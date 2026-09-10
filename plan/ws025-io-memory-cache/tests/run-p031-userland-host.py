@@ -25,7 +25,7 @@ def run(command):
     return result.stdout
 
 
-# Copy only userland sources and the published reservation ABI header.
+# Copy only userland sources and the published reservation/block ABI headers.
 for name in ('mkfs', 'cflow', 'cxref', 'common'):
     directory = isolated / 'userland/base' / name
     directory.mkdir(parents=True)
@@ -35,9 +35,11 @@ for name in ('mkfs', 'cflow', 'cxref', 'common'):
 header = isolated / 'include/zedbsd/fcntl.h'
 header.parent.mkdir(parents=True)
 shutil.copy2(REPO / 'include/uapi/zedbsd/fcntl.h', header)
+shutil.copy2(REPO / 'include/uapi/zedbsd/block.h', header.with_name('block.h'))
 assert not (isolated / 'src').exists()
 formatter = ['userland/base/mkfs/' + name for name in
-             ('main.c', 'ufs-format.c', 'ufs-super.c', 'ufs-endian.c')]
+             ('main.c', 'ufs-format.c', 'ufs-super.c', 'ufs-endian.c',
+              'block-command.c', 'fat32-format.c')]
 run(['cc', '-std=c89', '-D_GNU_SOURCE', '-O2', '-Wall', '-Wextra', '-Werror',
      '-I.', '-Iinclude', *formatter, 'userland/base/common/format-file.c',
      '-o', 'mkfs'])

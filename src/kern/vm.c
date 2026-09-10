@@ -265,6 +265,9 @@ static void object_page_index_remove(struct vm_object *object, struct vm_object_
 static int object_reference_locked(struct vm_object *object, struct file *file, int cache_only);
 static int object_cache_retainable(struct vm_object *object);
 static int object_cache_evict_one(struct mount *mount);
+static int object_discard_mount_check_locked(struct mount *mount);
+static int object_discard_file_check(struct vm_object *, struct mount *, struct file *);
+static int object_mount_reserved(const struct vm_object *);
 static void object_cache_discard_prepared(struct vm_object_page **pages, unsigned count);
 static int object_cache_read_missing(struct vm_object *object, off_t offset, void *buffer, size_t length, ssize_t *result, int *handled, int *stop);
 static struct vm_object_page *sync_page_at_or_after(struct vm_object *object, uint64_t offset);
@@ -1021,7 +1024,7 @@ vm_object_content_prepare(
 
 		/* Folds the revoked state into the page's dirty record. */
 		irq = spin_lock_irqsave(&object->lock);
-		if ((observed & HAL_PAGE_DIRTY) != 0) {
+		if ((observed & HAL_SPACE_PAGE_DIRTY) != 0) {
 			object_page_dirty_mark(page);
 		}
 
@@ -2407,6 +2410,79 @@ vm_object_cache_unpin(
 }
 
 /*
+ * Makes read progress without releasing the caller's cache identity pin.
+ * The caller must own that pin and retain no page pointer across this call.
+ */
+size_t
+vm_object_cache_reclaim_pinned(
+	struct vm_object *object,
+	size_t target)
+{
+	struct vm_object_page *page;
+	struct vm_object_page **link;
+	struct vm_object_page *retired;
+	size_t freed;
+	unsigned long irq;
+	bool enabled;
+
+	if (object == NULL || target == 0)
+		return 0;
+	if (target > KERN_IO_BATCH_MAX)
+		target = KERN_IO_BATCH_MAX;
+	retired = NULL;
+	freed = 0;
+
+	/*
+	 * The caller is the only resident-page user. Prefetch operations own
+	 * private frames and publish under the object lock, so they do not
+	 * prevent retirement of unrelated clean pages. Faults, other readers,
+	 * waiters, mappings and transactions keep the conservative exclusion.
+	 */
+	enabled = registry_lock();
+	if ((object->flags & VM_OBJECT_CACHE_REFERENCE) == 0 ||
+	    (object->flags & (VM_OBJECT_DETACHING | VM_OBJECT_RESIZING |
+	    VM_OBJECT_CONTENT | VM_OBJECT_RETAINED_WRITEBACK)) != 0 ||
+	    object->mapping_count != 0 || object->registry_waiters != 0 ||
+	    object->active_operations <= object->prefetch_operations ||
+	    object->active_operations - object->prefetch_operations != 1 ||
+	    refcount_load(&object->refs) < 2 ||
+	    refcount_load(&object->refs) - 2 != object->prefetch_operations) {
+
+		registry_unlock(enabled);
+		return 0;
+	}
+
+	/* Detaches only immediately disposable pages; the object stays pinned. */
+	irq = spin_lock_irqsave(&object->lock);
+	link = &object->pages;
+	while (*link != NULL && freed < target) {
+		page = *link;
+		if ((page->flags & ~VM_OBJECT_PAGE_ERROR) != 0 ||
+		    page->mapping_count != 0 || page->hold_count != 0 ||
+		    page->pin_count != 0) {
+			link = &page->next;
+			continue;
+		}
+
+		*link = page->next;
+		object_page_index_remove(object, page);
+		page->next = retired;
+		retired = page;
+		freed += page->pmem.size;
+	}
+	spin_unlock_irqrestore(&object->lock, irq);
+	registry_unlock(enabled);
+
+	/* Returns physical storage and shared credits outside metadata locks. */
+	while (retired != NULL) {
+		page = retired;
+		retired = page->next;
+		free_object_page(page);
+	}
+	return freed;
+}
+
+/*
  * Discards eligible clean cache references before mount or claim teardown.
  */
 unsigned
@@ -2425,6 +2501,240 @@ vm_object_cache_drain(
 
 	/* Reports the number of detached cache objects. */
 	return count;
+}
+
+/* Global reclaim must not acquire owners after unmount has closed admission. */
+static int
+object_mount_reserved(
+	const struct vm_object *object)
+{
+	if (object->inode != NULL && object->inode->i_mount != NULL &&
+	    object->inode->i_mount->m_state == MOUNT_STATE_DYING)
+		return 1;
+	if (object->file != NULL && object->file->f_path.p_mount != NULL &&
+	    object->file->f_path.p_mount->m_state == MOUNT_STATE_DYING)
+		return 1;
+	if (object->write_file != NULL && object->write_file->f_path.p_mount != NULL &&
+	    object->write_file->f_path.p_mount->m_state == MOUNT_STATE_DYING)
+		return 1;
+	return 0;
+}
+
+/* A retained file may still be shared with a descriptor outside the VM cache. */
+static int
+object_discard_file_check(
+	struct vm_object *object,
+	struct mount *mount,
+	struct file *file)
+{
+	unsigned owned;
+
+	if (file == NULL)
+		return 0;
+
+	/* Only ordinary paths on this exact mount have proven disposal ownership. */
+	if (object->inode == NULL)
+		return EBUSY;
+	if (object->inode->i_mount != mount)
+		return EBUSY;
+	if (file->f_path.p_mount != mount)
+		return EBUSY;
+	if (file->f_path.p_inode != object->inode)
+		return EBUSY;
+	if (file->f_inode != object->inode)
+		return EBUSY;
+	if (file->f_vm_inode != NULL && file->f_vm_inode != object->inode)
+		return EBUSY;
+
+	/* Two slots can hold one description, but it still owns only one path. */
+	owned = 0;
+	if (object->file == file)
+		owned++;
+	if (object->write_file == file)
+		owned++;
+	if (refcount_load(&file->f_refs) != owned)
+		return EBUSY;
+
+	return 0;
+}
+
+/* Checks ownership without clearing dirty/error state or detaching any object. */
+static int
+object_discard_mount_check_locked(struct mount *mount)
+{
+	struct vm_object *object;
+	struct vm_object_page *page;
+	unsigned long irq;
+	unsigned list;
+	int error;
+
+	error = 0;
+	for (object = shared_objects; object != NULL; object = object->next) {
+		if ((object->inode == NULL || object->inode->i_mount != mount) &&
+		    (object->file == NULL || object->file->f_path.p_mount != mount) &&
+		    (object->write_file == NULL || object->write_file->f_path.p_mount != mount))
+			continue;
+		irq = spin_lock_irqsave(&object->lock);
+		if ((object->flags & (VM_OBJECT_CACHE_REFERENCE | VM_OBJECT_RETAINED_WRITEBACK)) == 0 ||
+		    (object->flags & (VM_OBJECT_DETACHING | VM_OBJECT_RESIZING |
+		    VM_OBJECT_CONTENT | VM_OBJECT_ANONYMOUS)) != 0 ||
+		    refcount_load(&object->refs) != 1 || object->mapping_count != 0 ||
+		    object->active_operations != 0 || object->registry_waiters != 0)
+			error = EBUSY;
+		if (error == 0)
+			error = object_discard_file_check(object, mount, object->file);
+		if (error == 0)
+			error = object_discard_file_check(object, mount, object->write_file);
+		for (list = 0; list < 2 && error == 0; list++) {
+			page = list == 0 ? object->pages : object->orphan_pages;
+			for (; page != NULL; page = page->next) {
+				if ((page->flags & (VM_OBJECT_PAGE_BUSY | VM_OBJECT_PAGE_WRITEBACK)) != 0 ||
+				    page->hold_count != 0 || page->pin_count != 0 ||
+				    page->mapping_count != 0 || page->mappings != NULL) {
+					error = EBUSY;
+					break;
+				}
+			}
+		}
+		spin_unlock_irqrestore(&object->lock, irq);
+		if (error != 0)
+			break;
+	}
+	return error;
+}
+
+/* Caller retains the mount and excludes fresh users through a later commit. */
+int
+vm_object_discard_mount_check(struct mount *mount)
+{
+	bool enabled;
+	int error;
+
+	if (mount == NULL || mount->m_disk == NULL || disk_media_status(mount->m_disk) == 0)
+		return EINVAL;
+	enabled = registry_lock();
+	error = object_discard_mount_check_locked(mount);
+	registry_unlock(enabled);
+	return error;
+}
+
+/* Counts only paths proven to disappear when the eligible objects are destroyed. */
+int
+vm_object_discard_mount_refs(
+	struct mount *mount,
+	struct inode *inode,
+	unsigned *refs)
+{
+	struct vm_object *object;
+	unsigned count;
+	unsigned owned;
+	bool enabled;
+	int error;
+
+	if (refs == NULL)
+		return EINVAL;
+	*refs = 0;
+	if (mount == NULL || mount->m_disk == NULL)
+		return EINVAL;
+	if (disk_media_status(mount->m_disk) == 0)
+		return EINVAL;
+	if (inode != NULL && inode->i_mount != mount)
+		return EINVAL;
+
+	/* Caller keeps new mount users out; no inode-cache lock may be held here. */
+	count = 0;
+	enabled = registry_lock();
+	error = object_discard_mount_check_locked(mount);
+	if (error != 0) {
+		registry_unlock(enabled);
+		return error;
+	}
+	for (object = shared_objects; object != NULL; object = object->next) {
+		if (object->inode == NULL || object->inode->i_mount != mount)
+			continue;
+		if (inode != NULL && object->inode != inode)
+			continue;
+
+		owned = 0;
+		if (object->file != NULL)
+			owned++;
+		if (object->write_file != NULL && object->write_file != object->file)
+			owned++;
+		if (count > UINT_MAX - owned) {
+			registry_unlock(enabled);
+			return EOVERFLOW;
+		}
+		count += owned;
+	}
+	registry_unlock(enabled);
+	*refs = count;
+	return 0;
+}
+
+/* The caller has quiesced the mount, workers and all non-VM dependencies. */
+int
+vm_object_discard_mount(struct mount *mount, uint64_t *dirty_bytes)
+{
+	struct vm_object *object;
+	struct vm_object *next;
+	struct vm_object *detached;
+	struct vm_object_page *page;
+	uint64_t discarded;
+	unsigned long irq;
+	unsigned list;
+	bool enabled;
+	int error;
+
+	if (dirty_bytes == NULL)
+		return EINVAL;
+	*dirty_bytes = 0;
+	if (mount == NULL || mount->m_disk == NULL || disk_media_status(mount->m_disk) == 0)
+		return EINVAL;
+	discarded = 0;
+	detached = NULL;
+	enabled = registry_lock();
+	error = object_discard_mount_check_locked(mount);
+	if (error != 0) {
+		registry_unlock(enabled);
+		return error;
+	}
+	/* No fallible admission remains; remove all selected identities before freeing. */
+	for (object = shared_objects; object != NULL; object = next) {
+		next = object->next;
+		if ((object->inode == NULL || object->inode->i_mount != mount) &&
+		    (object->file == NULL || object->file->f_path.p_mount != mount) &&
+		    (object->write_file == NULL || object->write_file->f_path.p_mount != mount))
+			continue;
+		irq = spin_lock_irqsave(&object->lock);
+		for (list = 0; list < 2; list++) {
+			page = list == 0 ? object->pages : object->orphan_pages;
+			for (; page != NULL; page = page->next) {
+				if (page->flags & VM_OBJECT_PAGE_DIRTY)
+					discarded += PAGE_SIZE;
+				clear_page_dirty_locked(page);
+			}
+		}
+		object->writeback_error = 0;
+		object->flags &= ~VM_OBJECT_RETAINED_WRITEBACK;
+		spin_unlock_irqrestore(&object->lock, irq);
+		if (!unlink_object_locked(object))
+			HAL_FATAL("revoked VM discard lost registry entry");
+		object->next = detached;
+		detached = object;
+	}
+	registry_unlock(enabled);
+
+	/* Physical frame and file finalizers may sleep or enter other owners. */
+	while (detached != NULL) {
+		object = detached;
+		detached = object->next;
+		object->next = NULL;
+		if (!refcount_put(&object->refs))
+			HAL_FATAL("revoked VM discard retained external reference");
+		destroy_object(object);
+	}
+	*dirty_bytes = discarded;
+	return 0;
 }
 
 /*
@@ -2674,7 +2984,7 @@ vm_object_content_prepare_delayed(
 
 		irq = spin_lock_irqsave(&object->lock);
 
-		if ((observed & HAL_PAGE_DIRTY) != 0)
+		if ((observed & HAL_SPACE_PAGE_DIRTY) != 0)
 			object_page_dirty_mark(pages[index]);
 
 		spin_unlock_irqrestore(&object->lock, irq);
@@ -2778,6 +3088,8 @@ vm_object_sync_mount_buffer(
 			/* Skips an object outside the mount the caller named. */
 			if (mount != NULL && object->inode->i_mount != mount)
 				continue;
+			if (mount == NULL && object_mount_reserved(object))
+				continue;
 			next = object->registry_generation;
 			inode = object->inode;
 		}
@@ -2873,6 +3185,9 @@ vm_object_prefetch_prepare(
 	object->active_operations++;
 	if (object->active_operations == 0)
 		HAL_FATAL("prefetch operation counter overflow");
+	object->prefetch_operations++;
+	if (object->prefetch_operations == 0)
+		HAL_FATAL("private prefetch counter overflow");
 
 	refcount_get(&object->refs);
 	registry_unlock(enabled);
@@ -3090,6 +3405,7 @@ vm_object_prefetch_abort(
 	struct vm_object_prefetch *fill)
 {
 	struct vm_object *object;
+	bool enabled;
 
 	/*
 	 * Makes cancellation of an unused or previously consumed token
@@ -3110,6 +3426,13 @@ vm_object_prefetch_abort(
 
 	/* Empties the descriptor so a second cancellation does nothing. */
 	memset(fill, 0, sizeof(*fill));
+
+	/* Stops qualifying this owner for clean reclaim before dropping its pin. */
+	enabled = registry_lock();
+	if (object->prefetch_operations == 0)
+		HAL_FATAL("private prefetch counter underflow");
+	object->prefetch_operations--;
+	registry_unlock(enabled);
 
 	/* Retires the operation this prefetch counted against the object. */
 	object_operation_end(object);
@@ -3134,7 +3457,7 @@ int
 vm_commit_init(
 	void)
 {
-	struct hal_memory_stats memory;
+	struct hal_pmem_stats memory;
 	struct swap_backend *swap;
 	uint32_t swap_pages;
 	uint32_t swap_free;
@@ -3152,7 +3475,7 @@ vm_commit_init(
 	}
 
 	/* Counts the physical pages left after the system reserve. */
-	hal_memory_get_stats(&memory);
+	hal_pmem_get_stats(&memory);
 	physical_pages = memory.physical_free / VM_COMMIT_PAGE_SIZE;
 	if (physical_pages > VM_COMMIT_SYSTEM_RESERVE_PAGES)
 		physical_pages -= VM_COMMIT_SYSTEM_RESERVE_PAGES;
@@ -4331,6 +4654,8 @@ vm_object_reclaim_clean(
 	enabled = registry_lock();
 	for (object = shared_objects; object != NULL && freed < target;
 	     object = object->next) {
+		if (object_mount_reserved(object))
+			continue;
 		/* Skips an object anything still owns. */
 		if ((object->flags & VM_OBJECT_CACHE_REFERENCE) == 0 ||
 		    (object->flags & (VM_OBJECT_DETACHING | VM_OBJECT_RESIZING |
@@ -4400,6 +4725,8 @@ vm_object_reclaim_one(
 
 	enabled = registry_lock();
 	for (object = shared_objects; object != NULL; object = object->next) {
+		if (object_mount_reserved(object))
+			continue;
 		/* Skips an object that is being detached or resized. */
 		if ((object->flags & (VM_OBJECT_DETACHING |
 		    VM_OBJECT_RESIZING)) != 0)
@@ -4602,7 +4929,7 @@ vm_reclaim_get_stats(
 			output->file_resident++;
 
 		/* Separates pages that need writing from pages that do not. */
-		if ((state_flags & VM_PAGE_DIRTY) || (flags & HAL_PAGE_DIRTY))
+		if ((state_flags & VM_PAGE_DIRTY) || (flags & HAL_SPACE_PAGE_DIRTY))
 			output->dirty++;
 		else
 			output->clean++;
@@ -4813,7 +5140,7 @@ vm_reclaim_private_one(
 
 			/* Leaves a recently accessed page to the second pass. */
 			flags = backing_pte_flags(backing);
-			if (pass == 0 && (flags & HAL_PAGE_ACCESSED))
+			if (pass == 0 && (flags & HAL_SPACE_PAGE_ACCESSED))
 				continue;
 
 			/* Takes the backing and pins its mappings for the reclaim. */
@@ -6431,7 +6758,7 @@ vm_object_sync_range_buffer(
 		/* Folds the revoked hardware state into the page's dirty record. */
 		irq = spin_lock_irqsave(&object->lock);
 
-		if ((observed & HAL_PAGE_DIRTY) != 0) {
+		if ((observed & HAL_SPACE_PAGE_DIRTY) != 0) {
 			object_page_dirty_mark(candidate);
 		}
 
@@ -7319,6 +7646,8 @@ object_cache_evict_one(
 	enabled = registry_lock();
 
 	for (object = shared_objects; object != NULL; object = object->next) {
+		if (object_mount_reserved(object))
+			continue;
 		/* Skips an object anything still owns. */
 		if ((object->flags & VM_OBJECT_CACHE_REFERENCE) == 0 ||
 		    (object->flags & (VM_OBJECT_DETACHING | VM_OBJECT_RESIZING |
@@ -8016,7 +8345,7 @@ backing_pte_flags(
 		if (!(page->flags & VM_MAPPING_MAPPED))
 			continue;
 		flags = 0;
-		if (hal_page_query(page->vm->space, (void *)page->address,
+		if (hal_space_query(page->vm->space, (void *)page->address,
 		    &flags) == HAL_OK)
 			combined |= flags;
 	}
@@ -8163,18 +8492,18 @@ unmap_backing_ptes(
 			 * PTE.  Synchronous unmap is the revoke; conservatively
 			 * write it back.
 			 */
-			if (hal_page_unmap(page->vm->space,
+			if (hal_space_unmap(page->vm->space,
 			    (void *)page->address, PAGE_SIZE) != HAL_OK) {
 				error = EIO;
 				break;
 			}
 
 			page->flags |= VM_MAPPING_RECLAIM_UNMAPPED;
-			*pte_flags |= HAL_PAGE_DIRTY;
+			*pte_flags |= HAL_SPACE_PAGE_DIRTY;
 			continue;
 		}
 
-		if (hal_page_prot_query(page->vm->space,
+		if (hal_space_prot_query(page->vm->space,
 		    (void *)page->address, PAGE_SIZE, readonly, &flags) != HAL_OK) {
 			error = EIO;
 			break;
@@ -8194,7 +8523,7 @@ unmap_backing_ptes(
 		    (page->flags & VM_MAPPING_RECLAIM_UNMAPPED) != 0)
 			continue;
 
-		if (hal_page_unmap(page->vm->space, (void *)page->address, PAGE_SIZE) != HAL_OK) {
+		if (hal_space_unmap(page->vm->space, (void *)page->address, PAGE_SIZE) != HAL_OK) {
 			error = EIO;
 			break;
 		}
@@ -8209,7 +8538,7 @@ rollback:
 	/* Roll back outside all VM locks.  A failed remap remains lazy. */
 	for (page = backing->mappings; page != NULL; page = page->private_next) {
 		if ((page->flags & VM_MAPPING_RECLAIM_UNMAPPED) != 0) {
-			if (hal_page_map(page->vm->space, (void *)page->address,
+			if (hal_space_map(page->vm->space, (void *)page->address,
 			    backing->pmem.paddr, PAGE_SIZE,
 			    mapping_prot(page)) == HAL_OK)
 				page->flags &= ~(VM_MAPPING_RECLAIM_UNMAPPED |
@@ -8220,14 +8549,14 @@ rollback:
 		if ((page->flags & VM_MAPPING_RECLAIM_PROTECTED) == 0)
 			continue;
 
-		if (hal_page_prot(page->vm->space, (void *)page->address,
+		if (hal_space_prot(page->vm->space, (void *)page->address,
 		    PAGE_SIZE, mapping_prot(page)) == HAL_OK) {
 			page->flags &= ~VM_MAPPING_RECLAIM_PROTECTED;
 			continue;
 		}
 
 		/* A stale read-only PTE would livelock a later write fault. */
-		if (hal_page_unmap(page->vm->space, (void *)page->address, PAGE_SIZE) != HAL_OK)
+		if (hal_space_unmap(page->vm->space, (void *)page->address, PAGE_SIZE) != HAL_OK)
 			HAL_FATAL("VM reclaim protection rollback failed");
 
 		page->flags |= VM_MAPPING_RECLAIM_UNMAPPED;
@@ -8251,7 +8580,7 @@ rollback_backing_ptes(
 	for (page = backing->mappings; page != NULL; page = page->private_next) {
 		/* A failed remap remains lazy until the next fault. */
 		if ((page->flags & VM_MAPPING_RECLAIM_UNMAPPED) != 0) {
-			if (hal_page_map(page->vm->space, (void *)page->address,
+			if (hal_space_map(page->vm->space, (void *)page->address,
 			    backing->pmem.paddr, PAGE_SIZE,
 			    mapping_prot(page)) == HAL_OK)
 				page->flags &= ~(VM_MAPPING_RECLAIM_UNMAPPED |
@@ -8263,7 +8592,7 @@ rollback_backing_ptes(
 			continue;
 
 		/* Restores the protection reclaim took away from this mapping. */
-		if (hal_page_prot(page->vm->space,
+		if (hal_space_prot(page->vm->space,
 				  (void *)page->address,
 				  PAGE_SIZE,
 				  mapping_prot(page)) == HAL_OK) {
@@ -8272,7 +8601,7 @@ rollback_backing_ptes(
 		}
 
 		/* A stale read-only PTE is removed rather than left behind. */
-		if (hal_page_unmap(page->vm->space,
+		if (hal_space_unmap(page->vm->space,
 				   (void *)page->address,
 				   PAGE_SIZE) != HAL_OK)
 			HAL_FATAL("VM reclaim PTE rollback failed");
@@ -8696,7 +9025,7 @@ reclaim_backing_owned(
 	 */
 	if (file_candidate &&
 	    (state_flags & VM_PAGE_DIRTY) == 0 &&
-	    (pte_flags & HAL_PAGE_DIRTY) == 0) {
+	    (pte_flags & HAL_SPACE_PAGE_DIRTY) == 0) {
 		/* Reports why the page could not be discarded. */
 		error = discard_file_backing_owned(backing);
 		if (error != 0)

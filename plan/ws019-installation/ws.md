@@ -1,32 +1,30 @@
 # WS019: installation and disk administration
 
-Last updated: 2026-09-09
+Last updated: 2026-09-10
+Status: completed / cleared q186
 
-Completed q163: [p030 GPT initialization codec](phase030-gpt-initialization-codec/results.md).
-Completed q164: [p031 exclusive block administration](phase031-exclusive-block-administration/results.md).
-Completed q165: [p032 public diskpart init](phase032-diskpart-gpt-init/results.md).
-Next: p006 partition reservation and FAT32/native UFS formatters, then p007.
-Completed q162: [p027 live source admission and source screen](phase027-installation-source-selection/results.md).
-Completed q161: [p028 tree-copy utilities/adapters](phase028-native-tree-copy-tools/results.md). Completed q160:
-[p005](phase005-qemu-nvme-overlay-install/q160-results.md) verifies installed
-NVMe-only boot. Next: p006/p007 dedicated installation.
-[q159](phase004-zedinst-existing-fat-overlay/q159-results.md)
-completed p004 public coexistence acceptance, p025 runtime contracts and p026
-Noct image copying/progress. Native tree
-copying will use attribute-preserving cp. p006/p007 are now designed and no
-longer blocked on a user decision; both modes are required for WS019 completion.
+The text installer is accepted in both modes. [p049/q182](phase049-native-installer-integration/results.md)
+completed the actual source/mode/disk/review/copy/boot flow, coexistence regression,
+source-free native boots and three supported builds. [p007/q183](phase007-native-root-installation/results.md)
+completed real UFS swap paging, 513-extent fragmentation, lifecycle and halt.
+p006/p007/p029/p049 are complete. The amd64 installer is accepted; PC98 FAT-only installation and target-only login passed in p050/q186.
+Earlier codec, claim, command and copy evidence is indexed in the phase registry.
 
 User addition: finish the current text UI, then implement
 [p029 BeUI frontend](phase029-graphic-installer/phase.md) with shared installer
 logic and precomposed 640x480 RGB24 screen assets. Final entry points are
 /sbin/zedinst and /sbin/zedinst-graphic; /bin/noct remains the interpreter.
-p029 is required before WS019 completion and the following NVMe p050 work.
+[q184 results](phase029-graphic-installer/results.md): graphical native and FAT
+coexistence installation passed. User accepts normal-path completion.
+Additional PC98 graphical FAT-only acceptance: [p050](phase050-pc98-graphic-fat/phase.md).
 
 User request 2026-09-09: capture and show the installer screen on its next QEMU
 execution. Preserve actual framebuffer screenshots with the acceptance artifacts
 and display them to the user; do not substitute a mockup or console transcript.
 
-Current q156: [retained GPT/BPB and live identity](phase004-zedinst-existing-fat-overlay/q156-results.md)
+## Earlier execution history (superseded by the completed phase registry)
+
+q156: [retained GPT/BPB and live identity](phase004-zedinst-existing-fat-overlay/q156-results.md)
 pass host/native capture and revalidation. Public installer integration remains.
 
 q154: [p021](phase021-nested-mount/results.md) completed process-path
@@ -248,8 +246,8 @@ the running overlay upper or active swap. It generates the direct
 | `ws019-p003` | [userspace diskpart inspection](phase003-diskpart-readonly/phase.md) | Completed in q076 | GPT/MBR analysis using raw reads |
 | `ws019-p004` | [existing-FAT overlay `/bin/zedinst`](phase004-zedinst-existing-fat-overlay/phase.md) | Completed q159 | Public cancel/install/rerun and conflict refusal/restoration passed |
 | `ws019-p005` | [QEMU NVMe overlay-install acceptance](phase005-qemu-nvme-overlay-install/phase.md) | Completed q160 | Installed boot/persistence, selection and fault-model reconciliation passed; WS003 candidate recorded |
-| `ws019-p006` | [Mode selection and whole-disk provisioning](phase006-whole-disk-provisioning/phase.md) | Planned; decision complete | Coexistence/dedicated choice, NO/YES confirmation, automatic GPT/FAT32/UFS; shell escape, no partition editor |
-| `ws019-p007` | [Native-root installation](phase007-native-root-installation/phase.md) | Planned; decision complete | ESP loader/kernel/config, private source mount and attribute-preserving cp to UFS, UFS file swap and disk-only boot |
+| `ws019-p006` | [Mode selection and whole-disk provisioning](phase006-whole-disk-provisioning/phase.md) | Completed q182 | Coexistence/dedicated choice, NO/YES confirmation, automatic GPT/FAT32/UFS; shell escape, no partition editor |
+| `ws019-p007` | [Native-root installation](phase007-native-root-installation/phase.md) | Completed q183 | ESP loader/kernel/config, private source mount and attribute-preserving cp to UFS, UFS file swap and disk-only boot |
 | `ws019-p008` | [target `/sbin/mkfs`](phase008-target-mkfs/phase.md) | Completed q079 | Create a bounded UFS1 filesystem in a newly created regular file without formatting its containing partition |
 | `ws019-p009` | [target `/sbin/mkswap`](phase009-target-mkswap/phase.md) | Completed q079 | Create the existing ZEDSWAP2 format in a newly created regular file with bounded size and publication |
 
@@ -272,7 +270,7 @@ the running overlay upper or active swap. It generates the direct
 | `ws019-p026` | [Noct image copy and progress](phase026-noct-image-copy/phase.md) | Completed q159 | Host faults and native copying/cancel/install/rerun passed; p004 conflict tracked separately |
 | `ws019-p027` | [Installation source selection](phase027-installation-source-selection/phase.md) | Completed q162 | Live private-root admission, disk-only source screen, native/no-image refusal and unchanged-target acceptance |
 | `ws019-p028` | [Native tree copy tools](phase028-native-tree-copy-tools/phase.md) | Completed q161 | Census, archive cp, Noct progress, independent verification and native nanosecond persistence accepted |
-| `ws019-p029` | [BeUI graphic installer](phase029-graphic-installer/phase.md) | Planned after text installer | Shared backend, /sbin entry points, precomposed 640x480 RGB24 UI using user artwork |
+| `ws019-p029` | [BeUI graphic installer](phase029-graphic-installer/phase.md) | Completed q184 | Shared backend, /sbin entry points, precomposed 640x480 RGB24 UI using user artwork |
 | `ws019-p030` | [GPT initialization codec](phase030-gpt-initialization-codec/phase.md) | Completed q163 | Both GPT copies/PMBR, old-byte checks, fault/sanitizer/independent inspection and three builds pass; p006 command admission follows |
 | `ws019-p031` | [Exclusive block administration](phase031-exclusive-block-administration/phase.md) | Completed q164 | FD-owned gate/claim, owner writes/reload, dup/final-close/exit, QEMU and three builds pass |
 | `ws019-p032` | [Public diskpart GPT init](phase032-diskpart-gpt-init/phase.md) | Completed q165 | Host faults/sanitizers, blank/existing QEMU, empty/full GPT and live child geometry, three builds pass |
@@ -292,7 +290,8 @@ the running overlay upper or active swap. It generates the direct
 | `ws019-p046` | [Native layout plan](phase046-native-layout-plan/phase.md) | Complete q179 | 6 layouts / 29 refusals in Noct JIT and interpreter; packaged |
 | `ws019-p047` | [Native swap startup](phase047-native-swap-startup/phase.md) | Complete q180 | Two source-free UFS boots, automatic swap, missing-entry recovery and halt |
 | `ws019-p048` | [Native formatter preflight](phase048-native-format-preflight/phase.md) | Complete q181 | Actual codec capacity, no-media-I/O CLI and Noct byte/inode admission |
-| `ws019-p049` | [Native installer integration](phase049-native-installer-integration/phase.md) | In progress q182 | Actual mode/disk/review flow, provision/copy/swap/config transaction and QEMU |
+| `ws019-p049` | [Native installer integration](phase049-native-installer-integration/phase.md) | Completed q182 | Actual mode/disk/review flow, provision/copy/swap/config transaction and QEMU |
+| `ws019-p050` | [PC98 graphical FAT installation](phase050-pc98-graphic-fat/phase.md) | Completed q186 | Two IDE disks, PC98 boot chain, FAT only; no GPT/native provisioning |
 
 ## Installer-v1 completion conditions
 

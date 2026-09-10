@@ -715,7 +715,7 @@ prepare_worker(
 	/* Uses optional shared-budget admission for the actual HAL allocation size. */
 	if (worker->memory.size == 0) {
 		memset(&memory, 0, sizeof(memory));
-		error = io_scratch_alloc(RA_MEMORY, 1, &memory);
+		error = io_scratch_alloc(RA_MEMORY, &memory);
 		if (error != HAL_OK || memory.vaddr == NULL || memory.size < RA_MEMORY) {
 			if (memory.size != 0 && io_scratch_free(&memory) != HAL_OK)
 				HAL_FATAL("readahead allocation rollback failed");

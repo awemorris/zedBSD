@@ -16,23 +16,25 @@ static uint64_t observed_boundary;
 static unsigned constrained_calls;
 static int reject_free;
 
-int hal_pmem_alloc(const struct hal_pmem_request *request, struct hal_pmem *memory)
+int hal_pmem_alloc(hal_physaddr_t request_paddr, size_t request_size, size_t request_alignment, uint32_t request_type, uint32_t request_attr, struct hal_pmem *memory)
 {
-	(void)request; (void)memory;
+	(void)request_paddr; (void)request_size; (void)request_alignment; (void)request_type; (void)request_attr; (void)memory;
 	assert(!"DMA must enter the constrained allocator");
 	return HAL_ERR_UNSUPPORTED;
 }
 
-int hal_pmem_alloc_range(const struct hal_pmem_request *request,
+int hal_pmem_alloc_range(hal_physaddr_t request_paddr, size_t request_size, size_t request_alignment, uint32_t request_type, uint32_t request_attr,
     uint64_t minimum, uint64_t maximum, uint64_t boundary, struct hal_pmem *memory)
 {
+	(void)request_paddr; (void)request_type; (void)request_attr;
+
 	unsigned i;
 	uint64_t physical, size;
 	enum amd64_pmem_result result;
 	observed_maximum = maximum; observed_boundary = boundary; constrained_calls++;
 	for (i = 2; i != 0; i--) {
-		result = amd64_pmem_extent_alloc(&pools[i - 1], request->size,
-		    request->alignment, minimum, maximum, boundary, &physical, &size);
+		result = amd64_pmem_extent_alloc(&pools[i - 1], request_size,
+		    request_alignment, minimum, maximum, boundary, &physical, &size);
 		if (result == AMD64_PMEM_NOMEM) continue;
 		assert(result == AMD64_PMEM_OK);
 		memory->vaddr = malloc((size_t)size);

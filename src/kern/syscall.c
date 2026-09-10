@@ -8,7 +8,7 @@
 /*
  * The system call layer.
  *
- * syscall_dispatch() is the handler the HAL invokes for every user trap.
+ * kernel_syscall_handler() is the entry the HAL calls for every system call.
  * It copies the arguments, runs one sys_*_call() handler, and applies the
  * restart policy: a handler interrupted by a transparent stop is
  * redispatched with its original arguments, an interruptible handler
@@ -40,6 +40,7 @@
 #include "kern/page.h"
 #include "kern/sched.h"
 #include "kern/signal.h"
+#include "kern/user-probe.h"
 #include "kern/sysctl.h"
 #include "kern/thread.h"
 #include "kern/uaccess.h"
@@ -291,7 +292,6 @@ static SYSCALL_EXT intptr_t sys_resource_limit_call(const uintptr_t args[6], int
 static intptr_t sys_process_identity_call(uint32_t number, const uintptr_t args[6]);
 static intptr_t syscall_dispatch_body(uint32_t number, const uintptr_t args[6]);
 static int syscall_restartable(uint32_t number);
-static intptr_t syscall_dispatch(uint32_t number, const uintptr_t args[6]);
 
 /*
  * Clears the restart bookkeeping of a thread at the start of a system
@@ -526,7 +526,7 @@ syscall_test_thread_cancel_call(
 #endif
 
 /*
- * Initializes the system call layer and registers the dispatcher.
+ * Initializes the system call layer.
  */
 void
 syscall_init(
@@ -536,7 +536,6 @@ syscall_init(
 	usync_init();
 	(void)mutex_init(&user_atomic_lock, LOCK_RANK_USER_ATOMIC,
 	    "user atomic");
-	hal_syscall_set_handler(syscall_dispatch);
 	signal_init();
 }
 
@@ -3717,13 +3716,13 @@ sys_unmount_call(
 		return -EPERM;
 
 	/* Rejects a flag word this kernel does not define. */
-	if (args[1] != 0)
+	if ((args[1] & ~(uintptr_t)MNT_FORCE) != 0)
 		return -EINVAL;
 
 	/* Reads the mount point and detaches it. */
 	error = copyinstr(args[0], directory, sizeof(directory), NULL);
 	if (error == 0)
-		error = unmount_context(process->cwdi, directory);
+		error = unmount_context_flags(process->cwdi, directory, (int)args[1]);
 
 	/* Reports the outcome of the call. */
 	if (error != 0)
@@ -9116,8 +9115,8 @@ syscall_restartable(
 }
 
 /* Runs one system call with accounting, redispatch, and restart policy. */
-static intptr_t
-syscall_dispatch(
+intptr_t
+kernel_syscall_handler(
 	uint32_t number,
 	const uintptr_t args[6])
 {
@@ -9128,6 +9127,9 @@ syscall_dispatch(
 	int cred_guard;
 	intptr_t result;
 	enum signal_stop_return_result stop_result;
+
+	/* Records the entry for the user probe. */
+	user_probe_syscall(number);
 
 	/* Resolves the caller and decides whether to hold the credentials. */
 	thread = curthread;

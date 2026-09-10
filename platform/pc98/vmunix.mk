@@ -711,3 +711,6 @@ CHECK_RUN_TARGETS += hal-pc98-compile kern-compile
 $(BUILD)/userland/%.o: userland/%.c $(ZEDBSD_SYSROOT_I386)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(OBJ_CC) $(OBJ_CPPFLAGS) $(OBJ_CFLAGS) -MMD -MP -c $< -o $@
+
+# Preserve the CPU architecture in uname -m; identify this platform in -v/-a.
+$(BUILD)/userland/base/uname/main.o: OBJ_CPPFLAGS += -DZEDBSD_UNAME_PC98

@@ -34,7 +34,7 @@ int mutex_owned(struct mutex *mutex)
 }
 
 /* Supply ample deterministic memory to the production cache accountant. */
-void hal_memory_get_stats(struct hal_memory_stats *stats)
+void hal_pmem_get_stats(struct hal_pmem_stats *stats)
 {
 	memset(stats, 0, sizeof(*stats));
 	stats->physical_total = 512U * 1024U * 1024U;
@@ -62,19 +62,21 @@ int swap_write_page(struct swap_backend *backend, uint32_t slot, const void *pag
 }
 
 /* Region-admission tests must never reach hardware translation operations. */
-int hal_page_query(hal_space_t space, void *address, uint32_t *flags)
+int hal_space_query(hal_space_t space, void *address, hal_physaddr_t *physical, uint32_t *flags)
 {
+ if (physical != NULL) *physical = 0;
+
 	(void)space; (void)address; (void)flags;
 	CHECK(0);
 	return HAL_ERR_UNSUPPORTED;
 }
-int hal_page_map(hal_space_t space, void *address, hal_physaddr_t physical, size_t size, uint32_t flags)
+int hal_space_map(hal_space_t space, void *address, hal_physaddr_t physical, size_t size, uint32_t flags)
 {
 	(void)space; (void)address; (void)physical; (void)size; (void)flags;
 	CHECK(0);
 	return HAL_ERR_UNSUPPORTED;
 }
-int hal_page_prot(hal_space_t space, void *address, size_t size, uint32_t flags)
+int hal_space_prot(hal_space_t space, void *address, size_t size, uint32_t flags)
 {
 	(void)space; (void)address; (void)size; (void)flags;
 	CHECK(0);

@@ -1,0 +1,35 @@
+require graphicui;
+require result;
+func instGraphicFailure(context, unused) {
+    if (BeUI.isOpen() != 1 || !Dict.hasKey(context.ui.images, "review-focus")) { return; }
+    instGraphicRead(context.ui, {kind:"review", step:3, title:"Installation could not continue",
+        description:context.message, options:["Close"], selected:0, left:"Close", right:"Close"});
+}
+func instGraphicRun(ui, unused) {
+    instGraphicOpen(ui);
+    var result = instWizard(ui, 0);
+    var title = "Installation complete";
+    var message = "The installation has been verified.\nYou can now close the installer.";
+    if (!result.ok) {
+        title = "Installation incomplete";
+        message = result.message;
+    }
+    if (result.cancelled) { title = "Installation cancelled"; message = "No installation was authorized."; }
+    if (Array.size(result.cleanup) != 0) {
+        message = message + "\nCleanup needs inspection; details follow on the console.";
+    }
+    instGraphicRead(ui, {kind:"review", step:4, title:title, description:message,
+        options:["Close"], selected:0, left:"Close", right:"Close"});
+    return result;
+}
+func main(args) {
+    if (Array.size(args) != 0) { System.error("usage: /sbin/zedinst-graphic"); }
+    if (Term.isTTY() != 1) { System.error("installation requires an interactive terminal"); }
+    var ui = instGraphicUi();
+    var outcome = System.pcall(instGraphicRun, ui, 0);
+    if (!outcome.ok) { System.pcall(instGraphicFailure, {ui:ui, message:outcome.message}, 0); }
+    var closed = System.pcall(instGraphicClose, ui, 0);
+    if (!outcome.ok) { System.error(outcome.message); }
+    if (!closed.ok) { System.error(closed.message); }
+    instReportConsole(outcome.value);
+}

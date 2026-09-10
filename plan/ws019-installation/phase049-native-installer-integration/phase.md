@@ -1,6 +1,6 @@
 # ws019-p049: complete native installer transaction and text flow
 
-Status: in-progress q182; dependencies accepted through q181
+Status: completed q182; see [results](results.md)
 Parent: [WS019](../ws.md), implements remaining p006/p007 product flow
 Timebox: 180 active minutes
 

@@ -76,10 +76,10 @@ m68k_exception_cause(unsigned vector, uint16_t mmusr)
 		return HAL_TRAP_CAUSE_ILLEGAL_INSN;
 	if (vector == 5U || vector == 6U || vector == 7U ||
 	    (vector >= 48U && vector <= 55U))
-		return HAL_TRAP_CAUSE_MACHINE_CHECK;
+		return HAL_TRAP_CAUSE_ARITHMETIC;
 	if (vector == 9U || vector == 47U)
 		return HAL_TRAP_CAUSE_BREAKPOINT;
-	return HAL_TRAP_CAUSE_MACHINE_CHECK;
+	return HAL_TRAP_CAUSE_OTHER;
 }
 
 uint32_t

@@ -1,0 +1,22 @@
+// Presentation-only fixture: these labels are not discovered hardware.
+require graphicui;
+func gfBody(ui, unused) {
+    instGraphicOpen(ui);
+    var longLabel = "";
+    for (i in 0..12) { longLabel = longLabel + "long-label-"; }
+    var options = [];
+    for (i in 0..8) { Array.push(options, "Fixture disk " + i + ": " + longLabel); }
+    var selected = instGraphicChoose(ui, "disk", "Fixture: many long labels",
+        "Presentation fixture; no storage operations.", options);
+    if (selected != 7) { System.error("wrong page selection"); }
+    var empty = instGraphicChoose(ui, "disk", "Fixture: no destinations",
+        "Presentation fixture; no storage operations.", []);
+    if (empty != -1) { System.error("empty list accepted a destination"); }
+}
+func main(args) {
+    var ui = instGraphicUi();
+    var result = System.pcall(gfBody, ui, 0);
+    instGraphicClose(ui, 0);
+    if (!result.ok) { System.error(result.message); }
+    print("graphic layout fixture PASS");
+}

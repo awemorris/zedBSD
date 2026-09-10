@@ -326,22 +326,12 @@ hal_rtc_read_counter(
 #define HAL_SIGNAL_NEST_MAX	(8)
 
 /*
- * The HAL installs the active return-to-user frame and invokes this handler
- * with local IRQs masked.  The generic kernel owns any interruptible syscall
- * window and must return with local IRQs masked so the HAL can commit the
- * saved frame atomically.
- */
-typedef intptr_t (
-	*hal_syscall_handler_t)(
-	uint32_t number,
-	const uintptr_t args[HAL_SYSCALL_ARGS]);
-
-void
-hal_syscall_set_handler(
-	hal_syscall_handler_t handler);
-
-/*
- * Trap Handlers
+ * Trap causes and access modes reported to the fixed kernel entry points.
+ *
+ * A cause is the architecture-independent kind of a trap, and the generic
+ * kernel decides on it alone.  The raw vector and error code accompany it
+ * for diagnostics only; they mean nothing outside the HAL that produced
+ * them.  The mode is NONE unless the cause is a page fault.
  */
 
 struct hal_reg_set;
@@ -351,24 +341,17 @@ struct hal_reg_set;
 #define HAL_TRAP_CAUSE_BREAKPOINT	(2)
 #define HAL_TRAP_CAUSE_ALIGNMENT	(3)
 #define HAL_TRAP_CAUSE_MACHINE_CHECK	(4)
+#define HAL_TRAP_CAUSE_ARITHMETIC	(5)
+#define HAL_TRAP_CAUSE_PROTECTION	(6)
+#define HAL_TRAP_CAUSE_OTHER		(7)
 
 #define HAL_TRAP_MODE_READ	(0)
 #define HAL_TRAP_MODE_WRITE	(1)
 #define HAL_TRAP_MODE_EXEC	(2)
+#define HAL_TRAP_MODE_NONE	(3)
 
 #define HAL_TRAP_RET_SUCCESS	(0)
 #define HAL_TRAP_RET_FAILED	(1)
-
-typedef int (
-	*hal_trap_handler_t)(
-	void *pc,
-	void *addr,
-	int mode);
-
-void
-hal_set_trap_handler(
-	int trap,
-	hal_trap_handler_t handler);
 
 /*
  * Memory
@@ -401,15 +384,15 @@ typedef void *hal_space_t;
 #define HAL_SPACE_WRITETHRU	(16)
 #define HAL_SPACE_DEVICE	(32)
 
-#define HAL_PAGE_PRESENT	0x01U
-#define HAL_PAGE_ACCESSED	0x02U
-#define HAL_PAGE_DIRTY	0x04U
+#define HAL_SPACE_PAGE_PRESENT	0x01U
+#define HAL_SPACE_PAGE_ACCESSED	0x02U
+#define HAL_SPACE_PAGE_DIRTY	0x04U
 
 /*
  * Create a user space containing the shared system mapping.
  */
 hal_space_t
-hal_mem_create_space(void);
+hal_space_create(void);
 
 /*
  * Destroy a user space.  The generic kernel must first retire every owning
@@ -417,21 +400,21 @@ hal_mem_create_space(void);
  * hardware translation windows, but never change task ownership implicitly.
  */
 void
-hal_page_destroy_space(
+hal_space_destroy(
 	hal_space_t space);
 
 /*
  * Select a user space on the current CPU; HAL_SPACE_SYS selects only system.
  */
 void
-hal_page_switch_space(
+hal_space_switch(
 	hal_space_t space);
 
 /*
  * Map an address and complete any required TLB synchronization.
  */
 int
-hal_page_map(
+hal_space_map(
 	hal_space_t space,
 	void *vaddr,
 	hal_physaddr_t paddr,
@@ -442,7 +425,7 @@ hal_page_map(
  * Change protection and complete any required TLB synchronization.
  */
 int
-hal_page_prot(
+hal_space_prot(
 	hal_space_t space,
 	void *vaddr,
 	size_t size,
@@ -457,7 +440,7 @@ hal_page_prot(
  * this operation as the write-revoke boundary before page writeback.
  */
 int
-hal_page_prot_query(
+hal_space_prot_query(
 	hal_space_t space,
 	void *vaddr,
 	size_t size,
@@ -468,19 +451,19 @@ hal_page_prot_query(
  * Unmap an address and complete any required TLB synchronization.
  */
 int
-hal_page_unmap(
+hal_space_unmap(
 	hal_space_t space,
 	void *vaddr,
 	size_t size);
 
 int
-hal_page_query(
+hal_space_query(
 	hal_space_t space,
 	void *vaddr,
 	uint32_t *flags);
 
 int
-hal_page_clear_flags(
+hal_space_clear_flags(
 	hal_space_t space,
 	void *vaddr,
 	uint32_t flags);
@@ -495,11 +478,11 @@ hal_page_clear_flags(
  *   the specified user space.
  */
 void
-hal_page_flush_tlb(
+hal_space_flush_tlb(
 	hal_space_t space);
 
 void
-hal_page_flush_tlb_range(
+hal_space_flush_tlb_range(
 	hal_space_t space,
 	void *vaddr,
 	size_t size);
@@ -508,11 +491,11 @@ hal_page_flush_tlb_range(
  * Get the page size. (level > 1 means a large page size.)
  */
 size_t
-hal_page_get_page_size(
+hal_space_get_page_size(
 	int level);
 
 void
-hal_page_get_user_range(
+hal_space_get_user_range(
 	uintptr_t *minimum,
 	uintptr_t *limit);
 
@@ -561,22 +544,6 @@ struct hal_pmem {
 	uint32_t attr;
 };
 
-/* Optional owned kernel scratch mappings. Capability is currently amd64-only.
- * Callers on portable paths must check the optional symbols before use.
- * Reserve allocates no frames; populate owns independent RAM pages. A pin
- * protects the returned VA and its page lookup until the matching unpin.
- * Release refuses active pins and retires translations before freeing RAM.
- * One returned PA describes one page, never a physically contiguous run. */
-#define HAL_VMAP_MAX_SIZE (128U * 1024U)
-struct hal_vmap;
-unsigned hal_vmap_capabilities(void);
-int hal_vmap_reserve(size_t size, struct hal_vmap **result);
-int hal_vmap_populate(struct hal_vmap *mapping, uint64_t minimum, uint64_t maximum);
-int hal_vmap_pin(struct hal_vmap *mapping, void **address);
-void hal_vmap_unpin(struct hal_vmap *mapping);
-int hal_vmap_release(struct hal_vmap *mapping);
-int hal_kernel_page_lookup(const void *address, hal_physaddr_t *physical);
-
 int
 hal_pmem_alloc(
 	const struct hal_pmem_request *request,
@@ -606,7 +573,7 @@ hal_pmem_free(
 size_t
 hal_pmem_get_total_size(void);
 
-struct hal_memory_stats {
+struct hal_pmem_stats {
 	size_t physical_total;
 	size_t physical_reserved;
 	size_t physical_allocated;
@@ -632,8 +599,8 @@ struct hal_memory_stats {
 };
 
 void
-hal_memory_get_stats(
-	struct hal_memory_stats *stats);
+hal_pmem_get_stats(
+	struct hal_pmem_stats *stats);
 
 /*
  * Task
@@ -1170,27 +1137,43 @@ kernel_cpu_notify_handler(
 	hal_irq_ack_t acknowledge);
 
 /*
- * Trap handler callback.
+ * System call entry.  The HAL installs the active return-to-user frame and
+ * calls this with local IRQs masked.  The generic kernel owns any
+ * interruptible syscall window and returns with local IRQs masked so the
+ * HAL can commit the saved frame atomically.
  */
-void
-kernel_user_int_handler(
-	uint32_t vector,
-	uint32_t privilege,
-	uintptr_t pc,
-	uintptr_t value);
+intptr_t
+kernel_syscall_handler(
+	uint32_t number,
+	const uintptr_t args[HAL_SYSCALL_ARGS]);
 
 /*
- * Fault handler callback.  A user frame is active and local IRQs are masked
- * on entry and normal return.  The generic kernel owns fault accounting and
+ * User fault entry.  A user frame is active and local IRQs are masked on
+ * entry and normal return.  The generic kernel owns fault accounting and
  * any interruptible fault-resolution window.
  */
 int
 kernel_user_fault_handler(
-	uint32_t vector,
-	uint32_t privilege,
+	int cause,
+	int mode,
 	uintptr_t pc,
-	uintptr_t error_code,
-	uintptr_t fault_address);
+	uintptr_t address,
+	uintptr_t vector,
+	uintptr_t error_code);
+
+/*
+ * Supervisor fault entry.  No user frame is published and the HAL keeps
+ * its own saved frame.  SUCCESS resumes the interrupted kernel code;
+ * FAILED leaves the register diagnostics and the stop to the HAL.
+ */
+int
+kernel_sys_fault_handler(
+	int cause,
+	int mode,
+	uintptr_t pc,
+	uintptr_t address,
+	uintptr_t vector,
+	uintptr_t error_code);
 
 /*
  * Final return-to-user callback.  For asynchronous interrupts, the HAL has

@@ -54,7 +54,7 @@ def main():
         identity = re.search(r"^kern.boot.root_image: 1:15:(\d+):", observed, re.M)
         assert identity, observed
         records = guest.run("diskpart --machine list")
-        loop = re.search(r"^device\t(\S+)\t" + identity[1] + r"\t0\t1\t", records, re.M)
+        loop = re.search(r"^device\t(\S+)\t" + identity[1] + r"\t0\t9\t", records, re.M)
         part = re.search(r"^device\tnvme0n1p2\t(\d+)\t", records, re.M)
         assert loop and part, records
         position = len(guest.text())

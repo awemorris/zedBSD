@@ -106,7 +106,7 @@ i386_space_init_secondary(
  * Creates one empty i386 user address space.
  */
 hal_space_t
-hal_mem_create_space(
+hal_space_create(
 	void)
 {
 	struct i386_space *space;
@@ -161,7 +161,7 @@ hal_mem_create_space(
  * Destroys one inactive i386 user address space.
  */
 void
-hal_page_destroy_space(
+hal_space_destroy(
 	hal_space_t handle)
 {
 	struct i386_space *space;
@@ -270,7 +270,7 @@ hal_i386_space_memory_stats(
  * Switches the current CPU to one i386 address space.
  */
 void
-hal_page_switch_space(
+hal_space_switch(
 	hal_space_t handle)
 {
 	struct i386_space *space;
@@ -319,7 +319,7 @@ hal_page_switch_space(
  * Maps a physical interval into one i386 user address space.
  */
 int
-hal_page_map(
+hal_space_map(
 	hal_space_t handle,
 	void *address,
 	hal_physaddr_t paddr,
@@ -431,7 +431,7 @@ hal_page_map(
  * Changes protection across one i386 user mapping.
  */
 int
-hal_page_prot(
+hal_space_prot(
 	hal_space_t handle,
 	void *address,
 	size_t size,
@@ -440,7 +440,7 @@ hal_page_prot(
 	int result;
 
 	/* Changes protection without requesting observed PTE flags. */
-	result = hal_page_prot_query(handle, address, size, attr, NULL);
+	result = hal_space_prot_query(handle, address, size, attr, NULL);
 
 	/* Returns the protection-change result. */
 	return result;
@@ -450,7 +450,7 @@ hal_page_prot(
  * Changes protection and reports observed flags across one i386 mapping.
  */
 int
-hal_page_prot_query(
+hal_space_prot_query(
 	hal_space_t handle,
 	void *address,
 	size_t size,
@@ -515,11 +515,11 @@ hal_page_prot_query(
 
 		/* Accumulates an accessed bit observed during replacement. */
 		if ((old & PTE_ACCESS) != 0U)
-			observed |= HAL_PAGE_ACCESSED;
+			observed |= HAL_SPACE_PAGE_ACCESSED;
 
 		/* Accumulates a dirty bit observed during replacement. */
 		if ((old & PTE_DIRTY) != 0U)
-			observed |= HAL_PAGE_DIRTY;
+			observed |= HAL_SPACE_PAGE_DIRTY;
 	}
 
 	/* Invalidates every changed translation before verifying hardware state. */
@@ -546,15 +546,15 @@ hal_page_prot_query(
 		}
 
 		/* Accumulates current presence and hardware-maintained state. */
-		observed |= HAL_PAGE_PRESENT;
+		observed |= HAL_SPACE_PAGE_PRESENT;
 
 		/* Accumulates the current accessed bit. */
 		if ((entry & PTE_ACCESS) != 0U)
-			observed |= HAL_PAGE_ACCESSED;
+			observed |= HAL_SPACE_PAGE_ACCESSED;
 
 		/* Accumulates the current dirty bit. */
 		if ((entry & PTE_DIRTY) != 0U)
-			observed |= HAL_PAGE_DIRTY;
+			observed |= HAL_SPACE_PAGE_DIRTY;
 	}
 
 	/* Releases operation ownership before publishing optional flags. */
@@ -573,7 +573,7 @@ hal_page_prot_query(
  * Removes mappings across one i386 user interval.
  */
 int
-hal_page_unmap(
+hal_space_unmap(
 	hal_space_t handle,
 	void *address,
 	size_t size)
@@ -640,7 +640,7 @@ hal_page_unmap(
  * Reports hardware-maintained flags for one i386 user page.
  */
 int
-hal_page_query(
+hal_space_query(
 	hal_space_t handle,
 	void *address,
 	uint32_t *flags)
@@ -681,9 +681,9 @@ hal_page_query(
 	}
 
 	/* Converts the hardware PTE state to public page flags. */
-	*flags = (pte & PTE_PRESENT ? HAL_PAGE_PRESENT : 0) |
-	    (pte & PTE_ACCESS ? HAL_PAGE_ACCESSED : 0) |
-	    (pte & PTE_DIRTY ? HAL_PAGE_DIRTY : 0);
+	*flags = (pte & PTE_PRESENT ? HAL_SPACE_PAGE_PRESENT : 0) |
+	    (pte & PTE_ACCESS ? HAL_SPACE_PAGE_ACCESSED : 0) |
+	    (pte & PTE_DIRTY ? HAL_SPACE_PAGE_DIRTY : 0);
 
 	/* Releases operation ownership after the PTE snapshot. */
 	space_lock_leave(space, enabled);
@@ -697,7 +697,7 @@ hal_page_query(
  * Clears selected hardware-maintained flags from one i386 user page.
  */
 int
-hal_page_clear_flags(
+hal_space_clear_flags(
 	hal_space_t handle,
 	void *address,
 	uint32_t flags)
@@ -724,7 +724,7 @@ hal_page_clear_flags(
 		return HAL_ERR_INVALID;
 
 	/* Rejects flags outside the hardware-maintained clearable set. */
-	if ((flags & ~(HAL_PAGE_ACCESSED | HAL_PAGE_DIRTY)) != 0)
+	if ((flags & ~(HAL_SPACE_PAGE_ACCESSED | HAL_SPACE_PAGE_DIRTY)) != 0)
 		return HAL_ERR_INVALID;
 
 	/* Admits and serializes the flag-clear operation. */
@@ -742,11 +742,11 @@ hal_page_clear_flags(
 	}
 
 	/* Includes the hardware accessed bit when requested. */
-	if ((flags & HAL_PAGE_ACCESSED) != 0U)
+	if ((flags & HAL_SPACE_PAGE_ACCESSED) != 0U)
 		mask |= PTE_ACCESS;
 
 	/* Includes the hardware dirty bit when requested. */
-	if ((flags & HAL_PAGE_DIRTY) != 0U)
+	if ((flags & HAL_SPACE_PAGE_DIRTY) != 0U)
 		mask |= PTE_DIRTY;
 	keep = ~mask;
 
@@ -781,7 +781,7 @@ i386_tlb_interrupt(
  * Flushes all translations for one address space.
  */
 void
-hal_page_flush_tlb(
+hal_space_flush_tlb(
 	hal_space_t handle)
 {
 	struct i386_space *space;
@@ -809,7 +809,7 @@ hal_page_flush_tlb(
  * Flushes one translation interval for an address space.
  */
 void
-hal_page_flush_tlb_range(
+hal_space_flush_tlb_range(
 	hal_space_t handle,
 	void *vaddr,
 	size_t size)
@@ -843,7 +843,7 @@ hal_page_flush_tlb_range(
  * Reports the page size for one i386 translation level.
  */
 size_t
-hal_page_get_page_size(
+hal_space_get_page_size(
 	int level)
 {
 	/* Supports only the ordinary first page-table level. */
@@ -858,7 +858,7 @@ hal_page_get_page_size(
  * Reports the valid i386 user virtual-address interval.
  */
 void
-hal_page_get_user_range(
+hal_space_get_user_range(
 	uintptr_t *minimum,
 	uintptr_t *limit)
 {

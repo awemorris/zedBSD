@@ -27,6 +27,7 @@
 #include "kern/record-lock.h"
 #include "kern/posix-acl.h"
 #include "kern/vm-object.h"
+#include <hal/hal.h>
 
 #include <zedbsd/rename.h>
 #include <errno.h>
@@ -45,6 +46,8 @@ extern int vm_object_resize_prepare(struct vm_object_resize *resize)
 extern void vm_object_resize_commit(struct vm_object_resize *resize, off_t size)
     __attribute__((weak));
 extern void vm_object_resize_abort(struct vm_object_resize *resize)
+    __attribute__((weak));
+extern int vm_object_discard_mount_refs(struct mount *, struct inode *, unsigned *)
     __attribute__((weak));
 
 #define INODE_COMMON_MAX 256U
@@ -389,6 +392,110 @@ inode_cache_purge_mount(
 			break;
 		destroy_inode(victim);
 	}
+}
+
+/* Checks revoked ownership without holding the cache lock across VM inspection. */
+int
+inode_cache_mount_revoked_check(
+	struct mount *mountp)
+{
+	struct inode *inode;
+	unsigned long irq;
+	unsigned i;
+	unsigned allowed;
+	unsigned internal;
+	unsigned vm_refs;
+	int error;
+
+	if (mountp == NULL)
+		return EINVAL;
+	if (mountp->m_state != MOUNT_STATE_DYING)
+		return EBUSY;
+	if (vm_object_discard_mount_refs == NULL)
+		return EOPNOTSUPP;
+
+	/* Even an empty inode cache must not hide a busy or live-medium VM owner. */
+	error = vm_object_discard_mount_refs(mountp, NULL, &vm_refs);
+	if (error != 0)
+		return error;
+
+	for (i = 0; i < INODE_CACHE_MAX; i++) {
+		irq = spin_lock_irqsave(&inode_cache_lock);
+		inode = inode_cache[i];
+		if (inode == NULL || inode == INODE_CACHE_RESERVED ||
+		    inode->i_mount != mountp) {
+			spin_unlock_irqrestore(&inode_cache_lock, irq);
+			continue;
+		}
+
+		/* The pin prevents eviction while the VM registry is inspected. */
+		if (refcount_load(&inode->i_refs) == UINT_MAX) {
+			spin_unlock_irqrestore(&inode_cache_lock, irq);
+			return EBUSY;
+		}
+		inode_ref(inode);
+		spin_unlock_irqrestore(&inode_cache_lock, irq);
+		error = vm_object_discard_mount_refs(mountp, inode, &vm_refs);
+
+		irq = spin_lock_irqsave(&inode_cache_lock);
+		if (error == 0) {
+			/* Cache and temporary pin; the mount also owns its root. */
+			allowed = 2U;
+			if (inode == mountp->m_root)
+				allowed++;
+			internal = atomic_load_acquire(&inode->i_namespace_refs);
+			if (internal > UINT_MAX - allowed)
+				error = EBUSY;
+			else
+				allowed += internal;
+			if (error == 0 && vm_refs > UINT_MAX - allowed)
+				error = EBUSY;
+			if (error == 0) {
+				allowed += vm_refs;
+				if (refcount_load(&inode->i_refs) != allowed)
+					error = EBUSY;
+			}
+		}
+
+		/* Undo only this pin; do not invoke dead-inode reclamation on refusal. */
+		(void)refcount_put_not_last(&inode->i_refs);
+		spin_unlock_irqrestore(&inode_cache_lock, irq);
+		if (error != 0)
+			return error;
+	}
+	return 0;
+}
+
+/* Allows local destruction of dirty inodes without claiming they were synced. */
+unsigned
+inode_cache_discard_mount_dirty(
+	struct mount *mountp)
+{
+	struct inode *inode;
+	unsigned long irq;
+	unsigned i;
+	unsigned discarded;
+
+	if (mountp == NULL || mountp->m_disk == NULL)
+		HAL_FATAL("inode revoked discard without disk");
+	if (mountp->m_state != MOUNT_STATE_DYING || disk_media_status(mountp->m_disk) == 0)
+		HAL_FATAL("inode revoked discard without closed lost mount");
+
+	/* Caller has completed all ownership checks and suppressed backend reclaim. */
+	discarded = 0;
+	irq = spin_lock_irqsave(&inode_cache_lock);
+	for (i = 0; i < INODE_CACHE_MAX; i++) {
+		inode = inode_cache[i];
+		if (inode == NULL || inode == INODE_CACHE_RESERVED ||
+		    inode->i_mount != mountp)
+			continue;
+		if (inode->i_flags & INODE_DIRTY) {
+			inode->i_flags &= ~INODE_DIRTY;
+			discarded++;
+		}
+	}
+	spin_unlock_irqrestore(&inode_cache_lock, irq);
+	return discarded;
 }
 
 /*

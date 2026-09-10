@@ -1,9 +1,17 @@
 /* Production UFS private operations; deterministic physical error injection.
  * SPDX-License-Identifier: Zlib */
 #define UFS_AUDIT_VERSION 2
+#define UFS_AUDIT_CUSTOM_IO
 #define main ufs_regression_main
 #include "ufs-metadata-audit.c"
 #undef main
+
+/* Host IRQ state and both disk APIs share the existing fault-injected medium. */
+bool hal_irq_disable(void) { return false; }
+void hal_irq_enable(void) { }
+int disk_write_filesystem_context(struct disk *disk, uint64_t block,
+    uint32_t count, const void *data, const struct io_context *context)
+{ return disk_write_context(disk, block, count, data, context); }
 
 int main(void)
 {

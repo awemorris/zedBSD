@@ -39,6 +39,7 @@
 #endif
 #if CONFIG_DRIVER_USB_STORAGE
 #include "drivers/usb-storage.h"
+#include <drivers/usb-uas.h>
 #endif
 #if CONFIG_DRIVER_USB_CDC_NCM
 #include <drivers/usb-cdc-ncm.h>
@@ -121,6 +122,8 @@ kern_platform_init(
 #if CONFIG_DRIVER_USB_STORAGE
 	if (drv_usb_storage_driver_register() != 0)
 		hal_printf("usb: mass-storage driver registration failed\n");
+	if (drv_usb_uas_driver_register() != 0)
+		hal_printf("usb: UAS driver registration failed\n");
 #endif
 #if CONFIG_DRIVER_USB_CDC_NCM
 	if (drv_usb_cdc_ncm_driver_register() != 0)

@@ -331,7 +331,7 @@ hal_task_exec_current(
 		initial_fpregs,
 		sizeof(initial_fpregs));
 	asm_frstor(running_task->fpregs);
-	hal_page_switch_space(new_space);
+	hal_space_switch(new_space);
 
 	/* Reports a completed executable replacement. */
 	return 0;
@@ -565,7 +565,7 @@ hal_task_context_switch(
 	from->run_cpu = -1;
 	to->run_cpu = (int)hal_cpu_current();
 	running_task = to;
-	hal_page_switch_space(to->space);
+	hal_space_switch(to->space);
 
 	/* Updates privilege-transition state for an allocated task stack. */
 	if (to->sys_stack != NULL) {

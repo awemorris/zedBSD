@@ -68,15 +68,17 @@ hal_free(void *pointer)
 }
 
 size_t
-hal_page_get_page_size(int level)
+hal_space_get_page_size(int level)
 {
 	(void)level;
 	return 4096U;
 }
 
 int
-hal_pmem_alloc(const struct hal_pmem_request *request, struct hal_pmem *memory)
+hal_pmem_alloc(hal_physaddr_t request_paddr, size_t request_size, size_t request_alignment, uint32_t request_type, uint32_t request_attr, struct hal_pmem *memory)
 {
+	(void)request_paddr; (void)request_alignment;
+
 	void *address;
 
 	assert(lock_depth == 0);
@@ -88,15 +90,15 @@ hal_pmem_alloc(const struct hal_pmem_request *request, struct hal_pmem *memory)
 			pthread_cond_wait(&allocation_condition, &allocation_gate);
 	}
 	pthread_mutex_unlock(&allocation_gate);
-	address = malloc(request->size);
+	address = malloc(request_size);
 	if (address == NULL)
 		return HAL_ERR_NOMEM;
 	memory->vaddr = address;
 	memory->paddr = __atomic_fetch_add(&next_paddr, 0x10000UL,
 	    __ATOMIC_RELAXED);
-	memory->size = request->size;
-	memory->type = request->type;
-	memory->attr = request->attr;
+	memory->size = request_size;
+	memory->type = request_type;
+	memory->attr = request_attr;
 	(void)__atomic_fetch_add(&live_pmem, 1U, __ATOMIC_RELAXED);
 	return HAL_OK;
 }

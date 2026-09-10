@@ -40,7 +40,6 @@ struct drv_dma_mapping {
 
 struct drv_dma_vector {
 	struct drv_dma_device *device;
-	struct hal_vmap *mapping;
 	struct drv_dma_buffer contiguous;
 	void *address;
 	size_t size, charged;
@@ -56,13 +55,6 @@ extern void cache_memory_commit(enum cache_memory_kind, size_t) __attribute__((w
 extern void cache_memory_cancel(enum cache_memory_kind, size_t) __attribute__((weak));
 extern void cache_memory_release(enum cache_memory_kind, size_t) __attribute__((weak));
 extern size_t cache_memory_reclaim(size_t) __attribute__((weak));
-extern unsigned hal_vmap_capabilities(void) __attribute__((weak));
-extern int hal_vmap_reserve(size_t, struct hal_vmap **) __attribute__((weak));
-extern int hal_vmap_populate(struct hal_vmap *, uint64_t, uint64_t) __attribute__((weak));
-extern int hal_vmap_pin(struct hal_vmap *, void **) __attribute__((weak));
-extern void hal_vmap_unpin(struct hal_vmap *) __attribute__((weak));
-extern int hal_vmap_release(struct hal_vmap *) __attribute__((weak));
-extern int hal_kernel_page_lookup(const void *, hal_physaddr_t *) __attribute__((weak));
 
 /*
  * Forward declaration
@@ -255,8 +247,8 @@ drv_dma_alloc_coherent(
 	request.size = size;
 
 	/* Checks the hal page get page size result. */
-	if (alignment < hal_page_get_page_size(1))
-		alignment = hal_page_get_page_size(1);
+	if (alignment < hal_space_get_page_size(1))
+		alignment = hal_space_get_page_size(1);
 	request.alignment = alignment;
 	request.type = HAL_PMEM_TYPE_RAM;
 	request.attr = 0;
@@ -270,7 +262,7 @@ drv_dma_alloc_coherent(
 	 * A sub-page segment constrains the exposed payload, not unused
 	 * backing.
 	 */
-	if (boundary < hal_page_get_page_size(1))
+	if (boundary < hal_space_get_page_size(1))
 		boundary = 0;
 
 	/* Checks the operation status. */
@@ -584,8 +576,6 @@ drv_dma_vector_create(
 	struct drv_dma_vector **result)
 {
 	struct drv_dma_vector *vector;
-	uint64_t maximum;
-	size_t rounded;
 	unsigned long irq;
 	int error;
 
@@ -623,48 +613,12 @@ drv_dma_vector_create(
 	vector->device = device;
 	vector->size = size;
 	vector->charged = sizeof(*vector);
-	maximum = device->constraints.address_bits == 64U
-			  ? UINT64_MAX
-			  : ((UINT64_C(1) << device->constraints.address_bits) -
-			     1U);
-	rounded = (size + 4095U) & ~(size_t)4095U;
-	error = EOPNOTSUPP;
 
-	/*
-	 * The optional HAL owns page lifetime and supplies checked per-page
-	 * PAs.
-	 */
-	if (hal_vmap_capabilities != NULL && hal_vmap_reserve != NULL &&
-	    hal_vmap_populate != NULL && hal_vmap_pin != NULL &&
-	    hal_vmap_unpin != NULL && hal_vmap_release != NULL &&
-	    hal_kernel_page_lookup != NULL && hal_vmap_capabilities() != 0 &&
-	    hal_vmap_reserve(rounded, &vector->mapping) == HAL_OK) {
-		/* Checks the operation status. */
-		error = hal_vmap_populate(vector->mapping, 0, maximum);
-		if (error == HAL_OK)
-			error = hal_vmap_pin(vector->mapping, &vector->address);
-		if (error == HAL_OK)
-			error = dma_vector_segments(vector);
-		if (error != 0) {
-			/* Checks the dma vector backing free result. */
-			if (dma_vector_backing_free(vector) != 0) {
-				HAL_FATAL("DMA vector preparation rollback "
-					  "failed");
-			}
-		} else {
-			vector->charged += rounded;
-		}
-	}
-
-	/* Constrained coherent storage is the mask/capability fallback. */
-	if (vector->mapping == NULL) {
-		/* Checks the operation status. */
-		error = drv_dma_alloc_coherent(device, size, 64U,
-					       &vector->contiguous);
-		if (error == 0) {
-			vector->address = vector->contiguous.address;
-			error = dma_vector_segments(vector);
-		}
+	/* Coherent storage already satisfies the device mask and boundaries. */
+	error = drv_dma_alloc_coherent(device, size, 64U, &vector->contiguous);
+	if (error == 0) {
+		vector->address = vector->contiguous.address;
+		error = dma_vector_segments(vector);
 	}
 
 	/* Checks the operation status. */
@@ -910,22 +864,10 @@ dma_vector_segments(
 	boundary = device->constraints.segment_boundary;
 	vector->count = 0;
 	offset = 0;
-	/* Process each remaining element. */
+	/* Splits the contiguous run wherever a device limit requires it. */
 	while (offset < vector->size) {
-		/* Handles the mapping availability. */
-		if (vector->mapping != NULL) {
-			/* Checks the hal kernel page lookup result. */
-			if (hal_kernel_page_lookup((char *)vector->address +
-							   offset,
-						   &physical) != HAL_OK) {
-				/* Failed. */
-				return EIO;
-			}
-			length = 4096U - offset % 4096U;
-		} else {
-			physical = vector->contiguous.device_address + offset;
-			length = vector->size - offset;
-		}
+		physical = vector->contiguous.device_address + offset;
+		length = vector->size - offset;
 
 		/* Checks the current data length. */
 		remaining = vector->size - offset;
@@ -976,26 +918,8 @@ static int
 dma_vector_backing_free(
 	struct drv_dma_vector *vector)
 {
-	/* Handles the mapping availability. */
-	if (vector->mapping != NULL) {
-		/* Handles the address availability. */
-		if (vector->address != NULL)
-			hal_vmap_unpin(vector->mapping);
-
-		/* Checks the hal vmap release result. */
-		if (hal_vmap_release(vector->mapping) != HAL_OK) {
-			/* Checks the hal vmap pin result. */
-			if (vector->address != NULL &&
-			    hal_vmap_pin(vector->mapping, &vector->address) !=
-				    HAL_OK)
-				HAL_FATAL("DMA vector release lost its pin");
-
-			/* Failed. */
-			return EBUSY;
-		}
-
-		vector->mapping = NULL;
-	} else if (vector->contiguous.address != NULL) {
+	/* Returns the coherent storage; a refused release keeps the vector. */
+	if (vector->contiguous.address != NULL) {
 		drv_dma_free_coherent(vector->device, &vector->contiguous);
 
 		/* Handles the address availability. */

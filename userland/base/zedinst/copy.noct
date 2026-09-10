@@ -1,6 +1,7 @@
 // Bounded binary copying with byte progress and explicit stream ownership.
 // Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-func instCopyRead(context, count) { return File.read(context.input, count); }
+// The known-size copy uses GC-managed buffers, including on 64 MiB targets.
+func instCopyRead(context, count) { return File.readExact(context.input, count); }
 func instCopyWrite(context, bytes, offset, count) {
     File.writeAll(context.output, bytes, offset, count);
     return count;
@@ -43,7 +44,7 @@ func instCopyBody(context, unused) {
             reported = done;
         }
     }
-    // File.read reports EOF as an exception, so size/digest checks detect growth.
+    // Exact reads reject premature EOF; size/digest checks also detect growth.
     if (ops.sourceSize(context) != context.bytes) { System.error("source size changed during copy"); }
     return done;
 }
@@ -71,4 +72,15 @@ func instCopyWithOperations(ops, source, target, bytes, label) {
 }
 func instCopyFile(source, target, bytes, label) {
     return instCopyWithOperations(instCopyOperations(), source, target, bytes, label);
+}
+
+func instCopyFrontendProgress(context, done, total) {
+    context.ops.ui.copyProgress(context.ops.ui, context.label, done, total);
+}
+
+func instCopyFileWithUi(source, target, bytes, label, ui) {
+    var ops = instCopyOperations();
+    ops.ui = ui;
+    ops.progress = instCopyFrontendProgress;
+    return instCopyWithOperations(ops, source, target, bytes, label);
 }

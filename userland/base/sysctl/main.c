@@ -264,7 +264,7 @@ show_name(
 			return -1;
 		printf("%s: buffers=%llu hits=%llu misses=%llu read_bios=%llu "
 		       "write_bios=%llu evictions=%llu waits=%llu "
-		       "writeback_errors=%llu\n",
+		       "writeback_errors=%llu capacity_failures=%llu physical_failures=%llu\n",
 		       name, (unsigned long long)stats.buffers,
 		       (unsigned long long)stats.hits,
 		       (unsigned long long)stats.misses,
@@ -272,7 +272,9 @@ show_name(
 		       (unsigned long long)stats.write_bios,
 		       (unsigned long long)stats.evictions,
 		       (unsigned long long)stats.waits,
-		       (unsigned long long)stats.writeback_errors);
+		       (unsigned long long)stats.writeback_errors,
+		       (unsigned long long)stats.capacity_failures,
+		       (unsigned long long)stats.physical_failures);
 
 		/* Reports successful completion. */
 		return 0;

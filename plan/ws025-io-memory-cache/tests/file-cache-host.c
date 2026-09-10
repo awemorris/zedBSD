@@ -80,6 +80,9 @@ static unsigned cache_pmem_failure;
 static size_t cache_live_bytes;
 static unsigned cache_backend_reads;
 static int cache_read_error;
+static unsigned cache_backend_credit;
+static unsigned cache_backend_refusals;
+static void test_cache_read_credit(void);
 static size_t cache_short_limit;
 static unsigned cache_generated;
 static int cache_disk_error;
@@ -130,6 +133,14 @@ FILE_CACHE_MAIN(void)
 	struct cache_memory_stats stats;
 
 	cache_memory_init();
+#ifdef FILE_CACHE_FOCUSED
+	cache_ops = backend_ops;
+	cache_ops.pread = cache_pread;
+	test_cache_read_credit();
+	test_cache_pressure();
+	puts("pinned-cache shared-credit and ownership regression: PASS");
+	return 0;
+#endif
 	CHECK(reservation_main() == 0);
 	test_cache_lifetime();
 	test_cache_races();
@@ -139,6 +150,7 @@ FILE_CACHE_MAIN(void)
 	test_cache_resize();
 	test_cache_dirty_retention();
 	test_cache_pressure();
+	test_cache_read_credit();
 	test_file_error_observers();
 	test_exec_input_leases();
 	test_exec_snapshot_pages();
@@ -181,6 +193,14 @@ cache_pread(
 		pthread_cond_broadcast(&cached_gate_changed);
 		while(!cached_backend_release)pthread_cond_wait(&cached_gate_changed,&cached_gate_lock);
 		pthread_mutex_unlock(&cached_gate_lock);
+	}
+	/* Models a lower-layer read needing a page of the same shared budget. */
+	if (cache_backend_credit) {
+		if (cache_memory_reserve(CACHE_MEMORY_BUF_DATA, 4096, 1) != 0) {
+			cache_backend_refusals++;
+			return -ENOMEM;
+		}
+		cache_memory_cancel(CACHE_MEMORY_BUF_DATA, 4096);
 	}
 	if (cache_read_error != 0)
 		return -cache_read_error;
@@ -521,6 +541,9 @@ waitq_wake_all(struct wait_queue *queue)
 	(void)__atomic_add_fetch(&queue->sequence, UINT64_C(1), __ATOMIC_RELEASE);
 }
 
+/* Optional focused fixture observer, installed only while its worker lives. */
+static void (*cache_wait_observer)(struct wait_queue *);
+
 /* Drops the condition lock while waiting, with a bounded deadlock diagnostic. */
 int
 waitq_sleep(struct wait_queue *queue, struct spinlock *lock,
@@ -536,6 +559,8 @@ waitq_sleep(struct wait_queue *queue, struct spinlock *lock,
 	CHECK(clock_gettime(CLOCK_MONOTONIC, &start) == 0);
 	if (lock != NULL)
 		spin_unlock_irqrestore(lock, 0);
+	if (cache_wait_observer != NULL)
+		cache_wait_observer(queue);
 	spins = 0;
 	while (waitq_sequence(queue) == observed) {
 		sched_yield();
@@ -606,7 +631,7 @@ cache_mapper(void *argument)
 }
 
 /* Accounts physical ownership independently from the manager under test. */
-int hal_pmem_alloc(const struct hal_pmem_request *request, struct hal_pmem *memory)
+int hal_pmem_alloc(hal_physaddr_t request_paddr, size_t request_size, size_t request_alignment, uint32_t request_type, uint32_t request_attr, struct hal_pmem *memory)
 {
 	unsigned call;
 	int error;
@@ -614,7 +639,7 @@ int hal_pmem_alloc(const struct hal_pmem_request *request, struct hal_pmem *memo
 	call = __atomic_add_fetch(&cache_pmem_count, 1U, __ATOMIC_RELAXED);
 	if (cache_pmem_failure != 0 && call == cache_pmem_failure)
 		return HAL_ERR_NOMEM;
-	error = reservation_pmem_alloc(request, memory);
+	error = reservation_pmem_alloc(request_paddr, request_size, request_alignment, request_type, request_attr, memory);
 	if (error == HAL_OK)
 		(void)__atomic_add_fetch(&cache_live_bytes, memory->size, __ATOMIC_RELAXED);
 	return error;
@@ -627,7 +652,7 @@ int hal_pmem_free(struct hal_pmem *memory)
 		(void)__atomic_sub_fetch(&cache_live_bytes, size, __ATOMIC_RELAXED);
 	return error;
 }
-void hal_memory_get_stats(struct hal_memory_stats *stats)
+void hal_pmem_get_stats(struct hal_pmem_stats *stats)
 {
 	memset(stats, 0, sizeof(*stats));
 	stats->physical_total = 64U * 1024U * 1024U;
@@ -1639,3 +1664,97 @@ static void test_cached_demand_progress(void)
  cache_generated=0;close_fixture(&fixture);
  CHECK(progress);
 }
+
+/* Shared credit exhaustion must not strand a sole reader behind its own cache. */
+static void
+test_cache_read_credit(void)
+{
+	struct fixture fixture;
+	struct file_io io;
+	struct vm_object_prefetch prefetch;
+	struct vm_object *other;
+	struct vm_object *identity;
+	struct vm_object_page *held;
+	struct cache_memory_stats before;
+	struct cache_memory_stats after;
+	unsigned char bytes[4096];
+	unsigned index;
+	unsigned byte;
+	size_t pages;
+
+	make_fixture(&fixture);
+	cache_ops = backend_ops;
+	cache_ops.pread = cache_pread;
+	fixture.inode.i_fop = fixture.owner->f_ops = &cache_ops;
+	fixture.inode.i_size = 256U * 1024U;
+	cache_generated = 1;
+	CHECK(cache_memory_set_target(65536) == 0);
+	CHECK(file_pread(fixture.owner, bytes, sizeof(bytes), 0) == sizeof(bytes));
+	CHECK(file_io_begin(fixture.owner, FILE_IO_PREAD, 0, 0, &io) == 0);
+	CHECK(io.read_object != NULL && io.held_content_read);
+	identity = io.read_object;
+
+	/* A second owner excludes targeted reclaim, even if every page is clean. */
+	CHECK(vm_object_cache_pin(&fixture.inode, &other) == 0);
+	pages = vm_object_page_count();
+	CHECK(vm_object_cache_reclaim_pinned(io.read_object, 65536) == 0);
+	CHECK(vm_object_page_count() == pages);
+	vm_object_cache_unpin(other);
+
+	/* A held page stays alive under the sole outer pin as well. */
+	CHECK(vm_object_fault(io.read_object, 0, &held) == 0);
+	CHECK(vm_object_cache_reclaim_pinned(io.read_object, 65536) == 0);
+	CHECK(held->hold_count == 1);
+	vm_object_fault_release(held);
+
+	/* A queued speculative fill keeps private frames, not resident-page holds. */
+	CHECK(vm_object_prefetch_prepare(&fixture.inode, 200U * 1024U, 4096,
+	    &prefetch) == 0);
+	CHECK(io.read_object->prefetch_operations == 1);
+
+	/* Reads beyond the budget within one unchanged outer content lease. */
+	cache_backend_credit = 1;
+	cache_backend_refusals = 0;
+	cache_memory_get_stats(&before);
+	for (index = 0; index < 64; index++) {
+		CHECK(file_io_transfer(&io, bytes, sizeof(bytes)) == sizeof(bytes));
+		for (byte = 0; byte < sizeof(bytes); byte++)
+			CHECK(bytes[byte] == (unsigned char)((index * sizeof(bytes) + byte) % 251U));
+		CHECK(io.read_object == identity && io.held_content_read);
+	}
+	CHECK(cache_backend_refusals != 0);
+	cache_memory_get_stats(&after);
+	CHECK(after.pending_bytes == 0 && after.resident_bytes <= after.target_bytes);
+	CHECK(after.refusals > before.refusals);
+	CHECK(prefetch.count == 1 && prefetch.pages[0] != NULL);
+	vm_object_prefetch_abort(&prefetch);
+	CHECK(io.read_object->prefetch_operations == 0);
+	vm_object_prefetch_abort(&prefetch);
+	file_io_end(&io);
+	cache_backend_credit = 0;
+	cache_generated = 0;
+	(void)vm_object_cache_drain(NULL);
+	close_fixture(&fixture);
+	CHECK(cache_memory_set_target(16U * 1024U * 1024U) == 0);
+}
+
+#ifdef FILE_CACHE_STANDALONE
+/* The cache fixture has no swap device or hardware page tables. */
+#include <kern/swap.h>
+struct swap_backend *swap_system_backend(void) { return NULL; }
+int swap_alloc_slot(struct swap_backend *backend, uint32_t *slot)
+{ (void)backend; (void)slot; CHECK(0); return ENOSPC; }
+void swap_free_slot(struct swap_backend *backend, uint32_t slot)
+{ (void)backend; (void)slot; CHECK(0); }
+int swap_write_page(struct swap_backend *backend, uint32_t slot, const void *page)
+{ (void)backend; (void)slot; (void)page; CHECK(0); return EIO; }
+int hal_space_query(hal_space_t space, void *address, hal_physaddr_t *physical, uint32_t *flags)
+{
+ if (physical != NULL) *physical = 0;
+ (void)space; (void)address; (void)flags; CHECK(0); return HAL_ERR_NOMEM; }
+int hal_space_map(hal_space_t space, void *address, hal_physaddr_t physical, size_t size, uint32_t flags)
+{ (void)space; (void)address; (void)physical; (void)size; (void)flags; CHECK(0); return HAL_ERR_NOMEM; }
+int hal_space_prot(hal_space_t space, void *address, size_t size, uint32_t flags)
+{ (void)space; (void)address; (void)size; (void)flags; CHECK(0); return HAL_ERR_NOMEM; }
+size_t hal_space_get_page_size(int level) { (void)level; return 4096; }
+#endif

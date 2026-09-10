@@ -1,0 +1,13 @@
+// Console report used after either frontend has released its display/input.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+func instReportConsole(result) {
+    for (message in result.cleanup) { print("Cleanup incomplete: " + message); }
+    if (result.transaction != 0) {
+        for (path in result.transaction.published) { print("Published: " + path); }
+        for (path in result.transaction.uncertain) { print("Publication requires inspection: " + path); }
+        for (item in result.transaction.leftovers) { print("Preserved staging object: " + item.path); }
+    }
+    if (result.cancelled && Array.size(result.cleanup) == 0) { print("Installation cancelled."); return; }
+    if (!result.ok) { System.error("installation incomplete: " + result.message); }
+    print("Installation complete.");
+}

@@ -1,6 +1,6 @@
 # ws019-p007: dedicated native UFS root installation
 
-Status: planned; user product decision complete, 2026-09-09
+Status: completed q183; see [results](results.md)
 Depends on p006; Parent: [WS019](../ws.md)
 
 Install EFI/BOOT/BOOTX64.EFI, vmunix and boot configuration on ESP. The other
@@ -154,3 +154,23 @@ file_pread/file_pwrite_context, not that array directly. Do not silently regress
 UFS loop creation when enabling canonical identity. Its existing 2-GiB bound is
 separate from the direct file-swap source path and must not be confused with a
 native swap-size restriction.
+
+## Final acceptance after p049
+
+Use one finite 120-active-minute acceptance queue after actual text integration
+passes. Do not create another prerequisite sequence. Consolidate accepted codec,
+claim, tree-copy, lifecycle and publication fault evidence above; add the missing
+real paging proof on a disposable clone of the public-installer-created disk.
+Reuse the production-ABI pressure worker in ws016-swap-control/tests/runtime-
+swap-guest.c through a test-only wrapper (not an installed command). Require
+actual page-out and page-in increments, pattern readback, unchanged I/O error
+count, repeated generations, swapoff release/reactivation and halt. Confirm the
+active source is the installed UFS /swapfile and no boot USB or other swap source
+is attached. Transfer the probe through the disposable ESP and copy to /run;
+this is test instrumentation, not host provisioning of the installed root.
+
+Retain explicit fragmented-file and indirect-boundary admission evidence. If
+physical-pressure policy prevents the test from reaching swap, report that as
+unaccepted paging rather than treating swapon success as stress coverage. Keep
+any genuine missing kernel functionality as an explicit unresolved issue with
+a bounded fix; do not mark p007 complete solely from q182 boot/activation proof.

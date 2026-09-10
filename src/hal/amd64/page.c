@@ -345,8 +345,8 @@ hal_amd64_task_memory_stats(
  * Reports the current amd64 HAL memory accounting.
  */
 void
-hal_memory_get_stats(
-	struct hal_memory_stats *stats)
+hal_pmem_get_stats(
+	struct hal_pmem_stats *stats)
 {
 	bool enabled;
 	uint32_t index;

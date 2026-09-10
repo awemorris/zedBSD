@@ -92,11 +92,52 @@ def capture(path, expected):
         qmp.close()
 
 
-def run_cell(out, value):
+def storage_measurements(text):
+    rows = re.findall(r'IMOD-STORAGE SAMPLE (\d+) write_ns=(\d+) fsync_ns=(\d+) read_ns=(\d+)\r?$', text, re.M)
+    if [int(row[0]) for row in rows] != list(range(64)):
+        raise RuntimeError('missing, duplicate or reordered storage samples')
+    ends = re.findall(r'IMOD-STORAGE PASS samples=64 bytes=65536 wall_ns=(\d+) process_cpu_us=(\d+)\r?$', text, re.M)
+    if len(ends) != 1:
+        raise RuntimeError('missing unique confirmed write/readback completion')
+    start = text.index('IMOD-STORAGE READY ')
+    end = text.index('IMOD-STORAGE PASS ')
+    concurrent = text[start:end]
+    if 'USB-HID-GUEST RECORD PASS role=relative' not in concurrent:
+        raise RuntimeError('HID record did not complete during storage workload')
+    resolutions = re.findall(r'IMOD-STORAGE READY [^\n]*clock_resolution_ns=(\d+)', text)
+    if len(resolutions) != 1 or int(resolutions[0]) <= 0:
+        raise RuntimeError('missing positive guest clock resolution')
+    irq_rows = re.findall(r'IMOD-STORAGE IRQ entry=(\d+) owned=(\d+) events=(\d+) duration_ns=(\d+)\r?$', text, re.M)
+    if len(irq_rows) != 1:
+        raise RuntimeError('missing unique IRQ measurement')
+    entry, owned, events, duration = map(int, irq_rows[0])
+    if not (entry > 0 and owned > 0 and events > 0 and duration > 0):
+        raise RuntimeError('invalid or inactive xHCI IRQ sample')
+    irq = dict(entries=entry, owned=owned, events=events, duration_ns=duration,
+               entries_per_second=entry * 1e9 / duration,
+               owned_per_second=owned * 1e9 / duration,
+               scope='Aggregate xHCI callbacks; independently sampled counters at interval boundaries, not IRQ service latency')
+    metrics = {}
+    for column, name in enumerate(('write', 'fsync', 'readback'), 1):
+        samples = [int(row[column]) for row in rows]
+        ordered = sorted(samples)
+        metrics[name] = dict(samples_ns=samples, minimum_ns=ordered[0],
+                             maximum_ns=ordered[-1],
+                             **{f'p{p}_ns': ordered[(len(ordered) * p + 99) // 100 - 1]
+                                for p in (50, 95, 99)})
+    return dict(irq=irq, operations=metrics, bytes_per_sample=65536, samples=64,
+                clock_resolution_ns=int(resolutions[0]),
+                wall_ns=int(ends[0][0]), process_cpu_us=int(ends[0][1]),
+                hid_overlap=True,
+                scope='Guest cached-file operations and tick-accounted process CPU; paced wall time. No physical IRQ or controller latency claim.')
+
+
+def run_cell(out, value, usb2=False):
     campaign = out / f'i{value}'
     env = dict(os.environ, USB_HID_QEMU_CELLS='xhci',
-               USB_HID_XHCI_IMOD=str(value), USB_HID_QMP_DIAGNOSTICS='1')
-    record = {'setting': value}
+               USB_HID_XHCI_IMOD=str(value), USB_HID_QMP_DIAGNOSTICS='1',
+               USB_HID_IMOD_STORAGE='1', USB_HID_XHCI_USB2_ONLY='1' if usb2 else '0')
+    record = {'setting': value, 'usb2_only': usb2}
     started = time.monotonic()
     with (out / f'i{value}.log').open('w') as log:
         process = subprocess.Popen(
@@ -122,6 +163,13 @@ def run_cell(out, value):
             if 'readback' not in record:
                 raise RuntimeError('campaign ended without actual IMOD readback')
             record['functional_results'] = (campaign / 'results.tsv').read_text()
+            record['storage'] = storage_measurements(guest_log.read_text(errors='replace'))
+            if usb2:
+                resets = re.findall(r'xhci: port 4 reset complete portsc=([0-9a-fA-F]+)',
+                                    guest_log.read_text(errors='replace'))
+                if not resets or any((int(word, 16) >> 10) & 15 != 3 for word in resets):
+                    raise RuntimeError('USB2 root speed was not confirmed')
+                record['root_speed_id'] = 3
             record['result'] = 'PASS functional campaign and actual interval'
             print(f'IMOD {value}: functional campaign PASS', flush=True)
         except BaseException as error:
@@ -143,6 +191,7 @@ def run_cell(out, value):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path)
+    parser.add_argument('--usb2', action='store_true')
     parser.add_argument('--values', nargs='+', type=int, choices=[0, 160, 4000],
                         default=[0, 160, 4000])
     args = parser.parse_args()
@@ -151,11 +200,12 @@ def main():
     out.mkdir(parents=True, exist_ok=False)
     source = REPO / 'src/drivers/pci/pci-xhci.c'
     digest = lambda: hashlib.sha256(source.read_bytes()).hexdigest()
-    result = dict(source_sha256=digest(), cells=[],
+    result = dict(source_sha256=digest(),
+                  workload_sha256=hashlib.sha256((REPO / 'plan/ws025-io-memory-cache/tests/imod-storage-guest.c').read_bytes()).hexdigest(), cells=[],
                   scope='QEMU functional comparison; no physical latency/CPU claim')
     try:
         for value in args.values:
-            result['cells'].append(run_cell(out, value))
+            result['cells'].append(run_cell(out, value, args.usb2))
         result['result'] = 'PASS'
     finally:
         result['source_sha256_after'] = digest()

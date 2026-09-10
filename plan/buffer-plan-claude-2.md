@@ -118,7 +118,7 @@ vendor/product/serial と READ CAPACITY の一致）を 1 回行い、一致し�
   Codex 案には直接関係しないが、第 III 部 W3 の前提なので、段階 0 の「事実」に記録する。
 - **F6 reservation 容量**: 64 KiB × bulk 2 本 = 128 KiB の物理連続 coherent DMA を storage device ごとに
   attach 時に確保する。`alloc_ram` の 64 ページ連続要求が attach 時に走るのは許容範囲だが、
-  複数 storage（root + 別スティック）で 2 倍になる。`hal_memory_get_stats` で見える形に。
+  複数 storage（root + 別スティック）で 2 倍になる。`hal_pmem_get_stats` で見える形に。
 - **F7 順序**: 段階 1（pool）と段階 2（cache run）は独立、3（UFS run）は 2 に依存、4（USB）は独立。
   1 と 4 は別 Queue で並行できる。効果が見えるのは 2+3+4 が揃ってから。
 

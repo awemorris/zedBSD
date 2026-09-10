@@ -1,6 +1,6 @@
 # ws004-p050: multiple NVMe controllers
 
-Status: planned; required within the active Priority goal after WS019 completion
+Status: completed / cleared q187; WS019 completed in q186
 Parent: [WS004](../ws.md)
 Authorization: user instruction 2026-09-09; finish the installer first.
 
@@ -27,3 +27,57 @@ independent and concurrent read/write/flush with separate sentinels, failed atta
 timeout/reset isolation and normal shutdown/reboot persistence. Verify resource
 ownership on failed initialization and release. Preserve existing single-device
 acceptance and record practical supported limits without another one-device stub.
+
+## Preliminary inventory during q185 (read-only)
+
+All nvme_primary references are currently in src/drivers/pci/pci-nvme.c:
+namespace probe, the additional-controller attach refusal, detach/shutdown
+claims, and controller publication/unpublication. Per-controller command locks
+and lifecycle state already exist, and PCI driver_data stores the controller.
+The next queue must replace the singleton lookup/publication with a registry
+while retaining the existing probe_busy/detach ownership protocol; merely
+removing the attach refusal would overwrite ownership. This is inventory,
+not implementation or acceptance. Installer/PC98 normal-path work still runs.
+
+
+## Implementation design inventory after q186 reads (not yet queued)
+
+- `nvme_probe_namespace()` also hard-codes controller 0 in
+  `disk_alloc_nvme_name(disk, 0, namespace_id)`. Registry changes alone cannot
+  work: each bound controller needs its own index and therefore a unique
+  `nvmeCnN` name. Disk allocation already checks names under its lock. Persisted
+  boot selection continues to use PARTUUID, not these enumeration indices.
+- Add intrusive next/index fields to the allocated controller, replace
+  `nvme_primary` with the registry head, and assign indices under the existing
+  registry lock. Use explicit exhaustion handling; no new fixed one-controller
+  array. Failed attaches may consume an index; name stability across boots is
+  not a promised identity mechanism.
+- Namespace probing selects one not-yet-started eligible entry while holding
+  registry then command_lock, sets probe_started/probe_busy before releasing
+  locks, and restarts its registry search after each result. Do not save an
+  unlocked next pointer across probe/teardown: detach may retire that node.
+  Keep the existing probe-failure quarantine and detach ownership arbitration.
+- Detach/shutdown claims locate the controller by PCI device in the registry,
+  then claim detach_busy under command_lock before releasing registry. Do not
+  replace this with an unprotected driver_data dereference: PCI clears that
+  field only after successful driver detach.
+- Publication/unpublication must update only the intended node. Preserve
+  per-controller command/DMA/IRQ/recovery ownership already present. A sibling
+  remains registered when attach/probe/teardown of one controller fails.
+- Reuse the existing lifecycle host fixtures and installed-boot QEMU harness;
+  add a second distinct NVMe namespace image in both PCI enumeration orders.
+  Confirm both names, root identity, independent sentinels/flush/persistence,
+  failure isolation and shutdown. This is design preparation during the PC98
+  runtime wait, not implementation or an accepted multiple-controller result.
+
+
+## Completion
+
+[Results](results.md) map the acceptance to current-code host ownership/lifecycle
+checks and real two-controller QEMU cases. Both enumeration orders, target-only
+boot/login/swap, separate and concurrent writes/flush/readback, persisted data,
+namespace-probe failure isolation and normal halt pass. Initialization failure
+and timeout/reset ownership isolation pass host ordinary/ASan/UBSan checks of
+production functions. This does not claim physical lost-completion/reset tests.
+All three supported disk-image builds pass. BUG-016's one-controller admission
+and boot-order failure are fixed; this phase is cleared.

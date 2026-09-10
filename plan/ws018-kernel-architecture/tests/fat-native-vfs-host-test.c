@@ -1148,9 +1148,7 @@ check_probe_and_initial_contents(struct memory_image *image,
 	CHECK(capture.file_block[0] == 0U);
 	CHECK(capture.disk_block[0] == cluster_lba(image, 3U));
 	CHECK(capture.count[0] == 2U);
-	CHECK_ERROR(drv_fat_file_contiguous_block(&file, &backing_disk, &block), 0);
-	CHECK(backing_disk == &image->disk);
-	CHECK(block == cluster_lba(image, 3U));
+	/* Contiguity is now described by the single extent verified above. */
 	capture.reject = 1;
 	CHECK_ERROR(drv_fat_file_extents(&file, capture_extent, &capture), EBUSY);
 	CHECK_ERROR(host_file_close(&file), 0);
@@ -1265,11 +1263,7 @@ check_file_mutations(struct memory_image *image, struct mount *mountp)
 	CHECK_ERROR(host_file_open(again, O_RDONLY, &empty), 0);
 	CHECK_ERROR(drv_fat_file_extents(&empty, capture_extent, &capture), 0);
 	CHECK(capture.used == 0U);
-	{
-		struct disk *disk;
-		uint64_t block;
-		CHECK_ERROR(drv_fat_file_contiguous_block(&empty, &disk, &block), EIO);
-	}
+	/* An empty file supplies no extents; no legacy single-block query. */
 	CHECK_ERROR(host_file_close(&empty), 0);
 	inode_release(again);
 	inode_release(inode);
@@ -3069,8 +3063,6 @@ verify_grown_file(struct memory_image *image, struct mount *mountp,
 	struct inode *inode;
 	struct file file;
 	struct extent_capture capture = {0};
-	struct disk *disk;
-	uint64_t block;
 	char boundary[2];
 	uint64_t free_after;
 
@@ -3094,8 +3086,7 @@ verify_grown_file(struct memory_image *image, struct mount *mountp,
 	CHECK(capture.count[1] == 1U);
 	CHECK(capture.disk_block[0] == cluster_lba(image, 2U));
 	CHECK(capture.disk_block[1] != capture.disk_block[0] + 1U);
-	CHECK_ERROR(drv_fat_file_contiguous_block(&file, &disk, &block),
-	    EOPNOTSUPP);
+	/* The two non-adjacent extents above prove this file is fragmented. */
 	CHECK_ERROR(host_file_close(&file), 0);
 	inode_release(inode);
 }

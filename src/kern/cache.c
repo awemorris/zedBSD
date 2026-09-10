@@ -74,13 +74,13 @@ void
 cache_memory_init(
 	void)
 {
-	struct hal_memory_stats memory;
+	struct hal_pmem_stats memory;
 	uint64_t target;
 	uint64_t reserve;
 	bool enabled;
 
 	/* Samples real managed memory outside the accounting lock. */
-	hal_memory_get_stats(&memory);
+	hal_pmem_get_stats(&memory);
 	cache_memory_policy(memory.physical_total, &target, &reserve);
 
 	if (mutex_init(&control_lock, LOCK_RANK_VM_RESIZE, "cache memory control") != 0)
@@ -111,7 +111,7 @@ cache_memory_reserve(
 	size_t bytes,
 	int optional)
 {
-	struct hal_memory_stats memory;
+	struct hal_pmem_stats memory;
 	uint64_t target;
 	uint64_t current;
 	uint64_t floor;
@@ -123,7 +123,7 @@ cache_memory_reserve(
 	memset(&memory, 0, sizeof(memory));
 
 	if (optional)
-		hal_memory_get_stats(&memory);
+		hal_pmem_get_stats(&memory);
 
 	enabled = cache_lock();
 	current = accounting.resident_bytes + accounting.pending_bytes;
@@ -353,7 +353,7 @@ void
 cache_memory_get_stats(
 	struct cache_memory_stats *stats)
 {
-	struct hal_memory_stats memory;
+	struct hal_pmem_stats memory;
 	bool enabled;
 
 	/* Copies the ownership transaction under its private lock. */
@@ -365,7 +365,7 @@ cache_memory_get_stats(
 	cache_unlock(enabled);
 
 	/* Avoids acquiring the physical allocator under cache accounting ownership. */
-	hal_memory_get_stats(&memory);
+	hal_pmem_get_stats(&memory);
 	stats->free_bytes = memory.physical_free;
 }
 
@@ -390,7 +390,7 @@ cache_worker_init(
 
 	/* Allocates the region, releasing a short allocation before reporting it. */
 	memset(&memory, 0, sizeof(memory));
-	error = io_scratch_alloc(WORKER_BYTES, 1, &memory);
+	error = io_scratch_alloc(WORKER_BYTES, &memory);
 	if (error != HAL_OK || memory.vaddr == NULL || memory.size < WORKER_BYTES) {
 		if (memory.size != 0 && io_scratch_free(&memory) != HAL_OK)
 			HAL_FATAL("cache worker allocation rollback failed");

@@ -91,3 +91,22 @@ Project-specific execution constraints remain in force:
 - use `make -j16` for the supported build gate;
 - use `qemu-system-x86_64` for amd64 runtime verification;
 - use disposable image copies for destructive storage tests.
+
+## HAL interface approval
+
+`include/hal/hal.h` must not be changed without explicit user approval. General
+Priority execution authorization does not override this interface rule. The
+2026-09-10 user-requested 18 space/pmem renames are explicitly approved and listed
+in [ws025-p036](ws025-io-memory-cache/phase036-hal-space-api/phase.md). Keep any
+other proposed interface changes reviewable and obtain specific approval first.
+
+The user subsequently explicitly approved the complete
+[HAL interface proposal](ws025-io-memory-cache/hal-interface-proposal.md), including
+allocation argument expansion, kernel-range query, PA-capable space query,
+HAL_SPACE_SYS integration and hal_vmap removal/common VM ownership. Do not request
+approval for these again. Any additions outside that proposal still need approval.
+
+The user subsequently directed execution of the discussed HAL fixed-entry
+refactor after pausing I/O performance. This authorizes ws025-p038 fixed syscall/
+user-fault/sys-fault callbacks and removal of their replaced registration APIs.
+Unresolved stack/return layout differences must still be presented as requested.

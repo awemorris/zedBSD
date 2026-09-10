@@ -1,6 +1,6 @@
 # p031 execution results
 
-Status: in-progress, q123. Implementation and acceptance are not complete.
+Status: completed / cleared q188 by user acceptance (2026-09-10). Intermediate progress and failed attempts below are retained as history.
 
 - Corrected the planning generator's graphics path typo to the user's agreed platform/<machine>/graphics tree before moving sources.
 - Saved preimplementation source hashes, configuration and source copies in ../temp/p031-baseline.
@@ -24,3 +24,107 @@ No physical runtime for this patch has been claimed. No commit or aggregate make
 - Thus all 39 selected device runners have passing results, including the three documented rechecks.
 
 The latest coding-style file was already user-modified at entry (modeline/goto prose removed, checklist still references goto). Existing ownership cleanup gotos were preserved rather than mechanically changing lifetimes to satisfy the inconsistent checklist. Ordering exceptions are listed in style-order.tsv. Callback table initializers require their function declarations before the table.
+
+## q188 update (2026-09-10, in progress)
+
+The user clarified that RTL8822B's separate `.inc` is intentional for license
+separation. The attempted inline merge was reverted byte for byte against
+`../temp/q188-layout1/rtl8822b-before.c` and
+`../temp/q188-layout1/rtl8822b-tables-before.inc`. Production driver/table and
+provenance checker have no q188 difference. Phase and source map now preserve
+this exception. The layout.json with 110 files describes only the abandoned
+intermediate merge, not the restored final tree (111 source files).
+
+Retained useful changes: core/provenance runners read current production paths
+without the obsolete section-marker extractor; independent mkfs host compilation
+now includes block-command.c, fat32-format.c and the public block ABI header.
+`../temp/q188-userland2/results.json`: isolated kernel-free build, cflow/cxref
+host operation and standalone install, all three rootfs placements PASS. The
+first attempt's missing mkfs command symbols were a stale test source list.
+
+Three image builds passed (`/tmp/zedbsd-q188-{amd64,pcat,pc98}-build.log`)
+before reverting the table merge. Current actual object lists (not stale .o
+files on disk) exposed 531/364/109 external driver definitions, all drv_, in
+57/36/20 driver objects; `../temp/q188-layout1/*-symbols.json`. Non-x86
+conditional source coverage is not yet proved.
+
+RTL core ordinary/ASan+UBSan/analyzer passed on the intermediate merged source;
+LSan disabled for this run. Provenance test passed on that intermediate source
+with a temporary slicing change, since removed. Do not claim these as a fresh
+post-restoration run. Earlier production behavior was restored without changes.
+Wi-Fi stories 1–36 passed ordinary and sanitized in
+`/tmp/zedbsd-q188-wifi-stories2.log` and
+`/tmp/zedbsd-q188-wifi-sanitize.log`; initial unprivileged run failed because
+local socket creation was denied. Authorized unrestricted run passed.
+
+Remaining: migrate remaining marker-dependent host fixtures (especially FS50
+runner and its merged kernel collaborators), source/conditional style-symbol
+review, reconcile later runtime evidence and verify any uncovered gates. The
+old FS50 runner still references removed io-stats.c and section fragments and
+expects exactly 30 Wi-Fi stories although 36 now exist. p031 is not cleared.
+
+### q188 FS acceptance migration
+
+Current-code FS50 passed: `../../ws018-kernel-architecture/temp/q188-fs-combined/results.json`.
+39 host scenarios (`q188-fs5`) plus 11 native USB scenarios (`q188-native1`)
+cover all S01–S50. Host source.sha256 and native source-image SHA were checked
+against the worktree/image before combining the independent records. Native
+run and verify booted the disposable USB image twice. Its producer was rebuilt
+with the current source using storage-native.mk; ordinary disk-image was also
+rebuilt after restoring the separate RTL tables. No installer fault campaign.
+
+Changes are fixture-only: full FAT/UFS/io translation units replace obsolete
+section fragments; UFS uses its actual journal rather than duplicate abort
+stubs, with the existing deterministic disk-fault medium and host IRQ shim;
+removed single-block FAT API assertions are superseded by the adjacent extent
+checks for contiguous, empty and fragmented files. The syscall fixture still
+executes the exact extracted production functions and current I/O counters;
+only its existing two host pool boundary functions override the merged io.o.
+
+Both ordinary and ASan/UBSan storage groups passed. Host LSan was disabled
+where ptrace prevents it; Wi-Fi ordinary and sanitizer runners passed all 36
+stories in the authorized socket-capable environment. The old assertion
+requiring exactly 30 stories now requires all original 30 and permits the
+six later recovery cases. The 39/50 standalone host result is retained as
+such, not relabeled; the combined result supplies the native missing cases.
+
+AX211 still has the original two source-section markers, unlike the reordered
+UFS/xHCI/input units. Its runners now select only that valid production unit
+when generating disposable test views; extraction checks/hashes are retained.
+Do not generalize the marker removal to every driver. RTL USB runner directly
+includes the current RTL core with its separate licensed table file.
+
+### q188 device-fixture progress
+
+- AX211 ten formerly global-extractor-dependent runners all PASS in
+  `../../ws004-hardware/temp/q188-ax211/results.json`: boot, command, core,
+  DMA, firmware loader, PCI lifecycle, runtime-start, scan-session, transport
+  backend and transport. Each runs its maintained ordinary/sanitizer/analyzer
+  and ABI checks; production AX211 source unchanged.
+- RTL8822BU driver fixture PASS ordinary/ASan+UBSan/analyzer with the restored
+  separate license file: `/tmp/zedbsd-q188-rtl-driver.log`.
+- Dynamic cdev/devfs fixture PASS ordinary/ASan+UBSan/analyzer, including full
+  current input.c analysis: `/tmp/zedbsd-q188-input2.log`. Its new block-admin
+  dependencies are aborting host stubs, not success stubs; these character-
+  device scenarios never execute that unrelated path. Actual block-admin
+  behavior remains covered by WS019 acceptance.
+
+No production function was made extern or otherwise changed for these tests.
+The remaining legacy xHCI/DMA/FS auxiliary runners must still be reviewed
+for stale extraction and source-shape checks, and final platform/style
+coverage reconciled. q188 and p031 remain in progress, not cleared.
+
+## Final disposition
+
+User accepted completion after manual refactor/device review and repaired-test
+smoke acceptance. p031 is cleared; q188 is finished. Earlier remaining-gate
+paragraphs describe interim state and are superseded by this decision.
+
+Historical xHCI/DMA/auxiliary source-shape and extraction-based runners not
+migrated in q188 remain maintenance candidates. Non-x86 and exhaustive style
+rechecks were not performed in this cycle; neither is claimed PASS. These
+items no longer block subsequent WS025 phases under the user's acceptance.
+No new production changes, commits, or aggregate make check were made.
+
+旧テスト群の包括的整理は、ユーザー指示で概要のみ作成した
+[WS026](../../ws026-test-maintenance/ws.md)へ引き継ぐ。p031のclearは維持する。

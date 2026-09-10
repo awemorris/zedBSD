@@ -67,7 +67,7 @@ shell-return marker times out (8/9). Session 21860 ended with exit 1.
 Before termination, bounded read-only QMP commands were atomically sent through
 the verified QEMU stdin pipe; replies with `q137-readonly-*` IDs are retained in
 `paired/qmp.log`. CPU0 is in libc pointer_block with IF clear. Its stack is
-heap_allocator_free <- kern_free <- free_detached_tables <- hal_page_unmap
+heap_allocator_free <- kern_free <- free_detached_tables <- hal_space_unmap
 <- free_vm_page <- vmspace_destroy <- vmspace_reap_pending <- process_reaper.
 Other CPUs are idle with IF enabled. A later attempt to save heap bytes found
 the campaign already exited and wrote no dump. This is evidence of a heap walk

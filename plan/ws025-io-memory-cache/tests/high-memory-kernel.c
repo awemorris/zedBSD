@@ -65,21 +65,25 @@ __wrap_hal_page_unmap(hal_space_t space, void *address, size_t size)
 static void
 probe(uint64_t minimum, uint64_t maximum)
 {
-	struct hal_pmem_request request = {0};
+	hal_physaddr_t request_paddr = 0;
+	size_t request_size = 0;
+	size_t request_alignment = 0;
+	uint32_t request_type = 0;
+	uint32_t request_attr = 0;
 	struct hal_pmem memory = {0};
-	struct hal_memory_stats before;
-	struct hal_memory_stats after;
+	struct hal_pmem_stats before;
+	struct hal_pmem_stats after;
 	volatile uint64_t *words;
 	uint64_t physical;
 	size_t index;
 	int result;
 
-	request.type = HAL_PMEM_TYPE_RAM;
-	request.paddr = HAL_PMEM_PADDR_ANY;
-	request.size = 32768;
-	request.alignment = 65536;
-	hal_memory_get_stats(&before);
-	result = hal_pmem_alloc_range(&request, minimum, maximum, 65536, &memory);
+	request_type = HAL_PMEM_TYPE_RAM;
+	request_paddr = HAL_PMEM_PADDR_ANY;
+	request_size = 32768;
+	request_alignment = 65536;
+	hal_pmem_get_stats(&before);
+	result = hal_pmem_alloc_range(request_paddr, request_size, request_alignment, request_type, request_attr, minimum, maximum, 65536, &memory);
 	if (result == HAL_ERR_NOMEM) {
 		hal_printf("HIGH PROBE unavailable min=%llu\n", (unsigned long long)minimum);
 		return;
@@ -97,7 +101,7 @@ probe(uint64_t minimum, uint64_t maximum)
 	}
 	if (hal_pmem_free(&memory) != HAL_OK)
 		HAL_FATAL("HIGH PROBE free failed");
-	hal_memory_get_stats(&after);
+	hal_pmem_get_stats(&after);
 	if (before.physical_allocated != after.physical_allocated ||
 	    before.physical_free != after.physical_free ||
 	    before.physical_reserved != after.physical_reserved)

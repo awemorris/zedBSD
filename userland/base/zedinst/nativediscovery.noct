@@ -4,11 +4,15 @@ require discovery;
 require nativeplan;
 
 func instNativeCandidates(observed) {
+    return instPhysicalCandidates(observed, true);
+}
+
+func instPhysicalCandidates(observed, native) {
     var source = instDiscoveryOrigins(observed);
     var candidates = [];
     for (disk in observed.devices) {
         if (disk.parent == 0 && disk.offset == 0 && (disk.flags & 9) == 0 &&
-            disk.id != source.disk.id && disk.sectorSize == 512 && disk.sectors > 67) {
+            disk.id != source.disk.id && (!native || disk.sectorSize == 512) && disk.sectors > 67) {
             Array.push(candidates, disk);
         }
     }

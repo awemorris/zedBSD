@@ -91,7 +91,7 @@ int hal_task_exec_current(hal_space_t new_space,uintptr_t entry,uintptr_t user_s
 	running_task->signal_depth=0;
 	hal_memcpy(running_task->fpregs,initial_fpregs,sizeof(initial_fpregs));
 	arm64_fp_restore(running_task->fpregs);
-	hal_page_switch_space(new_space);
+	hal_space_switch(new_space);
 	return 0;
 }
 uintptr_t hal_task_user_stack(void){struct arm64_exception_frame*f=running_task!=NULL?running_task->active_user_frame:NULL;return f!=NULL?(uintptr_t)f->user_sp:0;}
@@ -111,7 +111,7 @@ void hal_task_context_switch(hal_task_t h)
 	if(to->run_cpu>=0)HAL_FATAL("arm64 HAL task already running");
 	from->run_cpu=-1;to->run_cpu=0;
 	arm64_fp_save(from->fpregs);__asm__ volatile("mrs %0,tpidr_el0":"=r"(tls));from->tls=(uintptr_t)tls;
-	running_task=to;hal_page_switch_space(to->space);arm64_fp_restore(to->fpregs);
+	running_task=to;hal_space_switch(to->space);arm64_fp_restore(to->fpregs);
 	__asm__ volatile("msr tpidr_el0,%0"::"r"((uint64_t)to->tls));
 	asm_task_dispatch(&from->resume_sp,&to->resume_sp);
 }

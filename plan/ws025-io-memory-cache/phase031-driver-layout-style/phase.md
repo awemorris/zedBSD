@@ -4,7 +4,7 @@
 
 Phase ID: `ws025-p031`
 
-Status: uncleared; q123 finished。リファクタリング後の最終確認が残る。p033〜p035完了、p032はPC98実機起動回復のため再開。
+Status: completed / cleared q188（2026-09-10ユーザー受け入れ）。q123のuncleared履歴は保持。p032のPC98実機起動問題は別Phaseとして継続。
 
 Parent: [WS025](../ws.md)
 
@@ -150,6 +150,7 @@ src/drivers/
     └── rtl8822b/
         ├── rtl8822b-internal.h
         ├── rtl8822b-security.c
+        ├── rtl8822b-tables.inc
         └── rtl8822b.c
 ```
 
@@ -164,8 +165,9 @@ src/drivers/
   `include/uapi/zedbsd/input.h` の ABI は維持する。
 - `hid-report.c` は `usb/usb-hid.c` へ統合する。parser の外部利用を確認し、
   USB 内部だけであれば static 化と不要な宣言の削除を行う。
-- 全 `src/drivers/**/*.inc` を所有する C に取り込む。DMA vector、FAT batch、
-  UFS、xHCI SG、RTL8822B table を対象とし、定義順・macro 有効範囲・配列内容を維持する。
+- RTL8822B のライセンス分離用 `rtl8822b-tables.inc` を除く
+  `src/drivers/**/*.inc` を所有する C に取り込む。DMA vector、FAT batch、
+  UFS、xHCI SG を対象とし、定義順・macro 有効範囲・配列内容を維持する。
 - `pci-nvme-{io-lifecycle,lifecycle,shutdown-lifecycle}.h` は `pci/pci-nvme.c` に統合する。
   `include/drivers/` の公開 NVMe protocol/API ヘッダまで無条件に消さない。
 - `pci-intel-ax211.c` の接続・登録処理は `wifi/intel-ax211/intel-ax211.c` へ統合する。
@@ -226,12 +228,12 @@ amd64 でリンクされないだけでは削除しない。判断できない�
 
 [coding-style.md](../../coding-style.md) 全体を正とし、特に以下をレビューする。
 
-1. modeline・著作権・説明、tabs/幅8、macro/type/変数/宣言/public/static の順。
+1. 著作権・説明（現行規約では modeline 不要）、tabs/幅8、macro/type/変数/宣言/public/static の順。
 2. 関数定義の改行、static 前方宣言、公開関数と static 関数の説明。
 3. ANSI C の関数先頭宣言、for 内宣言やスコープ限定ブロックの除去。
 4. 意味のまとまりと空行、判断・loop・switch・return の目的コメント。
 5. fallible call の個別評価、短絡順序の維持、明示的なエラー判定と戻り値。
-6. goto の解消は ownership 境界の helper 化などで行い、逆順解放、lock、IRQ 状態、
+6. 現行規約で許容される goto を機械的に除去せず、逆順解放、lock、IRQ 状態、
    refcount、DMA lifetime、volatile/MMIO の評価回数・順序を維持する。
 7. braces、引数改行、オブジェクトごとの初期化、テスト専用環境変数の不使用。
 
@@ -253,7 +255,7 @@ amd64 でリンクされないだけでは削除しない。判断できない�
 
 ## 受け入れと完了条件
 
-- 目標ツリーと移行表を照合し、旧ディレクトリ、全 .inc、統合対象の私有ヘッダ、
+- 目標ツリーと移行表を照合し、旧ディレクトリ、上記例外以外の .inc、統合対象の私有ヘッダ、
   src/drivers 直下の C が残っていない。古いパスの有効なビルド参照がない。
   過去の受け入れログは改竄せず、新しい対応表から追跡する。
 - 全ドライバの外部定義をソース解析と利用可能な機種別 object の symbol 表で照合し、
@@ -288,3 +290,39 @@ amd64 でリンクされないだけでは削除しない。判断できない�
 q123 で実行する。90 active minutes ごとに進捗と証拠を確認する。
 途中終了時は完了済みの単位、失敗箇所、通常 artifact の状態、残条件を残す。
 p031 完了後も p027–p030 はそれぞれの採用条件を満たした範囲で選択する。
+
+## RTL8822B license boundary exception (2026-09-10)
+
+User clarification supersedes the general `.inc` consolidation rule:
+`src/drivers/wifi/rtl8822b/rtl8822b-tables.inc` must remain a separate file
+to preserve the imported tables' BSD-3-Clause license boundary. Do not merge
+it into `rtl8822b.c`. The tree and no-`.inc` acceptance checks explicitly
+allow this file. The q188 attempted merge was reverted byte for byte; the
+core fixture may compile the current driver directly, and the provenance
+fixture must read this separate table file.
+
+## Test migration policy (user clarification, 2026-09-10)
+
+The refactor has already received substantial manual review. Prefer repairing
+stale tests and trusting the current production structure unless concrete
+evidence identifies a production defect. Do not change visibility or undo
+consolidation merely to preserve a fixture's old source boundaries. Restoring
+an external function is permissible when the intended cross-unit API actually
+requires it; first check the real callers and ownership boundary.
+
+## Final acceptance decision (2026-09-10)
+
+The user accepts the manually reviewed refactor and previously verified device
+operation, together with the repaired tests and current smoke checks, as
+sufficient to clear p031. This supersedes the earlier requirement to migrate
+every historical fixture or repeat all device/platform/style checks before
+closing this phase. Remaining historical test migration is maintenance work,
+not a blocker for p028/p030. Do not label unexecuted checks PASS.
+
+Accepted evidence: FS50 (39 host plus 11 native USB two-boot scenarios),
+Wi-Fi36 ordinary/sanitized, ten AX211 runner families, RTL8822BU, dynamic
+cdev/devfs/input, independent mkfs/debug packaging, supported x86 builds
+and 1,004 inspected external driver definitions. See results.md for exact
+artifacts and boundaries. RTL8822B tables remain separately licensed `.inc`.
+No production visibility changes were required. Other phases retain their
+own implementation and acceptance requirements.

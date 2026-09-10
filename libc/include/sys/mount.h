@@ -9,6 +9,7 @@
 #define LIBC_SYS_MOUNT_H
 
 #include <stdint.h>
+#include <zedbsd/unmount.h>
 
 #define MNT_RDONLY 0x00000001U
 #define MNT_NOSUID  0x00000002U

@@ -122,7 +122,7 @@ src/drivers/rpi4-sdhci.c	src/drivers/platform/rpi4/rpi4-sdhci.c
 src/drivers/rpi4-sdhci.h	src/drivers/platform/rpi4/rpi4-sdhci.h
 src/drivers/rtl8822b-internal.h	src/drivers/wifi/rtl8822b/rtl8822b-internal.h
 src/drivers/rtl8822b-security.c	src/drivers/wifi/rtl8822b/rtl8822b-security.c
-src/drivers/rtl8822b-tables.inc	src/drivers/wifi/rtl8822b/rtl8822b.c
+src/drivers/rtl8822b-tables.inc	src/drivers/wifi/rtl8822b/rtl8822b-tables.inc
 src/drivers/rtl8822b.c	src/drivers/wifi/rtl8822b/rtl8822b.c
 src/drivers/sun4u-cmd646.c	src/drivers/platform/sun4u/sun4u-cmd646.c
 src/drivers/sun4u-cmd646.h	src/drivers/platform/sun4u/sun4u-cmd646.h

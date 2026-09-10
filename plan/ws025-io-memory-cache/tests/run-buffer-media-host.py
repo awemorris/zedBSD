@@ -27,6 +27,6 @@ for mode in ('ordinary','sanitize'):
     bridge=str(out/(mode+'-thread.o'))
     run(mode+'-thread',['cc','-O1','-g','-pthread',*extra,'-c','plan/ws018-kernel-architecture/tests/mount-thread-host.c','-o',bridge])
     binary=str(out/mode)
-    run(mode+'-build',['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-DZEDBSD_USER_ABI_LP64','-ffunction-sections','-fdata-sections','-I.','-Iinclude','-Iinclude/uapi','-Isrc','-Ilibc/include','-I'+str(out),*extra,'plan/ws025-io-memory-cache/tests/buffer-media-host.c', 'src/kern/io-stats.c',bridge,'-pthread','-Wl,--gc-sections','-o',binary])
+    run(mode+'-build',['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-DZEDBSD_USER_ABI_LP64','-ffunction-sections','-fdata-sections','-I.','-Iinclude','-Iinclude/uapi','-Isrc','-Ilibc/include','-I'+str(out),*extra,'plan/ws025-io-memory-cache/tests/buffer-media-host.c', 'src/kern/io.c',bridge,'-pthread','-Wl,--gc-sections','-o',binary])
     run(mode,['timeout','60s',binary])
 print('WS025 buffer run gates PASS')

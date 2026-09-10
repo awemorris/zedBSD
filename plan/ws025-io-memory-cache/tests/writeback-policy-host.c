@@ -28,6 +28,8 @@ static struct writeback_budget *owners[6];
 static uint64_t dirty[6];
 static unsigned sync_calls[6],sync_fail[6],block_first;
 static int off_result;
+int disk_media_status(const struct disk *disk)
+{ return disk == NULL || disk->d_media_revoked ? ENXIO : 0; }
 static unsigned ready[4];
 static __thread int worker_index=-1;
 
@@ -76,10 +78,12 @@ static void run_worker(void *argument)
 { unsigned index=(unsigned)(uintptr_t)argument;worker_index=(int)index;entries[index](arguments[index]); }
 void thread_start(struct thread *thread)
 { unsigned index=(unsigned)(thread-thread_records);threads[index]=host_thread_start(run_worker,(void *)(uintptr_t)index); }
-int hal_pmem_alloc(const struct hal_pmem_request *request,struct hal_pmem *memory)
+int hal_pmem_alloc(hal_physaddr_t request_paddr, size_t request_size, size_t request_alignment, uint32_t request_type, uint32_t request_attr,struct hal_pmem *memory)
 {
+	(void)request_paddr; (void)request_alignment; (void)request_type; (void)request_attr;
+
  memset(memory,0,sizeof(*memory));if(allocation_fail)return HAL_ERR_NOMEM;
- memory->size=(request->size+4095)&~(size_t)4095;
+ memory->size=(request_size+4095)&~(size_t)4095;
  memory->vaddr=aligned_alloc(4096,memory->size);CHECK(memory->vaddr!=NULL);allocations++;return HAL_OK;
 }
 int hal_pmem_free(struct hal_pmem *memory)
@@ -94,7 +98,7 @@ void cache_memory_get_stats(struct cache_memory_stats *stats)
 { memset(stats,0,sizeof(*stats));stats->target_bytes=64U*1024U*1024U; }
 void disk_ref(struct disk *disk) { refcount_get(&disk->d_refs); }
 void disk_release(struct disk *disk) { CHECK(!refcount_put(&disk->d_refs)); }
-int writeback_domain_acquire(struct disk *disk,struct disk **leaf)
+int disk_cache_acquire(struct disk *disk,struct disk **leaf)
 { disk_ref(disk);__atomic_add_fetch(&disk->d_cache_users,1,__ATOMIC_RELAXED);*leaf=disk;return 0; }
 void disk_cache_release(struct disk *disk)
 { CHECK(__atomic_fetch_sub(&disk->d_cache_users,1,__ATOMIC_RELAXED)>0);disk_release(disk); }
@@ -197,6 +201,17 @@ int main(void)
 
  /* A reversible unmount drains but retains policy and refuses competing controls. */
  commit_dirty(0);sync_fail[0]=1;
+ CHECK(writeback_unmount_begin_revoked(NULL,&unmount)==EINVAL);
+ CHECK(writeback_unmount_begin_revoked(&mounts[0],&unmount)==EINVAL);
+ disks[0].d_media_revoked=1;before=sync_calls[0];
+ CHECK(writeback_unmount_begin_revoked(&mounts[0],&unmount)==0);
+ CHECK(dirty[0]==4096 && sync_calls[0]==before && unmount.mount==&mounts[0]);
+ CHECK(!writeback_mount_active(&mounts[0]) && writeback_mount_active(&mounts[1]));
+ CHECK(writeback_unmount_begin_revoked(&mounts[5],&other)==EBUSY && other.mount==NULL);
+ CHECK(writeback_mount_admit(&mounts[0],&ticket)==EAGAIN);
+ writeback_unmount_finish(&unmount,0);
+ CHECK(unmount.mount==NULL && dirty[0]==4096 && writeback_mount_active(&mounts[0]));
+ disks[0].d_media_revoked=0; /* Reset the host-only eligibility fixture. */
  CHECK(writeback_unmount_begin(&mounts[0],&unmount)==EIO);
  CHECK(unmount.mount==NULL&&dirty[0]==4096);sync_fail[0]=0;
  CHECK(writeback_unmount_begin(&mounts[0],&unmount)==0&&dirty[0]==0);
@@ -303,4 +318,4 @@ int main(void)
  return 0;
 }
 
-size_t hal_page_get_page_size(int level) { (void)level;return 4096; }
+size_t hal_space_get_page_size(int level) { (void)level;return 4096; }

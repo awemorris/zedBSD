@@ -3,6 +3,7 @@
 #include "include/uefi.h"
 #include "elf64.h"
 #include "framebuffer.h"
+#include "video.h"
 #include "memory-map.h"
 #include "volume-discovery.h"
 #include "zedbsd-config.h"
@@ -1025,6 +1026,18 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 	    &configuration);
 	if (EFI_ERROR(status))
 		fail_discovered(&context, &discovered, "Load zedbsd.cfg", status);
+
+	/* Applies the optional display request before retaining framebuffer addresses. */
+	status = zbl_uefi_video_select(boot, gop,
+	    configuration.parameter_record.text,
+	    configuration.parameter_record.length);
+	if (EFI_ERROR(status))
+		fail_discovered(&context, &discovered, "Select configured video mode", status);
+
+	/* SetMode can replace the framebuffer base, size, stride, and pixel format. */
+	if (!framebuffer_from_gop(gop, &framebuffer, &framebuffer_mapping))
+		fail_discovered(&context, &discovered, "Validate selected GOP", EFI_UNSUPPORTED);
+
 	if (!kernel_path_utf16(configuration.kernel_path, kernel_file_path))
 		fail_discovered(&context, &discovered,
 		    "Prepare kernel path", EFI_INVALID_PARAMETER);

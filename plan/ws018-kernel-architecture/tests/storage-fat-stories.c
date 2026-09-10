@@ -71,8 +71,10 @@ int disk_buffer_acquire(struct disk *disk)
 void disk_buffer_release(struct disk *disk)
 { CHECK(disk->d_buffer_refs);disk->d_buffer_refs--; }
 struct thread *thread_current(void) { return NULL; }
-int hal_pmem_alloc(const struct hal_pmem_request *r, struct hal_pmem *m)
-{ memset(m, 0, sizeof(*m)); m->size = r->size; m->vaddr = aligned_alloc(4096, r->size); return m->vaddr ? HAL_OK : HAL_ERR_NOMEM; }
+int hal_pmem_alloc(hal_physaddr_t r_paddr, size_t r_size, size_t r_alignment, uint32_t r_type, uint32_t r_attr, struct hal_pmem *m)
+{
+	(void)r_paddr; (void)r_alignment; (void)r_type; (void)r_attr;
+ memset(m, 0, sizeof(*m)); m->size = r_size; m->vaddr = aligned_alloc(4096, r_size); return m->vaddr ? HAL_OK : HAL_ERR_NOMEM; }
 int hal_pmem_free(struct hal_pmem *m) { free(m->vaddr); return HAL_OK; }
 size_t hal_pmem_get_total_size(void) { return 64U * 1024U * 1024U; }
 void waitq_init(struct wait_queue *q, const char *name) { (void)name; memset(q, 0, sizeof(*q)); }

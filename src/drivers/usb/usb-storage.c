@@ -1626,7 +1626,12 @@ storage_refresh_partitions(
 	 */
 
 	/* Checks the operation status. */
+	/* Reload requires exactly one administrative open, outside command lock. */
+	error = disk_open(storage->disk);
+	if (error != 0)
+		return error;
 	error = partition_reload(storage->disk);
+	disk_close(storage->disk);
 	if (error == 0 || error == EINVAL || error == EOPNOTSUPP)
 		storage->partitions_pending = 0;
 

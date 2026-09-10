@@ -1,104 +1,110 @@
-/* Real vmap owner with deterministic allocation/table/retirement boundaries. */
-#include <hal/hal.h>
+/* Common VM mapping owner, with controlled generic HAL boundaries. */
+#include <kern/vm-kernel-map.h>
 #include <kern/io-scratch.h>
-#include "src/hal/amd64/defs.h"
-#include "src/hal/amd64/space.h"
+#include <kern/lock.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
+#include <limits.h>
 #include <pthread.h>
-#define CHECK(x) do {checks++;if(!(x)){fprintf(stderr,"vmap:%u: %s\n",__LINE__,#x);abort();}}while(0)
-static unsigned checks,allocations,live,allocation_failure,walks,walk_failure,flushes,freed_after;
-static int ram_active=1,ram_builder;
-static uint64_t system_pml4[512],leaves[128*64];
-static pthread_mutex_t table_lock=PTHREAD_MUTEX_INITIALIZER;
-static bool space_lock_enter(struct amd64_space *space)
-{ (void)space;CHECK(pthread_mutex_lock(&table_lock)==0);return 1; }
-static void space_lock_leave(struct amd64_space *space,bool enabled)
-{ (void)space;(void)enabled;CHECK(pthread_mutex_unlock(&table_lock)==0); }
-void *hal_memset(void *p,int byte,size_t n) { return memset(p,byte,n); }
-int hal_pmem_alloc_range(const struct hal_pmem_request *request,uint64_t low,uint64_t high,uint64_t boundary,struct hal_pmem *memory)
+#define PAGE_SIZE 4096U
+#define BASE ((uintptr_t)0x40000000)
+#define CHECK(x) do { if(!(x)){fprintf(stderr,"map:%d %s\n",__LINE__,#x);abort();} } while(0)
+static pthread_mutex_t mutex=PTHREAD_MUTEX_INITIALIZER;
+static unsigned locked,live,allocations,map_calls,fail_alloc,fail_map,unmaps,supported=1;
+static unsigned contiguous;
+static hal_physaddr_t entries[8192];
+static unsigned attributes[8192];
+unsigned long spin_lock_irqsave(struct spinlock *l) {(void)l;CHECK(!pthread_mutex_lock(&mutex));locked=1;return 0;}
+void spin_unlock_irqrestore(struct spinlock *l,unsigned long irq) {(void)l;(void)irq;locked=0;CHECK(!pthread_mutex_unlock(&mutex));}
+void hal_fatal(const char *f,int l,const char *m) {fprintf(stderr,"%s:%d %s\n",f,l,m);abort();}
+void __attribute__((weak)) hal_space_get_kernel_range(uintptr_t *lo,uintptr_t *hi) {*lo=supported?BASE:0;*hi=supported?BASE+8192*4096:0;}
+size_t hal_space_get_page_size(int level) {return level==1?4096:0;}
+int hal_pmem_alloc(hal_physaddr_t pa,size_t size,size_t alignment,uint32_t type,uint32_t attr,struct hal_pmem *m)
+{(void)pa;(void)size;(void)alignment;(void)type;(void)attr;(void)m;return HAL_ERR_NOMEM;}
+int hal_pmem_alloc_range(hal_physaddr_t pa,size_t size,size_t alignment,uint32_t type,uint32_t attr,uint64_t lo,uint64_t hi,uint64_t boundary,struct hal_pmem *m)
 {
- (void)boundary;allocations++;
- if(allocations==allocation_failure)return HAL_ERR_NOMEM;
- CHECK(request->size==4096);memory->paddr=UINT64_C(0x100000000)+(uint64_t)allocations*8192;
- CHECK(memory->paddr>=low && memory->paddr+4095<=high);
- memory->vaddr=malloc(4096);CHECK(memory->vaddr);memory->size=4096;live++;return HAL_OK;
+ CHECK(!locked && pa==HAL_PMEM_PADDR_ANY && size==4096 && alignment==4096 && type==HAL_PMEM_TYPE_RAM && !attr && !boundary);
+ if(++allocations==fail_alloc)return HAL_ERR_NOMEM;
+ m->paddr=UINT64_C(0x100000000)+allocations*(contiguous?4096:8192);CHECK(m->paddr>=lo && m->paddr+4095<=hi);
+ m->vaddr=malloc(4096);CHECK(m->vaddr);m->size=4096;m->type=type;m->attr=0;live++;return HAL_OK;
 }
-int hal_pmem_free(struct hal_pmem *memory)
-{ CHECK(live>0);if(memory->paddr>UINT32_MAX)CHECK(flushes>freed_after);live--;free(memory->vaddr);memset(memory,0,sizeof(*memory));return HAL_OK; }
-static int contiguous_fail=1;
-size_t hal_page_get_page_size(int level) { (void)level;return 4096; }
-int hal_pmem_alloc(const struct hal_pmem_request *request,struct hal_pmem *memory)
+int hal_pmem_free(struct hal_pmem *m)
 {
- if(contiguous_fail)return HAL_ERR_NOMEM;
- memory->paddr=4096;memory->size=request->size;memory->vaddr=malloc(request->size);
- CHECK(memory->vaddr);live++;return HAL_OK;
+ unsigned i;CHECK(!locked && live);
+ for(i=0;i<8192;i++)CHECK(entries[i]!=m->paddr);
+ live--;free(m->vaddr);memset(m,0,sizeof(*m));return HAL_OK;
 }
-static int amd64_ram_lookup(void *builder,uint64_t physical,uint64_t *entry)
-{ (void)builder;CHECK(physical>=UINT64_C(0x100000000));*entry=AMD64_PTE_PRESENT|AMD64_PTE_WRITE;return 1; }
-static uint64_t *walk_leaf(struct amd64_space *space,uintptr_t address,int create)
+int hal_space_map(hal_space_t s,void *v,hal_physaddr_t p,size_t size,uint32_t attr)
 {
- size_t index=(address-UINT64_C(0xffffc00000000000))/4096;(void)space;
- CHECK(index<128*64);if(create && ++walks==walk_failure)return NULL;return &leaves[index];
+ size_t i=((uintptr_t)v-BASE)/4096,n;CHECK(!locked && s==HAL_SPACE_SYS && size && size%4096==0 && i+size/4096<=8192);
+ for(n=0;n<size/4096;n++)CHECK(!entries[i+n]);
+ if(++map_calls==fail_map)return HAL_ERR_NOMEM;
+ if(p%4096)return HAL_ERR_INVALID;
+ for(n=0;n<size/4096;n++){entries[i+n]=p+n*4096;attributes[i+n]=attr;}return HAL_OK;
 }
-static struct amd64_table_page *detach_empty_tables(struct amd64_space *space)
-{ (void)space;return NULL; }
-static void free_detached_tables(struct amd64_table_page *page) { CHECK(page==NULL); }
-static void shootdown(hal_space_t space,void *address,size_t size)
-{ (void)address;(void)size;CHECK(space==HAL_SPACE_SYS);flushes++; }
-uintptr_t amd64_image_to_phys(const void *p) { (void)p;return UINTPTR_MAX; }
-uintptr_t amd64_direct_to_phys(const void *p) { (void)p;return UINTPTR_MAX; }
-void hal_fatal(const char *file,int line,const char *message)
-{ fprintf(stderr,"fatal %s:%d %s\n",file,line,message);abort(); }
-#include "src/hal/amd64/space-vmap.inc"
+int hal_space_unmap(hal_space_t s,void *v,size_t size)
+{
+ size_t i=((uintptr_t)v-BASE)/4096,n;CHECK(!locked && s==HAL_SPACE_SYS && size%4096==0 && i+size/4096<=8192);
+ for(n=0;n<size/4096;n++)entries[i+n]=attributes[i+n]=0;
+ unmaps++;return HAL_OK;
+}
+
 int main(void)
 {
- struct hal_vmap *map,*slots[128];void *address;hal_physaddr_t physical,previous;
- struct io_scratch scratch;void *extra;unsigned i,j,before;
- CHECK(hal_vmap_reserve(0,&map)==HAL_ERR_INVALID);
- CHECK(hal_vmap_reserve(65537,&map)==HAL_ERR_INVALID);
- CHECK(hal_vmap_reserve(1,&map)==HAL_ERR_INVALID);
- ram_active=0;CHECK(hal_vmap_reserve(4096,&map)==HAL_ERR_UNSUPPORTED);ram_active=1;
- for(i=0;i<128;i++)CHECK(hal_vmap_reserve(65536,&slots[i])==HAL_OK);
- CHECK(live==0 && allocations==0 && walks==0);
- CHECK(hal_vmap_reserve(4096,&map)==HAL_ERR_NOMEM);
- for(i=0;i<128;i++)CHECK(hal_vmap_release(slots[i])==HAL_OK);
- for(i=1;i<=33;i++) {
-  CHECK(hal_vmap_reserve(65536,&map)==HAL_OK);freed_after=flushes;
-  if(i<=16)allocation_failure=allocations+i;
-  else if(i<=32)walk_failure=walks+i-16;
-  before=flushes;
-  CHECK(hal_vmap_populate(map,UINT64_C(0x100000000),UINT64_MAX)==(i==33?HAL_OK:HAL_ERR_NOMEM));
-  CHECK(flushes>before);allocation_failure=walk_failure=0;
-  if(i!=33){CHECK(live==0);CHECK(hal_vmap_populate(map,UINT64_C(0x100000000),UINT64_MAX)==HAL_OK);}
-  CHECK(live==16);CHECK(hal_vmap_pin(map,&address)==HAL_OK);
-  CHECK(hal_vmap_release(map)==HAL_ERR_BUSY);
-  previous=0;
-  for(j=0;j<16;j++){
-   CHECK(hal_kernel_page_lookup((char *)address+j*4096+31,&physical)==HAL_OK);
-   CHECK(physical>UINT32_MAX && physical!=previous+4096);previous=physical;
-   CHECK((leaves[((uintptr_t)address-VMAP_BASE)/4096+j]&AMD64_PTE_USER)==0);
-   CHECK(leaves[((uintptr_t)address-VMAP_BASE)/4096+j]&AMD64_PTE_NX);
-  }
-  CHECK(hal_kernel_page_lookup((char *)address+65536,&physical)==HAL_ERR_INVALID);
-  hal_vmap_unpin(map);freed_after=flushes;CHECK(hal_vmap_release(map)==HAL_OK);
-  CHECK(live==0);CHECK(hal_kernel_page_lookup(address,&physical)==HAL_ERR_INVALID);
+ struct vm_kernel_map *m,*slots[128];struct io_scratch scratch;
+ hal_physaddr_t pages[16];void *address;unsigned i,j,before;
+ supported=0;CHECK(vm_kernel_map_reserve(65536,&m)==HAL_ERR_UNSUPPORTED);supported=1;
+ for(i=0;i<16;i++)pages[i]=UINT64_C(0x200000000)+i*8192;
+ for(i=1;i<=16;i++) {
+  CHECK(vm_kernel_map_reserve(65536,&m)==HAL_OK);fail_alloc=allocations+i;
+  CHECK(vm_kernel_map_populate(m,0,UINT64_MAX)==HAL_ERR_NOMEM && !live);
+  fail_alloc=0;CHECK(vm_kernel_map_release(m)==HAL_OK);
+  CHECK(vm_kernel_map_reserve(65536,&m)==HAL_OK);fail_map=map_calls+i;
+  CHECK(vm_kernel_map_populate(m,0,UINT64_MAX)==HAL_ERR_NOMEM && !live);
+  fail_map=0;CHECK(vm_kernel_map_release(m)==HAL_OK);
+  CHECK(vm_kernel_map_reserve(65536,&m)==HAL_OK);before=allocations;fail_map=map_calls+i;
+  CHECK(vm_kernel_map_borrow(m,pages,16,0)==HAL_ERR_NOMEM && allocations==before && !live);
+  fail_map=0;CHECK(vm_kernel_map_borrow(m,pages,16,0)==HAL_OK);
+  CHECK(vm_kernel_map_pin(m,&address)==HAL_OK);
+  for(j=0;j<16;j++)CHECK(entries[((uintptr_t)address-BASE)/4096+j]==pages[j] && attributes[((uintptr_t)address-BASE)/4096+j]==HAL_SPACE_READ);
+  CHECK(vm_kernel_map_release(m)==HAL_ERR_BUSY);vm_kernel_map_unpin(m);CHECK(vm_kernel_map_release(m)==HAL_OK);
  }
- /* Scratch owner keeps a pin until drain, and restores it on busy release. */
- CHECK(io_scratch_alloc(4096,0,&scratch)==HAL_ERR_NOMEM);
- contiguous_fail=0;CHECK(io_scratch_alloc(4097,0,&scratch)==HAL_OK);
- CHECK(scratch.size==8192 && scratch.mapping==NULL);
- CHECK(io_scratch_free(&scratch)==HAL_OK && live==0);contiguous_fail=1;
- CHECK(io_scratch_alloc(65536+4096,1,&scratch)==HAL_OK);
- CHECK(scratch.size==69632 && scratch.mapping!=NULL && scratch.physical.size==0);
- CHECK(hal_vmap_pin(scratch.mapping,&extra)==HAL_OK);
- CHECK(io_scratch_free(&scratch)==HAL_ERR_BUSY && scratch.vaddr==extra);
- hal_vmap_unpin(scratch.mapping);freed_after=flushes;
- CHECK(io_scratch_free(&scratch)==HAL_OK && live==0 && scratch.size==0);
- allocation_failure=allocations+3;freed_after=flushes;
- CHECK(io_scratch_alloc(65536,1,&scratch)==HAL_ERR_NOMEM && live==0);
- allocation_failure=0;
- printf("vmap reservation/vector/failure/pin/retirement: PASS (%u checks)\n",checks);
- return 0;
+ CHECK(vm_kernel_map_reserve(65536,&m)==HAL_OK);
+ CHECK(vm_kernel_map_borrow(m,NULL,16,1)==HAL_ERR_INVALID);
+ CHECK(vm_kernel_map_borrow(m,pages,15,1)==HAL_ERR_INVALID);
+ CHECK(vm_kernel_map_borrow(m,pages,16,2)==HAL_ERR_INVALID);
+ pages[5]++;CHECK(vm_kernel_map_borrow(m,pages,16,1)==HAL_ERR_INVALID);pages[5]--;
+ CHECK(vm_kernel_map_borrow(m,pages,16,1)==HAL_OK);
+ CHECK(vm_kernel_map_pin(m,&address)==HAL_OK && (attributes[((uintptr_t)address-BASE)/4096]&HAL_SPACE_WRITE));
+ vm_kernel_map_unpin(m);CHECK(vm_kernel_map_release(m)==HAL_OK);
+ /* One contiguous owned vector publishes through one HAL call. */
+ contiguous=1;before=map_calls;
+ CHECK(vm_kernel_map_reserve(65536,&m)==HAL_OK);
+ CHECK(vm_kernel_map_populate(m,0,UINT64_MAX)==HAL_OK && map_calls==before+1);
+ CHECK(vm_kernel_map_release(m)==HAL_OK && !live);contiguous=0;
+ /* Borrowed contiguous pages retain one call and exact PA translations. */
+ for(i=0;i<16;i++)pages[i]=UINT64_C(0x200000000)+i*4096;
+ CHECK(vm_kernel_map_reserve(65536,&m)==HAL_OK);before=map_calls;
+ CHECK(vm_kernel_map_borrow(m,pages,16,0)==HAL_OK && map_calls==before+1);
+ CHECK(vm_kernel_map_pin(m,&address)==HAL_OK);
+ for(j=0;j<16;j++)CHECK(entries[((uintptr_t)address-BASE)/4096+j]==pages[j]);
+ vm_kernel_map_unpin(m);CHECK(vm_kernel_map_release(m)==HAL_OK);
+ /* A repeated physical run must not be merged; later failure retires prefix. */
+ for(i=8;i<16;i++)pages[i]=pages[i-8];
+ CHECK(vm_kernel_map_reserve(65536,&m)==HAL_OK);fail_map=map_calls+2;
+ CHECK(vm_kernel_map_borrow(m,pages,16,1)==HAL_ERR_NOMEM);
+ for(j=0;j<8192;j++)CHECK(!entries[j]);
+ fail_map=0;before=map_calls;
+ CHECK(vm_kernel_map_borrow(m,pages,16,1)==HAL_OK && map_calls==before+2);
+ CHECK(vm_kernel_map_release(m)==HAL_OK);
+ for(i=0;i<128;i++)CHECK(vm_kernel_map_reserve(4096,&slots[i])==HAL_OK);
+ CHECK(vm_kernel_map_reserve(4096,&m)==HAL_ERR_NOMEM);
+ for(i=0;i<128;i++)CHECK(vm_kernel_map_release(slots[i])==HAL_OK);
+ CHECK(io_scratch_alloc(65536,1,&scratch)==HAL_OK && live==16);
+ CHECK(io_scratch_free(&scratch)==HAL_OK && !live);
+ for(i=0;i<8192;i++)CHECK(!entries[i]);
+ CHECK(unmaps>0 && !locked);
+ puts("PASS common kernel map: allocation/map failure, borrowed ownership, pins, slots, scratch");
 }

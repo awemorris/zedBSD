@@ -12,7 +12,7 @@ import time
 REPO = Path(__file__).resolve().parents[3]
 
 class Guest:
-    def __init__(self, directory, disk):
+    def __init__(self, directory, disk, extra_disks=(), memory="64M"):
         self.directory = directory
         directory.mkdir()
         self.deadline = time.monotonic() + 240
@@ -24,10 +24,11 @@ class Guest:
         self.proc = subprocess.Popen([
             str(REPO / "build/qemu-pc98/build/qemu-system-i386"),
             "-M", "pc9821,pegc=off,coregraph=on", "-cpu", "486",
-            "-smp", "1", "-m", "64M", "-display", "none", "-serial", "none",
+            "-smp", "1", "-m", memory, "-display", "none", "-serial", "none",
             "-no-reboot", "-drive", f"if=ide,format=raw,file={disk}",
             "-debugcon", f"file:{directory}/debugcon.log",
-            "-monitor", f"unix:{monitor},server=on,wait=off"],
+            "-monitor", f"unix:{monitor},server=on,wait=off"] + [argument for extra in extra_disks
+                for argument in ("-drive", f"if=ide,format=raw,file={extra}")],
             stdout=self.output, stderr=subprocess.STDOUT)
         self.socket = socket.socket(socket.AF_UNIX)
         for _ in range(100):

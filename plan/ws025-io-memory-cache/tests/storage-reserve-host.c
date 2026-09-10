@@ -155,7 +155,11 @@ CHECK(s->media_state==STORAGE_FAILED&&s->disk->d_media_revoked&&inject_read_ua==
  publish_error=0;partition_reload_error=EBUSY;data_commands=partition_reload_calls;
  CHECK(storage_control_step(s)==EBUSY && s->media_state==STORAGE_ONLINE && s->disk->d_dev!=i);
  CHECK(s->partitions_pending && partition_reload_calls==data_commands+1);
- partition_reload_error=0;
+ CHECK(s->disk->d_open_count==0);
+ partition_open_error=EBUSY;
+ CHECK(storage_control_step(s)==EBUSY && s->partitions_pending && s->disk->d_open_count==0);
+ CHECK(partition_reload_calls==data_commands+1);
+ partition_open_error=0;partition_reload_error=0;
  CHECK(storage_control_step(s)==0 && !s->partitions_pending && partition_reload_calls==data_commands+2);
  CHECK(s->flush_error==0 && live_urbs==3);
  device_disconnected=1;data_commands=wire_commands;

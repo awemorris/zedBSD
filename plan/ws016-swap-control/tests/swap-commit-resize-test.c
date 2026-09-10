@@ -30,7 +30,7 @@ spin_unlock_irqrestore(struct spinlock *lock, unsigned long enabled)
 }
 
 void
-hal_memory_get_stats(struct hal_memory_stats *stats)
+hal_pmem_get_stats(struct hal_pmem_stats *stats)
 {
 	memset(stats, 0, sizeof(*stats));
 	stats->physical_free =

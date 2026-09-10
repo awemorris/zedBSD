@@ -52,6 +52,8 @@ struct writeback_unmount {
 	void *worker;
 };
 int writeback_unmount_begin(struct mount *mount, struct writeback_unmount *token);
+/* Explicit lost-media boundary: caller must dispose dirty owners before commit. */
+int writeback_unmount_begin_revoked(struct mount *mount, struct writeback_unmount *token);
 void writeback_unmount_finish(struct writeback_unmount *token, int committed);
 int writeback_shutdown_begin(void);
 void writeback_shutdown_finish(int committed);

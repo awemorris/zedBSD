@@ -101,6 +101,7 @@ static int worker_dispose(struct writeback_worker *worker);
 static int policy_enable(struct mount *mount);
 static int policy_disable(struct mount *mount);
 static int worker_pause(struct writeback_worker *worker);
+static int unmount_begin(struct mount *, struct writeback_unmount *, int);
 static unsigned worker_siblings(struct writeback_mount_policy *policy);
 static void worker_run(void *argument);
 static void worker_restore(struct writeback_worker *worker);
@@ -736,12 +737,33 @@ writeback_unmount_begin(
 	struct mount *mount,
 	struct writeback_unmount *token)
 {
+	return unmount_begin(mount, token, 0);
+}
+
+/* Pauses owners of an irrevocably lost medium without pretending to flush it. */
+int
+writeback_unmount_begin_revoked(
+	struct mount *mount,
+	struct writeback_unmount *token)
+{
+	return unmount_begin(mount, token, 1);
+}
+
+/* Caller retains mount/disk identity throughout this reversible boundary. */
+static int
+unmount_begin(
+	struct mount *mount,
+	struct writeback_unmount *token,
+	int revoked)
+{
 	struct writeback_mount_policy *policy;
 	struct writeback_worker *worker;
 	int error;
 
 	/* Leaves an inactive token for mounts that have never enabled writeback. */
 	if (mount == NULL || token == NULL || token->mount != NULL || token->worker != NULL)
+		return EINVAL;
+	if (revoked && (mount->m_disk == NULL || disk_media_status(mount->m_disk) == 0))
 		return EINVAL;
 	if (atomic_load_acquire(&policy_initialized) != 2)
 		return 0;
@@ -771,7 +793,12 @@ writeback_unmount_begin(
 		return error;
 	}
 
-	error = worker_sync_mount(mount, worker->memory.vaddr);
+	if (revoked) {
+		/* No replacement of the retained media identity is allowed while paused. */
+		error = mount->m_disk != NULL && disk_media_status(mount->m_disk) != 0 ? 0 : EINVAL;
+	} else {
+		error = worker_sync_mount(mount, worker->memory.vaddr);
+	}
 	if (error != 0) {
 		worker_restore(worker);
 		mutex_unlock(&policy_control);
@@ -1193,7 +1220,7 @@ worker_prepare(struct writeback_worker *worker)
 
 	if (worker->memory.size == 0) {
 		memset(&memory, 0, sizeof(memory));
-		error = io_scratch_alloc(WB_MEMORY, 1, &memory);
+		error = io_scratch_alloc(WB_MEMORY, &memory);
 		if (error != HAL_OK || memory.vaddr == NULL || memory.size < WB_MEMORY) {
 			if (memory.size != 0 && io_scratch_free(&memory) != HAL_OK)
 				HAL_FATAL("writeback allocation rollback failed");

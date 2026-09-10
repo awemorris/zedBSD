@@ -9,12 +9,12 @@ Status: active
 
 ## 現在地
 
-- [q181](queue-q181.md)で初期化前の容量・inode数確認を実装。[q180](queue-q180.md)でUSBなしのnative UFS起動・swap・異常設定時の回復・haltを確認済み。次は[WS019-p049](ws019-installation/phase049-native-installer-integration/phase.md)で実インストーラのモード選択から公開まで統合し、その後BeUI版p029へ進む。詳細は[WS019](ws019-installation/ws.md)を参照。
+- [q184](queue-q184.md)でamd64のテキスト／グラフィカルインストーラを受け入れ完了。正常系を完了基準とするユーザー判断でp029をcleared。追加の[WS019-p050](ws019-installation/phase050-pc98-graphic-fat/phase.md)もq186で完了。PC98・IDE HDD 2台でグラフィカルFATインストール後、ターゲット単独起動・rootログインを確認。GPT/nativeは対象外。
 
-- WS025の必須p001〜p026とWS024は完了。p031の最終リファクタリング確認は未クリア。p032は現行PC98バイナリの実機不動作というユーザー報告で再開。過去のQEMU合格は維持する。
+- WS025の必須p001〜p026とWS024は完了。p031はq188で手動レビュー・既存デバイス動作・修復テストのユーザー受け入れにより完了。p032は現行PC98バイナリの実機不動作というユーザー報告で再開。過去のQEMU合格は維持する。
 - WS011のcommit confirmedはユーザー確認により完了。追加の実機受け入れ待ちは解除。
 - Priority全件の自走をユーザー承認済み。進められないPhaseはunclearedとし、次の実行可能なWSへ進む。
-- WS025-p027はq139で完了、p028〜p030は未完了。実機不要の実装とQEMU検証を継続対象とする。QEMUにusb-uasがあり、利用不能と確認した場合のみUASをFutureへ移す。WS006はq147、WS022はq128で完了、WS019はNoctインストーラ実装が残る。
+- WS025-p027はq139で完了、p029はq230で完了、p028/p030は未完了。実機不要の実装とQEMU検証を継続対象とする。QEMUにusb-uasがあり、利用不能と確認した場合のみUASをFutureへ移す。WS006はq147、WS022はq128で完了、WS019はamd64と追加のPC98 FAT対応まで完了。
 
 ## Priority
 
@@ -22,17 +22,17 @@ Status: active
 
 | 順位 | 対象 | 次に行う内容 |
 | --- | --- | --- |
-| 1 | [WS025](ws025-io-memory-cache/ws.md) p027〜p030、再開p032 | 直接I/O、QEMU UAS、IMOD計測の残件とPC98実機起動回復。p029はQEMU動作受け入れで完了可、p032は実機確認を要する。実機観測待ちでは独立作業を進める。 |
+| 1 | [WS025](ws025-io-memory-cache/ws.md) p027〜p030、再開p032 | p027/p029とHAL共通化p037完了。p028は専門家レビュー待ちで性能作業を保留、既定無効。ユーザー指示で[HAL固定入口p038](ws025-io-memory-cache/phase038-hal-fixed-entry/phase.md)を優先。固定入口移行・amd64/i386実例外テスト済み、SPARC初回フレーム方針は確認待ち（入力CPU 2.82秒/3.21秒、出力0.86秒/0.96秒：無効/有効、q291カーソル出力。q287の間欠的login/exec ENOSPCは未解決）。[直接I/O結果](ws025-io-memory-cache/phase028-direct-user-io/results.md)。p030はUSB2/3の3設定比較済み、[残る実機/WLAN・回復比較](ws025-io-memory-cache/phase030-imod-measurement/remaining-evidence.md)を継続。p032はPC98実機起動の観測待ち。 |
 | 2 | [WS006](ws006-input/ws.md) | 完了（q147）。旧consoleイベントUAPI撤去、paired USB修正とXzed/Noct/BeUI受け入れ。 |
 | 3 | [WS022](ws022-elf-tls/ws.md) | 完了（q128）。ELF TLS/TCB、exec、pthread、両x86受け入れ。 |
-| 4 | [WS019](ws019-installation/ws.md) | 共存経路p004/p005、元選択p027・属性付きコピーp028・GPT処理p030完了。p006/p007の排他保護・フォーマット・native UFS root・UFSファイルswapを実装し、QEMUで両モードを受け入れる。その後p029グラフィカル版。 |
+| 4 | [WS019](ws019-installation/ws.md) | 共存経路p004/p005、元選択p027・属P性付きコピーp028・GPT処理p030完了。p006/p049で両モードの実インストールを受け入れ済み。p007のUFSスワップ負荷・断片化も受け入れ済み。p029も完了。追加p050のPC98グラフィカルFATインストールとターゲット単独ログインもq186で完了。 |
 | 5 | [WS002](ws002-services/ws.md) | 完了。p021は現行試験合格とユーザー判断でcleared。過去の未再現事象はBUG-012に保持。 |
-| 6 | [WS009](ws009-documentation/ws.md) | 未完了の設計・UAPI・起動・インストール等の説明を整備。 |
+| 6 | [WS009](ws009-documentation/ws.md) | p008をq190で完了し、現行実装の文書整備完了。DOC-54のみWS014の手動保留に依存し、WSは未完了のまま保持。実行可能Phaseなし。 |
 
 p027〜p030のq122での見送りは過去の実績として保持する。
 追加必須項目（2026-09-09ユーザー指示）：[WS004-p050](ws004-hardware/phase050-nvme-multiple-controllers/phase.md)
-でNVMeの1コントローラ制限を解除する。インストーラ全体の完成を先行し、その後に
-同じ進行中の目標で実装・検証する。Futureへ移さず、目標完了条件に含める。
+はq187で完了。NVMeの1コントローラ制限を解除し、両列挙順の起動、
+独立・同時I/O、永続化、検出失敗の分離を検証済み。
 WS019は現行テキスト画面で完成を先行し、続いて[p029](ws019-installation/phase029-graphic-installer/phase.md)
 で共通処理を使うBeUI版 `/sbin/zedinst-graphic` を追加する。テキスト版の最終配置も
 `/sbin/zedinst` とする。添付の背景・デザインによる640x480 RGB24画面を事前合成する。
@@ -53,7 +53,7 @@ Future Listへ移したWS013・WS015は次節で管理する。完了WSの詳細
 | [WS006](ws006-input/ws.md) | 入力・evdev | 完了 | q147。両USB構成の通常ビルドで実Xzed/PTYとUSB-root/HID受け入れ。 |
 | [WS007](ws007-graphics/ws.md) | グラフィックス・デスクトップ | 一部未クリア | p004の正確なGUI再現条件、amd64残件、統合試験。 |
 | [WS008](ws008-noct/ws.md) | Noct・BeUI | 完了 | q063。 |
-| [WS009](ws009-documentation/ws.md) | ドキュメント | Priority 6 | 設計・UAPI・起動・導入等の残件。 |
+| [WS009](ws009-documentation/ws.md) | ドキュメント | 手動保留項目待ち | p001〜p008完了。残るDOC-54はWS014 GPUの保留解除後にPhase化。 |
 | [WS010](ws010-scripting/ws.md) | スクリプト・イメージツール | 完了 | q063。 |
 | [WS011](ws011-net-config/ws.md) | ネットワーク設定コンソール | 完了（ユーザー確認） | commit confirmed完了。VLANキャンセル、bridgeはF-001へ移管。 |
 | [WS012](ws012-service-console/ws.md) | サービス管理コンソール | 完了 | q018。 |
@@ -61,13 +61,14 @@ Future Listへ移したWS013・WS015は次節で管理する。完了WSの詳細
 | [WS016](ws016-swap-control/ws.md) | 実行時swap制御 | 完了 | q021。 |
 | [WS017](ws017-lfb-graphics/ws.md) | LFB描画高速化 | 依存待ち | WS022後にmmap・Xzed高速描画・受け入れ。 |
 | [WS018](ws018-kernel-architecture/ws.md) | カーネル所有権・構成統一 | 完了 | p001〜p020。I/O後続はWS025。 |
-| [WS019](ws019-installation/ws.md) | インストール・ディスク管理 | Priority 4 | p004/p005共存、p026〜p028・p030完了。p006/p007専用インストール、p029グラフィカル版が残る。 |
+| [WS019](ws019-installation/ws.md) | インストール・ディスク管理 | Priority 4 | 完了（q186）。amd64共存・専用・グラフィカル版とPC98 FATインストールを受け入れ済み。 |
 | [WS020](ws020-intel-mac/ws.md) | Intel Mac UEFI・Variant | 完了 | 2026-09-05ユーザー実機確認。 |
 | [WS021](ws021-llvm-toolchain/ws.md) | LLVM・sysroot | 完了 | q064。 |
 | [WS022](ws022-elf-tls/ws.md) | ELF TLS | 完了 | q128：p001〜p003、両x86 QEMU・dynamic回帰、PC98確認。 |
 | [WS023](ws023-x86-hal-style/ws.md) | x86 HALコーディング規約 | 完了 | q067。 |
 | [WS024](ws024-unified-ufs/ws.md) | 単一64-bit UFS | 完了 | q102。 |
-| [WS025](ws025-io-memory-cache/ws.md) | I/O・キャッシュ・物理メモリ | Priority 1 | p001〜p027、p033〜p035完了。p028〜p031未完了、p032実機起動回復を再開。p029はQEMU UAS受け入れで完了可。 |
+| [WS025](ws025-io-memory-cache/ws.md) | I/O・キャッシュ・物理メモリ | Priority 1 | p001〜p027、p031、p033〜p035完了。p028/p030未完了、p032実機対応。p029はq230でdirty媒体喪失回復を含むHS/SS QEMU受け入れ完了。[現状・設計](ws025-io-memory-cache/phase029-uas/lost-media-teardown.md)。 |
+| [WS026](ws026-test-maintenance/ws.md) | テスト資産の整理 | 計画のみ | 不要・重複テストの整理と現行ソースへの追随。Phase未詳細化・Queue未投入。 |
 
 ## Future List(やりたいことリスト)
 
@@ -94,7 +95,7 @@ VLANは2026-09-09ユーザー指示によりキャンセル。Future Listにも�
 
 ## 主要な依存関係
 
-- WS025-p027〜p030：各Phaseの既存I/O契約、p031の残件確認、測定・対象機器。
+- WS025-p027〜p030：各Phaseの既存I/O契約、測定・対象機器。p031の先行条件はq188で充足。
 - WS022 → WS017。WS006のevdev移行はデスクトップ各consumerへ反映する。
 - WS019のインストーラ受け入れ → WS003の実機NVMeインストール・起動。
   WS013の完了済みブート設定基盤を使い、将来のRuntime CPARを前提にしない。

@@ -228,7 +228,7 @@ hal_task_exec_current(hal_space_t new_space, uintptr_t entry,
 	running_task->signal_depth = 0;
 	hal_memset(running_task->signal_token, 0,
 	    sizeof(running_task->signal_token));
-	hal_page_switch_space(new_space);
+	hal_space_switch(new_space);
 	return 0;
 }
 
@@ -337,7 +337,7 @@ hal_task_context_switch(hal_task_t handle)
 	previous->run_cpu = -1;
 	next->run_cpu = 0;
 	running_task = next;
-	hal_page_switch_space(next->space);
+	hal_space_switch(next->space);
 	m68k_task_dispatch(&previous->resume_sp, next->resume_sp);
 }
 

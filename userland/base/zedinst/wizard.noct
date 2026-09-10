@@ -1,0 +1,54 @@
+// Shared installer decisions; a frontend supplies presentation and input only.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require nativeinstall;
+require pc98;
+
+func instWizardCancelled() {
+    return {ok:false, cancelled:true, message:"", cleanup:[], transaction:0};
+}
+
+func instWizard(ui, unused) {
+    if (instLines(instRequire(["/bin/id", "-u"]))[0] != "0") {
+        System.error("installation requires root");
+    }
+    // A shell return starts a new source admission and inventory.
+    while (true) {
+        if (!ui.source(ui)) { return instWizardCancelled(); }
+        var image = instRootImageObserve();
+        if (instPc98Platform()) {
+            var pc98 = instPc98Wizard(ui, image);
+            if (pc98.action == "restart") { continue; }
+            if (pc98.action == "cancel") { return instWizardCancelled(); }
+            return pc98.result;
+        }
+        var mode = ui.choose(ui, "mode", "Installation mode", "Choose how to install zedBSD.",
+            ["Coexist with an existing FAT filesystem", "Dedicated disk (erase all contents)", "Open shell"]);
+        if (mode < 0) { return instWizardCancelled(); }
+        if (mode == 2) { ui.shell(ui); continue; }
+        if (mode > 2) { System.error("invalid installation mode"); }
+        var observed = instDiscoveryObserve(0);
+        var candidates = instPhysicalCandidates(observed, mode == 1);
+        var options = [];
+        for (disk in candidates) {
+            Array.push(options, "/dev/" + disk.name + "  " + disk.sectors * disk.sectorSize / 1048576L + " MiB");
+        }
+        var selected = ui.choose(ui, "disk", "Choose your disk", "The installation source is excluded.", options);
+        if (selected < 0) { return instWizardCancelled(); }
+        if (selected >= Array.size(candidates)) { System.error("invalid disk selection"); }
+        var disk = candidates[selected];
+        if (mode == 1) { return instNativeInstall(disk.name, ui); }
+        var metadata = instDiscoveryMetadata(0, disk.name, false);
+        if (!instSameDevice(metadata.disk, disk)) { System.error("selected disk changed"); }
+        var payloads = [];
+        options = [];
+        for (child in metadata.children) {
+            if (!metadata.fat32[child.name] || (child.flags & 1) != 0) { continue; }
+            Array.push(payloads, child);
+            Array.push(options, "/dev/" + child.name + "  " + child.sectors * child.sectorSize / 1048576L + " MiB FAT32");
+        }
+        var payload = ui.choose(ui, "payload", "Choose existing FAT payload", "Existing unrelated files will be preserved.", options);
+        if (payload < 0) { return instWizardCancelled(); }
+        if (payload >= Array.size(payloads)) { System.error("invalid payload selection"); }
+        return instInstallSelectedWithUi(disk.name, payloads[payload].name, ui);
+    }
+}

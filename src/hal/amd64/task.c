@@ -317,7 +317,7 @@ hal_task_exec_current(
 	    : "memory");
 
 	/* Activates the replacement address space. */
-	hal_page_switch_space(new_space);
+	hal_space_switch(new_space);
 
 	/* Reports a completed exec transition. */
 	return 0;
@@ -547,7 +547,7 @@ hal_task_context_switch(
 	/* Switches task identity, address space, and architectural TLS. */
 	from->tls = (uintptr_t)asm_read_msr(AMD64_MSR_FS_BASE);
 	running_task = to;
-	hal_page_switch_space(to->space);
+	hal_space_switch(to->space);
 	asm_write_msr(AMD64_MSR_FS_BASE, (uint64_t)to->tls);
 
 	/* Selects the destination kernel stack for future privilege changes. */

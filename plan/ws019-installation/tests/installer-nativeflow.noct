@@ -1,0 +1,105 @@
+require textui;
+
+func nfCheck(ok, message) { if (!ok) { System.error(message); } }
+func nfDisk(name, id, flags, parent) {
+    return {name:name, id:id, flags:flags, parent:parent, offset:0L, sectorSize:512, sectors:524288L};
+}
+func nfFeed(context, unused) { return instNativeCommandFeed(context.state, context.chunk); }
+func nfDecode(text, unused) { return instNativeCensusPath(text); }
+func nfRun(context, unused) {
+    return instNativeCommand(["/usr/bin/python3", context.fixture, context.mode], "ERASE", context.disk, context.owner);
+}
+func nfFinish() {
+    for (fault in ["none", "copy", "publication", "cleanup", "cancel"]) {
+        var workspace = instWorkspaceNew({}, 0, "/run/zedinst");
+        if (fault == "cleanup") {
+            Array.push(workspace.resources, {kind:"mount", path:"/run/zedinst/native-final", state:"pending"});
+        }
+        var context = {directories:[], seedPending:false, workspace:workspace,
+            cancelled:fault == "cancel", transaction:0,
+            destination:{mounts:{nvme0n1p1:{path:"/run/zedinst/native-esp"}}}};
+        if (fault == "publication") {
+            context.transaction = {published:["/run/zedinst/native-esp/vmunix"],
+                uncertain:["/run/zedinst/native-esp/zedbsd.cfg"],
+                leftovers:[{path:"/run/zedinst/native-esp/zedinst-stage/config"}]};
+        }
+        var failed = fault == "copy" || fault == "publication";
+        var report = instInstallFinish(context, {ok:!failed, message:fault});
+        nfCheck(report.ok == (fault == "none"), "finish accepted " + fault);
+        if (failed) { nfCheck(report.message == fault, "lost primary failure"); }
+        if (fault == "cleanup") {
+            nfCheck(Array.size(report.cleanup) == 1 && workspace.resources[0].state == "pending",
+                "uncertain mount was hidden or released");
+        }
+        if (fault == "publication") {
+            nfCheck(report.transaction.published[0] == "/dev/nvme0n1p1:/vmunix" &&
+                report.transaction.uncertain[0] == "/dev/nvme0n1p1:/zedbsd.cfg" &&
+                report.transaction.leftovers[0].path == "/dev/nvme0n1p1:/zedinst-stage/config",
+                "lost recovery locations after unmount");
+        }
+    }
+}
+func main(args) {
+    nfFinish();
+    var disk = nfDisk("nvme0n1", 2, 0, 0);
+    var challenge = instNativeChallenge("ERASE", disk);
+    var state = {challenge:challenge, sent:false, output:""};
+    var transcript = challenge.header + "\r\nWARNING: test\r\n" + challenge.prompt;
+    for (i in 0..String.charCount(transcript)) {
+        var ready = instNativeCommandFeed(state, String.charAt(transcript, i));
+        nfCheck(ready == (i + 1 == String.charCount(transcript)), "premature command authorization");
+    }
+    state.sent = true;
+    nfCheck(!instNativeCommandFeed(state, challenge.phrase + "\r\nDone\r\n"), "repeated authorization");
+    nfCheck(!System.pcall(nfFeed, {state:state, chunk:challenge.prompt}, 0).ok, "duplicate prompt accepted");
+    for (header in ["", "Target /dev/nvme0n1 registration=3 sector-size=512 sectors=524288\r\n",
+        challenge.header + "\r\n" + challenge.header + "\r\n"]) {
+        var bad = {challenge:challenge, sent:false, output:""};
+        nfCheck(!System.pcall(nfFeed, {state:bad, chunk:header + challenge.prompt}, 0).ok, "wrong target accepted");
+    }
+    var menu = {options:["NO", "YES"], selected:0};
+    nfCheck(instTextMenuKey(menu, Term.KEY_RET) == 1 && menu.selected == 0, "review default is not NO");
+    nfCheck(instTextMenuKey(menu, Term.KEY_DOWN) == 0 && menu.selected == 1, "review movement");
+    nfCheck(instTextMenuKey(menu, 27) == -1, "escape accepted");
+    nfCheck(instTextMenuKey(menu, -2) == -1, "EOF accepted");
+    nfCheck(instTextMenuKey({options:[], selected:0}, Term.KEY_RET) == 0, "empty list accepted");
+    var source = nfDisk("sda", 1, 2, 0);
+    var part = nfDisk("sda1", 3, 6, 1);
+    var guid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    var observed = {devices:[source, part, disk, nfDisk("loop0", 4, 8, 0),
+        nfDisk("readonly", 5, 1, 0), nfDisk("p", 6, 4, 2)],
+        identities:{sda1:{DEVNAME:"sda1", PARTUUID:guid}},
+        provenance:{firmware:"PARTUUID=" + guid, configuration:"PARTUUID=" + guid, matches:1}};
+    var candidates = instNativeCandidates(observed);
+    nfCheck(Array.size(candidates) == 1 && candidates[0].id == 2, "destination filtering");
+    var fourKn = nfDisk("fourkn", 7, 0, 0);
+    fourKn.sectorSize = 4096;
+    Array.push(observed.devices, fourKn);
+    nfCheck(Array.size(instNativeCandidates(observed)) == 1, "native admitted 4Kn");
+    nfCheck(Array.size(instPhysicalCandidates(observed, false)) == 2, "coexistence excluded 4Kn");
+    var decoded = instNativeCensusPath("2f732f610aff");
+    nfCheck(String.byteLength(decoded) == 6, "filename byte decoding");
+    for (bad in ["", "0", "00", "zz"]) { nfCheck(!System.pcall(nfDecode, bad, 0).ok, "bad census encoding"); }
+    var digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    nfCheck(instNativeDigestGuid(digest) == "01234567-89ab-8def-8123-456789abcdef", "UUIDv8 encoding");
+    var header = Packed.uint8(512);
+    var magic = "EFI PART";
+    for (i in 0..8) { header[i] = String.charCodeAt(magic, i); }
+    for (i in 0..16) { header[56 + i] = i; }
+    nfCheck(instNativeHeaderGuid(header, 0) == "03020100-0504-0706-0809-0a0b0c0d0e0f", "disk GUID endianness");
+    var context = {plan:{configuration:"native\n"}, source:{inputs:[
+        {path:"/source/loader", bytes:1024, digest:digest}, {path:"/source/kernel", bytes:2048, digest:digest}]}};
+    var entries = instNativeBootEntries(context, "/run/esp");
+    var transaction = {profile:"native", entries:entries, states:[]};
+    instTransactionPlan(transaction);
+    nfCheck(Array.size(transaction.states) == 3 && entries[2].final == "/run/esp/zedbsd.cfg", "native publication profile");
+    if (Array.size(args) == 1) {
+        for (mode in ["success", "nonzero", "missing", "stale", "repeated", "overflow"]) {
+            var owner = {started:false};
+            var result = System.pcall(nfRun, {fixture:args[0], mode:mode, disk:disk, owner:owner}, 0);
+            nfCheck(result.ok == (mode == "success"), "child outcome " + mode);
+            nfCheck(owner.started == (mode == "success" || mode == "nonzero" || mode == "repeated"), "partial write evidence " + mode);
+        }
+    }
+    print("native flow PASS: review, inventory, challenge, filename, GUID and publication admission");
+}

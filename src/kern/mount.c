@@ -23,6 +23,9 @@
 #include "kern/inode.h"
 #include "kern/namecache.h"
 #include "kern/namei.h"
+#include "kern/vm-object.h"
+#include "kern/klog.h"
+#include <hal/hal.h>
 
 #include <errno.h>
 #include <string.h>
@@ -48,10 +51,13 @@ struct mount_io_boundary {
 extern int readahead_boundary_begin(struct readahead_boundary *, struct mount *) __attribute__((weak));
 extern void readahead_boundary_end(struct readahead_boundary *) __attribute__((weak));
 extern int writeback_unmount_begin(struct mount *, struct writeback_unmount *) __attribute__((weak));
+extern int writeback_unmount_begin_revoked(struct mount *, struct writeback_unmount *) __attribute__((weak));
 extern void writeback_unmount_finish(struct writeback_unmount *, int) __attribute__((weak));
 
 extern unsigned vm_object_cache_drain(struct mount *) __attribute__((weak));
 extern int vm_object_sync_mount_buffer(struct mount *, void *, size_t) __attribute__((weak));
+extern int vm_object_discard_mount_refs(struct mount *, struct inode *, unsigned *) __attribute__((weak));
+extern int vm_object_discard_mount(struct mount *, uint64_t *) __attribute__((weak));
 
 extern void io_error_record(struct io_error_state *, int) __attribute__((weak));
 extern void io_error_snapshot(struct io_error_state *, struct io_error_snapshot *) __attribute__((weak));
@@ -68,6 +74,7 @@ static struct spinlock namespace_lock;
 static struct mutex namespace_transaction;
 
 static int mount_io_quiesce(struct mount *mountp, struct mount_io_boundary *boundary);
+static int mount_io_quiesce_mode(struct mount *, struct mount_io_boundary *, int);
 static void mount_io_finish(struct mount_io_boundary *boundary, int committed);
 static struct mount * mount_alloc(void);
 static void mount_free(struct mount *mountp);
@@ -89,6 +96,7 @@ static void detach_mount(struct mount *mountp);
 static int reserve_mount(struct mount *mountp, const struct path *directory, const char *name, const struct inode *expected);
 static int mount_at_target(const char *type_name, const struct path *directory, const char *name, int flags, void *data, struct mount **result, const struct inode *expected);
 static int unmount_owned(struct mount *mountp);
+static int unmount_revoked_owned(struct mount *mountp);
 static int same_inode(const struct inode *left, const struct inode *right);
 static void unlink_global(struct mount *mountp);
 
@@ -1166,10 +1174,22 @@ unmount_context(
 	struct cwdinfo *context,
 	const char *directory)
 {
+	return unmount_context_flags(context, directory, 0);
+}
+
+int
+unmount_context_flags(
+	struct cwdinfo *context,
+	const char *directory,
+	int flags)
+{
 	struct cwdinfo *snapshot;
 	struct path target;
 	struct mount *mountp;
 	int error;
+
+	if ((flags & ~(int)MNT_FORCE) != 0)
+		return EINVAL;
 
 	/* Resolve under one process root/cwd snapshot, including symbolic links. */
 	snapshot = NULL;
@@ -1191,7 +1211,10 @@ unmount_context(
 	cwdinfo_release(snapshot);
 	if (error != 0)
 		return error;
-	error = unmount_owned(mountp);
+	if (flags & MNT_FORCE)
+		error = unmount_revoked_owned(mountp);
+	else
+		error = unmount_owned(mountp);
 	if (error != 0)
 		return error;
 
@@ -1507,11 +1530,15 @@ unmount(
 	int error;
 
 	/* Internal callers retain the existing global-path lookup contract. */
-	(void)flags;
+	if ((flags & ~(int)MNT_FORCE) != 0)
+		return EINVAL;
 	mountp = mount_find_ref(dir);
 	if (mountp == NULL)
 		return ENOENT;
-	error = unmount_owned(mountp);
+	if (flags & MNT_FORCE)
+		error = unmount_revoked_owned(mountp);
+	else
+		error = unmount_owned(mountp);
 	if (error != 0)
 		return error;
 
@@ -2361,6 +2388,15 @@ mount_io_quiesce(
 	struct mount *mountp,
 	struct mount_io_boundary *boundary)
 {
+	return mount_io_quiesce_mode(mountp, boundary, 0);
+}
+
+static int
+mount_io_quiesce_mode(
+	struct mount *mountp,
+	struct mount_io_boundary *boundary,
+	int revoked)
+{
 	int error;
 
 	/* Requires both halves of each optional lifecycle provider before changing state. */
@@ -2376,7 +2412,10 @@ mount_io_quiesce(
 
 	/* Keeps the read gate closed while writeback pauses and drains the same mount. */
 	if (writeback_unmount_begin != NULL) {
-		error = writeback_unmount_begin(mountp, &boundary->writeback);
+		if (revoked)
+			error = writeback_unmount_begin_revoked(mountp, &boundary->writeback);
+		else
+			error = writeback_unmount_begin(mountp, &boundary->writeback);
 		if (error != 0) {
 			if (readahead_boundary_end != NULL)
 				readahead_boundary_end(&boundary->readahead);
@@ -2468,6 +2507,119 @@ fail:
 
 	/* Succeeded. */
 	return 0;
+}
+
+/* Consumes one held reference; only precommit refusals can restore admission. */
+static int
+unmount_revoked_owned(
+	struct mount *mountp)
+{
+	struct mount_io_boundary boundary = { 0 };
+	unsigned long irq;
+	unsigned expected;
+	unsigned vm_refs;
+	unsigned dirty_inodes;
+	uint64_t dirty_bytes;
+	int error;
+	int entered;
+	int reserved;
+
+	reserved = 0;
+	error = EOPNOTSUPP;
+	if (mountp->m_disk == NULL || mountp->m_type == NULL ||
+	    mountp->m_type->prepare_unmount_revoked == NULL ||
+	    mountp->m_type->commit_unmount_revoked == NULL)
+		goto out;
+	if (vm_object_discard_mount_refs == NULL || vm_object_discard_mount == NULL ||
+	    writeback_unmount_begin == NULL || writeback_unmount_begin_revoked == NULL ||
+	    writeback_unmount_finish == NULL || readahead_boundary_begin == NULL ||
+	    readahead_boundary_end == NULL)
+		goto out;
+	error = EINVAL;
+	if (disk_media_status(mountp->m_disk) == 0)
+		goto out;
+	error = EBUSY;
+	if (mountp == root_mount || mount_is_private(mountp) ||
+	    (mountp->m_internal_flags & MOUNT_BIND_INTERNAL) != 0)
+		goto out;
+
+	/* Join optional reads and writes without trying to sync the lost medium. */
+	error = mount_io_quiesce_mode(mountp, &boundary, 1);
+	if (error != 0)
+		goto out;
+
+	entered = mount_vfs_transaction_join(mountp);
+	irq = spin_lock_irqsave(&namespace_lock);
+	error = EBUSY;
+	if (mountp->m_state == MOUNT_STATE_LIVE && mountp->m_children == NULL) {
+		mountp->m_state = MOUNT_STATE_DYING;
+		reserved = 1;
+		error = 0;
+	}
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	if (entered)
+		mount_vfs_transaction_leave(mountp);
+	if (error != 0)
+		goto out;
+
+	/* Drop reconstructible lookup cache owners before counting external users. */
+	namecache_purge_mount(mountp);
+	error = vm_object_discard_mount_refs(mountp, NULL, &vm_refs);
+	if (error != 0)
+		goto out;
+	expected = 2U;
+	if (boundary.writeback.mount != NULL)
+		expected++;
+	if (vm_refs > UINT_MAX - expected) {
+		error = EBUSY;
+		goto out;
+	}
+	expected += vm_refs;
+	irq = spin_lock_irqsave(&namespace_lock);
+	error = refcount_load(&mountp->m_refs) == expected ? 0 : EBUSY;
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	if (error != 0)
+		goto out;
+	error = inode_cache_mount_revoked_check(mountp);
+	if (error != 0)
+		goto out;
+	error = mountp->m_type->prepare_unmount_revoked(mountp);
+	if (error != 0)
+		goto out;
+
+	/* Every refusal is behind us. No write, sync or clean-superblock claim. */
+	mountp->m_type->commit_unmount_revoked(mountp);
+	dirty_inodes = inode_cache_discard_mount_dirty(mountp);
+	error = vm_object_discard_mount(mountp, &dirty_bytes);
+	if (error != 0)
+		HAL_FATAL("revoked unmount lost exclusive VM ownership");
+	kern_logf("unmount: %s: revoked medium discarded; VM dirty bytes=%llu, dirty inodes=%u\n",
+	    mountp->m_path, (unsigned long long)dirty_bytes, dirty_inodes);
+
+	/* The disk retirement owner later disposes shared physical buffers. */
+	mount_io_finish(&boundary, 1);
+	finalize_filesystem_destroy(mountp);
+	entered = mount_vfs_transaction_join(mountp);
+	inode_dir_changed(mountp->m_cover.p_inode);
+	detach_mount(mountp);
+	if (entered)
+		mount_vfs_transaction_leave(mountp);
+	mount_release(mountp);
+	mount_free(mountp);
+	return 0;
+
+out:
+	if (reserved) {
+		entered = mount_vfs_transaction_join(mountp);
+		irq = spin_lock_irqsave(&namespace_lock);
+		mountp->m_state = MOUNT_STATE_LIVE;
+		spin_unlock_irqrestore(&namespace_lock, irq);
+		if (entered)
+			mount_vfs_transaction_leave(mountp);
+	}
+	mount_io_finish(&boundary, 0);
+	mount_release(mountp);
+	return error;
 }
 
 /* Consumes one held mount reference on every teardown outcome. */

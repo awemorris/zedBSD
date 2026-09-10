@@ -11,6 +11,7 @@
 
 #include "kern/io-stats.h"
 #include "kern/io-pool.h"
+#include "kern/io-destination.h"
 #define ZEDBSD_SYSCALL_REGULAR_CHUNK KERN_IO_BATCH_MAX
 #include "storage-syscall-config.h"
 #ifndef SSIZE_MAX
@@ -31,7 +32,24 @@ struct inode { int i_type; };
 struct file { struct inode *f_inode; size_t offset; };
 struct process { void *fd, *cred; };
 struct file_io { struct file *file; int kind; size_t offset; };
-struct uaccess_pin { unsigned char *base; };
+struct uaccess_pin { unsigned char *base; size_t size; };
+struct uaccess_view { struct uaccess_pin *pin; const void *address; size_t size; };
+struct uaccess_output { struct uaccess_pin *pin; struct io_span spans[16]; struct io_destination destination; };
+#define HAL_FATAL(message) do { (void)(message); abort(); } while (0)
+static unsigned view_available,views;
+static int uaccess_view_acquire(struct uaccess_pin *p,struct uaccess_view *v)
+{ if(!view_available || p->size>65536 || p->size==0)return EBUSY;assert(!views);views++;v->pin=p;v->address=p->base;v->size=p->size;return 0; }
+static int uaccess_output_acquire(struct uaccess_pin *p,struct uaccess_output *v)
+{
+ if(!view_available || p->size>65536 || !p->size)return EBUSY;
+ assert(!views);views++;v->pin=p;
+ v->spans[0].address=p->base;v->spans[0].size=p->size;
+ v->destination.spans=v->spans;v->destination.count=1;return 0;
+}
+static int uaccess_output_release(struct uaccess_output *v)
+{ assert(views && v->pin);views--;memset(v,0,sizeof(*v));return 0; }
+static int uaccess_view_release(struct uaccess_view *v)
+{ assert(views && v->pin);views--;memset(v,0,sizeof(*v));return 0; }
 static struct inode inode = {INODE_REG};
 static struct file file = {&inode, 0};
 static struct process process;
@@ -61,8 +79,8 @@ void *io_pool_borrow(size_t wanted, size_t *capacity)
 void io_pool_release(void *p)
 { assert(allocations); allocations--; free(p); }
 static int uaccess_pin(uintptr_t base, size_t n, unsigned access, struct uaccess_pin *p)
-{ (void)n; (void)access; p->base = (void *)base; pins++; return 0; }
-static void uaccess_unpin(struct uaccess_pin *p) { (void)p; assert(pins); pins--; }
+{ p->size=n; (void)access; p->base = (void *)base; pins++; return 0; }
+static void uaccess_unpin(struct uaccess_pin *p) { (void)p; assert(pins && !views); pins--; }
 static int file_io_begin(struct file *f, int kind, off_t x, int y, struct file_io *io)
 { (void)y; assert(!held); if (begin_error) return begin_error; held = 1; io->file = f; io->kind = kind; io->offset = kind >= FILE_IO_PREAD ? (size_t)x : f->offset; return 0; }
 static int file_io_begin_cred(struct file *f, int kind, off_t x, int y, void *cred, struct file_io *io)
@@ -72,6 +90,7 @@ static int completion_error;
 static unsigned completions;
 static ssize_t file_io_complete(struct file_io *io, ssize_t result)
 {
+ if(view_available && (ZEDBSD_USER_INPUT_VIEW || ZEDBSD_USER_OUTPUT_VIEW))assert(views==1);
  file_io_end(io);completions++;
  return completion_error && result>=0 ? -completion_error : result;
 }
@@ -91,6 +110,20 @@ static ssize_t file_io_transfer(struct file_io *io, void *buffer, size_t n)
 	io->offset += n;
 	if (io->kind < FILE_IO_PREAD) file.offset = io->offset;
 	return n;
+}
+static int prefix_error;
+static unsigned prefix_calls;
+static ssize_t file_io_transfer_destination(struct file_io *io,const struct io_destination *destination,size_t n)
+{
+ unsigned char buffer[65536];
+ ssize_t result;
+ assert(n<=sizeof(buffer));
+ assert(views && (io->kind==FILE_IO_READ || io->kind==FILE_IO_PREAD));
+ prefix_calls++;
+ if(prefix_error)return -prefix_error;
+ result=file_io_transfer(io,buffer,n);
+ if(result>0)assert(io_destination_copy(destination,0,buffer,(size_t)result)==0);
+ return result;
 }
 static int copyin_pinned(struct uaccess_pin *p, size_t at, void *buffer, size_t n)
 { if (++copy_calls == fail_copy) return EFAULT; memcpy(buffer,p->base+at,n); return 0; }
@@ -194,5 +227,57 @@ int main(void)
 	assert(sys_vector_call(va, 1) == 512 && calls == 1);
 	assert(!held && !pins && !allocations);
 	puts("q087 PASS stream read termination and PIPE_BUF single transfer preserved");
+
+#if ZEDBSD_USER_INPUT_VIEW
+	/* The verbatim scalar paths must retain view ownership through completion. */
+	view_available=1;inode.i_type=INODE_REG;pipe_mode=0;
+	for(unsigned mode=0;mode<2;mode++) {
+		for(unsigned fault=0;fault<5;fault++) {
+			file.offset=0;calls=copy_calls=completions=0;
+			fail_backend=fault==1?1:0;begin_error=fault==2?EBUSY:0;
+			completion_error=fault==3?EIO:0;
+			short_backend=fault==4?1:0;short_count=37;
+			args[2]=65536;args[3]=8192;
+			intptr_t got=mode?sys_positional_call(args,1):sys_write_call(args);
+			intptr_t want=fault==1 || fault==3?-EIO:fault==2?-EBUSY:fault==4?37:65536;
+			assert(got==want && !held && !pins && !views && !allocations);
+			assert(copy_calls==0 && calls==(fault==2?0U:1U));
+			if(fault==0)assert(memcmp(medium+(mode?8192:0),bytes,65536)==0);
+		}
+	}
+	puts("WS025 PASS experimental write/pwrite views: no copy, error/short/begin/complete cleanup");
+#endif
+
+#if ZEDBSD_USER_OUTPUT_VIEW
+ view_available=1;inode.i_type=INODE_REG;pipe_mode=0;
+ for(unsigned mode=0;mode<2;mode++) for(unsigned fault=0;fault<7;fault++) {
+  file.offset=0;calls=copy_calls=completions=prefix_calls=0;
+  fail_backend=fault==1?1:0;begin_error=fault==2?EBUSY:0;
+  completion_error=0;short_backend=fault==3 || fault==4?1:0;
+  short_count=fault==4?0:37;prefix_error=fault==5?ENOTSUP:fault==6?ENOMEM:0;
+  args[2]=65536;args[3]=8192;memset(bytes,0x66,65536);memset(medium,0x39,sizeof(medium));
+  intptr_t got=mode?sys_positional_call(args,0):sys_read_call(args);
+  intptr_t want=fault==1?-EIO:fault==2?-EBUSY:fault==3?37:fault==4?0:65536;
+  assert(got==want && !held && !pins && !views && !allocations);
+  assert(prefix_calls==(fault==2?0U:1U));
+  assert(copy_calls==(fault==5 || fault==6?1U:0U));
+  for(unsigned j=0;j<65536;j++)assert(bytes[j]==(got>0 && j<(unsigned)got?0x39:0x66));
+  assert(file.offset==(!mode && got>0?(size_t)got:0));
+ }
+ /* A refused staging-pool borrow slices the destination at every 512 bytes. */
+ fail_alloc=1;fail_backend=short_backend=0;begin_error=completion_error=0;
+ for(unsigned mode=0;mode<2;mode++) for(unsigned fallback=0;fallback<3;fallback++) {
+  prefix_error=fallback==1?ENOMEM:fallback==2?ENOTSUP:0;
+  file.offset=0;calls=copy_calls=prefix_calls=0;
+  for(unsigned j=0;j<sizeof(medium);j++)medium[j]=(unsigned char)(j%251);
+  memset(bytes,0x66,65536);args[2]=65536;args[3]=8192;
+  assert((mode?sys_positional_call(args,0):sys_read_call(args))==65536);
+  assert(prefix_calls==128 && calls==128 && copy_calls==(fallback?128U:0U));
+  assert(memcmp(bytes,medium+(mode?8192:0),65536)==0);
+  assert(!held && !pins && !views && !allocations);
+ }
+ fail_alloc=0;prefix_error=0;
+ puts("WS025 PASS read/pread output views: short/error/EOF/fallback/position/suffix/cleanup");
+#endif
 	return 0;
 }

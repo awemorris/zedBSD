@@ -167,7 +167,7 @@ void __attribute__((weak)) hal_sparcv9_task_memory_stats(uint32_t *c, size_t *s)
 void hal_sparcv9_space_memory_stats(uint32_t *, uint32_t *);
 
 void
-hal_memory_get_stats(struct hal_memory_stats *s)
+hal_pmem_get_stats(struct hal_pmem_stats *s)
 {
 	if (!s) return;
 	hal_memset(s, 0, sizeof(*s));

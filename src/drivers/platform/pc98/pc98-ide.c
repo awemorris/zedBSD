@@ -20,6 +20,7 @@
 
 #include "drivers/platform/pc98/pc98-ide.h"
 #include "kern/boot.h"
+#include "kern/lock.h"
 #include <errno.h>
 #include <hal/hal.h>
 
@@ -82,6 +83,9 @@ static struct ide_unit units[IDE_UNIT_MAX];
 static struct ide_unit *unit_order[IDE_UNIT_MAX];
 static unsigned unit_count;
 static const char *failure_stage;
+/* Both ATA banks share one register window and must serialize commands. */
+static struct mutex controller_lock;
+
 
 static const struct boot_device * bios_device_for_slot(const struct boot_device *devices, unsigned count, unsigned slot);
 static int reset_bank(uint8_t bank);
@@ -130,6 +134,7 @@ drv_pc98_ide_init(
 	unsigned pass;
 	unsigned slot;
 
+	(void)mutex_init(&controller_lock, LOCK_RANK_DISK, "pc98-ide");
 	unit_count = 0;
 	/* Process each element required by the operation. */
 	for (slot = 0; slot < IDE_UNIT_MAX; slot++) {
@@ -791,6 +796,8 @@ pc98_ide_submit(
 	int error;
 	size_t transferred = 0;
 
+	/* Keep bank selection, PIO data and status sampling in one command. */
+	mutex_lock(&controller_lock);
 	failure_stage = "request";
 
 	/* Handles the bio condition. */
@@ -804,6 +811,7 @@ pc98_ide_submit(
 		error = pio_flush(dev);
 	else {
 		/* Failed. */
+		mutex_unlock(&controller_lock);
 		return EOPNOTSUPP;
 	}
 
@@ -826,6 +834,9 @@ pc98_ide_submit(
 	/* Checks the operation status. */
 	if (error == 0)
 		transferred = (size_t)bio->b_block_count * dev->d_block_size;
+	mutex_unlock(&controller_lock);
+
+	/* Completion may issue another request; do it after releasing the bus. */
 	bio_complete(bio, error, transferred);
 
 	/* Succeeded. */

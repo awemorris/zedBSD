@@ -1,7 +1,6 @@
 #!/bin/sh
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
-python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py"
 
 test_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$test_dir/../../.." && pwd)
@@ -11,7 +10,7 @@ trap 'rm -rf "$build_dir"' EXIT HUP INT TERM
 cc=${CC:-cc}
 warnings="-std=c11 -Wall -Wextra -Werror"
 defines="-DRTL8822B_TESTING -DRTL8822B_HOST_TEST"
-source="$repo_root/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/rtl8822b.c"
+source="$repo_root/src/drivers/wifi/rtl8822b/rtl8822b.c"
 fixture="$test_dir/rtl8822b-core-test.c"
 
 $cc $warnings -O2 $defines "$source" "$fixture" \
@@ -21,7 +20,7 @@ $cc $warnings -O2 $defines "$source" "$fixture" \
 $cc $warnings -O1 -g $defines -fno-omit-frame-pointer \
 	-fsanitize=address,undefined "$source" "$fixture" \
 	-o "$build_dir/rtl8822b-core-sanitize"
-ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
+ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1} UBSAN_OPTIONS=halt_on_error=1 \
 	"$build_dir/rtl8822b-core-sanitize"
 
 $cc $warnings -O0 $defines -fanalyzer "$source" "$fixture" \
@@ -54,7 +53,7 @@ if [ "${RTL8822B_FIRMWARE_TEST_BLOB:-}" != "" ]; then
 		-fsanitize=address,undefined "$source" "$loader_fixture" \
 		"$build_dir/firmware-blob.o" -no-pie \
 		-o "$build_dir/rtl8822b-loader-sanitize"
-	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
+	ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1} UBSAN_OPTIONS=halt_on_error=1 \
 		"$build_dir/rtl8822b-loader-sanitize"
 	$cc $loader_flags -O0 -fanalyzer "$source" "$loader_fixture" \
 		"$build_dir/firmware-blob.o" -no-pie \

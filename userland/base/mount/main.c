@@ -210,17 +210,33 @@ run_unmount(
 	int argc,
 	char **argv)
 {
+	int flags;
+	int index;
+	int end_options;
+
+	flags = 0;
+	index = 1;
+	end_options = 0;
+	if (index < argc && strcmp(argv[index], "-f") == 0) {
+		flags = MNT_FORCE;
+		index++;
+	}
+	if (index < argc && strcmp(argv[index], "--") == 0) {
+		end_options = 1;
+		index++;
+	}
+
 	/* Validates the command-line arguments. */
-	if (argc != 2) {
-		fprintf(stderr, "usage: umount directory\n");
+	if (index != argc - 1 || (!end_options && argv[index][0] == '-')) {
+		fprintf(stderr, "usage: umount [-f] [--] directory\n");
 
 		/* Reports operation failure. */
 		return 2;
 	}
 
 	/* Validates the command-line arguments. */
-	if (unmount(argv[1], 0) != 0) {
-		fprintf(stderr, "umount: %s: %s\n", argv[1], strerror(errno));
+	if (unmount(argv[index], flags) != 0) {
+		fprintf(stderr, "umount: %s: %s\n", argv[index], strerror(errno));
 
 		/* Reports operation failure. */
 		return 1;

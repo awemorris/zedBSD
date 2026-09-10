@@ -168,7 +168,7 @@ size_t hal_pmem_get_total_size(void) { return (size_t)phys_pages * ARM64_PAGE_SI
 void __attribute__((weak)) hal_arm64_task_memory_stats(uint32_t *c,size_t *s)
 { if(c)*c=0; if(s)*s=0; }
 void hal_arm64_space_memory_stats(uint32_t *,uint32_t *);
-void hal_memory_get_stats(struct hal_memory_stats *s)
+void hal_pmem_get_stats(struct hal_pmem_stats *s)
 {
 	if (!s) return;
 	hal_memset(s,0,sizeof(*s));

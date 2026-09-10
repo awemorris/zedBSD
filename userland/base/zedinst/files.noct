@@ -5,6 +5,7 @@ require copy;
 require identity;
 require transaction;
 require admission;
+require notify;
 
 func instFileParent(path) {
     instControlledPath(path);
@@ -62,6 +63,7 @@ func instFileOwned(path, expected) {
     return current;
 }
 func instFileVerify(context, entry, path, expected) {
+    instNotifyStage(context, "Verifying " + entry.role);
     var current = instFileOwned(path, expected);
     if (current.size != entry.bytes || current.permissions != entry.permissions) {
         System.error("file size or permissions differ: " + path);
@@ -91,30 +93,44 @@ func instFileCreate(context, entry) {
     if (identity.size != 0) { System.error("created staging file is not empty"); }
     return identity;
 }
+func instFilePrepareCommand(context, command) {
+    var seconds = "180";
+    if (context != 0 && Dict.hasKey(context, "prepareSeconds")) { seconds = context.prepareSeconds; }
+    return instRequireFor(command, seconds);
+}
 func instFilePopulate(context, entry, expected) {
+    instNotifyStage(context, "Preparing " + entry.role);
     instFileOwned(entry.stage, expected);
     if (entry.role == "data" || entry.role == "swap") {
-        instRequire(["/bin/truncate", "-s", "" + entry.bytes, entry.stage]);
+        instFilePrepareCommand(context, ["/bin/truncate", "-s", "" + entry.bytes, entry.stage]);
         instFileOwned(entry.stage, expected);
-        if (entry.role == "data") { instRequire(["/sbin/mkfs", "-t", "ufs", entry.stage]); }
-        else { instRequire(["/sbin/mkswap", entry.stage]); }
+        if (entry.role == "data") { instFilePrepareCommand(context, ["/sbin/mkfs", "-t", "ufs", entry.stage]); }
+        else { instFilePrepareCommand(context, ["/sbin/mkswap", entry.stage]); }
     } else if (entry.role == "config") {
         FileUtil.writeText(entry.stage, entry.text);
     } else {
-        instCopyFile(entry.source, entry.stage, entry.bytes, entry.role);
+        if (context != 0 && Dict.hasKey(context, "ui") && context.ui != 0) {
+            instCopyFileWithUi(entry.source, entry.stage, entry.bytes, entry.role, context.ui);
+        } else {
+            instCopyFile(entry.source, entry.stage, entry.bytes, entry.role);
+        }
     }
     instFileOwned(entry.stage, expected);
     instRequire(["/bin/chmod", entry.modeText, entry.stage]);
 }
 func instFileSync(context, path) { instRequire(["/bin/sync", "--", path]); }
 func instFilePublish(context, entry) {
+    instNotifyStage(context, "Publishing " + entry.role);
     instRequire(["/bin/mv", "-T", "--update=none-fail", "--", entry.stage, entry.final]);
 }
 func instFileRemove(context, path, expected) {
     instFileOwned(path, expected);
     instRequire(["/bin/rm", "--", path]);
 }
-func instFileRevalidate(context) { context.revalidate(context); }
+func instFileRevalidate(context) {
+    instNotifyStage(context, "Rechecking source and destination");
+    context.revalidate(context);
+}
 func instFileOperations() {
     return { stat: instFileLookup, verify: instFileVerify, create: instFileCreate,
         populate: instFilePopulate, syncFile: instFileSync, syncDirectory: instFileSync,

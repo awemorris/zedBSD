@@ -22,12 +22,11 @@
 #include "space.h"
 #include "task.h"
 
-static hal_syscall_handler_t syscall_handler;
-
 static int is_asynchronous_interrupt(int int_num);
 static void create_idt(void);
 static void load_idt(void);
 static void set_idt_entry(int index, int dpl, void *handler);
+static int trap_cause(int vector);
 static void handle_fault(struct interrupt_frame *fp);
 
 /*
@@ -53,15 +52,35 @@ i386_int_load(
 	load_idt();
 }
 
-/*
- * Installs the kernel system-call handler.
- */
-void
-hal_syscall_set_handler(
-	hal_syscall_handler_t handler)
+/* Maps an x86 exception vector onto the generic trap cause. */
+static int
+trap_cause(
+	int vector)
 {
-	/* Publishes the callback used by the system-call vector. */
-	syscall_handler = handler;
+	/* Page faults carry an address and an access mode. */
+	if (vector == 14)
+		return HAL_TRAP_CAUSE_PAGE_FAULT;
+
+	/* Instruction and breakpoint traps. */
+	if (vector == 6)
+		return HAL_TRAP_CAUSE_ILLEGAL_INSN;
+	if (vector == 3)
+		return HAL_TRAP_CAUSE_BREAKPOINT;
+	if (vector == 17)
+		return HAL_TRAP_CAUSE_ALIGNMENT;
+	if (vector == 18)
+		return HAL_TRAP_CAUSE_MACHINE_CHECK;
+
+	/* Divide error, overflow, x87 and SIMD exceptions. */
+	if (vector == 0 || vector == 4 || vector == 16 || vector == 19)
+		return HAL_TRAP_CAUSE_ARITHMETIC;
+
+	/* Invalid TSS, segment not present, stack and general protection. */
+	if (vector >= 10 && vector <= 13)
+		return HAL_TRAP_CAUSE_PROTECTION;
+
+	/* Everything else is reported with its raw vector only. */
+	return HAL_TRAP_CAUSE_OTHER;
 }
 
 /*
@@ -116,12 +135,7 @@ int_handler(
 			is_handled = 1;
 		}
 	} else if (int_num == INT_SYSCALL && (fp->cs & 3U) == 3U) {
-		/* Reports the user entry and captures the ABI argument registers. */
-		kernel_user_int_handler(
-			(uint32_t)int_num,
-			fp->cs,
-			fp->eip,
-			fp->regs.eax);
+		/* Captures the ABI argument registers. */
 		args[0] = fp->regs.ebx;
 		args[1] = fp->regs.ecx;
 		args[2] = fp->regs.edx;
@@ -130,14 +144,10 @@ int_handler(
 		args[5] = fp->regs.ebp;
 		i386_task_enter_user_frame(fp);
 
-		/* Invokes the installed callback or reports an unavailable syscall. */
-		if (syscall_handler != NULL) {
-			syscall_result = (uint32_t)syscall_handler(
-				fp->regs.eax,
-				args);
-		} else {
-			syscall_result = (uint32_t)-(int32_t)ENOSYS;
-		}
+		/* Lets the generic kernel own accounting and interruption. */
+		syscall_result = (uint32_t)kernel_syscall_handler(
+			fp->regs.eax,
+			args);
 		fp->regs.eax = syscall_result;
 
 		/* Completes accounting before releasing the active user frame. */
@@ -272,27 +282,41 @@ handle_fault(
 	uint32_t fault_address;
 	int handled;
 	int int_num;
+	int cause;
+	int mode;
 
 	/* Captures the processor fault number. */
 	int_num = fp->int_num;
+
+	/* Captures CR2 and the access mode only for a page fault. */
+	fault_address = 0;
+	mode = HAL_TRAP_MODE_NONE;
+	if (int_num == INT_PAGEFAULT) {
+		fault_address = asm_get_cr2();
+		if ((fp->error_code & 16U) != 0)
+			mode = HAL_TRAP_MODE_EXEC;
+		else if ((fp->error_code & 2U) != 0)
+			mode = HAL_TRAP_MODE_WRITE;
+		else
+			mode = HAL_TRAP_MODE_READ;
+	}
+
+	/* Maps the architectural vector onto the generic trap causes. */
+	cause = trap_cause(int_num);
 
 	/* Delegates user faults while retaining kernel faults for diagnostics. */
 	if ((fp->cs & 3U) != 0U) {
 		/* Offers the active user frame before observing fault state. */
 		i386_task_enter_user_frame(fp);
 
-		/* Captures CR2 only for the page-fault callback argument. */
-		fault_address = 0;
-		if (int_num == INT_PAGEFAULT)
-			fault_address = asm_get_cr2();
-
-		/* Delegates the captured fault to the generic handler. */
+		/* Delegates the captured fault to the generic entry. */
 		handled = kernel_user_fault_handler(
-			(uint32_t)int_num,
-			fp->cs,
+			cause,
+			mode,
 			fp->eip,
-			fp->error_code,
-			fault_address);
+			fault_address,
+			(uintptr_t)int_num,
+			fp->error_code);
 
 		/* Completes a successfully handled user fault. */
 		if (handled == HAL_TRAP_RET_SUCCESS) {
@@ -305,6 +329,17 @@ handle_fault(
 		i386_task_leave_user_frame();
 		HAL_FATAL("user fault handler returned");
 	} else {
+		/* Gives a supervisor fault to the kernel's fixed entry first. */
+		handled = kernel_sys_fault_handler(
+			cause,
+			mode,
+			fp->eip,
+			fault_address,
+			(uintptr_t)int_num,
+			fp->error_code);
+		if (handled == HAL_TRAP_RET_SUCCESS)
+			return;
+
 		/* Reports the complete kernel fault register frame. */
 		hal_printf(
 			"[INT] int 0x%02X handled!\n"

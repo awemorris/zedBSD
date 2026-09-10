@@ -29,6 +29,7 @@ func main(args) {
     s = scenario(); s.payload = "nvme0n1p1"; mustReject(choose, s, 0);
     s = scenario(); s.payload = "sda2"; mustReject(choose, s, 0);
     s = scenario(); s.table.disk.flags = 1; mustReject(choose, s, 0);
+    s = scenario(); s.table.disk.flags = 8; mustReject(choose, s, 0);
     s = scenario(); s.devices[2].flags = 5; mustReject(choose, s, 0);
     s = scenario(); s.firmware = s.devices[1]; mustReject(choose, s, 0);
     s = scenario(); s.configuration = s.devices[2]; mustReject(choose, s, 0);

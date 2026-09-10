@@ -1,0 +1,153 @@
+// PC98 FAT coexistence policy; reuse the managed-file transaction and frontends.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require rootimage;
+require workspace;
+require metadata;
+
+func instPc98Platform() {
+    var lines = instLines(instRequire(["/bin/uname", "-a"]));
+    if (Array.size(lines) != 1) { System.error("invalid uname response"); }
+    var fields = instSplit(lines[0], " ");
+    var count = Array.size(fields);
+    return count >= 2 && fields[count - 1] == "i386" && fields[count - 2] == "pc98";
+}
+func instPc98Devices() { return instInventory(instRequire(["/sbin/diskpart", "--machine", "list"])); }
+func instPc98Source(devices, image) {
+    for (device in devices) {
+        if (device.id == image.device && device.parent != 0) { return device; }
+    }
+    System.error("PC98 installer source partition is unavailable");
+}
+func instPc98Fat(device) {
+    if (device.parent == 0 || (device.flags & 9) != 0 || device.sectorSize != 512 ||
+        device.sectors > 8388608L) { return false; }
+    var b = instSourceRead("/dev/" + device.name, 0L, 512);
+    if (Packed.size(b) != 512 || b[510] != 85 || b[511] != 170) { return false; }
+    var sector = instU16(b, 11);
+    if (sector < 512 || sector > 4096 || (sector & (sector - 1)) != 0) { return false; }
+    var total = instU16(b, 19);
+    if (total == 0) { total = instU32(b, 32); }
+    var cluster = b[13];
+    if (cluster == 0 || (cluster & (cluster - 1)) != 0 || total * (sector / 512) > device.sectors || total == 0) { return false; }
+    // FAT16 is the PC98 BIOS loader's coexistence format. Do not mistake GPT for it.
+    var reserved = instU16(b, 14);
+    var fats = b[16];
+    var fatSectors = instU16(b, 22);
+    var roots = instU16(b, 17);
+    var data = reserved + fats * fatSectors + (roots * 32 + sector - 1) / sector;
+    if (reserved == 0 || fats == 0 || fatSectors == 0 || roots == 0 || data >= total) { return false; }
+    var clusters = (total - data) / cluster;
+    return clusters >= 4085 && clusters < 65525 && fatSectors * (sector / 2L) >= clusters + 2;
+}
+func instPc98Revalidate(context) {
+    instRootImageSame(context.image, instRootImageObserve());
+    var devices = instPc98Devices();
+    if (!instSameDevice(context.sourceDevice, instFindDevice(devices, context.sourceDevice.name)) ||
+        !instSameDevice(context.targetDevice, instFindDevice(devices, context.targetDevice.name)) ||
+        !instPc98Fat(context.targetDevice)) { System.error("PC98 installation devices changed"); }
+    instWorkspaceCheck(context.workspace, context.sourceMount);
+    instWorkspaceCheck(context.workspace, context.targetMount);
+    instRootImageAdmit(context.image, instFileIdentity(context.sourceMount.path + "/rootfs.img"));
+}
+func instPc98Body(context, unused) {
+    var ui = context.ui;
+    var workspace = context.workspace;
+    instWorkspaceDirectory(workspace, "");
+    context.sourceMount = instWorkspaceAttach(workspace, instWorkspaceDirectory(workspace, "source"), context.sourceDevice.name, true);
+    context.targetMount = instWorkspaceAttach(workspace, instWorkspaceDirectory(workspace, "target"), context.targetDevice.name, false);
+    instPc98Revalidate(context);
+    var source = context.sourceMount.path;
+    var target = context.targetMount.path;
+    var roles = ["loader", "kernel", "rootfs", "data", "swap", "config"];
+    var names = ["BOOTZBSD.EXE", "vmunix", "rootfs.img", "data.img", "swapfile", "BOOTZBSD.CFG"];
+    var entries = [];
+    var required = 0L;
+    var config = "kernel=vmunix\noverlay-root=rootfs.img\noverlay-data=data.img\nswap0=swapfile\n";
+    instNotifyStage(context, "Checking PC98 FAT installation files");
+    for (i in 0..Array.size(roles)) {
+        var path = source + "/" + names[i];
+        var identity = instFileIdentity(path);
+        if ((identity.mode & 61440) != 32768 || identity.size <= 0 || identity.size > 2147483648L) {
+            System.error("PC98 payload must be a regular file of at most 2 GiB: " + names[i]);
+        }
+        var bytes = identity.size;
+        if (roles[i] == "config") { bytes = String.byteLength(config); }
+        var digest = "";
+        if (i < 3) { digest = instFileDigest(path); }
+        Array.push(entries, {role:roles[i], source:path, bytes:bytes, text:config, digest:digest,
+            final:target + "/" + names[i], stage:target + "/ZINSTTMP/" + names[i],
+            directory:target, stageDirectory:target + "/ZINSTTMP", mount:target,
+            permissions:493, modeText:"755"});
+        required = required + bytes + 65536L;
+    }
+    if (instFileCapacity(target).available < required) { System.error("insufficient FAT space for installation"); }
+    var choice = ui.choose(ui, "review", "Review PC98 FAT installation",
+        "/dev/" + context.targetDevice.name + "\nCopy kernel, rootfs, fresh data and swap.\nExisting unrelated files are preserved.", ["NO - return without installing", "YES - install zedBSD"]);
+    if (choice != 1) { context.cancelled = true; return; }
+    if (Dict.hasKey(ui, "reviewAccepted")) { ui.reviewAccepted = true; }
+    instPc98Revalidate(context);
+    // The existing FAT bootstrap is retained. The PC98 loader and config are files.
+    instRequire(["/bin/mkdir", target + "/ZINSTTMP"]);
+    context.stage = target + "/ZINSTTMP";
+    instRequire(["/bin/cp", "-T", "--attributes-only", "--preserve=mode", "--update=none-fail", "--", "/bin/sh", context.seed]);
+    context.seedIdentity = instFileIdentity(context.seed);
+    instRequire(["/bin/chmod", "755", context.seed]);
+    context.seedIdentity = instFileIdentity(context.seed);
+    context.transaction = instManagedTransaction(instFileOperations(), context, entries);
+}
+func instPc98Install(ui, image, source, target) {
+    var context = {ui:ui, image:image, sourceDevice:source, targetDevice:target,
+        workspace:instWorkspaceNew(instWorkspaceOps(), 0, "/run/zedinst"),
+        sourceMount:0, targetMount:0, seed:"/run/zedinst/seed", seedIdentity:0,
+        stage:"", cancelled:false, transaction:0, revalidate:instPc98Revalidate, prepareSeconds:"900"};
+    var result = System.pcall(instPc98Body, context, 0);
+    var cleanup = [];
+    if (context.seedIdentity != 0) {
+        var removed = System.pcall(instPc98RemoveSeed, context, 0);
+        if (!removed.ok) { Array.push(cleanup, removed.message); }
+    }
+    if (context.stage != "") {
+        var removed = instRun(["/bin/rmdir", context.stage], "30", 4096);
+        if (removed[0] != 0) { Array.push(cleanup, "staging directory retained: " + context.stage); }
+    }
+    var released = instWorkspaceRelease(context.workspace);
+    if (!released.ok) { Array.push(cleanup, released.message); }
+    var ok = result.ok && Array.size(cleanup) == 0;
+    var message = "";
+    if (!result.ok) { message = result.message; }
+    if (context.transaction != 0 && !context.transaction.ok) { ok = false; message = context.transaction.message; }
+    return {ok:ok && !context.cancelled, cancelled:context.cancelled,
+        message:message, cleanup:cleanup, transaction:context.transaction};
+}
+func instPc98RemoveSeed(context, unused) { instFileRemove(0, context.seed, context.seedIdentity); }
+func instPc98Wizard(ui, image) {
+    var mode = ui.choose(ui, "mode", "Installation mode", "PC98 supports existing FAT installation.",
+        ["Coexist with an existing FAT filesystem", "Open shell"]);
+    if (mode < 0) { return {action:"cancel"}; }
+    if (mode == 1) { ui.shell(ui); return {action:"restart"}; }
+    var devices = instPc98Devices();
+    var source = instPc98Source(devices, image);
+    var disks = [];
+    var labels = [];
+    for (device in devices) {
+        if (device.parent == 0 && device.id != source.parent && (device.flags & 9) == 0) {
+            Array.push(disks, device);
+            Array.push(labels, "/dev/" + device.name + "  " + device.sectors * device.sectorSize / 1048576L + " MiB");
+        }
+    }
+    var selected = ui.choose(ui, "disk", "Choose your disk", "The installation source is excluded.", labels);
+    if (selected < 0) { return {action:"cancel"}; }
+    if (selected >= Array.size(disks)) { System.error("invalid PC98 disk selection"); }
+    var parts = [];
+    labels = [];
+    for (device in devices) {
+        if (device.parent == disks[selected].id && instPc98Fat(device)) {
+            Array.push(parts, device);
+            Array.push(labels, "/dev/" + device.name + "  " + device.sectors / 2048L + " MiB FAT16");
+        }
+    }
+    selected = ui.choose(ui, "payload", "Choose existing FAT partition", "PC98 FAT partition: at most 4 GiB.", labels);
+    if (selected < 0) { return {action:"cancel"}; }
+    if (selected >= Array.size(parts)) { System.error("invalid PC98 partition selection"); }
+    return {action:"done", result:instPc98Install(ui, image, source, parts[selected])};
+}

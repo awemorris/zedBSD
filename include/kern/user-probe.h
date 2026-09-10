@@ -6,7 +6,8 @@
  */
 
 /*
- * Temporary ring-3 INT 0xc2 observation record.
+ * Observation records of user system calls and faults, and the fixed
+ * fault entries the HAL calls.
  */
 
 #ifndef ZEDBSD_KERN_USER_PROBE_H
@@ -62,5 +63,9 @@ extern volatile struct user_fault_probe user_fault_probe;
 
 void
 user_probe_init(void);
+
+void
+user_probe_syscall(
+	uint32_t number);
 
 #endif

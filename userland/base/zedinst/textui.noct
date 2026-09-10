@@ -1,0 +1,84 @@
+// Text frontend decisions; native transaction logic has no terminal dependency.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require wizard;
+
+func instTextMenuDraw(menu) {
+    Term.clear();
+    Term.moveTo(0, 0);
+    Term.write("Install zedBSD\r\n" + menu.title + "\r\n\r\n" + menu.description + "\r\n\r\n");
+    var first = menu.selected / 8 * 8;
+    var end = first + 8;
+    if (end > Array.size(menu.options)) { end = Array.size(menu.options); }
+    for (i in first..end) {
+        var prefix = "    ";
+        if (i == menu.selected) { prefix = "  > "; }
+        Term.write(prefix + menu.options[i] + "\r\n");
+    }
+    if (Array.size(menu.options) == 0) { Term.write("    No suitable destinations found.\r\n"); }
+    Term.write("\r\nUp/Down or Tab: Move    Enter: Select    Esc: Cancel\r\n");
+    Term.flush();
+}
+
+func instTextMenuKey(menu, key) {
+    if (key == 27 || key < -1) { return -1; }
+    var count = Array.size(menu.options);
+    if (count == 0) { return 0; }
+    if (key == Term.KEY_UP) { menu.selected = (menu.selected + count - 1) % count; }
+    if (key == Term.KEY_DOWN || key == Term.KEY_TAB) { menu.selected = (menu.selected + 1) % count; }
+    if (key == Term.KEY_RET || key == (Term.CTRL | 106)) { return 1; }
+    return 0;
+}
+
+func instTextMenuRead(menu, unused) {
+    instTextMenuDraw(menu);
+    for (poll in 0..1200) {
+        var previous = menu.selected;
+        var action = instTextMenuKey(menu, Term.readKey(1000));
+        if (action == -1) { return -1; }
+        if (action == 1) { return menu.selected; }
+        if (menu.selected != previous) { instTextMenuDraw(menu); }
+    }
+    return -1;
+}
+
+func instTextMenu(title, description, options) {
+    var menu = {title:title, description:description, options:options, selected:0};
+    if (Term.open() != 1) { System.error("cannot open installer terminal"); }
+    var result = System.pcall(instTextMenuRead, menu, 0);
+    Term.close();
+    if (!result.ok) { System.error(result.message); }
+    return result.value;
+}
+
+func instTextNativeReview(ui, plan, measured) {
+    var description = "Destination: /dev/" + plan.disk.name + "  registration=" + plan.disk.id +
+        "\r\nCapacity: " + plan.disk.sectors * plan.disk.sectorSize / 1048576L + " MiB" +
+        "\r\nEFI: " + plan.esp.bytes / 1048576L + " MiB  UFS root: " + plan.root.bytes / 1048576L + " MiB" +
+        "\r\nSwap file: " + plan.swapBytes / 1048576L + " MiB" +
+        "\r\n\r\nWARNING: ALL existing partitions and files on this disk will be lost." +
+        "\r\nThis cannot be undone. Select YES only to erase this destination.";
+    return instTextMenu("Review dedicated installation", description, ["NO - Cancel", "YES - Erase and install"]) == 1;
+}
+func instTextStage(ui, title) { print("\nInstall zedBSD\n" + title); }
+func instTextChoose(ui, kind, title, description, options) {
+    return instTextMenu(title, description, options);
+}
+func instTextSource(ui) { return instSourceScreen(); }
+func instTextShell(ui) { System.shell("/bin/sh"); }
+func instTextCoexistReview(ui, context) {
+    return instConfirm(instInstallSummary(context), context.disk, context.payload);
+}
+func instTextCopyProgress(ui, label, done, total) {
+    instCopyProgress({label:label}, done, total);
+}
+func instTextUi() {
+    return {source:instTextSource, choose:instTextChoose, shell:instTextShell,
+        review:instTextNativeReview, coexistReview:instTextCoexistReview,
+        stage:instTextStage, progress:instTreeCopyNotify, copyProgress:instTextCopyProgress};
+}
+func instTextNativeUi() { return instTextUi(); }
+func instTextCancelled() { return instWizardCancelled(); }
+func instTextWizard() {
+    if (Term.isTTY() != 1) { System.error("installation requires an interactive terminal"); }
+    return instWizard(instTextUi(), 0);
+}

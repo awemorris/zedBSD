@@ -1,4 +1,4 @@
-# zedBSD-owned sysroot link boundary for the canonical Noct amd64 target.
+# zedBSD-owned sysroot link boundary for the canonical Noct targets.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 function(noct_configure_zedbsd_target target)
@@ -6,7 +6,19 @@ function(noct_configure_zedbsd_target target)
     message(FATAL_ERROR "zedBSD Noct target does not exist: ${target}")
   endif()
   if(NOT DEFINED ZEDBSD_SYSROOT OR ZEDBSD_SYSROOT STREQUAL "")
-    message(FATAL_ERROR "ZEDBSD_SYSROOT must name the amd64 target sysroot")
+    message(FATAL_ERROR "ZEDBSD_SYSROOT must name the target sysroot")
+  endif()
+
+  if(CMAKE_SYSTEM_PROCESSOR STREQUAL "i386")
+    set(zedbsd_arch pcat)
+    set(zedbsd_compile_options -m32 -march=i486 -msoft-float -mno-80387 -mno-fp-ret-in-387 -mno-mmx -mno-sse -mno-sse2)
+    set(zedbsd_definitions HAL_ARCH_I386)
+    set(zedbsd_emulation elf_i386)
+  else()
+    set(zedbsd_arch amd64)
+    set(zedbsd_compile_options -m64 -march=x86-64 -mno-red-zone)
+    set(zedbsd_definitions HAL_ARCH_AMD64 ZEDBSD_USER_ABI_LP64)
+    set(zedbsd_emulation elf_x86_64)
   endif()
 
   set(crt0 "${ZEDBSD_SYSROOT}/usr/lib/crt0.o")
@@ -16,7 +28,7 @@ function(noct_configure_zedbsd_target target)
   set(llvm_builtins
       "${ZEDBSD_SYSROOT}/usr/lib/libclang_rt.builtins.a")
   set(linker_script
-      "${ZEDBSD_SYSROOT}/usr/lib/zedbsd/amd64/user.ld")
+      "${ZEDBSD_SYSROOT}/usr/lib/zedbsd/${zedbsd_arch}/user.ld")
   foreach(input IN ITEMS
       "${crt0}" "${libc_bundle}" "${runtime_bundle}" "${llvm_builtins}"
       "${linker_script}")
@@ -26,13 +38,10 @@ function(noct_configure_zedbsd_target target)
   endforeach()
 
   target_compile_definitions("${target}" PRIVATE
-    HAL_ARCH_AMD64
-    ZEDBSD_USER_ABI_LP64
+    ${zedbsd_definitions}
   )
   target_compile_options("${target}" PRIVATE
-    -m64
-    -march=x86-64
-    -mno-red-zone
+    ${zedbsd_compile_options}
     -ffreestanding
     -fno-builtin
     -fno-pic
@@ -55,7 +64,7 @@ function(noct_configure_zedbsd_target target)
     -nostdlib
     -static
     -no-pie
-    "LINKER:-m,elf_x86_64"
+    "LINKER:-m,${zedbsd_emulation}"
     "LINKER:--gc-sections"
     "LINKER:--build-id=none"
     "LINKER:-z,max-page-size=4096"

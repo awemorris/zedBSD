@@ -93,7 +93,7 @@ amd64 の `alloc_ram()`（[page.c:300](../src/hal/amd64/page.c:300)）は
 ### 2.4 受け入れ
 
 * 定常状態で read/write syscall 1 回あたりの `hal_pmem_alloc` 呼び出し回数が **0**。
-  （カウンタを `hal_memory_get_stats` に足すか、テスト用 hook で数える。）
+  （カウンタを `hal_pmem_get_stats` に足すか、テスト用 hook で数える。）
 * バッファキャッシュを満杯にし、さらに数百 MB のユーザプロセスを載せた状態で、
   64 KiB write の p95 が起動直後と同じ。
 * 既存の q087 fixture（境界サイズ、部分失敗、EFAULT、PIPE_BUF、vector）はそのまま通る。

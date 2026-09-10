@@ -73,7 +73,7 @@ struct wlan_station {
 
 #define RTL8822B_HOST_TEST 1
 #define RTL8822B_TESTING 1
-#include "../../../plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/rtl8822b.c"
+#include "../../../src/drivers/wifi/rtl8822b/rtl8822b.c"
 
 struct rtl8822bu_adapter;
 

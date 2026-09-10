@@ -57,12 +57,14 @@ void hal_fatal(const char *file, int line, const char *message)
 void disk_ref(struct disk *d) { (void)d; }
 void disk_release(struct disk *d) { (void)d; }
 int disk_buffer_acquire(struct disk *d)
-{ if(d->d_media_revoked)return ENXIO;d->d_buffer_refs++;return 0; }
+{ if(d->d_media_revoked)return ENXIO;__atomic_fetch_add(&d->d_buffer_refs,1,__ATOMIC_RELAXED);return 0; }
 void disk_buffer_release(struct disk *d)
-{ assert(d->d_buffer_refs);d->d_buffer_refs--; }
+{ assert(__atomic_fetch_sub(&d->d_buffer_refs,1,__ATOMIC_RELAXED)>0); }
 size_t hal_pmem_get_total_size(void) { return 64U*1024U*1024U; }
-int hal_pmem_alloc(const struct hal_pmem_request *r, struct hal_pmem *m)
+int hal_pmem_alloc(hal_physaddr_t r_paddr, size_t r_size, size_t r_alignment, uint32_t r_type, uint32_t r_attr, struct hal_pmem *m)
 {
+	(void)r_paddr; (void)r_alignment; (void)r_type; (void)r_attr;
+
  unsigned bucket; struct buf *b;
  if (check_preparation) {
   for (bucket=0;bucket<BUF_HASH_BUCKETS;bucket++)
@@ -75,7 +77,7 @@ int hal_pmem_alloc(const struct hal_pmem_request *r, struct hal_pmem *m)
   assert(buf_set_max_bytes(65536)==0);
   assert(buf_read(&nested_device,0,8,output)==0);
  }
- m->size=(r->size+4095)&~(size_t)4095; m->vaddr=aligned_alloc(4096,m->size);
+ m->size=(r_size+4095)&~(size_t)4095; m->vaddr=aligned_alloc(4096,m->size);
  if (!m->vaddr) return HAL_ERR_NOMEM;
  __atomic_fetch_add(&live_pages,1,__ATOMIC_RELAXED); return HAL_OK;
 }

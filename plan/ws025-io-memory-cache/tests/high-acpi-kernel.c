@@ -12,7 +12,11 @@ int __real_bsp_physical_range_mappable(uint64_t, size_t);
 uint64_t
 __wrap_bsp_acpi_rsdp(void)
 {
-	struct hal_pmem_request request = {0};
+	hal_physaddr_t request_paddr = 0;
+	size_t request_size = 0;
+	size_t request_alignment = 0;
+	uint32_t request_type = 0;
+	uint32_t request_attr = 0;
 	const unsigned char *original;
 	uint64_t physical;
 	size_t length;
@@ -34,11 +38,11 @@ __wrap_bsp_acpi_rsdp(void)
 		if (original == NULL)
 			HAL_FATAL("HIGH ACPI complete RSDP mapping failed");
 	}
-	request.type = HAL_PMEM_TYPE_RAM;
-	request.paddr = HAL_PMEM_PADDR_ANY;
-	request.size = 4096;
-	request.alignment = 4096;
-	result = hal_pmem_alloc_range(&request, UINT64_C(0x100000000), UINT64_MAX, 0, &copy);
+	request_type = HAL_PMEM_TYPE_RAM;
+	request_paddr = HAL_PMEM_PADDR_ANY;
+	request_size = 4096;
+	request_alignment = 4096;
+	result = hal_pmem_alloc_range(request_paddr, request_size, request_alignment, request_type, request_attr, UINT64_C(0x100000000), UINT64_MAX, 0, &copy);
 	if (result != HAL_OK)
 		HAL_FATAL("HIGH ACPI high RSDP allocation failed");
 	hal_memcpy(copy.vaddr, original, length);

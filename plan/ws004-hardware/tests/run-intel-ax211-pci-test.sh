@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py" --source src/drivers/wifi/intel-ax211/intel-ax211.c
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py" --source src/drivers/wifi/intel-ax211/intel-ax211.c --source src/drivers/wifi/intel-ax211/intel-ax211.c
 
 repository=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-ax211-pci.XXXXXX")

@@ -31,8 +31,9 @@ func instRun(command, seconds, limit) {
     return [status, output, overflow];
 }
 
-func instRequire(command) {
-    var result = instRun(command, "180", 1048576);
+func instRequire(command) { return instRequireFor(command, "180"); }
+func instRequireFor(command, seconds) {
+    var result = instRun(command, seconds, 1048576);
     if (result[0] != 0 || result[2]) {
         var description = command[0];
         for (i in 1..Array.size(command)) {

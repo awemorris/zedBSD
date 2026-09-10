@@ -1,31 +1,33 @@
+#include <kern/vm-kernel-map.h>
 /* Actual DMA vector owner/accounting; controlled optional vmap boundary. */
 #define DMA_CACHE_MAIN retained_dma_accounting_main
 #include "cache-dma-host.c"
-struct hal_vmap { void *bytes;size_t size;unsigned pins,populated; };
-static struct hal_vmap *live_map;
+struct vm_kernel_map { void *bytes;size_t size;unsigned pins,populated; };
+static struct vm_kernel_map *live_map;
 static unsigned capability=1,fail_reserve,fail_populate,fail_lookup,fail_release,shape;
-unsigned hal_vmap_capabilities(void) { return capability; }
-int hal_vmap_reserve(size_t size,struct hal_vmap **result)
+unsigned vm_kernel_map_capabilities(void) { return capability; }
+int vm_kernel_map_reserve(size_t size,struct vm_kernel_map **result)
 {
  *result=NULL;if(fail_reserve)return HAL_ERR_NOMEM;assert(!live_map);
  live_map=calloc(1,sizeof(*live_map));assert(live_map);live_map->size=size;
  *result=live_map;return HAL_OK;
 }
-int hal_vmap_populate(struct hal_vmap *map,uint64_t low,uint64_t high)
+int vm_kernel_map_populate(struct vm_kernel_map *map,uint64_t low,uint64_t high)
 {
  (void)low;(void)high;if(fail_populate)return HAL_ERR_NOMEM;
  map->bytes=aligned_alloc(4096,map->size);assert(map->bytes);map->populated=1;return HAL_OK;
 }
-int hal_vmap_pin(struct hal_vmap *map,void **address)
+int vm_kernel_map_pin(struct vm_kernel_map *map,void **address)
 { assert(map->populated);map->pins++;*address=map->bytes;return HAL_OK; }
-void hal_vmap_unpin(struct hal_vmap *map) { assert(map->pins);map->pins--; }
-int hal_vmap_release(struct hal_vmap *map)
+void vm_kernel_map_unpin(struct vm_kernel_map *map) { assert(map->pins);map->pins--; }
+int vm_kernel_map_release(struct vm_kernel_map *map)
 {
  if(fail_release || map->pins)return HAL_ERR_BUSY;
  assert(map==live_map);free(map->bytes);free(map);live_map=NULL;return HAL_OK;
 }
-int hal_kernel_page_lookup(const void *address,hal_physaddr_t *physical)
+int hal_space_query(hal_space_t space,void *address,hal_physaddr_t *physical,uint32_t *flags)
 {
+ assert(space==HAL_SPACE_SYS);*flags=HAL_SPACE_PAGE_PRESENT;
  uintptr_t offset=(uintptr_t)address-(uintptr_t)live_map->bytes;
  assert(offset<live_map->size);
  if(fail_lookup && offset>=4096)return HAL_ERR_INVALID;

@@ -74,6 +74,13 @@ static struct buf *dirty_tail;
 static struct mutex cache_control;
 
 /*
+ * Keeps another allocator from consuming space reclaimed for an admission.
+ * Held only across component accounting and clean eviction, never backend I/O,
+ * shared-cache reclaim, or physical allocation. Resize has its own control lock.
+ */
+static struct mutex cache_admission;
+
+/*
  * XXX: 説明を入れる。
  */
 static struct buf *cache_hash[BUF_HASH_BUCKETS];
@@ -152,6 +159,10 @@ static volatile uint64_t stat_write_bios;
  * XXX: 説明を入れる。
  */
 static volatile uint64_t stat_evictions;
+
+/* Counts hard-cap admission and physical allocation failures independently. */
+static volatile uint64_t stat_capacity_failures;
+static volatile uint64_t stat_physical_failures;
 
 /*
  * XXX: 説明を入れる。
@@ -239,6 +250,9 @@ buf_init(
 	spin_init(&dirty_index_lock, LOCK_RANK_DIRTY_INDEX, "dirty buffer index");
 	if (mutex_init(&cache_control, LOCK_RANK_BUFCACHE,
 	    "buffer cache control") != 0)
+		return ENOMEM;
+	if (mutex_init(&cache_admission, LOCK_RANK_BUFCACHE,
+	    "buffer cache admission") != 0)
 		return ENOMEM;
 	memset(cache_hash, 0, sizeof(cache_hash));
 
@@ -902,6 +916,11 @@ int
 buf_discard_media(
 	struct disk *disk)
 {
+	struct buf *buffer;
+	unsigned bucket;
+	unsigned long irq;
+	unsigned long birq;
+	unsigned long dirty_irq;
 	size_t freed;
 	int error;
 
@@ -909,6 +928,28 @@ buf_discard_media(
 	if (disk == NULL || disk->d_parent != NULL ||
 	    !atomic_raw_load_acquire(&disk->d_media_revoked))
 		return EINVAL;
+
+	/* Refuse before any dirty data is discarded. The caller keeps users excluded
+	 * across this check and eviction; this scan alone is not an admission gate. */
+	irq = spin_lock_irqsave(&cache_lock);
+	for (bucket = 0; bucket < BUF_HASH_BUCKETS; bucket++) {
+		for (buffer = cache_hash[bucket]; buffer != NULL;
+		     buffer = buffer->b_hash_next) {
+			if (buffer->b_disk != disk)
+				continue;
+			birq = spin_lock_irqsave(&buffer->b_lock);
+			dirty_irq = spin_lock_irqsave(&dirty_index_lock);
+			error = refcount_load(&buffer->b_refs) != 1 ||
+			    buffer->b_busy || buffer->b_io_inflight ? EBUSY : 0;
+			spin_unlock_irqrestore(&dirty_index_lock, dirty_irq);
+			spin_unlock_irqrestore(&buffer->b_lock, birq);
+			if (error != 0) {
+				spin_unlock_irqrestore(&cache_lock, irq);
+				return error;
+			}
+		}
+	}
+	spin_unlock_irqrestore(&cache_lock, irq);
 
 	/* Discards one buffer at a time until the cache holds none. */
 	for (;;) {
@@ -991,6 +1032,8 @@ buf_get_stats(
 	stats->waits = atomic_u64_load_acquire(&stat_waits);
 	stats->writeback_errors =
 	    atomic_u64_load_acquire(&stat_writeback_errors);
+	stats->capacity_failures = atomic_u64_load_acquire(&stat_capacity_failures);
+	stats->physical_failures = atomic_u64_load_acquire(&stat_physical_failures);
 }
 
 /*
@@ -1219,7 +1262,10 @@ reserve_bytes(
 			return error;
 	}
 
-	/* Tries before and after one clean reclaim pass. */
+	/* Reserves reclaimed space before another allocator can claim it. */
+	mutex_lock(&cache_admission);
+
+	/* Tries before and after one clean reclaim pass; never waits on busy buffers. */
 	for (attempt = 0; attempt < 2U; attempt++) {
 		irq = spin_lock_irqsave(&cache_lock);
 		if (cache_current_bytes <= cache_max_bytes &&
@@ -1228,6 +1274,7 @@ reserve_bytes(
 		    cache_reserved_bytes) {
 			cache_reserved_bytes += size;
 			spin_unlock_irqrestore(&cache_lock, irq);
+			mutex_unlock(&cache_admission);
 			return 0;
 		}
 
@@ -1236,11 +1283,14 @@ reserve_bytes(
 			break;
 	}
 
+	mutex_unlock(&cache_admission);
+
 	/* Returns shared credit when the component cap cannot admit ownership. */
 	if (cache_memory_cancel != NULL)
 		cache_memory_cancel(kind, size);
 
 	/* Reports that the bytes do not fit. */
+	stat_add(&stat_capacity_failures, 1);
 	return ENOMEM;
 }
 
@@ -1316,8 +1366,10 @@ alloc_pmem(
 	error = hal_pmem_alloc(&request, memory);
 	if (error != HAL_OK) {
 		cancel_reservation(reserved, metadata);
-		if (error == HAL_ERR_NOMEM)
+		if (error == HAL_ERR_NOMEM) {
+			stat_add(&stat_physical_failures, 1);
 			return ENOMEM;
+		}
 		return EIO;
 	}
 

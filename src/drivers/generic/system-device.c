@@ -333,7 +333,7 @@ system_get_vmstat(
 	uintptr_t argument)
 {
 	struct vm_statistics output;
-	struct hal_memory_stats hs;
+	struct hal_pmem_stats hs;
 	struct kern_memory_stats ks;
 	struct vm_reclaim_stats vs;
 	struct vm_commit_stats cs;
@@ -348,7 +348,7 @@ system_get_vmstat(
 
 	/* Samples every statistics source. */
 	memset(&output, 0, sizeof(output));
-	hal_memory_get_stats(&hs);
+	hal_pmem_get_stats(&hs);
 	kern_memory_get_stats(&ks);
 	vm_reclaim_get_stats(&vs);
 	vm_commit_get_stats(&cs);

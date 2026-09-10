@@ -70,9 +70,17 @@ func instInstallSeed(context) {
 }
 func instInstallBody(context, unused) {
     instWorkspaceDirectory(context.workspace, "");
+    instNotifyStage(context, "Inspecting installation source");
     context.source = instSourceMounts(context.workspace, context.discovered);
+    instNotifyStage(context, "Inspecting destination files and capacity");
     context.destination = instDestinationPrepare(context.workspace, context.discovered, context.source);
-    if (!instConfirm(instInstallSummary(context), context.disk, context.payload)) {
+    var confirmed = false;
+    if (context.ui == 0) {
+        confirmed = instConfirm(instInstallSummary(context), context.disk, context.payload);
+    } else {
+        confirmed = context.ui.coexistReview(context.ui, context);
+    }
+    if (!confirmed) {
         context.cancelled = true;
         return false;
     }
@@ -126,11 +134,17 @@ func instInstall(disk, payload) {
         return {ok:false, cancelled:true, message:"", cleanup:[], transaction:0};
     }
     instRootImageObserve();
+    return instInstallSelected(disk, payload);
+}
+func instInstallSelected(disk, payload) {
+    return instInstallSelectedWithUi(disk, payload, 0);
+}
+func instInstallSelectedWithUi(disk, payload, ui) {
     var discovered = instDiscoverReloaded(disk, payload);
     var context = {disk:disk, payload:payload, discovered:discovered, source:0, destination:0,
         workspace:instWorkspaceNew(instWorkspaceOps(), 0, "/run/zedinst"),
         seed:"/run/zedinst/seed", seedIdentity:0, seedPending:false, directories:[],
-        transaction:0, cancelled:false, revalidate:instInstallRevalidate};
+        transaction:0, cancelled:false, revalidate:instInstallRevalidate, ui:ui};
     var result = System.pcall(instInstallBody, context, 0);
     return instInstallFinish(context, result);
 }

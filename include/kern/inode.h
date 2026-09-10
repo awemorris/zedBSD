@@ -275,6 +275,11 @@ int
 inode_cache_mount_busy(
 	struct mount *mount);
 
+/* Caller reserves DYING mount admission through subsequent discard/teardown. */
+int inode_cache_mount_revoked_check(struct mount *mount);
+/* Irreversible local disposal after all-owner preflight; returns dirty inode count. */
+unsigned inode_cache_discard_mount_dirty(struct mount *mount);
+
 unsigned
 inode_cache_mount_count(
 	struct mount *mount);

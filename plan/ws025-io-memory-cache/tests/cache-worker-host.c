@@ -14,16 +14,18 @@ static int reject_allocation = 1;
 static unsigned char *backing;
 void hal_fatal(const char *file, int line, const char *message)
 { fprintf(stderr, "%s:%d %s\n", file, line, message); abort(); }
-void hal_memory_get_stats(struct hal_memory_stats *stats)
+void hal_pmem_get_stats(struct hal_pmem_stats *stats)
 {
 	memset(stats, 0, sizeof(*stats));
 	stats->physical_total = 8U * 1024U * 1024U;
 	stats->physical_free = stats->physical_total - live_bytes;
 }
-int hal_pmem_alloc(const struct hal_pmem_request *request, struct hal_pmem *memory)
+int hal_pmem_alloc(hal_physaddr_t request_paddr, size_t request_size, size_t request_alignment, uint32_t request_type, uint32_t request_attr, struct hal_pmem *memory)
 {
+	(void)request_paddr; (void)request_type; (void)request_attr;
+
 	if (reject_allocation) return HAL_ERR_NOMEM;
-	assert(request->size == 69632 && request->alignment == 4096);
+	assert(request_size == 69632 && request_alignment == 4096);
 	memory->size = 131072; /* Charge actual backing rather than requested bytes. */
 	memory->vaddr = calloc(1, memory->size);
 	assert(memory->vaddr);
@@ -77,4 +79,4 @@ int main(void)
 	return 0;
 }
 
-size_t hal_page_get_page_size(int level) { (void)level;return 4096; }
+size_t hal_space_get_page_size(int level) { (void)level;return 4096; }

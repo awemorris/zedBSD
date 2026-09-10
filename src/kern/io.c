@@ -65,15 +65,9 @@ extern void cache_memory_commit(enum cache_memory_kind, size_t) __attribute__((w
 extern void cache_memory_cancel(enum cache_memory_kind, size_t) __attribute__((weak));
 extern void cache_memory_release(enum cache_memory_kind, size_t) __attribute__((weak));
 extern size_t cache_memory_reclaim(size_t) __attribute__((weak));
-static int allocate_backing(size_t bytes, size_t limit, int allow_vmap, struct io_scratch *memory);
+static int allocate_backing(size_t bytes, size_t limit, struct io_scratch *memory);
 static void *borrow_slots(struct io_pool_slot *slots, unsigned count, unsigned *rotor);
 static int release_slots(struct io_pool_slot *slots, unsigned count, void *buffer);
-extern unsigned hal_vmap_capabilities(void) __attribute__((weak));
-extern int hal_vmap_reserve(size_t size, struct hal_vmap **mapping) __attribute__((weak));
-extern int hal_vmap_populate(struct hal_vmap *mapping, uint64_t offset, uint64_t length) __attribute__((weak));
-extern int hal_vmap_pin(struct hal_vmap *mapping, void **vaddr) __attribute__((weak));
-extern void hal_vmap_unpin(struct hal_vmap *mapping) __attribute__((weak));
-extern int hal_vmap_release(struct hal_vmap *mapping) __attribute__((weak));
 
 /*
  * Records a new actual writeback failure without clearing earlier observations.
@@ -160,7 +154,7 @@ io_error_observe(
 void
 io_pool_init(void)
 {
-	struct hal_memory_stats memory;
+	struct hal_pmem_stats memory;
 	size_t wanted_large;
 	size_t wanted_small;
 	size_t wanted;
@@ -173,7 +167,7 @@ io_pool_init(void)
 	expected = 0;
 	if (!atomic_raw_compare_exchange(&initialized, &expected, 1U))
 		HAL_FATAL("I/O pool initialized twice");
-	hal_memory_get_stats(&memory);
+	hal_pmem_get_stats(&memory);
 	budget_bytes = memory.physical_total / 64U;
 	if (budget_bytes > IO_POOL_MAX_BYTES)
 		budget_bytes = IO_POOL_MAX_BYTES;
@@ -186,7 +180,7 @@ io_pool_init(void)
 	/* Charges the complete, page-rounded descriptor table to the same budget. */
 	wanted_small = wanted;
 	if (!allocate_backing((wanted_large + wanted_small) * sizeof(*large_slots),
-	    budget_bytes, 0, &metadata)) {
+	    budget_bytes, &metadata)) {
 		atomic_raw_store_release(&initialized, 2U);
 		hal_printf("I/O pool unavailable budget=%llu; stack fallback active\n",
 		    (unsigned long long)budget_bytes);
@@ -204,7 +198,7 @@ io_pool_init(void)
 		small_limit = budget_bytes - resident_bytes;
 	small_bytes = 0;
 	while (small_count < wanted_small) {
-		if (!allocate_backing(KERN_IO_SMALL_SIZE, small_limit - small_bytes, 0,
+		if (!allocate_backing(KERN_IO_SMALL_SIZE, small_limit - small_bytes,
 		    &small_slots[small_count].backing))
 			break;
 		small_bytes += small_slots[small_count].backing.size;
@@ -212,9 +206,9 @@ io_pool_init(void)
 		small_count++;
 	}
 
-	/* Allocates large slots during construction, with optional owned vmap fallback. */
+	/* Allocates large slots during construction. */
 	while (large_count < wanted_large) {
-		if (!allocate_backing(KERN_IO_BATCH_MAX, budget_bytes - resident_bytes, 1,
+		if (!allocate_backing(KERN_IO_BATCH_MAX, budget_bytes - resident_bytes,
 		    &large_slots[large_count].backing))
 			break;
 		resident_bytes += large_slots[large_count].backing.size;
@@ -328,16 +322,11 @@ io_pool_get_stats(
 }
 
 /*
- * Allocates one pinned scratch region of at least the requested size.
- *
- * Contiguous physical memory is tried first.  A caller that passes
- * allow_vmap accepts a pinned virtual mapping when the platform provides one
- * and physical allocation failed.
+ * Allocates one contiguous scratch region of at least the requested size.
  */
 int
 io_scratch_alloc(
 	size_t size,
-	int allow_vmap,
 	struct io_scratch *result)
 {
 	struct hal_pmem_request request;
@@ -352,12 +341,12 @@ io_scratch_alloc(
 	memset(result, 0, sizeof(*result));
 
 	/* Rounds the request up to whole pages, refusing an unusable size. */
-	page = hal_page_get_page_size(1);
+	page = hal_space_get_page_size(1);
 	if (size == 0 || page == 0 || size > SIZE_MAX - (page - 1U))
 		return HAL_ERR_INVALID;
 	rounded = (size + page - 1U) / page * page;
 
-	/* Prefers contiguous physical memory of at least the rounded size. */
+	/* Asks for contiguous physical memory of at least the rounded size. */
 	memset(&scratch, 0, sizeof(scratch));
 	memset(&request, 0, sizeof(request));
 	request.paddr = HAL_PMEM_PADDR_ANY;
@@ -374,45 +363,13 @@ io_scratch_alloc(
 		return HAL_OK;
 	}
 
-	/* Returns a short or failed physical allocation before trying a mapping. */
+	/* Returns a short or failed physical allocation. */
 	if (scratch.physical.size != 0 &&
 	    hal_pmem_free(&scratch.physical) != HAL_OK)
 		HAL_FATAL("scratch physical rollback failed");
-	memset(&scratch.physical, 0, sizeof(scratch.physical));
 
-	/* Falls back to a mapping only when the caller and the platform allow one. */
-	if (!allow_vmap ||
-	    rounded > HAL_VMAP_MAX_SIZE ||
-	    hal_vmap_capabilities == NULL ||
-	    hal_vmap_reserve == NULL ||
-	    hal_vmap_populate == NULL ||
-	    hal_vmap_pin == NULL ||
-	    hal_vmap_unpin == NULL ||
-	    hal_vmap_release == NULL ||
-	    hal_vmap_capabilities() == 0)
-		return HAL_ERR_NOMEM;
-
-	/* Reserves the address range. */
-	error = hal_vmap_reserve(rounded, &scratch.mapping);
-	if (error != HAL_OK)
-		return error;
-
-	/* Populates and pins it, releasing the reservation on either failure. */
-	error = hal_vmap_populate(scratch.mapping, 0, UINT64_MAX);
-	if (error == HAL_OK)
-		error = hal_vmap_pin(scratch.mapping, &scratch.vaddr);
-	if (error != HAL_OK) {
-		if (hal_vmap_release(scratch.mapping) != HAL_OK)
-			HAL_FATAL("scratch vmap rollback failed");
-		return error;
-	}
-
-	/* Publishes the mapped region. */
-	scratch.size = rounded;
-	*result = scratch;
-
-	/* Reports the completed allocation. */
-	return HAL_OK;
+	/* Failed. */
+	return HAL_ERR_NOMEM;
 }
 
 /*
@@ -431,16 +388,8 @@ io_scratch_free(
 	if (scratch == NULL || scratch->vaddr == NULL || scratch->size == 0)
 		return HAL_ERR_INVALID;
 
-	/* Unpins a mapping, or returns contiguous physical memory. */
-	if (scratch->mapping != NULL) {
-		hal_vmap_unpin(scratch->mapping);
-		error = hal_vmap_release(scratch->mapping);
-		if (error != HAL_OK &&
-		    hal_vmap_pin(scratch->mapping, &scratch->vaddr) != HAL_OK)
-			HAL_FATAL("scratch vmap release lost ownership");
-	} else {
-		error = hal_pmem_free(&scratch->physical);
-	}
+	/* Returns the contiguous physical memory. */
+	error = hal_pmem_free(&scratch->physical);
 
 	/* Empties the description only once its region is really gone. */
 	if (error == HAL_OK)
@@ -536,19 +485,19 @@ io_error_unlock(
 
 /* Allocates and accounts complete HAL backing, including architecture page rounding. */
 static int
-allocate_backing(size_t bytes, size_t limit, int allow_vmap, struct io_scratch *memory)
+allocate_backing(size_t bytes, size_t limit, struct io_scratch *memory)
 {
 	size_t page;
 	size_t rounded;
 	int result;
 
-	page = hal_page_get_page_size(1);
+	page = hal_space_get_page_size(1);
 	if (page == 0 || bytes > SIZE_MAX - (page - 1U))
 		return 0;
 	rounded = (bytes + page - 1U) / page * page;
 	if (rounded > limit)
 		return 0;
-	result = io_scratch_alloc(rounded, allow_vmap, memory);
+	result = io_scratch_alloc(rounded, memory);
 	if (result != HAL_OK)
 		return 0;
 	if (memory->size < rounded || memory->size > limit || memory->vaddr == NULL) {

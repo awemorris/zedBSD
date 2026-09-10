@@ -313,7 +313,7 @@ hal_m68k_task_memory_stats(uint32_t *count, size_t *stack_bytes)
 void hal_m68k_space_memory_stats(uint32_t *, uint32_t *);
 
 void
-hal_memory_get_stats(struct hal_memory_stats *stats)
+hal_pmem_get_stats(struct hal_pmem_stats *stats)
 {
 	if (stats == NULL)
 		return;

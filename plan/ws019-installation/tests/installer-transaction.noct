@@ -135,5 +135,27 @@ func main(args) {
     assertTransaction(!report.ok && c.files["/stage/kernel"].content == "unknown", "unknown stage deleted");
     txCheck(c, report);
     scenarios = scenarios + 1;
+    // The native profile retains identical failure semantics and publishes config last.
+    c = txSetup(0, 0);
+    c.entries = [c.entries[0], c.entries[1], c.entries[5]];
+    report = instManagedProfile(ops, c, c.entries, "native");
+    assertTransaction(report.ok, report.message);
+    txCheck(c, report);
+    count = Array.size(c.events);
+    scenarios = scenarios + 1;
+    for (i in 1..count + 1) {
+        c = txSetup(i, 0);
+        c.entries = [c.entries[0], c.entries[1], c.entries[5]];
+        report = instManagedProfile(ops, c, c.entries, "native");
+        assertTransaction(!report.ok && c.failed, "native fault did not fail transaction");
+        txCheck(c, report);
+        scenarios = scenarios + 1;
+    }
+    for (profile in ["native", "unknown"]) {
+        c = txSetup(0, 0);
+        report = instManagedProfile(ops, c, c.entries, profile);
+        assertTransaction(!report.ok && Array.size(c.events) == 0, "profile mismatch performed I/O");
+        scenarios = scenarios + 1;
+    }
     print("installer transaction PASS " + scenarios + " scenarios");
 }

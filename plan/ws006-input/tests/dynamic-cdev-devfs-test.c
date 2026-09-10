@@ -3,6 +3,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 
 #include "kern/backing-claim.h"
+#include "kern/buf.h"
 #include "kern/block-identity.h"
 #include "kern/cdev.h"
 #include "kern/devfs.h"
@@ -40,6 +41,32 @@ int partition_reload(struct disk *d) { (void)d; return EOPNOTSUPP; }
 struct ucred *cred_current_ref(void) { return NULL; }
 int cred_is_superuser(const struct ucred *c) { (void)c; return 0; }
 void cred_release(struct ucred *c) { (void)c; }
+
+/* Character-device tests must never reach the new block-administration paths. */
+int disk_admin_begin(struct disk *d, const struct backing_claim *c)
+{ (void)d; (void)c; abort(); }
+void disk_admin_end(struct disk *d, const struct backing_claim *c)
+{ (void)d; (void)c; abort(); }
+int disk_admin_io_begin(struct disk *d, const struct backing_claim *c)
+{ (void)d; (void)c; abort(); }
+void disk_admin_io_end(struct disk *d, const struct backing_claim *c)
+{ (void)d; (void)c; abort(); }
+int partition_reload_claimed(struct disk *d, const struct backing_claim *c)
+{ (void)d; (void)c; abort(); }
+int backing_claim_prepare_disk(struct disk *d, uint64_t first, uint64_t count,
+    enum backing_claim_owner owner, struct backing_claim **out)
+{ (void)d; (void)first; (void)count; (void)owner; (void)out; abort(); }
+void backing_claim_release(struct backing_claim *c)
+{ (void)c; abort(); }
+int buf_invalidate(struct disk *d, uint64_t first, uint64_t count, unsigned flags)
+{ (void)d; (void)first; (void)count; (void)flags; abort(); }
+int buf_invalidate_disk(struct disk *d, unsigned flags)
+{ (void)d; (void)flags; abort(); }
+int disk_read_direct(struct disk *d, uint64_t first, uint32_t count, void *data)
+{ (void)d; (void)first; (void)count; (void)data; abort(); }
+int disk_write_direct_claimed(struct disk *d, uint64_t first, uint32_t count,
+    const void *data, const struct backing_claim *c)
+{ (void)d; (void)first; (void)count; (void)data; (void)c; abort(); }
 
 struct test_payload {
 	unsigned value;

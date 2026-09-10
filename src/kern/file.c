@@ -19,6 +19,7 @@
 #include "kern/file.h"
 #include "kern/file-backing.h"
 #include "kern/io-stats.h"
+#include "kern/io-pool.h"
 #include "kern/cache-memory.h"
 #include "kern/disk.h"
 #include "kern/page.h"
@@ -122,6 +123,8 @@ extern void file_regular_io_lock_checkpoint(struct inode *inode)
 extern void vm_object_cache_prepare(struct file *) __attribute__((weak));
 extern int vm_object_cache_pin(struct inode *, struct vm_object **) __attribute__((weak));
 extern void vm_object_cache_unpin(struct vm_object *) __attribute__((weak));
+extern size_t vm_object_cache_reclaim_pinned(struct vm_object *, size_t)
+    __attribute__((weak));
 static void file_io_cache_read_prepare(struct file_io *io);
 extern unsigned vm_object_cache_drain(struct mount *) __attribute__((weak));
 extern int vm_object_backing_busy(const struct backing_claim *)
@@ -1295,6 +1298,7 @@ file_io_transfer(
 	ssize_t result;
 	ssize_t cached;
 	int cache_published;
+	int cache_retried;
 	uint64_t maximum_end;
 	uint64_t remaining;
 	uint64_t end;
@@ -1304,6 +1308,7 @@ file_io_transfer(
 	write_start = 0;
 	limit_existing = 0;
 	requested_length = length;
+	cache_retried = 0;
 
 	/* Rejects a transfer without an operation or a buffer. */
 	if (io == NULL || io->file == NULL || (buffer == NULL && length != 0))
@@ -1398,6 +1403,7 @@ read_cache_retry:
 			io->held_inode_io = 0;
 		}
 
+read_coherent_retry:
 		useful = 0;
 		if (vm_object_read_coherent_useful != NULL) {
 			content_error = vm_object_read_coherent_useful(io->content_inode,
@@ -1408,6 +1414,21 @@ read_cache_retry:
 		}
 
 		io->readahead_useful += useful;
+
+
+		/*
+		 * Optional pages of this read can exhaust the backend's shared
+		 * credits. The inner operation has ended without returning bytes.
+		 * Keep every outer identity/content lease and retry once only after
+		 * the sole-owner check has actually retired disposable storage.
+		 */
+		if (content_error == ENOMEM && !cache_retried &&
+		    io->read_object != NULL && vm_object_cache_reclaim_pinned != NULL) {
+			cache_retried = 1;
+			if (vm_object_cache_reclaim_pinned(io->read_object,
+			    KERN_IO_BATCH_MAX) != 0)
+				goto read_coherent_retry;
+		}
 		if (io->read_object == NULL) {
 			mutex_lock(&file->f_inode->i_io_lock);
 			io->held_inode_io = 1;

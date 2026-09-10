@@ -11,8 +11,6 @@
 #include <errno.h>
 
 extern char sparcv9_trap_table[];
-static hal_trap_handler_t trap_handlers[5];
-static hal_syscall_handler_t syscall_handler;
 static int user_fault_active;
 
 static void
@@ -30,8 +28,10 @@ deliver_user_fault(uintptr_t pc, uintptr_t address, int instruction,
 
 	(void)value;
 	user_fault_active++;
-	result = kernel_user_fault_handler(14U, 3U, pc,
-	    instruction ? 0x10U : write ? 2U : 0U, address);
+	result = kernel_user_fault_handler(HAL_TRAP_CAUSE_PAGE_FAULT,
+	    instruction ? HAL_TRAP_MODE_EXEC :
+	    write ? HAL_TRAP_MODE_WRITE : HAL_TRAP_MODE_READ,
+	    pc, address, instruction ? 0x64U : 0x68U, 0);
 	user_fault_active--;
 	return result;
 }
@@ -73,7 +73,7 @@ int
 sparcv9_trap_dispatch(uint64_t trap_type, uintptr_t pc, uintptr_t next_pc,
 	uint64_t tstate)
 {
-	int cause, mode = HAL_TRAP_MODE_READ;
+	int cause, mode = HAL_TRAP_MODE_NONE;
 	uintptr_t address = 0;
 	(void)next_pc;
 	(void)tstate;
@@ -96,12 +96,13 @@ sparcv9_trap_dispatch(uint64_t trap_type, uintptr_t pc, uintptr_t next_pc,
 		cause = HAL_TRAP_CAUSE_BREAKPOINT;
 	} else if (trap_type == 0x34U) {
 		cause = HAL_TRAP_CAUSE_ALIGNMENT;
+	} else if (trap_type == 0x28U) {
+		cause = HAL_TRAP_CAUSE_ARITHMETIC;
 	} else {
-		cause = HAL_TRAP_CAUSE_MACHINE_CHECK;
+		cause = HAL_TRAP_CAUSE_OTHER;
 	}
-	if (trap_handlers[cause] != NULL &&
-	    trap_handlers[cause]((void *)pc, (void *)address, mode) ==
-	    HAL_TRAP_RET_SUCCESS)
+	if (kernel_sys_fault_handler(cause, mode, pc, address,
+	    (uintptr_t)trap_type, 0) == HAL_TRAP_RET_SUCCESS)
 		return 0;
 	hal_printf("SPARCV9 trap=%llx pc=%p target=%llx access=%llx sfar=%llx\n",
 	    trap_type, (void *)pc,
@@ -135,13 +136,11 @@ sparcv9_user_trap_dispatch(uint64_t trap_type, uintptr_t pc,
 		uintptr_t args[HAL_SYSCALL_ARGS];
 		unsigned i;
 
-		kernel_user_int_handler(0xc2U, 3U, pc,
-		    frame->syscall_number);
 		for (i = 0; i < HAL_SYSCALL_ARGS; i++)
 			args[i] = (uintptr_t)frame->out[i];
 		/* The generic callback owns accounting and its interruptible window. */
-		frame->out[0] = (uint64_t)(syscall_handler != NULL ?
-		    syscall_handler((uint32_t)frame->syscall_number, args) : -ENOSYS);
+		frame->out[0] = (uint64_t)kernel_syscall_handler(
+		    (uint32_t)frame->syscall_number, args);
 		kernel_user_return_handler();
 		sparcv9_task_leave_user_frame();
 		return 1;
@@ -176,24 +175,23 @@ sparcv9_user_trap_dispatch(uint64_t trap_type, uintptr_t pc,
 		HAL_FATAL("SPARC V9 user page fault handler returned");
 	}
 	{
-		uint32_t vector;
+		int cause;
 		hal_printf("SPARCV9 user trap=%llx pc=%p npc=%p tstate=%llx o0=%llx sp=%llx\n",
 		    trap_type, (void *)pc, (void *)next_pc, tstate,
 		    frame->out[0], frame->old_sp + SPARCV9_STACK_BIAS);
-		vector = trap_type == 0x34U ? 17U :
-		    trap_type == 0x101U ? 3U : 6U;
-		(void)kernel_user_fault_handler(vector, 3U, pc, 0, 0);
+		if (trap_type == 0x34U)
+			cause = HAL_TRAP_CAUSE_ALIGNMENT;
+		else if (trap_type == 0x101U)
+			cause = HAL_TRAP_CAUSE_BREAKPOINT;
+		else if (trap_type == 0x10U || trap_type == 0x11U)
+			cause = HAL_TRAP_CAUSE_ILLEGAL_INSN;
+		else if (trap_type == 0x28U)
+			cause = HAL_TRAP_CAUSE_ARITHMETIC;
+		else
+			cause = HAL_TRAP_CAUSE_OTHER;
+		(void)kernel_user_fault_handler(cause, HAL_TRAP_MODE_NONE, pc, 0,
+		    (uintptr_t)trap_type, 0);
 	}
 	HAL_FATAL("SPARC V9 user fault handler returned");
 	return 0;
-}
-
-void hal_syscall_set_handler(hal_syscall_handler_t h){syscall_handler=h;}
-
-void
-hal_set_trap_handler(int trap, hal_trap_handler_t handler)
-{
-	if (trap < 0 || trap >= 5)
-		HAL_FATAL("bad SPARC V9 trap handler");
-	trap_handlers[trap] = handler;
 }

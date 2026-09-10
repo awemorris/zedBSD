@@ -2,18 +2,35 @@
 #include <hal/hal.h>
 #include <drivers/dma.h>
 #include <drivers/usb.h>
+#include <string.h>
 
 #define REQUIRE(x) do { if (!(x)) HAL_FATAL("SG probe: " #x); } while (0)
 static unsigned allocating[HAL_CPU_MAX];
 static unsigned high_index, low_index;
 int __real_drv_dma_vector_create(struct drv_dma_device *, size_t, struct drv_dma_vector **);
-int __real_hal_pmem_alloc_range(const struct hal_pmem_request *, uint64_t, uint64_t, uint64_t, struct hal_pmem *);
+int __real_hal_pmem_alloc_range(hal_physaddr_t, size_t, size_t, uint32_t, uint32_t, uint64_t, uint64_t, uint64_t, struct hal_pmem *);
 int __real_drv_usb_hcd_register(struct drv_usb_hcd *, struct drv_usb_bus **);
 
 /* Reproduce the extra core/HCD copy with identical backing and TRB shapes. */
 int
 __wrap_drv_usb_hcd_register(struct drv_usb_hcd *hcd, struct drv_usb_bus **bus)
 {
+#ifdef WS025_SG_HIGH_QEMU
+	static struct drv_dma_device *high_device;
+	struct drv_dma_constraints constraints;
+
+	/* QEMU AC64 fixture only; keep the owner alive as long as the HCD. */
+	if (strcmp(hcd->name, "xHCI") == 0) {
+		REQUIRE(high_device == NULL);
+		memset(&constraints, 0, sizeof(constraints));
+		constraints.address_bits = 64;
+		constraints.max_segment_size = drv_dma_device_max_segment_size(hcd->dma);
+		constraints.coherent = drv_dma_device_is_coherent(hcd->dma);
+		REQUIRE(drv_dma_device_create(&constraints, &high_device) == 0);
+		hcd->dma = high_device;
+		hal_puts("SG QEMU TEST DMA OWNER bits=64 lifetime=HCD\n");
+	}
+#endif
 #ifdef WS025_SG_COPY_BASELINE
 	static struct drv_usb_hcd_ops saved[8];
 	static unsigned count;
@@ -29,13 +46,21 @@ __wrap_drv_usb_hcd_register(struct drv_usb_hcd *hcd, struct drv_usb_bus **bus)
 }
 
 int
-__wrap_hal_pmem_alloc_range(const struct hal_pmem_request *request,
+__wrap_hal_pmem_alloc_range(hal_physaddr_t request_paddr, size_t request_size, size_t request_alignment, uint32_t request_type, uint32_t request_attr,
     uint64_t minimum, uint64_t maximum, uint64_t boundary, struct hal_pmem *memory)
 {
 	uint64_t candidate;
 	unsigned index;
+	unsigned attempt;
+	int error;
 
-	if (allocating[hal_cpu_current()] && request->size == 4096) {
+	if (!allocating[hal_cpu_current()] || request_size != 4096)
+		return __real_hal_pmem_alloc_range(request_paddr, request_size,
+		    request_alignment, request_type, request_attr, minimum, maximum,
+		    boundary, memory);
+
+	/* Exact test PFNs may already belong to ordinary coherent buffers. */
+	for (attempt = 0; attempt < 1024; attempt++) {
 		if (maximum > UINT32_MAX) {
 			index = __atomic_fetch_add(&high_index, 1U, __ATOMIC_RELAXED);
 			candidate = UINT64_C(0x110000000) + (uint64_t)index * 65536U;
@@ -43,11 +68,17 @@ __wrap_hal_pmem_alloc_range(const struct hal_pmem_request *request,
 			index = __atomic_fetch_add(&low_index, 1U, __ATOMIC_RELAXED);
 			candidate = UINT64_C(0x20000000) + (uint64_t)index * 65536U;
 		}
-		REQUIRE(candidate >= minimum && candidate <= maximum - 4095U);
-		minimum = candidate;
-		maximum = candidate + 4095U;
+		if (maximum < 4095U || candidate < minimum || candidate > maximum - 4095U)
+			return HAL_ERR_NOMEM;
+		error = __real_hal_pmem_alloc_range(request_paddr, request_size,
+		    request_alignment, request_type, request_attr, candidate,
+		    candidate + 4095U, boundary, memory);
+		if (error != HAL_ERR_NOMEM)
+			return error;
+		hal_printf("SG TEST PFN UNAVAILABLE address=%llx attempt=%u\n",
+		    (unsigned long long)candidate, attempt);
 	}
-	return __real_hal_pmem_alloc_range(request, minimum, maximum, boundary, memory);
+	return HAL_ERR_NOMEM;
 }
 
 int
@@ -68,6 +99,7 @@ __wrap_drv_dma_vector_create(struct drv_dma_device *device, size_t size,
 	if (error != 0 || size != 65536)
 		return error;
 	count = drv_dma_vector_count(*result);
+	hal_printf("SG VECTOR OBSERVED count=%u bits=%u\n", count, drv_dma_device_address_bits(device));
 	REQUIRE(count == 16);
 	previous = first = 0;
 	for (index = 0; index < count; index++) {

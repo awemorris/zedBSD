@@ -127,8 +127,8 @@ hal_pmem_get_total_size(
  * Collects i386 physical, task, and address-space memory statistics.
  */
 void
-hal_memory_get_stats(
-	struct hal_memory_stats *stats)
+hal_pmem_get_stats(
+	struct hal_pmem_stats *stats)
 {
 	bool enabled;
 

@@ -1,0 +1,229 @@
+--- a/src/api/api-beui-zedbsd.c
++++ b/src/api/api-beui-zedbsd.c
+@@ -381,6 +381,8 @@
+ static bool cfunc_BeUI_isOpen(NoctEnv *env);
+ static bool cfunc_BeUI_getWidth(NoctEnv *env);
+ static bool cfunc_BeUI_getHeight(NoctEnv *env);
++static bool cfunc_BeUI_getBitsPerPixel(NoctEnv *env);
++static bool cfunc_BeUI_hasInput(NoctEnv *env);
+ static bool cfunc_BeUI_poll(NoctEnv *env);
+ static bool cfunc_BeUI_flush(NoctEnv *env);
+ static bool cfunc_BeUI_fill(NoctEnv *env);
+@@ -3177,6 +3179,55 @@
+ 	return call_result;
+ }
+ 
++/* Returns actual framebuffer storage depth rather than the initialization hint. */
++static bool
++cfunc_BeUI_getBitsPerPixel(
++	NoctEnv *env)
++{
++	bool call_result;
++	struct display_info info;
++
++	/* Handles the next cfunc_BeUI_getBitsPerPixel decision. */
++	if (!get_display_info(&info)) {
++		noct_error(env, N_TR("BeUI is not open."));
++
++		/* Reports the cfunc_BeUI_getBitsPerPixel result. */
++		return false;
++	}
++
++	/* Reports the cfunc_BeUI_getBitsPerPixel result. */
++	call_result = return_int(env, (int)info.bits_per_pixel);
++
++	/* Reports the cfunc_BeUI_getBitsPerPixel result. */
++	return call_result;
++}
++
++/* Reports whether at least one usable input source remains attached. */
++static bool
++cfunc_BeUI_hasInput(
++	NoctEnv *env)
++{
++	int present;
++	bool returned;
++	unsigned index;
++
++	/* Rescans and detaches failed evdev descriptors before counting inputs. */
++	present = 0;
++	if (state.display_open && backend.input_initialized) {
++		zedbsd_input_service(&backend);
++		for (index = 0; index < INPUT_MAX_SOURCES; index++) {
++			if (backend.sources[index].fd >= 0) {
++				present = 1;
++				break;
++			}
++		}
++	}
++
++	/* Succeeded: returns a current attachment observation, not a key state. */
++	returned = return_int(env, present);
++	return returned;
++}
++
+ /*
+  * Returns 1 while the display is alive and 0 once it has closed, so the
+  * canonical loop is "while (BeUI.poll()) { ... }".
+@@ -4332,6 +4383,8 @@
+ 		{"BeUI.isOpen", "isOpen", 0, {NULL}, cfunc_BeUI_isOpen},
+ 		{"BeUI.getWidth", "getWidth", 0, {NULL}, cfunc_BeUI_getWidth},
+ 		{"BeUI.getHeight", "getHeight", 0, {NULL}, cfunc_BeUI_getHeight},
++		{"BeUI.getBitsPerPixel", "getBitsPerPixel", 0, {NULL}, cfunc_BeUI_getBitsPerPixel},
++		{"BeUI.hasInput", "hasInput", 0, {NULL}, cfunc_BeUI_hasInput},
+ 		{"BeUI.poll", "poll", 0, {NULL}, cfunc_BeUI_poll},
+ 		{"BeUI.flush", "flush", 0, {NULL}, cfunc_BeUI_flush},
+ 		{"BeUI.fill", "fill", 5, {"x", "y", "width", "height", "color"}, cfunc_BeUI_fill},
+--- a/src/api/api-beui-sdl2.c
++++ b/src/api/api-beui-sdl2.c
+@@ -252,6 +252,8 @@
+ static bool cfunc_BeUI_isOpen(NoctEnv *env);
+ static bool cfunc_BeUI_getWidth(NoctEnv *env);
+ static bool cfunc_BeUI_getHeight(NoctEnv *env);
++static bool cfunc_BeUI_getBitsPerPixel(NoctEnv *env);
++static bool cfunc_BeUI_hasInput(NoctEnv *env);
+ static bool cfunc_BeUI_poll(NoctEnv *env);
+ static bool cfunc_BeUI_flush(NoctEnv *env);
+ static bool cfunc_BeUI_fill(NoctEnv *env);
+@@ -1815,6 +1817,45 @@
+ 	return returned;
+ }
+ 
++/* Returns actual framebuffer storage depth rather than the initialization hint. */
++static bool
++cfunc_BeUI_getBitsPerPixel(
++	NoctEnv *env)
++{
++	struct display_info info;
++	int available;
++	bool returned;
++
++	/* Reads the active display description. */
++	available = beui_get_display_info(&info);
++	if (!available) {
++		noct_error(env, N_TR("BeUI is not open."));
++		return false;
++	}
++
++	/* Returns the active display depth. */
++	returned = return_int(env, (int)info.bits_per_pixel);
++
++	/* Reports whether the depth was returned. */
++	return returned;
++}
++
++/* Reports whether at least one usable input source remains attached. */
++static bool
++cfunc_BeUI_hasInput(
++	NoctEnv *env)
++{
++	int present;
++	bool returned;
++
++	/* These hosts expose input for the lifetime of their display session. */
++	present = beui_is_open();
++
++	/* Succeeded: returns a current attachment observation, not a key state. */
++	returned = return_int(env, present);
++	return returned;
++}
++
+ /* Implements BeUI.poll(). */
+ static bool
+ cfunc_BeUI_poll(
+@@ -2986,6 +3027,8 @@
+ 		{"BeUI.isOpen", "isOpen", 0, {NULL}, cfunc_BeUI_isOpen},
+ 		{"BeUI.getWidth", "getWidth", 0, {NULL}, cfunc_BeUI_getWidth},
+ 		{"BeUI.getHeight", "getHeight", 0, {NULL}, cfunc_BeUI_getHeight},
++		{"BeUI.getBitsPerPixel", "getBitsPerPixel", 0, {NULL}, cfunc_BeUI_getBitsPerPixel},
++		{"BeUI.hasInput", "hasInput", 0, {NULL}, cfunc_BeUI_hasInput},
+ 		{"BeUI.poll", "poll", 0, {NULL}, cfunc_BeUI_poll},
+ 		{"BeUI.flush", "flush", 0, {NULL}, cfunc_BeUI_flush},
+ 		{"BeUI.fill", "fill", 5, {"x", "y", "width", "height", "color"}, cfunc_BeUI_fill},
+--- a/src/api/api-beui-pc98.c
++++ b/src/api/api-beui-pc98.c
+@@ -367,6 +367,8 @@
+ static bool cfunc_BeUI_isOpen(NoctEnv *env);
+ static bool cfunc_BeUI_getWidth(NoctEnv *env);
+ static bool cfunc_BeUI_getHeight(NoctEnv *env);
++static bool cfunc_BeUI_getBitsPerPixel(NoctEnv *env);
++static bool cfunc_BeUI_hasInput(NoctEnv *env);
+ static bool cfunc_BeUI_poll(NoctEnv *env);
+ static bool cfunc_BeUI_flush(NoctEnv *env);
+ static bool cfunc_BeUI_fill(NoctEnv *env);
+@@ -3286,6 +3288,45 @@
+ 	return call_result;
+ }
+ 
++/* Returns actual framebuffer storage depth rather than the initialization hint. */
++static bool
++cfunc_BeUI_getBitsPerPixel(
++	NoctEnv *env)
++{
++	bool call_result;
++	struct display_info info;
++
++	/* Handles the next cfunc_BeUI_getBitsPerPixel decision. */
++	if (!beui_get_display_info(&info)) {
++		noct_error(env, N_TR("BeUI is not open."));
++
++		/* Reports the cfunc_BeUI_getBitsPerPixel result. */
++		return false;
++	}
++
++	/* Reports the cfunc_BeUI_getBitsPerPixel result. */
++	call_result = return_int(env, (int)info.bits_per_pixel);
++
++	/* Reports the cfunc_BeUI_getBitsPerPixel result. */
++	return call_result;
++}
++
++/* Reports whether at least one usable input source remains attached. */
++static bool
++cfunc_BeUI_hasInput(
++	NoctEnv *env)
++{
++	int present;
++	bool returned;
++
++	/* These hosts expose input for the lifetime of their display session. */
++	present = beui_is_open();
++
++	/* Succeeded: returns a current attachment observation, not a key state. */
++	returned = return_int(env, present);
++	return returned;
++}
++
+ /*
+  * Returns 1 while the display is alive and 0 once it has closed, so the
+  * canonical loop is "while (BeUI.poll()) { ... }".  Targets that own the
+@@ -4475,6 +4516,8 @@
+ 		{"BeUI.isOpen", "isOpen", 0, {NULL}, cfunc_BeUI_isOpen},
+ 		{"BeUI.getWidth", "getWidth", 0, {NULL}, cfunc_BeUI_getWidth},
+ 		{"BeUI.getHeight", "getHeight", 0, {NULL}, cfunc_BeUI_getHeight},
++		{"BeUI.getBitsPerPixel", "getBitsPerPixel", 0, {NULL}, cfunc_BeUI_getBitsPerPixel},
++		{"BeUI.hasInput", "hasInput", 0, {NULL}, cfunc_BeUI_hasInput},
+ 		{"BeUI.poll", "poll", 0, {NULL}, cfunc_BeUI_poll},
+ 		{"BeUI.flush", "flush", 0, {NULL}, cfunc_BeUI_flush},
+ 		{"BeUI.fill", "fill", 5, {"x", "y", "width", "height", "color"}, cfunc_BeUI_fill},
+--- a/docs/beui.md
++++ b/docs/beui.md
+@@ -38,6 +38,18 @@
+ ### BeUI.getWidth() / BeUI.getHeight()
+ 
+ The display size in pixels. Only valid while open.
++
++### BeUI.getBitsPerPixel()
++
++Returns the actual framebuffer storage depth while open. An RGB24 image may
++be drawn into a 32-bit framebuffer; the initialization hint is not this value.
++
++### BeUI.hasInput()
++
++Returns 1 if a usable input source is currently attached, otherwise 0. The
++zedBSD backend services evdev detach/rescan before reporting. SDL2 and PC-98
++provide input for the lifetime of their open display session. This is an
++observation, not a promise that hardware cannot disconnect on the next call.
+ 
+ ### BeUI.poll()
+ 

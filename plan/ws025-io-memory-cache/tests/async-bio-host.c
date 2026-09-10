@@ -51,10 +51,12 @@ int waitq_sleep(struct wait_queue *wait,struct spinlock *lock,uint64_t sequence,
  if (__atomic_load_n(&stopping,__ATOMIC_ACQUIRE))async_host_exit();
  host_thread_yield();spin_lock_irqsave(lock);return EAGAIN;
 }
-int hal_pmem_alloc(const struct hal_pmem_request *request,struct hal_pmem *memory)
+int hal_pmem_alloc(hal_physaddr_t request_paddr, size_t request_size, size_t request_alignment, uint32_t request_type, uint32_t request_attr,struct hal_pmem *memory)
 {
+	(void)request_paddr; (void)request_alignment; (void)request_type; (void)request_attr;
+
  memset(memory,0,sizeof(*memory));if(memory_fail)return HAL_ERR_NOMEM;
- memory->size=(request->size+4095)&~(size_t)4095;
+ memory->size=(request_size+4095)&~(size_t)4095;
  memory->vaddr=aligned_alloc(4096,memory->size);CHECK(memory->vaddr!=NULL);
  memory_count++;memory_bytes+=memory->size;return HAL_OK;
 }
@@ -127,7 +129,7 @@ static void test_loop_worker(void)
 }
 static void complete_callback(struct bio_async_request *request,void *argument)
 {
- (void)request;(void)argument;__atomic_fetch_add(&callbacks,1,__ATOMIC_RELEASE);
+ (void)request_paddr; (void)request_size; (void)request_alignment; (void)request_type; (void)request_attr;(void)argument;__atomic_fetch_add(&callbacks,1,__ATOMIC_RELEASE);
 }
 static void release_callback(struct bio_async_request *request,void *argument)
 {

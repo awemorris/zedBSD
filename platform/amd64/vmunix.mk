@@ -114,7 +114,7 @@ endif
 AMD64_USB_CLASS_SOURCES :=
 ifeq ($(CONFIG_DRIVER_USB_STORAGE),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-storage.c
-AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-uas.c
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-uas.c src/drivers/usb/usb-uas-transport.c src/drivers/usb/usb-uas-disk.c
 endif
 AMD64_NVME_SOURCES :=
 ifeq ($(CONFIG_DRIVER_PCI_NVME),y)
@@ -388,7 +388,7 @@ $(BUILD)/bootloader/BOOTZBSD.EXE: $(BUILD)/bootloader/bootzbsd.bin \
 
 $(BUILD)/uefi/bootx64.o: $(UEFI_LOADER)/bootx64.c \
 	$(UEFI_LOADER)/include/uefi.h $(UEFI_LOADER)/elf64.h \
-	$(UEFI_LOADER)/framebuffer.h $(UEFI_LOADER)/memory-map.h \
+	$(UEFI_LOADER)/framebuffer.h $(UEFI_LOADER)/video.h $(UEFI_LOADER)/memory-map.h \
 	$(UEFI_LOADER)/volume-discovery.h \
 	$(UEFI_LOADER)/zedbsd-config.h \
 	bootloader/include/amd64-handoff.h \
@@ -404,6 +404,12 @@ $(BUILD)/uefi/volume-discovery.o: $(UEFI_LOADER)/volume-discovery.c \
 
 $(BUILD)/uefi/framebuffer.o: $(UEFI_LOADER)/framebuffer.c \
 	$(UEFI_LOADER)/framebuffer.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
+
+$(BUILD)/uefi/video.o: $(UEFI_LOADER)/video.c $(UEFI_LOADER)/video.h \
+	$(UEFI_LOADER)/include/uefi.h bootloader/include/boot-parameter-handoff.h \
+	include/boot/parameter-handoff.h include/boot/parameters.h
 	@mkdir -p $(dir $@)
 	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
 
@@ -433,7 +439,7 @@ $(BUILD)/uefi/transition.o: $(UEFI_LOADER)/transition.S
 	$(EFI_CC) -m64 -mno-red-zone -c $< -o $@
 
 $(BUILD)/uefi/BOOTX64.EFI: $(BUILD)/uefi/bootx64.o \
-	$(BUILD)/uefi/elf64.o $(BUILD)/uefi/framebuffer.o \
+	$(BUILD)/uefi/elf64.o $(BUILD)/uefi/framebuffer.o $(BUILD)/uefi/video.o \
 	$(BUILD)/uefi/memory-map.o $(BUILD)/uefi/memory-map-v6.o $(BUILD)/uefi/common-memory-map.o \
 	$(BUILD)/uefi/volume-discovery.o $(BUILD)/uefi/zedbsd-config.o \
 	$(BUILD)/uefi/transition.o \

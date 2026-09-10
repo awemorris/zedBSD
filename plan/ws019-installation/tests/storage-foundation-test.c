@@ -383,7 +383,10 @@ static void test_admin(void)
 	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&info) == ENOMEM); alloc_error = 0;
 	CHECK(!admin_claims && disk->d_admin_owner == NULL);
 	disk->d_flags |= DISK_FILE_BACKED;
-	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&info) == EOPNOTSUPP);
+	changed = info;
+	CHECK(block_ioctl(&file, BLKGETINFO, (uintptr_t)&changed) == 0);
+	CHECK((changed.flags & ZEDBSD_BLOCK_FILE_BACKED) != 0);
+	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&changed) == EOPNOTSUPP);
 	disk->d_flags &= ~DISK_FILE_BACKED;
 	disk->d_flags |= DISK_READ_ONLY;
 	changed = info; CHECK(block_ioctl(&file, BLKGETINFO, (uintptr_t)&changed) == 0);

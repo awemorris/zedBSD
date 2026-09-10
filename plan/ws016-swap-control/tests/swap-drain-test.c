@@ -346,20 +346,22 @@ hal_fatal(const char *file, int line, const char *message)
 }
 
 int
-hal_pmem_alloc(const struct hal_pmem_request *request, struct hal_pmem *memory)
+hal_pmem_alloc(hal_physaddr_t request_paddr, size_t request_size, size_t request_alignment, uint32_t request_type, uint32_t request_attr, struct hal_pmem *memory)
 {
+	(void)request_paddr;
+
 	void *allocation;
 
-	assert(request != NULL && memory != NULL);
-	allocation = aligned_alloc(request->alignment, request->size);
+	assert(memory != NULL);
+	allocation = aligned_alloc(request_alignment, request_size);
 	if (allocation == NULL)
 		return HAL_ERR_NOMEM;
-	memset(allocation, 0, request->size);
+	memset(allocation, 0, request_size);
 	memory->vaddr = allocation;
 	memory->paddr = (hal_physaddr_t)(uintptr_t)allocation;
-	memory->size = request->size;
-	memory->type = request->type;
-	memory->attr = request->attr;
+	memory->size = request_size;
+	memory->type = request_type;
+	memory->attr = request_attr;
 	return HAL_OK;
 }
 
@@ -373,8 +375,10 @@ hal_pmem_free(struct hal_pmem *memory)
 }
 
 int
-hal_page_query(hal_space_t space, void *address, uint32_t *flags)
+hal_space_query(hal_space_t space, void *address, hal_physaddr_t *physical, uint32_t *flags)
 {
+ if (physical != NULL) *physical = 0;
+
 	(void)space;
 	(void)address;
 	if (flags != NULL)
@@ -383,7 +387,7 @@ hal_page_query(hal_space_t space, void *address, uint32_t *flags)
 }
 
 int
-hal_page_prot_query(hal_space_t space, void *address, size_t size,
+hal_space_prot_query(hal_space_t space, void *address, size_t size,
 	uint32_t attr, uint32_t *flags)
 {
 	(void)space;
@@ -396,7 +400,7 @@ hal_page_prot_query(hal_space_t space, void *address, size_t size,
 }
 
 int
-hal_page_map(hal_space_t space, void *address, hal_physaddr_t physical,
+hal_space_map(hal_space_t space, void *address, hal_physaddr_t physical,
 	size_t size, uint32_t attr)
 {
 	(void)space;
@@ -408,7 +412,7 @@ hal_page_map(hal_space_t space, void *address, hal_physaddr_t physical,
 }
 
 int
-hal_page_prot(hal_space_t space, void *address, size_t size, uint32_t attr)
+hal_space_prot(hal_space_t space, void *address, size_t size, uint32_t attr)
 {
 	(void)space;
 	(void)address;
@@ -418,7 +422,7 @@ hal_page_prot(hal_space_t space, void *address, size_t size, uint32_t attr)
 }
 
 int
-hal_page_unmap(hal_space_t space, void *address, size_t size)
+hal_space_unmap(hal_space_t space, void *address, size_t size)
 {
 	(void)space;
 	(void)address;

@@ -1,0 +1,25 @@
+require graphicui;
+func stats(label) {
+ var out = label + "\n";
+ for (name in ["hw.memory.stats", "vfs.cache_memory.stats", "vfs.bufcache.stats"]) {
+  var line = instLines(instRequire(["/sbin/sysctl", name]))[0];
+  out = out + name + "\n";
+  for (field in instSplit(line, " ")) {
+   for (prefix in ["allocated=", "free=", "target=", "resident=", "pending=", "refusals=", "capacity_failures=", "physical_failures="]) {
+    if (String.indexOf(field, prefix) == 0) { out = out + field + " "; }
+   }
+  }
+  out = out + "\n";
+ }
+ return out;
+}
+func main(args) {
+ var ui = instGraphicUi();
+ instGraphicOpen(ui);
+ instGraphicStage(ui, "Checking a precreated 64 MiB swap file");
+ var before = stats("BEFORE");
+ var result = instRun(["/sbin/mkswap", "--verify-pristine", "/tmp/target/swapfile"], "900", 4096);
+ var after = stats("AFTER");
+ instGraphicClose(ui, 0);
+ print(before);print("STATUS=" + result[0] + " " + result[1]);print(after);print("PROBE-END");
+}

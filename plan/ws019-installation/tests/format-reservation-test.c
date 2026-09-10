@@ -680,19 +680,21 @@ hal_fatal(
  */
 int
 hal_pmem_alloc(
-	const struct hal_pmem_request *request,
+	hal_physaddr_t request_paddr, size_t request_size, size_t request_alignment, uint32_t request_type, uint32_t request_attr,
 	struct hal_pmem *memory)
 {
+	(void)request_paddr; (void)request_alignment; (void)request_attr;
+
 	/* Allocate a fresh zeroed page with ordinary host storage. */
 	memset(memory, 0, sizeof(*memory));
-	memory->vaddr = calloc(1, request->size);
+	memory->vaddr = calloc(1, request_size);
 	if (memory->vaddr == NULL)
 		return ENOMEM;
 
 	/* Publish the page descriptor consumed by production VM code. */
-	memory->size = request->size;
+	memory->size = request_size;
 	memory->paddr = (hal_physaddr_t)(uintptr_t)memory->vaddr;
-	memory->type = request->type;
+	memory->type = request_type;
 
 	/* Report successful allocation. */
 	return 0;
@@ -784,7 +786,7 @@ vm_metadata_init(void)
  * Supplies a bounded host user-address range for production region validation.
  */
 void
-hal_page_get_user_range(
+hal_space_get_user_range(
 	uintptr_t *minimum,
 	uintptr_t *limit)
 {
@@ -797,7 +799,7 @@ hal_page_get_user_range(
  * Rejects an unexpected hardware page-protection request.
  */
 int
-hal_page_prot_query(
+hal_space_prot_query(
 	hal_space_t space,
 	void *address,
 	size_t size,
@@ -820,7 +822,7 @@ hal_page_prot_query(
  * Rejects an unexpected hardware page-unmap request.
  */
 int
-hal_page_unmap(
+hal_space_unmap(
 	hal_space_t space,
 	void *address,
 	size_t size)
@@ -839,7 +841,7 @@ hal_page_unmap(
  * Rejects an unexpected hardware address-space destruction.
  */
 void
-hal_page_destroy_space(
+hal_space_destroy(
 	hal_space_t space)
 {
 	/* Fixture address spaces use caller-owned stack metadata. */

@@ -17,7 +17,7 @@ REPO = PUBLIC["REPO"]
 
 
 class InstalledGuest(PUBLIC["PublicInstallGuest"]):
-    def __init__(self, output, disk, variables, extra_args=None):
+    def __init__(self, output, disk, variables, extra_args=None, memory_mib=512, auxiliary_first=True):
         output.mkdir()
         self.output = output
         self.log = output / "guest.log"
@@ -25,7 +25,8 @@ class InstalledGuest(PUBLIC["PublicInstallGuest"]):
         self.commands = (output / "commands.log").open("w")
         self.monitor = (output / "qemu.log").open("w")
         self.qmp = output / "qmp.sock"
-        args = ["qemu-system-x86_64", "-machine", "q35", "-m", "512", "-smp", "4",
+        assert isinstance(memory_mib, int) and 64 <= memory_mib <= 4096
+        args = ["qemu-system-x86_64", "-machine", "q35", "-m", str(memory_mib), "-smp", "4",
                 "-drive", "if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd",
                 "-drive", f"if=pflash,format=raw,file={variables}",
                 "-drive", f"file={disk},format=raw,if=none,id=installed",
@@ -35,7 +36,10 @@ class InstalledGuest(PUBLIC["PublicInstallGuest"]):
                 "-qmp", f"unix:{self.qmp},server=on,wait=off"]
         # Place an auxiliary controller before the installed one to exercise
         # discovery independently of enumeration order, without boot priority.
-        args[7:7] = extra_args or []
+        if auxiliary_first:
+            args[7:7] = extra_args or []
+        else:
+            args.extend(extra_args or [])
         self.commands.write(repr(args) + "\n")
         self.commands.flush()
         self.proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=self.monitor,

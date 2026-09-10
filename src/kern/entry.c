@@ -389,7 +389,7 @@ kernel_entry(
 		kern_logf("cache: worker scratch unavailable; writeback remains disabled\n");
 
 	/* Synchronizes the shared kernel translation domain with the new CPUs. */
-	hal_page_flush_tlb_range(HAL_SPACE_SYS, __kernel_vma_start,
+	hal_space_flush_tlb_range(HAL_SPACE_SYS, __kernel_vma_start,
 				 ZEDBSD_PAGE_SIZE);
 	if (kern_cpu_notify_probe() != HAL_OK)
 		hal_fatal(__FILE__, __LINE__,

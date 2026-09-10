@@ -1,7 +1,7 @@
 /* Production xHCI request/reservation paths, deterministic coherent-DMA boundary.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 typedef int tid_t; /* Host libc lacks zedBSD thread IDs. */
-#include "../temp/p031-driver-fragments/src/drivers/pci-xhci.c"
+#include "../../../src/drivers/pci/pci-xhci.c"
 #include <stdio.h>
 #include <stdlib.h>
 #define CHECK(x) do {if(!(x)){fprintf(stderr,"line %d: %s\n",__LINE__,#x);abort();}}while(0)

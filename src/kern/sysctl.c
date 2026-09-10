@@ -109,7 +109,7 @@ kern_sysctl(
 	struct readahead_report readahead;
 	struct memory_stats memory;
 	struct root_image_info root_image;
-	struct hal_memory_stats hal_memory;
+	struct hal_pmem_stats hal_memory;
 	const char *new_name;
 	uint64_t value;
 	uint32_t cpus;
@@ -146,7 +146,7 @@ kern_sysctl(
 		if (newp != NULL || newlen != 0)
 			return EPERM;
 		memset(&hal_memory, 0, sizeof(hal_memory));
-		hal_memory_get_stats(&hal_memory);
+		hal_pmem_get_stats(&hal_memory);
 		memset(&memory, 0, sizeof(memory));
 		memory.version = MEMORY_STATS_VERSION;
 		memory.boot_ranges_valid = hal_memory.boot_ranges_valid;

@@ -471,10 +471,25 @@ int disk_media_retire(struct disk *disk) { (void)disk;return EBUSY; }
 int partition_retire_media(struct disk *disk) { return disk_media_retire(disk); }
 static unsigned partition_reload_calls;
 static int partition_reload_error;
+static int partition_open_error;
+int disk_open(struct disk *disk)
+{
+	struct usb_storage *storage = disk->d_data;
+	CHECK(storage->lock.locked == 0 && disk->d_open_count == 0);
+	if (partition_open_error) return partition_open_error;
+	disk->d_open_count++;
+	return 0;
+}
+void disk_close(struct disk *disk)
+{
+	struct usb_storage *storage = disk->d_data;
+	CHECK(storage->lock.locked == 0 && disk->d_open_count == 1);
+	disk->d_open_count--;
+}
 int partition_reload(struct disk *disk)
 {
 	struct usb_storage *storage = disk->d_data;
-	CHECK(storage->lock.locked == 0);
+	CHECK(storage->lock.locked == 0 && disk->d_open_count == 1);
 	partition_reload_calls++;
 	return partition_reload_error;
 }

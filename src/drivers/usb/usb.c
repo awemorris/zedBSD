@@ -116,6 +116,8 @@ struct drv_usb_device {
 	unsigned hcd_urb_count;
 	unsigned quarantined;
 	unsigned report_disconnect;
+	/* Topology owner tracks diagnostics independently of the DMA barrier. */
+	int reported_detach_error;
 	atomic_uint_t selection_gate;
 	atomic_uint_t control_gate;
 	atomic_uint_t control_inflight;
@@ -169,6 +171,8 @@ struct drv_usb_urb {
 	size_t transfer_capacity;
 	size_t length, actual_length;
 	unsigned flags, timeout_ms;
+	/* Immutable while the HCD owns this submission, reset by ordinary setup. */
+	unsigned stream_id;
 	drv_usb_urb_callback_t callback;
 	void *callback_argument;
 	struct drv_usb_control_request control;
@@ -489,7 +493,10 @@ drv_usb_hcd_register(
 	    result == NULL ||
 	    (hcd->capabilities & ~(DRV_USB_HCD_CAP_CONCURRENT_URBS |
 				   DRV_USB_HCD_CAP_TRANSFER_RESERVE |
-				   DRV_USB_HCD_CAP_SHARED_STAGING)) != 0 ||
+				   DRV_USB_HCD_CAP_SHARED_STAGING |
+				   DRV_USB_HCD_CAP_BULK_STREAMS)) != 0 ||
+	    ((hcd->capabilities & DRV_USB_HCD_CAP_BULK_STREAMS) != 0 &&
+	     (hcd->ops->endpoint_streams == NULL || hcd->ops->endpoint_enable == NULL)) ||
 	    ((hcd->ops->urb_reserve == NULL) !=
 	     (hcd->ops->urb_unreserve == NULL)) ||
 	    (((hcd->capabilities & DRV_USB_HCD_CAP_SHARED_STAGING) != 0) !=
@@ -2146,6 +2153,7 @@ drv_usb_urb_setup(
 	}
 
 	u->length = n;
+	u->stream_id = 0;
 	u->flags = f;
 	u->timeout_ms = t;
 	u->callback = cb;
@@ -2156,6 +2164,41 @@ drv_usb_urb_setup(
 
 	/* Succeeded. */
 	return 0;
+}
+
+
+/* Publish stream identity only after every ordinary setup check succeeds. */
+int
+drv_usb_urb_setup_stream(struct drv_usb_urb *u, unsigned stream_id,
+    void *b, size_t n, unsigned f, unsigned t,
+    drv_usb_urb_callback_t cb, void *a)
+{
+	int error;
+
+	if (u == NULL || stream_id > UINT16_MAX)
+		return EINVAL;
+	if (hal_atomic_load_acquire(&u->status) == DRV_USB_URB_PENDING ||
+	    hal_atomic_load_acquire(&u->hcd_owned) != 0)
+		return EBUSY;
+	if (stream_id != 0) {
+		if (u->endpoint->type != DRV_USB_TRANSFER_BULK ||
+		    drv_usb_device_speed(u->device) != DRV_USB_SPEED_SUPER ||
+		    !u->endpoint->companion_valid ||
+		    (u->endpoint->companion.attributes & 31U) == 0)
+			return EINVAL;
+		if (!(drv_usb_device_hcd_capabilities(u->device) & DRV_USB_HCD_CAP_BULK_STREAMS))
+			return EOPNOTSUPP;
+	}
+	error = drv_usb_urb_setup(u, b, n, f, t, cb, a);
+	if (error == 0)
+		u->stream_id = stream_id;
+	return error;
+}
+
+unsigned
+drv_usb_urb_stream_id(const struct drv_usb_urb *u)
+{
+	return u != NULL ? u->stream_id : 0;
 }
 
 /*
@@ -2477,7 +2520,8 @@ drv_usb_urb_wait(
 			continue;
 		}
 
-		hal_compiler_barrier();
+		/* Completion may be published by an HCD retirement worker. */
+		sched_yield();
 	}
 }
 
@@ -3756,6 +3800,130 @@ drv_usb_endpoint_set_hcd_data(
 /*
  * Clears the halt an endpoint has fallen into.
  */
+/* Configure streams with the same lifetime/admission barriers as endpoint reset. */
+int
+drv_usb_endpoint_configure_streams(
+	struct drv_usb_endpoint *endpoint, unsigned maximum_stream_id)
+{
+	struct drv_usb_device *device;
+	struct drv_usb_interface *interface, *owner = NULL;
+	unsigned accepted = 0;
+	int binding_entered = 0, selection_locked = 0;
+	int interface_locked = 0, control_locked = 0;
+	int error;
+
+	/* Handles the endpoint availability. */
+	if (endpoint == NULL || endpoint->interface == NULL ||
+	    endpoint->alternate == NULL ||
+	    (endpoint->type != DRV_USB_TRANSFER_BULK) ||
+	    (endpoint->descriptor.address & 0x0fU) == 0) {
+		/* Failed. */
+		return EINVAL;
+	}
+	interface = endpoint->interface;
+
+	/* Checks the endpoint retained by device result. */
+	device = interface->device;
+	if (!endpoint_retained_by_device(device, endpoint))
+		return ENODEV;
+
+	if (maximum_stream_id == 0 || maximum_stream_id > UINT16_MAX ||
+	    device->speed != DRV_USB_SPEED_SUPER || !endpoint->companion_valid ||
+	    (endpoint->companion.attributes & 31U) == 0 ||
+	    (endpoint->companion.attributes & 31U) > 16 ||
+	    maximum_stream_id >= (1U << (endpoint->companion.attributes & 31U)))
+		return EINVAL;
+	if (!(device->bus->hcd->capabilities & DRV_USB_HCD_CAP_BULK_STREAMS) ||
+	    device->bus->hcd->ops->endpoint_streams == NULL)
+		return EOPNOTSUPP;
+
+	/* Checks the device is disconnecting result. */
+	if (device_is_disconnecting(device) || device_is_quarantined(device) ||
+	    hal_atomic_load_acquire(&device->bus->stopping) != 0) {
+		/* Failed. */
+		return ENODEV;
+	}
+
+	/* Checks the operation status. */
+	error = device_binding_enter(device);
+	if (error != 0)
+		return error;
+	binding_entered = 1;
+
+	/* Checks the operation status. */
+	error = endpoint_binding_pin(interface, &owner);
+	if (error != 0)
+		goto out;
+
+	/* Checks the atomic try acquire zero result. */
+	if (!atomic_try_acquire_zero(&device->selection_gate)) {
+		error = EBUSY;
+		goto out;
+	}
+
+	selection_locked = 1;
+
+	/* Checks the device is disconnecting result. */
+	if (device_is_disconnecting(device) || device_is_quarantined(device) ||
+	    hal_atomic_load_acquire(&device->bus->stopping) != 0 ||
+	    device->state != DRV_USB_STATE_CONFIGURED ||
+	    device_active_configuration(device) != interface->configuration ||
+	    interface_active_alternate(interface) != endpoint->alternate ||
+	    interface_binding_owner(interface) != owner) {
+		error = ENODEV;
+		goto out;
+	}
+
+	/* Checks the operation status. */
+	error = io_gate_close_empty(&interface->io_gate);
+	if (error != 0)
+		goto out;
+	interface_locked = 1;
+
+	/* Checks the operation status. */
+	error = device_control_try_lock(device);
+	if (error != 0)
+		goto out;
+	control_locked = 1;
+
+	/* Checks the device is disconnecting result. */
+	if (device_is_disconnecting(device) || device_is_quarantined(device) ||
+	    hal_atomic_load_acquire(&device->bus->stopping) != 0) {
+		error = ENODEV;
+		goto out;
+	}
+
+	error = device->bus->hcd->ops->endpoint_streams(device->bus->hcd,
+	    endpoint, maximum_stream_id, &accepted);
+	if (error != 0 && accepted)
+		device_quarantine_recovery(device, "stream configuration", error);
+
+out:
+
+	/* Handles the control locked condition. */
+	if (control_locked)
+		device_control_unlock(device);
+
+	/* Handles the interface locked condition. */
+	if (interface_locked)
+		io_gate_open(&interface->io_gate);
+
+	/* Handles the selection locked condition. */
+	if (selection_locked)
+		atomic_store_release(&device->selection_gate, 0U);
+	endpoint_binding_unpin(owner);
+
+	/* Handles the binding entered condition. */
+	if (binding_entered)
+		device_binding_exit(device);
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
 int
 drv_usb_endpoint_clear_halt(
 	struct drv_usb_endpoint *endpoint)
@@ -4465,13 +4633,22 @@ device_quiesce(
 
 	/* Handles the device quiesce availability. */
 	if (bus->hcd->ops->device_quiesce == NULL) {
-		/* Checks the device is quarantined result. */
 		if (!device_is_quarantined(device))
 			return 0;
-		device_link(bus, device);
-
-		/* Failed. */
-		return EBUSY;
+		/* A busy class detach may have quarantined this object before its
+		 * final request retired. Controllers without a per-device barrier
+		 * can now prove retirement through checked endpoint shutdown. */
+		if (bus->hcd->ops->endpoint_disable == NULL)
+			return EBUSY;
+		if (drv_usb_device_hcd_urb_count(device) != 0)
+			return EBUSY;
+		error = device_disable_active_endpoints(device);
+		if (error != 0)
+			return error;
+		if (drv_usb_device_hcd_urb_count(device) != 0)
+			return EBUSY;
+		hal_atomic_store_release(&device->quarantined, 0U);
+		return 0;
 	}
 
 	/* Checks the operation status. */
@@ -4737,11 +4914,12 @@ destroy_device(
 		quiesce_error = device_disable_active_endpoints(device);
 	if (detach_error != 0 || quiesce_error != 0) {
 		/* Checks the operation status. */
-		if (detach_error != 0 && !device_is_quarantined(device)) {
+		if (detach_error != 0 && detach_error != device->reported_detach_error) {
 			hal_printf("usb%u: device %u port %u driver detach "
 				   "pending (%d); device retained\n",
 				   bus->number, device->address, device->port,
 				   detach_error);
+			device->reported_detach_error = detach_error;
 		}
 
 		hal_atomic_store_release(&device->quarantined, 1U);

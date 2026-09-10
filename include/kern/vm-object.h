@@ -124,6 +124,9 @@ struct vm_object {
 	 */
 	unsigned active_operations;
 
+	/* Registry-protected subset owning only unpublished prefetch frames. */
+	unsigned prefetch_operations;
+
 	/*
 	 * Lookup lifetime holds waiting for DETACHING to finish.
 	 */
@@ -213,10 +216,18 @@ int vm_object_backing_busy(const struct backing_claim *);
 void vm_object_cache_prepare(struct file *file);
 int vm_object_cache_pin(struct inode *inode, struct vm_object **result);
 void vm_object_cache_unpin(struct vm_object *object);
+/* Caller owns a cache pin and no page pointer; other page users exclude reclaim. */
+size_t vm_object_cache_reclaim_pinned(struct vm_object *object, size_t target);
 int vm_object_writeback_prepare(struct file *file, struct vm_object **result);
 void vm_object_writeback_release(struct vm_object *object);
 int vm_object_content_prepare_delayed(struct vm_object_content *content, struct vm_object *object, struct writeback_ticket *ticket);
 unsigned vm_object_cache_drain(struct mount *mount);
+/* Non-destructive preflight; caller excludes new mount users through later commit. */
+int vm_object_discard_mount_check(struct mount *mount);
+/* Closed admission required. NULL inode counts mount paths; otherwise inode paths. */
+int vm_object_discard_mount_refs(struct mount *, struct inode *, unsigned *);
+/* Commit only after closed admission and complete cross-layer preflight. */
+int vm_object_discard_mount(struct mount *mount, uint64_t *dirty_bytes);
 
 int
 vm_object_get_shared(

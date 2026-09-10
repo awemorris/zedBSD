@@ -65,7 +65,7 @@ func instNativeBootEntries(context, mount) {
 }
 
 func instNativeCopyRoot(context) {
-    context.ui.stage("Copying root filesystem");
+    instNotifyStage(context, "Copying root filesystem");
     var mount = instNativeMount(context, 1, "native-copy", false);
     var copied = instTreeCopy(context.census, mount.path, "3600", "/bin/cp", context.ui.progress, context.ui);
     if (!copied.ok) { System.error(copied.message + "\n" + copied.output); }
@@ -73,7 +73,7 @@ func instNativeCopyRoot(context) {
     instWorkspaceReleaseOne(context.workspace, mount);
 
     // New read-only mounts compare persisted attributes, independent of read-time atime.
-    context.ui.stage("Verifying files and attributes");
+    instNotifyStage(context, "Verifying files and attributes");
     var destination = instNativeMount(context, 1, "native-verify", true);
     var sourceDirectory = instWorkspaceDirectory(context.workspace, "source-verify");
     var source = instWorkspaceAttachType(context.workspace, sourceDirectory,
@@ -87,7 +87,7 @@ func instNativeCopyRoot(context) {
 }
 
 func instNativeSwap(context) {
-    context.ui.stage("Preparing native swap file");
+    instNotifyStage(context, "Preparing native swap file");
     var mount = instNativeMount(context, 1, "native-final", false);
     var path = mount.path + context.plan.swapPath;
     if (instFileLookup(0, path) != 0) { System.error("installation source already contains /swapfile"); }
@@ -122,20 +122,23 @@ func instNativeSwap(context) {
 
 func instNativeBody(context, unused) {
     instWorkspaceDirectory(context.workspace, "");
-    context.ui.stage("Inspecting installation source");
+    instNotifyStage(context, "Inspecting installation source");
     context.source = instSourceMounts(context.workspace, context.discovered);
+    instNotifyStage(context, "Counting source files");
     var directory = instWorkspaceDirectory(context.workspace, "census");
     context.censusDirectory = directory.path;
     context.census = instTreePrepare(context.source.tree.mount.path, directory.path, "/bin/find");
     if (instFileLookup(0, context.source.tree.mount.path + "/swapfile") != 0) {
         System.error("installation source already contains /swapfile");
     }
+    instNotifyStage(context, "Measuring source files");
     var measured = instNativeMeasure(context.census, context.source.inputs, 32L * 1048576L);
     instInstallSeed(context);
     var guids = instNativeNewGuids(context);
+    instNotifyStage(context, "Checking destination capacity");
     context.plan = instNativeAdmittedPlan(context.discovered.disk, context.discovered.origins.disk,
         measured, guids, instFormatQuery, 0);
-    if (!context.ui.review(context.plan, measured)) { context.cancelled = true; return false; }
+    if (!context.ui.review(context.ui, context.plan, measured)) { context.cancelled = true; return false; }
     instSourceRecheck(context.workspace, context.discovered, context.source);
     instNativeBeforeErase(context.discovered);
     // Repeat collision admission after the interactive pause.
@@ -143,7 +146,7 @@ func instNativeBody(context, unused) {
     for (guid in guids) {
         for (existing in visible) { if (guid == existing) { System.error("native GUID collision after review"); } }
     }
-    context.ui.stage("Initializing destination disk");
+    instNotifyStage(context, "Initializing destination disk");
     instNativeCommand(context.plan.argv, "ERASE", context.plan.disk, context);
     context.partitions = instNativeReconcile(context.discovered, context.plan);
     instNativeCheck(context);
@@ -152,7 +155,7 @@ func instNativeBody(context, unused) {
         var argv = ["/sbin/mkfs", "-t", "fat32"];
         if (i == 1) { argv = ["/sbin/mkfs", "-t", "ufs", "--profile=native"]; }
         Array.push(argv, "/dev/" + context.partitions[i].name);
-        context.ui.stage("Formatting /dev/" + context.partitions[i].name);
+        instNotifyStage(context, "Formatting /dev/" + context.partitions[i].name);
         instNativeCommand(argv, "FORMAT", context.partitions[i], context);
     }
     context.destination = {mounts:{}};
@@ -164,7 +167,7 @@ func instNativeBody(context, unused) {
         {path:esp.path + "/zedinst-stage", mount:esp.path}];
     context.destination.present = [true];
     instInstallDirectories(context);
-    context.ui.stage("Installing boot files");
+    instNotifyStage(context, "Installing boot files");
     var entries = instNativeBootEntries(context, esp.path);
     context.transaction = instManagedProfile(instFileOperations(), context, entries, "native");
     if (!context.transaction.ok) { System.error(context.transaction.message); }

@@ -101,7 +101,7 @@ def main():
         guest.run("cat /dev/null")
         guest.run("dd if=/dev/zero of=/run/conflict-byte bs=1 count=1")
         guest.run("echo discard > /dev/null")
-        guest.run("zedinst", "usage: zedinst", status=1)
+        guest.run("zedinst invalid", "usage: zedinst", status=1)
         guest.run("zedinst nvme0n1 nvme0n1p2 < /dev/null", "interactive terminal", status=1)
         guest.run_installer("zedinst sda sda2", "cannot reload the requested installation destination", status=1)
         result["vars_before"] = F["digest"](out / "vars.fd")

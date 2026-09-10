@@ -77,10 +77,12 @@ static void run_worker(void *argument)
 { unsigned index=(unsigned)(uintptr_t)argument;worker_index=(int)index;entries[index](arguments[index]); }
 void thread_start(struct thread *thread)
 { unsigned index=(unsigned)(thread-thread_records);threads[index]=host_thread_start(run_worker,(void *)(uintptr_t)index); }
-int hal_pmem_alloc(const struct hal_pmem_request *request,struct hal_pmem *memory)
+int hal_pmem_alloc(hal_physaddr_t request_paddr, size_t request_size, size_t request_alignment, uint32_t request_type, uint32_t request_attr,struct hal_pmem *memory)
 {
+	(void)request_paddr; (void)request_alignment; (void)request_type; (void)request_attr;
+
  memset(memory,0,sizeof(*memory));if(allocation_fail)return HAL_ERR_NOMEM;
- memory->size=(request->size+4095)&~(size_t)4095;
+ memory->size=(request_size+4095)&~(size_t)4095;
  memory->vaddr=aligned_alloc(4096,memory->size);CHECK(memory->vaddr!=NULL);allocations++;return HAL_OK;
 }
 int hal_pmem_free(struct hal_pmem *memory)
@@ -269,4 +271,4 @@ int main(void)
  printf("readahead worker: %u checks PASS\n",checks);return 0;
 }
 
-size_t hal_page_get_page_size(int level) { (void)level;return 4096; }
+size_t hal_space_get_page_size(int level) { (void)level;return 4096; }

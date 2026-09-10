@@ -9,7 +9,7 @@ $(WS025_HIGH_KERNEL): plan/ws025-io-memory-cache/tests/high-memory-kernel.c $(ZE
 	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) -c $< -o $@
 .PHONY: ws025-high-relink
 $(BUILD)/vmunix: $(WS025_HIGH_KERNEL) ws025-high-relink
-$(BUILD)/vmunix: LD += --wrap=amd64_boot_memory_release --wrap=hal_page_map --wrap=hal_page_unmap --wrap=hal_pmem_free
+$(BUILD)/vmunix: LD += --wrap=amd64_boot_memory_release --wrap=hal_space_map --wrap=hal_space_unmap --wrap=hal_pmem_free
 $(WS025_HIGH_OBJECT): plan/ws025-io-memory-cache/tests/high-memory-guest.c $(ZEDBSD_SYSROOT_AMD64)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(CC) $(AMD64_USER_CPPFLAGS) $(AMD64_USER_CFLAGS) -c $< -o $@

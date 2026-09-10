@@ -81,6 +81,8 @@
 #define DRV_USB_HCD_CAP_CONCURRENT_URBS	(1U << 0)
 #define DRV_USB_HCD_CAP_TRANSFER_RESERVE	(1U << 1)
 #define DRV_USB_HCD_CAP_SHARED_STAGING	(1U << 2)
+/* Advertise only with configured stream rings, completion and checked cancel. */
+#define DRV_USB_HCD_CAP_BULK_STREAMS	(1U << 3)
 #define DRV_USB_TRANSFER_RESERVE_MAX_SIZE (64U * 1024U)
 
 #define DRV_USB_DETACH_FORCE	(1U << 0)
@@ -357,6 +359,11 @@ struct drv_usb_hcd_ops {
 	 * by HCDs whose schedules need no endpoint-level programming.  A failed
 	 * enable must leave the endpoint disabled and without HCD-owned resources;
 	 * the USB core compensates only endpoints whose enable returned success. */
+	/* Explicit idle configuration. Set changed before publishing DMA to hardware;
+	 * a failure with changed set retains every resource until checked teardown. */
+	int (*endpoint_streams)(struct drv_usb_hcd *, struct drv_usb_endpoint *,
+	    unsigned maximum_stream_id, unsigned *changed);
+
 	int (
 		*endpoint_enable)(
 		struct drv_usb_hcd *,
@@ -720,6 +727,9 @@ drv_usb_endpoint_set_hcd_data(
 	struct drv_usb_endpoint *e,
 	unsigned n,
 	uintptr_t value);
+int drv_usb_endpoint_configure_streams(struct drv_usb_endpoint *endpoint,
+    unsigned maximum_stream_id);
+
 int
 drv_usb_endpoint_clear_halt(
 	struct drv_usb_endpoint *endpoint);
@@ -758,6 +768,14 @@ drv_usb_urb_setup(
 	unsigned t,
 	drv_usb_urb_callback_t cb,
 	void *a);
+/* Exclusive idle owner only, as for setup. Nonzero streams require SuperSpeed
+ * bulk and HCD capability. The HCD must additionally validate the configured
+ * stream context at enqueue. Ordinary setup always returns to stream zero. */
+int drv_usb_urb_setup_stream(struct drv_usb_urb *u, unsigned stream_id,
+    void *b, size_t n, unsigned f, unsigned t,
+    drv_usb_urb_callback_t cb, void *a);
+unsigned drv_usb_urb_stream_id(const struct drv_usb_urb *u);
+
 int
 drv_usb_urb_setup_control(
 	struct drv_usb_urb *u,

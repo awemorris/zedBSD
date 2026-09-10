@@ -39,10 +39,9 @@ typedef char amd64_idt_entry_size_must_be_16[
 	sizeof(struct amd64_idt_entry) == 16 ? 1 : -1];
 
 static struct amd64_idt_entry idt[256] __attribute__((aligned(16)));
-static hal_syscall_handler_t syscall_handler;
-static hal_trap_handler_t trap_handlers[5];
 
 static int is_asynchronous_interrupt(int vector);
+static int trap_cause(int vector);
 static void set_gate(unsigned vector, unsigned dpl, void *handler);
 static void handle_fault(struct amd64_interrupt_frame *frame);
 
@@ -104,31 +103,35 @@ amd64_int_init(
 	amd64_int_load();
 }
 
-/*
- * Selects the kernel syscall callback.
- */
-void
-hal_syscall_set_handler(
-	hal_syscall_handler_t handler)
+/* Maps an x86 exception vector onto the generic trap cause. */
+static int
+trap_cause(
+	int vector)
 {
-	/* Publishes the callback used by the syscall vector. */
-	syscall_handler = handler;
-}
+	/* Page faults carry an address and an access mode. */
+	if (vector == 14)
+		return HAL_TRAP_CAUSE_PAGE_FAULT;
 
-/*
- * Selects a kernel trap callback.
- */
-void
-hal_set_trap_handler(
-	int trap,
-	hal_trap_handler_t handler)
-{
-	/* Ignores unsupported generic trap slots. */
-	if (trap < 0 || trap >= 5)
-		return;
+	/* Instruction and breakpoint traps. */
+	if (vector == 6)
+		return HAL_TRAP_CAUSE_ILLEGAL_INSN;
+	if (vector == 3)
+		return HAL_TRAP_CAUSE_BREAKPOINT;
+	if (vector == 17)
+		return HAL_TRAP_CAUSE_ALIGNMENT;
+	if (vector == 18)
+		return HAL_TRAP_CAUSE_MACHINE_CHECK;
 
-	/* Publishes the callback for the selected trap. */
-	trap_handlers[trap] = handler;
+	/* Divide error, overflow, x87 and SIMD exceptions. */
+	if (vector == 0 || vector == 4 || vector == 16 || vector == 19)
+		return HAL_TRAP_CAUSE_ARITHMETIC;
+
+	/* Invalid TSS, segment not present, stack and general protection. */
+	if (vector >= 10 && vector <= 13)
+		return HAL_TRAP_CAUSE_PROTECTION;
+
+	/* Everything else is reported with its raw vector only. */
+	return HAL_TRAP_CAUSE_OTHER;
 }
 
 /*
@@ -175,13 +178,6 @@ int_handler(
 	} else if (vector == AMD64_VECTOR_SPURIOUS) {
 		/* Leaves the unacknowledged APIC spurious vector untouched. */
 	} else if (vector == INT_SYSCALL && (frame->cs & 3U) == 3U) {
-		/* Reports the userspace software interrupt to the kernel. */
-		kernel_user_int_handler(
-			(uint32_t)vector,
-			(uint32_t)frame->cs,
-			frame->rip,
-			frame->rax);
-
 		/* Copies syscall arguments in the established register order. */
 		args[0] = (uintptr_t)frame->rbx;
 		args[1] = (uintptr_t)frame->rcx;
@@ -193,14 +189,10 @@ int_handler(
 		/* Exposes the user frame throughout the interruptible syscall. */
 		amd64_task_enter_user_frame(frame);
 
-		/* Lets the generic callback own accounting and interruption. */
-		if (syscall_handler != NULL) {
-			frame->rax = (uint64_t)syscall_handler(
-				(uint32_t)frame->rax,
-				args);
-		} else {
-			frame->rax = (uint64_t)(intptr_t)-ENOSYS;
-		}
+		/* Lets the generic kernel own accounting and interruption. */
+		frame->rax = (uint64_t)kernel_syscall_handler(
+			(uint32_t)frame->rax,
+			args);
 
 		/* Completes delivery before withdrawing the user frame. */
 		kernel_user_return_handler();
@@ -283,38 +275,29 @@ handle_fault(
 	else
 		address = 0;
 
-	/* Decodes the generic access mode without changing priority. */
-	if (vector == INT_PAGEFAULT && (frame->error_code & 16U) != 0) {
+	/* Decodes the access mode of a page fault; other traps have none. */
+	if (vector != INT_PAGEFAULT)
+		mode = HAL_TRAP_MODE_NONE;
+	else if ((frame->error_code & 16U) != 0)
 		mode = HAL_TRAP_MODE_EXEC;
-	} else if (vector == INT_PAGEFAULT &&
-	    (frame->error_code & 2U) != 0) {
+	else if ((frame->error_code & 2U) != 0)
 		mode = HAL_TRAP_MODE_WRITE;
-	} else {
+	else
 		mode = HAL_TRAP_MODE_READ;
-	}
 
 	/* Maps the architectural vector onto the generic trap causes. */
-	if (vector == INT_PAGEFAULT) {
-		cause = HAL_TRAP_CAUSE_PAGE_FAULT;
-	} else if (vector == 6) {
-		cause = HAL_TRAP_CAUSE_ILLEGAL_INSN;
-	} else if (vector == 3) {
-		cause = HAL_TRAP_CAUSE_BREAKPOINT;
-	} else if (vector == 17) {
-		cause = HAL_TRAP_CAUSE_ALIGNMENT;
-	} else {
-		cause = HAL_TRAP_CAUSE_MACHINE_CHECK;
-	}
+	cause = trap_cause(vector);
 
-	/* Gives a userspace fault to the kernel's user-fault path. */
+	/* Gives a userspace fault to the kernel's user-fault entry. */
 	if ((frame->cs & 3U) == 3U) {
 		amd64_task_enter_user_frame(frame);
 		handled = kernel_user_fault_handler(
-			(uint32_t)vector,
-			(uint32_t)frame->cs,
+			cause,
+			mode,
 			frame->rip,
-			frame->error_code,
-			address) == HAL_TRAP_RET_SUCCESS;
+			address,
+			(uintptr_t)vector,
+			frame->error_code) == HAL_TRAP_RET_SUCCESS;
 
 		/* Completes a handled user fault at the user-return safe point. */
 		if (handled) {
@@ -328,17 +311,18 @@ handle_fault(
 		HAL_FATAL("amd64 user fault handler returned");
 	}
 
-	/* Gives a supported kernel fault to its registered trap callback. */
-	if (cause >= 0 && cause < 5 && trap_handlers[cause] != NULL) {
-		handled = trap_handlers[cause](
-			(void *)(uintptr_t)frame->rip,
-			(void *)address,
-			mode) == HAL_TRAP_RET_SUCCESS;
+	/* Gives a supervisor fault to the kernel's fixed entry. */
+	handled = kernel_sys_fault_handler(
+		cause,
+		mode,
+		frame->rip,
+		address,
+		(uintptr_t)vector,
+		frame->error_code) == HAL_TRAP_RET_SUCCESS;
 
-		/* Resumes the kernel when the registered callback handled the fault. */
-		if (handled)
-			return;
-	}
+	/* Resumes the kernel when the entry handled the fault. */
+	if (handled)
+		return;
 
 	/* Reports the complete unhandled fault before stopping the machine. */
 	hal_printf(

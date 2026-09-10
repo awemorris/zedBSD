@@ -18,14 +18,19 @@ $(WS006_P008_PROBE_OBJECT): $(WS006_P008_PROBE_SOURCE)
 	$(CC) $(AMD64_USER_CPPFLAGS) $(AMD64_USER_CFLAGS) \
 		-fno-strict-aliasing -MMD -MP -c $< -o $@
 
-$(WS006_P008_PROBE): $(AMD64_USER_LIBC_OBJS) \
+WS025_IMOD_OBJECT := $(BUILD)/tests/imod-storage-guest.o
+$(WS025_IMOD_OBJECT): plan/ws025-io-memory-cache/tests/imod-storage-guest.c
+	@mkdir -p $(dir $@)
+	$(CC) $(AMD64_USER_CPPFLAGS) $(AMD64_USER_CFLAGS) -MMD -MP -c $< -o $@
+
+$(WS006_P008_PROBE): $(AMD64_USER_LIBC_OBJS) $(WS025_IMOD_OBJECT) \
 	$(WS006_P008_PROBE_OBJECT) $(AMD64_PLATFORM)/user.ld \
 	$(AMD64_USER_ELF_CHECK)
 	@mkdir -p $(dir $@)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
 		-z max-page-size=4096 -z stack-size=0x100000 \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
-		$(WS006_P008_PROBE_OBJECT) -o $@
+		$(WS006_P008_PROBE_OBJECT) $(WS025_IMOD_OBJECT) -o $@
 	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) \
 		--machine amd64 $@

@@ -517,9 +517,10 @@ References:
 ## 6. Driver completion rule
 
 User-ordered active-goal follow-up: [p050 multiple NVMe controllers](phase050-nvme-multiple-controllers/phase.md)
-resolves BUG-016 after WS019 installer completion. This is required work within
-the ongoing Priority goal, not Future. Define and execute its bounded queue
-after the installer modes, source selection and copy acceptance are finished.
+completed in q187 after WS019. BUG-016 is fixed: both NVMe enumeration orders,
+installed boot, separate/concurrent I/O, persistence, probe-failure isolation and
+host timeout/reset ownership checks pass. See the phase results for evidence
+and hardware-model limits. Other WS004 phases retain their existing status.
 
 A driver is complete only when the common lifecycle is covered: discovery,
 normal operation, concurrency, timeout, reset, detach/shutdown, and diagnostic

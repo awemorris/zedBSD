@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Production core/HCD reservation tests with retained build commands and hashes."""
-__import__('runpy').run_path(str(__import__('pathlib').Path(__file__).resolve().parents[3] / 'plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py'), run_name='__main__')
 from pathlib import Path
 import subprocess,json,sys,os,hashlib
 repo=Path(__file__).resolve().parents[3]
@@ -13,9 +12,10 @@ def run(name,args):
  if r.returncode:sys.exit(1)
 for mode in ('ordinary','sanitize'):
  extra=[] if mode=='ordinary' else ['-fsanitize=address,undefined','-fno-omit-frame-pointer','--param','asan-globals=0']
- for name in ('usb','xhci','storage'):
+ for name in (sys.argv[2:] or ['usb','xhci','storage']):
+  if name not in ('usb','xhci','storage'): raise ValueError(name)
   binary=str(out/(name+'-'+mode))
-  run(name+'-'+mode+'-build',['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-ffunction-sections','-fdata-sections','-I.','-Iinclude','-Iinclude/uapi','-Isrc',*extra,'plan/ws025-io-memory-cache/tests/'+name+'-reserve-host.c','src/kern/io-stats.c','-pthread','-Wl,--gc-sections','-o',binary])
+  run(name+'-'+mode+'-build',['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-ffunction-sections','-fdata-sections','-I.','-Iinclude','-Iinclude/uapi','-Isrc',*extra,'plan/ws025-io-memory-cache/tests/'+name+'-reserve-host.c','src/kern/io.c','-pthread','-Wl,--gc-sections','-o',binary])
   run(name+'-'+mode,['timeout','60s',binary])
-(out/'source.json').write_text(json.dumps({p:hashlib.sha256((repo/p).read_bytes()).hexdigest() for p in ('src/drivers/usb/usb.c','plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/pci-xhci.c','src/drivers/usb/usb-storage.c','include/drivers/usb.h')},indent=2)+'\n')
-print('WS025 USB reservation gates PASS')
+(out/'source.json').write_text(json.dumps({p:hashlib.sha256((repo/p).read_bytes()).hexdigest() for p in ('src/drivers/usb/usb.c','src/drivers/pci/pci-xhci.c','src/drivers/usb/usb-storage.c','include/drivers/usb.h')},indent=2)+'\n')
+print('WS025 reservation gates PASS: ' + ', '.join(sys.argv[2:] or ['usb','xhci','storage']))

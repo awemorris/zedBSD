@@ -1,5 +1,5 @@
 /*
- * USB Attached SCSI descriptor decoder.
+ * USB Attached SCSI descriptor and high-speed command protocol.
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
@@ -19,7 +19,117 @@ static unsigned uas_le16(const uint8_t *bytes);
 static int uas_decode_alternate(const uint8_t *bytes, size_t length,
     enum drv_usb_uas_profile profile, struct drv_usb_uas_capabilities *result);
 
-/* Validates the configuration framing before decoding the selected alternate. */
+/* Encode the fixed Command IU without depending on host packing/endian order. */
+int
+drv_usb_uas_command_begin(struct drv_usb_uas_command *command,
+    uint16_t tag, unsigned lun, const void *cdb, size_t cdb_length,
+    enum drv_usb_uas_direction direction, size_t expected, uint8_t wire[32])
+{
+	if (command == NULL || wire == NULL || cdb == NULL)
+		return EINVAL;
+	if (command->state != DRV_USB_UAS_IDLE)
+		return EBUSY;
+	if (tag == 0 || lun > 255 || cdb_length == 0 || cdb_length > 16)
+		return EINVAL;
+	if (direction != DRV_USB_UAS_NO_DATA &&
+	    direction != DRV_USB_UAS_READ && direction != DRV_USB_UAS_WRITE)
+		return EINVAL;
+	if ((direction == DRV_USB_UAS_NO_DATA) != (expected == 0))
+		return EINVAL;
+
+	memset(wire, 0, 32);
+	wire[0] = 1; /* Command IU, SIMPLE task attribute and no additional CDB. */
+	wire[2] = (uint8_t)(tag >> 8);
+	wire[3] = (uint8_t)tag;
+	wire[9] = (uint8_t)lun; /* Peripheral-device addressing. */
+	memcpy(wire + 16, cdb, cdb_length);
+
+	memset(command, 0, sizeof(*command));
+	command->tag = tag;
+	command->direction = direction;
+	command->expected = expected;
+	command->state = DRV_USB_UAS_WAIT_STATUS;
+	return 0;
+}
+
+void
+drv_usb_uas_command_fail(struct drv_usb_uas_command *command)
+{
+	if (command != NULL)
+		command->state = DRV_USB_UAS_FAILED;
+}
+
+int
+drv_usb_uas_command_data(struct drv_usb_uas_command *command, size_t actual)
+{
+	if (command == NULL)
+		return EINVAL;
+	if (command->state != DRV_USB_UAS_DATA || actual > command->expected) {
+		command->state = DRV_USB_UAS_FAILED;
+		return EIO;
+	}
+
+	command->transferred = actual;
+	command->state = DRV_USB_UAS_WAIT_STATUS;
+	return 0;
+}
+
+int
+drv_usb_uas_command_status(struct drv_usb_uas_command *command,
+    const void *wire, size_t length)
+{
+	const uint8_t *bytes;
+	unsigned tag;
+	unsigned sense_length;
+
+	if (command == NULL)
+		return EINVAL;
+	if (command->state != DRV_USB_UAS_WAIT_STATUS)
+		goto malformed;
+	if (wire == NULL || length < 4)
+		goto malformed;
+	bytes = wire;
+	tag = ((unsigned)bytes[2] << 8) | bytes[3];
+	if (tag != command->tag)
+		goto malformed;
+
+	/* High-speed READY grants exactly one data phase in the planned direction. */
+	if (bytes[0] == 6 || bytes[0] == 7) {
+		if (length != 4 || command->data_seen)
+			goto malformed;
+		if (command->direction == DRV_USB_UAS_NO_DATA)
+			goto malformed;
+		if (bytes[0] == 6 && command->direction != DRV_USB_UAS_READ)
+			goto malformed;
+		if (bytes[0] == 7 && command->direction != DRV_USB_UAS_WRITE)
+			goto malformed;
+		command->data_seen = 1;
+		command->state = DRV_USB_UAS_DATA;
+		return 0;
+	}
+
+	/* Sense IU may complete a rejected CDB without a READY/data transfer. */
+	if (bytes[0] != 3 || length < 16)
+		goto malformed;
+	sense_length = ((unsigned)bytes[14] << 8) | bytes[15];
+	if (length - 16 != sense_length)
+		goto malformed;
+	/* Qualified status needs handling beyond the current SIMPLE-task owner. */
+	if (bytes[4] != 0 || bytes[5] != 0)
+		goto malformed;
+	if (bytes[6] == 0 && command->expected != 0 && !command->data_seen)
+		goto malformed;
+
+	command->scsi_status = bytes[6];
+	command->state = DRV_USB_UAS_COMPLETE;
+	return 0;
+
+malformed:
+	command->state = DRV_USB_UAS_FAILED;
+	return EIO;
+}
+
+/* Validate the configuration framing before decoding the selected alternate. */
 int
 drv_usb_uas_decode_configuration(
 	const void *raw,

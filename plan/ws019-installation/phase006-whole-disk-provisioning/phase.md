@@ -1,6 +1,6 @@
 # ws019-p006: mode selection and whole-disk provisioning
 
-Status: planned; user product decision complete, 2026-09-09
+Status: completed q182; see [integration results](../phase049-native-installer-integration/results.md)
 Parent: [WS019](../ws.md)
 
 Offer existing-FAT coexistence or dedicated whole-disk installation early.
@@ -50,3 +50,8 @@ q169 adds a native UFS codec with an empty root, persistence tail and 64-bit
 fragment/accounting geometry. The historical 2-GiB cap remains only on the
 legacy overlay-image profile. Public native mkfs admission and actual QEMU
 mount/tree-copy remain prerequisites before p006/p007 acceptance.
+
+Accepted through p049/q182: actual mode/disk/default-NO flow, blank-disk GPT and
+FAT/UFS provisioning, source-free native boot, shell return, coexistence install/
+rerun/conflict regression and all supported builds. Earlier linked codec/claim/
+formatter fault gates retain their evidence. Native paging stress belongs to p007.

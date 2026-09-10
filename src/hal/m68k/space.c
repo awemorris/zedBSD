@@ -191,7 +191,7 @@ m68k030_space_init(uintptr_t empty_root_physical)
 }
 
 hal_space_t
-hal_mem_create_space(void)
+hal_space_create(void)
 {
 	struct m68k030_space *space = hal_malloc(sizeof(*space));
 	bool enabled;
@@ -220,7 +220,7 @@ hal_mem_create_space(void)
 }
 
 void
-hal_page_destroy_space(hal_space_t handle)
+hal_space_destroy(hal_space_t handle)
 {
 	struct m68k030_space *space = handle;
 	struct m68k030_space **link;
@@ -258,7 +258,7 @@ hal_page_destroy_space(hal_space_t handle)
 }
 
 void
-hal_page_switch_space(hal_space_t handle)
+hal_space_switch(hal_space_t handle)
 {
 	struct m68k030_space *space;
 	const struct m68k030_root_pointer *root;
@@ -286,7 +286,7 @@ hal_page_switch_space(hal_space_t handle)
 }
 
 int
-hal_page_map(hal_space_t handle, void *virtual_address,
+hal_space_map(hal_space_t handle, void *virtual_address,
 	     hal_physaddr_t physical,
 	     size_t size, uint32_t attributes)
 {
@@ -349,14 +349,14 @@ hal_page_map(hal_space_t handle, void *virtual_address,
 }
 
 int
-hal_page_prot(hal_space_t handle, void *virtual_address, size_t size,
+hal_space_prot(hal_space_t handle, void *virtual_address, size_t size,
 	      uint32_t attributes)
 {
-	return hal_page_prot_query(handle, virtual_address, size, attributes, NULL);
+	return hal_space_prot_query(handle, virtual_address, size, attributes, NULL);
 }
 
 int
-hal_page_prot_query(hal_space_t handle, void *virtual_address, size_t size,
+hal_space_prot_query(hal_space_t handle, void *virtual_address, size_t size,
 		    uint32_t attributes, uint32_t *flags)
 {
 	struct m68k030_space *space = handle;
@@ -391,11 +391,11 @@ hal_page_prot_query(hal_space_t handle, void *virtual_address, size_t size,
 		unsigned index = m68k030_leaf_index(address + offset);
 		uint32_t old;
 		old = table->entries[index];
-		observed |= HAL_PAGE_PRESENT;
+		observed |= HAL_SPACE_PAGE_PRESENT;
 		if (old & M68K030_DESC_USED)
-			observed |= HAL_PAGE_ACCESSED;
+			observed |= HAL_SPACE_PAGE_ACCESSED;
 		if (old & M68K030_PAGE_MODIFIED)
-			observed |= HAL_PAGE_DIRTY;
+			observed |= HAL_SPACE_PAGE_DIRTY;
 		table->entries[index] = m68k030_page_descriptor(
 			m68k030_page_address(old), page_attributes(attributes) |
 			(old & (M68K030_DESC_USED | M68K030_PAGE_MODIFIED)));
@@ -410,9 +410,9 @@ hal_page_prot_query(hal_space_t handle, void *virtual_address, size_t size,
 		uint32_t entry = table->entries[
 			m68k030_leaf_index(address + offset)];
 		if (entry & M68K030_DESC_USED)
-			observed |= HAL_PAGE_ACCESSED;
+			observed |= HAL_SPACE_PAGE_ACCESSED;
 		if (entry & M68K030_PAGE_MODIFIED)
-			observed |= HAL_PAGE_DIRTY;
+			observed |= HAL_SPACE_PAGE_DIRTY;
 	}
 	if (flags != NULL)
 		*flags = observed;
@@ -421,7 +421,7 @@ hal_page_prot_query(hal_space_t handle, void *virtual_address, size_t size,
 }
 
 int
-hal_page_unmap(hal_space_t handle, void *virtual_address, size_t size)
+hal_space_unmap(hal_space_t handle, void *virtual_address, size_t size)
 {
 	struct m68k030_space *space = handle;
 	struct m68k030_table_page *detached;
@@ -451,7 +451,7 @@ hal_page_unmap(hal_space_t handle, void *virtual_address, size_t size)
 }
 
 int
-hal_page_query(hal_space_t handle, void *virtual_address, uint32_t *flags)
+hal_space_query(hal_space_t handle, void *virtual_address, uint32_t *flags)
 {
 	struct m68k030_space *space = handle;
 	uintptr_t address = (uintptr_t)virtual_address;
@@ -467,17 +467,17 @@ hal_page_query(hal_space_t handle, void *virtual_address, uint32_t *flags)
 	table = find_table(space, address);
 	descriptor = table == NULL ? M68K030_DT_INVALID :
 		table->entries[m68k030_leaf_index(address)];
-	*flags = m68k030_descriptor_is_page(descriptor) ? HAL_PAGE_PRESENT : 0;
+	*flags = m68k030_descriptor_is_page(descriptor) ? HAL_SPACE_PAGE_PRESENT : 0;
 	if (descriptor & M68K030_DESC_USED)
-		*flags |= HAL_PAGE_ACCESSED;
+		*flags |= HAL_SPACE_PAGE_ACCESSED;
 	if (descriptor & M68K030_PAGE_MODIFIED)
-		*flags |= HAL_PAGE_DIRTY;
+		*flags |= HAL_SPACE_PAGE_DIRTY;
 	space_unlock(space, enabled);
 	return HAL_OK;
 }
 
 int
-hal_page_clear_flags(hal_space_t handle, void *virtual_address,
+hal_space_clear_flags(hal_space_t handle, void *virtual_address,
 		     uint32_t flags)
 {
 	struct m68k030_space *space = handle;
@@ -488,7 +488,7 @@ hal_page_clear_flags(hal_space_t handle, void *virtual_address,
 
 	if (space == NULL ||
 	    !valid_user_range(address, M68K030_PAGE_SIZE) ||
-	    (flags & ~(HAL_PAGE_ACCESSED | HAL_PAGE_DIRTY)) != 0)
+	    (flags & ~(HAL_SPACE_PAGE_ACCESSED | HAL_SPACE_PAGE_DIRTY)) != 0)
 		return HAL_ERR_INVALID;
 	if (!space_lock_handle(handle, &space, &enabled))
 		return HAL_ERR_STATE;
@@ -498,9 +498,9 @@ hal_page_clear_flags(hal_space_t handle, void *virtual_address,
 		space_unlock(space, enabled);
 		return HAL_ERR_INVALID;
 	}
-	if (flags & HAL_PAGE_ACCESSED)
+	if (flags & HAL_SPACE_PAGE_ACCESSED)
 		mask |= M68K030_DESC_USED;
-	if (flags & HAL_PAGE_DIRTY)
+	if (flags & HAL_SPACE_PAGE_DIRTY)
 		mask |= M68K030_PAGE_MODIFIED;
 	table->entries[m68k030_leaf_index(address)] &= ~mask;
 	hal_compiler_barrier();
@@ -510,7 +510,7 @@ hal_page_clear_flags(hal_space_t handle, void *virtual_address,
 }
 
 void
-hal_page_flush_tlb(hal_space_t handle)
+hal_space_flush_tlb(hal_space_t handle)
 {
 	struct m68k030_space *space;
 	bool enabled;
@@ -529,22 +529,22 @@ hal_page_flush_tlb(hal_space_t handle)
 }
 
 void
-hal_page_flush_tlb_range(hal_space_t handle, void *virtual_address,
+hal_space_flush_tlb_range(hal_space_t handle, void *virtual_address,
 			 size_t size)
 {
 	(void)virtual_address;
 	if (size != 0)
-		hal_page_flush_tlb(handle);
+		hal_space_flush_tlb(handle);
 }
 
 size_t
-hal_page_get_page_size(int level)
+hal_space_get_page_size(int level)
 {
 	return level == 1 ? M68K030_PAGE_SIZE : 0;
 }
 
 void
-hal_page_get_user_range(uintptr_t *minimum, uintptr_t *limit)
+hal_space_get_user_range(uintptr_t *minimum, uintptr_t *limit)
 {
 	if (minimum != NULL)
 		*minimum = M68K030_PAGE_SIZE;

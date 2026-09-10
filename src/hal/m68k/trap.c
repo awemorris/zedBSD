@@ -8,15 +8,12 @@
 #include "mmu030.h"
 
 #define M68K_SR_SUPERVISOR 0x2000U
-#define M68K_TRAP_CAUSE_COUNT 5U
 
 extern char m68k_vector_table[];
 void m68k_set_vbr(void *table);
 void m68k_task_enter_user_frame(struct m68k_saved_frame *frame);
 void m68k_task_leave_user_frame(void);
 
-static hal_trap_handler_t trap_handlers[M68K_TRAP_CAUSE_COUNT];
-static hal_syscall_handler_t syscall_handler;
 
 int __attribute__((weak))
 x68k_irq_dispatch(unsigned vector)
@@ -36,21 +33,6 @@ frame_long(const uint8_t *p)
 {
 	return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 |
 	    (uint32_t)p[2] << 8 | p[3];
-}
-
-static uint32_t
-kernel_fault_vector(unsigned vector, uint32_t cause)
-{
-	if (cause == HAL_TRAP_CAUSE_PAGE_FAULT)
-		return 14U;
-	if (cause == HAL_TRAP_CAUSE_BREAKPOINT)
-		return 3U;
-	if (cause == HAL_TRAP_CAUSE_ILLEGAL_INSN)
-		return 6U;
-	if (vector == 5U || vector == 6U || vector == 7U ||
-	    (vector >= 48U && vector <= 55U))
-		return 0U;
-	return 17U;
 }
 
 void
@@ -92,8 +74,6 @@ m68k_exception_dispatch(struct m68k_saved_frame *frame)
 
 	if (vector == 32U && user) {
 		uintptr_t arguments[HAL_SYSCALL_ARGS];
-		kernel_user_int_handler(0xc2U, 3U,
-		    frame_long(hardware + 2U), frame->d[0]);
 		arguments[0] = frame->d[1];
 		arguments[1] = frame->d[2];
 		arguments[2] = frame->d[3];
@@ -101,8 +81,8 @@ m68k_exception_dispatch(struct m68k_saved_frame *frame)
 		arguments[4] = frame->d[5];
 		arguments[5] = frame->a[0];
 		m68k_task_enter_user_frame(frame);
-		frame->d[0] = (uint32_t)(syscall_handler != NULL ?
-		    syscall_handler(frame->d[0], arguments) : -ENOSYS);
+		frame->d[0] = (uint32_t)kernel_syscall_handler(frame->d[0],
+		    arguments);
 		kernel_user_return_handler();
 		m68k_task_leave_user_frame();
 		return;
@@ -114,8 +94,7 @@ m68k_exception_dispatch(struct m68k_saved_frame *frame)
 		uint16_t mmusr = 0;
 		size_t frame_size = m68k_exception_frame_size(format_vector);
 		uint32_t cause;
-		uint32_t access = HAL_TRAP_MODE_READ;
-		uintptr_t error_code = 0;
+		uint32_t access = HAL_TRAP_MODE_NONE;
 
 		if (m68k_exception_fault_address(hardware, frame_size,
 		    &fault_address, &ssw) == 0 && vector == 2U) {
@@ -138,15 +117,10 @@ m68k_exception_dispatch(struct m68k_saved_frame *frame)
 		cause = m68k_exception_cause(vector, mmusr);
 		if (user) {
 			int handled;
-			if (access == HAL_TRAP_MODE_EXEC)
-				error_code = 0x10U;
-			else if (access == HAL_TRAP_MODE_WRITE)
-				error_code = 2U;
 			m68k_task_enter_user_frame(frame);
-			handled = kernel_user_fault_handler(
-			    kernel_fault_vector(vector, cause), 3U,
-			    frame_long(hardware + 2U), error_code,
-			    fault_address) == HAL_TRAP_RET_SUCCESS;
+			handled = kernel_user_fault_handler((int)cause,
+			    (int)access, frame_long(hardware + 2U),
+			    fault_address, vector, ssw) == HAL_TRAP_RET_SUCCESS;
 			if (handled) {
 				kernel_user_return_handler();
 				m68k_task_leave_user_frame();
@@ -155,29 +129,13 @@ m68k_exception_dispatch(struct m68k_saved_frame *frame)
 			m68k_task_leave_user_frame();
 			HAL_FATAL("m68k user fault handler returned");
 		}
-		if (cause < M68K_TRAP_CAUSE_COUNT &&
-		    trap_handlers[cause] != NULL &&
-		    trap_handlers[cause]((void *)(uintptr_t)
-		    frame_long(hardware + 2U), (void *)fault_address,
-		    (int)access) == HAL_TRAP_RET_SUCCESS)
+		if (kernel_sys_fault_handler((int)cause, (int)access,
+		    frame_long(hardware + 2U), fault_address, vector,
+		    ssw) == HAL_TRAP_RET_SUCCESS)
 			return;
 	}
 
 	hal_printf("m68k supervisor exception vector=%u format=%x sr=%x pc=%x\n",
 	    vector, format_vector >> 12, sr, frame_long(hardware + 2U));
 	HAL_FATAL("unhandled m68k supervisor exception");
-}
-
-void
-hal_set_trap_handler(int trap, hal_trap_handler_t handler)
-{
-	if (trap < 0 || trap >= (int)M68K_TRAP_CAUSE_COUNT)
-		HAL_FATAL("invalid m68k trap handler");
-	trap_handlers[trap] = handler;
-}
-
-void
-hal_syscall_set_handler(hal_syscall_handler_t handler)
-{
-	syscall_handler = handler;
 }

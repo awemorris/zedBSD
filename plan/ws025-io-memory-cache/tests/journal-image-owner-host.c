@@ -6,9 +6,11 @@
 static unsigned allocations,frees,fail_alloc,fail_reserve;
 static size_t charged,pending;
 static unsigned char backing[73728];
-int hal_pmem_alloc(const struct hal_pmem_request *request,struct hal_pmem *memory)
+int hal_pmem_alloc(hal_physaddr_t request_paddr, size_t request_size, size_t request_alignment, uint32_t request_type, uint32_t request_attr,struct hal_pmem *memory)
 {
- CHECK(request->size==UFS_JOURNAL_IMAGE_BYTES);
+	(void)request_paddr; (void)request_alignment; (void)request_type; (void)request_attr;
+
+ CHECK(request_size==UFS_JOURNAL_IMAGE_BYTES);
  if(fail_alloc)return HAL_ERR_NOMEM;
  CHECK(allocations==frees);allocations++;
  memory->vaddr=backing;memory->size=sizeof(backing);return HAL_OK;

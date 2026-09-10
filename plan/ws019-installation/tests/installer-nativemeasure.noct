@@ -1,0 +1,6 @@
+require nativemeasure;
+func main(args) {
+    var prepared = instTreePrepare(args[0], args[1], "/bin/find");
+    var measured = instNativeMeasure(prepared, [{bytes:1024}, {bytes:2048}], 33554432L);
+    print("MEASURE " + measured.tree + " " + measured.objects);
+}

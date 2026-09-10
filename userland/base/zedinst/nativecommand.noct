@@ -47,12 +47,23 @@ func instNativeCommandFeed(state, chunk) {
 }
 
 func instNativeCommandBody(state, unused) {
-    var argv = ["/bin/timeout", "-k", "2", "900"];
+    // Keep the formatter in the PTY foreground group so fgets cannot stop on SIGTTIN.
+    var argv = ["/bin/timeout", "--foreground", "-k", "2", "900"];
     for (argument in state.argv) { Array.push(argv, argument); }
     state.process = Process.spawn(argv);
     if (state.process < 0) { System.error("cannot start destructive command"); }
+    var promptPolls = 0;
     while (Process.isAlive(state.process)) {
-        if (instNativeCommandFeed(state, Process.read(state.process, 100))) {
+        var chunk = Process.read(state.process, 100);
+        if (chunk != "") { promptPolls = 0; }
+        else if (!state.sent) {
+            promptPolls = promptPolls + 1;
+            if (promptPolls > 300) {
+                System.error("destructive command did not provide the expected prompt: " +
+                    state.challenge.prompt + "\nReceived:\n" + state.output);
+            }
+        }
+        if (instNativeCommandFeed(state, chunk)) {
             // Once attempted, a failed write or child exit can still mean partial media changes.
             state.owner.started = true;
             state.sent = true;

@@ -15,6 +15,8 @@
 #include <unistd.h>
 #include <zedbsd/input.h>
 
+int imod_storage_measure(void);
+
 #define ARRAY_LENGTH(array) (sizeof(array) / sizeof((array)[0]))
 #define BITS_PER_WORD (sizeof(unsigned long) * 8U)
 #define BIT_WORDS(maximum) \
@@ -666,6 +668,8 @@ main(int argc, char **argv)
 {
 	enum input_role role;
 
+	if (argc == 2 && strcmp(argv[1], "imod-storage") == 0)
+		return imod_storage_measure();
 	if (argc == 2 && strcmp(argv[1], "tty-identity") == 0)
 		return terminal_identity();
 	if (argc == 2 && strcmp(argv[1], "retire-child") == 0)

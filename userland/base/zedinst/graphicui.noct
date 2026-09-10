@@ -1,0 +1,269 @@
+// BeUI presentation of the shared installer. No storage operations live here.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require wizard;
+
+func instGraphicLines(text, columns) {
+    var lines = [];
+    for (line in instSplit(text, "\n")) {
+        while (String.charCount(line) > columns) {
+            Array.push(lines, String.substring(line, 0, columns));
+            line = String.substring(line, columns, -1);
+        }
+        Array.push(lines, line);
+    }
+    return lines;
+}
+func instGraphicText(text, x, y, columns, limit, color) {
+    var lines = instGraphicLines(text, columns);
+    var count = Array.size(lines);
+    if (count > limit) {
+        count = limit;
+        lines[count - 1] = String.substring(lines[count - 1], 0, columns - 3) + "...";
+    }
+    for (i in 0..count) { BeUI.drawText(lines[i], x, y + i * 18, color, -1); }
+}
+func instGraphicAssetRead(path, unused) {
+    var size = FileUtil.getFileSize(path);
+    var file = File.open(path, "r");
+    var result = System.pcall(instGraphicAssetBytes, file, size);
+    File.close(file);
+    if (!result.ok) { System.error(result.message); }
+    return result.value;
+}
+func instGraphicAssetBytes(file, size) {
+    if (size != 921654L) { System.error("invalid installer screen asset size"); }
+    return BeUI.loadImage(File.readExact(file, size));
+}
+func instGraphicOpen(ui) {
+    if (BeUI.initWithHint(24) != 1) { System.error("cannot open installer display"); }
+    if (BeUI.getWidth() != 640 || BeUI.getHeight() != 480) {
+        System.error("graphical installer requires video=640x480 at boot");
+    }
+    var depth = BeUI.getBitsPerPixel();
+    if (depth != 24 && depth != 32) { System.error("graphical installer requires a true-color framebuffer"); }
+    if (BeUI.hasInput() != 1) { System.error("graphical installer requires keyboard or pointer input"); }
+    ui.images = {};
+    // Validate every screen before the wizard can admit a destructive operation.
+    for (name in ["menu", "menu-focus", "review", "review-focus", "progress", "progress-focus"]) {
+        var image = instGraphicAssetRead("/lib/zedinst/assets/" + name + ".bmp", 0);
+        if (BeUI.getImageWidth(image) != 640 || BeUI.getImageHeight(image) != 480) {
+            System.error("invalid installer screen geometry");
+        }
+        BeUI.destroyImage(image);
+    }
+}
+func instGraphicAlive() {
+    if (BeUI.poll() != 1) { System.error("installer display or input disconnected"); }
+    if (BeUI.hasInput() != 1) { System.error("installer input disconnected"); }
+}
+// Retain only the active screen and its focus/background restoration images.
+func instGraphicImages(ui, kind) {
+    var retained = {};
+    for (name, image in ui.images) {
+        if (name == kind || name == kind + "-focus" || (kind == "menu" && name == "review")) {
+            retained[name] = image;
+        } else { BeUI.destroyImage(image); }
+    }
+    ui.images = retained;
+    var needed = [kind, kind + "-focus"];
+    if (kind == "menu") { Array.push(needed, "review"); }
+    for (name in needed) {
+        if (!Dict.hasKey(ui.images, name)) {
+            ui.images[name] = instGraphicAssetRead("/lib/zedinst/assets/" + name + ".bmp", 0);
+        }
+    }
+}
+func instGraphicDraw(ui, menu) {
+    instGraphicAlive();
+    instGraphicImages(ui, menu.kind);
+    var image = ui.images[menu.kind];
+    BeUI.drawImage(image, 0, 0);
+    // Only the active breadcrumb and selected prepared regions are copied.
+    BeUI.drawImageRegion(ui.images[menu.kind + "-focus"], 58 + menu.step * 105, 77,
+        13, 13, 58 + menu.step * 105, 77);
+    instGraphicText(menu.title, 60, 118, 65, 1, 16777215);
+    var limit = 11;
+    if (menu.kind == "menu") { limit = 2; }
+    instGraphicText(menu.description, 60, 151, 65, limit, 14873573);
+    if (menu.kind == "menu") {
+        var first = menu.selected / 3 * 3;
+        var end = first + 3;
+        if (end > Array.size(menu.options)) { end = Array.size(menu.options); }
+        // Unused slots are plain panel, so decoration never suggests extra disks.
+        for (row in (end - first)..3) {
+            var emptyY = 197 + row * 50;
+            BeUI.drawImageRegion(ui.images.review, 59, emptyY, 523, 44, 59, emptyY);
+        }
+        for (i in first..end) {
+            var y = 198 + (i - first) * 50;
+            if (i == menu.selected) {
+                BeUI.drawImageRegion(ui.images["menu-focus"], 59, y - 1, 523, 44, 59, y - 1);
+            }
+            instGraphicText(menu.options[i], 96, y + 12, 59, 1, 16777215);
+        }
+        if (Array.size(menu.options) == 0) {
+            instGraphicText("No suitable destinations found.", 96, 210, 59, 1, 16777215);
+        }
+        instGraphicText(menu.note, 60, 353, 65, 1, 14873573);
+        if (Array.size(menu.options) > 3) {
+            instGraphicText("Page " + (first / 3 + 1) + "/" + ((Array.size(menu.options) + 2) / 3), 430, 353, 18, 1, 14873573);
+        }
+    } else if (menu.kind == "review") {
+        var x = 59;
+        var width = 123;
+        if (menu.selected == 1) { x = 437; width = 145; }
+        BeUI.drawImageRegion(ui.images["review-focus"], x, 388, width, 36, x, 388);
+    }
+    instGraphicText(menu.left, 75, 398, 12, 1, 16777215);
+    instGraphicText(menu.right, 451, 398, 15, 1, 1059871);
+    // A small pointer remains visible without owning a window compositor.
+    var px = BeUI.getPointerX();
+    var py = BeUI.getPointerY();
+    if (px > 632) { px = 632; }
+    if (py > 464) { py = 464; }
+    BeUI.drawText("+", px, py, 16777215, -1);
+    BeUI.flush();
+}
+func instGraphicKeys() {
+    return [BeUI.isKeyDown(Key.Escape), BeUI.isKeyDown(Key.Enter),
+        BeUI.isKeyDown(Key.Up), BeUI.isKeyDown(Key.Down), BeUI.isKeyDown(Key.Tab),
+        BeUI.isKeyDown(Key.Left), BeUI.isKeyDown(Key.Right), BeUI.getPointerButtons()];
+}
+func instGraphicRead(ui, menu) {
+    instGraphicDraw(ui, menu);
+    var previous = instGraphicKeys();
+    var armed = false;
+    var deadline = BeUI.getMilliseconds() + 1200000L;
+    var px = BeUI.getPointerX();
+    var py = BeUI.getPointerY();
+    while (BeUI.getMilliseconds() < deadline) {
+        instGraphicAlive();
+        var keys = instGraphicKeys();
+        var released = true;
+        for (key in keys) { if (key != 0) { released = false; } }
+        // Held Enter/click from the previous screen can never authorize this one.
+        if (!armed) {
+            armed = released;
+            previous = keys;
+            BeUI.sleep(16);
+            continue;
+        }
+        var old = menu.selected;
+        if (keys[0] == 1 && previous[0] == 0) { return -1; }
+        var count = Array.size(menu.options);
+        if (count > 0) {
+            if ((keys[2] == 1 && previous[2] == 0) || (keys[5] == 1 && previous[5] == 0)) {
+                menu.selected = (menu.selected + count - 1) % count;
+            }
+            if ((keys[3] == 1 && previous[3] == 0) || (keys[4] == 1 && previous[4] == 0) ||
+                (keys[6] == 1 && previous[6] == 0)) {
+                menu.selected = (menu.selected + 1) % count;
+            }
+            if (keys[1] == 1 && previous[1] == 0) { return menu.selected; }
+        }
+        var nx = BeUI.getPointerX();
+        var ny = BeUI.getPointerY();
+        if ((keys[7] & Button.Left) != 0 && (previous[7] & Button.Left) == 0) {
+            if (ny >= 389 && ny < 423) {
+                if (nx >= 60 && nx < 180) { return -1; }
+                if (nx >= 438 && nx < 580 && count > 0) {
+                    // Review's YES is a fresh click on the explicit affirmative button.
+                    if (menu.kind == "review") { return 1; }
+                    return menu.selected;
+                }
+            }
+            if (menu.kind == "menu" && nx >= 60 && nx < 580) {
+                var row = (ny - 198) / 50;
+                if (ny >= 198 && ny < 340 && row >= 0 && row < 3 && (ny - 198) % 50 < 42) {
+                    var item = menu.selected / 3 * 3 + row;
+                    if (item < count) { menu.selected = item; }
+                }
+            }
+        }
+        if (old != menu.selected || nx != px || ny != py) { instGraphicDraw(ui, menu); }
+        previous = keys;
+        px = nx;
+        py = ny;
+        BeUI.sleep(16);
+    }
+    return -1;
+}
+func instGraphicChoose(ui, kind, title, description, options) {
+    var step = 2;
+    if (kind == "mode") { step = 1; }
+    var menu = {kind:"menu", step:step, title:title, description:description,
+        options:options, selected:0, note:"No changes until you confirm.", left:"Cancel", right:"Continue"};
+    return instGraphicRead(ui, menu);
+}
+func instGraphicSource(ui) {
+    ui.reviewAccepted = false;
+    var menu = {kind:"menu", step:0, title:"Installation source",
+        description:"Choose where to read the installation files.",
+        options:["Installation disk"], selected:0, note:"HTTP is not available yet.", left:"Cancel", right:"Continue"};
+    return instGraphicRead(ui, menu) == 0;
+}
+func instGraphicReview(ui, plan, measured) {
+    var text = "ALL partitions and files on this disk will be lost.\nThis cannot be undone.\n\n" +
+        "Destination: /dev/" + plan.disk.name + "\n" +
+        "Capacity: " + plan.disk.sectors * plan.disk.sectorSize / 1048576L + " MiB\n" +
+        "EFI: " + plan.esp.bytes / 1048576L + " MiB   UFS root: " + plan.root.bytes / 1048576L + " MiB\n" +
+        "Swap file: " + plan.swapBytes / 1048576L + " MiB\n\n" +
+        "Select YES only to erase this destination.";
+    ui.reviewAccepted = instGraphicRead(ui, {kind:"review", step:3, title:"Review dedicated installation",
+        description:text, options:["NO", "YES"], selected:0, left:"NO", right:"YES: Install"}) == 1;
+    return ui.reviewAccepted;
+}
+func instGraphicCoexistReview(ui, context) {
+    var selected = context.discovered.selected;
+    var text = "Install into existing FAT filesystems.\nUnrelated files will be preserved.\n\n" +
+        "Destination: /dev/" + selected.disk.name + "\n" +
+        "EFI: /dev/" + selected.esp.device.name + "\n" +
+        "Payload: /dev/" + selected.payload.device.name + "\n\n" +
+        "Existing managed files must match this source.\nSelect YES to install.";
+    ui.reviewAccepted = instGraphicRead(ui, {kind:"review", step:3, title:"Review coexistence installation",
+        description:text, options:["NO", "YES"], selected:0, left:"NO", right:"YES: Install"}) == 1;
+    return ui.reviewAccepted;
+}
+func instGraphicStage(ui, title) {
+    ui.stageTitle = title;
+    // This flag changes presentation only; the shared backend still revalidates.
+    var heading = "Preparing installation";
+    var step = 2;
+    if (ui.reviewAccepted) { heading = "Installing zedBSD"; step = 4; }
+    instGraphicDraw(ui, {kind:"progress", step:step, title:heading,
+        description:title, options:[], selected:0, left:"Working", right:"Please wait"});
+}
+func instGraphicProgress(ui, done, total, label) {
+    instGraphicAlive();
+    BeUI.drawImageRegion(ui.images.progress, 59, 226, 523, 106, 59, 226);
+    instGraphicText(label, 60, 231, 65, 2, 16777215);
+    instGraphicText(done + " / " + total, 60, 271, 65, 1, 16777215);
+    if (total > 0) {
+        var width = done * 518 / total;
+        if (width > 518) { width = 518; }
+        if (width > 0) { BeUI.fill(61, 296, width, 13, 11139549); }
+    }
+    BeUI.flush();
+}
+func instGraphicTreeProgress(ui, state) {
+    instGraphicProgress(ui, state.done, state.census.total,
+        "Files copied; directories " + state.directoriesDone + " / " + state.census.directoryTotal);
+}
+func instGraphicCopyProgress(ui, label, done, total) { instGraphicProgress(ui, done, total, label + " bytes"); }
+func instGraphicShell(ui) {
+    instGraphicClose(ui, 0);
+    System.shell("/bin/sh");
+    instGraphicOpen(ui);
+}
+func instGraphicClose(ui, unused) {
+    // Restore the console even if releasing a later image unexpectedly fails.
+    BeUI.close();
+    for (name, image in ui.images) { BeUI.destroyImage(image); }
+    ui.images = {};
+}
+func instGraphicUi() {
+    return {source:instGraphicSource, choose:instGraphicChoose, shell:instGraphicShell,
+        review:instGraphicReview, coexistReview:instGraphicCoexistReview,
+        stage:instGraphicStage, progress:instGraphicTreeProgress, copyProgress:instGraphicCopyProgress,
+        images:{}, stageTitle:"", reviewAccepted:false};
+}

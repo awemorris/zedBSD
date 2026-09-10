@@ -19,6 +19,12 @@ cell_timeout=${CELL_TIMEOUT_SECONDS:-600}
 key_delay=${KEY_DELAY_SECONDS:-0.08}
 cells=${USB_HID_QEMU_CELLS:-"xhci paired"}
 imod=${USB_HID_XHCI_IMOD:-}
+xhci_device=qemu-xhci,id=xhci
+case ${USB_HID_XHCI_USB2_ONLY:-0} in
+0) ;;
+1) xhci_device=qemu-xhci,id=xhci,p2=4,p3=0 ;;
+*) echo 'USB_HID_XHCI_USB2_ONLY must be 0 or 1' >&2; exit 2 ;;
+esac
 xzed=${USB_HID_XZED:-0}
 case $xzed in
 0|1) ;;
@@ -183,7 +189,7 @@ run_parser_preflight()
 
 	if [[ $kind == xhci ]]; then
 		topology=(
-			-device qemu-xhci,id=xhci
+			-device "$xhci_device"
 			-device usb-storage,bus=xhci.0,port=4,drive=boot,id=rootstick,bootindex=1
 			-device usb-kbd,bus=xhci.0,port=1,id=kbd,serial=in-t41-kbd,display=video0
 			-device usb-mouse,bus=xhci.0,port=2,id=mouse,serial=in-t41-mouse
@@ -309,7 +315,7 @@ run_cell()
 	: >"$controller_result"
 	if [[ $kind == xhci ]]; then
 		topology=(
-			-device qemu-xhci,id=xhci
+			-device "$xhci_device"
 			-device usb-storage,bus=xhci.0,port=4,drive=boot,id=rootstick,bootindex=1
 			-device usb-kbd,bus=xhci.0,port=1,id=kbd,serial=in-t41-kbd,display=video0
 		)
@@ -342,7 +348,7 @@ run_cell()
 	{
 		local failure
 		failure=$(rg -a -m 1 -- \
-			'fatal:|kernel panic|panic:|amd64 fault v=|VFS initialization failed|Input/output error|controller quarantined|USB-HID-GUEST FAIL|usb-storage: .*error=[1-9]|loop[0-9]+: .*error=[1-9]' \
+			'fatal:|kernel panic|panic:|amd64 fault v=|VFS initialization failed|Input/output error|controller quarantined|USB-HID-GUEST FAIL|IMOD-STORAGE FAIL|usb-storage: .*error=[1-9]|loop[0-9]+: .*error=[1-9]' \
 			"$guest_log" 2>/dev/null || true)
 		printf '%s' "$failure"
 	}
@@ -541,6 +547,11 @@ run_cell()
 		send_shell '/usr/bin/usb-hid-guest-probe storage /dev/sda &' || return 1
 		wait_for 'USB-HID-GUEST STORAGE READY path=/dev/sda bytes=67108864' \
 			1 "$command_timeout" 'concurrent USB root read start' || return 1
+		if [[ ${USB_HID_IMOD_STORAGE:-0} == 1 ]]; then
+		    send_shell '/usr/bin/usb-hid-guest-probe imod-storage &' || return 1
+		    wait_for 'IMOD-STORAGE READY ' 1 "$command_timeout" \
+		        'IMOD write/fsync/readback start' || return 1
+		fi
 		if [[ ${USB_HID_RETIREMENT_CHURN:-0} == 1 ]]; then
 			send_shell '/usr/bin/usb-hid-guest-probe retire &' || return 1
 			wait_for 'USB-HID-GUEST RETIREMENT READY iterations=128' 1 \
@@ -555,6 +566,10 @@ run_cell()
 		wait_for 'USB-HID-GUEST STORAGE PASS bytes=67108864' 1 \
 			"$command_timeout" \
 			'concurrent USB root read' || return 1
+		if [[ ${USB_HID_IMOD_STORAGE:-0} == 1 ]]; then
+		    wait_for 'IMOD-STORAGE PASS samples=64 bytes=65536 ' 1 \
+		        "$command_timeout" 'IMOD confirmed write/readback completion' || return 1
+		fi
 		if [[ ${USB_HID_RETIREMENT_CHURN:-0} == 1 ]]; then
 			wait_for 'USB-HID-GUEST RETIREMENT PASS iterations=128' 1 \
 				"$command_timeout" 'retirement stress completion' || return 1

@@ -96,7 +96,7 @@ func instChoose(devices, identities, table, fat32, firmware, configuration, payl
     if (Dict.hasKey(table, "restrictions") && table.restrictions != 0) {
         System.error("restricted source table cannot be an installation destination");
     }
-    if (disk.parent != 0 || (disk.flags & 1) != 0) { System.error("destination is not a writable whole disk"); }
+    if (disk.parent != 0 || (disk.flags & 9) != 0) { System.error("destination is not a writable physical whole disk"); }
     if (firmware.parent == disk.id || configuration.parent == disk.id) { System.error("destination overlaps boot source"); }
     var requested = instFindDevice(devices, payloadName);
     if (requested.parent != disk.id || (requested.flags & 1) != 0) { System.error("payload is not a writable child of the selected disk"); }

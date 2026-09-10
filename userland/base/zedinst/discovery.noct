@@ -40,7 +40,7 @@ func instDiscoverReloaded(diskName, payloadName) {
     var before = instDiscoveryObserve(0);
     var source = instDiscoveryOrigins(before);
     var disk = instFindDevice(before.devices, diskName);
-    if (disk.parent != 0 || disk.id == source.disk.id || (disk.flags & 1) != 0) {
+    if (disk.parent != 0 || disk.id == source.disk.id || (disk.flags & 9) != 0) {
         System.error("cannot reload the requested installation destination");
     }
     // Reload rejects existing consumers, including claims outside the visible mounts.
@@ -81,6 +81,7 @@ func instDiscover(ops, context, diskName, payloadName) {
     var origins = instDiscoveryOrigins(first);
     var disk = instFindDevice(first.devices, diskName);
     if (disk.parent != 0 || disk.id == origins.disk.id) { System.error("destination overlaps source disk"); }
+    if ((disk.flags & 9) != 0) { System.error("destination is not a writable physical disk"); }
     var source = ops.metadata(context, origins.disk.name, true);
     if (!instSameDevice(source.disk, origins.disk)) { System.error("source parent changed"); }
     instDiscoveryContains(source, origins.firmware, instGuid(String.substring(first.provenance.firmware, 9, -1)));

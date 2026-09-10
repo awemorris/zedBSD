@@ -13,7 +13,7 @@ drv_pci_nvme_driver_register(void);
 
 /*
  * Namespace Identify is deferred until the platform has enabled interrupts.
- * The initial implementation supports one controller and one namespace.
+ * Each registered controller publishes its supported active namespace.
  */
 void
 drv_pci_nvme_probe_namespaces(void);

@@ -15,7 +15,7 @@ Require its low 16 bits to match 0, 160 or 4000 respectively. Record QEMU runtim
 and existing functional oracle results, not a physical IRQ latency claim.
 Do not change production default or infer untested WLAN/USB2/3 combinations.
 
-Status: uncleared (q143); 比較機構実装済み。0/160/4000の実レジスタ・USB/HID比較合格。計測とwrite/fsyncセルは残る。
+Status: uncleared (q258); USB2/USB3-rootの0/160/4000実レジスタ・HID・write/fsync/readback・IRQ/rate・CPU比較に合格。WLAN・回復等の残件はresults.mdを参照。
 
 Parent: [WS025](../ws.md)
 
@@ -94,3 +94,121 @@ This records the conditional decision, not completion of this optional phase.
 USB storage/HID受け入れへ接続し、設定値と実レジスタ読戻し、timeout/reset、
 整合性と終了を記録する。QEMUの処理時間だけで物理性能の最適値を決めず、
 実機比較のない既定値は4000を維持する。実施済みとの主張ではない。
+
+## q188 prerequisite update
+
+p031 is completed/cleared by user acceptance. Its refactor dependency no
+longer blocks this phase; this phase retains its own implementation and
+measurement/ownership acceptance requirements.
+
+## q189 measurement implementation
+
+Add a private guest workload to the existing USB/HID image: 64 aligned 64-KiB
+file writes, each followed by fsync and exact readback, with distinct data per
+iteration. Time write, fsync and readback separately using CLOCK_MONOTONIC;
+report process CPU via getrusage when supported, explicitly not whole-system
+CPU or IRQ latency. Retain raw per-operation samples and compute percentiles
+in the host comparator. Keep paced workload active alongside the existing
+HID scenario; pacing time is separate from per-operation durations.
+
+Only the IMOD comparator enables this optional test command. Operate on a
+file under /root in the private USB-backed overlay, never raw root sectors.
+Failure/short I/O must fail the campaign. Preserve ordinary source/config and
+IMOD default 4000. Raw device IRQ rate, physical controller comparison and
+WLAN remain unmeasured unless separately evidenced; do not infer them from
+QEMU wall time. Final phase status must distinguish these remaining gates.
+
+## q246 IRQ/rate measurement
+
+Record xHCI handler entries separately from USBSTS EINT/FATAL-owned entries and
+consumed event-ring records. Aggregate counters are across xHCI controllers; they
+are not CPU hardware interrupt totals or IRQ service-time measurements. The native
+workload samples I/O stats and monotonic time across its paced HID/storage interval,
+reports deltas and exact observation duration, and the comparator derives rates.
+Validate positive activity for the one-controller QEMU
+4000 topology. Counters are sampled independently, so boundary races prohibit
+asserting delta-entry >= delta-owned. Preserve source/config/default; compare other values subsequently.
+
+## q255 native default IRQ interval
+
+Run current run-imod-qemu.py with --values 4000, using the private HID build.
+Require actual IMOD readback, existing HID/USB functional checks, 64 confirmed
+write/fsync/readback samples and positive independently sampled IRQ/event deltas.
+Keep raw interval, rates, source/config hashes and scope limits. Other interval
+values and physical tuning remain separate; no ordinary default changes.
+
+## q256 other native intervals
+
+Run current comparator sequentially for 0 and 160, with the q255 workload and
+source identity. Require register readback, 64 data-verified samples and HID
+overlap; retain IRQ rates and CPU/timing scope. Compare q255 4000 only after
+checking production/workload hashes. Default remains 4000.
+
+## q257 USB2-only xHCI
+
+Expose validated USB2-only test option using QEMU xHCI p2=4,p3=0. Maintain
+existing default topology. Verify root port 4 speed ID is 3 (high speed), plus
+actual IMOD readback, full USB/HID campaign and 64 confirmed storage samples.
+Run 4000 first; other values and WLAN remain separate.
+
+## q258 USB2 remaining intervals
+
+Run --usb2 --values 0 160 with the q257 speed oracle and unchanged workload.
+Require same production/workload identity as q257, actual interval readback and
+high-speed root, 64 confirmed samples and full USB/HID campaign. Compare all
+three USB2 intervals without claiming physical optimum.
+
+## q259 default media recovery and WLAN availability
+
+Current default 4000, ordinary kernel: reusable writeback runner --journal
+--media-recovery on disposable QEMU disks. Verify ordinary I/O, idle equal-size
+replacement detection, and rejection of stale cached data after mounted media
+replacement. This covers only these recovery cells, not all REC01-REC06.
+WLAN machine readiness: SSH 10.0.10.25 returned No route to host; require route
+and SSH availability before remote topology inspection or concurrency tests.
+
+## q260 current BOT reset/control gate
+
+Repair retired paths in reservation runner and select only the storage fixture.
+Run actual BOT bounded self-reset/current-UA/repeated-UA/transport-failure and
+control-worker lifetime tests ordinary and sanitizer. Retain source identity;
+controlled transport tests supplement, not replace, native IMOD measurements.
+
+## q261 USB core ownership
+
+Run the current USB reservation fixture only. Inspect its actual cancellation,
+reservation/release and callback ownership assertions. Repair stale fixture
+boundaries if needed, preserving production behavior. Ordinary and sanitizers;
+record how this complements controlled BOT recovery and native media acceptance.
+
+## q262 current HCD reservation boundary
+
+Select xHCI reservation fixture against consolidated pci-xhci.c. Inspect and
+run request reserve/reuse/retirement, SG TRB/high-address encoding and generation
+exhaustion checks. Repair missing test collaborators if necessary; controlled
+DMA tests are not physical/high-DMA native acceptance.
+
+## q275 evidence boundary and execution selection
+
+Reconcile existing REC01–06 acceptance in p025 and p029 with p030's IMOD
+comparison scope. Recheck authorized WLAN host read-only, retain physical
+measurement dependency, and identify a finite next native comparison without
+repeating unchanged USB core/BOT/HCD host tests. Update stale Priority summary.
+Timebox 30 active minutes; standing Priority authorization. Documentation/read-only.
+
+## q276 media runner IMOD integration
+
+Add explicit --image/--root-image and bounded --expect-imod options to existing
+writeback native runner. Validate before guest creation; attach a separate QMP
+socket only for register capture, reusing run-imod-qemu.py capture implementation.
+Verify IMOD before workload and after media exchange, preserve source identity
+and record failure/cleanup evidence. Test default 4000 media exchange first;
+0/160 comparison follows on dedicated images. No production changes.
+Timebox 60 active minutes, standing Priority authorization.
+
+## q277 nondefault media recovery comparisons
+
+Build 0/160 with existing ZEDBSD_XHCI_IMOD test override. Preserve dedicated
+source images; run same q276 media oracle/root with expected MMIO interval
+before/after. Compare source/root identity, restore ordinary default4000.
+Timebox 60 active minutes; standing Priority authorization.

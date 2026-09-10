@@ -527,7 +527,7 @@ amd64_mmio_map_ecam(
  * Creates an empty user address space.
  */
 hal_space_t
-hal_mem_create_space(
+hal_space_create(
 	void)
 {
 	struct amd64_space *space;
@@ -576,7 +576,7 @@ hal_mem_create_space(
  * Destroys a retired user address space.
  */
 void
-hal_page_destroy_space(
+hal_space_destroy(
 	hal_space_t handle)
 {
 	struct amd64_space *space;
@@ -679,7 +679,7 @@ hal_page_destroy_space(
  * Switches the current CPU to an address space.
  */
 void
-hal_page_switch_space(
+hal_space_switch(
 	hal_space_t handle)
 {
 	struct amd64_space *space;
@@ -730,7 +730,7 @@ hal_page_switch_space(
  * Maps physical pages into a user address space.
  */
 int
-hal_page_map(
+hal_space_map(
 	hal_space_t handle,
 	void *pointer,
 	hal_physaddr_t physical,
@@ -855,7 +855,7 @@ hal_page_map(
  * Changes permissions on a mapped user range.
  */
 int
-hal_page_prot(
+hal_space_prot(
 	hal_space_t handle,
 	void *pointer,
 	size_t size,
@@ -864,7 +864,7 @@ hal_page_prot(
 	int status;
 
 	/* Applies permissions without requesting observed hardware flags. */
-	status = hal_page_prot_query(handle, pointer, size, attr, NULL);
+	status = hal_space_prot_query(handle, pointer, size, attr, NULL);
 
 	/* Reports the permission operation status. */
 	return status;
@@ -874,7 +874,7 @@ hal_page_prot(
  * Changes permissions and reports observed page flags.
  */
 int
-hal_page_prot_query(
+hal_space_prot_query(
 	hal_space_t handle,
 	void *pointer,
 	size_t size,
@@ -949,11 +949,11 @@ hal_page_prot_query(
 
 		/* Records a previously observed access. */
 		if (old & AMD64_PTE_ACCESSED)
-			observed |= HAL_PAGE_ACCESSED;
+			observed |= HAL_SPACE_PAGE_ACCESSED;
 
 		/* Records a previously observed write. */
 		if (old & AMD64_PTE_DIRTY)
-			observed |= HAL_PAGE_DIRTY;
+			observed |= HAL_SPACE_PAGE_DIRTY;
 	}
 
 	/* Invalidates every old translation before the final observation. */
@@ -984,15 +984,15 @@ hal_page_prot_query(
 		}
 
 		/* Records that the replacement leaf remains present. */
-		observed |= HAL_PAGE_PRESENT;
+		observed |= HAL_SPACE_PAGE_PRESENT;
 
 		/* Records an access observed after the shootdown. */
 		if (entry & AMD64_PTE_ACCESSED)
-			observed |= HAL_PAGE_ACCESSED;
+			observed |= HAL_SPACE_PAGE_ACCESSED;
 
 		/* Records a write observed after the shootdown. */
 		if (entry & AMD64_PTE_DIRTY)
-			observed |= HAL_PAGE_DIRTY;
+			observed |= HAL_SPACE_PAGE_DIRTY;
 	}
 
 	/* Releases mapping and lifetime serialization. */
@@ -1011,7 +1011,7 @@ hal_page_prot_query(
  * Removes mappings from a user address space.
  */
 int
-hal_page_unmap(
+hal_space_unmap(
 	hal_space_t handle,
 	void *pointer,
 	size_t size)
@@ -1083,7 +1083,7 @@ hal_page_unmap(
  * Reports hardware flags for one user page.
  */
 int
-hal_page_query(
+hal_space_query(
 	hal_space_t handle,
 	void *pointer,
 	uint32_t *flags)
@@ -1113,15 +1113,15 @@ hal_page_query(
 	enabled = space_lock_enter(space);
 	leaf = walk_leaf(space, (uintptr_t)pointer, 0);
 	*flags = leaf != NULL && (*leaf & AMD64_PTE_PRESENT) ?
-	    HAL_PAGE_PRESENT : 0;
+	    HAL_SPACE_PAGE_PRESENT : 0;
 
 	/* Reports an observed access bit. */
 	if (leaf != NULL && (*leaf & AMD64_PTE_ACCESSED))
-		*flags |= HAL_PAGE_ACCESSED;
+		*flags |= HAL_SPACE_PAGE_ACCESSED;
 
 	/* Reports an observed dirty bit. */
 	if (leaf != NULL && (*leaf & AMD64_PTE_DIRTY))
-		*flags |= HAL_PAGE_DIRTY;
+		*flags |= HAL_SPACE_PAGE_DIRTY;
 
 	/* Releases page-table and lifetime ownership. */
 	space_lock_leave(space, enabled);
@@ -1135,7 +1135,7 @@ hal_page_query(
  * Clears selected hardware flags on one user page.
  */
 int
-hal_page_clear_flags(
+hal_space_clear_flags(
 	hal_space_t handle,
 	void *pointer,
 	uint32_t flags)
@@ -1161,7 +1161,7 @@ hal_page_clear_flags(
 		return HAL_ERR_INVALID;
 
 	/* Rejects flags outside the clearable hardware set. */
-	if ((flags & ~(HAL_PAGE_ACCESSED | HAL_PAGE_DIRTY)) != 0)
+	if ((flags & ~(HAL_SPACE_PAGE_ACCESSED | HAL_SPACE_PAGE_DIRTY)) != 0)
 		return HAL_ERR_INVALID;
 
 	/* Acquires lifetime ownership of the destination space. */
@@ -1181,11 +1181,11 @@ hal_page_clear_flags(
 	}
 
 	/* Builds the hardware bit mask requested by the caller. */
-	if (flags & HAL_PAGE_ACCESSED)
+	if (flags & HAL_SPACE_PAGE_ACCESSED)
 		mask |= AMD64_PTE_ACCESSED;
 
 	/* Includes the dirty bit when requested by the caller. */
-	if (flags & HAL_PAGE_DIRTY)
+	if (flags & HAL_SPACE_PAGE_DIRTY)
 		mask |= AMD64_PTE_DIRTY;
 
 	/* Clears the selected bits despite concurrent hardware updates. */
@@ -1232,7 +1232,7 @@ amd64_tlb_interrupt(
  * Flushes all translations for an address space.
  */
 void
-hal_page_flush_tlb(
+hal_space_flush_tlb(
 	hal_space_t handle)
 {
 	struct amd64_space *space;
@@ -1264,7 +1264,7 @@ hal_page_flush_tlb(
  * Flushes a translation range for an address space.
  */
 void
-hal_page_flush_tlb_range(
+hal_space_flush_tlb_range(
 	hal_space_t handle,
 	void *vaddr,
 	size_t size)
@@ -1302,7 +1302,7 @@ hal_page_flush_tlb_range(
  * Reports the page size for a translation level.
  */
 size_t
-hal_page_get_page_size(
+hal_space_get_page_size(
 	int level)
 {
 	/* Reports the leaf-page size. */
@@ -1321,7 +1321,7 @@ hal_page_get_page_size(
  * Reports the valid user virtual-address range.
  */
 void
-hal_page_get_user_range(
+hal_space_get_user_range(
 	uintptr_t *minimum,
 	uintptr_t *limit)
 {
@@ -2011,7 +2011,7 @@ build_ram_map(const struct zbl6_framebuffer *framebuffer)
 	ram_builder.allocate = ram_allocate;
 	ram_builder.resolve = ram_resolve;
 	ram_builder.physical_max = acpi_physical_max;
-	/* Empty PDPTs ensure later kernel/vmap changes reach every process. */
+	/* Empty PDPTs ensure later kernel mapping changes reach every process. */
 	for (index = 256; index < 511; index++) {
 		if (!ram_allocate(NULL, &physical, &table))
 			HAL_FATAL("amd64 early shared-root arena exhausted");
@@ -2205,4 +2205,3 @@ amd64_acpi_finish_discovery(void)
 	acpi_discovery_finished = 1;
 }
 
-#include "space-vmap.inc"

@@ -88,6 +88,10 @@ struct xhci_ring {
 
 struct xhci_endpoint {
 	struct xhci_ring ring;
+	/* Owned until checked endpoint drop or Disable Slot, including failed config. */
+	struct drv_dma_buffer stream_contexts;
+	struct xhci_ring streams[3];
+	unsigned maximum_stream_id;
 	struct xhci_request *active;
 	unsigned dci;
 	unsigned enabled, recovering, stall_publishing;
@@ -115,6 +119,8 @@ struct xhci_request {
 	unsigned normal_count;
 	struct drv_dma_segment normal[DRV_DMA_VECTOR_MAX_SEGMENTS];
 	struct xhci_endpoint *endpoint;
+	struct xhci_ring *ring;
+	unsigned stream_id;
 	size_t length;
 	unsigned first_trb;
 	unsigned trb_count;
@@ -217,6 +223,11 @@ static void xhci_legacy_release(struct xhci_controller *controller);
 static int xhci_pci_release(struct xhci_controller *controller);
 static void xhci_mark_quarantined(struct xhci_controller *controller);
 static void xhci_quarantine(struct xhci_controller *controller, const char *stage, int error);
+static struct xhci_ring *xhci_stream_ring(struct xhci_endpoint *, unsigned);
+static void xhci_streams_free(struct xhci_controller *, struct xhci_endpoint *);
+static int xhci_streams_configure(struct drv_usb_hcd *, struct drv_usb_endpoint *, unsigned, unsigned *);
+static int xhci_endpoint_dequeue_all(struct xhci_controller *, struct xhci_device *, struct xhci_endpoint *, unsigned, unsigned *);
+
 static int ring_alloc(struct xhci_controller *c, struct xhci_ring *r);
 static void ring_free(struct xhci_controller *c, struct xhci_ring *r);
 static uint64_t ring_push(struct xhci_ring *r, uint64_t parameter, uint32_t status, uint32_t control);
@@ -255,7 +266,7 @@ static int xhci_worker_start(struct xhci_controller *c);
 static void xhci_worker_stop(struct xhci_controller *c);
 static unsigned normal_trb_count(uint64_t address, size_t length);
 static uint64_t enqueue_normal(struct xhci_ring *ring, uint64_t address, size_t length, int input, size_t maximum_packet_size, int zero_packet);
-static int xhci_endpoint_restart_empty(struct xhci_controller *c, struct xhci_device *d, struct xhci_endpoint *endpoint, unsigned dci);
+static int xhci_endpoint_restart_empty(struct xhci_controller *c, struct xhci_device *d, struct xhci_endpoint *endpoint, unsigned dci, unsigned stream);
 static int xhci_endpoint_recover(struct xhci_controller *c, struct xhci_device *d, struct xhci_endpoint *endpoint, unsigned dci);
 static int xhci_endpoint_reset(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep);
 static struct xhci_request *xhci_request_alloc(struct xhci_controller *c, struct drv_usb_hcd *h, size_t length, unsigned flags, struct drv_usb_urb *urb, int *error);
@@ -315,6 +326,7 @@ static const struct drv_usb_hcd_ops xhci_ops = {
 	.urb_reserve_buffer = xhci_urb_reserve_buffer,
 	.urb_dequeue = xhci_guarded_urb_dequeue,
 	.endpoint_enable = xhci_guarded_endpoint_enable,
+	.endpoint_streams = xhci_streams_configure,
 	.endpoint_disable = xhci_guarded_endpoint_disable,
 	.endpoint_reset = xhci_guarded_endpoint_reset,
 	.frame_number = xhci_guarded_frame,
@@ -733,6 +745,30 @@ xhci_quarantine(
 	hal_printf("xhci: attach quarantined at %s (%d); controller ownership "
 		   "retained\n",
 		   stage, error);
+}
+
+static struct xhci_ring *
+xhci_stream_ring(struct xhci_endpoint *endpoint, unsigned stream)
+{
+	if (endpoint->maximum_stream_id == 0)
+		return stream == 0 ? &endpoint->ring : NULL;
+	if (stream == 0 || stream > endpoint->maximum_stream_id)
+		return NULL;
+	return &endpoint->streams[stream - 1];
+}
+
+/* Caller has either never published the array or completed checked drop/disable. */
+static void
+xhci_streams_free(struct xhci_controller *c, struct xhci_endpoint *endpoint)
+{
+	unsigned i;
+
+	for (i = 0; i < 3; i++)
+		ring_free(c, &endpoint->streams[i]);
+	if (endpoint->stream_contexts.address != NULL)
+		drv_dma_free_coherent(c->hcd.dma, &endpoint->stream_contexts);
+	memset(&endpoint->stream_contexts, 0, sizeof(endpoint->stream_contexts));
+	endpoint->maximum_stream_id = 0;
 }
 
 /* Takes the memory one transfer or command ring lives in. */
@@ -1167,6 +1203,11 @@ fill_endpoint(
 	dequeue |= ep->ring.cycle ? 1U : 0U;
 	memset(context, 0, c->context_size);
 	w[0] = encoded->word0;
+	if (ep->maximum_stream_id != 0) {
+		/* MaxPStreams=1 gives four primary slots; LSA forbids secondary arrays. */
+		w[0] |= (1U << 10) | (1U << 15);
+		dequeue = ep->stream_contexts.device_address;
+	}
 	w[1] = encoded->word1;
 	w[2] = (uint32_t)dequeue;
 	w[3] = (uint32_t)(dequeue >> 32);
@@ -1233,9 +1274,10 @@ xhci_event_request_locked(
 	/* Checks the drv xhci transfer event matches result. */
 	request = endpoint->active;
 	if (request == NULL || request->device != device ||
-	    request->endpoint != endpoint ||
+	    request->endpoint != endpoint || request->ring == NULL ||
+	    request->ring != xhci_stream_ring(endpoint, request->stream_id) ||
 	    !drv_xhci_transfer_event_matches(
-		    endpoint->ring.dma.device_address, XHCI_RING_TRBS,
+		    request->ring->dma.device_address, XHCI_RING_TRBS,
 		    request->slot, request->dci, request->first_trb,
 		    request->trb_count, pointer, slot, dci, trb_offset)) {
 		/* Reports that no result is available. */
@@ -1409,8 +1451,10 @@ xhci_device_release(
 	}
 
 	/* Process each element required by the operation. */
-	for (i = 1; i < 32; i++)
+	for (i = 1; i < 32; i++) {
 		ring_free(c, &d->endpoints[i].ring);
+		xhci_streams_free(c, &d->endpoints[i]);
+	}
 
 	/* Handles the address availability. */
 	if (d->input_context.address != NULL)
@@ -1775,6 +1819,108 @@ xhci_endpoint_enable(
 	/* Succeeded. */
 	return 0;
 }
+/* Core holds selection/control and has closed this interface's empty I/O gate. */
+static int
+xhci_streams_configure(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep,
+    unsigned maximum_stream_id, unsigned *changed)
+{
+	struct xhci_controller *c;
+	struct xhci_device *d;
+	struct xhci_endpoint *ep;
+	const struct drv_usb_endpoint_descriptor *desc;
+	const struct drv_usb_superspeed_endpoint_companion_descriptor *companion;
+	struct drv_xhci_endpoint_context_words encoded;
+	uint64_t *contexts;
+	uint8_t *input;
+	uint32_t *control;
+	unsigned dci, i, type;
+	unsigned long irq;
+	int error;
+
+	*changed = 0;
+	c = hcd_controller(h);
+	if (maximum_stream_id != 3 || ((rd32(c->capability, 0x10U) >> 12) & 15U) == 0)
+		return EOPNOTSUPP;
+	error = xhci_submission_enter(c);
+	if (error != 0)
+		return error;
+	d = xhci_usb_device(drv_usb_endpoint_device(usbep));
+	desc = drv_usb_endpoint_descriptor(usbep);
+	companion = drv_usb_endpoint_superspeed_companion(usbep);
+	if (d == NULL || desc == NULL || companion == NULL ||
+	    drv_usb_device_speed(d->usb) != DRV_USB_SPEED_SUPER ||
+	    drv_usb_endpoint_type(usbep) != DRV_USB_TRANSFER_BULK ||
+	    (companion->attributes & 31U) < 2 || (companion->attributes & 31U) > 16) {
+		error = EINVAL;
+		goto leave;
+	}
+	dci = (desc->address & 15U) * 2U + ((desc->address & 0x80U) != 0);
+	if (dci < 2 || dci >= 32) {
+		error = EINVAL;
+		goto leave;
+	}
+	ep = &d->endpoints[dci];
+	type = (desc->address & 0x80U) != 0 ? 6U : 2U;
+	if (!drv_xhci_endpoint_context_encode(DRV_USB_SPEED_SUPER, type,
+	    desc->maximum_packet_size, desc->interval, companion, &encoded)) {
+		error = EINVAL;
+		goto leave;
+	}
+	irq = spin_lock_irqsave(&c->active_lock);
+	if (!ep->enabled || d->quiescing || c->controller_stopping || ep->active || ep->recovering) {
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		error = EBUSY;
+		goto leave;
+	}
+	if (ep->maximum_stream_id != 0) {
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		error = ep->maximum_stream_id == maximum_stream_id ? 0 : EBUSY;
+		goto leave;
+	}
+	ep->recovering = 1;
+	c->endpoint_recoveries_busy++;
+	spin_unlock_irqrestore(&c->active_lock, irq);
+
+	error = drv_dma_alloc_coherent(h->dma, 64, 64, &ep->stream_contexts);
+	if (error != 0)
+		goto recover_leave;
+	memset(ep->stream_contexts.address, 0, 64);
+	contexts = ep->stream_contexts.address;
+	for (i = 0; i < 3; i++) {
+		error = ring_alloc(c, &ep->streams[i]);
+		if (error != 0) {
+			xhci_streams_free(c, ep);
+			goto recover_leave;
+		}
+		/* 16-byte entries, index zero invalid; primary transfer ring SCT=1. */
+		contexts[(i + 1) * 2] = ep->streams[i].dma.device_address | 3U;
+	}
+	*changed = 1;
+	error = xhci_endpoint_quiesce(c, d, dci);
+	if (error != 0)
+		goto recover_leave;
+	ep->maximum_stream_id = maximum_stream_id;
+	input = d->input_context.address;
+	memset(input, 0, 4096);
+	control = (uint32_t *)input;
+	control[0] = 1U << dci;
+	control[1] = 1U | (1U << dci);
+	fill_slot(c, d, input + c->context_size, d->context_entries);
+	fill_endpoint(c, input + (dci + 1) * c->context_size, ep, &encoded);
+	hal_io_wmb();
+	error = command(c, d->input_context.device_address, 0,
+	    XHCI_TRB_TYPE(12) | XHCI_TRB_SLOT(d->slot), NULL);
+	/* Failure retains array/rings; core quarantines the device before reopening. */
+
+recover_leave:
+	irq = spin_lock_irqsave(&c->active_lock);
+	xhci_recovery_leave_locked(c, ep);
+	spin_unlock_irqrestore(&c->active_lock, irq);
+leave:
+	xhci_submission_leave(c);
+	return error;
+}
+
 /* Takes one endpoint out of the device's configuration. */
 static int
 xhci_endpoint_disable(
@@ -1851,6 +1997,7 @@ xhci_endpoint_disable(
 	if (error != 0)
 		return error;
 	d->context_entries = entries;
+	xhci_streams_free(c, ep);
 
 	/* Succeeded. */
 	return 0;
@@ -2139,6 +2286,8 @@ xhci_irq(
 	int handled = 0;
 	uint32_t status;
 
+	io_stats_record(IO_XHCI_IRQ_ENTRY, 0);
+
 	/* Checks the atomic raw fetch add relaxed result. */
 	if (atomic_raw_fetch_add_relaxed(&c->irq_busy, 1U) == UINT_MAX)
 		__builtin_trap();
@@ -2147,6 +2296,7 @@ xhci_irq(
 	status = rd32(c->operational, XHCI_USBSTS);
 	if (!(status & (XHCI_STS_EINT | XHCI_STS_FATAL)))
 		goto out;
+	io_stats_record(IO_XHCI_IRQ_OWNED, 0);
 	wr32(c->operational, XHCI_USBSTS, status);
 	wr32(c->runtime, 0x20U, rd32(c->runtime, 0x20U) | 1U);
 	/* Continue until the operation reaches a terminal state. */
@@ -2163,6 +2313,7 @@ xhci_irq(
 		/* Handles the available condition. */
 		if (!available)
 			break;
+		io_stats_record(IO_XHCI_IRQ_EVENT, 0);
 		handled = 1;
 
 		/* Handles the type condition. */
@@ -2215,20 +2366,20 @@ xhci_port_worker(
 {
 	struct xhci_controller *c = argument;
 
-	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-		/* Classifies the current input character. */
-		if (c->port_stopping)
+		if (__atomic_load_n(&c->port_stopping, __ATOMIC_ACQUIRE))
 			return;
-
-		/* Checks the atomic exchange n result. */
-		if (__atomic_exchange_n(&c->port_pending, 0U,
-					__ATOMIC_ACQ_REL)) {
+		(void)__atomic_exchange_n(&c->port_pending, 0U, __ATOMIC_ACQ_REL);
+		if (__atomic_load_n(&c->root_ready, __ATOMIC_ACQUIRE))
 			drv_usb_hcd_root_hub_changed(&c->hcd);
-			continue;
-		}
 
-		kernel_wait_task();
+		/* A retained detach needs another pass even without a new port edge.
+		 * A notification racing sleep can delay work by at most 100 ms. */
+		if (__atomic_load_n(&c->port_stopping, __ATOMIC_ACQUIRE))
+			return;
+		if (__atomic_load_n(&c->port_pending, __ATOMIC_ACQUIRE))
+			continue;
+		sched_sleep(sched_ticks() + 10);
 	}
 }
 
@@ -2266,7 +2417,7 @@ xhci_worker_stop(
 	if (!worker)
 		return;
 	c->port_worker = NULL;
-	c->port_stopping = 1;
+	__atomic_store_n(&c->port_stopping, 1U, __ATOMIC_RELEASE);
 	kernel_notify_task(worker->task);
 	/* Continue while the operation condition remains true. */
 	while (worker->state != THREAD_ZOMBIE)
@@ -2377,19 +2528,46 @@ enqueue_normal(
 	return final_trb;
 }
 
+static int
+xhci_endpoint_dequeue_all(struct xhci_controller *c, struct xhci_device *d,
+    struct xhci_endpoint *endpoint, unsigned dci, unsigned *completion)
+{
+	struct xhci_ring *ring;
+	uint64_t dequeue;
+	unsigned stream;
+	int error;
+
+	stream = endpoint->maximum_stream_id != 0 ? 1 : 0;
+	do {
+		ring = xhci_stream_ring(endpoint, stream);
+		if (ring == NULL || ring->dma.address == NULL)
+			return EIO;
+		dequeue = ring->dma.device_address + (uint64_t)ring->enqueue * sizeof(struct xhci_trb);
+		dequeue |= ring->cycle ? 1U : 0U;
+		if (stream != 0)
+			dequeue |= 2U; /* Primary transfer ring SCT. */
+		error = command_ex(c, dequeue, stream << 16,
+		    XHCI_TRB_TYPE(16) | (dci << 16) | XHCI_TRB_SLOT(d->slot), NULL, completion);
+		if (error != 0)
+			return error;
+		stream++;
+	} while (stream <= endpoint->maximum_stream_id);
+	return 0;
+}
+
 /* Restarts an endpoint whose ring has been emptied. */
 static int
 xhci_endpoint_restart_empty(
 	struct xhci_controller *c,
 	struct xhci_device *d,
 	struct xhci_endpoint *endpoint,
-	unsigned dci)
+	unsigned dci, unsigned stream)
 {
 	uint64_t deadline;
 	unsigned state;
 
 	/* Handles the address availability. */
-	if (endpoint->ring.dma.address == NULL)
+	if (xhci_stream_ring(endpoint, stream) == NULL)
 		return EIO;
 
 	/*
@@ -2398,7 +2576,7 @@ xhci_endpoint_restart_empty(
 	 * publish Running before either recovery succeeds or cancelled DMA
 	 * ownership is released.
 	 */
-	wr32(c->doorbells, d->slot * 4U, dci);
+	wr32(c->doorbells, d->slot * 4U, dci | (stream << 16));
 	deadline = sched_ticks() + 100U;
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
@@ -2437,7 +2615,6 @@ xhci_endpoint_recover(
 		DRV_XHCI_CANCEL_QUIESCE_CONTROLLER;
 	unsigned state = UINT32_MAX, previous_state = UINT32_MAX;
 	unsigned attempt, completion = 0;
-	uint64_t dequeue;
 	int error = EIO;
 
 	/* Process each element required by the operation. */
@@ -2468,23 +2645,11 @@ xhci_endpoint_recover(
 					   NULL, &completion);
 			break;
 		case DRV_XHCI_CANCEL_SET_TR_DEQUEUE:
-			/* Handles the address availability. */
-			if (endpoint->ring.dma.address == NULL)
-				return EIO;
-			dequeue = endpoint->ring.dma.device_address +
-				  (uint64_t)endpoint->ring.enqueue *
-					  sizeof(struct xhci_trb);
-			dequeue |= endpoint->ring.cycle ? 1U : 0U;
-
-			/* Checks the operation status. */
-			error = command_ex(c, dequeue, 0,
-					   XHCI_TRB_TYPE(16) | (dci << 16) |
-						   XHCI_TRB_SLOT(d->slot),
-					   NULL, &completion);
+			error = xhci_endpoint_dequeue_all(c, d, endpoint, dci, &completion);
 			if (error == 0) {
 				/* Checks the operation status. */
 				error = xhci_endpoint_restart_empty(
-					c, d, endpoint, dci);
+					c, d, endpoint, dci, endpoint->maximum_stream_id != 0 ? 1U : 0U);
 				if (error == 0)
 					return 0;
 			}
@@ -3126,6 +3291,12 @@ xhci_urb_enqueue(
 		return e;
 	}
 
+	if (xhci_stream_ring(ep, drv_usb_urb_stream_id(u)) == NULL) {
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		xhci_submission_leave(c);
+		return EINVAL;
+	}
+
 	/* Classifies the current input character. */
 	if (c->endpoint_recoveries_busy == UINT_MAX)
 		__builtin_trap();
@@ -3149,6 +3320,8 @@ xhci_urb_enqueue(
 	r->urb = u;
 	r->device = d;
 	r->endpoint = ep;
+	r->stream_id = drv_usb_urb_stream_id(u);
+	r->ring = xhci_stream_ring(ep, r->stream_id);
 	r->length = length;
 	r->input = q ? (q->request_type & DRV_USB_DIR_IN) != 0
 		     : drv_usb_endpoint_is_input(drv_usb_urb_endpoint(u));
@@ -3270,7 +3443,7 @@ xhci_urb_enqueue(
 		return e;
 	}
 
-	r->first_trb = ep->ring.enqueue;
+	r->first_trb = r->ring->enqueue;
 	r->trb_count = q != NULL ? (length ? 3U : 2U)
 				 : normal_count + (zero_packet ? 1U : 0U);
 
@@ -3287,14 +3460,14 @@ xhci_urb_enqueue(
 
 	/* Handles the q condition. */
 	if (q) {
-		ring_push(&ep->ring,
+		ring_push(r->ring,
 			  (uint64_t)setup_words.parameter_low |
 				  ((uint64_t)setup_words.parameter_high << 32),
 			  setup_words.status, setup_words.control);
 
 		/* Checks the current data length. */
 		if (length) {
-			ring_push(&ep->ring,
+			ring_push(r->ring,
 				  (uint64_t)data_words.parameter_low |
 					  ((uint64_t)data_words.parameter_high
 					   << 32),
@@ -3302,26 +3475,26 @@ xhci_urb_enqueue(
 		}
 
 		(void)ring_push(
-			&ep->ring,
+			r->ring,
 			(uint64_t)status_words.parameter_low |
 				((uint64_t)status_words.parameter_high << 32),
 			status_words.status, status_words.control);
 	} else {
 		/* Handles the vector availability. */
 		if (r->vector != NULL) {
-			xhci_sg_enqueue(&ep->ring, r, input,
+			xhci_sg_enqueue(r->ring, r, input,
 					maximum_packet_size, zero_packet);
 
 			/* Handles the r condition. */
 			if (r->normal_count > 1U)
 				io_stats_record(IO_XHCI_SG_TD, length);
 		} else {
-			(void)enqueue_normal(&ep->ring, dma, length, input,
+			(void)enqueue_normal(r->ring, dma, length, input,
 					     maximum_packet_size, zero_packet);
 		}
 	}
 
-	wr32(c->doorbells, d->slot * 4U, dci);
+	wr32(c->doorbells, d->slot * 4U, dci | (r->stream_id << 16));
 	xhci_recovery_leave_locked(c, ep);
 
 	spin_unlock_irqrestore(&c->active_lock, irq);
@@ -3416,13 +3589,15 @@ xhci_cancel_request(
 			 * command completes so the same ring slots cannot be
 			 * reused after a software-only unlink.
 			 */
-			dequeue = ep->ring.dma.device_address +
-				  (uint64_t)ep->ring.enqueue *
+			dequeue = r->ring->dma.device_address +
+				  (uint64_t)r->ring->enqueue *
 					  sizeof(struct xhci_trb);
-			dequeue |= ep->ring.cycle ? 1U : 0U;
+			dequeue |= r->ring->cycle ? 1U : 0U;
 
 			/* Checks the operation status. */
-			error = command_ex(c, dequeue, 0,
+			if (r->stream_id != 0)
+				dequeue |= 2U;
+			error = command_ex(c, dequeue, r->stream_id << 16,
 					   XHCI_TRB_TYPE(16) | (r->dci << 16) |
 						   XHCI_TRB_SLOT(d->slot),
 					   NULL, &completion);
@@ -3449,7 +3624,7 @@ xhci_cancel_request(
 
 				/* Checks the operation status. */
 				error = xhci_endpoint_restart_empty(c, d, ep,
-								    r->dci);
+								    r->dci, r->stream_id);
 				if (error == 0) {
 					releasable =
 						drv_xhci_request_resources_releasable(
@@ -3588,7 +3763,6 @@ xhci_endpoint_quiesce(
 	unsigned dci)
 {
 	struct xhci_endpoint *endpoint = &d->endpoints[dci];
-	uint64_t dequeue;
 	unsigned attempt, completion = 0;
 	unsigned state = DRV_XHCI_ENDPOINT_DISABLED;
 	unsigned previous_state = UINT32_MAX;
@@ -3626,19 +3800,7 @@ xhci_endpoint_quiesce(
 					   NULL, &completion);
 		} else if (state == DRV_XHCI_ENDPOINT_STOPPED ||
 			   state == DRV_XHCI_ENDPOINT_ERROR) {
-			/* Handles the address availability. */
-			if (endpoint->ring.dma.address == NULL)
-				return EIO;
-			dequeue = endpoint->ring.dma.device_address +
-				  (uint64_t)endpoint->ring.enqueue *
-					  sizeof(struct xhci_trb);
-			dequeue |= endpoint->ring.cycle ? 1U : 0U;
-
-			/* Checks the operation status. */
-			error = command_ex(c, dequeue, 0,
-					   XHCI_TRB_TYPE(16) | (dci << 16) |
-						   XHCI_TRB_SLOT(d->slot),
-					   NULL, &completion);
+			error = xhci_endpoint_dequeue_all(c, d, endpoint, dci, &completion);
 			if (error == 0)
 				return 0;
 		} else {
@@ -5236,6 +5398,8 @@ xhci_attach(
 	c->hcd.capabilities = DRV_USB_HCD_CAP_CONCURRENT_URBS |
 			      DRV_USB_HCD_CAP_TRANSFER_RESERVE |
 			      DRV_USB_HCD_CAP_SHARED_STAGING;
+	if (((rd32(c->capability, 0x10U) >> 12) & 15U) != 0)
+		c->hcd.capabilities |= DRV_USB_HCD_CAP_BULK_STREAMS;
 	c->hcd.private_data[0] = (uintptr_t)c;
 
 	/* Checks the ownership result. */

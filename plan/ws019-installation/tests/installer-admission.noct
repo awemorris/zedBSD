@@ -24,6 +24,12 @@ func main(args) {
     var uuid = "1234-ABCD";
     var cfg = "kernel=vmunix\noverlay-root=rootfs.img\noverlay-data=data.img\nswap0=swapfile\n";
     admitCheck(instSourceConfiguration(cfg, guid, uuid), "generated source");
+    admitCheck(instSourceConfiguration(cfg + "video=640x480\n", guid, uuid), "installer video mode");
+    for (mode in ["", "0x480", "0640x480", "640X480", "640x480z", "640x480x1",
+        "+640x480", "640x-480", "16385x480", "640x99999999999999999999999"]) {
+        admitRejected(admitConfig, cfg + "video=" + mode + "\n", guid, uuid);
+    }
+    admitRejected(admitConfig, cfg + "video=640x480\nvideo=640x480\n", guid, uuid);
     admitCheck(instSourceConfiguration(String.substring(cfg, 0, String.charCount(cfg) - 1), guid, uuid), "unterminated final line");
     admitCheck(instSourceConfiguration(cfg + "boot0=UUID=1234-abcd\ninit=/sbin/init\n", guid, uuid), "same FAT");
     var destination = instDestinationConfiguration(guid);

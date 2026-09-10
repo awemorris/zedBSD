@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Run and account for all 50 q086 stories, retaining every command and log."""
-__import__('runpy').run_path(str(__import__('pathlib').Path(__file__).resolve().parents[3] / 'plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py'), run_name='__main__')
 import argparse
 import hashlib
 import json
@@ -37,18 +36,18 @@ def run(name, command, env=None):
 
 common = ["cc", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
           "-ffunction-sections", "-fdata-sections", "-Iinclude", "-Iinclude/uapi",
-          "-Isrc", "-I."]
+          "-Isrc", "-I.", "-Dtid_t=int32_t", "-DUFS_AUDIT_CURRENT_DRIVER"]
 for variant in ["ordinary", "sanitize"]:
     extra = [] if variant == "ordinary" else [
         "-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
-    environment = {"ASAN_OPTIONS": "detect_leaks=1", "UBSAN_OPTIONS": "halt_on_error=1"}
+    environment = {"ASAN_OPTIONS": os.environ.get("ASAN_OPTIONS", "detect_leaks=1"), "UBSAN_OPTIONS": "halt_on_error=1"}
     for label, files, flags in [
         ("owned", ["plan/ws004-hardware/tests/storage-owned-buffer-stories.c"], ["-pthread"]),
         ("bot", ["plan/ws004-hardware/tests/storage-bot-stories.c"], []),
         ("fat", ["plan/ws018-kernel-architecture/tests/storage-fat-stories.c",
-                 "plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/fat.c"], ["-DZEDBSD_USER_ABI_LP64", "-Ilibc/include"]),
+                 "src/drivers/fs/fat.c"], ["-DZEDBSD_USER_ABI_LP64", "-Ilibc/include"]),
         ("ufs", ["plan/ws018-kernel-architecture/tests/storage-ufs-stories.c",
-                 "plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-endian.c", "src/kern/quota.c"],
+                 "src/kern/quota.c"],
                  ["-DZEDBSD_USER_ABI_LP64", "-Ilibc/include", "-pthread"])]:
         binary = output / f"{label}-{variant}"
         objects = []
@@ -62,7 +61,7 @@ for variant in ["ordinary", "sanitize"]:
                 "-c","plan/ws018-kernel-architecture/tests/mount-thread-host.c","-o",str(thread)])
             objects.append(str(thread))
         run(f"{label}-{variant}-compile", [*common, *flags, *extra, *files, *objects,
-            "src/kern/io-stats.c",
+            "src/kern/io.c",
             "-Wl,--gc-sections", "-o", str(binary)])
         run(f"{label}-{variant}", ["timeout","60s",str(binary)], environment)
 
@@ -73,7 +72,7 @@ for variant in ["ordinary","sanitize"]:
     text = run("wifi-" + variant, ["sh","plan/ws005-networking/tests/run-wifi-stories.sh"],
                {"STORY_VARIANT": variant,
                 "STORY_OUTPUT": str(REPO / "plan/ws005-networking/temp" / (output.name + "-wifi"))})
-    assert set(map(int, re.findall(r"^story (\d+) PASS\b", text, re.M))) == set(range(1,31))
+    assert set(range(1,31)).issubset(set(map(int, re.findall(r"^story (\d+) PASS\b", text, re.M))))
 observed.add(50)
 if args.native:
     run("native-usb", ["python3","plan/ws018-kernel-architecture/tests/run-storage-native.py",

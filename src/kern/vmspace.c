@@ -260,7 +260,7 @@ vmspace_layout_init(
 	vm_metadata_init();
 
 	/* Takes the user range from the HAL and derives the fixed layout. */
-	hal_page_get_user_range(&minimum, &limit);
+	hal_space_get_user_range(&minimum, &limit);
 	if (minimum < PAGE_SIZE ||
 	    (minimum & (PAGE_SIZE - 1U)) != 0 ||
 	    limit <= minimum ||
@@ -511,7 +511,7 @@ vmspace_user_range_valid(
  * Existing fault holds drain before this routine is called, so no new
  * reverse mapping can appear until the writer publishes the new cache
  * bytes.  Each mapping is then pinned in metadata, revoked with no
- * VM/object lock held, and finally detached.  hal_page_prot_query()
+ * VM/object lock held, and finally detached.  hal_space_prot_query()
  * returns A/D state only after the remote TLB acknowledgement, closing
  * the late-store window between a dirty snapshot and unmap.  A
  * write-only mapping cannot be represented read-only by the current HAL
@@ -598,7 +598,7 @@ vmspace_object_page_revoke(
 		if (was_mapped) {
 			flags = 0;
 			if (readonly != 0) {
-				error = hal_page_prot_query(vm->space,
+				error = hal_space_prot_query(vm->space,
 							    (void *)mapping->address,
 							    PAGE_SIZE,
 							    readonly,
@@ -607,10 +607,10 @@ vmspace_object_page_revoke(
 					HAL_FATAL("shared VM write revoke failed");
 			} else {
 				/* The synchronous unmap is the revoke operation. */
-				flags |= HAL_PAGE_DIRTY;
+				flags |= HAL_SPACE_PAGE_DIRTY;
 			}
 
-			if (hal_page_unmap(vm->space,
+			if (hal_space_unmap(vm->space,
 					   (void *)mapping->address,
 					   PAGE_SIZE) != HAL_OK)
 				HAL_FATAL("shared VM content unmap failed");
@@ -762,7 +762,7 @@ vmspace_create(
 		return NULL;
 
 	/* Asks the HAL for the hardware address space. */
-	vm->space = hal_mem_create_space();
+	vm->space = hal_space_create();
 	if (vm->space == NULL) {
 		kern_free(vm);
 		return NULL;
@@ -1029,7 +1029,7 @@ retry:
 
 		/* A replacement needs a shootdown, performed with no VM lock held. */
 		if (error == 0 && fresh != NULL && was_mapped) {
-			if (hal_page_unmap(vm->space, (void *)page_address,
+			if (hal_space_unmap(vm->space, (void *)page_address,
 			    PAGE_SIZE) != HAL_OK)
 				error = EIO;
 			else
@@ -1071,7 +1071,7 @@ retry:
 
 		/* Installs the copy, giving up on map pressure so a reclaim can run. */
 		if (error == 0 && fresh != NULL) {
-			if (hal_page_map(vm->space, (void *)page_address,
+			if (hal_space_map(vm->space, (void *)page_address,
 			    fresh->pmem.paddr, PAGE_SIZE, region->prot) != HAL_OK) {
 				error = ENOMEM;
 				map_pressure = 1;
@@ -1084,7 +1084,7 @@ retry:
 			}
 		} else if (error == 0 &&
 		    (page->flags & VM_MAPPING_MAPPED) == 0) {
-			if (hal_page_map(vm->space, (void *)page_address,
+			if (hal_space_map(vm->space, (void *)page_address,
 			    prepared_physical, PAGE_SIZE,
 			    vm_page_effective_prot(page)) != HAL_OK) {
 				error = ENOMEM;
@@ -1245,7 +1245,7 @@ retry:
 
 		/* Maps the object page, read-only when a snapshot owns it. */
 		page->object_page = object_page;
-		mapped = hal_page_map(vm->space,
+		mapped = hal_space_map(vm->space,
 				      (void *)page_address,
 				      object_page->pmem.paddr,
 				      PAGE_SIZE,
@@ -1378,7 +1378,7 @@ retry:
 		goto unlink_locked;
 	}
 
-	if (hal_page_map(vm->space, (void *)page_address,
+	if (hal_space_map(vm->space, (void *)page_address,
 	    prepared_physical, PAGE_SIZE, region->prot) != HAL_OK) {
 		/*
 		 * The frame allocator already retries after reclaim, but the
@@ -1426,7 +1426,7 @@ retry:
 remove_placeholder:
 	/* Undoes a partial mapping and drops an object fault hold. */
 	if (mapped)
-		(void)hal_page_unmap(vm->space, (void *)page_address, PAGE_SIZE);
+		(void)hal_space_unmap(vm->space, (void *)page_address, PAGE_SIZE);
 
 	if (object_page != NULL) {
 		vm_object_fault_release(object_page);
@@ -3674,13 +3674,13 @@ vmspace_fork_locked(
 			mutex_unlock(&source->lock);
 			vm_metadata_leave();
 
-			if (resident && source_mapped && hal_page_prot(source->space,
+			if (resident && source_mapped && hal_space_prot(source->space,
 			    (void *)page_address, PAGE_SIZE, cow_prot) != HAL_OK)
 				error = ENOMEM;
 
 			/* Maps the child read-only so the first write faults. */
 			if (error == 0 && resident && source_mapped &&
-			    hal_page_map(copy->space, (void *)page_address, physical,
+			    hal_space_map(copy->space, (void *)page_address, physical,
 			    PAGE_SIZE, cow_prot) != HAL_OK)
 				error = ENOMEM;
 			else if (error == 0 && resident && source_mapped)
@@ -4876,14 +4876,14 @@ free_vm_page(
 	/* An object page only drops its reverse mapping. */
 	if (page->object_page != NULL) {
 		if (page->flags & VM_MAPPING_MAPPED)
-			(void)hal_page_unmap(vm->space, (void *)page->address, PAGE_SIZE);
+			(void)hal_space_unmap(vm->space, (void *)page->address, PAGE_SIZE);
 		vm_object_mapping_remove(page->object_page, page);
 		vm_page_free_metadata(page);
 		return;
 	}
 
 	if (page->flags & VM_MAPPING_MAPPED)
-		(void)hal_page_unmap(vm->space, (void *)page->address, PAGE_SIZE);
+		(void)hal_space_unmap(vm->space, (void *)page->address, PAGE_SIZE);
 	vm_page_untrack(page);
 	vm_page_free_metadata(page);
 }
@@ -4920,7 +4920,7 @@ detach_vm_page_for_unmap(
 	 * the region list publishes the virtual address as free.
 	 */
 	if ((page->flags & VM_MAPPING_MAPPED) != 0) {
-		if (hal_page_unmap(vm->space, (void *)page->address,
+		if (hal_space_unmap(vm->space, (void *)page->address,
 		    PAGE_SIZE) != HAL_OK)
 			HAL_FATAL("VM unmap commit failed");
 		page->flags &= ~VM_MAPPING_MAPPED;
@@ -5661,7 +5661,7 @@ vmspace_protect_locked(
 				page_prot = prot;
 			hal_error = HAL_OK;
 			if (prot == 0 && (page->flags & VM_MAPPING_MAPPED)) {
-				hal_error = hal_page_unmap(vm->space,
+				hal_error = hal_space_unmap(vm->space,
 				    (void *)page->address, PAGE_SIZE);
 				if (hal_error == HAL_OK) {
 					page->flags &= ~VM_MAPPING_MAPPED;
@@ -5669,10 +5669,10 @@ vmspace_protect_locked(
 				}
 			} else if (prot != 0 &&
 			    (page->flags & VM_MAPPING_MAPPED)) {
-				hal_error = hal_page_prot(vm->space,
+				hal_error = hal_space_prot(vm->space,
 				    (void *)page->address, PAGE_SIZE, page_prot);
 			} else if (prot != 0 && page->object_page != NULL) {
-				hal_error = hal_page_map(vm->space,
+				hal_error = hal_space_map(vm->space,
 				    (void *)page->address,
 				    page->object_page->pmem.paddr, PAGE_SIZE, page_prot);
 				if (hal_error == HAL_OK)
@@ -5680,7 +5680,7 @@ vmspace_protect_locked(
 					    VM_MAPPING_PROTECT_ADDED;
 			} else if (prot != 0 &&
 			    vm_private_page_is_resident(page)) {
-				hal_error = hal_page_map(vm->space,
+				hal_error = hal_space_map(vm->space,
 				    (void *)page->address,
 				    page->private_page->pmem.paddr, PAGE_SIZE, page_prot);
 				if (hal_error == HAL_OK)
@@ -5722,7 +5722,7 @@ rollback:
 			if (region == failed_region && rollback == failed_page)
 				break;
 			if (rollback->flags & VM_MAPPING_PROTECT_ADDED) {
-				if (hal_page_unmap(vm->space,
+				if (hal_space_unmap(vm->space,
 				    (void *)rollback->address, PAGE_SIZE) != HAL_OK)
 					HAL_FATAL("VM protection rollback unmap failed");
 				rollback->flags &= ~(VM_MAPPING_MAPPED |
@@ -5732,14 +5732,14 @@ rollback:
 					physical = rollback->object_page->pmem.paddr;
 				else
 					physical = rollback->private_page->pmem.paddr;
-				if (hal_page_map(vm->space,
+				if (hal_space_map(vm->space,
 				    (void *)rollback->address, physical, PAGE_SIZE,
 				    vm_page_effective_prot(rollback)) != HAL_OK)
 					HAL_FATAL("VM protection rollback map failed");
 				rollback->flags &= ~VM_MAPPING_PROTECT_REMOVED;
 				rollback->flags |= VM_MAPPING_MAPPED;
 			} else if ((rollback->flags & VM_MAPPING_MAPPED) &&
-			    hal_page_prot(vm->space, (void *)rollback->address,
+			    hal_space_prot(vm->space, (void *)rollback->address,
 				PAGE_SIZE, vm_page_effective_prot(rollback)) != HAL_OK) {
 				HAL_FATAL("VM protection rollback failed");
 			}
@@ -5782,7 +5782,7 @@ vmspace_destroy(
 		region = vm->regions;
 	}
 
-	hal_page_destroy_space(vm->space);
+	hal_space_destroy(vm->space);
 	(void)atomic_raw_fetch_add_relaxed(&vmspace_live.value, (unsigned)-1);
 
 	vm_metadata_leave();
@@ -5891,7 +5891,7 @@ vmspace_exec_cache_fault(
 
 	/* Replaces a PTE only after the complete private copy is ready. */
 	if (error == 0 && writing && (page->flags & VM_MAPPING_MAPPED) != 0) {
-		if (hal_page_unmap(vm->space, (void *)address, PAGE_SIZE) != HAL_OK)
+		if (hal_space_unmap(vm->space, (void *)address, PAGE_SIZE) != HAL_OK)
 			error = EIO;
 		else
 			unmapped = 1;
@@ -5912,7 +5912,7 @@ vmspace_exec_cache_fault(
 	    region->snapshot == NULL || region->prot != prot || (prot & required) == 0))
 		error = EAGAIN;
 
-	if (error == 0 && hal_page_map(vm->space, (void *)address,
+	if (error == 0 && hal_space_map(vm->space, (void *)address,
 	    writing ? fresh->pmem.paddr : source->pmem.paddr, PAGE_SIZE,
 	    writing ? prot : prot & ~HAL_SPACE_WRITE) != HAL_OK)
 		error = ENOMEM;

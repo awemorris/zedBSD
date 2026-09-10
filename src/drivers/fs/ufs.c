@@ -681,6 +681,8 @@ static int ufs_statvfs(struct mount *mountp, struct statvfs *result);
 static int ufs_quotactl(struct mount *mountp, struct quota_control *request);
 static int ufs_snapshotctl(struct mount *mountp, struct snapshot_control *request);
 static int ufs_prepare_unmount(struct mount *mountp);
+static int ufs_prepare_unmount_revoked(struct mount *mountp);
+static void ufs_commit_unmount_revoked(struct mount *mountp);
 static void ufs_unmount(struct mount *mountp);
 static uint32_t checksum(const void *buffer, size_t length);
 static void put32(uint8_t *p, uint32_t v);
@@ -763,6 +765,8 @@ const struct filesystem_type drv_ufs_filesystem_type = {
 	.quotactl = ufs_quotactl,
 	.snapshotctl = ufs_snapshotctl,
 	.prepare_unmount = ufs_prepare_unmount,
+	.prepare_unmount_revoked = ufs_prepare_unmount_revoked,
+	.commit_unmount_revoked = ufs_commit_unmount_revoked,
 	.unmount = ufs_unmount,
 	.alloc_inode = ufs_alloc_inode,
 	.free_inode = ufs_free_inode,
@@ -16523,6 +16527,52 @@ ufs_prepare_unmount(
 
 	/* Reports whether the volume could be left clean. */
 	return error;
+}
+
+/* Checks local ownership without marking a lost medium clean. */
+static int
+ufs_prepare_unmount_revoked(
+	struct mount *mountp)
+{
+	struct ufs_mount_state *ms;
+
+	/* Only an initialized mount on an irrevocably lost medium is eligible. */
+	if (mountp == NULL)
+		return EINVAL;
+	if (mountp->m_disk == NULL)
+		return EINVAL;
+	if (disk_media_status(mountp->m_disk) == 0)
+		return EINVAL;
+	ms = state(mountp);
+	if (ms == NULL)
+		return EINVAL;
+
+	/* A published snapshot retains independent ownership of this volume. */
+	if (ms->snapshot_disk != NULL)
+		return EBUSY;
+	if (drv_ufs_journal_views_busy(&ms->journal))
+		return EBUSY;
+
+	/* The caller still owns all namespace, inode and cache preparation. */
+	return 0;
+}
+
+/* Disables backend reclaim before any final file or inode owner is released. */
+static void
+ufs_commit_unmount_revoked(
+	struct mount *mountp)
+{
+	struct ufs_mount_state *ms;
+
+	if (ufs_prepare_unmount_revoked(mountp) != 0)
+		HAL_FATAL("UFS revoked commit without eligible owners");
+	if (mountp->m_state != MOUNT_STATE_DYING)
+		HAL_FATAL("UFS revoked commit without closed admission");
+
+	/* This is local disposal, not an on-disk read-only or clean transition. */
+	ms = state(mountp);
+	drv_ufs_journal_views_close(&ms->journal);
+	ms->writable = 0;
 }
 
 /* Takes a mount out of service and gives its state back. */

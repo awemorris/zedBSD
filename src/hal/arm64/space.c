@@ -195,14 +195,14 @@ static void free_detached_tables(struct arm64_table_page *p)
 	while(p){struct arm64_table_page *next=p->next;(void)hal_pmem_free(&p->memory);
 		hal_free(p);if(page_table_count)page_table_count--;p=next;}
 }
-hal_space_t hal_mem_create_space(void)
+hal_space_t hal_space_create(void)
 {
 	struct arm64_space *s=hal_malloc(sizeof(*s));bool enabled;if(!s)return NULL;hal_memset(s,0,sizeof(*s));
 	if(alloc_page(&s->l0_memory)!=HAL_OK){hal_free(s);return NULL;}
 	s->l0=s->l0_memory.vaddr;hal_memset(s->l0,0,ARM64_PAGE_SIZE);s->magic=ARM64_SPACE_MAGIC;
 	enabled=hal_irq_disable();s->space_id=next_space_id++;s->registry_next=space_registry;space_registry=s;space_count++;if(enabled)hal_irq_enable();return s;
 }
-void hal_page_destroy_space(hal_space_t h)
+void hal_space_destroy(hal_space_t h)
 {
 	struct arm64_space *s=h,**link;struct arm64_table_page *p;bool enabled;if(!s)return;
 	enabled=hal_irq_disable();for(link=&space_registry;*link&&*link!=s;link=&(*link)->registry_next);
@@ -213,7 +213,7 @@ void hal_page_destroy_space(hal_space_t h)
 	while((p=s->tables)){s->tables=p->next;(void)hal_pmem_free(&p->memory);hal_free(p);if(page_table_count)page_table_count--;}
 	s->magic=0;(void)hal_pmem_free(&s->l0_memory);hal_free(s);if(space_count)space_count--;if(enabled)hal_irq_enable();
 }
-void hal_page_switch_space(hal_space_t h)
+void hal_space_switch(hal_space_t h)
 {
 	struct arm64_space *s;uintptr_t ttbr;bool enabled;if(h==current_space)return;
 	if(h==HAL_SPACE_SYS){enabled=hal_irq_disable();arm64_write_ttbr0(system_ttbr0);arm64_flush_tlb();current_space=h;if(enabled)hal_irq_enable();return;}
@@ -228,7 +228,7 @@ static uint64_t leaf_flags(uint32_t attr)
 	if(attr&HAL_SPACE_DEVICE)f|=PTE_ATTR(1);else if(attr&HAL_SPACE_NOCACHE)f|=PTE_ATTR(2);
 	return f;
 }
-int hal_page_map(hal_space_t h,void *v,hal_physaddr_t p,size_t n,uint32_t attr)
+int hal_space_map(hal_space_t h,void *v,hal_physaddr_t p,size_t n,uint32_t attr)
 {
 	struct arm64_space *s=h;uintptr_t a=(uintptr_t)v,o;bool enabled;
 	if(!s||!valid_user(a,n)||(p&4095)||p>=hal_pmem_get_total_size()||n>hal_pmem_get_total_size()-p||
@@ -238,7 +238,7 @@ int hal_page_map(hal_space_t h,void *v,hal_physaddr_t p,size_t n,uint32_t attr)
 	for(o=0;o<n;o+=4096){uint64_t *l=walk_leaf(s,a+o,1);if(!l){struct arm64_table_page *detached;uintptr_t rollback;for(rollback=0;rollback<o;rollback+=4096){l=walk_leaf(s,a+rollback,0);if(l)*l=0;}detached=detach_empty_tables(s);hal_wmb();flush_locked(s);free_detached_tables(detached);space_unlock(s,enabled);return HAL_ERR_NOMEM;}*l=(p+o)|leaf_flags(attr);}
 	flush_locked(s);space_unlock(s,enabled);return HAL_OK;
 }
-int hal_page_prot_query(hal_space_t h,void *v,size_t n,uint32_t attr,uint32_t *flags)
+int hal_space_prot_query(hal_space_t h,void *v,size_t n,uint32_t attr,uint32_t *flags)
 {
 	struct arm64_space *s=h;uintptr_t a=(uintptr_t)v,o;uint32_t observed=0;bool enabled;if(!s||!valid_user(a,n)||
 	 !(attr&(HAL_SPACE_READ|HAL_SPACE_WRITE|HAL_SPACE_EXEC))||((attr&HAL_SPACE_WRITE)&&(attr&HAL_SPACE_EXEC)))return HAL_ERR_INVALID;
@@ -246,22 +246,22 @@ int hal_page_prot_query(hal_space_t h,void *v,size_t n,uint32_t attr,uint32_t *f
 	for(o=0;o<n;o+=4096){uint64_t *l=walk_leaf(s,a+o,0);if(!l||!(*l&PTE_VALID)){space_unlock(s,enabled);return HAL_ERR_INVALID;}}
 	/* Use break-before-make for the complete range.  This also covers callers
 	 * which change the AttrIndx, not merely the permission bits. */
-	for(o=0;o<n;o+=4096){uint64_t *l=walk_leaf(s,a+o,0),old=*l;observed|=HAL_PAGE_PRESENT;if(old&PTE_AF)observed|=HAL_PAGE_ACCESSED;
+	for(o=0;o<n;o+=4096){uint64_t *l=walk_leaf(s,a+o,0),old=*l;observed|=HAL_SPACE_PAGE_PRESENT;if(old&PTE_AF)observed|=HAL_SPACE_PAGE_ACCESSED;
 		/* This profile has no hardware dirty management.  Any writable
 		 * translation is conservatively dirty, including stores made before
 		 * the TLB invalidation completes. */
 		if((old&PTE_RO)==0)old|=PTE_SW_DIRTY;
-		if(old&PTE_SW_DIRTY)observed|=HAL_PAGE_DIRTY;
+		if(old&PTE_SW_DIRTY)observed|=HAL_SPACE_PAGE_DIRTY;
 		*l=old&~PTE_VALID;}
 	hal_wmb();flush_locked(s);
 	for(o=0;o<n;o+=4096){uint64_t *l=walk_leaf(s,a+o,0),old=*l;*l=(old&PTE_ADDR)|leaf_flags(attr)|(old&PTE_SW_DIRTY);}
 	hal_wmb();flush_locked(s);
-	for(o=0;o<n;o+=4096){uint64_t *l=walk_leaf(s,a+o,0),entry=*l;if(entry&PTE_AF)observed|=HAL_PAGE_ACCESSED;if(entry&PTE_SW_DIRTY)observed|=HAL_PAGE_DIRTY;}
+	for(o=0;o<n;o+=4096){uint64_t *l=walk_leaf(s,a+o,0),entry=*l;if(entry&PTE_AF)observed|=HAL_SPACE_PAGE_ACCESSED;if(entry&PTE_SW_DIRTY)observed|=HAL_SPACE_PAGE_DIRTY;}
 	if(flags)*flags=observed;
 	space_unlock(s,enabled);return HAL_OK;
 }
-int hal_page_prot(hal_space_t h,void *v,size_t n,uint32_t attr){return hal_page_prot_query(h,v,n,attr,NULL);}
-int hal_page_unmap(hal_space_t h,void *v,size_t n)
+int hal_space_prot(hal_space_t h,void *v,size_t n,uint32_t attr){return hal_space_prot_query(h,v,n,attr,NULL);}
+int hal_space_unmap(hal_space_t h,void *v,size_t n)
 {
 	struct arm64_space *s=h;struct arm64_table_page *detached;uintptr_t a=(uintptr_t)v,o;bool enabled;if(!n)return HAL_OK;if(!s||!valid_user(a,n))return HAL_ERR_INVALID;
 	if(!space_lock_handle(h,&s,&enabled))return HAL_ERR_STATE;
@@ -269,24 +269,24 @@ int hal_page_unmap(hal_space_t h,void *v,size_t n)
 	detached=detach_empty_tables(s);hal_wmb();flush_locked(s);
 	free_detached_tables(detached);space_unlock(s,enabled);return HAL_OK;
 }
-int hal_page_query(hal_space_t h,void *v,uint32_t *flags)
+int hal_space_query(hal_space_t h,void *v,uint32_t *flags)
 {
 	struct arm64_space *s=h;uint64_t *l;bool enabled;if(!s||!flags||!valid_user((uintptr_t)v,4096))return HAL_ERR_INVALID;
 	if(!space_lock_handle(h,&s,&enabled))return HAL_ERR_STATE;
-	l=walk_leaf(s,(uintptr_t)v,0);*flags=l&&(*l&PTE_VALID)?HAL_PAGE_PRESENT|HAL_PAGE_ACCESSED:0;if(l&&(*l&PTE_SW_DIRTY))*flags|=HAL_PAGE_DIRTY;space_unlock(s,enabled);return HAL_OK;
+	l=walk_leaf(s,(uintptr_t)v,0);*flags=l&&(*l&PTE_VALID)?HAL_SPACE_PAGE_PRESENT|HAL_SPACE_PAGE_ACCESSED:0;if(l&&(*l&PTE_SW_DIRTY))*flags|=HAL_SPACE_PAGE_DIRTY;space_unlock(s,enabled);return HAL_OK;
 }
-int hal_page_clear_flags(hal_space_t h,void *v,uint32_t flags)
+int hal_space_clear_flags(hal_space_t h,void *v,uint32_t flags)
 {
-	struct arm64_space *s=h;uint64_t *l;bool enabled;if(!s||!valid_user((uintptr_t)v,4096)||(flags&~(HAL_PAGE_ACCESSED|HAL_PAGE_DIRTY)))return HAL_ERR_INVALID;
+	struct arm64_space *s=h;uint64_t *l;bool enabled;if(!s||!valid_user((uintptr_t)v,4096)||(flags&~(HAL_SPACE_PAGE_ACCESSED|HAL_SPACE_PAGE_DIRTY)))return HAL_ERR_INVALID;
 	if(!space_lock_handle(h,&s,&enabled))return HAL_ERR_STATE;
 	l=walk_leaf(s,(uintptr_t)v,0);if(!l||!(*l&PTE_VALID)){space_unlock(s,enabled);return HAL_ERR_INVALID;}
 	/* AF is deliberately conservative.  DIRTY can become clean only after
 	 * write permission has already been revoked. */
-	if((flags&HAL_PAGE_DIRTY)&&(*l&PTE_RO))*l&=~PTE_SW_DIRTY;
+	if((flags&HAL_SPACE_PAGE_DIRTY)&&(*l&PTE_RO))*l&=~PTE_SW_DIRTY;
 	hal_wmb();flush_locked(s);space_unlock(s,enabled);return HAL_OK;
 }
-void hal_page_flush_tlb(hal_space_t h){struct arm64_space *s;bool enabled;if(h==HAL_SPACE_SYS){enabled=hal_irq_disable();flush_locked(h);if(enabled)hal_irq_enable();return;}if(!space_lock_handle(h,&s,&enabled))HAL_FATAL("invalid arm64 space flush");flush_locked(s);space_unlock(s,enabled);}
-void hal_page_flush_tlb_range(hal_space_t h,void*v,size_t n){(void)v;if(n)hal_page_flush_tlb(h);}
-size_t hal_page_get_page_size(int level){if(level==1)return 4096;if(level==2)return 0x200000;if(level==3)return 0x40000000;return 0;}
-void hal_page_get_user_range(uintptr_t *minimum,uintptr_t *limit){if(minimum)*minimum=4096;if(limit)*limit=ARM64_USER_LIMIT;}
+void hal_space_flush_tlb(hal_space_t h){struct arm64_space *s;bool enabled;if(h==HAL_SPACE_SYS){enabled=hal_irq_disable();flush_locked(h);if(enabled)hal_irq_enable();return;}if(!space_lock_handle(h,&s,&enabled))HAL_FATAL("invalid arm64 space flush");flush_locked(s);space_unlock(s,enabled);}
+void hal_space_flush_tlb_range(hal_space_t h,void*v,size_t n){(void)v;if(n)hal_space_flush_tlb(h);}
+size_t hal_space_get_page_size(int level){if(level==1)return 4096;if(level==2)return 0x200000;if(level==3)return 0x40000000;return 0;}
+void hal_space_get_user_range(uintptr_t *minimum,uintptr_t *limit){if(minimum)*minimum=4096;if(limit)*limit=ARM64_USER_LIMIT;}
 void hal_arm64_space_memory_stats(uint32_t *s,uint32_t *t){bool enabled=hal_irq_disable();if(s)*s=space_count;if(t)*t=page_table_count;if(enabled)hal_irq_enable();}

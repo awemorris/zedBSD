@@ -34,28 +34,27 @@ _Static_assert(sizeof(user_fault_probe.fault_address) == sizeof(uintptr_t),
 	       "user fault address width must match uintptr_t");
 
 /*
- * Records a user-mode software interrupt in the interrupt probe.
+ * Records one system call entry in the interrupt probe.
+ *
+ * The fixed entry carries no vector or privilege; those fields stay zero.
  */
 void
-kernel_user_int_handler(
-	uint32_t vector,
-	uint32_t privilege,
-	uintptr_t pc,
-	uintptr_t value)
+user_probe_syscall(
+	uint32_t number)
 {
 	struct thread *thread;
 
-	/* Ignores an interrupt outside any process. */
+	/* Ignores a call outside any process. */
 	thread = curthread;
 	if (thread == NULL || thread->proc == NULL)
 		return;
 
-	/* Records the trap, publishing the magic last. */
+	/* Records the call, publishing the magic last. */
 	user_int_probe.count++;
-	user_int_probe.vector = vector;
-	user_int_probe.cs = privilege;
-	user_int_probe.eip = pc;
-	user_int_probe.eax = value;
+	user_int_probe.vector = 0;
+	user_int_probe.cs = 0;
+	user_int_probe.eip = 0;
+	user_int_probe.eax = number;
 	user_int_probe.pid = thread->proc->pid;
 	user_int_probe.tid = thread->tid;
 	hal_compiler_barrier();
@@ -71,11 +70,12 @@ kernel_user_int_handler(
  */
 int
 kernel_user_fault_handler(
-	uint32_t vector,
-	uint32_t privilege,
+	int cause,
+	int mode,
 	uintptr_t pc,
-	uintptr_t error_code,
-	uintptr_t fault_address)
+	uintptr_t address,
+	uintptr_t vector,
+	uintptr_t error_code)
 {
 	struct thread *thread;
 	struct signal_info info;
@@ -99,15 +99,15 @@ kernel_user_fault_handler(
 		goto out;
 
 	/* Offers a page fault to the address space first. */
-	if (vector == 14U && thread->proc->vmspace != NULL) {
-		if (error_code & 0x10U)
+	if (cause == HAL_TRAP_CAUSE_PAGE_FAULT && thread->proc->vmspace != NULL) {
+		if (mode == HAL_TRAP_MODE_EXEC)
 			required = HAL_SPACE_EXEC;
-		else if (error_code & 2U)
+		else if (mode == HAL_TRAP_MODE_WRITE)
 			required = HAL_SPACE_WRITE;
 		else
 			required = HAL_SPACE_READ;
 		page_fault_error = vmspace_fault(thread->proc->vmspace,
-		    fault_address, required);
+		    address, required);
 		if (page_fault_error == 0) {
 			result = HAL_TRAP_RET_SUCCESS;
 			goto out;
@@ -115,43 +115,40 @@ kernel_user_fault_handler(
 	}
 
 	/* Retains the fault on the thread for the signal frame. */
-	thread->fault_vector = vector;
+	thread->fault_vector = (uint32_t)vector;
 	thread->fault_eip = pc;
-	thread->fault_address = fault_address;
+	thread->fault_address = address;
 
 	/* Records the fault, publishing the magic last. */
 	user_fault_probe.count++;
-	user_fault_probe.vector = vector;
-	user_fault_probe.cs = privilege;
+	user_fault_probe.vector = (uint32_t)vector;
+	user_fault_probe.cs = 0;
 	user_fault_probe.eip = pc;
 	user_fault_probe.error_code = error_code;
-	user_fault_probe.fault_address = fault_address;
+	user_fault_probe.fault_address = address;
 	user_fault_probe.pid = thread->proc->pid;
 	user_fault_probe.tid = thread->tid;
 	hal_compiler_barrier();
 	user_fault_probe.magic = USER_FAULT_PROBE_MAGIC;
 
-	/* Maps the fault vector to a signal. */
-	switch (vector) {
-	case 0:
+	/* Maps the fault cause to a signal. */
+	switch (cause) {
+	case HAL_TRAP_CAUSE_ARITHMETIC:
 		signo = SIGFPE;
 		break;
-	case 3:
+	case HAL_TRAP_CAUSE_BREAKPOINT:
 		signo = SIGTRAP;
 		break;
-	case 6:
+	case HAL_TRAP_CAUSE_ILLEGAL_INSN:
 		signo = SIGILL;
 		break;
-	case 14:
+	case HAL_TRAP_CAUSE_PAGE_FAULT:
 		if (page_fault_error == ENXIO)
 			signo = SIGBUS;
 		else
 			signo = SIGSEGV;
 		break;
-	case 10:
-	case 11:
-	case 12:
-	case 13:
+	case HAL_TRAP_CAUSE_PROTECTION:
 		signo = SIGSEGV;
 		break;
 	default:
@@ -161,8 +158,8 @@ kernel_user_fault_handler(
 
 	/* Describes the fault for the signal handler. */
 	memset(&info, 0, sizeof(info));
-	if (vector == 14U)
-		info.address = fault_address;
+	if (cause == HAL_TRAP_CAUSE_PAGE_FAULT)
+		info.address = address;
 	else
 		info.address = pc;
 
@@ -184,7 +181,10 @@ kernel_user_fault_handler(
 			info.code = SEGV_MAPERR;
 		break;
 	case SIGBUS:
-		info.code = BUS_ADRERR;
+		if (cause == HAL_TRAP_CAUSE_ALIGNMENT)
+			info.code = BUS_ADRALN;
+		else
+			info.code = BUS_ADRERR;
 		break;
 	default:
 		info.code = SI_KERNEL;
@@ -217,4 +217,31 @@ user_probe_init(
 	user_int_probe.count = 0;
 	user_fault_probe.magic = 0;
 	user_fault_probe.count = 0;
+}
+
+/*
+ * Handles a supervisor-mode fault.
+ *
+ * Nothing in the kernel can resume from one yet, so every fault is left to
+ * the HAL, which prints its register diagnostics and stops.  The arguments
+ * are the same as for a user fault so that a later fixup table can use them.
+ */
+int
+kernel_sys_fault_handler(
+	int cause,
+	int mode,
+	uintptr_t pc,
+	uintptr_t address,
+	uintptr_t vector,
+	uintptr_t error_code)
+{
+	(void)cause;
+	(void)mode;
+	(void)pc;
+	(void)address;
+	(void)vector;
+	(void)error_code;
+
+	/* Failed. */
+	return HAL_TRAP_RET_FAILED;
 }

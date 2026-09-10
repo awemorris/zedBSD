@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+set -euo pipefail
+repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)
+temporary=$(mktemp -d "$repo/plan/ws025-io-memory-cache/temp/uas-transport.XXXXXX")
+trap 'rm -rf -- "$temporary"' EXIT
+mkdir -p "$temporary/include/kern"
+printf '#include <stdint.h>\nuint64_t sched_ticks(void);\nvoid sched_yield(void);\n' > "$temporary/include/kern/sched.h"
+sources=("$repo/src/drivers/usb/usb-uas.c" "$repo/src/drivers/usb/usb-uas-transport.c" "$repo/plan/ws025-io-memory-cache/tests/uas-transport-host.c")
+flags=(-std=c11 -Wall -Wextra -Werror -g -I"$temporary/include" -I"$repo/include")
+cc "${flags[@]}" "${sources[@]}" -o "$temporary/plain"
+"$temporary/plain"
+cc "${flags[@]}" -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -fno-pie -no-pie "${sources[@]}" -o "$temporary/sanitize"
+ASAN_OPTIONS=detect_leaks=1 "$temporary/sanitize"

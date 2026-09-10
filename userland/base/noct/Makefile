@@ -13,7 +13,9 @@ ZEDBSD_NOCT_DISTFILE := $(ZEDBSD_NOCT_DISTDIR)/$(ZEDBSD_NOCT_ARCHIVE_NAME)
 ZEDBSD_NOCT_PATCHES := \
 	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0001-connect-zedbsd-target-adapter.patch \
 	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0002-use-project-llvm-sysroot.patch \
-	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0003-terminal-partial-input-progress.patch
+	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0003-terminal-partial-input-progress.patch \
+	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0004-transparent-beui-text.patch \
+	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0005-beui-display-input-state.patch
 ZEDBSD_NOCT_FETCH ?= curl --fail --location --silent --show-error
 ZEDBSD_NOCT_SHA256 ?= sha256sum
 
@@ -26,13 +28,16 @@ NOCT_HOST_SOURCE_STAMP := $(NOCT_HOST_SOURCE_DIR)/.zedbsd-source-$(ZEDBSD_NOCT_V
 NOCT_HOST_SOURCE_IDENTITY := $(NOCT_HOST_SOURCE_DIR)/.zedbsd-source-identity
 NOCT_HOST_SOURCE_MANIFEST := $(NOCT_HOST_SOURCE_DIR)/.zedbsd-source-manifest
 
-NOCT_ZEDBSD_BUILD_DIR := $(NOCT_SOURCE_DIR)/build-zedbsd-amd64
+NOCT_ZEDBSD_ARCH := $(if $(filter i386,$(ZEDBSD_ARCHITECTURE)),i386,amd64)
+NOCT_ZEDBSD_SYSROOT = $(if $(filter i386,$(NOCT_ZEDBSD_ARCH)),$(ZEDBSD_SYSROOT_I386),$(ZEDBSD_SYSROOT_AMD64))
+NOCT_ZEDBSD_CMAKE_OPTIONS := $(if $(filter i386,$(NOCT_ZEDBSD_ARCH)),--toolchain $(ZEDBSD_NOCT_PACKAGE_ROOT)/zedbsd-i386.cmake -DNOCT_ENABLE_JIT=OFF,)
+NOCT_ZEDBSD_BUILD_DIR := $(NOCT_SOURCE_DIR)/build-zedbsd-$(NOCT_ZEDBSD_ARCH)
 NOCT_ZEDBSD_ARTIFACT := $(NOCT_ZEDBSD_BUILD_DIR)/noct
 NOCT_PACKAGE_HOLORIS := $(NOCT_SOURCE_DIR)/resources/apps/holoris/holoris.noct
 
-# The first resumed target remains amd64-only and optional. Remacs stays held
+# i386 uses the interpreter for the PC98 i486 baseline. Remacs stays held
 # independently until its own application acceptance is scheduled.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,noct,noct,amd64,n,package,,y,base,base/noct,))
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,noct,noct,amd64 pc98,n,package,,y,base,base/noct,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter noct,$(ZEDBSD_USER_PROGRAMS)),\
 	$(BUILD)/bin/noct $(NOCT_PACKAGE_HOLORIS))
@@ -220,21 +225,21 @@ patch: noct-target-source-verify
 $(NOCT_PACKAGE_HOLORIS): | noct-target-source-verify
 	@test -f '$@'
 
-noct-zedbsd: noct-target-source-verify sysroot-amd64
+noct-zedbsd: noct-target-source-verify sysroot-$(NOCT_ZEDBSD_ARCH)
 	cd '$(NOCT_SOURCE_DIR)' && \
 		ZEDBSD_SOURCE_DIR='$(ZEDBSD_NOCT_ROOT)' \
-		ZEDBSD_SYSROOT='$(ZEDBSD_SYSROOT_AMD64)' \
+		ZEDBSD_SYSROOT='$(NOCT_ZEDBSD_SYSROOT)' \
 		ZEDBSD_LLVM_BIN='$(ZEDBSD_LLVM_INSTALL)/bin' \
-		cmake --preset zedbsd-amd64 \
+		cmake --preset zedbsd-amd64 -B build-zedbsd-$(NOCT_ZEDBSD_ARCH) $(NOCT_ZEDBSD_CMAKE_OPTIONS) \
 		-DNOCT_VERSION='$(ZEDBSD_NOCT_VERSION)'
 	cd '$(NOCT_SOURCE_DIR)' && \
 		ZEDBSD_SOURCE_DIR='$(ZEDBSD_NOCT_ROOT)' \
-		ZEDBSD_SYSROOT='$(ZEDBSD_SYSROOT_AMD64)' \
+		ZEDBSD_SYSROOT='$(NOCT_ZEDBSD_SYSROOT)' \
 		ZEDBSD_LLVM_BIN='$(ZEDBSD_LLVM_INSTALL)/bin' \
-		cmake --build --preset zedbsd-amd64 --parallel 16
+		cmake --build build-zedbsd-$(NOCT_ZEDBSD_ARCH) --parallel 16
 	@test -x '$(NOCT_ZEDBSD_ARTIFACT)'
 
-ifeq ($(ZEDBSD_ARCHITECTURE),amd64)
+ifneq ($(filter amd64 i386,$(ZEDBSD_ARCHITECTURE)),)
 $(BUILD)/bin/noct: noct-zedbsd
 	@mkdir -p $(dir $@)
 	cp -f '$(NOCT_ZEDBSD_ARTIFACT)' '$@'

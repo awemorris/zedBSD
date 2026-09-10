@@ -1,13 +1,13 @@
 # Boot, root storage and installation status
 
-Status: current boot procedure; full NVMe installation remains incomplete
+Status: current; accepted amd64 installation and PC98 FAT installation.
 
 Start with the [build guide](build-from-source.md) and select a BIOS-capable
 amd64 image for the following disposable QEMU example. Commands run in the
 repository root on the host:
 
 ```sh
-make -j16 disk-image
+make -j16 ZEDBSD_CONFIG=config/ci/config-amd64.mk disk-image
 cp build/amd64/hdd-image.img /tmp/zedbsd-trial.img
 qemu-system-x86_64 -machine pc -m 512 -smp 4 \
   -drive file=/tmp/zedbsd-trial.img,format=raw,if=ide -boot c
@@ -71,7 +71,8 @@ implied. Aliasing, recursion and conflicting root selectors are errors.
 Persistence belongs to `data.img` and the containing medium, not to the
 immutable lower image. Do not format or replace an active data/swap backing
 file. [mkfs/mkswap](../reference/image-formatters.md) take reserved regular
-files; they do not partition a disk. `--verify-pristine` is read-only but
+files in their image mode; the installer also uses explicit block-formatting
+modes on inactive target partitions. Partition creation is owned by `diskpart`. `--verify-pristine` is read-only but
 intentionally rejects a previously used filesystem or swap payload, even if
 it is otherwise valid.
 
@@ -92,6 +93,11 @@ arrangement and required runtime files. Formatting an empty UFS image alone
 does not populate a bootable root. The supported filesystem is the single
 64-bit `ufs` implementation, with no selectable UFS1 alternative.
 
+The dedicated installer below populates this native root and writes its GPT
+PARTUUID selector. It creates `/swapfile` on UFS and an `/etc/fstab` swap entry;
+normal startup activates the file after mounting root. There is no separate
+swap partition or FAT `swap0` setting in this mode.
+
 The [retained root-mode acceptance](../../plan/queue-q015.md) covers native and
 overlay roots and selector reordering; later
 [configured-loader gates](../../plan/queue-q032.md) establish required-file
@@ -107,6 +113,14 @@ root and working directory, including nested paths and symbolic links. Both
 require superuser authority. A child mount or an open file keeps its mount busy;
 an ordinary directory is not an unmount target. See
 [path acceptance](../../plan/ws019-installation/phase021-nested-mount/results.md).
+
+If a removable UFS medium has already been lost, ordinary `umount` preserves its
+failed synchronization result. Root can use `umount -f /mount/point` to explicitly
+discard that revoked attachment. This requires all files, mappings and working
+directories on it to be released; root, bind mounts and unsupported filesystems
+are refused, as is a still-live medium. Success reports local disposal, not saved
+data. Physical buffers and replacement-media publication remain owned by disk
+retirement after all old-device users are gone.
 
 Populated tmpfs unmount reclaims its directory entries and data after all users
 close; it does not require empty directories. A failed busy/sync/prepare check
@@ -130,13 +144,115 @@ shutdown before removing the medium. A failed storage sync or controller
 quiesce is an error to investigate, not permission to report a clean halt.
 These tests are not a new physical USB acceptance campaign.
 
-The first-stage installer design targets existing GPT/ESP/FAT32 storage without
-partitioning or formatting those partitions. Its six managed files and
-config-last publication/recovery component passed q149, but public admission,
-confirmation, packaging and installed-NVMe-only boot are still unfinished.
-There is therefore no supported executable `zedinst` installation recipe yet.
-[WS019](../../plan/ws019-installation/ws.md) owns p004/p005 completion; this
-guide will add the actual invocation and recovery procedure after acceptance.
+## Install from the running installation disk
+
+Boot the installation medium, log in as `root`, and run one frontend from an
+interactive console:
+
+```sh
+/sbin/zedinst
+```
+
+For the BeUI frontend, use:
+
+```sh
+/sbin/zedinst-graphic
+```
+
+Both launch `/bin/noct` and share the installation backend in `/lib/zedinst`.
+They are included in the amd64 and PC98 installer packages. The graphical
+frontend requires a 640x480 true-color framebuffer and keyboard or pointer
+input. On amd64 UEFI, `video=640x480` in the selected boot configuration
+requests the mode; the supplied configuration already includes it. RGB24
+artwork can be displayed on the accepted QEMU XRGB32 framebuffer. On PC98,
+use a supported 640x480 true-color CoreGraph configuration; the ordinary
+low-color display is not sufficient.
+
+1. Select **Installation disk**. HTTP is displayed as unavailable; there is
+   no network-download installation path yet. The installer requires a mounted
+   `rootfs.img` from that installation disk and checks its identity. Starting
+   from a native installed root without that image produces an error.
+2. Choose the installation mode, then the destination disk. The installation
+   source is excluded. Read the displayed disk name and capacity; enumeration
+   names alone are not persistent identities.
+3. Review the selected destination and confirm using the frontend's prompt.
+   Dedicated installation starts at **NO** and requires selecting **YES** to
+   erase. Graphical coexistence and PC98 also require explicit confirmation.
+   Text-mode amd64 coexistence asks for the displayed `INSTALL DISK PARTITION`
+   phrase instead of the dedicated mode's NO/YES menu.
+4. Wait for copy and verification to finish. Image copies show byte progress.
+   Native-root copying counts files first and reports copied-file progress,
+   preserving attributes. The source installation's writable data and active
+   swap contents are not cloned: fresh destination data/swap are initialized.
+5. After **Installation complete**, close the frontend and run `halt`. Once
+   shutdown completes, remove the installation source and select the target
+   disk in firmware. Log in on the target-only boot; inspect `mount` for the selected root and the boot console
+   `swap: active sources=...` message for active swap.
+
+### amd64 coexistence
+
+Select **Coexist with an existing FAT filesystem**, then a destination payload
+partition. The target needs a healthy supported GPT, exactly one usable FAT32
+ESP and a separate writable FAT32 payload partition with enough free space.
+Existing partition geometry and unrelated files are preserved. The installer
+publishes `EFI/BOOT/BOOTX64.EFI` on the ESP and `vmunix`, `rootfs.img`, fresh
+`data.img`, `swapfile` and `zedbsd.cfg` on the payload FAT filesystem. It selects
+the installed files by partition identity and publishes configuration last.
+It is not an arbitrary overwrite/update tool: conflicting existing managed
+files are reported rather than silently replaced.
+
+### amd64 dedicated disk
+
+Select **Dedicated disk (erase all contents)** and the whole destination disk.
+This destroys the selected disk's existing contents after explicit confirmation.
+The current path requires a writable disk with 512-byte logical sectors.
+Partitioning is automatic: a FAT32 EFI System Partition sized for the boot
+files (at least 64 MiB), then a UFS root partition using the remaining aligned
+space. There is no partition editor, separate home partition or swap partition.
+
+The ESP receives `EFI/BOOT/BOOTX64.EFI`, `vmunix` and `zedbsd.cfg`. The installer
+copies the mounted lower `rootfs.img` tree into UFS, preserving file attributes,
+creates the native swap file, and configures startup swap activation. This path
+installs a UEFI loader; it does not provision a new BIOS boot chain. Use the
+firmware's target-disk boot entry or select `EFI/BOOT/BOOTX64.EFI` manually.
+
+### PC98 FAT installation
+
+PC98 is detected from `uname -a`. Use two IDE HDDs: the installation source
+and a target with an existing PC98 partition layout, a working boot entry and
+FAT16. Select the existing FAT partition. Its size must be at most 4 GiB and
+every managed payload file at most 2 GiB; the UI also checks available space.
+
+`BOOTZBSD.EXE`, `vmunix`, `rootfs.img`, fresh `data.img`, `swapfile` and
+`BOOTZBSD.CFG` go on that FAT partition. No ESP or GPT is used. The existing
+bootstrap and unrelated files are retained. Blank-disk bootstrap creation and
+native-root installation are not implemented for PC98 in this installer.
+The accepted QEMU run used a 486, 64 MiB, CoreGraph and two IDE disks, then
+booted and logged in with the target alone. This does not resolve the separate
+physical PC-9821V13 CF boot failure.
+
+### Shell and recovery
+
+**Open shell** leaves the wizard for `/bin/sh`; exiting it restarts source
+admission and disk discovery. `diskpart` remains available for manual work;
+the installer has no arbitrary partition-editing screen. Returning from a
+shell does not preserve an old destination approval.
+
+If installation reports failure or cleanup problems, retain the console's
+`Published`, `Publication requires inspection` and `Preserved staging object`
+paths. Inspect them before retrying. Do not delete staging or overwrite a
+managed file merely to suppress a conflict. Dedicated formatting cannot restore
+the previous disk contents. Cancellation before confirmation leaves installation
+unauthorized; a later I/O failure is not equivalent to cancellation.
+
+Accepted normal paths and target-only boots are recorded in
+[amd64 native integration](../../plan/ws019-installation/phase049-native-installer-integration/phase.md),
+[graphical installation](../../plan/ws019-installation/phase029-graphic-installer/results.md)
+and [PC98 FAT installation](../../plan/ws019-installation/phase050-pc98-graphic-fat/results.md).
+[Multiple-NVMe acceptance](../../plan/ws004-hardware/phase050-nvme-multiple-controllers/results.md)
+also verifies installed-root boot under both enumeration orders. There is no
+longer a one-controller NVMe limit; current support remains one active namespace
+per controller, bounded by resources and the shared disk registry.
 
 ## Failure diagnosis
 
@@ -150,7 +266,8 @@ guide will add the actual invocation and recovery procedure after acceptance.
 - A boot-device or storage error: retain the console log and test a disposable
   copy with the matching controller. Do not repair by formatting the live root.
 
-q150 reconciles documentation only. It retains earlier clean-build evidence
-from [WS009-p002](../../plan/ws009-documentation/phase002-build-guide/phase.md)
-and the current incremental amd64/PCAT/PC98 gates from q149; it does not claim
-a new clean-room build or new physical installation.
+q190 updates these instructions against current installer sources and retained
+normal-path producer evidence. Earlier clean-build evidence remains in
+[WS009-p002](../../plan/ws009-documentation/phase002-build-guide/phase.md).
+This documentation update performs no new physical installation or exhaustive
+installer fault campaign.

@@ -4,17 +4,17 @@ Last updated: 2026-09-09
 
 WSID: `ws009`
 
-Status: active; p007 completed current architecture/UAPI reconciliation in
-q150. p008 published boot/storage guidance but remains uncleared for the
-full native/installed-NVMe procedure dependent on WS019-p004/p005.
+Status: p001–p008 completed through q190; current implementation documentation
+is complete. WS remains unfinished only for DOC-54, whose GPU producer WS014
+is on manual hold. No executable documentation Phase remains.
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws009-p007` complete (`q150`)
+Last verified Phase: `ws009-p008` complete (`q190`)
 
-Resume point: complete producer-dependent native/installation instructions and
-their guide acceptance after WS019-p004/p005. DOC-54 stays with the manually
-held GPU producer; current documentation explicitly records its absence.
+Resume point: after the user releases WS014 and a real GPU UAPI exists, define
+a finite documentation Phase for DOC-54. Existing documentation explicitly
+records that no current GPU ABI is available. Installer dependencies are closed.
 
 Shared tests: [WS009 test index](tests/README.md)
 
@@ -29,7 +29,7 @@ Shared tests: [WS009 test index](tests/README.md)
 | [`ws009-p005`](phase005-kernel-parameter-reference/phase.md) | Complete (`q046`) | Common parameters and all four required configured x86 loader paths are reconciled with production source and retained q015/q031/q032 evidence |
 | [`ws009-p006`](phase006-completed-producer-follow-up/phase.md) | Complete (`q072`) | Current WLAN, physical USB HID, Intel Mac Variant, Noct 2.0.1, and project-toolchain behavior is published without claiming planned removals or new UAPIs |
 | [`ws009-p007`](phase007-current-architecture-uapi/phase.md) | Complete (`q150`) | Architecture, compatibility, console/graphics/system and multi-radio WLAN reconciled; 283 product links pass |
-| [`ws009-p008`](phase008-boot-install-guides/phase.md) | Uncleared (`q150`) | Boot/root/USB limits published; full installation and native preparation guide waits for WS019 acceptance |
+| [`ws009-p008`](phase008-boot-install-guides/phase.md) | Complete (`q190`) | Current amd64/PC98 installer and native-root workflows, recovery/limits, producer evidence and 293 product links verified |
 
 Documentation work may be extracted alongside a producer WS when it describes
 a newly frozen public interface, but it retains a WS009 Phase ID and acceptance
@@ -72,11 +72,11 @@ than assumed here.
 | DOC-11 | Complete (`q150`) | HAL overview and architecture-independent kernel structure | Kernel/platform audit | Subsystem boundaries, ownership, and amd64-specific examples are traceable to source |
 | DOC-12 | Complete (`q150`) | UAPI POSIX/SUS compliance and `_XOPEN_SOURCE` profile | PX-02 | Claims match headers, implementations, and compliance ledger |
 | DOC-20 | Complete | Complete build-from-source guide | Supported toolchain/build audit | Toolchain/image commands reproduced; amd64 QEMU and links pass |
-| DOC-30 | Published (`q150`; retained boot evidence) | Bootloader and boot-flow guide | BR-01–BR-04 design | BIOS/UEFI flow, failure points, and diagnostic paths are documented |
+| DOC-30 | Complete (`q190`; retained boot evidence) | Bootloader and boot-flow guide | BR-01–BR-04 design | BIOS/UEFI flow, failure points, and diagnostic paths are documented |
 | DOC-31 | Complete through `ws009-p005` | Kernel parameter reference | Parser/default audit | Every documented parameter cites parser/default and unknown-key behavior |
-| DOC-32 | Published (`q150`; retained boot evidence) | Boot filesystem plus loopback-root guide | Boot/root implementation | QEMU procedure reaches the intended root reproducibly |
-| DOC-33 | Partial / uncleared (`q150`) | Native UFS-root guide | Stable native storage drivers | QEMU and supported hardware procedures are explicit and safe |
-| DOC-34 | Partial / uncleared (`q150`) | USB trial and NVMe installation guide | WS019 p005, WS003 p018 | USB-first evaluation, the existing-GPT/ESP/FAT32 prerequisite, read-only `diskpart`, no-format overlay `zedinst`, fallback/manual UEFI selection, and recovery limits match the released first-stage tools; native/destructive guidance waits for its later Phase |
+| DOC-32 | Complete (`q190`; retained boot evidence) | Boot filesystem plus loopback-root guide | Boot/root implementation | QEMU procedure reaches the intended root reproducibly |
+| DOC-33 | Complete (`q190`) | Native UFS-root guide | Stable native storage drivers | QEMU and supported hardware procedures are explicit and safe |
+| DOC-34 | Complete (`q190`) | USB trial and NVMe installation guide | WS019 p005, WS003 p018 | Public text/graphic source/mode/confirmation/copy workflows, GPT/FAT coexistence, dedicated EFI+UFS, native file swap, PC98 FAT/bootstrap limits and source-free boot match accepted WS019/q187 behavior |
 | DOC-40 | Complete | zedBSD init, rc.conf, service.d, fd 3 readiness, and shutdown model | Phase 11–20 implementation | Boot/service/shutdown examples match tested behavior |
 | DOC-50 | Complete (`q150`) | `/dev/console` HAL-bridge reference | IN migration state | Text/input/framebuffer roles and deprecated interfaces are accurate |
 | DOC-51 | Complete (`q150`) | `/dev/graphics` HAL-bridge reference | GFX takeover design | Framebuffer, mmap/ioctl, ownership, and GPU takeover are specified |

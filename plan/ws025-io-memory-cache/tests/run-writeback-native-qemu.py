@@ -2,6 +2,7 @@
 """WS025 file-cache acceptance on a disposable xHCI USB root image.
 Derived from the maintained q086 native runner; source image is hash protected.
 """
+import argparse
 import hashlib
 import json
 import os
@@ -23,7 +24,13 @@ base = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(base)
 
 class USBGuest(base.Guest):
-    def __init__(self, output):
+    def text(self):
+        text = super().text()
+        if re.search(r"^(?:fatal:|panic:|kernel panic)", text, re.M | re.I):
+            raise RuntimeError("guest fatal error: " + text[-1200:])
+        return text
+
+    def __init__(self, output, expect_imod=None):
         self.output = output
         self.log = output / "guest.log"
         self.deadline = time.monotonic() + 600
@@ -39,15 +46,27 @@ class USBGuest(base.Guest):
                 "-device", ("nvme,drive=wb,serial=WS025WRITEBACK" if "--nvme" in sys.argv else "usb-storage,bus=xhci.0,drive=wb" + (",removable=on" if "--media-recovery" in sys.argv else "")),
                 "-nic", "none", "-display", "none", "-serial", "none",
                 "-debugcon", f"file:{self.log}", "-monitor", "stdio"]
+        if expect_imod is not None:
+            args += ["-qmp", f"unix:{output / 'imod.sock'},server=on,wait=off"]
         self.commands.write(repr(args) + "\n")
         self.proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=self.monitor,
                                      stderr=subprocess.STDOUT, text=True)
 
 def main():
-    output = Path(sys.argv[1]).resolve()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("output", type=Path)
+    parser.add_argument("--image", type=Path, default=REPO / "build/amd64/hdd-image.img")
+    parser.add_argument("--root-image", type=Path,
+                        default=REPO / "build/arch-images/amd64-ws025-writeback.ufs")
+    parser.add_argument("--expect-imod", type=int, choices=range(65536), metavar="0..65535")
+    options, _ = parser.parse_known_args()
+    source = options.image.resolve()
+    root = options.root_image.resolve()
+    if not source.is_file() or not root.is_file():
+        parser.error("source and workload root images must exist")
+    output = options.output.resolve()
     output.relative_to(REPO / "plan/ws025-io-memory-cache/temp")
     output.mkdir(parents=True, exist_ok=False)
-    source = REPO / "build/amd64/hdd-image.img"
     original = base.digest(source)
     subprocess.run(["cp", "--reflink=auto", "--sparse=always",
                     str(source), str(output / "boot.img")], check=True)
@@ -70,7 +89,6 @@ def main():
                            "::/rootfs.img"], capture_output=True).returncode == 0:
             candidates.append(first)
     assert len(candidates) == 1
-    root = REPO / "build/arch-images/amd64-ws025-writeback.ufs"
     subprocess.run(["mcopy", "-o", "-i",
         f"{output / 'boot.img'}@@{candidates[0] * 512}", str(root), "::/rootfs.img"], check=True)
     # Record the backing-file alignment: 2 KiB FAT clusters can double 4 KiB RMW writes.
@@ -136,9 +154,21 @@ def main():
         (output / "replacement.img").write_bytes(create(64 * 1024 * 1024, root=replacement_root, profile=profile))
     (output / "writeback.img").write_bytes(create(64 * 1024 * 1024, root=read_root, profile=profile))
     (output / "filesystem-profile.json").write_text(json.dumps({"profile": profile}) + "\n")
-    guest = USBGuest(output)
+    capture = None
+    if options.expect_imod is not None:
+        imod_spec = importlib.util.spec_from_file_location("ws025_imod_capture",
+            Path(__file__).with_name("run-imod-qemu.py"))
+        imod = importlib.util.module_from_spec(imod_spec)
+        imod_spec.loader.exec_module(imod)
+        capture = imod.capture
+    evidence = {"source": str(source), "source_sha256": original,
+                "root_image": str(root), "root_sha256": base.digest(root),
+                "expected_imod": options.expect_imod, "completed": False}
+    guest = USBGuest(output, options.expect_imod)
     try:
         guest.login()
+        if capture is not None:
+            evidence["imod_before"] = capture(output / "imod.sock", options.expect_imod)
         commands = [
             "mkdir /ws025-wb",
             "mount -t ufs /dev/sdb /ws025-wb",
@@ -221,8 +251,13 @@ def main():
             assert "WRITEBACK SHUTDOWN STORAGE CLEAN" in result
             assert "final system action failed" not in result
             results["shutdown storage/device boundary"] = "PASS"
+        if capture is not None and "--shutdown" not in sys.argv:
+            evidence["imod_after"] = capture(output / "imod.sock", options.expect_imod)
+        evidence["completed"] = True
     finally:
         guest.stop()
+        evidence["source_unchanged"] = base.digest(source) == original
+        (output / "campaign.json").write_text(json.dumps(evidence, indent=2) + "\n")
     if "--shutdown" in sys.argv:
         checker_spec = importlib.util.spec_from_file_location("ufs_checker", REPO / "tools/build/check-ufs-image.py")
         checker = importlib.util.module_from_spec(checker_spec)
@@ -234,7 +269,7 @@ def main():
         results["shutdown disk contents"] = "PASS"
     (output / "results.json").write_text(json.dumps(results, indent=2) + "\n")
     assert base.digest(source) == original
-    (output / "source.sha256").write_text(original + "  build/amd64/hdd-image.img\n")
+    (output / "source.sha256").write_text(original + "  " + str(source) + "\n")
     print("WS025 native writeback PASS")
 
 if __name__ == "__main__":

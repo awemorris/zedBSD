@@ -185,6 +185,9 @@ struct drv_nvme_shutdown_lifecycle {
 };
 
 struct nvme_controller {
+	/* Registry linkage and a boot-local index, independent of media identity. */
+	struct nvme_controller *next;
+	unsigned index;
 	struct drv_nvme_lifecycle lifecycle;
 	struct drv_nvme_detach_flush_lifecycle detach_flush;
 	struct drv_nvme_shutdown_lifecycle shutdown_lifecycle;
@@ -296,7 +299,10 @@ struct drv_nvme_shutdown_ops {
 	int (*bus_master_disable)(void *context);
 };
 
-static struct nvme_controller *nvme_primary;
+/* Bound controllers, including quarantines, protected by the registry lock. */
+static struct nvme_controller *nvme_controllers;
+/* Monotonic boot-local names; failed attaches never reuse an observed index. */
+static uint64_t nvme_next_index;
 static struct spinlock nvme_registry_lock;
 
 
@@ -483,33 +489,27 @@ drv_pci_nvme_probe_namespaces(
 	int owns_detach = 0;
 	int error;
 
+next_controller:
+	owns_detach = 0;
 	registry_irq = spin_lock_irqsave(&nvme_registry_lock);
 
-	/* Handles the controller availability. */
-	controller = nvme_primary;
-	if (controller == NULL) {
-		spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
-
-		/* Returns the computed result. */
-		return;
-	}
-
-	/* Handles the controller condition. */
-	irq = spin_lock_irqsave(&controller->command_lock);
-	if (controller->probe_started || controller->detach_busy ||
-	    controller->stopping || controller->quarantined) {
+	/* Claim one probe while its registry node cannot be detached. */
+	for (controller = nvme_controllers; controller != NULL;
+	     controller = controller->next) {
+		irq = spin_lock_irqsave(&controller->command_lock);
+		if (controller->probe_started || controller->detach_busy ||
+		    controller->stopping || controller->quarantined) {
+			spin_unlock_irqrestore(&controller->command_lock, irq);
+			continue;
+		}
+		controller->probe_started = 1;
+		controller->probe_busy = 1;
 		spin_unlock_irqrestore(&controller->command_lock, irq);
-		spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
-
-		/* Returns the computed result. */
-		return;
+		break;
 	}
-
-	controller->probe_started = 1;
-	controller->probe_busy = 1;
-
-	spin_unlock_irqrestore(&controller->command_lock, irq);
 	spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
+	if (controller == NULL)
+		return;
 
 	/* Checks the operation status. */
 	error = nvme_probe_namespace(controller);
@@ -530,14 +530,14 @@ drv_pci_nvme_probe_namespaces(
 
 	/* Checks the operation status. */
 	if (error == 0)
-		return;
+		goto next_controller;
 
 	/*
 	 * A concurrent PCI detach already owns teardown and may free controller
 	 * as soon as probe_busy clears.  Do not dereference it in that case.
 	 */
 	if (!owns_detach)
-		return;
+		goto next_controller;
 
 	/*
 	 * A failed Identify probe releases every safely quiesced resource but
@@ -556,6 +556,8 @@ drv_pci_nvme_probe_namespaces(
 		hal_printf(
 			"nvme: failed probe resources released; quarantined\n");
 	}
+	/* Search again under the registry lock; no saved sibling pointer survives. */
+	goto next_controller;
 }
 
 /* Starts a record of the steps an attach has taken. */
@@ -1452,24 +1454,22 @@ nvme_attach(
 
 	(void)id;
 
-	/* Handles the nvme primary availability. */
-	registry_irq = spin_lock_irqsave(&nvme_registry_lock);
-	if (nvme_primary != NULL) {
-		spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
-		hal_printf("nvme: additional controller rejected by initial "
-			   "profile\n");
-
-		/* Failed. */
-		return EBUSY;
-	}
-
-	spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
-
 	/* Handles the controller availability. */
 	controller = hal_malloc(sizeof(*controller));
 	if (controller == NULL)
 		return ENOMEM;
 	memset(controller, 0, sizeof(*controller));
+
+	/* Reserve a unique name before this attach can publish or quarantine. */
+	registry_irq = spin_lock_irqsave(&nvme_registry_lock);
+	if (nvme_next_index > UINT_MAX) {
+		spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
+		hal_free(controller);
+		return ENOSPC;
+	}
+	controller->index = (unsigned)nvme_next_index++;
+	spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
+
 	drv_nvme_lifecycle_init(&controller->lifecycle);
 	drv_nvme_detach_flush_init(&controller->detach_flush);
 	drv_nvme_shutdown_lifecycle_init(&controller->shutdown_lifecycle);
@@ -2693,8 +2693,12 @@ nvme_detach_claim(
 	registry_irq = spin_lock_irqsave(&nvme_registry_lock);
 
 	/* Handles the controller availability. */
-	controller = nvme_primary;
-	if (controller == NULL || controller->pci != device) {
+	for (controller = nvme_controllers; controller != NULL;
+	     controller = controller->next) {
+		if (controller->pci == device)
+			break;
+	}
+	if (controller == NULL) {
 		spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
 
 		/* Failed. */
@@ -2760,8 +2764,12 @@ nvme_shutdown_claim(
 	registry_irq = spin_lock_irqsave(&nvme_registry_lock);
 
 	/* Handles the controller availability. */
-	controller = nvme_primary;
-	if (controller == NULL || controller->pci != device) {
+	for (controller = nvme_controllers; controller != NULL;
+	     controller = controller->next) {
+		if (controller->pci == device)
+			break;
+	}
+	if (controller == NULL) {
 		spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
 
 		/* Failed. */
@@ -3278,27 +3286,35 @@ static void
 nvme_publish_controller(
 	struct nvme_controller *controller)
 {
+	struct nvme_controller **link;
 	unsigned long irq;
 
 	(void)drv_pci_device_set_driver_data(controller->pci, controller);
 	irq = spin_lock_irqsave(&nvme_registry_lock);
-
-	nvme_primary = controller;
-
+	link = &nvme_controllers;
+	while (*link != NULL)
+		link = &(*link)->next;
+	controller->next = NULL;
+	*link = controller;
 	spin_unlock_irqrestore(&nvme_registry_lock, irq);
 }
 
-/* Takes it back out of view. */
+/* Removes only the node whose teardown owns the controller. */
 static void
 nvme_unpublish_controller(
 	struct nvme_controller *controller)
 {
-	unsigned long irq = spin_lock_irqsave(&nvme_registry_lock);
+	struct nvme_controller **link;
+	unsigned long irq;
 
-	/* Handles the nvme primary condition. */
-	if (nvme_primary == controller)
-		nvme_primary = NULL;
-
+	irq = spin_lock_irqsave(&nvme_registry_lock);
+	link = &nvme_controllers;
+	while (*link != NULL && *link != controller)
+		link = &(*link)->next;
+	if (*link == controller) {
+		*link = controller->next;
+		controller->next = NULL;
+	}
 	spin_unlock_irqrestore(&nvme_registry_lock, irq);
 }
 
@@ -4606,7 +4622,7 @@ nvme_probe_namespace(
 		return ENOMEM;
 
 	/* Checks the operation status. */
-	error = disk_alloc_nvme_name(disk, 0, namespace_id);
+	error = disk_alloc_nvme_name(disk, controller->index, namespace_id);
 	if (error != 0)
 		goto fail_disk;
 	disk->d_flags = 0;

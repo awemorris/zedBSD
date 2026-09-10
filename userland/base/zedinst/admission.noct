@@ -55,7 +55,7 @@ func instSourceConfiguration(text, partuuid, uuid) {
         var value = String.substring(line, at + 1, -1);
         if (Dict.hasKey(values, key)) { System.error("duplicate source directive"); }
         if (key != "kernel" && key != "overlay-root" && key != "overlay-data" &&
-            key != "swap0" && key != "boot0" && key != "init") {
+            key != "swap0" && key != "boot0" && key != "init" && key != "video") {
             System.error("unsupported installer source profile");
         }
         values[key] = value;
@@ -82,6 +82,18 @@ func instSourceConfiguration(text, partuuid, uuid) {
     }
     if (Dict.hasKey(values, "init") && values.init != "/sbin/init") {
         System.error("source profile uses a different init");
+    }
+    // Match the loader's bounded canonical dimensions without redirecting artifacts.
+    if (Dict.hasKey(values, "video")) {
+        var dimensions = instSplit(values.video, "x");
+        if (Array.size(dimensions) != 2) { System.error("invalid source video mode"); }
+        for (dimension in dimensions) {
+            if (dimension == "" || String.charAt(dimension, 0) == "0") {
+                System.error("invalid source video dimension");
+            }
+            var pixels = instNumber(dimension, 10);
+            if (pixels < 1 || pixels > 16384) { System.error("source video dimension out of range"); }
+        }
     }
     return true;
 }

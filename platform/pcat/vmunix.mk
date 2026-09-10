@@ -81,7 +81,7 @@ endif
 PCAT_USB_CLASS_OBJS :=
 ifeq ($(CONFIG_DRIVER_USB_STORAGE),y)
 PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb/usb-storage.o
-PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb/usb-uas.o
+PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb/usb-uas.o $(BUILD)/drivers/usb/usb-uas-transport.o $(BUILD)/drivers/usb/usb-uas-disk.o
 endif
 PCAT_NVME_OBJS :=
 ifeq ($(CONFIG_DRIVER_PCI_NVME),y)

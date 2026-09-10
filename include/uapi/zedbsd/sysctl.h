@@ -103,6 +103,8 @@ struct bufcache_stats {
 	uint64_t evictions;
 	uint64_t waits;
 	uint64_t writeback_errors;
+	uint64_t capacity_failures;
+	uint64_t physical_failures;
 };
 
 #endif

@@ -47,23 +47,25 @@ hal_free(void *pointer)
 }
 
 size_t
-hal_page_get_page_size(int level)
+hal_space_get_page_size(int level)
 {
 	(void)level;
 	return 4096;
 }
 
 int
-hal_pmem_alloc(const struct hal_pmem_request *request, struct hal_pmem *memory)
+hal_pmem_alloc(hal_physaddr_t request_paddr, size_t request_size, size_t request_alignment, uint32_t request_type, uint32_t request_attr, struct hal_pmem *memory)
 {
-	observed_alignment = request->alignment;
-	memory->vaddr = malloc(request->size);
+	(void)request_paddr;
+
+	observed_alignment = request_alignment;
+	memory->vaddr = malloc(request_size);
 	if (memory->vaddr == NULL)
 		return HAL_ERR_NOMEM;
-	memory->paddr = request->alignment;
-	memory->size = request->size;
-	memory->type = request->type;
-	memory->attr = request->attr;
+	memory->paddr = request_alignment;
+	memory->size = request_size;
+	memory->type = request_type;
+	memory->attr = request_attr;
 	return HAL_OK;
 }
 

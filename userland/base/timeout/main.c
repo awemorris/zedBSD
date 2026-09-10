@@ -266,6 +266,12 @@ parse_options(
 			break;
 		}
 
+		/* Keeps interactive utilities in their controlling terminal's foreground group. */
+		if (strcmp(argument, "--foreground") == 0) {
+			options->foreground = 1;
+			continue;
+		}
+
 		/* Process each element required by the operation. */
 		for (position = 1; argument[position] != '\0'; position++) {
 			/* Dispatch the selected operation case. */

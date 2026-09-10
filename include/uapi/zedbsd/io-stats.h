@@ -6,7 +6,7 @@
 
 #include <stdint.h>
 
-#define IO_STATS_VERSION 8U
+#define IO_STATS_VERSION 9U
 
 /* Append events; never renumber an existing entry. All sizes are bytes. */
 enum io_stat_event {
@@ -82,6 +82,10 @@ enum io_stat_event {
 	IO_XHCI_DATA_TRB,
 	IO_DISK_VECTOR_BATCH,
 	IO_DISK_VECTOR_SPLIT,
+	/* All xHCI controllers: handler entries, owned status, consumed ring events. */
+	IO_XHCI_IRQ_ENTRY,
+	IO_XHCI_IRQ_OWNED,
+	IO_XHCI_IRQ_EVENT,
 	IO_STAT_COUNT
 };
 

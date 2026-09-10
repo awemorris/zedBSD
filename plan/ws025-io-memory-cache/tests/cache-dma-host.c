@@ -6,7 +6,7 @@
 
 void hal_fatal(const char *file, int line, const char *message)
 { fprintf(stderr, "%s:%d %s\n", file, line, message); abort(); }
-void hal_memory_get_stats(struct hal_memory_stats *stats)
+void hal_pmem_get_stats(struct hal_pmem_stats *stats)
 {
 	memset(stats, 0, sizeof(*stats));
 	stats->physical_total = 4U * 1024U * 1024U;

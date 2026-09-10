@@ -3,6 +3,18 @@
 require treecopy;
 require nativeplan;
 
+func instNativeCensusPath(hex) {
+    var length = String.charCount(hex);
+    if (length == 0 || length % 2 != 0) { System.error("invalid encoded census path"); }
+    var bytes = Packed.uint8(length / 2);
+    for (i in 0..Packed.size(bytes)) {
+        var byte = instNumber(String.substring(hex, i * 2, 2), 16);
+        if (byte == 0) { System.error("NUL in census path"); }
+        bytes[i] = byte;
+    }
+    return Packed.toString(bytes, 0, Packed.size(bytes));
+}
+
 func instNativeMeasureBatch(paths, measured) {
     if (Array.size(paths) == 0) { return; }
     var argv = ["/bin/stat", "-c", "%d:%i:%f:%s:%a:%u:%g", "--"];
@@ -28,7 +40,7 @@ func instNativeMeasure(prepared, inputs, swapBytes) {
     var batch = [];
     for (map in [prepared.census.files, prepared.census.directories]) {
         for (path, present in map) {
-            Array.push(batch, path);
+            Array.push(batch, instNativeCensusPath(path));
             if (Array.size(batch) == 32) {
                 instNativeMeasureBatch(batch, measured);
                 batch = [];

@@ -16,6 +16,7 @@
 #include "kern/atomic.h"
 #include <kern/io-epoch.h>
 #include <kern/io-error.h>
+#include <zedbsd/unmount.h>
 #include "kern/backing-claim.h"
 #include "kern/lock.h"
 #include "kern/waitq.h"
@@ -85,6 +86,14 @@ struct filesystem_type {
 	 * Last failure-capable step before namespace/inode state is destroyed.
 	 */
 	int (*prepare_unmount)(struct mount *);
+	/*
+	 * Optional revoked-media preflight, before any destructive cache discard.
+	 * Caller closes admission and joins I/O owners. Must not mutate state or
+	 * issue backend I/O; NULL means revoked teardown is unsupported.
+	 */
+	int (*prepare_unmount_revoked)(struct mount *);
+	/* No-fail/no-I/O commit after all owners pass preflight, before file close. */
+	void (*commit_unmount_revoked)(struct mount *);
 	void (*unmount)(struct mount *);
 	struct inode *(*alloc_inode)(struct mount *);
 	void (*free_inode)(struct inode *);
@@ -280,6 +289,7 @@ mount(
 struct cwdinfo;
 int mount_context(struct cwdinfo *context, const char *type_name, const char *directory, int flags, void *data);
 int unmount_context(struct cwdinfo *context, const char *directory);
+int unmount_context_flags(struct cwdinfo *, const char *, int);
 
 int
 unmount(

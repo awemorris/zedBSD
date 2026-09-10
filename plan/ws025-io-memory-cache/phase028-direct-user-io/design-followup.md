@@ -75,3 +75,50 @@ This staged proposal supplies concrete implementation questions for the next
 p028 Queue. It is not authorization to change shared source while Daybreak owns
 q140's build/runtime slot, and is not a substitute for resolving the lease/PTE
 and output-publication contracts before enabling those capabilities.
+
+## q233 source-grounded alias reservation refinement
+
+The new private `io_try_upgrade` primitive provides BUSY ownership while
+retaining caller pins; it is not a completed content lease. Reading the
+current vmspace paths establishes the next implementation boundary:
+
+- `vmspace_fault` marks an existing mapping BUSY and holds its region before
+  waiting in `vm_private_page_io_acquire`. Upgrading first and subsequently
+  waiting for that mapping would deadlock. Under the global metadata lock,
+  preflight every reverse mapping for BUSY/region lifetime before upgrading;
+  a conflicting mapping must cause immediate rollback/fallback, never wait.
+- `vmspace_protect_locked` waits for region holds/mapping BUSY, but otherwise
+  directly restores writable PTEs. Merely clearing VM_MAPPING_MAPPED while
+  retaining backing BUSY is insufficient. Reserve all eligible mappings and
+  retain their region holds through the entire lease, including I/O.
+- Bounded alias storage must be allocated before locks; overflow, dying
+  vmspace (`tryref` failure), foreign pins and shared object pages fall back.
+  Deduplicate backing owners with exact caller pin multiplicity. Under global
+  metadata, validate all mappings and take all owner upgrades without waiting;
+  mark every mapping BUSY and take vmspace/region lifetime holds before unlock.
+- Revoke hardware mappings without metadata locks, preserving descriptors and
+  COW flags; record/unset MAPPED after synchronous retirement. Leave BUSY and
+  region holds until view retirement, so mprotect/fork/unmap cannot republish
+  aliases during I/O. Preserve dirty information when invalidating PTEs.
+- On success or refusal after partial revoke, retire the borrowed kernel view
+  first, then release backing and mapping reservations under metadata locks,
+  wake fault waiters, drop vmspace holds outside locks, and finally unpin.
+  Revoked mappings can refault under their unchanged region/COW permissions;
+  never restore a stale writable PTE snapshot. Rollback must be tested too.
+
+This strategy temporarily serializes mutating operations across each affected
+vmspace because existing wait_faults scans all region holds. Measure its cost
+alongside copied-byte/CPU benefit before enablement; do not silently claim
+that this primitive alone resolves fork/unmap/protect races. The next fixture
+must exercise those actual entry points and refusal/partial revoke recovery.
+
+## q238 measured next question
+
+The complete-unmap input lease passes native semantics and removes 128 MiB
+of staging copies, but takes 4.76 s guest CPU versus 3.04 s baseline. Keep it
+default-off. Investigate preserving READ/EXEC user aliases and revoking only
+WRITE for input snapshots, retaining BUSY/region reservations. Preserve COW
+and write-only-region behavior, dirty bits and release/refault permissions;
+ensure rollback cannot leave a hardware/metadata mismatch. This is a new
+optimization requiring actual VM tests, not permission to weaken immutable
+input content. Output leases cannot expose unconfirmed writes to readers.

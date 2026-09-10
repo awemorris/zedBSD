@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess,sys,json,hashlib,os
 root=Path(__file__).resolve().parents[3]
 out=Path(sys.argv[1]).resolve();out.relative_to(root/'plan/ws025-io-memory-cache/temp');out.mkdir(parents=True,exist_ok=False)
-sources=['src/kern/writeback.c','src/kern/writeback-policy.c','src/kern/io-scratch.c','plan/ws025-io-memory-cache/tests/writeback-policy-host.c']
+sources=['src/kern/writeback.c','src/kern/io.c','plan/ws025-io-memory-cache/tests/writeback-policy-host.c']
 (out/'source.json').write_text(json.dumps({p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in sources},indent=2)+'\n')
 control=(root/'src/kern/sysctl.c').read_text()
 start=control.index('static int\nsysctl_writeback(')

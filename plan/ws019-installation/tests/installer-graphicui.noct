@@ -1,0 +1,10 @@
+require graphicui;
+func main(args) {
+    var lines = instGraphicLines("abcde\nxy", 3);
+    if (Array.size(lines) != 3 || lines[0] != "abc" || lines[1] != "de" || lines[2] != "xy") {
+        System.error("graphic text wrapping");
+    }
+    var ui = instGraphicUi();
+    if (!Dict.hasKey(ui, "coexistReview") || !Dict.hasKey(ui, "review")) { System.error("frontend contract"); }
+    print("installer graphic layout PASS");
+}
