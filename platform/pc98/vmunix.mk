@@ -43,7 +43,8 @@ PC98_DISPLAY_OBJS :=
 ifeq ($(CONFIG_DRIVER_GRAPHICS_DEVICE),y)
 PC98_GRAPHICS_OBJS := \
 	$(BUILD)/src/drivers/platform/pc98/graphics/pc98-graphics.o \
-	$(BUILD)/src/drivers/platform/pc98/graphics/backend.o
+	$(BUILD)/src/drivers/platform/pc98/graphics/backend.o \
+	$(BUILD)/src/drivers/platform/pc98/graphics/text.o
 PC98_DISPLAY_OBJS := \
 	$(BUILD)/src/drivers/platform/pc98/graphics/display-gdc.o \
 	$(BUILD)/src/drivers/platform/pc98/graphics/display-glyph.o \
@@ -110,6 +111,7 @@ STAGE2_OBJS = \
 	$(BUILD)/drivers/generic/loop.o \
 	$(BUILD)/drivers/platform/pc98/pc98-ide.o \
 	$(BUILD)/drivers/platform/pc98/pc98-busmouse.o \
+	$(BUILD)/drivers/platform/pc98/pc98-keyboard.o \
 	$(BUILD)/drivers/ethernet/dp8390.o \
 	$(BUILD)/drivers/platform/pc98/pc98-lgy98.o \
 	$(BUILD)/drivers/disklabel/mbr.o \

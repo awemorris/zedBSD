@@ -20,6 +20,7 @@
 #include <drivers/disklabel.h>
 #include "drivers/platform/pc98/pc98-ide.h"
 #include "drivers/hid/pc98-busmouse.h"
+#include "drivers/platform/pc98/pc98-keyboard.h"
 #if CONFIG_DRIVER_LGY98
 #include "drivers/pc98-lgy98.h"
 #endif
@@ -136,16 +137,27 @@ kern_platform_input_init(
 	void)
 {
 	int error;
+	int first_error;
+
+	/*
+	 * The keyboard and the mouse are separate chips on separate
+	 * interrupts, so each is brought up on its own and the first
+	 * failure is reported without skipping the other device.
+	 */
+	first_error = 0;
+
+	/* Starts the 8251 keyboard driver. */
+	error = drv_pc98_keyboard_init();
+	if (error != 0)
+		first_error = error;
 
 	/* Starts the bus mouse driver. */
-
-	/* Reports why the driver failed. */
 	error = drv_pc98_busmouse_init();
-	if (error != 0)
-		return error;
+	if (error != 0 && first_error == 0)
+		first_error = error;
 
-	/* Succeeded. */
-	return 0;
+	/* Reports the first failure, or success. */
+	return first_error;
 }
 
 /*

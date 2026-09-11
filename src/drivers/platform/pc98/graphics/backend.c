@@ -19,6 +19,7 @@
 
 #include <string.h>
 #include "kern/klog.h"
+#include "text.h"
 #include "errno.h"
 #include "kern/pmem.h"
 
@@ -37,6 +38,7 @@ static struct pc98_display_ops native_display;
 static int backend_prepared;
 
 static int pc98_graphics_prepare_hardware(void);
+static void text_console_start(void);
 static uint8_t port_in8(void *context, uint16_t port);
 static void port_out8(void *context, uint16_t port, uint8_t value);
 static int display_reset(void *context);
@@ -310,14 +312,39 @@ int
 drv_pc98_graphics_prepare(
 	void)
 {
-	/* Checks the pc98 graphics prepare hardware result. */
-	backend_prepared = 0;
-	if (!pc98_graphics_prepare_hardware())
-		return 0;
-	backend_prepared = 1;
+	int prepared;
 
-	/* Reports operation failure. */
-	return 1;
+	/* Brings up the graphics planes, which may not all be present. */
+	backend_prepared = 0;
+	prepared = pc98_graphics_prepare_hardware();
+	backend_prepared = prepared != 0;
+
+	/*
+	 * Text memory is always present on this board, so the console
+	 * comes up either way. This publishes the text table and hands
+	 * HAL output over, after which kern_logf() and /dev/console
+	 * share one cursor.
+	 */
+	text_console_start();
+
+	/* Reports whether the graphics planes are usable. */
+	return prepared;
+}
+
+/*
+ * Brings up the text grid and hands HAL output over to it.
+ */
+static void
+text_console_start(
+	void)
+{
+	drv_pc98_text_init();
+
+	/* Publishes the handover only once the layer can actually draw. */
+	if (drv_pc98_text_ready()) {
+		__atomic_store_n(&kernel_putc, drv_pc98_text_putc,
+				 __ATOMIC_RELEASE);
+	}
 }
 
 /*
