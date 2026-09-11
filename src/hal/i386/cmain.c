@@ -35,7 +35,7 @@ cmain(
 
 	/* Initializes the board handoff and the bootstrap console. */
 	bsp_boot_init(raw_boot_info);
-	i386_bsp_cons_init();
+	prekern_bsp_cons_init();
 
 	/* Prints the board-specific startup banner. */
 #if defined(HAL_BOARD_PC98)
@@ -56,7 +56,7 @@ cmain(
 	irq_init();
 	bsp_timer_init();
 	(void)i386_interrupt_select();
-	i386_bsp_cons_irq_init();
+	prekern_bsp_cons_irq_init();
 
 	/* Converts the board handoff and transfers control to the kernel. */
 	handoff = bsp_kernel_handoff(raw_boot_info);

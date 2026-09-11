@@ -157,6 +157,60 @@ hal_irq_send_eoi(
 		hal_irq_enable();
 }
 
+/* Installs or removes one real-time handler; the public pair wraps it. */
+int hal_irq_set_handler(int irq, hal_irq_handler_t handler, void *argument);
+
+/*
+ * Registers a handler for one numbered IRQ.
+ */
+int
+hal_irq_register(
+	int irq_num,
+	hal_irq_handler_t func,
+	void *arg)
+{
+	/* Requires a handler; removal goes through hal_irq_unregister(). */
+	if (func == NULL)
+		return HAL_ERR_INVALID;
+
+	/* Installs the callback for this line. */
+	return hal_irq_set_handler(irq_num, func, arg);
+}
+
+/*
+ * Removes the handler registered for one numbered IRQ.
+ */
+int
+hal_irq_unregister(
+	int irq_num,
+	hal_irq_handler_t func,
+	void *arg)
+{
+	struct irq_service_info *service;
+	bool enabled;
+	int matches;
+
+	/* Requires a plausible registration to remove. */
+	if (func == NULL || irq_num < 0 || irq_num > IRQ_MAX)
+		return HAL_ERR_INVALID;
+
+	/* Confirms the stored registration belongs to this caller. */
+	enabled = hal_irq_disable();
+	service = &irq_service[irq_num];
+	matches = service->handler == func && service->argument == arg;
+
+	/* Restores interrupts before acting on the comparison. */
+	if (enabled)
+		hal_irq_enable();
+
+	/* Rejects a removal the caller does not own. */
+	if (!matches)
+		return HAL_ERR_INVALID;
+
+	/* Removes the confirmed callback. */
+	return hal_irq_set_handler(irq_num, NULL, NULL);
+}
+
 /*
  * Installs or removes one real-time IRQ handler.
  */
@@ -325,16 +379,23 @@ hal_irq_set_affinity(
 int
 hal_irq_get_affinity(
 	int irq,
-	struct hal_irq_affinity *result)
+	struct hal_cpu_mask *requested,
+	struct hal_cpu_mask *effective)
 {
-	/* Rejects an invalid IRQ or missing result object. */
-	if (irq < 0 || irq > IRQ_MAX || result == NULL)
+	/* Rejects an invalid IRQ number. */
+	if (irq < 0 || irq > IRQ_MAX)
 		return HAL_ERR_INVALID;
 
-	/* Copies the requested mask and reconstructs the effective mask. */
-	result->requested = irq_service[irq].requested;
-	hal_memset(&result->effective, 0, sizeof(result->effective));
-	result->effective = irq_service[irq].requested;
+	/* Reports the mask the caller asked for, when wanted. */
+	if (requested != NULL)
+		*requested = irq_service[irq].requested;
+
+	/*
+	 * This board routes every IRQ to whichever CPU the request named,
+	 * so the effective mask is the requested one.
+	 */
+	if (effective != NULL)
+		*effective = irq_service[irq].requested;
 
 	/* Reports the available affinity information. */
 	return HAL_OK;

@@ -217,6 +217,22 @@ hal_putchar(
 }
 
 /*
+ * Writes one terminated string through the early console.
+ */
+static void
+cons_puts(
+	const char *string)
+{
+	/* Ignores a missing input string. */
+	if (string == NULL)
+		return;
+
+	/* Emits every byte in order. */
+	while (*string != '\0')
+		hal_putc((unsigned char)*string++);
+}
+
+/*
  * Writes one terminated string to the HAL console.
  */
 int
@@ -224,7 +240,7 @@ hal_puts(
 	const char *s)
 {
 	/* Writes the complete string through the board console. */
-	hal_cons_write(s);
+	cons_puts(s);
 
 	/* Reports a successful write. */
 	return 0;
@@ -290,9 +306,9 @@ hal_printf(
 
 			/* Emits the supplied string or its null-pointer marker. */
 			if (string != NULL) {
-				hal_cons_write(string);
+				cons_puts(string);
 			} else {
-				hal_cons_write("(null)");
+				cons_puts("(null)");
 			}
 			break;
 		case 'd':

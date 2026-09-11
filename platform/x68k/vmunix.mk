@@ -8,7 +8,7 @@ M68K_OBJDUMP ?= m68k-linux-gnu-objdump
 M68K_OBJCOPY ?= m68k-linux-gnu-objcopy
 X68K_PLATFORM := platform/x68k
 
-M68K_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
+M68K_CPPFLAGS := -nostdinc -Iinclude -Isrc -I. \
 	-Ilibc/include -Isrc/hal/m68k -DHAL_ARCH_M68K -DHAL_BOARD_X68K \
 	-DKERN_USER_ABI_M68K -DKERN_PAGE_SIZE=4096 \
 	-DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT \
@@ -21,7 +21,7 @@ M68K_USER_CFLAGS := -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-fno-builtin -fno-common -ffunction-sections -fdata-sections \
 	-Os -Wall -Wextra -Werror
-M68K_USER_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
+M68K_USER_CPPFLAGS := -nostdinc -Iinclude -Isrc -I. \
 	-Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K \
 	-DKERN_USER_PAGE_SIZE=4096 \
 	-DKERN_NO_PRINTF_FLOAT

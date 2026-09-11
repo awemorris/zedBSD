@@ -11,7 +11,7 @@ HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 HAL_PCAT_SOURCES := src/hal/i386/smp.c src/hal/i386/percpu.c src/hal/x86/rtc.c src/hal/x86/boot-parameters.c src/hal/i386/lib.c src/hal/i386/atomic.c src/hal/i386/irq.c \
 	src/hal/i386/mps.c src/hal/i386/acpi.c src/hal/i386/lapic.c \
 	src/hal/i386/ioapic.c \
-	src/hal/pmem-constraints.c src/hal/i386/page.c src/hal/i386/space.c src/hal/i386/int.c \
+	src/hal/i386/page.c src/hal/i386/space.c src/hal/i386/int.c \
 	src/hal/i386/cmain.c src/hal/i386/task.c \
 	src/hal/i386/bsp-pcat/boot.c src/hal/i386/bsp-pcat/cons.c \
 	src/hal/i386/bsp-pcat/pic.c src/hal/i386/bsp-pcat/pit.c
@@ -30,10 +30,13 @@ PCAT_GRAPHICS_OBJS := \
 	$(BUILD)/src/drivers/platform/pcat/graphics/pcat-graphics.o \
 	$(BUILD)/src/drivers/platform/pcat/graphics/backend.o \
 	$(BUILD)/src/drivers/platform/pcat/graphics/font.o \
+	$(BUILD)/src/drivers/platform/pcat/graphics/text.o \
 	$(BUILD)/src/drivers/platform/pcat/graphics/vgafont.o
 endif
 KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/timer.o \
+	$(BUILD)/src/kern/device-io.o $(BUILD)/src/kern/irq.o \
+	$(BUILD)/src/kern/pmem.o $(BUILD)/src/kern/test-checkpoint.o \
 	$(BUILD)/src/kern/lock.o $(BUILD)/src/kern/klog.o $(BUILD)/src/kern/waitq.o \
 	$(BUILD)/src/kern/buf.o $(BUILD)/src/kern/cache.o $(BUILD)/src/kern/readahead.o $(BUILD)/src/kern/writeback.o $(BUILD)/src/kern/io.o $(BUILD)/src/kern/sysctl.o \
 	$(BUILD)/src/kern/resource.o \
@@ -123,7 +126,7 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o \
 	$(PCAT_NVME_OBJS) \
 	$(BUILD)/drivers/platform/pcat/pcat-ide.o $(BUILD)/drivers/ethernet/dp8390.o \
 	$(BUILD)/drivers/isa/ne2000.o \
-	$(BUILD)/drivers/platform/pcat/ps2-mouse.o \
+	$(BUILD)/drivers/platform/pcat/ps2-8042.o \
 	$(BUILD)/drivers/disklabel/mbr.o \
 	$(BUILD)/drivers/disklabel/gpt.o \
 	$(BUILD)/drivers/disklabel/pcat.o \
@@ -564,18 +567,18 @@ $(DYNAMIC_DIR)/obj/userland/base/rtld/entry.o: userland/base/rtld/entry-i386.S
 $(DYNAMIC_SOFTFLOAT_DIR)/%.o: src/softfloat/%.c \
 	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Ilibc/include -Iinclude -I. $(DYNAMIC_CFLAGS) \
  -mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_FLOAT_PARSE_OBJ): libc/float-parse.c \
 	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Ilibc/include -Iinclude -I. $(DYNAMIC_CFLAGS) \
  -mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_LIBM_OBJ): libc/math.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Ilibc/include -Iinclude -I. $(DYNAMIC_CFLAGS) \
  -mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)

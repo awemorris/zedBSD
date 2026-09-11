@@ -30,7 +30,7 @@ static size_t task_stack_bytes;
 static uint8_t initial_fpregs[512] __attribute__((aligned(16)));
 static volatile unsigned task_registry_lock;
 
-static void i386_task_init_primary(void);
+static struct task_info *i386_task_init_primary(void);
 static void tasklist_add(struct task_info *task);
 static void tasklist_del(struct task_info *task);
 static void set_initial_resume_frame(struct task_info *task, void (*start)(void *), void *arg, void *user_sp);
@@ -38,16 +38,16 @@ static void set_initial_resume_frame(struct task_info *task, void (*start)(void 
 /*
  * Initializes the public HAL task subsystem.
  */
-void
-hal_task_init(
+hal_task_t
+hal_task_create_for_init_context(
 	void)
 {
-	/* Initializes task state for the bootstrap CPU. */
-	i386_task_init_primary();
+	/* Establishes this CPU's initial task and reports it. */
+	return i386_task_init_primary();
 }
 
 /* Initializes task context for the bootstrap CPU. */
-static void
+static struct task_info *
 i386_task_init_primary(
 	void)
 {
@@ -56,18 +56,18 @@ i386_task_init_primary(
 
 	/* Rejects repeated bootstrap task initialization. */
 	if (running_task != NULL)
-		HAL_FATAL("hal_task_init called twice");
+		HAL_FATAL("bootstrap task established twice");
 
 	/* Initializes the bootstrap CPU's descriptor state from its live stack. */
 	stack = (uintptr_t)asm_get_esp();
 	i386_percpu_init(0, stack);
 
 	/* Allocates and initializes the bootstrap task record. */
-	task = hal_malloc(sizeof(*task));
+	task = kernel_alloc(sizeof(*task));
 
-	/* Rejects bootstrap task allocation failure. */
+	/* Reports bootstrap task allocation failure to the kernel. */
 	if (task == NULL)
-		HAL_FATAL("initial HAL task allocation failed");
+		return NULL;
 	hal_memset(task, 0, sizeof(*task));
 	task->space = HAL_SPACE_SYS;
 	task->run_cpu = 0;
@@ -82,6 +82,9 @@ i386_task_init_primary(
 	/* Publishes the bootstrap task as the current task. */
 	tasklist_add(task);
 	running_task = task;
+
+	/* Reports the established task. */
+	return task;
 }
 
 /*
@@ -107,7 +110,7 @@ i386_task_init_secondary(
 		HAL_FATAL("invalid secondary HAL task initialization");
 
 	/* Allocates and initializes the secondary CPU's bootstrap task. */
-	task = hal_malloc(sizeof(*task));
+	task = kernel_alloc(sizeof(*task));
 
 	/* Rejects secondary bootstrap task allocation failure. */
 	if (task == NULL)
@@ -146,7 +149,7 @@ hal_task_create(
 	}
 
 	/* Allocates and initializes the task record. */
-	task = hal_malloc(sizeof(*task));
+	task = kernel_alloc(sizeof(*task));
 
 	/* Reports task-record allocation failure. */
 	if (task == NULL)
@@ -158,11 +161,11 @@ hal_task_create(
 	hal_memcpy(task->fpregs, initial_fpregs, sizeof(initial_fpregs));
 
 	/* Allocates the task's owned kernel stack. */
-	task->sys_stack = hal_malloc(SYS_STACK_SIZE);
+	task->sys_stack = kernel_alloc(SYS_STACK_SIZE);
 
 	/* Releases the task record when stack allocation fails. */
 	if (task->sys_stack == NULL) {
-		hal_free(task);
+		kernel_free(task);
 		return NULL;
 	}
 
@@ -340,7 +343,7 @@ hal_task_exec_current(
  * Reports the current task's user stack pointer.
  */
 uintptr_t
-hal_task_user_stack(
+hal_task_get_user_stack(
 	void)
 {
 	struct interrupt_frame *frame;
@@ -364,8 +367,10 @@ hal_task_user_stack(
  * Reports the current task's user-visible execution context.
  */
 int
-hal_task_user_context(
-	struct hal_user_context *context)
+hal_task_get_user_context(
+	uintptr_t *pc,
+	uintptr_t *stack_pointer,
+	intptr_t *return_value)
 {
 	struct interrupt_frame *frame;
 
@@ -376,14 +381,21 @@ hal_task_user_context(
 		frame = NULL;
 	}
 
-	/* Requires a user frame and writable context storage. */
-	if (frame == NULL || context == NULL || (frame->cs & 3U) != 3U)
+	/* Requires a frame that entered from user privilege. */
+	if (frame == NULL || (frame->cs & 3U) != 3U)
 		return -1;
 
-	/* Copies the user PC, stack, and signed syscall return value. */
-	context->pc = frame->eip;
-	context->stack_pointer = frame->user_esp;
-	context->return_value = (intptr_t)(int32_t)frame->regs.eax;
+	/* Reports the user program counter when wanted. */
+	if (pc != NULL)
+		*pc = frame->eip;
+
+	/* Reports the user stack pointer when wanted. */
+	if (stack_pointer != NULL)
+		*stack_pointer = frame->user_esp;
+
+	/* Reports the signed syscall return value when wanted. */
+	if (return_value != NULL)
+		*return_value = (intptr_t)(int32_t)frame->regs.eax;
 
 	/* Reports an available user context. */
 	return 0;
@@ -524,10 +536,10 @@ hal_task_destroy(
 
 	/* Releases the kernel stack only when this task owns it. */
 	if (task->owns_stack)
-		hal_free(task->sys_stack);
+		kernel_free(task->sys_stack);
 
 	/* Releases the unregistered task record itself. */
-	hal_free(task);
+	kernel_free(task);
 }
 
 /*

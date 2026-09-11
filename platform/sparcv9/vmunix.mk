@@ -11,7 +11,7 @@ SPARCV9_OBJDUMP ?= $(SPARCV9_PREFIX)/bin/$(SPARCV9_TARGET)-objdump
 SPARCV9_READELF ?= $(SPARCV9_PREFIX)/bin/$(SPARCV9_TARGET)-readelf
 SPARCV9_PLATFORM := platform/sparcv9
 
-SPARCV9_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
+SPARCV9_CPPFLAGS := -nostdinc -Iinclude -Isrc -I. \
 	-Ilibc/include -Isrc/hal/sparcv9 -DHAL_ARCH_SPARCV9 \
 	-DHAL_BOARD_SUN4U -DKERN_USER_ABI_SPARCV9 -DKERN_USER_ABI_LP64 \
 	-DKERN_PAGE_SIZE=8192 \
@@ -291,7 +291,7 @@ $(BUILD)/POSIX-R2-REMAINING.ELF: \
 
 # ELF64 runtime linker and shared libc for the SPARC V9 userland.
 SPARCV9_DYNAMIC_DIR := $(BUILD)/dynamic
-SPARCV9_DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude -Iinclude/uapi \
+SPARCV9_DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude \
 	-Ilibc/include -DHAL_ARCH_SPARCV9 -DKERN_USER_ABI_SPARCV9 \
 	-DKERN_USER_ABI_LP64 -DKERN_USER_PAGE_SIZE=8192 \
 	-DKERN_DYNAMIC_LIBC
@@ -329,7 +329,7 @@ SPARCV9_DYNAMIC_LIBC_OBJS += $(SPARCV9_DYNAMIC_LIBM_OBJ) \
 
 $(SPARCV9_DYNAMIC_DIR)/softfp/%.o: src/softfloat/%.c
 	@mkdir -p $(dir $@)
-	$(SPARCV9_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
+	$(SPARCV9_CC) -nostdinc -Ilibc/include -Iinclude -I. \
  $(SPARCV9_DYNAMIC_CFLAGS) \
  -MMD -MP -c $< -o $@
 
@@ -356,13 +356,13 @@ $(SPARCV9_DYNAMIC_DIR)/obj/src/crt/crt1.o: src/crt/crt1-sparcv9.S
 
 $(SPARCV9_DYNAMIC_LIBM_OBJ): libc/math.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(SPARCV9_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
+	$(SPARCV9_CC) -nostdinc -Ilibc/include -Iinclude -I. \
  $(SPARCV9_DYNAMIC_CFLAGS) -c $< -o $@
 
 $(SPARCV9_DYNAMIC_FLOAT_PARSE_OBJ): libc/float-parse.c \
 	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(SPARCV9_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
+	$(SPARCV9_CC) -nostdinc -Ilibc/include -Iinclude -I. \
  $(SPARCV9_DYNAMIC_CFLAGS) -c $< -o $@
 
 $(SPARCV9_DYNAMIC_DIR)/ld.so: $(SPARCV9_DYNAMIC_RTLD_OBJS)

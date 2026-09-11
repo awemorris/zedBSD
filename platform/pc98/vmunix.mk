@@ -530,18 +530,18 @@ $(DYNAMIC_DIR)/obj/userland/base/rtld/entry.o: userland/base/rtld/entry-i386.S
 $(DYNAMIC_SOFTFLOAT_DIR)/%.o: src/softfloat/%.c \
 	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Ilibc/include -Iinclude -I. $(DYNAMIC_CFLAGS) \
  -mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_FLOAT_PARSE_OBJ): libc/float-parse.c \
 	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Ilibc/include -Iinclude -I. $(DYNAMIC_CFLAGS) \
  -mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_LIBM_OBJ): libc/math.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Ilibc/include -Iinclude -I. $(DYNAMIC_CFLAGS) \
  -mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)

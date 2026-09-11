@@ -114,7 +114,7 @@ $(1)/.zedbsd-sysroot-complete: $(ZEDBSD_SYSROOT_INPUTS) \
 	for source in $$(ZEDBSD_SYSROOT_LIBC_SOURCES); do \
 		object="$$$$temporary/obj/$$$$source.o"; mkdir -p "$$$${object%/*}"; \
 		'$(ZEDBSD_SYSROOT_CLANG)' --target='$(3)' --sysroot="$$$$temporary" \
-			$(4) -D$(5) $(11) -DZEDBSD_STATIC_TLS -nostdinc -Ilibc/include -Iinclude/uapi -Iinclude -Isrc -I. \
+			$(4) -D$(5) $(11) -DZEDBSD_STATIC_TLS -nostdinc -Ilibc/include -Iinclude -Isrc -I. \
 			-ffreestanding -fno-builtin -fno-pic -fno-pie \
 			-fno-stack-protector -fno-asynchronous-unwind-tables \
 			-fno-unwind-tables -fno-common -fno-strict-aliasing \
@@ -130,7 +130,7 @@ $(1)/.zedbsd-sysroot-complete: $(ZEDBSD_SYSROOT_INPUTS) \
 	for source in $$(ZEDBSD_SYSROOT_COMPILER_RT_SOURCES); do \
 		object="$$$$temporary/obj/$$$$source.o"; mkdir -p "$$$${object%/*}"; \
 		'$(ZEDBSD_SYSROOT_CLANG)' --target='$(3)' --sysroot="$$$$temporary" \
-			$(4) -D$(5) $(11) -DZEDBSD_STATIC_TLS -nostdinc -Ilibc/include -Iinclude/uapi -Iinclude -Isrc -I. \
+			$(4) -D$(5) $(11) -DZEDBSD_STATIC_TLS -nostdinc -Ilibc/include -Iinclude -Isrc -I. \
 			-ffreestanding -fno-builtin -fno-pic -fno-pie \
 			-fno-stack-protector -fno-asynchronous-unwind-tables \
 			-fno-unwind-tables -fno-common -fno-strict-aliasing \
@@ -158,11 +158,11 @@ $(1)/.zedbsd-sysroot-complete: $(ZEDBSD_SYSROOT_INPUTS) \
 	'$(ZEDBSD_SYSROOT_AR)' rcsD "$$$$temporary/usr/lib/libclang_rt.builtins.a" \
 		$$$$(find "$$$$temporary/obj" -type f -name '*.c.o' -print | LC_ALL=C sort); \
 	'$(ZEDBSD_SYSROOT_CLANG)' --target='$(3)' --sysroot="$$$$temporary" \
-		$(4) -nostdinc -Iinclude -Iinclude/uapi -D$(5) $(11) \
+		$(4) -nostdinc -Iinclude -D$(5) $(11) \
 		-ffreestanding -fno-pic -fno-pie -fno-stack-protector \
 		-c '$(6)' -o "$$$$temporary/usr/lib/crt0.o"; \
 	'$(ZEDBSD_SYSROOT_CLANG)' --target='$(3)' --sysroot="$$$$temporary" \
-		$(4) -nostdinc -Iinclude -Iinclude/uapi -D$(5) $(11) \
+		$(4) -nostdinc -Iinclude -D$(5) $(11) \
 		-ffreestanding -fno-pic -fno-pie -fno-stack-protector \
 		-c '$(7)' -o "$$$$temporary/usr/lib/crt1.o"; \
 	cp platform/amd64/user.ld platform/amd64/vmunix.ld \

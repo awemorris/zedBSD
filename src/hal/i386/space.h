@@ -21,7 +21,7 @@
 
 struct i386_page_table {
 	uintptr_t vaddr;
-	struct hal_pmem memory;
+	hal_physaddr_t memory;
 	uint32_t *pte;
 	struct i386_page_table *next;
 };
@@ -31,7 +31,7 @@ struct i386_space {
 	int space_id;
 	unsigned active_ops;
 	struct i386_space *registry_next;
-	struct hal_pmem directory_memory;
+	hal_physaddr_t directory_memory;
 	uint32_t *pdt;
 	struct i386_page_table *page_tables;
 	volatile unsigned lock;

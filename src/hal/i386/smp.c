@@ -434,7 +434,7 @@ start_one(
 		return HAL_ERR_STATE;
 
 	/* Allocates the secondary CPU's retained bootstrap stack. */
-	cpus[cpu].stack = hal_malloc(AP_STACK_SIZE);
+	cpus[cpu].stack = kernel_alloc(AP_STACK_SIZE);
 	if (cpus[cpu].stack == NULL)
 		return HAL_ERR_NOMEM;
 

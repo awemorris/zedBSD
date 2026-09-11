@@ -2597,7 +2597,7 @@ establish_msi(
 {
 	struct drv_pci_device *device = cookie->device;
 	char source[17];
-	paddr_t address;
+	uint64_t address;
 	uint32_t event;
 	uint16_t control;
 	unsigned data_offset;
@@ -2772,7 +2772,7 @@ establish_msix(
 	unsigned index_for;
 	volatile uint32_t *entry;
 	char source[17];
-	paddr_t address;
+	uint64_t address;
 	uint32_t event;
 	uint16_t control;
 	int error;

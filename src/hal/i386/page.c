@@ -27,7 +27,6 @@
 
 #define PAGEMAP_WORDS \
 	(PHYSICAL_MEGS * (1024U * 1024U / PAGE_SIZE) / 32U)
-#define FIXED_CLAIMS 8U
 
 #ifdef HAL_BOARD_PC98
 extern char __kernel_phys_start[];
@@ -44,7 +43,6 @@ static uint32_t reserved_pages;
 static uint32_t allocated_pages;
 static volatile unsigned pmem_lock;
 static uint32_t pagemap_tbl[PAGEMAP_WORDS];
-static struct hal_pmem fixed_claims[FIXED_CLAIMS];
 
 uint32_t bsp_mem_probe(void);
 void hal_i386_task_memory_stats(uint32_t *, size_t *);
@@ -54,11 +52,10 @@ static bool pmem_lock_enter(void);
 static void pmem_lock_leave(bool enabled);
 static void init_pagemap_tbl(void);
 static void reserve_range(hal_physaddr_t paddr, size_t size);
-static int alloc_ram(size_t size, size_t alignment, struct hal_pmem *desc);
-static int valid_fixed_window(hal_physaddr_t paddr, size_t size);
-static int claim_fixed(const struct hal_pmem_request *request, struct hal_pmem *desc);
-static int pmem_alloc_unlocked(const struct hal_pmem_request *request, struct hal_pmem *desc);
-static int pmem_free_unlocked(struct hal_pmem *desc);
+static int pmem_alloc_unlocked(size_t size, size_t alignment,
+			       hal_physaddr_t max_paddr, size_t boundary,
+			       hal_physaddr_t *block);
+static int pmem_free_unlocked(hal_physaddr_t *block, size_t size);
 
 /*
  * Initializes the i386 physical-page ownership map.
@@ -88,28 +85,86 @@ i386_page_init(
 		(size_t)(__high_end - __high_start));
 #endif
 
-	/* Clears the fixed MMIO and video-memory claim registry. */
-	hal_memset(fixed_claims, 0, sizeof(fixed_claims));
 }
 
 /*
- * Allocates one physical-memory range.
+ * Allocates one physical RAM block.
  */
 int
 hal_pmem_alloc(
-	const struct hal_pmem_request *request,
-	struct hal_pmem *desc)
+	size_t req_size,
+	size_t req_align,
+	hal_physaddr_t *block)
 {
 	bool enabled;
 	int error;
 
-	/* Serializes allocation and records its result. */
+	/* Performs the complete allocation while holding the global lock. */
 	enabled = pmem_lock_enter();
-	error = pmem_alloc_unlocked(request, desc);
+	error = pmem_alloc_unlocked(req_size, req_align, UINT32_MAX, 0, block);
 	pmem_lock_leave(enabled);
 
-	/* Returns the allocation result. */
+	/* Returns the allocation result unchanged. */
 	return error;
+}
+
+/*
+ * Allocates one physical RAM block a device can reach.
+ */
+int
+hal_pmem_alloc_limited(
+	size_t req_size,
+	size_t req_align,
+	hal_physaddr_t max_paddr,
+	size_t boundary,
+	hal_physaddr_t *block)
+{
+	bool enabled;
+	int error;
+
+	/* Performs the constrained allocation while holding the global lock. */
+	enabled = pmem_lock_enter();
+	error = pmem_alloc_unlocked(req_size, req_align, max_paddr, boundary,
+				    block);
+	pmem_lock_leave(enabled);
+
+	/* Returns the allocation result unchanged. */
+	return error;
+}
+
+/*
+ * Frees one physical RAM block.
+ */
+int
+hal_pmem_free(
+	hal_physaddr_t *block,
+	size_t size)
+{
+	bool enabled;
+	int error;
+
+	/* Performs the complete release while holding the global lock. */
+	enabled = pmem_lock_enter();
+	error = pmem_free_unlocked(block, size);
+	pmem_lock_leave(enabled);
+
+	/* Returns the release result unchanged. */
+	return error;
+}
+
+/*
+ * Translates a physical RAM address to its kernel address.
+ */
+void *
+hal_pmem_to_kernel(
+	hal_physaddr_t paddr)
+{
+	/* Reports no alias for an address outside managed RAM. */
+	if (paddr >= (hal_physaddr_t)phys_pages * PAGE_SIZE)
+		return NULL;
+
+	/* Managed RAM is direct-mapped into the system half. */
+	return (void *)((uintptr_t)paddr | SYS_START);
 }
 
 /*
@@ -127,8 +182,8 @@ hal_pmem_get_total_size(
  * Collects i386 physical, task, and address-space memory statistics.
  */
 void
-hal_pmem_get_stats(
-	struct hal_pmem_stats *stats)
+hal_get_memstat(
+	struct hal_memstat *stats)
 {
 	bool enabled;
 
@@ -153,25 +208,6 @@ hal_pmem_get_stats(
 	hal_i386_space_memory_stats(
 		&stats->space_count,
 		&stats->page_table_count);
-}
-
-/*
- * Releases one physical-memory range.
- */
-int
-hal_pmem_free(
-	struct hal_pmem *desc)
-{
-	bool enabled;
-	int error;
-
-	/* Serializes release and records its result. */
-	enabled = pmem_lock_enter();
-	error = pmem_free_unlocked(desc);
-	pmem_lock_leave(enabled);
-
-	/* Returns the release result. */
-	return error;
 }
 
 /* Acquires the physical allocator lock with interrupts disabled. */
@@ -287,53 +323,79 @@ reserve_range(
 	}
 }
 
-/* Allocates contiguous pages from direct-mapped RAM. */
+/*
+ * Finds and claims an aligned run of free pages.
+ *
+ * max_paddr is the highest byte the caller can address, and boundary,
+ * when not zero, is a power-of-two block the run must not cross.
+ */
 static int
-alloc_ram(
+pmem_alloc_unlocked(
 	size_t size,
 	size_t alignment,
-	struct hal_pmem *desc)
+	hal_physaddr_t max_paddr,
+	size_t boundary,
+	hal_physaddr_t *block)
 {
 	uint32_t need_pages;
 	uint32_t align_pages;
 	uint32_t start_index;
+	uint32_t limit_pages;
 	uint32_t page_end;
 	uint32_t i;
-	bool irq_enabled;
+	uint64_t first;
+	uint64_t last;
 
-	/* Converts the request size and alignment to page counts. */
-	need_pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+	/* Requires a destination and a non-empty request. */
+	if (block == NULL || size == 0)
+		return HAL_ERR_INVALID;
+
+	/* Selects and validates the requested page alignment. */
+	if (alignment == 0)
+		alignment = PAGE_SIZE;
+	if (alignment < PAGE_SIZE || (alignment & (alignment - 1U)) != 0)
+		return HAL_ERR_INVALID;
+
+	/* Rejects a boundary which is not a power of two. */
+	if (boundary != 0 && (boundary & (boundary - 1U)) != 0)
+		return HAL_ERR_INVALID;
+
+	/* Rounds the request up so the free path can repeat this. */
+	need_pages = (uint32_t)((size + PAGE_SIZE - 1) / PAGE_SIZE);
 	align_pages = (uint32_t)(alignment / PAGE_SIZE);
 
 	/* Rejects requests larger than the managed page inventory. */
 	if (need_pages == 0 || need_pages > phys_pages)
 		return HAL_ERR_NOMEM;
-	page_end = phys_pages - need_pages;
 
-	/* Keeps allocation search and bitmap publication interrupt-atomic. */
-	irq_enabled = hal_irq_disable();
-	start_index = 0;
+	/* Limits the search to pages the caller can address. */
+	limit_pages = phys_pages;
+	if (max_paddr < (hal_physaddr_t)phys_pages * PAGE_SIZE)
+		limit_pages = (uint32_t)((max_paddr + 1U) / PAGE_SIZE);
+	if (limit_pages < need_pages)
+		return HAL_ERR_NOMEM;
+	page_end = limit_pages - need_pages;
 
-	/* Searches for an aligned run of unused physical pages. */
-	for (;;) {
-		/* Finds the next aligned free candidate page. */
-		for (; start_index <= page_end; start_index++) {
-			/* Skips candidates which do not meet the requested alignment. */
-			if ((start_index & (align_pages - 1U)) != 0)
+	/* Searches for an aligned free run meeting every constraint. */
+	for (start_index = 0; start_index <= page_end; start_index++) {
+		/* Skips candidates which do not meet the requested alignment. */
+		if ((start_index & (align_pages - 1U)) != 0)
+			continue;
+
+		/* Skips a run which would cross a forbidden boundary. */
+		if (boundary != 0) {
+			first = (uint64_t)start_index * PAGE_SIZE;
+			last = first +
+			    (uint64_t)need_pages * PAGE_SIZE - 1U;
+
+			/* Requires both ends inside one boundary block. */
+			if (first / boundary != last / boundary)
 				continue;
-
-			/* Stops at the first aligned unclaimed page. */
-			if (PAGEMAP_GET(start_index) == 0)
-				break;
 		}
-
-		/* Stops when no candidate remains. */
-		if (start_index > page_end)
-			break;
 
 		/* Measures the free run beginning at this candidate. */
 		for (i = 0; i < need_pages; i++) {
-			/* Stops at the first claimed page in the candidate run. */
+			/* Stops at the first claimed page in the run. */
 			if (PAGEMAP_GET(start_index + i) != 0)
 				break;
 		}
@@ -341,277 +403,75 @@ alloc_ram(
 		/* Stops when the candidate spans the complete request. */
 		if (i == need_pages)
 			break;
-		start_index += i + 1;
+		start_index += i;
 	}
 
-	/* Reports exhaustion after restoring the prior interrupt state. */
-	if (start_index > page_end) {
-		/* Restores interrupts only when they were previously enabled. */
-		if (irq_enabled)
-			hal_irq_enable();
+	/* Reports exhaustion when no candidate run remains. */
+	if (start_index > page_end)
 		return HAL_ERR_NOMEM;
-	}
 
 	/* Claims and accounts for every page in the selected run. */
 	for (i = 0; i < need_pages; i++)
 		PAGEMAP_SET(start_index + i);
 	allocated_pages += need_pages;
 
-	/* Restores interrupts only when they were previously enabled. */
-	if (irq_enabled)
-		hal_irq_enable();
-
-	/* Describes the direct-mapped allocated range. */
-	desc->paddr = (hal_physaddr_t)(start_index << 12);
-	desc->vaddr = (void *)((start_index << 12) | SYS_START);
-	desc->size = need_pages << 12;
-	desc->type = HAL_PMEM_TYPE_RAM;
-	desc->attr = 0;
+	/* Publishes the allocated physical address. */
+	*block = (hal_physaddr_t)start_index * PAGE_SIZE;
 
 	/* Reports a successful RAM allocation. */
 	return HAL_OK;
 }
 
-/* Tests whether a fixed claim lies in an allowed device window. */
-static int
-valid_fixed_window(
-	hal_physaddr_t paddr,
-	size_t size)
-{
-	/* Accepts the conventional-memory device aperture. */
-	if (paddr >= 0x000a0000U && paddr <= 0x00100000U &&
-	    size <= 0x00100000U - paddr) {
-		return 1;
-	}
-
-	/* Accepts the high PCI-style device aperture. */
-	if (paddr >= 0xf0000000U && paddr <= 0xf1000000U &&
-	    size <= 0xf1000000U - paddr) {
-		return 1;
-	}
-
-	/* Rejects fixed claims outside both apertures. */
-	return 0;
-}
-
-/* Claims one fixed MMIO or video-memory interval. */
-static int
-claim_fixed(
-	const struct hal_pmem_request *request,
-	struct hal_pmem *desc)
-{
-	hal_physaddr_t end;
-	hal_physaddr_t claim_end;
-	unsigned i;
-	unsigned free_slot;
-	bool irq_enabled;
-
-	/* Initializes the request extent and empty-slot sentinel. */
-	free_slot = FIXED_CLAIMS;
-	end = request->paddr + request->size;
-
-	/* Keeps claim inspection and publication interrupt-atomic. */
-	irq_enabled = hal_irq_disable();
-
-	/* Finds an empty registry slot while rejecting overlap. */
-	for (i = 0; i < FIXED_CLAIMS; i++) {
-		/* Remembers the first unused registry slot. */
-		if (fixed_claims[i].size == 0) {
-			/* Preserves the earliest unused slot. */
-			if (free_slot == FIXED_CLAIMS)
-				free_slot = i;
-			continue;
-		}
-
-		/* Rejects overlap with this existing fixed claim. */
-		claim_end = fixed_claims[i].paddr + fixed_claims[i].size;
-
-		/* Reports an interval intersection with the existing claim. */
-		if (request->paddr < claim_end &&
-		    end > fixed_claims[i].paddr) {
-			/* Restores interrupts before reporting the overlap. */
-			if (irq_enabled)
-				hal_irq_enable();
-			return HAL_ERR_BUSY;
-		}
-	}
-
-	/* Reports exhaustion of the fixed-size claim registry. */
-	if (free_slot == FIXED_CLAIMS) {
-		/* Restores interrupts before reporting registry exhaustion. */
-		if (irq_enabled)
-			hal_irq_enable();
-		return HAL_ERR_NOMEM;
-	}
-
-	/* Publishes the fixed direct-mapped descriptor and returns its copy. */
-	fixed_claims[free_slot].vaddr =
-	    (void *)((uintptr_t)request->paddr | SYS_START);
-	fixed_claims[free_slot].paddr = request->paddr;
-	fixed_claims[free_slot].size = request->size;
-	fixed_claims[free_slot].type = request->type;
-	fixed_claims[free_slot].attr = request->attr;
-	*desc = fixed_claims[free_slot];
-
-	/* Restores interrupts only when they were previously enabled. */
-	if (irq_enabled)
-		hal_irq_enable();
-
-	/* Reports a successful fixed-range claim. */
-	return HAL_OK;
-}
-
-/* Validates and dispatches one physical-memory allocation request. */
-static int
-pmem_alloc_unlocked(
-	const struct hal_pmem_request *request,
-	struct hal_pmem *desc)
-{
-	struct hal_pmem result;
-	size_t alignment;
-	int error;
-
-	/* Rejects missing, empty, or unsupported allocation requests. */
-	if (request == NULL || desc == NULL || request->size == 0 ||
-	    (request->attr & ~(HAL_PMEM_ATTR_NOCACHE |
-	    HAL_PMEM_ATTR_WRITETHRU)) != 0) {
-		return HAL_ERR_INVALID;
-	}
-
-	/* Selects and validates the requested page alignment. */
-	alignment = request->alignment == 0 ? PAGE_SIZE : request->alignment;
-
-	/* Rejects a sub-page or non-power-of-two alignment. */
-	if (alignment < PAGE_SIZE || (alignment & (alignment - 1U)) != 0)
-		return HAL_ERR_INVALID;
-
-	/* Dispatches ordinary RAM through the contiguous page allocator. */
-	if (request->type == HAL_PMEM_TYPE_RAM) {
-		/* Requires unspecified placement and cacheable RAM attributes. */
-		if (request->paddr != HAL_PMEM_PADDR_ANY || request->attr != 0)
-			return HAL_ERR_INVALID;
-		error = alloc_ram(request->size, alignment, desc);
-		return error;
-	}
-
-	/* Validates a fixed MMIO or video-memory claim. */
-	if ((request->type != HAL_PMEM_TYPE_MMIO &&
-	    request->type != HAL_PMEM_TYPE_VRAM) ||
-	    request->paddr == HAL_PMEM_PADDR_ANY ||
-	    request->paddr > UINT32_MAX - request->size ||
-	    (request->paddr & (alignment - 1U)) != 0 ||
-	    !valid_fixed_window(request->paddr, request->size)) {
-		return HAL_ERR_INVALID;
-	}
-
-	/* Retains the existing descriptor read before claiming fixed memory. */
-	result = *desc;
-	(void)result;
-
-	/* Claims and reports the fixed device interval. */
-	error = claim_fixed(request, desc);
-
-	/* Returns the fixed-claim result. */
-	return error;
-}
-
-/* Validates and releases one physical-memory descriptor. */
+/*
+ * Releases the pages of one allocation.
+ *
+ * size is the size the matching allocation requested, so the same
+ * rounding is repeated here and a smaller size splits the block.
+ */
 static int
 pmem_free_unlocked(
-	struct hal_pmem *desc)
+	hal_physaddr_t *block,
+	size_t size)
 {
 	uint32_t start_page;
 	uint32_t end_page;
 	uint32_t i;
-	unsigned slot;
-	bool irq_enabled;
 
-	/* Rejects an empty descriptor. */
-	if (desc == NULL || desc->size == 0)
+	/* Rejects an empty release. */
+	if (block == NULL || size == 0)
 		return HAL_ERR_INVALID;
 
-	/* Releases a fixed MMIO or video-memory claim by exact identity. */
-	if (desc->type != HAL_PMEM_TYPE_RAM) {
-		irq_enabled = hal_irq_disable();
-
-		/* Finds the exact registered fixed claim. */
-		for (slot = 0; slot < FIXED_CLAIMS; slot++) {
-			/* Stops at a descriptor with identical ownership fields. */
-			if (fixed_claims[slot].vaddr == desc->vaddr &&
-			    fixed_claims[slot].paddr == desc->paddr &&
-			    fixed_claims[slot].size == desc->size &&
-			    fixed_claims[slot].type == desc->type) {
-				break;
-			}
-		}
-
-		/* Rejects a descriptor absent from the claim registry. */
-		if (slot == FIXED_CLAIMS) {
-			/* Restores interrupts before reporting the stale descriptor. */
-			if (irq_enabled)
-				hal_irq_enable();
-			return HAL_ERR_STATE;
-		}
-
-		/* Clears the registered fixed claim. */
-		hal_memset(
-			&fixed_claims[slot],
-			0,
-			sizeof(fixed_claims[slot]));
-
-		/* Restores prior interrupts before clearing the caller descriptor. */
-		if (irq_enabled)
-			hal_irq_enable();
-		hal_memset(desc, 0, sizeof(*desc));
-
-		/* Reports a released fixed claim. */
-		return HAL_OK;
-	}
-
-	/* Validates a direct-mapped, page-aligned RAM descriptor. */
-	if (desc->vaddr != (void *)((uintptr_t)desc->paddr | SYS_START) ||
-	    (desc->paddr & (PAGE_SIZE - 1U)) != 0 ||
-	    (desc->size & (PAGE_SIZE - 1U)) != 0) {
+	/* Requires a page-aligned start. */
+	if ((*block & (PAGE_SIZE - 1U)) != 0)
 		return HAL_ERR_INVALID;
-	}
-	start_page = (uint32_t)desc->paddr >> 12;
-	end_page = start_page + (desc->size >> 12);
+
+	/* Repeats the rounding the allocation applied. */
+	start_page = (uint32_t)(*block / PAGE_SIZE);
+	end_page = start_page +
+	    (uint32_t)((size + PAGE_SIZE - 1) / PAGE_SIZE);
 
 	/* Rejects a page interval outside managed physical memory. */
 	if (start_page >= phys_pages || end_page > phys_pages)
 		return HAL_ERR_INVALID;
 
-	/* Keeps RAM validation and bitmap release interrupt-atomic. */
-	irq_enabled = hal_irq_disable();
-
 	/* Verifies ownership of every page before changing the bitmap. */
 	for (i = start_page; i < end_page; i++) {
-		/* Rejects the first page absent from the allocation bitmap. */
-		if (PAGEMAP_GET(i) == 0) {
-			/* Restores interrupts before reporting inconsistent ownership. */
-			if (irq_enabled)
-				hal_irq_enable();
+		/* Rejects the first page absent from the bitmap. */
+		if (PAGEMAP_GET(i) == 0)
 			return HAL_ERR_STATE;
-		}
 	}
 
 	/* Rejects an allocation-accounting underflow. */
-	if (allocated_pages < end_page - start_page) {
-		/* Restores interrupts before reporting inconsistent accounting. */
-		if (irq_enabled)
-			hal_irq_enable();
+	if (allocated_pages < end_page - start_page)
 		return HAL_ERR_STATE;
-	}
 
-	/* Releases and accounts for every page in the descriptor. */
+	/* Releases and accounts for every page in the interval. */
 	for (i = start_page; i < end_page; i++)
 		PAGEMAP_RESET(i);
 	allocated_pages -= end_page - start_page;
 
-	/* Restores prior interrupts before clearing the caller descriptor. */
-	if (irq_enabled)
-		hal_irq_enable();
-	hal_memset(desc, 0, sizeof(*desc));
+	/* Clears the caller address so a double free is visible. */
+	*block = 0;
 
 	/* Reports a released RAM allocation. */
 	return HAL_OK;

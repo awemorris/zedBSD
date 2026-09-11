@@ -52,7 +52,7 @@ static void raw_lock_leave(volatile unsigned *lock, bool enabled);
 static int space_op_enter(struct i386_space *space);
 static void space_op_leave(struct i386_space *space);
 static void table_count_drop(void);
-static int alloc_page(struct hal_pmem *memory);
+static int alloc_page(hal_physaddr_t *memory);
 static bool space_lock_enter(struct i386_space *space);
 static void space_lock_leave(struct i386_space *space, bool enabled);
 static struct i386_page_table *find_table(struct i386_space *space, uintptr_t vaddr);
@@ -116,7 +116,7 @@ hal_space_create(
 	int result;
 
 	/* Allocates and clears the software address-space record. */
-	space = hal_malloc(sizeof(*space));
+	space = kernel_alloc(sizeof(*space));
 
 	/* Reports allocation failure before initializing the record. */
 	if (space == NULL)
@@ -128,12 +128,12 @@ hal_space_create(
 
 	/* Releases the software record when directory allocation fails. */
 	if (result != HAL_OK) {
-		hal_free(space);
+		kernel_free(space);
 		return NULL;
 	}
 
 	/* Clears the directory and copies the kernel half without user access. */
-	space->pdt = space->directory_memory.vaddr;
+	space->pdt = hal_pmem_to_kernel(space->directory_memory);
 	hal_memset(space->pdt, 0, PAGE_SIZE);
 	system_pdt = (uint32_t *)(system_cr3 | SYS_START);
 	for (i = 512; i < 1024; i++)
@@ -223,15 +223,15 @@ hal_space_destroy(
 	/* Releases every page table and its physical backing page. */
 	while ((table = space->page_tables) != NULL) {
 		space->page_tables = table->next;
-		(void)hal_pmem_free(&table->memory);
-		hal_free(table);
+		(void)hal_pmem_free(&table->memory, PAGE_SIZE);
+		kernel_free(table);
 		table_count_drop();
 	}
 
 	/* Invalidates and releases the directory and software record. */
 	space->magic = 0;
-	(void)hal_pmem_free(&space->directory_memory);
-	hal_free(space);
+	(void)hal_pmem_free(&space->directory_memory, PAGE_SIZE);
+	kernel_free(space);
 
 	/* Decrements the global address-space count under its lock. */
 	enabled = raw_lock_enter(&count_lock);
@@ -306,7 +306,7 @@ hal_space_switch(
 	enabled = space_lock_enter(space);
 
 	/* Loads the user page directory before publishing current space. */
-	cr3 = (uint32_t)space->directory_memory.paddr;
+	cr3 = (uint32_t)space->directory_memory;
 	asm_load_cr3(cr3);
 	__atomic_store_n(&current_space, handle, __ATOMIC_RELEASE);
 
@@ -425,6 +425,73 @@ hal_space_map(
 
 	/* Reports a completely mapped interval. */
 	return HAL_OK;
+}
+
+/*
+ * Reports whether one range lies in a window the board exposes.
+ */
+static int
+device_window(
+	hal_physaddr_t paddr,
+	size_t size)
+{
+	/* Accepts the conventional-memory device aperture. */
+	if (paddr >= 0x000a0000U && paddr <= 0x00100000U &&
+	    size <= 0x00100000U - paddr) {
+		return 1;
+	}
+
+	/* Accepts the high PCI-style device aperture. */
+	if (paddr >= 0xf0000000U && paddr <= 0xf1000000U &&
+	    size <= 0xf1000000U - paddr) {
+		return 1;
+	}
+
+	/* Rejects a range outside both apertures. */
+	return 0;
+}
+
+/*
+ * Maps one device range into its fixed kernel window.
+ */
+int
+hal_space_map_device(
+	hal_physaddr_t paddr,
+	size_t size,
+	uint32_t attr,
+	void **vaddr)
+{
+	void *address;
+
+	/* Requires a destination and a window the board exposes. */
+	if (vaddr == NULL || size == 0 || !device_window(paddr, size))
+		return HAL_ERR_INVALID;
+
+	/* The whole physical space is aliased into the system half. */
+	address = (void *)((uintptr_t)paddr | SYS_START);
+
+	/*
+	 * The alias is established by early paging, so a repeated map is
+	 * expected and is not an error. Refreshing the attributes is best
+	 * effort; the window itself is what the caller needs.
+	 */
+	(void)hal_space_map(HAL_SPACE_SYS, address, paddr, size, attr);
+
+	/* Reports the mapped window. */
+	*vaddr = address;
+	return HAL_OK;
+}
+
+/*
+ * Removes one device mapping.
+ */
+int
+hal_space_unmap_device(
+	void *vaddr,
+	size_t size)
+{
+	/* Releases the system-space window. */
+	return hal_space_unmap(HAL_SPACE_SYS, vaddr, size);
 }
 
 /*
@@ -998,22 +1065,10 @@ table_count_drop(
 /* Allocates one zero-owner physical page for page-table use. */
 static int
 alloc_page(
-	struct hal_pmem *memory)
+	hal_physaddr_t *memory)
 {
-	const struct hal_pmem_request request = {
-		HAL_PMEM_PADDR_ANY,
-		PAGE_SIZE,
-		PAGE_SIZE,
-		HAL_PMEM_TYPE_RAM,
-		0
-	};
-	int result;
-
-	/* Allocates the fixed-size aligned RAM page. */
-	result = hal_pmem_alloc(&request, memory);
-
-	/* Returns the physical allocator result. */
-	return result;
+	/* Allocates one page-aligned page of RAM. */
+	return hal_pmem_alloc(PAGE_SIZE, PAGE_SIZE, memory);
 }
 
 /* Acquires one address-space serializer with interrupts disabled. */
@@ -1095,7 +1150,7 @@ create_table(
 	pde = (unsigned)(vaddr >> 22);
 
 	/* Allocates and clears the software page-table record. */
-	table = hal_malloc(sizeof(*table));
+	table = kernel_alloc(sizeof(*table));
 
 	/* Reports allocation failure before initializing the record. */
 	if (table == NULL)
@@ -1107,13 +1162,13 @@ create_table(
 
 	/* Releases the software record when page allocation fails. */
 	if (result != HAL_OK) {
-		hal_free(table);
+		kernel_free(table);
 		return NULL;
 	}
 
 	/* Initializes and attaches the empty page table. */
 	table->vaddr = vaddr & 0xffc00000U;
-	table->pte = table->memory.vaddr;
+	table->pte = hal_pmem_to_kernel(table->memory);
 	hal_memset(table->pte, 0, PAGE_SIZE);
 	table->next = space->page_tables;
 	space->page_tables = table;
@@ -1125,7 +1180,7 @@ create_table(
 
 	/* Publishes the user-writable page-directory entry last. */
 	space->pdt[pde] =
-	    ((uint32_t)table->memory.paddr & 0xfffff000U) |
+	    ((uint32_t)table->memory & 0xfffff000U) |
 	    PTE_PRESENT | PTE_WRITE | PTE_USER;
 
 	/* Returns the attached page table. */
@@ -1184,8 +1239,8 @@ free_detached_tables(
 	/* Releases every physical page and software record in list order. */
 	while (table != NULL) {
 		next = table->next;
-		(void)hal_pmem_free(&table->memory);
-		hal_free(table);
+		(void)hal_pmem_free(&table->memory, PAGE_SIZE);
+		kernel_free(table);
 		table_count_drop();
 		table = next;
 	}

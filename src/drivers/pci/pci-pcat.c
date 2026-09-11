@@ -39,11 +39,11 @@ struct pcat_bar_mapping {
 static struct pcat_bar_mapping *bar_mappings;
 
 #if defined(__x86_64__)
-extern int amd64_acpi_ecam_address(uint16_t, uint8_t, uint8_t, uint8_t, paddr_t *);
+extern int amd64_acpi_ecam_address(uint16_t, uint8_t, uint8_t, uint8_t, uint64_t *);
 extern int amd64_acpi_ecam_pointer(uint16_t, uint8_t, uint8_t, uint8_t, volatile uint8_t **);
 #endif
 
-static int ecam_function_address(const struct drv_pci_address *address, paddr_t *result);
+static int ecam_function_address(const struct drv_pci_address *address, uint64_t *result);
 static int pcat_config_read(void *context, const struct drv_pci_address *address, unsigned offset, unsigned width, uint32_t *result);
 static int ecam_map(const struct drv_pci_address *address, volatile uint8_t **result);
 static bool lock_enter(void);
@@ -90,7 +90,7 @@ drv_pci_pcat_init(
 		.segment_boundary = 0,
 		.coherent = 1};
 	struct drv_pci_bus *root;
-	paddr_t ecam;
+	uint64_t ecam;
 	int error;
 
 	/* Checks the ecam function address result. */
@@ -134,7 +134,7 @@ drv_pci_pcat_init(
 static int
 ecam_function_address(
 	const struct drv_pci_address *address,
-	paddr_t *result)
+	uint64_t *result)
 {
 #if defined(__x86_64__)
 	int error;

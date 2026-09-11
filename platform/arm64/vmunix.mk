@@ -7,7 +7,7 @@ ARM64_OBJCOPY ?= aarch64-linux-gnu-objcopy
 ARM64_NM ?= aarch64-linux-gnu-nm
 ARM64_PLATFORM := platform/arm64
 
-ARM64_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
+ARM64_CPPFLAGS := -nostdinc -Iinclude -Isrc -I. \
 	-Ilibc/include -Isrc/hal/arm64 -DHAL_ARCH_ARM64 -DHAL_BOARD_RPI4 \
 	-DKERN_USER_ABI_AARCH64 -DKERN_USER_ABI_LP64
 ARM64_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
@@ -68,7 +68,7 @@ ARM64_KERNEL_LIBC_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(ZEDBSD_LIBC_SOURC
 ARM64_VMUNIX_OBJS := $(ARM64_BOOT_OBJS) $(ARM64_KERNEL_OBJS) $(ARM64_KERNEL_LIBC_OBJS)
 $(ARM64_VMUNIX_OBJS): $(ZEDBSD_PLATFORM_CONFIG_STAMP)
 
-ARM64_USER_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
+ARM64_USER_CPPFLAGS := -nostdinc -Iinclude -Isrc -I. \
 	-Ilibc/include -DHAL_ARCH_ARM64 -DKERN_USER_ABI_AARCH64 \
 	-DKERN_USER_ABI_LP64
 ARM64_USER_CFLAGS := -march=armv8-a -mno-outline-atomics \
@@ -250,7 +250,7 @@ $(BUILD)/POSIX-R2-REMAINING.ELF: \
 
 # ELF64 runtime linker and shared libc for the aarch64 architecture overlay.
 DYNAMIC_DIR := $(BUILD)/dynamic
-DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude -Iinclude/uapi -Ilibc/include \
+DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude -Ilibc/include \
 	-DHAL_ARCH_ARM64 -DKERN_USER_ABI_AARCH64 -DKERN_USER_ABI_LP64 \
 	-DKERN_DYNAMIC_LIBC
 DYNAMIC_CFLAGS := -march=armv8-a -mno-outline-atomics -Os -ffreestanding \
@@ -298,29 +298,29 @@ $(DYNAMIC_DIR)/obj/src/crt/crt1.o: src/crt/crt1-aarch64.S
 	$(ARM64_CC) -c $< -o $@
 $(DYNAMIC_LIBM_OBJ): libc/math.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(ARM64_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
+	$(ARM64_CC) -nostdinc -Ilibc/include -Iinclude -I. \
  $(DYNAMIC_CFLAGS) -c $< -o $@
 $(DYNAMIC_FLOAT_DIR)/zed-softfloat.o: src/softfloat/zed-softfloat.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(ARM64_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
+	$(ARM64_CC) -nostdinc -Ilibc/include -Iinclude -I. \
  $(DYNAMIC_CFLAGS) -c $< -o $@
 $(DYNAMIC_FLOAT_DIR)/compiler-runtime.o: src/softfloat/compiler-runtime.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(ARM64_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
+	$(ARM64_CC) -nostdinc -Ilibc/include -Iinclude -I. \
  $(DYNAMIC_CFLAGS) -c $< -o $@
 $(DYNAMIC_FLOAT_DIR)/zed-softfloat128.o: src/softfloat/zed-softfloat128.c \
 	src/softfloat/zed-softfloat128.h src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(ARM64_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
+	$(ARM64_CC) -nostdinc -Ilibc/include -Iinclude -I. \
  $(DYNAMIC_CFLAGS) -c $< -o $@
 $(DYNAMIC_FLOAT_DIR)/compiler-runtime128.o: src/softfloat/compiler-runtime128.c \
 	src/softfloat/zed-softfloat128.h src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(ARM64_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
+	$(ARM64_CC) -nostdinc -Ilibc/include -Iinclude -I. \
  $(DYNAMIC_CFLAGS) -c $< -o $@
 $(DYNAMIC_FLOAT_DIR)/float-parse.o: libc/float-parse.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(ARM64_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
+	$(ARM64_CC) -nostdinc -Ilibc/include -Iinclude -I. \
  $(DYNAMIC_CFLAGS) -c $< -o $@
 
 $(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)

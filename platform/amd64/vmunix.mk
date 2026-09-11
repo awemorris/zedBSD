@@ -709,19 +709,19 @@ $(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o: DYNAMIC_CFLAGS += -mtls-dialec
 
 $(DYNAMIC_LIBM_OBJ): libc/math.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Ilibc/include -Iinclude -I. $(DYNAMIC_CFLAGS) \
  -mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_FLOAT_DIR)/zed-softfloat.o: src/softfloat/zed-softfloat.c \
 	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Ilibc/include -Iinclude -I. $(DYNAMIC_CFLAGS) \
  -mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_FLOAT_DIR)/float-parse.o: libc/float-parse.c \
 	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Ilibc/include -Iinclude -I. $(DYNAMIC_CFLAGS) \
  -mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_DIR)/obj/src/crt/crt1.o: src/crt/crt1-amd64.S

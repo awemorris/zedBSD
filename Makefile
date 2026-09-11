@@ -478,7 +478,7 @@ ZEDBSD_CPPFLAGS := -nostdinc \
 	-isystem $(ZEDBSD_TARGET_SYSROOT)/usr/include \
 	-Iinclude -Isrc -I. -I$(BUILD) $(ZEDBSD_CONFIG_CPPFLAGS)
 else
-ZEDBSD_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
+ZEDBSD_CPPFLAGS := -nostdinc -Iinclude -Isrc -I. \
 	-I$(BUILD) -Ilibc/include $(ZEDBSD_CONFIG_CPPFLAGS)
 endif
 ifeq ($(ZEDBSD_ARCHITECTURE),i386)
