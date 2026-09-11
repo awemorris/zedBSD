@@ -18,6 +18,7 @@
 #include <hal/hal.h>
 
 #include <string.h>
+#include "kern/klog.h"
 
 #define CIRRUS_PADDR 0xf0000000U
 
@@ -81,12 +82,12 @@ drv_pc98_graphics_backend_enter(
 		return 0;
 	memset(&info, 0, sizeof(info));
 	info.preferred_bits_per_pixel = mode->preferred_bits_per_pixel;
-	hal_printf("graphics: enter request: preferred %u bpp\n",
+	kern_logf("graphics: enter request: preferred %u bpp\n",
 		   mode->preferred_bits_per_pixel);
 
 	/* Checks the enter result. */
 	if (!native_display.enter(native_display.context, &info)) {
-		hal_printf("graphics: Cirrus and GDC mode entry failed\n");
+		kern_logf("graphics: Cirrus and GDC mode entry failed\n");
 
 		/* Succeeded. */
 		return 0;
@@ -96,7 +97,7 @@ drv_pc98_graphics_backend_enter(
 	mode->height = info.height;
 	mode->bits_per_pixel = info.bits_per_pixel;
 	mode->stride = info.stride;
-	hal_printf("graphics: %s mode %ux%ux%u stride=%u\n",
+	kern_logf("graphics: %s mode %ux%ux%u stride=%u\n",
 		   display.active == &display.cirrus_hal.display ? "Cirrus"
 								 : "GDC",
 		   info.width, info.height, info.bits_per_pixel, info.stride);

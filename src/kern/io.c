@@ -24,6 +24,7 @@
 #include <string.h>
 #include "kern/atomic.h"
 #include "kern/io-stats.h"
+#include "kern/klog.h"
 
 #define IO_POOL_MAX_BYTES (4U * 1024U * 1024U)
 
@@ -182,7 +183,7 @@ io_pool_init(void)
 	if (!allocate_backing((wanted_large + wanted_small) * sizeof(*large_slots),
 	    budget_bytes, &metadata)) {
 		atomic_raw_store_release(&initialized, 2U);
-		hal_printf("I/O pool unavailable budget=%llu; stack fallback active\n",
+		kern_logf("I/O pool unavailable budget=%llu; stack fallback active\n",
 		    (unsigned long long)budget_bytes);
 		return;
 	}
@@ -216,7 +217,7 @@ io_pool_init(void)
 	}
 
 	atomic_raw_store_release(&initialized, 2U);
-	hal_printf("I/O pool large=%u small=%u resident=%llu budget=%llu\n",
+	kern_logf("I/O pool large=%u small=%u resident=%llu budget=%llu\n",
 	    large_count, small_count, (unsigned long long)resident_bytes,
 	    (unsigned long long)budget_bytes);
 }

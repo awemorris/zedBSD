@@ -39,6 +39,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
+#include "kern/klog.h"
 
 #define EXEC_ARG_MAX ZEDBSD_SPAWN_ARG_MAX
 #define EXEC_ENV_MAX ZEDBSD_SPAWN_ENV_MAX
@@ -688,7 +689,7 @@ process_spawn_from(
 	process = NULL;
 out:
 	if (error != 0)
-		hal_printf("exec: %s failed for %s (%d)\n", stage, path, error);
+		kern_logf("exec: %s failed for %s (%d)\n", stage, path, error);
 	exec_target_release(&target);
 	process_cred_reservation_abort(cred_reservation);
 	cred_release(prospective_cred);

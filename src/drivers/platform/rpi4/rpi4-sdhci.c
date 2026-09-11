@@ -15,6 +15,7 @@
 #include <kern/disk.h>
 
 #include <errno.h>
+#include "kern/klog.h"
 
 #define DIRECT_BASE 0xffff000000000000ULL
 #define REG_BLOCK_SIZE 0x04
@@ -93,14 +94,14 @@ drv_rpi4_sdhci_init(
 	/* Maps the controller and reports what it advertises. */
 	unit.base = (volatile uint8_t *)(DIRECT_BASE + physical_base);
 	unit.disk = 0;
-	hal_printf("sdhci: base=%p caps=%x present=%x version=%x\n",
+	kern_logf("sdhci: base=%p caps=%x present=%x version=%x\n",
 		   (void *)physical_base, r32(REG_CAPABILITIES),
 		   r32(REG_PRESENT), r16(0xfe));
 
 	/* Checks the operation status. */
 	error = controller_init();
 	if (error) {
-		hal_printf("sdhci: init error=%u status=%x present=%x\n",
+		kern_logf("sdhci: init error=%u status=%x present=%x\n",
 			   (unsigned)error, r32(REG_INT_STATUS),
 			   r32(REG_PRESENT));
 
@@ -137,7 +138,7 @@ drv_rpi4_sdhci_init(
 		return error;
 	}
 
-	hal_printf("sdhci: mmcblk0 ready (%s addressing)\n",
+	kern_logf("sdhci: mmcblk0 ready (%s addressing)\n",
 		   unit.high_capacity ? "block" : "byte");
 
 	/* Succeeded. */
@@ -208,7 +209,7 @@ controller_init(
 
 	/* Checks the operation status. */
 	if ((error = set_clock(400000U)) != 0) {
-		hal_printf("sdhci: clock identification %u\n", (unsigned)error);
+		kern_logf("sdhci: clock identification %u\n", (unsigned)error);
 
 		/* Failed. */
 		return error;
@@ -216,7 +217,7 @@ controller_init(
 
 	/* Checks the operation status. */
 	if ((error = command(0, 0, 0, 0)) != 0) {
-		hal_printf("sdhci: CMD0 %u\n", (unsigned)error);
+		kern_logf("sdhci: CMD0 %u\n", (unsigned)error);
 
 		/* Failed. */
 		return error;
@@ -226,10 +227,10 @@ controller_init(
 	error = command(8, 0x1aaU, CMD_RESP_SHORT | CMD_CRC | CMD_INDEX,
 			&response);
 	if (error) {
-		hal_printf("sdhci: CMD8 error=%u irq=%x\n", (unsigned)error,
+		kern_logf("sdhci: CMD8 error=%u irq=%x\n", (unsigned)error,
 			   last_error_status);
 	} else {
-		hal_printf("sdhci: CMD8 response=%x\n", response);
+		kern_logf("sdhci: CMD8 response=%x\n", response);
 	}
 
 	unit.rca = 0;
@@ -243,7 +244,7 @@ controller_init(
 
 	/* Checks the operation status. */
 	if (error != 0 || !(response & 0x80000000U)) {
-		hal_printf("sdhci: ACMD41 error=%u irq=%x ocr=%x\n",
+		kern_logf("sdhci: ACMD41 error=%u irq=%x ocr=%x\n",
 			   (unsigned)error, last_error_status, response);
 
 		/* Failed. */
@@ -254,7 +255,7 @@ controller_init(
 
 	/* Checks the operation status. */
 	if ((error = command(2, 0, CMD_RESP_LONG | CMD_CRC, 0)) != 0) {
-		hal_printf("sdhci: CMD2 %u\n", (unsigned)error);
+		kern_logf("sdhci: CMD2 %u\n", (unsigned)error);
 
 		/* Failed. */
 		return error;
@@ -263,7 +264,7 @@ controller_init(
 	/* Checks the operation status. */
 	if ((error = command(3, 0, CMD_RESP_SHORT | CMD_CRC | CMD_INDEX,
 			     &response)) != 0) {
-		hal_printf("sdhci: CMD3 %u\n", (unsigned)error);
+		kern_logf("sdhci: CMD3 %u\n", (unsigned)error);
 
 		/* Failed. */
 		return error;
@@ -278,7 +279,7 @@ controller_init(
 	/* Checks the operation status. */
 	if ((error = command(9, unit.rca << 16, CMD_RESP_LONG | CMD_CRC, 0)) !=
 	    0) {
-		hal_printf("sdhci: CMD9 %u\n", (unsigned)error);
+		kern_logf("sdhci: CMD9 %u\n", (unsigned)error);
 
 		/* Failed. */
 		return error;
@@ -287,7 +288,7 @@ controller_init(
 	/* Checks the operation status. */
 	if ((error = command(7, unit.rca << 16,
 			     CMD_RESP_BUSY | CMD_CRC | CMD_INDEX, 0)) != 0) {
-		hal_printf("sdhci: CMD7 %u\n", (unsigned)error);
+		kern_logf("sdhci: CMD7 %u\n", (unsigned)error);
 
 		/* Failed. */
 		return error;
@@ -303,7 +304,7 @@ controller_init(
 
 	/* Checks the operation status. */
 	if ((error = set_clock(25000000U)) != 0) {
-		hal_printf("sdhci: clock transfer %u\n", (unsigned)error);
+		kern_logf("sdhci: clock transfer %u\n", (unsigned)error);
 
 		/* Failed. */
 		return error;
@@ -607,7 +608,7 @@ sd_submit(
 
 	/* Checks the operation status. */
 	if (error) {
-		hal_printf(
+		kern_logf(
 			"sdhci: op=%u lba=%llu count=%u error=%d status=%x\n",
 			(unsigned)bio->b_op, bio->b_mapped_block,
 			bio->b_block_count, error, r32(REG_INT_STATUS));

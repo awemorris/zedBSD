@@ -8,15 +8,19 @@
  */
 
 /*
- * The PC/AT VGA console and interrupt-driven 8042 keyboard driver.
+ * The PC/AT early console.
+ *
+ * This is output only, and only until the kernel publishes kernel_putc.
+ * It exists so the HAL and the earliest kernel initialization can report
+ * diagnostics through hal_printf() before /dev/graphics and /dev/console
+ * are up. The keyboard belongs to drivers/platform/pcat/ps2-8042.c and
+ * the text grid to drivers/platform/pcat/graphics/text.c.
  */
 
 #include <hal/hal.h>
-#include "../../cons-keys.h"
 
 #include <string.h>
 
-#include "../../cons-wait.h"
 #include "../asm.h"
 #include "../defs.h"
 #include "../irq.h"
@@ -27,28 +31,6 @@
 #define VGA_INDEX	0x3d4U
 #define VGA_DATA	0x3d5U
 
-#define KBD_DATA			0x60U
-#define KBD_STATUS			0x64U
-#define KBD_COMMAND			0x64U
-#define KBD_STATUS_OUTPUT		0x01U
-#define KBD_STATUS_INPUT		0x02U
-#define KBD_STATUS_AUX			0x20U
-#define KBD_READ_CONFIGURATION		0x20U
-#define KBD_WRITE_CONFIGURATION		0x60U
-#define KBD_DISABLE_AUX			0xa7U
-#define KBD_DISABLE_KEYBOARD		0xadU
-#define KBD_ENABLE_KEYBOARD		0xaeU
-#define KBD_CONFIGURATION_KEYBOARD_IRQ	0x01U
-#define KBD_CONFIGURATION_AUX_IRQ	0x02U
-#define KBD_CONFIGURATION_KEYBOARD_OFF	0x10U
-#define KBD_CONFIGURATION_AUX_OFF	0x20U
-#define KBD_CONFIGURATION_TRANSLATION	0x40U
-#define KBD_WAIT_LOOPS			100000U
-#define KBD_FLUSH_LIMIT			64U
-
-/* 256 physical scan positions, two resync markers, and one ring sentinel. */
-#define EVENT_COUNT 259U
-
 struct console_output_token {
 	uint32_t cpu;
 	int interrupts_enabled;
@@ -56,25 +38,10 @@ struct console_output_token {
 
 static volatile uint16_t *vga_memory = (volatile uint16_t *)((uintptr_t)AMD64_IMAGE_BASE + 0xb8000U);
 static unsigned cursor_row;
-/*
- * One queued key event. The HAL interface passes the keysymbol and the
- * flags as separate parameters, so this record stays file-local.
- */
-struct pcat_key_event {
-	char symbol[HAL_KEY_SYMBOL_SIZE];
-	uint32_t flags;
-};
-
 static unsigned cursor_column;
 static uint8_t current_attribute = 0x07U;
 static int cursor_visible = 1;
 static int console_suspended;
-static int event_mode;
-static struct pcat_key_event events[EVENT_COUNT];
-static unsigned event_head;
-static unsigned event_tail;
-static uint8_t key_down[32];
-static struct hal_cons_wait_queue input_waiters;
 
 static const struct zbl6_framebuffer *framebuffer;
 static volatile uint32_t *framebuffer_pixels;
@@ -124,11 +91,6 @@ static const uint32_t vga_palette[16] = {
 static struct zbl6_framebuffer console_test_framebuffer;
 #endif
 
-/*
- * The designated indexes preserve the sparse scan-code identity and are the
- * sole narrow designated-initializer exception in this source.
- */
-
 static int console_interrupt_disable(void);
 static void console_interrupt_enable(void);
 #ifndef ZEDBSD_CONSOLE_OUTPUT_TEST
@@ -149,8 +111,6 @@ static void newline_locked(void);
 static void put_graphic_locked(int character);
 static void putc_locked(int character);
 static void write_n_locked(const char *string, unsigned length);
-static int write_n_at_locked(unsigned row, unsigned column, const char *string, unsigned length, uint8_t attribute);
-static int symbol_equal(const char *left, const char *right);
 
 /*
  * Acquires recursive console-output ownership.
@@ -183,66 +143,6 @@ pcat_cons_output_end(
 	/* Reconstructs and releases the saved ownership token. */
 	token.cpu = (uint32_t)(encoded >> 32);
 	token.interrupts_enabled = (encoded & 1U) != 0;
-	console_output_unlock(token);
-}
-
-/*
- * Updates the visible hardware cursor.
- */
-void
-hal_cons_update_cursor(
-	void)
-{
-	struct console_output_token token;
-
-	/* Serializes the cursor update with all console rendering. */
-	token = console_output_lock();
-	update_cursor_locked();
-	console_output_unlock(token);
-}
-
-/*
- * Clears one console row.
- */
-void
-hal_cons_clear_row(
-	unsigned row)
-{
-	struct console_output_token token;
-
-	/* Serializes row clearing with all console rendering. */
-	token = console_output_lock();
-	clear_row_locked(row);
-	console_output_unlock(token);
-}
-
-/*
- * Clears the complete console.
- */
-void
-hal_cons_clear(
-	void)
-{
-	struct console_output_token token;
-
-	/* Serializes console clearing with all rendering. */
-	token = console_output_lock();
-	clear_locked();
-	console_output_unlock(token);
-}
-
-/*
- * Resets the console presentation state.
- */
-void
-hal_cons_reset(
-	void)
-{
-	struct console_output_token token;
-
-	/* Serializes the reset with all console rendering. */
-	token = console_output_lock();
-	reset_locked();
 	console_output_unlock(token);
 }
 
@@ -310,299 +210,6 @@ pcat_cons_write_string(
 
 	/* Writes the measured byte range. */
 	pcat_cons_write_n(string, length);
-}
-
-/*
- * Writes bounded text at a fixed console position.
- */
-static int
-pcat_cons_write_n_at(
-	unsigned row,
-	unsigned column,
-	const char *string,
-	unsigned length,
-	uint8_t attribute)
-{
-	struct console_output_token token;
-	int changed;
-
-	/* Rejects a missing input string. */
-	if (string == NULL)
-		return -1;
-
-	/* Serializes positioned rendering with all console output. */
-	token = console_output_lock();
-	changed = write_n_at_locked(
-		row,
-		column,
-		string,
-		length,
-		attribute);
-	console_output_unlock(token);
-
-	/* Reports the number of cells changed. */
-	return changed;
-}
-
-/*
- * Writes a terminated UTF-8 string at a fixed console position with the
- * given attribute. Clipped at the end of the row; clearing is spaces.
- */
-void
-hal_cons_write(
-	unsigned row,
-	unsigned column,
-	uint8_t attribute,
-	const char *utf8)
-{
-	unsigned length;
-
-	/* Ignores a missing input string. */
-	if (utf8 == NULL)
-		return;
-
-	/* Measures the terminated input string. */
-	length = 0;
-	while (utf8[length] != '\0')
-		length++;
-
-	/* Writes the measured string with the requested attribute. */
-	(void)pcat_cons_write_n_at(
-		row,
-		column,
-		utf8,
-		length,
-		attribute);
-}
-
-/*
- * Clears from the current cursor to the end of its row.
- */
-void
-hal_cons_clear_to_eol(
-	void)
-{
-	struct console_output_token token;
-	unsigned current;
-
-	/* Serializes row clearing with all console rendering. */
-	token = console_output_lock();
-
-	/* Clears every cell at or after a valid cursor. */
-	if (cursor_row < PCAT_CONS_ROWS &&
-	    cursor_column < PCAT_CONS_COLUMNS) {
-		/* Clears the remainder of the current row. */
-		for (current = cursor_column;
-		     current < PCAT_CONS_COLUMNS;
-		     current++) {
-			write_cell_locked(
-				cursor_row,
-				current,
-				' ',
-				current_attribute);
-		}
-	}
-
-	/* Releases console-output serialization after clearing the row. */
-	console_output_unlock(token);
-}
-
-/*
- * Clears from a specified position to the end of its row.
- */
-int
-hal_cons_clear_to_eol_at(
-	unsigned row,
-	unsigned column)
-{
-	struct console_output_token token;
-	unsigned current;
-	int changed;
-
-	/* Initializes the invalid-position result. */
-	changed = 0;
-
-	/* Serializes row clearing with all console rendering. */
-	token = console_output_lock();
-
-	/* Clears every cell at or after a valid requested position. */
-	if (row < PCAT_CONS_ROWS && column < PCAT_CONS_COLUMNS) {
-		/* Clears the remainder of the requested row. */
-		for (current = column;
-		     current < PCAT_CONS_COLUMNS;
-		     current++) {
-			write_cell_locked(
-				row,
-				current,
-				' ',
-				current_attribute);
-		}
-
-		/* Leaves the logical cursor at the requested position. */
-		cursor_row = row;
-		cursor_column = column;
-		changed = 1;
-	}
-
-	/* Releases console-output serialization after the update. */
-	console_output_unlock(token);
-
-	/* Reports whether a valid row was cleared. */
-	return changed;
-}
-
-/*
- * Sets the console cursor position.
- */
-int
-hal_cons_set_cursor(
-	unsigned row,
-	unsigned column)
-{
-	struct console_output_token token;
-	int changed;
-
-	/* Initializes the invalid-position result. */
-	changed = 0;
-
-	/* Serializes cursor movement with all console rendering. */
-	token = console_output_lock();
-
-	/* Applies a position within the fixed console geometry. */
-	if (row < PCAT_CONS_ROWS && column < PCAT_CONS_COLUMNS) {
-		cursor_row = row;
-		cursor_column = column;
-		update_cursor_locked();
-		changed = 1;
-	}
-
-	/* Releases console-output serialization after moving the cursor. */
-	console_output_unlock(token);
-
-	/* Reports whether the requested position was valid. */
-	return changed;
-}
-
-/*
- * Moves the console cursor to a signed position.
- */
-void
-hal_cons_move_cursor(
-	int line,
-	int column)
-{
-	/* Delegates validation to the unsigned cursor interface. */
-	(void)hal_cons_set_cursor((unsigned)line, (unsigned)column);
-}
-
-/*
- * Shows or hides the hardware cursor.
- */
-void
-hal_cons_show_cursor(
-	int visible)
-{
-	struct console_output_token token;
-
-	/* Serializes visibility and rendering updates. */
-	token = console_output_lock();
-	cursor_visible = visible != 0;
-	update_cursor_locked();
-	console_output_unlock(token);
-}
-
-/*
- * Reports the cursor position and whether the cursor is visible.
- */
-void
-hal_cons_get_cursor(
-	unsigned *row,
-	unsigned *column,
-	int *visible)
-{
-	struct console_output_token token;
-
-	/* Captures a consistent cursor snapshot. */
-	token = console_output_lock();
-	if (row != NULL)
-		*row = cursor_row;
-	if (column != NULL)
-		*column = cursor_column;
-	if (visible != NULL)
-		*visible = cursor_visible;
-	console_output_unlock(token);
-}
-
-/*
- * Reports the text console size in character cells.
- */
-void
-hal_cons_get_size(
-	unsigned *cols,
-	unsigned *rows)
-{
-	/* The geometry is fixed for this board. */
-	if (cols != NULL)
-		*cols = PCAT_CONS_COLUMNS;
-	if (rows != NULL)
-		*rows = PCAT_CONS_ROWS;
-}
-
-/*
- * Suspends hardware console rendering.
- */
-void
-hal_cons_suspend(
-	void)
-{
-	struct console_output_token token;
-
-	/* Serializes suspension with all console rendering. */
-	token = console_output_lock();
-
-	/* Leaves an already suspended console unchanged. */
-	if (console_suspended) {
-		console_output_unlock(token);
-
-		/* Completes the no-op suspension request. */
-		return;
-	}
-
-	/* Hides the VGA cursor when no framebuffer backend is active. */
-	if (framebuffer_pixels == NULL) {
-		asm_outb(VGA_INDEX, 0x0aU);
-		asm_outb(VGA_DATA, 0x20U);
-	}
-
-	/* Publishes suspension before releasing output serialization. */
-	console_suspended = 1;
-	console_output_unlock(token);
-}
-
-/*
- * Resumes hardware console rendering.
- */
-void
-hal_cons_resume(
-	void)
-{
-	struct console_output_token token;
-
-	/* Serializes resumption with all console rendering. */
-	token = console_output_lock();
-
-	/* Leaves an active console unchanged. */
-	if (!console_suspended) {
-		console_output_unlock(token);
-
-		/* Completes the no-op resume request. */
-		return;
-	}
-
-	/* Re-enables rendering and reconstructs the visible terminal. */
-	console_suspended = 0;
-	clear_locked();
-	console_output_unlock(token);
 }
 
 #ifdef ZEDBSD_CONSOLE_OUTPUT_TEST
@@ -715,271 +322,8 @@ pcat_console_output_test_state(
 #endif
 
 #ifdef ZEDBSD_INPUT_OWNERSHIP_TEST
-/*
- * Resets the PC/AT keyboard ownership fixture.
- */
-void
-pcat_input_ownership_test_reset(
-	void)
-{
-	/* Clears all held-key and queued-event state. */
-	memset(key_down, 0, sizeof(key_down));
-	memset(events, 0, sizeof(events));
-	event_head = 0;
-	event_tail = 0;
-}
 
-/*
- * Sets one held key in the keyboard ownership fixture.
- */
-void
-pcat_input_ownership_test_key(
-	unsigned extended,
-	unsigned scan,
-	int down)
-{
-	unsigned state_index;
-
-	/* Ignores a scan position outside the emulated keyboard state. */
-	if (extended > 1U || scan >= 128U)
-		return;
-
-	/* Updates the selected physical key bit. */
-	state_index = extended * 16U + (scan >> 3);
-
-	/* Records the requested press or release state. */
-	if (down) {
-		key_down[state_index] |=
-		    (uint8_t)(1U << (scan & 7U));
-	} else {
-		key_down[state_index] &=
-		    (uint8_t)~(1U << (scan & 7U));
-	}
-}
-
-/*
- * Sets the caps-lock state in the keyboard ownership fixture.
- */
-void
-pcat_input_ownership_test_caps(
-	int locked)
-{
-	/* Publishes the simulated caps-lock state. */
-}
-
-/*
- * Rebuilds the keyboard ownership snapshot.
- */
-void
-pcat_input_ownership_test_rebuild(
-	void)
-{
-	/* Rebuilds the fixture queue from the simulated held-key state. */
-	rebuild_keyboard_events_locked();
-}
-
-/*
- * Enqueues one repeat event in the keyboard ownership fixture.
- */
-void
-pcat_input_ownership_test_repeat(
-	const char *symbol)
-{
-	/* Enqueues the requested simulated repeat transition. */
-	enqueue_keyboard_event_locked(symbol, HAL_KEY_EVENT_REPEAT);
-}
-
-/*
- * Removes one event from the keyboard ownership fixture.
- */
-int
-pcat_input_ownership_test_pop(
-	struct pcat_key_event *event)
-{
-	/* Reports an empty fixture queue. */
-	if (event_tail == event_head)
-		return 0;
-
-	/* Copies the oldest event when requested. */
-	if (event != NULL)
-		*event = events[event_tail];
-
-	/* Retires the consumed fixture event. */
-	event_tail = (event_tail + 1U) % EVENT_COUNT;
-
-	/* Reports a consumed fixture event. */
-	return 1;
-}
 #endif
-
-
-/*
- * Copies one queued event into the caller's keysymbol and flags.
- */
-static void
-copy_event(
-	const struct pcat_key_event *source,
-	char *keysym,
-	uint32_t *flags)
-{
-	unsigned index;
-
-	/* Copies the NUL terminated keysymbol when requested. */
-	if (keysym != NULL) {
-		for (index = 0; index < HAL_KEY_SYMBOL_SIZE; index++)
-			keysym[index] = source->symbol[index];
-	}
-
-	/* Copies the event flags when requested. */
-	if (flags != NULL)
-		*flags = source->flags;
-}
-
-/*
- * Enables or disables keyboard event mode.
- */
-void
-hal_cons_set_event_mode(
-	int enable)
-{
-	struct console_output_token token;
-
-	/* Serializes the mode change with all console rendering. */
-	token = console_output_lock();
-	event_mode = enable != 0;
-
-	/* Terminal mode owns the visible cursor again. */
-	if (!event_mode)
-		update_cursor_locked();
-	console_output_unlock(token);
-}
-
-/*
- * Tests whether a console key event is queued.
- */
-int
-hal_cons_poll_event(
-	char *keysym,
-	uint32_t *flags)
-{
-	bool enabled;
-	int available;
-
-	/* Inspects the queue under input serialization. */
-	enabled = hal_cons_wait_queue_lock(&input_waiters);
-	available = event_head != event_tail;
-
-	/* Copies the queued event without consuming it. */
-	if (available)
-		copy_event(&events[event_tail], keysym, flags);
-
-	/* Releases input serialization after inspecting the queue. */
-	hal_cons_wait_queue_unlock(&input_waiters, enabled);
-
-	/* Reports whether an event is available. */
-	return available;
-}
-
-/*
- * Waits for and consumes one console key event.
- */
-int
-hal_cons_read_event(
-	char *keysym,
-	uint32_t *flags)
-{
-	struct hal_cons_wait_entry waiter;
-	bool enabled;
-
-	/* Initializes the reusable wait-queue entry for this task. */
-	waiter.task = hal_task_get_current();
-	waiter.next = NULL;
-	waiter.queued = 0;
-
-	/* Waits until the interrupt path publishes a queued key event. */
-	for (;;) {
-		enabled = hal_cons_wait_queue_lock(&input_waiters);
-
-		/* Consumes the oldest available event. */
-		if (event_head != event_tail) {
-			/* Copies the event out. */
-			copy_event(&events[event_tail], keysym, flags);
-
-			/* Retires the event and releases input serialization. */
-			event_tail = (event_tail + 1U) % EVENT_COUNT;
-			hal_cons_wait_queue_unlock(&input_waiters, enabled);
-
-			/* Reports a consumed key event. */
-			return 1;
-		}
-
-		/* Queues this task before yielding to avoid a lost wakeup. */
-		hal_cons_wait_queue_add(&input_waiters, &waiter);
-		hal_cons_wait_queue_unlock(&input_waiters, enabled);
-		kernel_wait_task();
-	}
-}
-
-/*
- * Waits for and translates one text key event.
- */
-int
-hal_cons_getc(
-	void)
-{
-	char symbol[HAL_KEY_SYMBOL_SIZE];
-	uint32_t event_flags;
-
-	/* Waits until a press or repeat event represents a text character. */
-	for (;;) {
-		(void)hal_cons_read_event(symbol, &event_flags);
-
-		/* Ignores key-state snapshot events. */
-		if ((event_flags & HAL_KEY_EVENT_SNAPSHOT) != 0)
-			continue;
-
-		/* Ignores events which do not produce text. */
-		if ((event_flags &
-		    (HAL_KEY_EVENT_PRESS | HAL_KEY_EVENT_REPEAT)) == 0) {
-			continue;
-		}
-
-		/* Reports a one-byte key symbol directly. */
-		if (symbol[1] == '\0')
-			return symbol[0];
-
-		/* Translates the enter key. */
-		if (symbol_equal(symbol, "enter"))
-			return '\r';
-
-		/* Translates the tab key. */
-		if (symbol_equal(symbol, "tab"))
-			return '\t';
-
-		/* Translates the backspace key. */
-		if (symbol_equal(symbol, "backspace"))
-			return '\b';
-
-		/* Translates the escape key. */
-		if (symbol_equal(symbol, "esc"))
-			return 0x1b;
-	}
-}
-
-/*
- * Discards all queued console input.
- */
-void
-hal_cons_drain_input(
-	void)
-{
-	bool enabled;
-
-	/* Advances the consumer to the published queue head. */
-	enabled = hal_cons_wait_queue_lock(&input_waiters);
-	event_tail = event_head;
-	hal_cons_wait_queue_unlock(&input_waiters, enabled);
-}
 
 /*
  * Initializes the PC/AT console and keyboard state.
@@ -993,7 +337,6 @@ prekern_pcat_cons_init(
 	uint64_t offset;
 	uint64_t pixel;
 	uint64_t pixel_count;
-	unsigned index;
 
 	/* Acquires output ownership before selecting the rendering backend. */
 	token = console_output_lock();
@@ -1028,16 +371,6 @@ prekern_pcat_cons_init(
 	reset_locked();
 	console_output_unlock(token);
 
-	/* Resets the keyboard state before enabling input interrupts. */
-	event_head = 0;
-	event_tail = 0;
-
-	/* Clears every physical held-key bit. */
-	for (index = 0; index < sizeof(key_down); index++)
-		key_down[index] = 0;
-
-	/* Initializes the task wait queue. */
-	hal_cons_wait_queue_init(&input_waiters);
 }
 
 /*
@@ -1524,7 +857,6 @@ reset_locked(
 {
 	/* Restores the default terminal presentation. */
 	current_attribute = 0x07U;
-	event_mode = 0;
 	cursor_visible = 1;
 	clear_locked();
 }
@@ -1590,9 +922,8 @@ newline_locked(
 		cursor_row = PCAT_CONS_ROWS - 1U;
 	}
 
-	/* Publishes the cursor only while terminal mode owns presentation. */
-	if (!event_mode)
-		update_cursor_locked();
+	/* Publishes the advanced cursor. */
+	update_cursor_locked();
 }
 
 /* Writes one printable character at the logical cursor. */
@@ -1614,7 +945,7 @@ put_graphic_locked(
 	/* Wraps or publishes the advanced cursor. */
 	if (cursor_column >= PCAT_CONS_COLUMNS) {
 		newline_locked();
-	} else if (!event_mode) {
+	} else {
 		update_cursor_locked();
 	}
 }
@@ -1714,110 +1045,6 @@ write_n_locked(
 		}
 	}
 }
-
-/* Writes bounded text at a fixed position while output is held. */
-static int
-write_n_at_locked(
-	unsigned row,
-	unsigned column,
-	const char *string,
-	unsigned length,
-	uint8_t attribute)
-{
-	unsigned changed;
-	unsigned index;
-	uint8_t character;
-	uint8_t selected_attribute;
-
-	/* Initializes the rendered-cell count. */
-	changed = 0;
-
-	/* Rejects an invalid origin or missing input string. */
-	if (row >= PCAT_CONS_ROWS ||
-	    column >= PCAT_CONS_COLUMNS ||
-	    string == NULL) {
-		return -1;
-	}
-
-	/* Renders bytes until the input or fixed terminal geometry ends. */
-	for (index = 0;
-	     index < length && row < PCAT_CONS_ROWS;
-	     index++) {
-		character = (uint8_t)string[index];
-
-		/* Advances a newline to the next row. */
-		if (character == '\n') {
-			row++;
-			column = 0;
-			continue;
-		}
-
-		/* Returns carriage output to the first column. */
-		if (character == '\r') {
-			column = 0;
-			continue;
-		}
-
-		/* Replaces non-ASCII bytes with a visible placeholder. */
-		if (character >= 0x80U)
-			character = '?';
-
-		/* Stops before writing beyond the fixed row width. */
-		if (column >= PCAT_CONS_COLUMNS)
-			break;
-
-		/* Renders this byte with the selected text attribute. */
-		selected_attribute = attribute ? attribute : 0x07U;
-		write_cell_locked(
-			row,
-			column++,
-			character,
-			selected_attribute);
-		changed++;
-	}
-
-	/* Leaves the logical cursor at the bounded final position. */
-	cursor_row = row < PCAT_CONS_ROWS ? row : PCAT_CONS_ROWS - 1U;
-	cursor_column = column < PCAT_CONS_COLUMNS ?
-	    column : PCAT_CONS_COLUMNS - 1U;
-
-	/* Reports the number of cells changed. */
-	return (int)changed;
-}
-
-
-
-/* Compares two terminated key symbols. */
-static int
-symbol_equal(
-	const char *left,
-	const char *right)
-{
-	int equal;
-
-	/* Skips the common prefix of both symbols. */
-	while (*left != '\0' && *left == *right) {
-		left++;
-		right++;
-	}
-
-	/* Tests whether both symbols ended at the same position. */
-	equal = *left == *right;
-
-	/* Reports whether the complete symbols match. */
-	return equal;
-}
-
-
-
-
-
-
-
-
-
-
-
 
 /* Switches VGA access after the permanent uncached window becomes present. */
 void

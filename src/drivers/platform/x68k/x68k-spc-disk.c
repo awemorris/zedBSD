@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <hal/hal.h>
 #include <kern/disk.h>
+#include "kern/klog.h"
 
 #define SPC_TARGET_COUNT 7U
 #define SPC_LUN 0U
@@ -184,7 +185,7 @@ probe_target(
 	sanitize(vendor, inquiry + 8U, 8U);
 	sanitize(product, inquiry + 16U, 16U);
 	sanitize(revision, inquiry + 32U, 4U);
-	hal_printf("spc: %s target=%u blocks=%llu %s %s %s\n",
+	kern_logf("spc: %s target=%u blocks=%llu %s %s %s\n",
 		   unit->disk->d_name, target_id, blocks, vendor, product,
 		   revision);
 	present_count++;
@@ -311,12 +312,12 @@ record_command_error(
 	/* Checks the operation status. */
 	if (error == X68K_SPC_ERR_STATUS &&
 	    (unit->sense_valid || request_sense(unit) == 0)) {
-		hal_printf("spc: target=%u op=%02X sense=%02X/%02X/%02X\n",
+		kern_logf("spc: target=%u op=%02X sense=%02X/%02X/%02X\n",
 			   unit->target_id, opcode, unit->sense.key,
 			   unit->sense.asc, unit->sense.ascq);
 	} else {
 		unit->sense_valid = 0;
-		hal_printf("spc: target=%u op=%02X transport=%d\n",
+		kern_logf("spc: target=%u op=%02X transport=%d\n",
 			   unit->target_id, opcode, error);
 	}
 

@@ -390,7 +390,7 @@ kernel_entry(
 	if (kern_cpu_notify_probe() != HAL_OK)
 		hal_fatal(__FILE__, __LINE__,
 			  "secondary CPU notification failed");
-	hal_printf("boot: HAL initialized successfully. "
+	kern_logf("boot: HAL initialized successfully. "
 		   "[cpu %u, memory %uMB, timer %ums]\n",
 		   hal_cpu_count(),
 		   (unsigned)(hal_pmem_get_total_size() / (1024U * 1024U)),

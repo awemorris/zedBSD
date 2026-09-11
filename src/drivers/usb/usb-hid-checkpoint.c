@@ -17,6 +17,8 @@
 #include <kern/thread.h>
 #include <stdint.h>
 #include <string.h>
+#include "kern/klog.h"
+#include "kern/kmem.h"
 
 #define USB_HID_CLASS 0x03U
 #define CHECKPOINT_DRAIN_TIMEOUT_MS 5000U
@@ -120,7 +122,7 @@ checkpoint_report_submit(
 	if (checkpoint->submit_markers >= CHECKPOINT_MARKER_LIMIT)
 		return;
 	checkpoint->submit_markers++;
-	hal_printf("usb-hid-checkpoint: submit generation=%u usb%u device=%u "
+	kern_logf("usb-hid-checkpoint: submit generation=%u usb%u device=%u "
 		   "interface=%u sequence=%u error=%d\n",
 		   checkpoint->generation, checkpoint_bus_number(checkpoint),
 		   drv_usb_device_address(checkpoint->device),
@@ -143,7 +145,7 @@ checkpoint_report_completion(
 	if (checkpoint->completion_markers >= CHECKPOINT_MARKER_LIMIT)
 		return;
 	checkpoint->completion_markers++;
-	hal_printf("usb-hid-checkpoint: completion generation=%u usb%u "
+	kern_logf("usb-hid-checkpoint: completion generation=%u usb%u "
 		   "device=%u interface=%u sequence=%u status=%u actual=%u "
 		   "drain-error=%d\n",
 		   checkpoint->generation, checkpoint_bus_number(checkpoint),
@@ -374,15 +376,15 @@ checkpoint_attach(
 		return error;
 
 	/* Handles the checkpoint availability. */
-	checkpoint = kernel_alloc(sizeof(*checkpoint));
+	checkpoint = kern_malloc(sizeof(*checkpoint));
 	if (checkpoint == NULL)
 		return ENOMEM;
 	memset(checkpoint, 0, sizeof(*checkpoint));
-	checkpoint->buffer = kernel_alloc(buffer_size);
+	checkpoint->buffer = kern_malloc(buffer_size);
 
 	/* Handles the buffer availability. */
 	if (checkpoint->buffer == NULL) {
-		kernel_free(checkpoint);
+		kern_free(checkpoint);
 
 		/* Failed. */
 		return ENOMEM;
@@ -400,8 +402,8 @@ checkpoint_attach(
 
 	/* Handles the urb availability. */
 	if (checkpoint->urb == NULL) {
-		kernel_free(checkpoint->buffer);
-		kernel_free(checkpoint);
+		kern_free(checkpoint->buffer);
+		kern_free(checkpoint);
 
 		/* Failed. */
 		return ENOMEM;
@@ -411,8 +413,8 @@ checkpoint_attach(
 	error = drv_usb_interface_set_driver_data(interface, checkpoint);
 	if (error != 0) {
 		drv_usb_urb_free(checkpoint->urb);
-		kernel_free(checkpoint->buffer);
-		kernel_free(checkpoint);
+		kern_free(checkpoint->buffer);
+		kern_free(checkpoint);
 
 		/* Failed. */
 		return error;
@@ -424,15 +426,15 @@ checkpoint_attach(
 	if (error != 0) {
 		(void)drv_usb_interface_set_driver_data(interface, NULL);
 		drv_usb_urb_free(checkpoint->urb);
-		kernel_free(checkpoint->buffer);
-		kernel_free(checkpoint);
+		kern_free(checkpoint->buffer);
+		kern_free(checkpoint);
 
 		/* Failed. */
 		return error;
 	}
 
 	checkpoint->worker = worker;
-	hal_printf("usb-hid-checkpoint: attach generation=%u usb%u device=%u "
+	kern_logf("usb-hid-checkpoint: attach generation=%u usb%u device=%u "
 		   "interface=%u endpoint=%02x length=%u\n",
 		   checkpoint->generation, checkpoint_bus_number(checkpoint),
 		   drv_usb_device_address(checkpoint->device),
@@ -536,7 +538,7 @@ checkpoint_report_detach(
 	if (checkpoint->detach_markers >= CHECKPOINT_DETACH_MARKER_LIMIT)
 		return;
 	checkpoint->detach_markers++;
-	hal_printf("usb-hid-checkpoint: detach generation=%u usb%u device=%u "
+	kern_logf("usb-hid-checkpoint: detach generation=%u usb%u device=%u "
 		   "interface=%u submits=%u completions=%u cancel-error=%d "
 		   "drain-error=%d join-error=%d\n",
 		   checkpoint->generation, checkpoint_bus_number(checkpoint),
@@ -592,8 +594,8 @@ checkpoint_detach(
 	checkpoint_report_detach(checkpoint, cancel_error, 0, 0);
 	(void)drv_usb_interface_set_driver_data(interface, NULL);
 	drv_usb_urb_free(checkpoint->urb);
-	kernel_free(checkpoint->buffer);
-	kernel_free(checkpoint);
+	kern_free(checkpoint->buffer);
+	kern_free(checkpoint);
 
 	/* Succeeded. */
 	return 0;

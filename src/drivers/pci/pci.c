@@ -14,6 +14,8 @@
 
 #include <errno.h>
 #include <string.h>
+#include "kern/klog.h"
+#include "kern/kmem.h"
 
 #define PCI_COMMAND 0x04U
 #define PCI_STATUS 0x06U
@@ -198,7 +200,7 @@ drv_pci_bus_create_root(
 	}
 
 	/* Handles the bus availability. */
-	bus = kernel_alloc(sizeof(*bus));
+	bus = kern_malloc(sizeof(*bus));
 	if (bus == NULL)
 		return ENOMEM;
 	memset(bus, 0, sizeof(*bus));
@@ -231,7 +233,7 @@ drv_pci_bus_create_child(
 		return EINVAL;
 
 	/* Handles the bus availability. */
-	bus = kernel_alloc(sizeof(*bus));
+	bus = kern_malloc(sizeof(*bus));
 	if (bus == NULL)
 		return ENOMEM;
 	memset(bus, 0, sizeof(*bus));
@@ -264,7 +266,7 @@ drv_pci_bus_destroy(
 	/* Process each linked entry. */
 	for (device = bus->devices; device != NULL; device = next) {
 		next = device->next;
-		kernel_free(device);
+		kern_free(device);
 	}
 
 	/* Handles the parent availability. */
@@ -282,7 +284,7 @@ drv_pci_bus_destroy(
 	/* Handles the bridge availability. */
 	if (bus->bridge != NULL)
 		bus->bridge->subordinate = NULL;
-	kernel_free(bus);
+	kern_free(bus);
 
 	/* Succeeded. */
 	return 0;
@@ -329,7 +331,7 @@ drv_pci_bus_scan(
 			}
 
 			/* Handles the device availability. */
-			device = kernel_alloc(sizeof(*device));
+			device = kern_malloc(sizeof(*device));
 			if (device == NULL)
 				return ENOMEM;
 			memset(device, 0, sizeof(*device));
@@ -338,7 +340,7 @@ drv_pci_bus_scan(
 
 			/* Checks the read device result. */
 			if (read_device(device) != 0) {
-				kernel_free(device);
+				kern_free(device);
 				continue;
 			}
 
@@ -1525,7 +1527,7 @@ drv_pci_device_establish_irq(
 		return EINVAL;
 
 	/* Handles the cookie availability. */
-	cookie = kernel_alloc(sizeof(*cookie));
+	cookie = kern_malloc(sizeof(*cookie));
 	if (cookie == NULL)
 		return ENOMEM;
 	memset(cookie, 0, sizeof(*cookie));
@@ -1549,7 +1551,7 @@ drv_pci_device_establish_irq(
 
 	/* Checks the operation status. */
 	if (error != 0) {
-		kernel_free(cookie);
+		kern_free(cookie);
 
 		/* Failed. */
 		return error;
@@ -1688,7 +1690,7 @@ drv_pci_device_disestablish_irq_checked(
 		return EINVAL;
 	}
 
-	kernel_free(cookie);
+	kern_free(cookie);
 
 	/* Succeeded. */
 	return 0;
@@ -1949,7 +1951,7 @@ drv_pci_driver_register(
 	}
 
 	/* Handles the entry availability. */
-	entry = kernel_alloc(sizeof(*entry));
+	entry = kern_malloc(sizeof(*entry));
 	if (entry == NULL)
 		return ENOMEM;
 	entry->driver = driver;
@@ -2002,7 +2004,7 @@ drv_pci_driver_unregister(
 		/* Handles the e condition. */
 		if (e->driver == r) {
 			*p = e->next;
-			kernel_free(e);
+			kern_free(e);
 
 			/* Succeeded. */
 			return 0;
@@ -2093,7 +2095,7 @@ drv_pci_dump(
 	for (b = root_buses; b; b = b->next) {
 		/* Process each linked entry. */
 		for (d = b->devices; d; d = d->next) {
-			hal_printf("pci: %04x:%02x:%02x.%u %04x:%04x class "
+			kern_logf("pci: %04x:%02x:%02x.%u %04x:%04x class "
 				   "%06x%s%s\n",
 				   d->address.segment, d->address.bus,
 				   d->address.device, d->address.function,
@@ -2475,7 +2477,7 @@ establish_intx(
 	int hal_error;
 
 	/* Handles the candidate availability. */
-	candidate = kernel_alloc(sizeof(*candidate));
+	candidate = kern_malloc(sizeof(*candidate));
 	if (candidate == NULL)
 		return ENOMEM;
 	memset(candidate, 0, sizeof(*candidate));
@@ -2489,7 +2491,7 @@ establish_intx(
 		/* Handles the line condition. */
 		if (line->removing) {
 			intx_lock_leave(enabled);
-			kernel_free(candidate);
+			kern_free(candidate);
 
 			/* Failed. */
 			return EBUSY;
@@ -2503,7 +2505,7 @@ establish_intx(
 		cookie->irq = line->irq;
 		cookie->intx_line = line;
 		intx_lock_leave(enabled);
-		kernel_free(candidate);
+		kern_free(candidate);
 
 		/* Succeeded. */
 		return 0;
@@ -2530,7 +2532,7 @@ establish_intx(
 
 	/* Checks the operation status. */
 	if (hal_error != HAL_OK) {
-		kernel_free(candidate);
+		kern_free(candidate);
 
 		/* Returns the computed result. */
 		return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
@@ -2970,7 +2972,7 @@ disestablish_intx(
 		cookie->intx_line = NULL;
 		cookie->intx_next = NULL;
 		intx_lock_leave(enabled);
-		kernel_free(cookie);
+		kern_free(cookie);
 
 		/* Succeeded. */
 		return 0;
@@ -3011,8 +3013,8 @@ disestablish_intx(
 	line->handlers = NULL;
 	cookie->intx_line = NULL;
 	intx_lock_leave(enabled);
-	kernel_free(line);
-	kernel_free(cookie);
+	kern_free(line);
+	kern_free(cookie);
 
 	/* Succeeded. */
 	return 0;

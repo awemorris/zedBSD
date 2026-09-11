@@ -29,6 +29,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include "kern/klog.h"
 
 #define LOOP_SECTOR_SIZE 512U
 #define LOOP_MAX_TRANSFER_BLOCKS 128U
@@ -460,7 +461,7 @@ drv_loop_attach_path(
 		/* Checks the operation status. */
 		error = drv_loop_attach_file(file, flags, disk_out);
 		if (error != 0) {
-			hal_printf("loop: attach %s mode=%s file-flags=%x "
+			kern_logf("loop: attach %s mode=%s file-flags=%x "
 				   "size=%u failed (%d)\n",
 				   path, flags == LOOP_READ_WRITE ? "rw" : "ro",
 				   (unsigned)file_status_flags_get(file),
@@ -472,7 +473,7 @@ drv_loop_attach_path(
 
 		(void)file_close(file);
 	} else {
-		hal_printf("loop: open %s flags=%x failed (%d)\n", path,
+		kern_logf("loop: open %s flags=%x failed (%d)\n", path,
 			   (unsigned)open_flags, error);
 	}
 
@@ -868,7 +869,7 @@ loop_submit(
 	else if ((uint64_t)done != bytes64)
 		error = bio->b_op == BIO_WRITE ? ENOSPC : EIO;
 	if (error != 0) {
-		hal_printf(
+		kern_logf(
 			"loop%u: %s block=%u count=%u flags=%x error=%d\n",
 			loop->index, bio->b_op == BIO_READ ? "read" : "write",
 			(uint32_t)bio->b_mapped_block, bio->b_block_count,

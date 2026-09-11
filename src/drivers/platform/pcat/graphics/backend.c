@@ -18,6 +18,7 @@
 #include <hal/hal.h>
 #include <string.h>
 #include "bootloader/include/amd64-handoff.h"
+#include "kern/klog.h"
 
 #define WIDTH 640U
 #define HEIGHT 480U
@@ -109,7 +110,7 @@ drv_pcat_graphics_backend_enter(
 		mode->bits_per_pixel = 32U;
 		mode->stride = linear_framebuffer->stride * 4U;
 		(void)pcat_graphics_clear();
-		hal_printf("graphics: boot framebuffer %ux%ux32 stride=%u\n",
+		kern_logf("graphics: boot framebuffer %ux%ux32 stride=%u\n",
 			   mode->width, mode->height, mode->stride);
 
 
@@ -125,7 +126,7 @@ drv_pcat_graphics_backend_enter(
 		mode->bits_per_pixel = requested;
 		mode->stride =
 			requested == 24U ? CIRRUS_STRIDE24 : CIRRUS_STRIDE8;
-		hal_printf("graphics: PC/AT Cirrus %ux%ux%u stride=%u\n", WIDTH,
+		kern_logf("graphics: PC/AT Cirrus %ux%ux%u stride=%u\n", WIDTH,
 			   HEIGHT, requested, mode->stride);
 
 		/* Reports operation failure. */
@@ -140,7 +141,7 @@ drv_pcat_graphics_backend_enter(
 	mode->bits_per_pixel = 4;
 	mode->stride = WIDTH / 8U;
 	(void)pcat_graphics_clear();
-	hal_printf("graphics: PC/AT VGA fallback %ux%ux4 planar\n", WIDTH,
+	kern_logf("graphics: PC/AT VGA fallback %ux%ux4 planar\n", WIDTH,
 		   HEIGHT);
 
 	/* Reports operation failure. */
@@ -225,7 +226,7 @@ drv_pcat_graphics_backend_leave(
 	vga_text_mode();
 	active_backend = DISPLAY_NONE;
 	active_bpp = 0;
-	hal_printf("graphics: PC/AT text mode restored\n");
+	kern_logf("graphics: PC/AT text mode restored\n");
 }
 
 /*
@@ -1038,7 +1039,7 @@ pcat_graphics_prepare_hardware(
 
 		/*
 		 * Brings up the text grid and hands HAL output over to it.
-		 * From here on hal_printf() and /dev/console share one cursor.
+		 * From here on kern_logf() and /dev/console share one cursor.
 		 */
 		drv_pcat_text_init();
 		if (drv_pcat_text_ready()) {
@@ -1076,7 +1077,7 @@ pcat_graphics_prepare_hardware(
 
 	/* Handles the cirrus present condition. */
 	if (!cirrus_present)
-		hal_printf("graphics: PCI Cirrus absent; VGA fallback ready\n");
+		kern_logf("graphics: PCI Cirrus absent; VGA fallback ready\n");
 
 	/* Reports operation failure. */
 	return 1;
@@ -1096,14 +1097,14 @@ cirrus_attach(
 	cirrus_device = device;
 	cirrus_present = 1;
 	drv_pci_device_address(device, &address);
-	hal_printf("graphics: PCI Cirrus %04x:%04x at %u:%u.%u\n",
+	kern_logf("graphics: PCI Cirrus %04x:%04x at %u:%u.%u\n",
 		   drv_pci_device_vendor(device),
 		   drv_pci_device_product(device), address.bus, address.device,
 		   address.function);
 
 	/* Checks the drv pci device bar result. */
 	if (drv_pci_device_bar(device, 0, &bar) == 0) {
-		hal_printf("graphics: Cirrus BAR0=%08x size=%u KiB\n",
+		kern_logf("graphics: Cirrus BAR0=%08x size=%u KiB\n",
 			   (unsigned)bar.bus_address,
 			   (unsigned)(bar.size / 1024U));
 	}

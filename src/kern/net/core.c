@@ -34,6 +34,7 @@
 #include <hal/hal.h>
 #include <stdbool.h>
 #include <string.h>
+#include "kern/klog.h"
 
 #define NET_POLL_BUDGET 16U
 #define NET_WORK_BUDGET 32U
@@ -274,7 +275,7 @@ net_shutdown_for_boot(
 		if (error == 0)
 			break;
 		if (error != last_error)
-			hal_printf("net: shutdown barrier retry (%d)\n", error);
+			kern_logf("net: shutdown barrier retry (%d)\n", error);
 		last_error = error;
 		sched_yield();
 	}
@@ -285,7 +286,7 @@ net_shutdown_for_boot(
 		if (error == 0)
 			break;
 		if (error != last_error)
-			hal_printf("net: WLAN shutdown barrier retry (%d)\n", error);
+			kern_logf("net: WLAN shutdown barrier retry (%d)\n", error);
 		last_error = error;
 		sched_yield();
 	}

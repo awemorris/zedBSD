@@ -18,6 +18,7 @@
 #include <limits.h>
 #include <string.h>
 #include <kern/pmem.h>
+#include "kern/kmem.h"
 
 struct dma_allocation {
 	struct kern_pmem memory;
@@ -90,7 +91,7 @@ drv_dma_device_create(
 	}
 
 	/* Handles the device availability. */
-	device = kernel_alloc(sizeof(*device));
+	device = kern_malloc(sizeof(*device));
 	if (device == NULL)
 		return ENOMEM;
 	memset(device, 0, sizeof(*device));
@@ -128,7 +129,7 @@ drv_dma_device_destroy(
 
 	spin_unlock_irqrestore(&device->lock, irq);
 
-	kernel_free(device);
+	kern_free(device);
 
 	/* Succeeded. */
 	return 0;
@@ -234,7 +235,7 @@ drv_dma_alloc_coherent(
 	}
 
 	/* Handles the allocation availability. */
-	allocation = kernel_alloc(sizeof(*allocation));
+	allocation = kern_malloc(sizeof(*allocation));
 	if (allocation == NULL) {
 		device_operation_end(device);
 
@@ -279,7 +280,7 @@ drv_dma_alloc_coherent(
 		if (allocation->memory.size != 0 &&
 		    hal_pmem_free(&allocation->memory.paddr, allocation->memory.size) != HAL_OK)
 			__builtin_trap();
-		kernel_free(allocation);
+		kern_free(allocation);
 		device_operation_end(device);
 
 		/* Failed. */
@@ -296,7 +297,7 @@ drv_dma_alloc_coherent(
 			/* Checks the hal pmem free result. */
 			if (hal_pmem_free(&allocation->memory.paddr, allocation->memory.size) != HAL_OK)
 				__builtin_trap();
-			kernel_free(allocation);
+			kern_free(allocation);
 			device_operation_end(device);
 
 			/* Failed. */
@@ -316,7 +317,7 @@ drv_dma_alloc_coherent(
 		/* Handles the cache memory cancel availability. */
 		if (cache_memory_cancel != NULL)
 			cache_memory_cancel(CACHE_MEMORY_DMA, allocation_bytes);
-		kernel_free(allocation);
+		kern_free(allocation);
 		device_operation_end(device);
 
 		/* Failed. */
@@ -409,7 +410,7 @@ drv_dma_free_coherent(
 			return;
 		}
 
-		kernel_free(allocation);
+		kern_free(allocation);
 		memset(buffer, 0, sizeof(*buffer));
 	}
 
@@ -455,7 +456,7 @@ drv_dma_map(
 	}
 
 	/* Handles the mapping availability. */
-	mapping = kernel_alloc(sizeof(*mapping));
+	mapping = kern_malloc(sizeof(*mapping));
 	if (mapping == NULL) {
 		device_operation_end(device);
 
@@ -467,7 +468,7 @@ drv_dma_map(
 	irq = spin_lock_irqsave(&device->lock);
 	if (device->destroying) {
 		spin_unlock_irqrestore(&device->lock, irq);
-		kernel_free(mapping);
+		kern_free(mapping);
 		device_operation_end(device);
 
 		/* Failed. */
@@ -497,7 +498,7 @@ drv_dma_map(
 
 	spin_unlock_irqrestore(&device->lock, irq);
 
-	kernel_free(mapping);
+	kern_free(mapping);
 	device_operation_end(device);
 
 	/* Failed. */
@@ -516,7 +517,7 @@ drv_dma_unmap(
 
 	/* Handles the mapping availability. */
 	if (mapping != NULL)
-		kernel_free(mapping);
+		kern_free(mapping);
 }
 /*
  * Implements the drv dma mapping segment count operation.
@@ -602,7 +603,7 @@ drv_dma_vector_create(
 	}
 
 	/* Handles the vector availability. */
-	vector = kernel_alloc(sizeof(*vector));
+	vector = kern_malloc(sizeof(*vector));
 	if (vector == NULL) {
 		device_operation_end(device);
 
@@ -666,7 +667,7 @@ fail:
 	/* Checks the dma vector backing free result. */
 	if (dma_vector_backing_free(vector) != 0)
 		HAL_FATAL("DMA vector allocation rollback failed");
-	kernel_free(vector);
+	kern_free(vector);
 	device_operation_end(device);
 
 	/* Reports the failure. */
@@ -720,7 +721,7 @@ drv_dma_vector_free(
 
 	spin_unlock_irqrestore(&device->lock, irq);
 
-	kernel_free(vector);
+	kern_free(vector);
 	device_operation_end(device);
 
 	/* Succeeded. */

@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <hal/hal.h>
 #include <kern/lock.h>
+#include "kern/klog.h"
 
 #define ATA_DATA 0U
 #define ATA_ERROR 1U
@@ -128,7 +129,7 @@ drv_pcat_ide_init(
 			continue;
 		unit->present = 1;
 		order[present_count++] = unit;
-		hal_printf("ata: %s blocks=%u CHS=%u/%u/%u\n",
+		kern_logf("ata: %s blocks=%u CHS=%u/%u/%u\n",
 			   unit->disk->d_name, sectors, unit->cylinders,
 			   unit->heads, unit->sectors);
 	}
@@ -443,7 +444,7 @@ ata_submit(
 	else
 		error = EOPNOTSUPP;
 	if (error != 0) {
-		hal_printf(
+		kern_logf(
 			"ata: %s op=%u lba=%u count=%u error=%d status=%02X\n",
 			disk->d_name, (unsigned)bio->b_op,
 			(uint32_t)bio->b_mapped_block, bio->b_block_count,

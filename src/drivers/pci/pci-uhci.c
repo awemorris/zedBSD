@@ -18,6 +18,8 @@
 #include <kern/sched.h>
 #include <kern/thread.h>
 #include <string.h>
+#include "kern/klog.h"
+#include "kern/kmem.h"
 
 #define UHCI_USBCMD 0x00U
 #define UHCI_USBSTS 0x02U
@@ -364,7 +366,7 @@ uhci_root_worker_arm(
 	/* Checks the atomic exchange n result. */
 	if (!__atomic_exchange_n(&controller->root_evidence, 1U,
 				 __ATOMIC_ACQ_REL))
-		hal_printf("uhci: root hotplug worker active\n");
+		kern_logf("uhci: root hotplug worker active\n");
 #endif
 }
 
@@ -781,7 +783,7 @@ fail:
 	if (stop_error == 0)
 		uhci_schedule_release(controller);
 	else
-		hal_printf("uhci: start failed (%d), checked DMA stop failed "
+		kern_logf("uhci: start failed (%d), checked DMA stop failed "
 			   "(%d); schedule retained\n",
 			   error, stop_error);
 
@@ -847,7 +849,7 @@ uhci_hardware_stop(
 	/* Checks the operation status. */
 	irq_error = uhci_irq_disestablish(controller);
 	if (halt_error != 0 || bus_master_error != 0 || irq_error != 0) {
-		hal_printf("uhci: %s stop incomplete (halt=%d master=%d "
+		kern_logf("uhci: %s stop incomplete (halt=%d master=%d "
 			   "irq=%d); retaining controller ownership\n",
 			   context, halt_error, bus_master_error, irq_error);
 
@@ -918,7 +920,7 @@ uhci_irq_disestablish(
 
 		/* Checks the sched ticks result. */
 		if (sched_ticks() - started >= UHCI_IRQ_DRAIN_TICKS) {
-			hal_printf("uhci: IRQ removal timed out; retaining "
+			kern_logf("uhci: IRQ removal timed out; retaining "
 				   "controller resources\n");
 
 			/* Failed. */
@@ -930,7 +932,7 @@ uhci_irq_disestablish(
 
 	/* Checks the operation status. */
 	if (error != 0) {
-		hal_printf("uhci: checked IRQ removal failed (%d); retaining "
+		kern_logf("uhci: checked IRQ removal failed (%d); retaining "
 			   "controller resources\n",
 			   error);
 
@@ -968,7 +970,7 @@ uhci_stop(
 
 	/* Handles the releasable condition. */
 	if (!releasable) {
-		hal_printf("uhci: refusing to release DMA before checked "
+		kern_logf("uhci: refusing to release DMA before checked "
 			   "quiesce\n");
 
 		/* Returns the computed result. */
@@ -1020,7 +1022,7 @@ uhci_report_shutdown_evidence(
 
 	/* Handles the report condition. */
 	if (report)
-		hal_printf("uhci: checked shutdown workers joined\n");
+		kern_logf("uhci: checked shutdown workers joined\n");
 #endif
 
 	/* Succeeded. */
@@ -1440,7 +1442,7 @@ uhci_retirement_process_request(
 	/* Checks the atomic exchange n result. */
 	if (!__atomic_exchange_n(&controller->retirement_evidence, 1U,
 				 __ATOMIC_RELAXED))
-		hal_printf("uhci: checked frame retirement active\n");
+		kern_logf("uhci: checked frame retirement active\n");
 #endif
 
 	/* Checks the uhci request active locked result. */
@@ -1573,7 +1575,7 @@ uhci_retirement_fail(
 	/* Handles the report condition. */
 	if (report) {
 		uhci_root_worker_request_stop(controller);
-		hal_printf("uhci: frame retirement failed (%d); retaining "
+		kern_logf("uhci: frame retirement failed (%d); retaining "
 			   "QH/TD/bounce DMA\n",
 			   error);
 	}
@@ -1900,7 +1902,7 @@ uhci_request_free(
 	/* Handles the r condition. */
 	if (r->bounce.address)
 		drv_dma_free_coherent(c->hcd.dma, &r->bounce);
-	kernel_free(r);
+	kern_free(r);
 }
 
 /* Hands a request to the thread that retires them. */
@@ -2512,7 +2514,7 @@ uhci_build_request(
 			return error;
 	} else {
 		/* Handles the r availability. */
-		r = kernel_alloc(sizeof(*r));
+		r = kern_malloc(sizeof(*r));
 		if (r == NULL)
 			return ENOMEM;
 		memset(r, 0, sizeof(*r));
@@ -2545,7 +2547,7 @@ uhci_build_request(
 		error = drv_dma_alloc_coherent(c->hcd.dma, 4096U, 16U,
 					       &r->schedule);
 		if (error != 0) {
-			kernel_free(r);
+			kern_free(r);
 
 			/* Failed. */
 			return error;
@@ -3183,7 +3185,7 @@ uhci_qh_progress_watchdog(
 
 		/* Handles the report condition. */
 		if (report) {
-			hal_printf("uhci: QH advance observation failed (%d); "
+			kern_logf("uhci: QH advance observation failed (%d); "
 				   "controller quarantined with DMA retained\n",
 				   error);
 		}
@@ -3559,7 +3561,7 @@ uhci_irq(
 		out16(c->io_base + UHCI_USBCMD,
 		      in16(c->io_base + UHCI_USBCMD) & (uint16_t)~UHCI_CMD_RUN);
 		if (report_failure) {
-			hal_printf("uhci: fatal IRQ status %04x; controller "
+			kern_logf("uhci: fatal IRQ status %04x; controller "
 				   "quarantined\n",
 				   status);
 		}
@@ -3880,7 +3882,7 @@ uhci_root_ports_changed(
 		controller->root_stopping = 1;
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 		if (report_failure) {
-			hal_printf("uhci: root-port register unavailable; "
+			kern_logf("uhci: root-port register unavailable; "
 				   "controller quarantined\n");
 		}
 
@@ -4266,7 +4268,7 @@ uhci_attach(
 	(void)id;
 
 	/* Handles the controller availability. */
-	controller = kernel_alloc(sizeof(*controller));
+	controller = kern_malloc(sizeof(*controller));
 	if (controller == NULL)
 		return ENOMEM;
 	memset(controller, 0, sizeof(*controller));
@@ -4357,9 +4359,9 @@ uhci_attach(
 	out16(controller->io_base + UHCI_USBINTR, 0x000dU);
 	uhci_publish(controller);
 #ifdef ZEDBSD_TEST_CHECKPOINTS
-	hal_printf("uhci: concurrent per-endpoint scheduling active\n");
+	kern_logf("uhci: concurrent per-endpoint scheduling active\n");
 #endif
-	hal_printf("uhci: PCI controller at I/O %04x, ports=%u\n",
+	kern_logf("uhci: PCI controller at I/O %04x, ports=%u\n",
 		   controller->io_base, controller->hcd.root_port_count);
 
 	/* Succeeded. */
@@ -4372,7 +4374,7 @@ fail:
 	if (cleanup_error != 0) {
 		controller->quarantined = 1;
 		uhci_publish(controller);
-		hal_printf("uhci: attach failed at %s (%d), cleanup failed "
+		kern_logf("uhci: attach failed at %s (%d), cleanup failed "
 			   "(%d); controller quarantined\n",
 			   stage, error, cleanup_error);
 
@@ -4380,7 +4382,7 @@ fail:
 		return 0;
 	}
 
-	kernel_free(controller);
+	kern_free(controller);
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -4423,7 +4425,7 @@ uhci_detach(
 
 	uhci_unpublish(controller);
 	drv_pci_device_set_driver_data(device, NULL);
-	kernel_free(controller);
+	kern_free(controller);
 
 	/* Succeeded. */
 	return 0;

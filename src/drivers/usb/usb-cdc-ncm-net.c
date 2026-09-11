@@ -19,6 +19,8 @@
 #include <kern/sched.h>
 #include <limits.h>
 #include <string.h>
+#include "kern/klog.h"
+#include "kern/kmem.h"
 
 #define NCM_COMMUNICATION_CLASS 0x02U
 #define NCM_COMMUNICATION_SUBCLASS 0x0dU
@@ -1776,7 +1778,7 @@ static void
 ncm_release(
 	void *driver_data)
 {
-	kernel_free(driver_data);
+	kern_free(driver_data);
 }
 
 /* Marks the device as ready to carry traffic. */
@@ -1834,9 +1836,9 @@ static void
 ncm_buffers_free(
 	struct ncm_adapter *adapter)
 {
-	kernel_free(adapter->tx_buffer);
-	kernel_free(adapter->rx_buffer);
-	kernel_free(adapter->notification_buffer);
+	kern_free(adapter->tx_buffer);
+	kern_free(adapter->rx_buffer);
+	kern_free(adapter->notification_buffer);
 	adapter->tx_buffer = NULL;
 	adapter->rx_buffer = NULL;
 	adapter->notification_buffer = NULL;
@@ -1847,9 +1849,9 @@ static int
 ncm_buffers_alloc(
 	struct ncm_adapter *adapter)
 {
-	adapter->notification_buffer = kernel_alloc(NCM_NOTIFICATION_SIZE);
-	adapter->rx_buffer = kernel_alloc(adapter->profile.ntb_in_max_size);
-	adapter->tx_buffer = kernel_alloc(adapter->profile.ntb_out_max_size);
+	adapter->notification_buffer = kern_malloc(NCM_NOTIFICATION_SIZE);
+	adapter->rx_buffer = kern_malloc(adapter->profile.ntb_in_max_size);
+	adapter->tx_buffer = kern_malloc(adapter->profile.ntb_out_max_size);
 
 	/* Handles the notification buffer availability. */
 	if (adapter->notification_buffer != NULL &&
@@ -1933,7 +1935,7 @@ ncm_attach(
 		return ENODEV;
 
 	/* Handles the adapter availability. */
-	adapter = kernel_alloc(sizeof(*adapter));
+	adapter = kern_malloc(sizeof(*adapter));
 	if (adapter == NULL)
 		return ENOMEM;
 	memset(adapter, 0, sizeof(*adapter));
@@ -1956,7 +1958,7 @@ ncm_attach(
 	/* Checks the operation status. */
 	error = drv_usb_interface_set_driver_data(interface, adapter);
 	if (error != 0) {
-		kernel_free(adapter);
+		kern_free(adapter);
 
 		/* Failed. */
 		return error;
@@ -2031,7 +2033,7 @@ ncm_attach(
 	if (error != 0)
 		return error;
 	ncm_set_ready(adapter, 1);
-	hal_printf("usb-cdc-ncm: %s mac=%02x:%02x:%02x:%02x:%02x:%02x\n",
+	kern_logf("usb-cdc-ncm: %s mac=%02x:%02x:%02x:%02x:%02x:%02x\n",
 		   adapter->net_device->name, mac[0], mac[1], mac[2], mac[3],
 		   mac[4], mac[5]);
 
@@ -2084,7 +2086,7 @@ ncm_detach(
 	if (adapter->net_device != NULL)
 		net_device_destroy(adapter->net_device);
 	else
-		kernel_free(adapter);
+		kern_free(adapter);
 
 	/* Succeeded. */
 	return 0;

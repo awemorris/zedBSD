@@ -26,6 +26,8 @@
 #include <string.h>
 
 #include "../wifi/rtl8822b/rtl8822b-internal.h"
+#include "kern/klog.h"
+#include "kern/kmem.h"
 
 /*
  * The host fixture substitutes an immutable in-memory lease.  Production
@@ -708,7 +710,7 @@ static int rtl8822bu_attach(
 		return ENODEV;
 
 	/* Handles the adapter availability. */
-	adapter = kernel_alloc(sizeof(*adapter));
+	adapter = kern_malloc(sizeof(*adapter));
 	if (adapter == NULL)
 		return ENOMEM;
 	memset(adapter, 0, sizeof(*adapter));
@@ -726,7 +728,7 @@ static int rtl8822bu_attach(
 	error = mutex_init(&adapter->lifecycle_lock, LOCK_RANK_DEVICE,
 			   "usb-rtl8822bu lifecycle");
 	if (error != 0) {
-		kernel_free(adapter);
+		kern_free(adapter);
 
 		/* Failed. */
 		return error;
@@ -735,7 +737,7 @@ static int rtl8822bu_attach(
 	/* Checks the operation status. */
 	error = drv_usb_interface_set_driver_data(interface, adapter);
 	if (error != 0) {
-		kernel_free(adapter);
+		kern_free(adapter);
 
 		/* Failed. */
 		return error;
@@ -743,7 +745,7 @@ static int rtl8822bu_attach(
 
 	mutex_lock(&adapter->lifecycle_lock);
 
-	adapter->rx_buffer = kernel_alloc(RTL8822BU_RX_BUFFER_SIZE);
+	adapter->rx_buffer = kern_malloc(RTL8822BU_RX_BUFFER_SIZE);
 
 	/* Handles the rx buffer availability. */
 	if (adapter->rx_buffer == NULL) {
@@ -772,7 +774,7 @@ static int rtl8822bu_attach(
 
 	mutex_unlock(&adapter->lifecycle_lock);
 
-	hal_printf("usb-rtl8822bu: %s mac=%02x:%02x:%02x:%02x:%02x:%02x "
+	kern_logf("usb-rtl8822bu: %s mac=%02x:%02x:%02x:%02x:%02x:%02x "
 		   "cut=%u rfe=%u usb=%s bulk=%u country=%02x%02x plan=%02x "
 		   "rf-board=%02x "
 		   "pre-radio\n",
@@ -1776,7 +1778,7 @@ rtl8822bu_register_processing_delay(
 	 * Localizes failures without printing the transferred register value.
 	 */
 	if (error != 0 && rtl8822bu_log_error(adapter)) {
-		hal_printf("usb-rtl8822bu: processing-delay-error actual=%u "
+		kern_logf("usb-rtl8822bu: processing-delay-error actual=%u "
 			   "error=%d\n",
 			   (unsigned)actual, error);
 	}
@@ -1840,7 +1842,7 @@ rtl8822bu_register_transfer(
 	 * Identifies a failed control operation without exposing register data.
 	 */
 	if (error != 0 && rtl8822bu_log_error(adapter)) {
-		hal_printf("usb-rtl8822bu: control-error reg=%04x width=%u "
+		kern_logf("usb-rtl8822bu: control-error reg=%04x width=%u "
 			   "write=%u actual=%u error=%d\n",
 			   reg, (unsigned)width, (unsigned)write,
 			   (unsigned)actual, error);
@@ -2179,13 +2181,13 @@ rtl8822bu_board_read(
 	/* Handles the adapter availability. */
 	if (adapter == NULL || board == NULL)
 		return EINVAL;
-	physical = kernel_alloc(RTL8822B_EFUSE_PHYSICAL_SIZE);
+	physical = kern_malloc(RTL8822B_EFUSE_PHYSICAL_SIZE);
 
 	/* Handles the physical availability. */
-	logical = kernel_alloc(RTL8822B_EFUSE_LOGICAL_SIZE);
+	logical = kern_malloc(RTL8822B_EFUSE_LOGICAL_SIZE);
 	if (physical == NULL || logical == NULL) {
-		kernel_free(logical);
-		kernel_free(physical);
+		kern_free(logical);
+		kern_free(physical);
 
 		/* Failed. */
 		return ENOMEM;
@@ -2214,7 +2216,7 @@ rtl8822bu_board_read(
 	if (error == 0) {
 		/* Process each remaining element. */
 		for (path = 0U; path < board->chip.rf_path_count; path++) {
-			hal_printf("usb-rtl8822bu: efuse path=%u "
+			kern_logf("usb-rtl8822bu: efuse path=%u "
 				   "cck=%02x/%02x/%02x/%02x "
 				   "bw40=%02x/%02x/%02x/%02x ofdm-diff=%d "
 				   "w52=%02x/%02x ofdm-diff-5g=%d "
@@ -2240,8 +2242,8 @@ rtl8822bu_board_read(
 #endif
 	memset(logical, 0, RTL8822B_EFUSE_LOGICAL_SIZE);
 	memset(physical, 0, RTL8822B_EFUSE_PHYSICAL_SIZE);
-	kernel_free(logical);
-	kernel_free(physical);
+	kern_free(logical);
+	kern_free(physical);
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -2777,7 +2779,7 @@ rtl8822bu_firmware_download_model(
 	memset(&transfer, 0, sizeof(transfer));
 	transfer.adapter = adapter;
 	transfer.view = view;
-	transfer.wire_buffer = kernel_alloc(RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE +
+	transfer.wire_buffer = kern_malloc(RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE +
 					  RTL8822B_FIRMWARE_CHUNK_MAX + 1U);
 
 	/* Handles the wire buffer availability. */
@@ -2880,7 +2882,7 @@ out:
 	memset(transfer.wire_buffer, 0,
 	       RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE +
 		       RTL8822B_FIRMWARE_CHUNK_MAX + 1U);
-	kernel_free(transfer.wire_buffer);
+	kern_free(transfer.wire_buffer);
 	memset(&transfer, 0, sizeof(transfer));
 	memset(&saved, 0, sizeof(saved));
 
@@ -4249,7 +4251,7 @@ rtl8822bu_frame_transmit_private(
 	 * firmware answering nothing inside the bounded report window.
 	 */
 	if (tombstones_after != tombstones_before) {
-		hal_printf("usb-rtl8822bu: tx-report-missing expired=%u "
+		kern_logf("usb-rtl8822bu: tx-report-missing expired=%u "
 			   "total=%u recovery=%u\n",
 			   tombstones_after - tombstones_before,
 			   tombstones_after, recovery_after);
@@ -4261,7 +4263,7 @@ rtl8822bu_frame_transmit_private(
 	capacity = RTL8822B_DATA_TX_DESCRIPTOR_SIZE + length + 1U;
 
 	/* Handles the wire availability. */
-	wire = kernel_alloc(capacity);
+	wire = kern_malloc(capacity);
 	if (wire == NULL) {
 		error = ENOMEM;
 		goto out_release;
@@ -4312,7 +4314,7 @@ rtl8822bu_frame_transmit_private(
 	}
 
 	memset(wire, 0, capacity);
-	kernel_free(wire);
+	kern_free(wire);
 out_release:
 
 	/* Checks the operation status. */
@@ -4393,7 +4395,7 @@ rtl8822bu_frame_transmit(
 
 		/* Checks the operation status. */
 		if (error != 0) {
-			hal_printf(
+			kern_logf(
 				"usb-rtl8822bu: connect generation=%llu "
 				"stage=%s error=%d remaining=%llu\n",
 				(unsigned long long)request->generation, stage,
@@ -4406,7 +4408,7 @@ rtl8822bu_frame_transmit(
 
 #if RTL8822BU_TRACE
 		else {
-			hal_printf(
+			kern_logf(
 				"usb-rtl8822bu: connect generation=%llu "
 				"stage=%s error=0 cookie=%llu remaining=%llu\n",
 				(unsigned long long)request->generation, stage,
@@ -4673,7 +4675,7 @@ rtl8822bu_rx_report(
 			subtype = frame_control & 0x00fcU;
 			if (subtype == 0x00b0U || subtype == 0x0010U ||
 			    subtype == 0x00a0U || subtype == 0x00c0U) {
-				hal_printf("usb-rtl8822bu: rx-management "
+				kern_logf("usb-rtl8822bu: rx-management "
 					   "subtype=%02x length=%u rssi=%d "
 					   "rejected=%d\n",
 					   subtype >> 4,
@@ -4715,7 +4717,7 @@ rtl8822bu_rx_report(
 		 * frame from one the firmware dropped without airing.
 		 */
 		if (!key_installed) {
-			hal_printf("usb-rtl8822bu: tx-report generation=%llu "
+			kern_logf("usb-rtl8822bu: tx-report generation=%llu "
 				   "cookie=%llu acknowledged=%d error=%d "
 				   "status=%02x "
 				   "verdict=%d\n",
@@ -4786,7 +4788,7 @@ rtl8822bu_rx_report(
 #if RTL8822BU_TRACE
 		/* Handles the connect stage frame condition. */
 		if (connect_stage_frame) {
-			hal_printf("usb-rtl8822bu: rx-management subtype=%02x "
+			kern_logf("usb-rtl8822bu: rx-management subtype=%02x "
 				   "length=%u rssi=%d generation=%llu "
 				   "verdict=%d\n",
 				   subtype >> 4,
@@ -4843,7 +4845,7 @@ rtl8822bu_rx_report(
 	if (phy_sample) {
 		/* Handles the phy info availability. */
 		if (packet->phy_info != NULL && packet->phy_info_length >= 8U) {
-			hal_printf("usb-rtl8822bu: phy-sample rssi=%d "
+			kern_logf("usb-rtl8822bu: phy-sample rssi=%d "
 				   "bytes=%02x%02x%02x%02x%02x%02x%02x%02x\n",
 				   packet->rssi_dbm, packet->phy_info[0],
 				   packet->phy_info[1], packet->phy_info[2],
@@ -4851,7 +4853,7 @@ rtl8822bu_rx_report(
 				   packet->phy_info[5], packet->phy_info[6],
 				   packet->phy_info[7]);
 		} else {
-			hal_printf("usb-rtl8822bu: phy-sample rssi=%d "
+			kern_logf("usb-rtl8822bu: phy-sample rssi=%d "
 				   "length=%u\n",
 				   packet->rssi_dbm,
 				   (unsigned)packet->phy_info_length);
@@ -4952,7 +4954,7 @@ rtl8822bu_scan_channel_start(
 	error = drv_rtl8822b_radio_set_channel(&adapter->radio,
 					       (uint8_t)channel, deadline);
 	if (error != 0) {
-		hal_printf("usb-rtl8822bu: scan-channel-failed channel=%u "
+		kern_logf("usb-rtl8822bu: scan-channel-failed channel=%u "
 			   "step=%u error=%d now=%llu deadline=%llu radio=%u\n",
 			   channel, step_index, error,
 			   (unsigned long long)clock_ticks(),
@@ -5190,7 +5192,7 @@ rtl8822bu_connect_start(
 	/* Handles the started condition. */
 	started = clock_ticks();
 	if (started >= deadline) {
-		hal_printf("usb-rtl8822bu: connect generation=%llu "
+		kern_logf("usb-rtl8822bu: connect generation=%llu "
 			   "stage=admission "
 			   "error=%d now=%llu deadline=%llu\n",
 			   (unsigned long long)generation, ETIMEDOUT,
@@ -5300,7 +5302,7 @@ rtl8822bu_connect_start(
 			}
 
 			spin_unlock_irqrestore(&adapter->lock, enabled);
-			hal_printf(
+			kern_logf(
 				"usb-rtl8822bu: connect generation=%llu "
 				"stage=radio-serialization error=%d "
 				"elapsed=%llu\n",
@@ -5336,7 +5338,7 @@ rtl8822bu_connect_start(
 #if RTL8822BU_TRACE
 	/* Checks the operation status. */
 	if (error == 0) {
-		hal_printf("usb-rtl8822bu: connect generation=%llu prepared "
+		kern_logf("usb-rtl8822bu: connect generation=%llu prepared "
 			   "channel-ticks=%llu security-ticks=%llu "
 			   "remaining=%llu\n",
 			   (unsigned long long)generation,
@@ -5351,7 +5353,7 @@ rtl8822bu_connect_start(
 	/* Checks the operation status. */
 	if (error != 0 && error != EBUSY) {
 #endif
-		hal_printf("usb-rtl8822bu: connect generation=%llu stage=%s "
+		kern_logf("usb-rtl8822bu: connect generation=%llu stage=%s "
 			   "error=%d elapsed=%llu remaining=%llu\n",
 			   (unsigned long long)generation, stage, error,
 			   (unsigned long long)(stopped - started),
@@ -6961,7 +6963,7 @@ rtl8822bu_management_transmit(
 	}
 
 	/* Handles the wire availability. */
-	wire = kernel_alloc(RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + length + 1U);
+	wire = kern_malloc(RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + length + 1U);
 	if (wire == NULL) {
 		error = ENOMEM;
 		goto out_operation;
@@ -7010,7 +7012,7 @@ rtl8822bu_management_transmit(
 	}
 
 	memset(wire, 0, RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + length + 1U);
-	kernel_free(wire);
+	kern_free(wire);
 out_operation:
 
 	/* Checks the operation status. */
@@ -7610,7 +7612,7 @@ rtl8822bu_recovery_tx_snapshot(
 	    adapter->polls_active != 0U ||
 	    adapter->radio_operations_active != 0U) {
 		spin_unlock_irqrestore(&adapter->lock, enabled);
-		hal_printf("usb-rtl8822bu: recovery-tx skipped error=%d\n",
+		kern_logf("usb-rtl8822bu: recovery-tx skipped error=%d\n",
 			   EBUSY);
 
 		/* Returns the computed result. */
@@ -7687,7 +7689,7 @@ rtl8822bu_recovery_tx_snapshot(
 	 */
 	for (index = 0U; index < sizeof(registers) / sizeof(registers[0]);
 	     index++) {
-		hal_printf("usb-rtl8822bu: recovery-tx reg=%04x width=%u "
+		kern_logf("usb-rtl8822bu: recovery-tx reg=%04x width=%u "
 			   "value=%08x error=%d\n",
 			   (unsigned)registers[index], (unsigned)widths[index],
 			   (unsigned)values[index], errors[index]);
@@ -7758,11 +7760,11 @@ rtl8822bu_runtime_recover(
 
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 
-	hal_printf("usb-rtl8822bu: recovery-start error=%d channel=%u "
+	kern_logf("usb-rtl8822bu: recovery-start error=%d channel=%u "
 		   "rx-errors=%u control-errors=%u tx-tombstones=%u\n",
 		   reason, recovery_channel, recovery_rx_errors,
 		   recovery_control_errors, recovery_tx_tombstones);
-	hal_printf("usb-rtl8822bu: recovery-rx completions=%u c2h=%u "
+	kern_logf("usb-rtl8822bu: recovery-rx completions=%u c2h=%u "
 		   "frames=%u last-length=%u last-c2h=%02x\n",
 		   recovery_rx_completions, recovery_rx_c2h_packets,
 		   recovery_rx_frame_packets, recovery_rx_last_length,
@@ -7851,7 +7853,7 @@ rtl8822bu_runtime_recover(
 
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 
-	hal_printf("usb-rtl8822bu: recovery-finished error=%d\n", error);
+	kern_logf("usb-rtl8822bu: recovery-finished error=%d\n", error);
 
 	mutex_unlock(&adapter->lifecycle_lock);
 }
@@ -7880,7 +7882,7 @@ rtl8822bu_close_locked(
 	/* Checks the operation status. */
 	error = rtl8822bu_station_close_wait(station);
 	if (error != 0 && rtl8822bu_log_error(adapter)) {
-		hal_printf("usb-rtl8822bu: common close requires checked stop "
+		kern_logf("usb-rtl8822bu: common close requires checked stop "
 			   "(%d)\n",
 			   error);
 	}
@@ -7963,7 +7965,7 @@ rtl8822bu_close(
 	error = rtl8822bu_close_locked(adapter);
 	wlan_station_stop_complete(adapter->station, error);
 	if (error != 0 && rtl8822bu_log_error(adapter)) {
-		hal_printf("usb-rtl8822bu: checked close pending (%d)\n",
+		kern_logf("usb-rtl8822bu: checked close pending (%d)\n",
 			   error);
 	}
 
@@ -8255,7 +8257,7 @@ rtl8822bu_ioctl(
 			if (adapter->tx_reports[index].active)
 				reports++;
 		spin_unlock_irqrestore(&adapter->lock, enabled);
-		hal_printf("usb-rtl8822bu: disconnect-ioctl-error error=%d "
+		kern_logf("usb-rtl8822bu: disconnect-ioctl-error error=%d "
 			   "radio-ops=%u tx-reports=%u tx-quiescing=%u\n",
 			   error, operations, reports, quiescing);
 	}
@@ -8278,7 +8280,7 @@ rtl8822bu_release(
 	if (adapter == NULL)
 		return;
 	memset(adapter, 0, sizeof(*adapter));
-	kernel_free(adapter);
+	kern_free(adapter);
 }
 
 static void
@@ -8294,7 +8296,7 @@ rtl8822bu_usb_resources_free(
 	/* Handles the rx buffer availability. */
 	if (adapter->rx_buffer != NULL) {
 		memset(adapter->rx_buffer, 0, RTL8822BU_RX_BUFFER_SIZE);
-		kernel_free(adapter->rx_buffer);
+		kern_free(adapter->rx_buffer);
 		adapter->rx_buffer = NULL;
 	}
 }

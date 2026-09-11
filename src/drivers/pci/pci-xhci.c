@@ -26,6 +26,8 @@
 #include <errno.h>
 #include <limits.h>
 #include <string.h>
+#include "kern/klog.h"
+#include "kern/kmem.h"
 
 #define XHCI_USBCMD 0x00U
 
@@ -508,7 +510,7 @@ xhci_pci_identity(
 	bridge = bus != NULL ? drv_pci_bus_bridge(bus) : NULL;
 	if (bridge != NULL) {
 		drv_pci_device_address(bridge, &bridge_address);
-		hal_printf("xhci: pci %04x:%02x:%02x.%u id=%04x:%04x "
+		kern_logf("xhci: pci %04x:%02x:%02x.%u id=%04x:%04x "
 			   "sub=%04x:%04x rev=%02x parent=%04x:%02x:%02x.%u\n",
 			   address.segment, address.bus, address.device,
 			   address.function, drv_pci_device_vendor(device),
@@ -519,7 +521,7 @@ xhci_pci_identity(
 			   bridge_address.segment, bridge_address.bus,
 			   bridge_address.device, bridge_address.function);
 	} else {
-		hal_printf("xhci: pci %04x:%02x:%02x.%u id=%04x:%04x "
+		kern_logf("xhci: pci %04x:%02x:%02x.%u id=%04x:%04x "
 			   "sub=%04x:%04x rev=%02x parent=root\n",
 			   address.segment, address.bus, address.device,
 			   address.function, drv_pci_device_vendor(device),
@@ -650,7 +652,7 @@ xhci_pci_release(
 	if (controller->pci_state_saved || controller->bar_mapped)
 		master_error = xhci_bus_master_disable(controller);
 	if (master_error != 0) {
-		hal_printf("xhci: PCI bus-master disable failed (%d)\n",
+		kern_logf("xhci: PCI bus-master disable failed (%d)\n",
 			   master_error);
 
 		/* Returns the computed result. */
@@ -668,12 +670,12 @@ xhci_pci_release(
 	/* Checks the operation status. */
 	bar_error = xhci_restore_bar(controller);
 	if (bar_error != 0) {
-		hal_printf("xhci: BAR0 restore failed (%d)\n", bar_error);
+		kern_logf("xhci: BAR0 restore failed (%d)\n", bar_error);
 
 		/* Checks the operation status. */
 		quiesce_error = xhci_pci_quiesce(controller);
 		if (quiesce_error != 0) {
-			hal_printf("xhci: PCI quiesce after BAR failure failed "
+			kern_logf("xhci: PCI quiesce after BAR failure failed "
 				   "(%d)\n",
 				   quiesce_error);
 		}
@@ -688,13 +690,13 @@ xhci_pci_release(
 		error = drv_pci_device_restore_enable_state(
 			controller->pci, &controller->pci_enable_state);
 		if (error != 0) {
-			hal_printf("xhci: PCI command restore failed (%d)\n",
+			kern_logf("xhci: PCI command restore failed (%d)\n",
 				   error);
 
 			/* Checks the operation status. */
 			quiesce_error = xhci_pci_quiesce(controller);
 			if (quiesce_error != 0) {
-				hal_printf("xhci: PCI command failure quiesce "
+				kern_logf("xhci: PCI command failure quiesce "
 					   "failed (%d)\n",
 					   quiesce_error);
 			}
@@ -742,7 +744,7 @@ xhci_quarantine(
 		controllers = controller;
 	}
 
-	hal_printf("xhci: attach quarantined at %s (%d); controller ownership "
+	kern_logf("xhci: attach quarantined at %s (%d); controller ownership "
 		   "retained\n",
 		   stage, error);
 }
@@ -1005,7 +1007,7 @@ command_ex(
 		/* Checks the drv xhci command completion matches result. */
 		if (!drv_xhci_command_completion_matches(
 			    command_address, xhci_event_pointer(&event))) {
-			hal_printf("xhci: ignored command completion for "
+			kern_logf("xhci: ignored command completion for "
 				   "%x:%x, expected %x:%x\n",
 				   event.parameter_high, event.parameter_low,
 				   (uint32_t)(command_address >> 32),
@@ -1023,7 +1025,7 @@ command_ex(
 		/* Checks the operation result. */
 		result = ((event.status >> 24) & 0xffU) == 1U ? 0 : EIO;
 		if (result) {
-			hal_printf("xhci: command %u failed, completion=%u\n",
+			kern_logf("xhci: command %u failed, completion=%u\n",
 				   (control >> 10) & 0x3fU,
 				   (event.status >> 24) & 0xffU);
 		}
@@ -1055,7 +1057,7 @@ command_ex(
 
 	/* Checks the operation result. */
 	if (result == ETIMEDOUT) {
-		hal_printf("xhci: command %u timed out\n",
+		kern_logf("xhci: command %u timed out\n",
 			   (control >> 10) & 0x3fU);
 	}
 
@@ -1410,7 +1412,7 @@ xhci_device_release(
 
 	/* Handles the d availability. */
 	if (d == NULL || !d->slot_disabled) {
-		hal_printf(
+		kern_logf(
 			"xhci: refusing device release before Disable Slot\n");
 
 		/* Returns the computed result. */
@@ -1424,7 +1426,7 @@ xhci_device_release(
 	if (xhci_device_request_busy_locked(d) ||
 	    xhci_device_recovery_busy_locked(d) || d->completions_busy != 0) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
-		hal_printf("xhci: slot %u release crossed an active ownership "
+		kern_logf("xhci: slot %u release crossed an active ownership "
 			   "boundary\n",
 			   d->slot);
 		__builtin_trap();
@@ -1463,7 +1465,7 @@ xhci_device_release(
 	/* Handles the address availability. */
 	if (d->output_context.address != NULL)
 		drv_dma_free_coherent(h->dma, &d->output_context);
-	kernel_free(d);
+	kern_free(d);
 }
 
 /* Takes a slot for a newly attached device. */
@@ -1491,7 +1493,7 @@ xhci_device_enable(
 		return EBUSY;
 
 	/* Checks the current descriptor. */
-	d = kernel_alloc(sizeof(*d));
+	d = kern_malloc(sizeof(*d));
 	if (!d)
 		return ENOMEM;
 	memset(d, 0, sizeof(*d));
@@ -1499,7 +1501,7 @@ xhci_device_enable(
 
 	/* Checks the drv usb device port result. */
 	if (drv_usb_device_port(u) == 0 || drv_usb_device_port(u) > c->ports) {
-		kernel_free(d);
+		kern_free(d);
 
 		/* Failed. */
 		return EINVAL;
@@ -1510,7 +1512,7 @@ xhci_device_enable(
 
 	/* Handles the portsc condition. */
 	if (portsc == UINT32_MAX || d->speed_id == 0) {
-		kernel_free(d);
+		kern_free(d);
 
 		/* Failed. */
 		return EIO;
@@ -1518,7 +1520,7 @@ xhci_device_enable(
 
 	/* Checks the command result. */
 	if ((e = command(c, 0, 0, XHCI_TRB_TYPE(9), &slot)) != 0 || slot == 0) {
-		kernel_free(d);
+		kern_free(d);
 
 		/* Returns the computed result. */
 		return e ? e : EIO;
@@ -1606,7 +1608,7 @@ fail:
 		d->slot_disabled = 1;
 		xhci_device_release(h, d);
 	} else {
-		hal_printf("xhci: slot %u enable rollback failed (%d, "
+		kern_logf("xhci: slot %u enable rollback failed (%d, "
 			   "completion=%u); contexts retained\n",
 			   slot, disable_error, completion);
 	}
@@ -1707,7 +1709,7 @@ xhci_device_disable(
 
 	/* Checks the current descriptor. */
 	if (!d->slot_disabled) {
-		hal_printf("xhci: slot %u release requested before checked "
+		kern_logf("xhci: slot %u release requested before checked "
 			   "teardown; retaining contexts\n",
 			   d->slot);
 
@@ -2156,7 +2158,7 @@ xhci_completion_finish(
 	     request->completion_code != 13U)) {
 		/* Handles the control request availability. */
 		if (control_request != NULL) {
-			hal_printf(
+			kern_logf(
 				"xhci: control port=%u slot=%u request=%02x "
 				"type=%02x value=%04x index=%04x stage=%u "
 				"completion=%u residual=%u length=%u "
@@ -2171,7 +2173,7 @@ xhci_completion_finish(
 				(unsigned)request->length,
 				xhci_endpoint_state(c, device, request->dci));
 		} else {
-			hal_printf("xhci: transfer completion=%u residual=%u "
+			kern_logf("xhci: transfer completion=%u residual=%u "
 				   "length=%u slot=%u endpoint=%u port=%u "
 				   "direction=%s\n",
 				   request->completion_code,
@@ -2331,7 +2333,7 @@ xhci_irq(
 				c->command_event = event;
 				c->command_event_ready = 1;
 			} else {
-				hal_printf("xhci: unmatched command completion "
+				kern_logf("xhci: unmatched command completion "
 					   "%x:%x\n",
 					   event.parameter_high,
 					   event.parameter_low);
@@ -2671,7 +2673,7 @@ xhci_endpoint_recover(
 			break;
 	}
 
-	hal_printf("xhci: slot %u endpoint %u recovery failed (%d, "
+	kern_logf("xhci: slot %u endpoint %u recovery failed (%d, "
 		   "completion=%u, state=%u); new TD rejected\n",
 		   d->slot, dci, error, completion, state);
 
@@ -2874,7 +2876,7 @@ xhci_request_alloc(
 	}
 
 	/* Handles the request availability. */
-	request = kernel_alloc(sizeof(*request));
+	request = kern_malloc(sizeof(*request));
 	if (request == NULL) {
 		*error = ENOMEM;
 		/* Reports that no result is available. */
@@ -2888,7 +2890,7 @@ xhci_request_alloc(
 	allocation_error = drv_dma_alloc_coherent(
 		h->dma, length != 0 ? length : 8U, 64U, &request->bounce);
 	if (allocation_error != 0) {
-		kernel_free(request);
+		kern_free(request);
 		*error = allocation_error;
 		/* Reports that no result is available. */
 		return NULL;
@@ -2942,7 +2944,7 @@ xhci_request_release(
 	/* Handles the request condition. */
 	if (!request->reserved) {
 		drv_dma_free_coherent(c->hcd.dma, &request->bounce);
-		kernel_free(request);
+		kern_free(request);
 
 		/* Returns the computed result. */
 		return;
@@ -3074,7 +3076,7 @@ xhci_urb_reserve(
 		return error;
 
 	/* Handles the reservation availability. */
-	reservation = kernel_alloc(sizeof(*reservation));
+	reservation = kern_malloc(sizeof(*reservation));
 	if (reservation == NULL) {
 		xhci_operation_leave(controller);
 
@@ -3102,7 +3104,7 @@ xhci_urb_reserve(
 
 		/* Checks the operation status. */
 		if (error != EOPNOTSUPP) {
-			kernel_free(reservation);
+			kern_free(reservation);
 			xhci_operation_leave(controller);
 
 			/* Failed. */
@@ -3123,7 +3125,7 @@ xhci_urb_reserve(
 	error = drv_dma_alloc_coherent(hcd->dma, capacity, alignment,
 				       &reservation->backing);
 	if (error != 0) {
-		kernel_free(reservation);
+		kern_free(reservation);
 		xhci_operation_leave(controller);
 
 		/* Failed. */
@@ -3189,7 +3191,7 @@ xhci_urb_unreserve(
 		drv_dma_free_coherent(hcd->dma, &reservation->backing);
 	}
 
-	kernel_free(reservation);
+	kern_free(reservation);
 }
 
 /* Leaves the submission gate. */
@@ -3660,7 +3662,7 @@ retain:
 
 	spin_unlock_irqrestore(&c->active_lock, irq);
 
-	hal_printf("xhci: slot %u endpoint %u port %u cancel failed (%d, "
+	kern_logf("xhci: slot %u endpoint %u port %u cancel failed (%d, "
 		   "completion=%u, state=%u); request and DMA retained\n",
 		   r->slot, r->dci, r->port, error, completion,
 		   (unsigned)state);
@@ -3812,7 +3814,7 @@ xhci_endpoint_quiesce(
 			break;
 	}
 
-	hal_printf("xhci: slot %u endpoint %u teardown quiesce failed (%d, "
+	kern_logf("xhci: slot %u endpoint %u teardown quiesce failed (%d, "
 		   "completion=%u, state=%u); slot retained\n",
 		   d->slot, dci, error, completion, state);
 
@@ -3869,7 +3871,7 @@ xhci_device_quiesce(
 
 		/* Checks the sched ticks result. */
 		if (sched_ticks() - wait_started >= 100U) {
-			hal_printf("xhci: slot %u teardown completion barrier "
+			kern_logf("xhci: slot %u teardown completion barrier "
 				   "timed out; ownership retained\n",
 				   d->slot);
 
@@ -3977,7 +3979,7 @@ xhci_device_quiesce(
 
 		/* Checks the sched ticks result. */
 		if (sched_ticks() - wait_started >= 100U) {
-			hal_printf("xhci: slot %u teardown timed out (URBs=%u "
+			kern_logf("xhci: slot %u teardown timed out (URBs=%u "
 				   "completion=%u endpoint=%u); ownership "
 				   "retained\n",
 				   d->slot, owned, completion, wait_for_cancel);
@@ -4014,7 +4016,7 @@ xhci_device_quiesce(
 	error = command_ex(c, 0, 0, XHCI_TRB_TYPE(10) | XHCI_TRB_SLOT(d->slot),
 			   NULL, &completion);
 	if (error != 0) {
-		hal_printf("xhci: slot %u Disable Slot failed (%d, "
+		kern_logf("xhci: slot %u Disable Slot failed (%d, "
 			   "completion=%u); rings and contexts retained\n",
 			   d->slot, error, completion);
 
@@ -4320,7 +4322,7 @@ xhci_root_port_reset(
 				/* Failed. */
 				return ENODEV;
 			}
-			hal_printf("xhci: port %u reset complete portsc=%08x\n",
+			kern_logf("xhci: port %u reset complete portsc=%08x\n",
 				   port, portsc);
 
 			/* Succeeded. */
@@ -4341,7 +4343,7 @@ xhci_root_port_reset(
 		sched_yield();
 	}
 
-	hal_printf("xhci: port %u reset timed out portsc=%08x\n", port, portsc);
+	kern_logf("xhci: port %u reset timed out portsc=%08x\n", port, portsc);
 
 	/* Failed. */
 	return ETIMEDOUT;
@@ -4365,7 +4367,7 @@ xhci_scratchpads_free(
 			}
 		}
 
-		kernel_free(c->scratchpads);
+		kern_free(c->scratchpads);
 		c->scratchpads = NULL;
 	}
 
@@ -4387,7 +4389,7 @@ xhci_scratchpads_alloc(
 	if (!c->scratchpad_count)
 		return 0;
 	c->scratchpads =
-		kernel_alloc(sizeof(*c->scratchpads) * c->scratchpad_count);
+		kern_malloc(sizeof(*c->scratchpads) * c->scratchpad_count);
 
 	/* Classifies the current input character. */
 	if (!c->scratchpads)
@@ -4540,7 +4542,7 @@ xhci_submission_quiesce(
 
 		/* Checks the sched ticks result. */
 		if (sched_ticks() - started >= 100U) {
-			hal_printf("xhci: controller operation barrier timed "
+			kern_logf("xhci: controller operation barrier timed "
 				   "out (operations=%u submit=%u recovery=%u "
 				   "completion=%u command=%u active=%u); "
 				   "retaining all DMA\n",
@@ -4566,7 +4568,7 @@ xhci_irq_quiesce(
 	while (atomic_raw_load_acquire(&c->irq_busy) != 0) {
 		/* Checks the sched ticks result. */
 		if (sched_ticks() - started >= 100U) {
-			hal_printf("xhci: IRQ completion barrier timed out; "
+			kern_logf("xhci: IRQ completion barrier timed out; "
 				   "retaining all DMA\n");
 
 			/* Failed. */
@@ -4613,7 +4615,7 @@ xhci_irq_disestablish(
 
 		/* Checks the sched ticks result. */
 		if (sched_ticks() - started >= 100U) {
-			hal_printf("xhci: IRQ removal barrier timed out; "
+			kern_logf("xhci: IRQ removal barrier timed out; "
 				   "retaining all DMA\n");
 
 			/* Failed. */
@@ -4625,7 +4627,7 @@ xhci_irq_disestablish(
 
 	/* Checks the operation status. */
 	if (error != 0) {
-		hal_printf("xhci: checked IRQ disestablish failed (%d); "
+		kern_logf("xhci: checked IRQ disestablish failed (%d); "
 			   "retaining all DMA\n",
 			   error);
 
@@ -4670,7 +4672,7 @@ xhci_quiesce(
 	/* Checks the operation status. */
 	master_error = xhci_bus_master_disable(c);
 	if (halt_error != 0) {
-		hal_printf("xhci: stop did not reach HCHalted (halt=%d "
+		kern_logf("xhci: stop did not reach HCHalted (halt=%d "
 			   "master=%d); retaining DMA/IRQ state\n",
 			   halt_error, master_error);
 
@@ -4680,7 +4682,7 @@ xhci_quiesce(
 
 	/* Checks the operation status. */
 	if (master_error != 0) {
-		hal_printf("xhci: bus-master disable failed; retaining DMA/IRQ "
+		kern_logf("xhci: bus-master disable failed; retaining DMA/IRQ "
 			   "state\n");
 
 		/* Returns the computed result. */
@@ -4716,7 +4718,7 @@ xhci_release_resources(
 
 	/* Classifies the current input character. */
 	if (!c->dma_quiesced) {
-		hal_printf("xhci: refusing to release DMA before HCHalted\n");
+		kern_logf("xhci: refusing to release DMA before HCHalted\n");
 
 		/* Failed. */
 		return EBUSY;
@@ -4744,7 +4746,7 @@ xhci_release_resources(
 
 	/* Handles the resources safe condition. */
 	if (!resources_safe) {
-		hal_printf("xhci: controller resources are still owned; "
+		kern_logf("xhci: controller resources are still owned; "
 			   "retaining all DMA\n");
 
 		/* Failed. */
@@ -5230,7 +5232,7 @@ xhci_attach(
 	(void)id;
 
 	/* Classifies the current input character. */
-	c = kernel_alloc(sizeof(*c));
+	c = kern_malloc(sizeof(*c));
 	if (!c)
 		return ENOMEM;
 	memset(c, 0, sizeof(*c));
@@ -5289,7 +5291,7 @@ xhci_attach(
 	}
 
 	xhci_bar_raw(d, mapped_bar.type, &mapped_low, &mapped_high);
-	hal_printf("xhci: pci %04x:%02x:%02x.%u BAR0 type=%u size=%08x:%08x "
+	kern_logf("xhci: pci %04x:%02x:%02x.%u BAR0 type=%u size=%08x:%08x "
 		   "original=%08x:%08x/%08x:%08x final=%08x:%08x/%08x:%08x "
 		   "mapped=%u\n",
 		   address.segment, address.bus, address.device,
@@ -5331,7 +5333,7 @@ xhci_attach(
 	    (e = drv_pci_device_config_read16(d, XHCI_PCI_COMMAND,
 					      &command_after)) != 0)
 		goto fail;
-	hal_printf("xhci: pci %04x:%02x:%02x.%u command=%04x->%04x (MEM on, "
+	kern_logf("xhci: pci %04x:%02x:%02x.%u command=%04x->%04x (MEM on, "
 		   "MASTER off)\n",
 		   address.segment, address.bus, address.device,
 		   address.function, command_before, command_after);
@@ -5362,7 +5364,7 @@ xhci_attach(
 	}
 
 	reasons = drv_xhci_capability_validate(&snapshot);
-	hal_printf("xhci: pci %04x:%02x:%02x.%u caps len=%02x version=%04x "
+	kern_logf("xhci: pci %04x:%02x:%02x.%u caps len=%02x version=%04x "
 		   "hcs1=%08x hcs2=%08x hcc1=%08x dboff=%08x rtsoff=%08x "
 		   "reject=%08x:%s\n",
 		   address.segment, address.bus, address.device,
@@ -5456,7 +5458,7 @@ xhci_attach(
 	irq_type = c->irq.type == DRV_PCI_IRQ_MSI    ? "MSI"
 		   : c->irq.type == DRV_PCI_IRQ_MSIX ? "MSI-X"
 						     : "INTx";
-	hal_printf("xhci: PCI controller, version=%x ports=%u slots=%u irq=%u "
+	kern_logf("xhci: PCI controller, version=%x ports=%u slots=%u irq=%u "
 		   "%s\n",
 		   snapshot.version, c->ports, c->max_slots, c->irq.vector,
 		   irq_type);
@@ -5494,15 +5496,15 @@ fail:
 	/* Checks the operation status. */
 	cleanup_error = xhci_pci_release(c);
 	if (cleanup_error != 0) {
-		hal_printf("xhci: attach failed at %s (%d)\n", stage, e);
+		kern_logf("xhci: attach failed at %s (%d)\n", stage, e);
 		xhci_quarantine(c, "PCI release", cleanup_error);
 
 		/* Succeeded. */
 		return 0;
 	}
 
-	hal_printf("xhci: attach failed at %s (%d)\n", stage, e);
-	kernel_free(c);
+	kern_logf("xhci: attach failed at %s (%d)\n", stage, e);
+	kern_free(c);
 
 	/* Returns the computed result. */
 	return e;
@@ -5600,7 +5602,7 @@ xhci_detach(
 		}
 	}
 
-	kernel_free(c);
+	kern_free(c);
 
 	/* Succeeded. */
 	return 0;

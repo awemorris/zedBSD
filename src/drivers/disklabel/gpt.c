@@ -16,6 +16,7 @@
 #include <kern/kmem.h>
 #include <stdint.h>
 #include <string.h>
+#include "kern/klog.h"
 
 #define GPT_HEADER_MIN_SIZE 92U
 #define GPT_ENTRY_MIN_SIZE 128U
@@ -1004,7 +1005,7 @@ recover_backup_candidates(
 		if (!copy_headers_equal(&copies[0U], &copies[1U])) {
 			decimal_u64(pmbr_text_local, candidate_lbas[0U]);
 			decimal_u64(physical_text_local, candidate_lbas[1U]);
-			hal_printf("gpt: %s rejected: contradictory backup "
+			kern_logf("gpt: %s rejected: contradictory backup "
 				   "candidates pmbr-lba=%s physical-lba=%s\n",
 				   disk->d_name, pmbr_text_local,
 				   physical_text_local);
@@ -1022,7 +1023,7 @@ recover_backup_candidates(
 		if (equal == 0) {
 			decimal_u64(pmbr_text_local1, candidate_lbas[0U]);
 			decimal_u64(physical_text_local2, candidate_lbas[1U]);
-			hal_printf("gpt: %s rejected: contradictory backup "
+			kern_logf("gpt: %s rejected: contradictory backup "
 				   "entry arrays pmbr-lba=%s physical-lba=%s\n",
 				   disk->d_name, pmbr_text_local1,
 				   physical_text_local2);
@@ -1040,13 +1041,13 @@ recover_backup_candidates(
 	} else {
 		/* Handles the candidate count condition. */
 		if (candidate_count == 2U) {
-			hal_printf(
+			kern_logf(
 				"gpt: %s rejected: primary=%d pmbr-backup=%d "
 				"physical-backup=%d\n",
 				disk->d_name, -primary_error,
 				-candidate_errors[0U], -candidate_errors[1U]);
 		} else {
-			hal_printf("gpt: %s rejected: primary=%d backup=%d\n",
+			kern_logf("gpt: %s rejected: primary=%d backup=%d\n",
 				   disk->d_name, -primary_error,
 				   -candidate_errors[0U]);
 		}
@@ -1065,7 +1066,7 @@ recover_backup_candidates(
 
 	/* Reports that the table came from the backup copy. */
 	decimal_u64(lba_text, candidate_lbas[chosen]);
-	hal_printf("gpt: %s primary damaged (%d), using backup at LBA %s "
+	kern_logf("gpt: %s primary damaged (%d), using backup at LBA %s "
 		   "read-only\n",
 		   disk->d_name, -primary_error, lba_text);
 	error = 0;
@@ -1167,7 +1168,7 @@ gpt_scan(
 	/* Checks the operation status. */
 	error = canonical_protective_mbr(disk, block, &protective_blocks);
 	if (error != 0) {
-		hal_printf("gpt: %s rejected: invalid protective MBR (%d)\n",
+		kern_logf("gpt: %s rejected: invalid protective MBR (%d)\n",
 			   disk->d_name, -error);
 		goto out;
 	}
@@ -1241,7 +1242,7 @@ gpt_scan(
 	if (primary_error == 0 && backup_error == 0) {
 		/* Checks the copy headers equal result. */
 		if (!copy_headers_equal(&primary, &backup)) {
-			hal_printf("gpt: %s rejected: contradictory headers\n",
+			kern_logf("gpt: %s rejected: contradictory headers\n",
 				   disk->d_name);
 			error = -EINVAL;
 			goto out;
@@ -1256,7 +1257,7 @@ gpt_scan(
 
 		/* Handles the equal condition. */
 		if (equal == 0) {
-			hal_printf("gpt: %s rejected: contradictory entry "
+			kern_logf("gpt: %s rejected: contradictory entry "
 				   "arrays\n",
 				   disk->d_name);
 			error = -EINVAL;
@@ -1268,12 +1269,12 @@ gpt_scan(
 	} else if (primary_error == 0) {
 		/* Handles the primary only condition. */
 		if (primary_only != 0) {
-			hal_printf(
+			kern_logf(
 				"gpt: %s intentional primary-only GPT accepted "
 				"read-only\n",
 				disk->d_name);
 		} else {
-			hal_printf("gpt: %s backup damaged (%d), using primary "
+			kern_logf("gpt: %s backup damaged (%d), using primary "
 				   "read-only\n",
 				   disk->d_name, -backup_error);
 		}
@@ -1281,7 +1282,7 @@ gpt_scan(
 		selected = &primary;
 		selected_entries = primary_entries;
 	} else {
-		hal_printf("gpt: %s primary damaged (%d), using backup "
+		kern_logf("gpt: %s primary damaged (%d), using backup "
 			   "read-only\n",
 			   disk->d_name, -primary_error);
 		selected = &backup;
@@ -1305,7 +1306,7 @@ selected_copy:
 	if (protective_mismatch) {
 		decimal_u64(advertised_last_text, protective_blocks);
 		decimal_u64(gpt_last_text, logical_last);
-		hal_printf("gpt: %s protective MBR extent mismatch: "
+		kern_logf("gpt: %s protective MBR extent mismatch: "
 			   "advertised-last=%s gpt-last=%s; using GPT\n",
 			   disk->d_name, advertised_last_text, gpt_last_text);
 	}
@@ -1320,7 +1321,7 @@ selected_copy:
 		decimal_u64(declared_sectors_text, logical_last + 1U);
 		decimal_u64(physical_sectors_text, physical_last + 1U);
 		decimal_u64(ignored_tail_text, physical_last - logical_last);
-		hal_printf("gpt: %s bounded extent accepted: logical-last=%s "
+		kern_logf("gpt: %s bounded extent accepted: logical-last=%s "
 			   "physical-last=%s declared-sectors=%s "
 			   "physical-sectors=%s "
 			   "ignored-tail-sectors=%s\n",

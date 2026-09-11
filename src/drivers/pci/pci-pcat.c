@@ -15,6 +15,8 @@
 #include <hal/hal.h>
 #include <kern/pmem.h>
 #include <string.h>
+#include "kern/klog.h"
+#include "kern/kmem.h"
 
 #define PCI_CONFIG_ADDRESS 0x0cf8U
 #define PCI_CONFIG_DATA 0x0cfcU
@@ -93,7 +95,7 @@ drv_pci_pcat_init(
 	/* Checks the ecam function address result. */
 	if (ecam_function_address(&(const struct drv_pci_address){0, 0, 0, 0},
 				  &ecam) == HAL_OK) {
-		hal_printf("pci: ECAM segment 0000 bus 00 at %08x:%08x\n",
+		kern_logf("pci: ECAM segment 0000 bus 00 at %08x:%08x\n",
 			   (uint32_t)((uint64_t)ecam >> 32), (uint32_t)ecam);
 	}
 
@@ -102,7 +104,7 @@ drv_pci_pcat_init(
 	value4 = 0;
 	(void)pcat_config_read(NULL, &address0, 0, 4, &value0);
 	(void)pcat_config_read(NULL, &address4, 0, 4, &value4);
-	hal_printf("WS004 PCI CONFIG %08x %08x\n", value0, value4);
+	kern_logf("WS004 PCI CONFIG %08x %08x\n", value0, value4);
 #endif
 
 	/* Checks the operation status. */
@@ -437,7 +439,7 @@ pcat_map_bar(
 	}
 
 	/* Handles the memory availability. */
-	memory = kernel_alloc(sizeof(*memory));
+	memory = kern_malloc(sizeof(*memory));
 	if (memory == NULL)
 		return ENOMEM;
 	memory->paddr = bar->bus_address;
@@ -454,7 +456,7 @@ pcat_map_bar(
 		if ((bar->type != DRV_PCI_BAR_MEMORY32 &&
 		     bar->type != DRV_PCI_BAR_MEMORY64) ||
 		    bar->size > 0x01000000U) {
-			kernel_free(memory);
+			kern_free(memory);
 
 			/* Failed. */
 			return ENOMEM;
@@ -470,7 +472,7 @@ pcat_map_bar(
 			assigned = (pci_small_mmio_next + alignment - 1U) &
 				   ~(alignment - 1U);
 			if (assigned > 0xf1000000U - bar->size) {
-				kernel_free(memory);
+				kern_free(memory);
 
 				/* Failed. */
 				return ENOMEM;
@@ -482,7 +484,7 @@ pcat_map_bar(
 		/* Checks the drv pci device assign bar result. */
 		if (drv_pci_device_assign_bar(device, bar->index, assigned) !=
 		    0) {
-			kernel_free(memory);
+			kern_free(memory);
 
 			/* Failed. */
 			return ENOMEM;
@@ -493,13 +495,13 @@ pcat_map_bar(
 		/* Checks the device mapping result. */
 		if (hal_space_map_device(memory->paddr, memory->size, attr,
 					 &address) != HAL_OK) {
-			kernel_free(memory);
+			kern_free(memory);
 
 			/* Failed. */
 			return ENOMEM;
 		}
 
-		hal_printf("pci: BAR%u assigned to %08x (%u KiB)\n", bar->index,
+		kern_logf("pci: BAR%u assigned to %08x (%u KiB)\n", bar->index,
 			   assigned, (unsigned)(bar->size / 1024U));
 	}
 
@@ -509,10 +511,10 @@ pcat_map_bar(
 	mapping->private_data[0] = (uintptr_t)memory;
 
 	/* Handles the record availability. */
-	record = kernel_alloc(sizeof(*record));
+	record = kern_malloc(sizeof(*record));
 	if (record == NULL) {
 		(void)hal_space_unmap_device(mapping->address, memory->size);
-		kernel_free(memory);
+		kern_free(memory);
 		memset(mapping, 0, sizeof(*mapping));
 
 		/* Failed. */
@@ -566,7 +568,7 @@ pcat_unmap_bar(
 	if (record != NULL) {
 		/* Handles the record condition. */
 		if (record->references != 1U) {
-			hal_printf("pci: BAR%u unmap retained with %u "
+			kern_logf("pci: BAR%u unmap retained with %u "
 				   "references\n",
 				   record->bar_index, record->references);
 
@@ -584,11 +586,11 @@ pcat_unmap_bar(
 			}
 		}
 
-		kernel_free(record);
+		kern_free(record);
 	}
 
 	(void)hal_space_unmap_device(mapping->address, memory->size);
-	kernel_free(memory);
+	kern_free(memory);
 	memset(mapping, 0, sizeof(*mapping));
 }
 

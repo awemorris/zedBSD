@@ -23,6 +23,7 @@
 #include "kern/lock.h"
 #include <errno.h>
 #include <hal/hal.h>
+#include "kern/klog.h"
 
 #define IDE_BANK_SELECT 0x432U
 #define IDE_DATA 0x640U
@@ -436,7 +437,7 @@ report_probe_failure(
 	select_bank((uint8_t)(slot / 2U));
 	status = inb(IDE_ALT_STATUS);
 	error = (status & IDE_STATUS_ERR) ? inb(IDE_ERROR) : 0;
-	hal_printf("ide: probe BIOS=%02X bank=%u drive=%u stage=%s "
+	kern_logf("ide: probe BIOS=%02X bank=%u drive=%u stage=%s "
 		   "status=%02X error=%02X bankctl=%02X\n",
 		   0x80U + slot, slot / 2U, slot & 1U, failure_stage, status,
 		   error, inb(IDE_BANK_SELECT));
@@ -820,7 +821,7 @@ pc98_ide_submit(
 		select_bank(unit->bank);
 		status = inb(IDE_ALT_STATUS);
 		ata_error = (status & IDE_STATUS_ERR) ? inb(IDE_ERROR) : 0;
-		hal_printf("ide: %s %s LBA=%u count=%u bank=%u drive=%u "
+		kern_logf("ide: %s %s LBA=%u count=%u bank=%u drive=%u "
 			   "stage=%s status=%02X error=%02X bankctl=%02X\n",
 			   dev->d_name,
 			   bio->b_op == BIO_READ    ? "read"

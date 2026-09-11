@@ -19,6 +19,8 @@
 #include <kern/sched.h>
 #include <limits.h>
 #include <string.h>
+#include "kern/klog.h"
+#include "kern/kmem.h"
 
 #define ECM_COMMUNICATION_CLASS 0x02U
 #define ECM_COMMUNICATION_SUBCLASS 0x06U
@@ -1525,7 +1527,7 @@ static void
 ecm_release(
 	void *driver_data)
 {
-	kernel_free(driver_data);
+	kern_free(driver_data);
 }
 
 /* Marks the device as ready to carry traffic. */
@@ -1583,9 +1585,9 @@ static void
 ecm_buffers_free(
 	struct ecm_adapter *adapter)
 {
-	kernel_free(adapter->tx_buffer);
-	kernel_free(adapter->rx_buffer);
-	kernel_free(adapter->notification_buffer);
+	kern_free(adapter->tx_buffer);
+	kern_free(adapter->rx_buffer);
+	kern_free(adapter->notification_buffer);
 	adapter->tx_buffer = NULL;
 	adapter->rx_buffer = NULL;
 	adapter->notification_buffer = NULL;
@@ -1596,9 +1598,9 @@ static int
 ecm_buffers_alloc(
 	struct ecm_adapter *adapter)
 {
-	adapter->notification_buffer = kernel_alloc(ECM_NOTIFICATION_SIZE);
-	adapter->rx_buffer = kernel_alloc(ECM_FRAME_SIZE);
-	adapter->tx_buffer = kernel_alloc(ECM_FRAME_SIZE);
+	adapter->notification_buffer = kern_malloc(ECM_NOTIFICATION_SIZE);
+	adapter->rx_buffer = kern_malloc(ECM_FRAME_SIZE);
+	adapter->tx_buffer = kern_malloc(ECM_FRAME_SIZE);
 
 	/* Handles the notification buffer availability. */
 	if (adapter->notification_buffer != NULL &&
@@ -1675,7 +1677,7 @@ ecm_attach(
 		return ENODEV;
 
 	/* Handles the adapter availability. */
-	adapter = kernel_alloc(sizeof(*adapter));
+	adapter = kern_malloc(sizeof(*adapter));
 	if (adapter == NULL)
 		return ENOMEM;
 	memset(adapter, 0, sizeof(*adapter));
@@ -1693,7 +1695,7 @@ ecm_attach(
 	/* Checks the operation status. */
 	error = drv_usb_interface_set_driver_data(interface, adapter);
 	if (error != 0) {
-		kernel_free(adapter);
+		kern_free(adapter);
 
 		/* Failed. */
 		return error;
@@ -1730,7 +1732,7 @@ ecm_attach(
 	if (error != 0)
 		return error;
 	ecm_set_ready(adapter, 1);
-	hal_printf("usb-cdc-ecm: %s mac=%02x:%02x:%02x:%02x:%02x:%02x "
+	kern_logf("usb-cdc-ecm: %s mac=%02x:%02x:%02x:%02x:%02x:%02x "
 		   "segment=%u\n",
 		   adapter->net_device->name, mac[0], mac[1], mac[2], mac[3],
 		   mac[4], mac[5], binding.max_segment_size);
@@ -1780,7 +1782,7 @@ ecm_detach(
 	if (adapter->net_device != NULL)
 		net_device_destroy(adapter->net_device);
 	else
-		kernel_free(adapter);
+		kern_free(adapter);
 
 	/* Succeeded. */
 	return 0;

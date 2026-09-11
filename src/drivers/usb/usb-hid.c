@@ -24,6 +24,7 @@
 #include <string.h>
 #include <errno.h>
 #include <string.h>
+#include "kern/klog.h"
 
 #define HID_ITEM_TYPE_MAIN 0U
 #define HID_ITEM_TYPE_GLOBAL 1U
@@ -373,7 +374,7 @@ drv_usb_hid_input_ready(
 		/* Checks the operation status. */
 		error = usb_hid_activate(claimed, 1);
 		if (error != 0) {
-			hal_printf("usb-hid: deferred activation failed "
+			kern_logf("usb-hid: deferred activation failed "
 				   "interface=%u error=%d\n",
 				   interface_number, error);
 		}
@@ -426,7 +427,7 @@ usb_hid_attach(
 	}
 
 	/* Handles the hid availability. */
-	hid = kernel_alloc(sizeof(*hid));
+	hid = kern_malloc(sizeof(*hid));
 	if (hid == NULL)
 		return ENOMEM;
 	memset(hid, 0, sizeof(*hid));
@@ -454,7 +455,7 @@ usb_hid_attach(
 	if (error != 0)
 		goto fail;
 	usb_hid_identity(hid);
-	hid->buffer = kernel_alloc(hid->buffer_size);
+	hid->buffer = kern_malloc(hid->buffer_size);
 
 	/* Handles the buffer availability. */
 	if (hid->buffer == NULL) {
@@ -508,12 +509,12 @@ fail:
 
 	/* Handles the buffer availability. */
 	if (hid->buffer != NULL)
-		kernel_free(hid->buffer);
+		kern_free(hid->buffer);
 
 	/* Handles the layout availability. */
 	if (hid->layout != NULL)
 		drv_hid_report_layout_destroy(hid->layout);
-	kernel_free(hid);
+	kern_free(hid);
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -569,12 +570,12 @@ usb_hid_detach(
 
 	/* Handles the buffer availability. */
 	if (hid->buffer != NULL)
-		kernel_free(hid->buffer);
+		kern_free(hid->buffer);
 
 	/* Handles the layout availability. */
 	if (hid->layout != NULL)
 		drv_hid_report_layout_destroy(hid->layout);
-	kernel_free(hid);
+	kern_free(hid);
 
 	/* Succeeded. */
 	return 0;
@@ -767,7 +768,7 @@ usb_hid_fetch_layout(
 		return error;
 
 	/* Handles the descriptor availability. */
-	descriptor = kernel_alloc(descriptor_length);
+	descriptor = kern_malloc(descriptor_length);
 	if (descriptor == NULL)
 		return ENOMEM;
 
@@ -787,7 +788,7 @@ usb_hid_fetch_layout(
 			descriptor, descriptor_length, &hid->layout);
 	}
 
-	kernel_free(descriptor);
+	kern_free(descriptor);
 
 	/* Checks the operation status. */
 	if (error != 0)
@@ -1091,7 +1092,7 @@ usb_hid_publish_report(
 	if (error != 0) {
 		/* Checks the operation status. */
 		if (hid->error_markers++ < USB_HID_ERROR_MARKERS) {
-			hal_printf("usb-hid: malformed input usb%u device=%u "
+			kern_logf("usb-hid: malformed input usb%u device=%u "
 				   "interface=%u length=%u error=%d\n",
 				   drv_usb_bus_number(
 					   drv_usb_device_bus(hid->device)),
@@ -1239,13 +1240,13 @@ usb_hid_runtime_stop(
 	if (report) {
 		/* Handles the transfer status condition. */
 		if (transfer_status) {
-			hal_printf(
+			kern_logf(
 				"usb-hid: terminal transfer stopped "
 				"interface=%u status=%d; input unpublished\n",
 				drv_usb_interface_number(hid->interface),
 				error);
 		} else {
-			hal_printf("usb-hid: %s failed interface=%u error=%d; "
+			kern_logf("usb-hid: %s failed interface=%u error=%d; "
 				   "input unpublished\n",
 				   stage,
 				   drv_usb_interface_number(hid->interface),
@@ -1499,7 +1500,7 @@ usb_hid_activate(
 	spin_unlock_irqrestore(&hid->lock, irq);
 
 	thread_start(worker);
-	hal_printf("usb-hid: event device usb%u device=%u interface=%u "
+	kern_logf("usb-hid: event device usb%u device=%u interface=%u "
 		   "endpoint=%02x report-bytes=%u\n",
 		   drv_usb_bus_number(drv_usb_device_bus(hid->device)),
 		   drv_usb_device_address(hid->device),

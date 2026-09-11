@@ -63,6 +63,7 @@
 #endif
 #include <errno.h>
 #include <hal/hal.h>
+#include "kern/klog.h"
 
 #if CONFIG_KERNEL_USB_HID_CHECKPOINT
 int drv_usb_hid_checkpoint_driver_register(void);
@@ -110,70 +111,70 @@ kern_platform_init(
 
 	/* Brings up the PCI core and, under test, the MSI fixture. */
 	if (drv_pci_init() != 0)
-		hal_printf("pci: core initialization failed\n");
+		kern_logf("pci: core initialization failed\n");
 #ifdef ZEDBSD_TEST_CHECKPOINTS
 	if (ws004_pci_msi_qemu_register() != 0)
-		hal_printf("WS004 MSI fixture registration failed\n");
+		kern_logf("WS004 MSI fixture registration failed\n");
 #endif
 
 	/* Brings up the USB core and registers the USB device drivers. */
 	if (drv_usb_init() != 0)
-		hal_printf("usb: core initialization failed\n");
+		kern_logf("usb: core initialization failed\n");
 #if CONFIG_DRIVER_USB_STORAGE
 	if (drv_usb_storage_driver_register() != 0)
-		hal_printf("usb: mass-storage driver registration failed\n");
+		kern_logf("usb: mass-storage driver registration failed\n");
 	if (drv_usb_uas_driver_register() != 0)
-		hal_printf("usb: UAS driver registration failed\n");
+		kern_logf("usb: UAS driver registration failed\n");
 #endif
 #if CONFIG_DRIVER_USB_CDC_NCM
 	if (drv_usb_cdc_ncm_driver_register() != 0)
-		hal_printf("usb: CDC NCM driver registration failed\n");
+		kern_logf("usb: CDC NCM driver registration failed\n");
 #endif
 #if CONFIG_DRIVER_USB_CDC_ECM
 	if (drv_usb_cdc_ecm_driver_register() != 0)
-		hal_printf("usb: CDC ECM driver registration failed\n");
+		kern_logf("usb: CDC ECM driver registration failed\n");
 #endif
 #if CONFIG_DRIVER_USB_RTL8822BU
 	if (drv_usb_rtl8822bu_driver_register() != 0)
-		hal_printf("usb: RTL8822BU WLAN driver registration failed\n");
+		kern_logf("usb: RTL8822BU WLAN driver registration failed\n");
 #endif
 #if CONFIG_KERNEL_USB_HID_CHECKPOINT
 	if (drv_usb_hid_checkpoint_driver_register() != 0)
-		hal_printf("usb: HID checkpoint driver registration failed\n");
+		kern_logf("usb: HID checkpoint driver registration failed\n");
 #elif CONFIG_DRIVER_USB_HID
 	if (drv_usb_hid_driver_register() != 0)
-		hal_printf("usb: HID input driver registration failed\n");
+		kern_logf("usb: HID input driver registration failed\n");
 #endif
 
 	/* Registers the PCI drivers: host controllers, NVMe, WLAN, graphics. */
 #if CONFIG_DRIVER_PCI_UHCI
 	if (drv_pci_uhci_driver_register() != 0)
-		hal_printf("usb: UHCI PCI driver registration failed\n");
+		kern_logf("usb: UHCI PCI driver registration failed\n");
 #endif
 #if CONFIG_DRIVER_PCI_EHCI
 	if (drv_pci_ehci_driver_register() != 0)
-		hal_printf("usb: EHCI PCI driver registration failed\n");
+		kern_logf("usb: EHCI PCI driver registration failed\n");
 #endif
 #if CONFIG_DRIVER_PCI_XHCI
 	if (drv_pci_xhci_driver_register() != 0)
-		hal_printf("usb: xHCI PCI driver registration failed\n");
+		kern_logf("usb: xHCI PCI driver registration failed\n");
 #endif
 #if CONFIG_DRIVER_PCI_NVME
 	if (drv_pci_nvme_driver_register() != 0)
-		hal_printf("nvme: PCI driver registration failed\n");
+		kern_logf("nvme: PCI driver registration failed\n");
 #endif
 #if CONFIG_DRIVER_PCI_INTEL_AX211
 	if (drv_pci_intel_ax211_driver_register() != 0)
-		hal_printf("wlan: Intel AX211 PCI driver registration failed\n");
+		kern_logf("wlan: Intel AX211 PCI driver registration failed\n");
 #endif
 #if CONFIG_DRIVER_GRAPHICS_DEVICE
 	if (drv_pcat_graphics_pci_register() != 0)
-		hal_printf("graphics: PCI driver registration failed\n");
+		kern_logf("graphics: PCI driver registration failed\n");
 #endif
 
 	/* Probes the host bridge, which binds the registered drivers. */
 	if (drv_pci_pcat_init() != 0)
-		hal_printf("pci: PC/AT host initialization failed\n");
+		kern_logf("pci: PC/AT host initialization failed\n");
 #ifdef ZEDBSD_TEST_CHECKPOINTS
 	else
 		drv_pci_dump();
@@ -206,17 +207,17 @@ kern_platform_init(
 #if CONFIG_DRIVER_NE2000
 	network_error = drv_pcat_ne2000_init();
 	if (network_error == 0)
-		hal_printf("net: ISA NE2000 at 0x300 irq 10 registered "
+		kern_logf("net: ISA NE2000 at 0x300 irq 10 registered "
 		    "as ne0\n");
 	else if (network_error != ENODEV)
-		hal_printf("net: ISA NE2000 initialization failed (%d)\n",
+		kern_logf("net: ISA NE2000 initialization failed (%d)\n",
 		    network_error);
 #endif
 
 	/* Prepares the graphics driver. */
 #if CONFIG_DRIVER_GRAPHICS_DEVICE
 	if (!drv_pcat_graphics_prepare())
-		hal_printf("graphics: PC/AT driver unavailable\n");
+		kern_logf("graphics: PC/AT driver unavailable\n");
 #endif
 
 	/* Reports the number of boot devices. */
@@ -263,11 +264,11 @@ kern_platform_refresh_devices(
 	if (disk_count() != 0)
 		goto nvme;
 	deadline = clock_ticks() + 5U * KERN_CLOCK_HZ;
-	hal_printf("boot: waiting up to 5 seconds for boot storage\n");
+	kern_logf("boot: waiting up to 5 seconds for boot storage\n");
 	while (disk_count() == 0 && clock_ticks() < deadline)
 		sched_yield();
 	if (disk_count() == 0)
-		hal_printf("boot: boot-storage wait expired\n");
+		kern_logf("boot: boot-storage wait expired\n");
 nvme:
 	(void)0;
 

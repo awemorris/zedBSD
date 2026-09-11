@@ -19,6 +19,8 @@
 #include <kern/thread.h>
 #include <limits.h>
 #include <string.h>
+#include "kern/klog.h"
+#include "kern/kmem.h"
 
 #define EHCI_USBCMD 0x00U
 #define EHCI_USBSTS 0x04U
@@ -453,7 +455,7 @@ ehci_root_ports_changed(
 					 __ATOMIC_RELEASE);
 			spin_unlock_irqrestore(&controller->active_lock, irq);
 			if (report_failure) {
-				hal_printf(
+				kern_logf(
 					"ehci: root-port register unavailable; "
 					"controller quarantined\n");
 			}
@@ -1282,7 +1284,7 @@ fail:
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 		ehci_schedule_release(controller);
 	} else {
-		hal_printf("ehci: start failed (%d), DMA stop failed (%d); "
+		kern_logf("ehci: start failed (%d), DMA stop failed (%d); "
 			   "schedule retained\n",
 			   error, stop_error);
 	}
@@ -1486,7 +1488,7 @@ stop_owner:
 
 	/* Checks the operation status. */
 	if (error != 0) {
-		hal_printf("ehci: %s hardware stop incomplete (halt=%d "
+		kern_logf("ehci: %s hardware stop incomplete (halt=%d "
 			   "master=%d irq=%d); ownership retained\n",
 			   owner, halt_error, master_error, irq_error);
 	}
@@ -1544,7 +1546,7 @@ ehci_irq_disestablish(
 
 		/* Checks the sched ticks result. */
 		if (sched_ticks() - started >= EHCI_QUIESCE_TICKS) {
-			hal_printf("ehci: IRQ removal timed out; retaining "
+			kern_logf("ehci: IRQ removal timed out; retaining "
 				   "controller ownership\n");
 
 			/* Failed. */
@@ -1556,7 +1558,7 @@ ehci_irq_disestablish(
 
 	/* Checks the operation status. */
 	if (error != 0) {
-		hal_printf("ehci: checked IRQ removal failed (%d); retaining "
+		kern_logf("ehci: checked IRQ removal failed (%d); retaining "
 			   "controller ownership\n",
 			   error);
 
@@ -1684,7 +1686,7 @@ ehci_request_free(
 	/* Handles the address availability. */
 	if (request->bounce.address != NULL)
 		drv_dma_free_coherent(controller->hcd.dma, &request->bounce);
-	kernel_free(request);
+	kern_free(request);
 }
 
 /* Takes a request off the reclaim list to be reused. */
@@ -1914,7 +1916,7 @@ ehci_build_request(
 			return error;
 	} else {
 		/* Handles the request availability. */
-		request = kernel_alloc(sizeof(*request));
+		request = kern_malloc(sizeof(*request));
 		if (request == NULL)
 			return ENOMEM;
 		memset(request, 0, sizeof(*request));
@@ -1947,7 +1949,7 @@ ehci_build_request(
 		error = drv_dma_alloc_coherent(controller->hcd.dma, 4096U, 64U,
 					       &request->schedule);
 		if (error != 0) {
-			kernel_free(request);
+			kern_free(request);
 
 			/* Failed. */
 			return error;
@@ -3130,7 +3132,7 @@ ehci_retirement_report(
 		/* Handles the stage availability. */
 		if (stage == NULL)
 			return;
-		hal_printf("ehci: request retirement failed at %s (%d); "
+		kern_logf("ehci: request retirement failed at %s (%d); "
 			   "request and DMA retained\n",
 			   stage, error);
 	}
@@ -3582,7 +3584,7 @@ ehci_retirement_progress(
 		if (__atomic_exchange_n(
 			    &controller->retirement_success_reported, 1U,
 			    __ATOMIC_ACQ_REL) == 0) {
-			hal_printf("ehci: checked request-local retirement "
+			kern_logf("ehci: checked request-local retirement "
 				   "active\n");
 		}
 
@@ -3622,7 +3624,7 @@ ehci_controller_fatal_stop(
 	stop_error = ehci_hardware_stop(controller, "fatal");
 	__atomic_store_n(&controller->fatal_stopping, 0U, __ATOMIC_RELEASE);
 	if (stop_error != 0 || (root_error != 0 && root_error != EBUSY)) {
-		hal_printf("ehci: fatal stop incomplete (hardware=%d root=%d); "
+		kern_logf("ehci: fatal stop incomplete (hardware=%d root=%d); "
 			   "ownership retained\n",
 			   stop_error, root_error);
 	}
@@ -4356,7 +4358,7 @@ ehci_report_shutdown_evidence(
 
 	/* Handles the report condition. */
 	if (report)
-		hal_printf("ehci: checked shutdown workers joined\n");
+		kern_logf("ehci: checked shutdown workers joined\n");
 #endif
 
 	/* Succeeded. */
@@ -4536,7 +4538,7 @@ ehci_stop(
 
 	/* Handles the releasable condition. */
 	if (!releasable) {
-		hal_printf("ehci: refusing to release DMA before checked "
+		kern_logf("ehci: refusing to release DMA before checked "
 			   "quiesce\n");
 		controller->quarantined = 1;
 
@@ -4882,7 +4884,7 @@ ehci_irq(
 
 		/* Handles the report controller condition. */
 		if (report_controller) {
-			hal_printf("ehci: invalid IRQ status; controller "
+			kern_logf("ehci: invalid IRQ status; controller "
 				   "quarantined\n");
 		}
 
@@ -5013,7 +5015,7 @@ ehci_irq(
 
 	/* Handles the report controller condition. */
 	if (report_controller)
-		hal_printf("ehci: %s; controller quarantined\n", fatal_stage);
+		kern_logf("ehci: %s; controller quarantined\n", fatal_stage);
 
 	/* Handles the fatal event condition. */
 	if (fatal_event)
@@ -5324,7 +5326,7 @@ ehci_attach(
 	(void)id;
 
 	/* Handles the controller availability. */
-	controller = kernel_alloc(sizeof(*controller));
+	controller = kern_malloc(sizeof(*controller));
 	if (controller == NULL)
 		return ENOMEM;
 	memset(controller, 0, sizeof(*controller));
@@ -5425,10 +5427,10 @@ ehci_attach(
 	     EHCI_STS_USBINT | EHCI_STS_USBERRINT | EHCI_STS_PCD |
 		     EHCI_STS_HSE | EHCI_STS_IAA);
 	ehci_publish(controller);
-	hal_printf("ehci: PCI controller, ports=%u version=%x\n", ports,
+	kern_logf("ehci: PCI controller, ports=%u version=%x\n", ports,
 		   *(volatile uint16_t *)(controller->capability + 2));
-	hal_printf("ehci: concurrent async/periodic scheduling active\n");
-	hal_printf("ehci: root hotplug worker active\n");
+	kern_logf("ehci: concurrent async/periodic scheduling active\n");
+	kern_logf("ehci: root hotplug worker active\n");
 
 	/* Succeeded. */
 	return 0;
@@ -5440,7 +5442,7 @@ fail:
 	if (cleanup_error != 0) {
 		controller->quarantined = 1;
 		ehci_publish(controller);
-		hal_printf("ehci: attach failed at %s (%d), cleanup failed "
+		kern_logf("ehci: attach failed at %s (%d), cleanup failed "
 			   "(%d); controller quarantined\n",
 			   stage, error, cleanup_error);
 
@@ -5448,7 +5450,7 @@ fail:
 		return 0;
 	}
 
-	kernel_free(controller);
+	kern_free(controller);
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -5491,7 +5493,7 @@ ehci_detach(
 
 	ehci_unpublish(controller);
 	drv_pci_device_set_driver_data(device, NULL);
-	kernel_free(controller);
+	kern_free(controller);
 
 	/* Succeeded. */
 	return 0;

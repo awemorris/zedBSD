@@ -14,6 +14,7 @@
 
 #include <hal/hal.h>
 #include <string.h>
+#include "kern/klog.h"
 
 #ifndef PCAT_VGA_APERTURE_ADDRESS
 #define PCAT_VGA_APERTURE_ADDRESS 0x800a0000U
@@ -53,7 +54,7 @@ drv_pcat_font_init(
 	if (boot_font != NULL) {
 		memcpy(ascii_font, boot_font, sizeof(ascii_font));
 		font_valid = 1;
-		hal_printf("graphics: BIOS 8x16 ASCII font handoff accepted\n");
+		kern_logf("graphics: BIOS 8x16 ASCII font handoff accepted\n");
 
 		/* Returns the computed result. */
 		return;
@@ -62,7 +63,7 @@ drv_pcat_font_init(
 	/* UEFI has no VGA BIOS font handoff and may not expose VGA plane 2. */
 	memcpy(ascii_font, drv_pcat_vgafont16, sizeof(ascii_font));
 	font_valid = 1;
-	hal_printf("graphics: built-in VGA 8x16 font selected\n");
+	kern_logf("graphics: built-in VGA 8x16 font selected\n");
 }
 
 /*

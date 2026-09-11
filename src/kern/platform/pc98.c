@@ -28,6 +28,7 @@
 #endif
 #include <errno.h>
 #include <hal/hal.h>
+#include "kern/klog.h"
 
 /*
  * Publishes the present boot devices from the PC-98 handoff and starts
@@ -94,17 +95,17 @@ kern_platform_init(
 	/* Starts the LGY-98 network interface when one is present. */
 	network_error = drv_pc98_lgy98_init();
 	if (network_error == 0) {
-		hal_printf("net: LGY-98 registered as ne0\n");
+		kern_logf("net: LGY-98 registered as ne0\n");
 		kern_platform_debug_write("net: LGY-98 registered as ne0\n");
 	} else if (network_error != ENODEV) {
-		hal_printf("net: LGY-98 initialization failed (%d)\n", network_error);
+		kern_logf("net: LGY-98 initialization failed (%d)\n", network_error);
 	}
 
 #endif
 #if CONFIG_DRIVER_GRAPHICS_DEVICE
 	/* Prepares the graphics driver, reporting its absence. */
 	if (!drv_pc98_graphics_prepare())
-		hal_printf("graphics: PC-98 driver unavailable\n");
+		kern_logf("graphics: PC-98 driver unavailable\n");
 #endif
 
 	/* Reports the number of published devices. */

@@ -28,6 +28,8 @@
 #include <string.h>
 #include <errno.h>
 #include <stddef.h>
+#include "kern/klog.h"
+#include "kern/kmem.h"
 
 #define NVME_ADMIN_QUEUE_REQUESTED_DEPTH 64U
 #define NVME_IO_QUEUE_REQUESTED_DEPTH 64U
@@ -514,7 +516,7 @@ next_controller:
 	/* Checks the operation status. */
 	error = nvme_probe_namespace(controller);
 	if (error != 0)
-		hal_printf("nvme: namespace probe failed (%d)\n", error);
+		kern_logf("nvme: namespace probe failed (%d)\n", error);
 	irq = spin_lock_irqsave(&controller->command_lock);
 
 	/* Checks the operation status. */
@@ -549,11 +551,11 @@ next_controller:
 	controller->quarantined = 1;
 	nvme_detach_release(controller, 0);
 	if (error != 0) {
-		hal_printf(
+		kern_logf(
 			"nvme: failed probe teardown retained resources (%d)\n",
 			error);
 	} else {
-		hal_printf(
+		kern_logf(
 			"nvme: failed probe resources released; quarantined\n");
 	}
 	/* Search again under the registry lock; no saved sibling pointer survives. */
@@ -1455,7 +1457,7 @@ nvme_attach(
 	(void)id;
 
 	/* Handles the controller availability. */
-	controller = kernel_alloc(sizeof(*controller));
+	controller = kern_malloc(sizeof(*controller));
 	if (controller == NULL)
 		return ENOMEM;
 	memset(controller, 0, sizeof(*controller));
@@ -1464,7 +1466,7 @@ nvme_attach(
 	registry_irq = spin_lock_irqsave(&nvme_registry_lock);
 	if (nvme_next_index > UINT_MAX) {
 		spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
-		kernel_free(controller);
+		kern_free(controller);
 		return ENOSPC;
 	}
 	controller->index = (unsigned)nvme_next_index++;
@@ -1626,7 +1628,7 @@ nvme_attach(
 	/* Handles the reasons condition. */
 	reasons = drv_nvme_capability_validate(&snapshot);
 	if (reasons != 0U) {
-		hal_printf("nvme: pci %04x:%02x:%02x.%u capability rejected "
+		kern_logf("nvme: pci %04x:%02x:%02x.%u capability rejected "
 			   "%08x:%s\n",
 			   address.segment, address.bus, address.device,
 			   address.function, reasons,
@@ -1774,7 +1776,7 @@ nvme_attach(
 	controller->stopping = 0;
 	nvme_publish_controller(controller);
 	irq_name = controller->irq.type == DRV_PCI_IRQ_MSIX ? "MSI-X" : "MSI";
-	hal_printf("nvme: PCI controller %04x:%02x:%02x.%u version=%x queue=%u "
+	kern_logf("nvme: PCI controller %04x:%02x:%02x.%u version=%x queue=%u "
 		   "timeout=%ums %s\n",
 		   address.segment, address.bus, address.device,
 		   address.function, controller->version,
@@ -1790,7 +1792,7 @@ fail:
 	if (cleanup_error != 0) {
 		controller->quarantined = 1;
 		nvme_publish_controller(controller);
-		hal_printf("nvme: attach failed at %s (%d), cleanup failed "
+		kern_logf("nvme: attach failed at %s (%d), cleanup failed "
 			   "(%d); quarantined\n",
 			   stage, error, cleanup_error);
 
@@ -1798,8 +1800,8 @@ fail:
 		return 0;
 	}
 
-	hal_printf("nvme: attach failed at %s (%d)\n", stage, error);
-	kernel_free(controller);
+	kern_logf("nvme: attach failed at %s (%d)\n", stage, error);
+	kern_free(controller);
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -1890,7 +1892,7 @@ nvme_detach_owned(
 			waitq_wake_all(&controller->io_state_waitq);
 			spin_unlock_irqrestore(&controller->command_lock, irq);
 			nvme_detach_release(controller, 0);
-			hal_printf("nvme: final detach FLUSH incomplete (%d); "
+			kern_logf("nvme: final detach FLUSH incomplete (%d); "
 				   "disk gone, resources retained\n",
 				   flush_error);
 
@@ -1926,7 +1928,7 @@ nvme_detach_owned(
 
 	nvme_unpublish_controller(controller);
 	(void)drv_pci_device_set_driver_data(device, NULL);
-	kernel_free(controller);
+	kern_free(controller);
 
 	/* Succeeded. */
 	return 0;
@@ -2003,7 +2005,7 @@ nvme_shutdown(
 	if (mask_error != 0 || lifecycle_error != 0 || drain_error != 0 ||
 	    quiesce_error != 0) {
 		controller->quarantined = 1;
-		hal_printf("nvme: shutdown retained resources mask=%d "
+		kern_logf("nvme: shutdown retained resources mask=%d "
 			   "lifecycle=%d drain=%d quiesce=%d dma-safe=%u\n",
 			   mask_error, lifecycle_error, drain_error,
 			   quiesce_error,
@@ -2944,7 +2946,7 @@ nvme_irq_remove(
 
 		/* Checks the operation status. */
 		if (error != 0) {
-			hal_printf("nvme: IRQ removal failed (%d); retaining "
+			kern_logf("nvme: IRQ removal failed (%d); retaining "
 				   "controller resources\n",
 				   error);
 
@@ -2974,7 +2976,7 @@ nvme_irq_drain(
 		hal_compiler_barrier();
 	}
 
-	hal_printf(
+	kern_logf(
 		"nvme: IRQ drain timed out; retaining controller resources\n");
 
 	/* Failed. */
@@ -3180,7 +3182,7 @@ nvme_lifecycle_bar_restore(
 	/* Checks the operation status. */
 	quiesce_error = nvme_pci_quiesce(controller);
 	if (quiesce_error != 0) {
-		hal_printf("nvme: PCI quiesce after BAR restore failure failed "
+		kern_logf("nvme: PCI quiesce after BAR restore failure failed "
 			   "(%d)\n",
 			   quiesce_error);
 	}
@@ -3223,7 +3225,7 @@ fail:
 	/* Checks the operation status. */
 	message_error = nvme_message_irq_mask(controller);
 	if (message_error != 0) {
-		hal_printf("nvme: message interrupt mask after PCI restore "
+		kern_logf("nvme: message interrupt mask after PCI restore "
 			   "failure failed (%d)\n",
 			   message_error);
 	}
@@ -3231,7 +3233,7 @@ fail:
 	/* Checks the operation status. */
 	quiesce_error = nvme_pci_quiesce(controller);
 	if (quiesce_error != 0) {
-		hal_printf("nvme: PCI quiesce after command restore failure "
+		kern_logf("nvme: PCI quiesce after command restore failure "
 			   "failed (%d)\n",
 			   quiesce_error);
 	}
@@ -4549,7 +4551,7 @@ nvme_probe_namespace(
 		controller->identify_dma.address, controller->identify_dma.size,
 		&controller_profile);
 	if (reasons != 0U) {
-		hal_printf("nvme: unsupported Identify Controller (%08x)\n",
+		kern_logf("nvme: unsupported Identify Controller (%08x)\n",
 			   reasons);
 
 		/* Failed. */
@@ -4566,7 +4568,7 @@ nvme_probe_namespace(
 		controller->identify_dma.address, controller->identify_dma.size,
 		controller_profile.namespace_count, &namespace_id);
 	if (reasons != 0U) {
-		hal_printf("nvme: unsupported active namespace set (%08x)\n",
+		kern_logf("nvme: unsupported active namespace set (%08x)\n",
 			   reasons);
 
 		/* Failed. */
@@ -4584,7 +4586,7 @@ nvme_probe_namespace(
 		controller->identify_dma.address, controller->identify_dma.size,
 		&namespace_profile);
 	if (reasons != 0U) {
-		hal_printf("nvme: unsupported namespace %u (%08x)\n",
+		kern_logf("nvme: unsupported namespace %u (%08x)\n",
 			   namespace_id, reasons);
 
 		/* Failed. */
@@ -4644,7 +4646,7 @@ nvme_probe_namespace(
 	if (error != 0)
 		goto fail_disk;
 	controller->namespace_disk = disk;
-	hal_printf("nvme: /dev/%s namespace=%u blocks=%08x:%08x block-size=%u "
+	kern_logf("nvme: /dev/%s namespace=%u blocks=%08x:%08x block-size=%u "
 		   "writable max-transfer=%u\n",
 		   disk->d_name, namespace_id,
 		   (uint32_t)(namespace_profile.block_count >> 32),
@@ -5334,7 +5336,7 @@ nvme_io_recover(
 
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
-	hal_printf("nvme: I/O queue recovered epoch=%u\n",
+	kern_logf("nvme: I/O queue recovered epoch=%u\n",
 		   controller->io_epoch);
 
 	/* Succeeded. */
@@ -5365,7 +5367,7 @@ fail:
 	if (quiesced)
 		(void)nvme_io_lifecycles_quiesce(controller);
 	nvme_io_quarantine(controller, error, !quiesced);
-	hal_printf("nvme: I/O recovery failed (%d); disk unavailable, DMA "
+	kern_logf("nvme: I/O recovery failed (%d); disk unavailable, DMA "
 		   "retained\n",
 		   error);
 

@@ -1232,6 +1232,8 @@ drv_intel_ax211_staging_clear(
 #include <kern/sched.h>
 #include <stdint.h>
 #include <string.h>
+#include "kern/klog.h"
+#include "kern/kmem.h"
 
 #define AX211_PCI_VENDOR 0x8086U
 #define AX211_PCI_PRODUCT 0x51f0U
@@ -1655,7 +1657,7 @@ drv_pci_intel_ax211_devices_ready(
 		error = ax211_pci_refresh_one(controller);
 		ax211_pci_refresh_release(controller);
 		if (error != 0) {
-			hal_printf("intel-ax211: deferred WLAN publication "
+			kern_logf("intel-ax211: deferred WLAN publication "
 				   "failed (%d)\n",
 				   error);
 		}
@@ -1705,7 +1707,7 @@ ax211_pci_attach(
 		return EBUSY;
 
 	/* Handles the controller availability. */
-	controller = kernel_alloc(sizeof(*controller));
+	controller = kern_malloc(sizeof(*controller));
 	if (controller == NULL)
 		return ENOMEM;
 	memset(controller, 0, sizeof(*controller));
@@ -1766,14 +1768,14 @@ ax211_pci_attach(
 	if (error == 0) {
 		controller->ready = 1U;
 		ax211_pci_list_add(controller);
-		hal_printf("intel-ax211: controller retained; WLAN publication "
+		kern_logf("intel-ax211: controller retained; WLAN publication "
 			   "deferred\n");
 
 		/* Succeeded. */
 		return 0;
 	}
 
-	hal_printf("intel-ax211: attach failed stage=%s error=%d "
+	kern_logf("intel-ax211: attach failed stage=%s error=%d "
 		   "hw-rev=%08x rf-id=%08x\n",
 		   stage, error, controller->hardware_revision,
 		   controller->radio_identity);
@@ -1793,7 +1795,7 @@ ax211_pci_attach(
 	if (controller->driver_data_set)
 		(void)drv_pci_device_set_driver_data(device, NULL);
 	ax211_pci_scrub(controller, sizeof(*controller));
-	kernel_free(controller);
+	kern_free(controller);
 
 	/* Returns the computed result. */
 	return cleanup_error;
@@ -1911,7 +1913,7 @@ ax211_pci_detach(
 		net_device_destroy(net_device);
 	} else {
 		ax211_pci_scrub(controller, sizeof(*controller));
-		kernel_free(controller);
+		kern_free(controller);
 	}
 
 	/* Succeeded. */
@@ -2275,7 +2277,7 @@ ax211_pci_quarantine(
 	}
 
 	ax211_pci_list_add(controller);
-	hal_printf("intel-ax211: controller restoration quarantined (%d)\n",
+	kern_logf("intel-ax211: controller restoration quarantined (%d)\n",
 		   failure);
 
 	/* Returning success is intentional: the PCI core must bind detach. */
@@ -2757,7 +2759,7 @@ ax211_pci_recovery_latch_locked(
 		controller->recovery_generation =
 			controller->connection_generation;
 		controller->recovery_pending = 1U;
-		hal_printf("intel-ax211: recovery latched error=%d "
+		kern_logf("intel-ax211: recovery latched error=%d "
 			   "generation=%u\n",
 			   controller->recovery_error,
 			   (unsigned)controller->recovery_generation);
@@ -2813,12 +2815,12 @@ ax211_pci_recovery_run_locked(
 
 		/* Checks the operation status. */
 		if (carrier_error != 0 && carrier_error != ENODEV) {
-			hal_printf("intel-ax211: recovery carrier-down failed "
+			kern_logf("intel-ax211: recovery carrier-down failed "
 				   "(%d)\n",
 				   carrier_error);
 		}
 
-		hal_printf("intel-ax211: recovery operation join failed (%d)\n",
+		kern_logf("intel-ax211: recovery operation join failed (%d)\n",
 			   join_error);
 
 		/* Returns the computed result. */
@@ -2851,20 +2853,20 @@ ax211_pci_recovery_run_locked(
 
 	/* Checks the operation status. */
 	if (pin_error != 0 && pin_error != ENODEV) {
-		hal_printf("intel-ax211: recovery station pin failed (%d)\n",
+		kern_logf("intel-ax211: recovery station pin failed (%d)\n",
 			   pin_error);
 	}
 
 	/* Checks the operation status. */
 	if (carrier_error != 0 && carrier_error != ENODEV) {
-		hal_printf("intel-ax211: recovery carrier-down failed (%d)\n",
+		kern_logf("intel-ax211: recovery carrier-down failed (%d)\n",
 			   carrier_error);
 	}
 
 	/* Checks the operation status. */
 	if (link_error != 0 && link_error != ESTALE && link_error != ENODEV &&
 	    link_error != ENOTCONN && link_error != EALREADY) {
-		hal_printf(
+		kern_logf(
 			"intel-ax211: recovery link retirement failed (%d)\n",
 			link_error);
 	}
@@ -2873,7 +2875,7 @@ ax211_pci_recovery_run_locked(
 	if (stop_error != 0) {
 		/* An inactive, quarantined runtime cannot drive another poll retry. */
 		ax211_pci_stop_defer_locked(controller, stop_error);
-		hal_printf("intel-ax211: fatal poll cleanup failed (%d)\n",
+		kern_logf("intel-ax211: fatal poll cleanup failed (%d)\n",
 			   stop_error);
 	}
 
@@ -2952,7 +2954,7 @@ ax211_pci_session_stop(
 	/* Handles the controller condition. */
 	if (controller->runtime_active &&
 	    controller->connection_generation != 0U) {
-		hal_printf("intel-ax211: stopping connection generation=%u "
+		kern_logf("intel-ax211: stopping connection generation=%u "
 			   "association-phase=%u step=%u\n",
 			   (unsigned)controller->connection_generation,
 			   controller->association.phase,
@@ -3092,7 +3094,7 @@ ax211_pci_stop_defer_locked(
 	wlan_station_stop_complete(controller->station, error);
 
 	/* Preserves the first failure without repeating firmware rollback logs. */
-	hal_printf("intel-ax211: global stop deferred error=%d runtime-state=%u "
+	kern_logf("intel-ax211: global stop deferred error=%d runtime-state=%u "
 		   "irq=%u/%u dma-retained=%u\n",
 		   error, controller->runtime_start.state,
 		   controller->irq_established, controller->irq_allocated,
@@ -3409,7 +3411,7 @@ ax211_pci_receive_event(
 		     INTEL_AX211_TRANSPORT_FH_CAUSE_ERROR) != 0U ||
 		    (causes.hardware & INTEL_AX211_TRANSPORT_HW_FATAL_CAUSES) !=
 			    0U) {
-			hal_printf("intel-ax211: fatal firmware interrupt "
+			kern_logf("intel-ax211: fatal firmware interrupt "
 				   "fh=%08x hw=%08x raw-fh=%08x raw-hw=%08x\n",
 				   causes.flow_handler, causes.hardware,
 				   causes.raw_flow_handler,
@@ -4166,7 +4168,7 @@ ax211_pci_scan_command_dispatch(
 		/* Succeeded. */
 		return 0;
 	}
-	hal_printf("intel-ax211: scan command failed phase=%u result=%d "
+	kern_logf("intel-ax211: scan command failed phase=%u result=%d "
 		   "length=%u opcode=%02x group=%02x index=%02x queue=%02x\n",
 		   phase, result, (unsigned)length,
 		   length > 4U ? bytes[4U] : 0U, length > 5U ? bytes[5U] : 0U,
@@ -4202,7 +4204,7 @@ ax211_pci_scan_notification_dispatch(
 		payload = message->payload;
 
 		/* Reports a notification this driver does not recognize. */
-		hal_printf(
+		kern_logf(
 			"intel-ax211: unexpected scan notification opcode=%02x "
 			"flags=%02x "
 			"length=%u uid=%02x%02x%02x%02x schedule=%u "
@@ -4356,7 +4358,7 @@ ax211_pci_scan_report_error(
 	/* Checks the operation status. */
 	error = ax211_pci_scan_result_errno(result);
 	if (error != 0) {
-		hal_printf("intel-ax211: scan generation=%u failed result=%d "
+		kern_logf("intel-ax211: scan generation=%u failed result=%d "
 			   "error=%d phase=%u\n",
 			   (unsigned)controller->scan_session.common_generation,
 			   result, error, controller->scan_session.phase);
@@ -4809,7 +4811,7 @@ ax211_pci_firmware_error_dump(
 	if (!controller->runtime_start.alive_accepted ||
 	    controller->runtime_start.alive.status !=
 		    INTEL_AX211_PROTOCOL_ALIVE_STATUS_OK) {
-		hal_printf("intel-ax211: firmware error table unavailable "
+		kern_logf("intel-ax211: firmware error table unavailable "
 			   "alive=%u status=%04x\n",
 			   (unsigned)controller->runtime_start.alive_accepted,
 			   controller->runtime_start.alive.status);
@@ -4831,7 +4833,7 @@ ax211_pci_firmware_error_dump(
 
 	/* Handles the lmac result condition. */
 	if (lmac_result == 0) {
-		hal_printf(
+		kern_logf(
 			"intel-ax211: LMAC firmware error ptr=%08x valid=%08x "
 			"id=%08x data=%08x/%08x/%08x hcmd=%08x last=%08x "
 			"isr=%08x/%08x/%08x/%08x/%08x\n",
@@ -4839,20 +4841,20 @@ ax211_pci_firmware_error_dump(
 			lmac[9U], lmac[23U], lmac[29U], lmac[24U], lmac[25U],
 			lmac[26U], lmac[27U], lmac[28U]);
 	} else {
-		hal_printf("intel-ax211: LMAC firmware error unavailable "
+		kern_logf("intel-ax211: LMAC firmware error unavailable "
 			   "ptr=%08x result=%d\n",
 			   lmac_address, lmac_result);
 	}
 
 	/* Handles the umac result condition. */
 	if (umac_result == 0) {
-		hal_printf(
+		kern_logf(
 			"intel-ax211: UMAC firmware error ptr=%08x valid=%08x "
 			"id=%08x data=%08x/%08x/%08x hcmd=%08x isr=%08x\n",
 			umac_address, umac[0U], umac[1U], umac[6U], umac[7U],
 			umac[8U], umac[13U], umac[14U]);
 	} else {
-		hal_printf("intel-ax211: UMAC firmware error unavailable "
+		kern_logf("intel-ax211: UMAC firmware error unavailable "
 			   "ptr=%08x result=%d\n",
 			   umac_address, umac_result);
 	}
@@ -4993,7 +4995,7 @@ ax211_pci_direct_command(
 						(uint16_t)error_payload[6U] |
 						((uint16_t)error_payload[7U]
 						 << 8);
-					hal_printf("intel-ax211: firmware "
+					kern_logf("intel-ax211: firmware "
 						   "command error "
 						   "type=%08x command=%02x "
 						   "sequence=%04x "
@@ -5005,7 +5007,7 @@ ax211_pci_direct_command(
 						   ax211_pci_get_le32(
 							   error_payload + 8U));
 				} else {
-					hal_printf("intel-ax211: malformed "
+					kern_logf("intel-ax211: malformed "
 						   "firmware "
 						   "command error length=%u\n",
 						   (unsigned)decoded
@@ -5058,7 +5060,7 @@ ax211_pci_direct_command(
 				result = 0;
 				command_submitted = 0;
 			} else {
-				hal_printf(
+				kern_logf(
 					"intel-ax211: command completion "
 					"rejected "
 					"request=%02x/%02x response=%02x/%02x "
@@ -5102,7 +5104,7 @@ ax211_pci_direct_command(
 				       .command_slots_device_address +
 			       (uint64_t)handle.token.index *
 				       INTEL_AX211_TRANSPORT_COMMAND_SLOT_SIZE;
-		hal_printf(
+		kern_logf(
 			"intel-ax211: command timeout opcode=%02x group=%02x "
 			"token=%u events=%u reason=%s slot-page=%03x "
 			"fh=%08x hw=%08x raw-fh=%08x raw-hw=%08x "
@@ -5228,7 +5230,7 @@ ax211_pci_assoc_exchange(
 		reply->payload, sizeof(reply->payload), &response_length,
 		&message, &pending);
 	if (result != 0) {
-		hal_printf("intel-ax211: association exchange failed step=%u "
+		kern_logf("intel-ax211: association exchange failed step=%u "
 			   "opcode=%02x group=%02x result=%d\n",
 			   command->step, command->opcode, command->group,
 			   result);
@@ -5275,7 +5277,7 @@ ax211_pci_assoc_exchange(
 						  ((uint16_t)reply->payload[7U]
 						   << 8)
 					: 0;
-			hal_printf("intel-ax211: queue add response rejected "
+			kern_logf("intel-ax211: queue add response rejected "
 				   "result=%d "
 				   "length=%u qid=%u flags=%04x wp=%u "
 				   "reserved=%04x\n",
@@ -6072,7 +6074,7 @@ ax211_pci_key_fail_closed(
 	/* Handles the controller availability. */
 	if (controller == NULL)
 		return error != 0 ? error : EIO;
-	hal_printf("intel-ax211: fail-closed key/association path error=%d "
+	kern_logf("intel-ax211: fail-closed key/association path error=%d "
 		   "phase=%u step=%u resources=%08x\n",
 		   error, controller->association.phase,
 		   controller->association.step,
@@ -6205,7 +6207,7 @@ ax211_pci_tx_dispatch(
 
 	/* Checks the operation status. */
 	if (result == INTEL_AX211_TX_RING_TX_FAILED) {
-		hal_printf("intel-ax211: TX failed generation=%u cookie=%u "
+		kern_logf("intel-ax211: TX failed generation=%u cookie=%u "
 			   "acknowledged=%u failure=%u/%u\n",
 			   (unsigned)retired.handle.connection_generation,
 			   (unsigned)retired.handle.cookie,
@@ -6276,7 +6278,7 @@ ax211_pci_tx_timeout_check(
 	/* Checks the operation result. */
 	if (result != INTEL_AX211_TX_RING_TIMEOUT)
 		return EIO;
-	hal_printf(
+	kern_logf(
 		"intel-ax211: TX completion timeout generation=%u cookie=%u\n",
 		(unsigned)handle.connection_generation,
 		(unsigned)handle.cookie);
@@ -6505,7 +6507,7 @@ ax211_net_open(
 			/* Handles the boot result condition. */
 			if (boot_result == INTEL_AX211_BOOT_OK &&
 			    controller->mmio.master_disable_timed_out) {
-				hal_printf("intel-ax211: master-disable "
+				kern_logf("intel-ax211: master-disable "
 					   "indication "
 					   "timed out; PCI bus master disabled "
 					   "and reset "
@@ -6514,7 +6516,7 @@ ax211_net_open(
 
 			/* Checks the operation status. */
 			if (error != 0) {
-				hal_printf(
+				kern_logf(
 					"intel-ax211: first boot failed "
 					"result=%d "
 					"last=%u state=%u generation=%u "
@@ -6541,7 +6543,7 @@ ax211_net_open(
 			/* Checks the operation status. */
 			if (error != 0 &&
 			    controller->last_receive_length != 0U) {
-				hal_printf("intel-ax211: last rx length=%u "
+				kern_logf("intel-ax211: last rx length=%u "
 					   "opcode=%02x "
 					   "group=%02x index=%02x queue=%02x "
 					   "version=%u\n",
@@ -6601,7 +6603,7 @@ ax211_net_open(
 			controller->hardware_epoch =
 				controller->runtime_start.generation;
 			if (error != 0) {
-				hal_printf(
+				kern_logf(
 					"intel-ax211: runtime start failed "
 					"result=%d "
 					"last=%u state=%u generation=%u "
@@ -6633,7 +6635,7 @@ ax211_net_open(
 			/* Checks the operation status. */
 			if (error != 0 &&
 			    controller->last_receive_length != 0U) {
-				hal_printf("intel-ax211: last runtime rx "
+				kern_logf("intel-ax211: last runtime rx "
 					   "length=%u "
 					   "opcode=%02x group=%02x index=%02x "
 					   "queue=%02x "
@@ -6707,7 +6709,7 @@ ax211_net_open(
 		if (error == 0) {
 			controller->operation_admission_open = 1U;
 		} else {
-			hal_printf(
+			kern_logf(
 				"intel-ax211: open failed stage=%s error=%d\n",
 				stage, error);
 
@@ -6769,7 +6771,7 @@ ax211_pci_close_locked(
 				  station, ax211_pci_lifecycle_deadline());
 	mutex_lock(&controller->lifecycle_lock);
 	if (error != 0 && ax211_pci_log_rejection(controller)) {
-		hal_printf("intel-ax211: common close requires checked stop "
+		kern_logf("intel-ax211: common close requires checked stop "
 			   "(%d)\n",
 			   error);
 	}
@@ -6835,7 +6837,7 @@ ax211_net_close(
 	error = ax211_pci_close_locked(controller);
 	wlan_station_stop_complete(controller->station, error);
 	if (error != 0 && ax211_pci_log_rejection(controller))
-		hal_printf("intel-ax211: checked close pending (%d)\n", error);
+		kern_logf("intel-ax211: checked close pending (%d)\n", error);
 
 	mutex_unlock(&controller->lifecycle_lock);
 }
@@ -7012,7 +7014,7 @@ ax211_net_poll_receive(
 		if (result == INTEL_AX211_BOOT_RECEIVE_TIMEOUT)
 			break;
 		if (result != INTEL_AX211_BOOT_RECEIVE_OK) {
-			hal_printf(
+			kern_logf(
 				"intel-ax211: runtime receive failed result=%d "
 				"scan-phase=%u pending=%u\n",
 				result, controller->scan_session.phase,
@@ -7029,7 +7031,7 @@ ax211_net_poll_receive(
 
 		/* Handles the dispatch result condition. */
 		if (dispatch_result != 0) {
-			hal_printf(
+			kern_logf(
 				"intel-ax211: runtime dispatch failed error=%d "
 				"length=%u opcode=%02x group=%02x index=%02x "
 				"queue=%02x "
@@ -7132,7 +7134,7 @@ ax211_net_ioctl(
 	/* Checks the ax211 pci log rejection result. */
 	if (request == SIOCSWLANCONNECT && result != 0 &&
 	    ax211_pci_log_rejection(controller)) {
-		hal_printf("intel-ax211: connect ioctl rejected result=%d "
+		kern_logf("intel-ax211: connect ioctl rejected result=%d "
 			   "runtime=%u "
 			   "quarantined=%u recovery=%u/%u attached=%u "
 			   "detaching=%u\n",
@@ -7166,7 +7168,7 @@ ax211_net_release(
 	if (controller == NULL)
 		return;
 	ax211_pci_scrub(controller, sizeof(*controller));
-	kernel_free(controller);
+	kern_free(controller);
 }
 
 /* Starts one finite asynchronous firmware scan on the selected channel. */
@@ -7403,7 +7405,7 @@ ax211_radio_scan_stop(
 	 * producer behind the common WLAN barrier.
 	 */
 	error = ax211_pci_scan_result_errno(result);
-	hal_printf("intel-ax211: scan stop generation=%u phase=%u result=%d "
+	kern_logf("intel-ax211: scan stop generation=%u phase=%u result=%d "
 		   "error=%d\n",
 		   (unsigned)generation, phase, result, error);
 	ax211_pci_bss_staging_discard(controller);
@@ -7453,7 +7455,7 @@ ax211_radio_connect_start(
 	    controller->connection_generation != 0U) {
 		/* Handles the ax211 pci log rejection condition. */
 		if (ax211_pci_log_rejection(controller)) {
-			hal_printf("intel-ax211: connect admission rejected "
+			kern_logf("intel-ax211: connect admission rejected "
 				   "runtime=%u "
 				   "quarantined=%u recovery=%u/%u tx-ring=%u "
 				   "association=%u "
@@ -7513,7 +7515,7 @@ ax211_radio_connect_start(
 
 		/* Checks the operation result. */
 		if (result != INTEL_AX211_ASSOC_AUTH_READY) {
-			hal_printf(
+			kern_logf(
 				"intel-ax211: association drive stopped "
 				"result=%d "
 				"phase=%u step=%u failure=%d resources=%08x\n",
@@ -7541,14 +7543,14 @@ ax211_radio_connect_start(
 
 	/* Checks the operation result. */
 	if (result != 0) {
-		hal_printf("intel-ax211: association start failed result=%d "
+		kern_logf("intel-ax211: association start failed result=%d "
 			   "phase=%u step=%u failure=%d resources=%08x\n",
 			   result, controller->association.phase,
 			   controller->association.step,
 			   controller->association.failure,
 			   controller->association.resources);
 	} else {
-		hal_printf("intel-ax211: association hardware ready "
+		kern_logf("intel-ax211: association hardware ready "
 			   "generation=%u\n",
 			   (unsigned)generation);
 	}
@@ -7595,7 +7597,7 @@ ax211_radio_disconnect(
 		/* Checks the operation result. */
 		result = ax211_pci_assoc_rollback(controller, generation);
 		if (result != 0 && ax211_pci_log_rejection(controller)) {
-			hal_printf("intel-ax211: association rollback failed "
+			kern_logf("intel-ax211: association rollback failed "
 				   "generation=%u result=%d phase=%u step=%u "
 				   "failure=%d\n",
 				   (unsigned)generation, result,
@@ -7651,7 +7653,7 @@ ax211_radio_management_transmit(
 	    controller->connection_generation != generation) {
 		/* Handles the ax211 pci log rejection condition. */
 		if (ax211_pci_log_rejection(controller)) {
-			hal_printf("intel-ax211: management TX rejected "
+			kern_logf("intel-ax211: management TX rejected "
 				   "runtime=%u "
 				   "recovery=%u/%u ring=%u "
 				   "expected-generation=%u generation=%u\n",
@@ -7763,7 +7765,7 @@ ax211_radio_association_set(
 				result = ax211_pci_mcast_filter_configure(
 					controller, deadline);
 				if (result != 0) {
-					hal_printf(
+					kern_logf(
 						"intel-ax211: post-association "
 						"multicast configuration "
 						"failed (%d)\n",
@@ -7777,7 +7779,7 @@ ax211_radio_association_set(
 				result = ax211_pci_mac_power_configure(
 					controller, deadline);
 				if (result != 0) {
-					hal_printf(
+					kern_logf(
 						"intel-ax211: post-association "
 						"power configuration failed "
 						"(%d)\n",

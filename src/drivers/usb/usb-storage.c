@@ -22,6 +22,8 @@
 #include <kern/sched.h>
 #include <kern/thread.h>
 #include <string.h>
+#include "kern/klog.h"
+#include "kern/kmem.h"
 
 #define USB_MASS_STORAGE_CLASS 0x08U
 #define USB_MASS_STORAGE_SCSI 0x06U
@@ -318,7 +320,7 @@ storage_urb_transfer(
 	if (error == 0 && checkpoint != NULL &&
 	    drv_usb_urb_status(urb) == DRV_USB_URB_PENDING) {
 		checkpoint_sequence = ++storage->checkpoint_read_sequence;
-		hal_printf(
+		kern_logf(
 			"usb-storage-checkpoint: accepted disk=%s "
 			"generation=%u "
 			"usb%u device=%u lba=%u blocks=%u bytes=%u "
@@ -341,7 +343,7 @@ storage_urb_transfer(
 
 	/* Handles the checkpoint sequence condition. */
 	if (checkpoint_sequence != 0) {
-		hal_printf(
+		kern_logf(
 			"usb-storage-checkpoint: completed disk=%s "
 			"generation=%u "
 			"usb%u device=%u lba=%u blocks=%u bytes=%u status=%u "
@@ -693,7 +695,7 @@ bot_command_locked(
 	error = storage_bulk(storage, storage->bulk_out, &cbw, sizeof(cbw),
 			     BOT_TIMEOUT_MS, &actual, NULL);
 	if (error != 0 || actual != sizeof(cbw)) {
-		hal_printf(
+		kern_logf(
 			"usb-storage: BOT CBW error=%d actual=%u expected=%u\n",
 			error, (unsigned)actual, (unsigned)sizeof(cbw));
 		goto transport_error;
@@ -722,7 +724,7 @@ bot_command_locked(
 		}
 		if (error != 0 ||
 		    (data_stalled == 0 && !input && actual != length)) {
-			hal_printf("usb-storage: BOT data dir=%s error=%d "
+			kern_logf("usb-storage: BOT data dir=%s error=%d "
 				   "actual=%u "
 				   "expected=%u\n",
 				   input ? "in" : "out", error,
@@ -748,7 +750,7 @@ bot_command_locked(
 	if (error != 0 || actual != sizeof(csw) ||
 	    get_le32(csw.signature) != BOT_CSW_SIGNATURE ||
 	    get_le32(csw.tag) != tag) {
-		hal_printf("usb-storage: BOT CSW error=%d actual=%u status=%u "
+		kern_logf("usb-storage: BOT CSW error=%d actual=%u status=%u "
 			   "tag=%u expected-tag=%u\n",
 			   error, (unsigned)actual, (unsigned)csw.status,
 			   get_le32(csw.tag), tag);
@@ -758,7 +760,7 @@ bot_command_locked(
 	/* Handles the csw result condition. */
 	csw_result = drv_usb_bot_classify_csw_status(csw.status);
 	if (csw_result == DRV_USB_BOT_CSW_INVALID) {
-		hal_printf("usb-storage: BOT invalid CSW status=%u\n",
+		kern_logf("usb-storage: BOT invalid CSW status=%u\n",
 			   (unsigned)csw.status);
 		goto transport_error;
 	}
@@ -766,7 +768,7 @@ bot_command_locked(
 	/* Handles the uint64 t condition. */
 	residue = get_le32(csw.residue);
 	if ((uint64_t)residue > length) {
-		hal_printf("usb-storage: BOT residue=%u exceeds transfer=%u\n",
+		kern_logf("usb-storage: BOT residue=%u exceeds transfer=%u\n",
 			   residue, (unsigned)length);
 		goto transport_error;
 	}
@@ -775,7 +777,7 @@ bot_command_locked(
 	if (csw_result == DRV_USB_BOT_CSW_GOOD &&
 	    !drv_usb_bot_processed_length(length, data_actual, residue, input,
 					  &processed)) {
-		hal_printf(
+		kern_logf(
 			"usb-storage: BOT data length=%u actual=%u residue=%u "
 			"direction=%s\n",
 			(unsigned)length, (unsigned)data_actual, residue,
@@ -796,7 +798,7 @@ bot_command_locked(
 	if (drv_usb_bot_csw_requests_sense(csw_result)) {
 		/* Checks the operation status. */
 		if (report_command_failed != 0) {
-			hal_printf(
+			kern_logf(
 				"usb-storage: BOT check-condition residue=%u\n",
 				residue);
 		}
@@ -808,7 +810,7 @@ bot_command_locked(
 		return EIO;
 	}
 
-	hal_printf("usb-storage: BOT phase-error residue=%u\n", residue);
+	kern_logf("usb-storage: BOT phase-error residue=%u\n", residue);
 transport_error:
 	storage->transport_error = 1;
 
@@ -1265,12 +1267,12 @@ scsi_configure_flush_policy(
 
 	/* Handles the sense condition. */
 	if (sense.valid) {
-		hal_printf("usb-storage: flush preflight error=%d "
+		kern_logf("usb-storage: flush preflight error=%d "
 			   "sense=%02x/%02x/%02x policy=%s\n",
 			   error, sense.key, sense.asc, sense.ascq,
 			   flush_policy_name(storage->flush_policy));
 	} else {
-		hal_printf("usb-storage: flush preflight error=%d "
+		kern_logf("usb-storage: flush preflight error=%d "
 			   "sense=unavailable policy=%s\n",
 			   error, flush_policy_name(storage->flush_policy));
 	}
@@ -1332,12 +1334,12 @@ scsi_probe(
 	if (error != 0) {
 		/* Handles the sense condition. */
 		if (sense.valid) {
-			hal_printf("usb-storage: LUN %u not ready error=%d "
+			kern_logf("usb-storage: LUN %u not ready error=%d "
 				   "sense=%02x/%02x/%02x\n",
 				   storage->lun, error, sense.key, sense.asc,
 				   sense.ascq);
 		} else {
-			hal_printf("usb-storage: LUN %u not ready error=%d "
+			kern_logf("usb-storage: LUN %u not ready error=%d "
 				   "sense=unavailable\n",
 				   storage->lun, error);
 		}
@@ -1453,26 +1455,26 @@ out:
 	if (error != 0 && (opcode != 0 || bio->b_op == BIO_FLUSH)) {
 		/* Handles the bio condition. */
 		if (bio->b_op == BIO_FLUSH && sense.valid) {
-			hal_printf("usb-storage: %s flush policy=%s error=%d "
+			kern_logf("usb-storage: %s flush policy=%s error=%d "
 				   "sense=%02x/%02x/%02x\n",
 				   disk->d_name,
 				   flush_policy_name(storage->flush_policy),
 				   error, sense.key, sense.asc, sense.ascq);
 		} else if (bio->b_op == BIO_FLUSH) {
-			hal_printf("usb-storage: %s flush policy=%s error=%d "
+			kern_logf("usb-storage: %s flush policy=%s error=%d "
 				   "sense=unavailable\n",
 				   disk->d_name,
 				   flush_policy_name(storage->flush_policy),
 				   error);
 		} else if (sense.valid) {
-			hal_printf("usb-storage: %s op=%02x lba=%u blocks=%u "
+			kern_logf("usb-storage: %s op=%02x lba=%u blocks=%u "
 				   "error=%d sense=%02x/%02x/%02x\n",
 				   disk->d_name, opcode,
 				   (uint32_t)bio->b_mapped_block,
 				   bio->b_block_count, error, sense.key,
 				   sense.asc, sense.ascq);
 		} else {
-			hal_printf("usb-storage: %s op=%02x lba=%u blocks=%u "
+			kern_logf("usb-storage: %s op=%02x lba=%u blocks=%u "
 				   "error=%d sense=unavailable\n",
 				   disk->d_name, opcode,
 				   (uint32_t)bio->b_mapped_block,
@@ -1598,7 +1600,7 @@ storage_publish_disk(
 		return error;
 	}
 
-	hal_printf("usb-storage: %s blocks=%u block-size=%u cache=%s "
+	kern_logf("usb-storage: %s blocks=%u block-size=%u cache=%s "
 		   "dpofua=%s flush=%s%s\n",
 		   disk->d_name, (uint32_t)disk->d_block_count,
 		   disk->d_block_size,
@@ -1867,7 +1869,7 @@ storage_attach(
 	(void)id;
 
 	/* Handles the storage availability. */
-	storage = kernel_alloc(sizeof(*storage));
+	storage = kern_malloc(sizeof(*storage));
 	if (storage == NULL)
 		return ENOMEM;
 	memset(storage, 0, sizeof(*storage));
@@ -1880,7 +1882,7 @@ storage_attach(
 
 	/* Handles the bulk in availability. */
 	if (storage->bulk_in == NULL || storage->bulk_out == NULL) {
-		kernel_free(storage);
+		kern_free(storage);
 
 		/* Failed. */
 		return ENODEV;
@@ -1893,7 +1895,7 @@ storage_attach(
 	/* Checks the operation status. */
 	error = storage_urbs_alloc(storage);
 	if (error != 0) {
-		kernel_free(storage);
+		kern_free(storage);
 
 		/* Failed. */
 		return error;
@@ -1907,7 +1909,7 @@ storage_attach(
 			    drv_usb_interface_number(interface), &maximum_lun,
 			    1, 1000U, &actual) == 0 &&
 	    actual == 1 && maximum_lun != 0) {
-		hal_printf("usb-storage: only LUN 0 of %u is supported\n",
+		kern_logf("usb-storage: only LUN 0 of %u is supported\n",
 			   (unsigned)maximum_lun + 1U);
 	}
 
@@ -1939,7 +1941,7 @@ storage_attach(
 
 	/* Handles the medium absent condition. */
 	if (medium_absent) {
-		hal_printf("usb-storage: LUN %u has no medium; reader attached "
+		kern_logf("usb-storage: LUN %u has no medium; reader attached "
 			   "without a disk\n",
 			   storage->lun);
 	}
@@ -1956,7 +1958,7 @@ fail:
 		 */
 		storage->media_state = STORAGE_FAILED;
 		(void)drv_usb_interface_set_driver_data(interface, storage);
-		hal_printf("usb-storage: attach error=%d; control owner "
+		kern_logf("usb-storage: attach error=%d; control owner "
 			   "retained for stop\n",
 			   error);
 
@@ -1965,7 +1967,7 @@ fail:
 	}
 
 	storage_urbs_free(storage);
-	kernel_free(storage);
+	kern_free(storage);
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -2046,7 +2048,7 @@ storage_detach(
 	if (error != 0)
 		return error;
 	storage_urbs_free(storage);
-	kernel_free(storage);
+	kern_free(storage);
 
 	/* Succeeded. */
 	return 0;

@@ -57,6 +57,7 @@ kern_log_write(
 {
 	char chunk[257];
 	unsigned long irq;
+	void (*console_output)(int c);
 	size_t at;
 	size_t n;
 
@@ -70,6 +71,16 @@ kern_log_write(
 	append_locked(bytes, length);
 
 	spin_unlock_irqrestore(&klog_lock, irq);
+
+	/*
+	 * Mirrors the record to the console the kernel has published, so a
+	 * driver diagnostic is visible on screen and not only in the ring.
+	 */
+	console_output = __atomic_load_n(&kernel_putc, __ATOMIC_ACQUIRE);
+	if (console_output != NULL) {
+		for (at = 0; at < length; at++)
+			console_output((unsigned char)bytes[at]);
+	}
 
 	/* Mirrors the record to the debug console in terminated chunks. */
 	at = 0;

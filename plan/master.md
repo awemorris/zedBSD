@@ -104,6 +104,117 @@ Objectives → Milestone Goals → WS → Phase → Queue試行/結果を対応�
 なったため、`/dev/console` が12件、`tty.c` が9件、pcat graphics が11件ビルドできない。
 これは early console 化そのものなので、下の計画に従って別途進める。
 
+#### fg008：ドライバとHALの分離（2026-09-12、着手済み、未コミット）
+
+方針は、ドライバがHALを直接触らないこと。HAL API相当の操作はカーネル側に用意し、
+単なるラッパーであってもカーネルに置く。カーネルがコア機能として持つAPIは `kern_*()`
+で命名する。インライン化は要求しない。LTOは将来の検討とし、今は前提にしない。
+
+置換済み（468箇所、27ファイル、ビルドと起動を確認）：
+
+- `hal_printf()` → `kern_logf()`（ドライバ282、カーネル40）。
+- `kernel_alloc()`/`kernel_free()` → `kern_malloc()`/`kern_free()`（186）。
+  `kernel_alloc`/`kernel_free` はHALが呼ぶ入口として残る。
+
+この置換で診断の経路が一本化された。`kern_log_write()` は従来リングバッファと
+プラットフォームのデバッグポートにしか出しておらず、amd64 では画面に出なかったため、
+公開済みのコンソールへもミラーするようにした。あわせて `hal_printf()` と `kern_logf()`
+を並べて呼ぶ二重出力（`VFS_LOG` マクロと main.c の4箇所）を1本に畳んだ。
+
+## カーネル側に用意すべき足場
+
+ドライバに残るHAL直接呼び出しは295箇所。5群に分かれる。
+
+1. アトミックとバリア（約110）
+   `hal_atomic_load_acquire` 45、`hal_atomic_store_release` 17、
+   `hal_atomic_compare_exchange_acq_rel` 8、`hal_atomic_relax` 4、その他。
+   `hal_io_mb` 33、`hal_io_wmb` 31、`hal_io_rmb` 19、`hal_compiler_barrier` 6。
+   受け皿は既存の `include/kern/atomic.h`。`kern_atomic_*` と `kern_barrier_*` を足す。
+
+2. デバイスI/O（約50）
+   `hal_io_outp8` 17、`hal_io_inp8` 8、`hal_io_inp16` 2、`hal_io_outp16` 1、
+   `hal_mmio_read*`/`hal_mmio_write*` 各3。
+   新規に `include/kern/device-io.h` を置き、`kern_io_in8()`、`kern_io_out8()`、
+   `kern_mmio_read32()` などを定義する。
+
+3. 割り込み（約50）
+   `hal_irq_mask` 9、`hal_irq_send_eoi` 7、`hal_irq_unregister` 6、`hal_irq_unmask` 6、
+   `hal_irq_enable` 6、`hal_irq_disable` 5、`hal_irq_unregister_msi` 5、
+   `hal_irq_register` 4、`hal_irq_register_msi` 2、`hal_irq_set_handler` 2、
+   `hal_irq_service_wait` 1。
+   新規に `include/kern/irq.h`。`hal_irq_ack_t` がドライバに15箇所露出しているので、
+   カーネル側の不透明な型に置き換える。`hal_irq_set_handler` の2箇所は
+   `hal_irq_register` への移行漏れ。
+
+4. 物理メモリとアドレス空間（約25）
+   `hal_pmem_free` 9、`hal_pmem_to_kernel` 4、`hal_pmem_alloc` 3、
+   `hal_pmem_alloc_limited` 1、`hal_space_map_device` 3、`hal_space_unmap_device` 2、
+   `hal_space_get_page_size` 3、`hal_get_memstat` 1、`hal_get_arch_handoff` 2。
+   `include/kern/pmem.h` が既に `struct kern_pmem` を持つので、そこへ
+   `kern_pmem_alloc()`、`kern_pmem_free()`、`kern_pmem_to_kernel()`、
+   `kern_device_map()` を足す。`hal_physaddr_t` の露出3箇所も置き換える。
+
+5. スレッドの待機と起床（29）
+   `kernel_notify_task` 24、`kernel_wait_task` 5。
+   これはタスクではなくスレッドに対する操作なので、カーネルAPIとして
+   `kern_thread_block()` と `kern_thread_wakeup(struct thread *)` を用意する。
+   ドライバが `hal_task_t` を持ち回らなくて済むよう、ワーカー構造体が
+   `struct thread *` を保持する形に変える。USB と PCI のワーカーが対象。
+
+6. その他
+   `hal_cons_resume`/`hal_cons_suspend` 6箇所は `pcat-graphics.c` に残る古い呼び出しで、
+   `drv_pcat_text_resume()`/`_suspend()` への置換漏れ。`hal_rtc_read_counter` 2箇所は
+   時刻APIをカーネル側に用意する。`HAL_OK` 31、`HAL_FATAL` 9、`HAL_ERR_*` 6 の
+   定数露出も、カーネル側の返り値規約へ寄せる。
+
+完了の判定は、`src/drivers` から `hal/hal.h` の include を外してもビルドが通ること。
+現在38ファイルが直接 include している。
+
+## zedbsd 接頭辞の段階的廃止
+
+`ZEDBSD_` はヘッダガード564件、それ以外1483件。`zedbsd_` は69件。
+上位は `ZEDBSD_PATH_MAX` 93、`ZEDBSD_PAGE_SIZE` 86、`ZEDBSD_FAT32` 32、
+`zedbsd_peercred` 26、`ZEDBSD_TEST_CHECKPOINTS` 24。
+
+カーネルのコア機能に属するものから `kern_*`/`KERN_*` へ移す。
+ヘッダガードは機械的に置換できるので最後でよい。UAPI に露出しているもの
+（`ZEDBSD_TTY_IOC_GROUP` など）はユーザーランドとの互換に影響するため、
+移行時期を別に決める。
+
+#### fg007：段階5 early console への縮退（2026-09-11、amd64、未コミット）
+
+amd64 の HAL コンソールを出力専用の早期コンソールへ縮めた。early console 化は完了。
+
+- `src/hal/amd64/bsp-pcat/cons.c` は 2407行から 1054行になった。公開していた
+  `hal_cons_*` 19関数、キーイベントのリング、待ち行列、キーボード所有権のテスト
+  フィクスチャ6個、8042 のポート定数を削除した。残るのは `hal_putc()`、その描画経路、
+  出力ロック、`prekern_pcat_cons_init()`、`prekern_pcat_cons_irq_init()` である。
+- `src/hal/cons-keys.h` を削除した。キーイベントの符号化はカーネル側の
+  `KERN_KEY_*`（include/kern/input-device.h）だけになった。
+- `src/hal/cons-wait.h` は i386・arm64・m68k がまだ使うため残す。amd64 からの参照は消えた。
+- イベントモードの分岐を削除した。早期コンソールは常にターミナル表示である。
+
+検証（QEMU、QMP の send-key）：
+
+- `login:` まで到達し、`root` の打鍵がエコーされる。
+- 空パスワードでログインし、`root@zedbsd:/root$` のシェルで `ls` が実行できる。
+- 8042 → evdev → `/dev/console` の keymap 変換 → `/dev/graphics` のテキスト層、という
+  入力と出力の往復が通っている。
+
+fg007 の到達点：
+
+- hal.h の Console 節は存在しない。HAL の表示関連は `hal_putc()` 1本。
+- 表示は `/dev/graphics`（`graphics/text.c`）、入力は `ps2-8042.c` の evdev、
+  端末制御は `/dev/console` というプラットフォーム独立のマルチプレクサ、という構成になった。
+
+残り：
+
+- HAL 側の `kernel_wait_task()`/`kernel_notify_task()` は `src/hal/amd64/irq.c` の
+  `hal_irq_service_wait()` にのみ残る。これはサービス方式IRQ廃止の別作業に属する。
+- hal.h に説明要求の XXX が13件残る。
+- i386・arm64・sparcv9・m68k は未対応。
+- 上位モデルによる監査。
+
 #### fg007：init 停止の解決と段階4（2026-09-11、amd64、未コミット）
 
 `boot: starting init /sbin/init` で止まる症状を解決した。QEMU で `login:` まで到達し、

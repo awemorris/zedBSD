@@ -13,6 +13,8 @@
 #include <hal/hal.h>
 #include <errno.h>
 #include <string.h>
+#include "kern/klog.h"
+#include "kern/kmem.h"
 
 /* A completed probe description, separate from the published disk state. */
 struct uas_media {
@@ -409,7 +411,7 @@ uas_publish_media(struct uas_disk *owner, const struct uas_media *media)
 	owner->partitions_pending = 1;
 	owner->media_recovery_attempted = 0;
 	owner->disk = disk;
-	hal_printf("usb-uas: %s blocks=%llu block-size=%u policy=%u %s\n",
+	kern_logf("usb-uas: %s blocks=%llu block-size=%u policy=%u %s\n",
 	    disk->d_name, (unsigned long long)owner->blocks, owner->block_size,
 	    (unsigned)owner->policy, owner->transport.super_speed ? "super-speed" : "high-speed");
 	return 0;
@@ -591,7 +593,7 @@ uas_attach(struct drv_usb_interface *interface, const struct drv_usb_id *id)
 				pipes[j] = endpoint;
 		}
 	}
-	owner = kernel_alloc(sizeof(*owner));
+	owner = kern_malloc(sizeof(*owner));
 	if (owner == NULL)
 		return ENOMEM;
 	memset(owner, 0, sizeof(*owner));
@@ -638,10 +640,10 @@ fail:
 	if (uas_control_stop(owner) != 0 ||
 	    drv_usb_uas_transport_stop(&owner->transport) != 0) {
 		(void)drv_usb_interface_set_driver_data(interface, owner);
-		hal_printf("usb-uas: attach error=%d; owner retained for stop\n", error);
+		kern_logf("usb-uas: attach error=%d; owner retained for stop\n", error);
 		return 0;
 	}
-	kernel_free(owner);
+	kern_free(owner);
 	return error;
 }
 
@@ -703,7 +705,7 @@ done:
 	mutex_unlock(&owner->control_lock);
 	if (error == 0) {
 		(void)drv_usb_interface_set_driver_data(interface, NULL);
-		kernel_free(owner);
+		kern_free(owner);
 	}
 	return error;
 }

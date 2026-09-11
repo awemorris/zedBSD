@@ -20,6 +20,8 @@
 #include <kern/io-stats.h>
 #include <kern/sched.h>
 #include <string.h>
+#include "kern/klog.h"
+#include "kern/kmem.h"
 
 #define USB_REQ_GET_DESCRIPTOR 6U
 #define USB_REQ_CLEAR_FEATURE 1U
@@ -322,7 +324,7 @@ drv_usb_init(
 	usb_device_generation = 0;
 	atomic_store_release(&usb_topology_gate, 0U);
 	usb_initialized = true;
-	hal_printf("usb: URB completion contract q009-release-acquire-v1\n");
+	kern_logf("usb: URB completion contract q009-release-acquire-v1\n");
 
 	/* Succeeded. */
 	return 0;
@@ -395,7 +397,7 @@ drv_usb_shutdown(
 			/* Checks the operation status. */
 			error = shutdown_interfaces(device, &retain);
 			if (error != 0) {
-				hal_printf("usb%u: device %u driver shutdown "
+				kern_logf("usb%u: device %u driver shutdown "
 					   "failed (%d); class resources "
 					   "retained\n",
 					   bus->number, device->address, error);
@@ -428,7 +430,7 @@ drv_usb_shutdown(
 				? 0
 				: bus->hcd->ops->quiesce(bus->hcd);
 		if (error != 0) {
-			hal_printf("usb%u: host controller stop failed\n",
+			kern_logf("usb%u: host controller stop failed\n",
 				   bus->number);
 			usb_topology_lock();
 
@@ -453,7 +455,7 @@ drv_usb_shutdown(
 		 * before reboot.
 		 */
 		if (retain && bus->hcd->ops->quiesce != NULL) {
-			hal_printf("usb%u: host controller quiesced; resources "
+			kern_logf("usb%u: host controller quiesced; resources "
 				   "retained\n",
 				   bus->number);
 		}
@@ -510,7 +512,7 @@ drv_usb_hcd_register(
 	}
 
 	/* Handles the bus availability. */
-	bus = kernel_alloc(sizeof(*bus));
+	bus = kern_malloc(sizeof(*bus));
 	if (bus == NULL)
 		return ENOMEM;
 	memset(bus, 0, sizeof(*bus));
@@ -520,18 +522,18 @@ drv_usb_hcd_register(
 
 	/* Handles the hcd condition. */
 	if (hcd->root_port_count == UINT_MAX) {
-		kernel_free(bus);
+		kern_free(bus);
 
 		/* Failed. */
 		return EOVERFLOW;
 	}
 
-	bus->ports = kernel_alloc(((size_t)hcd->root_port_count + 1U) *
+	bus->ports = kern_malloc(((size_t)hcd->root_port_count + 1U) *
 				sizeof(*bus->ports));
 
 	/* Handles the ports availability. */
 	if (bus->ports == NULL) {
-		kernel_free(bus);
+		kern_free(bus);
 
 		/* Failed. */
 		return ENOMEM;
@@ -543,8 +545,8 @@ drv_usb_hcd_register(
 
 	/* Handles the root hub availability. */
 	if (bus->root_hub == NULL) {
-		kernel_free(bus->ports);
-		kernel_free(bus);
+		kern_free(bus->ports);
+		kern_free(bus);
 
 		/* Failed. */
 		return ENOMEM;
@@ -553,9 +555,9 @@ drv_usb_hcd_register(
 	/* Checks the operation status. */
 	error = hcd->ops->start(hcd);
 	if (error != 0) {
-		kernel_free(bus->root_hub);
-		kernel_free(bus->ports);
-		kernel_free(bus);
+		kern_free(bus->root_hub);
+		kern_free(bus->ports);
+		kern_free(bus);
 
 		/* Failed. */
 		return error;
@@ -566,7 +568,7 @@ drv_usb_hcd_register(
 	usb_buses = bus;
 	usb_topology_unlock();
 	*result = bus;
-	hal_printf("usb%u: %s, %u root ports\n", bus->number, hcd->name,
+	kern_logf("usb%u: %s, %u root ports\n", bus->number, hcd->name,
 		   hcd->root_port_count);
 
 	/* Succeeded. */
@@ -674,9 +676,9 @@ drv_usb_hcd_unregister(
 		*link = bus->next;
 		bus->lifecycle_claimed = 0U;
 		usb_topology_unlock();
-		kernel_free(bus->root_hub);
-		kernel_free(bus->ports);
-		kernel_free(bus);
+		kern_free(bus->root_hub);
+		kern_free(bus->ports);
+		kern_free(bus);
 
 		/* Succeeded. */
 		return 0;
@@ -763,7 +765,7 @@ drv_usb_hcd_root_hub_changed(
 		/* Checks the operation status. */
 		error = root_port_acknowledge_changes(hcd, port, status);
 		if (error != 0) {
-			hal_printf("usb%u: port %u change acknowledge failed "
+			kern_logf("usb%u: port %u change acknowledge failed "
 				   "(%d)\n",
 				   bus->number, port, error);
 			continue;
@@ -840,7 +842,7 @@ drv_usb_hcd_root_hub_changed(
 				error = ENODEV;
 		}
 		if (error != 0) {
-			hal_printf("usb%u: port %u enumeration failed (%d)\n",
+			kern_logf("usb%u: port %u enumeration failed (%d)\n",
 				   bus->number, port, error);
 		}
 	}
@@ -1864,7 +1866,7 @@ drv_usb_urb_alloc(
 	}
 
 	/* Handles the urb availability. */
-	urb = kernel_alloc(sizeof(*urb));
+	urb = kern_malloc(sizeof(*urb));
 	if (urb == NULL) {
 		device_urb_put(device);
 
@@ -1881,11 +1883,11 @@ drv_usb_urb_alloc(
 	/* Handles the iso count condition. */
 	if (iso_count != 0) {
 		urb->iso_packets =
-			kernel_alloc(sizeof(*urb->iso_packets) * iso_count);
+			kern_malloc(sizeof(*urb->iso_packets) * iso_count);
 
 		/* Handles the iso packets availability. */
 		if (urb->iso_packets == NULL) {
-			kernel_free(urb);
+			kern_free(urb);
 			device_urb_put(device);
 
 			/* Reports that no result is available. */
@@ -1948,7 +1950,7 @@ drv_usb_urb_reserve_sync(
 	}
 
 	/* Handles the buffer availability. */
-	buffer = kernel_alloc(capacity);
+	buffer = kern_malloc(capacity);
 	if (buffer == NULL)
 		return ENOMEM;
 	io_stats_record(IO_USB_BUFFER_ALLOC, capacity);
@@ -1956,7 +1958,7 @@ drv_usb_urb_reserve_sync(
 	/* Handles the sync buffer availability. */
 	if (u->sync_buffer != NULL)
 		io_stats_record(IO_USB_BUFFER_FREE, u->sync_capacity);
-	kernel_free(u->sync_buffer);
+	kern_free(u->sync_buffer);
 	u->sync_buffer = buffer;
 	u->sync_capacity = capacity;
 
@@ -2021,7 +2023,7 @@ drv_usb_urb_reserve_transfer(
 	buffer = NULL;
 	if (!shared && capacity > urb->sync_capacity) {
 		/* Handles the buffer availability. */
-		buffer = kernel_alloc(capacity);
+		buffer = kern_malloc(capacity);
 		if (buffer == NULL)
 			return ENOMEM;
 	}
@@ -2031,7 +2033,7 @@ drv_usb_urb_reserve_transfer(
 	/* Checks the operation status. */
 	error = hcd->ops->urb_reserve(hcd, urb, capacity, &reservation);
 	if (error != 0) {
-		kernel_free(buffer);
+		kern_free(buffer);
 
 		/* Failed. */
 		return error;
@@ -2082,7 +2084,7 @@ drv_usb_urb_reserve_transfer(
 
 		/* Handles the urb condition. */
 		if (!urb->sync_shared)
-			kernel_free(urb->sync_buffer);
+			kern_free(urb->sync_buffer);
 		urb->sync_buffer = shared ? shared_buffer : buffer;
 		urb->sync_capacity = capacity;
 		urb->sync_shared = shared;
@@ -4230,7 +4232,7 @@ drv_usb_driver_register(
 	}
 
 	/* Handles the e condition. */
-	e = kernel_alloc(sizeof(*e));
+	e = kern_malloc(sizeof(*e));
 	if (!e)
 		return ENOMEM;
 	e->driver = d;
@@ -4258,7 +4260,7 @@ drv_usb_driver_unregister(
 		/* Handles the e condition. */
 		if (e->driver == d) {
 			*p = e->next;
-			kernel_free(e);
+			kern_free(e);
 
 			/* Succeeded. */
 			return 0;
@@ -4280,7 +4282,7 @@ drv_usb_dump(
 
 	/* Process each linked entry. */
 	for (b = usb_buses; b; b = b->next) {
-		hal_printf("usb%u: hcd=%s ports=%u\n", b->number, b->hcd->name,
+		kern_logf("usb%u: hcd=%s ports=%u\n", b->number, b->hcd->name,
 			   b->hcd->root_port_count);
 	}
 }
@@ -4664,7 +4666,7 @@ device_quiesce(
 
 	/* Checks the device is quarantined result. */
 	if (!device_is_quarantined(device)) {
-		hal_printf("usb%u: device %u port %u teardown failed (%d); "
+		kern_logf("usb%u: device %u port %u teardown failed (%d); "
 			   "device and DMA retained\n",
 			   bus->number, device->address, device->port, error);
 	}
@@ -4731,7 +4733,7 @@ static struct drv_usb_device *
 allocate_root_hub(
 	struct drv_usb_bus *bus)
 {
-	struct drv_usb_device *device = kernel_alloc(sizeof(*device));
+	struct drv_usb_device *device = kern_malloc(sizeof(*device));
 
 	/* Handles the device availability. */
 	if (device == NULL)
@@ -4915,7 +4917,7 @@ destroy_device(
 	if (detach_error != 0 || quiesce_error != 0) {
 		/* Checks the operation status. */
 		if (detach_error != 0 && detach_error != device->reported_detach_error) {
-			hal_printf("usb%u: device %u port %u driver detach "
+			kern_logf("usb%u: device %u port %u driver detach "
 				   "pending (%d); device retained\n",
 				   bus->number, device->address, device->port,
 				   detach_error);
@@ -5075,7 +5077,7 @@ device_quarantine_selection(
 {
 	/* Checks the device is quarantined result. */
 	if (!device_is_quarantined(device)) {
-		hal_printf("usb%u: device %u %s rollback failed (%d); "
+		kern_logf("usb%u: device %u %s rollback failed (%d); "
 			   "quarantined\n",
 			   device->bus->number, device->address, stage, error);
 	}
@@ -5178,7 +5180,7 @@ device_release(
 		if ((state & USB_DEVICE_LIFECYCLE_URB_MASK) != 0) {
 			/* Checks the device is quarantined result. */
 			if (!device_is_quarantined(device)) {
-				hal_printf(
+				kern_logf(
 					"usb%u: device %u port %u release "
 					"waiting for %u URB reference(s); "
 					"device retained\n",
@@ -5247,12 +5249,12 @@ device_finalize(
 
 	/* Handles the quarantine buffer availability. */
 	if (device->quarantine_buffer != NULL)
-		kernel_free(device->quarantine_buffer);
-	kernel_free(device);
+		kern_free(device->quarantine_buffer);
+	kern_free(device);
 
 	/* Handles the report disconnect condition. */
 	if (report_disconnect) {
-		hal_printf("usb%u: device %u port %u disconnected\n",
+		kern_logf("usb%u: device %u port %u disconnected\n",
 			   bus->number, address, port);
 	}
 }
@@ -5269,7 +5271,7 @@ free_configurations(
 		/* Process each remaining element. */
 		for (index = 0; index < device->configuration_count; index++)
 			free_configuration(&device->configurations[index]);
-		kernel_free(device->configurations);
+		kern_free(device->configurations);
 	}
 
 	device->configurations = NULL;
@@ -5297,20 +5299,20 @@ free_configuration(
 
 			/* Handles the endpoints availability. */
 			if (alternate->endpoints != NULL)
-				kernel_free(alternate->endpoints);
-			kernel_free(alternate);
+				kern_free(alternate->endpoints);
+			kern_free(alternate);
 		}
 
-		kernel_free(interface);
+		kern_free(interface);
 	}
 
 	/* Handles the iads availability. */
 	if (configuration->iads != NULL)
-		kernel_free(configuration->iads);
+		kern_free(configuration->iads);
 
 	/* Handles the raw availability. */
 	if (configuration->raw != NULL)
-		kernel_free(configuration->raw);
+		kern_free(configuration->raw);
 	memset(configuration, 0, sizeof(*configuration));
 }
 
@@ -5388,7 +5390,7 @@ enumerate_port(
 	int address = 0, cleanup_error, error = 0, preferred_score;
 
 	/* Handles the device availability. */
-	device = kernel_alloc(sizeof(*device));
+	device = kern_malloc(sizeof(*device));
 	if (device == NULL)
 		return ENOMEM;
 	memset(device, 0, sizeof(*device));
@@ -5510,7 +5512,7 @@ enumerate_port(
 	}
 
 	device->configuration_count = device->descriptor.configuration_count;
-	device->configurations = kernel_alloc(device->configuration_count *
+	device->configurations = kern_malloc(device->configuration_count *
 					    sizeof(*device->configurations));
 
 	/* Handles the configurations availability. */
@@ -5565,7 +5567,7 @@ enumerate_port(
 	if (error != 0)
 		goto fail;
 	device_link(bus, device);
-	hal_printf("usb%u: device %u port %u %04x:%04x class %02x "
+	kern_logf("usb%u: device %u port %u %04x:%04x class %02x "
 		   "configuration=%u configured%s\n",
 		   bus->number, device->address, port,
 		   device->descriptor.vendor, device->descriptor.product,
@@ -5706,7 +5708,7 @@ enumerate_configuration(
 	}
 
 	/* Handles the raw availability. */
-	raw = kernel_alloc(descriptor.total_length);
+	raw = kern_malloc(descriptor.total_length);
 	if (raw == NULL)
 		return ENOMEM;
 
@@ -5719,7 +5721,7 @@ enumerate_configuration(
 		(uint16_t)((DRV_USB_DESCRIPTOR_CONFIGURATION << 8) | index), 0,
 		raw, descriptor.total_length, USB_CONTROL_TIMEOUT_MS, &actual);
 	if (error != 0 || actual != descriptor.total_length) {
-		kernel_free(raw);
+		kern_free(raw);
 
 		/* Returns the computed result. */
 		return error != 0 ? error : EIO;
@@ -5838,7 +5840,7 @@ parse_configuration(
 				}
 
 				current_interface =
-					kernel_alloc(sizeof(*current_interface));
+					kern_malloc(sizeof(*current_interface));
 
 				/* Handles the current interface availability. */
 				if (current_interface == NULL) {
@@ -5876,7 +5878,7 @@ parse_configuration(
 			}
 
 			current_alternate =
-				kernel_alloc(sizeof(*current_alternate));
+				kern_malloc(sizeof(*current_alternate));
 
 			/* Handles the current alternate availability. */
 			if (current_alternate == NULL) {
@@ -5892,13 +5894,13 @@ parse_configuration(
 
 			/* Handles the interface descriptor condition. */
 			if (interface_descriptor.endpoint_count != 0) {
-				current_alternate->endpoints = kernel_alloc(
+				current_alternate->endpoints = kern_malloc(
 					interface_descriptor.endpoint_count *
 					sizeof(*current_alternate->endpoints));
 
 				/* Handles the endpoints availability. */
 				if (current_alternate->endpoints == NULL) {
-					kernel_free(current_alternate);
+					kern_free(current_alternate);
 					current_alternate = NULL;
 					error = ENOMEM;
 					goto fail;
@@ -6112,7 +6114,7 @@ configuration_iads_prepare(
 	/* Checks the remaining item count. */
 	if (count != 0) {
 		configuration->iads =
-			kernel_alloc(count * sizeof(*configuration->iads));
+			kern_malloc(count * sizeof(*configuration->iads));
 
 		/* Handles the iads availability. */
 		if (configuration->iads == NULL)
@@ -6593,7 +6595,7 @@ interface_report_probe(
 	/* Checks the operation status. */
 	if (error == 0) {
 		driver = interface->driver;
-		hal_printf("usb%u: device %u interface %u class %02x/%02x/%02x "
+		kern_logf("usb%u: device %u interface %u class %02x/%02x/%02x "
 			   "driver=%s\n",
 			   bus, address, descriptor->interface_number,
 			   descriptor->interface_class,
@@ -6605,7 +6607,7 @@ interface_report_probe(
 
 		/* Reports the outcome in the form the failure calls for. */
 		driver = owner->driver;
-		hal_printf("usb%u: device %u interface %u class %02x/%02x/%02x "
+		kern_logf("usb%u: device %u interface %u class %02x/%02x/%02x "
 			   "claimed-by=%u driver=%s\n",
 			   bus, address, descriptor->interface_number,
 			   descriptor->interface_class,
@@ -6616,14 +6618,14 @@ interface_report_probe(
 				   : 0,
 			   driver != NULL ? driver->name : "unknown");
 	} else if (error == ENODEV && matched_driver == NULL) {
-		hal_printf("usb%u: device %u interface %u class %02x/%02x/%02x "
+		kern_logf("usb%u: device %u interface %u class %02x/%02x/%02x "
 			   "no-driver\n",
 			   bus, address, descriptor->interface_number,
 			   descriptor->interface_class,
 			   descriptor->interface_subclass,
 			   descriptor->interface_protocol);
 	} else if (matched_driver != NULL) {
-		hal_printf("usb%u: device %u interface %u class %02x/%02x/%02x "
+		kern_logf("usb%u: device %u interface %u class %02x/%02x/%02x "
 			   "driver=%s attach-failed error=%d\n",
 			   bus, address, descriptor->interface_number,
 			   descriptor->interface_class,
@@ -6631,7 +6633,7 @@ interface_report_probe(
 			   descriptor->interface_protocol, matched_driver->name,
 			   error);
 	} else {
-		hal_printf("usb%u: device %u interface %u class %02x/%02x/%02x "
+		kern_logf("usb%u: device %u interface %u class %02x/%02x/%02x "
 			   "probe-failed error=%d\n",
 			   bus, address, descriptor->interface_number,
 			   descriptor->interface_class,
@@ -6842,7 +6844,7 @@ urb_put(
 
 	/* Handles the iso packets availability. */
 	if (urb->iso_packets != NULL)
-		kernel_free(urb->iso_packets);
+		kern_free(urb->iso_packets);
 
 	/* Handles the sync buffer availability. */
 	if (urb->sync_buffer != NULL && !urb->sync_shared)
@@ -6850,8 +6852,8 @@ urb_put(
 
 	/* Handles the urb condition. */
 	if (!urb->sync_shared)
-		kernel_free(urb->sync_buffer);
-	kernel_free(urb);
+		kern_free(urb->sync_buffer);
+	kern_free(urb);
 	device_urb_put(device);
 }
 
@@ -7077,7 +7079,7 @@ device_quarantine_recovery(
 {
 	/* Checks the device is quarantined result. */
 	if (!device_is_quarantined(device)) {
-		hal_printf("usb%u: device %u %s failed (%d); quarantined\n",
+		kern_logf("usb%u: device %u %s failed (%d); quarantined\n",
 			   device->bus->number, device->address, stage, error);
 	}
 

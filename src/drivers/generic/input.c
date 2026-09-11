@@ -31,6 +31,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#include "kern/klog.h"
 
 #define INPUT_DEVICE_MAX 8U
 #define INPUT_TEXT_MAX 64U
@@ -352,7 +353,7 @@ drv_input_device_register(
 	}
 
 	*result = device;
-	hal_printf("input: /dev/input/%s: %s\n", node, device->name);
+	kern_logf("input: /dev/input/%s: %s\n", node, device->name);
 
 	/* Succeeded. */
 	return 0;

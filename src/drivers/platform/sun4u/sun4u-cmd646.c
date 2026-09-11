@@ -15,6 +15,7 @@
 #include <kern/disk.h>
 
 #include <errno.h>
+#include "kern/klog.h"
 
 #define ATA_DATA 0U
 #define ATA_ERROR 1U
@@ -66,7 +67,7 @@ drv_sun4u_cmd646_init(
 	/* Checks the operation status. */
 	error = wait_status(ATA_DRDY, ATA_BSY);
 	if (error) {
-		hal_printf("cmd646: reset error=%d status=%x ata=%x\n", error,
+		kern_logf("cmd646: reset error=%d status=%x ata=%x\n", error,
 			   hal_io_inp8(cmd + ATA_STATUS),
 			   hal_io_inp8(cmd + ATA_ERROR));
 
@@ -77,7 +78,7 @@ drv_sun4u_cmd646_init(
 	/* Checks the operation status. */
 	error = identify();
 	if (error) {
-		hal_printf("cmd646: identify error=%d status=%x ata=%x\n",
+		kern_logf("cmd646: identify error=%d status=%x ata=%x\n",
 			   error, hal_io_inp8(cmd + ATA_STATUS),
 			   hal_io_inp8(cmd + ATA_ERROR));
 
@@ -114,7 +115,7 @@ drv_sun4u_cmd646_init(
 		return error;
 	}
 
-	hal_printf("SPARCV9 IDE PASS sectors=%llu\n", sectors);
+	kern_logf("SPARCV9 IDE PASS sectors=%llu\n", sectors);
 
 	/* Succeeded. */
 	return 0;
@@ -285,7 +286,7 @@ submit(
 
 	/* Checks the operation status. */
 	if (error) {
-		hal_printf("cmd646: op=%u lba=%llu count=%u error=%d status=%x "
+		kern_logf("cmd646: op=%u lba=%llu count=%u error=%d status=%x "
 			   "ata=%x\n",
 			   (unsigned)b->b_op, b->b_mapped_block,
 			   b->b_block_count, error,

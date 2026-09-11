@@ -53,11 +53,8 @@
 
 #define PHYSICAL_DISK_MAX 4U
 #define VFS_HIGH __attribute__((section(".hightext")))
-#define VFS_LOG(...)                                                           \
-	do {                                                                   \
-		hal_printf(__VA_ARGS__);                                       \
-		kern_logf(__VA_ARGS__);                                        \
-	} while (0)
+/* kern_logf() reaches both the console and the ring buffer. */
+#define VFS_LOG(...) kern_logf(__VA_ARGS__)
 
 #if !defined(HAL_ARCH_I386) && !defined(HAL_ARCH_AMD64)
 #define VFS_LEGACY_NULL_AUTOROOT 1
