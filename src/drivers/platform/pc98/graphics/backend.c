@@ -23,9 +23,13 @@
 #include "kern/pmem.h"
 
 #define CIRRUS_PADDR 0xf0000000U
+/* One GDC plane, and the Cirrus aperture. */
+#define GDC_PLANE_SIZE 0x8000U
+#define CIRRUS_APERTURE_SIZE (4U * 1024U * 1024U)
 
-static struct kern_pmem gdc_memory[4];
-static struct kern_pmem cirrus_memory;
+/* The four GDC planes and the Cirrus aperture, once mapped. */
+static void *gdc_memory[4];
+static void *cirrus_memory;
 
 static struct pc98_auto display;
 static struct pc98_display_backend backend_hal;
@@ -334,36 +338,28 @@ pc98_graphics_prepare_hardware(
 {
 	static const uint64_t plane_address[4] = {
 		0x000a8000U, 0x000b0000U, 0x000b8000U, 0x000e0000U};
-	struct hal_pmem_request request;
 	unsigned i;
 
-	memset(&request, 0, sizeof(request));
-	request.size = 0x8000U;
-	request.alignment = 0x1000U;
-	request.type = HAL_PMEM_TYPE_VRAM;
-	request.attr = HAL_PMEM_ATTR_NOCACHE;
-	/* Process each element required by the operation. */
+	/* Maps the four uncached GDC planes. */
 	for (i = 0; i < 4; i++) {
-		request.paddr = plane_address[i];
-
-		/* Checks the hal pmem alloc result. */
-		if (hal_pmem_alloc(&request, &gdc_memory[i]) != 0)
+		/* Stops at the first plane the kernel cannot map. */
+		if (kern_device_map(plane_address[i], GDC_PLANE_SIZE,
+				    KERN_DEVICE_UNCACHED,
+				    &gdc_memory[i]) != 0)
 			goto fail;
 	}
 
-	request.paddr = CIRRUS_PADDR;
-	request.size = 4U * 1024U * 1024U;
-
-	/* Checks the hal pmem alloc result. */
-	if (hal_pmem_alloc(&request, &cirrus_memory) != 0)
+	/* Maps the uncached Cirrus aperture. */
+	if (kern_device_map(CIRRUS_PADDR, CIRRUS_APERTURE_SIZE,
+			    KERN_DEVICE_UNCACHED, &cirrus_memory) != 0)
 		goto fail;
 	drv_pc98_auto_default(&display, display_reset, display_stop, NULL,
 			      port_in8, port_out8, NULL,
-			      (volatile uint8_t *)cirrus_memory.vaddr);
+			      (volatile uint8_t *)cirrus_memory);
 
 	/* Kernel code may run while a user CR3 is active. */
 	for (i = 0; i < 4; i++)
-		display.gdc.planes[i] = (volatile uint8_t *)gdc_memory[i].vaddr;
+		display.gdc.planes[i] = (volatile uint8_t *)gdc_memory[i];
 
 	/* Checks the drv pc98 auto make hal result. */
 	if (!drv_pc98_auto_make_hal(&backend_hal, &display))
@@ -375,16 +371,22 @@ pc98_graphics_prepare_hardware(
 
 fail:
 
-	/* Handles the cirrus memory condition. */
-	if (cirrus_memory.size != 0)
-		(void)hal_pmem_free(&cirrus_memory);
-	/* Continue while the operation condition remains true. */
+	/* Releases the Cirrus aperture when it was mapped. */
+	if (cirrus_memory != NULL) {
+		(void)kern_device_unmap(cirrus_memory,
+					CIRRUS_APERTURE_SIZE);
+		cirrus_memory = NULL;
+	}
+
+	/* Releases every plane mapped before the failure. */
 	while (i != 0) {
 		i--;
 
-		/* Handles the gdc memory condition. */
-		if (gdc_memory[i].size != 0)
-			(void)hal_pmem_free(&gdc_memory[i]);
+		/* Skips a plane this attempt never reached. */
+		if (gdc_memory[i] == NULL)
+			continue;
+		(void)kern_device_unmap(gdc_memory[i], GDC_PLANE_SIZE);
+		gdc_memory[i] = NULL;
 	}
 
 	/* Succeeded. */

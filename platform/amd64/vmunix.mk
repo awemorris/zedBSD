@@ -80,6 +80,7 @@ AMD64_CFLAGS := -m64 -mcmodel=kernel -mno-red-zone -mgeneral-regs-only \
 AMD64_KERNEL_LIBC_CFLAGS := $(filter-out -mgeneral-regs-only,$(AMD64_CFLAGS))
 
 AMD64_HAL_SOURCES := src/hal/x86/rtc.c src/hal/x86/boot-parameters.c \
+	src/hal/x86/io.c \
 	src/hal/amd64/asm.c src/hal/amd64/lib.c \
 	src/hal/amd64/page.c src/hal/amd64/pmem-range.c \
 	src/hal/amd64/ram-map.c src/hal/amd64/framebuffer-map.c \
@@ -196,7 +197,8 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/pipe.c src/kern/cred.c src/kern/signal.c \
 	src/kern/cwdinfo.c src/kern/elf.c src/kern/exec.c \
 	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
-	src/kern/cdev.c src/kern/devfs.c src/drivers/generic/console.c \
+	src/kern/cdev.c src/kern/devfs.c src/kern/text-display.c \
+	src/drivers/generic/console.c \
 	src/drivers/generic/input.c \
 	src/kern/locale-record.c \
 	src/kern/tty.c \

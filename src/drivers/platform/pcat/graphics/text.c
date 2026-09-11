@@ -16,7 +16,10 @@
  * discipline above it.
  */
 
+#include <kern/device-io.h>
+#include <kern/text-display.h>
 #include <kern/lock.h>
+#include <kern/pmem.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -30,6 +33,27 @@
 /* Bounds the static cell array; 1920x1080 needs 240x67. */
 #define TEXT_MAX_COLUMNS	240U
 #define TEXT_MAX_ROWS		68U
+
+/* The legacy aperture, and text memory's offset and geometry inside it. */
+#define TEXT_VGA_APERTURE	0x000a0000U
+#define TEXT_VGA_APERTURE_SIZE	0x00020000U
+#define TEXT_VGA_OFFSET		0x00018000U
+#define TEXT_VGA_COLUMNS	80U
+#define TEXT_VGA_ROWS		25U
+#define TEXT_VGA_CRTC_INDEX	0x03d4U
+#define TEXT_VGA_CRTC_DATA	0x03d5U
+#define TEXT_VGA_CURSOR_HIGH	0x0eU
+#define TEXT_VGA_CURSOR_LOW	0x0fU
+#define TEXT_VGA_CURSOR_START	0x0aU
+#define TEXT_VGA_CURSOR_END	0x0bU
+#define TEXT_VGA_CURSOR_OFF	0x20U
+
+/* Where the characters actually land. */
+enum text_surface {
+	TEXT_SURFACE_NONE,
+	TEXT_SURFACE_FRAMEBUFFER,
+	TEXT_SURFACE_VGA_TEXT
+};
 
 /* One VGA text cell: character in the low byte, attribute in the high byte. */
 static uint16_t text_cells[TEXT_MAX_ROWS * TEXT_MAX_COLUMNS];
@@ -46,6 +70,8 @@ static unsigned text_cursor_column;
 static int text_cursor_visible = 1;
 static int text_rgbx;
 static int text_ready;
+static enum text_surface text_surface;
+static volatile uint16_t *text_vram;
 
 /* The standard VGA palette the attribute byte indexes. */
 static const uint32_t text_palette[16] = {
@@ -60,6 +86,8 @@ static void draw_cell_locked(unsigned row, unsigned column, int cursor);
 static void redraw_locked(void);
 static void scroll_locked(void);
 static void putc_locked(int character);
+static int vga_text_attach_locked(void);
+static void vga_cursor_locked(void);
 
 /*
  * Converts one palette index to the framebuffer pixel format.
@@ -112,6 +140,15 @@ draw_cell_locked(
 	/* Decodes the stored character and attribute. */
 	cell = text_cells[row * text_columns + column];
 	attribute = (uint8_t)(cell >> 8);
+
+	/*
+	 * Text memory takes the cell word as it stands. The cursor is the
+	 * CRTC's own, so this surface never inverts a cell to show it.
+	 */
+	if (text_surface == TEXT_SURFACE_VGA_TEXT) {
+		text_vram[row * text_columns + column] = cell;
+		return;
+	}
 
 	/* Inverts the cell colours while drawing the cursor. */
 	if (cursor)
@@ -260,6 +297,20 @@ putc_locked(
 	}
 }
 
+/* The character output this board publishes to /dev/console. */
+static const struct kern_text_ops pcat_text_ops = {
+	.get_size = drv_pcat_text_get_size,
+	.putc = drv_pcat_text_putc,
+	.write = drv_pcat_text_write,
+	.clear = drv_pcat_text_clear,
+	.set_cursor = drv_pcat_text_set_cursor,
+	.get_cursor = drv_pcat_text_get_cursor,
+	.show_cursor = drv_pcat_text_show_cursor,
+	.update_cursor = drv_pcat_text_update_cursor,
+	.suspend = drv_pcat_text_suspend,
+	.resume = drv_pcat_text_resume
+};
+
 /*
  * Establishes the text grid over the linear framebuffer.
  */
@@ -275,25 +326,39 @@ drv_pcat_text_init(
 	/* Publishes the lock before any writer can reach this layer. */
 	spin_init(&text_lock, LOCK_RANK_CONSOLE_TEXT, "pcat text console");
 
-	/* Requires the linear framebuffer this layer draws into. */
-	if (!drv_pcat_graphics_backend_get_framebuffer(&text_pixels, &width,
-						       &height, &text_stride,
-						       &text_rgbx))
-		return;
+	/*
+	 * Prefers the linear framebuffer, where characters are drawn as
+	 * pixels and can share the screen with graphics. Without one the
+	 * machine is old enough that text memory is the only surface.
+	 */
+	if (drv_pcat_graphics_backend_get_framebuffer(&text_pixels, &width,
+						      &height, &text_stride,
+						      &text_rgbx)) {
+		irq = spin_lock_irqsave(&text_lock);
+		text_surface = TEXT_SURFACE_FRAMEBUFFER;
 
-	irq = spin_lock_irqsave(&text_lock);
+		/* Derives the grid from the framebuffer and cell size. */
+		text_columns = width / TEXT_GLYPH_WIDTH;
+		text_rows = height / TEXT_GLYPH_HEIGHT;
+		if (text_columns > TEXT_MAX_COLUMNS)
+			text_columns = TEXT_MAX_COLUMNS;
+		if (text_rows > TEXT_MAX_ROWS)
+			text_rows = TEXT_MAX_ROWS;
 
-	/* Derives the grid from the framebuffer and the fixed cell size. */
-	text_columns = width / TEXT_GLYPH_WIDTH;
-	text_rows = height / TEXT_GLYPH_HEIGHT;
-	if (text_columns > TEXT_MAX_COLUMNS)
-		text_columns = TEXT_MAX_COLUMNS;
-	if (text_rows > TEXT_MAX_ROWS)
-		text_rows = TEXT_MAX_ROWS;
+		/* Centres a grid that does not fill the framebuffer. */
+		text_origin_x =
+		    (width - text_columns * TEXT_GLYPH_WIDTH) / 2U;
+		text_origin_y =
+		    (height - text_rows * TEXT_GLYPH_HEIGHT) / 2U;
+	} else {
+		irq = spin_lock_irqsave(&text_lock);
 
-	/* Centres the grid when the framebuffer is not an exact multiple. */
-	text_origin_x = (width - text_columns * TEXT_GLYPH_WIDTH) / 2U;
-	text_origin_y = (height - text_rows * TEXT_GLYPH_HEIGHT) / 2U;
+		/* Gives up when text memory cannot be reached either. */
+		if (!vga_text_attach_locked()) {
+			spin_unlock_irqrestore(&text_lock, irq);
+			return;
+		}
+	}
 
 	/* Starts from an empty screen with the default attribute. */
 	for (index = 0; index < text_rows * text_columns; index++)
@@ -303,7 +368,78 @@ drv_pcat_text_init(
 	text_cursor_visible = 1;
 	text_ready = 1;
 	redraw_locked();
+	vga_cursor_locked();
 	spin_unlock_irqrestore(&text_lock, irq);
+
+	/* Publishes this board's character output to the kernel. */
+	kern_text_register(&pcat_text_ops);
+}
+
+/*
+ * Attaches the VGA text-memory surface.
+ *
+ * Returns 0 when the aperture cannot be mapped, which leaves the layer
+ * unavailable and the early console in charge of the screen.
+ */
+static int
+vga_text_attach_locked(
+	void)
+{
+	void *aperture;
+
+	/* Maps the uncached legacy aperture that holds text memory. */
+	if (kern_device_map(TEXT_VGA_APERTURE, TEXT_VGA_APERTURE_SIZE,
+			    KERN_DEVICE_UNCACHED, &aperture) != 0)
+		return 0;
+
+	/* Publishes the text-memory window and its fixed geometry. */
+	text_vram = (volatile uint16_t *)((volatile uint8_t *)aperture +
+	    TEXT_VGA_OFFSET);
+	text_surface = TEXT_SURFACE_VGA_TEXT;
+	text_columns = TEXT_VGA_COLUMNS;
+	text_rows = TEXT_VGA_ROWS;
+	text_origin_x = 0;
+	text_origin_y = 0;
+
+	/* Reports an attached surface. */
+	return 1;
+}
+
+/*
+ * Moves the CRTC cursor to the tracked cell, or hides it.
+ *
+ * This does nothing on the framebuffer surface, where the cursor is a
+ * drawn inversion of the cell rather than a hardware feature.
+ */
+static void
+vga_cursor_locked(
+	void)
+{
+	unsigned offset;
+
+	/* Leaves the hardware alone unless text memory is the surface. */
+	if (text_surface != TEXT_SURFACE_VGA_TEXT || !text_ready)
+		return;
+
+	/* Disables the cursor scan lines while it is hidden. */
+	if (!text_cursor_visible) {
+		kern_io_out8(TEXT_VGA_CRTC_INDEX, TEXT_VGA_CURSOR_START);
+		kern_io_out8(TEXT_VGA_CRTC_DATA, TEXT_VGA_CURSOR_OFF);
+		return;
+	}
+
+	/* Restores an underline cursor on the last two scan lines. */
+	kern_io_out8(TEXT_VGA_CRTC_INDEX, TEXT_VGA_CURSOR_START);
+	kern_io_out8(TEXT_VGA_CRTC_DATA, 14U);
+	kern_io_out8(TEXT_VGA_CRTC_INDEX, TEXT_VGA_CURSOR_END);
+	kern_io_out8(TEXT_VGA_CRTC_DATA, 15U);
+
+	/* Writes the linear cell offset to the cursor registers. */
+	offset = text_cursor_row * text_columns + text_cursor_column;
+	kern_io_out8(TEXT_VGA_CRTC_INDEX, TEXT_VGA_CURSOR_HIGH);
+	kern_io_out8(TEXT_VGA_CRTC_DATA, (uint8_t)(offset >> 8));
+	kern_io_out8(TEXT_VGA_CRTC_INDEX, TEXT_VGA_CURSOR_LOW);
+	kern_io_out8(TEXT_VGA_CRTC_DATA, (uint8_t)(offset & 0xffU));
 }
 
 /*
@@ -487,6 +623,7 @@ drv_pcat_text_update_cursor(
 	irq = spin_lock_irqsave(&text_lock);
 	draw_cell_locked(text_cursor_row, text_cursor_column,
 			 text_cursor_visible);
+	vga_cursor_locked();
 	spin_unlock_irqrestore(&text_lock, irq);
 }
 
@@ -499,8 +636,14 @@ drv_pcat_text_suspend(
 {
 	unsigned long irq;
 
-	/* Holds the cell array but stops painting. */
+	/* Hides the hardware cursor before the screen changes hands. */
 	irq = spin_lock_irqsave(&text_lock);
+	if (text_surface == TEXT_SURFACE_VGA_TEXT && text_ready) {
+		kern_io_out8(TEXT_VGA_CRTC_INDEX, TEXT_VGA_CURSOR_START);
+		kern_io_out8(TEXT_VGA_CRTC_DATA, TEXT_VGA_CURSOR_OFF);
+	}
+
+	/* Holds the cell array but stops painting. */
 	text_ready = 0;
 	spin_unlock_irqrestore(&text_lock, irq);
 }
@@ -514,13 +657,15 @@ drv_pcat_text_resume(
 {
 	unsigned long irq;
 
-	/* Resumes only when a framebuffer is still published. */
+	/* Resumes only when a surface is still attached. */
 	irq = spin_lock_irqsave(&text_lock);
-	if (text_pixels != NULL && text_columns != 0 && text_rows != 0) {
+	if (text_surface != TEXT_SURFACE_NONE && text_columns != 0 &&
+	    text_rows != 0) {
 		text_ready = 1;
 		redraw_locked();
 		draw_cell_locked(text_cursor_row, text_cursor_column,
 				 text_cursor_visible);
+		vga_cursor_locked();
 	}
 	spin_unlock_irqrestore(&text_lock, irq);
 }

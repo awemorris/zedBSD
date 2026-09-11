@@ -76,6 +76,7 @@ static void vga_write_pixel(unsigned x, unsigned y, uint8_t color);
 static uint8_t rgb_to_vga(uint32_t color);
 static int pattern_bit(uint64_t pattern, unsigned x, unsigned y);
 static int pcat_graphics_prepare_hardware(void);
+static void text_console_start(void);
 static int cirrus_attach(struct drv_pci_device *device, const struct drv_pci_id *id);
 static int cirrus_detach(struct drv_pci_device *device, unsigned flags);
 
@@ -1039,17 +1040,8 @@ pcat_graphics_prepare_hardware(
 				 *)(uintptr_t)(ZBL6_FRAMEBUFFER_VIRTUAL_BASE +
 					       offset);
 
-		/*
-		 * Brings up the text grid and hands HAL output over to it.
-		 * From here on kern_logf() and /dev/console share one cursor.
-		 */
-		drv_pcat_text_init();
-		if (drv_pcat_text_ready()) {
-			__atomic_store_n(&kernel_putc, drv_pcat_text_putc,
-					 __ATOMIC_RELEASE);
-		}
-
 		/* Reports a usable linear framebuffer. */
+		text_console_start();
 		return 1;
 	}
 
@@ -1080,8 +1072,34 @@ pcat_graphics_prepare_hardware(
 	if (!cirrus_present)
 		kern_logf("graphics: PCI Cirrus absent; VGA fallback ready\n");
 
+	/*
+	 * Without a framebuffer the text layer falls back to VGA text
+	 * memory, which this aperture has just made reachable.
+	 */
+	text_console_start();
+
 	/* Reports operation failure. */
 	return 1;
+}
+
+/*
+ * Brings up the text grid and hands HAL output over to it.
+ *
+ * From here on kern_logf() and /dev/console share one cursor. Nothing
+ * happens when the layer found no surface: the HAL early console keeps
+ * the screen and the kernel simply has no console device.
+ */
+static void
+text_console_start(
+	void)
+{
+	drv_pcat_text_init();
+
+	/* Publishes the handover only once the layer can actually draw. */
+	if (drv_pcat_text_ready()) {
+		__atomic_store_n(&kernel_putc, drv_pcat_text_putc,
+				 __ATOMIC_RELEASE);
+	}
 }
 
 /* Supports the cirrus attach operation. */

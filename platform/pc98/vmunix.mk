@@ -19,12 +19,12 @@ HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-Iinclude -Isrc -Isrc/hal/i386 -I. \
 	-DHAL_ARCH_I386 -DHAL_BOARD_PC98
 HAL_PC98_SOURCES := \
-	src/hal/i386/smp.c src/hal/i386/percpu.c src/hal/i386/lib.c src/hal/i386/atomic.c src/hal/i386/irq.c src/hal/pmem-constraints.c src/hal/i386/page.c \
+	src/hal/i386/smp.c src/hal/i386/percpu.c src/hal/i386/lib.c src/hal/i386/atomic.c src/hal/i386/irq.c src/hal/i386/page.c \
 	src/hal/i386/mps.c src/hal/i386/acpi.c src/hal/i386/lapic.c \
 	src/hal/i386/ioapic.c \
 	src/hal/i386/space.c src/hal/i386/int.c src/hal/i386/cmain.c \
 	src/hal/i386/task.c \
-	src/hal/x86/boot-parameters.c \
+	src/hal/x86/boot-parameters.c src/hal/x86/io.c \
 	src/hal/i386/bsp-pc98/boot.c \
 	src/hal/i386/bsp-pc98/cons.c src/hal/i386/bsp-pc98/pic.c \
 	src/hal/i386/bsp-pc98/pit.c src/hal/i386/bsp-pc98/display.c \
@@ -52,6 +52,8 @@ PC98_DISPLAY_OBJS := \
 endif
 KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/timer.o \
+	$(BUILD)/src/kern/device-io.o $(BUILD)/src/kern/irq.o \
+	$(BUILD)/src/kern/pmem.o $(BUILD)/src/kern/test-checkpoint.o \
 	$(BUILD)/src/kern/lock.o $(BUILD)/src/kern/klog.o $(BUILD)/src/kern/waitq.o \
 	$(BUILD)/src/kern/buf.o $(BUILD)/src/kern/cache.o $(BUILD)/src/kern/readahead.o $(BUILD)/src/kern/writeback.o $(BUILD)/src/kern/io.o $(BUILD)/src/kern/sysctl.o \
 	$(BUILD)/src/kern/resource.o \
@@ -70,7 +72,8 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/elf.o $(BUILD)/src/kern/exec.o \
 	$(BUILD)/src/kern/user-probe.o $(BUILD)/src/kern/syscall.o \
 	$(BUILD)/src/kern/uaccess.o $(BUILD)/src/kern/cdev.o \
-	$(BUILD)/src/kern/devfs.o $(BUILD)/src/drivers/generic/console.o \
+	$(BUILD)/src/kern/devfs.o $(BUILD)/src/kern/text-display.o \
+	$(BUILD)/src/drivers/generic/console.o \
 	$(BUILD)/src/drivers/generic/input.o \
 	$(BUILD)/src/kern/locale-record.o \
 	$(BUILD)/src/kern/tty.o \

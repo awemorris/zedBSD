@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -16,9 +14,9 @@
 
 #include <hal/types.h>
 
-#define MULTIBOOT_HEADER_MAGIC 0x1badb002U
-#define MULTIBOOT_BOOTLOADER_MAGIC 0x2badb002U
-#define MULTIBOOT_HEADER_FLAGS 0x00000003U
+#define MULTIBOOT_HEADER_MAGIC		0x1badb002U
+#define MULTIBOOT_BOOTLOADER_MAGIC	0x2badb002U
+#define MULTIBOOT_HEADER_FLAGS		0x00000003U
 
 #define MBINFO_FLAG_MEMORY       (1U << 0)
 #define MBINFO_FLAG_BOOT_DEVICE  (1U << 1)

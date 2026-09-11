@@ -25,7 +25,7 @@
 #include <uapi/console.h>
 #include <errno.h>
 #include <fcntl.h>
-#include "../platform/pcat/graphics/text.h"
+#include "kern/text-display.h"
 #include <string.h>
 
 #define CONSOLE_WRITE_MAX 512U
@@ -179,7 +179,7 @@ console_clear_span(
 	for (index = 0; index < count; index++)
 		blanks[index] = ' ';
 	blanks[count] = '\0';
-	drv_pcat_text_write(row, column, DRV_PCAT_TEXT_ATTRIB_NORMAL, blanks);
+	kern_text_write(row, column, KERN_TEXT_ATTRIB_NORMAL, blanks);
 }
 
 
@@ -692,7 +692,7 @@ console_write(
 	/* Checks the operation result. */
 	if (result < 0)
 		return result;
-	drv_pcat_text_update_cursor();
+	kern_text_update_cursor();
 
 	/* Returns the computed result. */
 	return result;
@@ -714,7 +714,7 @@ console_write_at(
 	if (error != 0)
 		return error;
 
-	drv_pcat_text_get_size(&columns, &rows);
+	kern_text_get_size(&columns, &rows);
 
 	/* Handles the request condition. */
 	if (request.row >= rows ||
@@ -731,7 +731,7 @@ console_write_at(
 	text[request.length] = '\0';
 
 	/* Computes the function result. */
-	drv_pcat_text_write(request.row, request.column,
+	kern_text_write(request.row, request.column,
 		       (uint8_t)request.attribute, text);
 	function_result = 0 != 0
 				  ? EIO
@@ -763,7 +763,7 @@ console_ioctl(
 	int error;
 
 	/* Every bound below comes from the live console geometry. */
-	drv_pcat_text_get_size(&columns, &rows);
+	kern_text_get_size(&columns, &rows);
 	size.rows = rows;
 	size.columns = columns;
 
@@ -777,7 +777,7 @@ console_ioctl(
 		/* Returns the computed result. */
 		return function_result;
 	case KERN_CONSOLE_CLEAR:
-		drv_pcat_text_clear();
+		kern_text_clear();
 
 		/* Succeeded. */
 		return 0;
@@ -813,7 +813,7 @@ console_ioctl(
 		return function_result;
 	case KERN_CONSOLE_GET_CURSOR:
 
-		drv_pcat_text_get_cursor(&cursor_row, &cursor_column, &cursor_shown);
+		kern_text_get_cursor(&cursor_row, &cursor_column, &cursor_shown);
 		cursor_local.row = cursor_row;
 		cursor_local.column = cursor_column;
 		cursor_local.visible = cursor_shown != 0;
@@ -832,7 +832,7 @@ console_ioctl(
 			return error;
 
 		/* Computes the function result. */
-		function_result = drv_pcat_text_set_cursor(cursor_local1.row,
+		function_result = kern_text_set_cursor(cursor_local1.row,
 						      cursor_local1.column)
 					  ? 0
 					  : EINVAL;
@@ -845,7 +845,7 @@ console_ioctl(
 		error = copyin(argument, &cursor_local2, sizeof(cursor_local2));
 		if (error != 0)
 			return error;
-		drv_pcat_text_show_cursor(cursor_local2.visible != 0);
+		kern_text_show_cursor(cursor_local2.visible != 0);
 
 		/* Succeeded. */
 		return 0;
@@ -917,7 +917,7 @@ vt_write(
 
 	/* Checks the operation result. */
 	if (result >= 0)
-		drv_pcat_text_update_cursor();
+		kern_text_update_cursor();
 
 	/* Returns the computed result. */
 	return result;

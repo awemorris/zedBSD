@@ -36,7 +36,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <hal/hal.h>
-#include "../drivers/platform/pcat/graphics/text.h"
+#include "kern/text-display.h"
 #include <poll.h>
 #include <string.h>
 #include <termios.h>
@@ -274,9 +274,9 @@ tty_vt_activate(
 
 	active_vt = vt;
 	console_escape_state[vt] = 0;
-	drv_pcat_text_clear();
+	kern_text_clear();
 	tty_render(vt, vt_history[vt], vt_history_used[vt]);
-	drv_pcat_text_update_cursor();
+	kern_text_update_cursor();
 
 	spin_unlock_irqrestore(&console_output_lock, irq);
 
@@ -936,7 +936,7 @@ tty_console_rows(void)
 	unsigned console_columns;
 	unsigned console_rows;
 
-	drv_pcat_text_get_size(&console_columns, &console_rows);
+	kern_text_get_size(&console_columns, &console_rows);
 	return console_rows;
 }
 
@@ -949,7 +949,7 @@ tty_console_columns(void)
 	unsigned console_columns;
 	unsigned console_rows;
 
-	drv_pcat_text_get_size(&console_columns, &console_rows);
+	kern_text_get_size(&console_columns, &console_rows);
 	return console_columns;
 }
 
@@ -965,7 +965,7 @@ tty_console_puts(
 
 	/* Emits every byte in order. */
 	for (index = 0; index < length; index++)
-		drv_pcat_text_putc((unsigned char)bytes[index]);
+		kern_text_putc((unsigned char)bytes[index]);
 }
 
 /*
@@ -989,7 +989,7 @@ tty_clear_span(
 	for (index = 0; index < count; index++)
 		blanks[index] = ' ';
 	blanks[count] = '\0';
-	drv_pcat_text_write(row, column, DRV_PCAT_TEXT_ATTRIB_NORMAL, blanks);
+	kern_text_write(row, column, KERN_TEXT_ATTRIB_NORMAL, blanks);
 }
 
 /* Executes a parsed CSI command on the HAL console. */
@@ -1011,17 +1011,17 @@ tty_console_csi(
 		amount = console_escape_parameter[vt];
 	else
 		amount = 1U;
-	drv_pcat_text_get_size(&columns, &rows);
-	drv_pcat_text_get_cursor(&state_row, &state_column, &state_shown);
+	kern_text_get_size(&columns, &rows);
+	kern_text_get_cursor(&state_row, &state_column, &state_shown);
 	switch (command) {
 	case 'H':
-		(void)drv_pcat_text_set_cursor(0U, 0U);
+		(void)kern_text_set_cursor(0U, 0U);
 		break;
 	case 'J':
 		if (amount == 2U) {
 			for (row = 0; row < rows; row++)
 				tty_clear_span(row, 0U, columns);
-			(void)drv_pcat_text_set_cursor(0U, 0U);
+			(void)kern_text_set_cursor(0U, 0U);
 		}
 
 		break;
@@ -1030,26 +1030,26 @@ tty_console_csi(
 			state_row = state_row - amount;
 		else
 			state_row = 0U;
-		(void)drv_pcat_text_set_cursor(state_row, state_column);
+		(void)kern_text_set_cursor(state_row, state_column);
 		break;
 	case 'B':
 		state_row += amount;
 		if (state_row >= rows)
 			state_row = rows - 1U;
-		(void)drv_pcat_text_set_cursor(state_row, state_column);
+		(void)kern_text_set_cursor(state_row, state_column);
 		break;
 	case 'C':
 		state_column += amount;
 		if (state_column >= columns)
 			state_column = columns - 1U;
-		(void)drv_pcat_text_set_cursor(state_row, state_column);
+		(void)kern_text_set_cursor(state_row, state_column);
 		break;
 	case 'D':
 		if (amount < state_column)
 			state_column = state_column - amount;
 		else
 			state_column = 0U;
-		(void)drv_pcat_text_set_cursor(state_row, state_column);
+		(void)kern_text_set_cursor(state_row, state_column);
 		break;
 	case 'G':
 		if (amount == 0U)
@@ -1058,12 +1058,12 @@ tty_console_csi(
 			state_column = amount - 1U;
 		if (state_column >= columns)
 			state_column = columns - 1U;
-		(void)drv_pcat_text_set_cursor(state_row, state_column);
+		(void)kern_text_set_cursor(state_row, state_column);
 		break;
 	case 'K':
 		if (amount == 2U) {
 			tty_clear_span(state_row, 0U, columns);
-			(void)drv_pcat_text_set_cursor(state_row, state_column);
+			(void)kern_text_set_cursor(state_row, state_column);
 		} else if (!console_escape_has_parameter[vt] || amount == 0U) {
 			tty_clear_span(state_row, state_column,
 				       columns - state_column);

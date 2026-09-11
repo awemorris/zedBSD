@@ -49,7 +49,7 @@ static struct mutex lifecycle_lock;
 static struct input_device *mouse_input;
 static uint32_t last_buttons;
 static unsigned reader_count;
-static int worker_started;
+static int handler_registered;
 static int mouse_active;
 
 static const struct input_capability mouse_capabilities[] = {
@@ -69,8 +69,8 @@ static void outb(uint16_t port, uint8_t value);
 static uint8_t read_nibble(uint8_t control);
 static void read_sample(int32_t *dx, int32_t *dy, uint32_t *buttons);
 static void mouse_publish(int32_t dx, int32_t dy, uint32_t previous, uint32_t buttons);
-static void mouse_service_irq(kern_irq_ack_t acknowledge);
-static void mouse_service(void *argument);
+static void mouse_interrupt(int interrupt,
+			    kern_irq_ack_t acknowledge, void *argument);
 static int mouse_start(void);
 static void mouse_stop(void);
 static int mouse_input_open(void *context);
@@ -184,22 +184,31 @@ mouse_publish(
 	drv_input_device_emit(mouse_input, EV_SYN, SYN_REPORT, 0);
 }
 
-/* Supports the mouse service irq operation. */
+/*
+ * Reads one sample and reports it.
+ *
+ * This runs in interrupt context, so it takes no lock. It reads the
+ * hardware, releases the line, and then emits: only this handler writes
+ * the button state while the mouse is active.
+ */
 static void
-mouse_service_irq(
-	kern_irq_ack_t acknowledge)
+mouse_interrupt(
+	int interrupt,
+	kern_irq_ack_t acknowledge,
+	void *argument)
 {
 	int32_t dx = 0, dy = 0;
 	uint32_t buttons = 0, previous = 0;
 	int report = 0;
 
-	mutex_lock(&lifecycle_lock);
+	(void)interrupt;
+	(void)argument;
 
-	/* Handles the mouse active condition. */
-	if (mouse_active) {
+	/* Collects the sample only while a reader wants one. */
+	if (__atomic_load_n(&mouse_active, __ATOMIC_ACQUIRE)) {
 		read_sample(&dx, &dy, &buttons);
 
-		/* Handles the dx condition. */
+		/* Reports only a change in position or buttons. */
 		previous = last_buttons;
 		if (dx != 0 || dy != 0 || buttons != previous) {
 			last_buttons = buttons;
@@ -207,30 +216,12 @@ mouse_service_irq(
 		}
 	}
 
+	/* Releases the line before the evdev publication. */
 	kern_irq_send_eoi(acknowledge);
 
-	/* Handles the report condition. */
+	/* Publishes the change to the input layer. */
 	if (report)
 		mouse_publish(dx, dy, previous, buttons);
-
-	mutex_unlock(&lifecycle_lock);
-}
-
-/* Supports the mouse service operation. */
-static void
-mouse_service(
-	void *argument)
-{
-	kern_irq_ack_t acknowledge;
-
-	(void)argument;
-	/* Continue until the operation reaches a terminal state. */
-	for (;;) {
-		/* Checks the hal irq service wait result. */
-		if (hal_irq_service_wait(MOUSE_IRQ, &acknowledge) != 0)
-			HAL_FATAL("PC-98 bus mouse IRQ service failed");
-		mouse_service_irq(acknowledge);
-	}
 }
 
 /* Supports the mouse start operation. */
@@ -238,23 +229,23 @@ static int
 mouse_start(
 	void)
 {
-	struct thread *worker;
 	int error;
 
-	/* Handles the worker started condition. */
-	if (!worker_started) {
-		/* Checks the operation status. */
-		error = kthread_create(mouse_service, NULL, SCHED_PRIOR_LOW,
-				       &worker);
+	/* Installs the handler while the line is still masked. */
+	if (!handler_registered) {
+		kern_irq_mask(MOUSE_IRQ);
+		error = kern_irq_register(MOUSE_IRQ, mouse_interrupt, NULL);
+
+		/* Leaves an inactive, retryable backend on failure. */
 		if (error != 0)
 			return error;
-		worker_started = 1;
-		thread_start(worker);
+		handler_registered = 1;
 	}
 
-	/* The task IRQ service unmasks IRQ13 when it first waits. */
-	mouse_active = 1;
+	/* Enables reporting, then lets the hardware and the line run. */
+	__atomic_store_n(&mouse_active, 1, __ATOMIC_RELEASE);
 	outb(MOUSE_PORT_C, 0x00U);
+	kern_irq_unmask(MOUSE_IRQ);
 
 	/* Succeeded. */
 	return 0;
@@ -265,10 +256,12 @@ static void
 mouse_stop(
 	void)
 {
-	mouse_active = 0;
+	/* Quiets the line before the hardware stops producing samples. */
+	kern_irq_mask(MOUSE_IRQ);
+	__atomic_store_n(&mouse_active, 0, __ATOMIC_RELEASE);
 	outb(MOUSE_PORT_C, 0x10U);
 
-	/* Handles the last buttons condition. */
+	/* Releases any button the last sample left pressed. */
 	if (last_buttons != 0) {
 		mouse_publish(0, 0, last_buttons, 0);
 		last_buttons = 0;
@@ -351,7 +344,7 @@ drv_pc98_busmouse_init(
 	mouse_input = NULL;
 	last_buttons = 0;
 	reader_count = 0;
-	worker_started = 0;
+	handler_registered = 0;
 	mouse_active = 0;
 
 	/* Obtains the drv input device register result. */

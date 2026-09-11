@@ -258,6 +258,145 @@ toolchain smoke は PASS、world ビルドはエラーなし、QEMU でログイ
 注意点として、パッチの削除行は上流の本文と一致させる必要があるため、
 接頭辞移行の対象外である。追加行だけが新しい名前を使う。
 
+## /dev/console の機種非依存化と cons-wait.h の削除（2026-09-12、未コミット）
+
+`cons-wait.h` を削除した。ビルド対象での最後の利用者は PC-98 の HAL コンソール
+だったので、その縮退と同時に外した。arm64 と m68k は今も include しているが、
+どちらも CI config が無くビルド対象ではない。
+
+### カーネル側にテキスト表示の受け口を置いた
+
+`/dev/console` は `drivers/platform/pcat/graphics/text.h` を直接 include して
+いた。機種非依存であるべきドライバが 1 つの基板に依存していたことになる。
+`src/kern/tty.c` も同じ依存を持っていて、pcat 以外ではリンクできなかった。
+
+`include/kern/text-display.h` に `struct kern_text_ops` を定義し、
+各基板の表示ドライバが自分の表を publish する形にした。`/dev/console` と
+`tty.c` は `kern_text_*()` だけを呼ぶ。表が未登録の間は全て no-op で、
+表示を持たない基板ではそれが正しい振る舞いになる。
+
+| 綴り | 役割 |
+| --- | --- |
+| `kern_text_register()` | 表示ドライバが起動時に 1 度 publish |
+| `kern_text_ready()` | 表が登録済みかを報告 |
+| `kern_text_putc()` ほか | `/dev/console` と `tty.c` が呼ぶ入口 |
+
+表は 1 文字ごとに読まれるので、ロックではなく atomic な store と load で扱う。
+
+### PC-98
+
+HAL コンソールを 2090 行から 330 行余りの出力専用へ縮退した。テキスト VRAM は
+文字が `0xa0000` の 16bit 語、属性が `0xa2000` のバイトという 2 面構成で、
+カーソルは uPD7220 の CSRW コマンドで動かす。早期コンソールは ASCII のみで、
+日本語の経路は表示ドライバ側の仕事とした。
+
+`prekern_bsp_cons_init()` と `prekern_bsp_cons_irq_init()` に改名し、後者は
+IRQ1 をマスクするだけにした。キーボードは 8251、マウスはバスマウスで
+別 IC・別割り込みなので、ドライバも別になる。
+
+表示ドライバの GDC 4 面と Cirrus アパーチャは、物理アロケータの固定クレームを
+やめて `kern_device_map()` に移した。これらは RAM ではなくデバイスメモリである。
+
+### バスマウスをハンドラ登録型にした
+
+`hal_irq_service_wait()` の最後の利用者だった。カーネルスレッドが HAL の中で
+線が鳴るのを待つ方式で、EOI から次の wait までにエッジトリガの割り込みを
+取りこぼし、コンテキストスイッチをまたいで割り込みコントローラの in-service
+状態を保持してしまう。登録型ハンドラにはどちらの問題も無い。
+
+ハンドラはライフサイクルの mutex を取れないので、サンプルを読んで EOI を
+出してから publish する。start と stop は mutex の下で線をマスクしてから
+登録を変える。
+
+### 並行編集で入っていたバグ
+
+`src/hal/x86/rtc.c` に私が触っていない整形が入っており、`& CMOS_UIP != 0` と
+括弧が落ちて条件が反転していた。HEAD 版は `(x & CMOS_UIP) == 0` で正しい。
+括弧を戻した。src/hal/i386 配下にも同様の整形が多数入っている。
+
+### 状態
+
+amd64、PC/AT、PC-98 の 3 つとも world がビルドできる。amd64 と PC/AT は
+QEMU でログインとシェル実行を確認した。PC-98 はまだ起動確認をしていない。
+表示ドライバ側のテキスト層と 8251 キーボードドライバが未実装で、
+`kern_text_register()` を呼ぶ主体がまだ無い。
+
+## i386 PC/AT の移植と表示面の二本立て（2026-09-12、未コミット）
+
+PC/AT の i386 port を現行の HAL 契約に合わせ、ログインシェルまで到達した。
+amd64 に回帰はない。
+
+### ブートローダが画面をどう決めているか
+
+追いかけた結果、ユーザの想定と実際が一点だけ違っていた。
+
+| 経路 | フレームバッファ |
+| --- | --- |
+| amd64 UEFI | GOP を前提 |
+| amd64 BIOS | `bootloader/pcat/vbe.inc` が VBE で LFB を設定 |
+| i386 PC/AT | 取得しない。常にテキストモード |
+
+amd64 の BIOS ローダが LFB を諦める条件は 4 つある。VBE 2.0 未満、
+コントローラ情報が `VESA` でない、1024x768・800x600・640x480 のいずれでも
+32bpp で SUPPORTED と GRAPHICS と LINEAR が揃うモードが無い、モード設定が
+失敗する。諦めた場合は handoff のフラグ `0x0008` が立たず、
+framebuffer の base/size/width/height/stride/format は書かれないままになる。
+
+i386 PC/AT は Multiboot で起動し、ヘッダのフラグは `0x00010003` である。
+ビット2のビデオモード要求が立っていないので、ローダはモードを設定せず
+`multiboot_info` のフレームバッファ欄も埋まらない。VBE を試すコードも無い。
+つまりこの port には最初から LFB が来ない。
+
+### 表示面を二つ持たせた
+
+`/dev/graphics` のテキスト層に面の概念を入れた。セル配列が唯一の真実で、
+面はその publish 先である。
+
+| 面 | 使う条件 | 文字の出し方 | カーソル |
+| --- | --- | --- | --- |
+| フレームバッファ | LFB がある | グリフをピクセルに描く | セル反転 |
+| VGA テキストメモリ | LFB が無い | セル語をそのまま書く | CRTC |
+
+セル配列は元から `(属性 << 8) | 文字` という VGA のセル語そのものだったので、
+テキストメモリ面は 1 セル 1 ストアで済む。グラフィックモードへ切り替えるときは
+既存の suspend/resume がそのまま効き、セル配列が残るので戻ると画面が復元される。
+VGA のグラフィックモードは backend.c に元からある 640x480x4 planar を使う。
+
+`drv_pcat_text_init()` は LFB 経路の中だけで呼ばれていたので、両経路の後で
+呼ぶよう `text_console_start()` に切り出した。これが無いと i386 では
+`kernel_putc` が公開されず、起動は進むのに画面には何も出ない。実際その状態を
+ハングと読み違えた。
+
+### HAL 側の移植
+
+- `page.c`：`struct hal_pmem` と request/stats 構造体を廃し、物理アドレスと
+  サイズの契約にした。`hal_pmem_alloc_limited()` と `hal_pmem_to_kernel()` を
+  追加し、`hal_pmem_get_stats()` を `hal_get_memstat()` に改名した。
+  MMIO と VRAM の固定クレーム機構はこのファイルから出した。
+- `space.c`：ページテーブルのページを物理アドレスで持つようにした。
+  `hal_space_map_device()` と `hal_space_unmap_device()` を追加。i386 では
+  32bit 空間全体がシステム半分に別名で見えるので、窓の検査だけで足りる。
+- `irq.c`：`hal_irq_register()` と `hal_irq_unregister()` を追加。
+  アフィニティ取得を 2 ポインタの契約に合わせた。
+- `task.c`：`hal_task_init()` を `hal_task_create_for_init_context()` にし、
+  確保失敗を HAL_FATAL ではなく NULL で返すようにした。カーネルが判断する。
+  アクセサ 2 本を `get_` 付きの名前と struct 無しの契約に合わせた。
+- `bsp-pcat/cons.c`：1190 行から 300 行余りへ。出力専用の early console で、
+  `kernel_putc` が公開されたらそちらへ委譲する。キーボードは持たない。
+  初期化は `prekern_bsp_cons_init()` と `prekern_bsp_cons_irq_init()` に改名。
+  後者は IRQ1 をマスクするだけで、8042 ドライバが登録するまで黙らせる。
+- `src/hal/x86/io.c` を新設。ポート I/O の HAL 実装が x86 に無く、
+  `kern_io_out8()` が amd64 では未使用のため gc-sections で消えていた。
+  命令は両アーキで同一なので共有する。
+
+ドライバ側では `src/drivers/pci/` の `paddr_t` 6 箇所を `uint64_t` にした。
+i386 では 32bit なので、カーネル API へ渡す型が合わなかった。
+
+### 残り
+
+PC-98 は未着手。HAL の同じ移植に加えて `/dev/graphics` の再構築が要る。
+キーボードとマウスは別 IC で割り込みも別なので、ドライバも 2 本になる。
+
 ## ヘッダ名前空間から zedbsd を外す（2026-09-12、amd64、未コミット）
 
 ユーザ API は `include/uapi/` にあり、`/usr/include/uapi/` へ入る。36 本。
