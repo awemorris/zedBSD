@@ -166,7 +166,7 @@ hal_cons_reset(
  * Writes one character to the PC-98 text console.
  */
 void
-hal_cons_putc(
+hal_putc(
 	int character)
 {
 	uint8_t byte;
@@ -245,7 +245,7 @@ write_n(
 		/* Delegates supported control characters to the byte writer. */
 		if (codepoint == '\n' || codepoint == '\r' ||
 		    codepoint == '\b') {
-			hal_cons_putc((int)codepoint);
+			hal_putc((int)codepoint);
 			continue;
 		}
 

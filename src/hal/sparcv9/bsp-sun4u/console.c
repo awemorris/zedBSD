@@ -19,7 +19,7 @@ static void console_putc(int c)
 static void console_puts(const char *s) { if (s) while (*s) console_putc(*s++); }
 static int console_getc(void) { return sun4u_uart_getc(); }
 void hal_cons_reset(void) { state.mode = HAL_CONS_TERMINAL; state.row = state.column = 0; }
-void hal_cons_putc(int c) { console_putc(c); }
+void hal_putc(int c) { console_putc(c); }
 void hal_cons_clear(void) { console_puts("\033[2J\033[H"); state.row = state.column = 0; }
 void hal_cons_move_cursor(int r, int c) { (void)hal_cons_set_cursor((unsigned)r, (unsigned)c); }
 int hal_cons_getc(void) { struct hal_key_event event; (void)hal_cons_read_event(&event); return (unsigned char)event.symbol[0]; }

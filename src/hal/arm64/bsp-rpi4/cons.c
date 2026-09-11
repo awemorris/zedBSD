@@ -64,7 +64,7 @@ static void console_putc(int character)
 }
 static void console_puts(const char*s){if(s)while(*s)console_putc(*s++);}
 static int console_getc(void){return rpi4_uart_getc();}
-void hal_cons_putc(int c){console_putc(c);}
+void hal_putc(int c){console_putc(c);}
 void hal_cons_move_cursor(int row,int column){(void)hal_cons_set_cursor((unsigned)row,(unsigned)column);}
 int hal_cons_getc(void){struct hal_key_event event;for(;;){(void)hal_cons_read_event(&event);if((event.flags&HAL_KEY_EVENT_PRESS)!=0&&event.symbol[1]=='\0')return event.symbol[0];}}
 void hal_cons_write(const char*s){console_puts(s);}

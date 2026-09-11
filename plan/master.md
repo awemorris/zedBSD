@@ -104,6 +104,42 @@ Objectives → Milestone Goals → WS → Phase → Queue試行/結果を対応�
 なったため、`/dev/console` が12件、`tty.c` が9件、pcat graphics が11件ビルドできない。
 これは early console 化そのものなので、下の計画に従って別途進める。
 
+#### fg007：init 停止の解決と段階4（2026-09-11、amd64、未コミット）
+
+`boot: starting init /sbin/init` で止まる症状を解決した。QEMU で `login:` まで到達し、
+QMP の send-key で `root` を打鍵すると `login: root` とエコーされて `Password:` が出る。
+8042 ドライバ → evdev → `/dev/console` → テキスト層の往復が動作している。
+
+原因は2つあった。
+
+1. `drv_pcat_text_init()` の挿入先の誤り。`backend.c` のグラフィックモード進入関数に入って
+   いて、起動時に走る `pcat_graphics_prepare_hardware()` には無かった。`text_ready` が0のまま
+   となり、`/dev/console` 経由の書き込みは `putc_locked()` の先頭で黙って捨てられていた。
+   カーネル自身のログは HAL 早期コンソールが描いていたため、描画が動いているように見えた。
+2. グリフ取得の戻り値の読み違い。`drv_pcat_font_get_glyph()` は成功時に1を返すが、
+   テキスト層は0を成功と扱っていたため、全文字が空白で描かれ、カーソルの反転セルだけが
+   見える状態になっていた。
+
+段階4を同時に実施した。
+
+- `hal_cons_putc()` を `hal_putc()` に改名し、hal.h の HAL C runtime 節へ移した。
+  hal.h の Console 節は消えた。
+- カーネルが関数ポインタ `kernel_putc`（初期値 NULL、`src/kern/entry.c`）を提供し、
+  `hal_putc()` は ACQUIRE で読んで非 NULL なら委譲する。`backend.c` はテキスト層の初期化
+  直後に RELEASE ストアで `drv_pcat_text_putc` を公開する。以降 `hal_printf()` と
+  `/dev/console` は同じカーソルを共有する。
+- テキスト層は制御文字でカーソルが移動する前に反転セルを消すようにした。
+
+結果として、1024x768 のフレームバッファ全面が 128x48 のテキストグリッドになった。
+HAL 早期コンソールの 80x30 中央寄せは、引き渡しまでの表示にだけ使われる。
+
+残り：
+
+- 段階5。amd64 `cons.c` を早期コンソールの最小構成へ縮める。`src/hal/cons-keys.h` と
+  `src/hal/cons-wait.h` の削除、HAL 側の `kernel_wait_task()`/`kernel_notify_task()` 利用の撤去。
+- 他アーキは未対応。
+- 上位モデルによる監査。
+
 #### fg007：段階3 ps2-8042.c の実装（2026-09-11、amd64、未コミット）
 
 ビルド PASS。evdev デバイスが2つとも1つのドライバから登録され、VFS も完了する。

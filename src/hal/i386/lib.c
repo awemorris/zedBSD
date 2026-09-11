@@ -210,7 +210,7 @@ hal_putchar(
 	int c)
 {
 	/* Writes the character through the board console. */
-	hal_cons_putc(c);
+	hal_putc(c);
 
 	/* Returns the written character. */
 	return c;
@@ -252,7 +252,7 @@ hal_printf(
 	for (p = format; *p != '\0'; p++) {
 		/* Emits ordinary characters without parsing a conversion. */
 		if (*p != '%') {
-			hal_cons_putc(*p);
+			hal_putc(*p);
 			continue;
 		}
 
@@ -283,7 +283,7 @@ hal_printf(
 		/* Emits the selected restricted conversion. */
 		switch (*p) {
 		case 'c':
-			hal_cons_putc(__builtin_va_arg(ap, int));
+			hal_putc(__builtin_va_arg(ap, int));
 			break;
 		case 's':
 			string = __builtin_va_arg(ap, const char *);
@@ -308,7 +308,7 @@ hal_printf(
 			/* Emits a sign before converting a negative magnitude. */
 			magnitude = (uint64_t)value;
 			if (value < 0) {
-				hal_cons_putc('-');
+				hal_putc('-');
 				magnitude = 0U - magnitude;
 			}
 			put_unsigned(magnitude, 10, 0, width, zero);
@@ -333,18 +333,18 @@ hal_printf(
 				zero);
 			break;
 		case '%':
-			hal_cons_putc('%');
+			hal_putc('%');
 			break;
 		default:
-			hal_cons_putc('%');
+			hal_putc('%');
 
 			/* Restores any consumed length modifiers verbatim. */
 			while (longs-- > 0)
-				hal_cons_putc('l');
+				hal_putc('l');
 
 			/* Emits the unknown conversion or reprocesses the terminator. */
 			if (*p != '\0') {
-				hal_cons_putc(*p);
+				hal_putc(*p);
 			} else {
 				p--;
 			}
@@ -543,13 +543,13 @@ put_unsigned(
 
 	/* Emits enough leading fill characters for the requested width. */
 	while (width > n) {
-		hal_cons_putc(zero ? '0' : ' ');
+		hal_putc(zero ? '0' : ' ');
 		width--;
 	}
 
 	/* Emits the converted digits in normal order. */
 	while (n > 0) {
 		n--;
-		hal_cons_putc(digits[n]);
+		hal_putc(digits[n]);
 	}
 }

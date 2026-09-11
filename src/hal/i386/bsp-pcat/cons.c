@@ -164,7 +164,7 @@ hal_cons_reset(
  * Writes one character to the PC/AT text console.
  */
 void
-hal_cons_putc(
+hal_putc(
 	int character)
 {
 	int display_character;
@@ -200,7 +200,7 @@ hal_cons_putc(
 	/* Expands a tab through the next eight-column stop. */
 	if (character == '\t') {
 		do {
-			hal_cons_putc(' ');
+			hal_putc(' ');
 		} while ((cursor_column & 7U) != 0);
 		return;
 	}
@@ -249,14 +249,14 @@ hal_cons_write_n(
 
 		/* Emits ASCII directly or substitutes one non-ASCII sequence. */
 		if (byte < 0x80U) {
-			hal_cons_putc(byte);
+			hal_putc(byte);
 		} else {
 			/* Skips every continuation byte belonging to this sequence. */
 			while (index < length &&
 			    ((uint8_t)string[index] & 0xc0U) == 0x80U) {
 				index++;
 			}
-			hal_cons_putc('?');
+			hal_putc('?');
 		}
 	}
 }

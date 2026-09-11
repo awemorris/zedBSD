@@ -190,7 +190,7 @@ int cons_getc(void)
 }
 void cons_set_attr(int foreground, int background)
 { current_attribute = (uint8_t)(((background & 15) << 4) | (foreground & 15)); }
-void hal_cons_putc(int character) { cons_putc(character); }
+void hal_putc(int character) { cons_putc(character); }
 void hal_cons_move_cursor(int row, int column)
 { (void)hal_cons_set_cursor((unsigned)row, (unsigned)column); }
 int hal_cons_getc(void) { return cons_getc(); }

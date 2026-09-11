@@ -112,7 +112,6 @@ drv_pcat_graphics_backend_enter(
 		hal_printf("graphics: boot framebuffer %ux%ux32 stride=%u\n",
 			   mode->width, mode->height, mode->stride);
 
-			drv_pcat_text_init();
 
 	/* Reports operation failure. */
 		return 1;
@@ -1037,7 +1036,17 @@ pcat_graphics_prepare_hardware(
 				 *)(uintptr_t)(ZBL6_FRAMEBUFFER_VIRTUAL_BASE +
 					       offset);
 
-		/* Reports operation failure. */
+		/*
+		 * Brings up the text grid and hands HAL output over to it.
+		 * From here on hal_printf() and /dev/console share one cursor.
+		 */
+		drv_pcat_text_init();
+		if (drv_pcat_text_ready()) {
+			__atomic_store_n(&kernel_putc, drv_pcat_text_putc,
+					 __ATOMIC_RELEASE);
+		}
+
+		/* Reports a usable linear framebuffer. */
 		return 1;
 	}
 

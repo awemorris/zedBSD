@@ -75,7 +75,7 @@ hal_free(void *pointer)
 	deallocator(pointer);
 }
 
-int hal_putchar(int character) { hal_cons_putc(character); return character; }
+int hal_putchar(int character) { hal_putc(character); return character; }
 int hal_puts(const char *string) { hal_cons_write(string); return 0; }
 
 static uint64_t
@@ -106,9 +106,9 @@ put_number(uint64_t value, unsigned base, int width)
 		    'a' + remainder - 10);
 	} while (value != 0);
 	while (width-- > count)
-		hal_cons_putc('0');
+		hal_putc('0');
 	while (count != 0)
-		hal_cons_putc(digits[--count]);
+		hal_putc(digits[--count]);
 }
 
 int
@@ -119,7 +119,7 @@ hal_printf(const char *format, ...)
 	while (*format != '\0') {
 		int width = 0, long_argument = 0;
 		if (*format != '%') {
-			hal_cons_putc(*format++);
+			hal_putc(*format++);
 			continue;
 		}
 		format++;
@@ -134,7 +134,7 @@ hal_printf(const char *format, ...)
 				format++;
 		}
 		switch (*format++) {
-		case 'c': hal_cons_putc(__builtin_va_arg(arguments, int)); break;
+		case 'c': hal_putc(__builtin_va_arg(arguments, int)); break;
 		case 's': {
 			const char *string = __builtin_va_arg(arguments, const char *);
 			hal_cons_write(string != NULL ? string : "(null)");
@@ -152,7 +152,7 @@ hal_printf(const char *format, ...)
 			    __builtin_va_arg(arguments, int32_t);
 			uint64_t magnitude;
 			if (value < 0) {
-				hal_cons_putc('-');
+				hal_putc('-');
 				magnitude = (uint64_t)(-(value + 1)) + 1;
 			} else {
 				magnitude = (uint64_t)value;
@@ -162,8 +162,8 @@ hal_printf(const char *format, ...)
 		}
 		case 'p': put_number((uintptr_t)__builtin_va_arg(arguments, void *),
 		    16, 8); break;
-		case '%': hal_cons_putc('%'); break;
-		default: hal_cons_putc('?'); break;
+		case '%': hal_putc('%'); break;
+		default: hal_putc('?'); break;
 		}
 	}
 	__builtin_va_end(arguments);

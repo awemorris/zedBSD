@@ -11,7 +11,7 @@ void hal_set_allocator(void*(*a)(size_t),void(*f)(void*))
 {if(!a||!f||allocator||deallocator)HAL_FATAL("hal_set_allocator must be called exactly once");allocator=a;deallocator=f;}
 void *hal_malloc(size_t n){if(!allocator)HAL_FATAL("allocator unset");return allocator(n);}
 void hal_free(void*p){if(!deallocator)HAL_FATAL("allocator unset");deallocator(p);}
-int hal_putchar(int c){hal_cons_putc(c);return c;}int hal_puts(const char*s){hal_cons_write(s);return 0;}
+int hal_putchar(int c){hal_putc(c);return c;}int hal_puts(const char*s){hal_cons_write(s);return 0;}
 
 static uint64_t divide(uint64_t value,unsigned base,uint64_t *remainder)
 {
@@ -22,23 +22,23 @@ static uint64_t divide(uint64_t value,unsigned base,uint64_t *remainder)
 static void put_number(uint64_t value,unsigned base,int width)
 {
 	char b[24];int n=0;do{uint64_t rem;value=divide(value,base,&rem);b[n++]=(char)(rem<10?'0'+rem:'a'+rem-10);}while(value);
-	while(width-->n)hal_cons_putc('0');
-	while(n)hal_cons_putc(b[--n]);
+	while(width-->n)hal_putc('0');
+	while(n)hal_putc(b[--n]);
 }
 int hal_printf(const char*fmt,...)
 {
 	__builtin_va_list ap;__builtin_va_start(ap,fmt);
-	while(*fmt){int width=0,long_arg=0;if(*fmt!='%'){hal_cons_putc(*fmt++);continue;}fmt++;if(*fmt=='0')fmt++;
+	while(*fmt){int width=0,long_arg=0;if(*fmt!='%'){hal_putc(*fmt++);continue;}fmt++;if(*fmt=='0')fmt++;
 		while(*fmt>='0'&&*fmt<='9')width=width*10+(*fmt++-'0');
 		if(*fmt=='l'){long_arg=1;fmt++;if(*fmt=='l')fmt++;}
 		switch(*fmt++){
-		case 'c':hal_cons_putc(__builtin_va_arg(ap,int));break;
+		case 'c':hal_putc(__builtin_va_arg(ap,int));break;
 		case 's':{const char*s=__builtin_va_arg(ap,const char*);hal_cons_write(s?s:"(null)");break;}
 		case 'u':put_number(long_arg?__builtin_va_arg(ap,uint64_t):__builtin_va_arg(ap,uint32_t),10,width);break;
 		case 'x':put_number(long_arg?__builtin_va_arg(ap,uint64_t):__builtin_va_arg(ap,uint32_t),16,width);break;
-		case 'd':{int64_t v=long_arg?__builtin_va_arg(ap,int64_t):__builtin_va_arg(ap,int32_t);uint64_t u;if(v<0){hal_cons_putc('-');u=(uint64_t)(-(v+1))+1;}else u=(uint64_t)v;put_number(u,10,width);break;}
+		case 'd':{int64_t v=long_arg?__builtin_va_arg(ap,int64_t):__builtin_va_arg(ap,int32_t);uint64_t u;if(v<0){hal_putc('-');u=(uint64_t)(-(v+1))+1;}else u=(uint64_t)v;put_number(u,10,width);break;}
 		case 'p':put_number((uintptr_t)__builtin_va_arg(ap,void*),16,16);break;
-		case '%':hal_cons_putc('%');break;default:hal_cons_putc('?');break;}
+		case '%':hal_putc('%');break;default:hal_putc('?');break;}
 	}
 	__builtin_va_end(ap);return 0;
 }

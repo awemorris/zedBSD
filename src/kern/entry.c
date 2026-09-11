@@ -516,6 +516,13 @@ kernel_heap_trace_observer(
 #endif
 
 /*
+ * Kernel console output for the HAL. Stays NULL until the display driver
+ * publishes its text layer; hal_putc() falls back to the early console
+ * until then.
+ */
+void (*kernel_putc)(int c);
+
+/*
  * Allocates memory for the HAL. Declared by the HAL interface, so the
  * HAL calls it directly instead of receiving a registered callback.
  */

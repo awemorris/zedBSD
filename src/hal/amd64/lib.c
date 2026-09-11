@@ -137,7 +137,7 @@ cons_puts(
 
 	/* Emits every byte in order. */
 	while (*string != '\0')
-		hal_cons_putc((unsigned char)*string++);
+		hal_putc((unsigned char)*string++);
 }
 
 /*
@@ -148,7 +148,7 @@ hal_putchar(
 	int character)
 {
 	/* Writes the character through the console backend. */
-	hal_cons_putc(character);
+	hal_putc(character);
 
 	/* Returns the written character. */
 	return character;
@@ -199,7 +199,7 @@ hal_printf(
 
 		/* Emits literal bytes without conversion processing. */
 		if (*position != '%') {
-			hal_cons_putc(*position);
+			hal_putc(*position);
 			continue;
 		}
 
@@ -226,7 +226,7 @@ hal_printf(
 		switch (*position) {
 		case 'c':
 			character = __builtin_va_arg(arguments, int);
-			hal_cons_putc(character);
+			hal_putc(character);
 			break;
 		case 's':
 			string = __builtin_va_arg(arguments, const char *);
@@ -249,7 +249,7 @@ hal_printf(
 			/* Emits the sign before formatting the magnitude. */
 			unsigned_value = (uint64_t)signed_value;
 			if (signed_value < 0) {
-				hal_cons_putc('-');
+				hal_putc('-');
 				unsigned_value = 0U - unsigned_value;
 			}
 			put_unsigned(unsigned_value, 10, 0, width, zero);
@@ -275,18 +275,18 @@ hal_printf(
 				zero);
 			break;
 		case '%':
-			hal_cons_putc('%');
+			hal_putc('%');
 			break;
 		default:
-			hal_cons_putc('%');
+			hal_putc('%');
 
 			/* Restores any consumed length modifiers verbatim. */
 			while (longs-- > 0)
-				hal_cons_putc('l');
+				hal_putc('l');
 
 			/* Preserves an unknown conversion or trailing marker. */
 			if (*position != '\0')
-				hal_cons_putc(*position);
+				hal_putc(*position);
 			else
 				position--;
 			break;
@@ -460,13 +460,13 @@ put_unsigned(
 	while (width > length) {
 		/* Selects zero or space padding for this output position. */
 		if (zero)
-			hal_cons_putc('0');
+			hal_putc('0');
 		else
-			hal_cons_putc(' ');
+			hal_putc(' ');
 		width--;
 	}
 
 	/* Emits the accumulated digits in display order. */
 	while (length > 0)
-		hal_cons_putc(digits[--length]);
+		hal_putc(digits[--length]);
 }

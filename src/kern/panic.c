@@ -24,7 +24,7 @@ __stdio_console_write(
 
 	/* Writes the bytes unmodified through the character path. */
 	for (index = 0; index < length; index++)
-		hal_cons_putc((unsigned char)bytes[index]);
+		hal_putc((unsigned char)bytes[index]);
 
 	/* Reports every byte as written. */
 	return length;
@@ -39,7 +39,7 @@ panic_puts(
 {
 	/* Emits every byte in order. */
 	while (*string != '\0')
-		hal_cons_putc((unsigned char)*string++);
+		hal_putc((unsigned char)*string++);
 }
 
 /*

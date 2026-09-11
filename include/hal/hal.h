@@ -77,6 +77,17 @@ int
 hal_putchar(
 	int c);
 
+/*
+ * Put one character on the early console.
+ *
+ * Before the kernel console exists this writes to the HAL's own early
+ * console. Once the kernel publishes kernel_putc, every character is
+ * delegated there instead and the HAL stops touching the display.
+ */
+void
+hal_putc(
+	int c);
+
 int
 hal_puts(
 	const char *s);
@@ -915,18 +926,6 @@ hal_mmio_write64(
 
 
 /*
- * Console
- */
-
-/*
- * Put a character on the HAL console.
- */
-void
-hal_cons_putc(
-	int c);
-
-
-/*
  * Misc
  */
 
@@ -1171,6 +1170,16 @@ kernel_sys_fault_handler(
  */
 void
 kernel_user_return_handler(void);
+
+/*
+ * Kernel console output, or NULL until the kernel console exists.
+ *
+ * The kernel publishes this with a RELEASE store once its console can
+ * draw. hal_putc() reads it with ACQUIRE and delegates when it is set.
+ * It is called from interrupt context and from panic, so it must not
+ * sleep and must take only IRQ-safe locks.
+ */
+extern void (*kernel_putc)(int c);
 
 /*
  * Allocator. Called only after the invocation of kernel_entry().

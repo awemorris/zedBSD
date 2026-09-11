@@ -247,13 +247,22 @@ hal_cons_reset(
 }
 
 /*
- * Writes one character to the console.
+ * Writes one character to the early console, or to the kernel console
+ * once the kernel has published one.
  */
 void
-hal_cons_putc(
+hal_putc(
 	int character)
 {
 	struct console_output_token token;
+	void (*kernel_output)(int c);
+
+	/* Delegates to the kernel console after the handover. */
+	kernel_output = __atomic_load_n(&kernel_putc, __ATOMIC_ACQUIRE);
+	if (kernel_output != NULL) {
+		kernel_output(character);
+		return;
+	}
 
 	/* Serializes character rendering with all console output. */
 	token = console_output_lock();
@@ -656,7 +665,7 @@ pcat_console_output_test_reentrant_transient(
 	/* Models a fault or NMI after newline publishes its transient row. */
 	token = console_output_lock();
 	cursor_row = PCAT_CONS_ROWS;
-	hal_cons_putc(character);
+	hal_putc(character);
 	cursor_row = PCAT_CONS_ROWS - 1U;
 	cursor_column = 0;
 	console_output_unlock(token);

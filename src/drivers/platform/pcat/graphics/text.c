@@ -120,9 +120,12 @@ draw_cell_locked(
 	foreground = text_color(attribute & 15U);
 	background = text_color((attribute >> 4) & 15U);
 
-	/* Falls back to a blank cell when the font has no such glyph. */
-	if (drv_pcat_font_get_glyph((uint8_t)cell, glyph, &glyph_width,
-				    &glyph_height) != 0) {
+	/*
+	 * Falls back to a blank cell when the font has no such glyph. The
+	 * font reports success as 1.
+	 */
+	if (!drv_pcat_font_get_glyph((uint8_t)cell, glyph, &glyph_width,
+				     &glyph_height)) {
 		glyph_width = TEXT_GLYPH_WIDTH;
 		glyph_height = TEXT_GLYPH_HEIGHT;
 		for (line = 0; line < TEXT_GLYPH_HEIGHT; line++)
@@ -214,6 +217,14 @@ putc_locked(
 	/* Ignores output before the framebuffer is published. */
 	if (!text_ready)
 		return;
+
+	/*
+	 * A control character moves the cursor without redrawing its cell,
+	 * so the inverted cursor image is erased here first.
+	 */
+	if (character == '\n' || character == '\r' ||
+	    character == '\b' || character == '\t')
+		draw_cell_locked(text_cursor_row, text_cursor_column, 0);
 
 	/* Handles the line and carriage controls. */
 	if (character == '\n') {
