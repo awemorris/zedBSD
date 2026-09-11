@@ -21,7 +21,7 @@
 #include <drivers/disklabel.h>
 #include "drivers/pcat-ide.h"
 #include "drivers/pci-pcat.h"
-#include "drivers/hid/ps2-mouse.h"
+#include "drivers/hid/ps2-8042.h"
 #if CONFIG_DRIVER_PCI_UHCI
 #include "drivers/pci-uhci.h"
 #endif
@@ -302,7 +302,7 @@ kern_platform_input_init(
 	/* Attaches the PS/2 mouse. */
 
 	/* Reports why the mouse attachment failed. */
-	error = drv_pcat_ps2_mouse_init();
+	error = drv_pcat_ps2_8042_init();
 	if (error != 0)
 		return error;
 

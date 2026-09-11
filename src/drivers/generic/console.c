@@ -61,7 +61,6 @@ static struct console_source_state console_sources[CONSOLE_INPUT_SOURCES];
 static struct spinlock input_lock;
 static struct wait_queue dispatch_waitq;
 #ifndef ZEDBSD_INPUT_OWNERSHIP_TEST
-static struct input_device *keyboard_input;
 static struct input_subscription console_subscription;
 #endif
 
@@ -87,8 +86,6 @@ static int console_close_file(struct file *file);
 #define CONSOLE_BLANK_MAX	256U
 
 static void console_clear_span(unsigned row, unsigned column, unsigned count);
-static int console_capability_add(struct input_capability *capabilities, size_t *count, uint16_t code);
-static int console_capabilities(struct input_capability *capabilities, size_t *count);
 static void console_deliver(uint32_t translated);
 static void console_dispatch_worker(void *argument);
 static ssize_t console_read(struct file *file, void *buffer, size_t size);
@@ -162,38 +159,6 @@ console_close_file(
 }
 
 /* Records one thing the console's input source can report. */
-static int
-console_capability_add(
-	struct input_capability *capabilities,
-	size_t *count,
-	uint16_t code)
-{
-	size_t index;
-
-	/* Handles the code condition. */
-	if (code == KEY_RESERVED)
-		return 0;
-	/* Process each remaining element. */
-	for (index = 0; index < *count; index++) {
-		/* Handles the capabilities condition. */
-		if (capabilities[index].type == EV_KEY &&
-		    capabilities[index].code == code) {
-			/* Succeeded. */
-			return 0;
-		}
-	}
-
-	/* Checks the remaining item count. */
-	if (*count == CONSOLE_KEY_CAPABILITIES)
-		return ENOSPC;
-	capabilities[*count].type = EV_KEY;
-	capabilities[*count].code = code;
-	(*count)++;
-
-	/* Succeeded. */
-	return 0;
-}
-
 /*
  * Clears a span of one row by writing spaces. The console interface has
  * no separate clear operation.
@@ -216,35 +181,6 @@ console_clear_span(
 		blanks[index] = ' ';
 	blanks[count] = '\0';
 	drv_pcat_text_write(row, column, DRV_PCAT_TEXT_ATTRIB_NORMAL, blanks);
-}
-
-/* Reports everything those sources can report together. */
-static int
-console_capabilities(
-	struct input_capability *capabilities,
-	size_t *count)
-{
-	int error_local;
-	unsigned character;
-
-	*count = 1;
-	capabilities[0].type = EV_SYN;
-	capabilities[0].code = SYN_REPORT;
-
-	/* Every console reports the full ASCII text set. */
-	for (character = 1; character < 0x80U; character++) {
-		char symbol[2] = {(char)character, '\0'};
-
-		/* Checks the operation status. */
-		error_local = console_capability_add(
-			capabilities, count,
-			drv_input_key_from_symbol(symbol));
-		if (error_local != 0)
-			return error_local;
-	}
-
-	/* Succeeded. */
-	return 0;
 }
 
 
@@ -1046,38 +982,13 @@ drv_console_device_register(
 	void)
 {
 	unsigned i_index_for;
-	struct input_capability capabilities[CONSOLE_KEY_CAPABILITIES];
-	struct input_device_info keyboard_info;
 	struct thread *dispatcher = NULL;
-	size_t capability_count;
 	int error;
-
-	/*
-	 * Every HAL console now supports text, release and repeat events,
-	 * emulating whatever the board cannot report, so there is no
-	 * capability declaration left to validate.
-	 */
-
-	/* Checks the operation status. */
-	error = console_capabilities(capabilities, &capability_count);
-	if (error != 0)
-		return error;
-	memset(&keyboard_info, 0, sizeof(keyboard_info));
-	keyboard_info.name = "zedBSD console keyboard";
-	keyboard_info.physical_path = "console/input0";
-	keyboard_info.id = (struct input_id){
-		.bustype = BUS_HOST, .product = 1, .version = 1};
-	keyboard_info.capabilities = capabilities;
-	keyboard_info.capability_count = capability_count;
-
-	/* Release events are always available, so keys are not momentary. */
-	keyboard_info.flags |= INPUT_DEVICE_KEY_REPEAT;
 
 	/* Starts every queue, lock and keymap out empty. */
 	spin_init(&input_lock, LOCK_RANK_DEVICE, "console input");
 	waitq_init(&dispatch_waitq, "console input dispatch");
 	dispatch_head = dispatch_tail = dispatch_used = 0;
-	keyboard_input = NULL;
 	memset(console_sources, 0, sizeof(console_sources));
 	memset(&console_subscription, 0, sizeof(console_subscription));
 
@@ -1116,11 +1027,6 @@ drv_console_device_register(
 		goto fail;
 
 	/* Checks the operation status. */
-	error = drv_input_device_register(&keyboard_info, &keyboard_input);
-	if (error != 0)
-		goto fail;
-
-	/* Checks the operation status. */
 	error = drv_input_subscribe(&console_subscription,
 				    console_input_subscriber, NULL);
 	if (error != 0)
@@ -1132,12 +1038,6 @@ drv_console_device_register(
 
 fail:
 	drv_input_unsubscribe(&console_subscription);
-
-	/* Handles the keyboard input availability. */
-	if (keyboard_input != NULL) {
-		drv_input_device_unregister(keyboard_input);
-		keyboard_input = NULL;
-	}
 
 	/* Handles the dispatcher availability. */
 	if (dispatcher != NULL)

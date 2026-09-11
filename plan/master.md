@@ -104,6 +104,43 @@ Objectives → Milestone Goals → WS → Phase → Queue試行/結果を対応�
 なったため、`/dev/console` が12件、`tty.c` が9件、pcat graphics が11件ビルドできない。
 これは early console 化そのものなので、下の計画に従って別途進める。
 
+#### fg007：段階3 ps2-8042.c の実装（2026-09-11、amd64、未コミット）
+
+ビルド PASS。evdev デバイスが2つとも1つのドライバから登録され、VFS も完了する。
+`boot: starting init /sbin/init` の先へ進まない症状は段階1-2から継続。
+
+実装：
+
+- `src/drivers/platform/pcat/ps2-8042.c`（926行）。既存 `ps2-mouse.c` を吸収し、
+  キーボード側を追加した。`controller_lock` 1本で IRQ1 と IRQ12 の両方を持つ。
+  ヘッダは `include/drivers/hid/ps2-8042.h`、入口は `drv_pcat_ps2_8042_init()`。
+- スキャンコード表 `scan_symbols[128]` と `scan_symbol()` を HAL の cons.c から移した。
+  キーコードへの変換は既存の `drv_input_key_from_symbol()` を使う。
+  capability は表から機械的に構築するので二重管理にならない。
+- キーボード割り込みは、バイトを読んで EOI してから publish する。8042 は出力バッファを
+  読むと IRQ1 を下げるので、次のバイトが即座に新しいエッジを作れる。ps2-mouse と同じ方針。
+- `/dev/console` の自前キーボードデバイス登録と capability 構築を削除した。
+- HAL の `prekern_pcat_cons_irq_init()` は IRQ1 を登録しなくなった。マスクするだけである。
+  これに伴い cons.c から `keyboard_interrupt()`、`keyboard_controller_init()`、
+  設定バイト操作、`pump_keyboard_locked()`、`hal_cons_modifiers()`、修飾キー状態、
+  スキャンコード表が不要になり削除した。
+
+起動ログの確認：
+
+    input: /dev/input/event0: PC/AT PS/2 mouse
+    input: /dev/input/event1: PC/AT PS/2 keyboard
+
+途中で見つけた不具合：
+
+- IRQ1 の二重所有。HAL の cons.c が先に `hal_irq_register()` していたため、
+  ps2-8042.c の登録が EBUSY（zedBSD では17）になっていた。HAL 側を外して解決。
+- `/dev/console` のキーボードデバイスが残っていて event 番号が衝突していた。削除して解決。
+
+残る症状：
+
+- init 起動後に出力が止まる。段階1-2から続く未解決点で、キーボード実装とは独立している。
+  上位モデルによる監査の対象とする。
+
 #### fg007：early console 段階1-2 の実装（2026-09-11、amd64、未コミット）
 
 ビルドは PASS。QEMU で `boot: starting init /sbin/init` まで到達するが、ログインまで進まない。

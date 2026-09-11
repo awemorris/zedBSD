@@ -74,11 +74,6 @@ static struct pcat_key_event events[EVENT_COUNT];
 static unsigned event_head;
 static unsigned event_tail;
 static uint8_t key_down[32];
-static int shift_down;
-static int ctrl_down;
-static int alt_down;
-static int caps_lock;
-static int e0_prefix;
 static struct hal_cons_wait_queue input_waiters;
 
 static const struct zbl6_framebuffer *framebuffer;
@@ -133,75 +128,6 @@ static struct zbl6_framebuffer console_test_framebuffer;
  * The designated indexes preserve the sparse scan-code identity and are the
  * sole narrow designated-initializer exception in this source.
  */
-static const char *const scan_symbols[128] = {
-	[0x01] = "esc",
-	[0x02] = "1",
-	[0x03] = "2",
-	[0x04] = "3",
-	[0x05] = "4",
-	[0x06] = "5",
-	[0x07] = "6",
-	[0x08] = "7",
-	[0x09] = "8",
-	[0x0a] = "9",
-	[0x0b] = "0",
-	[0x0c] = "minus",
-	[0x0d] = "equal",
-	[0x0e] = "backspace",
-	[0x0f] = "tab",
-	[0x10] = "q",
-	[0x11] = "w",
-	[0x12] = "e",
-	[0x13] = "r",
-	[0x14] = "t",
-	[0x15] = "y",
-	[0x16] = "u",
-	[0x17] = "i",
-	[0x18] = "o",
-	[0x19] = "p",
-	[0x1a] = "leftbrace",
-	[0x1b] = "rightbrace",
-	[0x1c] = "enter",
-	[0x1d] = "leftctrl",
-	[0x1e] = "a",
-	[0x1f] = "s",
-	[0x20] = "d",
-	[0x21] = "f",
-	[0x22] = "g",
-	[0x23] = "h",
-	[0x24] = "j",
-	[0x25] = "k",
-	[0x26] = "l",
-	[0x27] = "semicolon",
-	[0x28] = "apostrophe",
-	[0x29] = "grave",
-	[0x2a] = "leftshift",
-	[0x2b] = "backslash",
-	[0x2c] = "z",
-	[0x2d] = "x",
-	[0x2e] = "c",
-	[0x2f] = "v",
-	[0x30] = "b",
-	[0x31] = "n",
-	[0x32] = "m",
-	[0x33] = "comma",
-	[0x34] = "dot",
-	[0x35] = "slash",
-	[0x36] = "rightshift",
-	[0x38] = "leftalt",
-	[0x39] = "space",
-	[0x3a] = "capslock",
-	[0x3b] = "f1",
-	[0x3c] = "f2",
-	[0x3d] = "f3",
-	[0x3e] = "f4",
-	[0x3f] = "f5",
-	[0x40] = "f6",
-	[0x41] = "f7",
-	[0x42] = "f8",
-	[0x43] = "f9",
-	[0x44] = "f10",
-};
 
 static int console_interrupt_disable(void);
 static void console_interrupt_enable(void);
@@ -224,20 +150,7 @@ static void put_graphic_locked(int character);
 static void putc_locked(int character);
 static void write_n_locked(const char *string, unsigned length);
 static int write_n_at_locked(unsigned row, unsigned column, const char *string, unsigned length, uint8_t attribute);
-static const char *scan_symbol(uint8_t scan, int extended);
-static void set_event(struct pcat_key_event *event, const char *symbol, uint32_t flags);
 static int symbol_equal(const char *left, const char *right);
-static void rebuild_keyboard_events_locked(void);
-static void enqueue_keyboard_event_locked(const char *symbol, uint32_t flags);
-static int snapshot_modifier(const char *symbol);
-static int keyboard_wait_input_empty(void);
-static int keyboard_write_command(uint8_t command);
-static void keyboard_flush_output(void);
-static int keyboard_read_configuration(uint8_t *configuration);
-static int keyboard_write_configuration(uint8_t configuration);
-static int keyboard_controller_init(void);
-static void pump_keyboard_locked(void);
-static void keyboard_interrupt(int irq, hal_irq_ack_t acknowledge, void *argument);
 
 /*
  * Acquires recursive console-output ownership.
@@ -805,10 +718,6 @@ pcat_input_ownership_test_reset(
 	memset(events, 0, sizeof(events));
 	event_head = 0;
 	event_tail = 0;
-	caps_lock = 0;
-	shift_down = 0;
-	ctrl_down = 0;
-	alt_down = 0;
 }
 
 /*
@@ -847,7 +756,6 @@ pcat_input_ownership_test_caps(
 	int locked)
 {
 	/* Publishes the simulated caps-lock state. */
-	caps_lock = locked != 0;
 }
 
 /*
@@ -895,33 +803,6 @@ pcat_input_ownership_test_pop(
 }
 #endif
 
-/*
- * Reports the active keyboard modifier mask.
- */
-unsigned
-hal_cons_modifiers(
-	void)
-{
-	unsigned modifiers;
-
-	/* Starts with no active modifier bits. */
-	modifiers = 0;
-
-	/* Reports an active shift key. */
-	if (shift_down)
-		modifiers |= 1U;
-
-	/* Reports an active control key. */
-	if (ctrl_down)
-		modifiers |= 2U;
-
-	/* Reports an active alternate key. */
-	if (alt_down)
-		modifiers |= 4U;
-
-	/* Reports the combined modifier mask. */
-	return modifiers;
-}
 
 /*
  * Copies one queued event into the caller's keysymbol and flags.
@@ -1141,11 +1022,6 @@ prekern_pcat_cons_init(
 	/* Resets the keyboard state before enabling input interrupts. */
 	event_head = 0;
 	event_tail = 0;
-	shift_down = 0;
-	ctrl_down = 0;
-	alt_down = 0;
-	caps_lock = 0;
-	e0_prefix = 0;
 
 	/* Clears every physical held-key bit. */
 	for (index = 0; index < sizeof(key_down); index++)
@@ -1156,34 +1032,18 @@ prekern_pcat_cons_init(
 }
 
 /*
- * Registers and enables the PC/AT keyboard interrupt.
+ * Leaves the PC/AT keyboard line to the kernel-side 8042 driver.
+ *
+ * The early console is output only, so the HAL no longer claims IRQ1 or
+ * programs the controller. drivers/platform/pcat/ps2-8042.c owns the single
+ * controller and publishes both evdev devices.
  */
 void
 prekern_pcat_cons_irq_init(
 	void)
 {
-	int status;
-
-	/* Keeps the legacy line quiet while establishing controller ownership. */
+	/* Keeps the legacy line quiet until the kernel driver claims it. */
 	hal_irq_mask(IRQ_KEYBOARD);
-
-	/* Registers the keyboard interrupt handler. */
-	status = hal_irq_register(
-		IRQ_KEYBOARD,
-		keyboard_interrupt,
-		NULL);
-	if (status != HAL_OK)
-		HAL_FATAL("PC/AT keyboard IRQ registration failed");
-
-	/* Establishes a known keyboard port and scan-code translation state. */
-	status = keyboard_controller_init();
-	if (status != HAL_OK) {
-		hal_printf("input: i8042 keyboard unavailable (%d)\n", status);
-		return;
-	}
-
-	/* Enables delivery of keyboard interrupts. */
-	hal_irq_unmask(IRQ_KEYBOARD);
 }
 
 #ifdef ZEDBSD_CONSOLE_OUTPUT_TEST
@@ -1916,91 +1776,7 @@ write_n_at_locked(
 	return (int)changed;
 }
 
-/* Resolves a physical scan position to its key symbol. */
-static const char *
-scan_symbol(
-	uint8_t scan,
-	int extended)
-{
-	const char *symbol;
 
-	/* Resolves a non-extended scan through the sparse identity table. */
-	if (!extended)
-		return scan_symbols[scan];
-
-	/* Starts with no symbol for the extended scan position. */
-	symbol = NULL;
-
-	/* Resolves supported E0-prefixed scan positions. */
-	switch (scan) {
-	case 0x1d:
-		symbol = "rightctrl";
-		break;
-	case 0x38:
-		symbol = "rightalt";
-		break;
-	case 0x47:
-		symbol = "home";
-		break;
-	case 0x48:
-		symbol = "up";
-		break;
-	case 0x49:
-		symbol = "pageup";
-		break;
-	case 0x4b:
-		symbol = "left";
-		break;
-	case 0x4d:
-		symbol = "right";
-		break;
-	case 0x4f:
-		symbol = "end";
-		break;
-	case 0x50:
-		symbol = "down";
-		break;
-	case 0x51:
-		symbol = "pagedown";
-		break;
-	case 0x52:
-		symbol = "insert";
-		break;
-	case 0x53:
-		symbol = "delete";
-		break;
-	default:
-		break;
-	}
-
-	/* Reports the resolved symbol or an unsupported position. */
-	return symbol;
-}
-
-/* Initializes one public key event. */
-static void
-set_event(
-	struct pcat_key_event *event,
-	const char *symbol,
-	uint32_t flags)
-{
-	unsigned index;
-
-	/* Copies as much of the terminated symbol as the event can hold. */
-	index = 0;
-	while (index + 1U < HAL_KEY_SYMBOL_SIZE &&
-	    symbol[index] != '\0') {
-		event->symbol[index] = symbol[index];
-		index++;
-	}
-
-	/* Terminates and clears the remainder of the symbol field. */
-	while (index < HAL_KEY_SYMBOL_SIZE)
-		event->symbol[index++] = '\0';
-
-	/* Publishes the event classification flags. */
-	event->flags = flags;
-}
 
 /* Compares two terminated key symbols. */
 static int
@@ -2023,382 +1799,16 @@ symbol_equal(
 	return equal;
 }
 
-/* Enqueues one keyboard event or rebuilds an overflowed snapshot. */
-static void
-enqueue_keyboard_event_locked(
-	const char *symbol,
-	uint32_t flags)
-{
-	unsigned next;
 
-	/* Selects the next producer position in the event ring. */
-	next = (event_head + 1U) % EVENT_COUNT;
 
-	/* Rebuilds a truthful held-key snapshot instead of overwriting events. */
-	if (next == event_tail) {
-		rebuild_keyboard_events_locked();
-		return;
-	}
 
-	/* Publishes the event at the current producer position. */
-	set_event(&events[event_head], symbol, flags);
-	event_head = next;
-}
 
-/* Tests whether a symbol is a snapshot-ordering modifier. */
-static int
-snapshot_modifier(
-	const char *symbol)
-{
-	/* Recognizes the left shift key. */
-	if (symbol_equal(symbol, "leftshift"))
-		return 1;
 
-	/* Recognizes the right shift key. */
-	if (symbol_equal(symbol, "rightshift"))
-		return 1;
 
-	/* Recognizes the left control key. */
-	if (symbol_equal(symbol, "leftctrl"))
-		return 1;
 
-	/* Recognizes the right control key. */
-	if (symbol_equal(symbol, "rightctrl"))
-		return 1;
 
-	/* Recognizes the left alternate key. */
-	if (symbol_equal(symbol, "leftalt"))
-		return 1;
 
-	/* Recognizes the right alternate key. */
-	if (symbol_equal(symbol, "rightalt"))
-		return 1;
 
-	/* Recognizes the caps-lock key. */
-	if (symbol_equal(symbol, "capslock"))
-		return 1;
-
-	/* Reports an ordinary held-key symbol. */
-	return 0;
-}
-
-/* Waits until the 8042 can accept a command or data byte. */
-static int
-keyboard_wait_input_empty(
-	void)
-{
-	unsigned spin;
-
-	/* Bounds an absent or wedged legacy controller. */
-	for (spin = 0; spin < KBD_WAIT_LOOPS; spin++) {
-		if ((asm_inb(KBD_STATUS) & KBD_STATUS_INPUT) == 0)
-			return HAL_OK;
-		__asm__ volatile("pause");
-	}
-
-	/* Reports that the controller never accepted another byte. */
-	return HAL_ERR_TIMEOUT;
-}
-
-/* Writes one 8042 controller command after its input buffer drains. */
-static int
-keyboard_write_command(
-	uint8_t command)
-{
-	int status;
-
-	status = keyboard_wait_input_empty();
-	if (status != HAL_OK)
-		return status;
-	asm_outb(KBD_COMMAND, command);
-
-	/* Reports successful command submission. */
-	return HAL_OK;
-}
-
-/* Discards stale bytes left by firmware in the shared output buffer. */
-static void
-keyboard_flush_output(
-	void)
-{
-	unsigned count;
-
-	/* Both ports are disabled before this bounded drain begins. */
-	for (count = 0; count < KBD_FLUSH_LIMIT; count++) {
-		if ((asm_inb(KBD_STATUS) & KBD_STATUS_OUTPUT) == 0)
-			break;
-		(void)asm_inb(KBD_DATA);
-	}
-}
-
-/* Reads the 8042 configuration byte without accepting an auxiliary byte. */
-static int
-keyboard_read_configuration(
-	uint8_t *configuration)
-{
-	uint8_t status;
-	unsigned spin;
-	int result;
-
-	result = keyboard_write_command(KBD_READ_CONFIGURATION);
-	if (result != HAL_OK)
-		return result;
-
-	/* Waits for the controller response and drains any stale AUX byte. */
-	for (spin = 0; spin < KBD_WAIT_LOOPS; spin++) {
-		status = asm_inb(KBD_STATUS);
-		if ((status & KBD_STATUS_OUTPUT) == 0) {
-			__asm__ volatile("pause");
-			continue;
-		}
-		if ((status & KBD_STATUS_AUX) != 0) {
-			(void)asm_inb(KBD_DATA);
-			continue;
-		}
-		*configuration = asm_inb(KBD_DATA);
-		return HAL_OK;
-	}
-
-	/* Reports a controller which did not return its configuration. */
-	return HAL_ERR_TIMEOUT;
-}
-
-/* Writes the 8042 configuration byte as one controller transaction. */
-static int
-keyboard_write_configuration(
-	uint8_t configuration)
-{
-	int status;
-
-	status = keyboard_write_command(KBD_WRITE_CONFIGURATION);
-	if (status != HAL_OK)
-		return status;
-	status = keyboard_wait_input_empty();
-	if (status != HAL_OK)
-		return status;
-	asm_outb(KBD_DATA, configuration);
-
-	/* Reports successful configuration submission. */
-	return HAL_OK;
-}
-
-/* Establishes the PC/AT keyboard port independently of firmware state. */
-static int
-keyboard_controller_init(
-	void)
-{
-	uint8_t configuration;
-	int status;
-
-	/* Stops both sources before discarding firmware-owned output bytes. */
-	status = keyboard_write_command(KBD_DISABLE_KEYBOARD);
-	if (status != HAL_OK)
-		return status;
-	status = keyboard_write_command(KBD_DISABLE_AUX);
-	if (status != HAL_OK)
-		return status;
-	status = keyboard_wait_input_empty();
-	if (status != HAL_OK)
-		return status;
-	keyboard_flush_output();
-
-	/* Selects translated set-1 input and leaves AUX disabled until opened. */
-	status = keyboard_read_configuration(&configuration);
-	if (status != HAL_OK)
-		return status;
-	configuration |= KBD_CONFIGURATION_KEYBOARD_IRQ |
-	    KBD_CONFIGURATION_AUX_OFF |
-	    KBD_CONFIGURATION_TRANSLATION;
-	configuration &= (uint8_t)~(KBD_CONFIGURATION_AUX_IRQ |
-	    KBD_CONFIGURATION_KEYBOARD_OFF);
-	status = keyboard_write_configuration(configuration);
-	if (status != HAL_OK)
-		return status;
-
-	/* Restarts the keyboard clock after its interrupt route is installed. */
-	status = keyboard_write_command(KBD_ENABLE_KEYBOARD);
-	if (status != HAL_OK)
-		return status;
-	return keyboard_wait_input_empty();
-}
-
-/* Rebuilds the event queue as a truthful held-key snapshot. */
-static void
-rebuild_keyboard_events_locked(
-	void)
-{
-	const char *symbol;
-	unsigned pass;
-	unsigned extended;
-	unsigned scan;
-	unsigned state_index;
-
-	/* Starts a new snapshot with the current lock state. */
-	event_head = 0;
-	event_tail = 0;
-	set_event(
-		&events[event_head],
-		"",
-		HAL_KEY_EVENT_RESYNC |
-		(caps_lock ? HAL_KEY_EVENT_LOCK_CAPS : 0U));
-	event_head = (event_head + 1U) % EVENT_COUNT;
-
-	/* Emits modifiers before ordinary keys so the snapshot is truthful. */
-	for (pass = 0; pass < 2U; pass++) {
-		/* Examines base and E0-prefixed scan spaces. */
-		for (extended = 0; extended < 2U; extended++) {
-			/* Emits every held key belonging to this ordering pass. */
-			for (scan = 0; scan < 128U; scan++) {
-				state_index = extended * 16U + (scan >> 3);
-
-				/* Skips keys which are not currently held. */
-				if (((key_down[state_index] >>
-				    (scan & 7U)) & 1U) == 0) {
-					continue;
-				}
-
-				/* Resolves this held scan position to its public symbol. */
-				symbol = scan_symbol(
-					(uint8_t)scan,
-					(int)extended);
-
-				/* Skips scan positions without a public symbol. */
-				if (symbol == NULL)
-					continue;
-
-				/* Selects modifiers first and ordinary keys second. */
-				if (snapshot_modifier(symbol) != (pass == 0U))
-					continue;
-
-				/* Publishes this held key in the rebuilt snapshot. */
-				set_event(
-					&events[event_head],
-					symbol,
-					HAL_KEY_EVENT_PRESS |
-					HAL_KEY_EVENT_SNAPSHOT);
-				event_head = (event_head + 1U) % EVENT_COUNT;
-			}
-		}
-	}
-
-	/* Terminates the rebuilt snapshot. */
-	set_event(&events[event_head], "", HAL_KEY_EVENT_RESYNC_END);
-	event_head = (event_head + 1U) % EVENT_COUNT;
-}
-
-/* Drains available 8042 keyboard bytes into the event queue. */
-static void
-pump_keyboard_locked(
-	void)
-{
-	const char *symbol;
-	uint8_t status;
-	uint8_t raw;
-	uint8_t scan;
-	int released;
-	int extended;
-	int was_down;
-	unsigned state_index;
-	uint32_t flags;
-
-	/* Processes every available non-auxiliary byte. */
-	for (;;) {
-		status = asm_inb(KBD_STATUS);
-
-		/* Stops when input is empty or belongs to the auxiliary device. */
-		if ((status & 1U) == 0 ||
-		    (status & KBD_STATUS_AUX) != 0) {
-			break;
-		}
-
-		/* Reads the scan byte selected by the controller status. */
-		raw = asm_inb(KBD_DATA);
-
-		/* Records an E0 prefix for the next physical scan byte. */
-		if (raw == 0xe0U) {
-			e0_prefix = 1;
-			continue;
-		}
-
-		/* Decodes the physical press or release position. */
-		released = (raw & 0x80U) != 0;
-		scan = raw & 0x7fU;
-		extended = e0_prefix;
-		e0_prefix = 0;
-		state_index = (extended ? 16U : 0U) + (scan >> 3);
-		was_down = (key_down[state_index] >> (scan & 7U)) & 1U;
-
-		/* Updates the physical held-key bitmap. */
-		if (released) {
-			key_down[state_index] &=
-			    (uint8_t)~(1U << (scan & 7));
-		} else {
-			key_down[state_index] |=
-			    (uint8_t)(1U << (scan & 7));
-		}
-
-		/* Recomputes the public modifier state from physical keys. */
-		shift_down =
-		    ((key_down[0x2aU >> 3] >> (0x2aU & 7U)) |
-		    (key_down[0x36U >> 3] >> (0x36U & 7U))) & 1U;
-		ctrl_down =
-		    ((key_down[0x1dU >> 3] >> (0x1dU & 7U)) |
-		    (key_down[16U + (0x1dU >> 3)] >>
-		    (0x1dU & 7U))) & 1U;
-		alt_down =
-		    ((key_down[0x38U >> 3] >> (0x38U & 7U)) |
-		    (key_down[16U + (0x38U >> 3)] >>
-		    (0x38U & 7U))) & 1U;
-
-		/* Toggles caps lock only on a new press. */
-		if (scan == 0x3aU && !released && !was_down)
-			caps_lock = !caps_lock;
-
-		/* Resolves the physical position to a public key symbol. */
-		symbol = scan_symbol(scan, extended);
-
-		/* Ignores physical positions without a public symbol. */
-		if (symbol == NULL)
-			continue;
-
-		/* Classifies and enqueues this physical transition. */
-		flags = released ? HAL_KEY_EVENT_RELEASE :
-		    was_down ? HAL_KEY_EVENT_REPEAT : HAL_KEY_EVENT_PRESS;
-		enqueue_keyboard_event_locked(symbol, flags);
-	}
-}
-
-/* Handles one 8042 keyboard interrupt. */
-static void
-keyboard_interrupt(
-	int irq,
-	hal_irq_ack_t acknowledge,
-	void *argument)
-{
-	struct hal_cons_wait_entry *waiters;
-	bool enabled;
-
-	UNUSED_PARAMETER(irq);
-	UNUSED_PARAMETER(argument);
-
-	/* Starts with no detached input waiters. */
-	waiters = NULL;
-
-	/* Drains keyboard input and detaches waiters under queue serialization. */
-	enabled = hal_cons_wait_queue_lock(&input_waiters);
-	pump_keyboard_locked();
-
-	/* Selects all sleepers when at least one event is available. */
-	if (event_head != event_tail)
-		waiters = hal_cons_wait_queue_detach_all(&input_waiters);
-
-	/* Releases input serialization after detaching eligible waiters. */
-	hal_cons_wait_queue_unlock(&input_waiters, enabled);
-
-	/* Wakes consumers before completing the hardware interrupt. */
-	hal_cons_wait_queue_notify_all(waiters);
-	hal_irq_send_eoi(acknowledge);
-}
 
 /* Switches VGA access after the permanent uncached window becomes present. */
 void

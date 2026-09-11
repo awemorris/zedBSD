@@ -181,7 +181,7 @@ AMD64_KERNEL_SOURCES := \
 	$(AMD64_NVME_SOURCES) \
 	$(AMD64_INTEL_WLAN_SOURCES) \
 	src/drivers/platform/pcat/pcat-ide.c src/drivers/ethernet/dp8390.c \
-	src/drivers/isa/ne2000.c src/drivers/platform/pcat/ps2-mouse.c \
+	src/drivers/isa/ne2000.c src/drivers/platform/pcat/ps2-8042.c \
 	src/drivers/disklabel/mbr.c src/drivers/disklabel/gpt.c \
 	src/drivers/disklabel/pcat.c src/kern/platform/pcat.c \
 	src/kern/panic.c src/kern/entry.c src/kern/clock.c \
