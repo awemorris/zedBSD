@@ -67,7 +67,6 @@ static int console_getc(void){return rpi4_uart_getc();}
 void hal_cons_putc(int c){console_putc(c);}
 void hal_cons_move_cursor(int row,int column){(void)hal_cons_set_cursor((unsigned)row,(unsigned)column);}
 int hal_cons_getc(void){struct hal_key_event event;for(;;){(void)hal_cons_read_event(&event);if((event.flags&HAL_KEY_EVENT_PRESS)!=0&&event.symbol[1]=='\0')return event.symbol[0];}}
-void hal_cons_set_mode(enum hal_cons_mode mode){state.mode=mode;}
 void hal_cons_write(const char*s){console_puts(s);}
 void hal_cons_write_n(const char*s,unsigned n){if(s)while(n--)console_putc(*s++);}
 int hal_cons_write_n_at(unsigned row,unsigned column,const char*s,unsigned n,uint8_t attr)
@@ -84,7 +83,6 @@ void hal_cons_clear_to_eol(void){(void)hal_cons_clear_to_eol_at(state.row,state.
 int hal_cons_set_cursor(unsigned r,unsigned c){if(r>=HAL_CONS_ROWS||c>=HAL_CONS_COLUMNS)return 0;erase_cursor();state.row=r;state.column=c;hal_cons_update_cursor();return 1;}
 void hal_cons_show_cursor(int visible){erase_cursor();state.cursor_visible=visible!=0;hal_cons_update_cursor();}
 void hal_cons_save_state(struct hal_cons_state*out){if(out)*out=state;}
-void hal_cons_restore_terminal(const struct hal_cons_state*in){erase_cursor();state.mode=HAL_CONS_TERMINAL;if(in&&in->row<HAL_CONS_ROWS&&in->column<HAL_CONS_COLUMNS)state=*in;hal_cons_update_cursor();}
 static void rpi4_console_interrupt(int irq,hal_irq_ack_t acknowledge,void*argument)
 {
 	struct hal_cons_wait_entry*waiters=NULL;bool enabled;
@@ -107,9 +105,7 @@ void rpi4_cons_irq_init(void)
 	rpi4_uart_enable_rx_irq();hal_irq_unmask((int)info->uart_irq);
 }
 int hal_cons_poll_event(struct hal_key_event*event){bool enabled=hal_cons_wait_queue_lock(&input_waiters);int available=input_head!=input_tail;if(available&&event!=NULL)*event=input_events[input_tail];hal_cons_wait_queue_unlock(&input_waiters,enabled);return available;}
-void hal_cons_get_input_info(struct hal_cons_input_info*info){if(info){info->flags=HAL_CONS_INPUT_TEXT;info->symbols=NULL;info->symbol_count=0;}}
 int hal_cons_read_event(struct hal_key_event*event){struct hal_cons_wait_entry waiter={hal_task_get_current(),NULL,0};for(;;){bool enabled=hal_cons_wait_queue_lock(&input_waiters);if(input_head!=input_tail){if(event!=NULL)*event=input_events[input_tail];input_tail=(input_tail+1U)%INPUT_EVENT_COUNT;hal_cons_wait_queue_unlock(&input_waiters,enabled);return 1;}hal_cons_wait_queue_add(&input_waiters,&waiter);hal_cons_wait_queue_unlock(&input_waiters,enabled);kernel_wait_task();}}
-int hal_cons_key_state(int key){(void)key;return 0;}
 void hal_cons_drain_input(void){bool enabled=hal_cons_wait_queue_lock(&input_waiters);input_tail=input_head;hal_cons_wait_queue_unlock(&input_waiters,enabled);}
 unsigned hal_cons_modifiers(void){return 0;}
 void hal_cons_suspend(void){}

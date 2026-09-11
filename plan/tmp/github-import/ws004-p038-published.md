@@ -1,0 +1,371 @@
+<!-- awesome-plan project=zedbsd record=ws004-p038 -->
+
+既存計画の取り込み。本文はローカルの現行記録、リポジトリ資料へのリンクは基準コミットの履歴です。Issue作成・open状態は実行承認や未完了判定を意味しません。Awesome Planの状態同期導入前のため、実際の状態は本文を参照してください。
+
+元資料: `plan/ws004/phase038/phase.md`
+
+親: [ws004](https://github.com/awemorris/zedBSD/issues/5)
+
+# WS004 Phase 038: standalone Intel Wi-Fi 6E AX211 normal path
+
+Last updated: 2026-09-03
+
+Phase ID: `ws004-p038`
+
+Status: Uncleared (`q066` automatic and exact-device VFIO normal-path
+milestones complete); one final direct physical run remains pending
+
+Parent: [WS004 hardware expansion](https://github.com/awemorris/zedBSD/issues/5)
+
+Tests: [WS004 test index](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws004-hardware/tests/README.md)
+
+Intake evidence:
+[HW-T37 q061 read-only record](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws004-hardware/tests/q061-intel-wlan-intake-evidence.md)
+
+## Objective
+
+Implement the exact q061 Intel Wi-Fi 6E AX211/CNVio2 target as an independent
+native zedBSD driver and establish one bounded useful normal path in this
+order:
+
+```text
+exact attach + pinned firmware/PNVM
+  -> NVM/MCC-permitted 2.4/5-GHz 20-MHz scan
+  -> WPA2-Personal/CCMP authorization
+  -> DHCP
+  -> gateway ping + public ping + bounded HTTP fetch
+  -> disconnect + administrative down
+```
+
+The purpose is first communication, not exhaustive hardening. Essential input
+bounds, finite waits, checked DMA/interrupt ownership, secret redaction, and
+fail-closed authorization are required from the start. Exhaustive recovery,
+rekey, suspend, race, fault-injection, throughput, and repeatability work
+remains a later Phase extracted after this exact normal path works.
+
+## Frozen exact-device boundary
+
+P038 binds only this q061 tuple:
+
+| Field | Frozen value |
+| --- | --- |
+| PCI vendor/device | `8086:51f0` |
+| Subsystem vendor/device | `8086:4090` |
+| PCI revision | `01` |
+| Device | Intel Wi-Fi 6E AX211 160 MHz, Garfield Peak |
+| Platform interface | Alder Lake-P PCH CNVi WiFi, CNVio2 Root Complex Integrated Endpoint |
+| Firmware | `intel/iwlwifi/iwlwifi-so-a0-gf-a0-89.ucode` |
+| Firmware size/SHA-256 | `1736748`; `c569c4b0ffe2054a1cedd5affccff2da8515325eeb23f788c7abe9463d1a1514` |
+| PNVM | `intel/iwlwifi/iwlwifi-so-a0-gf-a0.pnvm` |
+| PNVM size/SHA-256 | `55176`; `efa9726d4a9d44b83fc9a14cedcf306a4e439e9de919802eb9e92df4ec032b2a` |
+| Upstream snapshot | official `linux-firmware` tag `20260410`, commit `dc85ccedc9c973682fbcf4d628ca61174bcc3120` |
+| Runtime firmware report | `89.735b75a4.0` |
+| Execution method | bounded QEMU VFIO development run on the exact device, followed by one final direct zedBSD boot on the exact machine |
+
+Do not match AX201, AX210, another AX211 subsystem/revision, a broad Intel
+vendor range, or a neighboring `so-a0` firmware family. Tagged WHENCE reports
+`86.735b75a4.0` for the exact `-89` bytes while the host runtime reports
+`89.735b75a4.0`; retain that discrepancy in diagnostics and tests rather than
+using it to substitute a different blob.
+
+## Dependencies
+
+- `ws004-p030`: its automatic RTL8822BU lifecycle implementation is complete;
+  WS005 p008's shared physical closure is not a prerequisite here.
+- `ws004-p037`: q061 completed the exact AX211/CNVio2 identity, topology,
+  selected firmware/PNVM, immutable official provenance, clear license, and
+  optional-package boundary.
+- `ws004-p003`, `p012`, and the existing PCI/MSI-X, DMA, net-device, shutdown,
+  and checked lifetime contracts.
+- `ws004-p027` and `p029`: the existing generic WLAN UAPI/common station,
+  WPA2-Personal/CCMP engine, controlled port, and Ethernet conversion contract.
+- `ws003-p025`: the q065 production PCI backend correctly refused to invent a
+  local timing source. Q066 first completes the approved HAL fixed-frequency
+  counter and its whole-CPU-set publication contract. This supplies deadlines;
+  it is not the root cause of the firmware association assert.
+- The q061 machine exposes `0000:00:14.3` alone in IOMMU group 11, advertises
+  FLR, supplies VFIO support, and reaches SSH through another interface.
+  Q065 used QEMU PCI passthrough as a bounded development and
+  physical-device evidence path. The guest does not reproduce the host PCI,
+  ACPI, power, CNVi or RF-kill topology, so one direct zedBSD boot remains the
+  final completion gate.
+
+P006/p007 WS005 orchestration is not a dependency. The development checkpoint
+may use the already working primitive commands and `dhcpc`, keeping this Phase
+focused on the Intel hardware path.
+
+## No-premature-commonization rule
+
+Implement AX211 behind the existing stable WLAN and `net_device` contracts in
+Intel-owned source. It may duplicate concepts or small routines found in the
+RTL8822BU implementation. Do not first introduce a shared Intel/Realtek
+firmware loader, command transport, DMA ring, descriptor codec, interrupt
+engine, calibration layer, register API, or chip-family framework.
+
+Reuse only facilities which already have a device-independent public contract,
+such as PCI/DMA/interrupt primitives, the p027 WLAN operations, p029 WPA2/CCMP
+state, and the net-device boundary. If an internal adapter can express AX211
+behavior through those interfaces, prefer the adapter over a public UAPI
+change. If correct operation truly requires a new public semantic, stop and
+mark p038 `uncleared` with the exact missing operation and affected consumers.
+
+The Intel driver must remain replaceable as one implementation. Its private
+module boundaries, state machine, firmware commands, and data structures may
+differ completely from Realtek.
+
+## Initial capability boundary
+
+- Exact q061 AX211 identity only: `8086:51f0`, subsystem `8086:4090`, revision
+  `01`, with the recorded CNVio2 platform relationship.
+- Infrastructure station mode, 2.4/5-GHz channels permitted by the frozen
+  NVM/MCC world/board policy, 20-MHz width, and the legacy/HT subset actually
+  required for the controlled normal path.
+- WPA2-Personal PSK with CCMP-128 through the existing common security engine.
+- One ordinary Ethernet MTU and one bounded TX/RX queue profile sufficient for
+  DHCP, ICMP, ARP, DNS, and the HTTP oracle.
+- No 6 GHz, 40/80/160 MHz, 802.11ax/HE performance claim, WPA3/SAE,
+  802.1X, roaming, AP/monitor mode, aggregation tuning, power-save
+  optimization, Bluetooth coexistence optimization, suspend/resume, or
+  throughput target.
+
+Unsupported marketed capabilities remain explicit and do not enter the first
+normal-path completion claim.
+
+## Ordered implementation
+
+### 1. Exact attach and optional firmware package
+
+- Match only the frozen PCI/subsystem/revision tuple and confirm the expected
+  CNVio2/So/GF transport identifiers before register or DMA access.
+- Acquire BAR0, MSI-X, DMA, platform-companion, and net-device ownership
+  transactionally with exact reverse unwind. The observed BAR/IRQ/IOMMU/FLR
+  values are evidence, not hard-coded runtime addresses or vector numbers.
+- Implement default-off `userland/firmware/intelax211/`. Acquire only the
+  frozen `-89.ucode`, PNVM, and `LICENCE.iwlwifi_firmware` from the immutable
+  official snapshot, verify both sizes and SHA-256 values, install below
+  `/lib/firmware/`, and install the license and package manifest.
+- Keep every blob outside the base-license claim and default image. An ordinary
+  build and the kernel perform no firmware network fetch. Missing, wrong-
+  digest, or incompatible bytes fail visibly with carrier down.
+- Automatically install the complete OpenBSD ISC and Intel BSD-3-Clause
+  source-derivation notices whenever the kernel AX211 driver is selected. This
+  binary-distribution obligation is independent of the optional firmware
+  package and its separate firmware license.
+- Parse and upload only the pinned firmware/PNVM formats with checked
+  arithmetic, bounded commands, explicit ready/error states, and complete
+  staging scrub. Do not reverse engineer, decompile, or disassemble the blob.
+
+### 2. AX211-private CNVio2 transport and radio start
+
+- Keep firmware command/event rings, TX/RX descriptors, DMA ownership,
+  interrupts, NVM/calibration, channel programming, CNVi/CRF interaction, and
+  device reset inside the AX211 implementation.
+- Use finite controller/firmware deadlines and reject unknown firmware, PNVM,
+  NVM, RF, or companion layouts. Never guess board calibration or report
+  carrier after partial initialization.
+- Publish one stable `wlanN` only after exact identity and basic object lifetime
+  are valid; keep it administratively down until open succeeds.
+
+### 3. Scan normal path
+
+- Map Intel receive/event formats into the existing bounded WLAN scan callbacks
+  without changing their public representation.
+- Complete one finite NVM/MCC-constrained 2.4/5-GHz scan, publish truthful
+  BSS/security/channel/RSSI fields, and stop cleanly. A scan result never
+  implies authorization.
+
+### 4. WPA2/CCMP and Ethernet normal path
+
+- The pinned `-89` firmware advertises `MLD_API_SUPPORT`; keep one command API
+  generation throughout association. Encode and sequence API89
+  `MAC_CONFIG`, `LINK_CONFIG`, `STA_CONFIG`, and its matching security-key
+  operation. Do not send legacy `MAC_CONTEXT`, binding, `ADD_STA`, or legacy
+  key commands on this path, and do not substitute `-77` firmware.
+- Supply the existing common authentication, association, EAPOL, hardware-key,
+  encrypted TX/RX, and completion callbacks from AX211-private operations.
+- Preserve p029 replay, MIC, key-install, controlled-port, and secret-lifetime
+  rules. Carrier rises only after the common engine authorizes the link.
+- Convert one bounded authorized Ethernet stream through the existing common
+  L2 boundary; no Intel-specific packet format escapes the driver.
+
+### 5. Useful IP checkpoint
+
+- Produce one clearly identified direct-boot image for the exact q061 machine.
+  Scan, connect using runtime-only credentials, obtain DHCP, ping the gateway
+  and one public address, fetch a bounded nonempty HTTP object, disconnect, and
+  bring the interface down.
+- Never retain a real-machine or real-network credential, SSID, BSSID, MAC
+  address, lease, hostname, account name, or host address in plans, build logs,
+  screenshots, or fixtures. Clearly synthetic protocol vectors are permitted
+  in automatic tests.
+
+## Verification contract (`HW-T38`)
+
+Automatic gates first cover:
+
+- exact and neighboring PCI/subsystem/revision identities, expected CNVio2
+  transport IDs, allocation failure, reverse unwind, DMA/ring wrap, interrupt
+  claim, finite firmware command/event handling, malformed firmware/PNVM/NVM,
+  and secret/staging erasure;
+- reproduction of the frozen two firmware-file sizes/digests and rejection of
+  WHENCE/runtime-version confusion, unapproved fallbacks, and floating updates;
+- deterministic 2.4/5-GHz scan events, NVM/MCC regulatory precedence, and
+  malformed/stale/duplicate frame rejection;
+- the existing p027/p029 fake-authenticator WPA2/CCMP and L2 suites against an
+  AX211-private fake transport;
+- authorization ordering, hardware-key failure, TX/RX bounds, terminal down,
+  and no traffic before controlled-port authorization;
+- configured amd64 build, ordinary repository build, `git diff --check`, and
+  IDE/xHCI USB-root regressions proving the new driver does not disturb the
+  boot medium or RTL8822BU baseline.
+
+Q065 assigned only the isolated exact BDF to a bounded QEMU guest and recorded
+PCI ownership, MSI-X/DMA, firmware/PNVM, ALIVE, and scan before the first
+association command failed. Q066 resumes from that exact boundary after p025,
+then records association and useful traffic as separate gates. Always restore
+the host binding to `iwlwifi`. This development path may expose and repair
+driver defects, but one bounded direct zedBSD boot on the exact q061 machine
+remains the final acceptance path because QEMU does not reproduce the host
+platform topology.
+
+## Completion conditions
+
+- Exact AX211/CNVio2 attach, pinned firmware/PNVM start, bounded scan,
+  WPA2/CCMP controlled port, encrypted Ethernet, and checked down pass on
+  production code.
+- The automatic transport/firmware/scan/security/L2/build/regression gates
+  pass without changing the public WLAN UAPI.
+- One exact direct-boot run reaches DHCP, gateway/public ping, and a bounded
+  nonempty HTTP fetch, then disconnects and goes administratively down.
+- Before that final run, the q065/q066 VFIO attempts record their deepest
+  exact-device checkpoints and restore the host AX211 to `iwlwifi`; a
+  virtualization-only topology failure is recorded rather than treated as a
+  native driver claim.
+- The AX211 implementation remains independent of RTL internal code. Any
+  duplicated implementation is intentionally retained for p039 review.
+- Exhaustive reconnect/rekey/recovery/long-run behavior is explicitly
+  unclaimed and recorded for a later hardening Phase.
+
+## Q062 progress
+
+- Complete: default-off exact firmware/PNVM/license/WHENCE package and its
+  immutable-cache fixture, plus automatic installation of the complete driver
+  source notices whenever the kernel driver is selected.
+- Complete: private API89/PNVM parser, exact real-blob inventory, Gen3
+  context/descriptor and command/event codecs, ring/staging bounds, and
+  ordinary/sanitizer/analyzer/ABI gates.
+- Complete as production integration plus automatic evidence: exact PCI
+  ownership and down-state publication, checked MSI-X/DMA open-generation
+  lifetime, firmware boot/ALIVE/PNVM/NVM, the non-DQA API89 runtime command
+  sequence, MCC-constrained passive scan, external-DMA scan command, BSS,
+  association, key, TX-ring/TX, and RX paths all pass their focused gates.
+- Complete: the production common station opens only after hardware success;
+  the synthetic integration fixture traverses scan selection, WPA2/CCMP
+  authorization, protected Ethernet TX/RX, disconnect, close, and detach
+  without changing the public WLAN UAPI.
+- Complete: operation leases, single-poll ownership, generation/sequence
+  checks, secret erasure, and fatal recovery cover concurrent close/detach,
+  stale completions, ambiguous command failure, and retained-DMA retry without
+  use-after-free or premature resource release. The configured amd64 kernel
+  links with the driver selected.
+- Pending human evidence: one direct boot on the exact q061 AX211/CNVio2
+  machine must still establish physical firmware/PNVM execution, RF scan,
+  WPA2/CCMP association, DHCP, gateway/public ping, bounded nonempty fetch,
+  disconnect, and administrative down. Until that single run succeeds, p038
+  remains required and p038 makes no physical firmware/RF claim. Q062 closed
+  this item as `uncleared` when the user deferred the physical test so that
+  independent work could continue.
+
+## Q065 evidence and exact resume boundary
+
+- The isolated exact device passed safe VFIO assignment, MSI-X/DMA startup,
+  pinned firmware and PNVM ALIVE, NVM/MCC policy, and a complete 33-BSS scan.
+  The intended 5-GHz BSS was found on channel 44.
+- The first legacy 148-byte `MAC_CONTEXT_CMD` ADD caused firmware UMAC
+  `ADVANCED_SYSASSERT`; the recorded last host command decodes as group 1,
+  opcode `0x28`. Adding the reference-consistent initial DTIM value did not
+  change the failure.
+- Static comparison established that the exact `-89` firmware exposes
+  capability bit 110 (`MLD_API_SUPPORT`) and the MAC/LINK configuration command
+  family. Linux and current OpenBSD use the MLD family with this generation;
+  the available legacy comparison uses `-77`. Therefore q066 replaces the
+  complete MAC/link/station/key family rather than guessing another legacy
+  payload field or changing the frozen firmware.
+- Every bounded run restored `0000:00:14.3` to `iwlwifi`; the independent USB
+  Ethernet SSH route remained intact. Remote credential-bearing staging and
+  logs were deleted.
+
+Q066 completed the byte-exact MLD transition, focused gates, and bounded VFIO
+normal path after `ws003-p025` passed its automatic counter gates. The sole
+remaining p038 gate is the one-run direct boot shared with p025's physical
+multicore counter observation.
+
+## Q066 automatic and exact-device VFIO evidence
+
+- Replaced the mixed-generation legacy association path with one API89 MLD
+  family. Initial setup is now exactly `MAC_CONFIG ADD`, `LINK_CONFIG ADD`
+  with invalid PHY, legacy `PHY_CONTEXT ADD`, `RLC_CONFIG`, `LINK_CONFIG
+  MODIFY` assigning PHY 0 while inactive, `LINK_CONFIG MODIFY` activating the
+  link with rates, `STA_CONFIG`, queue add, then session protection.
+- Post-scan association is `MAC_CONFIG MODIFY`, `LINK_CONFIG MODIFY` with the
+  rates/QoS/beacon-timing mask `0x1a`, then `STA_CONFIG`. Cleanup is bounded
+  reverse ownership order: session, queue, station, link deactivate, link
+  remove, MAC remove, and PHY remove. An ambiguous submitted command is never
+  retried and contributes its possibly acquired resource to that rollback.
+- Command-table layout versions remain independently validated (`MAC_CONFIG`
+  v2, `LINK_CONFIG` v2, implicit `STA_CONFIG`/`STA_REMOVE` v1, `RLC_CONFIG`
+  v2, and `SEC_KEY` v1). MLD MAC/LINK/STA commands and `SEC_KEY` use wide-header
+  version 0, while the API89 `RLC_CONFIG` exception explicitly uses wide-header
+  version 2. These commands accept only an empty ACK. Queue ADD alone retains
+  its exact v2 eight-byte allocation response; Queue REMOVE is a synchronous
+  ACK whose optional payload has no remove-result semantics and is ignored.
+- An intermediate exact-device VFIO retry passed counter publication, open,
+  and the complete 5-GHz scan, then localized Queue ADD ownership. Static
+  comparison with the API89 Linux contract found that the v3 ADD request does
+  not select a queue or write pointer: firmware returns a 1..511 queue ID and
+  initial pointer in the v2 response. Production now stores both, masks the
+  returned pointer by the 256-entry ring, uses the full queue ID for WRPTR and
+  completion-payload checks, and uses its five-bit sequence-field
+  representation for TX command/completion headers. REMOVE no longer applies
+  ADD-response queue/write-pointer equality to its ACK.
+- The closing bounded VFIO run on the exact device passed firmware/PNVM,
+  5-GHz scan and target discovery, WPA2/CCMP association, controlled-port
+  authorization, DHCP and default-route installation, the selected LAN-peer
+  ping, public ping, a bounded nonempty HTTP fetch, disconnect, and
+  administrative down. Both test components returned success; the host BDF
+  was restored to `iwlwifi`, its independent Ethernet route remained
+  available, and the disposable remote staging tree was removed.
+- The v2 link payload uses the firmware's `ac[]` wire order BK, BE, VI, VO,
+  independently from Gen2 TX FIFO identities 1, 2, 3, 4. The production codec
+  and an independently arranged full-payload fixture prevent the AC-index and
+  FIFO-mask values from being conflated.
+- `run-intel-ax211-assoc-test.sh` passes ordinary execution, the cached real
+  API89 command table, ASan/UBSan, analyzer, and amd64/i386 syntax gates. It
+  checks the complete 52/208/96-byte MLD payloads, nine-command setup,
+  three-command association update, exact response identity, uncertain
+  completion, session expiry, and seven-command rollback.
+- `run-intel-ax211-key-test.sh`, `run-intel-ax211-pci-test.sh`, and
+  `run-intel-ax211-wlan-common-integration-test.sh` pass their ordinary,
+  sanitizer/analyzer, and amd64/i386 gates. The ordinary configured repository
+  build also passes with `make -j16`; no HAL or public WLAN UAPI was changed by
+  this MLD transition.
+- The common L2 receive path accepts ordinary TID-0 non-A-MSDU QoS Data with checked
+  QoS, optional HT Control, CCMP, LLC, and MIC offsets. The focused ordinary,
+  sanitizer, and analyzer gate and the exact-device useful-IP run pass. Full
+  WMM/nonzero-TID transmit policy, A-MSDU, per-TID replay state, and exhaustive malformed
+  QoS cases remain outside this normal-path Phase.
+- Automatic and VFIO evidence does not replace the final direct physical
+  acceptance run.
+- Q066's exit scope remains one end-to-end normal-path pass. Exhaustive
+  recovery, rekey, race, fault-injection, and repeatability matrices are
+  deliberately deferred to a later hardening Phase rather than expanded here.
+
+## Reconsideration boundary
+
+Return to planning if the exact q061 tuple or CNVio2 companion relationship
+does not match, direct boot is unavailable, the frozen firmware/PNVM fails its
+digest or format contract, firmware/NVM behavior cannot be bounded, or the
+existing public WLAN contract cannot express a required semantic. A public
+UAPI change or a new firmware redistribution decision is a human decision; do
+not hide it behind a broad Intel match, embedded firmware, plaintext network,
+or premature commonization.

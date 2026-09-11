@@ -1,0 +1,2529 @@
+[
+  {
+    "id": "master",
+    "source": "plan/master.md",
+    "snapshot": "plan/tmp/github-import/review/master.md",
+    "sha256": "eec2e72cb1ab2014416dd842364f09b27a2647a6c3b32a258f7573868198f0f0",
+    "characters": 5964
+  },
+  {
+    "id": "ws001",
+    "source": "plan/ws001/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws001.md",
+    "sha256": "7e760aff9d9841e1e92c126fe3a77c6cf82fdf4cfa6760e87cffd0e34ee783e9",
+    "characters": 83716
+  },
+  {
+    "id": "ws002",
+    "source": "plan/ws002/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws002.md",
+    "sha256": "7b0920b8cbee2dc38dd44effcb35947467640564eb1b2bacf741cde821c4abf9",
+    "characters": 12437
+  },
+  {
+    "id": "ws003",
+    "source": "plan/ws003/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws003.md",
+    "sha256": "85d2f842eda7f19e78500bed1729dac560068c6140a410a8699afb54f8278fb3",
+    "characters": 20927
+  },
+  {
+    "id": "ws004",
+    "source": "plan/ws004/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws004.md",
+    "sha256": "7ab996b8bd296955c9991b5aaf438abec7245b2fc68dc70f84ac979a2eee5256",
+    "characters": 47210
+  },
+  {
+    "id": "ws005",
+    "source": "plan/ws005/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws005.md",
+    "sha256": "d762740bb40d0974e526896705d3c7f7bfcd59d564e13d76b8544a5a067bcaf0",
+    "characters": 25362
+  },
+  {
+    "id": "ws006",
+    "source": "plan/ws006/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws006.md",
+    "sha256": "fe94814e9f93b29a9faa79ae66c87c62c9d217f1767bfb87f3048172197b5a99",
+    "characters": 10410
+  },
+  {
+    "id": "ws007",
+    "source": "plan/ws007/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws007.md",
+    "sha256": "bbd09f2b36122e695c0661534df498980a3f491f800ccc7c8e0235102408242a",
+    "characters": 7743
+  },
+  {
+    "id": "ws008",
+    "source": "plan/ws008/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws008.md",
+    "sha256": "d0f8dd1b464a82deb4b363a10798df9e66d6782f63fd1f862bdf80e60af7f09b",
+    "characters": 13912
+  },
+  {
+    "id": "ws009",
+    "source": "plan/ws009/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws009.md",
+    "sha256": "ec69e00faee3ad90ff02a4c1ee8c4038cdf4c84acc5239fb1a015d3a42f0ebc3",
+    "characters": 7950
+  },
+  {
+    "id": "ws010",
+    "source": "plan/ws010/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws010.md",
+    "sha256": "e6e8ddeed06ade8ac71a087e97dd3025ed26af07d49983b6d33a765df6d7f261",
+    "characters": 4056
+  },
+  {
+    "id": "ws011",
+    "source": "plan/ws011/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws011.md",
+    "sha256": "14fb9269231ee9313c1a17bbf45f814f03681a453b4d665bac75a8d3522ec71c",
+    "characters": 2756
+  },
+  {
+    "id": "ws012",
+    "source": "plan/ws012/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws012.md",
+    "sha256": "751a96fbf198ee7ba1944b69bfa0cad1b88dc716689c4527022c388b808d1ca3",
+    "characters": 8465
+  },
+  {
+    "id": "ws013",
+    "source": "plan/ws013/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws013.md",
+    "sha256": "6746e5c975fa28cce3f89bae32989b524e7577691d84bd107d6278a520ddf866",
+    "characters": 16351
+  },
+  {
+    "id": "ws014",
+    "source": "plan/ws014/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws014.md",
+    "sha256": "eb01faafbcb470a666a73d5f3d6a0e6d885b153fd1c6cc12ad84c93bdd1fa38b",
+    "characters": 3470
+  },
+  {
+    "id": "ws015",
+    "source": "plan/ws015/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws015.md",
+    "sha256": "0df05508fb3b6e45d82a20004f30a7e88c97af031a845a45f003f5068b7668a9",
+    "characters": 9239
+  },
+  {
+    "id": "ws016",
+    "source": "plan/ws016/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws016.md",
+    "sha256": "67a27e48d13fa0d7c3fe13242f8f2f488f00769def70fbb67c9228bca7f4c10c",
+    "characters": 9020
+  },
+  {
+    "id": "ws017",
+    "source": "plan/ws017/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws017.md",
+    "sha256": "0fe4a289a73d150e754b626fa6d27d8f92e47b556755ee7cd255080a9f1f6579",
+    "characters": 9449
+  },
+  {
+    "id": "ws018",
+    "source": "plan/ws018/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws018.md",
+    "sha256": "5db3c1b585b0758c1f4db545af53d1225d717cd8c8a04f4ac0931c8b964ec0d0",
+    "characters": 16029
+  },
+  {
+    "id": "ws019",
+    "source": "plan/ws019/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws019.md",
+    "sha256": "8ae8ee0568886ade247e665ba36e0c1c8f9a1f870ffcbc1bfe9340fc9bbdbe2f",
+    "characters": 25702
+  },
+  {
+    "id": "ws020",
+    "source": "plan/ws020/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws020.md",
+    "sha256": "3e42c48e4890eec636b41991b30c32d2ba98531486ae279300eb90a57be88751",
+    "characters": 7275
+  },
+  {
+    "id": "ws021",
+    "source": "plan/ws021/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws021.md",
+    "sha256": "5c1b812a20d07fc60b7969f284abab3f5df257b82ece97adde926e3dfb9f8c0e",
+    "characters": 7341
+  },
+  {
+    "id": "ws022",
+    "source": "plan/ws022/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws022.md",
+    "sha256": "e839a41261184dffe76945888a508aa7eeccbc8935cebf3cf48df0a32c48018e",
+    "characters": 3371
+  },
+  {
+    "id": "ws023",
+    "source": "plan/ws023/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws023.md",
+    "sha256": "57687ef8d63553c01b214111f015a0f78570863e8ce3277814f26211b05f29e2",
+    "characters": 6194
+  },
+  {
+    "id": "ws024",
+    "source": "plan/ws024/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws024.md",
+    "sha256": "4bff8bfcf323b49e6adccb61c2f8a256e28a70fe5068840465dd51b03dc88b92",
+    "characters": 7760
+  },
+  {
+    "id": "ws025",
+    "source": "plan/ws025/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws025.md",
+    "sha256": "0f603b5f05c0b2245e2d5b3d65bee56afa0ecbe3dfcc0f65f120f62ea5c79315",
+    "characters": 33946
+  },
+  {
+    "id": "ws026",
+    "source": "plan/ws026/ws.md",
+    "snapshot": "plan/tmp/github-import/review/ws026.md",
+    "sha256": "32a7f0a32813fb6004f9fdd2e9303b84c43eff0ca054c578e347b619f6467188",
+    "characters": 833
+  },
+  {
+    "id": "ws001-p000",
+    "source": "plan/ws001/phase000/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p000.md",
+    "sha256": "7a2900e89f9aac97794894050e68274715ebb57a9582af12a210a20c35a49070",
+    "characters": 1373
+  },
+  {
+    "id": "ws001-p001",
+    "source": "plan/ws001/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p001.md",
+    "sha256": "30437f3ece2767fe91d7ff339653582ff3e7c914ea6fe2c66ea85a436129e04d",
+    "characters": 1145
+  },
+  {
+    "id": "ws001-p002",
+    "source": "plan/ws001/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p002.md",
+    "sha256": "d048823853451faa3b8360a281cf900c7f2f418589b37cd0a0658f72e55cd982",
+    "characters": 1260
+  },
+  {
+    "id": "ws001-p003",
+    "source": "plan/ws001/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p003.md",
+    "sha256": "a822d671dcf02a4811281e933f1be5ad155710e4ab673c9f864b8be0de80d76b",
+    "characters": 1099
+  },
+  {
+    "id": "ws001-p004",
+    "source": "plan/ws001/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p004.md",
+    "sha256": "913b68bca246e6f0a571403a75279299bd58c1dbc0f485fdc8c3b3c04dc2a16e",
+    "characters": 1306
+  },
+  {
+    "id": "ws001-p005",
+    "source": "plan/ws001/phase005/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p005.md",
+    "sha256": "6f77a1e06647e4308b9bdb195865e011b0ac1bffbcf7e36fe39a6f2124b3f801",
+    "characters": 1156
+  },
+  {
+    "id": "ws001-p006",
+    "source": "plan/ws001/phase006/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p006.md",
+    "sha256": "0f9547f0355243b1aa4ed28d1dd3799d80b31554782621fda98c3d0ed0e7b0a7",
+    "characters": 1088
+  },
+  {
+    "id": "ws001-p007",
+    "source": "plan/ws001/phase007/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p007.md",
+    "sha256": "e3ffd71b25231796265a16879b8ff6928db3ae35a7ccd3ded67ae0420dd7a008",
+    "characters": 1066
+  },
+  {
+    "id": "ws001-p008",
+    "source": "plan/ws001/phase008/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p008.md",
+    "sha256": "24226ab843e363088dafb1b2b835e6a0ef3e73dd6bb26c9426d902b32595f32b",
+    "characters": 1063
+  },
+  {
+    "id": "ws001-p009",
+    "source": "plan/ws001/phase009/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p009.md",
+    "sha256": "e0b68a129022a2388b31dfb0b0c192b3293754b11c6cf2e07fe3bda26eb01bdf",
+    "characters": 43584
+  },
+  {
+    "id": "ws001-p010",
+    "source": "plan/ws001/phase010/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p010.md",
+    "sha256": "1fa832b64a17f8a869d12c8b113923d54d7f3c25012073ca6040395ba1437053",
+    "characters": 19653
+  },
+  {
+    "id": "ws001-p011",
+    "source": "plan/ws001/phase011/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p011.md",
+    "sha256": "337ea3040cbd548c8f43c0b6a3df1f65c6dbdf0b9f1159eada52d11ee3bae155",
+    "characters": 2210
+  },
+  {
+    "id": "ws001-p012",
+    "source": "plan/ws001/phase012/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p012.md",
+    "sha256": "0a8a92fc16518b961e4e08420bd024b40bd6fdbef24249e59f1641c8300f19d2",
+    "characters": 2088
+  },
+  {
+    "id": "ws001-p013",
+    "source": "plan/ws001/phase013/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p013.md",
+    "sha256": "b8615644b9ba22afc44740f55a30b84fca375c2adf98fa245ee30e810cfcfadd",
+    "characters": 1326
+  },
+  {
+    "id": "ws001-p014",
+    "source": "plan/ws001/phase014/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p014.md",
+    "sha256": "6e9572015588533ac18f53f36e0ad1b72cb91b133586b3531d541b7be773ee50",
+    "characters": 10505
+  },
+  {
+    "id": "ws001-p015",
+    "source": "plan/ws001/phase015/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p015.md",
+    "sha256": "a7ebcd93fcf76280bd9d323ba052e7a7015c8290330bb83b319b0efa8e6d96e1",
+    "characters": 4861
+  },
+  {
+    "id": "ws001-p016",
+    "source": "plan/ws001/phase016/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p016.md",
+    "sha256": "efad4102515a536829e1e83e77b618685f5b8b6ab1b6029c07b866157c9581cc",
+    "characters": 4947
+  },
+  {
+    "id": "ws001-p017",
+    "source": "plan/ws001/phase017/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p017.md",
+    "sha256": "9656d9f580676f4a971a966d8895058d6c974f4d2dc6f6b8884695d78d82df07",
+    "characters": 2943
+  },
+  {
+    "id": "ws001-p018",
+    "source": "plan/ws001/phase018/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p018.md",
+    "sha256": "d8b44b53215aa7f5e61f93ef43fe101344988125504c9b17f777b58769582fa9",
+    "characters": 2808
+  },
+  {
+    "id": "ws001-p019",
+    "source": "plan/ws001/phase019/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p019.md",
+    "sha256": "eba1fed1aaa736747d9994cdabdccf7a443b76e9a0c750554c11e5ea57b19e8e",
+    "characters": 6526
+  },
+  {
+    "id": "ws001-p020",
+    "source": "plan/ws001/phase020/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p020.md",
+    "sha256": "6374c32abfed76f598111184e8eef1f4a2bd81d05c710f7785c86bcdd06daf8b",
+    "characters": 8240
+  },
+  {
+    "id": "ws001-p021",
+    "source": "plan/ws001/phase021/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p021.md",
+    "sha256": "d4ccbaa9172a84bb175a70a038f9c586ea2d670094d17d9d263a6f6018d46155",
+    "characters": 8261
+  },
+  {
+    "id": "ws001-p022",
+    "source": "plan/ws001/phase022/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p022.md",
+    "sha256": "5286bbdc117412a46334bb447d69962b74ab5feb81b104b0ac52e417d9d369a6",
+    "characters": 18626
+  },
+  {
+    "id": "ws001-p023",
+    "source": "plan/ws001/phase023/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p023.md",
+    "sha256": "905ae400db392b2c2127929e18b592c70b986f9381070de6b378029c537df7b6",
+    "characters": 14083
+  },
+  {
+    "id": "ws001-p085",
+    "source": "plan/ws001/phase085/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws001-p085.md",
+    "sha256": "bd11e76709b8e62d53e9ed34cbe4a25d478e52de78438078bb9502649e2924f5",
+    "characters": 1388
+  },
+  {
+    "id": "ws002-p011",
+    "source": "plan/ws002/phase011/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws002-p011.md",
+    "sha256": "cf3b49512aa6cd70f59d77b0eedac58cb57dcca17fd00efa55ded4fe57941df8",
+    "characters": 1155
+  },
+  {
+    "id": "ws002-p012",
+    "source": "plan/ws002/phase012/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws002-p012.md",
+    "sha256": "1a4416c085ff71e82abf761be4525bc912aa30ca09db59859245388b1039a2ed",
+    "characters": 1138
+  },
+  {
+    "id": "ws002-p013",
+    "source": "plan/ws002/phase013/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws002-p013.md",
+    "sha256": "dcad0c34f6b775985fb3370efc52e6b5addcc23bf52a6b16d73cc81ce862d04f",
+    "characters": 1050
+  },
+  {
+    "id": "ws002-p014",
+    "source": "plan/ws002/phase014/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws002-p014.md",
+    "sha256": "9956354c3e79d972cd915ff53c9c86993b550d86ef35fc9c35534acf7780f034",
+    "characters": 968
+  },
+  {
+    "id": "ws002-p015",
+    "source": "plan/ws002/phase015/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws002-p015.md",
+    "sha256": "9162e78dbac870e5c447ec867ad35e8c52d3aa8cf4377460d4944d25e6e9b849",
+    "characters": 1090
+  },
+  {
+    "id": "ws002-p016",
+    "source": "plan/ws002/phase016/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws002-p016.md",
+    "sha256": "bd1a90c884cfc7ec285e5588519650af6c47ced682ceed1495a614a3c9dd5511",
+    "characters": 1037
+  },
+  {
+    "id": "ws002-p017",
+    "source": "plan/ws002/phase017/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws002-p017.md",
+    "sha256": "c445dd6ceea44fa3afd9a61c32089675f9023b15e8282a443c461c929c48372f",
+    "characters": 971
+  },
+  {
+    "id": "ws002-p018",
+    "source": "plan/ws002/phase018/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws002-p018.md",
+    "sha256": "dab7a525e0004f365b259b5c6b0787cc2db9b84c985c105f8972bb40e4e0c638",
+    "characters": 1440
+  },
+  {
+    "id": "ws002-p019",
+    "source": "plan/ws002/phase019/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws002-p019.md",
+    "sha256": "a8652817bc92085bb2110b647cfd941287709504c0bdd52036f3483623ebf4c4",
+    "characters": 1320
+  },
+  {
+    "id": "ws002-p020",
+    "source": "plan/ws002/phase020/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws002-p020.md",
+    "sha256": "fc63bc2cbeee2ad904b127b803f416c0bbbc7f089f62b61f6b401313297f4b77",
+    "characters": 28992
+  },
+  {
+    "id": "ws002-p021",
+    "source": "plan/ws002/phase021/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws002-p021.md",
+    "sha256": "ce2e9f9ec7cf7ab1fb8f7881f563f6f2739bcc31718722ce7cb850040e7fc54c",
+    "characters": 5234
+  },
+  {
+    "id": "ws002-p022",
+    "source": "plan/ws002/phase022/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws002-p022.md",
+    "sha256": "2990331b58442707b76b000131d82f8fd3a5b79c5e5a82c7496b1d2abf91a3b6",
+    "characters": 5881
+  },
+  {
+    "id": "ws002-p023",
+    "source": "plan/ws002/phase023/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws002-p023.md",
+    "sha256": "f1c420f9b9e2416b59b6023f06914eece9ffcf687f0ac7d8e3697a44922b718b",
+    "characters": 3689
+  },
+  {
+    "id": "ws002-p024",
+    "source": "plan/ws002/phase024/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws002-p024.md",
+    "sha256": "d65e7ce9e2c4b6c3825db11c67e8386977b20b68e4e8d6616a20cda8ab076713",
+    "characters": 9881
+  },
+  {
+    "id": "ws003-p001",
+    "source": "plan/ws003/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p001.md",
+    "sha256": "b351093a62708c9d989e19fc47591ea5ea892bfe8c91052403f8ccad765089a8",
+    "characters": 1941
+  },
+  {
+    "id": "ws003-p002",
+    "source": "plan/ws003/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p002.md",
+    "sha256": "254ff2df9a5d97b9be7eba104eea60f46d4b292451d76137c58897ddb39b31ba",
+    "characters": 9530
+  },
+  {
+    "id": "ws003-p003",
+    "source": "plan/ws003/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p003.md",
+    "sha256": "43b945d154d05951122b679dff8b29afce042c48b0d33fa9abc498e3b0f6f138",
+    "characters": 18445
+  },
+  {
+    "id": "ws003-p004",
+    "source": "plan/ws003/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p004.md",
+    "sha256": "44b06d1a498e75c083461664ccd9d04a0f01508b8252024c01dca35c3e8e3c5a",
+    "characters": 11557
+  },
+  {
+    "id": "ws003-p005",
+    "source": "plan/ws003/phase005/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p005.md",
+    "sha256": "09aba1c8456eb498f96ac9be1f98f739ca4e938a08c55e424e274adb258a21c8",
+    "characters": 10060
+  },
+  {
+    "id": "ws003-p006",
+    "source": "plan/ws003/phase006/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p006.md",
+    "sha256": "eb17929e6f835ebd2dd02a8b6ae0436b2e6ae725f7c2dc85def58d402a18560e",
+    "characters": 4089
+  },
+  {
+    "id": "ws003-p007",
+    "source": "plan/ws003/phase007/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p007.md",
+    "sha256": "e9200072af9c9ef4690ea1ad7e6e0806e890500912938e1d16fa4bedae7711d0",
+    "characters": 4129
+  },
+  {
+    "id": "ws003-p008",
+    "source": "plan/ws003/phase008/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p008.md",
+    "sha256": "15a8bb68280fbef504790cc04fbeeea6a53c5f55ef5fed1a0428c143569d7d6a",
+    "characters": 3744
+  },
+  {
+    "id": "ws003-p009",
+    "source": "plan/ws003/phase009/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p009.md",
+    "sha256": "312e6508a606a09b98a534674cefe1481c8228d2539d399e4b0916b857843653",
+    "characters": 3617
+  },
+  {
+    "id": "ws003-p010",
+    "source": "plan/ws003/phase010/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p010.md",
+    "sha256": "34c173cbd3f8b17e910e42d68a8c17b741599595e4b8d57a07246d3c3d24af15",
+    "characters": 14527
+  },
+  {
+    "id": "ws003-p011",
+    "source": "plan/ws003/phase011/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p011.md",
+    "sha256": "286437b98f6c1a4c1648aa0f9545f9496f15c8b4d648ca9071e664b55fdaf7a3",
+    "characters": 5149
+  },
+  {
+    "id": "ws003-p012",
+    "source": "plan/ws003/phase012/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p012.md",
+    "sha256": "93eb90a2d702437078f0ee77dff430b6bf13c2c540ab3157d789331f7f4a8ab6",
+    "characters": 6699
+  },
+  {
+    "id": "ws003-p013",
+    "source": "plan/ws003/phase013/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p013.md",
+    "sha256": "b7e9c8ef0b3c5a7142b3ff1643f2a0a505322918f158d20b45f89867c763ae11",
+    "characters": 5993
+  },
+  {
+    "id": "ws003-p014",
+    "source": "plan/ws003/phase014/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p014.md",
+    "sha256": "cf4afbcaefce9161956858668bc30cd73c373496fa1729343d20fcf9c39b8928",
+    "characters": 9791
+  },
+  {
+    "id": "ws003-p015",
+    "source": "plan/ws003/phase015/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p015.md",
+    "sha256": "f31794e13006036801c48b7956f8134300ce11cdb1bdd795fba566a9fb714556",
+    "characters": 8490
+  },
+  {
+    "id": "ws003-p016",
+    "source": "plan/ws003/phase016/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p016.md",
+    "sha256": "a4af2c193f60376048bb9d74c487bdee1504219d7f45e19d6346e6d26c84d257",
+    "characters": 10956
+  },
+  {
+    "id": "ws003-p017",
+    "source": "plan/ws003/phase017/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p017.md",
+    "sha256": "5576e517d2ae095bc0975e25c0b51ffb1a2ef8d84a25d28431fc332e050a8502",
+    "characters": 4531
+  },
+  {
+    "id": "ws003-p018",
+    "source": "plan/ws003/phase018/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p018.md",
+    "sha256": "b2cdb38de14ddbf10aea31987b1238f9b3375ccaf5ff494b5153329c8d5b0f94",
+    "characters": 3009
+  },
+  {
+    "id": "ws003-p019",
+    "source": "plan/ws003/phase019/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p019.md",
+    "sha256": "f34f2ea1aa46a74b2e450777e35cec17ea5165ca5905b29d77eccf9beda862f4",
+    "characters": 1145
+  },
+  {
+    "id": "ws003-p020",
+    "source": "plan/ws003/phase020/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p020.md",
+    "sha256": "6a431a8a40e33dec65552ed1c3d510624aac6afd14dac4f36ec940b9fd61737b",
+    "characters": 13134
+  },
+  {
+    "id": "ws003-p021",
+    "source": "plan/ws003/phase021/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p021.md",
+    "sha256": "daecb0471146de95c21772522e83a75ddd4c3afca4fe48068c1d7421b20feea6",
+    "characters": 12382
+  },
+  {
+    "id": "ws003-p022",
+    "source": "plan/ws003/phase022/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p022.md",
+    "sha256": "7ff21679a38bf096f6784511cc6e58be00b356bfeca0b887262e420b0f3f010c",
+    "characters": 9436
+  },
+  {
+    "id": "ws003-p023",
+    "source": "plan/ws003/phase023/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p023.md",
+    "sha256": "1ffde6f7e3d49ac8d90a63651a355e3a38c2ad807cf5d100f87ee2f9779cd9e2",
+    "characters": 7043
+  },
+  {
+    "id": "ws003-p024",
+    "source": "plan/ws003/phase024/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p024.md",
+    "sha256": "c7ea7806cfd378f16ed563b2685ee91a686cf93cd0ed4dedb39aa935362d455e",
+    "characters": 9867
+  },
+  {
+    "id": "ws003-p025",
+    "source": "plan/ws003/phase025/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws003-p025.md",
+    "sha256": "412e2cedbb68755680c280cb1bf2564d1cfcd31bd603c2e754e896e1acfd627b",
+    "characters": 9385
+  },
+  {
+    "id": "ws004-p001",
+    "source": "plan/ws004/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p001.md",
+    "sha256": "114ddc15a9894dc1513210a9c05a75f5c0a9c8ab3691057f9f17c6c6d11fbcc5",
+    "characters": 2161
+  },
+  {
+    "id": "ws004-p002",
+    "source": "plan/ws004/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p002.md",
+    "sha256": "32ee57523f09f271eb98cc7e98f903d0e9b24c2b87cad89595f89bbab32906e7",
+    "characters": 3144
+  },
+  {
+    "id": "ws004-p003",
+    "source": "plan/ws004/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p003.md",
+    "sha256": "2d9c4377330c7410bca519e4c93ab6516d5dcf2b160902c4fb89f5f2b3dbd816",
+    "characters": 11717
+  },
+  {
+    "id": "ws004-p004",
+    "source": "plan/ws004/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p004.md",
+    "sha256": "01666766a883042b81a39b607708133c84b8f732cb774776cd80beb2b61c4548",
+    "characters": 6154
+  },
+  {
+    "id": "ws004-p005",
+    "source": "plan/ws004/phase005/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p005.md",
+    "sha256": "55ed8487b7fa95b2a55ebad6e354495660b66b0b877d248f9a53a3f87f7b9d54",
+    "characters": 8156
+  },
+  {
+    "id": "ws004-p006",
+    "source": "plan/ws004/phase006/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p006.md",
+    "sha256": "7a7e48d82df0c1c331a58fbc164a1cca2176fc6cadf0f1a7472889f8b9626923",
+    "characters": 16652
+  },
+  {
+    "id": "ws004-p007",
+    "source": "plan/ws004/phase007/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p007.md",
+    "sha256": "828df1408cf4383d09f8497f110c0d35664f2826fbf4c5a6afd5d68d054ce9ba",
+    "characters": 3867
+  },
+  {
+    "id": "ws004-p008",
+    "source": "plan/ws004/phase008/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p008.md",
+    "sha256": "345ea89ae26bc5d2f46973d0e7000bc4e8da630983c65f2f6e88034f5e1c4d56",
+    "characters": 6772
+  },
+  {
+    "id": "ws004-p009",
+    "source": "plan/ws004/phase009/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p009.md",
+    "sha256": "510b96f8eb61086167cacf9385b6c1426a6c670139a709197073d1532b368e3d",
+    "characters": 5223
+  },
+  {
+    "id": "ws004-p010",
+    "source": "plan/ws004/phase010/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p010.md",
+    "sha256": "6843343b26955771e1c406d12e6337344dee6eea410cf1e33202b5231a8cf7cb",
+    "characters": 5576
+  },
+  {
+    "id": "ws004-p011",
+    "source": "plan/ws004/phase011/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p011.md",
+    "sha256": "5baa415c558ce76e5dcbe8b0c0fb0304f53f8b8e8acd63f715e716ee194731e4",
+    "characters": 8680
+  },
+  {
+    "id": "ws004-p012",
+    "source": "plan/ws004/phase012/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p012.md",
+    "sha256": "adf434c1a11a5ea547b5b2659c13499676f9a2eea949801c5800060916aae70b",
+    "characters": 5712
+  },
+  {
+    "id": "ws004-p013",
+    "source": "plan/ws004/phase013/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p013.md",
+    "sha256": "dc907c6fa9ecc984f9da30d2de3f25d41857fab45782a335279f007e8b76cb3c",
+    "characters": 3500
+  },
+  {
+    "id": "ws004-p014",
+    "source": "plan/ws004/phase014/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p014.md",
+    "sha256": "2acb137805c47f0980c055bb2556356b98e35dbd6f2f72b355acd594b50883a6",
+    "characters": 7865
+  },
+  {
+    "id": "ws004-p015",
+    "source": "plan/ws004/phase015/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p015.md",
+    "sha256": "97601c860431861ec6b434d9fcfcbb60c5e3c20d0aec2cff779b29b990337313",
+    "characters": 9434
+  },
+  {
+    "id": "ws004-p016",
+    "source": "plan/ws004/phase016/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p016.md",
+    "sha256": "b8763d8ac7095d6e18878399cd86f87e2acd72af6912b8921a8926b2f159bb89",
+    "characters": 6716
+  },
+  {
+    "id": "ws004-p017",
+    "source": "plan/ws004/phase017/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p017.md",
+    "sha256": "7e624a0c25278828184d342e4edd8fae562e14c3d78733b9b84ed5e286db1638",
+    "characters": 7766
+  },
+  {
+    "id": "ws004-p018",
+    "source": "plan/ws004/phase018/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p018.md",
+    "sha256": "248181e00b4c7f74f82b552c8b16131fec12419b499f6f654cbd992cbd86d09a",
+    "characters": 9799
+  },
+  {
+    "id": "ws004-p019",
+    "source": "plan/ws004/phase019/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p019.md",
+    "sha256": "4a71d6dec22a70e54ffa8d3f6996b91464d7592be147ddea057cf9d50a63ad3e",
+    "characters": 11774
+  },
+  {
+    "id": "ws004-p020",
+    "source": "plan/ws004/phase020/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p020.md",
+    "sha256": "6b8bd5dfed1d7bbd55ed2b3f021b0ef6b022b3386a459825e3084bfaafe34a4b",
+    "characters": 9075
+  },
+  {
+    "id": "ws004-p021",
+    "source": "plan/ws004/phase021/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p021.md",
+    "sha256": "70e5396711b2ed69361fc1a785b81c1f9226fd3f19452fd48251a8d5889db5ec",
+    "characters": 11735
+  },
+  {
+    "id": "ws004-p022",
+    "source": "plan/ws004/phase022/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p022.md",
+    "sha256": "31cb0f2573dbab82a8c023888f4bd71fb1d6cd3326b93c186fecaedc102448ff",
+    "characters": 4860
+  },
+  {
+    "id": "ws004-p023",
+    "source": "plan/ws004/phase023/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p023.md",
+    "sha256": "a4e683d68a345738df764a65cf052ae52597c8c72792d58055709a8cadf62e5b",
+    "characters": 6052
+  },
+  {
+    "id": "ws004-p024",
+    "source": "plan/ws004/phase024/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p024.md",
+    "sha256": "d9f76def590ab237ea8e4090e90f6e34e8d1265195dc452a00a314c6ffd2e768",
+    "characters": 7667
+  },
+  {
+    "id": "ws004-p025",
+    "source": "plan/ws004/phase025/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p025.md",
+    "sha256": "84c274a887e7c677ff7218894fd4cf0282b11fb007f795175853170ce04043ac",
+    "characters": 1582
+  },
+  {
+    "id": "ws004-p026",
+    "source": "plan/ws004/phase026/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p026.md",
+    "sha256": "923ab774d13e757d9129de1ff7a3034d097d68d0ba3853869d2a86f9accf6c19",
+    "characters": 13999
+  },
+  {
+    "id": "ws004-p027",
+    "source": "plan/ws004/phase027/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p027.md",
+    "sha256": "008f575a957d04f3f115abccf6b86051792d1d4237b954d0a37ebc5b2609fec1",
+    "characters": 16616
+  },
+  {
+    "id": "ws004-p028",
+    "source": "plan/ws004/phase028/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p028.md",
+    "sha256": "06c1e9cc92ec1bb4bb710a14156cfc46b954963c704c0777276a5c7a7b41507b",
+    "characters": 22411
+  },
+  {
+    "id": "ws004-p029",
+    "source": "plan/ws004/phase029/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p029.md",
+    "sha256": "8a9aea534e3ce35ca434ffef7419e427850d85bba71f062a7e2d1cff316c44dd",
+    "characters": 17400
+  },
+  {
+    "id": "ws004-p030",
+    "source": "plan/ws004/phase030/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p030.md",
+    "sha256": "c5b362df1e6c5e51b9dca05d49c9839fd718e590b75caebaf543d5823092f0ff",
+    "characters": 17102
+  },
+  {
+    "id": "ws004-p031",
+    "source": "plan/ws004/phase031/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p031.md",
+    "sha256": "8778cb47b36be59f3218632b4d3fd6d51b07323c05e7446a3398e69815edb49e",
+    "characters": 29377
+  },
+  {
+    "id": "ws004-p032",
+    "source": "plan/ws004/phase032/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p032.md",
+    "sha256": "1ee89d61a83862dc6b0c4b1fc5b2a670479c6a32fb611b489aed735e93401f09",
+    "characters": 27656
+  },
+  {
+    "id": "ws004-p033",
+    "source": "plan/ws004/phase033/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p033.md",
+    "sha256": "8e70d2199c5991d6f728bcc80f1b5daac8e0ca8ed00bc2a96cc12837adea8369",
+    "characters": 5767
+  },
+  {
+    "id": "ws004-p034",
+    "source": "plan/ws004/phase034/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p034.md",
+    "sha256": "69aecf107129a3753b426322a9360d0e963a1e22088430eafae0ef5de292ebd1",
+    "characters": 3759
+  },
+  {
+    "id": "ws004-p035",
+    "source": "plan/ws004/phase035/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p035.md",
+    "sha256": "1d3020c8e6a052d6af21ece39ea7e1972211988e3219757420603869448f2b50",
+    "characters": 2544
+  },
+  {
+    "id": "ws004-p036",
+    "source": "plan/ws004/phase036/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p036.md",
+    "sha256": "b6c9cf8d08ea63b181b824c63e09c7465951b6806bdca05d70b66a41c8f78971",
+    "characters": 12258
+  },
+  {
+    "id": "ws004-p037",
+    "source": "plan/ws004/phase037/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p037.md",
+    "sha256": "8481287d0029abd78e599ce61e7cc11493971e2a4abd9fb6b50521339e40475d",
+    "characters": 9159
+  },
+  {
+    "id": "ws004-p038",
+    "source": "plan/ws004/phase038/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p038.md",
+    "sha256": "d464d52111fe696c52ddec2dcc15e05cf21c832e4a052b4cecca56017f699ad1",
+    "characters": 20229
+  },
+  {
+    "id": "ws004-p039",
+    "source": "plan/ws004/phase039/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p039.md",
+    "sha256": "584a05d03a4fd400bff7c46ded7ce2cab250625e3339b84a6cf65ef231b77fe9",
+    "characters": 6147
+  },
+  {
+    "id": "ws004-p040",
+    "source": "plan/ws004/phase040/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p040.md",
+    "sha256": "4a00f1e627c238286f3597c1f30256596f8da53aa913be86a9ca1b5ead11678a",
+    "characters": 5633
+  },
+  {
+    "id": "ws004-p041",
+    "source": "plan/ws004/phase041/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p041.md",
+    "sha256": "459223a489822c15d29d5e169eb4c5970e1a4230e4d7842b849dc503202158f2",
+    "characters": 6303
+  },
+  {
+    "id": "ws004-p042",
+    "source": "plan/ws004/phase042/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p042.md",
+    "sha256": "758eb284b7be47196231f4bae3573bd6b389e6b658673e5826a0451e33b8bea9",
+    "characters": 3391
+  },
+  {
+    "id": "ws004-p043",
+    "source": "plan/ws004/phase043/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p043.md",
+    "sha256": "0f82bdd5230248c2133bc9205f9f6c60c13e793c6e76db6c471496b491516b45",
+    "characters": 27632
+  },
+  {
+    "id": "ws004-p044",
+    "source": "plan/ws004/phase044/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p044.md",
+    "sha256": "836e713c07e5ce31a653dac0cd55cf1349b3aef3d2c017f462aa82179a3366a3",
+    "characters": 7142
+  },
+  {
+    "id": "ws004-p045",
+    "source": "plan/ws004/phase045/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p045.md",
+    "sha256": "d4af1f3a8c157ca3027028029413f37164a1158de07798a2abd29337ffb1965d",
+    "characters": 3500
+  },
+  {
+    "id": "ws004-p046",
+    "source": "plan/ws004/phase046/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p046.md",
+    "sha256": "8cb05739df2cfcbe5a3c90b07e9329b79a7713fa36aab16e43f48308312d6ea5",
+    "characters": 11938
+  },
+  {
+    "id": "ws004-p047",
+    "source": "plan/ws004/phase047/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p047.md",
+    "sha256": "b59c72690a42a2ea6872ea610fb558153a944666de7c10725bf31c8954726720",
+    "characters": 3502
+  },
+  {
+    "id": "ws004-p048",
+    "source": "plan/ws004/phase048/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p048.md",
+    "sha256": "f0895ca424a6f97a6ebe623f27c5acee57f09fd9602709ac5577859734f1b33a",
+    "characters": 3157
+  },
+  {
+    "id": "ws004-p049",
+    "source": "plan/ws004/phase049/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p049.md",
+    "sha256": "788418b37261921e95b638992b2e699c4eb10ca476b69cef07780f23800f9557",
+    "characters": 873
+  },
+  {
+    "id": "ws004-p050",
+    "source": "plan/ws004/phase050/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws004-p050.md",
+    "sha256": "1fb8f9c62a5c9f6ee3f9200ebd83929f531328413df57b6cacbdcee2ad4f463b",
+    "characters": 5106
+  },
+  {
+    "id": "ws005-p001",
+    "source": "plan/ws005/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws005-p001.md",
+    "sha256": "c8304cfde05d290280538142e8718066502774d31033f62c2efc3ae1ac11ee8d",
+    "characters": 16992
+  },
+  {
+    "id": "ws005-p002",
+    "source": "plan/ws005/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws005-p002.md",
+    "sha256": "7a6a2aabb4e58678041e5463e6f4520a560d1ac2d62a401ef4df2bbabf7bd69f",
+    "characters": 17805
+  },
+  {
+    "id": "ws005-p003",
+    "source": "plan/ws005/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws005-p003.md",
+    "sha256": "ac57f12c9bc14015bbeec77f57af9330d8d511bc938a38b1d5c8a78ae5685d97",
+    "characters": 21926
+  },
+  {
+    "id": "ws005-p004",
+    "source": "plan/ws005/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws005-p004.md",
+    "sha256": "d666d4b215f7d75059f86afff1d87a1cfcffcc05359bcd47bb29efaf2aeeb1f8",
+    "characters": 6871
+  },
+  {
+    "id": "ws005-p005",
+    "source": "plan/ws005/phase005/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws005-p005.md",
+    "sha256": "94276bd941c163497c0e34417c8f906ad8dca3b5e1641afb4816d8f4080e7560",
+    "characters": 25826
+  },
+  {
+    "id": "ws005-p006",
+    "source": "plan/ws005/phase006/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws005-p006.md",
+    "sha256": "0dd812215f6c9ea26da95f6836b7e2e2c6722383cef5465d420ce9971c5c70ab",
+    "characters": 23617
+  },
+  {
+    "id": "ws005-p007",
+    "source": "plan/ws005/phase007/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws005-p007.md",
+    "sha256": "f3e20dda3ad2a44bda7a9ef98470ffd7548ac112fc8afb853aa3da12ae8b2a90",
+    "characters": 20497
+  },
+  {
+    "id": "ws005-p008",
+    "source": "plan/ws005/phase008/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws005-p008.md",
+    "sha256": "40b1b7e5dc6306752e4f99a6606b9cd723b7a443519d8f41aa6016e1e3df12ae",
+    "characters": 21973
+  },
+  {
+    "id": "ws005-p009",
+    "source": "plan/ws005/phase009/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws005-p009.md",
+    "sha256": "7cd02f3d12b61309a8b8f09e857d6f47260e65ed8313861cb1c3af6e15ecfd45",
+    "characters": 4597
+  },
+  {
+    "id": "ws005-p010",
+    "source": "plan/ws005/phase010/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws005-p010.md",
+    "sha256": "ca5231523b9ad4436f1c0317faa14e2e33e48acc186ebb06df61a645d9a9be06",
+    "characters": 3378
+  },
+  {
+    "id": "ws005-p011",
+    "source": "plan/ws005/phase011/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws005-p011.md",
+    "sha256": "94be3a2e5f22120394d5bcd27da74fa0fdd8fb079d07a2692c53fa3e55e72d49",
+    "characters": 14879
+  },
+  {
+    "id": "ws005-p012",
+    "source": "plan/ws005/phase012/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws005-p012.md",
+    "sha256": "766bb3364242519af3565f2b07616104d5f14fa1e0cb437634a0a800f3d09e56",
+    "characters": 5851
+  },
+  {
+    "id": "ws006-p001",
+    "source": "plan/ws006/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws006-p001.md",
+    "sha256": "ed19e53689163142f050ab55b5a62284b905d59b39816ba7fe093ca52f6e9fab",
+    "characters": 2445
+  },
+  {
+    "id": "ws006-p002",
+    "source": "plan/ws006/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws006-p002.md",
+    "sha256": "d91b4a1ac544e1515a1ae4af67f02772e2159abec19e46eb0ba872dcf67be55f",
+    "characters": 2543
+  },
+  {
+    "id": "ws006-p003",
+    "source": "plan/ws006/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws006-p003.md",
+    "sha256": "216db7e0d299f4051e27798ec2736449ec37578e23a3f5a3622eedf45e6fd1a7",
+    "characters": 1990
+  },
+  {
+    "id": "ws006-p004",
+    "source": "plan/ws006/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws006-p004.md",
+    "sha256": "feb37eee71a48d71cab67eec775fc28818384d0a43611ff9c48336a8f2232dad",
+    "characters": 5620
+  },
+  {
+    "id": "ws006-p005",
+    "source": "plan/ws006/phase005/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws006-p005.md",
+    "sha256": "1809ca58ee8a4c966780908a2269a1e038c5444aed8f2451b3abdeb6c5f35c40",
+    "characters": 6508
+  },
+  {
+    "id": "ws006-p006",
+    "source": "plan/ws006/phase006/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws006-p006.md",
+    "sha256": "0cd8dfba0af7d4852e60fe7025ed148291f4b488bf44f75e37301b0df7d2add1",
+    "characters": 12503
+  },
+  {
+    "id": "ws006-p007",
+    "source": "plan/ws006/phase007/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws006-p007.md",
+    "sha256": "914aaf6b751f26dda88d88cf333a235b8d005f51cda6df7d3b298ca63b107e19",
+    "characters": 10204
+  },
+  {
+    "id": "ws006-p008",
+    "source": "plan/ws006/phase008/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws006-p008.md",
+    "sha256": "a127b2cd03a6706486f8cf3111c7b57ea81f3685ae7b5f3b6fa07b1fb1e800c9",
+    "characters": 14699
+  },
+  {
+    "id": "ws006-p009",
+    "source": "plan/ws006/phase009/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws006-p009.md",
+    "sha256": "c36725215203efcc044a3092e27b42b7a07a555379439741b36faa2bbf377daa",
+    "characters": 7490
+  },
+  {
+    "id": "ws006-p010",
+    "source": "plan/ws006/phase010/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws006-p010.md",
+    "sha256": "0f4a98c6c956c309db9e674f63ca6d69cf16a39af97eabe2827b91a017b938c4",
+    "characters": 2715
+  },
+  {
+    "id": "ws006-p011",
+    "source": "plan/ws006/phase011/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws006-p011.md",
+    "sha256": "1706fa71cec790738c06cef3cda7073217adb39c3ac8577e7663b6cf78245482",
+    "characters": 1501
+  },
+  {
+    "id": "ws007-p001",
+    "source": "plan/ws007/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws007-p001.md",
+    "sha256": "8842a0bd49f113e2868885ede054b814efdee8c030baeb5b712aa2994940b6d6",
+    "characters": 1839
+  },
+  {
+    "id": "ws007-p002",
+    "source": "plan/ws007/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws007-p002.md",
+    "sha256": "f667246be567cbe55dbe631722fe0331a63804b4060cd8db47324d614ecaa7de",
+    "characters": 2613
+  },
+  {
+    "id": "ws007-p003",
+    "source": "plan/ws007/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws007-p003.md",
+    "sha256": "7b15f0e2734ce661a3674a55b0f33bea0ae01b772ca642a8a35bc3af680a6665",
+    "characters": 5296
+  },
+  {
+    "id": "ws007-p004",
+    "source": "plan/ws007/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws007-p004.md",
+    "sha256": "7a3521a06b4dade5d788f405d9df8fdf9cb84658c8dae838250b30f9b49bc4f1",
+    "characters": 8973
+  },
+  {
+    "id": "ws008-p001",
+    "source": "plan/ws008/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws008-p001.md",
+    "sha256": "9273253bd45a9433e6ba94b80a5de6768630fd926d2a31f3b6f9feb0c6eb079b",
+    "characters": 7312
+  },
+  {
+    "id": "ws008-p002",
+    "source": "plan/ws008/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws008-p002.md",
+    "sha256": "169ea73923fe3febfbccecfa38b7744f4d905ce85b728902294c3e8b7b0bf3cd",
+    "characters": 7949
+  },
+  {
+    "id": "ws008-p003",
+    "source": "plan/ws008/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws008-p003.md",
+    "sha256": "f1b0f8e2176ff62adc63f8600943a816139f0ac59ed848b5421c190e639b5a82",
+    "characters": 5873
+  },
+  {
+    "id": "ws008-p004",
+    "source": "plan/ws008/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws008-p004.md",
+    "sha256": "065ffcfc23acfcd636edb5f495b896b8ecb7520a5bbfbe857f29b4941c96418f",
+    "characters": 6856
+  },
+  {
+    "id": "ws008-p005",
+    "source": "plan/ws008/phase005/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws008-p005.md",
+    "sha256": "5ecd0f0a5d7a8ae1a9b5de6ab4334c2c949fb6a41525d4bac91ffa1431c6bd11",
+    "characters": 7986
+  },
+  {
+    "id": "ws008-p006",
+    "source": "plan/ws008/phase006/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws008-p006.md",
+    "sha256": "0b8a31092d4dba117050b0b23e47976f77fb28fe032caf6c00bbac055c058543",
+    "characters": 11291
+  },
+  {
+    "id": "ws008-p007",
+    "source": "plan/ws008/phase007/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws008-p007.md",
+    "sha256": "7b30c5161d1387127b31ec9a8bb706f2ea06c4b110a73304f5f134382c9cfc34",
+    "characters": 3623
+  },
+  {
+    "id": "ws008-p008",
+    "source": "plan/ws008/phase008/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws008-p008.md",
+    "sha256": "5b4c8ac0bdbb8acae74ecb9e387f16b446671551a612bf48cd4c67d4c6a1049a",
+    "characters": 7384
+  },
+  {
+    "id": "ws008-p009",
+    "source": "plan/ws008/phase009/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws008-p009.md",
+    "sha256": "4ef7c970af02cb9bfdeeda238690bfa9a3ec053662aabc0a71fa8227471a4373",
+    "characters": 12078
+  },
+  {
+    "id": "ws008-p010",
+    "source": "plan/ws008/phase010/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws008-p010.md",
+    "sha256": "55ab103a93109de91cf068385d8ccd7f505d1f5e39f9da1e7d979584d71f63ed",
+    "characters": 12395
+  },
+  {
+    "id": "ws009-p001",
+    "source": "plan/ws009/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws009-p001.md",
+    "sha256": "fbdf82f162fbb7105e90e19f8538c8d34bd2dddaafec8ba6223678314a6c1f0c",
+    "characters": 1838
+  },
+  {
+    "id": "ws009-p002",
+    "source": "plan/ws009/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws009-p002.md",
+    "sha256": "7b967cf266fd36bc191760e96a7215f03d36b96d61c2b36c6c2732c40455c588",
+    "characters": 1811
+  },
+  {
+    "id": "ws009-p003",
+    "source": "plan/ws009/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws009-p003.md",
+    "sha256": "26fc62cd14f236a9f6790e1e5ef5116677e337c4db9ac7895c30504155404613",
+    "characters": 935
+  },
+  {
+    "id": "ws009-p004",
+    "source": "plan/ws009/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws009-p004.md",
+    "sha256": "c55e8f205a19e3fb90025a445c57e444d53d1a20b945cf037ca10f787994b775",
+    "characters": 5059
+  },
+  {
+    "id": "ws009-p005",
+    "source": "plan/ws009/phase005/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws009-p005.md",
+    "sha256": "58fa54b69b19fa3ae024880acfa729a30302a1fa1b613eba617f6b8b457e7383",
+    "characters": 4761
+  },
+  {
+    "id": "ws009-p006",
+    "source": "plan/ws009/phase006/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws009-p006.md",
+    "sha256": "1b8b6137f8630f18b9452dcecb05d09daca4e76999d72d5e4ae5b352c98c0e7b",
+    "characters": 5462
+  },
+  {
+    "id": "ws009-p007",
+    "source": "plan/ws009/phase007/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws009-p007.md",
+    "sha256": "58fcbce35accf153e59acbcd2d35b460f8dcf96f3bd7fb8ce683dc88998acb53",
+    "characters": 1390
+  },
+  {
+    "id": "ws009-p008",
+    "source": "plan/ws009/phase008/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws009-p008.md",
+    "sha256": "550814c09f13d41ce8ba6f7dbc6ec7da2c5da8403eedbb0975ff72c821f2111f",
+    "characters": 4015
+  },
+  {
+    "id": "ws010-p001",
+    "source": "plan/ws010/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws010-p001.md",
+    "sha256": "60d8518a545cdf11d736f03e0de803f3eb01d8c00da415e379f41e62dd8a425c",
+    "characters": 1149
+  },
+  {
+    "id": "ws010-p002",
+    "source": "plan/ws010/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws010-p002.md",
+    "sha256": "b1d1bcf2ccf438165cb6b1a993f70dfdc9ea31813ebbeedef58f8c9bd3631e4c",
+    "characters": 2673
+  },
+  {
+    "id": "ws010-p003",
+    "source": "plan/ws010/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws010-p003.md",
+    "sha256": "662998a2273fa40d0eb276122ea9948861869daf3f483cfddcfa0524c4f33e3e",
+    "characters": 1433
+  },
+  {
+    "id": "ws010-p004",
+    "source": "plan/ws010/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws010-p004.md",
+    "sha256": "af2408e16598b920630cf92931518baa8df9cb93a2c5473dff919696731c00c1",
+    "characters": 1304
+  },
+  {
+    "id": "ws010-p005",
+    "source": "plan/ws010/phase005/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws010-p005.md",
+    "sha256": "5628d510e670825366653ef85b6b9dcaffe93e776e20a3f880dbe1bc6bfc6239",
+    "characters": 6156
+  },
+  {
+    "id": "ws011-p001",
+    "source": "plan/ws011/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws011-p001.md",
+    "sha256": "ab4b10b27af8d780a3f02fe89627b8941163f5ddb3e15a21b084c252e825fa29",
+    "characters": 1618
+  },
+  {
+    "id": "ws011-p002",
+    "source": "plan/ws011/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws011-p002.md",
+    "sha256": "afbf35b278b3dc3dd8e4b790ac70772612a83c9fd57c7c221485e437ccfb5753",
+    "characters": 2575
+  },
+  {
+    "id": "ws011-p003",
+    "source": "plan/ws011/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws011-p003.md",
+    "sha256": "8b8c2ffe86cd96f187151085e0dd836ebaf2695d7b0f5b3320b61ffb71f73fa2",
+    "characters": 1824
+  },
+  {
+    "id": "ws011-p004",
+    "source": "plan/ws011/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws011-p004.md",
+    "sha256": "90a05841f439b5fd60b6f7d51f22f5799dec008797951becad8cc0dddb924b62",
+    "characters": 1900
+  },
+  {
+    "id": "ws011-p005",
+    "source": "plan/ws011/phase005/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws011-p005.md",
+    "sha256": "9024e2a2c43c3003e3defe388c6ab8ea9b39320ff5655dfc22e56836d522c262",
+    "characters": 9983
+  },
+  {
+    "id": "ws011-p006",
+    "source": "plan/ws011/phase006/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws011-p006.md",
+    "sha256": "8ecae899928ea57430539a5b50251477e4915489fd3ccc0bc7f1f4821811ccdc",
+    "characters": 10584
+  },
+  {
+    "id": "ws011-p007",
+    "source": "plan/ws011/phase007/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws011-p007.md",
+    "sha256": "84242297124c6348e6028d52915822bf60295b46bdb011e2765cbd910d5a229b",
+    "characters": 9478
+  },
+  {
+    "id": "ws011-p008",
+    "source": "plan/ws011/phase008/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws011-p008.md",
+    "sha256": "a73ff1b62c1ab40d646438dad913d0057a6f83a79bceb6cad56beec7a7eaa6bf",
+    "characters": 4811
+  },
+  {
+    "id": "ws011-p009",
+    "source": "plan/ws011/phase009/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws011-p009.md",
+    "sha256": "c7e7346838a26e1a899035a5b1a2c3430a1eff2e25f0abc1d2bf256e7e3948bb",
+    "characters": 10541
+  },
+  {
+    "id": "ws012-p001",
+    "source": "plan/ws012/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws012-p001.md",
+    "sha256": "f88ef934d5bc20e891ff2eb332fa90b6a7ee42c2fd0414b0509fc3af7bf1ad7a",
+    "characters": 8056
+  },
+  {
+    "id": "ws012-p002",
+    "source": "plan/ws012/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws012-p002.md",
+    "sha256": "67ce4893d005de1d649b67b44387e89ceec495b6f08d1cbb4511a3f4bc931a8c",
+    "characters": 6685
+  },
+  {
+    "id": "ws012-p003",
+    "source": "plan/ws012/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws012-p003.md",
+    "sha256": "ccf67fc96f2c4fde1102a188c435e1be10400ff96239f9354dc1a2ba9e218b74",
+    "characters": 10592
+  },
+  {
+    "id": "ws012-p004",
+    "source": "plan/ws012/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws012-p004.md",
+    "sha256": "a5edfaacfcebd631f473a2bcd95959c74b2ed60430178cdda21c0e43a70a181b",
+    "characters": 6361
+  },
+  {
+    "id": "ws012-p005",
+    "source": "plan/ws012/phase005/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws012-p005.md",
+    "sha256": "5a1cfce436eb769ee30554651cb4f4ad31f3ebe5d51907b8ec5fdc4b9ced7835",
+    "characters": 5329
+  },
+  {
+    "id": "ws012-p006",
+    "source": "plan/ws012/phase006/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws012-p006.md",
+    "sha256": "883663989e4a804ce83da1c7a26058ccf82ba620d295cf029929a4bce484969c",
+    "characters": 5700
+  },
+  {
+    "id": "ws013-p001",
+    "source": "plan/ws013/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws013-p001.md",
+    "sha256": "47bb5ce8317b9b0caf55146ba4f2d84b6a0dd72888877090ae97c82f834a7ef7",
+    "characters": 12890
+  },
+  {
+    "id": "ws013-p002",
+    "source": "plan/ws013/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws013-p002.md",
+    "sha256": "a4529bcad0ec3a32a19de283428932c68e7bd84e19d95a9e06b7302202fbb4d2",
+    "characters": 8625
+  },
+  {
+    "id": "ws013-p003",
+    "source": "plan/ws013/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws013-p003.md",
+    "sha256": "85a16e576821e486bff64cb880435d05d06c3129a8c719b716fcea605edab4f6",
+    "characters": 10953
+  },
+  {
+    "id": "ws013-p004",
+    "source": "plan/ws013/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws013-p004.md",
+    "sha256": "fbfc936a47e2fa796ccbe7f799fe0e5ba4ae2eec0ba7f16bd21136a59c7a8f76",
+    "characters": 11441
+  },
+  {
+    "id": "ws013-p005",
+    "source": "plan/ws013/phase005/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws013-p005.md",
+    "sha256": "e8e4db54b1c0e1420f059ca0a375155a8bdce95fa75681afaa09cdabcda8e3fc",
+    "characters": 12505
+  },
+  {
+    "id": "ws013-p006",
+    "source": "plan/ws013/phase006/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws013-p006.md",
+    "sha256": "56f67d65f0f954b5cb1fa1782b313a2ea8c7502e58ce17ccf2f6007e6f659280",
+    "characters": 7589
+  },
+  {
+    "id": "ws014-p001",
+    "source": "plan/ws014/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws014-p001.md",
+    "sha256": "0d5d9068e4de3b2a0ad27e2de560279313b80d59e414eaac858d108bea8f366f",
+    "characters": 3750
+  },
+  {
+    "id": "ws015-p001",
+    "source": "plan/ws015/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws015-p001.md",
+    "sha256": "6fa8428f74245595e7e5bab66e391ec19be062cc534c98974ec6913a2beecd96",
+    "characters": 11664
+  },
+  {
+    "id": "ws016-p001",
+    "source": "plan/ws016/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws016-p001.md",
+    "sha256": "bd06cdb4feea27bbfa445a0e66cad335dd1cf4603f0d7faf0e8f3088673c1f18",
+    "characters": 4912
+  },
+  {
+    "id": "ws016-p002",
+    "source": "plan/ws016/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws016-p002.md",
+    "sha256": "de2ed9f7ade782a19fea4d0549eb2b6f9f2b5379427cb6dd9763084aabbe3019",
+    "characters": 3698
+  },
+  {
+    "id": "ws016-p003",
+    "source": "plan/ws016/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws016-p003.md",
+    "sha256": "eb560894a7bbb3a75d375de7f17d94004c3f5029a32d7a89b200c1f48c4f646e",
+    "characters": 3029
+  },
+  {
+    "id": "ws016-p004",
+    "source": "plan/ws016/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws016-p004.md",
+    "sha256": "93adcfd41cecddf2ab5b0626bb37a8fa30579c511476cb65b9c726a190516b64",
+    "characters": 4266
+  },
+  {
+    "id": "ws017-p001",
+    "source": "plan/ws017/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws017-p001.md",
+    "sha256": "d1a564639b2cb5d9211f2a1635eba9417ee79fdde8015b52520cc82e788f26cd",
+    "characters": 4173
+  },
+  {
+    "id": "ws017-p002",
+    "source": "plan/ws017/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws017-p002.md",
+    "sha256": "78de50235cf0f132fc0bbf68b85c0ea44bd868b3bc9f6ddcdece0be529570606",
+    "characters": 3034
+  },
+  {
+    "id": "ws017-p003",
+    "source": "plan/ws017/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws017-p003.md",
+    "sha256": "4721f7c015593a5743f94fa46659e8c426f8a9756d28fc7fde3a80f7056981fb",
+    "characters": 2535
+  },
+  {
+    "id": "ws017-p004",
+    "source": "plan/ws017/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws017-p004.md",
+    "sha256": "5fa38b06a3b04ea48da59fd169f85608ee73b7ac56fe23828ee9699e9e136f59",
+    "characters": 2458
+  },
+  {
+    "id": "ws018-p001",
+    "source": "plan/ws018/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p001.md",
+    "sha256": "50c4bb3d4a285eb72519c880a7e8e12d3129b6b7cc15eaf67f261f22869c5f4e",
+    "characters": 7360
+  },
+  {
+    "id": "ws018-p002",
+    "source": "plan/ws018/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p002.md",
+    "sha256": "be548fc1b0652da608bab7784b903f904b139592739df752426fab694c511c75",
+    "characters": 8392
+  },
+  {
+    "id": "ws018-p003",
+    "source": "plan/ws018/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p003.md",
+    "sha256": "27bac12d63d909134ba626a34e439ef198a631072e6c3e7079b27d46e73895bb",
+    "characters": 7004
+  },
+  {
+    "id": "ws018-p004",
+    "source": "plan/ws018/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p004.md",
+    "sha256": "51c0b815c59d524b51bb4a60109e03125fdc9938f3bc1827fa4ea1f18b86596a",
+    "characters": 9087
+  },
+  {
+    "id": "ws018-p005",
+    "source": "plan/ws018/phase005/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p005.md",
+    "sha256": "60572fbfa10e5ad9f5b37e73d3bb2af5bc8df1987ee1aaccec29774bd345fe61",
+    "characters": 5934
+  },
+  {
+    "id": "ws018-p006",
+    "source": "plan/ws018/phase006/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p006.md",
+    "sha256": "6aec210864c83e823612e66ef087ff1316ff07b400e36cc7b873a1c176638133",
+    "characters": 8718
+  },
+  {
+    "id": "ws018-p007",
+    "source": "plan/ws018/phase007/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p007.md",
+    "sha256": "3358d17d2376c4f0aa1494bd4118b8346175c3b93bc638a872420c9fa21af466",
+    "characters": 11807
+  },
+  {
+    "id": "ws018-p008",
+    "source": "plan/ws018/phase008/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p008.md",
+    "sha256": "d869d8b6e7b1631099347aee164a6a88f79bffcb43baad3e96c84d778e1df771",
+    "characters": 12832
+  },
+  {
+    "id": "ws018-p009",
+    "source": "plan/ws018/phase009/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p009.md",
+    "sha256": "afcb87355d9bf43e5702fcea17c8482e9e33eb884bac0705f6c89894942e6d96",
+    "characters": 15837
+  },
+  {
+    "id": "ws018-p010",
+    "source": "plan/ws018/phase010/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p010.md",
+    "sha256": "2c0b2297993f30956b8521b4a159d24f2aeae07bd8e56e0727c811aa8d411196",
+    "characters": 7282
+  },
+  {
+    "id": "ws018-p011",
+    "source": "plan/ws018/phase011/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p011.md",
+    "sha256": "f1deb7dd6e9ba118f1f73a74c8e8d90aa31c6f77ef84c229fe81ee52fb7b7f93",
+    "characters": 10292
+  },
+  {
+    "id": "ws018-p012",
+    "source": "plan/ws018/phase012/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p012.md",
+    "sha256": "51d4192150001c8802702cd1a48e64e70c2b448c64fe148eb7e1a7a800dfa12f",
+    "characters": 9673
+  },
+  {
+    "id": "ws018-p013",
+    "source": "plan/ws018/phase013/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p013.md",
+    "sha256": "80ab9295ec460f701c1afef9d088c288e1fb3802de2bd47cda18af01affdc1ef",
+    "characters": 10678
+  },
+  {
+    "id": "ws018-p014",
+    "source": "plan/ws018/phase014/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p014.md",
+    "sha256": "f88c046a94796b3d96f1b8b333214c3df42569ad98e4e107cf32f4fbc86c54fb",
+    "characters": 4653
+  },
+  {
+    "id": "ws018-p015",
+    "source": "plan/ws018/phase015/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p015.md",
+    "sha256": "38a2c411c76568262396ec38b810274ffbe5dbe40e35f153f8713a17fc1f2069",
+    "characters": 3765
+  },
+  {
+    "id": "ws018-p016",
+    "source": "plan/ws018/phase016/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p016.md",
+    "sha256": "82c7589a0216171db4cfd07c395b2d69c707b6a3dc629a16710be3d2447deb0b",
+    "characters": 2937
+  },
+  {
+    "id": "ws018-p017",
+    "source": "plan/ws018/phase017/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p017.md",
+    "sha256": "a8bcfb53fd1c2e487645b9e504a16974ff7b15b8fe68da56c7c03213f3a80d70",
+    "characters": 879
+  },
+  {
+    "id": "ws018-p018",
+    "source": "plan/ws018/phase018/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p018.md",
+    "sha256": "c66c9621574fc4687f392e61e9bc1b5b529601514712f12d8f7689dbd910f11f",
+    "characters": 892
+  },
+  {
+    "id": "ws018-p019",
+    "source": "plan/ws018/phase019/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p019.md",
+    "sha256": "d0fd335e4c5c339dacda829743847faa948fe75c9c7c3215d281fc01fa553d88",
+    "characters": 902
+  },
+  {
+    "id": "ws018-p020",
+    "source": "plan/ws018/phase020/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws018-p020.md",
+    "sha256": "bcb9db908a332b80b389de98f6ccd172e029dfb5a8b01b9678a45c237d4828e9",
+    "characters": 1380
+  },
+  {
+    "id": "ws019-p001",
+    "source": "plan/ws019/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p001.md",
+    "sha256": "08b04c92cd1009d97dd392fa4e7eef3a6eac4928d98536cf348bce065ebc8f3c",
+    "characters": 3201
+  },
+  {
+    "id": "ws019-p002",
+    "source": "plan/ws019/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p002.md",
+    "sha256": "234c82c18320bedcc65ec8ec27e277994b2415eb1d87c662134aeb7d1ce8339b",
+    "characters": 2383
+  },
+  {
+    "id": "ws019-p003",
+    "source": "plan/ws019/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p003.md",
+    "sha256": "87f275bdf7621be90429c7fd58c68d89bde5d606c672d6e80611e57dd925e93a",
+    "characters": 1844
+  },
+  {
+    "id": "ws019-p004",
+    "source": "plan/ws019/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p004.md",
+    "sha256": "be60e1c6ffd4629c41025ddcc59c9c65b7b8c8c561665a53a0b5071b72b21d92",
+    "characters": 7540
+  },
+  {
+    "id": "ws019-p005",
+    "source": "plan/ws019/phase005/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p005.md",
+    "sha256": "3c38dde9ec896e110986f0e76f27c0c2b8e8c64620168e701e5cf8834718b9e9",
+    "characters": 4085
+  },
+  {
+    "id": "ws019-p006",
+    "source": "plan/ws019/phase006/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p006.md",
+    "sha256": "4080c4f904bfb5c936b9dd019b30631c4870162da4de942a3295c9f62749973d",
+    "characters": 3557
+  },
+  {
+    "id": "ws019-p007",
+    "source": "plan/ws019/phase007/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p007.md",
+    "sha256": "b97454b083ef09000983d7e2a7434436392dedbce7aea3bd6f9a290668751508",
+    "characters": 11235
+  },
+  {
+    "id": "ws019-p008",
+    "source": "plan/ws019/phase008/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p008.md",
+    "sha256": "55f0f5dc3146bba32832a3770c5a89f26e47acf43a56d680b44a8f9948f3c428",
+    "characters": 5221
+  },
+  {
+    "id": "ws019-p009",
+    "source": "plan/ws019/phase009/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p009.md",
+    "sha256": "66e697abbfcff6216d6f43c84d3e37c0a9b5200bc3d7c419222abb610b88f37b",
+    "characters": 4302
+  },
+  {
+    "id": "ws019-p010",
+    "source": "plan/ws019/phase010/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p010.md",
+    "sha256": "249b40263096015314b0603b99f797e8f3fae20e388ac98a8f0ceee751238770",
+    "characters": 3430
+  },
+  {
+    "id": "ws019-p011",
+    "source": "plan/ws019/phase011/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p011.md",
+    "sha256": "983d1f471089809c51f6f80cb08d0adf2dbdff5d1321ac7dcdfec8d9a5c0706b",
+    "characters": 3919
+  },
+  {
+    "id": "ws019-p012",
+    "source": "plan/ws019/phase012/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p012.md",
+    "sha256": "7c87e5bdc3b422b35d6e0f8fabe8f7d736dee81286d2c2146dfc6fb9bb014304",
+    "characters": 3248
+  },
+  {
+    "id": "ws019-p013",
+    "source": "plan/ws019/phase013/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p013.md",
+    "sha256": "8ae1acf2de292fd7c434a7a06554baa17c67c556b1d0301be3d291f155fd73d7",
+    "characters": 1362
+  },
+  {
+    "id": "ws019-p014",
+    "source": "plan/ws019/phase014/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p014.md",
+    "sha256": "18403f9dc68a645e152af38044e24f9d0431ab3be861fa11dcb205c115e3f593",
+    "characters": 887
+  },
+  {
+    "id": "ws019-p015",
+    "source": "plan/ws019/phase015/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p015.md",
+    "sha256": "9ab051cba1054f5f3ef2189b97315492d8e1559b7d2aef17ecdcb7333c314873",
+    "characters": 2574
+  },
+  {
+    "id": "ws019-p016",
+    "source": "plan/ws019/phase016/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p016.md",
+    "sha256": "cb083001164e1b1e259ed26b6a1e6edf325aa617d19efee5f78d5f8b59347760",
+    "characters": 3835
+  },
+  {
+    "id": "ws019-p017",
+    "source": "plan/ws019/phase017/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p017.md",
+    "sha256": "afc1d16bea99d611d4904ec089cbcf8ef3578b1f5d160cc4eacac20fc3da29bd",
+    "characters": 5555
+  },
+  {
+    "id": "ws019-p018",
+    "source": "plan/ws019/phase018/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p018.md",
+    "sha256": "00a30490f870ddb2274cdfa347aa6c09e9f348776288fcae818effb36f7eb0ad",
+    "characters": 1979
+  },
+  {
+    "id": "ws019-p019",
+    "source": "plan/ws019/phase019/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p019.md",
+    "sha256": "4faf2994459cdb0dbbba39d2e7cda881f56ef01bfb5eeae01834494a0f24601c",
+    "characters": 2460
+  },
+  {
+    "id": "ws019-p020",
+    "source": "plan/ws019/phase020/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p020.md",
+    "sha256": "5a2e2c14d36500a431e7962a6cc8e8651c9854dadf8af5e071b6bb5b33451e76",
+    "characters": 1165
+  },
+  {
+    "id": "ws019-p021",
+    "source": "plan/ws019/phase021/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p021.md",
+    "sha256": "9e54093d724f1482b77b429f1449f187d655914a5d8aba36458c5d1f656b2c32",
+    "characters": 2889
+  },
+  {
+    "id": "ws019-p022",
+    "source": "plan/ws019/phase022/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p022.md",
+    "sha256": "aedc560988b5d7f63b6f1557da048d5af712546d6dbd5a5b0c341b98586c8bfb",
+    "characters": 2306
+  },
+  {
+    "id": "ws019-p023",
+    "source": "plan/ws019/phase023/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p023.md",
+    "sha256": "e7acbc895a73843444264bc35aa011e94378fbb6a55c876a9477c0fe019ab57c",
+    "characters": 2396
+  },
+  {
+    "id": "ws019-p024",
+    "source": "plan/ws019/phase024/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p024.md",
+    "sha256": "1ff5241ff4964a066694fa8fa3f4922b4ae25c0749ad0f28a48791a08cf2f98e",
+    "characters": 1909
+  },
+  {
+    "id": "ws019-p025",
+    "source": "plan/ws019/phase025/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p025.md",
+    "sha256": "832d019eea323f9ecdc4d5c79490dc5ad4d307fed18e8c66231eee5f8c3e7b5e",
+    "characters": 2508
+  },
+  {
+    "id": "ws019-p026",
+    "source": "plan/ws019/phase026/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p026.md",
+    "sha256": "9dcd0a0147a08bc2b5da39e3cfcbacbfeeb646fcfaa21983c6ff615ebb2f4811",
+    "characters": 2421
+  },
+  {
+    "id": "ws019-p027",
+    "source": "plan/ws019/phase027/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p027.md",
+    "sha256": "04b35ff14c2a91b98c30b970b70c50ee426fa8cf07b7028032a7ba1551325df1",
+    "characters": 2538
+  },
+  {
+    "id": "ws019-p028",
+    "source": "plan/ws019/phase028/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p028.md",
+    "sha256": "16e23968be9e738726d70edb5a09512e6fcc2e2a31ce901612856f79dc901c60",
+    "characters": 3969
+  },
+  {
+    "id": "ws019-p029",
+    "source": "plan/ws019/phase029/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p029.md",
+    "sha256": "0ed7649b95e4847f6bad7b93d04f0f7dbb1955885ffb81085bc883338dcb5a75",
+    "characters": 8659
+  },
+  {
+    "id": "ws019-p030",
+    "source": "plan/ws019/phase030/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p030.md",
+    "sha256": "e5df045440a079a0381e599df55817016896a1c47f0d70f75467a9af02a7f9da",
+    "characters": 2198
+  },
+  {
+    "id": "ws019-p031",
+    "source": "plan/ws019/phase031/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p031.md",
+    "sha256": "3aaf954ec9bfff6579f7fa7c76f99a399a8ac040f6bd50957cebe097d540f0ba",
+    "characters": 2934
+  },
+  {
+    "id": "ws019-p032",
+    "source": "plan/ws019/phase032/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p032.md",
+    "sha256": "f5c89930b84977c63d2d261eefae91a6319daa2182b60f6f40ae6634675291b3",
+    "characters": 2331
+  },
+  {
+    "id": "ws019-p033",
+    "source": "plan/ws019/phase033/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p033.md",
+    "sha256": "5c3186fc25437f6c79faeca7848e22567174fa91ff5f6b8d52abaa6dfee167c5",
+    "characters": 2655
+  },
+  {
+    "id": "ws019-p034",
+    "source": "plan/ws019/phase034/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p034.md",
+    "sha256": "b295ae416d35d17de3f6450b39bb934de27a62dab782de72bb7aaca46a4d5c3b",
+    "characters": 1891
+  },
+  {
+    "id": "ws019-p035",
+    "source": "plan/ws019/phase035/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p035.md",
+    "sha256": "f3560ce6aaa907f34fbd144cc34fc73a362794bc49fd7ccda2fad86c7d70b662",
+    "characters": 2368
+  },
+  {
+    "id": "ws019-p036",
+    "source": "plan/ws019/phase036/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p036.md",
+    "sha256": "a037cc83c4f51bfa18c73656c35ebaa30c3f7bac31c33902a0a3e41c1e8f422f",
+    "characters": 1817
+  },
+  {
+    "id": "ws019-p037",
+    "source": "plan/ws019/phase037/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p037.md",
+    "sha256": "e9b2c0b3b2da1189628ef100d0802ae03ef63f942155521c6d081a5fcd7a0068",
+    "characters": 1992
+  },
+  {
+    "id": "ws019-p038",
+    "source": "plan/ws019/phase038/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p038.md",
+    "sha256": "3399c21845a7acfa9257648a9eaf16e1b5a45b1eb366851e1c2bb0bbc0862769",
+    "characters": 1200
+  },
+  {
+    "id": "ws019-p039",
+    "source": "plan/ws019/phase039/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p039.md",
+    "sha256": "1b686c22f88c8d6c4bebdc6208dd37cced455075efc378c0066f70dfb9190020",
+    "characters": 1238
+  },
+  {
+    "id": "ws019-p040",
+    "source": "plan/ws019/phase040/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p040.md",
+    "sha256": "2bdaa150899dac7b7bc134d52666da7bbbdbb63df29f6abaa898b8d799c8b5a6",
+    "characters": 1271
+  },
+  {
+    "id": "ws019-p041",
+    "source": "plan/ws019/phase041/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p041.md",
+    "sha256": "23638f2dbc4938f781589c0b9f15df14f28d1077b5aaa7eaba015af009f465ad",
+    "characters": 1133
+  },
+  {
+    "id": "ws019-p042",
+    "source": "plan/ws019/phase042/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p042.md",
+    "sha256": "1967e7ff0e568be68a9f2ba4ad06ae32df2a5fbf362756fbc71eb98b3354ad4e",
+    "characters": 990
+  },
+  {
+    "id": "ws019-p043",
+    "source": "plan/ws019/phase043/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p043.md",
+    "sha256": "b82b033b9e3f9ea96502b5cf1465684c254daf5a229ec8b7b9abdb4788d6a45e",
+    "characters": 1135
+  },
+  {
+    "id": "ws019-p044",
+    "source": "plan/ws019/phase044/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p044.md",
+    "sha256": "cbe4baaee282620b03dc8bce997efacd28d20bc35b9aa63220babb40975ef4d9",
+    "characters": 963
+  },
+  {
+    "id": "ws019-p045",
+    "source": "plan/ws019/phase045/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p045.md",
+    "sha256": "af7fde585ed64032047aedcc78f90cc2a86ebe88fb349ff0c51f666aa4a634da",
+    "characters": 1501
+  },
+  {
+    "id": "ws019-p046",
+    "source": "plan/ws019/phase046/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p046.md",
+    "sha256": "d0f5a6b153a70b58e9cd95302ac7f4a8bf2f1f5510007be5cf2ff5a697bd52a8",
+    "characters": 2413
+  },
+  {
+    "id": "ws019-p047",
+    "source": "plan/ws019/phase047/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p047.md",
+    "sha256": "c76ad8901288ea2c8866fbcb6a3fd9d98a6035e0acf156f6c775488ffee8ff45",
+    "characters": 2169
+  },
+  {
+    "id": "ws019-p048",
+    "source": "plan/ws019/phase048/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p048.md",
+    "sha256": "aca9842eb30186ae0c105e4dd92cf2e9fdb26375e75e165159b027104fbe5fa4",
+    "characters": 2636
+  },
+  {
+    "id": "ws019-p049",
+    "source": "plan/ws019/phase049/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p049.md",
+    "sha256": "eab5f78ad6d7efb00bdb952f5387c52b8eb34eb5313cdbfcee6a2faba83a577d",
+    "characters": 4808
+  },
+  {
+    "id": "ws019-p050",
+    "source": "plan/ws019/phase050/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws019-p050.md",
+    "sha256": "06bcedcdfe429d0c864be52160b2b8952a4998f8de7d2c9db5ad6b2844413969",
+    "characters": 6812
+  },
+  {
+    "id": "ws020-p001",
+    "source": "plan/ws020/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws020-p001.md",
+    "sha256": "33d622ec661a254390cff7f1d78e371f2847d6ef1877cb39e4625403ddf976e9",
+    "characters": 3349
+  },
+  {
+    "id": "ws020-p002",
+    "source": "plan/ws020/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws020-p002.md",
+    "sha256": "a5f2ba9b455d83956b65a65bb4fcc392a7aa54d2ee62417d3e27263a3cdfcc62",
+    "characters": 5043
+  },
+  {
+    "id": "ws020-p003",
+    "source": "plan/ws020/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws020-p003.md",
+    "sha256": "39370090e90fd319aef77324273f1ee620cf438910b1f5d74cd8de64ef004865",
+    "characters": 5707
+  },
+  {
+    "id": "ws020-p004",
+    "source": "plan/ws020/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws020-p004.md",
+    "sha256": "b73cb40e68e0846bdf3fa2356b4b0e365c803d0fd671474a55177db20806fa8b",
+    "characters": 3450
+  },
+  {
+    "id": "ws020-p005",
+    "source": "plan/ws020/phase005/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws020-p005.md",
+    "sha256": "8f599bcb7ab2d3a49284c0daa12614d2c34ebfff3ca92227f3b17c29b6f9f45d",
+    "characters": 7525
+  },
+  {
+    "id": "ws020-p006",
+    "source": "plan/ws020/phase006/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws020-p006.md",
+    "sha256": "3a9c778829f411fa69f226c3cb15f6fa1bd28a3a0a63f0627cde8f2822c423e9",
+    "characters": 12034
+  },
+  {
+    "id": "ws021-p001",
+    "source": "plan/ws021/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws021-p001.md",
+    "sha256": "da86412d0a0b7a8c64ad5da1c6a0070825e596333b31df14d565a8c817c26dea",
+    "characters": 2563
+  },
+  {
+    "id": "ws021-p002",
+    "source": "plan/ws021/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws021-p002.md",
+    "sha256": "6bb33a7885dbae78e800d74b51b6fd04ce2e2f5a4391187dbdb19725579fc130",
+    "characters": 2539
+  },
+  {
+    "id": "ws021-p003",
+    "source": "plan/ws021/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws021-p003.md",
+    "sha256": "95da0c565aed8d7e3804af811a4d2e2d29f64aee5e4adf5b73a055f0beb2da46",
+    "characters": 2955
+  },
+  {
+    "id": "ws021-p004",
+    "source": "plan/ws021/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws021-p004.md",
+    "sha256": "f1a87968e75a8ba010bca9c3feae222326339da759b651f68b6031c770ac1f4d",
+    "characters": 2872
+  },
+  {
+    "id": "ws021-p005",
+    "source": "plan/ws021/phase005/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws021-p005.md",
+    "sha256": "31d10b2b0465d2877499b0ec6776448d2c3f6dfb293fe666f600353255f57702",
+    "characters": 2270
+  },
+  {
+    "id": "ws021-p006",
+    "source": "plan/ws021/phase006/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws021-p006.md",
+    "sha256": "868ac8c14f9ab03d8f9698241ef46376e256af138dbe4cd8f46dee16918db0b3",
+    "characters": 2867
+  },
+  {
+    "id": "ws021-p007",
+    "source": "plan/ws021/phase007/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws021-p007.md",
+    "sha256": "0b7b41ccb756d6f6d94acb87df4f912c1cdd69a737fd8830c6166d85a53399e8",
+    "characters": 1984
+  },
+  {
+    "id": "ws022-p001",
+    "source": "plan/ws022/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws022-p001.md",
+    "sha256": "bb127565710c9ed4c09d2fa5dcad21ce6e877601843b857baa6d4b087615d2c5",
+    "characters": 1516
+  },
+  {
+    "id": "ws022-p002",
+    "source": "plan/ws022/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws022-p002.md",
+    "sha256": "fb37a1745ab113d2f1e9838c78deb6e076930802afb77e0f6649d982b0984577",
+    "characters": 1352
+  },
+  {
+    "id": "ws022-p003",
+    "source": "plan/ws022/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws022-p003.md",
+    "sha256": "0906ac16117803f335e15cac60002d770cf189120402978061c7910b6cb8e5af",
+    "characters": 2346
+  },
+  {
+    "id": "ws023-p001",
+    "source": "plan/ws023/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws023-p001.md",
+    "sha256": "fca26ecb9641ae5f5b59158bf42bc69745ccbde895d1f5e8fb0b34b4bf58495f",
+    "characters": 2188
+  },
+  {
+    "id": "ws023-p002",
+    "source": "plan/ws023/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws023-p002.md",
+    "sha256": "7bc4bd588e86164a2147fa15c98eff34d193d3b148b47cf9afbbd17db5f41f60",
+    "characters": 1781
+  },
+  {
+    "id": "ws023-p003",
+    "source": "plan/ws023/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws023-p003.md",
+    "sha256": "8df462ea106cfaa4512404c8f4ef40a5f9525c07447eb7ca20ea1cfbb422a5c7",
+    "characters": 1633
+  },
+  {
+    "id": "ws023-p004",
+    "source": "plan/ws023/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws023-p004.md",
+    "sha256": "0d3d373841e77a5a0aa4e4b5c250253c765e2ed2bb3088540b89447085ec0440",
+    "characters": 1564
+  },
+  {
+    "id": "ws023-p005",
+    "source": "plan/ws023/phase005/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws023-p005.md",
+    "sha256": "39fd17f9dbefc755662630db5c21087029feb1ee2e602a8ea15815da69b7a031",
+    "characters": 1818
+  },
+  {
+    "id": "ws023-p006",
+    "source": "plan/ws023/phase006/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws023-p006.md",
+    "sha256": "0986add6cd7a1b2a7cdef71233649d5f64301c3d920c9139c10c4de94c6a7562",
+    "characters": 1658
+  },
+  {
+    "id": "ws023-p007",
+    "source": "plan/ws023/phase007/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws023-p007.md",
+    "sha256": "bbf122d5f866a2c3e4dc7a13d38918345d730792ff148330506c7b7eb36075a0",
+    "characters": 1520
+  },
+  {
+    "id": "ws023-p008",
+    "source": "plan/ws023/phase008/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws023-p008.md",
+    "sha256": "4ab50475ffa5b36c32131b5a9df73e3df131315a139eb75dffc6c9f7f5c3195a",
+    "characters": 1658
+  },
+  {
+    "id": "ws023-p009",
+    "source": "plan/ws023/phase009/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws023-p009.md",
+    "sha256": "32d9a917b6b83329a8ada827ec994c39ec79d9fc05aa800f6f3de16c16e795ab",
+    "characters": 1471
+  },
+  {
+    "id": "ws023-p010",
+    "source": "plan/ws023/phase010/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws023-p010.md",
+    "sha256": "dc0887fe97e94bd45765ff1d11f9041ca84d0b13ac31f6e04fd668cad5cd3605",
+    "characters": 1738
+  },
+  {
+    "id": "ws023-p011",
+    "source": "plan/ws023/phase011/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws023-p011.md",
+    "sha256": "963ed31e0496821dca46b9f5c5b8ddd77712a9e95551eb00addb9e3792a6bc58",
+    "characters": 2391
+  },
+  {
+    "id": "ws024-p001",
+    "source": "plan/ws024/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws024-p001.md",
+    "sha256": "87dd1dc9353e7d80f46a74680e685438251ee0c08df7887d110b4168fd606ecd",
+    "characters": 1643
+  },
+  {
+    "id": "ws024-p002",
+    "source": "plan/ws024/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws024-p002.md",
+    "sha256": "8a7824a4116c0283a5583a389e692af12b1bb0070a530c92568b98776c5b9dd9",
+    "characters": 1446
+  },
+  {
+    "id": "ws024-p003",
+    "source": "plan/ws024/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws024-p003.md",
+    "sha256": "4a35556e04b792507e422523bd3dde8caaafce240474dbe6b33fb197286e5a3b",
+    "characters": 1686
+  },
+  {
+    "id": "ws024-p004",
+    "source": "plan/ws024/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws024-p004.md",
+    "sha256": "0687d03fc7caa9c1b044b3f98b9d87a7f8b7ca2e67d6cec2712a90df650564b5",
+    "characters": 1461
+  },
+  {
+    "id": "ws025-p001",
+    "source": "plan/ws025/phase001/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p001.md",
+    "sha256": "e00d8cb95636722307868fea3720af49a6bda4d431656a2efe73dc8d62dd5c5e",
+    "characters": 1437
+  },
+  {
+    "id": "ws025-p002",
+    "source": "plan/ws025/phase002/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p002.md",
+    "sha256": "764cbfc499f2fa2e7b01c22036f5bc5fd7daccdbb37653bf06fe4620eaf7d7c2",
+    "characters": 1798
+  },
+  {
+    "id": "ws025-p003",
+    "source": "plan/ws025/phase003/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p003.md",
+    "sha256": "a554e4fbcea010f674742b83954373a478033056d369cbd8be5a9040e2766c95",
+    "characters": 1779
+  },
+  {
+    "id": "ws025-p004",
+    "source": "plan/ws025/phase004/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p004.md",
+    "sha256": "00cadc111e04238736c163b95c9f6b4481081e8b5ccd8bc9b6dd1155b8ad484f",
+    "characters": 1824
+  },
+  {
+    "id": "ws025-p005",
+    "source": "plan/ws025/phase005/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p005.md",
+    "sha256": "03c03409d9e149eb693a820e7e45932d688c671fc5a8d6228330272595290bd2",
+    "characters": 1521
+  },
+  {
+    "id": "ws025-p006",
+    "source": "plan/ws025/phase006/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p006.md",
+    "sha256": "cacd36321f53d448a19139cdbd442b6d191d20433ea831bbda7fc808ff2fbb49",
+    "characters": 1375
+  },
+  {
+    "id": "ws025-p007",
+    "source": "plan/ws025/phase007/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p007.md",
+    "sha256": "6d3aa57efd32f61bf3cfd8a97a0dc0d0fa3900c2dfd05baefa0f334c4479edef",
+    "characters": 1241
+  },
+  {
+    "id": "ws025-p008",
+    "source": "plan/ws025/phase008/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p008.md",
+    "sha256": "1a076395af1e6d453e55357cfe44dd8ff27f3872bc6d2addbc55b89713261510",
+    "characters": 1306
+  },
+  {
+    "id": "ws025-p009",
+    "source": "plan/ws025/phase009/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p009.md",
+    "sha256": "c2ce1011dfab6ea98d0e58cd4a7506b62f35e6b7b00b4ce9da15788041028fcf",
+    "characters": 1526
+  },
+  {
+    "id": "ws025-p010",
+    "source": "plan/ws025/phase010/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p010.md",
+    "sha256": "2fbd4ad020488131108e2379f800fbe38b7345098c865176d800cbef60d2438a",
+    "characters": 1435
+  },
+  {
+    "id": "ws025-p011",
+    "source": "plan/ws025/phase011/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p011.md",
+    "sha256": "930a41ea64e59fb0460ada3a68f6cb6a293583f389717e710d8a50c7d1fb20b7",
+    "characters": 3579
+  },
+  {
+    "id": "ws025-p012",
+    "source": "plan/ws025/phase012/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p012.md",
+    "sha256": "989a5344c48aadcdb21ea986820572b7f83d986df858803ed3116e01c0b758c5",
+    "characters": 2270
+  },
+  {
+    "id": "ws025-p013",
+    "source": "plan/ws025/phase013/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p013.md",
+    "sha256": "f0e2b37766dcb9d5476cd5f06e0c2824a0236dd2f91f1c714e85a9aa07b41df1",
+    "characters": 4152
+  },
+  {
+    "id": "ws025-p014",
+    "source": "plan/ws025/phase014/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p014.md",
+    "sha256": "5f42172b59ec6fa51fb09e0a752b602b815bc07ce00856a48fd5fd532205a549",
+    "characters": 4158
+  },
+  {
+    "id": "ws025-p015",
+    "source": "plan/ws025/phase015/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p015.md",
+    "sha256": "2d5db342222e3f3bdf03065fce75a28666a875004570a4aefea11f63824e39f3",
+    "characters": 4600
+  },
+  {
+    "id": "ws025-p016",
+    "source": "plan/ws025/phase016/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p016.md",
+    "sha256": "d3a6c8b76860f24f5ad097207053973ae8c2e7f0c71b965172f0c610a66fae11",
+    "characters": 5364
+  },
+  {
+    "id": "ws025-p017",
+    "source": "plan/ws025/phase017/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p017.md",
+    "sha256": "2cc755900b64e29f820d4b66bc3017df981a52d3dd0025a90eab005ea31a0247",
+    "characters": 4702
+  },
+  {
+    "id": "ws025-p018",
+    "source": "plan/ws025/phase018/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p018.md",
+    "sha256": "cb71bbe6b5031f1cb82bec9b493b3fce488cb1721557c316d5e45af04e3972b1",
+    "characters": 11361
+  },
+  {
+    "id": "ws025-p019",
+    "source": "plan/ws025/phase019/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p019.md",
+    "sha256": "ad3ab54553daf0f8d901e2ddba7bb3b901df7a84f399d2ef166f0ba9dbd593f5",
+    "characters": 5785
+  },
+  {
+    "id": "ws025-p020",
+    "source": "plan/ws025/phase020/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p020.md",
+    "sha256": "10fac4feeaaedc8489581e1426161606603340f717187dce66c400532e3719b7",
+    "characters": 12894
+  },
+  {
+    "id": "ws025-p021",
+    "source": "plan/ws025/phase021/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p021.md",
+    "sha256": "d70c29ae99900251242998b4417e3591880b95576c552421b22b1867e5c7b36f",
+    "characters": 3140
+  },
+  {
+    "id": "ws025-p022",
+    "source": "plan/ws025/phase022/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p022.md",
+    "sha256": "2dffb40b4a2bd56c8035d7928e42902a70157b8baa03e1dae4a830ba11f69525",
+    "characters": 1624
+  },
+  {
+    "id": "ws025-p023",
+    "source": "plan/ws025/phase023/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p023.md",
+    "sha256": "17a894449f8d2161ffe6cd019a39d23f87b5010e879ad35a2bf74fa1d5a90c6e",
+    "characters": 1774
+  },
+  {
+    "id": "ws025-p024",
+    "source": "plan/ws025/phase024/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p024.md",
+    "sha256": "1ea82d9d44808d043e79c4872a875be449a83a93b632b61a9a9a46243538135b",
+    "characters": 1842
+  },
+  {
+    "id": "ws025-p025",
+    "source": "plan/ws025/phase025/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p025.md",
+    "sha256": "16924452b9228d53aeb2f240fd6407107ffd64ec246dcae694f971aad55331de",
+    "characters": 2214
+  },
+  {
+    "id": "ws025-p026",
+    "source": "plan/ws025/phase026/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p026.md",
+    "sha256": "106cfd3cb088c9bb4a2a0215fc326fdc7d55b9d1f19d08cfcaad16bfa25dec02",
+    "characters": 1598
+  },
+  {
+    "id": "ws025-p027",
+    "source": "plan/ws025/phase027/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p027.md",
+    "sha256": "987dd01957ccef64b03e71e7cd1f3c05dd8a3eaa9a46b2bb9b48fb6b1c12518e",
+    "characters": 4416
+  },
+  {
+    "id": "ws025-p028",
+    "source": "plan/ws025/phase028/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p028.md",
+    "sha256": "4e367600b0fb0b74880a758f803cfe218b378b9a71da7367ef9a1d1d12e507ec",
+    "characters": 27833
+  },
+  {
+    "id": "ws025-p029",
+    "source": "plan/ws025/phase029/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p029.md",
+    "sha256": "784dfaa71226e7d3c1756d97f5a06b32b0e0bc83151b969ac572e6edd5ce9368",
+    "characters": 33246
+  },
+  {
+    "id": "ws025-p030",
+    "source": "plan/ws025/phase030/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p030.md",
+    "sha256": "48d19e36e3c4947acff1dfd00f9f04d8bd482320a8120a85179f86b690fcbdac",
+    "characters": 9768
+  },
+  {
+    "id": "ws025-p031",
+    "source": "plan/ws025/phase031/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p031.md",
+    "sha256": "6a8e654def1f6fd2f4bc62be6a99cf245b9ddee3fe9b5f91443ab69e552ae67b",
+    "characters": 11042
+  },
+  {
+    "id": "ws025-p032",
+    "source": "plan/ws025/phase032/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p032.md",
+    "sha256": "29a4c82a47b12ed5a7a3951ff2bd153c9cbdd44ea48332ed1433aeb340d64734",
+    "characters": 3878
+  },
+  {
+    "id": "ws025-p033",
+    "source": "plan/ws025/phase033/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p033.md",
+    "sha256": "c97ae6aac08b0d92a20b0182cf11ac5715d97be9cccf03c563cbf928f185edc7",
+    "characters": 2113
+  },
+  {
+    "id": "ws025-p034",
+    "source": "plan/ws025/phase034/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p034.md",
+    "sha256": "9c2e7d65caf95994226581cb02a025c3989b79e376eae0afb783fe08d88e9293",
+    "characters": 1348
+  },
+  {
+    "id": "ws025-p035",
+    "source": "plan/ws025/phase035/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p035.md",
+    "sha256": "41db7ed9ba0341b95fdbb3cd794775f67bf24189b33011617a50e35da40a5f67",
+    "characters": 2674
+  },
+  {
+    "id": "ws025-p036",
+    "source": "plan/ws025/phase036/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p036.md",
+    "sha256": "7c6b61170c5152fbe367fdc7fea213dd22a9c8af7c86bec23ba18629fa4b62c5",
+    "characters": 2730
+  },
+  {
+    "id": "ws025-p037",
+    "source": "plan/ws025/phase037/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p037.md",
+    "sha256": "31147ca40f50792dda3dd98540475f561dbb85a730e8296488f520654fdb7a82",
+    "characters": 6372
+  },
+  {
+    "id": "ws025-p038",
+    "source": "plan/ws025/phase038/phase.md",
+    "snapshot": "plan/tmp/github-import/review/ws025-p038.md",
+    "sha256": "df8091c88e8caafed13f90ebe36375e31bc43a6719f4955455e047666b153af1",
+    "characters": 6097
+  }
+]

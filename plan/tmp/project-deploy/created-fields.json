@@ -1,0 +1,387 @@
+[
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6yIs",
+    "name": "Title",
+    "dataType": "TITLE"
+  },
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6yIw",
+    "name": "Assignees",
+    "dataType": "ASSIGNEES"
+  },
+  {
+    "id": "PVTSSF_lAHOC2X95c4BjFGlzhh6yI0",
+    "name": "Status",
+    "options": [
+      {
+        "id": "f75ad846",
+        "name": "Todo"
+      },
+      {
+        "id": "47fc9ee4",
+        "name": "In Progress"
+      },
+      {
+        "id": "98236657",
+        "name": "Done"
+      }
+    ]
+  },
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6yI4",
+    "name": "Labels",
+    "dataType": "LABELS"
+  },
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6yI8",
+    "name": "Linked pull requests",
+    "dataType": "LINKED_PULL_REQUESTS"
+  },
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6yJA",
+    "name": "Milestone",
+    "dataType": "MILESTONE"
+  },
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6yJE",
+    "name": "Repository",
+    "dataType": "REPOSITORY"
+  },
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6yJM",
+    "name": "Reviewers",
+    "dataType": "REVIEWERS"
+  },
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6yJQ",
+    "name": "Parent issue",
+    "dataType": "PARENT_ISSUE"
+  },
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6yJU",
+    "name": "Sub-issues progress",
+    "dataType": "SUB_ISSUES_PROGRESS"
+  },
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6yJY",
+    "name": "Created",
+    "dataType": "CREATED"
+  },
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6yJc",
+    "name": "Updated",
+    "dataType": "UPDATED"
+  },
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6yJg",
+    "name": "Closed",
+    "dataType": "CLOSED"
+  },
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6zBA",
+    "name": "Logical ID",
+    "dataType": "TEXT"
+  },
+  {
+    "id": "PVTSSF_lAHOC2X95c4BjFGlzhh6zB8",
+    "name": "Record Kind",
+    "options": [
+      {
+        "id": "6429c2e7",
+        "name": "Board"
+      },
+      {
+        "id": "7a7d255c",
+        "name": "WS"
+      },
+      {
+        "id": "018ad3d2",
+        "name": "Phase"
+      }
+    ]
+  },
+  {
+    "id": "PVTSSF_lAHOC2X95c4BjFGlzhh6zCA",
+    "name": "Primary Milestone",
+    "options": [
+      {
+        "id": "1fcc8a3e",
+        "name": "MG001"
+      },
+      {
+        "id": "97811c7e",
+        "name": "MG002"
+      },
+      {
+        "id": "69aba4af",
+        "name": "MG003"
+      },
+      {
+        "id": "e423d93f",
+        "name": "MG004"
+      },
+      {
+        "id": "e313f1b4",
+        "name": "MG005"
+      },
+      {
+        "id": "fb9282cb",
+        "name": "MG006"
+      },
+      {
+        "id": "58ea1029",
+        "name": "MG007"
+      },
+      {
+        "id": "a205706d",
+        "name": "MG008"
+      },
+      {
+        "id": "2bb0e6d5",
+        "name": "MG009"
+      }
+    ]
+  },
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6zC8",
+    "name": "Related Milestones",
+    "dataType": "TEXT"
+  },
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6zDc",
+    "name": "Objectives",
+    "dataType": "TEXT"
+  },
+  {
+    "id": "PVTSSF_lAHOC2X95c4BjFGlzhh6zE0",
+    "name": "Awesome Plan Status",
+    "options": [
+      {
+        "id": "d637dc6d",
+        "name": "planning"
+      },
+      {
+        "id": "9384185c",
+        "name": "planned"
+      },
+      {
+        "id": "ec533f6d",
+        "name": "in-progress"
+      },
+      {
+        "id": "781c0612",
+        "name": "incomplete"
+      },
+      {
+        "id": "99f5b599",
+        "name": "completed"
+      },
+      {
+        "id": "14af033a",
+        "name": "cleared"
+      },
+      {
+        "id": "22fbe707",
+        "name": "uncleared"
+      }
+    ]
+  },
+  {
+    "id": "PVTSSF_lAHOC2X95c4BjFGlzhh6zE4",
+    "name": "Phase Disposition",
+    "options": [
+      {
+        "id": "b6289037",
+        "name": "normal"
+      },
+      {
+        "id": "89a872af",
+        "name": "canceled"
+      }
+    ]
+  },
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6zF0",
+    "name": "WS Priority",
+    "dataType": "NUMBER"
+  },
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6zF4",
+    "name": "Focused Goal IDs",
+    "dataType": "TEXT"
+  },
+  {
+    "id": "PVTSSF_lAHOC2X95c4BjFGlzhh6zG0",
+    "name": "Current Focus",
+    "options": [
+      {
+        "id": "2f35565f",
+        "name": "Yes"
+      },
+      {
+        "id": "61e33108",
+        "name": "No"
+      }
+    ]
+  },
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6zHw",
+    "name": "Queue ID",
+    "dataType": "TEXT"
+  },
+  {
+    "id": "PVTSSF_lAHOC2X95c4BjFGlzhh6zIs",
+    "name": "Queue Item Status",
+    "options": [
+      {
+        "id": "bf104739",
+        "name": "pending"
+      },
+      {
+        "id": "cf34edf4",
+        "name": "in-progress"
+      },
+      {
+        "id": "d5f8951a",
+        "name": "cleared"
+      },
+      {
+        "id": "ae8d0ab9",
+        "name": "uncleared"
+      }
+    ]
+  },
+  {
+    "id": "PVTSSF_lAHOC2X95c4BjFGlzhh6zIw",
+    "name": "Planning Category",
+    "options": [
+      {
+        "id": "94406ed6",
+        "name": "Other"
+      },
+      {
+        "id": "69bf7185",
+        "name": "Outlook"
+      },
+      {
+        "id": "60a32904",
+        "name": "Current Queue"
+      }
+    ]
+  },
+  {
+    "id": "PVTSSF_lAHOC2X95c4BjFGlzhh6zI0",
+    "name": "Parent WS",
+    "options": [
+      {
+        "id": "988ce36a",
+        "name": "ws001"
+      },
+      {
+        "id": "6b244a72",
+        "name": "ws002"
+      },
+      {
+        "id": "7d7c44a2",
+        "name": "ws003"
+      },
+      {
+        "id": "9e2a0658",
+        "name": "ws004"
+      },
+      {
+        "id": "3aff2124",
+        "name": "ws005"
+      },
+      {
+        "id": "de0b0fd6",
+        "name": "ws006"
+      },
+      {
+        "id": "d2eccd9c",
+        "name": "ws007"
+      },
+      {
+        "id": "fe471177",
+        "name": "ws008"
+      },
+      {
+        "id": "106f8fbb",
+        "name": "ws009"
+      },
+      {
+        "id": "350ed3d8",
+        "name": "ws010"
+      },
+      {
+        "id": "c8a54b69",
+        "name": "ws011"
+      },
+      {
+        "id": "a849f2cf",
+        "name": "ws012"
+      },
+      {
+        "id": "1b8ab3de",
+        "name": "ws013"
+      },
+      {
+        "id": "e856bce6",
+        "name": "ws014"
+      },
+      {
+        "id": "0f5aef69",
+        "name": "ws015"
+      },
+      {
+        "id": "64c4397b",
+        "name": "ws016"
+      },
+      {
+        "id": "54f1f0dd",
+        "name": "ws017"
+      },
+      {
+        "id": "d865de9e",
+        "name": "ws018"
+      },
+      {
+        "id": "8f8fc5a0",
+        "name": "ws019"
+      },
+      {
+        "id": "5a37af17",
+        "name": "ws020"
+      },
+      {
+        "id": "dbde310d",
+        "name": "ws021"
+      },
+      {
+        "id": "a2237305",
+        "name": "ws022"
+      },
+      {
+        "id": "8e006128",
+        "name": "ws023"
+      },
+      {
+        "id": "6d6e01bc",
+        "name": "ws024"
+      },
+      {
+        "id": "5bf9767a",
+        "name": "ws025"
+      },
+      {
+        "id": "aa0d9226",
+        "name": "ws026"
+      }
+    ]
+  },
+  {
+    "id": "PVTF_lAHOC2X95c4BjFGlzhh6zJw",
+    "name": "Status Note",
+    "dataType": "TEXT"
+  }
+]

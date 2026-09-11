@@ -1,0 +1,3321 @@
+{
+  "repository": "awemorris/zedBSD",
+  "base_commit": "67b28ce04445787ad9225be4a703e3323587b6f1",
+  "records": {
+    "master": {
+      "path": "plan/master.md",
+      "source_sha256": "eec2e72cb1ab2014416dd842364f09b27a2647a6c3b32a258f7573868198f0f0",
+      "payload": "plan/tmp/github-import/master.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/1",
+      "number": 1,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws001": {
+      "path": "plan/ws001/ws.md",
+      "source_sha256": "7e760aff9d9841e1e92c126fe3a77c6cf82fdf4cfa6760e87cffd0e34ee783e9",
+      "payload": "plan/tmp/github-import/ws001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/2",
+      "number": 2,
+      "continuations": 1,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws002": {
+      "path": "plan/ws002/ws.md",
+      "source_sha256": "7b0920b8cbee2dc38dd44effcb35947467640564eb1b2bacf741cde821c4abf9",
+      "payload": "plan/tmp/github-import/ws002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/3",
+      "number": 3,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws003": {
+      "path": "plan/ws003/ws.md",
+      "source_sha256": "85d2f842eda7f19e78500bed1729dac560068c6140a410a8699afb54f8278fb3",
+      "payload": "plan/tmp/github-import/ws003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/4",
+      "number": 4,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws004": {
+      "path": "plan/ws004/ws.md",
+      "source_sha256": "7ab996b8bd296955c9991b5aaf438abec7245b2fc68dc70f84ac979a2eee5256",
+      "payload": "plan/tmp/github-import/ws004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/5",
+      "number": 5,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws005": {
+      "path": "plan/ws005/ws.md",
+      "source_sha256": "d762740bb40d0974e526896705d3c7f7bfcd59d564e13d76b8544a5a067bcaf0",
+      "payload": "plan/tmp/github-import/ws005.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/6",
+      "number": 6,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws006": {
+      "path": "plan/ws006/ws.md",
+      "source_sha256": "fe94814e9f93b29a9faa79ae66c87c62c9d217f1767bfb87f3048172197b5a99",
+      "payload": "plan/tmp/github-import/ws006.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/7",
+      "number": 7,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws007": {
+      "path": "plan/ws007/ws.md",
+      "source_sha256": "bbd09f2b36122e695c0661534df498980a3f491f800ccc7c8e0235102408242a",
+      "payload": "plan/tmp/github-import/ws007.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/8",
+      "number": 8,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws008": {
+      "path": "plan/ws008/ws.md",
+      "source_sha256": "d0f8dd1b464a82deb4b363a10798df9e66d6782f63fd1f862bdf80e60af7f09b",
+      "payload": "plan/tmp/github-import/ws008.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/9",
+      "number": 9,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws009": {
+      "path": "plan/ws009/ws.md",
+      "source_sha256": "ec69e00faee3ad90ff02a4c1ee8c4038cdf4c84acc5239fb1a015d3a42f0ebc3",
+      "payload": "plan/tmp/github-import/ws009.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/10",
+      "number": 10,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws010": {
+      "path": "plan/ws010/ws.md",
+      "source_sha256": "e6e8ddeed06ade8ac71a087e97dd3025ed26af07d49983b6d33a765df6d7f261",
+      "payload": "plan/tmp/github-import/ws010.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/11",
+      "number": 11,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws011": {
+      "path": "plan/ws011/ws.md",
+      "source_sha256": "14fb9269231ee9313c1a17bbf45f814f03681a453b4d665bac75a8d3522ec71c",
+      "payload": "plan/tmp/github-import/ws011.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/12",
+      "number": 12,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws012": {
+      "path": "plan/ws012/ws.md",
+      "source_sha256": "751a96fbf198ee7ba1944b69bfa0cad1b88dc716689c4527022c388b808d1ca3",
+      "payload": "plan/tmp/github-import/ws012.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/13",
+      "number": 13,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws013": {
+      "path": "plan/ws013/ws.md",
+      "source_sha256": "6746e5c975fa28cce3f89bae32989b524e7577691d84bd107d6278a520ddf866",
+      "payload": "plan/tmp/github-import/ws013.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/14",
+      "number": 14,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws014": {
+      "path": "plan/ws014/ws.md",
+      "source_sha256": "eb01faafbcb470a666a73d5f3d6a0e6d885b153fd1c6cc12ad84c93bdd1fa38b",
+      "payload": "plan/tmp/github-import/ws014.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/15",
+      "number": 15,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws015": {
+      "path": "plan/ws015/ws.md",
+      "source_sha256": "0df05508fb3b6e45d82a20004f30a7e88c97af031a845a45f003f5068b7668a9",
+      "payload": "plan/tmp/github-import/ws015.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/16",
+      "number": 16,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws016": {
+      "path": "plan/ws016/ws.md",
+      "source_sha256": "67a27e48d13fa0d7c3fe13242f8f2f488f00769def70fbb67c9228bca7f4c10c",
+      "payload": "plan/tmp/github-import/ws016.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/17",
+      "number": 17,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws017": {
+      "path": "plan/ws017/ws.md",
+      "source_sha256": "0fe4a289a73d150e754b626fa6d27d8f92e47b556755ee7cd255080a9f1f6579",
+      "payload": "plan/tmp/github-import/ws017.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/18",
+      "number": 18,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws018": {
+      "path": "plan/ws018/ws.md",
+      "source_sha256": "5db3c1b585b0758c1f4db545af53d1225d717cd8c8a04f4ac0931c8b964ec0d0",
+      "payload": "plan/tmp/github-import/ws018.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/19",
+      "number": 19,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws019": {
+      "path": "plan/ws019/ws.md",
+      "source_sha256": "8ae8ee0568886ade247e665ba36e0c1c8f9a1f870ffcbc1bfe9340fc9bbdbe2f",
+      "payload": "plan/tmp/github-import/ws019.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/20",
+      "number": 20,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws020": {
+      "path": "plan/ws020/ws.md",
+      "source_sha256": "3e42c48e4890eec636b41991b30c32d2ba98531486ae279300eb90a57be88751",
+      "payload": "plan/tmp/github-import/ws020.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/21",
+      "number": 21,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws021": {
+      "path": "plan/ws021/ws.md",
+      "source_sha256": "5c1b812a20d07fc60b7969f284abab3f5df257b82ece97adde926e3dfb9f8c0e",
+      "payload": "plan/tmp/github-import/ws021.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/22",
+      "number": 22,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws022": {
+      "path": "plan/ws022/ws.md",
+      "source_sha256": "e839a41261184dffe76945888a508aa7eeccbc8935cebf3cf48df0a32c48018e",
+      "payload": "plan/tmp/github-import/ws022.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/23",
+      "number": 23,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws023": {
+      "path": "plan/ws023/ws.md",
+      "source_sha256": "57687ef8d63553c01b214111f015a0f78570863e8ce3277814f26211b05f29e2",
+      "payload": "plan/tmp/github-import/ws023.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/24",
+      "number": 24,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws024": {
+      "path": "plan/ws024/ws.md",
+      "source_sha256": "4bff8bfcf323b49e6adccb61c2f8a256e28a70fe5068840465dd51b03dc88b92",
+      "payload": "plan/tmp/github-import/ws024.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/25",
+      "number": 25,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws025": {
+      "path": "plan/ws025/ws.md",
+      "source_sha256": "0f603b5f05c0b2245e2d5b3d65bee56afa0ecbe3dfcc0f65f120f62ea5c79315",
+      "payload": "plan/tmp/github-import/ws025.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/26",
+      "number": 26,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws026": {
+      "path": "plan/ws026/ws.md",
+      "source_sha256": "32a7f0a32813fb6004f9fdd2e9303b84c43eff0ca054c578e347b619f6467188",
+      "payload": "plan/tmp/github-import/ws026.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/27",
+      "number": 27,
+      "navigation_updated": false,
+      "verified": true,
+      "navigation_removed": true
+    },
+    "ws001-p000": {
+      "path": "plan/ws001/phase000/phase.md",
+      "source_sha256": "7a2900e89f9aac97794894050e68274715ebb57a9582af12a210a20c35a49070",
+      "payload": "plan/tmp/github-import/ws001-p000.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/28",
+      "number": 28,
+      "verified": true
+    },
+    "ws001-p001": {
+      "path": "plan/ws001/phase001/phase.md",
+      "source_sha256": "30437f3ece2767fe91d7ff339653582ff3e7c914ea6fe2c66ea85a436129e04d",
+      "payload": "plan/tmp/github-import/ws001-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/29",
+      "number": 29,
+      "verified": true
+    },
+    "ws001-p002": {
+      "path": "plan/ws001/phase002/phase.md",
+      "source_sha256": "d048823853451faa3b8360a281cf900c7f2f418589b37cd0a0658f72e55cd982",
+      "payload": "plan/tmp/github-import/ws001-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/30",
+      "number": 30,
+      "verified": true
+    },
+    "ws001-p003": {
+      "path": "plan/ws001/phase003/phase.md",
+      "source_sha256": "a822d671dcf02a4811281e933f1be5ad155710e4ab673c9f864b8be0de80d76b",
+      "payload": "plan/tmp/github-import/ws001-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/31",
+      "number": 31,
+      "verified": true
+    },
+    "ws001-p004": {
+      "path": "plan/ws001/phase004/phase.md",
+      "source_sha256": "913b68bca246e6f0a571403a75279299bd58c1dbc0f485fdc8c3b3c04dc2a16e",
+      "payload": "plan/tmp/github-import/ws001-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/32",
+      "number": 32,
+      "verified": true
+    },
+    "ws001-p005": {
+      "path": "plan/ws001/phase005/phase.md",
+      "source_sha256": "6f77a1e06647e4308b9bdb195865e011b0ac1bffbcf7e36fe39a6f2124b3f801",
+      "payload": "plan/tmp/github-import/ws001-p005.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/33",
+      "number": 33,
+      "verified": true
+    },
+    "ws001-p006": {
+      "path": "plan/ws001/phase006/phase.md",
+      "source_sha256": "0f9547f0355243b1aa4ed28d1dd3799d80b31554782621fda98c3d0ed0e7b0a7",
+      "payload": "plan/tmp/github-import/ws001-p006.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/34",
+      "number": 34,
+      "verified": true
+    },
+    "ws001-p007": {
+      "path": "plan/ws001/phase007/phase.md",
+      "source_sha256": "e3ffd71b25231796265a16879b8ff6928db3ae35a7ccd3ded67ae0420dd7a008",
+      "payload": "plan/tmp/github-import/ws001-p007.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/35",
+      "number": 35,
+      "verified": true
+    },
+    "ws001-p008": {
+      "path": "plan/ws001/phase008/phase.md",
+      "source_sha256": "24226ab843e363088dafb1b2b835e6a0ef3e73dd6bb26c9426d902b32595f32b",
+      "payload": "plan/tmp/github-import/ws001-p008.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/36",
+      "number": 36,
+      "verified": true
+    },
+    "ws001-p009": {
+      "path": "plan/ws001/phase009/phase.md",
+      "source_sha256": "e0b68a129022a2388b31dfb0b0c192b3293754b11c6cf2e07fe3bda26eb01bdf",
+      "payload": "plan/tmp/github-import/ws001-p009.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/37",
+      "number": 37,
+      "verified": true
+    },
+    "ws001-p010": {
+      "path": "plan/ws001/phase010/phase.md",
+      "source_sha256": "1fa832b64a17f8a869d12c8b113923d54d7f3c25012073ca6040395ba1437053",
+      "payload": "plan/tmp/github-import/ws001-p010.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/38",
+      "number": 38,
+      "verified": true
+    },
+    "ws001-p011": {
+      "path": "plan/ws001/phase011/phase.md",
+      "source_sha256": "337ea3040cbd548c8f43c0b6a3df1f65c6dbdf0b9f1159eada52d11ee3bae155",
+      "payload": "plan/tmp/github-import/ws001-p011.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/39",
+      "number": 39,
+      "verified": true
+    },
+    "ws001-p012": {
+      "path": "plan/ws001/phase012/phase.md",
+      "source_sha256": "0a8a92fc16518b961e4e08420bd024b40bd6fdbef24249e59f1641c8300f19d2",
+      "payload": "plan/tmp/github-import/ws001-p012.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/40",
+      "number": 40,
+      "verified": true
+    },
+    "ws001-p013": {
+      "path": "plan/ws001/phase013/phase.md",
+      "source_sha256": "b8615644b9ba22afc44740f55a30b84fca375c2adf98fa245ee30e810cfcfadd",
+      "payload": "plan/tmp/github-import/ws001-p013.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/41",
+      "number": 41,
+      "verified": true
+    },
+    "ws001-p014": {
+      "path": "plan/ws001/phase014/phase.md",
+      "source_sha256": "6e9572015588533ac18f53f36e0ad1b72cb91b133586b3531d541b7be773ee50",
+      "payload": "plan/tmp/github-import/ws001-p014.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/42",
+      "number": 42,
+      "verified": true
+    },
+    "ws001-p015": {
+      "path": "plan/ws001/phase015/phase.md",
+      "source_sha256": "a7ebcd93fcf76280bd9d323ba052e7a7015c8290330bb83b319b0efa8e6d96e1",
+      "payload": "plan/tmp/github-import/ws001-p015.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/43",
+      "number": 43,
+      "verified": true
+    },
+    "ws001-p016": {
+      "path": "plan/ws001/phase016/phase.md",
+      "source_sha256": "efad4102515a536829e1e83e77b618685f5b8b6ab1b6029c07b866157c9581cc",
+      "payload": "plan/tmp/github-import/ws001-p016.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/44",
+      "number": 44,
+      "verified": true
+    },
+    "ws001-p017": {
+      "path": "plan/ws001/phase017/phase.md",
+      "source_sha256": "9656d9f580676f4a971a966d8895058d6c974f4d2dc6f6b8884695d78d82df07",
+      "payload": "plan/tmp/github-import/ws001-p017.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/45",
+      "number": 45,
+      "verified": true
+    },
+    "ws001-p018": {
+      "path": "plan/ws001/phase018/phase.md",
+      "source_sha256": "d8b44b53215aa7f5e61f93ef43fe101344988125504c9b17f777b58769582fa9",
+      "payload": "plan/tmp/github-import/ws001-p018.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/46",
+      "number": 46,
+      "verified": true
+    },
+    "ws001-p019": {
+      "path": "plan/ws001/phase019/phase.md",
+      "source_sha256": "eba1fed1aaa736747d9994cdabdccf7a443b76e9a0c750554c11e5ea57b19e8e",
+      "payload": "plan/tmp/github-import/ws001-p019.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/47",
+      "number": 47,
+      "verified": true
+    },
+    "ws001-p020": {
+      "path": "plan/ws001/phase020/phase.md",
+      "source_sha256": "6374c32abfed76f598111184e8eef1f4a2bd81d05c710f7785c86bcdd06daf8b",
+      "payload": "plan/tmp/github-import/ws001-p020.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/48",
+      "number": 48,
+      "verified": true
+    },
+    "ws001-p021": {
+      "path": "plan/ws001/phase021/phase.md",
+      "source_sha256": "d4ccbaa9172a84bb175a70a038f9c586ea2d670094d17d9d263a6f6018d46155",
+      "payload": "plan/tmp/github-import/ws001-p021.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/49",
+      "number": 49,
+      "verified": true
+    },
+    "ws001-p022": {
+      "path": "plan/ws001/phase022/phase.md",
+      "source_sha256": "5286bbdc117412a46334bb447d69962b74ab5feb81b104b0ac52e417d9d369a6",
+      "payload": "plan/tmp/github-import/ws001-p022.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/50",
+      "number": 50,
+      "verified": true
+    },
+    "ws001-p023": {
+      "path": "plan/ws001/phase023/phase.md",
+      "source_sha256": "905ae400db392b2c2127929e18b592c70b986f9381070de6b378029c537df7b6",
+      "payload": "plan/tmp/github-import/ws001-p023.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/51",
+      "number": 51,
+      "verified": true
+    },
+    "ws001-p085": {
+      "path": "plan/ws001/phase085/phase.md",
+      "source_sha256": "bd11e76709b8e62d53e9ed34cbe4a25d478e52de78438078bb9502649e2924f5",
+      "payload": "plan/tmp/github-import/ws001-p085.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/52",
+      "number": 52,
+      "verified": true
+    },
+    "ws002-p011": {
+      "path": "plan/ws002/phase011/phase.md",
+      "source_sha256": "cf3b49512aa6cd70f59d77b0eedac58cb57dcca17fd00efa55ded4fe57941df8",
+      "payload": "plan/tmp/github-import/ws002-p011.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/53",
+      "number": 53,
+      "verified": true
+    },
+    "ws002-p012": {
+      "path": "plan/ws002/phase012/phase.md",
+      "source_sha256": "1a4416c085ff71e82abf761be4525bc912aa30ca09db59859245388b1039a2ed",
+      "payload": "plan/tmp/github-import/ws002-p012.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/54",
+      "number": 54,
+      "verified": true
+    },
+    "ws002-p013": {
+      "path": "plan/ws002/phase013/phase.md",
+      "source_sha256": "dcad0c34f6b775985fb3370efc52e6b5addcc23bf52a6b16d73cc81ce862d04f",
+      "payload": "plan/tmp/github-import/ws002-p013.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/55",
+      "number": 55,
+      "verified": true
+    },
+    "ws002-p014": {
+      "path": "plan/ws002/phase014/phase.md",
+      "source_sha256": "9956354c3e79d972cd915ff53c9c86993b550d86ef35fc9c35534acf7780f034",
+      "payload": "plan/tmp/github-import/ws002-p014.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/56",
+      "number": 56,
+      "verified": true
+    },
+    "ws002-p015": {
+      "path": "plan/ws002/phase015/phase.md",
+      "source_sha256": "9162e78dbac870e5c447ec867ad35e8c52d3aa8cf4377460d4944d25e6e9b849",
+      "payload": "plan/tmp/github-import/ws002-p015.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/57",
+      "number": 57,
+      "verified": true
+    },
+    "ws002-p016": {
+      "path": "plan/ws002/phase016/phase.md",
+      "source_sha256": "bd1a90c884cfc7ec285e5588519650af6c47ced682ceed1495a614a3c9dd5511",
+      "payload": "plan/tmp/github-import/ws002-p016.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/58",
+      "number": 58,
+      "verified": true
+    },
+    "ws002-p017": {
+      "path": "plan/ws002/phase017/phase.md",
+      "source_sha256": "c445dd6ceea44fa3afd9a61c32089675f9023b15e8282a443c461c929c48372f",
+      "payload": "plan/tmp/github-import/ws002-p017.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/59",
+      "number": 59,
+      "verified": true
+    },
+    "ws002-p018": {
+      "path": "plan/ws002/phase018/phase.md",
+      "source_sha256": "dab7a525e0004f365b259b5c6b0787cc2db9b84c985c105f8972bb40e4e0c638",
+      "payload": "plan/tmp/github-import/ws002-p018.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/60",
+      "number": 60,
+      "verified": true
+    },
+    "ws002-p019": {
+      "path": "plan/ws002/phase019/phase.md",
+      "source_sha256": "a8652817bc92085bb2110b647cfd941287709504c0bdd52036f3483623ebf4c4",
+      "payload": "plan/tmp/github-import/ws002-p019.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/61",
+      "number": 61,
+      "verified": true
+    },
+    "ws002-p020": {
+      "path": "plan/ws002/phase020/phase.md",
+      "source_sha256": "fc63bc2cbeee2ad904b127b803f416c0bbbc7f089f62b61f6b401313297f4b77",
+      "payload": "plan/tmp/github-import/ws002-p020.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/62",
+      "number": 62,
+      "verified": true
+    },
+    "ws002-p021": {
+      "path": "plan/ws002/phase021/phase.md",
+      "source_sha256": "ce2e9f9ec7cf7ab1fb8f7881f563f6f2739bcc31718722ce7cb850040e7fc54c",
+      "payload": "plan/tmp/github-import/ws002-p021.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/63",
+      "number": 63,
+      "verified": true
+    },
+    "ws002-p022": {
+      "path": "plan/ws002/phase022/phase.md",
+      "source_sha256": "2990331b58442707b76b000131d82f8fd3a5b79c5e5a82c7496b1d2abf91a3b6",
+      "payload": "plan/tmp/github-import/ws002-p022.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/64",
+      "number": 64,
+      "verified": true
+    },
+    "ws002-p023": {
+      "path": "plan/ws002/phase023/phase.md",
+      "source_sha256": "f1c420f9b9e2416b59b6023f06914eece9ffcf687f0ac7d8e3697a44922b718b",
+      "payload": "plan/tmp/github-import/ws002-p023.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/65",
+      "number": 65,
+      "verified": true
+    },
+    "ws002-p024": {
+      "path": "plan/ws002/phase024/phase.md",
+      "source_sha256": "d65e7ce9e2c4b6c3825db11c67e8386977b20b68e4e8d6616a20cda8ab076713",
+      "payload": "plan/tmp/github-import/ws002-p024.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/66",
+      "number": 66,
+      "verified": true
+    },
+    "ws003-p001": {
+      "path": "plan/ws003/phase001/phase.md",
+      "source_sha256": "b351093a62708c9d989e19fc47591ea5ea892bfe8c91052403f8ccad765089a8",
+      "payload": "plan/tmp/github-import/ws003-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/67",
+      "number": 67,
+      "verified": true
+    },
+    "ws003-p002": {
+      "path": "plan/ws003/phase002/phase.md",
+      "source_sha256": "254ff2df9a5d97b9be7eba104eea60f46d4b292451d76137c58897ddb39b31ba",
+      "payload": "plan/tmp/github-import/ws003-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/68",
+      "number": 68,
+      "verified": true
+    },
+    "ws003-p003": {
+      "path": "plan/ws003/phase003/phase.md",
+      "source_sha256": "43b945d154d05951122b679dff8b29afce042c48b0d33fa9abc498e3b0f6f138",
+      "payload": "plan/tmp/github-import/ws003-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/69",
+      "number": 69,
+      "verified": true
+    },
+    "ws003-p004": {
+      "path": "plan/ws003/phase004/phase.md",
+      "source_sha256": "44b06d1a498e75c083461664ccd9d04a0f01508b8252024c01dca35c3e8e3c5a",
+      "payload": "plan/tmp/github-import/ws003-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/70",
+      "number": 70,
+      "verified": true
+    },
+    "ws003-p005": {
+      "path": "plan/ws003/phase005/phase.md",
+      "source_sha256": "09aba1c8456eb498f96ac9be1f98f739ca4e938a08c55e424e274adb258a21c8",
+      "payload": "plan/tmp/github-import/ws003-p005.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/71",
+      "number": 71,
+      "verified": true
+    },
+    "ws003-p006": {
+      "path": "plan/ws003/phase006/phase.md",
+      "source_sha256": "eb17929e6f835ebd2dd02a8b6ae0436b2e6ae725f7c2dc85def58d402a18560e",
+      "payload": "plan/tmp/github-import/ws003-p006.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/72",
+      "number": 72,
+      "verified": true
+    },
+    "ws003-p007": {
+      "path": "plan/ws003/phase007/phase.md",
+      "source_sha256": "e9200072af9c9ef4690ea1ad7e6e0806e890500912938e1d16fa4bedae7711d0",
+      "payload": "plan/tmp/github-import/ws003-p007.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/73",
+      "number": 73,
+      "verified": true
+    },
+    "ws003-p008": {
+      "path": "plan/ws003/phase008/phase.md",
+      "source_sha256": "15a8bb68280fbef504790cc04fbeeea6a53c5f55ef5fed1a0428c143569d7d6a",
+      "payload": "plan/tmp/github-import/ws003-p008.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/74",
+      "number": 74,
+      "verified": true
+    },
+    "ws003-p009": {
+      "path": "plan/ws003/phase009/phase.md",
+      "source_sha256": "312e6508a606a09b98a534674cefe1481c8228d2539d399e4b0916b857843653",
+      "payload": "plan/tmp/github-import/ws003-p009.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/75",
+      "number": 75,
+      "verified": true
+    },
+    "ws003-p010": {
+      "path": "plan/ws003/phase010/phase.md",
+      "source_sha256": "34c173cbd3f8b17e910e42d68a8c17b741599595e4b8d57a07246d3c3d24af15",
+      "payload": "plan/tmp/github-import/ws003-p010.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/76",
+      "number": 76,
+      "verified": true
+    },
+    "ws003-p011": {
+      "path": "plan/ws003/phase011/phase.md",
+      "source_sha256": "286437b98f6c1a4c1648aa0f9545f9496f15c8b4d648ca9071e664b55fdaf7a3",
+      "payload": "plan/tmp/github-import/ws003-p011.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/77",
+      "number": 77,
+      "verified": true
+    },
+    "ws003-p012": {
+      "path": "plan/ws003/phase012/phase.md",
+      "source_sha256": "93eb90a2d702437078f0ee77dff430b6bf13c2c540ab3157d789331f7f4a8ab6",
+      "payload": "plan/tmp/github-import/ws003-p012.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/78",
+      "number": 78,
+      "verified": true
+    },
+    "ws003-p013": {
+      "path": "plan/ws003/phase013/phase.md",
+      "source_sha256": "b7e9c8ef0b3c5a7142b3ff1643f2a0a505322918f158d20b45f89867c763ae11",
+      "payload": "plan/tmp/github-import/ws003-p013.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/79",
+      "number": 79,
+      "verified": true
+    },
+    "ws003-p014": {
+      "path": "plan/ws003/phase014/phase.md",
+      "source_sha256": "cf4afbcaefce9161956858668bc30cd73c373496fa1729343d20fcf9c39b8928",
+      "payload": "plan/tmp/github-import/ws003-p014.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/80",
+      "number": 80,
+      "verified": true
+    },
+    "ws003-p015": {
+      "path": "plan/ws003/phase015/phase.md",
+      "source_sha256": "f31794e13006036801c48b7956f8134300ce11cdb1bdd795fba566a9fb714556",
+      "payload": "plan/tmp/github-import/ws003-p015.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/81",
+      "number": 81,
+      "verified": true
+    },
+    "ws003-p016": {
+      "path": "plan/ws003/phase016/phase.md",
+      "source_sha256": "a4af2c193f60376048bb9d74c487bdee1504219d7f45e19d6346e6d26c84d257",
+      "payload": "plan/tmp/github-import/ws003-p016.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/82",
+      "number": 82,
+      "verified": true
+    },
+    "ws003-p017": {
+      "path": "plan/ws003/phase017/phase.md",
+      "source_sha256": "5576e517d2ae095bc0975e25c0b51ffb1a2ef8d84a25d28431fc332e050a8502",
+      "payload": "plan/tmp/github-import/ws003-p017.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/83",
+      "number": 83,
+      "verified": true
+    },
+    "ws003-p018": {
+      "path": "plan/ws003/phase018/phase.md",
+      "source_sha256": "b2cdb38de14ddbf10aea31987b1238f9b3375ccaf5ff494b5153329c8d5b0f94",
+      "payload": "plan/tmp/github-import/ws003-p018.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/84",
+      "number": 84,
+      "verified": true
+    },
+    "ws003-p019": {
+      "path": "plan/ws003/phase019/phase.md",
+      "source_sha256": "f34f2ea1aa46a74b2e450777e35cec17ea5165ca5905b29d77eccf9beda862f4",
+      "payload": "plan/tmp/github-import/ws003-p019.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/85",
+      "number": 85,
+      "verified": true
+    },
+    "ws003-p020": {
+      "path": "plan/ws003/phase020/phase.md",
+      "source_sha256": "6a431a8a40e33dec65552ed1c3d510624aac6afd14dac4f36ec940b9fd61737b",
+      "payload": "plan/tmp/github-import/ws003-p020.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/86",
+      "number": 86,
+      "verified": true
+    },
+    "ws003-p021": {
+      "path": "plan/ws003/phase021/phase.md",
+      "source_sha256": "daecb0471146de95c21772522e83a75ddd4c3afca4fe48068c1d7421b20feea6",
+      "payload": "plan/tmp/github-import/ws003-p021.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/87",
+      "number": 87,
+      "verified": true
+    },
+    "ws003-p022": {
+      "path": "plan/ws003/phase022/phase.md",
+      "source_sha256": "7ff21679a38bf096f6784511cc6e58be00b356bfeca0b887262e420b0f3f010c",
+      "payload": "plan/tmp/github-import/ws003-p022.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/88",
+      "number": 88,
+      "verified": true
+    },
+    "ws003-p023": {
+      "path": "plan/ws003/phase023/phase.md",
+      "source_sha256": "1ffde6f7e3d49ac8d90a63651a355e3a38c2ad807cf5d100f87ee2f9779cd9e2",
+      "payload": "plan/tmp/github-import/ws003-p023.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/89",
+      "number": 89,
+      "verified": true
+    },
+    "ws003-p024": {
+      "path": "plan/ws003/phase024/phase.md",
+      "source_sha256": "c7ea7806cfd378f16ed563b2685ee91a686cf93cd0ed4dedb39aa935362d455e",
+      "payload": "plan/tmp/github-import/ws003-p024.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/90",
+      "number": 90,
+      "verified": true
+    },
+    "ws003-p025": {
+      "path": "plan/ws003/phase025/phase.md",
+      "source_sha256": "412e2cedbb68755680c280cb1bf2564d1cfcd31bd603c2e754e896e1acfd627b",
+      "payload": "plan/tmp/github-import/ws003-p025.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/91",
+      "number": 91,
+      "verified": true
+    },
+    "ws004-p001": {
+      "path": "plan/ws004/phase001/phase.md",
+      "source_sha256": "114ddc15a9894dc1513210a9c05a75f5c0a9c8ab3691057f9f17c6c6d11fbcc5",
+      "payload": "plan/tmp/github-import/ws004-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/92",
+      "number": 92,
+      "verified": true
+    },
+    "ws004-p002": {
+      "path": "plan/ws004/phase002/phase.md",
+      "source_sha256": "32ee57523f09f271eb98cc7e98f903d0e9b24c2b87cad89595f89bbab32906e7",
+      "payload": "plan/tmp/github-import/ws004-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/93",
+      "number": 93,
+      "verified": true
+    },
+    "ws004-p003": {
+      "path": "plan/ws004/phase003/phase.md",
+      "source_sha256": "2d9c4377330c7410bca519e4c93ab6516d5dcf2b160902c4fb89f5f2b3dbd816",
+      "payload": "plan/tmp/github-import/ws004-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/94",
+      "number": 94,
+      "verified": true
+    },
+    "ws004-p004": {
+      "path": "plan/ws004/phase004/phase.md",
+      "source_sha256": "01666766a883042b81a39b607708133c84b8f732cb774776cd80beb2b61c4548",
+      "payload": "plan/tmp/github-import/ws004-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/95",
+      "number": 95,
+      "verified": true
+    },
+    "ws004-p005": {
+      "path": "plan/ws004/phase005/phase.md",
+      "source_sha256": "55ed8487b7fa95b2a55ebad6e354495660b66b0b877d248f9a53a3f87f7b9d54",
+      "payload": "plan/tmp/github-import/ws004-p005.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/96",
+      "number": 96,
+      "verified": true
+    },
+    "ws004-p006": {
+      "path": "plan/ws004/phase006/phase.md",
+      "source_sha256": "7a7e48d82df0c1c331a58fbc164a1cca2176fc6cadf0f1a7472889f8b9626923",
+      "payload": "plan/tmp/github-import/ws004-p006.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/97",
+      "number": 97,
+      "verified": true
+    },
+    "ws004-p007": {
+      "path": "plan/ws004/phase007/phase.md",
+      "source_sha256": "828df1408cf4383d09f8497f110c0d35664f2826fbf4c5a6afd5d68d054ce9ba",
+      "payload": "plan/tmp/github-import/ws004-p007.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/98",
+      "number": 98,
+      "verified": true
+    },
+    "ws004-p008": {
+      "path": "plan/ws004/phase008/phase.md",
+      "source_sha256": "345ea89ae26bc5d2f46973d0e7000bc4e8da630983c65f2f6e88034f5e1c4d56",
+      "payload": "plan/tmp/github-import/ws004-p008.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/99",
+      "number": 99,
+      "verified": true
+    },
+    "ws004-p009": {
+      "path": "plan/ws004/phase009/phase.md",
+      "source_sha256": "510b96f8eb61086167cacf9385b6c1426a6c670139a709197073d1532b368e3d",
+      "payload": "plan/tmp/github-import/ws004-p009.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/100",
+      "number": 100,
+      "verified": true
+    },
+    "ws004-p010": {
+      "path": "plan/ws004/phase010/phase.md",
+      "source_sha256": "6843343b26955771e1c406d12e6337344dee6eea410cf1e33202b5231a8cf7cb",
+      "payload": "plan/tmp/github-import/ws004-p010.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/101",
+      "number": 101,
+      "verified": true
+    },
+    "ws004-p011": {
+      "path": "plan/ws004/phase011/phase.md",
+      "source_sha256": "5baa415c558ce76e5dcbe8b0c0fb0304f53f8b8e8acd63f715e716ee194731e4",
+      "payload": "plan/tmp/github-import/ws004-p011.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/102",
+      "number": 102,
+      "verified": true
+    },
+    "ws004-p012": {
+      "path": "plan/ws004/phase012/phase.md",
+      "source_sha256": "adf434c1a11a5ea547b5b2659c13499676f9a2eea949801c5800060916aae70b",
+      "payload": "plan/tmp/github-import/ws004-p012.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/103",
+      "number": 103,
+      "verified": true
+    },
+    "ws004-p013": {
+      "path": "plan/ws004/phase013/phase.md",
+      "source_sha256": "dc907c6fa9ecc984f9da30d2de3f25d41857fab45782a335279f007e8b76cb3c",
+      "payload": "plan/tmp/github-import/ws004-p013.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/104",
+      "number": 104,
+      "verified": true
+    },
+    "ws004-p014": {
+      "path": "plan/ws004/phase014/phase.md",
+      "source_sha256": "2acb137805c47f0980c055bb2556356b98e35dbd6f2f72b355acd594b50883a6",
+      "payload": "plan/tmp/github-import/ws004-p014.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/105",
+      "number": 105,
+      "verified": true
+    },
+    "ws004-p015": {
+      "path": "plan/ws004/phase015/phase.md",
+      "source_sha256": "97601c860431861ec6b434d9fcfcbb60c5e3c20d0aec2cff779b29b990337313",
+      "payload": "plan/tmp/github-import/ws004-p015.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/106",
+      "number": 106,
+      "verified": true
+    },
+    "ws004-p016": {
+      "path": "plan/ws004/phase016/phase.md",
+      "source_sha256": "b8763d8ac7095d6e18878399cd86f87e2acd72af6912b8921a8926b2f159bb89",
+      "payload": "plan/tmp/github-import/ws004-p016.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/107",
+      "number": 107,
+      "verified": true
+    },
+    "ws004-p017": {
+      "path": "plan/ws004/phase017/phase.md",
+      "source_sha256": "7e624a0c25278828184d342e4edd8fae562e14c3d78733b9b84ed5e286db1638",
+      "payload": "plan/tmp/github-import/ws004-p017.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/108",
+      "number": 108,
+      "verified": true
+    },
+    "ws004-p018": {
+      "path": "plan/ws004/phase018/phase.md",
+      "source_sha256": "248181e00b4c7f74f82b552c8b16131fec12419b499f6f654cbd992cbd86d09a",
+      "payload": "plan/tmp/github-import/ws004-p018.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/109",
+      "number": 109,
+      "verified": true
+    },
+    "ws004-p019": {
+      "path": "plan/ws004/phase019/phase.md",
+      "source_sha256": "4a71d6dec22a70e54ffa8d3f6996b91464d7592be147ddea057cf9d50a63ad3e",
+      "payload": "plan/tmp/github-import/ws004-p019.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/110",
+      "number": 110,
+      "verified": true
+    },
+    "ws004-p020": {
+      "path": "plan/ws004/phase020/phase.md",
+      "source_sha256": "6b8bd5dfed1d7bbd55ed2b3f021b0ef6b022b3386a459825e3084bfaafe34a4b",
+      "payload": "plan/tmp/github-import/ws004-p020.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/111",
+      "number": 111,
+      "verified": true
+    },
+    "ws004-p021": {
+      "path": "plan/ws004/phase021/phase.md",
+      "source_sha256": "70e5396711b2ed69361fc1a785b81c1f9226fd3f19452fd48251a8d5889db5ec",
+      "payload": "plan/tmp/github-import/ws004-p021.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/112",
+      "number": 112,
+      "verified": true
+    },
+    "ws004-p022": {
+      "path": "plan/ws004/phase022/phase.md",
+      "source_sha256": "31cb0f2573dbab82a8c023888f4bd71fb1d6cd3326b93c186fecaedc102448ff",
+      "payload": "plan/tmp/github-import/ws004-p022.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/113",
+      "number": 113,
+      "verified": true
+    },
+    "ws004-p023": {
+      "path": "plan/ws004/phase023/phase.md",
+      "source_sha256": "a4e683d68a345738df764a65cf052ae52597c8c72792d58055709a8cadf62e5b",
+      "payload": "plan/tmp/github-import/ws004-p023.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/114",
+      "number": 114,
+      "verified": true
+    },
+    "ws004-p024": {
+      "path": "plan/ws004/phase024/phase.md",
+      "source_sha256": "d9f76def590ab237ea8e4090e90f6e34e8d1265195dc452a00a314c6ffd2e768",
+      "payload": "plan/tmp/github-import/ws004-p024.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/115",
+      "number": 115,
+      "verified": true
+    },
+    "ws004-p025": {
+      "path": "plan/ws004/phase025/phase.md",
+      "source_sha256": "84c274a887e7c677ff7218894fd4cf0282b11fb007f795175853170ce04043ac",
+      "payload": "plan/tmp/github-import/ws004-p025.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/116",
+      "number": 116,
+      "verified": true
+    },
+    "ws004-p026": {
+      "path": "plan/ws004/phase026/phase.md",
+      "source_sha256": "923ab774d13e757d9129de1ff7a3034d097d68d0ba3853869d2a86f9accf6c19",
+      "payload": "plan/tmp/github-import/ws004-p026.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/117",
+      "number": 117,
+      "verified": true
+    },
+    "ws004-p027": {
+      "path": "plan/ws004/phase027/phase.md",
+      "source_sha256": "008f575a957d04f3f115abccf6b86051792d1d4237b954d0a37ebc5b2609fec1",
+      "payload": "plan/tmp/github-import/ws004-p027.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/118",
+      "number": 118,
+      "verified": true
+    },
+    "ws004-p028": {
+      "path": "plan/ws004/phase028/phase.md",
+      "source_sha256": "06c1e9cc92ec1bb4bb710a14156cfc46b954963c704c0777276a5c7a7b41507b",
+      "payload": "plan/tmp/github-import/ws004-p028.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/119",
+      "number": 119,
+      "verified": true
+    },
+    "ws004-p029": {
+      "path": "plan/ws004/phase029/phase.md",
+      "source_sha256": "8a9aea534e3ce35ca434ffef7419e427850d85bba71f062a7e2d1cff316c44dd",
+      "payload": "plan/tmp/github-import/ws004-p029.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/120",
+      "number": 120,
+      "verified": true
+    },
+    "ws004-p030": {
+      "path": "plan/ws004/phase030/phase.md",
+      "source_sha256": "c5b362df1e6c5e51b9dca05d49c9839fd718e590b75caebaf543d5823092f0ff",
+      "payload": "plan/tmp/github-import/ws004-p030.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/121",
+      "number": 121,
+      "verified": true
+    },
+    "ws004-p031": {
+      "path": "plan/ws004/phase031/phase.md",
+      "source_sha256": "8778cb47b36be59f3218632b4d3fd6d51b07323c05e7446a3398e69815edb49e",
+      "payload": "plan/tmp/github-import/ws004-p031.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/122",
+      "number": 122,
+      "verified": true
+    },
+    "ws004-p032": {
+      "path": "plan/ws004/phase032/phase.md",
+      "source_sha256": "1ee89d61a83862dc6b0c4b1fc5b2a670479c6a32fb611b489aed735e93401f09",
+      "payload": "plan/tmp/github-import/ws004-p032.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/123",
+      "number": 123,
+      "verified": true
+    },
+    "ws004-p033": {
+      "path": "plan/ws004/phase033/phase.md",
+      "source_sha256": "8e70d2199c5991d6f728bcc80f1b5daac8e0ca8ed00bc2a96cc12837adea8369",
+      "payload": "plan/tmp/github-import/ws004-p033.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/124",
+      "number": 124,
+      "verified": true
+    },
+    "ws004-p034": {
+      "path": "plan/ws004/phase034/phase.md",
+      "source_sha256": "69aecf107129a3753b426322a9360d0e963a1e22088430eafae0ef5de292ebd1",
+      "payload": "plan/tmp/github-import/ws004-p034.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/125",
+      "number": 125,
+      "verified": true
+    },
+    "ws004-p035": {
+      "path": "plan/ws004/phase035/phase.md",
+      "source_sha256": "1d3020c8e6a052d6af21ece39ea7e1972211988e3219757420603869448f2b50",
+      "payload": "plan/tmp/github-import/ws004-p035.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/126",
+      "number": 126,
+      "verified": true
+    },
+    "ws004-p036": {
+      "path": "plan/ws004/phase036/phase.md",
+      "source_sha256": "b6c9cf8d08ea63b181b824c63e09c7465951b6806bdca05d70b66a41c8f78971",
+      "payload": "plan/tmp/github-import/ws004-p036.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/127",
+      "number": 127,
+      "verified": true
+    },
+    "ws004-p037": {
+      "path": "plan/ws004/phase037/phase.md",
+      "source_sha256": "8481287d0029abd78e599ce61e7cc11493971e2a4abd9fb6b50521339e40475d",
+      "payload": "plan/tmp/github-import/ws004-p037.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/128",
+      "number": 128,
+      "verified": true
+    },
+    "ws004-p038": {
+      "path": "plan/ws004/phase038/phase.md",
+      "source_sha256": "d464d52111fe696c52ddec2dcc15e05cf21c832e4a052b4cecca56017f699ad1",
+      "payload": "plan/tmp/github-import/ws004-p038.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/129",
+      "number": 129,
+      "verified": true
+    },
+    "ws004-p039": {
+      "path": "plan/ws004/phase039/phase.md",
+      "source_sha256": "584a05d03a4fd400bff7c46ded7ce2cab250625e3339b84a6cf65ef231b77fe9",
+      "payload": "plan/tmp/github-import/ws004-p039.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/130",
+      "number": 130,
+      "verified": true
+    },
+    "ws004-p040": {
+      "path": "plan/ws004/phase040/phase.md",
+      "source_sha256": "4a00f1e627c238286f3597c1f30256596f8da53aa913be86a9ca1b5ead11678a",
+      "payload": "plan/tmp/github-import/ws004-p040.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/131",
+      "number": 131,
+      "verified": true
+    },
+    "ws004-p041": {
+      "path": "plan/ws004/phase041/phase.md",
+      "source_sha256": "459223a489822c15d29d5e169eb4c5970e1a4230e4d7842b849dc503202158f2",
+      "payload": "plan/tmp/github-import/ws004-p041.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/132",
+      "number": 132,
+      "verified": true
+    },
+    "ws004-p042": {
+      "path": "plan/ws004/phase042/phase.md",
+      "source_sha256": "758eb284b7be47196231f4bae3573bd6b389e6b658673e5826a0451e33b8bea9",
+      "payload": "plan/tmp/github-import/ws004-p042.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/133",
+      "number": 133,
+      "verified": true
+    },
+    "ws004-p043": {
+      "path": "plan/ws004/phase043/phase.md",
+      "source_sha256": "0f82bdd5230248c2133bc9205f9f6c60c13e793c6e76db6c471496b491516b45",
+      "payload": "plan/tmp/github-import/ws004-p043.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/134",
+      "number": 134,
+      "verified": true
+    },
+    "ws004-p044": {
+      "path": "plan/ws004/phase044/phase.md",
+      "source_sha256": "836e713c07e5ce31a653dac0cd55cf1349b3aef3d2c017f462aa82179a3366a3",
+      "payload": "plan/tmp/github-import/ws004-p044.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/135",
+      "number": 135,
+      "verified": true
+    },
+    "ws004-p045": {
+      "path": "plan/ws004/phase045/phase.md",
+      "source_sha256": "d4af1f3a8c157ca3027028029413f37164a1158de07798a2abd29337ffb1965d",
+      "payload": "plan/tmp/github-import/ws004-p045.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/136",
+      "number": 136,
+      "verified": true
+    },
+    "ws004-p046": {
+      "path": "plan/ws004/phase046/phase.md",
+      "source_sha256": "8cb05739df2cfcbe5a3c90b07e9329b79a7713fa36aab16e43f48308312d6ea5",
+      "payload": "plan/tmp/github-import/ws004-p046.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/137",
+      "number": 137,
+      "verified": true
+    },
+    "ws004-p047": {
+      "path": "plan/ws004/phase047/phase.md",
+      "source_sha256": "b59c72690a42a2ea6872ea610fb558153a944666de7c10725bf31c8954726720",
+      "payload": "plan/tmp/github-import/ws004-p047.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/138",
+      "number": 138,
+      "verified": true
+    },
+    "ws004-p048": {
+      "path": "plan/ws004/phase048/phase.md",
+      "source_sha256": "f0895ca424a6f97a6ebe623f27c5acee57f09fd9602709ac5577859734f1b33a",
+      "payload": "plan/tmp/github-import/ws004-p048.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/139",
+      "number": 139,
+      "verified": true
+    },
+    "ws004-p049": {
+      "path": "plan/ws004/phase049/phase.md",
+      "source_sha256": "788418b37261921e95b638992b2e699c4eb10ca476b69cef07780f23800f9557",
+      "payload": "plan/tmp/github-import/ws004-p049.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/140",
+      "number": 140,
+      "verified": true
+    },
+    "ws004-p050": {
+      "path": "plan/ws004/phase050/phase.md",
+      "source_sha256": "1fb8f9c62a5c9f6ee3f9200ebd83929f531328413df57b6cacbdcee2ad4f463b",
+      "payload": "plan/tmp/github-import/ws004-p050.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/141",
+      "number": 141,
+      "verified": true
+    },
+    "ws005-p001": {
+      "path": "plan/ws005/phase001/phase.md",
+      "source_sha256": "c8304cfde05d290280538142e8718066502774d31033f62c2efc3ae1ac11ee8d",
+      "payload": "plan/tmp/github-import/ws005-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/142",
+      "number": 142,
+      "verified": true
+    },
+    "ws005-p002": {
+      "path": "plan/ws005/phase002/phase.md",
+      "source_sha256": "7a6a2aabb4e58678041e5463e6f4520a560d1ac2d62a401ef4df2bbabf7bd69f",
+      "payload": "plan/tmp/github-import/ws005-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/143",
+      "number": 143,
+      "verified": true
+    },
+    "ws005-p003": {
+      "path": "plan/ws005/phase003/phase.md",
+      "source_sha256": "ac57f12c9bc14015bbeec77f57af9330d8d511bc938a38b1d5c8a78ae5685d97",
+      "payload": "plan/tmp/github-import/ws005-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/144",
+      "number": 144,
+      "verified": true
+    },
+    "ws005-p004": {
+      "path": "plan/ws005/phase004/phase.md",
+      "source_sha256": "d666d4b215f7d75059f86afff1d87a1cfcffcc05359bcd47bb29efaf2aeeb1f8",
+      "payload": "plan/tmp/github-import/ws005-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/145",
+      "number": 145,
+      "verified": true
+    },
+    "ws005-p005": {
+      "path": "plan/ws005/phase005/phase.md",
+      "source_sha256": "94276bd941c163497c0e34417c8f906ad8dca3b5e1641afb4816d8f4080e7560",
+      "payload": "plan/tmp/github-import/ws005-p005.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/146",
+      "number": 146,
+      "verified": true
+    },
+    "ws005-p006": {
+      "path": "plan/ws005/phase006/phase.md",
+      "source_sha256": "0dd812215f6c9ea26da95f6836b7e2e2c6722383cef5465d420ce9971c5c70ab",
+      "payload": "plan/tmp/github-import/ws005-p006.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/147",
+      "number": 147,
+      "verified": true
+    },
+    "ws005-p007": {
+      "path": "plan/ws005/phase007/phase.md",
+      "source_sha256": "f3e20dda3ad2a44bda7a9ef98470ffd7548ac112fc8afb853aa3da12ae8b2a90",
+      "payload": "plan/tmp/github-import/ws005-p007.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/148",
+      "number": 148,
+      "verified": true
+    },
+    "ws005-p008": {
+      "path": "plan/ws005/phase008/phase.md",
+      "source_sha256": "40b1b7e5dc6306752e4f99a6606b9cd723b7a443519d8f41aa6016e1e3df12ae",
+      "payload": "plan/tmp/github-import/ws005-p008.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/149",
+      "number": 149,
+      "verified": true
+    },
+    "ws005-p009": {
+      "path": "plan/ws005/phase009/phase.md",
+      "source_sha256": "7cd02f3d12b61309a8b8f09e857d6f47260e65ed8313861cb1c3af6e15ecfd45",
+      "payload": "plan/tmp/github-import/ws005-p009.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/150",
+      "number": 150,
+      "verified": true
+    },
+    "ws005-p010": {
+      "path": "plan/ws005/phase010/phase.md",
+      "source_sha256": "ca5231523b9ad4436f1c0317faa14e2e33e48acc186ebb06df61a645d9a9be06",
+      "payload": "plan/tmp/github-import/ws005-p010.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/151",
+      "number": 151,
+      "verified": true
+    },
+    "ws005-p011": {
+      "path": "plan/ws005/phase011/phase.md",
+      "source_sha256": "94be3a2e5f22120394d5bcd27da74fa0fdd8fb079d07a2692c53fa3e55e72d49",
+      "payload": "plan/tmp/github-import/ws005-p011.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/152",
+      "number": 152,
+      "verified": true
+    },
+    "ws005-p012": {
+      "path": "plan/ws005/phase012/phase.md",
+      "source_sha256": "766bb3364242519af3565f2b07616104d5f14fa1e0cb437634a0a800f3d09e56",
+      "payload": "plan/tmp/github-import/ws005-p012.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/153",
+      "number": 153,
+      "verified": true
+    },
+    "ws006-p001": {
+      "path": "plan/ws006/phase001/phase.md",
+      "source_sha256": "ed19e53689163142f050ab55b5a62284b905d59b39816ba7fe093ca52f6e9fab",
+      "payload": "plan/tmp/github-import/ws006-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/154",
+      "number": 154,
+      "verified": true
+    },
+    "ws006-p002": {
+      "path": "plan/ws006/phase002/phase.md",
+      "source_sha256": "d91b4a1ac544e1515a1ae4af67f02772e2159abec19e46eb0ba872dcf67be55f",
+      "payload": "plan/tmp/github-import/ws006-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/155",
+      "number": 155,
+      "verified": true
+    },
+    "ws006-p003": {
+      "path": "plan/ws006/phase003/phase.md",
+      "source_sha256": "216db7e0d299f4051e27798ec2736449ec37578e23a3f5a3622eedf45e6fd1a7",
+      "payload": "plan/tmp/github-import/ws006-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/156",
+      "number": 156,
+      "verified": true
+    },
+    "ws006-p004": {
+      "path": "plan/ws006/phase004/phase.md",
+      "source_sha256": "feb37eee71a48d71cab67eec775fc28818384d0a43611ff9c48336a8f2232dad",
+      "payload": "plan/tmp/github-import/ws006-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/157",
+      "number": 157,
+      "verified": true
+    },
+    "ws006-p005": {
+      "path": "plan/ws006/phase005/phase.md",
+      "source_sha256": "1809ca58ee8a4c966780908a2269a1e038c5444aed8f2451b3abdeb6c5f35c40",
+      "payload": "plan/tmp/github-import/ws006-p005.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/158",
+      "number": 158,
+      "verified": true
+    },
+    "ws006-p006": {
+      "path": "plan/ws006/phase006/phase.md",
+      "source_sha256": "0cd8dfba0af7d4852e60fe7025ed148291f4b488bf44f75e37301b0df7d2add1",
+      "payload": "plan/tmp/github-import/ws006-p006.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/159",
+      "number": 159,
+      "verified": true
+    },
+    "ws006-p007": {
+      "path": "plan/ws006/phase007/phase.md",
+      "source_sha256": "914aaf6b751f26dda88d88cf333a235b8d005f51cda6df7d3b298ca63b107e19",
+      "payload": "plan/tmp/github-import/ws006-p007.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/160",
+      "number": 160,
+      "verified": true
+    },
+    "ws006-p008": {
+      "path": "plan/ws006/phase008/phase.md",
+      "source_sha256": "a127b2cd03a6706486f8cf3111c7b57ea81f3685ae7b5f3b6fa07b1fb1e800c9",
+      "payload": "plan/tmp/github-import/ws006-p008.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/161",
+      "number": 161,
+      "verified": true
+    },
+    "ws006-p009": {
+      "path": "plan/ws006/phase009/phase.md",
+      "source_sha256": "c36725215203efcc044a3092e27b42b7a07a555379439741b36faa2bbf377daa",
+      "payload": "plan/tmp/github-import/ws006-p009.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/162",
+      "number": 162,
+      "verified": true
+    },
+    "ws006-p010": {
+      "path": "plan/ws006/phase010/phase.md",
+      "source_sha256": "0f4a98c6c956c309db9e674f63ca6d69cf16a39af97eabe2827b91a017b938c4",
+      "payload": "plan/tmp/github-import/ws006-p010.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/163",
+      "number": 163,
+      "verified": true
+    },
+    "ws006-p011": {
+      "path": "plan/ws006/phase011/phase.md",
+      "source_sha256": "1706fa71cec790738c06cef3cda7073217adb39c3ac8577e7663b6cf78245482",
+      "payload": "plan/tmp/github-import/ws006-p011.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/164",
+      "number": 164,
+      "verified": true
+    },
+    "ws007-p001": {
+      "path": "plan/ws007/phase001/phase.md",
+      "source_sha256": "8842a0bd49f113e2868885ede054b814efdee8c030baeb5b712aa2994940b6d6",
+      "payload": "plan/tmp/github-import/ws007-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/165",
+      "number": 165,
+      "verified": true
+    },
+    "ws007-p002": {
+      "path": "plan/ws007/phase002/phase.md",
+      "source_sha256": "f667246be567cbe55dbe631722fe0331a63804b4060cd8db47324d614ecaa7de",
+      "payload": "plan/tmp/github-import/ws007-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/166",
+      "number": 166,
+      "verified": true
+    },
+    "ws007-p003": {
+      "path": "plan/ws007/phase003/phase.md",
+      "source_sha256": "7b15f0e2734ce661a3674a55b0f33bea0ae01b772ca642a8a35bc3af680a6665",
+      "payload": "plan/tmp/github-import/ws007-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/167",
+      "number": 167,
+      "verified": true
+    },
+    "ws007-p004": {
+      "path": "plan/ws007/phase004/phase.md",
+      "source_sha256": "7a3521a06b4dade5d788f405d9df8fdf9cb84658c8dae838250b30f9b49bc4f1",
+      "payload": "plan/tmp/github-import/ws007-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/168",
+      "number": 168,
+      "verified": true
+    },
+    "ws008-p001": {
+      "path": "plan/ws008/phase001/phase.md",
+      "source_sha256": "9273253bd45a9433e6ba94b80a5de6768630fd926d2a31f3b6f9feb0c6eb079b",
+      "payload": "plan/tmp/github-import/ws008-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/169",
+      "number": 169,
+      "verified": true
+    },
+    "ws008-p002": {
+      "path": "plan/ws008/phase002/phase.md",
+      "source_sha256": "169ea73923fe3febfbccecfa38b7744f4d905ce85b728902294c3e8b7b0bf3cd",
+      "payload": "plan/tmp/github-import/ws008-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/170",
+      "number": 170,
+      "verified": true
+    },
+    "ws008-p003": {
+      "path": "plan/ws008/phase003/phase.md",
+      "source_sha256": "f1b0f8e2176ff62adc63f8600943a816139f0ac59ed848b5421c190e639b5a82",
+      "payload": "plan/tmp/github-import/ws008-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/171",
+      "number": 171,
+      "verified": true
+    },
+    "ws008-p004": {
+      "path": "plan/ws008/phase004/phase.md",
+      "source_sha256": "065ffcfc23acfcd636edb5f495b896b8ecb7520a5bbfbe857f29b4941c96418f",
+      "payload": "plan/tmp/github-import/ws008-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/172",
+      "number": 172,
+      "verified": true
+    },
+    "ws008-p005": {
+      "path": "plan/ws008/phase005/phase.md",
+      "source_sha256": "5ecd0f0a5d7a8ae1a9b5de6ab4334c2c949fb6a41525d4bac91ffa1431c6bd11",
+      "payload": "plan/tmp/github-import/ws008-p005.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/173",
+      "number": 173,
+      "verified": true
+    },
+    "ws008-p006": {
+      "path": "plan/ws008/phase006/phase.md",
+      "source_sha256": "0b8a31092d4dba117050b0b23e47976f77fb28fe032caf6c00bbac055c058543",
+      "payload": "plan/tmp/github-import/ws008-p006.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/174",
+      "number": 174,
+      "verified": true
+    },
+    "ws008-p007": {
+      "path": "plan/ws008/phase007/phase.md",
+      "source_sha256": "7b30c5161d1387127b31ec9a8bb706f2ea06c4b110a73304f5f134382c9cfc34",
+      "payload": "plan/tmp/github-import/ws008-p007.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/175",
+      "number": 175,
+      "verified": true
+    },
+    "ws008-p008": {
+      "path": "plan/ws008/phase008/phase.md",
+      "source_sha256": "5b4c8ac0bdbb8acae74ecb9e387f16b446671551a612bf48cd4c67d4c6a1049a",
+      "payload": "plan/tmp/github-import/ws008-p008.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/176",
+      "number": 176,
+      "verified": true
+    },
+    "ws008-p009": {
+      "path": "plan/ws008/phase009/phase.md",
+      "source_sha256": "4ef7c970af02cb9bfdeeda238690bfa9a3ec053662aabc0a71fa8227471a4373",
+      "payload": "plan/tmp/github-import/ws008-p009.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/177",
+      "number": 177,
+      "verified": true
+    },
+    "ws008-p010": {
+      "path": "plan/ws008/phase010/phase.md",
+      "source_sha256": "55ab103a93109de91cf068385d8ccd7f505d1f5e39f9da1e7d979584d71f63ed",
+      "payload": "plan/tmp/github-import/ws008-p010.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/178",
+      "number": 178,
+      "verified": true
+    },
+    "ws009-p001": {
+      "path": "plan/ws009/phase001/phase.md",
+      "source_sha256": "fbdf82f162fbb7105e90e19f8538c8d34bd2dddaafec8ba6223678314a6c1f0c",
+      "payload": "plan/tmp/github-import/ws009-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/179",
+      "number": 179,
+      "verified": true
+    },
+    "ws009-p002": {
+      "path": "plan/ws009/phase002/phase.md",
+      "source_sha256": "7b967cf266fd36bc191760e96a7215f03d36b96d61c2b36c6c2732c40455c588",
+      "payload": "plan/tmp/github-import/ws009-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/180",
+      "number": 180,
+      "verified": true
+    },
+    "ws009-p003": {
+      "path": "plan/ws009/phase003/phase.md",
+      "source_sha256": "26fc62cd14f236a9f6790e1e5ef5116677e337c4db9ac7895c30504155404613",
+      "payload": "plan/tmp/github-import/ws009-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/181",
+      "number": 181,
+      "verified": true
+    },
+    "ws009-p004": {
+      "path": "plan/ws009/phase004/phase.md",
+      "source_sha256": "c55e8f205a19e3fb90025a445c57e444d53d1a20b945cf037ca10f787994b775",
+      "payload": "plan/tmp/github-import/ws009-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/182",
+      "number": 182,
+      "verified": true
+    },
+    "ws009-p005": {
+      "path": "plan/ws009/phase005/phase.md",
+      "source_sha256": "58fa54b69b19fa3ae024880acfa729a30302a1fa1b613eba617f6b8b457e7383",
+      "payload": "plan/tmp/github-import/ws009-p005.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/183",
+      "number": 183,
+      "verified": true
+    },
+    "ws009-p006": {
+      "path": "plan/ws009/phase006/phase.md",
+      "source_sha256": "1b8b6137f8630f18b9452dcecb05d09daca4e76999d72d5e4ae5b352c98c0e7b",
+      "payload": "plan/tmp/github-import/ws009-p006.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/184",
+      "number": 184,
+      "verified": true
+    },
+    "ws009-p007": {
+      "path": "plan/ws009/phase007/phase.md",
+      "source_sha256": "58fcbce35accf153e59acbcd2d35b460f8dcf96f3bd7fb8ce683dc88998acb53",
+      "payload": "plan/tmp/github-import/ws009-p007.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/185",
+      "number": 185,
+      "verified": true
+    },
+    "ws009-p008": {
+      "path": "plan/ws009/phase008/phase.md",
+      "source_sha256": "550814c09f13d41ce8ba6f7dbc6ec7da2c5da8403eedbb0975ff72c821f2111f",
+      "payload": "plan/tmp/github-import/ws009-p008.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/186",
+      "number": 186,
+      "verified": true
+    },
+    "ws010-p001": {
+      "path": "plan/ws010/phase001/phase.md",
+      "source_sha256": "60d8518a545cdf11d736f03e0de803f3eb01d8c00da415e379f41e62dd8a425c",
+      "payload": "plan/tmp/github-import/ws010-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/187",
+      "number": 187,
+      "verified": true
+    },
+    "ws010-p002": {
+      "path": "plan/ws010/phase002/phase.md",
+      "source_sha256": "b1d1bcf2ccf438165cb6b1a993f70dfdc9ea31813ebbeedef58f8c9bd3631e4c",
+      "payload": "plan/tmp/github-import/ws010-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/188",
+      "number": 188,
+      "verified": true
+    },
+    "ws010-p003": {
+      "path": "plan/ws010/phase003/phase.md",
+      "source_sha256": "662998a2273fa40d0eb276122ea9948861869daf3f483cfddcfa0524c4f33e3e",
+      "payload": "plan/tmp/github-import/ws010-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/189",
+      "number": 189,
+      "verified": true
+    },
+    "ws010-p004": {
+      "path": "plan/ws010/phase004/phase.md",
+      "source_sha256": "af2408e16598b920630cf92931518baa8df9cb93a2c5473dff919696731c00c1",
+      "payload": "plan/tmp/github-import/ws010-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/190",
+      "number": 190,
+      "verified": true
+    },
+    "ws010-p005": {
+      "path": "plan/ws010/phase005/phase.md",
+      "source_sha256": "5628d510e670825366653ef85b6b9dcaffe93e776e20a3f880dbe1bc6bfc6239",
+      "payload": "plan/tmp/github-import/ws010-p005.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/191",
+      "number": 191,
+      "verified": true
+    },
+    "ws011-p001": {
+      "path": "plan/ws011/phase001/phase.md",
+      "source_sha256": "ab4b10b27af8d780a3f02fe89627b8941163f5ddb3e15a21b084c252e825fa29",
+      "payload": "plan/tmp/github-import/ws011-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/192",
+      "number": 192,
+      "verified": true
+    },
+    "ws011-p002": {
+      "path": "plan/ws011/phase002/phase.md",
+      "source_sha256": "afbf35b278b3dc3dd8e4b790ac70772612a83c9fd57c7c221485e437ccfb5753",
+      "payload": "plan/tmp/github-import/ws011-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/193",
+      "number": 193,
+      "verified": true
+    },
+    "ws011-p003": {
+      "path": "plan/ws011/phase003/phase.md",
+      "source_sha256": "8b8c2ffe86cd96f187151085e0dd836ebaf2695d7b0f5b3320b61ffb71f73fa2",
+      "payload": "plan/tmp/github-import/ws011-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/194",
+      "number": 194,
+      "verified": true
+    },
+    "ws011-p004": {
+      "path": "plan/ws011/phase004/phase.md",
+      "source_sha256": "90a05841f439b5fd60b6f7d51f22f5799dec008797951becad8cc0dddb924b62",
+      "payload": "plan/tmp/github-import/ws011-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/195",
+      "number": 195,
+      "verified": true
+    },
+    "ws011-p005": {
+      "path": "plan/ws011/phase005/phase.md",
+      "source_sha256": "9024e2a2c43c3003e3defe388c6ab8ea9b39320ff5655dfc22e56836d522c262",
+      "payload": "plan/tmp/github-import/ws011-p005.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/196",
+      "number": 196,
+      "verified": true
+    },
+    "ws011-p006": {
+      "path": "plan/ws011/phase006/phase.md",
+      "source_sha256": "8ecae899928ea57430539a5b50251477e4915489fd3ccc0bc7f1f4821811ccdc",
+      "payload": "plan/tmp/github-import/ws011-p006.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/197",
+      "number": 197,
+      "verified": true
+    },
+    "ws011-p007": {
+      "path": "plan/ws011/phase007/phase.md",
+      "source_sha256": "84242297124c6348e6028d52915822bf60295b46bdb011e2765cbd910d5a229b",
+      "payload": "plan/tmp/github-import/ws011-p007.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/198",
+      "number": 198,
+      "verified": true
+    },
+    "ws011-p008": {
+      "path": "plan/ws011/phase008/phase.md",
+      "source_sha256": "a73ff1b62c1ab40d646438dad913d0057a6f83a79bceb6cad56beec7a7eaa6bf",
+      "payload": "plan/tmp/github-import/ws011-p008.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/199",
+      "number": 199,
+      "verified": true
+    },
+    "ws011-p009": {
+      "path": "plan/ws011/phase009/phase.md",
+      "source_sha256": "c7e7346838a26e1a899035a5b1a2c3430a1eff2e25f0abc1d2bf256e7e3948bb",
+      "payload": "plan/tmp/github-import/ws011-p009.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/200",
+      "number": 200,
+      "verified": true
+    },
+    "ws012-p001": {
+      "path": "plan/ws012/phase001/phase.md",
+      "source_sha256": "f88ef934d5bc20e891ff2eb332fa90b6a7ee42c2fd0414b0509fc3af7bf1ad7a",
+      "payload": "plan/tmp/github-import/ws012-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/201",
+      "number": 201,
+      "verified": true
+    },
+    "ws012-p002": {
+      "path": "plan/ws012/phase002/phase.md",
+      "source_sha256": "67ce4893d005de1d649b67b44387e89ceec495b6f08d1cbb4511a3f4bc931a8c",
+      "payload": "plan/tmp/github-import/ws012-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/202",
+      "number": 202,
+      "verified": true
+    },
+    "ws012-p003": {
+      "path": "plan/ws012/phase003/phase.md",
+      "source_sha256": "ccf67fc96f2c4fde1102a188c435e1be10400ff96239f9354dc1a2ba9e218b74",
+      "payload": "plan/tmp/github-import/ws012-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/203",
+      "number": 203,
+      "verified": true
+    },
+    "ws012-p004": {
+      "path": "plan/ws012/phase004/phase.md",
+      "source_sha256": "a5edfaacfcebd631f473a2bcd95959c74b2ed60430178cdda21c0e43a70a181b",
+      "payload": "plan/tmp/github-import/ws012-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/204",
+      "number": 204,
+      "verified": true
+    },
+    "ws012-p005": {
+      "path": "plan/ws012/phase005/phase.md",
+      "source_sha256": "5a1cfce436eb769ee30554651cb4f4ad31f3ebe5d51907b8ec5fdc4b9ced7835",
+      "payload": "plan/tmp/github-import/ws012-p005.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/205",
+      "number": 205,
+      "verified": true
+    },
+    "ws012-p006": {
+      "path": "plan/ws012/phase006/phase.md",
+      "source_sha256": "883663989e4a804ce83da1c7a26058ccf82ba620d295cf029929a4bce484969c",
+      "payload": "plan/tmp/github-import/ws012-p006.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/206",
+      "number": 206,
+      "verified": true
+    },
+    "ws013-p001": {
+      "path": "plan/ws013/phase001/phase.md",
+      "source_sha256": "47bb5ce8317b9b0caf55146ba4f2d84b6a0dd72888877090ae97c82f834a7ef7",
+      "payload": "plan/tmp/github-import/ws013-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/207",
+      "number": 207,
+      "verified": true
+    },
+    "ws013-p002": {
+      "path": "plan/ws013/phase002/phase.md",
+      "source_sha256": "a4529bcad0ec3a32a19de283428932c68e7bd84e19d95a9e06b7302202fbb4d2",
+      "payload": "plan/tmp/github-import/ws013-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/208",
+      "number": 208,
+      "verified": true
+    },
+    "ws013-p003": {
+      "path": "plan/ws013/phase003/phase.md",
+      "source_sha256": "85a16e576821e486bff64cb880435d05d06c3129a8c719b716fcea605edab4f6",
+      "payload": "plan/tmp/github-import/ws013-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/209",
+      "number": 209,
+      "verified": true
+    },
+    "ws013-p004": {
+      "path": "plan/ws013/phase004/phase.md",
+      "source_sha256": "fbfc936a47e2fa796ccbe7f799fe0e5ba4ae2eec0ba7f16bd21136a59c7a8f76",
+      "payload": "plan/tmp/github-import/ws013-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/210",
+      "number": 210,
+      "verified": true
+    },
+    "ws013-p005": {
+      "path": "plan/ws013/phase005/phase.md",
+      "source_sha256": "e8e4db54b1c0e1420f059ca0a375155a8bdce95fa75681afaa09cdabcda8e3fc",
+      "payload": "plan/tmp/github-import/ws013-p005.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/211",
+      "number": 211,
+      "verified": true
+    },
+    "ws013-p006": {
+      "path": "plan/ws013/phase006/phase.md",
+      "source_sha256": "56f67d65f0f954b5cb1fa1782b313a2ea8c7502e58ce17ccf2f6007e6f659280",
+      "payload": "plan/tmp/github-import/ws013-p006.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/212",
+      "number": 212,
+      "verified": true
+    },
+    "ws014-p001": {
+      "path": "plan/ws014/phase001/phase.md",
+      "source_sha256": "0d5d9068e4de3b2a0ad27e2de560279313b80d59e414eaac858d108bea8f366f",
+      "payload": "plan/tmp/github-import/ws014-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/213",
+      "number": 213,
+      "verified": true
+    },
+    "ws015-p001": {
+      "path": "plan/ws015/phase001/phase.md",
+      "source_sha256": "6fa8428f74245595e7e5bab66e391ec19be062cc534c98974ec6913a2beecd96",
+      "payload": "plan/tmp/github-import/ws015-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/214",
+      "number": 214,
+      "verified": true
+    },
+    "ws016-p001": {
+      "path": "plan/ws016/phase001/phase.md",
+      "source_sha256": "bd06cdb4feea27bbfa445a0e66cad335dd1cf4603f0d7faf0e8f3088673c1f18",
+      "payload": "plan/tmp/github-import/ws016-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/215",
+      "number": 215,
+      "verified": true
+    },
+    "ws016-p002": {
+      "path": "plan/ws016/phase002/phase.md",
+      "source_sha256": "de2ed9f7ade782a19fea4d0549eb2b6f9f2b5379427cb6dd9763084aabbe3019",
+      "payload": "plan/tmp/github-import/ws016-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/216",
+      "number": 216,
+      "verified": true
+    },
+    "ws016-p003": {
+      "path": "plan/ws016/phase003/phase.md",
+      "source_sha256": "eb560894a7bbb3a75d375de7f17d94004c3f5029a32d7a89b200c1f48c4f646e",
+      "payload": "plan/tmp/github-import/ws016-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/217",
+      "number": 217,
+      "verified": true
+    },
+    "ws016-p004": {
+      "path": "plan/ws016/phase004/phase.md",
+      "source_sha256": "93adcfd41cecddf2ab5b0626bb37a8fa30579c511476cb65b9c726a190516b64",
+      "payload": "plan/tmp/github-import/ws016-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/218",
+      "number": 218,
+      "verified": true
+    },
+    "ws017-p001": {
+      "path": "plan/ws017/phase001/phase.md",
+      "source_sha256": "d1a564639b2cb5d9211f2a1635eba9417ee79fdde8015b52520cc82e788f26cd",
+      "payload": "plan/tmp/github-import/ws017-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/219",
+      "number": 219,
+      "verified": true
+    },
+    "ws017-p002": {
+      "path": "plan/ws017/phase002/phase.md",
+      "source_sha256": "78de50235cf0f132fc0bbf68b85c0ea44bd868b3bc9f6ddcdece0be529570606",
+      "payload": "plan/tmp/github-import/ws017-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/220",
+      "number": 220,
+      "verified": true
+    },
+    "ws017-p003": {
+      "path": "plan/ws017/phase003/phase.md",
+      "source_sha256": "4721f7c015593a5743f94fa46659e8c426f8a9756d28fc7fde3a80f7056981fb",
+      "payload": "plan/tmp/github-import/ws017-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/221",
+      "number": 221,
+      "verified": true
+    },
+    "ws017-p004": {
+      "path": "plan/ws017/phase004/phase.md",
+      "source_sha256": "5fa38b06a3b04ea48da59fd169f85608ee73b7ac56fe23828ee9699e9e136f59",
+      "payload": "plan/tmp/github-import/ws017-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/222",
+      "number": 222,
+      "verified": true
+    },
+    "ws018-p001": {
+      "path": "plan/ws018/phase001/phase.md",
+      "source_sha256": "50c4bb3d4a285eb72519c880a7e8e12d3129b6b7cc15eaf67f261f22869c5f4e",
+      "payload": "plan/tmp/github-import/ws018-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/223",
+      "number": 223,
+      "verified": true
+    },
+    "ws018-p002": {
+      "path": "plan/ws018/phase002/phase.md",
+      "source_sha256": "be548fc1b0652da608bab7784b903f904b139592739df752426fab694c511c75",
+      "payload": "plan/tmp/github-import/ws018-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/224",
+      "number": 224,
+      "verified": true
+    },
+    "ws018-p003": {
+      "path": "plan/ws018/phase003/phase.md",
+      "source_sha256": "27bac12d63d909134ba626a34e439ef198a631072e6c3e7079b27d46e73895bb",
+      "payload": "plan/tmp/github-import/ws018-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/225",
+      "number": 225,
+      "verified": true
+    },
+    "ws018-p004": {
+      "path": "plan/ws018/phase004/phase.md",
+      "source_sha256": "51c0b815c59d524b51bb4a60109e03125fdc9938f3bc1827fa4ea1f18b86596a",
+      "payload": "plan/tmp/github-import/ws018-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/226",
+      "number": 226,
+      "verified": true
+    },
+    "ws018-p005": {
+      "path": "plan/ws018/phase005/phase.md",
+      "source_sha256": "60572fbfa10e5ad9f5b37e73d3bb2af5bc8df1987ee1aaccec29774bd345fe61",
+      "payload": "plan/tmp/github-import/ws018-p005.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/227",
+      "number": 227,
+      "verified": true
+    },
+    "ws018-p006": {
+      "path": "plan/ws018/phase006/phase.md",
+      "source_sha256": "6aec210864c83e823612e66ef087ff1316ff07b400e36cc7b873a1c176638133",
+      "payload": "plan/tmp/github-import/ws018-p006.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/228",
+      "number": 228,
+      "verified": true
+    },
+    "ws018-p007": {
+      "path": "plan/ws018/phase007/phase.md",
+      "source_sha256": "3358d17d2376c4f0aa1494bd4118b8346175c3b93bc638a872420c9fa21af466",
+      "payload": "plan/tmp/github-import/ws018-p007.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/229",
+      "number": 229,
+      "verified": true
+    },
+    "ws018-p008": {
+      "path": "plan/ws018/phase008/phase.md",
+      "source_sha256": "d869d8b6e7b1631099347aee164a6a88f79bffcb43baad3e96c84d778e1df771",
+      "payload": "plan/tmp/github-import/ws018-p008.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/230",
+      "number": 230,
+      "verified": true
+    },
+    "ws018-p009": {
+      "path": "plan/ws018/phase009/phase.md",
+      "source_sha256": "afcb87355d9bf43e5702fcea17c8482e9e33eb884bac0705f6c89894942e6d96",
+      "payload": "plan/tmp/github-import/ws018-p009.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/231",
+      "number": 231,
+      "verified": true
+    },
+    "ws018-p010": {
+      "path": "plan/ws018/phase010/phase.md",
+      "source_sha256": "2c0b2297993f30956b8521b4a159d24f2aeae07bd8e56e0727c811aa8d411196",
+      "payload": "plan/tmp/github-import/ws018-p010.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/232",
+      "number": 232,
+      "verified": true
+    },
+    "ws018-p011": {
+      "path": "plan/ws018/phase011/phase.md",
+      "source_sha256": "f1deb7dd6e9ba118f1f73a74c8e8d90aa31c6f77ef84c229fe81ee52fb7b7f93",
+      "payload": "plan/tmp/github-import/ws018-p011.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/233",
+      "number": 233,
+      "verified": true
+    },
+    "ws018-p012": {
+      "path": "plan/ws018/phase012/phase.md",
+      "source_sha256": "51d4192150001c8802702cd1a48e64e70c2b448c64fe148eb7e1a7a800dfa12f",
+      "payload": "plan/tmp/github-import/ws018-p012.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/234",
+      "number": 234,
+      "verified": true
+    },
+    "ws018-p013": {
+      "path": "plan/ws018/phase013/phase.md",
+      "source_sha256": "80ab9295ec460f701c1afef9d088c288e1fb3802de2bd47cda18af01affdc1ef",
+      "payload": "plan/tmp/github-import/ws018-p013.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/235",
+      "number": 235,
+      "verified": true
+    },
+    "ws018-p014": {
+      "path": "plan/ws018/phase014/phase.md",
+      "source_sha256": "f88c046a94796b3d96f1b8b333214c3df42569ad98e4e107cf32f4fbc86c54fb",
+      "payload": "plan/tmp/github-import/ws018-p014.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/236",
+      "number": 236,
+      "verified": true
+    },
+    "ws018-p015": {
+      "path": "plan/ws018/phase015/phase.md",
+      "source_sha256": "38a2c411c76568262396ec38b810274ffbe5dbe40e35f153f8713a17fc1f2069",
+      "payload": "plan/tmp/github-import/ws018-p015.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/237",
+      "number": 237,
+      "verified": true
+    },
+    "ws018-p016": {
+      "path": "plan/ws018/phase016/phase.md",
+      "source_sha256": "82c7589a0216171db4cfd07c395b2d69c707b6a3dc629a16710be3d2447deb0b",
+      "payload": "plan/tmp/github-import/ws018-p016.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/238",
+      "number": 238,
+      "verified": true
+    },
+    "ws018-p017": {
+      "path": "plan/ws018/phase017/phase.md",
+      "source_sha256": "a8bcfb53fd1c2e487645b9e504a16974ff7b15b8fe68da56c7c03213f3a80d70",
+      "payload": "plan/tmp/github-import/ws018-p017.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/239",
+      "number": 239,
+      "verified": true
+    },
+    "ws018-p018": {
+      "path": "plan/ws018/phase018/phase.md",
+      "source_sha256": "c66c9621574fc4687f392e61e9bc1b5b529601514712f12d8f7689dbd910f11f",
+      "payload": "plan/tmp/github-import/ws018-p018.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/240",
+      "number": 240,
+      "verified": true
+    },
+    "ws018-p019": {
+      "path": "plan/ws018/phase019/phase.md",
+      "source_sha256": "d0fd335e4c5c339dacda829743847faa948fe75c9c7c3215d281fc01fa553d88",
+      "payload": "plan/tmp/github-import/ws018-p019.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/241",
+      "number": 241,
+      "verified": true
+    },
+    "ws018-p020": {
+      "path": "plan/ws018/phase020/phase.md",
+      "source_sha256": "bcb9db908a332b80b389de98f6ccd172e029dfb5a8b01b9678a45c237d4828e9",
+      "payload": "plan/tmp/github-import/ws018-p020.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/242",
+      "number": 242,
+      "verified": true
+    },
+    "ws019-p001": {
+      "path": "plan/ws019/phase001/phase.md",
+      "source_sha256": "08b04c92cd1009d97dd392fa4e7eef3a6eac4928d98536cf348bce065ebc8f3c",
+      "payload": "plan/tmp/github-import/ws019-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/243",
+      "number": 243,
+      "verified": true
+    },
+    "ws019-p002": {
+      "path": "plan/ws019/phase002/phase.md",
+      "source_sha256": "234c82c18320bedcc65ec8ec27e277994b2415eb1d87c662134aeb7d1ce8339b",
+      "payload": "plan/tmp/github-import/ws019-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/244",
+      "number": 244,
+      "verified": true
+    },
+    "ws019-p003": {
+      "path": "plan/ws019/phase003/phase.md",
+      "source_sha256": "87f275bdf7621be90429c7fd58c68d89bde5d606c672d6e80611e57dd925e93a",
+      "payload": "plan/tmp/github-import/ws019-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/245",
+      "number": 245,
+      "verified": true
+    },
+    "ws019-p004": {
+      "path": "plan/ws019/phase004/phase.md",
+      "source_sha256": "be60e1c6ffd4629c41025ddcc59c9c65b7b8c8c561665a53a0b5071b72b21d92",
+      "payload": "plan/tmp/github-import/ws019-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/246",
+      "number": 246,
+      "verified": true
+    },
+    "ws019-p005": {
+      "path": "plan/ws019/phase005/phase.md",
+      "source_sha256": "3c38dde9ec896e110986f0e76f27c0c2b8e8c64620168e701e5cf8834718b9e9",
+      "payload": "plan/tmp/github-import/ws019-p005.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/247",
+      "number": 247,
+      "verified": true
+    },
+    "ws019-p006": {
+      "path": "plan/ws019/phase006/phase.md",
+      "source_sha256": "4080c4f904bfb5c936b9dd019b30631c4870162da4de942a3295c9f62749973d",
+      "payload": "plan/tmp/github-import/ws019-p006.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/248",
+      "number": 248,
+      "verified": true
+    },
+    "ws019-p007": {
+      "path": "plan/ws019/phase007/phase.md",
+      "source_sha256": "b97454b083ef09000983d7e2a7434436392dedbce7aea3bd6f9a290668751508",
+      "payload": "plan/tmp/github-import/ws019-p007.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/249",
+      "number": 249,
+      "verified": true
+    },
+    "ws019-p008": {
+      "path": "plan/ws019/phase008/phase.md",
+      "source_sha256": "55f0f5dc3146bba32832a3770c5a89f26e47acf43a56d680b44a8f9948f3c428",
+      "payload": "plan/tmp/github-import/ws019-p008.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/250",
+      "number": 250,
+      "verified": true
+    },
+    "ws019-p009": {
+      "path": "plan/ws019/phase009/phase.md",
+      "source_sha256": "66e697abbfcff6216d6f43c84d3e37c0a9b5200bc3d7c419222abb610b88f37b",
+      "payload": "plan/tmp/github-import/ws019-p009.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/251",
+      "number": 251,
+      "verified": true
+    },
+    "ws019-p010": {
+      "path": "plan/ws019/phase010/phase.md",
+      "source_sha256": "249b40263096015314b0603b99f797e8f3fae20e388ac98a8f0ceee751238770",
+      "payload": "plan/tmp/github-import/ws019-p010.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/252",
+      "number": 252,
+      "verified": true
+    },
+    "ws019-p011": {
+      "path": "plan/ws019/phase011/phase.md",
+      "source_sha256": "983d1f471089809c51f6f80cb08d0adf2dbdff5d1321ac7dcdfec8d9a5c0706b",
+      "payload": "plan/tmp/github-import/ws019-p011.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/253",
+      "number": 253,
+      "verified": true
+    },
+    "ws019-p012": {
+      "path": "plan/ws019/phase012/phase.md",
+      "source_sha256": "7c87e5bdc3b422b35d6e0f8fabe8f7d736dee81286d2c2146dfc6fb9bb014304",
+      "payload": "plan/tmp/github-import/ws019-p012.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/254",
+      "number": 254,
+      "verified": true
+    },
+    "ws019-p013": {
+      "path": "plan/ws019/phase013/phase.md",
+      "source_sha256": "8ae1acf2de292fd7c434a7a06554baa17c67c556b1d0301be3d291f155fd73d7",
+      "payload": "plan/tmp/github-import/ws019-p013.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/255",
+      "number": 255,
+      "verified": true
+    },
+    "ws019-p014": {
+      "path": "plan/ws019/phase014/phase.md",
+      "source_sha256": "18403f9dc68a645e152af38044e24f9d0431ab3be861fa11dcb205c115e3f593",
+      "payload": "plan/tmp/github-import/ws019-p014.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/256",
+      "number": 256,
+      "verified": true
+    },
+    "ws019-p015": {
+      "path": "plan/ws019/phase015/phase.md",
+      "source_sha256": "9ab051cba1054f5f3ef2189b97315492d8e1559b7d2aef17ecdcb7333c314873",
+      "payload": "plan/tmp/github-import/ws019-p015.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/257",
+      "number": 257,
+      "verified": true
+    },
+    "ws019-p016": {
+      "path": "plan/ws019/phase016/phase.md",
+      "source_sha256": "cb083001164e1b1e259ed26b6a1e6edf325aa617d19efee5f78d5f8b59347760",
+      "payload": "plan/tmp/github-import/ws019-p016.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/258",
+      "number": 258,
+      "verified": true
+    },
+    "ws019-p017": {
+      "path": "plan/ws019/phase017/phase.md",
+      "source_sha256": "afc1d16bea99d611d4904ec089cbcf8ef3578b1f5d160cc4eacac20fc3da29bd",
+      "payload": "plan/tmp/github-import/ws019-p017.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/259",
+      "number": 259,
+      "verified": true
+    },
+    "ws019-p018": {
+      "path": "plan/ws019/phase018/phase.md",
+      "source_sha256": "00a30490f870ddb2274cdfa347aa6c09e9f348776288fcae818effb36f7eb0ad",
+      "payload": "plan/tmp/github-import/ws019-p018.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/260",
+      "number": 260,
+      "verified": true
+    },
+    "ws019-p019": {
+      "path": "plan/ws019/phase019/phase.md",
+      "source_sha256": "4faf2994459cdb0dbbba39d2e7cda881f56ef01bfb5eeae01834494a0f24601c",
+      "payload": "plan/tmp/github-import/ws019-p019.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/261",
+      "number": 261,
+      "verified": true
+    },
+    "ws019-p020": {
+      "path": "plan/ws019/phase020/phase.md",
+      "source_sha256": "5a2e2c14d36500a431e7962a6cc8e8651c9854dadf8af5e071b6bb5b33451e76",
+      "payload": "plan/tmp/github-import/ws019-p020.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/262",
+      "number": 262,
+      "verified": true
+    },
+    "ws019-p021": {
+      "path": "plan/ws019/phase021/phase.md",
+      "source_sha256": "9e54093d724f1482b77b429f1449f187d655914a5d8aba36458c5d1f656b2c32",
+      "payload": "plan/tmp/github-import/ws019-p021.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/263",
+      "number": 263,
+      "verified": true
+    },
+    "ws019-p022": {
+      "path": "plan/ws019/phase022/phase.md",
+      "source_sha256": "aedc560988b5d7f63b6f1557da048d5af712546d6dbd5a5b0c341b98586c8bfb",
+      "payload": "plan/tmp/github-import/ws019-p022.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/264",
+      "number": 264,
+      "verified": true
+    },
+    "ws019-p023": {
+      "path": "plan/ws019/phase023/phase.md",
+      "source_sha256": "e7acbc895a73843444264bc35aa011e94378fbb6a55c876a9477c0fe019ab57c",
+      "payload": "plan/tmp/github-import/ws019-p023.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/265",
+      "number": 265,
+      "verified": true
+    },
+    "ws019-p024": {
+      "path": "plan/ws019/phase024/phase.md",
+      "source_sha256": "1ff5241ff4964a066694fa8fa3f4922b4ae25c0749ad0f28a48791a08cf2f98e",
+      "payload": "plan/tmp/github-import/ws019-p024.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/266",
+      "number": 266,
+      "verified": true
+    },
+    "ws019-p025": {
+      "path": "plan/ws019/phase025/phase.md",
+      "source_sha256": "832d019eea323f9ecdc4d5c79490dc5ad4d307fed18e8c66231eee5f8c3e7b5e",
+      "payload": "plan/tmp/github-import/ws019-p025.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/267",
+      "number": 267,
+      "verified": true
+    },
+    "ws019-p026": {
+      "path": "plan/ws019/phase026/phase.md",
+      "source_sha256": "9dcd0a0147a08bc2b5da39e3cfcbacbfeeb646fcfaa21983c6ff615ebb2f4811",
+      "payload": "plan/tmp/github-import/ws019-p026.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/268",
+      "number": 268,
+      "verified": true
+    },
+    "ws019-p027": {
+      "path": "plan/ws019/phase027/phase.md",
+      "source_sha256": "04b35ff14c2a91b98c30b970b70c50ee426fa8cf07b7028032a7ba1551325df1",
+      "payload": "plan/tmp/github-import/ws019-p027.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/269",
+      "number": 269,
+      "verified": true
+    },
+    "ws019-p028": {
+      "path": "plan/ws019/phase028/phase.md",
+      "source_sha256": "16e23968be9e738726d70edb5a09512e6fcc2e2a31ce901612856f79dc901c60",
+      "payload": "plan/tmp/github-import/ws019-p028.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/270",
+      "number": 270,
+      "verified": true
+    },
+    "ws019-p029": {
+      "path": "plan/ws019/phase029/phase.md",
+      "source_sha256": "0ed7649b95e4847f6bad7b93d04f0f7dbb1955885ffb81085bc883338dcb5a75",
+      "payload": "plan/tmp/github-import/ws019-p029.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/271",
+      "number": 271,
+      "verified": true
+    },
+    "ws019-p030": {
+      "path": "plan/ws019/phase030/phase.md",
+      "source_sha256": "e5df045440a079a0381e599df55817016896a1c47f0d70f75467a9af02a7f9da",
+      "payload": "plan/tmp/github-import/ws019-p030.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/272",
+      "number": 272,
+      "verified": true
+    },
+    "ws019-p031": {
+      "path": "plan/ws019/phase031/phase.md",
+      "source_sha256": "3aaf954ec9bfff6579f7fa7c76f99a399a8ac040f6bd50957cebe097d540f0ba",
+      "payload": "plan/tmp/github-import/ws019-p031.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/273",
+      "number": 273,
+      "verified": true
+    },
+    "ws019-p032": {
+      "path": "plan/ws019/phase032/phase.md",
+      "source_sha256": "f5c89930b84977c63d2d261eefae91a6319daa2182b60f6f40ae6634675291b3",
+      "payload": "plan/tmp/github-import/ws019-p032.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/274",
+      "number": 274,
+      "verified": true
+    },
+    "ws019-p033": {
+      "path": "plan/ws019/phase033/phase.md",
+      "source_sha256": "5c3186fc25437f6c79faeca7848e22567174fa91ff5f6b8d52abaa6dfee167c5",
+      "payload": "plan/tmp/github-import/ws019-p033.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/275",
+      "number": 275,
+      "verified": true
+    },
+    "ws019-p034": {
+      "path": "plan/ws019/phase034/phase.md",
+      "source_sha256": "b295ae416d35d17de3f6450b39bb934de27a62dab782de72bb7aaca46a4d5c3b",
+      "payload": "plan/tmp/github-import/ws019-p034.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/276",
+      "number": 276,
+      "verified": true
+    },
+    "ws019-p035": {
+      "path": "plan/ws019/phase035/phase.md",
+      "source_sha256": "f3560ce6aaa907f34fbd144cc34fc73a362794bc49fd7ccda2fad86c7d70b662",
+      "payload": "plan/tmp/github-import/ws019-p035.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/277",
+      "number": 277,
+      "verified": true
+    },
+    "ws019-p036": {
+      "path": "plan/ws019/phase036/phase.md",
+      "source_sha256": "a037cc83c4f51bfa18c73656c35ebaa30c3f7bac31c33902a0a3e41c1e8f422f",
+      "payload": "plan/tmp/github-import/ws019-p036.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/278",
+      "number": 278,
+      "verified": true
+    },
+    "ws019-p037": {
+      "path": "plan/ws019/phase037/phase.md",
+      "source_sha256": "e9b2c0b3b2da1189628ef100d0802ae03ef63f942155521c6d081a5fcd7a0068",
+      "payload": "plan/tmp/github-import/ws019-p037.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/279",
+      "number": 279,
+      "verified": true
+    },
+    "ws019-p038": {
+      "path": "plan/ws019/phase038/phase.md",
+      "source_sha256": "3399c21845a7acfa9257648a9eaf16e1b5a45b1eb366851e1c2bb0bbc0862769",
+      "payload": "plan/tmp/github-import/ws019-p038.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/280",
+      "number": 280,
+      "verified": true
+    },
+    "ws019-p039": {
+      "path": "plan/ws019/phase039/phase.md",
+      "source_sha256": "1b686c22f88c8d6c4bebdc6208dd37cced455075efc378c0066f70dfb9190020",
+      "payload": "plan/tmp/github-import/ws019-p039.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/281",
+      "number": 281,
+      "verified": true
+    },
+    "ws019-p040": {
+      "path": "plan/ws019/phase040/phase.md",
+      "source_sha256": "2bdaa150899dac7b7bc134d52666da7bbbdbb63df29f6abaa898b8d799c8b5a6",
+      "payload": "plan/tmp/github-import/ws019-p040.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/282",
+      "number": 282,
+      "verified": true
+    },
+    "ws019-p041": {
+      "path": "plan/ws019/phase041/phase.md",
+      "source_sha256": "23638f2dbc4938f781589c0b9f15df14f28d1077b5aaa7eaba015af009f465ad",
+      "payload": "plan/tmp/github-import/ws019-p041.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/283",
+      "number": 283,
+      "verified": true
+    },
+    "ws019-p042": {
+      "path": "plan/ws019/phase042/phase.md",
+      "source_sha256": "1967e7ff0e568be68a9f2ba4ad06ae32df2a5fbf362756fbc71eb98b3354ad4e",
+      "payload": "plan/tmp/github-import/ws019-p042.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/284",
+      "number": 284,
+      "verified": true
+    },
+    "ws019-p043": {
+      "path": "plan/ws019/phase043/phase.md",
+      "source_sha256": "b82b033b9e3f9ea96502b5cf1465684c254daf5a229ec8b7b9abdb4788d6a45e",
+      "payload": "plan/tmp/github-import/ws019-p043.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/285",
+      "number": 285,
+      "verified": true
+    },
+    "ws019-p044": {
+      "path": "plan/ws019/phase044/phase.md",
+      "source_sha256": "cbe4baaee282620b03dc8bce997efacd28d20bc35b9aa63220babb40975ef4d9",
+      "payload": "plan/tmp/github-import/ws019-p044.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/286",
+      "number": 286,
+      "verified": true
+    },
+    "ws019-p045": {
+      "path": "plan/ws019/phase045/phase.md",
+      "source_sha256": "af7fde585ed64032047aedcc78f90cc2a86ebe88fb349ff0c51f666aa4a634da",
+      "payload": "plan/tmp/github-import/ws019-p045.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/287",
+      "number": 287,
+      "verified": true
+    },
+    "ws019-p046": {
+      "path": "plan/ws019/phase046/phase.md",
+      "source_sha256": "d0f5a6b153a70b58e9cd95302ac7f4a8bf2f1f5510007be5cf2ff5a697bd52a8",
+      "payload": "plan/tmp/github-import/ws019-p046.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/288",
+      "number": 288,
+      "verified": true
+    },
+    "ws019-p047": {
+      "path": "plan/ws019/phase047/phase.md",
+      "source_sha256": "c76ad8901288ea2c8866fbcb6a3fd9d98a6035e0acf156f6c775488ffee8ff45",
+      "payload": "plan/tmp/github-import/ws019-p047.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/289",
+      "number": 289,
+      "verified": true
+    },
+    "ws019-p048": {
+      "path": "plan/ws019/phase048/phase.md",
+      "source_sha256": "aca9842eb30186ae0c105e4dd92cf2e9fdb26375e75e165159b027104fbe5fa4",
+      "payload": "plan/tmp/github-import/ws019-p048.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/290",
+      "number": 290,
+      "verified": true
+    },
+    "ws019-p049": {
+      "path": "plan/ws019/phase049/phase.md",
+      "source_sha256": "eab5f78ad6d7efb00bdb952f5387c52b8eb34eb5313cdbfcee6a2faba83a577d",
+      "payload": "plan/tmp/github-import/ws019-p049.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/291",
+      "number": 291,
+      "verified": true
+    },
+    "ws019-p050": {
+      "path": "plan/ws019/phase050/phase.md",
+      "source_sha256": "06bcedcdfe429d0c864be52160b2b8952a4998f8de7d2c9db5ad6b2844413969",
+      "payload": "plan/tmp/github-import/ws019-p050.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/292",
+      "number": 292,
+      "verified": true
+    },
+    "ws020-p001": {
+      "path": "plan/ws020/phase001/phase.md",
+      "source_sha256": "33d622ec661a254390cff7f1d78e371f2847d6ef1877cb39e4625403ddf976e9",
+      "payload": "plan/tmp/github-import/ws020-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/293",
+      "number": 293,
+      "verified": true
+    },
+    "ws020-p002": {
+      "path": "plan/ws020/phase002/phase.md",
+      "source_sha256": "a5f2ba9b455d83956b65a65bb4fcc392a7aa54d2ee62417d3e27263a3cdfcc62",
+      "payload": "plan/tmp/github-import/ws020-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/294",
+      "number": 294,
+      "verified": true
+    },
+    "ws020-p003": {
+      "path": "plan/ws020/phase003/phase.md",
+      "source_sha256": "39370090e90fd319aef77324273f1ee620cf438910b1f5d74cd8de64ef004865",
+      "payload": "plan/tmp/github-import/ws020-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/295",
+      "number": 295,
+      "verified": true
+    },
+    "ws020-p004": {
+      "path": "plan/ws020/phase004/phase.md",
+      "source_sha256": "b73cb40e68e0846bdf3fa2356b4b0e365c803d0fd671474a55177db20806fa8b",
+      "payload": "plan/tmp/github-import/ws020-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/296",
+      "number": 296,
+      "verified": true
+    },
+    "ws020-p005": {
+      "path": "plan/ws020/phase005/phase.md",
+      "source_sha256": "8f599bcb7ab2d3a49284c0daa12614d2c34ebfff3ca92227f3b17c29b6f9f45d",
+      "payload": "plan/tmp/github-import/ws020-p005.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/297",
+      "number": 297,
+      "verified": true
+    },
+    "ws020-p006": {
+      "path": "plan/ws020/phase006/phase.md",
+      "source_sha256": "3a9c778829f411fa69f226c3cb15f6fa1bd28a3a0a63f0627cde8f2822c423e9",
+      "payload": "plan/tmp/github-import/ws020-p006.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/298",
+      "number": 298,
+      "verified": true
+    },
+    "ws021-p001": {
+      "path": "plan/ws021/phase001/phase.md",
+      "source_sha256": "da86412d0a0b7a8c64ad5da1c6a0070825e596333b31df14d565a8c817c26dea",
+      "payload": "plan/tmp/github-import/ws021-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/299",
+      "number": 299,
+      "verified": true
+    },
+    "ws021-p002": {
+      "path": "plan/ws021/phase002/phase.md",
+      "source_sha256": "6bb33a7885dbae78e800d74b51b6fd04ce2e2f5a4391187dbdb19725579fc130",
+      "payload": "plan/tmp/github-import/ws021-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/300",
+      "number": 300,
+      "verified": true
+    },
+    "ws021-p003": {
+      "path": "plan/ws021/phase003/phase.md",
+      "source_sha256": "95da0c565aed8d7e3804af811a4d2e2d29f64aee5e4adf5b73a055f0beb2da46",
+      "payload": "plan/tmp/github-import/ws021-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/301",
+      "number": 301,
+      "verified": true
+    },
+    "ws021-p004": {
+      "path": "plan/ws021/phase004/phase.md",
+      "source_sha256": "f1a87968e75a8ba010bca9c3feae222326339da759b651f68b6031c770ac1f4d",
+      "payload": "plan/tmp/github-import/ws021-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/302",
+      "number": 302,
+      "verified": true
+    },
+    "ws021-p005": {
+      "path": "plan/ws021/phase005/phase.md",
+      "source_sha256": "31d10b2b0465d2877499b0ec6776448d2c3f6dfb293fe666f600353255f57702",
+      "payload": "plan/tmp/github-import/ws021-p005.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/303",
+      "number": 303,
+      "verified": true
+    },
+    "ws021-p006": {
+      "path": "plan/ws021/phase006/phase.md",
+      "source_sha256": "868ac8c14f9ab03d8f9698241ef46376e256af138dbe4cd8f46dee16918db0b3",
+      "payload": "plan/tmp/github-import/ws021-p006.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/304",
+      "number": 304,
+      "verified": true
+    },
+    "ws021-p007": {
+      "path": "plan/ws021/phase007/phase.md",
+      "source_sha256": "0b7b41ccb756d6f6d94acb87df4f912c1cdd69a737fd8830c6166d85a53399e8",
+      "payload": "plan/tmp/github-import/ws021-p007.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/305",
+      "number": 305,
+      "verified": true
+    },
+    "ws022-p001": {
+      "path": "plan/ws022/phase001/phase.md",
+      "source_sha256": "bb127565710c9ed4c09d2fa5dcad21ce6e877601843b857baa6d4b087615d2c5",
+      "payload": "plan/tmp/github-import/ws022-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/306",
+      "number": 306,
+      "verified": true
+    },
+    "ws022-p002": {
+      "path": "plan/ws022/phase002/phase.md",
+      "source_sha256": "fb37a1745ab113d2f1e9838c78deb6e076930802afb77e0f6649d982b0984577",
+      "payload": "plan/tmp/github-import/ws022-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/307",
+      "number": 307,
+      "verified": true
+    },
+    "ws022-p003": {
+      "path": "plan/ws022/phase003/phase.md",
+      "source_sha256": "0906ac16117803f335e15cac60002d770cf189120402978061c7910b6cb8e5af",
+      "payload": "plan/tmp/github-import/ws022-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/308",
+      "number": 308,
+      "verified": true
+    },
+    "ws023-p001": {
+      "path": "plan/ws023/phase001/phase.md",
+      "source_sha256": "fca26ecb9641ae5f5b59158bf42bc69745ccbde895d1f5e8fb0b34b4bf58495f",
+      "payload": "plan/tmp/github-import/ws023-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/309",
+      "number": 309,
+      "verified": true
+    },
+    "ws023-p002": {
+      "path": "plan/ws023/phase002/phase.md",
+      "source_sha256": "7bc4bd588e86164a2147fa15c98eff34d193d3b148b47cf9afbbd17db5f41f60",
+      "payload": "plan/tmp/github-import/ws023-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/310",
+      "number": 310,
+      "verified": true
+    },
+    "ws023-p003": {
+      "path": "plan/ws023/phase003/phase.md",
+      "source_sha256": "8df462ea106cfaa4512404c8f4ef40a5f9525c07447eb7ca20ea1cfbb422a5c7",
+      "payload": "plan/tmp/github-import/ws023-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/311",
+      "number": 311,
+      "verified": true
+    },
+    "ws023-p004": {
+      "path": "plan/ws023/phase004/phase.md",
+      "source_sha256": "0d3d373841e77a5a0aa4e4b5c250253c765e2ed2bb3088540b89447085ec0440",
+      "payload": "plan/tmp/github-import/ws023-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/312",
+      "number": 312,
+      "verified": true
+    },
+    "ws023-p005": {
+      "path": "plan/ws023/phase005/phase.md",
+      "source_sha256": "39fd17f9dbefc755662630db5c21087029feb1ee2e602a8ea15815da69b7a031",
+      "payload": "plan/tmp/github-import/ws023-p005.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/313",
+      "number": 313,
+      "verified": true
+    },
+    "ws023-p006": {
+      "path": "plan/ws023/phase006/phase.md",
+      "source_sha256": "0986add6cd7a1b2a7cdef71233649d5f64301c3d920c9139c10c4de94c6a7562",
+      "payload": "plan/tmp/github-import/ws023-p006.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/314",
+      "number": 314,
+      "verified": true
+    },
+    "ws023-p007": {
+      "path": "plan/ws023/phase007/phase.md",
+      "source_sha256": "bbf122d5f866a2c3e4dc7a13d38918345d730792ff148330506c7b7eb36075a0",
+      "payload": "plan/tmp/github-import/ws023-p007.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/315",
+      "number": 315,
+      "verified": true
+    },
+    "ws023-p008": {
+      "path": "plan/ws023/phase008/phase.md",
+      "source_sha256": "4ab50475ffa5b36c32131b5a9df73e3df131315a139eb75dffc6c9f7f5c3195a",
+      "payload": "plan/tmp/github-import/ws023-p008.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/316",
+      "number": 316,
+      "verified": true
+    },
+    "ws023-p009": {
+      "path": "plan/ws023/phase009/phase.md",
+      "source_sha256": "32d9a917b6b83329a8ada827ec994c39ec79d9fc05aa800f6f3de16c16e795ab",
+      "payload": "plan/tmp/github-import/ws023-p009.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/317",
+      "number": 317,
+      "verified": true
+    },
+    "ws023-p010": {
+      "path": "plan/ws023/phase010/phase.md",
+      "source_sha256": "dc0887fe97e94bd45765ff1d11f9041ca84d0b13ac31f6e04fd668cad5cd3605",
+      "payload": "plan/tmp/github-import/ws023-p010.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/318",
+      "number": 318,
+      "verified": true
+    },
+    "ws023-p011": {
+      "path": "plan/ws023/phase011/phase.md",
+      "source_sha256": "963ed31e0496821dca46b9f5c5b8ddd77712a9e95551eb00addb9e3792a6bc58",
+      "payload": "plan/tmp/github-import/ws023-p011.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/319",
+      "number": 319,
+      "verified": true
+    },
+    "ws024-p001": {
+      "path": "plan/ws024/phase001/phase.md",
+      "source_sha256": "87dd1dc9353e7d80f46a74680e685438251ee0c08df7887d110b4168fd606ecd",
+      "payload": "plan/tmp/github-import/ws024-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/320",
+      "number": 320,
+      "verified": true
+    },
+    "ws024-p002": {
+      "path": "plan/ws024/phase002/phase.md",
+      "source_sha256": "8a7824a4116c0283a5583a389e692af12b1bb0070a530c92568b98776c5b9dd9",
+      "payload": "plan/tmp/github-import/ws024-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/321",
+      "number": 321,
+      "verified": true
+    },
+    "ws024-p003": {
+      "path": "plan/ws024/phase003/phase.md",
+      "source_sha256": "4a35556e04b792507e422523bd3dde8caaafce240474dbe6b33fb197286e5a3b",
+      "payload": "plan/tmp/github-import/ws024-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/322",
+      "number": 322,
+      "verified": true
+    },
+    "ws024-p004": {
+      "path": "plan/ws024/phase004/phase.md",
+      "source_sha256": "0687d03fc7caa9c1b044b3f98b9d87a7f8b7ca2e67d6cec2712a90df650564b5",
+      "payload": "plan/tmp/github-import/ws024-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/323",
+      "number": 323,
+      "verified": true
+    },
+    "ws025-p001": {
+      "path": "plan/ws025/phase001/phase.md",
+      "source_sha256": "e00d8cb95636722307868fea3720af49a6bda4d431656a2efe73dc8d62dd5c5e",
+      "payload": "plan/tmp/github-import/ws025-p001.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/324",
+      "number": 324,
+      "verified": true
+    },
+    "ws025-p002": {
+      "path": "plan/ws025/phase002/phase.md",
+      "source_sha256": "764cbfc499f2fa2e7b01c22036f5bc5fd7daccdbb37653bf06fe4620eaf7d7c2",
+      "payload": "plan/tmp/github-import/ws025-p002.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/325",
+      "number": 325,
+      "verified": true
+    },
+    "ws025-p003": {
+      "path": "plan/ws025/phase003/phase.md",
+      "source_sha256": "a554e4fbcea010f674742b83954373a478033056d369cbd8be5a9040e2766c95",
+      "payload": "plan/tmp/github-import/ws025-p003.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/326",
+      "number": 326,
+      "verified": true
+    },
+    "ws025-p004": {
+      "path": "plan/ws025/phase004/phase.md",
+      "source_sha256": "00cadc111e04238736c163b95c9f6b4481081e8b5ccd8bc9b6dd1155b8ad484f",
+      "payload": "plan/tmp/github-import/ws025-p004.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/327",
+      "number": 327,
+      "verified": true
+    },
+    "ws025-p005": {
+      "path": "plan/ws025/phase005/phase.md",
+      "source_sha256": "03c03409d9e149eb693a820e7e45932d688c671fc5a8d6228330272595290bd2",
+      "payload": "plan/tmp/github-import/ws025-p005.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/328",
+      "number": 328,
+      "verified": true
+    },
+    "ws025-p006": {
+      "path": "plan/ws025/phase006/phase.md",
+      "source_sha256": "cacd36321f53d448a19139cdbd442b6d191d20433ea831bbda7fc808ff2fbb49",
+      "payload": "plan/tmp/github-import/ws025-p006.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/329",
+      "number": 329,
+      "verified": true
+    },
+    "ws025-p007": {
+      "path": "plan/ws025/phase007/phase.md",
+      "source_sha256": "6d3aa57efd32f61bf3cfd8a97a0dc0d0fa3900c2dfd05baefa0f334c4479edef",
+      "payload": "plan/tmp/github-import/ws025-p007.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/330",
+      "number": 330,
+      "verified": true
+    },
+    "ws025-p008": {
+      "path": "plan/ws025/phase008/phase.md",
+      "source_sha256": "1a076395af1e6d453e55357cfe44dd8ff27f3872bc6d2addbc55b89713261510",
+      "payload": "plan/tmp/github-import/ws025-p008.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/331",
+      "number": 331,
+      "verified": true
+    },
+    "ws025-p009": {
+      "path": "plan/ws025/phase009/phase.md",
+      "source_sha256": "c2ce1011dfab6ea98d0e58cd4a7506b62f35e6b7b00b4ce9da15788041028fcf",
+      "payload": "plan/tmp/github-import/ws025-p009.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/332",
+      "number": 332,
+      "verified": true
+    },
+    "ws025-p010": {
+      "path": "plan/ws025/phase010/phase.md",
+      "source_sha256": "2fbd4ad020488131108e2379f800fbe38b7345098c865176d800cbef60d2438a",
+      "payload": "plan/tmp/github-import/ws025-p010.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/333",
+      "number": 333,
+      "verified": true
+    },
+    "ws025-p011": {
+      "path": "plan/ws025/phase011/phase.md",
+      "source_sha256": "930a41ea64e59fb0460ada3a68f6cb6a293583f389717e710d8a50c7d1fb20b7",
+      "payload": "plan/tmp/github-import/ws025-p011.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/334",
+      "number": 334,
+      "verified": true
+    },
+    "ws025-p012": {
+      "path": "plan/ws025/phase012/phase.md",
+      "source_sha256": "989a5344c48aadcdb21ea986820572b7f83d986df858803ed3116e01c0b758c5",
+      "payload": "plan/tmp/github-import/ws025-p012.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/335",
+      "number": 335,
+      "verified": true
+    },
+    "ws025-p013": {
+      "path": "plan/ws025/phase013/phase.md",
+      "source_sha256": "f0e2b37766dcb9d5476cd5f06e0c2824a0236dd2f91f1c714e85a9aa07b41df1",
+      "payload": "plan/tmp/github-import/ws025-p013.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/336",
+      "number": 336,
+      "verified": true
+    },
+    "ws025-p014": {
+      "path": "plan/ws025/phase014/phase.md",
+      "source_sha256": "5f42172b59ec6fa51fb09e0a752b602b815bc07ce00856a48fd5fd532205a549",
+      "payload": "plan/tmp/github-import/ws025-p014.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/337",
+      "number": 337,
+      "verified": true
+    },
+    "ws025-p015": {
+      "path": "plan/ws025/phase015/phase.md",
+      "source_sha256": "2d5db342222e3f3bdf03065fce75a28666a875004570a4aefea11f63824e39f3",
+      "payload": "plan/tmp/github-import/ws025-p015.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/338",
+      "number": 338,
+      "verified": true
+    },
+    "ws025-p016": {
+      "path": "plan/ws025/phase016/phase.md",
+      "source_sha256": "d3a6c8b76860f24f5ad097207053973ae8c2e7f0c71b965172f0c610a66fae11",
+      "payload": "plan/tmp/github-import/ws025-p016.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/339",
+      "number": 339,
+      "verified": true
+    },
+    "ws025-p017": {
+      "path": "plan/ws025/phase017/phase.md",
+      "source_sha256": "2cc755900b64e29f820d4b66bc3017df981a52d3dd0025a90eab005ea31a0247",
+      "payload": "plan/tmp/github-import/ws025-p017.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/340",
+      "number": 340,
+      "verified": true
+    },
+    "ws025-p018": {
+      "path": "plan/ws025/phase018/phase.md",
+      "source_sha256": "cb71bbe6b5031f1cb82bec9b493b3fce488cb1721557c316d5e45af04e3972b1",
+      "payload": "plan/tmp/github-import/ws025-p018.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/341",
+      "number": 341,
+      "verified": true
+    },
+    "ws025-p019": {
+      "path": "plan/ws025/phase019/phase.md",
+      "source_sha256": "ad3ab54553daf0f8d901e2ddba7bb3b901df7a84f399d2ef166f0ba9dbd593f5",
+      "payload": "plan/tmp/github-import/ws025-p019.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/342",
+      "number": 342,
+      "verified": true
+    },
+    "ws025-p020": {
+      "path": "plan/ws025/phase020/phase.md",
+      "source_sha256": "10fac4feeaaedc8489581e1426161606603340f717187dce66c400532e3719b7",
+      "payload": "plan/tmp/github-import/ws025-p020.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/343",
+      "number": 343,
+      "verified": true
+    },
+    "ws025-p021": {
+      "path": "plan/ws025/phase021/phase.md",
+      "source_sha256": "d70c29ae99900251242998b4417e3591880b95576c552421b22b1867e5c7b36f",
+      "payload": "plan/tmp/github-import/ws025-p021.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/344",
+      "number": 344,
+      "verified": true
+    },
+    "ws025-p022": {
+      "path": "plan/ws025/phase022/phase.md",
+      "source_sha256": "2dffb40b4a2bd56c8035d7928e42902a70157b8baa03e1dae4a830ba11f69525",
+      "payload": "plan/tmp/github-import/ws025-p022.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/345",
+      "number": 345,
+      "verified": true
+    },
+    "ws025-p023": {
+      "path": "plan/ws025/phase023/phase.md",
+      "source_sha256": "17a894449f8d2161ffe6cd019a39d23f87b5010e879ad35a2bf74fa1d5a90c6e",
+      "payload": "plan/tmp/github-import/ws025-p023.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/346",
+      "number": 346,
+      "verified": true
+    },
+    "ws025-p024": {
+      "path": "plan/ws025/phase024/phase.md",
+      "source_sha256": "1ea82d9d44808d043e79c4872a875be449a83a93b632b61a9a9a46243538135b",
+      "payload": "plan/tmp/github-import/ws025-p024.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/347",
+      "number": 347,
+      "verified": true
+    },
+    "ws025-p025": {
+      "path": "plan/ws025/phase025/phase.md",
+      "source_sha256": "16924452b9228d53aeb2f240fd6407107ffd64ec246dcae694f971aad55331de",
+      "payload": "plan/tmp/github-import/ws025-p025.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/348",
+      "number": 348,
+      "verified": true
+    },
+    "ws025-p026": {
+      "path": "plan/ws025/phase026/phase.md",
+      "source_sha256": "106cfd3cb088c9bb4a2a0215fc326fdc7d55b9d1f19d08cfcaad16bfa25dec02",
+      "payload": "plan/tmp/github-import/ws025-p026.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/349",
+      "number": 349,
+      "verified": true
+    },
+    "ws025-p027": {
+      "path": "plan/ws025/phase027/phase.md",
+      "source_sha256": "987dd01957ccef64b03e71e7cd1f3c05dd8a3eaa9a46b2bb9b48fb6b1c12518e",
+      "payload": "plan/tmp/github-import/ws025-p027.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/350",
+      "number": 350,
+      "verified": true
+    },
+    "ws025-p028": {
+      "path": "plan/ws025/phase028/phase.md",
+      "source_sha256": "4e367600b0fb0b74880a758f803cfe218b378b9a71da7367ef9a1d1d12e507ec",
+      "payload": "plan/tmp/github-import/ws025-p028.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/351",
+      "number": 351,
+      "verified": true
+    },
+    "ws025-p029": {
+      "path": "plan/ws025/phase029/phase.md",
+      "source_sha256": "784dfaa71226e7d3c1756d97f5a06b32b0e0bc83151b969ac572e6edd5ce9368",
+      "payload": "plan/tmp/github-import/ws025-p029.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/352",
+      "number": 352,
+      "verified": true
+    },
+    "ws025-p030": {
+      "path": "plan/ws025/phase030/phase.md",
+      "source_sha256": "48d19e36e3c4947acff1dfd00f9f04d8bd482320a8120a85179f86b690fcbdac",
+      "payload": "plan/tmp/github-import/ws025-p030.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/353",
+      "number": 353,
+      "verified": true
+    },
+    "ws025-p031": {
+      "path": "plan/ws025/phase031/phase.md",
+      "source_sha256": "6a8e654def1f6fd2f4bc62be6a99cf245b9ddee3fe9b5f91443ab69e552ae67b",
+      "payload": "plan/tmp/github-import/ws025-p031.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/354",
+      "number": 354,
+      "verified": true
+    },
+    "ws025-p032": {
+      "path": "plan/ws025/phase032/phase.md",
+      "source_sha256": "29a4c82a47b12ed5a7a3951ff2bd153c9cbdd44ea48332ed1433aeb340d64734",
+      "payload": "plan/tmp/github-import/ws025-p032.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/355",
+      "number": 355,
+      "verified": true
+    },
+    "ws025-p033": {
+      "path": "plan/ws025/phase033/phase.md",
+      "source_sha256": "c97ae6aac08b0d92a20b0182cf11ac5715d97be9cccf03c563cbf928f185edc7",
+      "payload": "plan/tmp/github-import/ws025-p033.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/356",
+      "number": 356,
+      "verified": true
+    },
+    "ws025-p034": {
+      "path": "plan/ws025/phase034/phase.md",
+      "source_sha256": "9c2e7d65caf95994226581cb02a025c3989b79e376eae0afb783fe08d88e9293",
+      "payload": "plan/tmp/github-import/ws025-p034.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/357",
+      "number": 357,
+      "verified": true
+    },
+    "ws025-p035": {
+      "path": "plan/ws025/phase035/phase.md",
+      "source_sha256": "41db7ed9ba0341b95fdbb3cd794775f67bf24189b33011617a50e35da40a5f67",
+      "payload": "plan/tmp/github-import/ws025-p035.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/358",
+      "number": 358,
+      "verified": true
+    },
+    "ws025-p036": {
+      "path": "plan/ws025/phase036/phase.md",
+      "source_sha256": "7c6b61170c5152fbe367fdc7fea213dd22a9c8af7c86bec23ba18629fa4b62c5",
+      "payload": "plan/tmp/github-import/ws025-p036.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/359",
+      "number": 359,
+      "verified": true
+    },
+    "ws025-p037": {
+      "path": "plan/ws025/phase037/phase.md",
+      "source_sha256": "31147ca40f50792dda3dd98540475f561dbb85a730e8296488f520654fdb7a82",
+      "payload": "plan/tmp/github-import/ws025-p037.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/360",
+      "number": 360,
+      "verified": true
+    },
+    "ws025-p038": {
+      "path": "plan/ws025/phase038/phase.md",
+      "source_sha256": "df8091c88e8caafed13f90ebe36375e31bc43a6719f4955455e047666b153af1",
+      "payload": "plan/tmp/github-import/ws025-p038.md",
+      "operation": "created",
+      "url": "https://github.com/awemorris/zedBSD/issues/361",
+      "number": 361,
+      "verified": true
+    }
+  },
+  "status": "uploaded",
+  "verification": {
+    "bodies": 361,
+    "parent_child_links": 360,
+    "continuation_comments": 1,
+    "approved_sources_unchanged": true
+  },
+  "display_policy": {
+    "prepend_child_issue_index": false,
+    "removed_and_verified": 27
+  }
+}

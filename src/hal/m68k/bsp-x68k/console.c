@@ -194,7 +194,6 @@ void hal_cons_putc(int character) { cons_putc(character); }
 void hal_cons_move_cursor(int row, int column)
 { (void)hal_cons_set_cursor((unsigned)row, (unsigned)column); }
 int hal_cons_getc(void) { return cons_getc(); }
-void hal_cons_set_mode(enum hal_cons_mode mode) { state.mode = mode; }
 void hal_cons_write(const char *string) { cons_puts(string); }
 void hal_cons_write_n(const char *string, unsigned length)
 { if (string != NULL) while (length-- != 0) cons_putc(*string++); }
@@ -256,13 +255,5 @@ int hal_cons_set_cursor(unsigned row, unsigned column)
 void hal_cons_show_cursor(int visible) { state.cursor_visible = visible != 0; }
 void hal_cons_save_state(struct hal_cons_state *output)
 { if (output != NULL) *output = state; }
-void hal_cons_restore_terminal(const struct hal_cons_state *input)
-{
-	state.mode = HAL_CONS_TERMINAL;
-	if (input != NULL && input->row < HAL_CONS_ROWS &&
-	    input->column < HAL_CONS_COLUMNS)
-		state = *input;
-}
-
 void hal_cons_suspend(void) {}
 void hal_cons_resume(void) {}

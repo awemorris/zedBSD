@@ -106,6 +106,7 @@ static void input_lock_release(bool enabled);
 static void pump_locked(void);
 static void keyboard_interrupt(int irq, hal_irq_ack_t acknowledge, void *argument);
 static int legacy_character(const char *symbol);
+static void write_n(const char *string, unsigned length);
 
 /*
  * Clears one PC-98 text-console row.
@@ -216,14 +217,14 @@ hal_cons_write(
 		length++;
 
 	/* Writes the measured byte range. */
-	hal_cons_write_n(string, length);
+	write_n(string, length);
 }
 
 /*
  * Writes a bounded UTF-8 string to the PC-98 text console.
  */
-void
-hal_cons_write_n(
+static void
+write_n(
 	const char *string,
 	unsigned length)
 {
@@ -495,59 +496,6 @@ hal_cons_save_state(
 	state->row = cursor_row;
 	state->column = cursor_column;
 	state->cursor_visible = cursor_visible;
-}
-
-/*
- * Restores PC-98 terminal mode around retained output state.
- */
-void
-hal_cons_restore_terminal(
-	const struct hal_cons_state *state)
-{
-	unsigned output_row;
-	unsigned output_column;
-
-	/* Captures the current logical output position. */
-	output_row = cursor_row;
-	output_column = cursor_column;
-
-	/* Selects terminal mode and repairs an invalid retained position. */
-	console_mode = HAL_CONS_TERMINAL;
-	if (output_row >= HAL_CONS_ROWS) {
-		output_row = 0;
-		output_column = 0;
-	}
-
-	/* Selects a later valid saved row or retains the output position. */
-	if (state != NULL && state->mode == HAL_CONS_TERMINAL &&
-	    state->row < HAL_CONS_ROWS &&
-	    state->column < HAL_CONS_COLUMNS &&
-	    state->row > output_row) {
-		cursor_row = state->row;
-		cursor_column = state->column;
-	} else {
-		cursor_row = output_row;
-		cursor_column = output_column;
-	}
-
-	/* Starts subsequent terminal output on a fresh row when necessary. */
-	if (cursor_column != 0)
-		newline();
-
-	/* Restores and publishes cursor visibility. */
-	cursor_visible = 1;
-	hal_cons_update_cursor();
-}
-
-/*
- * Selects the PC-98 console output mode.
- */
-void
-hal_cons_set_mode(
-	enum hal_cons_mode mode)
-{
-	/* Publishes the requested console mode. */
-	console_mode = mode;
 }
 
 /*
@@ -926,38 +874,6 @@ hal_cons_poll_event(
 }
 
 /*
- * Reports PC-98 keyboard input capabilities.
- */
-void
-hal_cons_get_input_info(
-	struct hal_cons_input_info *info)
-{
-	static const char *const symbols[] = {
-		"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k",
-		"l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v",
-		"w", "x", "y", "z", " ",
-		"jis-1", "jis-2", "jis-3", "jis-4", "jis-5", "jis-6",
-		"jis-7", "jis-8", "jis-9", "jis-0", "jis-minus",
-		"jis-caret", "jis-yen", "jis-at", "jis-lbrace", "jis-semi",
-		"jis-colon", "jis-rbrace", "jis-comma", "jis-dot",
-		"jis-slash", "jis-ro", "esc", "backspace", "tab", "enter",
-		"leftshift", "rightshift", "leftctrl", "leftalt", "capslock",
-		"kana", "home", "up", "pageup", "left", "right", "end",
-		"down", "pagedown", "insert", "delete", "f1", "f2", "f3",
-		"f4", "f5", "f6", "f7", "f8", "f9", "f10"
-	};
-
-	/* Ignores a missing capability destination. */
-	if (info == NULL)
-		return;
-
-	/* Publishes event modes and the stable symbol inventory. */
-	info->flags = HAL_CONS_INPUT_RELEASE | HAL_CONS_INPUT_REPEAT;
-	info->symbols = symbols;
-	info->symbol_count = sizeof(symbols) / sizeof(symbols[0]);
-}
-
-/*
  * Reads one PC-98 keyboard event, waiting when necessary.
  */
 int
@@ -1026,25 +942,6 @@ hal_cons_getc(
 		if (character >= 0)
 			return character;
 	}
-}
-
-/*
- * Reports legacy PC-98 keyboard state for one key value.
- */
-int
-hal_cons_key_state(
-	int key)
-{
-	bool enabled;
-	int down;
-
-	/* Samples the selected physical key under the input lock. */
-	enabled = input_lock_acquire();
-	down = pc98_keyboard_is_down(&keyboard, key);
-	input_lock_release(enabled);
-
-	/* Returns the sampled key state or unsupported-key marker. */
-	return down;
 }
 
 /*

@@ -45,6 +45,7 @@ amd64_cmain(
 	pcat_cons_init();
 	amd64_cpu_init();
 	amd64_percpu_bootstrap();
+
 	hal_puts("\nzedBSD amd64 HAL\n");
 	hal_puts("A64 ENTRY PASS\n");
 
@@ -52,11 +53,13 @@ amd64_cmain(
 	amd64_page_init();
 	amd64_space_init();
 	amd64_range_page_init();
+
 	hal_puts("A64 PAGING PASS\n");
 
 	/* Installs the BSP descriptor and interrupt tables. */
 	amd64_descriptor_init();
 	amd64_int_init();
+
 	hal_puts("A64 IDT READY\n");
 
 	/* Discovers the platform interrupt topology from ACPI. */
@@ -69,6 +72,7 @@ amd64_cmain(
 	error = amd64_lapic_init(&acpi);
 	if (error != HAL_OK)
 		HAL_FATAL("amd64 Local APIC initialization failed");
+
 	amd64_smp_init(&acpi);
 
 	/* Retires loader ownership after the last boot discovery consumer. */
@@ -76,15 +80,22 @@ amd64_cmain(
 
 	/* Enables external interrupts, the scheduler clock, and console input. */
 	irq_init(&acpi);
+
 	error = bsp_timer_init();
 	if (error != HAL_OK)
 		HAL_FATAL("amd64 Local APIC timer initialization failed");
+
 	pcat_cons_irq_init();
+
 	hal_puts("A64 CONSOLE IRQ READY\n");
 	hal_puts("A64 IRQ READY\n");
 
 	/* Converts the board handoff and transfers control to the kernel. */
 	handoff = bsp_kernel_handoff(raw_boot_info);
+
+	/*
+	 * Call the kernel entry point.
+	 */
 	kernel_entry(handoff);
 
 	/* Treats an unexpected return from the kernel as fatal. */

@@ -1,0 +1,6050 @@
+[
+  {
+    "logical_id": "master",
+    "number": 1,
+    "values": {
+      "Logical ID": "master",
+      "Record Kind": "Board",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Status Note": "active"
+    }
+  },
+  {
+    "logical_id": "ws001",
+    "number": 2,
+    "values": {
+      "Logical ID": "ws001",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Awesome Plan Status": "incomplete",
+      "Status Note": "in progress; compliance ledger remains active"
+    }
+  },
+  {
+    "logical_id": "ws002",
+    "number": 3,
+    "values": {
+      "Logical ID": "ws002",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2, O3",
+      "WS Priority": 5,
+      "Awesome Plan Status": "completed",
+      "Status Note": "completed; service baseline and corrective phases accepted"
+    }
+  },
+  {
+    "logical_id": "ws003",
+    "number": 4,
+    "values": {
+      "Logical ID": "ws003",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Awesome Plan Status": "incomplete",
+      "Status Note": "active; `ws003-p004` through `ws003-p009` complete in q013; q014"
+    }
+  },
+  {
+    "logical_id": "ws004",
+    "number": 5,
+    "values": {
+      "Logical ID": "ws004",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Awesome Plan Status": "incomplete",
+      "Status Note": "active follow-up; q071 completed the reopened W52 RTL8822BU path and"
+    }
+  },
+  {
+    "logical_id": "ws005",
+    "number": 6,
+    "values": {
+      "Logical ID": "ws005",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Awesome Plan Status": "completed",
+      "Status Note": "p001--p011 historically complete (`q071`); p012 complete (`q085`)."
+    }
+  },
+  {
+    "logical_id": "ws006",
+    "number": 7,
+    "values": {
+      "Logical ID": "ws006",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG003",
+      "Objectives": "O2, O4",
+      "WS Priority": 2,
+      "Awesome Plan Status": "completed",
+      "Status Note": "completed (q147), including the user's 2026-09-05 physical USB HID"
+    }
+  },
+  {
+    "logical_id": "ws007",
+    "number": 8,
+    "values": {
+      "Logical ID": "ws007",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Objectives": "O2",
+      "Awesome Plan Status": "incomplete",
+      "Status Note": "active; X11 launch and the independently reproduced q039 PC-98 PIC"
+    }
+  },
+  {
+    "logical_id": "ws008",
+    "number": 9,
+    "values": {
+      "Logical ID": "ws008",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG001, MG007",
+      "Objectives": "O1, O2, O4, O5",
+      "Awesome Plan Status": "completed",
+      "Status Note": "complete (`q063`)"
+    }
+  },
+  {
+    "logical_id": "ws009",
+    "number": 10,
+    "values": {
+      "Logical ID": "ws009",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG006, MG008, MG009",
+      "Objectives": "O2, O4, O5",
+      "WS Priority": 6,
+      "Awesome Plan Status": "incomplete",
+      "Status Note": "DOC54 manual-held dependency on WS014"
+    }
+  },
+  {
+    "logical_id": "ws010",
+    "number": 11,
+    "values": {
+      "Logical ID": "ws010",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG007",
+      "Objectives": "O1, O2, O4, O5",
+      "Awesome Plan Status": "completed",
+      "Status Note": "complete (`q063`)"
+    }
+  },
+  {
+    "logical_id": "ws011",
+    "number": 12,
+    "values": {
+      "Logical ID": "ws011",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG003",
+      "Objectives": "O1, O2, O3, O4",
+      "Awesome Plan Status": "completed",
+      "Status Note": "completed — commit confirmedはユーザー確認により完了。"
+    }
+  },
+  {
+    "logical_id": "ws012",
+    "number": 13,
+    "values": {
+      "Logical ID": "ws012",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG003",
+      "Objectives": "O1, O2, O3, O4",
+      "Awesome Plan Status": "completed",
+      "Status Note": "Complete (`q018`, 2026-08-28)"
+    }
+  },
+  {
+    "logical_id": "ws013",
+    "number": 14,
+    "values": {
+      "Logical ID": "ws013",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG007",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2",
+      "Awesome Plan Status": "planning",
+      "Status Note": "Future List; execution not scheduled"
+    }
+  },
+  {
+    "logical_id": "ws014",
+    "number": 15,
+    "values": {
+      "Logical ID": "ws014",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG003",
+      "Objectives": "O2, O4",
+      "Awesome Plan Status": "incomplete",
+      "Status Note": "Manual hold"
+    }
+  },
+  {
+    "logical_id": "ws015",
+    "number": 16,
+    "values": {
+      "Logical ID": "ws015",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG007",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2",
+      "Awesome Plan Status": "planning",
+      "Status Note": "Future List; execution not scheduled"
+    }
+  },
+  {
+    "logical_id": "ws016",
+    "number": 17,
+    "values": {
+      "Logical ID": "ws016",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Objectives": "O1, O2",
+      "Awesome Plan Status": "completed",
+      "Status Note": "Complete (`q021`)"
+    }
+  },
+  {
+    "logical_id": "ws017",
+    "number": 18,
+    "values": {
+      "Logical ID": "ws017",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Objectives": "O2",
+      "Awesome Plan Status": "incomplete",
+      "Status Note": "Queue-ready; the initial-protection `mprotect` ceiling is selected"
+    }
+  },
+  {
+    "logical_id": "ws018",
+    "number": 19,
+    "values": {
+      "Logical ID": "ws018",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Awesome Plan Status": "completed",
+      "Status Note": "p001--p020 complete (q087)."
+    }
+  },
+  {
+    "logical_id": "ws019",
+    "number": 20,
+    "values": {
+      "Logical ID": "ws019",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "WS Priority": 4,
+      "Awesome Plan Status": "completed",
+      "Status Note": "completed / cleared q186"
+    }
+  },
+  {
+    "logical_id": "ws020",
+    "number": 21,
+    "values": {
+      "Logical ID": "ws020",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Awesome Plan Status": "completed",
+      "Status Note": "complete. P001-p003 and p005-p006 automatic work pass, and the user"
+    }
+  },
+  {
+    "logical_id": "ws021",
+    "number": 22,
+    "values": {
+      "Logical ID": "ws021",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O4, O5",
+      "Awesome Plan Status": "completed",
+      "Status Note": "complete (`q064`)"
+    }
+  },
+  {
+    "logical_id": "ws022",
+    "number": 23,
+    "values": {
+      "Logical ID": "ws022",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Objectives": "O1",
+      "WS Priority": 3,
+      "Awesome Plan Status": "completed",
+      "Status Note": "completed (q128); amd64/i386 static TLSとdynamic回帰、PC98確認完了"
+    }
+  },
+  {
+    "logical_id": "ws023",
+    "number": 24,
+    "values": {
+      "Logical ID": "ws023",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG008",
+      "Objectives": "O4, O5",
+      "Awesome Plan Status": "completed",
+      "Status Note": "complete (`q067`)"
+    }
+  },
+  {
+    "logical_id": "ws024",
+    "number": 25,
+    "values": {
+      "Logical ID": "ws024",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Objectives": "O1, O2",
+      "Awesome Plan Status": "completed",
+      "Status Note": "completed (q102); p001–p004 complete; unified production owner and selected U01–U24 acceptance pass"
+    }
+  },
+  {
+    "logical_id": "ws025",
+    "number": 26,
+    "values": {
+      "Logical ID": "ws025",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "Yes",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Focused Goal IDs": "fg001, fg002, fg003",
+      "WS Priority": 1,
+      "Awesome Plan Status": "incomplete",
+      "Status Note": "未完了。p028 cancelled、p029修正後確認待ち、p030実装確認済み/残る比較未確認、p032未着手。p036名称統一は完了、p037旧設計は現行修正で置換、p038現行APIの確認残。詳細はpost-rollback-review.md。"
+    }
+  },
+  {
+    "logical_id": "ws026",
+    "number": 27,
+    "values": {
+      "Logical ID": "ws026",
+      "Record Kind": "WS",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG009",
+      "Objectives": "O4, O5",
+      "Awesome Plan Status": "planned",
+      "Status Note": "planned（概要のみ。Phase未定義・Queue未投入）"
+    }
+  },
+  {
+    "logical_id": "ws001-p000",
+    "number": 28,
+    "values": {
+      "Logical ID": "ws001-p000",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete"
+    }
+  },
+  {
+    "logical_id": "ws001-p001",
+    "number": 29,
+    "values": {
+      "Logical ID": "ws001-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete"
+    }
+  },
+  {
+    "logical_id": "ws001-p002",
+    "number": 30,
+    "values": {
+      "Logical ID": "ws001-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete milestone; compliance review remains iterative"
+    }
+  },
+  {
+    "logical_id": "ws001-p003",
+    "number": 31,
+    "values": {
+      "Logical ID": "ws001-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete milestone"
+    }
+  },
+  {
+    "logical_id": "ws001-p004",
+    "number": 32,
+    "values": {
+      "Logical ID": "ws001-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete milestone; audit findings remain"
+    }
+  },
+  {
+    "logical_id": "ws001-p005",
+    "number": 33,
+    "values": {
+      "Logical ID": "ws001-p005",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete milestone"
+    }
+  },
+  {
+    "logical_id": "ws001-p006",
+    "number": 34,
+    "values": {
+      "Logical ID": "ws001-p006",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete milestone"
+    }
+  },
+  {
+    "logical_id": "ws001-p007",
+    "number": 35,
+    "values": {
+      "Logical ID": "ws001-p007",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete milestone"
+    }
+  },
+  {
+    "logical_id": "ws001-p008",
+    "number": 36,
+    "values": {
+      "Logical ID": "ws001-p008",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete milestone"
+    }
+  },
+  {
+    "logical_id": "ws001-p009",
+    "number": 37,
+    "values": {
+      "Logical ID": "ws001-p009",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete as audit; findings remain active in the WS ledger"
+    }
+  },
+  {
+    "logical_id": "ws001-p010",
+    "number": 38,
+    "values": {
+      "Logical ID": "ws001-p010",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete at the local-replacement milestone"
+    }
+  },
+  {
+    "logical_id": "ws001-p011",
+    "number": 39,
+    "values": {
+      "Logical ID": "ws001-p011",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete implementation milestone; conformance review remains open"
+    }
+  },
+  {
+    "logical_id": "ws001-p012",
+    "number": 40,
+    "values": {
+      "Logical ID": "ws001-p012",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete implementation milestone; conformance review remains open"
+    }
+  },
+  {
+    "logical_id": "ws001-p013",
+    "number": 41,
+    "values": {
+      "Logical ID": "ws001-p013",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete"
+    }
+  },
+  {
+    "logical_id": "ws001-p014",
+    "number": 42,
+    "values": {
+      "Logical ID": "ws001-p014",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (`q023`, 2026-08-28)"
+    }
+  },
+  {
+    "logical_id": "ws001-p015",
+    "number": 43,
+    "values": {
+      "Logical ID": "ws001-p015",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`agent2-q001`, 2026-08-31)"
+    }
+  },
+  {
+    "logical_id": "ws001-p016",
+    "number": 44,
+    "values": {
+      "Logical ID": "ws001-p016",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete implementation milestone (`agent2-q001`, 2026-08-31)"
+    }
+  },
+  {
+    "logical_id": "ws001-p017",
+    "number": 45,
+    "values": {
+      "Logical ID": "ws001-p017",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete implementation milestone (`agent2-q001`, 2026-08-31)"
+    }
+  },
+  {
+    "logical_id": "ws001-p018",
+    "number": 46,
+    "values": {
+      "Logical ID": "ws001-p018",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete implementation milestone (`agent2-q001`, 2026-08-31)"
+    }
+  },
+  {
+    "logical_id": "ws001-p019",
+    "number": 47,
+    "values": {
+      "Logical ID": "ws001-p019",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`agent2-q002`, 2026-08-31)"
+    }
+  },
+  {
+    "logical_id": "ws001-p020",
+    "number": 48,
+    "values": {
+      "Logical ID": "ws001-p020",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "uncleared",
+      "Status Note": "Uncleared (`agent2-q003`, 2026-08-31)"
+    }
+  },
+  {
+    "logical_id": "ws001-p021",
+    "number": 49,
+    "values": {
+      "Logical ID": "ws001-p021",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`agent2-q006`, 2026-08-31)"
+    }
+  },
+  {
+    "logical_id": "ws001-p022",
+    "number": 50,
+    "values": {
+      "Logical ID": "ws001-p022",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q050`, 2026-09-01)"
+    }
+  },
+  {
+    "logical_id": "ws001-p023",
+    "number": 51,
+    "values": {
+      "Logical ID": "ws001-p023",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q050`, 2026-09-01)"
+    }
+  },
+  {
+    "logical_id": "ws001-p085",
+    "number": 52,
+    "values": {
+      "Logical ID": "ws001-p085",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws001",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete milestone"
+    }
+  },
+  {
+    "logical_id": "ws002-p011",
+    "number": 53,
+    "values": {
+      "Logical ID": "ws002-p011",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws002",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete"
+    }
+  },
+  {
+    "logical_id": "ws002-p012",
+    "number": 54,
+    "values": {
+      "Logical ID": "ws002-p012",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws002",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete"
+    }
+  },
+  {
+    "logical_id": "ws002-p013",
+    "number": 55,
+    "values": {
+      "Logical ID": "ws002-p013",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws002",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete baseline"
+    }
+  },
+  {
+    "logical_id": "ws002-p014",
+    "number": 56,
+    "values": {
+      "Logical ID": "ws002-p014",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws002",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete baseline"
+    }
+  },
+  {
+    "logical_id": "ws002-p015",
+    "number": 57,
+    "values": {
+      "Logical ID": "ws002-p015",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws002",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete baseline; superseded in part by `ws002-p020`"
+    }
+  },
+  {
+    "logical_id": "ws002-p016",
+    "number": 58,
+    "values": {
+      "Logical ID": "ws002-p016",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws002",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete baseline"
+    }
+  },
+  {
+    "logical_id": "ws002-p017",
+    "number": 59,
+    "values": {
+      "Logical ID": "ws002-p017",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws002",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete optional feature"
+    }
+  },
+  {
+    "logical_id": "ws002-p018",
+    "number": 60,
+    "values": {
+      "Logical ID": "ws002-p018",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws002",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "uncleared",
+      "Status Note": "partial with recorded compatibility handoffs"
+    }
+  },
+  {
+    "logical_id": "ws002-p019",
+    "number": 61,
+    "values": {
+      "Logical ID": "ws002-p019",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws002",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete for the documented minimum system"
+    }
+  },
+  {
+    "logical_id": "ws002-p020",
+    "number": 62,
+    "values": {
+      "Logical ID": "ws002-p020",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws002",
+      "Phase Disposition": "normal",
+      "Status Note": "implementation milestone complete; focused host/build/QEMU gates pass",
+      "Awesome Plan Status": "cleared"
+    }
+  },
+  {
+    "logical_id": "ws002-p021",
+    "number": 63,
+    "values": {
+      "Logical ID": "ws002-p021",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws002",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (user acceptance; current runtime verified, historical cause unproven)"
+    }
+  },
+  {
+    "logical_id": "ws002-p022",
+    "number": 64,
+    "values": {
+      "Logical ID": "ws002-p022",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws002",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete; `BUG-002` resolved"
+    }
+  },
+  {
+    "logical_id": "ws002-p023",
+    "number": 65,
+    "values": {
+      "Logical ID": "ws002-p023",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws002",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q135 QEMU reproduction and correction)"
+    }
+  },
+  {
+    "logical_id": "ws002-p024",
+    "number": 66,
+    "values": {
+      "Logical ID": "ws002-p024",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws002",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q142); q141 heap/UHCI repair and current regression gates pass"
+    }
+  },
+  {
+    "logical_id": "ws003-p001",
+    "number": 67,
+    "values": {
+      "Logical ID": "ws003-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "uncleared",
+      "Status Note": "carried forward; WLAN identity partially captured"
+    }
+  },
+  {
+    "logical_id": "ws003-p002",
+    "number": 68,
+    "values": {
+      "Logical ID": "ws003-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete"
+    }
+  },
+  {
+    "logical_id": "ws003-p003",
+    "number": 69,
+    "values": {
+      "Logical ID": "ws003-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "uncleared",
+      "Status Note": "Partial (`q012` finished; BR-T33 uncleared)"
+    }
+  },
+  {
+    "logical_id": "ws003-p004",
+    "number": 70,
+    "values": {
+      "Logical ID": "ws003-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q013`)"
+    }
+  },
+  {
+    "logical_id": "ws003-p005",
+    "number": 71,
+    "values": {
+      "Logical ID": "ws003-p005",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q013`)"
+    }
+  },
+  {
+    "logical_id": "ws003-p006",
+    "number": 72,
+    "values": {
+      "Logical ID": "ws003-p006",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q013`)"
+    }
+  },
+  {
+    "logical_id": "ws003-p007",
+    "number": 73,
+    "values": {
+      "Logical ID": "ws003-p007",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q013`)"
+    }
+  },
+  {
+    "logical_id": "ws003-p008",
+    "number": 74,
+    "values": {
+      "Logical ID": "ws003-p008",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q013`)"
+    }
+  },
+  {
+    "logical_id": "ws003-p009",
+    "number": 75,
+    "values": {
+      "Logical ID": "ws003-p009",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q013`)"
+    }
+  },
+  {
+    "logical_id": "ws003-p010",
+    "number": 76,
+    "values": {
+      "Logical ID": "ws003-p010",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q014`)"
+    }
+  },
+  {
+    "logical_id": "ws003-p011",
+    "number": 77,
+    "values": {
+      "Logical ID": "ws003-p011",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (`q015`, 2026-08-27)"
+    }
+  },
+  {
+    "logical_id": "ws003-p012",
+    "number": 78,
+    "values": {
+      "Logical ID": "ws003-p012",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (`q015`, 2026-08-27)"
+    }
+  },
+  {
+    "logical_id": "ws003-p013",
+    "number": 79,
+    "values": {
+      "Logical ID": "ws003-p013",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (`q015`, 2026-08-27)"
+    }
+  },
+  {
+    "logical_id": "ws003-p014",
+    "number": 80,
+    "values": {
+      "Logical ID": "ws003-p014",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (`q015`, 2026-08-27)"
+    }
+  },
+  {
+    "logical_id": "ws003-p015",
+    "number": 81,
+    "values": {
+      "Logical ID": "ws003-p015",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (`q015`, 2026-08-27)"
+    }
+  },
+  {
+    "logical_id": "ws003-p016",
+    "number": 82,
+    "values": {
+      "Logical ID": "ws003-p016",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (`q023`, 2026-08-28)"
+    }
+  },
+  {
+    "logical_id": "ws003-p017",
+    "number": 83,
+    "values": {
+      "Logical ID": "ws003-p017",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Status Note": "Superseded by `ws013-p003`; historical implementation/evidence only"
+    }
+  },
+  {
+    "logical_id": "ws003-p018",
+    "number": 84,
+    "values": {
+      "Logical ID": "ws003-p018",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "planned",
+      "Status Note": "planned; dependency-gated; not ready for a Queue"
+    }
+  },
+  {
+    "logical_id": "ws003-p019",
+    "number": 85,
+    "values": {
+      "Logical ID": "ws003-p019",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "planning",
+      "Status Note": "future; not designed; not ready for a Queue"
+    }
+  },
+  {
+    "logical_id": "ws003-p020",
+    "number": 86,
+    "values": {
+      "Logical ID": "ws003-p020",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (`q033`, 2026-08-30)"
+    }
+  },
+  {
+    "logical_id": "ws003-p021",
+    "number": 87,
+    "values": {
+      "Logical ID": "ws003-p021",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (`q034`, 2026-08-30)"
+    }
+  },
+  {
+    "logical_id": "ws003-p022",
+    "number": 88,
+    "values": {
+      "Logical ID": "ws003-p022",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "uncleared",
+      "Status Note": "Uncleared historical evidence (`q037`); automatic checkpoint passed,"
+    }
+  },
+  {
+    "logical_id": "ws003-p023",
+    "number": 89,
+    "values": {
+      "Logical ID": "ws003-p023",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "uncleared",
+      "Status Note": "Uncleared historical evidence (`q039`); every automatic gate passes,"
+    }
+  },
+  {
+    "logical_id": "ws003-p024",
+    "number": 90,
+    "values": {
+      "Logical ID": "ws003-p024",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "uncleared",
+      "Status Note": "Uncleared (`q043`); source/binary/QEMU milestone passes, one exact"
+    }
+  },
+  {
+    "logical_id": "ws003-p025",
+    "number": 91,
+    "values": {
+      "Logical ID": "ws003-p025",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws003",
+      "Phase Disposition": "normal",
+      "Status Note": "Automatic milestone complete (`q066`); one physical observation is"
+    }
+  },
+  {
+    "logical_id": "ws004-p001",
+    "number": 92,
+    "values": {
+      "Logical ID": "ws004-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (software audit; hardware observations carried forward)"
+    }
+  },
+  {
+    "logical_id": "ws004-p002",
+    "number": 93,
+    "values": {
+      "Logical ID": "ws004-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete software milestone"
+    }
+  },
+  {
+    "logical_id": "ws004-p003",
+    "number": 94,
+    "values": {
+      "Logical ID": "ws004-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete software milestone; cross-target link evidence carried forward"
+    }
+  },
+  {
+    "logical_id": "ws004-p004",
+    "number": 95,
+    "values": {
+      "Logical ID": "ws004-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete QEMU storage milestone; physical/fault coverage retained"
+    }
+  },
+  {
+    "logical_id": "ws004-p005",
+    "number": 96,
+    "values": {
+      "Logical ID": "ws004-p005",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "uncleared",
+      "Status Note": "partial; automatic QEMU runtime complete, manual acceptance pending"
+    }
+  },
+  {
+    "logical_id": "ws004-p006",
+    "number": 97,
+    "values": {
+      "Logical ID": "ws004-p006",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete automatic QEMU milestone; manual acceptance pending"
+    }
+  },
+  {
+    "logical_id": "ws004-p007",
+    "number": 98,
+    "values": {
+      "Logical ID": "ws004-p007",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete"
+    }
+  },
+  {
+    "logical_id": "ws004-p008",
+    "number": 99,
+    "values": {
+      "Logical ID": "ws004-p008",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete; automatic QEMU gate passed in q010"
+    }
+  },
+  {
+    "logical_id": "ws004-p009",
+    "number": 100,
+    "values": {
+      "Logical ID": "ws004-p009",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q016`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p010",
+    "number": 101,
+    "values": {
+      "Logical ID": "ws004-p010",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (`q027`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p011",
+    "number": 102,
+    "values": {
+      "Logical ID": "ws004-p011",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (`q027`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p012",
+    "number": 103,
+    "values": {
+      "Logical ID": "ws004-p012",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (`q027`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p013",
+    "number": 104,
+    "values": {
+      "Logical ID": "ws004-p013",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (`q027`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p014",
+    "number": 105,
+    "values": {
+      "Logical ID": "ws004-p014",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (`q027`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p015",
+    "number": 106,
+    "values": {
+      "Logical ID": "ws004-p015",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (`q027`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p016",
+    "number": 107,
+    "values": {
+      "Logical ID": "ws004-p016",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q041`); residual from `ws004-p015`"
+    }
+  },
+  {
+    "logical_id": "ws004-p017",
+    "number": 108,
+    "values": {
+      "Logical ID": "ws004-p017",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q054`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p018",
+    "number": 109,
+    "values": {
+      "Logical ID": "ws004-p018",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q028`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p019",
+    "number": 110,
+    "values": {
+      "Logical ID": "ws004-p019",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q049`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p020",
+    "number": 111,
+    "values": {
+      "Logical ID": "ws004-p020",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q029` automatic software scope)"
+    }
+  },
+  {
+    "logical_id": "ws004-p021",
+    "number": 112,
+    "values": {
+      "Logical ID": "ws004-p021",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "uncleared",
+      "Status Note": "uncleared (`q052` automatic/runtime milestone passed; one hash-pinned"
+    }
+  },
+  {
+    "logical_id": "ws004-p022",
+    "number": 113,
+    "values": {
+      "Logical ID": "ws004-p022",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (`q030`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p023",
+    "number": 114,
+    "values": {
+      "Logical ID": "ws004-p023",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (`q030`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p024",
+    "number": 115,
+    "values": {
+      "Logical ID": "ws004-p024",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete in `q030`"
+    }
+  },
+  {
+    "logical_id": "ws004-p025",
+    "number": 116,
+    "values": {
+      "Logical ID": "ws004-p025",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "planned",
+      "Status Note": "planned; physical acceptance; depends on `ws004-p024`"
+    }
+  },
+  {
+    "logical_id": "ws004-p026",
+    "number": 117,
+    "values": {
+      "Logical ID": "ws004-p026",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q055` decision closure after `q040` read-only intake)"
+    }
+  },
+  {
+    "logical_id": "ws004-p027",
+    "number": 118,
+    "values": {
+      "Logical ID": "ws004-p027",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q055`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p028",
+    "number": 119,
+    "values": {
+      "Logical ID": "ws004-p028",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Status Note": "automatic milestone complete (`q057`); one-run developmental physical"
+    }
+  },
+  {
+    "logical_id": "ws004-p029",
+    "number": 120,
+    "values": {
+      "Logical ID": "ws004-p029",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Status Note": "automatic milestone complete (`q058`); one-run developmental physical"
+    }
+  },
+  {
+    "logical_id": "ws004-p030",
+    "number": 121,
+    "values": {
+      "Logical ID": "ws004-p030",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Status Note": "automatic milestone complete (`q060`); later shared physical closure"
+    }
+  },
+  {
+    "logical_id": "ws004-p031",
+    "number": 122,
+    "values": {
+      "Logical ID": "ws004-p031",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q047`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p032",
+    "number": 123,
+    "values": {
+      "Logical ID": "ws004-p032",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q047`, 2026-08-31)"
+    }
+  },
+  {
+    "logical_id": "ws004-p033",
+    "number": 124,
+    "values": {
+      "Logical ID": "ws004-p033",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q047`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p034",
+    "number": 125,
+    "values": {
+      "Logical ID": "ws004-p034",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "planned",
+      "Status Note": "planned/deferred; nonblocking; not queued"
+    }
+  },
+  {
+    "logical_id": "ws004-p035",
+    "number": 126,
+    "values": {
+      "Logical ID": "ws004-p035",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "planned",
+      "Status Note": "planned/deferred; nonblocking; not queued"
+    }
+  },
+  {
+    "logical_id": "ws004-p036",
+    "number": 127,
+    "values": {
+      "Logical ID": "ws004-p036",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q056`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p037",
+    "number": 128,
+    "values": {
+      "Logical ID": "ws004-p037",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q061`); the user corrected the Intel target to the observed"
+    }
+  },
+  {
+    "logical_id": "ws004-p038",
+    "number": 129,
+    "values": {
+      "Logical ID": "ws004-p038",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "uncleared",
+      "Status Note": "Uncleared (`q066` automatic and exact-device VFIO normal-path"
+    }
+  },
+  {
+    "logical_id": "ws004-p039",
+    "number": 130,
+    "values": {
+      "Logical ID": "ws004-p039",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "planned",
+      "Status Note": "planned; not started; follows completed `ws004-p038`; not queued"
+    }
+  },
+  {
+    "logical_id": "ws004-p040",
+    "number": 131,
+    "values": {
+      "Logical ID": "ws004-p040",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q068`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p041",
+    "number": 132,
+    "values": {
+      "Logical ID": "ws004-p041",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q071`); focused W52 gates and the shared user-accepted"
+    }
+  },
+  {
+    "logical_id": "ws004-p042",
+    "number": 133,
+    "values": {
+      "Logical ID": "ws004-p042",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q069`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p043",
+    "number": 134,
+    "values": {
+      "Logical ID": "ws004-p043",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q070`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p044",
+    "number": 135,
+    "values": {
+      "Logical ID": "ws004-p044",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q071`); asynchronous kernel ownership, minimal read-only"
+    }
+  },
+  {
+    "logical_id": "ws004-p045",
+    "number": 136,
+    "values": {
+      "Logical ID": "ws004-p045",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (user-requested feasibility investigation; no implementation Queue)"
+    }
+  },
+  {
+    "logical_id": "ws004-p046",
+    "number": 137,
+    "values": {
+      "Logical ID": "ws004-p046",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (`q083`, 2026-09-06)"
+    }
+  },
+  {
+    "logical_id": "ws004-p047",
+    "number": 138,
+    "values": {
+      "Logical ID": "ws004-p047",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (`q085`), with P048 lifecycle acceptance."
+    }
+  },
+  {
+    "logical_id": "ws004-p048",
+    "number": 139,
+    "values": {
+      "Logical ID": "ws004-p048",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (`q085`)"
+    }
+  },
+  {
+    "logical_id": "ws004-p049",
+    "number": 140,
+    "values": {
+      "Logical ID": "ws004-p049",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed"
+    }
+  },
+  {
+    "logical_id": "ws004-p050",
+    "number": 141,
+    "values": {
+      "Logical ID": "ws004-p050",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG004, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws004",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed / cleared q187; WS019 completed in q186"
+    }
+  },
+  {
+    "logical_id": "ws005-p001",
+    "number": 142,
+    "values": {
+      "Logical ID": "ws005-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws005",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (`q029`); automatic, real-device QEMU-passthrough, and final"
+    }
+  },
+  {
+    "logical_id": "ws005-p002",
+    "number": 143,
+    "values": {
+      "Logical ID": "ws005-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws005",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q053`) as historical design closure; 2026-09-05 global"
+    }
+  },
+  {
+    "logical_id": "ws005-p003",
+    "number": 144,
+    "values": {
+      "Logical ID": "ws005-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws005",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q040`)"
+    }
+  },
+  {
+    "logical_id": "ws005-p004",
+    "number": 145,
+    "values": {
+      "Logical ID": "ws005-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws005",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (`q059`)"
+    }
+  },
+  {
+    "logical_id": "ws005-p005",
+    "number": 146,
+    "values": {
+      "Logical ID": "ws005-p005",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws005",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q051`); q041 host implementation, q050 native VFS"
+    }
+  },
+  {
+    "logical_id": "ws005-p006",
+    "number": 147,
+    "values": {
+      "Logical ID": "ws005-p006",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws005",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q071`); focused protocol/auth/store/child gates and the"
+    }
+  },
+  {
+    "logical_id": "ws005-p007",
+    "number": 148,
+    "values": {
+      "Logical ID": "ws005-p007",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws005",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q071`); the 2026-09-05 global command and ownership"
+    }
+  },
+  {
+    "logical_id": "ws005-p008",
+    "number": 149,
+    "values": {
+      "Logical ID": "ws005-p008",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws005",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q071`; user accepted 2026-09-05)"
+    }
+  },
+  {
+    "logical_id": "ws005-p009",
+    "number": 150,
+    "values": {
+      "Logical ID": "ws005-p009",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws005",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (`q059`)"
+    }
+  },
+  {
+    "logical_id": "ws005-p010",
+    "number": 151,
+    "values": {
+      "Logical ID": "ws005-p010",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws005",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q071`); finite userspace retry, asynchronous-kernel"
+    }
+  },
+  {
+    "logical_id": "ws005-p011",
+    "number": 152,
+    "values": {
+      "Logical ID": "ws005-p011",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws005",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q071`); the global policy, no-retained-passphrase contract,"
+    }
+  },
+  {
+    "logical_id": "ws005-p012",
+    "number": 153,
+    "values": {
+      "Logical ID": "ws005-p012",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Parent WS": "ws005",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (`q085`)"
+    }
+  },
+  {
+    "logical_id": "ws006-p001",
+    "number": 154,
+    "values": {
+      "Logical ID": "ws006-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG003",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws006",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete"
+    }
+  },
+  {
+    "logical_id": "ws006-p002",
+    "number": 155,
+    "values": {
+      "Logical ID": "ws006-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG003",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws006",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete implementation milestone"
+    }
+  },
+  {
+    "logical_id": "ws006-p003",
+    "number": 156,
+    "values": {
+      "Logical ID": "ws006-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG003",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws006",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete milestone"
+    }
+  },
+  {
+    "logical_id": "ws006-p004",
+    "number": 157,
+    "values": {
+      "Logical ID": "ws006-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG003",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws006",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete PC/AT software milestone; port-specific physical mapping remains"
+    }
+  },
+  {
+    "logical_id": "ws006-p005",
+    "number": 158,
+    "values": {
+      "Logical ID": "ws006-p005",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG003",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws006",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (amd64/PC/AT software milestone, `q020`)"
+    }
+  },
+  {
+    "logical_id": "ws006-p006",
+    "number": 159,
+    "values": {
+      "Logical ID": "ws006-p006",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG003",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws006",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete automatic/source milestone (`q044`); QEMU acceptance is"
+    }
+  },
+  {
+    "logical_id": "ws006-p007",
+    "number": 160,
+    "values": {
+      "Logical ID": "ws006-p007",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG003",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws006",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q044` software/parser milestone); live USB binding remains"
+    }
+  },
+  {
+    "logical_id": "ws006-p008",
+    "number": 161,
+    "values": {
+      "Logical ID": "ws006-p008",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG003",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws006",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q048` plus user physical confirmation, 2026-09-05)"
+    }
+  },
+  {
+    "logical_id": "ws006-p009",
+    "number": 162,
+    "values": {
+      "Logical ID": "ws006-p009",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG003",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws006",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q147); q126のconsumer検証にpaired USB rootと実Xzed受け入れを追加。"
+    }
+  },
+  {
+    "logical_id": "ws006-p010",
+    "number": 163,
+    "values": {
+      "Logical ID": "ws006-p010",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG003",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws006",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q147; ordinary paired campaign passes after q141 UHCI repair)"
+    }
+  },
+  {
+    "logical_id": "ws006-p011",
+    "number": 164,
+    "values": {
+      "Logical ID": "ws006-p011",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG003",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws006",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q147)"
+    }
+  },
+  {
+    "logical_id": "ws007-p001",
+    "number": 165,
+    "values": {
+      "Logical ID": "ws007-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Objectives": "O2",
+      "Parent WS": "ws007",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete"
+    }
+  },
+  {
+    "logical_id": "ws007-p002",
+    "number": 166,
+    "values": {
+      "Logical ID": "ws007-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Objectives": "O2",
+      "Parent WS": "ws007",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "uncleared",
+      "Status Note": "carried forward (reported defect not reproduced)"
+    }
+  },
+  {
+    "logical_id": "ws007-p003",
+    "number": 167,
+    "values": {
+      "Logical ID": "ws007-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Objectives": "O2",
+      "Parent WS": "ws007",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q039`)"
+    }
+  },
+  {
+    "logical_id": "ws007-p004",
+    "number": 168,
+    "values": {
+      "Logical ID": "ws007-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Objectives": "O2",
+      "Parent WS": "ws007",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "uncleared",
+      "Status Note": "Uncleared (`q043`); every locally constructible cell passes, while"
+    }
+  },
+  {
+    "logical_id": "ws008-p001",
+    "number": 169,
+    "values": {
+      "Logical ID": "ws008-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG001, MG007",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws008",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q019`)"
+    }
+  },
+  {
+    "logical_id": "ws008-p002",
+    "number": 170,
+    "values": {
+      "Logical ID": "ws008-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG001, MG007",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws008",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q020`)"
+    }
+  },
+  {
+    "logical_id": "ws008-p003",
+    "number": 171,
+    "values": {
+      "Logical ID": "ws008-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG001, MG007",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws008",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q020`)"
+    }
+  },
+  {
+    "logical_id": "ws008-p004",
+    "number": 172,
+    "values": {
+      "Logical ID": "ws008-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG001, MG007",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws008",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q022`)"
+    }
+  },
+  {
+    "logical_id": "ws008-p005",
+    "number": 173,
+    "values": {
+      "Logical ID": "ws008-p005",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG001, MG007",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws008",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (`q023`, 2026-08-28)"
+    }
+  },
+  {
+    "logical_id": "ws008-p006",
+    "number": 174,
+    "values": {
+      "Logical ID": "ws008-p006",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG001, MG007",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws008",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "uncleared",
+      "Status Note": "Uncleared (`q024`; Principal Engineer review rejected implementation)"
+    }
+  },
+  {
+    "logical_id": "ws008-p007",
+    "number": 175,
+    "values": {
+      "Logical ID": "ws008-p007",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG001, MG007",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws008",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q025`, 2026-08-28)"
+    }
+  },
+  {
+    "logical_id": "ws008-p008",
+    "number": 176,
+    "values": {
+      "Logical ID": "ws008-p008",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG001, MG007",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws008",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q041`, 2026-08-31)"
+    }
+  },
+  {
+    "logical_id": "ws008-p009",
+    "number": 177,
+    "values": {
+      "Logical ID": "ws008-p009",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG001, MG007",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws008",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q063`, 2026-09-02)"
+    }
+  },
+  {
+    "logical_id": "ws008-p010",
+    "number": 178,
+    "values": {
+      "Logical ID": "ws008-p010",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG001, MG007",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws008",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q063`, 2026-09-02)"
+    }
+  },
+  {
+    "logical_id": "ws009-p001",
+    "number": 179,
+    "values": {
+      "Logical ID": "ws009-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG006, MG008, MG009",
+      "Objectives": "O2, O4, O5",
+      "Parent WS": "ws009",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete"
+    }
+  },
+  {
+    "logical_id": "ws009-p002",
+    "number": 180,
+    "values": {
+      "Logical ID": "ws009-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG006, MG008, MG009",
+      "Objectives": "O2, O4, O5",
+      "Parent WS": "ws009",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete"
+    }
+  },
+  {
+    "logical_id": "ws009-p003",
+    "number": 181,
+    "values": {
+      "Logical ID": "ws009-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG006, MG008, MG009",
+      "Objectives": "O2, O4, O5",
+      "Parent WS": "ws009",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete"
+    }
+  },
+  {
+    "logical_id": "ws009-p004",
+    "number": 182,
+    "values": {
+      "Logical ID": "ws009-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG006, MG008, MG009",
+      "Objectives": "O2, O4, O5",
+      "Parent WS": "ws009",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q046`)"
+    }
+  },
+  {
+    "logical_id": "ws009-p005",
+    "number": 183,
+    "values": {
+      "Logical ID": "ws009-p005",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG006, MG008, MG009",
+      "Objectives": "O2, O4, O5",
+      "Parent WS": "ws009",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (`q046`, 2026-08-31)"
+    }
+  },
+  {
+    "logical_id": "ws009-p006",
+    "number": 184,
+    "values": {
+      "Logical ID": "ws009-p006",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG006, MG008, MG009",
+      "Objectives": "O2, O4, O5",
+      "Parent WS": "ws009",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q072`, 2026-09-05)"
+    }
+  },
+  {
+    "logical_id": "ws009-p007",
+    "number": 185,
+    "values": {
+      "Logical ID": "ws009-p007",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG006, MG008, MG009",
+      "Objectives": "O2, O4, O5",
+      "Parent WS": "ws009",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q150); [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws009-documentation/phase007-current-architecture-uapi/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws009-p008",
+    "number": 186,
+    "values": {
+      "Logical ID": "ws009-p008",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG006, MG008, MG009",
+      "Objectives": "O2, O4, O5",
+      "Parent WS": "ws009",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed / cleared q190"
+    }
+  },
+  {
+    "logical_id": "ws010-p001",
+    "number": 187,
+    "values": {
+      "Logical ID": "ws010-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG007",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws010",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete"
+    }
+  },
+  {
+    "logical_id": "ws010-p002",
+    "number": 188,
+    "values": {
+      "Logical ID": "ws010-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG007",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws010",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete"
+    }
+  },
+  {
+    "logical_id": "ws010-p003",
+    "number": 189,
+    "values": {
+      "Logical ID": "ws010-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG007",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws010",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete"
+    }
+  },
+  {
+    "logical_id": "ws010-p004",
+    "number": 190,
+    "values": {
+      "Logical ID": "ws010-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG007",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws010",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete"
+    }
+  },
+  {
+    "logical_id": "ws010-p005",
+    "number": 191,
+    "values": {
+      "Logical ID": "ws010-p005",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG007",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws010",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q063`, 2026-09-02)"
+    }
+  },
+  {
+    "logical_id": "ws011-p001",
+    "number": 192,
+    "values": {
+      "Logical ID": "ws011-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG003",
+      "Objectives": "O1, O2, O3, O4",
+      "Parent WS": "ws011",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete"
+    }
+  },
+  {
+    "logical_id": "ws011-p002",
+    "number": 193,
+    "values": {
+      "Logical ID": "ws011-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG003",
+      "Objectives": "O1, O2, O3, O4",
+      "Parent WS": "ws011",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete"
+    }
+  },
+  {
+    "logical_id": "ws011-p003",
+    "number": 194,
+    "values": {
+      "Logical ID": "ws011-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG003",
+      "Objectives": "O1, O2, O3, O4",
+      "Parent WS": "ws011",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete software milestone"
+    }
+  },
+  {
+    "logical_id": "ws011-p004",
+    "number": 195,
+    "values": {
+      "Logical ID": "ws011-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG003",
+      "Objectives": "O1, O2, O3, O4",
+      "Parent WS": "ws011",
+      "Phase Disposition": "canceled",
+      "Status Note": "cancelled for VLAN; bridge transferred to Future List F-001 (2026-09-09)",
+      "Awesome Plan Status": "uncleared"
+    }
+  },
+  {
+    "logical_id": "ws011-p005",
+    "number": 196,
+    "values": {
+      "Logical ID": "ws011-p005",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG003",
+      "Objectives": "O1, O2, O3, O4",
+      "Parent WS": "ws011",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete design; p006 implementation is complete, p007 automatic"
+    }
+  },
+  {
+    "logical_id": "ws011-p006",
+    "number": 197,
+    "values": {
+      "Logical ID": "ws011-p006",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG003",
+      "Objectives": "O1, O2, O3, O4",
+      "Parent WS": "ws011",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q073`, 2026-09-05)"
+    }
+  },
+  {
+    "logical_id": "ws011-p007",
+    "number": 198,
+    "values": {
+      "Logical ID": "ws011-p007",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG003",
+      "Objectives": "O1, O2, O3, O4",
+      "Parent WS": "ws011",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (`q075`, 2026-09-05); q074 T020 and corrective q075 T021 accepted"
+    }
+  },
+  {
+    "logical_id": "ws011-p008",
+    "number": 199,
+    "values": {
+      "Logical ID": "ws011-p008",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG003",
+      "Objectives": "O1, O2, O3, O4",
+      "Parent WS": "ws011",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (user-accepted, 2026-09-09)"
+    }
+  },
+  {
+    "logical_id": "ws011-p009",
+    "number": 200,
+    "values": {
+      "Logical ID": "ws011-p009",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG003",
+      "Objectives": "O1, O2, O3, O4",
+      "Parent WS": "ws011",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (`q075`, 2026-09-05); causal FAT correction and four post-fix cells pass"
+    }
+  },
+  {
+    "logical_id": "ws012-p001",
+    "number": 201,
+    "values": {
+      "Logical ID": "ws012-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG003",
+      "Objectives": "O1, O2, O3, O4",
+      "Parent WS": "ws012",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete"
+    }
+  },
+  {
+    "logical_id": "ws012-p002",
+    "number": 202,
+    "values": {
+      "Logical ID": "ws012-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG003",
+      "Objectives": "O1, O2, O3, O4",
+      "Parent WS": "ws012",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q017`)"
+    }
+  },
+  {
+    "logical_id": "ws012-p003",
+    "number": 203,
+    "values": {
+      "Logical ID": "ws012-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG003",
+      "Objectives": "O1, O2, O3, O4",
+      "Parent WS": "ws012",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (`q018`, 2026-08-28)"
+    }
+  },
+  {
+    "logical_id": "ws012-p004",
+    "number": 204,
+    "values": {
+      "Logical ID": "ws012-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG003",
+      "Objectives": "O1, O2, O3, O4",
+      "Parent WS": "ws012",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (`q018`, 2026-08-28)"
+    }
+  },
+  {
+    "logical_id": "ws012-p005",
+    "number": 205,
+    "values": {
+      "Logical ID": "ws012-p005",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG003",
+      "Objectives": "O1, O2, O3, O4",
+      "Parent WS": "ws012",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (`q018`, 2026-08-28)"
+    }
+  },
+  {
+    "logical_id": "ws012-p006",
+    "number": 206,
+    "values": {
+      "Logical ID": "ws012-p006",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG005",
+      "Related Milestones": "MG003",
+      "Objectives": "O1, O2, O3, O4",
+      "Parent WS": "ws012",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q018`, 2026-08-28)"
+    }
+  },
+  {
+    "logical_id": "ws013-p001",
+    "number": 207,
+    "values": {
+      "Logical ID": "ws013-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG007",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2",
+      "Parent WS": "ws013",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "planning",
+      "Status Note": "future — master Future List F-002へ移管（2026-09-09）"
+    }
+  },
+  {
+    "logical_id": "ws013-p002",
+    "number": 208,
+    "values": {
+      "Logical ID": "ws013-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG007",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2",
+      "Parent WS": "ws013",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed in `q031`"
+    }
+  },
+  {
+    "logical_id": "ws013-p003",
+    "number": 209,
+    "values": {
+      "Logical ID": "ws013-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG007",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2",
+      "Parent WS": "ws013",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed in `q031`; depends on completed `ws013-p002`"
+    }
+  },
+  {
+    "logical_id": "ws013-p004",
+    "number": 210,
+    "values": {
+      "Logical ID": "ws013-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG007",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2",
+      "Parent WS": "ws013",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed in `q031`; depends on completed `ws013-p003`"
+    }
+  },
+  {
+    "logical_id": "ws013-p005",
+    "number": 211,
+    "values": {
+      "Logical ID": "ws013-p005",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG007",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2",
+      "Parent WS": "ws013",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (`q032`, 2026-08-30)"
+    }
+  },
+  {
+    "logical_id": "ws013-p006",
+    "number": 212,
+    "values": {
+      "Logical ID": "ws013-p006",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG007",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2",
+      "Parent WS": "ws013",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (`q032`, 2026-08-30)"
+    }
+  },
+  {
+    "logical_id": "ws014-p001",
+    "number": 213,
+    "values": {
+      "Logical ID": "ws014-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Related Milestones": "MG003",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws014",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "uncleared",
+      "Status Note": "Blocked (manual hold)"
+    }
+  },
+  {
+    "logical_id": "ws015-p001",
+    "number": 214,
+    "values": {
+      "Logical ID": "ws015-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG007",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O2",
+      "Parent WS": "ws015",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "planning",
+      "Status Note": "future — master Future List F-003へ移管（2026-09-09）"
+    }
+  },
+  {
+    "logical_id": "ws016-p001",
+    "number": 215,
+    "values": {
+      "Logical ID": "ws016-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Objectives": "O1, O2",
+      "Parent WS": "ws016",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q021`)"
+    }
+  },
+  {
+    "logical_id": "ws016-p002",
+    "number": 216,
+    "values": {
+      "Logical ID": "ws016-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Objectives": "O1, O2",
+      "Parent WS": "ws016",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q021`)"
+    }
+  },
+  {
+    "logical_id": "ws016-p003",
+    "number": 217,
+    "values": {
+      "Logical ID": "ws016-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Objectives": "O1, O2",
+      "Parent WS": "ws016",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q021`)"
+    }
+  },
+  {
+    "logical_id": "ws016-p004",
+    "number": 218,
+    "values": {
+      "Logical ID": "ws016-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Objectives": "O1, O2",
+      "Parent WS": "ws016",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q021`)"
+    }
+  },
+  {
+    "logical_id": "ws017-p001",
+    "number": 219,
+    "values": {
+      "Logical ID": "ws017-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Objectives": "O2",
+      "Parent WS": "ws017",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "planned",
+      "Status Note": "Queue-ready; initial-protection ceiling selected on 2026-09-05"
+    }
+  },
+  {
+    "logical_id": "ws017-p002",
+    "number": 220,
+    "values": {
+      "Logical ID": "ws017-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Objectives": "O2",
+      "Parent WS": "ws017",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "planned",
+      "Status Note": "Planned; Queue-ready after `ws017-p001`"
+    }
+  },
+  {
+    "logical_id": "ws017-p003",
+    "number": 221,
+    "values": {
+      "Logical ID": "ws017-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Objectives": "O2",
+      "Parent WS": "ws017",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "planned",
+      "Status Note": "Planned; Queue-ready after `ws017-p001`--`p002`"
+    }
+  },
+  {
+    "logical_id": "ws017-p004",
+    "number": 222,
+    "values": {
+      "Logical ID": "ws017-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG006",
+      "Objectives": "O2",
+      "Parent WS": "ws017",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "planned",
+      "Status Note": "Planned; Queue-ready after `ws017-p001`--`p003`"
+    }
+  },
+  {
+    "logical_id": "ws018-p001",
+    "number": 223,
+    "values": {
+      "Logical ID": "ws018-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q025`)"
+    }
+  },
+  {
+    "logical_id": "ws018-p002",
+    "number": 224,
+    "values": {
+      "Logical ID": "ws018-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q026`)"
+    }
+  },
+  {
+    "logical_id": "ws018-p003",
+    "number": 225,
+    "values": {
+      "Logical ID": "ws018-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q025`)"
+    }
+  },
+  {
+    "logical_id": "ws018-p004",
+    "number": 226,
+    "values": {
+      "Logical ID": "ws018-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q025`)"
+    }
+  },
+  {
+    "logical_id": "ws018-p005",
+    "number": 227,
+    "values": {
+      "Logical ID": "ws018-p005",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q025`)"
+    }
+  },
+  {
+    "logical_id": "ws018-p006",
+    "number": 228,
+    "values": {
+      "Logical ID": "ws018-p006",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q025`)"
+    }
+  },
+  {
+    "logical_id": "ws018-p007",
+    "number": 229,
+    "values": {
+      "Logical ID": "ws018-p007",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q026`)"
+    }
+  },
+  {
+    "logical_id": "ws018-p008",
+    "number": 230,
+    "values": {
+      "Logical ID": "ws018-p008",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (`q026`)"
+    }
+  },
+  {
+    "logical_id": "ws018-p009",
+    "number": 231,
+    "values": {
+      "Logical ID": "ws018-p009",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q035`)"
+    }
+  },
+  {
+    "logical_id": "ws018-p010",
+    "number": 232,
+    "values": {
+      "Logical ID": "ws018-p010",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q035`)"
+    }
+  },
+  {
+    "logical_id": "ws018-p011",
+    "number": 233,
+    "values": {
+      "Logical ID": "ws018-p011",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q035`)"
+    }
+  },
+  {
+    "logical_id": "ws018-p012",
+    "number": 234,
+    "values": {
+      "Logical ID": "ws018-p012",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q035`)"
+    }
+  },
+  {
+    "logical_id": "ws018-p013",
+    "number": 235,
+    "values": {
+      "Logical ID": "ws018-p013",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed in finished q077"
+    }
+  },
+  {
+    "logical_id": "ws018-p014",
+    "number": 236,
+    "values": {
+      "Logical ID": "ws018-p014",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed in finished q077"
+    }
+  },
+  {
+    "logical_id": "ws018-p015",
+    "number": 237,
+    "values": {
+      "Logical ID": "ws018-p015",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed in finished q077"
+    }
+  },
+  {
+    "logical_id": "ws018-p016",
+    "number": 238,
+    "values": {
+      "Logical ID": "ws018-p016",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q084)"
+    }
+  },
+  {
+    "logical_id": "ws018-p017",
+    "number": 239,
+    "values": {
+      "Logical ID": "ws018-p017",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed"
+    }
+  },
+  {
+    "logical_id": "ws018-p018",
+    "number": 240,
+    "values": {
+      "Logical ID": "ws018-p018",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed"
+    }
+  },
+  {
+    "logical_id": "ws018-p019",
+    "number": 241,
+    "values": {
+      "Logical ID": "ws018-p019",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed"
+    }
+  },
+  {
+    "logical_id": "ws018-p020",
+    "number": 242,
+    "values": {
+      "Logical ID": "ws018-p020",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG008",
+      "Related Milestones": "MG001, MG004",
+      "Objectives": "O1, O2, O4, O5",
+      "Parent WS": "ws018",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed"
+    }
+  },
+  {
+    "logical_id": "ws019-p001",
+    "number": 243,
+    "values": {
+      "Logical ID": "ws019-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed by design, 2026-08-29"
+    }
+  },
+  {
+    "logical_id": "ws019-p002",
+    "number": 244,
+    "values": {
+      "Logical ID": "ws019-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed in q076, 2026-09-05"
+    }
+  },
+  {
+    "logical_id": "ws019-p003",
+    "number": 245,
+    "values": {
+      "Logical ID": "ws019-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed in q076, 2026-09-05"
+    }
+  },
+  {
+    "logical_id": "ws019-p004",
+    "number": 246,
+    "values": {
+      "Logical ID": "ws019-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q159); [public package and final acceptance](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase004-zedinst-existing-fat-overlay/q159-results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p005",
+    "number": 247,
+    "values": {
+      "Logical ID": "ws019-p005",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed; [q160 results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase005-qemu-nvme-overlay-install/q160-results.md), public install and NVMe-only boot accepted"
+    }
+  },
+  {
+    "logical_id": "ws019-p006",
+    "number": 248,
+    "values": {
+      "Logical ID": "ws019-p006",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q182; see [integration results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase049-native-installer-integration/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p007",
+    "number": 249,
+    "values": {
+      "Logical ID": "ws019-p007",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q183; see [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase007-native-root-installation/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p008",
+    "number": 250,
+    "values": {
+      "Logical ID": "ws019-p008",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed in q079 after q078 implementation"
+    }
+  },
+  {
+    "logical_id": "ws019-p009",
+    "number": 251,
+    "values": {
+      "Logical ID": "ws019-p009",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed in q079 after q078 implementation"
+    }
+  },
+  {
+    "logical_id": "ws019-p010",
+    "number": 252,
+    "values": {
+      "Logical ID": "ws019-p010",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed in finished q077; original q076 residual retained below"
+    }
+  },
+  {
+    "logical_id": "ws019-p011",
+    "number": 253,
+    "values": {
+      "Logical ID": "ws019-p011",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed in finished q077; original q076 residual retained below"
+    }
+  },
+  {
+    "logical_id": "ws019-p012",
+    "number": 254,
+    "values": {
+      "Logical ID": "ws019-p012",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed in finished q077; original q076 residual retained below"
+    }
+  },
+  {
+    "logical_id": "ws019-p013",
+    "number": 255,
+    "values": {
+      "Logical ID": "ws019-p013",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q129 design)"
+    }
+  },
+  {
+    "logical_id": "ws019-p014",
+    "number": 256,
+    "values": {
+      "Logical ID": "ws019-p014",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q129); see [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase014-current-ufs-formatter/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p015",
+    "number": 257,
+    "values": {
+      "Logical ID": "ws019-p015",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q130); see [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase015-atomic-publication/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p016",
+    "number": 258,
+    "values": {
+      "Logical ID": "ws019-p016",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q131); see [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase016-boot-source-provenance/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p017",
+    "number": 259,
+    "values": {
+      "Logical ID": "ws019-p017",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q133; q132 remains historical uncleared)"
+    }
+  },
+  {
+    "logical_id": "ws019-p018",
+    "number": 260,
+    "values": {
+      "Logical ID": "ws019-p018",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q133)"
+    }
+  },
+  {
+    "logical_id": "ws019-p019",
+    "number": 261,
+    "values": {
+      "Logical ID": "ws019-p019",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q148)"
+    }
+  },
+  {
+    "logical_id": "ws019-p020",
+    "number": 262,
+    "values": {
+      "Logical ID": "ws019-p020",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q151); [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase020-df-capacity/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p021",
+    "number": 263,
+    "values": {
+      "Logical ID": "ws019-p021",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q154); [acceptance and boundaries](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase021-nested-mount/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p022",
+    "number": 264,
+    "values": {
+      "Logical ID": "ws019-p022",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q155); [acceptance](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase022-tmpfs-unmount/results.md), [ownership design](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase022-tmpfs-unmount/design.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p023",
+    "number": 265,
+    "values": {
+      "Logical ID": "ws019-p023",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q155); [host/native acceptance](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase023-noct-large-seek/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p024",
+    "number": 266,
+    "values": {
+      "Logical ID": "ws019-p024",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q158); [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase024-noct-terminal-input/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p025",
+    "number": 267,
+    "values": {
+      "Logical ID": "ws019-p025",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed, q159; see [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase025-public-runtime-contracts/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p026",
+    "number": 268,
+    "values": {
+      "Logical ID": "ws019-p026",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed; q159, user instruction 2026-09-09"
+    }
+  },
+  {
+    "logical_id": "ws019-p027",
+    "number": 269,
+    "values": {
+      "Logical ID": "ws019-p027",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q162; [acceptance](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase027-installation-source-selection/results.md), 2026-09-09"
+    }
+  },
+  {
+    "logical_id": "ws019-p028",
+    "number": 270,
+    "values": {
+      "Logical ID": "ws019-p028",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q161; [acceptance](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase028-native-tree-copy-tools/results.md), 2026-09-09"
+    }
+  },
+  {
+    "logical_id": "ws019-p029",
+    "number": 271,
+    "values": {
+      "Logical ID": "ws019-p029",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (cleared), q184; normal-path scope accepted by user 2026-09-10"
+    }
+  },
+  {
+    "logical_id": "ws019-p030",
+    "number": 272,
+    "values": {
+      "Logical ID": "ws019-p030",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed, q163; [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase030-gpt-initialization-codec/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p031",
+    "number": 273,
+    "values": {
+      "Logical ID": "ws019-p031",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q164; timebox 90 active minutes; [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase031-exclusive-block-administration/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p032",
+    "number": 274,
+    "values": {
+      "Logical ID": "ws019-p032",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q165; timebox 90 active minutes; [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase032-diskpart-gpt-init/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p033",
+    "number": 275,
+    "values": {
+      "Logical ID": "ws019-p033",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q166; timebox 90 active minutes"
+    }
+  },
+  {
+    "logical_id": "ws019-p034",
+    "number": 276,
+    "values": {
+      "Logical ID": "ws019-p034",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q167; timebox 90 active minutes"
+    }
+  },
+  {
+    "logical_id": "ws019-p035",
+    "number": 277,
+    "values": {
+      "Logical ID": "ws019-p035",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q168; timebox 90 active minutes"
+    }
+  },
+  {
+    "logical_id": "ws019-p036",
+    "number": 278,
+    "values": {
+      "Logical ID": "ws019-p036",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q169; timebox 90 active minutes"
+    }
+  },
+  {
+    "logical_id": "ws019-p037",
+    "number": 279,
+    "values": {
+      "Logical ID": "ws019-p037",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q170; timebox 90 active minutes"
+    }
+  },
+  {
+    "logical_id": "ws019-p038",
+    "number": 280,
+    "values": {
+      "Logical ID": "ws019-p038",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed, q171"
+    }
+  },
+  {
+    "logical_id": "ws019-p039",
+    "number": 281,
+    "values": {
+      "Logical ID": "ws019-p039",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q172"
+    }
+  },
+  {
+    "logical_id": "ws019-p040",
+    "number": 282,
+    "values": {
+      "Logical ID": "ws019-p040",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q173"
+    }
+  },
+  {
+    "logical_id": "ws019-p041",
+    "number": 283,
+    "values": {
+      "Logical ID": "ws019-p041",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q174"
+    }
+  },
+  {
+    "logical_id": "ws019-p042",
+    "number": 284,
+    "values": {
+      "Logical ID": "ws019-p042",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q175"
+    }
+  },
+  {
+    "logical_id": "ws019-p043",
+    "number": 285,
+    "values": {
+      "Logical ID": "ws019-p043",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q176"
+    }
+  },
+  {
+    "logical_id": "ws019-p044",
+    "number": 286,
+    "values": {
+      "Logical ID": "ws019-p044",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q177"
+    }
+  },
+  {
+    "logical_id": "ws019-p045",
+    "number": 287,
+    "values": {
+      "Logical ID": "ws019-p045",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q178; see [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase045-ufs-backing-admission/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p046",
+    "number": 288,
+    "values": {
+      "Logical ID": "ws019-p046",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q179; see [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase046-native-layout-plan/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p047",
+    "number": 289,
+    "values": {
+      "Logical ID": "ws019-p047",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q180; see [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase047-native-swap-startup/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p048",
+    "number": 290,
+    "values": {
+      "Logical ID": "ws019-p048",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q181; see [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase048-native-format-preflight/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p049",
+    "number": 291,
+    "values": {
+      "Logical ID": "ws019-p049",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed q182; see [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws019-installation/phase049-native-installer-integration/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws019-p050",
+    "number": 292,
+    "values": {
+      "Logical ID": "ws019-p050",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG006, MG004",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws019",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed / cleared q186 (q185 was uncleared: BUG-020)"
+    }
+  },
+  {
+    "logical_id": "ws020-p001",
+    "number": 293,
+    "values": {
+      "Logical ID": "ws020-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws020",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (revised 2026-08-31)"
+    }
+  },
+  {
+    "logical_id": "ws020-p002",
+    "number": 294,
+    "values": {
+      "Logical ID": "ws020-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws020",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (revised 2026-08-31)"
+    }
+  },
+  {
+    "logical_id": "ws020-p003",
+    "number": 295,
+    "values": {
+      "Logical ID": "ws020-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws020",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Complete (`q047`, 2026-08-31)"
+    }
+  },
+  {
+    "logical_id": "ws020-p004",
+    "number": 296,
+    "values": {
+      "Logical ID": "ws020-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws020",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete; the user confirmed successful Intel Mac real-hardware"
+    }
+  },
+  {
+    "logical_id": "ws020-p005",
+    "number": 297,
+    "values": {
+      "Logical ID": "ws020-p005",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws020",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Completed (`q038`; refreshed `q047`, 2026-08-31)"
+    }
+  },
+  {
+    "logical_id": "ws020-p006",
+    "number": 298,
+    "values": {
+      "Logical ID": "ws020-p006",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG003",
+      "Related Milestones": "MG008",
+      "Objectives": "O2, O4",
+      "Parent WS": "ws020",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete; automatic acceptance and the user's 2026-09-05 Intel Mac"
+    }
+  },
+  {
+    "logical_id": "ws021-p001",
+    "number": 299,
+    "values": {
+      "Logical ID": "ws021-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O4, O5",
+      "Parent WS": "ws021",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q064`)"
+    }
+  },
+  {
+    "logical_id": "ws021-p002",
+    "number": 300,
+    "values": {
+      "Logical ID": "ws021-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O4, O5",
+      "Parent WS": "ws021",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q064`)"
+    }
+  },
+  {
+    "logical_id": "ws021-p003",
+    "number": 301,
+    "values": {
+      "Logical ID": "ws021-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O4, O5",
+      "Parent WS": "ws021",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q064`)"
+    }
+  },
+  {
+    "logical_id": "ws021-p004",
+    "number": 302,
+    "values": {
+      "Logical ID": "ws021-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O4, O5",
+      "Parent WS": "ws021",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q064`)"
+    }
+  },
+  {
+    "logical_id": "ws021-p005",
+    "number": 303,
+    "values": {
+      "Logical ID": "ws021-p005",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O4, O5",
+      "Parent WS": "ws021",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q064`)"
+    }
+  },
+  {
+    "logical_id": "ws021-p006",
+    "number": 304,
+    "values": {
+      "Logical ID": "ws021-p006",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O4, O5",
+      "Parent WS": "ws021",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q064`)"
+    }
+  },
+  {
+    "logical_id": "ws021-p007",
+    "number": 305,
+    "values": {
+      "Logical ID": "ws021-p007",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG002",
+      "Objectives": "O1, O4, O5",
+      "Parent WS": "ws021",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q064`)"
+    }
+  },
+  {
+    "logical_id": "ws022-p001",
+    "number": 306,
+    "values": {
+      "Logical ID": "ws022-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Objectives": "O1",
+      "Parent WS": "ws022",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q127)"
+    }
+  },
+  {
+    "logical_id": "ws022-p002",
+    "number": 307,
+    "values": {
+      "Logical ID": "ws022-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Objectives": "O1",
+      "Parent WS": "ws022",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q128)"
+    }
+  },
+  {
+    "logical_id": "ws022-p003",
+    "number": 308,
+    "values": {
+      "Logical ID": "ws022-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG002",
+      "Objectives": "O1",
+      "Parent WS": "ws022",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q128)"
+    }
+  },
+  {
+    "logical_id": "ws023-p001",
+    "number": 309,
+    "values": {
+      "Logical ID": "ws023-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG008",
+      "Objectives": "O4, O5",
+      "Parent WS": "ws023",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q067`)"
+    }
+  },
+  {
+    "logical_id": "ws023-p002",
+    "number": 310,
+    "values": {
+      "Logical ID": "ws023-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG008",
+      "Objectives": "O4, O5",
+      "Parent WS": "ws023",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q067`)"
+    }
+  },
+  {
+    "logical_id": "ws023-p003",
+    "number": 311,
+    "values": {
+      "Logical ID": "ws023-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG008",
+      "Objectives": "O4, O5",
+      "Parent WS": "ws023",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q067`)"
+    }
+  },
+  {
+    "logical_id": "ws023-p004",
+    "number": 312,
+    "values": {
+      "Logical ID": "ws023-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG008",
+      "Objectives": "O4, O5",
+      "Parent WS": "ws023",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q067`)"
+    }
+  },
+  {
+    "logical_id": "ws023-p005",
+    "number": 313,
+    "values": {
+      "Logical ID": "ws023-p005",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG008",
+      "Objectives": "O4, O5",
+      "Parent WS": "ws023",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q067`)"
+    }
+  },
+  {
+    "logical_id": "ws023-p006",
+    "number": 314,
+    "values": {
+      "Logical ID": "ws023-p006",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG008",
+      "Objectives": "O4, O5",
+      "Parent WS": "ws023",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q067`)"
+    }
+  },
+  {
+    "logical_id": "ws023-p007",
+    "number": 315,
+    "values": {
+      "Logical ID": "ws023-p007",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG008",
+      "Objectives": "O4, O5",
+      "Parent WS": "ws023",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q067`)"
+    }
+  },
+  {
+    "logical_id": "ws023-p008",
+    "number": 316,
+    "values": {
+      "Logical ID": "ws023-p008",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG008",
+      "Objectives": "O4, O5",
+      "Parent WS": "ws023",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q067`)"
+    }
+  },
+  {
+    "logical_id": "ws023-p009",
+    "number": 317,
+    "values": {
+      "Logical ID": "ws023-p009",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG008",
+      "Objectives": "O4, O5",
+      "Parent WS": "ws023",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q067`)"
+    }
+  },
+  {
+    "logical_id": "ws023-p010",
+    "number": 318,
+    "values": {
+      "Logical ID": "ws023-p010",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG008",
+      "Objectives": "O4, O5",
+      "Parent WS": "ws023",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q067`)"
+    }
+  },
+  {
+    "logical_id": "ws023-p011",
+    "number": 319,
+    "values": {
+      "Logical ID": "ws023-p011",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG001",
+      "Related Milestones": "MG008",
+      "Objectives": "O4, O5",
+      "Parent WS": "ws023",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (`q067`)"
+    }
+  },
+  {
+    "logical_id": "ws024-p001",
+    "number": 320,
+    "values": {
+      "Logical ID": "ws024-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Objectives": "O1, O2",
+      "Parent WS": "ws024",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed; Queue q100; see [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws024-unified-ufs/phase001-format-and-migration-contract/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws024-p002",
+    "number": 321,
+    "values": {
+      "Logical ID": "ws024-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Objectives": "O1, O2",
+      "Parent WS": "ws024",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q101); final consolidated acceptance and retirement follow in p004"
+    }
+  },
+  {
+    "logical_id": "ws024-p003",
+    "number": 322,
+    "values": {
+      "Logical ID": "ws024-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Objectives": "O1, O2",
+      "Parent WS": "ws024",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q101); legacy fixture dependency retirement and full integration follow in p004"
+    }
+  },
+  {
+    "logical_id": "ws024-p004",
+    "number": 323,
+    "values": {
+      "Logical ID": "ws024-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Objectives": "O1, O2",
+      "Parent WS": "ws024",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q102); see [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws024-unified-ufs/phase004-acceptance-and-retirement/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws025-p001",
+    "number": 324,
+    "values": {
+      "Logical ID": "ws025-p001",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed; Queue q088, 2026-09-07 — [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws025-io-memory-cache/phase001-baseline-contracts/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws025-p002",
+    "number": 325,
+    "values": {
+      "Logical ID": "ws025-p002",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed; Queue q089, 2026-09-07. [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws025-io-memory-cache/phase002-boot-memory-handoff/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws025-p003",
+    "number": 326,
+    "values": {
+      "Logical ID": "ws025-p003",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed; Queue q090, 2026-09-07. [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws025-io-memory-cache/phase003-amd64-direct-map/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws025-p004",
+    "number": 327,
+    "values": {
+      "Logical ID": "ws025-p004",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed; Queue q091; evidence in results.md"
+    }
+  },
+  {
+    "logical_id": "ws025-p005",
+    "number": 328,
+    "values": {
+      "Logical ID": "ws025-p005",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed; Queue q092; automatic evidence and user-accepted physical gate in results.md"
+    }
+  },
+  {
+    "logical_id": "ws025-p006",
+    "number": 329,
+    "values": {
+      "Logical ID": "ws025-p006",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed; Queue q093; results.md に受け入れ証拠を記録"
+    }
+  },
+  {
+    "logical_id": "ws025-p007",
+    "number": 330,
+    "values": {
+      "Logical ID": "ws025-p007",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed; Queue q094; results.md に証拠を記録"
+    }
+  },
+  {
+    "logical_id": "ws025-p008",
+    "number": 331,
+    "values": {
+      "Logical ID": "ws025-p008",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed; Queue q095; results.md に受け入れ証拠を記録"
+    }
+  },
+  {
+    "logical_id": "ws025-p009",
+    "number": 332,
+    "values": {
+      "Logical ID": "ws025-p009",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed; Queue q096; results.md に受け入れ証拠を記録"
+    }
+  },
+  {
+    "logical_id": "ws025-p010",
+    "number": 333,
+    "values": {
+      "Logical ID": "ws025-p010",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed; Queue q097; see [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws025-io-memory-cache/phase010-ufs-metadata-adapter/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws025-p011",
+    "number": 334,
+    "values": {
+      "Logical ID": "ws025-p011",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q103); see [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws025-io-memory-cache/phase011-ufs-allocation-batching/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws025-p012",
+    "number": 335,
+    "values": {
+      "Logical ID": "ws025-p012",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed; Queue q098; see [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws025-io-memory-cache/phase012-fat-cache-cursor/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws025-p013",
+    "number": 336,
+    "values": {
+      "Logical ID": "ws025-p013",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q104); focused fault tests, three x86 builds and native acceptance passed"
+    }
+  },
+  {
+    "logical_id": "ws025-p014",
+    "number": 337,
+    "values": {
+      "Logical ID": "ws025-p014",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed; Queue q099; see [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws025-io-memory-cache/phase014-flush-generations/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws025-p015",
+    "number": 338,
+    "values": {
+      "Logical ID": "ws025-p015",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q105); bounded cache lifetime, fault/concurrency and native acceptance passed"
+    }
+  },
+  {
+    "logical_id": "ws025-p016",
+    "number": 339,
+    "values": {
+      "Logical ID": "ws025-p016",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q106); shared physical ownership, indexed/slab file cache, clean reclaim and worker reserve verified"
+    }
+  },
+  {
+    "logical_id": "ws025-p017",
+    "number": 340,
+    "values": {
+      "Logical ID": "ws025-p017",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (q107); evidence in results.md"
+    }
+  },
+  {
+    "logical_id": "ws025-p018",
+    "number": 341,
+    "values": {
+      "Logical ID": "ws025-p018",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q109); evidence in [results.md](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws025-io-memory-cache/phase018-data-writeback/results.md)"
+    }
+  },
+  {
+    "logical_id": "ws025-p019",
+    "number": 342,
+    "values": {
+      "Logical ID": "ws025-p019",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "complete (q108); evidence in results.md"
+    }
+  },
+  {
+    "logical_id": "ws025-p020",
+    "number": 343,
+    "values": {
+      "Logical ID": "ws025-p020",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q110); bounded automatic readahead, cache-read ownership correction, focused/native/build acceptance complete; see results.md."
+    }
+  },
+  {
+    "logical_id": "ws025-p021",
+    "number": 344,
+    "values": {
+      "Logical ID": "ws025-p021",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q116); implementation and final acceptance are recorded in [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws025-io-memory-cache/phase021-ufs-metadata-writeback/results.md)."
+    }
+  },
+  {
+    "logical_id": "ws025-p022",
+    "number": 345,
+    "values": {
+      "Logical ID": "ws025-p022",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed in q118; see [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws025-io-memory-cache/phase022-exec-cache-snapshot/results.md) and [snapshot design](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws025-io-memory-cache/phase022-exec-cache-snapshot/snapshot-design.md)."
+    }
+  },
+  {
+    "logical_id": "ws025-p023",
+    "number": 346,
+    "values": {
+      "Logical ID": "ws025-p023",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Historical phase completion; former vmap/VM ownership design was removed or replaced by 67b28ce0. Not current implementation evidence."
+    }
+  },
+  {
+    "logical_id": "ws025-p024",
+    "number": 347,
+    "values": {
+      "Logical ID": "ws025-p024",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed in q120; see [results](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws025-io-memory-cache/phase024-sg-dma/results.md) and [SG owner design](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws025-io-memory-cache/phase024-sg-dma/sg-design.md)."
+    }
+  },
+  {
+    "logical_id": "ws025-p025",
+    "number": 348,
+    "values": {
+      "Logical ID": "ws025-p025",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed in q121; see [acceptance evidence](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws025-io-memory-cache/phase025-storage-media-recovery/results.md)."
+    }
+  },
+  {
+    "logical_id": "ws025-p026",
+    "number": 349,
+    "values": {
+      "Logical ID": "ws025-p026",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed in q122; [results and acceptance](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws025-io-memory-cache/phase026-integration-defaults/results.md)."
+    }
+  },
+  {
+    "logical_id": "ws025-p027",
+    "number": 350,
+    "values": {
+      "Logical ID": "ws025-p027",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed (q139); bounded pipeline and QEMU functional acceptance passed."
+    }
+  },
+  {
+    "logical_id": "ws025-p028",
+    "number": 351,
+    "values": {
+      "Logical ID": "ws025-p028",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "canceled",
+      "Awesome Plan Status": "uncleared",
+      "Status Note": "canceled; adoption withdrawn, not achievement evidence"
+    }
+  },
+  {
+    "logical_id": "ws025-p029",
+    "number": 352,
+    "values": {
+      "Logical ID": "ws025-p029",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "Yes",
+      "Primary Milestone": "MG004",
+      "Related Milestones": null,
+      "Objectives": "O1, O2",
+      "Focused Goal IDs": "fg001",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "uncleared",
+      "Status Note": "uncleared / 修正後確認待ち（67b28ce0）。旧q230受け入れは履歴として保持。"
+    }
+  },
+  {
+    "logical_id": "ws025-p030",
+    "number": 353,
+    "values": {
+      "Logical ID": "ws025-p030",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "Yes",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG005",
+      "Objectives": "O1, O2, O3",
+      "Focused Goal IDs": "fg003",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "uncleared",
+      "Status Note": "uncleared / 現行実装確認済み（67b28ce0）。現行動作・残る比較証拠は未確認。"
+    }
+  },
+  {
+    "logical_id": "ws025-p031",
+    "number": 354,
+    "values": {
+      "Logical ID": "ws025-p031",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed / cleared q188（2026-09-10ユーザー受け入れ）。q123のuncleared履歴は保持。p032のPC98実機起動問題は別Phaseとして継続。"
+    }
+  },
+  {
+    "logical_id": "ws025-p032",
+    "number": 355,
+    "values": {
+      "Logical ID": "ws025-p032",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "Yes",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O2, O4",
+      "Focused Goal IDs": "fg002",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "planned",
+      "Status Note": "pending / 未着手（2026-09-10ユーザー指定、現行修正後の対応）。"
+    }
+  },
+  {
+    "logical_id": "ws025-p033",
+    "number": 356,
+    "values": {
+      "Logical ID": "ws025-p033",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed; q124。修正・host gate・実 AX211 VFIO 受け入れ完了。詳細は [results.md](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws025-io-memory-cache/phase033-ax211-wifi-dhcp-regression/results.md)。"
+    }
+  },
+  {
+    "logical_id": "ws025-p034",
+    "number": 357,
+    "values": {
+      "Logical ID": "ws025-p034",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed; q124。修正・host gate・実 AX211 VFIO 受け入れ完了。詳細は [results.md](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws025-io-memory-cache/phase034-ax211-operation-recovery/results.md)。"
+    }
+  },
+  {
+    "logical_id": "ws025-p035",
+    "number": 358,
+    "values": {
+      "Logical ID": "ws025-p035",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "completed; q124。詳細は [実行結果](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws025-io-memory-cache/phase035-multi-radio-selection/results.md)。"
+    }
+  },
+  {
+    "logical_id": "ws025-p036",
+    "number": 359,
+    "values": {
+      "Logical ID": "ws025-p036",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "cleared (q245)"
+    }
+  },
+  {
+    "logical_id": "ws025-p037",
+    "number": 360,
+    "values": {
+      "Logical ID": "ws025-p037",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "No",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG003, MG008",
+      "Objectives": "O1, O2, O4",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "cleared",
+      "Status Note": "Historical phase completion; former vmap/VM ownership design was removed or replaced by 67b28ce0. Not current implementation evidence."
+    }
+  },
+  {
+    "logical_id": "ws025-p038",
+    "number": 361,
+    "values": {
+      "Logical ID": "ws025-p038",
+      "Record Kind": "Phase",
+      "Planning Category": "Other",
+      "Current Focus": "Yes",
+      "Primary Milestone": "MG004",
+      "Related Milestones": "MG008, MG001",
+      "Objectives": "O4, O5",
+      "Focused Goal IDs": "fg001",
+      "Parent WS": "ws025",
+      "Phase Disposition": "normal",
+      "Awesome Plan Status": "uncleared",
+      "Status Note": "q303 stopped; current callback/API and SPARC initial-frame verification remains"
+    }
+  }
+]

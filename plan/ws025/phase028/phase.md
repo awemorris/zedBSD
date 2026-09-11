@@ -1,0 +1,538 @@
+# ws025-p028: 条件付き user page 直接 I/O
+
+<!-- awesome-plan-current:start -->
+
+## Current state — 2026-09-11 adoption
+
+Status: uncleared
+Phase disposition: canceled
+
+ユーザー指示で採用撤回。削除済みの専用実装を復活させない。
+以下の旧試行記録は履歴として保持。本項は既存判断の正規化であり実装の再開許可ではない。
+
+[Guardrail](https://github.com/awemorris/zedBSD/issues/363) · [Queue](https://github.com/awemorris/zedBSD/issues/362)
+
+<!-- awesome-plan-current:end -->
+
+
+Status: cancelled（2026-09-10ユーザー指定）。67b28ce0で専用実装を除去。性能未達のまま採用撤回。
+
+## 2026-09-10 修正後の扱い
+
+旧Queue・設計・測定は履歴であり、下記の継続実装計画は失効。再実装しない。
+[現行ソース照合](../post-rollback-review.md)。以下の旧計画より本項を優先する。
+
+日付: 2026-09-07
+
+Phase ID: `ws025-p028`
+
+
+Parent: [WS025](../ws.md)
+
+依存: ws025-p022–p024 とコピー律速の測定
+
+追加の先行条件: [ws025-p031](../phase031/phase.md) のドライバ整理を完了してから実装する。下記の旧ソースパスは p031 の移行表で解決する。既存の採用条件は維持する。
+
+追加の回帰 gate: [ws025-p032](../phase032/phase.md) の PC-98 QEMU 起動回復を完了してから実装へ進む。
+
+## 現在の選択
+
+ユーザーがp027〜p030を次に実施する最優先項目として選択した。
+旧見送りを継続する扱いではなく、p031残件・現ソース・下記の測定/実機条件を確認してQueue化する。
+今回の計画整理で実装や測定を実施済みとは扱わない。
+
+## 目的と境界
+
+必要な workload で page-vector I/O を user buffer へ接続する。
+
+## 変更対象
+
+- `src/kern/syscall.c`
+- `src/kern/file.c`
+- `src/kern/vmspace.c`
+- `src/kern/vm-object.c`
+- `src/drivers/dma.c`
+
+実装時点の source owner と file 名を再確認し、WS024 の移行済みコードを二重実装しない。
+
+## 設計と実装手順
+
+1. 既存 bounce を adapter として残し、対応 file/device の page-vector operation を限定公開する。
+2. user pin、COW、content lease、DMA map の異なる寿命を管理し、aligned/boundary/partial/fault/short result を扱う。
+3. unmap/truncate/exit/cancel と競合しても DMA backing を変更/解放しない。cache coherence と書込み snapshot を保証する。
+4. memcpy bytes/CPU が実測で減るか比較し、USB の待ち時間だけが律速なら有効化しない。
+
+[共通 I/O 契約](../io-design.md) と [memory 設計](../memory-design.md) を維持する。
+
+## 受け入れ
+
+- SG01–SG05、ASYNC01–ASYNC08、IO04–IO06、CACHE03–CACHE09 と direct I/O 専用 fault/mapping セル。
+- 該当 ID の詳細は [受け入れ行列](../acceptance.md)。変更範囲の focused fixture と supported build を実行し、source/config・counter・結果を記録する。
+
+## 停止・再開と成果物
+
+pin だけで DMA が可能とみなさない。効果または契約の根拠が不足したら既存 copy 経路で運用する。
+
+成果物は production patch、必要な fixture、実行後の `results.md`。途中状態は同ファイルに事実・失敗地点・残条件を記し、未実施を PASS にしない。Queue 選択前には実装せず、build/runtime は共有環境で直列に行う。
+
+## q122 adoption decision
+
+Not adopted in the mandatory WS025 implementation. Measure a remaining user-copy CPU bottleneck and define the complete pin/COW/unmap/cancel contract.
+See [effective policy and evidence basis](../phase026/effective-policy.md).
+This records the conditional decision, not completion of this optional phase.
+
+## q125 現ソースに合わせた詳細化
+
+ユーザーのPriority全件自走指示により着手条件を確認。完了できないPhaseはunclearedとし他WSへ進む。
+
+対象: src/kern/syscall.c、src/kern/file.c、src/kern/vmspace.c、src/kern/vm/以下、src/drivers/generic/dma.c。
+
+現状: vmspace_pin_user_pagesは存在するが、pinはDMAとの同時書換えを禁止するcontent leaseではない。file content leaseとuser aliasの寿命は別。p024 controlled比較はCPU改善を示していない。
+
+設計手順: (1) 対象を通常fileのaligned bulk I/Oに限定し、small/unaligned/faultは既存copyを保持。(2) 入力user aliasをwrite-protect/COW snapshotにする契約と、出力aliasへDMA書込みする権限・dirty公開を分離。(3) inode cache世代/範囲lease→user pin→DMA mapの取得順、逆順解放を固定。(4) unmap/exit/truncate/cancel、shared alias変更、short/error時のprefix公開をfault fixtureで検証。(5) CPU/コピー量のnative比較で採用判断する。
+
+今回の未クリア理由: direct user I/Oを正当化する対象workloadのcopy律速測定がなく、既存pinだけではalias/COW整合を満たせない。p024のコピー削減結果をdirect I/OのCPU改善と読み替えない。
+
+再開条件: 対象workloadのcopyコストを分離した測定、および共有aliasのfreeze/COW方式を検証するVM fixture。測定と契約が揃うまで既存copyで運用する。
+
+旧停止節のplanned維持はq122時点の判断。今回の実行結果はunclearedとして扱う。
+
+## q139 後の実装準備
+
+実機不在を停止条件にせず、既存pin/BUSY/reverse mapping/vmapの所有者を
+調査した。[段階導入案](design-followup.md)に、既存pinを自分で待たない
+try-upgrade、別aliasのPTE revoke、借用フレームのvmap寿命、入力snapshotと
+出力prefix公開を分離する手順を記録した。p028はまだ実装・検証していない。
+
+## q188 prerequisite update
+
+p031 is completed/cleared by user acceptance. Its refactor dependency no
+longer blocks this phase; this phase retains its own implementation and
+measurement/ownership acceptance requirements.
+
+## q231: current-source verification baseline
+
+Reconnect `tests/run-vmap-host.py` to the refactored `src/kern/io.c` owner.
+Compile the actual translation unit with function/data sections and discard
+unreferenced pool/error/statistics functions at link time; do not extract or
+copy scratch implementations. Preserve existing reservation exhaustion,
+allocation/leaf failure rollback, high physical addresses, supervisor/NX,
+pin-busy release and scratch fallback checks. Run ordinary and sanitized
+variants with saved source hashes/logs. This prerequisite does not complete
+p028 or establish a user-content lease.
+
+## q232: borrowed-frame vmap foundation
+
+Add optional amd64 `hal_vmap_borrow(mapping, pages, count, writable)`.
+Accept exactly one aligned RAM physical address per reserved page, validate
+physical address width and RAM eligibility, and copy the vector internally.
+Caller holds lifetime pins and any required content lease through successful
+release; this API neither acquires user ownership nor freezes aliases.
+Borrowed mappings never zero or free backing, remain supervisor/NX, and use
+explicit readonly/write permission. Failures clear partial mappings and
+complete shootdown before returning the reservation for retry. Release
+refuses active view pins; after successful release the owner may unpin RAM.
+Other platforms retain optional-symbol fallback. Verify invalid vectors,
+all partial-map failures, retry, duplicate/high physical pages, permissions,
+no frame allocation/free, and unchanged owned scratch behavior in the actual
+implementation fixture. Run ordinary/sanitized fixtures and amd64/PCAT/PC98
+builds sequentially. p028 remains incomplete until VM/syscall/measurement work.
+
+## q233: pin-to-owner upgrade
+
+Add `vm_private_page_io_try_upgrade(backing, owned_pins)`: caller retains all
+specified pins; reject zero, mismatched/foreign pins, absent RAM, BUSY or active
+operations without waiting or mutation. Under state lock, matching resident
+backing gains BUSY and generation advances, without another lifetime ref.
+Release with existing io_release before dropping any caller pins. This is
+metadata exclusion only; user PTEs still require separate synchronous revoke.
+Controlled actual-vm.c fixture verifies refusal invariance, duplicate-pin
+multiplicity, new pin/operation exclusion, release/retry, concurrent single
+winner and reference/pin conservation. Ordinary/sanitized host runs plus three
+supported builds; retain p028 uncleared for alias freeze and integration.
+
+## q234: bounded alias lease
+
+Provide opaque `vmspace_user_lease` acquire/release for at most 16 private
+pinned pages and 64 reverse mappings. Allocate bookkeeping before metadata
+locks; deduplicate backing owners and exact pin multiplicity. Under global
+metadata, upgrade all owners without waiting, reserve every non-BUSY mapping
+and region plus vmspace lifetime, and fail/rollback on foreign pins, stale
+frame identities, shared pages, dying vmspace or alias capacity exhaustion.
+Revoke every mapped alias outside metadata locks, conservatively mark backing
+dirty, and clear MAPPED after synchronous unmap. Keep BUSY and region holds
+through lease release so existing VM mutators wait. A HAL unmap error returns
+EIO after rollback; completed revokes remain absent and refault normally.
+Release requires the borrowed view already retired, drops reservations and
+wakes waiters before dropping vmspace refs; caller unpins last. Test actual
+owners with controlled HAL failures/alias lists including COW and duplicate
+pins, all-or-nothing refusal, retirement ordering, no allocation in locks and
+reference/hold conservation. Supported builds plus ordinary/sanitized focused
+fixture. Native syscall/race/measurement acceptance remains incomplete.
+
+## q235: real VM entry-point acceptance
+
+Reconnect exec-snapshot VM fixture to merged current owners. Preserve actual
+VM/fault/fork/protect/unmap/COW implementations and checked host PTE state.
+Add private anonymous lease cases and real mutator threads. Observe entry into
+actual wait paths before releasing lease; require completion after release
+and caller unpin, unchanged source content, correct COW separation/refault,
+and final vmspace/backing/commit cleanup. Ordinary and sanitized fixture;
+production builds only if production changes. Native performance and syscall
+integration remain separate unmet p028 requirements.
+
+## q236: uaccess readonly view
+
+Add an input-only view over a complete aligned 4–64 KiB pin. Require READ,
+private-page lease eligibility and optional HAL symbols; unsupported/invalid
+requests retain staging. Acquire lease, reserve/borrow readonly vmap, pin VA,
+then publish. Any failure retires the mapping before releasing the lease.
+Track a live view in its parent pin and reject duplicate acquire; premature
+unpin is an invariant violation. Release retires VA then lease, leaving user
+pins for the caller. Busy mapping release restores the VA pin and retains
+all ownership for retry. Exercise actual uaccess with controlled HAL/lease
+collaborators, failure at each acquisition stage, busy release retry and
+unsupported/unaligned input. Three supported builds. This does not implement
+output publication or enable syscalls before native benefit measurement.
+
+## q237: experimental write/pwrite integration
+
+Use `ZEDBSD_USER_INPUT_VIEW=1` only in explicit experimental builds; default
+zero until native benefit/contract acceptance. For regular-file scalar
+write/pwrite, attempt a full-pin readonly view before file_io_begin. On any
+refusal use existing staging. Preserve begin credentials, positional offsets,
+append, growth limit/SIGXFSZ, transfer short/error and complete semantics.
+Hold the view through file_io_complete, retire before unpin on every path;
+never return a borrowed VA to io_pool. Record scalar input copy and view bytes
+separately (attempted backend bytes for views, successful copied bytes for
+staging). Append events/version the I/O report. Build supported default
+configurations and an experimental amd64 kernel. Native scenarios and CPU/
+copy comparison remain required before enabling by default or clearing p028.
+
+## q238: native scalar input comparison
+
+Boot separate disposable copies of default and q237 experimental amd64 images
+with the same four-CPU QEMU/512 MiB USB boot setup. Compile one guest test
+against current sysroot, inject into source FAT copies, mount readonly and
+run against a writable regular file. Verify aligned write/pwrite/readback,
+append, unaligned fallback, fsync and RLIMIT partial write. Measure a fixed
+32-iteration 64 KiB overwrite loop: copied/view counter deltas plus process
+CPU and monotonic elapsed time. Both variants must verify data and protocol;
+view-on must demonstrate actual view bytes. Save image/source hashes, argv,
+guest logs and results. Guest abort/timeout is evidence, not a restart trigger;
+inspect and repair before another bounded run. No default adoption inferred
+from one noisy timing pair; output/read acceptance remains outstanding.
+
+## q239: input-only readable aliases
+
+Add a distinct input lease operation sharing bounded metadata acquisition
+with the existing full-unmap lease. Under existing BUSY/region reservations,
+remove WRITE with synchronous HAL protection but retain READ/EXEC mappings;
+write-only aliases still unmap. Leave original region/COW semantics intact,
+conservatively retain dirty state, and let future write faults restore allowed
+access. Release does not restore a stale writable PTE. Switch readonly uaccess
+views to this operation; output/full-unmap callers remain unchanged. Test both
+lease variants with actual VM mutator waits, partial HAL failure/refault/COW,
+non-COW write revocation and repeat-read pin without remapping. Build all
+supported configurations and experimental amd64; repeat the q238 same-binary
+native comparison before judging benefit.
+
+## q240: contiguous input permission ranges
+
+Group adjacent entries in the already reserved alias vector only when they
+have the same vmspace, contiguous virtual pages, mapped state and equal
+nonzero readonly protection. No sorting/reallocation or cross-gap operation;
+full-unmap and write-only aliases remain individual. Mark every affected
+mapping INPUT_PROTECTED before HAL transition, conservatively, so even a
+post-transition HAL error leaves a repairable write fault. Mark each backing
+dirty and update metadata under locks, but issue one synchronous HAL protect
+outside locks for the entire group. Verify grouping/non-grouping and failed
+range retry against actual VM/PTE fixtures; preserve existing races and
+fallbacks. Build all supported configurations, preserving default-off policy.
+
+q240 native follow-through: after supported builds, run the unchanged q239
+guest workload on default/experimental disposable images and compare exact
+copy/view selection and process CPU; retain all samples and unchanged-image
+checks. This remains measurement evidence, not automatic default adoption.
+
+## q241: prefix-preserving coherent reads
+
+Audit found `object_cache_read_missing` directly passes the destination to
+raw backend if scratch/publication allocation fails. Thus generic coherent
+read is not sufficient for direct-user output. Add a separate coherent prefix
+API using the same actual cache algorithm but refusing that fallback with
+ENOMEM after cleanup. A positive result guarantees only that prefix changed;
+a negative error changes no bytes. The caller retains the inode content read
+lease and a pinned cache identity. Preserve generic low-memory behavior for
+existing staging callers. Exercise a backend that writes beyond short/error
+results, scratch refusal, complete/short/EOF and resident-prefix plus later
+error. Do not expose writable user output until file-transaction integration
+also prevents raw fallback and preserves final-result semantics.
+
+## q242 file prefix integration
+
+Accept READ/PREAD only with pinned coherent cache and content read lease; reject
+unsupported transactions before touching output. Share existing transfer accounting,
+but forbid raw backend fallback. Verify real file transactions with hostile errors,
+short reads, scratch refusal, unchanged suffix/position and completion. Run focused
+host checks and three supported builds. Writable uaccess/syscalls follow separately.
+
+## q243 writable view
+
+Add an explicit output view entry requiring a WRITE pin. Use the full-unmap VM
+lease before file locks; publish writable borrowed VA only after acquisition.
+Dirty all captured private owners before writable access, including owners whose
+aliases were already absent. Share rollback/retirement with readonly input view.
+Test direction selection, HAL permissions, failure ordering, unsupported HAL and
+busy release, then supported builds. Syscall/native output acceptance follows.
+
+## q244 scalar output integration
+
+Acquire output view before file locks. Retain normal nonblocking scratch selection
+before the transaction for fallback; direct reads bypass copyout, not pool ownership.
+Invoke strict file transfer and fall back to staging only on ENOTSUP/ENOMEM with no
+confirmed bytes or changed file offset. Hold view through completion in all paths.
+Add separate confirmed output-view and copyout byte counters; keep feature default
+off until native functionality/performance acceptance. Exercise extracted actual
+READ/PREAD loops for direct, short/error/EOF, fallback and cleanup, then three builds.
+
+q244 native extension: reuse the disposable QEMU runner for eight warm READ/PREAD
+rounds with matching guest binaries, output counters, short EOF/unaligned/COW and
+post-release CPU access. Compare output flag off/on; preserve both images before
+restoring default builds. A slower result leaves the feature disabled.
+
+## q265 input ownership attribution
+
+Instrument external lease-acquire/release and kernel borrow/release calls with
+existing hal_rtc_read_counter in link-only wrappers. Collect aggregate elapsed
+ticks/counts once input lease acquisition starts; concurrent callers may contribute.
+Report every 256 completions, retain frequency and distinguish elapsed wall from
+CPU. No per-stage measurements imply full syscall attribution. Run existing input
+guest and restore ordinary image; do not compare instrumented timing as baseline.
+
+## q266 count-only attribution
+
+Use test-only external HAL map/prot/unmap wrappers and report calls/pages at
+256 completed input-lease intervals. No unavailable clock calls. Counters may
+include concurrent operations; distinguish system map/unmap from user protection.
+Run input oracle and restore ordinary image.
+
+## q267 retained input protection audit
+
+Audit whether INPUT_PROTECTED can justify skipping repeated HAL protection.
+Inspect failure, write-fault and mprotect paths; extend the actual VM lease host
+fixture with failed input protection followed by retry. No production/API change
+unless the invariant is proved. Timebox 30 active minutes; standing Priority
+authorization. Run only this changed fixture, ordinary and ASan/UBSan.
+
+## q268 redundant amd64 permission transition
+
+Under the existing space serializer, avoid PTE compare/exchange when the desired
+entry already equals the observed entry. Skip shootdown only if no leaf changed
+and no observed-flags output was requested; retain synchronization for query
+callers and every actual change. All mapping mutations finish shootdown before
+releasing this serializer. Preserve full-range validation and A/D bits.
+Focused actual HAL fixture: identical user/SYS permissions, mixed transitions,
+flags-query synchronization and invalid range atomicity. Supported builds follow;
+native input CPU acceptance remains required before enabling direct I/O.
+Timebox: 60 active minutes, standing Priority authorization.
+
+## q269 native permission optimization acceptance
+
+Run existing eight-sample input oracle on ordinary and input-view-enabled amd64
+images from q268 source. Retain source images, hashes and every sample, verify
+identical guest binary, compare total CPU and exact copy/view accounting. Restore
+ordinary build. No adoption without measured benefit. Timebox 60 active minutes.
+
+## q270 non-executable absent-PTE publication
+
+Intel SDM 4.10.4.3 permits P=0 to P=1 without invalidation provided prior removal
+was invalidated. Current amd64 map rejects present leaves under the serializer;
+unmap and rollback finish invalidation before freeing tables/unlocking. Omit
+success-path shootdown for non-executable mappings; executable mappings retain
+instruction serialization. Keep every rollback/unmap retirement unchanged.
+Test actual HAL fresh map, executable map, overlap, partial rollback, VA reuse
+and retained unmap sync; build amd64 and run input off/on native data oracle.
+Restore ordinary image. Timebox 60 active minutes, standing Priority authorization.
+
+## q271 SMP mapping retirement regression
+
+Run existing actual kernel-map probe on q270 source, 8 GiB/4 CPUs. Add explicit
+assertions that successive rounds reuse the same VA with a different first PA.
+Verify real table-allocation rollback, high fragmented mapping, existing/new
+user spaces, AP observations, retirement and free-byte balance, then root login.
+Restore ordinary build by forced relink and verify wrapper removal.
+Timebox 45 active minutes; standing Priority authorization.
+
+## q272 output comparison on optimized HAL
+
+Run eight-sample output oracle off/on on current q270 HAL. Require identical
+guest binaries, exact counters, EOF/short suffix, unaligned and fork COW checks.
+Retain source images and hashes, restore ordinary. No default adoption without
+CPU benefit. Timebox 60 active minutes, standing Priority authorization.
+
+## q273 output alias retirement batching
+
+Coalesce adjacent mapped aliases in the same vmspace with the same transition
+kind. Output unmaps need no region-permission equality. Pass the complete run
+to hal_space_unmap and clear MAPPED on every member only after success. Keep
+busy/region/backing ownership through all runs. Audited current amd64, i386,
+arm64, m68k and sparcv9 unmap: errors occur before mutation; admitted range
+retirement returns success after synchronization. Earlier successful runs
+remain reflected if a later run fails. No new HAL declarations.
+Verify actual VM lease fixture batching, holes, cross-space separation, first
+and later-run failures; ordinary/sanitizer and supported builds. Native output
+performance follows. Timebox 60 active minutes, standing Priority authorization.
+
+## q274 native output batching acceptance
+
+Run unchanged output oracle off/on on q273 source. Retain identical guest
+hashes, exact counters and all samples; check EOF/short/unaligned/COW. Restore
+ordinary image. Timebox 60 active minutes, standing Priority authorization.
+
+## q278 output staging and remap cost audit
+
+Inspect scratch selection and fallback ownership before attempting lazy
+acquisition. Compare actual pool behavior with syscall fixture ordering. Identify
+a next bounded attribution step without changing the accepted lifetime contract.
+Timebox 30 active minutes; standing Priority authorization; read-only production.
+
+## q279 output pin/map operation attribution
+
+Use a separate link-only count probe activated at first output lease. Count
+external SYS/user map/unmap calls and user-pin calls/pages, report every 256
+lease releases. Counts include concurrent callers and exclude the first pin
+before activation; they are not stage CPU attribution. Run unchanged output
+oracle, preserve probe image, force ordinary relink and verify no wrappers.
+Timebox 60 active minutes; standing Priority authorization.
+
+## q280 output alias restoration
+
+Remember only successfully revoked output aliases. On lease release (after
+kernel writer retirement), best-effort restore contiguous VA/PA runs in one
+space with equal effective COW permissions while busy/region/backing reservations
+remain held. Never populate an originally absent alias or input lease. Failed
+map runs remain absent and faultable; current HAL map rollback leaves no partial
+range. Acquisition unwind may restore its completed output revocations safely
+(no writer was published). Do not change I/O results for restoration failure.
+Actual VM tests: contiguous run, COW split, originally absent alias, allocation
+refusal, reservation/cleanup. Three builds, then native CPU acceptance separately.
+Timebox 60 active minutes; standing Priority authorization, no HAL API changes.
+
+## q281 native output restoration acceptance
+
+Compare unchanged output oracle off/on on q280 source, same guest hash, exact
+copy/view counts, EOF/short suffix and COW. Preserve samples/images; restore
+ordinary. Timebox 60 active minutes, standing Priority authorization.
+
+## q282 page-vector output implementation design
+
+Audit contiguous-pointer constraints against original batch/page-vector plan.
+Define bounded destination spans without new HAL API, preserving one coherent
+64 KiB transaction and strict prefix publication. Result and finite next steps:
+[page-vector-output-design.md](page-vector-output-design.md).
+Timebox 30 active minutes; standing Priority authorization.
+
+## q283 VM vector destination
+
+Implement bounded destination helpers and strict VM vector read using existing
+coherent/miss algorithm. Test actual prefix paths with scattered destination
+and hostile backend, scratch refusal and preserved one-run fill. No syscall
+activation yet. Focused host ordinary/sanitizer and supported builds. Timebox
+60 active minutes, standing Priority authorization.
+
+## q284 file transaction destination
+
+Add strict file_io destination entry sharing transfer implementation, maintaining
+read identity/content guards and position/completion behavior. Exercise actual
+file/VM scattered READ/PREAD hostile-prefix/fallback cases and full64 KiB miss
+backend count. No syscall activation. Focused host/sanitizer and three builds.
+Timebox60 active minutes; standing Priority authorization.
+
+## q285 mapping-free uaccess output owner
+
+Add output owner exposing validated stable pinned-page spans under exclusive
+lease, with dirty accounting and no SYS mapping dependency. Preserve existing
+output view until next syscall switch removes it. Test actual uaccess owner
+invalid pins, lease refusal, dirty and parent lifetime, duplicate acquire/release
+and operation without optional map symbols. Syscall integration needs destination
+slicing because fallback capacity can be512 bytes; do not assume page-aligned
+chunks. Focused host/sanitizer and supported builds; timebox60 minutes.
+
+## q286 syscall destination switch
+
+Add validated offset/length span slicing, switch scalar READ/PREAD to uaccess
+output spans, retain512-byte staging fallback and complete-before-release.
+Remove superseded mapped output API/field; input mapping remains. Adapt actual
+uaccess/syscall fixtures and test512-byte successful/fallback progress. Focused
+ordinary/sanitizer and supported builds. Native comparison follows; defaults off.
+Timebox60 active minutes, standing Priority authorization.
+
+## q287 output native comparison
+
+Run current ordinary image and output-span-enabled image with the same native
+output guest on disposable QEMU USB disks. Check exact copy/direct counters,
+data and completion, guest hash and source immutability. Compare summed CPU
+for eight16MiB samples. Restore ordinary image after enabled build. Defaults
+remain off unless adoption conditions are proven. Timebox60 active minutes.
+
+## q288 native boot ENOSPC diagnosis
+
+Locate ENOSPC before output comparison using temporary test-only origin logging
+in kernel/filesystem error sites, preserving capacity/ownership and credentials.
+Retain failing guest evidence; remove instrumentation and restore ordinary build.
+If cause exceeds this finite diagnostic scope, record concrete follow-up rather
+than changing limits speculatively. Timebox60 minutes, standing authorization.
+
+## q289 enabled output span measurement
+
+Compare enabled output spans against q288 restored ordinary cell, same guest
+hash/counters and native correctness. Retain independent image and hashes,
+restore ordinary build after execution. q287 intermittent boot remains open;
+no default activation without performance adoption. Timebox60 minutes.
+
+## q290 validated destination cursor
+
+Initialize a bounded copied span descriptor once per coherent VM read, then
+consume only confirmed sequential prefixes. Reject invalid init and overrun
+before publishing bytes; retain public random-offset copy validation. Both
+resident and miss copy sites share one cursor. Test empty spans, short chunks,
+source descriptor mutation, invalid/oversized requests and actual file/VM
+prefix/batch paths; supported builds. Native measurement follows separately.
+Timebox60 minutes; standing Priority authorization.
+
+## q291 cursor native comparison
+
+Measure current ordinary and output-enabled cursor builds using identical
+guest/counters on disposable QEMU images. Record all samples and source
+immutability; restore ordinary image. Keep q287 intermittent failure explicit.
+Timebox60 minutes; no adoption on an inconclusive timing pair.
+
+## q292 profiling prerequisite and fallback selection
+
+Revalidate precise counter prerequisite before repeating q265 failed timing.
+Inspect local KVM availability and QEMU TCG invariant-counter support using
+a diskless paused guest. If unavailable, select instruction-count or operation
+attribution without claiming CPU stage timing. No HAL policy override. Save
+concrete next profiling plan and evidence; timebox30 minutes.
+
+## q293 current output operation counts
+
+Use existing output-profile-native.mk link-only external-call wrappers with
+output enabled. Native data/counter oracle plus2048-lease map/unmap/pin totals;
+counts include concurrent external callers and do not measure CPU-stage time.
+Compare current counts with historical q279 only as operation evidence. Force
+ordinary relink after test and verify wrapper symbols absent. Timebox60 minutes.
+
+## q294 input source feasibility/design
+
+Audit file write dispatch, delayed content commit, unordered cached pages and
+input lease. Save bounded source-span implementation plan with contiguous
+backend fallback and irreversible mutation ordering. No production changes.
+Timebox30 minutes; standing Priority authorization.
+
+## User steering after q294
+
+Pause I/O performance changes for external expert review. Do not execute input
+source design steps until review/user resumes. Switch to HAL fixed callbacks
+under ws025-p038. Existing defaults off and q287 boot evidence retained.

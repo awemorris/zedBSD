@@ -629,48 +629,6 @@ hal_cons_save_state(
 }
 
 /*
- * Restores terminal mode and an optional presentation state.
- */
-void
-hal_cons_restore_terminal(
-	const struct hal_cons_state *state)
-{
-	struct console_output_token token;
-
-	/* Serializes restoration with all console rendering. */
-	token = console_output_lock();
-	console_mode = HAL_CONS_TERMINAL;
-
-	/* Restores a valid saved cursor state when supplied. */
-	if (state != NULL &&
-	    state->row < HAL_CONS_ROWS &&
-	    state->column < HAL_CONS_COLUMNS) {
-		cursor_row = state->row;
-		cursor_column = state->column;
-		cursor_visible = state->cursor_visible;
-	}
-
-	/* Publishes the restored cursor and releases output serialization. */
-	update_cursor_locked();
-	console_output_unlock(token);
-}
-
-/*
- * Selects the console presentation mode.
- */
-void
-hal_cons_set_mode(
-	enum hal_cons_mode mode)
-{
-	struct console_output_token token;
-
-	/* Publishes the mode under the output serializer. */
-	token = console_output_lock();
-	console_mode = mode;
-	console_output_unlock(token);
-}
-
-/*
  * Suspends hardware console rendering.
  */
 void
@@ -993,33 +951,6 @@ hal_cons_poll_event(
 }
 
 /*
- * Reports the PC/AT console input capabilities.
- */
-void
-hal_cons_get_input_info(
-	struct hal_cons_input_info *info)
-{
-	static const char *const symbols[] = {
-		"esc", "backspace", "tab", "enter",
-		"leftshift", "rightshift", "leftctrl", "rightctrl",
-		"leftalt", "rightalt", "capslock", "home", "up",
-		"pageup", "left", "right", "end", "down", "pagedown",
-		"insert", "delete", "f1", "f2", "f3", "f4", "f5",
-		"f6", "f7", "f8", "f9", "f10"
-	};
-
-	/* Ignores a missing output record. */
-	if (info == NULL)
-		return;
-
-	/* Publishes the keyboard event and symbol capabilities. */
-	info->flags = HAL_CONS_INPUT_TEXT | HAL_CONS_INPUT_RELEASE |
-	    HAL_CONS_INPUT_REPEAT;
-	info->symbols = symbols;
-	info->symbol_count = sizeof(symbols) / sizeof(symbols[0]);
-}
-
-/*
  * Waits for and consumes one console key event.
  */
 int
@@ -1102,25 +1033,6 @@ hal_cons_getc(
 		if (symbol_equal(event.symbol, "esc"))
 			return 0x1b;
 	}
-}
-
-/*
- * Reports the compatibility key state.
- */
-int
-hal_cons_key_state(
-	int key)
-{
-	bool enabled;
-	int down;
-
-	/* Reads the compatibility key under input serialization. */
-	enabled = hal_cons_wait_queue_lock(&input_waiters);
-	down = key == 0x170 ? shift_down : 0;
-	hal_cons_wait_queue_unlock(&input_waiters, enabled);
-
-	/* Reports the requested compatibility state. */
-	return down;
 }
 
 /*

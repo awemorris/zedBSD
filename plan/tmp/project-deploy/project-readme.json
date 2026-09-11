@@ -1,0 +1,3 @@
+{
+  "text": "[Master Board](https://github.com/awemorris/zedBSD/issues/1) の Objectives → Milestone Goals → WS → Phase を表示するProjectです。\n\nMilestones / Workstreamsから各WS、Phasesから親WS別のPhaseを辿れます。Current Focusはfg001〜fg003、PriorityはMaster指定順です。完了済みPriorityも履歴として保持しています。\n\nAwesome Plan Statusが計画上の状態です。Issueのopen/closedや既定Statusとは別です。Status Noteに元の条件・限定を残します。clearedは各Phaseが定めた範囲の記録であり、製品全体の完成を意味しません。Primary MilestoneはMG分類のカスタムフィールドで、GitHub native milestoneではありません。\n\nCurrent Queue / Outlookは現在空です。q303は停止・終了済みで、新しい実行Queueは作っていません。Current Focusは実行許可ではありません。p028はcanceledで達成証拠から除外します。MG009はPrimary WS未定義のため、詳細はMasterを参照してください。\n\nIssue本文が計画内容の正本です。このProjectは2026-09-10時点の表示用投影で、以後の変更はIssueとフィールドを併せて更新してください。自動同期は未導入です。\n"
+}

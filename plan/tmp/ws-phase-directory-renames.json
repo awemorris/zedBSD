@@ -1,0 +1,1446 @@
+[
+  {
+    "from": "plan/ws001-posix/phase000-inventory",
+    "to": "plan/ws001/phase000"
+  },
+  {
+    "from": "plan/ws001-posix/phase001-failure-commands",
+    "to": "plan/ws001/phase001"
+  },
+  {
+    "from": "plan/ws001-posix/phase002-low-dependency",
+    "to": "plan/ws001/phase002"
+  },
+  {
+    "from": "plan/ws001-posix/phase003-locale",
+    "to": "plan/ws001/phase003"
+  },
+  {
+    "from": "plan/ws001-posix/phase004-parsers",
+    "to": "plan/ws001/phase004"
+  },
+  {
+    "from": "plan/ws001-posix/phase005-process-ipc",
+    "to": "plan/ws001/phase005"
+  },
+  {
+    "from": "plan/ws001-posix/phase006-development",
+    "to": "plan/ws001/phase006"
+  },
+  {
+    "from": "plan/ws001-posix/phase007-compression",
+    "to": "plan/ws001/phase007"
+  },
+  {
+    "from": "plan/ws001-posix/phase008-sccs",
+    "to": "plan/ws001/phase008"
+  },
+  {
+    "from": "plan/ws001-posix/phase009-audit",
+    "to": "plan/ws001/phase009"
+  },
+  {
+    "from": "plan/ws001-posix/phase010-local-reimplementation",
+    "to": "plan/ws001/phase010"
+  },
+  {
+    "from": "plan/ws001-posix/phase011-basename",
+    "to": "plan/ws001/phase011"
+  },
+  {
+    "from": "plan/ws001-posix/phase012-dirname",
+    "to": "plan/ws001/phase012"
+  },
+  {
+    "from": "plan/ws001-posix/phase013-link-unlink",
+    "to": "plan/ws001/phase013"
+  },
+  {
+    "from": "plan/ws001-posix/phase014-shell-job-control",
+    "to": "plan/ws001/phase014"
+  },
+  {
+    "from": "plan/ws001-posix/phase015-base-c-style-adoption",
+    "to": "plan/ws001/phase015"
+  },
+  {
+    "from": "plan/ws001-posix/phase016-direct-lpd-printing",
+    "to": "plan/ws001/phase016"
+  },
+  {
+    "from": "plan/ws001-posix/phase017-cmp-conformance",
+    "to": "plan/ws001/phase017"
+  },
+  {
+    "from": "plan/ws001-posix/phase018-tee-conformance",
+    "to": "plan/ws001/phase018"
+  },
+  {
+    "from": "plan/ws001-posix/phase019-userland-file-headers",
+    "to": "plan/ws001/phase019"
+  },
+  {
+    "from": "plan/ws001-posix/phase020-complete-userland-c-style",
+    "to": "plan/ws001/phase020"
+  },
+  {
+    "from": "plan/ws001-posix/phase021-ansi-c-semantic-layout",
+    "to": "plan/ws001/phase021"
+  },
+  {
+    "from": "plan/ws001-posix/phase022-credential-aware-vfs-creation",
+    "to": "plan/ws001/phase022"
+  },
+  {
+    "from": "plan/ws001-posix/phase023-directory-fsync",
+    "to": "plan/ws001/phase023"
+  },
+  {
+    "from": "plan/ws001-posix/phase085-terminfo",
+    "to": "plan/ws001/phase085"
+  },
+  {
+    "from": "plan/ws002-services/phase011-service-foundation",
+    "to": "plan/ws002/phase011"
+  },
+  {
+    "from": "plan/ws002-services/phase012-init",
+    "to": "plan/ws002/phase012"
+  },
+  {
+    "from": "plan/ws002-services/phase013-logging",
+    "to": "plan/ws002/phase013"
+  },
+  {
+    "from": "plan/ws002-services/phase014-sessions",
+    "to": "plan/ws002/phase014"
+  },
+  {
+    "from": "plan/ws002-services/phase015-network",
+    "to": "plan/ws002/phase015"
+  },
+  {
+    "from": "plan/ws002-services/phase016-scheduling",
+    "to": "plan/ws002/phase016"
+  },
+  {
+    "from": "plan/ws002-services/phase017-time",
+    "to": "plan/ws002/phase017"
+  },
+  {
+    "from": "plan/ws002-services/phase018-shell",
+    "to": "plan/ws002/phase018"
+  },
+  {
+    "from": "plan/ws002-services/phase019-integration",
+    "to": "plan/ws002/phase019"
+  },
+  {
+    "from": "plan/ws002-services/phase020-network-service",
+    "to": "plan/ws002/phase020"
+  },
+  {
+    "from": "plan/ws002-services/phase021-missing-login-session-teardown",
+    "to": "plan/ws002/phase021"
+  },
+  {
+    "from": "plan/ws002-services/phase022-intermittent-console-login",
+    "to": "plan/ws002/phase022"
+  },
+  {
+    "from": "plan/ws002-services/phase023-usb-boot-halt",
+    "to": "plan/ws002/phase023"
+  },
+  {
+    "from": "plan/ws002-services/phase024-retirement-heap-integrity",
+    "to": "plan/ws002/phase024"
+  },
+  {
+    "from": "plan/ws003-bringup/phase001-hardware-inventory",
+    "to": "plan/ws003/phase001"
+  },
+  {
+    "from": "plan/ws003-bringup/phase002-uefi-memory-map",
+    "to": "plan/ws003/phase002"
+  },
+  {
+    "from": "plan/ws003-bringup/phase003-latitude-xhci-capability-mmio",
+    "to": "plan/ws003/phase003"
+  },
+  {
+    "from": "plan/ws003-bringup/phase004-latitude-xhci-device-enumeration",
+    "to": "plan/ws003/phase004"
+  },
+  {
+    "from": "plan/ws003-bringup/phase005-xhci-command-cancel-lifecycle",
+    "to": "plan/ws003/phase005"
+  },
+  {
+    "from": "plan/ws003-bringup/phase006-xhci-halted-endpoint-recovery",
+    "to": "plan/ws003/phase006"
+  },
+  {
+    "from": "plan/ws003-bringup/phase007-shared-dma-allocation-synchronization",
+    "to": "plan/ws003/phase007"
+  },
+  {
+    "from": "plan/ws003-bringup/phase008-xhci-device-association-lifetime",
+    "to": "plan/ws003/phase008"
+  },
+  {
+    "from": "plan/ws003-bringup/phase009-superspeed-endpoint-context",
+    "to": "plan/ws003/phase009"
+  },
+  {
+    "from": "plan/ws003-bringup/phase010-usb-storage-flush-capability",
+    "to": "plan/ws003/phase010"
+  },
+  {
+    "from": "plan/ws003-bringup/phase011-boot-parameter-core",
+    "to": "plan/ws003/phase011"
+  },
+  {
+    "from": "plan/ws003-bringup/phase012-x86-parameter-handoff",
+    "to": "plan/ws003/phase012"
+  },
+  {
+    "from": "plan/ws003-bringup/phase013-root-source-selection",
+    "to": "plan/ws003/phase013"
+  },
+  {
+    "from": "plan/ws003-bringup/phase014-multi-swap",
+    "to": "plan/ws003/phase014"
+  },
+  {
+    "from": "plan/ws003-bringup/phase015-x86-parameter-acceptance",
+    "to": "plan/ws003/phase015"
+  },
+  {
+    "from": "plan/ws003-bringup/phase016-boot-parameter-header-dependency",
+    "to": "plan/ws003/phase016"
+  },
+  {
+    "from": "plan/ws003-bringup/phase017-uefi-load-options-compatibility",
+    "to": "plan/ws003/phase017"
+  },
+  {
+    "from": "plan/ws003-bringup/phase018-latitude-nvme-install-boot",
+    "to": "plan/ws003/phase018"
+  },
+  {
+    "from": "plan/ws003-bringup/phase019-latitude-nvme-native-install-boot",
+    "to": "plan/ws003/phase019"
+  },
+  {
+    "from": "plan/ws003-bringup/phase020-cf-sv7-acpi-irq-bringup",
+    "to": "plan/ws003/phase020"
+  },
+  {
+    "from": "plan/ws003-bringup/phase021-portable-gpt-image-extent",
+    "to": "plan/ws003/phase021"
+  },
+  {
+    "from": "plan/ws003-bringup/phase022-pc9821-v13-ipl-read-contract",
+    "to": "plan/ws003/phase022"
+  },
+  {
+    "from": "plan/ws003-bringup/phase023-pc9821-v13-ipl-entry-localization",
+    "to": "plan/ws003/phase023"
+  },
+  {
+    "from": "plan/ws003-bringup/phase024-pc9821-v13-stage1-fixed-read-compatibility",
+    "to": "plan/ws003/phase024"
+  },
+  {
+    "from": "plan/ws003-bringup/phase025-amd64-smp-counter-validation",
+    "to": "plan/ws003/phase025"
+  },
+  {
+    "from": "plan/ws004-hardware/phase001-foundation-audit",
+    "to": "plan/ws004/phase001"
+  },
+  {
+    "from": "plan/ws004-hardware/phase002-pcie-xhci-prerequisites",
+    "to": "plan/ws004/phase002"
+  },
+  {
+    "from": "plan/ws004-hardware/phase003-ecam-msi",
+    "to": "plan/ws004/phase003"
+  },
+  {
+    "from": "plan/ws004-hardware/phase004-xhci",
+    "to": "plan/ws004/phase004"
+  },
+  {
+    "from": "plan/ws004-hardware/phase005-usb-root",
+    "to": "plan/ws004/phase005"
+  },
+  {
+    "from": "plan/ws004-hardware/phase006-usb-overlay-write",
+    "to": "plan/ws004/phase006"
+  },
+  {
+    "from": "plan/ws004-hardware/phase007-warm-reset",
+    "to": "plan/ws004/phase007"
+  },
+  {
+    "from": "plan/ws004-hardware/phase008-smp-heap-integrity",
+    "to": "plan/ws004/phase008"
+  },
+  {
+    "from": "plan/ws004-hardware/phase009-pci-hcd-irq-teardown",
+    "to": "plan/ws004/phase009"
+  },
+  {
+    "from": "plan/ws004-hardware/phase010-usb-function-model",
+    "to": "plan/ws004/phase010"
+  },
+  {
+    "from": "plan/ws004-hardware/phase011-xhci-concurrent-urbs",
+    "to": "plan/ws004/phase011"
+  },
+  {
+    "from": "plan/ws004-hardware/phase012-net-device-hotplug",
+    "to": "plan/ws004/phase012"
+  },
+  {
+    "from": "plan/ws004-hardware/phase013-cdc-ncm-wire",
+    "to": "plan/ws004/phase013"
+  },
+  {
+    "from": "plan/ws004-hardware/phase014-cdc-ncm-driver",
+    "to": "plan/ws004/phase014"
+  },
+  {
+    "from": "plan/ws004-hardware/phase015-usb-binding-transactions",
+    "to": "plan/ws004/phase015"
+  },
+  {
+    "from": "plan/ws004-hardware/phase016-legacy-hcd-request-retirement",
+    "to": "plan/ws004/phase016"
+  },
+  {
+    "from": "plan/ws004-hardware/phase017-cdc-ncm-runtime-recovery",
+    "to": "plan/ws004/phase017"
+  },
+  {
+    "from": "plan/ws004-hardware/phase018-rtl8156-ncm-association",
+    "to": "plan/ws004/phase018"
+  },
+  {
+    "from": "plan/ws004-hardware/phase019-cdc-ecm-qemu-baseline",
+    "to": "plan/ws004/phase019"
+  },
+  {
+    "from": "plan/ws004-hardware/phase020-cdc-ncm-deterministic-hardening",
+    "to": "plan/ws004/phase020"
+  },
+  {
+    "from": "plan/ws004-hardware/phase021-xhci-superspeed-interrupt-context",
+    "to": "plan/ws004/phase021"
+  },
+  {
+    "from": "plan/ws004-hardware/phase022-nvme-admin-identify",
+    "to": "plan/ws004/phase022"
+  },
+  {
+    "from": "plan/ws004-hardware/phase023-nvme-io-lifecycle",
+    "to": "plan/ws004/phase023"
+  },
+  {
+    "from": "plan/ws004-hardware/phase024-nvme-qemu-acceptance",
+    "to": "plan/ws004/phase024"
+  },
+  {
+    "from": "plan/ws004-hardware/phase025-latitude-nvme-readonly",
+    "to": "plan/ws004/phase025"
+  },
+  {
+    "from": "plan/ws004-hardware/phase026-archer-t3u-nano-identity-firmware",
+    "to": "plan/ws004/phase026"
+  },
+  {
+    "from": "plan/ws004-hardware/phase027-wlan-uapi-common-core",
+    "to": "plan/ws004/phase027"
+  },
+  {
+    "from": "plan/ws004-hardware/phase028-rtl8822bu-usb-scan",
+    "to": "plan/ws004/phase028"
+  },
+  {
+    "from": "plan/ws004-hardware/phase029-wpa2-ccmp-l2",
+    "to": "plan/ws004/phase029"
+  },
+  {
+    "from": "plan/ws004-hardware/phase030-wlan-lifecycle-hardware-hardening",
+    "to": "plan/ws004/phase030"
+  },
+  {
+    "from": "plan/ws004-hardware/phase031-legacy-hcd-concurrent-hotplug",
+    "to": "plan/ws004/phase031"
+  },
+  {
+    "from": "plan/ws004-hardware/phase032-usb-endpoint-device-recovery",
+    "to": "plan/ws004/phase032"
+  },
+  {
+    "from": "plan/ws004-hardware/phase033-amd64-framebuffer-console-serialization",
+    "to": "plan/ws004/phase033"
+  },
+  {
+    "from": "plan/ws004-hardware/phase034-cdc-ecm-async-tx-accounting",
+    "to": "plan/ws004/phase034"
+  },
+  {
+    "from": "plan/ws004-hardware/phase035-usb-same-endpoint-multi-urb",
+    "to": "plan/ws004/phase035"
+  },
+  {
+    "from": "plan/ws004-hardware/phase036-rtl8822bu-pre-radio-substrate",
+    "to": "plan/ws004/phase036"
+  },
+  {
+    "from": "plan/ws004-hardware/phase037-intel-ax201-intake-firmware",
+    "to": "plan/ws004/phase037"
+  },
+  {
+    "from": "plan/ws004-hardware/phase038-intel-ax201-standalone-driver",
+    "to": "plan/ws004/phase038"
+  },
+  {
+    "from": "plan/ws004-hardware/phase038-intel-ax211-standalone-driver",
+    "to": "plan/ws004/phase038"
+  },
+  {
+    "from": "plan/ws004-hardware/phase039-wlan-evidence-driven-refactor",
+    "to": "plan/ws004/phase039"
+  },
+  {
+    "from": "plan/ws004-hardware/phase040-rtl8822bu-passthrough-reproduction",
+    "to": "plan/ws004/phase040"
+  },
+  {
+    "from": "plan/ws004-hardware/phase041-rtl8822bu-5ghz-quality",
+    "to": "plan/ws004/phase041"
+  },
+  {
+    "from": "plan/ws004-hardware/phase042-rtl8822bu-24ghz-connect-reproduction",
+    "to": "plan/ws004/phase042"
+  },
+  {
+    "from": "plan/ws004-hardware/phase043-rtl8822bu-physical-connect-ux",
+    "to": "plan/ws004/phase043"
+  },
+  {
+    "from": "plan/ws004-hardware/phase044-wlan-async-operation-boundary",
+    "to": "plan/ws004/phase044"
+  },
+  {
+    "from": "plan/ws004-hardware/phase045-archer-t3u-plus-feasibility",
+    "to": "plan/ws004/phase045"
+  },
+  {
+    "from": "plan/ws004-hardware/phase046-archer-t3u-plus-driver",
+    "to": "plan/ws004/phase046"
+  },
+  {
+    "from": "plan/ws004-hardware/phase047-wlan-driver-lifecycle-review",
+    "to": "plan/ws004/phase047"
+  },
+  {
+    "from": "plan/ws004-hardware/phase048-wlan-deferred-stop",
+    "to": "plan/ws004/phase048"
+  },
+  {
+    "from": "plan/ws004-hardware/phase049-storage-recovery",
+    "to": "plan/ws004/phase049"
+  },
+  {
+    "from": "plan/ws004-hardware/phase050-nvme-multiple-controllers",
+    "to": "plan/ws004/phase050"
+  },
+  {
+    "from": "plan/ws005-networking/phase001-usb-ncm-physical-datapath",
+    "to": "plan/ws005/phase001"
+  },
+  {
+    "from": "plan/ws005-networking/phase002-wlan-v1-contract",
+    "to": "plan/ws005/phase002"
+  },
+  {
+    "from": "plan/ws005-networking/phase003-unix-peer-credentials",
+    "to": "plan/ws005/phase003"
+  },
+  {
+    "from": "plan/ws005-networking/phase004-wifi-ioctl-command",
+    "to": "plan/ws005/phase004"
+  },
+  {
+    "from": "plan/ws005-networking/phase005-wifi-credential-store",
+    "to": "plan/ws005/phase005"
+  },
+  {
+    "from": "plan/ws005-networking/phase006-networkd-wifi-protocol",
+    "to": "plan/ws005/phase006"
+  },
+  {
+    "from": "plan/ws005-networking/phase007-net-wifi-orchestration",
+    "to": "plan/ws005/phase007"
+  },
+  {
+    "from": "plan/ws005-networking/phase008-archer-physical-acceptance",
+    "to": "plan/ws005/phase008"
+  },
+  {
+    "from": "plan/ws005-networking/phase009-wlan-minimum-connectivity",
+    "to": "plan/ws005/phase009"
+  },
+  {
+    "from": "plan/ws005-networking/phase010-wifi-primitive-hardening",
+    "to": "plan/ws005/phase010"
+  },
+  {
+    "from": "plan/ws005-networking/phase011-networkd-managed-wlan-reconnect",
+    "to": "plan/ws005/phase011"
+  },
+  {
+    "from": "plan/ws005-networking/phase012-wifi-command-scenarios",
+    "to": "plan/ws005/phase012"
+  },
+  {
+    "from": "plan/ws006-input/phase001-evdev-profile",
+    "to": "plan/ws006/phase001"
+  },
+  {
+    "from": "plan/ws006-input/phase002-input-core",
+    "to": "plan/ws006/phase002"
+  },
+  {
+    "from": "plan/ws006-input/phase003-producer-bridge",
+    "to": "plan/ws006/phase003"
+  },
+  {
+    "from": "plan/ws006-input/phase004-console-broker",
+    "to": "plan/ws006/phase004"
+  },
+  {
+    "from": "plan/ws006-input/phase005-evdev-capability-state",
+    "to": "plan/ws006/phase005"
+  },
+  {
+    "from": "plan/ws006-input/phase006-input-truthfulness-ownership",
+    "to": "plan/ws006/phase006"
+  },
+  {
+    "from": "plan/ws006-input/phase007-usb-hid-parser",
+    "to": "plan/ws006/phase007"
+  },
+  {
+    "from": "plan/ws006-input/phase008-usb-hid-evdev",
+    "to": "plan/ws006/phase008"
+  },
+  {
+    "from": "plan/ws006-input/phase009-consumer-legacy-removal",
+    "to": "plan/ws006/phase009"
+  },
+  {
+    "from": "plan/ws006-input/phase010-legacy-usb-root-recovery",
+    "to": "plan/ws006/phase010"
+  },
+  {
+    "from": "plan/ws006-input/phase011-terminal-identity",
+    "to": "plan/ws006/phase011"
+  },
+  {
+    "from": "plan/ws007-graphics/phase001-x11-launch",
+    "to": "plan/ws007/phase001"
+  },
+  {
+    "from": "plan/ws007-graphics/phase002-x11-mouse",
+    "to": "plan/ws007/phase002"
+  },
+  {
+    "from": "plan/ws007-graphics/phase003-pc98-xzed-mouse-pic-cascade",
+    "to": "plan/ws007/phase003"
+  },
+  {
+    "from": "plan/ws007-graphics/phase004-pc98-xzed-mouse-exact-reproduction",
+    "to": "plan/ws007/phase004"
+  },
+  {
+    "from": "plan/ws008-noct/phase001-zedbsd-preset",
+    "to": "plan/ws008/phase001"
+  },
+  {
+    "from": "plan/ws008-noct/phase002-beui-zedbsd",
+    "to": "plan/ws008/phase002"
+  },
+  {
+    "from": "plan/ws008-noct/phase003-amd64-jit",
+    "to": "plan/ws008/phase003"
+  },
+  {
+    "from": "plan/ws008-noct/phase004-upstream-review",
+    "to": "plan/ws008/phase004"
+  },
+  {
+    "from": "plan/ws008-noct/phase005-independent-beui-backends",
+    "to": "plan/ws008/phase005"
+  },
+  {
+    "from": "plan/ws008-noct/phase006-maintainer-api-layout-review",
+    "to": "plan/ws008/phase006"
+  },
+  {
+    "from": "plan/ws008-noct/phase007-target-package-hold",
+    "to": "plan/ws008/phase007"
+  },
+  {
+    "from": "plan/ws008-noct/phase008-latest-host-toolchain-pin",
+    "to": "plan/ws008/phase008"
+  },
+  {
+    "from": "plan/ws008-noct/phase009-base-noct-relocation-target-resume",
+    "to": "plan/ws008/phase009"
+  },
+  {
+    "from": "plan/ws008-noct/phase010-host-script-cli-contract-repair",
+    "to": "plan/ws008/phase010"
+  },
+  {
+    "from": "plan/ws009-documentation/phase001-information-architecture",
+    "to": "plan/ws009/phase001"
+  },
+  {
+    "from": "plan/ws009-documentation/phase002-build-guide",
+    "to": "plan/ws009/phase002"
+  },
+  {
+    "from": "plan/ws009-documentation/phase003-init-services",
+    "to": "plan/ws009/phase003"
+  },
+  {
+    "from": "plan/ws009-documentation/phase004-evdev-input-reference",
+    "to": "plan/ws009/phase004"
+  },
+  {
+    "from": "plan/ws009-documentation/phase005-kernel-parameter-reference",
+    "to": "plan/ws009/phase005"
+  },
+  {
+    "from": "plan/ws009-documentation/phase006-completed-producer-follow-up",
+    "to": "plan/ws009/phase006"
+  },
+  {
+    "from": "plan/ws009-documentation/phase007-current-architecture-uapi",
+    "to": "plan/ws009/phase007"
+  },
+  {
+    "from": "plan/ws009-documentation/phase008-boot-install-guides",
+    "to": "plan/ws009/phase008"
+  },
+  {
+    "from": "plan/ws010-scripting/phase001-toolchain",
+    "to": "plan/ws010/phase001"
+  },
+  {
+    "from": "plan/ws010-scripting/phase002-x86-build-tools",
+    "to": "plan/ws010/phase002"
+  },
+  {
+    "from": "plan/ws010-scripting/phase003-python-removal",
+    "to": "plan/ws010/phase003"
+  },
+  {
+    "from": "plan/ws010-scripting/phase004-boot-acceptance",
+    "to": "plan/ws010/phase004"
+  },
+  {
+    "from": "plan/ws010-scripting/phase005-userland-source-lifecycle",
+    "to": "plan/ws010/phase005"
+  },
+  {
+    "from": "plan/ws011-net-config/phase001-netconf",
+    "to": "plan/ws011/phase001"
+  },
+  {
+    "from": "plan/ws011-net-config/phase002-console",
+    "to": "plan/ws011/phase002"
+  },
+  {
+    "from": "plan/ws011-net-config/phase003-persistence",
+    "to": "plan/ws011/phase003"
+  },
+  {
+    "from": "plan/ws011-net-config/phase004-vlan-bridge",
+    "to": "plan/ws011/phase004"
+  },
+  {
+    "from": "plan/ws011-net-config/phase005-confirmed-commit-design",
+    "to": "plan/ws011/phase005"
+  },
+  {
+    "from": "plan/ws011-net-config/phase006-confirmed-commit-implementation",
+    "to": "plan/ws011/phase006"
+  },
+  {
+    "from": "plan/ws011-net-config/phase007-confirmed-commit-acceptance",
+    "to": "plan/ws011/phase007"
+  },
+  {
+    "from": "plan/ws011-net-config/phase008-confirmed-commit-physical-acceptance",
+    "to": "plan/ws011/phase008"
+  },
+  {
+    "from": "plan/ws011-net-config/phase009-confirmed-commit-overlay-publication",
+    "to": "plan/ws011/phase009"
+  },
+  {
+    "from": "plan/ws012-service-console/phase001-design-discussion",
+    "to": "plan/ws012/phase001"
+  },
+  {
+    "from": "plan/ws012-service-console/phase002-yaml-rcconf",
+    "to": "plan/ws012/phase002"
+  },
+  {
+    "from": "plan/ws012-service-console/phase003-zsv1-init-protocol",
+    "to": "plan/ws012/phase003"
+  },
+  {
+    "from": "plan/ws012-service-console/phase004-service-argv-persistence",
+    "to": "plan/ws012/phase004"
+  },
+  {
+    "from": "plan/ws012-service-console/phase005-interactive-console",
+    "to": "plan/ws012/phase005"
+  },
+  {
+    "from": "plan/ws012-service-console/phase006-integration-acceptance",
+    "to": "plan/ws012/phase006"
+  },
+  {
+    "from": "plan/ws013-containers/phase001-architecture-discussion",
+    "to": "plan/ws013/phase001"
+  },
+  {
+    "from": "plan/ws013-containers/phase002-uefi-payload-discovery",
+    "to": "plan/ws013/phase002"
+  },
+  {
+    "from": "plan/ws013-containers/phase003-uefi-boot-config-menu",
+    "to": "plan/ws013/phase003"
+  },
+  {
+    "from": "plan/ws013-containers/phase004-boot-path-dead-source-audit",
+    "to": "plan/ws013/phase004"
+  },
+  {
+    "from": "plan/ws013-containers/phase005-pcat-bios-zedbsd-config",
+    "to": "plan/ws013/phase005"
+  },
+  {
+    "from": "plan/ws013-containers/phase006-pc98-bootzbsd-config",
+    "to": "plan/ws013/phase006"
+  },
+  {
+    "from": "plan/ws014-gpu/phase001-architecture-discussion",
+    "to": "plan/ws014/phase001"
+  },
+  {
+    "from": "plan/ws015-muitron-rt/phase001-architecture-discussion",
+    "to": "plan/ws015/phase001"
+  },
+  {
+    "from": "plan/ws016-swap-control/phase001-runtime-swap-manager",
+    "to": "plan/ws016/phase001"
+  },
+  {
+    "from": "plan/ws016-swap-control/phase002-swap-uapi",
+    "to": "plan/ws016/phase002"
+  },
+  {
+    "from": "plan/ws016-swap-control/phase003-swap-commands",
+    "to": "plan/ws016/phase003"
+  },
+  {
+    "from": "plan/ws016-swap-control/phase004-runtime-swap-acceptance",
+    "to": "plan/ws016/phase004"
+  },
+  {
+    "from": "plan/ws017-lfb-graphics/phase001-device-mmap-uapi",
+    "to": "plan/ws017/phase001"
+  },
+  {
+    "from": "plan/ws017-lfb-graphics/phase002-amd64-lfb-backend",
+    "to": "plan/ws017/phase002"
+  },
+  {
+    "from": "plan/ws017-lfb-graphics/phase003-xzed-lfb-fast-path",
+    "to": "plan/ws017/phase003"
+  },
+  {
+    "from": "plan/ws017-lfb-graphics/phase004-uefi-xzed-acceptance",
+    "to": "plan/ws017/phase004"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase001-driver-source-tree",
+    "to": "plan/ws018/phase001"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase002-disklabel-platform-layout",
+    "to": "plan/ws018/phase002"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase003-ufs-independence",
+    "to": "plan/ws018/phase003"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase004-filesystem-identity",
+    "to": "plan/ws018/phase004"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase005-core-source-consolidation",
+    "to": "plan/ws018/phase005"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase006-boot-api-consolidation",
+    "to": "plan/ws018/phase006"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase007-xzed-evdev-consumer",
+    "to": "plan/ws018/phase007"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase008-input-hid-driver-ownership",
+    "to": "plan/ws018/phase008"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase009-independent-graphics-frontends",
+    "to": "plan/ws018/phase009"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase010-fat-source-consolidation",
+    "to": "plan/ws018/phase010"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase011-fat-native-vfs",
+    "to": "plan/ws018/phase011"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase012-legacy-bootfs-removal",
+    "to": "plan/ws018/phase012"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase013-legacy-disk-mount-residue",
+    "to": "plan/ws018/phase013"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase014-mounted-namespace-protection",
+    "to": "plan/ws018/phase014"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase015-filesystem-wide-audit",
+    "to": "plan/ws018/phase015"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase016-kern-refactor-integration",
+    "to": "plan/ws018/phase016"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase017-storage-baseline",
+    "to": "plan/ws018/phase017"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase018-storage-io-path",
+    "to": "plan/ws018/phase018"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase019-storage-acceptance",
+    "to": "plan/ws018/phase019"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture/phase020-syscall-request-batching",
+    "to": "plan/ws018/phase020"
+  },
+  {
+    "from": "plan/ws019-installation/phase001-installer-v1-contract",
+    "to": "plan/ws019/phase001"
+  },
+  {
+    "from": "plan/ws019-installation/phase002-readonly-block-gpt-administration",
+    "to": "plan/ws019/phase002"
+  },
+  {
+    "from": "plan/ws019-installation/phase003-diskpart-readonly",
+    "to": "plan/ws019/phase003"
+  },
+  {
+    "from": "plan/ws019-installation/phase004-zedinst-existing-fat-overlay",
+    "to": "plan/ws019/phase004"
+  },
+  {
+    "from": "plan/ws019-installation/phase005-qemu-nvme-overlay-install",
+    "to": "plan/ws019/phase005"
+  },
+  {
+    "from": "plan/ws019-installation/phase006-whole-disk-provisioning",
+    "to": "plan/ws019/phase006"
+  },
+  {
+    "from": "plan/ws019-installation/phase007-native-root-installation",
+    "to": "plan/ws019/phase007"
+  },
+  {
+    "from": "plan/ws019-installation/phase008-target-mkfs",
+    "to": "plan/ws019/phase008"
+  },
+  {
+    "from": "plan/ws019-installation/phase009-target-mkswap",
+    "to": "plan/ws019/phase009"
+  },
+  {
+    "from": "plan/ws019-installation/phase010-conservative-partition-reload",
+    "to": "plan/ws019/phase010"
+  },
+  {
+    "from": "plan/ws019-installation/phase011-userspace-partition-editing",
+    "to": "plan/ws019/phase011"
+  },
+  {
+    "from": "plan/ws019-installation/phase012-explicit-auxiliary-mounts",
+    "to": "plan/ws019/phase012"
+  },
+  {
+    "from": "plan/ws019-installation/phase013-installer-prerequisite-contracts",
+    "to": "plan/ws019/phase013"
+  },
+  {
+    "from": "plan/ws019-installation/phase014-current-ufs-formatter",
+    "to": "plan/ws019/phase014"
+  },
+  {
+    "from": "plan/ws019-installation/phase015-atomic-publication",
+    "to": "plan/ws019/phase015"
+  },
+  {
+    "from": "plan/ws019-installation/phase016-boot-source-provenance",
+    "to": "plan/ws019/phase016"
+  },
+  {
+    "from": "plan/ws019-installation/phase017-command-staging",
+    "to": "plan/ws019/phase017"
+  },
+  {
+    "from": "plan/ws019-installation/phase018-fat-growth-capacity",
+    "to": "plan/ws019/phase018"
+  },
+  {
+    "from": "plan/ws019-installation/phase019-pristine-verification",
+    "to": "plan/ws019/phase019"
+  },
+  {
+    "from": "plan/ws019-installation/phase020-df-capacity",
+    "to": "plan/ws019/phase020"
+  },
+  {
+    "from": "plan/ws019-installation/phase021-nested-mount",
+    "to": "plan/ws019/phase021"
+  },
+  {
+    "from": "plan/ws019-installation/phase022-tmpfs-unmount",
+    "to": "plan/ws019/phase022"
+  },
+  {
+    "from": "plan/ws019-installation/phase023-noct-large-seek",
+    "to": "plan/ws019/phase023"
+  },
+  {
+    "from": "plan/ws019-installation/phase024-noct-terminal-input",
+    "to": "plan/ws019/phase024"
+  },
+  {
+    "from": "plan/ws019-installation/phase025-public-runtime-contracts",
+    "to": "plan/ws019/phase025"
+  },
+  {
+    "from": "plan/ws019-installation/phase026-noct-image-copy",
+    "to": "plan/ws019/phase026"
+  },
+  {
+    "from": "plan/ws019-installation/phase027-installation-source-selection",
+    "to": "plan/ws019/phase027"
+  },
+  {
+    "from": "plan/ws019-installation/phase028-native-tree-copy-tools",
+    "to": "plan/ws019/phase028"
+  },
+  {
+    "from": "plan/ws019-installation/phase029-graphic-installer",
+    "to": "plan/ws019/phase029"
+  },
+  {
+    "from": "plan/ws019-installation/phase030-gpt-initialization-codec",
+    "to": "plan/ws019/phase030"
+  },
+  {
+    "from": "plan/ws019-installation/phase031-exclusive-block-administration",
+    "to": "plan/ws019/phase031"
+  },
+  {
+    "from": "plan/ws019-installation/phase032-diskpart-gpt-init",
+    "to": "plan/ws019/phase032"
+  },
+  {
+    "from": "plan/ws019-installation/phase033-partition-administration",
+    "to": "plan/ws019/phase033"
+  },
+  {
+    "from": "plan/ws019-installation/phase034-fat32-formatter",
+    "to": "plan/ws019/phase034"
+  },
+  {
+    "from": "plan/ws019-installation/phase035-fat32-command",
+    "to": "plan/ws019/phase035"
+  },
+  {
+    "from": "plan/ws019-installation/phase036-native-ufs-codec",
+    "to": "plan/ws019/phase036"
+  },
+  {
+    "from": "plan/ws019-installation/phase037-native-ufs-command",
+    "to": "plan/ws019/phase037"
+  },
+  {
+    "from": "plan/ws019-installation/phase038-root-image-view",
+    "to": "plan/ws019/phase038"
+  },
+  {
+    "from": "plan/ws019-installation/phase039-owned-root-view",
+    "to": "plan/ws019/phase039"
+  },
+  {
+    "from": "plan/ws019-installation/phase040-file-extent-capability",
+    "to": "plan/ws019/phase040"
+  },
+  {
+    "from": "plan/ws019-installation/phase041-ufs-file-extents",
+    "to": "plan/ws019/phase041"
+  },
+  {
+    "from": "plan/ws019-installation/phase042-backing-self-overlap",
+    "to": "plan/ws019/phase042"
+  },
+  {
+    "from": "plan/ws019-installation/phase043-owned-file-metadata",
+    "to": "plan/ws019/phase043"
+  },
+  {
+    "from": "plan/ws019-installation/phase044-file-claim-finalization",
+    "to": "plan/ws019/phase044"
+  },
+  {
+    "from": "plan/ws019-installation/phase045-ufs-backing-admission",
+    "to": "plan/ws019/phase045"
+  },
+  {
+    "from": "plan/ws019-installation/phase046-native-layout-plan",
+    "to": "plan/ws019/phase046"
+  },
+  {
+    "from": "plan/ws019-installation/phase047-native-swap-startup",
+    "to": "plan/ws019/phase047"
+  },
+  {
+    "from": "plan/ws019-installation/phase048-native-format-preflight",
+    "to": "plan/ws019/phase048"
+  },
+  {
+    "from": "plan/ws019-installation/phase049-native-installer-integration",
+    "to": "plan/ws019/phase049"
+  },
+  {
+    "from": "plan/ws019-installation/phase050-pc98-graphic-fat",
+    "to": "plan/ws019/phase050"
+  },
+  {
+    "from": "plan/ws020-intel-mac/phase001-target-variant-config",
+    "to": "plan/ws020/phase001"
+  },
+  {
+    "from": "plan/ws020-intel-mac/phase002-image-layouts",
+    "to": "plan/ws020/phase002"
+  },
+  {
+    "from": "plan/ws020-intel-mac/phase003-qemu-acceptance",
+    "to": "plan/ws020/phase003"
+  },
+  {
+    "from": "plan/ws020-intel-mac/phase004-physical-bringup",
+    "to": "plan/ws020/phase004"
+  },
+  {
+    "from": "plan/ws020-intel-mac/phase005-production-uefi-preflight",
+    "to": "plan/ws020/phase005"
+  },
+  {
+    "from": "plan/ws020-intel-mac/phase006-relocated-physical-gpt",
+    "to": "plan/ws020/phase006"
+  },
+  {
+    "from": "plan/ws021-llvm-toolchain/phase001-llvm-source-and-zedbsd-target",
+    "to": "plan/ws021/phase001"
+  },
+  {
+    "from": "plan/ws021-llvm-toolchain/phase002-host-llvm-build",
+    "to": "plan/ws021/phase002"
+  },
+  {
+    "from": "plan/ws021-llvm-toolchain/phase003-x86-sysroots",
+    "to": "plan/ws021/phase003"
+  },
+  {
+    "from": "plan/ws021-llvm-toolchain/phase004-x86-target-migration",
+    "to": "plan/ws021/phase004"
+  },
+  {
+    "from": "plan/ws021-llvm-toolchain/phase005-bootloader-toolchain-closure",
+    "to": "plan/ws021/phase005"
+  },
+  {
+    "from": "plan/ws021-llvm-toolchain/phase006-big-bang-qemu-acceptance",
+    "to": "plan/ws021/phase006"
+  },
+  {
+    "from": "plan/ws021-llvm-toolchain/phase007-host-llvm-release",
+    "to": "plan/ws021/phase007"
+  },
+  {
+    "from": "plan/ws022-elf-tls/phase001-contract-and-fixtures",
+    "to": "plan/ws022/phase001"
+  },
+  {
+    "from": "plan/ws022-elf-tls/phase002-exec-loader",
+    "to": "plan/ws022/phase002"
+  },
+  {
+    "from": "plan/ws022-elf-tls/phase003-thread-runtime-acceptance",
+    "to": "plan/ws022/phase003"
+  },
+  {
+    "from": "plan/ws023-x86-hal-style/phase001-i386-compressed-core",
+    "to": "plan/ws023/phase001"
+  },
+  {
+    "from": "plan/ws023-x86-hal-style/phase002-i386-core-interrupts",
+    "to": "plan/ws023/phase002"
+  },
+  {
+    "from": "plan/ws023-x86-hal-style/phase003-i386-vm-task",
+    "to": "plan/ws023/phase003"
+  },
+  {
+    "from": "plan/ws023-x86-hal-style/phase004-i386-pcat",
+    "to": "plan/ws023/phase004"
+  },
+  {
+    "from": "plan/ws023-x86-hal-style/phase005-i386-pc98",
+    "to": "plan/ws023/phase005"
+  },
+  {
+    "from": "plan/ws023-x86-hal-style/phase006-amd64-leaf-core",
+    "to": "plan/ws023/phase006"
+  },
+  {
+    "from": "plan/ws023-x86-hal-style/phase007-amd64-interrupt-task",
+    "to": "plan/ws023/phase007"
+  },
+  {
+    "from": "plan/ws023-x86-hal-style/phase008-amd64-platform-time",
+    "to": "plan/ws023/phase008"
+  },
+  {
+    "from": "plan/ws023-x86-hal-style/phase009-amd64-vmspace",
+    "to": "plan/ws023/phase009"
+  },
+  {
+    "from": "plan/ws023-x86-hal-style/phase010-amd64-console",
+    "to": "plan/ws023/phase010"
+  },
+  {
+    "from": "plan/ws023-x86-hal-style/phase011-x86-final-audit",
+    "to": "plan/ws023/phase011"
+  },
+  {
+    "from": "plan/ws024-unified-ufs/phase001-format-and-migration-contract",
+    "to": "plan/ws024/phase001"
+  },
+  {
+    "from": "plan/ws024-unified-ufs/phase002-single-driver",
+    "to": "plan/ws024/phase002"
+  },
+  {
+    "from": "plan/ws024-unified-ufs/phase003-formatters-and-image-consumers",
+    "to": "plan/ws024/phase003"
+  },
+  {
+    "from": "plan/ws024-unified-ufs/phase004-acceptance-and-retirement",
+    "to": "plan/ws024/phase004"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase001-baseline-contracts",
+    "to": "plan/ws025/phase001"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase002-boot-memory-handoff",
+    "to": "plan/ws025/phase002"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase003-amd64-direct-map",
+    "to": "plan/ws025/phase003"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase004-physical-allocator-dma",
+    "to": "plan/ws025/phase004"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase005-high-memory-acceptance",
+    "to": "plan/ws025/phase005"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase006-io-pool-exec",
+    "to": "plan/ws025/phase006"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase007-buffer-runs",
+    "to": "plan/ws025/phase007"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase008-ufs-data-runs",
+    "to": "plan/ws025/phase008"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase009-usb-reservations",
+    "to": "plan/ws025/phase009"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase010-ufs-metadata-adapter",
+    "to": "plan/ws025/phase010"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase011-ufs-allocation-batching",
+    "to": "plan/ws025/phase011"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase012-fat-cache-cursor",
+    "to": "plan/ws025/phase012"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase013-fat-metadata-batching",
+    "to": "plan/ws025/phase013"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase014-flush-generations",
+    "to": "plan/ws025/phase014"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase015-file-page-cache",
+    "to": "plan/ws025/phase015"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase016-memory-budget-reclaim",
+    "to": "plan/ws025/phase016"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase017-dirty-error-drain",
+    "to": "plan/ws025/phase017"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase018-data-writeback",
+    "to": "plan/ws025/phase018"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase019-async-bio",
+    "to": "plan/ws025/phase019"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase020-readahead",
+    "to": "plan/ws025/phase020"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase021-ufs-metadata-writeback",
+    "to": "plan/ws025/phase021"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase022-exec-cache-snapshot",
+    "to": "plan/ws025/phase022"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase023-kernel-vmap",
+    "to": "plan/ws025/phase023"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase024-sg-dma",
+    "to": "plan/ws025/phase024"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase025-storage-media-recovery",
+    "to": "plan/ws025/phase025"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase026-integration-defaults",
+    "to": "plan/ws025/phase026"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase027-nvme-queue-depth",
+    "to": "plan/ws025/phase027"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase028-direct-user-io",
+    "to": "plan/ws025/phase028"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase029-uas",
+    "to": "plan/ws025/phase029"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase030-imod-measurement",
+    "to": "plan/ws025/phase030"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase031-driver-layout-style",
+    "to": "plan/ws025/phase031"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase032-pc98-boot-regression",
+    "to": "plan/ws025/phase032"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase033-ax211-wifi-dhcp-regression",
+    "to": "plan/ws025/phase033"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase034-ax211-operation-recovery",
+    "to": "plan/ws025/phase034"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase035-multi-radio-selection",
+    "to": "plan/ws025/phase035"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase036-hal-space-api",
+    "to": "plan/ws025/phase036"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase037-hal-interface-consolidation",
+    "to": "plan/ws025/phase037"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache/phase038-hal-fixed-entry",
+    "to": "plan/ws025/phase038"
+  },
+  {
+    "from": "plan/ws001-posix",
+    "to": "plan/ws001"
+  },
+  {
+    "from": "plan/ws002-services",
+    "to": "plan/ws002"
+  },
+  {
+    "from": "plan/ws003-bringup",
+    "to": "plan/ws003"
+  },
+  {
+    "from": "plan/ws004-hardware",
+    "to": "plan/ws004"
+  },
+  {
+    "from": "plan/ws005-networking",
+    "to": "plan/ws005"
+  },
+  {
+    "from": "plan/ws006-input",
+    "to": "plan/ws006"
+  },
+  {
+    "from": "plan/ws007-graphics",
+    "to": "plan/ws007"
+  },
+  {
+    "from": "plan/ws008-noct",
+    "to": "plan/ws008"
+  },
+  {
+    "from": "plan/ws009-documentation",
+    "to": "plan/ws009"
+  },
+  {
+    "from": "plan/ws010-scripting",
+    "to": "plan/ws010"
+  },
+  {
+    "from": "plan/ws011-net-config",
+    "to": "plan/ws011"
+  },
+  {
+    "from": "plan/ws012-service-console",
+    "to": "plan/ws012"
+  },
+  {
+    "from": "plan/ws013-containers",
+    "to": "plan/ws013"
+  },
+  {
+    "from": "plan/ws014-gpu",
+    "to": "plan/ws014"
+  },
+  {
+    "from": "plan/ws015-muitron-rt",
+    "to": "plan/ws015"
+  },
+  {
+    "from": "plan/ws016-swap-control",
+    "to": "plan/ws016"
+  },
+  {
+    "from": "plan/ws017-lfb-graphics",
+    "to": "plan/ws017"
+  },
+  {
+    "from": "plan/ws018-kernel-architecture",
+    "to": "plan/ws018"
+  },
+  {
+    "from": "plan/ws019-installation",
+    "to": "plan/ws019"
+  },
+  {
+    "from": "plan/ws020-intel-mac",
+    "to": "plan/ws020"
+  },
+  {
+    "from": "plan/ws021-llvm-toolchain",
+    "to": "plan/ws021"
+  },
+  {
+    "from": "plan/ws022-elf-tls",
+    "to": "plan/ws022"
+  },
+  {
+    "from": "plan/ws023-x86-hal-style",
+    "to": "plan/ws023"
+  },
+  {
+    "from": "plan/ws024-unified-ufs",
+    "to": "plan/ws024"
+  },
+  {
+    "from": "plan/ws025-io-memory-cache",
+    "to": "plan/ws025"
+  },
+  {
+    "from": "plan/ws026-test-maintenance",
+    "to": "plan/ws026"
+  }
+]

@@ -1,0 +1,243 @@
+{
+  "node": {
+    "url": "https://github.com/users/awemorris/projects/2",
+    "public": false,
+    "repositories": {
+      "nodes": [
+        {
+          "nameWithOwner": "awemorris/zedBSD"
+        }
+      ]
+    },
+    "views": {
+      "nodes": [
+        {
+          "id": "PVTV_lAHOC2X95c4BjFGlzgLnQUM",
+          "name": "Milestones / Workstreams",
+          "number": 2,
+          "filter": "record-kind:WS",
+          "layout": "TABLE_LAYOUT",
+          "sortByFields": {
+            "nodes": []
+          },
+          "groupByFields": {
+            "nodes": [
+              {
+                "name": "Primary Milestone"
+              }
+            ]
+          },
+          "fields": {
+            "nodes": [
+              {
+                "name": "Title"
+              },
+              {
+                "name": "Logical ID"
+              },
+              {
+                "name": "Primary Milestone"
+              },
+              {
+                "name": "Related Milestones"
+              },
+              {
+                "name": "Objectives"
+              },
+              {
+                "name": "Awesome Plan Status"
+              }
+            ]
+          }
+        },
+        {
+          "id": "PVTV_lAHOC2X95c4BjFGlzgLnQUQ",
+          "name": "Current Focus",
+          "number": 3,
+          "filter": "current-focus:Yes",
+          "layout": "TABLE_LAYOUT",
+          "sortByFields": {
+            "nodes": []
+          },
+          "groupByFields": {
+            "nodes": [
+              {
+                "name": "Record Kind"
+              }
+            ]
+          },
+          "fields": {
+            "nodes": [
+              {
+                "name": "Title"
+              },
+              {
+                "name": "Logical ID"
+              },
+              {
+                "name": "Primary Milestone"
+              },
+              {
+                "name": "Awesome Plan Status"
+              },
+              {
+                "name": "Focused Goal IDs"
+              },
+              {
+                "name": "Status Note"
+              }
+            ]
+          }
+        },
+        {
+          "id": "PVTV_lAHOC2X95c4BjFGlzgLnQUU",
+          "name": "Priority",
+          "number": 4,
+          "filter": "record-kind:WS ws-priority:>0",
+          "layout": "TABLE_LAYOUT",
+          "sortByFields": {
+            "nodes": [
+              {
+                "direction": "ASC",
+                "field": {
+                  "name": "WS Priority"
+                }
+              }
+            ]
+          },
+          "groupByFields": {
+            "nodes": []
+          },
+          "fields": {
+            "nodes": [
+              {
+                "name": "Title"
+              },
+              {
+                "name": "Logical ID"
+              },
+              {
+                "name": "Primary Milestone"
+              },
+              {
+                "name": "Awesome Plan Status"
+              },
+              {
+                "name": "WS Priority"
+              },
+              {
+                "name": "Status Note"
+              }
+            ]
+          }
+        },
+        {
+          "id": "PVTV_lAHOC2X95c4BjFGlzgLnQUc",
+          "name": "Phases",
+          "number": 5,
+          "filter": "record-kind:Phase",
+          "layout": "TABLE_LAYOUT",
+          "sortByFields": {
+            "nodes": []
+          },
+          "groupByFields": {
+            "nodes": [
+              {
+                "name": "Parent WS"
+              }
+            ]
+          },
+          "fields": {
+            "nodes": [
+              {
+                "name": "Title"
+              },
+              {
+                "name": "Logical ID"
+              },
+              {
+                "name": "Primary Milestone"
+              },
+              {
+                "name": "Awesome Plan Status"
+              },
+              {
+                "name": "Phase Disposition"
+              },
+              {
+                "name": "Status Note"
+              }
+            ]
+          }
+        },
+        {
+          "id": "PVTV_lAHOC2X95c4BjFGlzgLnQUg",
+          "name": "Current Queue",
+          "number": 6,
+          "filter": "planning-category:\"Current Queue\"",
+          "layout": "TABLE_LAYOUT",
+          "sortByFields": {
+            "nodes": []
+          },
+          "groupByFields": {
+            "nodes": []
+          },
+          "fields": {
+            "nodes": [
+              {
+                "name": "Title"
+              },
+              {
+                "name": "Logical ID"
+              },
+              {
+                "name": "Primary Milestone"
+              },
+              {
+                "name": "Awesome Plan Status"
+              },
+              {
+                "name": "Queue ID"
+              },
+              {
+                "name": "Queue Item Status"
+              }
+            ]
+          }
+        },
+        {
+          "id": "PVTV_lAHOC2X95c4BjFGlzgLnQUk",
+          "name": "Outlook",
+          "number": 7,
+          "filter": "planning-category:Outlook",
+          "layout": "TABLE_LAYOUT",
+          "sortByFields": {
+            "nodes": []
+          },
+          "groupByFields": {
+            "nodes": []
+          },
+          "fields": {
+            "nodes": [
+              {
+                "name": "Title"
+              },
+              {
+                "name": "Logical ID"
+              },
+              {
+                "name": "Primary Milestone"
+              },
+              {
+                "name": "Awesome Plan Status"
+              },
+              {
+                "name": "Focused Goal IDs"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

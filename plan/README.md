@@ -1,56 +1,30 @@
-# zedBSD plans
+# zedBSD planning entry
 
-The authoritative program plan is [master.md](master.md). Planning documents
-are organized by permanent workstream ID (WSID):
+Awesome Plan is active in **GitHub mode**. Start with [configuration](config.md)
+and [Guardrail](guardrail.md), then fetch Master/Queue/Past Log and relevant
+WS/Phase records using [the sync procedure](tools/README.md).
 
-The currently proposed or authorized cross-WS execution set and its status are
-tracked in [queue.md](queue.md). It is the Q-book execution boundary; M/W/P
-planning alone does not authorize implementation. Closed execution sets are
-retained as numbered `queue-qNNN.md` records.
+[Master](https://github.com/awemorris/zedBSD/issues/1) ·
+[Project](https://github.com/users/awemorris/projects/2)
 
-```text
-plan/
-  master.md
-  queue.md
-  queue-qNNN.md
-  governance.md
-  wsXXX-name/
-    ws.md
-    phaseXXX-name/
-      phase.md
-    tests/
-      README.md
-```
+- [Master cache](master.md): Objectives, Milestones, Focus and Priority.
+- [Queue](queue.md): q303 finished/stopped; **no active execution Queue**.
+- [Future Work](future-work.md), [known bugs](known-bugs.md), [Past Log](history/index.md).
+- wsXXX/phaseYYY: plans and durable evidence; only load the relevant branches.
+- old/: superseded proposals and pre-Awesome policy; tmp/: import/deployment evidence.
+  Neither is an instruction source or a script to replay automatically.
+- [Migration status](migration-status.md): inherited limitations and current setup evidence.
 
-Use `wsXXX-pYYY` when referring to a Phase unambiguously across the project.
-For example, `ws001-p009` is WS001 Phase 009.
+2026-09-11: Priorityリスト削除。WS025残件4件をユーザー判断でcleared、
+WS025/WS019/WS006/WS022/WS002をcompletedとして閉鎖。後続指示による現行Focusはfg004（WS003の4機種インストーラ実機bring-up）。
 
-## Workstream index
+Next session: inspect local changes and sync ownership → fetch current records
+and decision comments → reconcile pending/conflicted edits → report current focus
+and remaining work → follow the user's concrete instruction. Do not resume q303
+or cancel/complete other work just because the management method changed.
 
-| WSID | Workstream | Plan |
-| --- | --- | --- |
-| `ws001` | POSIX.1-2024 compliance | [WS001](ws001-posix/ws.md) |
-| `ws002` | System services | [WS002](ws002-services/ws.md) |
-| `ws003` | Dell Latitude 5320 bring-up | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | [WS004](ws004-hardware/ws.md) |
-| `ws005` | Networking and WLAN | [WS005](ws005-networking/ws.md) |
-| `ws006` | Input and evdev | [WS006](ws006-input/ws.md) |
-| `ws007` | Graphics and desktop | [WS007](ws007-graphics/ws.md) |
-| `ws008` | Noct and BeUI | [WS008](ws008-noct/ws.md) |
-| `ws009` | Documentation | [WS009](ws009-documentation/ws.md) |
-| `ws010` | Noct scripting and build tools | [WS010](ws010-scripting/ws.md) |
-| `ws011` | Network configuration console | [WS011](ws011-net-config/ws.md) |
-| `ws012` | Service administration console | [WS012](ws012-service-console/ws.md) |
-| `ws013` | CPAR container partitioning | [WS013](ws013-containers/ws.md) |
-| `ws014` | Native GPU stack | [WS014](ws014-gpu/ws.md) |
-| `ws015` | μITRON asymmetric real-time domain | [WS015](ws015-muitron-rt/ws.md) |
-| `ws016` | Runtime swap control | [WS016](ws016-swap-control/ws.md) |
-| `ws017` | `/dev/graphics` linear-framebuffer fast path | [WS017](ws017-lfb-graphics/ws.md) |
-| `ws018` | Kernel source ownership and interface consolidation | [WS018](ws018-kernel-architecture/ws.md) |
-| `ws019` | Installation and disk administration | [WS019](ws019-installation/ws.md) |
-| `ws020` | Intel Mac UEFI bring-up and generic image variants | [WS020](ws020-intel-mac/ws.md) |
-| `ws021` | Reproducible x86 LLVM toolchain and sysroots | [WS021](ws021-llvm-toolchain/ws.md) |
-| `ws022` | ELF `PT_TLS` and static thread-local storage | [WS022](ws022-elf-tls/ws.md) |
+[今回のbring-up計画](history/2026-09-11-installer-bringup-plan.md)。新規Issue/既存本文・Projectの公開は承認待ちでoutboxに保持。実行Queueなし。
 
-Status, interruption, resumption, and evidence rules are defined in
-[governance.md](governance.md).
+現行Focusにfg005（WS005のネットワーク改善1〜3）を追加。[仕様と計画](ws005/network-improvements-2026-09-11.md)。fg004と両立し、順位・Queue未指定。両計画のGitHub公開は保留。
+
+現行Focusにfg006（PC-9821V13起動改善）を追加。ユーザー指定の実行PhaseはWS003 p022→p023→p024。[具体化した計画](ws003/v13-boot-focus.md)。fg004/fg005は保持、実行Queueなし。

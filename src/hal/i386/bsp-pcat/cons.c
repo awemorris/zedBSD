@@ -493,39 +493,6 @@ hal_cons_save_state(
 }
 
 /*
- * Restores PC/AT terminal mode and optional cursor state.
- */
-void
-hal_cons_restore_terminal(
-	const struct hal_cons_state *state)
-{
-	/* Selects terminal output before applying an optional valid position. */
-	console_mode = HAL_CONS_TERMINAL;
-
-	/* Restores the cursor only from a visible saved position. */
-	if (state != NULL && state->row < HAL_CONS_ROWS &&
-	    state->column < HAL_CONS_COLUMNS) {
-		cursor_row = state->row;
-		cursor_column = state->column;
-		cursor_visible = state->cursor_visible;
-	}
-
-	/* Publishes the restored terminal cursor. */
-	hal_cons_update_cursor();
-}
-
-/*
- * Selects the PC/AT console output mode.
- */
-void
-hal_cons_set_mode(
-	enum hal_cons_mode mode)
-{
-	/* Publishes the requested console mode. */
-	console_mode = mode;
-}
-
-/*
  * Suspends PC/AT text-memory and cursor updates.
  */
 void
@@ -709,33 +676,6 @@ hal_cons_poll_event(
 }
 
 /*
- * Reports PC/AT keyboard input capabilities.
- */
-void
-hal_cons_get_input_info(
-	struct hal_cons_input_info *info)
-{
-	static const char *const symbols[] = {
-		"esc", "backspace", "tab", "enter",
-		"leftshift", "rightshift", "leftctrl", "rightctrl",
-		"leftalt", "rightalt", "capslock", "home", "up", "pageup",
-		"left", "right", "end", "down", "pagedown", "insert",
-		"delete", "f1", "f2", "f3", "f4", "f5", "f6", "f7",
-		"f8", "f9", "f10"
-	};
-
-	/* Ignores a missing capability destination. */
-	if (info == NULL)
-		return;
-
-	/* Publishes event modes and the stable symbol inventory. */
-	info->flags = HAL_CONS_INPUT_TEXT | HAL_CONS_INPUT_RELEASE |
-	    HAL_CONS_INPUT_REPEAT;
-	info->symbols = symbols;
-	info->symbol_count = sizeof(symbols) / sizeof(symbols[0]);
-}
-
-/*
  * Reads one PC/AT keyboard event, waiting when necessary.
  */
 int
@@ -808,25 +748,6 @@ hal_cons_getc(
 		else if (symbol_equal(event.symbol, "esc"))
 			return 0x1b;
 	}
-}
-
-/*
- * Reports legacy PC/AT keyboard state for one key code.
- */
-int
-hal_cons_key_state(
-	int key)
-{
-	bool enabled;
-	int down;
-
-	/* Samples the supported legacy Shift key under the input lock. */
-	enabled = hal_cons_wait_queue_lock(&input_waiters);
-	down = key == 0x170 ? shift_down : 0;
-	hal_cons_wait_queue_unlock(&input_waiters, enabled);
-
-	/* Returns the sampled legacy key state. */
-	return down;
 }
 
 /*

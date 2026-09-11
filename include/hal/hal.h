@@ -57,6 +57,7 @@ hal_memcpy(
 	const void *src,
 	size_t n);
 
+/* XXX: To be removed. Use kernel_alloc() and kernel_free(). */
 /*
  * The embedding kernel supplies the allocator used by the HAL.
  */
@@ -124,6 +125,63 @@ struct hal_cpu_mask {
 	uint64_t bits[HAL_CPU_MASK_WORDS];
 };
 
+/*
+ * XXX: Add explanation.
+ */
+int
+hal_cpu_start_others(void);
+
+/*
+ * Get the numbers of the CPUs.
+ */
+unsigned
+hal_cpu_count(void);
+
+/*
+ * Get the ID of the current CPU of the caller context.
+ */
+hal_cpu_id_t
+hal_cpu_current(void);
+
+/*
+ * XXX: Add explanation.
+ */
+void
+hal_cpu_ready_mask(
+	struct hal_cpu_mask *result);
+
+/*
+ * XXX: Add explanation.
+ */
+int
+hal_cpu_notify(
+	hal_cpu_id_t cpu);
+
+/*
+ * XXX: Add explanation.
+ */
+int
+hal_cpu_notify_mask(
+	const struct hal_cpu_mask *targets);
+
+/*
+ * XXX: Add explanation.
+ */
+_Noreturn void
+hal_cpu_park(void);
+
+/*
+ * XXX: Add explanation.
+ */
+_Noreturn void
+hal_cpu_panic_all(void);
+
+/*
+ * Atomically enable interrupts and halt, then return with IRQs disabled.
+ */
+void
+hal_cpu_idle(void);
+
 static inline void
 hal_cpu_mask_zero(
 	struct hal_cpu_mask *mask)
@@ -134,6 +192,9 @@ hal_cpu_mask_zero(
 		mask->bits[i] = 0;
 }
 
+/*
+ * Utility to set all CPU mask bits.
+ */
 static inline void
 hal_cpu_mask_fill(
 	struct hal_cpu_mask *mask)
@@ -144,6 +205,9 @@ hal_cpu_mask_fill(
 		mask->bits[i] = ~(uint64_t)0;
 }
 
+/*
+ * Utility to set a CPU mask bit.
+ */
 static inline void
 hal_cpu_mask_set(
 	struct hal_cpu_mask *mask,
@@ -153,6 +217,9 @@ hal_cpu_mask_set(
 		mask->bits[cpu / 64U] |= (uint64_t)1 << (cpu % 64U);
 }
 
+/*
+ * Utility to clear a CPU mask bit.
+ */
 static inline void
 hal_cpu_mask_clear(
 	struct hal_cpu_mask *mask,
@@ -162,6 +229,9 @@ hal_cpu_mask_clear(
 		mask->bits[cpu / 64U] &= ~((uint64_t)1 << (cpu % 64U));
 }
 
+/*
+ * Utility to check a CPU mask bit.
+ */
 static inline int
 hal_cpu_mask_test(
 	const struct hal_cpu_mask *mask,
@@ -171,32 +241,6 @@ hal_cpu_mask_test(
 	       (mask->bits[cpu / 64U] & ((uint64_t)1 << (cpu % 64U))) != 0;
 }
 
-hal_cpu_id_t
-hal_cpu_current(void);
-
-unsigned
-hal_cpu_count(void);
-
-void
-hal_cpu_ready_mask(
-	struct hal_cpu_mask *result);
-
-int
-hal_cpu_start_others(void);
-
-int
-hal_cpu_notify(
-	hal_cpu_id_t cpu);
-
-int
-hal_cpu_notify_mask(
-	const struct hal_cpu_mask *targets);
-
-_Noreturn void
-hal_cpu_park(void);
-
-_Noreturn void
-hal_cpu_panic_all(void);
 
 /*
  * IRQ
@@ -633,56 +677,6 @@ hal_task_create(
 	void *user_stack_pointer);
 
 /*
- * Duplicate/replace the active return-to-user context.  These
- * operations are valid only while the current task is handling a user
- * system call.
- */
-hal_task_t
-hal_task_fork_current(
-	hal_space_t child_space,
-	intptr_t child_syscall_result);
-
-int
-hal_task_exec_current(
-	hal_space_t new_space,
-	uintptr_t entry,
-	uintptr_t user_stack_pointer);
-
-int
-hal_task_exec_validate(
-	hal_space_t new_space,
-	uintptr_t entry,
-	uintptr_t user_stack_pointer);
-
-uintptr_t
-hal_task_user_stack(void);
-
-struct hal_user_context {
-	uintptr_t pc;
-	uintptr_t stack_pointer;
-	intptr_t return_value;
-};
-
-int
-hal_task_user_context(
-	struct hal_user_context *context);
-
-int
-hal_task_signal_enter(
-	uintptr_t handler,
-	uintptr_t stack,
-	int signo,
-	uintptr_t siginfo,
-	uintptr_t ucontext,
-	uintptr_t restorer,
-	uint32_t token);
-
-int
-hal_task_signal_return(
-	uint32_t token,
-	intptr_t *return_value);
-
-/*
  * Destroy a task.
  */
 void
@@ -697,10 +691,68 @@ hal_task_context_switch(
 	hal_task_t t);
 
 /*
- * Atomically enable interrupts and halt, then return with IRQs disabled.
+ * XXX: Add a single line, easy to understand explanation.
+ *
+ * Duplicate/replace the active return-to-user context.  These
+ * operations are valid only while the current task is handling a user
+ * system call.
  */
-void
-hal_cpu_idle(void);
+hal_task_t
+hal_task_fork_current(
+	hal_space_t child_space,
+	intptr_t child_syscall_result);
+
+/*
+ * XXX: Add a single line, easy to understand explanation.
+ */
+int
+hal_task_exec_current(
+	hal_space_t new_space,
+	uintptr_t entry,
+	uintptr_t user_stack_pointer);
+
+/*
+ * XXX: Add a single line, easy to understand explanation.
+ */
+int
+hal_task_exec_validate(
+	hal_space_t new_space,
+	uintptr_t entry,
+	uintptr_t user_stack_pointer);
+
+/*
+ * XXX: Rename to hal_task_get_user_stack()
+ */
+uintptr_t
+hal_task_user_stack(void);
+
+/* XXX: Rename to hal_task_get_user_context(). Remove struct and embed into parameters. */
+int
+hal_task_user_context(
+	uintptr_t *pc,
+	uintptr_t *stack_pointer,
+	intptr_t *return_value);
+
+/*
+ * XXX: Add explanation.
+ */
+int
+hal_task_signal_enter(
+	uintptr_t handler,
+	uintptr_t stack,
+	int signo,
+	uintptr_t siginfo,
+	uintptr_t ucontext,
+	uintptr_t restorer,
+	uint32_t token);
+
+/*
+ * XXX: Add explanation.
+ */
+int
+hal_task_signal_return(
+	uint32_t token,
+	intptr_t *return_value);
 
 /*
  * Get the current task.
@@ -876,16 +928,15 @@ hal_mmio_write64(
  * Console
  */
 
-enum hal_cons_mode {
-	HAL_CONS_FIXED_MENU,
-	HAL_CONS_TERMINAL,
-};
-
+/* XXX: Remove. Use hal_cons_get_size(). */
 #define HAL_CONS_COLUMNS		80U
 #define HAL_CONS_ROWS			25U
+
+/* XXX: Rename. HAL_CONS_ATTRIB_NORMAL */
 #define HAL_CONS_NORMAL_ATTRIBUTE	0xe1U
 
 #define HAL_KEY_SYMBOL_SIZE		16U
+
 #define HAL_KEY_EVENT_PRESS		0x00000001U
 #define HAL_KEY_EVENT_RELEASE		0x00000002U
 #define HAL_KEY_EVENT_REPEAT		0x00000004U
@@ -895,10 +946,12 @@ enum hal_cons_mode {
 #define HAL_KEY_EVENT_LOCK_CAPS		0x00000040U
 #define HAL_KEY_EVENT_LOCK_KANA		0x00000080U
 
+/* XXX: Remove. Always support and emulate, even if they are stubs. */
 #define HAL_CONS_INPUT_TEXT		0x00000001U
 #define HAL_CONS_INPUT_RELEASE		0x00000002U
 #define HAL_CONS_INPUT_REPEAT		0x00000004U
 
+/* XXX: Remove. Embed the members into the function parameters. */
 /*
  * A keysymbol is stable lowercase ASCII, at most 15 bytes, and NUL terminated.
  * Exactly one of PRESS, RELEASE, or REPEAT describes a normal transition.
@@ -910,26 +963,6 @@ enum hal_cons_mode {
 struct hal_key_event {
 	char symbol[HAL_KEY_SYMBOL_SIZE];
 	uint32_t flags;
-};
-
-/*
- * Describe what the console input adapter can actually publish.  TEXT means
- * that one-byte character symbols are possible.  The optional symbol table
- * lists named keys in addition to those characters.  Generic console code
- * uses this declaration to build a truthful evdev capability bitmap and to
- * distinguish physical make/break sources from momentary character streams.
- */
-struct hal_cons_input_info {
-	uint32_t flags;
-	const char *const *symbols;
-	size_t symbol_count;
-};
-
-struct hal_cons_state {
-	enum hal_cons_mode mode;
-	unsigned row;
-	unsigned column;
-	int cursor_visible;
 };
 
 /*
@@ -952,6 +985,14 @@ void
 hal_cons_clear(void);
 
 /*
+ * XXX: Add.
+ * Get the screen size.
+ */
+void hal_cons_get_size(
+	int *cols,
+	int *rows);
+
+/*
  * Move cursor.
  */
 void
@@ -965,32 +1006,25 @@ hal_cons_move_cursor(
 int
 hal_cons_getc(void);
 
-void
-hal_cons_set_mode(
-	enum hal_cons_mode mode);
-
+/* XXX: Add the parameters, row, column, and attrib. */
 void
 hal_cons_write(
 	const char *utf8);
 
+/* XXX: Remove. */
 void
 hal_cons_write_n(
 	const char *utf8,
 	unsigned length);
 
+/* XXX: Remove. */
 void
 hal_cons_write_at(
 	unsigned row,
 	unsigned column,
 	const char *utf8);
 
-void
-hal_cons_clear_row(
-	unsigned row);
-
-void
-hal_cons_clear_to_eol(void);
-
+/* XXX: Remove. Use hal_cons_write_at(). */
 int
 hal_cons_write_at_attr(
 	unsigned row,
@@ -998,86 +1032,88 @@ hal_cons_write_at_attr(
 	const char *utf8,
 	uint8_t attribute);
 
-int
-hal_cons_write_n_at(
-	unsigned row,
-	unsigned column,
-	const char *utf8,
-	unsigned length,
-	uint8_t attribute);
+/* XXX: Remove. Use hal_cons_write(). */
+void
+hal_cons_clear_row(
+	unsigned row);
 
+/* XXX: Remove. Use hal_cons_write(). */
+void
+hal_cons_clear_to_eol(void);
+
+/* XXX: Remove. Use hal_cons_write(). */
 int
 hal_cons_clear_to_eol_at(
 	unsigned row,
 	unsigned column);
 
+/*
+ * Show or hide the cursor.
+ */
+void
+hal_cons_show_cursor(
+	int visible);
+
+/*
+ * Set the cursor position.
+ */
 int
 hal_cons_set_cursor(
 	unsigned row,
 	unsigned column);
 
 void
-hal_cons_show_cursor(
-	int visible);
-
-void
 hal_cons_save_state(
 	struct hal_cons_state *state);
 
-void
-hal_cons_restore_terminal(
-	const struct hal_cons_state *state);
-
+/*
+ * Use this after hal_cons_write() to update the cursor position.
+ */
 void
 hal_cons_update_cursor(void);
 
+/*
+ * Use this to wait for a keyboard event. Only for event mode.
+ */
 int
 hal_cons_read_event(
 	struct hal_key_event *event);
 
+/*
+ * Use this to check for a keyboard event. Only for event mode.
+ */
 int
 hal_cons_poll_event(
 	struct hal_key_event *event);
-
-void
-hal_cons_get_input_info(
-	struct hal_cons_input_info *info);
-
-int
-hal_cons_key_state(
-	int key);
-
-void
-hal_cons_drain_input(void);
-
-unsigned
-hal_cons_modifiers(void);
-
-void
-hal_cons_suspend(void);
-
-void
-hal_cons_resume(void);
 
 /*
  * Misc
  */
 
 /*
- * Return an architecture-specific boot handoff object by name.
- * The returned object remains owned by HAL.  Unknown or unavailable
+ * Return an architecture-specific boot handoff object by name.  The
+ * returned object remains owned by HAL.  Unknown or unavailable
  * handoffs return NULL.
  */
 void *
 hal_get_arch_handoff(
 	const char *name);
 
+/*
+ * Do system reset for a reboot.
+ */
 void
 hal_reset(void);
 
+/*
+ * Do system power off.
+ */
 void
 hal_poweroff(void);
 
+/*
+ * Halt for a kernel panic.
+ */
 void
 hal_panic(void);
 
@@ -1137,10 +1173,10 @@ kernel_cpu_notify_handler(
 	hal_irq_ack_t acknowledge);
 
 /*
- * System call entry.  The HAL installs the active return-to-user frame and
- * calls this with local IRQs masked.  The generic kernel owns any
- * interruptible syscall window and returns with local IRQs masked so the
- * HAL can commit the saved frame atomically.
+ * System call entry.  The HAL installs the active return-to-user
+ * frame and calls this with local IRQs masked.  The generic kernel
+ * owns any interruptible syscall window and returns with local IRQs
+ * masked so the HAL can commit the saved frame atomically.
  */
 intptr_t
 kernel_syscall_handler(
@@ -1148,9 +1184,9 @@ kernel_syscall_handler(
 	const uintptr_t args[HAL_SYSCALL_ARGS]);
 
 /*
- * User fault entry.  A user frame is active and local IRQs are masked on
- * entry and normal return.  The generic kernel owns fault accounting and
- * any interruptible fault-resolution window.
+ * User fault entry.  A user frame is active and local IRQs are masked
+ * on entry and normal return.  The generic kernel owns fault
+ * accounting and any interruptible fault-resolution window.
  */
 int
 kernel_user_fault_handler(
@@ -1162,9 +1198,10 @@ kernel_user_fault_handler(
 	uintptr_t error_code);
 
 /*
- * Supervisor fault entry.  No user frame is published and the HAL keeps
- * its own saved frame.  SUCCESS resumes the interrupted kernel code;
- * FAILED leaves the register diagnostics and the stop to the HAL.
+ * Supervisor fault entry.  No user frame is published and the HAL
+ * keeps its own saved frame.  SUCCESS resumes the interrupted kernel
+ * code. FAILED leaves the register diagnostics and the stop to the
+ * HAL.
  */
 int
 kernel_sys_fault_handler(
@@ -1176,14 +1213,28 @@ kernel_sys_fault_handler(
 	uintptr_t error_code);
 
 /*
- * Final return-to-user callback.  For asynchronous interrupts, the HAL has
- * quiesced the source and either completed its acknowledgement or transferred
- * acknowledgement ownership under the IRQ-service contract.  A user frame is
- * active and local IRQs are masked on entry and normal return; the generic
- * kernel may enable IRQs while applying stop/exit/signal policy.  The HAL
- * detaches the frame only after this callback returns.
+ * XXX: Please exlain simply.
+ * Final return-to-user callback.  For asynchronous interrupts, the
+ * HAL has quiesced the source and either completed its
+ * acknowledgement or transferred acknowledgement ownership under the
+ * IRQ-service contract.  A user frame is active and local IRQs are
+ * masked on entry and normal return.  The generic kernel may enable
+ * IRQs while applying stop/exit/signal policy.  The HAL detaches the
+ * frame only after this callback returns.
  */
 void
 kernel_user_return_handler(void);
+
+/* XXX: Added. */
+/*
+ * Allocator. Called only after the invocation of kernel_entry().
+ */
+void *kernel_alloc(size_t size);
+
+/* XXX: Added. */
+/*
+ * Deallocator.
+ */
+void kernel_free(void *p);
 
 #endif

@@ -1,0 +1,12 @@
+{
+  "name": "Outlook",
+  "layout": "table",
+  "filter": "planning-category:Outlook",
+  "visible_fields": [
+    410699915,
+    410700816,
+    410700877,
+    410700832,
+    410700894
+  ]
+}

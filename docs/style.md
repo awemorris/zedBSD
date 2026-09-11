@@ -32,4 +32,4 @@ Use relative Markdown links for repository documents. Every document is
 reachable from [the documentation index](README.md), a section index, or the
 authoritative [plan index](../plan/README.md). Renames update inbound links in
 the same change. Run the repeatable link validator documented by
-[WS009 tests](../plan/ws009-documentation/tests/README.md).
+[WS009 tests](../plan/ws009/tests/README.md).

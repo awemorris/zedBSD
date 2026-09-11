@@ -56,7 +56,7 @@ read-only output says `pristine`; normal formatting says `initialized`.
 
 Implementation: `userland/base/common/format-file.c`,
 `userland/base/mkfs/`, `userland/base/mkswap/`.
-Acceptance: [WS019-p019](../../plan/ws019-installation/phase019-pristine-verification/phase.md).
+Acceptance: [WS019-p019](../../plan/ws019/phase019/phase.md).
 
 ## Block-device modes
 
@@ -90,4 +90,4 @@ The regular-file `--verify-pristine` command is not a general checker for an
 installed native filesystem. FAT32 block formatting and native UFS are owned
 by `userland/base/mkfs/block-command.c`, `fat32-format.c` and `ufs-format.c`;
 acceptance is recorded in
-[WS019 native integration](../../plan/ws019-installation/phase049-native-installer-integration/phase.md).
+[WS019 native integration](../../plan/ws019/phase049/phase.md).

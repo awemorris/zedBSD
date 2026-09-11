@@ -24,7 +24,7 @@ tick count at publication time; they are not wall-clock timestamps. These
 claims are fixed by the [public header](../../include/uapi/zedbsd/input.h), the
 [timestamp implementation](../../src/drivers/generic/input.c), the
 [monotonic-clock owner](../../src/kern/clock.c), and the
-[dual-ABI layout fixture](../../plan/ws006-input/tests/evdev-layout-test.c).
+[dual-ABI layout fixture](../../plan/ws006/tests/evdev-layout-test.c).
 
 Reads return only whole records. A buffer smaller than one record fails with
 `EINVAL`; a nonblocking empty read fails with `EAGAIN`. `poll()` reports
@@ -36,7 +36,7 @@ carry current values described by `EVIOCGABS`. The read/poll path is in the
 [input-device implementation](../../src/drivers/generic/input.c), and the
 independent/late-reader behavior is fixed by the
 [bounded-queue implementation](../../src/drivers/generic/input.c) and
-[IN-T10 fixture](../../plan/ws006-input/tests/input-queue-test.c).
+[IN-T10 fixture](../../plan/ws006/tests/input-queue-test.c).
 
 Each open file has an independent cursor over a bounded 256-record device
 queue. If that reader falls behind, its next read starts with
@@ -50,7 +50,7 @@ readers. Already queued records drain before `read()` returns end-of-file;
 records remain. These are production behaviors in
 [`input-device.c`](../../src/drivers/generic/input.c) and
 [`input-queue.c`](../../src/drivers/generic/input.c), exercised by the
-[input-device ownership fixture](../../plan/ws006-input/tests/input-device-ownership-test.c).
+[input-device ownership fixture](../../plan/ws006/tests/input-device-ownership-test.c).
 
 An `eventN` number is an allocation result, not a stable device identity.
 Programs enumerate the nodes, query identity and capabilities, and select a
@@ -63,7 +63,7 @@ instead of aliasing generations. The registration behavior is owned by
 [`input-device.c`](../../src/drivers/generic/input.c), the dynamic namespace
 lifecycle by [`devfs.c`](../../src/kern/devfs.c), and capability-only
 enumeration by the
-[IN-T12 probe](../../plan/ws006-input/tests/evdev-capability-probe.c).
+[IN-T12 probe](../../plan/ws006/tests/evdev-capability-probe.c).
 
 ## Initial ioctl and policy subset
 
@@ -77,7 +77,7 @@ caller memory. The definitions and dispatcher are respectively the
 [public UAPI](../../include/uapi/zedbsd/input.h) and
 [production ioctl path](../../src/drivers/generic/input.c); registration and
 state validation are covered by the
-[IN-T11 fixture](../../plan/ws006-input/tests/input-capability-test.c).
+[IN-T11 fixture](../../plan/ws006/tests/input-capability-test.c).
 
 Capability and key-state buffers use the caller architecture's native
 `unsigned long[]` representation, matching the Linux/FreeBSD source convention:
@@ -90,7 +90,7 @@ the exact output-direction encoding. The bitmap representation and copy rules
 are implemented in
 [`input-capability.h`](../../include/kern/input-capability.h) and
 [`input-capability.c`](../../src/drivers/generic/input.c), and frozen by the
-[capability fixture](../../plan/ws006-input/tests/input-capability-test.c).
+[capability fixture](../../plan/ws006/tests/input-capability-test.c).
 
 A grab excludes delivery to other evdev file readers but does not disable the
 kernel console path. On release, non-grabbing readers resume at the current
@@ -100,7 +100,7 @@ installation policy; the kernel does not infer trust from an event-device
 number. The grab and open-mode behavior is in
 [`input-device.c`](../../src/drivers/generic/input.c), and its interaction with
 independent readers is covered by the
-[input-device ownership fixture](../../plan/ws006-input/tests/input-device-ownership-test.c).
+[input-device ownership fixture](../../plan/ws006/tests/input-device-ownership-test.c).
 
 The header currently declares only the constants needed for ordinary PC
 keyboards, relative mice, wheels, absolute pointers, and basic multitouch
@@ -117,7 +117,7 @@ by [`input-device.c`](../../src/drivers/generic/input.c). Built-in mouse button
 state is backend-local in the
 [PC/AT PS/2 driver](../../src/drivers/platform/pcat/ps2-mouse.c) and
 [PC-98 bus-mouse driver](../../src/drivers/platform/pc98/pc98-busmouse.c). The q044
-[ownership runner](../../plan/ws006-input/tests/run-input-ownership-host-test.sh)
+[ownership runner](../../plan/ws006/tests/run-input-ownership-host-test.sh)
 exercises two independent keyboard and pointer states, overlapping modifiers
 and buttons, registration races, and detach while held.
 
@@ -157,16 +157,16 @@ only evdev readers, not this console subscriber. The contract and registry live
 in [`input-device.h`](../../include/kern/input-device.h) and
 [`input-subscriber.c`](../../src/drivers/generic/input.c); the console owner
 is [`console.c`](../../src/drivers/generic/console.c), with focused evidence in the
-[subscriber fixture](../../plan/ws006-input/tests/input-ownership-test.c) and
-[console fixture](../../plan/ws006-input/tests/console-input-ownership-test.c).
+[subscriber fixture](../../plan/ws006/tests/input-ownership-test.c) and
+[console fixture](../../plan/ws006/tests/console-input-ownership-test.c).
 
 Stable `jis-*` position symbols let PC-98 and X68000 retain physical identity
 when modifiers change between make, repeat, and break. A console-only symbol
 which has no code in the frozen public subset remains internal to the console
 subscriber and does not fabricate an evdev capability or event. The mapping is
 owned by [`input-keymap.c`](../../src/drivers/generic/input.c) and exercised by
-the [PC-98](../../plan/ws006-input/tests/pc98-keyboard-ownership-test.c) and
-[X68000](../../plan/ws006-input/tests/x68k-keyboard-ownership-test.c) fixtures.
+the [PC-98](../../plan/ws006/tests/pc98-keyboard-ownership-test.c) and
+[X68000](../../plan/ws006/tests/x68k-keyboard-ownership-test.c) fixtures.
 
 ## Resynchronization
 
@@ -187,8 +187,8 @@ is implemented by [`input-queue.c`](../../src/drivers/generic/input.c); the
 transactional producer path is implemented by
 [`input-device.c`](../../src/drivers/generic/input.c) and the
 [console subscriber](../../src/drivers/generic/console.c). The
-[HAL resync fixture](../../plan/ws006-input/tests/hal-input-resync-test.c) and
-[input-device ownership fixture](../../plan/ws006-input/tests/input-device-ownership-test.c)
+[HAL resync fixture](../../plan/ws006/tests/hal-input-resync-test.c) and
+[input-device ownership fixture](../../plan/ws006/tests/input-device-ownership-test.c)
 cover the source snapshot and atomic state transition.
 
 ## Compatibility differences
@@ -217,14 +217,14 @@ incorporated into the zedBSD base system.
 
 | Current claim | Production owner | Executable evidence |
 | --- | --- | --- |
-| Public layout, constants, and wrapper identity | [`input.h`](../../include/uapi/zedbsd/input.h), [Linux wrapper](../../libc/include/linux/input.h), [FreeBSD wrapper](../../libc/include/dev/evdev/input.h) | [IN-T00](../../plan/ws006-input/tests/evdev-layout-test.c) in LP64 and ILP32 modes |
-| Independent queues, read/poll/grab, overflow, and detach | [`input-device.c`](../../src/drivers/generic/input.c), [`input-queue.c`](../../src/drivers/generic/input.c) | [IN-T10 queue fixture](../../plan/ws006-input/tests/input-queue-test.c), [ownership/lifecycle fixture](../../plan/ws006-input/tests/input-device-ownership-test.c) |
-| Capability registration and current key/ABS state | [`input-capability.c`](../../src/drivers/generic/input.c) | [IN-T11](../../plan/ws006-input/tests/input-capability-test.c) and [IN-T12 probe](../../plan/ws006-input/tests/evdev-capability-probe.c) |
-| Per-source physical/momentary input, console subscription, resync, and detach | [`input-device.c`](../../src/drivers/generic/input.c), [`input-subscriber.c`](../../src/drivers/generic/input.c), [`console.c`](../../src/drivers/generic/console.c) | [q044 ownership runner](../../plan/ws006-input/tests/run-input-ownership-host-test.sh) and [`ws006-p006`](../../plan/ws006-input/phase006-input-truthfulness-ownership/phase.md) |
-| HID descriptor/report parsing | [`hid-report.c`](../../src/drivers/usb/usb-hid.c) | [IN-T40 fixture](../../plan/ws006-input/tests/hid-report-test.c) and [`ws006-p007`](../../plan/ws006-input/phase007-usb-hid-parser/phase.md) |
-| USB HID Report-Protocol producers, hotplug, and generation-safe nodes | [`usb-hid.c`](../../src/drivers/usb/usb-hid.c), [`input-device.c`](../../src/drivers/generic/input.c), [`devfs.c`](../../src/kern/devfs.c) | [IN-T41/IN-T42 definitions](../../plan/ws006-input/tests/README.md), [`ws006-p008` result](../../plan/ws006-input/phase008-usb-hid-evdev/phase.md) |
-| Xzed evdev-only consumer | [Xzed input owner](../../userland/X11/xzed/input-posix.c) | [`ws018-p007`](../../plan/ws018-kernel-architecture/phase007-xzed-evdev-consumer/phase.md) and its [host runner](../../plan/ws018-kernel-architecture/tests/run-xzed-input-host-test.sh) |
-| Noct 2.0.1 BeUI evdev consumer | [zedBSD BeUI backend](../../userland/base/noct/noct/src/api/api-beui-zedbsd.c) | [q063 Noct evidence](../../plan/ws008-noct/tests/q063-noct-2.0.1-evidence.md) |
+| Public layout, constants, and wrapper identity | [`input.h`](../../include/uapi/zedbsd/input.h), [Linux wrapper](../../libc/include/linux/input.h), [FreeBSD wrapper](../../libc/include/dev/evdev/input.h) | [IN-T00](../../plan/ws006/tests/evdev-layout-test.c) in LP64 and ILP32 modes |
+| Independent queues, read/poll/grab, overflow, and detach | [`input-device.c`](../../src/drivers/generic/input.c), [`input-queue.c`](../../src/drivers/generic/input.c) | [IN-T10 queue fixture](../../plan/ws006/tests/input-queue-test.c), [ownership/lifecycle fixture](../../plan/ws006/tests/input-device-ownership-test.c) |
+| Capability registration and current key/ABS state | [`input-capability.c`](../../src/drivers/generic/input.c) | [IN-T11](../../plan/ws006/tests/input-capability-test.c) and [IN-T12 probe](../../plan/ws006/tests/evdev-capability-probe.c) |
+| Per-source physical/momentary input, console subscription, resync, and detach | [`input-device.c`](../../src/drivers/generic/input.c), [`input-subscriber.c`](../../src/drivers/generic/input.c), [`console.c`](../../src/drivers/generic/console.c) | [q044 ownership runner](../../plan/ws006/tests/run-input-ownership-host-test.sh) and [`ws006-p006`](../../plan/ws006/phase006/phase.md) |
+| HID descriptor/report parsing | [`hid-report.c`](../../src/drivers/usb/usb-hid.c) | [IN-T40 fixture](../../plan/ws006/tests/hid-report-test.c) and [`ws006-p007`](../../plan/ws006/phase007/phase.md) |
+| USB HID Report-Protocol producers, hotplug, and generation-safe nodes | [`usb-hid.c`](../../src/drivers/usb/usb-hid.c), [`input-device.c`](../../src/drivers/generic/input.c), [`devfs.c`](../../src/kern/devfs.c) | [IN-T41/IN-T42 definitions](../../plan/ws006/tests/README.md), [`ws006-p008` result](../../plan/ws006/phase008/phase.md) |
+| Xzed evdev-only consumer | [Xzed input owner](../../userland/X11/xzed/input-posix.c) | [`ws018-p007`](../../plan/ws018/phase007/phase.md) and its [host runner](../../plan/ws018/tests/run-xzed-input-host-test.sh) |
+| Noct 2.0.1 BeUI evdev consumer | [zedBSD BeUI backend](../../userland/base/noct/noct/src/api/api-beui-zedbsd.c) | [q063 Noct evidence](../../plan/ws008/tests/q063-noct-2.0.1-evidence.md) |
 
 Registration requires `EV_SYN/SYN_REPORT`; malformed declarations and
 undeclared producer events are rejected, keeping advertised capabilities and
@@ -243,4 +243,4 @@ event queue. Their request numbers remain unused; unknown console requests
 follow the ordinary TTY unsupported-operation path (`EOPNOTSUPP`). Console
 read/poll still use the normal TTY discipline, including termios and character
 input. Geometry/cursor operations and the ISATTY request at number 13 remain. Those
-boundaries are tracked by the [WS006 plan](../../plan/ws006-input/ws.md).
+boundaries are tracked by the [WS006 plan](../../plan/ws006/ws.md).

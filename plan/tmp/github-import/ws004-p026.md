@@ -1,0 +1,242 @@
+<!-- awesome-plan project=zedbsd record=ws004-p026 -->
+
+既存計画の取り込み。本文はローカルの現行記録、リポジトリ資料へのリンクは基準コミットの履歴です。Issue作成・open状態は実行承認や未完了判定を意味しません。Awesome Planの状態同期導入前のため、実際の状態は本文を参照してください。
+
+元資料: `plan/ws004/phase026/phase.md`
+
+親: [ws004](https://github.com/awemorris/zedBSD/issues/5)
+
+# WS004 Phase 026: Archer T3U Nano identity and firmware policy
+
+Last updated: 2026-09-01
+
+Phase ID: `ws004-p026`
+
+Status: Complete (`q055` decision closure after `q040` read-only intake)
+
+Parent: [WS004 hardware expansion](https://github.com/awemorris/zedBSD/issues/5)
+
+Tests: [WS004 test index](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws004-hardware/tests/README.md)
+
+## Objective
+
+Freeze the exact first WLAN hardware target before a USB ID is bound or a
+binary firmware file is distributed. The selected product is TP-Link Archer
+T3U Nano, but a product name or vendor download page is not sufficient device
+identity. This Phase records the purchased unit's label and descriptors,
+separates documentary V1.0 facts from this revision-unmarked unit, and decides the
+provenance and licensing boundary for the required Realtek firmware.
+
+No driver, firmware loader, WLAN UAPI, or command is implemented in this
+Phase. `ws004-p027` through `p030` remain planning-book entries and are not
+authorized for implementation by creating this Phase.
+
+## Verified facts and inference boundary
+
+| Claim | Classification | Evidence and consequence |
+| --- | --- | --- |
+| Archer T3U Nano V1.0 contains RTL8822BU | Verified documentary fact | FCC filing `2AXJ4T3UNANO` identifies the product and the internal photograph, page 6 of 6, shows a package marked `RTL8822BU`. The official TP-Link Windows archive also labels the device section as 8822B. |
+| TP-Link USB `2357:012e` uses the RTL8822B USB driver | Verified software identity | TP-Link's INF maps `USB\VID_2357&PID_012E` in its 8822B section; Linux mainline maps `2357:012e` to `rtw8822b_hw_spec` in `rtw8822bu.c`. |
+| The target is RTL8828BU | Rejected | No primary source found for this product supports RTL8828BU. The implementation name, documentation, diagnostics, and firmware selection must use RTL8822BU unless the purchased unit proves a different identity. |
+| Archer T3U Nano V1.40/V1.46/V1.60/V1.80 is the same silicon and USB ID | Inference only | TP-Link regional pages expose later hardware revisions and may offer a shared driver archive. A compatible archive is not proof that every revision retains the same chip, USB ID, RF front end, or firmware. |
+| The purchased adapter is `2357:012e`/RTL8822BU | Verified for this exact unit | Its label reads `Archer T3U Nano`, the region is Japan, no hardware revision is printed, and the retained complete descriptor is `2357:012e`, `bcdDevice=2.10`, `ff/ff/ff` with the recorded five endpoints. This does not assert that the unit is V1.0 or generalize to another descriptor. |
+
+The B and C suffixes are material. RTL8822BU is the 8822B family on USB and
+uses `rtw8822b_fw.bin`; the Latitude's retained built-in RTL8822CE is the 8822C
+family on PCIe and uses `rtw8822c_fw.bin`. They may share the future generic
+WLAN core, but are not interchangeable chip or bus drivers.
+
+## One read-only development-host intake
+
+Before `p028` can be proposed for a Queue, capture one read-only evidence
+record for the exact adapter that will be used in development. This is an
+inventory action on an already working development host, not a zedBSD boot,
+driver bind, firmware upload, or radio test. Prefer an existing SSH-accessible
+Linux/FreeBSD host and one command such as `lsusb -v -d 2357:012e` or the exact
+`usbconfig ... dump_all_desc` equivalent; do not request a candidate zedBSD
+image merely to identify the adapter.
+
+1. Photograph or transcribe the product label, model, region, and printed
+   hardware revision when present; explicitly record that a revision marking
+   is absent when it is not printed. Redact the serial number from shared evidence.
+2. On a known-working host, retain the complete device and configuration
+   descriptors: `idVendor`, `idProduct`, `bcdDevice`, USB speed, manufacturer,
+   product, every interface class/subclass/protocol, alternate setting, and
+   endpoint address/type/direction/max-packet/burst values.
+3. Record the host OS, inspection command, and raw descriptor output. Do not
+   exercise a host driver or radio and do not add an unplug/replug campaign to
+   this one inventory. A product string alone is never accepted as identity.
+4. Require `2357:012e` and the exact vendor-specific interface tuple captured
+   from the unit before enabling the RTL8822BU match. Do not match only vendor,
+   product text, interface class, or a broad Realtek family ID.
+5. Compare the descriptor with the TP-Link INF and Linux `rtw8822bu` table.
+   If the ID, interface layout, endpoint topology, or device revision differs,
+   stop and create a new identity Phase. Do not widen `p028` in place.
+
+Opening the enclosure is not required. FCC internal photographs establish the
+documentary V1.0 chip claim; the non-destructive descriptor is the binding
+authority for the purchased unit.
+
+If this one read-only inventory cannot be obtained, finish the planned
+documentary/firmware analysis but mark p026 `uncleared` with the missing host
+evidence as its resume condition. Do not treat public `2357:012e` evidence as
+permission to bind an uninspected purchased revision, and do not queue p028's
+driver binding. This prevents a mistaken later revision from receiving 8822B
+register writes or firmware.
+
+## Firmware policy
+
+Linux mainline names the 8822B payload
+`rtw88/rtw8822b_fw.bin`. The candidate upstream source is the official
+`linux-firmware` repository. The payload is not zlib-licensed source and must
+not be committed, linked into, or represented as part of the permissively
+licensed zedBSD base tree.
+
+The blob inspected during planning reports firmware version `30.20.0`. That is
+a research candidate, not a floating-version promise: p026 still pins the
+exact upstream commit, bytes, size, and digest obtained for the approved
+package, and p028 reports the parsed version from those pinned bytes.
+
+The accepted distribution boundary is:
+
+- zedBSD base contains the native driver and a fixed firmware request for
+  `/lib/firmware/rtw88/rtw8822b_fw.bin`, but no Realtek binary;
+- the optional `userland/firmware/rtl8822b/` entry downloads the
+  unmodified blob and `LICENCE.rtlwifi_firmware.txt` from the immutable GitHub
+  transport mirror `endlessm/linux-firmware` revision
+  `2f56219d20e4becccd718963fc3bcc671c543ce5` only when that package is selected,
+  verifies both frozen SHA-256 digests,
+  and installs the blob at the fixed path as a separate userland package;
+- the package and image manifest state the Realtek binary-firmware terms
+  separately from the zedBSD source license; installation is an explicit
+  packaging choice, never a silent build-time or runtime download;
+- the binary is redistributed only unmodified and with the required copyright
+  notice and disclaimer. The license's reverse-engineering/decompilation/
+  disassembly restriction and limited patent language are recorded, not
+  paraphrased away;
+- `p028` accepts only the pinned size and digest selected by this Phase. A
+  missing, truncated, substituted, or unapproved newer blob fails visibly and
+  leaves the interface down; it never falls back to an embedded copy; and
+- firmware updates are separate reviewed package changes with their own
+  hardware regression evidence. A driver change does not silently advance the
+  blob.
+
+The kernel loads the file on the first interface open after the root filesystem
+is available. Boot-time USB discovery may publish an uninitialized WLAN device,
+but it must not claim a working radio. `ENOENT`, digest mismatch, unsupported
+firmware header/version, upload timeout, and firmware-start failure remain
+distinct diagnostics. If a safe kernel file-loading boundary cannot be
+defined without a broader VFS or credential change, stop before `p028` rather
+than adding an ad-hoc firmware-upload ioctl.
+
+## Primary sources
+
+- FCC Equipment Authorization System internal-photograph attachment for FCC
+  ID `2AXJ4T3UNANO`:
+  <https://apps.fcc.gov/eas/GetApplicationAttachment.html?id=5468516>
+- TP-Link's official V1.40 download page, which proves that later labeled
+  revisions exist but not their internal chip identity:
+  <https://www.tp-link.com/uk/support/download/archer-t3u-nano/v1.40/>
+- TP-Link's official driver archive containing the 8822B/`2357:012e` INF
+  mapping:
+  <https://static.tp-link.com/upload/driver/2025/202512/20251231/Archer%20T3U%20Nano.zip>
+- Linux mainline 8822BU USB ID table and 8822B firmware selection:
+  <https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/realtek/rtw88/rtw8822bu.c>
+  and
+  <https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/realtek/rtw88/rtw8822b.c>
+- Official `linux-firmware` provenance and Realtek license files:
+  <https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/WHENCE>
+  and
+  <https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/LICENSES/LICENCE.rtlwifi_firmware.txt>
+- Immutable GitHub acquisition mirror used only by the optional package:
+  <https://github.com/endlessm/linux-firmware/tree/2f56219d20e4becccd718963fc3bcc671c543ce5>
+- FreeBSD's current rtw88 module makefile and manual. They are useful
+  behavioral/inventory references only; no implementation is imported into
+  the zedBSD base. USB is disabled in the module makefile and the manual does
+  not establish a completed native 8822BU USB path:
+  <https://cgit.freebsd.org/src/tree/sys/modules/rtw88/Makefile> and
+  <https://man.freebsd.org/cgi/man.cgi?query=rtw88&sektion=4>
+
+## Verification plan
+
+1. Complete `HW-T32` with the exact adapter label and raw descriptor record.
+   This is the single development-host inventory above; it is not a zedBSD
+   physical acceptance run.
+2. Extract the TP-Link archive without executing its installer; retain the
+   archive digest and the exact INF stanza that maps `2357:012e` to 8822B.
+3. Pin one upstream `linux-firmware` revision. Record the blob path, version
+   reported by the accepted parser, byte size, SHA-256, WHENCE entry, and exact
+   accompanying license text.
+4. Review the optional-package manifest against the policy above. Verify that
+   a normal base image contains no Realtek blob and performs no network fetch.
+5. Prepare negative fixtures for absent, short, oversized, wrong-digest, and
+   unsupported-header payloads for `p028`; this Phase records them but does not
+   implement the loader.
+
+## Completion conditions
+
+- The physical product is identified by the only printed information
+  available: `Archer T3U Nano`, Japanese region, with no separately printed
+  hardware revision. The retained `2357:012e`, `bcdDevice=2.10`, `ff/ff/ff`,
+  five-endpoint descriptor is therefore the binding authority for this exact
+  development unit. A future differing descriptor remains a new identity.
+- Every document calls the verified target RTL8822BU; RTL8828BU is not retained
+  as an alias or guess.
+- Later TP-Link hardware revisions are explicitly marked inference-only until
+  independently captured.
+- One exact firmware revision, size, digest, upstream provenance, license text,
+  install path, and update rule are frozen.
+- The base-versus-optional-package license boundary and all failure behavior
+  are accepted before `p028` is eligible for a Queue proposal.
+- No zedBSD candidate is booted for p026; the first zedBSD physical observation
+  is the single combined checkpoint owned with WS005 p008 after p030's
+  automatic gates.
+
+## Reconsideration boundary
+
+Return to planning if the physical unit is not `2357:012e`, its descriptor is
+not compatible with the Linux 8822BU match, the upstream blob cannot legally or
+technically be distributed under the declared optional-package policy, the
+firmware header cannot be validated before upload, or initialization requires
+another undisclosed board-specific file. Those findings are not permission to
+bind a neighboring USB ID, use an out-of-tree binary driver, or embed firmware
+in the base kernel.
+
+## q040 result (2026-08-31)
+
+The user-authorized Debian 13.6 development host supplied one complete,
+read-only descriptor for the unbound adapter. It is `2357:012e`, USB 2.10 at
+High Speed, device revision 2.10, with one `ff/ff/ff` interface and exact bulk
+IN/bulk OUT/bulk OUT/interrupt IN/bulk OUT endpoint tuple. The serial was
+redacted. TP-Link's pinned official INF and pinned Linux mainline independently
+map that ID to the 8822B/`rtw8822b_hw_spec` family.
+
+Official `linux-firmware` revision
+`458e40fdbb4dad5134ec230a42df21aea1b5baf8` is frozen at 161,240 bytes,
+version 30.20.0, and SHA-256
+`a72da690597bfa99d8eb6fc2ab090d18d8ad92ac2befd35db1c9e3662d8d8418`.
+The exact WHENCE and relocated `LICENSES/LICENCE.rtlwifi_firmware.txt` records,
+optional-package boundary, base-tree absence, update rule, and five later
+negative fixtures are recorded in the [HW-T32 intake](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws004-hardware/tests/archer-t3u-nano-intake.md).
+No firmware is committed and no radio operation or zedBSD candidate boot was
+performed.
+
+## q055 identity and package closure (2026-09-01)
+
+The user reports that the product supplies no more specific label than
+`Archer T3U Nano`; the region is Japan and no separately printed hardware
+revision is available. Absence of a revision marking is retained as the
+observed fact rather than guessed from `bcdDevice`. The user accepts the exact
+q040 descriptor as the binding authority, so the initial driver remains
+restricted to `2357:012e`, `bcdDevice=2.10`, interface `ff/ff/ff`, and the
+recorded five-endpoint tuple.
+
+The firmware remains outside the kernel and base system. The approved package
+root is `userland/firmware/rtl8822b/`; selecting/building that firmware entry
+downloads from the immutable `endlessm/linux-firmware` GitHub revision
+`2f56219d20e4becccd718963fc3bcc671c543ce5`, verifies the frozen blob and
+license digests, and installs `/lib/firmware/rtw88/rtw8822b_fw.bin` only as an
+additional userland package. An ordinary base build performs no firmware
+download, and the kernel performs no runtime network fetch. The actual
+firmware-entry rules and driver-side loader are part of p036; this decision
+closes p026 and releases p027.

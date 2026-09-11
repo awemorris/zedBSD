@@ -1,0 +1,75 @@
+{
+  "date": "2026-09-11T02:05:33.329061+00:00",
+  "decision": "計画を更新します。現在のPriorityリストを削除します。WS025の残件はclearedにして、WS025を閉じます。WS019も閉じます。WS006, WS022, WS002を閉じます。",
+  "additional_publication_approval": "User replied 承認します after explanation of the automatic approval rejection.",
+  "issues": [
+    {
+      "record": "ws025-p029",
+      "status": "cleared",
+      "issue": "https://github.com/awemorris/zedBSD/issues/352",
+      "state": "closed",
+      "reason": "completed"
+    },
+    {
+      "record": "ws025-p030",
+      "status": "cleared",
+      "issue": "https://github.com/awemorris/zedBSD/issues/353",
+      "state": "closed",
+      "reason": "completed"
+    },
+    {
+      "record": "ws025-p032",
+      "status": "cleared",
+      "issue": "https://github.com/awemorris/zedBSD/issues/355",
+      "state": "closed",
+      "reason": "completed"
+    },
+    {
+      "record": "ws025-p038",
+      "status": "cleared",
+      "issue": "https://github.com/awemorris/zedBSD/issues/361",
+      "state": "closed",
+      "reason": "completed"
+    },
+    {
+      "record": "ws025",
+      "status": "completed",
+      "issue": "https://github.com/awemorris/zedBSD/issues/26",
+      "state": "closed",
+      "reason": "completed"
+    },
+    {
+      "record": "ws019",
+      "status": "completed",
+      "issue": "https://github.com/awemorris/zedBSD/issues/20",
+      "state": "closed",
+      "reason": "completed"
+    },
+    {
+      "record": "ws006",
+      "status": "completed",
+      "issue": "https://github.com/awemorris/zedBSD/issues/7",
+      "state": "closed",
+      "reason": "completed"
+    },
+    {
+      "record": "ws022",
+      "status": "completed",
+      "issue": "https://github.com/awemorris/zedBSD/issues/23",
+      "state": "closed",
+      "reason": "completed"
+    },
+    {
+      "record": "ws002",
+      "status": "completed",
+      "issue": "https://github.com/awemorris/zedBSD/issues/3",
+      "state": "closed",
+      "reason": "completed"
+    }
+  ],
+  "project_changes": 31,
+  "priority_values": 0,
+  "priority_view_removed": true,
+  "new_execution_queue": false,
+  "source_changes_and_runtime_tests": false
+}

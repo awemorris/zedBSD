@@ -1,0 +1,120 @@
+<!-- awesome-plan project=zedbsd record=ws025-p038 -->
+
+既存計画の取り込み。本文はローカルの現行記録、リポジトリ資料へのリンクは基準コミットの履歴です。Issue作成・open状態は実行承認や未完了判定を意味しません。Awesome Planの状態同期導入前のため、実際の状態は本文を参照してください。
+
+元資料: `plan/ws025/phase038/phase.md`
+
+親: [ws025](https://github.com/awemorris/zedBSD/issues/26)
+
+# ws025-p038: fixed HAL syscall and fault callbacks
+
+## 2026-09-10 現行仕様の訂正
+
+現行67b28ce0ではfault引数がcause, mode, pc, address, vector, error_codeへ変更され、detail引数はない。実装は残るが、旧試験を現行合格と扱わない。既存Phaseの確認点としてテスト/API整合とSPARC初回フレーム事項を保持。q303は停止済み。
+修正後照合（ローカル資料: `../post-rollback-review.md`）を優先し、以下は旧計画・履歴として読む。
+
+Date: 2026-09-10
+Status: in-progress
+Authorization: user instructed moving from I/O optimization to HAL modifications,
+following discussion of fixed kernel_syscall_handler/user_fault/sys_fault entries.
+This authorizes these declarations; unrelated HAL API changes remain restricted.
+
+## Scope
+
+1. Replace syscall registration with fixed kernel_syscall_handler in every HAL;
+   retain masked IRQ and active user-frame, restart/sigreturn/accounting contract.
+2. Normalize fault cause/access (including OTHER and non-access mode); split
+   user and sys callbacks, retain diagnostic native vector/error without generic
+   policy branching on CPU vector. Remove old registration and user-int observer
+   entry by moving observations to appropriate fixed entry/diagnostic owner.
+3. Preserve architecture-specific saved frames and assembly stack layouts within
+   HAL. User C callbacks run on kernel stack. Audit SPARC windows and ARM64
+   current-EL return path. Present unresolved layout/return-contract choices to
+   user before dependent changes, as requested.
+4. Update focused real-source fixtures, supported image builds and QEMU syscall/
+   user fault/signal/restart handling. No aggregate make check. Do not declare
+   phase complete after syscall-only migration.
+
+## q295 finite scope
+
+Fixed syscall callback only, all five HALs, no frame/argument order or fault
+routing changes. Remove obsolete registration typedef/pointers. Three image
+builds; inspect non-x86 calls. Remaining fault integration in subsequent queue.
+Timebox60 minutes; standing execution plus explicit HAL task authorization.
+
+## q296 fixed supervisor fault callback
+
+Replace unused registered trap tables with kernel_sys_fault_handler on all HALs,
+including i386 diagnostic-only path. Callback carries cause/access/pc/address and
+raw vector/error for diagnostics; current generic policy returns FAILED without
+changing IRQ state (matching no registered handler). HAL retains final register
+dump/stop. Add OTHER/NONE and arithmetic/protection classification vocabulary.
+Preserve saved frames; ARM64 current sync uses existing SAVE/RESTORE288-byte
+layout, wire RESTORE/eret on handled return instead of infinite loop. Existing
+user-fault policy migration remains next. Three image builds; timebox60 minutes.
+
+## q297 normalized user faults and syscall observation
+
+User callback takes cause/pc/address/mode/detail plus diagnostic vector/error.
+Generic VM/signal policy never branches on native vector. Keep integer divide/
+overflow detail; unspecified arithmetic uses SI_KERNEL, not fabricated INTDIV.
+Replace kernel_user_int_handler with generic syscall observation once per fixed
+entry; legacy probe location fields become unavailable0. Preserve IRQ/accounting
+and user-return ownership. All HAL call sites migrate; shared sys decoding may
+be completed alongside user decode. Focused compilation/builds; runtime follows.
+Timebox60 minutes, user-authorized fixed-entry scope.
+
+## q298 amd64 native fixed-entry gate
+
+Disposable QEMU normal image with purpose-built guest: real UD2/page/divide
+fault termination, returning INT3 signal handler, EINTR and SA_RESTART blocked
+read, fork/wait and syscall ENOSYS. Record guest/source hash and result; this is
+HAL runtime acceptance, not an I/O performance test. Other architectures and
+detailed decode audit remain. Timebox60 minutes.
+
+q298 finding: actual INT3 produces GP vector13/error0x1a at opcodecc because
+vector3 gate is DPL0. Correct amd64/i386 vector3 DPL3 within fault-entry scope;
+retain interrupt-gate IRQ behavior and privilege on other fault/IRQ gates.
+
+## q299 ARM64 exception slot identity
+
+Preserve native0..15 slot through out-of-line SAVE_FRAME stubs, before passing
+slot to C. No register/288-byte frame layout change. Decode ESR only for supported
+synchronous slots; FIQ=OTHER, SError=MACHINE_CHECK, unsupported AArch32=OTHER.
+Only lower AArch64 synchronous SVC enters syscall. IRQ paths unchanged. Test
+actual extracted C dispatch with contradictory ESR on async slots; assemble
+target stubs and syntax-check ARM64 C. Full ARM64 boot remains separate.
+Timebox60 minutes, user-authorized fixed HAL entry scope.
+
+## q300 SPARC startup frame contract audit
+
+Trace initial task context versus actual trap save/restore. Record concrete
+contract mismatch and consult user as explicitly requested for stack-layout
+differences. Do not implement the dependent SPARC transition before answer.
+Independent remaining architecture verification remains executable.
+Timebox30 minutes, source audit only.
+
+## q301 m68k fixed-entry mode contract
+
+Exercise actual trap.c/exception.c with saved hardware frames and mocked generic
+callbacks/MMU probe. Check user/sys ownership, syscall arguments, page modes
+and non-memory NONE; correct mismatch without changing frame layout. Target C
+syntax plus ordinary/sanitizer host gates. SPARC decision stays pending.
+Timebox45 minutes.
+
+## q302 i386 native fixed-entry gate
+
+Run the existing fixed-entry guest on disposable PC/AT BIOS image, using i386
+sysroot and ABI, same exception/signal/restart assertions. Share x86 instructions
+valid in both modes. Extend runner to select pcat explicitly; preserve amd64
+default. Timebox60 minutes, no I/O measurements. Record evidence and retain
+failures; do not expand unrelated subsystem scope.
+
+## q303 i386 callback readability and shared runtime gate
+
+Bring newly added i386 cause/mode/detail decoding and callback invocation into
+coding-style shape: explicit switch/branches, named handler result, no nested
+conditional expressions. Preserve classifications and raw diagnostic data.
+Rebuild supported images serially and verify shared updated guest on amd64 and
+PC/AT. This also closes the q302 changed-amd64-runner verification gap.
+Timebox60 minutes. SPARC startup remains awaiting explicit answer.

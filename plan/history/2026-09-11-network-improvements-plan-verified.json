@@ -1,0 +1,16 @@
+{
+  "new_phases": 5,
+  "local_links_checked": true,
+  "installer_plan_preserved": true,
+  "confirmed_user_answers": {
+    "lan_disable": "disable",
+    "ready": "either wired or Wi-Fi has IP",
+    "timeout": "continue boot and networkd processing"
+  },
+  "github_writes": 0,
+  "source_changes": false,
+  "runtime_tests": false,
+  "active_queue": null,
+  "pending_operations": 52,
+  "conflicts": 0
+}

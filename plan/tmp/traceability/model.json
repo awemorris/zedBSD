@@ -1,0 +1,4767 @@
+{
+  "objectives": {
+    "O1": "寛容なライセンスで企業が自由に使いやすいUNIX互換システムを作り、GPLのLinuxカーネルに依存せず、Linux/Androidを置き換え可能な水準の完成度で提供する。",
+    "O2": "デスクトップ、ラップトップ、SBC、タブレット、モバイルなど様々なスケールで動作するカーネルとユーザランドを提供し、開発者が独自ディストリビューションを自由にカスタマイズ・リブランディング・配布できるようにする。",
+    "O3": "UNIX/BSD/Linuxの歴史的遺産から現代のシステムに必要なエッセンスを抽出し、networkd、netconf、serviceなどをシンプルで一貫した仕組みとして再実装する。",
+    "O4": "ページベースMMUを備える32bit/64bitコンピュータへUNIX互換OSを確実に移植できる、明確で最小限のHALを定義し、人類の共有知とする。レトロコンピュータへの移植でも実証する。",
+    "O5": "AI時代のOSSのあり方を、大規模なAI活用開発を通じて探索・思索し、成果・失敗・人間の判断を再利用可能な知見として共有する。"
+  },
+  "milestones": {
+    "MG001": {
+      "title": "継続開発できる基盤が揃う",
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "acceptance": "文書化した環境でビルドでき、設計境界・規約・試験・制限を追跡できる。",
+      "primary_ws": [
+        "ws009",
+        "ws010",
+        "ws021",
+        "ws023",
+        "ws026"
+      ],
+      "status": "planning"
+    },
+    "MG002": {
+      "title": "UNIXアプリケーションの実行基盤が成立する",
+      "objectives": [
+        "O1"
+      ],
+      "acceptance": "プロセス・メモリ・libc・ローダ/TLSの対応範囲を、互換性台帳と代表アプリの結果で確認できる。",
+      "primary_ws": [
+        "ws001",
+        "ws022"
+      ],
+      "status": "planning"
+    },
+    "MG003": {
+      "title": "対象機へ導入して単独起動できる",
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "acceptance": "合意した機種・媒体でインストール後の単独起動・ログインを確認できる。実機とQEMUの証拠を区別する。",
+      "primary_ws": [
+        "ws003",
+        "ws004",
+        "ws019",
+        "ws020"
+      ],
+      "status": "planning"
+    },
+    "MG004": {
+      "title": "データを保持しメモリ/ストレージを実用的に使える",
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "acceptance": "永続化、低メモリ時の進行、媒体世代、既定構成の性能を合意した用途で確認できる。",
+      "primary_ws": [
+        "ws016",
+        "ws024",
+        "ws025"
+      ],
+      "status": "planning"
+    },
+    "MG005": {
+      "title": "シンプルで一貫したネットワーク/サービス管理を利用できる",
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "acceptance": "networkd/netconf/serviceの責務・設定・操作が一貫し、永続化と失敗後の復旧を確認できる。",
+      "primary_ws": [
+        "ws002",
+        "ws005",
+        "ws011",
+        "ws012"
+      ],
+      "status": "planning"
+    },
+    "MG006": {
+      "title": "グラフィカルな操作環境を利用できる",
+      "objectives": [
+        "O2"
+      ],
+      "acceptance": "入力・描画・ウィンドウ・端末・GUIツールの一連の操作を合意した環境で確認できる。",
+      "primary_ws": [
+        "ws006",
+        "ws007",
+        "ws008",
+        "ws014",
+        "ws017"
+      ],
+      "status": "planning"
+    },
+    "MG007": {
+      "title": "用途別の独自ディストリビューションを構成・配布できる",
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "acceptance": "第三者が用途別に構成し独自ブランドでビルド・配布できる。Linux/Android代替の対象用途・機能/品質基準を具体化し実証する。",
+      "primary_ws": [
+        "ws013",
+        "ws015"
+      ],
+      "status": "planning"
+    },
+    "MG008": {
+      "title": "最小HALの移植契約を公開し異なる機種で実証できる",
+      "objectives": [
+        "O4"
+      ],
+      "acceptance": "32bit/64bitのHAL契約・移植手順と異種/レトロ機での実証を公開し、移植者が必要な実装を判断できる。",
+      "primary_ws": [
+        "ws018"
+      ],
+      "status": "planning"
+    },
+    "MG009": {
+      "title": "AI活用OSS開発の経験を検証可能な知見として公開できる",
+      "objectives": [
+        "O5"
+      ],
+      "acceptance": "設計権限・レビュー・変更追跡・失敗からの回復について事例と根拠を公開し、知見と未解決の問いを整理する。",
+      "primary_ws": [],
+      "status": "planning"
+    }
+  },
+  "workstreams": {
+    "ws009": {
+      "primary": "MG001",
+      "related": [
+        "MG006",
+        "MG008",
+        "MG009"
+      ],
+      "objectives": [
+        "O2",
+        "O4",
+        "O5"
+      ],
+      "contribution": "実装・利用手順・制限を文書化する。研究知見の公開全体を既存の完了で代替しない。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/10"
+    },
+    "ws010": {
+      "primary": "MG001",
+      "related": [
+        "MG007"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O4",
+        "O5"
+      ],
+      "contribution": "Noctによるビルド/イメージツールを維持する。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/11"
+    },
+    "ws021": {
+      "primary": "MG001",
+      "related": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1",
+        "O4",
+        "O5"
+      ],
+      "contribution": "LLVM/sysrootとツールチェーンを整える。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/22"
+    },
+    "ws023": {
+      "primary": "MG001",
+      "related": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "contribution": "x86 HALの規約準拠と可読性を整える。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/24"
+    },
+    "ws026": {
+      "primary": "MG001",
+      "related": [
+        "MG009"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "contribution": "テストの目的・範囲・保守性を整理する。AI開発研究そのものの完了とは扱わない。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/27"
+    },
+    "ws001": {
+      "primary": "MG002",
+      "related": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "contribution": "POSIX/UNIX互換APIと対応範囲を整える。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/2"
+    },
+    "ws022": {
+      "primary": "MG002",
+      "related": [],
+      "objectives": [
+        "O1"
+      ],
+      "contribution": "ELF TLS/TCBとアプリ実行基盤を提供する。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/23"
+    },
+    "ws003": {
+      "primary": "MG003",
+      "related": [
+        "MG008"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "contribution": "対象機の起動と移植上の問題を解消する。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/4"
+    },
+    "ws004": {
+      "primary": "MG003",
+      "related": [
+        "MG004",
+        "MG008"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O4"
+      ],
+      "contribution": "導入・運用に必要なデバイスとドライバを成立させる。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/5"
+    },
+    "ws019": {
+      "primary": "MG003",
+      "related": [
+        "MG006",
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O4"
+      ],
+      "contribution": "共存/専用/PC98のインストールと対象単独起動を成立させる。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/20"
+    },
+    "ws020": {
+      "primary": "MG003",
+      "related": [
+        "MG008"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "contribution": "Intel MacのUEFI/variant起動を成立させる。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/21"
+    },
+    "ws016": {
+      "primary": "MG004",
+      "related": [],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "contribution": "実行時のswap制御を提供する。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/17"
+    },
+    "ws024": {
+      "primary": "MG004",
+      "related": [],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "contribution": "単一64bit UFSを提供する。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/25"
+    },
+    "ws025": {
+      "primary": "MG004",
+      "related": [
+        "MG003",
+        "MG008"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O4"
+      ],
+      "contribution": "メモリ・キャッシュ・I/O・媒体回復の整合と実用性を整える。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/26"
+    },
+    "ws002": {
+      "primary": "MG005",
+      "related": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "contribution": "initとシステムサービスの実行・制御を整える。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/3"
+    },
+    "ws005": {
+      "primary": "MG005",
+      "related": [],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "contribution": "ネットワーク/WLANの通信基盤を提供する。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/6"
+    },
+    "ws011": {
+      "primary": "MG005",
+      "related": [
+        "MG003"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3",
+        "O4"
+      ],
+      "contribution": "永続化・復旧可能なネットワーク設定操作を提供する。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/12"
+    },
+    "ws012": {
+      "primary": "MG005",
+      "related": [
+        "MG003"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3",
+        "O4"
+      ],
+      "contribution": "サービス管理操作を一貫させる。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/13"
+    },
+    "ws006": {
+      "primary": "MG006",
+      "related": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "contribution": "操作に必要な入力デバイスとイベント体系を提供する。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/7"
+    },
+    "ws007": {
+      "primary": "MG006",
+      "related": [],
+      "objectives": [
+        "O2"
+      ],
+      "contribution": "グラフィックスとデスクトップの操作を成立させる。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/8"
+    },
+    "ws008": {
+      "primary": "MG006",
+      "related": [
+        "MG001",
+        "MG007"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O4",
+        "O5"
+      ],
+      "contribution": "Noct/BeUIによるGUI・システムツールの基盤を提供する。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/9"
+    },
+    "ws014": {
+      "primary": "MG006",
+      "related": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "contribution": "ネイティブGPUを支える。手動保留を維持。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/15"
+    },
+    "ws017": {
+      "primary": "MG006",
+      "related": [],
+      "objectives": [
+        "O2"
+      ],
+      "contribution": "LFB描画を改善しGUI操作へ接続する。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/18"
+    },
+    "ws013": {
+      "primary": "MG007",
+      "related": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "contribution": "用途別構成の隔離/資源管理に寄与する。Future扱いを維持。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/14"
+    },
+    "ws015": {
+      "primary": "MG007",
+      "related": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "contribution": "必要な組込み用途のリアルタイム機能に寄与する。Future扱いを維持。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/16"
+    },
+    "ws018": {
+      "primary": "MG008",
+      "related": [
+        "MG001",
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O4",
+        "O5"
+      ],
+      "contribution": "カーネルの所有権・インタフェース境界を整理し、HAL移植契約の土台に寄与する。",
+      "issue": "https://github.com/awemorris/zedBSD/issues/19"
+    }
+  },
+  "phases": {
+    "ws001-p000": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/28",
+      "source": "plan/ws001/phase000/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p001": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/29",
+      "source": "plan/ws001/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p002": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/30",
+      "source": "plan/ws001/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p003": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/31",
+      "source": "plan/ws001/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p004": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/32",
+      "source": "plan/ws001/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p005": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/33",
+      "source": "plan/ws001/phase005/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p006": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/34",
+      "source": "plan/ws001/phase006/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p007": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/35",
+      "source": "plan/ws001/phase007/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p008": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/36",
+      "source": "plan/ws001/phase008/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p009": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/37",
+      "source": "plan/ws001/phase009/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p010": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/38",
+      "source": "plan/ws001/phase010/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p011": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/39",
+      "source": "plan/ws001/phase011/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p012": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/40",
+      "source": "plan/ws001/phase012/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p013": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/41",
+      "source": "plan/ws001/phase013/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p014": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/42",
+      "source": "plan/ws001/phase014/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p015": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/43",
+      "source": "plan/ws001/phase015/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p016": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/44",
+      "source": "plan/ws001/phase016/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p017": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/45",
+      "source": "plan/ws001/phase017/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p018": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/46",
+      "source": "plan/ws001/phase018/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p019": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/47",
+      "source": "plan/ws001/phase019/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p020": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/48",
+      "source": "plan/ws001/phase020/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p021": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/49",
+      "source": "plan/ws001/phase021/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p022": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/50",
+      "source": "plan/ws001/phase022/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p023": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/51",
+      "source": "plan/ws001/phase023/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws001-p085": {
+      "parent_ws": "ws001",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/52",
+      "source": "plan/ws001/phase085/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws002-p011": {
+      "parent_ws": "ws002",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/53",
+      "source": "plan/ws002/phase011/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws002-p012": {
+      "parent_ws": "ws002",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/54",
+      "source": "plan/ws002/phase012/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws002-p013": {
+      "parent_ws": "ws002",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/55",
+      "source": "plan/ws002/phase013/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws002-p014": {
+      "parent_ws": "ws002",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/56",
+      "source": "plan/ws002/phase014/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws002-p015": {
+      "parent_ws": "ws002",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/57",
+      "source": "plan/ws002/phase015/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws002-p016": {
+      "parent_ws": "ws002",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/58",
+      "source": "plan/ws002/phase016/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws002-p017": {
+      "parent_ws": "ws002",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/59",
+      "source": "plan/ws002/phase017/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws002-p018": {
+      "parent_ws": "ws002",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/60",
+      "source": "plan/ws002/phase018/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws002-p019": {
+      "parent_ws": "ws002",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/61",
+      "source": "plan/ws002/phase019/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws002-p020": {
+      "parent_ws": "ws002",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/62",
+      "source": "plan/ws002/phase020/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws002-p021": {
+      "parent_ws": "ws002",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/63",
+      "source": "plan/ws002/phase021/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws002-p022": {
+      "parent_ws": "ws002",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/64",
+      "source": "plan/ws002/phase022/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws002-p023": {
+      "parent_ws": "ws002",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/65",
+      "source": "plan/ws002/phase023/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws002-p024": {
+      "parent_ws": "ws002",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/66",
+      "source": "plan/ws002/phase024/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p001": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/67",
+      "source": "plan/ws003/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p002": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/68",
+      "source": "plan/ws003/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p003": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/69",
+      "source": "plan/ws003/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p004": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/70",
+      "source": "plan/ws003/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p005": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/71",
+      "source": "plan/ws003/phase005/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p006": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/72",
+      "source": "plan/ws003/phase006/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p007": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/73",
+      "source": "plan/ws003/phase007/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p008": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/74",
+      "source": "plan/ws003/phase008/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p009": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/75",
+      "source": "plan/ws003/phase009/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p010": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/76",
+      "source": "plan/ws003/phase010/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p011": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/77",
+      "source": "plan/ws003/phase011/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p012": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/78",
+      "source": "plan/ws003/phase012/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p013": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/79",
+      "source": "plan/ws003/phase013/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p014": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/80",
+      "source": "plan/ws003/phase014/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p015": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/81",
+      "source": "plan/ws003/phase015/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p016": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/82",
+      "source": "plan/ws003/phase016/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p017": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/83",
+      "source": "plan/ws003/phase017/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p018": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/84",
+      "source": "plan/ws003/phase018/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p019": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/85",
+      "source": "plan/ws003/phase019/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p020": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/86",
+      "source": "plan/ws003/phase020/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p021": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/87",
+      "source": "plan/ws003/phase021/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p022": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/88",
+      "source": "plan/ws003/phase022/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p023": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/89",
+      "source": "plan/ws003/phase023/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p024": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/90",
+      "source": "plan/ws003/phase024/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws003-p025": {
+      "parent_ws": "ws003",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/91",
+      "source": "plan/ws003/phase025/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p001": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/92",
+      "source": "plan/ws004/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p002": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/93",
+      "source": "plan/ws004/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p003": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/94",
+      "source": "plan/ws004/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p004": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/95",
+      "source": "plan/ws004/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p005": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/96",
+      "source": "plan/ws004/phase005/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p006": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/97",
+      "source": "plan/ws004/phase006/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p007": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/98",
+      "source": "plan/ws004/phase007/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p008": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/99",
+      "source": "plan/ws004/phase008/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p009": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/100",
+      "source": "plan/ws004/phase009/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p010": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/101",
+      "source": "plan/ws004/phase010/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p011": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/102",
+      "source": "plan/ws004/phase011/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p012": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/103",
+      "source": "plan/ws004/phase012/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p013": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/104",
+      "source": "plan/ws004/phase013/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p014": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/105",
+      "source": "plan/ws004/phase014/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p015": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/106",
+      "source": "plan/ws004/phase015/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p016": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/107",
+      "source": "plan/ws004/phase016/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p017": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/108",
+      "source": "plan/ws004/phase017/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p018": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/109",
+      "source": "plan/ws004/phase018/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p019": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/110",
+      "source": "plan/ws004/phase019/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p020": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/111",
+      "source": "plan/ws004/phase020/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p021": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/112",
+      "source": "plan/ws004/phase021/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p022": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/113",
+      "source": "plan/ws004/phase022/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p023": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/114",
+      "source": "plan/ws004/phase023/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p024": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/115",
+      "source": "plan/ws004/phase024/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p025": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/116",
+      "source": "plan/ws004/phase025/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p026": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/117",
+      "source": "plan/ws004/phase026/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p027": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/118",
+      "source": "plan/ws004/phase027/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p028": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/119",
+      "source": "plan/ws004/phase028/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p029": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/120",
+      "source": "plan/ws004/phase029/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p030": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/121",
+      "source": "plan/ws004/phase030/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p031": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/122",
+      "source": "plan/ws004/phase031/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p032": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/123",
+      "source": "plan/ws004/phase032/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p033": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/124",
+      "source": "plan/ws004/phase033/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p034": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/125",
+      "source": "plan/ws004/phase034/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p035": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/126",
+      "source": "plan/ws004/phase035/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p036": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/127",
+      "source": "plan/ws004/phase036/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p037": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/128",
+      "source": "plan/ws004/phase037/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p038": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/129",
+      "source": "plan/ws004/phase038/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p039": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/130",
+      "source": "plan/ws004/phase039/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p040": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/131",
+      "source": "plan/ws004/phase040/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p041": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/132",
+      "source": "plan/ws004/phase041/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p042": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/133",
+      "source": "plan/ws004/phase042/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p043": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/134",
+      "source": "plan/ws004/phase043/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p044": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/135",
+      "source": "plan/ws004/phase044/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p045": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/136",
+      "source": "plan/ws004/phase045/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p046": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/137",
+      "source": "plan/ws004/phase046/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p047": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/138",
+      "source": "plan/ws004/phase047/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p048": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/139",
+      "source": "plan/ws004/phase048/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p049": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/140",
+      "source": "plan/ws004/phase049/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws004-p050": {
+      "parent_ws": "ws004",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/141",
+      "source": "plan/ws004/phase050/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws005-p001": {
+      "parent_ws": "ws005",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/142",
+      "source": "plan/ws005/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws005-p002": {
+      "parent_ws": "ws005",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/143",
+      "source": "plan/ws005/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws005-p003": {
+      "parent_ws": "ws005",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/144",
+      "source": "plan/ws005/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws005-p004": {
+      "parent_ws": "ws005",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/145",
+      "source": "plan/ws005/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws005-p005": {
+      "parent_ws": "ws005",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/146",
+      "source": "plan/ws005/phase005/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws005-p006": {
+      "parent_ws": "ws005",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/147",
+      "source": "plan/ws005/phase006/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws005-p007": {
+      "parent_ws": "ws005",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/148",
+      "source": "plan/ws005/phase007/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws005-p008": {
+      "parent_ws": "ws005",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/149",
+      "source": "plan/ws005/phase008/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws005-p009": {
+      "parent_ws": "ws005",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/150",
+      "source": "plan/ws005/phase009/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws005-p010": {
+      "parent_ws": "ws005",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/151",
+      "source": "plan/ws005/phase010/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws005-p011": {
+      "parent_ws": "ws005",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/152",
+      "source": "plan/ws005/phase011/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws005-p012": {
+      "parent_ws": "ws005",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/153",
+      "source": "plan/ws005/phase012/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws006-p001": {
+      "parent_ws": "ws006",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/154",
+      "source": "plan/ws006/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws006-p002": {
+      "parent_ws": "ws006",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/155",
+      "source": "plan/ws006/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws006-p003": {
+      "parent_ws": "ws006",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/156",
+      "source": "plan/ws006/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws006-p004": {
+      "parent_ws": "ws006",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/157",
+      "source": "plan/ws006/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws006-p005": {
+      "parent_ws": "ws006",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/158",
+      "source": "plan/ws006/phase005/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws006-p006": {
+      "parent_ws": "ws006",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/159",
+      "source": "plan/ws006/phase006/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws006-p007": {
+      "parent_ws": "ws006",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/160",
+      "source": "plan/ws006/phase007/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws006-p008": {
+      "parent_ws": "ws006",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/161",
+      "source": "plan/ws006/phase008/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws006-p009": {
+      "parent_ws": "ws006",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/162",
+      "source": "plan/ws006/phase009/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws006-p010": {
+      "parent_ws": "ws006",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/163",
+      "source": "plan/ws006/phase010/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws006-p011": {
+      "parent_ws": "ws006",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/164",
+      "source": "plan/ws006/phase011/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws007-p001": {
+      "parent_ws": "ws007",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/165",
+      "source": "plan/ws007/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws007-p002": {
+      "parent_ws": "ws007",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/166",
+      "source": "plan/ws007/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws007-p003": {
+      "parent_ws": "ws007",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/167",
+      "source": "plan/ws007/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws007-p004": {
+      "parent_ws": "ws007",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/168",
+      "source": "plan/ws007/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws008-p001": {
+      "parent_ws": "ws008",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/169",
+      "source": "plan/ws008/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws008-p002": {
+      "parent_ws": "ws008",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/170",
+      "source": "plan/ws008/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws008-p003": {
+      "parent_ws": "ws008",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/171",
+      "source": "plan/ws008/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws008-p004": {
+      "parent_ws": "ws008",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/172",
+      "source": "plan/ws008/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws008-p005": {
+      "parent_ws": "ws008",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/173",
+      "source": "plan/ws008/phase005/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws008-p006": {
+      "parent_ws": "ws008",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/174",
+      "source": "plan/ws008/phase006/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws008-p007": {
+      "parent_ws": "ws008",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/175",
+      "source": "plan/ws008/phase007/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws008-p008": {
+      "parent_ws": "ws008",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/176",
+      "source": "plan/ws008/phase008/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws008-p009": {
+      "parent_ws": "ws008",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/177",
+      "source": "plan/ws008/phase009/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws008-p010": {
+      "parent_ws": "ws008",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/178",
+      "source": "plan/ws008/phase010/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws009-p001": {
+      "parent_ws": "ws009",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/179",
+      "source": "plan/ws009/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws009-p002": {
+      "parent_ws": "ws009",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/180",
+      "source": "plan/ws009/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws009-p003": {
+      "parent_ws": "ws009",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/181",
+      "source": "plan/ws009/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws009-p004": {
+      "parent_ws": "ws009",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/182",
+      "source": "plan/ws009/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws009-p005": {
+      "parent_ws": "ws009",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/183",
+      "source": "plan/ws009/phase005/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws009-p006": {
+      "parent_ws": "ws009",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/184",
+      "source": "plan/ws009/phase006/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws009-p007": {
+      "parent_ws": "ws009",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/185",
+      "source": "plan/ws009/phase007/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws009-p008": {
+      "parent_ws": "ws009",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/186",
+      "source": "plan/ws009/phase008/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws010-p001": {
+      "parent_ws": "ws010",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/187",
+      "source": "plan/ws010/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws010-p002": {
+      "parent_ws": "ws010",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/188",
+      "source": "plan/ws010/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws010-p003": {
+      "parent_ws": "ws010",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/189",
+      "source": "plan/ws010/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws010-p004": {
+      "parent_ws": "ws010",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/190",
+      "source": "plan/ws010/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws010-p005": {
+      "parent_ws": "ws010",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/191",
+      "source": "plan/ws010/phase005/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws011-p001": {
+      "parent_ws": "ws011",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/192",
+      "source": "plan/ws011/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws011-p002": {
+      "parent_ws": "ws011",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/193",
+      "source": "plan/ws011/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws011-p003": {
+      "parent_ws": "ws011",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/194",
+      "source": "plan/ws011/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws011-p004": {
+      "parent_ws": "ws011",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/195",
+      "source": "plan/ws011/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws011-p005": {
+      "parent_ws": "ws011",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/196",
+      "source": "plan/ws011/phase005/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws011-p006": {
+      "parent_ws": "ws011",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/197",
+      "source": "plan/ws011/phase006/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws011-p007": {
+      "parent_ws": "ws011",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/198",
+      "source": "plan/ws011/phase007/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws011-p008": {
+      "parent_ws": "ws011",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/199",
+      "source": "plan/ws011/phase008/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws011-p009": {
+      "parent_ws": "ws011",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/200",
+      "source": "plan/ws011/phase009/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws012-p001": {
+      "parent_ws": "ws012",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/201",
+      "source": "plan/ws012/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws012-p002": {
+      "parent_ws": "ws012",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/202",
+      "source": "plan/ws012/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws012-p003": {
+      "parent_ws": "ws012",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/203",
+      "source": "plan/ws012/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws012-p004": {
+      "parent_ws": "ws012",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/204",
+      "source": "plan/ws012/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws012-p005": {
+      "parent_ws": "ws012",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/205",
+      "source": "plan/ws012/phase005/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws012-p006": {
+      "parent_ws": "ws012",
+      "milestones": [
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/206",
+      "source": "plan/ws012/phase006/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws013-p001": {
+      "parent_ws": "ws013",
+      "milestones": [
+        "MG007"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/207",
+      "source": "plan/ws013/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws013-p002": {
+      "parent_ws": "ws013",
+      "milestones": [
+        "MG007"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/208",
+      "source": "plan/ws013/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws013-p003": {
+      "parent_ws": "ws013",
+      "milestones": [
+        "MG007"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/209",
+      "source": "plan/ws013/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws013-p004": {
+      "parent_ws": "ws013",
+      "milestones": [
+        "MG007"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/210",
+      "source": "plan/ws013/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws013-p005": {
+      "parent_ws": "ws013",
+      "milestones": [
+        "MG007"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/211",
+      "source": "plan/ws013/phase005/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws013-p006": {
+      "parent_ws": "ws013",
+      "milestones": [
+        "MG007"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/212",
+      "source": "plan/ws013/phase006/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws014-p001": {
+      "parent_ws": "ws014",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/213",
+      "source": "plan/ws014/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws015-p001": {
+      "parent_ws": "ws015",
+      "milestones": [
+        "MG007"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/214",
+      "source": "plan/ws015/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws016-p001": {
+      "parent_ws": "ws016",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/215",
+      "source": "plan/ws016/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws016-p002": {
+      "parent_ws": "ws016",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/216",
+      "source": "plan/ws016/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws016-p003": {
+      "parent_ws": "ws016",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/217",
+      "source": "plan/ws016/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws016-p004": {
+      "parent_ws": "ws016",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/218",
+      "source": "plan/ws016/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws017-p001": {
+      "parent_ws": "ws017",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/219",
+      "source": "plan/ws017/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws017-p002": {
+      "parent_ws": "ws017",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/220",
+      "source": "plan/ws017/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws017-p003": {
+      "parent_ws": "ws017",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/221",
+      "source": "plan/ws017/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws017-p004": {
+      "parent_ws": "ws017",
+      "milestones": [
+        "MG006"
+      ],
+      "objectives": [
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/222",
+      "source": "plan/ws017/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p001": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/223",
+      "source": "plan/ws018/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p002": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/224",
+      "source": "plan/ws018/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p003": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/225",
+      "source": "plan/ws018/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p004": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/226",
+      "source": "plan/ws018/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p005": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/227",
+      "source": "plan/ws018/phase005/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p006": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/228",
+      "source": "plan/ws018/phase006/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p007": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/229",
+      "source": "plan/ws018/phase007/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p008": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/230",
+      "source": "plan/ws018/phase008/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p009": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/231",
+      "source": "plan/ws018/phase009/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p010": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/232",
+      "source": "plan/ws018/phase010/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p011": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/233",
+      "source": "plan/ws018/phase011/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p012": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/234",
+      "source": "plan/ws018/phase012/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p013": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/235",
+      "source": "plan/ws018/phase013/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p014": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/236",
+      "source": "plan/ws018/phase014/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p015": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/237",
+      "source": "plan/ws018/phase015/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p016": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/238",
+      "source": "plan/ws018/phase016/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p017": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/239",
+      "source": "plan/ws018/phase017/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p018": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/240",
+      "source": "plan/ws018/phase018/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p019": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/241",
+      "source": "plan/ws018/phase019/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws018-p020": {
+      "parent_ws": "ws018",
+      "milestones": [
+        "MG008"
+      ],
+      "objectives": [
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/242",
+      "source": "plan/ws018/phase020/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p001": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/243",
+      "source": "plan/ws019/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p002": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/244",
+      "source": "plan/ws019/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p003": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/245",
+      "source": "plan/ws019/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p004": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/246",
+      "source": "plan/ws019/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p005": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/247",
+      "source": "plan/ws019/phase005/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p006": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/248",
+      "source": "plan/ws019/phase006/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p007": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/249",
+      "source": "plan/ws019/phase007/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p008": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/250",
+      "source": "plan/ws019/phase008/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p009": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/251",
+      "source": "plan/ws019/phase009/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p010": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/252",
+      "source": "plan/ws019/phase010/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p011": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/253",
+      "source": "plan/ws019/phase011/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p012": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/254",
+      "source": "plan/ws019/phase012/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p013": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/255",
+      "source": "plan/ws019/phase013/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p014": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/256",
+      "source": "plan/ws019/phase014/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p015": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/257",
+      "source": "plan/ws019/phase015/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p016": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/258",
+      "source": "plan/ws019/phase016/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p017": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/259",
+      "source": "plan/ws019/phase017/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p018": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/260",
+      "source": "plan/ws019/phase018/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p019": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/261",
+      "source": "plan/ws019/phase019/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p020": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/262",
+      "source": "plan/ws019/phase020/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p021": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/263",
+      "source": "plan/ws019/phase021/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p022": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/264",
+      "source": "plan/ws019/phase022/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p023": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/265",
+      "source": "plan/ws019/phase023/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p024": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/266",
+      "source": "plan/ws019/phase024/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p025": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/267",
+      "source": "plan/ws019/phase025/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p026": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/268",
+      "source": "plan/ws019/phase026/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p027": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/269",
+      "source": "plan/ws019/phase027/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p028": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/270",
+      "source": "plan/ws019/phase028/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p029": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/271",
+      "source": "plan/ws019/phase029/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p030": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/272",
+      "source": "plan/ws019/phase030/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p031": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/273",
+      "source": "plan/ws019/phase031/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p032": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/274",
+      "source": "plan/ws019/phase032/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p033": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/275",
+      "source": "plan/ws019/phase033/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p034": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/276",
+      "source": "plan/ws019/phase034/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p035": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/277",
+      "source": "plan/ws019/phase035/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p036": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/278",
+      "source": "plan/ws019/phase036/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p037": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/279",
+      "source": "plan/ws019/phase037/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p038": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/280",
+      "source": "plan/ws019/phase038/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p039": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/281",
+      "source": "plan/ws019/phase039/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p040": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/282",
+      "source": "plan/ws019/phase040/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p041": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/283",
+      "source": "plan/ws019/phase041/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p042": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/284",
+      "source": "plan/ws019/phase042/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p043": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/285",
+      "source": "plan/ws019/phase043/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p044": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/286",
+      "source": "plan/ws019/phase044/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p045": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/287",
+      "source": "plan/ws019/phase045/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p046": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/288",
+      "source": "plan/ws019/phase046/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p047": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/289",
+      "source": "plan/ws019/phase047/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p048": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/290",
+      "source": "plan/ws019/phase048/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p049": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/291",
+      "source": "plan/ws019/phase049/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws019-p050": {
+      "parent_ws": "ws019",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/292",
+      "source": "plan/ws019/phase050/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws020-p001": {
+      "parent_ws": "ws020",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/293",
+      "source": "plan/ws020/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws020-p002": {
+      "parent_ws": "ws020",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/294",
+      "source": "plan/ws020/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws020-p003": {
+      "parent_ws": "ws020",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/295",
+      "source": "plan/ws020/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws020-p004": {
+      "parent_ws": "ws020",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/296",
+      "source": "plan/ws020/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws020-p005": {
+      "parent_ws": "ws020",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/297",
+      "source": "plan/ws020/phase005/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws020-p006": {
+      "parent_ws": "ws020",
+      "milestones": [
+        "MG003"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/298",
+      "source": "plan/ws020/phase006/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws021-p001": {
+      "parent_ws": "ws021",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/299",
+      "source": "plan/ws021/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws021-p002": {
+      "parent_ws": "ws021",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/300",
+      "source": "plan/ws021/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws021-p003": {
+      "parent_ws": "ws021",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/301",
+      "source": "plan/ws021/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws021-p004": {
+      "parent_ws": "ws021",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/302",
+      "source": "plan/ws021/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws021-p005": {
+      "parent_ws": "ws021",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/303",
+      "source": "plan/ws021/phase005/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws021-p006": {
+      "parent_ws": "ws021",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/304",
+      "source": "plan/ws021/phase006/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws021-p007": {
+      "parent_ws": "ws021",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/305",
+      "source": "plan/ws021/phase007/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws022-p001": {
+      "parent_ws": "ws022",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/306",
+      "source": "plan/ws022/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws022-p002": {
+      "parent_ws": "ws022",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/307",
+      "source": "plan/ws022/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws022-p003": {
+      "parent_ws": "ws022",
+      "milestones": [
+        "MG002"
+      ],
+      "objectives": [
+        "O1"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/308",
+      "source": "plan/ws022/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws023-p001": {
+      "parent_ws": "ws023",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/309",
+      "source": "plan/ws023/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws023-p002": {
+      "parent_ws": "ws023",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/310",
+      "source": "plan/ws023/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws023-p003": {
+      "parent_ws": "ws023",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/311",
+      "source": "plan/ws023/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws023-p004": {
+      "parent_ws": "ws023",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/312",
+      "source": "plan/ws023/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws023-p005": {
+      "parent_ws": "ws023",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/313",
+      "source": "plan/ws023/phase005/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws023-p006": {
+      "parent_ws": "ws023",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/314",
+      "source": "plan/ws023/phase006/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws023-p007": {
+      "parent_ws": "ws023",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/315",
+      "source": "plan/ws023/phase007/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws023-p008": {
+      "parent_ws": "ws023",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/316",
+      "source": "plan/ws023/phase008/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws023-p009": {
+      "parent_ws": "ws023",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/317",
+      "source": "plan/ws023/phase009/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws023-p010": {
+      "parent_ws": "ws023",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/318",
+      "source": "plan/ws023/phase010/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws023-p011": {
+      "parent_ws": "ws023",
+      "milestones": [
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/319",
+      "source": "plan/ws023/phase011/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws024-p001": {
+      "parent_ws": "ws024",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/320",
+      "source": "plan/ws024/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws024-p002": {
+      "parent_ws": "ws024",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/321",
+      "source": "plan/ws024/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws024-p003": {
+      "parent_ws": "ws024",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/322",
+      "source": "plan/ws024/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws024-p004": {
+      "parent_ws": "ws024",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/323",
+      "source": "plan/ws024/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p001": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/324",
+      "source": "plan/ws025/phase001/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p002": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/325",
+      "source": "plan/ws025/phase002/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p003": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/326",
+      "source": "plan/ws025/phase003/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p004": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/327",
+      "source": "plan/ws025/phase004/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p005": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/328",
+      "source": "plan/ws025/phase005/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p006": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/329",
+      "source": "plan/ws025/phase006/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p007": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/330",
+      "source": "plan/ws025/phase007/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p008": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/331",
+      "source": "plan/ws025/phase008/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p009": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/332",
+      "source": "plan/ws025/phase009/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p010": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/333",
+      "source": "plan/ws025/phase010/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p011": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/334",
+      "source": "plan/ws025/phase011/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p012": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/335",
+      "source": "plan/ws025/phase012/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p013": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/336",
+      "source": "plan/ws025/phase013/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p014": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/337",
+      "source": "plan/ws025/phase014/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p015": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/338",
+      "source": "plan/ws025/phase015/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p016": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/339",
+      "source": "plan/ws025/phase016/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p017": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/340",
+      "source": "plan/ws025/phase017/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p018": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/341",
+      "source": "plan/ws025/phase018/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p019": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/342",
+      "source": "plan/ws025/phase019/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p020": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/343",
+      "source": "plan/ws025/phase020/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p021": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/344",
+      "source": "plan/ws025/phase021/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p022": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/345",
+      "source": "plan/ws025/phase022/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p023": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/346",
+      "source": "plan/ws025/phase023/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p024": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/347",
+      "source": "plan/ws025/phase024/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p025": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/348",
+      "source": "plan/ws025/phase025/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p026": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/349",
+      "source": "plan/ws025/phase026/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p027": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/350",
+      "source": "plan/ws025/phase027/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p028": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/351",
+      "source": "plan/ws025/phase028/phase.md",
+      "evidence_eligible": false
+    },
+    "ws025-p029": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/352",
+      "source": "plan/ws025/phase029/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p030": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004",
+        "MG005"
+      ],
+      "objectives": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/353",
+      "source": "plan/ws025/phase030/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p031": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/354",
+      "source": "plan/ws025/phase031/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p032": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG003",
+        "MG008"
+      ],
+      "objectives": [
+        "O2",
+        "O4"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/355",
+      "source": "plan/ws025/phase032/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p033": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/356",
+      "source": "plan/ws025/phase033/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p034": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/357",
+      "source": "plan/ws025/phase034/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p035": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/358",
+      "source": "plan/ws025/phase035/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p036": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/359",
+      "source": "plan/ws025/phase036/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p037": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG004"
+      ],
+      "objectives": [
+        "O1",
+        "O2"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/360",
+      "source": "plan/ws025/phase037/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    },
+    "ws025-p038": {
+      "parent_ws": "ws025",
+      "milestones": [
+        "MG008",
+        "MG001"
+      ],
+      "objectives": [
+        "O4",
+        "O5"
+      ],
+      "issue": "https://github.com/awemorris/zedBSD/issues/361",
+      "source": "plan/ws025/phase038/phase.md",
+      "evidence_eligible": "requires current Phase evidence review"
+    }
+  }
+}

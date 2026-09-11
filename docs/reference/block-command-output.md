@@ -82,5 +82,5 @@ command. Invocation errors return 2; observation/output errors return 1.
 Successful `df` does not reserve space or guarantee that a later allocation
 succeeds. An installer must separately account for cluster rounding, directory
 growth, concurrent changes and staging errors. [df source](../../userland/base/df/main.c)
-and [q151 checks](../../plan/ws019-installation/phase020-df-capacity/results.md)
+and [q151 checks](../../plan/ws019/phase020/results.md)
 cover arithmetic and complete-error reporting.

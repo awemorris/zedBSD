@@ -209,19 +209,19 @@ maintain policy. Routine administration should use `net wifi`.
 
 | Contract | Production source | Executable evidence |
 | --- | --- | --- |
-| Public grammar and local `set-key` dispatch | [`userland/base/net/main.c`](../../userland/base/net/main.c) | [NET-T21 and NET-T30](../../plan/ws005-networking/tests/README.md) |
-| Profile grammar, limits, validation, and wiping | [`wifi-conf.c`](../../userland/base/net/wifi-conf.c), [`wifi-conf.h`](../../userland/base/net/wifi-conf.h) | [wifi-conf/store runners](../../plan/ws005-networking/tests/README.md) |
-| UID-derived secure publication | [`wifi-store.c`](../../userland/base/net/wifi-store.c) | [NET-T21 native and reboot evidence](../../plan/ws005-networking/phase005-wifi-credential-store/phase.md) |
-| Authenticated socket and global orchestration | [`networkd/main.c`](../../userland/base/networkd/main.c), [`protocol.h`](../../userland/base/net/protocol.h) | [NET-T20, NET-T22, NET-T30](../../plan/ws005-networking/tests/README.md) |
-| Managed states and link-loss recovery | [`managed-wlan.c`](../../userland/base/networkd/managed-wlan.c), [`route.h`](../../include/uapi/zedbsd/route.h) | [NET-T36](../../plan/ws005-networking/tests/README.md) |
-| Finite L2 primitive and secret descriptor | [`wifi/main.c`](../../userland/base/wifi/main.c), [`wifi-child.c`](../../userland/base/networkd/wifi-child.c) | [NET-T23, NET-T24, NET-T35](../../plan/ws005-networking/tests/README.md) |
+| Public grammar and local `set-key` dispatch | [`userland/base/net/main.c`](../../userland/base/net/main.c) | [NET-T21 and NET-T30](../../plan/ws005/tests/README.md) |
+| Profile grammar, limits, validation, and wiping | [`wifi-conf.c`](../../userland/base/net/wifi-conf.c), [`wifi-conf.h`](../../userland/base/net/wifi-conf.h) | [wifi-conf/store runners](../../plan/ws005/tests/README.md) |
+| UID-derived secure publication | [`wifi-store.c`](../../userland/base/net/wifi-store.c) | [NET-T21 native and reboot evidence](../../plan/ws005/phase005/phase.md) |
+| Authenticated socket and global orchestration | [`networkd/main.c`](../../userland/base/networkd/main.c), [`protocol.h`](../../userland/base/net/protocol.h) | [NET-T20, NET-T22, NET-T30](../../plan/ws005/tests/README.md) |
+| Managed states and link-loss recovery | [`managed-wlan.c`](../../userland/base/networkd/managed-wlan.c), [`route.h`](../../include/uapi/zedbsd/route.h) | [NET-T36](../../plan/ws005/tests/README.md) |
+| Finite L2 primitive and secret descriptor | [`wifi/main.c`](../../userland/base/wifi/main.c), [`wifi-child.c`](../../userland/base/networkd/wifi-child.c) | [NET-T23, NET-T24, NET-T35](../../plan/ws005/tests/README.md) |
 
 The automatic protocol, credential, orchestration, lifecycle, build, and QEMU
 gates passed in q071. The project owner also accepted the consolidated
 RTL8822BU physical WLAN result on 2026-09-05. See the [completed Queue
-record](../../plan/queue-q071.md) and [WS005 result](../../plan/ws005-networking/ws.md).
+record](../../plan/history/queue-q071.md) and [WS005 result](../../plan/ws005/ws.md).
 
-The later [multi-radio q124 results](../../plan/ws025-io-memory-cache/phase035-multi-radio-selection/results.md)
+The later [multi-radio q124 results](../../plan/ws025/phase035/results.md)
 cover 36 host scenarios plus physical AX211/RTL8822BU attached to QEMU,
 enable-before-set-key, key-first, repeated enable and cancellation. One measured
 RTL selection reached OFFER in 6.524 seconds and IPv4 in 9.152 seconds; an

@@ -7,3 +7,6 @@ __pycache__/
 *~
 .internal/
 plan/ws*/temp/
+
+# Awesome Plan local cache, write-back journal and conflicts
+/plan/.sync/

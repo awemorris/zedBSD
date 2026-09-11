@@ -36,7 +36,7 @@ identities. A selector establishes origin; it does not freeze file contents,
 claim an installation destination or prove that removable media has remained
 attached. These remain separate installer checks.
 
-[WS019-p016](../../plan/ws019-installation/phase016-boot-source-provenance/phase.md)
+[WS019-p016](../../plan/ws019/phase016/phase.md)
 owns acceptance evidence.
 
 ## Live root-image observation
@@ -56,5 +56,5 @@ and compares device, inode and size, alongside the retained physical provenance
 above. A file with that name merely existing is insufficient. Recheck the live
 record and source identity after interaction before committing changes.
 
-[WS019-p027](../../plan/ws019-installation/phase027-installation-source-selection/phase.md)
+[WS019-p027](../../plan/ws019/phase027/phase.md)
 owns the private-root positive and native-root refusal acceptance.

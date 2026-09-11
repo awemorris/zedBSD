@@ -103,11 +103,11 @@ provide confirmed-commit semantics.
 
 | Contract | Production source | Executable evidence |
 | --- | --- | --- |
-| Console grammar and transaction ordering | [`net/main.c`](../../userland/base/net/main.c) | [`confirmed-commit-test.sh`](../../plan/ws011-net-config/tests/confirmed-commit-test.sh), [`net-console-test.sh`](../../plan/ws011-net-config/tests/net-console-test.sh) |
-| Complete wired reconcile and rollback generation | [`reconcile.c`](../../userland/base/net/reconcile.c) | [`netconf-reconcile-test.c`](../../plan/ws011-net-config/tests/netconf-reconcile-test.c) |
-| Atomic persistence and writer lock | [`netconf.c`](../../userland/base/net/netconf.c) | [`netconf-persistence-test.c`](../../plan/ws011-net-config/tests/netconf-persistence-test.c) |
-| Volatile timer, secure program ownership, and bounded rollback | [`confirmed.c`](../../userland/base/networkd/confirmed.c), [`networkd/main.c`](../../userland/base/networkd/main.c) | [`confirmed-commit-model-test.c`](../../plan/ws011-net-config/tests/confirmed-commit-model-test.c) |
-| Private ZNV2 fields and bounds | [`protocol.h`](../../userland/base/net/protocol.h) | [`networkd-protocol-test.c`](../../plan/ws005-networking/tests/networkd-protocol-test.c) |
+| Console grammar and transaction ordering | [`net/main.c`](../../userland/base/net/main.c) | [`confirmed-commit-test.sh`](../../plan/ws011/tests/confirmed-commit-test.sh), [`net-console-test.sh`](../../plan/ws011/tests/net-console-test.sh) |
+| Complete wired reconcile and rollback generation | [`reconcile.c`](../../userland/base/net/reconcile.c) | [`netconf-reconcile-test.c`](../../plan/ws011/tests/netconf-reconcile-test.c) |
+| Atomic persistence and writer lock | [`netconf.c`](../../userland/base/net/netconf.c) | [`netconf-persistence-test.c`](../../plan/ws011/tests/netconf-persistence-test.c) |
+| Volatile timer, secure program ownership, and bounded rollback | [`confirmed.c`](../../userland/base/networkd/confirmed.c), [`networkd/main.c`](../../userland/base/networkd/main.c) | [`confirmed-commit-model-test.c`](../../plan/ws011/tests/confirmed-commit-model-test.c) |
+| Private ZNV2 fields and bounds | [`protocol.h`](../../userland/base/net/protocol.h) | [`networkd-protocol-test.c`](../../plan/ws005/tests/networkd-protocol-test.c) |
 
 The private rollback language and `ZNV2` messages are implementation contracts,
 not public administration interfaces. QEMU timeout recovery and confirmed

@@ -66,7 +66,7 @@ make help              # show a short command summary
 ## Standards status
 
 The implemented POSIX/SUS surface and known limitations are tracked by
-[WS001](plan/ws001-posix/ws.md). Focused acceptance evidence is owned by each
+[WS001](plan/ws001/ws.md). Focused acceptance evidence is owned by each
 workstream under `plan/wsXXX-*/tests/`; `make check` is not the project
 acceptance interface.
 

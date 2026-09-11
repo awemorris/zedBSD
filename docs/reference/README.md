@@ -5,7 +5,7 @@ Status: current navigation index
 Reference documents define stable or explicitly experimental commands,
 configuration formats, headers, structures, constants, errors, and
 permissions. Every compatibility claim must point to implementation and test
-evidence; POSIX claims must agree with [WS001](../../plan/ws001-posix/ws.md).
+evidence; POSIX claims must agree with [WS001](../../plan/ws001/ws.md).
 
 - [C interfaces and compatibility profile](compatibility-profile.md): feature
   selectors, ABI boundaries and conformance limits.

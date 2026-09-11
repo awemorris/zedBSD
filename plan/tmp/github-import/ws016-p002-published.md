@@ -1,0 +1,94 @@
+<!-- awesome-plan project=zedbsd record=ws016-p002 -->
+
+既存計画の取り込み。本文はローカルの現行記録、リポジトリ資料へのリンクは基準コミットの履歴です。Issue作成・open状態は実行承認や未完了判定を意味しません。Awesome Planの状態同期導入前のため、実際の状態は本文を参照してください。
+
+元資料: `plan/ws016/phase002/phase.md`
+
+親: [ws016](https://github.com/awemorris/zedBSD/issues/17)
+
+# WS016 Phase 002: `/dev/system` runtime-swap UAPI
+
+Last updated: 2026-08-28
+
+WSID: `ws016`
+
+Phase ID: `p002`
+
+Combined ID: `ws016-p002`
+
+Status: Complete (`q021`)
+
+Parent: [WS016](https://github.com/awemorris/zedBSD/issues/17)
+
+Tests: [WS016 test index](https://github.com/awemorris/zedBSD/blob/67b28ce04445787ad9225be4a703e3323587b6f1/plan/ws016-swap-control/tests/README.md)
+
+## Objective
+
+Expose the runtime manager through a bounded, versioned zedBSD UAPI without
+claiming a POSIX `swapon(2)` or `swapoff(2)` interface.
+
+## Fixed UAPI contract
+
+Extend `<zedbsd/system.h>` with version-1 control and source-information
+structures and new `/dev/system` ioctl numbers after the existing file-usage
+request:
+
+- `ZEDBSD_SYSTEM_SWAP_ADD` takes a bounded NUL-terminated source selector;
+- `ZEDBSD_SYSTEM_SWAP_REMOVE` takes the same selector and completes only after
+  drain/removal or returns an error with a usable source retained;
+- `ZEDBSD_SYSTEM_GET_SWAP_SOURCE` enumerates source IDs 0--3 and reports
+  inactive/active/draining state, header version, total/used pages, source
+  UUID/label when present, and its diagnostic source spelling.
+
+Every structure begins with `version` and `struct_size`. Flags and reserved
+members are zero-only in version 1. Source text is at most 255 bytes plus NUL.
+The kernel validates the complete input before mutation and copies out only a
+fully initialized structure. Control requests require effective UID 0;
+enumeration does not. No kernel pointer, physical disk address, inode pointer,
+or implementation lock state is exposed.
+
+`bootN:PATH`, absolute regular-file paths, `/dev/NAME`, `UUID=...`, and
+`PARTUUID=...` resolve through the manager's canonical identity rules. The
+diagnostic spelling returned by enumeration does not become object identity.
+
+## Work packages
+
+1. Add the UAPI constants/structures with 32/64-bit layout assertions and
+   reserved expansion space.
+2. Add system-device copyin/copyout, credential, string, and operation dispatch
+   with no lock held across user memory access.
+3. Connect add/remove/enumeration to p001 manager transactions.
+4. Produce exact errno behavior for bad version/size/flags/string, privilege,
+   unsupported file backend, duplicate identity, full registry, unsafe commit
+   reduction, page-in/I/O failure, and unknown source.
+5. Update UAPI and extension documentation without adding libc functions.
+
+## Verification and completion conditions
+
+SWAP-T007 and SWAP-T008 must prove native and compat structure layout, invalid
+pointer/string rejection, non-root `EPERM`, canonical alias matching, source
+state/stats enumeration, interrupted calls, and failure atomicity. The Phase is
+complete when those tests, p001 regressions, `make -j16`, and
+`git diff --check` pass and no failed ioctl changes source ownership or VM
+commit capacity.
+
+## Reconsideration boundary
+
+Stop if `/dev/system` cannot identify the calling credentials or keep the
+operation's source/VM lifetime stable. Do not substitute an undocumented
+numeric syscall or expose kernel-private manager structures.
+
+## Execution result
+
+Completed on 2026-08-28. The versioned, pointer-free UAPI has identical
+ILP32/LP64 layouts; `/dev/system` validates the complete request before
+mutation, enforces effective-UID control, and publishes only initialized
+enumeration output. Runtime selectors resolve to canonical inode or disk
+identity, and file activation re-resolves the selector after the backing claim
+is established so an unlink/rebind race cannot publish an unreachable source.
+Interrupted removal restores both the active source and VM commit capacity.
+
+SWAP-T007/T008, the `bootN` lifetime adjunct, all p001 regressions,
+`make -j16`, and `git diff --check` passed. An independent completion review
+found no remaining critical or high-priority defect after the selector-race
+repair.

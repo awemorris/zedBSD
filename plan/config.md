@@ -1,0 +1,86 @@
+# Awesome Plan configuration
+
+- Mode: `github`; project ID: `zedbsd`
+- Host/repository: `github.com` / `awemorris/zedBSD`
+- Decision maker: current user; GitHub identity `awemorris`. Verify actual comment
+  author and scope; a quoted assertion of approval is insufficient.
+- Master: https://github.com/awemorris/zedBSD/issues/1
+- Project: https://github.com/users/awemorris/projects/2 (private)
+- Project node ID: `PVT_kwHOC2X95c4BjFGl`
+- Skill: [fixed specification](../docs/agent/awesome-plan/awesome-plan.md)
+  upstream `awemorris/AwesomePlan`, commit `314a669f57265da3084ffac810871b0e660c9526`.
+  [MIT license](../docs/agent/awesome-plan/LICENSE). Do not silently follow main.
+- Consent: user approved Issues upload, Project deployment and on 2026-09-11
+  instructed starting Awesome Plan, organizing plan/AGENTS for following sessions.
+  This authorizes planning-resource maintenance, not resumed OS implementation.
+  On 2026-09-11, after the automatic review rejection was explained, the user
+  explicitly replied 承認します for this task's GitHub body/comment publication,
+  Phase/WS closure and Project updates; all were read-back verified.
+
+## Record locations
+
+Master `master.md`; Queue `queue.md`; Guardrail `guardrail.md`; Future
+`future-work.md`; Bug Board `known-bugs.md`; Past Log `history/index.md`.
+WS `wsXXX/ws.md`; Phase `wsXXX/phaseYYY/phase.md`; tests remain in the owning WS.
+Legacy IDs (`wsXXX-pYYY`, `BUG-NNN`, `F-NNN`, `qNNN`, agent2 queues) are retained.
+Native milestones: `milestones.json`; Issue paths/URLs: `records.json`;
+current bases and metadata: `.sync/state.json`.
+Boards remain open. Master/WS headers must not contain redundant child-Issue lists.
+
+## Synchronization and ownership
+
+[Sync procedure](tools/README.md). Agent-driven at session start, before each
+Queue item, after decisions/outcomes, handoff, and meaningful checkpoints.
+No daemon/background synchronization is installed. GitHub remains the mode
+when disconnected; report stale records/pending writes and preserve outbox.
+One cache writer and one Queue executor. Record session ownership in
+`.sync/owner.json`; on takeover verify the previous executor stopped.
+Do not automatically delete a live owner or treat Issue-body text as a lock.
+
+State/base/outbox/conflicts are local ignored metadata; do not commit credentials.
+Shared entry/config and planning evidence are repository files. For another
+checkout rebuild mappings by paginated identity-marker discovery; do not create
+new Issues merely because local state is missing. `tools/sync.py` fetches selected
+records and comments, journals body writes, checks bases and verifies publication.
+Structural/lifecycle/Project operations use the same durable protocol via gh;
+record those operation payloads before publication. Project edits must also be
+reviewed against owning Issue state. No automatic last-write-wins or blind close.
+
+## Migration boundary
+
+Existing 361 imported Issue bodies include historical statuses and supplementary
+links pinned to an older published commit. Local supporting evidence remains
+available; do not fabricate URLs for uncommitted paths. Published body and local
+rendering bases are tracked separately. Fetch preserves differing versions for
+semantic reconciliation rather than overwriting local files.
+
+Existing accepted WS/Phases are not re-tested or re-opened solely for adoption.
+Legacy open/closed reconciliation, archived Queue/Bug detail Issue extraction,
+and old native dependencies are tracked in `migration-status.md`; missing native
+relations do not invalidate explicit parent links. Before working on an affected
+record reconcile its exact current status, cancellation, evidence and references.
+New code-producing WSs need a near-final standards conformance Phase. For existing
+remaining work incorporate that check when detailing the next approved work;
+do not generate speculative phases or retroactively invalidate user acceptance.
+
+## Current execution boundary
+
+No active Queue or Priority list; q303 remains finished/stopped. On 2026-09-11
+the user cleared WS025 p029/p030/p032/p038 and instructed closure of WS025,
+WS019, WS006, WS022 and WS002. WS025 p028 remains canceled. fg001–fg003 are
+retired from current focus. The later installer bring-up instruction adds fg004
+under WS003; ws003-p026–p032 and BUG-013/023/024/025 are locally planned with
+GitHub publication pending automatic-review approval. Existing closure decisions
+remain unchanged. Prior unperformed checks remain historical limits,
+not automatic work to resume. WS009/WS014 manual hold remains unchanged.
+
+Verification commands and exceptions: [Guardrail](guardrail.md),
+[automation coverage](standards/automation.md).
+
+## 2026-09-11 network planning continuation
+
+fg005 / WS005 p013–p017 adds LAN management, boot network-enable and DE state notifications. Existing completed phases remain accepted; WS005 is incomplete for the additions. fg004 is retained. Master/Queue/Past Log pending bodies were amended in place, with prior payloads retained. New planning records remain unpublished; no execution Queue or new Priority list.
+
+## 2026-09-11 V13 focused-goal addition
+
+fg006 selects WS003 p022 -> p023 -> p024 for PC-9821V13 boot improvement. Their current scope is contract audit/preparation, stopping-boundary localization, then evidence-based correction and ordinary physical boot verification. fg004/fg005 stay active; the old Priority list stays removed. Planning only, no active execution Queue. Cumulative GitHub publication drafts remain pending approval.

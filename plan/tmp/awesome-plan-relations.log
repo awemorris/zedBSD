@@ -1,0 +1,15 @@
+relations 20 / 720
+relations 40 / 720
+relations 60 / 720
+relations 80 / 720
+relations 100 / 720
+relations 120 / 720
+Traceback (most recent call last):
+  File "/home/awe/zedBSD/plan/tools/adopt-relations.py", line 34, in <module>
+    gql(q);op['status']='confirmed';s.write(p,op);print('relations',min(off+20,len(operations)),'/',len(operations),flush=True);time.sleep(1)
+    ~~~^^^
+  File "/home/awe/zedBSD/plan/tools/adopt-relations.py", line 6, in gql
+    x=s.api('graphql','POST',{'query':q})
+  File "/home/awe/zedBSD/plan/tools/sync.py", line 34, in api
+    raise RuntimeError(result.stderr.strip())
+RuntimeError: gh: We couldn't respond to your request in time. Sorry about that. Please try resubmitting your request and contact us if the problem persists. (HTTP 504)

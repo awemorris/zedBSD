@@ -136,13 +136,13 @@ image paths and therefore does not replace `config.mk` or the ordinary output:
 
 ```sh
 build/NoctLang/build-static/noct --path=tools/build \
-  plan/ws020-intel-mac/tests/qemu-variant-matrix.noct \
-  . plan/ws020-intel-mac/temp/p003-qemu
+  plan/ws020/tests/qemu-variant-matrix.noct \
+  . plan/ws020/temp/p003-qemu
 ```
 
 It requires the locally documented SeaBIOS and OVMF firmware files and verifies
 all three profiles against both firmware families. See the
-[WS020 test index](../../plan/ws020-intel-mac/tests/README.md) before running
+[WS020 test index](../../plan/ws020/tests/README.md) before running
 this longer acceptance matrix.
 
 The maintained x86 output directories are:

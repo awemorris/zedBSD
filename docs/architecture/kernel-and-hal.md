@@ -53,7 +53,7 @@ zedBSD image profile; it does not certify other systems' UFS variants.
 Current NVMe supports bounded concurrent commands (default depth four).
 A syscall, a BIO and a hardware command are different transfer units: reducing
 syscall splitting does not imply one hardware command or one durability flush.
-[WS025](../../plan/ws025-io-memory-cache/ws.md) retains direct user-page I/O,
+[WS025](../../plan/ws025/ws.md) retains direct user-page I/O,
 the UAS transport and performance measurement as unfinished work. A UAS
 descriptor decoder exists; it is not an operational storage transport.
 
@@ -68,7 +68,7 @@ Text terminals, event input and graphical drawing have separate interfaces:
 [console/graphics](../reference/control-devices.md) and
 [evdev](../reference/evdev.md). Graphical ownership does not imply exclusive
 ownership of every input source. Native GPU acceleration remains a held
-proposal in [WS014](../../plan/ws014-gpu/ws.md), not an installed `/dev/gpu`
+proposal in [WS014](../../plan/ws014/ws.md), not an installed `/dev/gpu`
 contract.
 
 Service and network policy belongs to [init](../reference/init-services.md)
@@ -79,9 +79,9 @@ and DMA retirement before architecture-specific halt.
 
 ## Evidence boundary
 
-Recent producer gates include [TLS q128](../../plan/queue-q128.md),
-[NVMe q139](../../plan/queue-q139.md), [USB lifecycle q141](../../plan/queue-q141.md),
-[input and real graphical terminal q147](../../plan/queue-q147.md), and
-[formatter q148](../../plan/queue-q148.md). They cover their stated host/QEMU
+Recent producer gates include [TLS q128](../../plan/history/queue-q128.md),
+[NVMe q139](../../plan/history/queue-q139.md), [USB lifecycle q141](../../plan/history/queue-q141.md),
+[input and real graphical terminal q147](../../plan/history/queue-q147.md), and
+[formatter q148](../../plan/history/queue-q148.md). They cover their stated host/QEMU
 configurations. This source overview adds no new physical-machine or
 performance acceptance claim.

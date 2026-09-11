@@ -35,13 +35,13 @@ when a non-x86 architecture supplies a NULL parameter-source pointer; Section
 
 | Contract area | Production anchors | Executable and retained evidence |
 | --- | --- | --- |
-| Limits, record, names, grammar, defaults | [`include/boot/parameters.h`](../../include/boot/parameters.h), [`include/boot/parameter-handoff.h`](../../include/boot/parameter-handoff.h), [`include/kern/boot.h`](../../include/kern/boot.h), [`src/kern/boot.c`](../../src/kern/boot.c) | [BR-T42 parser fixture](../../plan/ws003-bringup/tests/boot-parameters-test.c), [q015 completion record](../../plan/queue-q015.md) |
-| Selectors, boot slots, and root modes | [`src/kern/block-identity.c`](../../src/kern/block-identity.c), [`src/kern/boot.c`](../../src/kern/boot.c), [`src/kern/vfs.c`](../../src/kern/vfs.c) | [BR-T44 source/root fixture](../../plan/ws003-bringup/tests/boot-source-test.c), [WS003 p013 evidence](../../plan/ws003-bringup/phase013-root-source-selection/phase.md) |
-| Boot-time swap sources | [`src/kern/swap.c`](../../src/kern/swap.c), [`src/kern/swap.c`](../../src/kern/swap.c), [`src/kern/swap.c`](../../src/kern/swap.c) | [BR-T45 swap fixture](../../plan/ws003-bringup/tests/swap-source-test.c), [WS003 p014 evidence](../../plan/ws003-bringup/phase014-multi-swap/phase.md) |
-| Runtime swap separation | [`include/uapi/zedbsd/system.h`](../../include/uapi/zedbsd/system.h), [`src/kern/swap.c`](../../src/kern/swap.c), [`src/drivers/generic/system-device.c`](../../src/drivers/generic/system-device.c) | [WS016 test index](../../plan/ws016-swap-control/tests/README.md), [runtime acceptance phase](../../plan/ws016-swap-control/phase004-runtime-swap-acceptance/phase.md), [q021 completion record](../../plan/queue-q021.md) |
-| PID 1 selection | [`src/kern/main.c`](../../src/kern/main.c), [`src/kern/init.c`](../../src/kern/init.c) | [BR-T42 init cases](../../plan/ws003-bringup/tests/boot-parameters-test.c), [WS003 p011 evidence](../../plan/ws003-bringup/phase011-boot-parameter-core/phase.md) |
-| Common configured-loader language | [`bootloader/uefi/zedbsd-config.c`](../../bootloader/uefi/zedbsd-config.c), [`bootloader/uefi/zedbsd-config.h`](../../bootloader/uefi/zedbsd-config.h) | [configuration host fixture](../../plan/ws013-containers/tests/zedbsd-config-host-test.c), [WS013 test index](../../plan/ws013-containers/tests/README.md) |
-| Four current x86 loader paths | [`bootloader/uefi/bootx64.c`](../../bootloader/uefi/bootx64.c), [`bootloader/pcat/bootzbsd.S`](../../bootloader/pcat/bootzbsd.S), [`bootloader/pc98/bootzbsd.S`](../../bootloader/pc98/bootzbsd.S), [`src/hal/x86/boot-parameters.c`](../../src/hal/x86/boot-parameters.c) | [BR-T43 handoff fixture](../../plan/ws003-bringup/tests/x86-parameter-handoff-test.c), [q031 UEFI evidence](../../plan/queue-q031.md), [q032 BIOS evidence](../../plan/queue-q032.md) |
+| Limits, record, names, grammar, defaults | [`include/boot/parameters.h`](../../include/boot/parameters.h), [`include/boot/parameter-handoff.h`](../../include/boot/parameter-handoff.h), [`include/kern/boot.h`](../../include/kern/boot.h), [`src/kern/boot.c`](../../src/kern/boot.c) | [BR-T42 parser fixture](../../plan/ws003/tests/boot-parameters-test.c), [q015 completion record](../../plan/history/queue-q015.md) |
+| Selectors, boot slots, and root modes | [`src/kern/block-identity.c`](../../src/kern/block-identity.c), [`src/kern/boot.c`](../../src/kern/boot.c), [`src/kern/vfs.c`](../../src/kern/vfs.c) | [BR-T44 source/root fixture](../../plan/ws003/tests/boot-source-test.c), [WS003 p013 evidence](../../plan/ws003/phase013/phase.md) |
+| Boot-time swap sources | [`src/kern/swap.c`](../../src/kern/swap.c), [`src/kern/swap.c`](../../src/kern/swap.c), [`src/kern/swap.c`](../../src/kern/swap.c) | [BR-T45 swap fixture](../../plan/ws003/tests/swap-source-test.c), [WS003 p014 evidence](../../plan/ws003/phase014/phase.md) |
+| Runtime swap separation | [`include/uapi/zedbsd/system.h`](../../include/uapi/zedbsd/system.h), [`src/kern/swap.c`](../../src/kern/swap.c), [`src/drivers/generic/system-device.c`](../../src/drivers/generic/system-device.c) | [WS016 test index](../../plan/ws016/tests/README.md), [runtime acceptance phase](../../plan/ws016/phase004/phase.md), [q021 completion record](../../plan/history/queue-q021.md) |
+| PID 1 selection | [`src/kern/main.c`](../../src/kern/main.c), [`src/kern/init.c`](../../src/kern/init.c) | [BR-T42 init cases](../../plan/ws003/tests/boot-parameters-test.c), [WS003 p011 evidence](../../plan/ws003/phase011/phase.md) |
+| Common configured-loader language | [`bootloader/uefi/zedbsd-config.c`](../../bootloader/uefi/zedbsd-config.c), [`bootloader/uefi/zedbsd-config.h`](../../bootloader/uefi/zedbsd-config.h) | [configuration host fixture](../../plan/ws013/tests/zedbsd-config-host-test.c), [WS013 test index](../../plan/ws013/tests/README.md) |
+| Four current x86 loader paths | [`bootloader/uefi/bootx64.c`](../../bootloader/uefi/bootx64.c), [`bootloader/pcat/bootzbsd.S`](../../bootloader/pcat/bootzbsd.S), [`bootloader/pc98/bootzbsd.S`](../../bootloader/pc98/bootzbsd.S), [`src/hal/x86/boot-parameters.c`](../../src/hal/x86/boot-parameters.c) | [BR-T43 handoff fixture](../../plan/ws003/tests/x86-parameter-handoff-test.c), [q031 UEFI evidence](../../plan/history/queue-q031.md), [q032 BIOS evidence](../../plan/history/queue-q032.md) |
 
 ## 2. Text format
 
@@ -131,7 +131,7 @@ Detected auxiliary FAT filesystems are no longer automatically mounted at
 `/diskN`; configured boot/root/overlay/swap sources are unchanged. Use an
 explicit mount request for an auxiliary filesystem. The current public mount
 API accepts root-level targets (for example `/data`), not nested targets.
-The [q076 evidence](../../plan/ws019-installation/tests/q076-results.md) records
+The [q076 evidence](../../plan/ws019/tests/q076-results.md) records
 the amd64 boot check and the remaining explicit-mount/reboot regression gate.
 
 ## 5. Root modes
@@ -427,11 +427,11 @@ publication, root mount, or init. The UUID and PARTUUID reordering cells
 enumerated another disk first while still selecting the production boot image,
 so loader-origin `boot0` and explicit secondary-slot resolution were both
 proved. Artifacts, generated configuration, hashes, commands, guest logs, and
-the result table are retained by the [q015 completion record](../../plan/queue-q015.md).
+the result table are retained by the [q015 completion record](../../plan/history/queue-q015.md).
 Because q015 preceded the configured-loader convergence, current loader-file
-behavior is additionally established by [q031](../../plan/queue-q031.md)
+behavior is additionally established by [q031](../../plan/history/queue-q031.md)
 (UEFI discovery/configuration and ignored `LoadOptions`) and
-[q032](../../plan/queue-q032.md) (20/20 PC/AT/amd64 BIOS and 16/16 PC-98
+[q032](../../plan/history/queue-q032.md) (20/20 PC/AT/amd64 BIOS and 16/16 PC-98
 configuration-path cells). These later Queue records replace q015 only for
 loader configuration and fallback wording; q015 remains the integrated
 kernel parser, root, swap, and PID 1 evidence.

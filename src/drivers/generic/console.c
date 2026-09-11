@@ -1041,6 +1041,11 @@ drv_console_device_register(
 	size_t capability_count;
 	int error;
 
+	/*
+	 * XXX: hal_cons_get_input_info() was removed.
+	 * All HAL must emulate all capabilities even if they are stubs.
+	 */
+
 	memset(&hal_info, 0, sizeof(hal_info));
 	hal_cons_get_input_info(&hal_info);
 
@@ -1055,8 +1060,7 @@ drv_console_device_register(
 	}
 
 	/* Checks the operation status. */
-	error = console_capabilities(&hal_info, capabilities,
-				     &capability_count);
+	error = console_capabilities(&hal_info, capabilities, &capability_count);
 	if (error != 0)
 		return error;
 	memset(&keyboard_info, 0, sizeof(keyboard_info));
@@ -1135,7 +1139,6 @@ drv_console_device_register(
 		goto fail;
 	thread_start(dispatcher);
 	thread_start(producer);
-	hal_cons_set_mode(HAL_CONS_TERMINAL);
 
 	/* Succeeded. */
 	return 0;

@@ -16,10 +16,14 @@ arm64_cmain(uintptr_t fdt_phys)
 	int error;
 
 	rpi4_cons_init();
+
 	hal_puts("RPI4 ENTRY\n");
+
 	if (arm64_current_el() != 1)
 		HAL_FATAL("AArch64 kernel did not enter EL1");
+
 	hal_puts("RPI4 EL1 PASS\n");
+
 	fdt = (const void *)(ARM64_DIRECT_BASE + fdt_phys);
 	if (fdt_phys == 0)
 		HAL_FATAL("missing firmware FDT");

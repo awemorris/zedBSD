@@ -1,0 +1,21 @@
+{
+  "focus": "fg006",
+  "preserved_focus": [
+    "fg004",
+    "fg005"
+  ],
+  "execution_phases": [
+    "ws003-p022",
+    "ws003-p023",
+    "ws003-p024"
+  ],
+  "phase_status": "uncleared",
+  "dependency_order_verified": true,
+  "local_links_verified": true,
+  "priority_list_restored": false,
+  "active_queue": null,
+  "code_changes": false,
+  "github_writes": 0,
+  "pending_operations": 60,
+  "conflicts": 0
+}

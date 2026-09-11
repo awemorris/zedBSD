@@ -209,7 +209,7 @@ AMD64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_BLOCK_IDENTITY_SOURCES) \
 	$(KERN_UFS_SOURCES)
 AMD64_KERNEL_SOURCES += $(KERN_BOOT_SOURCES)
 ifeq ($(CONFIG_KERNEL_TEST_CHECKPOINTS),y)
-AMD64_KERNEL_SOURCES += plan/ws004-hardware/tests/pci-msi-qemu.c
+AMD64_KERNEL_SOURCES += plan/ws004/tests/pci-msi-qemu.c
 endif
 AMD64_KERNEL_SOURCES += $(KERN_ACL_SOURCES)
 AMD64_KERNEL_SOURCES += $(KERN_QUOTA_SOURCES)
@@ -541,7 +541,7 @@ $(BUILD)/POSIX-R2-REMAINING.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 # program registry; the owning QEMU runner explicitly builds and injects it
 # into a disposable image.
 AMD64_NOCT_JIT_VM_PROBE_OBJ := \
-	$(BUILD)/user64/plan/ws008-noct/tests/noct-jit-vm-probe.o
+	$(BUILD)/user64/plan/ws008/tests/noct-jit-vm-probe.o
 $(BUILD)/NOCT-JIT-VM-PROBE.ELF: $(AMD64_USER_LIBC_OBJS) \
 	$(AMD64_NOCT_JIT_VM_PROBE_OBJ) $(AMD64_PLATFORM)/user.ld \
 	$(AMD64_USER_ELF_CHECK)

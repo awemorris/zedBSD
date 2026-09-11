@@ -30,15 +30,25 @@ static size_t task_stack_bytes;
 static uint8_t initial_fpregs[512] __attribute__((aligned(16)));
 static volatile unsigned task_registry_lock;
 
+static void i386_task_init_primary(void);
 static void tasklist_add(struct task_info *task);
 static void tasklist_del(struct task_info *task);
 static void set_initial_resume_frame(struct task_info *task, void (*start)(void *), void *arg, void *user_sp);
 
 /*
- * Initializes task context for the bootstrap CPU.
+ * Initializes the public HAL task subsystem.
  */
 void
-i386_task_init(
+hal_task_init(
+	void)
+{
+	/* Initializes task state for the bootstrap CPU. */
+	i386_task_init_primary();
+}
+
+/* Initializes task context for the bootstrap CPU. */
+static void
+i386_task_init_primary(
 	void)
 {
 	struct task_info *task;
@@ -115,17 +125,6 @@ i386_task_init_secondary(
 	/* Publishes the secondary bootstrap task as the current task. */
 	tasklist_add(task);
 	running_task = task;
-}
-
-/*
- * Initializes the public HAL task subsystem.
- */
-void
-hal_task_init(
-	void)
-{
-	/* Initializes task state for the bootstrap CPU. */
-	i386_task_init();
 }
 
 /*

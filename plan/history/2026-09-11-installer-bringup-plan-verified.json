@@ -1,0 +1,22 @@
+{
+  "new_local_records": 11,
+  "existing_local_records_updated": 8,
+  "local_links_checked": true,
+  "phase_rows_unique": true,
+  "priority_not_recreated": true,
+  "closed_ws_preserved": true,
+  "execution_queue": null,
+  "github_writes_this_task": 0,
+  "pending_operations": 37,
+  "local_changes": [
+    "master",
+    "ws003",
+    "ws003-p018",
+    "ws003-p019",
+    "ws003-p024",
+    "queue",
+    "bug-board",
+    "past-log"
+  ],
+  "conflicts": []
+}

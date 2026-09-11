@@ -21,4 +21,4 @@ libc/rtldの私有ABIはversion 5。ABI v4のバイナリ互換を提供せず�
 起動DSOのinitial-exec/local-exec統合と、`dlopen`後のstatic TLS予約は対象外。
 静的TLSの実装を、それらの対応完了と解釈しない。
 
-設計と受け入れの正本は[WS022](../../plan/ws022-elf-tls/ws.md)を参照。
+設計と受け入れの正本は[WS022](../../plan/ws022/ws.md)を参照。

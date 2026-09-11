@@ -352,7 +352,7 @@ menuconfig:
 
 .PHONY: menuconfig-host-test
 menuconfig-host-test:
-	@$(PYTHON) plan/ws020-intel-mac/tests/menuconfig-target-host-test.py
+	@$(PYTHON) plan/ws020/tests/menuconfig-target-host-test.py
 
 .PHONY: validate-image-config
 validate-image-config:
@@ -396,8 +396,8 @@ $(ZEDBSD_HOST_NOCT_BUILD_STAMP): $(ZEDBSD_HOST_NOCT)
 	@touch $@
 
 .PHONY: noct-toolchain-smoke
-noct-toolchain-smoke: $(ZEDBSD_HOST_NOCT_BUILD_STAMP) plan/ws010-scripting/tests/toolchain-smoke.noct
-	$(NOCT) plan/ws010-scripting/tests/toolchain-smoke.noct \
+noct-toolchain-smoke: $(ZEDBSD_HOST_NOCT_BUILD_STAMP) plan/ws010/tests/toolchain-smoke.noct
+	$(NOCT) plan/ws010/tests/toolchain-smoke.noct \
  $(abspath build/noct-toolchain-smoke.txt)
 
 toolchain: $(ZEDBSD_HOST_NOCT_BUILD_STAMP) noct-toolchain-smoke llvm-toolchain \

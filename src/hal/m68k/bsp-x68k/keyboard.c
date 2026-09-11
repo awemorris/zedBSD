@@ -316,32 +316,6 @@ hal_cons_poll_event(struct hal_key_event *event)
 	return available;
 }
 
-void
-hal_cons_get_input_info(struct hal_cons_input_info *info)
-{
-	static const char *const symbols[] = {
-	    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k",
-	    "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v",
-	    "w", "x", "y", "z", " ", "jis-1", "jis-2", "jis-3",
-	    "jis-4", "jis-5", "jis-6", "jis-7", "jis-8", "jis-9",
-	    "jis-0", "jis-minus", "jis-caret", "jis-yen", "jis-at",
-	    "jis-lbrace", "jis-semi", "jis-colon", "jis-rbrace",
-	    "jis-comma", "jis-dot", "jis-slash", "jis-ro", "jis-kp-slash",
-	    "jis-kp-star", "jis-kp-minus", "jis-kp-7", "jis-kp-8",
-	    "jis-kp-9", "jis-kp-plus", "jis-kp-4", "jis-kp-5",
-	    "jis-kp-6", "jis-kp-equal", "jis-kp-1", "jis-kp-2",
-	    "jis-kp-3", "jis-kp-enter", "jis-kp-0", "jis-kp-comma",
-	    "jis-kp-dot", "esc", "backspace", "tab", "enter", "leftshift",
-	    "leftctrl", "leftalt", "capslock", "home", "up", "pageup",
-	    "left", "right", "end", "down", "pagedown", "delete", "f1",
-	    "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10"};
-	if (info == NULL)
-		return;
-	info->flags = HAL_CONS_INPUT_RELEASE | HAL_CONS_INPUT_REPEAT;
-	info->symbols = symbols;
-	info->symbol_count = sizeof(symbols) / sizeof(symbols[0]);
-}
-
 int
 hal_cons_read_event(struct hal_key_event *event)
 {
@@ -364,16 +338,6 @@ hal_cons_read_event(struct hal_key_event *event)
 		hal_cons_wait_queue_unlock(&input_waiters, enabled);
 		kernel_wait_task();
 	}
-}
-
-int
-hal_cons_key_state(int key)
-{
-	bool enabled = hal_cons_wait_queue_lock(&input_waiters);
-	int down = x68k_keyboard_key_state(&keyboard, key);
-
-	hal_cons_wait_queue_unlock(&input_waiters, enabled);
-	return down;
 }
 
 void

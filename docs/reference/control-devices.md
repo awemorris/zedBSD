@@ -37,7 +37,7 @@ use `ttyname_r`. Current libc uses termios for the former and device identity
 for the latter; a PTY is a terminal but is not `/dev/console`. Normal example:
 `tty` inside zterm reports `/dev/pts/N`. A regular file descriptor is not a
 terminal, and an invalid descriptor must remain distinguishable from it.
-[q147](../../plan/queue-q147.md) tests these cases and actual graphical input.
+[q147](../../plan/history/queue-q147.md) tests these cases and actual graphical input.
 
 ## Graphical ownership and drawing
 
@@ -78,9 +78,9 @@ flush rectangles to 32 and its row buffer to 4096 bytes. These implementation
 bounds do not mean arbitrary user strides, multiplication overflows or
 out-of-range rectangles are accepted. Returned mode may differ from the
 requested preference. The actual Xzed/zterm path passed
-[WS006 q147](../../plan/queue-q147.md).
+[WS006 q147](../../plan/history/queue-q147.md).
 
-`/dev/gpu` remains a [WS014 proposal on manual hold](../../plan/ws014-gpu/ws.md).
+`/dev/gpu` remains a [WS014 proposal on manual hold](../../plan/ws014/ws.md).
 There is no published current GPU object ABI to enumerate here.
 
 ## System administration and observation
@@ -129,8 +129,8 @@ Console/graphics/system nodes normally use the devfs non-event-device mode
 ownership. See [devfs](../../src/kern/devfs.c) for node policy and
 [service shutdown](init-services.md) for orchestration.
 
-Relevant evidence includes [runtime swap](../../plan/ws016-swap-control/tests/README.md),
-[USB-root checked halt q141](../../plan/queue-q141.md), and
-[resource-baseline q142](../../plan/queue-q142.md). Resource counts are live:
+Relevant evidence includes [runtime swap](../../plan/ws016/tests/README.md),
+[USB-root checked halt q141](../../plan/history/queue-q141.md), and
+[resource-baseline q142](../../plan/history/queue-q142.md). Resource counts are live:
 an independently retiring boot worker can change the baseline, so immediate
 before/after subtraction alone does not prove a leak.
