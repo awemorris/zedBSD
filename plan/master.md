@@ -258,6 +258,62 @@ toolchain smoke は PASS、world ビルドはエラーなし、QEMU でログイ
 注意点として、パッチの削除行は上流の本文と一致させる必要があるため、
 接頭辞移行の対象外である。追加行だけが新しい名前を使う。
 
+## ヘッダ名前空間から zedbsd を外す（2026-09-12、amd64、未コミット）
+
+ユーザ API は `include/uapi/` にあり、`/usr/include/uapi/` へ入る。36 本。
+綴りはどこでも `<uapi/X.h>` である。カーネルのビルドでも、ユーザランドの
+ビルドでも、インストール済みヘッダに対してコンパイルする第三者から見ても
+同じファイルを指す。探索順に依存する解決がない。
+
+内部ヘッダは `include/kern/` のままで、参照は `<kern/X.h>` である。
+インストールしない。`src/kern/` にも `-Isrc` 経由で引かれるヘッダが 20 本あり、
+これも `<kern/X.h>` で引く。
+
+libc 自身の契約 5 本は `libc/include/` 直下へ移した。各ファイルの XXX コメントが
+そう書いていたとおりである。
+
+| 綴り | 指すもの |
+| --- | --- |
+| `<kern/X.h>` | カーネル内部。`include/kern/` か `src/kern/`。インストールしない |
+| `<uapi/X.h>` | ユーザ API。全ビルドとインストール後で同一 |
+
+### インストール先に uapi を残す理由
+
+`/usr/include/kern/` に入れると内部ヘッダと 14 個の名前が衝突する。
+`atomic.h`、`poll.h`、`process.h`、`quota.h`、`resource.h`、`signal.h`、
+`syscall.h`、`sysctl.h`、`thread.h`、`usync.h`、`writeback.h`、`io-stats.h`、
+`cache-memory.h`、`readahead.h` である。
+
+自分のソースだけなら綴り分けで済む。済まないのは libc のヘッダである。
+`libc/include/sys/resource.h` はインストール後の利用者のために `<kern/resource.h>`
+と書くしかないが、カーネルもユーザランドも `-Iinclude` を sysroot より先に置くので、
+この参照が内部ヘッダに解決されてしまう。実際 `CTL_MAXNAME` と `RLIMIT_*` が
+これで消えた。`uapi` を接頭辞に残すと、この綴りが一意になり衝突自体が起きない。
+
+sysroot を作る規則は `include/` だけを剥がす。移行前は `include/uapi/` を
+剥がしていたので、名前空間がインストール先に出てこなかった。
+
+### noct 側の追従
+
+上流 NoctLang が zedBSD のパスを 3 箇所参照していた。CMake ツールチェーンの
+必須ファイル一覧に `include/uapi/zedbsd/system.h`、BeUI バックエンドに
+`<zedbsd/graphics.h>` と `<zedbsd/input.h>` である。パッチ 0001 で当ててビルドを
+通したが、これは本来上流で直すべき 3 行である。パッチレベルは `zedbsd11`。
+
+### 付随して直したもの
+
+sysroot のヘッダ一覧が生の `find` だったため、エディタのバックアップが
+`/usr/include/` にコピーされていた。`! -name '*~'` を足した。リポジトリには
+まだ 164 個残っている。
+
+### 残る zedbsd
+
+`/usr/lib/zedbsd/<arch>/` にリンカスクリプトを置いている。これは OS ベンダの
+ライブラリディレクトリなので、ヘッダとは別の判断になる。ビルド専用の makefile
+変数と noct 統合のファイル名も未着手のままである。
+
+ビルドは PASS。QEMU でログイン、シェル、ユーザランド noct の応答を確認した。
+
 #### fg007：段階5 early console への縮退（2026-09-11、amd64、未コミット）
 
 amd64 の HAL コンソールを出力専用の早期コンソールへ縮めた。early console 化は完了。

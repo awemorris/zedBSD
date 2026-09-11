@@ -8,7 +8,7 @@
 #ifndef LIBC_SYS_SNAPSHOT_H
 #define LIBC_SYS_SNAPSHOT_H
 
-#include <zedbsd/snapshot.h>
+#include <uapi/snapshot.h>
 
 int snapshotctl(const char *,struct snapshot_control *);
 

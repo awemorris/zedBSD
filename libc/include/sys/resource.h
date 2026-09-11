@@ -9,7 +9,7 @@
 #define LIBC_SYS_RESOURCE_H
 
 #include <stdint.h>
-#include <zedbsd/resource.h>
+#include <uapi/resource.h>
 #include <sys/time.h>
 
 #define PRIO_PROCESS 0

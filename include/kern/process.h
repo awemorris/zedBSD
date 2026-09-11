@@ -14,7 +14,7 @@
 
 #include <sys/types.h>
 #include <stdint.h>
-#include <uapi/zedbsd/signal.h>
+#include <uapi/signal.h>
 #include <kern/signal.h>
 #include <kern/atomic.h>
 #include <kern/lock.h>

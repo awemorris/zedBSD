@@ -25,7 +25,7 @@
 #include "kern/page.h"
 #include "kern/vmspace.h"
 
-#include <zedbsd/tls.h>
+#include <uapi/tls.h>
 #include <errno.h>
 #include <stdint.h>
 #include <string.h>

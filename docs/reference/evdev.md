@@ -10,7 +10,7 @@ storage, and the user confirmed physical USB keyboard/mouse operation on
 zedBSD reserves `/dev/input/eventN` for an independently implemented event
 interface whose initial keyboard and pointer subset is source-oriented toward
 Linux and FreeBSD evdev. The authoritative public header is
-[`<zedbsd/input.h>`](../../include/uapi/zedbsd/input.h). The compatibility
+[`<uapi/input.h>`](../../include/uapi/input.h). The compatibility
 include paths [`<linux/input.h>`](../../libc/include/linux/input.h) and
 [`<dev/evdev/input.h>`](../../libc/include/dev/evdev/input.h) include that same
 header; they do not provide a second ABI.
@@ -21,7 +21,7 @@ header; they do not provide a second ABI.
 and signed 32-bit value. The frozen zedBSD layouts are 24 bytes for x86-64 LP64
 and 20 bytes for i386 ILP32. Events are timestamped from the kernel monotonic
 tick count at publication time; they are not wall-clock timestamps. These
-claims are fixed by the [public header](../../include/uapi/zedbsd/input.h), the
+claims are fixed by the [public header](../../include/uapi/input.h), the
 [timestamp implementation](../../src/drivers/generic/input.c), the
 [monotonic-clock owner](../../src/kern/clock.c), and the
 [dual-ABI layout fixture](../../plan/ws006/tests/evdev-layout-test.c).
@@ -74,7 +74,7 @@ the current built-in relative pointers register no absolute axes. Repeat
 get/set, properties, and current LED state remain reserved in the header but
 are not operational. Unsupported requests return `ENOTTY` without changing
 caller memory. The definitions and dispatcher are respectively the
-[public UAPI](../../include/uapi/zedbsd/input.h) and
+[public UAPI](../../include/uapi/input.h) and
 [production ioctl path](../../src/drivers/generic/input.c); registration and
 state validation are covered by the
 [IN-T11 fixture](../../plan/ws006/tests/input-capability-test.c).
@@ -195,7 +195,7 @@ cover the source snapshot and atomic state transition.
 
 | Property | Linux | FreeBSD | zedBSD initial profile |
 | --- | --- | --- | --- |
-| Include path | `<linux/input.h>` | `<dev/evdev/input.h>` | Both wrappers plus authoritative `<zedbsd/input.h>` |
+| Include path | `<linux/input.h>` | `<dev/evdev/input.h>` | Both wrappers plus authoritative `<uapi/input.h>` |
 | LP64 event layout | Native timeval; 24 bytes on x86-64 | Native timeval; 24 bytes on x86-64 | 24 bytes |
 | i386 event layout | Linux compat/time-mode dependent; commonly 16 bytes | Native FreeBSD timeval layout | 20 bytes because zedBSD `time_t` is 64-bit |
 | ioctl encoding | Linux `_IOC` ABI | FreeBSD ioctl ABI | zedBSD ioctl ABI; source names match but numbers are not binary-compatible |
@@ -217,7 +217,7 @@ incorporated into the zedBSD base system.
 
 | Current claim | Production owner | Executable evidence |
 | --- | --- | --- |
-| Public layout, constants, and wrapper identity | [`input.h`](../../include/uapi/zedbsd/input.h), [Linux wrapper](../../libc/include/linux/input.h), [FreeBSD wrapper](../../libc/include/dev/evdev/input.h) | [IN-T00](../../plan/ws006/tests/evdev-layout-test.c) in LP64 and ILP32 modes |
+| Public layout, constants, and wrapper identity | [`input.h`](../../include/uapi/input.h), [Linux wrapper](../../libc/include/linux/input.h), [FreeBSD wrapper](../../libc/include/dev/evdev/input.h) | [IN-T00](../../plan/ws006/tests/evdev-layout-test.c) in LP64 and ILP32 modes |
 | Independent queues, read/poll/grab, overflow, and detach | [`input-device.c`](../../src/drivers/generic/input.c), [`input-queue.c`](../../src/drivers/generic/input.c) | [IN-T10 queue fixture](../../plan/ws006/tests/input-queue-test.c), [ownership/lifecycle fixture](../../plan/ws006/tests/input-device-ownership-test.c) |
 | Capability registration and current key/ABS state | [`input-capability.c`](../../src/drivers/generic/input.c) | [IN-T11](../../plan/ws006/tests/input-capability-test.c) and [IN-T12 probe](../../plan/ws006/tests/evdev-capability-probe.c) |
 | Per-source physical/momentary input, console subscription, resync, and detach | [`input-device.c`](../../src/drivers/generic/input.c), [`input-subscriber.c`](../../src/drivers/generic/input.c), [`console.c`](../../src/drivers/generic/console.c) | [q044 ownership runner](../../plan/ws006/tests/run-input-ownership-host-test.sh) and [`ws006-p006`](../../plan/ws006/phase006/phase.md) |

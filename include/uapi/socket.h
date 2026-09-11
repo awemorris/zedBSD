@@ -14,7 +14,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <zedbsd/types.h>
+#include <uapi/types.h>
 #include <sys/time.h>
 #include <sys/types.h>
 

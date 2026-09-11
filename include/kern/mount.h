@@ -16,7 +16,7 @@
 #include "kern/atomic.h"
 #include <kern/io-epoch.h>
 #include <kern/io-error.h>
-#include <zedbsd/unmount.h>
+#include <uapi/unmount.h>
 #include "kern/backing-claim.h"
 #include "kern/lock.h"
 #include "kern/waitq.h"

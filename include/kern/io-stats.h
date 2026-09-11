@@ -4,7 +4,7 @@
 #ifndef KERN_KERN_IO_STATS_H
 #define KERN_KERN_IO_STATS_H
 
-#include <zedbsd/io-stats.h>
+#include <uapi/io-stats.h>
 
 void io_stats_record(enum io_stat_event event, uint64_t bytes);
 void io_stats_snapshot(struct io_stats *snapshot);

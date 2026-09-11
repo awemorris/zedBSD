@@ -24,8 +24,8 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-#include <zedbsd/netif.h>
-#include <zedbsd/wlan.h>
+#include <uapi/netif.h>
+#include <uapi/wlan.h>
 
 #define NETWORKD_WIFI_PATH "/sbin/wifi"
 #define NETWORKD_WIFI_SECRET_DESCRIPTOR 4

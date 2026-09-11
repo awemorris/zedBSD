@@ -30,7 +30,7 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-#include <zedbsd/system.h>
+#include <uapi/system.h>
 
 #define SERVICE_MAX 32
 #define ARGUMENT_MAX 16

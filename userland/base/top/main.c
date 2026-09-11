@@ -22,7 +22,7 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
-#include <zedbsd/system.h>
+#include <uapi/system.h>
 
 #define TOP_MAX_PROCESSES 256U
 #define TOP_CLEAR_SCREEN "\033[H\033[2J"

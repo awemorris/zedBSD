@@ -23,7 +23,7 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
-#include <zedbsd/wlan.h>
+#include <uapi/wlan.h>
 
 #define WIFI_CONNECT_SECONDS		30U
 #define WIFI_DISCONNECT_SECONDS		5U

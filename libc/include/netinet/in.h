@@ -8,6 +8,6 @@
 #ifndef LIBC_NETINET_IN_H
 #define LIBC_NETINET_IN_H
 
-#include <zedbsd/netinet.h>
+#include <uapi/netinet.h>
 
 #endif

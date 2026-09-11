@@ -8,7 +8,7 @@
 #ifndef LIBC_SYS_IOCTL_H
 #define LIBC_SYS_IOCTL_H
 
-#include <zedbsd/features.h>
+#include <features.h>
 #include <stddef.h>
 
 #define KERN_IOC_VOID  0x00000000UL

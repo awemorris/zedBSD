@@ -2,7 +2,7 @@
 #include "block-command.h"
 #include "fat32-format.h"
 #include "ufs-format.h"
-#include <zedbsd/block.h>
+#include <uapi/block.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>

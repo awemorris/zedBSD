@@ -12,7 +12,7 @@
 #ifndef LIBC_FTW_H
 #define LIBC_FTW_H
 
-#include <zedbsd/features.h>
+#include <features.h>
 #include <sys/stat.h>
 
 #define FTW_F 0

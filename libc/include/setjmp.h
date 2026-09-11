@@ -8,7 +8,7 @@
 #ifndef LIBC_SETJMP_H
 #define LIBC_SETJMP_H
 
-#include <zedbsd/features.h>
+#include <features.h>
 #include <signal.h>
 
 typedef struct {

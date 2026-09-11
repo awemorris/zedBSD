@@ -29,7 +29,7 @@
 #include "kern/vm-object.h"
 #include <hal/hal.h>
 
-#include <zedbsd/rename.h>
+#include <uapi/rename.h>
 #include <errno.h>
 #include <string.h>
 

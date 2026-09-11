@@ -17,7 +17,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
-#include <zedbsd/blkid.h>
+#include <uapi/blkid.h>
 
 static int identify(const char *path);
 static unsigned selected_tags;

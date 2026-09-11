@@ -24,10 +24,10 @@
 #include "kern/uaccess.h"
 #include "internal.h"
 
-#include <zedbsd/netif.h>
-#include <zedbsd/netinet.h>
-#include <zedbsd/route.h>
-#include <zedbsd/wlan.h>
+#include <uapi/netif.h>
+#include <uapi/netinet.h>
+#include <uapi/route.h>
+#include <uapi/wlan.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <string.h>

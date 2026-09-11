@@ -22,7 +22,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <zedbsd/system.h>
+#include <uapi/system.h>
 
 #define WORKERS 8
 #define ITERATIONS 4167

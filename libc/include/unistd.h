@@ -8,7 +8,7 @@
 #ifndef LIBC_UNISTD_H
 #define LIBC_UNISTD_H
 
-#include <zedbsd/features.h>
+#include <features.h>
 
 #include <stddef.h>
 #include <stdint.h>

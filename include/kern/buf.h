@@ -15,7 +15,7 @@
 #include <kern/atomic.h>
 #include <kern/lock.h>
 #include <kern/waitq.h>
-#include <zedbsd/sysctl.h>
+#include <uapi/sysctl.h>
 
 struct disk;
 struct io_context;

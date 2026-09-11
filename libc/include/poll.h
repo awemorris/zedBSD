@@ -8,7 +8,7 @@
 #ifndef LIBC_POLL_H
 #define LIBC_POLL_H
 
-#include <zedbsd/poll.h>
+#include <uapi/poll.h>
 #include <signal.h>
 #include <time.h>
 

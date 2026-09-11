@@ -17,7 +17,7 @@
 #include <kern/waitq.h>
 #include <kern/atomic.h>
 #include <kern/signal.h>
-#include <uapi/zedbsd/signal.h>
+#include <uapi/signal.h>
 #include <sys/types.h>
 #include <stdint.h>
 

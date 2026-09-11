@@ -12,7 +12,7 @@
 #ifndef KERN_UAPI_ROUTE_H
 #define KERN_UAPI_ROUTE_H
 
-#include <zedbsd/socket.h>
+#include <uapi/socket.h>
 #include <stdint.h>
 
 #define RTF_UP	0x0001U

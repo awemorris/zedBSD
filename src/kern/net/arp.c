@@ -25,7 +25,7 @@
 #include "internal.h"
 #include "wire.h"
 
-#include <zedbsd/netinet.h>
+#include <uapi/netinet.h>
 #include <errno.h>
 #include <string.h>
 

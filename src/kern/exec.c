@@ -31,8 +31,8 @@
 #include "kern/resource-limit.h"
 #include "kern/test-checkpoint.h"
 
-#include <zedbsd/auxv.h>
-#include <zedbsd/process.h>
+#include <uapi/auxv.h>
+#include <uapi/process.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <hal/hal.h>

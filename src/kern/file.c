@@ -36,7 +36,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
-#include <zedbsd/fcntl.h>
+#include <uapi/fcntl.h>
 
 #define FILE_MAX 192U
 

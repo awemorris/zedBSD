@@ -19,7 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <zedbsd/input.h>
+#include <uapi/input.h>
 
 #define BITS_PER_WORD (sizeof(unsigned long) * 8U)
 #define BIT_WORDS(maximum) (((maximum) + 1U + BITS_PER_WORD - 1U) / BITS_PER_WORD)

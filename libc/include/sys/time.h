@@ -8,7 +8,7 @@
 #ifndef LIBC_SYS_TIME_H
 #define LIBC_SYS_TIME_H
 
-#include <zedbsd/features.h>
+#include <features.h>
 #include <time.h>
 
 struct timeval {

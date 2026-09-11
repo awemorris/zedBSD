@@ -37,7 +37,7 @@ set(ZEDBSD_SOURCE_DIR "${ZEDBSD_SOURCE_DIR}" CACHE PATH
 set(_NOCT_ZEDBSD_REQUIRED_FILES
   Makefile
   include/hal/arch/i386.h
-  include/uapi/zedbsd/system.h
+  include/uapi/system.h
   libc/include/stdint.h
   platform/pcat/user.ld
   userland/base/noct/zedbsd.cmake

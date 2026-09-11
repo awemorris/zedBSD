@@ -8,7 +8,7 @@
 #ifndef KERN_LIBC_LOCALE_DB_H
 #define KERN_LIBC_LOCALE_DB_H
 
-#include <zedbsd/locale-format.h>
+#include <locale-format.h>
 
 struct zed_locale_record;
 

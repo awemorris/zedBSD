@@ -6,7 +6,7 @@
  */
 
 #include "libc/include/nl_types.h"
-#include "libc/include/zedbsd/catalog-format.h"
+#include "libc/include/catalog-format.h"
 
 #include <errno.h>
 #include <fcntl.h>

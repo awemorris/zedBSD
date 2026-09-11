@@ -1,6 +1,6 @@
 # Exclusive block administration
 
-`<zedbsd/block.h>` provides `BLKGETINFO`, `BLKRESERVE` and `BLKREREADPART`.
+`<uapi/block.h>` provides `BLKGETINFO`, `BLKRESERVE` and `BLKREREADPART`.
 `BLKGETINFO` returns a live registration identity and logical-sector geometry;
 the registration number is not an on-disk GUID and must not be persisted as a
 boot selector. Initialize `version`, `struct_size` and zero reserved fields.

@@ -16,8 +16,8 @@
 
 #include "userland/base/libc/syscall.h"
 
-#include <zedbsd/syscall.h>
-#include <zedbsd/usync.h>
+#include <uapi/syscall.h>
+#include <uapi/usync.h>
 #include <errno.h>
 #include <pthread.h>
 #include <sched.h>

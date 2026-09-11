@@ -12,7 +12,7 @@
 #ifndef KERN_UAPI_NETINET_H
 #define KERN_UAPI_NETINET_H
 
-#include <zedbsd/socket.h>
+#include <uapi/socket.h>
 #include <stdint.h>
 
 #define IPPROTO_IP		0

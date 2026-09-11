@@ -13,7 +13,7 @@
 
 #include "userland/base/sh/builtins.h"
 
-#include <zedbsd/console.h>
+#include <uapi/console.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>

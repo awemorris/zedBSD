@@ -12,7 +12,7 @@
 #ifndef KERN_UAPI_NETIF_H
 #define KERN_UAPI_NETIF_H
 
-#include <zedbsd/socket.h>
+#include <uapi/socket.h>
 #include <stdint.h>
 
 #define IFNAMSIZ 16

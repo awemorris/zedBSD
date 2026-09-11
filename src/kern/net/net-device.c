@@ -21,7 +21,7 @@
 #include "kern/net/packet-buf.h"
 #include "kern/net/socket.h"
 
-#include <zedbsd/route.h>
+#include <uapi/route.h>
 
 #include <errno.h>
 #include <stdbool.h>

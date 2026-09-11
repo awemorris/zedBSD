@@ -18,7 +18,8 @@ diff --git a/cmake/toolchains/zedbsd-amd64.cmake b/cmake/toolchains/zedbsd-amd64
 --- a/cmake/toolchains/zedbsd-amd64.cmake
 +++ b/cmake/toolchains/zedbsd-amd64.cmake
 @@ -40,7 +40,7 @@ set(_NOCT_ZEDBSD_REQUIRED_FILES
-   include/uapi/zedbsd/system.h
+-  include/uapi/zedbsd/system.h
++  include/uapi/system.h
    libc/include/stdint.h
    platform/amd64/user.ld
 -  userland/packages/lang/noct/zedbsd.cmake
@@ -27,3 +28,16 @@ diff --git a/cmake/toolchains/zedbsd-amd64.cmake b/cmake/toolchains/zedbsd-amd64
  foreach(_NOCT_ZEDBSD_FILE IN LISTS _NOCT_ZEDBSD_REQUIRED_FILES)
    if(NOT EXISTS "${ZEDBSD_SOURCE_DIR}/${_NOCT_ZEDBSD_FILE}")
 
+diff --git a/src/api/api-beui-zedbsd.c b/src/api/api-beui-zedbsd.c
+--- a/src/api/api-beui-zedbsd.c
++++ b/src/api/api-beui-zedbsd.c
+@@ -14,7 +14,7 @@
+ #include <noct/noct.h>
+ 
+-#include <zedbsd/graphics.h>
+-#include <zedbsd/input.h>
++#include <uapi/graphics.h>
++#include <uapi/input.h>
+ 
+ #include <limits.h>
+ #include <stddef.h>

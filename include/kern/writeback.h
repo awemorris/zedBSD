@@ -3,7 +3,7 @@
 #define KERN_KERN_WRITEBACK_H
 #include <stdint.h>
 #include <stddef.h>
-#include <zedbsd/writeback.h>
+#include <uapi/writeback.h>
 
 struct disk;
 struct mount;

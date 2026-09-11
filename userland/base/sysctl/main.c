@@ -16,11 +16,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
-#include <zedbsd/sysctl.h>
-#include <zedbsd/io-stats.h>
-#include <zedbsd/cache-memory.h>
-#include <zedbsd/writeback.h>
-#include <zedbsd/readahead.h>
+#include <uapi/sysctl.h>
+#include <uapi/io-stats.h>
+#include <uapi/cache-memory.h>
+#include <uapi/writeback.h>
+#include <uapi/readahead.h>
 
 #define NAME_MAX 64U
 

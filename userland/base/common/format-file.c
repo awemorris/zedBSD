@@ -19,7 +19,7 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <zedbsd/fcntl.h>
+#include <uapi/fcntl.h>
 
 static int same_object(const struct stat *expected, const struct stat *actual);
 static int close_files(int writer, int reader, int error);

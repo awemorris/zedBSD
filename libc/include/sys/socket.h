@@ -8,6 +8,6 @@
 #ifndef LIBC_SYS_SOCKET_H
 #define LIBC_SYS_SOCKET_H
 
-#include <zedbsd/socket.h>
+#include <uapi/socket.h>
 
 #endif

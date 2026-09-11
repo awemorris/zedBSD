@@ -8,6 +8,6 @@
 #ifndef LIBC_NETPACKET_PACKET_H
 #define LIBC_NETPACKET_PACKET_H
 
-#include <zedbsd/socket.h>
+#include <uapi/socket.h>
 
 #endif

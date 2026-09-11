@@ -8,7 +8,7 @@
 #ifndef LIBC_SYS_SELECT_H
 #define LIBC_SYS_SELECT_H
 
-#include <zedbsd/select.h>
+#include <uapi/select.h>
 #include <signal.h>
 #include <sys/time.h>
 #include <time.h>

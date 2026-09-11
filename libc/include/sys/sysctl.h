@@ -9,7 +9,7 @@
 #define LIBC_SYS_SYSCTL_H
 
 #include <stddef.h>
-#include <zedbsd/sysctl.h>
+#include <uapi/sysctl.h>
 
 int sysctl(const int *, unsigned int, void *, size_t *, const void *, size_t);
 int sysctlbyname(const char *, void *, size_t *, const void *, size_t);

@@ -11,7 +11,7 @@ Keep format changes compatible with the kernel decoder through those tests;
 do not reintroduce a kernel-source build dependency.
 
 The command frontend also uses userland/base/common/format-file.c/.h and the
-public zedbsd/fcntl.h interface. The zedBSD frontend requires its exclusive
+public kern/fcntl.h interface. The zedBSD frontend requires its exclusive
 format-reservation ioctl before writing. A port to another OS must supply an
 appropriate host reservation frontend; compiling the portable codec does not
 provide that OS-specific reservation service. Kernel implementation sources

@@ -9,7 +9,7 @@
 #define KERN_KERN_RESOURCE_LIMIT_H
 
 #include <stdint.h>
-#include <zedbsd/resource.h>
+#include <uapi/resource.h>
 
 struct process;
 struct vmspace;

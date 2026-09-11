@@ -13,7 +13,7 @@
 #define KERN_KERN_BLOCK_IDENTITY_H
 
 #include <kern/disk.h>
-#include <zedbsd/blkid.h>
+#include <uapi/blkid.h>
 
 int
 block_identity_get(

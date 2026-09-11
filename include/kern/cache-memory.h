@@ -4,7 +4,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <zedbsd/cache-memory.h>
+#include <uapi/cache-memory.h>
 
 struct cache_worker_buffer {
 	void *data;

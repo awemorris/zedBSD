@@ -20,8 +20,8 @@
 #include "kern/atomic.h"
 #include "kern/uaccess.h"
 
-#include <zedbsd/netinet.h>
-#include <zedbsd/route.h>
+#include <uapi/netinet.h>
+#include <uapi/route.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <string.h>

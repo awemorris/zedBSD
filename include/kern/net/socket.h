@@ -15,7 +15,7 @@
 #include <kern/atomic.h>
 #include <kern/lock.h>
 #include <kern/waitq.h>
-#include <zedbsd/socket.h>
+#include <uapi/socket.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>

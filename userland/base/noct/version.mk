@@ -12,4 +12,4 @@ override ZEDBSD_NOCT_ARCHIVE_NAME := NoctLang-fcf5759eddfac9c36d6eb88323d62da614
 override ZEDBSD_NOCT_ARCHIVE_URL := https://codeload.github.com/awemorris/NoctLang/tar.gz/fcf5759eddfac9c36d6eb88323d62da6148b3822
 override ZEDBSD_NOCT_ARCHIVE_SIZE := 2529920
 override ZEDBSD_NOCT_ARCHIVE_SHA256 := 0083328ee970c715619bad15d6b1fea60b19e5764522273b233142e7add53d21
-override ZEDBSD_NOCT_PATCH_LEVEL := zedbsd7
+override ZEDBSD_NOCT_PATCH_LEVEL := zedbsd11

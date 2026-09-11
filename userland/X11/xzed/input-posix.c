@@ -16,7 +16,7 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
-#include <zedbsd/input.h>
+#include <uapi/input.h>
 
 static int system_open(void *context, const char *path);
 static int system_get_bits(void *context, int fd, unsigned type, void *bits, size_t size);

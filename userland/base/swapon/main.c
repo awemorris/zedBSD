@@ -14,7 +14,7 @@
 #include "userland/base/swap-control/swap-command.h"
 #include "userland/base/common/fstab.h"
 
-#include <zedbsd/system.h>
+#include <uapi/system.h>
 
 static int swapon_all(void);
 

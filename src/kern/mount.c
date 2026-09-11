@@ -30,10 +30,10 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/statvfs.h>
-#include <zedbsd/blkid.h>
-#include <zedbsd/quota.h>
-#include <zedbsd/snapshot.h>
-#include <zedbsd/mountinfo.h>
+#include <uapi/blkid.h>
+#include <uapi/quota.h>
+#include <uapi/snapshot.h>
+#include <uapi/mountinfo.h>
 
 #define FILESYSTEM_MAX 8U
 #define MOUNT_BIND_INTERNAL 0x00000001U

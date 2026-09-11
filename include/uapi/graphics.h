@@ -14,7 +14,7 @@
 
 #include <stdint.h>
 #include <sys/ioctl.h>
-#include <zedbsd/types.h>
+#include <uapi/types.h>
 
 #define KERN_GRAPHICS_IOC_GROUP	'g'
 

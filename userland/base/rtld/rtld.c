@@ -13,11 +13,11 @@
 
 #include "userland/base/rtld/rtld.h"
 
-#include <zedbsd/auxv.h>
-#include <zedbsd/rtld-abi.h>
-#include <zedbsd/syscall.h>
-#include <zedbsd/thread.h>
-#include <zedbsd/usync.h>
+#include <uapi/auxv.h>
+#include <rtld-abi.h>
+#include <uapi/syscall.h>
+#include <uapi/thread.h>
+#include <uapi/usync.h>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <sys/mman.h>

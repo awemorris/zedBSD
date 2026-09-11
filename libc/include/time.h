@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <locale.h>
-#include <zedbsd/signal.h>
+#include <uapi/signal.h>
 
 typedef int64_t time_t;
 typedef int clockid_t;

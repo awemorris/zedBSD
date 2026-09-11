@@ -16,7 +16,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <zedbsd/tls.h>
+#include <uapi/tls.h>
 
 /*
  * XXX: Rename the following KERN_* to KERN_*

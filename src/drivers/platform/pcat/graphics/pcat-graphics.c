@@ -16,7 +16,7 @@
 #include "kern/uaccess.h"
 #include "drivers/platform/pcat/graphics/backend.h"
 
-#include <zedbsd/graphics.h>
+#include <uapi/graphics.h>
 #include <errno.h>
 #include "text.h"
 #include <string.h>

@@ -14,7 +14,7 @@ TPの直前に各スレッド専用のTLSデータがあり、TP先頭wordはTP�
 終了したスレッドのTLS mappingはjoinerまたはdetached reaperが回収する。
 
 実装上限はTLS本体1MiB、整列4096bytes、TCB予約4096bytes。
-loader/libc共通prefixは[zedbsd/tls.h](../../include/uapi/zedbsd/tls.h)、
+loader/libc共通prefixは[kern/tls.h](../../include/uapi/tls.h)、
 libc/rtldの私有ABIはversion 5。ABI v4のバイナリ互換を提供せず、成果物を再構築する。
 
 動的runtimeのGD TLSと`__tls_get_addr`/DTVは引き続きrtldが所有する。

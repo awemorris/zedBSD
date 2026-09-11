@@ -12,7 +12,7 @@
  */
 
 #include "userland/base/libc/syscall.h"
-#include <zedbsd/syscall.h>
+#include <uapi/syscall.h>
 #include <errno.h>
 #include <signal.h>
 #include <pthread.h>

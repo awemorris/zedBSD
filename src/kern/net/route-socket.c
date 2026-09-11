@@ -17,8 +17,8 @@
 
 #include <errno.h>
 #include <string.h>
-#include <zedbsd/netif.h>
-#include <zedbsd/route.h>
+#include <uapi/netif.h>
+#include <uapi/route.h>
 
 struct route_endpoint {
 	struct socket socket;

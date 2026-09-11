@@ -21,7 +21,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
-#include <zedbsd/system.h>
+#include <uapi/system.h>
 
 #ifndef SWAP_COMMAND_OPEN
 #define SWAP_COMMAND_OPEN open

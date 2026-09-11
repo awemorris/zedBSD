@@ -19,7 +19,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
-#include <zedbsd/wlan.h>
+#include <uapi/wlan.h>
 
 #define NETWORKD_MANAGED_RESOLVER_MAX	1024U
 

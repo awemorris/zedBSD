@@ -20,7 +20,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
-#include <zedbsd/system.h>
+#include <uapi/system.h>
 
 #define PS_MAX_PROCESSES 256
 #define PS_MAX_FIELDS 24

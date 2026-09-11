@@ -26,7 +26,7 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
-#include <zedbsd/graphics.h>
+#include <uapi/graphics.h>
 
 #include "userland/X11/xzed/input.h"
 #include "userland/X11/xzed/pointer.h"

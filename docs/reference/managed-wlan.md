@@ -213,7 +213,7 @@ maintain policy. Routine administration should use `net wifi`.
 | Profile grammar, limits, validation, and wiping | [`wifi-conf.c`](../../userland/base/net/wifi-conf.c), [`wifi-conf.h`](../../userland/base/net/wifi-conf.h) | [wifi-conf/store runners](../../plan/ws005/tests/README.md) |
 | UID-derived secure publication | [`wifi-store.c`](../../userland/base/net/wifi-store.c) | [NET-T21 native and reboot evidence](../../plan/ws005/phase005/phase.md) |
 | Authenticated socket and global orchestration | [`networkd/main.c`](../../userland/base/networkd/main.c), [`protocol.h`](../../userland/base/net/protocol.h) | [NET-T20, NET-T22, NET-T30](../../plan/ws005/tests/README.md) |
-| Managed states and link-loss recovery | [`managed-wlan.c`](../../userland/base/networkd/managed-wlan.c), [`route.h`](../../include/uapi/zedbsd/route.h) | [NET-T36](../../plan/ws005/tests/README.md) |
+| Managed states and link-loss recovery | [`managed-wlan.c`](../../userland/base/networkd/managed-wlan.c), [`route.h`](../../include/uapi/route.h) | [NET-T36](../../plan/ws005/tests/README.md) |
 | Finite L2 primitive and secret descriptor | [`wifi/main.c`](../../userland/base/wifi/main.c), [`wifi-child.c`](../../userland/base/networkd/wifi-child.c) | [NET-T23, NET-T24, NET-T35](../../plan/ws005/tests/README.md) |
 
 The automatic protocol, credential, orchestration, lifecycle, build, and QEMU

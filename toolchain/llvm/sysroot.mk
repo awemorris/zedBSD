@@ -72,7 +72,7 @@ $(ZEDBSD_SYSROOT_LLVM_BUILTIN_SOURCES): | $(ZEDBSD_LLVM_SOURCE_STAMP)
 	@test -f '$@'
 
 ZEDBSD_SYSROOT_PUBLIC_HEADERS := $(shell \
-	find libc/include include/uapi -type f -print | LC_ALL=C sort)
+	find libc/include include/uapi -type f ! -name '*~' -print | LC_ALL=C sort)
 ZEDBSD_SYSROOT_LINKER_SCRIPTS := \
 	platform/amd64/user.ld platform/amd64/vmunix.ld \
 	platform/pcat/user.ld platform/pcat/vmunix.ld \
@@ -105,7 +105,7 @@ $(1)/.zedbsd-sysroot-complete: $(ZEDBSD_SYSROOT_INPUTS) \
 	for header in $$(ZEDBSD_SYSROOT_PUBLIC_HEADERS); do \
 		case "$$$$header" in \
 		libc/include/*) relative=$$$${header#libc/include/} ;; \
-		include/uapi/*) relative=$$$${header#include/uapi/} ;; \
+		include/uapi/*) relative=$$$${header#include/} ;; \
 		*) echo "sysroot: non-public header in manifest: $$$$header" >&2; exit 1 ;; \
 		esac; \
 		case "$$$$relative" in */*) mkdir -p "$$$$temporary/usr/include/$$$${relative%/*}" ;; esac; \

@@ -7,7 +7,7 @@
 #ifndef KERN_KERN_RESOURCE_H
 #define KERN_KERN_RESOURCE_H
 
-#include <zedbsd/system.h>
+#include <uapi/system.h>
 
 void
 kern_resource_snapshot(

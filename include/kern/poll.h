@@ -7,7 +7,7 @@
 #ifndef KERN_KERN_POLL_H
 #define KERN_KERN_POLL_H
 
-#include <zedbsd/poll.h>
+#include <uapi/poll.h>
 #include <stdint.h>
 
 struct file;

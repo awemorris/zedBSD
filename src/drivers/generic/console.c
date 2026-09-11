@@ -22,7 +22,7 @@
 #include "kern/uaccess.h"
 #include "kern/waitq.h"
 
-#include <zedbsd/console.h>
+#include <uapi/console.h>
 #include <errno.h>
 #include <fcntl.h>
 #include "../platform/pcat/graphics/text.h"

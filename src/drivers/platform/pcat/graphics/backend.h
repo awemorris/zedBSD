@@ -14,7 +14,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <zedbsd/graphics.h>
+#include <uapi/graphics.h>
 
 struct pcat_graphics_image {
 	unsigned format, width, height;

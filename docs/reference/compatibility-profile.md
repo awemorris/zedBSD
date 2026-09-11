@@ -10,7 +10,7 @@ acceptance; individual implementation tests establish the supported subset.
 
 ## Feature selection
 
-The source of truth is [zedbsd/features.h](../../libc/include/zedbsd/features.h).
+The source of truth is [features.h](../../libc/include/features.h).
 Its current declarations include:
 
 | Declaration | Current value / selection |
@@ -37,7 +37,7 @@ and `errno`; do not infer success from `_POSIX_VERSION` alone.
 
 ## ABI boundary
 
-[uapi/types.h](../../include/uapi/zedbsd/types.h) selects `uapi_ptr_t` as
+[uapi/types.h](../../include/uapi/types.h) selects `uapi_ptr_t` as
 64 bits for `ZEDBSD_USER_ABI_LP64`, otherwise 32 bits. Structures containing
 that type and ioctl encodings must be compiled for the intended ABI. Do not
 copy host Linux structures, assume all UAPI records have one architecture-neutral

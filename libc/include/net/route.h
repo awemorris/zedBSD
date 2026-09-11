@@ -8,6 +8,6 @@
 #ifndef LIBC_NET_ROUTE_H
 #define LIBC_NET_ROUTE_H
 
-#include <zedbsd/route.h>
+#include <uapi/route.h>
 
 #endif

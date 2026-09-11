@@ -12,9 +12,9 @@
  */
 
 #include "userland/base/libc/syscall.h"
-#include <zedbsd/rtld-abi.h>
-#include <zedbsd/syscall.h>
-#include <zedbsd/thread.h>
+#include <rtld-abi.h>
+#include <uapi/syscall.h>
+#include <uapi/thread.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/mman.h>

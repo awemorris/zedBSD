@@ -33,7 +33,7 @@
 #include <hal/hal.h>
 #include <kern/pmem.h>
 #include <string.h>
-#include <zedbsd/block.h>
+#include <uapi/block.h>
 
 #define DISK_ALLOCATED		1U
 #define DISK_LIVE		2U

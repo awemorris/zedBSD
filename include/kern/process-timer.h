@@ -8,7 +8,7 @@
 #ifndef KERN_KERN_PROCESS_TIMER_H
 #define KERN_KERN_PROCESS_TIMER_H
 
-#include <uapi/zedbsd/signal.h>
+#include <uapi/signal.h>
 #include <stdint.h>
 #include <time.h>
 

@@ -37,7 +37,7 @@
 #include <string.h>
 #include <sys/un.h>
 #include <unistd.h>
-#include <zedbsd/poll.h>
+#include <uapi/poll.h>
 
 #define UNIX_STREAM_CHUNK_SIZE 2048U
 

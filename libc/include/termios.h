@@ -2,7 +2,7 @@
 #ifndef KERN_TERMIOS_H
 #define KERN_TERMIOS_H
 
-#include <zedbsd/termios.h>
+#include <uapi/termios.h>
 #include <sys/types.h>
 
 #define L_ctermid 13

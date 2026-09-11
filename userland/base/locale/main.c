@@ -19,7 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "libc/include/zedbsd/locale-format.h"
+#include "libc/include/locale-format.h"
 
 struct key_metadata {
 	int category;

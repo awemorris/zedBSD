@@ -10,7 +10,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <zedbsd/types.h>
+#include <uapi/types.h>
 
 #define NSIG	64
 #define SIGHUP	1

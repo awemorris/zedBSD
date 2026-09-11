@@ -8,8 +8,8 @@
 #ifndef LIBC_SIGNAL_H
 #define LIBC_SIGNAL_H
 
-#include <zedbsd/features.h>
-#include <zedbsd/signal.h>
+#include <features.h>
+#include <uapi/signal.h>
 #include <sys/types.h>
 #include <time.h>
 

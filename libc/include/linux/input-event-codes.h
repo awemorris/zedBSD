@@ -8,6 +8,6 @@
 #ifndef LIBC_LINUX_INPUT_EVENT_CODES_COMPAT_H
 #define LIBC_LINUX_INPUT_EVENT_CODES_COMPAT_H
 
-#include <zedbsd/input.h>
+#include <uapi/input.h>
 
 #endif

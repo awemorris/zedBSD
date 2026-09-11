@@ -13,7 +13,7 @@
 
 #include "userland/base/libc/syscall.h"
 
-#include <zedbsd/syscall.h>
+#include <uapi/syscall.h>
 #include <errno.h>
 #include <poll.h>
 #include <stdint.h>

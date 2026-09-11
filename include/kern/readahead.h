@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <zedbsd/readahead.h>
+#include <uapi/readahead.h>
 
 #define READAHEAD_MIN_WINDOW (64U * 1024U)
 #define READAHEAD_MAX_WINDOW (128U * 1024U)

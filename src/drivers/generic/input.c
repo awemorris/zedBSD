@@ -23,7 +23,7 @@
 #include "kern/uaccess.h"
 #include "kern/waitq.h"
 
-#include <zedbsd/input.h>
+#include <uapi/input.h>
 
 #include <errno.h>
 #include <string.h>

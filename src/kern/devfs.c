@@ -33,7 +33,7 @@
 #include "kern/partition.h"
 #include "kern/cred.h"
 
-#include <zedbsd/block.h>
+#include <uapi/block.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>

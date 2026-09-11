@@ -10,7 +10,7 @@
 
 #include <stdarg.h>
 #include <stddef.h>
-#include <zedbsd/rename.h>
+#include <uapi/rename.h>
 #include <stdint.h>
 #include <sys/types.h>
 

@@ -10,7 +10,7 @@ being treated as kernel pointers. Unsupported requests generally return
 
 ## Text console and terminals
 
-[console.h](../../include/uapi/zedbsd/console.h),
+[console.h](../../include/uapi/console.h),
 [console.c](../../src/drivers/generic/console.c) and
 [tty.c](../../src/kern/tty.c) define `/dev/console`. Ordinary reads, writes,
 polling and termios use the TTY path. Text display controls use ioctl group
@@ -41,7 +41,7 @@ terminal, and an invalid descriptor must remain distinguishable from it.
 
 ## Graphical ownership and drawing
 
-[graphics.h](../../include/uapi/zedbsd/graphics.h) defines group `g`.
+[graphics.h](../../include/uapi/graphics.h) defines group `g`.
 The [PC/AT driver](../../src/drivers/platform/pcat/graphics/pcat-graphics.c)
 serves the maintained PC/AT x86 path; the
 [PC-98 driver](../../src/drivers/platform/pc98/graphics/pc98-graphics.c)
@@ -85,8 +85,8 @@ There is no published current GPU object ABI to enumerate here.
 
 ## System administration and observation
 
-[system.h](../../include/uapi/zedbsd/system.h),
-[mountinfo.h](../../include/uapi/zedbsd/mountinfo.h) and
+[system.h](../../include/uapi/system.h),
+[mountinfo.h](../../include/uapi/mountinfo.h) and
 [system-device.c](../../src/drivers/generic/system-device.c) define
 `/dev/system`, group `s`. The device exposes ioctl operations, not a stream
 of textual status. Device-node access alone does not authorize privileged

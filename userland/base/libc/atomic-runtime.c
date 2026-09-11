@@ -17,8 +17,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <unistd.h>
-#include <zedbsd/atomic.h>
-#include <zedbsd/syscall.h>
+#include <uapi/atomic.h>
+#include <uapi/syscall.h>
 
 /*
  * GCC and Clang use the libatomic ABI when an atomic object is wider than the

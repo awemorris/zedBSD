@@ -6,7 +6,7 @@
 
 #include <kern/cdev.h>
 #include <kern/memory-device.h>
-#include <zedbsd/poll.h>
+#include <uapi/poll.h>
 #include <string.h>
 
 static ssize_t null_read(struct file *file, void *buffer, size_t size);

@@ -10,7 +10,7 @@
 
 #include <stdint.h>
 #include <sys/ioctl.h>
-#include <zedbsd/netif.h>
+#include <uapi/netif.h>
 
 #define KERN_WLAN_IOCTL_GROUP 'W'
 

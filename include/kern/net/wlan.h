@@ -10,7 +10,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <zedbsd/wlan.h>
+#include <uapi/wlan.h>
 
 #define WLAN_SCAN_DEADLINE_TICKS 1500ULL
 #define WLAN_SCAN_TUNE_DEADLINE_TICKS 50ULL

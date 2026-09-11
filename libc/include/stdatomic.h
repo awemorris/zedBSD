@@ -11,7 +11,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <zedbsd/atomic-compiler.h>
+#include <atomic-compiler.h>
 
 #define ATOMIC_BOOL_LOCK_FREE	__ZEDBSD_ATOMIC_BOOL_LOCK_FREE
 #define ATOMIC_CHAR_LOCK_FREE	__ZEDBSD_ATOMIC_CHAR_LOCK_FREE

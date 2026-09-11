@@ -27,7 +27,7 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <zedbsd/fcntl.h>
+#include <uapi/fcntl.h>
 
 #define RECORD_LOCK_INFINITY INT64_MAX
 

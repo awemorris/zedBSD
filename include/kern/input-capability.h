@@ -2,7 +2,7 @@
 #ifndef KERN_KERN_INPUT_CAPABILITY_H
 #define KERN_KERN_INPUT_CAPABILITY_H
 
-#include <zedbsd/input.h>
+#include <uapi/input.h>
 #include <stddef.h>
 #include <stdint.h>
 

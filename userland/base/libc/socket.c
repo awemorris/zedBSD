@@ -13,8 +13,8 @@
 
 #include "userland/base/libc/syscall.h"
 
-#include <zedbsd/syscall.h>
-#include <zedbsd/netinet.h>
+#include <uapi/syscall.h>
+#include <uapi/netinet.h>
 #include <errno.h>
 #include <stdint.h>
 #include <string.h>

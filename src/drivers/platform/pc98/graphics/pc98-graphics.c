@@ -16,7 +16,7 @@
 #include "kern/uaccess.h"
 #include "drivers/platform/pc98/graphics/backend.h"
 
-#include <zedbsd/graphics.h>
+#include <uapi/graphics.h>
 #include <errno.h>
 #include <hal/hal.h>
 #include <string.h>

@@ -29,7 +29,7 @@
 #include <hal/hal.h>
 #include <stdint.h>
 #include <string.h>
-#include <zedbsd/sysctl.h>
+#include <uapi/sysctl.h>
 
 #define SYSCTL_NAME_MAX 64U
 

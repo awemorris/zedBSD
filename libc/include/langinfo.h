@@ -8,7 +8,7 @@
 #ifndef LIBC_LANGINFO_H
 #define LIBC_LANGINFO_H
 
-#include <zedbsd/locale-format.h>
+#include <locale-format.h>
 
 typedef int nl_item;
 

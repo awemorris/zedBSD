@@ -12,10 +12,10 @@
  */
 
 #include "userland/base/libc/syscall.h"
-#include <zedbsd/syscall.h>
-#include <zedbsd/usync.h>
-#include <zedbsd/thread.h>
-#include <zedbsd/rtld-abi.h>
+#include <uapi/syscall.h>
+#include <uapi/usync.h>
+#include <uapi/thread.h>
+#include <rtld-abi.h>
 #include <errno.h>
 #include <fenv.h>
 #include <pthread.h>

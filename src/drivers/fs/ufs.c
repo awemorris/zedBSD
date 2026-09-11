@@ -50,9 +50,9 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/statvfs.h>
-#include <zedbsd/blkid.h>
-#include <zedbsd/quota.h>
-#include <zedbsd/snapshot.h>
+#include <uapi/blkid.h>
+#include <uapi/quota.h>
+#include <uapi/snapshot.h>
 #include "kern/panic.h"
 
 #define UFS_SECTOR_SIZE			512U

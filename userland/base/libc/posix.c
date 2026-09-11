@@ -15,15 +15,15 @@
 #include "libc/heap.h"
 #include "libc/stdio-internal.h"
 
-#include <zedbsd/auxv.h>
-#include <zedbsd/dirent.h>
-#include <zedbsd/fcntl.h>
-#include <zedbsd/syscall.h>
+#include <uapi/auxv.h>
+#include <uapi/dirent.h>
+#include <uapi/fcntl.h>
+#include <uapi/syscall.h>
 #include <sys/sysctl.h>
-#include <zedbsd/process.h>
-#include <zedbsd/netif.h>
-#include <zedbsd/route.h>
-#include <zedbsd/rtld-abi.h>
+#include <uapi/process.h>
+#include <uapi/netif.h>
+#include <uapi/route.h>
+#include <rtld-abi.h>
 #include <dirent.h>
 #include <devctl.h>
 #include <aio.h>

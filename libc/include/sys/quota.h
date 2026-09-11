@@ -8,7 +8,7 @@
 #ifndef LIBC_SYS_QUOTA_H
 #define LIBC_SYS_QUOTA_H
 
-#include <zedbsd/quota.h>
+#include <uapi/quota.h>
 
 int quotactl(const char *, struct quota_control *);
 

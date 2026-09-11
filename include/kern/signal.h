@@ -12,7 +12,7 @@
 #ifndef KERN_KERN_SIGNAL_H
 #define KERN_KERN_SIGNAL_H
 
-#include <uapi/zedbsd/signal.h>
+#include <uapi/signal.h>
 #include <stdint.h>
 #include <sys/types.h>
 

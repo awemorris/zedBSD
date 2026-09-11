@@ -8,6 +8,6 @@
 #ifndef LIBC_NET_IF_H
 #define LIBC_NET_IF_H
 
-#include <zedbsd/netif.h>
+#include <uapi/netif.h>
 
 #endif

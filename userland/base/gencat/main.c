@@ -24,7 +24,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "libc/include/zedbsd/catalog-format.h"
+#include "libc/include/catalog-format.h"
 
 struct message {
 	uint32_t set;

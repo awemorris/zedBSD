@@ -49,7 +49,7 @@
 #include <hal/hal.h>
 #include <string.h>
 
-#include <zedbsd/sysctl.h>
+#include <uapi/sysctl.h>
 
 #define PHYSICAL_DISK_MAX 4U
 #define VFS_HIGH __attribute__((section(".hightext")))

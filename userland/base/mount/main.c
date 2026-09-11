@@ -20,7 +20,7 @@
 #include <sys/mount.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <zedbsd/mountinfo.h>
+#include <uapi/mountinfo.h>
 
 static const char *program_name(const char *path);
 static int run_unmount(int argc, char **argv);

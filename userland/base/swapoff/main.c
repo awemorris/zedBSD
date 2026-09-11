@@ -13,7 +13,7 @@
 
 #include "userland/base/swap-control/swap-command.h"
 
-#include <zedbsd/system.h>
+#include <uapi/system.h>
 
 /*
  * Runs the swapoff command.

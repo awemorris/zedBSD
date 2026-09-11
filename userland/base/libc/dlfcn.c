@@ -12,7 +12,7 @@
  */
 
 #include <dlfcn.h>
-#include <zedbsd/rtld-abi.h>
+#include <rtld-abi.h>
 
 #if !defined(KERN_DYNAMIC_LIBC)
 extern void *__rtld_dlopen(const char *, int) __attribute__((weak));

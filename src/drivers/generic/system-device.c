@@ -34,8 +34,8 @@
 #include "kern/net/socket.h"
 #include "kern/vmspace.h"
 #include "kern/mount.h"
-#include <zedbsd/system.h>
-#include <zedbsd/mountinfo.h>
+#include <uapi/system.h>
+#include <uapi/mountinfo.h>
 #include <errno.h>
 #include <string.h>
 #include <kern/system-swap-device.h>

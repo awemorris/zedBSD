@@ -14,7 +14,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <zedbsd/graphics.h>
+#include <uapi/graphics.h>
 
 struct pc98_graphics_image {
 	unsigned format, width, height;

@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "table.h"
-#include <zedbsd/block.h>
+#include <uapi/block.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>

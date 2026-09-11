@@ -18,7 +18,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
-#include <zedbsd/system.h>
+#include <uapi/system.h>
 
 static void usage(void);
 static int show_file(int descriptor, const char *path, int mount_query, int show_user);
