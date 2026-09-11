@@ -9,8 +9,8 @@
  * inode
  */
 
-#ifndef ZEDBSD_KERN_INODE_H
-#define ZEDBSD_KERN_INODE_H
+#ifndef KERN_KERN_INODE_H
+#define KERN_KERN_INODE_H
 
 #include <stddef.h>
 #include <stdint.h>

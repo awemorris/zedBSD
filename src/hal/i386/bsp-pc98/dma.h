@@ -11,8 +11,8 @@
  * The legacy PC-98 system-DMA contract.
  */
 
-#ifndef ZEDBSD_HAL_I386_PC98_DMA_H
-#define ZEDBSD_HAL_I386_PC98_DMA_H
+#ifndef KERN_HAL_I386_PC98_DMA_H
+#define KERN_HAL_I386_PC98_DMA_H
 
 #include <hal/hal.h>
 

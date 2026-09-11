@@ -1,8 +1,8 @@
 /* Typed X68000 device apertures in the MC68030 high direct map. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 
-#ifndef ZEDBSD_HAL_M68K_X68K_MMIO_H
-#define ZEDBSD_HAL_M68K_X68K_MMIO_H
+#ifndef KERN_HAL_M68K_X68K_MMIO_H
+#define KERN_HAL_M68K_X68K_MMIO_H
 
 #include <hal/hal.h>
 

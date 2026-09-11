@@ -45,10 +45,10 @@ for variant in ["ordinary", "sanitize"]:
         ("owned", ["plan/ws004/tests/storage-owned-buffer-stories.c"], ["-pthread"]),
         ("bot", ["plan/ws004/tests/storage-bot-stories.c"], []),
         ("fat", ["plan/ws018/tests/storage-fat-stories.c",
-                 "src/drivers/fs/fat.c"], ["-DZEDBSD_USER_ABI_LP64", "-Ilibc/include"]),
+                 "src/drivers/fs/fat.c"], ["-DKERN_USER_ABI_LP64", "-Ilibc/include"]),
         ("ufs", ["plan/ws018/tests/storage-ufs-stories.c",
                  "src/kern/quota.c"],
-                 ["-DZEDBSD_USER_ABI_LP64", "-Ilibc/include", "-pthread"])]:
+                 ["-DKERN_USER_ABI_LP64", "-Ilibc/include", "-pthread"])]:
         binary = output / f"{label}-{variant}"
         objects = []
         if label == "ufs":

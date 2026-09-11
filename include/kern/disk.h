@@ -9,8 +9,8 @@
  * Disk (block device)
  */
 
-#ifndef ZEDBSD_KERN_DISK_H
-#define ZEDBSD_KERN_DISK_H
+#ifndef KERN_KERN_DISK_H
+#define KERN_KERN_DISK_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -49,9 +49,9 @@ struct disk;
 struct bio;
 struct thread;
 struct backing_claim;
-struct zedbsd_block_info;
+struct kern_block_info;
 
-int disk_block_info(struct disk *, struct zedbsd_block_info *);
+int disk_block_info(struct disk *, struct kern_block_info *);
 
 struct disk_geometry {
 	uint32_t cylinders;

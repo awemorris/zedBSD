@@ -11,8 +11,8 @@
  * Declares the zedBSD userland readline interface.
  */
 
-#ifndef ZEDBSD_READLINE_READLINE_H
-#define ZEDBSD_READLINE_READLINE_H
+#ifndef KERN_READLINE_READLINE_H
+#define KERN_READLINE_READLINE_H
 
 /* Small, source-compatible subset of the GNU Readline interface. */
 extern char *rl_line_buffer;

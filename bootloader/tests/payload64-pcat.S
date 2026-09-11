@@ -29,7 +29,7 @@ _start:
 	jne fail
 	testw $ZBL6_HANDOFF_FLAG_BOOT_PARAMETERS, ZBL6_HANDOFF_FLAGS_OFFSET(%rdi)
 	jz fail
-	cmpl $ZEDBSD_BOOT_PARAMETER_RECORD_MAGIC, \
+	cmpl $KERN_BOOT_PARAMETER_RECORD_MAGIC, \
 	    ZBL6_HANDOFF_V5_BIOS_PARAMETERS_OFFSET(%rdi)
 	jne fail
 	jmp common_handoff

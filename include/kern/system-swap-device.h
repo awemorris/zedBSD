@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_KERN_SYSTEM_SWAP_DEVICE_H
-#define ZEDBSD_KERN_SYSTEM_SWAP_DEVICE_H
+#ifndef KERN_KERN_SYSTEM_SWAP_DEVICE_H
+#define KERN_KERN_SYSTEM_SWAP_DEVICE_H
 
 #include <stdint.h>
 

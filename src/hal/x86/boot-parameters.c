@@ -4,12 +4,12 @@
 #include <boot/pc98-handoff.h>
 
 static void
-copy_default(char destination[ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE])
+copy_default(char destination[KERN_BOOT_PARAMETERS_STORAGE_SIZE])
 {
-	static const char text[] = ZEDBSD_BOOT_PARAMETERS_DEFAULT_TEXT;
+	static const char text[] = KERN_BOOT_PARAMETERS_DEFAULT_TEXT;
 	size_t index;
 
-	_Static_assert(sizeof(text) <= ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE,
+	_Static_assert(sizeof(text) <= KERN_BOOT_PARAMETERS_STORAGE_SIZE,
 	    "default boot parameters must fit transport storage");
 	for (index = 0; index < sizeof(text); index++)
 		destination[index] = text[index];
@@ -17,7 +17,7 @@ copy_default(char destination[ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE])
 
 enum x86_boot_parameters_result
 x86_boot_parameters_copy(
-	char destination[ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE],
+	char destination[KERN_BOOT_PARAMETERS_STORAGE_SIZE],
 	const char *source, size_t source_capacity)
 {
 	size_t length;
@@ -29,7 +29,7 @@ x86_boot_parameters_copy(
 		return X86_BOOT_PARAMETERS_OK;
 	}
 	for (length = 0; length < source_capacity &&
-	     length < ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE; length++) {
+	     length < KERN_BOOT_PARAMETERS_STORAGE_SIZE; length++) {
 		unsigned char byte = (unsigned char)source[length];
 
 		if (byte == 0U)
@@ -38,7 +38,7 @@ x86_boot_parameters_copy(
 			return X86_BOOT_PARAMETERS_NON_ASCII;
 	}
 	if (length == source_capacity ||
-	    length == ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE)
+	    length == KERN_BOOT_PARAMETERS_STORAGE_SIZE)
 		return X86_BOOT_PARAMETERS_UNTERMINATED;
 	for (size_t index = 0; index <= length; index++)
 		destination[index] = source[index];
@@ -47,20 +47,20 @@ x86_boot_parameters_copy(
 
 enum x86_boot_parameters_result
 x86_boot_parameter_record_copy(
-	char destination[ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE],
-	const struct zedbsd_boot_parameter_record *record, size_t available)
+	char destination[KERN_BOOT_PARAMETERS_STORAGE_SIZE],
+	const struct kern_boot_parameter_record *record, size_t available)
 {
 	size_t index;
 
 	if (destination == NULL || record == NULL)
 		return X86_BOOT_PARAMETERS_INVALID_ARGUMENT;
 	if (available < sizeof(*record) ||
-	    record->magic != ZEDBSD_BOOT_PARAMETER_RECORD_MAGIC ||
-	    record->version != ZEDBSD_BOOT_PARAMETER_RECORD_VERSION ||
+	    record->magic != KERN_BOOT_PARAMETER_RECORD_MAGIC ||
+	    record->version != KERN_BOOT_PARAMETER_RECORD_VERSION ||
 	    record->size != sizeof(*record) ||
-	    record->flags != ZEDBSD_BOOT_PARAMETER_RECORD_FLAG_TEXT ||
+	    record->flags != KERN_BOOT_PARAMETER_RECORD_FLAG_TEXT ||
 	    record->reserved != 0U ||
-	    record->length > ZEDBSD_BOOT_PARAMETERS_TEXT_MAX ||
+	    record->length > KERN_BOOT_PARAMETERS_TEXT_MAX ||
 	    record->text[record->length] != '\0')
 		return X86_BOOT_PARAMETERS_INVALID_RECORD;
 	for (index = 0; index < record->length; index++) {
@@ -78,12 +78,12 @@ x86_boot_parameter_record_copy(
 enum x86_pc98_handoff_form
 x86_pc98_handoff_classify(uint16_t version, uint16_t size)
 {
-	if (version == ZEDBSD_HANDOFF_VERSION_PC98 &&
-	    size == ZEDBSD_PC98_PARAMETER_HANDOFF_SIZE)
+	if (version == KERN_HANDOFF_VERSION_PC98 &&
+	    size == KERN_PC98_PARAMETER_HANDOFF_SIZE)
 		return X86_PC98_HANDOFF_PARAMETERS;
-	if ((version == ZEDBSD_HANDOFF_VERSION_PC98 ||
-	     version == ZEDBSD_HANDOFF_VERSION_MULTIBOOT) &&
-	    size == ZEDBSD_PC98_HANDOFF_COMMON_SIZE)
+	if ((version == KERN_HANDOFF_VERSION_PC98 ||
+	     version == KERN_HANDOFF_VERSION_MULTIBOOT) &&
+	    size == KERN_PC98_HANDOFF_COMMON_SIZE)
 		return X86_PC98_HANDOFF_LEGACY;
 	return X86_PC98_HANDOFF_INVALID;
 }

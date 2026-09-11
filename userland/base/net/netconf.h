@@ -11,8 +11,8 @@
  * Declares the zedBSD userland netconf interface.
  */
 
-#ifndef ZEDBSD_NETCONF_H
-#define ZEDBSD_NETCONF_H
+#ifndef KERN_NETCONF_H
+#define KERN_NETCONF_H
 
 #include <stddef.h>
 #include <stdio.h>

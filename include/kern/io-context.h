@@ -7,8 +7,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_KERN_IO_CONTEXT_H
-#define ZEDBSD_KERN_IO_CONTEXT_H
+#ifndef KERN_KERN_IO_CONTEXT_H
+#define KERN_KERN_IO_CONTEXT_H
 
 #include <stdint.h>
 #include <stddef.h>

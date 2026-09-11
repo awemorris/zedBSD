@@ -150,7 +150,7 @@ video_parse(
 	int valid;
 
 	/* Requires the transport's bounded NUL-terminated text contract. */
-	if (text == 0 || length > ZEDBSD_BOOT_PARAMETERS_TEXT_MAX)
+	if (text == 0 || length > KERN_BOOT_PARAMETERS_TEXT_MAX)
 		return -1;
 
 	if (text[length] != '\0')

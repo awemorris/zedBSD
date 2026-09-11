@@ -28,7 +28,7 @@ cp "$pnvm" "$build_dir/pnvm.bin"
 
 cc=${CC:-cc}
 warnings="-std=c11 -Wall -Wextra -Werror"
-defines="-m64 -DHAL_ARCH_AMD64 -DHAL_BOARD_PCAT -DZEDBSD_USER_ABI_LP64"
+defines="-m64 -DHAL_ARCH_AMD64 -DHAL_BOARD_PCAT -DKERN_USER_ABI_LP64"
 defines="$defines -DINTEL_AX211_FIRMWARE_LOADER_HOST_TEST"
 includes="-I$repo_root/libc/include -I$repo_root/include/uapi"
 includes="$includes -I$repo_root/include -I$repo_root/src"

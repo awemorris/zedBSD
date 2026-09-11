@@ -153,7 +153,7 @@ draw(
 	zombie = 0;
 
 	/* Handles a failed ioctl operation. */
-	if (ioctl(fd, ZEDBSD_SYSTEM_GET_VMSTAT, &vm) != 0 ||
+	if (ioctl(fd, KERN_SYSTEM_GET_VMSTAT, &vm) != 0 ||
 	    snapshot(fd, p, &count) != 0)
 
 		/* Returns the computed result. */
@@ -175,8 +175,8 @@ draw(
 	human(vm.physical_total, total);
 	human(vm.physical_free, freeb);
 	human(vm.physical_total - vm.physical_free, used);
-	human(vm.swap_total * ZEDBSD_SYSTEM_SWAP_PAGE_SIZE, swap);
-	human(vm.swap_free * ZEDBSD_SYSTEM_SWAP_PAGE_SIZE, swapfree);
+	human(vm.swap_total * KERN_SYSTEM_SWAP_PAGE_SIZE, swap);
+	human(vm.swap_free * KERN_SYSTEM_SWAP_PAGE_SIZE, swapfree);
 
 	/* Handles the batch condition. */
 	if (!batch)
@@ -228,7 +228,7 @@ snapshot(
 		p[used].pid = cursor;
 
 		/* Handles a failed ioctl operation. */
-		if (ioctl(fd, ZEDBSD_SYSTEM_GET_PROCESS, &p[used]) != 0) {
+		if (ioctl(fd, KERN_SYSTEM_GET_PROCESS, &p[used]) != 0) {
 			/* Handles the reported system error. */
 			if (errno == ENOENT)
 				break;
@@ -236,7 +236,7 @@ snapshot(
 			/* Reports operation failure. */
 			return -1;
 		}
-		p[used].command[ZEDBSD_SYSTEM_PROCESS_COMMAND_MAX - 1U] = '\0';
+		p[used].command[KERN_SYSTEM_PROCESS_COMMAND_MAX - 1U] = '\0';
 		cursor = p[used].pid;
 		used++;
 	}

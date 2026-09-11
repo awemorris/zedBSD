@@ -11,8 +11,8 @@
  * Declares the zedBSD userland netutil interface.
  */
 
-#ifndef ZEDBSD_USER_NETUTIL_H
-#define ZEDBSD_USER_NETUTIL_H
+#ifndef KERN_USER_NETUTIL_H
+#define KERN_USER_NETUTIL_H
 
 #include <net/if.h>
 #include <netinet/in.h>

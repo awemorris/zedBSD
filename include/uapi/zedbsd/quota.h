@@ -4,23 +4,24 @@
  *
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_UAPI_QUOTA_H
-#define ZEDBSD_UAPI_QUOTA_H
+
+#ifndef KERN_UAPI_QUOTA_H
+#define KERN_UAPI_QUOTA_H
 
 #include <stdint.h>
 
-#define ZEDBSD_QUOTA_VERSION	1U
+#define KERN_QUOTA_VERSION	1U
 
-#define ZEDBSD_QUOTA_GET	1U
-#define ZEDBSD_QUOTA_SET	2U
-#define ZEDBSD_QUOTA_ENABLE	3U
-#define ZEDBSD_QUOTA_DISABLE	4U
-#define ZEDBSD_QUOTA_SYNC	5U
+#define KERN_QUOTA_GET	1U
+#define KERN_QUOTA_SET	2U
+#define KERN_QUOTA_ENABLE	3U
+#define KERN_QUOTA_DISABLE	4U
+#define KERN_QUOTA_SYNC	5U
 
-#define ZEDBSD_QUOTA_USER	0U
-#define ZEDBSD_QUOTA_GROUP	1U
+#define KERN_QUOTA_USER	0U
+#define KERN_QUOTA_GROUP	1U
 
-#define ZEDBSD_QUOTA_F_ENABLED	0x00000001U
+#define KERN_QUOTA_F_ENABLED	0x00000001U
 
 /*
  * All quantities are filesystem blocks, inodes, or absolute UTC seconds.

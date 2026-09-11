@@ -9,8 +9,8 @@
  * Process image construction
  */
 
-#ifndef ZEDBSD_KERN_EXEC_H
-#define ZEDBSD_KERN_EXEC_H
+#ifndef KERN_KERN_EXEC_H
+#define KERN_KERN_EXEC_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -26,7 +26,7 @@ struct vmspace;
 
 #define EXEC_STACK_DEFAULT_SIZE		(1024U * 1024U)
 #define EXEC_STACK_HARD_MAX		(1024U * 1024U)
-#define EXEC_STACK_GUARD_SIZE		ZEDBSD_PAGE_SIZE
+#define EXEC_STACK_GUARD_SIZE		KERN_PAGE_SIZE
 #define EXEC_INTERP_MAX			64U
 #define EXEC_INTERP_PATH		"/lib/ld.so"
 #define EXEC_SHEBANG_LINE_MAX		256U

@@ -47,11 +47,11 @@ compile_x86()
 }
 
 compile_x86 "$kernel64_obj" "$kernel64_dep" -m64 \
-	-DZEDBSD_USER_ABI_LP64 -DKA_T050_KERNEL
+	-DKERN_USER_ABI_LP64 -DKA_T050_KERNEL
 compile_x86 "$kernel32_obj" "$kernel32_dep" -m32 -march=i386 \
 	-DKA_T050_KERNEL
 compile_x86 "$amd64_hal_obj" "$amd64_hal_dep" -m64 \
-	-DHAL_ARCH_AMD64 -DHAL_BOARD_PCAT -DZEDBSD_USER_ABI_LP64 \
+	-DHAL_ARCH_AMD64 -DHAL_BOARD_PCAT -DKERN_USER_ABI_LP64 \
 	-DKA_T050_HAL
 compile_x86 "$i386_hal_obj" "$i386_hal_dep" -m32 -march=i386 \
 	-DHAL_ARCH_I386 -DHAL_BOARD_PCAT -DKA_T050_HAL
@@ -66,7 +66,7 @@ fi
 # Intentional word splitting: common_flags is a compiler option list.
 # shellcheck disable=SC2086
 "$m68k_cc" $common_flags -m68030 -msoft-float \
-	-DHAL_ARCH_M68K -DHAL_BOARD_X68K -DZEDBSD_USER_ABI_M68K \
+	-DHAL_ARCH_M68K -DHAL_BOARD_X68K -DKERN_USER_ABI_M68K \
 	-DKA_T050_X68K -MMD -MF "$x68k_dep" \
 	-c "$fixture" -o "$x68k_obj"
 

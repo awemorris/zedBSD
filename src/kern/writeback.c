@@ -41,7 +41,7 @@
 
 #define WB_AGE (2U * KERN_CLOCK_HZ)
 
-#define WB_MEMORY (WRITEBACK_TICKET_BYTES + ZEDBSD_PAGE_SIZE)
+#define WB_MEMORY (WRITEBACK_TICKET_BYTES + KERN_PAGE_SIZE)
 
 struct writeback_worker {
 	struct writeback_unmount *unmount;
@@ -125,13 +125,13 @@ writeback_budget_limits(
 		limit = WRITEBACK_GLOBAL_MAX;
 	else
 		limit = target / 5U * 2U;
-	limit &= ~(uint64_t)(ZEDBSD_PAGE_SIZE - 1U);
+	limit &= ~(uint64_t)(KERN_PAGE_SIZE - 1U);
 
 	/* Publishes page-aligned limits for the caller. */
 	*high = limit;
-	*low = (limit / 2U) & ~(uint64_t)(ZEDBSD_PAGE_SIZE - 1U);
+	*low = (limit / 2U) & ~(uint64_t)(KERN_PAGE_SIZE - 1U);
 	*device_high = (limit / WRITEBACK_DEVICE_MAX) &
-	    ~(uint64_t)(ZEDBSD_PAGE_SIZE - 1U);
+	    ~(uint64_t)(KERN_PAGE_SIZE - 1U);
 }
 
 /*
@@ -352,7 +352,7 @@ writeback_ticket_commit(
 	/* Traps on a commit the ticket cannot cover. */
 	enabled = budget_lock();
 	if (ticket == NULL || !budget_registered(ticket->budget) ||
-	    bytes > ticket->reserved || (bytes & (ZEDBSD_PAGE_SIZE - 1U)) != 0)
+	    bytes > ticket->reserved || (bytes & (KERN_PAGE_SIZE - 1U)) != 0)
 		HAL_FATAL("invalid dirty credit commit");
 
 	/* Moves the bytes from reserved to dirty at both levels. */
@@ -412,7 +412,7 @@ writeback_budget_clean(
 	/* Traps on a retirement larger than the recorded dirty quantity. */
 	enabled = budget_lock();
 	if (!budget_registered(budget) || bytes > budget->dirty ||
-	    (bytes & (ZEDBSD_PAGE_SIZE - 1U)) != 0)
+	    (bytes & (KERN_PAGE_SIZE - 1U)) != 0)
 		HAL_FATAL("invalid dirty credit retirement");
 
 	/* Discharges the bytes at both levels. */

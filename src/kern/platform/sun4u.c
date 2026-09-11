@@ -40,11 +40,11 @@ kern_platform_init(
 	if (!h ||
 	    !d ||
 	    !capacity ||
-	    h->magic != ZEDBSD_HANDOFF_MAGIC ||
-	    h->version != ZEDBSD_HANDOFF_VERSION_SUN4U ||
+	    h->magic != KERN_HANDOFF_MAGIC ||
+	    h->version != KERN_HANDOFF_VERSION_SUN4U ||
 	    h->size < sizeof(*s) ||
-	    s->extension_magic != ZEDBSD_SUN4U_HANDOFF_MAGIC ||
-	    s->extension_version != ZEDBSD_SUN4U_HANDOFF_VERSION ||
+	    s->extension_magic != KERN_SUN4U_HANDOFF_MAGIC ||
+	    s->extension_version != KERN_SUN4U_HANDOFF_VERSION ||
 	    s->ide_vendor != 0x1095 ||
 	    s->ide_device != 0x0646)
 		return 0;
@@ -57,10 +57,10 @@ kern_platform_init(
 
 	/* Publishes the IDE disk as the boot device. */
 	hal_memset(d, 0, sizeof(*d));
-	d->device_class = ZEDBSD_DEV_IDE;
+	d->device_class = KERN_DEV_IDE;
 	d->display_index = 0;
 	d->bios_id = 0x80;
-	d->flags = ZEDBSD_DEV_PRESENT | ZEDBSD_DEV_BOOT_ORIGIN;
+	d->flags = KERN_DEV_PRESENT | KERN_DEV_BOOT_ORIGIN;
 	d->sector_size = 512;
 
 	/* Reports the single published device. */
@@ -100,7 +100,7 @@ kern_platform_block_device(
 	struct disk *disk;
 
 	/* Only the IDE boot device has a disk. */
-	if (!d || d->device_class != ZEDBSD_DEV_IDE)
+	if (!d || d->device_class != KERN_DEV_IDE)
 		return NULL;
 
 	/* Resolves the CMD646 disk. */

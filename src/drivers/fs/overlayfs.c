@@ -37,7 +37,7 @@
 #define OVERLAY_RECORD_BYTES 512U
 #define OVERLAY_SLOT_SECTORS (OVERLAY_JOURNAL_BYTES / OVERLAY_RECORD_BYTES)
 #define OVERLAY_PATH_RECORD_MAX 468U
-#ifdef ZEDBSD_OVERLAY_CONTENT_HOST_TEST
+#ifdef KERN_OVERLAY_CONTENT_HOST_TEST
 /*
  * Keep host-test functions independently discardable.  The kernel link
  * still collects the complete overlay implementation in high memory.
@@ -54,7 +54,7 @@
 #define OVERLAY_OP_SET_OPAQUE 3U
 #define OVERLAY_OP_CLEAR_OPAQUE 4U
 
-#define OVERLAY_MATERIALIZATION_MAX ((ZEDBSD_PATH_MAX / 2U) + 1U)
+#define OVERLAY_MATERIALIZATION_MAX ((KERN_PATH_MAX / 2U) + 1U)
 
 enum overlay_identity_state {
 	OVERLAY_ID_FREE,
@@ -65,14 +65,14 @@ enum overlay_identity_state {
 struct overlay_identity {
 	ino_t ino;
 	uint8_t state;
-	char path[ZEDBSD_PATH_MAX];
+	char path[KERN_PATH_MAX];
 };
 
 struct overlay_metadata {
 	uint8_t used;
 	uint8_t flags;
 	uint64_t sequence;
-	char path[ZEDBSD_PATH_MAX];
+	char path[KERN_PATH_MAX];
 };
 
 struct overlay_mount_state {
@@ -106,7 +106,7 @@ struct overlay_inode_info {
 	struct path upper;
 	struct path lower;
 	unsigned identity_index;
-	char path[ZEDBSD_PATH_MAX];
+	char path[KERN_PATH_MAX];
 };
 
 struct overlay_inode_slot {
@@ -152,9 +152,9 @@ struct overlay_materialization_transaction {
 static struct overlay_inode_slot overlay_inodes[OVERLAY_INODE_MAX]
 	__attribute__((section(".vfs_bss")));
 
-#ifndef ZEDBSD_OVERLAY_CONTENT_HOST_TEST
+#ifndef KERN_OVERLAY_CONTENT_HOST_TEST
 typedef char overlay_record_path_must_fit[
-	(ZEDBSD_PATH_MAX - 1U <= OVERLAY_PATH_RECORD_MAX) ? 1 : -1];
+	(KERN_PATH_MAX - 1U <= OVERLAY_PATH_RECORD_MAX) ? 1 : -1];
 #endif
 
 static int overlay_layers_supported(const struct overlay_mount_args *args);
@@ -199,12 +199,12 @@ static OVERLAY_HIGH const struct path * overlay_select_path_locked(const struct 
 static OVERLAY_HIGH int overlay_path_snapshot(struct inode *inode,
     enum overlay_path_selection selection, struct path *result);
 static OVERLAY_HIGH int overlay_info_snapshot(struct inode *inode,
-    struct path *upper, struct path *lower, char relative[ZEDBSD_PATH_MAX]);
+    struct path *upper, struct path *lower, char relative[KERN_PATH_MAX]);
 static OVERLAY_HIGH int overlay_temporary_name(const char *name);
 static OVERLAY_HIGH int overlay_reserved_name(const char *name);
 static OVERLAY_HIGH int overlay_component_text(const struct componentname *component, char name[NAME_MAX + 1U]);
 static OVERLAY_HIGH int overlay_join(const char *parent, const char *name,
-    char result[ZEDBSD_PATH_MAX]);
+    char result[KERN_PATH_MAX]);
 static OVERLAY_HIGH int overlay_identity_get(struct overlay_mount_state *state,
     const char *path, unsigned *index_out, ino_t *ino_out, int *created_out);
 static OVERLAY_HIGH int overlay_lookup_real(const struct path *directory,
@@ -221,7 +221,7 @@ static OVERLAY_HIGH int overlay_getattr(struct inode *inode,
 static OVERLAY_HIGH int overlay_find_relative(struct mount *mountp,
     const char *relative, struct inode **result);
 static OVERLAY_HIGH int overlay_split_path(const char *path,
-    char parent[ZEDBSD_PATH_MAX], struct componentname *name);
+    char parent[KERN_PATH_MAX], struct componentname *name);
 static OVERLAY_HIGH void overlay_publish_upper(struct inode *inode,
     const struct path *upper, int clear_lower, const char *relative);
 static OVERLAY_HIGH void overlay_install_upper(struct inode *inode,
@@ -235,7 +235,7 @@ static OVERLAY_HIGH void overlay_temp_name(uint16_t number, char name[11]);
 static OVERLAY_HIGH int overlay_copy_up_regular(struct inode *inode);
 static OVERLAY_HIGH int overlay_new_preflight(struct inode *directory,
     const struct componentname *name, char text[NAME_MAX + 1U],
-    char relative[ZEDBSD_PATH_MAX], struct inode **hidden_lower);
+    char relative[KERN_PATH_MAX], struct inode **hidden_lower);
 static OVERLAY_HIGH int overlay_finish_new(struct inode *directory,
     const struct componentname *name, const char *relative,
     int directory_object, int opaque_added, struct inode **result);
@@ -298,7 +298,7 @@ static OVERLAY_HIGH ssize_t overlay_pwrite(struct file *file,
 static OVERLAY_HIGH ssize_t overlay_pwrite_internal(struct file *file,
     const void *buffer, size_t size, off_t offset, unsigned flags,
     const struct ucred *credential, const struct io_context *context);
-#ifdef ZEDBSD_OVERLAY_CONTENT_HOST_TEST
+#ifdef KERN_OVERLAY_CONTENT_HOST_TEST
 static int overlay_host_truncate_limited(struct inode *inode,
     const struct inode_truncate_request *request,
     struct inode_truncate_result *result);
@@ -469,7 +469,7 @@ drv_overlay_mount_at(
 	return 0;
 }
 
-#ifdef ZEDBSD_OVERLAY_CONTENT_HOST_TEST
+#ifdef KERN_OVERLAY_CONTENT_HOST_TEST
 /*
  * Runs the stacked write callback for a host test with a temporary
  * overlay binding of an outer file over a real file.
@@ -852,7 +852,7 @@ overlay_metadata_digest(
 	const struct overlay_metadata entries[OVERLAY_METADATA_MAX])
 {
 	uint32_t crc;
-	char previous[ZEDBSD_PATH_MAX];
+	char previous[KERN_PATH_MAX];
 	unsigned emitted;
 	int best;
 	int difference;
@@ -960,7 +960,7 @@ overlay_snapshot_apply(
 	uint64_t sequence;
 	uint64_t epoch;
 	uint16_t version;
-	char path[ZEDBSD_PATH_MAX];
+	char path[KERN_PATH_MAX];
 	char *root;
 	unsigned i;
 	int signature;
@@ -993,7 +993,7 @@ overlay_snapshot_apply(
 		return EINVAL;	/* Failed. */
 
 	/* A path longer than the kernel or the record itself can hold. */
-	if (length >= ZEDBSD_PATH_MAX || length > OVERLAY_PATH_RECORD_MAX)
+	if (length >= KERN_PATH_MAX || length > OVERLAY_PATH_RECORD_MAX)
 		return EINVAL;	/* Failed. */
 
 	/* A record of another epoch belongs to a slot that was replaced. */
@@ -1063,7 +1063,7 @@ overlay_operation_apply(
 	uint64_t sequence;
 	uint64_t epoch;
 	uint16_t version;
-	char path[ZEDBSD_PATH_MAX];
+	char path[KERN_PATH_MAX];
 	int signature;
 	int identity;
 	int tail_blank;
@@ -1091,7 +1091,7 @@ overlay_operation_apply(
 		return EINVAL;	/* Failed. */
 
 	/* A path longer than the kernel or the record itself can hold. */
-	if (length >= ZEDBSD_PATH_MAX || length > OVERLAY_PATH_RECORD_MAX)
+	if (length >= KERN_PATH_MAX || length > OVERLAY_PATH_RECORD_MAX)
 		return EINVAL;	/* Failed. */
 
 	/* A record of another epoch belongs to a slot that was replaced. */
@@ -1574,7 +1574,7 @@ overlay_journal_compact_impl(
 	unsigned commit_sector;
 	unsigned sector;
 	unsigned target;
-	char previous[ZEDBSD_PATH_MAX];
+	char previous[KERN_PATH_MAX];
 	const char *after;
 	int index;
 	int error;
@@ -1745,7 +1745,7 @@ overlay_journal_append_impl(
 	if (path == NULL || path[0] == '\0' || path[0] == '/')
 		return EINVAL;
 	length = strlen(path);
-	if (length >= ZEDBSD_PATH_MAX || length > OVERLAY_PATH_RECORD_MAX)
+	if (length >= KERN_PATH_MAX || length > OVERLAY_PATH_RECORD_MAX)
 		return ENAMETOOLONG;
 
 	/* A new entry needs a free table slot. */
@@ -1955,7 +1955,7 @@ overlay_info_snapshot(
 	struct inode *inode,
 	struct path *upper,
 	struct path *lower,
-	char relative[ZEDBSD_PATH_MAX])
+	char relative[KERN_PATH_MAX])
 {
 	struct overlay_inode_info *info;
 
@@ -2073,7 +2073,7 @@ static OVERLAY_HIGH int
 overlay_join(
 	const char *parent,
 	const char *name,
-	char result[ZEDBSD_PATH_MAX])
+	char result[KERN_PATH_MAX])
 {
 	size_t parent_length;
 	size_t name_length;
@@ -2094,7 +2094,7 @@ overlay_join(
 		return ENAMETOOLONG;
 
 	/* And a result the caller buffer could not hold. */
-	if (parent_length + separator_length + name_length >= ZEDBSD_PATH_MAX)
+	if (parent_length + separator_length + name_length >= KERN_PATH_MAX)
 		return ENAMETOOLONG;
 	memcpy(result, parent, parent_length);
 	if (parent_length != 0) {
@@ -2211,7 +2211,7 @@ overlay_refresh_locked(
 	inode->i_atime = visible->i_atime;
 	inode->i_mtime = visible->i_mtime;
 	inode->i_ctime = visible->i_ctime;
-#ifndef ZEDBSD_OVERLAY_CONTENT_HOST_TEST
+#ifndef KERN_OVERLAY_CONTENT_HOST_TEST
 	inode->i_op = &overlay_inode_ops;
 	if (inode->i_type == INODE_DIR)
 		inode->i_fop = &overlay_directory_ops;
@@ -2344,8 +2344,8 @@ overlay_lookup(
 	struct path *upper_argument;
 	struct path *lower_argument;
 	char name[NAME_MAX + 1U];
-	char parent_path[ZEDBSD_PATH_MAX];
-	char relative[ZEDBSD_PATH_MAX];
+	char parent_path[KERN_PATH_MAX];
+	char relative[KERN_PATH_MAX];
 	struct overlay_inode_info *info;
 	unsigned parent_flags;
 	unsigned name_flags;
@@ -2571,7 +2571,7 @@ overlay_find_relative(
 static OVERLAY_HIGH int
 overlay_split_path(
 	const char *path,
-	char parent[ZEDBSD_PATH_MAX],
+	char parent[KERN_PATH_MAX],
 	struct componentname *name)
 {
 	const char *slash;
@@ -2783,8 +2783,8 @@ overlay_ensure_upper_dir_tracked(
 	struct path lower;
 	struct path parent_upper;
 	struct componentname name;
-	char relative[ZEDBSD_PATH_MAX];
-	char parent_path[ZEDBSD_PATH_MAX];
+	char relative[KERN_PATH_MAX];
+	char parent_path[KERN_PATH_MAX];
 	struct overlay_inode_info *info;
 	int error;
 	int cleanup_error;
@@ -3005,8 +3005,8 @@ overlay_copy_up_regular(
 	struct componentname final_name;
 	struct componentname temp_name_component;
 	struct inode_creation_request request;
-	char relative[ZEDBSD_PATH_MAX];
-	char parent_path[ZEDBSD_PATH_MAX];
+	char relative[KERN_PATH_MAX];
+	char parent_path[KERN_PATH_MAX];
 	char temp_name[11];
 	uint8_t *buffer;
 	off_t offset;
@@ -3315,7 +3315,7 @@ overlay_new_preflight(
 	struct inode *directory,
 	const struct componentname *name,
 	char text[NAME_MAX + 1U],
-	char relative[ZEDBSD_PATH_MAX],
+	char relative[KERN_PATH_MAX],
 	struct inode **hidden_lower)
 {
 	struct overlay_mount_state *state;
@@ -3323,7 +3323,7 @@ overlay_new_preflight(
 	struct path lower;
 	struct inode *found;
 	struct overlay_inode_info *info;
-	char parent_path[ZEDBSD_PATH_MAX];
+	char parent_path[KERN_PATH_MAX];
 	unsigned flags;
 	unsigned parent_flags;
 	int reserved;
@@ -3533,7 +3533,7 @@ overlay_create(
 	struct path upper;
 	struct inode *created;
 	char text[NAME_MAX + 1U];
-	char relative[ZEDBSD_PATH_MAX];
+	char relative[KERN_PATH_MAX];
 	int error;
 
 	state = directory->i_mount->m_data;
@@ -3592,7 +3592,7 @@ overlay_mkdir(
 	struct inode *created;
 	struct inode *lower;
 	char text[NAME_MAX + 1U];
-	char relative[ZEDBSD_PATH_MAX];
+	char relative[KERN_PATH_MAX];
 	unsigned metadata_flags;
 	int error;
 	int opaque_added;
@@ -3888,7 +3888,7 @@ overlay_mknod(
 	struct path upper;
 	struct inode *created;
 	char text[NAME_MAX + 1U];
-	char relative[ZEDBSD_PATH_MAX];
+	char relative[KERN_PATH_MAX];
 	int error;
 
 	state = directory->i_mount->m_data;
@@ -3957,7 +3957,7 @@ overlay_symlink(
 	struct path upper;
 	struct inode *created;
 	char text[NAME_MAX + 1U];
-	char relative[ZEDBSD_PATH_MAX];
+	char relative[KERN_PATH_MAX];
 	int error;
 
 	state = directory->i_mount->m_data;
@@ -4066,7 +4066,7 @@ overlay_repath_preflight(
 	unsigned j;
 	size_t old_length;
 	size_t new_length;
-	char candidate[ZEDBSD_PATH_MAX];
+	char candidate[KERN_PATH_MAX];
 	const char *suffix;
 	const struct overlay_inode_info *replaced_info;
 	size_t suffix_length;
@@ -4147,7 +4147,7 @@ overlay_repath_commit(
 {
 	unsigned i;
 	size_t old_length;
-	char updated[ZEDBSD_PATH_MAX];
+	char updated[KERN_PATH_MAX];
 	struct overlay_inode_info *info;
 	struct inode *inode;
 	int below;
@@ -4212,10 +4212,10 @@ overlay_rename(
 	struct path new_upper_path;
 	char old_text[NAME_MAX + 1U];
 	char new_text[NAME_MAX + 1U];
-	char old_parent_path[ZEDBSD_PATH_MAX];
-	char new_parent_path[ZEDBSD_PATH_MAX];
-	char old_relative[ZEDBSD_PATH_MAX];
-	char new_relative[ZEDBSD_PATH_MAX];
+	char old_parent_path[KERN_PATH_MAX];
+	char new_parent_path[KERN_PATH_MAX];
+	char old_relative[KERN_PATH_MAX];
+	char new_relative[KERN_PATH_MAX];
 	unsigned name_flags;
 	int old_reserved;
 	int new_reserved;
@@ -4470,8 +4470,8 @@ overlay_remove(
 	struct path target_lower;
 	struct inode *target;
 	char text[NAME_MAX + 1U];
-	char parent_path[ZEDBSD_PATH_MAX];
-	char relative[ZEDBSD_PATH_MAX];
+	char parent_path[KERN_PATH_MAX];
+	char relative[KERN_PATH_MAX];
 	int reserved;
 	int error;
 
@@ -4977,7 +4977,7 @@ overlay_pwrite_internal(
 	return count;
 }
 
-#ifdef ZEDBSD_OVERLAY_CONTENT_HOST_TEST
+#ifdef KERN_OVERLAY_CONTENT_HOST_TEST
 /*
  * Exercises the real stacking callback without exposing overlay-private state.
  */
@@ -5110,7 +5110,7 @@ overlay_dir_open_phase(
 	struct path path;
 	struct path *upper_argument;
 	struct path *lower_argument;
-	char relative[ZEDBSD_PATH_MAX];
+	char relative[KERN_PATH_MAX];
 	unsigned directory_flags;
 	int error;
 
@@ -5189,8 +5189,8 @@ overlay_dir_child_hidden(
 	struct inode *directory,
 	const char *name)
 {
-	char parent[ZEDBSD_PATH_MAX];
-	char relative[ZEDBSD_PATH_MAX];
+	char parent[KERN_PATH_MAX];
+	char relative[KERN_PATH_MAX];
 	unsigned flags;
 	int error;
 

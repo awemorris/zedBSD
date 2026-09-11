@@ -19,7 +19,7 @@ if [ ! -f "$source_file" ]; then
 fi
 
 "${CC:-cc}" -std=c11 \
-	-DZEDBSD_USER_ABI_LP64 \
+	-DKERN_USER_ABI_LP64 \
 	-I"$repo_dir/include" -I"$repo_dir/include/uapi" \
 	-I"$repo_dir/src" -I"$repo_dir/libc/include" -I"$repo_dir" \
 	-Wall -Wextra -Werror -ffunction-sections -fdata-sections \

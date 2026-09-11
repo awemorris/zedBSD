@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_KERN_TMPFS_H
-#define ZEDBSD_KERN_TMPFS_H
+#ifndef KERN_KERN_TMPFS_H
+#define KERN_KERN_TMPFS_H
 
 #include <kern/mount.h>
 

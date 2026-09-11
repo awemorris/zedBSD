@@ -14,7 +14,7 @@
 #include <dlfcn.h>
 #include <zedbsd/rtld-abi.h>
 
-#if !defined(ZEDBSD_DYNAMIC_LIBC)
+#if !defined(KERN_DYNAMIC_LIBC)
 extern void *__rtld_dlopen(const char *, int) __attribute__((weak));
 extern void *__rtld_dlsym(void *, const char *) __attribute__((weak));
 extern void *__rtld_dlvsym(void *, const char *, const char *)
@@ -24,7 +24,7 @@ extern int __rtld_dlclose(void *) __attribute__((weak));
 extern char *__rtld_dlerror(void) __attribute__((weak));
 #endif
 
-#if !defined(ZEDBSD_DYNAMIC_LIBC)
+#if !defined(KERN_DYNAMIC_LIBC)
 static char static_dlerror[] = "dynamic loading is unavailable";
 static int static_error_pending;
 #endif
@@ -39,7 +39,7 @@ dlopen(
 {
 	void *function_result;
 
-#if defined(ZEDBSD_DYNAMIC_LIBC)
+#if defined(KERN_DYNAMIC_LIBC)
 
 	/* Computes the function result. */
 	function_result = __rtld_exports.dlopen(path, flags);
@@ -76,7 +76,7 @@ dlvsym(
 {
 	void *function_result;
 
-#if defined(ZEDBSD_DYNAMIC_LIBC)
+#if defined(KERN_DYNAMIC_LIBC)
 
 	/* Computes the function result. */
 	function_result = __rtld_exports.dlvsym(handle, name, version);
@@ -114,7 +114,7 @@ dlsym(
 {
 	void *function_result;
 
-#if defined(ZEDBSD_DYNAMIC_LIBC)
+#if defined(KERN_DYNAMIC_LIBC)
 
 	/* Computes the function result. */
 	function_result = __rtld_exports.dlsym(handle, name);
@@ -151,7 +151,7 @@ dladdr(
 {
 	int function_result;
 
-#if defined(ZEDBSD_DYNAMIC_LIBC)
+#if defined(KERN_DYNAMIC_LIBC)
 
 	/* Computes the function result. */
 	function_result = __rtld_exports.dladdr(address, information);
@@ -186,7 +186,7 @@ dlclose(
 {
 	int function_result;
 
-#if defined(ZEDBSD_DYNAMIC_LIBC)
+#if defined(KERN_DYNAMIC_LIBC)
 
 	/* Computes the function result. */
 	function_result = __rtld_exports.dlclose(handle);
@@ -221,7 +221,7 @@ dlerror(
 {
 	char *function_result;
 
-#if defined(ZEDBSD_DYNAMIC_LIBC)
+#if defined(KERN_DYNAMIC_LIBC)
 
 	/* Computes the function result. */
 	function_result = __rtld_exports.dlerror();

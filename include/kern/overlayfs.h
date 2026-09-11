@@ -8,8 +8,8 @@
 /*
  * Overlay filesystem
  */
-#ifndef ZEDBSD_KERN_OVERLAYFS_H
-#define ZEDBSD_KERN_OVERLAYFS_H
+#ifndef KERN_KERN_OVERLAYFS_H
+#define KERN_KERN_OVERLAYFS_H
 
 #include "kern/mount.h"
 

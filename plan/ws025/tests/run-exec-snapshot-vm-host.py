@@ -9,7 +9,7 @@ paths=['src/kern/'+s+'.c' for s in sources]+['plan/ws025/tests/exec-snapshot-vm-
 (out/'source.json').write_text(json.dumps({p:hashlib.sha256((repo/p).read_bytes()).hexdigest() for p in paths},indent=2)+'\n')
 for variant in ('ordinary','sanitize'):
  flags=[] if variant=='ordinary' else ['-fsanitize=address,undefined','-fno-omit-frame-pointer','--param=asan-globals=0','-no-pie']
- common=['cc','-std=c11','-O0','-g','-pthread','-Dtid_t=int32_t','-DZEDBSD_USER_ABI_LP64','-DHAL_ARCH_AMD64','-Iinclude','-Iinclude/uapi','-I.','-Wall','-Wextra','-Werror','-ffunction-sections','-fdata-sections',*flags]
+ common=['cc','-std=c11','-O0','-g','-pthread','-Dtid_t=int32_t','-DKERN_USER_ABI_LP64','-DHAL_ARCH_AMD64','-Iinclude','-Iinclude/uapi','-I.','-Wall','-Wextra','-Werror','-ffunction-sections','-fdata-sections',*flags]
  with (out/(variant+'.log')).open('w') as log:
   objects=[]
   for source in sources:

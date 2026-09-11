@@ -4,12 +4,14 @@
  *
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_UAPI_SELECT_H
-#define ZEDBSD_UAPI_SELECT_H
+
+#ifndef KERN_UAPI_SELECT_H
+#define KERN_UAPI_SELECT_H
 
 #include <stdint.h>
 
-#define ZEDBSD_FD_SETSIZE	32
+#define KERN_FD_SETSIZE	32
+
 typedef struct fd_set {
 	uint32_t bits[1];
 } fd_set;

@@ -11,8 +11,8 @@
  * Declares shared userland uucodec support.
  */
 
-#ifndef ZEDBSD_USERLAND_UUCODEC_H
-#define ZEDBSD_USERLAND_UUCODEC_H
+#ifndef KERN_USERLAND_UUCODEC_H
+#define KERN_USERLAND_UUCODEC_H
 
 int uu_encode_fd(int input_fd, int base64, unsigned mode,
 		 const char *decode_path);

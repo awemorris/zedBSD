@@ -13,7 +13,6 @@
 #include <drivers/pci-nvme-protocol.h>
 #include <drivers/pci.h>
 
-#include <hal/hal.h>
 #include <kern/atomic.h>
 #include <kern/clock.h>
 #include <kern/disk.h>
@@ -30,6 +29,7 @@
 #include <stddef.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
+#include "kern/device-io.h"
 
 #define NVME_ADMIN_QUEUE_REQUESTED_DEPTH 64U
 #define NVME_IO_QUEUE_REQUESTED_DEPTH 64U
@@ -1476,7 +1476,7 @@ nvme_attach(
 	drv_nvme_detach_flush_init(&controller->detach_flush);
 	drv_nvme_shutdown_lifecycle_init(&controller->shutdown_lifecycle);
 	controller->pci = device;
-	controller->page_size = ZEDBSD_PAGE_SIZE;
+	controller->page_size = KERN_PAGE_SIZE;
 	spin_init(&controller->command_lock, LOCK_RANK_DEVICE,
 		  "NVMe command state");
 	waitq_init(&controller->io_state_waitq, "NVMe I/O state");
@@ -2047,7 +2047,7 @@ nvme_write32(
 {
 	*(volatile uint32_t *)(controller->registers + offset) = value;
 
-	hal_io_mb();
+	kern_io_barrier();
 }
 
 /* Writes one 64-bit controller register. */
@@ -2063,7 +2063,7 @@ nvme_write64(
 	*(volatile uint32_t *)(controller->registers + offset + 4U) =
 		(uint32_t)(value >> 32);
 
-	hal_io_mb();
+	kern_io_barrier();
 }
 
 /* Reports how long to wait, from the controller's own timeout. */
@@ -2137,7 +2137,7 @@ nvme_wait_ready(
 			return ETIMEDOUT;
 		}
 
-		hal_compiler_barrier();
+		kern_compiler_barrier();
 	}
 }
 
@@ -2193,7 +2193,7 @@ nvme_wait_shutdown_complete(
 			return ETIMEDOUT;
 		}
 
-		hal_compiler_barrier();
+		kern_compiler_barrier();
 	}
 }
 
@@ -2941,7 +2941,7 @@ nvme_irq_remove(
 				controller->pci, controller->irq_cookie);
 			if (error != EBUSY)
 				break;
-			hal_compiler_barrier();
+			kern_compiler_barrier();
 		}
 
 		/* Checks the operation status. */
@@ -2973,7 +2973,7 @@ nvme_irq_drain(
 		/* Checks the atomic raw load acquire result. */
 		if (atomic_raw_load_acquire(&controller->irq_busy) == 0U)
 			return 0;
-		hal_compiler_barrier();
+		kern_compiler_barrier();
 	}
 
 	kern_logf(
@@ -3379,7 +3379,7 @@ nvme_irq_admin_locked(
 		if ((entry->status & 1U) !=
 		    (controller->completion_cursor.phase & 1U))
 			break;
-		hal_io_rmb();
+		kern_io_read_barrier();
 		completion.result = entry->result;
 		completion.reserved = entry->reserved;
 		completion.submission_head = entry->submission_head;
@@ -3464,7 +3464,7 @@ nvme_irq_io_locked(
 		if ((entry->status & 1U) !=
 		    (controller->io_completion_cursor.phase & 1U))
 			break;
-		hal_io_rmb();
+		kern_io_read_barrier();
 		completion.result = entry->result;
 		completion.reserved = entry->reserved;
 		completion.submission_head = entry->submission_head;
@@ -3635,7 +3635,7 @@ nvme_admin_execute_mode(
 	}
 
 	controller->submission_tail = next;
-	hal_io_wmb();
+	kern_io_write_barrier();
 	nvme_write32(controller, controller->submission_doorbell,
 		     controller->submission_tail);
 	/* Continue while the operation condition remains true. */
@@ -3718,7 +3718,7 @@ nvme_identify(
 		/* Failed. */
 		return EINVAL;
 	}
-	hal_io_wmb();
+	kern_io_write_barrier();
 
 	/* Obtains the nvme admin execute result. */
 	error = nvme_admin_execute(controller, &command, NULL);
@@ -4138,7 +4138,7 @@ nvme_io_post(
 	controller->io_commands_posted++;
 	if (controller->io_pending > controller->io_pending_high_water)
 		controller->io_pending_high_water = controller->io_pending;
-	hal_io_wmb();
+	kern_io_write_barrier();
 	nvme_write32(controller, controller->io_submission_doorbell,
 		     controller->io_submission_tail);
 
@@ -4309,7 +4309,7 @@ nvme_io_execute(
 	/* Failed posts also own a faulted slot and must participate in recovery. */
 	error = nvme_io_wait_completion(controller, slot, &recovery_owner);
 	if (error == 0 && opcode == DRV_NVME_NVM_READ) {
-		hal_io_rmb();
+		kern_io_read_barrier();
 		memcpy(bytes, slot->bounce_dma.address,
 		    (size_t)block_count * controller->namespace_block_size);
 	}
@@ -4410,7 +4410,7 @@ nvme_io_pipeline(
 		/* Report only the successful prefix, even if later writes completed. */
 		if (error == 0) {
 			if (opcode == DRV_NVME_NVM_READ) {
-				hal_io_rmb();
+				kern_io_read_barrier();
 				memcpy(entry->bytes, entry->slot->bounce_dma.address,
 				    entry->length);
 			}

@@ -9,8 +9,8 @@
  * X68000 MB89352/SPC and SCSI-2 command contract.
  */
 
-#ifndef ZEDBSD_DRIVERS_X68K_MB89352_H
-#define ZEDBSD_DRIVERS_X68K_MB89352_H
+#ifndef KERN_DRIVERS_X68K_MB89352_H
+#define KERN_DRIVERS_X68K_MB89352_H
 
 #include <stddef.h>
 #include <stdint.h>

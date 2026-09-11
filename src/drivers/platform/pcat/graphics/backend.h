@@ -9,8 +9,8 @@
  * PC/AT boot framebuffer, Cirrus GD5446, and standard VGA backends.
  */
 
-#ifndef ZEDBSD_DRIVERS_GRAPHICS_PCAT_BACKEND_H
-#define ZEDBSD_DRIVERS_GRAPHICS_PCAT_BACKEND_H
+#ifndef KERN_DRIVERS_GRAPHICS_PCAT_BACKEND_H
+#define KERN_DRIVERS_GRAPHICS_PCAT_BACKEND_H
 
 #include <stddef.h>
 #include <stdint.h>

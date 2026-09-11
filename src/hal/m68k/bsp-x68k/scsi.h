@@ -1,8 +1,8 @@
 /* X68000 internal SCSI controller board wiring. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 
-#ifndef ZEDBSD_HAL_M68K_X68K_SCSI_H
-#define ZEDBSD_HAL_M68K_X68K_SCSI_H
+#ifndef KERN_HAL_M68K_X68K_SCSI_H
+#define KERN_HAL_M68K_X68K_SCSI_H
 
 #include "drivers/platform/x68k/x68k-mb89352.h"
 

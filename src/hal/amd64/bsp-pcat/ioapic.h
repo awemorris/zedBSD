@@ -11,8 +11,8 @@
  * The amd64 I/O APIC routing contract.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_IOAPIC_H
-#define ZEDBSD_HAL_AMD64_IOAPIC_H
+#ifndef KERN_HAL_AMD64_IOAPIC_H
+#define KERN_HAL_AMD64_IOAPIC_H
 
 #include <hal/types.h>
 #include "acpi.h"

@@ -10,7 +10,7 @@ trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
 cc=${CC:-cc}
 source_file=$repo/plan/ws005/tests/networkd-auth-test.c
-common="-std=c11 -DZEDBSD_USER_ABI_LP64 -I$repo/include/uapi \
+common="-std=c11 -DKERN_USER_ABI_LP64 -I$repo/include/uapi \
 	-I$repo/libc/include -I$repo -Wall -Wextra -Werror \
 	-ffunction-sections -fdata-sections"
 discard="-Wl,--gc-sections"

@@ -20,7 +20,7 @@ def main():
     obj, binary = out / "probe.o", out / "probe"
     subprocess.run([str(REPO / "build/llvm/bin/clang"),
                     "--target=x86_64-unknown-zedbsd", "-nostdinc", "-isystem", str(sysroot / "include"),
-                    "-I" + str(REPO / "include/uapi"), "-DZEDBSD_USER_ABI_LP64=1", "-ffreestanding", "-fno-pie", "-O1",
+                    "-I" + str(REPO / "include/uapi"), "-DKERN_USER_ABI_LP64=1", "-ffreestanding", "-fno-pie", "-O1",
                     "-c", str(HERE / "block-admin-probe.c"), "-o", str(obj)], check=True)
     subprocess.run(["ld", "-m", "elf_x86_64", "--gc-sections", "-nostdlib", "-static",
                     "-z", "max-page-size=4096", "-z", "stack-size=0x100000",

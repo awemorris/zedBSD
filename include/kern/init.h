@@ -9,8 +9,8 @@
  * init
  */
 
-#ifndef ZEDBSD_KERN_INIT_H
-#define ZEDBSD_KERN_INIT_H
+#ifndef KERN_KERN_INIT_H
+#define KERN_KERN_INIT_H
 
 int
 kern_init_start(

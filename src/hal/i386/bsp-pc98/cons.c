@@ -771,7 +771,7 @@ pc98_keyboard_is_down(
 	return (kb->down[scan >> 3] >> (scan & 7)) & 1;
 }
 
-#ifdef ZEDBSD_INPUT_OWNERSHIP_TEST
+#ifdef KERN_INPUT_OWNERSHIP_TEST
 /*
  * Resets PC-98 keyboard ownership state for the focused host test.
  */

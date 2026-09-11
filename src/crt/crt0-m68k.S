@@ -51,7 +51,7 @@ __syscall6:
 __signal_restorer:
 	move.l HAL_TASK_SIGNAL_RESTORER_TOKEN_OFFSET(%sp),%d1
 	move.l HAL_TASK_SIGNAL_RESTORER_CONTEXT_OFFSET(%sp),%d2
-	moveq #80,%d0                   /* ZEDBSD_SYS_sigreturn */
+	moveq #80,%d0                   /* KERN_SYS_sigreturn */
 	trap #0
 	illegal
 	.size __signal_restorer,.-__signal_restorer

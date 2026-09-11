@@ -1178,8 +1178,8 @@ parse_bootzbsd_config:
 	jnz fatal_config_invalid
 	mov si, offset parsed_configuration + \
 		ZBL_ZEDBSD_CONFIG_PARAMETER_RECORD_OFFSET
-	mov di, offset pc98_handoff + ZEDBSD_PC98_PARAMETER_RECORD_OFFSET
-	mov cx, ZEDBSD_BOOT_PARAMETER_RECORD_SIZE / 4
+	mov di, offset pc98_handoff + KERN_PC98_PARAMETER_RECORD_OFFSET
+	mov cx, KERN_BOOT_PARAMETER_RECORD_SIZE / 4
 1:	mov eax, dword ptr [si]
 	mov dword ptr [di], eax
 	add si, 4
@@ -1549,7 +1549,7 @@ unreal_fs:
 prepare_pc98_handoff:
 	mov dword ptr [pc98_handoff + 0], 0x48323842
 	mov word ptr [pc98_handoff + 4], 2
-	mov word ptr [pc98_handoff + 6], ZEDBSD_PC98_PARAMETER_HANDOFF_SIZE
+	mov word ptr [pc98_handoff + 6], KERN_PC98_PARAMETER_HANDOFF_SIZE
 	mov al, byte ptr [boot_drive]
 	mov byte ptr [pc98_handoff + 9], al
 	/* Version 2 selects the native PC-98 partition by LBA.  The scheme and
@@ -2123,8 +2123,8 @@ long_handoff:
 
 .balign 4
 pc98_handoff:
-	.space ZEDBSD_PC98_HANDOFF_COMMON_SIZE
-	.space ZEDBSD_BOOT_PARAMETER_RECORD_SIZE
+	.space KERN_PC98_HANDOFF_COMMON_SIZE
+	.space KERN_BOOT_PARAMETER_RECORD_SIZE
 device_table: .space 16 * 4
 fat_cache: .space 1024
 

@@ -57,7 +57,7 @@
  * volume stored, so nothing above this file has to know that FAT keeps two.
  */
 struct fat_dir_entry {
-	char name[ZEDBSD_PATH_MAX];
+	char name[KERN_PATH_MAX];
 	uint64_t size;
 	uint8_t attributes;
 };
@@ -73,7 +73,7 @@ enum fat_name_match {
 };
 
 struct fat_component {
-	char text[ZEDBSD_PATH_MAX];
+	char text[KERN_PATH_MAX];
 	char sfn[11];
 };
 
@@ -84,7 +84,7 @@ struct fat_component {
  * An entry lives for as long as the mount does and is never written to disk.
  */
 struct fat_metadata {
-	char path[ZEDBSD_PATH_MAX];
+	char path[KERN_PATH_MAX];
 	mode_t mode;
 	uid_t uid;
 	gid_t gid;
@@ -240,7 +240,7 @@ struct fat_lfn_state {
  */
 struct fat_inode_slot {
 	struct fat_inode_info info;
-	char path[ZEDBSD_PATH_MAX];
+	char path[KERN_PATH_MAX];
 	uint8_t used;
 };
 
@@ -476,13 +476,13 @@ static int fat_raw_find_entry(struct fat_mount_state *filesystem,
 	const struct fat_directory *directory,
 	const struct fat_component *component, enum fat_name_match match,
 	uint32_t *entry_lba, uint16_t *entry_offset, uint32_t *free_lba,
-	uint16_t *free_offset, char found_name[ZEDBSD_PATH_MAX]);
+	uint16_t *free_offset, char found_name[KERN_PATH_MAX]);
 static int fat_raw_resolve_parent(struct fat_mount_state *filesystem,
 	const char *path, struct fat_directory *parent,
 	struct fat_component *component);
 static int fat_raw_resolve_entry(struct fat_mount_state *filesystem,
 	const char *path, uint32_t *lba, uint16_t *offset, const uint8_t **raw,
-	enum fat_name_match match, char found_name[ZEDBSD_PATH_MAX]);
+	enum fat_name_match match, char found_name[KERN_PATH_MAX]);
 static int fat_raw_populate_file(struct fat_file_state *file, uint32_t lba,
 	uint16_t offset, const uint8_t raw[32]);
 static void fat_file_bind(struct fat_file_state *file,
@@ -543,7 +543,7 @@ static int fat_engine_stat_location_casefold(struct fat_mount_state *filesystem,
 static const char *fat_path(struct inode *inode);
 static struct inode *fat_alloc_inode(struct mount *mountp);
 static int join_path(const char *parent, const struct componentname *name,
-	char output[ZEDBSD_PATH_MAX]);
+	char output[KERN_PATH_MAX]);
 static int fat_creation_collision(struct fat_mount_state *state,
 	const char *path);
 static int fat_created_inode_matches(const struct fat_mount_state *state,
@@ -585,7 +585,7 @@ static FAT_MUTATION int fat_raw_update_dotdot(struct fat_mount_state *filesystem
 static FAT_MUTATION int fat_raw_restore_entry_payload(struct fat_mount_state *filesystem, uint32_t lba, uint16_t offset, const uint8_t raw[32]);
 static FAT_MUTATION void fat_raw_rename_rollback_destination(struct fat_mount_state *filesystem, const struct fat_directory *parent, uint32_t lba, uint16_t offset, int replacing, const uint8_t target[32]);
 static int fat_raw_canonical_basename(struct fat_mount_state *filesystem,
-	const char *path, char basename[ZEDBSD_PATH_MAX]);
+	const char *path, char basename[KERN_PATH_MAX]);
 static int fat_raw_readdir(struct fat_mount_state *filesystem, const char *path,
 	unsigned wanted, struct fat_dir_entry *entry);
 static int fat_stat_location_mode(struct fat_mount_state *filesystem,
@@ -1583,11 +1583,11 @@ parse_bpb(
 	 * table entry, and so which of the three formats this volume is.
 	 */
 	if (fat->cluster_count < 4085)
-		fat->type = ZEDBSD_FAT12;
+		fat->type = KERN_FAT12;
 	else if (fat->cluster_count < 65525)
-		fat->type = ZEDBSD_FAT16;
+		fat->type = KERN_FAT16;
 	else
-		fat->type = ZEDBSD_FAT32;
+		fat->type = KERN_FAT32;
 
 	/* Where the first allocation table starts, and how long it is. */
 	fat->fat_start = reserved;
@@ -1616,7 +1616,7 @@ parse_bpb(
 	fat->fsinfo_sector = fat_engine_get16(bpb + 48);
 
 	/* Everything below concerns FAT32 only. */
-	if (fat->type != ZEDBSD_FAT32) {
+	if (fat->type != KERN_FAT32) {
 		/* Succeeded. */
 		return 0;
 	}
@@ -1658,11 +1658,11 @@ fat_engine_mount(
 		return EOPNOTSUPP;	/* Failed. */
 
 	/* A FAT16 mount needs the fixed root directory that layout has. */
-	if (required_type == ZEDBSD_FAT16 && !fat->fat16_layout)
+	if (required_type == KERN_FAT16 && !fat->fat16_layout)
 		return EOPNOTSUPP;	/* Failed. */
 
 	/* And a FAT32 mount needs the root that lives in the data area. */
-	if (required_type == ZEDBSD_FAT32 && !fat->fat32_layout)
+	if (required_type == KERN_FAT32 && !fat->fat32_layout)
 		return EOPNOTSUPP;	/* Failed. */
 
 	fat->allocation_hint = 2;
@@ -2730,7 +2730,7 @@ fat16_mount(
 	uint32_t fat_entries;
 
 	/* Reads the layout and refuses a volume of another width. */
-	result = fat_engine_mount(filesystem, ZEDBSD_FAT16);
+	result = fat_engine_mount(filesystem, KERN_FAT16);
 	if (result != 0)
 		return result;
 
@@ -2781,9 +2781,9 @@ fat_raw_is_end(
 	uint32_t first_end;
 
 	/* Each width reserves the top of its cluster range for end markers. */
-	if (fat->type == ZEDBSD_FAT12)
+	if (fat->type == KERN_FAT12)
 		first_end = 0xff8U;
-	else if (fat->type == ZEDBSD_FAT16)
+	else if (fat->type == KERN_FAT16)
 		first_end = 0xfff8U;
 	else
 		first_end = 0x0ffffff8U;
@@ -2807,9 +2807,9 @@ fat_raw_reserved_limit(
 	const struct fat_mount_state *fat)
 {
 	/* Each width reserves a different number of entries. */
-	if (fat->type == ZEDBSD_FAT12)
+	if (fat->type == KERN_FAT12)
 		return FAT12_RESERVED_CLUSTER;
-	if (fat->type == ZEDBSD_FAT16)
+	if (fat->type == KERN_FAT16)
 		return FAT16_RESERVED_CLUSTER;
 
 	/* Reports the limit of the only remaining width. */
@@ -2822,9 +2822,9 @@ fat_raw_end_of_chain(
 	const struct fat_mount_state *fat)
 {
 	/* Each width has its own end-of-chain value. */
-	if (fat->type == ZEDBSD_FAT12)
+	if (fat->type == KERN_FAT12)
 		return FAT12_END_OF_CHAIN;
-	if (fat->type == ZEDBSD_FAT16)
+	if (fat->type == KERN_FAT16)
 		return FAT16_END_OF_CHAIN;
 
 	/* Reports the value of the only remaining width. */
@@ -2838,11 +2838,11 @@ fat_raw_entry_offset(
 	uint32_t cluster)
 {
 	/* A FAT12 entry is twelve bits, so every second one starts mid-byte. */
-	if (fat->type == ZEDBSD_FAT12)
+	if (fat->type == KERN_FAT12)
 		return cluster + cluster / 2U;
 
 	/* The wider formats hold two or four whole bytes per entry. */
-	if (fat->type == ZEDBSD_FAT16)
+	if (fat->type == KERN_FAT16)
 		return cluster * 2U;
 
 	/* Reports the offset of the only remaining width. */
@@ -2881,7 +2881,7 @@ fat_raw_next_cluster(
 		return result;
 
 	/* A FAT32 entry is a word, of which the top four bits are reserved. */
-	if (fat->type == ZEDBSD_FAT32) {
+	if (fat->type == KERN_FAT32) {
 		*next_cluster = fat_engine_get32(sector + (offset & 511U)) &
 			0x0fffffffU;
 
@@ -2890,7 +2890,7 @@ fat_raw_next_cluster(
 	}
 
 	/* A FAT16 entry is a halfword and never crosses a sector. */
-	if (fat->type == ZEDBSD_FAT16) {
+	if (fat->type == KERN_FAT16) {
 		*next_cluster = fat_engine_get16(sector + (offset & 511U));
 
 		/* Succeeded. */
@@ -3031,7 +3031,7 @@ fat_raw_set_cluster_copy(
 
 	/* A FAT16 or FAT32 entry never straddles two sectors. */
 	copy_start = fat->fat_start + copy * fat->fat_sectors;
-	if (fat->type != ZEDBSD_FAT12) {
+	if (fat->type != KERN_FAT12) {
 		/* An offset that would run past the end of this copy. */
 		if ((offset >> 9) > 0xffffffffU - copy_start)
 			return EIO;
@@ -3043,7 +3043,7 @@ fat_raw_set_cluster_copy(
 			return result;
 
 		/* A FAT32 entry keeps the top four bits it already had. */
-		if (fat->type == ZEDBSD_FAT32) {
+		if (fat->type == KERN_FAT32) {
 			entry = sector + (offset & 511U);
 			old = fat_engine_get32(entry);
 			put32(entry,
@@ -3136,7 +3136,7 @@ fat_raw_get_cluster_copy(
 	 * Decode aligned entries and retain each copy's reserved high bits on
 	 * rewrite.
 	 */
-	if (filesystem->type == ZEDBSD_FAT32) {
+	if (filesystem->type == KERN_FAT32) {
 		*value = fat_engine_get32(sector + (offset & 511U)) &
 			 0x0fffffffU;
 
@@ -3145,7 +3145,7 @@ fat_raw_get_cluster_copy(
 	}
 
 	/* A FAT16 entry is a halfword and never crosses a sector. */
-	if (filesystem->type == ZEDBSD_FAT16) {
+	if (filesystem->type == KERN_FAT16) {
 		*value = fat_engine_get16(sector + (offset & 511U));
 
 		/* Succeeded. */
@@ -3488,7 +3488,7 @@ fat_table_transaction(
 		return E2BIG;
 
 	used = 0;
-	bytes = filesystem->type == ZEDBSD_FAT32 ? 4U : 2U;
+	bytes = filesystem->type == KERN_FAT32 ? 4U : 2U;
 
 	/* Collects the sectors every change of the batch will touch. */
 	for (entry = 0; entry < count; entry++) {
@@ -3607,11 +3607,11 @@ fat_table_transaction(
 			second += (offset + 1U) & 511U;
 
 			/* An entry is as wide as the volume format. */
-			if (filesystem->type == ZEDBSD_FAT32) {
+			if (filesystem->type == KERN_FAT32) {
 				put32(first,
 				      (fat_engine_get32(first) & 0xf0000000U) |
 				      (value & 0x0fffffffU));
-			} else if (filesystem->type == ZEDBSD_FAT16) {
+			} else if (filesystem->type == KERN_FAT16) {
 				put16(first, (uint16_t)value);
 			} else if (changes[entry].cluster & 1U) {
 				*first = (uint8_t)((*first & 0x0fU) |
@@ -3702,7 +3702,7 @@ fat_link_initialized_cluster(
 	second_offset = fat_raw_entry_offset(filesystem, added);
 
 	/* Two entries may be written together when both fit two sectors. */
-	bytes = filesystem->type == ZEDBSD_FAT32 ? 4U : 2U;
+	bytes = filesystem->type == KERN_FAT32 ? 4U : 2U;
 	if (first_offset / 512U == second_offset / 512U &&
 	    first_offset / 512U == (first_offset + bytes - 1U) / 512U &&
 	    second_offset / 512U == (second_offset + bytes - 1U) / 512U) {
@@ -3875,7 +3875,7 @@ fat_raw_dir_cluster(
 	uint32_t cluster = fat_engine_get16(raw + 26);
 
 	/* A FAT32 record keeps the top half of the number apart. */
-	if (fat->type == ZEDBSD_FAT32)
+	if (fat->type == KERN_FAT32)
 		cluster |= (uint32_t)fat_engine_get16(raw + 20) << 16;
 
 	/* The cluster number, of which four bits are reserved. */
@@ -3892,7 +3892,7 @@ fat_raw_put_dir_cluster(
 	put16(raw + 26, (uint16_t)cluster);
 
 	/* A FAT32 record keeps the top half of the number apart. */
-	if (fat->type == ZEDBSD_FAT32)
+	if (fat->type == KERN_FAT32)
 		put16(raw + 20, (uint16_t)(cluster >> 16));
 }
 
@@ -3902,7 +3902,7 @@ fat_raw_root_cluster(
 	const struct fat_mount_state *fat)
 {
 	/* FAT32 puts its root in an ordinary cluster chain. */
-	if (fat->type == ZEDBSD_FAT32)
+	if (fat->type == KERN_FAT32)
 		return fat->root_cluster;
 
 	/* The narrower widths use a fixed table, which cluster zero denotes. */
@@ -4550,7 +4550,7 @@ fat_raw_allocate_run(
 	/* A batch of no clusters would allocate nothing. */
 	if (limit == 0)
 		return EINVAL;
-	bytes = filesystem->type == ZEDBSD_FAT32 ? 4U : 2U;
+	bytes = filesystem->type == KERN_FAT32 ? 4U : 2U;
 	count = 0;
 	sector = 0;
 
@@ -4794,9 +4794,9 @@ fat_raw_find_entry(
 	uint16_t *entry_offset,
 	uint32_t *free_lba,
 	uint16_t *free_offset,
-	char found_name[ZEDBSD_PATH_MAX])
+	char found_name[KERN_PATH_MAX])
 {
-	char long_name[ZEDBSD_PATH_MAX];
+	char long_name[KERN_PATH_MAX];
 	struct fat_dir_entry short_entry;
 	int matches;
 	uint32_t lba;
@@ -4862,7 +4862,7 @@ fat_raw_find_entry(
 		/* A long-name record is collected, not compared. */
 		if (raw[11] == 0x0f) {
 			/* Only FAT32 volumes carry long names at all. */
-			if (fat->type == ZEDBSD_FAT32)
+			if (fat->type == KERN_FAT32)
 				(void)fat_lfn_feed(&lfn, raw);
 			continue;
 		}
@@ -4874,7 +4874,7 @@ fat_raw_find_entry(
 		}
 
 		/* A FAT32 record may carry a long name in front of it. */
-		if (fat->type == ZEDBSD_FAT32) {
+		if (fat->type == KERN_FAT32) {
 			/* A long name that did not hold together is dropped. */
 			finished = fat_lfn_finish(&lfn, raw, long_name,
 						  sizeof(long_name));
@@ -4902,7 +4902,7 @@ fat_raw_find_entry(
 			/* Reports the name as the volume itself spells it. */
 			if (found_name != 0)
 				text_copy(found_name, long_name,
-					ZEDBSD_PATH_MAX);
+					KERN_PATH_MAX);
 		} else {
 			/* A short name is compared without regard to case. */
 			same = fat_sfn_equal(raw, component->sfn);
@@ -4913,7 +4913,7 @@ fat_raw_find_entry(
 			if (found_name != 0) {
 				fat_sfn_decode_lower(raw, &short_entry);
 				text_copy(found_name, short_entry.name,
-					ZEDBSD_PATH_MAX);
+					KERN_PATH_MAX);
 			}
 		}
 
@@ -4985,7 +4985,7 @@ fat_raw_resolve_parent(
 		component->text[length] = '\0';
 
 		/* A volume without long names needs a short one to look up. */
-		if (filesystem->type != ZEDBSD_FAT32) {
+		if (filesystem->type != KERN_FAT32) {
 			encoded = fat_sfn_encode(component->text,
 						 component->sfn);
 			if (!encoded) {
@@ -5049,7 +5049,7 @@ fat_raw_resolve_entry(
 	uint16_t *offset,
 	const uint8_t **raw,
 	enum fat_name_match match,
-	char found_name[ZEDBSD_PATH_MAX])
+	char found_name[KERN_PATH_MAX])
 {
 	struct fat_directory parent;
 	struct fat_component component;
@@ -6065,7 +6065,7 @@ fat_raw_extend_directory(
 
 	/* Only a FAT32 directory grows; the FAT16 root is fixed. */
 	valid = fat_raw_valid_cluster(fat, last);
-	if (fat->type != ZEDBSD_FAT32 || !valid)
+	if (fat->type != KERN_FAT32 || !valid)
 		return ENOSPC;
 
 	/* Walks to the last cluster the directory has. */
@@ -6366,7 +6366,7 @@ fat_raw_insert_entry(
 		return result;
 
 	/* A FAT32 volume also refuses a name that differs by case. */
-	if (filesystem->type == ZEDBSD_FAT32) {
+	if (filesystem->type == KERN_FAT32) {
 		/* Looks the name up again, this time ignoring case. */
 		result = fat_raw_find_entry(filesystem,
 					    parent,
@@ -6496,7 +6496,7 @@ fat_raw_create(
 	if (result == 0)
 		return EEXIST;
 	if (result != ENOENT &&
-	    !(filesystem->type == ZEDBSD_FAT32 && result == ENOSPC)) {
+	    !(filesystem->type == KERN_FAT32 && result == ENOSPC)) {
 		/* Failed. */
 		return result;
 	}
@@ -7079,7 +7079,7 @@ static int
 fat_raw_canonical_basename(
 	struct fat_mount_state *filesystem,
 	const char *path,
-	char basename[ZEDBSD_PATH_MAX])
+	char basename[KERN_PATH_MAX])
 {
 	struct fat_dir_entry decoded;
 	struct fat_directory parent;
@@ -7097,8 +7097,8 @@ fat_raw_canonical_basename(
 		return result;
 
 	/* A FAT32 volume stores the name as the caller spelled it. */
-	if (filesystem->type == ZEDBSD_FAT32) {
-		text_copy(basename, component.text, ZEDBSD_PATH_MAX);
+	if (filesystem->type == KERN_FAT32) {
+		text_copy(basename, component.text, KERN_PATH_MAX);
 
 		/* Succeeded. */
 		return 0;
@@ -7111,7 +7111,7 @@ fat_raw_canonical_basename(
 	clear_bytes(raw, sizeof(raw));
 	copy_bytes(raw, component.sfn, sizeof(component.sfn));
 	fat_sfn_decode_lower(raw, &decoded);
-	text_copy(basename, decoded.name, ZEDBSD_PATH_MAX);
+	text_copy(basename, decoded.name, KERN_PATH_MAX);
 
 	/* Succeeded. */
 	return 0;
@@ -7481,7 +7481,7 @@ fat_raw_readdir(
 		/* A long-name record is collected, not counted. */
 		if (raw[11] == 0x0f) {
 			/* Only FAT32 volumes carry long names at all. */
-			if (fat->type == ZEDBSD_FAT32)
+			if (fat->type == KERN_FAT32)
 				(void)fat_lfn_feed(&lfn, raw);
 			continue;
 		}
@@ -7502,7 +7502,7 @@ fat_raw_readdir(
 		 * A long name is only available on FAT32, and only if complete.
 		 */
 		decoded = 0;
-		if (fat->type == ZEDBSD_FAT32) {
+		if (fat->type == KERN_FAT32) {
 			decoded = fat_lfn_finish(&lfn, raw, entry->name,
 						 sizeof(entry->name));
 		}
@@ -7512,7 +7512,7 @@ fat_raw_readdir(
 		 * case bits, so it is decoded preserving them; the narrower
 		 * widths have none and decode to lower case.
 		 */
-		if (!decoded && fat->type == ZEDBSD_FAT32) {
+		if (!decoded && fat->type == KERN_FAT32) {
 			fat_sfn_decode_preserve(raw, entry->name,
 						sizeof(entry->name));
 		} else if (!decoded) {
@@ -7543,7 +7543,7 @@ fat_stat_location_mode(
 	enum fat_name_match match)
 {
 	const uint8_t *raw;
-	char found_name[ZEDBSD_PATH_MAX];
+	char found_name[KERN_PATH_MAX];
 	int result;
 
 	/* A call that names no volume, no path or no entry to fill in. */
@@ -7570,7 +7570,7 @@ fat_stat_location_mode(
 		return result;
 
 	/* A FAT32 volume reports the long name it stores. */
-	if (filesystem->type == ZEDBSD_FAT32) {
+	if (filesystem->type == KERN_FAT32) {
 		text_copy(entry->name, found_name, sizeof(entry->name));
 		entry->size = fat_engine_get32(raw + 28);
 		entry->attributes = raw[11];
@@ -7631,7 +7631,7 @@ fat_engine_stat_location_casefold(
 	int located;
 
 	/* Refuses a volume that cannot hold the names this match needs. */
-	if (filesystem == 0 || filesystem->type != ZEDBSD_FAT32)
+	if (filesystem == 0 || filesystem->type != KERN_FAT32)
 		return EOPNOTSUPP;
 
 	/* Looks the name up with case folding enabled. */
@@ -7673,9 +7673,9 @@ fat_engine_file_extents(
 	state = file;
 
 	/* A mount of no known width has no layout to report. */
-	if (fat->type != ZEDBSD_FAT12 &&
-	    fat->type != ZEDBSD_FAT16 &&
-	    fat->type != ZEDBSD_FAT32) {
+	if (fat->type != KERN_FAT12 &&
+	    fat->type != KERN_FAT16 &&
+	    fat->type != KERN_FAT32) {
 		/* Failed. */
 		return EIO;
 	}
@@ -7805,7 +7805,7 @@ fat12_mount(
 	uint32_t fat_entries;
 
 	/* Reads the layout and refuses a volume of another width. */
-	result = fat_engine_mount(filesystem, ZEDBSD_FAT12);
+	result = fat_engine_mount(filesystem, KERN_FAT12);
 	if (result != 0)
 		return result;
 
@@ -7841,7 +7841,7 @@ fat32_mount(
 	int valid;
 
 	/* Reads the layout and refuses a volume of another width. */
-	result = fat_engine_mount(filesystem, ZEDBSD_FAT32);
+	result = fat_engine_mount(filesystem, KERN_FAT32);
 	if (result != 0)
 		return result;
 
@@ -8168,7 +8168,7 @@ static int
 join_path(
 	const char *parent,
 	const struct componentname *name,
-	char output[ZEDBSD_PATH_MAX])
+	char output[KERN_PATH_MAX])
 {
 	size_t parent_length;
 
@@ -8187,7 +8187,7 @@ join_path(
 	 */
 	parent_length = strlen(parent);
 	if (parent_length + (parent_length != 0) + name->cn_namelen >=
-	    ZEDBSD_PATH_MAX)
+	    KERN_PATH_MAX)
 		return ENAMETOOLONG;
 
 	/*
@@ -8243,7 +8243,7 @@ fat_creation_collision(
 		return error;
 
 	/* Only a FAT32 volume also refuses a name differing by case. */
-	if (state->type != ZEDBSD_FAT32)
+	if (state->type != KERN_FAT32)
 		return 0;
 
 	/* Looks the name up again, this time ignoring case. */
@@ -8500,7 +8500,7 @@ fat_decode_time(
 	seconds = (int64_t)days * 86400 + ((time >> 11) & 0x1f) * 3600 +
 		  ((time >> 5) & 0x3f) * 60 + (time & 0x1f) * 2;
 
-#ifdef ZEDBSD_USER_ABI_LP64
+#ifdef KERN_USER_ABI_LP64
 	/* Reports the decoded time. */
 	return (time_t)seconds;
 #else
@@ -8646,7 +8646,7 @@ fat_make_inode(
 	/* A path longer than a slot could hold. */
 	slot = fat_slot(inode);
 	path_length = strlen(path);
-	if (slot == NULL || path_length >= ZEDBSD_PATH_MAX) {
+	if (slot == NULL || path_length >= KERN_PATH_MAX) {
 		inode_release(inode);
 
 		/* Failed. */
@@ -8714,7 +8714,7 @@ fat_stat_path(
 {
 	struct fat_mount_state *state = fat_mount_state(mountp);
 	struct fat_dir_entry entry;
-	char canonical[ZEDBSD_PATH_MAX];
+	char canonical[KERN_PATH_MAX];
 	const char *slash;
 	size_t prefix_length;
 	uint32_t lba, first_cluster;
@@ -8781,7 +8781,7 @@ fat_stat_path_casefold(
 {
 	struct fat_mount_state *state = fat_mount_state(mountp);
 	struct fat_dir_entry entry;
-	char canonical[ZEDBSD_PATH_MAX];
+	char canonical[KERN_PATH_MAX];
 	const char *slash;
 	size_t prefix_length;
 	uint32_t lba, first_cluster;
@@ -8846,7 +8846,7 @@ fat_lookup_unlocked(
 	struct inode **result)
 {
 	char *slash;
-	char path[ZEDBSD_PATH_MAX];
+	char path[KERN_PATH_MAX];
 	const char *parent = fat_path(directory);
 	int error;
 
@@ -8939,7 +8939,7 @@ fat_lookup_casefold_unlocked(
 	const struct componentname *name,
 	struct inode **result)
 {
-	char path[ZEDBSD_PATH_MAX];
+	char path[KERN_PATH_MAX];
 	const char *parent = fat_path(directory);
 	int error;
 
@@ -9701,7 +9701,7 @@ fat_readdir_unlocked(
 {
 	struct fat_mount_state *state = fat_mount_state(file->f_inode->i_mount);
 	struct fat_dir_entry decoded;
-	char child_path[ZEDBSD_PATH_MAX];
+	char child_path[KERN_PATH_MAX];
 	struct componentname component;
 	struct inode *child;
 	int result;
@@ -10001,7 +10001,7 @@ fat_create_unlocked(
 	struct fat_mount_state *state = fat_mount_state(directory->i_mount);
 	struct fat_file_state file = {0};
 	struct inode *created = NULL;
-	char path[ZEDBSD_PATH_MAX];
+	char path[KERN_PATH_MAX];
 	int error, rollback;
 	int representable;
 
@@ -10203,7 +10203,7 @@ fat_mkdir_unlocked(
 	int deferred;
 	struct fat_mount_state *state = fat_mount_state(directory->i_mount);
 	struct inode *created = NULL;
-	char path[ZEDBSD_PATH_MAX];
+	char path[KERN_PATH_MAX];
 	uint32_t cluster = 0;
 	int error, rollback;
 	int representable;
@@ -10409,7 +10409,7 @@ fat_remove_inode_unlocked(
 {
 	struct fat_mount_state *state = fat_mount_state(directory->i_mount);
 	struct inode *victim = NULL;
-	char path[ZEDBSD_PATH_MAX];
+	char path[KERN_PATH_MAX];
 	int error;
 
 	*orphaned = NULL;
@@ -10544,7 +10544,7 @@ fat_repath_descendants(
 	const char *old_path,
 	const char *new_path)
 {
-	char replacement[ZEDBSD_PATH_MAX];
+	char replacement[KERN_PATH_MAX];
 	size_t suffix;
 	size_t old_length;
 	size_t new_length;
@@ -10633,7 +10633,7 @@ fat_repath_descendants_possible(
 		 * Refuses the rename when this inode's new path would not fit.
 		 */
 		suffix = strlen(fat_inodes[i].path + old_length);
-		if (new_length + suffix >= ZEDBSD_PATH_MAX) {
+		if (new_length + suffix >= KERN_PATH_MAX) {
 			error = ENAMETOOLONG;
 			break;
 		}
@@ -10665,9 +10665,9 @@ fat_rename_unlocked(
 	struct fat_inode_info *info;
 	struct fat_rename_result renamed = {0};
 	struct componentname canonical_name;
-	char old_path[ZEDBSD_PATH_MAX], new_path[ZEDBSD_PATH_MAX];
-	char canonical_basename[ZEDBSD_PATH_MAX];
-	char old_canonical[ZEDBSD_PATH_MAX], new_canonical[ZEDBSD_PATH_MAX];
+	char old_path[KERN_PATH_MAX], new_path[KERN_PATH_MAX];
+	char canonical_basename[KERN_PATH_MAX];
+	char old_canonical[KERN_PATH_MAX], new_canonical[KERN_PATH_MAX];
 	unsigned i;
 	unsigned long irq;
 	int error, target_error;
@@ -11158,10 +11158,10 @@ fat_identify(
 	/* Reports the type, which is all a volume without a label carries. */
 	memset(identity, 0, sizeof(*identity));
 	strcpy(identity->type, "vfat");
-	identity->flags = ZEDBSD_BLKID_TYPE;
+	identity->flags = KERN_BLKID_TYPE;
 
 	/* FAT32 moved the extended fields further into the boot sector. */
-	if (type == ZEDBSD_FAT32) {
+	if (type == KERN_FAT32) {
 		serial_offset = 67U;
 		label_offset = 71U;
 	} else {
@@ -11182,7 +11182,7 @@ fat_identify(
 	memmove(identity->uuid + 5, identity->uuid + 4, 4U);
 	identity->uuid[4] = '-';
 	identity->uuid[9] = '\0';
-	identity->flags |= ZEDBSD_BLKID_UUID;
+	identity->flags |= KERN_BLKID_UUID;
 
 	/* Reports the volume label, unless it is the placeholder one. */
 	fat_copy_label(identity->label,
@@ -11195,7 +11195,7 @@ fat_identify(
 
 	/* The placeholder label every unnamed volume carries. */
 	if (difference != 0)
-		identity->flags |= ZEDBSD_BLKID_LABEL;
+		identity->flags |= KERN_BLKID_LABEL;
 
 	/*
 	 * Succeeded: the caller now holds everything the volume names itself
@@ -11265,13 +11265,13 @@ fat_mount_impl(
 	if (result == 0) {
 		/* Each width has a mount of its own to check its table. */
 		switch (type) {
-		case ZEDBSD_FAT12:
+		case KERN_FAT12:
 			result = fat12_mount(state);
 			break;
-		case ZEDBSD_FAT16:
+		case KERN_FAT16:
 			result = fat16_mount(state);
 			break;
-		case ZEDBSD_FAT32:
+		case KERN_FAT32:
 			result = fat32_mount(state);
 			break;
 		default:

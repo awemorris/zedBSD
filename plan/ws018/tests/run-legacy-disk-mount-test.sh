@@ -19,7 +19,7 @@ for mode in ordinary sanitize; do
 	# Disable only mount's hightext grouping so unused callbacks can be GC'd.
 	# shellcheck disable=SC2086
 	${HOSTCC:-cc} -std=c11 -O1 -g -Wall -Wextra -Werror \
-		-ffunction-sections -fdata-sections -DZEDBSD_USER_ABI_LP64 \
+		-ffunction-sections -fdata-sections -DKERN_USER_ABI_LP64 \
 		-DZEDBSD_STORAGE_HOST_TEST $extra -I"$repo/include" \
 		-I"$repo/include/uapi" -I"$repo/src" -I"$repo/libc/include" \
 		"$repo/plan/ws018/tests/legacy-disk-mount-test.c" \

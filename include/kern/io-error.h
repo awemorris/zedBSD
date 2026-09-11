@@ -7,8 +7,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_KERN_IO_ERROR_H
-#define ZEDBSD_KERN_IO_ERROR_H
+#ifndef KERN_KERN_IO_ERROR_H
+#define KERN_KERN_IO_ERROR_H
 
 #include <kern/atomic.h>
 

@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_COMMAND_SHA256_H
-#define ZEDBSD_COMMAND_SHA256_H
+#ifndef KERN_COMMAND_SHA256_H
+#define KERN_COMMAND_SHA256_H
 #include <stddef.h>
 #include <stdint.h>
 struct command_sha256_context {

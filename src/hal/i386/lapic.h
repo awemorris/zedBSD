@@ -11,8 +11,8 @@
  * The private i386 local-APIC contract.
  */
 
-#ifndef ZEDBSD_HAL_I386_LAPIC_H
-#define ZEDBSD_HAL_I386_LAPIC_H
+#ifndef KERN_HAL_I386_LAPIC_H
+#define KERN_HAL_I386_LAPIC_H
 
 #include <hal/hal.h>
 

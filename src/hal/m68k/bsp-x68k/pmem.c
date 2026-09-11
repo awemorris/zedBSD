@@ -88,10 +88,10 @@ m68k030_page_init(void)
 	hal_memset(fixed_claims, 0, sizeof(fixed_claims));
 
 	for (index = 0; index < handoff->memory_region_count &&
-	    index < ZEDBSD_X68K_MAX_MEMORY_REGIONS; index++) {
+	    index < KERN_X68K_MAX_MEMORY_REGIONS; index++) {
 		const struct boot_memory_region32 *region =
 			&handoff->memory_regions[index];
-		if (region->type == ZEDBSD_MEMORY_AVAILABLE &&
+		if (region->type == KERN_MEMORY_AVAILABLE &&
 		    region->base <= UINT32_MAX - region->size)
 			release_available(region->base, region->size);
 	}
@@ -108,10 +108,10 @@ m68k030_page_init(void)
 		reserve_range(handoff->kernel_phys_start,
 			handoff->kernel_phys_end - handoff->kernel_phys_start);
 	for (index = 0; index < handoff->memory_region_count &&
-	    index < ZEDBSD_X68K_MAX_MEMORY_REGIONS; index++) {
+	    index < KERN_X68K_MAX_MEMORY_REGIONS; index++) {
 		const struct boot_memory_region32 *region =
 			&handoff->memory_regions[index];
-		if (region->type == ZEDBSD_MEMORY_RESERVED &&
+		if (region->type == KERN_MEMORY_RESERVED &&
 		    region->base <= UINT32_MAX - region->size)
 			reserve_range(region->base, region->size);
 	}

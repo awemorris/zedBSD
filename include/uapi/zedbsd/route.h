@@ -9,8 +9,8 @@
  * IPv4 routing interface
  */
 
-#ifndef ZEDBSD_UAPI_ROUTE_H
-#define ZEDBSD_UAPI_ROUTE_H
+#ifndef KERN_UAPI_ROUTE_H
+#define KERN_UAPI_ROUTE_H
 
 #include <zedbsd/socket.h>
 #include <stdint.h>
@@ -36,6 +36,10 @@
 
 #define RTM_IFINFO_F_OVERFLOW	0x00000001U
 
+#define SIOCADDRT	0x0000890bUL
+#define SIOCDELRT	0x0000890cUL
+#define SIOCGRTENTRY	0x000089f1UL
+
 struct rtm_ifinfo {
 	uint16_t rtm_version;
 	uint16_t rtm_type;
@@ -49,9 +53,6 @@ struct rtm_ifinfo {
 	uint64_t rtm_reserved[2];
 };
 
-_Static_assert(sizeof(struct rtm_ifinfo) == 56U,
-    "RTM_IFINFO ABI must remain fixed width");
-
 struct rtentry {
 	uint32_t rt_index;
 	uint32_t rt_flags;
@@ -62,8 +63,7 @@ struct rtentry {
 	struct sockaddr rt_genmask;
 };
 
-#define SIOCADDRT	0x0000890bUL
-#define SIOCDELRT	0x0000890cUL
-#define SIOCGRTENTRY	0x000089f1UL
+_Static_assert(sizeof(struct rtm_ifinfo) == 56U,
+    "RTM_IFINFO ABI must remain fixed width");
 
 #endif

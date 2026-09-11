@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_AMD64_FRAMEBUFFER_MAP_H
-#define ZEDBSD_AMD64_FRAMEBUFFER_MAP_H
+#ifndef KERN_AMD64_FRAMEBUFFER_MAP_H
+#define KERN_AMD64_FRAMEBUFFER_MAP_H
 #include <stdint.h>
 
 /* Maps only framebuffer pages; at most the two partial 2 MiB edges need PTs. */

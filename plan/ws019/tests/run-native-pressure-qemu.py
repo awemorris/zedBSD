@@ -30,7 +30,7 @@ def main():
     obj, binary = out / "probe.o", out / "probe"
     subprocess.run([str(REPO / "build/llvm/bin/clang"), "--target=x86_64-unknown-zedbsd",
         "-nostdinc", "-isystem", str(sysroot / "include"), "-I" + str(REPO / "include/uapi"),
-        "-DZEDBSD_USER_ABI_LP64=1", "-ffreestanding", "-fno-pie", "-O1",
+        "-DKERN_USER_ABI_LP64=1", "-ffreestanding", "-fno-pie", "-O1",
         "-ffunction-sections", "-fdata-sections", "-Wall", "-Wextra", "-Werror", "-c",
         str(HERE / "native-swap-pressure.c"), "-o", str(obj)], check=True)
     subprocess.run(["ld", "-m", "elf_x86_64", "--gc-sections", "-nostdlib", "-static",

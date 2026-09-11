@@ -11,8 +11,8 @@
  * The private amd64 timecounter ownership and SMP-validation contract.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_TIMECOUNTER_H
-#define ZEDBSD_HAL_AMD64_TIMECOUNTER_H
+#ifndef KERN_HAL_AMD64_TIMECOUNTER_H
+#define KERN_HAL_AMD64_TIMECOUNTER_H
 
 #include <hal/types.h>
 #include "timecounter-policy.h"

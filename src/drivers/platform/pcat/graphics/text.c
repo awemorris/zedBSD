@@ -16,7 +16,6 @@
  * discipline above it.
  */
 
-#include <hal/hal.h>
 #include <kern/lock.h>
 #include <stddef.h>
 #include <stdint.h>

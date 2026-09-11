@@ -11,7 +11,7 @@ for mode in ordinary sanitize; do
     ${HOSTCC:-cc} -O1 -g -pthread $extra -c \
         "$repo/plan/ws018/tests/mount-thread-host.c" -o "$out/thread.o"
     ${HOSTCC:-cc} -std=c11 -O1 -g -Wall -Wextra -Werror \
-        -DZEDBSD_USER_ABI_LP64 -DZEDBSD_STORAGE_HOST_TEST -ffunction-sections -fdata-sections \
+        -DKERN_USER_ABI_LP64 -DZEDBSD_STORAGE_HOST_TEST -ffunction-sections -fdata-sections \
         $extra -I"$repo/include" -I"$repo/include/uapi" -I"$repo/src" -I"$repo/libc/include" \
         "$repo/plan/ws019/tests/nested-mount-host.c" \
         "$repo/src/kern/mount.c" "$repo/src/kern/inode.c" "$repo/src/kern/namei.c" \

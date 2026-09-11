@@ -91,45 +91,45 @@ typedef enum memory_order {
 #define atomic_fetch_and(object, operand) \
 	atomic_fetch_and_explicit((object), (operand), memory_order_seq_cst)
 
-#define ZEDBSD_ATOMIC_TYPE(name, type)	typedef _Atomic(type) name
-ZEDBSD_ATOMIC_TYPE(atomic_bool, _Bool);
-ZEDBSD_ATOMIC_TYPE(atomic_char, char);
-ZEDBSD_ATOMIC_TYPE(atomic_schar, signed char);
-ZEDBSD_ATOMIC_TYPE(atomic_uchar, unsigned char);
-ZEDBSD_ATOMIC_TYPE(atomic_short, short);
-ZEDBSD_ATOMIC_TYPE(atomic_ushort, unsigned short);
-ZEDBSD_ATOMIC_TYPE(atomic_int, int);
-ZEDBSD_ATOMIC_TYPE(atomic_uint, unsigned int);
-ZEDBSD_ATOMIC_TYPE(atomic_long, long);
-ZEDBSD_ATOMIC_TYPE(atomic_ulong, unsigned long);
-ZEDBSD_ATOMIC_TYPE(atomic_llong, long long);
-ZEDBSD_ATOMIC_TYPE(atomic_ullong, unsigned long long);
-ZEDBSD_ATOMIC_TYPE(atomic_char16_t, __CHAR16_TYPE__);
-ZEDBSD_ATOMIC_TYPE(atomic_char32_t, __CHAR32_TYPE__);
-ZEDBSD_ATOMIC_TYPE(atomic_wchar_t, __WCHAR_TYPE__);
-ZEDBSD_ATOMIC_TYPE(atomic_int_least8_t, int_least8_t);
-ZEDBSD_ATOMIC_TYPE(atomic_uint_least8_t, uint_least8_t);
-ZEDBSD_ATOMIC_TYPE(atomic_int_least16_t, int_least16_t);
-ZEDBSD_ATOMIC_TYPE(atomic_uint_least16_t, uint_least16_t);
-ZEDBSD_ATOMIC_TYPE(atomic_int_least32_t, int_least32_t);
-ZEDBSD_ATOMIC_TYPE(atomic_uint_least32_t, uint_least32_t);
-ZEDBSD_ATOMIC_TYPE(atomic_int_least64_t, int_least64_t);
-ZEDBSD_ATOMIC_TYPE(atomic_uint_least64_t, uint_least64_t);
-ZEDBSD_ATOMIC_TYPE(atomic_int_fast8_t, int_fast8_t);
-ZEDBSD_ATOMIC_TYPE(atomic_uint_fast8_t, uint_fast8_t);
-ZEDBSD_ATOMIC_TYPE(atomic_int_fast16_t, int_fast16_t);
-ZEDBSD_ATOMIC_TYPE(atomic_uint_fast16_t, uint_fast16_t);
-ZEDBSD_ATOMIC_TYPE(atomic_int_fast32_t, int_fast32_t);
-ZEDBSD_ATOMIC_TYPE(atomic_uint_fast32_t, uint_fast32_t);
-ZEDBSD_ATOMIC_TYPE(atomic_int_fast64_t, int_fast64_t);
-ZEDBSD_ATOMIC_TYPE(atomic_uint_fast64_t, uint_fast64_t);
-ZEDBSD_ATOMIC_TYPE(atomic_intptr_t, intptr_t);
-ZEDBSD_ATOMIC_TYPE(atomic_uintptr_t, uintptr_t);
-ZEDBSD_ATOMIC_TYPE(atomic_size_t, size_t);
-ZEDBSD_ATOMIC_TYPE(atomic_ptrdiff_t, ptrdiff_t);
-ZEDBSD_ATOMIC_TYPE(atomic_intmax_t, intmax_t);
-ZEDBSD_ATOMIC_TYPE(atomic_uintmax_t, uintmax_t);
-#undef ZEDBSD_ATOMIC_TYPE
+#define KERN_ATOMIC_TYPE(name, type)	typedef _Atomic(type) name
+KERN_ATOMIC_TYPE(atomic_bool, _Bool);
+KERN_ATOMIC_TYPE(atomic_char, char);
+KERN_ATOMIC_TYPE(atomic_schar, signed char);
+KERN_ATOMIC_TYPE(atomic_uchar, unsigned char);
+KERN_ATOMIC_TYPE(atomic_short, short);
+KERN_ATOMIC_TYPE(atomic_ushort, unsigned short);
+KERN_ATOMIC_TYPE(atomic_int, int);
+KERN_ATOMIC_TYPE(atomic_uint, unsigned int);
+KERN_ATOMIC_TYPE(atomic_long, long);
+KERN_ATOMIC_TYPE(atomic_ulong, unsigned long);
+KERN_ATOMIC_TYPE(atomic_llong, long long);
+KERN_ATOMIC_TYPE(atomic_ullong, unsigned long long);
+KERN_ATOMIC_TYPE(atomic_char16_t, __CHAR16_TYPE__);
+KERN_ATOMIC_TYPE(atomic_char32_t, __CHAR32_TYPE__);
+KERN_ATOMIC_TYPE(atomic_wchar_t, __WCHAR_TYPE__);
+KERN_ATOMIC_TYPE(atomic_int_least8_t, int_least8_t);
+KERN_ATOMIC_TYPE(atomic_uint_least8_t, uint_least8_t);
+KERN_ATOMIC_TYPE(atomic_int_least16_t, int_least16_t);
+KERN_ATOMIC_TYPE(atomic_uint_least16_t, uint_least16_t);
+KERN_ATOMIC_TYPE(atomic_int_least32_t, int_least32_t);
+KERN_ATOMIC_TYPE(atomic_uint_least32_t, uint_least32_t);
+KERN_ATOMIC_TYPE(atomic_int_least64_t, int_least64_t);
+KERN_ATOMIC_TYPE(atomic_uint_least64_t, uint_least64_t);
+KERN_ATOMIC_TYPE(atomic_int_fast8_t, int_fast8_t);
+KERN_ATOMIC_TYPE(atomic_uint_fast8_t, uint_fast8_t);
+KERN_ATOMIC_TYPE(atomic_int_fast16_t, int_fast16_t);
+KERN_ATOMIC_TYPE(atomic_uint_fast16_t, uint_fast16_t);
+KERN_ATOMIC_TYPE(atomic_int_fast32_t, int_fast32_t);
+KERN_ATOMIC_TYPE(atomic_uint_fast32_t, uint_fast32_t);
+KERN_ATOMIC_TYPE(atomic_int_fast64_t, int_fast64_t);
+KERN_ATOMIC_TYPE(atomic_uint_fast64_t, uint_fast64_t);
+KERN_ATOMIC_TYPE(atomic_intptr_t, intptr_t);
+KERN_ATOMIC_TYPE(atomic_uintptr_t, uintptr_t);
+KERN_ATOMIC_TYPE(atomic_size_t, size_t);
+KERN_ATOMIC_TYPE(atomic_ptrdiff_t, ptrdiff_t);
+KERN_ATOMIC_TYPE(atomic_intmax_t, intmax_t);
+KERN_ATOMIC_TYPE(atomic_uintmax_t, uintmax_t);
+#undef KERN_ATOMIC_TYPE
 
 typedef struct atomic_flag {
 	_Atomic _Bool value;

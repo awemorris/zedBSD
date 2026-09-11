@@ -9,8 +9,8 @@
  * signal
  */
 
-#ifndef ZEDBSD_KERN_SIGNAL_H
-#define ZEDBSD_KERN_SIGNAL_H
+#ifndef KERN_KERN_SIGNAL_H
+#define KERN_KERN_SIGNAL_H
 
 #include <uapi/zedbsd/signal.h>
 #include <stdint.h>

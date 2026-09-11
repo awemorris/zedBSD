@@ -5,8 +5,8 @@
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_KERN_IO_POOL_H
-#define ZEDBSD_KERN_IO_POOL_H
+#ifndef KERN_KERN_IO_POOL_H
+#define KERN_KERN_IO_POOL_H
 
 #include <stddef.h>
 #include <stdint.h>

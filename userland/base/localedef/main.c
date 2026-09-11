@@ -33,11 +33,11 @@ struct key_metadata {
 	const char *utf8_value;
 };
 
-static const struct key_metadata metadata[ZEDBSD_LOCALE_KEY_COUNT] = {
-    [ZEDBSD_LOCALE_KEY_INVALID] = {-1, "", "", ""},
+static const struct key_metadata metadata[KERN_LOCALE_KEY_COUNT] = {
+    [KERN_LOCALE_KEY_INVALID] = {-1, "", "", ""},
 #define LOCALE_METADATA(name, category, keyword, c_value, utf8_value)          \
-	[ZEDBSD_LOCALE_KEY_##name] = {category, keyword, c_value, utf8_value},
-    ZEDBSD_LOCALE_KEYS(LOCALE_METADATA)
+	[KERN_LOCALE_KEY_##name] = {category, keyword, c_value, utf8_value},
+    KERN_LOCALE_KEYS(LOCALE_METADATA)
 #undef LOCALE_METADATA
 };
 
@@ -47,8 +47,8 @@ static const char *const category_names[] = {
 };
 
 struct locale_source {
-	char *values[ZEDBSD_LOCALE_KEY_COUNT];
-	unsigned seen_keys[ZEDBSD_LOCALE_KEY_COUNT];
+	char *values[KERN_LOCALE_KEY_COUNT];
+	unsigned seen_keys[KERN_LOCALE_KEY_COUNT];
 	unsigned seen_categories[6];
 	int utf8;
 	int force;
@@ -65,11 +65,11 @@ static char *decode_string(const char *input, int utf8);
 static int hex_value(unsigned char character);
 static int append_utf8(char **output, uint32_t value);
 static int copy_builtin(struct locale_source *source, int category, const char *name);
-static int source_set(struct locale_source *source, enum zedbsd_locale_key key, const char *value, int duplicate_error);
-static int parse_group(struct locale_source *source, enum zedbsd_locale_key first, size_t expected, char *text);
+static int source_set(struct locale_source *source, enum kern_locale_key key, const char *value, int duplicate_error);
+static int parse_group(struct locale_source *source, enum kern_locale_key first, size_t expected, char *text);
 static int split_values(char *text, char **values, size_t maximum);
-static int parse_grouping(struct locale_source *source, enum zedbsd_locale_key key, char *text);
-static enum zedbsd_locale_key key_find(const char *keyword, int category);
+static int parse_grouping(struct locale_source *source, enum kern_locale_key key, char *text);
+static enum kern_locale_key key_find(const char *keyword, int category);
 static int encode_source(struct locale_source *source, unsigned char **result, size_t *result_size);
 static int write_atomic(const char *path, const unsigned char *data, size_t size);
 static void source_free(struct locale_source *source);
@@ -284,7 +284,7 @@ source_defaults(
 
 	/* Process each remaining element. */
 	source->utf8 = utf8;
-	for (key = 1; key < ZEDBSD_LOCALE_KEY_COUNT; key++) {
+	for (key = 1; key < KERN_LOCALE_KEY_COUNT; key++) {
 		value = utf8 ? metadata[key].utf8_value : metadata[key].c_value;
 
 		source->values[key] = strdup(value);
@@ -307,7 +307,7 @@ parse_source(
 {
 	char *decoded_local;
 	char *decoded_local1;
-	enum zedbsd_locale_key key;
+	enum kern_locale_key key;
 	char *keyword;
 	char *value;
 	char *space;
@@ -403,7 +403,7 @@ parse_source(
 		/* Handles the current condition. */
 		if (current == LC_TIME && strcmp(keyword, "abday") == 0) {
 			/* Handles a failed parse group operation. */
-			if (parse_group(source, ZEDBSD_LOCALE_KEY_ABDAY_1, 7U,
+			if (parse_group(source, KERN_LOCALE_KEY_ABDAY_1, 7U,
 					value) != 0)
 				goto invalid;
 			continue;
@@ -412,7 +412,7 @@ parse_source(
 		/* Handles the current condition. */
 		if (current == LC_TIME && strcmp(keyword, "day") == 0) {
 			/* Handles a failed parse group operation. */
-			if (parse_group(source, ZEDBSD_LOCALE_KEY_DAY_1, 7U,
+			if (parse_group(source, KERN_LOCALE_KEY_DAY_1, 7U,
 					value) != 0)
 				goto invalid;
 			continue;
@@ -421,7 +421,7 @@ parse_source(
 		/* Handles the current condition. */
 		if (current == LC_TIME && strcmp(keyword, "abmon") == 0) {
 			/* Handles a failed parse group operation. */
-			if (parse_group(source, ZEDBSD_LOCALE_KEY_ABMON_1, 12U,
+			if (parse_group(source, KERN_LOCALE_KEY_ABMON_1, 12U,
 					value) != 0)
 				goto invalid;
 			continue;
@@ -430,7 +430,7 @@ parse_source(
 		/* Handles the current condition. */
 		if (current == LC_TIME && strcmp(keyword, "mon") == 0) {
 			/* Handles a failed parse group operation. */
-			if (parse_group(source, ZEDBSD_LOCALE_KEY_MON_1, 12U,
+			if (parse_group(source, KERN_LOCALE_KEY_MON_1, 12U,
 					value) != 0)
 				goto invalid;
 			continue;
@@ -439,7 +439,7 @@ parse_source(
 		/* Handles the current condition. */
 		if (current == LC_TIME && strcmp(keyword, "am_pm") == 0) {
 			/* Handles a failed parse group operation. */
-			if (parse_group(source, ZEDBSD_LOCALE_KEY_AM_STR, 2U,
+			if (parse_group(source, KERN_LOCALE_KEY_AM_STR, 2U,
 					value) != 0)
 				goto invalid;
 			continue;
@@ -453,8 +453,8 @@ parse_source(
 			/* Handles a failed parse grouping operation. */
 			if (parse_grouping(source,
 					   current == LC_NUMERIC
-					       ? ZEDBSD_LOCALE_KEY_GROUPING
-					       : ZEDBSD_LOCALE_KEY_MON_GROUPING,
+					       ? KERN_LOCALE_KEY_GROUPING
+					       : KERN_LOCALE_KEY_MON_GROUPING,
 					   value) != 0)
 				goto invalid;
 			continue;
@@ -468,7 +468,7 @@ parse_source(
 		key = key_find(keyword, current);
 
 		/* Handles the selected key. */
-		if (key == ZEDBSD_LOCALE_KEY_INVALID)
+		if (key == KERN_LOCALE_KEY_INVALID)
 			goto invalid;
 		decoded_local1 = decode_string(value, source->utf8);
 
@@ -746,10 +746,10 @@ copy_builtin(
 	}
 
 	/* Process each remaining element. */
-	for (key = 1; key < ZEDBSD_LOCALE_KEY_COUNT; key++) {
+	for (key = 1; key < KERN_LOCALE_KEY_COUNT; key++) {
 		/* Handles a failed source set operation. */
 		if (metadata[key].category == category &&
-		    source_set(source, (enum zedbsd_locale_key)key,
+		    source_set(source, (enum kern_locale_key)key,
 			       utf8 ? metadata[key].utf8_value
 				    : metadata[key].c_value,
 			       0) != 0)
@@ -766,7 +766,7 @@ copy_builtin(
 static int
 source_set(
 	struct locale_source *source,
-	enum zedbsd_locale_key key,
+	enum kern_locale_key key,
 	const char *value,
 	int duplicate_error)
 {
@@ -796,7 +796,7 @@ source_set(
 static int
 parse_group(
 	struct locale_source *source,
-	enum zedbsd_locale_key first,
+	enum kern_locale_key first,
 	size_t expected,
 	char *text)
 {
@@ -885,7 +885,7 @@ split_values(
 static int
 parse_grouping(
 	struct locale_source *source,
-	enum zedbsd_locale_key key,
+	enum kern_locale_key key,
 	char *text)
 {
 	int function_result;
@@ -925,7 +925,7 @@ parse_grouping(
 }
 
 /* Supports the key find operation. */
-static enum zedbsd_locale_key
+static enum kern_locale_key
 key_find(
 	const char *keyword,
 	int category)
@@ -933,17 +933,17 @@ key_find(
 	unsigned key;
 
 	/* Process each remaining element. */
-	for (key = 1; key < ZEDBSD_LOCALE_KEY_COUNT; key++) {
+	for (key = 1; key < KERN_LOCALE_KEY_COUNT; key++) {
 		/* Handles the metadata condition. */
 		if (metadata[key].category == category &&
 		    strcmp(metadata[key].keyword, keyword) == 0)
 
 			/* Returns the computed result. */
-			return (enum zedbsd_locale_key)key;
+			return (enum kern_locale_key)key;
 	}
 
 	/* Returns the computed result. */
-	return ZEDBSD_LOCALE_KEY_INVALID;
+	return KERN_LOCALE_KEY_INVALID;
 }
 
 /* Supports the encode source operation. */
@@ -964,7 +964,7 @@ encode_source(
 	strings = 0;
 
 	/* Process each remaining element. */
-	for (key = 1; key < ZEDBSD_LOCALE_KEY_COUNT; key++) {
+	for (key = 1; key < KERN_LOCALE_KEY_COUNT; key++) {
 		length = strlen(source->values[key]) + 1U;
 
 		/* Checks the current data length. */
@@ -976,8 +976,8 @@ encode_source(
 		}
 		strings += length;
 	}
-	total = ZEDBSD_LOCALE_HEADER_SIZE +
-		(ZEDBSD_LOCALE_KEY_COUNT - 1U) * ZEDBSD_LOCALE_ENTRY_SIZE +
+	total = KERN_LOCALE_HEADER_SIZE +
+		(KERN_LOCALE_KEY_COUNT - 1U) * KERN_LOCALE_ENTRY_SIZE +
 		strings;
 
 	/* Handles the total condition. */
@@ -992,25 +992,25 @@ encode_source(
 	/* Handles the data availability. */
 	if (data == NULL)
 		return -1;
-	memcpy(data, ZEDBSD_LOCALE_MAGIC, ZEDBSD_LOCALE_MAGIC_SIZE);
-	zedbsd_locale_put32(data + 8U, ZEDBSD_LOCALE_VERSION);
-	zedbsd_locale_put32(data + 12U, ZEDBSD_LOCALE_HEADER_SIZE);
-	zedbsd_locale_put32(data + 16U, ZEDBSD_LOCALE_KEY_COUNT - 1U);
-	zedbsd_locale_put32(data + 20U, ZEDBSD_LOCALE_HEADER_SIZE);
-	offset = ZEDBSD_LOCALE_HEADER_SIZE +
-		 (ZEDBSD_LOCALE_KEY_COUNT - 1U) * ZEDBSD_LOCALE_ENTRY_SIZE;
-	zedbsd_locale_put32(data + 24U, (uint32_t)offset);
+	memcpy(data, KERN_LOCALE_MAGIC, KERN_LOCALE_MAGIC_SIZE);
+	kern_locale_put32(data + 8U, KERN_LOCALE_VERSION);
+	kern_locale_put32(data + 12U, KERN_LOCALE_HEADER_SIZE);
+	kern_locale_put32(data + 16U, KERN_LOCALE_KEY_COUNT - 1U);
+	kern_locale_put32(data + 20U, KERN_LOCALE_HEADER_SIZE);
+	offset = KERN_LOCALE_HEADER_SIZE +
+		 (KERN_LOCALE_KEY_COUNT - 1U) * KERN_LOCALE_ENTRY_SIZE;
+	kern_locale_put32(data + 24U, (uint32_t)offset);
 
 	/* Process each remaining element. */
-	for (key = 1; key < ZEDBSD_LOCALE_KEY_COUNT; key++) {
-		entry = data + ZEDBSD_LOCALE_HEADER_SIZE +
-		       (key - 1U) * ZEDBSD_LOCALE_ENTRY_SIZE;
+	for (key = 1; key < KERN_LOCALE_KEY_COUNT; key++) {
+		entry = data + KERN_LOCALE_HEADER_SIZE +
+		       (key - 1U) * KERN_LOCALE_ENTRY_SIZE;
 		length = strlen(source->values[key]);
 
-		zedbsd_locale_put32(entry, key);
-		zedbsd_locale_put32(entry + 4U, metadata[key].category);
-		zedbsd_locale_put32(entry + 8U, (uint32_t)offset);
-		zedbsd_locale_put32(entry + 12U, (uint32_t)length);
+		kern_locale_put32(entry, key);
+		kern_locale_put32(entry + 4U, metadata[key].category);
+		kern_locale_put32(entry + 8U, (uint32_t)offset);
+		kern_locale_put32(entry + 12U, (uint32_t)length);
 		memcpy(data + offset, source->values[key], length + 1U);
 		offset += length + 1U;
 	}
@@ -1083,6 +1083,6 @@ source_free(
 	unsigned key;
 
 	/* Process each remaining element. */
-	for (key = 1; key < ZEDBSD_LOCALE_KEY_COUNT; key++)
+	for (key = 1; key < KERN_LOCALE_KEY_COUNT; key++)
 		free(source->values[key]);
 }

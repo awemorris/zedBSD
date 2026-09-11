@@ -20,7 +20,7 @@ for mode in normal sanitize; do
 		if [ "$source" = file ] && [ "${CACHE_READ_NO_RETRY:-0}" = 1 ]; then
 			control='-Dvm_object_cache_reclaim_pinned=vm_object_cache_reclaim_unavailable'
 		fi
-		${CC:-cc} -std=c11 -pthread -O0 -g -Dtid_t=int32_t -DZEDBSD_USER_ABI_LP64 \
+		${CC:-cc} -std=c11 -pthread -O0 -g -Dtid_t=int32_t -DKERN_USER_ABI_LP64 \
 			-I"$repo/include" -I"$repo/include/uapi" -I"$repo" \
 			-Wall -Wextra -Werror -ffunction-sections -fdata-sections \
 			$flags $control -c "$repo/src/kern/$source.c" -o "$object"
@@ -34,7 +34,7 @@ for mode in normal sanitize; do
 		for symbol in $symbols; do objcopy --weaken-symbol="$symbol" "$object"; done
 		objects="$objects $object"
 	done
-	${CC:-cc} -std=c11 -pthread -O0 -g -Dtid_t=int32_t -DZEDBSD_USER_ABI_LP64 \
+	${CC:-cc} -std=c11 -pthread -O0 -g -Dtid_t=int32_t -DKERN_USER_ABI_LP64 \
 		-DFILE_CACHE_STANDALONE -DFILE_CACHE_FOCUSED -I"$repo/include" -I"$repo/include/uapi" -I"$repo" \
 		-Wall -Wextra -Werror -ffunction-sections -fdata-sections $flags \
 		"$repo/plan/ws025/tests/file-cache-host.c" $objects \

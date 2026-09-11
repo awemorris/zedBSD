@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_STDNORETURN_H
-#define ZEDBSD_STDNORETURN_H
+#ifndef KERN_STDNORETURN_H
+#define KERN_STDNORETURN_H
 
 #ifndef __cplusplus
 #define noreturn	_Noreturn

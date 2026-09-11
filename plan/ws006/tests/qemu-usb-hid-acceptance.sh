@@ -171,7 +171,7 @@ if rg -n '/dev/input/event[0-9]|strcmp[(][^,]+,[[:space:]]*"QEMU|EVIOCGNAME.*ROL
 	exit 1
 fi
 if ! TMPDIR="$task_tmp" cc -std=c11 -Wall -Wextra -Werror \
-	-DZEDBSD_USER_ABI_LP64 \
+	-DKERN_USER_ABI_LP64 \
 	-I"$repo/libc/include" -I"$repo/include/uapi" -fsyntax-only \
 	"$guest_source" >"$output/guest-syntax.log" 2>&1; then
 	echo "guest probe host syntax gate failed" >&2

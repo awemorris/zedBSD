@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_KERN_RESOURCE_LIMIT_H
-#define ZEDBSD_KERN_RESOURCE_LIMIT_H
+#ifndef KERN_KERN_RESOURCE_LIMIT_H
+#define KERN_KERN_RESOURCE_LIMIT_H
 
 #include <stdint.h>
 #include <zedbsd/resource.h>

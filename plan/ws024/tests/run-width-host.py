@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess,sys,json
 repo=Path(__file__).resolve().parents[3];out=Path(sys.argv[1]).resolve();out.relative_to(repo/'plan/ws024/temp');out.mkdir(parents=True,exist_ok=False)
 commands=[]
-for arch,abi in [('amd64',['-m64','-DZEDBSD_USER_ABI_LP64']),('i386',['-m32'])]:
+for arch,abi in [('amd64',['-m64','-DKERN_USER_ABI_LP64']),('i386',['-m32'])]:
  binary=str(out/arch)
  args=['cc',*abi,'-std=c11','-O1','-Wall','-Wextra','-Werror','-ffreestanding','-fno-builtin','-fno-stack-protector','-fno-pie','-no-pie','-ffunction-sections','-fdata-sections','-nostdlib','-static','-I.','-Iinclude','-Iinclude/uapi','-Isrc','-Ilibc/include','plan/ws024/tests/ufs-width-host.c','plan/ws025/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-endian.c','-Wl,--gc-sections,-e,_start','-o',binary]
  for name,cmd in [(arch+'-build',args),(arch,['timeout','30s',binary])]:

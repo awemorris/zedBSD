@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_KERN_CRED_H
-#define ZEDBSD_KERN_CRED_H
+#ifndef KERN_KERN_CRED_H
+#define KERN_KERN_CRED_H
 
 #include <kern/atomic.h>
 #include <sys/types.h>

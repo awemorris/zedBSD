@@ -11,8 +11,8 @@
  * Shared file-backed virtual-memory objects.
  */
 
-#ifndef ZEDBSD_KERN_VM_OBJECT_H
-#define ZEDBSD_KERN_VM_OBJECT_H
+#ifndef KERN_KERN_VM_OBJECT_H
+#define KERN_KERN_VM_OBJECT_H
 
 #include <hal/hal.h>
 #include <kern/pmem.h>

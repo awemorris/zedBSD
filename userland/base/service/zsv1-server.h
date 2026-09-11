@@ -11,8 +11,8 @@
  * Declares the zedBSD userland zsv1 server interface.
  */
 
-#ifndef ZEDBSD_ZSV1_SERVER_H
-#define ZEDBSD_ZSV1_SERVER_H
+#ifndef KERN_ZSV1_SERVER_H
+#define KERN_ZSV1_SERVER_H
 
 #include "userland/base/service/zsv1-protocol.h"
 

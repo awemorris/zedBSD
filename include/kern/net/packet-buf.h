@@ -9,8 +9,8 @@
  * Packet buffer
  */
 
-#ifndef ZEDBSD_KERN_NET_PACKET_BUF_H
-#define ZEDBSD_KERN_NET_PACKET_BUF_H
+#ifndef KERN_KERN_NET_PACKET_BUF_H
+#define KERN_KERN_NET_PACKET_BUF_H
 
 #include <kern/atomic.h>
 #include <stddef.h>

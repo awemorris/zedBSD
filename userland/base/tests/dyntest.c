@@ -57,7 +57,7 @@ main(
 	unsigned reload_iteration;
 	pthread_t first, second;
 	void *first_result, *second_result;
-	char putenv_entry[sizeof("ZEDBSD_PUTENV=first")];
+	char putenv_entry[sizeof("KERN_PUTENV=first")];
 
 	plugin_destructor_count = 0;
 
@@ -312,17 +312,17 @@ main(
 	if (version_value == NULL || version_value() != 42)
 		return 44;
 	version_value =
-	    (int (*)(void))dlvsym(handle, "versioned_value", "ZEDBSD_1.0");
+	    (int (*)(void))dlvsym(handle, "versioned_value", "KERN_1.0");
 
 	/* Handles a failed version value operation. */
 	if (version_value == NULL || version_value() != 41)
 		return 45;
 	version_value =
-	    (int (*)(void))dlvsym(handle, "versioned_value", "ZEDBSD_2.0");
+	    (int (*)(void))dlvsym(handle, "versioned_value", "KERN_2.0");
 
 	/* Handles an operation failure. */
 	if (version_value == NULL || version_value() != 42 ||
-	    dlvsym(handle, "versioned_value", "ZEDBSD_MISSING") != NULL ||
+	    dlvsym(handle, "versioned_value", "KERN_MISSING") != NULL ||
 	    dlerror() == NULL || dlerror() != NULL || dlclose(handle) != 0)
 
 		/* Returns the computed result. */
@@ -344,31 +344,31 @@ main(
 	if (plugin != NULL || dlerror() == NULL || dlerror() != NULL)
 		return 48;
 	puts("DL:05L:CORRUPT-DSO-REJECTED");
-		strcpy(putenv_entry, "ZEDBSD_PUTENV=first");
+		strcpy(putenv_entry, "KERN_PUTENV=first");
 
 	/* Handles a failed setenv operation. */
-	if (setenv("ZEDBSD_ENV_RACE", "old", 1) != 0 ||
-	    (saved = getenv("ZEDBSD_ENV_RACE")) == NULL ||
+	if (setenv("KERN_ENV_RACE", "old", 1) != 0 ||
+	    (saved = getenv("KERN_ENV_RACE")) == NULL ||
 	    pthread_create(&first, NULL, environment_thread, NULL) !=
 		0 ||
 	    pthread_join(first, &thread_result) != 0 ||
 	    thread_result != NULL || strcmp(saved, "old") != 0 ||
-	    strcmp(getenv("ZEDBSD_ENV_RACE"), "new") != 0)
+	    strcmp(getenv("KERN_ENV_RACE"), "new") != 0)
 
 		/* Returns the computed result. */
 		return 49;
 
 	/* Handles a failed putenv operation. */
 	if (putenv(putenv_entry) != 0 ||
-	    strcmp(getenv("ZEDBSD_PUTENV"), "first") != 0)
+	    strcmp(getenv("KERN_PUTENV"), "first") != 0)
 
 		/* Returns the computed result. */
 		return 50;
 	memcpy(strchr(putenv_entry, '=') + 1, "other", 6);
 
 	/* Handles a failed getenv operation. */
-	if (strcmp(getenv("ZEDBSD_PUTENV"), "other") != 0 ||
-	    clearenv() != 0 || getenv("ZEDBSD_ENV_RACE") != NULL)
+	if (strcmp(getenv("KERN_PUTENV"), "other") != 0 ||
+	    clearenv() != 0 || getenv("KERN_ENV_RACE") != NULL)
 
 		/* Returns the computed result. */
 		return 51;
@@ -438,7 +438,7 @@ environment_thread(
 	(void)argument;
 
 	/* Computes the function result. */
-	function_result = (void *)(uintptr_t)(setenv("ZEDBSD_ENV_RACE", "new", 1) == 0
+	function_result = (void *)(uintptr_t)(setenv("KERN_ENV_RACE", "new", 1) == 0
 				       ? 0
 				       : 1);
 

@@ -30,7 +30,7 @@
 #include <string.h>
 #include <sys/mman.h>
 
-#define PAGE_SIZE			ZEDBSD_PAGE_SIZE
+#define PAGE_SIZE			KERN_PAGE_SIZE
 #define VM_PAGE_SLAB_SLOTS		32U
 #define VM_PRIVATE_PAGE_SLAB_SLOTS	24U
 #define VM_PRIVATE_PAGE_SLAB_FREE_MASK	((1U << VM_PRIVATE_PAGE_SLAB_SLOTS) - 1U)
@@ -271,7 +271,7 @@ vmspace_layout_init(
 	vm_layout.user_limit = limit;
 
 	/* Places the break and the mmap area where this ABI expects them. */
-#ifdef ZEDBSD_USER_ABI_LP64
+#ifdef KERN_USER_ABI_LP64
 	vm_layout.brk_limit = 0x0000000100000000ULL;
 	vm_layout.mmap_base = 0x0000000100000000ULL;
 #else

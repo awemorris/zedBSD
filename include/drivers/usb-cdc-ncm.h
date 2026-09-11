@@ -3,8 +3,8 @@
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_DRIVERS_USB_CDC_NCM_H
-#define ZEDBSD_DRIVERS_USB_CDC_NCM_H
+#ifndef KERN_DRIVERS_USB_CDC_NCM_H
+#define KERN_DRIVERS_USB_CDC_NCM_H
 
 #include <stddef.h>
 #include <stdint.h>

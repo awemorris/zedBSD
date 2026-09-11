@@ -11,8 +11,8 @@
  * Declares the bounded networkd Wi-Fi child runner.
  */
 
-#ifndef ZEDBSD_NETWORKD_WIFI_CHILD_H
-#define ZEDBSD_NETWORKD_WIFI_CHILD_H
+#ifndef KERN_NETWORKD_WIFI_CHILD_H
+#define KERN_NETWORKD_WIFI_CHILD_H
 
 #include "userland/base/net/protocol.h"
 

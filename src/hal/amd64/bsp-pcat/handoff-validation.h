@@ -11,8 +11,8 @@
  * Pure ZBL6 version, size, and flag classification shared with host fixtures.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_PCAT_HANDOFF_VALIDATION_H
-#define ZEDBSD_HAL_AMD64_PCAT_HANDOFF_VALIDATION_H
+#ifndef KERN_HAL_AMD64_PCAT_HANDOFF_VALIDATION_H
+#define KERN_HAL_AMD64_PCAT_HANDOFF_VALIDATION_H
 
 #include <stdint.h>
 #include "bootloader/include/amd64-handoff.h"

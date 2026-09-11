@@ -9,8 +9,8 @@
  * File operation
  */
 
-#ifndef ZEDBSD_KERN_FILE_H
-#define ZEDBSD_KERN_FILE_H
+#ifndef KERN_KERN_FILE_H
+#define KERN_KERN_FILE_H
 
 #include <kern/readahead.h>
 #include "kern/inode.h"

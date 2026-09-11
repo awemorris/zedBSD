@@ -11,8 +11,8 @@
  * Declares shared userland c parser support.
  */
 
-#ifndef ZEDBSD_USERLAND_C_PARSER_H
-#define ZEDBSD_USERLAND_C_PARSER_H
+#ifndef KERN_USERLAND_C_PARSER_H
+#define KERN_USERLAND_C_PARSER_H
 
 #include <stddef.h>
 

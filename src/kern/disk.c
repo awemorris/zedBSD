@@ -1100,14 +1100,14 @@ disk_registry_reset(
 DISK_HIGH int
 disk_block_info(
 	struct disk *disk,
-	struct zedbsd_block_info *info)
+	struct kern_block_info *info)
 {
 	bool enabled;
 	unsigned i;
 
 	/* Validates the caller's ABI and reserved fields before touching the disk. */
 	if (info == NULL ||
-	    info->version != ZEDBSD_BLOCK_VERSION ||
+	    info->version != KERN_BLOCK_VERSION ||
 	    info->struct_size != sizeof(*info))
 		return EINVAL;
 
@@ -1128,7 +1128,7 @@ disk_block_info(
 
 	/* Publishes one coherent device, parent and sector-geometry snapshot. */
 	memset(info, 0, sizeof(*info));
-	info->version = ZEDBSD_BLOCK_VERSION;
+	info->version = KERN_BLOCK_VERSION;
 	info->struct_size = sizeof(*info);
 	info->device = (uint32_t)disk->d_dev;
 	info->parent_device = disk->d_parent != NULL ? (uint32_t)disk->d_parent->d_dev : 0;
@@ -1136,7 +1136,7 @@ disk_block_info(
 
 	/* Exposes the backing capability without leaking internal flag values. */
 	if ((disk->d_flags & DISK_FILE_BACKED) != 0)
-		info->flags |= ZEDBSD_BLOCK_FILE_BACKED;
+		info->flags |= KERN_BLOCK_FILE_BACKED;
 
 	info->sector_size = disk->d_block_size;
 	info->sector_count = disk->d_block_count;
@@ -2375,13 +2375,13 @@ bio_async_enable(struct disk *disk)
 	spin_unlock_irqrestore(&endpoint->lock, irq);
 	spin_unlock_irqrestore(&async_registry, registry_irq);
 
-	controls = (ASYNC_SLOTS * sizeof(struct bio_async_request) + ZEDBSD_PAGE_SIZE - 1U) &
-	    ~(size_t)(ZEDBSD_PAGE_SIZE - 1U);
+	controls = (ASYNC_SLOTS * sizeof(struct bio_async_request) + KERN_PAGE_SIZE - 1U) &
+	    ~(size_t)(KERN_PAGE_SIZE - 1U);
 
 	allocation_size = controls + ASYNC_SLOTS * KERN_IO_BATCH_MAX;
 	memset(&memory, 0, sizeof(memory));
 	memory.size = allocation_size;
-	error = hal_pmem_alloc(allocation_size, ZEDBSD_PAGE_SIZE,
+	error = hal_pmem_alloc(allocation_size, KERN_PAGE_SIZE,
 			       &memory.paddr);
 	if (error != HAL_OK || hal_pmem_to_kernel(memory.paddr) == NULL) {
 		error = ENOMEM;

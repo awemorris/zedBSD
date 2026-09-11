@@ -9,8 +9,8 @@
  * Swap
  */
 
-#ifndef ZEDBSD_KERN_SWAP_H
-#define ZEDBSD_KERN_SWAP_H
+#ifndef KERN_KERN_SWAP_H
+#define KERN_KERN_SWAP_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -23,18 +23,18 @@
 #define SWAP_SLOT_SOURCE_MASK		UINT32_C(0x60000000)
 #define SWAP_SLOT_VALID_MASK		UINT32_C(0x7fffffff)
 #define SWAP_SOURCE_MAX_SLOTS		(UINT32_C(1) << SWAP_SLOT_SOURCE_SHIFT)
-#define ZEDBSD_SWAP_FILE_MIN_BYTES	(32U * 1024U * 1024U)
-#define ZEDBSD_SWAP_FILE_MAX_BYTES	(64U * 1024U * 1024U)
-#define ZEDBSD_SWAP_HEADER_SIZE		64U
-#define ZEDBSD_SWAP_V2_UUID_SIZE		8U
-#define ZEDBSD_SWAP_V2_LABEL_SIZE	20U
+#define KERN_SWAP_FILE_MIN_BYTES	(32U * 1024U * 1024U)
+#define KERN_SWAP_FILE_MAX_BYTES	(64U * 1024U * 1024U)
+#define KERN_SWAP_HEADER_SIZE		64U
+#define KERN_SWAP_V2_UUID_SIZE		8U
+#define KERN_SWAP_V2_LABEL_SIZE	20U
 
 struct swap_header_info {
 	uint32_t version;
 	uint64_t backing_bytes;
 	uint64_t slot_count;
-	uint8_t uuid[ZEDBSD_SWAP_V2_UUID_SIZE];
-	char label[ZEDBSD_SWAP_V2_LABEL_SIZE];
+	uint8_t uuid[KERN_SWAP_V2_UUID_SIZE];
+	char label[KERN_SWAP_V2_LABEL_SIZE];
 };
 
 struct swap_backend_ops {

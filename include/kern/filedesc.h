@@ -9,8 +9,8 @@
  * Per-process file descriptor table
  */
 
-#ifndef ZEDBSD_KERN_FILEDESC_H
-#define ZEDBSD_KERN_FILEDESC_H
+#ifndef KERN_KERN_FILEDESC_H
+#define KERN_KERN_FILEDESC_H
 
 #include <kern/atomic.h>
 #include <kern/lock.h>

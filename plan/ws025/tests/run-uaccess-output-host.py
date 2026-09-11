@@ -10,6 +10,6 @@ for mode in ('ordinary','sanitize'):
  if mode=='unsupported':flags+=['-DOMIT_BORROW']
  binary=out/mode
  with (out/(mode+'.log')).open('w') as log:
-  subprocess.run(['cc','-std=c11','-g','-pthread','-Dtid_t=int32_t','-DZEDBSD_USER_ABI_LP64','-Iinclude','-Iinclude/uapi','-I.','-Wall','-Wextra','-Werror','-ffunction-sections','-fdata-sections',*flags,paths[0],paths[2],'-Wl,--gc-sections','-o',str(binary)],cwd=repo,stdout=log,stderr=subprocess.STDOUT,check=True)
+  subprocess.run(['cc','-std=c11','-g','-pthread','-Dtid_t=int32_t','-DKERN_USER_ABI_LP64','-Iinclude','-Iinclude/uapi','-I.','-Wall','-Wextra','-Werror','-ffunction-sections','-fdata-sections',*flags,paths[0],paths[2],'-Wl,--gc-sections','-o',str(binary)],cwd=repo,stdout=log,stderr=subprocess.STDOUT,check=True)
   subprocess.run(['timeout','60',str(binary)],cwd=repo,stdout=log,stderr=subprocess.STDOUT,check=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=1','UBSAN_OPTIONS':'halt_on_error=1'})
  print(mode+': PASS')

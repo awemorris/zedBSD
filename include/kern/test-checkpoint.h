@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_KERN_TEST_CHECKPOINT_H
-#define ZEDBSD_KERN_TEST_CHECKPOINT_H
+#ifndef KERN_KERN_TEST_CHECKPOINT_H
+#define KERN_KERN_TEST_CHECKPOINT_H
 
 enum kern_test_checkpoint_id {
 	KERN_TEST_DISK_LOOKUP_BEFORE_REF = 1,
@@ -29,7 +29,7 @@ enum kern_test_checkpoint_id {
 	KERN_TEST_EXEC_RETIREMENT_BEGIN,
 };
 
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 typedef void (
 	*kern_test_checkpoint_fn)(
 	enum kern_test_checkpoint_id,

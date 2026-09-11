@@ -1,6 +1,6 @@
 /* UltraSPARC-I/II TTE encoding used by the software MMU. */
-#ifndef ZEDBSD_HAL_SPARCV9_TTE_H
-#define ZEDBSD_HAL_SPARCV9_TTE_H
+#ifndef KERN_HAL_SPARCV9_TTE_H
+#define KERN_HAL_SPARCV9_TTE_H
 
 #include <hal/types.h>
 

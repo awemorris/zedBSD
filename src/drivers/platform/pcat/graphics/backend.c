@@ -15,10 +15,12 @@
 #include "drivers/graphics/pcat.h"
 
 #include <drivers/pci.h>
-#include <hal/hal.h>
 #include <string.h>
 #include "bootloader/include/amd64-handoff.h"
 #include "kern/klog.h"
+#include "kern/pmem.h"
+#include "errno.h"
+#include "kern/platform.h"
 
 #define WIDTH 640U
 #define HEIGHT 480U
@@ -1025,7 +1027,7 @@ pcat_graphics_prepare_hardware(
 	void *aperture;
 
 	drv_pcat_font_init();
-	linear_framebuffer = hal_get_arch_handoff("pcat.framebuffer");
+	linear_framebuffer = kern_boot_handoff("pcat.framebuffer");
 
 	/* Handles the linear framebuffer availability. */
 	linear_pixels = NULL;
@@ -1052,9 +1054,8 @@ pcat_graphics_prepare_hardware(
 	}
 
 	/* Maps the uncached legacy VGA aperture. */
-	if (hal_space_map_device(0x000a0000U, 0x00020000U,
-				 HAL_SPACE_READ | HAL_SPACE_WRITE |
-				 HAL_SPACE_NOCACHE, &aperture) != HAL_OK)
+	if (kern_device_map(0x000a0000U, 0x00020000U,
+			    KERN_DEVICE_UNCACHED, &aperture) != 0)
 		return 0;
 	vga_aperture = (volatile uint8_t *)aperture;
 

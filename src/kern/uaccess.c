@@ -30,7 +30,7 @@
 #include <string.h>
 
 #define UACCESS_EXT __attribute__((section(".hightext")))
-#define PAGE_SIZE ZEDBSD_PAGE_SIZE
+#define PAGE_SIZE KERN_PAGE_SIZE
 
 static struct vmspace *current_vmspace(void);
 static UACCESS_EXT int pinned_range(const struct uaccess_pin *pin, size_t offset, size_t size, uint32_t prot, size_t *position);
@@ -480,8 +480,8 @@ copyinstr(
 		error = user_address_add(source, used, &address);
 		if (error != 0)
 			return error;
-		chunk = ZEDBSD_PAGE_SIZE -
-		    (size_t)(address & (ZEDBSD_PAGE_SIZE - 1U));
+		chunk = KERN_PAGE_SIZE -
+		    (size_t)(address & (KERN_PAGE_SIZE - 1U));
 		if (chunk > capacity - used)
 			chunk = capacity - used;
 		error = copyin(address, destination + used, chunk);

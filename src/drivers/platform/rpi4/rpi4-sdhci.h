@@ -9,8 +9,8 @@
  * Raspberry Pi 4 eMMC2 SDHCI PIO driver.
  */
 
-#ifndef ZEDBSD_DRIVERS_RPI4_SDHCI_H
-#define ZEDBSD_DRIVERS_RPI4_SDHCI_H
+#ifndef KERN_DRIVERS_RPI4_SDHCI_H
+#define KERN_DRIVERS_RPI4_SDHCI_H
 
 #include <stdint.h>
 struct disk;

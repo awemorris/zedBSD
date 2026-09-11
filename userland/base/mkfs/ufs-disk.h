@@ -1,8 +1,8 @@
 /* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_UFS_DISK_H
-#define ZEDBSD_UFS_DISK_H
+#ifndef KERN_UFS_DISK_H
+#define KERN_UFS_DISK_H
 
 #include <stddef.h>
 #include <stdint.h>

@@ -16,7 +16,6 @@
 #include <drivers/usb-rtl8822bu.h>
 #include <drivers/usb.h>
 #include <errno.h>
-#include <hal/hal.h>
 #include <kern/clock.h>
 #include <kern/lock.h>
 #include <kern/net/net-device.h>
@@ -28,6 +27,7 @@
 #include "../wifi/rtl8822b/rtl8822b-internal.h"
 #include "kern/klog.h"
 #include "kern/kmem.h"
+#include "kern/atomic.h"
 
 /*
  * The host fixture substitutes an immutable in-memory lease.  Production
@@ -1032,7 +1032,7 @@ rtl8822bu_radio_delay_us(
 	 * Long requests are representable by the monotonic kernel clock.  Short
 	 * MAC/RF-table delays are deliberately not rounded to a 10-ms tick:
 	 * doing so for every 1/5/13-us table entry makes initialization take
-	 * minutes. hal_atomic_relax() keeps the bounded sub-tick path
+	 * minutes. atomic_spin_hint() keeps the bounded sub-tick path
 	 * architecture-neutral.
 	 */
 	scaled = (uint64_t)microseconds * KERN_CLOCK_HZ;
@@ -1073,7 +1073,7 @@ rtl8822bu_radio_delay_us(
 		for (spin = 0U;
 		     spin < batch * RTL8822BU_RELAXATIONS_PER_MICROSECOND;
 		     spin++)
-			hal_atomic_relax();
+			atomic_spin_hint();
 		remaining -= batch;
 
 		/* Handles the now condition. */

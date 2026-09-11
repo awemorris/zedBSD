@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_KERN_BACKING_CLAIM_H
-#define ZEDBSD_KERN_BACKING_CLAIM_H
+#ifndef KERN_KERN_BACKING_CLAIM_H
+#define KERN_KERN_BACKING_CLAIM_H
 
 #include <stdint.h>
 

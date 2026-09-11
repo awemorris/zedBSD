@@ -1,5 +1,5 @@
-#ifndef ZEDBSD_HAL_SPARCV9_BSP_H
-#define ZEDBSD_HAL_SPARCV9_BSP_H
+#ifndef KERN_HAL_SPARCV9_BSP_H
+#define KERN_HAL_SPARCV9_BSP_H
 
 #include <kern/sun4u/boot.h>
 

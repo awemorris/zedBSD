@@ -11,8 +11,8 @@
  * The amd64 assembly-helper contract.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_ASM_H
-#define ZEDBSD_HAL_AMD64_ASM_H
+#ifndef KERN_HAL_AMD64_ASM_H
+#define KERN_HAL_AMD64_ASM_H
 
 #include <hal/types.h>
 

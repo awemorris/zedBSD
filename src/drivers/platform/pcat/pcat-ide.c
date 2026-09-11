@@ -11,7 +11,6 @@
 
 #include "drivers/pcat-ide.h"
 #include <errno.h>
-#include <hal/hal.h>
 #include <kern/lock.h>
 #include "kern/klog.h"
 

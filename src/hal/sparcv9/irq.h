@@ -1,5 +1,5 @@
-#ifndef ZEDBSD_HAL_SPARCV9_IRQ_H
-#define ZEDBSD_HAL_SPARCV9_IRQ_H
+#ifndef KERN_HAL_SPARCV9_IRQ_H
+#define KERN_HAL_SPARCV9_IRQ_H
 
 #include <hal/hal.h>
 

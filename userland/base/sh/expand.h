@@ -11,8 +11,8 @@
  * Declares the zedBSD userland expand interface.
  */
 
-#ifndef ZEDBSD_USERLAND_SH_EXPAND_H
-#define ZEDBSD_USERLAND_SH_EXPAND_H
+#ifndef KERN_USERLAND_SH_EXPAND_H
+#define KERN_USERLAND_SH_EXPAND_H
 
 #include "userland/base/sh/lexer.h"
 

@@ -13,7 +13,6 @@
 #include <drivers/pci.h>
 #include <drivers/usb.h>
 #include <errno.h>
-#include <hal/hal.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
@@ -21,6 +20,7 @@
 #include <string.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
+#include "kern/device-io.h"
 
 #define EHCI_USBCMD 0x00U
 #define EHCI_USBSTS 0x04U
@@ -239,7 +239,7 @@ struct ehci_controller {
 	uint64_t hardware_stop_result_generation;
 	int hardware_stop_error;
 	unsigned retirement_success_reported;
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 	unsigned shutdown_evidence_reported;
 #endif
 	volatile unsigned fatal_pending;
@@ -611,7 +611,7 @@ wr32(
 {
 	*(volatile uint32_t *)(registers + offset) = value;
 
-	hal_io_mb();
+	kern_io_barrier();
 }
 
 /* Writes one root port register, keeping the bits it must not clear. */
@@ -650,7 +650,7 @@ ehci_port_handoff(
 		return ENOTSUP;
 	ehci_port_write(controller, port, status, EHCI_PORT_OWNER, 0, 0);
 	status = rd32(controller->operational, EHCI_PORTSC(port));
-	hal_io_mb();
+	kern_io_barrier();
 	if (status == UINT32_MAX)
 		return EIO;
 	if ((status & EHCI_PORT_CONNECT) == 0)
@@ -675,7 +675,7 @@ ehci_port_finish_reset(
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		status = rd32(controller->operational, EHCI_PORTSC(port));
-		hal_io_mb();
+		kern_io_barrier();
 		if (status == UINT32_MAX)
 			return EIO;
 		if ((status & EHCI_PORT_RESET) == 0)
@@ -1073,7 +1073,7 @@ ehci_schedule_initialize(
 	controller->async_head->capabilities = 1U << 30;
 	controller->async_head->next = EHCI_LINK_TERM;
 	controller->async_head->alternate = EHCI_LINK_TERM;
-	hal_io_wmb();
+	kern_io_write_barrier();
 
 	/* Succeeded. */
 	return 0;
@@ -1103,7 +1103,7 @@ ehci_wait_schedule_status(
 	for (;;) {
 		status = rd32(controller->operational, EHCI_USBSTS);
 
-		hal_io_mb();
+		kern_io_barrier();
 
 		/* Checks the operation status. */
 		if (status == UINT32_MAX || (status & EHCI_STS_HSE) != 0)
@@ -1193,7 +1193,7 @@ ehci_start(
 			status = rd32(controller->operational,
 				      EHCI_PORTSC(port));
 
-			hal_io_mb();
+			kern_io_barrier();
 
 			/* Checks the operation status. */
 			if (status == UINT32_MAX) {
@@ -1419,7 +1419,7 @@ stop_owner:
 	/* Handles the mmio invalid condition. */
 	if (!mmio_invalid) {
 		command = rd32(controller->operational, EHCI_USBCMD);
-		hal_io_mb();
+		kern_io_barrier();
 
 		/* Handles the command condition. */
 		if (command == UINT32_MAX) {
@@ -1440,7 +1440,7 @@ stop_owner:
 		/* Continue until the operation reaches a terminal state. */
 		for (;;) {
 			status = rd32(controller->operational, EHCI_USBSTS);
-			hal_io_mb();
+			kern_io_barrier();
 			if (status == UINT32_MAX) {
 				mmio_invalid = 1;
 				break;
@@ -2203,12 +2203,12 @@ ehci_async_insert_locked(
 		 * store. Make the complete private QH/qTD graph and its tail
 		 * link visible before hardware can follow that store.
 		 */
-		hal_io_wmb();
+		kern_io_write_barrier();
 		controller->async_last->qh->horizontal =
 			ehci_request_link(request);
 	} else {
 		controller->async_first = request;
-		hal_io_wmb();
+		kern_io_write_barrier();
 		controller->async_head->horizontal = ehci_request_link(request);
 	}
 
@@ -2311,14 +2311,14 @@ ehci_periodic_insert_locked(
 	 * contract: initialize the private graph, order it, then expose its
 	 * link from the controller-owned skeleton.
 	 */
-	hal_io_wmb();
+	kern_io_write_barrier();
 	controller->periodic_skeleton[request->periodic_node].horizontal =
 		ehci_request_link(request);
 
 	/*
 	 * Order the publication store before the later PSE resume MMIO write.
 	 */
-	hal_io_wmb();
+	kern_io_write_barrier();
 	request->linked = true;
 }
 
@@ -2492,7 +2492,7 @@ ehci_periodic_pause(
 
 	command = rd32(controller->operational, EHCI_USBCMD);
 	status = rd32(controller->operational, EHCI_USBSTS);
-	hal_io_mb();
+	kern_io_barrier();
 
 	/* Handles the command condition. */
 	if (command == UINT32_MAX || status == UINT32_MAX ||
@@ -2546,7 +2546,7 @@ ehci_periodic_resume(
 
 	command = rd32(controller->operational, EHCI_USBCMD);
 	status = rd32(controller->operational, EHCI_USBSTS);
-	hal_io_mb();
+	kern_io_barrier();
 
 	/* Handles the command condition. */
 	if (command == UINT32_MAX || status == UINT32_MAX ||
@@ -2992,7 +2992,7 @@ ehci_request_terminal(
 	int all_inactive = 1;
 	int short_packet = 0;
 
-	hal_io_rmb();
+	kern_io_read_barrier();
 	/* Process each remaining element. */
 	for (index = 0; index < request->qtd_count; index++) {
 		token = request->qtds[index].token;
@@ -3166,7 +3166,7 @@ ehci_retirement_begin_iaa_locked(
 		return EAGAIN;
 	status = rd32(controller->operational, EHCI_USBSTS);
 	command = rd32(controller->operational, EHCI_USBCMD);
-	hal_io_mb();
+	kern_io_barrier();
 	if (status == UINT32_MAX || command == UINT32_MAX ||
 	    (status & (EHCI_STS_HSE | EHCI_STS_HALTED)) != 0) {
 		/* Failed. */
@@ -3189,7 +3189,7 @@ ehci_retirement_begin_iaa_locked(
 	if ((status & EHCI_STS_IAA) != 0) {
 		wr32(controller->operational, EHCI_USBSTS, EHCI_STS_IAA);
 		status = rd32(controller->operational, EHCI_USBSTS);
-		hal_io_mb();
+		kern_io_barrier();
 		if (status == UINT32_MAX || (status & EHCI_STS_IAA) != 0)
 			return EIO;
 	}
@@ -3198,7 +3198,7 @@ ehci_retirement_begin_iaa_locked(
 	error = ehci_async_unlink_locked(controller, request);
 	if (error != 0)
 		return error;
-	hal_io_wmb();
+	kern_io_write_barrier();
 	controller->retirement_generation++;
 
 	/* Handles the controller condition. */
@@ -3238,7 +3238,7 @@ ehci_retirement_observe_iaa_locked(
 		return EAGAIN;
 	status = rd32(controller->operational, EHCI_USBSTS);
 	command = rd32(controller->operational, EHCI_USBCMD);
-	hal_io_mb();
+	kern_io_barrier();
 	if (status == UINT32_MAX || command == UINT32_MAX ||
 	    (status & (EHCI_STS_HSE | EHCI_STS_HALTED)) != 0 ||
 	    (status & EHCI_STS_ASYNC) == 0 ||
@@ -3294,7 +3294,7 @@ ehci_complete_retired_request(
 	 * The QH is unreachable and the controller-specific barrier has
 	 * completed.
 	 */
-	hal_io_rmb();
+	kern_io_read_barrier();
 
 	/* Handles the request condition. */
 	if (request->retirement_reason != EHCI_RETIRE_DISCONNECT) {
@@ -3421,7 +3421,7 @@ ehci_retire_periodic_request(
 	error = ehci_periodic_unlink_locked(controller, request);
 	if (error == 0) {
 		request->state = EHCI_REQUEST_WAIT_PERIODIC;
-		hal_io_wmb();
+		kern_io_write_barrier();
 	}
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
@@ -3760,7 +3760,7 @@ ehci_retirement_worker(
 			continue;
 		}
 
-		kernel_wait_task();
+		kern_thread_block();
 	}
 }
 
@@ -3964,7 +3964,7 @@ ehci_urb_dequeue(
 
 		/* Handles the request condition. */
 		if (request->state == EHCI_REQUEST_RETIRED_CANCEL) {
-			hal_io_rmb();
+			kern_io_read_barrier();
 			ehci_request_commit_toggle(request);
 			ehci_active_remove_locked(controller, request);
 			(void)drv_usb_urb_set_hcd_data(urb, NULL);
@@ -4317,7 +4317,7 @@ ehci_report_shutdown_evidence(
 {
 	unsigned long irq;
 	int ready;
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 	int report = 0;
 
 #endif
@@ -4339,7 +4339,7 @@ ehci_report_shutdown_evidence(
 		!controller->retirement_joining &&
 		controller->root_worker == NULL && !controller->root_joining &&
 		!controller->root_dispatching;
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 
 	/* Handles the ready condition. */
 	if (ready && !controller->shutdown_evidence_reported) {
@@ -4354,7 +4354,7 @@ ehci_report_shutdown_evidence(
 	/* Handles the ready condition. */
 	if (!ready)
 		return EBUSY;
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 
 	/* Handles the report condition. */
 	if (report)
@@ -4874,7 +4874,7 @@ ehci_irq(
 	irq = spin_lock_irqsave(&controller->active_lock);
 
 	status = rd32(controller->operational, EHCI_USBSTS);
-	hal_io_mb();
+	kern_io_barrier();
 	if (status == UINT32_MAX) {
 		report_controller = !controller->quarantined;
 		controller->fatal_mmio_invalid = 1;
@@ -4942,7 +4942,7 @@ ehci_irq(
 	/* Handles the acknowledge condition. */
 	if ((acknowledge & EHCI_STS_IAA) != 0) {
 		readback = rd32(controller->operational, EHCI_USBSTS);
-		hal_io_mb();
+		kern_io_barrier();
 
 		/* Handles the readback condition. */
 		if (readback == UINT32_MAX || (readback & EHCI_STS_IAA) != 0) {

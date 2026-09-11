@@ -11,8 +11,8 @@
  * The private amd64 machine constants and source helpers.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_DEFS_H
-#define ZEDBSD_HAL_AMD64_DEFS_H
+#ifndef KERN_HAL_AMD64_DEFS_H
+#define KERN_HAL_AMD64_DEFS_H
 
 #define CLOCK_HZ               100
 #define PAGE_SIZE              4096

@@ -9,8 +9,8 @@
  * Kernel process objects
  */
 
-#ifndef ZEDBSD_KERN_PROCESS_H
-#define ZEDBSD_KERN_PROCESS_H
+#ifndef KERN_KERN_PROCESS_H
+#define KERN_KERN_PROCESS_H
 
 #include <sys/types.h>
 #include <stdint.h>
@@ -400,7 +400,7 @@ void
 exit1_signal(
 	int signo) __attribute__((noreturn));
 
-#ifdef ZEDBSD_PROCESS_TEST
+#ifdef KERN_PROCESS_TEST
 void
 process_test_reparent(
 	struct process *,

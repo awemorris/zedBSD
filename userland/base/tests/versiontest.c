@@ -11,8 +11,8 @@
  * Exercises the zedBSD versiontest userland behavior.
  */
 
-__asm__(".symver versioned_value_v1,versioned_value@ZEDBSD_1.0");
-__asm__(".symver versioned_value_v2,versioned_value@@ZEDBSD_2.0");
+__asm__(".symver versioned_value_v1,versioned_value@KERN_1.0");
+__asm__(".symver versioned_value_v2,versioned_value@@KERN_2.0");
 
 /*
  * Implements the versioned value v1 operation.

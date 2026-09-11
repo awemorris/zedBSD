@@ -9,8 +9,8 @@
  * Kernel main
  */
 
-#ifndef ZEDBSD_KERN_KERNEL_H
-#define ZEDBSD_KERN_KERNEL_H
+#ifndef KERN_KERN_KERNEL_H
+#define KERN_KERN_KERNEL_H
 
 #include "kern/boot.h"
 

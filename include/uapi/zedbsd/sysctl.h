@@ -4,8 +4,9 @@
  *
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_UAPI_SYSCTL_H
-#define ZEDBSD_UAPI_SYSCTL_H
+
+#ifndef KERN_UAPI_SYSCTL_H
+#define KERN_UAPI_SYSCTL_H
 
 #include <stdint.h>
 
@@ -87,7 +88,7 @@ struct root_image_info {
 	uint64_t backing_inode;
 	uint64_t backing_bytes;
 };
-#define ZEDBSD_HOST_NAME_MAX	64U
+#define KERN_HOST_NAME_MAX	64U
 
 struct bufcache_stats {
 	uint64_t max_bytes;

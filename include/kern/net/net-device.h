@@ -9,8 +9,8 @@
  * Network device
  */
 
-#ifndef ZEDBSD_KERN_NET_NET_DEVICE_H
-#define ZEDBSD_KERN_NET_NET_DEVICE_H
+#ifndef KERN_KERN_NET_NET_DEVICE_H
+#define KERN_KERN_NET_NET_DEVICE_H
 
 #include <kern/atomic.h>
 #include <stddef.h>

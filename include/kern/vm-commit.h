@@ -9,8 +9,8 @@
  * Strict user virtual-memory commitment accounting
  */
 
-#ifndef ZEDBSD_KERN_VM_COMMIT_H
-#define ZEDBSD_KERN_VM_COMMIT_H
+#ifndef KERN_KERN_VM_COMMIT_H
+#define KERN_KERN_VM_COMMIT_H
 
 #include <stddef.h>
 #include <stdint.h>

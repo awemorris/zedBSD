@@ -14,7 +14,7 @@
 #include "kern/kmem.h"
 #include "kern/lock.h"
 #include "kern/poll.h"
-#ifndef ZEDBSD_INPUT_OWNERSHIP_TEST
+#ifndef KERN_INPUT_OWNERSHIP_TEST
 #include "kern/sched.h"
 #include "kern/thread.h"
 #endif
@@ -25,7 +25,6 @@
 #include <zedbsd/console.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <hal/hal.h>
 #include "../platform/pcat/graphics/text.h"
 #include <string.h>
 
@@ -60,12 +59,12 @@ static unsigned dispatch_head, dispatch_tail, dispatch_used;
 static struct console_source_state console_sources[CONSOLE_INPUT_SOURCES];
 static struct spinlock input_lock;
 static struct wait_queue dispatch_waitq;
-#ifndef ZEDBSD_INPUT_OWNERSHIP_TEST
+#ifndef KERN_INPUT_OWNERSHIP_TEST
 static struct input_subscription console_subscription;
 #endif
 
 
-#ifndef ZEDBSD_INPUT_OWNERSHIP_TEST
+#ifndef KERN_INPUT_OWNERSHIP_TEST
 struct console_open {
 	unsigned vt;
 };
@@ -78,7 +77,7 @@ static uint32_t console_source_active_key(struct console_source_state *source, c
 static void console_dispatch_enqueue(uint32_t translated, unsigned device_id, unsigned repeat);
 static void console_input_subscriber(void *context, const struct input_report *report);
 
-#ifndef ZEDBSD_INPUT_OWNERSHIP_TEST
+#ifndef KERN_INPUT_OWNERSHIP_TEST
 static struct console_open *console_open_state(struct file *file);
 static unsigned console_file_vt(struct file *file);
 static int console_open_file(struct file *file);
@@ -99,7 +98,7 @@ static int vt_poll(struct file *file, short events, short *revents);
 static int vt_ioctl(struct file *file, unsigned long request, uintptr_t argument);
 #endif
 
-#ifndef ZEDBSD_INPUT_OWNERSHIP_TEST
+#ifndef KERN_INPUT_OWNERSHIP_TEST
 
 /* Reports the state behind an open console file. */
 static struct console_open *
@@ -498,7 +497,7 @@ console_input_subscriber(
 	spin_unlock_irqrestore(&input_lock, irq);
 }
 
-#ifdef ZEDBSD_INPUT_OWNERSHIP_TEST
+#ifdef KERN_INPUT_OWNERSHIP_TEST
 /*
  * Clears the ownership record the host tests inspect.
  */
@@ -770,19 +769,19 @@ console_ioctl(
 
 	/* Dispatch the selected operation case. */
 	switch (request) {
-	case ZEDBSD_CONSOLE_GET_SIZE:
+	case KERN_CONSOLE_GET_SIZE:
 
 		/* Obtains the copyout result. */
 		function_result = copyout(&size, argument, sizeof(size));
 
 		/* Returns the computed result. */
 		return function_result;
-	case ZEDBSD_CONSOLE_CLEAR:
+	case KERN_CONSOLE_CLEAR:
 		drv_pcat_text_clear();
 
 		/* Succeeded. */
 		return 0;
-	case ZEDBSD_CONSOLE_CLEAR_ROW:
+	case KERN_CONSOLE_CLEAR_ROW:
 
 		/* Checks the operation status. */
 		error = copyin(argument, &row, sizeof(row));
@@ -796,7 +795,7 @@ console_ioctl(
 
 		/* Succeeded. */
 		return 0;
-	case ZEDBSD_CONSOLE_CLEAR_TO_EOL:
+	case KERN_CONSOLE_CLEAR_TO_EOL:
 
 		/* Checks the operation status. */
 		error = copyin(argument, &position, sizeof(position));
@@ -812,7 +811,7 @@ console_ioctl(
 
 		/* Returns the computed result. */
 		return function_result;
-	case ZEDBSD_CONSOLE_GET_CURSOR:
+	case KERN_CONSOLE_GET_CURSOR:
 
 		drv_pcat_text_get_cursor(&cursor_row, &cursor_column, &cursor_shown);
 		cursor_local.row = cursor_row;
@@ -825,7 +824,7 @@ console_ioctl(
 
 		/* Returns the computed result. */
 		return function_result;
-	case ZEDBSD_CONSOLE_SET_CURSOR:
+	case KERN_CONSOLE_SET_CURSOR:
 
 		/* Checks the operation status. */
 		error = copyin(argument, &cursor_local1, sizeof(cursor_local1));
@@ -840,7 +839,7 @@ console_ioctl(
 
 		/* Returns the computed result. */
 		return function_result;
-	case ZEDBSD_CONSOLE_SHOW_CURSOR:
+	case KERN_CONSOLE_SHOW_CURSOR:
 
 		/* Checks the operation status. */
 		error = copyin(argument, &cursor_local2, sizeof(cursor_local2));
@@ -850,13 +849,13 @@ console_ioctl(
 
 		/* Succeeded. */
 		return 0;
-	case ZEDBSD_CONSOLE_WRITE_AT:
+	case KERN_CONSOLE_WRITE_AT:
 		/* Obtains the console write at result. */
 		function_result = console_write_at(argument);
 
 		/* Returns the computed result. */
 		return function_result;
-	case ZEDBSD_CONSOLE_ISATTY:
+	case KERN_CONSOLE_ISATTY:
 		/* Succeeded. */
 		return 0;
 	default:

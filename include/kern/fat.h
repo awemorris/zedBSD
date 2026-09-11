@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_FAT_H
-#define ZEDBSD_FAT_H
+#ifndef KERN_FAT_H
+#define KERN_FAT_H
 
 #include "kern/file.h"
 #include "kern/mount.h"
@@ -14,9 +14,9 @@
 #include <stdint.h>
 
 enum bootfat_type {
-	ZEDBSD_FAT12 = 12,
-	ZEDBSD_FAT16 = 16,
-	ZEDBSD_FAT32 = 32,
+	KERN_FAT12 = 12,
+	KERN_FAT16 = 16,
+	KERN_FAT32 = 32,
 };
 
 extern const struct filesystem_type drv_fat_filesystem_type;

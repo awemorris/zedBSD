@@ -14,7 +14,7 @@
 extern int versioned_value(void);
 extern int versioned_value_v1_reference(void);
 
-__asm__(".symver versioned_value_v1_reference,versioned_value@ZEDBSD_1.0");
+__asm__(".symver versioned_value_v1_reference,versioned_value@KERN_1.0");
 
 /*
  * Implements the versionuse value operation.

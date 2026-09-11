@@ -17,7 +17,7 @@
  */
 
 #include "kern/process.h"
-#ifndef ZEDBSD_PROCESS_TEST
+#ifndef KERN_PROCESS_TEST
 #include "kern/process-timer.h"
 #else
 /*
@@ -159,7 +159,7 @@ process_init(
 	all_processes = &process0;
 }
 
-#ifdef ZEDBSD_PROCESS_TEST
+#ifdef KERN_PROCESS_TEST
 /*
  * Runs one autoreap claim and commit for a host test.
  */
@@ -301,7 +301,7 @@ process_parent_ref(
 	return parent;
 }
 
-#ifdef ZEDBSD_PROCESS_TEST
+#ifdef KERN_PROCESS_TEST
 /*
  * Changes a process's parent for a host test.
  */
@@ -2295,7 +2295,7 @@ process_exit_if_last_thread(
 		process_exit_cleanup(status);
 }
 
-#ifdef ZEDBSD_PROCESS_TEST
+#ifdef KERN_PROCESS_TEST
 /*
  * Commits a thread exit for a host test.
  */

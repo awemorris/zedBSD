@@ -11,8 +11,8 @@
  * The amd64 IRQ routing and service-state contract.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_IRQ_H
-#define ZEDBSD_HAL_AMD64_IRQ_H
+#ifndef KERN_HAL_AMD64_IRQ_H
+#define KERN_HAL_AMD64_IRQ_H
 
 #include <hal/hal.h>
 #include "bsp-pcat/acpi.h"

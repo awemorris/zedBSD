@@ -9,8 +9,8 @@
  * name cache
  */
 
-#ifndef ZEDBSD_KERN_NAMECACHE_H
-#define ZEDBSD_KERN_NAMECACHE_H
+#ifndef KERN_KERN_NAMECACHE_H
+#define KERN_KERN_NAMECACHE_H
 
 #include "kern/inode.h"
 

@@ -40,20 +40,20 @@ catalog_valid(struct __nl_catalog *catalog)
 	uint32_t previous_set = 0;
 	uint32_t previous_message = 0;
 
-	if (catalog->size < ZEDBSD_CATALOG_HEADER_SIZE ||
-	    memcmp(data, ZEDBSD_CATALOG_MAGIC, ZEDBSD_CATALOG_MAGIC_SIZE) !=
+	if (catalog->size < KERN_CATALOG_HEADER_SIZE ||
+	    memcmp(data, KERN_CATALOG_MAGIC, KERN_CATALOG_MAGIC_SIZE) !=
 		0 ||
-	    zedbsd_catalog_get32(data + 8U) != ZEDBSD_CATALOG_VERSION ||
-	    zedbsd_catalog_get32(data + 12U) != ZEDBSD_CATALOG_HEADER_SIZE)
+	    kern_catalog_get32(data + 8U) != KERN_CATALOG_VERSION ||
+	    kern_catalog_get32(data + 12U) != KERN_CATALOG_HEADER_SIZE)
 		return 0;
-	catalog->count = zedbsd_catalog_get32(data + 16U);
-	catalog->entries = zedbsd_catalog_get32(data + 20U);
-	strings = zedbsd_catalog_get32(data + 24U);
-	if (catalog->count > UINT32_MAX / ZEDBSD_CATALOG_ENTRY_SIZE ||
+	catalog->count = kern_catalog_get32(data + 16U);
+	catalog->entries = kern_catalog_get32(data + 20U);
+	strings = kern_catalog_get32(data + 24U);
+	if (catalog->count > UINT32_MAX / KERN_CATALOG_ENTRY_SIZE ||
 	    !range_valid(catalog->size, catalog->entries,
-			 catalog->count * ZEDBSD_CATALOG_ENTRY_SIZE) ||
+			 catalog->count * KERN_CATALOG_ENTRY_SIZE) ||
 	    strings <
-		catalog->entries + catalog->count * ZEDBSD_CATALOG_ENTRY_SIZE ||
+		catalog->entries + catalog->count * KERN_CATALOG_ENTRY_SIZE ||
 	    strings > catalog->size)
 		return 0;
 	total = (uint32_t)catalog->size;
@@ -61,11 +61,11 @@ catalog_valid(struct __nl_catalog *catalog)
 		return 0;
 	for (index = 0; index < catalog->count; index++) {
 		const unsigned char *entry =
-		    data + catalog->entries + index * ZEDBSD_CATALOG_ENTRY_SIZE;
-		uint32_t set = zedbsd_catalog_get32(entry);
-		uint32_t message = zedbsd_catalog_get32(entry + 4U);
-		uint32_t offset = zedbsd_catalog_get32(entry + 8U);
-		uint32_t length = zedbsd_catalog_get32(entry + 12U);
+		    data + catalog->entries + index * KERN_CATALOG_ENTRY_SIZE;
+		uint32_t set = kern_catalog_get32(entry);
+		uint32_t message = kern_catalog_get32(entry + 4U);
+		uint32_t offset = kern_catalog_get32(entry + 8U);
+		uint32_t length = kern_catalog_get32(entry + 12U);
 
 		if (set == 0 || message == 0 || offset < strings ||
 		    length == UINT32_MAX ||
@@ -294,9 +294,9 @@ catgets(nl_catd catalog, int set, int message, const char *fallback)
 	while (low < high) {
 		uint32_t middle = low + (high - low) / 2U;
 		const unsigned char *entry = catalog->data + catalog->entries +
-					     middle * ZEDBSD_CATALOG_ENTRY_SIZE;
-		uint32_t entry_set = zedbsd_catalog_get32(entry);
-		uint32_t entry_message = zedbsd_catalog_get32(entry + 4U);
+					     middle * KERN_CATALOG_ENTRY_SIZE;
+		uint32_t entry_set = kern_catalog_get32(entry);
+		uint32_t entry_message = kern_catalog_get32(entry + 4U);
 
 		if (entry_set < (uint32_t)set ||
 		    (entry_set == (uint32_t)set &&
@@ -307,12 +307,12 @@ catgets(nl_catd catalog, int set, int message, const char *fallback)
 	}
 	if (low < catalog->count) {
 		const unsigned char *entry = catalog->data + catalog->entries +
-					     low * ZEDBSD_CATALOG_ENTRY_SIZE;
+					     low * KERN_CATALOG_ENTRY_SIZE;
 
-		if (zedbsd_catalog_get32(entry) == (uint32_t)set &&
-		    zedbsd_catalog_get32(entry + 4U) == (uint32_t)message)
+		if (kern_catalog_get32(entry) == (uint32_t)set &&
+		    kern_catalog_get32(entry + 4U) == (uint32_t)message)
 			return (char *)catalog->data +
-			       zedbsd_catalog_get32(entry + 8U);
+			       kern_catalog_get32(entry + 8U);
 	}
 	errno = ENOMSG;
 	return (char *)fallback;

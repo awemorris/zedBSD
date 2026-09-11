@@ -9,8 +9,8 @@
  * Partition
  */
 
-#ifndef ZEDBSD_KERN_PARTITION_H
-#define ZEDBSD_KERN_PARTITION_H
+#ifndef KERN_KERN_PARTITION_H
+#define KERN_KERN_PARTITION_H
 
 #include "kern/disk.h"
 

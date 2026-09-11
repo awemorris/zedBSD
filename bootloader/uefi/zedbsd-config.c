@@ -16,7 +16,7 @@ struct line_iterator {
 };
 
 struct parameter_builder {
-	struct zedbsd_boot_parameter_record *record;
+	struct kern_boot_parameter_record *record;
 	size_t length;
 };
 
@@ -277,7 +277,7 @@ static enum zbl_uefi_zedbsd_config_result
 builder_append(struct parameter_builder *builder, const unsigned char *text,
 	       size_t length)
 {
-	if (length > ZEDBSD_BOOT_PARAMETERS_TEXT_MAX - builder->length)
+	if (length > KERN_BOOT_PARAMETERS_TEXT_MAX - builder->length)
 		return ZBL_UEFI_ZEDBSD_CONFIG_PARAMETERS_TOO_LONG;
 	for (size_t index = 0U; index < length; index++)
 		builder->record->text[builder->length + index] = (char)text[index];
@@ -336,12 +336,12 @@ builder_line(struct parameter_builder *builder, const struct config_line *line)
 }
 
 static void
-record_finish(struct zedbsd_boot_parameter_record *record, size_t length)
+record_finish(struct kern_boot_parameter_record *record, size_t length)
 {
-	record->magic = ZEDBSD_BOOT_PARAMETER_RECORD_MAGIC;
-	record->version = ZEDBSD_BOOT_PARAMETER_RECORD_VERSION;
+	record->magic = KERN_BOOT_PARAMETER_RECORD_MAGIC;
+	record->version = KERN_BOOT_PARAMETER_RECORD_VERSION;
 	record->size = (uint16_t)sizeof(*record);
-	record->flags = ZEDBSD_BOOT_PARAMETER_RECORD_FLAG_TEXT;
+	record->flags = KERN_BOOT_PARAMETER_RECORD_FLAG_TEXT;
 	record->length = (uint16_t)length;
 	record->reserved = 0U;
 	record->text[length] = '\0';

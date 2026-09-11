@@ -43,7 +43,7 @@ if [ "${RTL8822B_FIRMWARE_TEST_BLOB:-}" != "" ]; then
 	abi_includes="$abi_includes -I$repo_root/src -I$repo_root"
 	abi_includes="$abi_includes -I$repo_root/libc/include"
 	loader_flags="$warnings -m64 -DHAL_ARCH_AMD64 -DHAL_BOARD_PCAT"
-	loader_flags="$loader_flags -DZEDBSD_USER_ABI_LP64 $abi_includes"
+	loader_flags="$loader_flags -DKERN_USER_ABI_LP64 $abi_includes"
 	loader_fixture="$test_dir/rtl8822b-loader-test.c"
 	$cc $loader_flags -O1 "$source" "$loader_fixture" \
 		"$build_dir/firmware-blob.o" -no-pie \

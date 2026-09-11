@@ -15,9 +15,9 @@
 #include "kern/lock.h"
 
 #include <errno.h>
-#include <hal/hal.h>
 #include <limits.h>
 #include <stdint.h>
+#include "kern/irq.h"
 
 #define I8042_DATA 0x60U
 #define I8042_STATUS 0x64U
@@ -156,12 +156,12 @@ static int write_config(uint8_t configuration);
 static int mouse_command(uint8_t command);
 static int consume_byte(uint8_t value, int32_t *dx, int32_t *dy, uint32_t *buttons);
 static void publish_sample(int32_t dx, int32_t dy, uint32_t buttons, uint32_t changed_buttons);
-static void mouse_interrupt(int interrupt, hal_irq_ack_t acknowledge, void *argument);
+static void mouse_interrupt(int interrupt, kern_irq_ack_t acknowledge, void *argument);
 static int mouse_start(void);
 static void mouse_stop(void);
 static int mouse_input_open(void *context);
 static const char *scan_symbol(uint8_t scan, int extended);
-static void keyboard_interrupt(int interrupt, hal_irq_ack_t acknowledge,
+static void keyboard_interrupt(int interrupt, kern_irq_ack_t acknowledge,
 			       void *argument);
 static void keyboard_build_capabilities(void);
 static void mouse_input_close(void *context);
@@ -472,7 +472,7 @@ publish_sample(
 static void
 mouse_interrupt(
 	int interrupt,
-	hal_irq_ack_t acknowledge,
+	kern_irq_ack_t acknowledge,
 	void *argument)
 {
 	uint8_t value;
@@ -512,7 +512,7 @@ mouse_interrupt(
 	 * buffer is read, allowing the next packet byte to create a fresh edge
 	 * after EOI instead of being stranded while a task IRQ is masked.
 	 */
-	hal_irq_send_eoi(acknowledge);
+	kern_irq_send_eoi(acknowledge);
 
 	/* Handles the report condition. */
 	if (report)
@@ -531,7 +531,7 @@ mouse_start(
 	int error;
 
 	/* Enables the auxiliary port with the interrupt held off. */
-	hal_irq_mask(PS2_MOUSE_IRQ);
+	kern_irq_mask(PS2_MOUSE_IRQ);
 	irq = spin_lock_irqsave(&controller_lock);
 
 	mouse_active = 0;
@@ -573,7 +573,7 @@ mouse_start(
 
 	/* Checks the operation status. */
 	if (error == 0)
-		hal_irq_unmask(PS2_MOUSE_IRQ);
+		kern_irq_unmask(PS2_MOUSE_IRQ);
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -591,7 +591,7 @@ mouse_stop(
 	unsigned long irq;
 	uint8_t configuration;
 
-	hal_irq_mask(PS2_MOUSE_IRQ);
+	kern_irq_mask(PS2_MOUSE_IRQ);
 	irq = spin_lock_irqsave(&controller_lock);
 
 	mouse_active = 0;
@@ -790,7 +790,7 @@ keyboard_build_capabilities(
 static void
 keyboard_interrupt(
 	int interrupt,
-	hal_irq_ack_t acknowledge,
+	kern_irq_ack_t acknowledge,
 	void *argument)
 {
 	const char *symbol;
@@ -837,7 +837,7 @@ keyboard_interrupt(
 	 * The 8042 lowers IRQ1 once its output buffer is read, so the next
 	 * byte can create a fresh edge as soon as this acknowledgement lands.
 	 */
-	hal_irq_send_eoi(acknowledge);
+	kern_irq_send_eoi(acknowledge);
 
 	/* Publishes the decoded transition. */
 	if (publish && keyboard_input != NULL) {
@@ -879,16 +879,16 @@ drv_pcat_ps2_8042_init(
 	last_buttons = 0;
 	reader_count = 0;
 	mouse_active = 0;
-	hal_irq_mask(PS2_MOUSE_IRQ);
+	kern_irq_mask(PS2_MOUSE_IRQ);
 
 	/* Checks the hal irq set handler result. */
-	if (hal_irq_register(PS2_MOUSE_IRQ, mouse_interrupt, NULL) != HAL_OK)
+	if (kern_irq_register(PS2_MOUSE_IRQ, mouse_interrupt, NULL) != 0)
 		return EBUSY;
 
 	/* Checks the operation status. */
 	error = drv_input_device_register(&mouse_info, &mouse_input);
 	if (error != 0) {
-		(void)hal_irq_unregister(PS2_MOUSE_IRQ, mouse_interrupt, NULL);
+		(void)kern_irq_unregister(PS2_MOUSE_IRQ, mouse_interrupt, NULL);
 
 		/* Reports the failure. */
 		return error;
@@ -898,11 +898,11 @@ drv_pcat_ps2_8042_init(
 	keyboard_extended = 0;
 	keyboard_build_capabilities();
 	keyboard_info.capability_count = keyboard_capability_count;
-	hal_irq_mask(PS2_KEYBOARD_IRQ);
-	if (hal_irq_register(PS2_KEYBOARD_IRQ, keyboard_interrupt, NULL) !=
-	    HAL_OK) {
+	kern_irq_mask(PS2_KEYBOARD_IRQ);
+	if (kern_irq_register(PS2_KEYBOARD_IRQ, keyboard_interrupt, NULL) !=
+	    0) {
 		drv_input_device_unregister(mouse_input);
-		(void)hal_irq_unregister(PS2_MOUSE_IRQ, mouse_interrupt, NULL);
+		(void)kern_irq_unregister(PS2_MOUSE_IRQ, mouse_interrupt, NULL);
 
 		/* Reports the failure. */
 		return EBUSY;
@@ -911,17 +911,17 @@ drv_pcat_ps2_8042_init(
 	/* Checks the operation status. */
 	error = drv_input_device_register(&keyboard_info, &keyboard_input);
 	if (error != 0) {
-		(void)hal_irq_unregister(PS2_KEYBOARD_IRQ, keyboard_interrupt,
+		(void)kern_irq_unregister(PS2_KEYBOARD_IRQ, keyboard_interrupt,
 					 NULL);
 		drv_input_device_unregister(mouse_input);
-		(void)hal_irq_unregister(PS2_MOUSE_IRQ, mouse_interrupt, NULL);
+		(void)kern_irq_unregister(PS2_MOUSE_IRQ, mouse_interrupt, NULL);
 
 		/* Reports the failure. */
 		return error;
 	}
 
 	/* Lets the controller raise keyboard interrupts. */
-	hal_irq_unmask(PS2_KEYBOARD_IRQ);
+	kern_irq_unmask(PS2_KEYBOARD_IRQ);
 
 	/* Succeeded. */
 	return 0;

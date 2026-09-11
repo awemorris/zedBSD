@@ -1,6 +1,13 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_UAPI_WRITEBACK_H
-#define ZEDBSD_UAPI_WRITEBACK_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef KERN_UAPI_WRITEBACK_H
+#define KERN_UAPI_WRITEBACK_H
+
 #include <stdint.h>
 
 #define WRITEBACK_REPORT_VERSION 1U
@@ -15,6 +22,7 @@ struct writeback_control {
 	uint32_t enabled;
 	char path[WRITEBACK_PATH_MAX];
 };
+
 struct writeback_report_header {
 	uint64_t high;
 	uint64_t low;
@@ -33,6 +41,7 @@ struct writeback_report_header {
 	int32_t last_error;
 	uint32_t padding;
 };
+
 struct writeback_mount_info {
 	char path[WRITEBACK_PATH_MAX];
 	char device[WRITEBACK_DEVICE_NAME_MAX];
@@ -43,8 +52,10 @@ struct writeback_mount_info {
 	uint32_t state;
 	uint32_t padding;
 };
+
 struct writeback_report {
 	struct writeback_report_header header;
 	struct writeback_mount_info mounts[WRITEBACK_REPORT_MOUNTS];
 };
+
 #endif

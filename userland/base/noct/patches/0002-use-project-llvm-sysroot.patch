@@ -61,7 +61,7 @@
  set(CMAKE_C_FLAGS_INIT
 -  "-m64 -march=x86-64 -mno-red-zone -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -fno-strict-aliasing -nostdinc -U__linux__ -U__linux -Ulinux -D__ZEDBSD__ -DHAL_ARCH_AMD64 -DZEDBSD_USER_ABI_LP64")
 -set(CMAKE_ASM_FLAGS_INIT "-nostdinc")
-+  "-m64 -march=x86-64 -mno-red-zone -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -fno-strict-aliasing -DHAL_ARCH_AMD64 -DZEDBSD_USER_ABI_LP64")
++  "-m64 -march=x86-64 -mno-red-zone -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -fno-strict-aliasing -DHAL_ARCH_AMD64 -DKERN_USER_ABI_LP64")
  set(CMAKE_C_STANDARD_INCLUDE_DIRECTORIES
 -  "${ZEDBSD_SOURCE_DIR}/include"
 -  "${ZEDBSD_SOURCE_DIR}/include/uapi"

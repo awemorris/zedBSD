@@ -11,8 +11,8 @@
  * The amd64 legacy programmable interrupt controller contract.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_PIC_H
-#define ZEDBSD_HAL_AMD64_PIC_H
+#ifndef KERN_HAL_AMD64_PIC_H
+#define KERN_HAL_AMD64_PIC_H
 
 void pic_init(void);
 void pic_set_irq_mask(int irq_num, int mask);

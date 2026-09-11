@@ -9,8 +9,8 @@
  * Kernel thread objects backed by opaque HAL tasks
  */
 
-#ifndef ZEDBSD_KERN_THREAD_H
-#define ZEDBSD_KERN_THREAD_H
+#ifndef KERN_KERN_THREAD_H
+#define KERN_KERN_THREAD_H
 
 #include <hal/hal.h>
 #include <kern/sched.h>
@@ -240,5 +240,21 @@ int
 thread_wait(
 	struct thread *thread,
 	int *status);
+
+/*
+ * Block the running thread until it is woken.
+ *
+ * A wake delivered just before this call is retained, so the pair is
+ * free of lost-wakeup races and needs no condition lock held across
+ * the handoff.
+ */
+void kern_thread_block(void);
+
+/*
+ * Wake one blocked thread.
+ *
+ * Safe from interrupt context; it never sleeps.
+ */
+void kern_thread_wakeup(struct thread *thread);
 
 #endif

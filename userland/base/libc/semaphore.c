@@ -384,9 +384,9 @@ sem_lock(
 {
 	/* Continue while the operation condition remains true. */
 	while (__atomic_exchange_n(&sem->guard, 1, __ATOMIC_ACQUIRE) != 0) {
-		(void)__syscall6(ZEDBSD_SYS_usync, (uintptr_t)&sem->guard,
-				 ZEDBSD_USYNC_WAIT, 1, 0, 0,
-				 sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE);
+		(void)__syscall6(KERN_SYS_usync, (uintptr_t)&sem->guard,
+				 KERN_USYNC_WAIT, 1, 0, 0,
+				 sem->pshared ? 0 : KERN_USYNC_PRIVATE);
 	}
 }
 
@@ -396,9 +396,9 @@ sem_unlock(
 	sem_t *sem)
 {
 	__atomic_store_n(&sem->guard, 0, __ATOMIC_RELEASE);
-	(void)__syscall6(ZEDBSD_SYS_usync, (uintptr_t)&sem->guard,
-			 ZEDBSD_USYNC_WAKE, 0, 0, 1,
-			 sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE);
+	(void)__syscall6(KERN_SYS_usync, (uintptr_t)&sem->guard,
+			 KERN_USYNC_WAKE, 0, 0, 1,
+			 sem->pshared ? 0 : KERN_USYNC_PRIVATE);
 }
 
 /* Supports the sem wait common operation. */
@@ -493,16 +493,16 @@ sem_usync_wait(
 
 	/* Handles the timeout availability. */
 	if (timeout != NULL) {
-		timeout_flags = ZEDBSD_USYNC_ABSTIME;
+		timeout_flags = KERN_USYNC_ABSTIME;
 
 		/* Handles the clock condition. */
 		if (clock == CLOCK_REALTIME)
-			timeout_flags |= ZEDBSD_USYNC_CLOCK_REALTIME;
+			timeout_flags |= KERN_USYNC_CLOCK_REALTIME;
 	}
 	result = syscall_result(
-	    __syscall6(ZEDBSD_SYS_usync, (uintptr_t)&sem->value,
-		       ZEDBSD_USYNC_WAIT, 0, (uintptr_t)timeout, 0,
-		       (sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE) |
+	    __syscall6(KERN_SYS_usync, (uintptr_t)&sem->value,
+		       KERN_USYNC_WAIT, 0, (uintptr_t)timeout, 0,
+		       (sem->pshared ? 0 : KERN_USYNC_PRIVATE) |
 			   cancelable_flag() | timeout_flags));
 
 	/* Returns the computed result. */
@@ -518,7 +518,7 @@ cancelable_flag(
 
 	/* Computes the function result. */
 	function_result = __pthread_cancel_enabled != NULL && __pthread_cancel_enabled()
-		   ? ZEDBSD_USYNC_CANCELABLE
+		   ? KERN_USYNC_CANCELABLE
 		   : 0;
 
 	/* Returns the computed result. */
@@ -530,9 +530,9 @@ static void
 sem_usync_wake(
 	sem_t *sem)
 {
-	(void)__syscall6(ZEDBSD_SYS_usync, (uintptr_t)&sem->value,
-			 ZEDBSD_USYNC_WAKE, 0, 0, 1,
-			 sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE);
+	(void)__syscall6(KERN_SYS_usync, (uintptr_t)&sem->value,
+			 KERN_USYNC_WAKE, 0, 0, 1,
+			 sem->pshared ? 0 : KERN_USYNC_PRIVATE);
 }
 
 /* Supports the named sem name operation. */

@@ -11,17 +11,17 @@
  * Declares the zedBSD userland rtld interface.
  */
 
-#ifndef ZEDBSD_RTLD_H
-#define ZEDBSD_RTLD_H
+#ifndef KERN_RTLD_H
+#define KERN_RTLD_H
 
 #include "userland/base/rtld/elf.h"
 #include <stddef.h>
 #include <stdint.h>
 
-#ifndef ZEDBSD_USER_PAGE_SIZE
-#define ZEDBSD_USER_PAGE_SIZE 4096U
+#ifndef KERN_USER_PAGE_SIZE
+#define KERN_USER_PAGE_SIZE 4096U
 #endif
-#define RTLD_PAGE_SIZE ZEDBSD_USER_PAGE_SIZE
+#define RTLD_PAGE_SIZE KERN_USER_PAGE_SIZE
 #define RTLD_PATH_MAX 256U
 #define RTLD_NAME_MAX 64U
 #define RTLD_OBJECT_MAX 32U

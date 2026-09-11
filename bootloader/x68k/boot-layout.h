@@ -1,8 +1,8 @@
 ﻿/* zedBSD X68000 raw disk boot layout. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 
-#ifndef ZEDBSD_BOOT_X68K_LAYOUT_H
-#define ZEDBSD_BOOT_X68K_LAYOUT_H
+#ifndef KERN_BOOT_X68K_LAYOUT_H
+#define KERN_BOOT_X68K_LAYOUT_H
 
 #define X68K_SECTOR_SIZE 512
 #define X68K_STAGE1_DISK_OFFSET 1024

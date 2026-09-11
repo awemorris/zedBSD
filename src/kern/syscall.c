@@ -86,7 +86,7 @@
 #define SOCKET_SEND_FLAGS (MSG_DONTWAIT | MSG_NOSIGNAL)
 #define SOCKET_RECV_FLAGS (MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC | MSG_WAITALL)
 #define SYSCALL_SOCKET_OPTION_MAX 128U
-#define SYSCALL_PAGE_MASK (ZEDBSD_PAGE_SIZE - 1U)
+#define SYSCALL_PAGE_MASK (KERN_PAGE_SIZE - 1U)
 #define SYSCALL_ATOMIC_CHUNK 128U
 #define SYSCALL_EXT __attribute__((section(".hightext")))
 #define SYSCALL_SYSCTL_VALUE_MAX 512U
@@ -112,9 +112,9 @@ struct sockaddr_output_pin {
 };
 
 struct syscall_exec_args {
-	char *argv[ZEDBSD_SPAWN_ARG_MAX + 1U];
-	char *envp[ZEDBSD_SPAWN_ENV_MAX + 1U];
-	char strings[ZEDBSD_SPAWN_STRING_MAX];
+	char *argv[KERN_SPAWN_ARG_MAX + 1U];
+	char *envp[KERN_SPAWN_ENV_MAX + 1U];
+	char strings[KERN_SPAWN_STRING_MAX];
 	size_t used;
 };
 
@@ -126,7 +126,7 @@ struct syscall_inode_ref {
 	int has_path;
 };
 
-#ifdef ZEDBSD_USER_ABI_LP64
+#ifdef KERN_USER_ABI_LP64
 struct syscall_iovec {
 	uint64_t base;
 	uint64_t length;
@@ -140,13 +140,13 @@ struct syscall_iovec {
 
 static struct mutex user_atomic_lock;
 
-#ifdef ZEDBSD_SYSCALL_STOP_TEST
+#ifdef KERN_SYSCALL_STOP_TEST
 #endif
 
 static int poll_mask_enter(uintptr_t address, struct poll_mask_guard *guard);
 static void poll_mask_leave(struct poll_mask_guard *guard, int defer_restore);
 static int poll_mask_defer_restore(const struct poll_mask_guard *guard, int error);
-#ifdef ZEDBSD_SYSCALL_STOP_TEST
+#ifdef KERN_SYSCALL_STOP_TEST
 static int syscall_stop_should_redispatch(enum signal_stop_return_result result);
 #endif
 static int poll_timeout(uintptr_t address, uint64_t *deadline, int *immediate);
@@ -155,7 +155,7 @@ static int pselect_pin(uintptr_t address, struct uaccess_pin *pin, fd_set *value
 static intptr_t sys_pselect_call(const uintptr_t args[6]);
 static intptr_t sys_sysctl_call(const uintptr_t args[6]);
 static struct process *current_process(void);
-static struct ucred * peercred_snapshot_ref(struct process *process, struct zedbsd_peercred *snapshot);
+static struct ucred * peercred_snapshot_ref(struct process *process, struct kern_peercred *snapshot);
 static int descriptor_socket(struct process *process, int descriptor, struct socket_file_ref *reference);
 static intptr_t socket_result(struct socket_file_ref *reference, intptr_t result);
 static int copy_sockaddr_in(uintptr_t address, socklen_t length, struct sockaddr_storage *storage);
@@ -421,7 +421,7 @@ syscall_restart_prepare_stop(
 	thread->syscall_stop_redispatch = 1;
 }
 
-#ifdef ZEDBSD_SYSCALL_STOP_TEST
+#ifdef KERN_SYSCALL_STOP_TEST
 /*
  * Simulates the stop-redispatch decision of the dispatcher for a test.
  */
@@ -638,7 +638,7 @@ poll_mask_defer_restore(
 	return 1;
 }
 
-#ifdef ZEDBSD_SYSCALL_STOP_TEST
+#ifdef KERN_SYSCALL_STOP_TEST
 /* Tests whether a stop result asks for a redispatch. */
 static int
 syscall_stop_should_redispatch(
@@ -1032,7 +1032,7 @@ current_process(
 static struct ucred *
 peercred_snapshot_ref(
 	struct process *process,
-	struct zedbsd_peercred *snapshot)
+	struct kern_peercred *snapshot)
 {
 	struct ucred *credential;
 
@@ -1331,7 +1331,7 @@ sys_socketpair_call(
 {
 	struct process *process;
 	struct ucred *credential;
-	struct zedbsd_peercred creator;
+	struct kern_peercred creator;
 	struct socket *left_socket;
 	struct socket *right_socket;
 	struct file *left_file;
@@ -1481,7 +1481,7 @@ sys_connect_call(
 {
 	struct process *process;
 	struct ucred *credential;
-	struct zedbsd_peercred connector;
+	struct kern_peercred connector;
 	struct socket_file_ref reference;
 	struct socket *socket;
 	struct sockaddr_storage address;
@@ -1546,7 +1546,7 @@ sys_listen_call(
 	struct socket_file_ref reference;
 	struct socket *socket;
 	struct ucred *credential;
-	struct zedbsd_peercred listener;
+	struct kern_peercred listener;
 	intptr_t result;
 	int error;
 
@@ -1958,8 +1958,8 @@ sys_sendmsg_call(
 	struct socket_file_ref reference;
 	struct sockaddr_storage address;
 	struct sockaddr *destination;
-	struct file *files[ZEDBSD_MSG_FD_MAX];
-	int descriptors[ZEDBSD_MSG_FD_MAX];
+	struct file *files[KERN_MSG_FD_MAX];
+	int descriptors[KERN_MSG_FD_MAX];
 	void *buffer;
 	void *data;
 	unsigned index;
@@ -1985,7 +1985,7 @@ sys_sendmsg_call(
 	if (request.reserved != 0 ||
 	    request.data_length > SIZE_MAX ||
 	    request.name_length > sizeof(address) ||
-	    request.descriptor_count > ZEDBSD_MSG_FD_MAX ||
+	    request.descriptor_count > KERN_MSG_FD_MAX ||
 	    (request.data_length != 0 && request.data == 0) ||
 	    (request.name_length != 0 && request.name == 0) ||
 	    (request.descriptor_count != 0 && request.descriptors == 0))
@@ -2100,7 +2100,7 @@ sys_recvmsg_call(
 	struct sockaddr_storage address;
 	struct unix_recv_transaction transaction;
 	struct filedesc_reservation reservation;
-	int descriptors[ZEDBSD_MSG_FD_MAX];
+	int descriptors[KERN_MSG_FD_MAX];
 	void *buffer;
 	void *data;
 	uint8_t *buffer_argument;
@@ -2141,7 +2141,7 @@ sys_recvmsg_call(
 	    request.reserved2 != 0 ||
 	    request.data_capacity > SIZE_MAX ||
 	    request.name_capacity > sizeof(address) ||
-	    request.descriptor_capacity > ZEDBSD_MSG_FD_MAX ||
+	    request.descriptor_capacity > KERN_MSG_FD_MAX ||
 	    (request.data_capacity != 0 && request.data == 0) ||
 	    (request.name_capacity != 0 && request.name == 0) ||
 	    (request.descriptor_capacity != 0 && request.descriptors == 0))
@@ -2996,21 +2996,21 @@ dirent_type(
 {
 	switch (type) {
 	case INODE_REG:
-		return ZEDBSD_DT_REG;
+		return KERN_DT_REG;
 	case INODE_DIR:
-		return ZEDBSD_DT_DIR;
+		return KERN_DT_DIR;
 	case INODE_BLOCK:
-		return ZEDBSD_DT_BLK;
+		return KERN_DT_BLK;
 	case INODE_CHAR:
-		return ZEDBSD_DT_CHR;
+		return KERN_DT_CHR;
 	case INODE_FIFO:
-		return ZEDBSD_DT_FIFO;
+		return KERN_DT_FIFO;
 	case INODE_SYMLINK:
-		return ZEDBSD_DT_LNK;
+		return KERN_DT_LNK;
 	case INODE_SOCKET:
-		return ZEDBSD_DT_SOCK;
+		return KERN_DT_SOCK;
 	default:
-		return ZEDBSD_DT_UNKNOWN;
+		return KERN_DT_UNKNOWN;
 	}
 }
 
@@ -3669,7 +3669,7 @@ sys_mount_call(
 	if (error == 0 && args[3] != 0) {
 		error = copyin(args[3], &requested, sizeof(requested));
 		if (error == 0 && (requested.size != sizeof(requested) ||
-		    requested.version != ZEDBSD_MOUNT_ARGS_VERSION ||
+		    requested.version != KERN_MOUNT_ARGS_VERSION ||
 		    memchr(requested.fspec, '\0', sizeof(requested.fspec)) == NULL))
 			error = EINVAL;
 		if (error == 0 && requested.fspec[0] != '\0')
@@ -3802,17 +3802,17 @@ sys_quotactl_call(
 		error = copyin(args[1], &request, sizeof(request));
 	if (error == 0 &&
 	    (request.size != sizeof(request) ||
-	    request.version != ZEDBSD_QUOTA_VERSION ||
-	    request.type > ZEDBSD_QUOTA_GROUP ||
-	    request.command < ZEDBSD_QUOTA_GET ||
-	    request.command > ZEDBSD_QUOTA_SYNC))
+	    request.version != KERN_QUOTA_VERSION ||
+	    request.type > KERN_QUOTA_GROUP ||
+	    request.command < KERN_QUOTA_GET ||
+	    request.command > KERN_QUOTA_SYNC))
 		error = EINVAL;
 
 	/* An unprivileged caller may only query its own quotas. */
 	if (error == 0) {
 		allowed = cred_is_superuser(process->cred);
-		if (request.command == ZEDBSD_QUOTA_GET && !allowed) {
-			if (request.type == ZEDBSD_QUOTA_USER) {
+		if (request.command == KERN_QUOTA_GET && !allowed) {
+			if (request.type == KERN_QUOTA_USER) {
 				allowed = 0;
 				if (request.id == process->cred->ruid ||
 				    request.id == process->cred->euid ||
@@ -3872,9 +3872,9 @@ sys_snapshotctl_call(
 		error = copyin(args[1], &request, sizeof(request));
 	if (error == 0 &&
 	    (request.size != sizeof(request) ||
-	    request.version != ZEDBSD_SNAPSHOT_VERSION ||
-	    request.command < ZEDBSD_SNAPSHOT_CREATE ||
-	    request.command > ZEDBSD_SNAPSHOT_STATUS))
+	    request.version != KERN_SNAPSHOT_VERSION ||
+	    request.command < KERN_SNAPSHOT_CREATE ||
+	    request.command > KERN_SNAPSHOT_STATUS))
 		error = EINVAL;
 	if (error == 0)
 		error = namei_path_at(process->cwdi, pathname, &path);
@@ -3988,7 +3988,7 @@ copy_exec_vector(
 	unsigned index;
 	size_t length;
 	int error;
-#ifdef ZEDBSD_USER_ABI_LP64
+#ifdef KERN_USER_ABI_LP64
 	uintptr_t pointer;
 #else
 	uint32_t pointer;
@@ -4630,7 +4630,7 @@ sys_mutation_common(
 		goto out_held;
 
 	/* Performs the operation under the mount's namespace transaction. */
-	if (number == ZEDBSD_SYS_mkdir) {
+	if (number == KERN_SYS_mkdir) {
 		mount_vfs_transaction_enter(parent.p_mount);
 		error = inode_creation_request_user(parent.p_inode,
 			    credential, INODE_DIR,
@@ -4640,8 +4640,8 @@ sys_mutation_common(
 			error = inode_mkdir(parent.p_inode, &name, &creation,
 			    &created);
 		mount_vfs_transaction_leave(parent.p_mount);
-	} else if (number == ZEDBSD_SYS_unlink ||
-	    number == ZEDBSD_SYS_rmdir) {
+	} else if (number == KERN_SYS_unlink ||
+	    number == KERN_SYS_rmdir) {
 		mount_vfs_transaction_enter(parent.p_mount);
 		error = mount_namespace_check_name(parent.p_inode, &name);
 		if (error == 0)
@@ -4653,7 +4653,7 @@ sys_mutation_common(
 
 		/* Removes the name, as a file or as a directory. */
 		if (error == 0) {
-			if (number == ZEDBSD_SYS_unlink)
+			if (number == KERN_SYS_unlink)
 				error = inode_unlink(parent.p_inode, &name);
 			else
 				error = inode_rmdir(parent.p_inode, &name);
@@ -4747,7 +4747,7 @@ sys_mutation_call(
 	uintptr_t option;
 
 	/* Only mkdir has a mode argument; rename's second argument is a path. */
-	option = number == ZEDBSD_SYS_mkdir ? args[1] : 0;
+	option = number == KERN_SYS_mkdir ? args[1] : 0;
 	result = sys_mutation_common(number, AT_FDCWD, args[0], option,
 		AT_FDCWD, args[1]);
 	return result;
@@ -4763,36 +4763,36 @@ sys_mutation_at_call(
 	intptr_t result;
 
 	/* Creates a directory relative to the descriptor. */
-	if (number == ZEDBSD_SYS_mkdirat) {
-		result = sys_mutation_common(ZEDBSD_SYS_mkdir, (int)args[0],
+	if (number == KERN_SYS_mkdirat) {
+		result = sys_mutation_common(KERN_SYS_mkdir, (int)args[0],
 			args[1], args[2], AT_FDCWD, 0);
 		return result;
 	}
 
 	/* Removes a file or a directory, as the flag asks. */
-	if (number == ZEDBSD_SYS_unlinkat) {
+	if (number == KERN_SYS_unlinkat) {
 		if ((args[2] & ~AT_REMOVEDIR) != 0)
 			return -EINVAL;
 		if ((args[2] & AT_REMOVEDIR) != 0)
-			operation = ZEDBSD_SYS_rmdir;
+			operation = KERN_SYS_rmdir;
 		else
-			operation = ZEDBSD_SYS_unlink;
+			operation = KERN_SYS_unlink;
 		result = sys_mutation_common(operation, (int)args[0],
 			args[1], 0, AT_FDCWD, 0);
 		return result;
 	}
 
 	/* Validates the new ABI without changing renameat's four arguments. */
-	if (number == ZEDBSD_SYS_renameat2) {
+	if (number == KERN_SYS_renameat2) {
 		if ((args[4] & ~(uintptr_t)RENAME_NOREPLACE) != 0)
 			return -EINVAL;
-		result = sys_mutation_common(ZEDBSD_SYS_rename, (int)args[0],
+		result = sys_mutation_common(KERN_SYS_rename, (int)args[0],
 		    args[1], args[4], (int)args[2], args[3]);
 		return result;
 	}
 
 	/* Renames across the two named directories. */
-	result = sys_mutation_common(ZEDBSD_SYS_rename, (int)args[0], args[1],
+	result = sys_mutation_common(KERN_SYS_rename, (int)args[0], args[1],
 		0, (int)args[2], args[3]);
 	return result;
 }
@@ -4858,19 +4858,19 @@ sys_cred_get_call(
 
 	/* Reports the identity the call number names. */
 	switch (number) {
-	case ZEDBSD_SYS_getuid:
+	case KERN_SYS_getuid:
 		result = cred->ruid;
 		break;
-	case ZEDBSD_SYS_geteuid:
+	case KERN_SYS_geteuid:
 		result = cred->euid;
 		break;
-	case ZEDBSD_SYS_getgid:
+	case KERN_SYS_getgid:
 		result = cred->rgid;
 		break;
-	case ZEDBSD_SYS_getegid:
+	case KERN_SYS_getegid:
 		result = cred->egid;
 		break;
-	case ZEDBSD_SYS_getgroups:
+	case KERN_SYS_getgroups:
 		/* A zero count only asks for the group count. */
 		if ((int)args[0] < 0 ||
 		    ((unsigned)args[0] != 0 &&
@@ -4961,11 +4961,11 @@ sys_cred_getres_call(
 		cred = NULL;
 	if (error == 0 && cred == NULL)
 		error = EINVAL;
-	if (error == 0 && number == ZEDBSD_SYS_getresuid) {
+	if (error == 0 && number == KERN_SYS_getresuid) {
 		values[0] = cred->ruid;
 		values[1] = cred->euid;
 		values[2] = cred->suid;
-	} else if (error == 0 && number == ZEDBSD_SYS_getresgid) {
+	} else if (error == 0 && number == KERN_SYS_getresgid) {
 		values[0] = cred->rgid;
 		values[1] = cred->egid;
 		values[2] = cred->sgid;
@@ -5117,26 +5117,26 @@ sys_atomic_call(
 	memset(&first, 0, sizeof(first));
 	memset(&second, 0, sizeof(second));
 	if (size == 0 ||
-	    operation > ZEDBSD_ATOMIC_COMPARE_EXCHANGE ||
+	    operation > KERN_ATOMIC_COMPARE_EXCHANGE ||
 	    args[0] == 0 ||
 	    args[1] == 0 ||
-	    (operation >= ZEDBSD_ATOMIC_EXCHANGE && args[2] == 0))
+	    (operation >= KERN_ATOMIC_EXCHANGE && args[2] == 0))
 		return -EINVAL;
-	if (operation == ZEDBSD_ATOMIC_LOAD)
+	if (operation == KERN_ATOMIC_LOAD)
 		object_prot = HAL_SPACE_READ;
-	else if (operation == ZEDBSD_ATOMIC_STORE)
+	else if (operation == KERN_ATOMIC_STORE)
 		object_prot = HAL_SPACE_WRITE;
 	else
 		object_prot = HAL_SPACE_READ | HAL_SPACE_WRITE;
-	if (operation == ZEDBSD_ATOMIC_LOAD)
+	if (operation == KERN_ATOMIC_LOAD)
 		first_prot = HAL_SPACE_WRITE;
-	else if (operation == ZEDBSD_ATOMIC_COMPARE_EXCHANGE)
+	else if (operation == KERN_ATOMIC_COMPARE_EXCHANGE)
 		first_prot = HAL_SPACE_READ | HAL_SPACE_WRITE;
 	else
 		first_prot = HAL_SPACE_READ;
-	if (operation == ZEDBSD_ATOMIC_EXCHANGE)
+	if (operation == KERN_ATOMIC_EXCHANGE)
 		second_prot = HAL_SPACE_WRITE;
-	else if (operation == ZEDBSD_ATOMIC_COMPARE_EXCHANGE)
+	else if (operation == KERN_ATOMIC_COMPARE_EXCHANGE)
 		second_prot = HAL_SPACE_READ;
 	error = uaccess_pin(args[0], size, object_prot, &object);
 	if (error == 0)
@@ -5156,18 +5156,18 @@ sys_atomic_call(
 
 	/* Runs the requested operation with the objects pinned and the lock held. */
 	switch (operation) {
-	case ZEDBSD_ATOMIC_LOAD:
+	case KERN_ATOMIC_LOAD:
 		error = user_atomic_copy(&object, &first, size);
 		break;
-	case ZEDBSD_ATOMIC_STORE:
+	case KERN_ATOMIC_STORE:
 		error = user_atomic_copy(&first, &object, size);
 		break;
-	case ZEDBSD_ATOMIC_EXCHANGE:
+	case KERN_ATOMIC_EXCHANGE:
 		error = user_atomic_copy(&object, &second, size);
 		if (error == 0)
 			error = user_atomic_copy(&first, &object, size);
 		break;
-	case ZEDBSD_ATOMIC_COMPARE_EXCHANGE:
+	case KERN_ATOMIC_COMPARE_EXCHANGE:
 		error = user_atomic_equal(&object, &first, size, &equal);
 		if (error == 0 && equal)
 			error = user_atomic_copy(&second, &object, size);
@@ -5188,7 +5188,7 @@ out:
 	uaccess_unpin(&object);
 	if (error != 0)
 		return -error;
-	if (operation == ZEDBSD_ATOMIC_COMPARE_EXCHANGE)
+	if (operation == KERN_ATOMIC_COMPARE_EXCHANGE)
 		return equal;
 	return 0;
 }
@@ -5231,7 +5231,7 @@ sys_cred_set_call(
 
 	/* Applies the change the call number names. */
 	switch (number) {
-	case ZEDBSD_SYS_setuid:
+	case KERN_SYS_setuid:
 		if (!uid_permitted(old, (uid_t)args[0])) {
 			error = EPERM;
 			break;
@@ -5249,7 +5249,7 @@ sys_cred_set_call(
 		/* Sets only the effective user identity. */
 		error = 0;
 		break;
-	case ZEDBSD_SYS_seteuid:
+	case KERN_SYS_seteuid:
 		if (!uid_permitted(old, (uid_t)args[0])) {
 			error = EPERM;
 			break;
@@ -5259,7 +5259,7 @@ sys_cred_set_call(
 		cred->euid = (uid_t)args[0];
 		error = 0;
 		break;
-	case ZEDBSD_SYS_setgid:
+	case KERN_SYS_setgid:
 		if (!gid_permitted(old, (gid_t)args[0])) {
 			error = EPERM;
 			break;
@@ -5277,7 +5277,7 @@ sys_cred_set_call(
 		/* Sets only the effective group identity. */
 		error = 0;
 		break;
-	case ZEDBSD_SYS_setegid:
+	case KERN_SYS_setegid:
 		if (!gid_permitted(old, (gid_t)args[0])) {
 			error = EPERM;
 			break;
@@ -5287,7 +5287,7 @@ sys_cred_set_call(
 		cred->egid = (gid_t)args[0];
 		error = 0;
 		break;
-	case ZEDBSD_SYS_setreuid:
+	case KERN_SYS_setreuid:
 		ruid = (uid_t)args[0];
 		euid = (uid_t)args[1];
 		if ((ruid != (uid_t)-1 && !uid_permitted(old, ruid)) ||
@@ -5303,7 +5303,7 @@ sys_cred_set_call(
 			cred->euid = euid;
 		error = 0;
 		break;
-	case ZEDBSD_SYS_setregid:
+	case KERN_SYS_setregid:
 		rgid = (gid_t)args[0];
 		egid = (gid_t)args[1];
 		if ((rgid != (gid_t)-1 && !gid_permitted(old, rgid)) ||
@@ -5319,7 +5319,7 @@ sys_cred_set_call(
 			cred->egid = egid;
 		error = 0;
 		break;
-	case ZEDBSD_SYS_setresuid:
+	case KERN_SYS_setresuid:
 		uids[0] = (uid_t)args[0];
 		uids[1] = (uid_t)args[1];
 		uids[2] = (uid_t)args[2];
@@ -5341,7 +5341,7 @@ sys_cred_set_call(
 			cred->suid = uids[2];
 		error = 0;
 		break;
-	case ZEDBSD_SYS_setresgid:
+	case KERN_SYS_setresgid:
 		gids[0] = (gid_t)args[0];
 		gids[1] = (gid_t)args[1];
 		gids[2] = (gid_t)args[2];
@@ -5363,7 +5363,7 @@ sys_cred_set_call(
 			cred->sgid = gids[2];
 		error = 0;
 		break;
-	case ZEDBSD_SYS_setgroups:
+	case KERN_SYS_setgroups:
 		if (!cred_is_superuser(old)) {
 			error = EPERM;
 			break;
@@ -6931,12 +6931,12 @@ sys_thread_join_call(
 		return -EDEADLK;
 
 	/* Rejects a flag word this call does not define. */
-	if ((args[2] & ~ZEDBSD_THREAD_JOIN_CANCELABLE) != 0 ||
+	if ((args[2] & ~KERN_THREAD_JOIN_CANCELABLE) != 0 ||
 	    args[3] != 0 || args[4] != 0 || args[5] != 0)
 		return -EINVAL;
 
 	/* Records who is joining and how the wait may end. */
-	cancelable = (args[2] & ZEDBSD_THREAD_JOIN_CANCELABLE) != 0;
+	cancelable = (args[2] & KERN_THREAD_JOIN_CANCELABLE) != 0;
 	owner = curthread->tid;
 	memset(&pin, 0, sizeof(pin));
 
@@ -7080,11 +7080,11 @@ sys_thread_self_call(
 	    args[4] != 0 ||
 	    args[5] != 0)
 		return -EINVAL;
-	if (args[0] == ZEDBSD_THREAD_SELF_TID && args[1] == 0)
+	if (args[0] == KERN_THREAD_SELF_TID && args[1] == 0)
 		return curthread->tid;
-	if (args[0] == ZEDBSD_THREAD_SELF_GET_TLS && args[1] == 0)
+	if (args[0] == KERN_THREAD_SELF_GET_TLS && args[1] == 0)
 		return (intptr_t)hal_task_get_tls(curthread->task);
-	if (args[0] == ZEDBSD_THREAD_SELF_SET_TLS) {
+	if (args[0] == KERN_THREAD_SELF_SET_TLS) {
 		hal_task_set_tls(curthread->task, args[1]);
 		return 0;
 	}
@@ -7145,11 +7145,11 @@ sys_thread_cancel_call(
 	    args[3] != 0 ||
 	    args[4] != 0 ||
 	    args[5] != 0 ||
-	    operation > ZEDBSD_THREAD_CANCEL_CLEAR)
+	    operation > KERN_THREAD_CANCEL_CLEAR)
 		return -EINVAL;
 
 	/* A request marks another thread of the process and interrupts it. */
-	if (operation == ZEDBSD_THREAD_CANCEL_REQUEST) {
+	if (operation == KERN_THREAD_CANCEL_REQUEST) {
 		target = thread_find_ref((tid_t)args[0]);
 		if (target == NULL || target->proc != current->proc) {
 			if (target != NULL)
@@ -7177,7 +7177,7 @@ sys_thread_cancel_call(
 	irq = spin_lock_irqsave(&current->proc->lock);
 
 	pending = atomic_raw_load_acquire(&current->cancel_pending) != 0;
-	if (operation == ZEDBSD_THREAD_CANCEL_CLEAR)
+	if (operation == KERN_THREAD_CANCEL_CLEAR)
 		atomic_raw_store_release(&current->cancel_pending, 0U);
 
 	spin_unlock_irqrestore(&current->proc->lock, irq);
@@ -7213,14 +7213,14 @@ sys_usync_call(
 	/* Rejects a flag word this call does not define. */
 	flags = (unsigned)args[5];
 	if (process == NULL ||
-	    (flags & ~(ZEDBSD_USYNC_PRIVATE | ZEDBSD_USYNC_CANCELABLE |
-	    ZEDBSD_USYNC_ABSTIME | ZEDBSD_USYNC_CLOCK_REALTIME)) != 0 ||
-	    ((flags & ZEDBSD_USYNC_CLOCK_REALTIME) != 0 &&
-	    (flags & ZEDBSD_USYNC_ABSTIME) == 0))
+	    (flags & ~(KERN_USYNC_PRIVATE | KERN_USYNC_CANCELABLE |
+	    KERN_USYNC_ABSTIME | KERN_USYNC_CLOCK_REALTIME)) != 0 ||
+	    ((flags & KERN_USYNC_CLOCK_REALTIME) != 0 &&
+	    (flags & KERN_USYNC_ABSTIME) == 0))
 		return -EINVAL;
 
 	/* A private object is keyed by process; a shared one by its VM object. */
-	if ((flags & ZEDBSD_USYNC_PRIVATE) != 0) {
+	if ((flags & KERN_USYNC_PRIVATE) != 0) {
 		key_object = (uintptr_t)process;
 		key_offset = args[0];
 	} else {
@@ -7232,7 +7232,7 @@ sys_usync_call(
 	}
 
 	/* A wait converts its absolute or relative timeout to a deadline. */
-	if ((unsigned)args[1] == ZEDBSD_USYNC_WAIT) {
+	if ((unsigned)args[1] == KERN_USYNC_WAIT) {
 		if (args[4] != 0) {
 			error = EINVAL;
 			goto out;
@@ -7240,11 +7240,11 @@ sys_usync_call(
 
 		/* Turns an absolute timeout into the deadline this wait runs to. */
 		if (args[3] != 0) {
-			if ((flags & ZEDBSD_USYNC_ABSTIME) != 0) {
+			if ((flags & KERN_USYNC_ABSTIME) != 0) {
 				error = copyin(args[3], &timeout, sizeof(timeout));
 				if (error == 0)
 					error = kern_timespec_validate(&timeout);
-				if ((flags & ZEDBSD_USYNC_CLOCK_REALTIME) != 0)
+				if ((flags & KERN_USYNC_CLOCK_REALTIME) != 0)
 					clock = CLOCK_REALTIME;
 				else
 					clock = CLOCK_MONOTONIC;
@@ -7296,16 +7296,16 @@ sys_usync_call(
 
 		error = usync_wait(args[0], (uint32_t)args[2],
 		    key_object, key_offset, deadline,
-		    (flags & ZEDBSD_USYNC_CANCELABLE) != 0);
+		    (flags & KERN_USYNC_CANCELABLE) != 0);
 		goto out;
 	}
 
 	/* A wake takes only a count. */
-	if ((unsigned)args[1] == ZEDBSD_USYNC_WAKE) {
+	if ((unsigned)args[1] == KERN_USYNC_WAKE) {
 		if (args[2] != 0 ||
 		    args[3] != 0 ||
-		    (flags & (ZEDBSD_USYNC_CANCELABLE | ZEDBSD_USYNC_ABSTIME |
-		    ZEDBSD_USYNC_CLOCK_REALTIME)) != 0)
+		    (flags & (KERN_USYNC_CANCELABLE | KERN_USYNC_ABSTIME |
+		    KERN_USYNC_CLOCK_REALTIME)) != 0)
 			error = EINVAL;
 		else
 			error = usync_wake(args[0], key_object, key_offset,
@@ -7800,10 +7800,10 @@ sys_times_call(
 	    args[5] != 0)
 		return -EINVAL;
 	if (args[1] == 0)
-		record_size = ZEDBSD_PROCESS_TIMES_V1_SIZE;
+		record_size = KERN_PROCESS_TIMES_V1_SIZE;
 	else
 		record_size = (size_t)args[1];
-	if (record_size != ZEDBSD_PROCESS_TIMES_V1_SIZE &&
+	if (record_size != KERN_PROCESS_TIMES_V1_SIZE &&
 	    record_size != sizeof(result))
 		return -EINVAL;
 
@@ -8218,11 +8218,11 @@ sys_execve_call(
 	copy = kern_calloc(1, sizeof(*copy));
 	if (copy == NULL)
 		return -ENOMEM;
-	error = copy_exec_vector(args[1], copy->argv, ZEDBSD_SPAWN_ARG_MAX,
+	error = copy_exec_vector(args[1], copy->argv, KERN_SPAWN_ARG_MAX,
 	    copy, 0);
 	if (error == 0)
 		error = copy_exec_vector(args[2], copy->envp,
-		    ZEDBSD_SPAWN_ENV_MAX, copy, 1);
+		    KERN_SPAWN_ENV_MAX, copy, 1);
 	if (error == 0)
 		error = process_execve(process, path, copy->argv, copy->envp);
 	kern_free(copy);
@@ -8265,11 +8265,11 @@ sys_fexecve_call(
 	}
 
 	/* Copies both vectors in and runs the image. */
-	error = copy_exec_vector(args[1], copy->argv, ZEDBSD_SPAWN_ARG_MAX,
+	error = copy_exec_vector(args[1], copy->argv, KERN_SPAWN_ARG_MAX,
 	    copy, 0);
 	if (error == 0)
 		error = copy_exec_vector(args[2], copy->envp,
-		    ZEDBSD_SPAWN_ENV_MAX, copy, 1);
+		    KERN_SPAWN_ENV_MAX, copy, 1);
 	if (error == 0)
 		error = process_fexecve(process, file, copy->argv, copy->envp);
 	kern_free(copy);
@@ -8496,16 +8496,16 @@ sys_process_identity_call(
 
 	/* Reports or changes the identity the call number names. */
 	switch (number) {
-	case ZEDBSD_SYS_getpid:
+	case KERN_SYS_getpid:
 		return process->pid;
-	case ZEDBSD_SYS_getppid:
+	case KERN_SYS_getppid:
 		result = process_parent_pid(process);
 		return result;
-	case ZEDBSD_SYS_getpgrp:
+	case KERN_SYS_getpgrp:
 		return process->pgrp;
 
 	/* Reports the group of the caller or of the named process. */
-	case ZEDBSD_SYS_getpgid:
+	case KERN_SYS_getpgid:
 		pid = (pid_t)args[0];
 		if (pid == 0)
 			return process->pgrp;
@@ -8519,7 +8519,7 @@ sys_process_identity_call(
 		return -ESRCH;
 
 	/* Moves a process into a group. */
-	case ZEDBSD_SYS_setpgid:
+	case KERN_SYS_setpgid:
 		error = process_setpgid(process, (pid_t)args[0],
 		    (pid_t)args[1]);
 		if (error != 0)
@@ -8527,10 +8527,10 @@ sys_process_identity_call(
 		return 0;
 
 	/* Starts a session and reports the one a process belongs to. */
-	case ZEDBSD_SYS_setsid:
+	case KERN_SYS_setsid:
 		result = process_setsid(process);
 		return result;
-	case ZEDBSD_SYS_getsid:
+	case KERN_SYS_getsid:
 		pid = (pid_t)args[0];
 		if (pid == 0)
 			return process->session;
@@ -8558,446 +8558,446 @@ syscall_dispatch_body(
 
 	/* Runs the handler the call number names. */
 	switch (number) {
-	case ZEDBSD_SYS_exit:
+	case KERN_SYS_exit:
 		exit1((int)args[0]);
 
 	/* Opens files and moves through the directory tree. */
-	case ZEDBSD_SYS_open:
+	case KERN_SYS_open:
 		result = sys_open_call(args, 0);
 		break;
-	case ZEDBSD_SYS_openat:
+	case KERN_SYS_openat:
 		result = sys_open_call(args, 1);
 		break;
-	case ZEDBSD_SYS_close:
+	case KERN_SYS_close:
 		result = sys_close_call(args);
 		break;
-	case ZEDBSD_SYS_read:
+	case KERN_SYS_read:
 		result = sys_read_call(args);
 		break;
-	case ZEDBSD_SYS_write:
+	case KERN_SYS_write:
 		result = sys_write_call(args);
 		break;
-	case ZEDBSD_SYS_lseek:
+	case KERN_SYS_lseek:
 		result = sys_lseek_call(args);
 		break;
-	case ZEDBSD_SYS_fstat:
+	case KERN_SYS_fstat:
 		result = sys_fstat_call(args);
 		break;
-	case ZEDBSD_SYS_getdents:
+	case KERN_SYS_getdents:
 		result = sys_getdents_call(args);
 		break;
-	case ZEDBSD_SYS_chdir:
+	case KERN_SYS_chdir:
 		result = sys_chdir_call(args);
 		break;
-	case ZEDBSD_SYS_fchdir:
+	case KERN_SYS_fchdir:
 		result = sys_fchdir_call(args);
 		break;
-	case ZEDBSD_SYS_mknodat:
+	case KERN_SYS_mknodat:
 		result = sys_mknodat_call(args);
 		break;
-	case ZEDBSD_SYS_getcwd:
+	case KERN_SYS_getcwd:
 		result = sys_getcwd_call(args);
 		break;
 
 	/* Maps and unmaps address space. */
-	case ZEDBSD_SYS_mmap:
+	case KERN_SYS_mmap:
 		result = sys_mmap_call(args);
 		break;
-	case ZEDBSD_SYS_munmap:
+	case KERN_SYS_munmap:
 		result = sys_munmap_call(args);
 		break;
-	case ZEDBSD_SYS_mprotect:
+	case KERN_SYS_mprotect:
 		result = sys_mprotect_call(args);
 		break;
 
 	/* Reaches devices and kernel state directly. */
-	case ZEDBSD_SYS_ioctl:
+	case KERN_SYS_ioctl:
 		result = sys_ioctl_call(args);
 		break;
-	case ZEDBSD_SYS_sysctl:
+	case KERN_SYS_sysctl:
 		result = sys_sysctl_call(args);
 		break;
 
 	/* Waits for a descriptor to become ready. */
-	case ZEDBSD_SYS_ppoll:
+	case KERN_SYS_ppoll:
 		result = sys_ppoll_call(args);
 		break;
-	case ZEDBSD_SYS_pselect:
+	case KERN_SYS_pselect:
 		result = sys_pselect_call(args);
 		break;
 
 	/* Handles the signal calls that carry their own stack or wait. */
-	case ZEDBSD_SYS_sigaltstack:
+	case KERN_SYS_sigaltstack:
 		result = sys_sigaltstack_call(args);
 		break;
-	case ZEDBSD_SYS_sigtimedwait:
+	case KERN_SYS_sigtimedwait:
 		result = sys_sigtimedwait_call(args);
 		break;
-	case ZEDBSD_SYS_sigqueue:
+	case KERN_SYS_sigqueue:
 		result = sys_sigqueue_call(args);
 		break;
 
 	/* Creates threads and steers the ones that exist. */
-	case ZEDBSD_SYS_thread_create:
+	case KERN_SYS_thread_create:
 		result = sys_thread_create_call(args);
 		break;
-	case ZEDBSD_SYS_thread_exit:
+	case KERN_SYS_thread_exit:
 		result = sys_thread_exit_call(args);
 		break;
-	case ZEDBSD_SYS_thread_join:
+	case KERN_SYS_thread_join:
 		result = sys_thread_join_call(args);
 		break;
-	case ZEDBSD_SYS_thread_detach:
+	case KERN_SYS_thread_detach:
 		result = sys_thread_detach_call(args);
 		break;
-	case ZEDBSD_SYS_thread_self:
+	case KERN_SYS_thread_self:
 		result = sys_thread_self_call(args);
 		break;
-	case ZEDBSD_SYS_thread_kill:
+	case KERN_SYS_thread_kill:
 		result = sys_thread_kill_call(args);
 		break;
-	case ZEDBSD_SYS_thread_cancel:
+	case KERN_SYS_thread_cancel:
 		result = sys_thread_cancel_call(args);
 		break;
-	case ZEDBSD_SYS_usync:
+	case KERN_SYS_usync:
 		result = sys_usync_call(args);
 		break;
 
 	/* Reads clocks and drives the per-process timers. */
-	case ZEDBSD_SYS_clock_gettime:
+	case KERN_SYS_clock_gettime:
 		result = sys_clock_gettime_call(args);
 		break;
-	case ZEDBSD_SYS_clock_getres:
+	case KERN_SYS_clock_getres:
 		result = sys_clock_getres_call(args);
 		break;
-	case ZEDBSD_SYS_clock_settime:
+	case KERN_SYS_clock_settime:
 		result = sys_clock_settime_call(args);
 		break;
-	case ZEDBSD_SYS_timer_create:
+	case KERN_SYS_timer_create:
 		result = sys_timer_create_call(args);
 		break;
-	case ZEDBSD_SYS_timer_delete:
+	case KERN_SYS_timer_delete:
 		result = sys_timer_delete_call(args);
 		break;
-	case ZEDBSD_SYS_timer_settime:
+	case KERN_SYS_timer_settime:
 		result = sys_timer_settime_call(args);
 		break;
-	case ZEDBSD_SYS_timer_gettime:
+	case KERN_SYS_timer_gettime:
 		result = sys_timer_gettime_call(args);
 		break;
-	case ZEDBSD_SYS_timer_getoverrun:
+	case KERN_SYS_timer_getoverrun:
 		result = sys_timer_getoverrun_call(args);
 		break;
 
 	/* Attaches file systems and reports their statistics. */
-	case ZEDBSD_SYS_mount:
+	case KERN_SYS_mount:
 		result = sys_mount_call(args);
 		break;
-	case ZEDBSD_SYS_unmount:
+	case KERN_SYS_unmount:
 		result = sys_unmount_call(args);
 		break;
-	case ZEDBSD_SYS_statvfs:
+	case KERN_SYS_statvfs:
 		result = sys_statvfs_call(args, 0);
 		break;
-	case ZEDBSD_SYS_fstatvfs:
+	case KERN_SYS_fstatvfs:
 		result = sys_statvfs_call(args, 1);
 		break;
 
 	/* Reads and writes extended attributes. */
-	case ZEDBSD_SYS_getxattr:
+	case KERN_SYS_getxattr:
 		result = sys_getxattr_call(args, 0, 0);
 		break;
-	case ZEDBSD_SYS_lgetxattr:
+	case KERN_SYS_lgetxattr:
 		result = sys_getxattr_call(args, 0, 1);
 		break;
-	case ZEDBSD_SYS_fgetxattr:
+	case KERN_SYS_fgetxattr:
 		result = sys_getxattr_call(args, 1, 0);
 		break;
-	case ZEDBSD_SYS_setxattr:
+	case KERN_SYS_setxattr:
 		result = sys_setxattr_call(args, 0, 0);
 		break;
-	case ZEDBSD_SYS_lsetxattr:
+	case KERN_SYS_lsetxattr:
 		result = sys_setxattr_call(args, 0, 1);
 		break;
-	case ZEDBSD_SYS_fsetxattr:
+	case KERN_SYS_fsetxattr:
 		result = sys_setxattr_call(args, 1, 0);
 		break;
-	case ZEDBSD_SYS_listxattr:
+	case KERN_SYS_listxattr:
 		result = sys_listxattr_call(args, 0, 0);
 		break;
-	case ZEDBSD_SYS_llistxattr:
+	case KERN_SYS_llistxattr:
 		result = sys_listxattr_call(args, 0, 1);
 		break;
-	case ZEDBSD_SYS_flistxattr:
+	case KERN_SYS_flistxattr:
 		result = sys_listxattr_call(args, 1, 0);
 		break;
-	case ZEDBSD_SYS_removexattr:
+	case KERN_SYS_removexattr:
 		result = sys_removexattr_call(args, 0, 0);
 		break;
-	case ZEDBSD_SYS_lremovexattr:
+	case KERN_SYS_lremovexattr:
 		result = sys_removexattr_call(args, 0, 1);
 		break;
-	case ZEDBSD_SYS_fremovexattr:
+	case KERN_SYS_fremovexattr:
 		result = sys_removexattr_call(args, 1, 0);
 		break;
 
 	/* Administers quotas and snapshots. */
-	case ZEDBSD_SYS_quotactl:
+	case KERN_SYS_quotactl:
 		result = sys_quotactl_call(args);
 		break;
-	case ZEDBSD_SYS_snapshotctl:
+	case KERN_SYS_snapshotctl:
 		result = sys_snapshotctl_call(args);
 		break;
 
 	/* Sleeps for an interval. */
-	case ZEDBSD_SYS_nanosleep:
+	case KERN_SYS_nanosleep:
 		result = sys_nanosleep_call(args);
 		break;
 
 	/* Moves the program break. */
-	case ZEDBSD_SYS_brk:
+	case KERN_SYS_brk:
 		result = sys_brk_call(args);
 		break;
 
 	/* Carries the whole socket interface. */
-	case ZEDBSD_SYS_socket:
+	case KERN_SYS_socket:
 		result = sys_socket_call(args);
 		break;
-	case ZEDBSD_SYS_socketpair:
+	case KERN_SYS_socketpair:
 		result = sys_socketpair_call(args);
 		break;
-	case ZEDBSD_SYS_sendmsg:
+	case KERN_SYS_sendmsg:
 		result = sys_sendmsg_call(args);
 		break;
-	case ZEDBSD_SYS_recvmsg:
+	case KERN_SYS_recvmsg:
 		result = sys_recvmsg_call(args);
 		break;
-	case ZEDBSD_SYS_bind:
+	case KERN_SYS_bind:
 		result = sys_bind_call(args);
 		break;
-	case ZEDBSD_SYS_connect:
+	case KERN_SYS_connect:
 		result = sys_connect_call(args);
 		break;
-	case ZEDBSD_SYS_listen:
+	case KERN_SYS_listen:
 		result = sys_listen_call(args);
 		break;
-	case ZEDBSD_SYS_accept:
+	case KERN_SYS_accept:
 		result = sys_accept_call(args);
 		break;
-	case ZEDBSD_SYS_sendto:
+	case KERN_SYS_sendto:
 		result = sys_sendto_call(args);
 		break;
-	case ZEDBSD_SYS_recvfrom:
+	case KERN_SYS_recvfrom:
 		result = sys_recvfrom_call(args);
 		break;
-	case ZEDBSD_SYS_shutdown:
+	case KERN_SYS_shutdown:
 		result = sys_shutdown_call(args);
 		break;
-	case ZEDBSD_SYS_getsockname:
+	case KERN_SYS_getsockname:
 		result = sys_socket_name_call(args, 0);
 		break;
-	case ZEDBSD_SYS_getpeername:
+	case KERN_SYS_getpeername:
 		result = sys_socket_name_call(args, 1);
 		break;
-	case ZEDBSD_SYS_setsockopt:
+	case KERN_SYS_setsockopt:
 		result = sys_setsockopt_call(args);
 		break;
-	case ZEDBSD_SYS_getsockopt:
+	case KERN_SYS_getsockopt:
 		result = sys_getsockopt_call(args);
 		break;
 
 	/* Forks and yields. */
-	case ZEDBSD_SYS_fork:
+	case KERN_SYS_fork:
 		result = sys_fork_call(args);
 		break;
-	case ZEDBSD_SYS_sched_yield:
+	case KERN_SYS_sched_yield:
 		result = sys_sched_yield_call(args);
 		break;
-	case ZEDBSD_SYS_times:
+	case KERN_SYS_times:
 		result = sys_times_call(args);
 		break;
 
 	/* Flushes every dirty buffer. */
-	case ZEDBSD_SYS_sync:
+	case KERN_SYS_sync:
 		result = -(long)mount_sync_all();
 		break;
 
 	/* Reads and sets scheduling priority and accounting. */
-	case ZEDBSD_SYS_getpriority:
+	case KERN_SYS_getpriority:
 		result = sys_getpriority_call(args);
 		break;
-	case ZEDBSD_SYS_setpriority:
+	case KERN_SYS_setpriority:
 		result = sys_setpriority_call(args);
 		break;
-	case ZEDBSD_SYS_getrusage:
+	case KERN_SYS_getrusage:
 		result = sys_getrusage_call(args);
 		break;
-	case ZEDBSD_SYS_getitimer:
+	case KERN_SYS_getitimer:
 		result = sys_getitimer_call(args);
 		break;
-	case ZEDBSD_SYS_setitimer:
+	case KERN_SYS_setitimer:
 		result = sys_setitimer_call(args);
 		break;
 
 	/* Replaces the image and reaps children. */
-	case ZEDBSD_SYS_execve:
+	case KERN_SYS_execve:
 		result = sys_execve_call(args);
 		break;
-	case ZEDBSD_SYS_fexecve:
+	case KERN_SYS_fexecve:
 		result = sys_fexecve_call(args);
 		break;
-	case ZEDBSD_SYS_waitpid:
+	case KERN_SYS_waitpid:
 		result = sys_waitpid_call(args);
 		break;
-	case ZEDBSD_SYS_waitid:
+	case KERN_SYS_waitid:
 		result = sys_waitid_call(args);
 		break;
 
 	/* Reads and sets the resource limits. */
-	case ZEDBSD_SYS_getrlimit:
+	case KERN_SYS_getrlimit:
 		result = sys_resource_limit_call(args, 0);
 		break;
-	case ZEDBSD_SYS_setrlimit:
+	case KERN_SYS_setrlimit:
 		result = sys_resource_limit_call(args, 1);
 		break;
 
 	/* Reads and sets the process identifiers. */
-	case ZEDBSD_SYS_getpid:
-	case ZEDBSD_SYS_getppid:
-	case ZEDBSD_SYS_getpgrp:
-	case ZEDBSD_SYS_getpgid:
-	case ZEDBSD_SYS_setpgid:
-	case ZEDBSD_SYS_setsid:
-	case ZEDBSD_SYS_getsid:
+	case KERN_SYS_getpid:
+	case KERN_SYS_getppid:
+	case KERN_SYS_getpgrp:
+	case KERN_SYS_getpgid:
+	case KERN_SYS_setpgid:
+	case KERN_SYS_setsid:
+	case KERN_SYS_getsid:
 		result = sys_process_identity_call(number, args);
 		break;
 
 	/* Duplicates descriptors and creates pipes. */
-	case ZEDBSD_SYS_dup:
+	case KERN_SYS_dup:
 		result = sys_dup_call(args);
 		break;
-	case ZEDBSD_SYS_dup2:
+	case KERN_SYS_dup2:
 		result = sys_dup2_call(args, 0);
 		break;
-	case ZEDBSD_SYS_dup3:
+	case KERN_SYS_dup3:
 		result = sys_dup2_call(args, 1);
 		break;
-	case ZEDBSD_SYS_fcntl:
+	case KERN_SYS_fcntl:
 		result = sys_fcntl_call(args);
 		break;
-	case ZEDBSD_SYS_pipe:
+	case KERN_SYS_pipe:
 		result = sys_pipe2_call(args, 1);
 		break;
-	case ZEDBSD_SYS_pipe2:
+	case KERN_SYS_pipe2:
 		result = sys_pipe2_call(args, 0);
 		break;
 
 	/* Transfers at an offset, in vectors, and flushes. */
-	case ZEDBSD_SYS_pread:
+	case KERN_SYS_pread:
 		result = sys_positional_call(args, 0);
 		break;
-	case ZEDBSD_SYS_pwrite:
+	case KERN_SYS_pwrite:
 		result = sys_positional_call(args, 1);
 		break;
-	case ZEDBSD_SYS_readv:
+	case KERN_SYS_readv:
 		result = sys_vector_call(args, 0);
 		break;
-	case ZEDBSD_SYS_writev:
+	case KERN_SYS_writev:
 		result = sys_vector_call(args, 1);
 		break;
-	case ZEDBSD_SYS_fsync:
-	case ZEDBSD_SYS_fdatasync:
+	case KERN_SYS_fsync:
+	case KERN_SYS_fdatasync:
 		result = sys_fsync_call(args);
 		break;
 
 	/* Reports file attributes and changes file length. */
-	case ZEDBSD_SYS_stat:
+	case KERN_SYS_stat:
 		result = sys_stat_path_call(args, 0, 0);
 		break;
-	case ZEDBSD_SYS_lstat:
+	case KERN_SYS_lstat:
 		result = sys_stat_path_call(args, 0, 1);
 		break;
-	case ZEDBSD_SYS_fstatat:
+	case KERN_SYS_fstatat:
 		result = sys_stat_path_call(args, 1, 0);
 		break;
-	case ZEDBSD_SYS_truncate:
+	case KERN_SYS_truncate:
 		result = sys_truncate_call(args, 0);
 		break;
-	case ZEDBSD_SYS_ftruncate:
+	case KERN_SYS_ftruncate:
 		result = sys_truncate_call(args, 1);
 		break;
 
 	/* Changes the shape of the directory tree. */
-	case ZEDBSD_SYS_mkdir:
-	case ZEDBSD_SYS_unlink:
-	case ZEDBSD_SYS_rmdir:
-	case ZEDBSD_SYS_rename:
+	case KERN_SYS_mkdir:
+	case KERN_SYS_unlink:
+	case KERN_SYS_rmdir:
+	case KERN_SYS_rename:
 		result = sys_mutation_call(number, args);
 		break;
-	case ZEDBSD_SYS_mkdirat:
-	case ZEDBSD_SYS_unlinkat:
-	case ZEDBSD_SYS_renameat:
-	case ZEDBSD_SYS_renameat2:
+	case KERN_SYS_mkdirat:
+	case KERN_SYS_unlinkat:
+	case KERN_SYS_renameat:
+	case KERN_SYS_renameat2:
 		result = sys_mutation_at_call(number, args);
 		break;
 
 	/* Sets the creation mask. */
-	case ZEDBSD_SYS_umask:
+	case KERN_SYS_umask:
 		result = sys_umask_call(args);
 		break;
 
 	/* Reads the credentials of the caller. */
-	case ZEDBSD_SYS_getuid:
-	case ZEDBSD_SYS_geteuid:
-	case ZEDBSD_SYS_getgid:
-	case ZEDBSD_SYS_getegid:
-	case ZEDBSD_SYS_getgroups:
+	case KERN_SYS_getuid:
+	case KERN_SYS_geteuid:
+	case KERN_SYS_getgid:
+	case KERN_SYS_getegid:
+	case KERN_SYS_getgroups:
 		result = sys_cred_get_call(number, args);
 		break;
-	case ZEDBSD_SYS_getresuid:
-	case ZEDBSD_SYS_getresgid:
+	case KERN_SYS_getresuid:
+	case KERN_SYS_getresgid:
 		result = sys_cred_getres_call(number, args);
 		break;
 
 	/* Draws random bytes. */
-	case ZEDBSD_SYS_getentropy:
+	case KERN_SYS_getentropy:
 		result = sys_getentropy_call(args);
 		break;
 
 	/* Runs one atomic operation on user memory. */
-	case ZEDBSD_SYS_atomic:
+	case KERN_SYS_atomic:
 		result = sys_atomic_call(args);
 		break;
 
 	/* Sets the credentials of the caller. */
-	case ZEDBSD_SYS_setuid:
-	case ZEDBSD_SYS_seteuid:
-	case ZEDBSD_SYS_setgid:
-	case ZEDBSD_SYS_setegid:
-	case ZEDBSD_SYS_setgroups:
-	case ZEDBSD_SYS_setreuid:
-	case ZEDBSD_SYS_setregid:
-	case ZEDBSD_SYS_setresuid:
-	case ZEDBSD_SYS_setresgid:
+	case KERN_SYS_setuid:
+	case KERN_SYS_seteuid:
+	case KERN_SYS_setgid:
+	case KERN_SYS_setegid:
+	case KERN_SYS_setgroups:
+	case KERN_SYS_setreuid:
+	case KERN_SYS_setregid:
+	case KERN_SYS_setresuid:
+	case KERN_SYS_setresgid:
 		result = sys_cred_set_call(number, args);
 		break;
 
 	/* Tests access against the caller's credentials. */
-	case ZEDBSD_SYS_access:
+	case KERN_SYS_access:
 		result = sys_access_call(args);
 		break;
 
 	/* Installs handlers, masks signals, and sends them. */
-	case ZEDBSD_SYS_sigaction:
+	case KERN_SYS_sigaction:
 		result = sys_sigaction_call(args);
 		break;
-	case ZEDBSD_SYS_sigprocmask:
+	case KERN_SYS_sigprocmask:
 		result = sys_sigprocmask_call(args);
 		break;
-	case ZEDBSD_SYS_sigpending:
+	case KERN_SYS_sigpending:
 		result = sys_sigpending_call(args);
 		break;
-	case ZEDBSD_SYS_kill:
+	case KERN_SYS_kill:
 		error = signal_kill(current_process(), (pid_t)args[0],
 		    (int)args[1]);
 		if (error != 0)
@@ -9007,70 +9007,70 @@ syscall_dispatch_body(
 		break;
 
 	/* Returns from a handler. */
-	case ZEDBSD_SYS_sigreturn:
+	case KERN_SYS_sigreturn:
 		result = sys_sigreturn_call(args);
 		break;
 
 	/* Writes a mapping back. */
-	case ZEDBSD_SYS_msync:
+	case KERN_SYS_msync:
 		result = sys_msync_call(args);
 		break;
 
 	/* Changes the mode and the ownership of a file. */
-	case ZEDBSD_SYS_chmod:
+	case KERN_SYS_chmod:
 		result = sys_chmod_common(AT_FDCWD, args[0], -1,
 			(mode_t)args[1], 0);
 		break;
-	case ZEDBSD_SYS_fchmod:
+	case KERN_SYS_fchmod:
 		result = sys_chmod_common(AT_FDCWD, 0, (int)args[0],
 			(mode_t)args[1], 0);
 		break;
-	case ZEDBSD_SYS_fchmodat:
+	case KERN_SYS_fchmodat:
 		result = sys_chmod_common((int)args[0], args[1], -1,
 			(mode_t)args[2], (int)args[3]);
 		break;
-	case ZEDBSD_SYS_chown:
+	case KERN_SYS_chown:
 		result = sys_chown_common(AT_FDCWD, args[0], -1,
 			(uid_t)args[1], (gid_t)args[2], 0);
 		break;
-	case ZEDBSD_SYS_lchown:
+	case KERN_SYS_lchown:
 		result = sys_chown_common(AT_FDCWD, args[0], -1,
 			(uid_t)args[1], (gid_t)args[2], AT_SYMLINK_NOFOLLOW);
 		break;
-	case ZEDBSD_SYS_fchown:
+	case KERN_SYS_fchown:
 		result = sys_chown_common(AT_FDCWD, 0, (int)args[0],
 			(uid_t)args[1], (gid_t)args[2], 0);
 		break;
-	case ZEDBSD_SYS_fchownat:
+	case KERN_SYS_fchownat:
 		result = sys_chown_common((int)args[0], args[1], -1,
 			(uid_t)args[2], (gid_t)args[3], (int)args[4]);
 		break;
 
 	/* Sets timestamps and tests access by descriptor. */
-	case ZEDBSD_SYS_utimensat:
+	case KERN_SYS_utimensat:
 		result = sys_utimens_common((int)args[0], args[1], -1,
 			args[2], (int)args[3]);
 		break;
-	case ZEDBSD_SYS_futimens:
+	case KERN_SYS_futimens:
 		result = sys_utimens_common(AT_FDCWD, 0, (int)args[0], args[1], 0);
 		break;
-	case ZEDBSD_SYS_faccessat:
+	case KERN_SYS_faccessat:
 		result = sys_faccessat_call(args);
 		break;
 
 	/* Creates and reads links. */
-	case ZEDBSD_SYS_linkat:
+	case KERN_SYS_linkat:
 		result = sys_linkat_call(args);
 		break;
-	case ZEDBSD_SYS_symlinkat:
+	case KERN_SYS_symlinkat:
 		result = sys_symlinkat_call(args);
 		break;
-	case ZEDBSD_SYS_readlinkat:
+	case KERN_SYS_readlinkat:
 		result = sys_readlinkat_call(args);
 		break;
 
 	/* Waits with a substituted signal mask. */
-	case ZEDBSD_SYS_sigsuspend:
+	case KERN_SYS_sigsuspend:
 		result = sys_sigsuspend_call(args);
 		break;
 	default:
@@ -9087,27 +9087,27 @@ syscall_restartable(
 	uint32_t number)
 {
 	switch (number) {
-	case ZEDBSD_SYS_read:
-	case ZEDBSD_SYS_write:
-	case ZEDBSD_SYS_pread:
-	case ZEDBSD_SYS_pwrite:
-	case ZEDBSD_SYS_readv:
-	case ZEDBSD_SYS_writev:
-	case ZEDBSD_SYS_open:
-	case ZEDBSD_SYS_openat:
-	case ZEDBSD_SYS_fcntl: /* F_SETLKW is an interruptible slow operation. */
-	case ZEDBSD_SYS_ioctl:
-	case ZEDBSD_SYS_fsync:
-	case ZEDBSD_SYS_fdatasync:
-	case ZEDBSD_SYS_waitpid:
-	case ZEDBSD_SYS_waitid:
-	case ZEDBSD_SYS_accept:
-	case ZEDBSD_SYS_sendto:
-	case ZEDBSD_SYS_recvfrom:
-	case ZEDBSD_SYS_sendmsg:
-	case ZEDBSD_SYS_recvmsg:
-	case ZEDBSD_SYS_thread_join:
-	case ZEDBSD_SYS_socketpair:
+	case KERN_SYS_read:
+	case KERN_SYS_write:
+	case KERN_SYS_pread:
+	case KERN_SYS_pwrite:
+	case KERN_SYS_readv:
+	case KERN_SYS_writev:
+	case KERN_SYS_open:
+	case KERN_SYS_openat:
+	case KERN_SYS_fcntl: /* F_SETLKW is an interruptible slow operation. */
+	case KERN_SYS_ioctl:
+	case KERN_SYS_fsync:
+	case KERN_SYS_fdatasync:
+	case KERN_SYS_waitpid:
+	case KERN_SYS_waitid:
+	case KERN_SYS_accept:
+	case KERN_SYS_sendto:
+	case KERN_SYS_recvfrom:
+	case KERN_SYS_sendmsg:
+	case KERN_SYS_recvmsg:
+	case KERN_SYS_thread_join:
+	case KERN_SYS_socketpair:
 		return 1;
 	default:
 		return 0;
@@ -9138,8 +9138,8 @@ kernel_syscall_handler(
 	else
 		process = NULL;
 	dispatch_number = number;
-	cred_guard = number != ZEDBSD_SYS_exit &&
-	    number != ZEDBSD_SYS_thread_exit;
+	cred_guard = number != KERN_SYS_exit &&
+	    number != KERN_SYS_thread_exit;
 
 	/*
 	 * HAL calls the registered dispatcher with the active user frame
@@ -9162,7 +9162,7 @@ kernel_syscall_handler(
 
 	/* Runs the handler, redispatching after a sigreturn or a transparent stop. */
 	for (;;) {
-		if (thread != NULL && dispatch_number != ZEDBSD_SYS_sigreturn) {
+		if (thread != NULL && dispatch_number != KERN_SYS_sigreturn) {
 			thread->syscall_restart_number = dispatch_number;
 			memcpy(thread->syscall_restart_args, dispatch_args,
 			    sizeof(thread->syscall_restart_args));
@@ -9175,7 +9175,7 @@ kernel_syscall_handler(
 		result = syscall_dispatch_body(dispatch_number, dispatch_args);
 		if (thread != NULL)
 			thread->syscall_stop_redispatch = 0;
-		if (thread != NULL && dispatch_number != ZEDBSD_SYS_sigreturn)
+		if (thread != NULL && dispatch_number != KERN_SYS_sigreturn)
 			thread->syscall_restart_valid = result == -EINTR &&
 			    syscall_restartable(dispatch_number);
 		if (thread != NULL && thread->terminate_requested) {
@@ -9185,7 +9185,7 @@ kernel_syscall_handler(
 		}
 
 		/* Redispatches the call a signal handler returned into. */
-		if (thread != NULL && dispatch_number == ZEDBSD_SYS_sigreturn &&
+		if (thread != NULL && dispatch_number == KERN_SYS_sigreturn &&
 		    thread->syscall_redispatch_valid) {
 			dispatch_number = thread->syscall_restart_number;
 			memcpy(dispatch_args, thread->syscall_restart_args,

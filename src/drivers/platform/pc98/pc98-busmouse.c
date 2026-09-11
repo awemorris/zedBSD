@@ -26,6 +26,7 @@ void thread_start(struct thread *);
 #include <hal/hal.h>
 #include <limits.h>
 #include <stdint.h>
+#include "kern/irq.h"
 
 #define MOUSE_PORT_A 0x7fd9U
 #define MOUSE_PORT_C 0x7fddU
@@ -68,7 +69,7 @@ static void outb(uint16_t port, uint8_t value);
 static uint8_t read_nibble(uint8_t control);
 static void read_sample(int32_t *dx, int32_t *dy, uint32_t *buttons);
 static void mouse_publish(int32_t dx, int32_t dy, uint32_t previous, uint32_t buttons);
-static void mouse_service_irq(hal_irq_ack_t acknowledge);
+static void mouse_service_irq(kern_irq_ack_t acknowledge);
 static void mouse_service(void *argument);
 static int mouse_start(void);
 static void mouse_stop(void);
@@ -186,7 +187,7 @@ mouse_publish(
 /* Supports the mouse service irq operation. */
 static void
 mouse_service_irq(
-	hal_irq_ack_t acknowledge)
+	kern_irq_ack_t acknowledge)
 {
 	int32_t dx = 0, dy = 0;
 	uint32_t buttons = 0, previous = 0;
@@ -206,7 +207,7 @@ mouse_service_irq(
 		}
 	}
 
-	hal_irq_send_eoi(acknowledge);
+	kern_irq_send_eoi(acknowledge);
 
 	/* Handles the report condition. */
 	if (report)
@@ -220,13 +221,13 @@ static void
 mouse_service(
 	void *argument)
 {
-	hal_irq_ack_t acknowledge;
+	kern_irq_ack_t acknowledge;
 
 	(void)argument;
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		/* Checks the hal irq service wait result. */
-		if (hal_irq_service_wait(MOUSE_IRQ, &acknowledge) != HAL_OK)
+		if (hal_irq_service_wait(MOUSE_IRQ, &acknowledge) != 0)
 			HAL_FATAL("PC-98 bus mouse IRQ service failed");
 		mouse_service_irq(acknowledge);
 	}

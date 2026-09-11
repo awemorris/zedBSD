@@ -43,7 +43,7 @@ static uint8_t root_partition;
 static int boot_info_valid;
 static uint8_t boot_font[PCAT_BOOT_FONT_GLYPHS][PCAT_BOOT_FONT_HEIGHT];
 static int boot_font_valid;
-static char boot_command_line[ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE];
+static char boot_command_line[KERN_BOOT_PARAMETERS_STORAGE_SIZE];
 
 static int handoff_name_is(const char *name, const char *expected);
 
@@ -120,8 +120,8 @@ bsp_boot_init(
 		available = (size_t)(total_memory - address);
 
 		/* Clips the readable bytes to local command-line storage. */
-		if (available > ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE)
-			available = ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE;
+		if (available > KERN_BOOT_PARAMETERS_STORAGE_SIZE)
+			available = KERN_BOOT_PARAMETERS_STORAGE_SIZE;
 		result = x86_boot_parameters_copy(
 			boot_command_line,
 			(const char *)(uintptr_t)address,
@@ -193,10 +193,10 @@ bsp_kernel_handoff(
 		HAL_FATAL("invalid PC/AT Multiboot information");
 
 	/* Describes the selected BIOS IDE boot device. */
-	boot_device.device_class = ZEDBSD_DEV_IDE;
+	boot_device.device_class = KERN_DEV_IDE;
 	boot_device.display_index = (uint8_t)(root_bios_id - 0x80U);
 	boot_device.bios_id = root_bios_id;
-	boot_device.flags = ZEDBSD_DEV_PRESENT | ZEDBSD_DEV_BOOT_ORIGIN;
+	boot_device.flags = KERN_DEV_PRESENT | KERN_DEV_BOOT_ORIGIN;
 	boot_device.sector_size = 512U;
 	boot_device.cylinders = 0;
 	boot_device.heads = 0;
@@ -208,16 +208,16 @@ bsp_kernel_handoff(
 		boot_device.reserved[i] = 0;
 
 	/* Publishes the generic handoff around the single boot device. */
-	handoff.magic = ZEDBSD_HANDOFF_MAGIC;
-	handoff.version = ZEDBSD_HANDOFF_VERSION_MULTIBOOT;
+	handoff.magic = KERN_HANDOFF_MAGIC;
+	handoff.version = KERN_HANDOFF_VERSION_MULTIBOOT;
 	handoff.size = sizeof(handoff);
 	handoff.device_count = 1;
 	handoff.boot_bios_id = root_bios_id;
-	handoff.boot_partition_scheme = ZEDBSD_PARTITION_SCHEME_MBR;
+	handoff.boot_partition_scheme = KERN_PARTITION_SCHEME_MBR;
 	handoff.boot_partition_index = root_partition;
 	handoff.device_table = (uint32_t)(uintptr_t)&boot_device;
 	handoff.bios_gateway = 0;
-	handoff.boot_partition_lba = ZEDBSD_BOOT_PARTITION_LBA_UNKNOWN;
+	handoff.boot_partition_lba = KERN_BOOT_PARTITION_LBA_UNKNOWN;
 
 	/* Reports the selected root and optional loader identity. */
 	hal_printf(

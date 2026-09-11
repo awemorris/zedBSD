@@ -11,8 +11,8 @@
  * Declares the zedBSD userland vars interface.
  */
 
-#ifndef ZEDBSD_USERLAND_SH_VARS_H
-#define ZEDBSD_USERLAND_SH_VARS_H
+#ifndef KERN_USERLAND_SH_VARS_H
+#define KERN_USERLAND_SH_VARS_H
 
 int sh_var_name(const char *);
 const char *sh_var_get(const char *);

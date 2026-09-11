@@ -3,8 +3,8 @@
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_DRIVERS_DISKLABEL_H
-#define ZEDBSD_DRIVERS_DISKLABEL_H
+#ifndef KERN_DRIVERS_DISKLABEL_H
+#define KERN_DRIVERS_DISKLABEL_H
 
 #include <kern/partition.h>
 

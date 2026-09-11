@@ -11,8 +11,8 @@
  * The GRUB Multiboot information contract used by the i386 BSP.
  */
 
-#ifndef ZEDBSD_HAL_I386_MULTIBOOT_H
-#define ZEDBSD_HAL_I386_MULTIBOOT_H
+#ifndef KERN_HAL_I386_MULTIBOOT_H
+#define KERN_HAL_I386_MULTIBOOT_H
 
 #include <hal/types.h>
 

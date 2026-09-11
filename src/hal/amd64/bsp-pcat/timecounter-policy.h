@@ -11,8 +11,8 @@
  * Pure policy for the amd64 PC/AT boot-local timecounter.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_TIMECOUNTER_POLICY_H
-#define ZEDBSD_HAL_AMD64_TIMECOUNTER_POLICY_H
+#ifndef KERN_HAL_AMD64_TIMECOUNTER_POLICY_H
+#define KERN_HAL_AMD64_TIMECOUNTER_POLICY_H
 
 #include <hal/types.h>
 

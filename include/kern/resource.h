@@ -4,8 +4,8 @@
  *
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_KERN_RESOURCE_H
-#define ZEDBSD_KERN_RESOURCE_H
+#ifndef KERN_KERN_RESOURCE_H
+#define KERN_KERN_RESOURCE_H
 
 #include <zedbsd/system.h>
 

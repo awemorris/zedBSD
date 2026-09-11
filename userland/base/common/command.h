@@ -11,8 +11,8 @@
  * Declares shared userland command support.
  */
 
-#ifndef ZEDBSD_USERLAND_COMMON_COMMAND_H
-#define ZEDBSD_USERLAND_COMMON_COMMAND_H
+#ifndef KERN_USERLAND_COMMON_COMMAND_H
+#define KERN_USERLAND_COMMON_COMMAND_H
 
 #include <stddef.h>
 #include <stdio.h>

@@ -859,29 +859,29 @@ vfs_log_boot_handoff(
 	const struct boot_handoff *handoff,
 	unsigned device_count)
 {
-	if (handoff->version == ZEDBSD_HANDOFF_VERSION_SUN4U) {
+	if (handoff->version == KERN_HANDOFF_VERSION_SUN4U) {
 		VFS_LOG("vfs: boot BIOS=%02x Sun slice=%u devices=%u\n",
 			handoff->boot_bios_id, handoff->boot_partition_index,
 			device_count);
-	} else if (handoff->version == ZEDBSD_HANDOFF_VERSION_MULTIBOOT) {
+	} else if (handoff->version == KERN_HANDOFF_VERSION_MULTIBOOT) {
 		/* The partition index is unknown when the loader could not tell. */
 		if (handoff->boot_partition_scheme ==
-		    ZEDBSD_PARTITION_SCHEME_MBR &&
+		    KERN_PARTITION_SCHEME_MBR &&
 		    handoff->boot_partition_index ==
-		    ZEDBSD_PARTITION_INDEX_UNKNOWN)
+		    KERN_PARTITION_INDEX_UNKNOWN)
 			VFS_LOG(
 			    "vfs: boot BIOS=%02x MBR partition=unknown devices=%u\n",
 			    handoff->boot_bios_id, device_count);
 		else if (handoff->boot_partition_scheme ==
-		    ZEDBSD_PARTITION_SCHEME_MBR)
+		    KERN_PARTITION_SCHEME_MBR)
 			VFS_LOG(
 			    "vfs: boot BIOS=%02x MBR partition=%u devices=%u\n",
 			    handoff->boot_bios_id,
 			    handoff->boot_partition_index, device_count);
 		else if (handoff->boot_partition_scheme ==
-		    ZEDBSD_PARTITION_SCHEME_GPT &&
+		    KERN_PARTITION_SCHEME_GPT &&
 		    handoff->boot_partition_index ==
-		    ZEDBSD_PARTITION_INDEX_UNKNOWN)
+		    KERN_PARTITION_INDEX_UNKNOWN)
 			VFS_LOG(
 			    "vfs: boot BIOS=%02x GPT partition=unknown devices=%u\n",
 			    handoff->boot_bios_id, device_count);
@@ -891,7 +891,7 @@ vfs_log_boot_handoff(
 			    handoff->boot_bios_id,
 			    handoff->boot_partition_scheme,
 			    handoff->boot_partition_index, device_count);
-	} else if (handoff->version == ZEDBSD_HANDOFF_VERSION_X68K) {
+	} else if (handoff->version == KERN_HANDOFF_VERSION_X68K) {
 		VFS_LOG("vfs: boot SCSI=%u X68k partition=%u devices=%u\n",
 			handoff->boot_bios_id, handoff->boot_partition_index,
 			device_count);
@@ -991,26 +991,26 @@ vfs_scan_physical_disks(
 			if (physical[i] != boot_physical)
 				continue;
 			matches = 0;
-			if (handoff->version == ZEDBSD_HANDOFF_VERSION_MULTIBOOT &&
+			if (handoff->version == KERN_HANDOFF_VERSION_MULTIBOOT &&
 			    handoff->boot_partition_scheme ==
-			    ZEDBSD_PARTITION_SCHEME_MBR &&
+			    KERN_PARTITION_SCHEME_MBR &&
 			    entries[slot].p_index + 1U ==
 			    handoff->boot_partition_index)
 				matches = 1;
-			else if (handoff->version == ZEDBSD_HANDOFF_VERSION_SUN4U &&
+			else if (handoff->version == KERN_HANDOFF_VERSION_SUN4U &&
 			    handoff->boot_partition_scheme ==
-			    ZEDBSD_PARTITION_SCHEME_SUN &&
+			    KERN_PARTITION_SCHEME_SUN &&
 			    entries[slot].p_index == handoff->boot_partition_index)
 				matches = 1;
-			else if (handoff->version == ZEDBSD_HANDOFF_VERSION_X68K &&
+			else if (handoff->version == KERN_HANDOFF_VERSION_X68K &&
 			    handoff->boot_partition_scheme ==
-			    ZEDBSD_PARTITION_SCHEME_X68K &&
+			    KERN_PARTITION_SCHEME_X68K &&
 			    entries[slot].p_index + 1U ==
 			    handoff->boot_partition_index &&
 			    entries[slot].p_start_block ==
 			    handoff->boot_partition_lba)
 				matches = 1;
-			else if (handoff->version == ZEDBSD_HANDOFF_VERSION_PC98 &&
+			else if (handoff->version == KERN_HANDOFF_VERSION_PC98 &&
 			    entries[slot].p_start_block ==
 			    handoff->boot_partition_lba)
 				matches = 1;

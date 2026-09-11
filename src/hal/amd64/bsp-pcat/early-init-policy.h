@@ -11,8 +11,8 @@
  * Pure amd64 PC/AT early-interrupt policy shared with host fixtures.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_EARLY_INIT_POLICY_H
-#define ZEDBSD_HAL_AMD64_EARLY_INIT_POLICY_H
+#ifndef KERN_HAL_AMD64_EARLY_INIT_POLICY_H
+#define KERN_HAL_AMD64_EARLY_INIT_POLICY_H
 
 #include <hal/types.h>
 

@@ -1,5 +1,5 @@
-#ifndef ZEDBSD_HAL_ARM64_RPI4_FDT_H
-#define ZEDBSD_HAL_ARM64_RPI4_FDT_H
+#ifndef KERN_HAL_ARM64_RPI4_FDT_H
+#define KERN_HAL_ARM64_RPI4_FDT_H
 
 #include <hal/types.h>
 

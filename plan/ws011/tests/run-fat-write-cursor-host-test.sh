@@ -13,7 +13,7 @@ fi
 # Deliberate compiler-flag word splitting.
 # shellcheck disable=SC2086
 timeout --kill-after=5s 60s "${CC:-cc}" -std=c11 -O1 -g \
-	-DZEDBSD_USER_ABI_LP64 -Wall -Wextra -Werror -ffunction-sections \
+	-DKERN_USER_ABI_LP64 -Wall -Wextra -Werror -ffunction-sections \
 	-fdata-sections -Iinclude -Iinclude/uapi -Isrc -Ilibc/include -I. \
 	$sanitize_flags plan/ws011/tests/fat-write-cursor-host-test.c \
 	plan/ws025/temp/p031-driver-fragments/src/drivers/fs/fat.c src/kern/io-stats.c -Wl,--gc-sections -o "$test_root/test"

@@ -11,8 +11,8 @@
  * The private i386 per-CPU descriptor and TSS contract.
  */
 
-#ifndef ZEDBSD_HAL_I386_PERCPU_H
-#define ZEDBSD_HAL_I386_PERCPU_H
+#ifndef KERN_HAL_I386_PERCPU_H
+#define KERN_HAL_I386_PERCPU_H
 
 #include <hal/hal.h>
 

@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "hal/i386/i386.h"
+#include "kern/irq.h"
 
 #define LGY_IO_BASE 0x00d0U
 #define LGY_DATA_PORT 0x02d0U
@@ -39,7 +40,7 @@ static uint8_t lgy_read_data8(void *cookie);
 static uint16_t lgy_read_data16(void *cookie);
 static void lgy_write_data16(void *cookie, uint16_t value);
 static int lgy_reset(void *cookie);
-static void lgy_irq_handler(int irq, hal_irq_ack_t acknowledge, void *argument);
+static void lgy_irq_handler(int irq, kern_irq_ack_t acknowledge, void *argument);
 static int lgy_open(struct net_device *device);
 static void lgy_close(struct net_device *device);
 static int lgy_transmit(struct net_device *device, struct packet_buf *packet);
@@ -111,11 +112,11 @@ drv_pc98_lgy98_init(
 	if (error == 0)
 		error = net_device_create(lgy_device);
 	if (error == 0) {
-		hal_irq_mask(LGY_IRQ);
+		kern_irq_mask(LGY_IRQ);
 
 		/* Checks the hal irq set handler result. */
-		if (hal_irq_set_handler(LGY_IRQ, lgy_irq_handler, &lgy_dp) ==
-		    HAL_OK)
+		if (kern_irq_register(LGY_IRQ, lgy_irq_handler, &lgy_dp) ==
+		    0)
 			irq_registered = 1;
 		else
 			error = EBUSY;
@@ -124,11 +125,11 @@ drv_pc98_lgy98_init(
 	/* Checks the operation status. */
 	if (error == 0)
 		return 0;
-	hal_irq_mask(LGY_IRQ);
+	kern_irq_mask(LGY_IRQ);
 
 	/* Handles the irq registered condition. */
 	if (irq_registered)
-		(void)hal_irq_set_handler(LGY_IRQ, NULL, NULL);
+		(void)kern_irq_register(LGY_IRQ, NULL, NULL);
 
 	/* Handles the lgy device condition. */
 	if (lgy_device->open_count != 0)
@@ -252,14 +253,14 @@ lgy_reset(
 static void
 lgy_irq_handler(
 	int irq,
-	hal_irq_ack_t acknowledge,
+	kern_irq_ack_t acknowledge,
 	void *argument)
 {
 	struct dp8390 *dp = argument;
 
 	(void)irq;
 	drv_dp8390_interrupt(dp);
-	hal_irq_send_eoi(acknowledge);
+	kern_irq_send_eoi(acknowledge);
 }
 
 /* Supports the lgy open operation. */
@@ -271,7 +272,7 @@ lgy_open(
 
 	/* Checks the operation status. */
 	if (error == 0)
-		hal_irq_unmask(LGY_IRQ);
+		kern_irq_unmask(LGY_IRQ);
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -286,7 +287,7 @@ static void
 lgy_close(
 	struct net_device *device)
 {
-	hal_irq_mask(LGY_IRQ);
+	kern_irq_mask(LGY_IRQ);
 
 	/* Handles the close availability. */
 	if (lgy_dp_ops->close != NULL)

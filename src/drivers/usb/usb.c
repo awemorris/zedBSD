@@ -15,13 +15,14 @@
 
 #include <drivers/usb.h>
 #include <errno.h>
-#include <hal/hal.h>
 #include <kern/atomic.h>
 #include <kern/io-stats.h>
 #include <kern/sched.h>
 #include <string.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
+#include "kern/device-io.h"
+#include "kern/irq.h"
 
 #define USB_REQ_GET_DESCRIPTOR 6U
 #define USB_REQ_CLEAR_FEATURE 1U
@@ -381,7 +382,7 @@ drv_usb_shutdown(
 		 * attempt fails.  A terminal shutdown must retry that same
 		 * checked sequence.
 		 */
-		hal_atomic_store_release(&bus->stopping, 1U);
+		atomic_raw_store_release(&bus->stopping, 1U);
 
 		/*
 		 * Stop admission first, then let every class driver disconnect
@@ -605,7 +606,7 @@ drv_usb_hcd_unregister(
 		}
 
 		bus->lifecycle_claimed = 1U;
-		hal_atomic_store_release(&bus->stopping, 1U);
+		atomic_raw_store_release(&bus->stopping, 1U);
 		device_begin_disconnect(bus->root_hub);
 
 		/*
@@ -634,7 +635,7 @@ drv_usb_hcd_unregister(
 		}
 
 		usb_topology_lock();
-		state = hal_atomic_load_acquire(&bus->root_hub->lifecycle);
+		state = atomic_raw_load_acquire(&bus->root_hub->lifecycle);
 		/* Continue until the operation reaches a terminal state. */
 		for (;;) {
 			/* Handles the state condition. */
@@ -656,7 +657,7 @@ drv_usb_hcd_unregister(
 			}
 
 			/* Checks the hal atomic compare exchange acq rel result. */
-			if (hal_atomic_compare_exchange_acq_rel(
+			if (atomic_raw_compare_exchange(
 				    &bus->root_hub->lifecycle, &state,
 				    state | USB_DEVICE_LIFECYCLE_FINALIZING))
 				break;
@@ -743,7 +744,7 @@ drv_usb_hcd_root_hub_changed(
 
 	/* Checks the hal atomic load acquire result. */
 	bus = find_hcd_bus(hcd);
-	if (bus == NULL || hal_atomic_load_acquire(&bus->stopping) != 0 ||
+	if (bus == NULL || atomic_raw_load_acquire(&bus->stopping) != 0 ||
 	    hcd->ops->root_hub_control == NULL) {
 		usb_topology_unlock();
 
@@ -1122,7 +1123,7 @@ drv_usb_device_hcd_urb_count(
 	unsigned function_result;
 
 	/* Computes the function result. */
-	function_result = d ? hal_atomic_load_acquire(&d->hcd_urb_count) : 0;
+	function_result = d ? atomic_raw_load_acquire(&d->hcd_urb_count) : 0;
 
 	/* Returns the computed result. */
 	return function_result;
@@ -1139,7 +1140,7 @@ drv_usb_device_is_tearing_down(
 
 	/* Computes the function result. */
 	error =
-		device != NULL && (hal_atomic_load_acquire(&device->lifecycle) &
+		device != NULL && (atomic_raw_load_acquire(&device->lifecycle) &
 				   (USB_DEVICE_LIFECYCLE_DISCONNECTING |
 				    USB_DEVICE_LIFECYCLE_FINALIZING)) != 0;
 
@@ -1256,7 +1257,7 @@ drv_usb_device_reset(
 	if (device->port == 0 || device->port > bus->hcd->root_port_count ||
 	    !device_linked(bus, device) || device_is_disconnecting(device) ||
 	    device_is_quarantined(device) ||
-	    hal_atomic_load_acquire(&bus->stopping) != 0) {
+	    atomic_raw_load_acquire(&bus->stopping) != 0) {
 		error = ENODEV;
 		goto out;
 	}
@@ -1313,12 +1314,12 @@ drv_usb_device_reset(
 
 	/* Checks the device is disconnecting result. */
 	if (device_is_disconnecting(device) || device_is_quarantined(device) ||
-	    hal_atomic_load_acquire(&bus->stopping) != 0 ||
+	    atomic_raw_load_acquire(&bus->stopping) != 0 ||
 	    device->generation != device_generation ||
 	    bus->ports[device->port].connection_generation != port_generation ||
 	    drv_usb_device_hcd_urb_count(device) != 0) {
 		error = device_is_disconnecting(device) ||
-					hal_atomic_load_acquire(
+					atomic_raw_load_acquire(
 						&bus->stopping) != 0
 				? ENODEV
 				: EBUSY;
@@ -1505,7 +1506,7 @@ fail_destructive:
 
 	/* Checks the device is disconnecting result. */
 	if (!device_is_disconnecting(device) &&
-	    hal_atomic_load_acquire(&bus->stopping) == 0)
+	    atomic_raw_load_acquire(&bus->stopping) == 0)
 		device_quarantine_recovery(device, "device reset", error);
 	else
 		error = ENODEV;
@@ -1930,8 +1931,8 @@ drv_usb_urb_reserve_sync(
 		return EINVAL;
 
 	/* Checks the hal atomic load acquire result. */
-	if (hal_atomic_load_acquire(&u->hcd_owned) != 0 ||
-	    hal_atomic_load_acquire(&u->status) == DRV_USB_URB_PENDING) {
+	if (atomic_raw_load_acquire(&u->hcd_owned) != 0 ||
+	    atomic_raw_load_acquire(&u->status) == DRV_USB_URB_PENDING) {
 		/* Failed. */
 		return EBUSY;
 	}
@@ -1987,8 +1988,8 @@ drv_usb_urb_reserve_transfer(
 		return EINVAL;
 
 	/* Checks the hal atomic load acquire result. */
-	if (hal_atomic_load_acquire(&urb->hcd_owned) != 0 ||
-	    hal_atomic_load_acquire(&urb->status) == DRV_USB_URB_PENDING) {
+	if (atomic_raw_load_acquire(&urb->hcd_owned) != 0 ||
+	    atomic_raw_load_acquire(&urb->status) == DRV_USB_URB_PENDING) {
 		/* Failed. */
 		return EBUSY;
 	}
@@ -2130,8 +2131,8 @@ drv_usb_urb_setup(
 		return EINVAL;
 
 	/* Checks the hal atomic load acquire result. */
-	if (hal_atomic_load_acquire(&u->status) == DRV_USB_URB_PENDING ||
-	    hal_atomic_load_acquire(&u->hcd_owned) != 0) {
+	if (atomic_raw_load_acquire(&u->status) == DRV_USB_URB_PENDING ||
+	    atomic_raw_load_acquire(&u->hcd_owned) != 0) {
 		/* Failed. */
 		return EBUSY;
 	}
@@ -2161,8 +2162,8 @@ drv_usb_urb_setup(
 	u->callback = cb;
 	u->callback_argument = a;
 	u->actual_length = 0;
-	hal_atomic_store_relaxed(&u->terminal_claimed, 0U);
-	hal_atomic_store_release(&u->status, DRV_USB_URB_IDLE);
+	atomic_raw_store_relaxed(&u->terminal_claimed, 0U);
+	atomic_raw_store_release(&u->status, DRV_USB_URB_IDLE);
 
 	/* Succeeded. */
 	return 0;
@@ -2179,8 +2180,8 @@ drv_usb_urb_setup_stream(struct drv_usb_urb *u, unsigned stream_id,
 
 	if (u == NULL || stream_id > UINT16_MAX)
 		return EINVAL;
-	if (hal_atomic_load_acquire(&u->status) == DRV_USB_URB_PENDING ||
-	    hal_atomic_load_acquire(&u->hcd_owned) != 0)
+	if (atomic_raw_load_acquire(&u->status) == DRV_USB_URB_PENDING ||
+	    atomic_raw_load_acquire(&u->hcd_owned) != 0)
 		return EBUSY;
 	if (stream_id != 0) {
 		if (u->endpoint->type != DRV_USB_TRANSFER_BULK ||
@@ -2303,16 +2304,16 @@ drv_usb_urb_submit(
 		return EINVAL;
 
 	/* Checks the hal atomic load acquire result. */
-	if (hal_atomic_load_acquire(&urb->hcd_owned) != 0)
+	if (atomic_raw_load_acquire(&urb->hcd_owned) != 0)
 		return EBUSY;
 
 	/* Checks the hal atomic load acquire result. */
-	if (hal_atomic_load_acquire(&urb->status) == DRV_USB_URB_PENDING)
+	if (atomic_raw_load_acquire(&urb->status) == DRV_USB_URB_PENDING)
 		return EINVAL;
 
 	/* Checks the hal atomic load acquire result. */
 	device = urb->device;
-	if (hal_atomic_load_acquire(&device->bus->stopping) != 0)
+	if (atomic_raw_load_acquire(&device->bus->stopping) != 0)
 		return EBUSY;
 
 	/* Handles the device is disconnecting condition. */
@@ -2347,7 +2348,7 @@ drv_usb_urb_submit(
 		goto out_hcd;
 
 	/* Checks the hal atomic load acquire result. */
-	if (hal_atomic_load_acquire(&device->bus->stopping) != 0 ||
+	if (atomic_raw_load_acquire(&device->bus->stopping) != 0 ||
 	    device_is_disconnecting(device) || device_is_quarantined(device)) {
 		error = ENODEV;
 		goto out_hcd;
@@ -2364,12 +2365,12 @@ drv_usb_urb_submit(
 	}
 
 	urb->actual_length = 0;
-	hal_atomic_store_relaxed(&urb->terminal_claimed, 0U);
+	atomic_raw_store_relaxed(&urb->terminal_claimed, 0U);
 	commit.device = device;
 	commit.binding_owner = submitting_owner;
 	atomic_store_release(&commit.finished, 0U);
 	submitting_owner = NULL;
-	hal_atomic_store_release(&urb->submit_commit_pending, 1U);
+	atomic_raw_store_release(&urb->submit_commit_pending, 1U);
 	__atomic_store_n(&urb->submit_commit, &commit, __ATOMIC_RELEASE);
 
 	/*
@@ -2377,7 +2378,7 @@ drv_usb_urb_submit(
 	 * commit handoff.  A concurrent cancel which sees PENDING can therefore
 	 * never enter its callback ahead of the short-gate release.
 	 */
-	hal_atomic_store_release(&urb->status, DRV_USB_URB_PENDING);
+	atomic_raw_store_release(&urb->status, DRV_USB_URB_PENDING);
 	error = device->bus->hcd->ops->urb_enqueue(device->bus->hcd, urb);
 
 	/*
@@ -2389,7 +2390,7 @@ drv_usb_urb_submit(
 	 * it preempted.  A remote completion which wins the claim can still
 	 * finish while local IRQs are masked.
 	 */
-	irq_enabled = hal_irq_disable();
+	irq_enabled = kern_irq_disable();
 
 	/* Checks the atomic load acquire result. */
 	if (atomic_load_acquire(&commit.finished) == 0) {
@@ -2402,7 +2403,7 @@ drv_usb_urb_submit(
 
 	/* Handles the irq enabled condition. */
 	if (irq_enabled)
-		hal_irq_enable();
+		kern_irq_enable();
 
 	/* Handles the claimed availability. */
 	if (claimed == NULL) {
@@ -2413,7 +2414,7 @@ drv_usb_urb_submit(
 
 	/* Checks the operation status. */
 	if (error != 0) {
-		hal_atomic_store_release(&urb->status, DRV_USB_URB_IDLE);
+		atomic_raw_store_release(&urb->status, DRV_USB_URB_IDLE);
 		urb_hcd_put(urb);
 	}
 
@@ -2476,7 +2477,7 @@ drv_usb_urb_wait(
 		 * automatic enum across the cancel/retry back edge.
 		 */
 		/* Dispatch the current operation state. */
-		switch (hal_atomic_load_acquire(&urb->status)) {
+		switch (atomic_raw_load_acquire(&urb->status)) {
 		case DRV_USB_URB_PENDING:
 			break;
 		case DRV_USB_URB_COMPLETE:
@@ -2555,10 +2556,10 @@ drv_usb_urb_drain(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-		status = hal_atomic_load_acquire(&u->status);
+		status = atomic_raw_load_acquire(&u->status);
 
 		/* Checks the operation status. */
-		owned = hal_atomic_load_acquire(&u->hcd_owned);
+		owned = atomic_raw_load_acquire(&u->hcd_owned);
 		if (status != DRV_USB_URB_PENDING && owned == 0)
 			return 0;
 
@@ -2589,7 +2590,7 @@ drv_usb_urb_wait_reusable(
 	 * Retry checked retirement, then detach only the caller's view of an
 	 * isolated buffer. Never forge completion or release the HCD reference.
 	 */
-	for (attempt = 0; attempt < 2U && hal_atomic_load_acquire(&u->status) ==
+	for (attempt = 0; attempt < 2U && atomic_raw_load_acquire(&u->status) ==
 						  DRV_USB_URB_PENDING;
 	     attempt++) {
 		(void)urb_cancel_to(u, DRV_USB_URB_TIMEOUT);
@@ -2640,7 +2641,7 @@ drv_usb_urb_status(
 
 	/* Computes the function result. */
 	function_result =
-		u ? hal_atomic_load_acquire(&u->status) : DRV_USB_URB_IO_ERROR;
+		u ? atomic_raw_load_acquire(&u->status) : DRV_USB_URB_IO_ERROR;
 
 	/* Returns the computed result. */
 	return function_result;
@@ -2658,7 +2659,7 @@ drv_usb_urb_actual_length(
 	/* Handles the u condition. */
 	if (!u)
 		return 0;
-	status = hal_atomic_load_acquire(&u->status);
+	status = atomic_raw_load_acquire(&u->status);
 
 	/* Returns the computed result. */
 	return status == DRV_USB_URB_PENDING ? 0 : u->actual_length;
@@ -3841,7 +3842,7 @@ drv_usb_endpoint_configure_streams(
 
 	/* Checks the device is disconnecting result. */
 	if (device_is_disconnecting(device) || device_is_quarantined(device) ||
-	    hal_atomic_load_acquire(&device->bus->stopping) != 0) {
+	    atomic_raw_load_acquire(&device->bus->stopping) != 0) {
 		/* Failed. */
 		return ENODEV;
 	}
@@ -3867,7 +3868,7 @@ drv_usb_endpoint_configure_streams(
 
 	/* Checks the device is disconnecting result. */
 	if (device_is_disconnecting(device) || device_is_quarantined(device) ||
-	    hal_atomic_load_acquire(&device->bus->stopping) != 0 ||
+	    atomic_raw_load_acquire(&device->bus->stopping) != 0 ||
 	    device->state != DRV_USB_STATE_CONFIGURED ||
 	    device_active_configuration(device) != interface->configuration ||
 	    interface_active_alternate(interface) != endpoint->alternate ||
@@ -3890,7 +3891,7 @@ drv_usb_endpoint_configure_streams(
 
 	/* Checks the device is disconnecting result. */
 	if (device_is_disconnecting(device) || device_is_quarantined(device) ||
-	    hal_atomic_load_acquire(&device->bus->stopping) != 0) {
+	    atomic_raw_load_acquire(&device->bus->stopping) != 0) {
 		error = ENODEV;
 		goto out;
 	}
@@ -3955,7 +3956,7 @@ drv_usb_endpoint_clear_halt(
 
 	/* Checks the device is disconnecting result. */
 	if (device_is_disconnecting(device) || device_is_quarantined(device) ||
-	    hal_atomic_load_acquire(&device->bus->stopping) != 0) {
+	    atomic_raw_load_acquire(&device->bus->stopping) != 0) {
 		/* Failed. */
 		return ENODEV;
 	}
@@ -3981,7 +3982,7 @@ drv_usb_endpoint_clear_halt(
 
 	/* Checks the device is disconnecting result. */
 	if (device_is_disconnecting(device) || device_is_quarantined(device) ||
-	    hal_atomic_load_acquire(&device->bus->stopping) != 0 ||
+	    atomic_raw_load_acquire(&device->bus->stopping) != 0 ||
 	    device->state != DRV_USB_STATE_CONFIGURED ||
 	    device_active_configuration(device) != interface->configuration ||
 	    interface_active_alternate(interface) != endpoint->alternate ||
@@ -4004,7 +4005,7 @@ drv_usb_endpoint_clear_halt(
 
 	/* Checks the device is disconnecting result. */
 	if (device_is_disconnecting(device) || device_is_quarantined(device) ||
-	    hal_atomic_load_acquire(&device->bus->stopping) != 0) {
+	    atomic_raw_load_acquire(&device->bus->stopping) != 0) {
 		error = ENODEV;
 		goto out;
 	}
@@ -4015,18 +4016,18 @@ drv_usb_endpoint_clear_halt(
 		/* Checks the operation status. */
 		if (accepted && error != EPIPE &&
 		    !device_is_disconnecting(device) &&
-		    hal_atomic_load_acquire(&device->bus->stopping) == 0) {
+		    atomic_raw_load_acquire(&device->bus->stopping) == 0) {
 			device_quarantine_recovery(device, "clear-halt wire",
 						   error);
 		} else if (device_is_disconnecting(device) ||
-			   hal_atomic_load_acquire(&device->bus->stopping) != 0)
+			   atomic_raw_load_acquire(&device->bus->stopping) != 0)
 			error = ENODEV;
 		goto out;
 	}
 
 	/* Checks the device is disconnecting result. */
 	if (device_is_disconnecting(device) ||
-	    hal_atomic_load_acquire(&device->bus->stopping) != 0) {
+	    atomic_raw_load_acquire(&device->bus->stopping) != 0) {
 		error = ENODEV;
 		goto out;
 	}
@@ -4037,7 +4038,7 @@ drv_usb_endpoint_clear_halt(
 	if (error != 0) {
 		/* Checks the device is disconnecting result. */
 		if (device_is_disconnecting(device) ||
-		    hal_atomic_load_acquire(&device->bus->stopping) != 0)
+		    atomic_raw_load_acquire(&device->bus->stopping) != 0)
 			error = ENODEV;
 		else
 			device_quarantine_recovery(device, "endpoint reset",
@@ -4047,7 +4048,7 @@ drv_usb_endpoint_clear_halt(
 
 	/* Checks the device is disconnecting result. */
 	if (device_is_disconnecting(device) ||
-	    hal_atomic_load_acquire(&device->bus->stopping) != 0) {
+	    atomic_raw_load_acquire(&device->bus->stopping) != 0) {
 		error = ENODEV;
 		goto out;
 	}
@@ -4324,7 +4325,7 @@ device_begin_disconnect(
 		return;
 	}
 
-	(void)hal_atomic_fetch_or_release(&device->lifecycle,
+	(void)atomic_raw_fetch_or_release(&device->lifecycle,
 					  USB_DEVICE_LIFECYCLE_DISCONNECTING);
 
 	/*
@@ -4649,7 +4650,7 @@ device_quiesce(
 			return error;
 		if (drv_usb_device_hcd_urb_count(device) != 0)
 			return EBUSY;
-		hal_atomic_store_release(&device->quarantined, 0U);
+		atomic_raw_store_release(&device->quarantined, 0U);
 		return 0;
 	}
 
@@ -4658,7 +4659,7 @@ device_quiesce(
 	if (error == 0 && drv_usb_device_hcd_urb_count(device) != 0)
 		error = EBUSY;
 	if (error == 0) {
-		hal_atomic_store_release(&device->quarantined, 0U);
+		atomic_raw_store_release(&device->quarantined, 0U);
 
 		/* Succeeded. */
 		return 0;
@@ -4671,7 +4672,7 @@ device_quiesce(
 			   bus->number, device->address, device->port, error);
 	}
 
-	hal_atomic_store_release(&device->quarantined, 1U);
+	atomic_raw_store_release(&device->quarantined, 1U);
 	device_link(bus, device);
 
 	/* Reports the failure. */
@@ -4690,7 +4691,7 @@ device_is_quarantined(
 	int error;
 
 	/* Computes the function result. */
-	error = hal_atomic_load_acquire(&device->quarantined) != 0;
+	error = atomic_raw_load_acquire(&device->quarantined) != 0;
 
 	/* Returns the computed result. */
 	return error;
@@ -4924,7 +4925,7 @@ destroy_device(
 			device->reported_detach_error = detach_error;
 		}
 
-		hal_atomic_store_release(&device->quarantined, 1U);
+		atomic_raw_store_release(&device->quarantined, 1U);
 		device_link(bus, device);
 
 		/* Returns the computed result. */
@@ -5082,7 +5083,7 @@ device_quarantine_selection(
 			   device->bus->number, device->address, stage, error);
 	}
 
-	hal_atomic_store_release(&device->quarantined, 1U);
+	atomic_raw_store_release(&device->quarantined, 1U);
 	io_gate_close(&device->submit_gate);
 }
 
@@ -5173,7 +5174,7 @@ device_release(
 	/* Handles the recovery urb availability. */
 	if (recovery_urb != NULL)
 		drv_usb_urb_free(recovery_urb);
-	state = hal_atomic_load_acquire(&device->lifecycle);
+	state = atomic_raw_load_acquire(&device->lifecycle);
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		/* Handles the state condition. */
@@ -5189,7 +5190,7 @@ device_release(
 					state & USB_DEVICE_LIFECYCLE_URB_MASK);
 			}
 
-			hal_atomic_store_release(&device->quarantined, 1U);
+			atomic_raw_store_release(&device->quarantined, 1U);
 			device_link(bus, device);
 
 			/* Failed. */
@@ -5201,7 +5202,7 @@ device_release(
 			return EALREADY;
 
 		/* Checks the hal atomic compare exchange acq rel result. */
-		if (hal_atomic_compare_exchange_acq_rel(
+		if (atomic_raw_compare_exchange(
 			    &device->lifecycle, &state,
 			    state | USB_DEVICE_LIFECYCLE_FINALIZING))
 			break;
@@ -5370,7 +5371,7 @@ usb_delay_ticks(
 
 	/* Continue while the operation condition remains true. */
 	while (sched_ticks() < deadline)
-		hal_compiler_barrier();
+		kern_compiler_barrier();
 }
 
 /* Enumerates whatever has just been attached to one port. */
@@ -6560,7 +6561,7 @@ io_gate_exit(
 
 	/* Handles the previous condition. */
 	if ((previous & USB_IO_GATE_COUNT_MASK) == 1U)
-		hal_atomic_fence_acquire();
+		atomic_acquire_fence();
 }
 
 /* Leaves the binding gate. */
@@ -6660,7 +6661,7 @@ urb_publish_terminal(
 	}
 
 	/* Checks the hal atomic load acquire result. */
-	if (hal_atomic_load_acquire(&urb->status) != DRV_USB_URB_PENDING)
+	if (atomic_raw_load_acquire(&urb->status) != DRV_USB_URB_PENDING)
 		return 0;
 
 	/*
@@ -6676,12 +6677,12 @@ urb_publish_terminal(
 		submit_commit_finish(urb, commit);
 	else
 		/* Continue while the operation condition remains true. */
-		while (hal_atomic_load_acquire(&urb->submit_commit_pending) !=
+		while (atomic_raw_load_acquire(&urb->submit_commit_pending) !=
 		       0)
 			sched_yield();
 
 	/* Checks the hal atomic compare exchange acq rel result. */
-	if (!hal_atomic_compare_exchange_acq_rel(&urb->terminal_claimed,
+	if (!atomic_raw_compare_exchange(&urb->terminal_claimed,
 						 &expected, 1U)) {
 		/* Succeeded. */
 		return 0;
@@ -6698,7 +6699,7 @@ urb_publish_terminal(
 	urb->actual_length = actual > urb->length ? urb->length : actual;
 
 	/* The terminal state publishes actual_length and all HCD input data. */
-	hal_atomic_store_release(&urb->status, status);
+	atomic_raw_store_release(&urb->status, status);
 
 	/* Handles the callback availability. */
 	if (urb->callback != NULL)
@@ -6723,7 +6724,7 @@ submit_commit_finish(
 	 * before allowing that publisher to enter a callback which can free the
 	 * URB.
 	 */
-	hal_atomic_store_release(&urb->submit_commit_pending, 0U);
+	atomic_raw_store_release(&urb->submit_commit_pending, 0U);
 	atomic_store_release(&commit->finished, 1U);
 }
 
@@ -6770,14 +6771,14 @@ urb_hcd_put(
 	unsigned expected = 1U;
 
 	/* Checks the hal atomic compare exchange acq rel result. */
-	if (hal_atomic_compare_exchange_acq_rel(&urb->hcd_owned, &expected,
+	if (atomic_raw_compare_exchange(&urb->hcd_owned, &expected,
 						2U)) {
 		/* Checks the hal atomic fetch add release result. */
-		if (hal_atomic_fetch_add_release(&urb->device->hcd_urb_count,
+		if (atomic_raw_fetch_add_release(&urb->device->hcd_urb_count,
 						 (unsigned)-1) == 0)
 			__builtin_trap();
 		urb_admission_put(urb);
-		hal_atomic_store_release(&urb->hcd_owned, 0U);
+		atomic_raw_store_release(&urb->hcd_owned, 0U);
 		urb_put(urb);
 	}
 }
@@ -6865,7 +6866,7 @@ device_urb_put(
 	unsigned previous;
 
 	previous =
-		hal_atomic_fetch_add_release(&device->lifecycle, (unsigned)-1);
+		atomic_raw_fetch_add_release(&device->lifecycle, (unsigned)-1);
 
 	/* Handles the previous condition. */
 	if ((previous & USB_DEVICE_LIFECYCLE_URB_MASK) == 0)
@@ -6873,7 +6874,7 @@ device_urb_put(
 
 	/* Handles the previous condition. */
 	if ((previous & USB_DEVICE_LIFECYCLE_URB_MASK) == 1U)
-		hal_atomic_fence_acquire();
+		atomic_acquire_fence();
 }
 
 /* Reports which driver a configuration is really owned by. */
@@ -7083,7 +7084,7 @@ device_quarantine_recovery(
 			   device->bus->number, device->address, stage, error);
 	}
 
-	hal_atomic_store_release(&device->quarantined, 1U);
+	atomic_raw_store_release(&device->quarantined, 1U);
 	io_gate_close(&device->submit_gate);
 }
 
@@ -7429,7 +7430,7 @@ device_urb_get(
 {
 	unsigned state;
 
-	state = hal_atomic_load_acquire(&device->lifecycle);
+	state = atomic_raw_load_acquire(&device->lifecycle);
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		/* Handles the state condition. */
@@ -7442,7 +7443,7 @@ device_urb_get(
 		}
 
 		/* Checks the hal atomic compare exchange acq rel result. */
-		if (hal_atomic_compare_exchange_acq_rel(&device->lifecycle,
+		if (atomic_raw_compare_exchange(&device->lifecycle,
 							&state, state + 1U)) {
 			/* Reports operation failure. */
 			return 1;
@@ -7521,7 +7522,7 @@ urb_hcd_get(
 	unsigned expected = 0;
 
 	/* Checks the hal atomic compare exchange acq rel result. */
-	if (!hal_atomic_compare_exchange_acq_rel(&urb->hcd_owned, &expected,
+	if (!atomic_raw_compare_exchange(&urb->hcd_owned, &expected,
 						 1U)) {
 		/* Failed. */
 		return EBUSY;
@@ -7535,7 +7536,7 @@ urb_hcd_get(
 	refcount_get(&urb->references);
 
 	/* Checks the hal atomic fetch add relaxed result. */
-	if (hal_atomic_fetch_add_relaxed(&urb->device->hcd_urb_count, 1U) ==
+	if (atomic_raw_fetch_add_relaxed(&urb->device->hcd_urb_count, 1U) ==
 	    UINT_MAX)
 		__builtin_trap();
 
@@ -7695,7 +7696,7 @@ urb_cancel_to(
 	int e, published;
 
 	/* Checks the hal atomic load acquire result. */
-	if (!u || hal_atomic_load_acquire(&u->status) != DRV_USB_URB_PENDING)
+	if (!u || atomic_raw_load_acquire(&u->status) != DRV_USB_URB_PENDING)
 		return EINVAL;
 
 	/* Handles the e condition. */
@@ -7741,7 +7742,7 @@ device_control_lock(
 		}
 
 		/* Checks the hal atomic load acquire result. */
-		if (hal_atomic_load_acquire(&device->bus->stopping) != 0)
+		if (atomic_raw_load_acquire(&device->bus->stopping) != 0)
 			return EBUSY;
 
 		/* Checks the sched ticks result. */

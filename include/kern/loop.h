@@ -9,8 +9,8 @@
  * File-backed loop block devices
  */
 
-#ifndef ZEDBSD_KERN_LOOP_H
-#define ZEDBSD_KERN_LOOP_H
+#ifndef KERN_KERN_LOOP_H
+#define KERN_KERN_LOOP_H
 
 struct disk;
 struct file;

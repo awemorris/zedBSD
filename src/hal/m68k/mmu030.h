@@ -8,8 +8,8 @@
  * 9 (short table/page descriptors and the Translation Control register).
  */
 
-#ifndef ZEDBSD_HAL_M68K_MMU030_H
-#define ZEDBSD_HAL_M68K_MMU030_H
+#ifndef KERN_HAL_M68K_MMU030_H
+#define KERN_HAL_M68K_MMU030_H
 
 #include <hal/types.h>
 

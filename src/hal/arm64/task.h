@@ -1,5 +1,5 @@
-#ifndef ZEDBSD_HAL_ARM64_TASK_H
-#define ZEDBSD_HAL_ARM64_TASK_H
+#ifndef KERN_HAL_ARM64_TASK_H
+#define KERN_HAL_ARM64_TASK_H
 
 #include <hal/hal.h>
 #include "int.h"

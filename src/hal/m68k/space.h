@@ -1,8 +1,8 @@
 /* MC68030 user address spaces, private to the m68k HAL. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 
-#ifndef ZEDBSD_HAL_M68K_SPACE_H
-#define ZEDBSD_HAL_M68K_SPACE_H
+#ifndef KERN_HAL_M68K_SPACE_H
+#define KERN_HAL_M68K_SPACE_H
 
 #include <hal/hal.h>
 #include "mmu030.h"

@@ -11,8 +11,8 @@
  * The amd64 ACPI topology and PCI ECAM discovery contract.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_ACPI_H
-#define ZEDBSD_HAL_AMD64_ACPI_H
+#ifndef KERN_HAL_AMD64_ACPI_H
+#define KERN_HAL_AMD64_ACPI_H
 
 #include <hal/types.h>
 #include "../defs.h"

@@ -11,8 +11,8 @@
  * Declares the zedBSD userland rcconf interface.
  */
 
-#ifndef ZEDBSD_RCCONF_H
-#define ZEDBSD_RCCONF_H
+#ifndef KERN_RCCONF_H
+#define KERN_RCCONF_H
 
 #include <stddef.h>
 #include <stdio.h>

@@ -6,8 +6,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_DRIVERS_PCI_INTEL_AX211_H
-#define ZEDBSD_DRIVERS_PCI_INTEL_AX211_H
+#ifndef KERN_DRIVERS_PCI_INTEL_AX211_H
+#define KERN_DRIVERS_PCI_INTEL_AX211_H
 
 /*
  * Registers the exact Intel AX211 PCI transport driver.

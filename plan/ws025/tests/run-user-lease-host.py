@@ -10,7 +10,7 @@ paths=['src/kern/vm.c','src/kern/vmspace.c','include/kern/vmspace.h','include/ke
 (out/'source.json').write_text(json.dumps({p:hashlib.sha256((repo/p).read_bytes()).hexdigest() for p in paths},indent=2)+'\n')
 for mode in ('ordinary','sanitize'):
  flags=[] if mode=='ordinary' else ['-fsanitize=address,undefined','-fno-omit-frame-pointer','-no-pie']
- common=['cc','-std=c11','-g','-O0','-pthread','-Dtid_t=int32_t','-DZEDBSD_USER_ABI_LP64','-Iinclude','-Iinclude/uapi','-I.','-Wall','-Wextra','-Werror','-ffunction-sections','-fdata-sections',*flags]
+ common=['cc','-std=c11','-g','-O0','-pthread','-Dtid_t=int32_t','-DKERN_USER_ABI_LP64','-Iinclude','-Iinclude/uapi','-I.','-Wall','-Wextra','-Werror','-ffunction-sections','-fdata-sections',*flags]
  with (out/(mode+'.log')).open('w') as log:
   objects=[]
   for source in ('vm','vmspace'):

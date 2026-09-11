@@ -1,8 +1,8 @@
 /* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
 
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_BOOT_MEMORY_MAP_H
-#define ZEDBSD_BOOT_MEMORY_MAP_H
+#ifndef KERN_BOOT_MEMORY_MAP_H
+#define KERN_BOOT_MEMORY_MAP_H
 
 #include "bootloader/include/amd64-handoff.h"
 

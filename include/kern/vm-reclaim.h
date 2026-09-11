@@ -9,8 +9,8 @@
  * Virtual memory reclaim
  */
 
-#ifndef ZEDBSD_KERN_VM_RECLAIM_H
-#define ZEDBSD_KERN_VM_RECLAIM_H
+#ifndef KERN_KERN_VM_RECLAIM_H
+#define KERN_KERN_VM_RECLAIM_H
 
 #include <stdint.h>
 

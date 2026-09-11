@@ -9,8 +9,8 @@
  * PC-98 graphics-private frontend/backend boundary.
  */
 
-#ifndef ZEDBSD_DRIVERS_GRAPHICS_PC98_BACKEND_H
-#define ZEDBSD_DRIVERS_GRAPHICS_PC98_BACKEND_H
+#ifndef KERN_DRIVERS_GRAPHICS_PC98_BACKEND_H
+#define KERN_DRIVERS_GRAPHICS_PC98_BACKEND_H
 
 #include <stddef.h>
 #include <stdint.h>

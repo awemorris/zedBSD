@@ -16,7 +16,7 @@
 
 #include "kern/test-fault.h"
 
-#ifdef ZEDBSD_TEST_FAULTS
+#ifdef KERN_TEST_FAULTS
 #include <errno.h>
 #include <kern/atomic.h>
 #include <string.h>

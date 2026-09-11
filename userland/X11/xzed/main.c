@@ -465,13 +465,13 @@ initialize(
 		return -1;
 
 	/* Handles a failed ioctl operation. */
-	if (ioctl(s->graphics, ZEDBSD_GRAPHICS_GET_CAPS, &caps))
+	if (ioctl(s->graphics, KERN_GRAPHICS_GET_CAPS, &caps))
 		return -1;
 
 	/* Handles the caps condition. */
-	if (!(caps.capabilities & ZEDBSD_GRAPHICS_CAP_FLUSH) ||
-	    !(caps.capabilities & ZEDBSD_GRAPHICS_CAP_GLYPH) ||
-	    !(caps.capabilities & ZEDBSD_GRAPHICS_CAP_BLIT_RGB24)) {
+	if (!(caps.capabilities & KERN_GRAPHICS_CAP_FLUSH) ||
+	    !(caps.capabilities & KERN_GRAPHICS_CAP_GLYPH) ||
+	    !(caps.capabilities & KERN_GRAPHICS_CAP_BLIT_RGB24)) {
 		errno = ENOTSUP;
 
 		/* Reports operation failure. */
@@ -486,7 +486,7 @@ initialize(
 		return -1;
 
 	/* Handles a failed ioctl operation. */
-	if (ioctl(s->graphics, ZEDBSD_GRAPHICS_ENTER, &s->mode))
+	if (ioctl(s->graphics, KERN_GRAPHICS_ENTER, &s->mode))
 		return -1;
 	(void)mkdir("/tmp/.X11-unix", 0777);
 	(void)unlink("/tmp/.X11-unix/X0");
@@ -572,7 +572,7 @@ choose_mode(
 	list.capacity = sizeof(modes) / sizeof(modes[0]);
 
 	/* Handles a failed ioctl operation. */
-	if (ioctl(fd, ZEDBSD_GRAPHICS_GET_MODES, &list) != 0 || list.count == 0)
+	if (ioctl(fd, KERN_GRAPHICS_GET_MODES, &list) != 0 || list.count == 0)
 		return -1;
 
 	/* Handles the list condition. */
@@ -790,14 +790,14 @@ present(
 	b.y = (uint32_t)y;
 	b.width = (uint32_t)w;
 	b.height = (uint32_t)h;
-	b.format = ZEDBSD_GRAPHICS_FORMAT_RGB24;
+	b.format = KERN_GRAPHICS_FORMAT_RGB24;
 	b.stride = (uint32_t)w * 3;
 	b.pixels = (uapi_ptr_t)(uintptr_t)s->transfer;
-	(void)ioctl(s->graphics, ZEDBSD_GRAPHICS_BLIT, &b);
+	(void)ioctl(s->graphics, KERN_GRAPHICS_BLIT, &b);
 	r = (struct graphics_rect){(uint32_t)x, (uint32_t)y, (uint32_t)w,
 				   (uint32_t)h};
 	f = (struct graphics_flush){(uapi_ptr_t)(uintptr_t)&r, 1};
-	(void)ioctl(s->graphics, ZEDBSD_GRAPHICS_FLUSH, &f);
+	(void)ioctl(s->graphics, KERN_GRAPHICS_FLUSH, &f);
 }
 
 /* Supports the pointer shape operation. */
@@ -3154,7 +3154,7 @@ draw_text(
 		q.bitmap_capacity = sizeof(bitmap);
 
 		/* Handles a failed ioctl operation. */
-		if (ioctl(s->graphics, ZEDBSD_GRAPHICS_GET_GLYPH, &q))
+		if (ioctl(s->graphics, KERN_GRAPHICS_GET_GLYPH, &q))
 			continue;
 
 		/* Process each element required by the operation. */

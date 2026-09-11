@@ -13,11 +13,11 @@ for variant in ('ordinary', 'sanitize'):
     extra = [] if variant == 'ordinary' else ['-fsanitize=address,undefined',
         '-fno-omit-frame-pointer', '--param', 'asan-globals=0']
     bridge = out / (variant + '-thread.o')
-    subprocess.run(['cc', '-DZEDBSD_USER_ABI_LP64', '-O1', '-g', '-pthread',
+    subprocess.run(['cc', '-DKERN_USER_ABI_LP64', '-O1', '-g', '-pthread',
         *extra, '-c', 'plan/ws018/tests/mount-thread-host.c',
         '-o', str(bridge)], cwd=root, check=True)
     binary = out / variant
-    subprocess.run(['cc', '-DZEDBSD_USER_ABI_LP64', '-std=c11', '-O1', '-g',
+    subprocess.run(['cc', '-DKERN_USER_ABI_LP64', '-std=c11', '-O1', '-g',
         '-Wall', '-Wextra', '-Werror', '-ffunction-sections', '-fdata-sections',
         *extra, '-I.', '-Iinclude', '-Iinclude/uapi', '-Isrc', '-Ilibc/include',
         '-Iplan/ws018/tests', '-Iplan/ws025/temp/p031-driver-fragments/src/drivers/fs/ufs',

@@ -4,8 +4,8 @@
  *
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_KERN_PIPE_H
-#define ZEDBSD_KERN_PIPE_H
+#ifndef KERN_KERN_PIPE_H
+#define KERN_KERN_PIPE_H
 
 struct file;
 struct file_ops;

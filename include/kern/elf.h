@@ -9,8 +9,8 @@
  * ELF
  */
 
-#ifndef ZEDBSD_KERN_ELF_H
-#define ZEDBSD_KERN_ELF_H
+#ifndef KERN_KERN_ELF_H
+#define KERN_KERN_ELF_H
 
 #include <stdint.h>
 

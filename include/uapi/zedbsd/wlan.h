@@ -5,12 +5,14 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_UAPI_WLAN_H
-#define ZEDBSD_UAPI_WLAN_H
+#ifndef KERN_UAPI_WLAN_H
+#define KERN_UAPI_WLAN_H
 
 #include <stdint.h>
 #include <sys/ioctl.h>
 #include <zedbsd/netif.h>
+
+#define KERN_WLAN_IOCTL_GROUP 'W'
 
 #define WLAN_ABI_VERSION 1U
 
@@ -172,18 +174,17 @@ struct wlan_status_request {
 	uint32_t reserved[2];
 };
 
-#define ZEDBSD_WLAN_IOCTL_GROUP 'W'
 #define SIOCSWLANSCAN \
-	_IOWR(ZEDBSD_WLAN_IOCTL_GROUP, 1, struct wlan_scan_request)
+	_IOWR(KERN_WLAN_IOCTL_GROUP, 1, struct wlan_scan_request)
 #define SIOCGWLANSCAN \
-	_IOWR(ZEDBSD_WLAN_IOCTL_GROUP, 2, struct wlan_scan_status_request)
+	_IOWR(KERN_WLAN_IOCTL_GROUP, 2, struct wlan_scan_status_request)
 #define SIOCGWLANBSS \
-	_IOWR(ZEDBSD_WLAN_IOCTL_GROUP, 3, struct wlan_bss_request)
+	_IOWR(KERN_WLAN_IOCTL_GROUP, 3, struct wlan_bss_request)
 #define SIOCSWLANCONNECT \
-	_IOWR(ZEDBSD_WLAN_IOCTL_GROUP, 4, struct wlan_connect_request)
+	_IOWR(KERN_WLAN_IOCTL_GROUP, 4, struct wlan_connect_request)
 #define SIOCSWLANDISCONNECT \
-	_IOWR(ZEDBSD_WLAN_IOCTL_GROUP, 5, struct wlan_disconnect_request)
+	_IOWR(KERN_WLAN_IOCTL_GROUP, 5, struct wlan_disconnect_request)
 #define SIOCGWLANSTATUS \
-	_IOWR(ZEDBSD_WLAN_IOCTL_GROUP, 6, struct wlan_status_request)
+	_IOWR(KERN_WLAN_IOCTL_GROUP, 6, struct wlan_status_request)
 
 #endif

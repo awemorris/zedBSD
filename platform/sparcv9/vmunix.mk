@@ -13,11 +13,11 @@ SPARCV9_PLATFORM := platform/sparcv9
 
 SPARCV9_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 	-Ilibc/include -Isrc/hal/sparcv9 -DHAL_ARCH_SPARCV9 \
-	-DHAL_BOARD_SUN4U -DZEDBSD_USER_ABI_SPARCV9 -DZEDBSD_USER_ABI_LP64 \
-	-DZEDBSD_PAGE_SIZE=8192 \
-	-DZEDBSD_USER_PAGE_SIZE=8192 \
-	-DZEDBSD_NO_PRINTF_FLOAT \
-	-DZEDBSD_INIT_PATH='"/bin/sh"'
+	-DHAL_BOARD_SUN4U -DKERN_USER_ABI_SPARCV9 -DKERN_USER_ABI_LP64 \
+	-DKERN_PAGE_SIZE=8192 \
+	-DKERN_USER_PAGE_SIZE=8192 \
+	-DKERN_NO_PRINTF_FLOAT \
+	-DKERN_INIT_PATH='"/bin/sh"'
 SPARCV9_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
 SPARCV9_CFLAGS := -m64 -mcpu=ultrasparc -mstack-bias -mcmodel=medany \
 	-msoft-float -mno-app-regs -ffreestanding -fno-pic -fno-pie \
@@ -292,9 +292,9 @@ $(BUILD)/POSIX-R2-REMAINING.ELF: \
 # ELF64 runtime linker and shared libc for the SPARC V9 userland.
 SPARCV9_DYNAMIC_DIR := $(BUILD)/dynamic
 SPARCV9_DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude -Iinclude/uapi \
-	-Ilibc/include -DHAL_ARCH_SPARCV9 -DZEDBSD_USER_ABI_SPARCV9 \
-	-DZEDBSD_USER_ABI_LP64 -DZEDBSD_USER_PAGE_SIZE=8192 \
-	-DZEDBSD_DYNAMIC_LIBC
+	-Ilibc/include -DHAL_ARCH_SPARCV9 -DKERN_USER_ABI_SPARCV9 \
+	-DKERN_USER_ABI_LP64 -DKERN_USER_PAGE_SIZE=8192 \
+	-DKERN_DYNAMIC_LIBC
 SPARCV9_DYNAMIC_CFLAGS := -m64 -mcpu=ultrasparc -mstack-bias \
 	-mcmodel=medany -msoft-float -mno-app-regs -Os -ffreestanding -fPIC \
 	-fno-builtin -fno-stack-protector -fno-asynchronous-unwind-tables \

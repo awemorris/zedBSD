@@ -49,13 +49,13 @@
 #define DEVFS_PTS_INO_BASE 0x200000000ULL
 #define DEVFS_CHAR_INO_BASE 0x300000000ULL
 #define DEVFS_HIGH __attribute__((section(".hightext")))
-#ifdef ZEDBSD_STORAGE_HOST_TEST
+#ifdef KERN_STORAGE_HOST_TEST
 #undef DEVFS_HIGH
 #define DEVFS_HIGH
 #endif
 
 typedef char devfs_ino_must_be_64_bit[(sizeof(ino_t) >= 8) ? 1 : -1];
-#if !defined(ZEDBSD_DEVFS_HOST_TEST)
+#if !defined(KERN_DEVFS_HOST_TEST)
 typedef char devfs_dev_must_fit_32_bit[(sizeof(dev_t) <= 4) ? 1 : -1];
 #endif
 
@@ -1082,8 +1082,8 @@ block_reserve(
 	struct file *file,
 	uintptr_t argument)
 {
-	struct zedbsd_block_info expected;
-	struct zedbsd_block_info current;
+	struct kern_block_info expected;
+	struct kern_block_info current;
 	struct backing_claim *claim;
 	struct disk *disk;
 	int error;
@@ -1143,7 +1143,7 @@ block_ioctl(
 	unsigned long request,
 	uintptr_t argument)
 {
-	struct zedbsd_block_info info;
+	struct kern_block_info info;
 	struct ucred *cred;
 	int allowed;
 	int error;

@@ -63,7 +63,7 @@ grep -q 'static struct boot_device devices\[KERN_PLATFORM_MAX_DEVICES\]' \
 	"$repo_dir/src/kern/entry.c" ||
 	fail "the borrowed boot-device table does not have kernel lifetime"
 
-common_flags="-std=c11 -DZEDBSD_USER_ABI_LP64 -Wall -Wextra -Werror \
+common_flags="-std=c11 -DKERN_USER_ABI_LP64 -Wall -Wextra -Werror \
 -include $test_dir/boot-metadata-host-types.h \
 -ffunction-sections -fdata-sections -I$repo_dir/include \
 -I$repo_dir/include/uapi -I$repo_dir"

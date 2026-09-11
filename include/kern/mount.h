@@ -9,8 +9,8 @@
  * mount
  */
 
-#ifndef ZEDBSD_KERN_MOUNT_H
-#define ZEDBSD_KERN_MOUNT_H
+#ifndef KERN_KERN_MOUNT_H
+#define KERN_KERN_MOUNT_H
 
 #include "kern/disk.h"
 #include "kern/atomic.h"
@@ -28,8 +28,8 @@
 #ifndef NAME_MAX
 #define NAME_MAX		255U
 #endif
-#ifndef ZEDBSD_PATH_MAX
-#define ZEDBSD_PATH_MAX		PATH_MAX
+#ifndef KERN_PATH_MAX
+#define KERN_PATH_MAX		PATH_MAX
 #endif
 
 #define MOUNT_MAX		64U
@@ -46,8 +46,8 @@ struct dirent;
 struct statvfs;
 struct quota_control;
 struct snapshot_control;
-struct zedbsd_mount_info;
-int mount_info_snapshot(struct zedbsd_mount_info *, unsigned, unsigned *);
+struct kern_mount_info;
+int mount_info_snapshot(struct kern_mount_info *, unsigned, unsigned *);
 struct block_identity;
 
 struct path {
@@ -111,7 +111,7 @@ struct filesystem_type {
 };
 
 struct mount {
-	char m_path[ZEDBSD_PATH_MAX];
+	char m_path[KERN_PATH_MAX];
 	char m_name[NAME_MAX + 1U];
 	unsigned m_flags;
 	struct io_epoch m_write_epoch;

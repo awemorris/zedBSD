@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_HAL_X86_RTC_H
-#define ZEDBSD_HAL_X86_RTC_H
+#ifndef KERN_HAL_X86_RTC_H
+#define KERN_HAL_X86_RTC_H
 
 #include <hal/types.h>
 

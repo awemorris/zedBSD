@@ -19,10 +19,10 @@
 #include <zedbsd/tls.h>
 
 /*
- * XXX: Rename the following ZEDBSD_* to KERN_*
+ * XXX: Rename the following KERN_* to KERN_*
  */
-#define ZEDBSD_RTLD_ABI_VERSION 5U
-#define ZEDBSD_RTLD_DLERROR_SIZE 192U
+#define KERN_RTLD_ABI_VERSION 5U
+#define KERN_RTLD_DLERROR_SIZE 192U
 
 struct __tls_index {
 	uintptr_t module;
@@ -32,19 +32,19 @@ struct __tls_index {
 struct dl_info;
 
 struct __rtld_tcb {
-	struct zedbsd_tls_prefix tls;
+	struct kern_tls_prefix tls;
 	void **dtv;
 	size_t dtv_count;
 	uint64_t dtv_generation;
 	void *pthread_private;
-	char dlerror_buf[ZEDBSD_RTLD_DLERROR_SIZE];
+	char dlerror_buf[KERN_RTLD_DLERROR_SIZE];
 	int dlerror_pending;
 	/* Runtime-linker private thread registry link. */
 	struct __rtld_tcb *rtld_next;
 };
 
 typedef char __rtld_tcb_reserve_check[
-	sizeof(struct __rtld_tcb) <= ZEDBSD_TLS_TCB_RESERVE ? 1 : -1];
+	sizeof(struct __rtld_tcb) <= KERN_TLS_TCB_RESERVE ? 1 : -1];
 
 /*
  * Data-based import table used by libc.so.

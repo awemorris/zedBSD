@@ -3,8 +3,8 @@
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_DRIVERS_PCI_XHCI_CONTROL_H
-#define ZEDBSD_DRIVERS_PCI_XHCI_CONTROL_H
+#ifndef KERN_DRIVERS_PCI_XHCI_CONTROL_H
+#define KERN_DRIVERS_PCI_XHCI_CONTROL_H
 
 #include <drivers/usb.h>
 

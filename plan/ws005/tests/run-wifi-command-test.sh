@@ -11,7 +11,7 @@ trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 cc=${CC:-cc}
 source_file=$repo/plan/ws005/tests/wifi-command-test.c
 consumer_file=$repo/plan/ws005/tests/wifi-produced-stream.c
-common="-std=c11 -D_GNU_SOURCE -DZEDBSD_USER_ABI_LP64 \
+common="-std=c11 -D_GNU_SOURCE -DKERN_USER_ABI_LP64 \
 	-I$repo/include/uapi -I$repo/libc/include -I$repo \
 	-Wall -Wextra -Werror -ffunction-sections -fdata-sections"
 discard="-Wl,--gc-sections"

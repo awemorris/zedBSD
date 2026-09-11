@@ -54,8 +54,8 @@
  * SPDX-License-Identifier: ISC AND BSD-3-Clause
  */
 
-#ifndef ZEDBSD_DRIVERS_INTEL_AX211_ASSOC_H
-#define ZEDBSD_DRIVERS_INTEL_AX211_ASSOC_H
+#ifndef KERN_DRIVERS_INTEL_AX211_ASSOC_H
+#define KERN_DRIVERS_INTEL_AX211_ASSOC_H
 
 #include <stddef.h>
 #include <stdint.h>

@@ -13,8 +13,8 @@
  * /dev/console calls these directly; they are not exposed to user space.
  */
 
-#ifndef ZEDBSD_DRIVERS_GRAPHICS_PCAT_TEXT_H
-#define ZEDBSD_DRIVERS_GRAPHICS_PCAT_TEXT_H
+#ifndef KERN_DRIVERS_GRAPHICS_PCAT_TEXT_H
+#define KERN_DRIVERS_GRAPHICS_PCAT_TEXT_H
 
 #include <stdint.h>
 

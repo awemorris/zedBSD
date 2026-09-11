@@ -1,7 +1,7 @@
 /* Bounded helpers for UEFI zedbsd.cfg volume discovery. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_UEFI_VOLUME_DISCOVERY_H
-#define ZEDBSD_UEFI_VOLUME_DISCOVERY_H
+#ifndef KERN_UEFI_VOLUME_DISCOVERY_H
+#define KERN_UEFI_VOLUME_DISCOVERY_H
 
 #include <stddef.h>
 #include <stdint.h>

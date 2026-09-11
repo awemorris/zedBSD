@@ -80,7 +80,7 @@ mkfs_capacity_command(int argc, char **argv)
 int
 mkfs_block_command(int argc, char **argv)
 {
-	struct zedbsd_block_info info;
+	struct kern_block_info info;
 	struct fat32_format_geometry geometry;
 	struct stat status;
 	const char *name;
@@ -103,7 +103,7 @@ mkfs_block_command(int argc, char **argv)
 	if (strncmp(name, "/dev/", 5) == 0)
 		name += 5;
 	length = strlen(name);
-	if (length == 0 || length >= ZEDBSD_BLOCK_NAME_MAX ||
+	if (length == 0 || length >= KERN_BLOCK_NAME_MAX ||
 	    strspn(name, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") != length) {
 		fprintf(stderr, "mkfs: expected canonical block device name\n");
 		return 2;
@@ -125,18 +125,18 @@ mkfs_block_command(int argc, char **argv)
 		goto out;
 	}
 	memset(&info, 0, sizeof(info));
-	info.version = ZEDBSD_BLOCK_VERSION;
+	info.version = KERN_BLOCK_VERSION;
 	info.struct_size = sizeof(info);
 	if (ioctl(fd, BLKGETINFO, &info) < 0) {
 		error = errno;
 		goto out;
 	}
-	if (info.version != ZEDBSD_BLOCK_VERSION || info.struct_size != sizeof(info) ||
+	if (info.version != KERN_BLOCK_VERSION || info.struct_size != sizeof(info) ||
 	    memchr(info.name, '\0', sizeof(info.name)) == NULL || strcmp(info.name, name) != 0) {
 		error = EINVAL;
 		goto out;
 	}
-	if (info.flags & ZEDBSD_BLOCK_READ_ONLY) {
+	if (info.flags & KERN_BLOCK_READ_ONLY) {
 		error = EROFS;
 		goto out;
 	}

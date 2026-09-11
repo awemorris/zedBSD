@@ -18,7 +18,7 @@ for mode in ordinary sanitize; do
 	fi
 
 	${HOSTCC:-cc} -std=c11 -O1 -g -Wall -Wextra -Werror \
-		-ffunction-sections -fdata-sections -DZEDBSD_USER_ABI_LP64 \
+		-ffunction-sections -fdata-sections -DKERN_USER_ABI_LP64 \
 		$extra -I"$repo/include" -I"$repo/include/uapi" \
 		-I"$repo/src" -I"$repo/libc/include" \
 		"$repo/plan/ws018/tests/pty-write-flags-test.c" \

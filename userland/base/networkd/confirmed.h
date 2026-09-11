@@ -7,8 +7,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_NETWORKD_CONFIRMED_H
-#define ZEDBSD_NETWORKD_CONFIRMED_H
+#ifndef KERN_NETWORKD_CONFIRMED_H
+#define KERN_NETWORKD_CONFIRMED_H
 
 #include "userland/base/net/protocol.h"
 

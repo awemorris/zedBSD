@@ -38,7 +38,7 @@
 #define FILESYSTEM_MAX 8U
 #define MOUNT_BIND_INTERNAL 0x00000001U
 #define MOUNT_HIGH __attribute__((section(".hightext")))
-#ifdef ZEDBSD_STORAGE_HOST_TEST
+#ifdef KERN_STORAGE_HOST_TEST
 #undef MOUNT_HIGH
 #define MOUNT_HIGH
 #endif
@@ -1124,7 +1124,7 @@ mount_context(
 	struct path target;
 	struct path parent;
 	struct componentname component;
-	char canonical[ZEDBSD_PATH_MAX];
+	char canonical[KERN_PATH_MAX];
 	char name[NAME_MAX + 1U];
 	int error;
 
@@ -1551,7 +1551,7 @@ unmount(
  */
 MOUNT_HIGH int
 mount_info_snapshot(
-	struct zedbsd_mount_info *entries,
+	struct kern_mount_info *entries,
 	unsigned capacity,
 	unsigned *count_out)
 {
@@ -1561,11 +1561,11 @@ mount_info_snapshot(
 	unsigned count = 0, i;
 	int error = 0;
 	unsigned long irq;
-	struct zedbsd_mount_info *info;
+	struct kern_mount_info *info;
 
 	/* Rejects a malformed request. */
 	if (count_out == NULL || (capacity != 0 && entries == NULL) ||
-	    capacity > ZEDBSD_MOUNT_INFO_MAX)
+	    capacity > KERN_MOUNT_INFO_MAX)
 		return EINVAL;
 
 	/* Counts the live mounts before deciding whether they fit. */
@@ -1597,7 +1597,7 @@ mount_info_snapshot(
 		info->flags = mountp->m_flags;
 		source = mountp->m_bind_source;
 		if (source != NULL) {
-			info->kind = ZEDBSD_MOUNT_INFO_BIND;
+			info->kind = KERN_MOUNT_INFO_BIND;
 			if (mount_is_private(source))
 				strcpy(info->source, "(private)");
 			else
@@ -1890,8 +1890,8 @@ static int
 filesystem_identity_valid(
 	const struct block_identity *identity)
 {
-	const uint32_t allowed = ZEDBSD_BLKID_TYPE | ZEDBSD_BLKID_UUID |
-	    ZEDBSD_BLKID_LABEL;
+	const uint32_t allowed = KERN_BLKID_TYPE | KERN_BLKID_UUID |
+	    KERN_BLKID_LABEL;
 
 	/* Requires known flags, zero reserved fields and well-formed text. */
 	if ((identity->flags & ~allowed) != 0 ||
@@ -1901,11 +1901,11 @@ filesystem_identity_valid(
 	    !identity_text_zero(identity->partlabel,
 	    sizeof(identity->partlabel)) ||
 	    !identity_text_valid(identity->type, sizeof(identity->type),
-	    identity->flags, ZEDBSD_BLKID_TYPE) ||
+	    identity->flags, KERN_BLKID_TYPE) ||
 	    !identity_text_valid(identity->uuid, sizeof(identity->uuid),
-	    identity->flags, ZEDBSD_BLKID_UUID) ||
+	    identity->flags, KERN_BLKID_UUID) ||
 	    !identity_text_valid(identity->label, sizeof(identity->label),
-	    identity->flags, ZEDBSD_BLKID_LABEL))
+	    identity->flags, KERN_BLKID_LABEL))
 		return 0;
 	return 1;
 }
@@ -2124,7 +2124,7 @@ set_mount_path(
 	const char *name)
 {
 	struct cwdinfo context;
-	char base[ZEDBSD_PATH_MAX];
+	char base[KERN_PATH_MAX];
 	size_t base_length, name_length = strlen(name);
 	int error;
 

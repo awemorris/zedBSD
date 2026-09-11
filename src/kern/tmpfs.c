@@ -31,7 +31,7 @@
 
 #define TMPFS_DEFAULT_NODES 1024U
 #define TMPFS_DEFAULT_BYTES (32U * 1024U * 1024U)
-#ifdef ZEDBSD_USER_ABI_LP64
+#ifdef KERN_USER_ABI_LP64
 #define TMPFS_OFF_MAX ((off_t)INT64_MAX)
 #else
 #define TMPFS_OFF_MAX ((off_t)INT32_MAX)
@@ -40,7 +40,7 @@
 struct tmpfs_page {
 	struct tmpfs_page *next;
 	uint64_t index;
-	uint8_t data[ZEDBSD_PAGE_SIZE];
+	uint8_t data[KERN_PAGE_SIZE];
 };
 
 struct tmpfs_dirent {
@@ -502,19 +502,19 @@ charge_page(
 	error = 0;
 	mutex_lock(&state->quota_lock);
 
-	if (state->used_bytes > state->max_bytes - ZEDBSD_PAGE_SIZE)
+	if (state->used_bytes > state->max_bytes - KERN_PAGE_SIZE)
 		error = ENOSPC;
 	else
-		state->used_bytes += ZEDBSD_PAGE_SIZE;
+		state->used_bytes += KERN_PAGE_SIZE;
 
 	mutex_unlock(&state->quota_lock);
 
 	/* Then the commit limit, undoing the quota charge on failure. */
 	if (error == 0) {
-		error = vm_commit_reserve(ZEDBSD_PAGE_SIZE);
+		error = vm_commit_reserve(KERN_PAGE_SIZE);
 		if (error != 0) {
 			mutex_lock(&state->quota_lock);
-			state->used_bytes -= ZEDBSD_PAGE_SIZE;
+			state->used_bytes -= KERN_PAGE_SIZE;
 			mutex_unlock(&state->quota_lock);
 		}
 	}
@@ -532,11 +532,11 @@ static void
 uncharge_page(
 	struct tmpfs_state *state)
 {
-	vm_commit_release(ZEDBSD_PAGE_SIZE);
+	vm_commit_release(KERN_PAGE_SIZE);
 	mutex_lock(&state->quota_lock);
 
-	if (state->used_bytes >= ZEDBSD_PAGE_SIZE)
-		state->used_bytes -= ZEDBSD_PAGE_SIZE;
+	if (state->used_bytes >= KERN_PAGE_SIZE)
+		state->used_bytes -= KERN_PAGE_SIZE;
 
 	mutex_unlock(&state->quota_lock);
 }
@@ -1253,9 +1253,9 @@ tmpfs_pread(
 	/* Copies page by page, zero-filling holes. */
 	while (done < length) {
 		absolute = (uint64_t)offset + done;
-		index = absolute / ZEDBSD_PAGE_SIZE;
-		within = (size_t)(absolute % ZEDBSD_PAGE_SIZE);
-		count = ZEDBSD_PAGE_SIZE - within;
+		index = absolute / KERN_PAGE_SIZE;
+		within = (size_t)(absolute % KERN_PAGE_SIZE);
+		count = KERN_PAGE_SIZE - within;
 		link = find_page_link(node, index);
 		if (count > length - done)
 			count = length - done;
@@ -1317,9 +1317,9 @@ tmpfs_write_at(
 	/* Copies page by page, allocating and charging missing pages. */
 	while (done < length) {
 		absolute = (uint64_t)offset + done;
-		index = absolute / ZEDBSD_PAGE_SIZE;
-		within = (size_t)(absolute % ZEDBSD_PAGE_SIZE);
-		count = ZEDBSD_PAGE_SIZE - within;
+		index = absolute / KERN_PAGE_SIZE;
+		within = (size_t)(absolute % KERN_PAGE_SIZE);
+		count = KERN_PAGE_SIZE - within;
 		link = find_page_link(node, index);
 		if (count > length - done)
 			count = length - done;
@@ -1447,7 +1447,7 @@ tmpfs_truncate(
 	if (size == 0)
 		last_index = 0;
 	else
-		last_index = ((uint64_t)size - 1U) / ZEDBSD_PAGE_SIZE;
+		last_index = ((uint64_t)size - 1U) / KERN_PAGE_SIZE;
 	for (link = &node->pages; *link != NULL;) {
 		page = *link;
 		if (size == 0 || page->index > last_index) {
@@ -1461,11 +1461,11 @@ tmpfs_truncate(
 	}
 
 	/* Zeroes the tail of the last page so a later extension reads zeros. */
-	if (size != 0 && ((uint64_t)size % ZEDBSD_PAGE_SIZE) != 0) {
+	if (size != 0 && ((uint64_t)size % KERN_PAGE_SIZE) != 0) {
 		tail = find_page_link(node, last_index);
 		if (*tail != NULL && (*tail)->index == last_index)
-			memset((*tail)->data + ((size_t)size % ZEDBSD_PAGE_SIZE), 0,
-			    ZEDBSD_PAGE_SIZE - ((size_t)size % ZEDBSD_PAGE_SIZE));
+			memset((*tail)->data + ((size_t)size % KERN_PAGE_SIZE), 0,
+			    KERN_PAGE_SIZE - ((size_t)size % KERN_PAGE_SIZE));
 	}
 
 	inode->i_size = size;
@@ -1505,10 +1505,10 @@ tmpfs_getattr(
 	status->st_atime = inode->i_atime.tv_sec;
 	status->st_mtime = inode->i_mtime.tv_sec;
 	status->st_ctime = inode->i_ctime.tv_sec;
-	status->st_blksize = ZEDBSD_PAGE_SIZE;
+	status->st_blksize = KERN_PAGE_SIZE;
 	if (node != NULL)
 		status->st_blocks = (blkcnt_t)(node->allocated_pages *
-		    (ZEDBSD_PAGE_SIZE / 512U));
+		    (KERN_PAGE_SIZE / 512U));
 	else
 		status->st_blocks = 0;
 	return 0;
@@ -1755,11 +1755,11 @@ tmpfs_statvfs(
 	mutex_lock(&state->quota_lock);
 
 	memset(result, 0, sizeof(*result));
-	result->f_bsize = ZEDBSD_PAGE_SIZE;
-	result->f_frsize = ZEDBSD_PAGE_SIZE;
-	result->f_blocks = state->max_bytes / ZEDBSD_PAGE_SIZE;
+	result->f_bsize = KERN_PAGE_SIZE;
+	result->f_frsize = KERN_PAGE_SIZE;
+	result->f_blocks = state->max_bytes / KERN_PAGE_SIZE;
 	result->f_bfree = result->f_blocks -
-	    state->used_bytes / ZEDBSD_PAGE_SIZE;
+	    state->used_bytes / KERN_PAGE_SIZE;
 	result->f_bavail = result->f_bfree;
 	result->f_files = state->max_nodes;
 	result->f_ffree = state->max_nodes - state->used_nodes;

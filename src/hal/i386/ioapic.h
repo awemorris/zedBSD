@@ -11,8 +11,8 @@
  * The private i386 I/O-APIC contract.
  */
 
-#ifndef ZEDBSD_HAL_I386_IOAPIC_H
-#define ZEDBSD_HAL_I386_IOAPIC_H
+#ifndef KERN_HAL_I386_IOAPIC_H
+#define KERN_HAL_I386_IOAPIC_H
 
 #include "apic-topology.h"
 

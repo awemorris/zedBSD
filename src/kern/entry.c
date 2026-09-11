@@ -41,7 +41,7 @@
 #include "kern/thread.h"
 
 #define KERNEL_HEAP_SIZE (512U * 1024U)
-#define KERNEL_LARGE_THRESHOLD (2U * ZEDBSD_PAGE_SIZE)
+#define KERNEL_LARGE_THRESHOLD (2U * KERN_PAGE_SIZE)
 #define KERNEL_ALLOCATION_ALIGNMENT 16U
 
 struct kernel_large_allocation {
@@ -51,14 +51,14 @@ struct kernel_large_allocation {
 };
 
 static uint8_t kernel_heap_storage[KERNEL_HEAP_SIZE]
-    __attribute__((section(".kernel_heap"), aligned(ZEDBSD_PAGE_SIZE)));
+    __attribute__((section(".kernel_heap"), aligned(KERN_PAGE_SIZE)));
 static struct heap_allocator kernel_heap;
 static atomic_uint_t kernel_heap_lock;
 static uint8_t kernel_heap_libc_lock_active[HAL_CPU_MAX];
 static uint8_t kernel_heap_libc_irq_enabled[HAL_CPU_MAX];
 static struct kernel_large_allocation *kernel_large_allocations;
 
-#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+#ifdef KERN_KERNEL_HEAP_TRACE
 /* Private QMP-readable provenance; all writers hold kernel_heap_lock. */
 struct kernel_heap_trace_entry {
 	uint64_t sequence;
@@ -82,7 +82,7 @@ static void kernel_heap_trace_observer(void *context, void *pointer, size_t size
 #define KERNEL_HEAP_CHECK(event, caller) ((void)0)
 #endif
 
-#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+#ifdef KERN_KERNEL_HEAP_TRACE
 void
 __heap_trace_pointer_walk(void *pointer, void *caller)
 {
@@ -194,7 +194,7 @@ kern_malloc(
 
 	/* Allocates page-aligned physical memory for the header and the block. */
 	memory.size = size + header_size;
-	if (hal_pmem_alloc(memory.size, ZEDBSD_PAGE_SIZE,
+	if (hal_pmem_alloc(memory.size, KERN_PAGE_SIZE,
 			   &memory.paddr) != HAL_OK)
 		return NULL;
 
@@ -337,11 +337,11 @@ kernel_entry(
 	/* Refuses a handoff that is missing, foreign, or truncated. */
 	h = handoff;
 	if (h == NULL ||
-	    h->magic != ZEDBSD_HANDOFF_MAGIC ||
-	    (h->version != ZEDBSD_HANDOFF_VERSION_PC98 &&
-	     h->version != ZEDBSD_HANDOFF_VERSION_MULTIBOOT &&
-	     h->version != ZEDBSD_HANDOFF_VERSION_SUN4U &&
-	     h->version != ZEDBSD_HANDOFF_VERSION_X68K) ||
+	    h->magic != KERN_HANDOFF_MAGIC ||
+	    (h->version != KERN_HANDOFF_VERSION_PC98 &&
+	     h->version != KERN_HANDOFF_VERSION_MULTIBOOT &&
+	     h->version != KERN_HANDOFF_VERSION_SUN4U &&
+	     h->version != KERN_HANDOFF_VERSION_X68K) ||
 	    h->size < sizeof(*h))
 		hal_fatal(__FILE__, __LINE__, "invalid zedBSD handoff");
 
@@ -350,7 +350,7 @@ kernel_entry(
 	kern_logf("boot: kernel heap, process, and scheduler initialization\n");
 	heap_allocator_init(&kernel_heap, kernel_heap_storage,
 			    KERNEL_HEAP_SIZE);
-#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+#ifdef KERN_KERNEL_HEAP_TRACE
 	heap_allocator_set_observer(&kernel_heap, kernel_heap_trace_observer, NULL);
 #endif
 	(void)heap_active_set(&kernel_heap);
@@ -386,7 +386,7 @@ kernel_entry(
 
 	/* Synchronizes the shared kernel translation domain with the new CPUs. */
 	hal_space_flush_tlb_range(HAL_SPACE_SYS, __kernel_vma_start,
-				 ZEDBSD_PAGE_SIZE);
+				 KERN_PAGE_SIZE);
 	if (kern_cpu_notify_probe() != HAL_OK)
 		hal_fatal(__FILE__, __LINE__,
 			  "secondary CPU notification failed");
@@ -467,7 +467,7 @@ kernel_heap_lock_leave(
 		hal_irq_enable();
 }
 
-#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+#ifdef KERN_KERNEL_HEAP_TRACE
 /* Record without allocation, logging, or any second lock domain. */
 static void
 kernel_heap_trace_record(

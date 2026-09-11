@@ -59,9 +59,9 @@ namei_path_flags_at(
 	struct componentname component;
 	struct ucred *owned_cred;
 	const struct ucred *cred;
-	char work[ZEDBSD_PATH_MAX];
-	char target[ZEDBSD_PATH_MAX];
-	char combined[ZEDBSD_PATH_MAX];
+	char work[KERN_PATH_MAX];
+	char target[KERN_PATH_MAX];
+	char combined[KERN_PATH_MAX];
 	size_t length;
 	size_t position;
 	size_t start;
@@ -195,7 +195,7 @@ namei_path_flags_at(
 		      !trailing)) {
 			remainder = length - position;
 			symlinks++;
-			if (symlinks > ZEDBSD_SYMLOOP_MAX) {
+			if (symlinks > KERN_SYMLOOP_MAX) {
 				inode_release(next_inode);
 				error = ELOOP;
 				goto fail;
@@ -350,7 +350,7 @@ namei_parent_path_at(
 	struct componentname *last,
 	char storage[NAME_MAX + 1U])
 {
-	char prefix[ZEDBSD_PATH_MAX];
+	char prefix[KERN_PATH_MAX];
 	size_t length;
 	size_t start;
 	size_t parent_length;
@@ -647,11 +647,11 @@ path_length(
 
 	/* Counts the bytes up to the limit. */
 	n = 0;
-	while (n < ZEDBSD_PATH_MAX && path[n] != '\0')
+	while (n < KERN_PATH_MAX && path[n] != '\0')
 		n++;
 	if (n == 0)
 		return ENOENT;
-	if (n == ZEDBSD_PATH_MAX)
+	if (n == KERN_PATH_MAX)
 		return ENAMETOOLONG;
 
 	*length = n;
@@ -818,7 +818,7 @@ getcwd_once(
 	struct path current;
 	struct path parent;
 	struct inode *parent_inode;
-	char reverse[ZEDBSD_PATH_MAX];
+	char reverse[KERN_PATH_MAX];
 	char name[NAME_MAX + 1U];
 	size_t position;
 	size_t length;
@@ -835,7 +835,7 @@ getcwd_once(
 	while (!path_equal(&current, root)) {
 		/* Bounds the walk against a cyclic directory graph. */
 		depth++;
-		if (depth > ZEDBSD_PATH_MAX / 2U) {
+		if (depth > KERN_PATH_MAX / 2U) {
 			error = ELOOP;
 			break;
 		}

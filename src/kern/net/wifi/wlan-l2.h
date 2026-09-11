@@ -14,8 +14,8 @@
  * can be rejected.
  */
 
-#ifndef ZEDBSD_KERN_NET_WLAN_L2_H
-#define ZEDBSD_KERN_NET_WLAN_L2_H
+#ifndef KERN_KERN_NET_WLAN_L2_H
+#define KERN_KERN_NET_WLAN_L2_H
 
 #include <stddef.h>
 #include <stdint.h>

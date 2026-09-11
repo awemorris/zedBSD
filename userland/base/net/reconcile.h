@@ -2,8 +2,8 @@
 
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 
-#ifndef ZEDBSD_NETCONF_RECONCILE_H
-#define ZEDBSD_NETCONF_RECONCILE_H
+#ifndef KERN_NETCONF_RECONCILE_H
+#define KERN_NETCONF_RECONCILE_H
 
 #include "userland/base/net/netconf.h"
 

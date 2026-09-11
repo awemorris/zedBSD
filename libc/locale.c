@@ -974,7 +974,7 @@ localeconv(void)
 	    effective_locale_category(LC_MONETARY)->categories[LC_MONETARY];
 
 #define LOCALE_VALUE(record, key)                                              \
-	((char *)zed_locale_record_value((record), ZEDBSD_LOCALE_KEY_##key))
+	((char *)zed_locale_record_value((record), KERN_LOCALE_KEY_##key))
 	value.decimal_point = LOCALE_VALUE(numeric, DECIMAL_POINT);
 	value.thousands_sep = LOCALE_VALUE(numeric, THOUSANDS_SEP);
 	value.grouping = LOCALE_VALUE(numeric, GROUPING);
@@ -1009,14 +1009,14 @@ char *
 nl_langinfo(nl_item item)
 {
 	static char empty[] = "";
-	int category = zed_locale_key_category((enum zedbsd_locale_key)item);
+	int category = zed_locale_key_category((enum kern_locale_key)item);
 	struct __locale *locale;
 
 	if (category < 0)
 		return empty;
 	locale = effective_locale_category(category);
 	return (char *)zed_locale_record_value(locale->categories[category],
-					       (enum zedbsd_locale_key)item);
+					       (enum kern_locale_key)item);
 }
 
 int

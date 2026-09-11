@@ -4,16 +4,14 @@
  *
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_UAPI_SIGNAL_H
-#define ZEDBSD_UAPI_SIGNAL_H
+
+#ifndef KERN_UAPI_SIGNAL_H
+#define KERN_UAPI_SIGNAL_H
+
 #include <stdint.h>
 #include <stddef.h>
 #include <zedbsd/types.h>
-/*
- * One bit per signal.  Signal 63 is reserved to libc and bit 63 is unused,
- * leaving a fixed-width ABI with room for the classic and realtime sets.
- */
-typedef uint64_t sigset_t;
+
 #define NSIG	64
 #define SIGHUP	1
 #define SIGINT	2
@@ -91,6 +89,22 @@ typedef uint64_t sigset_t;
 #define CLD_STOPPED	5
 #define CLD_CONTINUED	6
 
+#define SIGEV_NONE	0
+#define SIGEV_SIGNAL	1
+#define SIGEV_THREAD	2
+
+#define SS_ONSTACK	0x0001
+#define SS_DISABLE	0x0002
+#define MINSIGSTKSZ	8192U
+#define SIGSTKSZ	32768U
+
+/*
+ * One bit per signal.  Signal 63 is reserved to libc and bit 63 is
+ * unused, leaving a fixed-width ABI with room for the classic and
+ * realtime sets.
+ */
+typedef uint64_t sigset_t;
+
 union sigval {
 	int32_t sival_int;
 	void *sival_ptr;
@@ -98,27 +112,22 @@ union sigval {
 };
 
 /*
- * pthread_attr_t is a libc type.  Giving its implementation tag a forward
- * declaration lets sigevent expose the standard pointer type without making
- * the kernel UAPI depend on the pthread header.
+ * pthread_attr_t is a libc type.  Giving its implementation tag a
+ * forward declaration lets sigevent expose the standard pointer type
+ * without making the kernel UAPI depend on the pthread header.
  */
 struct __pthread_attr;
 
-#define SIGEV_NONE	0
-#define SIGEV_SIGNAL	1
-#define SIGEV_THREAD	2
 struct sigevent {
 	int32_t sigev_notify;
 	int32_t sigev_signo;
 	union sigval sigev_value;
-	void (
-		*sigev_notify_function)(
-		union sigval);
-#ifndef ZEDBSD_USER_ABI_LP64
+	void (*sigev_notify_function)(union sigval);
+#ifndef KERN_USER_ABI_LP64
 	uint32_t __sigev_notify_function_pad;
 #endif
 	struct __pthread_attr *sigev_notify_attributes;
-#ifndef ZEDBSD_USER_ABI_LP64
+#ifndef KERN_USER_ABI_LP64
 	uint32_t __sigev_notify_attributes_pad;
 #endif
 };
@@ -137,13 +146,9 @@ typedef struct siginfo {
 	uint64_t si_reserved[10];
 } siginfo_t;
 
-#define SS_ONSTACK	0x0001
-#define SS_DISABLE	0x0002
-#define MINSIGSTKSZ	8192U
-#define SIGSTKSZ	32768U
 struct sigaltstack_record {
 	uapi_ptr_t ss_sp;
-#ifndef ZEDBSD_USER_ABI_LP64
+#ifndef KERN_USER_ABI_LP64
 	uint32_t ss_pointer_pad;
 #endif
 	uint64_t ss_size;
@@ -152,10 +157,11 @@ struct sigaltstack_record {
 };
 
 /*
- * mc_pc, mc_sp, and mc_retval describe the interrupted user context.  The
- * first ABI revision deliberately permits sigreturn to adopt only
- * uc_sigmask; changing machine-context fields makes sigreturn fail with
- * EINVAL.  This keeps privileged architecture state opaque to userland.
+ * mc_pc, mc_sp, and mc_retval describe the interrupted user context.
+ * The first ABI revision deliberately permits sigreturn to adopt only
+ * uc_sigmask; changing machine-context fields makes sigreturn fail
+ * with EINVAL.  This keeps privileged architecture state opaque to
+ * userland.
  */
 typedef struct mcontext {
 	uint64_t mc_pc;

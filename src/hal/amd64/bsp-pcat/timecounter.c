@@ -221,7 +221,7 @@ amd64_timecounter_ap_probe(
 
 	/* Collects this AP's architectural counter metadata. */
 	metadata_collect(&cpu->timecounter_metadata);
-#ifdef ZEDBSD_TEST_TIMECOUNTER_INCONSISTENT_CPU
+#ifdef KERN_TEST_TIMECOUNTER_INCONSISTENT_CPU
 	/* Injects inconsistent CPUID metadata for the retained negative fixture. */
 	if (cpu->logical_id == 1U)
 		cpu->timecounter_metadata.frequency.numerator ^= 1U;
@@ -242,7 +242,7 @@ amd64_timecounter_ap_probe(
 		/* Samples once for each new nonzero BSP request generation. */
 		if (request != 0U && request != observed) {
 			sample = amd64_timecounter_sample_serialized();
-#ifdef ZEDBSD_TEST_TIMECOUNTER_INCONSISTENT_SAMPLE
+#ifdef KERN_TEST_TIMECOUNTER_INCONSISTENT_SAMPLE
 			/* Injects an invalid sample for the retained negative fixture. */
 			if (cpu->logical_id == 1U)
 				sample = 0U;

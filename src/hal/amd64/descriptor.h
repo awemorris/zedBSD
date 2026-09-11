@@ -11,8 +11,8 @@
  * The amd64 descriptor-table and task-state-segment contract.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_DESCRIPTOR_H
-#define ZEDBSD_HAL_AMD64_DESCRIPTOR_H
+#ifndef KERN_HAL_AMD64_DESCRIPTOR_H
+#define KERN_HAL_AMD64_DESCRIPTOR_H
 
 #include <hal/types.h>
 

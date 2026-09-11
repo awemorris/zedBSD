@@ -13,8 +13,8 @@
  * interface; no source code from those kernels is included in this file.
  */
 
-#ifndef ZEDBSD_DRIVERS_DMA_H
-#define ZEDBSD_DRIVERS_DMA_H
+#ifndef KERN_DRIVERS_DMA_H
+#define KERN_DRIVERS_DMA_H
 
 #include <stddef.h>
 #include <stdint.h>

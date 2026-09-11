@@ -27,7 +27,7 @@
 #define ACCOUNT_RESULT_MAX 2048
 #define ACCOUNT_GROUP_MAX 16
 
-#if defined(ZEDBSD_DYNAMIC_LIBC) || defined(ZEDBSD_STATIC_TLS)
+#if defined(KERN_DYNAMIC_LIBC) || defined(KERN_STATIC_TLS)
 #define ACCOUNT_THREAD_LOCAL _Thread_local
 #else
 #define ACCOUNT_THREAD_LOCAL

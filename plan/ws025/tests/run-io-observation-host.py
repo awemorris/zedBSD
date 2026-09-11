@@ -43,7 +43,7 @@ for variant in ("ordinary", "sanitize"):
     for version in (2,):
         binary = out / f"ufs{version}-{variant}"
         run(f"ufs{version}-build-{variant}", [*flags,
-            "-ffunction-sections", "-fdata-sections", "-DZEDBSD_USER_ABI_LP64",
+            "-ffunction-sections", "-fdata-sections", "-DKERN_USER_ABI_LP64",
             f"-DUFS_AUDIT_VERSION={version}", "-Ilibc/include", "-pthread",
             *([] if variant == "ordinary" else ["--param", "asan-globals=0"]),
             "plan/ws025/tests/io-ufs-host.c",

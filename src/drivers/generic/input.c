@@ -23,7 +23,6 @@
 #include "kern/uaccess.h"
 #include "kern/waitq.h"
 
-#include <hal/hal.h>
 #include <zedbsd/input.h>
 
 #include <errno.h>
@@ -2206,7 +2205,7 @@ input_ioctl(
 	}
 
 	/* Handles the group condition. */
-	if (group == ZEDBSD_EVDEV_IOC_GROUP) {
+	if (group == KERN_EVDEV_IOC_GROUP) {
 		/* Dispatch the selected operation case. */
 		switch (number) {
 		case 0x06:
@@ -2248,7 +2247,7 @@ input_ioctl(
 	}
 
 	/* Checks the EVIOCGKEY result. */
-	if (group == ZEDBSD_EVDEV_IOC_GROUP && number == 0x18U &&
+	if (group == KERN_EVDEV_IOC_GROUP && number == 0x18U &&
 	    request == EVIOCGKEY(size)) {
 		/* Obtains the copy key state result. */
 		function_result = copy_key_state(device, size, argument);
@@ -2258,7 +2257,7 @@ input_ioctl(
 	}
 
 	/* Checks the EVIOCGBIT result. */
-	if (group == ZEDBSD_EVDEV_IOC_GROUP && number >= 0x20U &&
+	if (group == KERN_EVDEV_IOC_GROUP && number >= 0x20U &&
 	    number <= 0x20U + EV_MAX &&
 	    request == EVIOCGBIT(number - 0x20U, size)) {
 		/* Obtains the copy capability bits result. */
@@ -2270,7 +2269,7 @@ input_ioctl(
 	}
 
 	/* Checks the EVIOCGABS result. */
-	if (group == ZEDBSD_EVDEV_IOC_GROUP && number >= 0x40U &&
+	if (group == KERN_EVDEV_IOC_GROUP && number >= 0x40U &&
 	    number <= 0x40U + ABS_MAX && request == EVIOCGABS(number - 0x40U)) {
 		/* Obtains the copy abs info result. */
 		function_result =

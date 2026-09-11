@@ -4,7 +4,7 @@ set -eu
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-storage-test.XXXXXX")
 trap 'rm -rf -- "$temporary"' EXIT HUP INT TERM
-common="-std=c11 -O1 -g -Wall -Wextra -Werror -ffunction-sections -fdata-sections -DZEDBSD_USER_ABI_LP64 -DZEDBSD_STORAGE_HOST_TEST -DSTORAGE_FOUNDATION_HAL_STUBS -I$repo -I$repo/include -I$repo/include/uapi -I$repo/src -I$repo/libc/include"
+common="-std=c11 -O1 -g -Wall -Wextra -Werror -ffunction-sections -fdata-sections -DKERN_USER_ABI_LP64 -DZEDBSD_STORAGE_HOST_TEST -DSTORAGE_FOUNDATION_HAL_STUBS -I$repo -I$repo/include -I$repo/include/uapi -I$repo/src -I$repo/libc/include"
 for mode in ordinary sanitize; do
 	extra=""
 	if test "$mode" = sanitize; then

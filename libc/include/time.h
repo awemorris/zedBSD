@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_TIME_H
-#define ZEDBSD_TIME_H
+#ifndef KERN_TIME_H
+#define KERN_TIME_H
 
 #include <stdint.h>
 #include <stddef.h>

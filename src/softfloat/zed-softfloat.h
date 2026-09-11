@@ -14,8 +14,8 @@
  * through the compiler helpers that call it.
  */
 
-#ifndef ZEDBSD_ZED_SOFTFLOAT_H
-#define ZEDBSD_ZED_SOFTFLOAT_H
+#ifndef KERN_ZED_SOFTFLOAT_H
+#define KERN_ZED_SOFTFLOAT_H
 
 #include <stdint.h>
 

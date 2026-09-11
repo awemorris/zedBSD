@@ -1,6 +1,6 @@
 /* Traditional BSD string interfaces. SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_STRINGS_H
-#define ZEDBSD_STRINGS_H
+#ifndef KERN_STRINGS_H
+#define KERN_STRINGS_H
 #include <stddef.h>
 int bcmp(const void *, const void *, size_t);
 void bcopy(const void *, void *, size_t);

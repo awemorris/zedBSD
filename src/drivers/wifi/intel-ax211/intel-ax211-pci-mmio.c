@@ -9,10 +9,12 @@
 #include "intel-ax211-pci-mmio.h"
 
 #include <errno.h>
-#include <hal/hal.h>
 #include <kern/sched.h>
 #include <limits.h>
 #include <string.h>
+#include "kern/device-io.h"
+#include "kern/atomic.h"
+#include "kern/clock.h"
 
 #define AX211_PCI_MMIO_MINIMUM_SIZE 0x4000U
 #define AX211_HBUS_PRPH_WRITE_ADDRESS 0x0444U
@@ -72,7 +74,7 @@ drv_intel_ax211_pci_mmio_backend_init(
 	memset(&candidate, 0, sizeof(candidate));
 
 	/* Checks the hal rtc read counter result. */
-	if (!hal_rtc_read_counter(&origin_counter, &frequency_hz) ||
+	if (!kern_rtc_read_counter(&origin_counter, &frequency_hz) ||
 	    frequency_hz < AX211_COUNTER_FREQUENCY_MIN_HZ ||
 	    frequency_hz > AX211_COUNTER_FREQUENCY_MAX_HZ) {
 		memset(backend, 0, sizeof(*backend));
@@ -140,7 +142,7 @@ ax211_backend_csr_read32(
 	if (value == NULL || !ax211_backend_range_valid(backend, offset))
 		return EINVAL;
 	*value = *(volatile uint32_t *)(backend->registers + offset);
-	hal_io_rmb();
+	kern_io_read_barrier();
 
 	/* Validates the current value. */
 	if (*value == UINT32_MAX)
@@ -163,7 +165,7 @@ ax211_backend_csr_write32(
 	if (!ax211_backend_range_valid(backend, offset))
 		return EINVAL;
 	*(volatile uint32_t *)(backend->registers + offset) = value;
-	hal_io_wmb();
+	kern_io_write_barrier();
 
 	/* Succeeded. */
 	return 0;
@@ -189,7 +191,7 @@ ax211_backend_prph_read32(
 					  address | AX211_PRPH_ACCESS_DWORD);
 	if (error != 0)
 		return error;
-	hal_io_mb();
+	kern_io_barrier();
 
 	/* Obtains the ax211 backend csr read32 result. */
 	function_result = ax211_backend_csr_read32(
@@ -220,7 +222,7 @@ ax211_backend_prph_write32(
 					  address | AX211_PRPH_ACCESS_DWORD);
 	if (error != 0)
 		return error;
-	hal_io_wmb();
+	kern_io_write_barrier();
 
 	/* Obtains the ax211 backend csr write32 result. */
 	function_result = ax211_backend_csr_write32(
@@ -240,7 +242,7 @@ ax211_backend_relax(
 
 	intel_ax211_pci_mmio_host_relax();
 #else
-	hal_atomic_relax();
+	atomic_spin_hint();
 #endif
 }
 
@@ -417,7 +419,7 @@ ax211_backend_counter_read_checked(
 		return EINVAL;
 
 	/* Checks the hal rtc read counter result. */
-	if (!hal_rtc_read_counter(&current, &frequency_hz) ||
+	if (!kern_rtc_read_counter(&current, &frequency_hz) ||
 	    frequency_hz != backend->counter_frequency_hz) {
 		/* Failed. */
 		return EIO;

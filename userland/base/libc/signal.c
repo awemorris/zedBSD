@@ -79,7 +79,7 @@ sigaction(
 	}
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_sigaction, signo, (uintptr_t)action,
+	function_result = (int)call(KERN_SYS_sigaction, signo, (uintptr_t)action,
 			 (uintptr_t)old_action);
 
 	/* Returns the computed result. */
@@ -105,7 +105,7 @@ sigprocmask(
 	}
 
 	/* Handles a failed call operation. */
-	if (call(ZEDBSD_SYS_sigprocmask, how, (uintptr_t)set,
+	if (call(KERN_SYS_sigprocmask, how, (uintptr_t)set,
 		 (uintptr_t)old_set) < 0)
 
 		/* Reports operation failure. */
@@ -127,7 +127,7 @@ sigpending(
 {
 	int result;
 
-	result = (int)call(ZEDBSD_SYS_sigpending, (uintptr_t)set, 0, 0);
+	result = (int)call(KERN_SYS_sigpending, (uintptr_t)set, 0, 0);
 
 	/* Handles the set availability. */
 	if (result == 0 && set != NULL)
@@ -154,7 +154,7 @@ sigsuspend(
 	}
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_sigsuspend, (uintptr_t)set, 0, 0);
+	function_result = (int)call(KERN_SYS_sigsuspend, (uintptr_t)set, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -179,7 +179,7 @@ kill(
 	}
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_kill, pid, signo, 0);
+	function_result = (int)call(KERN_SYS_kill, pid, signo, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -325,7 +325,7 @@ sigaltstack(
 		in.ss_size = n->ss_size;
 		in.ss_flags = n->ss_flags;
 	}
-	r = call(ZEDBSD_SYS_sigaltstack, n != NULL ? (uintptr_t)&in : 0,
+	r = call(KERN_SYS_sigaltstack, n != NULL ? (uintptr_t)&in : 0,
 		 o != NULL ? (uintptr_t)&out : 0, 0);
 
 	/* Handles the o availability. */
@@ -369,7 +369,7 @@ sigtimedwait(
 	}
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_sigtimedwait, (uintptr_t)&copy,
+	function_result = (int)call(KERN_SYS_sigtimedwait, (uintptr_t)&copy,
 			 (uintptr_t)information, (uintptr_t)timeout);
 
 	/* Returns the computed result. */
@@ -446,7 +446,7 @@ sigqueue(
 	memcpy(&raw, &value, sizeof(raw));
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_sigqueue, pid, signo, (uintptr_t)raw);
+	function_result = (int)call(KERN_SYS_sigqueue, pid, signo, (uintptr_t)raw);
 
 	/* Returns the computed result. */
 	return function_result;

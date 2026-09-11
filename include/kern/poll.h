@@ -4,8 +4,8 @@
  *
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_KERN_POLL_H
-#define ZEDBSD_KERN_POLL_H
+#ifndef KERN_KERN_POLL_H
+#define KERN_KERN_POLL_H
 
 #include <zedbsd/poll.h>
 #include <stdint.h>

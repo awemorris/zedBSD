@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_KERN_QUOTA_H
-#define ZEDBSD_KERN_QUOTA_H
+#ifndef KERN_KERN_QUOTA_H
+#define KERN_KERN_QUOTA_H
 
 #include "kern/lock.h"
 

@@ -1179,7 +1179,7 @@ sched_cpu_notify(
 		sched_yield();
 }
 
-#ifdef ZEDBSD_SCHED_TEST
+#ifdef KERN_SCHED_TEST
 /*
  * Brings a CPU online under test with a fake idle thread.
  */

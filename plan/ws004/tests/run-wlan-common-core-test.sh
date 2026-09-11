@@ -39,7 +39,7 @@ $cc $warnings -O0 -pthread -DWLAN_TESTING -fanalyzer $host_includes $sources "$f
 
 # The public records must retain exactly the same offsets and sizes for both
 # configured user ABIs.  -fsyntax-only avoids requiring 32-bit host libraries.
-$cc -m64 -nostdinc $abi_includes -DZEDBSD_USER_ABI_LP64 $warnings \
+$cc -m64 -nostdinc $abi_includes -DKERN_USER_ABI_LP64 $warnings \
 	-fsyntax-only "$layout" $sources
 $cc -m32 -nostdinc $abi_includes $warnings -fsyntax-only "$layout" $sources
 

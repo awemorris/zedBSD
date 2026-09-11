@@ -777,3 +777,27 @@ kernel_thread_trampoline(
 	thread->kernel_entry(thread->kernel_arg);
 	thread_exit(0);
 }
+
+/*
+ * Blocks the running thread until it is woken.
+ */
+void
+kern_thread_block(
+	void)
+{
+	/* The scheduler retains a wake delivered just before this. */
+	sched_wait_task();
+}
+
+/*
+ * Wakes one blocked thread.
+ */
+void
+kern_thread_wakeup(
+	struct thread *thread)
+{
+	/* Ignores a thread which has no context yet. */
+	if (thread == NULL || thread->task == NULL)
+		return;
+	sched_notify_task(thread->task);
+}

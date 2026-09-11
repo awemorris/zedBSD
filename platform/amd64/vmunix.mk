@@ -69,7 +69,7 @@ AMD64_CPPFLAGS := -nostdinc \
 	-isystem $(ZEDBSD_SYSROOT_AMD64)/usr/include \
 	-Iinclude -Isrc -I. \
 	-DHAL_ARCH_AMD64 -DHAL_BOARD_PCAT -DHAL_PCAT_DEBUGCON \
-	-DZEDBSD_USER_ABI_LP64 \
+	-DKERN_USER_ABI_LP64 \
 	-DPCAT_VGA_APERTURE_ADDRESS=0xffffffffc1400000ULL \
 	-DPCAT_CIRRUS_APERTURE_ADDRESS=0xffffffffc0000000ULL
 AMD64_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
@@ -186,6 +186,7 @@ AMD64_KERNEL_SOURCES := \
 	src/drivers/disklabel/pcat.c src/kern/platform/pcat.c \
 	src/kern/panic.c src/kern/entry.c src/kern/clock.c \
 	src/kern/timer.c src/kern/klog.c \
+	src/kern/device-io.c src/kern/irq.c src/kern/pmem.c \
 	src/kern/test-checkpoint.c \
 	src/kern/lock.c src/kern/waitq.c \
 	src/kern/process.c src/kern/thread.c src/kern/sched.c \
@@ -456,7 +457,7 @@ $(BUILD)/uefi/BOOTX64.EFI: $(BUILD)/uefi/bootx64.o \
 
 AMD64_USER_CPPFLAGS := -nostdinc \
 	-isystem $(ZEDBSD_SYSROOT_AMD64)/usr/include \
-	-Iinclude -Isrc -I. -DHAL_ARCH_AMD64 -DZEDBSD_USER_ABI_LP64
+	-Iinclude -Isrc -I. -DHAL_ARCH_AMD64 -DKERN_USER_ABI_LP64
 AMD64_USER_CFLAGS := -m64 -march=x86-64 -mno-red-zone -ffreestanding \
 	-fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables \
 	-fno-unwind-tables -fno-builtin -fno-common -ffunction-sections \
@@ -660,7 +661,7 @@ $(foreach command,$(USER_BASIC_COMMANDS),\
 DYNAMIC_DIR := $(BUILD)/dynamic
 DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude \
 	-isystem $(ZEDBSD_SYSROOT_AMD64)/usr/include \
-	-DHAL_ARCH_AMD64 -DZEDBSD_USER_ABI_LP64 -DZEDBSD_DYNAMIC_LIBC
+	-DHAL_ARCH_AMD64 -DKERN_USER_ABI_LP64 -DKERN_DYNAMIC_LIBC
 DYNAMIC_CFLAGS := -m64 -march=x86-64 -mno-red-zone -Os -ffreestanding \
 	-fPIC -fno-builtin -fno-stack-protector \
 	-fno-asynchronous-unwind-tables -fno-unwind-tables \

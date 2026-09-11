@@ -1,8 +1,8 @@
 /* MC68030 exception-frame parsing and generic trap classification. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 
-#ifndef ZEDBSD_HAL_M68K_EXCEPTION_H
-#define ZEDBSD_HAL_M68K_EXCEPTION_H
+#ifndef KERN_HAL_M68K_EXCEPTION_H
+#define KERN_HAL_M68K_EXCEPTION_H
 
 #include <hal/hal.h>
 

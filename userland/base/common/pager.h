@@ -11,8 +11,8 @@
  * Declares shared userland pager support.
  */
 
-#ifndef ZEDBSD_USERLAND_PAGER_H
-#define ZEDBSD_USERLAND_PAGER_H
+#ifndef KERN_USERLAND_PAGER_H
+#define KERN_USERLAND_PAGER_H
 enum pager_style { PAGER_MORE, PAGER_LESS };
 int pager_main(enum pager_style, int, char **);
 #endif

@@ -11,17 +11,17 @@ _start:
 	jne fail
 	cmpw $2, 4(%ebx)
 	jne legacy_v3
-	cmpw $ZEDBSD_PC98_PARAMETER_HANDOFF_SIZE, 6(%ebx)
+	cmpw $KERN_PC98_PARAMETER_HANDOFF_SIZE, 6(%ebx)
 	jne fail
 	cmpw $0, 10(%ebx)
 	jne fail
-	cmpl $ZEDBSD_BOOT_PARAMETER_RECORD_MAGIC, ZEDBSD_PC98_PARAMETER_RECORD_OFFSET(%ebx)
+	cmpl $KERN_BOOT_PARAMETER_RECORD_MAGIC, KERN_PC98_PARAMETER_RECORD_OFFSET(%ebx)
 	jne fail
 	jmp origin_ready
 legacy_v3:
 	cmpw $3, 4(%ebx)
 	jne fail
-	cmpw $ZEDBSD_PC98_HANDOFF_COMMON_SIZE, 6(%ebx)
+	cmpw $KERN_PC98_HANDOFF_COMMON_SIZE, 6(%ebx)
 	jne fail
 	cmpb $1, 10(%ebx)
 	jne fail

@@ -11,8 +11,8 @@
  * Declares the zedBSD userland lpd client interface.
  */
 
-#ifndef ZEDBSD_USERLAND_LP_LPD_CLIENT_H
-#define ZEDBSD_USERLAND_LP_LPD_CLIENT_H
+#ifndef KERN_USERLAND_LP_LPD_CLIENT_H
+#define KERN_USERLAND_LP_LPD_CLIENT_H
 
 #include <stddef.h>
 #include <stdint.h>

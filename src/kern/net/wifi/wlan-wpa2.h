@@ -14,8 +14,8 @@
  * timer tick, and it never blocks or touches a device itself.
  */
 
-#ifndef ZEDBSD_KERN_NET_WLAN_WPA2_H
-#define ZEDBSD_KERN_NET_WLAN_WPA2_H
+#ifndef KERN_KERN_NET_WLAN_WPA2_H
+#define KERN_KERN_NET_WLAN_WPA2_H
 
 #include <stddef.h>
 #include <stdint.h>

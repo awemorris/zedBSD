@@ -101,7 +101,7 @@ __timer_sigev_thread_fork_child(
 	 * The fixed slot array intentionally needs no allocation or freeing
 	 * here. */
 	if (timer_service_ready) {
-		(void)timer_syscall(ZEDBSD_SYS_sigaction,
+		(void)timer_syscall(KERN_SYS_sigaction,
 				    LIBC_TIMER_WAKE_SIGNAL,
 				    (uintptr_t)&timer_previous_action, 0, 0);
 	}
@@ -165,7 +165,7 @@ timer_create(
 	/* Handles the event availability. */
 	if (event == NULL || event->sigev_notify != SIGEV_THREAD) {
 		/* Computes the function result. */
-		function_result = (int)timer_syscall(ZEDBSD_SYS_timer_create, clock,
+		function_result = (int)timer_syscall(KERN_SYS_timer_create, clock,
 					  (uintptr_t)event, (uintptr_t)result,
 					  0);
 
@@ -209,7 +209,7 @@ timer_create(
 	kernel_event.sigev_value.__sival_pad = public_id;
 
 	/* Handles a failed timer syscall operation. */
-	if (timer_syscall(ZEDBSD_SYS_timer_create, clock,
+	if (timer_syscall(KERN_SYS_timer_create, clock,
 			  (uintptr_t)&kernel_event, (uintptr_t)&kernel_id,
 			  0) < 0) {
 		error = errno;
@@ -257,7 +257,7 @@ timer_delete(
 	/* Handles a failed timer is libc id operation. */
 	if (!timer_is_libc_id(timer)) {
 		/* Computes the function result. */
-		function_result = (int)timer_syscall(ZEDBSD_SYS_timer_delete,
+		function_result = (int)timer_syscall(KERN_SYS_timer_delete,
 					  (uintptr_t)timer, 0, 0, 0);
 
 		/* Returns the computed result. */
@@ -277,7 +277,7 @@ timer_delete(
 	__atomic_store_n(&record->state, TIMER_SLOT_DELETING, __ATOMIC_RELEASE);
 
 	/* Handles a failed timer syscall operation. */
-	if (timer_syscall(ZEDBSD_SYS_timer_delete, (uintptr_t)record->kernel_id,
+	if (timer_syscall(KERN_SYS_timer_delete, (uintptr_t)record->kernel_id,
 			  0, 0, 0) < 0) {
 		error = errno;
 		__atomic_store_n(&record->state, TIMER_SLOT_ACTIVE,
@@ -325,7 +325,7 @@ timer_settime(
 	if (!timer_is_libc_id(timer)) {
 		/* Computes the function result. */
 		function_result = (int)timer_syscall(
-		    ZEDBSD_SYS_timer_settime, (uintptr_t)timer, flags,
+		    KERN_SYS_timer_settime, (uintptr_t)timer, flags,
 		    (uintptr_t)value, (uintptr_t)old_value);
 
 		/* Returns the computed result. */
@@ -342,7 +342,7 @@ timer_settime(
 		/* Reports operation failure. */
 		return -1;
 	}
-	result = timer_syscall(ZEDBSD_SYS_timer_settime,
+	result = timer_syscall(KERN_SYS_timer_settime,
 			       (uintptr_t)record->kernel_id, flags,
 			       (uintptr_t)value, (uintptr_t)old_value);
 	saved_errno = errno;
@@ -369,7 +369,7 @@ timer_gettime(
 	/* Handles a failed timer is libc id operation. */
 	if (!timer_is_libc_id(timer)) {
 		/* Computes the function result. */
-		function_result = (int)timer_syscall(ZEDBSD_SYS_timer_gettime,
+		function_result = (int)timer_syscall(KERN_SYS_timer_gettime,
 					  (uintptr_t)timer, (uintptr_t)value, 0,
 					  0);
 
@@ -388,7 +388,7 @@ timer_gettime(
 		return -1;
 	}
 	result =
-	    timer_syscall(ZEDBSD_SYS_timer_gettime,
+	    timer_syscall(KERN_SYS_timer_gettime,
 			  (uintptr_t)record->kernel_id, (uintptr_t)value, 0, 0);
 	saved_errno = errno;
 	(void)pthread_mutex_unlock(&timer_lock);
@@ -413,7 +413,7 @@ timer_getoverrun(
 	/* Handles a failed timer is libc id operation. */
 	if (!timer_is_libc_id(timer)) {
 		/* Computes the function result. */
-		function_result = (int)timer_syscall(ZEDBSD_SYS_timer_getoverrun,
+		function_result = (int)timer_syscall(KERN_SYS_timer_getoverrun,
 					  (uintptr_t)timer, 0, 0, 0);
 
 		/* Returns the computed result. */
@@ -430,7 +430,7 @@ timer_getoverrun(
 		/* Reports operation failure. */
 		return -1;
 	}
-	result = timer_syscall(ZEDBSD_SYS_timer_getoverrun,
+	result = timer_syscall(KERN_SYS_timer_getoverrun,
 			       (uintptr_t)record->kernel_id, 0, 0, 0);
 	saved_errno = errno;
 	(void)pthread_mutex_unlock(&timer_lock);
@@ -485,7 +485,7 @@ timer_service_start_locked(
 	action.sa_restorer = (uint64_t)(uintptr_t)__signal_restorer;
 
 	/* Handles a failed timer syscall operation. */
-	if (timer_syscall(ZEDBSD_SYS_sigaction, LIBC_TIMER_WAKE_SIGNAL,
+	if (timer_syscall(KERN_SYS_sigaction, LIBC_TIMER_WAKE_SIGNAL,
 			  (uintptr_t)&action, (uintptr_t)&timer_previous_action,
 			  0) < 0) {
 		error = errno;
@@ -500,7 +500,7 @@ timer_service_start_locked(
 
 	/* Handles an operation failure. */
 	if (error != 0) {
-		(void)timer_syscall(ZEDBSD_SYS_sigaction,
+		(void)timer_syscall(KERN_SYS_sigaction,
 				    LIBC_TIMER_WAKE_SIGNAL,
 				    (uintptr_t)&timer_previous_action, 0, 0);
 
@@ -649,9 +649,9 @@ timer_signal_handler(
 	 * the worker makes this safe even when the wake runs just before it
 	 * sleeps. */
 	(void)__atomic_add_fetch(&timer_wake_generation, 1, __ATOMIC_RELEASE);
-	(void)__syscall6(ZEDBSD_SYS_usync, (uintptr_t)&timer_wake_generation,
-			 ZEDBSD_USYNC_WAKE, 0, 0, UINT32_MAX,
-			 ZEDBSD_USYNC_PRIVATE);
+	(void)__syscall6(KERN_SYS_usync, (uintptr_t)&timer_wake_generation,
+			 KERN_USYNC_WAKE, 0, 0, UINT32_MAX,
+			 KERN_USYNC_PRIVATE);
 	(void)__atomic_sub_fetch(&record->handler_refs, 1, __ATOMIC_RELEASE);
 }
 
@@ -794,7 +794,7 @@ timer_worker(
 	 * signal, even when the thread that created the first timer had it
 	 * blocked.  Build the private bit directly because the public sigset
 	 * helpers intentionally reject every signal above SIGRTMAX. */
-	(void)timer_syscall(ZEDBSD_SYS_sigprocmask, SIG_UNBLOCK,
+	(void)timer_syscall(KERN_SYS_sigprocmask, SIG_UNBLOCK,
 			    (uintptr_t)&signal_set, 0, 0);
 
 	/* Continue until the operation reaches a terminal state. */
@@ -812,10 +812,10 @@ timer_worker(
 		/* Handles a failed atomic load n operation. */
 		if (__atomic_load_n(&timer_wake_generation, __ATOMIC_ACQUIRE) ==
 		    observed) {
-			(void)__syscall6(ZEDBSD_SYS_usync,
+			(void)__syscall6(KERN_SYS_usync,
 					 (uintptr_t)&timer_wake_generation,
-					 ZEDBSD_USYNC_WAIT, observed, 0, 0,
-					 ZEDBSD_USYNC_PRIVATE);
+					 KERN_USYNC_WAIT, observed, 0, 0,
+					 KERN_USYNC_PRIVATE);
 		}
 	}
 

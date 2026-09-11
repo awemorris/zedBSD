@@ -525,7 +525,7 @@ hal_cons_resume(
 	hal_cons_clear();
 }
 
-#ifdef ZEDBSD_INPUT_OWNERSHIP_TEST
+#ifdef KERN_INPUT_OWNERSHIP_TEST
 /*
  * Resets PC/AT keyboard ownership state for the focused host test.
  */

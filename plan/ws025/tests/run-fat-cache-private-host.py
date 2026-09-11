@@ -11,7 +11,7 @@ commands=[]
 for variant in ('ordinary','sanitize'):
  extra=[] if variant=='ordinary' else ['-fsanitize=address,undefined','-fno-omit-frame-pointer','--param','asan-globals=0']
  binary=str(out/variant)
- build=['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-DZEDBSD_USER_ABI_LP64','-ffunction-sections','-fdata-sections','-I.','-Iinclude','-Iinclude/uapi','-Isrc','-Ilibc/include',*extra,*sources,'-Wl,--gc-sections','-o',binary]
+ build=['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-DKERN_USER_ABI_LP64','-ffunction-sections','-fdata-sections','-I.','-Iinclude','-Iinclude/uapi','-Isrc','-Ilibc/include',*extra,*sources,'-Wl,--gc-sections','-o',binary]
  for name,args in ((variant+'-build',build),(variant,['timeout','60s',binary])):
   commands.append(dict(name=name,argv=args));(out/'commands.json').write_text(json.dumps(commands,indent=2)+'\n')
   r=subprocess.run(args,cwd=repo,capture_output=True,text=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=1','UBSAN_OPTIONS':'halt_on_error=1'})

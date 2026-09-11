@@ -10,12 +10,10 @@ ZEDBSD_NOCT_ROOT := $(if $(ZEDBSD_TOPLEVEL_BUILD),$(CURDIR),$(ZEDBSD_REPO_ROOT))
 ZEDBSD_NOCT_PACKAGE_ROOT := $(abspath $(ZEDBSD_NOCT_ROOT)/userland/base/noct)
 ZEDBSD_NOCT_DISTDIR := $(ZEDBSD_NOCT_PACKAGE_ROOT)/distfiles
 ZEDBSD_NOCT_DISTFILE := $(ZEDBSD_NOCT_DISTDIR)/$(ZEDBSD_NOCT_ARCHIVE_NAME)
+# Only the cross-build wiring stays local; the rest is upstream now.
 ZEDBSD_NOCT_PATCHES := \
 	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0001-connect-zedbsd-target-adapter.patch \
-	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0002-use-project-llvm-sysroot.patch \
-	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0003-terminal-partial-input-progress.patch \
-	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0004-transparent-beui-text.patch \
-	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0005-beui-display-input-state.patch
+	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0002-use-project-llvm-sysroot.patch
 ZEDBSD_NOCT_FETCH ?= curl --fail --location --silent --show-error
 ZEDBSD_NOCT_SHA256 ?= sha256sum
 

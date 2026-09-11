@@ -8,7 +8,7 @@ for mode in normal sanitize; do
     if [ "$mode" = sanitize ]; then
         flags='-fsanitize=address,undefined -fno-omit-frame-pointer'
     fi
-    ${CC:-cc} -std=c11 -O1 -g -DZEDBSD_USER_ABI_LP64 \
+    ${CC:-cc} -std=c11 -O1 -g -DKERN_USER_ABI_LP64 \
         -I"$repo/include" -I"$repo/include/uapi" -Wall -Wextra -Werror $flags \
         "$repo/src/kern/cache-memory.c" \
         "$repo/plan/ws025/tests/cache-memory-host.c" \

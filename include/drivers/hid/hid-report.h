@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_DRIVERS_HID_REPORT_H
-#define ZEDBSD_DRIVERS_HID_REPORT_H
+#ifndef KERN_DRIVERS_HID_REPORT_H
+#define KERN_DRIVERS_HID_REPORT_H
 
 #include "kern/input-capability.h"
 

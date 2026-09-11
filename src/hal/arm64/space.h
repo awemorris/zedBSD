@@ -1,5 +1,5 @@
-#ifndef ZEDBSD_HAL_ARM64_SPACE_H
-#define ZEDBSD_HAL_ARM64_SPACE_H
+#ifndef KERN_HAL_ARM64_SPACE_H
+#define KERN_HAL_ARM64_SPACE_H
 
 #include <hal/hal.h>
 

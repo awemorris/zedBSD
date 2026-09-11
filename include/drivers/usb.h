@@ -16,8 +16,8 @@
  * xHCI TRB/rings must remain private to their respective HCDs.
  */
 
-#ifndef ZEDBSD_DRIVERS_USB_H
-#define ZEDBSD_DRIVERS_USB_H
+#ifndef KERN_DRIVERS_USB_H
+#define KERN_DRIVERS_USB_H
 
 #include <stdbool.h>
 #include <stddef.h>

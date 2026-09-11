@@ -68,7 +68,7 @@ static const struct sysctl_leaf leaves[] = {
 };
 
 static struct spinlock hostname_lock;
-static char hostname[ZEDBSD_HOST_NAME_MAX + 1U] = "zedbsd";
+static char hostname[KERN_HOST_NAME_MAX + 1U] = "zedbsd";
 
 static int sysctl_writeback(const int *name, void *oldp, size_t *oldlenp, const void *newp, size_t newlen, int superuser);
 static int oid_compare(const int *a, unsigned alen, const int *b, unsigned blen);
@@ -203,7 +203,7 @@ kern_sysctl(
 				new_name = newp;
 				if (!superuser)
 					return EPERM;
-				if (newlen == 0 || newlen > ZEDBSD_HOST_NAME_MAX)
+				if (newlen == 0 || newlen > KERN_HOST_NAME_MAX)
 					return EINVAL;
 
 				/* Rejects a name with a terminator, slash, or whitespace. */

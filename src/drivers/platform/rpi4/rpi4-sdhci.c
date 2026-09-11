@@ -11,11 +11,11 @@
 
 #include "drivers/platform/rpi4/rpi4-sdhci.h"
 
-#include <hal/hal.h>
 #include <kern/disk.h>
 
 #include <errno.h>
 #include "kern/klog.h"
+#include "kern/device-io.h"
 
 #define DIRECT_BASE 0xffff000000000000ULL
 #define REG_BLOCK_SIZE 0x04
@@ -164,7 +164,7 @@ r32(
 	uint32_t function_result;
 
 	/* Obtains the hal mmio read32 result. */
-	function_result = hal_mmio_read32(unit.base + offset);
+	function_result = kern_mmio_read32(unit.base + offset);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -178,7 +178,7 @@ r16(
 	uint16_t function_result;
 
 	/* Obtains the hal mmio read16 result. */
-	function_result = hal_mmio_read16(unit.base + offset);
+	function_result = kern_mmio_read16(unit.base + offset);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -326,7 +326,7 @@ w8(
 	unsigned offset,
 	uint8_t value)
 {
-	hal_mmio_write8(unit.base + offset, value);
+	kern_mmio_write8(unit.base + offset, value);
 }
 
 /* Supports the counter operation. */
@@ -363,7 +363,7 @@ r8(
 	uint8_t function_result;
 
 	/* Obtains the hal mmio read8 result. */
-	function_result = hal_mmio_read8(unit.base + offset);
+	function_result = kern_mmio_read8(unit.base + offset);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -375,7 +375,7 @@ w32(
 	unsigned offset,
 	uint32_t value)
 {
-	hal_mmio_write32(unit.base + offset, value);
+	kern_mmio_write32(unit.base + offset, value);
 }
 
 /* Supports the set clock operation. */
@@ -421,7 +421,7 @@ w16(
 	unsigned offset,
 	uint16_t value)
 {
-	hal_mmio_write16(unit.base + offset, value);
+	kern_mmio_write16(unit.base + offset, value);
 }
 
 /* Supports the command operation. */

@@ -139,7 +139,7 @@ struct networkd_wifi_observation {
 
 struct networkd_wifi_pending {
 	struct networkd_request request;
-	struct zedbsd_peercred peer;
+	struct kern_peercred peer;
 	enum networkd_client_role role;
 };
 
@@ -153,7 +153,7 @@ struct networkd_control_input {
 	int active;
 	int descriptor;
 	uint64_t deadline;
-	struct zedbsd_peercred peer;
+	struct kern_peercred peer;
 	enum networkd_client_role role;
 	size_t used;
 	unsigned char bytes[NETWORKD_PROTOCOL_HEADER_MAX + NETWORKD_REQUEST_MAX + 1U];
@@ -179,13 +179,13 @@ static int control_listener = -1;
 static int (*wifi_wait_pump)(void);
 static struct networkd_control_input control_inputs[NETWORKD_CONTROL_INPUT_MAX];
 static int control_input_pending(void);
-static int receive_wait_request(struct networkd_request *, struct zedbsd_peercred *, enum networkd_client_role *);
+static int receive_wait_request(struct networkd_request *, struct kern_peercred *, enum networkd_client_role *);
 static int service_wifi_wait(void);
 static void remember_wifi_observation(const char *, const struct networkd_wifi_child_result *);
 static void clear_wifi_observation(size_t);
 static int append_wifi_snapshot(const char *, const char *, size_t, uint64_t, char *, size_t, size_t *);
 static void send_wifi_observation(int, const struct networkd_request *);
-static void wifi_profiles_changed(const struct zedbsd_peercred *);
+static void wifi_profiles_changed(const struct kern_peercred *);
 static void dispatch_pending_wifi(void);
 static void wifi_work_begin(uint32_t, int);
 static void wifi_work_end(void);
@@ -215,24 +215,24 @@ static int retire_removed_connection(enum networkd_managed_wlan_state);
 static int retire_managed_policy(void);
 static void notify_init(const char *record);
 static int write_all(int descriptor, const char *buffer, size_t length);
-static void write_auth_log(const struct zedbsd_peercred *peer,
+static void write_auth_log(const struct kern_peercred *peer,
 			   enum networkd_client_role role, int error);
-static int authenticate_client(int client, struct zedbsd_peercred *peer,
+static int authenticate_client(int client, struct kern_peercred *peer,
 			       enum networkd_client_role *role);
 static int operation_allowed(enum networkd_client_role role,
 			     const char *operation);
 static void handle_request(int, enum networkd_client_role,
-	const struct zedbsd_peercred *);
-static void dispatch_request(int, struct networkd_request *, enum networkd_client_role, const struct zedbsd_peercred *);
+	const struct kern_peercred *);
+static void dispatch_request(int, struct networkd_request *, enum networkd_client_role, const struct kern_peercred *);
 static void send_wired_observation(int, const struct networkd_request *);
 static void handle_wifi_request(int, struct networkd_request *,
-	const struct zedbsd_peercred *);
+	const struct kern_peercred *);
 static int wifi_request_list(struct networkd_wifi_request *);
-static int wifi_request_enable(struct networkd_wifi_request *, const struct zedbsd_peercred *);
+static int wifi_request_enable(struct networkd_wifi_request *, const struct kern_peercred *);
 static int wifi_request_stop(struct networkd_wifi_request *, int);
 static int wifi_request_connect(struct networkd_wifi_request *, const struct networkd_request *);
 static int wifi_request_prepare(struct networkd_wifi_request *);
-static void process_wifi_request(int, struct networkd_request *, const struct zedbsd_peercred *);
+static void process_wifi_request(int, struct networkd_request *, const struct kern_peercred *);
 static int read_request(int descriptor, struct networkd_request *request);
 static int read_request_end(int descriptor);
 static int decode_request(struct networkd_request *request);
@@ -277,7 +277,7 @@ static int acquire_managed_l3(const char *, uint64_t);
 static int reconcile_pending_l3(void);
 static const struct wifi_conf_profile *find_profile(const struct wifi_conf_model *, const void *, size_t);
 static int load_policy(uid_t, struct wifi_conf_model *, char *, size_t);
-static int owner_allowed(const struct zedbsd_peercred *);
+static int owner_allowed(const struct kern_peercred *);
 static const char *managed_state_name(enum networkd_managed_wlan_state);
 static int append_managed_status(char *, size_t, size_t *);
 static int snapshot_interface_l3(const char *, uint32_t *, struct networkd_managed_l3 *);
@@ -315,7 +315,7 @@ main(
 	int poll_timeout;
 	size_t index;
 	struct pollfd descriptors[2];
-	struct zedbsd_peercred peer;
+	struct kern_peercred peer;
 	enum networkd_client_role role;
 	struct networkd_listener listener;
 
@@ -1508,7 +1508,7 @@ notify_init(
 {
 	const char *value;
 
-	value = getenv("ZEDBSD_NOTIFY_FD");
+	value = getenv("KERN_NOTIFY_FD");
 
 	/* Handles the value availability. */
 	if (value == NULL || strcmp(value, "3") != 0)
@@ -1549,7 +1549,7 @@ write_all(
 /* Records the peer credential decision without exposing request contents. */
 static void
 write_auth_log(
-	const struct zedbsd_peercred *peer,
+	const struct kern_peercred *peer,
 	enum networkd_client_role role,
 	int error)
 {
@@ -1587,7 +1587,7 @@ write_auth_log(
 static int
 authenticate_client(
 	int client,
-	struct zedbsd_peercred *peer,
+	struct kern_peercred *peer,
 	enum networkd_client_role *role)
 {
 	socklen_t length;
@@ -1661,7 +1661,7 @@ static void
 handle_request(
 	int client,
 	enum networkd_client_role role,
-	const struct zedbsd_peercred *peer)
+	const struct kern_peercred *peer)
 {
 	struct networkd_request request;
 
@@ -1680,7 +1680,7 @@ dispatch_request(
 	int client,
 	struct networkd_request *request,
 	enum networkd_client_role role,
-	const struct zedbsd_peercred *peer)
+	const struct kern_peercred *peer)
 {
 	char response[NETWORKD_RESPONSE_MAX];
 	char diagnostic[CHILD_OUTPUT_MAX];
@@ -2192,7 +2192,7 @@ wifi_request_list(
 static int
 wifi_request_enable(
 	struct networkd_wifi_request *work,
-	const struct zedbsd_peercred *peer)
+	const struct kern_peercred *peer)
 {
 	if (wifi_disable_pending) {
 		errno = EBUSY;
@@ -2354,7 +2354,7 @@ static void
 process_wifi_request(
 	int client,
 	struct networkd_request *request,
-	const struct zedbsd_peercred *peer)
+	const struct kern_peercred *peer)
 {
 	struct networkd_wifi_request work;
 	uint32_t opcode;
@@ -2648,7 +2648,7 @@ send_wired_observation(
 /* Preserves local profile publication while waking the applicable policy only. */
 static void
 wifi_profiles_changed(
-	const struct zedbsd_peercred *peer)
+	const struct kern_peercred *peer)
 {
 	size_t index;
 
@@ -2698,7 +2698,7 @@ control_input_pending(
 static int
 receive_wait_request(
 	struct networkd_request *request,
-	struct zedbsd_peercred *peer,
+	struct kern_peercred *peer,
 	enum networkd_client_role *role)
 {
 	struct networkd_control_input *input;
@@ -2818,7 +2818,7 @@ service_wifi_wait(
 	void)
 {
 	struct networkd_request request;
-	struct zedbsd_peercred peer;
+	struct kern_peercred peer;
 	enum networkd_client_role role;
 	int client;
 	int error;
@@ -2933,7 +2933,7 @@ static void
 handle_wifi_request(
 	int client,
 	struct networkd_request *request,
-	const struct zedbsd_peercred *peer)
+	const struct kern_peercred *peer)
 {
 	wifi_work_begin(request->header.opcode, 0);
 	process_wifi_request(client, request, peer);
@@ -4027,7 +4027,7 @@ load_policy(
 /* Tests whether one peer may control the currently enabled policy. */
 static int
 owner_allowed(
-	const struct zedbsd_peercred *peer)
+	const struct kern_peercred *peer)
 {
 	/* Root may override; other admitted peers must own the active policy. */
 	if (peer == NULL)

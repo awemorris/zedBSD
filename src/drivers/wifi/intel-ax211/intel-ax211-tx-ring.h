@@ -52,8 +52,8 @@
  * SPDX-License-Identifier: ISC AND BSD-3-Clause
  */
 
-#ifndef ZEDBSD_DRIVERS_INTEL_AX211_TX_RING_H
-#define ZEDBSD_DRIVERS_INTEL_AX211_TX_RING_H
+#ifndef KERN_DRIVERS_INTEL_AX211_TX_RING_H
+#define KERN_DRIVERS_INTEL_AX211_TX_RING_H
 
 #include <drivers/dma.h>
 

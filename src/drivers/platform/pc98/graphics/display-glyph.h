@@ -9,8 +9,8 @@
  * zedBSD graphics PC-98 CGROM glyph backend.
  */
 
-#ifndef ZEDBSD_DRIVERS_GRAPHICS_PC98_DISPLAY_GLYPH_H
-#define ZEDBSD_DRIVERS_GRAPHICS_PC98_DISPLAY_GLYPH_H
+#ifndef KERN_DRIVERS_GRAPHICS_PC98_DISPLAY_GLYPH_H
+#define KERN_DRIVERS_GRAPHICS_PC98_DISPLAY_GLYPH_H
 
 #include "drivers/platform/pc98/graphics/display.h"
 #include "drivers/platform/pc98/graphics/display-gdc.h"

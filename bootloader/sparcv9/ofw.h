@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_SPARCV9_OFW_H
-#define ZEDBSD_SPARCV9_OFW_H
+#ifndef KERN_SPARCV9_OFW_H
+#define KERN_SPARCV9_OFW_H
 
 typedef unsigned long ofw_cell_t;
 typedef long ofw_scell_t;

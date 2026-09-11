@@ -14,9 +14,9 @@
 #include "kern/net/net-device.h"
 
 #include <errno.h>
-#include <hal/hal.h>
 #include <stdint.h>
 #include <string.h>
+#include "kern/irq.h"
 
 #define NE2000_IO_BASE 0x0300U
 #define NE2000_DATA_OFFSET 0x0010U
@@ -49,7 +49,7 @@ static uint8_t ne2000_read_data8(void *cookie);
 static uint16_t ne2000_read_data16(void *cookie);
 static void ne2000_write_data16(void *cookie, uint16_t value);
 static int ne2000_reset(void *cookie);
-static void ne2000_irq_handler(int irq, hal_irq_ack_t acknowledge, void *argument);
+static void ne2000_irq_handler(int irq, kern_irq_ack_t acknowledge, void *argument);
 
 /* Device operation and registration tables. */
 static const struct dp8390_bus_ops ne2000_bus_ops = {
@@ -104,8 +104,8 @@ drv_pcat_ne2000_init(void)
 		error = net_device_create(ne2000.device);
 	if (error == 0) {
 		/* Checks the hal irq set handler result. */
-		if (hal_irq_register((int)ne2000.irq, ne2000_irq_handler,
-					&ne2000) == HAL_OK)
+		if (kern_irq_register((int)ne2000.irq, ne2000_irq_handler,
+					&ne2000) == 0)
 			irq_registered = 1;
 		else
 			error = EBUSY;
@@ -115,17 +115,17 @@ drv_pcat_ne2000_init(void)
 	if (error == 0)
 		error = net_device_open(ne2000.device);
 	if (error == 0) {
-		hal_irq_unmask((int)ne2000.irq);
+		kern_irq_unmask((int)ne2000.irq);
 
 		/* Succeeded. */
 		return 0;
 	}
 
-	hal_irq_mask((int)ne2000.irq);
+	kern_irq_mask((int)ne2000.irq);
 
 	/* Handles the irq registered condition. */
 	if (irq_registered)
-		(void)hal_irq_unregister((int)ne2000.irq, ne2000_irq_handler,
+		(void)kern_irq_unregister((int)ne2000.irq, ne2000_irq_handler,
 					 NULL);
 
 	/* Handles the ne2000 condition. */
@@ -301,14 +301,14 @@ ne2000_reset(
 static void
 ne2000_irq_handler(
 	int irq,
-	hal_irq_ack_t acknowledge,
+	kern_irq_ack_t acknowledge,
 	void *argument)
 {
 	struct pcat_ne2000 *state = argument;
 
 	(void)irq;
 	drv_dp8390_interrupt(&state->dp);
-	hal_irq_send_eoi(acknowledge);
+	kern_irq_send_eoi(acknowledge);
 }
 
 /*

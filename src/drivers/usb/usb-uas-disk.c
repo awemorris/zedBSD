@@ -10,7 +10,6 @@
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
-#include <hal/hal.h>
 #include <errno.h>
 #include <string.h>
 #include "kern/klog.h"
@@ -519,7 +518,7 @@ uas_control_worker(void *argument)
 	while (!atomic_raw_load_acquire(&owner->control_ready)) {
 		if (atomic_raw_load_acquire(&owner->control_stopping))
 			return;
-		kernel_wait_task();
+		kern_thread_block();
 	}
 	while (!atomic_raw_load_acquire(&owner->control_stopping)) {
 		mutex_lock(&owner->control_lock);

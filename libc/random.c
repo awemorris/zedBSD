@@ -13,7 +13,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#if defined(ZEDBSD_DYNAMIC_LIBC) || defined(ZEDBSD_STATIC_TLS)
+#if defined(KERN_DYNAMIC_LIBC) || defined(KERN_STATIC_TLS)
 #define RANDOM_THREAD_LOCAL _Thread_local
 #else
 #define RANDOM_THREAD_LOCAL

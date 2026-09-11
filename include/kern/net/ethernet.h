@@ -4,8 +4,8 @@
  *
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_KERN_NET_ETHERNET_H
-#define ZEDBSD_KERN_NET_ETHERNET_H
+#ifndef KERN_KERN_NET_ETHERNET_H
+#define KERN_KERN_NET_ETHERNET_H
 
 #include <stddef.h>
 #include <stdint.h>

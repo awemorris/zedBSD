@@ -96,7 +96,7 @@ swapon_all(void)
 			failed = 1;
 			break;
 		}
-		if (SWAP_COMMAND_IOCTL(descriptor, ZEDBSD_SYSTEM_SWAP_ADD, &control) != 0) {
+		if (SWAP_COMMAND_IOCTL(descriptor, KERN_SYSTEM_SWAP_ADD, &control) != 0) {
 			error = errno;
 			if (error == EEXIST || (nofail && (error == ENOENT || error == ENODEV)))
 				continue;
@@ -129,7 +129,7 @@ main(
 		return swapon_all();
 
 	/* Obtains the swap command main result. */
-	function_result = swap_command_main("swapon", ZEDBSD_SYSTEM_SWAP_ADD, argc, argv);
+	function_result = swap_command_main("swapon", KERN_SYSTEM_SWAP_ADD, argc, argv);
 
 	/* Returns the computed result. */
 	return function_result;

@@ -11,8 +11,8 @@
  * The native PC-98 GDC display-switching contract.
  */
 
-#ifndef ZEDBSD_PLATFORM_PC98_DISPLAY_H
-#define ZEDBSD_PLATFORM_PC98_DISPLAY_H
+#ifndef KERN_PLATFORM_PC98_DISPLAY_H
+#define KERN_PLATFORM_PC98_DISPLAY_H
 
 int pc98_display_graphics_start(void);
 int pc98_display_graphics_stop(void);

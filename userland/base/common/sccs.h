@@ -11,8 +11,8 @@
  * Declares shared userland sccs support.
  */
 
-#ifndef ZEDBSD_USERLAND_SCCS_H
-#define ZEDBSD_USERLAND_SCCS_H
+#ifndef KERN_USERLAND_SCCS_H
+#define KERN_USERLAND_SCCS_H
 
 #include <stddef.h>
 

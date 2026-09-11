@@ -11,8 +11,8 @@
  * Declares the zedBSD userland service command interface.
  */
 
-#ifndef ZEDBSD_SERVICE_COMMAND_H
-#define ZEDBSD_SERVICE_COMMAND_H
+#ifndef KERN_SERVICE_COMMAND_H
+#define KERN_SERVICE_COMMAND_H
 
 #include "userland/base/service/zsv1-client.h"
 

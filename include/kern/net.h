@@ -9,8 +9,8 @@
  * Network stack
  */
 
-#ifndef ZEDBSD_KERN_NET_H
-#define ZEDBSD_KERN_NET_H
+#ifndef KERN_KERN_NET_H
+#define KERN_KERN_NET_H
 
 #include <stddef.h>
 #include <stdint.h>

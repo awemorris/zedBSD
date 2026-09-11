@@ -16,7 +16,6 @@
 #include <drivers/pci-xhci-lifecycle.h>
 #include <drivers/usb.h>
 
-#include <hal/hal.h>
 #include <kern/atomic.h>
 #include <kern/io-stats.h>
 #include <kern/lock.h>
@@ -28,11 +27,14 @@
 #include <string.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
+#include "kern/device-io.h"
+#include "kern/irq.h"
+#include "kern/panic.h"
 
 #define XHCI_USBCMD 0x00U
 
-#ifndef ZEDBSD_XHCI_IMOD
-#define ZEDBSD_XHCI_IMOD 4000U
+#ifndef KERN_XHCI_IMOD
+#define KERN_XHCI_IMOD 4000U
 #endif
 
 #define XHCI_USBSTS 0x04U
@@ -311,7 +313,7 @@ static int xhci_guarded_root_port_reset(struct drv_usb_hcd *h, unsigned port);
 static int xhci_attach(struct drv_pci_device *d, const struct drv_pci_id *id);
 static int xhci_detach(struct drv_pci_device *d, unsigned flags);
 
-_Static_assert(ZEDBSD_XHCI_IMOD <= 65535U, "xHCI IMOD interval range");
+_Static_assert(KERN_XHCI_IMOD <= 65535U, "xHCI IMOD interval range");
 
 /* Device operation and registration tables. */
 static const struct drv_usb_hcd_ops xhci_ops = {
@@ -416,7 +418,7 @@ wr32(
 {
 	*(volatile uint32_t *)(b + o) = v;
 
-	hal_io_mb();
+	kern_io_barrier();
 }
 /* Writes one byte of a controller register. */
 static void
@@ -426,7 +428,7 @@ wr8(
 	uint8_t v)
 {
 	b[o] = v;
-	hal_io_mb();
+	kern_io_barrier();
 }
 /* Writes one 64-bit controller register, low half first. */
 static void
@@ -820,9 +822,9 @@ ring_push(
 	t->parameter_low = (uint32_t)parameter;
 	t->parameter_high = (uint32_t)(parameter >> 32);
 	t->status = status;
-	hal_io_wmb();
+	kern_io_write_barrier();
 	t->control = control | (r->cycle ? XHCI_TRB_CYCLE : 0);
-	hal_io_wmb();
+	kern_io_write_barrier();
 
 	/* Handles the r condition. */
 	if (++r->enqueue == XHCI_RING_TRBS - 1U) {
@@ -830,10 +832,10 @@ ring_push(
 		t->parameter_low = (uint32_t)r->dma.device_address;
 		t->parameter_high = (uint32_t)(r->dma.device_address >> 32);
 		t->status = 0;
-		hal_io_wmb();
+		kern_io_write_barrier();
 		t->control = XHCI_TRB_TYPE(6) | 0x2U |
 			     (control & XHCI_TRB_CHAIN) | (r->cycle ? 1U : 0U);
-		hal_io_wmb();
+		kern_io_write_barrier();
 		r->enqueue = 0;
 		r->cycle ^= 1U;
 	}
@@ -854,7 +856,7 @@ event_take(
 	/* Handles the control condition. */
 	if ((control & 1U) != c->event_cycle)
 		return 0;
-	hal_io_rmb();
+	kern_io_read_barrier();
 	*out = *t;
 	/* Classifies the current input character. */
 	if (++c->event_dequeue == XHCI_RING_TRBS) {
@@ -877,7 +879,7 @@ event_lock(
 {
 	/* Continue while the operation condition remains true. */
 	while (__atomic_exchange_n(&c->event_busy, 1U, __ATOMIC_ACQUIRE))
-		hal_compiler_barrier();
+		kern_compiler_barrier();
 }
 
 /* Gives that lock back. */
@@ -931,7 +933,7 @@ command_ex(
 	unsigned n, type;
 	uint64_t command_address;
 	uint32_t iman;
-	bool enabled = hal_irq_disable();
+	bool enabled = kern_irq_disable();
 	int result = ETIMEDOUT;
 
 	/* Handles the completion condition. */
@@ -941,9 +943,9 @@ command_ex(
 	while (__atomic_exchange_n(&c->command_busy, 1U, __ATOMIC_ACQUIRE)) {
 		/* Handles the enabled condition. */
 		if (enabled)
-			hal_irq_enable();
+			kern_irq_enable();
 		sched_yield();
-		enabled = hal_irq_disable();
+		enabled = kern_irq_disable();
 	}
 
 	/* Checks the operation status. */
@@ -952,7 +954,7 @@ command_ex(
 
 		/* Handles the enabled condition. */
 		if (enabled)
-			hal_irq_enable();
+			kern_irq_enable();
 
 		/* Failed. */
 		return EIO;
@@ -1046,7 +1048,7 @@ command_ex(
 
 	/* Handles the enabled condition. */
 	if (enabled)
-		hal_irq_enable();
+		kern_irq_enable();
 
 	/*
 	 * Transfer Events consumed while polling are claimed before event_lock
@@ -1394,7 +1396,7 @@ xhci_default_owner_release(
 
 	/* Checks the hal atomic compare exchange acq rel result. */
 	expected = d->slot;
-	if (hal_atomic_compare_exchange_acq_rel(&c->default_slot, &expected,
+	if (atomic_raw_compare_exchange(&c->default_slot, &expected,
 						0U))
 		d->default_owned = 0;
 }
@@ -1449,7 +1451,7 @@ xhci_device_release(
 	/* Handles the address availability. */
 	if (c->dcbaa.address != NULL && d->slot <= c->max_slots) {
 		((uint64_t *)c->dcbaa.address)[d->slot] = 0;
-		hal_io_wmb();
+		kern_io_write_barrier();
 	}
 
 	/* Process each element required by the operation. */
@@ -1489,7 +1491,7 @@ xhci_device_enable(
 	unsigned slot = 0;
 
 	/* Checks the hal atomic load acquire result. */
-	if (hal_atomic_load_acquire(&c->default_slot) != 0)
+	if (atomic_raw_load_acquire(&c->default_slot) != 0)
 		return EBUSY;
 
 	/* Checks the current descriptor. */
@@ -1580,7 +1582,7 @@ xhci_device_enable(
 
 	/* Checks the hal atomic compare exchange acq rel result. */
 	expected = 0;
-	if (!hal_atomic_compare_exchange_acq_rel(&c->default_slot, &expected,
+	if (!atomic_raw_compare_exchange(&c->default_slot, &expected,
 						 slot)) {
 		e = EBUSY;
 		goto fail;
@@ -1909,7 +1911,7 @@ xhci_streams_configure(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep,
 	control[1] = 1U | (1U << dci);
 	fill_slot(c, d, input + c->context_size, d->context_entries);
 	fill_endpoint(c, input + (dci + 1) * c->context_size, ep, &encoded);
-	hal_io_wmb();
+	kern_io_write_barrier();
 	error = command(c, d->input_context.device_address, 0,
 	    XHCI_TRB_TYPE(12) | XHCI_TRB_SLOT(d->slot), NULL);
 	/* Failure retains array/rings; core quarantines the device before reopening. */
@@ -3186,7 +3188,7 @@ xhci_urb_unreserve(
 	if (reservation->vector != NULL) {
 		/* Checks the drv dma vector free result. */
 		if (drv_dma_vector_free(reservation->vector) != 0)
-			HAL_FATAL("xHCI reservation DMA retirement failed");
+			KERN_FATAL("xHCI reservation DMA retirement failed");
 	} else {
 		drv_dma_free_coherent(hcd->dma, &reservation->backing);
 	}
@@ -3524,7 +3526,7 @@ xhci_endpoint_state(
 	}
 	context = (volatile uint32_t *)((uint8_t *)d->output_context.address +
 					(size_t)dci * c->context_size);
-	hal_io_rmb();
+	kern_io_read_barrier();
 
 	/* Returns the computed result. */
 	return context[0] & 7U;
@@ -4919,7 +4921,7 @@ xhci_start(
 	wr32(c->runtime, 0x28U, 1);
 	wr64(c->runtime, 0x30U, c->erst_memory.device_address);
 	wr64(c->runtime, 0x38U, c->event_memory.device_address);
-	wr32(c->runtime, 0x24U, ZEDBSD_XHCI_IMOD);
+	wr32(c->runtime, 0x24U, KERN_XHCI_IMOD);
 	wr32(c->runtime, 0x20U, 2U);
 	wr32(c->operational, XHCI_CONFIG, c->max_slots);
 	wr32(c->operational, XHCI_USBSTS, 0xffffffffU);
@@ -5345,7 +5347,7 @@ xhci_attach(
 		goto fail;
 	}
 
-	hal_io_mb();
+	kern_io_barrier();
 
 	c->capability = c->mapping.address;
 	memset(&snapshot, 0, sizeof(snapshot));

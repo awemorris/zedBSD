@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_STDIO_INTERNAL_H
-#define ZEDBSD_STDIO_INTERNAL_H
+#ifndef KERN_STDIO_INTERNAL_H
+#define KERN_STDIO_INTERNAL_H
 
 #include <stdio.h>
 #include <stdint.h>

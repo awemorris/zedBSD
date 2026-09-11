@@ -12,11 +12,12 @@
 #include <drivers/pci-pcat.h>
 #include <drivers/pci.h>
 #include <errno.h>
-#include <hal/hal.h>
 #include <kern/pmem.h>
 #include <string.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
+#include "kern/device-io.h"
+#include "kern/irq.h"
 
 #define PCI_CONFIG_ADDRESS 0x0cf8U
 #define PCI_CONFIG_DATA 0x0cfcU
@@ -76,7 +77,7 @@ drv_pci_pcat_init(
 {
 	int function_result;
 
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 	uint32_t value0, value4;
 	const struct drv_pci_address address0 = {0, 0, 0, 0};
 	const struct drv_pci_address address4 = {0, 0, 4, 0};
@@ -94,12 +95,12 @@ drv_pci_pcat_init(
 
 	/* Checks the ecam function address result. */
 	if (ecam_function_address(&(const struct drv_pci_address){0, 0, 0, 0},
-				  &ecam) == HAL_OK) {
+				  &ecam) == 0) {
 		kern_logf("pci: ECAM segment 0000 bus 00 at %08x:%08x\n",
 			   (uint32_t)((uint64_t)ecam >> 32), (uint32_t)ecam);
 	}
 
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 	value0 = 0;
 	value4 = 0;
 	(void)pcat_config_read(NULL, &address0, 0, 4, &value0);
@@ -151,7 +152,7 @@ ecam_function_address(
 	(void)result;
 
 	/* Returns the computed result. */
-	return HAL_ERR_UNSUPPORTED;
+	return ENOTSUP;
 #endif
 }
 
@@ -243,7 +244,7 @@ ecam_map(
 	error =
 		amd64_acpi_ecam_pointer(address->segment, address->bus,
 					address->device, address->function,
-					result) == HAL_OK
+					result) == 0
 			? 0
 			: ENOTSUP;
 
@@ -264,7 +265,7 @@ static bool
 lock_enter(
 	void)
 {
-	bool enabled = hal_irq_disable();
+	bool enabled = kern_irq_disable();
 
 	/* Continue while the operation condition remains true. */
 	while (__atomic_exchange_n(&config_lock, 1U, __ATOMIC_ACQUIRE) != 0)
@@ -317,7 +318,7 @@ lock_leave(
 
 	/* Handles the enabled condition. */
 	if (enabled)
-		hal_irq_enable();
+		kern_irq_enable();
 }
 
 /* Supports the pcat config write operation. */
@@ -355,7 +356,7 @@ pcat_config_write(
 			*(volatile uint32_t *)(base + offset) = value;
 		}
 
-		hal_io_mb();
+		kern_io_barrier();
 
 		/* Succeeded. */
 		return 0;
@@ -444,13 +445,13 @@ pcat_map_bar(
 		return ENOMEM;
 	memory->paddr = bar->bus_address;
 	memory->size = (size_t)bar->size;
-	attr = HAL_SPACE_READ | HAL_SPACE_WRITE |
-		((flags & DRV_PCI_MAP_WRITETHROUGH) ? HAL_SPACE_WRITETHRU
-						    : HAL_SPACE_NOCACHE);
+	attr = KERN_PROT_READ | KERN_PROT_WRITE |
+		((flags & DRV_PCI_MAP_WRITETHROUGH) ? KERN_DEVICE_WRITETHROUGH
+						    : KERN_DEVICE_UNCACHED);
 
 	/* Checks the device mapping result. */
-	if (hal_space_map_device(memory->paddr, memory->size, attr,
-				 &address) != HAL_OK) {
+	if (kern_device_map(memory->paddr, memory->size, attr,
+				 &address) != 0) {
 		/* The initial PC/AT HAL exposes one 16-MiB PCI MMIO window. */
 		/* A 64-bit BAR may still be reassigned below 4 GiB. */
 		if ((bar->type != DRV_PCI_BAR_MEMORY32 &&
@@ -493,8 +494,8 @@ pcat_map_bar(
 		memory->paddr = assigned;
 
 		/* Checks the device mapping result. */
-		if (hal_space_map_device(memory->paddr, memory->size, attr,
-					 &address) != HAL_OK) {
+		if (kern_device_map(memory->paddr, memory->size, attr,
+					 &address) != 0) {
 			kern_free(memory);
 
 			/* Failed. */
@@ -513,7 +514,7 @@ pcat_map_bar(
 	/* Handles the record availability. */
 	record = kern_malloc(sizeof(*record));
 	if (record == NULL) {
-		(void)hal_space_unmap_device(mapping->address, memory->size);
+		(void)kern_device_unmap(mapping->address, memory->size);
 		kern_free(memory);
 		memset(mapping, 0, sizeof(*mapping));
 
@@ -589,7 +590,7 @@ pcat_unmap_bar(
 		kern_free(record);
 	}
 
-	(void)hal_space_unmap_device(mapping->address, memory->size);
+	(void)kern_device_unmap(mapping->address, memory->size);
 	kern_free(memory);
 	memset(mapping, 0, sizeof(*mapping));
 }

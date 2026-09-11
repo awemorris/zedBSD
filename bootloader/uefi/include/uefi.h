@@ -1,7 +1,7 @@
 /* Minimal UEFI x64 declarations used by the zedBSD loader. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_BOOTLOADER_UEFI_H
-#define ZEDBSD_BOOTLOADER_UEFI_H
+#ifndef KERN_BOOTLOADER_UEFI_H
+#define KERN_BOOTLOADER_UEFI_H
 
 #include <stddef.h>
 #include <stdint.h>

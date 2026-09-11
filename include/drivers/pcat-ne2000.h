@@ -8,8 +8,8 @@
 /*
  * PC/AT ISA NE2000 Ethernet driver
  */
-#ifndef ZEDBSD_DRIVERS_PCAT_NE2000_H
-#define ZEDBSD_DRIVERS_PCAT_NE2000_H
+#ifndef KERN_DRIVERS_PCAT_NE2000_H
+#define KERN_DRIVERS_PCAT_NE2000_H
 
 int
 drv_pcat_ne2000_init(void);

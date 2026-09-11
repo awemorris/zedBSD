@@ -59,7 +59,7 @@ struct stat {
 	struct timespec st_ctim;
 	blksize_t st_blksize;
 	blkcnt_t st_blocks;
-#ifndef ZEDBSD_USER_ABI_LP64
+#ifndef KERN_USER_ABI_LP64
 } __attribute__((packed, aligned(4)));
 #else
 };
@@ -69,7 +69,7 @@ struct stat {
 #define st_mtime st_mtim.tv_sec
 #define st_ctime st_ctim.tv_sec
 
-#ifdef ZEDBSD_USER_ABI_LP64
+#ifdef KERN_USER_ABI_LP64
 _Static_assert(sizeof(struct timespec) == 16, "LP64 timespec ABI");
 _Static_assert(sizeof(struct stat) == 112, "LP64 stat ABI");
 _Static_assert(__builtin_offsetof(struct stat, st_ino) == 8, "LP64 stat ino");

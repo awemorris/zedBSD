@@ -132,16 +132,16 @@ block_identity_resolve(
 
 	/* Splits an identity selector into the field and the value. */
 	if (strncmp(selector, "UUID=", 5U) == 0) {
-		required = ZEDBSD_BLKID_UUID;
+		required = KERN_BLKID_UUID;
 		value = selector + 5U;
 	} else if (strncmp(selector, "LABEL=", 6U) == 0) {
-		required = ZEDBSD_BLKID_LABEL;
+		required = KERN_BLKID_LABEL;
 		value = selector + 6U;
 	} else if (strncmp(selector, "PARTUUID=", 9U) == 0) {
-		required = ZEDBSD_BLKID_PARTUUID;
+		required = KERN_BLKID_PARTUUID;
 		value = selector + 9U;
 	} else if (strncmp(selector, "PARTLABEL=", 10U) == 0) {
-		required = ZEDBSD_BLKID_PARTLABEL;
+		required = KERN_BLKID_PARTLABEL;
 		value = selector + 10U;
 	} else {
 		return EINVAL;
@@ -157,8 +157,8 @@ block_identity_resolve(
 			continue;
 
 		/* A partition field needs no header read. */
-		if (required == ZEDBSD_BLKID_PARTUUID ||
-		    required == ZEDBSD_BLKID_PARTLABEL) {
+		if (required == KERN_BLKID_PARTUUID ||
+		    required == KERN_BLKID_PARTLABEL) {
 			memset(&identity, 0, sizeof(identity));
 			partition_identity_fill(candidate, &identity);
 			if (identity.flags != 0U)
@@ -290,14 +290,14 @@ partition_identity_fill(
 	if ((part->p_flags & PARTITION_HAS_UUID) != 0U) {
 		memcpy(identity->partuuid, part->p_uuid, sizeof(identity->partuuid));
 		identity->partuuid[sizeof(identity->partuuid) - 1U] = '\0';
-		identity->flags |= ZEDBSD_BLKID_PARTUUID;
+		identity->flags |= KERN_BLKID_PARTUUID;
 	}
 
 	/* Copies the label supplied by the same pinned record. */
 	if ((part->p_flags & PARTITION_HAS_LABEL) != 0U) {
 		memcpy(identity->partlabel, part->p_label, sizeof(identity->partlabel));
 		identity->partlabel[sizeof(identity->partlabel) - 1U] = '\0';
-		identity->flags |= ZEDBSD_BLKID_PARTLABEL;
+		identity->flags |= KERN_BLKID_PARTLABEL;
 	}
 }
 
@@ -307,7 +307,7 @@ swap_identify(
 	struct disk *disk,
 	struct block_identity *identity)
 {
-	uint8_t header[ZEDBSD_SWAP_HEADER_SIZE];
+	uint8_t header[KERN_SWAP_HEADER_SIZE];
 	struct swap_header_info info;
 	uint64_t bytes;
 	int error;
@@ -340,12 +340,12 @@ swap_identify(
 	/* Describes the swap area by type, UUID, and label. */
 	memset(identity, 0, sizeof(*identity));
 	strcpy(identity->type, "swap");
-	identity->flags = ZEDBSD_BLKID_TYPE;
+	identity->flags = KERN_BLKID_TYPE;
 	if (swap_header_uuid_format(&info, identity->uuid, sizeof(identity->uuid)) == 0)
-		identity->flags |= ZEDBSD_BLKID_UUID;
+		identity->flags |= KERN_BLKID_UUID;
 	if (info.label[0] != '\0') {
 		strcpy(identity->label, info.label);
-		identity->flags |= ZEDBSD_BLKID_LABEL;
+		identity->flags |= KERN_BLKID_LABEL;
 	}
 
 	/* Reports the swap identity. */
@@ -359,19 +359,19 @@ identity_merge_filesystem(
 	const struct block_identity *filesystem)
 {
 	/* Copies each field the filesystem provides. */
-	if ((filesystem->flags & ZEDBSD_BLKID_TYPE) != 0U) {
+	if ((filesystem->flags & KERN_BLKID_TYPE) != 0U) {
 		memcpy(identity->type, filesystem->type, sizeof(identity->type));
-		identity->flags |= ZEDBSD_BLKID_TYPE;
+		identity->flags |= KERN_BLKID_TYPE;
 	}
 
-	if ((filesystem->flags & ZEDBSD_BLKID_UUID) != 0U) {
+	if ((filesystem->flags & KERN_BLKID_UUID) != 0U) {
 		memcpy(identity->uuid, filesystem->uuid, sizeof(identity->uuid));
-		identity->flags |= ZEDBSD_BLKID_UUID;
+		identity->flags |= KERN_BLKID_UUID;
 	}
 
-	if ((filesystem->flags & ZEDBSD_BLKID_LABEL) != 0U) {
+	if ((filesystem->flags & KERN_BLKID_LABEL) != 0U) {
 		memcpy(identity->label, filesystem->label, sizeof(identity->label));
-		identity->flags |= ZEDBSD_BLKID_LABEL;
+		identity->flags |= KERN_BLKID_LABEL;
 	}
 }
 
@@ -436,11 +436,11 @@ identity_field(
 	unsigned required)
 {
 	/* Maps each selector kind onto its field. */
-	if (required == ZEDBSD_BLKID_UUID)
+	if (required == KERN_BLKID_UUID)
 		return identity->uuid;
-	if (required == ZEDBSD_BLKID_LABEL)
+	if (required == KERN_BLKID_LABEL)
 		return identity->label;
-	if (required == ZEDBSD_BLKID_PARTUUID)
+	if (required == KERN_BLKID_PARTUUID)
 		return identity->partuuid;
 
 	/* The remaining kind is the partition label. */

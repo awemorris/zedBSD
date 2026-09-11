@@ -429,7 +429,7 @@ ZEDBSD_CONFIG_CPPFLAGS := \
 	-DCONFIG_KERNEL_USB_HID_CHECKPOINT=$(if $(filter y,$(CONFIG_KERNEL_USB_HID_CHECKPOINT)),1,0) \
 	-DCONFIG_BUF_CACHE_KIB=$(CONFIG_BUF_CACHE_KIB)
 ifeq ($(CONFIG_KERNEL_TEST_CHECKPOINTS),y)
-ZEDBSD_CONFIG_CPPFLAGS += -DZEDBSD_TEST_CHECKPOINTS
+ZEDBSD_CONFIG_CPPFLAGS += -DKERN_TEST_CHECKPOINTS
 endif
 # Private test builds may add compile-time fault injection without replacing
 # the configured feature macros above. Keep these flags last so a disposable

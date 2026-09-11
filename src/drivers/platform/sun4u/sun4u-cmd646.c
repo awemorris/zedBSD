@@ -11,11 +11,11 @@
 
 #include "drivers/platform/sun4u/sun4u-cmd646.h"
 
-#include <hal/hal.h>
 #include <kern/disk.h>
 
 #include <errno.h>
 #include "kern/klog.h"
+#include "kern/device-io.h"
 
 #define ATA_DATA 0U
 #define ATA_ERROR 1U
@@ -57,19 +57,19 @@ drv_sun4u_cmd646_init(
 	cmd = command_port;
 	ctl = control_port;
 	ata_disk = NULL;
-	hal_io_outp8(ctl + 2U, 0x04);
+	kern_io_out8(ctl + 2U, 0x04);
 	/* Process each remaining element. */
 	for (i_index_for = 0; i_index_for < 100000U; i_index_for++)
 		;
-	hal_io_outp8(ctl + 2U, 0x02);
-	hal_io_outp8(cmd + ATA_DRIVE, 0xa0);
+	kern_io_out8(ctl + 2U, 0x02);
+	kern_io_out8(cmd + ATA_DRIVE, 0xa0);
 
 	/* Checks the operation status. */
 	error = wait_status(ATA_DRDY, ATA_BSY);
 	if (error) {
 		kern_logf("cmd646: reset error=%d status=%x ata=%x\n", error,
-			   hal_io_inp8(cmd + ATA_STATUS),
-			   hal_io_inp8(cmd + ATA_ERROR));
+			   kern_io_in8(cmd + ATA_STATUS),
+			   kern_io_in8(cmd + ATA_ERROR));
 
 		/* Failed. */
 		return error;
@@ -79,8 +79,8 @@ drv_sun4u_cmd646_init(
 	error = identify();
 	if (error) {
 		kern_logf("cmd646: identify error=%d status=%x ata=%x\n",
-			   error, hal_io_inp8(cmd + ATA_STATUS),
-			   hal_io_inp8(cmd + ATA_ERROR));
+			   error, kern_io_in8(cmd + ATA_STATUS),
+			   kern_io_in8(cmd + ATA_ERROR));
 
 		/* Failed. */
 		return error;
@@ -144,7 +144,7 @@ wait_status(
 	/* Continue while the operation condition remains true. */
 	while (n--) {
 		/* Checks the current string state. */
-		s = hal_io_inp8(cmd + ATA_STATUS);
+		s = kern_io_in8(cmd + ATA_STATUS);
 		if (s & ATA_ERR)
 			return EIO;
 
@@ -167,15 +167,15 @@ identify(
 	int error;
 
 	/* Selects the drive and issues the identify command. */
-	hal_io_outp8(cmd + ATA_DRIVE, 0xa0);
-	hal_io_outp8(cmd + ATA_COUNT, 0);
-	hal_io_outp8(cmd + ATA_LBA0, 0);
-	hal_io_outp8(cmd + ATA_LBA1, 0);
-	hal_io_outp8(cmd + ATA_LBA2, 0);
-	hal_io_outp8(cmd + ATA_COMMAND, 0xec);
+	kern_io_out8(cmd + ATA_DRIVE, 0xa0);
+	kern_io_out8(cmd + ATA_COUNT, 0);
+	kern_io_out8(cmd + ATA_LBA0, 0);
+	kern_io_out8(cmd + ATA_LBA1, 0);
+	kern_io_out8(cmd + ATA_LBA2, 0);
+	kern_io_out8(cmd + ATA_COMMAND, 0xec);
 
 	/* Checks the hal io inp8 result. */
-	if (hal_io_inp8(cmd + ATA_STATUS) == 0)
+	if (kern_io_in8(cmd + ATA_STATUS) == 0)
 		return ENODEV;
 
 	/* Checks the operation status. */
@@ -184,7 +184,7 @@ identify(
 		return error;
 	/* Process each remaining element. */
 	for (i_index_for = 0; i_index_for < 256U; i_index_for++)
-		words[i_index_for] = hal_io_inp16(cmd + ATA_DATA);
+		words[i_index_for] = kern_io_in16(cmd + ATA_DATA);
 	sectors = (uint32_t)words[60] | (uint64_t)words[61] << 16;
 
 	/* Returns the computed result. */
@@ -196,11 +196,11 @@ static void
 select_lba(
 	uint32_t lba)
 {
-	hal_io_outp8(cmd + ATA_COUNT, 1);
-	hal_io_outp8(cmd + ATA_LBA0, (uint8_t)lba);
-	hal_io_outp8(cmd + ATA_LBA1, (uint8_t)(lba >> 8));
-	hal_io_outp8(cmd + ATA_LBA2, (uint8_t)(lba >> 16));
-	hal_io_outp8(cmd + ATA_DRIVE, (uint8_t)(0xe0U | (lba >> 24 & 15U)));
+	kern_io_out8(cmd + ATA_COUNT, 1);
+	kern_io_out8(cmd + ATA_LBA0, (uint8_t)lba);
+	kern_io_out8(cmd + ATA_LBA1, (uint8_t)(lba >> 8));
+	kern_io_out8(cmd + ATA_LBA2, (uint8_t)(lba >> 16));
+	kern_io_out8(cmd + ATA_DRIVE, (uint8_t)(0xe0U | (lba >> 24 & 15U)));
 }
 
 /* Supports the block operation. */
@@ -217,7 +217,7 @@ block(
 	int error;
 
 	select_lba(lba);
-	hal_io_outp8(cmd + ATA_COMMAND, write ? 0x30U : 0x20U);
+	kern_io_out8(cmd + ATA_COMMAND, write ? 0x30U : 0x20U);
 
 	/* Checks the operation status. */
 	error = wait_status(ATA_DRQ, ATA_BSY);
@@ -229,9 +229,9 @@ block(
 		if (write) {
 			word_local = (uint16_t)data[i_index_for * 2U] |
 				     (uint16_t)data[i_index_for * 2U + 1U] << 8;
-			hal_io_outp16(cmd + ATA_DATA, word_local);
+			kern_io_out16(cmd + ATA_DATA, word_local);
 		} else {
-			word_local1 = hal_io_inp16(cmd + ATA_DATA);
+			word_local1 = kern_io_in16(cmd + ATA_DATA);
 			data[i_index_for * 2U] = (uint8_t)word_local1;
 			data[i_index_for * 2U + 1U] =
 				(uint8_t)(word_local1 >> 8);
@@ -240,7 +240,7 @@ block(
 
 	/* Handles the write condition. */
 	if (write) {
-		hal_io_outp8(cmd + ATA_COMMAND, 0xe7);
+		kern_io_out8(cmd + ATA_COMMAND, 0xe7);
 
 		/* Obtains the wait status result. */
 		function_result = wait_status(ATA_DRDY, ATA_BSY);
@@ -267,7 +267,7 @@ submit(
 
 	/* Handles the b condition. */
 	if (b->b_op == BIO_FLUSH) {
-		hal_io_outp8(cmd + ATA_COMMAND, 0xe7);
+		kern_io_out8(cmd + ATA_COMMAND, 0xe7);
 		error = wait_status(ATA_DRDY, ATA_BSY);
 	} else if (b->b_op != BIO_READ && b->b_op != BIO_WRITE)
 		error = EOPNOTSUPP;
@@ -290,8 +290,8 @@ submit(
 			   "ata=%x\n",
 			   (unsigned)b->b_op, b->b_mapped_block,
 			   b->b_block_count, error,
-			   hal_io_inp8(cmd + ATA_STATUS),
-			   hal_io_inp8(cmd + ATA_ERROR));
+			   kern_io_in8(cmd + ATA_STATUS),
+			   kern_io_in8(cmd + ATA_ERROR));
 	}
 
 	bio_complete(b, error, error ? 0 : (size_t)b->b_block_count * 512U);

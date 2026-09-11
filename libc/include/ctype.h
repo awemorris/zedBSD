@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_CTYPE_H
-#define ZEDBSD_CTYPE_H
+#ifndef KERN_CTYPE_H
+#define KERN_CTYPE_H
 
 int isalnum(int character);
 int isalpha(int character);

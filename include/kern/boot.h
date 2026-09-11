@@ -9,8 +9,8 @@
  * Boot handoff and BIOS call
  */
 
-#ifndef ZEDBSD_ABI_H
-#define ZEDBSD_ABI_H
+#ifndef KERN_ABI_H
+#define KERN_ABI_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -26,8 +26,8 @@ uint64_t kern_boot_config_matches(void);
  * Shared data contract between the real-mode Stage 1 and 32-bit Stage 2.
  */
 
-#define ZEDBSD_STAGE2_MAGIC	0x53383942U  /* "B98S" */
-#define ZEDBSD_HANDOFF_MAGIC	0x48323842U /* "B82H" */
+#define KERN_STAGE2_MAGIC	0x53383942U  /* "B98S" */
+#define KERN_HANDOFF_MAGIC	0x48323842U /* "B82H" */
 
 struct boot_stage2_header {
 	uint32_t magic;
@@ -58,24 +58,24 @@ struct boot_handoff {
 	uint32_t boot_partition_lba;
 } __attribute__((packed));
 
-#define ZEDBSD_HANDOFF_VERSION_PC98		2U
-#define ZEDBSD_HANDOFF_VERSION_MULTIBOOT	3U
-#define ZEDBSD_HANDOFF_VERSION_SUN4U		4U
-#define ZEDBSD_HANDOFF_VERSION_X68K		5U
-#define ZEDBSD_PARTITION_SCHEME_LBA		0U
-#define ZEDBSD_PARTITION_SCHEME_MBR		1U
-#define ZEDBSD_PARTITION_SCHEME_SUN		2U
-#define ZEDBSD_PARTITION_SCHEME_X68K		3U
-#define ZEDBSD_PARTITION_SCHEME_GPT		4U
-#define ZEDBSD_PARTITION_INDEX_UNKNOWN		0U
-#define ZEDBSD_BOOT_PARTITION_LBA_UNKNOWN	0xffffffffU
+#define KERN_HANDOFF_VERSION_PC98		2U
+#define KERN_HANDOFF_VERSION_MULTIBOOT	3U
+#define KERN_HANDOFF_VERSION_SUN4U		4U
+#define KERN_HANDOFF_VERSION_X68K		5U
+#define KERN_PARTITION_SCHEME_LBA		0U
+#define KERN_PARTITION_SCHEME_MBR		1U
+#define KERN_PARTITION_SCHEME_SUN		2U
+#define KERN_PARTITION_SCHEME_X68K		3U
+#define KERN_PARTITION_SCHEME_GPT		4U
+#define KERN_PARTITION_INDEX_UNKNOWN		0U
+#define KERN_BOOT_PARTITION_LBA_UNKNOWN	0xffffffffU
 
-#define ZEDBSD_X68K_HANDOFF_MAGIC		0x58363848U /* "X68H" */
-#define ZEDBSD_X68K_HANDOFF_VERSION		1U
-#define ZEDBSD_X68K_MAX_MEMORY_REGIONS		4U
+#define KERN_X68K_HANDOFF_MAGIC		0x58363848U /* "X68H" */
+#define KERN_X68K_HANDOFF_VERSION		1U
+#define KERN_X68K_MAX_MEMORY_REGIONS		4U
 
-#define ZEDBSD_MEMORY_AVAILABLE			1U
-#define ZEDBSD_MEMORY_RESERVED			2U
+#define KERN_MEMORY_AVAILABLE			1U
+#define KERN_MEMORY_RESERVED			2U
 
 struct boot_memory_region32 {
 	uint32_t base;
@@ -95,7 +95,7 @@ struct x68k_boot_handoff {
 	uint32_t loader_phys_end;
 	uint32_t memory_region_count;
 	struct boot_memory_region32
-		memory_regions[ZEDBSD_X68K_MAX_MEMORY_REGIONS];
+		memory_regions[KERN_X68K_MAX_MEMORY_REGIONS];
 } __attribute__((packed));
 
 _Static_assert(
@@ -103,40 +103,40 @@ _Static_assert(
 	"zedBSD X68k handoff ABI must remain 104 bytes");
 
 enum bios_service {
-	ZEDBSD_BIOS_DISK_READ = 1,
-	ZEDBSD_BIOS_KEY_READ = 2,
-	ZEDBSD_BIOS_KEY_POLL = 3,
-	ZEDBSD_BIOS_DISPLAY_RESET = 4,
-	ZEDBSD_BIOS_RETURN_MENU = 5,
+	KERN_BIOS_DISK_READ = 1,
+	KERN_BIOS_KEY_READ = 2,
+	KERN_BIOS_KEY_POLL = 3,
+	KERN_BIOS_DISPLAY_RESET = 4,
+	KERN_BIOS_RETURN_MENU = 5,
 
 	/*
 	 * Service 6 was the retired IPLware bridge; the number stays unused.
 	 */
-	ZEDBSD_BIOS_REPROBE = 7,
-	ZEDBSD_BIOS_CHAIN_BOOT = 8,
-	ZEDBSD_BIOS_CLOCK_SECOND = 9,
+	KERN_BIOS_REPROBE = 7,
+	KERN_BIOS_CHAIN_BOOT = 8,
+	KERN_BIOS_CLOCK_SECOND = 9,
 
 	/*
 	 * Probe exactly request.bios_id; request.status is a device-class hint.
 	 */
-	ZEDBSD_BIOS_PROBE_FIXED = 10,
+	KERN_BIOS_PROBE_FIXED = 10,
 
 	/*
 	 * One 512-byte fixed-disk write through the low-memory BIOS bounce
 	 * area.
 	 */
-	ZEDBSD_BIOS_DISK_WRITE = 11,
+	KERN_BIOS_DISK_WRITE = 11,
 
 	/*
 	 * Stop displaying G-VRAM (INT 18h, AH=41h).
 	 */
-	ZEDBSD_BIOS_DISPLAY_STOP = 12,
+	KERN_BIOS_DISPLAY_STOP = 12,
 
 	/*
 	 * One byte of the BIOS real-time key state table; request.status
 	 * selects the scan-code group (0..15).
 	 */
-	ZEDBSD_BIOS_KEY_STATE = 13,
+	KERN_BIOS_KEY_STATE = 13,
 };
 
 struct bios_request {
@@ -167,16 +167,16 @@ _Static_assert(
 	"zedBSD BIOS request must remain 16 bytes");
 
 enum boot_device_class {
-	ZEDBSD_DEV_FDD = 1,
-	ZEDBSD_DEV_IDE = 2,
-	ZEDBSD_DEV_SCSI = 3,
-	ZEDBSD_DEV_SD = 4,
+	KERN_DEV_FDD = 1,
+	KERN_DEV_IDE = 2,
+	KERN_DEV_SCSI = 3,
+	KERN_DEV_SD = 4,
 };
 
 enum boot_device_flags {
-	ZEDBSD_DEV_PRESENT = 1U << 0,
-	ZEDBSD_DEV_HAS_GEOMETRY = 1U << 1,
-	ZEDBSD_DEV_BOOT_ORIGIN = 1U << 2,
+	KERN_DEV_PRESENT = 1U << 0,
+	KERN_DEV_HAS_GEOMETRY = 1U << 1,
+	KERN_DEV_BOOT_ORIGIN = 1U << 2,
 };
 
 /*
@@ -207,8 +207,6 @@ _Static_assert(
  * implementation-refactoring convenience.
  */
 
-#define KERN_BOOT_PARAMETERS_TEXT_MAX ZEDBSD_BOOT_PARAMETERS_TEXT_MAX
-#define KERN_BOOT_PARAMETERS_STORAGE_SIZE ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE
 #define KERN_BOOT_PARAMETERS_INIT_PATH_MAX 255U
 #define KERN_BOOT_PARAMETERS_UNKNOWN_NAME_MAX 31U
 #define KERN_BOOT_PARAMETER_OFFSET_ABSENT UINT16_MAX

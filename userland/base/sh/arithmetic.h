@@ -11,8 +11,8 @@
  * Declares the zedBSD userland arithmetic interface.
  */
 
-#ifndef ZEDBSD_USERLAND_SH_ARITHMETIC_H
-#define ZEDBSD_USERLAND_SH_ARITHMETIC_H
+#ifndef KERN_USERLAND_SH_ARITHMETIC_H
+#define KERN_USERLAND_SH_ARITHMETIC_H
 
 int sh_arithmetic_eval(const char *, const char *(*)(void *, const char *),
 		       void *, long *, const char **);

@@ -126,15 +126,15 @@ identify(
 	}
 	if (export_output) {
 		export_value("DEVNAME", path);
-		if (id.flags & selected_tags & ZEDBSD_BLKID_TYPE)
+		if (id.flags & selected_tags & KERN_BLKID_TYPE)
 			export_value("TYPE", id.type);
-		if (id.flags & selected_tags & ZEDBSD_BLKID_UUID)
+		if (id.flags & selected_tags & KERN_BLKID_UUID)
 			export_value("UUID", id.uuid);
-		if (id.flags & selected_tags & ZEDBSD_BLKID_PARTUUID)
+		if (id.flags & selected_tags & KERN_BLKID_PARTUUID)
 			export_value("PARTUUID", id.partuuid);
-		if (id.flags & selected_tags & ZEDBSD_BLKID_LABEL)
+		if (id.flags & selected_tags & KERN_BLKID_LABEL)
 			export_value("LABEL", id.label);
-		if (id.flags & selected_tags & ZEDBSD_BLKID_PARTLABEL)
+		if (id.flags & selected_tags & KERN_BLKID_PARTLABEL)
 			export_value("PARTLABEL", id.partlabel);
 		putchar('\n');
 		return (id.flags & selected_tags) != 0 ? 0 : 2;
@@ -142,23 +142,23 @@ identify(
 	printf("%s:", path);
 
 	/* Handles the id condition. */
-	if (id.flags & selected_tags & ZEDBSD_BLKID_LABEL)
+	if (id.flags & selected_tags & KERN_BLKID_LABEL)
 		printf(" LABEL=\"%s\"", id.label);
 
 	/* Handles the id condition. */
-	if (id.flags & selected_tags & ZEDBSD_BLKID_UUID)
+	if (id.flags & selected_tags & KERN_BLKID_UUID)
 		printf(" UUID=\"%s\"", id.uuid);
 
 	/* Handles the id condition. */
-	if (id.flags & selected_tags & ZEDBSD_BLKID_TYPE)
+	if (id.flags & selected_tags & KERN_BLKID_TYPE)
 		printf(" TYPE=\"%s\"", id.type);
 
 	/* Handles the id condition. */
-	if (id.flags & selected_tags & ZEDBSD_BLKID_PARTLABEL)
+	if (id.flags & selected_tags & KERN_BLKID_PARTLABEL)
 		printf(" PARTLABEL=\"%s\"", id.partlabel);
 
 	/* Handles the id condition. */
-	if (id.flags & selected_tags & ZEDBSD_BLKID_PARTUUID)
+	if (id.flags & selected_tags & KERN_BLKID_PARTUUID)
 		printf(" PARTUUID=\"%s\"", id.partuuid);
 	putchar('\n');
 
@@ -170,11 +170,11 @@ identify(
 static unsigned
 tag_flag(const char *tag)
 {
-	if (strcmp(tag, "TYPE") == 0) return ZEDBSD_BLKID_TYPE;
-	if (strcmp(tag, "UUID") == 0) return ZEDBSD_BLKID_UUID;
-	if (strcmp(tag, "PARTUUID") == 0) return ZEDBSD_BLKID_PARTUUID;
-	if (strcmp(tag, "LABEL") == 0) return ZEDBSD_BLKID_LABEL;
-	if (strcmp(tag, "PARTLABEL") == 0) return ZEDBSD_BLKID_PARTLABEL;
+	if (strcmp(tag, "TYPE") == 0) return KERN_BLKID_TYPE;
+	if (strcmp(tag, "UUID") == 0) return KERN_BLKID_UUID;
+	if (strcmp(tag, "PARTUUID") == 0) return KERN_BLKID_PARTUUID;
+	if (strcmp(tag, "LABEL") == 0) return KERN_BLKID_LABEL;
+	if (strcmp(tag, "PARTLABEL") == 0) return KERN_BLKID_PARTLABEL;
 	return 0;
 }
 

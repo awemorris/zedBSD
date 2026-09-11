@@ -12,7 +12,6 @@
 #include <drivers/usb-cdc-ncm.h>
 #include <drivers/usb.h>
 #include <errno.h>
-#include <hal/hal.h>
 #include <kern/lock.h>
 #include <kern/net/net-device.h>
 #include <kern/net/packet-buf.h>

@@ -11,8 +11,8 @@
  * The amd64 interrupt-frame and interrupt-entry contract.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_INT_H
-#define ZEDBSD_HAL_AMD64_INT_H
+#ifndef KERN_HAL_AMD64_INT_H
+#define KERN_HAL_AMD64_INT_H
 
 #include <hal/types.h>
 #include "defs.h"

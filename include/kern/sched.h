@@ -9,8 +9,8 @@
  * Round-robin kernel scheduler
  */
 
-#ifndef ZEDBSD_KERN_SCHED_H
-#define ZEDBSD_KERN_SCHED_H
+#ifndef KERN_KERN_SCHED_H
+#define KERN_KERN_SCHED_H
 
 #include <hal/hal.h>
 #include <stdint.h>
@@ -177,7 +177,7 @@ void
 sched_cpu_notify(
 	hal_cpu_id_t cpu);
 
-#ifdef ZEDBSD_SCHED_TEST
+#ifdef KERN_SCHED_TEST
 int
 sched_test_cpu_online(
 	hal_cpu_id_t,

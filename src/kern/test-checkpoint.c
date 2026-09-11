@@ -17,7 +17,7 @@
 
 #include <hal/atomic.h>
 
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 static kern_test_checkpoint_fn checkpoint_handler;
 static void *checkpoint_argument;
 

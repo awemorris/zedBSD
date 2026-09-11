@@ -3,8 +3,8 @@
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_DRIVERS_USB_UAS_H
-#define ZEDBSD_DRIVERS_USB_UAS_H
+#ifndef KERN_DRIVERS_USB_UAS_H
+#define KERN_DRIVERS_USB_UAS_H
 
 #include <stddef.h>
 #include <stdint.h>

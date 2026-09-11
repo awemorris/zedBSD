@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_KERN_TEST_FAULT_H
-#define ZEDBSD_KERN_TEST_FAULT_H
+#ifndef KERN_KERN_TEST_FAULT_H
+#define KERN_KERN_TEST_FAULT_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -26,7 +26,7 @@ struct kern_test_fault_result {
 	size_t short_count;
 };
 
-#ifdef ZEDBSD_TEST_FAULTS
+#ifdef KERN_TEST_FAULTS
 #define KERN_TEST_FAULT_LOG_CAPACITY	128U
 #define KERN_TEST_FAULT_ANY_CONTEXT	UINT32_MAX
 

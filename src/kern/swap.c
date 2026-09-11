@@ -1471,7 +1471,7 @@ swap_header_checksum(
 	checksum_offset = memcmp(header, "ZEDSWAP2", 8U) == 0 ? 60U : 28U;
 
 	/* Includes all header bytes with the checksum field treated as zero. */
-	for (i = 0; i < ZEDBSD_SWAP_HEADER_SIZE; i++) {
+	for (i = 0; i < KERN_SWAP_HEADER_SIZE; i++) {
 		byte = i >= checksum_offset &&
 		    i < checksum_offset + 4U ? 0 : header[i];
 		hash = (hash ^ byte) * 16777619U;
@@ -1511,10 +1511,10 @@ swap_header_parse(
 	memset(&parsed, 0, sizeof(parsed));
 	if (memcmp(header, magic_v1, sizeof(magic_v1)) == 0) {
 		/* Validates the legacy fixed-size header. */
-		if ((backing_bytes != ZEDBSD_SWAP_FILE_MIN_BYTES &&
-		     backing_bytes != ZEDBSD_SWAP_FILE_MAX_BYTES) ||
+		if ((backing_bytes != KERN_SWAP_FILE_MIN_BYTES &&
+		     backing_bytes != KERN_SWAP_FILE_MAX_BYTES) ||
 		    get32(header + 8U) != 1U ||
-		    get32(header + 12U) != ZEDBSD_SWAP_HEADER_SIZE ||
+		    get32(header + 12U) != KERN_SWAP_HEADER_SIZE ||
 		    get32(header + 16U) != SWAP_PAGE_SIZE ||
 		    get32(header + 20U) != backing_bytes ||
 		    get32(header + 28U) != swap_header_checksum(header))
@@ -1526,7 +1526,7 @@ swap_header_parse(
 			return EINVAL;
 
 		/* Rejects nonzero bytes reserved by version one. */
-		for (i = 32U; i < ZEDBSD_SWAP_HEADER_SIZE; i++) {
+		for (i = 32U; i < KERN_SWAP_HEADER_SIZE; i++) {
 			/* Requires the reserved byte to be zero. */
 			if (header[i] != 0U)
 				return EINVAL;
@@ -1543,7 +1543,7 @@ swap_header_parse(
 
 		/* Validates the version-two geometry and checksum. */
 		if (get16(header + 8U) != 2U ||
-		    get16(header + 10U) != ZEDBSD_SWAP_HEADER_SIZE ||
+		    get16(header + 10U) != KERN_SWAP_HEADER_SIZE ||
 		    get32(header + 12U) != SWAP_PAGE_SIZE ||
 		    get64(header + 16U) != backing_bytes ||
 		    get64(header + 24U) != slots ||
@@ -1551,11 +1551,11 @@ swap_header_parse(
 			return EINVAL;
 
 		/* Copies the optional version-two UUID. */
-		for (i = 0; i < ZEDBSD_SWAP_V2_UUID_SIZE; i++)
+		for (i = 0; i < KERN_SWAP_V2_UUID_SIZE; i++)
 			parsed.uuid[i] = header[32U + i];
 
 		/* Requires a printable label with a zero-padded terminator. */
-		for (i = 0; i < ZEDBSD_SWAP_V2_LABEL_SIZE; i++) {
+		for (i = 0; i < KERN_SWAP_V2_LABEL_SIZE; i++) {
 			/* Reads one label byte before checking termination. */
 
 			/* Rejects nonzero padding after the terminator. */
@@ -1632,7 +1632,7 @@ swap_header_uuid_format(
 		return EINVAL;
 
 	/* Detects whether the header carries a UUID at all. */
-	for (i = 0; i < ZEDBSD_SWAP_V2_UUID_SIZE; i++)
+	for (i = 0; i < KERN_SWAP_V2_UUID_SIZE; i++)
 		present |= header->uuid[i] != 0U;
 
 	/* Distinguishes an absent UUID from an all-zero printed identifier. */
@@ -1642,7 +1642,7 @@ swap_header_uuid_format(
 	}
 
 	/* Visits every byte of the UUID. */
-	for (i = 0; i < ZEDBSD_SWAP_V2_UUID_SIZE; i++) {
+	for (i = 0; i < KERN_SWAP_V2_UUID_SIZE; i++) {
 		output[i * 2U] = digits[header->uuid[i] >> 4];
 		output[i * 2U + 1U] = digits[header->uuid[i] & 15U];
 	}
@@ -1681,7 +1681,7 @@ kern_swap_source_prepare_file(
 	struct file_swap_data *data;
 	struct swap_header_info header_info;
 	struct file *file;
-	uint8_t header[ZEDBSD_SWAP_HEADER_SIZE];
+	uint8_t header[KERN_SWAP_HEADER_SIZE];
 	uint64_t bytes;
 	struct backing_claim_extent *claim_extents;
 	ssize_t header_bytes;

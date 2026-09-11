@@ -13,7 +13,7 @@
 
 typedef __PTRDIFF_TYPE__ ssize_t;
 
-#ifdef ZEDBSD_USER_ABI_LP64
+#ifdef KERN_USER_ABI_LP64
 typedef int64_t off_t;
 typedef int64_t blkcnt_t;
 typedef int64_t blksize_t;

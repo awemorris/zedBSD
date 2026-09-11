@@ -517,7 +517,7 @@ $(foreach command,$(USER_BASIC_COMMANDS),\
 DYNAMIC_DIR := $(BUILD)/dynamic
 DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude \
 	-isystem $(ZEDBSD_SYSROOT_I386)/usr/include \
-	-DHAL_ARCH_I386 -DZEDBSD_DYNAMIC_LIBC
+	-DHAL_ARCH_I386 -DKERN_DYNAMIC_LIBC
 DYNAMIC_CFLAGS := -m32 -march=i386 -Os -ffreestanding -fPIC -fno-builtin \
 	-fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-ftls-model=global-dynamic -Wall -Wextra -Werror -msoft-float \

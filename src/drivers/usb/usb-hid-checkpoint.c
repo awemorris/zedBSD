@@ -11,7 +11,6 @@
 
 #include <drivers/usb.h>
 #include <errno.h>
-#include <hal/hal.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
@@ -279,7 +278,7 @@ checkpoint_worker(
 
 		/* Handles the work condition. */
 		if (work == 0) {
-			kernel_wait_task();
+			kern_thread_block();
 			continue;
 		}
 

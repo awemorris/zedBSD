@@ -23,7 +23,7 @@ for variant in ('ordinary', 'sanitize'):
     snapshot_extra = [] if variant == 'ordinary' else ['--param', 'asan-globals=0']
     subprocess.run(['cc', '-std=c11', '-O1', '-g', '-Wall', '-Wextra', '-Werror',
                     '-ffunction-sections', '-fdata-sections', '-I.', '-Iinclude',
-                    '-Iinclude/uapi', '-Isrc', '-DZEDBSD_USER_ABI_LP64', '-Ilibc/include',
+                    '-Iinclude/uapi', '-Isrc', '-DKERN_USER_ABI_LP64', '-Ilibc/include',
                     *extra, *snapshot_extra,
                     'plan/ws025/tests/snapshot-flush-host.c',
                     '-Wl,--gc-sections', '-o', str(snapshot)], cwd=repo, check=True)
@@ -33,7 +33,7 @@ for variant in ('ordinary', 'sanitize'):
     owner = output / ('image-owner-' + variant)
     subprocess.run(['cc', '-std=c11', '-O1', '-g', '-Wall', '-Wextra', '-Werror',
                     '-ffunction-sections', '-fdata-sections', '-I.', '-Iinclude',
-                    '-Iinclude/uapi', '-Isrc', '-DZEDBSD_USER_ABI_LP64', '-Ilibc/include',
+                    '-Iinclude/uapi', '-Isrc', '-DKERN_USER_ABI_LP64', '-Ilibc/include',
                     *extra, *snapshot_extra,
                     'plan/ws025/tests/journal-image-owner-host.c',
                     'plan/ws025/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-journal.c',

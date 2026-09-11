@@ -13,8 +13,8 @@
  * converted explicitly by the code that reads or writes them.
  */
 
-#ifndef ZEDBSD_KERN_NET_WIRE_H
-#define ZEDBSD_KERN_NET_WIRE_H
+#ifndef KERN_KERN_NET_WIRE_H
+#define KERN_KERN_NET_WIRE_H
 
 #include <stdint.h>
 

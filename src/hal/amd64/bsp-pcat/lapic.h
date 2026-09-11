@@ -11,8 +11,8 @@
  * The amd64 local APIC control and delivery contract.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_LAPIC_H
-#define ZEDBSD_HAL_AMD64_LAPIC_H
+#ifndef KERN_HAL_AMD64_LAPIC_H
+#define KERN_HAL_AMD64_LAPIC_H
 
 #include <hal/types.h>
 

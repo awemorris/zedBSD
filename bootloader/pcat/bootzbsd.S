@@ -877,7 +877,7 @@ load_zedbsd_configuration:
 	je fatal_config
 	call16 format_boot_uuid
 	mov byte ptr [path_role], 0
-	mov si, offset zedbsd_config_path
+	mov si, offset kern_config_path
 	call16 fat_find_path
 	mov eax, dword ptr [file_size]
 	cmp eax, ZBL_ZEDBSD_CONFIG_FILE_MAX
@@ -925,7 +925,7 @@ load_zedbsd_configuration:
 	mov si, offset bios_configuration + \
 		ZBL_ZEDBSD_CONFIG_PARAMETER_RECORD_OFFSET
 	mov di, offset long_handoff + ZBL6_HANDOFF_V5_BIOS_PARAMETERS_OFFSET
-	mov cx, ZEDBSD_BOOT_PARAMETER_RECORD_SIZE / 4
+	mov cx, KERN_BOOT_PARAMETER_RECORD_SIZE / 4
 	rep movsd
 	pop es
 	mov si, offset msg_config
@@ -940,7 +940,7 @@ load_zedbsd_configuration:
 	call16 puts
 	mov si, offset bios_configuration + \
 		ZBL_ZEDBSD_CONFIG_PARAMETER_RECORD_OFFSET + \
-	    ZEDBSD_BOOT_PARAMETER_RECORD_TEXT_OFFSET
+	    KERN_BOOT_PARAMETER_RECORD_TEXT_OFFSET
 	call16 puts
 	mov al, '\n'
 	call16 putc
@@ -1654,7 +1654,7 @@ msg_elf64:     .asciz "E6 "
 msg_loaded:    .asciz "LD "
 msg_go:        .asciz "GO\n"
 msg_error:     .asciz "ERR "
-zedbsd_config_path: .asciz "zedbsd.cfg"
+kern_config_path: .asciz "zedbsd.cfg"
 boot_uuid_text: .space 10
 
 .balign 8
@@ -1760,7 +1760,7 @@ mbi_boot_device: .long 0
 mbi_cmdline:
 	.long 0x10000 + long_handoff + \
 	    ZBL6_HANDOFF_V5_BIOS_PARAMETERS_OFFSET + \
-	    ZEDBSD_BOOT_PARAMETER_RECORD_TEXT_OFFSET
+	    KERN_BOOT_PARAMETER_RECORD_TEXT_OFFSET
 
 long_handoff:
 	.long ZBL6_HANDOFF_MAGIC
@@ -1773,7 +1773,7 @@ long_handoff:
 	.long 0                         /* extended memory, KiB */
 	.long 0
 	.space ZBL6_HANDOFF_FB_SIZE - ZBL6_HANDOFF_SIZE
-	.space ZEDBSD_BOOT_PARAMETER_RECORD_SIZE
+	.space KERN_BOOT_PARAMETER_RECORD_SIZE
 long_memory:
 	.long ZBL6_MEMORY_SOURCE_BIOS_E820, ZBL6_MEMORY_MAP_COMPLETE
 	.long 0, ZBL6_MEMORY_RANGE_V6_SIZE

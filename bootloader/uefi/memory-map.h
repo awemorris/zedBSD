@@ -1,7 +1,7 @@
 /* UEFI memory-map normalization for the amd64 loader handoff. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_BOOTLOADER_UEFI_MEMORY_MAP_H
-#define ZEDBSD_BOOTLOADER_UEFI_MEMORY_MAP_H
+#ifndef KERN_BOOTLOADER_UEFI_MEMORY_MAP_H
+#define KERN_BOOTLOADER_UEFI_MEMORY_MAP_H
 
 #include "include/uefi.h"
 #include "bootloader/include/amd64-handoff.h"

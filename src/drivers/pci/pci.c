@@ -10,12 +10,14 @@
  */
 
 #include <drivers/pci.h>
-#include <hal/hal.h>
 
 #include <errno.h>
 #include <string.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
+#include "kern/atomic.h"
+#include "kern/device-io.h"
+#include "kern/irq.h"
 
 #define PCI_COMMAND 0x04U
 #define PCI_STATUS 0x06U
@@ -132,8 +134,8 @@ static void pci_source(const struct drv_pci_address *address, char result[17]);
 static int establish_msix(struct pci_irq_cookie *cookie);
 static int map_msix_entry(struct pci_irq_cookie *cookie);
 static int disestablish_intx(struct pci_irq_cookie *cookie);
-static void pci_irq_dispatch(int irq, hal_irq_ack_t acknowledge, void *argument);
-static void pci_intx_dispatch(int irq, hal_irq_ack_t acknowledge, void *argument);
+static void pci_irq_dispatch(int irq, kern_irq_ack_t acknowledge, void *argument);
+static void pci_intx_dispatch(int irq, kern_irq_ack_t acknowledge, void *argument);
 
 /*
  * Brings the PCI subsystem into service.
@@ -1575,7 +1577,7 @@ drv_pci_device_disestablish_irq_checked(
 	volatile uint32_t *entry_local1;
 	struct pci_irq_cookie *cookie = value;
 	uint16_t control;
-	int hal_error;
+	int status;
 
 	(void)device;
 
@@ -1607,9 +1609,9 @@ drv_pci_device_disestablish_irq_checked(
 			}
 
 			/* Checks the operation status. */
-			hal_error = hal_irq_unregister_msi(cookie->irq);
-			if (hal_error != HAL_OK)
-				return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
+			status = kern_irq_unregister_msi(cookie->irq);
+			if (status != 0)
+				return status == EBUSY ? EBUSY : EIO;
 			cookie->message_registered = 0;
 		}
 
@@ -1643,15 +1645,15 @@ drv_pci_device_disestablish_irq_checked(
 		if (cookie->message_registered && cookie->table_mapped) {
 			entry_local = cookie->table.address;
 			entry_local[3] |= PCI_MSIX_ENTRY_MASK;
-			hal_io_mb();
+			kern_io_barrier();
 		}
 
 		/* Handles the cookie condition. */
 		if (cookie->message_registered) {
 			/* Checks the operation status. */
-			hal_error = hal_irq_unregister_msi(cookie->irq);
-			if (hal_error != HAL_OK)
-				return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
+			status = kern_irq_unregister_msi(cookie->irq);
+			if (status != 0)
+				return status == EBUSY ? EBUSY : EIO;
 			cookie->message_registered = 0;
 		}
 
@@ -1666,7 +1668,7 @@ drv_pci_device_disestablish_irq_checked(
 		entry_local1[2] = cookie->msix_entry_saved[2];
 		entry_local1[3] =
 			cookie->msix_entry_saved[3] | PCI_MSIX_ENTRY_MASK;
-		hal_io_mb();
+		kern_io_barrier();
 
 		/* Checks the drv pci device config write16 result. */
 		if (drv_pci_device_config_write16(
@@ -1677,7 +1679,7 @@ drv_pci_device_disestablish_irq_checked(
 			return EIO;
 		}
 		entry_local1[3] = cookie->msix_entry_saved[3];
-		hal_io_mb();
+		kern_io_barrier();
 		cookie->msix_state_saved = 0;
 
 		/* Handles the cookie condition. */
@@ -2474,7 +2476,7 @@ establish_intx(
 	struct pci_intx_line *candidate, *line;
 	struct pci_irq_cookie **link;
 	bool enabled;
-	int hal_error;
+	int status;
 
 	/* Handles the candidate availability. */
 	candidate = kern_malloc(sizeof(*candidate));
@@ -2517,25 +2519,25 @@ establish_intx(
 	 */
 
 	/* Checks the operation status. */
-	hal_error = hal_irq_register(candidate->irq, pci_intx_dispatch,
+	status = kern_irq_register(candidate->irq, pci_intx_dispatch,
 					candidate);
-	if (hal_error == HAL_OK) {
+	if (status == 0) {
 		candidate->handlers = cookie;
 		candidate->next = intx_lines;
 		intx_lines = candidate;
 		cookie->irq = candidate->irq;
 		cookie->intx_line = candidate;
-		hal_irq_unmask(candidate->irq);
+		kern_irq_unmask(candidate->irq);
 	}
 
 	intx_lock_leave(enabled);
 
 	/* Checks the operation status. */
-	if (hal_error != HAL_OK) {
+	if (status != 0) {
 		kern_free(candidate);
 
 		/* Returns the computed result. */
-		return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
+		return status == EBUSY ? EBUSY : EIO;
 	}
 
 	/* Succeeded. */
@@ -2547,11 +2549,11 @@ static bool
 intx_lock_enter(
 	void)
 {
-	bool enabled = hal_irq_disable();
+	bool enabled = kern_irq_disable();
 
 	/* Continue while the operation condition remains true. */
-	while (!hal_atomic_uint_try_acquire(&intx_lock))
-		hal_atomic_relax();
+	while (!atomic_raw_try_acquire_zero(&intx_lock))
+		atomic_spin_hint();
 
 	/* Returns the computed result. */
 	return enabled;
@@ -2580,11 +2582,11 @@ static void
 intx_lock_leave(
 	bool enabled)
 {
-	hal_atomic_store_release(&intx_lock, 0U);
+	atomic_raw_store_release(&intx_lock, 0U);
 
 	/* Handles the enabled condition. */
 	if (enabled)
-		hal_irq_enable();
+		kern_irq_enable();
 }
 
 /* Puts a handler on a device's message-signalled interrupt. */
@@ -2639,10 +2641,10 @@ establish_msi(
 	pci_source(&device->address, source);
 
 	/* Checks the operation status. */
-	error = hal_irq_register_msi(source, pci_irq_dispatch, cookie,
+	error = kern_irq_register_msi(source, pci_irq_dispatch, cookie,
 				     &cookie->irq, &address, &event);
-	if (error != HAL_OK)
-		return error == HAL_ERR_NOMEM ? ENOMEM : EIO;
+	if (error != 0)
+		return error == ENOMEM ? ENOMEM : EIO;
 	cookie->message_registered = 1;
 
 	/* Handles the event condition. */
@@ -2703,7 +2705,7 @@ fail:
 
 	/* Checks the hal irq unregister msi result. */
 	if (cookie->message_registered &&
-	    hal_irq_unregister_msi(cookie->irq) == HAL_OK)
+	    kern_irq_unregister_msi(cookie->irq) == 0)
 		cookie->message_registered = 0;
 	(void)drv_pci_device_config_write32(
 		device, cookie->capability + PCI_MSI_ADDRESS,
@@ -2790,7 +2792,7 @@ establish_msix(
 		goto fail;
 	}
 
-	hal_io_rmb();
+	kern_io_read_barrier();
 	/* Process each remaining element. */
 	for (index_for = 0; index_for < 4U; index_for++)
 		cookie->msix_entry_saved[index_for] = entry[index_for];
@@ -2799,10 +2801,10 @@ establish_msix(
 	pci_source(&cookie->device->address, source);
 
 	/* Checks the operation status. */
-	error = hal_irq_register_msi(source, pci_irq_dispatch, cookie,
+	error = kern_irq_register_msi(source, pci_irq_dispatch, cookie,
 				     &cookie->irq, &address, &event);
-	if (error != HAL_OK) {
-		error = error == HAL_ERR_NOMEM ? ENOMEM : EIO;
+	if (error != 0) {
+		error = error == ENOMEM ? ENOMEM : EIO;
 		goto fail;
 	}
 
@@ -2810,7 +2812,7 @@ establish_msix(
 	entry[0] = (uint32_t)address;
 	entry[1] = (uint32_t)((uint64_t)address >> 32);
 	entry[2] = event;
-	hal_io_mb();
+	kern_io_barrier();
 
 	/* Checks the drv pci device config read16 result. */
 	if (drv_pci_device_config_read16(cookie->device,
@@ -2823,13 +2825,13 @@ establish_msix(
 		error = EIO;
 
 		/* Checks the hal irq unregister msi result. */
-		if (hal_irq_unregister_msi(cookie->irq) == HAL_OK)
+		if (kern_irq_unregister_msi(cookie->irq) == 0)
 			cookie->message_registered = 0;
 		goto fail;
 	}
 
 	entry[3] &= ~PCI_MSIX_ENTRY_MASK;
-	hal_io_mb();
+	kern_io_barrier();
 
 	/* Succeeded. */
 	return 0;
@@ -2837,7 +2839,7 @@ fail:
 
 	/* Checks the hal irq unregister msi result. */
 	if (cookie->message_registered &&
-	    hal_irq_unregister_msi(cookie->irq) == HAL_OK)
+	    kern_irq_unregister_msi(cookie->irq) == 0)
 		cookie->message_registered = 0;
 
 	/* Handles the cookie condition. */
@@ -2847,12 +2849,12 @@ fail:
 		entry[1] = cookie->msix_entry_saved[1];
 		entry[2] = cookie->msix_entry_saved[2];
 		entry[3] = cookie->msix_entry_saved[3] | PCI_MSIX_ENTRY_MASK;
-		hal_io_mb();
+		kern_io_barrier();
 		(void)drv_pci_device_config_write16(
 			cookie->device, cookie->capability + PCI_MSIX_CONTROL,
 			cookie->msix_control_saved);
 		entry[3] = cookie->msix_entry_saved[3];
-		hal_io_mb();
+		kern_io_barrier();
 	}
 
 	/* Handles the cookie condition. */
@@ -2925,7 +2927,7 @@ disestablish_intx(
 	struct pci_intx_line **line_link;
 	struct pci_irq_cookie **cookie_link;
 	bool enabled;
-	int hal_error;
+	int status;
 
 	enabled = intx_lock_enter();
 
@@ -2980,19 +2982,19 @@ disestablish_intx(
 
 	/* Only the final owner may mask and remove the physical IRQ handler. */
 	line->removing = 1;
-	hal_irq_mask(line->irq);
+	kern_irq_mask(line->irq);
 	intx_lock_leave(enabled);
 
 	/* Checks the operation status. */
-	hal_error = hal_irq_unregister(line->irq, pci_intx_dispatch, line);
-	if (hal_error != HAL_OK) {
+	status = kern_irq_unregister(line->irq, pci_intx_dispatch, line);
+	if (status != 0) {
 		enabled = intx_lock_enter();
 		line->removing = 0;
-		hal_irq_unmask(line->irq);
+		kern_irq_unmask(line->irq);
 		intx_lock_leave(enabled);
 
 		/* Returns the computed result. */
-		return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
+		return status == EBUSY ? EBUSY : EIO;
 	}
 
 	/*
@@ -3024,21 +3026,21 @@ disestablish_intx(
 static void
 pci_irq_dispatch(
 	int irq,
-	hal_irq_ack_t acknowledge,
+	kern_irq_ack_t acknowledge,
 	void *argument)
 {
 	struct pci_irq_cookie *cookie = argument;
 
 	(void)irq;
 	(void)cookie->handler(cookie->argument);
-	hal_irq_send_eoi(acknowledge);
+	kern_irq_send_eoi(acknowledge);
 }
 
 /* Serves one pin interrupt, which several devices may share. */
 static void
 pci_intx_dispatch(
 	int irq,
-	hal_irq_ack_t acknowledge,
+	kern_irq_ack_t acknowledge,
 	void *argument)
 {
 	drv_pci_irq_handler_t handler;
@@ -3073,5 +3075,5 @@ pci_intx_dispatch(
 	enabled = intx_lock_enter();
 	line->dispatching--;
 	intx_lock_leave(enabled);
-	hal_irq_send_eoi(acknowledge);
+	kern_irq_send_eoi(acknowledge);
 }

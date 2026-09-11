@@ -1,14 +1,24 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_UAPI_IO_STATS_H
-#define ZEDBSD_UAPI_IO_STATS_H
+/*
+ * Terminal-capability probe used by isatty().
+ */
+
+#ifndef KERN_UAPI_IO_STATS_H
+#define KERN_UAPI_IO_STATS_H
 
 #include <stdint.h>
 
 #define IO_STATS_VERSION 9U
 
-/* Append events; never renumber an existing entry. All sizes are bytes. */
+/*
+ * Append events. Never renumber an existing entry. All sizes are bytes.
+ */
 enum io_stat_event {
 	IO_FILE_READ,
 	IO_FILE_WRITE,
@@ -82,8 +92,7 @@ enum io_stat_event {
 	IO_XHCI_DATA_TRB,
 	IO_DISK_VECTOR_BATCH,
 	IO_DISK_VECTOR_SPLIT,
-	/* All xHCI controllers: handler entries, owned status, consumed ring events. */
-	IO_XHCI_IRQ_ENTRY,
+	IO_XHCI_IRQ_ENTRY,	/* All xHCI controllers: handler entries, owned status, consumed ring events. */
 	IO_XHCI_IRQ_OWNED,
 	IO_XHCI_IRQ_EVENT,
 	IO_STAT_COUNT
@@ -94,7 +103,9 @@ struct io_stat_value {
 	uint64_t bytes;
 };
 
-/* Each field is atomic; a live snapshot is not a transaction across fields. */
+/*
+ * Each field is atomic. A live snapshot is not a transaction across fields.
+ */
 struct io_stats {
 	uint32_t version;
 	uint32_t count;

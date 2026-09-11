@@ -1,8 +1,8 @@
 /* X68000 keyboard scan-code translation. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 
-#ifndef ZEDBSD_HAL_M68K_X68K_KEYBOARD_MAP_H
-#define ZEDBSD_HAL_M68K_X68K_KEYBOARD_MAP_H
+#ifndef KERN_HAL_M68K_X68K_KEYBOARD_MAP_H
+#define KERN_HAL_M68K_X68K_KEYBOARD_MAP_H
 
 #include <stdint.h>
 

@@ -4,8 +4,8 @@
  *
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_DRIVERS_GRAPHICS_PCAT_H
-#define ZEDBSD_DRIVERS_GRAPHICS_PCAT_H
+#ifndef KERN_DRIVERS_GRAPHICS_PCAT_H
+#define KERN_DRIVERS_GRAPHICS_PCAT_H
 
 int
 drv_pcat_graphics_pci_register(void);

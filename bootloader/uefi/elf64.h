@@ -1,7 +1,7 @@
 /* Restricted ELF64 loader contract for the amd64 kernel. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_BOOTLOADER_UEFI_ELF64_H
-#define ZEDBSD_BOOTLOADER_UEFI_ELF64_H
+#ifndef KERN_BOOTLOADER_UEFI_ELF64_H
+#define KERN_BOOTLOADER_UEFI_ELF64_H
 
 #include <stdint.h>
 

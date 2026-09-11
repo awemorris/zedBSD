@@ -11,8 +11,8 @@
  * The private amd64 per-CPU state and interrupt acknowledgement contract.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_PERCPU_H
-#define ZEDBSD_HAL_AMD64_PERCPU_H
+#ifndef KERN_HAL_AMD64_PERCPU_H
+#define KERN_HAL_AMD64_PERCPU_H
 
 #include <hal/hal.h>
 #include "defs.h"

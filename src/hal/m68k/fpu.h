@@ -1,8 +1,8 @@
 /* MC68881/MC68882 complete task state. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 
-#ifndef ZEDBSD_HAL_M68K_FPU_H
-#define ZEDBSD_HAL_M68K_FPU_H
+#ifndef KERN_HAL_M68K_FPU_H
+#define KERN_HAL_M68K_FPU_H
 
 #include <hal/types.h>
 

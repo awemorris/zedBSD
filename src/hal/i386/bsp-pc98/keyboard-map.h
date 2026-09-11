@@ -13,8 +13,8 @@
  * Focused host tests share this private state and event representation.
  */
 
-#ifndef ZEDBSD_HAL_I386_PC98_KEYBOARD_MAP_H
-#define ZEDBSD_HAL_I386_PC98_KEYBOARD_MAP_H
+#ifndef KERN_HAL_I386_PC98_KEYBOARD_MAP_H
+#define KERN_HAL_I386_PC98_KEYBOARD_MAP_H
 
 #include <stdint.h>
 

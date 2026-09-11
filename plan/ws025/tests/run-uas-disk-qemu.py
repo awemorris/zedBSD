@@ -60,7 +60,7 @@ def main():
         obj, binary = out / 'held.o', out / 'held'
         subprocess.run([str(REPO / 'build/llvm/bin/clang'), '--target=x86_64-unknown-zedbsd',
                         '-nostdinc', '-isystem', str(sysroot / 'include'), '-I' + str(REPO / 'include/uapi'),
-                        '-DZEDBSD_USER_ABI_LP64=1', '-ffreestanding', '-fno-pie', '-O1',
+                        '-DKERN_USER_ABI_LP64=1', '-ffreestanding', '-fno-pie', '-O1',
                         '-ffunction-sections', '-fdata-sections', *(['-DUAS_WRITE_TIMEOUT'] if options.write_timeout else []), '-Wall', '-Wextra', '-Werror',
                         '-c', str(Path(__file__).with_name('uas-dirty-guest.c' if options.dirty_exchange else 'uas-write-error-guest.c' if options.write_error else 'uas-held-guest.c')), '-o', str(obj)], check=True)
         subprocess.run(['ld', '-m', 'elf_x86_64', '--gc-sections', '-nostdlib', '-static',

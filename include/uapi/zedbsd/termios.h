@@ -4,33 +4,12 @@
  *
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_UAPI_TERMIOS_H
-#define ZEDBSD_UAPI_TERMIOS_H
+
+#ifndef KERN_UAPI_TERMIOS_H
+#define KERN_UAPI_TERMIOS_H
 
 #include <stdint.h>
 #include <sys/ioctl.h>
-
-typedef uint32_t tcflag_t;
-typedef uint8_t cc_t;
-typedef uint32_t speed_t;
-
-#define NCCS	20
-struct termios {
-	tcflag_t c_iflag;
-	tcflag_t c_oflag;
-	tcflag_t c_cflag;
-	tcflag_t c_lflag;
-	cc_t c_cc[NCCS];
-	speed_t c_ispeed;
-	speed_t c_ospeed;
-};
-
-struct winsize {
-	uint16_t ws_row;
-	uint16_t ws_col;
-	uint16_t ws_xpixel;
-	uint16_t ws_ypixel;
-};
 
 #define VINTR	0
 #define VQUIT	1
@@ -94,23 +73,45 @@ struct winsize {
 #define TCIOFF	2
 #define TCION	3
 
-#define ZEDBSD_TTY_IOC_GROUP	't'
-#define TCGETS	_IOR(ZEDBSD_TTY_IOC_GROUP, 1, struct termios)
-#define TCSETS	_IOW(ZEDBSD_TTY_IOC_GROUP, 2, struct termios)
-#define TCSETSW	_IOW(ZEDBSD_TTY_IOC_GROUP, 3, struct termios)
-#define TCSETSF	_IOW(ZEDBSD_TTY_IOC_GROUP, 4, struct termios)
-#define TIOCGWINSZ	_IOR(ZEDBSD_TTY_IOC_GROUP, 5, struct winsize)
-#define TIOCSWINSZ	_IOW(ZEDBSD_TTY_IOC_GROUP, 6, struct winsize)
-#define TIOCGPGRP	_IOR(ZEDBSD_TTY_IOC_GROUP, 7, int32_t)
-#define TIOCSPGRP	_IOW(ZEDBSD_TTY_IOC_GROUP, 8, int32_t)
-#define TIOCSCTTY	_IO(ZEDBSD_TTY_IOC_GROUP, 9)
-#define TIOCNOTTY	_IO(ZEDBSD_TTY_IOC_GROUP, 10)
-#define TIOCFLUSH	_IOW(ZEDBSD_TTY_IOC_GROUP, 11, int32_t)
-#define TIOCGPTN	_IOR(ZEDBSD_TTY_IOC_GROUP, 12, uint32_t)
-#define TIOCSPTLCK	_IOW(ZEDBSD_TTY_IOC_GROUP, 13, int32_t)
-#define TIOCGSID	_IOR(ZEDBSD_TTY_IOC_GROUP, 14, int32_t)
-#define TCSBRK	_IOW(ZEDBSD_TTY_IOC_GROUP, 15, int32_t)
-#define TCXONC	_IOW(ZEDBSD_TTY_IOC_GROUP, 16, int32_t)
-#define TIOCDRAIN	_IO(ZEDBSD_TTY_IOC_GROUP, 17)
+#define KERN_TTY_IOC_GROUP	't'
+#define TCGETS	_IOR(KERN_TTY_IOC_GROUP, 1, struct termios)
+#define TCSETS	_IOW(KERN_TTY_IOC_GROUP, 2, struct termios)
+#define TCSETSW	_IOW(KERN_TTY_IOC_GROUP, 3, struct termios)
+#define TCSETSF	_IOW(KERN_TTY_IOC_GROUP, 4, struct termios)
+#define TIOCGWINSZ	_IOR(KERN_TTY_IOC_GROUP, 5, struct winsize)
+#define TIOCSWINSZ	_IOW(KERN_TTY_IOC_GROUP, 6, struct winsize)
+#define TIOCGPGRP	_IOR(KERN_TTY_IOC_GROUP, 7, int32_t)
+#define TIOCSPGRP	_IOW(KERN_TTY_IOC_GROUP, 8, int32_t)
+#define TIOCSCTTY	_IO(KERN_TTY_IOC_GROUP, 9)
+#define TIOCNOTTY	_IO(KERN_TTY_IOC_GROUP, 10)
+#define TIOCFLUSH	_IOW(KERN_TTY_IOC_GROUP, 11, int32_t)
+#define TIOCGPTN	_IOR(KERN_TTY_IOC_GROUP, 12, uint32_t)
+#define TIOCSPTLCK	_IOW(KERN_TTY_IOC_GROUP, 13, int32_t)
+#define TIOCGSID	_IOR(KERN_TTY_IOC_GROUP, 14, int32_t)
+#define TCSBRK	_IOW(KERN_TTY_IOC_GROUP, 15, int32_t)
+#define TCXONC	_IOW(KERN_TTY_IOC_GROUP, 16, int32_t)
+#define TIOCDRAIN	_IO(KERN_TTY_IOC_GROUP, 17)
+
+typedef uint32_t tcflag_t;
+typedef uint8_t cc_t;
+typedef uint32_t speed_t;
+
+#define NCCS	20
+struct termios {
+	tcflag_t c_iflag;
+	tcflag_t c_oflag;
+	tcflag_t c_cflag;
+	tcflag_t c_lflag;
+	cc_t c_cc[NCCS];
+	speed_t c_ispeed;
+	speed_t c_ospeed;
+};
+
+struct winsize {
+	uint16_t ws_row;
+	uint16_t ws_col;
+	uint16_t ws_xpixel;
+	uint16_t ws_ypixel;
+};
 
 #endif

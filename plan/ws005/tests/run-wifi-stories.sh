@@ -12,7 +12,7 @@ if [ "$variant" = sanitize ]; then
 fi
 # The overlay selects target network structs, while host process/file/time APIs
 # and errno remain native. No production policy or child-stream parser is mocked.
-$cc -std=c11 -D_GNU_SOURCE -DZEDBSD_USER_ABI_LP64 -Wall -Wextra -Werror \
+$cc -std=c11 -D_GNU_SOURCE -DKERN_USER_ABI_LP64 -Wall -Wextra -Werror \
  -ffunction-sections -fdata-sections $options \
  -I"$test_dir/story-include" -I"$repo/include/uapi" -I"$repo" \
  "$test_dir/wifi-story-test.c" "$test_dir/wifi-story-world.c" \

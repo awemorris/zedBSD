@@ -110,7 +110,7 @@ memory_ranges(ofw_cell_t node, const char *name,
 	if (length <= 0 || stride == 0 || (unsigned int)length % stride != 0)
 		return -1;
 	entries = (unsigned int)length / stride;
-	if (entries == 0 || entries > ZEDBSD_SUN4U_MAX_MEMORY_RANGES)
+	if (entries == 0 || entries > KERN_SUN4U_MAX_MEMORY_RANGES)
 		return -1;
 	for (index = 0; index < entries; index++) {
 		const unsigned char *entry = bytes + index * stride;
@@ -274,7 +274,7 @@ copy_bootpath(char *destination, const char *source)
 {
 	unsigned int index;
 
-	for (index = 0; index + 1U < ZEDBSD_SUN4U_BOOTPATH_SIZE &&
+	for (index = 0; index + 1U < KERN_SUN4U_BOOTPATH_SIZE &&
 	    source[index] != '\0'; index++)
 		destination[index] = source[index];
 	destination[index] = '\0';
@@ -288,16 +288,16 @@ sparcv9_handoff_build(struct sun4u_boot_handoff *handoff,
 	ofw_scell_t root;
 
 	clear_bytes(handoff, sizeof(*handoff));
-	handoff->common.magic = ZEDBSD_HANDOFF_MAGIC;
-	handoff->common.version = ZEDBSD_HANDOFF_VERSION_SUN4U;
+	handoff->common.magic = KERN_HANDOFF_MAGIC;
+	handoff->common.version = KERN_HANDOFF_VERSION_SUN4U;
 	handoff->common.size = sizeof(*handoff);
 	handoff->common.device_count = 1;
 	handoff->common.boot_bios_id = 0x80;
-	handoff->common.boot_partition_scheme = ZEDBSD_PARTITION_SCHEME_SUN;
+	handoff->common.boot_partition_scheme = KERN_PARTITION_SCHEME_SUN;
 	handoff->common.boot_partition_index = 1;
 	handoff->common.boot_partition_lba = 4096;
-	handoff->extension_magic = ZEDBSD_SUN4U_HANDOFF_MAGIC;
-	handoff->extension_version = ZEDBSD_SUN4U_HANDOFF_VERSION;
+	handoff->extension_magic = KERN_SUN4U_HANDOFF_MAGIC;
+	handoff->extension_version = KERN_SUN4U_HANDOFF_VERSION;
 	handoff->extension_size = sizeof(*handoff) - sizeof(handoff->common);
 	copy_bootpath(handoff->bootpath, bootpath);
 	state.handoff = handoff;

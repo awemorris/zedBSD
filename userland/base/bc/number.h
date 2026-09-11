@@ -11,8 +11,8 @@
  * Declares the zedBSD userland number interface.
  */
 
-#ifndef ZEDBSD_BC_NUMBER_H
-#define ZEDBSD_BC_NUMBER_H
+#ifndef KERN_BC_NUMBER_H
+#define KERN_BC_NUMBER_H
 
 #include <stddef.h>
 #include <stdint.h>

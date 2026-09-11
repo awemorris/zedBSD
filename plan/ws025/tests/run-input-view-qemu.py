@@ -11,7 +11,7 @@ out=o.output.resolve();out.relative_to(REPO/'plan/ws025/temp');out.mkdir(exist_o
 source=o.image.resolve();record={'source_sha256':digest(source),'view_expected':o.view,'direction':'output' if o.output_view else 'input'}
 subprocess.run(['cp','--reflink=auto','--sparse=always',str(source),str(out/'boot.img')],check=True)
 sysroot=REPO/'build/amd64/sysroot/usr';obj=out/'guest.o';binary=out/'ivtest'
-subprocess.run([str(REPO/'build/llvm/bin/clang'),'--target=x86_64-unknown-zedbsd','-nostdinc','-isystem',str(sysroot/'include'),'-I'+str(REPO/'include/uapi'),'-DZEDBSD_USER_ABI_LP64=1','-ffreestanding','-fno-pie','-O1','-ffunction-sections','-fdata-sections','-Wall','-Wextra','-Werror','-c',str(Path(__file__).with_name('output-view-guest.c' if o.output_view else 'input-view-guest.c')),'-o',str(obj)],check=True)
+subprocess.run([str(REPO/'build/llvm/bin/clang'),'--target=x86_64-unknown-zedbsd','-nostdinc','-isystem',str(sysroot/'include'),'-I'+str(REPO/'include/uapi'),'-DKERN_USER_ABI_LP64=1','-ffreestanding','-fno-pie','-O1','-ffunction-sections','-fdata-sections','-Wall','-Wextra','-Werror','-c',str(Path(__file__).with_name('output-view-guest.c' if o.output_view else 'input-view-guest.c')),'-o',str(obj)],check=True)
 subprocess.run(['ld','-m','elf_x86_64','--gc-sections','-nostdlib','-static','-z','max-page-size=4096','-z','stack-size=0x100000','-T',str(REPO/'platform/amd64/user.ld'),str(sysroot/'lib/crt0.o'),str(sysroot/'lib/libc.o'),str(obj),'-o',str(binary)],check=True)
 with source.open('rb') as f:
  f.seek(512);header=f.read(512);assert header[:8]==b'EFI PART'

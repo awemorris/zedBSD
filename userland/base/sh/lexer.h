@@ -11,8 +11,8 @@
  * Declares the zedBSD userland lexer interface.
  */
 
-#ifndef ZEDBSD_USERLAND_SH_LEXER_H
-#define ZEDBSD_USERLAND_SH_LEXER_H
+#ifndef KERN_USERLAND_SH_LEXER_H
+#define KERN_USERLAND_SH_LEXER_H
 
 #include <stddef.h>
 

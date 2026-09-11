@@ -13,8 +13,8 @@
  * library.  Each context is caller-owned and carries its own failure flag.
  */
 
-#ifndef ZEDBSD_KERN_NET_WLAN_CRYPTO_H
-#define ZEDBSD_KERN_NET_WLAN_CRYPTO_H
+#ifndef KERN_KERN_NET_WLAN_CRYPTO_H
+#define KERN_KERN_NET_WLAN_CRYPTO_H
 
 #include <stddef.h>
 #include <stdint.h>

@@ -358,7 +358,7 @@ sh_builtin_dispatch(
 		}
 
 		/* Computes the function result. */
-		function_result = ioctl(1, ZEDBSD_CONSOLE_CLEAR) == 0;
+		function_result = ioctl(1, KERN_CONSOLE_CLEAR) == 0;
 
 		/* Returns the computed result. */
 		return function_result;
@@ -1667,7 +1667,7 @@ print_column_entries(
 	/* Checks the remaining item count. */
 	if (count == 0)
 		return;
-	(void)ioctl(1, ZEDBSD_CONSOLE_GET_SIZE, &size);
+	(void)ioctl(1, KERN_CONSOLE_GET_SIZE, &size);
 
 	/* Checks the current data size. */
 	if (size.columns == 0)

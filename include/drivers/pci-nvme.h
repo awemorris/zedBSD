@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_DRIVERS_PCI_NVME_H
-#define ZEDBSD_DRIVERS_PCI_NVME_H
+#ifndef KERN_DRIVERS_PCI_NVME_H
+#define KERN_DRIVERS_PCI_NVME_H
 
 /* Register the standard PCI class driver. */
 int

@@ -11,8 +11,8 @@
  * Declares the zedBSD userland zsv1 protocol interface.
  */
 
-#ifndef ZEDBSD_ZSV1_PROTOCOL_H
-#define ZEDBSD_ZSV1_PROTOCOL_H
+#ifndef KERN_ZSV1_PROTOCOL_H
+#define KERN_ZSV1_PROTOCOL_H
 
 #include <stddef.h>
 #include <sys/types.h>

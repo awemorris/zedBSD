@@ -30,20 +30,20 @@ static int mount_fstab_entry(const char *source, const char *target, const char 
 static int
 list_mounts(void)
 {
-	struct zedbsd_mount_query *query;
+	struct kern_mount_query *query;
 	unsigned i;
 	int fd, error;
-	query = calloc(1, sizeof(*query) + ZEDBSD_MOUNT_INFO_MAX *
+	query = calloc(1, sizeof(*query) + KERN_MOUNT_INFO_MAX *
 	    sizeof(query->entries[0]));
 	if (query == NULL) {
 		fprintf(stderr, "mount: out of memory\n");
 		return 1;
 	}
-	query->version = ZEDBSD_MOUNT_INFO_VERSION;
+	query->version = KERN_MOUNT_INFO_VERSION;
 	query->struct_size = sizeof(*query);
-	query->capacity = ZEDBSD_MOUNT_INFO_MAX;
+	query->capacity = KERN_MOUNT_INFO_MAX;
 	fd = open("/dev/system", O_RDONLY);
-	error = fd < 0 ? errno : ioctl(fd, ZEDBSD_SYSTEM_GET_MOUNTS, query) < 0 ?
+	error = fd < 0 ? errno : ioctl(fd, KERN_SYSTEM_GET_MOUNTS, query) < 0 ?
 	    errno : 0;
 	if (fd >= 0)
 		close(fd);
@@ -53,14 +53,14 @@ list_mounts(void)
 		return 1;
 	}
 	for (i = 0; i < query->count; i++) {
-		const struct zedbsd_mount_info *entry = &query->entries[i];
+		const struct kern_mount_info *entry = &query->entries[i];
 		printf("%s%s on %s type %s (%s%s%s)\n",
-		    entry->device != 0 && !(entry->kind & ZEDBSD_MOUNT_INFO_BIND) ?
+		    entry->device != 0 && !(entry->kind & KERN_MOUNT_INFO_BIND) ?
 		    "/dev/" : "", entry->source[0] ? entry->source : entry->type,
 		    entry->target, entry->type,
 		    entry->flags & MNT_RDONLY ? "ro" : "rw",
 		    entry->flags & MNT_NOSUID ? ",nosuid" : "",
-		    entry->kind & ZEDBSD_MOUNT_INFO_BIND ? ",bind" : "");
+		    entry->kind & KERN_MOUNT_INFO_BIND ? ",bind" : "");
 	}
 	free(query);
 	return 0;
@@ -109,7 +109,7 @@ main(
 
 	/* Process each remaining command-line operand. */
 	arguments.size = sizeof(arguments);
-	arguments.version = ZEDBSD_MOUNT_ARGS_VERSION;
+	arguments.version = KERN_MOUNT_ARGS_VERSION;
 	for (i = 1; i < argc; i++) {
 		/* Handles the selected command-line operation. */
 		if (strcmp(argv[i], "-r") == 0) {
@@ -306,7 +306,7 @@ mount_fstab_entry(
 		return 0;
 	memset(&arguments, 0, sizeof(arguments));
 	arguments.size = sizeof(arguments);
-	arguments.version = ZEDBSD_MOUNT_ARGS_VERSION;
+	arguments.version = KERN_MOUNT_ARGS_VERSION;
 
 	/* Selects the matching prefix. */
 	if (strncmp(source, "/dev/", 5) == 0)

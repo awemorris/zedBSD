@@ -18,8 +18,8 @@
 #define POSIX_SPAWN_SETSIGMASK 0x0008
 #define POSIX_SPAWN_SETSID      0x0010
 
-#define ZEDBSD_SPAWN_ACTION_MAX 16
-#define ZEDBSD_SPAWN_PATH_MAX 256
+#define KERN_SPAWN_ACTION_MAX 16
+#define KERN_SPAWN_PATH_MAX 256
 
 struct __spawn_action {
 	int operation;
@@ -27,12 +27,12 @@ struct __spawn_action {
 	int new_descriptor;
 	int flags;
 	mode_t mode;
-	char path[ZEDBSD_SPAWN_PATH_MAX];
+	char path[KERN_SPAWN_PATH_MAX];
 };
 
 typedef struct {
 	unsigned count;
-	struct __spawn_action actions[ZEDBSD_SPAWN_ACTION_MAX];
+	struct __spawn_action actions[KERN_SPAWN_ACTION_MAX];
 } posix_spawn_file_actions_t;
 
 typedef struct {

@@ -1,9 +1,9 @@
-#ifndef ZEDBSD_KERN_RPI4_BOOT_H
-#define ZEDBSD_KERN_RPI4_BOOT_H
+#ifndef KERN_KERN_RPI4_BOOT_H
+#define KERN_KERN_RPI4_BOOT_H
 
 #include <kern/boot.h>
 
-#define ZEDBSD_RPI4_HANDOFF_MAGIC	0x34495052U
+#define KERN_RPI4_HANDOFF_MAGIC	0x34495052U
 struct rpi4_boot_handoff {
 	struct boot_handoff common;
 	uint32_t extension_magic;

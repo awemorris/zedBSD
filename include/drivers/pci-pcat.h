@@ -8,8 +8,8 @@
 /*
  * PC/AT PCI host bridge.
  */
-#ifndef ZEDBSD_DRIVERS_PCI_PCAT_H
-#define ZEDBSD_DRIVERS_PCI_PCAT_H
+#ifndef KERN_DRIVERS_PCI_PCAT_H
+#define KERN_DRIVERS_PCI_PCAT_H
 
 int
 drv_pci_pcat_init(void);

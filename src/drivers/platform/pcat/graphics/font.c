@@ -12,9 +12,9 @@
 #include "drivers/platform/pcat/graphics/font.h"
 #include "drivers/platform/pcat/graphics/vgafont.h"
 
-#include <hal/hal.h>
 #include <string.h>
 #include "kern/klog.h"
+#include "kern/platform.h"
 
 #ifndef PCAT_VGA_APERTURE_ADDRESS
 #define PCAT_VGA_APERTURE_ADDRESS 0x800a0000U
@@ -50,7 +50,7 @@ drv_pcat_font_init(
 		return;
 
 	/* Handles the boot font availability. */
-	boot_font = hal_get_arch_handoff("pcat.boot-font");
+	boot_font = kern_boot_handoff("pcat.boot-font");
 	if (boot_font != NULL) {
 		memcpy(ascii_font, boot_font, sizeof(ascii_font));
 		font_valid = 1;

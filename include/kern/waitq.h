@@ -4,8 +4,8 @@
  *
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_KERN_WAITQ_H
-#define ZEDBSD_KERN_WAITQ_H
+#ifndef KERN_KERN_WAITQ_H
+#define KERN_KERN_WAITQ_H
 
 #include <stdint.h>
 

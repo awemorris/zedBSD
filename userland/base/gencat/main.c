@@ -178,30 +178,30 @@ catalog_load(
 		goto failed;
 
 	/* Handles a failed zedbsd catalog get32 operation. */
-	if ((size_t)end < ZEDBSD_CATALOG_HEADER_SIZE ||
-	    memcmp(data, ZEDBSD_CATALOG_MAGIC, ZEDBSD_CATALOG_MAGIC_SIZE) !=
+	if ((size_t)end < KERN_CATALOG_HEADER_SIZE ||
+	    memcmp(data, KERN_CATALOG_MAGIC, KERN_CATALOG_MAGIC_SIZE) !=
 		0 ||
-	    zedbsd_catalog_get32(data + 8U) != ZEDBSD_CATALOG_VERSION ||
-	    zedbsd_catalog_get32(data + 12U) != ZEDBSD_CATALOG_HEADER_SIZE)
+	    kern_catalog_get32(data + 8U) != KERN_CATALOG_VERSION ||
+	    kern_catalog_get32(data + 12U) != KERN_CATALOG_HEADER_SIZE)
 		goto invalid;
-	count = zedbsd_catalog_get32(data + 16U);
-	entries = zedbsd_catalog_get32(data + 20U);
-	strings = zedbsd_catalog_get32(data + 24U);
+	count = kern_catalog_get32(data + 16U);
+	entries = kern_catalog_get32(data + 20U);
+	strings = kern_catalog_get32(data + 24U);
 
 	/* Checks the remaining item count. */
-	if (count > UINT32_MAX / ZEDBSD_CATALOG_ENTRY_SIZE ||
+	if (count > UINT32_MAX / KERN_CATALOG_ENTRY_SIZE ||
 	    entries > (uint32_t)end || strings > (uint32_t)end ||
-	    count * ZEDBSD_CATALOG_ENTRY_SIZE > (uint32_t)end - entries ||
-	    strings < entries + count * ZEDBSD_CATALOG_ENTRY_SIZE)
+	    count * KERN_CATALOG_ENTRY_SIZE > (uint32_t)end - entries ||
+	    strings < entries + count * KERN_CATALOG_ENTRY_SIZE)
 		goto invalid;
 
 	/* Process each remaining element. */
 	for (index = 0; index < count; index++) {
-		entry = data + entries + index * ZEDBSD_CATALOG_ENTRY_SIZE;
-		set = zedbsd_catalog_get32(entry);
-		number = zedbsd_catalog_get32(entry + 4U);
-		offset = zedbsd_catalog_get32(entry + 8U);
-		length = zedbsd_catalog_get32(entry + 12U);
+		entry = data + entries + index * KERN_CATALOG_ENTRY_SIZE;
+		set = kern_catalog_get32(entry);
+		number = kern_catalog_get32(entry + 4U);
+		offset = kern_catalog_get32(entry + 8U);
+		length = kern_catalog_get32(entry + 12U);
 
 		/* Handles a failed catalog set operation. */
 		if (set == 0 || number == 0 || offset < strings ||
@@ -777,44 +777,44 @@ catalog_encode(
 	}
 
 	/* Handles the catalog condition. */
-	if (catalog->count > UINT32_MAX / ZEDBSD_CATALOG_ENTRY_SIZE ||
-	    catalog->count * ZEDBSD_CATALOG_ENTRY_SIZE >
-		UINT32_MAX - ZEDBSD_CATALOG_HEADER_SIZE ||
-	    strings > UINT32_MAX - ZEDBSD_CATALOG_HEADER_SIZE -
-			  catalog->count * ZEDBSD_CATALOG_ENTRY_SIZE) {
+	if (catalog->count > UINT32_MAX / KERN_CATALOG_ENTRY_SIZE ||
+	    catalog->count * KERN_CATALOG_ENTRY_SIZE >
+		UINT32_MAX - KERN_CATALOG_HEADER_SIZE ||
+	    strings > UINT32_MAX - KERN_CATALOG_HEADER_SIZE -
+			  catalog->count * KERN_CATALOG_ENTRY_SIZE) {
 		errno = EFBIG;
 
 		/* Reports operation failure. */
 		return -1;
 	}
-	total = ZEDBSD_CATALOG_HEADER_SIZE +
-		catalog->count * ZEDBSD_CATALOG_ENTRY_SIZE + strings;
+	total = KERN_CATALOG_HEADER_SIZE +
+		catalog->count * KERN_CATALOG_ENTRY_SIZE + strings;
 	data = calloc(1, total != 0 ? total : 1U);
 
 	/* Handles the data availability. */
 	if (data == NULL)
 		return -1;
-	memcpy(data, ZEDBSD_CATALOG_MAGIC, ZEDBSD_CATALOG_MAGIC_SIZE);
-	zedbsd_catalog_put32(data + 8U, ZEDBSD_CATALOG_VERSION);
-	zedbsd_catalog_put32(data + 12U, ZEDBSD_CATALOG_HEADER_SIZE);
-	zedbsd_catalog_put32(data + 16U, (uint32_t)catalog->count);
-	zedbsd_catalog_put32(data + 20U, ZEDBSD_CATALOG_HEADER_SIZE);
-	zedbsd_catalog_put32(data + 24U, ZEDBSD_CATALOG_HEADER_SIZE +
+	memcpy(data, KERN_CATALOG_MAGIC, KERN_CATALOG_MAGIC_SIZE);
+	kern_catalog_put32(data + 8U, KERN_CATALOG_VERSION);
+	kern_catalog_put32(data + 12U, KERN_CATALOG_HEADER_SIZE);
+	kern_catalog_put32(data + 16U, (uint32_t)catalog->count);
+	kern_catalog_put32(data + 20U, KERN_CATALOG_HEADER_SIZE);
+	kern_catalog_put32(data + 24U, KERN_CATALOG_HEADER_SIZE +
 					     (uint32_t)catalog->count *
-						 ZEDBSD_CATALOG_ENTRY_SIZE);
-	offset = ZEDBSD_CATALOG_HEADER_SIZE +
-		 catalog->count * ZEDBSD_CATALOG_ENTRY_SIZE;
+						 KERN_CATALOG_ENTRY_SIZE);
+	offset = KERN_CATALOG_HEADER_SIZE +
+		 catalog->count * KERN_CATALOG_ENTRY_SIZE;
 
 	/* Process each remaining element. */
 	for (index = 0; index < catalog->count; index++) {
-		entry = data + ZEDBSD_CATALOG_HEADER_SIZE +
-		       index * ZEDBSD_CATALOG_ENTRY_SIZE;
+		entry = data + KERN_CATALOG_HEADER_SIZE +
+		       index * KERN_CATALOG_ENTRY_SIZE;
 		length = strlen(catalog->items[index].text);
 
-		zedbsd_catalog_put32(entry, catalog->items[index].set);
-		zedbsd_catalog_put32(entry + 4U, catalog->items[index].number);
-		zedbsd_catalog_put32(entry + 8U, (uint32_t)offset);
-		zedbsd_catalog_put32(entry + 12U, (uint32_t)length);
+		kern_catalog_put32(entry, catalog->items[index].set);
+		kern_catalog_put32(entry + 4U, catalog->items[index].number);
+		kern_catalog_put32(entry + 8U, (uint32_t)offset);
+		kern_catalog_put32(entry + 12U, (uint32_t)length);
 		memcpy(data + offset, catalog->items[index].text, length + 1U);
 		offset += length + 1U;
 	}

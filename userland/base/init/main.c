@@ -507,7 +507,7 @@ open_control_socket(
 
 	memset(&address, 0, sizeof(address));
 	address.sun_family = AF_UNIX;
-	strcpy(address.sun_path, ZEDBSD_INIT_SOCKET);
+	strcpy(address.sun_path, KERN_INIT_SOCKET);
 
 	(void)unlink(address.sun_path);
 
@@ -730,7 +730,7 @@ spawn_service(
 			/* Handles a failed dup2 operation. */
 			if (dup2(notify_pipe[1], 3) < 0 ||
 			    fcntl(3, F_SETFD, 0) != 0 ||
-			    setenv("ZEDBSD_NOTIFY_FD", "3", 1) != 0)
+			    setenv("KERN_NOTIFY_FD", "3", 1) != 0)
 				_exit(126);
 
 			/* Handles the notify pipe condition. */
@@ -1062,8 +1062,8 @@ shutdown_system(
 	printf("init: executing system action %s\n", action_name);
 	(void)fflush(stdout);
 
-	system_action = action == INIT_ACTION_REBOOT ? ZEDBSD_SYSTEM_REBOOT
-						     : ZEDBSD_SYSTEM_HALT;
+	system_action = action == INIT_ACTION_REBOOT ? KERN_SYSTEM_REBOOT
+						     : KERN_SYSTEM_HALT;
 	/* Keeps the requested action pending while storage can still recover. */
 	for (;;) {
 		system_descriptor = open("/dev/system", O_RDONLY);

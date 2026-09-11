@@ -11,8 +11,8 @@
  * Declares the zedBSD C library syscall interface.
  */
 
-#ifndef ZEDBSD_USER_SYSCALL_H
-#define ZEDBSD_USER_SYSCALL_H
+#ifndef KERN_USER_SYSCALL_H
+#define KERN_USER_SYSCALL_H
 #include <stdint.h>
 intptr_t __syscall6(uint32_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t,
 		    uintptr_t, uintptr_t);

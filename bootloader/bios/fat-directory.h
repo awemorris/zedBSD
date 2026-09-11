@@ -1,7 +1,7 @@
 /* Bounded FAT directory-name matching for native BIOS loaders. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_BOOTLOADER_BIOS_FAT_DIRECTORY_H
-#define ZEDBSD_BOOTLOADER_BIOS_FAT_DIRECTORY_H
+#ifndef KERN_BOOTLOADER_BIOS_FAT_DIRECTORY_H
+#define KERN_BOOTLOADER_BIOS_FAT_DIRECTORY_H
 
 #define ZBL_BIOS_FAT_DIRECTORY_STATE_SIZE 264U
 

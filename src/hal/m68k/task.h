@@ -1,8 +1,8 @@
 /* MC68030 task context. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 
-#ifndef ZEDBSD_HAL_M68K_TASK_H
-#define ZEDBSD_HAL_M68K_TASK_H
+#ifndef KERN_HAL_M68K_TASK_H
+#define KERN_HAL_M68K_TASK_H
 
 #include <hal/hal.h>
 #include "frame-offsets.h"

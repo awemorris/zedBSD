@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_KERN_ATOMIC_H
-#define ZEDBSD_KERN_ATOMIC_H
+#ifndef KERN_KERN_ATOMIC_H
+#define KERN_KERN_ATOMIC_H
 
 #include <hal/hal.h>
 #include <limits.h>
@@ -35,6 +35,16 @@ atomic_try_acquire_zero(
 	return hal_atomic_uint_try_acquire(&value->value);
 }
 
+/*
+ * Claim a plain counter which is zero when free.
+ */
+static inline int
+atomic_raw_try_acquire_zero(
+	volatile unsigned *value)
+{
+	return hal_atomic_uint_try_acquire(value);
+}
+
 static inline unsigned
 atomic_raw_load_acquire(
 	const volatile unsigned *value)
@@ -55,6 +65,14 @@ atomic_raw_store_release(
 	unsigned next)
 {
 	hal_atomic_store_release(value, next);
+}
+
+static inline void
+atomic_raw_store_relaxed(
+	volatile unsigned *value,
+	unsigned next)
+{
+	hal_atomic_store_relaxed(value, next);
 }
 
 static inline unsigned
@@ -273,6 +291,26 @@ refcount_put_not_last(
 		    &value, value - 1U))
 			return value - 1U;
 	}
+}
+
+/*
+ * Hint that this processor is spinning.
+ */
+static inline void
+atomic_spin_hint(
+	void)
+{
+	hal_atomic_relax();
+}
+
+/*
+ * Order earlier loads against everything that follows.
+ */
+static inline void
+atomic_acquire_fence(
+	void)
+{
+	hal_atomic_fence_acquire();
 }
 
 #endif

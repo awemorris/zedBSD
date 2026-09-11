@@ -13,13 +13,13 @@
 #include <drivers/pci.h>
 #include <drivers/usb.h>
 #include <errno.h>
-#include <hal/hal.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
 #include <string.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
+#include "kern/device-io.h"
 
 #define UHCI_USBCMD 0x00U
 #define UHCI_USBSTS 0x02U
@@ -167,7 +167,7 @@ struct uhci_controller {
 	uint64_t root_wake_generation;
 	uint16_t root_port_status[2];
 	unsigned root_port_status_valid;
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 	unsigned retirement_evidence;
 	unsigned root_evidence;
 	unsigned shutdown_evidence;
@@ -361,7 +361,7 @@ uhci_root_worker_arm(
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 
 	/* Checks the atomic exchange n result. */
 	if (!__atomic_exchange_n(&controller->root_evidence, 1U,
@@ -603,7 +603,7 @@ uhci_schedule_initialize(
 			controller, uhci_frame_periodic_level(index));
 	}
 
-	hal_io_wmb();
+	kern_io_write_barrier();
 
 	/* Succeeded. */
 	return 0;
@@ -651,7 +651,7 @@ uhci_wait_running(
 	for (;;) {
 		status = in16(controller->io_base + UHCI_USBSTS);
 
-		hal_io_mb();
+		kern_io_barrier();
 
 		/* Checks the operation status. */
 		if (status == UINT16_MAX ||
@@ -750,7 +750,7 @@ uhci_start(
 	controller->retirement_stopping = 0;
 	controller->retirement_joining = 0;
 	controller->retirement_error = 0;
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 	controller->retirement_evidence = 0;
 	controller->root_evidence = 0;
 	controller->shutdown_evidence = 0;
@@ -819,7 +819,7 @@ uhci_hardware_stop(
 		/* Continue until the operation reaches a terminal state. */
 		for (;;) {
 			status = in16(controller->io_base + UHCI_USBSTS);
-			hal_io_mb();
+			kern_io_barrier();
 			if (status == UINT16_MAX) {
 				halt_error = EIO;
 				break;
@@ -989,7 +989,7 @@ uhci_report_shutdown_evidence(
 {
 	unsigned long irq;
 	int ready;
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 	int report = 0;
 
 #endif
@@ -1003,7 +1003,7 @@ uhci_report_shutdown_evidence(
 		controller->retirement_worker == NULL &&
 		!controller->retirement_joining &&
 		controller->root_worker == NULL && !controller->root_joining;
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 
 	/* Handles the ready condition. */
 	if (ready && !controller->shutdown_evidence) {
@@ -1018,7 +1018,7 @@ uhci_report_shutdown_evidence(
 	/* Handles the ready condition. */
 	if (!ready)
 		return EBUSY;
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 
 	/* Handles the report condition. */
 	if (report)
@@ -1270,7 +1270,7 @@ uhci_retirement_begin_locked(
 	 * unlink. A later, different FRNUM is the only successful
 	 * DMA-retirement proof.
 	 */
-	hal_io_wmb();
+	kern_io_write_barrier();
 
 	/*
 	 * Preserve the raw register value.  Masking an absent-device 0xffff
@@ -1336,7 +1336,7 @@ uhci_schedule_unlink_locked(
 	 * boundary.  Hardware may already be traversing that QH and must still
 	 * be able to reach every unrelated successor.
 	 */
-	hal_io_wmb();
+	kern_io_write_barrier();
 }
 
 /* Finds the queue head a request belongs under. */
@@ -1437,7 +1437,7 @@ uhci_retirement_process_request(
 		return;
 	}
 
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 
 	/* Checks the atomic exchange n result. */
 	if (!__atomic_exchange_n(&controller->retirement_evidence, 1U,
@@ -1510,7 +1510,7 @@ uhci_wait_frame_advance(
 
 		status = in16(controller->io_base + UHCI_USBSTS);
 		command = in16(controller->io_base + UHCI_USBCMD);
-		hal_io_mb();
+		kern_io_barrier();
 
 		/* Checks the operation status. */
 		if (controller->retirement_stopping ||
@@ -1657,7 +1657,7 @@ uhci_finish_completion(
 	 * FRNUM has advanced since the unlink snapshot, so neither descriptors
 	 * nor the bounce buffer can still be reached by this controller.
 	 */
-	hal_io_rmb();
+	kern_io_read_barrier();
 	actual = uhci_request_actual(request);
 	uhci_request_commit_toggle(request);
 
@@ -2702,7 +2702,7 @@ uhci_progress_frame_sample(
 	frame = in16(controller->io_base + UHCI_FRNUM);
 	status = in16(controller->io_base + UHCI_USBSTS);
 	command = in16(controller->io_base + UHCI_USBCMD);
-	hal_io_mb();
+	kern_io_barrier();
 
 	/* Checks the operation status. */
 	if (frame == UINT16_MAX || status == UINT16_MAX ||
@@ -2731,7 +2731,7 @@ uhci_request_advance_snapshot(
 	uint32_t base, element, link, next_status, physical, status, token;
 	unsigned actual, expected, index, offset;
 
-	hal_io_rmb();
+	kern_io_read_barrier();
 
 	/* Handles the element condition. */
 	element = request->qh->element;
@@ -2870,7 +2870,7 @@ uhci_request_qh_progress_locked(
 			    sched_ticks() - request->advance_started_tick >=
 				    UHCI_QH_STALL_TICKS) {
 				request->qh->element = link;
-				hal_io_wmb();
+				kern_io_write_barrier();
 				uhci_request_advance_clear(request);
 
 				/* Succeeded. */
@@ -2935,7 +2935,7 @@ uhci_request_terminal(
 	uint32_t status;
 	unsigned index;
 
-	hal_io_rmb();
+	kern_io_read_barrier();
 	/* Process each remaining element. */
 	for (index = 0; index < request->td_count; index++) {
 		status = request->tds[index].status;
@@ -3120,11 +3120,11 @@ uhci_schedule_insert_locked(
 	/* Handles the head availability. */
 	if (*head != NULL)
 		(*head)->schedule_previous = request;
-	hal_io_wmb();
+	kern_io_write_barrier();
 	anchor->head = uhci_request_link(request);
 	*head = request;
 	request->scheduled = true;
-	hal_io_wmb();
+	kern_io_write_barrier();
 }
 
 /* Fails a queue head that has stopped making progress. */
@@ -3486,7 +3486,7 @@ uhci_urb_dequeue(
 
 		/* Handles the r condition. */
 		if (r->state == UHCI_REQUEST_RETIRED_CANCEL) {
-			hal_io_rmb();
+			kern_io_read_barrier();
 			uhci_request_commit_toggle(r);
 
 			/* Handles the r condition. */
@@ -4358,7 +4358,7 @@ uhci_attach(
 		goto fail;
 	out16(controller->io_base + UHCI_USBINTR, 0x000dU);
 	uhci_publish(controller);
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 	kern_logf("uhci: concurrent per-endpoint scheduling active\n");
 #endif
 	kern_logf("uhci: PCI controller at I/O %04x, ports=%u\n",

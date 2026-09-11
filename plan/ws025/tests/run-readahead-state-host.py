@@ -10,7 +10,7 @@ commands=[]
 for mode in ('ordinary','sanitize'):
  extra=[] if mode=='ordinary' else ['-fsanitize=address,undefined','-fno-omit-frame-pointer']
  binary=str(out/mode)
- build=['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-DZEDBSD_USER_ABI_LP64','-Iinclude','-Iinclude/uapi',*extra,*sources,'-o',binary]
+ build=['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-DKERN_USER_ABI_LP64','-Iinclude','-Iinclude/uapi',*extra,*sources,'-o',binary]
  for name,args in [(mode+'-build',build),(mode,['timeout','30s',binary])]:
   commands.append(dict(name=name,argv=args));(out/'commands.json').write_text(json.dumps(commands,indent=2)+'\n')
   r=subprocess.run(args,cwd=root,capture_output=True,text=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=1','UBSAN_OPTIONS':'halt_on_error=1'})

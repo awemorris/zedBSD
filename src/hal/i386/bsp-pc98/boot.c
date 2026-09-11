@@ -24,7 +24,7 @@
 
 static struct boot_handoff kernel_handoff;
 static struct boot_device kernel_boot_devices[PC98_BOOT_DEVICE_MAX];
-static char boot_command_line[ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE];
+static char boot_command_line[KERN_BOOT_PARAMETERS_STORAGE_SIZE];
 static int boot_info_valid;
 
 static int handoff_name_is(const char *name, const char *expected);
@@ -48,9 +48,9 @@ bsp_boot_init(
 	raw = raw_boot_info;
 
 	/* Validates the fixed header, version, and device-table references. */
-	if (raw == NULL || raw->magic != ZEDBSD_HANDOFF_MAGIC ||
-	    (raw->version != ZEDBSD_HANDOFF_VERSION_PC98 &&
-	     raw->version != ZEDBSD_HANDOFF_VERSION_MULTIBOOT) ||
+	if (raw == NULL || raw->magic != KERN_HANDOFF_MAGIC ||
+	    (raw->version != KERN_HANDOFF_VERSION_PC98 &&
+	     raw->version != KERN_HANDOFF_VERSION_MULTIBOOT) ||
 	    raw->device_count == 0 ||
 	    raw->device_count > PC98_BOOT_DEVICE_MAX ||
 	    raw->device_table == 0) {
@@ -63,15 +63,15 @@ bsp_boot_init(
 		return;
 
 	/* Enforces the native handoff's whole-disk LBA convention. */
-	if (raw->version == ZEDBSD_HANDOFF_VERSION_PC98 &&
-	    (raw->boot_partition_scheme != ZEDBSD_PARTITION_SCHEME_LBA ||
+	if (raw->version == KERN_HANDOFF_VERSION_PC98 &&
+	    (raw->boot_partition_scheme != KERN_PARTITION_SCHEME_LBA ||
 	     raw->boot_partition_index != 0)) {
 		return;
 	}
 
 	/* Enforces the Multiboot handoff's one-based MBR convention. */
-	if (raw->version == ZEDBSD_HANDOFF_VERSION_MULTIBOOT &&
-	    (raw->boot_partition_scheme != ZEDBSD_PARTITION_SCHEME_MBR ||
+	if (raw->version == KERN_HANDOFF_VERSION_MULTIBOOT &&
+	    (raw->boot_partition_scheme != KERN_PARTITION_SCHEME_MBR ||
 	     raw->boot_partition_index < 1 ||
 	     raw->boot_partition_index > 4)) {
 		return;
@@ -96,8 +96,8 @@ bsp_boot_init(
 	if (form == X86_PC98_HANDOFF_PARAMETERS) {
 		parameter_result = x86_boot_parameter_record_copy(
 			boot_command_line,
-			&((const struct zedbsd_pc98_parameter_handoff *)raw)->parameters,
-			ZEDBSD_BOOT_PARAMETER_RECORD_SIZE);
+			&((const struct kern_pc98_parameter_handoff *)raw)->parameters,
+			KERN_BOOT_PARAMETER_RECORD_SIZE);
 	} else {
 		parameter_result = x86_boot_parameters_copy(
 			boot_command_line,

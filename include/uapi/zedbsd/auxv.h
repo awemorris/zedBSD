@@ -9,8 +9,8 @@
  * ELF auxiliary vector
  */
 
-#ifndef ZEDBSD_UAPI_AUXV_H
-#define ZEDBSD_UAPI_AUXV_H
+#ifndef KERN_UAPI_AUXV_H
+#define KERN_UAPI_AUXV_H
 
 #define AT_NULL	0U
 #define AT_PHDR	3U

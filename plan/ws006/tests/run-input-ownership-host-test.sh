@@ -6,7 +6,7 @@ repo=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/ws006-input-ownership.XXXXXX")
 trap 'rm -rf -- "$temporary"' EXIT HUP INT TERM
 
-common="-std=c11 -O2 -D_POSIX_C_SOURCE=200809L -pthread -DZEDBSD_USER_ABI_LP64 -idirafter $repo/libc/include -include $repo/libc/include/sys/ioctl.h -ffunction-sections -fdata-sections -Wl,--gc-sections -I$repo/include -I$repo/include/uapi -I$repo/src -Wall -Wextra -Werror"
+common="-std=c11 -O2 -D_POSIX_C_SOURCE=200809L -pthread -DKERN_USER_ABI_LP64 -idirafter $repo/libc/include -include $repo/libc/include/sys/ioctl.h -ffunction-sections -fdata-sections -Wl,--gc-sections -I$repo/include -I$repo/include/uapi -I$repo/src -Wall -Wextra -Werror"
 sources="$repo/plan/ws006/tests/input-ownership-test.c $repo/src/drivers/generic/input.c $repo/plan/ws006/tests/input-host-unreachable.c"
 
 cc $common $sources -o "$temporary/ordinary"
@@ -18,7 +18,7 @@ ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
 	"$temporary/sanitize"
 
 device_sources="$repo/plan/ws006/tests/input-device-ownership-test.c $repo/src/drivers/generic/input.c $repo/plan/ws006/tests/input-host-unreachable.c"
-device_common="$common -DZEDBSD_USER_ABI_LP64 -idirafter $repo/libc/include -include $repo/libc/include/sys/ioctl.h"
+device_common="$common -DKERN_USER_ABI_LP64 -idirafter $repo/libc/include -include $repo/libc/include/sys/ioctl.h"
 cc $device_common $device_sources -o "$temporary/input-device"
 "$temporary/input-device"
 cc $device_common -g -fno-omit-frame-pointer -fsanitize=address,undefined \

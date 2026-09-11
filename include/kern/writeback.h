@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_KERN_WRITEBACK_H
-#define ZEDBSD_KERN_WRITEBACK_H
+#ifndef KERN_KERN_WRITEBACK_H
+#define KERN_KERN_WRITEBACK_H
 #include <stdint.h>
 #include <stddef.h>
 #include <zedbsd/writeback.h>

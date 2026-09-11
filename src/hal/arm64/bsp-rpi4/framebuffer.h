@@ -1,5 +1,5 @@
-#ifndef ZEDBSD_HAL_ARM64_RPI4_FRAMEBUFFER_H
-#define ZEDBSD_HAL_ARM64_RPI4_FRAMEBUFFER_H
+#ifndef KERN_HAL_ARM64_RPI4_FRAMEBUFFER_H
+#define KERN_HAL_ARM64_RPI4_FRAMEBUFFER_H
 #include <hal/types.h>
 int rpi4_framebuffer_init(uintptr_t mailbox_phys);
 int rpi4_framebuffer_ready(void);

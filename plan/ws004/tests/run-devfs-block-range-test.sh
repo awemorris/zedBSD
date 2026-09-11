@@ -8,7 +8,7 @@ trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
 compiler=${HOSTCC:-cc}
 fixture=$repo/plan/ws004/tests/devfs-block-range-test.c
-common="-std=c11 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -DZEDBSD_USER_ABI_LP64 -DZEDBSD_DEVFS_HOST_TEST -DZEDBSD_STORAGE_HOST_TEST -I$repo/include -I$repo/include/uapi -I$repo/src -I$repo/libc/include"
+common="-std=c11 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -DKERN_USER_ABI_LP64 -DZEDBSD_DEVFS_HOST_TEST -DZEDBSD_STORAGE_HOST_TEST -I$repo/include -I$repo/include/uapi -I$repo/src -I$repo/libc/include"
 
 # shellcheck disable=SC2086
 $compiler $common -O2 "$fixture" -Wl,--gc-sections -o "$temporary/devfs-block-range-test"

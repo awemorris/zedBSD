@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_KERN_POSIX_ACL_H
-#define ZEDBSD_KERN_POSIX_ACL_H
+#ifndef KERN_KERN_POSIX_ACL_H
+#define KERN_KERN_POSIX_ACL_H
 
 #include <stddef.h>
 #include <stdint.h>

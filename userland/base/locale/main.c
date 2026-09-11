@@ -24,13 +24,13 @@
 struct key_metadata {
 	int category;
 	const char *keyword;
-	enum zedbsd_locale_key key;
+	enum kern_locale_key key;
 };
 
 static const struct key_metadata metadata[] = {
 #define LOCALE_METADATA(name, category, keyword, c_value, utf8_value)          \
-	{category, keyword, ZEDBSD_LOCALE_KEY_##name},
-    ZEDBSD_LOCALE_KEYS(LOCALE_METADATA)
+	{category, keyword, KERN_LOCALE_KEY_##name},
+    KERN_LOCALE_KEYS(LOCALE_METADATA)
 #undef LOCALE_METADATA
 };
 
@@ -44,8 +44,8 @@ static void print_environment(void);
 static int category_index(const char *name);
 static int print_category(int category, int category_heading, int include_keyword);
 static void print_value(const struct key_metadata *key, int include_keyword);
-static int grouping_keyword(enum zedbsd_locale_key key);
-static int numeric_keyword(enum zedbsd_locale_key key);
+static int grouping_keyword(enum kern_locale_key key);
+static int numeric_keyword(enum kern_locale_key key);
 static void print_quoted(const char *value);
 static const struct key_metadata *keyword_find(const char *name);
 static int name_compare(const void *left, const void *right);
@@ -386,21 +386,21 @@ print_value(
 /* Supports the grouping keyword operation. */
 static int
 grouping_keyword(
-	enum zedbsd_locale_key key)
+	enum kern_locale_key key)
 {
 	/* Returns the computed result. */
-	return key == ZEDBSD_LOCALE_KEY_GROUPING ||
-	       key == ZEDBSD_LOCALE_KEY_MON_GROUPING;
+	return key == KERN_LOCALE_KEY_GROUPING ||
+	       key == KERN_LOCALE_KEY_MON_GROUPING;
 }
 
 /* Supports the numeric keyword operation. */
 static int
 numeric_keyword(
-	enum zedbsd_locale_key key)
+	enum kern_locale_key key)
 {
 	/* Returns the computed result. */
-	return key >= ZEDBSD_LOCALE_KEY_INT_FRAC_DIGITS &&
-	       key <= ZEDBSD_LOCALE_KEY_N_SIGN_POSN;
+	return key >= KERN_LOCALE_KEY_INT_FRAC_DIGITS &&
+	       key <= KERN_LOCALE_KEY_N_SIGN_POSN;
 }
 
 /* Supports the print quoted operation. */

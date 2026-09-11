@@ -11,8 +11,8 @@
  * Declares the zedBSD userland builtins interface.
  */
 
-#ifndef ZEDBSD_USERLAND_SH_BUILTINS_H
-#define ZEDBSD_USERLAND_SH_BUILTINS_H
+#ifndef KERN_USERLAND_SH_BUILTINS_H
+#define KERN_USERLAND_SH_BUILTINS_H
 
 int sh_builtin_dispatch(int argc, char **argv, int *handled);
 void sh_hash_clear(void);

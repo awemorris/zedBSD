@@ -9,8 +9,8 @@
  * namei
  */
 
-#ifndef ZEDBSD_KERN_NAMEI_H
-#define ZEDBSD_KERN_NAMEI_H
+#ifndef KERN_KERN_NAMEI_H
+#define KERN_KERN_NAMEI_H
 
 #include "kern/inode.h"
 #include "kern/lock.h"
@@ -23,8 +23,8 @@
 #ifndef PATH_MAX
 #define PATH_MAX		256U
 #endif
-#ifndef ZEDBSD_PATH_MAX
-# define ZEDBSD_PATH_MAX	PATH_MAX
+#ifndef KERN_PATH_MAX
+# define KERN_PATH_MAX	PATH_MAX
 #endif
 
 #define COMPONENT_LAST		0x0001U
@@ -32,7 +32,7 @@
 #define COMPONENT_DOTDOT	0x0004U
 
 #define NAMEI_NOFOLLOW_FINAL	0x0001U
-#define ZEDBSD_SYMLOOP_MAX	40U
+#define KERN_SYMLOOP_MAX	40U
 
 struct componentname {
 	const char *cn_nameptr;

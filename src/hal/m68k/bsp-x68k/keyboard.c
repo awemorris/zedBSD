@@ -189,7 +189,7 @@ enqueue_raw(uint8_t raw)
 	event_head = next;
 }
 
-#ifdef ZEDBSD_INPUT_OWNERSHIP_TEST
+#ifdef KERN_INPUT_OWNERSHIP_TEST
 void
 x68k_input_ownership_test_reset(void)
 {

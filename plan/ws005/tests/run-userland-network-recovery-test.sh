@@ -7,7 +7,7 @@ work=$(mktemp -d "$temporary_root/zedbsd-network-recovery.XXXXXX")
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 
 cc=${CC:-cc}
-common="-std=c11 -DZEDBSD_USER_ABI_LP64 -I$root/include/uapi \
+common="-std=c11 -DKERN_USER_ABI_LP64 -I$root/include/uapi \
 	-I$root/libc/include -I$root \
 	-Wall -Wextra -Werror -ffunction-sections -fdata-sections"
 discard="-Wl,--gc-sections"

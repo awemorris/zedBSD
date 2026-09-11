@@ -37,12 +37,12 @@
 #include <zedbsd/system.h>
 #include <zedbsd/mountinfo.h>
 #include <errno.h>
-#include <hal/hal.h>
 #include <string.h>
 #include <kern/system-swap-device.h>
 #include <kern/swap-control.h>
 #include <kern/swap.h>
 #include <kern/uaccess.h>
+#include "kern/pmem.h"
 
 static int system_ioctl(struct file *file, unsigned long request, uintptr_t argument);
 static int system_get_info(uintptr_t argument);
@@ -69,9 +69,9 @@ static const struct cdev_ops system_ops = {
 	.ioctl = system_ioctl
 };
 
-_Static_assert(sizeof(((struct kern_swap_control_source_info *)0)->uuid) == ZEDBSD_SYSTEM_SWAP_UUID_SIZE, "kernel and UAPI swap UUID sizes differ");
-_Static_assert(sizeof(((struct kern_swap_control_source_info *)0)->label) == ZEDBSD_SYSTEM_SWAP_LABEL_SIZE, "kernel and UAPI swap label sizes differ");
-_Static_assert(sizeof(((struct kern_swap_control_source_info *)0)->source) == ZEDBSD_SYSTEM_SWAP_SOURCE_MAX, "kernel and UAPI swap source-string sizes differ");
+_Static_assert(sizeof(((struct kern_swap_control_source_info *)0)->uuid) == KERN_SYSTEM_SWAP_UUID_SIZE, "kernel and UAPI swap UUID sizes differ");
+_Static_assert(sizeof(((struct kern_swap_control_source_info *)0)->label) == KERN_SYSTEM_SWAP_LABEL_SIZE, "kernel and UAPI swap label sizes differ");
+_Static_assert(sizeof(((struct kern_swap_control_source_info *)0)->source) == KERN_SYSTEM_SWAP_SOURCE_MAX, "kernel and UAPI swap source-string sizes differ");
 
 /*
  * Registers the system control device.
@@ -104,11 +104,11 @@ drv_system_swap_device_ioctl(
 
 	/* Routes the request to its handler. */
 	switch (request) {
-	case ZEDBSD_SYSTEM_SWAP_ADD:
-	case ZEDBSD_SYSTEM_SWAP_REMOVE:
+	case KERN_SYSTEM_SWAP_ADD:
+	case KERN_SYSTEM_SWAP_REMOVE:
 		error = control_ioctl(request, argument, superuser);
 		break;
-	case ZEDBSD_SYSTEM_GET_SWAP_SOURCE:
+	case KERN_SYSTEM_GET_SWAP_SOURCE:
 		error = get_source_ioctl(argument);
 		break;
 	default:
@@ -137,33 +137,33 @@ system_ioctl(
 
 	/* Routes the request. */
 	switch (request) {
-	case ZEDBSD_SYSTEM_GET_MOUNTS:
+	case KERN_SYSTEM_GET_MOUNTS:
 		error = system_get_mounts(argument);
 		break;
-	case ZEDBSD_SYSTEM_GET_INFO:
+	case KERN_SYSTEM_GET_INFO:
 		error = system_get_info(argument);
 		break;
-	case ZEDBSD_SYSTEM_GET_DEVICE:
+	case KERN_SYSTEM_GET_DEVICE:
 		error = system_get_device(argument);
 		break;
-	case ZEDBSD_SYSTEM_GET_VMSTAT:
+	case KERN_SYSTEM_GET_VMSTAT:
 		error = system_get_vmstat(argument);
 		break;
-	case ZEDBSD_SYSTEM_GET_RESOURCES:
+	case KERN_SYSTEM_GET_RESOURCES:
 		error = system_get_resources(argument);
 		break;
-	case ZEDBSD_SYSTEM_GET_PROCESS:
+	case KERN_SYSTEM_GET_PROCESS:
 		error = system_get_process(argument);
 		break;
-	case ZEDBSD_SYSTEM_GET_FILE_USAGE:
+	case KERN_SYSTEM_GET_FILE_USAGE:
 		error = system_get_file_usage(argument);
 		break;
-	case ZEDBSD_SYSTEM_SWAP_ADD:
-	case ZEDBSD_SYSTEM_SWAP_REMOVE:
-	case ZEDBSD_SYSTEM_GET_SWAP_SOURCE:
+	case KERN_SYSTEM_SWAP_ADD:
+	case KERN_SYSTEM_SWAP_REMOVE:
+	case KERN_SYSTEM_GET_SWAP_SOURCE:
 		error = system_swap_ioctl(request, argument);
 		break;
-	case ZEDBSD_SYSTEM_HALT:
+	case KERN_SYSTEM_HALT:
 		/* Only init may halt the machine. */
 		if (curthread->proc->pid != 1)
 			return EPERM;
@@ -173,7 +173,7 @@ system_ioctl(
 		kern_platform_halt();
 		error = 0;
 		break;
-	case ZEDBSD_SYSTEM_REBOOT:
+	case KERN_SYSTEM_REBOOT:
 		/* Only init may reboot the machine. */
 		if (curthread->proc->pid != 1)
 			return EPERM;
@@ -201,8 +201,8 @@ static int
 system_get_mounts(
 	uintptr_t argument)
 {
-	struct zedbsd_mount_query header;
-	struct zedbsd_mount_query *output;
+	struct kern_mount_query header;
+	struct kern_mount_query *output;
 	size_t bytes;
 	size_t copy_bytes;
 	unsigned count;
@@ -214,9 +214,9 @@ system_get_mounts(
 	error = copyin(argument, &header, sizeof(header));
 	if (error != 0)
 		return error;
-	if (header.version != ZEDBSD_MOUNT_INFO_VERSION ||
+	if (header.version != KERN_MOUNT_INFO_VERSION ||
 	    header.struct_size != sizeof(header) ||
-	    header.capacity > ZEDBSD_MOUNT_INFO_MAX)
+	    header.capacity > KERN_MOUNT_INFO_MAX)
 		return EINVAL;
 
 	/* Rejects reserved input before allocating the bounded output. */
@@ -333,7 +333,7 @@ system_get_vmstat(
 	uintptr_t argument)
 {
 	struct vm_statistics output;
-	struct hal_memstat hs;
+	struct kern_memstat hs;
 	struct kern_memory_stats ks;
 	struct vm_reclaim_stats vs;
 	struct vm_commit_stats cs;
@@ -348,7 +348,7 @@ system_get_vmstat(
 
 	/* Samples every statistics source. */
 	memset(&output, 0, sizeof(output));
-	hal_get_memstat(&hs);
+	kern_memstat(&hs);
 	kern_memory_get_stats(&ks);
 	vm_reclaim_get_stats(&vs);
 	vm_commit_get_stats(&cs);
@@ -366,10 +366,10 @@ system_get_vmstat(
 	output.heap_peak = ks.heap_peak;
 	output.heap_largest_free = ks.heap_largest_free;
 	output.heap_largest_failed = ks.heap_largest_failed;
-	output.hal_tasks = hs.task_count;
-	output.hal_task_stack_bytes = hs.task_stack_bytes;
-	output.hal_spaces = hs.space_count;
-	output.hal_page_tables = hs.page_table_count;
+	output.kern_tasks = hs.task_count;
+	output.kern_task_stack_bytes = hs.task_stack_bytes;
+	output.kern_spaces = hs.space_count;
+	output.kern_page_tables = hs.page_table_count;
 	output.vm_resident = vs.resident;
 	output.vm_anonymous = vs.anonymous_resident;
 	output.vm_file = vs.file_resident;
@@ -487,7 +487,7 @@ system_get_process(
 
 	/* Adds the parent and the mapped virtual size. */
 	output.ppid = process_parent_pid(process);
-	output.version = ZEDBSD_SYSTEM_PROCESS_INFO_VERSION;
+	output.version = KERN_SYSTEM_PROCESS_INFO_VERSION;
 	output.struct_size = sizeof(output);
 	vmspace = process_vmspace_ref(process);
 	if (vmspace != NULL) {
@@ -528,10 +528,10 @@ system_get_file_usage(
 	if (error != 0)
 		return error;
 
-	if (output.version != ZEDBSD_SYSTEM_FILE_USAGE_VERSION ||
+	if (output.version != KERN_SYSTEM_FILE_USAGE_VERSION ||
 	    output.struct_size != sizeof(output) ||
 	    (output.query_flags &
-	     ~ZEDBSD_SYSTEM_FILE_USAGE_QUERY_MOUNT) != 0)
+	     ~KERN_SYSTEM_FILE_USAGE_QUERY_MOUNT) != 0)
 		return EINVAL;
 
 	output.path[sizeof(output.path) - 1U] = '\0';
@@ -663,9 +663,9 @@ system_process_file_usage(
 	if (cwdi != NULL) {
 		irq = spin_lock_irqsave(&cwdi->lock);
 		if (system_path_matches(&cwdi->cwd, target, query_flags))
-			flags |= ZEDBSD_SYSTEM_FILE_USAGE_CWD;
+			flags |= KERN_SYSTEM_FILE_USAGE_CWD;
 		if (system_path_matches(&cwdi->root, target, query_flags))
-			flags |= ZEDBSD_SYSTEM_FILE_USAGE_ROOT;
+			flags |= KERN_SYSTEM_FILE_USAGE_ROOT;
 		spin_unlock_irqrestore(&cwdi->lock, irq);
 		cwdinfo_release(cwdi);
 	}
@@ -678,9 +678,9 @@ system_process_file_usage(
 			if (system_file_matches(candidate, target, query_flags,
 						&socket_match)) {
 				if (socket_match)
-					flags |= ZEDBSD_SYSTEM_FILE_USAGE_SOCKET;
+					flags |= KERN_SYSTEM_FILE_USAGE_SOCKET;
 				else
-					flags |= ZEDBSD_SYSTEM_FILE_USAGE_OPEN;
+					flags |= KERN_SYSTEM_FILE_USAGE_OPEN;
 			}
 
 			if (candidate != NULL)
@@ -700,10 +700,10 @@ system_process_file_usage(
 			if (!system_file_matches(region->file, target,
 						 query_flags, &region_socket_match))
 				continue;
-			if ((region->prot & HAL_SPACE_EXEC) != 0)
-				flags |= ZEDBSD_SYSTEM_FILE_USAGE_EXECUTABLE;
+			if ((region->prot & KERN_PROT_EXEC) != 0)
+				flags |= KERN_SYSTEM_FILE_USAGE_EXECUTABLE;
 			else
-				flags |= ZEDBSD_SYSTEM_FILE_USAGE_MAPPED;
+				flags |= KERN_SYSTEM_FILE_USAGE_MAPPED;
 		}
 
 		mutex_unlock(&vmspace->lock);
@@ -733,7 +733,7 @@ system_file_matches(
 		return 1;
 
 	/* For a path query the backing or mapped inode may match. */
-	if ((query_flags & ZEDBSD_SYSTEM_FILE_USAGE_QUERY_MOUNT) == 0 &&
+	if ((query_flags & KERN_SYSTEM_FILE_USAGE_QUERY_MOUNT) == 0 &&
 	    (candidate->f_inode == target->p_inode ||
 	     candidate->f_vm_inode == target->p_inode))
 		return 1;
@@ -763,7 +763,7 @@ system_path_matches(
 		return 0;
 
 	/* A mount query matches any path on the target's mount. */
-	if ((query_flags & ZEDBSD_SYSTEM_FILE_USAGE_QUERY_MOUNT) != 0) {
+	if ((query_flags & KERN_SYSTEM_FILE_USAGE_QUERY_MOUNT) != 0) {
 		if (candidate->p_mount == target->p_mount)
 			return 1;
 		return 0;
@@ -820,7 +820,7 @@ control_valid(
 	const struct system_swap_control *control)
 {
 	/* The versioned layout must match exactly. */
-	if (control->version != ZEDBSD_SYSTEM_SWAP_VERSION)
+	if (control->version != KERN_SYSTEM_SWAP_VERSION)
 		return 0;
 	if (control->struct_size != sizeof(*control))
 		return 0;
@@ -848,7 +848,7 @@ query_valid(
 	const struct system_swap_source_info *query)
 {
 	/* The versioned layout must match exactly. */
-	if (query->version != ZEDBSD_SYSTEM_SWAP_VERSION)
+	if (query->version != KERN_SYSTEM_SWAP_VERSION)
 		return 0;
 	if (query->struct_size != sizeof(*query))
 		return 0;
@@ -861,7 +861,7 @@ query_valid(
 		return 0;
 
 	/* The source identifier must exist. */
-	if (query->source_id >= ZEDBSD_SYSTEM_SWAP_SOURCE_COUNT)
+	if (query->source_id >= KERN_SYSTEM_SWAP_SOURCE_COUNT)
 		return 0;
 
 	/* Reports a valid query. */
@@ -882,14 +882,14 @@ map_source_state(
 	switch (state) {
 	case SWAP_SOURCE_STATE_INACTIVE:
 	case SWAP_SOURCE_STATE_PREPARED:
-		*mapped = ZEDBSD_SYSTEM_SWAP_STATE_INACTIVE;
+		*mapped = KERN_SYSTEM_SWAP_STATE_INACTIVE;
 		return 0;
 	case SWAP_SOURCE_STATE_ACTIVE:
-		*mapped = ZEDBSD_SYSTEM_SWAP_STATE_ACTIVE;
+		*mapped = KERN_SYSTEM_SWAP_STATE_ACTIVE;
 		return 0;
 	case SWAP_SOURCE_STATE_DRAINING:
 	case SWAP_SOURCE_STATE_REMOVING:
-		*mapped = ZEDBSD_SYSTEM_SWAP_STATE_DRAINING;
+		*mapped = KERN_SYSTEM_SWAP_STATE_DRAINING;
 		return 0;
 	default:
 		break;
@@ -921,7 +921,7 @@ control_ioctl(
 		return EPERM;
 
 	/* Performs the requested change. */
-	if (request == ZEDBSD_SYSTEM_SWAP_ADD)
+	if (request == KERN_SYSTEM_SWAP_ADD)
 		error = kern_swap_control_add(control.source);
 	else
 		error = kern_swap_control_remove(control.source);
@@ -965,7 +965,7 @@ get_source_ioctl(
 
 	/* Renders the snapshot in the public layout. */
 	memset(&output, 0, sizeof(output));
-	output.version = ZEDBSD_SYSTEM_SWAP_VERSION;
+	output.version = KERN_SYSTEM_SWAP_VERSION;
 	output.struct_size = sizeof(output);
 	output.source_id = source_id;
 	error = map_source_state(snapshot.state, &output.state);

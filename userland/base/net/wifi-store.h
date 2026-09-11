@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_WIFI_STORE_H
-#define ZEDBSD_WIFI_STORE_H
+#ifndef KERN_WIFI_STORE_H
+#define KERN_WIFI_STORE_H
 
 #include "userland/base/net/wifi-conf.h"
 

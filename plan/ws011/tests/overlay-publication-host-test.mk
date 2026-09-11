@@ -6,7 +6,7 @@ OBJCOPY ?= objcopy
 SELF := $(lastword $(MAKEFILE_LIST))
 TEST := $(REPO)/plan/ws011/tests/overlay-publication-host-test.c
 FIXTURE := $(REPO)/plan/ws001/tests/credential-vfs-overlay-fault-host-test.c
-CPPFLAGS := -DZEDBSD_USER_ABI_LP64 -I$(REPO)/include \
+CPPFLAGS := -DKERN_USER_ABI_LP64 -I$(REPO)/include \
 	-I$(REPO)/include/uapi -I$(REPO)/src -I$(REPO)/libc/include -I$(REPO)
 CFLAGS := -std=c11 -O0 -g -Wall -Wextra -Werror -ffunction-sections \
 	-fdata-sections $(CFLAGS_EXTRA)

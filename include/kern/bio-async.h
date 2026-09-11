@@ -1,7 +1,7 @@
 /* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_KERN_BIO_ASYNC_H
-#define ZEDBSD_KERN_BIO_ASYNC_H
+#ifndef KERN_KERN_BIO_ASYNC_H
+#define KERN_KERN_BIO_ASYNC_H
 
 #include <kern/disk.h>
 

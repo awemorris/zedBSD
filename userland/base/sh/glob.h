@@ -11,8 +11,8 @@
  * Declares the zedBSD userland glob interface.
  */
 
-#ifndef ZEDBSD_USERLAND_SH_GLOB_H
-#define ZEDBSD_USERLAND_SH_GLOB_H
+#ifndef KERN_USERLAND_SH_GLOB_H
+#define KERN_USERLAND_SH_GLOB_H
 
 #include "userland/base/sh/expand.h"
 

@@ -11,8 +11,8 @@
  * Declares the zedBSD userland editor interface.
  */
 
-#ifndef ZEDBSD_ED_EDITOR_H
-#define ZEDBSD_ED_EDITOR_H
+#ifndef KERN_ED_EDITOR_H
+#define KERN_ED_EDITOR_H
 
 #include <stddef.h>
 

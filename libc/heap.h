@@ -5,15 +5,15 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_HEAP_H
-#define ZEDBSD_HEAP_H
+#ifndef KERN_HEAP_H
+#define KERN_HEAP_H
 
 #include <stddef.h>
 #include <stdint.h>
 
 enum heap_event {
-	ZEDBSD_HEAP_ALLOCATED = 0,
-	ZEDBSD_HEAP_FREED,
+	KERN_HEAP_ALLOCATED = 0,
+	KERN_HEAP_FREED,
 };
 
 typedef void (*heap_observer_fn)(void *context, void *pointer,
@@ -68,7 +68,7 @@ size_t heap_allocator_largest_failed(const struct heap_allocator *heap);
 size_t heap_allocator_error_count(const struct heap_allocator *heap);
 size_t heap_allocator_largest_free(const struct heap_allocator *heap);
 int heap_allocator_validate(const struct heap_allocator *heap);
-#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+#ifdef KERN_KERNEL_HEAP_TRACE
 int heap_allocator_trace_validate(const struct heap_allocator *heap);
 #endif
 

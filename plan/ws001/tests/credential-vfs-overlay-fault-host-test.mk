@@ -5,7 +5,7 @@ OUT ?= $(REPO)/build/ws001-p022-overlay-fault-host
 CC ?= cc
 OBJCOPY ?= objcopy
 
-CPPFLAGS := -DZEDBSD_USER_ABI_LP64 -I$(REPO)/include \
+CPPFLAGS := -DKERN_USER_ABI_LP64 -I$(REPO)/include \
 	-I$(REPO)/include/uapi -I$(REPO)/src -I$(REPO)/libc/include -I$(REPO)
 CFLAGS := -std=c11 -O0 -Wall -Wextra -Werror -ffunction-sections \
 	-fdata-sections

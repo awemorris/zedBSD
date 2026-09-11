@@ -11,8 +11,8 @@
  * Declares the zedBSD userland elf interface.
  */
 
-#ifndef ZEDBSD_RTLD_ELF_H
-#define ZEDBSD_RTLD_ELF_H
+#ifndef KERN_RTLD_ELF_H
+#define KERN_RTLD_ELF_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -203,7 +203,7 @@ typedef struct elf_verneed Elf_Verneed;
 typedef struct elf_vernaux Elf_Vernaux;
 typedef uint16_t Elf_Versym;
 
-#if defined(ZEDBSD_USER_ABI_LP64)
+#if defined(KERN_USER_ABI_LP64)
 typedef struct elf64_ehdr Elf_Ehdr;
 typedef struct elf64_phdr Elf_Phdr;
 typedef struct elf64_dyn Elf_Dyn;

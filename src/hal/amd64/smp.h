@@ -11,8 +11,8 @@
  * The amd64 symmetric-multiprocessing contract.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_SMP_H
-#define ZEDBSD_HAL_AMD64_SMP_H
+#ifndef KERN_HAL_AMD64_SMP_H
+#define KERN_HAL_AMD64_SMP_H
 
 #include <hal/types.h>
 #include "bsp-pcat/acpi.h"

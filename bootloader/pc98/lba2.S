@@ -40,7 +40,7 @@ relocated:
 	movw	%cs, %ax
 	movw	%ax, %ds
 	sti
-#if ZEDBSD_PC98_IPL_DIAGNOSTIC
+#if KERN_PC98_IPL_DIAGNOSTIC
 	/* Four bounded tones prove that LBA 0 transferred control to LBA 2. */
 	movw	$0x4532, %dx	/* "2E": Stage 2 entry. */
 	movw	$4, %cx
@@ -136,19 +136,19 @@ read_sector:
 	ret
 boot_failure_table:
 	movw	$0x5432, %dx	/* "2T": partition-table read failed. */
-#if ZEDBSD_PC98_IPL_DIAGNOSTIC
+#if KERN_PC98_IPL_DIAGNOSTIC
 	movw	$5, %cx
 #endif
 	jmp	boot_failure
 boot_failure_name:
 	movw	$0x4e32, %dx	/* "2N": BOOT partition name not found. */
-#if ZEDBSD_PC98_IPL_DIAGNOSTIC
+#if KERN_PC98_IPL_DIAGNOSTIC
 	movw	$6, %cx
 #endif
 	jmp	boot_failure
 boot_failure_pbr:
 	movw	$0x5032, %dx	/* "2P": partition boot-record read failed. */
-#if ZEDBSD_PC98_IPL_DIAGNOSTIC
+#if KERN_PC98_IPL_DIAGNOSTIC
 	movw	$7, %cx
 #endif
 boot_failure:
@@ -164,7 +164,7 @@ boot_failure:
 	movw	%ax, %es
 	movw	$0x00e1, %es:(%bx)
 	movw	$0x00e1, %es:2(%bx)
-#if ZEDBSD_PC98_IPL_DIAGNOSTIC
+#if KERN_PC98_IPL_DIAGNOSTIC
 	call	diagnostic_checkpoint
 #else
 	movb	%dl, %al
@@ -178,7 +178,7 @@ boot_failure:
 	hlt
 	jmp	1b
 
-#if ZEDBSD_PC98_IPL_DIAGNOSTIC
+#if KERN_PC98_IPL_DIAGNOSTIC
 /* Keep the diagnostic stage self-contained; the two fixed IPL binaries do
  * not share runtime code or state.  See disk-ipl.S for the marker contract. */
 diagnostic_checkpoint:

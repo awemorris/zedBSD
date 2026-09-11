@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_KERN_INPUT_QUEUE_H
-#define ZEDBSD_KERN_INPUT_QUEUE_H
+#ifndef KERN_KERN_INPUT_QUEUE_H
+#define KERN_KERN_INPUT_QUEUE_H
 
 #include <zedbsd/input.h>
 #include <stddef.h>

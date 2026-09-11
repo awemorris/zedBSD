@@ -266,16 +266,16 @@ write_file(
 	const struct stat *expected,
 	const struct format_file_ops *ops)
 {
-	struct zedbsd_file_format_reserve request;
+	struct kern_file_format_reserve request;
 	struct stat actual;
 	int error;
 
 	/* Requests fixed-size exclusive mutation and activation ownership. */
 	memset(&request, 0, sizeof(request));
-	request.version = ZEDBSD_FILE_FORMAT_VERSION;
+	request.version = KERN_FILE_FORMAT_VERSION;
 	request.struct_size = sizeof(request);
 	request.size_bytes = (uint64_t)expected->st_size;
-	if (ioctl(writer, ZEDBSD_FILE_FORMAT_RESERVE, &request) < 0)
+	if (ioctl(writer, KERN_FILE_FORMAT_RESERVE, &request) < 0)
 		return errno;
 
 	/* Rechecks the name after reservation and before any content mutation. */

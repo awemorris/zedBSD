@@ -9,8 +9,8 @@
  * CMD646 primary-channel ATA PIO driver for QEMU sun4u.
  */
 
-#ifndef ZEDBSD_DRIVERS_SUN4U_CMD646_H
-#define ZEDBSD_DRIVERS_SUN4U_CMD646_H
+#ifndef KERN_DRIVERS_SUN4U_CMD646_H
+#define KERN_DRIVERS_SUN4U_CMD646_H
 
 #include <stdint.h>
 

@@ -9,8 +9,8 @@
  * BSD socket
  */
 
-#ifndef ZEDBSD_KERN_NET_SOCKET_H
-#define ZEDBSD_KERN_NET_SOCKET_H
+#ifndef KERN_KERN_NET_SOCKET_H
+#define KERN_KERN_NET_SOCKET_H
 
 #include <kern/atomic.h>
 #include <kern/lock.h>
@@ -109,7 +109,7 @@ struct unix_recv_transaction {
 	unsigned data_truncated;
 	unsigned control_truncated;
 	unsigned active;
-	struct file *files[ZEDBSD_MSG_FD_MAX];
+	struct file *files[KERN_MSG_FD_MAX];
 };
 
 struct socket_family_ops {
@@ -158,7 +158,7 @@ int packet_socket_init(void);
 int route_socket_init(void);
 int unix_socket_init(void);
 int unix_socket_pair_create(int type, int protocol,
-			    const struct zedbsd_peercred *creator,
+			    const struct kern_peercred *creator,
 			    struct socket **left_result,
 			    struct socket **right_result);
 ssize_t unix_socket_send_message(struct socket *socket, const void *buffer,
@@ -191,10 +191,10 @@ int unix_socket_bind_path(struct socket *socket, struct cwdinfo *context,
 			  const struct ucred *cred, mode_t umask,
 			  const struct sockaddr *address, socklen_t length);
 int unix_socket_listen(struct socket *socket, int backlog,
-		       const struct zedbsd_peercred *listener);
+		       const struct kern_peercred *listener);
 int unix_socket_connect_path(struct socket *socket, struct cwdinfo *context,
 			     const struct ucred *cred,
-			     const struct zedbsd_peercred *connector,
+			     const struct kern_peercred *connector,
 			     const struct sockaddr *address, socklen_t length,
 			     unsigned io_flags);
 int unix_socket_bound_path_matches(struct socket *socket,

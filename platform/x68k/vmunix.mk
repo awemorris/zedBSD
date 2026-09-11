@@ -10,9 +10,9 @@ X68K_PLATFORM := platform/x68k
 
 M68K_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 	-Ilibc/include -Isrc/hal/m68k -DHAL_ARCH_M68K -DHAL_BOARD_X68K \
-	-DZEDBSD_USER_ABI_M68K -DZEDBSD_PAGE_SIZE=4096 \
-	-DZEDBSD_USER_PAGE_SIZE=4096 -DZEDBSD_NO_PRINTF_FLOAT \
-	-DZEDBSD_INIT_PATH='"/x68k/bin/sh"'
+	-DKERN_USER_ABI_M68K -DKERN_PAGE_SIZE=4096 \
+	-DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT \
+	-DKERN_INIT_PATH='"/x68k/bin/sh"'
 M68K_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
 M68K_KERNEL_CFLAGS := -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables \
@@ -22,9 +22,9 @@ M68K_USER_CFLAGS := -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie \
 	-fno-builtin -fno-common -ffunction-sections -fdata-sections \
 	-Os -Wall -Wextra -Werror
 M68K_USER_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
-	-Ilibc/include -DHAL_ARCH_M68K -DZEDBSD_USER_ABI_M68K \
-	-DZEDBSD_USER_PAGE_SIZE=4096 \
-	-DZEDBSD_NO_PRINTF_FLOAT
+	-Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K \
+	-DKERN_USER_PAGE_SIZE=4096 \
+	-DKERN_NO_PRINTF_FLOAT
 
 # These overrides make an explicit `libc-objects` request use the m68k kernel
 # contract. X68k user libc is defined separately when the user image lands.

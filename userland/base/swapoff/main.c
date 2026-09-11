@@ -26,7 +26,7 @@ main(
 	int function_result;
 
 	/* Obtains the swap command main result. */
-	function_result = swap_command_main("swapoff", ZEDBSD_SYSTEM_SWAP_REMOVE, argc,
+	function_result = swap_command_main("swapoff", KERN_SYSTEM_SWAP_REMOVE, argc,
 			 argv);
 
 	/* Returns the computed result. */

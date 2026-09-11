@@ -11,8 +11,8 @@
  * The shared i386 ACPI and MPS interrupt-topology contract.
  */
 
-#ifndef ZEDBSD_HAL_I386_APIC_TOPOLOGY_H
-#define ZEDBSD_HAL_I386_APIC_TOPOLOGY_H
+#ifndef KERN_HAL_I386_APIC_TOPOLOGY_H
+#define KERN_HAL_I386_APIC_TOPOLOGY_H
 
 #include <hal/hal.h>
 

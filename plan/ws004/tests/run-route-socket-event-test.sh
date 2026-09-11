@@ -33,7 +33,7 @@ cc $warnings -O0 -fanalyzer $includes -c \
 	-o "$temporary/net-device-event-analyzer.o"
 
 abi_includes="-I$repo/libc/include -I$repo/include/uapi"
-cc -m64 -nostdinc $abi_includes -DZEDBSD_USER_ABI_LP64 \
+cc -m64 -nostdinc $abi_includes -DKERN_USER_ABI_LP64 \
 	-std=c11 -Wall -Wextra -Werror -fsyntax-only "$layout"
 cc -m32 -nostdinc $abi_includes -std=c11 -Wall -Wextra -Werror \
 	-fsyntax-only "$layout"

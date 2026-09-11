@@ -17,7 +17,7 @@ for version in 2; do
 			-o "$temporary/thread.o"
 		# shellcheck disable=SC2086
 		${HOSTCC:-cc} -std=c11 -O1 -g -Wall -Wextra -Werror \
-			-ffunction-sections -fdata-sections -DZEDBSD_USER_ABI_LP64 \
+			-ffunction-sections -fdata-sections -DKERN_USER_ABI_LP64 \
 			-DUFS_AUDIT_VERSION=$version $extra -I"$repo/include" \
 			-I"$repo/include/uapi" -I"$repo/src" -I"$repo/libc/include" \
 			"$repo/plan/ws018/tests/ufs-metadata-audit.c" \

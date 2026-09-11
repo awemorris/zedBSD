@@ -19,11 +19,13 @@
 
 #include <string.h>
 #include "kern/klog.h"
+#include "errno.h"
+#include "kern/pmem.h"
 
 #define CIRRUS_PADDR 0xf0000000U
 
-static struct hal_pmem gdc_memory[4];
-static struct hal_pmem cirrus_memory;
+static struct kern_pmem gdc_memory[4];
+static struct kern_pmem cirrus_memory;
 
 static struct pc98_auto display;
 static struct pc98_display_backend backend_hal;
@@ -330,7 +332,7 @@ static int
 pc98_graphics_prepare_hardware(
 	void)
 {
-	static const hal_physaddr_t plane_address[4] = {
+	static const uint64_t plane_address[4] = {
 		0x000a8000U, 0x000b0000U, 0x000b8000U, 0x000e0000U};
 	struct hal_pmem_request request;
 	unsigned i;
@@ -345,7 +347,7 @@ pc98_graphics_prepare_hardware(
 		request.paddr = plane_address[i];
 
 		/* Checks the hal pmem alloc result. */
-		if (hal_pmem_alloc(&request, &gdc_memory[i]) != HAL_OK)
+		if (hal_pmem_alloc(&request, &gdc_memory[i]) != 0)
 			goto fail;
 	}
 
@@ -353,7 +355,7 @@ pc98_graphics_prepare_hardware(
 	request.size = 4U * 1024U * 1024U;
 
 	/* Checks the hal pmem alloc result. */
-	if (hal_pmem_alloc(&request, &cirrus_memory) != HAL_OK)
+	if (hal_pmem_alloc(&request, &cirrus_memory) != 0)
 		goto fail;
 	drv_pc98_auto_default(&display, display_reset, display_stop, NULL,
 			      port_in8, port_out8, NULL,

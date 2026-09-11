@@ -159,7 +159,7 @@ drv_pc98_ide_init(
 			bios_dev = bios_device_for_slot(
 				bios_devices, bios_device_count, slot);
 			if (bios_dev == NULL ||
-			    (((bios_dev->flags & ZEDBSD_DEV_BOOT_ORIGIN) !=
+			    (((bios_dev->flags & KERN_DEV_BOOT_ORIGIN) !=
 			      0) != (pass == 0)))
 				continue;
 
@@ -298,7 +298,7 @@ bios_device_for_slot(
 	/* Process each remaining element. */
 	for (i = 0; devices != NULL && i < count; i++) {
 		/* Handles the devices condition. */
-		if (devices[i].device_class == ZEDBSD_DEV_IDE &&
+		if (devices[i].device_class == KERN_DEV_IDE &&
 		    devices[i].bios_id == 0x80U + slot) {
 			/* Returns the computed result. */
 			return &devices[i];

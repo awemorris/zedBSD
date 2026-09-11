@@ -6,8 +6,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_KERN_IO_EPOCH_H
-#define ZEDBSD_KERN_IO_EPOCH_H
+#ifndef KERN_KERN_IO_EPOCH_H
+#define KERN_KERN_IO_EPOCH_H
 
 #include <kern/atomic.h>
 

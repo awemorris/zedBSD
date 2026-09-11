@@ -9,8 +9,8 @@
  * Internal HAL console wait-list helpers.
  */
 
-#ifndef ZEDBSD_HAL_CONS_WAIT_H
-#define ZEDBSD_HAL_CONS_WAIT_H
+#ifndef KERN_HAL_CONS_WAIT_H
+#define KERN_HAL_CONS_WAIT_H
 
 #include <hal/hal.h>
 

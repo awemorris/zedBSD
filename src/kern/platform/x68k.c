@@ -67,12 +67,12 @@ kern_platform_init(
 		/* Describes one present SCSI target for the boot record. */
 		device = &devices[count];
 		hal_memset(device, 0, sizeof(*device));
-		device->device_class = ZEDBSD_DEV_SCSI;
+		device->device_class = KERN_DEV_SCSI;
 		device->display_index = (uint8_t)count;
 		device->bios_id = (uint8_t)target;
-		device->flags = ZEDBSD_DEV_PRESENT;
+		device->flags = KERN_DEV_PRESENT;
 		if (target == handoff->common.boot_bios_id)
-			device->flags |= ZEDBSD_DEV_BOOT_ORIGIN;
+			device->flags |= KERN_DEV_BOOT_ORIGIN;
 		device->sector_size = X68K_SCSI_BLOCK_SIZE;
 		device->controller_location = (uint8_t)target;
 		count++;
@@ -115,7 +115,7 @@ kern_platform_block_device(
 	struct disk *disk;
 
 	/* Only a SCSI boot device has a disk. */
-	if (device == NULL || device->device_class != ZEDBSD_DEV_SCSI)
+	if (device == NULL || device->device_class != KERN_DEV_SCSI)
 		return NULL;
 
 	/* Resolves the SPC target that the device names. */

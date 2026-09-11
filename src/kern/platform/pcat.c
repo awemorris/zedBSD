@@ -68,7 +68,7 @@
 #if CONFIG_KERNEL_USB_HID_CHECKPOINT
 int drv_usb_hid_checkpoint_driver_register(void);
 #endif
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 int ws004_pci_msi_qemu_register(void);
 void ws004_pci_msi_qemu_raise(void);
 #endif
@@ -101,8 +101,8 @@ kern_platform_init(
 	if (handoff == 0 ||
 	    devices == 0 ||
 	    capacity == 0 ||
-	    handoff->magic != ZEDBSD_HANDOFF_MAGIC ||
-	    handoff->version != ZEDBSD_HANDOFF_VERSION_MULTIBOOT)
+	    handoff->magic != KERN_HANDOFF_MAGIC ||
+	    handoff->version != KERN_HANDOFF_VERSION_MULTIBOOT)
 		return 0;
 
 	/* Selects the partition scheme and starts with no disks. */
@@ -112,7 +112,7 @@ kern_platform_init(
 	/* Brings up the PCI core and, under test, the MSI fixture. */
 	if (drv_pci_init() != 0)
 		kern_logf("pci: core initialization failed\n");
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 	if (ws004_pci_msi_qemu_register() != 0)
 		kern_logf("WS004 MSI fixture registration failed\n");
 #endif
@@ -175,7 +175,7 @@ kern_platform_init(
 	/* Probes the host bridge, which binds the registered drivers. */
 	if (drv_pci_pcat_init() != 0)
 		kern_logf("pci: PC/AT host initialization failed\n");
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 	else
 		drv_pci_dump();
 #endif
@@ -187,12 +187,12 @@ kern_platform_init(
 		if (disk == 0)
 			continue;
 		device = &devices[count];
-		device->device_class = ZEDBSD_DEV_IDE;
+		device->device_class = KERN_DEV_IDE;
 		device->display_index = (uint8_t)count;
 		device->bios_id = (uint8_t)(0x80U + slot);
-		device->flags = ZEDBSD_DEV_PRESENT;
+		device->flags = KERN_DEV_PRESENT;
 		if (device->bios_id == handoff->boot_bios_id)
-			device->flags |= ZEDBSD_DEV_BOOT_ORIGIN;
+			device->flags |= KERN_DEV_BOOT_ORIGIN;
 		device->sector_size = 512;
 		device->cylinders = 0;
 		device->heads = 0;
@@ -242,7 +242,7 @@ kern_platform_refresh_devices(
 	(void)n;
 
 	/* Raises the MSI fixture interrupt under test. */
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 	ws004_pci_msi_qemu_raise();
 #endif
 
@@ -321,7 +321,7 @@ kern_platform_block_device(
 	struct disk *disk;
 
 	/* Only BIOS IDE units are boot devices on this platform. */
-	if (device == 0 || device->device_class != ZEDBSD_DEV_IDE)
+	if (device == 0 || device->device_class != KERN_DEV_IDE)
 		return 0;
 
 	/* Looks up the unit by its BIOS identifier. */

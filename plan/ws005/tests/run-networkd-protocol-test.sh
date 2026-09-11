@@ -9,7 +9,7 @@ temporary=$(mktemp -d "$temporary_root/networkd-protocol.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
 cc=${CC:-cc}
-common="-std=c11 -DZEDBSD_USER_ABI_LP64 -I$repo/include/uapi \
+common="-std=c11 -DKERN_USER_ABI_LP64 -I$repo/include/uapi \
 	-I$repo/libc/include -I$repo -Wall -Wextra -Werror"
 
 # shellcheck disable=SC2086

@@ -23,7 +23,7 @@
 static pthread_mutex_t utmp_lock = PTHREAD_MUTEX_INITIALIZER;
 static int utmp_fd = -1;
 static off_t utmp_offset;
-#if defined(ZEDBSD_DYNAMIC_LIBC) || defined(ZEDBSD_STATIC_TLS)
+#if defined(KERN_DYNAMIC_LIBC) || defined(KERN_STATIC_TLS)
 static _Thread_local struct utmpx utmp_result;
 #else
 /*

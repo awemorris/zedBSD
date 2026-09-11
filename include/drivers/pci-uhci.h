@@ -8,8 +8,8 @@
 /*
  * PCI UHCI host controller.
  */
-#ifndef ZEDBSD_DRIVERS_PCI_UHCI_H
-#define ZEDBSD_DRIVERS_PCI_UHCI_H
+#ifndef KERN_DRIVERS_PCI_UHCI_H
+#define KERN_DRIVERS_PCI_UHCI_H
 
 int
 drv_pci_uhci_driver_register(void);

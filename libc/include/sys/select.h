@@ -13,7 +13,7 @@
 #include <sys/time.h>
 #include <time.h>
 
-#define FD_SETSIZE ZEDBSD_FD_SETSIZE
+#define FD_SETSIZE KERN_FD_SETSIZE
 
 #define FD_ZERO(set) ((set)->bits[0] = 0U)
 #define FD_SET(fd, set) ((set)->bits[0] |= (uint32_t)1U << (unsigned)(fd))

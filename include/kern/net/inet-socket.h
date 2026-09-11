@@ -9,8 +9,8 @@
  * IPv4 socket
  */
 
-#ifndef ZEDBSD_KERN_NET_INET_SOCKET_H
-#define ZEDBSD_KERN_NET_INET_SOCKET_H
+#ifndef KERN_KERN_NET_INET_SOCKET_H
+#define KERN_KERN_NET_INET_SOCKET_H
 
 #include "kern/net/socket.h"
 

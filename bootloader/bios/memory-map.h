@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_BIOS_MEMORY_MAP_H
-#define ZEDBSD_BIOS_MEMORY_MAP_H
+#ifndef KERN_BIOS_MEMORY_MAP_H
+#define KERN_BIOS_MEMORY_MAP_H
 
 #include "bootloader/common/memory-map.h"
 

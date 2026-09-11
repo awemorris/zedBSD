@@ -9,8 +9,8 @@
  * RTL8822B private chip contract
  */
 
-#ifndef ZEDBSD_DRIVERS_RTL8822B_INTERNAL_H
-#define ZEDBSD_DRIVERS_RTL8822B_INTERNAL_H
+#ifndef KERN_DRIVERS_RTL8822B_INTERNAL_H
+#define KERN_DRIVERS_RTL8822B_INTERNAL_H
 
 #include <stddef.h>
 #include <stdint.h>

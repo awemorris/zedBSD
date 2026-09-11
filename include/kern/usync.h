@@ -4,8 +4,8 @@
  *
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_KERN_USYNC_H
-#define ZEDBSD_KERN_USYNC_H
+#ifndef KERN_KERN_USYNC_H
+#define KERN_KERN_USYNC_H
 
 #include <stdint.h>
 

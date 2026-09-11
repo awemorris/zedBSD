@@ -12,7 +12,6 @@
 #include <drivers/hid/hid-report.h>
 #include <drivers/usb-hid.h>
 #include <drivers/usb.h>
-#include <hal/hal.h>
 #include <kern/input-device.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
@@ -1276,7 +1275,7 @@ usb_hid_worker(
 
 		/* Handles the work condition. */
 		if (work == 0U) {
-			kernel_wait_task();
+			kern_thread_block();
 			continue;
 		}
 

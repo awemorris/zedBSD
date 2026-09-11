@@ -1,7 +1,7 @@
 /* Bounded zedbsd.cfg parsing and boot-parameter assembly. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_BOOTLOADER_UEFI_ZEDBSD_CONFIG_H
-#define ZEDBSD_BOOTLOADER_UEFI_ZEDBSD_CONFIG_H
+#ifndef KERN_BOOTLOADER_UEFI_ZEDBSD_CONFIG_H
+#define KERN_BOOTLOADER_UEFI_ZEDBSD_CONFIG_H
 
 #include "bootloader/include/boot-parameter-handoff.h"
 
@@ -16,7 +16,7 @@
 	ZBL_ZEDBSD_CONFIG_KERNEL_PATH_STORAGE_SIZE
 #define ZBL_ZEDBSD_CONFIG_RESULT_SIZE \
 	(ZBL_ZEDBSD_CONFIG_PARAMETER_RECORD_OFFSET + \
-	 ZEDBSD_BOOT_PARAMETER_RECORD_SIZE)
+	 KERN_BOOT_PARAMETER_RECORD_SIZE)
 
 #ifndef __ASSEMBLER__
 #include <stddef.h>
@@ -24,7 +24,7 @@
 struct zbl_uefi_zedbsd_config {
 	/* A validated path relative to the selected SimpleFS root. */
 	char kernel_path[ZBL_ZEDBSD_CONFIG_KERNEL_PATH_STORAGE_SIZE];
-	struct zedbsd_boot_parameter_record parameter_record;
+	struct kern_boot_parameter_record parameter_record;
 };
 
 _Static_assert(sizeof(((struct zbl_uefi_zedbsd_config *)0)->kernel_path) ==

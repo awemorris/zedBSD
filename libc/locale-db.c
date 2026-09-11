@@ -23,7 +23,7 @@ struct zed_locale_record {
 	char name[64];
 	unsigned char *data;
 	size_t size;
-	const char *values[ZEDBSD_LOCALE_KEY_COUNT];
+	const char *values[KERN_LOCALE_KEY_COUNT];
 	unsigned utf8;
 	unsigned used;
 };
@@ -31,28 +31,28 @@ struct zed_locale_record {
 static struct zed_locale_record locale_cache[LOCALE_CACHE_COUNT];
 static volatile uint32_t locale_cache_lock;
 
-static const int key_categories[ZEDBSD_LOCALE_KEY_COUNT] = {
-    [ZEDBSD_LOCALE_KEY_INVALID] = -1,
-#define ZEDBSD_LOCALE_CATEGORY(name, category, keyword, c_value, utf8_value)   \
-	[ZEDBSD_LOCALE_KEY_##name] = category,
-    ZEDBSD_LOCALE_KEYS(ZEDBSD_LOCALE_CATEGORY)
-#undef ZEDBSD_LOCALE_CATEGORY
+static const int key_categories[KERN_LOCALE_KEY_COUNT] = {
+    [KERN_LOCALE_KEY_INVALID] = -1,
+#define KERN_LOCALE_CATEGORY(name, category, keyword, c_value, utf8_value)   \
+	[KERN_LOCALE_KEY_##name] = category,
+    KERN_LOCALE_KEYS(KERN_LOCALE_CATEGORY)
+#undef KERN_LOCALE_CATEGORY
 };
 
-static const char *const c_values[ZEDBSD_LOCALE_KEY_COUNT] = {
-    [ZEDBSD_LOCALE_KEY_INVALID] = "",
-#define ZEDBSD_LOCALE_C_VALUE(name, category, keyword, c_value, utf8_value)    \
-	[ZEDBSD_LOCALE_KEY_##name] = c_value,
-    ZEDBSD_LOCALE_KEYS(ZEDBSD_LOCALE_C_VALUE)
-#undef ZEDBSD_LOCALE_C_VALUE
+static const char *const c_values[KERN_LOCALE_KEY_COUNT] = {
+    [KERN_LOCALE_KEY_INVALID] = "",
+#define KERN_LOCALE_C_VALUE(name, category, keyword, c_value, utf8_value)    \
+	[KERN_LOCALE_KEY_##name] = c_value,
+    KERN_LOCALE_KEYS(KERN_LOCALE_C_VALUE)
+#undef KERN_LOCALE_C_VALUE
 };
 
-static const char *const utf8_values[ZEDBSD_LOCALE_KEY_COUNT] = {
-    [ZEDBSD_LOCALE_KEY_INVALID] = "",
-#define ZEDBSD_LOCALE_UTF8_VALUE(name, category, keyword, c_value, utf8_value) \
-	[ZEDBSD_LOCALE_KEY_##name] = utf8_value,
-    ZEDBSD_LOCALE_KEYS(ZEDBSD_LOCALE_UTF8_VALUE)
-#undef ZEDBSD_LOCALE_UTF8_VALUE
+static const char *const utf8_values[KERN_LOCALE_KEY_COUNT] = {
+    [KERN_LOCALE_KEY_INVALID] = "",
+#define KERN_LOCALE_UTF8_VALUE(name, category, keyword, c_value, utf8_value) \
+	[KERN_LOCALE_KEY_##name] = utf8_value,
+    KERN_LOCALE_KEYS(KERN_LOCALE_UTF8_VALUE)
+#undef KERN_LOCALE_UTF8_VALUE
 };
 
 static struct zed_locale_record locale_c = {
@@ -78,9 +78,9 @@ cache_unlock(void)
 }
 
 int
-zed_locale_key_category(enum zedbsd_locale_key key)
+zed_locale_key_category(enum kern_locale_key key)
 {
-	return key > ZEDBSD_LOCALE_KEY_INVALID && key < ZEDBSD_LOCALE_KEY_COUNT
+	return key > KERN_LOCALE_KEY_INVALID && key < KERN_LOCALE_KEY_COUNT
 		   ? key_categories[key]
 		   : -1;
 }
@@ -93,9 +93,9 @@ zed_locale_record_name(const struct zed_locale_record *record)
 
 const char *
 zed_locale_record_value(const struct zed_locale_record *record,
-			enum zedbsd_locale_key key)
+			enum kern_locale_key key)
 {
-	if (key <= ZEDBSD_LOCALE_KEY_INVALID || key >= ZEDBSD_LOCALE_KEY_COUNT)
+	if (key <= KERN_LOCALE_KEY_INVALID || key >= KERN_LOCALE_KEY_COUNT)
 		return "";
 	if (record->values[key] != NULL)
 		return record->values[key];
@@ -124,29 +124,29 @@ record_validate(struct zed_locale_record *record)
 	uint32_t index;
 	uint32_t previous = 0;
 
-	if (record->size < ZEDBSD_LOCALE_HEADER_SIZE ||
-	    memcmp(data, ZEDBSD_LOCALE_MAGIC, ZEDBSD_LOCALE_MAGIC_SIZE) != 0 ||
-	    zedbsd_locale_get32(data + 8U) != ZEDBSD_LOCALE_VERSION ||
-	    zedbsd_locale_get32(data + 12U) != ZEDBSD_LOCALE_HEADER_SIZE)
+	if (record->size < KERN_LOCALE_HEADER_SIZE ||
+	    memcmp(data, KERN_LOCALE_MAGIC, KERN_LOCALE_MAGIC_SIZE) != 0 ||
+	    kern_locale_get32(data + 8U) != KERN_LOCALE_VERSION ||
+	    kern_locale_get32(data + 12U) != KERN_LOCALE_HEADER_SIZE)
 		return 0;
-	count = zedbsd_locale_get32(data + 16U);
-	entries = zedbsd_locale_get32(data + 20U);
-	strings = zedbsd_locale_get32(data + 24U);
-	if (count > UINT32_MAX / ZEDBSD_LOCALE_ENTRY_SIZE ||
+	count = kern_locale_get32(data + 16U);
+	entries = kern_locale_get32(data + 20U);
+	strings = kern_locale_get32(data + 24U);
+	if (count > UINT32_MAX / KERN_LOCALE_ENTRY_SIZE ||
 	    !range_valid(record->size, entries,
-			 count * ZEDBSD_LOCALE_ENTRY_SIZE) ||
-	    strings < entries + count * ZEDBSD_LOCALE_ENTRY_SIZE ||
+			 count * KERN_LOCALE_ENTRY_SIZE) ||
+	    strings < entries + count * KERN_LOCALE_ENTRY_SIZE ||
 	    strings > record->size)
 		return 0;
 	for (index = 0; index < count; index++) {
 		const unsigned char *entry =
-		    data + entries + index * ZEDBSD_LOCALE_ENTRY_SIZE;
-		uint32_t key = zedbsd_locale_get32(entry);
-		uint32_t category = zedbsd_locale_get32(entry + 4U);
-		uint32_t offset = zedbsd_locale_get32(entry + 8U);
-		uint32_t length = zedbsd_locale_get32(entry + 12U);
+		    data + entries + index * KERN_LOCALE_ENTRY_SIZE;
+		uint32_t key = kern_locale_get32(entry);
+		uint32_t category = kern_locale_get32(entry + 4U);
+		uint32_t offset = kern_locale_get32(entry + 8U);
+		uint32_t length = kern_locale_get32(entry + 12U);
 
-		if (key <= previous || key >= ZEDBSD_LOCALE_KEY_COUNT ||
+		if (key <= previous || key >= KERN_LOCALE_KEY_COUNT ||
 		    category != (uint32_t)key_categories[key] ||
 		    offset < strings || length == UINT32_MAX ||
 		    !range_valid(record->size, offset, length + 1U) ||
@@ -156,11 +156,11 @@ record_validate(struct zed_locale_record *record)
 		record->values[key] = (const char *)data + offset;
 		previous = key;
 	}
-	if (strcmp(zed_locale_record_value(record, ZEDBSD_LOCALE_KEY_CODESET),
+	if (strcmp(zed_locale_record_value(record, KERN_LOCALE_KEY_CODESET),
 		   "UTF-8") == 0)
 		record->utf8 = 1;
 	else if (strcmp(
-		     zed_locale_record_value(record, ZEDBSD_LOCALE_KEY_CODESET),
+		     zed_locale_record_value(record, KERN_LOCALE_KEY_CODESET),
 		     "US-ASCII") != 0)
 		return 0;
 	return 1;

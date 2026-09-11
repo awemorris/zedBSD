@@ -1,6 +1,6 @@
 /* Shared bounded fstab records. Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_COMMAND_FSTAB_H
-#define ZEDBSD_COMMAND_FSTAB_H
+#ifndef KERN_COMMAND_FSTAB_H
+#define KERN_COMMAND_FSTAB_H
 
 #include <errno.h>
 #include <stdio.h>

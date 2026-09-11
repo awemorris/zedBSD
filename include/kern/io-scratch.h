@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_KERN_IO_SCRATCH_H
-#define ZEDBSD_KERN_IO_SCRATCH_H
+#ifndef KERN_KERN_IO_SCRATCH_H
+#define KERN_KERN_IO_SCRATCH_H
 #include <hal/hal.h>
 #include <kern/pmem.h>
 

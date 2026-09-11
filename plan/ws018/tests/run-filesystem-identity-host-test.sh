@@ -9,7 +9,7 @@ temporary=$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-fs-identity.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
 ufs_dir=$repo_dir/src/drivers/fs/ufs
-common_flags="-std=c11 -DZEDBSD_USER_ABI_LP64 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -I$repo_dir/include -I$repo_dir/include/uapi -I$repo_dir/src -I$repo_dir/libc/include -I$repo_dir -I$ufs_dir"
+common_flags="-std=c11 -DKERN_USER_ABI_LP64 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -I$repo_dir/include -I$repo_dir/include/uapi -I$repo_dir/src -I$repo_dir/libc/include -I$repo_dir -I$ufs_dir"
 
 compile()
 {

@@ -9,8 +9,8 @@
  * Console device
  */
 
-#ifndef ZEDBSD_KERN_CONSOLE_DEVICE_H
-#define ZEDBSD_KERN_CONSOLE_DEVICE_H
+#ifndef KERN_KERN_CONSOLE_DEVICE_H
+#define KERN_KERN_CONSOLE_DEVICE_H
 
 int
 drv_console_device_register(void);

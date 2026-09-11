@@ -9,8 +9,8 @@
  * System device (/dev/system)
  */
 
-#ifndef ZEDBSD_KERN_SYSTEM_DEVICE_H
-#define ZEDBSD_KERN_SYSTEM_DEVICE_H
+#ifndef KERN_KERN_SYSTEM_DEVICE_H
+#define KERN_KERN_SYSTEM_DEVICE_H
 
 int
 drv_system_device_register(void);

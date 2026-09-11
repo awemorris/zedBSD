@@ -9,8 +9,8 @@
  * Common dp8390 Ethernet driver
  */
 
-#ifndef ZEDBSD_DRIVERS_DP8390_H
-#define ZEDBSD_DRIVERS_DP8390_H
+#ifndef KERN_DRIVERS_DP8390_H
+#define KERN_DRIVERS_DP8390_H
 
 #include <stddef.h>
 #include <stdint.h>

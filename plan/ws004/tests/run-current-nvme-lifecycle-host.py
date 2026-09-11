@@ -12,6 +12,6 @@ for name in ['nvme-lifecycle-test','nvme-io-lifecycle-test','nvme-shutdown-lifec
  for mode in ['normal','sanitize']:
   binary=out/(name+'-'+mode)
   flags=[] if mode=='normal' else ['-fsanitize=address,undefined','-fno-omit-frame-pointer','--param=asan-globals=0']
-  subprocess.run(['cc','-std=c11','-pthread','-O1','-g','-Dtid_t=int32_t','-DHAL_ARCH_AMD64','-DZEDBSD_USER_ABI_LP64','-I'+str(r),'-I'+str(r/'include'),'-I'+str(r/'include/uapi'),'-Wall','-Wextra','-Werror','-ffunction-sections','-fdata-sections',*flags,str(fixture),'-Wl,--gc-sections','-o',str(binary)],check=True)
+  subprocess.run(['cc','-std=c11','-pthread','-O1','-g','-Dtid_t=int32_t','-DHAL_ARCH_AMD64','-DKERN_USER_ABI_LP64','-I'+str(r),'-I'+str(r/'include'),'-I'+str(r/'include/uapi'),'-Wall','-Wextra','-Werror','-ffunction-sections','-fdata-sections',*flags,str(fixture),'-Wl,--gc-sections','-o',str(binary)],check=True)
   subprocess.run([str(binary)],check=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=0'})
   print(name,mode,'PASS',flush=True)

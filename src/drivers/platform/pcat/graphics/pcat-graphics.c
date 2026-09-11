@@ -18,15 +18,14 @@
 
 #include <zedbsd/graphics.h>
 #include <errno.h>
-#include <hal/hal.h>
 #include "text.h"
 #include <string.h>
 
 #define GRAPHICS_CAPABILITIES                                                  \
-	(ZEDBSD_GRAPHICS_CAP_FILL | ZEDBSD_GRAPHICS_CAP_LINE |                 \
-	 ZEDBSD_GRAPHICS_CAP_PATTERN | ZEDBSD_GRAPHICS_CAP_BLIT_INDEX8 |       \
-	 ZEDBSD_GRAPHICS_CAP_BLIT_RGB24 | ZEDBSD_GRAPHICS_CAP_BLIT_MONO1 |     \
-	 ZEDBSD_GRAPHICS_CAP_FLUSH | ZEDBSD_GRAPHICS_CAP_GLYPH)
+	(KERN_GRAPHICS_CAP_FILL | KERN_GRAPHICS_CAP_LINE |                 \
+	 KERN_GRAPHICS_CAP_PATTERN | KERN_GRAPHICS_CAP_BLIT_INDEX8 |       \
+	 KERN_GRAPHICS_CAP_BLIT_RGB24 | KERN_GRAPHICS_CAP_BLIT_MONO1 |     \
+	 KERN_GRAPHICS_CAP_FLUSH | KERN_GRAPHICS_CAP_GLYPH)
 #define GRAPHICS_MAX_RECTS 32U
 #define GRAPHICS_ROW_MAX 4096U
 #define GRAPHICS_MAX_MODES 16U
@@ -419,7 +418,7 @@ load_palette(
 	int error;
 
 	/* Handles the request condition. */
-	if (request->format == ZEDBSD_GRAPHICS_FORMAT_MONO1) {
+	if (request->format == KERN_GRAPHICS_FORMAT_MONO1) {
 		palette_buffer[0] = request->background;
 		palette_buffer[1] = request->foreground;
 
@@ -428,14 +427,14 @@ load_palette(
 	}
 
 	/* Handles the request condition. */
-	if (request->format == ZEDBSD_GRAPHICS_FORMAT_RGB24) {
+	if (request->format == KERN_GRAPHICS_FORMAT_RGB24) {
 		return request->palette == 0 && request->palette_count == 0
 			       ? 0
 			       : EINVAL;
 	}
 
 	/* Handles the request condition. */
-	if (request->format != ZEDBSD_GRAPHICS_FORMAT_INDEX8 ||
+	if (request->format != KERN_GRAPHICS_FORMAT_INDEX8 ||
 	    request->palette == 0 || request->palette_count == 0 ||
 	    request->palette_count > 256U) {
 		/* Failed. */
@@ -481,11 +480,11 @@ graphics_blit(
 	}
 
 	/* Handles the request condition. */
-	if (request.format == ZEDBSD_GRAPHICS_FORMAT_RGB24)
+	if (request.format == KERN_GRAPHICS_FORMAT_RGB24)
 		minimum_stride = (uint64_t)request.width * 3U;
-	else if (request.format == ZEDBSD_GRAPHICS_FORMAT_INDEX8)
+	else if (request.format == KERN_GRAPHICS_FORMAT_INDEX8)
 		minimum_stride = request.width;
-	else if (request.format == ZEDBSD_GRAPHICS_FORMAT_MONO1)
+	else if (request.format == KERN_GRAPHICS_FORMAT_MONO1)
 		minimum_stride = ((uint64_t)request.width + 7U) / 8U;
 	else {
 		/* Failed. */
@@ -504,16 +503,16 @@ graphics_blit(
 	if (error != 0)
 		return error;
 	memset(&image, 0, sizeof(image));
-	image.format = request.format == ZEDBSD_GRAPHICS_FORMAT_RGB24 ? 2U : 1U;
+	image.format = request.format == KERN_GRAPHICS_FORMAT_RGB24 ? 2U : 1U;
 	image.width = request.width;
 	image.height = 1;
-	image.stride = request.format == ZEDBSD_GRAPHICS_FORMAT_RGB24
+	image.stride = request.format == KERN_GRAPHICS_FORMAT_RGB24
 			       ? (size_t)request.width * 3U
 			       : request.width;
 	image.pixels = row_buffer;
 	image.palette = palette_buffer;
-	image.palette_size = request.format == ZEDBSD_GRAPHICS_FORMAT_RGB24 ? 0U
-			     : request.format == ZEDBSD_GRAPHICS_FORMAT_MONO1
+	image.palette_size = request.format == KERN_GRAPHICS_FORMAT_RGB24 ? 0U
+			     : request.format == KERN_GRAPHICS_FORMAT_MONO1
 				     ? 2U
 				     : request.palette_count;
 	/* Process each element required by the operation. */
@@ -524,7 +523,7 @@ graphics_blit(
 			return EFAULT;
 
 		/* Handles the request condition. */
-		if (request.format == ZEDBSD_GRAPHICS_FORMAT_MONO1) {
+		if (request.format == KERN_GRAPHICS_FORMAT_MONO1) {
 			/* Handles the minimum stride condition. */
 			if (minimum_stride > sizeof(packed))
 				return EINVAL;
@@ -644,7 +643,7 @@ graphics_glyph(
 	request.bearing_x = 0;
 	request.bearing_y = 0;
 	request.advance = width;
-	request.format = ZEDBSD_GRAPHICS_GLYPH_MSB1;
+	request.format = KERN_GRAPHICS_GLYPH_MSB1;
 	request.bitmap_size = request.stride * height;
 
 	/* Checks the operation status. */
@@ -678,7 +677,7 @@ graphics_ioctl_locked(
 		return EBADF;
 
 	/* Handles the request condition. */
-	if (request == ZEDBSD_GRAPHICS_GET_CAPS) {
+	if (request == KERN_GRAPHICS_GET_CAPS) {
 		struct graphics_caps caps = {GRAPHICS_CAPABILITIES, 0, 0, 0};
 
 		/* Checks the remaining item count. */
@@ -705,7 +704,7 @@ graphics_ioctl_locked(
 	}
 
 	/* Handles the request condition. */
-	if (request == ZEDBSD_GRAPHICS_GET_MODES) {
+	if (request == KERN_GRAPHICS_GET_MODES) {
 		/* Obtains the graphics get modes result. */
 		function_result = graphics_get_modes(argument);
 
@@ -714,7 +713,7 @@ graphics_ioctl_locked(
 	}
 
 	/* Handles the request condition. */
-	if (request == ZEDBSD_GRAPHICS_ENTER) {
+	if (request == KERN_GRAPHICS_ENTER) {
 		/* Obtains the graphics enter result. */
 		function_result = graphics_enter(argument);
 
@@ -728,7 +727,7 @@ graphics_ioctl_locked(
 		return error;
 	/* Dispatch the selected operation case. */
 	switch (request) {
-	case ZEDBSD_GRAPHICS_GET_MODE:
+	case KERN_GRAPHICS_GET_MODE:
 		mode.preferred_width = graphics_mode.preferred_width;
 		mode.preferred_height = graphics_mode.preferred_height;
 		mode.preferred_bits_per_pixel =
@@ -744,43 +743,43 @@ graphics_ioctl_locked(
 
 		/* Returns the computed result. */
 		return function_result;
-	case ZEDBSD_GRAPHICS_FILL_RECT:
+	case KERN_GRAPHICS_FILL_RECT:
 		/* Obtains the graphics fill result. */
 		function_result = graphics_fill(argument, 0);
 
 		/* Returns the computed result. */
 		return function_result;
-	case ZEDBSD_GRAPHICS_DRAW_LINE:
+	case KERN_GRAPHICS_DRAW_LINE:
 		/* Obtains the graphics line result. */
 		function_result = graphics_line(argument);
 
 		/* Returns the computed result. */
 		return function_result;
-	case ZEDBSD_GRAPHICS_PATTERN_FILL:
+	case KERN_GRAPHICS_PATTERN_FILL:
 		/* Obtains the graphics fill result. */
 		function_result = graphics_fill(argument, 1);
 
 		/* Returns the computed result. */
 		return function_result;
-	case ZEDBSD_GRAPHICS_BLIT:
+	case KERN_GRAPHICS_BLIT:
 		/* Obtains the graphics blit result. */
 		function_result = graphics_blit(argument, 0);
 
 		/* Returns the computed result. */
 		return function_result;
-	case ZEDBSD_GRAPHICS_BLIT_PATTERN:
+	case KERN_GRAPHICS_BLIT_PATTERN:
 		/* Obtains the graphics blit result. */
 		function_result = graphics_blit(argument, 1);
 
 		/* Returns the computed result. */
 		return function_result;
-	case ZEDBSD_GRAPHICS_FLUSH:
+	case KERN_GRAPHICS_FLUSH:
 		/* Obtains the graphics flush result. */
 		function_result = graphics_flush(argument);
 
 		/* Returns the computed result. */
 		return function_result;
-	case ZEDBSD_GRAPHICS_GET_GLYPH:
+	case KERN_GRAPHICS_GET_GLYPH:
 		/* Obtains the graphics glyph result. */
 		function_result = graphics_glyph(argument);
 

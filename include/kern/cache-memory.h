@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_KERN_CACHE_MEMORY_H
-#define ZEDBSD_KERN_CACHE_MEMORY_H
+#ifndef KERN_KERN_CACHE_MEMORY_H
+#define KERN_KERN_CACHE_MEMORY_H
 
 #include <stddef.h>
 #include <stdint.h>

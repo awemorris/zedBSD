@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_KERN_INPUT_DEVICE_H
-#define ZEDBSD_KERN_INPUT_DEVICE_H
+#ifndef KERN_KERN_INPUT_DEVICE_H
+#define KERN_KERN_INPUT_DEVICE_H
 
 #include "kern/input-capability.h"
 

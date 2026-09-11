@@ -11,8 +11,8 @@
  * The private i386 task-context and signal-frame contract.
  */
 
-#ifndef ZEDBSD_HAL_I386_TASK_H
-#define ZEDBSD_HAL_I386_TASK_H
+#ifndef KERN_HAL_I386_TASK_H
+#define KERN_HAL_I386_TASK_H
 
 #include <hal/hal.h>
 #include "asm.h"

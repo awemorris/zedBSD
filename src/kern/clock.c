@@ -27,12 +27,12 @@
 #include <hal/hal.h>
 #include <limits.h>
 
-#define ZEDBSD_REALTIME_EPOCH_2026 1767225600LL
+#define KERN_REALTIME_EPOCH_2026 1767225600LL
 
 static volatile uint64_t kernel_ticks;
 static volatile uint32_t cpu_notify_count[HAL_CPU_MAX];
 static struct kern_timespec realtime_offset = {
-	ZEDBSD_REALTIME_EPOCH_2026, 0
+	KERN_REALTIME_EPOCH_2026, 0
 };
 static int realtime_synchronized;
 static volatile unsigned realtime_sequence;
@@ -57,7 +57,7 @@ kern_clock_init(
 	atomic_u64_store_release(&kernel_ticks, 0);
 	atomic_raw_store_release(&realtime_sequence, 0);
 	atomic_store_release(&realtime_writer, 0);
-	realtime_offset.tv_sec = ZEDBSD_REALTIME_EPOCH_2026;
+	realtime_offset.tv_sec = KERN_REALTIME_EPOCH_2026;
 	realtime_offset.tv_nsec = 0;
 	atomic_raw_store_release((volatile unsigned *)&realtime_synchronized, 0);
 	process_timer_init();

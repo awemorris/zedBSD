@@ -7,8 +7,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_USER_SWAP_FORMAT_H
-#define ZEDBSD_USER_SWAP_FORMAT_H
+#ifndef KERN_USER_SWAP_FORMAT_H
+#define KERN_USER_SWAP_FORMAT_H
 
 #include <stdint.h>
 

@@ -121,6 +121,56 @@ Objectives → Milestone Goals → WS → Phase → Queue試行/結果を対応�
 公開済みのコンソールへもミラーするようにした。あわせて `hal_printf()` と `kern_logf()`
 を並べて呼ぶ二重出力（`VFS_LOG` マクロと main.c の4箇所）を1本に畳んだ。
 
+## 足場の実装と置換（2026-09-12、amd64、未コミット）
+
+足場を用意し、ドライバの置換を行った。ビルドは PASS、ログインとシェル実行を確認済み。
+
+用意した足場：
+
+- `include/kern/device-io.h` と `src/kern/device-io.c`。ポートI/O 6本、MMIO 8本、
+  順序バリア4本。`kern_io_in8()`、`kern_mmio_read32()`、`kern_io_barrier()` など。
+- `include/kern/irq.h` と `src/kern/irq.c`。登録・解除、MSI、マスク、EOI、
+  割り込み禁止と復帰。`kern_irq_ack_t` を不透明な型として定義し、HAL の
+  `hal_irq_ack_t` がドライバに出ないようにした。HAL の状態値は errno へ写す。
+- `src/kern/pmem.c`。`kern_pmem_alloc()`、`kern_pmem_alloc_limited()`、
+  `kern_pmem_free()` は `struct kern_pmem` を受け取るので、呼び出し側が
+  物理アドレスとサイズを別々に持ち回らなくてよい。`kern_device_map()` と
+  `kern_device_unmap()`、`kern_page_size()`、`kern_memstat()`、
+  `kern_boot_handoff()`、`kern_rtc_read_counter()` も置いた。
+- `include/kern/thread.h` に `kern_thread_block()` と
+  `kern_thread_wakeup(struct thread *)`。ドライバは既に `struct thread *` を
+  保持していたので、構造体の変更は不要だった。
+- `include/kern/atomic.h` に不足していた `atomic_raw_store_relaxed()`、
+  `atomic_spin_hint()`、`atomic_acquire_fence()` を足した。
+
+置換した件数（src/drivers のみ）：
+
+- 一括置換 264件、22ファイル。I/O、MMIO、バリア、割り込み、アトミック、スレッド待機。
+- 個別書き換え 30件。デバイス写像、割り込み登録、コンソールの停止と再開。
+- 状態定数と残りの呼び出し 48件。`HAL_OK` → 0、`HAL_ERR_*` → errno、
+  ブート handoff、RTC、MSI、統計。
+- 最終 12件。物理メモリの確保と解放、acquire フェンス、VGA アパーチャの属性。
+
+合計 354件。前段の `hal_printf`/`kernel_alloc` 置換 468件と合わせて 822件。
+
+amd64 ビルド対象のドライバに残る HAL 参照：
+
+| ファイル | 残り |
+| --- | --- |
+| `generic/system-device.c` | `struct hal_memstat` の各フィールド、`HAL_SPACE_EXEC` |
+| `pci/pci-pcat.c` | `HAL_SPACE_*` 属性 4種 |
+| `pci/pci.c` | `hal_atomic_uint_try_acquire`、`enum hal_error` |
+| `fs/ufs.c`、`generic/dma.c`、`pci/pci-xhci.c` | `HAL_FATAL` |
+
+いずれも受け皿の型か定数をカーネル側に定義する必要がある。統計構造体は内容が
+プラットフォーム固有なので、カーネル側の型に写す設計が要る。`HAL_FATAL` は
+カーネルの致命エラー表明へ、`HAL_SPACE_*` はページ保護属性としてカーネルに定義する。
+
+pc98 配下のドライバは未対応。この port はコンソール移行も済んでいない。
+
+`hal/hal.h` を直接 include するドライバはまだ38ファイルある。上の残りを片付けた
+時点で include を外し、以後は外したままビルドが通ることを完了条件にする。
+
 ## カーネル側に用意すべき足場
 
 ドライバに残るHAL直接呼び出しは295箇所。5群に分かれる。
@@ -180,6 +230,33 @@ Objectives → Milestone Goals → WS → Phase → Queue試行/結果を対応�
 ヘッダガードは機械的に置換できるので最後でよい。UAPI に露出しているもの
 （`ZEDBSD_TTY_IOC_GROUP` など）はユーザーランドとの互換に影響するため、
 移行時期を別に決める。
+
+## 接頭辞移行と NoctLang の追従（2026-09-12、amd64、未コミット）
+
+C シンボルの接頭辞を 3252 件置換した。`ZEDBSD_` → `KERN_`、`zedbsd_` → `kern_`。
+UAPI も含む。ビルドと起動、ログイン、シェル実行を確認済み。
+
+残すのはビルド専用の makefile 変数（`ZEDBSD_CONFIG`、`ZEDBSD_PLATFORM` など）、
+`include/uapi/zedbsd/` のディレクトリ名、noct 統合のファイル名
+（`.zedbsd-source-manifest`、`zedbsd.cmake`）である。いずれもパスとディレクトリ構造に
+波及するので、別の移行として扱う。
+
+### NoctLang 本家への還元と main 追従
+
+ローカルパッチのうち、ターミナルの部分入力と BeUI の 2 件を本家へ送った。
+クロスビルドの配線は本家に入れるべきではないのでパッチのまま残した。
+本家の zedBSD ターゲットは、zedBSD 上でセルフコンパイルするときのターゲットとする。
+
+取得先を main の先頭 `fcf5759e` に移した。パッチレベルは `zedbsd7`。
+パッチは 0001（ターゲットアダプタの接続）と 0002（プロジェクトの LLVM と sysroot）の
+2 件だけになり、旧 0003・0004・0005 は削除した。
+
+ビルド toolchain の noct とユーザランドの noct の両方を入れ替えた。
+toolchain smoke は PASS、world ビルドはエラーなし、QEMU でログイン後に
+ユーザランドの noct が Noct 2.0.1 と応答することを確認した。
+
+注意点として、パッチの削除行は上流の本文と一致させる必要があるため、
+接頭辞移行の対象外である。追加行だけが新しい名前を使う。
 
 #### fg007：段階5 early console への縮退（2026-09-11、amd64、未コミット）
 

@@ -798,7 +798,7 @@ mq_usync_wake(
 	volatile uint32_t *word,
 	unsigned count)
 {
-	(void)mq_call(ZEDBSD_SYS_usync, (uintptr_t)word, ZEDBSD_USYNC_WAKE, 0,
+	(void)mq_call(KERN_SYS_usync, (uintptr_t)word, KERN_USYNC_WAKE, 0,
 		      0, count, 0);
 }
 
@@ -833,7 +833,7 @@ mq_usync_wait(
 	intptr_t result;
 
 	result = mq_call(
-	    ZEDBSD_SYS_usync, (uintptr_t)word, ZEDBSD_USYNC_WAIT, expected,
+	    KERN_SYS_usync, (uintptr_t)word, KERN_USYNC_WAIT, expected,
 	    (uintptr_t)relative, 0, cancelable_flag(cancellation_point));
 
 	/* Returns the computed result. */
@@ -850,7 +850,7 @@ cancelable_flag(
 	/* Computes the function result. */
 	function_result = cancellation_point && __pthread_cancel_enabled != NULL &&
 		       __pthread_cancel_enabled()
-		   ? ZEDBSD_USYNC_CANCELABLE
+		   ? KERN_USYNC_CANCELABLE
 		   : 0;
 
 	/* Returns the computed result. */
@@ -896,8 +896,8 @@ mq_private_lock(
 {
 	/* Continue while the operation condition remains true. */
 	while (__atomic_exchange_n(word, 1, __ATOMIC_ACQUIRE) != 0) {
-		(void)mq_call(ZEDBSD_SYS_usync, (uintptr_t)word,
-			      ZEDBSD_USYNC_WAIT, 1, 0, 0, ZEDBSD_USYNC_PRIVATE);
+		(void)mq_call(KERN_SYS_usync, (uintptr_t)word,
+			      KERN_USYNC_WAIT, 1, 0, 0, KERN_USYNC_PRIVATE);
 	}
 }
 
@@ -907,8 +907,8 @@ mq_private_unlock(
 	volatile uint32_t *word)
 {
 	__atomic_store_n(word, 0, __ATOMIC_RELEASE);
-	(void)mq_call(ZEDBSD_SYS_usync, (uintptr_t)word, ZEDBSD_USYNC_WAKE, 0,
-		      0, 1, ZEDBSD_USYNC_PRIVATE);
+	(void)mq_call(KERN_SYS_usync, (uintptr_t)word, KERN_USYNC_WAKE, 0,
+		      0, 1, KERN_USYNC_PRIVATE);
 }
 
 /* Supports the mq store lock operation. */

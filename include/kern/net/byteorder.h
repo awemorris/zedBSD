@@ -9,8 +9,8 @@
  * Network byteorder operations
  */
 
-#ifndef ZEDBSD_KERN_NET_BYTEORDER_H
-#define ZEDBSD_KERN_NET_BYTEORDER_H
+#ifndef KERN_KERN_NET_BYTEORDER_H
+#define KERN_KERN_NET_BYTEORDER_H
 
 #include <stdint.h>
 

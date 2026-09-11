@@ -11,8 +11,8 @@
  * Declares the zedBSD userland dhcp interface.
  */
 
-#ifndef ZEDBSD_USER_DHCP_H
-#define ZEDBSD_USER_DHCP_H
+#ifndef KERN_USER_DHCP_H
+#define KERN_USER_DHCP_H
 
 #include <stddef.h>
 #include <stdint.h>

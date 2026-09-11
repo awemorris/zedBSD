@@ -1,5 +1,5 @@
-#ifndef ZEDBSD_HAL_ARM64_RPI4_UART_H
-#define ZEDBSD_HAL_ARM64_RPI4_UART_H
+#ifndef KERN_HAL_ARM64_RPI4_UART_H
+#define KERN_HAL_ARM64_RPI4_UART_H
 
 void rpi4_uart_init(void);
 void rpi4_uart_putc(int c);

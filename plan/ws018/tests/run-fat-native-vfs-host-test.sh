@@ -8,7 +8,7 @@ repo_dir=$(CDPATH= cd -- "$test_dir/../../.." && pwd)
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-fat-native-vfs.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
-common_flags="-std=c11 -DZEDBSD_USER_ABI_LP64 -Wall -Wextra -Werror \
+common_flags="-std=c11 -DKERN_USER_ABI_LP64 -Wall -Wextra -Werror \
 -ffunction-sections -fdata-sections -I$repo_dir/include \
 -I$repo_dir/include/uapi -I$repo_dir/src -I$repo_dir/libc/include \
 -I$repo_dir"

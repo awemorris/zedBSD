@@ -11,8 +11,8 @@
  * Declares the zedBSD userland swap command interface.
  */
 
-#ifndef ZEDBSD_USERLAND_SWAP_COMMAND_H
-#define ZEDBSD_USERLAND_SWAP_COMMAND_H
+#ifndef KERN_USERLAND_SWAP_COMMAND_H
+#define KERN_USERLAND_SWAP_COMMAND_H
 
 #include <errno.h>
 #include <fcntl.h>
@@ -72,7 +72,7 @@ swap_command_make_request(struct system_swap_control *control,
 		return -1;
 	}
 	memset(control, 0, sizeof(*control));
-	control->version = ZEDBSD_SYSTEM_SWAP_VERSION;
+	control->version = KERN_SYSTEM_SWAP_VERSION;
 	control->struct_size = (uint32_t)sizeof(*control);
 	memcpy(control->source, source, length + 1);
 	return 0;

@@ -11,8 +11,8 @@
  * The amd64 task context and assembly-transition contract.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_TASK_H
-#define ZEDBSD_HAL_AMD64_TASK_H
+#ifndef KERN_HAL_AMD64_TASK_H
+#define KERN_HAL_AMD64_TASK_H
 
 #include <hal/hal.h>
 #include "int.h"

@@ -10,8 +10,8 @@
  * fault entries the HAL calls.
  */
 
-#ifndef ZEDBSD_KERN_USER_PROBE_H
-#define ZEDBSD_KERN_USER_PROBE_H
+#ifndef KERN_KERN_USER_PROBE_H
+#define KERN_KERN_USER_PROBE_H
 
 #include <stdint.h>
 

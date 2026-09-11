@@ -21,26 +21,26 @@ struct zed_locale_record {
 
 static struct zed_locale_record c_locale = {"C", 0};
 static struct zed_locale_record utf8_locale = {"C.UTF-8", 1};
-static const int key_categories[ZEDBSD_LOCALE_KEY_COUNT] = {
-    [ZEDBSD_LOCALE_KEY_INVALID] = -1,
-#define ZEDBSD_LOCALE_CATEGORY(name, category, keyword, c_value, utf8_value)   \
-	[ZEDBSD_LOCALE_KEY_##name] = category,
-    ZEDBSD_LOCALE_KEYS(ZEDBSD_LOCALE_CATEGORY)
-#undef ZEDBSD_LOCALE_CATEGORY
+static const int key_categories[KERN_LOCALE_KEY_COUNT] = {
+    [KERN_LOCALE_KEY_INVALID] = -1,
+#define KERN_LOCALE_CATEGORY(name, category, keyword, c_value, utf8_value)   \
+	[KERN_LOCALE_KEY_##name] = category,
+    KERN_LOCALE_KEYS(KERN_LOCALE_CATEGORY)
+#undef KERN_LOCALE_CATEGORY
 };
-static const char *const c_values[ZEDBSD_LOCALE_KEY_COUNT] = {
-    [ZEDBSD_LOCALE_KEY_INVALID] = "",
-#define ZEDBSD_LOCALE_C_VALUE(name, category, keyword, c_value, utf8_value)    \
-	[ZEDBSD_LOCALE_KEY_##name] = c_value,
-    ZEDBSD_LOCALE_KEYS(ZEDBSD_LOCALE_C_VALUE)
-#undef ZEDBSD_LOCALE_C_VALUE
+static const char *const c_values[KERN_LOCALE_KEY_COUNT] = {
+    [KERN_LOCALE_KEY_INVALID] = "",
+#define KERN_LOCALE_C_VALUE(name, category, keyword, c_value, utf8_value)    \
+	[KERN_LOCALE_KEY_##name] = c_value,
+    KERN_LOCALE_KEYS(KERN_LOCALE_C_VALUE)
+#undef KERN_LOCALE_C_VALUE
 };
-static const char *const utf8_values[ZEDBSD_LOCALE_KEY_COUNT] = {
-    [ZEDBSD_LOCALE_KEY_INVALID] = "",
-#define ZEDBSD_LOCALE_UTF8_VALUE(name, category, keyword, c_value, utf8_value) \
-	[ZEDBSD_LOCALE_KEY_##name] = utf8_value,
-    ZEDBSD_LOCALE_KEYS(ZEDBSD_LOCALE_UTF8_VALUE)
-#undef ZEDBSD_LOCALE_UTF8_VALUE
+static const char *const utf8_values[KERN_LOCALE_KEY_COUNT] = {
+    [KERN_LOCALE_KEY_INVALID] = "",
+#define KERN_LOCALE_UTF8_VALUE(name, category, keyword, c_value, utf8_value) \
+	[KERN_LOCALE_KEY_##name] = utf8_value,
+    KERN_LOCALE_KEYS(KERN_LOCALE_UTF8_VALUE)
+#undef KERN_LOCALE_UTF8_VALUE
 };
 
 /*
@@ -90,10 +90,10 @@ zed_locale_record_name(
 const char *
 zed_locale_record_value(
 	const struct zed_locale_record *record,
-	enum zedbsd_locale_key key)
+	enum kern_locale_key key)
 {
 	/* An invalid key has an empty value. */
-	if (key <= ZEDBSD_LOCALE_KEY_INVALID || key >= ZEDBSD_LOCALE_KEY_COUNT)
+	if (key <= KERN_LOCALE_KEY_INVALID || key >= KERN_LOCALE_KEY_COUNT)
 		return "";
 
 	/* Selects the UTF-8 table only for a UTF-8 record. */
@@ -124,10 +124,10 @@ zed_locale_record_utf8(
  */
 int
 zed_locale_key_category(
-	enum zedbsd_locale_key key)
+	enum kern_locale_key key)
 {
 	/* An invalid key belongs to no category. */
-	if (key <= ZEDBSD_LOCALE_KEY_INVALID || key >= ZEDBSD_LOCALE_KEY_COUNT)
+	if (key <= KERN_LOCALE_KEY_INVALID || key >= KERN_LOCALE_KEY_COUNT)
 		return -1;
 
 	/* Reports the recorded category. */

@@ -9,8 +9,8 @@
  * Cross-vmspace metadata serialization.
  */
 
-#ifndef ZEDBSD_KERN_VM_LOCK_H
-#define ZEDBSD_KERN_VM_LOCK_H
+#ifndef KERN_KERN_VM_LOCK_H
+#define KERN_KERN_VM_LOCK_H
 
 /*
  * Reverse mappings connect vmspace, private-page and VM-object ownership

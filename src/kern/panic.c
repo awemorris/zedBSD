@@ -59,3 +59,16 @@ __libc_panic(
 	for (;;)
 		hal_halt();
 }
+
+/*
+ * Reports a fatal kernel condition and stops the machine.
+ */
+void
+kern_fatal(
+	const char *file,
+	int line,
+	const char *message)
+{
+	/* The HAL owns the stop; it records the site and never returns. */
+	hal_fatal(file, line, message);
+}

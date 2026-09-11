@@ -11,8 +11,8 @@
  * The amd64 board-support boot, memory, and console contract.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_BSP_H
-#define ZEDBSD_HAL_AMD64_BSP_H
+#ifndef KERN_HAL_AMD64_BSP_H
+#define KERN_HAL_AMD64_BSP_H
 
 #include <hal/types.h>
 

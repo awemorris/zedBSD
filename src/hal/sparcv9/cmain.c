@@ -16,18 +16,18 @@ static int
 handoff_valid(const struct sun4u_boot_handoff *handoff)
 {
 	return handoff != (const struct sun4u_boot_handoff *)0 &&
-	    handoff->common.magic == ZEDBSD_HANDOFF_MAGIC &&
-	    handoff->common.version == ZEDBSD_HANDOFF_VERSION_SUN4U &&
+	    handoff->common.magic == KERN_HANDOFF_MAGIC &&
+	    handoff->common.version == KERN_HANDOFF_VERSION_SUN4U &&
 	    handoff->common.size == sizeof(*handoff) &&
 	    handoff->common.boot_partition_scheme ==
-	    ZEDBSD_PARTITION_SCHEME_SUN &&
-	    handoff->extension_magic == ZEDBSD_SUN4U_HANDOFF_MAGIC &&
-	    handoff->extension_version == ZEDBSD_SUN4U_HANDOFF_VERSION &&
+	    KERN_PARTITION_SCHEME_SUN &&
+	    handoff->extension_magic == KERN_SUN4U_HANDOFF_MAGIC &&
+	    handoff->extension_version == KERN_SUN4U_HANDOFF_VERSION &&
 	    handoff->extension_size == sizeof(*handoff) -
 	    sizeof(handoff->common) && handoff->installed_count != 0 &&
-	    handoff->installed_count <= ZEDBSD_SUN4U_MAX_MEMORY_RANGES &&
+	    handoff->installed_count <= KERN_SUN4U_MAX_MEMORY_RANGES &&
 	    handoff->available_count != 0 && handoff->available_count <=
-	    ZEDBSD_SUN4U_MAX_MEMORY_RANGES && handoff->tick_frequency != 0 &&
+	    KERN_SUN4U_MAX_MEMORY_RANGES && handoff->tick_frequency != 0 &&
 	    handoff->pci_io_base != 0 && handoff->serial_io_offset != 0 &&
 	    handoff->ide_vendor == 0x1095 && handoff->ide_device == 0x0646;
 }

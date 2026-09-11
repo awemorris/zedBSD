@@ -56,8 +56,8 @@
 #include <time.h>
 #include <unistd.h>
 
-#ifndef ZEDBSD_USER_PAGE_SIZE
-#define ZEDBSD_USER_PAGE_SIZE 4096
+#ifndef KERN_USER_PAGE_SIZE
+#define KERN_USER_PAGE_SIZE 4096
 #endif
 
 char **environ;
@@ -79,7 +79,7 @@ extern void __pthread_initialize_main(void) __attribute__((weak));
 extern void __libc_environment_lock(void) __attribute__((weak));
 extern void __libc_environment_unlock(void) __attribute__((weak));
 extern char *__pthread_environment_exchange(char *) __attribute__((weak));
-#if !defined(ZEDBSD_DYNAMIC_LIBC)
+#if !defined(KERN_DYNAMIC_LIBC)
 void __rtld_process_fini(void) __attribute__((weak));
 void __rtld_startup_init(void) __attribute__((weak));
 
@@ -582,7 +582,7 @@ void
 _exit(
 	int status)
 {
-	(void)__syscall6(ZEDBSD_SYS_exit, (uintptr_t)status, 0, 0, 0, 0, 0);
+	(void)__syscall6(KERN_SYS_exit, (uintptr_t)status, 0, 0, 0, 0, 0);
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;)
@@ -612,7 +612,7 @@ open(
 	}
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_open, (uintptr_t)path, flags, mode, 0, 0,
+	function_result = (int)call(KERN_SYS_open, (uintptr_t)path, flags, mode, 0, 0,
 			 0);
 
 	/* Returns the computed result. */
@@ -643,7 +643,7 @@ openat(
 	}
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_openat, dirfd, (uintptr_t)path, flags, mode,
+	function_result = (int)call(KERN_SYS_openat, dirfd, (uintptr_t)path, flags, mode,
 			 0, 0);
 
 	/* Returns the computed result. */
@@ -659,7 +659,7 @@ close(
 {
 	int result;
 
-	result = (int)call(ZEDBSD_SYS_close, fd, 0, 0, 0, 0, 0);
+	result = (int)call(KERN_SYS_close, fd, 0, 0, 0, 0, 0);
 
 	/* Handles the reported system error. */
 	if (result < 0 && errno == EINTR)
@@ -707,7 +707,7 @@ dup(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_dup, fd, 0, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_dup, fd, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -724,7 +724,7 @@ dup2(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_dup2, oldfd, newfd, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_dup2, oldfd, newfd, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -742,7 +742,7 @@ dup3(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_dup3, oldfd, newfd, flags, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_dup3, oldfd, newfd, flags, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -797,7 +797,7 @@ fcntl(
 		argument = (intptr_t)&request;
 	}
 
-	result = (int)call(ZEDBSD_SYS_fcntl, fd, command, argument, 0, 0, 0);
+	result = (int)call(KERN_SYS_fcntl, fd, command, argument, 0, 0, 0);
 
 	/* Checks the operation result. */
 	if (result == 0 &&
@@ -872,7 +872,7 @@ pipe2(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_pipe2, (uintptr_t)result, flags, 0, 0, 0,
+	function_result = (int)call(KERN_SYS_pipe2, (uintptr_t)result, flags, 0, 0, 0,
 			 0);
 
 	/* Returns the computed result. */
@@ -907,7 +907,7 @@ read(
 	ssize_t r;
 
 	cancel_point();
-	r = (ssize_t)call(ZEDBSD_SYS_read, fd, (uintptr_t)p, n, 0, 0, 0);
+	r = (ssize_t)call(KERN_SYS_read, fd, (uintptr_t)p, n, 0, 0, 0);
 	cancel_point();
 
 	/* Returns the computed result. */
@@ -926,7 +926,7 @@ write(
 	ssize_t r;
 
 	cancel_point();
-	r = (ssize_t)call(ZEDBSD_SYS_write, fd, (uintptr_t)p, n, 0, 0, 0);
+	r = (ssize_t)call(KERN_SYS_write, fd, (uintptr_t)p, n, 0, 0, 0);
 	cancel_point();
 
 	/* Returns the computed result. */
@@ -946,7 +946,7 @@ pread(
 	ssize_t function_result;
 
 	/* Computes the function result. */
-	function_result = (ssize_t)call(ZEDBSD_SYS_pread, fd, (uintptr_t)p, n, offset, 0,
+	function_result = (ssize_t)call(KERN_SYS_pread, fd, (uintptr_t)p, n, offset, 0,
 			     0);
 
 	/* Returns the computed result. */
@@ -966,7 +966,7 @@ pwrite(
 	ssize_t function_result;
 
 	/* Computes the function result. */
-	function_result = (ssize_t)call(ZEDBSD_SYS_pwrite, fd, (uintptr_t)p, n, offset, 0,
+	function_result = (ssize_t)call(KERN_SYS_pwrite, fd, (uintptr_t)p, n, offset, 0,
 			     0);
 
 	/* Returns the computed result. */
@@ -985,7 +985,7 @@ readv(
 	ssize_t function_result;
 
 	/* Computes the function result. */
-	function_result = (ssize_t)call(ZEDBSD_SYS_readv, fd, (uintptr_t)iov, count, 0, 0,
+	function_result = (ssize_t)call(KERN_SYS_readv, fd, (uintptr_t)iov, count, 0, 0,
 			     0);
 
 	/* Returns the computed result. */
@@ -1004,7 +1004,7 @@ writev(
 	ssize_t function_result;
 
 	/* Computes the function result. */
-	function_result = (ssize_t)call(ZEDBSD_SYS_writev, fd, (uintptr_t)iov, count, 0, 0,
+	function_result = (ssize_t)call(KERN_SYS_writev, fd, (uintptr_t)iov, count, 0, 0,
 			     0);
 
 	/* Returns the computed result. */
@@ -1078,7 +1078,7 @@ fsync(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_fsync, fd, 0, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_fsync, fd, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -1091,7 +1091,7 @@ void
 sync(
 	void)
 {
-	(void)call(ZEDBSD_SYS_sync, 0, 0, 0, 0, 0, 0);
+	(void)call(KERN_SYS_sync, 0, 0, 0, 0, 0, 0);
 }
 
 /*
@@ -1104,7 +1104,7 @@ fdatasync(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_fdatasync, fd, 0, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_fdatasync, fd, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -1122,7 +1122,7 @@ lseek(
 	off_t function_result;
 
 	/* Computes the function result. */
-	function_result = (off_t)call(ZEDBSD_SYS_lseek, fd, off, whence, 0, 0, 0);
+	function_result = (off_t)call(KERN_SYS_lseek, fd, off, whence, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -1139,7 +1139,7 @@ fstat(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_fstat, fd, (uintptr_t)st, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_fstat, fd, (uintptr_t)st, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -1155,7 +1155,7 @@ chdir(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_chdir, (uintptr_t)p, 0, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_chdir, (uintptr_t)p, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -1171,7 +1171,7 @@ fchdir(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_fchdir, fd, 0, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_fchdir, fd, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -1188,7 +1188,7 @@ getcwd(
 	char *function_result;
 
 	/* Computes the function result. */
-	function_result = (char *)call(ZEDBSD_SYS_getcwd, (uintptr_t)p, n, 0, 0, 0, 0);
+	function_result = (char *)call(KERN_SYS_getcwd, (uintptr_t)p, n, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -1215,7 +1215,7 @@ ioctl(
 	}
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_ioctl, fd, request, arg, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_ioctl, fd, request, arg, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -1243,7 +1243,7 @@ posix_devctl(
 	if (size > 0x1fffU || (command_size != 0 && size < command_size))
 		return EINVAL;
 	cancel_point();
-	result = __syscall6(ZEDBSD_SYS_ioctl, (uintptr_t)descriptor, request,
+	result = __syscall6(KERN_SYS_ioctl, (uintptr_t)descriptor, request,
 			    (uintptr_t)data, 0, 0, 0);
 	cancel_point();
 
@@ -1273,7 +1273,7 @@ sysctl(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_sysctl, (uintptr_t)name, namelen,
+	function_result = (int)call(KERN_SYS_sysctl, (uintptr_t)name, namelen,
 			 (uintptr_t)oldp, (uintptr_t)oldlenp, (uintptr_t)newp,
 			 newlen);
 
@@ -1333,7 +1333,7 @@ mmap(
 {
 	intptr_t value;
 
-	value = call(ZEDBSD_SYS_mmap, (uintptr_t)address, length, prot,
+	value = call(KERN_SYS_mmap, (uintptr_t)address, length, prot,
 			      flags, fd, offset);
 
 	/* Returns the computed result. */
@@ -1351,7 +1351,7 @@ munmap(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_munmap, (uintptr_t)p, n, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_munmap, (uintptr_t)p, n, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -1369,7 +1369,7 @@ mprotect(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_mprotect, (uintptr_t)p, n, prot, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_mprotect, (uintptr_t)p, n, prot, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -1387,7 +1387,7 @@ msync(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_msync, (uintptr_t)p, n, flags, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_msync, (uintptr_t)p, n, flags, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -1409,7 +1409,7 @@ brk(
 		/* Reports operation failure. */
 		return -1;
 	}
-	value = call(ZEDBSD_SYS_brk, (uintptr_t)address, 0, 0, 0, 0, 0);
+	value = call(KERN_SYS_brk, (uintptr_t)address, 0, 0, 0, 0, 0);
 
 	/* Validates the current value. */
 	if (value == -1)
@@ -1436,7 +1436,7 @@ sbrk(
 
 	/* Handles the process break known condition. */
 	if (!process_break_known) {
-		value = call(ZEDBSD_SYS_brk, 0, 0, 0, 0, 0, 0);
+		value = call(KERN_SYS_brk, 0, 0, 0, 0, 0, 0);
 
 		/* Validates the current value. */
 		if (value == -1)
@@ -1460,7 +1460,7 @@ sbrk(
 	}
 	new_break = increment < 0 ? old_break - decrease
 				  : old_break + (uintptr_t)increment;
-	value = call(ZEDBSD_SYS_brk, new_break, 0, 0, 0, 0, 0);
+	value = call(KERN_SYS_brk, new_break, 0, 0, 0, 0, 0);
 
 	/* Validates the current value. */
 	if (value == -1)
@@ -1487,7 +1487,7 @@ sysconf(
 	switch (name) {
 	case _SC_PAGE_SIZE:
 		/* Returns the computed result. */
-		return ZEDBSD_USER_PAGE_SIZE;
+		return KERN_USER_PAGE_SIZE;
 	case _SC_OPEN_MAX:
 
 	/* Computes the function result. */
@@ -1698,7 +1698,7 @@ mkdir(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_mkdir, (uintptr_t)path, mode, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_mkdir, (uintptr_t)path, mode, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -1716,7 +1716,7 @@ mkdirat(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_mkdirat, dirfd, (uintptr_t)path, mode, 0, 0,
+	function_result = (int)call(KERN_SYS_mkdirat, dirfd, (uintptr_t)path, mode, 0, 0,
 			 0);
 
 	/* Returns the computed result. */
@@ -1735,7 +1735,7 @@ mkfifoat(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_mknodat, dirfd, (uintptr_t)path,
+	function_result = (int)call(KERN_SYS_mknodat, dirfd, (uintptr_t)path,
 			 S_IFIFO | (mode & 07777U), 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -1772,7 +1772,7 @@ mknodat(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_mknodat, dirfd, (uintptr_t)path, mode,
+	function_result = (int)call(KERN_SYS_mknodat, dirfd, (uintptr_t)path, mode,
 			 device, 0, 0);
 
 	/* Returns the computed result. */
@@ -1808,7 +1808,7 @@ getpriority(
 	int value;
 
 	/* Handles a failed call operation. */
-	if (call(ZEDBSD_SYS_getpriority, which, who, (uintptr_t)&value, 0, 0,
+	if (call(KERN_SYS_getpriority, which, who, (uintptr_t)&value, 0, 0,
 		 0) < 0)
 
 		/* Reports operation failure. */
@@ -1830,7 +1830,7 @@ setpriority(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_setpriority, which, who, value, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_setpriority, which, who, value, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -1883,7 +1883,7 @@ getrusage(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_getrusage, who, (uintptr_t)usage, 0, 0, 0,
+	function_result = (int)call(KERN_SYS_getrusage, who, (uintptr_t)usage, 0, 0, 0,
 			 0);
 
 	/* Returns the computed result. */
@@ -1901,7 +1901,7 @@ getitimer(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_getitimer, which, (uintptr_t)value, 0, 0, 0,
+	function_result = (int)call(KERN_SYS_getitimer, which, (uintptr_t)value, 0, 0, 0,
 			 0);
 
 	/* Returns the computed result. */
@@ -1920,7 +1920,7 @@ setitimer(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_setitimer, which, (uintptr_t)value,
+	function_result = (int)call(KERN_SYS_setitimer, which, (uintptr_t)value,
 			 (uintptr_t)old, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -1937,7 +1937,7 @@ unlink(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_unlink, (uintptr_t)path, 0, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_unlink, (uintptr_t)path, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -1955,7 +1955,7 @@ unlinkat(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_unlinkat, dirfd, (uintptr_t)path, flags, 0,
+	function_result = (int)call(KERN_SYS_unlinkat, dirfd, (uintptr_t)path, flags, 0,
 			 0, 0);
 
 	/* Returns the computed result. */
@@ -1972,7 +1972,7 @@ rmdir(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_rmdir, (uintptr_t)path, 0, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_rmdir, (uintptr_t)path, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -1989,7 +1989,7 @@ rename(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_rename, (uintptr_t)oldpath,
+	function_result = (int)call(KERN_SYS_rename, (uintptr_t)oldpath,
 			 (uintptr_t)newpath, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -2009,7 +2009,7 @@ renameat(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_renameat, olddirfd, (uintptr_t)oldpath,
+	function_result = (int)call(KERN_SYS_renameat, olddirfd, (uintptr_t)oldpath,
 			 newdirfd, (uintptr_t)newpath, 0, 0);
 
 	/* Returns the computed result. */
@@ -2025,7 +2025,7 @@ renameat2(
 	const char *newpath,
 	unsigned flags)
 {
-	return (int)call(ZEDBSD_SYS_renameat2, olddirfd, (uintptr_t)oldpath,
+	return (int)call(KERN_SYS_renameat2, olddirfd, (uintptr_t)oldpath,
 	    newdirfd, (uintptr_t)newpath, flags, 0);
 }
 
@@ -2043,7 +2043,7 @@ linkat(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_linkat, olddirfd, (uintptr_t)oldpath,
+	function_result = (int)call(KERN_SYS_linkat, olddirfd, (uintptr_t)oldpath,
 			 newdirfd, (uintptr_t)newpath, flags, 0);
 
 	/* Returns the computed result. */
@@ -2079,7 +2079,7 @@ symlinkat(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_symlinkat, (uintptr_t)target, dirfd,
+	function_result = (int)call(KERN_SYS_symlinkat, (uintptr_t)target, dirfd,
 			 (uintptr_t)path, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -2116,7 +2116,7 @@ readlinkat(
 	ssize_t function_result;
 
 	/* Computes the function result. */
-	function_result = (ssize_t)call(ZEDBSD_SYS_readlinkat, dirfd, (uintptr_t)path,
+	function_result = (ssize_t)call(KERN_SYS_readlinkat, dirfd, (uintptr_t)path,
 			     (uintptr_t)buffer, size, 0, 0);
 
 	/* Returns the computed result. */
@@ -2152,7 +2152,7 @@ truncate(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_truncate, (uintptr_t)path, length, 0, 0, 0,
+	function_result = (int)call(KERN_SYS_truncate, (uintptr_t)path, length, 0, 0, 0,
 			 0);
 
 	/* Returns the computed result. */
@@ -2170,7 +2170,7 @@ ftruncate(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_ftruncate, fd, length, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_ftruncate, fd, length, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -2186,7 +2186,7 @@ umask(
 	mode_t function_result;
 
 	/* Computes the function result. */
-	function_result = (mode_t)call(ZEDBSD_SYS_umask, mask, 0, 0, 0, 0, 0);
+	function_result = (mode_t)call(KERN_SYS_umask, mask, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -2203,7 +2203,7 @@ clock_gettime(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_clock_gettime, id, (uintptr_t)ts, 0, 0, 0,
+	function_result = (int)call(KERN_SYS_clock_gettime, id, (uintptr_t)ts, 0, 0, 0,
 			 0);
 
 	/* Returns the computed result. */
@@ -2221,7 +2221,7 @@ clock_getres(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_clock_getres, id, (uintptr_t)ts, 0, 0, 0,
+	function_result = (int)call(KERN_SYS_clock_getres, id, (uintptr_t)ts, 0, 0, 0,
 			 0);
 
 	/* Returns the computed result. */
@@ -2239,7 +2239,7 @@ clock_settime(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_clock_settime, id, (uintptr_t)ts, 0, 0, 0,
+	function_result = (int)call(KERN_SYS_clock_settime, id, (uintptr_t)ts, 0, 0, 0,
 			 0);
 
 	/* Returns the computed result. */
@@ -2474,7 +2474,7 @@ mount(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_mount, (uintptr_t)type, (uintptr_t)dir,
+	function_result = (int)call(KERN_SYS_mount, (uintptr_t)type, (uintptr_t)dir,
 			 flags, (uintptr_t)data, 0, 0);
 
 	/* Returns the computed result. */
@@ -2492,7 +2492,7 @@ unmount(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_unmount, (uintptr_t)dir, flags, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_unmount, (uintptr_t)dir, flags, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -2509,7 +2509,7 @@ statvfs(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_statvfs, (uintptr_t)path, (uintptr_t)status,
+	function_result = (int)call(KERN_SYS_statvfs, (uintptr_t)path, (uintptr_t)status,
 			 0, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -2527,7 +2527,7 @@ fstatvfs(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_fstatvfs, fd, (uintptr_t)status, 0, 0, 0,
+	function_result = (int)call(KERN_SYS_fstatvfs, fd, (uintptr_t)status, 0, 0, 0,
 			 0);
 
 	/* Returns the computed result. */
@@ -2545,7 +2545,7 @@ quotactl(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_quotactl, (uintptr_t)path,
+	function_result = (int)call(KERN_SYS_quotactl, (uintptr_t)path,
 			 (uintptr_t)request, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -2563,7 +2563,7 @@ snapshotctl(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_snapshotctl, (uintptr_t)path,
+	function_result = (int)call(KERN_SYS_snapshotctl, (uintptr_t)path,
 			 (uintptr_t)request, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -2583,7 +2583,7 @@ getxattr(
 	ssize_t function_result;
 
 	/* Computes the function result. */
-	function_result = (ssize_t)call(ZEDBSD_SYS_getxattr, (uintptr_t)path,
+	function_result = (ssize_t)call(KERN_SYS_getxattr, (uintptr_t)path,
 			     (uintptr_t)name, (uintptr_t)value, size, 0, 0);
 
 	/* Returns the computed result. */
@@ -2603,7 +2603,7 @@ lgetxattr(
 	ssize_t function_result;
 
 	/* Computes the function result. */
-	function_result = (ssize_t)call(ZEDBSD_SYS_lgetxattr, (uintptr_t)path,
+	function_result = (ssize_t)call(KERN_SYS_lgetxattr, (uintptr_t)path,
 			     (uintptr_t)name, (uintptr_t)value, size, 0, 0);
 
 	/* Returns the computed result. */
@@ -2623,7 +2623,7 @@ fgetxattr(
 	ssize_t function_result;
 
 	/* Computes the function result. */
-	function_result = (ssize_t)call(ZEDBSD_SYS_fgetxattr, fd, (uintptr_t)name,
+	function_result = (ssize_t)call(KERN_SYS_fgetxattr, fd, (uintptr_t)name,
 			     (uintptr_t)value, size, 0, 0);
 
 	/* Returns the computed result. */
@@ -2644,7 +2644,7 @@ setxattr(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_setxattr, (uintptr_t)path, (uintptr_t)name,
+	function_result = (int)call(KERN_SYS_setxattr, (uintptr_t)path, (uintptr_t)name,
 			 (uintptr_t)value, size, flags, 0);
 
 	/* Returns the computed result. */
@@ -2665,7 +2665,7 @@ lsetxattr(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_lsetxattr, (uintptr_t)path, (uintptr_t)name,
+	function_result = (int)call(KERN_SYS_lsetxattr, (uintptr_t)path, (uintptr_t)name,
 			 (uintptr_t)value, size, flags, 0);
 
 	/* Returns the computed result. */
@@ -2686,7 +2686,7 @@ fsetxattr(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_fsetxattr, fd, (uintptr_t)name,
+	function_result = (int)call(KERN_SYS_fsetxattr, fd, (uintptr_t)name,
 			 (uintptr_t)value, size, flags, 0);
 
 	/* Returns the computed result. */
@@ -2705,7 +2705,7 @@ listxattr(
 	ssize_t function_result;
 
 	/* Computes the function result. */
-	function_result = (ssize_t)call(ZEDBSD_SYS_listxattr, (uintptr_t)path,
+	function_result = (ssize_t)call(KERN_SYS_listxattr, (uintptr_t)path,
 			     (uintptr_t)list, size, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -2724,7 +2724,7 @@ llistxattr(
 	ssize_t function_result;
 
 	/* Computes the function result. */
-	function_result = (ssize_t)call(ZEDBSD_SYS_llistxattr, (uintptr_t)path,
+	function_result = (ssize_t)call(KERN_SYS_llistxattr, (uintptr_t)path,
 			     (uintptr_t)list, size, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -2743,7 +2743,7 @@ flistxattr(
 	ssize_t function_result;
 
 	/* Computes the function result. */
-	function_result = (ssize_t)call(ZEDBSD_SYS_flistxattr, fd, (uintptr_t)list, size,
+	function_result = (ssize_t)call(KERN_SYS_flistxattr, fd, (uintptr_t)list, size,
 			     0, 0, 0);
 
 	/* Returns the computed result. */
@@ -2761,7 +2761,7 @@ removexattr(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_removexattr, (uintptr_t)path,
+	function_result = (int)call(KERN_SYS_removexattr, (uintptr_t)path,
 			 (uintptr_t)name, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -2779,7 +2779,7 @@ lremovexattr(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_lremovexattr, (uintptr_t)path,
+	function_result = (int)call(KERN_SYS_lremovexattr, (uintptr_t)path,
 			 (uintptr_t)name, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -2797,7 +2797,7 @@ fremovexattr(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_fremovexattr, fd, (uintptr_t)name, 0, 0, 0,
+	function_result = (int)call(KERN_SYS_fremovexattr, fd, (uintptr_t)name, 0, 0, 0,
 			 0);
 
 	/* Returns the computed result. */
@@ -2815,7 +2815,7 @@ nanosleep(
 	int result;
 
 	cancel_point();
-	result = (int)call(ZEDBSD_SYS_nanosleep, (uintptr_t)request,
+	result = (int)call(KERN_SYS_nanosleep, (uintptr_t)request,
 			   (uintptr_t)remain, 0, 0, 0, 0);
 	cancel_point();
 
@@ -2835,7 +2835,7 @@ waitpid(
 	pid_t result;
 
 	cancel_point();
-	result = (pid_t)call(ZEDBSD_SYS_waitpid, (uintptr_t)pid,
+	result = (pid_t)call(KERN_SYS_waitpid, (uintptr_t)pid,
 			     (uintptr_t)status, (uintptr_t)options, 0, 0, 0);
 	cancel_point();
 
@@ -3060,7 +3060,7 @@ waitid(
 	int result;
 
 	cancel_point();
-	result = (int)call(ZEDBSD_SYS_waitid, type, id, (uintptr_t)information,
+	result = (int)call(KERN_SYS_waitid, type, id, (uintptr_t)information,
 			   options, 0, 0);
 	cancel_point();
 
@@ -3086,7 +3086,7 @@ getrlimit(
 		/* Reports operation failure. */
 		return -1;
 	}
-	result = (int)call(ZEDBSD_SYS_getrlimit, resource, (uintptr_t)&wire, 0,
+	result = (int)call(KERN_SYS_getrlimit, resource, (uintptr_t)&wire, 0,
 			   0, 0, 0);
 
 	/* Checks the operation result. */
@@ -3121,7 +3121,7 @@ setrlimit(
 	wire.maximum = limit->rlim_max;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_setrlimit, resource, (uintptr_t)&wire, 0, 0,
+	function_result = (int)call(KERN_SYS_setrlimit, resource, (uintptr_t)&wire, 0, 0,
 			 0, 0);
 
 	/* Returns the computed result. */
@@ -3234,7 +3234,7 @@ posix_spawn_file_actions_addopen(
 	n = strlen(path);
 
 	/* Checks the current item count. */
-	if (n >= ZEDBSD_SPAWN_PATH_MAX)
+	if (n >= KERN_SPAWN_PATH_MAX)
 		return ENAMETOOLONG;
 	a = spawn_action_add(actions);
 
@@ -3269,7 +3269,7 @@ posix_spawn_file_actions_addchdir(
 	length = strlen(path);
 
 	/* Checks the current data length. */
-	if (length >= ZEDBSD_SPAWN_PATH_MAX)
+	if (length >= KERN_SPAWN_PATH_MAX)
 		return ENAMETOOLONG;
 	action = spawn_action_add(actions);
 
@@ -3545,7 +3545,7 @@ fork(
 	/* Handles the pthread fork prepare availability. */
 	if (__pthread_fork_prepare != NULL)
 		__pthread_fork_prepare();
-	result = (pid_t)call(ZEDBSD_SYS_fork, 0, 0, 0, 0, 0, 0);
+	result = (pid_t)call(KERN_SYS_fork, 0, 0, 0, 0, 0, 0);
 
 	/* Checks the operation result. */
 	if (result == 0) {
@@ -3582,7 +3582,7 @@ _Fork(
 	 * pthread_atfork handlers nor libc's pthread child recovery hooks.
 	 */
 	/* Computes the function result. */
-	function_result = (pid_t)call(ZEDBSD_SYS_fork, 0, 0, 0, 0, 0, 0);
+	function_result = (pid_t)call(KERN_SYS_fork, 0, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -3600,7 +3600,7 @@ execve(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_execve, (uintptr_t)path, (uintptr_t)argv,
+	function_result = (int)call(KERN_SYS_execve, (uintptr_t)path, (uintptr_t)argv,
 			 (uintptr_t)envp, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -3653,7 +3653,7 @@ fexecve(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_fexecve, descriptor, (uintptr_t)argv,
+	function_result = (int)call(KERN_SYS_fexecve, descriptor, (uintptr_t)argv,
 			 (uintptr_t)envp, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -3727,7 +3727,7 @@ getpid(
 	pid_t function_result;
 
 	/* Computes the function result. */
-	function_result = (pid_t)call(ZEDBSD_SYS_getpid, 0, 0, 0, 0, 0, 0);
+	function_result = (pid_t)call(KERN_SYS_getpid, 0, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -3743,7 +3743,7 @@ sched_yield(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_sched_yield, 0, 0, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_sched_yield, 0, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -3759,7 +3759,7 @@ getppid(
 	pid_t function_result;
 
 	/* Computes the function result. */
-	function_result = (pid_t)call(ZEDBSD_SYS_getppid, 0, 0, 0, 0, 0, 0);
+	function_result = (pid_t)call(KERN_SYS_getppid, 0, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -3775,7 +3775,7 @@ getpgrp(
 	pid_t function_result;
 
 	/* Computes the function result. */
-	function_result = (pid_t)call(ZEDBSD_SYS_getpgrp, 0, 0, 0, 0, 0, 0);
+	function_result = (pid_t)call(KERN_SYS_getpgrp, 0, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -3791,7 +3791,7 @@ getpgid(
 	pid_t function_result;
 
 	/* Computes the function result. */
-	function_result = (pid_t)call(ZEDBSD_SYS_getpgid, pid, 0, 0, 0, 0, 0);
+	function_result = (pid_t)call(KERN_SYS_getpgid, pid, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -3808,7 +3808,7 @@ setpgid(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_setpgid, pid, pgid, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_setpgid, pid, pgid, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -3824,7 +3824,7 @@ setsid(
 	pid_t function_result;
 
 	/* Computes the function result. */
-	function_result = (pid_t)call(ZEDBSD_SYS_setsid, 0, 0, 0, 0, 0, 0);
+	function_result = (pid_t)call(KERN_SYS_setsid, 0, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -3840,7 +3840,7 @@ getsid(
 	pid_t function_result;
 
 	/* Computes the function result. */
-	function_result = (pid_t)call(ZEDBSD_SYS_getsid, pid, 0, 0, 0, 0, 0);
+	function_result = (pid_t)call(KERN_SYS_getsid, pid, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -3856,7 +3856,7 @@ getuid(
 	uid_t function_result;
 
 	/* Computes the function result. */
-	function_result = (uid_t)call(ZEDBSD_SYS_getuid, 0, 0, 0, 0, 0, 0);
+	function_result = (uid_t)call(KERN_SYS_getuid, 0, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -3874,7 +3874,7 @@ getresuid(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_getresuid, (uintptr_t)real,
+	function_result = (int)call(KERN_SYS_getresuid, (uintptr_t)real,
 			 (uintptr_t)effective, (uintptr_t)saved, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -3891,7 +3891,7 @@ geteuid(
 	uid_t function_result;
 
 	/* Computes the function result. */
-	function_result = (uid_t)call(ZEDBSD_SYS_geteuid, 0, 0, 0, 0, 0, 0);
+	function_result = (uid_t)call(KERN_SYS_geteuid, 0, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -3907,7 +3907,7 @@ getgid(
 	gid_t function_result;
 
 	/* Computes the function result. */
-	function_result = (gid_t)call(ZEDBSD_SYS_getgid, 0, 0, 0, 0, 0, 0);
+	function_result = (gid_t)call(KERN_SYS_getgid, 0, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -3925,7 +3925,7 @@ getresgid(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_getresgid, (uintptr_t)real,
+	function_result = (int)call(KERN_SYS_getresgid, (uintptr_t)real,
 			 (uintptr_t)effective, (uintptr_t)saved, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -3942,7 +3942,7 @@ getegid(
 	gid_t function_result;
 
 	/* Computes the function result. */
-	function_result = (gid_t)call(ZEDBSD_SYS_getegid, 0, 0, 0, 0, 0, 0);
+	function_result = (gid_t)call(KERN_SYS_getegid, 0, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -3959,7 +3959,7 @@ getgroups(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_getgroups, count, (uintptr_t)groups, 0, 0,
+	function_result = (int)call(KERN_SYS_getgroups, count, (uintptr_t)groups, 0, 0,
 			 0, 0);
 
 	/* Returns the computed result. */
@@ -3976,7 +3976,7 @@ setuid(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_setuid, id, 0, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_setuid, id, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -3992,7 +3992,7 @@ seteuid(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_seteuid, id, 0, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_seteuid, id, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -4008,7 +4008,7 @@ setgid(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_setgid, id, 0, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_setgid, id, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -4024,7 +4024,7 @@ setegid(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_setegid, id, 0, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_setegid, id, 0, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -4041,7 +4041,7 @@ setgroups(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_setgroups, count, (uintptr_t)groups, 0, 0,
+	function_result = (int)call(KERN_SYS_setgroups, count, (uintptr_t)groups, 0, 0,
 			 0, 0);
 
 	/* Returns the computed result. */
@@ -4059,7 +4059,7 @@ setreuid(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_setreuid, real, effective, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_setreuid, real, effective, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -4077,7 +4077,7 @@ setresuid(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_setresuid, real, effective, saved, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_setresuid, real, effective, saved, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -4094,7 +4094,7 @@ setregid(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_setregid, real, effective, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_setregid, real, effective, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -4112,7 +4112,7 @@ setresgid(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_setresgid, real, effective, saved, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_setresgid, real, effective, saved, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -4129,7 +4129,7 @@ stat(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_stat, (uintptr_t)path, (uintptr_t)status, 0,
+	function_result = (int)call(KERN_SYS_stat, (uintptr_t)path, (uintptr_t)status, 0,
 			 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -4147,7 +4147,7 @@ lstat(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_lstat, (uintptr_t)path, (uintptr_t)status,
+	function_result = (int)call(KERN_SYS_lstat, (uintptr_t)path, (uintptr_t)status,
 			 0, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -4167,7 +4167,7 @@ fstatat(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_fstatat, dirfd, (uintptr_t)path,
+	function_result = (int)call(KERN_SYS_fstatat, dirfd, (uintptr_t)path,
 			 (uintptr_t)status, flags, 0, 0);
 
 	/* Returns the computed result. */
@@ -4185,7 +4185,7 @@ access(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_access, (uintptr_t)path, mode, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_access, (uintptr_t)path, mode, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -4204,7 +4204,7 @@ faccessat(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_faccessat, dirfd, (uintptr_t)path, mode,
+	function_result = (int)call(KERN_SYS_faccessat, dirfd, (uintptr_t)path, mode,
 			 flags, 0, 0);
 
 	/* Returns the computed result. */
@@ -4222,7 +4222,7 @@ chmod(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_chmod, (uintptr_t)path, mode, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_chmod, (uintptr_t)path, mode, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -4239,7 +4239,7 @@ fchmod(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_fchmod, fd, mode, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_fchmod, fd, mode, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -4258,7 +4258,7 @@ fchmodat(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_fchmodat, dirfd, (uintptr_t)path, mode,
+	function_result = (int)call(KERN_SYS_fchmodat, dirfd, (uintptr_t)path, mode,
 			 flags, 0, 0);
 
 	/* Returns the computed result. */
@@ -4277,7 +4277,7 @@ chown(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_chown, (uintptr_t)path, uid, gid, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_chown, (uintptr_t)path, uid, gid, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -4295,7 +4295,7 @@ fchown(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_fchown, fd, uid, gid, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_fchown, fd, uid, gid, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -4313,7 +4313,7 @@ lchown(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_lchown, (uintptr_t)path, uid, gid, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_lchown, (uintptr_t)path, uid, gid, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -4333,7 +4333,7 @@ fchownat(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_fchownat, dirfd, (uintptr_t)path, uid, gid,
+	function_result = (int)call(KERN_SYS_fchownat, dirfd, (uintptr_t)path, uid, gid,
 			 flags, 0);
 
 	/* Returns the computed result. */
@@ -4353,7 +4353,7 @@ utimensat(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_utimensat, dirfd, (uintptr_t)path,
+	function_result = (int)call(KERN_SYS_utimensat, dirfd, (uintptr_t)path,
 			 (uintptr_t)times, flags, 0, 0);
 
 	/* Returns the computed result. */
@@ -4371,7 +4371,7 @@ futimens(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_futimens, fd, (uintptr_t)times, 0, 0, 0, 0);
+	function_result = (int)call(KERN_SYS_futimens, fd, (uintptr_t)times, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -4482,7 +4482,7 @@ getentropy(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)call(ZEDBSD_SYS_getentropy, (uintptr_t)buffer, length, 0, 0,
+	function_result = (int)call(KERN_SYS_getentropy, (uintptr_t)buffer, length, 0, 0,
 			 0, 0);
 
 	/* Returns the computed result. */
@@ -4745,7 +4745,7 @@ posix_getdents(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-		result = call(ZEDBSD_SYS_getdents, fd, (uintptr_t)&source,
+		result = call(KERN_SYS_getdents, fd, (uintptr_t)&source,
 			      sizeof(source), 0, 0, 0);
 
 		/* Checks the operation result. */
@@ -4885,7 +4885,7 @@ readdir(
 		/* Reports that no result is available. */
 		return NULL;
 	}
-	result = call(ZEDBSD_SYS_getdents, directory->fd, (uintptr_t)&entry,
+	result = call(KERN_SYS_getdents, directory->fd, (uintptr_t)&entry,
 		      sizeof(entry), 0, 0, 0);
 
 	/* Checks the operation result. */
@@ -6852,7 +6852,7 @@ clock(
 	uint64_t value;
 
 	/* Handles a failed call operation. */
-	if (call(ZEDBSD_SYS_times, (uintptr_t)&record, sizeof(record), 0, 0, 0,
+	if (call(KERN_SYS_times, (uintptr_t)&record, sizeof(record), 0, 0, 0,
 		 0) < 0)
 
 		/* Returns the computed result. */
@@ -6889,7 +6889,7 @@ times(
 	struct process_times_record record;
 
 	/* Handles a failed call operation. */
-	if (call(ZEDBSD_SYS_times, (uintptr_t)&record, sizeof(record), 0, 0, 0,
+	if (call(KERN_SYS_times, (uintptr_t)&record, sizeof(record), 0, 0, 0,
 		 0) < 0)
 
 		/* Returns the computed result. */
@@ -6978,7 +6978,7 @@ exit(
 {
 	extern void __libc_run_exit_handlers(void);
 	__libc_run_exit_handlers();
-#if defined(ZEDBSD_DYNAMIC_LIBC)
+#if defined(KERN_DYNAMIC_LIBC)
 	__rtld_exports.process_fini();
 #else
 
@@ -7076,7 +7076,7 @@ __libc_init(
 	 * thread before the runtime linker invokes any of them. */
 	if (__pthread_initialize_main != NULL)
 		__pthread_initialize_main();
-#if defined(ZEDBSD_DYNAMIC_LIBC)
+#if defined(KERN_DYNAMIC_LIBC)
 	__rtld_exports.startup_init();
 #else
 
@@ -7349,7 +7349,7 @@ spawn_action_add(
 	posix_spawn_file_actions_t *actions)
 {
 	/* Handles the actions availability. */
-	if (actions == NULL || actions->count >= ZEDBSD_SPAWN_ACTION_MAX)
+	if (actions == NULL || actions->count >= KERN_SPAWN_ACTION_MAX)
 		return NULL;
 
 	/* Returns the computed result. */
@@ -7753,7 +7753,7 @@ exec_with_shell(
 {
 	int function_result;
 	size_t index_for;
-	char *shell_argv[ZEDBSD_SPAWN_ARG_MAX + 2U];
+	char *shell_argv[KERN_SPAWN_ARG_MAX + 2U];
 	size_t count;
 
 	count = 0;
@@ -7765,7 +7765,7 @@ exec_with_shell(
 		/* Process each remaining command-line operand. */
 		for (index_for = 1; argv[index_for] != NULL; index_for++) {
 			/* Checks the remaining item count. */
-			if (count == ZEDBSD_SPAWN_ARG_MAX + 1U) {
+			if (count == KERN_SPAWN_ARG_MAX + 1U) {
 				errno = E2BIG;
 
 				/* Reports operation failure. */
@@ -7793,7 +7793,7 @@ exec_varargs(
 	int explicit_environment)
 {
 	int function_result;
-	char *argv[ZEDBSD_SPAWN_ARG_MAX + 1U];
+	char *argv[KERN_SPAWN_ARG_MAX + 1U];
 	char *const *envp = environ;
 	size_t count;
 	const char *argument;
@@ -7804,7 +7804,7 @@ exec_varargs(
 	/* Continue while the operation condition remains true. */
 	while (argument != NULL) {
 		/* Checks the remaining item count. */
-		if (count == ZEDBSD_SPAWN_ARG_MAX) {
+		if (count == KERN_SPAWN_ARG_MAX) {
 			errno = E2BIG;
 
 			/* Reports operation failure. */

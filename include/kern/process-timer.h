@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_KERN_PROCESS_TIMER_H
-#define ZEDBSD_KERN_PROCESS_TIMER_H
+#ifndef KERN_KERN_PROCESS_TIMER_H
+#define KERN_KERN_PROCESS_TIMER_H
 
 #include <uapi/zedbsd/signal.h>
 #include <stdint.h>

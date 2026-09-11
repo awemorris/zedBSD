@@ -75,7 +75,7 @@ static int framebuffer_cursor_drawn;
  */
 static uint64_t console_output_state;
 
-#ifdef ZEDBSD_CONSOLE_OUTPUT_TEST
+#ifdef KERN_CONSOLE_OUTPUT_TEST
 static __thread uint32_t console_test_cpu;
 static __thread int console_test_interrupts_enabled = 1;
 #endif
@@ -87,13 +87,13 @@ static const uint32_t vga_palette[16] = {
 	0xff5555U, 0xff55ffU, 0xffff55U, 0xffffffU
 };
 
-#ifdef ZEDBSD_CONSOLE_OUTPUT_TEST
+#ifdef KERN_CONSOLE_OUTPUT_TEST
 static struct zbl6_framebuffer console_test_framebuffer;
 #endif
 
 static int console_interrupt_disable(void);
 static void console_interrupt_enable(void);
-#ifndef ZEDBSD_CONSOLE_OUTPUT_TEST
+#ifndef KERN_CONSOLE_OUTPUT_TEST
 static void console_cpuid(uint32_t leaf, uint32_t subleaf, uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx);
 #endif
 static uint32_t console_cpu_identity(void);
@@ -212,7 +212,7 @@ pcat_cons_write_string(
 	pcat_cons_write_n(string, length);
 }
 
-#ifdef ZEDBSD_CONSOLE_OUTPUT_TEST
+#ifdef KERN_CONSOLE_OUTPUT_TEST
 /*
  * Selects the simulated CPU identity for the output fixture.
  */
@@ -321,7 +321,7 @@ pcat_console_output_test_state(
 }
 #endif
 
-#ifdef ZEDBSD_INPUT_OWNERSHIP_TEST
+#ifdef KERN_INPUT_OWNERSHIP_TEST
 
 #endif
 
@@ -388,7 +388,7 @@ prekern_pcat_cons_irq_init(
 	hal_irq_mask(IRQ_KEYBOARD);
 }
 
-#ifdef ZEDBSD_CONSOLE_OUTPUT_TEST
+#ifdef KERN_CONSOLE_OUTPUT_TEST
 /* Disables simulated interrupts for console output serialization. */
 static int
 console_interrupt_disable(

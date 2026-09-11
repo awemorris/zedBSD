@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_KERN_SWAP_SOURCE_H
-#define ZEDBSD_KERN_SWAP_SOURCE_H
+#ifndef KERN_KERN_SWAP_SOURCE_H
+#define KERN_KERN_SWAP_SOURCE_H
 
 #include <stdint.h>
 #include <kern/swap.h>
@@ -25,8 +25,8 @@ struct kern_swap_source {
 	struct inode *identity_inode;
 	uint32_t slot_count;
 	uint32_t header_version;
-	uint8_t uuid[ZEDBSD_SWAP_V2_UUID_SIZE];
-	char label[ZEDBSD_SWAP_V2_LABEL_SIZE];
+	uint8_t uuid[KERN_SWAP_V2_UUID_SIZE];
+	char label[KERN_SWAP_V2_LABEL_SIZE];
 	char diagnostic[KERN_SWAP_SOURCE_TEXT_MAX + 1U];
 	unsigned parameter_index;
 };
@@ -38,8 +38,8 @@ struct kern_swap_source_snapshot {
 	uint32_t header_version;
 	uint32_t total_pages;
 	uint32_t used_pages;
-	uint8_t uuid[ZEDBSD_SWAP_V2_UUID_SIZE];
-	char label[ZEDBSD_SWAP_V2_LABEL_SIZE];
+	uint8_t uuid[KERN_SWAP_V2_UUID_SIZE];
+	char label[KERN_SWAP_V2_LABEL_SIZE];
 	char diagnostic[KERN_SWAP_SOURCE_TEXT_MAX + 1U];
 };
 

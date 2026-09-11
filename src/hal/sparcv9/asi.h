@@ -1,8 +1,8 @@
 /* SPARC V9 ASI helpers used by the sun4u BSP. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 
-#ifndef ZEDBSD_HAL_SPARCV9_ASI_H
-#define ZEDBSD_HAL_SPARCV9_ASI_H
+#ifndef KERN_HAL_SPARCV9_ASI_H
+#define KERN_HAL_SPARCV9_ASI_H
 
 #define SPARCV9_ASI_PHYS_BYPASS 0x15
 #define SPARCV9_ASI_PHYS_BYPASS_LE 0x1d

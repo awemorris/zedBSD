@@ -9,7 +9,7 @@ ARM64_PLATFORM := platform/arm64
 
 ARM64_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 	-Ilibc/include -Isrc/hal/arm64 -DHAL_ARCH_ARM64 -DHAL_BOARD_RPI4 \
-	-DZEDBSD_USER_ABI_AARCH64 -DZEDBSD_USER_ABI_LP64
+	-DKERN_USER_ABI_AARCH64 -DKERN_USER_ABI_LP64
 ARM64_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
 ARM64_CFLAGS := -march=armv8-a -mno-outline-atomics -mgeneral-regs-only -ffreestanding \
 	-fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables \
@@ -69,8 +69,8 @@ ARM64_VMUNIX_OBJS := $(ARM64_BOOT_OBJS) $(ARM64_KERNEL_OBJS) $(ARM64_KERNEL_LIBC
 $(ARM64_VMUNIX_OBJS): $(ZEDBSD_PLATFORM_CONFIG_STAMP)
 
 ARM64_USER_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
-	-Ilibc/include -DHAL_ARCH_ARM64 -DZEDBSD_USER_ABI_AARCH64 \
-	-DZEDBSD_USER_ABI_LP64
+	-Ilibc/include -DHAL_ARCH_ARM64 -DKERN_USER_ABI_AARCH64 \
+	-DKERN_USER_ABI_LP64
 ARM64_USER_CFLAGS := -march=armv8-a -mno-outline-atomics \
 	-ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables \
@@ -251,8 +251,8 @@ $(BUILD)/POSIX-R2-REMAINING.ELF: \
 # ELF64 runtime linker and shared libc for the aarch64 architecture overlay.
 DYNAMIC_DIR := $(BUILD)/dynamic
 DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude -Iinclude/uapi -Ilibc/include \
-	-DHAL_ARCH_ARM64 -DZEDBSD_USER_ABI_AARCH64 -DZEDBSD_USER_ABI_LP64 \
-	-DZEDBSD_DYNAMIC_LIBC
+	-DHAL_ARCH_ARM64 -DKERN_USER_ABI_AARCH64 -DKERN_USER_ABI_LP64 \
+	-DKERN_DYNAMIC_LIBC
 DYNAMIC_CFLAGS := -march=armv8-a -mno-outline-atomics -Os -ffreestanding \
 	-fPIC -fno-builtin -fno-stack-protector \
 	-fno-asynchronous-unwind-tables -fno-unwind-tables \

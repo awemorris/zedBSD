@@ -11,10 +11,11 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include "kern/device-io.h"
 
 /* Kept local so this C89-clean private boundary does not import HAL inlines. */
-extern void hal_io_rmb(void);
-extern void hal_io_wmb(void);
+extern void kern_io_read_barrier(void);
+extern void kern_io_write_barrier(void);
 
 static int ax211_backend_valid(const struct intel_ax211_transport_backend *backend);
 static int ax211_backend_ready(const struct intel_ax211_transport_backend *backend);
@@ -360,7 +361,7 @@ ax211_backend_csr_write8(
 	}
 
 	*(volatile uint8_t *)(backend->pci_mmio->registers + offset) = value;
-	hal_io_wmb();
+	kern_io_write_barrier();
 
 	/* Succeeded. */
 	return 0;
@@ -511,11 +512,11 @@ ax211_backend_dma_sync(
 
 	/* Handles the direction condition. */
 	if (direction == INTEL_AX211_TRANSPORT_DMA_PREWRITE)
-		hal_io_wmb();
+		kern_io_write_barrier();
 	else if (direction == INTEL_AX211_TRANSPORT_DMA_PREREAD)
-		hal_io_wmb();
+		kern_io_write_barrier();
 	else if (direction == INTEL_AX211_TRANSPORT_DMA_POSTREAD)
-		hal_io_rmb();
+		kern_io_read_barrier();
 	else {
 		/* Reports operation failure. */
 		return -1;

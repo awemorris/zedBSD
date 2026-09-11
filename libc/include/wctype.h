@@ -10,7 +10,7 @@
 
 #include <wchar.h>
 
-#ifdef ZEDBSD_REGEX_HOST_TEST
+#ifdef KERN_REGEX_HOST_TEST
 typedef unsigned long wctype_t;
 typedef const int *wctrans_t;
 #else

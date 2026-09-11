@@ -25,7 +25,7 @@ for variant in ('ordinary', 'sanitize'):
         sources = [f'plan/ws025/tests/fat-batch-{kind}-host.c', 'src/kern/io-stats.c']
         if kind == 'cost':
             sources.append('plan/ws025/temp/p031-driver-fragments/src/drivers/fs/fat.c')
-        subprocess.run(['cc', '-std=c11', '-DZEDBSD_USER_ABI_LP64', '-O1', '-g',
+        subprocess.run(['cc', '-std=c11', '-DKERN_USER_ABI_LP64', '-O1', '-g',
             '-Wall', '-Wextra', '-Werror', '-ffunction-sections', '-fdata-sections',
             '-Iinclude', '-Iinclude/uapi', '-Isrc', '-Ilibc/include', '-I.',
             *extra, *sources, '-Wl,--gc-sections', '-o', str(binary)], cwd=root, check=True)

@@ -42,7 +42,7 @@ cc $common -O0 -fanalyzer -c "$hotplug_fixture" \
 
 cc -std=c11 -O0 -Wall -Wextra -Werror -fanalyzer -nostdinc \
 	-ffreestanding -DHAL_ARCH_AMD64 -DHAL_BOARD_PCAT \
-	-DZEDBSD_USER_ABI_LP64 -I"$repo/include" -I"$repo/include/uapi" \
+	-DKERN_USER_ABI_LP64 -I"$repo/include" -I"$repo/include/uapi" \
 	-I"$repo/src" -I"$repo" -I"$repo/libc/include" \
 	-c "$repo/src/drivers/usb/usb-hid.c" -o "$temporary/analyzer.o"
 

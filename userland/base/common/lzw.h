@@ -11,8 +11,8 @@
  * Declares shared userland lzw support.
  */
 
-#ifndef ZEDBSD_USERLAND_LZW_H
-#define ZEDBSD_USERLAND_LZW_H
+#ifndef KERN_USERLAND_LZW_H
+#define KERN_USERLAND_LZW_H
 
 int lzw_compress(int input, int output, unsigned max_bits, int block_mode);
 int lzw_decompress(int input, int output);

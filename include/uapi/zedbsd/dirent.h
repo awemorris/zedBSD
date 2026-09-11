@@ -5,19 +5,19 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_UAPI_DIRENT_H
-#define ZEDBSD_UAPI_DIRENT_H
+#ifndef KERN_UAPI_DIRENT_H
+#define KERN_UAPI_DIRENT_H
 
 #include <stdint.h>
 
-#define ZEDBSD_DT_UNKNOWN	0U
-#define ZEDBSD_DT_REG	1U
-#define ZEDBSD_DT_DIR	2U
-#define ZEDBSD_DT_BLK	3U
-#define ZEDBSD_DT_CHR	4U
-#define ZEDBSD_DT_FIFO	5U
-#define ZEDBSD_DT_LNK	6U
-#define ZEDBSD_DT_SOCK	7U
+#define KERN_DT_UNKNOWN	0U
+#define KERN_DT_REG	1U
+#define KERN_DT_DIR	2U
+#define KERN_DT_BLK	3U
+#define KERN_DT_CHR	4U
+#define KERN_DT_FIFO	5U
+#define KERN_DT_LNK	6U
+#define KERN_DT_SOCK	7U
 
 struct dirent_record {
 	uint64_t d_ino;

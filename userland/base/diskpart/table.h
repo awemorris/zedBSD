@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_DISKPART_TABLE_H
-#define ZEDBSD_DISKPART_TABLE_H
+#ifndef KERN_DISKPART_TABLE_H
+#define KERN_DISKPART_TABLE_H
 #include <stddef.h>
 #include <stdint.h>
 

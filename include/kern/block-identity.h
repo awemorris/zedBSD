@@ -9,8 +9,8 @@
  * Block device filesystem and partition identity.
  */
 
-#ifndef ZEDBSD_KERN_BLOCK_IDENTITY_H
-#define ZEDBSD_KERN_BLOCK_IDENTITY_H
+#ifndef KERN_KERN_BLOCK_IDENTITY_H
+#define KERN_KERN_BLOCK_IDENTITY_H
 
 #include <kern/disk.h>
 #include <zedbsd/blkid.h>

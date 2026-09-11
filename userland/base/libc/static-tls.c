@@ -27,7 +27,7 @@ __rtld_thread_alloc(
 	void *pthread_private,
 	struct __rtld_tcb **out)
 {
-	struct zedbsd_tls_prefix prefix;
+	struct kern_tls_prefix prefix;
 	struct __rtld_tcb *tcb;
 	intptr_t current;
 	void *mapping;
@@ -38,28 +38,28 @@ __rtld_thread_alloc(
 		return -1;
 	*out = NULL;
 	memset(&prefix, 0, sizeof(prefix));
-	current = __syscall6(ZEDBSD_SYS_thread_self,
-	    ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
+	current = __syscall6(KERN_SYS_thread_self,
+	    KERN_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
 	if (current < 0)
 		return -1;
 	if (current != 0)
 		prefix = ((struct __rtld_tcb *)(uintptr_t)current)->tls;
 
 	/* Bound the clone before rounding or copying its user-owned metadata. */
-	if (prefix.memory_size > ZEDBSD_TLS_MEMORY_MAX)
+	if (prefix.memory_size > KERN_TLS_MEMORY_MAX)
 		return -1;
 	if (prefix.template_size > prefix.memory_size)
 		return -1;
 	if (prefix.distance < prefix.memory_size)
 		return -1;
-	if (prefix.distance > ZEDBSD_TLS_MEMORY_MAX + ZEDBSD_TLS_ALIGN_MAX)
+	if (prefix.distance > KERN_TLS_MEMORY_MAX + KERN_TLS_ALIGN_MAX)
 		return -1;
 	if (prefix.template_size != 0 && prefix.template_address == 0)
 		return -1;
 
 	payload = (prefix.distance + STATIC_TLS_PAGE_SIZE - 1U) &
 	    ~(size_t)(STATIC_TLS_PAGE_SIZE - 1U);
-	size = payload + ZEDBSD_TLS_TCB_RESERVE;
+	size = payload + KERN_TLS_TCB_RESERVE;
 	mapping = mmap(NULL, size, PROT_READ | PROT_WRITE,
 	    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	if (mapping == MAP_FAILED)
@@ -88,7 +88,7 @@ __rtld_thread_free(
 
 	if (tcb == NULL)
 		return;
-	current = __syscall6(ZEDBSD_SYS_thread_self, ZEDBSD_THREAD_SELF_GET_TLS,
+	current = __syscall6(KERN_SYS_thread_self, KERN_THREAD_SELF_GET_TLS,
 	    0, 0, 0, 0, 0);
 	if (current == (intptr_t)(uintptr_t)tcb)
 		return;
@@ -105,8 +105,8 @@ __rtld_thread_attach(
 	intptr_t value;
 	struct __rtld_tcb *tcb;
 
-	value = __syscall6(ZEDBSD_SYS_thread_self,
-				    ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
+	value = __syscall6(KERN_SYS_thread_self,
+				    KERN_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
 
 	/* Validates the current value. */
 	if (value < 0)
@@ -117,8 +117,8 @@ __rtld_thread_attach(
 		/* Handles a failed rtld thread alloc operation. */
 		if (__rtld_thread_alloc(pthread_private, &tcb) != 0)
 			return -1;
-		value = __syscall6(ZEDBSD_SYS_thread_self,
-				   ZEDBSD_THREAD_SELF_SET_TLS, (uintptr_t)tcb,
+		value = __syscall6(KERN_SYS_thread_self,
+				   KERN_THREAD_SELF_SET_TLS, (uintptr_t)tcb,
 				   0, 0, 0, 0);
 
 		/* Validates the current value. */
@@ -152,8 +152,8 @@ __rtld_pthread_private(
 {
 	intptr_t value;
 
-	value = __syscall6(ZEDBSD_SYS_thread_self,
-				    ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
+	value = __syscall6(KERN_SYS_thread_self,
+				    KERN_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
 
 	/* Validates the current value. */
 	if (value <= 0)

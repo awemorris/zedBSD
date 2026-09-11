@@ -10,8 +10,8 @@
  * Process virtual-memory ownership.
  */
 
-#ifndef ZEDBSD_KERN_VMSPACE_H
-#define ZEDBSD_KERN_VMSPACE_H
+#ifndef KERN_KERN_VMSPACE_H
+#define KERN_KERN_VMSPACE_H
 
 #include <hal/hal.h>
 #include <kern/pmem.h>

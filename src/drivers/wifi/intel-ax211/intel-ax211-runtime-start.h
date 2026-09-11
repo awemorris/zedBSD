@@ -6,8 +6,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_DRIVERS_INTEL_AX211_RUNTIME_START_H
-#define ZEDBSD_DRIVERS_INTEL_AX211_RUNTIME_START_H
+#ifndef KERN_DRIVERS_INTEL_AX211_RUNTIME_START_H
+#define KERN_DRIVERS_INTEL_AX211_RUNTIME_START_H
 
 #include "intel-ax211-boot.h"
 #include "intel-ax211-runtime.h"

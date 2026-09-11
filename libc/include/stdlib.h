@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_STDLIB_H
-#define ZEDBSD_STDLIB_H
+#ifndef KERN_STDLIB_H
+#define KERN_STDLIB_H
 
 #include <stddef.h>
 #include <stdint.h>

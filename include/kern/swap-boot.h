@@ -1,7 +1,7 @@
 /* Boot-parameter selected swap sources.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_KERN_SWAP_BOOT_H
-#define ZEDBSD_KERN_SWAP_BOOT_H
+#ifndef KERN_KERN_SWAP_BOOT_H
+#define KERN_KERN_SWAP_BOOT_H
 
 #include <kern/swap-source.h>
 

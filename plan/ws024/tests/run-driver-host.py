@@ -14,7 +14,7 @@ def run(name,args):
 for arch in ('amd64',):
  for variant in ('ordinary','sanitize'):
   prefix=arch+'-'+variant
-  abi=['-DZEDBSD_USER_ABI_LP64'] if arch=='amd64' else ['-m32']
+  abi=['-DKERN_USER_ABI_LP64'] if arch=='amd64' else ['-m32']
   san=[] if variant=='ordinary' else ['-fsanitize=address,undefined','-fno-omit-frame-pointer','--param','asan-globals=0']
   bridge=str(out/(prefix+'-thread.o'))
   run(prefix+'-thread',['cc',*abi,*san,'-O1','-g','-pthread','-c','plan/ws018/tests/mount-thread-host.c','-o',bridge])

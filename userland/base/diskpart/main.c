@@ -13,10 +13,10 @@
 
 /* Machine records contain numeric fields and kernel device/GUID tokens only. */
 static int machine_output;
-static void show_machine(const struct dp_table *, const struct zedbsd_block_info *);
+static void show_machine(const struct dp_table *, const struct kern_block_info *);
 
 static void
-machine_device(const struct zedbsd_block_info *info)
+machine_device(const struct kern_block_info *info)
 {
 	printf("device\t%s\t%u\t%u\t%u\t%u\t%llu\t%llu\n",
 	    info->name, info->device, info->parent_device, info->flags,
@@ -42,29 +42,29 @@ static int fd_write(void *context, uint64_t offset, const void *data, size_t siz
 static int fd_flush(void *context)
 { return fsync(*(int *)context) < 0 ? errno : 0; }
 
-static int query(int fd, struct zedbsd_block_info *info)
+static int query(int fd, struct kern_block_info *info)
 {
 	memset(info, 0, sizeof(*info));
-	info->version = ZEDBSD_BLOCK_VERSION; info->struct_size = sizeof(*info);
+	info->version = KERN_BLOCK_VERSION; info->struct_size = sizeof(*info);
 	return ioctl(fd, BLKGETINFO, info) < 0 ? errno : 0;
 }
 
 static int device_open(const char *operand, int writable, int *fd,
-	struct zedbsd_block_info *info)
+	struct kern_block_info *info)
 {
 	char path[64];
 	struct stat st;
 	const char *name = !strncmp(operand, "/dev/", 5) ? operand + 5 : operand;
 	int error;
-	if (!*name || strlen(name) >= ZEDBSD_BLOCK_NAME_MAX || strchr(name, '/')) return EINVAL;
+	if (!*name || strlen(name) >= KERN_BLOCK_NAME_MAX || strchr(name, '/')) return EINVAL;
 	snprintf(path, sizeof(path), "/dev/%s", name);
 	*fd = open(path, writable ? O_RDWR : O_RDONLY);
 	if (*fd < 0) return errno;
 	if (fstat(*fd, &st) < 0) error = errno;
 	else if (!S_ISBLK(st.st_mode)) error = EINVAL;
 	else error = query(*fd, info);
-	if (!error && (info->parent_device || (info->flags & ZEDBSD_BLOCK_PARTITION))) error = EINVAL;
-	if (!error && writable && (info->flags & ZEDBSD_BLOCK_READ_ONLY)) error = EROFS;
+	if (!error && (info->parent_device || (info->flags & KERN_BLOCK_PARTITION))) error = EINVAL;
+	if (!error && writable && (info->flags & KERN_BLOCK_READ_ONLY)) error = EROFS;
 	if (error) { close(*fd); *fd = -1; }
 	return error;
 }
@@ -99,10 +99,10 @@ static int list(void)
 	while ((entry = readdir(dir)) != NULL) {
 		char path[64];
 		struct stat st;
-		struct zedbsd_block_info info;
+		struct kern_block_info info;
 		int fd, error;
-		if (strlen(entry->d_name) >= ZEDBSD_BLOCK_NAME_MAX) continue;
-		snprintf(path, sizeof(path), "/dev/%.*s", (int)ZEDBSD_BLOCK_NAME_MAX - 1, entry->d_name);
+		if (strlen(entry->d_name) >= KERN_BLOCK_NAME_MAX) continue;
+		snprintf(path, sizeof(path), "/dev/%.*s", (int)KERN_BLOCK_NAME_MAX - 1, entry->d_name);
 		if (stat(path, &st) < 0 || !S_ISBLK(st.st_mode)) continue;
 		fd = open(path, O_RDONLY);
 		error = fd < 0 ? errno : query(fd, &info);
@@ -112,10 +112,10 @@ static int list(void)
 			machine_device(&info);
 			continue;
 		}
-		if (info.flags & ZEDBSD_BLOCK_PARTITION) continue;
+		if (info.flags & KERN_BLOCK_PARTITION) continue;
 		printf("%s %u %u %llu %s\n", info.name, info.device, info.sector_size,
 		    (unsigned long long)info.sector_count,
-		    info.flags & ZEDBSD_BLOCK_READ_ONLY ? "ro" : "rw");
+		    info.flags & KERN_BLOCK_READ_ONLY ? "ro" : "rw");
 	}
 	closedir(dir);
 	if (fflush(stdout) != 0 && !errors) errors = EIO;
@@ -138,7 +138,7 @@ static void show(const struct dp_table *t)
 
 /* Describe the table and exact metadata spans without printing label text. */
 static void
-show_machine(const struct dp_table *table, const struct zedbsd_block_info *info)
+show_machine(const struct dp_table *table, const struct kern_block_info *info)
 {
 	const struct dp_part *part;
 	const struct dp_copy *copy;
@@ -187,7 +187,7 @@ static int decimal(const char *s, uint64_t *value)
 /* Refuse editing against a stale live mapping. In particular an addition
  * cannot overlap an old root extent merely because disk bytes were changed
  * earlier and that change has not been accepted by the kernel. */
-static int live_extents_match(const struct zedbsd_block_info *parent,
+static int live_extents_match(const struct kern_block_info *parent,
 	const struct dp_table *t)
 {
 	DIR *dir = opendir("/dev");
@@ -197,10 +197,10 @@ static int live_extents_match(const struct zedbsd_block_info *parent,
 	while (!error && (entry = readdir(dir)) != NULL) {
 		char path[64];
 		struct stat st;
-		struct zedbsd_block_info child;
+		struct kern_block_info child;
 		int fd, found = 0;
-		if (strlen(entry->d_name) >= ZEDBSD_BLOCK_NAME_MAX) continue;
-		snprintf(path, sizeof(path), "/dev/%.*s", (int)ZEDBSD_BLOCK_NAME_MAX - 1, entry->d_name);
+		if (strlen(entry->d_name) >= KERN_BLOCK_NAME_MAX) continue;
+		snprintf(path, sizeof(path), "/dev/%.*s", (int)KERN_BLOCK_NAME_MAX - 1, entry->d_name);
 		if (stat(path, &st) < 0 || !S_ISBLK(st.st_mode)) continue;
 		fd = open(path, O_RDONLY);
 		error = fd < 0 ? errno : query(fd, &child);
@@ -218,7 +218,7 @@ static int live_extents_match(const struct zedbsd_block_info *parent,
 static int
 initialize_disk(int argc, char **argv)
 {
-	struct zedbsd_block_info info;
+	struct kern_block_info info;
 	struct dp_table table = {0};
 	struct dp_io io;
 	uint8_t guid[16];
@@ -335,7 +335,7 @@ out:
 
 int main(int argc, char **argv)
 {
-	struct zedbsd_block_info info;
+	struct kern_block_info info;
 	struct dp_table table;
 	struct dp_io io;
 	const char *verb;

@@ -10,7 +10,7 @@ common_flags="-std=c11 -O2 -Wall -Wextra -Werror -I$repo/include -I$repo/include
 test_source="$repo/plan/ws018/tests/graphics-frontends-host-test.c"
 
 # PC/AT is also the LP64 provider, so this run checks the 64-bit UAPI layout.
-cc $common_flags -DZEDBSD_USER_ABI_LP64 -DGRAPHICS_TEST_PCAT \
+cc $common_flags -DKERN_USER_ABI_LP64 -DGRAPHICS_TEST_PCAT \
 	"$test_source" "$repo/src/drivers/platform/pcat/graphics/pcat-graphics.c" \
 	-o "$temporary/pcat"
 "$temporary/pcat"

@@ -39,7 +39,7 @@
 #include <limits.h>
 #include "kern/sched.h"
 
-#define PAGE_SIZE			ZEDBSD_PAGE_SIZE
+#define PAGE_SIZE			KERN_PAGE_SIZE
 #define VM_OBJECT_DATA			__attribute__((section(".vfs_bss")))
 #define VM_OBJECT_FAULT_RECLAIM_RETRIES	4U
 #define VM_OBJECT_FAULT_RESERVE_PAGES	4U

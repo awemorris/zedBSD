@@ -1,5 +1,5 @@
-#ifndef ZEDBSD_HAL_ARM64_ASM_H
-#define ZEDBSD_HAL_ARM64_ASM_H
+#ifndef KERN_HAL_ARM64_ASM_H
+#define KERN_HAL_ARM64_ASM_H
 
 #include <hal/types.h>
 

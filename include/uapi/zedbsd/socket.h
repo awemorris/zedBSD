@@ -9,8 +9,8 @@
  * socket
  */
 
-#ifndef ZEDBSD_UAPI_SOCKET_H
-#define ZEDBSD_UAPI_SOCKET_H
+#ifndef KERN_UAPI_SOCKET_H
+#define KERN_UAPI_SOCKET_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -60,19 +60,19 @@ typedef uint32_t socklen_t;
  * This is a zedBSD extension and deliberately does not expose the kernel's
  * internal credential object.
  */
-struct zedbsd_peercred {
+struct kern_peercred {
 	int32_t pid;
 	uint32_t euid;
 	uint32_t egid;
 };
 
-_Static_assert(sizeof(struct zedbsd_peercred) == 12U,
+_Static_assert(sizeof(struct kern_peercred) == 12U,
     "zedBSD peer credential ABI must remain 12 bytes");
-_Static_assert(offsetof(struct zedbsd_peercred, pid) == 0U,
+_Static_assert(offsetof(struct kern_peercred, pid) == 0U,
     "zedBSD peer credential pid offset changed");
-_Static_assert(offsetof(struct zedbsd_peercred, euid) == 4U,
+_Static_assert(offsetof(struct kern_peercred, euid) == 4U,
     "zedBSD peer credential euid offset changed");
-_Static_assert(offsetof(struct zedbsd_peercred, egid) == 8U,
+_Static_assert(offsetof(struct kern_peercred, egid) == 8U,
     "zedBSD peer credential egid offset changed");
 _Static_assert(sizeof(pid_t) == sizeof(int32_t) && (pid_t)-1 < (pid_t)0,
     "native pid_t no longer fits peer credential pid");
@@ -92,7 +92,7 @@ _Static_assert(sizeof(gid_t) == sizeof(uint32_t) && (gid_t)-1 > (gid_t)0,
 
 #define SCM_RIGHTS	0x0001
 
-#define ZEDBSD_MSG_FD_MAX	8U
+#define KERN_MSG_FD_MAX	8U
 
 /*
  * Normalized sendmsg/recvmsg ABI.  libc flattens iovecs and validates

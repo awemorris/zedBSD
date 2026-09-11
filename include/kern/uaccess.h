@@ -9,8 +9,8 @@
  * uaccess
  */
 
-#ifndef ZEDBSD_KERN_UACCESS_H
-#define ZEDBSD_KERN_UACCESS_H
+#ifndef KERN_KERN_UACCESS_H
+#define KERN_KERN_UACCESS_H
 
 #include <stddef.h>
 #include <stdint.h>

@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_THREADS_H
-#define ZEDBSD_THREADS_H
+#ifndef KERN_THREADS_H
+#define KERN_THREADS_H
 
 #include <pthread.h>
 #include <time.h>

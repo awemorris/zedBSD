@@ -11,8 +11,8 @@
  * The amd64 address-space interface.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_SPACE_H
-#define ZEDBSD_HAL_AMD64_SPACE_H
+#ifndef KERN_HAL_AMD64_SPACE_H
+#define KERN_HAL_AMD64_SPACE_H
 
 #include <hal/hal.h>
 

@@ -46,8 +46,8 @@ static const struct parameter_name parameter_names[KERN_BOOT_PARAMETER_COUNT] = 
 	PARAMETER_NAME("init"),
 };
 
-static char firmware_source[ZEDBSD_BOOT_SOURCE_SELECTOR_SIZE];
-static char configuration_source[ZEDBSD_BOOT_SOURCE_SELECTOR_SIZE];
+static char firmware_source[KERN_BOOT_SOURCE_SELECTOR_SIZE];
+static char configuration_source[KERN_BOOT_SOURCE_SELECTOR_SIZE];
 static uint64_t configuration_matches;
 static int provenance_selector(const struct boot_partition_identity *identity, char *output);
 
@@ -68,8 +68,8 @@ static int runtime_mount_lookup(struct kern_boot_source_slot *source, const char
 int
 kern_boot_provenance_set(const struct boot_provenance *record)
 {
-	char firmware[ZEDBSD_BOOT_SOURCE_SELECTOR_SIZE];
-	char configuration[ZEDBSD_BOOT_SOURCE_SELECTOR_SIZE];
+	char firmware[KERN_BOOT_SOURCE_SELECTOR_SIZE];
+	char configuration[KERN_BOOT_SOURCE_SELECTOR_SIZE];
 	int error;
 
 	firmware_source[0] = '\0';
@@ -77,7 +77,7 @@ kern_boot_provenance_set(const struct boot_provenance *record)
 	configuration_matches = 0;
 	if (record == NULL)
 		return 0;
-	if (record->version != ZEDBSD_BOOT_PROVENANCE_VERSION ||
+	if (record->version != KERN_BOOT_PROVENANCE_VERSION ||
 	    record->config_matches == 0 || record->config_matches > 128U)
 		return EINVAL;
 	error = provenance_selector(&record->firmware, firmware);
@@ -668,9 +668,9 @@ kern_boot_source_fat_type_supported(
 	enum bootfat_type type)
 {
 	/* Only FAT16 and FAT32 are supported. */
-	if (type == ZEDBSD_FAT16)
+	if (type == KERN_FAT16)
 		return 1;
-	if (type == ZEDBSD_FAT32)
+	if (type == KERN_FAT32)
 		return 1;
 
 	/* Reports an unsupported variant. */
@@ -1359,13 +1359,13 @@ provenance_selector(const struct boot_partition_identity *identity, char *output
 	unsigned i, position, nonzero;
 	uint8_t byte;
 
-	memset(output, 0, ZEDBSD_BOOT_SOURCE_SELECTOR_SIZE);
+	memset(output, 0, KERN_BOOT_SOURCE_SELECTOR_SIZE);
 	if (identity->index == 0 || identity->block_count == 0 ||
 	    identity->first_lba > UINT64_MAX - identity->block_count)
 		return EINVAL;
-	if (identity->scheme == ZEDBSD_PARTITION_SCHEME_MBR)
+	if (identity->scheme == KERN_PARTITION_SCHEME_MBR)
 		return 0;
-	if (identity->scheme != ZEDBSD_PARTITION_SCHEME_GPT)
+	if (identity->scheme != KERN_PARTITION_SCHEME_GPT)
 		return EINVAL;
 	nonzero = 0;
 	for (i = 0; i < 16; i++)

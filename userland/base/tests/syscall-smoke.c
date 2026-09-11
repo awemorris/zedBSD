@@ -26,12 +26,12 @@
 #include <time.h>
 #include <unistd.h>
 
-#ifndef ZEDBSD_USER_PAGE_SIZE
-#define ZEDBSD_USER_PAGE_SIZE 4096U
+#ifndef KERN_USER_PAGE_SIZE
+#define KERN_USER_PAGE_SIZE 4096U
 #endif
-#define TEST_PAGE_SIZE ((size_t)ZEDBSD_USER_PAGE_SIZE)
+#define TEST_PAGE_SIZE ((size_t)KERN_USER_PAGE_SIZE)
 
-#ifdef ZEDBSD_USER_ABI_LP64
+#ifdef KERN_USER_ABI_LP64
 _Static_assert(sizeof(void *) == 8, "LP64 pointer ABI");
 _Static_assert(sizeof(long) == 8, "LP64 long ABI");
 _Static_assert(sizeof(off_t) == 8, "LP64 off_t ABI");
@@ -176,7 +176,7 @@ run_test(
 	/* Handles the allocation availability. */
 	if (allocation == NULL)
 		return 2;
-#ifdef ZEDBSD_USER_ABI_LP64
+#ifdef KERN_USER_ABI_LP64
 
 	/* Handles the uintptr t condition. */
 	if ((uintptr_t)&message <= UINT32_MAX)
@@ -700,7 +700,7 @@ run_test(
 	/* Handles an operation failure. */
 	if (mapping_local == MAP_FAILED)
 		return 16;
-#ifdef ZEDBSD_USER_ABI_LP64
+#ifdef KERN_USER_ABI_LP64
 
 	/* Handles the uintptr t condition. */
 	if ((uintptr_t)mapping_local <= UINT32_MAX)
@@ -942,7 +942,7 @@ run_test(
 
 		/* Returns the computed result. */
 		return 214;
-#ifdef ZEDBSD_USER_ABI_LP64
+#ifdef KERN_USER_ABI_LP64
 			times[0].tv_sec = (time_t)2208988800LL;
 			times[1].tv_sec = (time_t)2208988802LL;
 #else
@@ -987,7 +987,7 @@ run_test(
 	/* Handles the reported system error. */
 	if (fchmod(file_local, 0644) != -1 || errno != EOPNOTSUPP)
 		return 238;
-#ifdef ZEDBSD_USER_ABI_LP64
+#ifdef KERN_USER_ABI_LP64
 
 	/* Handles a failed lseek operation. */
 	if (lseek(file_local, (off_t)UINT32_MAX + 1, SEEK_SET) !=

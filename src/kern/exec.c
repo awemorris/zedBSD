@@ -41,11 +41,11 @@
 #include <unistd.h>
 #include "kern/klog.h"
 
-#define EXEC_ARG_MAX ZEDBSD_SPAWN_ARG_MAX
-#define EXEC_ENV_MAX ZEDBSD_SPAWN_ENV_MAX
-#define EXEC_STRING_MAX ZEDBSD_ARG_MAX
+#define EXEC_ARG_MAX KERN_SPAWN_ARG_MAX
+#define EXEC_ENV_MAX KERN_SPAWN_ENV_MAX
+#define EXEC_STRING_MAX KERN_ARG_MAX
 
-#ifdef ZEDBSD_USER_ABI_LP64
+#ifdef KERN_USER_ABI_LP64
 typedef uintptr_t exec_user_word_t;
 #define EXEC_IMAGE_INFO struct elf64_image_info
 #define exec_elf_load elf64_load
@@ -225,15 +225,15 @@ exec_script_argv_build(
 	 * array merely to distinguish an exactly-full unterminated array
 	 * from an oversized one.
 	 */
-	while (old_count < ZEDBSD_EXEC_VECTOR_MAX && old_argv[old_count] != NULL)
+	while (old_count < KERN_EXEC_VECTOR_MAX && old_argv[old_count] != NULL)
 		old_count++;
-	if (old_count == ZEDBSD_EXEC_VECTOR_MAX)
+	if (old_count == KERN_EXEC_VECTOR_MAX)
 		return E2BIG;
 	new_count = old_count + 1U + shebang->has_optional_argument;
-	if (new_count > ZEDBSD_EXEC_VECTOR_MAX)
+	if (new_count > KERN_EXEC_VECTOR_MAX)
 		return E2BIG;
 	table_bytes = (new_count + 1U) * sizeof(*vector);
-	if (table_bytes > ZEDBSD_ARG_MAX)
+	if (table_bytes > KERN_ARG_MAX)
 		return E2BIG;
 
 	/* Sizes the strings against the argument limit. */
@@ -326,7 +326,7 @@ exec_credential_prepare(
 	}
 }
 
-#ifdef ZEDBSD_EXEC_COMMIT_HOST_TEST
+#ifdef KERN_EXEC_COMMIT_HOST_TEST
 /*
  * Releases a content lease at the exec commit boundary for a host test.
  */
@@ -491,7 +491,7 @@ exec_build_initial_stack(
 	APPEND_AUX(AT_PHDR, aux->program_headers);
 	APPEND_AUX(AT_PHENT, aux->program_header_size);
 	APPEND_AUX(AT_PHNUM, aux->program_header_count);
-	APPEND_AUX(AT_PAGESZ, ZEDBSD_PAGE_SIZE);
+	APPEND_AUX(AT_PAGESZ, KERN_PAGE_SIZE);
 	APPEND_AUX(AT_BASE, aux->interpreter_base);
 	APPEND_AUX(AT_ENTRY, aux->program_entry);
 	APPEND_AUX(AT_UID, aux->uid);
@@ -837,11 +837,11 @@ script_argv_count(
 	int error;
 
 	/* The strings and the table must fit the argument limit together. */
-	error = exec_bounded_length(value, ZEDBSD_ARG_MAX - *string_bytes,
+	error = exec_bounded_length(value, KERN_ARG_MAX - *string_bytes,
 	    &length);
 	if (error != 0)
 		return E2BIG;
-	if (length > ZEDBSD_ARG_MAX - table_bytes - *string_bytes)
+	if (length > KERN_ARG_MAX - table_bytes - *string_bytes)
 		return E2BIG;
 	*string_bytes += length;
 

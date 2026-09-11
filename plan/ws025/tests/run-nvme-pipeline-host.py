@@ -17,7 +17,7 @@ for depth in (1, 2, 4, 8):
     for mode in ('ordinary', 'sanitize'):
         name = f'depth-{depth}-{mode}'
         extra = [] if mode == 'ordinary' else ['-fsanitize=address,undefined', '-fno-omit-frame-pointer', '--param', 'asan-globals=0']
-        cmd = ['cc', '-std=c11', '-O1', '-g', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function', '-DZEDBSD_USER_ABI_LP64', f'-DNVME_IO_PIPELINE_DEPTH={depth}', '-ffunction-sections', '-fdata-sections', '-I.', '-Iinclude', '-Iinclude/uapi', '-Isrc', '-Ilibc/include', '-I'+str(out), *extra, 'plan/ws025/tests/nvme-pipeline-host.c', '-Wl,--gc-sections', '-o', str(out/name)]
+        cmd = ['cc', '-std=c11', '-O1', '-g', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function', '-DKERN_USER_ABI_LP64', f'-DNVME_IO_PIPELINE_DEPTH={depth}', '-ffunction-sections', '-fdata-sections', '-I.', '-Iinclude', '-Iinclude/uapi', '-Isrc', '-Ilibc/include', '-I'+str(out), *extra, 'plan/ws025/tests/nvme-pipeline-host.c', '-Wl,--gc-sections', '-o', str(out/name)]
         r = subprocess.run(cmd, cwd=repo, capture_output=True, text=True)
         (out/(name+'-build.log')).write_text(r.stdout+r.stderr)
         if r.returncode:

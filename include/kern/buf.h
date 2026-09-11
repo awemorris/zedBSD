@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_KERN_BUF_H
-#define ZEDBSD_KERN_BUF_H
+#ifndef KERN_KERN_BUF_H
+#define KERN_KERN_BUF_H
 
 #include <stddef.h>
 #include <stdint.h>

@@ -9,8 +9,8 @@
  * VFS
  */
 
-#ifndef ZEDBSD_KERN_VFS_H
-#define ZEDBSD_KERN_VFS_H
+#ifndef KERN_KERN_VFS_H
+#define KERN_KERN_VFS_H
 
 #include "kern/boot.h"
 #include "kern/namei.h"

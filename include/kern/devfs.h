@@ -9,8 +9,8 @@
  * devfs
  */
 
-#ifndef ZEDBSD_KERN_DEVFS_H
-#define ZEDBSD_KERN_DEVFS_H
+#ifndef KERN_KERN_DEVFS_H
+#define KERN_KERN_DEVFS_H
 
 struct filesystem_type;
 

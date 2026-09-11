@@ -11,7 +11,7 @@ for mode in normal sanitize; do
     fi
     ${CC:-cc} -std=c11 -O1 -g $flags -pthread -c \
         plan/ws018/tests/mount-thread-host.c -o "$out/thread.o"
-    ${CC:-cc} -std=c11 -O1 -g $flags -DZEDBSD_USER_ABI_LP64 \
+    ${CC:-cc} -std=c11 -O1 -g $flags -DKERN_USER_ABI_LP64 \
         -Wall -Wextra -Werror -ffunction-sections -fdata-sections \
         -I. -Iinclude -Iinclude/uapi -Isrc -Ilibc/include \
         -Iplan/ws018/tests \

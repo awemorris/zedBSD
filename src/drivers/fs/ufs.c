@@ -40,7 +40,6 @@
 #include <kern/page.h>
 #include <kern/sched.h>
 #include <kern/writeback.h>
-#include <hal/hal.h>
 #include <kern/pmem.h>
 #include <kern/inode.h>
 #include <kern/quota.h>
@@ -54,6 +53,7 @@
 #include <zedbsd/blkid.h>
 #include <zedbsd/quota.h>
 #include <zedbsd/snapshot.h>
+#include "kern/panic.h"
 
 #define UFS_SECTOR_SIZE			512U
 #define UFS_SBLOCK_OFFSET		65536U
@@ -2567,7 +2567,7 @@ ufs_identify(
 	}
 
 	strcpy(identity->type, "ufs");
-	identity->flags |= ZEDBSD_BLKID_TYPE;
+	identity->flags |= KERN_BLKID_TYPE;
 	first = drv_ufs_get32(buffer, UFS_FS_ID, super.swapped);
 
 	/* The two halves of the volume identifier. */
@@ -2576,7 +2576,7 @@ ufs_identify(
 		ufs_identity_hex32(identity->uuid, first);
 		ufs_identity_hex32(identity->uuid + 8U, second);
 		identity->uuid[16] = '\0';
-		identity->flags |= ZEDBSD_BLKID_UUID;
+		identity->flags |= KERN_BLKID_UUID;
 	}
 
 	ufs_identity_label(identity->label, sizeof(identity->label),
@@ -2584,7 +2584,7 @@ ufs_identify(
 
 	/* Reports the volume label when the superblock carries one. */
 	if (identity->label[0] != '\0')
-		identity->flags |= ZEDBSD_BLKID_LABEL;
+		identity->flags |= KERN_BLKID_LABEL;
 	kern_free(buffer);
 
 	/* Succeeded. */
@@ -2804,17 +2804,17 @@ journal_image_alloc(
 	memset(&memory, 0, sizeof(memory));
 
 	/* Takes the physical memory the journal image lives in. */
-	memory.size = UFS_JOURNAL_IMAGE_BYTES;
-	error = hal_pmem_alloc(memory.size, ZEDBSD_PAGE_SIZE, &memory.paddr);
-	if (error != HAL_OK || hal_pmem_to_kernel(memory.paddr) == NULL) {
+	error = kern_pmem_alloc(UFS_JOURNAL_IMAGE_BYTES, KERN_PAGE_SIZE,
+				&memory);
+	if (error != 0 || kern_pmem_to_kernel(memory.paddr) == NULL) {
 		/*
 		 * Gives the memory back when it is not the size that was asked
 		 * for.
 		 */
 		if (memory.size != 0) {
-			released = hal_pmem_free(&memory.paddr, memory.size);
-			if (released != HAL_OK)
-				HAL_FATAL("ufs journal rollback failed");
+			released = kern_pmem_free(&memory);
+			if (released != 0)
+				KERN_FATAL("ufs journal rollback failed");
 		}
 
 		/* Failed. */
@@ -2830,9 +2830,9 @@ journal_image_alloc(
 	error = cache_memory_reserve(CACHE_MEMORY_BUF_META, memory.size, 0);
 	if (error != 0) {
 		/* Gives the memory back when the budget refused it. */
-		released = hal_pmem_free(&memory.paddr, memory.size);
-		if (released != HAL_OK)
-			HAL_FATAL("ufs journal reservation rollback failed");
+		released = kern_pmem_free(&memory);
+		if (released != 0)
+			KERN_FATAL("ufs journal reservation rollback failed");
 
 		/* Failed. */
 		return error;
@@ -2842,7 +2842,7 @@ journal_image_alloc(
 	ms->journal_memory = memory;
 
 	/* Publishes the image to the journal. */
-	error = drv_ufs_journal_bind_image(&ms->journal, hal_pmem_to_kernel(memory.paddr),
+	error = drv_ufs_journal_bind_image(&ms->journal, kern_pmem_to_kernel(memory.paddr),
 					   memory.size);
 	if (error != 0)
 		journal_image_free(ms);
@@ -2883,9 +2883,9 @@ journal_image_free(
 	journal_wait_readers(ms);
 
 	/* A memory release that fails leaves the budget charged. */
-	released = hal_pmem_free(&ms->journal_memory.paddr, ms->journal_memory.size);
-	if (released != HAL_OK)
-		HAL_FATAL("ufs journal backing release failed");
+	released = kern_pmem_free(&ms->journal_memory);
+	if (released != 0)
+		KERN_FATAL("ufs journal backing release failed");
 	cache_memory_release(CACHE_MEMORY_BUF_META, bytes);
 	memset(&ms->journal_memory, 0, sizeof(ms->journal_memory));
 	ms->journal.image = NULL;
@@ -16265,14 +16265,14 @@ ufs_quotactl(
 	mutating = 0;
 
 	/* Rejects a call that names no mount or no known quota type. */
-	if (ms == NULL || request == NULL || request->type > ZEDBSD_QUOTA_GROUP)
+	if (ms == NULL || request == NULL || request->type > KERN_QUOTA_GROUP)
 		return EINVAL;
 
-	type = request->type == ZEDBSD_QUOTA_USER ? QUOTA_USER : QUOTA_GROUP;
+	type = request->type == KERN_QUOTA_USER ? QUOTA_USER : QUOTA_GROUP;
 
 	/* Runs the operation the request names. */
 	switch (request->command) {
-	case ZEDBSD_QUOTA_GET:
+	case KERN_QUOTA_GET:
 
 		/* Reads the record the caller asked about. */
 		error = quota_get(&ms->quota, type, request->id, &record);
@@ -16283,7 +16283,7 @@ ufs_quotactl(
 		error = quota_enabled(&ms->quota, type, &enabled);
 		if (error != 0)
 			return error;
-		request->flags = enabled ? ZEDBSD_QUOTA_F_ENABLED : 0;
+		request->flags = enabled ? KERN_QUOTA_F_ENABLED : 0;
 		request->block_soft = record.block_soft;
 		request->block_hard = record.block_hard;
 		request->inode_soft = record.inode_soft;
@@ -16298,20 +16298,20 @@ ufs_quotactl(
 
 		/* Reports the grace period, or why it could not be read. */
 		return applied;
-	case ZEDBSD_QUOTA_SET:
+	case KERN_QUOTA_SET:
 		/* Refuses to write to a volume that is no longer writable. */
 		if (!ms->writable)
 			return EROFS;
 		mutating = 1;
 		break;
-	case ZEDBSD_QUOTA_ENABLE:
-	case ZEDBSD_QUOTA_DISABLE:
+	case KERN_QUOTA_ENABLE:
+	case KERN_QUOTA_DISABLE:
 		/* Refuses to write to a volume that is no longer writable. */
 		if (!ms->writable)
 			return EROFS;
 		mutating = 1;
 		break;
-	case ZEDBSD_QUOTA_SYNC:
+	case KERN_QUOTA_SYNC:
 		if (!ms->writable) {
 			/* A read-only volume only has to be flushed. */
 			applied = disk_sync(mountp->m_disk);
@@ -16347,7 +16347,7 @@ ufs_quotactl(
 
 	/* Runs the operation the request names. */
 	switch (request->command) {
-	case ZEDBSD_QUOTA_SET:
+	case KERN_QUOTA_SET:
 		/* Builds the record out of the limits the caller named. */
 		memset(&record, 0, sizeof(record));
 		record.id = request->id;
@@ -16364,11 +16364,11 @@ ufs_quotactl(
 		}
 
 		break;
-	case ZEDBSD_QUOTA_ENABLE:
+	case KERN_QUOTA_ENABLE:
 		/* Switches accounting on for the type the request names. */
 		error = quota_enable(&ms->quota, type, 1);
 		break;
-	case ZEDBSD_QUOTA_DISABLE:
+	case KERN_QUOTA_DISABLE:
 		/* And off again for that same type. */
 		error = quota_enable(&ms->quota, type, 0);
 		break;
@@ -16425,7 +16425,7 @@ ufs_snapshotctl(
 
 	/* Runs the operation the request names. */
 	switch (request->command) {
-	case ZEDBSD_SNAPSHOT_CREATE:
+	case KERN_SNAPSHOT_CREATE:
 		/* Refuses to write to a volume that is no longer writable. */
 		if (!ms->writable)
 			return EROFS;
@@ -16457,7 +16457,7 @@ ufs_snapshotctl(
 create_finished:
 		backing_mutation_end(&guard);
 		break;
-	case ZEDBSD_SNAPSHOT_DELETE:
+	case KERN_SNAPSHOT_DELETE:
 		/* Refuses to write to a volume that is no longer writable. */
 		if (!ms->writable)
 			return EROFS;
@@ -16478,7 +16478,7 @@ create_finished:
 		if (error != 0)
 			(void)snapshot_disk_publish(ms);
 		break;
-	case ZEDBSD_SNAPSHOT_STATUS:
+	case KERN_SNAPSHOT_STATUS:
 		break;
 	default:
 		/* Failed. */
@@ -16489,7 +16489,7 @@ create_finished:
 	if (error != 0)
 		return error;
 
-	request->flags = ms->snapshot.active ? ZEDBSD_SNAPSHOT_F_ACTIVE : 0;
+	request->flags = ms->snapshot.active ? KERN_SNAPSHOT_F_ACTIVE : 0;
 	request->captured_sectors = ms->snapshot.next_record;
 	request->capacity_sectors = ms->snapshot.max_records;
 
@@ -16563,9 +16563,9 @@ ufs_commit_unmount_revoked(
 	struct ufs_mount_state *ms;
 
 	if (ufs_prepare_unmount_revoked(mountp) != 0)
-		HAL_FATAL("UFS revoked commit without eligible owners");
+		KERN_FATAL("UFS revoked commit without eligible owners");
 	if (mountp->m_state != MOUNT_STATE_DYING)
-		HAL_FATAL("UFS revoked commit without closed admission");
+		KERN_FATAL("UFS revoked commit without closed admission");
 
 	/* This is local disposal, not an on-disk read-only or clean transition. */
 	ms = state(mountp);

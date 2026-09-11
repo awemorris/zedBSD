@@ -62,7 +62,7 @@ static uint8_t config_buffer[CONFIG_READ_BUFFER];
 static uint8_t file_info_buffer[FILE_INFO_BUFFER]
     __attribute__((aligned(8)));
 
-static const CHAR16 zedbsd_config_path[] = {
+static const CHAR16 kern_config_path[] = {
 	'\\', 'Z', 'E', 'D', 'B', 'S', 'D', '.', 'C', 'F', 'G', 0
 };
 
@@ -649,7 +649,7 @@ discover_config_volume(struct loader_context *context,
 			    EFI_ERROR(status) ? status : EFI_INVALID_PARAMETER);
 			continue;
 		}
-		status = root->Open(root, &config, zedbsd_config_path,
+		status = root->Open(root, &config, kern_config_path,
 		    EFI_FILE_MODE_READ, 0U);
 		if (EFI_ERROR(status) || config == 0) {
 			close_status = close_file_pair(config, root);
@@ -703,7 +703,7 @@ discover_config_volume(struct loader_context *context,
 		console_hex64(context, "A64 CFG MATCHES ",
 		    selection.match_count);
 	}
-	discovered->provenance.version = ZEDBSD_BOOT_PROVENANCE_VERSION;
+	discovered->provenance.version = KERN_BOOT_PROVENANCE_VERSION;
 	discovered->provenance.config_matches = (uint32_t)selection.match_count;
 	if (!zbl_uefi_partition_identity_copy(&loaded_path,
 	    &discovered->provenance.firmware) ||
@@ -887,7 +887,7 @@ build_bootstrap(uint64_t low_base, const struct zbl_elf64_plan *plan,
 		const struct zbl6_framebuffer *framebuffer,
 		const struct zbl_uefi_framebuffer_mapping *framebuffer_mapping,
 		uint32_t boot_volume_serial, uint8_t partition_scheme,
-		const struct zedbsd_boot_parameter_record *parameters,
+		const struct kern_boot_parameter_record *parameters,
 		const struct boot_provenance *provenance)
 {
 	uint8_t *low = (void *)(uintptr_t)low_base;

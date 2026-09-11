@@ -7,7 +7,7 @@ prior=Path(sys.argv[1]).resolve();out=Path(sys.argv[2]).resolve()
 for p in [prior,out]:p.relative_to(R/'plan/ws004/temp')
 assert json.loads((prior/'result.json').read_text())['status']=='PASS'
 out.mkdir(parents=True);sysroot=R/'build/amd64/sysroot/usr';obj=out/'probe.o';binary=out/'probe'
-subprocess.run([str(R/'build/llvm/bin/clang'),'--target=x86_64-unknown-zedbsd','-nostdinc','-isystem',str(sysroot/'include'),'-I'+str(R/'include/uapi'),'-DZEDBSD_USER_ABI_LP64=1','-ffreestanding','-fno-pie','-O1','-ffunction-sections','-fdata-sections','-Wall','-Wextra','-Werror','-c',str(R/'plan/ws004/tests/multiple-nvme-io.c'),'-o',str(obj)],check=True)
+subprocess.run([str(R/'build/llvm/bin/clang'),'--target=x86_64-unknown-zedbsd','-nostdinc','-isystem',str(sysroot/'include'),'-I'+str(R/'include/uapi'),'-DKERN_USER_ABI_LP64=1','-ffreestanding','-fno-pie','-O1','-ffunction-sections','-fdata-sections','-Wall','-Wextra','-Werror','-c',str(R/'plan/ws004/tests/multiple-nvme-io.c'),'-o',str(obj)],check=True)
 subprocess.run(['ld','-m','elf_x86_64','--gc-sections','-nostdlib','-static','-z','max-page-size=4096','-z','stack-size=0x100000','-T',str(R/'platform/amd64/user.ld'),str(sysroot/'lib/crt0.o'),str(sysroot/'lib/libc.o'),str(obj),'-o',str(binary)],check=True)
 for name in ['installed.img','aux.img']:subprocess.run(['cp','--reflink=auto',str(prior/'aux-first'/name),str(out/name)],check=True)
 subprocess.run(['mcopy','-i',str(out/'installed.img')+'@@1048576',str(binary),'::/q187-probe'],check=True)

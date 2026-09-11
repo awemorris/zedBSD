@@ -9,8 +9,8 @@
  * Graphics device
  */
 
-#ifndef ZEDBSD_KERN_GRAPHICS_DEVICE_H
-#define ZEDBSD_KERN_GRAPHICS_DEVICE_H
+#ifndef KERN_KERN_GRAPHICS_DEVICE_H
+#define KERN_KERN_GRAPHICS_DEVICE_H
 
 int
 drv_graphics_device_register(void);

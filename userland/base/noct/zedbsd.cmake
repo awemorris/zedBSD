@@ -17,7 +17,7 @@ function(noct_configure_zedbsd_target target)
   else()
     set(zedbsd_arch amd64)
     set(zedbsd_compile_options -m64 -march=x86-64 -mno-red-zone)
-    set(zedbsd_definitions HAL_ARCH_AMD64 ZEDBSD_USER_ABI_LP64)
+    set(zedbsd_definitions HAL_ARCH_AMD64 KERN_USER_ABI_LP64)
     set(zedbsd_emulation elf_x86_64)
   endif()
 

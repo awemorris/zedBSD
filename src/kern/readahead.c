@@ -31,7 +31,7 @@
 
 #define RA_SLOTS 2U
 
-#define RA_MEMORY (READAHEAD_REQUEST_MAX + ZEDBSD_PAGE_SIZE)
+#define RA_MEMORY (READAHEAD_REQUEST_MAX + KERN_PAGE_SIZE)
 
 #define RA_FREE 0U
 
@@ -185,12 +185,12 @@ readahead_observe(
 		state->window = READAHEAD_MAX_WINDOW;
 
 	/* Bounds issued bytes relative to demand progress, even for one-byte reads. */
-	first = (end + ZEDBSD_PAGE_SIZE - 1U) & ~(uint64_t)(ZEDBSD_PAGE_SIZE - 1U);
+	first = (end + KERN_PAGE_SIZE - 1U) & ~(uint64_t)(KERN_PAGE_SIZE - 1U);
 	if (first >= eof)
 		return 0;
 	limit = first + state->window;
-	eof_rounded = (eof + ZEDBSD_PAGE_SIZE - 1U) &
-	    ~(uint64_t)(ZEDBSD_PAGE_SIZE - 1U);
+	eof_rounded = (eof + KERN_PAGE_SIZE - 1U) &
+	    ~(uint64_t)(KERN_PAGE_SIZE - 1U);
 	if (limit > eof_rounded)
 		limit = eof_rounded;
 	if (first < state->issued_end)
@@ -273,8 +273,8 @@ readahead_submit(
 		return EINVAL;
 	offset = (off_t)request->offset;
 	if (offset < 0 || (uint64_t)offset != request->offset ||
-	    (request->offset & (ZEDBSD_PAGE_SIZE - 1U)) != 0 ||
-	    (request->length & (ZEDBSD_PAGE_SIZE - 1U)) != 0)
+	    (request->offset & (KERN_PAGE_SIZE - 1U)) != 0 ||
+	    (request->length & (KERN_PAGE_SIZE - 1U)) != 0)
 		return EINVAL;
 	mount = inode->i_mount;
 	if (mount == NULL || mount->m_disk == NULL)

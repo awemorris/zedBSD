@@ -1,7 +1,7 @@
 /* Checked framebuffer geometry for the amd64 UEFI loader. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_UEFI_FRAMEBUFFER_H
-#define ZEDBSD_UEFI_FRAMEBUFFER_H
+#ifndef KERN_UEFI_FRAMEBUFFER_H
+#define KERN_UEFI_FRAMEBUFFER_H
 
 #include <stdint.h>
 

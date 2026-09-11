@@ -11,8 +11,8 @@
  * Declares shared userland archive support.
  */
 
-#ifndef ZEDBSD_USERLAND_ARCHIVE_H
-#define ZEDBSD_USERLAND_ARCHIVE_H
+#ifndef KERN_USERLAND_ARCHIVE_H
+#define KERN_USERLAND_ARCHIVE_H
 
 #include <stddef.h>
 #include <stdint.h>

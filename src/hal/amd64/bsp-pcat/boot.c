@@ -35,11 +35,11 @@ struct vga_font_handoff {
 } __attribute__((packed));
 
 typedef char zbl6_kernel_mbr_partition_scheme_must_match[
-	ZBL6_PARTITION_SCHEME_MBR == ZEDBSD_PARTITION_SCHEME_MBR ? 1 : -1];
+	ZBL6_PARTITION_SCHEME_MBR == KERN_PARTITION_SCHEME_MBR ? 1 : -1];
 typedef char zbl6_kernel_gpt_partition_scheme_must_match[
-	ZBL6_PARTITION_SCHEME_GPT == ZEDBSD_PARTITION_SCHEME_GPT ? 1 : -1];
+	ZBL6_PARTITION_SCHEME_GPT == KERN_PARTITION_SCHEME_GPT ? 1 : -1];
 typedef char zbl6_kernel_unknown_partition_index_must_match[
-	ZBL6_PARTITION_INDEX_UNKNOWN == ZEDBSD_PARTITION_INDEX_UNKNOWN ? 1 : -1];
+	ZBL6_PARTITION_INDEX_UNKNOWN == KERN_PARTITION_INDEX_UNKNOWN ? 1 : -1];
 
 static struct zbl6_handoff boot_info;
 static struct zbl6_handoff_v2 boot_info_v2;
@@ -53,7 +53,7 @@ static uint64_t total_memory;
 static uint8_t boot_font[PCAT_BOOT_FONT_GLYPHS][PCAT_BOOT_FONT_HEIGHT];
 static int boot_font_valid;
 static char boot_selector[15];
-static char boot_parameters[ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE];
+static char boot_parameters[KERN_BOOT_PARAMETERS_STORAGE_SIZE];
 
 static void accept_memory(const struct zbl6_memory_handoff *memory, uint32_t source);
 static int handoff_name_is(const char *name, const char *expected);
@@ -345,13 +345,13 @@ prekern_bsp_boot_init(
 
 	/* Builds the architecture-independent kernel handoff. */
 	hal_memset(&kernel_handoff, 0, sizeof(kernel_handoff));
-	kernel_handoff.magic = ZEDBSD_HANDOFF_MAGIC;
-	kernel_handoff.version = ZEDBSD_HANDOFF_VERSION_MULTIBOOT;
+	kernel_handoff.magic = KERN_HANDOFF_MAGIC;
+	kernel_handoff.version = KERN_HANDOFF_VERSION_MULTIBOOT;
 	kernel_handoff.size = sizeof(kernel_handoff);
 	if (bios_form) {
 		kernel_handoff.boot_bios_id = boot_info.boot_drive;
 		kernel_handoff.boot_partition_scheme =
-		    ZEDBSD_PARTITION_SCHEME_MBR;
+		    KERN_PARTITION_SCHEME_MBR;
 		kernel_handoff.boot_partition_index = boot_info.partition_index;
 	} else {
 		kernel_handoff.boot_bios_id = boot_info_v2.boot_drive;

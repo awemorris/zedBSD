@@ -11,8 +11,8 @@
  * Declares the private net-to-networkd protocol.
  */
 
-#ifndef ZEDBSD_NETWORKD_PROTOCOL_H
-#define ZEDBSD_NETWORKD_PROTOCOL_H
+#ifndef KERN_NETWORKD_PROTOCOL_H
+#define KERN_NETWORKD_PROTOCOL_H
 
 #include <stddef.h>
 #include <stdint.h>

@@ -27,8 +27,8 @@
 
 #include <string.h>
 
-#ifndef ZEDBSD_INIT_PATH
-#define ZEDBSD_INIT_PATH "/sbin/init"
+#ifndef KERN_INIT_PATH
+#define KERN_INIT_PATH "/sbin/init"
 #endif
 
 static struct boot_handoff handoff_snapshot;
@@ -196,7 +196,7 @@ boot_start(
 	init_path = kern_boot_parameters_init_path(boot_parameters);
 #if !defined(HAL_ARCH_I386) && !defined(HAL_ARCH_AMD64)
 	if (!kern_boot_parameters_source_present())
-		init_path = ZEDBSD_INIT_PATH;
+		init_path = KERN_INIT_PATH;
 #endif
 
 	/* Starts init and reports a failure to do so. */

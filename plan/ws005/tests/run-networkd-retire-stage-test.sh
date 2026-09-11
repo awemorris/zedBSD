@@ -11,7 +11,7 @@ for variant in ordinary sanitize analyzer; do
 	sanitize) options='-fsanitize=address,undefined -fno-omit-frame-pointer' ;;
 	analyzer) options=-fanalyzer ;;
 	esac
-	cc -std=c11 -DZEDBSD_USER_ABI_LP64 -Wall -Wextra -Werror \
+	cc -std=c11 -DKERN_USER_ABI_LP64 -Wall -Wextra -Werror \
 		-ffunction-sections -fdata-sections $options \
 		-I"$repo/include/uapi" -I"$repo/libc/include" -I"$repo" \
 		"$repo/plan/ws005/tests/networkd-retire-stage-test.c" \

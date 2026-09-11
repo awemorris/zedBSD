@@ -18,7 +18,7 @@ paths = ['src/kern/vm.c', 'include/kern/vm-reclaim.h', 'include/kern/vmspace.h',
 for mode in ('ordinary', 'sanitize'):
     flags = [] if mode == 'ordinary' else ['-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-no-pie']
     binary = out / mode
-    args = ['cc', '-std=c11', '-g', '-O0', '-pthread', '-Dtid_t=int32_t', '-DZEDBSD_USER_ABI_LP64',
+    args = ['cc', '-std=c11', '-g', '-O0', '-pthread', '-Dtid_t=int32_t', '-DKERN_USER_ABI_LP64',
             '-Iinclude', '-Iinclude/uapi', '-I.', '-Wall', '-Wextra', '-Werror',
             '-ffunction-sections', '-fdata-sections', '-Wl,--gc-sections', *flags,
             paths[0], paths[3], '-o', str(binary)]

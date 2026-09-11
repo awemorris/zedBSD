@@ -26,7 +26,7 @@
 #define CACHE_RECLAIM_BATCH (64U * 1024U)
 #define CACHE_RESERVE_MIN (64U * 1024U)
 #define CACHE_RESERVE_MAX (8U * 1024U * 1024U)
-#define WORKER_BYTES (KERN_IO_BATCH_MAX + ZEDBSD_PAGE_SIZE)
+#define WORKER_BYTES (KERN_IO_BATCH_MAX + KERN_PAGE_SIZE)
 
 static struct cache_memory_stats accounting;
 static atomic_uint_t accounting_lock;
@@ -62,9 +62,9 @@ cache_memory_policy(
 		floor = CACHE_RESERVE_MAX;
 	if (floor > managed / 4U)
 		floor = managed / 4U;
-	floor &= ~(uint64_t)(ZEDBSD_PAGE_SIZE - 1U);
+	floor &= ~(uint64_t)(KERN_PAGE_SIZE - 1U);
 	*reserve = floor;
-	*target = (managed / 4U) & ~(uint64_t)(ZEDBSD_PAGE_SIZE - 1U);
+	*target = (managed / 4U) & ~(uint64_t)(KERN_PAGE_SIZE - 1U);
 }
 
 /*
@@ -291,7 +291,7 @@ cache_memory_set_target(
 
 	enabled = cache_lock();
 	if (!accounting.initialized ||
-	    (target & (ZEDBSD_PAGE_SIZE - 1U)) != 0 ||
+	    (target & (KERN_PAGE_SIZE - 1U)) != 0 ||
 	    target > accounting.managed_bytes - accounting.reserve_bytes) {
 		cache_unlock(enabled);
 		mutex_unlock(&control_lock);
@@ -301,7 +301,7 @@ cache_memory_set_target(
 	accounting.pending_target_bytes = target;
 	accounting.resizing = 1;
 	current = accounting.resident_bytes + accounting.pending_bytes;
-	attempts = current / ZEDBSD_PAGE_SIZE + 1U;
+	attempts = current / KERN_PAGE_SIZE + 1U;
 	cache_unlock(enabled);
 
 	/* Drains clean ownership in finite batches; mandatory growth may refuse shrink. */
@@ -437,7 +437,7 @@ cache_worker_borrow(
 	buffer->data = worker_memory.vaddr;
 	buffer->capacity = KERN_IO_BATCH_MAX;
 	buffer->metadata = (char *)worker_memory.vaddr + KERN_IO_BATCH_MAX;
-	buffer->metadata_capacity = ZEDBSD_PAGE_SIZE;
+	buffer->metadata_capacity = KERN_PAGE_SIZE;
 
 	/* Reports the loan. */
 	return 0;

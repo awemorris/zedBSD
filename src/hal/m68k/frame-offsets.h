@@ -1,8 +1,8 @@
 /* Assembly/C contract for the software prefix ahead of an m68k HW frame. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 
-#ifndef ZEDBSD_HAL_M68K_FRAME_OFFSETS_H
-#define ZEDBSD_HAL_M68K_FRAME_OFFSETS_H
+#ifndef KERN_HAL_M68K_FRAME_OFFSETS_H
+#define KERN_HAL_M68K_FRAME_OFFSETS_H
 
 #define M68K_FRAME_USP_OFFSET       0
 #define M68K_FRAME_D0_OFFSET        4

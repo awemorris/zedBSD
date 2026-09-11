@@ -6,8 +6,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_DRIVERS_INTEL_AX211_PCI_MMIO_H
-#define ZEDBSD_DRIVERS_INTEL_AX211_PCI_MMIO_H
+#ifndef KERN_DRIVERS_INTEL_AX211_PCI_MMIO_H
+#define KERN_DRIVERS_INTEL_AX211_PCI_MMIO_H
 
 #include <stddef.h>
 #include <stdint.h>

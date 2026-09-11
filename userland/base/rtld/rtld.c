@@ -153,7 +153,7 @@ static uint32_t next_handle_generation = 1;
 static volatile uint32_t loader_lock_word;
 static uintptr_t loader_lock_owner;
 static unsigned loader_lock_depth;
-static char loader_error[ZEDBSD_RTLD_DLERROR_SIZE];
+static char loader_error[KERN_RTLD_DLERROR_SIZE];
 static unsigned loader_error_pending;
 static struct rtld_tls_module tls_modules[RTLD_OBJECT_MAX + 1U];
 static uintptr_t tls_module_count;
@@ -163,7 +163,7 @@ static uint32_t next_object_generation = 1;
 
 __attribute__((visibility("default")))
 const struct __rtld_exports __rtld_exports = {
-    .abi_version = ZEDBSD_RTLD_ABI_VERSION,
+    .abi_version = KERN_RTLD_ABI_VERSION,
     .struct_size = sizeof(struct __rtld_exports),
     .startup_init = __rtld_startup_init,
     .process_fini = __rtld_process_fini,
@@ -265,7 +265,7 @@ rtld_debug(
 {
 	/* Handles the message availability. */
 	if (message != NULL) {
-		(void)syscall6(ZEDBSD_SYS_write, 2, (uintptr_t)message,
+		(void)syscall6(KERN_SYS_write, 2, (uintptr_t)message,
 			       rtld_strlen(message), 0, 0, 0);
 	}
 }
@@ -280,7 +280,7 @@ rtld_fatal(
 	rtld_debug("ld.so: ");
 	rtld_debug(message != NULL ? message : "runtime linker failure");
 	rtld_debug("\n");
-	(void)syscall6(ZEDBSD_SYS_exit, 127, 0, 0, 0, 0, 0);
+	(void)syscall6(KERN_SYS_exit, 127, 0, 0, 0, 0, 0);
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
@@ -295,7 +295,7 @@ __rtld_abi_version(
 	void)
 {
 	/* Returns the computed result. */
-	return ZEDBSD_RTLD_ABI_VERSION;
+	return KERN_RTLD_ABI_VERSION;
 }
 
 /*
@@ -357,7 +357,7 @@ __rtld_thread_free(
 	/* Handles the tcb availability. */
 	if (tcb == NULL)
 		return;
-	current = syscall6(ZEDBSD_SYS_thread_self, ZEDBSD_THREAD_SELF_GET_TLS,
+	current = syscall6(KERN_SYS_thread_self, KERN_THREAD_SELF_GET_TLS,
 			   0, 0, 0, 0, 0);
 
 	/* Handles an operation failure. */
@@ -402,8 +402,8 @@ __rtld_thread_attach(
 	intptr_t value;
 	struct __rtld_tcb *tcb;
 
-	value = syscall6(ZEDBSD_SYS_thread_self,
-				  ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
+	value = syscall6(KERN_SYS_thread_self,
+				  KERN_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
 
 	/* Handles an operation failure. */
 	if (raw_error(value))
@@ -415,7 +415,7 @@ __rtld_thread_attach(
 		if (__rtld_thread_alloc(pthread_private, &tcb) != 0)
 			return -1;
 		value =
-		    syscall6(ZEDBSD_SYS_thread_self, ZEDBSD_THREAD_SELF_SET_TLS,
+		    syscall6(KERN_SYS_thread_self, KERN_THREAD_SELF_SET_TLS,
 			     (uintptr_t)tcb, 0, 0, 0, 0);
 
 		/* Handles an operation failure. */
@@ -449,8 +449,8 @@ __rtld_pthread_private(
 {
 	intptr_t value;
 
-	value = syscall6(ZEDBSD_SYS_thread_self,
-				  ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
+	value = syscall6(KERN_SYS_thread_self,
+				  KERN_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
 
 	/* Handles an operation failure. */
 	if (raw_error(value) || value == 0)
@@ -476,7 +476,7 @@ __tls_get_addr(
 	if (index == NULL || index->module == 0 ||
 	    index->module > tls_module_count)
 		rtld_fatal("invalid TLS index");
-	value = syscall6(ZEDBSD_SYS_thread_self, ZEDBSD_THREAD_SELF_GET_TLS, 0,
+	value = syscall6(KERN_SYS_thread_self, KERN_THREAD_SELF_GET_TLS, 0,
 			 0, 0, 0, 0);
 
 	/* Handles an operation failure. */
@@ -523,8 +523,8 @@ d_tlsdesc_resolve(
 		rtld_fatal("invalid TLSDESC argument");
 	index = (const struct __tls_index *)descriptor->argument;
 	address = __tls_get_addr(index);
-	thread_pointer = syscall6(ZEDBSD_SYS_thread_self,
-				  ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
+	thread_pointer = syscall6(KERN_SYS_thread_self,
+				  KERN_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
 
 	/* Handles an operation failure. */
 	if (raw_error(thread_pointer) || thread_pointer == 0)
@@ -709,7 +709,7 @@ __rtld_dlopen(
 	}
 	rtld_memcpy(full_path, "/lib/", 5);
 	rtld_memcpy(full_path + 5, name, length + 1U);
-	fd = syscall6(ZEDBSD_SYS_open, (uintptr_t)full_path, O_RDONLY, 0, 0, 0,
+	fd = syscall6(KERN_SYS_open, (uintptr_t)full_path, O_RDONLY, 0, 0, 0,
 		      0);
 
 	/* Handles an operation failure. */
@@ -723,14 +723,14 @@ __rtld_dlopen(
 
 	/* Handles a failed preflight dlopen file operation. */
 	if (preflight_dlopen_file((int)fd) != 0) {
-		(void)syscall6(ZEDBSD_SYS_close, (uintptr_t)fd, 0, 0, 0, 0, 0);
+		(void)syscall6(KERN_SYS_close, (uintptr_t)fd, 0, 0, 0, 0, 0);
 		set_loader_error("invalid shared object");
 		loader_unlock();
 
 		/* Reports that no result is available. */
 		return NULL;
 	}
-	(void)syscall6(ZEDBSD_SYS_close, (uintptr_t)fd, 0, 0, 0, 0, 0);
+	(void)syscall6(KERN_SYS_close, (uintptr_t)fd, 0, 0, 0, 0, 0);
 	object = load_object(name, NULL);
 	relocate_object(object);
 
@@ -948,8 +948,8 @@ __rtld_dlerror(
 	intptr_t value;
 	struct __rtld_tcb *tcb;
 
-	value = syscall6(ZEDBSD_SYS_thread_self,
-				  ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
+	value = syscall6(KERN_SYS_thread_self,
+				  KERN_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
 	tcb = raw_error(value) || value == 0
 		? NULL
 		: (struct __rtld_tcb *)(uintptr_t)value;
@@ -1116,7 +1116,7 @@ rtld_main(
 	if (__rtld_thread_alloc(NULL, &initial_tcb) != 0)
 		rtld_fatal("cannot allocate initial TLS");
 	tls_result =
-	    syscall6(ZEDBSD_SYS_thread_self, ZEDBSD_THREAD_SELF_SET_TLS,
+	    syscall6(KERN_SYS_thread_self, KERN_THREAD_SELF_SET_TLS,
 		     (uintptr_t)initial_tcb, 0, 0, 0, 0);
 
 	/* Handles an operation failure. */
@@ -1193,7 +1193,7 @@ map_call(
 	intptr_t function_result;
 
 	/* Obtains the syscall6 result. */
-	function_result = syscall6(ZEDBSD_SYS_mmap, address, size, (uintptr_t)prot,
+	function_result = syscall6(KERN_SYS_mmap, address, size, (uintptr_t)prot,
 			(uintptr_t)flags, (uintptr_t)fd, offset);
 
 	/* Returns the computed result. */
@@ -1217,7 +1217,7 @@ tls_unmap(
 {
 	/* Handles the address availability. */
 	if (address != NULL) {
-		(void)syscall6(ZEDBSD_SYS_munmap, (uintptr_t)address,
+		(void)syscall6(KERN_SYS_munmap, (uintptr_t)address,
 			       page_ceil(size), 0, 0, 0, 0);
 	}
 }
@@ -1245,9 +1245,9 @@ loader_lock(
 		if (__atomic_exchange_n(&loader_lock_word, 1,
 					__ATOMIC_ACQUIRE) == 0)
 			break;
-		(void)syscall6(ZEDBSD_SYS_usync, (uintptr_t)&loader_lock_word,
-			       ZEDBSD_USYNC_WAIT, 1, 0, 0,
-			       ZEDBSD_USYNC_PRIVATE);
+		(void)syscall6(KERN_SYS_usync, (uintptr_t)&loader_lock_word,
+			       KERN_USYNC_WAIT, 1, 0, 0,
+			       KERN_USYNC_PRIVATE);
 	}
 	loader_lock_owner = tid;
 	loader_lock_depth = 1;
@@ -1261,8 +1261,8 @@ current_tid(
 	uintptr_t function_result;
 	intptr_t value;
 
-	value = syscall6(ZEDBSD_SYS_thread_self,
-				  ZEDBSD_THREAD_SELF_TID, 0, 0, 0, 0, 0);
+	value = syscall6(KERN_SYS_thread_self,
+				  KERN_THREAD_SELF_TID, 0, 0, 0, 0, 0);
 
 	/* Computes the function result. */
 	function_result = raw_error(value) ? 0 : (uintptr_t)value;
@@ -1285,8 +1285,8 @@ loader_unlock(
 		return;
 	loader_lock_owner = 0;
 	__atomic_store_n(&loader_lock_word, 0, __ATOMIC_RELEASE);
-	(void)syscall6(ZEDBSD_SYS_usync, (uintptr_t)&loader_lock_word,
-		       ZEDBSD_USYNC_WAKE, 0, 0, 1, ZEDBSD_USYNC_PRIVATE);
+	(void)syscall6(KERN_SYS_usync, (uintptr_t)&loader_lock_word,
+		       KERN_USYNC_WAKE, 0, 0, 1, KERN_USYNC_PRIVATE);
 }
 
 /* Supports the allocate tls block operation. */
@@ -1369,8 +1369,8 @@ clear_loader_error(
 	intptr_t value;
 	struct __rtld_tcb *tcb;
 
-	value = syscall6(ZEDBSD_SYS_thread_self,
-				  ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
+	value = syscall6(KERN_SYS_thread_self,
+				  KERN_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
 	tcb = raw_error(value) || value == 0
 		? NULL
 		: (struct __rtld_tcb *)(uintptr_t)value;
@@ -1396,8 +1396,8 @@ set_loader_error(
 	char *buffer;
 	size_t capacity;
 
-	value = syscall6(ZEDBSD_SYS_thread_self,
-				  ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
+	value = syscall6(KERN_SYS_thread_self,
+				  KERN_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
 	tcb = raw_error(value) || value == 0
 		? NULL
 		: (struct __rtld_tcb *)(uintptr_t)value;
@@ -1505,13 +1505,13 @@ preflight_dlopen_file(
 	intptr_t result;
 	size_t phdr_size;
 
-	result = syscall6(ZEDBSD_SYS_fstat, (uintptr_t)fd, (uintptr_t)&status,
+	result = syscall6(KERN_SYS_fstat, (uintptr_t)fd, (uintptr_t)&status,
 			  0, 0, 0, 0);
 
 	/* Handles an operation failure. */
 	if (raw_error(result) || status.st_size < (off_t)sizeof(header))
 		return -1;
-	result = syscall6(ZEDBSD_SYS_pread, (uintptr_t)fd, (uintptr_t)&header,
+	result = syscall6(KERN_SYS_pread, (uintptr_t)fd, (uintptr_t)&header,
 			  sizeof(header), 0, 0, 0);
 
 	/* Handles a failed valid elf header operation. */
@@ -1524,7 +1524,7 @@ preflight_dlopen_file(
 		/* Reports operation failure. */
 		return -1;
 	phdr_size = (size_t)header.e_phnum * sizeof(Elf_Phdr);
-	result = syscall6(ZEDBSD_SYS_pread, (uintptr_t)fd, (uintptr_t)phdr,
+	result = syscall6(KERN_SYS_pread, (uintptr_t)fd, (uintptr_t)phdr,
 			  phdr_size, (uintptr_t)header.e_phoff, 0, 0);
 
 	/* Handles a failed validate file programs operation. */
@@ -1712,7 +1712,7 @@ load_object(
 	/* Handles an operation failure. */
 	if (raw_error(fd))
 		rtld_fatal("cannot open dependency");
-	result = syscall6(ZEDBSD_SYS_fstat, (uintptr_t)fd, (uintptr_t)&status,
+	result = syscall6(KERN_SYS_fstat, (uintptr_t)fd, (uintptr_t)&status,
 			  0, 0, 0, 0);
 
 	/* Handles an operation failure. */
@@ -1722,12 +1722,12 @@ load_object(
 
 	/* Handles the existing availability. */
 	if (existing != NULL) {
-		(void)syscall6(ZEDBSD_SYS_close, (uintptr_t)fd, 0, 0, 0, 0, 0);
+		(void)syscall6(KERN_SYS_close, (uintptr_t)fd, 0, 0, 0, 0, 0);
 
 		/* Returns the computed result. */
 		return existing;
 	}
-	result = syscall6(ZEDBSD_SYS_pread, (uintptr_t)fd, (uintptr_t)&header,
+	result = syscall6(KERN_SYS_pread, (uintptr_t)fd, (uintptr_t)&header,
 			  sizeof(header), 0, 0, 0);
 
 	/* Handles a failed valid elf header operation. */
@@ -1737,7 +1737,7 @@ load_object(
 	    header.e_phnum >
 		((Elf_Off)status.st_size - header.e_phoff) / sizeof(Elf_Phdr))
 		rtld_fatal("invalid dependency ELF header");
-	result = syscall6(ZEDBSD_SYS_pread, (uintptr_t)fd, (uintptr_t)phdr,
+	result = syscall6(KERN_SYS_pread, (uintptr_t)fd, (uintptr_t)phdr,
 			  (size_t)header.e_phnum * sizeof(Elf_Phdr),
 			  (uintptr_t)header.e_phoff, 0, 0);
 
@@ -1777,7 +1777,7 @@ load_object(
 		    object->phdr[i].p_memsz != 0)
 			map_one_segment(object, (int)fd, &object->phdr[i], 0);
 	}
-	(void)syscall6(ZEDBSD_SYS_close, (uintptr_t)fd, 0, 0, 0, 0, 0);
+	(void)syscall6(KERN_SYS_close, (uintptr_t)fd, 0, 0, 0, 0, 0);
 	parse_dynamic(object);
 	load_dependencies(object);
 
@@ -1952,7 +1952,7 @@ open_search_candidate(
 	path[directory_length + name_length] = '\0';
 
 	/* Obtains the syscall6 result. */
-	function_result = syscall6(ZEDBSD_SYS_open, (uintptr_t)path, O_RDONLY, 0, 0, 0, 0);
+	function_result = syscall6(KERN_SYS_open, (uintptr_t)path, O_RDONLY, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -2154,7 +2154,7 @@ map_one_segment(
 
 	/* Handles the map prot condition. */
 	if (map_prot != final_prot) {
-		result = syscall6(ZEDBSD_SYS_mprotect, object->base + virtual_page,
+		result = syscall6(KERN_SYS_mprotect, object->base + virtual_page,
 	     memory_map_size, (uintptr_t)final_prot, 0, 0, 0);
 
 		/* Handles an operation failure. */
@@ -2997,7 +2997,7 @@ register_tls_module(
 			/* Handles the alignment condition. */
 			if ((alignment & (alignment - 1U)) != 0 ||
 			    alignment > RTLD_PAGE_SIZE ||
-			    object->phdr[i].p_memsz > ZEDBSD_TLS_MEMORY_MAX)
+			    object->phdr[i].p_memsz > KERN_TLS_MEMORY_MAX)
 				rtld_fatal("unsupported TLS alignment or size");
 
 			/* Process each remaining element. */
@@ -3130,7 +3130,7 @@ relocate_object(
 		if (!temporary_writable_plt(&object->phdr[i]))
 			continue;
 		start = object->base + (uintptr_t)object->phdr[i].p_vaddr;
-		result = syscall6(ZEDBSD_SYS_mprotect, start, RTLD_PAGE_SIZE,
+		result = syscall6(KERN_SYS_mprotect, start, RTLD_PAGE_SIZE,
 				  PROT_READ | PROT_EXEC, 0, 0, 0);
 
 		/* Handles an operation failure. */
@@ -3157,7 +3157,7 @@ relocate_object(
 		end = page_ceil(object->base +
 				(uintptr_t)object->phdr[i].p_vaddr +
 				(uintptr_t)object->phdr[i].p_memsz);
-		result = syscall6(ZEDBSD_SYS_mprotect, start, end - start,
+		result = syscall6(KERN_SYS_mprotect, start, end - start,
 				  PROT_READ, 0, 0, 0);
 
 		/* Handles an operation failure. */
@@ -4178,7 +4178,7 @@ unload_object_locked(
 
 	/* Process each remaining element. */
 	for (i = object->mapping_count; i != 0; i--) {
-		result = syscall6(ZEDBSD_SYS_munmap, object->mapping_start[i - 1U],
+		result = syscall6(KERN_SYS_munmap, object->mapping_start[i - 1U],
 	     object->mapping_size[i - 1U], 0, 0, 0, 0);
 
 		/* Handles an operation failure. */

@@ -13,8 +13,8 @@
  * interface; no source code from those kernels is included in this file.
  */
 
-#ifndef ZEDBSD_DRIVERS_PCI_H
-#define ZEDBSD_DRIVERS_PCI_H
+#ifndef KERN_DRIVERS_PCI_H
+#define KERN_DRIVERS_PCI_H
 
 #include <stdbool.h>
 #include <stddef.h>

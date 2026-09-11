@@ -27,8 +27,8 @@
 
 #define BUF_HASH_BUCKETS	64U
 #define BUF_MIN_BYTES		(64U * 1024U)
-#define BUF_SLAB_BYTES		ZEDBSD_PAGE_SIZE
-#define BUF_RUN_LINES		(KERN_IO_BATCH_MAX / ZEDBSD_PAGE_SIZE)
+#define BUF_SLAB_BYTES		KERN_PAGE_SIZE
+#define BUF_RUN_LINES		(KERN_IO_BATCH_MAX / KERN_PAGE_SIZE)
 
 #ifndef CONFIG_BUF_CACHE_KIB
 #define CONFIG_BUF_CACHE_KIB 0
@@ -265,7 +265,7 @@ buf_init(
 #endif
 	if (value < BUF_MIN_BYTES)
 		value = BUF_MIN_BYTES;
-	value &= ~(uint64_t)(ZEDBSD_PAGE_SIZE - 1U);
+	value &= ~(uint64_t)(KERN_PAGE_SIZE - 1U);
 	cache_max_bytes = value;
 
 	/* Allocates the first header slab. */
@@ -754,10 +754,10 @@ buf_write_context(
 			continue;
 		}
 
-		if (leaf->d_block_size > ZEDBSD_PAGE_SIZE)
+		if (leaf->d_block_size > KERN_PAGE_SIZE)
 			line_bytes = leaf->d_block_size;
 		else
-			line_bytes = ZEDBSD_PAGE_SIZE;
+			line_bytes = KERN_PAGE_SIZE;
 		line_blocks = line_bytes / leaf->d_block_size;
 		line_start = mapped - mapped % line_blocks;
 		offset_blocks = mapped - line_start;
@@ -1059,7 +1059,7 @@ buf_set_max_bytes(
 	if (value < BUF_MIN_BYTES ||
 	    value > total / 2U ||
 	    value > SIZE_MAX ||
-	    (value & (ZEDBSD_PAGE_SIZE - 1U)) != 0)
+	    (value & (KERN_PAGE_SIZE - 1U)) != 0)
 		return EINVAL;
 
 	/* Installs the new cap under the control mutex. */
@@ -1353,14 +1353,14 @@ alloc_pmem(
 	int error;
 
 	/* Reserves the page-rounded size first. */
-	if (size > SIZE_MAX - (ZEDBSD_PAGE_SIZE - 1U))
+	if (size > SIZE_MAX - (KERN_PAGE_SIZE - 1U))
 		return ENOMEM;
-	reserved = (size + ZEDBSD_PAGE_SIZE - 1U) &
-	    ~(size_t)(ZEDBSD_PAGE_SIZE - 1U);
+	reserved = (size + KERN_PAGE_SIZE - 1U) &
+	    ~(size_t)(KERN_PAGE_SIZE - 1U);
 	if (reserve_bytes(reserved, metadata) != 0)
 		return ENOMEM;
 	memory->size = reserved;
-	error = hal_pmem_alloc(reserved, ZEDBSD_PAGE_SIZE, &memory->paddr);
+	error = hal_pmem_alloc(reserved, KERN_PAGE_SIZE, &memory->paddr);
 	if (error != HAL_OK) {
 		cancel_reservation(reserved, metadata);
 		if (error == HAL_ERR_NOMEM) {
@@ -1724,10 +1724,10 @@ reference_line(
 		return EINVAL;
 
 	/* Lines are one page or one block; the block size must divide evenly. */
-	if (disk->d_block_size > ZEDBSD_PAGE_SIZE)
+	if (disk->d_block_size > KERN_PAGE_SIZE)
 		line_bytes = disk->d_block_size;
 	else
-		line_bytes = ZEDBSD_PAGE_SIZE;
+		line_bytes = KERN_PAGE_SIZE;
 	if ((disk->d_block_size & (disk->d_block_size - 1U)) != 0 ||
 	    line_bytes % disk->d_block_size != 0)
 		return EOPNOTSUPP;
@@ -1886,8 +1886,8 @@ transfer_run(
 
 	/* Leaves partial lines and small requests to the single-line path. */
 	*transferred = 0;
-	line_bytes = disk->d_block_size > ZEDBSD_PAGE_SIZE ?
-	    disk->d_block_size : ZEDBSD_PAGE_SIZE;
+	line_bytes = disk->d_block_size > KERN_PAGE_SIZE ?
+	    disk->d_block_size : KERN_PAGE_SIZE;
 	if (disk->d_block_size == 0 ||
 	    (disk->d_block_size & (disk->d_block_size - 1U)) != 0 ||
 	    line_bytes > KERN_IO_BATCH_MAX / 2U) {

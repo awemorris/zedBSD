@@ -8,7 +8,7 @@ QMP,digest=helpers['QMP'],helpers['digest']
 p=argparse.ArgumentParser();p.add_argument('output',type=Path);p.add_argument('--image',type=Path,required=True);p.add_argument('--platform',choices=['amd64','pcat'],default='amd64');o=p.parse_args()
 arch='i386' if o.platform=='pcat' else 'amd64'
 target='i386-unknown-zedbsd' if o.platform=='pcat' else 'x86_64-unknown-zedbsd'
-abi='-DZEDBSD_USER_ABI_ILP32=1' if o.platform=='pcat' else '-DZEDBSD_USER_ABI_LP64=1'
+abi='-DZEDBSD_USER_ABI_ILP32=1' if o.platform=='pcat' else '-DKERN_USER_ABI_LP64=1'
 tag='HAL-ENTRY'
 softfloat=[str(REPO/'build/i386/sysroot/usr/lib/libzedbsd-compiler-rt.o')] if o.platform=='pcat' else []
 cpu_flags=['-msoft-float','-mno-80387','-mno-mmx','-mno-sse','-mno-sse2'] if o.platform=='pcat' else []

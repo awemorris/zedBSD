@@ -6,8 +6,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_DRIVERS_INTEL_AX211_COMMAND_H
-#define ZEDBSD_DRIVERS_INTEL_AX211_COMMAND_H
+#ifndef KERN_DRIVERS_INTEL_AX211_COMMAND_H
+#define KERN_DRIVERS_INTEL_AX211_COMMAND_H
 
 #include <stddef.h>
 #include <stdint.h>

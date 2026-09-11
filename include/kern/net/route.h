@@ -9,8 +9,8 @@
  * Route
  */
 
-#ifndef ZEDBSD_KERN_NET_ROUTE_H
-#define ZEDBSD_KERN_NET_ROUTE_H
+#ifndef KERN_KERN_NET_ROUTE_H
+#define KERN_KERN_NET_ROUTE_H
 
 #include <stdint.h>
 

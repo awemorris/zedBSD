@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_KERN_TTY_H
-#define ZEDBSD_KERN_TTY_H
+#ifndef KERN_KERN_TTY_H
+#define KERN_KERN_TTY_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -107,7 +107,7 @@ tty_pty_snapshot(
 
 extern const struct file_ops tty_pty_slave_file_ops;
 
-#ifdef ZEDBSD_TTY_TEST
+#ifdef KERN_TTY_TEST
 int
 tty_test_vlnext_ixon(void);
 #endif

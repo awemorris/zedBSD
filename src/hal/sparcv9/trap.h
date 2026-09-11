@@ -1,5 +1,5 @@
-#ifndef ZEDBSD_HAL_SPARCV9_TRAP_H
-#define ZEDBSD_HAL_SPARCV9_TRAP_H
+#ifndef KERN_HAL_SPARCV9_TRAP_H
+#define KERN_HAL_SPARCV9_TRAP_H
 
 #include <hal/types.h>
 

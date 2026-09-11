@@ -48,7 +48,7 @@ relocated:
 	movw	%cs, %ax
 	movw	%ax, %ds
 	sti
-#if ZEDBSD_PC98_IPL_DIAGNOSTIC
+#if KERN_PC98_IPL_DIAGNOSTIC
 	/* One bounded tone means that the ROM entered LBA 0 and this IPL now
 	 * owns its stack.  Keep all physical tracing out of the normal image. */
 	movw	$0x4531, %dx	/* "1E": Stage 1 entry. */
@@ -97,7 +97,7 @@ prepare_target:
 	ret
 boot_failure_read:
 	movw	$0x5231, %dx	/* "1R": LBA 2 read failed. */
-#if ZEDBSD_PC98_IPL_DIAGNOSTIC
+#if KERN_PC98_IPL_DIAGNOSTIC
 	movw	$3, %cx
 #endif
 boot_failure:
@@ -115,7 +115,7 @@ boot_failure:
 	movw	%ax, %es
 	movw	$0x00e1, %es:(%bx)
 	movw	$0x00e1, %es:2(%bx)
-#if ZEDBSD_PC98_IPL_DIAGNOSTIC
+#if KERN_PC98_IPL_DIAGNOSTIC
 	call	diagnostic_checkpoint
 #else
 	movb	%dl, %al
@@ -129,7 +129,7 @@ boot_failure:
 	hlt
 	jmp	1b
 
-#if ZEDBSD_PC98_IPL_DIAGNOSTIC
+#if KERN_PC98_IPL_DIAGNOSTIC
 /*
  * Emit P<DX> to QEMU debug port E9 and a finite group of CX short tones.
  * IRQ0 supplies the delay, so the group remains countable across CPU speeds.

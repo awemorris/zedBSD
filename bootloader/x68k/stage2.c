@@ -278,17 +278,17 @@ make_handoff(const struct x68k_boot_manifest *manifest, uint32_t scsi_id,
 
 	zero_bytes(handoff, sizeof(*handoff));
 	zero_bytes(device, sizeof(*device));
-	handoff->common.magic = ZEDBSD_HANDOFF_MAGIC;
-	handoff->common.version = ZEDBSD_HANDOFF_VERSION_X68K;
+	handoff->common.magic = KERN_HANDOFF_MAGIC;
+	handoff->common.version = KERN_HANDOFF_VERSION_X68K;
 	handoff->common.size = sizeof(*handoff);
 	handoff->common.device_count = 1;
 	handoff->common.boot_bios_id = (uint8_t)scsi_id;
-	handoff->common.boot_partition_scheme = ZEDBSD_PARTITION_SCHEME_X68K;
+	handoff->common.boot_partition_scheme = KERN_PARTITION_SCHEME_X68K;
 	handoff->common.boot_partition_index = 1;
 	handoff->common.device_table = X68K_DEVICE_TABLE_ADDRESS;
 	handoff->common.boot_partition_lba = be32(&manifest->root_lba);
-	handoff->extension_magic = ZEDBSD_X68K_HANDOFF_MAGIC;
-	handoff->extension_version = ZEDBSD_X68K_HANDOFF_VERSION;
+	handoff->extension_magic = KERN_X68K_HANDOFF_MAGIC;
+	handoff->extension_version = KERN_X68K_HANDOFF_VERSION;
 	handoff->extension_size = sizeof(*handoff) - sizeof(handoff->common);
 	handoff->ram_bytes = ram_bytes;
 	handoff->kernel_phys_start = X68K_KERNEL_LOW_MIN;
@@ -298,15 +298,15 @@ make_handoff(const struct x68k_boot_manifest *manifest, uint32_t scsi_id,
 	handoff->memory_region_count = 2;
 	handoff->memory_regions[0].base = 0;
 	handoff->memory_regions[0].size = ram_bytes;
-	handoff->memory_regions[0].type = ZEDBSD_MEMORY_AVAILABLE;
+	handoff->memory_regions[0].type = KERN_MEMORY_AVAILABLE;
 	handoff->memory_regions[1].base = X68K_STAGE1_ADDRESS;
 	handoff->memory_regions[1].size = X68K_STAGE2_LIMIT - X68K_STAGE1_ADDRESS;
-	handoff->memory_regions[1].type = ZEDBSD_MEMORY_RESERVED;
+	handoff->memory_regions[1].type = KERN_MEMORY_RESERVED;
 
-	device->device_class = ZEDBSD_DEV_SCSI;
+	device->device_class = KERN_DEV_SCSI;
 	device->display_index = 0;
 	device->bios_id = (uint8_t)scsi_id;
-	device->flags = ZEDBSD_DEV_PRESENT | ZEDBSD_DEV_BOOT_ORIGIN;
+	device->flags = KERN_DEV_PRESENT | KERN_DEV_BOOT_ORIGIN;
 	device->sector_size = X68K_SECTOR_SIZE;
 }
 

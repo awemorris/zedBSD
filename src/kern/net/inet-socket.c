@@ -32,7 +32,7 @@
 #include <stdbool.h>
 #include <string.h>
 
-#define INET_IOCTL_DIRECTION_MASK ZEDBSD_IOC_INOUT
+#define INET_IOCTL_DIRECTION_MASK KERN_IOC_INOUT
 #define INET_IOCTL_SIZE_MASK (0x1fffUL << 16)
 #define INET_IOCTL_GROUP_MASK (0xffUL << 8)
 #define INET_IOCTL_NUMBER_MASK 0xffUL
@@ -1079,7 +1079,7 @@ inet_ioctl_is_wlan_group(
 {
 	/* The group is encoded in the command's group byte. */
 	if ((command & INET_IOCTL_GROUP_MASK) !=
-	    ((unsigned long)ZEDBSD_WLAN_IOCTL_GROUP << 8))
+	    ((unsigned long)KERN_WLAN_IOCTL_GROUP << 8))
 		return false;
 	return true;
 }
@@ -1114,7 +1114,7 @@ inet_ioctl_wlan_classify(
 	    query == NULL ||
 	    (command & ~INET_IOCTL_ENCODING_MASK) != 0 ||
 	    !inet_ioctl_is_wlan_group(command) ||
-	    (command & INET_IOCTL_DIRECTION_MASK) != ZEDBSD_IOC_INOUT)
+	    (command & INET_IOCTL_DIRECTION_MASK) != KERN_IOC_INOUT)
 		return EINVAL;
 
 	/* Maps the command number onto its request. */

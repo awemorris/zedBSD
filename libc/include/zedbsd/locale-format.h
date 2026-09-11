@@ -16,14 +16,14 @@
 
 #include <stdint.h>
 
-#define ZEDBSD_LOCALE_MAGIC "ZLOCALE1"
-#define ZEDBSD_LOCALE_MAGIC_SIZE 8U
-#define ZEDBSD_LOCALE_VERSION 1U
-#define ZEDBSD_LOCALE_HEADER_SIZE 28U
-#define ZEDBSD_LOCALE_ENTRY_SIZE 16U
+#define KERN_LOCALE_MAGIC "ZLOCALE1"
+#define KERN_LOCALE_MAGIC_SIZE 8U
+#define KERN_LOCALE_VERSION 1U
+#define KERN_LOCALE_HEADER_SIZE 28U
+#define KERN_LOCALE_ENTRY_SIZE 16U
 
 /* id, category, localedef/locale keyword, C value, C.UTF-8 value */
-#define ZEDBSD_LOCALE_KEYS(X)                                                  \
+#define KERN_LOCALE_KEYS(X)                                                  \
 	X(CODESET, LC_CTYPE, "charmap", "US-ASCII", "UTF-8")                   \
 	X(DECIMAL_POINT, LC_NUMERIC, "decimal_point", ".", ".")                \
 	X(THOUSANDS_SEP, LC_NUMERIC, "thousands_sep", "", "")                  \
@@ -99,24 +99,24 @@
 	X(NOSTR, LC_MESSAGES, "nostr", "no", "no")                             \
 	X(COLLATE, LC_COLLATE, "order_start", "forward", "forward")
 
-enum zedbsd_locale_key {
-	ZEDBSD_LOCALE_KEY_INVALID = 0,
-#define ZEDBSD_LOCALE_ENUM(name, category, keyword, c_value, utf8_value)       \
-	ZEDBSD_LOCALE_KEY_##name,
-	ZEDBSD_LOCALE_KEYS(ZEDBSD_LOCALE_ENUM)
-#undef ZEDBSD_LOCALE_ENUM
-	ZEDBSD_LOCALE_KEY_COUNT
+enum kern_locale_key {
+	KERN_LOCALE_KEY_INVALID = 0,
+#define KERN_LOCALE_ENUM(name, category, keyword, c_value, utf8_value)       \
+	KERN_LOCALE_KEY_##name,
+	KERN_LOCALE_KEYS(KERN_LOCALE_ENUM)
+#undef KERN_LOCALE_ENUM
+	KERN_LOCALE_KEY_COUNT
 };
 
 static inline uint32_t
-zedbsd_locale_get32(const unsigned char *bytes)
+kern_locale_get32(const unsigned char *bytes)
 {
 	return (uint32_t)bytes[0] << 24 | (uint32_t)bytes[1] << 16 |
 	       (uint32_t)bytes[2] << 8 | (uint32_t)bytes[3];
 }
 
 static inline void
-zedbsd_locale_put32(unsigned char *bytes, uint32_t value)
+kern_locale_put32(unsigned char *bytes, uint32_t value)
 {
 	bytes[0] = (unsigned char)(value >> 24);
 	bytes[1] = (unsigned char)(value >> 16);

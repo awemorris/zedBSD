@@ -15,7 +15,7 @@ for variant in ('ordinary','sanitize'):
   command=['cc','-O1','-g','-pthread',*extra,'-c',path,'-o',str(obj)]
   subprocess.run(command,cwd=root,check=True)
  binary=str(out/variant)
- build=['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-DZEDBSD_USER_ABI_LP64','-Dsched_yield=shutdown_test_yield','-ffunction-sections','-fdata-sections','-I.','-Iinclude','-Iinclude/uapi','-Isrc','-Ilibc/include','-I'+str(out),*extra,*sources,*bridges,'-pthread','-Wl,--gc-sections','-o',binary]
+ build=['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-DKERN_USER_ABI_LP64','-Dsched_yield=shutdown_test_yield','-ffunction-sections','-fdata-sections','-I.','-Iinclude','-Iinclude/uapi','-Isrc','-Ilibc/include','-I'+str(out),*extra,*sources,*bridges,'-pthread','-Wl,--gc-sections','-o',binary]
  for name,args in [(variant+'-build',build),(variant,['timeout','60s',binary])]:
   commands.append(dict(name=name,argv=args));(out/'commands.json').write_text(json.dumps(commands,indent=2)+'\n')
   result=subprocess.run(args,cwd=root,capture_output=True,text=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=1','UBSAN_OPTIONS':'halt_on_error=1'})

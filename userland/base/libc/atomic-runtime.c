@@ -42,7 +42,7 @@ zed_atomic_load(
 	int order)
 {
 	(void)order;
-	(void)atomic_call(ZEDBSD_ATOMIC_LOAD, object, result, NULL, size);
+	(void)atomic_call(KERN_ATOMIC_LOAD, object, result, NULL, size);
 }
 
 void zed_atomic_store(size_t size, volatile void *object, const void *desired,
@@ -59,7 +59,7 @@ zed_atomic_store(
 	int order)
 {
 	(void)order;
-	(void)atomic_call(ZEDBSD_ATOMIC_STORE, object,
+	(void)atomic_call(KERN_ATOMIC_STORE, object,
 			  (void *)(uintptr_t)desired, NULL, size);
 }
 
@@ -79,7 +79,7 @@ zed_atomic_exchange(
 	int order)
 {
 	(void)order;
-	(void)atomic_call(ZEDBSD_ATOMIC_EXCHANGE, object,
+	(void)atomic_call(KERN_ATOMIC_EXCHANGE, object,
 			  (void *)(uintptr_t)desired, result, size);
 }
 
@@ -105,7 +105,7 @@ zed_atomic_compare_exchange(
 	(void)failure_order;
 
 	/* Computes the function result. */
-	function_result = atomic_call(ZEDBSD_ATOMIC_COMPARE_EXCHANGE, object, expected,
+	function_result = atomic_call(KERN_ATOMIC_COMPARE_EXCHANGE, object, expected,
 			   (void *)(uintptr_t)desired, size) != 0;
 
 	/* Returns the computed result. */
@@ -152,7 +152,7 @@ zed_atomic_is_lock_free(
 	}
 }
 
-#define ZEDBSD_ATOMIC_WIDTH(suffix, type)                                      \
+#define KERN_ATOMIC_WIDTH(suffix, type)                                      \
 	type zed_atomic_load_##suffix(const volatile void *,                   \
 				      int) __asm__("__atomic_load_" #suffix);  \
 	type zed_atomic_load_##suffix(const volatile void *object, int order)  \
@@ -338,16 +338,16 @@ zed_atomic_is_lock_free(
 		    operand);                                                  \
 	}
 
-ZEDBSD_ATOMIC_WIDTH(1, uint8_t)
-ZEDBSD_ATOMIC_WIDTH(2, uint16_t)
-ZEDBSD_ATOMIC_WIDTH(4, uint32_t)
-ZEDBSD_ATOMIC_WIDTH(8, uint64_t)
+KERN_ATOMIC_WIDTH(1, uint8_t)
+KERN_ATOMIC_WIDTH(2, uint16_t)
+KERN_ATOMIC_WIDTH(4, uint32_t)
+KERN_ATOMIC_WIDTH(8, uint64_t)
 #if defined(__SIZEOF_INT128__)
-__extension__ typedef unsigned __int128 zedbsd_uint128_t;
-ZEDBSD_ATOMIC_WIDTH(16, zedbsd_uint128_t)
+__extension__ typedef unsigned __int128 kern_uint128_t;
+KERN_ATOMIC_WIDTH(16, kern_uint128_t)
 #endif
 
-#undef ZEDBSD_ATOMIC_WIDTH
+#undef KERN_ATOMIC_WIDTH
 
 bool zed_atomic_test_and_set_1(volatile void *object,
 			       int order) __asm__("__atomic_test_and_set_1");
@@ -381,7 +381,7 @@ atomic_call(
 	intptr_t result;
 
 	result =
-	    __syscall6(ZEDBSD_SYS_atomic, (uintptr_t)object, (uintptr_t)first,
+	    __syscall6(KERN_SYS_atomic, (uintptr_t)object, (uintptr_t)first,
 		       (uintptr_t)second, (uintptr_t)size, operation, 0);
 
 	/* Checks the operation result. */

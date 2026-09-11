@@ -11,8 +11,8 @@
  * The sparse persistent-mapping window used for amd64 ACPI discovery.
  */
 
-#ifndef ZEDBSD_HAL_AMD64_ACPI_WINDOW_H
-#define ZEDBSD_HAL_AMD64_ACPI_WINDOW_H
+#ifndef KERN_HAL_AMD64_ACPI_WINDOW_H
+#define KERN_HAL_AMD64_ACPI_WINDOW_H
 
 #include <hal/types.h>
 

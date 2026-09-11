@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_MKFS_FAT32_FORMAT_H
-#define ZEDBSD_MKFS_FAT32_FORMAT_H
+#ifndef KERN_MKFS_FAT32_FORMAT_H
+#define KERN_MKFS_FAT32_FORMAT_H
 
 #include <stdint.h>
 

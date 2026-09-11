@@ -9,14 +9,14 @@
  * /dev/console
  */
 
-#ifndef ZEDBSD_UAPI_CONSOLE_H
-#define ZEDBSD_UAPI_CONSOLE_H
+#ifndef KERN_UAPI_CONSOLE_H
+#define KERN_UAPI_CONSOLE_H
 
 #include <stdint.h>
 #include <sys/ioctl.h>
 #include <zedbsd/types.h>
 
-#define ZEDBSD_CONSOLE_IOC_GROUP	'c'
+#define KERN_CONSOLE_IOC_GROUP	'c'
 
 struct console_size {
 	uint32_t rows;
@@ -46,26 +46,14 @@ struct console_write_at {
 	uint32_t length;
 };
 
-#define ZEDBSD_CONSOLE_GET_SIZE	\
-	_IOR(ZEDBSD_CONSOLE_IOC_GROUP, 1, struct console_size)
-#define ZEDBSD_CONSOLE_CLEAR	_IO(ZEDBSD_CONSOLE_IOC_GROUP, 2)
-#define ZEDBSD_CONSOLE_CLEAR_ROW	\
-	_IOW(ZEDBSD_CONSOLE_IOC_GROUP, 3, struct console_row)
-#define ZEDBSD_CONSOLE_CLEAR_TO_EOL	\
-	_IOW(ZEDBSD_CONSOLE_IOC_GROUP, 4, struct console_position)
-#define ZEDBSD_CONSOLE_GET_CURSOR	\
-	_IOR(ZEDBSD_CONSOLE_IOC_GROUP, 5, struct console_cursor)
-#define ZEDBSD_CONSOLE_SET_CURSOR	\
-	_IOW(ZEDBSD_CONSOLE_IOC_GROUP, 6, struct console_cursor)
-#define ZEDBSD_CONSOLE_SHOW_CURSOR	\
-	_IOW(ZEDBSD_CONSOLE_IOC_GROUP, 7, struct console_cursor)
-#define ZEDBSD_CONSOLE_WRITE_AT	\
-	_IOW(ZEDBSD_CONSOLE_IOC_GROUP, 8, struct console_write_at)
-/* Removed input-event request numbers 9--12 remain reserved. */
-/*
- * Terminal-capability probe used by isatty().
- */
-#define ZEDBSD_CONSOLE_ISATTY	_IO(ZEDBSD_CONSOLE_IOC_GROUP, 13)
-/* Removed input-mode request numbers 14--15 remain reserved. */
+#define KERN_CONSOLE_GET_SIZE		_IOR(KERN_CONSOLE_IOC_GROUP, 1, struct console_size)
+#define KERN_CONSOLE_CLEAR		_IO(KERN_CONSOLE_IOC_GROUP, 2)
+#define KERN_CONSOLE_CLEAR_ROW		_IOW(KERN_CONSOLE_IOC_GROUP, 3, struct console_row)
+#define KERN_CONSOLE_CLEAR_TO_EOL	_IOW(KERN_CONSOLE_IOC_GROUP, 4, struct console_position)
+#define KERN_CONSOLE_GET_CURSOR		_IOR(KERN_CONSOLE_IOC_GROUP, 5, struct console_cursor)
+#define KERN_CONSOLE_SET_CURSOR		_IOW(KERN_CONSOLE_IOC_GROUP, 6, struct console_cursor)
+#define KERN_CONSOLE_SHOW_CURSOR	_IOW(KERN_CONSOLE_IOC_GROUP, 7, struct console_cursor)
+#define KERN_CONSOLE_WRITE_AT		_IOW(KERN_CONSOLE_IOC_GROUP, 8, struct console_write_at)
+#define KERN_CONSOLE_ISATTY		_IO(KERN_CONSOLE_IOC_GROUP, 13)
 
 #endif

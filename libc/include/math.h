@@ -94,56 +94,56 @@ __zedbsd_double_bits(double value)
 #define islessequal(x, y) (!isunordered((x), (y)) && (x) <= (y))
 #define islessgreater(x, y) (!isunordered((x), (y)) && (x) != (y))
 
-#define ZEDBSD_MATH_UNARY(name) \
+#define KERN_MATH_UNARY(name) \
 	double name(double); float name##f(float); long double name##l(long double)
-#define ZEDBSD_MATH_BINARY(name) \
+#define KERN_MATH_BINARY(name) \
 	double name(double, double); float name##f(float, float); \
 	long double name##l(long double, long double)
 
-ZEDBSD_MATH_UNARY(acos);
-ZEDBSD_MATH_UNARY(acosh);
-ZEDBSD_MATH_UNARY(asin);
-ZEDBSD_MATH_UNARY(asinh);
-ZEDBSD_MATH_UNARY(atan);
-ZEDBSD_MATH_UNARY(atanh);
-ZEDBSD_MATH_UNARY(cbrt);
-ZEDBSD_MATH_UNARY(ceil);
-ZEDBSD_MATH_UNARY(cos);
-ZEDBSD_MATH_UNARY(cosh);
-ZEDBSD_MATH_UNARY(erf);
-ZEDBSD_MATH_UNARY(erfc);
-ZEDBSD_MATH_UNARY(exp);
-ZEDBSD_MATH_UNARY(exp2);
-ZEDBSD_MATH_UNARY(expm1);
-ZEDBSD_MATH_UNARY(fabs);
-ZEDBSD_MATH_UNARY(floor);
-ZEDBSD_MATH_UNARY(lgamma);
-ZEDBSD_MATH_UNARY(log);
-ZEDBSD_MATH_UNARY(log10);
-ZEDBSD_MATH_UNARY(log1p);
-ZEDBSD_MATH_UNARY(log2);
-ZEDBSD_MATH_UNARY(logb);
-ZEDBSD_MATH_UNARY(nearbyint);
-ZEDBSD_MATH_UNARY(rint);
-ZEDBSD_MATH_UNARY(round);
-ZEDBSD_MATH_UNARY(sin);
-ZEDBSD_MATH_UNARY(sinh);
-ZEDBSD_MATH_UNARY(sqrt);
-ZEDBSD_MATH_UNARY(tan);
-ZEDBSD_MATH_UNARY(tanh);
-ZEDBSD_MATH_UNARY(tgamma);
-ZEDBSD_MATH_UNARY(trunc);
+KERN_MATH_UNARY(acos);
+KERN_MATH_UNARY(acosh);
+KERN_MATH_UNARY(asin);
+KERN_MATH_UNARY(asinh);
+KERN_MATH_UNARY(atan);
+KERN_MATH_UNARY(atanh);
+KERN_MATH_UNARY(cbrt);
+KERN_MATH_UNARY(ceil);
+KERN_MATH_UNARY(cos);
+KERN_MATH_UNARY(cosh);
+KERN_MATH_UNARY(erf);
+KERN_MATH_UNARY(erfc);
+KERN_MATH_UNARY(exp);
+KERN_MATH_UNARY(exp2);
+KERN_MATH_UNARY(expm1);
+KERN_MATH_UNARY(fabs);
+KERN_MATH_UNARY(floor);
+KERN_MATH_UNARY(lgamma);
+KERN_MATH_UNARY(log);
+KERN_MATH_UNARY(log10);
+KERN_MATH_UNARY(log1p);
+KERN_MATH_UNARY(log2);
+KERN_MATH_UNARY(logb);
+KERN_MATH_UNARY(nearbyint);
+KERN_MATH_UNARY(rint);
+KERN_MATH_UNARY(round);
+KERN_MATH_UNARY(sin);
+KERN_MATH_UNARY(sinh);
+KERN_MATH_UNARY(sqrt);
+KERN_MATH_UNARY(tan);
+KERN_MATH_UNARY(tanh);
+KERN_MATH_UNARY(tgamma);
+KERN_MATH_UNARY(trunc);
 
-ZEDBSD_MATH_BINARY(atan2);
-ZEDBSD_MATH_BINARY(copysign);
-ZEDBSD_MATH_BINARY(fdim);
-ZEDBSD_MATH_BINARY(fmax);
-ZEDBSD_MATH_BINARY(fmin);
-ZEDBSD_MATH_BINARY(fmod);
-ZEDBSD_MATH_BINARY(hypot);
-ZEDBSD_MATH_BINARY(nextafter);
-ZEDBSD_MATH_BINARY(pow);
-ZEDBSD_MATH_BINARY(remainder);
+KERN_MATH_BINARY(atan2);
+KERN_MATH_BINARY(copysign);
+KERN_MATH_BINARY(fdim);
+KERN_MATH_BINARY(fmax);
+KERN_MATH_BINARY(fmin);
+KERN_MATH_BINARY(fmod);
+KERN_MATH_BINARY(hypot);
+KERN_MATH_BINARY(nextafter);
+KERN_MATH_BINARY(pow);
+KERN_MATH_BINARY(remainder);
 
 double fma(double, double, double);
 float fmaf(float, float, float);
@@ -200,7 +200,7 @@ float y0f(float);
 float y1f(float);
 float ynf(int, float);
 
-#undef ZEDBSD_MATH_UNARY
-#undef ZEDBSD_MATH_BINARY
+#undef KERN_MATH_UNARY
+#undef KERN_MATH_BINARY
 
 #endif

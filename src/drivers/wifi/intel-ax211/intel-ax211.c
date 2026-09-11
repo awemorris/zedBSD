@@ -1222,7 +1222,6 @@ drv_intel_ax211_staging_clear(
 #include "intel-ax211-tx-ring.h"
 
 #include <errno.h>
-#include <hal/hal.h>
 #include <limits.h>
 #include <kern/clock.h>
 #include <kern/lock.h>
@@ -1234,6 +1233,7 @@ drv_intel_ax211_staging_clear(
 #include <string.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
+#include "kern/device-io.h"
 
 #define AX211_PCI_VENDOR 0x8086U
 #define AX211_PCI_PRODUCT 0x51f0U
@@ -1988,7 +1988,7 @@ ax211_pci_read32(
 
 	registers = controller->mapping.address;
 	value = *(volatile uint32_t *)(registers + offset);
-	hal_io_rmb();
+	kern_io_read_barrier();
 
 	/* Returns the computed result. */
 	return value;
@@ -3453,7 +3453,7 @@ ax211_pci_receive_event(
 			}
 			buffer = &controller->active_dma
 					  ->rx_buffer[completion.buffer_id];
-			hal_io_rmb();
+			kern_io_read_barrier();
 			frame_length =
 				buffer->address == NULL || buffer->size < 4U
 					? 0U
@@ -3553,7 +3553,7 @@ ax211_pci_publish_pnvm(
 		/* Reports operation failure. */
 		return -1;
 	}
-	hal_io_wmb();
+	kern_io_write_barrier();
 
 	/* Checks the operation result. */
 	result = drv_intel_ax211_mmio_nic_lock(&controller->mmio);
@@ -4642,7 +4642,7 @@ ax211_pci_tx_sync_for_device(
 		/* Reports operation failure. */
 		return -1;
 	}
-	hal_io_wmb();
+	kern_io_write_barrier();
 
 	/* Succeeded. */
 	return 0;
@@ -4667,7 +4667,7 @@ ax211_pci_tx_write32(
 		/* Reports operation failure. */
 		return -1;
 	}
-	hal_io_wmb();
+	kern_io_write_barrier();
 
 	/* Computes the function result. */
 	error = controller->mmio.ops->csr_write32(
@@ -4773,7 +4773,7 @@ ax211_pci_sram_read_locked(
 		/* Failed. */
 		return EIO;
 	}
-	hal_io_mb();
+	kern_io_barrier();
 	/* Process each remaining element. */
 	for (index = 0U; index < count; index++) {
 		/* Checks the csr read32 result. */

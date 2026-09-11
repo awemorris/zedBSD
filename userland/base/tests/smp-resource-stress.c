@@ -167,7 +167,7 @@ resource_snapshot(
 	memset(resources, 0, sizeof(*resources));
 
 	/* Obtains the ioctl result. */
-	function_result = ioctl(system_fd, ZEDBSD_SYSTEM_GET_RESOURCES, resources);
+	function_result = ioctl(system_fd, KERN_SYSTEM_GET_RESOURCES, resources);
 
 	/* Returns the computed result. */
 	return function_result;

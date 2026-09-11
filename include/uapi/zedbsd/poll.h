@@ -4,8 +4,8 @@
  *
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_UAPI_POLL_H
-#define ZEDBSD_UAPI_POLL_H
+#ifndef KERN_UAPI_POLL_H
+#define KERN_UAPI_POLL_H
 
 #include <stdint.h>
 

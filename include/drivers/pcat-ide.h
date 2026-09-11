@@ -8,8 +8,8 @@
 /*
  * PC/AT ATA PIO driver
  */
-#ifndef ZEDBSD_DRIVERS_PCAT_IDE_H
-#define ZEDBSD_DRIVERS_PCAT_IDE_H
+#ifndef KERN_DRIVERS_PCAT_IDE_H
+#define KERN_DRIVERS_PCAT_IDE_H
 #include "kern/disk.h"
 
 unsigned

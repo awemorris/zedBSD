@@ -1,6 +1,6 @@
 /* BSD/XSI syslog client definitions. SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_SYSLOG_H
-#define ZEDBSD_SYSLOG_H
+#ifndef KERN_SYSLOG_H
+#define KERN_SYSLOG_H
 #include <stdarg.h>
 #define LOG_EMERG 0
 #define LOG_ALERT 1

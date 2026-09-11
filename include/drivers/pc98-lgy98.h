@@ -8,8 +8,8 @@
 /*
  * Melco LGY-98 Ethernet driver
  */
-#ifndef ZEDBSD_DRIVERS_PC98_LGY98_H
-#define ZEDBSD_DRIVERS_PC98_LGY98_H
+#ifndef KERN_DRIVERS_PC98_LGY98_H
+#define KERN_DRIVERS_PC98_LGY98_H
 
 int
 drv_pc98_lgy98_init(void);

@@ -385,7 +385,7 @@ snapshot(
 		process->pid = cursor;
 
 		/* Handles a failed ioctl operation. */
-		if (ioctl(descriptor, ZEDBSD_SYSTEM_GET_PROCESS, process) !=
+		if (ioctl(descriptor, KERN_SYSTEM_GET_PROCESS, process) !=
 		    0) {
 			/* Handles the reported system error. */
 			if (errno == ENOENT)
@@ -396,7 +396,7 @@ snapshot(
 		}
 
 		/* Handles the process condition. */
-		if (process->version != ZEDBSD_SYSTEM_PROCESS_INFO_VERSION ||
+		if (process->version != KERN_SYSTEM_PROCESS_INFO_VERSION ||
 		    process->struct_size != sizeof(*process)) {
 			errno = EINVAL;
 

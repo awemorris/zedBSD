@@ -11,7 +11,7 @@ for mode in normal sanitize; do
 	if [ "$mode" = sanitize ]; then
 		flags='-fsanitize=address,undefined -fno-omit-frame-pointer --param=asan-globals=0'
 	fi
-	${CC:-cc} -std=c11 -O0 -g -DZEDBSD_USER_ABI_LP64 \
+	${CC:-cc} -std=c11 -O0 -g -DKERN_USER_ABI_LP64 \
 		-I"$repo/include" -I"$repo/include/uapi" -I"$repo" \
 		-Wall -Wextra -Werror -ffunction-sections -fdata-sections \
 		$flags \

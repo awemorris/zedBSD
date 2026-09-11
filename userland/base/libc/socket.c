@@ -39,7 +39,7 @@ socket(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)socket_call(ZEDBSD_SYS_socket, domain, type, protocol, 0, 0,
+	function_result = (int)socket_call(KERN_SYS_socket, domain, type, protocol, 0, 0,
 				0);
 
 	/* Returns the computed result. */
@@ -82,7 +82,7 @@ socketpair(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)socket_call(ZEDBSD_SYS_socketpair, domain, type, protocol,
+	function_result = (int)socket_call(KERN_SYS_socketpair, domain, type, protocol,
 				(uintptr_t)descriptors, 0, 0);
 
 	/* Returns the computed result. */
@@ -101,7 +101,7 @@ bind(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)socket_call(ZEDBSD_SYS_bind, descriptor, (uintptr_t)address,
+	function_result = (int)socket_call(KERN_SYS_bind, descriptor, (uintptr_t)address,
 				length, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -120,7 +120,7 @@ connect(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)socket_call(ZEDBSD_SYS_connect, descriptor,
+	function_result = (int)socket_call(KERN_SYS_connect, descriptor,
 				(uintptr_t)address, length, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -138,7 +138,7 @@ listen(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)socket_call(ZEDBSD_SYS_listen, descriptor, backlog, 0, 0, 0,
+	function_result = (int)socket_call(KERN_SYS_listen, descriptor, backlog, 0, 0, 0,
 				0);
 
 	/* Returns the computed result. */
@@ -157,7 +157,7 @@ accept(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)socket_call(ZEDBSD_SYS_accept, descriptor,
+	function_result = (int)socket_call(KERN_SYS_accept, descriptor,
 				(uintptr_t)address, (uintptr_t)length, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -177,7 +177,7 @@ accept4(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)socket_call(ZEDBSD_SYS_accept, descriptor,
+	function_result = (int)socket_call(KERN_SYS_accept, descriptor,
 				(uintptr_t)address, (uintptr_t)length, flags, 0,
 				0);
 
@@ -200,7 +200,7 @@ sendto(
 	ssize_t function_result;
 
 	/* Computes the function result. */
-	function_result = (ssize_t)socket_call(ZEDBSD_SYS_sendto, descriptor,
+	function_result = (ssize_t)socket_call(KERN_SYS_sendto, descriptor,
 				    (uintptr_t)buffer, length, flags,
 				    (uintptr_t)address, address_length);
 
@@ -243,7 +243,7 @@ recvfrom(
 
 	/* Computes the function result. */
 	function_result = (ssize_t)socket_call(
-	    ZEDBSD_SYS_recvfrom, descriptor, (uintptr_t)buffer, length, flags,
+	    KERN_SYS_recvfrom, descriptor, (uintptr_t)buffer, length, flags,
 	    (uintptr_t)address, (uintptr_t)address_length);
 
 	/* Returns the computed result. */
@@ -331,7 +331,7 @@ sendmsg(
 					      sizeof(int));
 
 		/* Handles the descriptor count condition. */
-		if (descriptor_count > ZEDBSD_MSG_FD_MAX) {
+		if (descriptor_count > KERN_MSG_FD_MAX) {
 			errno = EMSGSIZE;
 
 			/* Reports operation failure. */
@@ -377,7 +377,7 @@ sendmsg(
 	request.flags = (uint32_t)flags;
 	request.descriptors = (uapi_ptr_t)(uintptr_t)descriptors;
 	request.descriptor_count = descriptor_count;
-	result = (ssize_t)socket_call(ZEDBSD_SYS_sendmsg, descriptor,
+	result = (ssize_t)socket_call(KERN_SYS_sendmsg, descriptor,
 				      (uintptr_t)&request, 0, 0, 0, 0);
 	free(buffer);
 
@@ -398,7 +398,7 @@ recvmsg(
 	struct cmsghdr *control;
 	size_t bytes;
 	struct recvmsg_args request;
-	int descriptors[ZEDBSD_MSG_FD_MAX];
+	int descriptors[KERN_MSG_FD_MAX];
 	unsigned descriptor_capacity;
 	unsigned char *buffer;
 	size_t total, offset, i, copied;
@@ -426,8 +426,8 @@ recvmsg(
 			       sizeof(int));
 
 		/* Handles the descriptor capacity condition. */
-		if (descriptor_capacity > ZEDBSD_MSG_FD_MAX)
-			descriptor_capacity = ZEDBSD_MSG_FD_MAX;
+		if (descriptor_capacity > KERN_MSG_FD_MAX)
+			descriptor_capacity = KERN_MSG_FD_MAX;
 	}
 
 	/* Process each element required by the operation. */
@@ -460,7 +460,7 @@ recvmsg(
 	request.flags = (uint32_t)flags;
 	request.descriptors = (uapi_ptr_t)(uintptr_t)descriptors;
 	request.descriptor_capacity = descriptor_capacity;
-	result = (ssize_t)socket_call(ZEDBSD_SYS_recvmsg, descriptor,
+	result = (ssize_t)socket_call(KERN_SYS_recvmsg, descriptor,
 				      (uintptr_t)&request, 0, 0, 0, 0);
 
 	/* Checks the operation result. */
@@ -509,7 +509,7 @@ shutdown(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)socket_call(ZEDBSD_SYS_shutdown, descriptor, how, 0, 0, 0,
+	function_result = (int)socket_call(KERN_SYS_shutdown, descriptor, how, 0, 0, 0,
 				0);
 
 	/* Returns the computed result. */
@@ -528,7 +528,7 @@ getsockname(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)socket_call(ZEDBSD_SYS_getsockname, descriptor,
+	function_result = (int)socket_call(KERN_SYS_getsockname, descriptor,
 				(uintptr_t)address, (uintptr_t)length, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -547,7 +547,7 @@ getpeername(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)socket_call(ZEDBSD_SYS_getpeername, descriptor,
+	function_result = (int)socket_call(KERN_SYS_getpeername, descriptor,
 				(uintptr_t)address, (uintptr_t)length, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -568,7 +568,7 @@ setsockopt(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)socket_call(ZEDBSD_SYS_setsockopt, descriptor, level,
+	function_result = (int)socket_call(KERN_SYS_setsockopt, descriptor, level,
 				option, (uintptr_t)value, length, 0);
 
 	/* Returns the computed result. */
@@ -589,7 +589,7 @@ getsockopt(
 	int function_result;
 
 	/* Computes the function result. */
-	function_result = (int)socket_call(ZEDBSD_SYS_getsockopt, descriptor, level,
+	function_result = (int)socket_call(KERN_SYS_getsockopt, descriptor, level,
 				option, (uintptr_t)value, (uintptr_t)length, 0);
 
 	/* Returns the computed result. */

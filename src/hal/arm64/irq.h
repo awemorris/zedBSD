@@ -1,5 +1,5 @@
-#ifndef ZEDBSD_HAL_ARM64_IRQ_H
-#define ZEDBSD_HAL_ARM64_IRQ_H
+#ifndef KERN_HAL_ARM64_IRQ_H
+#define KERN_HAL_ARM64_IRQ_H
 
 #include <hal/types.h>
 #include <hal/hal.h>

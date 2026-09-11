@@ -1,9 +1,9 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_NET_PUBLICATION_TRACE_H
-#define ZEDBSD_NET_PUBLICATION_TRACE_H
+#ifndef KERN_NET_PUBLICATION_TRACE_H
+#define KERN_NET_PUBLICATION_TRACE_H
 
 /* Private, compile-time-only stage observations for disposable test images. */
-#ifdef ZEDBSD_NCOM_TRACE
+#ifdef KERN_NCOM_TRACE
 #include <errno.h>
 #include <stdio.h>
 #include <unistd.h>

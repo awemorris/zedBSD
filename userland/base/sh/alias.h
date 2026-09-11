@@ -11,8 +11,8 @@
  * Declares the zedBSD userland alias interface.
  */
 
-#ifndef ZEDBSD_USERLAND_SH_ALIAS_H
-#define ZEDBSD_USERLAND_SH_ALIAS_H
+#ifndef KERN_USERLAND_SH_ALIAS_H
+#define KERN_USERLAND_SH_ALIAS_H
 
 #include "userland/base/sh/lexer.h"
 

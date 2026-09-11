@@ -9,8 +9,8 @@
  * Kernel memory allocation
  */
 
-#ifndef ZEDBSD_KERN_KMEM_H
-#define ZEDBSD_KERN_KMEM_H
+#ifndef KERN_KERN_KMEM_H
+#define KERN_KERN_KMEM_H
 
 #include <stddef.h>
 

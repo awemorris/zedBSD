@@ -82,7 +82,7 @@ static unsigned atfork_active_count;
 
 extern void __stdio_fork_child(void) __attribute__((weak));
 
-#if defined(ZEDBSD_DYNAMIC_LIBC)
+#if defined(KERN_DYNAMIC_LIBC)
 #define RTLD_CALL(name) (__rtld_exports.name)
 #else
 #define RTLD_CALL(name) (__rtld_##name)
@@ -289,7 +289,7 @@ fenv_t *
 __libc_fenv_location(
 	void)
 {
-#if defined(ZEDBSD_DYNAMIC_LIBC) || defined(ZEDBSD_STATIC_TLS)
+#if defined(KERN_DYNAMIC_LIBC) || defined(KERN_STATIC_TLS)
 	static _Thread_local fenv_t environment = {0U, FE_TONEAREST};
 
 	/* Returns the computed result. */
@@ -337,7 +337,7 @@ int *
 __libc_errno_location(
 	void)
 {
-#if defined(ZEDBSD_DYNAMIC_LIBC) || defined(ZEDBSD_STATIC_TLS)
+#if defined(KERN_DYNAMIC_LIBC) || defined(KERN_STATIC_TLS)
 	static _Thread_local int dynamic_errno;
 
 	/* Returns the computed result. */
@@ -450,7 +450,7 @@ pthread_create(
 		return EAGAIN;
 	}
 	error =
-	    (int)call(ZEDBSD_SYS_thread_create, (uintptr_t)thread_trampoline,
+	    (int)call(KERN_SYS_thread_create, (uintptr_t)thread_trampoline,
 		      (uintptr_t)usable_stack + size, 0,
 		      (uintptr_t)tcb->runtime_tcb, 0, (uintptr_t)&tcb->tid);
 
@@ -511,7 +511,7 @@ pthread_exit(
 	/* Handles the tcb availability. */
 	if (tcb != NULL && tcb->detached)
 		detached_enqueue(tcb);
-	(void)__syscall6(ZEDBSD_SYS_thread_exit, (uintptr_t)value, 0, 0, 0, 0,
+	(void)__syscall6(KERN_SYS_thread_exit, (uintptr_t)value, 0, 0, 0, 0,
 			 0);
 
 	/* Continue until the operation reaches a terminal state. */
@@ -539,10 +539,10 @@ pthread_join(
 		return EINVAL;
 	self = self_tcb();
 	do {
-		result = call(ZEDBSD_SYS_thread_join, thread, (uintptr_t)value,
+		result = call(KERN_SYS_thread_join, thread, (uintptr_t)value,
 			      self != NULL && self->cancel_state ==
 						  PTHREAD_CANCEL_ENABLE
-				  ? ZEDBSD_THREAD_JOIN_CANCELABLE
+				  ? KERN_THREAD_JOIN_CANCELABLE
 				  : 0,
 			      0, 0, 0);
 
@@ -2223,7 +2223,7 @@ pthread_kill(
 	/* Handles the signo condition. */
 	if (signo < 0 || signo > SIGRTMAX)
 		return EINVAL;
-	result = call(ZEDBSD_SYS_thread_kill, thread, signo, 0, 0, 0, 0);
+	result = call(KERN_SYS_thread_kill, thread, signo, 0, 0, 0, 0);
 
 	/* Returns the computed result. */
 	return result < 0 ? errno : 0;
@@ -2238,8 +2238,8 @@ pthread_cancel(
 {
 	intptr_t result;
 
-	result = call(ZEDBSD_SYS_thread_cancel, thread,
-			       ZEDBSD_THREAD_CANCEL_REQUEST, 0, 0, 0, 0);
+	result = call(KERN_SYS_thread_cancel, thread,
+			       KERN_THREAD_CANCEL_REQUEST, 0, 0, 0, 0);
 
 	/* Checks the operation result. */
 	if (result < 0)
@@ -2332,7 +2332,7 @@ pthread_testcancel(
 	/* Handles the tcb availability. */
 	if (tcb == NULL || tcb->cancel_state == PTHREAD_CANCEL_DISABLE)
 		return;
-	pending = call(ZEDBSD_SYS_thread_cancel, 0, ZEDBSD_THREAD_CANCEL_CLEAR,
+	pending = call(KERN_SYS_thread_cancel, 0, KERN_THREAD_CANCEL_CLEAR,
 		       0, 0, 0, 0);
 
 	/* Handles the pending condition. */
@@ -2876,10 +2876,10 @@ usync_wait_word_flags_cancelable(
 {
 	intptr_t result;
 
-	result = call(ZEDBSD_SYS_usync, (uintptr_t)address,
-			       ZEDBSD_USYNC_WAIT, value, (uintptr_t)timeout, 0,
-			       (pshared ? 0 : ZEDBSD_USYNC_PRIVATE) |
-				   (cancelable ? ZEDBSD_USYNC_CANCELABLE : 0) |
+	result = call(KERN_SYS_usync, (uintptr_t)address,
+			       KERN_USYNC_WAIT, value, (uintptr_t)timeout, 0,
+			       (pshared ? 0 : KERN_USYNC_PRIVATE) |
+				   (cancelable ? KERN_USYNC_CANCELABLE : 0) |
 				   timeout_flags);
 
 	/* Returns the computed result. */
@@ -2931,8 +2931,8 @@ usync_wake_word_flags(
 	unsigned count,
 	int pshared)
 {
-	(void)call(ZEDBSD_SYS_usync, (uintptr_t)address, ZEDBSD_USYNC_WAKE, 0,
-		   0, count, pshared ? 0 : ZEDBSD_USYNC_PRIVATE);
+	(void)call(KERN_SYS_usync, (uintptr_t)address, KERN_USYNC_WAKE, 0,
+		   0, count, pshared ? 0 : KERN_USYNC_PRIVATE);
 }
 
 /* Supports the self tcb operation. */
@@ -2959,7 +2959,7 @@ ensure_main(
 		return;
 	memset(&main_tcb, 0, sizeof(main_tcb));
 	main_tcb.tid =
-	    (pthread_t)call(ZEDBSD_SYS_thread_self, 0, 0, 0, 0, 0, 0);
+	    (pthread_t)call(KERN_SYS_thread_self, 0, 0, 0, 0, 0, 0);
 
 	/* Handles a failed RTLD CALL operation. */
 	if (RTLD_CALL(thread_attach)(&main_tcb) != 0) {
@@ -2968,7 +2968,7 @@ ensure_main(
 			;
 	}
 	main_tcb.runtime_tcb = (struct __rtld_tcb *)(uintptr_t)__syscall6(
-	    ZEDBSD_SYS_thread_self, ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
+	    KERN_SYS_thread_self, KERN_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
 }
 
 /* Supports the registry add operation. */
@@ -3130,7 +3130,7 @@ usync_wait_word_absolute(
 	int function_result;
 	unsigned flags;
 
-	flags = ZEDBSD_USYNC_ABSTIME;
+	flags = KERN_USYNC_ABSTIME;
 
 	/* Handles the clock condition. */
 	if (clock != CLOCK_REALTIME && clock != CLOCK_MONOTONIC)
@@ -3138,7 +3138,7 @@ usync_wait_word_absolute(
 
 	/* Handles the clock condition. */
 	if (clock == CLOCK_REALTIME)
-		flags |= ZEDBSD_USYNC_CLOCK_REALTIME;
+		flags |= KERN_USYNC_CLOCK_REALTIME;
 
 	/* Obtains the usync wait word flags cancelable result. */
 	function_result = usync_wait_word_flags_cancelable(address, value, absolute,
@@ -3237,7 +3237,7 @@ cancel_pending(
 	/* Handles a failed pthread cancel enabled operation. */
 	if (!__pthread_cancel_enabled())
 		return 0;
-	pending = call(ZEDBSD_SYS_thread_cancel, 0, ZEDBSD_THREAD_CANCEL_TEST,
+	pending = call(KERN_SYS_thread_cancel, 0, KERN_THREAD_CANCEL_TEST,
 		       0, 0, 0, 0);
 
 	/* Returns the computed result. */
@@ -3345,7 +3345,7 @@ detached_reaper(
 					      NULL);
 			continue;
 		}
-		(void)call(ZEDBSD_SYS_thread_join, tcb->tid, 0, 0, 0, 0, 0);
+		(void)call(KERN_SYS_thread_join, tcb->tid, 0, 0, 0, 0, 0);
 		(void)registry_remove(tcb->tid);
 		RTLD_CALL(thread_free)(tcb->runtime_tcb);
 

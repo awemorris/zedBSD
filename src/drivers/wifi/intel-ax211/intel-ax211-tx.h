@@ -50,8 +50,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ZEDBSD_DRIVERS_INTEL_AX211_TX_H
-#define ZEDBSD_DRIVERS_INTEL_AX211_TX_H
+#ifndef KERN_DRIVERS_INTEL_AX211_TX_H
+#define KERN_DRIVERS_INTEL_AX211_TX_H
 
 #include <stddef.h>
 #include <stdint.h>

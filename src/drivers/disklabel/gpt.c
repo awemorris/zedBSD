@@ -12,7 +12,6 @@
 #include <drivers/disklabel.h>
 
 #include <errno.h>
-#include <hal/hal.h>
 #include <kern/kmem.h>
 #include <stdint.h>
 #include <string.h>

@@ -117,11 +117,11 @@ show_file(
 	found = 0;
 
 	memset(&query, 0, sizeof(query));
-	query.version = ZEDBSD_SYSTEM_FILE_USAGE_VERSION;
+	query.version = KERN_SYSTEM_FILE_USAGE_VERSION;
 	query.struct_size = sizeof(query);
 	query.cursor_pid = -1;
 	query.query_flags =
-	    mount_query ? ZEDBSD_SYSTEM_FILE_USAGE_QUERY_MOUNT : 0;
+	    mount_query ? KERN_SYSTEM_FILE_USAGE_QUERY_MOUNT : 0;
 
 	/* Handles a failed strlen operation. */
 	if (strlen(path) >= sizeof(query.path)) {
@@ -136,7 +136,7 @@ show_file(
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		/* Handles a failed ioctl operation. */
-		if (ioctl(descriptor, ZEDBSD_SYSTEM_GET_FILE_USAGE, &query) !=
+		if (ioctl(descriptor, KERN_SYSTEM_GET_FILE_USAGE, &query) !=
 		    0) {
 			/* Handles the reported system error. */
 			if (errno == ENOENT)
@@ -175,26 +175,26 @@ print_flags(
 	unsigned flags)
 {
 	/* Checks the active flags. */
-	if ((flags & ZEDBSD_SYSTEM_FILE_USAGE_CWD) != 0)
+	if ((flags & KERN_SYSTEM_FILE_USAGE_CWD) != 0)
 		putchar('c');
 
 	/* Checks the active flags. */
-	if ((flags & ZEDBSD_SYSTEM_FILE_USAGE_ROOT) != 0)
+	if ((flags & KERN_SYSTEM_FILE_USAGE_ROOT) != 0)
 		putchar('r');
 
 	/* Checks the active flags. */
-	if ((flags & ZEDBSD_SYSTEM_FILE_USAGE_EXECUTABLE) != 0)
+	if ((flags & KERN_SYSTEM_FILE_USAGE_EXECUTABLE) != 0)
 		putchar('e');
 
 	/* Checks the active flags. */
-	if ((flags & ZEDBSD_SYSTEM_FILE_USAGE_OPEN) != 0)
+	if ((flags & KERN_SYSTEM_FILE_USAGE_OPEN) != 0)
 		putchar('f');
 
 	/* Checks the active flags. */
-	if ((flags & ZEDBSD_SYSTEM_FILE_USAGE_MAPPED) != 0)
+	if ((flags & KERN_SYSTEM_FILE_USAGE_MAPPED) != 0)
 		putchar('m');
 
 	/* Checks the active flags. */
-	if ((flags & ZEDBSD_SYSTEM_FILE_USAGE_SOCKET) != 0)
+	if ((flags & KERN_SYSTEM_FILE_USAGE_SOCKET) != 0)
 		putchar('s');
 }

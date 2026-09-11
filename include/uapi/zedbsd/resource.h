@@ -4,8 +4,9 @@
  *
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_UAPI_RESOURCE_H
-#define ZEDBSD_UAPI_RESOURCE_H
+
+#ifndef KERN_UAPI_RESOURCE_H
+#define KERN_UAPI_RESOURCE_H
 
 #include <stdint.h>
 

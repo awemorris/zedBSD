@@ -11,8 +11,8 @@
  * Declares the zedBSD userland service console interface.
  */
 
-#ifndef ZEDBSD_SERVICE_CONSOLE_H
-#define ZEDBSD_SERVICE_CONSOLE_H
+#ifndef KERN_SERVICE_CONSOLE_H
+#define KERN_SERVICE_CONSOLE_H
 
 #include "userland/base/service/service-command.h"
 

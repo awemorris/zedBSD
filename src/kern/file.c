@@ -44,7 +44,7 @@
 
 #define FILE_HIGH __attribute__((section(".hightext")))
 
-#ifdef ZEDBSD_USER_ABI_LP64
+#ifdef KERN_USER_ABI_LP64
 #define OFF_T_MAX ((off_t)INT64_MAX)
 #define OFF_T_MIN ((off_t)INT64_MIN)
 #else
@@ -506,7 +506,7 @@ file_ioctl(
 		return EBADF;
 
 	/* Handles the regular-file lease before filesystem-specific ioctls. */
-	if (request == ZEDBSD_FILE_FORMAT_RESERVE)
+	if (request == KERN_FILE_FORMAT_RESERVE)
 		return file_format_ioctl(file, argument);
 	if (file->f_ops == NULL || file->f_ops->ioctl == NULL)
 		return EOPNOTSUPP;
@@ -804,13 +804,13 @@ file_exec_snapshot_create(
 		return EINVAL;
 	*result = NULL;
 	if (input == NULL || !input->active || offset < 0 || length == 0 ||
-	    ((uint64_t)offset & (ZEDBSD_PAGE_SIZE - 1U)) != 0 ||
-	    (length & (ZEDBSD_PAGE_SIZE - 1U)) != 0 || offset > input->size ||
+	    ((uint64_t)offset & (KERN_PAGE_SIZE - 1U)) != 0 ||
+	    (length & (KERN_PAGE_SIZE - 1U)) != 0 || offset > input->size ||
 	    (uint64_t)length > (uint64_t)(input->size - offset))
 		return EINVAL;
 	if (!input->shared_read || input->read_object == NULL)
 		return EOPNOTSUPP;
-	count = length / ZEDBSD_PAGE_SIZE;
+	count = length / KERN_PAGE_SIZE;
 	if (count > (SIZE_MAX - sizeof(*snapshot)) / sizeof(snapshot->pages[0]))
 		return EOVERFLOW;
 	bytes = sizeof(*snapshot) + count * sizeof(snapshot->pages[0]);
@@ -841,7 +841,7 @@ file_exec_snapshot_create(
 	/* Persistent page pins prevent reclaim from replacing captured source bytes. */
 	for (index = 0; index < count; index++) {
 		error = vm_object_fault(snapshot->input.read_object,
-		    offset + (off_t)(index * ZEDBSD_PAGE_SIZE), &page);
+		    offset + (off_t)(index * KERN_PAGE_SIZE), &page);
 		if (error != 0)
 			goto fail;
 		error = vm_object_page_pin(page);
@@ -2654,7 +2654,7 @@ file_format_ioctl(
 	struct file *file,
 	uintptr_t argument)
 {
-	struct zedbsd_file_format_reserve request;
+	struct kern_file_format_reserve request;
 	int error;
 
 	/* Copies the complete request before making any reservation. */
@@ -2663,7 +2663,7 @@ file_format_ioctl(
 		return error;
 
 	/* Rejects unsupported versions and nonzero extension fields. */
-	if (request.version != ZEDBSD_FILE_FORMAT_VERSION ||
+	if (request.version != KERN_FILE_FORMAT_VERSION ||
 	    request.struct_size != sizeof(request) ||
 	    request.reserved[0] != 0 || request.reserved[1] != 0)
 		return EINVAL;

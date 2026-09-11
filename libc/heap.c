@@ -31,7 +31,7 @@ struct heap_block {
 static struct heap_allocator default_heap;
 static struct heap_allocator *active_heap = &default_heap;
 
-#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+#ifdef KERN_KERNEL_HEAP_TRACE
 /* Private kernel builds override this hook with a non-allocating ring writer. */
 __attribute__((weak)) void
 __heap_trace_pointer_walk(void *pointer, void *caller)
@@ -214,7 +214,7 @@ pointer_block(const struct heap_allocator *heap, void *pointer)
 	struct heap_block *block;
 	struct heap_block *cursor;
 	uint8_t *bytes = pointer;
-#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+#ifdef KERN_KERNEL_HEAP_TRACE
 	size_t limit;
 	size_t steps = 0;
 #endif
@@ -226,12 +226,12 @@ pointer_block(const struct heap_allocator *heap, void *pointer)
 	if ((uintptr_t)block % HEAP_ALIGNMENT != 0 ||
 	    block->magic != HEAP_MAGIC || block_payload(block) != bytes)
 		return NULL;
-#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+#ifdef KERN_KERNEL_HEAP_TRACE
 	limit = (size_t)(heap->end - heap->begin) / block_header_size() + 1U;
 #endif
 	for (cursor = heap->first; cursor != NULL;
 	     cursor = cursor->next_physical) {
-#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+#ifdef KERN_KERNEL_HEAP_TRACE
 		if (++steps > limit)
 			return NULL;
 #endif
@@ -416,7 +416,7 @@ heap_allocator_alloc(struct heap_allocator *heap, size_t size)
 	heap->successful_allocations++;
 	if (heap->observer != NULL)
 		heap->observer(heap->observer_context, block_payload(block),
-			       requested, ZEDBSD_HEAP_ALLOCATED);
+			       requested, KERN_HEAP_ALLOCATED);
 	return block_payload(block);
 }
 
@@ -521,7 +521,7 @@ retry:
 	heap->successful_allocations++;
 	if (heap->observer != NULL)
 		heap->observer(heap->observer_context, block_payload(aligned_block),
-		    requested, ZEDBSD_HEAP_ALLOCATED);
+		    requested, KERN_HEAP_ALLOCATED);
 	return block_payload(aligned_block);
 
 fail:
@@ -558,7 +558,7 @@ heap_allocator_free(struct heap_allocator *heap, void *pointer)
 		return;
 	if (heap == NULL)
 		return;
-#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+#ifdef KERN_KERNEL_HEAP_TRACE
 	__heap_trace_pointer_walk(pointer, __builtin_return_address(0));
 #endif
 	block = pointer_block(heap, pointer);
@@ -568,7 +568,7 @@ heap_allocator_free(struct heap_allocator *heap, void *pointer)
 	}
 	if (heap->observer != NULL)
 		heap->observer(heap->observer_context, pointer, block->used,
-			       ZEDBSD_HEAP_FREED);
+			       KERN_HEAP_FREED);
 	heap->current_bytes -= block->used;
 	block->used = 0;
 	block->state = HEAP_FREE;

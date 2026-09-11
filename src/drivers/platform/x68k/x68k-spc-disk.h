@@ -9,8 +9,8 @@
  * X68000 MB89352 synchronous polled-PIO block driver.
  */
 
-#ifndef ZEDBSD_DRIVERS_X68K_SPC_DISK_H
-#define ZEDBSD_DRIVERS_X68K_SPC_DISK_H
+#ifndef KERN_DRIVERS_X68K_SPC_DISK_H
+#define KERN_DRIVERS_X68K_SPC_DISK_H
 
 #include "drivers/platform/x68k/x68k-mb89352.h"
 

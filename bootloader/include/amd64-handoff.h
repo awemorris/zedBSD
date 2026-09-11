@@ -1,7 +1,7 @@
 /* PC/AT Stage 2 -> amd64 HAL bootstrap handoff. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_BOOTLOADER_AMD64_HANDOFF_H
-#define ZEDBSD_BOOTLOADER_AMD64_HANDOFF_H
+#ifndef KERN_BOOTLOADER_AMD64_HANDOFF_H
+#define KERN_BOOTLOADER_AMD64_HANDOFF_H
 
 #include "boot-parameter-handoff.h"
 #include "../../include/boot/provenance.h"
@@ -44,15 +44,15 @@
 #define ZBL6_HANDOFF_V4_SIZE 100
 #define ZBL6_HANDOFF_V5_VERSION 5
 #define ZBL6_HANDOFF_V5_BIOS_SIZE \
-	(ZBL6_HANDOFF_FB_SIZE + ZEDBSD_BOOT_PARAMETER_RECORD_SIZE)
+	(ZBL6_HANDOFF_FB_SIZE + KERN_BOOT_PARAMETER_RECORD_SIZE)
 #define ZBL6_HANDOFF_V5_UEFI_SIZE \
-	(ZBL6_HANDOFF_V4_SIZE + ZEDBSD_BOOT_PARAMETER_RECORD_SIZE)
+	(ZBL6_HANDOFF_V4_SIZE + KERN_BOOT_PARAMETER_RECORD_SIZE)
 #define ZBL6_HANDOFF_V5_BIOS_PARAMETERS_OFFSET ZBL6_HANDOFF_FB_SIZE
 #define ZBL6_HANDOFF_V5_UEFI_PARAMETERS_OFFSET ZBL6_HANDOFF_V4_SIZE
 
 /* V6 appends the same memory envelope after either unchanged V5 prefix. */
 #define ZBL6_HANDOFF_V7_VERSION 7
-#define ZBL6_HANDOFF_V7_UEFI_SIZE (ZBL6_HANDOFF_V6_UEFI_SIZE + ZEDBSD_BOOT_PROVENANCE_SIZE)
+#define ZBL6_HANDOFF_V7_UEFI_SIZE (ZBL6_HANDOFF_V6_UEFI_SIZE + KERN_BOOT_PROVENANCE_SIZE)
 #define ZBL6_HANDOFF_V6_VERSION 6
 #define ZBL6_MEMORY_HANDOFF_SIZE 64
 #define ZBL6_HANDOFF_V6_BIOS_MEMORY_OFFSET ZBL6_HANDOFF_V5_BIOS_SIZE
@@ -191,12 +191,12 @@ struct zbl6_handoff_v4 {
 
 struct zbl6_handoff_v5_bios {
 	struct zbl6_handoff_framebuffer common;
-	struct zedbsd_boot_parameter_record parameters;
+	struct kern_boot_parameter_record parameters;
 } __attribute__((packed));
 
 struct zbl6_handoff_v5_uefi {
 	struct zbl6_handoff_v4 common;
-	struct zedbsd_boot_parameter_record parameters;
+	struct kern_boot_parameter_record parameters;
 } __attribute__((packed));
 
 struct zbl6_framebuffer {

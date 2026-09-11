@@ -54,7 +54,7 @@ struct unix_connection {
 
 struct unix_rights {
 	unsigned count;
-	struct file *files[ZEDBSD_MSG_FD_MAX];
+	struct file *files[KERN_MSG_FD_MAX];
 };
 
 struct unix_stream_chunk {
@@ -90,8 +90,8 @@ struct unix_socket {
 	uint64_t reservation_token;
 	unsigned endpoint_closed;
 	unsigned connecting;
-	struct zedbsd_peercred listener_credential;
-	struct zedbsd_peercred peer_credential;
+	struct kern_peercred listener_credential;
+	struct kern_peercred peer_credential;
 	unsigned listener_credential_valid;
 	unsigned peer_credential_valid;
 };
@@ -103,7 +103,7 @@ static int unix_copy_path(const struct sockaddr *address, socklen_t length, char
 static void unix_store_address(const struct unix_socket *endpoint, struct sockaddr *address, socklen_t *length);
 static void unix_store_packet_source(const struct unix_socket *endpoint, struct packet_buf *packet);
 static int unix_resolve_endpoint(struct cwdinfo *context, const struct ucred *cred, const struct sockaddr *address, socklen_t length, int type, struct socket **result, char path_text[UNIX_PATH_MAX]);
-static int unix_connection_create(struct socket *left, struct socket *right, const struct zedbsd_peercred *left_peer, const struct zedbsd_peercred *right_peer);
+static int unix_connection_create(struct socket *left, struct socket *right, const struct kern_peercred *left_peer, const struct kern_peercred *right_peer);
 static void unix_connection_release(struct unix_connection *connection);
 static int unix_peer_ref(struct unix_socket *endpoint, struct socket **result);
 static ssize_t unix_send_epipe(struct unix_rights *rights, int flags);
@@ -117,7 +117,7 @@ static ssize_t unix_recvfrom(struct socket *socket, void *buffer, size_t length,
 static int unix_shutdown(struct socket *socket, int how);
 static int unix_bind(struct socket *socket, const struct sockaddr *address, socklen_t length);
 static void unix_connect_cancel(struct socket *socket);
-static int unix_connect_resolved(struct socket *socket, struct socket *listener_socket, const struct zedbsd_peercred *connector_credential, const char *path, unsigned io_flags);
+static int unix_connect_resolved(struct socket *socket, struct socket *listener_socket, const struct kern_peercred *connector_credential, const char *path, unsigned io_flags);
 static int unix_connect(struct socket *socket, const struct sockaddr *address, socklen_t length, unsigned io_flags);
 static int unix_accept(struct socket *socket, struct socket **result, struct sockaddr *address, socklen_t *length, unsigned io_flags);
 static int unix_getsockname(struct socket *socket, struct sockaddr *address, socklen_t *length);
@@ -198,7 +198,7 @@ unix_socket_send_message(
 	/* Rejects a socket of another family or too many files. */
 	if (socket == NULL ||
 	    socket->family != AF_UNIX ||
-	    count > ZEDBSD_MSG_FD_MAX) {
+	    count > KERN_MSG_FD_MAX) {
 		for (index = 0; index < count; index++)
 			(void)file_close(files[index]);
 		return -(ssize_t)EOPNOTSUPP;
@@ -254,7 +254,7 @@ unix_socket_send_message_at(
 	/* Rejects a socket of another family or too many files. */
 	if (socket == NULL ||
 	    socket->family != AF_UNIX ||
-	    count > ZEDBSD_MSG_FD_MAX) {
+	    count > KERN_MSG_FD_MAX) {
 		for (index = 0; index < count; index++)
 			(void)file_close(files[index]);
 		return -(ssize_t)EOPNOTSUPP;
@@ -335,7 +335,7 @@ unix_socket_receive_begin(
 	    socket->family != AF_UNIX ||
 	    transaction == NULL ||
 	    ((address == NULL) != (address_length == NULL)) ||
-	    file_capacity > ZEDBSD_MSG_FD_MAX)
+	    file_capacity > KERN_MSG_FD_MAX)
 		return -EINVAL;
 	memset(transaction, 0, sizeof(*transaction));
 	datagram = socket->type == SOCK_DGRAM;
@@ -865,7 +865,7 @@ int
 unix_socket_listen(
 	struct socket *socket,
 	int backlog,
-	const struct zedbsd_peercred *listener_credential)
+	const struct kern_peercred *listener_credential)
 {
 	struct unix_socket *endpoint;
 	unsigned long irq;
@@ -919,7 +919,7 @@ unix_socket_connect_path(
 	struct socket *socket,
 	struct cwdinfo *context,
 	const struct ucred *cred,
-	const struct zedbsd_peercred *connector_credential,
+	const struct kern_peercred *connector_credential,
 	const struct sockaddr *address,
 	socklen_t length,
 	unsigned io_flags)
@@ -979,7 +979,7 @@ int
 unix_socket_pair_create(
 	int type,
 	int protocol,
-	const struct zedbsd_peercred *creator,
+	const struct kern_peercred *creator,
 	struct socket **left_result,
 	struct socket **right_result)
 {
@@ -1239,8 +1239,8 @@ static int
 unix_connection_create(
 	struct socket *left,
 	struct socket *right,
-	const struct zedbsd_peercred *left_peer,
-	const struct zedbsd_peercred *right_peer)
+	const struct kern_peercred *left_peer,
+	const struct kern_peercred *right_peer)
 {
 	struct unix_connection *connection;
 
@@ -1900,7 +1900,7 @@ static int
 unix_connect_resolved(
 	struct socket *socket,
 	struct socket *listener_socket,
-	const struct zedbsd_peercred *connector_credential,
+	const struct kern_peercred *connector_credential,
 	const char *path,
 	unsigned io_flags)
 {
@@ -1908,7 +1908,7 @@ unix_connect_resolved(
 	struct unix_socket *listener;
 	struct unix_pending *pending;
 	struct unix_connection *connection;
-	struct zedbsd_peercred listener_credential;
+	struct kern_peercred listener_credential;
 	struct socket *accepted;
 	unsigned long irq;
 	int error;
@@ -2186,7 +2186,7 @@ unix_getsockopt(
 	socklen_t *length)
 {
 	struct unix_socket *endpoint;
-	struct zedbsd_peercred credential;
+	struct kern_peercred credential;
 	unsigned long irq;
 
 	/* Only SO_PEERCRED of a stream socket is handled here. */

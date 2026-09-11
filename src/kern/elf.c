@@ -31,8 +31,8 @@
 #include <string.h>
 
 #define ELF_PHNUM_MAX 32U
-#define PAGE_SIZE ZEDBSD_PAGE_SIZE
-#ifdef ZEDBSD_USER_ABI_LP64
+#define PAGE_SIZE KERN_PAGE_SIZE
+#ifdef KERN_USER_ABI_LP64
 #define ELF_OFF_MAX 0x7fffffffffffffffULL
 #else
 #define ELF_OFF_MAX 0x7fffffffULL
@@ -849,7 +849,7 @@ load_static_tls(
 	const struct normalized_program *tls,
 	uintptr_t *thread_pointer)
 {
-	struct zedbsd_tls_prefix prefix;
+	struct kern_tls_prefix prefix;
 	uintptr_t template_address;
 	uintptr_t mapping;
 	uintptr_t tp;
@@ -866,7 +866,7 @@ load_static_tls(
 	distance = (size_t)tls->memsz +
 	    (size_t)((0U - tls->vaddr - tls->memsz) & (alignment - 1U));
 	payload_size = (distance + PAGE_SIZE - 1U) & ~(size_t)(PAGE_SIZE - 1U);
-	mapping_size = payload_size + ZEDBSD_TLS_TCB_RESERVE;
+	mapping_size = payload_size + KERN_TLS_TCB_RESERVE;
 	template_size = ((size_t)tls->filesz + PAGE_SIZE - 1U) &
 	    ~(size_t)(PAGE_SIZE - 1U);
 	template_address = 0;
@@ -1101,7 +1101,7 @@ validate_and_load(
 			tls = program;
 			if (tls->filesz > tls->memsz)
 				goto invalid;
-			if (tls->memsz > ZEDBSD_TLS_MEMORY_MAX)
+			if (tls->memsz > KERN_TLS_MEMORY_MAX)
 				goto invalid;
 			if (tls->offset > file_size)
 				goto invalid;
@@ -1109,7 +1109,7 @@ validate_and_load(
 				goto invalid;
 			if (tls->vaddr > UINT64_MAX - tls->memsz)
 				goto invalid;
-			if (tls->align > ZEDBSD_TLS_ALIGN_MAX)
+			if (tls->align > KERN_TLS_ALIGN_MAX)
 				goto invalid;
 			if (tls->align > 1U) {
 				if (!power_of_two64(tls->align))

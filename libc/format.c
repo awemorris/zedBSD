@@ -19,7 +19,7 @@ struct format_output {
 	size_t length;
 };
 
-#ifndef ZEDBSD_NO_PRINTF_FLOAT
+#ifndef KERN_NO_PRINTF_FLOAT
 #define FLOAT_DIGITS_MAX 17
 
 union double_shape {
@@ -86,7 +86,7 @@ emit_wide_text(struct format_output *output, const wchar_t *text,
 	return 0;
 }
 
-#ifndef ZEDBSD_NO_PRINTF_FLOAT
+#ifndef KERN_NO_PRINTF_FLOAT
 static void
 append_character(char *buffer, size_t capacity, size_t *length, char character)
 {
@@ -567,7 +567,7 @@ vsnprintf(char *buffer, size_t size, const char *format, va_list arguments)
 		} else if (conversion == 'f' || conversion == 'F' ||
 			   conversion == 'e' || conversion == 'E' ||
 			   conversion == 'g' || conversion == 'G') {
-			#ifdef ZEDBSD_NO_PRINTF_FLOAT
+			#ifdef KERN_NO_PRINTF_FLOAT
 			(void)va_arg(arguments, double);
 			emit_bytes(&output, "[float]", 7U);
 			#else

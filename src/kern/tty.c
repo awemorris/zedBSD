@@ -847,7 +847,7 @@ tty_pty_register(
 	return 0;
 }
 
-#ifdef ZEDBSD_TTY_TEST
+#ifdef KERN_TTY_TEST
 /*
  * Tests that a VLNEXT-quoted VSTOP reaches the input as a plain byte.
  */

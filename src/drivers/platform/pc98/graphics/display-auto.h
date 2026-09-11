@@ -9,8 +9,8 @@
  * zedBSD graphics NEC PC-9821 Core-Graph / Cirrus GD5440 display backend.
  */
 
-#ifndef ZEDBSD_DRIVERS_GRAPHICS_PC98_DISPLAY_AUTO_H
-#define ZEDBSD_DRIVERS_GRAPHICS_PC98_DISPLAY_AUTO_H
+#ifndef KERN_DRIVERS_GRAPHICS_PC98_DISPLAY_AUTO_H
+#define KERN_DRIVERS_GRAPHICS_PC98_DISPLAY_AUTO_H
 
 #include "drivers/platform/pc98/graphics/display-cirrus.h"
 #include "drivers/platform/pc98/graphics/display-glyph.h"

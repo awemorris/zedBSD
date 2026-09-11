@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_KERN_SWAP_CONTROL_H
-#define ZEDBSD_KERN_SWAP_CONTROL_H
+#ifndef KERN_KERN_SWAP_CONTROL_H
+#define KERN_KERN_SWAP_CONTROL_H
 
 #include <kern/swap-source.h>
 
@@ -33,8 +33,8 @@ struct kern_swap_control_source_info {
 	uint32_t header_version;
 	uint32_t total_pages;
 	uint32_t used_pages;
-	uint8_t uuid[ZEDBSD_SWAP_V2_UUID_SIZE];
-	char label[ZEDBSD_SWAP_V2_LABEL_SIZE];
+	uint8_t uuid[KERN_SWAP_V2_UUID_SIZE];
+	char label[KERN_SWAP_V2_LABEL_SIZE];
 	char source[KERN_SWAP_SOURCE_TEXT_MAX + 1U];
 };
 

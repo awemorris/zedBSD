@@ -11,8 +11,8 @@
  * Declares networkd's global managed-WLAN policy state.
  */
 
-#ifndef ZEDBSD_NETWORKD_MANAGED_WLAN_H
-#define ZEDBSD_NETWORKD_MANAGED_WLAN_H
+#ifndef KERN_NETWORKD_MANAGED_WLAN_H
+#define KERN_NETWORKD_MANAGED_WLAN_H
 
 #include <net/if.h>
 #include <net/route.h>

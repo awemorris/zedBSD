@@ -11,8 +11,8 @@
  * The i386 board bootstrap contract.
  */
 
-#ifndef ZEDBSD_HAL_I386_BSP_H
-#define ZEDBSD_HAL_I386_BSP_H
+#ifndef KERN_HAL_I386_BSP_H
+#define KERN_HAL_I386_BSP_H
 
 void bsp_boot_init(const void *raw_boot_info);
 const void *bsp_kernel_handoff(const void *raw_boot_info);

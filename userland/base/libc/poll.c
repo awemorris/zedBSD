@@ -37,7 +37,7 @@ ppoll(
 	int result;
 
 	cancel_point();
-	result = (int)call(ZEDBSD_SYS_ppoll, (uintptr_t)fds, count,
+	result = (int)call(KERN_SYS_ppoll, (uintptr_t)fds, count,
 			   (uintptr_t)timeout, (uintptr_t)mask, 0, 0);
 	cancel_point();
 
@@ -99,7 +99,7 @@ pselect(
 
 	cancel_point();
 	result =
-	    (int)call(ZEDBSD_SYS_pselect, (uintptr_t)nfds, (uintptr_t)readfds,
+	    (int)call(KERN_SYS_pselect, (uintptr_t)nfds, (uintptr_t)readfds,
 		      (uintptr_t)writefds, (uintptr_t)exceptfds,
 		      (uintptr_t)timeout, (uintptr_t)mask);
 	cancel_point();

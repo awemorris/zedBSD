@@ -11,8 +11,8 @@
  * The fixed UFS data-image formatter interface.
  */
 
-#ifndef ZEDBSD_MKFS_UFS_FORMAT_H
-#define ZEDBSD_MKFS_UFS_FORMAT_H
+#ifndef KERN_MKFS_UFS_FORMAT_H
+#define KERN_MKFS_UFS_FORMAT_H
 
 #include <stdint.h>
 

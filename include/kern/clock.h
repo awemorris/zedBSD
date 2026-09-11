@@ -9,9 +9,10 @@
  * Clock
  */
 
-#ifndef ZEDBSD_KERN_CLOCK_H
-#define ZEDBSD_KERN_CLOCK_H
+#ifndef KERN_KERN_CLOCK_H
+#define KERN_KERN_CLOCK_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
 
@@ -102,5 +103,13 @@ kern_clock_realtime_synchronized(void);
 
 int
 kern_cpu_notify_probe(void);
+
+/*
+ * Read the monotonic counter and its frequency.
+ *
+ * The epoch is unspecified; only differences between samples are
+ * meaningful. Reports false when no counter is available.
+ */
+bool kern_rtc_read_counter(uint64_t *counter, uint64_t *frequency_hz);
 
 #endif

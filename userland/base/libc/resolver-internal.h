@@ -11,8 +11,8 @@
  * Declares the zedBSD C library resolver internal interface.
  */
 
-#ifndef ZEDBSD_RESOLVER_INTERNAL_H
-#define ZEDBSD_RESOLVER_INTERNAL_H
+#ifndef KERN_RESOLVER_INTERNAL_H
+#define KERN_RESOLVER_INTERNAL_H
 
 #include <netinet/in.h>
 #include <stddef.h>

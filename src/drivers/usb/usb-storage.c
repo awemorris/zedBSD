@@ -14,7 +14,6 @@
 #include <drivers/usb-storage-scsi.h>
 #include <drivers/usb.h>
 #include <errno.h>
-#include <hal/hal.h>
 #include <kern/disk.h>
 #include <kern/partition.h>
 #include <kern/io-stats.h>
@@ -104,7 +103,7 @@ struct usb_storage {
 	unsigned partitions_pending;
 	uint64_t command_deadline;
 	enum drv_usb_scsi_flush_policy flush_policy;
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 	unsigned checkpoint_read_sequence;
 #endif
 };
@@ -288,7 +287,7 @@ storage_urb_transfer(
 				 ? DRV_USB_URB_RECLAIM_SAFE
 				 : 0;
 	int error;
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 	unsigned checkpoint_sequence = 0;
 
 #else
@@ -309,7 +308,7 @@ storage_urb_transfer(
 				  NULL);
 	if (error == 0)
 		error = drv_usb_urb_submit(urb);
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 
 	/*
 	 * This marker is intentionally emitted only after the HCD accepted the
@@ -339,7 +338,7 @@ storage_urb_transfer(
 	/* Checks the operation status. */
 	if (error == 0)
 		error = drv_usb_urb_wait_reusable(urb);
-#ifdef ZEDBSD_TEST_CHECKPOINTS
+#ifdef KERN_TEST_CHECKPOINTS
 
 	/* Handles the checkpoint sequence condition. */
 	if (checkpoint_sequence != 0) {
@@ -1779,7 +1778,7 @@ storage_control_worker(
 		/* Checks the atomic raw load acquire result. */
 		if (atomic_raw_load_acquire(&storage->control_stopping))
 			return;
-		kernel_wait_task();
+		kern_thread_block();
 	}
 	while (!atomic_raw_load_acquire(&storage->control_stopping)) {
 		mutex_lock(&storage->control_lock);

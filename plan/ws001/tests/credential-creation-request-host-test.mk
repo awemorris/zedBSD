@@ -4,7 +4,7 @@ REPO := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../..)
 OUT ?= $(REPO)/build/ws001-p015-creation-request-host
 CC ?= cc
 
-CPPFLAGS := -DZEDBSD_USER_ABI_LP64 -I$(REPO)/include \
+CPPFLAGS := -DKERN_USER_ABI_LP64 -I$(REPO)/include \
 	-I$(REPO)/include/uapi -I$(REPO)/src -I$(REPO)/libc/include -I$(REPO)
 CFLAGS := -std=c11 -O0 -Wall -Wextra -Werror -ffunction-sections \
 	-fdata-sections

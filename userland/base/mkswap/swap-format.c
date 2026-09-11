@@ -69,7 +69,7 @@ swap_format_write(
 
 	/* Publishes the same deterministic header as the maintained builder. */
 	make_header(block, bytes);
-	error = write_exact(fd, block, ZEDBSD_SWAP_HEADER_SIZE, 0);
+	error = write_exact(fd, block, KERN_SWAP_HEADER_SIZE, 0);
 
 	/* Leaves durability and descriptor ownership to the command frontend. */
 	return error;
@@ -224,10 +224,10 @@ make_header(
 	uint64_t bytes)
 {
 	/* Initializes fixed fields and zero UUID/label/reserved bytes. */
-	memset(header, 0, ZEDBSD_SWAP_HEADER_SIZE);
+	memset(header, 0, KERN_SWAP_HEADER_SIZE);
 	memcpy(header, "ZEDSWAP2", 8);
 	header[8] = 2;
-	header[10] = ZEDBSD_SWAP_HEADER_SIZE;
+	header[10] = KERN_SWAP_HEADER_SIZE;
 	put32(header + 12, SWAP_PAGE_SIZE);
 	put64(header + 16, bytes);
 	put64(header + 24, bytes / SWAP_PAGE_SIZE - 1);

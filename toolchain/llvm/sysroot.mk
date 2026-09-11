@@ -213,7 +213,7 @@ $(1)/.zedbsd-sysroot-complete: $(ZEDBSD_SYSROOT_INPUTS) \
 	mv "$$$$temporary" "$$$$destination"; temporary=; trap - EXIT HUP INT TERM
 endef
 
-$(eval $(call ZEDBSD_BUILD_X86_SYSROOT,$(ZEDBSD_SYSROOT_AMD64),amd64,x86_64-unknown-zedbsd,-m64 -march=x86-64 -mno-red-zone,HAL_ARCH_AMD64,src/crt/crt0-amd64.S,src/crt/crt1-amd64.S,amd64,user.ld,Advanced Micro Devices X86-64,-DZEDBSD_USER_ABI_LP64))
+$(eval $(call ZEDBSD_BUILD_X86_SYSROOT,$(ZEDBSD_SYSROOT_AMD64),amd64,x86_64-unknown-zedbsd,-m64 -march=x86-64 -mno-red-zone,HAL_ARCH_AMD64,src/crt/crt0-amd64.S,src/crt/crt1-amd64.S,amd64,user.ld,Advanced Micro Devices X86-64,-DKERN_USER_ABI_LP64))
 $(eval $(call ZEDBSD_BUILD_X86_SYSROOT,$(ZEDBSD_SYSROOT_I386),i386,i386-unknown-zedbsd,-m32 -march=i386 -msoft-float -mno-mmx -mno-sse -mno-sse2,HAL_ARCH_I386,src/crt/crt0.S,src/crt/crt1-i386.S,pcat,user.ld,Intel 80386,))
 
 .PHONY: sysroot-amd64 sysroot-i386 sysroots

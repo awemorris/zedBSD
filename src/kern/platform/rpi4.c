@@ -43,10 +43,10 @@ kern_platform_init(
 	if (!handoff ||
 	    !devices ||
 	    capacity == 0 ||
-	    handoff->magic != ZEDBSD_HANDOFF_MAGIC ||
-	    handoff->version != ZEDBSD_HANDOFF_VERSION_MULTIBOOT ||
+	    handoff->magic != KERN_HANDOFF_MAGIC ||
+	    handoff->version != KERN_HANDOFF_VERSION_MULTIBOOT ||
 	    handoff->size < sizeof(*rpi4) ||
-	    rpi4->extension_magic != ZEDBSD_RPI4_HANDOFF_MAGIC ||
+	    rpi4->extension_magic != KERN_RPI4_HANDOFF_MAGIC ||
 	    rpi4->extension_version != 1 ||
 	    rpi4->extension_size < sizeof(*rpi4) - sizeof(rpi4->common) ||
 	    rpi4->sdhci_phys == 0)
@@ -69,12 +69,12 @@ kern_platform_init(
 
 	/* Publishes the SD card as the boot device. */
 	device = &devices[0];
-	device->device_class = ZEDBSD_DEV_SD;
+	device->device_class = KERN_DEV_SD;
 	device->display_index = 0;
 	device->bios_id = 0x80;
-	device->flags = ZEDBSD_DEV_PRESENT;
+	device->flags = KERN_DEV_PRESENT;
 	if (handoff->boot_bios_id == 0x80)
-		device->flags |= ZEDBSD_DEV_BOOT_ORIGIN;
+		device->flags |= KERN_DEV_BOOT_ORIGIN;
 	device->sector_size = 512;
 	device->cylinders = 0;
 	device->heads = 0;
@@ -120,7 +120,7 @@ kern_platform_block_device(
 	struct disk *disk;
 
 	/* Only the SD boot device has a disk. */
-	if (!d || d->device_class != ZEDBSD_DEV_SD)
+	if (!d || d->device_class != KERN_DEV_SD)
 		return NULL;
 
 	/* Resolves the SDHCI disk. */

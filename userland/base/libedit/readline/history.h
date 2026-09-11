@@ -11,8 +11,8 @@
  * Declares the zedBSD userland history interface.
  */
 
-#ifndef ZEDBSD_READLINE_HISTORY_H
-#define ZEDBSD_READLINE_HISTORY_H
+#ifndef KERN_READLINE_HISTORY_H
+#define KERN_READLINE_HISTORY_H
 
 typedef struct _hist_entry {
 	char *line;

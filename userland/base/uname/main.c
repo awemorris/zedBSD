@@ -89,7 +89,7 @@ main(
 	FIELD(node, nodename);
 	FIELD(release, release);
 	FIELD(version, version);
-#ifdef ZEDBSD_UNAME_PC98
+#ifdef KERN_UNAME_PC98
 	/* Distinguishes the PC98 distribution from PC/AT on the same CPU ABI. */
 	if (version || all)
 		printf(" pc98");

@@ -9,8 +9,8 @@
  * netif
  */
 
-#ifndef ZEDBSD_UAPI_NETIF_H
-#define ZEDBSD_UAPI_NETIF_H
+#ifndef KERN_UAPI_NETIF_H
+#define KERN_UAPI_NETIF_H
 
 #include <zedbsd/socket.h>
 #include <stdint.h>

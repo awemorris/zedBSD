@@ -4,8 +4,8 @@
  *
  * SPDX-License-Identifier: Zlib
  */
-#ifndef ZEDBSD_KERN_LOCK_H
-#define ZEDBSD_KERN_LOCK_H
+#ifndef KERN_KERN_LOCK_H
+#define KERN_KERN_LOCK_H
 
 #include <kern/atomic.h>
 #include <kern/waitq.h>

@@ -9,8 +9,8 @@
  * NEC PC-98 internal IDE driver
  */
 
-#ifndef ZEDBSD_DRIVERS_IDE_PC98_H
-#define ZEDBSD_DRIVERS_IDE_PC98_H
+#ifndef KERN_DRIVERS_IDE_PC98_H
+#define KERN_DRIVERS_IDE_PC98_H
 
 #include "kern/disk.h"
 

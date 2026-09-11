@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_UAPI_CACHE_MEMORY_H
-#define ZEDBSD_UAPI_CACHE_MEMORY_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef KERN_UAPI_CACHE_MEMORY_H
+#define KERN_UAPI_CACHE_MEMORY_H
 
 #include <stdint.h>
 

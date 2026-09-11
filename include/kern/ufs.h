@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_KERN_UFS_H
-#define ZEDBSD_KERN_UFS_H
+#ifndef KERN_KERN_UFS_H
+#define KERN_KERN_UFS_H
 
 struct filesystem_type;
 

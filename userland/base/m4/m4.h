@@ -11,8 +11,8 @@
  * Declares the zedBSD userland m4 interface.
  */
 
-#ifndef ZEDBSD_M4_H
-#define ZEDBSD_M4_H
+#ifndef KERN_M4_H
+#define KERN_M4_H
 
 #include <stddef.h>
 
