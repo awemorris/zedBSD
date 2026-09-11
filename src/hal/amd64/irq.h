@@ -38,7 +38,7 @@ struct irq_service_info {
 };
 
 void
-irq_init(
+prekern_irq_init(
 	const struct amd64_acpi_info *acpi);
 
 void

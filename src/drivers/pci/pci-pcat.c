@@ -13,6 +13,7 @@
 #include <drivers/pci.h>
 #include <errno.h>
 #include <hal/hal.h>
+#include <kern/pmem.h>
 #include <string.h>
 
 #define PCI_CONFIG_ADDRESS 0x0cf8U
@@ -394,8 +395,9 @@ pcat_map_bar(
 {
 	uint32_t alignment;
 	uint32_t assigned;
-	struct hal_pmem_request request;
-	struct hal_pmem *memory;
+	struct kern_pmem *memory;
+	void *address;
+	uint32_t attr;
 	struct pcat_bar_mapping *record;
 
 	(void)context;
@@ -435,25 +437,24 @@ pcat_map_bar(
 	}
 
 	/* Handles the memory availability. */
-	memory = hal_malloc(sizeof(*memory));
+	memory = kernel_alloc(sizeof(*memory));
 	if (memory == NULL)
 		return ENOMEM;
-	request.paddr = bar->bus_address;
-	request.size = (size_t)bar->size;
-	request.alignment = 4096U;
-	request.type = HAL_PMEM_TYPE_MMIO;
-	request.attr = (flags & DRV_PCI_MAP_WRITETHROUGH)
-			       ? HAL_PMEM_ATTR_WRITETHRU
-			       : HAL_PMEM_ATTR_NOCACHE;
+	memory->paddr = bar->bus_address;
+	memory->size = (size_t)bar->size;
+	attr = HAL_SPACE_READ | HAL_SPACE_WRITE |
+		((flags & DRV_PCI_MAP_WRITETHROUGH) ? HAL_SPACE_WRITETHRU
+						    : HAL_SPACE_NOCACHE);
 
-	/* Checks the hal pmem alloc result. */
-	if (hal_pmem_alloc(&request, memory) != HAL_OK) {
+	/* Checks the device mapping result. */
+	if (hal_space_map_device(memory->paddr, memory->size, attr,
+				 &address) != HAL_OK) {
 		/* The initial PC/AT HAL exposes one 16-MiB PCI MMIO window. */
 		/* A 64-bit BAR may still be reassigned below 4 GiB. */
 		if ((bar->type != DRV_PCI_BAR_MEMORY32 &&
 		     bar->type != DRV_PCI_BAR_MEMORY64) ||
 		    bar->size > 0x01000000U) {
-			hal_free(memory);
+			kernel_free(memory);
 
 			/* Failed. */
 			return ENOMEM;
@@ -469,7 +470,7 @@ pcat_map_bar(
 			assigned = (pci_small_mmio_next + alignment - 1U) &
 				   ~(alignment - 1U);
 			if (assigned > 0xf1000000U - bar->size) {
-				hal_free(memory);
+				kernel_free(memory);
 
 				/* Failed. */
 				return ENOMEM;
@@ -481,17 +482,18 @@ pcat_map_bar(
 		/* Checks the drv pci device assign bar result. */
 		if (drv_pci_device_assign_bar(device, bar->index, assigned) !=
 		    0) {
-			hal_free(memory);
+			kernel_free(memory);
 
 			/* Failed. */
 			return ENOMEM;
 		}
 
-		request.paddr = assigned;
+		memory->paddr = assigned;
 
-		/* Checks the hal pmem alloc result. */
-		if (hal_pmem_alloc(&request, memory) != HAL_OK) {
-			hal_free(memory);
+		/* Checks the device mapping result. */
+		if (hal_space_map_device(memory->paddr, memory->size, attr,
+					 &address) != HAL_OK) {
+			kernel_free(memory);
 
 			/* Failed. */
 			return ENOMEM;
@@ -501,16 +503,16 @@ pcat_map_bar(
 			   assigned, (unsigned)(bar->size / 1024U));
 	}
 
-	mapping->address = memory->vaddr;
+	mapping->address = address;
 	mapping->size = memory->size;
 	mapping->type = bar->type;
 	mapping->private_data[0] = (uintptr_t)memory;
 
 	/* Handles the record availability. */
-	record = hal_malloc(sizeof(*record));
+	record = kernel_alloc(sizeof(*record));
 	if (record == NULL) {
-		(void)hal_pmem_free(memory);
-		hal_free(memory);
+		(void)hal_space_unmap_device(mapping->address, memory->size);
+		kernel_free(memory);
 		memset(mapping, 0, sizeof(*mapping));
 
 		/* Failed. */
@@ -519,9 +521,9 @@ pcat_map_bar(
 
 	record->device = device;
 	record->bar_index = bar->index;
-	record->bus_address = request.paddr;
-	record->size = request.size;
-	record->virtual_address = memory->vaddr;
+	record->bus_address = memory->paddr;
+	record->size = memory->size;
+	record->virtual_address = mapping->address;
 	record->references = 1;
 	record->next = bar_mappings;
 	bar_mappings = record;
@@ -537,7 +539,7 @@ pcat_unmap_bar(
 	void *context,
 	struct drv_pci_mapping *mapping)
 {
-	struct hal_pmem *memory;
+	struct kern_pmem *memory;
 	struct pcat_bar_mapping *record, **link;
 
 	(void)context;
@@ -558,7 +560,7 @@ pcat_unmap_bar(
 		return;
 	}
 
-	memory = (struct hal_pmem *)mapping->private_data[0];
+	memory = (struct kern_pmem *)mapping->private_data[0];
 
 	/* Handles the record availability. */
 	if (record != NULL) {
@@ -582,11 +584,11 @@ pcat_unmap_bar(
 			}
 		}
 
-		hal_free(record);
+		kernel_free(record);
 	}
 
-	(void)hal_pmem_free(memory);
-	hal_free(memory);
+	(void)hal_space_unmap_device(mapping->address, memory->size);
+	kernel_free(memory);
 	memset(mapping, 0, sizeof(*mapping));
 }
 

@@ -510,7 +510,7 @@ drv_usb_hcd_register(
 	}
 
 	/* Handles the bus availability. */
-	bus = hal_malloc(sizeof(*bus));
+	bus = kernel_alloc(sizeof(*bus));
 	if (bus == NULL)
 		return ENOMEM;
 	memset(bus, 0, sizeof(*bus));
@@ -520,18 +520,18 @@ drv_usb_hcd_register(
 
 	/* Handles the hcd condition. */
 	if (hcd->root_port_count == UINT_MAX) {
-		hal_free(bus);
+		kernel_free(bus);
 
 		/* Failed. */
 		return EOVERFLOW;
 	}
 
-	bus->ports = hal_malloc(((size_t)hcd->root_port_count + 1U) *
+	bus->ports = kernel_alloc(((size_t)hcd->root_port_count + 1U) *
 				sizeof(*bus->ports));
 
 	/* Handles the ports availability. */
 	if (bus->ports == NULL) {
-		hal_free(bus);
+		kernel_free(bus);
 
 		/* Failed. */
 		return ENOMEM;
@@ -543,8 +543,8 @@ drv_usb_hcd_register(
 
 	/* Handles the root hub availability. */
 	if (bus->root_hub == NULL) {
-		hal_free(bus->ports);
-		hal_free(bus);
+		kernel_free(bus->ports);
+		kernel_free(bus);
 
 		/* Failed. */
 		return ENOMEM;
@@ -553,9 +553,9 @@ drv_usb_hcd_register(
 	/* Checks the operation status. */
 	error = hcd->ops->start(hcd);
 	if (error != 0) {
-		hal_free(bus->root_hub);
-		hal_free(bus->ports);
-		hal_free(bus);
+		kernel_free(bus->root_hub);
+		kernel_free(bus->ports);
+		kernel_free(bus);
 
 		/* Failed. */
 		return error;
@@ -674,9 +674,9 @@ drv_usb_hcd_unregister(
 		*link = bus->next;
 		bus->lifecycle_claimed = 0U;
 		usb_topology_unlock();
-		hal_free(bus->root_hub);
-		hal_free(bus->ports);
-		hal_free(bus);
+		kernel_free(bus->root_hub);
+		kernel_free(bus->ports);
+		kernel_free(bus);
 
 		/* Succeeded. */
 		return 0;
@@ -1864,7 +1864,7 @@ drv_usb_urb_alloc(
 	}
 
 	/* Handles the urb availability. */
-	urb = hal_malloc(sizeof(*urb));
+	urb = kernel_alloc(sizeof(*urb));
 	if (urb == NULL) {
 		device_urb_put(device);
 
@@ -1881,11 +1881,11 @@ drv_usb_urb_alloc(
 	/* Handles the iso count condition. */
 	if (iso_count != 0) {
 		urb->iso_packets =
-			hal_malloc(sizeof(*urb->iso_packets) * iso_count);
+			kernel_alloc(sizeof(*urb->iso_packets) * iso_count);
 
 		/* Handles the iso packets availability. */
 		if (urb->iso_packets == NULL) {
-			hal_free(urb);
+			kernel_free(urb);
 			device_urb_put(device);
 
 			/* Reports that no result is available. */
@@ -1948,7 +1948,7 @@ drv_usb_urb_reserve_sync(
 	}
 
 	/* Handles the buffer availability. */
-	buffer = hal_malloc(capacity);
+	buffer = kernel_alloc(capacity);
 	if (buffer == NULL)
 		return ENOMEM;
 	io_stats_record(IO_USB_BUFFER_ALLOC, capacity);
@@ -1956,7 +1956,7 @@ drv_usb_urb_reserve_sync(
 	/* Handles the sync buffer availability. */
 	if (u->sync_buffer != NULL)
 		io_stats_record(IO_USB_BUFFER_FREE, u->sync_capacity);
-	hal_free(u->sync_buffer);
+	kernel_free(u->sync_buffer);
 	u->sync_buffer = buffer;
 	u->sync_capacity = capacity;
 
@@ -2021,7 +2021,7 @@ drv_usb_urb_reserve_transfer(
 	buffer = NULL;
 	if (!shared && capacity > urb->sync_capacity) {
 		/* Handles the buffer availability. */
-		buffer = hal_malloc(capacity);
+		buffer = kernel_alloc(capacity);
 		if (buffer == NULL)
 			return ENOMEM;
 	}
@@ -2031,7 +2031,7 @@ drv_usb_urb_reserve_transfer(
 	/* Checks the operation status. */
 	error = hcd->ops->urb_reserve(hcd, urb, capacity, &reservation);
 	if (error != 0) {
-		hal_free(buffer);
+		kernel_free(buffer);
 
 		/* Failed. */
 		return error;
@@ -2082,7 +2082,7 @@ drv_usb_urb_reserve_transfer(
 
 		/* Handles the urb condition. */
 		if (!urb->sync_shared)
-			hal_free(urb->sync_buffer);
+			kernel_free(urb->sync_buffer);
 		urb->sync_buffer = shared ? shared_buffer : buffer;
 		urb->sync_capacity = capacity;
 		urb->sync_shared = shared;
@@ -4230,7 +4230,7 @@ drv_usb_driver_register(
 	}
 
 	/* Handles the e condition. */
-	e = hal_malloc(sizeof(*e));
+	e = kernel_alloc(sizeof(*e));
 	if (!e)
 		return ENOMEM;
 	e->driver = d;
@@ -4258,7 +4258,7 @@ drv_usb_driver_unregister(
 		/* Handles the e condition. */
 		if (e->driver == d) {
 			*p = e->next;
-			hal_free(e);
+			kernel_free(e);
 
 			/* Succeeded. */
 			return 0;
@@ -4731,7 +4731,7 @@ static struct drv_usb_device *
 allocate_root_hub(
 	struct drv_usb_bus *bus)
 {
-	struct drv_usb_device *device = hal_malloc(sizeof(*device));
+	struct drv_usb_device *device = kernel_alloc(sizeof(*device));
 
 	/* Handles the device availability. */
 	if (device == NULL)
@@ -5247,8 +5247,8 @@ device_finalize(
 
 	/* Handles the quarantine buffer availability. */
 	if (device->quarantine_buffer != NULL)
-		hal_free(device->quarantine_buffer);
-	hal_free(device);
+		kernel_free(device->quarantine_buffer);
+	kernel_free(device);
 
 	/* Handles the report disconnect condition. */
 	if (report_disconnect) {
@@ -5269,7 +5269,7 @@ free_configurations(
 		/* Process each remaining element. */
 		for (index = 0; index < device->configuration_count; index++)
 			free_configuration(&device->configurations[index]);
-		hal_free(device->configurations);
+		kernel_free(device->configurations);
 	}
 
 	device->configurations = NULL;
@@ -5297,20 +5297,20 @@ free_configuration(
 
 			/* Handles the endpoints availability. */
 			if (alternate->endpoints != NULL)
-				hal_free(alternate->endpoints);
-			hal_free(alternate);
+				kernel_free(alternate->endpoints);
+			kernel_free(alternate);
 		}
 
-		hal_free(interface);
+		kernel_free(interface);
 	}
 
 	/* Handles the iads availability. */
 	if (configuration->iads != NULL)
-		hal_free(configuration->iads);
+		kernel_free(configuration->iads);
 
 	/* Handles the raw availability. */
 	if (configuration->raw != NULL)
-		hal_free(configuration->raw);
+		kernel_free(configuration->raw);
 	memset(configuration, 0, sizeof(*configuration));
 }
 
@@ -5388,7 +5388,7 @@ enumerate_port(
 	int address = 0, cleanup_error, error = 0, preferred_score;
 
 	/* Handles the device availability. */
-	device = hal_malloc(sizeof(*device));
+	device = kernel_alloc(sizeof(*device));
 	if (device == NULL)
 		return ENOMEM;
 	memset(device, 0, sizeof(*device));
@@ -5510,7 +5510,7 @@ enumerate_port(
 	}
 
 	device->configuration_count = device->descriptor.configuration_count;
-	device->configurations = hal_malloc(device->configuration_count *
+	device->configurations = kernel_alloc(device->configuration_count *
 					    sizeof(*device->configurations));
 
 	/* Handles the configurations availability. */
@@ -5706,7 +5706,7 @@ enumerate_configuration(
 	}
 
 	/* Handles the raw availability. */
-	raw = hal_malloc(descriptor.total_length);
+	raw = kernel_alloc(descriptor.total_length);
 	if (raw == NULL)
 		return ENOMEM;
 
@@ -5719,7 +5719,7 @@ enumerate_configuration(
 		(uint16_t)((DRV_USB_DESCRIPTOR_CONFIGURATION << 8) | index), 0,
 		raw, descriptor.total_length, USB_CONTROL_TIMEOUT_MS, &actual);
 	if (error != 0 || actual != descriptor.total_length) {
-		hal_free(raw);
+		kernel_free(raw);
 
 		/* Returns the computed result. */
 		return error != 0 ? error : EIO;
@@ -5838,7 +5838,7 @@ parse_configuration(
 				}
 
 				current_interface =
-					hal_malloc(sizeof(*current_interface));
+					kernel_alloc(sizeof(*current_interface));
 
 				/* Handles the current interface availability. */
 				if (current_interface == NULL) {
@@ -5876,7 +5876,7 @@ parse_configuration(
 			}
 
 			current_alternate =
-				hal_malloc(sizeof(*current_alternate));
+				kernel_alloc(sizeof(*current_alternate));
 
 			/* Handles the current alternate availability. */
 			if (current_alternate == NULL) {
@@ -5892,13 +5892,13 @@ parse_configuration(
 
 			/* Handles the interface descriptor condition. */
 			if (interface_descriptor.endpoint_count != 0) {
-				current_alternate->endpoints = hal_malloc(
+				current_alternate->endpoints = kernel_alloc(
 					interface_descriptor.endpoint_count *
 					sizeof(*current_alternate->endpoints));
 
 				/* Handles the endpoints availability. */
 				if (current_alternate->endpoints == NULL) {
-					hal_free(current_alternate);
+					kernel_free(current_alternate);
 					current_alternate = NULL;
 					error = ENOMEM;
 					goto fail;
@@ -6112,7 +6112,7 @@ configuration_iads_prepare(
 	/* Checks the remaining item count. */
 	if (count != 0) {
 		configuration->iads =
-			hal_malloc(count * sizeof(*configuration->iads));
+			kernel_alloc(count * sizeof(*configuration->iads));
 
 		/* Handles the iads availability. */
 		if (configuration->iads == NULL)
@@ -6842,7 +6842,7 @@ urb_put(
 
 	/* Handles the iso packets availability. */
 	if (urb->iso_packets != NULL)
-		hal_free(urb->iso_packets);
+		kernel_free(urb->iso_packets);
 
 	/* Handles the sync buffer availability. */
 	if (urb->sync_buffer != NULL && !urb->sync_shared)
@@ -6850,8 +6850,8 @@ urb_put(
 
 	/* Handles the urb condition. */
 	if (!urb->sync_shared)
-		hal_free(urb->sync_buffer);
-	hal_free(urb);
+		kernel_free(urb->sync_buffer);
+	kernel_free(urb);
 	device_urb_put(device);
 }
 

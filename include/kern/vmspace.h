@@ -14,6 +14,7 @@
 #define ZEDBSD_KERN_VMSPACE_H
 
 #include <hal/hal.h>
+#include <kern/pmem.h>
 #include <kern/atomic.h>
 #include <kern/lock.h>
 #include <stddef.h>
@@ -113,7 +114,7 @@ struct vm_private_page {
 	 */
 	unsigned mapping_count;
 
-	struct hal_pmem pmem;
+	struct kern_pmem pmem;
 	unsigned flags;
 	uint32_t swap_slot;
 	struct vm_page *mappings;
@@ -220,7 +221,7 @@ struct vmspace_pinned_page {
 	 * Private-page pins copy directly through this immutable frame
 	 * snapshot.
 	 */
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 };
 
 extern struct vmspace kernel_vmspace;

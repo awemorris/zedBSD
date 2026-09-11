@@ -30,6 +30,7 @@ static hal_task_t xmm_selftest_main;
 static hal_task_t xmm_selftest_task;
 static volatile unsigned xmm_selftest_stage;
 static volatile unsigned initial_fpregs_ready;
+static volatile unsigned initial_fpregs_claimed;
 static volatile unsigned task_registry_lock;
 static const uint8_t xmm_main_pattern[16] = {
 	0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe,
@@ -52,7 +53,7 @@ static void build_initial_stack(struct amd64_task *task, void (*start)(void *), 
 /*
  * Initializes task state for the current CPU.
  */
-void
+struct amd64_task *
 amd64_task_init_cpu(
 	int run_selftest)
 {
@@ -65,7 +66,7 @@ amd64_task_init_cpu(
 
 	/* Prevents a second initial-task installation on this CPU. */
 	if (running_task != NULL)
-		HAL_FATAL("hal_task_init twice");
+		HAL_FATAL("amd64 initial task created twice on one CPU");
 
 	/* Establishes or waits for the canonical initial FP image. */
 	if (run_selftest) {
@@ -78,9 +79,9 @@ amd64_task_init_cpu(
 	}
 
 	/* Allocates the initial task record. */
-	task = hal_malloc(sizeof(*task));
+	task = kernel_alloc(sizeof(*task));
 	if (task == NULL)
-		HAL_FATAL("initial amd64 task allocation failed");
+		return NULL;
 
 	/* Initializes the task as a running system-space context. */
 	hal_memset(task, 0, sizeof(*task));
@@ -92,20 +93,33 @@ amd64_task_init_cpu(
 	tasklist_add(task);
 	running_task = task;
 
-	/* Verifies FP context switching only on the BSP. */
+	/* Verifies FP context switching only on the first CPU. */
 	if (run_selftest)
 		xmm_context_selftest();
+
+	/* Reports the published initial task. */
+	return task;
 }
 
 /*
- * Initializes BSP task state and runs the context self-test.
+ * Wraps the calling CPU's current context as that CPU's initial task.
+ * The first CPU to arrive publishes the canonical FP image and runs the
+ * context self-test; every later CPU adopts that image.
  */
-void
-hal_task_init(
+hal_task_t
+hal_task_create_for_init_context(
 	void)
 {
-	/* Establishes the BSP's initial task. */
-	amd64_task_init_cpu(1);
+	unsigned previous;
+
+	/* Claims the FP-image role exactly once across all CPUs. */
+	previous = __atomic_exchange_n(
+		&initial_fpregs_claimed,
+		1U,
+		__ATOMIC_ACQ_REL);
+
+	/* Establishes this CPU's initial task. */
+	return amd64_task_init_cpu(previous == 0U);
 }
 
 /*
@@ -127,15 +141,15 @@ hal_task_create(
 		return NULL;
 
 	/* Allocates the task record. */
-	task = hal_malloc(sizeof(*task));
+	task = kernel_alloc(sizeof(*task));
 	if (task == NULL)
 		return NULL;
 	hal_memset(task, 0, sizeof(*task));
 
 	/* Allocates the separately owned aligned kernel stack. */
-	task->sys_stack_allocation = hal_malloc(AMD64_SYS_STACK_SIZE + 15U);
+	task->sys_stack_allocation = kernel_alloc(AMD64_SYS_STACK_SIZE + 15U);
 	if (task->sys_stack_allocation == NULL) {
-		hal_free(task);
+		kernel_free(task);
 		return NULL;
 	}
 
@@ -327,7 +341,7 @@ hal_task_exec_current(
  * Reports the current task's active user stack pointer.
  */
 uintptr_t
-hal_task_user_stack(
+hal_task_get_user_stack(
 	void)
 {
 	struct amd64_interrupt_frame *frame;
@@ -347,11 +361,13 @@ hal_task_user_stack(
 }
 
 /*
- * Copies the current task's active user context.
+ * Reads the current task's active user context.
  */
 int
-hal_task_user_context(
-	struct hal_user_context *context)
+hal_task_get_user_context(
+	uintptr_t *pc,
+	uintptr_t *stack_pointer,
+	intptr_t *return_value)
 {
 	struct amd64_interrupt_frame *frame;
 
@@ -362,13 +378,16 @@ hal_task_user_context(
 		frame = NULL;
 
 	/* Requires a destination and ring-three frame. */
-	if (frame == NULL || context == NULL || (frame->cs & 3U) != 3U)
+	if (frame == NULL || (frame->cs & 3U) != 3U)
 		return -1;
 
-	/* Copies the generic user-context fields. */
-	context->pc = (uintptr_t)frame->rip;
-	context->stack_pointer = (uintptr_t)frame->rsp;
-	context->return_value = (intptr_t)frame->rax;
+	/* Copies each requested user-context field. */
+	if (pc != NULL)
+		*pc = (uintptr_t)frame->rip;
+	if (stack_pointer != NULL)
+		*stack_pointer = (uintptr_t)frame->rsp;
+	if (return_value != NULL)
+		*return_value = (intptr_t)frame->rax;
 
 	/* Reports a complete context snapshot. */
 	return 0;
@@ -497,10 +516,10 @@ hal_task_destroy(
 
 	/* Releases the separately owned kernel stack when present. */
 	if (task->sys_stack != NULL)
-		hal_free(task->sys_stack_allocation);
+		kernel_free(task->sys_stack_allocation);
 
 	/* Releases the task record last. */
-	hal_free(task);
+	kernel_free(task);
 }
 
 /*

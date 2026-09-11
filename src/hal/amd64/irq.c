@@ -34,6 +34,7 @@ static int valid_irq(int irq);
 static int is_msi_irq(int irq);
 static void hardware_mask(int irq);
 static void hardware_unmask(int irq);
+static int irq_set_handler(int irq, hal_irq_handler_t handler, void *argument);
 static bool service_lock(struct irq_service_info *service);
 static void service_unlock(struct irq_service_info *service, bool enabled);
 
@@ -41,7 +42,7 @@ static void service_unlock(struct irq_service_info *service, bool enabled);
  * Initializes amd64 interrupt service and hardware routing state.
  */
 void
-irq_init(
+prekern_irq_init(
 	const struct amd64_acpi_info *acpi)
 {
 	uint32_t bsp_apic_id;
@@ -169,8 +170,8 @@ hal_irq_send_eoi(
 /*
  * Installs or removes a real-time interrupt handler.
  */
-int
-hal_irq_set_handler(
+static int
+irq_set_handler(
 	int irq,
 	hal_irq_handler_t handler,
 	void *argument)
@@ -244,6 +245,52 @@ hal_irq_set_handler(
 
 	/* Reports a completed handler update. */
 	return HAL_OK;
+}
+
+/*
+ * Registers a real-time handler for one numbered IRQ.
+ */
+int
+hal_irq_register(
+	int irq_num,
+	hal_irq_handler_t func,
+	void *arg)
+{
+	/* Requires a handler; removal goes through hal_irq_unregister(). */
+	if (func == NULL)
+		return HAL_ERR_INVALID;
+
+	/* Installs the callback for this line. */
+	return irq_set_handler(irq_num, func, arg);
+}
+
+/*
+ * Removes the real-time handler registered for one numbered IRQ.
+ */
+int
+hal_irq_unregister(
+	int irq_num,
+	hal_irq_handler_t func,
+	void *arg)
+{
+	struct irq_service_info *service;
+	bool enabled;
+	int matches;
+
+	/* Requires the registration this caller owns. */
+	if (func == NULL || !valid_irq(irq_num))
+		return HAL_ERR_INVALID;
+
+	/* Confirms the stored registration before releasing it. */
+	service = &irq_service[irq_num];
+	enabled = service_lock(service);
+	matches = service->handler == func && service->argument == arg;
+	service_unlock(service, enabled);
+	if (!matches)
+		return HAL_ERR_INVALID;
+
+	/* Removes the confirmed callback. */
+	return irq_set_handler(irq_num, NULL, NULL);
 }
 
 /*
@@ -421,7 +468,8 @@ hal_irq_set_affinity(
 int
 hal_irq_get_affinity(
 	int irq,
-	struct hal_irq_affinity *result)
+	struct hal_cpu_mask *requested,
+	struct hal_cpu_mask *effective)
 {
 	hal_cpu_id_t cpu;
 	struct hal_cpu_mask ready;
@@ -429,25 +477,26 @@ hal_irq_get_affinity(
 	bool enabled;
 
 	/* Validates the IRQ and result destination. */
-	if (irq <= IRQ_TIMER || !valid_irq(irq) || result == NULL)
+	if (irq <= IRQ_TIMER || !valid_irq(irq) ||
+	    requested == NULL || effective == NULL)
 		return HAL_ERR_INVALID;
 
 	/* Snapshots the requested mask under the service lock. */
 	service = &irq_service[irq];
 	enabled = service_lock(service);
-	result->requested = service->requested;
-	hal_cpu_mask_zero(&result->effective);
+	*requested = service->requested;
+	hal_cpu_mask_zero(effective);
 	hal_cpu_ready_mask(&ready);
 
 	/* Selects the first ready CPU from the requested mask. */
 	for (cpu = 0; cpu < HAL_CPU_MAX; cpu++) {
 		/* Skips CPUs absent from the stored requested mask. */
-		if (!hal_cpu_mask_test(&result->requested, cpu))
+		if (!hal_cpu_mask_test(requested, cpu))
 			continue;
 
 		/* Publishes the first requested CPU which is currently ready. */
 		if (hal_cpu_mask_test(&ready, cpu)) {
-			hal_cpu_mask_set(&result->effective, cpu);
+			hal_cpu_mask_set(effective, cpu);
 			break;
 		}
 	}
@@ -700,7 +749,7 @@ hal_irq_unregister_msi(
 	service_unlock(service, enabled);
 
 	/* Drains and removes the installed real-time callback. */
-	error = hal_irq_set_handler(mapped_irq, NULL, NULL);
+	error = irq_set_handler(mapped_irq, NULL, NULL);
 	if (error != HAL_OK) {
 		enabled = service_lock(service);
 		service->removing = 0;

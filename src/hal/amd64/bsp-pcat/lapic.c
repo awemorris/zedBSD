@@ -18,6 +18,7 @@
 #include "timecounter.h"
 #include "../asm.h"
 #include "../defs.h"
+#include "../space.h"
 
 #define LAPIC_ID            0x020U
 #define LAPIC_EOI           0x0b0U
@@ -64,11 +65,10 @@ static int send_icr(uint32_t apic_id, uint32_t low);
  * Initializes the BSP local APIC from ACPI topology.
  */
 int
-amd64_lapic_init(
+prekern_amd64_lapic_init(
 	const struct amd64_acpi_info *acpi)
 {
-	struct hal_pmem_request request;
-	struct hal_pmem memory;
+	void *mmio;
 	uint32_t apic_id;
 	uint32_t mmio_id;
 	enum amd64_apic_policy_result policy;
@@ -96,20 +96,15 @@ amd64_lapic_init(
 		return HAL_ERR_UNSUPPORTED;
 	}
 
-	/* Claims the uncached local APIC MMIO page. */
-	request.paddr = acpi->lapic_address;
-	request.size = 4096;
-	request.alignment = 4096;
-	request.type = HAL_PMEM_TYPE_MMIO;
-	request.attr = HAL_PMEM_ATTR_NOCACHE;
-	error = hal_pmem_alloc(&request, &memory);
+	/* Maps the uncached local APIC MMIO page. */
+	error = amd64_device_map(acpi->lapic_address, 4096, &mmio);
 	if (error != HAL_OK) {
 		hal_puts("A64 LAPIC MAP FAIL\n");
 		return HAL_ERR_UNSUPPORTED;
 	}
 
 	/* Publishes the persistent MMIO mapping and physical base. */
-	lapic = memory.vaddr;
+	lapic = mmio;
 	lapic_physical_address = acpi->lapic_address;
 
 	/* Verifies the volatile MMIO identity against CPUID. */

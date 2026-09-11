@@ -15,6 +15,7 @@
 #define ZEDBSD_KERN_VM_OBJECT_H
 
 #include <hal/hal.h>
+#include <kern/pmem.h>
 #include <kern/atomic.h>
 #include <kern/lock.h>
 #include <kern/waitq.h>
@@ -77,7 +78,7 @@ struct vm_object_page {
 	struct vm_object *owner;
 	struct vm_page_slab *metadata_slab;
 	off_t offset;
-	struct hal_pmem pmem;
+	struct kern_pmem pmem;
 	unsigned flags;
 	int error;
 	unsigned mapping_count;
@@ -420,5 +421,8 @@ vm_object_page_count(void);
 
 unsigned
 vm_object_retained_count(void);
+
+/* Allocates one page-sized physical run for the VM layer. */
+int vm_private_page_alloc(struct kern_pmem *memory);
 
 #endif

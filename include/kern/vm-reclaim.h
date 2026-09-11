@@ -16,7 +16,7 @@
 
 struct vm_page;
 struct vm_private_page;
-struct hal_pmem;
+struct kern_pmem;
 
 struct vm_reclaim_stats {
 	uint32_t resident;
@@ -91,7 +91,7 @@ vm_private_page_mark_dirty(
 int
 vm_private_page_pin(
 	struct vm_private_page *backing,
-	struct hal_pmem *memory);
+	struct kern_pmem *memory);
 
 void
 vm_private_page_unpin(

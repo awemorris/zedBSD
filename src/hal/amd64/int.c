@@ -64,7 +64,7 @@ amd64_int_load(
  * Initializes every amd64 interrupt descriptor.
  */
 void
-amd64_int_init(
+prekern_amd64_int_init(
 	void)
 {
 	unsigned index;

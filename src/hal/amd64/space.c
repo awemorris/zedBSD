@@ -104,7 +104,7 @@ static void map_legacy_image_alias(void);
 static int arena_is_mapped(void);
 static void verify_ram_map(void);
 static void table_count_drop(void);
-static int alloc_page(struct hal_pmem *memory);
+static int alloc_page(hal_physaddr_t *paddr);
 static bool registry_lock_enter(void);
 static void registry_lock_leave(bool enabled);
 static int space_op_enter(struct amd64_space *space);
@@ -155,6 +155,116 @@ amd64_phys_to_direct(
 }
 
 /*
+ * Resolves a device physical address to its fixed kernel window.
+ *
+ * RAM is reached through the direct map. Device memory is not, so each
+ * supported controller range has a fixed window in the kernel half and is
+ * mapped explicitly.
+ */
+void *
+amd64_device_vaddr(
+	hal_physaddr_t physical)
+{
+	/* Selects the direct legacy-device window. */
+	if (physical >= 0x000a0000U && physical < 0x00100000U) {
+		return (void *)((uintptr_t)AMD64_LEGACY_MMIO_BASE +
+		    physical - 0xa0000U);
+	}
+
+	/* Selects the PCI MMIO window. */
+	if (physical >= 0xf0000000U && physical < 0xf1000000U) {
+		return (void *)(uintptr_t)(0xffffffffc0000000ULL +
+		    (physical - 0xf0000000U));
+	}
+
+	/* Selects the local APIC MMIO window. */
+	if (physical >= 0xfee00000U && physical < 0xff000000U) {
+		return (void *)(uintptr_t)(0xffffffffc1000000ULL +
+		    (physical - 0xfee00000U));
+	}
+
+	/* Selects the I/O APIC MMIO window. */
+	if (physical >= 0xfec00000U && physical < 0xfee00000U) {
+		return (void *)(uintptr_t)(0xffffffffc1200000ULL +
+		    (physical - 0xfec00000U));
+	}
+
+	/* Rejects addresses outside every fixed window. */
+	return NULL;
+}
+
+/*
+ * Maps one device range into its fixed kernel window.
+ */
+int
+hal_space_map_device(
+	hal_physaddr_t paddr,
+	size_t size,
+	uint32_t attr,
+	void **vaddr)
+{
+	void *address;
+
+	/* Requires a supported window and a destination. */
+	address = amd64_device_vaddr(paddr);
+	if (address == NULL || vaddr == NULL)
+		return HAL_ERR_INVALID;
+
+	/*
+	 * The fixed device windows are established by early paging, so a
+	 * repeated map is expected and is not an error. Refreshing the
+	 * attributes is best effort; the window itself is what the caller
+	 * needs.
+	 */
+	(void)hal_space_map(HAL_SPACE_SYS, address, paddr, size, attr);
+
+	/* Reports the mapped window. */
+	*vaddr = address;
+	return HAL_OK;
+}
+
+/*
+ * Removes one device mapping.
+ */
+int
+hal_space_unmap_device(
+	void *vaddr,
+	size_t size)
+{
+	/* Releases the system-space window. */
+	return hal_space_unmap(HAL_SPACE_SYS, vaddr, size);
+}
+
+/*
+ * Maps one device range into its fixed kernel window, uncached.
+ */
+int
+amd64_device_map(
+	hal_physaddr_t physical,
+	size_t size,
+	void **vaddr)
+{
+	void *address;
+
+	/* Requires a supported window and a destination. */
+	address = amd64_device_vaddr(physical);
+	if (address == NULL || vaddr == NULL)
+		return HAL_ERR_INVALID;
+
+	/* Refreshes the fixed window; an existing mapping is expected. */
+	(void)hal_space_map(
+		HAL_SPACE_SYS,
+		address,
+		physical,
+		size,
+		HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_NOCACHE);
+
+	/* Reports the mapped window. */
+	*vaddr = address;
+	return HAL_OK;
+}
+
+/*
  * Converts only linker-owned image addresses, independently of RAM aliases.
  */
 uintptr_t
@@ -189,7 +299,7 @@ amd64_system_cr3(
  * Initializes the system address space.
  */
 void
-amd64_space_init(
+prekern_amd64_space_init(
 	void)
 {
 	const struct zbl6_framebuffer *framebuffer;
@@ -536,7 +646,7 @@ hal_space_create(
 	unsigned index;
 
 	/* Allocates the software address-space record. */
-	space = hal_malloc(sizeof(*space));
+	space = kernel_alloc(sizeof(*space));
 	if (space == NULL)
 		return NULL;
 
@@ -544,14 +654,14 @@ hal_space_create(
 	hal_memset(space, 0, sizeof(*space));
 
 	/* Allocates the top-level hardware page table. */
-	status = alloc_page(&space->pml4_memory);
+	status = alloc_page(&space->pml4_paddr);
 	if (status != HAL_OK) {
-		hal_free(space);
+		kernel_free(space);
 		return NULL;
 	}
 
 	/* Initializes the user root with the shared system mapping. */
-	space->pml4 = space->pml4_memory.vaddr;
+	space->pml4 = amd64_phys_to_direct(space->pml4_paddr);
 	hal_memset(space->pml4, 0, PAGE_SIZE);
 	for (index = 256; index < 512; index++)
 		space->pml4[index] = system_pml4[index];
@@ -659,15 +769,15 @@ hal_space_destroy(
 	/* Releases every subordinate page table. */
 	while ((page = space->tables) != NULL) {
 		space->tables = page->next;
-		(void)hal_pmem_free(&page->memory);
-		hal_free(page);
+		(void)hal_pmem_free(&page->paddr, PAGE_SIZE);
+		kernel_free(page);
 		table_count_drop();
 	}
 
 	/* Invalidates and releases the top-level space record. */
 	space->magic = 0;
-	(void)hal_pmem_free(&space->pml4_memory);
-	hal_free(space);
+	(void)hal_pmem_free(&space->pml4_paddr, PAGE_SIZE);
+	kernel_free(space);
 
 	/* Accounts for the released address space. */
 	old_count = __atomic_fetch_sub(&space_count, 1U, __ATOMIC_RELAXED);
@@ -719,7 +829,7 @@ hal_space_switch(
 
 	/* Serializes the CR3 switch with page-table operations. */
 	enabled = space_lock_enter(space);
-	cr3 = (uintptr_t)space->pml4_memory.paddr;
+	cr3 = (uintptr_t)space->pml4_paddr;
 	asm_load_cr3(cr3);
 	__atomic_store_n(&AMD64_CURRENT_SPACE, handle, __ATOMIC_RELEASE);
 	space_lock_leave(space, enabled);
@@ -1409,22 +1519,10 @@ table_count_drop(
 /* Allocates one page-table page. */
 static int
 alloc_page(
-	struct hal_pmem *memory)
+	hal_physaddr_t *paddr)
 {
-	const struct hal_pmem_request request = {
-		HAL_PMEM_PADDR_ANY,
-		PAGE_SIZE,
-		PAGE_SIZE,
-		HAL_PMEM_TYPE_RAM,
-		0
-	};
-	int status;
-
-	/* Allocates a page matching the hardware table constraints. */
-	status = hal_pmem_alloc(&request, memory);
-
-	/* Reports the allocator result. */
-	return status;
+	/* Page tables are ordinary RAM reached through the direct map. */
+	return hal_pmem_alloc(PAGE_SIZE, PAGE_SIZE, paddr);
 }
 
 /* Acquires the address-space registry lock. */
@@ -1595,19 +1693,19 @@ allocate_table(
 	int status;
 
 	/* Allocates the software ownership record. */
-	page = hal_malloc(sizeof(*page));
+	page = kernel_alloc(sizeof(*page));
 	if (page == NULL)
 		return NULL;
 
 	/* Allocates the physical page-table storage. */
-	status = alloc_page(&page->memory);
+	status = alloc_page(&page->paddr);
 	if (status != HAL_OK) {
-		hal_free(page);
+		kernel_free(page);
 		return NULL;
 	}
 
 	/* Initializes and links the new subordinate table. */
-	hal_memset(page->memory.vaddr, 0, PAGE_SIZE);
+	hal_memset(amd64_phys_to_direct(page->paddr), 0, PAGE_SIZE);
 	page->parent = parent;
 	page->parent_index = parent_index;
 	page->next = space->tables;
@@ -1652,7 +1750,7 @@ walk_leaf(
 				return NULL;
 
 			/* Links the new subordinate table into its parent. */
-			entry = (uintptr_t)page->memory.paddr |
+			entry = (uintptr_t)page->paddr |
 			    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
 			if (address < AMD64_USER_LIMIT)
 				entry |= AMD64_PTE_USER;
@@ -1716,10 +1814,10 @@ detach_empty_tables(
 		/* Examines every table still linked to this address space. */
 		while (*link != NULL) {
 			page = *link;
-			expected = (uintptr_t)page->memory.paddr;
+			expected = (uintptr_t)page->paddr;
 
 			/* Keeps nonempty tables linked in the hardware tree. */
-			if (!table_is_empty(page->memory.vaddr)) {
+			if (!table_is_empty(amd64_phys_to_direct(page->paddr))) {
 				link = &page->next;
 				continue;
 			}
@@ -1756,8 +1854,8 @@ free_detached_tables(
 	/* Releases every detached table and its ownership record. */
 	while (page != NULL) {
 		next = page->next;
-		(void)hal_pmem_free(&page->memory);
-		hal_free(page);
+		(void)hal_pmem_free(&page->paddr, PAGE_SIZE);
+		kernel_free(page);
 		table_count_drop();
 		page = next;
 	}

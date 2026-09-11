@@ -31,6 +31,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <hal/hal.h>
+#include <kern/pmem.h>
 #include <string.h>
 #include <zedbsd/block.h>
 
@@ -78,7 +79,7 @@ struct bio_async_endpoint {
 	struct wait_queue wake;
 	struct disk *leaf;
 	struct disk *cache_token;
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	struct bio_async_request *requests;
 	struct bio_async_request *head;
 	struct bio_async_request *tail;
@@ -2330,8 +2331,8 @@ bio_async_enable(struct disk *disk)
 	struct bio_async_endpoint *candidate;
 	struct disk *token;
 	struct thread *thread;
-	struct hal_pmem_request allocation;
-	struct hal_pmem memory;
+	struct kern_pmem memory;
+	size_t allocation_size;
 	unsigned long registry_irq;
 	unsigned long irq;
 	unsigned index;
@@ -2376,14 +2377,13 @@ bio_async_enable(struct disk *disk)
 
 	controls = (ASYNC_SLOTS * sizeof(struct bio_async_request) + ZEDBSD_PAGE_SIZE - 1U) &
 	    ~(size_t)(ZEDBSD_PAGE_SIZE - 1U);
-	memset(&allocation, 0, sizeof(allocation));
-	allocation.size = controls + ASYNC_SLOTS * KERN_IO_BATCH_MAX;
-	allocation.alignment = ZEDBSD_PAGE_SIZE;
-	allocation.type = HAL_PMEM_TYPE_RAM;
-	allocation.paddr = HAL_PMEM_PADDR_ANY;
+
+	allocation_size = controls + ASYNC_SLOTS * KERN_IO_BATCH_MAX;
 	memset(&memory, 0, sizeof(memory));
-	error = hal_pmem_alloc(&allocation, &memory);
-	if (error != HAL_OK || memory.vaddr == NULL || memory.size < allocation.size) {
+	memory.size = allocation_size;
+	error = hal_pmem_alloc(allocation_size, ZEDBSD_PAGE_SIZE,
+			       &memory.paddr);
+	if (error != HAL_OK || hal_pmem_to_kernel(memory.paddr) == NULL) {
 		error = ENOMEM;
 		goto failed_memory;
 	}
@@ -2392,7 +2392,7 @@ bio_async_enable(struct disk *disk)
 	if (error != 0)
 		goto failed_memory;
 	cache_memory_commit(CACHE_MEMORY_IO_POOL, memory.size);
-	memset(memory.vaddr, 0, memory.size);
+	memset(hal_pmem_to_kernel(memory.paddr), 0, memory.size);
 	if (!endpoint->started) {
 		error = kthread_create(async_worker, endpoint, SCHED_PRIORITY_DEFAULT, &thread);
 		if (error != 0) {
@@ -2409,10 +2409,10 @@ bio_async_enable(struct disk *disk)
 
 	endpoint->memory = memory;
 	endpoint->cache_token = token;
-	endpoint->requests = memory.vaddr;
+	endpoint->requests = hal_pmem_to_kernel(memory.paddr);
 	for (index = 0; index < ASYNC_SLOTS; index++) {
 		endpoint->requests[index].endpoint = endpoint;
-		endpoint->requests[index].payload = (char *)memory.vaddr + controls + index * KERN_IO_BATCH_MAX;
+		endpoint->requests[index].payload = (char *)hal_pmem_to_kernel(memory.paddr) + controls + index * KERN_IO_BATCH_MAX;
 	}
 
 	endpoint->state = ASYNC_LIVE;
@@ -2423,7 +2423,7 @@ bio_async_enable(struct disk *disk)
 	return 0;
 
 failed_memory:
-	if (memory.size != 0 && hal_pmem_free(&memory) != HAL_OK)
+	if (memory.size != 0 && hal_pmem_free(&memory.paddr, memory.size) != HAL_OK)
 		HAL_FATAL("BIO endpoint rollback failed");
 	registry_irq = spin_lock_irqsave(&async_registry);
 	irq = spin_lock_irqsave(&endpoint->lock);
@@ -2450,7 +2450,7 @@ bio_async_disable(struct disk *disk)
 	struct bio_async_endpoint *endpoint;
 	struct disk *leaf;
 	struct disk *token;
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	unsigned long registry_irq;
 	unsigned long irq;
 	unsigned index;
@@ -2477,7 +2477,7 @@ bio_async_disable(struct disk *disk)
 		token = endpoint->cache_token;
 		spin_unlock_irqrestore(&endpoint->lock, irq);
 		spin_unlock_irqrestore(&async_registry, registry_irq);
-		error = hal_pmem_free(&memory);
+		error = hal_pmem_free(&memory.paddr, memory.size);
 		registry_irq = spin_lock_irqsave(&async_registry);
 		irq = spin_lock_irqsave(&endpoint->lock);
 		if (error != HAL_OK) {

@@ -426,7 +426,7 @@ usb_hid_attach(
 	}
 
 	/* Handles the hid availability. */
-	hid = hal_malloc(sizeof(*hid));
+	hid = kernel_alloc(sizeof(*hid));
 	if (hid == NULL)
 		return ENOMEM;
 	memset(hid, 0, sizeof(*hid));
@@ -454,7 +454,7 @@ usb_hid_attach(
 	if (error != 0)
 		goto fail;
 	usb_hid_identity(hid);
-	hid->buffer = hal_malloc(hid->buffer_size);
+	hid->buffer = kernel_alloc(hid->buffer_size);
 
 	/* Handles the buffer availability. */
 	if (hid->buffer == NULL) {
@@ -508,12 +508,12 @@ fail:
 
 	/* Handles the buffer availability. */
 	if (hid->buffer != NULL)
-		hal_free(hid->buffer);
+		kernel_free(hid->buffer);
 
 	/* Handles the layout availability. */
 	if (hid->layout != NULL)
 		drv_hid_report_layout_destroy(hid->layout);
-	hal_free(hid);
+	kernel_free(hid);
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -569,12 +569,12 @@ usb_hid_detach(
 
 	/* Handles the buffer availability. */
 	if (hid->buffer != NULL)
-		hal_free(hid->buffer);
+		kernel_free(hid->buffer);
 
 	/* Handles the layout availability. */
 	if (hid->layout != NULL)
 		drv_hid_report_layout_destroy(hid->layout);
-	hal_free(hid);
+	kernel_free(hid);
 
 	/* Succeeded. */
 	return 0;
@@ -767,7 +767,7 @@ usb_hid_fetch_layout(
 		return error;
 
 	/* Handles the descriptor availability. */
-	descriptor = hal_malloc(descriptor_length);
+	descriptor = kernel_alloc(descriptor_length);
 	if (descriptor == NULL)
 		return ENOMEM;
 
@@ -787,7 +787,7 @@ usb_hid_fetch_layout(
 			descriptor, descriptor_length, &hid->layout);
 	}
 
-	hal_free(descriptor);
+	kernel_free(descriptor);
 
 	/* Checks the operation status. */
 	if (error != 0)

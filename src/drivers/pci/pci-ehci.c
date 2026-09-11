@@ -1684,7 +1684,7 @@ ehci_request_free(
 	/* Handles the address availability. */
 	if (request->bounce.address != NULL)
 		drv_dma_free_coherent(controller->hcd.dma, &request->bounce);
-	hal_free(request);
+	kernel_free(request);
 }
 
 /* Takes a request off the reclaim list to be reused. */
@@ -1914,7 +1914,7 @@ ehci_build_request(
 			return error;
 	} else {
 		/* Handles the request availability. */
-		request = hal_malloc(sizeof(*request));
+		request = kernel_alloc(sizeof(*request));
 		if (request == NULL)
 			return ENOMEM;
 		memset(request, 0, sizeof(*request));
@@ -1947,7 +1947,7 @@ ehci_build_request(
 		error = drv_dma_alloc_coherent(controller->hcd.dma, 4096U, 64U,
 					       &request->schedule);
 		if (error != 0) {
-			hal_free(request);
+			kernel_free(request);
 
 			/* Failed. */
 			return error;
@@ -5324,7 +5324,7 @@ ehci_attach(
 	(void)id;
 
 	/* Handles the controller availability. */
-	controller = hal_malloc(sizeof(*controller));
+	controller = kernel_alloc(sizeof(*controller));
 	if (controller == NULL)
 		return ENOMEM;
 	memset(controller, 0, sizeof(*controller));
@@ -5448,7 +5448,7 @@ fail:
 		return 0;
 	}
 
-	hal_free(controller);
+	kernel_free(controller);
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -5491,7 +5491,7 @@ ehci_detach(
 
 	ehci_unpublish(controller);
 	drv_pci_device_set_driver_data(device, NULL);
-	hal_free(controller);
+	kernel_free(controller);
 
 	/* Succeeded. */
 	return 0;

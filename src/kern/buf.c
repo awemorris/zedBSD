@@ -38,7 +38,7 @@
  * XXX: 説明を入れる。
  */
 struct buf_slab {
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	struct buf_slab *next;
 	uint64_t free_mask;
 	unsigned capacity;
@@ -205,7 +205,7 @@ static void stat_add(volatile uint64_t *counter, uint64_t value);
 static int reserve_bytes(size_t size, int metadata);
 static void cancel_reservation(size_t size, int metadata);
 static void commit_reservation(size_t size, int metadata);
-static int alloc_pmem(size_t size, struct hal_pmem *memory, int metadata);
+static int alloc_pmem(size_t size, struct kern_pmem *memory, int metadata);
 static int slab_grow(void);
 static struct buf * alloc_metadata(void);
 static void free_metadata(struct buf *buffer);
@@ -1346,14 +1346,10 @@ commit_reservation(
 static int
 alloc_pmem(
 	size_t size,
-	struct hal_pmem *memory,
+	struct kern_pmem *memory,
 	int metadata)
 {
 	size_t reserved;
-	const struct hal_pmem_request request = {
-		HAL_PMEM_PADDR_ANY, size, ZEDBSD_PAGE_SIZE,
-		HAL_PMEM_TYPE_RAM, 0
-	};
 	int error;
 
 	/* Reserves the page-rounded size first. */
@@ -1363,7 +1359,8 @@ alloc_pmem(
 	    ~(size_t)(ZEDBSD_PAGE_SIZE - 1U);
 	if (reserve_bytes(reserved, metadata) != 0)
 		return ENOMEM;
-	error = hal_pmem_alloc(&request, memory);
+	memory->size = reserved;
+	error = hal_pmem_alloc(reserved, ZEDBSD_PAGE_SIZE, &memory->paddr);
 	if (error != HAL_OK) {
 		cancel_reservation(reserved, metadata);
 		if (error == HAL_ERR_NOMEM) {
@@ -1380,7 +1377,7 @@ alloc_pmem(
 	 */
 	if (memory->size > reserved) {
 		if (reserve_bytes(memory->size - reserved, metadata) != 0) {
-			if (hal_pmem_free(memory) != HAL_OK)
+			if (hal_pmem_free(&memory->paddr, memory->size) != HAL_OK)
 				HAL_FATAL("buffer allocation rollback failed");
 			cancel_reservation(reserved, metadata);
 			return ENOMEM;
@@ -1398,7 +1395,7 @@ static int
 slab_grow(
 	void)
 {
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	struct buf_slab *slab;
 	size_t header;
 	size_t charged;
@@ -1415,15 +1412,15 @@ slab_grow(
 	charged = memory.size;
 	capacity = (unsigned)((BUF_SLAB_BYTES - header) / sizeof(struct buf));
 	if (capacity == 0 || capacity > 64U) {
-		if (hal_pmem_free(&memory) != HAL_OK)
+		if (hal_pmem_free(&memory.paddr, memory.size) != HAL_OK)
 			HAL_FATAL("buffer slab rollback failed");
 		cancel_reservation(charged, 1);
 		return EOVERFLOW;
 	}
 
 	/* Initializes the slab with every slot free. */
-	memset(memory.vaddr, 0, BUF_SLAB_BYTES);
-	slab = memory.vaddr;
+	memset(hal_pmem_to_kernel(memory.paddr), 0, BUF_SLAB_BYTES);
+	slab = hal_pmem_to_kernel(memory.paddr);
 	slab->memory = memory;
 	slab->capacity = capacity;
 	if (capacity == 64U)
@@ -1486,7 +1483,7 @@ free_metadata(
 {
 	struct buf_slab *slab;
 	unsigned slot;
-	struct hal_pmem release;
+	struct kern_pmem release;
 	int free_slab;
 	size_t released_bytes;
 	unsigned long irq;
@@ -1525,7 +1522,7 @@ free_metadata(
 	/* Releases the slab memory unlocked. */
 	if (free_slab) {
 		released_bytes = release.size;
-		if (hal_pmem_free(&release) != HAL_OK)
+		if (hal_pmem_free(&release.paddr, release.size) != HAL_OK)
 			HAL_FATAL("buffer metadata retirement failed");
 		if (cache_memory_release != NULL)
 			cache_memory_release(CACHE_MEMORY_BUF_META, released_bytes);
@@ -1537,7 +1534,7 @@ static void
 free_buffer(
 	struct buf *buffer)
 {
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	size_t size;
 	struct disk *disk;
 	unsigned long irq;
@@ -1548,7 +1545,7 @@ free_buffer(
 
 	/* Frees the data and un-accounts it. */
 	if (size != 0) {
-		if (hal_pmem_free(&memory) != HAL_OK)
+		if (hal_pmem_free(&memory.paddr, memory.size) != HAL_OK)
 			HAL_FATAL("buffer data retirement failed");
 		if (cache_memory_release != NULL)
 			cache_memory_release(CACHE_MEMORY_BUF_DATA, size);
@@ -1718,7 +1715,7 @@ reference_line(
 	int error;
 	unsigned bucket;
 	unsigned long irq;
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 
 	candidate = NULL;
 
@@ -1775,7 +1772,7 @@ reference_line(
 			candidate->b_block_count = (uint32_t)line_blocks;
 			candidate->b_size = memory.size;
 			candidate->b_memory = memory;
-			candidate->b_data = memory.vaddr;
+			candidate->b_data = hal_pmem_to_kernel(memory.paddr);
 			error = disk_buffer_acquire(disk);
 			if (error != 0) {
 				free_buffer(candidate);

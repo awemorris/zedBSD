@@ -1900,7 +1900,7 @@ uhci_request_free(
 	/* Handles the r condition. */
 	if (r->bounce.address)
 		drv_dma_free_coherent(c->hcd.dma, &r->bounce);
-	hal_free(r);
+	kernel_free(r);
 }
 
 /* Hands a request to the thread that retires them. */
@@ -2512,7 +2512,7 @@ uhci_build_request(
 			return error;
 	} else {
 		/* Handles the r availability. */
-		r = hal_malloc(sizeof(*r));
+		r = kernel_alloc(sizeof(*r));
 		if (r == NULL)
 			return ENOMEM;
 		memset(r, 0, sizeof(*r));
@@ -2545,7 +2545,7 @@ uhci_build_request(
 		error = drv_dma_alloc_coherent(c->hcd.dma, 4096U, 16U,
 					       &r->schedule);
 		if (error != 0) {
-			hal_free(r);
+			kernel_free(r);
 
 			/* Failed. */
 			return error;
@@ -4266,7 +4266,7 @@ uhci_attach(
 	(void)id;
 
 	/* Handles the controller availability. */
-	controller = hal_malloc(sizeof(*controller));
+	controller = kernel_alloc(sizeof(*controller));
 	if (controller == NULL)
 		return ENOMEM;
 	memset(controller, 0, sizeof(*controller));
@@ -4380,7 +4380,7 @@ fail:
 		return 0;
 	}
 
-	hal_free(controller);
+	kernel_free(controller);
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -4423,7 +4423,7 @@ uhci_detach(
 
 	uhci_unpublish(controller);
 	drv_pci_device_set_driver_data(device, NULL);
-	hal_free(controller);
+	kernel_free(controller);
 
 	/* Succeeded. */
 	return 0;

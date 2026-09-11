@@ -12,6 +12,7 @@
  */
 
 #include <hal/hal.h>
+#include "../../cons-keys.h"
 
 #include <string.h>
 
@@ -55,12 +56,21 @@ struct console_output_token {
 
 static volatile uint16_t *vga_memory = (volatile uint16_t *)((uintptr_t)AMD64_IMAGE_BASE + 0xb8000U);
 static unsigned cursor_row;
+/*
+ * One queued key event. The HAL interface passes the keysymbol and the
+ * flags as separate parameters, so this record stays file-local.
+ */
+struct pcat_key_event {
+	char symbol[HAL_KEY_SYMBOL_SIZE];
+	uint32_t flags;
+};
+
 static unsigned cursor_column;
 static uint8_t current_attribute = 0x07U;
 static int cursor_visible = 1;
 static int console_suspended;
-static enum hal_cons_mode console_mode = HAL_CONS_TERMINAL;
-static struct hal_key_event events[EVENT_COUNT];
+static int event_mode;
+static struct pcat_key_event events[EVENT_COUNT];
 static unsigned event_head;
 static unsigned event_tail;
 static uint8_t key_down[32];
@@ -73,7 +83,15 @@ static struct hal_cons_wait_queue input_waiters;
 
 static const struct zbl6_framebuffer *framebuffer;
 static volatile uint32_t *framebuffer_pixels;
-static uint16_t framebuffer_cells[HAL_CONS_ROWS * HAL_CONS_COLUMNS];
+/*
+ * Text console geometry. The 8x16 VGA font over the 640x480 firmware
+ * framebuffer gives exactly 80 columns by 30 rows, so no centering band
+ * remains above or below the text area.
+ */
+#define PCAT_CONS_COLUMNS	80U
+#define PCAT_CONS_ROWS		30U
+
+static uint16_t framebuffer_cells[PCAT_CONS_ROWS * PCAT_CONS_COLUMNS];
 static unsigned framebuffer_x;
 static unsigned framebuffer_y;
 static unsigned drawn_cursor_row;
@@ -207,7 +225,7 @@ static void putc_locked(int character);
 static void write_n_locked(const char *string, unsigned length);
 static int write_n_at_locked(unsigned row, unsigned column, const char *string, unsigned length, uint8_t attribute);
 static const char *scan_symbol(uint8_t scan, int extended);
-static void set_event(struct hal_key_event *event, const char *symbol, uint32_t flags);
+static void set_event(struct pcat_key_event *event, const char *symbol, uint32_t flags);
 static int symbol_equal(const char *left, const char *right);
 static void rebuild_keyboard_events_locked(void);
 static void enqueue_keyboard_event_locked(const char *symbol, uint32_t flags);
@@ -331,10 +349,10 @@ hal_cons_putc(
 }
 
 /*
- * Writes a bounded byte string to the console.
+ * Writes a bounded byte string at the cursor.
  */
 void
-hal_cons_write_n(
+pcat_cons_write_n(
 	const char *string,
 	unsigned length)
 {
@@ -351,10 +369,10 @@ hal_cons_write_n(
 }
 
 /*
- * Writes a terminated byte string to the console.
+ * Writes a terminated byte string at the cursor.
  */
 void
-hal_cons_write(
+pcat_cons_write_string(
 	const char *string)
 {
 	unsigned length;
@@ -369,14 +387,14 @@ hal_cons_write(
 		length++;
 
 	/* Writes the measured byte range. */
-	hal_cons_write_n(string, length);
+	pcat_cons_write_n(string, length);
 }
 
 /*
  * Writes bounded text at a fixed console position.
  */
-int
-hal_cons_write_n_at(
+static int
+pcat_cons_write_n_at(
 	unsigned row,
 	unsigned column,
 	const char *string,
@@ -405,69 +423,34 @@ hal_cons_write_n_at(
 }
 
 /*
- * Writes attributed text at a fixed console position.
- */
-int
-hal_cons_write_at_attr(
-	unsigned row,
-	unsigned column,
-	const char *string,
-	uint8_t attribute)
-{
-	unsigned length;
-	int changed;
-
-	/* Rejects a missing input string. */
-	if (string == NULL)
-		return -1;
-
-	/* Measures the terminated input string. */
-	length = 0;
-	while (string[length] != '\0')
-		length++;
-
-	/* Writes the measured string with the requested attribute. */
-	changed = hal_cons_write_n_at(
-		row,
-		column,
-		string,
-		length,
-		attribute);
-
-	/* Reports the number of cells changed. */
-	return changed;
-}
-
-/*
- * Writes text at a fixed console position.
+ * Writes a terminated UTF-8 string at a fixed console position with the
+ * given attribute. Clipped at the end of the row; clearing is spaces.
  */
 void
-hal_cons_write_at(
+hal_cons_write(
 	unsigned row,
 	unsigned column,
-	const char *string)
+	uint8_t attribute,
+	const char *utf8)
 {
-	struct console_output_token token;
 	unsigned length;
 
 	/* Ignores a missing input string. */
-	if (string == NULL)
+	if (utf8 == NULL)
 		return;
 
 	/* Measures the terminated input string. */
 	length = 0;
-	while (string[length] != '\0')
+	while (utf8[length] != '\0')
 		length++;
 
-	/* Writes the measured string with the current attribute. */
-	token = console_output_lock();
-	(void)write_n_at_locked(
+	/* Writes the measured string with the requested attribute. */
+	(void)pcat_cons_write_n_at(
 		row,
 		column,
-		string,
+		utf8,
 		length,
-		current_attribute);
-	console_output_unlock(token);
+		attribute);
 }
 
 /*
@@ -484,11 +467,11 @@ hal_cons_clear_to_eol(
 	token = console_output_lock();
 
 	/* Clears every cell at or after a valid cursor. */
-	if (cursor_row < HAL_CONS_ROWS &&
-	    cursor_column < HAL_CONS_COLUMNS) {
+	if (cursor_row < PCAT_CONS_ROWS &&
+	    cursor_column < PCAT_CONS_COLUMNS) {
 		/* Clears the remainder of the current row. */
 		for (current = cursor_column;
-		     current < HAL_CONS_COLUMNS;
+		     current < PCAT_CONS_COLUMNS;
 		     current++) {
 			write_cell_locked(
 				cursor_row,
@@ -521,10 +504,10 @@ hal_cons_clear_to_eol_at(
 	token = console_output_lock();
 
 	/* Clears every cell at or after a valid requested position. */
-	if (row < HAL_CONS_ROWS && column < HAL_CONS_COLUMNS) {
+	if (row < PCAT_CONS_ROWS && column < PCAT_CONS_COLUMNS) {
 		/* Clears the remainder of the requested row. */
 		for (current = column;
-		     current < HAL_CONS_COLUMNS;
+		     current < PCAT_CONS_COLUMNS;
 		     current++) {
 			write_cell_locked(
 				row,
@@ -564,7 +547,7 @@ hal_cons_set_cursor(
 	token = console_output_lock();
 
 	/* Applies a position within the fixed console geometry. */
-	if (row < HAL_CONS_ROWS && column < HAL_CONS_COLUMNS) {
+	if (row < PCAT_CONS_ROWS && column < PCAT_CONS_COLUMNS) {
 		cursor_row = row;
 		cursor_column = column;
 		update_cursor_locked();
@@ -607,25 +590,40 @@ hal_cons_show_cursor(
 }
 
 /*
- * Saves the current console presentation state.
+ * Reports the cursor position and whether the cursor is visible.
  */
 void
-hal_cons_save_state(
-	struct hal_cons_state *state)
+hal_cons_get_cursor(
+	unsigned *row,
+	unsigned *column,
+	int *visible)
 {
 	struct console_output_token token;
 
-	/* Ignores a missing output record. */
-	if (state == NULL)
-		return;
-
-	/* Captures a consistent presentation snapshot. */
+	/* Captures a consistent cursor snapshot. */
 	token = console_output_lock();
-	state->mode = console_mode;
-	state->row = cursor_row;
-	state->column = cursor_column;
-	state->cursor_visible = cursor_visible;
+	if (row != NULL)
+		*row = cursor_row;
+	if (column != NULL)
+		*column = cursor_column;
+	if (visible != NULL)
+		*visible = cursor_visible;
 	console_output_unlock(token);
+}
+
+/*
+ * Reports the text console size in character cells.
+ */
+void
+hal_cons_get_size(
+	unsigned *cols,
+	unsigned *rows)
+{
+	/* The geometry is fixed for this board. */
+	if (cols != NULL)
+		*cols = PCAT_CONS_COLUMNS;
+	if (rows != NULL)
+		*rows = PCAT_CONS_ROWS;
 }
 
 /*
@@ -718,9 +716,9 @@ pcat_console_output_test_reset(
 		0,
 		sizeof(console_test_framebuffer));
 	console_test_framebuffer.size = pixel_count * sizeof(*pixels);
-	console_test_framebuffer.width = HAL_CONS_COLUMNS * 8U;
+	console_test_framebuffer.width = PCAT_CONS_COLUMNS * 8U;
 	console_test_framebuffer.height =
-	    HAL_CONS_ROWS * PCAT_VGAFONT_HEIGHT;
+	    PCAT_CONS_ROWS * PCAT_VGAFONT_HEIGHT;
 	console_test_framebuffer.stride = console_test_framebuffer.width;
 	console_test_framebuffer.format = ZBL6_FRAMEBUFFER_BGRX8888;
 	framebuffer = &console_test_framebuffer;
@@ -744,9 +742,9 @@ pcat_console_output_test_reentrant_transient(
 
 	/* Models a fault or NMI after newline publishes its transient row. */
 	token = console_output_lock();
-	cursor_row = HAL_CONS_ROWS;
+	cursor_row = PCAT_CONS_ROWS;
 	hal_cons_putc(character);
-	cursor_row = HAL_CONS_ROWS - 1U;
+	cursor_row = PCAT_CONS_ROWS - 1U;
 	cursor_column = 0;
 	console_output_unlock(token);
 }
@@ -764,11 +762,11 @@ pcat_console_output_test_state(
 
 	/* Captures the fixture state under output serialization. */
 	token = console_output_lock();
-	valid = cursor_row < HAL_CONS_ROWS;
+	valid = cursor_row < PCAT_CONS_ROWS;
 
 	/* Checks the column only after the cursor row proves valid. */
 	if (valid)
-		valid = cursor_column < HAL_CONS_COLUMNS;
+		valid = cursor_column < PCAT_CONS_COLUMNS;
 
 	/* Checks the framebuffer only after the cursor proves valid. */
 	if (valid)
@@ -879,7 +877,7 @@ pcat_input_ownership_test_repeat(
  */
 int
 pcat_input_ownership_test_pop(
-	struct hal_key_event *event)
+	struct pcat_key_event *event)
 {
 	/* Reports an empty fixture queue. */
 	if (event_tail == event_head)
@@ -926,11 +924,53 @@ hal_cons_modifiers(
 }
 
 /*
+ * Copies one queued event into the caller's keysymbol and flags.
+ */
+static void
+copy_event(
+	const struct pcat_key_event *source,
+	char *keysym,
+	uint32_t *flags)
+{
+	unsigned index;
+
+	/* Copies the NUL terminated keysymbol when requested. */
+	if (keysym != NULL) {
+		for (index = 0; index < HAL_KEY_SYMBOL_SIZE; index++)
+			keysym[index] = source->symbol[index];
+	}
+
+	/* Copies the event flags when requested. */
+	if (flags != NULL)
+		*flags = source->flags;
+}
+
+/*
+ * Enables or disables keyboard event mode.
+ */
+void
+hal_cons_set_event_mode(
+	int enable)
+{
+	struct console_output_token token;
+
+	/* Serializes the mode change with all console rendering. */
+	token = console_output_lock();
+	event_mode = enable != 0;
+
+	/* Terminal mode owns the visible cursor again. */
+	if (!event_mode)
+		update_cursor_locked();
+	console_output_unlock(token);
+}
+
+/*
  * Tests whether a console key event is queued.
  */
 int
 hal_cons_poll_event(
-	struct hal_key_event *event)
+	char *keysym,
+	uint32_t *flags)
 {
 	bool enabled;
 	int available;
@@ -939,9 +979,9 @@ hal_cons_poll_event(
 	enabled = hal_cons_wait_queue_lock(&input_waiters);
 	available = event_head != event_tail;
 
-	/* Copies the queued event without consuming it when requested. */
-	if (available && event != NULL)
-		*event = events[event_tail];
+	/* Copies the queued event without consuming it. */
+	if (available)
+		copy_event(&events[event_tail], keysym, flags);
 
 	/* Releases input serialization after inspecting the queue. */
 	hal_cons_wait_queue_unlock(&input_waiters, enabled);
@@ -955,7 +995,8 @@ hal_cons_poll_event(
  */
 int
 hal_cons_read_event(
-	struct hal_key_event *event)
+	char *keysym,
+	uint32_t *flags)
 {
 	struct hal_cons_wait_entry waiter;
 	bool enabled;
@@ -971,9 +1012,8 @@ hal_cons_read_event(
 
 		/* Consumes the oldest available event. */
 		if (event_head != event_tail) {
-			/* Copies the event when requested. */
-			if (event != NULL)
-				*event = events[event_tail];
+			/* Copies the event out. */
+			copy_event(&events[event_tail], keysym, flags);
 
 			/* Retires the event and releases input serialization. */
 			event_tail = (event_tail + 1U) % EVENT_COUNT;
@@ -997,40 +1037,41 @@ int
 hal_cons_getc(
 	void)
 {
-	struct hal_key_event event;
+	char symbol[HAL_KEY_SYMBOL_SIZE];
+	uint32_t event_flags;
 
 	/* Waits until a press or repeat event represents a text character. */
 	for (;;) {
-		(void)hal_cons_read_event(&event);
+		(void)hal_cons_read_event(symbol, &event_flags);
 
 		/* Ignores key-state snapshot events. */
-		if ((event.flags & HAL_KEY_EVENT_SNAPSHOT) != 0)
+		if ((event_flags & HAL_KEY_EVENT_SNAPSHOT) != 0)
 			continue;
 
 		/* Ignores events which do not produce text. */
-		if ((event.flags &
+		if ((event_flags &
 		    (HAL_KEY_EVENT_PRESS | HAL_KEY_EVENT_REPEAT)) == 0) {
 			continue;
 		}
 
 		/* Reports a one-byte key symbol directly. */
-		if (event.symbol[1] == '\0')
-			return event.symbol[0];
+		if (symbol[1] == '\0')
+			return symbol[0];
 
 		/* Translates the enter key. */
-		if (symbol_equal(event.symbol, "enter"))
+		if (symbol_equal(symbol, "enter"))
 			return '\r';
 
 		/* Translates the tab key. */
-		if (symbol_equal(event.symbol, "tab"))
+		if (symbol_equal(symbol, "tab"))
 			return '\t';
 
 		/* Translates the backspace key. */
-		if (symbol_equal(event.symbol, "backspace"))
+		if (symbol_equal(symbol, "backspace"))
 			return '\b';
 
 		/* Translates the escape key. */
-		if (symbol_equal(event.symbol, "esc"))
+		if (symbol_equal(symbol, "esc"))
 			return 0x1b;
 	}
 }
@@ -1054,7 +1095,7 @@ hal_cons_drain_input(
  * Initializes the PC/AT console and keyboard state.
  */
 void
-pcat_cons_init(
+prekern_pcat_cons_init(
 	void)
 {
 	struct console_output_token token;
@@ -1072,8 +1113,8 @@ pcat_cons_init(
 
 	/* Selects a valid firmware framebuffer large enough for the console. */
 	if (framebuffer != NULL &&
-	    framebuffer->width >= HAL_CONS_COLUMNS * 8U &&
-	    framebuffer->height >= HAL_CONS_ROWS * PCAT_VGAFONT_HEIGHT &&
+	    framebuffer->width >= PCAT_CONS_COLUMNS * 8U &&
+	    framebuffer->height >= PCAT_CONS_ROWS * PCAT_VGAFONT_HEIGHT &&
 	    framebuffer->stride >= framebuffer->width &&
 	    (uint64_t)framebuffer->stride * framebuffer->height <=
 	    framebuffer->size / sizeof(*framebuffer_pixels)) {
@@ -1082,8 +1123,8 @@ pcat_cons_init(
 		framebuffer_pixels = (volatile uint32_t *)(uintptr_t)
 		    (ZBL6_FRAMEBUFFER_VIRTUAL_BASE + offset);
 		framebuffer_x =
-		    (framebuffer->width - HAL_CONS_COLUMNS * 8U) / 2U;
-		framebuffer_y = (framebuffer->height - HAL_CONS_ROWS *
+		    (framebuffer->width - PCAT_CONS_COLUMNS * 8U) / 2U;
+		framebuffer_y = (framebuffer->height - PCAT_CONS_ROWS *
 		    PCAT_VGAFONT_HEIGHT) / 2U;
 
 		/* Clears every visible firmware framebuffer pixel. */
@@ -1118,7 +1159,7 @@ pcat_cons_init(
  * Registers and enables the PC/AT keyboard interrupt.
  */
 void
-pcat_cons_irq_init(
+prekern_pcat_cons_irq_init(
 	void)
 {
 	int status;
@@ -1127,7 +1168,7 @@ pcat_cons_irq_init(
 	hal_irq_mask(IRQ_KEYBOARD);
 
 	/* Registers the keyboard interrupt handler. */
-	status = hal_irq_set_handler(
+	status = hal_irq_register(
 		IRQ_KEYBOARD,
 		keyboard_interrupt,
 		NULL);
@@ -1417,7 +1458,7 @@ framebuffer_draw_cell_locked(
 	attribute = (uint8_t)(cell >> 8);
 
 	/* Rejects a cell outside the fixed console geometry. */
-	if (row >= HAL_CONS_ROWS || column >= HAL_CONS_COLUMNS)
+	if (row >= PCAT_CONS_ROWS || column >= PCAT_CONS_COLUMNS)
 		return;
 
 	/* Rejects an unavailable framebuffer backend. */
@@ -1495,8 +1536,8 @@ write_cell_locked(
 
 	/* Ignores rendering while suspended or outside the console geometry. */
 	if (console_suspended ||
-	    row >= HAL_CONS_ROWS ||
-	    column >= HAL_CONS_COLUMNS) {
+	    row >= PCAT_CONS_ROWS ||
+	    column >= PCAT_CONS_COLUMNS) {
 		return;
 	}
 
@@ -1504,7 +1545,7 @@ write_cell_locked(
 	if (framebuffer != NULL && framebuffer_pixels != NULL) {
 		cell = (uint16_t)((uint8_t)character |
 		    ((uint16_t)attribute << 8));
-		framebuffer_cells[row * HAL_CONS_COLUMNS + column] = cell;
+		framebuffer_cells[row * PCAT_CONS_COLUMNS + column] = cell;
 		framebuffer_draw_cell_locked(row, column, cell, 0);
 
 		/* Completes the framebuffer-backed write. */
@@ -1512,7 +1553,7 @@ write_cell_locked(
 	}
 
 	/* Writes the cell directly into VGA text memory. */
-	VGA_MEMORY[row * HAL_CONS_COLUMNS + column] =
+	VGA_MEMORY[row * PCAT_CONS_COLUMNS + column] =
 	    (uint16_t)((uint8_t)character | ((uint16_t)attribute << 8));
 }
 
@@ -1524,7 +1565,7 @@ update_cursor_locked(
 	unsigned position;
 
 	/* Computes the linear VGA cursor position. */
-	position = cursor_row * HAL_CONS_COLUMNS + cursor_column;
+	position = cursor_row * PCAT_CONS_COLUMNS + cursor_column;
 
 	/* Leaves hardware state untouched while rendering is suspended. */
 	if (console_suspended)
@@ -1534,20 +1575,20 @@ update_cursor_locked(
 	if (framebuffer != NULL && framebuffer_pixels != NULL) {
 		/* Restores the previously inverted cursor cell. */
 		if (framebuffer_cursor_drawn &&
-		    drawn_cursor_row < HAL_CONS_ROWS &&
-		    drawn_cursor_column < HAL_CONS_COLUMNS) {
+		    drawn_cursor_row < PCAT_CONS_ROWS &&
+		    drawn_cursor_column < PCAT_CONS_COLUMNS) {
 			framebuffer_draw_cell_locked(
 				drawn_cursor_row,
 				drawn_cursor_column,
 				framebuffer_cells[drawn_cursor_row *
-				HAL_CONS_COLUMNS + drawn_cursor_column],
+				PCAT_CONS_COLUMNS + drawn_cursor_column],
 				0);
 		}
 
 		/* Records whether the logical cursor should be drawn. */
 		framebuffer_cursor_drawn = cursor_visible &&
-		    cursor_row < HAL_CONS_ROWS &&
-		    cursor_column < HAL_CONS_COLUMNS;
+		    cursor_row < PCAT_CONS_ROWS &&
+		    cursor_column < PCAT_CONS_COLUMNS;
 
 		/* Inverts the new cursor cell when it is visible. */
 		if (framebuffer_cursor_drawn) {
@@ -1556,7 +1597,7 @@ update_cursor_locked(
 			framebuffer_draw_cell_locked(
 				cursor_row,
 				cursor_column,
-				framebuffer_cells[cursor_row * HAL_CONS_COLUMNS +
+				framebuffer_cells[cursor_row * PCAT_CONS_COLUMNS +
 				cursor_column],
 				1);
 		}
@@ -1582,11 +1623,11 @@ clear_row_locked(
 	unsigned column;
 
 	/* Ignores a row outside the fixed console geometry. */
-	if (row >= HAL_CONS_ROWS)
+	if (row >= PCAT_CONS_ROWS)
 		return;
 
 	/* Replaces every cell in the row with a space. */
-	for (column = 0; column < HAL_CONS_COLUMNS; column++)
+	for (column = 0; column < PCAT_CONS_COLUMNS; column++)
 		write_cell_locked(row, column, ' ', current_attribute);
 }
 
@@ -1598,7 +1639,7 @@ clear_locked(
 	unsigned row;
 
 	/* Clears every row of the fixed terminal. */
-	for (row = 0; row < HAL_CONS_ROWS; row++)
+	for (row = 0; row < PCAT_CONS_ROWS; row++)
 		clear_row_locked(row);
 
 	/* Homes and publishes the cursor. */
@@ -1614,7 +1655,7 @@ reset_locked(
 {
 	/* Restores the default terminal presentation. */
 	current_attribute = 0x07U;
-	console_mode = HAL_CONS_TERMINAL;
+	event_mode = 0;
 	cursor_visible = 1;
 	clear_locked();
 }
@@ -1633,15 +1674,15 @@ scroll_locked(
 	    framebuffer != NULL &&
 	    framebuffer_pixels != NULL) {
 		/* Copies every framebuffer row to its predecessor. */
-		for (row = 1; row < HAL_CONS_ROWS; row++) {
+		for (row = 1; row < PCAT_CONS_ROWS; row++) {
 			/* Copies every cell in this framebuffer row. */
 			for (column = 0;
-			     column < HAL_CONS_COLUMNS;
+			     column < PCAT_CONS_COLUMNS;
 			     column++) {
 				cell = framebuffer_cells[
-				    row * HAL_CONS_COLUMNS + column];
+				    row * PCAT_CONS_COLUMNS + column];
 				framebuffer_cells[
-				    (row - 1U) * HAL_CONS_COLUMNS + column] =
+				    (row - 1U) * PCAT_CONS_COLUMNS + column] =
 				    cell;
 				framebuffer_draw_cell_locked(
 					row - 1U,
@@ -1652,20 +1693,20 @@ scroll_locked(
 		}
 	} else if (!console_suspended) {
 		/* Copies every VGA row to its predecessor. */
-		for (row = 1; row < HAL_CONS_ROWS; row++) {
+		for (row = 1; row < PCAT_CONS_ROWS; row++) {
 			/* Copies every text cell in this VGA row. */
 			for (column = 0;
-			     column < HAL_CONS_COLUMNS;
+			     column < PCAT_CONS_COLUMNS;
 			     column++) {
 				VGA_MEMORY[
-				    (row - 1U) * HAL_CONS_COLUMNS + column] =
-				    VGA_MEMORY[row * HAL_CONS_COLUMNS + column];
+				    (row - 1U) * PCAT_CONS_COLUMNS + column] =
+				    VGA_MEMORY[row * PCAT_CONS_COLUMNS + column];
 			}
 		}
 	}
 
 	/* Clears the vacated final row. */
-	clear_row_locked(HAL_CONS_ROWS - 1U);
+	clear_row_locked(PCAT_CONS_ROWS - 1U);
 }
 
 /* Advances output to the beginning of the next terminal row. */
@@ -1675,13 +1716,13 @@ newline_locked(
 {
 	/* Advances the logical cursor and scrolls at the terminal bottom. */
 	cursor_column = 0;
-	if (++cursor_row >= HAL_CONS_ROWS) {
+	if (++cursor_row >= PCAT_CONS_ROWS) {
 		scroll_locked();
-		cursor_row = HAL_CONS_ROWS - 1U;
+		cursor_row = PCAT_CONS_ROWS - 1U;
 	}
 
 	/* Publishes the cursor only while terminal mode owns presentation. */
-	if (console_mode == HAL_CONS_TERMINAL)
+	if (!event_mode)
 		update_cursor_locked();
 }
 
@@ -1691,7 +1732,7 @@ put_graphic_locked(
 	int character)
 {
 	/* Wraps a cursor already beyond the visible row. */
-	if (cursor_column >= HAL_CONS_COLUMNS)
+	if (cursor_column >= PCAT_CONS_COLUMNS)
 		newline_locked();
 
 	/* Writes the glyph and advances the logical cursor. */
@@ -1702,9 +1743,9 @@ put_graphic_locked(
 		current_attribute);
 
 	/* Wraps or publishes the advanced cursor. */
-	if (cursor_column >= HAL_CONS_COLUMNS) {
+	if (cursor_column >= PCAT_CONS_COLUMNS) {
 		newline_locked();
-	} else if (console_mode == HAL_CONS_TERMINAL) {
+	} else if (!event_mode) {
 		update_cursor_locked();
 	}
 }
@@ -1823,15 +1864,15 @@ write_n_at_locked(
 	changed = 0;
 
 	/* Rejects an invalid origin or missing input string. */
-	if (row >= HAL_CONS_ROWS ||
-	    column >= HAL_CONS_COLUMNS ||
+	if (row >= PCAT_CONS_ROWS ||
+	    column >= PCAT_CONS_COLUMNS ||
 	    string == NULL) {
 		return -1;
 	}
 
 	/* Renders bytes until the input or fixed terminal geometry ends. */
 	for (index = 0;
-	     index < length && row < HAL_CONS_ROWS;
+	     index < length && row < PCAT_CONS_ROWS;
 	     index++) {
 		character = (uint8_t)string[index];
 
@@ -1853,7 +1894,7 @@ write_n_at_locked(
 			character = '?';
 
 		/* Stops before writing beyond the fixed row width. */
-		if (column >= HAL_CONS_COLUMNS)
+		if (column >= PCAT_CONS_COLUMNS)
 			break;
 
 		/* Renders this byte with the selected text attribute. */
@@ -1867,9 +1908,9 @@ write_n_at_locked(
 	}
 
 	/* Leaves the logical cursor at the bounded final position. */
-	cursor_row = row < HAL_CONS_ROWS ? row : HAL_CONS_ROWS - 1U;
-	cursor_column = column < HAL_CONS_COLUMNS ?
-	    column : HAL_CONS_COLUMNS - 1U;
+	cursor_row = row < PCAT_CONS_ROWS ? row : PCAT_CONS_ROWS - 1U;
+	cursor_column = column < PCAT_CONS_COLUMNS ?
+	    column : PCAT_CONS_COLUMNS - 1U;
 
 	/* Reports the number of cells changed. */
 	return (int)changed;
@@ -1939,7 +1980,7 @@ scan_symbol(
 /* Initializes one public key event. */
 static void
 set_event(
-	struct hal_key_event *event,
+	struct pcat_key_event *event,
 	const char *symbol,
 	uint32_t flags)
 {

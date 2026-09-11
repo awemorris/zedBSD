@@ -40,4 +40,18 @@ int drv_pcat_graphics_backend_flush(const struct graphics_rect *, size_t);
 int drv_pcat_graphics_backend_get_glyph(uint32_t, uint8_t[32], unsigned *,
 					unsigned *);
 
+/*
+ * Report the linear framebuffer this backend owns.
+ *
+ * The text layer draws glyphs into the same framebuffer, so it needs
+ * the pixel pointer and the geometry. Returns 0 when no linear
+ * framebuffer is available.
+ */
+int drv_pcat_graphics_backend_get_framebuffer(
+	volatile uint32_t **pixels,
+	unsigned *width,
+	unsigned *height,
+	unsigned *stride,
+	int *rgbx);
+
 #endif

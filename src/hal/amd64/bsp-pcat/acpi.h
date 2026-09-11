@@ -56,7 +56,7 @@ struct amd64_acpi_info {
 };
 
 int
-amd64_acpi_discover(
+prekern_amd64_acpi_discover(
 	struct amd64_acpi_info *result,
 	hal_physaddr_t rsdp_address);
 

@@ -700,7 +700,9 @@ signal_deliver_on_user_return(
 	struct signal_action action;
 	struct signal_info selected_info;
 	struct thread_signal_level *level;
-	struct hal_user_context interrupted;
+	uintptr_t interrupted_pc;
+	uintptr_t interrupted_sp;
+	intptr_t interrupted_return;
 	struct signal_frame frame;
 	siginfo_t user_info;
 	ucontext_t user_context;
@@ -807,11 +809,13 @@ retry:
 	/* Too deep a handler nesting or an unreadable user frame is fatal. */
 	if (thread->signal_depth >= SIGNAL_NEST_MAX)
 		exit1_signal(SIGSEGV);
-	if (hal_task_user_context(&interrupted) != 0)
+	if (hal_task_get_user_context(&interrupted_pc,
+				      &interrupted_sp,
+				      &interrupted_return) != 0)
 		exit1_signal(SIGSEGV);
 
 	/* Switches to the alternate stack when the handler asked for it. */
-	sp = interrupted.stack_pointer;
+	sp = interrupted_sp;
 	if ((action.flags & SA_ONSTACK) != 0 &&
 	    (thread->signal_altstack_flags & SS_DISABLE) == 0 &&
 	    thread->signal_on_altstack_depth == 0) {
@@ -858,9 +862,9 @@ retry:
 	    sizeof(selected_info.value));
 	memset(&user_context, 0, sizeof(user_context));
 	user_context.uc_sigmask = level->saved_mask;
-	user_context.uc_mcontext.mc_pc = (uint64_t)interrupted.pc;
-	user_context.uc_mcontext.mc_sp = (uint64_t)interrupted.stack_pointer;
-	user_context.uc_mcontext.mc_retval = (int64_t)interrupted.return_value;
+	user_context.uc_mcontext.mc_pc = (uint64_t)interrupted_pc;
+	user_context.uc_mcontext.mc_sp = (uint64_t)interrupted_sp;
+	user_context.uc_mcontext.mc_retval = (int64_t)interrupted_return;
 	level->saved_ucontext = user_context;
 	thread->signal_depth++;
 	thread->signal_token = token;

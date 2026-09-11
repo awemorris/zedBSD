@@ -15,6 +15,7 @@
 #include "ioapic.h"
 #include "early-init-policy.h"
 #include "../defs.h"
+#include "../space.h"
 
 struct ioapic_state {
 	volatile uint32_t *base;
@@ -43,8 +44,7 @@ amd64_ioapic_init(
 	uint32_t bootstrap_apic_id)
 {
 	struct amd64_ioapic_range ranges[AMD64_IOAPIC_MAX];
-	struct hal_pmem_request request;
-	struct hal_pmem memory;
+	void *mmio;
 	const char *policy_name;
 	uint32_t version;
 	unsigned index;
@@ -65,20 +65,18 @@ amd64_ioapic_init(
 			acpi->ioapics[index].address,
 			acpi->ioapics[index].gsi_base);
 
-		/* Claims the controller's uncached MMIO page. */
-		request.paddr = acpi->ioapics[index].address;
-		request.size = 4096;
-		request.alignment = 4096;
-		request.type = HAL_PMEM_TYPE_MMIO;
-		request.attr = HAL_PMEM_ATTR_NOCACHE;
-		error = hal_pmem_alloc(&request, &memory);
+		/* Maps the controller's uncached MMIO page. */
+		error = amd64_device_map(
+			acpi->ioapics[index].address,
+			4096,
+			&mmio);
 		if (error != HAL_OK) {
 			hal_printf("A64 IOAPIC MAP FAIL index=%u\n", index);
 			return HAL_ERR_UNSUPPORTED;
 		}
 
 		/* Records the persistent controller mapping and GSI base. */
-		controllers[index].base = memory.vaddr;
+		controllers[index].base = mmio;
 		controllers[index].gsi_base = acpi->ioapics[index].gsi_base;
 
 		/* Reads the volatile version register under the MMIO lock. */

@@ -23,16 +23,16 @@
 #include "bsp-pcat/acpi.h"
 #include "bsp-pcat/lapic.h"
 
-void amd64_page_init(void);
-void amd64_range_page_init(void);
-void amd64_int_init(void);
+void prekern_amd64_page_init(void);
+void prekern_amd64_range_page_init(void);
+void prekern_amd64_int_init(void);
 void kernel_entry(const void *handoff);
 
 /*
  * Initializes the amd64 HAL and enters the kernel.
  */
 void
-amd64_cmain(
+prekern_amd64_cmain(
 	const void *raw_boot_info)
 {
 	static struct amd64_acpi_info acpi;
@@ -41,57 +41,57 @@ amd64_cmain(
 	int error;
 
 	/* Establishes boot state, console output, and CPU-local facilities. */
-	bsp_boot_init(raw_boot_info);
-	pcat_cons_init();
+	prekern_bsp_boot_init(raw_boot_info);
+	prekern_pcat_cons_init();
 	amd64_cpu_init();
-	amd64_percpu_bootstrap();
+	prekern_amd64_percpu_bootstrap();
 
 	hal_puts("\nzedBSD amd64 HAL\n");
 	hal_puts("A64 ENTRY PASS\n");
 
 	/* Establishes kernel paging and address-space management. */
-	amd64_page_init();
-	amd64_space_init();
-	amd64_range_page_init();
+	prekern_amd64_page_init();
+	prekern_amd64_space_init();
+	prekern_amd64_range_page_init();
 
 	hal_puts("A64 PAGING PASS\n");
 
 	/* Installs the BSP descriptor and interrupt tables. */
 	amd64_descriptor_init();
-	amd64_int_init();
+	prekern_amd64_int_init();
 
 	hal_puts("A64 IDT READY\n");
 
 	/* Discovers the platform interrupt topology from ACPI. */
-	rsdp_address = bsp_acpi_rsdp();
-	error = amd64_acpi_discover(&acpi, rsdp_address);
+	rsdp_address = prekern_bsp_acpi_rsdp();
+	error = prekern_amd64_acpi_discover(&acpi, rsdp_address);
 	if (error != HAL_OK)
 		HAL_FATAL("amd64 ACPI MADT discovery failed");
 
 	/* Enables the BSP local APIC before bringing up secondary CPUs. */
-	error = amd64_lapic_init(&acpi);
+	error = prekern_amd64_lapic_init(&acpi);
 	if (error != HAL_OK)
 		HAL_FATAL("amd64 Local APIC initialization failed");
 
-	amd64_smp_init(&acpi);
+	prekern_amd64_smp_init(&acpi);
 
 	/* Retires loader ownership after the last boot discovery consumer. */
-	amd64_boot_memory_release();
+	prekern_amd64_boot_memory_release();
 
 	/* Enables external interrupts, the scheduler clock, and console input. */
-	irq_init(&acpi);
+	prekern_irq_init(&acpi);
 
-	error = bsp_timer_init();
+	error = prekern_bsp_timer_init();
 	if (error != HAL_OK)
 		HAL_FATAL("amd64 Local APIC timer initialization failed");
 
-	pcat_cons_irq_init();
+	prekern_pcat_cons_irq_init();
 
 	hal_puts("A64 CONSOLE IRQ READY\n");
 	hal_puts("A64 IRQ READY\n");
 
 	/* Converts the board handoff and transfers control to the kernel. */
-	handoff = bsp_kernel_handoff(raw_boot_info);
+	handoff = prekern_bsp_kernel_handoff(raw_boot_info);
 
 	/*
 	 * Call the kernel entry point.

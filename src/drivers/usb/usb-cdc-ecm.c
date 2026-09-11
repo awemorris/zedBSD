@@ -1525,7 +1525,7 @@ static void
 ecm_release(
 	void *driver_data)
 {
-	hal_free(driver_data);
+	kernel_free(driver_data);
 }
 
 /* Marks the device as ready to carry traffic. */
@@ -1583,9 +1583,9 @@ static void
 ecm_buffers_free(
 	struct ecm_adapter *adapter)
 {
-	hal_free(adapter->tx_buffer);
-	hal_free(adapter->rx_buffer);
-	hal_free(adapter->notification_buffer);
+	kernel_free(adapter->tx_buffer);
+	kernel_free(adapter->rx_buffer);
+	kernel_free(adapter->notification_buffer);
 	adapter->tx_buffer = NULL;
 	adapter->rx_buffer = NULL;
 	adapter->notification_buffer = NULL;
@@ -1596,9 +1596,9 @@ static int
 ecm_buffers_alloc(
 	struct ecm_adapter *adapter)
 {
-	adapter->notification_buffer = hal_malloc(ECM_NOTIFICATION_SIZE);
-	adapter->rx_buffer = hal_malloc(ECM_FRAME_SIZE);
-	adapter->tx_buffer = hal_malloc(ECM_FRAME_SIZE);
+	adapter->notification_buffer = kernel_alloc(ECM_NOTIFICATION_SIZE);
+	adapter->rx_buffer = kernel_alloc(ECM_FRAME_SIZE);
+	adapter->tx_buffer = kernel_alloc(ECM_FRAME_SIZE);
 
 	/* Handles the notification buffer availability. */
 	if (adapter->notification_buffer != NULL &&
@@ -1675,7 +1675,7 @@ ecm_attach(
 		return ENODEV;
 
 	/* Handles the adapter availability. */
-	adapter = hal_malloc(sizeof(*adapter));
+	adapter = kernel_alloc(sizeof(*adapter));
 	if (adapter == NULL)
 		return ENOMEM;
 	memset(adapter, 0, sizeof(*adapter));
@@ -1693,7 +1693,7 @@ ecm_attach(
 	/* Checks the operation status. */
 	error = drv_usb_interface_set_driver_data(interface, adapter);
 	if (error != 0) {
-		hal_free(adapter);
+		kernel_free(adapter);
 
 		/* Failed. */
 		return error;
@@ -1780,7 +1780,7 @@ ecm_detach(
 	if (adapter->net_device != NULL)
 		net_device_destroy(adapter->net_device);
 	else
-		hal_free(adapter);
+		kernel_free(adapter);
 
 	/* Succeeded. */
 	return 0;

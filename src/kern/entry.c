@@ -47,7 +47,7 @@
 struct kernel_large_allocation {
 	struct kernel_large_allocation *next;
 	void *pointer;
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 };
 
 static uint8_t kernel_heap_storage[KERNEL_HEAP_SIZE]
@@ -95,8 +95,6 @@ extern char __kernel_vma_start[], __kernel_vma_end[];
 
 static bool kernel_heap_lock_enter(void);
 static void kernel_heap_lock_leave(bool enabled);
-static void *kernel_alloc(size_t size);
-static void kernel_free(void *pointer);
 
 /*
  * Takes the kernel heap lock on behalf of libc's malloc.
@@ -166,8 +164,7 @@ kern_malloc(
 	size_t size)
 {
 	struct kernel_large_allocation *large;
-	struct hal_pmem_request request;
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	void *result;
 	size_t header_size;
 	bool enabled;
@@ -196,18 +193,16 @@ kern_malloc(
 		return NULL;
 
 	/* Allocates page-aligned physical memory for the header and the block. */
-	memset(&request, 0, sizeof(request));
-	request.paddr = HAL_PMEM_PADDR_ANY;
-	request.size = size + header_size;
-	request.alignment = ZEDBSD_PAGE_SIZE;
-	request.type = HAL_PMEM_TYPE_RAM;
-	if (hal_pmem_alloc(&request, &memory) != HAL_OK)
+	memory.size = size + header_size;
+	if (hal_pmem_alloc(memory.size, ZEDBSD_PAGE_SIZE,
+			   &memory.paddr) != HAL_OK)
 		return NULL;
 
 	/* Fills the header and links it into the large allocation list. */
-	large = memory.vaddr;
+	large = hal_pmem_to_kernel(memory.paddr);
 	memset(large, 0, header_size);
-	large->pointer = (uint8_t *)memory.vaddr + header_size;
+	large->pointer = (uint8_t *)hal_pmem_to_kernel(memory.paddr) +
+	    header_size;
 	large->memory = memory;
 	enabled = kernel_heap_lock_enter();
 	large->next = kernel_large_allocations;
@@ -256,7 +251,7 @@ kern_free(
 {
 	struct kernel_large_allocation **link;
 	struct kernel_large_allocation *large;
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	uintptr_t address;
 	bool enabled;
 
@@ -295,7 +290,7 @@ kern_free(
 	/* Releases the physical memory outside the lock. */
 	if (large == NULL)
 		HAL_FATAL("invalid kernel allocation free");
-	if (hal_pmem_free(&memory) != HAL_OK)
+	if (hal_pmem_free(&memory.paddr, memory.size) != HAL_OK)
 		HAL_FATAL("kernel large allocation free failed");
 }
 
@@ -359,8 +354,9 @@ kernel_entry(
 	heap_allocator_set_observer(&kernel_heap, kernel_heap_trace_observer, NULL);
 #endif
 	(void)heap_active_set(&kernel_heap);
-	hal_set_allocator(kernel_alloc, kernel_free);
-	hal_task_init();
+	if (hal_task_create_for_init_context() == NULL)
+		hal_fatal(__FILE__, __LINE__,
+			  "initial task allocation failed");
 	process_init();
 	kern_clock_init();
 	user_probe_init();
@@ -519,8 +515,11 @@ kernel_heap_trace_observer(
 }
 #endif
 
-/* Allocates memory for the HAL. */
-static void *
+/*
+ * Allocates memory for the HAL. Declared by the HAL interface, so the
+ * HAL calls it directly instead of receiving a registered callback.
+ */
+void *
 kernel_alloc(
 	size_t size)
 {
@@ -532,8 +531,10 @@ kernel_alloc(
 	return result;
 }
 
-/* Frees memory for the HAL. */
-static void
+/*
+ * Releases memory for the HAL.
+ */
+void
 kernel_free(
 	void *pointer)
 {

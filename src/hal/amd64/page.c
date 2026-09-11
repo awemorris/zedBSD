@@ -60,7 +60,6 @@ static uint64_t boot_usable_highest_end;
 static uint64_t allocator_initial_bytes;
 static uint32_t reserved_pages;
 static uint32_t allocated_pages;
-static struct hal_pmem fixed_claims[16];
 static volatile unsigned pmem_lock;
 static uint64_t pmem_entered_cycles;
 static uint64_t pmem_max_irqoff_cycles;
@@ -76,22 +75,22 @@ static int record_early_page(uint64_t physical);
 static int record_early_run(uint64_t physical, uint64_t size);
 static void *early_metadata(uint64_t size);
 static void reserve_managed(uint64_t base, uint64_t size);
-static int alloc_range(size_t size, size_t alignment, uint64_t minimum, uint64_t maximum, uint64_t boundary, struct hal_pmem *descriptor);
+static int alloc_range(size_t size, size_t alignment, uint64_t minimum,
+    uint64_t maximum, uint64_t boundary, hal_physaddr_t *paddr);
 static int boot_page_retained(uint64_t physical);
 static int boot_page_retired(uint64_t physical);
 static uint64_t next_retired_page(uint64_t physical, uint64_t end);
-static int alloc_ram(size_t size, size_t alignment, struct hal_pmem *descriptor);
-static int free_ram(struct hal_pmem *descriptor);
-static void *fixed_vaddr(hal_physaddr_t physical);
-static int claim_fixed(const struct hal_pmem_request *request, struct hal_pmem *descriptor);
-static int pmem_alloc_unlocked(const struct hal_pmem_request *request, struct hal_pmem *descriptor);
-static int pmem_free_unlocked(struct hal_pmem *descriptor);
+static int alloc_ram(size_t size, size_t alignment, hal_physaddr_t *paddr);
+static int free_ram(hal_physaddr_t paddr, size_t size);
+static int pmem_alloc_unlocked(size_t size, size_t alignment,
+    uint64_t maximum, uint64_t boundary, hal_physaddr_t *paddr);
+static int pmem_free_unlocked(hal_physaddr_t *block, size_t size);
 
 /*
  * Initializes the amd64 physical-memory allocation maps.
  */
 void
-amd64_page_init(
+prekern_amd64_page_init(
 	void)
 {
 	const struct zbl6_framebuffer *framebuffer;
@@ -157,14 +156,12 @@ amd64_page_init(
 	if (framebuffer != NULL)
 		reserve_range((uintptr_t)framebuffer->physical_base, (size_t)framebuffer->size);
 
-	/* Clears the independent fixed-mapping registry. */
 	allocator_initial_bytes = (uint64_t)(phys_pages - reserved_pages) * PAGE_SIZE;
 	hal_printf("A64 MEMORY source=%u usable=%llu boot_reclaim=%llu highest_usable=%llu allocator=%llu\n",
 	    bsp_memory_source(), (unsigned long long)boot_usable_bytes,
 	    (unsigned long long)boot_reclaim_bytes,
 	    (unsigned long long)boot_usable_highest_end,
 	    (unsigned long long)allocator_initial_bytes);
-	hal_memset(fixed_claims, 0, sizeof(fixed_claims));
 }
 
 /*
@@ -279,17 +276,49 @@ record_early_run(uint64_t physical, uint64_t size)
 /*
  * Allocates one physical-memory descriptor under the allocator lock.
  */
+/*
+ * Allocates one physical RAM block.
+ */
 int
 hal_pmem_alloc(
-	const struct hal_pmem_request *request,
-	struct hal_pmem *descriptor)
+	size_t req_size,
+	size_t req_align,
+	hal_physaddr_t *block)
 {
 	bool enabled;
 	int error;
 
 	/* Performs the complete allocation while holding the global lock. */
 	enabled = pmem_lock_enter();
-	error = pmem_alloc_unlocked(request, descriptor);
+	error = pmem_alloc_unlocked(req_size, req_align, UINT64_MAX, 0, block);
+	pmem_lock_leave(enabled);
+
+	/* Returns the allocation result unchanged. */
+	return error;
+}
+
+/*
+ * Allocates one physical RAM block a device can reach.
+ */
+int
+hal_pmem_alloc_limited(
+	size_t req_size,
+	size_t req_align,
+	hal_physaddr_t max_paddr,
+	size_t boundary,
+	hal_physaddr_t *block)
+{
+	bool enabled;
+	int error;
+
+	/* Performs the constrained allocation while holding the global lock. */
+	enabled = pmem_lock_enter();
+	error = pmem_alloc_unlocked(
+		req_size,
+		req_align,
+		(uint64_t)max_paddr,
+		(uint64_t)boundary,
+		block);
 	pmem_lock_leave(enabled);
 
 	/* Returns the allocation result unchanged. */
@@ -299,20 +328,35 @@ hal_pmem_alloc(
 /*
  * Frees one physical-memory descriptor under the allocator lock.
  */
+/*
+ * Frees one physical RAM block.
+ */
 int
 hal_pmem_free(
-	struct hal_pmem *descriptor)
+	hal_physaddr_t *block,
+	size_t size)
 {
 	bool enabled;
 	int error;
 
 	/* Performs the complete release while holding the global lock. */
 	enabled = pmem_lock_enter();
-	error = pmem_free_unlocked(descriptor);
+	error = pmem_free_unlocked(block, size);
 	pmem_lock_leave(enabled);
 
 	/* Returns the release result unchanged. */
 	return error;
+}
+
+/*
+ * Translates a physical RAM address to its direct-map address.
+ */
+void *
+hal_pmem_to_kernel(
+	hal_physaddr_t paddr)
+{
+	/* RAM is direct-mapped; anything else has no kernel alias. */
+	return amd64_phys_to_direct((uintptr_t)paddr);
 }
 
 /*
@@ -345,8 +389,8 @@ hal_amd64_task_memory_stats(
  * Reports the current amd64 HAL memory accounting.
  */
 void
-hal_pmem_get_stats(
-	struct hal_pmem_stats *stats)
+hal_get_memstat(
+	struct hal_memstat *stats)
 {
 	bool enabled;
 	uint32_t index;
@@ -505,266 +549,121 @@ reserve_range(
 }
 
 /* Allocates RAM through the published range geometry. */
+/* Allocates ordinary RAM, preferring memory above the DMA32 pool. */
 static int
-alloc_ram(size_t size, size_t alignment, struct hal_pmem *descriptor)
+alloc_ram(
+	size_t size,
+	size_t alignment,
+	hal_physaddr_t *paddr)
 {
 	int result;
 
 	/* Preserves DMA32 capacity even when one RAM extent crosses 4 GiB. */
 	result = alloc_range(size, alignment, UINT64_C(0x100000000),
-	    AMD64_ALLOCATOR_LIMIT - 1U, 0, descriptor);
+	    AMD64_ALLOCATOR_LIMIT - 1U, 0, paddr);
 	if (result != HAL_ERR_NOMEM)
 		return result;
 
 	/* Uses lower RAM when the high pool cannot satisfy the whole run. */
-	result = alloc_range(size, alignment, 0, UINT32_MAX, 0, descriptor);
-	return result;
+	return alloc_range(size, alignment, 0, UINT32_MAX, 0, paddr);
 }
 
 /* Frees exactly one range-owned allocation under the outer allocator lock. */
+/* Releases one RAM run back to the extent which owns it. */
 static int
-free_ram(struct hal_pmem *descriptor)
+free_ram(
+	hal_physaddr_t paddr,
+	size_t size)
 {
 	struct amd64_pmem_extent *extent;
 	uint32_t index;
 	enum amd64_pmem_result result;
 
-	if (!range_ready || descriptor == NULL || descriptor->size == 0 ||
-	    descriptor->attr != 0 ||
-	    descriptor->vaddr != amd64_phys_to_direct((uintptr_t)descriptor->paddr))
+	/* Requires a published extent set and a non-empty run. */
+	if (!range_ready || size == 0)
 		return HAL_ERR_INVALID;
+
+	/* Finds the extent which contains this run. */
 	for (index = 0; index < ram_extent_count; index++) {
 		extent = &ram_extents[index];
-		if (descriptor->paddr < extent->base ||
-		    descriptor->paddr - extent->base >= extent->pages * PAGE_SIZE)
+		if (paddr < extent->base ||
+		    paddr - extent->base >= extent->pages * PAGE_SIZE)
 			continue;
-		result = amd64_pmem_extent_free(extent, descriptor->paddr, descriptor->size);
+
+		/* Releases the run, splitting the owning block as needed. */
+		result = amd64_pmem_extent_free(extent, paddr, size);
 		if (result != AMD64_PMEM_OK)
-			return result == AMD64_PMEM_STATE ? HAL_ERR_STATE : HAL_ERR_INVALID;
-		hal_memset(descriptor, 0, sizeof(*descriptor));
+			return result == AMD64_PMEM_STATE ? HAL_ERR_STATE
+							  : HAL_ERR_INVALID;
 		return HAL_OK;
 	}
+
+	/* Reports a run outside every managed extent. */
 	return HAL_ERR_INVALID;
 }
 
 /* Resolves a supported fixed physical address to its virtual window. */
-static void *
-fixed_vaddr(
-	hal_physaddr_t physical)
-{
-	void *address;
-
-	/* Selects the direct legacy-device window. */
-	if (physical >= 0x000a0000U && physical < 0x00100000U) {
-		address = (void *)((uintptr_t)AMD64_LEGACY_MMIO_BASE + physical - 0xa0000U);
-
-		/* Returns the translated legacy-device address. */
-		return address;
-	}
-
-	/* Selects the PCI MMIO window. */
-	if (physical >= 0xf0000000U && physical < 0xf1000000U) {
-		return (void *)(uintptr_t)(0xffffffffc0000000ULL +
-		    (physical - 0xf0000000U));
-	}
-
-	/* Selects the local APIC MMIO window. */
-	if (physical >= 0xfee00000U && physical < 0xff000000U) {
-		return (void *)(uintptr_t)(0xffffffffc1000000ULL +
-		    (physical - 0xfee00000U));
-	}
-
-	/* Selects the I/O APIC MMIO window. */
-	if (physical >= 0xfec00000U && physical < 0xfee00000U) {
-		return (void *)(uintptr_t)(0xffffffffc1200000ULL +
-		    (physical - 0xfec00000U));
-	}
-
-	/* Rejects addresses outside every fixed window. */
-	return NULL;
-}
-
 /* Claims one supported fixed MMIO or VRAM mapping. */
-static int
-claim_fixed(
-	const struct hal_pmem_request *request,
-	struct hal_pmem *descriptor)
-{
-	hal_physaddr_t end;
-	hal_physaddr_t claim_end;
-	uint64_t flags;
-	void *vaddr;
-	unsigned index;
-	unsigned free_slot;
-
-	/* Resolves both ends of the requested fixed window. */
-	free_slot = 16;
-	end = request->paddr + request->size;
-	flags = asm_get_rflags();
-	vaddr = fixed_vaddr(request->paddr);
-	if (vaddr == NULL ||
-	    request->size > 0x01000000U ||
-	    fixed_vaddr(end - 1U) == NULL)
-		return HAL_ERR_INVALID;
-
-	/* Finds a free registry slot while rejecting overlaps. */
-	asm_cli();
-	for (index = 0; index < 16; index++) {
-		/* Remembers the first available registry slot. */
-		if (fixed_claims[index].size == 0) {
-			/* Retains the lowest-numbered available slot. */
-			if (free_slot == 16)
-				free_slot = index;
-			continue;
-		}
-
-		/* Computes the exclusive end of this existing claim. */
-		claim_end = fixed_claims[index].paddr +
-		    fixed_claims[index].size;
-
-		/* Rejects any overlap with an existing fixed claim. */
-		if (request->paddr < claim_end &&
-		    end > fixed_claims[index].paddr) {
-			/* Restores the caller's interrupt state before rejecting overlap. */
-			if ((flags & 0x200U) != 0)
-				asm_sti();
-
-			/* Reports an overlapping fixed claim. */
-			return HAL_ERR_BUSY;
-		}
-	}
-
-	/* Reports exhaustion of the fixed-claim registry. */
-	if (free_slot == 16) {
-		/* Restores the caller's interrupt state before reporting exhaustion. */
-		if ((flags & 0x200U) != 0)
-			asm_sti();
-
-		/* Reports that no fixed-claim slot remains. */
-		return HAL_ERR_NOMEM;
-	}
-
-	/* Records and returns the complete fixed mapping. */
-	fixed_claims[free_slot].vaddr = vaddr;
-	fixed_claims[free_slot].paddr = request->paddr;
-	fixed_claims[free_slot].size = request->size;
-	fixed_claims[free_slot].type = request->type;
-	fixed_claims[free_slot].attr = request->attr;
-	*descriptor = fixed_claims[free_slot];
-
-	/* Restores the caller's interrupt-enable state. */
-	if ((flags & 0x200U) != 0)
-		asm_sti();
-
-	/* Reports a successful fixed claim. */
-	return HAL_OK;
-}
-
 /* Selects the allocation path for a validated physical-memory request. */
+/* Validates and performs one RAM allocation under the allocator lock. */
 static int
 pmem_alloc_unlocked(
-	const struct hal_pmem_request *request,
-	struct hal_pmem *descriptor)
+	size_t size,
+	size_t alignment,
+	uint64_t maximum,
+	uint64_t boundary,
+	hal_physaddr_t *paddr)
 {
-	size_t alignment;
-	int error;
-
-	/* Validates the common request fields and supported attributes. */
-	if (request == NULL ||
-	    descriptor == NULL ||
-	    request->size == 0 ||
-	    (request->attr &
-	    ~(HAL_PMEM_ATTR_NOCACHE | HAL_PMEM_ATTR_WRITETHRU)) != 0)
+	/* Rejects an empty request or a missing destination. */
+	if (size == 0 || paddr == NULL)
 		return HAL_ERR_INVALID;
 
+	/* Rounds to whole pages so release can repeat the same arithmetic. */
+	if (size > SIZE_MAX - (PAGE_SIZE - 1U))
+		return HAL_ERR_INVALID;
+	size = (size + PAGE_SIZE - 1U) & ~(size_t)(PAGE_SIZE - 1U);
+
 	/* Applies and validates the requested physical alignment. */
-	if (request->alignment == 0)
+	if (alignment == 0)
 		alignment = PAGE_SIZE;
-	else
-		alignment = request->alignment;
 	if (alignment < PAGE_SIZE || (alignment & (alignment - 1U)) != 0)
 		return HAL_ERR_INVALID;
 
-	/* Allocates ordinary RAM only through the bitmap allocator. */
-	if (request->type == HAL_PMEM_TYPE_RAM) {
-		/* Rejects fixed-address or attributed requests on the RAM path. */
-		if (request->paddr != HAL_PMEM_PADDR_ANY || request->attr != 0)
-			return HAL_ERR_INVALID;
-
-		/* Allocates the validated RAM range. */
-		error = alloc_ram(request->size, alignment, descriptor);
-
-		/* Returns the RAM allocation result unchanged. */
-		return error;
-	}
-
-	/* Validates a fixed MMIO or VRAM request. */
-	if ((request->type != HAL_PMEM_TYPE_MMIO &&
-	    request->type != HAL_PMEM_TYPE_VRAM) ||
-	    request->paddr == HAL_PMEM_PADDR_ANY ||
-	    request->paddr > (hal_physaddr_t)-1 - request->size ||
-	    (request->paddr & (alignment - 1U)) != 0)
+	/* Requires a power-of-two segment boundary when one is given. */
+	if (boundary != 0 && (boundary & (boundary - 1U)) != 0)
 		return HAL_ERR_INVALID;
 
-	/* Claims the validated fixed mapping. */
-	error = claim_fixed(request, descriptor);
+	/* Uses the unconstrained path when the device can reach all RAM. */
+	if (maximum == UINT64_MAX && boundary == 0)
+		return alloc_ram(size, alignment, paddr);
 
-	/* Returns the fixed-claim result unchanged. */
-	return error;
+	/* Searches only the range the device can reach. */
+	return alloc_range(size, alignment, 0, maximum, boundary, paddr);
 }
 
 /* Releases a physical-memory descriptor without taking the outer lock. */
+/* Releases one RAM run under the allocator lock. */
 static int
 pmem_free_unlocked(
-	struct hal_pmem *descriptor)
+	hal_physaddr_t *block,
+	size_t size)
 {
-	uint64_t flags;
-	unsigned index;
 	int error;
 
-	/* Rejects absent and empty descriptors. */
-	if (descriptor == NULL || descriptor->size == 0)
+	/* Rejects an absent handle or an empty run. */
+	if (block == NULL || size == 0)
 		return HAL_ERR_INVALID;
 
-	/* Delegates ordinary RAM to the bitmap allocator. */
-	if (descriptor->type == HAL_PMEM_TYPE_RAM) {
-		error = free_ram(descriptor);
+	/* Repeats the rounding hal_pmem_alloc() applied. */
+	if (size > SIZE_MAX - (PAGE_SIZE - 1U))
+		return HAL_ERR_INVALID;
+	size = (size + PAGE_SIZE - 1U) & ~(size_t)(PAGE_SIZE - 1U);
 
-		/* Returns the RAM release result unchanged. */
+	/* Releases the run and retires the caller's handle. */
+	error = free_ram(*block, size);
+	if (error != HAL_OK)
 		return error;
-	}
-
-	/* Finds the exact fixed claim with interrupts disabled. */
-	flags = asm_get_rflags();
-	asm_cli();
-	for (index = 0; index < 16; index++) {
-		/* Selects the registry entry which exactly owns this descriptor. */
-		if (fixed_claims[index].vaddr == descriptor->vaddr &&
-		    fixed_claims[index].paddr == descriptor->paddr &&
-		    fixed_claims[index].size == descriptor->size &&
-		    fixed_claims[index].type == descriptor->type)
-			break;
-	}
-
-	/* Rejects descriptors absent from the fixed registry. */
-	if (index == 16) {
-		/* Restores the caller's interrupt state before rejecting ownership. */
-		if ((flags & 0x200U) != 0)
-			asm_sti();
-
-		/* Reports a descriptor without a matching fixed claim. */
-		return HAL_ERR_STATE;
-	}
-
-	/* Clears the matched claim and restores interrupt state. */
-	hal_memset(&fixed_claims[index], 0, sizeof(fixed_claims[index]));
-	if ((flags & 0x200U) != 0)
-		asm_sti();
-
-	/* Invalidates the caller's released descriptor. */
-	hal_memset(descriptor, 0, sizeof(*descriptor));
-
-	/* Reports a successful fixed release. */
+	*block = 0;
 	return HAL_OK;
 }
 
@@ -772,7 +671,7 @@ pmem_free_unlocked(
  * Transfers typed RAM and early ownership to extent-sized runtime metadata.
  */
 void
-amd64_range_page_init(void)
+prekern_amd64_range_page_init(void)
 {
 	uint64_t base;
 	uint64_t size;
@@ -924,60 +823,50 @@ reserve_managed(uint64_t base, uint64_t size)
 }
 
 /* Searches managed RAM inside the caller's physical constraints. */
+/* Allocates one RAM run honouring the device reach and boundary limits. */
 static int
-alloc_range(size_t size, size_t alignment, uint64_t minimum, uint64_t maximum,
-    uint64_t boundary, struct hal_pmem *descriptor)
+alloc_range(
+	size_t size,
+	size_t alignment,
+	uint64_t minimum,
+	uint64_t maximum,
+	uint64_t boundary,
+	hal_physaddr_t *paddr)
 {
 	uint64_t physical;
 	uint64_t allocated;
 	uint32_t index;
 	enum amd64_pmem_result result;
 
-	if (!range_ready || descriptor == NULL)
+	/* Requires a published extent set and a destination. */
+	if (!range_ready || paddr == NULL)
 		return HAL_ERR_STATE;
+
+	/* Searches every extent from the highest downwards. */
 	for (index = ram_extent_count; index != 0; index--) {
-		result = amd64_pmem_extent_alloc(&ram_extents[index - 1U], size, alignment,
-		    minimum, maximum, boundary, &physical, &allocated);
+		result = amd64_pmem_extent_alloc(
+			&ram_extents[index - 1U],
+			size,
+			alignment,
+			minimum,
+			maximum,
+			boundary,
+			&physical,
+			&allocated);
 		if (result == AMD64_PMEM_NOMEM)
 			continue;
 		if (result != AMD64_PMEM_OK)
 			return HAL_ERR_INVALID;
-		descriptor->paddr = physical;
-		descriptor->vaddr = amd64_phys_to_direct((uintptr_t)physical);
-		descriptor->size = (size_t)allocated;
-		descriptor->type = HAL_PMEM_TYPE_RAM;
-		descriptor->attr = 0;
+
+		/* Publishes the allocated physical run. */
+		*paddr = (hal_physaddr_t)physical;
 		return HAL_OK;
 	}
+
+	/* Reports an exhausted pool. */
 	return HAL_ERR_NOMEM;
 }
 
-/*
- * Allocates directly inside a device's physical address and boundary limits.
- */
-int
-hal_pmem_alloc_range(
-	const struct hal_pmem_request *request,
-	uint64_t minimum,
-	uint64_t maximum,
-	uint64_t boundary,
-	struct hal_pmem *descriptor)
-{
-	size_t alignment;
-	bool enabled;
-	int result;
-
-	if (request == NULL || descriptor == NULL || request->type != HAL_PMEM_TYPE_RAM ||
-	    request->paddr != HAL_PMEM_PADDR_ANY || request->attr != 0)
-		return HAL_ERR_INVALID;
-	alignment = request->alignment == 0 ? PAGE_SIZE : request->alignment;
-	if (alignment < PAGE_SIZE || (alignment & (alignment - 1U)) != 0)
-		return HAL_ERR_INVALID;
-	enabled = pmem_lock_enter();
-	result = alloc_range(request->size, alignment, minimum, maximum, boundary, descriptor);
-	pmem_lock_leave(enabled);
-	return result;
-}
 
 /* Samples local cycles; this metric includes lock waiting and is not wall time. */
 static uint64_t
@@ -996,7 +885,7 @@ pmem_cycles(void)
  * Permanent owners override release lifetimes, including overlapping records.
  */
 void
-amd64_boot_memory_release(void)
+prekern_amd64_boot_memory_release(void)
 {
 	struct amd64_pmem_extent *extent;
 	uint64_t physical;

@@ -27,7 +27,7 @@ static uint8_t cmos_read(uint8_t index, void *context);
  * Starts the BSP local APIC scheduler timer.
  */
 int
-bsp_timer_init(
+prekern_bsp_timer_init(
 	void)
 {
 	int error;

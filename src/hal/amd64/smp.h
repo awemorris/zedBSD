@@ -17,7 +17,7 @@
 #include <hal/types.h>
 #include "bsp-pcat/acpi.h"
 
-void amd64_smp_init(const struct amd64_acpi_info *acpi);
+void prekern_amd64_smp_init(const struct amd64_acpi_info *acpi);
 void amd64_ap_entry(uint64_t logical_cpu) __attribute__((noreturn));
 uint32_t amd64_smp_apic_id(hal_cpu_id_t cpu);
 int amd64_smp_panic_available(void);

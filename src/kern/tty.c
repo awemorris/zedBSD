@@ -36,6 +36,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <hal/hal.h>
+#include "../drivers/platform/pcat/graphics/text.h"
 #include <poll.h>
 #include <string.h>
 #include <termios.h>
@@ -145,6 +146,8 @@ static struct pty_pair pty_pairs[PTY_MAX];
 
 static void tty_flush_input_locked(struct tty *tty);
 static void tty_default_termios(struct termios *termios);
+static unsigned tty_console_rows(void);
+static unsigned tty_console_columns(void);
 static void tty_console_csi(unsigned vt, unsigned command);
 static void tty_render(unsigned vt, const char *bytes, size_t length);
 static void tty_echo(struct tty *tty, const char *bytes, size_t length);
@@ -224,8 +227,8 @@ tty_console_init(
 		waitq_init(&console_ttys[i].read_waitq, "virtual tty input");
 		waitq_init(&console_ttys[i].write_waitq, "virtual tty output");
 		tty_default_termios(&console_ttys[i].termios);
-		console_ttys[i].winsize.ws_row = HAL_CONS_ROWS;
-		console_ttys[i].winsize.ws_col = HAL_CONS_COLUMNS;
+		console_ttys[i].winsize.ws_row = tty_console_rows();
+		console_ttys[i].winsize.ws_col = tty_console_columns();
 		console_ttys[i].association_generation = 1;
 	}
 
@@ -271,9 +274,9 @@ tty_vt_activate(
 
 	active_vt = vt;
 	console_escape_state[vt] = 0;
-	hal_cons_clear();
+	drv_pcat_text_clear();
 	tty_render(vt, vt_history[vt], vt_history_used[vt]);
-	hal_cons_update_cursor();
+	drv_pcat_text_update_cursor();
 
 	spin_unlock_irqrestore(&console_output_lock, irq);
 
@@ -830,8 +833,8 @@ tty_pty_register(
 		waitq_init(&pair->slave.read_waitq, "pty slave input");
 		waitq_init(&pair->slave.write_waitq, "pty slave output flow");
 		tty_default_termios(&pair->slave.termios);
-		pair->slave.winsize.ws_row = HAL_CONS_ROWS;
-		pair->slave.winsize.ws_col = HAL_CONS_COLUMNS;
+		pair->slave.winsize.ws_row = tty_console_rows();
+		pair->slave.winsize.ws_col = tty_console_columns();
 		pair->slave.association_generation = 1;
 	}
 
@@ -922,13 +925,84 @@ tty_default_termios(
 	termios->c_ospeed = B9600;
 }
 
+#define CONSOLE_BLANK_MAX	256U
+
+/*
+ * Reports the live console row count.
+ */
+static unsigned
+tty_console_rows(void)
+{
+	unsigned console_columns;
+	unsigned console_rows;
+
+	drv_pcat_text_get_size(&console_columns, &console_rows);
+	return console_rows;
+}
+
+/*
+ * Reports the live console column count.
+ */
+static unsigned
+tty_console_columns(void)
+{
+	unsigned console_columns;
+	unsigned console_rows;
+
+	drv_pcat_text_get_size(&console_columns, &console_rows);
+	return console_columns;
+}
+
+/*
+ * Writes a bounded byte run through the console character path.
+ */
+static void
+tty_console_puts(
+	const char *bytes,
+	unsigned length)
+{
+	unsigned index;
+
+	/* Emits every byte in order. */
+	for (index = 0; index < length; index++)
+		drv_pcat_text_putc((unsigned char)bytes[index]);
+}
+
+/*
+ * Clears a span of one row by writing spaces. The console interface has
+ * no separate clear operation.
+ */
+static void
+tty_clear_span(
+	unsigned row,
+	unsigned column,
+	unsigned count)
+{
+	char blanks[CONSOLE_BLANK_MAX + 1U];
+	unsigned index;
+
+	/* Bounds the span to one write. */
+	if (count > CONSOLE_BLANK_MAX)
+		count = CONSOLE_BLANK_MAX;
+
+	/* Fills the span with spaces. */
+	for (index = 0; index < count; index++)
+		blanks[index] = ' ';
+	blanks[count] = '\0';
+	drv_pcat_text_write(row, column, DRV_PCAT_TEXT_ATTRIB_NORMAL, blanks);
+}
+
 /* Executes a parsed CSI command on the HAL console. */
 static void
 tty_console_csi(
 	unsigned vt,
 	unsigned command)
 {
-	struct hal_cons_state state;
+	unsigned state_row;
+	unsigned state_column;
+	int state_shown;
+	unsigned columns;
+	unsigned rows;
 	unsigned amount;
 	unsigned row;
 
@@ -937,60 +1011,62 @@ tty_console_csi(
 		amount = console_escape_parameter[vt];
 	else
 		amount = 1U;
-	hal_cons_save_state(&state);
+	drv_pcat_text_get_size(&columns, &rows);
+	drv_pcat_text_get_cursor(&state_row, &state_column, &state_shown);
 	switch (command) {
 	case 'H':
-		(void)hal_cons_set_cursor(0U, 0U);
+		(void)drv_pcat_text_set_cursor(0U, 0U);
 		break;
 	case 'J':
 		if (amount == 2U) {
-			for (row = 0; row < HAL_CONS_ROWS; row++)
-				hal_cons_clear_row(row);
-			(void)hal_cons_set_cursor(0U, 0U);
+			for (row = 0; row < rows; row++)
+				tty_clear_span(row, 0U, columns);
+			(void)drv_pcat_text_set_cursor(0U, 0U);
 		}
 
 		break;
 	case 'A':
-		if (amount < state.row)
-			state.row = state.row - amount;
+		if (amount < state_row)
+			state_row = state_row - amount;
 		else
-			state.row = 0U;
-		(void)hal_cons_set_cursor(state.row, state.column);
+			state_row = 0U;
+		(void)drv_pcat_text_set_cursor(state_row, state_column);
 		break;
 	case 'B':
-		state.row += amount;
-		if (state.row >= HAL_CONS_ROWS)
-			state.row = HAL_CONS_ROWS - 1U;
-		(void)hal_cons_set_cursor(state.row, state.column);
+		state_row += amount;
+		if (state_row >= rows)
+			state_row = rows - 1U;
+		(void)drv_pcat_text_set_cursor(state_row, state_column);
 		break;
 	case 'C':
-		state.column += amount;
-		if (state.column >= HAL_CONS_COLUMNS)
-			state.column = HAL_CONS_COLUMNS - 1U;
-		(void)hal_cons_set_cursor(state.row, state.column);
+		state_column += amount;
+		if (state_column >= columns)
+			state_column = columns - 1U;
+		(void)drv_pcat_text_set_cursor(state_row, state_column);
 		break;
 	case 'D':
-		if (amount < state.column)
-			state.column = state.column - amount;
+		if (amount < state_column)
+			state_column = state_column - amount;
 		else
-			state.column = 0U;
-		(void)hal_cons_set_cursor(state.row, state.column);
+			state_column = 0U;
+		(void)drv_pcat_text_set_cursor(state_row, state_column);
 		break;
 	case 'G':
 		if (amount == 0U)
-			state.column = 0U;
+			state_column = 0U;
 		else
-			state.column = amount - 1U;
-		if (state.column >= HAL_CONS_COLUMNS)
-			state.column = HAL_CONS_COLUMNS - 1U;
-		(void)hal_cons_set_cursor(state.row, state.column);
+			state_column = amount - 1U;
+		if (state_column >= columns)
+			state_column = columns - 1U;
+		(void)drv_pcat_text_set_cursor(state_row, state_column);
 		break;
 	case 'K':
 		if (amount == 2U) {
-			hal_cons_clear_row(state.row);
-			(void)hal_cons_set_cursor(state.row, state.column);
+			tty_clear_span(state_row, 0U, columns);
+			(void)drv_pcat_text_set_cursor(state_row, state_column);
 		} else if (!console_escape_has_parameter[vt] || amount == 0U) {
-			hal_cons_clear_to_eol();
+			tty_clear_span(state_row, state_column,
+				       columns - state_column);
 		}
 
 		break;
@@ -1024,7 +1100,8 @@ tty_render(
 			while (index < length && (unsigned char)bytes[index] != 0x1bU)
 				index++;
 			if (index != start)
-				hal_cons_write_n(bytes + start, (unsigned)(index - start));
+				tty_console_puts(bytes + start,
+						 (unsigned)(index - start));
 			if (index < length) {
 				console_escape_state[vt] = 1U;
 				index++;
@@ -1042,8 +1119,8 @@ tty_render(
 				console_escape_has_parameter[vt] = 0U;
 				console_escape_ignored[vt] = 0U;
 			} else {
-				hal_cons_write_n(&escape, 1U);
-				hal_cons_write_n(bytes + index - 1U, 1U);
+				tty_console_puts(&escape, 1U);
+				tty_console_puts(bytes + index - 1U, 1U);
 				console_escape_state[vt] = 0U;
 			}
 

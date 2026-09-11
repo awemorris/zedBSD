@@ -64,7 +64,7 @@ amd64_start:
 	leaq __amd64_boot_stack_top(%rip), %rsp
 	andq $-16, %rsp
 	xorq %rbp, %rbp
-	call amd64_cmain
+	call prekern_amd64_cmain
 .Lhalt:
 	cli
 	hlt

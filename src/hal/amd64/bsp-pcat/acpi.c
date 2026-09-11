@@ -68,7 +68,7 @@ static int add_cpu(struct amd64_acpi_info *result, uint32_t apic_id);
  * Discovers amd64 ACPI CPU, interrupt, and PCI topology.
  */
 int
-amd64_acpi_discover(
+prekern_amd64_acpi_discover(
 	struct amd64_acpi_info *result,
 	hal_physaddr_t rsdp_address)
 {

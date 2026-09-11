@@ -197,7 +197,7 @@ static void bit_clear(unsigned long *bits, unsigned bit);
 static int capability_bits_mutable(struct input_capability_state *state, unsigned type, unsigned long **bits, size_t *size);
 static int capability_code_valid(unsigned type, unsigned code);
 static void report_init(struct input_report *report, struct input_device *device);
-static void report_event(struct input_report *report, uint64_t milliseconds, uint16_t type, uint16_t code, int32_t value, const struct hal_key_event *key_event);
+static void report_event(struct input_report *report, uint64_t milliseconds, uint16_t type, uint16_t code, int32_t value, const struct kern_key_event *key_event);
 static struct input_device *file_device(struct file *file);
 static struct input_reader *file_reader(struct file *file);
 static int producer_callback_enter(struct input_device *device);
@@ -209,7 +209,7 @@ static int copy_capability_bits(const struct input_device *device, unsigned type
 static int copy_key_state(struct input_device *device, size_t capacity, uintptr_t argument);
 static int copy_abs_info(struct input_device *device, unsigned axis, uintptr_t argument);
 static void input_device_resync_begin(struct input_device *device, uint32_t key_flags);
-static void input_device_resync_snapshot(struct input_device *device, const struct hal_key_event *key_event);
+static void input_device_resync_snapshot(struct input_device *device, const struct kern_key_event *key_event);
 static void input_device_resync_end(struct input_device *device);
 static int function_number(const char *symbol);
 static void update_modifier(struct input_keymap_state *state, const char *symbol, int down, int press);
@@ -895,9 +895,9 @@ drv_input_device_emit(
 void
 drv_input_device_emit_key_event(
 	struct input_device *device,
-	const struct hal_key_event *key_event)
+	const struct kern_key_event *key_event)
 {
-	struct hal_key_event release;
+	struct kern_key_event release;
 	struct input_report report;
 	uint64_t milliseconds;
 	unsigned long irq, publication_irq;
@@ -906,16 +906,16 @@ drv_input_device_emit_key_event(
 
 	/* Handles the device availability. */
 	if (device == NULL || key_event == NULL ||
-	    key_event->symbol[HAL_KEY_SYMBOL_SIZE - 1U] != '\0') {
+	    key_event->symbol[KERN_KEY_SYMBOL_SIZE - 1U] != '\0') {
 		/* Returns the computed result. */
 		return;
 	}
 
 	/* Handles the key event condition. */
 	if ((key_event->flags &
-	     ~(HAL_KEY_EVENT_RESYNC | HAL_KEY_EVENT_LOCK_CAPS |
-	       HAL_KEY_EVENT_LOCK_KANA)) == 0 &&
-	    (key_event->flags & HAL_KEY_EVENT_RESYNC) != 0 &&
+	     ~(KERN_KEY_EVENT_RESYNC | KERN_KEY_EVENT_LOCK_CAPS |
+	       KERN_KEY_EVENT_LOCK_KANA)) == 0 &&
+	    (key_event->flags & KERN_KEY_EVENT_RESYNC) != 0 &&
 	    key_event->symbol[0] == '\0') {
 		input_device_resync_begin(device, key_event->flags);
 
@@ -925,7 +925,7 @@ drv_input_device_emit_key_event(
 
 	/* Handles the key event condition. */
 	if (key_event->flags ==
-	    (HAL_KEY_EVENT_PRESS | HAL_KEY_EVENT_SNAPSHOT)) {
+	    (KERN_KEY_EVENT_PRESS | KERN_KEY_EVENT_SNAPSHOT)) {
 		input_device_resync_snapshot(device, key_event);
 
 		/* Returns the computed result. */
@@ -933,7 +933,7 @@ drv_input_device_emit_key_event(
 	}
 
 	/* Handles the key event condition. */
-	if (key_event->flags == HAL_KEY_EVENT_RESYNC_END &&
+	if (key_event->flags == KERN_KEY_EVENT_RESYNC_END &&
 	    key_event->symbol[0] == '\0') {
 		input_device_resync_end(device);
 
@@ -942,11 +942,11 @@ drv_input_device_emit_key_event(
 	}
 
 	/* Handles the key event condition. */
-	if (key_event->flags == HAL_KEY_EVENT_PRESS)
+	if (key_event->flags == KERN_KEY_EVENT_PRESS)
 		value = 1;
-	else if (key_event->flags == HAL_KEY_EVENT_RELEASE)
+	else if (key_event->flags == KERN_KEY_EVENT_RELEASE)
 		value = 0;
-	else if (key_event->flags == HAL_KEY_EVENT_REPEAT)
+	else if (key_event->flags == KERN_KEY_EVENT_REPEAT)
 		value = 2;
 	else {
 		/* Returns the computed result. */
@@ -974,7 +974,7 @@ drv_input_device_emit_key_event(
 	/* Handles the momentary condition. */
 	if (momentary) {
 		release = *key_event;
-		release.flags = HAL_KEY_EVENT_RELEASE;
+		release.flags = KERN_KEY_EVENT_RELEASE;
 		report_event(&report, milliseconds, EV_KEY, code, 0, &release);
 	}
 
@@ -1191,7 +1191,7 @@ int
 drv_input_keymap_event_from_code(
 	uint16_t code,
 	int32_t value,
-	struct hal_key_event *event)
+	struct kern_key_event *event)
 {
 	static const char *const functions[] = {"f1", "f2", "f3", "f4", "f5",
 						"f6", "f7", "f8", "f9", "f10"};
@@ -1257,11 +1257,11 @@ drv_input_keymap_event_from_code(
 		return 0;
 	/* Process each remaining element. */
 	for (index = 0;
-	     index + 1U < HAL_KEY_SYMBOL_SIZE && symbol[index] != '\0'; index++)
+	     index + 1U < KERN_KEY_SYMBOL_SIZE && symbol[index] != '\0'; index++)
 		event->symbol[index] = symbol[index];
-	event->flags = value == 0   ? HAL_KEY_EVENT_RELEASE
-		       : value == 2 ? HAL_KEY_EVENT_REPEAT
-				    : HAL_KEY_EVENT_PRESS;
+	event->flags = value == 0   ? KERN_KEY_EVENT_RELEASE
+		       : value == 2 ? KERN_KEY_EVENT_REPEAT
+				    : KERN_KEY_EVENT_PRESS;
 
 	/* Reports operation failure. */
 	return 1;
@@ -1273,7 +1273,7 @@ drv_input_keymap_event_from_code(
 int
 drv_input_keymap_translate(
 	struct input_keymap_state *state,
-	const struct hal_key_event *event,
+	const struct kern_key_event *event,
 	uint32_t *result)
 {
 	const struct symbol_entry *entry;
@@ -1283,17 +1283,17 @@ drv_input_keymap_translate(
 
 	/* Handles the state availability. */
 	if (state == NULL || event == NULL || result == NULL ||
-	    event->symbol[HAL_KEY_SYMBOL_SIZE - 1U] != '\0') {
+	    event->symbol[KERN_KEY_SYMBOL_SIZE - 1U] != '\0') {
 		/* Succeeded. */
 		return 0;
 	}
-	release = (event->flags & HAL_KEY_EVENT_RELEASE) != 0;
-	press = (event->flags & HAL_KEY_EVENT_PRESS) != 0;
+	release = (event->flags & KERN_KEY_EVENT_RELEASE) != 0;
+	press = (event->flags & KERN_KEY_EVENT_PRESS) != 0;
 
 	/* Handles the event condition. */
-	if (event->flags != HAL_KEY_EVENT_PRESS &&
-	    event->flags != HAL_KEY_EVENT_RELEASE &&
-	    event->flags != HAL_KEY_EVENT_REPEAT) {
+	if (event->flags != KERN_KEY_EVENT_PRESS &&
+	    event->flags != KERN_KEY_EVENT_RELEASE &&
+	    event->flags != KERN_KEY_EVENT_REPEAT) {
 		/* Succeeded. */
 		return 0;
 	}
@@ -1678,7 +1678,7 @@ report_event(
 	uint16_t type,
 	uint16_t code,
 	int32_t value,
-	const struct hal_key_event *key_event)
+	const struct kern_key_event *key_event)
 {
 	struct input_report_event *item;
 	size_t index;
@@ -1696,7 +1696,7 @@ report_event(
 	if (key_event == NULL)
 		return;
 	/* Process each remaining element. */
-	for (index = 0; index < HAL_KEY_SYMBOL_SIZE; index++)
+	for (index = 0; index < KERN_KEY_SYMBOL_SIZE; index++)
 		item->symbol[index] = key_event->symbol[index];
 	item->key_flags = key_event->flags;
 }
@@ -2371,10 +2371,10 @@ input_device_resync_begin(
 	if (published) {
 		report_init(&report, device);
 		report.flags = INPUT_REPORT_RESYNC_BEGIN |
-			       ((key_flags & HAL_KEY_EVENT_LOCK_CAPS) != 0
+			       ((key_flags & KERN_KEY_EVENT_LOCK_CAPS) != 0
 					? INPUT_REPORT_LOCK_CAPS
 					: 0U) |
-			       ((key_flags & HAL_KEY_EVENT_LOCK_KANA) != 0
+			       ((key_flags & KERN_KEY_EVENT_LOCK_KANA) != 0
 					? INPUT_REPORT_LOCK_KANA
 					: 0U);
 		drv_input_subscriber_publish(&report);
@@ -2387,7 +2387,7 @@ input_device_resync_begin(
 static void
 input_device_resync_snapshot(
 	struct input_device *device,
-	const struct hal_key_event *key_event)
+	const struct kern_key_event *key_event)
 {
 	struct input_report report;
 	uint64_t milliseconds = clock_milliseconds(NULL);

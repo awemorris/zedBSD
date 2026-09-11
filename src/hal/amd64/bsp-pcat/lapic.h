@@ -18,7 +18,7 @@
 
 struct amd64_acpi_info;
 
-int amd64_lapic_init(const struct amd64_acpi_info *acpi);
+int prekern_amd64_lapic_init(const struct amd64_acpi_info *acpi);
 int amd64_lapic_init_secondary(uint32_t expected_apic_id, unsigned *failure_reason);
 uint32_t amd64_lapic_id(void);
 void amd64_lapic_eoi(void);

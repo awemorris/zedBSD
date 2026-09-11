@@ -21,7 +21,7 @@ static struct amd64_percpu cpu_states[AMD64_SMP_MAX_CPUS];
  * Initializes and selects the bootstrap CPU's private state.
  */
 void
-amd64_percpu_bootstrap(
+prekern_amd64_percpu_bootstrap(
 	void)
 {
 	struct amd64_percpu *cpu;

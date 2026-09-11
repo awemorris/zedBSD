@@ -70,8 +70,8 @@ user_probe_syscall(
  */
 int
 kernel_user_fault_handler(
-	int cause,
-	int mode,
+	enum hal_trap_cause cause,
+	enum hal_trap_mode mode,
 	uintptr_t pc,
 	uintptr_t address,
 	uintptr_t vector,
@@ -228,8 +228,8 @@ user_probe_init(
  */
 int
 kernel_sys_fault_handler(
-	int cause,
-	int mode,
+	enum hal_trap_cause cause,
+	enum hal_trap_mode mode,
 	uintptr_t pc,
 	uintptr_t address,
 	uintptr_t vector,

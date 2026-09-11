@@ -20,11 +20,26 @@ __stdio_console_write(
 	const char *bytes,
 	size_t length)
 {
-	/* Writes the bytes unmodified. */
-	hal_cons_write_n(bytes, (unsigned)length);
+	size_t index;
+
+	/* Writes the bytes unmodified through the character path. */
+	for (index = 0; index < length; index++)
+		hal_cons_putc((unsigned char)bytes[index]);
 
 	/* Reports every byte as written. */
 	return length;
+}
+
+/*
+ * Writes a terminated string through the console character path.
+ */
+static void
+panic_puts(
+	const char *string)
+{
+	/* Emits every byte in order. */
+	while (*string != '\0')
+		hal_cons_putc((unsigned char)*string++);
 }
 
 /*
@@ -35,10 +50,9 @@ __libc_panic(
 	const char *message)
 {
 	/* Prints the panic message, substituting a marker for a missing one. */
-	hal_cons_write("kernel panic: ");
-	hal_cons_write(message != NULL ? message : "unknown");
-	hal_cons_write("\n");
-	hal_cons_update_cursor();
+	panic_puts("kernel panic: ");
+	panic_puts(message != NULL ? message : "unknown");
+	panic_puts("\n");
 
 	/* Halts permanently with interrupts disabled. */
 	(void)hal_irq_disable();

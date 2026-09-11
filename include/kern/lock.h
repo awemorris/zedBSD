@@ -51,6 +51,11 @@ enum lock_rank {
 	 */
 	LOCK_RANK_DISK = 130,
 	LOCK_RANK_TTY = 135,
+	/*
+	 * The text console is a leaf: /dev/console and tty enter it while
+	 * holding their own locks, and it enters nothing.
+	 */
+	LOCK_RANK_CONSOLE_TEXT = 137,
 	LOCK_RANK_POLL = 140,
 	LOCK_RANK_USYNC = 145,
 	LOCK_RANK_SCHEDULER = 200,

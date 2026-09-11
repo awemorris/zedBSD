@@ -1705,7 +1705,7 @@ ax211_pci_attach(
 		return EBUSY;
 
 	/* Handles the controller availability. */
-	controller = hal_malloc(sizeof(*controller));
+	controller = kernel_alloc(sizeof(*controller));
 	if (controller == NULL)
 		return ENOMEM;
 	memset(controller, 0, sizeof(*controller));
@@ -1793,7 +1793,7 @@ ax211_pci_attach(
 	if (controller->driver_data_set)
 		(void)drv_pci_device_set_driver_data(device, NULL);
 	ax211_pci_scrub(controller, sizeof(*controller));
-	hal_free(controller);
+	kernel_free(controller);
 
 	/* Returns the computed result. */
 	return cleanup_error;
@@ -1911,7 +1911,7 @@ ax211_pci_detach(
 		net_device_destroy(net_device);
 	} else {
 		ax211_pci_scrub(controller, sizeof(*controller));
-		hal_free(controller);
+		kernel_free(controller);
 	}
 
 	/* Succeeded. */
@@ -7166,7 +7166,7 @@ ax211_net_release(
 	if (controller == NULL)
 		return;
 	ax211_pci_scrub(controller, sizeof(*controller));
-	hal_free(controller);
+	kernel_free(controller);
 }
 
 /* Starts one finite asynchronous firmware scan on the selected channel. */

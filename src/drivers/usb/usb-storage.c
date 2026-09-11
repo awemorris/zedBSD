@@ -1867,7 +1867,7 @@ storage_attach(
 	(void)id;
 
 	/* Handles the storage availability. */
-	storage = hal_malloc(sizeof(*storage));
+	storage = kernel_alloc(sizeof(*storage));
 	if (storage == NULL)
 		return ENOMEM;
 	memset(storage, 0, sizeof(*storage));
@@ -1880,7 +1880,7 @@ storage_attach(
 
 	/* Handles the bulk in availability. */
 	if (storage->bulk_in == NULL || storage->bulk_out == NULL) {
-		hal_free(storage);
+		kernel_free(storage);
 
 		/* Failed. */
 		return ENODEV;
@@ -1893,7 +1893,7 @@ storage_attach(
 	/* Checks the operation status. */
 	error = storage_urbs_alloc(storage);
 	if (error != 0) {
-		hal_free(storage);
+		kernel_free(storage);
 
 		/* Failed. */
 		return error;
@@ -1965,7 +1965,7 @@ fail:
 	}
 
 	storage_urbs_free(storage);
-	hal_free(storage);
+	kernel_free(storage);
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -2046,7 +2046,7 @@ storage_detach(
 	if (error != 0)
 		return error;
 	storage_urbs_free(storage);
-	hal_free(storage);
+	kernel_free(storage);
 
 	/* Succeeded. */
 	return 0;

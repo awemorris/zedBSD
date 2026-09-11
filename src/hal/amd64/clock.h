@@ -15,7 +15,7 @@
 #define ZEDBSD_HAL_AMD64_CLOCK_H
 
 int
-bsp_timer_init(void);
+prekern_bsp_timer_init(void);
 
 void
 clock_handler(void);

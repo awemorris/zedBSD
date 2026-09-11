@@ -9,7 +9,7 @@
 struct cell{uint8_t character,attribute;};
 static struct cell shadow[HAL_CONS_ROWS][HAL_CONS_COLUMNS];
 static struct hal_cons_state state={HAL_CONS_TERMINAL,0,0,1};
-static uint8_t current_attribute=HAL_CONS_NORMAL_ATTRIBUTE;
+static uint8_t current_attribute=HAL_CONS_ATTRIB_NORMAL;
 static struct hal_key_event input_events[INPUT_EVENT_COUNT];
 static unsigned input_head, input_tail;
 static struct hal_cons_wait_queue input_waiters;
@@ -32,7 +32,7 @@ void hal_cons_clear_row(unsigned row)
 void hal_cons_clear(void)
 {for(unsigned row=0;row<HAL_CONS_ROWS;row++)hal_cons_clear_row(row);state.row=state.column=0;hal_cons_update_cursor();}
 void hal_cons_reset(void)
-{current_attribute=HAL_CONS_NORMAL_ATTRIBUTE;state.mode=HAL_CONS_TERMINAL;state.cursor_visible=1;hal_cons_clear();}
+{current_attribute=HAL_CONS_ATTRIB_NORMAL;state.mode=HAL_CONS_TERMINAL;state.cursor_visible=1;hal_cons_clear();}
 
 static void scroll(void)
 {

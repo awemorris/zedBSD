@@ -20,8 +20,6 @@
 #include "bsp.h"
 #include "smp.h"
 
-static void *(*allocator_alloc)(size_t size);
-static void (*allocator_free)(void *pointer);
 static volatile unsigned panic_in_progress;
 
 static void put_unsigned(uint64_t value, unsigned base, int upper, int width, int zero);
@@ -127,58 +125,19 @@ hal_memcpy(
 }
 
 /*
- * Installs the kernel allocator callbacks.
+ * Writes a terminated string through the console character path.
  */
-void
-hal_set_allocator(
-	void *(*allocate)(size_t size),
-	void (*free_function)(void *pointer))
+static void
+cons_puts(
+	const char *string)
 {
-	/* Requires one complete allocator installation. */
-	if (allocate == NULL ||
-	    free_function == NULL ||
-	    allocator_alloc != NULL ||
-	    allocator_free != NULL)
-		HAL_FATAL("hal_set_allocator must be called exactly once");
+	/* Ignores a missing input string. */
+	if (string == NULL)
+		return;
 
-	/* Publishes the paired allocation callbacks. */
-	allocator_alloc = allocate;
-	allocator_free = free_function;
-}
-
-/*
- * Allocates kernel-owned memory through the installed allocator.
- */
-void *
-hal_malloc(
-	size_t size)
-{
-	void *result;
-
-	/* Rejects allocation before the kernel provides an allocator. */
-	if (allocator_alloc == NULL)
-		HAL_FATAL("hal_malloc before hal_set_allocator");
-
-	/* Allocates the requested memory. */
-	result = allocator_alloc(size);
-
-	/* Returns the allocator result unchanged. */
-	return result;
-}
-
-/*
- * Releases kernel-owned memory through the installed allocator.
- */
-void
-hal_free(
-	void *pointer)
-{
-	/* Rejects release before the kernel provides an allocator. */
-	if (allocator_free == NULL)
-		HAL_FATAL("hal_free before hal_set_allocator");
-
-	/* Releases the supplied allocation. */
-	allocator_free(pointer);
+	/* Emits every byte in order. */
+	while (*string != '\0')
+		hal_cons_putc((unsigned char)*string++);
 }
 
 /*
@@ -203,7 +162,7 @@ hal_puts(
 	const char *string)
 {
 	/* Writes the string without adding a terminator or newline. */
-	hal_cons_write(string);
+	cons_puts(string);
 
 	/* Reports successful output. */
 	return 0;
@@ -275,7 +234,7 @@ hal_printf(
 			/* Substitutes a readable value for a null string. */
 			if (string == NULL)
 				string = "(null)";
-			hal_cons_write(string);
+			cons_puts(string);
 			break;
 		case 'd':
 			/* Consumes the argument at its promoted width. */

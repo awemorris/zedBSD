@@ -708,7 +708,7 @@ static int rtl8822bu_attach(
 		return ENODEV;
 
 	/* Handles the adapter availability. */
-	adapter = hal_malloc(sizeof(*adapter));
+	adapter = kernel_alloc(sizeof(*adapter));
 	if (adapter == NULL)
 		return ENOMEM;
 	memset(adapter, 0, sizeof(*adapter));
@@ -726,7 +726,7 @@ static int rtl8822bu_attach(
 	error = mutex_init(&adapter->lifecycle_lock, LOCK_RANK_DEVICE,
 			   "usb-rtl8822bu lifecycle");
 	if (error != 0) {
-		hal_free(adapter);
+		kernel_free(adapter);
 
 		/* Failed. */
 		return error;
@@ -735,7 +735,7 @@ static int rtl8822bu_attach(
 	/* Checks the operation status. */
 	error = drv_usb_interface_set_driver_data(interface, adapter);
 	if (error != 0) {
-		hal_free(adapter);
+		kernel_free(adapter);
 
 		/* Failed. */
 		return error;
@@ -743,7 +743,7 @@ static int rtl8822bu_attach(
 
 	mutex_lock(&adapter->lifecycle_lock);
 
-	adapter->rx_buffer = hal_malloc(RTL8822BU_RX_BUFFER_SIZE);
+	adapter->rx_buffer = kernel_alloc(RTL8822BU_RX_BUFFER_SIZE);
 
 	/* Handles the rx buffer availability. */
 	if (adapter->rx_buffer == NULL) {
@@ -2179,13 +2179,13 @@ rtl8822bu_board_read(
 	/* Handles the adapter availability. */
 	if (adapter == NULL || board == NULL)
 		return EINVAL;
-	physical = hal_malloc(RTL8822B_EFUSE_PHYSICAL_SIZE);
+	physical = kernel_alloc(RTL8822B_EFUSE_PHYSICAL_SIZE);
 
 	/* Handles the physical availability. */
-	logical = hal_malloc(RTL8822B_EFUSE_LOGICAL_SIZE);
+	logical = kernel_alloc(RTL8822B_EFUSE_LOGICAL_SIZE);
 	if (physical == NULL || logical == NULL) {
-		hal_free(logical);
-		hal_free(physical);
+		kernel_free(logical);
+		kernel_free(physical);
 
 		/* Failed. */
 		return ENOMEM;
@@ -2240,8 +2240,8 @@ rtl8822bu_board_read(
 #endif
 	memset(logical, 0, RTL8822B_EFUSE_LOGICAL_SIZE);
 	memset(physical, 0, RTL8822B_EFUSE_PHYSICAL_SIZE);
-	hal_free(logical);
-	hal_free(physical);
+	kernel_free(logical);
+	kernel_free(physical);
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -2777,7 +2777,7 @@ rtl8822bu_firmware_download_model(
 	memset(&transfer, 0, sizeof(transfer));
 	transfer.adapter = adapter;
 	transfer.view = view;
-	transfer.wire_buffer = hal_malloc(RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE +
+	transfer.wire_buffer = kernel_alloc(RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE +
 					  RTL8822B_FIRMWARE_CHUNK_MAX + 1U);
 
 	/* Handles the wire buffer availability. */
@@ -2880,7 +2880,7 @@ out:
 	memset(transfer.wire_buffer, 0,
 	       RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE +
 		       RTL8822B_FIRMWARE_CHUNK_MAX + 1U);
-	hal_free(transfer.wire_buffer);
+	kernel_free(transfer.wire_buffer);
 	memset(&transfer, 0, sizeof(transfer));
 	memset(&saved, 0, sizeof(saved));
 
@@ -4261,7 +4261,7 @@ rtl8822bu_frame_transmit_private(
 	capacity = RTL8822B_DATA_TX_DESCRIPTOR_SIZE + length + 1U;
 
 	/* Handles the wire availability. */
-	wire = hal_malloc(capacity);
+	wire = kernel_alloc(capacity);
 	if (wire == NULL) {
 		error = ENOMEM;
 		goto out_release;
@@ -4312,7 +4312,7 @@ rtl8822bu_frame_transmit_private(
 	}
 
 	memset(wire, 0, capacity);
-	hal_free(wire);
+	kernel_free(wire);
 out_release:
 
 	/* Checks the operation status. */
@@ -6961,7 +6961,7 @@ rtl8822bu_management_transmit(
 	}
 
 	/* Handles the wire availability. */
-	wire = hal_malloc(RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + length + 1U);
+	wire = kernel_alloc(RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + length + 1U);
 	if (wire == NULL) {
 		error = ENOMEM;
 		goto out_operation;
@@ -7010,7 +7010,7 @@ rtl8822bu_management_transmit(
 	}
 
 	memset(wire, 0, RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + length + 1U);
-	hal_free(wire);
+	kernel_free(wire);
 out_operation:
 
 	/* Checks the operation status. */
@@ -8278,7 +8278,7 @@ rtl8822bu_release(
 	if (adapter == NULL)
 		return;
 	memset(adapter, 0, sizeof(*adapter));
-	hal_free(adapter);
+	kernel_free(adapter);
 }
 
 static void
@@ -8294,7 +8294,7 @@ rtl8822bu_usb_resources_free(
 	/* Handles the rx buffer availability. */
 	if (adapter->rx_buffer != NULL) {
 		memset(adapter->rx_buffer, 0, RTL8822BU_RX_BUFFER_SIZE);
-		hal_free(adapter->rx_buffer);
+		kernel_free(adapter->rx_buffer);
 		adapter->rx_buffer = NULL;
 	}
 }

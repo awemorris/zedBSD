@@ -154,7 +154,7 @@ io_error_observe(
 void
 io_pool_init(void)
 {
-	struct hal_pmem_stats memory;
+	struct hal_memstat memory;
 	size_t wanted_large;
 	size_t wanted_small;
 	size_t wanted;
@@ -167,7 +167,7 @@ io_pool_init(void)
 	expected = 0;
 	if (!atomic_raw_compare_exchange(&initialized, &expected, 1U))
 		HAL_FATAL("I/O pool initialized twice");
-	hal_pmem_get_stats(&memory);
+	hal_get_memstat(&memory);
 	budget_bytes = memory.physical_total / 64U;
 	if (budget_bytes > IO_POOL_MAX_BYTES)
 		budget_bytes = IO_POOL_MAX_BYTES;
@@ -329,7 +329,6 @@ io_scratch_alloc(
 	size_t size,
 	struct io_scratch *result)
 {
-	struct hal_pmem_request request;
 	struct io_scratch scratch;
 	size_t page;
 	size_t rounded;
@@ -348,16 +347,11 @@ io_scratch_alloc(
 
 	/* Asks for contiguous physical memory of at least the rounded size. */
 	memset(&scratch, 0, sizeof(scratch));
-	memset(&request, 0, sizeof(request));
-	request.paddr = HAL_PMEM_PADDR_ANY;
-	request.size = rounded;
-	request.alignment = page;
-	request.type = HAL_PMEM_TYPE_RAM;
-	error = hal_pmem_alloc(&request, &scratch.physical);
+	scratch.physical.size = rounded;
+	error = hal_pmem_alloc(rounded, page, &scratch.physical.paddr);
 	if (error == HAL_OK &&
-	    scratch.physical.vaddr != NULL &&
-	    scratch.physical.size >= rounded) {
-		scratch.vaddr = scratch.physical.vaddr;
+	    hal_pmem_to_kernel(scratch.physical.paddr) != NULL) {
+		scratch.vaddr = hal_pmem_to_kernel(scratch.physical.paddr);
 		scratch.size = scratch.physical.size;
 		*result = scratch;
 		return HAL_OK;
@@ -365,7 +359,8 @@ io_scratch_alloc(
 
 	/* Returns a short or failed physical allocation. */
 	if (scratch.physical.size != 0 &&
-	    hal_pmem_free(&scratch.physical) != HAL_OK)
+	    hal_pmem_free(&scratch.physical.paddr,
+			  scratch.physical.size) != HAL_OK)
 		HAL_FATAL("scratch physical rollback failed");
 
 	/* Failed. */
@@ -389,7 +384,8 @@ io_scratch_free(
 		return HAL_ERR_INVALID;
 
 	/* Returns the contiguous physical memory. */
-	error = hal_pmem_free(&scratch->physical);
+	error = hal_pmem_free(&scratch->physical.paddr,
+			      scratch->physical.size);
 
 	/* Empties the description only once its region is really gone. */
 	if (error == HAL_OK)

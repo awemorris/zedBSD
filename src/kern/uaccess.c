@@ -25,6 +25,7 @@
 
 #include <errno.h>
 #include <hal/hal.h>
+#include <kern/pmem.h>
 #include <limits.h>
 #include <string.h>
 
@@ -287,7 +288,7 @@ copyin_pinned(
 
 		/* Reads through the backing that pinned the page. */
 		if (page->kind == VMSPACE_PINNED_PRIVATE) {
-			memcpy(bytes, (const uint8_t *)page->memory.vaddr +
+			memcpy(bytes, (const uint8_t *)hal_pmem_to_kernel(page->memory.paddr) +
 			    page_offset, chunk);
 			error = 0;
 		} else if (page->kind == VMSPACE_PINNED_OBJECT) {
@@ -352,7 +353,7 @@ copyout_pinned(
 
 		/* Writes through the backing that pinned the page. */
 		if (page->kind == VMSPACE_PINNED_PRIVATE) {
-			memcpy((uint8_t *)page->memory.vaddr + page_offset,
+			memcpy((uint8_t *)hal_pmem_to_kernel(page->memory.paddr) + page_offset,
 			    bytes, chunk);
 
 			/*

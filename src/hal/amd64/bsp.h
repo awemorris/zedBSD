@@ -17,11 +17,11 @@
 #include <hal/types.h>
 
 void
-bsp_boot_init(
+prekern_bsp_boot_init(
 	const void *raw_boot_info);
 
 const void *
-bsp_kernel_handoff(
+prekern_bsp_kernel_handoff(
 	const void *raw_boot_info);
 
 uint64_t
@@ -47,15 +47,15 @@ bsp_physical_range_mappable(
 	size_t size);
 
 uint64_t
-bsp_acpi_rsdp(void);
+prekern_bsp_acpi_rsdp(void);
 
 void
-pcat_cons_init(void);
+prekern_pcat_cons_init(void);
 
 void pcat_cons_paging_ready(void);
 
 void
-pcat_cons_irq_init(void);
+prekern_pcat_cons_irq_init(void);
 
 uint64_t
 pcat_cons_output_begin(void);

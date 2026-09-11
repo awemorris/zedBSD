@@ -46,14 +46,15 @@ struct amd64_percpu {
 	volatile unsigned timecounter_runtime_done;
 	unsigned timecounter_runtime_status;
 	unsigned timecounter_runtime_reads;
-	struct hal_pmem bootstrap_stack;
+	hal_physaddr_t bootstrap_stack_paddr;
+	size_t bootstrap_stack_size;
 	struct amd64_irq_ack acknowledgements[AMD64_IRQ_ACK_DEPTH];
 	unsigned acknowledgement_depth;
 	struct amd64_task *running_task;
 	hal_space_t current_space;
 };
 
-void amd64_percpu_bootstrap(void);
+void prekern_amd64_percpu_bootstrap(void);
 struct amd64_percpu *amd64_percpu_get(hal_cpu_id_t cpu);
 struct amd64_percpu *amd64_percpu_current(void);
 void amd64_percpu_select(struct amd64_percpu *cpu);

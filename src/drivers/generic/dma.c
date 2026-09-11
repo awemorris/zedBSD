@@ -17,9 +17,10 @@
 #include <kern/lock.h>
 #include <limits.h>
 #include <string.h>
+#include <kern/pmem.h>
 
 struct dma_allocation {
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	size_t payload_size;
 	struct dma_allocation *next;
 };
@@ -89,7 +90,7 @@ drv_dma_device_create(
 	}
 
 	/* Handles the device availability. */
-	device = hal_malloc(sizeof(*device));
+	device = kernel_alloc(sizeof(*device));
 	if (device == NULL)
 		return ENOMEM;
 	memset(device, 0, sizeof(*device));
@@ -127,7 +128,7 @@ drv_dma_device_destroy(
 
 	spin_unlock_irqrestore(&device->lock, irq);
 
-	hal_free(device);
+	kernel_free(device);
 
 	/* Succeeded. */
 	return 0;
@@ -207,7 +208,6 @@ drv_dma_alloc_coherent(
 	size_t alignment,
 	struct drv_dma_buffer *buffer)
 {
-	struct hal_pmem_request request;
 	struct dma_allocation *allocation;
 	unsigned long irq;
 	size_t allocation_bytes;
@@ -234,7 +234,7 @@ drv_dma_alloc_coherent(
 	}
 
 	/* Handles the allocation availability. */
-	allocation = hal_malloc(sizeof(*allocation));
+	allocation = kernel_alloc(sizeof(*allocation));
 	if (allocation == NULL) {
 		device_operation_end(device);
 
@@ -243,15 +243,10 @@ drv_dma_alloc_coherent(
 	}
 
 	memset(allocation, 0, sizeof(*allocation));
-	request.paddr = HAL_PMEM_PADDR_ANY;
-	request.size = size;
 
 	/* Checks the hal page get page size result. */
 	if (alignment < hal_space_get_page_size(1))
 		alignment = hal_space_get_page_size(1);
-	request.alignment = alignment;
-	request.type = HAL_PMEM_TYPE_RAM;
-	request.attr = 0;
 	maximum = device->constraints.address_bits == 64U
 			  ? UINT64_MAX
 			  : ((UINT64_C(1) << device->constraints.address_bits) -
@@ -266,8 +261,13 @@ drv_dma_alloc_coherent(
 		boundary = 0;
 
 	/* Checks the operation status. */
-	error = hal_pmem_alloc_range(&request, 0, maximum, boundary,
-				     &allocation->memory);
+	allocation->memory.size = size;
+	error = hal_pmem_alloc_limited(
+		size,
+		alignment,
+		(hal_physaddr_t)maximum,
+		(size_t)boundary,
+		&allocation->memory.paddr);
 	if (error != HAL_OK ||
 	    !address_fits(device, allocation->memory.paddr,
 			  allocation->memory.size) ||
@@ -277,9 +277,9 @@ drv_dma_alloc_coherent(
 				     device->constraints.segment_boundary)) {
 		/* Checks the hal pmem free result. */
 		if (allocation->memory.size != 0 &&
-		    hal_pmem_free(&allocation->memory) != HAL_OK)
+		    hal_pmem_free(&allocation->memory.paddr, allocation->memory.size) != HAL_OK)
 			__builtin_trap();
-		hal_free(allocation);
+		kernel_free(allocation);
 		device_operation_end(device);
 
 		/* Failed. */
@@ -294,9 +294,9 @@ drv_dma_alloc_coherent(
 		if (cache_memory_reserve(CACHE_MEMORY_DMA,
 					 allocation->memory.size, 0) != 0) {
 			/* Checks the hal pmem free result. */
-			if (hal_pmem_free(&allocation->memory) != HAL_OK)
+			if (hal_pmem_free(&allocation->memory.paddr, allocation->memory.size) != HAL_OK)
 				__builtin_trap();
-			hal_free(allocation);
+			kernel_free(allocation);
 			device_operation_end(device);
 
 			/* Failed. */
@@ -310,13 +310,13 @@ drv_dma_alloc_coherent(
 		spin_unlock_irqrestore(&device->lock, irq);
 
 		/* Checks the hal pmem free result. */
-		if (hal_pmem_free(&allocation->memory) != HAL_OK)
+		if (hal_pmem_free(&allocation->memory.paddr, allocation->memory.size) != HAL_OK)
 			__builtin_trap();
 
 		/* Handles the cache memory cancel availability. */
 		if (cache_memory_cancel != NULL)
 			cache_memory_cancel(CACHE_MEMORY_DMA, allocation_bytes);
-		hal_free(allocation);
+		kernel_free(allocation);
 		device_operation_end(device);
 
 		/* Failed. */
@@ -329,7 +329,7 @@ drv_dma_alloc_coherent(
 
 	spin_unlock_irqrestore(&device->lock, irq);
 
-	buffer->address = allocation->memory.vaddr;
+	buffer->address = hal_pmem_to_kernel(allocation->memory.paddr);
 	buffer->device_address = allocation->memory.paddr;
 	buffer->size = size;
 	buffer->private_data[0] = (uintptr_t)allocation;
@@ -386,7 +386,7 @@ drv_dma_free_coherent(
 		released_size = allocation->memory.size;
 
 		/* Checks the hal pmem free result. */
-		if (hal_pmem_free(&allocation->memory) == HAL_OK) {
+		if (hal_pmem_free(&allocation->memory.paddr, allocation->memory.size) == HAL_OK) {
 			/* Handles the cache memory release availability. */
 			if (cache_memory_release != NULL) {
 				cache_memory_release(CACHE_MEMORY_DMA,
@@ -409,7 +409,7 @@ drv_dma_free_coherent(
 			return;
 		}
 
-		hal_free(allocation);
+		kernel_free(allocation);
 		memset(buffer, 0, sizeof(*buffer));
 	}
 
@@ -455,7 +455,7 @@ drv_dma_map(
 	}
 
 	/* Handles the mapping availability. */
-	mapping = hal_malloc(sizeof(*mapping));
+	mapping = kernel_alloc(sizeof(*mapping));
 	if (mapping == NULL) {
 		device_operation_end(device);
 
@@ -467,7 +467,7 @@ drv_dma_map(
 	irq = spin_lock_irqsave(&device->lock);
 	if (device->destroying) {
 		spin_unlock_irqrestore(&device->lock, irq);
-		hal_free(mapping);
+		kernel_free(mapping);
 		device_operation_end(device);
 
 		/* Failed. */
@@ -478,7 +478,8 @@ drv_dma_map(
 	for (allocation = device->allocations; allocation != NULL;
 	     allocation = allocation->next) {
 		/* Handles the start condition. */
-		base = (uintptr_t)allocation->memory.vaddr;
+		base = (uintptr_t)hal_pmem_to_kernel(
+			allocation->memory.paddr);
 		if (start < base || start - base > allocation->payload_size ||
 		    size > allocation->payload_size - (start - base))
 			continue;
@@ -496,7 +497,7 @@ drv_dma_map(
 
 	spin_unlock_irqrestore(&device->lock, irq);
 
-	hal_free(mapping);
+	kernel_free(mapping);
 	device_operation_end(device);
 
 	/* Failed. */
@@ -515,7 +516,7 @@ drv_dma_unmap(
 
 	/* Handles the mapping availability. */
 	if (mapping != NULL)
-		hal_free(mapping);
+		kernel_free(mapping);
 }
 /*
  * Implements the drv dma mapping segment count operation.
@@ -601,7 +602,7 @@ drv_dma_vector_create(
 	}
 
 	/* Handles the vector availability. */
-	vector = hal_malloc(sizeof(*vector));
+	vector = kernel_alloc(sizeof(*vector));
 	if (vector == NULL) {
 		device_operation_end(device);
 
@@ -665,7 +666,7 @@ fail:
 	/* Checks the dma vector backing free result. */
 	if (dma_vector_backing_free(vector) != 0)
 		HAL_FATAL("DMA vector allocation rollback failed");
-	hal_free(vector);
+	kernel_free(vector);
 	device_operation_end(device);
 
 	/* Reports the failure. */
@@ -719,7 +720,7 @@ drv_dma_vector_free(
 
 	spin_unlock_irqrestore(&device->lock, irq);
 
-	hal_free(vector);
+	kernel_free(vector);
 	device_operation_end(device);
 
 	/* Succeeded. */

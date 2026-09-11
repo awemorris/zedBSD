@@ -11,6 +11,7 @@
 
 #include "drivers/platform/pcat/graphics/backend.h"
 #include "drivers/platform/pcat/graphics/font.h"
+#include "drivers/platform/pcat/graphics/text.h"
 #include "drivers/graphics/pcat.h"
 
 #include <drivers/pci.h>
@@ -40,7 +41,6 @@ static int cirrus_present;
 static struct drv_pci_device *cirrus_device;
 static struct drv_pci_mapping cirrus_mapping;
 static int vga_color_cache = -1;
-static struct hal_pmem vga_memory;
 static volatile uint8_t *vga_aperture, *cirrus_aperture;
 static const struct zbl6_framebuffer *linear_framebuffer;
 static volatile uint32_t *linear_pixels;
@@ -112,7 +112,9 @@ drv_pcat_graphics_backend_enter(
 		hal_printf("graphics: boot framebuffer %ux%ux32 stride=%u\n",
 			   mode->width, mode->height, mode->stride);
 
-		/* Reports operation failure. */
+			drv_pcat_text_init();
+
+	/* Reports operation failure. */
 		return 1;
 	}
 
@@ -506,6 +508,39 @@ drv_pcat_graphics_prepare(
 /*
  * Implements the drv pcat graphics backend ready operation.
  */
+/*
+ * Reports the linear framebuffer for the text layer.
+ */
+int
+drv_pcat_graphics_backend_get_framebuffer(
+	volatile uint32_t **pixels,
+	unsigned *width,
+	unsigned *height,
+	unsigned *stride,
+	int *rgbx)
+{
+	/* Reports no framebuffer until the boot handoff supplied one. */
+	if (linear_pixels == NULL || linear_framebuffer == NULL)
+		return 0;
+
+	/* Publishes the pixel pointer and the geometry. */
+	if (pixels != NULL)
+		*pixels = linear_pixels;
+	if (width != NULL)
+		*width = linear_framebuffer->width;
+	if (height != NULL)
+		*height = linear_framebuffer->height;
+	if (stride != NULL)
+		*stride = linear_framebuffer->stride;
+	if (rgbx != NULL) {
+		*rgbx = linear_framebuffer->format ==
+			ZBL6_FRAMEBUFFER_RGBX8888;
+	}
+
+	/* Reports an available framebuffer. */
+	return 1;
+}
+
 int
 drv_pcat_graphics_backend_ready(
 	void)
@@ -987,9 +1022,7 @@ pcat_graphics_prepare_hardware(
 {
 	uint64_t aligned;
 	uint64_t offset;
-	struct hal_pmem_request request = {0x000a0000U, 0x00020000U, 0x1000U,
-					   HAL_PMEM_TYPE_VRAM,
-					   HAL_PMEM_ATTR_NOCACHE};
+	void *aperture;
 
 	drv_pcat_font_init();
 	linear_framebuffer = hal_get_arch_handoff("pcat.framebuffer");
@@ -1008,10 +1041,12 @@ pcat_graphics_prepare_hardware(
 		return 1;
 	}
 
-	/* Checks the hal pmem alloc result. */
-	if (hal_pmem_alloc(&request, &vga_memory) != HAL_OK)
+	/* Maps the uncached legacy VGA aperture. */
+	if (hal_space_map_device(0x000a0000U, 0x00020000U,
+				 HAL_SPACE_READ | HAL_SPACE_WRITE |
+				 HAL_SPACE_NOCACHE, &aperture) != HAL_OK)
 		return 0;
-	vga_aperture = (volatile uint8_t *)vga_memory.vaddr;
+	vga_aperture = (volatile uint8_t *)aperture;
 
 	/* Handles the cirrus present condition. */
 	if (cirrus_present) {

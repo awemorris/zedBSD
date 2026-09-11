@@ -81,7 +81,9 @@ AMD64_KERNEL_LIBC_CFLAGS := $(filter-out -mgeneral-regs-only,$(AMD64_CFLAGS))
 
 AMD64_HAL_SOURCES := src/hal/x86/rtc.c src/hal/x86/boot-parameters.c \
 	src/hal/amd64/asm.c src/hal/amd64/lib.c \
-	src/hal/pmem-constraints.c src/hal/amd64/page.c src/hal/amd64/pmem-range.c src/hal/amd64/ram-map.c src/hal/amd64/framebuffer-map.c src/hal/amd64/space.c \
+	src/hal/amd64/page.c src/hal/amd64/pmem-range.c \
+	src/hal/amd64/ram-map.c src/hal/amd64/framebuffer-map.c \
+	src/hal/amd64/space.c \
 	src/hal/amd64/acpi-window.c src/hal/amd64/cmain.c \
 	src/hal/amd64/descriptor.c src/hal/amd64/int.c src/hal/amd64/irq.c \
 	src/hal/amd64/msi-source.c \
@@ -203,7 +205,8 @@ ifeq ($(CONFIG_DRIVER_GRAPHICS_DEVICE),y)
 AMD64_KERNEL_SOURCES += \
 	src/drivers/platform/pcat/graphics/pcat-graphics.c \
 	src/drivers/platform/pcat/graphics/backend.c \
-	src/drivers/platform/pcat/graphics/font.c
+	src/drivers/platform/pcat/graphics/font.c \
+	src/drivers/platform/pcat/graphics/text.c
 endif
 AMD64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_BLOCK_IDENTITY_SOURCES) \
 	$(KERN_UFS_SOURCES)
@@ -242,7 +245,6 @@ $(BUILD)/src/hal/amd64/%.o: src/hal/amd64/%.c
 
 # Shared x86 HAL sources must use the amd64 flags as well. Without this
 # rule the generic i386 pattern can leave a 32-bit object in build/amd64.
-$(BUILD)/src/hal/pmem-constraints.o: src/hal/pmem-constraints.c
 	@mkdir -p $(dir $@)
 	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) -MMD -MP -c $< -o $@
 

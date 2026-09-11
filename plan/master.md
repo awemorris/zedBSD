@@ -77,6 +77,158 @@ Objectives → Milestone Goals → WS → Phase → Queue試行/結果を対応�
 - `hal_*` と `kernel_*` の公開APIは対象外とする想定。`hal_puts()` は前後どちらからも呼ばれる。
 - 担当WS。WS018（MG008）は完了のため、再開するか新WSを立てるかはユーザー判断。
 
+#### fg007：hal.h 再編への追従（2026-09-11、amd64、未コミット）
+
+ユーザーによる hal.h 再編に amd64 を合わせた。pmem 側は完了し、残りはコンソールのみ。
+
+完了した内容：
+
+- pmem を `hal_pmem_alloc(size, align, *paddr)` と `hal_pmem_free(*paddr, size)` へ移行した。
+  VRAM と MMIO の確保機能は pmem から外し、`hal_space_map_device()` で写す設計にした。
+- hal.h へ追加した入口は3つ。`hal_pmem_to_kernel()` は RAM の直接マップ変換、
+  `hal_pmem_alloc_limited()` はデバイス到達上限と境界制約付きの確保、
+  `hal_space_map_device()` と `hal_space_unmap_device()` はデバイス範囲の写像。
+- `struct kern_pmem`（paddr と size）を `include/kern/pmem.h` に新設した。
+  `hal_pmem_free()` がサイズを要求するため、run を保持するカーネル側はこれを使う。
+- amd64 の固定デバイス窓の表を pmem 割り当て器から `space.c` へ移した。
+  Local APIC、I/O APIC、PCI BAR はすべて `hal_space_map_device()` 経由になった。
+- `src/hal/pmem-constraints.c` を削除した。制約付き確保は `hal_pmem_alloc_limited()` に一本化。
+- `enum hal_trap_cause` と `hal_trap_mode` への改名に追従した。hal.h 内に旧名の書き残しが
+  1085行と1102行の2箇所あった。
+- `hal_irq_get_affinity()` を `struct hal_cpu_mask` 2本の新署名へ合わせた。
+- `hal_irq_set_handler()` を `hal_irq_register()` と `hal_irq_unregister()` へ分割した。
+- `hal_pmem_stats` は `struct hal_memstat` と `hal_get_memstat()` へ改名済みだったので追従した。
+- `HAL_KEY_*` をカーネル側 `KERN_KEY_*` と HAL 側 `src/hal/cons-keys.h` に分離した。
+
+残る32件はすべてコンソール関連である。hal.h のコンソール宣言が `hal_cons_putc()` だけに
+なったため、`/dev/console` が12件、`tty.c` が9件、pcat graphics が11件ビルドできない。
+これは early console 化そのものなので、下の計画に従って別途進める。
+
+#### fg007：early console 段階1-2 の実装（2026-09-11、amd64、未コミット）
+
+ビルドは PASS。QEMU で `boot: starting init /sbin/init` まで到達するが、ログインまで進まない。
+
+実装した内容：
+
+- `src/drivers/platform/pcat/graphics/text.c`（481行）と `text.h` を新設した。セル配列、
+  カーソル、スクロール、グリフ描画、VGA 16色パレットを持つ。フレームバッファは
+  `drv_pcat_graphics_backend_get_framebuffer()` から取る。グリッドは
+  幅/8 × 高さ/16 で算出し、端数は中央寄せする。
+- `backend.c` に `drv_pcat_graphics_backend_get_framebuffer()` を追加し、
+  `drv_pcat_text_init()` をフレームバッファ確定時に呼ぶようにした。
+- `/dev/console` と `tty.c` の描画を `drv_pcat_text_*` へ向けた。
+- `hal_cons_suspend()`/`hal_cons_resume()` は `drv_pcat_text_suspend()`/`_resume()` になり、
+  同一ドライバ内の状態管理になった。hal.h から外せる状態。
+- `/dev/console` の `console_input_worker()` スレッドを削除した。キーボード入力は
+  段階3の `ps2-8042.c` が evdev へ発行するまで無い。
+- `amd64_device_map()` と `hal_space_map_device()` は、固定デバイス窓が早期ページングで
+  既に張られているため、重複マップをエラーにしない実装にした。
+- `hal_pmem_alloc()`/`hal_pmem_free()` のページ丸めを割り当て器内部に閉じた。
+  呼び出し側が要求サイズをそのまま渡せば解放できる。
+
+未解決：
+
+- `boot: starting init /sbin/init` の後が出ない。userland からの `/dev/console` 書き込みが
+  進んでいない。カーネル自身の起動ログは新しいテキスト層で正しく描けているので、
+  描画そのものは動作している。
+  ロックランクは確認済みで原因ではない。`LOCK_RANK_CONSOLE_TEXT = 137` を新設し、
+  `tty.c` の `LOCK_RANK_TTY = 135` より上の葉ロックにしたが症状は変わらなかった。
+  次に見るべきは `console_write()` から `tty_render()` への経路と、
+  `console_input_worker()` 削除に伴う `/dev/console` の読み側の待ち合わせ。
+  init が `/dev/console` を開いて読もうとし、入力源が無いまま待っている可能性がある。
+- `/dev/console` が自前登録している `keyboard_input` デバイスはまだ残っている。
+  段階3で `ps2-8042.c` に置き換える。
+
+#### fg007：early console 化の計画（2026-09-11、amd64先行）
+
+`hal_cons_*` を早期コンソールへ縮退させ、起動後のコンソールはカーネル側が持つ。
+HAL に残すのは `hal_cons_putc()` のみで、用途は HAL 内と、カーネル初期化段階の
+`hal_printf()` による診断出力に限る。
+
+構成（2026-09-11ユーザー整理。旧案の「`/dev/console` は `/dev/graphics` に依存しない」は
+これに置き換える）：
+
+- `/dev/console` はプラットフォーム独立。`/dev/graphics` と evdev を利用する
+  マルチプレクサであり、ファイル操作、tty ディシプリン、ANSI/CSI 解釈、input 購読、
+  `drv_input_keymap_translate()` による文字変換を持つ。アーキ別実装は作らない。
+- `/dev/graphics` が表示を所有する。`pcat-graphics.c` に文字出力とカーソル機能を統合し、
+  セル配列・スクロール・属性・グリフ描画を持つ。グラフィックと文字は同時に使える。
+  プラットフォームによってはグラフィックモードが無くてもよい。
+- キーボードは `drivers/platform/pcat/ps2-keyboard.c` に分離し、evdev ドライバとする。
+  `ps2-mouse.c` と同型で、`hal_irq_register()` と `drv_input_device_emit()` を使う。
+
+この構成ではフレームバッファの所有者が `/dev/graphics` 一つになるため、
+`hal_cons_suspend()`/`hal_cons_resume()` は不要になり hal.h から外せる。
+`pcat-graphics.c` の当該6箇所は同一ドライバ内の状態管理になる。
+
+確認済みの前提：
+
+- `hal_cons_getc()` は HAL のコンソール実装以外から呼ばれていない。早期コンソールに入力は不要。
+- `pcat.framebuffer` と `pcat.boot-font` の handoff は既に `graphics/backend.c` と
+  `graphics/font.c` が使っている。`drv_pcat_graphics_backend_*` に fill/blit/glyph/flush、
+  `drv_pcat_font_*` にフォント操作がある。
+- `/dev/console` は既に input レポートを購読し keymap で文字へ変換する経路を持つ。
+- `src/hal/amd64/bsp-pcat/cons.c` は2407行で、表示系と 8042 キーボード系が同居している。
+- 現在のビルド残りは27件。`console.c` 12、`tty.c` 9、`pcat-graphics.c` 6。
+
+段階：
+
+1. `pcat-graphics.c` に文字出力とカーソルの内部インタフェースを足す。
+2. `/dev/console` と `tty.c` の描画をそこへ向ける。
+3. `ps2-keyboard.c` を新設し evdev へ発行する。`/dev/console` の `console_input_worker()` と
+   自前登録の `keyboard_input` デバイスを廃止し、購読経路へ一本化する。
+4. hal.h のコンソール宣言を `hal_cons_putc()` まで縮退し、amd64 cons.c を早期コンソールに縮小。
+   `src/hal/cons-keys.h` と `src/hal/cons-wait.h` も不要になる。
+5. HAL から `kernel_wait_task()`/`kernel_notify_task()` の利用が消える。
+
+決定済み（2026-09-11ユーザー指示）：
+
+- `/dev/graphics` は「表示デバイス」として全プラットフォームに置く。グラフィックモードのほうが
+  任意であり、テキストしか持たない機種でも `/dev/graphics` が存在する。
+- `/dev/console` から `/dev/graphics` へはカーネル内の関数呼び出しで密結合してよい。
+  ioctl は経由しない。
+- 責務の境目は、`/dev/graphics` がセル配列・カーソル位置・スクロール・属性・グリフ描画を持ち、
+  `/dev/console` が ANSI/CSI を解釈して位置指定の書き込み・カーソル移動・範囲消去へ翻訳する。
+  現在 `tty.c` にある CSI 処理はコンソール側に残る。
+
+出力の一本化：
+
+- `hal_cons_putc()` を `hal_putc()` へ改名し、hal.h の Console 節ではなく冒頭の
+  HAL C runtime 節へ移す。これにより hal.h から Console 節そのものが消える。
+- カーネルは関数ポインタ `kernel_putc` を提供する。初期値は NULL。
+- `hal_putc()` は `kernel_putc` を見て、非 NULL ならそちらへ委譲し、NULL なら自分の
+  早期コンソールへ書く。これにより `hal_printf()` の出力は引き渡し後に自動的に
+  本来のコンソールへ流れ、呼び出し側の変更が要らない。
+- 差し替えは `/dev/graphics` と `/dev/console` が完全に使える状態になってから、
+  RELEASE 順序の単一ストアで行う。
+- `kernel_putc` は割り込み文脈と panic からも呼ばれるため、眠らないこと、
+  IRQ 保存のロックで保護することを契約とする。
+
+panic の扱い（2026-09-11修正）：
+
+- panic で HAL コンソールへ退避する設計は採らない。カーネルは表示デバイスを変更しうるため
+  （GOP から GPU など）、引き渡し後の HAL 側の出力先は既に無効になっている可能性がある。
+  よって panic も通常経路、すなわち `hal_putc()` から `kernel_putc` を使う。
+- 引き渡し後、HAL は自分の早期コンソール状態に触れない。
+
+8042 の扱い（2026-09-11決定）：
+
+8042 はコントローラICが1個で、キーボードとマウスはその2ポートである。データポート 0x60、
+コマンド/ステータスポート 0x64、設定バイト、出力バッファのいずれも共有され、コマンド列も
+状態を持つ（マウス宛は 0x64 へ 0xD4 を書いてから 0x60 へ書く）。別々のロックで触ると競合する。
+
+よって、ICが1個であることに合わせ、1つのドライバソース
+`drivers/platform/pcat/ps2-8042.c` がコントローラを所有し、evdev デバイスを2つ登録する。
+
+- IRQ1（キーボード）と IRQ12（マウス）の両方をこのドライバが `hal_irq_register()` で登録する。
+- `controller_lock` は1本。設定バイトの read-modify-write、コマンド送出、
+  入力バッファ待ち、データ読み出しと AUX 判定をこのロックの下で行う。
+- 既存の `ps2-mouse.c`（627行、IRQ12）はこのファイルへ吸収する。
+- キーボードのスキャンコード表と解釈は `src/hal/amd64/bsp-pcat/cons.c` から移す。
+- 出力は `drv_input_device_emit()` のみ。HAL のキーイベント API は使わない。
+
+これで fg007 の設計判断はすべて解決済みとなる。
+
 影響範囲の実測（plan/ と build/ の複製を除く）：コンソール定数198箇所、write/clear系75箇所、
 `hal_key_event` 関連59箇所、アロケータ278箇所。`prekern_` 対象は5アーキの起動前経路で約50関数。
 HAL内のアロケータ使用26箇所のうち起動経路は6箇所のみで、残る20箇所は実行時のため対象外。

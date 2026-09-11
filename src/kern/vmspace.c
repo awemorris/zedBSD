@@ -46,7 +46,7 @@
  * holds any live slot.
  */
 struct vm_page_slab {
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	struct vm_page_slab *next;
 	uint32_t free_mask;
 	unsigned used;
@@ -60,7 +60,7 @@ struct vm_page_slab {
  * backings that reclaim and copy-on-write hand around.
  */
 struct vm_private_page_slab {
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	struct vm_private_page_slab *next;
 	uint32_t free_mask;
 	unsigned used;
@@ -166,8 +166,8 @@ extern void vmspace_pin_page_checkpoint(struct vmspace *vm, size_t index, size_t
 extern void vmspace_object_revoke_checkpoint(struct vmspace *vm, uintptr_t address) __attribute__((weak));
 
 static void (*vmspace_reap_notify)(void *);
-static int alloc_vm_page(struct hal_pmem *memory);
-static int alloc_vm_metadata_page(struct hal_pmem *memory);
+static int alloc_vm_page(struct kern_pmem *memory);
+static int alloc_vm_metadata_page(struct kern_pmem *memory);
 static struct vm_page * vm_page_slab_take_locked(void);
 static struct vm_private_page * vm_private_page_slab_take_locked(void);
 static struct vm_private_page * vm_private_page_alloc_metadata(void);
@@ -296,7 +296,7 @@ struct vm_page *
 vm_page_alloc_metadata(
 	void)
 {
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	struct vm_page_slab *fresh;
 	struct vm_page *page;
 	unsigned long irq;
@@ -322,7 +322,7 @@ vm_page_alloc_metadata(
 	}
 
 	/* Publishes the new slab unless another one appeared meanwhile. */
-	fresh = memory.vaddr;
+	fresh = hal_pmem_to_kernel(memory.paddr);
 	memset(fresh, 0, PAGE_SIZE);
 	fresh->memory = memory;
 	fresh->free_mask = UINT32_MAX;
@@ -341,7 +341,7 @@ vm_page_alloc_metadata(
 	spin_unlock_irqrestore(&vm_page_slab_lock, irq);
 
 	if (fresh != NULL)
-		(void)hal_pmem_free(&memory);
+		(void)hal_pmem_free(&memory.paddr, memory.size);
 
 	return page;
 }
@@ -355,7 +355,7 @@ vm_page_free_metadata(
 {
 	struct vm_page_slab **link;
 	struct vm_page_slab *slab;
-	struct hal_pmem released;
+	struct kern_pmem released;
 	uintptr_t address;
 	unsigned long irq;
 	int release;
@@ -397,7 +397,7 @@ vm_page_free_metadata(
 
 		spin_unlock_irqrestore(&vm_page_slab_lock, irq);
 
-		if (release && hal_pmem_free(&released) != HAL_OK)
+		if (release && hal_pmem_free(&released.paddr, released.size) != HAL_OK)
 			HAL_FATAL("VM page metadata slab free failed");
 
 		return;
@@ -417,7 +417,7 @@ vm_private_page_free_metadata(
 {
 	struct vm_private_page_slab **link;
 	struct vm_private_page_slab *slab;
-	struct hal_pmem released;
+	struct kern_pmem released;
 	uintptr_t address;
 	unsigned long irq;
 	int release;
@@ -462,7 +462,7 @@ vm_private_page_free_metadata(
 
 		spin_unlock_irqrestore(&vm_private_page_slab_lock, irq);
 
-		if (release && hal_pmem_free(&released) != HAL_OK)
+		if (release && hal_pmem_free(&released.paddr, released.size) != HAL_OK)
 			HAL_FATAL("VM private metadata slab free failed");
 
 		return;
@@ -736,7 +736,7 @@ vm_private_page_vaddr(
 
 	/* Reads the address only while the backing is resident. */
 	if ((backing->flags & VM_PAGE_RESIDENT) != 0)
-		address = (uintptr_t)backing->pmem.vaddr;
+		address = (uintptr_t)hal_pmem_to_kernel(backing->pmem.paddr);
 	else
 		address = 0;
 
@@ -1323,7 +1323,7 @@ retry:
 	if (region->backing == VM_BACKING_FILE) {
 		error = fill_file_page(region, page);
 	} else {
-		memset((void *)page->private_page->pmem.vaddr, 0, PAGE_SIZE);
+		memset((void *)hal_pmem_to_kernel(page->private_page->pmem.paddr), 0, PAGE_SIZE);
 		error = 0;
 	}
 
@@ -3221,16 +3221,12 @@ vmspace_map_exec_snapshot(
 /* Allocates one physical page for user memory. */
 static int
 alloc_vm_page(
-	struct hal_pmem *memory)
+	struct kern_pmem *memory)
 {
-	const struct hal_pmem_request request = {
-		HAL_PMEM_PADDR_ANY, PAGE_SIZE, PAGE_SIZE,
-		HAL_PMEM_TYPE_RAM, 0
-	};
 	int error;
 
 	/* Reports the failure. */
-	error = hal_pmem_alloc(&request, memory);
+	error = vm_private_page_alloc(memory);
 	if (error != 0)
 		return error;
 
@@ -3241,7 +3237,7 @@ alloc_vm_page(
 /* Allocates a metadata slab page, reclaiming once when not under the metadata lock. */
 static int
 alloc_vm_metadata_page(
-	struct hal_pmem *memory)
+	struct kern_pmem *memory)
 {
 	int error;
 
@@ -3343,7 +3339,7 @@ static struct vm_private_page *
 vm_private_page_alloc_metadata(
 	void)
 {
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	struct vm_private_page_slab *fresh;
 	struct vm_private_page *backing;
 	unsigned long irq;
@@ -3369,7 +3365,7 @@ vm_private_page_alloc_metadata(
 	}
 
 	/* Publishes the new slab unless another one appeared meanwhile. */
-	fresh = memory.vaddr;
+	fresh = hal_pmem_to_kernel(memory.paddr);
 	memset(fresh, 0, PAGE_SIZE);
 	fresh->memory = memory;
 	fresh->free_mask = VM_PRIVATE_PAGE_SLAB_FREE_MASK;
@@ -3385,7 +3381,7 @@ vm_private_page_alloc_metadata(
 
 	spin_unlock_irqrestore(&vm_private_page_slab_lock, irq);
 
-	if (fresh != NULL && hal_pmem_free(&memory) != HAL_OK)
+	if (fresh != NULL && hal_pmem_free(&memory.paddr, memory.size) != HAL_OK)
 		HAL_FATAL("unused VM private metadata slab free failed");
 	return backing;
 }
@@ -4288,7 +4284,7 @@ fill_file_page(
 		read_end = data_end;
 
 	/* A page outside the data is zero only for an ELF zero tail. */
-	memset((void *)page->private_page->pmem.vaddr, 0, PAGE_SIZE);
+	memset((void *)hal_pmem_to_kernel(page->private_page->pmem.paddr), 0, PAGE_SIZE);
 	if (read_start >= read_end) {
 		if ((region->flags & VM_REGION_ELF_ZERO_TAIL) != 0)
 			return 0;
@@ -4312,7 +4308,7 @@ fill_file_page(
 
 	/* Reports a short read as a device error. */
 	count = file_pread(region->file,
-		(void *)(page->private_page->pmem.vaddr +
+		(void *)(hal_pmem_to_kernel(page->private_page->pmem.paddr) +
 		    read_start - page->address),
 		length, offset);
 	if (count == (ssize_t)length)
@@ -4343,7 +4339,7 @@ prepare_cow_copy(
 	}
 
 	/* Copies the shared page and publishes the copy as resident and dirty. */
-	memcpy((void *)fresh->pmem.vaddr, (const void *)old->pmem.vaddr,
+	memcpy((void *)hal_pmem_to_kernel(fresh->pmem.paddr), (const void *)hal_pmem_to_kernel(old->pmem.paddr),
 	    PAGE_SIZE);
 	irq = spin_lock_irqsave(&fresh->state_lock);
 
@@ -4574,7 +4570,7 @@ copy_backing(
 		if (chunk > size)
 			chunk = size;
 		if (page->kind == VMSPACE_PINNED_PRIVATE) {
-			mapped = (uint8_t *)page->memory.vaddr + offset;
+			mapped = (uint8_t *)hal_pmem_to_kernel(page->memory.paddr) + offset;
 			if (to_user) {
 				memcpy(mapped, bytes, chunk);
 				vm_private_page_mark_dirty(
@@ -5883,7 +5879,7 @@ vmspace_exec_cache_fault(
 			if (fresh->generation == 0)
 				fresh->generation++;
 			spin_unlock_irqrestore(&fresh->state_lock, irq);
-			error = vm_object_page_pin_read(source, 0, fresh->pmem.vaddr, PAGE_SIZE);
+			error = vm_object_page_pin_read(source, 0, hal_pmem_to_kernel(fresh->pmem.paddr), PAGE_SIZE);
 			if (error == 0)
 				vm_private_page_mark_dirty(fresh);
 		}

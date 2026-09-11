@@ -42,7 +42,7 @@ static int start_one(struct amd64_percpu *cpu, int *timecounter_valid);
  * Builds the logical amd64 CPU topology from ACPI.
  */
 void
-amd64_smp_init(
+prekern_amd64_smp_init(
 	const struct amd64_acpi_info *acpi)
 {
 	struct amd64_percpu *bsp;
@@ -275,7 +275,8 @@ amd64_ap_entry(
 
 	/* Completes the boot-time counter probe and task setup. */
 	amd64_timecounter_ap_probe(cpu);
-	amd64_task_init_cpu(0);
+	if (hal_task_create_for_init_context() == NULL)
+		HAL_FATAL("amd64 AP initial task allocation failed");
 
 	/* Starts this CPU's local scheduler tick. */
 	error = amd64_lapic_timer_start();
@@ -448,13 +449,6 @@ start_one(
 	struct amd64_percpu *cpu,
 	int *timecounter_valid)
 {
-	const struct hal_pmem_request stack_request = {
-		HAL_PMEM_PADDR_ANY,
-		AMD64_AP_STACK_SIZE,
-		4096,
-		HAL_PMEM_TYPE_RAM,
-		0
-	};
 	uint8_t *destination;
 	const char *reason;
 	size_t image_size;
@@ -470,7 +464,11 @@ start_one(
 		return HAL_ERR_NOMEM;
 
 	/* Allocates the secondary CPU's bootstrap stack. */
-	error = hal_pmem_alloc(&stack_request, &cpu->bootstrap_stack);
+	cpu->bootstrap_stack_size = AMD64_AP_STACK_SIZE;
+	error = hal_pmem_alloc(
+		cpu->bootstrap_stack_size,
+		PAGE_SIZE,
+		&cpu->bootstrap_stack_paddr);
 	if (error != HAL_OK)
 		return HAL_ERR_NOMEM;
 
@@ -512,8 +510,9 @@ start_one(
 	    amd64_ap_trampoline_start)) = (uint32_t)amd64_system_cr3();
 	*(uint64_t *)(destination + (amd64_ap_trampoline_stack -
 	    amd64_ap_trampoline_start)) =
-	    (uint64_t)(uintptr_t)cpu->bootstrap_stack.vaddr +
-	    cpu->bootstrap_stack.size;
+	    (uint64_t)(uintptr_t)amd64_phys_to_direct(
+		cpu->bootstrap_stack_paddr) +
+	    cpu->bootstrap_stack_size;
 	*(uint64_t *)(destination + (amd64_ap_trampoline_cpu -
 	    amd64_ap_trampoline_start)) = cpu->logical_id;
 	*(uint64_t *)(destination + (amd64_ap_trampoline_entry -

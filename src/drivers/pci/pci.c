@@ -198,7 +198,7 @@ drv_pci_bus_create_root(
 	}
 
 	/* Handles the bus availability. */
-	bus = hal_malloc(sizeof(*bus));
+	bus = kernel_alloc(sizeof(*bus));
 	if (bus == NULL)
 		return ENOMEM;
 	memset(bus, 0, sizeof(*bus));
@@ -231,7 +231,7 @@ drv_pci_bus_create_child(
 		return EINVAL;
 
 	/* Handles the bus availability. */
-	bus = hal_malloc(sizeof(*bus));
+	bus = kernel_alloc(sizeof(*bus));
 	if (bus == NULL)
 		return ENOMEM;
 	memset(bus, 0, sizeof(*bus));
@@ -264,7 +264,7 @@ drv_pci_bus_destroy(
 	/* Process each linked entry. */
 	for (device = bus->devices; device != NULL; device = next) {
 		next = device->next;
-		hal_free(device);
+		kernel_free(device);
 	}
 
 	/* Handles the parent availability. */
@@ -282,7 +282,7 @@ drv_pci_bus_destroy(
 	/* Handles the bridge availability. */
 	if (bus->bridge != NULL)
 		bus->bridge->subordinate = NULL;
-	hal_free(bus);
+	kernel_free(bus);
 
 	/* Succeeded. */
 	return 0;
@@ -329,7 +329,7 @@ drv_pci_bus_scan(
 			}
 
 			/* Handles the device availability. */
-			device = hal_malloc(sizeof(*device));
+			device = kernel_alloc(sizeof(*device));
 			if (device == NULL)
 				return ENOMEM;
 			memset(device, 0, sizeof(*device));
@@ -338,7 +338,7 @@ drv_pci_bus_scan(
 
 			/* Checks the read device result. */
 			if (read_device(device) != 0) {
-				hal_free(device);
+				kernel_free(device);
 				continue;
 			}
 
@@ -1525,7 +1525,7 @@ drv_pci_device_establish_irq(
 		return EINVAL;
 
 	/* Handles the cookie availability. */
-	cookie = hal_malloc(sizeof(*cookie));
+	cookie = kernel_alloc(sizeof(*cookie));
 	if (cookie == NULL)
 		return ENOMEM;
 	memset(cookie, 0, sizeof(*cookie));
@@ -1549,7 +1549,7 @@ drv_pci_device_establish_irq(
 
 	/* Checks the operation status. */
 	if (error != 0) {
-		hal_free(cookie);
+		kernel_free(cookie);
 
 		/* Failed. */
 		return error;
@@ -1688,7 +1688,7 @@ drv_pci_device_disestablish_irq_checked(
 		return EINVAL;
 	}
 
-	hal_free(cookie);
+	kernel_free(cookie);
 
 	/* Succeeded. */
 	return 0;
@@ -1949,7 +1949,7 @@ drv_pci_driver_register(
 	}
 
 	/* Handles the entry availability. */
-	entry = hal_malloc(sizeof(*entry));
+	entry = kernel_alloc(sizeof(*entry));
 	if (entry == NULL)
 		return ENOMEM;
 	entry->driver = driver;
@@ -2002,7 +2002,7 @@ drv_pci_driver_unregister(
 		/* Handles the e condition. */
 		if (e->driver == r) {
 			*p = e->next;
-			hal_free(e);
+			kernel_free(e);
 
 			/* Succeeded. */
 			return 0;
@@ -2475,7 +2475,7 @@ establish_intx(
 	int hal_error;
 
 	/* Handles the candidate availability. */
-	candidate = hal_malloc(sizeof(*candidate));
+	candidate = kernel_alloc(sizeof(*candidate));
 	if (candidate == NULL)
 		return ENOMEM;
 	memset(candidate, 0, sizeof(*candidate));
@@ -2489,7 +2489,7 @@ establish_intx(
 		/* Handles the line condition. */
 		if (line->removing) {
 			intx_lock_leave(enabled);
-			hal_free(candidate);
+			kernel_free(candidate);
 
 			/* Failed. */
 			return EBUSY;
@@ -2503,7 +2503,7 @@ establish_intx(
 		cookie->irq = line->irq;
 		cookie->intx_line = line;
 		intx_lock_leave(enabled);
-		hal_free(candidate);
+		kernel_free(candidate);
 
 		/* Succeeded. */
 		return 0;
@@ -2515,7 +2515,7 @@ establish_intx(
 	 */
 
 	/* Checks the operation status. */
-	hal_error = hal_irq_set_handler(candidate->irq, pci_intx_dispatch,
+	hal_error = hal_irq_register(candidate->irq, pci_intx_dispatch,
 					candidate);
 	if (hal_error == HAL_OK) {
 		candidate->handlers = cookie;
@@ -2530,7 +2530,7 @@ establish_intx(
 
 	/* Checks the operation status. */
 	if (hal_error != HAL_OK) {
-		hal_free(candidate);
+		kernel_free(candidate);
 
 		/* Returns the computed result. */
 		return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
@@ -2970,7 +2970,7 @@ disestablish_intx(
 		cookie->intx_line = NULL;
 		cookie->intx_next = NULL;
 		intx_lock_leave(enabled);
-		hal_free(cookie);
+		kernel_free(cookie);
 
 		/* Succeeded. */
 		return 0;
@@ -2982,7 +2982,7 @@ disestablish_intx(
 	intx_lock_leave(enabled);
 
 	/* Checks the operation status. */
-	hal_error = hal_irq_set_handler(line->irq, NULL, NULL);
+	hal_error = hal_irq_unregister(line->irq, pci_intx_dispatch, line);
 	if (hal_error != HAL_OK) {
 		enabled = intx_lock_enter();
 		line->removing = 0;
@@ -3011,8 +3011,8 @@ disestablish_intx(
 	line->handlers = NULL;
 	cookie->intx_line = NULL;
 	intx_lock_leave(enabled);
-	hal_free(line);
-	hal_free(cookie);
+	kernel_free(line);
+	kernel_free(cookie);
 
 	/* Succeeded. */
 	return 0;

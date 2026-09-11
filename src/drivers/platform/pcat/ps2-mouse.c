@@ -610,13 +610,13 @@ drv_pcat_ps2_mouse_init(
 	hal_irq_mask(PS2_MOUSE_IRQ);
 
 	/* Checks the hal irq set handler result. */
-	if (hal_irq_set_handler(PS2_MOUSE_IRQ, mouse_interrupt, NULL) != HAL_OK)
+	if (hal_irq_register(PS2_MOUSE_IRQ, mouse_interrupt, NULL) != HAL_OK)
 		return EBUSY;
 
 	/* Checks the operation status. */
 	error = drv_input_device_register(&mouse_info, &mouse_input);
 	if (error != 0)
-		(void)hal_irq_set_handler(PS2_MOUSE_IRQ, NULL, NULL);
+		(void)hal_irq_unregister(PS2_MOUSE_IRQ, mouse_interrupt, NULL);
 
 	/* Reports the failure. */
 	if (error != 0)

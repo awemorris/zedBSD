@@ -35,6 +35,7 @@
 #include "kern/lock.h"
 #include "kern/swap.h"
 #include <hal/hal.h>
+#include <kern/pmem.h>
 #include <limits.h>
 #include "kern/sched.h"
 
@@ -56,7 +57,7 @@
  * global list so the next allocation finds it without a search.
  */
 struct vm_page_slab {
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	struct vm_page_slab *next;
 	struct vm_page_slab *previous;
 	struct vm_object_page *free_pages;
@@ -214,7 +215,8 @@ static void object_wake_registry_waiters(struct vm_object *object);
 static void object_wait_registry_waiters(struct vm_object *object);
 static int object_operation_begin(struct vm_object *object);
 static void object_operation_end(struct vm_object *object);
-static int alloc_vm_page(struct hal_pmem *memory);
+
+static int alloc_vm_page(struct kern_pmem *memory);
 static struct vm_object_page *find_page(struct vm_object *object, off_t offset);
 static int unlink_page_locked(struct vm_object_page **head, struct vm_object_page *page);
 static uint64_t next_generation(struct vm_object *object);
@@ -1245,7 +1247,7 @@ retry_lookup:
 		irq = spin_lock_irqsave(&object->lock);
 		if (page->hold_count == 0)
 			HAL_FATAL("VM object coherent read lost fault hold");
-		memcpy(bytes + done, (const uint8_t *)page->pmem.vaddr + in_page,
+		memcpy(bytes + done, (const uint8_t *)hal_pmem_to_kernel(page->pmem.paddr) + in_page,
 		    chunk);
 
 		/* Credits the prefetch that made this page resident. */
@@ -1614,7 +1616,7 @@ retry:
 
 read_page:
 	/* Reads the page's data, zero-filling past the end of file. */
-	memset((void *)page->pmem.vaddr, 0, PAGE_SIZE);
+	memset((void *)hal_pmem_to_kernel(page->pmem.paddr), 0, PAGE_SIZE);
 	length = (size_t)(fault_size - offset);
 	if (length > PAGE_SIZE)
 		length = PAGE_SIZE;
@@ -1648,7 +1650,7 @@ read_io_retry:
 			/* Transfers only into a page the file still describes. */
 			if (error == 0)
 				count = file_io_transfer(&io,
-				    (void *)page->pmem.vaddr, length);
+				    (void *)hal_pmem_to_kernel(page->pmem.paddr), length);
 			else
 				count = -error;
 			file_io_end(&io);
@@ -2947,7 +2949,7 @@ vm_object_content_prepare_delayed(
 
 			fresh[index] = 1;
 
-			memset(pages[index]->pmem.vaddr, 0, PAGE_SIZE);
+			memset(hal_pmem_to_kernel(pages[index]->pmem.paddr), 0, PAGE_SIZE);
 
 			wanted = (size_t)(object->logical_size - (off_t)current);
 			if (wanted > PAGE_SIZE)
@@ -2958,7 +2960,7 @@ vm_object_content_prepare_delayed(
 			 * may still abort.
 			 */
 			received = file_pread_internal(object->file,
-						       pages[index]->pmem.vaddr,
+						       hal_pmem_to_kernel(pages[index]->pmem.paddr),
 						       wanted,
 						       (off_t)current,
 						       FILE_IO_VM_OBJECT);
@@ -3320,8 +3322,8 @@ vm_object_prefetch_complete(
 		valid = fill->length - (size_t)index * PAGE_SIZE;
 		if (valid > PAGE_SIZE)
 			valid = PAGE_SIZE;
-		memset(page->pmem.vaddr, 0, PAGE_SIZE);
-		memcpy(page->pmem.vaddr, (const uint8_t *)bytes +
+		memset(hal_pmem_to_kernel(page->pmem.paddr), 0, PAGE_SIZE);
+		memcpy(hal_pmem_to_kernel(page->pmem.paddr), (const uint8_t *)bytes +
 		    (size_t)index * PAGE_SIZE, valid);
 		page->flags = 0;
 		page->content_generation = fill->content_generation;
@@ -3457,7 +3459,7 @@ int
 vm_commit_init(
 	void)
 {
-	struct hal_pmem_stats memory;
+	struct hal_memstat memory;
 	struct swap_backend *swap;
 	uint32_t swap_pages;
 	uint32_t swap_free;
@@ -3475,7 +3477,7 @@ vm_commit_init(
 	}
 
 	/* Counts the physical pages left after the system reserve. */
-	hal_pmem_get_stats(&memory);
+	hal_get_memstat(&memory);
 	physical_pages = memory.physical_free / VM_COMMIT_PAGE_SIZE;
 	if (physical_pages > VM_COMMIT_SYSTEM_RESERVE_PAGES)
 		physical_pages -= VM_COMMIT_SYSTEM_RESERVE_PAGES;
@@ -3837,7 +3839,7 @@ void
 vm_private_page_put(
 	struct vm_private_page *backing)
 {
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	uint32_t slot;
 	unsigned long irq;
 
@@ -3866,7 +3868,7 @@ vm_private_page_put(
 
 	/* Frees them and the metadata. */
 	if (memory.size != 0)
-		(void)hal_pmem_free(&memory);
+		(void)hal_pmem_free(&memory.paddr, memory.size);
 
 	if (slot != SWAP_SLOT_NONE && swap_system_backend() != NULL)
 		swap_free_slot(swap_system_backend(), slot);
@@ -4117,7 +4119,7 @@ vm_private_page_mark_dirty(
 int
 vm_private_page_pin(
 	struct vm_private_page *backing,
-	struct hal_pmem *memory)
+	struct kern_pmem *memory)
 {
 	unsigned long irq;
 
@@ -4189,16 +4191,12 @@ vm_private_page_in_owned(
 	struct vm_private_page *backing,
 	struct vm_page *accounting_page)
 {
-	const struct hal_pmem_request request = {
-		HAL_PMEM_PADDR_ANY, PAGE_SIZE, PAGE_SIZE,
-		HAL_PMEM_TYPE_RAM, 0
-	};
 
 	struct swap_backend *backend;
 	uint32_t slot;
 	unsigned long irq;
 	int error;
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 
 	/* Rejects a missing operand or a backing that is not owned and swapped. */
 	backend = swap_system_backend();
@@ -4223,14 +4221,14 @@ vm_private_page_in_owned(
 	spin_unlock_irqrestore(&backing->state_lock, irq);
 
 	/* Allocates a page, reclaiming once when memory is short, and reads it. */
-	if (hal_pmem_alloc(&request, &backing->pmem) == HAL_OK)
+	if (vm_private_page_alloc(&backing->pmem) == HAL_OK)
 		error = 0;
 	else
 		error = ENOMEM;
 
 	/* Reclaims once and tries again before giving up on memory. */
 	if (error != 0 && vm_reclaim_one(accounting_page) == 0) {
-		if (hal_pmem_alloc(&request, &backing->pmem) == HAL_OK)
+		if (vm_private_page_alloc(&backing->pmem) == HAL_OK)
 			error = 0;
 		else
 			error = ENOMEM;
@@ -4238,14 +4236,14 @@ vm_private_page_in_owned(
 
 	if (error == 0)
 		error = swap_read_page(backend, slot,
-		    (void *)backing->pmem.vaddr);
+		    (void *)hal_pmem_to_kernel(backing->pmem.paddr));
 
 	/* Returns the page rather than leaving a failed read behind. */
 	if (error != 0) {
 		if (backing->pmem.size != 0) {
 			memory = backing->pmem;
 			memset(&backing->pmem, 0, sizeof(backing->pmem));
-			(void)hal_pmem_free(&memory);
+			(void)hal_pmem_free(&memory.paddr, memory.size);
 		}
 
 		return error;
@@ -5554,23 +5552,34 @@ object_operation_end(
 }
 
 /* Allocates one page of physical memory. */
+/* Allocates one page-sized physical run for the VM layer. */
+int
+vm_private_page_alloc(
+	struct kern_pmem *memory)
+{
+	int error;
+
+	/* Records the size so the matching free can split correctly. */
+	error = hal_pmem_alloc(PAGE_SIZE, PAGE_SIZE, &memory->paddr);
+	if (error != HAL_OK)
+		return error;
+	memory->size = PAGE_SIZE;
+	return HAL_OK;
+}
+
 static int
 alloc_vm_page(
-	struct hal_pmem *memory)
+	struct kern_pmem *memory)
 {
-	const struct hal_pmem_request request = {
-		HAL_PMEM_PADDR_ANY, PAGE_SIZE, PAGE_SIZE,
-		HAL_PMEM_TYPE_RAM, 0
-	};
 	int error;
 
 	/* Asks the HAL for one page of ordinary memory. */
 	memset(memory, 0, sizeof(*memory));
 
 	/* Returns a short allocation rather than leaving it behind. */
-	error = hal_pmem_alloc(&request, memory);
+	error = vm_private_page_alloc(memory);
 	if (error != HAL_OK && memory->size != 0) {
-		if (hal_pmem_free(memory) != HAL_OK)
+		if (hal_pmem_free(&memory->paddr, memory->size) != HAL_OK)
 			HAL_FATAL("VM page allocation rollback failed");
 	}
 
@@ -5860,7 +5869,7 @@ write_page_data(
 		return error;
 
 	io.context.content_generation = page->write_dirty_generation;
-	count = file_io_transfer(&io, (void *)page->pmem.vaddr, length);
+	count = file_io_transfer(&io, (void *)hal_pmem_to_kernel(page->pmem.paddr), length);
 	file_io_end(&io);
 
 	if (count == (ssize_t)length)
@@ -6189,7 +6198,7 @@ vm_object_content_finish(
 				continue;
 
 			/* Copies the overlapping bytes into the page. */
-			memcpy((uint8_t *)page->pmem.vaddr +
+			memcpy((uint8_t *)hal_pmem_to_kernel(page->pmem.paddr) +
 			       (copy_start - page_start),
 			       (const uint8_t *)buffer +
 			       (copy_start - write_start),
@@ -6469,10 +6478,10 @@ vm_object_page_pin_copy(
 	 * Commit discards the orphan without ever putting it on writeback.
 	 */
 	if (write) {
-		memcpy((uint8_t *)page->pmem.vaddr + offset, buffer, length);
+		memcpy((uint8_t *)hal_pmem_to_kernel(page->pmem.paddr) + offset, buffer, length);
 		object_page_dirty_mark(page);
 	} else {
-		memcpy(buffer, (const uint8_t *)page->pmem.vaddr + offset, length);
+		memcpy(buffer, (const uint8_t *)hal_pmem_to_kernel(page->pmem.paddr) + offset, length);
 	}
 
 	spin_unlock_irqrestore(&object->lock, irq);
@@ -7094,7 +7103,7 @@ static struct vm_page_slab *
 object_slab_alloc(
 	int optional)
 {
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	struct vm_page_slab *slab;
 	struct vm_object_page *page;
 	size_t header;
@@ -7115,13 +7124,13 @@ object_slab_alloc(
 		return NULL;
 	}
 
-	if (memory.size != PAGE_SIZE || memory.vaddr == NULL)
+	if (memory.size != PAGE_SIZE || hal_pmem_to_kernel(memory.paddr) == NULL)
 		HAL_FATAL("unexpected VM descriptor slab allocation");
 
 	/*
 	 * Formats aligned descriptors without consuming the fixed kernel heap.
 	 */
-	slab = memory.vaddr;
+	slab = hal_pmem_to_kernel(memory.paddr);
 	memset(slab, 0, PAGE_SIZE);
 	slab->memory = memory;
 
@@ -7216,7 +7225,7 @@ object_descriptor_free(
 	struct vm_object_page *page)
 {
 	struct vm_page_slab *slab;
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	bool enabled;
 
 	/*
@@ -7258,7 +7267,7 @@ object_descriptor_free(
 
 	/* Releases physical metadata and its credits only outside the guard. */
 	if (memory.size != 0) {
-		if (hal_pmem_free(&memory) != HAL_OK)
+		if (hal_pmem_free(&memory.paddr, memory.size) != HAL_OK)
 			HAL_FATAL("VM descriptor slab retirement failed");
 		if (cache_memory_release != NULL)
 			cache_memory_release(CACHE_MEMORY_FILE_META, PAGE_SIZE);
@@ -7297,7 +7306,7 @@ alloc_object_page(
 		return NULL;
 	}
 
-	if (page->pmem.size != PAGE_SIZE || page->pmem.vaddr == NULL)
+	if (page->pmem.size != PAGE_SIZE || hal_pmem_to_kernel(page->pmem.paddr) == NULL)
 		HAL_FATAL("unexpected VM object frame allocation");
 
 	/*
@@ -7328,7 +7337,7 @@ release_object_page_storage(
 	object_prefetch_retire(page);
 
 	/* Returns data credits only after the physical frame has retired. */
-	if (hal_pmem_free(&page->pmem) != HAL_OK)
+	if (hal_pmem_free(&page->pmem.paddr, page->pmem.size) != HAL_OK)
 		HAL_FATAL("VM object frame retirement failed");
 
 	if (cache_memory_release != NULL)
@@ -7938,8 +7947,8 @@ object_cache_read_missing(
 		if (valid > PAGE_SIZE)
 			valid = PAGE_SIZE;
 		if (count >= (ssize_t)((size_t)index * PAGE_SIZE + valid)) {
-			memset(page->pmem.vaddr, 0, PAGE_SIZE);
-			memcpy(page->pmem.vaddr, (uint8_t *)scratch +
+			memset(hal_pmem_to_kernel(page->pmem.paddr), 0, PAGE_SIZE);
+			memcpy(hal_pmem_to_kernel(page->pmem.paddr), (uint8_t *)scratch +
 			    (size_t)index * PAGE_SIZE, valid);
 			page->flags = 0;
 			page->error = 0;
@@ -8105,7 +8114,7 @@ write_dirty_pages(
 			if (amount > PAGE_SIZE)
 				amount = PAGE_SIZE;
 
-			memcpy((char *)scratch + bytes, page->pmem.vaddr, amount);
+			memcpy((char *)scratch + bytes, hal_pmem_to_kernel(page->pmem.paddr), amount);
 
 			bytes += amount;
 
@@ -8616,7 +8625,7 @@ swap_out_backing_owned(
 	struct vm_private_page *backing)
 {
 	struct swap_backend *backend;
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	uint32_t slot;
 	unsigned long irq;
 	int slot_allocated;
@@ -8637,7 +8646,7 @@ swap_out_backing_owned(
 	if (error == 0) {
 		error = swap_write_page(backend,
 					slot,
-					(const void *)backing->pmem.vaddr);
+					(const void *)hal_pmem_to_kernel(backing->pmem.paddr));
 	}
 
 	/* A failure restores the PTEs and releases everything. */
@@ -8665,7 +8674,7 @@ swap_out_backing_owned(
 
 	/* PTE shootdown and swap I/O are complete before the state is published. */
 	memory = backing->pmem;
-	(void)hal_pmem_free(&memory);
+	(void)hal_pmem_free(&memory.paddr, memory.size);
 
 	/* Publishes the backing as swapped out rather than resident. */
 	vm_metadata_enter();
@@ -8713,7 +8722,7 @@ discard_file_backing_owned(
 {
 	struct vm_page *page;
 	struct vm_page *next;
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	unsigned long irq;
 	struct vm_page **link;
 	struct vmspace *vm;
@@ -8791,7 +8800,7 @@ discard_file_backing_owned(
 	vm_metadata_leave();
 
 	/* Frees the memory and releases the ownership this pass held. */
-	(void)hal_pmem_free(&memory);
+	(void)hal_pmem_free(&memory.paddr, memory.size);
 	vm_private_page_io_release(backing);
 	vm_private_page_put(backing);
 

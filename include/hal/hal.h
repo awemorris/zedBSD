@@ -23,7 +23,23 @@
 #include <hal/atomic.h>
 
 /*
- * Kernel C runtime
+ * HAL error code.
+ */
+enum hal_error {
+	HAL_OK = 0,
+	HAL_ERR_INVALID,
+	HAL_ERR_UNSUPPORTED,
+	HAL_ERR_BUSY,
+	HAL_ERR_NOMEM,
+	HAL_ERR_TIMEOUT,
+	HAL_ERR_STATE,
+	HAL_ERR_IO
+};
+
+/*
+ * HAL C runtime
+ *
+ * - Must be used only in HAL and early init phase of the kernel.
  */
 
 #define HAL_ASSERT(e)	((e) ? (void)0 : hal_assert(__FILE__, __LINE__, #e))
@@ -57,33 +73,6 @@ hal_memcpy(
 	const void *src,
 	size_t n);
 
-/* XXX: To be removed. Use kernel_alloc() and kernel_free(). */
-/*
- * The embedding kernel supplies the allocator used by the HAL.
- */
-void
-hal_set_allocator(
-	void *(*alloc)(size_t size),
-	void (*free)(void *p));
-
-void *
-hal_malloc(
-	size_t size);
-
-void
-hal_free(
-	void *ptr);
-
-/*
- * Fill a buffer from a platform cryptographic entropy source. Ports which
- * have no such source return false. Buffer contents are unspecified when the
- * function returns false.
- */
-bool
-hal_entropy_fill(
-	void *buffer,
-	size_t size);
-
 int
 hal_putchar(
 	int c);
@@ -108,6 +97,7 @@ hal_fatal(
 	const char *file,
 	int line,
 	const char *s);
+
 
 /*
  * SMP
@@ -182,6 +172,18 @@ hal_cpu_panic_all(void);
 void
 hal_cpu_idle(void);
 
+/*
+ * XXX: Rename to hal_cpu_halt().
+ * XXX: Is this same to hal_cpu_idle()??
+ *
+ * Halt until a next interrupt.
+ */
+void
+hal_halt(void);
+
+/*
+ * Utility to clear all CPU mask bits.
+ */
 static inline void
 hal_cpu_mask_zero(
 	struct hal_cpu_mask *mask)
@@ -248,18 +250,15 @@ hal_cpu_mask_test(
 
 #define HAL_IRQ_ACK_NONE	((hal_irq_ack_t)0)
 
+/*
+ * IRQ acknowledge number.
+ */
 typedef uintptr_t hal_irq_ack_t;
 
-typedef void (
-	*hal_irq_handler_t)(
-	int irq,
-	hal_irq_ack_t acknowledge,
-	void *argument);
-
-struct hal_irq_affinity {
-	struct hal_cpu_mask requested;
-	struct hal_cpu_mask effective;
-};
+/*
+ * IRQ handler.
+ */
+typedef void (*hal_irq_handler_t)(int irq, hal_irq_ack_t acknowledge, void *argument);
 
 /*
  * Disable IRQ interrupts. Returns true if currently enabled.
@@ -273,15 +272,22 @@ hal_irq_disable(void);
 void
 hal_irq_enable(void);
 
+/*
+ * Set IRQ affinity.
+ */
 int
 hal_irq_set_affinity(
 	int irq,
 	const struct hal_cpu_mask *requested);
 
+/*
+ * Get IRQ affinity.
+ */
 int
 hal_irq_get_affinity(
 	int irq,
-	struct hal_irq_affinity *result);
+	struct hal_cpu_mask *requested,
+	struct hal_cpu_mask *effective);
 
 /*
  * Set an IRQ mask.
@@ -298,30 +304,27 @@ hal_irq_unmask(
 	int irq_num);
 
 /*
- * Send EOI to the IRQ controller.
- */
-void
-hal_irq_send_eoi(
-	hal_irq_ack_t acknowledge);
-
-/*
- * Set an IRQ handler.
+ * Register a handler for a numbered IRQ.
  */
 int
-hal_irq_set_handler(
+hal_irq_register(
 	int irq_num,
 	hal_irq_handler_t func,
 	void *arg);
 
+/*
+ * Unregister a handler for a numberd IRQ.
+ */
 int
-hal_irq_service_wait(
+hal_irq_unregister(
 	int irq_num,
-	hal_irq_ack_t *acknowledge);
+	hal_irq_handler_t func,
+	void *arg);
 
 /*
- * Allocate one message-signalled logical IRQ.  source is a canonical bus
- * identity (initially "PCI SSSS:BB:DD.F").  Output values are published only
- * after the handler and architecture mapping are fully installed.
+ * Register a handler for a message-signalled logical IRQ.
+ *
+ * "source" is a canonical bus identity (initially "PCI SSSS:BB:DD.F").
  */
 int
 hal_irq_register_msi(
@@ -332,82 +335,123 @@ hal_irq_register_msi(
 	paddr_t *mapped_addr,
 	uint32_t *mapped_event);
 
-/* Release a message-signalled logical IRQ returned by register_msi. */
+/*
+ * Unregister a handler for a message-signalled logical IRQ.
+ */
 int
 hal_irq_unregister_msi(
 	int mapped_irq);
 
 /*
- * Interval Time
+ * Send EOI to the IRQ controller.
+ */
+void
+hal_irq_send_eoi(
+	hal_irq_ack_t acknowledge);
+
+
+/*
+ * RTC
  *
  * Do not consider timers other than local scheduling ticks.
  */
 
 #define HAL_TIMER_FREQUENCY	(100U)
 
-/* Read wall-clock time as whole seconds since the Unix epoch. */
+/*
+ * Read wall-clock time as whole seconds since the Unix epoch.
+ */
 bool
 hal_rtc_read_epoch_time(
 	uint64_t *unix_seconds);
 
 /*
- * Read a fixed-frequency monotonic counter.  Its epoch is unspecified and
- * only differences between samples are meaningful.  On false, neither output
- * is changed.  On true, the frequency is nonzero and stable for the boot, and
- * successful operations are linearizable: a later operation never returns a
- * counter below an earlier successful operation, including across CPUs.
+ * Read a fixed-frequency monotonic counter.
+ *
+ * Its epoch is unspecified and only differences between samples are
+ * meaningful.  On false, neither output is changed.  On true, the
+ * frequency is nonzero and stable for the boot, and successful
+ * operations are linearizable: a later operation never returns a
+ * counter below an earlier successful operation, including across
+ * CPUs.
  */
 bool
 hal_rtc_read_counter(
 	uint64_t *counter,
 	uint64_t *freq_hz);
 
-/*
- * System Call
- */
-
-#define HAL_SYSCALL_ARGS	(6)
-#define HAL_SIGNAL_NEST_MAX	(8)
 
 /*
- * Trap causes and access modes reported to the fixed kernel entry points.
+ * Physical RAM Allocation
  *
- * A cause is the architecture-independent kind of a trap, and the generic
- * kernel decides on it alone.  The raw vector and error code accompany it
- * for diagnostics only; they mean nothing outside the HAL that produced
- * them.  The mode is NONE unless the cause is a page fault.
+ *  - In some architectures such as x86, the physical RAM is divided
+ *    into some regions, for example, <640KB, <1MB, 15-16MB hole, and
+ *    above 16MB.
+ *  - HAL manages the RAM regions. hal_pmem_alloc() just allocates a
+ *    block, and it doesn't map the region to a virtual address.
  */
 
-struct hal_reg_set;
-
-#define HAL_TRAP_CAUSE_PAGE_FAULT	(0)
-#define HAL_TRAP_CAUSE_ILLEGAL_INSN	(1)
-#define HAL_TRAP_CAUSE_BREAKPOINT	(2)
-#define HAL_TRAP_CAUSE_ALIGNMENT	(3)
-#define HAL_TRAP_CAUSE_MACHINE_CHECK	(4)
-#define HAL_TRAP_CAUSE_ARITHMETIC	(5)
-#define HAL_TRAP_CAUSE_PROTECTION	(6)
-#define HAL_TRAP_CAUSE_OTHER		(7)
-
-#define HAL_TRAP_MODE_READ	(0)
-#define HAL_TRAP_MODE_WRITE	(1)
-#define HAL_TRAP_MODE_EXEC	(2)
-#define HAL_TRAP_MODE_NONE	(3)
-
-#define HAL_TRAP_RET_SUCCESS	(0)
-#define HAL_TRAP_RET_FAILED	(1)
+/*
+ * Get the total RAM size.
+ */
+size_t
+hal_pmem_get_total_size(void);
 
 /*
- * Memory
+ * Allocate a physical memory block.
+ */
+int
+hal_pmem_alloc(
+	size_t req_size,
+	size_t req_align,
+	hal_physaddr_t *block);
+
+/*
+ * Translate a physical RAM address to its kernel address.
  *
- * "Space" is an abstracted page table. In our design, kernels cannot
- * access to page tables directly.
+ * RAM is direct-mapped into the kernel half of the address space, so
+ * this is a pure address translation and never fails for managed RAM.
+ * Device memory is not direct-mapped; map it with hal_space_map().
+ * Returns NULL for an address outside managed RAM.
  */
+void *
+hal_pmem_to_kernel(
+	hal_physaddr_t paddr);
 
 /*
- * Address space handle.
+ * Allocate a physical memory block a device can reach.
+ *
+ * max_paddr is the highest physical address the device can address.
+ * boundary, when not zero, is a power-of-two block size the returned
+ * range must not cross, for engines whose transfer counter does not
+ * carry into the upper address bits.
  */
-typedef void *hal_space_t;
+int
+hal_pmem_alloc_limited(
+	size_t req_size,
+	size_t req_align,
+	hal_physaddr_t max_paddr,
+	size_t boundary,
+	hal_physaddr_t *block);
+
+/*
+ * Free a physical memory block. size must be the requested size of the
+ * matching allocation; a smaller size splits the block.
+ */
+int
+hal_pmem_free(
+	hal_physaddr_t *block,
+	size_t size);
+
+
+/*
+ * Space
+ *
+ *  - In our design, kernels cannot access to page tables directly.
+ *  - "Space" abstracts physical to virtual memory mapping.
+ *  - A space is for a user process memory space.
+ *  - There is the sole kernel space. (address where the MSB is set)
+ */
 
 /*
  * Shared system-address selector.  Every user space created by the HAL
@@ -418,19 +462,24 @@ typedef void *hal_space_t;
 #define HAL_SPACE_SYS	(NULL)
 
 /*
+ * Address space handle.
+ */
+typedef void *hal_space_t;
+
+/*
  * Page attributes.
  */
-#define HAL_SPACE_NONE	(0)
-#define HAL_SPACE_READ	(1)
-#define HAL_SPACE_WRITE	(2)
-#define HAL_SPACE_EXEC	(4)
-#define HAL_SPACE_NOCACHE	(8)
-#define HAL_SPACE_WRITETHRU	(16)
-#define HAL_SPACE_DEVICE	(32)
+#define HAL_SPACE_NONE			(0)
+#define HAL_SPACE_READ			(1)
+#define HAL_SPACE_WRITE			(2)
+#define HAL_SPACE_EXEC			(4)
+#define HAL_SPACE_NOCACHE		(8)
+#define HAL_SPACE_WRITETHRU		(16)
+#define HAL_SPACE_DEVICE		(32)
 
-#define HAL_SPACE_PAGE_PRESENT	0x01U
-#define HAL_SPACE_PAGE_ACCESSED	0x02U
-#define HAL_SPACE_PAGE_DIRTY	0x04U
+#define HAL_SPACE_PAGE_PRESENT		0x01U
+#define HAL_SPACE_PAGE_ACCESSED		0x02U
+#define HAL_SPACE_PAGE_DIRTY		0x04U
 
 /*
  * Create a user space containing the shared system mapping.
@@ -466,6 +515,37 @@ hal_space_map(
 	uint32_t attr);
 
 /*
+ * Unmap an address and complete any required TLB synchronization.
+ */
+int
+hal_space_unmap(
+	hal_space_t space,
+	void *vaddr,
+	size_t size);
+
+/*
+ * Map a device physical range into kernel space.
+ *
+ * RAM is direct-mapped and needs no call; device memory is not. The
+ * HAL owns the kernel window used for device mappings, so the caller
+ * receives the address the HAL chose. attr is the OR of HAL_SPACE_*.
+ */
+int
+hal_space_map_device(
+	hal_physaddr_t paddr,
+	size_t size,
+	uint32_t attr,
+	void **vaddr);
+
+/*
+ * Remove a mapping made by hal_space_map_device().
+ */
+int
+hal_space_unmap_device(
+	void *vaddr,
+	size_t size);
+
+/*
  * Change protection and complete any required TLB synchronization.
  */
 int
@@ -476,6 +556,9 @@ hal_space_prot(
 	uint32_t attr);
 
 /*
+ * XXX: Add a single-line explanation here. Should be renamed??
+ * XXX: Should be renamed to  hal_space_prot_with_query_flags() ??
+ *
  * Atomically publish a protection change, complete every required remote TLB
  * invalidation, and then report the access/dirty state accumulated by the old
  * translations.  flags is the OR of HAL_PAGE_* for the complete range.  In
@@ -492,20 +575,18 @@ hal_space_prot_query(
 	uint32_t *flags);
 
 /*
- * Unmap an address and complete any required TLB synchronization.
+ * XXX: Add a single-line explanation here.
+ * XXX: Should be renamed to  hal_space_query_flags() ??
  */
-int
-hal_space_unmap(
-	hal_space_t space,
-	void *vaddr,
-	size_t size);
-
 int
 hal_space_query(
 	hal_space_t space,
 	void *vaddr,
 	uint32_t *flags);
 
+/*
+ * XXX: Add a single-line explanation here. Should be renamed??
+ */
 int
 hal_space_clear_flags(
 	hal_space_t space,
@@ -513,7 +594,7 @@ hal_space_clear_flags(
 	uint32_t flags);
 
 /*
- * Flush TBLs.
+ * Flush TLBs.
  *
  * - If the kernel space is specified by space == NULL, do TLB
  *   shootdown and flush corresponding TLBs on all processors.
@@ -525,6 +606,9 @@ void
 hal_space_flush_tlb(
 	hal_space_t space);
 
+/*
+ * Flush TLBs only for the spcified range.
+ */
 void
 hal_space_flush_tlb_range(
 	hal_space_t space,
@@ -532,119 +616,22 @@ hal_space_flush_tlb_range(
 	size_t size);
 
 /*
- * Get the page size. (level > 1 means a large page size.)
+ * Get the page size.
+ *
+ *  - level > 1 means a large page size.
  */
 size_t
 hal_space_get_page_size(
 	int level);
 
+/*
+ * Get the rage of user space virtual address.
+ */
 void
 hal_space_get_user_range(
 	uintptr_t *minimum,
 	uintptr_t *limit);
 
-/*
- * Physical Memory Allocation (Page Unit)
- */
-
-enum hal_error {
-	HAL_OK = 0,
-	HAL_ERR_INVALID,
-	HAL_ERR_UNSUPPORTED,
-	HAL_ERR_BUSY,
-	HAL_ERR_NOMEM,
-	HAL_ERR_TIMEOUT,
-	HAL_ERR_STATE,
-	HAL_ERR_IO
-};
-
-#define HAL_PMEM_PADDR_ANY	((hal_physaddr_t) - 1)
-
-enum hal_pmem_type {
-	HAL_PMEM_TYPE_RAM = 1,
-	HAL_PMEM_TYPE_MMIO,
-	HAL_PMEM_TYPE_VRAM
-};
-
-/*
- * Flags.
- */
-#define HAL_PMEM_ATTR_NOCACHE	(1)
-#define HAL_PMEM_ATTR_WRITETHRU	(2)
-
-struct hal_pmem_request {
-	hal_physaddr_t paddr;
-	size_t size;
-	size_t alignment;
-	uint32_t type;
-	uint32_t attr;
-};
-
-struct hal_pmem {
-	void *vaddr;
-	hal_physaddr_t paddr;
-	size_t size;
-	uint32_t type;
-	uint32_t attr;
-};
-
-int
-hal_pmem_alloc(
-	const struct hal_pmem_request *request,
-	struct hal_pmem *desc);
-
-/* RAM-only constraints: inclusive byte limits and an optional power-of-two
- * segment boundary. Existing request fields retain their initialization ABI.
- * A rollback failure returns HAL_ERR_STATE with the retained descriptor. */
-int
-hal_pmem_alloc_range(
-	const struct hal_pmem_request *request,
-	uint64_t minimum,
-	uint64_t maximum,
-	uint64_t boundary,
-	struct hal_pmem *desc);
-
-/*
- * Free a physical memory block.
- */
-int
-hal_pmem_free(
-	struct hal_pmem *desc);
-
-/*
- * Get the total RAM size.
- */
-size_t
-hal_pmem_get_total_size(void);
-
-struct hal_pmem_stats {
-	size_t physical_total;
-	size_t physical_reserved;
-	size_t physical_allocated;
-	size_t physical_free;
-	size_t task_stack_bytes;
-	uint32_t task_count;
-	uint32_t space_count;
-	uint32_t page_table_count;
-	/* Optional boot-range observations; zero validity means unavailable. */
-	uint32_t boot_ranges_valid;
-	uint32_t boot_range_count;
-	uint64_t boot_usable_bytes;
-	uint64_t boot_highest_end;
-	uint64_t boot_usable_highest_end;
-	uint64_t direct_mapped_bytes;
-	uint64_t allocator_initial_bytes;
-	uint64_t boot_reclaim_bytes;
-	uint64_t allocator_metadata_bytes;
-	uint64_t allocator_scan_words;
-	uint64_t allocator_max_extent_scan_words;
-	uint64_t allocator_max_irqoff_cycles;
-	uint32_t boot_memory_source;
-};
-
-void
-hal_pmem_get_stats(
-	struct hal_pmem_stats *stats);
 
 /*
  * Task
@@ -661,10 +648,13 @@ hal_pmem_get_stats(
 typedef void *hal_task_t;
 
 /*
- * Wrap the CPU context which entered kernel_entry() as the initial task.
+ * Wrap the calling CPU's current context as that CPU's initial task.
+ * Returns the new task, or NULL when the task record cannot be
+ * allocated.  Every CPU calls this once, the boot CPU from the kernel
+ * and each secondary CPU from its own HAL bring-up.
  */
-void
-hal_task_init(void);
+hal_task_t
+hal_task_create_for_init_context(void);
 
 /*
  * Create a task.
@@ -721,14 +711,17 @@ hal_task_exec_validate(
 	uintptr_t user_stack_pointer);
 
 /*
- * XXX: Rename to hal_task_get_user_stack()
+ * Return the active return-to-user stack pointer.
  */
 uintptr_t
-hal_task_user_stack(void);
+hal_task_get_user_stack(void);
 
-/* XXX: Rename to hal_task_get_user_context(). Remove struct and embed into parameters. */
+/*
+ * Read the active return-to-user program counter, stack pointer and
+ * return value.
+ */
 int
-hal_task_user_context(
+hal_task_get_user_context(
 	uintptr_t *pc,
 	uintptr_t *stack_pointer,
 	intptr_t *return_value);
@@ -796,6 +789,7 @@ hal_task_transfer(
 	hal_task_t task,
 	hal_cpu_id_t target_cpu);
 
+
 /*
  * Synchronization
  */
@@ -851,11 +845,6 @@ hal_sync_instruction_stream(
 	void *addr,
 	size_t size);
 
-/*
- * Halt until a next interrupt.
- */
-void
-hal_halt(void);
 
 /*
  * I/O
@@ -924,52 +913,10 @@ hal_mmio_write64(
 	volatile void *addr,
 	uint64_t value);
 
+
 /*
  * Console
  */
-
-/* XXX: Remove. Use hal_cons_get_size(). */
-#define HAL_CONS_COLUMNS		80U
-#define HAL_CONS_ROWS			25U
-
-/* XXX: Rename. HAL_CONS_ATTRIB_NORMAL */
-#define HAL_CONS_NORMAL_ATTRIBUTE	0xe1U
-
-#define HAL_KEY_SYMBOL_SIZE		16U
-
-#define HAL_KEY_EVENT_PRESS		0x00000001U
-#define HAL_KEY_EVENT_RELEASE		0x00000002U
-#define HAL_KEY_EVENT_REPEAT		0x00000004U
-#define HAL_KEY_EVENT_RESYNC		0x00000008U
-#define HAL_KEY_EVENT_SNAPSHOT		0x00000010U
-#define HAL_KEY_EVENT_RESYNC_END	0x00000020U
-#define HAL_KEY_EVENT_LOCK_CAPS		0x00000040U
-#define HAL_KEY_EVENT_LOCK_KANA		0x00000080U
-
-/* XXX: Remove. Always support and emulate, even if they are stubs. */
-#define HAL_CONS_INPUT_TEXT		0x00000001U
-#define HAL_CONS_INPUT_RELEASE		0x00000002U
-#define HAL_CONS_INPUT_REPEAT		0x00000004U
-
-/* XXX: Remove. Embed the members into the function parameters. */
-/*
- * A keysymbol is stable lowercase ASCII, at most 15 bytes, and NUL terminated.
- * Exactly one of PRESS, RELEASE, or REPEAT describes a normal transition.
- * Character-only consoles may emit a one-byte symbol with PRESS and need not
- * synthesize release events.  RESYNC begins an internal authoritative-state
- * stream, PRESS|SNAPSHOT describes held state without input, and RESYNC_END
- * closes it.  LOCK_* is valid only on RESYNC.
- */
-struct hal_key_event {
-	char symbol[HAL_KEY_SYMBOL_SIZE];
-	uint32_t flags;
-};
-
-/*
- * Reset the HAL console.
- */
-void
-hal_cons_reset(void);
 
 /*
  * Put a character on the HAL console.
@@ -978,113 +925,6 @@ void
 hal_cons_putc(
 	int c);
 
-/*
- * Clear the console.
- */
-void
-hal_cons_clear(void);
-
-/*
- * XXX: Add.
- * Get the screen size.
- */
-void hal_cons_get_size(
-	int *cols,
-	int *rows);
-
-/*
- * Move cursor.
- */
-void
-hal_cons_move_cursor(
-	int line,
-	int col);
-
-/*
- * Get a character on the kernel console.
- */
-int
-hal_cons_getc(void);
-
-/* XXX: Add the parameters, row, column, and attrib. */
-void
-hal_cons_write(
-	const char *utf8);
-
-/* XXX: Remove. */
-void
-hal_cons_write_n(
-	const char *utf8,
-	unsigned length);
-
-/* XXX: Remove. */
-void
-hal_cons_write_at(
-	unsigned row,
-	unsigned column,
-	const char *utf8);
-
-/* XXX: Remove. Use hal_cons_write_at(). */
-int
-hal_cons_write_at_attr(
-	unsigned row,
-	unsigned column,
-	const char *utf8,
-	uint8_t attribute);
-
-/* XXX: Remove. Use hal_cons_write(). */
-void
-hal_cons_clear_row(
-	unsigned row);
-
-/* XXX: Remove. Use hal_cons_write(). */
-void
-hal_cons_clear_to_eol(void);
-
-/* XXX: Remove. Use hal_cons_write(). */
-int
-hal_cons_clear_to_eol_at(
-	unsigned row,
-	unsigned column);
-
-/*
- * Show or hide the cursor.
- */
-void
-hal_cons_show_cursor(
-	int visible);
-
-/*
- * Set the cursor position.
- */
-int
-hal_cons_set_cursor(
-	unsigned row,
-	unsigned column);
-
-void
-hal_cons_save_state(
-	struct hal_cons_state *state);
-
-/*
- * Use this after hal_cons_write() to update the cursor position.
- */
-void
-hal_cons_update_cursor(void);
-
-/*
- * Use this to wait for a keyboard event. Only for event mode.
- */
-int
-hal_cons_read_event(
-	struct hal_key_event *event);
-
-/*
- * Use this to check for a keyboard event. Only for event mode.
- */
-int
-hal_cons_poll_event(
-	struct hal_key_event *event);
 
 /*
  * Misc
@@ -1117,9 +957,105 @@ hal_poweroff(void);
 void
 hal_panic(void);
 
+
+/*
+ * Fill a buffer from a platform cryptographic entropy source. Ports which
+ * have no such source return false. Buffer contents are unspecified when the
+ * function returns false.
+ */
+bool
+hal_entropy_fill(
+	void *buffer,
+	size_t size);
+
+
+/*
+ * Memory Usage 
+ */
+
+struct hal_memstat {
+	size_t physical_total;
+	size_t physical_reserved;
+	size_t physical_allocated;
+	size_t physical_free;
+
+	size_t task_stack_bytes;
+	uint32_t task_count;
+
+	uint32_t space_count;
+	uint32_t page_table_count;
+
+	/* Optional boot-range observations. Zero validity means unavailable. */
+	uint32_t boot_ranges_valid;
+	uint32_t boot_range_count;
+	uint64_t boot_usable_bytes;
+	uint64_t boot_highest_end;
+	uint64_t boot_usable_highest_end;
+	uint64_t boot_reclaim_bytes;
+	uint32_t boot_memory_source;
+
+	uint64_t direct_mapped_bytes;
+
+	uint64_t allocator_initial_bytes;
+	uint64_t allocator_metadata_bytes;
+	uint64_t allocator_scan_words;
+	uint64_t allocator_max_extent_scan_words;
+	uint64_t allocator_max_irqoff_cycles;
+};
+
+/*
+ * Get the memory usage statistics.
+ */
+void
+hal_get_memstat(
+	struct hal_memstat *stat);
+
+
 /*
  * Kernel-side Entrypoints
  */
+
+/*
+ * Syscall arguments.
+ */
+#define HAL_SYSCALL_ARGS		(6)
+
+/*
+ * Signal nest.
+ */
+#define HAL_SIGNAL_NEST_MAX		(8)
+
+/*
+ * Trap cause.
+ */
+enum hal_trap_cause {
+	HAL_TRAP_CAUSE_PAGE_FAULT,
+	HAL_TRAP_CAUSE_ILLEGAL_INSN,
+	HAL_TRAP_CAUSE_BREAKPOINT,
+	HAL_TRAP_CAUSE_ALIGNMENT,
+	HAL_TRAP_CAUSE_MACHINE_CHECK,
+	HAL_TRAP_CAUSE_ARITHMETIC,
+	HAL_TRAP_CAUSE_PROTECTION,
+	HAL_TRAP_CAUSE_OTHER
+};
+
+/*
+ * Trap mode.
+ */
+enum hal_trap_mode {
+	HAL_TRAP_MODE_READ,
+	HAL_TRAP_MODE_WRITE,
+	HAL_TRAP_MODE_EXEC,
+	HAL_TRAP_MODE_NONE
+};
+
+/*
+ * Trap return.
+ */
+enum hal_trap_ret {
+	HAL_TRAP_RET_SUCCESS,
+	HAL_TRAP_RET_FAILED
+};
 
 /*
  * Entrypoint for the primary CPU.
@@ -1137,20 +1073,24 @@ kernel_secondary_entry(
 
 /*
  * Yield the current task while keeping it runnable.
+ *
+ * - This function must not be called from the kernel.
  */
 void
 kernel_yield_task(void);
 
 /*
- * Wait/notify protocol used by blocking HAL services.  A notification that
- * arrives immediately before kernel_wait_task() is retained, so the wait
- * returns without sleeping.
+ * Do "wait" behavior of the wait/notify protocol.
+ *
+ * - This function must not be called from the kernel.
  */
 void
 kernel_wait_task(void);
 
 /*
- * Make a waiting task runnable.  Safe to call from a real-time ISR.
+ * Do "notify" behavior of the wait/notify protocol for other tasks.
+ *
+ * - This function must not be called from the kernel.
  */
 void
 kernel_notify_task(
@@ -1173,10 +1113,12 @@ kernel_cpu_notify_handler(
 	hal_irq_ack_t acknowledge);
 
 /*
- * System call entry.  The HAL installs the active return-to-user
- * frame and calls this with local IRQs masked.  The generic kernel
- * owns any interruptible syscall window and returns with local IRQs
- * masked so the HAL can commit the saved frame atomically.
+ * System call entry.
+ *
+ * The HAL installs the active return-to-user frame and calls this
+ * with local IRQs masked.  The generic kernel owns any interruptible
+ * syscall window and returns with local IRQs masked so the HAL can
+ * commit the saved frame atomically.
  */
 intptr_t
 kernel_syscall_handler(
@@ -1184,20 +1126,24 @@ kernel_syscall_handler(
 	const uintptr_t args[HAL_SYSCALL_ARGS]);
 
 /*
- * User fault entry.  A user frame is active and local IRQs are masked
- * on entry and normal return.  The generic kernel owns fault
- * accounting and any interruptible fault-resolution window.
+ * User fault entry.
+ *
+ * A user frame is active and local IRQs are masked on entry and
+ * normal return.  The generic kernel owns fault accounting and any
+ * interruptible fault-resolution window.
  */
 int
 kernel_user_fault_handler(
-	int cause,
-	int mode,
+	enum hal_trap_cause cause,
+	enum hal_trap_mode mode,
 	uintptr_t pc,
 	uintptr_t address,
 	uintptr_t vector,
 	uintptr_t error_code);
 
 /*
+ * System fault entry.
+ *
  * Supervisor fault entry.  No user frame is published and the HAL
  * keeps its own saved frame.  SUCCESS resumes the interrupted kernel
  * code. FAILED leaves the register diagnostics and the stop to the
@@ -1205,33 +1151,32 @@ kernel_user_fault_handler(
  */
 int
 kernel_sys_fault_handler(
-	int cause,
-	int mode,
+	enum hal_trap_cause cause,
+	enum hal_trap_mode mode,
 	uintptr_t pc,
 	uintptr_t address,
 	uintptr_t vector,
 	uintptr_t error_code);
 
 /*
- * XXX: Please exlain simply.
- * Final return-to-user callback.  For asynchronous interrupts, the
- * HAL has quiesced the source and either completed its
- * acknowledgement or transferred acknowledgement ownership under the
- * IRQ-service contract.  A user frame is active and local IRQs are
- * masked on entry and normal return.  The generic kernel may enable
- * IRQs while applying stop/exit/signal policy.  The HAL detaches the
- * frame only after this callback returns.
+ * Called once on the way back to user mode, after a system call, a
+ * fault or an interrupt has been handled.
+ *
+ * This is the kernel's last chance to act on the returning task, so it
+ * applies pending signals, stop requests and exit here. The user frame
+ * is still attached and may be changed. Local IRQs are masked on entry
+ * and must be masked again on return, but the kernel may enable them
+ * while it works. Any interrupt source has already been quiesced and
+ * acknowledged by the HAL.
  */
 void
 kernel_user_return_handler(void);
 
-/* XXX: Added. */
 /*
  * Allocator. Called only after the invocation of kernel_entry().
  */
 void *kernel_alloc(size_t size);
 
-/* XXX: Added. */
 /*
  * Deallocator.
  */

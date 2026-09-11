@@ -26,6 +26,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <hal/hal.h>
+#include "../platform/pcat/graphics/text.h"
 #include <string.h>
 
 #define CONSOLE_WRITE_MAX 512U
@@ -42,7 +43,7 @@ struct console_dispatch_event {
 };
 
 struct console_logical_key {
-	char symbol[HAL_KEY_SYMBOL_SIZE];
+	char symbol[KERN_KEY_SYMBOL_SIZE];
 	uint16_t key;
 };
 
@@ -60,7 +61,6 @@ static struct console_source_state console_sources[CONSOLE_INPUT_SOURCES];
 static struct spinlock input_lock;
 static struct wait_queue dispatch_waitq;
 #ifndef ZEDBSD_INPUT_OWNERSHIP_TEST
-/* Registration owns the HAL keyboard producer and its TTY subscription. */
 static struct input_device *keyboard_input;
 static struct input_subscription console_subscription;
 #endif
@@ -84,11 +84,13 @@ static struct console_open *console_open_state(struct file *file);
 static unsigned console_file_vt(struct file *file);
 static int console_open_file(struct file *file);
 static int console_close_file(struct file *file);
+#define CONSOLE_BLANK_MAX	256U
+
+static void console_clear_span(unsigned row, unsigned column, unsigned count);
 static int console_capability_add(struct input_capability *capabilities, size_t *count, uint16_t code);
-static int console_capabilities(const struct hal_cons_input_info *hal_info, struct input_capability *capabilities, size_t *count);
+static int console_capabilities(struct input_capability *capabilities, size_t *count);
 static void console_deliver(uint32_t translated);
 static void console_dispatch_worker(void *argument);
-static void console_input_worker(void *argument);
 static ssize_t console_read(struct file *file, void *buffer, size_t size);
 static ssize_t console_write(struct file *file, const void *buffer, size_t size);
 static int console_write_at(uintptr_t argument);
@@ -192,45 +194,53 @@ console_capability_add(
 	return 0;
 }
 
+/*
+ * Clears a span of one row by writing spaces. The console interface has
+ * no separate clear operation.
+ */
+static void
+console_clear_span(
+	unsigned row,
+	unsigned column,
+	unsigned count)
+{
+	char blanks[CONSOLE_BLANK_MAX + 1U];
+	unsigned index;
+
+	/* Bounds the span to one write. */
+	if (count > CONSOLE_BLANK_MAX)
+		count = CONSOLE_BLANK_MAX;
+
+	/* Fills the span with spaces. */
+	for (index = 0; index < count; index++)
+		blanks[index] = ' ';
+	blanks[count] = '\0';
+	drv_pcat_text_write(row, column, DRV_PCAT_TEXT_ATTRIB_NORMAL, blanks);
+}
+
 /* Reports everything those sources can report together. */
 static int
 console_capabilities(
-	const struct hal_cons_input_info *hal_info,
 	struct input_capability *capabilities,
 	size_t *count)
 {
 	int error_local;
-	int error_local1;
 	unsigned character;
-	size_t index;
 
 	*count = 1;
 	capabilities[0].type = EV_SYN;
 	capabilities[0].code = SYN_REPORT;
 
-	/* Handles the hal info condition. */
-	if ((hal_info->flags & HAL_CONS_INPUT_TEXT) != 0) {
-		/* Process each element required by the operation. */
-		for (character = 1; character < 0x80U; character++) {
-			char symbol[2] = {(char)character, '\0'};
+	/* Every console reports the full ASCII text set. */
+	for (character = 1; character < 0x80U; character++) {
+		char symbol[2] = {(char)character, '\0'};
 
-			/* Checks the operation status. */
-			error_local = console_capability_add(
-				capabilities, count,
-				drv_input_key_from_symbol(symbol));
-			if (error_local != 0)
-				return error_local;
-		}
-	}
-
-	/* Process each remaining element. */
-	for (index = 0; index < hal_info->symbol_count; index++) {
 		/* Checks the operation status. */
-		error_local1 = console_capability_add(
+		error_local = console_capability_add(
 			capabilities, count,
-			drv_input_key_from_symbol(hal_info->symbols[index]));
-		if (error_local1 != 0)
-			return error_local1;
+			drv_input_key_from_symbol(symbol));
+		if (error_local != 0)
+			return error_local;
 	}
 
 	/* Succeeded. */
@@ -381,10 +391,10 @@ console_input_subscriber(
 	const struct input_report *report)
 {
 	const struct input_report_event *item_local;
-	struct hal_key_event key_event_local;
+	struct kern_key_event key_event_local;
 	uint32_t translated_local;
 	const struct input_report_event *item_local1;
-	struct hal_key_event key_event_local2;
+	struct kern_key_event key_event_local2;
 	uint32_t translated_local3;
 	uint8_t caps, kana;
 	uint32_t modifiers;
@@ -439,7 +449,7 @@ console_input_subscriber(
 				memcpy(key_event_local.symbol,
 				       item_local->symbol,
 				       sizeof(key_event_local.symbol));
-				key_event_local.flags = HAL_KEY_EVENT_PRESS;
+				key_event_local.flags = KERN_KEY_EVENT_PRESS;
 				caps = source->keymap.caps_lock;
 				kana = source->keymap.kana_lock;
 
@@ -676,12 +686,10 @@ console_deliver(
 	if ((translated & INPUT_KEY_RELEASE) != 0U)
 		return;
 
-	/* The subscriber worker calls this outside the producer lock. */
 	tty_console_input_event(translated);
 	poll_notify();
 }
 
-/* Delivers queued events outside the producer's context. */
 static void
 console_dispatch_worker(
 	void *argument)
@@ -709,21 +717,11 @@ console_dispatch_worker(
 	}
 }
 
-/* Takes input from the sources and queues it. */
-static void
-console_input_worker(
-	void *argument)
-{
-	struct hal_key_event event;
-
-	(void)argument;
-	/* Continue until the operation reaches a terminal state. */
-	for (;;) {
-		/* Handles the hal cons read event condition. */
-		if (hal_cons_read_event(&event))
-			drv_input_device_emit_key_event(keyboard_input, &event);
-	}
-}
+/*
+ * Keyboard input arrives through the evdev subscription that
+ * console_report() already services, so there is no polling worker
+ * and no console-owned keyboard device any more.
+ */
 
 
 /* Reads characters through the selected TTY discipline. */
@@ -759,7 +757,7 @@ console_write(
 	/* Checks the operation result. */
 	if (result < 0)
 		return result;
-	hal_cons_update_cursor();
+	drv_pcat_text_update_cursor();
 
 	/* Returns the computed result. */
 	return result;
@@ -773,15 +771,19 @@ console_write_at(
 	int function_result;
 	struct console_write_at request;
 	char text[CONSOLE_WRITE_MAX + 1U];
+	unsigned columns;
+	unsigned rows;
 	int error = copyin(argument, &request, sizeof(request));
 
 	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 
+	drv_pcat_text_get_size(&columns, &rows);
+
 	/* Handles the request condition. */
-	if (request.row >= HAL_CONS_ROWS ||
-	    request.column >= HAL_CONS_COLUMNS ||
+	if (request.row >= rows ||
+	    request.column >= columns ||
 	    request.length > CONSOLE_WRITE_MAX) {
 		/* Failed. */
 		return EINVAL;
@@ -794,9 +796,9 @@ console_write_at(
 	text[request.length] = '\0';
 
 	/* Computes the function result. */
-	function_result = hal_cons_write_n_at(request.row, request.column, text,
-					      request.length,
-					      (uint8_t)request.attribute) < 0
+	drv_pcat_text_write(request.row, request.column,
+		       (uint8_t)request.attribute, text);
+	function_result = 0 != 0
 				  ? EIO
 				  : 0;
 
@@ -811,15 +813,24 @@ console_ioctl(
 	unsigned long request,
 	uintptr_t argument)
 {
-	const struct console_size size = {HAL_CONS_ROWS, HAL_CONS_COLUMNS};
+	struct console_size size;
 	int function_result;
 	struct console_cursor cursor_local;
 	struct console_cursor cursor_local1;
 	struct console_cursor cursor_local2;
 	struct console_row row;
 	struct console_position position;
-	struct hal_cons_state state;
+	unsigned cursor_row;
+	unsigned cursor_column;
+	int cursor_shown;
+	unsigned columns;
+	unsigned rows;
 	int error;
+
+	/* Every bound below comes from the live console geometry. */
+	drv_pcat_text_get_size(&columns, &rows);
+	size.rows = rows;
+	size.columns = columns;
 
 	/* Dispatch the selected operation case. */
 	switch (request) {
@@ -831,7 +842,7 @@ console_ioctl(
 		/* Returns the computed result. */
 		return function_result;
 	case ZEDBSD_CONSOLE_CLEAR:
-		hal_cons_clear();
+		drv_pcat_text_clear();
 
 		/* Succeeded. */
 		return 0;
@@ -843,9 +854,9 @@ console_ioctl(
 			return error;
 
 		/* Handles the row condition. */
-		if (row.row >= HAL_CONS_ROWS)
+		if (row.row >= rows)
 			return EINVAL;
-		hal_cons_clear_row(row.row);
+		console_clear_span(row.row, 0U, columns);
 
 		/* Succeeded. */
 		return 0;
@@ -857,19 +868,20 @@ console_ioctl(
 			return error;
 
 		/* Computes the function result. */
-		function_result =
-			hal_cons_clear_to_eol_at(position.row, position.column)
-				? 0
-				: EINVAL;
+		if (position.row >= rows || position.column >= columns)
+			return EINVAL;
+		console_clear_span(position.row, position.column,
+				   columns - position.column);
+		function_result = 0;
 
 		/* Returns the computed result. */
 		return function_result;
 	case ZEDBSD_CONSOLE_GET_CURSOR:
 
-		hal_cons_save_state(&state);
-		cursor_local.row = state.row;
-		cursor_local.column = state.column;
-		cursor_local.visible = state.cursor_visible != 0;
+		drv_pcat_text_get_cursor(&cursor_row, &cursor_column, &cursor_shown);
+		cursor_local.row = cursor_row;
+		cursor_local.column = cursor_column;
+		cursor_local.visible = cursor_shown != 0;
 
 		/* Obtains the copyout result. */
 		function_result =
@@ -885,7 +897,7 @@ console_ioctl(
 			return error;
 
 		/* Computes the function result. */
-		function_result = hal_cons_set_cursor(cursor_local1.row,
+		function_result = drv_pcat_text_set_cursor(cursor_local1.row,
 						      cursor_local1.column)
 					  ? 0
 					  : EINVAL;
@@ -898,7 +910,7 @@ console_ioctl(
 		error = copyin(argument, &cursor_local2, sizeof(cursor_local2));
 		if (error != 0)
 			return error;
-		hal_cons_show_cursor(cursor_local2.visible != 0);
+		drv_pcat_text_show_cursor(cursor_local2.visible != 0);
 
 		/* Succeeded. */
 		return 0;
@@ -970,7 +982,7 @@ vt_write(
 
 	/* Checks the operation result. */
 	if (result >= 0)
-		hal_cons_update_cursor();
+		drv_pcat_text_update_cursor();
 
 	/* Returns the computed result. */
 	return result;
@@ -1035,32 +1047,19 @@ drv_console_device_register(
 {
 	unsigned i_index_for;
 	struct input_capability capabilities[CONSOLE_KEY_CAPABILITIES];
-	struct hal_cons_input_info hal_info;
 	struct input_device_info keyboard_info;
-	struct thread *producer = NULL, *dispatcher = NULL;
+	struct thread *dispatcher = NULL;
 	size_t capability_count;
 	int error;
 
 	/*
-	 * XXX: hal_cons_get_input_info() was removed.
-	 * All HAL must emulate all capabilities even if they are stubs.
+	 * Every HAL console now supports text, release and repeat events,
+	 * emulating whatever the board cannot report, so there is no
+	 * capability declaration left to validate.
 	 */
 
-	memset(&hal_info, 0, sizeof(hal_info));
-	hal_cons_get_input_info(&hal_info);
-
-	/* Handles the symbols availability. */
-	if ((hal_info.flags & ~(HAL_CONS_INPUT_TEXT | HAL_CONS_INPUT_RELEASE |
-				HAL_CONS_INPUT_REPEAT)) != 0 ||
-	    ((hal_info.flags & HAL_CONS_INPUT_REPEAT) != 0 &&
-	     (hal_info.flags & HAL_CONS_INPUT_RELEASE) == 0) ||
-	    (hal_info.symbol_count != 0 && hal_info.symbols == NULL)) {
-		/* Failed. */
-		return EINVAL;
-	}
-
 	/* Checks the operation status. */
-	error = console_capabilities(&hal_info, capabilities, &capability_count);
+	error = console_capabilities(capabilities, &capability_count);
 	if (error != 0)
 		return error;
 	memset(&keyboard_info, 0, sizeof(keyboard_info));
@@ -1071,13 +1070,8 @@ drv_console_device_register(
 	keyboard_info.capabilities = capabilities;
 	keyboard_info.capability_count = capability_count;
 
-	/* Handles the hal info condition. */
-	if ((hal_info.flags & HAL_CONS_INPUT_RELEASE) == 0)
-		keyboard_info.flags |= INPUT_DEVICE_KEY_MOMENTARY;
-
-	/* Handles the hal info condition. */
-	if ((hal_info.flags & HAL_CONS_INPUT_REPEAT) != 0)
-		keyboard_info.flags |= INPUT_DEVICE_KEY_REPEAT;
+	/* Release events are always available, so keys are not momentary. */
+	keyboard_info.flags |= INPUT_DEVICE_KEY_REPEAT;
 
 	/* Starts every queue, lock and keymap out empty. */
 	spin_init(&input_lock, LOCK_RANK_DEVICE, "console input");
@@ -1089,12 +1083,6 @@ drv_console_device_register(
 
 	/* Checks the operation status. */
 	error = tty_console_init();
-	if (error != 0)
-		return error;
-
-	/* Checks the operation status. */
-	error = kthread_create(console_input_worker, NULL,
-			       SCHED_PRIORITY_DEFAULT, &producer);
 	if (error != 0)
 		return error;
 
@@ -1138,7 +1126,6 @@ drv_console_device_register(
 	if (error != 0)
 		goto fail;
 	thread_start(dispatcher);
-	thread_start(producer);
 
 	/* Succeeded. */
 	return 0;
@@ -1156,9 +1143,6 @@ fail:
 	if (dispatcher != NULL)
 		(void)thread_abort_new(dispatcher);
 
-	/* Handles the producer availability. */
-	if (producer != NULL)
-		(void)thread_abort_new(producer);
 
 	/* Reports the failure. */
 	if (error != 0)

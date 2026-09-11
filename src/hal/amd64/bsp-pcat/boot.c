@@ -65,7 +65,7 @@ static void accept_framebuffer(uint64_t base, uint64_t size, uint32_t width, uin
  * Validates and preserves the amd64 bootloader handoff.
  */
 void
-bsp_boot_init(
+prekern_bsp_boot_init(
 	const void *raw_boot_info)
 {
 	const struct zbl6_handoff *raw;
@@ -514,7 +514,7 @@ bsp_physical_range_mappable(
  * Reports the bootloader-provided ACPI RSDP address.
  */
 uint64_t
-bsp_acpi_rsdp(
+prekern_bsp_acpi_rsdp(
 	void)
 {
 	/* Returns a UEFI RSDP only for a preserved extended handoff. */
@@ -529,7 +529,7 @@ bsp_acpi_rsdp(
  * Returns the architecture-independent kernel handoff.
  */
 const void *
-bsp_kernel_handoff(
+prekern_bsp_kernel_handoff(
 	const void *raw_boot_info)
 {
 	UNUSED_PARAMETER(raw_boot_info);

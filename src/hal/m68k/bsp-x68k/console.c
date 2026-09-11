@@ -19,7 +19,7 @@ struct x68k_console_cell {
 
 static struct x68k_console_cell shadow[HAL_CONS_ROWS][HAL_CONS_COLUMNS];
 static struct hal_cons_state state = { HAL_CONS_TERMINAL, 0, 0, 1 };
-static uint8_t current_attribute = HAL_CONS_NORMAL_ATTRIBUTE;
+static uint8_t current_attribute = HAL_CONS_ATTRIB_NORMAL;
 
 static void
 draw_cell(unsigned row, unsigned column)
@@ -70,7 +70,7 @@ hal_cons_clear(void)
 void
 hal_cons_reset(void)
 {
-	current_attribute = HAL_CONS_NORMAL_ATTRIBUTE;
+	current_attribute = HAL_CONS_ATTRIB_NORMAL;
 	state.mode = HAL_CONS_TERMINAL;
 	state.cursor_visible = 1;
 	hal_cons_clear();

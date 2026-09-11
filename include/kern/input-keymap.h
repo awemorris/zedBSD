@@ -35,6 +35,8 @@
 #define INPUT_KEY_GRAPH_SYMBOL 0x173U
 #define INPUT_KEY_CTRL_SYMBOL  0x174U
 
+struct kern_key_event;
+
 struct input_keymap_state {
 	uint8_t left_shift;
 	uint8_t right_shift;
@@ -50,8 +52,8 @@ void drv_input_keymap_init(struct input_keymap_state *);
 uint16_t drv_input_key_from_symbol(const char *);
 int drv_input_key_symbol_supported(const char *);
 int drv_input_keymap_event_from_code(uint16_t, int32_t,
-	struct hal_key_event *);
+	struct kern_key_event *);
 int drv_input_keymap_translate(struct input_keymap_state *,
-	const struct hal_key_event *, uint32_t *);
+	const struct kern_key_event *, uint32_t *);
 
 #endif

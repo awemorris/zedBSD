@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <hal/hal.h>
+#include <kern/pmem.h>
 #include <kern/atomic.h>
 #include <kern/lock.h>
 #include <kern/waitq.h>
@@ -39,7 +40,7 @@ struct buf {
 	uint64_t b_block;
 	uint32_t b_block_count;
 	size_t b_size;
-	struct hal_pmem b_memory;
+	struct kern_pmem b_memory;
 	void *b_data;
 	refcount_t b_refs;
 	struct spinlock b_lock;

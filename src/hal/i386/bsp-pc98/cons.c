@@ -127,7 +127,7 @@ hal_cons_clear_row(
 			row,
 			column,
 			' ',
-			HAL_CONS_NORMAL_ATTRIBUTE);
+			HAL_CONS_ATTRIB_NORMAL);
 	}
 }
 
@@ -187,7 +187,7 @@ hal_cons_putc(
 				cursor_row,
 				cursor_column,
 				' ',
-				HAL_CONS_NORMAL_ATTRIBUTE);
+				HAL_CONS_ATTRIB_NORMAL);
 		}
 	} else {
 		put_single_cell(byte);
@@ -259,7 +259,7 @@ write_n(
 			cursor_row,
 			cursor_column++,
 			code,
-			HAL_CONS_NORMAL_ATTRIBUTE);
+			HAL_CONS_ATTRIB_NORMAL);
 
 		/* Writes the marked second cell for a double-cell glyph. */
 		if (width == 2U) {
@@ -267,7 +267,7 @@ write_n(
 				cursor_row,
 				cursor_column++,
 				code | 0x8000U,
-				HAL_CONS_NORMAL_ATTRIBUTE);
+				HAL_CONS_ATTRIB_NORMAL);
 		}
 	}
 
@@ -310,7 +310,7 @@ hal_cons_clear_to_eol(
 			cursor_row,
 			column,
 			' ',
-			HAL_CONS_NORMAL_ATTRIBUTE);
+			HAL_CONS_ATTRIB_NORMAL);
 	}
 }
 
@@ -436,7 +436,7 @@ hal_cons_clear_to_eol_at(
 			row,
 			current,
 			' ',
-			HAL_CONS_NORMAL_ATTRIBUTE);
+			HAL_CONS_ATTRIB_NORMAL);
 	}
 
 	/* Stores the requested cursor position. */
@@ -1155,7 +1155,7 @@ put_single_cell(
 		cursor_row,
 		cursor_column,
 		code,
-		HAL_CONS_NORMAL_ATTRIBUTE);
+		HAL_CONS_ATTRIB_NORMAL);
 	cursor_column++;
 }
 

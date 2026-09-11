@@ -19,6 +19,7 @@
 #include <zedbsd/graphics.h>
 #include <errno.h>
 #include <hal/hal.h>
+#include "text.h"
 #include <string.h>
 
 #define GRAPHICS_CAPABILITIES                                                  \
@@ -95,7 +96,7 @@ drv_graphics_device_restore_text(
 {
 	/* Handles the graphics lock ready condition. */
 	if (!graphics_lock_ready) {
-		hal_cons_resume();
+		drv_pcat_text_resume();
 
 		/* Returns the computed result. */
 		return;
@@ -109,7 +110,7 @@ drv_graphics_device_restore_text(
 		graphics_entered = 0;
 	}
 
-	hal_cons_resume();
+	drv_pcat_text_resume();
 
 	mutex_unlock(&graphics_lock);
 }
@@ -169,7 +170,7 @@ graphics_close(
 		/* Handles the graphics entered condition. */
 		if (graphics_entered) {
 			drv_pcat_graphics_backend_leave();
-			hal_cons_resume();
+			drv_pcat_text_resume();
 			graphics_entered = 0;
 		}
 
@@ -235,12 +236,12 @@ graphics_enter(
 	graphics_mode.preferred_height = request.preferred_height;
 	graphics_mode.preferred_bits_per_pixel =
 		request.preferred_bits_per_pixel;
-	hal_cons_suspend();
+	drv_pcat_text_suspend();
 
 	/* Checks the drv pcat graphics backend enter result. */
 	if (!drv_pcat_graphics_backend_enter(&graphics_mode)) {
 		drv_pcat_graphics_backend_leave();
-		hal_cons_resume();
+		drv_pcat_text_resume();
 
 		/* Failed. */
 		return ENODEV;
@@ -257,7 +258,7 @@ graphics_enter(
 	error = copyout(&request, argument, sizeof(request));
 	if (error != 0) {
 		drv_pcat_graphics_backend_leave();
-		hal_cons_resume();
+		drv_pcat_text_resume();
 		graphics_entered = 0;
 	}
 

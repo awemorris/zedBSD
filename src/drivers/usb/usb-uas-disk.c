@@ -591,7 +591,7 @@ uas_attach(struct drv_usb_interface *interface, const struct drv_usb_id *id)
 				pipes[j] = endpoint;
 		}
 	}
-	owner = hal_malloc(sizeof(*owner));
+	owner = kernel_alloc(sizeof(*owner));
 	if (owner == NULL)
 		return ENOMEM;
 	memset(owner, 0, sizeof(*owner));
@@ -641,7 +641,7 @@ fail:
 		hal_printf("usb-uas: attach error=%d; owner retained for stop\n", error);
 		return 0;
 	}
-	hal_free(owner);
+	kernel_free(owner);
 	return error;
 }
 
@@ -703,7 +703,7 @@ done:
 	mutex_unlock(&owner->control_lock);
 	if (error == 0) {
 		(void)drv_usb_interface_set_driver_data(interface, NULL);
-		hal_free(owner);
+		kernel_free(owner);
 	}
 	return error;
 }

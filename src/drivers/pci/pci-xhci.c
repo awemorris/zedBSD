@@ -1463,7 +1463,7 @@ xhci_device_release(
 	/* Handles the address availability. */
 	if (d->output_context.address != NULL)
 		drv_dma_free_coherent(h->dma, &d->output_context);
-	hal_free(d);
+	kernel_free(d);
 }
 
 /* Takes a slot for a newly attached device. */
@@ -1491,7 +1491,7 @@ xhci_device_enable(
 		return EBUSY;
 
 	/* Checks the current descriptor. */
-	d = hal_malloc(sizeof(*d));
+	d = kernel_alloc(sizeof(*d));
 	if (!d)
 		return ENOMEM;
 	memset(d, 0, sizeof(*d));
@@ -1499,7 +1499,7 @@ xhci_device_enable(
 
 	/* Checks the drv usb device port result. */
 	if (drv_usb_device_port(u) == 0 || drv_usb_device_port(u) > c->ports) {
-		hal_free(d);
+		kernel_free(d);
 
 		/* Failed. */
 		return EINVAL;
@@ -1510,7 +1510,7 @@ xhci_device_enable(
 
 	/* Handles the portsc condition. */
 	if (portsc == UINT32_MAX || d->speed_id == 0) {
-		hal_free(d);
+		kernel_free(d);
 
 		/* Failed. */
 		return EIO;
@@ -1518,7 +1518,7 @@ xhci_device_enable(
 
 	/* Checks the command result. */
 	if ((e = command(c, 0, 0, XHCI_TRB_TYPE(9), &slot)) != 0 || slot == 0) {
-		hal_free(d);
+		kernel_free(d);
 
 		/* Returns the computed result. */
 		return e ? e : EIO;
@@ -2874,7 +2874,7 @@ xhci_request_alloc(
 	}
 
 	/* Handles the request availability. */
-	request = hal_malloc(sizeof(*request));
+	request = kernel_alloc(sizeof(*request));
 	if (request == NULL) {
 		*error = ENOMEM;
 		/* Reports that no result is available. */
@@ -2888,7 +2888,7 @@ xhci_request_alloc(
 	allocation_error = drv_dma_alloc_coherent(
 		h->dma, length != 0 ? length : 8U, 64U, &request->bounce);
 	if (allocation_error != 0) {
-		hal_free(request);
+		kernel_free(request);
 		*error = allocation_error;
 		/* Reports that no result is available. */
 		return NULL;
@@ -2942,7 +2942,7 @@ xhci_request_release(
 	/* Handles the request condition. */
 	if (!request->reserved) {
 		drv_dma_free_coherent(c->hcd.dma, &request->bounce);
-		hal_free(request);
+		kernel_free(request);
 
 		/* Returns the computed result. */
 		return;
@@ -3074,7 +3074,7 @@ xhci_urb_reserve(
 		return error;
 
 	/* Handles the reservation availability. */
-	reservation = hal_malloc(sizeof(*reservation));
+	reservation = kernel_alloc(sizeof(*reservation));
 	if (reservation == NULL) {
 		xhci_operation_leave(controller);
 
@@ -3102,7 +3102,7 @@ xhci_urb_reserve(
 
 		/* Checks the operation status. */
 		if (error != EOPNOTSUPP) {
-			hal_free(reservation);
+			kernel_free(reservation);
 			xhci_operation_leave(controller);
 
 			/* Failed. */
@@ -3123,7 +3123,7 @@ xhci_urb_reserve(
 	error = drv_dma_alloc_coherent(hcd->dma, capacity, alignment,
 				       &reservation->backing);
 	if (error != 0) {
-		hal_free(reservation);
+		kernel_free(reservation);
 		xhci_operation_leave(controller);
 
 		/* Failed. */
@@ -3189,7 +3189,7 @@ xhci_urb_unreserve(
 		drv_dma_free_coherent(hcd->dma, &reservation->backing);
 	}
 
-	hal_free(reservation);
+	kernel_free(reservation);
 }
 
 /* Leaves the submission gate. */
@@ -4365,7 +4365,7 @@ xhci_scratchpads_free(
 			}
 		}
 
-		hal_free(c->scratchpads);
+		kernel_free(c->scratchpads);
 		c->scratchpads = NULL;
 	}
 
@@ -4387,7 +4387,7 @@ xhci_scratchpads_alloc(
 	if (!c->scratchpad_count)
 		return 0;
 	c->scratchpads =
-		hal_malloc(sizeof(*c->scratchpads) * c->scratchpad_count);
+		kernel_alloc(sizeof(*c->scratchpads) * c->scratchpad_count);
 
 	/* Classifies the current input character. */
 	if (!c->scratchpads)
@@ -5230,7 +5230,7 @@ xhci_attach(
 	(void)id;
 
 	/* Classifies the current input character. */
-	c = hal_malloc(sizeof(*c));
+	c = kernel_alloc(sizeof(*c));
 	if (!c)
 		return ENOMEM;
 	memset(c, 0, sizeof(*c));
@@ -5502,7 +5502,7 @@ fail:
 	}
 
 	hal_printf("xhci: attach failed at %s (%d)\n", stage, e);
-	hal_free(c);
+	kernel_free(c);
 
 	/* Returns the computed result. */
 	return e;
@@ -5600,7 +5600,7 @@ xhci_detach(
 		}
 	}
 
-	hal_free(c);
+	kernel_free(c);
 
 	/* Succeeded. */
 	return 0;

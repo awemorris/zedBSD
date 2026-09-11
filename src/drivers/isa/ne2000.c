@@ -104,7 +104,7 @@ drv_pcat_ne2000_init(void)
 		error = net_device_create(ne2000.device);
 	if (error == 0) {
 		/* Checks the hal irq set handler result. */
-		if (hal_irq_set_handler((int)ne2000.irq, ne2000_irq_handler,
+		if (hal_irq_register((int)ne2000.irq, ne2000_irq_handler,
 					&ne2000) == HAL_OK)
 			irq_registered = 1;
 		else
@@ -125,7 +125,8 @@ drv_pcat_ne2000_init(void)
 
 	/* Handles the irq registered condition. */
 	if (irq_registered)
-		(void)hal_irq_set_handler((int)ne2000.irq, NULL, NULL);
+		(void)hal_irq_unregister((int)ne2000.irq, ne2000_irq_handler,
+					 NULL);
 
 	/* Handles the ne2000 condition. */
 	if (ne2000.device->open_count != 0)

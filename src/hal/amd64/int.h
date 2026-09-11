@@ -29,7 +29,7 @@ extern void *amd64_irq_table[16];
 extern void *amd64_msi_table[AMD64_VECTOR_MSI_COUNT];
 
 void
-amd64_int_init(void);
+prekern_amd64_int_init(void);
 
 void
 amd64_int_load(void);

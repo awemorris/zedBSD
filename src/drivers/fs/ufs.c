@@ -41,6 +41,7 @@
 #include <kern/sched.h>
 #include <kern/writeback.h>
 #include <hal/hal.h>
+#include <kern/pmem.h>
 #include <kern/inode.h>
 #include <kern/quota.h>
 
@@ -306,7 +307,7 @@ struct ufs_mount_state {
 	uint32_t active_cg;
 	uint32_t rotor_cg;
 	struct ufs_journal journal;
-	struct hal_pmem journal_memory;
+	struct kern_pmem journal_memory;
 	struct ufs_snapshot snapshot;
 	struct ufs_snapshot_entry *snapshot_map;
 	struct disk *snapshot_disk;
@@ -2793,10 +2794,7 @@ static int
 journal_image_alloc(
 	struct ufs_mount_state *ms)
 {
-	const struct hal_pmem_request request = {
-		HAL_PMEM_PADDR_ANY, UFS_JOURNAL_IMAGE_BYTES, ZEDBSD_PAGE_SIZE,
-		HAL_PMEM_TYPE_RAM, 0};
-	struct hal_pmem memory;
+	struct kern_pmem memory;
 	int released;
 	int error;
 
@@ -2806,15 +2804,15 @@ journal_image_alloc(
 	memset(&memory, 0, sizeof(memory));
 
 	/* Takes the physical memory the journal image lives in. */
-	error = hal_pmem_alloc(&request, &memory);
-	if (error != HAL_OK || memory.vaddr == NULL ||
-	    memory.size < UFS_JOURNAL_IMAGE_BYTES) {
+	memory.size = UFS_JOURNAL_IMAGE_BYTES;
+	error = hal_pmem_alloc(memory.size, ZEDBSD_PAGE_SIZE, &memory.paddr);
+	if (error != HAL_OK || hal_pmem_to_kernel(memory.paddr) == NULL) {
 		/*
 		 * Gives the memory back when it is not the size that was asked
 		 * for.
 		 */
 		if (memory.size != 0) {
-			released = hal_pmem_free(&memory);
+			released = hal_pmem_free(&memory.paddr, memory.size);
 			if (released != HAL_OK)
 				HAL_FATAL("ufs journal rollback failed");
 		}
@@ -2832,7 +2830,7 @@ journal_image_alloc(
 	error = cache_memory_reserve(CACHE_MEMORY_BUF_META, memory.size, 0);
 	if (error != 0) {
 		/* Gives the memory back when the budget refused it. */
-		released = hal_pmem_free(&memory);
+		released = hal_pmem_free(&memory.paddr, memory.size);
 		if (released != HAL_OK)
 			HAL_FATAL("ufs journal reservation rollback failed");
 
@@ -2844,7 +2842,7 @@ journal_image_alloc(
 	ms->journal_memory = memory;
 
 	/* Publishes the image to the journal. */
-	error = drv_ufs_journal_bind_image(&ms->journal, memory.vaddr,
+	error = drv_ufs_journal_bind_image(&ms->journal, hal_pmem_to_kernel(memory.paddr),
 					   memory.size);
 	if (error != 0)
 		journal_image_free(ms);
@@ -2885,7 +2883,7 @@ journal_image_free(
 	journal_wait_readers(ms);
 
 	/* A memory release that fails leaves the budget charged. */
-	released = hal_pmem_free(&ms->journal_memory);
+	released = hal_pmem_free(&ms->journal_memory.paddr, ms->journal_memory.size);
 	if (released != HAL_OK)
 		HAL_FATAL("ufs journal backing release failed");
 	cache_memory_release(CACHE_MEMORY_BUF_META, bytes);

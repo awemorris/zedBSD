@@ -1455,7 +1455,7 @@ nvme_attach(
 	(void)id;
 
 	/* Handles the controller availability. */
-	controller = hal_malloc(sizeof(*controller));
+	controller = kernel_alloc(sizeof(*controller));
 	if (controller == NULL)
 		return ENOMEM;
 	memset(controller, 0, sizeof(*controller));
@@ -1464,7 +1464,7 @@ nvme_attach(
 	registry_irq = spin_lock_irqsave(&nvme_registry_lock);
 	if (nvme_next_index > UINT_MAX) {
 		spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
-		hal_free(controller);
+		kernel_free(controller);
 		return ENOSPC;
 	}
 	controller->index = (unsigned)nvme_next_index++;
@@ -1799,7 +1799,7 @@ fail:
 	}
 
 	hal_printf("nvme: attach failed at %s (%d)\n", stage, error);
-	hal_free(controller);
+	kernel_free(controller);
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -1926,7 +1926,7 @@ nvme_detach_owned(
 
 	nvme_unpublish_controller(controller);
 	(void)drv_pci_device_set_driver_data(device, NULL);
-	hal_free(controller);
+	kernel_free(controller);
 
 	/* Succeeded. */
 	return 0;

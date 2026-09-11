@@ -374,15 +374,15 @@ checkpoint_attach(
 		return error;
 
 	/* Handles the checkpoint availability. */
-	checkpoint = hal_malloc(sizeof(*checkpoint));
+	checkpoint = kernel_alloc(sizeof(*checkpoint));
 	if (checkpoint == NULL)
 		return ENOMEM;
 	memset(checkpoint, 0, sizeof(*checkpoint));
-	checkpoint->buffer = hal_malloc(buffer_size);
+	checkpoint->buffer = kernel_alloc(buffer_size);
 
 	/* Handles the buffer availability. */
 	if (checkpoint->buffer == NULL) {
-		hal_free(checkpoint);
+		kernel_free(checkpoint);
 
 		/* Failed. */
 		return ENOMEM;
@@ -400,8 +400,8 @@ checkpoint_attach(
 
 	/* Handles the urb availability. */
 	if (checkpoint->urb == NULL) {
-		hal_free(checkpoint->buffer);
-		hal_free(checkpoint);
+		kernel_free(checkpoint->buffer);
+		kernel_free(checkpoint);
 
 		/* Failed. */
 		return ENOMEM;
@@ -411,8 +411,8 @@ checkpoint_attach(
 	error = drv_usb_interface_set_driver_data(interface, checkpoint);
 	if (error != 0) {
 		drv_usb_urb_free(checkpoint->urb);
-		hal_free(checkpoint->buffer);
-		hal_free(checkpoint);
+		kernel_free(checkpoint->buffer);
+		kernel_free(checkpoint);
 
 		/* Failed. */
 		return error;
@@ -424,8 +424,8 @@ checkpoint_attach(
 	if (error != 0) {
 		(void)drv_usb_interface_set_driver_data(interface, NULL);
 		drv_usb_urb_free(checkpoint->urb);
-		hal_free(checkpoint->buffer);
-		hal_free(checkpoint);
+		kernel_free(checkpoint->buffer);
+		kernel_free(checkpoint);
 
 		/* Failed. */
 		return error;
@@ -592,8 +592,8 @@ checkpoint_detach(
 	checkpoint_report_detach(checkpoint, cancel_error, 0, 0);
 	(void)drv_usb_interface_set_driver_data(interface, NULL);
 	drv_usb_urb_free(checkpoint->urb);
-	hal_free(checkpoint->buffer);
-	hal_free(checkpoint);
+	kernel_free(checkpoint->buffer);
+	kernel_free(checkpoint);
 
 	/* Succeeded. */
 	return 0;
