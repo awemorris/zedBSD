@@ -26,6 +26,15 @@ NOCT_HOST_SOURCE_STAMP := $(NOCT_HOST_SOURCE_DIR)/.zedbsd-source-$(ZEDBSD_NOCT_V
 NOCT_HOST_SOURCE_IDENTITY := $(NOCT_HOST_SOURCE_DIR)/.zedbsd-source-identity
 NOCT_HOST_SOURCE_MANIFEST := $(NOCT_HOST_SOURCE_DIR)/.zedbsd-source-manifest
 
+# Records of the archive and source-tree checks, kept beside what each one
+# examined so that a build repeats a check only after that thing changes.
+ZEDBSD_NOCT_ARCHIVE_VERIFIED := \
+	$(ZEDBSD_NOCT_DISTDIR)/.zedbsd-archive-verified-$(ZEDBSD_NOCT_ARCHIVE_NAME)
+NOCT_SOURCE_VERIFIED := \
+	$(NOCT_SOURCE_DIR)/.zedbsd-source-verified-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_PATCH_LEVEL)
+NOCT_HOST_SOURCE_VERIFIED := \
+	$(NOCT_HOST_SOURCE_DIR)/.zedbsd-source-verified-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_PATCH_LEVEL)
+
 NOCT_ZEDBSD_ARCH := $(if $(filter i386,$(ZEDBSD_ARCHITECTURE)),i386,amd64)
 NOCT_ZEDBSD_SYSROOT = $(if $(filter i386,$(NOCT_ZEDBSD_ARCH)),$(ZEDBSD_SYSROOT_I386),$(ZEDBSD_SYSROOT_AMD64))
 NOCT_ZEDBSD_CMAKE_OPTIONS := $(if $(filter i386,$(NOCT_ZEDBSD_ARCH)),--toolchain $(ZEDBSD_NOCT_PACKAGE_ROOT)/zedbsd-i386.cmake -DNOCT_ENABLE_JIT=OFF,)
@@ -106,6 +115,11 @@ $(ZEDBSD_NOCT_DISTFILE):
 .PHONY: noct-download
 noct-download: $(ZEDBSD_NOCT_DISTFILE)
 	$(ZEDBSD_NOCT_VERIFY_ARCHIVE)
+	@touch '$(ZEDBSD_NOCT_ARCHIVE_VERIFIED)'
+
+$(ZEDBSD_NOCT_ARCHIVE_VERIFIED): $(ZEDBSD_NOCT_DISTFILE)
+	$(ZEDBSD_NOCT_VERIFY_ARCHIVE)
+	@touch '$@'
 
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS += noct-download
 
@@ -197,10 +211,12 @@ define ZEDBSD_NOCT_VERIFY_SOURCE
 	trap - EXIT HUP INT TERM
 endef
 
-$(NOCT_SOURCE_STAMP): $(ZEDBSD_NOCT_PATCHES) | noct-download
+$(NOCT_SOURCE_STAMP): $(ZEDBSD_NOCT_PATCHES) \
+		| $(ZEDBSD_NOCT_ARCHIVE_VERIFIED)
 	$(call ZEDBSD_NOCT_EXTRACT_SOURCE,$(NOCT_SOURCE_DIR))
 
-$(NOCT_HOST_SOURCE_STAMP): $(ZEDBSD_NOCT_PATCHES) | noct-download
+$(NOCT_HOST_SOURCE_STAMP): $(ZEDBSD_NOCT_PATCHES) \
+		| $(ZEDBSD_NOCT_ARCHIVE_VERIFIED)
 	$(call ZEDBSD_NOCT_EXTRACT_SOURCE,$(NOCT_HOST_SOURCE_DIR))
 
 .PHONY: noct-source noct-target-source-verify noct-host-source \
@@ -209,21 +225,31 @@ noct-source: $(NOCT_SOURCE_STAMP)
 
 noct-target-source-verify: $(NOCT_SOURCE_STAMP)
 	$(call ZEDBSD_NOCT_VERIFY_SOURCE,$(NOCT_SOURCE_DIR))
+	@touch '$(NOCT_SOURCE_VERIFIED)'
 
 noct-host-source: $(NOCT_HOST_SOURCE_STAMP)
 
 noct-host-source-verify: $(NOCT_HOST_SOURCE_STAMP)
 	$(call ZEDBSD_NOCT_VERIFY_SOURCE,$(NOCT_HOST_SOURCE_DIR))
+	@touch '$(NOCT_HOST_SOURCE_VERIFIED)'
+
+$(NOCT_SOURCE_VERIFIED): $(NOCT_SOURCE_STAMP)
+	$(call ZEDBSD_NOCT_VERIFY_SOURCE,$(NOCT_SOURCE_DIR))
+	@touch '$@'
+
+$(NOCT_HOST_SOURCE_VERIFIED): $(NOCT_HOST_SOURCE_STAMP)
+	$(call ZEDBSD_NOCT_VERIFY_SOURCE,$(NOCT_HOST_SOURCE_DIR))
+	@touch '$@'
 
 ifndef ZEDBSD_TOPLEVEL_BUILD
 download: noct-download
 endif
 patch: noct-target-source-verify
 
-$(NOCT_PACKAGE_HOLORIS): | noct-target-source-verify
+$(NOCT_PACKAGE_HOLORIS): | $(NOCT_SOURCE_VERIFIED)
 	@test -f '$@'
 
-noct-zedbsd: noct-target-source-verify sysroot-$(NOCT_ZEDBSD_ARCH)
+noct-zedbsd: $(NOCT_SOURCE_VERIFIED) sysroot-$(NOCT_ZEDBSD_ARCH)
 	cd '$(NOCT_SOURCE_DIR)' && \
 		ZEDBSD_SOURCE_DIR='$(ZEDBSD_NOCT_ROOT)' \
 		ZEDBSD_SYSROOT='$(NOCT_ZEDBSD_SYSROOT)' \

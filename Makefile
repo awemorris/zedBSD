@@ -383,7 +383,8 @@ list-targets:
 	@printf 'Focused checks:\n'; \
  for target in $(ZEDBSD_CHECK_TARGETS); do printf ' %s\n' "$$target"; done
 
-$(ZEDBSD_HOST_NOCT): $(ZEDBSD_HOST_NOCT_SOURCE_STAMP) | noct-host-source-verify
+$(ZEDBSD_HOST_NOCT): $(ZEDBSD_HOST_NOCT_SOURCE_STAMP) \
+		| $(NOCT_HOST_SOURCE_VERIFIED)
 	@mkdir -p "$(ZEDBSD_HOST_NOCT_STATE_DIR)"
 	cd "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" && cmake --preset static \
  $(ZEDBSD_HOST_NOCT_CMAKE_OPTIONS)

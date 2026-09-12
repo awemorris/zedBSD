@@ -14,6 +14,14 @@ ZEDBSD_LLVM_SOURCE := $(abspath $(ZEDBSD_LLVM_ROOT)/build/llvm-source)
 ZEDBSD_LLVM_SOURCE_STAMP := $(ZEDBSD_LLVM_SOURCE)/.zedbsd-source-$(ZEDBSD_LLVM_VERSION)-$(ZEDBSD_LLVM_PATCH_LEVEL)
 ZEDBSD_LLVM_SOURCE_IDENTITY := $(ZEDBSD_LLVM_SOURCE)/.zedbsd-source-identity
 ZEDBSD_LLVM_SOURCE_MANIFEST := $(ZEDBSD_LLVM_SOURCE)/.zedbsd-source-manifest
+
+# Each check below records its result in a stamp whose prerequisite is what
+# the check examined. A build waits on the record, so an archive or a source
+# tree that has not changed since it passed is not examined again.
+ZEDBSD_LLVM_ARCHIVE_VERIFIED := \
+	$(ZEDBSD_LLVM_DISTDIR)/.zedbsd-archive-verified-$(ZEDBSD_LLVM_ARCHIVE_NAME)
+ZEDBSD_LLVM_SOURCE_VERIFIED := \
+	$(ZEDBSD_LLVM_SOURCE)/.zedbsd-source-verified-$(ZEDBSD_LLVM_VERSION)-$(ZEDBSD_LLVM_PATCH_LEVEL)
 ZEDBSD_LLVM_LICENSE := $(ZEDBSD_LLVM_SOURCE)/LICENSE.TXT
 ZEDBSD_LLVM_BUILD := $(abspath $(ZEDBSD_LLVM_ROOT)/build/llvm-build)
 ZEDBSD_LLVM_INSTALL := $(abspath $(ZEDBSD_LLVM_ROOT)/build/llvm)
@@ -27,6 +35,7 @@ ZEDBSD_LLVM_INSTALLED_TOOLS := $(addprefix $(ZEDBSD_LLVM_INSTALL)/bin/,\
 ZEDBSD_LLVM_INSTALLED_LICENSE := \
 	$(ZEDBSD_LLVM_INSTALL)/share/licenses/llvm/LICENSE.TXT
 ZEDBSD_LLVM_BUILD_PROFILE := x86-release-c4-l2-noanalyzer-noobjcrw-dist
+ZEDBSD_LLVM_CONFIG_IDENTITY := $(ZEDBSD_LLVM_BUILD)/.zedbsd-config-identity
 ZEDBSD_LLVM_CONFIG_STAMP := $(ZEDBSD_LLVM_BUILD)/.zedbsd-config-$(ZEDBSD_LLVM_VERSION)-$(ZEDBSD_LLVM_PATCH_LEVEL)-$(ZEDBSD_LLVM_BUILD_PROFILE)
 ZEDBSD_LLVM_BUILD_STAMP := $(ZEDBSD_LLVM_BUILD)/.zedbsd-build-$(ZEDBSD_LLVM_VERSION)-$(ZEDBSD_LLVM_PATCH_LEVEL)-$(ZEDBSD_LLVM_BUILD_PROFILE)
 ZEDBSD_LLVM_HOST_CC ?= $(if $(HOSTCC),$(HOSTCC),cc)
@@ -100,8 +109,16 @@ $(ZEDBSD_LLVM_DISTFILE):
 .PHONY: llvm-download
 llvm-download: $(ZEDBSD_LLVM_DISTFILE)
 	$(ZEDBSD_LLVM_VERIFY_ARCHIVE)
+	@touch '$(ZEDBSD_LLVM_ARCHIVE_VERIFIED)'
 
-$(ZEDBSD_LLVM_SOURCE_STAMP): $(ZEDBSD_LLVM_PATCH) | llvm-download
+# The record is older than the archive whenever the file is replaced, so a
+# new archive is checked and an unchanged one is not decompressed again.
+$(ZEDBSD_LLVM_ARCHIVE_VERIFIED): $(ZEDBSD_LLVM_DISTFILE)
+	$(ZEDBSD_LLVM_VERIFY_ARCHIVE)
+	@touch '$@'
+
+$(ZEDBSD_LLVM_SOURCE_STAMP): $(ZEDBSD_LLVM_PATCH) \
+		| $(ZEDBSD_LLVM_ARCHIVE_VERIFIED)
 	@set -eu; \
 	source='$(ZEDBSD_LLVM_SOURCE)'; parent=$${source%/*}; \
 	if test -e "$$source"; then \
@@ -166,8 +183,22 @@ endef
 llvm-source: $(ZEDBSD_LLVM_SOURCE_STAMP)
 llvm-source-verify: $(ZEDBSD_LLVM_SOURCE_STAMP)
 	@set -eu; $(ZEDBSD_LLVM_VERIFY_SOURCE_COMMANDS)
+	@touch '$(ZEDBSD_LLVM_SOURCE_VERIFIED)'
 
-$(ZEDBSD_LLVM_CONFIG_STAMP): $(ZEDBSD_LLVM_MAKEFILE) | llvm-source-verify
+# Hashing every extracted file is slow, so the build waits on the record of
+# that check and repeats it only after a fresh extraction.
+$(ZEDBSD_LLVM_SOURCE_VERIFIED): $(ZEDBSD_LLVM_SOURCE_STAMP)
+	@set -eu; $(ZEDBSD_LLVM_VERIFY_SOURCE_COMMANDS)
+	@touch '$@'
+
+.PHONY: FORCE_ZEDBSD_LLVM_CONFIG_IDENTITY
+FORCE_ZEDBSD_LLVM_CONFIG_IDENTITY:
+
+# Everything the generated build tree depends on, in one line. It is
+# rewritten only when it differs from what the tree was configured with, so
+# the stamps below see a new file exactly when cmake has to run again, and
+# not merely because a line of this makefile was edited.
+$(ZEDBSD_LLVM_CONFIG_IDENTITY): FORCE_ZEDBSD_LLVM_CONFIG_IDENTITY
 	@set -eu; \
 	mkdir -p '$(ZEDBSD_LLVM_BUILD)'; \
 	host_cc=$$(command -v '$(ZEDBSD_LLVM_HOST_CC)'); \
@@ -177,11 +208,15 @@ $(ZEDBSD_LLVM_CONFIG_STAMP): $(ZEDBSD_LLVM_MAKEFILE) | llvm-source-verify
 	host_cc_version=$$("$$host_cc" --version | sed -n '1p'); \
 	host_cxx_version=$$("$$host_cxx" --version | sed -n '1p'); \
 	identity="version=$(ZEDBSD_LLVM_VERSION) patch=$(ZEDBSD_LLVM_PATCH_LEVEL) host-cc=$$host_cc ($$host_cc_version) host-cxx=$$host_cxx ($$host_cxx_version) projects=clang,lld targets=PowerPC,AArch64,X86 build=Release compile-jobs=4 link-jobs=2 analyzer=off objc-rewriter=off distribution=$(ZEDBSD_LLVM_DISTRIBUTION_COMPONENTS)"; \
-	if test -f '$(ZEDBSD_LLVM_BUILD)/.zedbsd-config-identity' && \
-	   test "$$(cat '$(ZEDBSD_LLVM_BUILD)/.zedbsd-config-identity')" != "$$identity"; then \
+	if test -f '$@' && test "$$(cat '$@')" = "$$identity"; then exit 0; fi; \
+	if test -f '$@'; then \
 		echo 'LLVM: reconfiguring generated build tree for the current bounded-memory profile'; \
 	fi; \
-	printf '%s\n' "$$identity" > '$(ZEDBSD_LLVM_BUILD)/.zedbsd-config-identity'
+	printf '%s\n' "$$identity" > '$@.tmp'; \
+	mv -- '$@.tmp' '$@'
+
+$(ZEDBSD_LLVM_CONFIG_STAMP): $(ZEDBSD_LLVM_CONFIG_IDENTITY) \
+		| $(ZEDBSD_LLVM_SOURCE_VERIFIED)
 	cmake -S '$(ZEDBSD_LLVM_SOURCE)/llvm' -B '$(ZEDBSD_LLVM_BUILD)' -G Ninja \
 		-UCLANG_ENABLE_ARCMT \
 		-DCMAKE_BUILD_TYPE=Release \
@@ -211,13 +246,14 @@ $(ZEDBSD_LLVM_CONFIG_STAMP): $(ZEDBSD_LLVM_MAKEFILE) | llvm-source-verify
 .PHONY: llvm-configure llvm-build
 llvm-configure: $(ZEDBSD_LLVM_CONFIG_STAMP)
 
-$(ZEDBSD_LLVM_BUILD_STAMP): $(ZEDBSD_LLVM_CONFIG_STAMP) $(ZEDBSD_LLVM_MAKEFILE)
+$(ZEDBSD_LLVM_BUILD_STAMP): $(ZEDBSD_LLVM_CONFIG_STAMP) \
+		$(ZEDBSD_LLVM_CONFIG_IDENTITY)
 	cmake --build '$(ZEDBSD_LLVM_BUILD)' --target distribution --parallel
 	@touch '$@'
 
 llvm-build: $(ZEDBSD_LLVM_BUILD_STAMP)
 
-$(ZEDBSD_LLVM_INSTALL_STAMP): $(ZEDBSD_LLVM_MAKEFILE)
+$(ZEDBSD_LLVM_INSTALL_STAMP): $(ZEDBSD_LLVM_CONFIG_IDENTITY)
 	@$(MAKE) --no-print-directory llvm-build
 	@set -eu; \
 	if test -d '$(ZEDBSD_LLVM_INSTALL)' && \
