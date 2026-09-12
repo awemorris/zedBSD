@@ -1,3 +1,5 @@
+/* -*- mode: c; c-file-style: "bsd"; indent-tabs-mode: t; -*- */
+
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -21,12 +23,29 @@
 #include "kern/poll.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <string.h>
 
-static struct cdev *devices[CDEV_MAX] __attribute__((section(".vfs_bss")));
-static unsigned device_count __attribute__((section(".vfs_bss")));
-static uint64_t next_generation __attribute__((section(".vfs_bss")));
+/*
+ * The kernel-lifetime publication list, initially empty before drivers run.
+ * Registry ownership retains each node; registry_lock protects its links.
+ * VFS mounting does not clear registrations made during device discovery.
+ */
+static struct cdev *devices;
 
+/* The last published node permits ordered append under registry_lock. */
+static struct cdev *device_tail;
+
+/* The number of published nodes, protected by registry_lock until removal. */
+static unsigned device_count;
+
+/*
+ * The next publication advances this kernel-lifetime generation counter.
+ * registry_lock protects it; reset never reuses a generation seen by an inode.
+ */
+static uint64_t next_generation;
+
+/* Serializes namespace changes and retained snapshots for the kernel lifetime. */
 static struct spinlock registry_lock = {
 	{ 0 }, LOCK_RANK_DEVICE, "cdev registry", 0, 0
 };
@@ -56,28 +75,39 @@ void
 cdev_reset(
 	void)
 {
-	struct cdev *retired[CDEV_MAX];
-	unsigned count;
-	unsigned index;
+	struct cdev *retired;
+	struct cdev *device;
+	struct cdev *next;
 	unsigned long irq;
 
-	/* Removes the complete visible registry in one locked operation. */
+	/* Detaches the whole namespace without touching retained generations. */
 	irq = spin_lock_irqsave(&registry_lock);
 
-	count = device_count;
-	for (index = 0; index < count; index++) {
-		retired[index] = devices[index];
-		devices[index] = NULL;
-		atomic_store_release(&retired[index]->published, 0);
-	}
-
+	retired = devices;
+	devices = NULL;
+	device_tail = NULL;
 	device_count = 0;
+
+	/* Invalidates lookup eligibility before another publisher enters. */
+	for (device = retired;
+	     device != NULL;
+	     device = device->registry_next) {
+		atomic_store_release(&device->published, 0);
+	}
 
 	spin_unlock_irqrestore(&registry_lock, irq);
 
-	/* Drops each registry ref after the namespace is atomically empty. */
-	for (index = 0; index < count; index++)
-		cdev_release(retired[index]);
+	/* Runs finalizers outside the lock after saving each following node. */
+	device = retired;
+	while (device != NULL) {
+		next = device->registry_next;
+		device->registry_next = NULL;
+		cdev_release(device);
+		device = next;
+	}
+
+	/* Succeeded: the detached registry no longer retains any generation. */
+	return;
 }
 
 /*
@@ -101,7 +131,7 @@ cdev_register(
 	/* Keeps only the registry's reference. */
 	cdev_release(device);
 
-	/* Reports the published device. */
+	/* Succeeded: registry ownership retains the published device. */
 	return 0;
 }
 
@@ -121,14 +151,26 @@ cdev_register_managed(
 	struct cdev **result)
 {
 	struct cdev *device;
-	unsigned index;
+	struct cdev *existing;
 	unsigned long irq;
 	int error;
+	int valid;
+	int comparison;
 
-	/* Rejects a bad name or a missing operation table or result. */
-	if (result != NULL)
-		*result = NULL;
-	if (!cdev_name_valid(name) || ops == NULL || result == NULL)
+	/* Clears the output even when another operand is invalid. */
+	if (result == NULL)
+		return EINVAL;
+
+	/* Leaves no caller reference on any rejected publication. */
+	*result = NULL;
+
+	/* Rejects names that cannot be represented by devfs. */
+	valid = cdev_name_valid(name);
+	if (!valid)
+		return EINVAL;
+
+	/* Every published device must supply an operation table. */
+	if (ops == NULL)
 		return EINVAL;
 
 	/* Allocates the generation before entering the publication lock. */
@@ -136,6 +178,7 @@ cdev_register_managed(
 	if (device == NULL)
 		return ENOMEM;
 
+	/* Prepares immutable dispatch data and caller plus registry ownership. */
 	strcpy(device->name, name);
 	device->rdev = rdev;
 	device->ops = ops;
@@ -144,39 +187,58 @@ cdev_register_managed(
 	refcount_init(&device->refs, 2);
 	atomic_store_release(&device->published, 0);
 
-	/* Validates uniqueness and assigns the immutable generation at publish. */
+	/* Serializes duplicate detection with insertion into the namespace. */
 	error = 0;
 	irq = spin_lock_irqsave(&registry_lock);
 
-	for (index = 0; index < device_count; index++) {
-		if (!strcmp(devices[index]->name, name)) {
+	/* Refuses another currently published generation of this name. */
+	for (existing = devices;
+	     existing != NULL;
+	     existing = existing->registry_next) {
+		comparison = strcmp(existing->name, name);
+		if (comparison == 0) {
 			error = EEXIST;
 			break;
 		}
 	}
 
-	if (error == 0 && device_count >= CDEV_MAX)
-		error = ENOSPC;
+	/* Keeps the externally reported count representable. */
+	if (error == 0 && device_count == UINT_MAX)
+		error = EOVERFLOW;
+
+	/* Never wraps into a generation retained by an earlier inode. */
 	if (error == 0 && next_generation == UINT64_MAX)
 		error = EOVERFLOW;
+
+	/* Appends the generation only after every publication check succeeds. */
 	if (error == 0) {
 		next_generation++;
 		device->generation = next_generation;
-		devices[device_count++] = device;
+
+		/* Preserves registration order, including the first publication. */
+		if (device_tail == NULL)
+			devices = device;
+		else
+			device_tail->registry_next = device;
+
+		/* Commits namespace ownership and lookup eligibility together. */
+		device_tail = device;
+		device_count++;
 		atomic_store_release(&device->published, 1);
 	}
 
 	spin_unlock_irqrestore(&registry_lock, irq);
 
-	/* A failed publication leaves data and its finalizer with the caller. */
+	/* Leaves data and its finalizer with the caller on failed publication. */
 	if (error != 0) {
 		kern_free(device);
 		return error;
 	}
 
+	/* Transfers the caller reference alongside the registry reference. */
 	*result = device;
 
-	/* Reports the published generation. */
+	/* Succeeded: the supplied name resolves to this retained generation. */
 	return 0;
 }
 
@@ -187,44 +249,58 @@ int
 cdev_unregister(
 	struct cdev *device)
 {
-	unsigned index;
-	unsigned move;
+	struct cdev **link;
+	struct cdev *previous;
 	unsigned long irq;
 	int found;
 
-	/* Rejects a missing device. */
+	/* Rejects a missing generation rather than removing a name alone. */
 	if (device == NULL)
 		return EINVAL;
 
-	/* Removes the exact pointer so a same-name generation cannot alias it. */
+	/* Searches by identity so a same-name replacement cannot be removed. */
 	found = 0;
 	irq = spin_lock_irqsave(&registry_lock);
 
-	for (index = 0; index < device_count; index++) {
-		if (devices[index] == device) {
+	/* Retains the predecessor to repair the append position on removal. */
+	previous = NULL;
+	link = &devices;
+	while (*link != NULL) {
+		/* Stops only at the exact generation supplied by the owner. */
+		if (*link == device) {
 			found = 1;
 			break;
 		}
+
+		/* Advances the predecessor and its owning link as one cursor. */
+		previous = *link;
+		link = &previous->registry_next;
 	}
 
+	/* Detaches the node before any reference or private data can be freed. */
 	if (found) {
-		for (move = index + 1U; move < device_count; move++)
-			devices[move - 1U] = devices[move];
+		*link = device->registry_next;
+
+		/* Moves the append position when the removed node was last. */
+		if (device_tail == device)
+			device_tail = previous;
+
+		/* Removes this generation from the visible ownership count. */
+		device->registry_next = NULL;
 		device_count--;
-		devices[device_count] = NULL;
 		atomic_store_release(&device->published, 0);
 	}
 
 	spin_unlock_irqrestore(&registry_lock, irq);
 
-	/* Reports a generation that was not published. */
+	/* Reports a generation already removed or never published here. */
 	if (!found)
 		return ENOENT;
 
 	/* Releases registry ownership after the namespace is invalidated. */
 	cdev_release(device);
 
-	/* Reports the unpublished generation. */
+	/* Succeeded: retained references survive without namespace visibility. */
 	return 0;
 }
 
@@ -249,11 +325,15 @@ cdev_release(
 {
 	cdev_finalizer_t finalizer;
 	void *data;
+	int last;
 
 	/* Only the last reference finalizes. */
 	if (device == NULL)
 		return;
-	if (!refcount_put(&device->refs))
+
+	/* Releases ownership and lets only the final holder destroy data. */
+	last = refcount_put(&device->refs);
+	if (!last)
 		return;
 
 	/* Finalizes the data, then frees the generation. */
@@ -262,6 +342,9 @@ cdev_release(
 	if (finalizer != NULL)
 		finalizer(data);
 	kern_free(device);
+
+	/* Succeeded: the final generation owner released its dispatch data. */
+	return;
 }
 
 /*
@@ -271,14 +354,19 @@ int
 cdev_is_published(
 	const struct cdev *device)
 {
+	unsigned published;
+
 	/* A missing device is not published. */
 	if (device == NULL)
 		return 0;
 
 	/* Reads the flag the registry maintains. */
-	if (atomic_load_acquire(&device->published) != 0)
-		return 1;
-	return 0;
+	published = atomic_load_acquire(&device->published);
+	if (published == 0)
+		return 0;
+
+	/* Succeeded: this generation is still visible to namespace lookup. */
+	return 1;
 }
 
 /*
@@ -304,62 +392,163 @@ cdev_find_ref(
 	const char *name)
 {
 	struct cdev *device;
-	unsigned index;
 	unsigned long irq;
+	int comparison;
 
-	/* Rejects a missing name. */
+	/* A missing name cannot identify a published device. */
 	if (name == NULL)
 		return NULL;
 
-	/* References the device with the name under the registry lock. */
-	device = NULL;
+	/* Retains the matching immutable generation before namespace changes. */
 	irq = spin_lock_irqsave(&registry_lock);
 
-	for (index = 0; index < device_count; index++) {
-		if (!strcmp(devices[index]->name, name)) {
-			device = devices[index];
+	/* Searches the publication list in registration order. */
+	device = devices;
+	while (device != NULL) {
+		comparison = strcmp(device->name, name);
+		if (comparison == 0) {
 			cdev_ref(device);
 			break;
 		}
+
+		/* Advances only after this generation failed to match. */
+		device = device->registry_next;
 	}
 
 	spin_unlock_irqrestore(&registry_lock, irq);
 
-	/* Reports the referenced device, or none. */
+	/* A name removed before this lookup has no current generation. */
+	if (device == NULL)
+		return NULL;
+
+	/* Succeeded: the caller retains the published generation. */
 	return device;
 }
 
 /*
- * Retains one coherent snapshot of all currently published generations.
+ * Retains as many current device generations as the supplied array can hold.
  */
 unsigned
 cdev_snapshot(
 	struct cdev **snapshot,
 	unsigned capacity)
 {
+	struct cdev *device;
 	unsigned count;
-	unsigned index;
 	unsigned long irq;
 
-	/* Rejects a missing or empty snapshot array. */
+	/* A missing or empty array cannot receive any references. */
 	if (snapshot == NULL || capacity == 0)
 		return 0;
 
-	/* References as many devices as fit, in registry order. */
+	/* Copies one bounded, coherent prefix of the publication list. */
 	irq = spin_lock_irqsave(&registry_lock);
 
-	count = device_count;
-	if (count > capacity)
-		count = capacity;
-	for (index = 0; index < count; index++) {
-		snapshot[index] = devices[index];
-		cdev_ref(snapshot[index]);
+	/* Holds each generation before allowing concurrent namespace removal. */
+	count = 0;
+	device = devices;
+	while (device != NULL && count < capacity) {
+		snapshot[count] = device;
+		cdev_ref(device);
+		count++;
+		device = device->registry_next;
 	}
 
 	spin_unlock_irqrestore(&registry_lock, irq);
 
-	/* Reports the number of devices in the snapshot. */
+	/* Succeeded: the caller owns each reference in the reported prefix. */
 	return count;
+}
+
+/*
+ * Allocates and retains a complete coherent snapshot of the live registry.
+ *
+ * Allocation occurs outside the registry lock.  A concurrent registration
+ * can require a larger allocation before the final locked copy is taken.
+ */
+int
+cdev_snapshot_alloc(
+	struct cdev ***result,
+	unsigned *count_out)
+{
+	struct cdev **snapshot;
+	struct cdev *device;
+	size_t allocation_bytes;
+	unsigned capacity;
+	unsigned needed;
+	unsigned count;
+	unsigned long irq;
+
+	/* Requires both ownership outputs before allocating or retaining data. */
+	if (result == NULL || count_out == NULL)
+		return EINVAL;
+
+	/* Leaves no transferred ownership on every allocation failure. */
+	*result = NULL;
+	*count_out = 0;
+	snapshot = NULL;
+	capacity = 0;
+	count = 0;
+
+	/* Retries only when publishers outgrow the allocation just prepared. */
+	for (;;) {
+		/* Measures and, when possible, captures the whole current list. */
+		irq = spin_lock_irqsave(&registry_lock);
+
+		needed = device_count;
+
+		/* An empty namespace needs neither pointer storage nor references. */
+		if (needed == 0) {
+			spin_unlock_irqrestore(&registry_lock, irq);
+			break;
+		}
+
+		/* A sufficiently large array permits one atomic retained snapshot. */
+		if (snapshot != NULL && needed <= capacity) {
+			/* Retains every generation while removal remains excluded. */
+			device = devices;
+			while (device != NULL) {
+				snapshot[count] = device;
+				cdev_ref(device);
+				count++;
+				device = device->registry_next;
+			}
+
+			spin_unlock_irqrestore(&registry_lock, irq);
+			break;
+		}
+
+		spin_unlock_irqrestore(&registry_lock, irq);
+
+		/* Frees the unretained array before replacing its storage. */
+		kern_free(snapshot);
+
+		/* Rejects an array size that cannot be represented by the allocator. */
+		allocation_bytes = (size_t)needed * sizeof(*snapshot);
+		if (allocation_bytes / sizeof(*snapshot) != needed)
+			return EOVERFLOW;
+
+		/* Allocates enough pointers for the last observed namespace size. */
+		snapshot = kern_calloc(needed, sizeof(*snapshot));
+		if (snapshot == NULL)
+			return ENOMEM;
+
+		/* Remembers the pointer capacity available to the next locked copy. */
+		capacity = needed;
+	}
+
+	/* Normalizes a namespace emptied during allocation to no array ownership. */
+	if (count == 0) {
+		kern_free(snapshot);
+		snapshot = NULL;
+	}
+
+	/* Transfers both the array and all references obtained by its copy. */
+	*result = snapshot;
+	*count_out = count;
+
+	/* Succeeded: the snapshot has no device-count truncation. */
+	return 0;
 }
 
 /*
@@ -379,7 +568,7 @@ cdev_count(
 
 	spin_unlock_irqrestore(&registry_lock, irq);
 
-	/* Reports the sampled count. */
+	/* Succeeded: reports the current namespace size. */
 	return count;
 }
 
@@ -425,9 +614,7 @@ cdev_open_file(
 	if (device->ops->open == NULL)
 		return 0;
 
-	/* Opens through the device. */
-
-	/* Reports why the device's failed. */
+	/* Opens through the generation retained by the inode. */
 	error = device->ops->open(file);
 	if (error != 0)
 		return error;
@@ -576,6 +763,7 @@ cdev_name_valid(
 	const char *name)
 {
 	size_t length;
+	const char *slash;
 
 	/* Rejects a missing name. */
 	if (name == NULL)
@@ -585,9 +773,12 @@ cdev_name_valid(
 	length = strlen(name);
 	if (length == 0 || length >= sizeof(((struct cdev *)0)->name))
 		return 0;
-	if (strchr(name, '/') != NULL)
+
+	/* A registry name must remain a single devfs path component. */
+	slash = strchr(name, '/');
+	if (slash != NULL)
 		return 0;
 
-	/* Reports a usable name. */
+	/* Succeeded: the name fits one devfs component. */
 	return 1;
 }

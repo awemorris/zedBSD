@@ -283,10 +283,10 @@ clear_capture(void)
 	captured_count = 0;
 }
 
-static struct hal_key_event
+static struct kern_key_event
 key_event(const char *symbol, uint32_t flags)
 {
-	struct hal_key_event event;
+	struct kern_key_event event;
 
 	memset(&event, 0, sizeof(event));
 	assert(strlen(symbol) < sizeof(event.symbol));
@@ -422,7 +422,7 @@ test_momentary(void)
 {
 	struct input_device *device =
 	    register_keyboard(INPUT_DEVICE_KEY_MOMENTARY);
-	struct hal_key_event press = key_event("a", HAL_KEY_EVENT_PRESS);
+	struct kern_key_event press = key_event("a", KERN_KEY_EVENT_PRESS);
 
 	clear_capture();
 	drv_input_device_emit_key_event(device, &press);
@@ -456,11 +456,11 @@ test_two_physical_keyboards(void)
 	    register_keyboard(INPUT_DEVICE_KEY_REPEAT);
 	struct input_device *second =
 	    register_keyboard(INPUT_DEVICE_KEY_REPEAT);
-	struct hal_key_event shift =
-	    key_event("leftshift", HAL_KEY_EVENT_PRESS);
-	struct hal_key_event press = key_event("a", HAL_KEY_EVENT_PRESS);
-	struct hal_key_event repeat = key_event("a", HAL_KEY_EVENT_REPEAT);
-	struct hal_key_event release = key_event("a", HAL_KEY_EVENT_RELEASE);
+	struct kern_key_event shift =
+	    key_event("leftshift", KERN_KEY_EVENT_PRESS);
+	struct kern_key_event press = key_event("a", KERN_KEY_EVENT_PRESS);
+	struct kern_key_event repeat = key_event("a", KERN_KEY_EVENT_REPEAT);
+	struct kern_key_event release = key_event("a", KERN_KEY_EVENT_RELEASE);
 
 	clear_capture();
 	drv_input_device_emit_key_event(first, &shift);
@@ -628,12 +628,12 @@ test_resync_transaction(void)
 	    register_keyboard(INPUT_DEVICE_KEY_REPEAT);
 	struct test_file test;
 	const struct cdev *cdev = device_cdev(device);
-	struct hal_key_event press = key_event("a", HAL_KEY_EVENT_PRESS);
-	struct hal_key_event begin = key_event("", HAL_KEY_EVENT_RESYNC |
-	    HAL_KEY_EVENT_LOCK_CAPS | HAL_KEY_EVENT_LOCK_KANA);
-	struct hal_key_event snapshot = key_event("leftshift",
-	    HAL_KEY_EVENT_PRESS | HAL_KEY_EVENT_SNAPSHOT);
-	struct hal_key_event end = key_event("", HAL_KEY_EVENT_RESYNC_END);
+	struct kern_key_event press = key_event("a", KERN_KEY_EVENT_PRESS);
+	struct kern_key_event begin = key_event("", KERN_KEY_EVENT_RESYNC |
+	    KERN_KEY_EVENT_LOCK_CAPS | KERN_KEY_EVENT_LOCK_KANA);
+	struct kern_key_event snapshot = key_event("leftshift",
+	    KERN_KEY_EVENT_PRESS | KERN_KEY_EVENT_SNAPSHOT);
+	struct kern_key_event end = key_event("", KERN_KEY_EVENT_RESYNC_END);
 	struct input_event events[4];
 	unsigned long bits[INPUT_BIT_WORDS(KEY_MAX)];
 	ssize_t count;

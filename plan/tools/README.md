@@ -106,3 +106,14 @@ goal; create a new WS and retain origin links. At retirement, audit every child
 Issue and preserve uncleared outcomes at the user-selected deferred destination.
 WS003 is retired permanently. PowerPC porting now belongs to WS027; installer
 hardware acceptance, if selected again, must have its own new single-goal WS.
+
+## Standing Queue lifecycle after q304 (2026-09-12)
+
+Assigning the standing Queue item generic Project Status=Done was followed by
+Issue #362 closing during q304 synchronization. Read-back detected the mismatch.
+The generic Status was cleared and the Issue reopened, retaining Awesome Plan
+Status=finished. Queue cycles finish; the standing Queue Board remains open.
+Use the dedicated lifecycle field for standing Boards and do not set their
+generic Status to Done. Read back both native Issue lifecycle and Project
+projection after field writes. The recorded event does not authorize changing
+Project workflows or overriding an independent human closure decision.

@@ -2,6 +2,8 @@
 
 過去の範囲・結果。実行許可ではない。
 
+- [queue-q305](queue-q305.md) — finished / ws014-p002 cleared（通常の動的ops登録へ修正）
+- [queue-q304](queue-q304.md) — finished / ws014-p002 cleared
 - [queue-q303](queue-q303.md)
 - [queue-q302](queue-q302.md)
 - [queue-q301](queue-q301.md)

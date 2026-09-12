@@ -72,3 +72,15 @@ virtio-gpu基本2Dは複数scanout、cursor、display変更通知、RAM→host�
 [Guardrail](https://github.com/awemorris/zedBSD/issues/363)とローカルplan/coding-style.mdの全文を実装前に読む。HAL責務/hal.hの変更は別途適用承認が必要。既存PCI/VFS/VMの責務を確認し、大規模refactor前の配置を仮定しない。aggregate make checkは禁止。必要な対象buildはmake -j16と意味のある限定確認を用いる。無関係な変更を保護する。
 
 ユーザーは計画・GitHub公開を指示した。まだ有限Queue、実行範囲と調査上限は選択していない。コード実装/build/QEMUは未実行。資料のgit add/commitはユーザーが行うためエージェントはadd/commit/pushしない。
+
+## q304からの実装引継ぎ
+
+[p002](https://github.com/awemorris/zedBSD/issues/383)はGPUフレームワーク受け入れをcleared。本文の実装契約を接続元とする。callbackはopen/close/get_infoと任意resource_create/destroyの5 member。PCI service staging、deferred devfs公開、root open、session/世代handle、EBUSY解除の参照寿命が実装済み。
+
+次に必要なmmap、context/capset/blob、DMA/transport/submit/fence、scanout/present、display権限等は未実装。既存44 callback案と実装済みsubsetを混同せず、具体的なvirtio/Venus利用から補完する。現行VFSにはcdev mmap dispatchがない。HAL責務の変更をこの引継ぎで許可しない。
+
+ホストテストとamd64 buildの成功は実GPU描画やVenusの証拠ではない。p003はplanning、実行Queueは未選択。p002の規約確認は実施済みだが、p004では後続変更も含めて再度最終確認する。
+
+<!-- q305-dependency:start -->
+p002の通常GPU登録APIへの修正（q305）はcleared。drv_gpu_register(ops, private_data, **device)/unregister(device)と動的cdev/devfsを利用する。GPUヘッダにPCI公開service/publishはない。使用中EBUSYと解除成功時handle消費の契約を守る。詳細・証拠は[p002](https://github.com/awemorris/zedBSD/issues/383)。mmap/submit/fence/displayを実利用から補う。p003はplanning・未実行・Queueなし。
+<!-- q305-dependency:end -->

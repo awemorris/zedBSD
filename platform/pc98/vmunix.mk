@@ -76,6 +76,7 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/devfs.o $(BUILD)/src/kern/text-display.o \
 	$(BUILD)/src/drivers/generic/console.o \
 	$(BUILD)/src/drivers/generic/input.o \
+	$(BUILD)/src/drivers/gpu/gpu.o \
 	$(BUILD)/src/kern/locale-record.o \
 	$(BUILD)/src/kern/tty.o \
 	$(BUILD)/src/drivers/generic/system-device.o $(BUILD)/src/drivers/generic/memory-device.o $(BUILD)/src/kern/shutdown.o \

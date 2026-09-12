@@ -423,9 +423,9 @@ ioctlの粒度はこの表の関数数から決めない。device/context、reso
 
 固定したXMLの対象関数集合とMarkdownの関数行を照合し、欠落・重複・空欄がないことを確認する。これは資料の網羅性確認であり、driver動作、Vulkan conformance、QEMU表示の検証ではない。実装Queueは開始していない。
 
-## K：struct drv_gpu_interfaceの関数ポインタ案
+## K：struct drv_gpu_opsの関数ポインタ案
 
-上の275関数のK欄を、カーネルが提供する共通操作へまとめた案。操作は`struct drv_gpu_interface`の関数ポインタメンバーとして定義する案で、個々の`drv_gpu_*`グローバル関数は公開しない。具体driverの実装関数はstaticとし、メンバーへ設定する。既存実装や確定済みヘッダーではない。ユーザー空間がカーネル関数を直接リンクして呼ぶ意味ではなく、`/dev/gpu0`のopen/close/ioctl/mmap/poll等の入口から呼び出す想定。GPUサブシステムがVFS入口と共通検証を持ち、登録されたinterfaceを通じてdriverを呼ぶ。ioctl番号、構造体の実際のレイアウト、既存device/VFSフックへの適合は次の設計事項とする。
+上の275関数のK欄を、カーネルが提供する共通操作へまとめた案。操作は`struct drv_gpu_ops`の関数ポインタメンバーとして定義する案で、GPU操作を個々の`drv_gpu_*`グローバル関数にはしない。device登録・解除は`drv_gpu_register()`/`drv_gpu_unregister()`で行う。具体driverの実装関数はstaticとし、メンバーへ設定する。既存実装や確定済みヘッダーではない。ユーザー空間がカーネル関数を直接リンクして呼ぶ意味ではなく、`/dev/gpu0`のopen/close/ioctl/mmap/poll等の入口から呼び出す想定。GPUサブシステムがVFS入口と共通検証を持ち、登録されたinterfaceを通じてdriverを呼ぶ。ioctl番号、構造体の実際のレイアウト、既存device/VFSフックへの適合は次の設計事項とする。
 
 **この節はすべてKのcallback候補。** Vulkanのinstance、pipeline、descriptor、command buffer等のユーザー側管理は前の表のUに残す。Vulkanと同じ個数のioctlを作るのではなく、必要な操作をこの単位で提供する。
 
@@ -441,7 +441,7 @@ ioctlの粒度はこの表の関数数から決めない。device/context、reso
 
 ### 接続・能力・実行context
 
-| drv_gpu_interfaceのメンバー案 | 入力 → 出力 | ドライバが実装する責務 | 対応する主なvk API／利用箇所 |
+| drv_gpu_opsのメンバー案 | 入力 → 出力 | ドライバが実装する責務 | 対応する主なvk API／利用箇所 |
 | --- | --- | --- | --- |
 | `int (*open)(device, credentials, out_session)` | device・呼出元資格 → session | 接続とhandle表を作成し、render/display権限を分ける。VFS openから利用 | `vkCreateDevice`、physical device列挙の接続 |
 | `void (*close)(s)` | session → なし | 新規操作を止め、waitを解除。進行中処理とscanoutの参照を保護し、所有資源・表示権を回収 | `vkDestroyDevice`、プロセス終了 |
@@ -456,7 +456,7 @@ ioctlの粒度はこの表の関数数から決めない。device/context、reso
 
 buffer/imageの論理オブジェクトとVkDeviceMemoryの結合はUまたはhost backendが管理し、ここではKのbacking/resourceを扱う。`VkBuffer`、`VkImage`、Kのresourceを常に一対一とはしない。
 
-| drv_gpu_interfaceのメンバー案 | 入力 → 出力 | ドライバが実装する責務 | 対応する主なvk API／利用箇所 |
+| drv_gpu_opsのメンバー案 | 入力 → 出力 | ドライバが実装する責務 | 対応する主なvk API／利用箇所 |
 | --- | --- | --- | --- |
 | `int (*resource_create)(s, req, out_resource)` | size、backing種別、usage、必要なら2D format/extent/stride → resource ID・割当情報 | RAM/共有blob/2D resource等を確保。mapping/scanout可能性を検証し、過剰割当を防止 | `vkAllocateMemory`、swapchain作成、2D bring-up |
 | `int (*resource_destroy)(s, resource_id)` | resource ID → 状態 | 公開handleを無効化。実際のbackingはGPU/scanout参照消滅後に回収 | `vkFreeMemory`、関連resource解放 |
@@ -474,7 +474,7 @@ buffer/imageの論理オブジェクトとVkDeviceMemoryの結合はUまたはho
 
 `transport_send`はhost操作の転送、`submit`は実行とその依存関係の受付。実装上同じvirtqueue等を使っても、呼出側へ返す完了の意味は分ける。両者の処理を重複して送らない。
 
-| drv_gpu_interfaceのメンバー案 | 入力 → 出力 | ドライバが実装する責務 | 対応する主なvk API／利用箇所 |
+| drv_gpu_opsのメンバー案 | 入力 → 出力 | ドライバが実装する責務 | 対応する主なvk API／利用箇所 |
 | --- | --- | --- | --- |
 | `int (*transport_send)(s, req, out_request_id)` | context、登録済みcommand/reply resourceの範囲、protocol → request ID | Venus等のhost操作を送信。外枠・resource参照を検証しhost応答と対応付ける。GPU実行完了は保証しない | pipeline/descriptor/query等のhost処理、`vkCmd*`記録の転送 |
 | `int (*transport_receive)(s, req, out_reply)` | request ID、容量、timeout → 応答状態・返信長 | 応答の到着とサイズを確認し、指定reply領域/結果を返す。blocking/非blockingを区別 | host能力照会、object作成結果、cache/queryデータ取得 |
@@ -492,7 +492,7 @@ VenusのVkFence/VkSemaphoreをそのままK同期へ一対一に移すことは�
 
 ### display・present・通知
 
-| drv_gpu_interfaceのメンバー案 | 入力 → 出力 | ドライバが実装する責務 | 対応する主なvk API／利用箇所 |
+| drv_gpu_opsのメンバー案 | 入力 → 出力 | ドライバが実装する責務 | 対応する主なvk API／利用箇所 |
 | --- | --- | --- | --- |
 | `int (*display_get_info)(s, req, out_info)` | display/plane/modeの照会種別、ID、容量 → 情報・世代 | display、mode、planeと組合せ制約を列挙。切断・再接続で古いIDを検出 | `vkGet*Display*`、`vkGet*Surface*`、device-group present照会 |
 | `int (*display_acquire)(s, req, out_lease_id)` | display ID、制御要求 → lease ID | display制御の排他的所有権を許可。render権限だけでは取得不可 | direct-display WSIの制御取得（Vulkan関数との一対一対応なし） |
@@ -510,7 +510,7 @@ display presentでは、受付、画像解放、表示進行を別々に扱う�
 
 ### 機能を選択した場合だけ追加するKインタフェース
 
-| drv_gpu_interfaceのメンバー案 | 入力 → 出力 | ドライバが実装する責務 | 対応する主なvk API／条件 |
+| drv_gpu_opsのメンバー案 | 入力 → 出力 | ドライバが実装する責務 | 対応する主なvk API／条件 |
 | --- | --- | --- | --- |
 | `int (*sparse_bind)(s, req, out_completion_id)` | queue、resource範囲と疎なbinding配列、同期依存 → 完了ID | sparse mappingの検証・更新・同期。Venusではhost処理とK backingの責務を分ける | `vkQueueBindSparse`。sparse対応を選択した場合のみ |
 | `int (*resource_export)(s, req, out_share_handle)` | resource、範囲、権利 → 移譲可能handle | 他接続/プロセスへの共有権限を制限 | 外部memory拡張等。現在の275関数の対象外、将来候補 |
@@ -526,14 +526,14 @@ GPU reset、割込み処理、PCI attach/detach、DMA map/unmapはこれらを�
 
 ## interface構造体とPCI経由の登録
 
-2026-09-12ユーザー判断: GPU操作を`struct drv_gpu_interface`の関数ポインタにまとめ、GPUサブシステムへ登録する。PCI接続GPUの登録開始・解除はPCI側のライフサイクルから行う。個別GPU driverが独立した初期化経路からGPUサブシステムへ直接登録する方式にはしない。
+2026-09-12ユーザー判断: GPU操作を`struct drv_gpu_ops`の関数ポインタにまとめ、GPUサブシステムへ登録する。PCI接続GPUの登録開始・解除はPCI側のライフサイクルから行う。個別GPU driverが独立した初期化経路からGPUサブシステムへ直接登録する方式にはしない。
 
 ### 構造体の形
 
 以下は抜粋した型の模式図。完全な定義は上の44メンバー表をもとに作成し、ここではABIを固定しない。
 
 ```c
-struct drv_gpu_interface {
+struct drv_gpu_ops {
     uint32_t version;
     uint32_t size;
     int (*open)(struct drv_gpu_device *, const struct credentials *,
@@ -551,7 +551,7 @@ struct drv_gpu_interface {
 };
 ```
 
-driverは`static const struct drv_gpu_interface`を定義し、`.submit = virtio_gpu_submit`等のstatic実装関数を設定する。GPUごとの可変状態はinterfaceへ格納せず、登録するdevice instanceのprivate dataに保持する。複数のGPU instanceで同じimmutableなinterfaceを共有できる。sessionから所属device/private dataを参照できるようにする。
+driverは`static const struct drv_gpu_ops`を定義し、`.submit = virtio_gpu_submit`等のstatic実装関数を設定する。GPUごとの可変状態はinterfaceへ格納せず、登録するdevice instanceのprivate dataに保持する。複数のGPU instanceで同じimmutableなinterfaceを共有できる。sessionから所属device/private dataを参照できるようにする。
 
 これはカーネル内のdriver contractであり、ユーザー向けioctl ABIではない。ユーザー空間へ関数ポインタを渡さない。`version/size`はdriver contractの整合確認用で、wire ABIのversionとは別。必須callbackとcapabilityを対応付け、任意callbackがNULLなら該当機能を公開しない。GPUコアが提供できる共通処理はコアで実装し、個別driverへhandle表やVFS処理の重複実装を要求しない。
 
@@ -560,13 +560,23 @@ driverは`static const struct drv_gpu_interface`を定義し、`.submit = virtio
 | 担当 | 操作と引き渡すもの | 責務 |
 | --- | --- | --- |
 | 個別GPU driver | PCI driver descriptor、staticなGPU interface、deviceごとの初期化結果 | PCI ID matchとハードウェア初期化を提供し、初期化済みinstanceとinterfaceをPCI側へ引き渡す。GPU登録を別のグローバル初期化から開始しない |
-| PCIサブシステム側の連携処理 | attach成功後にGPU registration descriptorを取得 | `PCI device + interface + private data + capabilities`をGPUサブシステムへ登録する。登録契機とrollback/detach順序を所有する |
-| GPUサブシステム | descriptor検証、device instance生成 | interfaceのversion/必須callbackを検証し、安定したinstance参照と`/dev/gpuN`を公開する。VFS/権限/handle管理を共通化し、必要な操作をcallbackへdispatchする |
+| PCIサブシステム側の連携処理 | attach成功後にdriver instanceのops/private dataを取得 | `ops + private data`を`drv_gpu_register()`へ渡し、返されたdevice handleを保持する。GPUコアへPCI型は渡さない。登録契機とrollback/detach順序を所有する |
+| GPUサブシステム | ops検証、device instance生成 | interfaceのversion/必須callbackを検証し、安定したinstance参照と`/dev/gpuN`を公開する。VFS/権限/handle管理を共通化し、必要な操作をcallbackへdispatchする |
 | PCIサブシステム側の連携処理 | detachまたは登録失敗 | GPUコアへ停止・unregisterを依頼する。新規open/submit停止、既存参照の処理、DMA停止とdevice資源解放の順序を調整する |
 | GPUコアと個別driver | unregister/quiesce/最終回収 | device lostを通知しwaitを解除、使用中callbackとsession参照を安全に処理する。interface/private dataを利用中に破棄しない。物理切断時も無効MMIOへアクセスしない |
 
 順序案は `PCI match → driver attach/初期化 → PCI側がGPU登録 → /dev/gpuN公開`。公開前の失敗はGPU登録とハードウェア初期化を巻き戻す。detachでは公開停止・処理停止を先に行い、使用中参照とDMAの安全を確保してからBAR/IRQ/private dataを解放する。
 
-静的確認した現行PCI APIでは、`struct drv_pci_driver`はmatch/attach/detach等を持ち、`drv_pci_device_probe()`がdriverのattachを呼ぶ。**attachの戻り値はintだけで、GPU interfaceを受け取って登録する仕組みはまだ存在しない。** deviceにclass/service descriptorを付けてPCI側が取得する案など、引き渡し方法をp001で具体化する。GPU専用処理をPCI coreへ直書きするかどうかも未確定で、PCI側のclass/service連携処理として分離できる形を検討する。
+q305ではPCI側が既存の汎用service callbackから通常のGPU register/unregisterを呼ぶ方式に改める。GPUコアの公開ヘッダはPCIへ依存せず、GPU専用service tableとregistration wrapperを持たない。非PCI driverも同じops/登録APIを利用できる。device台数はGPUコアと共通cdev/devfsの動的registryで扱い、VFS mount時に既存登録を消さない。
 
-確認対象はローカルの`include/drivers/pci.h`の`struct drv_pci_driver`と`src/drivers/pci/pci.c`のprobe/detach。これは現行動作の読取りであり、PCI/GPUコードは変更していない。将来の非PCI GPUでもinterface自体を再利用できるよう、PCI parent情報はdevice登録descriptor側に置く。
+## p002の実装済み機能とq305の登録契約
+
+44 callbackの表は将来機能を含む案のまま保持する。p002で実装したversion 1は次の5 member。完全なcontract・所有権・検証結果は[p002本文](https://github.com/awemorris/zedBSD/issues/383)に掲載する。
+
+| member | p002での実装境界 |
+| --- | --- |
+| open / close | 必須。open descriptionごとのbackend session。最終closeで全資源を回収 |
+| get_info | 必須。device情報とresource上限。coreがversion/size/capabilityを確定 |
+| resource_create / resource_destroy | capabilityと対で任意。session所有の世代handle、失敗rollback、close cleanup |
+
+q305の公開APIは`drv_gpu_register(ops, private_data, **device)`と`drv_gpu_unregister(device)`。PCI側の通常service callbackがこれらを呼び、hardware detach前に解除する。使用中は非公開化後EBUSYとしてhandleとhardwareを保持する。mmap/submit/fence/display/Venusはp003への不足で未実装。p001全体はplanningのまま。

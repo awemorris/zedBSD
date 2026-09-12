@@ -1,6 +1,13 @@
 /* -*- mode: c; c-file-style: "bsd"; indent-tabs-mode: t; -*- */
 
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/* Exercises production dynamic cdev and devfs lifetime and allocation paths. */
 
 #include "kern/backing-claim.h"
 #include "kern/buf.h"
@@ -10,11 +17,12 @@
 #include "kern/disk.h"
 #include "kern/file.h"
 #include "kern/inode.h"
+#include "kern/kmem.h"
 #include "kern/mount.h"
 #include "kern/namei.h"
 #include "kern/poll.h"
 #include "kern/uaccess.h"
-#include <zedbsd/block.h>
+#include <uapi/block.h>
 #include <kern/cred.h>
 #include <kern/partition.h>
 #include "kern/tty.h"
@@ -28,14 +36,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/statvfs.h>
 
 #define TEST_INODE_MAX 64U
+#define TEST_DEVICE_COUNT 80U
 
 int copyin(uintptr_t u, void *k, size_t n)
 { if (!u) return EFAULT; memcpy(k, (const void *)u, n); return 0; }
 int copyout(const void *k, uintptr_t u, size_t n)
 { if (!u) return EFAULT; memcpy((void *)u, k, n); return 0; }
-int disk_block_info(struct disk *d, struct zedbsd_block_info *i)
+int disk_block_info(struct disk *d, struct kern_block_info *i)
 { (void)d; (void)i; return EOPNOTSUPP; }
 int partition_reload(struct disk *d) { (void)d; return EOPNOTSUPP; }
 struct ucred *cred_current_ref(void) { return NULL; }
@@ -76,7 +86,7 @@ struct test_payload {
 struct retained_generation {
 	const char *name;
 	struct cdev *found;
-	struct cdev *snapshot[CDEV_MAX];
+	struct cdev *snapshot[TEST_DEVICE_COUNT];
 	unsigned snapshot_count;
 	unsigned snapshot_mode;
 	volatile unsigned ready;
@@ -88,6 +98,15 @@ static struct inode *test_inodes[TEST_INODE_MAX];
 static pthread_mutex_t test_inode_lock = PTHREAD_MUTEX_INITIALIZER;
 static int test_inode_allocations_before_failure = -1;
 
+/* A positive countdown fails one kernel allocation, then disables itself. */
+static unsigned test_heap_failure;
+
+/* Counts live kernel objects, excluding the independent inode-cache fixture. */
+static unsigned test_heap_objects;
+
+/* Resets publication at an allocation boundary to model concurrent removal. */
+static unsigned test_reset_during_allocation;
+
 static void test_inode_destroy(struct inode *inode);
 static void test_inode_evict(struct mount *mountp, ino_t number);
 static void test_inode_purge_mount(struct mount *mountp);
@@ -98,7 +117,8 @@ static int payload_poll(struct file *file, short requested, short *returned);
 static ssize_t payload_read(struct file *file, void *buffer, size_t size);
 static void test_generation_lifetime(struct mount *mountp);
 static void test_legacy_registration(void);
-static void test_registry_capacity_and_reset(void);
+static void test_registry_growth_and_reset(struct mount *mountp);
+static void test_registration_before_mount(void);
 static void test_concurrent_lookup_snapshot_reset(void);
 static void test_fixed_directory_recreation(struct mount *mountp);
 static void test_mount_failure_cleanup(void);
@@ -170,25 +190,74 @@ mutex_unlock(
 	spin_unlock_irqrestore(&mutex->guard, 1U);
 }
 
+/*
+ * Allocates test kernel memory with the same accounting as zeroed objects.
+ */
 void *
 kern_malloc(
 	size_t size)
 {
-	return malloc(size);
+	void *allocation;
+
+	/* Reuses one failure counter for both kernel allocation entry points. */
+	allocation = kern_calloc(1, size);
+	if (allocation == NULL)
+		return NULL;
+
+	/* Succeeded: the caller owns one tracked heap allocation. */
+	return allocation;
 }
 
+/*
+ * Allocates counted storage or injects the selected allocation failure.
+ */
 void *
 kern_calloc(
 	size_t count,
 	size_t size)
 {
-	return calloc(count, size);
+	void *allocation;
+
+	/* Fails exactly one selected allocation in an otherwise ordinary path. */
+	if (test_heap_failure != 0) {
+		test_heap_failure--;
+
+		/* The terminal countdown selects this allocation for failure. */
+		if (test_heap_failure == 0)
+			return NULL;
+	}
+
+	/* Accounts only objects the host allocator actually supplies. */
+	allocation = calloc(count, size);
+	if (allocation == NULL)
+		return NULL;
+
+	test_heap_objects++;
+
+	/* Models namespace removal while snapshot allocation holds no registry lock. */
+	if (test_reset_during_allocation != 0) {
+		test_reset_during_allocation = 0;
+		cdev_reset();
+	}
+
+	/* Succeeded: final cleanup must balance this object. */
+	return allocation;
 }
 
+/*
+ * Releases one counted allocation while allowing ordinary NULL cleanup.
+ */
 void
 kern_free(
 	void *data)
 {
+	/* NULL cleanup owns no object and cannot decrement the count. */
+	if (data == NULL)
+		return;
+
+	/* Detects duplicate ownership release before invoking the host allocator. */
+	assert(test_heap_objects != 0);
+	test_heap_objects--;
 	free(data);
 }
 
@@ -443,16 +512,18 @@ main(
 	assert(mutex_init(&mountp.m_lock, LOCK_RANK_NAMESPACE,
 	    "test mount") == 0);
 	cdev_reset();
+	test_registration_before_mount();
 	assert(devfs_type.mount(&mountp) == 0);
 	assert(mountp.m_root != NULL);
 
 	test_generation_lifetime(&mountp);
 	test_legacy_registration();
-	test_registry_capacity_and_reset();
+	test_registry_growth_and_reset(&mountp);
 	test_concurrent_lookup_snapshot_reset();
 	test_fixed_directory_recreation(&mountp);
 	test_mount_failure_cleanup();
 	test_inode_purge_mount(&mountp);
+	assert(test_heap_objects == 0);
 
 	puts("WS006 dynamic cdev/devfs generation lifecycle: PASS");
 	return 0;
@@ -710,37 +781,189 @@ test_legacy_registration(
 	assert(cdev_count() == 0);
 }
 
-/* Verifies bounded publication failure and reset-delayed finalization. */
+/* Verifies early device registration survives ordinary devfs mounting. */
 static void
-test_registry_capacity_and_reset(
+test_registration_before_mount(
 	void)
 {
-	struct cdev *devices[CDEV_MAX];
-	struct cdev *overflow;
-	struct test_payload payloads[CDEV_MAX + 1U];
-	char name[32];
-	unsigned index;
+	struct mount mountp;
+	struct test_payload payload;
+	struct cdev *device;
+	struct inode *inode;
+	uint64_t generation;
+	int error;
 
+	/* Publishes a device while no devfs mount exists. */
+	memset(&payload, 0, sizeof(payload));
+	error = cdev_register_managed(
+		"early",
+		99,
+		&payload_ops,
+		&payload,
+		payload_finalize,
+		&device);
+	assert(error == 0);
+	generation = cdev_generation(device);
+
+	/* Mounts devfs without any driver-specific republication callback. */
+	memset(&mountp, 0, sizeof(mountp));
+	mountp.m_type = &devfs_type;
+	error = mutex_init(&mountp.m_lock, LOCK_RANK_NAMESPACE, "early mount");
+	assert(error == 0);
+	error = devfs_type.mount(&mountp);
+	assert(error == 0);
+	error = lookup_name(mountp.m_root, "early", &inode);
+	assert(error == 0);
+	assert(inode->i_data == device);
+	assert(device->generation == generation);
+
+	/* Releases the mount while its registration still has independent life. */
+	inode_release(inode);
+	test_inode_purge_mount(&mountp);
+	assert(payload.finalized == 0);
+	error = cdev_unregister(device);
+	assert(error == 0);
+	cdev_release(device);
+	assert(payload.finalized == 1);
+}
+
+/* Verifies registry and directory growth past the former fixed capacity. */
+static void
+test_registry_growth_and_reset(
+	struct mount *mountp)
+{
+	struct cdev *devices[TEST_DEVICE_COUNT];
+	struct cdev **snapshot;
+	struct cdev *failed_device;
+	struct test_payload payloads[TEST_DEVICE_COUNT];
+	struct test_payload failed_payload;
+	struct file directory;
+	struct inode *inode;
+	struct dirent entry;
+	struct statvfs status;
+	char name[32];
+	unsigned count;
+	unsigned listed;
+	unsigned index;
+	unsigned failure;
+	unsigned baseline;
+	int eof;
+	int error;
+	int comparison;
+
+	/* Registers enough devices to exceed both historical fixed arrays. */
 	memset(devices, 0, sizeof(devices));
 	memset(payloads, 0, sizeof(payloads));
-	for (index = 0; index < CDEV_MAX; index++) {
-		(void)snprintf(name, sizeof(name), "capacity%u", index);
-		assert(cdev_register_managed(name, (dev_t)index, &payload_ops,
-		    &payloads[index], payload_finalize, &devices[index]) == 0);
+	for (index = 0; index < TEST_DEVICE_COUNT; index++) {
+		(void)snprintf(name, sizeof(name), "dynamic%u", index);
+		error = cdev_register_managed(
+			name,
+			(dev_t)index,
+			&payload_ops,
+			&payloads[index],
+			payload_finalize,
+			&devices[index]);
+		assert(error == 0);
 	}
-	assert(cdev_count() == CDEV_MAX);
-	overflow = NULL;
-	assert(cdev_register_managed("overflow", 99, &payload_ops,
-	    &payloads[CDEV_MAX], payload_finalize, &overflow) == ENOSPC);
-	assert(overflow == NULL && payloads[CDEV_MAX].finalized == 0);
 
-	cdev_reset();
-	assert(cdev_count() == 0);
-	for (index = 0; index < CDEV_MAX; index++) {
+	/* Confirms every registration reaches devfs lookup, not only the prefix. */
+	count = cdev_count();
+	assert(count == TEST_DEVICE_COUNT);
+	for (index = 0; index < TEST_DEVICE_COUNT; index++) {
+		(void)snprintf(name, sizeof(name), "dynamic%u", index);
+		error = lookup_name(mountp->m_root, name, &inode);
+		assert(error == 0);
+		assert(inode->i_data == devices[index]);
+		inode_release(inode);
+	}
+
+	/* Takes one complete retained snapshot in registration order. */
+	error = cdev_snapshot_alloc(&snapshot, &count);
+	assert(error == 0);
+	assert(count == TEST_DEVICE_COUNT);
+	for (index = 0; index < count; index++) {
+		assert(snapshot[index] == devices[index]);
+		cdev_release(snapshot[index]);
+	}
+
+	kern_free(snapshot);
+
+	/* Lists every character entry through the production directory operations. */
+	memset(&directory, 0, sizeof(directory));
+	directory.f_inode = mountp->m_root;
+	error = mountp->m_root->i_fop->open(&directory);
+	assert(error == 0);
+	listed = 0;
+	for (;;) {
+		error = mountp->m_root->i_fop->readdir(&directory, &entry, &eof);
+		assert(error == 0);
+
+		/* Stops only at the directory's explicit end-of-snapshot result. */
+		if (eof)
+			break;
+
+		/* Counts the generated device names separately from fixed directories. */
+		comparison = strncmp(entry.d_name, "dynamic", 7);
+		if (comparison == 0)
+			listed++;
+	}
+
+	assert(listed == TEST_DEVICE_COUNT);
+	error = mountp->m_root->i_fop->close(&directory);
+	assert(error == 0);
+
+	/* The filesystem reports current entries without the former inode quota. */
+	error = devfs_type.statvfs(mountp, &status);
+	assert(error == 0);
+	assert(status.f_files == TEST_DEVICE_COUNT + 4U);
+
+	/* A failed device allocation cannot consume or finalize caller data. */
+	memset(&failed_payload, 0, sizeof(failed_payload));
+	test_heap_failure = 1;
+	error = cdev_register_managed(
+		"failed",
+		99,
+		&payload_ops,
+		&failed_payload,
+		payload_finalize,
+		&failed_device);
+	assert(error == ENOMEM);
+	assert(failed_device == NULL);
+	assert(failed_payload.finalized == 0);
+
+	/* Exercises snapshot, owner and entry-array allocation cleanup in turn. */
+	baseline = test_heap_objects;
+	for (failure = 1; failure <= 3; failure++) {
+		memset(&directory, 0, sizeof(directory));
+		directory.f_inode = mountp->m_root;
+		test_heap_failure = failure;
+		error = mountp->m_root->i_fop->open(&directory);
+		assert(error == ENOMEM);
+		assert(directory.f_data == NULL);
+		assert(test_heap_objects == baseline);
+	}
+
+	/* Empties the namespace while a full snapshot allocates outside its lock. */
+	test_reset_during_allocation = 1;
+	error = cdev_snapshot_alloc(&snapshot, &count);
+	assert(error == 0);
+	assert(snapshot == NULL);
+	assert(count == 0);
+
+	/* Reset removes visibility while caller references retain every generation. */
+	count = cdev_count();
+	assert(count == 0);
+	for (index = 0; index < TEST_DEVICE_COUNT; index++) {
 		assert(payloads[index].finalized == 0);
 		cdev_release(devices[index]);
 		assert(payloads[index].finalized == 1);
 	}
+
+	/* An empty full snapshot succeeds without reserving a pointer array. */
+	error = cdev_snapshot_alloc(&snapshot, &count);
+	assert(error == 0);
+	assert(snapshot == NULL);
+	assert(count == 0);
 }
 
 /* Retains one generation through either lookup or snapshot publication. */
@@ -754,7 +977,7 @@ retain_generation_worker(
 	retained = data;
 	if (retained->snapshot_mode) {
 		retained->snapshot_count = cdev_snapshot(retained->snapshot,
-		    CDEV_MAX);
+		    TEST_DEVICE_COUNT);
 	} else {
 		retained->found = cdev_find_ref(retained->name);
 	}

@@ -92,6 +92,9 @@ Vulkanのディスプレイ拡張をOSの公式なユーザー向け表示APIと
 
 Linux i915＋ANVホスト、egl-headless＋QMP screendump、frame更新によるキャプチャ検証、serial/画像/renderer証拠の保存をp003へ記録。実ホストでの動作は未確認。275関数のU/K表と44callback案は出発点で、p002/p003の実装結果により不足を補い整理する。実装Queueは未開始。資料のgit add/commitはユーザーが行い、エージェントはadd/commit/pushしない。
 
+
+q304: [p002](https://github.com/awemorris/zedBSD/issues/383)の最小frameworkを実装・検証しcleared。p001全体の受け入れは未完了。
+
 <details>
 <summary>2026-09-12より前の計画（i915 first・手動保留は上記判断で変更）</summary>
 
@@ -192,3 +195,19 @@ All code, fixtures, QEMU models, physical i915 validation, Vulkan/GLES work,
 desktop integration, and documentation remain later extracted Phases.
 
 </details>
+
+## p002の実装済み機能とq305の登録契約
+
+44 callbackの表は将来機能を含む案のまま保持する。p002で実装したversion 1は次の5 member。完全なcontract・所有権・検証結果は[p002本文](https://github.com/awemorris/zedBSD/issues/383)に掲載する。
+
+| member | p002での実装境界 |
+| --- | --- |
+| open / close | 必須。open descriptionごとのbackend session。最終closeで全資源を回収 |
+| get_info | 必須。device情報とresource上限。coreがversion/size/capabilityを確定 |
+| resource_create / resource_destroy | capabilityと対で任意。session所有の世代handle、失敗rollback、close cleanup |
+
+q305の公開APIは`drv_gpu_register(ops, private_data, **device)`と`drv_gpu_unregister(device)`。PCI側の通常service callbackがこれらを呼び、hardware detach前に解除する。使用中は非公開化後EBUSYとしてhandleとhardwareを保持する。mmap/submit/fence/display/Venusはp003への不足で未実装。p001全体はplanningのまま。
+
+<!-- q305-design:start -->
+q305完了。p002は通常のops/動的登録契約でcleared。GPU/PCI/cdev/devfs限定test・sanitizers・amd64 build PASS。完全な契約と証拠は[p002](https://github.com/awemorris/zedBSD/issues/383)。p001全体はplanning。
+<!-- q305-design:end -->

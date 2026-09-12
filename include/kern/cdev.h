@@ -1,3 +1,5 @@
+/* -*- mode: c; c-file-style: "bsd"; indent-tabs-mode: t; -*- */
+
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -17,13 +19,13 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#define CDEV_MAX	16U
-
 struct file;
 struct file_ops;
 
+/* Releases driver data after the last reference on its cdev generation. */
 typedef void (*cdev_finalizer_t)(void *);
 
+/* Dispatches open file operations for every device using one driver. */
 struct cdev_ops {
 	int (*open)(struct file *);
 	int (*close)(struct file *);
@@ -33,7 +35,12 @@ struct cdev_ops {
 	int (*poll)(struct file *, short, short *);
 };
 
+/*
+ * One immutable device generation retained by registry, driver and inodes.
+ * registry_next belongs exclusively to the registry and its spinlock.
+ */
 struct cdev {
+	struct cdev *registry_next;
 	char name[32];
 	dev_t rdev;
 	const struct cdev_ops *ops;
@@ -44,6 +51,7 @@ struct cdev {
 	atomic_uint_t published;
 };
 
+/* Explicitly unpublishes all devices; boot initialization does not call it. */
 void
 cdev_reset(void);
 
@@ -100,6 +108,16 @@ unsigned
 cdev_snapshot(
 	struct cdev **snapshot,
 	unsigned capacity);
+
+/*
+ * Allocates a complete coherent snapshot and retains every returned device.
+ * The caller releases each device and frees the array with kern_free().
+ * An empty snapshot succeeds with a NULL array and zero count.
+ */
+int
+cdev_snapshot_alloc(
+	struct cdev ***result,
+	unsigned *count_out);
 
 unsigned
 cdev_count(void);

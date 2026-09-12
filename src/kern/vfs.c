@@ -295,11 +295,10 @@ kern_vfs_init(
 		}
 	}
 
-	/* Resets the namespaces and registers the filesystems and devices. */
+	/* Initializes mounts while preserving devices published during discovery. */
 	mount_reset();
 	(void)drv_loop_init();
 	kern_boot_source_context_init(&boot_sources);
-	cdev_reset();
 	partition_reset();
 	error = filesystem_register(&drv_fat_filesystem_type);
 	if (error != 0) {
@@ -332,6 +331,8 @@ kern_vfs_init(
 	}
 
 	drv_input_core_init();
+
+	/* Publishes the console after the device subsystems are ready. */
 	error = drv_console_device_register();
 	if (error != 0) {
 		error = vfs_fail("register console", error);

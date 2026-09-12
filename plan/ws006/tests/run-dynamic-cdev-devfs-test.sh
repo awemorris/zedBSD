@@ -6,7 +6,7 @@ repo=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/ws006-dynamic-cdev.XXXXXX")
 trap 'rm -rf -- "$temporary"' EXIT HUP INT TERM
 
-common="-std=c11 -O2 -D_POSIX_C_SOURCE=200809L -pthread -DKERN_USER_ABI_LP64 -DZEDBSD_DEVFS_HOST_TEST -I$repo/include -I$repo/include/uapi -I$repo/src -idirafter $repo/libc/include -Wall -Wextra -Werror"
+common="-std=c11 -O2 -D_POSIX_C_SOURCE=200809L -pthread -DKERN_USER_ABI_LP64 -DKERN_DEVFS_HOST_TEST -I$repo/include -I$repo/src -idirafter $repo/libc/include -Wall -Wextra -Werror"
 sources="$repo/plan/ws006/tests/dynamic-cdev-devfs-test.c $repo/src/kern/cdev.c $repo/src/kern/devfs.c"
 
 cc $common $sources -o "$temporary/ordinary"

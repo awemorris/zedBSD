@@ -1,0 +1,77 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * GPU backend operations and dynamic device registration.
+ */
+
+#ifndef DRIVERS_GPU_H
+#define DRIVERS_GPU_H
+
+#include <uapi/gpu.h>
+#include <stdint.h>
+
+#define DRV_GPU_INTERFACE_VERSION	1U
+
+struct drv_gpu_device;
+
+/*
+ * Immutable operations shared by instances of one backend.
+ *
+ *  - No callback runs under a core spinlock.
+ *  - Distinct sessions may execute concurrently, a single session
+ *    admits one ioctl at a time.
+ *  - Open failure must unwind its own state.
+ *  - Resource-create failure must unwind its own allocation.
+ *  - Close and resource_destroy cannot fail and must finish using the state
+ *    before returning.
+ *  - Unregister preserves private_data until all sessions close; the owner
+ *    must retry EBUSY before releasing device state.
+ */
+struct drv_gpu_ops {
+	uint32_t version;
+	uint32_t size;
+	uint32_t capabilities;
+	uint32_t reserved;
+
+	int (*open)(void *, void **);
+	void (*close)(void *, void *);
+	int (*get_info)(void *, void *, struct gpu_info *);
+	int (*resource_create)(void *, void *, const struct gpu_resource_create *, void **);
+	void (*resource_destroy)(void *, void *, void *);
+};
+
+/*
+ * Registers one initialized device using borrowed operations and private data.
+ *
+ *  - Every call creates an independent device, even when operations are shared.
+ *  - The core owns the returned handle and its /dev/gpuN publication.
+ *  - Failure leaves result NULL and does not consume operations or private_data.
+ *  - Both borrowed objects must remain valid until unregister succeeds.
+ */
+int
+drv_gpu_register(
+	const struct drv_gpu_ops *ops,
+	void *private_data,
+	struct drv_gpu_device **result);
+
+/*
+ * Withdraws a device and releases its registration after all sessions close.
+ *
+ *  - EBUSY retains the handle and its borrowed state for a later retry.
+ *  - Once withdrawal starts, new opens and ioctls fail with ENODEV.
+ *  - Success consumes the handle, the caller may then release its private data
+ *    and operations.
+ *  - Old inode references retain only the offline core wrapper.
+ */
+int
+drv_gpu_unregister(
+	struct drv_gpu_device *device);
+
+#endif

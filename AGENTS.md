@@ -120,3 +120,33 @@ WS014/p001 architecture discussion resumed by user; first target is QEMU virtio-
 ## 2026-09-12 GPU phase sequence
 
 WS014 p001 supplies design decisions; p002 implements only the GPU framework; p003 integrates virtio-gpu/Venus and the capture/debug loop on Linux i915+ANV host, refining API gaps; p004 reviews final API and full standards. Native guest i915 is the separate WS029 after WS014. Read plan/ws014/qemu-venus-debug-loop.md. No Queue started. User will git add/commit documentation; do not add/commit/push.
+
+## q304 GPU framework completion（2026-09-12 historical handoff）
+
+User authorized and executed only WS014 p002. q304 / q304-i01 finished/cleared;
+no active Queue. Read plan/ws014/gpu-framework.md and plan/history/queue-q304.md.
+GPU/PCI/cdev framework tests and amd64 build passed. WS014 stays incomplete;
+p001/p003/p004 remain planning. Venus/native i915 have not started. Earlier
+no-implementation statements above are historical. Do not resume p003 without
+an applicable finite Queue. Changes remain uncommitted; user owns add/commit.
+
+q304 sync read-back caught the standing Queue Issue closing after generic
+Project Status=Done. Use Awesome Plan Status=finished for the cycle; keep the
+standing Queue Issue open and its generic Status unset. Read back both. See
+plan/tools/README.md; do not change Project workflows as a workaround.
+
+## q305 GPU registration correction（2026-09-12 latest handoff）
+
+WS014 p002 correction completed: q305 / q305-i01 finished/cleared; no active Queue.
+Use drv_gpu_register(ops, private_data, **device) / drv_gpu_unregister(device).
+Preserve the user's struct drv_gpu_ops name. GPU has no PCI-specific public
+service table, registration wrapper, deferred publish API, or fixed device count.
+Common cdev/devfs registry and directory snapshots are dynamic; VFS mount must
+preserve earlier registrations. Successful unregister consumes the handle;
+EBUSY retains handle/backend until a successful retry. See
+plan/ws014/gpu-framework.md and plan/history/queue-q305.md for ownership and tests.
+40 GPU / 80 cdev host tests, sanitizers, common registry analyzer, ILP32/LP64 ABI
+and amd64 build passed. WS014 remains incomplete; p001/p003/p004 are planning.
+Venus/native i915 are not started. Keep changes uncommitted for the user.
+The standing Queue Issue remains open with generic Project Status unset;
+use Awesome Plan Status=finished for q305 and verify both Issue and Project.

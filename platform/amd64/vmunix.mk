@@ -200,6 +200,7 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/cdev.c src/kern/devfs.c src/kern/text-display.c \
 	src/drivers/generic/console.c \
 	src/drivers/generic/input.c \
+	src/drivers/gpu/gpu.c \
 	src/kern/locale-record.c \
 	src/kern/tty.c \
 	src/drivers/generic/system-device.c src/drivers/generic/memory-device.c src/kern/shutdown.c \

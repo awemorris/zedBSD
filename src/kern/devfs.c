@@ -1,3 +1,5 @@
+/* -*- mode: c; c-file-style: "bsd"; indent-tabs-mode: t; -*- */
+
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -36,13 +38,13 @@
 #include <uapi/block.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/statvfs.h>
 
 #define DEVFS_BLOCK_INO_BASE 0x100000000ULL
 #define DEVFS_NAME_MAX 32U
-#define DEVFS_ENTRY_MAX (CDEV_MAX + DISK_MAX + 10U)
 #define DEVFS_SHM_INO 2U
 #define DEVFS_PTS_INO 3U
 #define DEVFS_INPUT_INO 4U
@@ -64,6 +66,7 @@ enum devfs_block_io_direction {
 	DEVFS_BLOCK_IO_WRITE
 };
 
+/* One copied namespace entry; its generation is revalidated at readdir. */
 struct devfs_dir_entry {
 	char name[DEVFS_NAME_MAX];
 	ino_t ino;
@@ -72,9 +75,10 @@ struct devfs_dir_entry {
 	int character;
 };
 
+/* An open directory owns this allocated snapshot until its final close. */
 struct devfs_dir_state {
 	unsigned count;
-	struct devfs_dir_entry entries[DEVFS_ENTRY_MAX];
+	struct devfs_dir_entry *entries;
 };
 
 struct devfs_block_io_range {
@@ -91,7 +95,8 @@ static DEVFS_HIGH int devfs_fixed_inode(struct inode *directory, ino_t number, s
 static DEVFS_HIGH int devfs_lookup(struct inode *directory, const struct componentname *component, struct inode **result);
 static DEVFS_HIGH int devfs_getattr(struct inode *inode, struct stat *status);
 static DEVFS_HIGH int dir_name_exists(const struct devfs_dir_state *state, const char *name);
-static DEVFS_HIGH void devfs_directory_add_cdevs(struct devfs_dir_state *state, int input_directory);
+static DEVFS_HIGH void devfs_directory_add_cdevs(struct devfs_dir_state *state, int input_directory, struct cdev **snapshot, unsigned count);
+static void devfs_cdev_snapshot_release(struct cdev **snapshot, unsigned count);
 static DEVFS_HIGH int devfs_dir_entry_live(const struct devfs_dir_entry *entry);
 static DEVFS_HIGH int devfs_dir_open(struct file *file);
 static DEVFS_HIGH int devfs_dir_close(struct file *file);
@@ -527,52 +532,78 @@ dir_name_exists(
 	const struct devfs_dir_state *state,
 	const char *name)
 {
-	unsigned i;
+	unsigned index;
+	int comparison;
 
-	/* Searches the snapshot in order. */
-	for (i = 0; i < state->count; i++) {
-		if (!strcmp(state->entries[i].name, name))
+	/* Prevents block nodes from duplicating a character-device name. */
+	for (index = 0; index < state->count; index++) {
+		comparison = strcmp(state->entries[index].name, name);
+		if (comparison == 0)
 			return 1;
 	}
 
-	/* Reports a new name. */
+	/* The name is absent from the entries already copied. */
 	return 0;
 }
 
-/* Copies the current cdev namespace into one bounded directory snapshot. */
+/* Copies matching devices into storage sized for the retained snapshot. */
 static DEVFS_HIGH void
 devfs_directory_add_cdevs(
 	struct devfs_dir_state *state,
-	int input_directory)
+	int input_directory,
+	struct cdev **snapshot,
+	unsigned count)
 {
-	struct cdev *snapshot[CDEV_MAX];
 	struct cdev *device;
 	struct devfs_dir_entry *entry;
 	uint64_t generation;
-	unsigned count;
 	unsigned index;
 	int input;
 
-	/* Lists the devices that belong in this directory, with their generation. */
-	count = cdev_snapshot(snapshot, CDEV_MAX);
+	/* Keeps event devices under input and other devices under the root. */
 	for (index = 0; index < count; index++) {
 		device = snapshot[index];
 		input = event_name(device->name);
-		generation = cdev_generation(device);
-		if (input == input_directory &&
-		    generation <= UINT64_MAX - DEVFS_CHAR_INO_BASE &&
-		    state->count < DEVFS_ENTRY_MAX) {
-			entry = &state->entries[state->count++];
-			memcpy(entry->name, device->name, DEVFS_NAME_MAX);
-			entry->name[DEVFS_NAME_MAX - 1U] = '\0';
-			entry->ino = (ino_t)(DEVFS_CHAR_INO_BASE + generation);
-			entry->type = INODE_CHAR;
-			entry->generation = generation;
-			entry->character = 1;
-		}
+		if (input != input_directory)
+			continue;
 
-		cdev_release(device);
+		/* Omits generations whose inode number cannot be represented. */
+		generation = cdev_generation(device);
+		if (generation > UINT64_MAX - DEVFS_CHAR_INO_BASE)
+			continue;
+
+		/* Records immutable identity without retaining devices until close. */
+		entry = &state->entries[state->count];
+		memcpy(entry->name, device->name, DEVFS_NAME_MAX);
+		entry->name[DEVFS_NAME_MAX - 1U] = '\0';
+		entry->ino = (ino_t)(DEVFS_CHAR_INO_BASE + generation);
+		entry->type = INODE_CHAR;
+		entry->generation = generation;
+		entry->character = 1;
+		state->count++;
 	}
+
+	/* Succeeded: each representable matching device has one copied entry. */
+	return;
+}
+
+/* Releases all generation references and their temporary pointer array. */
+static void
+devfs_cdev_snapshot_release(
+	struct cdev **snapshot,
+	unsigned count)
+{
+	unsigned index;
+
+	/* Balances the retained snapshot after copying or allocation failure. */
+	for (index = 0; index < count; index++)
+		cdev_release(snapshot[index]);
+
+	/* Drops pointer storage only after its device references are gone. */
+	kern_free(snapshot);
+
+	/* Succeeded: no temporary snapshot ownership remains. */
+	return;
 }
 
 /* Revalidates an old directory entry against the visible cdev generation. */
@@ -581,24 +612,30 @@ devfs_dir_entry_live(
 	const struct devfs_dir_entry *entry)
 {
 	struct cdev *device;
-	int live;
+	uint64_t generation;
 
-	/* Only character devices can be unpublished. */
+	/* Fixed and block entries do not carry cdev-generation lifetimes. */
 	if (!entry->character)
 		return 1;
 
-	/* The name must still be published under the same generation. */
+	/* A removed name cannot reappear in an already open directory. */
 	device = cdev_find_ref(entry->name);
 	if (device == NULL)
 		return 0;
-	live = cdev_generation(device) == entry->generation;
+
+	/* Captures immutable identity before releasing the lookup reference. */
+	generation = cdev_generation(device);
 	cdev_release(device);
 
-	/* Reports whether the entry is still valid. */
-	return live;
+	/* A newly registered device with the same name is a different entry. */
+	if (generation != entry->generation)
+		return 0;
+
+	/* Succeeded: this entry still identifies the published generation. */
+	return 1;
 }
 
-/* Snapshots a directory's entries into the open file. */
+/* Snapshots a directory without imposing a character-device count limit. */
 static DEVFS_HIGH int
 devfs_dir_open(
 	struct file *file)
@@ -606,113 +643,175 @@ devfs_dir_open(
 	struct disk_info disks[DISK_MAX];
 	struct devfs_dir_state *state;
 	struct devfs_dir_entry *entry;
+	struct cdev **snapshot;
+	size_t allocation_bytes;
 	unsigned indices[8];
 	unsigned count;
+	unsigned character_count;
+	unsigned capacity;
 	unsigned disk_count;
 	unsigned index;
-	unsigned value;
+	unsigned number;
 	unsigned used;
 	unsigned digit_index;
 	char digits[4];
 	int error;
+	int exists;
 
-	disk_count = 0;
+	/* Captures every device generation before sizing the entry storage. */
+	snapshot = NULL;
+	character_count = 0;
+	if (file->f_inode->i_ino != DEVFS_PTS_INO) {
+		error = cdev_snapshot_alloc(&snapshot, &character_count);
+		if (error != 0)
+			return error;
+	}
 
-	/* Allocates an empty snapshot. */
-	state = kern_malloc(sizeof(*state));
-	if (state == NULL)
-		return ENFILE;
-	memset(state, 0, sizeof(*state));
+	/* Reserves room for all non-character entries without count overflow. */
+	if (character_count > UINT_MAX - DISK_MAX - 10U) {
+		devfs_cdev_snapshot_release(snapshot, character_count);
+		return EOVERFLOW;
+	}
 
-	/* /dev/pts lists the live slave terminals by decimal index. */
+	/* Includes all existing disk slots, terminal slots and fixed directories. */
+	capacity = character_count + DISK_MAX + 10U;
+
+	/* Rejects byte counts that cannot be represented by this architecture. */
+	allocation_bytes = (size_t)capacity * sizeof(*entry);
+	if (allocation_bytes / sizeof(*entry) != capacity) {
+		devfs_cdev_snapshot_release(snapshot, character_count);
+		return EOVERFLOW;
+	}
+
+	/* Allocates the open-directory owner before its variable-size storage. */
+	state = kern_calloc(1, sizeof(*state));
+	if (state == NULL) {
+		devfs_cdev_snapshot_release(snapshot, character_count);
+		return ENOMEM;
+	}
+
+	/* Sizes the entry array from the retained snapshot, never a device cap. */
+	state->entries = kern_calloc(capacity, sizeof(*state->entries));
+	if (state->entries == NULL) {
+		devfs_cdev_snapshot_release(snapshot, character_count);
+		kern_free(state);
+		return ENOMEM;
+	}
+
+	/* Selects the namespace represented by this open directory. */
 	if (file->f_inode->i_ino == DEVFS_PTS_INO) {
-		count = tty_pty_snapshot(indices,
-		    sizeof(indices) / sizeof(indices[0]));
-		for (index = 0;
-		     index < count && index < sizeof(indices) / sizeof(indices[0]);
-		     index++) {
-			entry = &state->entries[state->count++];
+		/* Lists the live slave terminals by their existing bounded indices. */
+		count = tty_pty_snapshot(
+			indices,
+			sizeof(indices) / sizeof(indices[0]));
+		for (index = 0; index < count; index++) {
+			entry = &state->entries[state->count];
 
-			/* Renders the index in decimal, least significant digit first. */
-			value = indices[index];
+			/* Renders a terminal index least significant decimal digit first. */
+			number = indices[index];
 			used = 0;
 			do {
-				digits[used++] = (char)('0' + value % 10U);
-				value /= 10U;
-			} while (value != 0);
-			for (digit_index = 0; digit_index < used; digit_index++)
+				digits[used++] = (char)('0' + number % 10U);
+				number /= 10U;
+			} while (number != 0);
+
+			/* Reverses the digits into their directory name order. */
+			for (digit_index = 0; digit_index < used; digit_index++) {
 				entry->name[digit_index] =
-				    digits[used - digit_index - 1U];
+					digits[used - digit_index - 1U];
+			}
+
+			/* Associates the rendered name with its terminal inode number. */
 			entry->name[used] = '\0';
-			entry->ino =
-			    (ino_t)(DEVFS_PTS_INO_BASE + indices[index]);
+			entry->ino = (ino_t)(DEVFS_PTS_INO_BASE + indices[index]);
 			entry->type = INODE_CHAR;
+			state->count++;
+		}
+	} else if (file->f_inode->i_ino == DEVFS_INPUT_INO) {
+		/* Copies every event device visible at snapshot acquisition. */
+		devfs_directory_add_cdevs(state, 1, snapshot, character_count);
+	} else {
+		/* Publishes the fixed shared-memory directory in the root listing. */
+		entry = &state->entries[state->count];
+		strcpy(entry->name, "shm");
+		entry->ino = DEVFS_SHM_INO;
+		entry->type = INODE_DIR;
+		state->count++;
+
+		/* Publishes the fixed terminal directory in the root listing. */
+		entry = &state->entries[state->count];
+		strcpy(entry->name, "pts");
+		entry->ino = DEVFS_PTS_INO;
+		entry->type = INODE_DIR;
+		state->count++;
+
+		/* Publishes the fixed event directory in the root listing. */
+		entry = &state->entries[state->count];
+		strcpy(entry->name, "input");
+		entry->ino = DEVFS_INPUT_INO;
+		entry->type = INODE_DIR;
+		state->count++;
+
+		/* Copies every root-level device into its reserved snapshot space. */
+		devfs_directory_add_cdevs(state, 0, snapshot, character_count);
+
+		/* Obtains the block entries after retaining character-name precedence. */
+		disk_count = 0;
+		error = disk_registry_snapshot(disks, DISK_MAX, &disk_count);
+		if (error != 0) {
+			devfs_cdev_snapshot_release(snapshot, character_count);
+			kern_free(state->entries);
+			kern_free(state);
+			return error;
 		}
 
-		file->f_data = state;
-		return 0;
+		/* Hides a disk when a character entry already owns its name. */
+		for (index = 0; index < disk_count; index++) {
+			exists = dir_name_exists(state, disks[index].name);
+			if (exists)
+				continue;
+
+			/* Records the block name and its existing device-number identity. */
+			entry = &state->entries[state->count];
+			memcpy(entry->name, disks[index].name, DEVFS_NAME_MAX);
+			entry->name[DEVFS_NAME_MAX - 1U] = '\0';
+			entry->ino = (ino_t)(DEVFS_BLOCK_INO_BASE +
+				(uint64_t)disks[index].dev);
+			entry->type = INODE_BLOCK;
+			state->count++;
+		}
 	}
 
-	/* /dev/input lists the event devices. */
-	if (file->f_inode->i_ino == DEVFS_INPUT_INO) {
-		devfs_directory_add_cdevs(state, 1);
-		file->f_data = state;
-		return 0;
-	}
-
-	/* The root lists the fixed directories, the other devices, and the disks. */
-	strcpy(state->entries[state->count].name, "shm");
-	state->entries[state->count].ino = DEVFS_SHM_INO;
-	state->entries[state->count].type = INODE_DIR;
-	state->count++;
-	strcpy(state->entries[state->count].name, "pts");
-	state->entries[state->count].ino = DEVFS_PTS_INO;
-	state->entries[state->count].type = INODE_DIR;
-	state->count++;
-	strcpy(state->entries[state->count].name, "input");
-	state->entries[state->count].ino = DEVFS_INPUT_INO;
-	state->entries[state->count].type = INODE_DIR;
-	state->count++;
-	devfs_directory_add_cdevs(state, 0);
-	error = disk_registry_snapshot(disks, DISK_MAX, &disk_count);
-	if (error != 0) {
-		kern_free(state);
-		return error;
-	}
-
-	/* A disk whose name a character device took is hidden. */
-	for (index = 0; index < disk_count; index++) {
-		if (dir_name_exists(state, disks[index].name))
-			continue;
-		entry = &state->entries[state->count++];
-		memcpy(entry->name, disks[index].name, DEVFS_NAME_MAX);
-		entry->name[DEVFS_NAME_MAX - 1U] = '\0';
-		entry->ino = (ino_t)(DEVFS_BLOCK_INO_BASE +
-		    (uint64_t)disks[index].dev);
-		entry->type = INODE_BLOCK;
-	}
-
+	/* Transfers the copied snapshot after balancing temporary references. */
+	devfs_cdev_snapshot_release(snapshot, character_count);
 	file->f_data = state;
 
-	/* Reports the opened directory. */
+	/* Succeeded: this open directory owns every copied entry until close. */
 	return 0;
 }
 
-/* Frees a directory snapshot. */
+/* Frees the variable-size snapshot owned by one open directory. */
 static DEVFS_HIGH int
 devfs_dir_close(
 	struct file *file)
 {
-	/* Frees the snapshot when the open succeeded. */
-	if (file->f_data != NULL)
-		kern_free(file->f_data);
+	struct devfs_dir_state *state;
+
+	/* A failed open leaves no snapshot for final close to release. */
+	state = file->f_data;
+	if (state != NULL) {
+		kern_free(state->entries);
+		kern_free(state);
+	}
+
+	/* Prevents a second close from observing transferred ownership. */
 	file->f_data = NULL;
 
-	/* Reports the closed directory. */
+	/* Succeeded: no directory-snapshot storage remains owned by the file. */
 	return 0;
 }
 
-/* Reads the next live entry of a directory snapshot. */
+/* Reads the next still-published entry of an open directory snapshot. */
 static DEVFS_HIGH int
 devfs_readdir(
 	struct file *file,
@@ -721,27 +820,38 @@ devfs_readdir(
 {
 	struct devfs_dir_state *state;
 	unsigned index;
+	int live;
 
-	/* A directory without a snapshot was never opened. */
+	/* A directory without a snapshot was never successfully opened. */
 	state = file->f_data;
 	if (state == NULL)
 		return EIO;
 
-	/* Skips any generation unpublished after this directory was opened. */
+	/* Treats offsets outside the representable snapshot as end-of-file. */
+	if (file->f_offset < 0 || (uint64_t)file->f_offset >= state->count) {
+		*eof = 1;
+		return 0;
+	}
+
+	/* Skips generations removed or replaced since the directory was opened. */
 	index = (unsigned)file->f_offset;
-	while (index < state->count &&
-	       !devfs_dir_entry_live(&state->entries[index])) {
+	while (index < state->count) {
+		live = devfs_dir_entry_live(&state->entries[index]);
+		if (live)
+			break;
+
+		/* Advances past the removed generation without returning a stale name. */
 		index++;
 		file->f_offset = (off_t)index;
 	}
 
-	/* Reports the end of the snapshot. */
+	/* Reports exhaustion after the last surviving entry has been consumed. */
 	if (index >= state->count) {
 		*eof = 1;
 		return 0;
 	}
 
-	/* Copies the entry and advances. */
+	/* Copies immutable snapshot data and advances the directory position. */
 	memset(entry, 0, sizeof(*entry));
 	entry->d_ino = state->entries[index].ino;
 	entry->d_type = state->entries[index].type;
@@ -749,7 +859,7 @@ devfs_readdir(
 	file->f_offset++;
 	*eof = 0;
 
-	/* Reports the read entry. */
+	/* Succeeded: returns one current directory entry. */
 	return 0;
 }
 
@@ -1266,37 +1376,47 @@ no_space:
 	return ENOSPC;
 }
 
-/* Describes the devfs mount by its entry capacity. */
+/* Describes the current synthesized namespace without a fixed inode quota. */
 static DEVFS_HIGH int
 devfs_statvfs(
 	struct mount *mountp,
 	struct statvfs *result)
 {
+	struct disk_info disks[DISK_MAX];
+	unsigned indices[8];
 	unsigned character_count;
+	unsigned disk_count;
+	unsigned terminal_count;
+	int error;
 
+	/* The synthesized namespace is shared by every devfs mount. */
 	(void)mountp;
 
-	/* Rejects a missing result. */
+	/* Requires storage for the caller's filesystem description. */
 	if (result == NULL)
 		return EINVAL;
 
-	/* Reports the entries left after the character devices. */
-	character_count = cdev_count();
+	/* Measures the existing device classes instead of an artificial capacity. */
+	disk_count = 0;
+	error = disk_registry_snapshot(disks, DISK_MAX, &disk_count);
+	if (error != 0)
+		return error;
 
+	/* Samples live character devices and terminal nodes independently. */
+	character_count = cdev_count();
+	terminal_count = tty_pty_snapshot(
+		indices,
+		sizeof(indices) / sizeof(indices[0]));
+
+	/* Reports no reserved free-inode pool for this synthesized filesystem. */
 	memset(result, 0, sizeof(*result));
 	result->f_bsize = 1U;
 	result->f_frsize = 1U;
-	result->f_files = DEVFS_ENTRY_MAX;
-
-	if (character_count < DEVFS_ENTRY_MAX)
-		result->f_ffree = DEVFS_ENTRY_MAX - character_count;
-	else
-		result->f_ffree = 0;
-
-	result->f_favail = result->f_ffree;
+	result->f_files = (fsfilcnt_t)character_count + disk_count +
+		terminal_count + 4U;
 	result->f_namemax = DEVFS_NAME_MAX - 1U;
 
-	/* Reports the description. */
+	/* Succeeded: registration remains constrained by allocation, not a quota. */
 	return 0;
 }
 

@@ -163,6 +163,27 @@ struct drv_pci_bus_ops {
 		unsigned);
 };
 
+/*
+ * One subsystem publication contract staged by a PCI driver's attach.
+ *
+ * The interface and its opaque argument remain alive until detach succeeds.
+ * PCI invokes publish after attach and unpublish before hardware detach.
+ * A failed publish must undo its own visibility and acquired references.
+ * A failed unpublish retains all state and may be retried; it must prevent
+ * new operations from making teardown unbounded. Neither callback frees
+ * the driver's hardware instance. PCI serializes these lifecycle callbacks.
+ */
+struct drv_pci_service_interface {
+	int (
+		*publish)(
+		struct drv_pci_device *,
+		void *);
+	int (
+		*unpublish)(
+		struct drv_pci_device *,
+		void *);
+};
+
 struct drv_pci_driver {
 	const char *name;
 	const struct drv_pci_id *ids;
@@ -486,6 +507,18 @@ int
 drv_pci_device_set_driver_data(
 	struct drv_pci_device *d,
 	void *p);
+
+/*
+ * Stage one service during this driver's attach callback. Both callbacks
+ * and a driver detach callback are required. The opaque argument may be NULL.
+ * Staging does not publish anything; attach failure must clean its own state.
+ * Outside attach, or when a service is already staged, this returns EBUSY.
+ */
+int
+drv_pci_device_set_service(
+	struct drv_pci_device *device,
+	const struct drv_pci_service_interface *interface,
+	void *argument);
 int
 drv_pci_device_probe(
 	struct drv_pci_device *d);

@@ -53,6 +53,10 @@ struct drv_pci_bus {
 	struct drv_pci_device *bridge, *devices;
 };
 
+/*
+ * One enumerated function retained by its bus for the bus's lifetime.
+ * Binding transactions serialize the borrowed driver and service references.
+ */
 struct drv_pci_device {
 	struct drv_pci_address address;
 	struct drv_pci_bus *bus;
@@ -60,6 +64,15 @@ struct drv_pci_device {
 	struct drv_pci_bus *subordinate;
 	struct drv_pci_driver *driver;
 	void *driver_data;
+	/* The lifecycle owner holds these borrowed service references. */
+	const struct drv_pci_service_interface *service;
+	void *service_argument;
+	/* Only the active attach may stage a service for its candidate driver. */
+	struct drv_pci_driver *attaching_driver;
+	/* Publication remains owned until unpublish succeeds, including retries. */
+	unsigned service_published;
+	/* Serializes probe, service publication, rollback, and detach. */
+	volatile unsigned binding_busy;
 	uint16_t vendor, product, subvendor, subproduct;
 	uint32_t class_code;
 	uint8_t revision, header_type;
@@ -114,6 +127,7 @@ static int initialized;
 
 int drv_pci_device_probe(struct drv_pci_device *device);
 
+static int pci_device_detach_owned(struct drv_pci_device *device, unsigned flags);
 static int cfg_read(struct drv_pci_bus *bus, const struct drv_pci_address *a, unsigned offset, unsigned width, uint32_t *value);
 static struct drv_pci_device * find_device_on_bus(struct drv_pci_bus *bus, const struct drv_pci_address *address);
 static int read_device(struct drv_pci_device *device);
@@ -1836,70 +1850,188 @@ drv_pci_driver_match(
 }
 
 /*
- * Offers a device to every registered driver in turn.
+ * Stages a subsystem service for publication after hardware attach.
  */
 int
-drv_pci_device_probe(
-	struct drv_pci_device *d)
+drv_pci_device_set_service(
+	struct drv_pci_device *device,
+	const struct drv_pci_service_interface *interface,
+	void *argument)
 {
-	struct pci_driver_entry *e, *best = NULL;
-	const struct drv_pci_id *i, *best_id = NULL;
-	int score, best_score = 0, error;
+	/* Rejects a descriptor that cannot complete both lifecycle boundaries. */
+	if (device == NULL)
+		return EINVAL;
 
-	/* Checks the current descriptor. */
-	if (!d || d->driver)
-		return d ? EBUSY : EINVAL;
-	/* Process each linked entry. */
-	for (e = drivers; e; e = e->next) {
-		/* Checks the drv pci driver match result. */
-		if ((score = drv_pci_driver_match(e->driver, d, &i)) >
-		    best_score) {
-			best = e;
-			best_id = i;
-			best_score = score;
-		}
-	}
+	/* Requires an immutable publication contract supplied by the driver. */
+	if (interface == NULL)
+		return EINVAL;
 
-	/* Handles the best condition. */
-	if (!best)
-		return ENODEV;
+	/* Requires a publication operation before accepting its lifetime. */
+	if (interface->publish == NULL)
+		return EINVAL;
 
-	/* Checks the operation status. */
-	error = best->driver->attach ? best->driver->attach(d, best_id) : 0;
-	if (error)
-		return error;
-	d->driver = best->driver;
+	/* Requires a checked teardown boundary before accepting publication. */
+	if (interface->unpublish == NULL)
+		return EINVAL;
 
-	/* Succeeded. */
+	/* Only the attach callback may hand ownership to its PCI transaction. */
+	if (device->attaching_driver == NULL)
+		return EBUSY;
+
+	/* Hardware must be recoverable when later service publication fails. */
+	if (device->attaching_driver->detach == NULL)
+		return EINVAL;
+
+	/* Refuses replacement of a descriptor already borrowed by this attach. */
+	if (device->service != NULL)
+		return EBUSY;
+
+	/* Keeps the descriptor private until the hardware attach succeeds. */
+	device->service = interface;
+	device->service_argument = argument;
+
+	/* Succeeded: PCI now owns the later publication decision. */
 	return 0;
 }
 
 /*
- * Tells the driver holding a device to give it up.
+ * Attaches the best matching driver and publishes its staged service.
+ */
+int
+drv_pci_device_probe(
+	struct drv_pci_device *device)
+{
+	struct pci_driver_entry *entry;
+	struct pci_driver_entry *best;
+	const struct drv_pci_id *id;
+	const struct drv_pci_id *best_id;
+	int acquired;
+	int score;
+	int best_score;
+	int error;
+	int cleanup_error;
+
+	/* Requires a device whose lifecycle can be claimed. */
+	if (device == NULL)
+		return EINVAL;
+
+	/* Excludes concurrent and reentrant attachment or teardown. */
+	acquired = atomic_raw_try_acquire_zero(&device->binding_busy);
+	if (acquired == 0)
+		return EBUSY;
+
+	/* Preserves a live binding, including cleanup retained after failure. */
+	error = EBUSY;
+	if (device->driver != NULL)
+		goto release_binding;
+
+	/* Selects the highest scoring driver without changing device ownership. */
+	best = NULL;
+	best_id = NULL;
+	best_score = 0;
+	for (entry = drivers; entry != NULL; entry = entry->next) {
+		/* Obtains the candidate's match strength and matching identifier. */
+		score = drv_pci_driver_match(entry->driver, device, &id);
+
+		/* Replaces the candidate only with a strictly stronger match. */
+		if (score > best_score) {
+			best = entry;
+			best_id = id;
+			best_score = score;
+		}
+	}
+
+	/* Leaves an unmatched device available to a later driver registration. */
+	error = ENODEV;
+	if (best == NULL)
+		goto release_binding;
+
+	/* Admits service staging only while the hardware attach is executing. */
+	device->attaching_driver = best->driver;
+	error = 0;
+	if (best->driver->attach != NULL)
+		error = best->driver->attach(device, best_id);
+
+	/* Closes the staging window before any subsystem becomes visible. */
+	device->attaching_driver = NULL;
+
+	/* An unsuccessful attach owns its cleanup and leaves no service behind. */
+	if (error != 0) {
+		device->service = NULL;
+		device->service_argument = NULL;
+		goto release_binding;
+	}
+
+	/* Retains the hardware owner even if later publication cannot unwind. */
+	device->driver = best->driver;
+
+	/* Publishes only the descriptor returned by a successful hardware attach. */
+	if (device->service != NULL) {
+		/* Gives the subsystem its already initialized device instance. */
+		error = device->service->publish(device, device->service_argument);
+		if (error != 0) {
+			/* Keeps failed hardware cleanup bound so detach can retry it. */
+			cleanup_error = pci_device_detach_owned(device, 0);
+			if (cleanup_error != 0) {
+				/* Reports both the publication fault and retained cleanup. */
+				kern_logf(
+					"pci: service publication failed (%d), "
+					"detach retained (%d)\n",
+					error,
+					cleanup_error);
+			}
+
+			goto release_binding;
+		}
+
+		/* Marks the reference that unpublish must release before hardware. */
+		device->service_published = 1;
+	}
+
+release_binding:
+	/* Allows a later probe or cleanup retry after this transaction ends. */
+	atomic_raw_store_release(&device->binding_busy, 0);
+
+	/* Reports the first operation that prevented a complete attachment. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the driver and any subsystem service are both attached. */
+	return 0;
+}
+
+/*
+ * Removes a published service before releasing its hardware instance.
  */
 int
 drv_pci_device_detach(
-	struct drv_pci_device *d,
-	unsigned f)
+	struct drv_pci_device *device,
+	unsigned flags)
 {
-	int e = 0;
+	int acquired;
+	int error;
 
-	/* Checks the current descriptor. */
-	if (!d || !d->driver)
+	/* Requires a device whose lifecycle can be claimed. */
+	if (device == NULL)
 		return EINVAL;
 
-	/* Checks the current descriptor. */
-	if (d->driver->detach)
-		e = d->driver->detach(d, f);
+	/* Keeps publication and another detach from sharing the same instance. */
+	acquired = atomic_raw_try_acquire_zero(&device->binding_busy);
+	if (acquired == 0)
+		return EBUSY;
 
-	/* Handles the e condition. */
-	if (!e) {
-		d->driver = NULL;
-		d->driver_data = NULL;
-	}
+	/* Releases subsystem references before calling the hardware destructor. */
+	error = pci_device_detach_owned(device, flags);
 
-	/* Returns the computed result. */
-	return e;
+	/* Allows an unsuccessful teardown to be retried by its retained owner. */
+	atomic_raw_store_release(&device->binding_busy, 0);
+
+	/* Reports why the service or hardware must remain owned. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the device can be offered to another driver. */
+	return 0;
 }
 
 /*
@@ -2161,6 +2293,47 @@ find_device_on_bus(
 
 	/* Reports that no result is available. */
 	return NULL;
+}
+
+/* Releases an attached instance while its PCI lifecycle is exclusively held. */
+static int
+pci_device_detach_owned(
+	struct drv_pci_device *device,
+	unsigned flags)
+{
+	int error;
+
+	/* Refuses teardown when no successfully attached driver owns hardware. */
+	if (device->driver == NULL)
+		return EINVAL;
+
+	/* Keeps hardware alive until every published subsystem reference drains. */
+	if (device->service_published != 0) {
+		/* Stops publication and waits for the subsystem's checked boundary. */
+		error = device->service->unpublish(device, device->service_argument);
+		if (error != 0)
+			return error;
+
+		/* Prevents retrying an already released subsystem during HW cleanup. */
+		device->service_published = 0;
+	}
+
+	/* Lets the hardware owner retain DMA and interrupt state on failure. */
+	if (device->driver->detach != NULL) {
+		/* Destroys hardware only after subsystem callbacks can no longer run. */
+		error = device->driver->detach(device, flags);
+		if (error != 0)
+			return error;
+	}
+
+	/* Forgets borrowed pointers only after the hardware owner releases them. */
+	device->driver = NULL;
+	device->driver_data = NULL;
+	device->service = NULL;
+	device->service_argument = NULL;
+
+	/* Succeeded: no subsystem or hardware ownership remains on this binding. */
+	return 0;
 }
 
 /* Reads everything the subsystem keeps about one device. */
