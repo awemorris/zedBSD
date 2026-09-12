@@ -31,7 +31,12 @@
 #include <string.h>
 
 #define OVERLAY_INODE_MAX 256U
-#define OVERLAY_IDENTITY_MAX 128U
+/*
+ * One identity per inode slot: an identity is held exactly as long
+ * as the inode that uses it, so the table cannot be asked for more
+ * than the driver can allocate.
+ */
+#define OVERLAY_IDENTITY_MAX OVERLAY_INODE_MAX
 #define OVERLAY_METADATA_MAX 128U
 #define OVERLAY_JOURNAL_BYTES (128U * 1024U)
 #define OVERLAY_RECORD_BYTES 512U
@@ -195,6 +200,9 @@ static OVERLAY_HIGH struct overlay_inode_info * overlay_info(const struct inode 
 static OVERLAY_HIGH int overlay_slot_index(const struct inode *inode);
 static OVERLAY_HIGH struct inode * overlay_alloc_inode(struct mount *mountp);
 static OVERLAY_HIGH void overlay_free_inode(struct inode *inode);
+static OVERLAY_HIGH int overlay_identity_in_use(
+	const struct overlay_mount_state *state, unsigned index,
+	const struct inode *leaving);
 static OVERLAY_HIGH const struct path * overlay_select_path_locked(const struct overlay_inode_info *info, enum overlay_path_selection selection);
 static OVERLAY_HIGH int overlay_path_snapshot(struct inode *inode,
     enum overlay_path_selection selection, struct path *result);
@@ -4408,6 +4416,40 @@ out:
 	return 0;
 }
 
+/*
+ * Tests whether an identity still belongs to some other live inode.
+ *
+ * The cache keeps one inode per path, so an identity normally has a
+ * single owner; this confirms it before the slot is released, so a
+ * reclaim can never take a number another inode is still reporting.
+ */
+static OVERLAY_HIGH int
+overlay_identity_in_use(
+	const struct overlay_mount_state *state,
+	unsigned index,
+	const struct inode *leaving)
+{
+	unsigned i;
+
+	/* Looks for another live inode of this mount holding the slot. */
+	for (i = 0; i < OVERLAY_INODE_MAX; i++) {
+		if (!overlay_inodes[i].used)
+			continue;
+		if (&overlay_inodes[i].inode == leaving)
+			continue;
+		if (overlay_inodes[i].inode.i_mount == NULL ||
+		    overlay_inodes[i].inode.i_mount->m_data != state)
+			continue;
+
+		/* Reports the slot as still owned. */
+		if (overlay_inodes[i].info.identity_index == index)
+			return 1;
+	}
+
+	/* Reports the slot as free to release. */
+	return 0;
+}
+
 /* Retires an inode's identity and marks the inode dead. */
 static OVERLAY_HIGH void
 overlay_retire_inode(
@@ -4798,10 +4840,14 @@ overlay_reclaim(
 	path_release(&info->upper);
 	path_release(&info->lower);
 
-	/* A retired identity is freed once its inode is gone. */
-	if (state != NULL &&
-	    info->identity_index < OVERLAY_IDENTITY_MAX &&
-	    state->identities[info->identity_index].state == OVERLAY_ID_RETIRED)
+	/*
+	 * The identity is freed once its inode is gone, whether the file was
+	 * deleted or the inode was simply reclaimed. The number only has to
+	 * stay put while the kernel still knows the inode; after that nothing
+	 * can observe it, and holding the slot would fill the table.
+	 */
+	if (state != NULL && info->identity_index < OVERLAY_IDENTITY_MAX &&
+	    !overlay_identity_in_use(state, info->identity_index, inode))
 		memset(&state->identities[info->identity_index], 0,
 		       sizeof(state->identities[info->identity_index]));
 }
