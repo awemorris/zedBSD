@@ -1,7 +1,12 @@
-/* SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 /*
  * Generic PC-98 disk IPL selector.
- * Copyright (C) 2026 Awe Morris
  *
  * The ROM loads this 512-byte sector at 1fc0:0000.  It relocates itself and,
  * without changing the display or waiting for input, loads exactly one
@@ -28,8 +33,11 @@ _start:
 relocate:
 	cli
 	cld
-	/* Do not depend on the firmware's stack.  Some real PC-9821 ROMs enter
-	 * the IPL with an SS:SP pair which is only suitable for firmware use. */
+
+	/*
+	 * Do not depend on the firmware's stack.  Some real PC-9821 ROMs enter
+	 * the IPL with an SS:SP pair which is only suitable for firmware use.
+	 */
 	movw	%cs, %ax
 	movw	%ax, %ds
 	movw	%si, saved_si
@@ -49,8 +57,10 @@ relocated:
 	movw	%ax, %ds
 	sti
 #if KERN_PC98_IPL_DIAGNOSTIC
-	/* One bounded tone means that the ROM entered LBA 0 and this IPL now
-	 * owns its stack.  Keep all physical tracing out of the normal image. */
+	/*
+	 * One bounded tone means that the ROM entered LBA 0 and this IPL now
+	 * owns its stack.  Keep all physical tracing out of the normal image.
+	 */
 	movw	$0x4531, %dx	/* "1E": Stage 1 entry. */
 	movw	$1, %cx
 	call	diagnostic_checkpoint
@@ -64,9 +74,12 @@ relocated:
 	andb	$0x7f, %al
 	orb	$0x80, %al
 	movb	%al, boot_id
-	/* This IPL always reads the fixed physical sector C=0/H=0/S=2 and does
+
+	/*
+ 	 * This IPL always reads the fixed physical sector C=0/H=0/S=2 and does
 	 * not consume drive geometry.  Establish the destination immediately
-	 * before that one bounded AH=06 transfer. */
+	 * before that one bounded AH=06 transfer.
+	 */
 	call	prepare_target
 	xorw	%ax, %ax
 	movw	%ax, %ds
@@ -101,8 +114,10 @@ boot_failure_read:
 	movw	$3, %cx
 #endif
 boot_failure:
-	/* Failure-only physical diagnostic.  PC-98 text characters and their
-	 * attributes occupy corresponding words at A000: and A200:. */
+	/*
+ 	 * Failure-only physical diagnostic.  PC-98 text characters and their
+	 * attributes occupy corresponding words at A000: and A200:.
+	 */
 	movw	$0xa000, %ax
 	movw	%ax, %es
 	xorw	%bx, %bx
@@ -151,16 +166,21 @@ diagnostic_checkpoint:
 
 	movb	%cl, %bl
 1:
-	/* AH=06h starts the standard PC-98 BIOS timed beep and, unlike a raw
-	 * speaker write, also supplies the timer interrupts used by HLT below. */
+	/*
+	 * AH=06h starts the standard PC-98 BIOS timed beep and, unlike a raw
+	 * speaker write, also supplies the timer interrupts used by HLT below.
+	 */
 	movb	$0x06, %ah
 	movw	$8, %cx
 	movw	$1000, %dx
 	int	$0x1c
 	movw	$8, %cx
 	call	diagnostic_wait_ticks
-	/* Start a second timed beep but gate the speaker off immediately.  Its
-	 * active BIOS timer provides a CPU-speed-independent inter-tone pause. */
+
+	/*
+	 * Start a second timed beep but gate the speaker off immediately.  Its
+	 * active BIOS timer provides a CPU-speed-independent inter-tone pause.
+	 */
 	movb	$0x06, %ah
 	movw	$8, %cx
 	movw	$1000, %dx
@@ -171,6 +191,7 @@ diagnostic_checkpoint:
 	call	diagnostic_wait_ticks
 	decb	%bl
 	jnz	1b
+
 	/* Separate this group from the next-stage checkpoint. */
 	movb	$0x06, %ah
 	movw	$32, %cx
@@ -204,5 +225,4 @@ boot_id:
 	.org	0x01fc
 	.byte	9		/* PC-98 boot-menu version. */
 	.byte	0		/* Reserved. */
-	/* Required by later PC-9821 firmware before it will execute the IPL. */
-	.word	0xaa55
+	.word	0xaa55		/* Required by later PC-9821 firmware before it will execute the IPL. */

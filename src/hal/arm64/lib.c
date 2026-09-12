@@ -22,7 +22,21 @@ void *hal_malloc(size_t n) { if (alloc_fn == NULL) HAL_FATAL("allocator unset");
 void hal_free(void *p) { if (free_fn == NULL) HAL_FATAL("allocator unset"); free_fn(p); }
 
 int hal_putchar(int c) { hal_putc(c); return c; }
-int hal_puts(const char *s) { hal_cons_write(s); return 0; }
+/* Writes one terminated string through the early console. */
+static void
+cons_puts(
+	const char *string)
+{
+	/* Ignores a missing input string. */
+	if (string == NULL)
+		return;
+
+	/* Emits every byte in order. */
+	while (*string != '\0')
+		hal_putc((unsigned char)*string++);
+}
+
+int hal_puts(const char *s) { cons_puts(s); return 0; }
 static void put_u64(uint64_t value, unsigned base, int width)
 {
 	char b[24]; int n = 0;
@@ -43,7 +57,7 @@ int hal_printf(const char *fmt, ...)
 		if (*fmt == 'l') { long_arg = 1; fmt++; if (*fmt == 'l') fmt++; }
 		switch (*fmt++) {
 		case 'c': hal_putc(__builtin_va_arg(ap, int)); break;
-		case 's': { const char *s = __builtin_va_arg(ap, const char *); hal_cons_write(s ? s : "(null)"); break; }
+		case 's': { const char *s = __builtin_va_arg(ap, const char *); cons_puts(s ? s : "(null)"); break; }
 		case 'u': put_u64(long_arg ? __builtin_va_arg(ap, uint64_t) : __builtin_va_arg(ap, uint32_t), 10, width); break;
 		case 'x': put_u64(long_arg ? __builtin_va_arg(ap, uint64_t) : __builtin_va_arg(ap, uint32_t), 16, width); break;
 		case 'p': put_u64((uintptr_t)__builtin_va_arg(ap, void *), 16, 16); break;

@@ -1,5 +1,14 @@
-/* PC/AT ZBL2 Stage 2: select the active partition and chain its PBR. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * PC/AT ZBL2 Stage 2: select the active partition and chain its PBR.
+ */
+
 .intel_syntax noprefix
 .code16
 .section .text

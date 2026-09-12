@@ -1,4 +1,14 @@
-/* Versioned PC-98 PBR -> IO.SYS bootstrap handoff at physical 0000:0700. */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Versioned PC-98 PBR -> IO.SYS bootstrap handoff at physical 0000:0700.
+ */
+
 	.set HANDOFF,             0x0700
 	.set HANDOFF_MAGIC,       0x3150395a /* Z9P1 */
 	.set HANDOFF_VERSION,     1

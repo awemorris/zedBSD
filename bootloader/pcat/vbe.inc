@@ -1,5 +1,14 @@
-/* Legacy-BIOS VBE 2.0+ linear-framebuffer selection for amd64 loaders.
- * Included by bootzbsd.S while it is still in real mode. */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Legacy-BIOS VBE 2.0+ linear-framebuffer selection for amd64 loaders.
+ * Included by bootzbsd.S while it is still in real mode.
+ */
 
 .set VBE_CONTROLLER_INFO_SIZE, 512
 .set VBE_MODE_INFO_SIZE,       256
@@ -8,9 +17,11 @@
 .set VBE_MODE_LINEAR,          0x0080
 .set VBE_MEMORY_DIRECT_COLOR,  6
 
-/* Prefer a conservative 32-bpp mode.  1024x768, 800x600, and 640x480 are
+/*
+ * Prefer a conservative 32-bpp mode.  1024x768, 800x600, and 640x480 are
  * deliberately the only accepted geometries so the early console always has
- * at least 80x25 cells and the graphics ABI receives a familiar mode. */
+ * at least 80x25 cells and the graphics ABI receives a familiar mode.
+ */
 vbe_setup_framebuffer:
 	pushad
 	push ds
@@ -193,8 +204,10 @@ vbe_setup_done:
 	popad
 	ret
 
-/* Install the same early high-half framebuffer window used by the UEFI
- * transition.  GS must already carry the loader's flat unreal-mode cache. */
+/*
+ * Install the same early high-half framebuffer window used by the UEFI
+ * transition.  GS must already carry the loader's flat unreal-mode cache.
+ */
 vbe_map_framebuffer:
 	test word ptr [long_handoff + ZBL6_HANDOFF_FLAGS_OFFSET], 0x0008
 	jz 2f

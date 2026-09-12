@@ -176,7 +176,7 @@ $(ZEDBSD_LLVM_CONFIG_STAMP): $(ZEDBSD_LLVM_MAKEFILE) | llvm-source-verify
 		{ echo 'LLVM: host C/C++ compiler is unavailable' >&2; exit 1; }; \
 	host_cc_version=$$("$$host_cc" --version | sed -n '1p'); \
 	host_cxx_version=$$("$$host_cxx" --version | sed -n '1p'); \
-	identity="version=$(ZEDBSD_LLVM_VERSION) patch=$(ZEDBSD_LLVM_PATCH_LEVEL) host-cc=$$host_cc ($$host_cc_version) host-cxx=$$host_cxx ($$host_cxx_version) projects=clang,lld targets=X86 build=Release compile-jobs=4 link-jobs=2 analyzer=off objc-rewriter=off distribution=$(ZEDBSD_LLVM_DISTRIBUTION_COMPONENTS)"; \
+	identity="version=$(ZEDBSD_LLVM_VERSION) patch=$(ZEDBSD_LLVM_PATCH_LEVEL) host-cc=$$host_cc ($$host_cc_version) host-cxx=$$host_cxx ($$host_cxx_version) projects=clang,lld targets=PowerPC,AArch64,X86 build=Release compile-jobs=4 link-jobs=2 analyzer=off objc-rewriter=off distribution=$(ZEDBSD_LLVM_DISTRIBUTION_COMPONENTS)"; \
 	if test -f '$(ZEDBSD_LLVM_BUILD)/.zedbsd-config-identity' && \
 	   test "$$(cat '$(ZEDBSD_LLVM_BUILD)/.zedbsd-config-identity')" != "$$identity"; then \
 		echo 'LLVM: reconfiguring generated build tree for the current bounded-memory profile'; \
@@ -189,7 +189,7 @@ $(ZEDBSD_LLVM_CONFIG_STAMP): $(ZEDBSD_LLVM_MAKEFILE) | llvm-source-verify
 		-DCMAKE_C_COMPILER='$(ZEDBSD_LLVM_HOST_CC)' \
 		-DCMAKE_CXX_COMPILER='$(ZEDBSD_LLVM_HOST_CXX)' \
 		-DLLVM_ENABLE_PROJECTS='clang;lld' \
-		-DLLVM_TARGETS_TO_BUILD=X86 \
+		-DLLVM_TARGETS_TO_BUILD='PowerPC;AArch64;X86' \
 		-DLLVM_ENABLE_TERMINFO=OFF \
 		-DLLVM_ENABLE_ZLIB=OFF \
 		-DLLVM_ENABLE_ZSTD=OFF \
@@ -212,7 +212,7 @@ $(ZEDBSD_LLVM_CONFIG_STAMP): $(ZEDBSD_LLVM_MAKEFILE) | llvm-source-verify
 llvm-configure: $(ZEDBSD_LLVM_CONFIG_STAMP)
 
 $(ZEDBSD_LLVM_BUILD_STAMP): $(ZEDBSD_LLVM_CONFIG_STAMP) $(ZEDBSD_LLVM_MAKEFILE)
-	cmake --build '$(ZEDBSD_LLVM_BUILD)' --target distribution --parallel 16
+	cmake --build '$(ZEDBSD_LLVM_BUILD)' --target distribution --parallel
 	@touch '$@'
 
 llvm-build: $(ZEDBSD_LLVM_BUILD_STAMP)
@@ -230,8 +230,7 @@ $(ZEDBSD_LLVM_INSTALL_STAMP): $(ZEDBSD_LLVM_MAKEFILE)
 		echo 'LLVM: replacing the recognized generated installation for the new patch identity'; \
 		find '$(ZEDBSD_LLVM_INSTALL)' -depth -delete; \
 	fi
-	cmake --build '$(ZEDBSD_LLVM_BUILD)' --target install-distribution \
-		--parallel 1
+	cmake --build '$(ZEDBSD_LLVM_BUILD)' --target install-distribution --parallel
 	@mkdir -p '$(ZEDBSD_LLVM_INSTALL)/share/licenses/llvm'
 	@cp '$(ZEDBSD_LLVM_LICENSE)' \
 		'$(ZEDBSD_LLVM_INSTALL)/share/licenses/llvm/LICENSE.TXT'
@@ -244,8 +243,7 @@ $(ZEDBSD_LLVM_INSTALL_STAMP): $(ZEDBSD_LLVM_MAKEFILE)
 
 $(ZEDBSD_LLVM_INSTALLED_TOOLS): | $(ZEDBSD_LLVM_INSTALL_STAMP)
 	@echo 'LLVM: repairing a missing tool in the generated installation: $(@F)'
-	cmake --build '$(ZEDBSD_LLVM_BUILD)' --target install-distribution \
-		--parallel 1
+	cmake --build '$(ZEDBSD_LLVM_BUILD)' --target install-distribution --parallel
 	@test -x '$@' || { echo 'LLVM: repair did not restore $(@F)' >&2; exit 1; }
 
 $(ZEDBSD_LLVM_INSTALLED_LICENSE): | $(ZEDBSD_LLVM_INSTALL_STAMP)

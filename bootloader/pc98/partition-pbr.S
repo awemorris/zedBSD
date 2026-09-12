@@ -1,7 +1,12 @@
 /*
- * zedBSD FAT16 partition boot record.
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
+ *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * zedBSD FAT16 partition boot record.
  *
  * PC-98 FAT16 uses a 1024-byte logical reserved sector.  Firmware need only
  * load its first physical 512 bytes, so that half explicitly reads the second
@@ -50,11 +55,14 @@ pbr_start:
 	movb	%al, boot_drive
 	call	bios_sense
 	jc	boot_failure
-	/* The continuation occupies three physical sectors immediately after
+
+	/*
+	 * The continuation occupies three physical sectors immediately after
 	 * this first sector.  Validate the BPB before reading them so a corrupt
 	 * reserved count cannot make FAT or file data execute as PBR code.  The
 	 * production PC-98 layout is FAT16; its 1024-byte logical sectors require
-	 * two reserved sectors, while a 512-byte layout requires four. */
+	 * two reserved sectors, while a 512-byte layout requires four.
+	 */
 	cmpw	$0, 0x0016
 	je	boot_failure
 	cmpw	$512, 0x000b
@@ -70,9 +78,11 @@ pbr_bps_512:
 	jb	boot_failure
 	movl	$1, %ecx
 pbr_check_total:
-	/* The BPB volume itself must contain this sector and all three physical
+	/*
+	 * The BPB volume itself must contain this sector and all three physical
 	 * continuation sectors.  Convert its logical-sector total before the
-	 * first read, rejecting zero and multiplication overflow. */
+	 * first read, rejecting zero and multiplication overflow.
+	 */
 	movzwl	0x0013, %eax
 	testl	%eax, %eax
 	jnz	pbr_total_ready
@@ -88,8 +98,11 @@ pbr_total_ready:
 	movl	partition_lba, %edx
 	addl	$3, %edx
 	jc	boot_failure
-	/* Firmware may load only 512 bytes; fetch the remaining reserved Stage 3
-	 * sectors.  zedBSD formats at least four physical reserved sectors. */
+
+	/*
+	 * Firmware may load only 512 bytes; fetch the remaining reserved Stage 3
+	 * sectors.  zedBSD formats at least four physical reserved sectors.
+	 */
 	movl	partition_lba, %eax
 	incl	%eax
 	movw	%cs, %dx
@@ -488,21 +501,60 @@ io_found:
 	cmpl	volume_end_lba, %edx
 	ja	boot_failure
 
-	/* The system loader is contiguous.  Load and enter its DOS MZ image. */
-	movw	$LOAD_SEG, %dx
+	/*
+	 * The system loader is contiguous.  Load and enter its DOS MZ image.
+	 *
+	 * The IDE BIOS refuses a transfer whose end crosses a 64 KiB page,
+	 * and the MZ header is placed to finish at physical 0x10000, so the
+	 * first sector alone would straddle 0x0FFC0..0x101BF.  Read that one
+	 * through the table buffer and copy it into place; from the second
+	 * sector on the destination starts at 0x101C0 and stays inside one
+	 * page for every size this record accepts.
+	 */
+	movw	$TABLE_SEG, %dx
 	movw	%dx, %es
 	xorw	%bp, %bp
+	call	bios_read_volume
+	jc	boot_failure
+	incl	%eax
+	pushw	%ds
+	pushw	%si
+	pushw	%di
+	pushw	%cx
+	movw	$TABLE_SEG, %dx
+	movw	%dx, %ds
+	movw	$LOAD_SEG, %dx
+	movw	%dx, %es
+	xorw	%si, %si
+	xorw	%di, %di
+	movw	$256, %cx
+	cld
+	rep	movsw
+	popw	%cx
+	popw	%di
+	popw	%si
+	popw	%ds
+	decl	%ecx
+	jz	load_done
+	movw	$LOAD_SEG, %dx
+	movw	%dx, %es
+	movw	$512, %bp
 load_io:
 	call	bios_read_volume
 	jc	boot_failure
 	incl	%eax
 	addw	$512, %bp
 	loop	load_io
+load_done:
+	movw	$LOAD_SEG, %dx
+	movw	%dx, %es
 
-	/* The image builder's contiguous SYS-file contract determines how the
+	/*
+	 * The image builder's contiguous SYS-file contract determines how the
 	 * bytes are read.  Authenticate the fixed MZ envelope and the complete
 	 * inner ZBL2 image before trusting either header as executable control
-	 * flow.  Stage 2 verifies the checksum again after entry. */
+	 * flow.  Stage 2 verifies the checksum again after entry.
+	 */
 	cmpw	$0x5a4d, %es:0
 	jne	boot_failure
 	cmpw	$0, %es:0x06

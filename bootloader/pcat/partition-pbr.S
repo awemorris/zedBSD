@@ -1,5 +1,14 @@
-/* PC/AT FAT16 stage 3: load BOOTZBSD.EXE and enter its MZ entry point. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * PC/AT FAT16 stage 3: load BOOTZBSD.EXE and enter its MZ entry point.
+ */
+
 .intel_syntax noprefix
 .code16
 .section .text

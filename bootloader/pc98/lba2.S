@@ -1,7 +1,12 @@
-/* SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 /*
  * Generic PC-98 LBA 2 boot-partition selector.
- * Copyright (C) 2026 Awe Morris
  *
  * disk-ipl.S loads the first sector of this image at 1fc0:0000.  The stub
  * relocates itself, reads the native PC-98 partition table from LBA 1, finds
@@ -179,8 +184,10 @@ boot_failure:
 	jmp	1b
 
 #if KERN_PC98_IPL_DIAGNOSTIC
-/* Keep the diagnostic stage self-contained; the two fixed IPL binaries do
- * not share runtime code or state.  See disk-ipl.S for the marker contract. */
+/*
+ * Keep the diagnostic stage self-contained; the two fixed IPL binaries do
+ * not share runtime code or state.  See disk-ipl.S for the marker contract.
+ */
 diagnostic_checkpoint:
 	pushw	%ax
 	pushw	%bx
@@ -242,5 +249,6 @@ boot_name: .ascii "BOOT            "
 
 	.org	0x01fe
 	.word	0xaa55
+
 	/* LBA 2 through 15 are distributed and replaced as one binary. */
 	.org	(14 * 512)

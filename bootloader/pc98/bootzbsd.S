@@ -1,5 +1,14 @@
-/* PC-98 ZBL2 Stage 2: PC/AT MBR/FAT16 and ELF32 loader. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * PC-98 ZBL2 Stage 2: PC/AT MBR/FAT16 and ELF32 loader.
+ */
+
 .intel_syntax noprefix
 .code16
 .section .text

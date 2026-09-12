@@ -1,6 +1,10 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #ifndef KERN_BOOT_MEMORY_MAP_H
 #define KERN_BOOT_MEMORY_MAP_H
 
@@ -22,6 +26,14 @@ enum zbl_memory_result {
 typedef enum zbl_memory_result (*zbl_memory_decoder)(const void *context, uint32_t index, struct zbl6_memory_range_v6 *range);
 
 /* Decoder input must remain immutable and must not alias the output array. */
-enum zbl_memory_result zbl_memory_normalize(const void *context, uint32_t input_count, zbl_memory_decoder decode, unsigned options, struct zbl6_memory_range_v6 *ranges, uint32_t capacity, uint32_t *count);
+enum zbl_memory_result
+zbl_memory_normalize(
+	const void *context,
+	uint32_t input_count,
+	zbl_memory_decoder decode,
+	unsigned options,
+	struct zbl6_memory_range_v6 *ranges,
+	uint32_t capacity,
+	uint32_t *count);
 
 #endif

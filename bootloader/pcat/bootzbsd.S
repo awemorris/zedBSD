@@ -1,5 +1,14 @@
-/* PC/AT ZBL2 Stage 2: MBR/FAT16 and ELF32/ELF64 loader. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * PC/AT ZBL2 Stage 2: MBR/FAT16 and ELF32/ELF64 loader.
+ */
+
 .intel_syntax noprefix
 .code16
 .section .text
@@ -22,9 +31,11 @@
 .set KERNEL_HIGH_WINDOW_MIN, 0x80000000
 .set KERNEL_HIGH_WINDOW_LIMIT, 0xc0000000
 
-/* LLVM's integrated assembler otherwise selects ELF32 near call/return
+/*
+ * LLVM's integrated assembler otherwise selects ELF32 near call/return
  * operands even inside .code16.  Keep hand-written real-mode routines on a
- * true 16-bit near-call ABI; the two .code16gcc C calls below remain 32-bit. */
+ * true 16-bit near-call ABI; the two .code16gcc C calls below remain 32-bit.
+ */
 .macro call16 target
 	.byte 0xe8
 	.word \target - . - 2
@@ -51,8 +62,11 @@ stage2_entry:
 	mov ax, cs
 	cmp ax, 0x1000
 	je stage2_resident
-	/* DOS loaded the MZ module at an arbitrary paragraph.  Remember the
-	 * current DOS drive, then move the complete loader to its fixed address. */
+
+	/*
+	 * DOS loaded the MZ module at an arbitrary paragraph.  Remember the
+	 * current DOS drive, then move the complete loader to its fixed address.
+	 */
 	mov ds, ax
 	sti
 	mov ah, 0x19

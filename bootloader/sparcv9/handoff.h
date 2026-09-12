@@ -1,5 +1,13 @@
-/* OpenFirmware to zedBSD sun4u handoff builder. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * OpenFirmware to zedBSD sun4u handoff builder.
+ */
 
 #ifndef KERN_SPARCV9_HANDOFF_H
 #define KERN_SPARCV9_HANDOFF_H

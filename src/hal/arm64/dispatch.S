@@ -1,3 +1,12 @@
+/*
+ * The floating-point save and restore below needs the FP and SIMD
+ * registers and the FPCR and FPSR system registers. The kernel compiles
+ * its C with -mgeneral-regs-only so the compiler never emits FP of its
+ * own; this states that the assembler may, which is the whole point of
+ * these two routines.
+ */
+	.arch armv8-a+fp+simd
+
 	.text
 	.balign 16
 	.global asm_task_dispatch

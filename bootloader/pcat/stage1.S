@@ -1,5 +1,14 @@
-/* PC/AT MBR Stage 1: load and validate ZBL2 from the configured disk LBA. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * PC/AT MBR Stage 1: load and validate ZBL2 from the configured disk LBA.
+ */
+
 .intel_syntax noprefix
 .code16
 .section .text

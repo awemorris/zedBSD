@@ -14,14 +14,29 @@ static void task_add(struct arm64_task *t)
 static void task_del(struct arm64_task *t)
 {struct arm64_task **p=&task_list;while(*p&&*p!=t)p=&(*p)->next;if(*p){*p=t->next;if(task_count)task_count--;}}
 
-void hal_task_init(void)
+/*
+ * Wraps this CPU's current context as its initial task.
+ *
+ * Returns NULL when the record cannot be allocated; the kernel decides
+ * what to do about that rather than the HAL panicking on its behalf.
+ */
+hal_task_t
+hal_task_create_for_init_context(void)
 {
 	struct arm64_task *t;
-	if(running_task)HAL_FATAL("hal_task_init twice");
+
+	/* Rejects repeated bootstrap task initialization. */
+	if(running_task)HAL_FATAL("bootstrap task established twice");
 	arm64_fp_save(initial_fpregs);
-	t=hal_malloc(sizeof(*t));if(!t)HAL_FATAL("initial arm64 task allocation failed");
+
+	/* Reports allocation failure to the kernel. */
+	t=kernel_alloc(sizeof(*t));
+	if(!t)return NULL;
 	hal_memset(t,0,sizeof(*t));t->space=HAL_SPACE_SYS;t->run_cpu=0;
 	hal_memcpy(t->fpregs,initial_fpregs,sizeof(initial_fpregs));task_add(t);running_task=t;
+
+	/* Reports the established task. */
+	return t;
 }
 
 static void build_stack(struct arm64_task *t,void(*start)(void *),void *arg,void *user_sp)
@@ -36,8 +51,8 @@ static void build_stack(struct arm64_task *t,void(*start)(void *),void *arg,void
 hal_task_t hal_task_create(hal_space_t space,void(*start)(void *),void *arg,void *user_sp)
 {
 	struct arm64_task *t;if(!start||((space==HAL_SPACE_SYS)!=(user_sp==NULL)))return NULL;
-	t=hal_malloc(sizeof(*t));if(!t)return NULL;hal_memset(t,0,sizeof(*t));
-	t->sys_stack_allocation=hal_malloc(ARM64_SYS_STACK_SIZE+15);if(!t->sys_stack_allocation){hal_free(t);return NULL;}
+	t=kernel_alloc(sizeof(*t));if(!t)return NULL;hal_memset(t,0,sizeof(*t));
+	t->sys_stack_allocation=kernel_alloc(ARM64_SYS_STACK_SIZE+15);if(!t->sys_stack_allocation){kernel_free(t);return NULL;}
 	t->sys_stack=(void *)(((uintptr_t)t->sys_stack_allocation+15)&~(uintptr_t)15);
 	t->space=space;t->run_cpu=-1;hal_memcpy(t->fpregs,initial_fpregs,sizeof(initial_fpregs));
 	build_stack(t,start,arg,user_sp);task_stack_bytes+=ARM64_SYS_STACK_SIZE;task_add(t);return t;
@@ -94,14 +109,41 @@ int hal_task_exec_current(hal_space_t new_space,uintptr_t entry,uintptr_t user_s
 	hal_space_switch(new_space);
 	return 0;
 }
-uintptr_t hal_task_user_stack(void){struct arm64_exception_frame*f=running_task!=NULL?running_task->active_user_frame:NULL;return f!=NULL?(uintptr_t)f->user_sp:0;}
-int hal_task_user_context(struct hal_user_context*c){struct arm64_exception_frame*f=running_task!=NULL?running_task->active_user_frame:NULL;if(f==NULL||c==NULL)return-1;c->pc=(uintptr_t)f->elr;c->stack_pointer=(uintptr_t)f->user_sp;c->return_value=(intptr_t)f->x[0];return 0;}
+uintptr_t hal_task_get_user_stack(void){struct arm64_exception_frame*f=running_task!=NULL?running_task->active_user_frame:NULL;return f!=NULL?(uintptr_t)f->user_sp:0;}
+/*
+ * Reports the active return-to-user context.
+ *
+ * The caller asks for the three values it wants and may omit any of
+ * them, so the struct that used to carry all three is gone.
+ */
+int
+hal_task_get_user_context(
+	uintptr_t *pc,
+	uintptr_t *stack_pointer,
+	intptr_t *return_value)
+{
+	struct arm64_exception_frame *f;
+
+	/* Requires a frame that entered from user privilege. */
+	f = running_task != NULL ? running_task->active_user_frame : NULL;
+	if (f == NULL)
+		return -1;
+
+	/* Reports each value the caller asked for. */
+	if (pc != NULL)
+		*pc = (uintptr_t)f->elr;
+	if (stack_pointer != NULL)
+		*stack_pointer = (uintptr_t)f->user_sp;
+	if (return_value != NULL)
+		*return_value = (intptr_t)f->x[0];
+	return 0;
+}
 int hal_task_signal_enter(uintptr_t h,uintptr_t sp,int sig,uintptr_t info,uintptr_t context,uintptr_t rest,uint32_t token){struct arm64_exception_frame*f=running_task!=NULL?running_task->active_user_frame:NULL;unsigned d;if(f==NULL||running_task->signal_depth>=HAL_SIGNAL_NEST_MAX||h==0||sp==0||token==0)return-1;d=running_task->signal_depth;running_task->signal_frame[d]=*f;arm64_fp_save(running_task->signal_fpregs[d]);running_task->signal_token[d]=token;running_task->signal_depth=d+1U;f->elr=h;f->user_sp=sp;f->x[0]=(uint64_t)sig;f->x[1]=info;f->x[2]=context;f->x[30]=rest;return 0;}
 int hal_task_signal_return(uint32_t token,intptr_t*value){struct arm64_exception_frame*f=running_task!=NULL?running_task->active_user_frame:NULL;unsigned d;if(f==NULL||value==NULL||running_task->signal_depth==0||token==0)return-1;d=running_task->signal_depth-1U;if(token!=running_task->signal_token[d])return-1;*f=running_task->signal_frame[d];*value=(intptr_t)f->x[0];arm64_fp_restore(running_task->signal_fpregs[d]);running_task->signal_token[d]=0;running_task->signal_depth=d;return 0;}
 void hal_task_destroy(hal_task_t h)
 {
 	struct arm64_task *t=h;if(!t)return;if(t==running_task)HAL_FATAL("destroy current arm64 task");task_del(t);
-	if(t->sys_stack){task_stack_bytes-=ARM64_SYS_STACK_SIZE;hal_free(t->sys_stack_allocation);}hal_free(t);
+	if(t->sys_stack){task_stack_bytes-=ARM64_SYS_STACK_SIZE;kernel_free(t->sys_stack_allocation);}kernel_free(t);
 }
 void hal_task_context_switch(hal_task_t h)
 {

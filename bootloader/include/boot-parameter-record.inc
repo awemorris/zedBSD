@@ -1,5 +1,14 @@
-/* Emit one fixed-size versioned parameter record into an assembly image. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Emit one fixed-size versioned parameter record into an assembly image.
+ */
+
 #include "include/boot/parameter-handoff.h"
 
 .macro KERN_EMIT_BOOT_PARAMETER_RECORD

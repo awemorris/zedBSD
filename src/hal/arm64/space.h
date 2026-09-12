@@ -6,7 +6,7 @@
 #define ARM64_SPACE_MAGIC 0x41363453U
 
 struct arm64_table_page {
-	struct hal_pmem memory;
+	hal_physaddr_t memory;
 	uint64_t *parent;
 	unsigned parent_index;
 	struct arm64_table_page *next;
@@ -18,7 +18,7 @@ struct arm64_space {
 	unsigned lock;
 	unsigned destroying;
 	struct arm64_space *registry_next;
-	struct hal_pmem l0_memory;
+	hal_physaddr_t l0_memory;
 	uint64_t *l0;
 	struct arm64_table_page *tables;
 };

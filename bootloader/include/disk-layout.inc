@@ -1,4 +1,14 @@
-/* Shared native BIOS loader disk layout. */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Shared native BIOS loader disk layout.
+ */
+
 #ifdef ZBL_STAGE2_LBA_OVERRIDE
 .set ZBL_STAGE2_LBA,       ZBL_STAGE2_LBA_OVERRIDE
 #else

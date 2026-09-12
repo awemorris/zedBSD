@@ -1,112 +1,369 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The Raspberry Pi 4 early console.
+ *
+ * This exists so the HAL and the early part of kernel start-up have
+ * somewhere to print. It is output only, and it writes to both the UART
+ * and the framebuffer: the serial line is what a developer watches, and
+ * the framebuffer is what a display shows, so a message that matters
+ * before the kernel has a console device goes to both. Once the kernel
+ * publishes a console through kernel_putc, every character goes there
+ * instead and this code stops touching either.
+ *
+ * Input is not handled here. The UART's receive side belongs to a
+ * driver, which turns its bytes into input events like any other
+ * keyboard.
+ */
+
 #include <hal/hal.h>
+
 #include "../bsp.h"
-#include "uart.h"
 #include "framebuffer.h"
-#include "../../cons-wait.h"
+#include "uart.h"
 
-#define INPUT_EVENT_COUNT 64U
+#define CONS_COLUMNS	80U
+#define CONS_ROWS	25U
 
-struct cell{uint8_t character,attribute;};
-static struct cell shadow[HAL_CONS_ROWS][HAL_CONS_COLUMNS];
-static struct hal_cons_state state={HAL_CONS_TERMINAL,0,0,1};
-static uint8_t current_attribute=HAL_CONS_ATTRIB_NORMAL;
-static struct hal_key_event input_events[INPUT_EVENT_COUNT];
-static unsigned input_head, input_tail;
-static struct hal_cons_wait_queue input_waiters;
+/* Light grey on black, the default text attribute. */
+#define CONS_ATTRIBUTE	0x07U
 
-static void draw(unsigned row,unsigned column)
-{struct cell*c=&shadow[row][column];rpi4_framebuffer_cell(row,column,c->character,c->attribute);}
-static void erase_cursor(void)
-{if(state.row<HAL_CONS_ROWS&&state.column<HAL_CONS_COLUMNS)draw(state.row,state.column);}
-void hal_cons_update_cursor(void)
-{if(state.cursor_visible)rpi4_framebuffer_cursor(state.row,state.column,1);}
+struct cell {
+	uint8_t character;
+	uint8_t attribute;
+};
 
-void hal_cons_clear_row(unsigned row)
+static struct cell shadow[CONS_ROWS][CONS_COLUMNS];
+static unsigned cursor_row;
+static unsigned cursor_column;
+static volatile unsigned output_lock;
+static int output_suspended;
+
+static bool output_enter(void);
+static void output_leave(bool interrupts_enabled);
+static void draw_locked(unsigned row, unsigned column);
+static void update_cursor_locked(void);
+static void clear_row_locked(unsigned row);
+static void clear_locked(void);
+static void scroll_locked(void);
+static void newline_locked(void);
+static void putc_locked(int character);
+
+/*
+ * Writes one character to the early console, or to the kernel console
+ * once the kernel has published one.
+ */
+void
+hal_putc(
+	int character)
 {
-	if(row>=HAL_CONS_ROWS)return;
-	for(unsigned column=0;column<HAL_CONS_COLUMNS;column++){
-		shadow[row][column].character=' ';shadow[row][column].attribute=current_attribute;
-		draw(row,column);
+	void (*kernel_output)(int c);
+	bool interrupts_enabled;
+
+	/* Delegates to the kernel console after the handover. */
+	kernel_output = __atomic_load_n(&kernel_putc, __ATOMIC_ACQUIRE);
+	if (kernel_output != NULL) {
+		kernel_output(character);
+		return;
+	}
+
+	/* Serializes character rendering with all console output. */
+	interrupts_enabled = output_enter();
+	putc_locked(character);
+	output_leave(interrupts_enabled);
+}
+
+/*
+ * Acquires console-output ownership.
+ *
+ * The return value is the caller's interrupt state, which the matching
+ * release needs; it is opaque to the caller.
+ */
+uint32_t
+rpi4_cons_output_begin(
+	void)
+{
+	/* Reports the saved interrupt state as the release token. */
+	return output_enter() ? 1U : 0U;
+}
+
+/*
+ * Releases console-output ownership.
+ */
+void
+rpi4_cons_output_end(
+	uint32_t token)
+{
+	/* Restores the interrupt state the matching acquire saved. */
+	output_leave(token != 0);
+}
+
+/*
+ * Stops and resumes writes to the framebuffer.
+ *
+ * A display driver that takes the hardware calls this so late HAL
+ * diagnostics do not corrupt the screen. The UART keeps working, since
+ * nothing else owns it.
+ */
+void
+rpi4_cons_suspend_output(
+	void)
+{
+	bool interrupts_enabled;
+
+	/* Publishes the suspension under the output lock. */
+	interrupts_enabled = output_enter();
+	output_suspended = 1;
+	output_leave(interrupts_enabled);
+}
+
+void
+rpi4_cons_resume_output(
+	void)
+{
+	bool interrupts_enabled;
+
+	/* Restores framebuffer output and repaints a known state. */
+	interrupts_enabled = output_enter();
+	output_suspended = 0;
+	clear_locked();
+	output_leave(interrupts_enabled);
+}
+
+/*
+ * Prepares the Raspberry Pi early console.
+ *
+ * This runs before kernel_entry(), so it may not allocate or block.
+ */
+void
+prekern_bsp_cons_init(
+	void)
+{
+	/* Brings up the serial line the HAL prints to. */
+	rpi4_uart_init();
+
+	/* Starts from a known screen and cursor position. */
+	output_lock = 0;
+	output_suspended = 0;
+	cursor_row = 0;
+	cursor_column = 0;
+	clear_locked();
+}
+
+/*
+ * Leaves the UART receive interrupt masked for its driver.
+ *
+ * The early console does not read the serial line. It stays masked
+ * until the input driver registers, so a byte that arrives during
+ * start-up cannot raise an interrupt nobody handles.
+ */
+void
+prekern_bsp_cons_irq_init(
+	void)
+{
+	const struct rpi4_fdt_info *info;
+
+	/* Keeps the line quiet until its driver claims it. */
+	info = rpi4_boot_info();
+	if (info != NULL && info->uart_irq != 0)
+		hal_irq_mask((int)info->uart_irq);
+}
+
+/* Acquires the output lock with interrupts disabled. */
+static bool
+output_enter(
+	void)
+{
+	bool interrupts_enabled;
+
+	/* Keeps rendering atomic against interrupt-context output. */
+	interrupts_enabled = hal_irq_disable();
+
+	/* Spins until this CPU owns the output lock. */
+	while (__atomic_exchange_n(&output_lock, 1U, __ATOMIC_ACQUIRE) != 0U)
+		__asm__ volatile("yield" : : : "memory");
+
+	/* Reports the interrupt state the release has to restore. */
+	return interrupts_enabled;
+}
+
+/* Releases the output lock and restores the caller's interrupt state. */
+static void
+output_leave(
+	bool interrupts_enabled)
+{
+	/* Publishes every pending cell write before releasing. */
+	__atomic_store_n(&output_lock, 0U, __ATOMIC_RELEASE);
+
+	/* Restores interrupts only when they were previously enabled. */
+	if (interrupts_enabled)
+		hal_irq_enable();
+}
+
+/* Paints one stored cell onto the framebuffer. */
+static void
+draw_locked(
+	unsigned row,
+	unsigned column)
+{
+	const struct cell *c;
+
+	/* Leaves the screen alone while another driver owns it. */
+	if (output_suspended || row >= CONS_ROWS || column >= CONS_COLUMNS)
+		return;
+	c = &shadow[row][column];
+	rpi4_framebuffer_cell(row, column, c->character, c->attribute);
+}
+
+/* Draws the cursor at the tracked position. */
+static void
+update_cursor_locked(
+	void)
+{
+	/* Leaves the screen alone while another driver owns it. */
+	if (output_suspended)
+		return;
+	rpi4_framebuffer_cursor(cursor_row, cursor_column, 1);
+}
+
+/* Fills one row with blanks. */
+static void
+clear_row_locked(
+	unsigned row)
+{
+	unsigned column;
+
+	/* Rejects a row outside the grid. */
+	if (row >= CONS_ROWS)
+		return;
+
+	/* Blanks and repaints every cell of the row. */
+	for (column = 0; column < CONS_COLUMNS; column++) {
+		shadow[row][column].character = ' ';
+		shadow[row][column].attribute = CONS_ATTRIBUTE;
+		draw_locked(row, column);
 	}
 }
-void hal_cons_clear(void)
-{for(unsigned row=0;row<HAL_CONS_ROWS;row++)hal_cons_clear_row(row);state.row=state.column=0;hal_cons_update_cursor();}
-void hal_cons_reset(void)
-{current_attribute=HAL_CONS_ATTRIB_NORMAL;state.mode=HAL_CONS_TERMINAL;state.cursor_visible=1;hal_cons_clear();}
 
-static void scroll(void)
+/* Clears the screen and homes the cursor. */
+static void
+clear_locked(
+	void)
 {
-	for(unsigned row=1;row<HAL_CONS_ROWS;row++)for(unsigned column=0;column<HAL_CONS_COLUMNS;column++)
-		shadow[row-1][column]=shadow[row][column];
-	for(unsigned row=0;row<HAL_CONS_ROWS-1;row++)for(unsigned column=0;column<HAL_CONS_COLUMNS;column++)draw(row,column);
-	hal_cons_clear_row(HAL_CONS_ROWS-1);
-}
-static void newline(void)
-{state.column=0;if(++state.row>=HAL_CONS_ROWS){scroll();state.row=HAL_CONS_ROWS-1;}}
+	unsigned row;
 
-void rpi4_cons_init(void){rpi4_uart_init();input_head=input_tail=0;hal_cons_wait_queue_init(&input_waiters);for(unsigned r=0;r<HAL_CONS_ROWS;r++)for(unsigned c=0;c<HAL_CONS_COLUMNS;c++){shadow[r][c].character=' ';shadow[r][c].attribute=current_attribute;}}
-static void console_putc(int character)
+	/* Blanks every row in order. */
+	for (row = 0; row < CONS_ROWS; row++)
+		clear_row_locked(row);
+
+	/* Returns the cursor to the top-left cell. */
+	cursor_row = 0;
+	cursor_column = 0;
+	update_cursor_locked();
+}
+
+/* Scrolls the screen up by one row. */
+static void
+scroll_locked(
+	void)
 {
-	rpi4_uart_putc(character);erase_cursor();
-	if(character=='\n'){newline();hal_cons_update_cursor();return;}
-	if(character=='\r'){state.column=0;hal_cons_update_cursor();return;}
-	if(character=='\b'){
-		if(state.column)state.column--;
-		shadow[state.row][state.column].character=' ';
-		draw(state.row,state.column);hal_cons_update_cursor();return;
+	unsigned row;
+	unsigned column;
+
+	/* Shifts the stored rows up by one. */
+	for (row = 1; row < CONS_ROWS; row++) {
+		for (column = 0; column < CONS_COLUMNS; column++)
+			shadow[row - 1U][column] = shadow[row][column];
 	}
-	if(character=='\t'){do console_putc(' ');while(state.column&7U);return;}
-	if(state.column>=HAL_CONS_COLUMNS)newline();
-	shadow[state.row][state.column].character=(uint8_t)(character>=0x20&&character<0x7f?character:'?');
-	shadow[state.row][state.column].attribute=current_attribute;draw(state.row,state.column++);
-	if(state.column>=HAL_CONS_COLUMNS)newline();
-	hal_cons_update_cursor();
-}
-static void console_puts(const char*s){if(s)while(*s)console_putc(*s++);}
-static int console_getc(void){return rpi4_uart_getc();}
-void hal_putc(int c){console_putc(c);}
-void hal_cons_move_cursor(int row,int column){(void)hal_cons_set_cursor((unsigned)row,(unsigned)column);}
-int hal_cons_getc(void){struct hal_key_event event;for(;;){(void)hal_cons_read_event(&event);if((event.flags&HAL_KEY_EVENT_PRESS)!=0&&event.symbol[1]=='\0')return event.symbol[0];}}
-void hal_cons_write(const char*s){console_puts(s);}
-void hal_cons_write_n(const char*s,unsigned n){if(s)while(n--)console_putc(*s++);}
-int hal_cons_write_n_at(unsigned row,unsigned column,const char*s,unsigned n,uint8_t attr)
-{
-	unsigned changed=0;if(!s||row>=HAL_CONS_ROWS||column>=HAL_CONS_COLUMNS)return -1;erase_cursor();
-	while(n--&&row<HAL_CONS_ROWS){uint8_t c=(uint8_t)*s++;if(c=='\n'){row++;column=0;continue;}if(c=='\r'){column=0;continue;}if(column>=HAL_CONS_COLUMNS)break;
-		shadow[row][column].character=c<0x80?c:'?';shadow[row][column].attribute=attr?attr:current_attribute;draw(row,column++);changed++;}
-	state.row=row<HAL_CONS_ROWS?row:HAL_CONS_ROWS-1;state.column=column<HAL_CONS_COLUMNS?column:HAL_CONS_COLUMNS-1;hal_cons_update_cursor();return(int)changed;
-}
-int hal_cons_write_at_attr(unsigned r,unsigned c,const char*s,uint8_t attr){unsigned n=0;if(!s)return -1;while(s[n])n++;return hal_cons_write_n_at(r,c,s,n,attr);}
-void hal_cons_write_at(unsigned r,unsigned c,const char*s){(void)hal_cons_write_at_attr(r,c,s,current_attribute);}
-int hal_cons_clear_to_eol_at(unsigned r,unsigned c){if(r>=HAL_CONS_ROWS||c>=HAL_CONS_COLUMNS)return 0;erase_cursor();for(unsigned x=c;x<HAL_CONS_COLUMNS;x++){shadow[r][x].character=' ';shadow[r][x].attribute=current_attribute;draw(r,x);}state.row=r;state.column=c;hal_cons_update_cursor();return 1;}
-void hal_cons_clear_to_eol(void){(void)hal_cons_clear_to_eol_at(state.row,state.column);}
-int hal_cons_set_cursor(unsigned r,unsigned c){if(r>=HAL_CONS_ROWS||c>=HAL_CONS_COLUMNS)return 0;erase_cursor();state.row=r;state.column=c;hal_cons_update_cursor();return 1;}
-void hal_cons_show_cursor(int visible){erase_cursor();state.cursor_visible=visible!=0;hal_cons_update_cursor();}
-void hal_cons_save_state(struct hal_cons_state*out){if(out)*out=state;}
-static void rpi4_console_interrupt(int irq,hal_irq_ack_t acknowledge,void*argument)
-{
-	struct hal_cons_wait_entry*waiters=NULL;bool enabled;
-	(void)irq;(void)argument;enabled=hal_cons_wait_queue_lock(&input_waiters);
-	while(rpi4_uart_poll()){
-		unsigned next=(input_head+1U)%INPUT_EVENT_COUNT;
-		int character=console_getc();if(next==input_tail)continue;
-		for(unsigned i=0;i<HAL_KEY_SYMBOL_SIZE;i++)input_events[input_head].symbol[i]='\0';
-		input_events[input_head].symbol[0]=(char)character;
-		input_events[input_head].flags=HAL_KEY_EVENT_PRESS;input_head=next;
+
+	/* Repaints every row the shift moved. */
+	for (row = 0; row < CONS_ROWS - 1U; row++) {
+		for (column = 0; column < CONS_COLUMNS; column++)
+			draw_locked(row, column);
 	}
-	if(input_head!=input_tail)waiters=hal_cons_wait_queue_detach_all(&input_waiters);
-	hal_cons_wait_queue_unlock(&input_waiters,enabled);rpi4_uart_clear_rx_irq();
-	hal_cons_wait_queue_notify_all(waiters);hal_irq_send_eoi(acknowledge);
+
+	/* Blanks the row exposed at the bottom. */
+	clear_row_locked(CONS_ROWS - 1U);
 }
-void rpi4_cons_irq_init(void)
+
+/* Advances the cursor to the start of the next line. */
+static void
+newline_locked(
+	void)
 {
-	const struct rpi4_fdt_info*info=rpi4_boot_info();
-	if(info==NULL||info->uart_irq==0||hal_irq_set_handler((int)info->uart_irq,rpi4_console_interrupt,NULL)!=HAL_OK)HAL_FATAL("Raspberry Pi UART IRQ registration failed");
-	rpi4_uart_enable_rx_irq();hal_irq_unmask((int)info->uart_irq);
+	/* Returns to the first column of the following row. */
+	cursor_column = 0;
+	cursor_row++;
+
+	/* Scrolls instead of leaving the last row. */
+	if (cursor_row >= CONS_ROWS) {
+		scroll_locked();
+		cursor_row = CONS_ROWS - 1U;
+	}
 }
-int hal_cons_poll_event(struct hal_key_event*event){bool enabled=hal_cons_wait_queue_lock(&input_waiters);int available=input_head!=input_tail;if(available&&event!=NULL)*event=input_events[input_tail];hal_cons_wait_queue_unlock(&input_waiters,enabled);return available;}
-int hal_cons_read_event(struct hal_key_event*event){struct hal_cons_wait_entry waiter={hal_task_get_current(),NULL,0};for(;;){bool enabled=hal_cons_wait_queue_lock(&input_waiters);if(input_head!=input_tail){if(event!=NULL)*event=input_events[input_tail];input_tail=(input_tail+1U)%INPUT_EVENT_COUNT;hal_cons_wait_queue_unlock(&input_waiters,enabled);return 1;}hal_cons_wait_queue_add(&input_waiters,&waiter);hal_cons_wait_queue_unlock(&input_waiters,enabled);kernel_wait_task();}}
-void hal_cons_drain_input(void){bool enabled=hal_cons_wait_queue_lock(&input_waiters);input_tail=input_head;hal_cons_wait_queue_unlock(&input_waiters,enabled);}
-unsigned hal_cons_modifiers(void){return 0;}
-void hal_cons_suspend(void){}
-void hal_cons_resume(void){}
+
+/* Renders one character at the cursor. */
+static void
+putc_locked(
+	int character)
+{
+	/* The serial line carries every byte, control characters too. */
+	rpi4_uart_putc(character);
+
+	/* Removes the cursor before the cell under it changes. */
+	draw_locked(cursor_row, cursor_column);
+
+	/* Handles the line and column control characters. */
+	if (character == '\n') {
+		newline_locked();
+		update_cursor_locked();
+		return;
+	}
+	if (character == '\r') {
+		cursor_column = 0;
+		update_cursor_locked();
+		return;
+	}
+	if (character == '\b') {
+		/* Steps back and erases within the current row only. */
+		if (cursor_column > 0)
+			cursor_column--;
+		shadow[cursor_row][cursor_column].character = ' ';
+		draw_locked(cursor_row, cursor_column);
+		update_cursor_locked();
+		return;
+	}
+	if (character == '\t') {
+		/* Advances to the next eight-column stop. */
+		cursor_column = (cursor_column + 8U) & ~7U;
+
+		/* Wraps when the stop leaves the row. */
+		if (cursor_column >= CONS_COLUMNS)
+			newline_locked();
+		update_cursor_locked();
+		return;
+	}
+
+	/* Wraps before writing past the end of the row. */
+	if (cursor_column >= CONS_COLUMNS)
+		newline_locked();
+
+	/* Stores one printable cell, substituting anything else. */
+	shadow[cursor_row][cursor_column].character =
+	    (uint8_t)(character >= 0x20 && character < 0x7f ? character : '?');
+	shadow[cursor_row][cursor_column].attribute = CONS_ATTRIBUTE;
+	draw_locked(cursor_row, cursor_column);
+	cursor_column++;
+
+	/* Wraps to the next line at the end of the row. */
+	if (cursor_column >= CONS_COLUMNS)
+		newline_locked();
+	update_cursor_locked();
+}

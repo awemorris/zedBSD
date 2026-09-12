@@ -139,7 +139,9 @@ kern_platform_debug_write(
 {
 	/* Ignores a missing string. */
 	if (s)
-		hal_cons_write(s);
+		/* Emits every byte through the early console. */
+		while (*s != '\0')
+			hal_putc((unsigned char)*s++);
 }
 
 /*

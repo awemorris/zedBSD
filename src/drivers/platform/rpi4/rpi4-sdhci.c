@@ -597,7 +597,6 @@ sd_submit(
 	else {
 		/* Process each remaining element. */
 		for (i_index_for = 0;
-	}
 		     i_index_for < bio->b_block_count && error == 0;
 		     i_index_for++) {
 			error = transfer_block(
@@ -605,12 +604,14 @@ sd_submit(
 				bio->b_mapped_block + i_index_for,
 				data + (size_t)i_index_for * 512U);
 		}
+	}
 
 	/* Checks the operation status. */
 	if (error) {
 		kern_logf(
 			"sdhci: op=%u lba=%llu count=%u error=%d status=%x\n",
-			(unsigned)bio->b_op, bio->b_mapped_block,
+			(unsigned)bio->b_op,
+			(unsigned long long)bio->b_mapped_block,
 			bio->b_block_count, error, r32(REG_INT_STATUS));
 	}
 

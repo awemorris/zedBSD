@@ -88,18 +88,62 @@ hal_irq_set_affinity(int irq, const struct hal_cpu_mask *requested)
 	return HAL_OK;
 }
 
+/*
+ * Reports the requested and effective affinity of one IRQ.
+ */
 int
-hal_irq_get_affinity(int irq, struct hal_irq_affinity *result)
+hal_irq_get_affinity(int irq, struct hal_cpu_mask *requested,
+	struct hal_cpu_mask *effective)
 {
 	unsigned i;
 
-	if (irq < 0 || irq >= IRQ_MAX || result == NULL)
+	/* Rejects an invalid IRQ number. */
+	if (irq < 0 || irq >= IRQ_MAX)
 		return HAL_ERR_INVALID;
-	result->requested = slots[irq].requested;
-	for (i = 0; i < HAL_CPU_MASK_WORDS; i++)
-		result->effective.bits[i] = 0;
-	result->effective.bits[0] = 1;
+
+	/* Reports the mask the caller asked for, when wanted. */
+	if (requested != NULL)
+		*requested = slots[irq].requested;
+
+	/* This board delivers every IRQ to the boot CPU. */
+	if (effective != NULL) {
+		for (i = 0; i < HAL_CPU_MASK_WORDS; i++)
+			effective->bits[i] = 0;
+		effective->bits[0] = 1;
+	}
 	return HAL_OK;
+}
+
+/*
+ * Registers a handler for one numbered IRQ.
+ */
+int
+hal_irq_register(int irq_num, hal_irq_handler_t func, void *arg)
+{
+	/* Requires a handler; removal goes through hal_irq_unregister(). */
+	if (func == NULL)
+		return HAL_ERR_INVALID;
+
+	/* Installs the callback for this line. */
+	return hal_irq_set_handler(irq_num, func, arg);
+}
+
+/*
+ * Removes the handler registered for one numbered IRQ.
+ */
+int
+hal_irq_unregister(int irq_num, hal_irq_handler_t func, void *arg)
+{
+	/* Requires a plausible registration to remove. */
+	if (func == NULL || irq_num < 0 || irq_num >= IRQ_MAX)
+		return HAL_ERR_INVALID;
+
+	/* Rejects a removal the caller does not own. */
+	if (slots[irq_num].handler != func || slots[irq_num].argument != arg)
+		return HAL_ERR_INVALID;
+
+	/* Removes the confirmed callback. */
+	return hal_irq_set_handler(irq_num, NULL, NULL);
 }
 
 void
@@ -122,7 +166,7 @@ arm64_irq_dispatch(uint32_t id, hal_irq_ack_t acknowledge)
 
 int
 hal_irq_register_msi(const char *source, hal_irq_handler_t handler,
-	void *handler_arg, int *mapped_irq, paddr_t *mapped_addr,
+	void *handler_arg, int *mapped_irq, hal_physaddr_t *mapped_addr,
 	uint32_t *mapped_event)
 {
 	(void)source;

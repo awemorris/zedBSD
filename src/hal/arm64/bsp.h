@@ -9,7 +9,7 @@ void rpi4_boot_set_framebuffer(uint64_t phys,uint64_t size,uint32_t width,
 const struct rpi4_fdt_info *rpi4_boot_info(void);
 uintptr_t rpi4_boot_fdt_phys(void);
 const void *rpi4_kernel_handoff(void);
-void rpi4_cons_init(void);
-void rpi4_cons_irq_init(void);
+void prekern_bsp_cons_init(void);
+void prekern_bsp_cons_irq_init(void);
 
 #endif

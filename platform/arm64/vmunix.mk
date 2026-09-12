@@ -1,10 +1,13 @@
 # zedBSD arm64/Raspberry Pi 4 bootstrap rules.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
-ARM64_CC ?= aarch64-linux-gnu-gcc
-ARM64_LD ?= aarch64-linux-gnu-ld
-ARM64_OBJCOPY ?= aarch64-linux-gnu-objcopy
-ARM64_NM ?= aarch64-linux-gnu-nm
+# The project toolchain builds an AArch64 compiler, so the port uses
+# it rather than depending on a system cross GCC being installed.
+ARM64_CC ?= $(ZEDBSD_TARGET_LLVM_BIN)/clang --target=aarch64-unknown-zedbsd
+ARM64_LD ?= $(ZEDBSD_TARGET_LLVM_BIN)/ld.lld
+ARM64_OBJCOPY ?= $(ZEDBSD_TARGET_LLVM_BIN)/llvm-objcopy
+ARM64_NM ?= $(ZEDBSD_TARGET_LLVM_BIN)/llvm-nm
+AWK ?= awk
 ARM64_PLATFORM := platform/arm64
 
 ARM64_CPPFLAGS := -nostdinc -Iinclude -Isrc -I. \
@@ -17,7 +20,7 @@ ARM64_CFLAGS := -march=armv8-a -mno-outline-atomics -mgeneral-regs-only -ffreest
 	-Os -Wall -Wextra -Werror
 
 ARM64_BOOT_C := src/hal/cpu-up.c src/hal/arm64/asm.c src/hal/arm64/lib.c \
-	src/hal/pmem-constraints.c src/hal/arm64/page.c src/hal/arm64/space.c \
+	src/hal/arm64/page.c src/hal/arm64/space.c \
 	src/hal/arm64/int.c src/hal/arm64/irq.c \
 	src/hal/arm64/task.c \
 	src/hal/arm64/cmain.c src/hal/arm64/bsp-rpi4/uart.c \
@@ -26,6 +29,7 @@ ARM64_BOOT_C := src/hal/cpu-up.c src/hal/arm64/asm.c src/hal/arm64/lib.c \
 	src/hal/arm64/bsp-rpi4/boot.c src/hal/arm64/bsp-rpi4/gic.c \
 	src/hal/arm64/bsp-rpi4/clock.c
 ARM64_BOOT_S := src/hal/arm64/locore.S src/hal/arm64/trap.S \
+	libc/setjmp-aarch64.S \
 	src/hal/arm64/dispatch.S
 ARM64_BOOT_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(ARM64_BOOT_C)) \
 	$(patsubst %.S,$(BUILD)/%.o,$(ARM64_BOOT_S))
@@ -38,6 +42,8 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/vfs.c src/kern/swap.c src/kern/backing-claim.c \
  src/kern/buf.c src/kern/cache.c src/kern/readahead.c src/kern/writeback.c src/kern/io.c \
 	src/kern/sysctl.c src/kern/resource.c src/kern/poll.c src/kern/usync.c src/kern/disk.c \
+	src/kern/device-io.c src/kern/irq.c src/kern/pmem.c \
+	src/kern/test-checkpoint.c src/kern/text-display.c \
 	src/drivers/generic/loop.c \
 	src/kern/partition.c src/drivers/disklabel/mbr.c \
 	src/kern/platform/rpi4.c \
@@ -123,6 +129,12 @@ $(BUILD)/src/hal/arm64/%.o: src/hal/arm64/%.S
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(ARM64_CPPFLAGS) $(ARM64_CFLAGS) -D_ASM_SRC_ -c $< -o $@
 
+# libc carries one assembly source on this target, because clang has no
+# setjmp builtin for AArch64.
+$(BUILD)/libc/%.o: libc/%.S
+	@mkdir -p $(dir $@)
+	$(ARM64_CC) $(ARM64_CPPFLAGS) $(ARM64_CFLAGS) -D_ASM_SRC_ -c $< -o $@
+
 $(BUILD)/kernel/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(ARM64_CPPFLAGS) $(ARM64_CFLAGS) -fno-builtin \
@@ -162,7 +174,11 @@ $(BUILD)/bin/sh: $(ARM64_USER_OBJS) $(ARM64_USER_READLINE_LIB) \
 	$(ARM64_LD) --gc-sections -nostdlib -static -z max-page-size=4096 \
  -z stack-size=0x100000 -T $(ARM64_PLATFORM)/user.ld \
  $(ARM64_USER_OBJS) $(ARM64_USER_READLINE_LIB) -o $@
-	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
+	@# A weak undefined symbol is an optional hook, not a link error.
+	@# GNU nm drops those from -u; llvm-nm reports them, so the strong
+	@# references are selected explicitly.
+	@test -z "$$($(ARM64_NM) -u $@ | $(AWK) '$$1 == \"U\"')" || \
+		{ $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) tools/build/check-user-elf.py --machine aarch64 $@
 
 ARM64_USER_SYSCTL_OBJ := $(BUILD)/user/userland/base/sysctl/main.o
@@ -174,7 +190,11 @@ $(BUILD)/bin/sysctl: $(BUILD)/user/src/crt/crt0-aarch64.o \
  -z stack-size=0x100000 -T $(ARM64_PLATFORM)/user.ld \
  $(BUILD)/user/src/crt/crt0-aarch64.o \
  $(ARM64_USER_RUNTIME_OBJS) $(ARM64_USER_SYSCTL_OBJ) -o $@
-	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
+	@# A weak undefined symbol is an optional hook, not a link error.
+	@# GNU nm drops those from -u; llvm-nm reports them, so the strong
+	@# references are selected explicitly.
+	@test -z "$$($(ARM64_NM) -u $@ | $(AWK) '$$1 == \"U\"')" || \
+		{ $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) tools/build/check-user-elf.py --machine aarch64 $@
 
 ARM64_USER_MOUNT_OBJ := $(BUILD)/user/userland/base/mount/main.o
@@ -186,7 +206,11 @@ $(BUILD)/bin/mount: $(BUILD)/user/src/crt/crt0-aarch64.o \
  -z stack-size=0x100000 -T $(ARM64_PLATFORM)/user.ld \
  $(BUILD)/user/src/crt/crt0-aarch64.o \
  $(ARM64_USER_RUNTIME_OBJS) $(ARM64_USER_MOUNT_OBJ) -o $@
-	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
+	@# A weak undefined symbol is an optional hook, not a link error.
+	@# GNU nm drops those from -u; llvm-nm reports them, so the strong
+	@# references are selected explicitly.
+	@test -z "$$($(ARM64_NM) -u $@ | $(AWK) '$$1 == \"U\"')" || \
+		{ $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) tools/build/check-user-elf.py --machine aarch64 $@
 $(BUILD)/bin/umount: $(BUILD)/bin/mount
 	@mkdir -p $(dir $@)
@@ -221,7 +245,11 @@ $(BUILD)/POSIX-R1.ELF: $(BUILD)/user/src/crt/crt0-aarch64.o \
  $(BUILD)/user/src/crt/crt0-aarch64.o \
  $(ARM64_USER_RUNTIME_OBJS) \
  $(BUILD)/user/userland/base/tests/syscall-smoke.o -o $@
-	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
+	@# A weak undefined symbol is an optional hook, not a link error.
+	@# GNU nm drops those from -u; llvm-nm reports them, so the strong
+	@# references are selected explicitly.
+	@test -z "$$($(ARM64_NM) -u $@ | $(AWK) '$$1 == \"U\"')" || \
+		{ $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) tools/build/check-user-elf.py --machine aarch64 $@
 
 $(BUILD)/POSIX-R2.ELF: $(BUILD)/user/src/crt/crt0-aarch64.o \
@@ -233,7 +261,11 @@ $(BUILD)/POSIX-R2.ELF: $(BUILD)/user/src/crt/crt0-aarch64.o \
  $(BUILD)/user/src/crt/crt0-aarch64.o \
  $(ARM64_USER_RUNTIME_OBJS) \
  $(BUILD)/user/userland/base/tests/posix-r2.o -o $@
-	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
+	@# A weak undefined symbol is an optional hook, not a link error.
+	@# GNU nm drops those from -u; llvm-nm reports them, so the strong
+	@# references are selected explicitly.
+	@test -z "$$($(ARM64_NM) -u $@ | $(AWK) '$$1 == \"U\"')" || \
+		{ $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) tools/build/check-user-elf.py --machine aarch64 $@
 
 $(BUILD)/POSIX-R2-REMAINING.ELF: \
@@ -245,7 +277,11 @@ $(BUILD)/POSIX-R2-REMAINING.ELF: \
  $(BUILD)/user/src/crt/crt0-aarch64.o \
  $(ARM64_USER_RUNTIME_OBJS) \
  $(BUILD)/user/userland/base/tests/posix-r2-remaining.o -o $@
-	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
+	@# A weak undefined symbol is an optional hook, not a link error.
+	@# GNU nm drops those from -u; llvm-nm reports them, so the strong
+	@# references are selected explicitly.
+	@test -z "$$($(ARM64_NM) -u $@ | $(AWK) '$$1 == \"U\"')" || \
+		{ $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) tools/build/check-user-elf.py --machine aarch64 $@
 
 # ELF64 runtime linker and shared libc for the aarch64 architecture overlay.
@@ -448,7 +484,11 @@ $(BUILD)/kernel.elf: $(ARM64_VMUNIX_OBJS) $(ARM64_PLATFORM)/vmunix.ld \
 	platform/arm64/tools/check-arm64-vmunix.py
 	$(ARM64_LD) --gc-sections -z max-page-size=4096 \
  -T $(ARM64_PLATFORM)/vmunix.ld -nostdlib $(ARM64_VMUNIX_OBJS) -o $@
-	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
+	@# A weak undefined symbol is an optional hook, not a link error.
+	@# GNU nm drops those from -u; llvm-nm reports them, so the strong
+	@# references are selected explicitly.
+	@test -z "$$($(ARM64_NM) -u $@ | $(AWK) '$$1 == \"U\"')" || \
+		{ $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) platform/arm64/tools/check-arm64-vmunix.py --elf $@
 
 $(BUILD)/vmunix: $(BUILD)/kernel.elf \

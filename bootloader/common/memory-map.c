@@ -1,6 +1,9 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 #include "memory-map.h"
 
@@ -45,8 +48,13 @@ zbl_memory_normalize(
 	/* Validates the bounded input and clears the publication field first. */
 	if (count == 0)
 		return ZBL_MEMORY_INVALID;
+
 	*count = 0;
-	if (context == 0 || decode == 0 || ranges == 0 || capacity == 0 ||
+
+	if (context == 0 ||
+	    decode == 0 ||
+	    ranges == 0 ||
+	    capacity == 0 ||
 	    input_count > ZBL_MEMORY_MAX_INPUTS ||
 	    (options & ~ZBL_MEMORY_REJECT_OVERLAP) != 0)
 		return ZBL_MEMORY_INVALID;
@@ -56,16 +64,22 @@ zbl_memory_normalize(
 	highest = 0;
 	for (index = 0; index < input_count; index++) {
 		result = get_range(context, index, decode, &range);
+
 		if (result != ZBL_MEMORY_OK)
 			return result;
+
 		if (range.size == 0)
 			continue;
+
 		if (range.base < cursor)
 			cursor = range.base;
+
 		end = range.base + range.size;
+
 		if (end > highest)
 			highest = end;
 	}
+
 	if (highest == 0)
 		return ZBL_MEMORY_EMPTY;
 
@@ -77,17 +91,24 @@ zbl_memory_normalize(
 		selected_conflict = 0;
 		selected_priority = 0;
 		covering = 0;
+
 		for (index = 0; index < input_count; index++) {
 			result = get_range(context, index, decode, &range);
+
 			if (result != ZBL_MEMORY_OK)
 				return result;
+
 			if (range.size == 0)
 				continue;
+
 			end = range.base + range.size;
+
 			if (range.base > cursor && range.base < next)
 				next = range.base;
+
 			if (end > cursor && end < next)
 				next = end;
+
 			if (range.base > cursor || end <= cursor)
 				continue;
 
@@ -95,7 +116,9 @@ zbl_memory_normalize(
 			covering++;
 			if ((options & ZBL_MEMORY_REJECT_OVERLAP) != 0 && covering > 1)
 				return ZBL_MEMORY_OVERLAP;
+
 			priority = range_priority(range.type);
+
 			if (!selected_valid || priority > selected_priority) {
 				selected = range;
 				selected_priority = priority;
@@ -110,6 +133,7 @@ zbl_memory_normalize(
 		/* Publishes only described intervals, coalescing equal neighbours. */
 		if (next <= cursor)
 			return ZBL_MEMORY_INVALID;
+
 		if (selected_valid) {
 			/* Resolves conflicts after selecting the actual highest priority. */
 			if (selected_conflict) {
@@ -117,7 +141,9 @@ zbl_memory_normalize(
 				selected.flags = ZBL6_RANGE_MIXED_ATTRIBUTES;
 				selected.attributes = 0;
 			}
+
 			last = used == 0 ? 0 : &ranges[used - 1U];
+
 			if (last != 0 && last->base + last->size == cursor &&
 			    range_attributes_equal(last, &selected)) {
 				last->size = next - last->base;
@@ -134,6 +160,7 @@ zbl_memory_normalize(
 
 	/* Makes the complete normalized array visible to the caller. */
 	*count = used;
+
 	return used == 0 ? ZBL_MEMORY_EMPTY : ZBL_MEMORY_OK;
 }
 
@@ -150,13 +177,17 @@ get_range(
 	enum zbl_memory_result result;
 
 	result = decode(context, index, range);
+
 	if (result != ZBL_MEMORY_OK || range->size == 0)
 		return result;
+
 	if (range->size > UINT64_MAX - range->base)
 		return ZBL_MEMORY_OVERFLOW;
+
 	if (range->type < ZBL6_MEMORY_USABLE ||
 	    range->type > ZBL6_MEMORY_BOOT_RECLAIM)
 		range->type = ZBL6_MEMORY_RESERVED;
+
 	end = range->base + range->size;
 	mask = ZBL_MEMORY_PAGE_SIZE - 1U;
 
@@ -167,15 +198,19 @@ get_range(
 			range->size = 0;
 			return ZBL_MEMORY_OK;
 		}
+
 		range->base = (range->base + mask) & ~mask;
 		end &= ~mask;
 	} else {
 		if (end > UINT64_MAX - mask)
 			return ZBL_MEMORY_OVERFLOW;
+
 		range->base &= ~mask;
 		end = (end + mask) & ~mask;
 	}
+
 	range->size = end > range->base ? end - range->base : 0;
+
 	return ZBL_MEMORY_OK;
 }
 
@@ -206,6 +241,7 @@ range_attributes_equal(
 	const struct zbl6_memory_range_v6 *left,
 	const struct zbl6_memory_range_v6 *right)
 {
-	return left->type == right->type && left->flags == right->flags &&
-	    left->attributes == right->attributes;
+	return left->type == right->type &&
+		left->flags == right->flags &&
+		left->attributes == right->attributes;
 }

@@ -34,13 +34,10 @@ static int next_space_id=1;
 static uint32_t space_count, page_table_count;
 static struct arm64_space *space_registry;
 
-static int alloc_page(struct hal_pmem *memory)
+/* Allocates one zero-owner physical page for page-table use. */
+static int alloc_page(hal_physaddr_t *memory)
 {
-	const struct hal_pmem_request request = {
-		HAL_PMEM_PADDR_ANY, ARM64_PAGE_SIZE, ARM64_PAGE_SIZE,
-		HAL_PMEM_TYPE_RAM, 0
-	};
-	return hal_pmem_alloc(&request, memory);
+	return hal_pmem_alloc(ARM64_PAGE_SIZE, ARM64_PAGE_SIZE, memory);
 }
 extern char __kernel_text_start[],__kernel_text_end[];
 extern char __kernel_rodata_start[],__kernel_rodata_end[];
@@ -160,10 +157,10 @@ static int valid_user(uintptr_t a,size_t n)
 
 static struct arm64_table_page *allocate_table(struct arm64_space *s,uint64_t *parent,unsigned index)
 {
-	struct arm64_table_page *p=hal_malloc(sizeof(*p));
+	struct arm64_table_page *p=kernel_alloc(sizeof(*p));
 	if(!p)return NULL;
-	if(alloc_page(&p->memory)!=HAL_OK){hal_free(p);return NULL;}
-	hal_memset(p->memory.vaddr,0,ARM64_PAGE_SIZE);p->parent=parent;p->parent_index=index;
+	if(alloc_page(&p->memory)!=HAL_OK){kernel_free(p);return NULL;}
+	hal_memset(hal_pmem_to_kernel(p->memory),0,ARM64_PAGE_SIZE);p->parent=parent;p->parent_index=index;
 	p->next=s->tables;s->tables=p;page_table_count++;return p;
 }
 static uint64_t *walk_leaf(struct arm64_space *s,uintptr_t a,int create)
@@ -172,7 +169,7 @@ static uint64_t *walk_leaf(struct arm64_space *s,uintptr_t a,int create)
 	for(level=0;level<3;level++){
 		unsigned index=(unsigned)(a>>shifts[level])&511;uint64_t e=table[index];
 		if(!(e&PTE_VALID)){struct arm64_table_page *p;if(!create)return NULL;
-			p=allocate_table(s,table,index);if(!p)return NULL;e=(uintptr_t)p->memory.paddr|PTE_VALID|PTE_TABLE;table[index]=e;}
+			p=allocate_table(s,table,index);if(!p)return NULL;e=(uintptr_t)p->memory|PTE_VALID|PTE_TABLE;table[index]=e;}
 		if((e&(PTE_VALID|PTE_TABLE))!=(PTE_VALID|PTE_TABLE))return NULL;
 		table=arm64_phys_to_direct((uintptr_t)(e&PTE_ADDR));
 	}return &table[(a>>12)&511];
@@ -182,9 +179,9 @@ static struct arm64_table_page *detach_empty_tables(struct arm64_space *s)
 {
 	struct arm64_table_page *detached=NULL;int again;
 	do{struct arm64_table_page **link=&s->tables;again=0;while(*link){struct arm64_table_page *p=*link;
-			if(!table_empty(p->memory.vaddr)){link=&p->next;continue;}
+			if(!table_empty(hal_pmem_to_kernel(p->memory))){link=&p->next;continue;}
 			if(!(p->parent[p->parent_index]&PTE_VALID)||
-			   (p->parent[p->parent_index]&PTE_ADDR)!=(uintptr_t)p->memory.paddr)
+			   (p->parent[p->parent_index]&PTE_ADDR)!=(uintptr_t)p->memory)
 				HAL_FATAL("detaching an unlinked arm64 page table");
 			p->parent[p->parent_index]=0;*link=p->next;p->next=detached;
 			detached=p;again=1;}}while(again);
@@ -192,14 +189,14 @@ static struct arm64_table_page *detach_empty_tables(struct arm64_space *s)
 }
 static void free_detached_tables(struct arm64_table_page *p)
 {
-	while(p){struct arm64_table_page *next=p->next;(void)hal_pmem_free(&p->memory);
-		hal_free(p);if(page_table_count)page_table_count--;p=next;}
+	while(p){struct arm64_table_page *next=p->next;(void)hal_pmem_free(&p->memory,ARM64_PAGE_SIZE);
+		kernel_free(p);if(page_table_count)page_table_count--;p=next;}
 }
 hal_space_t hal_space_create(void)
 {
-	struct arm64_space *s=hal_malloc(sizeof(*s));bool enabled;if(!s)return NULL;hal_memset(s,0,sizeof(*s));
-	if(alloc_page(&s->l0_memory)!=HAL_OK){hal_free(s);return NULL;}
-	s->l0=s->l0_memory.vaddr;hal_memset(s->l0,0,ARM64_PAGE_SIZE);s->magic=ARM64_SPACE_MAGIC;
+	struct arm64_space *s=kernel_alloc(sizeof(*s));bool enabled;if(!s)return NULL;hal_memset(s,0,sizeof(*s));
+	if(alloc_page(&s->l0_memory)!=HAL_OK){kernel_free(s);return NULL;}
+	s->l0=hal_pmem_to_kernel(s->l0_memory);hal_memset(s->l0,0,ARM64_PAGE_SIZE);s->magic=ARM64_SPACE_MAGIC;
 	enabled=hal_irq_disable();s->space_id=next_space_id++;s->registry_next=space_registry;space_registry=s;space_count++;if(enabled)hal_irq_enable();return s;
 }
 void hal_space_destroy(hal_space_t h)
@@ -210,15 +207,15 @@ void hal_space_destroy(hal_space_t h)
 	if(current_space==s)HAL_FATAL("destroying an active arm64 space");
 	if(s->lock!=0)HAL_FATAL("destroying a busy arm64 space");
 	s->destroying=1U;*link=s->registry_next;
-	while((p=s->tables)){s->tables=p->next;(void)hal_pmem_free(&p->memory);hal_free(p);if(page_table_count)page_table_count--;}
-	s->magic=0;(void)hal_pmem_free(&s->l0_memory);hal_free(s);if(space_count)space_count--;if(enabled)hal_irq_enable();
+	while((p=s->tables)){s->tables=p->next;(void)hal_pmem_free(&p->memory,ARM64_PAGE_SIZE);kernel_free(p);if(page_table_count)page_table_count--;}
+	s->magic=0;(void)hal_pmem_free(&s->l0_memory,ARM64_PAGE_SIZE);kernel_free(s);if(space_count)space_count--;if(enabled)hal_irq_enable();
 }
 void hal_space_switch(hal_space_t h)
 {
 	struct arm64_space *s;uintptr_t ttbr;bool enabled;if(h==current_space)return;
 	if(h==HAL_SPACE_SYS){enabled=hal_irq_disable();arm64_write_ttbr0(system_ttbr0);arm64_flush_tlb();current_space=h;if(enabled)hal_irq_enable();return;}
 	if(!space_lock_handle(h,&s,&enabled))HAL_FATAL("invalid arm64 space switch");
-	ttbr=(uintptr_t)s->l0_memory.paddr;arm64_write_ttbr0(ttbr);arm64_flush_tlb();current_space=h;space_unlock(s,enabled);
+	ttbr=(uintptr_t)s->l0_memory;arm64_write_ttbr0(ttbr);arm64_flush_tlb();current_space=h;space_unlock(s,enabled);
 }
 static uint64_t leaf_flags(uint32_t attr)
 {
@@ -290,3 +287,46 @@ void hal_space_flush_tlb_range(hal_space_t h,void*v,size_t n){(void)v;if(n)hal_s
 size_t hal_space_get_page_size(int level){if(level==1)return 4096;if(level==2)return 0x200000;if(level==3)return 0x40000000;return 0;}
 void hal_space_get_user_range(uintptr_t *minimum,uintptr_t *limit){if(minimum)*minimum=4096;if(limit)*limit=ARM64_USER_LIMIT;}
 void hal_arm64_space_memory_stats(uint32_t *s,uint32_t *t){bool enabled=hal_irq_disable();if(s)*s=space_count;if(t)*t=page_table_count;if(enabled)hal_irq_enable();}
+
+/*
+ * Maps one device range into the kernel's direct map.
+ *
+ * arm64 aliases all of physical space into the kernel half, so the
+ * window already exists. Refreshing the attributes is best effort; the
+ * alias itself is what the caller needs.
+ */
+int
+hal_space_map_device(
+	hal_physaddr_t paddr,
+	size_t size,
+	uint32_t attr,
+	void **vaddr)
+{
+	void *address;
+
+	/* Requires a destination and a non-empty range. */
+	if (vaddr == NULL || size == 0)
+		return HAL_ERR_INVALID;
+	address = arm64_phys_to_direct((uintptr_t)paddr);
+
+	/* Rejects an address the direct map does not cover. */
+	if (address == NULL)
+		return HAL_ERR_INVALID;
+	(void)hal_space_map(HAL_SPACE_SYS, address, paddr, size, attr);
+
+	/* Reports the mapped window. */
+	*vaddr = address;
+	return HAL_OK;
+}
+
+/*
+ * Removes one device mapping.
+ */
+int
+hal_space_unmap_device(
+	void *vaddr,
+	size_t size)
+{
+	/* Releases the system-space window. */
+	return hal_space_unmap(HAL_SPACE_SYS, vaddr, size);
+}
