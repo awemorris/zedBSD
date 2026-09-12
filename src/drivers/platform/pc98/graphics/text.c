@@ -45,6 +45,13 @@
 #define GDC_PARAMETER		0x0060U
 #define GDC_CSRW		0x49U
 #define GDC_CSRFORM		0x4bU
+
+/* Cursor form: bit 7 shows it, the low five bits are the row
+ * height minus one, which the sixteen-line font fixes at 15. */
+#define GDC_CSRFORM_SHOW	0x8fU
+#define GDC_CSRFORM_HIDE	0x0fU
+#define GDC_CSRFORM_TOP		0x20U
+#define GDC_CSRFORM_BOTTOM	0x7bU
 #define GDC_FIFO_FULL		0x02U
 
 /* The JIS X 0208 table the HAL owns, indexed in row-major order. */
@@ -449,21 +456,34 @@ cursor_locked(
 	if (!text_ready)
 		return;
 
-	/* Selects a blinking underline, or no cursor at all. */
+	/*
+	 * Shows or hides the cursor. The low five bits of the first
+	 * parameter are the scan lines per character row minus one, which
+	 * is fixed by the font at sixteen; changing it would resize every
+	 * row of text on the screen.
+	 */
 	if (!gdc_write(GDC_COMMAND, GDC_CSRFORM))
 		return;
-	(void)gdc_write(GDC_PARAMETER,
-			text_cursor_visible ? 0x81U : 0x00U);
-	(void)gdc_write(GDC_PARAMETER, 0x0fU);
-	(void)gdc_write(GDC_PARAMETER, 0x7bU);
+	if (!gdc_write(GDC_PARAMETER,
+		       text_cursor_visible ? GDC_CSRFORM_SHOW
+					   : GDC_CSRFORM_HIDE))
+		return;
+	if (!gdc_write(GDC_PARAMETER, GDC_CSRFORM_TOP))
+		return;
+	if (!gdc_write(GDC_PARAMETER, GDC_CSRFORM_BOTTOM))
+		return;
 
-	/* Writes the cell address as the three-parameter cursor command. */
+	/* A hidden cursor needs no address. */
+	if (!text_cursor_visible)
+		return;
+
+	/* Writes the cell address as the two-parameter cursor command. */
 	address = text_cursor_row * TEXT_COLUMNS + text_cursor_column;
 	if (!gdc_write(GDC_COMMAND, GDC_CSRW))
 		return;
-	(void)gdc_write(GDC_PARAMETER, (uint8_t)(address & 0xffU));
-	(void)gdc_write(GDC_PARAMETER, (uint8_t)((address >> 8) & 0x1fU));
-	(void)gdc_write(GDC_PARAMETER, 0);
+	if (!gdc_write(GDC_PARAMETER, (uint8_t)(address & 0xffU)))
+		return;
+	(void)gdc_write(GDC_PARAMETER, (uint8_t)((address >> 8) & 0xffU));
 }
 
 /* Moves every row up by one and clears the last row. */

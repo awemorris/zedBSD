@@ -44,6 +44,18 @@
 #define GDC_COMMAND		0x0062U
 #define GDC_PARAMETER		0x0060U
 #define GDC_CSRW		0x49U
+#define GDC_CSRFORM		0x4bU
+
+/*
+ * Cursor form. Bit 7 of the first parameter shows the cursor; its low
+ * five bits are the scan lines per character row minus one, which the
+ * sixteen-line font fixes at 15. The display logic reads that field
+ * too, so a wrong value repeats the screen instead of only losing the
+ * cursor.
+ */
+#define GDC_CSRFORM_SHOW	0x8fU
+#define GDC_CSRFORM_TOP		0x20U
+#define GDC_CSRFORM_BOTTOM	0x7bU
 #define GDC_FIFO_FULL		0x02U
 
 static unsigned cursor_row;
@@ -241,13 +253,23 @@ update_cursor_locked(
 	if (output_suspended)
 		return;
 
-	/* Writes the cell address as the three-parameter cursor command. */
+	/* States the row height and shows the cursor. */
+	if (!gdc_write(GDC_COMMAND, GDC_CSRFORM))
+		return;
+	if (!gdc_write(GDC_PARAMETER, GDC_CSRFORM_SHOW))
+		return;
+	if (!gdc_write(GDC_PARAMETER, GDC_CSRFORM_TOP))
+		return;
+	if (!gdc_write(GDC_PARAMETER, GDC_CSRFORM_BOTTOM))
+		return;
+
+	/* Writes the cell address as the two-parameter cursor command. */
 	address = cursor_row * CONS_COLUMNS + cursor_column;
 	if (!gdc_write(GDC_COMMAND, GDC_CSRW))
 		return;
-	(void)gdc_write(GDC_PARAMETER, (uint8_t)(address & 0xffU));
-	(void)gdc_write(GDC_PARAMETER, (uint8_t)((address >> 8) & 0x1fU));
-	(void)gdc_write(GDC_PARAMETER, 0);
+	if (!gdc_write(GDC_PARAMETER, (uint8_t)(address & 0xffU)))
+		return;
+	(void)gdc_write(GDC_PARAMETER, (uint8_t)((address >> 8) & 0xffU));
 }
 
 /* Fills one row with blanks. */
