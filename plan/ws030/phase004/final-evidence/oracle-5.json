@@ -1,0 +1,21 @@
+{
+  "passed": true,
+  "time_ms": 790,
+  "width": 320,
+  "height": 240,
+  "rgb_sha256": "1d7b0d5d9c788f205d159830e00a653c0b5b5bc4d79ea42be862114bfd88e0a3",
+  "checked_pixels": 75952,
+  "excluded_boundary_pixels": 848,
+  "foreground_pixels": 7381,
+  "visible_faces": {
+    "(2, -1)": 2774,
+    "(0, 1)": 3514,
+    "(1, -1)": 1093
+  },
+  "checked_foreground_colors": 3721,
+  "mismatch_pixels": 0,
+  "mismatch_examples": [],
+  "geometry_margin_pixels": 0.3,
+  "texel_margin": 0.02,
+  "maximum_excluded_fraction": 0.05
+}

@@ -18,6 +18,8 @@
 
 #include <stdint.h>
 
+struct kern_text_snapshot;
+
 /* Light grey on black, the default text attribute. */
 #define DRV_PCAT_TEXT_ATTRIB_NORMAL	0x07U
 
@@ -34,5 +36,7 @@ void drv_pcat_text_show_cursor(int visible);
 void drv_pcat_text_update_cursor(void);
 void drv_pcat_text_suspend(void);
 void drv_pcat_text_resume(void);
+
+int drv_pcat_text_snapshot(struct kern_text_snapshot *snapshot);
 
 #endif

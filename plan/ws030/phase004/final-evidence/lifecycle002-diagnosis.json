@@ -1,0 +1,20 @@
+{
+  "attempt": "q308-lifecycle-002",
+  "original_result_preserved": true,
+  "status": "failed with two independently diagnosed causes",
+  "guest_shader_frames": "6 VNC/readback/oracle passes",
+  "abnormal_exit": true,
+  "ordinary_reopen": true,
+  "console_restored": false,
+  "console_cause": "Dedicated vkdemo configuration retained CONFIG_DRIVER_GRAPHICS=n from the old finite Venus test. The actual image omitted the PCAT text backend, so optional kern_text_snapshot returned ENOTSUP and no console worker was started. The individually compiled text object was not a linked kernel dependency. Enable the existing text provider in the dedicated config.",
+  "competition_observed": "VKDEMO FAILED run=r80d791fa964e92c3823158e2-contender api=direct display swapchain result=-1000000001 frames=0",
+  "owner_completed_frames": 35,
+  "competition_harness_cause": "Expected api=vkCreateSwapchainKHR, but application reports api=direct display swapchain. Result code correctly was VK_ERROR_NATIVE_WINDOW_IN_USE_KHR. Keep failure and correct the expected diagnostic name.",
+  "next_attempt": "Fresh build with text provider, scanout query/kernel-log notification corrections and corrected lifecycle harness.",
+  "evidence_sha256": {
+    "result.json": "2b55fd60b05375dfb4a89d280d9047bd4f3858899032b675ad528f69ac3cc4a2",
+    "console.log": "13dbbd517e424b00c1965893f8c187be4591bc318bc1ccc105bb0846c4afb071",
+    "console-return.ppm": "b44dda30a567d92ce99c242de8d8fdbbf3bd2c06932adb31373baf253767d89b",
+    "console-write.ppm": "b44dda30a567d92ce99c242de8d8fdbbf3bd2c06932adb31373baf253767d89b"
+  }
+}

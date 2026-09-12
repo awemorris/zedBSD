@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-12T19:29:21.716805+00:00",
+  "event": "https://github.com/awemorris/zedBSD/issues/392#issuecomment-5648174368",
+  "phase_acceptance": "not cleared; console restoration and final source integration pending",
+  "evidence_directory": "plan/ws030/phase004/checkpoint003-evidence",
+  "standard_guest_attempt": "q308-standard-vkdemo-002 PASS six independently verified frames and ordinary reopen",
+  "abnormal_exit_attempt": "q308-lifecycle-001 SIGINT/reopen PASS; physical console FAIL",
+  "approved_HAL_patch": "e6ec9e6c2deda41b840fa6f10846438d091f3a20ce782b9251b7979ac7591c8d"
+}

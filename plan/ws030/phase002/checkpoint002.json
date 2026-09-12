@@ -1,0 +1,23 @@
+{
+  "at": "2026-09-12T18:52:45.560086+00:00",
+  "queue_review": "First120 active minute boundary review; 720 active minute authorized estimate unchanged",
+  "wall_minutes_since_start": 118.1,
+  "phase_acceptance": "not cleared; guest standard-vkdemo and remaining peer/style acceptance pending",
+  "event": "https://github.com/awemorris/zedBSD/issues/390#issuecomment-5647977365",
+  "approved_HAL_patch": "e6ec9e6c2deda41b840fa6f10846438d091f3a20ce782b9251b7979ac7591c8d",
+  "evidence_directory": "plan/ws030/phase002/checkpoint002-evidence",
+  "captured_source_and_binary_hashes": {
+    "src/hal/amd64/space.c": "e4e97a8de5a22456d86737223f96eb0ed09de902b37c78fc00cbd1c3220001a8",
+    "include/hal/hal.h": "53d0d191fa9390017b2802329a4e199d04486462970662ec12fbe26753a41130",
+    "src/drivers/pci/pci-pcat.c": "c0703c87a54abcc9cbfb3e9efda218847a74f8bc5063d13438a822d232c7160b",
+    "src/kern/vm-device.c": "1a0e0e13c40be98d08c6e15c8796d46e0f9f009ea819cdbe1cc00fca4b757b8d",
+    "src/drivers/gpu/gpu.c": "27e33d9b862284a826604794b2a5b1d033a2f791ad50a421c97c6900ca0121cc",
+    "userland/base/libvulkan/memory.c": "7e8899b7e6fb4e62c7034121548cb4dd015400796711d3313582f5262a62124c",
+    "userland/base/libvulkan/descriptors.c": "f1d5ac02df999a6399d3f64ea5f0ff831444ae06f7168afdd727eb2f4eaa6557",
+    "build/vkdemo-amd64/dynamic/libvulkan.so": "a56264436f2099acb8fa74ee0d607483b66fe2bbb2d81bff7c8c5973b79ec4ef",
+    "build/vkdemo-amd64/bin/vkdemo": "66d288f64f63c0a1b5d551c42891d83f4ff02e9e41da0e68a629dd70d6cd5547"
+  },
+  "guest_aperture_attempt": "q308-aperture256-002",
+  "guest_aperture_result": "PASS all49152RGBpixels; existing Venus client",
+  "standard_guest_attempt": "q308-standard-vkdemo-001 started; result not checked at checkpoint"
+}

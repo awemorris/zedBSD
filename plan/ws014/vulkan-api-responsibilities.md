@@ -74,7 +74,7 @@ Venusではユーザーだけで完結するnative ICDの処理もhost転送を�
 | `vkGetImageSparseMemoryRequirements` | sparse imageのblock/miptail等の要件を返す | sparse対応の場合だけ粒度・結合制約を供給（当該feature対応時） |
 | `vkGetPhysicalDeviceSparseImageFormatProperties` | sparse image format・block条件を実装能力と照合して返す | device/capset/backend情報を供給。実装できない機能はadvertiseしない |
 | `vkQueueBindSparse` | sparse bindingと同期依存をまとめる | sparse mapping更新、範囲検証、queue同期。対応をadvertiseする場合に必要（当該feature対応時） |
-| `vkCreateFence` | binary/timeline等の状態とハンドルを作成 | backend同期オブジェクトまたは共有状態/待機機構を確保 |
+| `vkCreateFence` | signaled/unsignaled状態のfenceとハンドルを作成。timelineはsemaphoreの機能 | backend同期オブジェクトまたは共有状態/待機機構を確保 |
 | `vkDestroyFence` | 同期ハンドルを解放 | 関連するbackend同期資源・待機参照を回収 |
 | `vkResetFences` | 対象fenceを未通知状態へ戻す | backend同期状態をreset。実行中の仕事の取消ではない |
 | `vkGetFenceStatus` | fenceの通知状態を返す | 実行完了状態の読出しまたは共有状態を供給 |
@@ -645,3 +645,7 @@ transportと観測の詳細は [Venus transport資料](venus-transport.md)、実
 [追加APIの表](phase005/api-coverage.md) はformat照会、shader module、graphics pipeline、image view/sampler、descriptor、renderpass/framebuffer、vertex/descriptor binding、draw、push constant、texture upload、fence/pool再利用を記録する。これらのVulkan状態と符号化はUに属する。Kは既存のcapset/blob/read/write/command/presentを提供する。GPU ioctlやHALの追加はこのデモの実装前提にしていない。
 
 API表の275関数、44callback候補を、今回の有限clientがすべて実装したという意味へ変更しない。対象rendererのwire commandを直接符号化するクライアントであり、汎用libvulkan.so/loader/ICDの公開関数提供は後続課題。現行UAPI v1、K内部ops v2、通常の動的register/unregisterは維持する。実測したAPI不足・画像結果・完了判定は [p005](phase005/phase.md) とその結果を正とする。
+
+## q308: 標準API実装の独立WSへの分離
+
+[WS030](https://github.com/awemorris/zedBSD/issues/388) がVulkan1.0全137coreとKHR_surface/display/swapchain/display_swapchainの標準library実装を所有する。p005の旧有限wireクライアントは標準APIデモへ訂正するため現在clearを失効した。q307実測とこの275関数資料の履歴は保持する。EGLは今回cancel、Waylandは将来backend。仕様・limits・可視性・FIFOの未達をsymbolの存在で完了としない。

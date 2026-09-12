@@ -1,0 +1,4 @@
+libvulkan dispatch: PASS (155 real exports, 137 core, 18 WSI, independent scopes, extension gating)
+ordinary: PASS
+libvulkan dispatch: PASS (155 real exports, 137 core, 18 WSI, independent scopes, extension gating)
+sanitize: PASS

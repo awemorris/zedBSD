@@ -17,6 +17,7 @@
  */
 
 #include "kern/vmspace.h"
+#include "kern/vm-device.h"
 #include "kern/file.h"
 #include "kern/kmem.h"
 #include "kern/lock.h"
@@ -166,6 +167,7 @@ extern void vmspace_pin_page_checkpoint(struct vmspace *vm, size_t index, size_t
 extern void vmspace_object_revoke_checkpoint(struct vmspace *vm, uintptr_t address) __attribute__((weak));
 
 static void (*vmspace_reap_notify)(void *);
+static int vmspace_device_fault(struct vmspace *vm, struct vm_region *region, struct vm_page *page);
 static int alloc_vm_page(struct kern_pmem *memory);
 static int alloc_vm_metadata_page(struct kern_pmem *memory);
 static struct vm_page * vm_page_slab_take_locked(void);
@@ -474,6 +476,106 @@ vm_private_page_free_metadata(
 }
 
 /*
+ * Publishes a driver-owned shared extent without charging or allocating RAM pages.
+ */
+int
+vmspace_map_device(
+	struct vmspace *vm,
+	uintptr_t hint,
+	size_t size,
+	uint32_t prot,
+	struct vm_device_mapping *mapping,
+	int exact,
+	uintptr_t *mapped)
+{
+	struct vm_region *region;
+	uintptr_t start;
+	size_t rounded;
+	int error;
+	int valid;
+	int occupied;
+
+	/* Requires a retained backing and a user address space with an output owner. */
+	if (vm == NULL || vm == &kernel_vmspace)
+		return EINVAL;
+
+	/* Both the backing and the final mapped address need an explicit owner. */
+	if (mapping == NULL || mapped == NULL)
+		return EINVAL;
+
+	/* Refuses empty or unroundable extents before any VM allocation. */
+	if (size == 0 || size > SIZE_MAX - (PAGE_SIZE - 1U))
+		return EINVAL;
+
+	/* Neither initial nor later access rights may exceed the driver's original open authority. */
+	if ((prot & ~mapping->max_prot) != 0)
+		return EACCES;
+
+	/* Partial final pages are already included in the driver's retained extent. */
+	rounded = (size + PAGE_SIZE - 1U) & ~(size_t)(PAGE_SIZE - 1U);
+	if (rounded > mapping->bytes)
+		return EINVAL;
+
+	/* Address selection and region publication share the usual VM serializer. */
+	vm_metadata_enter();
+	mutex_lock(&vm->lock);
+
+	/* Resolves an exact unoccupied placement or searches the ordinary user address range. */
+	start = hint;
+	error = 0;
+	if (exact) {
+		/* Exact placement must satisfy user range bounds before overlap can be examined. */
+		valid = range_valid(start, rounded);
+		if (!valid) {
+			error = EINVAL;
+		} else {
+			/* Existing regions remain untouched by MAP_FIXED_NOREPLACE semantics. */
+			occupied = overlaps(vm, start, rounded);
+			if (occupied)
+				error = EEXIST;
+		}
+	} else {
+		error = vmspace_find_free_range_locked(vm, hint, rounded, PAGE_SIZE, &start);
+	}
+
+	/* Device ownership supplies storage; no anonymous commitment is reserved. */
+	if (error == 0) {
+		error = map_region(
+			vm,
+			start,
+			rounded,
+			prot,
+			VM_BACKING_DEVICE,
+			NULL,
+			0,
+			start,
+			rounded,
+			VM_REGION_SHARED,
+			0,
+			&region);
+	}
+
+	/* A published region retains the immutable backing until final region or pin retirement. */
+	if (error == 0) {
+		vm_device_ref(mapping);
+		region->device = mapping;
+		region->max_prot = mapping->max_prot;
+		*mapped = start;
+		vmspace_generation_advance_locked(vm);
+	}
+
+	mutex_unlock(&vm->lock);
+	vm_metadata_leave();
+
+	/* The caller keeps its initial backing reference on both success and failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: faults can now publish the retained device pages lazily. */
+	return 0;
+}
+
+/*
  * Tests whether a byte range lies entirely inside the user address range.
  */
 int
@@ -678,6 +780,10 @@ vm_page_effective_prot(
 	prot = page->region->prot;
 	if ((page->flags & VM_MAPPING_COW) != 0)
 		prot &= ~HAL_SPACE_WRITE;
+
+	/* A visible device page preserves its backing cache policy and physical identity. */
+	if (prot != 0 && page->region->device != NULL)
+		prot |= vm_device_page_attributes(page->region->device);
 
 	return prot;
 }
@@ -902,6 +1008,28 @@ retry:
 		vm_metadata_leave();
 		vmspace_wait_fault_event(vm, sequence);
 		goto retry;
+	}
+
+	/* Device storage remains resident; an absent PTE only needs remapping. */
+	if (page != NULL && region->device != NULL) {
+		if ((page->flags & VM_MAPPING_MAPPED) != 0) {
+			mutex_unlock(&vm->lock);
+			vm_metadata_leave();
+			return 0;
+		}
+
+		/* The region hold prevents unmap or split while the HAL changes its PTE. */
+		page->flags |= VM_MAPPING_BUSY;
+		region->hold_count++;
+		mutex_unlock(&vm->lock);
+		vm_metadata_leave();
+		/* Completes the held device mapping after all VM locks were released. */
+		error = vmspace_device_fault(vm, region, page);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the retained device page is now mapped with its original cache policy. */
+		return 0;
 	}
 
 	/* An existing object mapping is served by the object cache. */
@@ -1196,6 +1324,17 @@ retry:
 
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
+
+	/* The driver has already materialized and retained every device page. */
+	if (region->device != NULL) {
+		/* Completes the held device mapping after all VM locks were released. */
+		error = vmspace_device_fault(vm, region, page);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the retained device page is now mapped with its original cache policy. */
+		return 0;
+	}
 
 	/* A shared object page is mapped straight from the object cache. */
 	if (region->object != NULL || region->snapshot != NULL) {
@@ -1517,6 +1656,8 @@ vmspace_unpin_user_pages(
 			vm_private_page_unpin(page->owner.private_page);
 		else if (page->kind == VMSPACE_PINNED_OBJECT)
 			vm_object_page_unpin(page->owner.object_page);
+		else if (page->kind == VMSPACE_PINNED_DEVICE)
+			vm_device_put(page->owner.device);
 		memset(page, 0, sizeof(*page));
 	}
 }
@@ -1653,11 +1794,11 @@ retry_faults:
 		}
 
 		/*
-		 * A mapping is backed either privately or by an object, never
-		 * by both and never by neither.
+		 * Ordinary mappings have exactly one private or object backing.
+		 * Device mappings instead retain the region's immutable driver extent.
 		 */
-		if ((entry->private_page == NULL) ==
-		    (entry->object_page == NULL)) {
+		if (region->device == NULL &&
+		    (entry->private_page == NULL) == (entry->object_page == NULL)) {
 			error = EFAULT;
 			break;
 		}
@@ -1693,7 +1834,17 @@ retry_faults:
 	     index++, current += PAGE_SIZE) {
 		region = find_region_locked(vm, current, 1);
 		entry = find_page(region, current);
-		if (entry->private_page != NULL) {
+		if (region->device != NULL) {
+			/* The backing reference survives unmap and descriptor close. */
+			vm_device_ref(region->device);
+			pages[index].kind = VMSPACE_PINNED_DEVICE;
+			pages[index].owner.device = region->device;
+			pages[index].device_offset = region->device_offset +
+			    (size_t)(current - region->start);
+			pages[index].memory.paddr = (hal_physaddr_t)(region->device->physical +
+			    pages[index].device_offset);
+			pages[index].memory.size = PAGE_SIZE;
+		} else if (entry->private_page != NULL) {
 			error = vm_private_page_pin(entry->private_page,
 			    &pages[index].memory);
 			if (error == EBUSY) {
@@ -1773,6 +1924,7 @@ vmspace_wire_range(
 	struct vm_region *region;
 	struct vm_page *entry;
 	uint64_t sequence;
+	int resident;
 
 	error = vmspace_check(vm, address, size, required);
 	if (error != 0)
@@ -1820,9 +1972,20 @@ vmspace_wire_range(
 			continue;
 		}
 
-		/* Refuses a page the fault did not leave resident. */
-		if (entry == NULL || (entry->object_page == NULL &&
-		    !vm_private_page_is_resident(entry))) {
+		/* Classifies the page through its actual retained device, object or private backing. */
+		resident = 0;
+		if (entry != NULL) {
+			/* Device and object storage remain retained independently of ordinary private RAM residency. */
+			if (region->device != NULL || entry->object_page != NULL) {
+				resident = 1;
+			} else {
+				/* Only a private backing needs the ordinary RAM residency query. */
+				resident = vm_private_page_is_resident(entry);
+			}
+		}
+
+		/* Refuses a page the completed fault did not leave resident in its own backing domain. */
+		if (!resident) {
 			error = EFAULT;
 			mutex_unlock(&vm->lock);
 			vm_metadata_leave();
@@ -3586,6 +3749,14 @@ vmspace_fork_locked(
 			copy_region->snapshot = source_region->snapshot;
 		}
 
+		/* Forked device regions share the retained extent and fault their own PTEs lazily. */
+		if (source_region->device != NULL) {
+			vm_device_ref(source_region->device);
+			copy_region->device = source_region->device;
+			copy_region->device_offset = source_region->device_offset;
+			continue;
+		}
+
 		if (source_region->object != NULL) {
 			vm_object_ref(source_region->object);
 			copy_region->object = source_region->object;
@@ -3910,6 +4081,8 @@ discard_prepared_region(
 		vm_object_put(region->object);
 	if (region->snapshot != NULL)
 		file_exec_snapshot_put(region->snapshot);
+	if (region->device != NULL)
+		vm_device_put(region->device);
 	if (region->commit_size != 0)
 		vm_commit_release(region->commit_size);
 	kern_free(region);
@@ -4446,7 +4619,9 @@ vmspace_pin_mapping_ready(
 	    (region->prot & required) == required &&
 	    (entry->flags & (VM_MAPPING_BUSY | VM_MAPPING_MAPPED)) ==
 	    VM_MAPPING_MAPPED) {
-		if (entry->private_page != NULL &&
+		if (region->device != NULL) {
+			ready = 1;
+		} else if (entry->private_page != NULL &&
 		    vm_private_page_is_resident(entry) &&
 		    ((required & HAL_SPACE_WRITE) == 0 ||
 		    (entry->flags & VM_MAPPING_COW) == 0)) {
@@ -4581,6 +4756,21 @@ copy_backing(
 
 			/* Copies through whichever backing the pin holds. */
 			error = 0;
+		} else if (page->kind == VMSPACE_PINNED_DEVICE) {
+			/* Device pins keep the ordered kernel alias alive for either copy direction. */
+			if (to_user) {
+				error = vm_device_write(
+					page->owner.device,
+					page->device_offset + offset,
+					bytes,
+					chunk);
+			} else {
+				error = vm_device_read(
+					page->owner.device,
+					page->device_offset + offset,
+					bytes,
+					chunk);
+			}
 		} else if (page->kind == VMSPACE_PINNED_OBJECT) {
 			if (to_user)
 				error = vm_object_page_pin_write(
@@ -5054,6 +5244,12 @@ split_region_prepared(
 	if (right->snapshot != NULL)
 		file_exec_snapshot_ref(right->snapshot);
 
+	/* A split keeps both aliases on the same backing with distinct byte offsets. */
+	if (right->device != NULL) {
+		vm_device_ref(right->device);
+		right->device_offset += left_size;
+	}
+
 	/* The left half keeps whatever data lies before the split. */
 	region->size = left_size;
 	if (original_data_start < address &&
@@ -5143,6 +5339,8 @@ release_retired_regions(
 			vm_object_put(region->object);
 		if (region->snapshot != NULL)
 			file_exec_snapshot_put(region->snapshot);
+		if (region->device != NULL)
+			vm_device_put(region->device);
 		if (region->commit_size != 0)
 			vm_commit_release(region->commit_size);
 		kern_free(region);
@@ -5655,6 +5853,9 @@ vmspace_protect_locked(
 				page_prot = prot & ~HAL_SPACE_WRITE;
 			else
 				page_prot = prot;
+			/* Device identity and cache policy survive every nonempty protection change. */
+			if (prot != 0 && region->device != NULL)
+				page_prot |= vm_device_page_attributes(region->device);
 			hal_error = HAL_OK;
 			if (prot == 0 && (page->flags & VM_MAPPING_MAPPED)) {
 				hal_error = hal_space_unmap(vm->space,
@@ -5667,6 +5868,20 @@ vmspace_protect_locked(
 			    (page->flags & VM_MAPPING_MAPPED)) {
 				hal_error = hal_space_prot(vm->space,
 				    (void *)page->address, PAGE_SIZE, page_prot);
+			} else if (prot != 0 && region->device != NULL) {
+				/* Restores a previously inaccessible device page from its immutable physical extent. */
+				physical = (hal_physaddr_t)(region->device->physical +
+				    region->device_offset + page->address - region->start);
+				hal_error = hal_space_map(
+					vm->space,
+					(void *)page->address,
+					physical,
+					PAGE_SIZE,
+					page_prot);
+				if (hal_error == HAL_OK) {
+					/* Rollback must remove this newly restored PTE if a later page fails. */
+					page->flags |= VM_MAPPING_MAPPED | VM_MAPPING_PROTECT_ADDED;
+				}
 			} else if (prot != 0 && page->object_page != NULL) {
 				hal_error = hal_space_map(vm->space,
 				    (void *)page->address,
@@ -5724,10 +5939,17 @@ rollback:
 				rollback->flags &= ~(VM_MAPPING_MAPPED |
 				    VM_MAPPING_PROTECT_ADDED);
 			} else if (rollback->flags & VM_MAPPING_PROTECT_REMOVED) {
-				if (rollback->object_page != NULL)
+				/* Reconstructs the original physical page from the backing which survived rollback. */
+				if (region->device != NULL) {
+					physical = (hal_physaddr_t)(region->device->physical +
+					    region->device_offset + rollback->address - region->start);
+				} else if (rollback->object_page != NULL) {
 					physical = rollback->object_page->pmem.paddr;
-				else
+				} else {
 					physical = rollback->private_page->pmem.paddr;
+				}
+
+				/* Restores the original protection before releasing the rollback marker. */
 				if (hal_space_map(vm->space,
 				    (void *)rollback->address, physical, PAGE_SIZE,
 				    vm_page_effective_prot(rollback)) != HAL_OK)
@@ -5771,6 +5993,8 @@ vmspace_destroy(
 			vm_object_put(region->object);
 		if (region->snapshot != NULL)
 			file_exec_snapshot_put(region->snapshot);
+		if (region->device != NULL)
+			vm_device_put(region->device);
 		if (region->commit_size != 0)
 			vm_commit_release(region->commit_size);
 		kern_free(region);
@@ -5945,5 +6169,58 @@ vmspace_exec_cache_fault(
 		return error;
 
 	/* Succeeded. */
+	return 0;
+}
+
+/* Maps retained device storage while unmap and protection wait on its region hold. */
+static int
+vmspace_device_fault(
+	struct vmspace *vm,
+	struct vm_region *region,
+	struct vm_page *page)
+{
+	hal_physaddr_t physical;
+	uint32_t attributes;
+	int status;
+	int error;
+
+	/* Immutable mapping geometry stays valid through the entire HAL operation. */
+	physical = (hal_physaddr_t)(region->device->physical +
+	    region->device_offset + page->address - region->start);
+	attributes = region->prot | vm_device_page_attributes(region->device);
+	status = hal_space_map(
+		vm->space,
+		(void *)page->address,
+		physical,
+		PAGE_SIZE,
+		attributes);
+	error = 0;
+	if (status == HAL_ERR_NOMEM)
+		error = ENOMEM;
+	else if (status != HAL_OK)
+		error = EFAULT;
+
+	/* Publish completion before releasing the hold which excluded VM mutation. */
+	vm_metadata_enter();
+	mutex_lock(&vm->lock);
+
+	/* Only a successful HAL operation makes the retained device page visible to user access. */
+	if (error == 0)
+		page->flags |= VM_PAGE_RESIDENT | VM_MAPPING_MAPPED;
+
+	/* Clearing BUSY and the hold lets unmap, protect and waiting faults observe one completed attempt. */
+	page->flags &= ~VM_MAPPING_BUSY;
+	region->hold_count--;
+	vmspace_generation_advance_locked(vm);
+	vmspace_fault_wake_locked(vm);
+
+	mutex_unlock(&vm->lock);
+	vm_metadata_leave();
+
+	/* An allocation failure retains only harmless page metadata for a later retry. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the user page shares the driver's original device storage. */
 	return 0;
 }

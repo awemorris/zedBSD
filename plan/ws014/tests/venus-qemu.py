@@ -78,10 +78,10 @@ class QMP:
 
     def text(self, text):
         punctuation = {' ': 'spc', '-': 'minus', '=': 'equal', '/': 'slash',
-                       '.': 'dot', '\n': 'ret'}
+                       '.': 'dot', '&': 'shift-7', '\n': 'ret'}
         for char in text:
             key = punctuation.get(char, char)
-            if not re.fullmatch('[a-z0-9]+', key):
+            if key != 'shift-7' and not re.fullmatch('[a-z0-9]+', key):
                 raise ValueError(f'unsupported console character {char!r}')
             self.call('human-monitor-command', {'command-line': f'sendkey {key} 1'})
             time.sleep(0.025)
@@ -144,7 +144,7 @@ def run(args, exercise=None, harness_path=None):
                '-drive', f'if=pflash,format=raw,file={variables}',
                '-drive', f'file={run_image},format=raw,if=ide,index=0',
                '-vga', 'none', '-device',
-               'virtio-vga-gl,id=venus,venus=on,blob=on,hostmem=8M,max_outputs=1',
+               'virtio-vga-gl,id=venus,venus=on,blob=on,hostmem=256M,max_outputs=1',
                '-display', 'egl-headless,rendernode=/dev/dri/renderD128',
                '-qmp', f'unix:{qmp_path},server=on,wait=off',
                '-vnc', f'unix:{vnc_path}',

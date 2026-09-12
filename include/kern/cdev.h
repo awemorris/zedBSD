@@ -21,6 +21,7 @@
 
 struct file;
 struct file_ops;
+struct vm_device_mapping;
 
 /* Releases driver data after the last reference on its cdev generation. */
 typedef void (*cdev_finalizer_t)(void *);
@@ -33,6 +34,9 @@ struct cdev_ops {
 	ssize_t (*write)(struct file *, const void *,size_t);
 	int (*ioctl)(struct file *, unsigned long, uintptr_t);
 	int (*poll)(struct file *, short, short *);
+
+	/* Success transfers one retained device view; the caller must release its reference. */
+	int (*mmap)(struct file *, off_t, size_t, uint32_t, struct vm_device_mapping **);
 };
 
 /*

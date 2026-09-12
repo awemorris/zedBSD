@@ -7,6 +7,7 @@ Status: planning
 Phase disposition: normal
 Parent: [WS014](https://github.com/awemorris/zedBSD/issues/15)
 Queue: none
+Dependencies: corrected ws014-p005 and ws030-p004 final library contract
 <!-- awesome-plan-current:end -->
 
 Combined ID: `ws014-p004`
@@ -39,3 +40,13 @@ p002/p003/p005で修正された最終ソースとU/K・callback・PCI連携資�
 ## p005からの引き渡し（q307完了）
 
 [p005](https://github.com/awemorris/zedBSD/issues/387)の3D shader/texture/depthと連続frame・正常終了・同VM再openが成立した。追加U graphics API、共通session client、Kの非同期unmap待機修正を最終API・規約レビューへ含める。新ioctl/HAL変更なし。全Vulkan/libvulkan/WSI適合とnative i915は完了と解釈しない。本p004はplanningであり、次の有限Queueが選ばれるまで未実行。
+
+## q308による依存の更新
+
+[p005](https://github.com/awemorris/zedBSD/issues/387)の旧clearは標準API要求により失効した。標準API化したp005の実測と [WS030の最終library契約/意味論/規約結果](https://github.com/awemorris/zedBSD/issues/392) を待ってから本Phaseへ進む。本p004はplanning、q308には含めず未実行。旧q307のgraphics/wait修正は履歴証拠として保持する。全Vulkan1.0/shared libraryとdirect-display実装はWS030、native i915は後段のWS029が所有する。
+
+## q308の標準API・console契約の引き渡し
+
+WS030はVulkan1.0 core137＋direct-display WSI18と/lib/libvulkan.soを完成し、WS014 p005は標準APIだけのアプリへ訂正済み。q308-lifecycle-003で実描画6枚、正常/異常終了後の再open、640×480 console復帰・文字更新、別process表示競合拒否を確認した。GPU dynamic resources/device mmap/共有VM、PCI cache契約、native display lease/virtual FIFO、文字snapshot/workerを最終framework/API確認の入力にする。
+
+詳細は [WS030](https://github.com/awemorris/zedBSD/issues/388) と [p005](https://github.com/awemorris/zedBSD/issues/387) のq308結果。本p004はplanning・未queueのまま。WS030 p004の標準library受け入れを本p004のclearanceへ流用しない。native i915は別WS029。HALは既承認patchを超えて変更しない。

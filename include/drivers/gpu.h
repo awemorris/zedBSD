@@ -15,11 +15,26 @@
 #define DRIVERS_GPU_H
 
 #include <uapi/gpu.h>
+#include <drivers/gpu-display.h>
 #include <stdint.h>
 
-#define DRV_GPU_INTERFACE_VERSION	2U
+#define DRV_GPU_INTERFACE_VERSION	3U
+
+#define DRV_GPU_MAPPING_DEVICE 1U
 
 struct drv_gpu_device;
+
+/*
+ * An immutable CPU view borrowed from one retained resource. The GPU core
+ * retains the resource and its open file through every VM mapping and pin.
+ * DEVICE distinguishes uncached MMIO from ordinary coherently mapped DMA RAM.
+ */
+struct drv_gpu_mapping {
+	uint64_t physical;
+	void *address;
+	uint64_t bytes;
+	uint32_t attributes;
+};
 
 /*
  * Immutable operations shared by instances of one backend.
@@ -56,6 +71,9 @@ struct drv_gpu_ops {
 	int (*resource_write)(void *, void *, void *, uint64_t, const void *, uint32_t);
 	int (*command)(void *, void *, const void *, uint32_t);
 	int (*present)(void *, void *, void *, const struct gpu_present *);
+	/* Optional display ownership and immutable mapping views retain the same session lifetime. */
+	const struct drv_gpu_display_ops *display;
+	int (*resource_map)(void *, void *, void *, struct drv_gpu_mapping *);
 };
 
 /*

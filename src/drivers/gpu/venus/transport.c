@@ -19,11 +19,11 @@
 #include <limits.h>
 #include <string.h>
 
-#define VENUS_RING_AVAILABLE 128U
-#define VENUS_RING_USED 256U
-#define VENUS_WAIT_MILLISECONDS 10000U
-#define VENUS_WAIT_POLLS 50000000U
-#define VENUS_REQUIRED_FEATURES 0x19U
+#define VENUS_RING_AVAILABLE		128U
+#define VENUS_RING_USED			256U
+#define VENUS_WAIT_MILLISECONDS		10000U
+#define VENUS_WAIT_POLLS		50000000U
+#define VENUS_REQUIRED_FEATURES		0x19U
 
 static int venus_capabilities(struct venus_transport *transport);
 static int venus_capability(struct venus_transport *transport, unsigned offset, unsigned length, unsigned type);
@@ -811,7 +811,7 @@ venus_map_aperture(
 	if (error != 0)
 		return error;
 
-	/* The initial backend admits only its finite eight-MiB mapped-aperture budget. */
+	/* The backend bounds its whole BAR within the verified dynamic device window. */
 	if (bar.size == 0U || bar.size > VENUS_MAX_APERTURE_BYTES)
 		return EOPNOTSUPP;
 

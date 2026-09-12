@@ -23,13 +23,15 @@
  * checkpoints.
  */
 struct demo_options {
-	const char *device;
+	const char *output;
+	uint32_t device_index;
 	const char *token;
 	uint32_t duration;
 	uint32_t hold;
 	uint32_t milliseconds;
 	int fixed;
 	int verify;
+	int offscreen;
 };
 
 /*
@@ -55,14 +57,14 @@ main(
 {
 	struct demo_options options;
 	uint32_t frames;
-	uint32_t command;
+	const char *operation;
+	int32_t code;
 	int status;
 	int close_status;
 	int saved_errno;
 
 	/* Select finite ordinary animation unless the caller requests checkpoints. */
 	memset(&options, 0, sizeof(options));
-	options.device = "/dev/gpu0";
 	options.token = "manual";
 	options.duration = 10;
 	options.hold = 10;
@@ -73,7 +75,7 @@ main(
 	if (status != 0) {
 		fprintf(
 			stderr,
-			"usage: vkdemo [--device=PATH] [--token=NAME] [--duration=0..3600 | --time-ms=0..3600000 --hold=0..120 | --verify-session]\n");
+			"usage: vkdemo [--device-index=N] [--offscreen] [--output=PATH] [--token=NAME] [--duration=0..3600 | --time-ms=0..3600000 --hold=0..120 | --verify-session]\n");
 		return 2;
 	}
 
@@ -82,7 +84,7 @@ main(
 	fflush(stdout);
 
 	/* Create the Vulkan shaders, texture and retained frame resources. */
-	status = vkdemo_initialize(options.device);
+	status = vkdemo_initialize(options.device_index, options.offscreen);
 	if (status != 0)
 		goto out;
 
@@ -100,12 +102,14 @@ out:
 	if (status != 0) {
 		errno = saved_errno;
 		perror("vkdemo");
-		command = vkdemo_active_command();
+		operation = vkdemo_error_operation();
+		code = vkdemo_error_code();
 		fprintf(
 			stderr,
-			"VKDEMO FAILED run=%s command=%u frames=%u\n",
+			"VKDEMO FAILED run=%s api=%s result=%d frames=%u\n",
 			options.token,
-			command,
+			operation,
+			(int)code,
 			frames);
 		return 1;
 	}
@@ -247,10 +251,32 @@ parse_arguments(
 
 	/* Interpret each option without acquiring hardware resources. */
 	for (index = 1; index < argc; index++) {
-		/* Let the caller choose an ordinary GPU device node. */
-		match = strncmp(argv[index], "--device=", 9);
+		/* Select a physical device by its standard Vulkan enumeration index. */
+		match = strncmp(argv[index], "--device-index=", 15);
 		if (match == 0) {
-			options->device = argv[index] + 9;
+			status = parse_number(argv[index] + 15, UINT32_MAX, &options->device_index);
+			if (status != 0)
+				return -1;
+
+			/* Defer device availability checks to ordinary Vulkan initialization. */
+			continue;
+		}
+
+		/* Allow the same Vulkan renderer to run without owning a display. */
+		match = strcmp(argv[index], "--offscreen");
+		if (match == 0) {
+			options->offscreen = 1;
+			continue;
+		}
+
+		/* Export the latest completed GPU readback as an explicit diagnostic. */
+		match = strncmp(argv[index], "--output=", 9);
+		if (match == 0) {
+			options->output = argv[index] + 9;
+			if (*options->output == '\0')
+				return -1;
+
+			/* Keep the requested pathname until each completed frame is written. */
 			continue;
 		}
 
@@ -336,10 +362,6 @@ parse_arguments(
 		if (hold_set != 0)
 			return -1;
 	}
-
-	/* Refuse an empty path before invoking open. */
-	if (*options->device == '\0')
-		return -1;
 
 	/* Validate the printable identity used by every emitted capture marker. */
 	status = validate_token(options->token);
@@ -503,6 +525,7 @@ draw_frame(
 	uint32_t milliseconds)
 {
 	char digest[65];
+	const char *presentation;
 	int status;
 
 	/* Use the same Vulkan draw and readback for every mode. */
@@ -510,9 +533,22 @@ draw_frame(
 	if (status != 0)
 		return -1;
 
-	/* Publish the RGB hash of the bytes that were just presented. */
+	/* Finish an explicitly requested export before releasing the capture marker. */
+	if (options->output != NULL) {
+		status = vkdemo_write_frame(options->output);
+		if (status != 0)
+			return -1;
+	}
+
+	/* Distinguish a display presentation from an intentional offscreen render. */
+	presentation = "PRESENT";
+	if (options->offscreen != 0)
+		presentation = "OFFSCREEN";
+
+	/* Publish the RGB hash of the actual completed GPU readback. */
 	printf(
-		"VKDEMO PRESENT run=%s mode=%s sample=%u frame=%u time_ms=%u rgb_sha256=%s width=320 height=240\n",
+		"VKDEMO %s run=%s mode=%s sample=%u frame=%u time_ms=%u rgb_sha256=%s width=320 height=240\n",
+		presentation,
 		options->token,
 		mode,
 		sample,

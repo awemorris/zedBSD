@@ -1,0 +1,27 @@
+// zedBSD; Copyright 2026 Awe Morris; SPDX-License-Identifier: Zlib.
+// Maintains original ordinary Vulkan resource wrappers; production builds use the C include.
+func main(args) {
+    if (Array.size(args) != 1) { System.error("usage: maintain-resources.noct OUTPUT_INC"); }
+    var objects = [
+        ["Buffer", "BUFFER", "struct vulkan_object"],
+        ["BufferView", "BUFFER_VIEW", "struct vulkan_object"],
+        ["Image", "IMAGE", "struct vulkan_image"],
+        ["ImageView", "IMAGE_VIEW", "struct vulkan_object"],
+        ["ShaderModule", "SHADER_MODULE", "struct vulkan_object"],
+        ["Sampler", "SAMPLER", "struct vulkan_object"],
+        ["Framebuffer", "FRAMEBUFFER", "struct vulkan_object"]
+    ];
+    var output = "/* -*- mode: c; c-file-style: \"linux\"; tab-width: 8; -*- */\n\n/*\n * zedBSD\n * Copyright (C) 2026 Awe Morris\n *\n * SPDX-License-Identifier: Zlib\n */\n\n/* Maintained ordinary resource wrappers; input structures use the common typed codec. */\n";
+    for (i in 0..Array.size(objects)) {
+        var name = objects[i][0]; var kind = objects[i][1]; var storage = objects[i][2];
+        output = output + "\n/*\n * Creates one ordinary Vk" + name + " from all caller-supplied standard parameters.\n */\nVKAPI_ATTR VkResult VKAPI_CALL\nvkCreate" + name + "(\n\tVkDevice device,\n\tconst Vk" + name + "CreateInfo *pCreateInfo,\n\tconst VkAllocationCallbacks *pAllocator,\n\tVk" + name + " *p" + name + ")\n{\n\tstruct VkDevice_T *owner;\n\tstruct vulkan_object *object;\n\tstruct vulkan_writer writer;\n\tVkResult status;\n\tuint64_t handle;\n";
+        if (name == "Image") { output = output + "\tstruct vulkan_image *image;\n"; }
+        output = output + "\n\t/* Reserves local ownership before any renderer creation can have side effects. */\n\towner = vulkan_device(device);\n\tstatus = resource_allocate(owner, VULKAN_OBJECT_" + kind + ", sizeof(" + storage + "), pAllocator, &object);\n\tif (status != VK_SUCCESS)\n\t\treturn status;\n\n\t/* Encodes every active field using its declared type and protocol array count. */\n\tvulkan_writer_init_for_object(&writer, object);\n\tvulkan_command_begin(&writer, VULKAN_OPCODE_vkCreate" + name + ");\n\tvulkan_write_u64(&writer, owner->object.wire_id);\n\tvulkan_write_u64(&writer, 1);\n\tvulkan_encode_Vk" + name + "CreateInfo(&writer, pCreateInfo);\n\tstatus = vulkan_object_create_complete(owner, object, &writer, VULKAN_OPCODE_vkDestroy" + name + ");\n\tvulkan_writer_finish(&writer);\n\tif (status != VK_SUCCESS) {\n\t\tvulkan_object_free(object);\n\t\treturn status;\n\t}\n";
+        if (name == "Image") {
+            output = output + "\n\t/* Retains ordinary image metadata required by WSI and later standard resource operations. */\n\timage = (struct vulkan_image *)object;\n\timage->format = pCreateInfo->format;\n\timage->type = pCreateInfo->imageType;\n\timage->extent = pCreateInfo->extent;\n\timage->mip_levels = pCreateInfo->mipLevels;\n\timage->array_layers = pCreateInfo->arrayLayers;\n\timage->samples = pCreateInfo->samples;\n\timage->usage = pCreateInfo->usage;\n\timage->tiling = pCreateInfo->tiling;\n\timage->sharing_mode = pCreateInfo->sharingMode;\n";
+        }
+        output = output + "\n\t/* Changes caller output only after local and native creation succeeded. */\n\thandle = vulkan_nondispatchable_handle(object);\n\t*p" + name + " = (Vk" + name + ")(uintptr_t)handle;\n\n\t/* Succeeded: the public handle owns one real native resource. */\n\treturn VK_SUCCESS;\n}\n\n/*\n * Destroys one ordinary Vk" + name + " with the command's compatible callback policy.\n */\nVKAPI_ATTR void VKAPI_CALL\nvkDestroy" + name + "(\n\tVkDevice device,\n\tVk" + name + " " + "resource" + ",\n\tconst VkAllocationCallbacks *pAllocator)\n{\n\t/* Consumes native and local ownership without imposing GPU-specific publication rules. */\n\tresource_destroy(vulkan_device(device), (uint64_t)" + "resource" + ", VULKAN_OPCODE_vkDestroy" + name + ", pAllocator);\n\n\t/* Succeeded: a null handle is ignored and ordinary ownership is released. */\n\treturn;\n}\n";
+    }
+    FileUtil.writeText(args[0], output);
+    print("maintained fourteen ordinary resource creation/destruction entry points");
+}

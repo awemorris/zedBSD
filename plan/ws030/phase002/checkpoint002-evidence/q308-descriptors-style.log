@@ -1,0 +1,4 @@
+libvulkan descriptors: PASS (40 sets, rollback, detached layouts, guarded inputs, callbacks)
+ordinary: PASS
+libvulkan descriptors: PASS (40 sets, rollback, detached layouts, guarded inputs, callbacks)
+sanitize: PASS

@@ -15,6 +15,7 @@
  */
 
 #include <uapi/gpu.h>
+#include <uapi/gpu-display.h>
 #include <stddef.h>
 
 /* The complete capability response occupies 56 bytes on either data model. */
@@ -139,3 +140,44 @@ typedef char gpu_submit_command_check[GPU_COMMAND == 0x80184707UL ? 1 : -1];
 
 /* Presentation copies one fixed packed-image descriptor into the kernel. */
 typedef char gpu_present_command_check[GPU_PRESENT == 0x80304708UL ? 1 : -1];
+
+/* An mmap token is an opaque fixed-width offset in a 32-byte request. */
+typedef char gpu_map_size_check[sizeof(struct gpu_resource_map) == 32 ? 1 : -1];
+
+/* The mapped byte count has the same offset for 32-bit and 64-bit callers. */
+typedef char gpu_map_bytes_check[offsetof(struct gpu_resource_map, bytes) == 24 ? 1 : -1];
+
+/* Mapping command nine returns its token and extent through both copy directions. */
+typedef char gpu_map_command_check[GPU_RESOURCE_MAP == 0xc0204709UL ? 1 : -1];
+
+/* A display snapshot has no pointer-sized fields or ABI-dependent padding. */
+typedef char gpu_display_info_size_check[sizeof(struct gpu_display_info) == 152 ? 1 : -1];
+
+/* Display names begin after the fixed geometry and capability fields. */
+typedef char gpu_display_name_check[offsetof(struct gpu_display_info, name) == 88 ? 1 : -1];
+
+/* Native mode enumeration and validation share a 48-byte record. */
+typedef char gpu_display_mode_size_check[sizeof(struct gpu_display_mode) == 48 ? 1 : -1];
+
+/* Plane reservations return a 64-bit lease at the same byte offset on both ABIs. */
+typedef char gpu_display_claim_size_check[sizeof(struct gpu_display_claim) == 32 ? 1 : -1];
+typedef char gpu_display_claim_lease_check[offsetof(struct gpu_display_claim, lease) == 24 ? 1 : -1];
+
+/* Reservation release carries only the common header and owning lease. */
+typedef char gpu_display_release_size_check[sizeof(struct gpu_display_release) == 16 ? 1 : -1];
+
+/* Presentation keeps image geometry after its five 64-bit ownership fields. */
+typedef char gpu_display_present_size_check[sizeof(struct gpu_display_present) == 80 ? 1 : -1];
+typedef char gpu_display_present_width_check[offsetof(struct gpu_display_present, width) == 48 ? 1 : -1];
+
+/* Completion observations keep their timestamps and generations fully 64-bit. */
+typedef char gpu_display_wait_size_check[sizeof(struct gpu_display_wait) == 56 ? 1 : -1];
+typedef char gpu_display_wait_time_check[offsetof(struct gpu_display_wait, present_time_ns) == 40 ? 1 : -1];
+
+/* Each display ioctl encodes the documented fixed-width request size. */
+typedef char gpu_display_query_command_check[GPU_DISPLAY_QUERY == 0xc0984718UL ? 1 : -1];
+typedef char gpu_display_mode_command_check[GPU_DISPLAY_MODE == 0xc0304719UL ? 1 : -1];
+typedef char gpu_display_claim_command_check[GPU_DISPLAY_CLAIM == 0xc020471aUL ? 1 : -1];
+typedef char gpu_display_release_command_check[GPU_DISPLAY_RELEASE == 0x8010471bUL ? 1 : -1];
+typedef char gpu_display_present_command_check[GPU_DISPLAY_PRESENT == 0xc050471cUL ? 1 : -1];
+typedef char gpu_display_wait_command_check[GPU_DISPLAY_WAIT == 0xc038471dUL ? 1 : -1];

@@ -1,0 +1,59 @@
+// zedBSD Vulkan ABI comparison input; Copyright 2026 Awe Morris, Zlib.
+// Emits only an independent sizeof/alignof/offsetof/constant measurement program.
+func starts(text, prefix) { return String.substring(text, 0, String.charCount(prefix)) == prefix; }
+func trim(text) {
+    var first = 0; var last = String.charCount(text);
+    while (first < last && (String.charAt(text, first) == " " || String.charAt(text, first) == "\t")) { first = first + 1; }
+    while (last > first && (String.charAt(text, last - 1) == " " || String.charAt(text, last - 1) == "\t")) { last = last - 1; }
+    return String.substring(text, first, last - first);
+}
+func lines(text) {
+    var out = []; var start = 0;
+    for (i in 0..String.charCount(text)) {
+        if (String.charAt(text, i) == "\n") { Array.push(out, String.substring(text, start, i - start)); start = i + 1; }
+    }
+    return out;
+}
+func main(args) {
+    if (Array.size(args) != 2) { System.error("usage: vulkan-abi-source.noct MAINTAINED_HEADER OUTPUT_C"); }
+    var input = lines(FileUtil.readText(args[0])); var record = ""; var enumRecord = false;
+    var types = 0; var fields = 0; var constants = 0;
+    var output = "/* Independent compiled ABI measurements for the maintained Vulkan declarations. */\n#include <stddef.h>\n#include <vulkan/vulkan.h>\n\n/* Retains every measured ABI value in a relocation-free object section. */\nconst unsigned long vulkan_abi[] = {\n\tsizeof(void *),\n\tsizeof(VkInstance),\n\tsizeof(VkBuffer),\n\tsizeof(VkDeviceSize),\n";
+    for (i in 0..Array.size(input)) {
+        var line = trim(input[i]);
+        if (starts(line, "typedef struct ") || starts(line, "typedef union ")) {
+            var begin = 15;
+            if (starts(line, "typedef union ")) { begin = 14; }
+            var end = String.indexOf(line, " {");
+            record = String.substring(line, begin, end - begin); types = types + 1;
+            output = output + "\tsizeof(" + record + "), __alignof__(" + record + "),\n";
+            continue;
+        }
+        if (starts(line, "typedef enum ")) { enumRecord = true; continue; }
+        if (starts(line, "}")) { record = ""; enumRecord = false; continue; }
+        if (enumRecord) {
+            if (starts(line, "#")) { output = output + line + "\n"; continue; }
+            var equals = String.indexOf(line, " = ");
+            if (equals > 0) {
+                output = output + "\t(unsigned long)" + String.substring(line, 0, equals) + ",\n";
+                constants = constants + 1;
+            }
+            continue;
+        }
+        if (record == "") { continue; }
+        var end = String.indexOf(line, ";");
+        if (end < 0) { continue; }
+        var declaration = String.substring(line, 0, end); var last = -1;
+        for (j in 0..String.charCount(declaration)) { if (String.charAt(declaration, j) == " ") { last = j; } }
+        var name = String.substring(declaration, last + 1, -1);
+        while (starts(name, "*")) { name = String.substring(name, 1, -1); }
+        var array = String.indexOf(name, "[");
+        if (array >= 0) { name = String.substring(name, 0, array); }
+        output = output + "\toffsetof(" + record + ", " + name + "),\n";
+        fields = fields + 1;
+    }
+    output = output + "\t0\n};\n";
+    if (types < 100 || fields < 500 || constants < 1000) { System.error("unexpectedly incomplete ABI measurement source"); }
+    FileUtil.writeText(args[1], output);
+    print("ABI measurements: " + types + " structures/unions, " + fields + " fields, " + constants + " enum constants");
+}

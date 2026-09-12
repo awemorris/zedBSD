@@ -57,6 +57,7 @@ static ssize_t cdev_read_file(struct file *file, void *buffer, size_t size);
 static ssize_t cdev_write_file(struct file *file, const void *buffer, size_t size);
 static int cdev_ioctl_file(struct file *file, unsigned long request, uintptr_t argument);
 static int cdev_poll_file(struct file *file, short events, short *revents);
+static int cdev_mmap_file(struct file *file, off_t offset, size_t bytes, uint32_t prot, struct vm_device_mapping **result);
 static int cdev_name_valid(const char *name);
 
 const struct file_ops cdev_file_ops = {
@@ -66,6 +67,7 @@ const struct file_ops cdev_file_ops = {
 	.write = cdev_write_file,
 	.ioctl = cdev_ioctl_file,
 	.poll = cdev_poll_file,
+	.mmap = cdev_mmap_file,
 };
 
 /*
@@ -754,6 +756,37 @@ cdev_poll_file(
 		return error;
 
 	/* Succeeded. */
+	return 0;
+}
+
+/* Returns a retained device view from this open generation's backend. */
+static int
+cdev_mmap_file(
+	struct file *file,
+	off_t offset,
+	size_t bytes,
+	uint32_t prot,
+	struct vm_device_mapping **result)
+{
+	const struct cdev *device;
+	int error;
+
+	/* Leaves ownership empty on unsupported or failed requests. */
+	if (result == NULL)
+		return EINVAL;
+
+	/* Resolves the immutable cdev generation retained by this open file. */
+	*result = NULL;
+	device = file_cdev(file);
+	if (device == NULL || device->ops->mmap == NULL)
+		return EOPNOTSUPP;
+
+	/* The backend retains its resource before exposing any physical view. */
+	error = device->ops->mmap(file, offset, bytes, prot, result);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller owns the backend's retained immutable mapping view. */
 	return 0;
 }
 

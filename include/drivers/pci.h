@@ -83,6 +83,8 @@ struct drv_pci_bar {
 
 struct drv_pci_mapping {
 	void *address;
+	/* CPU physical base after host-bridge translation or BAR relocation. */
+	uint64_t physical_address;
 	size_t size;
 	enum drv_pci_bar_type type;
 	uintptr_t private_data[2];

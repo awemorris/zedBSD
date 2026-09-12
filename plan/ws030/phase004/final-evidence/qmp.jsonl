@@ -1,0 +1,1957 @@
+{"receive": {"QMP": {"version": {"qemu": {"micro": 11, "minor": 0, "major": 10}, "package": "Debian 1:10.0.11+ds-0+deb13u1"}, "capabilities": ["oob"]}}}
+{"send": {"execute": "qmp_capabilities", "id": 1}}
+{"receive": {"return": {}, "id": 1}}
+{"send": {"execute": "query-pci", "id": 2}}
+{"receive": {"return": [{"bus": 0, "devices": [{"irq_pin": 0, "bus": 0, "qdev_id": "", "slot": 0, "class_info": {"class": 1536, "desc": "Host bridge"}, "id": {"device": 4663, "subsystem-vendor": 6900, "vendor": 32902, "subsystem": 4352}, "function": 0, "regions": []}, {"irq_pin": 0, "bus": 0, "qdev_id": "", "slot": 1, "class_info": {"class": 1537, "desc": "ISA bridge"}, "id": {"device": 28672, "subsystem-vendor": 6900, "vendor": 32902, "subsystem": 4352}, "function": 0, "regions": []}, {"irq_pin": 0, "bus": 0, "qdev_id": "", "slot": 1, "class_info": {"class": 257, "desc": "IDE controller"}, "id": {"device": 28688, "subsystem-vendor": 6900, "vendor": 32902, "subsystem": 4352}, "function": 1, "regions": [{"bar": 4, "size": 16, "address": -1, "type": "io"}]}, {"irq_pin": 1, "bus": 0, "qdev_id": "", "irq": 0, "slot": 1, "class_info": {"class": 1664, "desc": "Bridge"}, "id": {"device": 28947, "subsystem-vendor": 6900, "vendor": 32902, "subsystem": 4352}, "function": 3, "regions": []}, {"irq_pin": 1, "bus": 0, "qdev_id": "venus", "irq": 0, "slot": 2, "class_info": {"class": 768, "desc": "VGA controller"}, "id": {"device": 4176, "subsystem-vendor": 6900, "vendor": 6900, "subsystem": 4352}, "function": 0, "regions": [{"prefetch": true, "mem_type_64": false, "bar": 0, "size": 8388608, "address": -1, "type": "memory"}, {"prefetch": false, "mem_type_64": false, "bar": 1, "size": 4096, "address": -1, "type": "memory"}, {"prefetch": true, "mem_type_64": true, "bar": 2, "size": 16384, "address": -1, "type": "memory"}, {"prefetch": true, "mem_type_64": true, "bar": 4, "size": 268435456, "address": -1, "type": "memory"}, {"prefetch": false, "mem_type_64": false, "bar": 6, "size": 65536, "address": -1, "type": "memory"}]}]}], "id": 2}}
+{"send": {"execute": "query-version", "id": 3}}
+{"receive": {"return": {"qemu": {"micro": 11, "minor": 0, "major": 10}, "package": "Debian 1:10.0.11+ds-0+deb13u1"}, "id": 3}}
+{"send": {"execute": "pmemsave", "id": 4, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"timestamp": {"seconds": 1789242063, "microseconds": 10033}, "event": "RTC_CHANGE", "data": {"offset": -1, "qom-path": "/machine/unattached/device[5]/rtc"}}}
+{"receive": {"return": {}, "id": 4}}
+{"send": {"execute": "pmemsave", "id": 5, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 5}}
+{"send": {"execute": "screendump", "id": 6, "arguments": {"filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/boot.ppm", "device": "venus", "head": 0}}}
+{"receive": {"return": {}, "id": 6}}
+{"send": {"execute": "human-monitor-command", "id": 7, "arguments": {"command-line": "sendkey slash 1"}}}
+{"receive": {"return": "", "id": 7}}
+{"send": {"execute": "human-monitor-command", "id": 8, "arguments": {"command-line": "sendkey b 1"}}}
+{"receive": {"return": "", "id": 8}}
+{"send": {"execute": "human-monitor-command", "id": 9, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 9}}
+{"send": {"execute": "human-monitor-command", "id": 10, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 10}}
+{"send": {"execute": "human-monitor-command", "id": 11, "arguments": {"command-line": "sendkey slash 1"}}}
+{"receive": {"return": "", "id": 11}}
+{"send": {"execute": "human-monitor-command", "id": 12, "arguments": {"command-line": "sendkey v 1"}}}
+{"receive": {"return": "", "id": 12}}
+{"send": {"execute": "human-monitor-command", "id": 13, "arguments": {"command-line": "sendkey k 1"}}}
+{"receive": {"return": "", "id": 13}}
+{"send": {"execute": "human-monitor-command", "id": 14, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 14}}
+{"send": {"execute": "human-monitor-command", "id": 15, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 15}}
+{"send": {"execute": "human-monitor-command", "id": 16, "arguments": {"command-line": "sendkey m 1"}}}
+{"receive": {"return": "", "id": 16}}
+{"send": {"execute": "human-monitor-command", "id": 17, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 17}}
+{"send": {"execute": "human-monitor-command", "id": 18, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 18}}
+{"send": {"execute": "human-monitor-command", "id": 19, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 19}}
+{"send": {"execute": "human-monitor-command", "id": 20, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 20}}
+{"send": {"execute": "human-monitor-command", "id": 21, "arguments": {"command-line": "sendkey v 1"}}}
+{"receive": {"return": "", "id": 21}}
+{"send": {"execute": "human-monitor-command", "id": 22, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 22}}
+{"send": {"execute": "human-monitor-command", "id": 23, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 23}}
+{"send": {"execute": "human-monitor-command", "id": 24, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 24}}
+{"send": {"execute": "human-monitor-command", "id": 25, "arguments": {"command-line": "sendkey f 1"}}}
+{"receive": {"return": "", "id": 25}}
+{"send": {"execute": "human-monitor-command", "id": 26, "arguments": {"command-line": "sendkey y 1"}}}
+{"receive": {"return": "", "id": 26}}
+{"send": {"execute": "human-monitor-command", "id": 27, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 27}}
+{"send": {"execute": "human-monitor-command", "id": 28, "arguments": {"command-line": "sendkey s 1"}}}
+{"receive": {"return": "", "id": 28}}
+{"send": {"execute": "human-monitor-command", "id": 29, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 29}}
+{"send": {"execute": "human-monitor-command", "id": 30, "arguments": {"command-line": "sendkey s 1"}}}
+{"receive": {"return": "", "id": 30}}
+{"send": {"execute": "human-monitor-command", "id": 31, "arguments": {"command-line": "sendkey s 1"}}}
+{"receive": {"return": "", "id": 31}}
+{"send": {"execute": "human-monitor-command", "id": 32, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 32}}
+{"send": {"execute": "human-monitor-command", "id": 33, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 33}}
+{"send": {"execute": "human-monitor-command", "id": 34, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 34}}
+{"send": {"execute": "human-monitor-command", "id": 35, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 35}}
+{"send": {"execute": "human-monitor-command", "id": 36, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 36}}
+{"send": {"execute": "human-monitor-command", "id": 37, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 37}}
+{"send": {"execute": "human-monitor-command", "id": 38, "arguments": {"command-line": "sendkey t 1"}}}
+{"receive": {"return": "", "id": 38}}
+{"send": {"execute": "human-monitor-command", "id": 39, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 39}}
+{"send": {"execute": "human-monitor-command", "id": 40, "arguments": {"command-line": "sendkey k 1"}}}
+{"receive": {"return": "", "id": 40}}
+{"send": {"execute": "human-monitor-command", "id": 41, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 41}}
+{"send": {"execute": "human-monitor-command", "id": 42, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 42}}
+{"send": {"execute": "human-monitor-command", "id": 43, "arguments": {"command-line": "sendkey equal 1"}}}
+{"receive": {"return": "", "id": 43}}
+{"send": {"execute": "human-monitor-command", "id": 44, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 44}}
+{"send": {"execute": "human-monitor-command", "id": 45, "arguments": {"command-line": "sendkey 3 1"}}}
+{"receive": {"return": "", "id": 45}}
+{"send": {"execute": "human-monitor-command", "id": 46, "arguments": {"command-line": "sendkey 3 1"}}}
+{"receive": {"return": "", "id": 46}}
+{"send": {"execute": "human-monitor-command", "id": 47, "arguments": {"command-line": "sendkey f 1"}}}
+{"receive": {"return": "", "id": 47}}
+{"send": {"execute": "human-monitor-command", "id": 48, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 48}}
+{"send": {"execute": "human-monitor-command", "id": 49, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 49}}
+{"send": {"execute": "human-monitor-command", "id": 50, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 50}}
+{"send": {"execute": "human-monitor-command", "id": 51, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 51}}
+{"send": {"execute": "human-monitor-command", "id": 52, "arguments": {"command-line": "sendkey 1 1"}}}
+{"receive": {"return": "", "id": 52}}
+{"send": {"execute": "human-monitor-command", "id": 53, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 53}}
+{"send": {"execute": "human-monitor-command", "id": 54, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 54}}
+{"send": {"execute": "human-monitor-command", "id": 55, "arguments": {"command-line": "sendkey b 1"}}}
+{"receive": {"return": "", "id": 55}}
+{"send": {"execute": "human-monitor-command", "id": 56, "arguments": {"command-line": "sendkey 6 1"}}}
+{"receive": {"return": "", "id": 56}}
+{"send": {"execute": "human-monitor-command", "id": 57, "arguments": {"command-line": "sendkey 9 1"}}}
+{"receive": {"return": "", "id": 57}}
+{"send": {"execute": "human-monitor-command", "id": 58, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 58}}
+{"send": {"execute": "human-monitor-command", "id": 59, "arguments": {"command-line": "sendkey 2 1"}}}
+{"receive": {"return": "", "id": 59}}
+{"send": {"execute": "human-monitor-command", "id": 60, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 60}}
+{"send": {"execute": "human-monitor-command", "id": 61, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 61}}
+{"send": {"execute": "human-monitor-command", "id": 62, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 62}}
+{"send": {"execute": "human-monitor-command", "id": 63, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 63}}
+{"send": {"execute": "human-monitor-command", "id": 64, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 64}}
+{"send": {"execute": "human-monitor-command", "id": 65, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 65}}
+{"send": {"execute": "human-monitor-command", "id": 66, "arguments": {"command-line": "sendkey f 1"}}}
+{"receive": {"return": "", "id": 66}}
+{"send": {"execute": "human-monitor-command", "id": 67, "arguments": {"command-line": "sendkey 0 1"}}}
+{"receive": {"return": "", "id": 67}}
+{"send": {"execute": "human-monitor-command", "id": 68, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 68}}
+{"send": {"execute": "human-monitor-command", "id": 69, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"return": "", "id": 69}}
+{"send": {"execute": "pmemsave", "id": 70, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 70}}
+{"send": {"execute": "pmemsave", "id": 71, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 71}}
+{"send": {"execute": "pmemsave", "id": 72, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 72}}
+{"send": {"execute": "pmemsave", "id": 73, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 73}}
+{"send": {"execute": "pmemsave", "id": 74, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 74}}
+{"send": {"execute": "pmemsave", "id": 75, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 75}}
+{"send": {"execute": "pmemsave", "id": 76, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 76}}
+{"send": {"execute": "pmemsave", "id": 77, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 77}}
+{"send": {"execute": "pmemsave", "id": 78, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 78}}
+{"send": {"execute": "pmemsave", "id": 79, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 79}}
+{"send": {"execute": "pmemsave", "id": 80, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 80}}
+{"send": {"execute": "pmemsave", "id": 81, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 81}}
+{"send": {"execute": "pmemsave", "id": 82, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 82}}
+{"send": {"execute": "pmemsave", "id": 83, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 83}}
+{"send": {"execute": "pmemsave", "id": 84, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 84}}
+{"send": {"execute": "pmemsave", "id": 85, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 85}}
+{"send": {"execute": "pmemsave", "id": 86, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 86}}
+{"send": {"execute": "pmemsave", "id": 87, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 87}}
+{"send": {"execute": "pmemsave", "id": 88, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 88}}
+{"send": {"execute": "pmemsave", "id": 89, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 89}}
+{"send": {"execute": "pmemsave", "id": 90, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 90}}
+{"send": {"execute": "pmemsave", "id": 91, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 91}}
+{"send": {"execute": "pmemsave", "id": 92, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 92}}
+{"send": {"execute": "pmemsave", "id": 93, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 93}}
+{"send": {"execute": "pmemsave", "id": 94, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 94}}
+{"send": {"execute": "pmemsave", "id": 95, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 95}}
+{"send": {"execute": "pmemsave", "id": 96, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 96}}
+{"send": {"execute": "pmemsave", "id": 97, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 97}}
+{"send": {"execute": "pmemsave", "id": 98, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 98}}
+{"send": {"execute": "pmemsave", "id": 99, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 99}}
+{"send": {"execute": "pmemsave", "id": 100, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 100}}
+{"send": {"execute": "pmemsave", "id": 101, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 101}}
+{"send": {"execute": "pmemsave", "id": 102, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 102}}
+{"send": {"execute": "pmemsave", "id": 103, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 103}}
+{"send": {"execute": "pmemsave", "id": 104, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 104}}
+{"send": {"execute": "pmemsave", "id": 105, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 105}}
+{"send": {"execute": "pmemsave", "id": 106, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 106}}
+{"send": {"execute": "human-monitor-command", "id": 107, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"timestamp": {"seconds": 1789242068, "microseconds": 570878}, "event": "VNC_CONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789242068, "microseconds": 570981}, "event": "VNC_INITIALIZED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789242068, "microseconds": 627190}, "event": "VNC_DISCONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"return": "", "id": 107}}
+{"send": {"execute": "pmemsave", "id": 108, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 108}}
+{"send": {"execute": "pmemsave", "id": 109, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 109}}
+{"send": {"execute": "pmemsave", "id": 110, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 110}}
+{"send": {"execute": "pmemsave", "id": 111, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 111}}
+{"send": {"execute": "pmemsave", "id": 112, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 112}}
+{"send": {"execute": "pmemsave", "id": 113, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 113}}
+{"send": {"execute": "pmemsave", "id": 114, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 114}}
+{"send": {"execute": "pmemsave", "id": 115, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 115}}
+{"send": {"execute": "human-monitor-command", "id": 116, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"timestamp": {"seconds": 1789242069, "microseconds": 424293}, "event": "VNC_CONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789242069, "microseconds": 424722}, "event": "VNC_INITIALIZED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789242069, "microseconds": 467190}, "event": "VNC_DISCONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"return": "", "id": 116}}
+{"send": {"execute": "pmemsave", "id": 117, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 117}}
+{"send": {"execute": "pmemsave", "id": 118, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 118}}
+{"send": {"execute": "pmemsave", "id": 119, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 119}}
+{"send": {"execute": "pmemsave", "id": 120, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 120}}
+{"send": {"execute": "pmemsave", "id": 121, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 121}}
+{"send": {"execute": "pmemsave", "id": 122, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 122}}
+{"send": {"execute": "pmemsave", "id": 123, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 123}}
+{"send": {"execute": "human-monitor-command", "id": 124, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"timestamp": {"seconds": 1789242070, "microseconds": 204715}, "event": "VNC_CONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789242070, "microseconds": 205063}, "event": "VNC_INITIALIZED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789242070, "microseconds": 247236}, "event": "VNC_DISCONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"return": "", "id": 124}}
+{"send": {"execute": "pmemsave", "id": 125, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 125}}
+{"send": {"execute": "pmemsave", "id": 126, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 126}}
+{"send": {"execute": "pmemsave", "id": 127, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 127}}
+{"send": {"execute": "pmemsave", "id": 128, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 128}}
+{"send": {"execute": "pmemsave", "id": 129, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 129}}
+{"send": {"execute": "pmemsave", "id": 130, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 130}}
+{"send": {"execute": "pmemsave", "id": 131, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 131}}
+{"send": {"execute": "human-monitor-command", "id": 132, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"timestamp": {"seconds": 1789242070, "microseconds": 985118}, "event": "VNC_CONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789242070, "microseconds": 985473}, "event": "VNC_INITIALIZED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789242071, "microseconds": 27230}, "event": "VNC_DISCONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"return": "", "id": 132}}
+{"send": {"execute": "pmemsave", "id": 133, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 133}}
+{"send": {"execute": "pmemsave", "id": 134, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 134}}
+{"send": {"execute": "pmemsave", "id": 135, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 135}}
+{"send": {"execute": "pmemsave", "id": 136, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 136}}
+{"send": {"execute": "pmemsave", "id": 137, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 137}}
+{"send": {"execute": "pmemsave", "id": 138, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 138}}
+{"send": {"execute": "pmemsave", "id": 139, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 139}}
+{"send": {"execute": "pmemsave", "id": 140, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 140}}
+{"send": {"execute": "human-monitor-command", "id": 141, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"timestamp": {"seconds": 1789242071, "microseconds": 828741}, "event": "VNC_CONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789242071, "microseconds": 829162}, "event": "VNC_INITIALIZED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789242071, "microseconds": 867218}, "event": "VNC_DISCONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"return": "", "id": 141}}
+{"send": {"execute": "pmemsave", "id": 142, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 142}}
+{"send": {"execute": "pmemsave", "id": 143, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 143}}
+{"send": {"execute": "pmemsave", "id": 144, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 144}}
+{"send": {"execute": "pmemsave", "id": 145, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 145}}
+{"send": {"execute": "pmemsave", "id": 146, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 146}}
+{"send": {"execute": "pmemsave", "id": 147, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 147}}
+{"send": {"execute": "pmemsave", "id": 148, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 148}}
+{"send": {"execute": "human-monitor-command", "id": 149, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"timestamp": {"seconds": 1789242072, "microseconds": 608737}, "event": "VNC_CONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789242072, "microseconds": 608825}, "event": "VNC_INITIALIZED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789242072, "microseconds": 647191}, "event": "VNC_DISCONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"return": "", "id": 149}}
+{"send": {"execute": "pmemsave", "id": 150, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 150}}
+{"send": {"execute": "pmemsave", "id": 151, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 151}}
+{"send": {"execute": "pmemsave", "id": 152, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 152}}
+{"send": {"execute": "pmemsave", "id": 153, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 153}}
+{"send": {"execute": "pmemsave", "id": 154, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 154}}
+{"send": {"execute": "pmemsave", "id": 155, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 155}}
+{"send": {"execute": "pmemsave", "id": 156, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 156}}
+{"send": {"execute": "pmemsave", "id": 157, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 157}}
+{"send": {"execute": "pmemsave", "id": 158, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 158}}
+{"send": {"execute": "pmemsave", "id": 159, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 159}}
+{"send": {"execute": "pmemsave", "id": 160, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 160}}
+{"send": {"execute": "pmemsave", "id": 161, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 161}}
+{"send": {"execute": "pmemsave", "id": 162, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 162}}
+{"send": {"execute": "pmemsave", "id": 163, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 163}}
+{"send": {"execute": "pmemsave", "id": 164, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 164}}
+{"send": {"execute": "pmemsave", "id": 165, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 165}}
+{"send": {"execute": "pmemsave", "id": 166, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 166}}
+{"send": {"execute": "human-monitor-command", "id": 167, "arguments": {"command-line": "sendkey slash 1"}}}
+{"receive": {"return": "", "id": 167}}
+{"send": {"execute": "human-monitor-command", "id": 168, "arguments": {"command-line": "sendkey b 1"}}}
+{"receive": {"return": "", "id": 168}}
+{"send": {"execute": "human-monitor-command", "id": 169, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 169}}
+{"send": {"execute": "human-monitor-command", "id": 170, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 170}}
+{"send": {"execute": "human-monitor-command", "id": 171, "arguments": {"command-line": "sendkey slash 1"}}}
+{"receive": {"return": "", "id": 171}}
+{"send": {"execute": "human-monitor-command", "id": 172, "arguments": {"command-line": "sendkey v 1"}}}
+{"receive": {"return": "", "id": 172}}
+{"send": {"execute": "human-monitor-command", "id": 173, "arguments": {"command-line": "sendkey k 1"}}}
+{"receive": {"return": "", "id": 173}}
+{"send": {"execute": "human-monitor-command", "id": 174, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 174}}
+{"send": {"execute": "human-monitor-command", "id": 175, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 175}}
+{"send": {"execute": "human-monitor-command", "id": 176, "arguments": {"command-line": "sendkey m 1"}}}
+{"receive": {"return": "", "id": 176}}
+{"send": {"execute": "human-monitor-command", "id": 177, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 177}}
+{"send": {"execute": "human-monitor-command", "id": 178, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 178}}
+{"send": {"execute": "human-monitor-command", "id": 179, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 179}}
+{"send": {"execute": "human-monitor-command", "id": 180, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 180}}
+{"send": {"execute": "human-monitor-command", "id": 181, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 181}}
+{"send": {"execute": "human-monitor-command", "id": 182, "arguments": {"command-line": "sendkey u 1"}}}
+{"receive": {"return": "", "id": 182}}
+{"send": {"execute": "human-monitor-command", "id": 183, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 183}}
+{"send": {"execute": "human-monitor-command", "id": 184, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 184}}
+{"send": {"execute": "human-monitor-command", "id": 185, "arguments": {"command-line": "sendkey t 1"}}}
+{"receive": {"return": "", "id": 185}}
+{"send": {"execute": "human-monitor-command", "id": 186, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 186}}
+{"send": {"execute": "human-monitor-command", "id": 187, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 187}}
+{"send": {"execute": "human-monitor-command", "id": 188, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 188}}
+{"send": {"execute": "human-monitor-command", "id": 189, "arguments": {"command-line": "sendkey equal 1"}}}
+{"receive": {"return": "", "id": 189}}
+{"send": {"execute": "human-monitor-command", "id": 190, "arguments": {"command-line": "sendkey 2 1"}}}
+{"receive": {"return": "", "id": 190}}
+{"send": {"execute": "human-monitor-command", "id": 191, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 191}}
+{"send": {"execute": "human-monitor-command", "id": 192, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 192}}
+{"send": {"execute": "human-monitor-command", "id": 193, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 193}}
+{"send": {"execute": "human-monitor-command", "id": 194, "arguments": {"command-line": "sendkey t 1"}}}
+{"receive": {"return": "", "id": 194}}
+{"send": {"execute": "human-monitor-command", "id": 195, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 195}}
+{"send": {"execute": "human-monitor-command", "id": 196, "arguments": {"command-line": "sendkey k 1"}}}
+{"receive": {"return": "", "id": 196}}
+{"send": {"execute": "human-monitor-command", "id": 197, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 197}}
+{"send": {"execute": "human-monitor-command", "id": 198, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 198}}
+{"send": {"execute": "human-monitor-command", "id": 199, "arguments": {"command-line": "sendkey equal 1"}}}
+{"receive": {"return": "", "id": 199}}
+{"send": {"execute": "human-monitor-command", "id": 200, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 200}}
+{"send": {"execute": "human-monitor-command", "id": 201, "arguments": {"command-line": "sendkey 3 1"}}}
+{"receive": {"return": "", "id": 201}}
+{"send": {"execute": "human-monitor-command", "id": 202, "arguments": {"command-line": "sendkey 3 1"}}}
+{"receive": {"return": "", "id": 202}}
+{"send": {"execute": "human-monitor-command", "id": 203, "arguments": {"command-line": "sendkey f 1"}}}
+{"receive": {"return": "", "id": 203}}
+{"send": {"execute": "human-monitor-command", "id": 204, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 204}}
+{"send": {"execute": "human-monitor-command", "id": 205, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 205}}
+{"send": {"execute": "human-monitor-command", "id": 206, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 206}}
+{"send": {"execute": "human-monitor-command", "id": 207, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 207}}
+{"send": {"execute": "human-monitor-command", "id": 208, "arguments": {"command-line": "sendkey 1 1"}}}
+{"receive": {"return": "", "id": 208}}
+{"send": {"execute": "human-monitor-command", "id": 209, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 209}}
+{"send": {"execute": "human-monitor-command", "id": 210, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 210}}
+{"send": {"execute": "human-monitor-command", "id": 211, "arguments": {"command-line": "sendkey b 1"}}}
+{"receive": {"return": "", "id": 211}}
+{"send": {"execute": "human-monitor-command", "id": 212, "arguments": {"command-line": "sendkey 6 1"}}}
+{"receive": {"return": "", "id": 212}}
+{"send": {"execute": "human-monitor-command", "id": 213, "arguments": {"command-line": "sendkey 9 1"}}}
+{"receive": {"return": "", "id": 213}}
+{"send": {"execute": "human-monitor-command", "id": 214, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 214}}
+{"send": {"execute": "human-monitor-command", "id": 215, "arguments": {"command-line": "sendkey 2 1"}}}
+{"receive": {"return": "", "id": 215}}
+{"send": {"execute": "human-monitor-command", "id": 216, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 216}}
+{"send": {"execute": "human-monitor-command", "id": 217, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 217}}
+{"send": {"execute": "human-monitor-command", "id": 218, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 218}}
+{"send": {"execute": "human-monitor-command", "id": 219, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 219}}
+{"send": {"execute": "human-monitor-command", "id": 220, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 220}}
+{"send": {"execute": "human-monitor-command", "id": 221, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 221}}
+{"send": {"execute": "human-monitor-command", "id": 222, "arguments": {"command-line": "sendkey f 1"}}}
+{"receive": {"return": "", "id": 222}}
+{"send": {"execute": "human-monitor-command", "id": 223, "arguments": {"command-line": "sendkey 0 1"}}}
+{"receive": {"return": "", "id": 223}}
+{"send": {"execute": "human-monitor-command", "id": 224, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 224}}
+{"send": {"execute": "human-monitor-command", "id": 225, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 225}}
+{"send": {"execute": "human-monitor-command", "id": 226, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 226}}
+{"send": {"execute": "human-monitor-command", "id": 227, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 227}}
+{"send": {"execute": "human-monitor-command", "id": 228, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 228}}
+{"send": {"execute": "human-monitor-command", "id": 229, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 229}}
+{"send": {"execute": "human-monitor-command", "id": 230, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 230}}
+{"send": {"execute": "human-monitor-command", "id": 231, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 231}}
+{"send": {"execute": "human-monitor-command", "id": 232, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 232}}
+{"send": {"execute": "human-monitor-command", "id": 233, "arguments": {"command-line": "sendkey y 1"}}}
+{"receive": {"return": "", "id": 233}}
+{"send": {"execute": "human-monitor-command", "id": 234, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"return": "", "id": 234}}
+{"send": {"execute": "pmemsave", "id": 235, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 235}}
+{"send": {"execute": "pmemsave", "id": 236, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 236}}
+{"send": {"execute": "pmemsave", "id": 237, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 237}}
+{"send": {"execute": "pmemsave", "id": 238, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 238}}
+{"send": {"execute": "pmemsave", "id": 239, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 239}}
+{"send": {"execute": "pmemsave", "id": 240, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 240}}
+{"send": {"execute": "pmemsave", "id": 241, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 241}}
+{"send": {"execute": "pmemsave", "id": 242, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 242}}
+{"send": {"execute": "pmemsave", "id": 243, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 243}}
+{"send": {"execute": "pmemsave", "id": 244, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 244}}
+{"send": {"execute": "pmemsave", "id": 245, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 245}}
+{"send": {"execute": "pmemsave", "id": 246, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 246}}
+{"send": {"execute": "pmemsave", "id": 247, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 247}}
+{"send": {"execute": "pmemsave", "id": 248, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 248}}
+{"send": {"execute": "pmemsave", "id": 249, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 249}}
+{"send": {"execute": "pmemsave", "id": 250, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 250}}
+{"send": {"execute": "pmemsave", "id": 251, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 251}}
+{"send": {"execute": "pmemsave", "id": 252, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 252}}
+{"send": {"execute": "pmemsave", "id": 253, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 253}}
+{"send": {"execute": "pmemsave", "id": 254, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 254}}
+{"send": {"execute": "pmemsave", "id": 255, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 255}}
+{"send": {"execute": "pmemsave", "id": 256, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 256}}
+{"send": {"execute": "pmemsave", "id": 257, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 257}}
+{"send": {"execute": "pmemsave", "id": 258, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 258}}
+{"send": {"execute": "pmemsave", "id": 259, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 259}}
+{"send": {"execute": "pmemsave", "id": 260, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 260}}
+{"send": {"execute": "pmemsave", "id": 261, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 261}}
+{"send": {"execute": "pmemsave", "id": 262, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 262}}
+{"send": {"execute": "pmemsave", "id": 263, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 263}}
+{"send": {"execute": "pmemsave", "id": 264, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 264}}
+{"send": {"execute": "pmemsave", "id": 265, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 265}}
+{"send": {"execute": "pmemsave", "id": 266, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 266}}
+{"send": {"execute": "pmemsave", "id": 267, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 267}}
+{"send": {"execute": "pmemsave", "id": 268, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 268}}
+{"send": {"execute": "pmemsave", "id": 269, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 269}}
+{"send": {"execute": "pmemsave", "id": 270, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 270}}
+{"send": {"execute": "pmemsave", "id": 271, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 271}}
+{"send": {"execute": "pmemsave", "id": 272, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 272}}
+{"send": {"execute": "pmemsave", "id": 273, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 273}}
+{"send": {"execute": "pmemsave", "id": 274, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 274}}
+{"send": {"execute": "pmemsave", "id": 275, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 275}}
+{"send": {"execute": "pmemsave", "id": 276, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 276}}
+{"send": {"execute": "pmemsave", "id": 277, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 277}}
+{"send": {"execute": "pmemsave", "id": 278, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 278}}
+{"send": {"execute": "pmemsave", "id": 279, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 279}}
+{"send": {"execute": "pmemsave", "id": 280, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 280}}
+{"send": {"execute": "pmemsave", "id": 281, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 281}}
+{"send": {"execute": "pmemsave", "id": 282, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 282}}
+{"send": {"execute": "pmemsave", "id": 283, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 283}}
+{"send": {"execute": "pmemsave", "id": 284, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 284}}
+{"send": {"execute": "pmemsave", "id": 285, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 285}}
+{"send": {"execute": "pmemsave", "id": 286, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 286}}
+{"send": {"execute": "pmemsave", "id": 287, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 287}}
+{"send": {"execute": "pmemsave", "id": 288, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 288}}
+{"send": {"execute": "pmemsave", "id": 289, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 289}}
+{"send": {"execute": "pmemsave", "id": 290, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 290}}
+{"send": {"execute": "pmemsave", "id": 291, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 291}}
+{"send": {"execute": "pmemsave", "id": 292, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 292}}
+{"send": {"execute": "pmemsave", "id": 293, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 293}}
+{"send": {"execute": "pmemsave", "id": 294, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 294}}
+{"send": {"execute": "pmemsave", "id": 295, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 295}}
+{"send": {"execute": "pmemsave", "id": 296, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 296}}
+{"send": {"execute": "pmemsave", "id": 297, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 297}}
+{"send": {"execute": "pmemsave", "id": 298, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 298}}
+{"send": {"execute": "pmemsave", "id": 299, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 299}}
+{"send": {"execute": "pmemsave", "id": 300, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 300}}
+{"send": {"execute": "pmemsave", "id": 301, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 301}}
+{"send": {"execute": "pmemsave", "id": 302, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 302}}
+{"send": {"execute": "pmemsave", "id": 303, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 303}}
+{"send": {"execute": "pmemsave", "id": 304, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 304}}
+{"send": {"execute": "pmemsave", "id": 305, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 305}}
+{"send": {"execute": "pmemsave", "id": 306, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 306}}
+{"send": {"execute": "pmemsave", "id": 307, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 307}}
+{"send": {"execute": "pmemsave", "id": 308, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 308}}
+{"send": {"execute": "pmemsave", "id": 309, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 309}}
+{"send": {"execute": "pmemsave", "id": 310, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 310}}
+{"send": {"execute": "human-monitor-command", "id": 311, "arguments": {"command-line": "sendkey slash 1"}}}
+{"receive": {"return": "", "id": 311}}
+{"send": {"execute": "human-monitor-command", "id": 312, "arguments": {"command-line": "sendkey b 1"}}}
+{"receive": {"return": "", "id": 312}}
+{"send": {"execute": "human-monitor-command", "id": 313, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 313}}
+{"send": {"execute": "human-monitor-command", "id": 314, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 314}}
+{"send": {"execute": "human-monitor-command", "id": 315, "arguments": {"command-line": "sendkey slash 1"}}}
+{"receive": {"return": "", "id": 315}}
+{"send": {"execute": "human-monitor-command", "id": 316, "arguments": {"command-line": "sendkey v 1"}}}
+{"receive": {"return": "", "id": 316}}
+{"send": {"execute": "human-monitor-command", "id": 317, "arguments": {"command-line": "sendkey k 1"}}}
+{"receive": {"return": "", "id": 317}}
+{"send": {"execute": "human-monitor-command", "id": 318, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 318}}
+{"send": {"execute": "human-monitor-command", "id": 319, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 319}}
+{"send": {"execute": "human-monitor-command", "id": 320, "arguments": {"command-line": "sendkey m 1"}}}
+{"receive": {"return": "", "id": 320}}
+{"send": {"execute": "human-monitor-command", "id": 321, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 321}}
+{"send": {"execute": "human-monitor-command", "id": 322, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 322}}
+{"send": {"execute": "human-monitor-command", "id": 323, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 323}}
+{"send": {"execute": "human-monitor-command", "id": 324, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 324}}
+{"send": {"execute": "human-monitor-command", "id": 325, "arguments": {"command-line": "sendkey v 1"}}}
+{"receive": {"return": "", "id": 325}}
+{"send": {"execute": "human-monitor-command", "id": 326, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 326}}
+{"send": {"execute": "human-monitor-command", "id": 327, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 327}}
+{"send": {"execute": "human-monitor-command", "id": 328, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 328}}
+{"send": {"execute": "human-monitor-command", "id": 329, "arguments": {"command-line": "sendkey f 1"}}}
+{"receive": {"return": "", "id": 329}}
+{"send": {"execute": "human-monitor-command", "id": 330, "arguments": {"command-line": "sendkey y 1"}}}
+{"receive": {"return": "", "id": 330}}
+{"send": {"execute": "human-monitor-command", "id": 331, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 331}}
+{"send": {"execute": "human-monitor-command", "id": 332, "arguments": {"command-line": "sendkey s 1"}}}
+{"receive": {"return": "", "id": 332}}
+{"send": {"execute": "human-monitor-command", "id": 333, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 333}}
+{"send": {"execute": "human-monitor-command", "id": 334, "arguments": {"command-line": "sendkey s 1"}}}
+{"receive": {"return": "", "id": 334}}
+{"send": {"execute": "human-monitor-command", "id": 335, "arguments": {"command-line": "sendkey s 1"}}}
+{"receive": {"return": "", "id": 335}}
+{"send": {"execute": "human-monitor-command", "id": 336, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 336}}
+{"send": {"execute": "human-monitor-command", "id": 337, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 337}}
+{"send": {"execute": "human-monitor-command", "id": 338, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 338}}
+{"send": {"execute": "human-monitor-command", "id": 339, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 339}}
+{"send": {"execute": "human-monitor-command", "id": 340, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 340}}
+{"send": {"execute": "human-monitor-command", "id": 341, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 341}}
+{"send": {"execute": "human-monitor-command", "id": 342, "arguments": {"command-line": "sendkey t 1"}}}
+{"receive": {"return": "", "id": 342}}
+{"send": {"execute": "human-monitor-command", "id": 343, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 343}}
+{"send": {"execute": "human-monitor-command", "id": 344, "arguments": {"command-line": "sendkey k 1"}}}
+{"receive": {"return": "", "id": 344}}
+{"send": {"execute": "human-monitor-command", "id": 345, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 345}}
+{"send": {"execute": "human-monitor-command", "id": 346, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 346}}
+{"send": {"execute": "human-monitor-command", "id": 347, "arguments": {"command-line": "sendkey equal 1"}}}
+{"receive": {"return": "", "id": 347}}
+{"send": {"execute": "human-monitor-command", "id": 348, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 348}}
+{"send": {"execute": "human-monitor-command", "id": 349, "arguments": {"command-line": "sendkey 3 1"}}}
+{"receive": {"return": "", "id": 349}}
+{"send": {"execute": "human-monitor-command", "id": 350, "arguments": {"command-line": "sendkey 3 1"}}}
+{"receive": {"return": "", "id": 350}}
+{"send": {"execute": "human-monitor-command", "id": 351, "arguments": {"command-line": "sendkey f 1"}}}
+{"receive": {"return": "", "id": 351}}
+{"send": {"execute": "human-monitor-command", "id": 352, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 352}}
+{"send": {"execute": "human-monitor-command", "id": 353, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 353}}
+{"send": {"execute": "human-monitor-command", "id": 354, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 354}}
+{"send": {"execute": "human-monitor-command", "id": 355, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 355}}
+{"send": {"execute": "human-monitor-command", "id": 356, "arguments": {"command-line": "sendkey 1 1"}}}
+{"receive": {"return": "", "id": 356}}
+{"send": {"execute": "human-monitor-command", "id": 357, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 357}}
+{"send": {"execute": "human-monitor-command", "id": 358, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 358}}
+{"send": {"execute": "human-monitor-command", "id": 359, "arguments": {"command-line": "sendkey b 1"}}}
+{"receive": {"return": "", "id": 359}}
+{"send": {"execute": "human-monitor-command", "id": 360, "arguments": {"command-line": "sendkey 6 1"}}}
+{"receive": {"return": "", "id": 360}}
+{"send": {"execute": "human-monitor-command", "id": 361, "arguments": {"command-line": "sendkey 9 1"}}}
+{"receive": {"return": "", "id": 361}}
+{"send": {"execute": "human-monitor-command", "id": 362, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 362}}
+{"send": {"execute": "human-monitor-command", "id": 363, "arguments": {"command-line": "sendkey 2 1"}}}
+{"receive": {"return": "", "id": 363}}
+{"send": {"execute": "human-monitor-command", "id": 364, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 364}}
+{"send": {"execute": "human-monitor-command", "id": 365, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 365}}
+{"send": {"execute": "human-monitor-command", "id": 366, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 366}}
+{"send": {"execute": "human-monitor-command", "id": 367, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 367}}
+{"send": {"execute": "human-monitor-command", "id": 368, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 368}}
+{"send": {"execute": "human-monitor-command", "id": 369, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 369}}
+{"send": {"execute": "human-monitor-command", "id": 370, "arguments": {"command-line": "sendkey f 1"}}}
+{"receive": {"return": "", "id": 370}}
+{"send": {"execute": "human-monitor-command", "id": 371, "arguments": {"command-line": "sendkey 0 1"}}}
+{"receive": {"return": "", "id": 371}}
+{"send": {"execute": "human-monitor-command", "id": 372, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 372}}
+{"send": {"execute": "human-monitor-command", "id": 373, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 373}}
+{"send": {"execute": "human-monitor-command", "id": 374, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 374}}
+{"send": {"execute": "human-monitor-command", "id": 375, "arguments": {"command-line": "sendkey b 1"}}}
+{"receive": {"return": "", "id": 375}}
+{"send": {"execute": "human-monitor-command", "id": 376, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 376}}
+{"send": {"execute": "human-monitor-command", "id": 377, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 377}}
+{"send": {"execute": "human-monitor-command", "id": 378, "arguments": {"command-line": "sendkey t 1"}}}
+{"receive": {"return": "", "id": 378}}
+{"send": {"execute": "human-monitor-command", "id": 379, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"return": "", "id": 379}}
+{"send": {"execute": "pmemsave", "id": 380, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 380}}
+{"send": {"execute": "pmemsave", "id": 381, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 381}}
+{"send": {"execute": "pmemsave", "id": 382, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 382}}
+{"send": {"execute": "pmemsave", "id": 383, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 383}}
+{"send": {"execute": "pmemsave", "id": 384, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 384}}
+{"send": {"execute": "pmemsave", "id": 385, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 385}}
+{"send": {"execute": "pmemsave", "id": 386, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 386}}
+{"send": {"execute": "pmemsave", "id": 387, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 387}}
+{"send": {"execute": "pmemsave", "id": 388, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 388}}
+{"send": {"execute": "pmemsave", "id": 389, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 389}}
+{"send": {"execute": "pmemsave", "id": 390, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 390}}
+{"send": {"execute": "pmemsave", "id": 391, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 391}}
+{"send": {"execute": "pmemsave", "id": 392, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 392}}
+{"send": {"execute": "pmemsave", "id": 393, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 393}}
+{"send": {"execute": "pmemsave", "id": 394, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 394}}
+{"send": {"execute": "pmemsave", "id": 395, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 395}}
+{"send": {"execute": "pmemsave", "id": 396, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 396}}
+{"send": {"execute": "pmemsave", "id": 397, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 397}}
+{"send": {"execute": "pmemsave", "id": 398, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 398}}
+{"send": {"execute": "pmemsave", "id": 399, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 399}}
+{"send": {"execute": "pmemsave", "id": 400, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 400}}
+{"send": {"execute": "pmemsave", "id": 401, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 401}}
+{"send": {"execute": "pmemsave", "id": 402, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 402}}
+{"send": {"execute": "pmemsave", "id": 403, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 403}}
+{"send": {"execute": "pmemsave", "id": 404, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 404}}
+{"send": {"execute": "human-monitor-command", "id": 405, "arguments": {"command-line": "sendkey ctrl-c 1"}}}
+{"receive": {"return": "", "id": 405}}
+{"send": {"execute": "pmemsave", "id": 406, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 406}}
+{"send": {"execute": "human-monitor-command", "id": 407, "arguments": {"command-line": "sendkey slash 1"}}}
+{"receive": {"return": "", "id": 407}}
+{"send": {"execute": "human-monitor-command", "id": 408, "arguments": {"command-line": "sendkey b 1"}}}
+{"receive": {"return": "", "id": 408}}
+{"send": {"execute": "human-monitor-command", "id": 409, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 409}}
+{"send": {"execute": "human-monitor-command", "id": 410, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 410}}
+{"send": {"execute": "human-monitor-command", "id": 411, "arguments": {"command-line": "sendkey slash 1"}}}
+{"receive": {"return": "", "id": 411}}
+{"send": {"execute": "human-monitor-command", "id": 412, "arguments": {"command-line": "sendkey v 1"}}}
+{"receive": {"return": "", "id": 412}}
+{"send": {"execute": "human-monitor-command", "id": 413, "arguments": {"command-line": "sendkey k 1"}}}
+{"receive": {"return": "", "id": 413}}
+{"send": {"execute": "human-monitor-command", "id": 414, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 414}}
+{"send": {"execute": "human-monitor-command", "id": 415, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 415}}
+{"send": {"execute": "human-monitor-command", "id": 416, "arguments": {"command-line": "sendkey m 1"}}}
+{"receive": {"return": "", "id": 416}}
+{"send": {"execute": "human-monitor-command", "id": 417, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 417}}
+{"send": {"execute": "human-monitor-command", "id": 418, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 418}}
+{"send": {"execute": "human-monitor-command", "id": 419, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 419}}
+{"send": {"execute": "human-monitor-command", "id": 420, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 420}}
+{"send": {"execute": "human-monitor-command", "id": 421, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 421}}
+{"send": {"execute": "human-monitor-command", "id": 422, "arguments": {"command-line": "sendkey u 1"}}}
+{"receive": {"return": "", "id": 422}}
+{"send": {"execute": "human-monitor-command", "id": 423, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 423}}
+{"send": {"execute": "human-monitor-command", "id": 424, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 424}}
+{"send": {"execute": "human-monitor-command", "id": 425, "arguments": {"command-line": "sendkey t 1"}}}
+{"receive": {"return": "", "id": 425}}
+{"send": {"execute": "human-monitor-command", "id": 426, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 426}}
+{"send": {"execute": "human-monitor-command", "id": 427, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 427}}
+{"send": {"execute": "human-monitor-command", "id": 428, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 428}}
+{"send": {"execute": "human-monitor-command", "id": 429, "arguments": {"command-line": "sendkey equal 1"}}}
+{"receive": {"return": "", "id": 429}}
+{"send": {"execute": "human-monitor-command", "id": 430, "arguments": {"command-line": "sendkey 2 1"}}}
+{"receive": {"return": "", "id": 430}}
+{"send": {"execute": "human-monitor-command", "id": 431, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 431}}
+{"send": {"execute": "human-monitor-command", "id": 432, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 432}}
+{"send": {"execute": "human-monitor-command", "id": 433, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 433}}
+{"send": {"execute": "human-monitor-command", "id": 434, "arguments": {"command-line": "sendkey t 1"}}}
+{"receive": {"return": "", "id": 434}}
+{"send": {"execute": "human-monitor-command", "id": 435, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 435}}
+{"send": {"execute": "human-monitor-command", "id": 436, "arguments": {"command-line": "sendkey k 1"}}}
+{"receive": {"return": "", "id": 436}}
+{"send": {"execute": "human-monitor-command", "id": 437, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 437}}
+{"send": {"execute": "human-monitor-command", "id": 438, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 438}}
+{"send": {"execute": "human-monitor-command", "id": 439, "arguments": {"command-line": "sendkey equal 1"}}}
+{"receive": {"return": "", "id": 439}}
+{"send": {"execute": "human-monitor-command", "id": 440, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 440}}
+{"send": {"execute": "human-monitor-command", "id": 441, "arguments": {"command-line": "sendkey 3 1"}}}
+{"receive": {"return": "", "id": 441}}
+{"send": {"execute": "human-monitor-command", "id": 442, "arguments": {"command-line": "sendkey 3 1"}}}
+{"receive": {"return": "", "id": 442}}
+{"send": {"execute": "human-monitor-command", "id": 443, "arguments": {"command-line": "sendkey f 1"}}}
+{"receive": {"return": "", "id": 443}}
+{"send": {"execute": "human-monitor-command", "id": 444, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 444}}
+{"send": {"execute": "human-monitor-command", "id": 445, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 445}}
+{"send": {"execute": "human-monitor-command", "id": 446, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 446}}
+{"send": {"execute": "human-monitor-command", "id": 447, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 447}}
+{"send": {"execute": "human-monitor-command", "id": 448, "arguments": {"command-line": "sendkey 1 1"}}}
+{"receive": {"return": "", "id": 448}}
+{"send": {"execute": "human-monitor-command", "id": 449, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 449}}
+{"send": {"execute": "human-monitor-command", "id": 450, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 450}}
+{"send": {"execute": "human-monitor-command", "id": 451, "arguments": {"command-line": "sendkey b 1"}}}
+{"receive": {"return": "", "id": 451}}
+{"send": {"execute": "human-monitor-command", "id": 452, "arguments": {"command-line": "sendkey 6 1"}}}
+{"receive": {"return": "", "id": 452}}
+{"send": {"execute": "human-monitor-command", "id": 453, "arguments": {"command-line": "sendkey 9 1"}}}
+{"receive": {"return": "", "id": 453}}
+{"send": {"execute": "human-monitor-command", "id": 454, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 454}}
+{"send": {"execute": "human-monitor-command", "id": 455, "arguments": {"command-line": "sendkey 2 1"}}}
+{"receive": {"return": "", "id": 455}}
+{"send": {"execute": "human-monitor-command", "id": 456, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 456}}
+{"send": {"execute": "human-monitor-command", "id": 457, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 457}}
+{"send": {"execute": "human-monitor-command", "id": 458, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 458}}
+{"send": {"execute": "human-monitor-command", "id": 459, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 459}}
+{"send": {"execute": "human-monitor-command", "id": 460, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 460}}
+{"send": {"execute": "human-monitor-command", "id": 461, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 461}}
+{"send": {"execute": "human-monitor-command", "id": 462, "arguments": {"command-line": "sendkey f 1"}}}
+{"receive": {"return": "", "id": 462}}
+{"send": {"execute": "human-monitor-command", "id": 463, "arguments": {"command-line": "sendkey 0 1"}}}
+{"receive": {"return": "", "id": 463}}
+{"send": {"execute": "human-monitor-command", "id": 464, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 464}}
+{"send": {"execute": "human-monitor-command", "id": 465, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 465}}
+{"send": {"execute": "human-monitor-command", "id": 466, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 466}}
+{"send": {"execute": "human-monitor-command", "id": 467, "arguments": {"command-line": "sendkey f 1"}}}
+{"receive": {"return": "", "id": 467}}
+{"send": {"execute": "human-monitor-command", "id": 468, "arguments": {"command-line": "sendkey t 1"}}}
+{"receive": {"return": "", "id": 468}}
+{"send": {"execute": "human-monitor-command", "id": 469, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 469}}
+{"send": {"execute": "human-monitor-command", "id": 470, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 470}}
+{"send": {"execute": "human-monitor-command", "id": 471, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 471}}
+{"send": {"execute": "human-monitor-command", "id": 472, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 472}}
+{"send": {"execute": "human-monitor-command", "id": 473, "arguments": {"command-line": "sendkey b 1"}}}
+{"receive": {"return": "", "id": 473}}
+{"send": {"execute": "human-monitor-command", "id": 474, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 474}}
+{"send": {"execute": "human-monitor-command", "id": 475, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 475}}
+{"send": {"execute": "human-monitor-command", "id": 476, "arguments": {"command-line": "sendkey t 1"}}}
+{"receive": {"return": "", "id": 476}}
+{"send": {"execute": "human-monitor-command", "id": 477, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 477}}
+{"send": {"execute": "human-monitor-command", "id": 478, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 478}}
+{"send": {"execute": "human-monitor-command", "id": 479, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 479}}
+{"send": {"execute": "human-monitor-command", "id": 480, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 480}}
+{"send": {"execute": "human-monitor-command", "id": 481, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 481}}
+{"send": {"execute": "human-monitor-command", "id": 482, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 482}}
+{"send": {"execute": "human-monitor-command", "id": 483, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 483}}
+{"send": {"execute": "human-monitor-command", "id": 484, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 484}}
+{"send": {"execute": "human-monitor-command", "id": 485, "arguments": {"command-line": "sendkey y 1"}}}
+{"receive": {"return": "", "id": 485}}
+{"send": {"execute": "human-monitor-command", "id": 486, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"return": "", "id": 486}}
+{"send": {"execute": "pmemsave", "id": 487, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 487}}
+{"send": {"execute": "pmemsave", "id": 488, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 488}}
+{"send": {"execute": "pmemsave", "id": 489, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 489}}
+{"send": {"execute": "pmemsave", "id": 490, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 490}}
+{"send": {"execute": "pmemsave", "id": 491, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 491}}
+{"send": {"execute": "pmemsave", "id": 492, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 492}}
+{"send": {"execute": "pmemsave", "id": 493, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 493}}
+{"send": {"execute": "pmemsave", "id": 494, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 494}}
+{"send": {"execute": "pmemsave", "id": 495, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 495}}
+{"send": {"execute": "pmemsave", "id": 496, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 496}}
+{"send": {"execute": "pmemsave", "id": 497, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 497}}
+{"send": {"execute": "pmemsave", "id": 498, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 498}}
+{"send": {"execute": "pmemsave", "id": 499, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 499}}
+{"send": {"execute": "pmemsave", "id": 500, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 500}}
+{"send": {"execute": "pmemsave", "id": 501, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 501}}
+{"send": {"execute": "pmemsave", "id": 502, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 502}}
+{"send": {"execute": "pmemsave", "id": 503, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 503}}
+{"send": {"execute": "pmemsave", "id": 504, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 504}}
+{"send": {"execute": "pmemsave", "id": 505, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 505}}
+{"send": {"execute": "pmemsave", "id": 506, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 506}}
+{"send": {"execute": "pmemsave", "id": 507, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 507}}
+{"send": {"execute": "pmemsave", "id": 508, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 508}}
+{"send": {"execute": "pmemsave", "id": 509, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 509}}
+{"send": {"execute": "pmemsave", "id": 510, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 510}}
+{"send": {"execute": "pmemsave", "id": 511, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 511}}
+{"send": {"execute": "pmemsave", "id": 512, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 512}}
+{"send": {"execute": "pmemsave", "id": 513, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 513}}
+{"send": {"execute": "pmemsave", "id": 514, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 514}}
+{"send": {"execute": "pmemsave", "id": 515, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 515}}
+{"send": {"execute": "pmemsave", "id": 516, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 516}}
+{"send": {"execute": "pmemsave", "id": 517, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 517}}
+{"send": {"execute": "pmemsave", "id": 518, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 518}}
+{"send": {"execute": "pmemsave", "id": 519, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 519}}
+{"send": {"execute": "pmemsave", "id": 520, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 520}}
+{"send": {"execute": "pmemsave", "id": 521, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 521}}
+{"send": {"execute": "pmemsave", "id": 522, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 522}}
+{"send": {"execute": "pmemsave", "id": 523, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 523}}
+{"send": {"execute": "pmemsave", "id": 524, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 524}}
+{"send": {"execute": "pmemsave", "id": 525, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 525}}
+{"send": {"execute": "pmemsave", "id": 526, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 526}}
+{"send": {"execute": "pmemsave", "id": 527, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 527}}
+{"send": {"execute": "pmemsave", "id": 528, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 528}}
+{"send": {"execute": "pmemsave", "id": 529, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 529}}
+{"send": {"execute": "pmemsave", "id": 530, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 530}}
+{"send": {"execute": "pmemsave", "id": 531, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 531}}
+{"send": {"execute": "pmemsave", "id": 532, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 532}}
+{"send": {"execute": "pmemsave", "id": 533, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 533}}
+{"send": {"execute": "pmemsave", "id": 534, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 534}}
+{"send": {"execute": "pmemsave", "id": 535, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 535}}
+{"send": {"execute": "pmemsave", "id": 536, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 536}}
+{"send": {"execute": "pmemsave", "id": 537, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 537}}
+{"send": {"execute": "pmemsave", "id": 538, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 538}}
+{"send": {"execute": "pmemsave", "id": 539, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 539}}
+{"send": {"execute": "pmemsave", "id": 540, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 540}}
+{"send": {"execute": "pmemsave", "id": 541, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 541}}
+{"send": {"execute": "pmemsave", "id": 542, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 542}}
+{"send": {"execute": "pmemsave", "id": 543, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 543}}
+{"send": {"execute": "pmemsave", "id": 544, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 544}}
+{"send": {"execute": "pmemsave", "id": 545, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 545}}
+{"send": {"execute": "pmemsave", "id": 546, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 546}}
+{"send": {"execute": "pmemsave", "id": 547, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 547}}
+{"send": {"execute": "pmemsave", "id": 548, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 548}}
+{"send": {"execute": "pmemsave", "id": 549, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 549}}
+{"send": {"execute": "pmemsave", "id": 550, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 550}}
+{"send": {"execute": "pmemsave", "id": 551, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 551}}
+{"send": {"execute": "pmemsave", "id": 552, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 552}}
+{"send": {"execute": "pmemsave", "id": 553, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 553}}
+{"send": {"execute": "pmemsave", "id": 554, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 554}}
+{"send": {"execute": "pmemsave", "id": 555, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 555}}
+{"send": {"execute": "pmemsave", "id": 556, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 556}}
+{"send": {"execute": "pmemsave", "id": 557, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 557}}
+{"send": {"execute": "pmemsave", "id": 558, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 558}}
+{"send": {"execute": "pmemsave", "id": 559, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 559}}
+{"send": {"execute": "pmemsave", "id": 560, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 560}}
+{"send": {"execute": "human-monitor-command", "id": 561, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"timestamp": {"seconds": 1789242088, "microseconds": 421043}, "event": "VNC_CONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789242088, "microseconds": 421503}, "event": "VNC_INITIALIZED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"return": "", "id": 561}}
+{"send": {"execute": "human-monitor-command", "id": 562, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"timestamp": {"seconds": 1789242088, "microseconds": 459268}, "event": "VNC_DISCONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"return": "", "id": 562}}
+{"send": {"execute": "human-monitor-command", "id": 563, "arguments": {"command-line": "sendkey h 1"}}}
+{"receive": {"return": "", "id": 563}}
+{"send": {"execute": "human-monitor-command", "id": 564, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 564}}
+{"send": {"execute": "human-monitor-command", "id": 565, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 565}}
+{"send": {"execute": "human-monitor-command", "id": 566, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 566}}
+{"send": {"execute": "human-monitor-command", "id": 567, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 567}}
+{"send": {"execute": "human-monitor-command", "id": 568, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 568}}
+{"send": {"execute": "human-monitor-command", "id": 569, "arguments": {"command-line": "sendkey s 1"}}}
+{"receive": {"return": "", "id": 569}}
+{"send": {"execute": "human-monitor-command", "id": 570, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 570}}
+{"send": {"execute": "human-monitor-command", "id": 571, "arguments": {"command-line": "sendkey l 1"}}}
+{"receive": {"return": "", "id": 571}}
+{"send": {"execute": "human-monitor-command", "id": 572, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 572}}
+{"send": {"execute": "human-monitor-command", "id": 573, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 573}}
+{"send": {"execute": "human-monitor-command", "id": 574, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 574}}
+{"send": {"execute": "human-monitor-command", "id": 575, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 575}}
+{"send": {"execute": "human-monitor-command", "id": 576, "arguments": {"command-line": "sendkey s 1"}}}
+{"receive": {"return": "", "id": 576}}
+{"send": {"execute": "human-monitor-command", "id": 577, "arguments": {"command-line": "sendkey t 1"}}}
+{"receive": {"return": "", "id": 577}}
+{"send": {"execute": "human-monitor-command", "id": 578, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 578}}
+{"send": {"execute": "human-monitor-command", "id": 579, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 579}}
+{"send": {"execute": "human-monitor-command", "id": 580, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 580}}
+{"send": {"execute": "human-monitor-command", "id": 581, "arguments": {"command-line": "sendkey t 1"}}}
+{"receive": {"return": "", "id": 581}}
+{"send": {"execute": "human-monitor-command", "id": 582, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 582}}
+{"send": {"execute": "human-monitor-command", "id": 583, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 583}}
+{"send": {"execute": "human-monitor-command", "id": 584, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 584}}
+{"send": {"execute": "human-monitor-command", "id": 585, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 585}}
+{"send": {"execute": "human-monitor-command", "id": 586, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 586}}
+{"send": {"execute": "human-monitor-command", "id": 587, "arguments": {"command-line": "sendkey h 1"}}}
+{"receive": {"return": "", "id": 587}}
+{"send": {"execute": "human-monitor-command", "id": 588, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 588}}
+{"send": {"execute": "human-monitor-command", "id": 589, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 589}}
+{"send": {"execute": "human-monitor-command", "id": 590, "arguments": {"command-line": "sendkey k 1"}}}
+{"receive": {"return": "", "id": 590}}
+{"send": {"execute": "human-monitor-command", "id": 591, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"return": "", "id": 591}}
+{"send": {"execute": "human-monitor-command", "id": 592, "arguments": {"command-line": "sendkey slash 1"}}}
+{"receive": {"timestamp": {"seconds": 1789242089, "microseconds": 539376}, "event": "VNC_CONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789242089, "microseconds": 539839}, "event": "VNC_INITIALIZED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"return": "", "id": 592}}
+{"send": {"execute": "human-monitor-command", "id": 593, "arguments": {"command-line": "sendkey b 1"}}}
+{"receive": {"timestamp": {"seconds": 1789242089, "microseconds": 599094}, "event": "VNC_DISCONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"return": "", "id": 593}}
+{"send": {"execute": "human-monitor-command", "id": 594, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 594}}
+{"send": {"execute": "human-monitor-command", "id": 595, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 595}}
+{"send": {"execute": "human-monitor-command", "id": 596, "arguments": {"command-line": "sendkey slash 1"}}}
+{"receive": {"return": "", "id": 596}}
+{"send": {"execute": "human-monitor-command", "id": 597, "arguments": {"command-line": "sendkey v 1"}}}
+{"receive": {"return": "", "id": 597}}
+{"send": {"execute": "human-monitor-command", "id": 598, "arguments": {"command-line": "sendkey k 1"}}}
+{"receive": {"return": "", "id": 598}}
+{"send": {"execute": "human-monitor-command", "id": 599, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 599}}
+{"send": {"execute": "human-monitor-command", "id": 600, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 600}}
+{"send": {"execute": "human-monitor-command", "id": 601, "arguments": {"command-line": "sendkey m 1"}}}
+{"receive": {"return": "", "id": 601}}
+{"send": {"execute": "human-monitor-command", "id": 602, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 602}}
+{"send": {"execute": "human-monitor-command", "id": 603, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 603}}
+{"send": {"execute": "human-monitor-command", "id": 604, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 604}}
+{"send": {"execute": "human-monitor-command", "id": 605, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 605}}
+{"send": {"execute": "human-monitor-command", "id": 606, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 606}}
+{"send": {"execute": "human-monitor-command", "id": 607, "arguments": {"command-line": "sendkey u 1"}}}
+{"receive": {"return": "", "id": 607}}
+{"send": {"execute": "human-monitor-command", "id": 608, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 608}}
+{"send": {"execute": "human-monitor-command", "id": 609, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 609}}
+{"send": {"execute": "human-monitor-command", "id": 610, "arguments": {"command-line": "sendkey t 1"}}}
+{"receive": {"return": "", "id": 610}}
+{"send": {"execute": "human-monitor-command", "id": 611, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 611}}
+{"send": {"execute": "human-monitor-command", "id": 612, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 612}}
+{"send": {"execute": "human-monitor-command", "id": 613, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 613}}
+{"send": {"execute": "human-monitor-command", "id": 614, "arguments": {"command-line": "sendkey equal 1"}}}
+{"receive": {"return": "", "id": 614}}
+{"send": {"execute": "human-monitor-command", "id": 615, "arguments": {"command-line": "sendkey 1 1"}}}
+{"receive": {"return": "", "id": 615}}
+{"send": {"execute": "human-monitor-command", "id": 616, "arguments": {"command-line": "sendkey 2 1"}}}
+{"receive": {"return": "", "id": 616}}
+{"send": {"execute": "human-monitor-command", "id": 617, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 617}}
+{"send": {"execute": "human-monitor-command", "id": 618, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 618}}
+{"send": {"execute": "human-monitor-command", "id": 619, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 619}}
+{"send": {"execute": "human-monitor-command", "id": 620, "arguments": {"command-line": "sendkey t 1"}}}
+{"receive": {"return": "", "id": 620}}
+{"send": {"execute": "human-monitor-command", "id": 621, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 621}}
+{"send": {"execute": "human-monitor-command", "id": 622, "arguments": {"command-line": "sendkey k 1"}}}
+{"receive": {"return": "", "id": 622}}
+{"send": {"execute": "human-monitor-command", "id": 623, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 623}}
+{"send": {"execute": "human-monitor-command", "id": 624, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 624}}
+{"send": {"execute": "human-monitor-command", "id": 625, "arguments": {"command-line": "sendkey equal 1"}}}
+{"receive": {"return": "", "id": 625}}
+{"send": {"execute": "human-monitor-command", "id": 626, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 626}}
+{"send": {"execute": "human-monitor-command", "id": 627, "arguments": {"command-line": "sendkey 3 1"}}}
+{"receive": {"return": "", "id": 627}}
+{"send": {"execute": "human-monitor-command", "id": 628, "arguments": {"command-line": "sendkey 3 1"}}}
+{"receive": {"return": "", "id": 628}}
+{"send": {"execute": "human-monitor-command", "id": 629, "arguments": {"command-line": "sendkey f 1"}}}
+{"receive": {"return": "", "id": 629}}
+{"send": {"execute": "human-monitor-command", "id": 630, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 630}}
+{"send": {"execute": "human-monitor-command", "id": 631, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 631}}
+{"send": {"execute": "human-monitor-command", "id": 632, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 632}}
+{"send": {"execute": "human-monitor-command", "id": 633, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 633}}
+{"send": {"execute": "human-monitor-command", "id": 634, "arguments": {"command-line": "sendkey 1 1"}}}
+{"receive": {"return": "", "id": 634}}
+{"send": {"execute": "human-monitor-command", "id": 635, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 635}}
+{"send": {"execute": "human-monitor-command", "id": 636, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 636}}
+{"send": {"execute": "human-monitor-command", "id": 637, "arguments": {"command-line": "sendkey b 1"}}}
+{"receive": {"return": "", "id": 637}}
+{"send": {"execute": "human-monitor-command", "id": 638, "arguments": {"command-line": "sendkey 6 1"}}}
+{"receive": {"return": "", "id": 638}}
+{"send": {"execute": "human-monitor-command", "id": 639, "arguments": {"command-line": "sendkey 9 1"}}}
+{"receive": {"return": "", "id": 639}}
+{"send": {"execute": "human-monitor-command", "id": 640, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 640}}
+{"send": {"execute": "human-monitor-command", "id": 641, "arguments": {"command-line": "sendkey 2 1"}}}
+{"receive": {"return": "", "id": 641}}
+{"send": {"execute": "human-monitor-command", "id": 642, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 642}}
+{"send": {"execute": "human-monitor-command", "id": 643, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 643}}
+{"send": {"execute": "human-monitor-command", "id": 644, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 644}}
+{"send": {"execute": "human-monitor-command", "id": 645, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 645}}
+{"send": {"execute": "human-monitor-command", "id": 646, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 646}}
+{"send": {"execute": "human-monitor-command", "id": 647, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 647}}
+{"send": {"execute": "human-monitor-command", "id": 648, "arguments": {"command-line": "sendkey f 1"}}}
+{"receive": {"return": "", "id": 648}}
+{"send": {"execute": "human-monitor-command", "id": 649, "arguments": {"command-line": "sendkey 0 1"}}}
+{"receive": {"return": "", "id": 649}}
+{"send": {"execute": "human-monitor-command", "id": 650, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 650}}
+{"send": {"execute": "human-monitor-command", "id": 651, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 651}}
+{"send": {"execute": "human-monitor-command", "id": 652, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 652}}
+{"send": {"execute": "human-monitor-command", "id": 653, "arguments": {"command-line": "sendkey w 1"}}}
+{"receive": {"return": "", "id": 653}}
+{"send": {"execute": "human-monitor-command", "id": 654, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 654}}
+{"send": {"execute": "human-monitor-command", "id": 655, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 655}}
+{"send": {"execute": "human-monitor-command", "id": 656, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 656}}
+{"send": {"execute": "human-monitor-command", "id": 657, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 657}}
+{"send": {"execute": "human-monitor-command", "id": 658, "arguments": {"command-line": "sendkey shift-7 1"}}}
+{"receive": {"return": "", "id": 658}}
+{"send": {"execute": "human-monitor-command", "id": 659, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"return": "", "id": 659}}
+{"send": {"execute": "pmemsave", "id": 660, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 660}}
+{"send": {"execute": "pmemsave", "id": 661, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 661}}
+{"send": {"execute": "pmemsave", "id": 662, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 662}}
+{"send": {"execute": "pmemsave", "id": 663, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 663}}
+{"send": {"execute": "pmemsave", "id": 664, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 664}}
+{"send": {"execute": "pmemsave", "id": 665, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 665}}
+{"send": {"execute": "pmemsave", "id": 666, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 666}}
+{"send": {"execute": "pmemsave", "id": 667, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 667}}
+{"send": {"execute": "pmemsave", "id": 668, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 668}}
+{"send": {"execute": "pmemsave", "id": 669, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 669}}
+{"send": {"execute": "pmemsave", "id": 670, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 670}}
+{"send": {"execute": "pmemsave", "id": 671, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 671}}
+{"send": {"execute": "pmemsave", "id": 672, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 672}}
+{"send": {"execute": "pmemsave", "id": 673, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 673}}
+{"send": {"execute": "pmemsave", "id": 674, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 674}}
+{"send": {"execute": "pmemsave", "id": 675, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 675}}
+{"send": {"execute": "pmemsave", "id": 676, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 676}}
+{"send": {"execute": "pmemsave", "id": 677, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 677}}
+{"send": {"execute": "pmemsave", "id": 678, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 678}}
+{"send": {"execute": "pmemsave", "id": 679, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 679}}
+{"send": {"execute": "pmemsave", "id": 680, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 680}}
+{"send": {"execute": "pmemsave", "id": 681, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 681}}
+{"send": {"execute": "pmemsave", "id": 682, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 682}}
+{"send": {"execute": "pmemsave", "id": 683, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 683}}
+{"send": {"execute": "pmemsave", "id": 684, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 684}}
+{"send": {"execute": "pmemsave", "id": 685, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 685}}
+{"send": {"execute": "human-monitor-command", "id": 686, "arguments": {"command-line": "sendkey slash 1"}}}
+{"receive": {"return": "", "id": 686}}
+{"send": {"execute": "human-monitor-command", "id": 687, "arguments": {"command-line": "sendkey b 1"}}}
+{"receive": {"return": "", "id": 687}}
+{"send": {"execute": "human-monitor-command", "id": 688, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 688}}
+{"send": {"execute": "human-monitor-command", "id": 689, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 689}}
+{"send": {"execute": "human-monitor-command", "id": 690, "arguments": {"command-line": "sendkey slash 1"}}}
+{"receive": {"return": "", "id": 690}}
+{"send": {"execute": "human-monitor-command", "id": 691, "arguments": {"command-line": "sendkey v 1"}}}
+{"receive": {"return": "", "id": 691}}
+{"send": {"execute": "human-monitor-command", "id": 692, "arguments": {"command-line": "sendkey k 1"}}}
+{"receive": {"return": "", "id": 692}}
+{"send": {"execute": "human-monitor-command", "id": 693, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 693}}
+{"send": {"execute": "human-monitor-command", "id": 694, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 694}}
+{"send": {"execute": "human-monitor-command", "id": 695, "arguments": {"command-line": "sendkey m 1"}}}
+{"receive": {"return": "", "id": 695}}
+{"send": {"execute": "human-monitor-command", "id": 696, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 696}}
+{"send": {"execute": "human-monitor-command", "id": 697, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 697}}
+{"send": {"execute": "human-monitor-command", "id": 698, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 698}}
+{"send": {"execute": "human-monitor-command", "id": 699, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 699}}
+{"send": {"execute": "human-monitor-command", "id": 700, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 700}}
+{"send": {"execute": "human-monitor-command", "id": 701, "arguments": {"command-line": "sendkey u 1"}}}
+{"receive": {"return": "", "id": 701}}
+{"send": {"execute": "human-monitor-command", "id": 702, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 702}}
+{"send": {"execute": "human-monitor-command", "id": 703, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 703}}
+{"send": {"execute": "human-monitor-command", "id": 704, "arguments": {"command-line": "sendkey t 1"}}}
+{"receive": {"return": "", "id": 704}}
+{"send": {"execute": "human-monitor-command", "id": 705, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 705}}
+{"send": {"execute": "human-monitor-command", "id": 706, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 706}}
+{"send": {"execute": "human-monitor-command", "id": 707, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 707}}
+{"send": {"execute": "human-monitor-command", "id": 708, "arguments": {"command-line": "sendkey equal 1"}}}
+{"receive": {"return": "", "id": 708}}
+{"send": {"execute": "human-monitor-command", "id": 709, "arguments": {"command-line": "sendkey 1 1"}}}
+{"receive": {"return": "", "id": 709}}
+{"send": {"execute": "human-monitor-command", "id": 710, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 710}}
+{"send": {"execute": "human-monitor-command", "id": 711, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 711}}
+{"send": {"execute": "human-monitor-command", "id": 712, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 712}}
+{"send": {"execute": "human-monitor-command", "id": 713, "arguments": {"command-line": "sendkey t 1"}}}
+{"receive": {"return": "", "id": 713}}
+{"send": {"execute": "human-monitor-command", "id": 714, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 714}}
+{"send": {"execute": "human-monitor-command", "id": 715, "arguments": {"command-line": "sendkey k 1"}}}
+{"receive": {"return": "", "id": 715}}
+{"send": {"execute": "human-monitor-command", "id": 716, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 716}}
+{"send": {"execute": "human-monitor-command", "id": 717, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 717}}
+{"send": {"execute": "human-monitor-command", "id": 718, "arguments": {"command-line": "sendkey equal 1"}}}
+{"receive": {"return": "", "id": 718}}
+{"send": {"execute": "human-monitor-command", "id": 719, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 719}}
+{"send": {"execute": "human-monitor-command", "id": 720, "arguments": {"command-line": "sendkey 3 1"}}}
+{"receive": {"return": "", "id": 720}}
+{"send": {"execute": "human-monitor-command", "id": 721, "arguments": {"command-line": "sendkey 3 1"}}}
+{"receive": {"return": "", "id": 721}}
+{"send": {"execute": "human-monitor-command", "id": 722, "arguments": {"command-line": "sendkey f 1"}}}
+{"receive": {"return": "", "id": 722}}
+{"send": {"execute": "human-monitor-command", "id": 723, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 723}}
+{"send": {"execute": "human-monitor-command", "id": 724, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 724}}
+{"send": {"execute": "human-monitor-command", "id": 725, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 725}}
+{"send": {"execute": "human-monitor-command", "id": 726, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 726}}
+{"send": {"execute": "human-monitor-command", "id": 727, "arguments": {"command-line": "sendkey 1 1"}}}
+{"receive": {"return": "", "id": 727}}
+{"send": {"execute": "human-monitor-command", "id": 728, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 728}}
+{"send": {"execute": "human-monitor-command", "id": 729, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 729}}
+{"send": {"execute": "human-monitor-command", "id": 730, "arguments": {"command-line": "sendkey b 1"}}}
+{"receive": {"return": "", "id": 730}}
+{"send": {"execute": "human-monitor-command", "id": 731, "arguments": {"command-line": "sendkey 6 1"}}}
+{"receive": {"return": "", "id": 731}}
+{"send": {"execute": "human-monitor-command", "id": 732, "arguments": {"command-line": "sendkey 9 1"}}}
+{"receive": {"return": "", "id": 732}}
+{"send": {"execute": "human-monitor-command", "id": 733, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 733}}
+{"send": {"execute": "human-monitor-command", "id": 734, "arguments": {"command-line": "sendkey 2 1"}}}
+{"receive": {"return": "", "id": 734}}
+{"send": {"execute": "human-monitor-command", "id": 735, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 735}}
+{"send": {"execute": "human-monitor-command", "id": 736, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 736}}
+{"send": {"execute": "human-monitor-command", "id": 737, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 737}}
+{"send": {"execute": "human-monitor-command", "id": 738, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 738}}
+{"send": {"execute": "human-monitor-command", "id": 739, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 739}}
+{"send": {"execute": "human-monitor-command", "id": 740, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 740}}
+{"send": {"execute": "human-monitor-command", "id": 741, "arguments": {"command-line": "sendkey f 1"}}}
+{"receive": {"return": "", "id": 741}}
+{"send": {"execute": "human-monitor-command", "id": 742, "arguments": {"command-line": "sendkey 0 1"}}}
+{"receive": {"return": "", "id": 742}}
+{"send": {"execute": "human-monitor-command", "id": 743, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 743}}
+{"send": {"execute": "human-monitor-command", "id": 744, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 744}}
+{"send": {"execute": "human-monitor-command", "id": 745, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 745}}
+{"send": {"execute": "human-monitor-command", "id": 746, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 746}}
+{"send": {"execute": "human-monitor-command", "id": 747, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 747}}
+{"send": {"execute": "human-monitor-command", "id": 748, "arguments": {"command-line": "sendkey t 1"}}}
+{"receive": {"return": "", "id": 748}}
+{"send": {"execute": "human-monitor-command", "id": 749, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 749}}
+{"send": {"execute": "human-monitor-command", "id": 750, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 750}}
+{"send": {"execute": "human-monitor-command", "id": 751, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 751}}
+{"send": {"execute": "human-monitor-command", "id": 752, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 752}}
+{"send": {"execute": "human-monitor-command", "id": 753, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 753}}
+{"send": {"execute": "human-monitor-command", "id": 754, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"return": "", "id": 754}}
+{"send": {"execute": "pmemsave", "id": 755, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 755}}
+{"send": {"execute": "pmemsave", "id": 756, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 756}}
+{"send": {"execute": "pmemsave", "id": 757, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 757}}
+{"send": {"execute": "pmemsave", "id": 758, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 758}}
+{"send": {"execute": "pmemsave", "id": 759, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 759}}
+{"send": {"execute": "pmemsave", "id": 760, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 760}}
+{"send": {"execute": "pmemsave", "id": 761, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 761}}
+{"send": {"execute": "pmemsave", "id": 762, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 762}}
+{"send": {"execute": "pmemsave", "id": 763, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 763}}
+{"send": {"execute": "pmemsave", "id": 764, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 764}}
+{"send": {"execute": "pmemsave", "id": 765, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 765}}
+{"send": {"execute": "pmemsave", "id": 766, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 766}}
+{"send": {"execute": "pmemsave", "id": 767, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 767}}
+{"send": {"execute": "pmemsave", "id": 768, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 768}}
+{"send": {"execute": "pmemsave", "id": 769, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 769}}
+{"send": {"execute": "pmemsave", "id": 770, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 770}}
+{"send": {"execute": "pmemsave", "id": 771, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 771}}
+{"send": {"execute": "pmemsave", "id": 772, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 772}}
+{"send": {"execute": "pmemsave", "id": 773, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 773}}
+{"send": {"execute": "pmemsave", "id": 774, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 774}}
+{"send": {"execute": "pmemsave", "id": 775, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 775}}
+{"send": {"execute": "pmemsave", "id": 776, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 776}}
+{"send": {"execute": "pmemsave", "id": 777, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 777}}
+{"send": {"execute": "pmemsave", "id": 778, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 778}}
+{"send": {"execute": "pmemsave", "id": 779, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 779}}
+{"send": {"execute": "pmemsave", "id": 780, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 780}}
+{"send": {"execute": "pmemsave", "id": 781, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 781}}
+{"send": {"execute": "pmemsave", "id": 782, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 782}}
+{"send": {"execute": "pmemsave", "id": 783, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 783}}
+{"send": {"execute": "pmemsave", "id": 784, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 784}}
+{"send": {"execute": "pmemsave", "id": 785, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 785}}
+{"send": {"execute": "pmemsave", "id": 786, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 786}}
+{"send": {"execute": "pmemsave", "id": 787, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 787}}
+{"send": {"execute": "pmemsave", "id": 788, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 788}}
+{"send": {"execute": "pmemsave", "id": 789, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 789}}
+{"send": {"execute": "pmemsave", "id": 790, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 790}}
+{"send": {"execute": "pmemsave", "id": 791, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 791}}
+{"send": {"execute": "pmemsave", "id": 792, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 792}}
+{"send": {"execute": "pmemsave", "id": 793, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 793}}
+{"send": {"execute": "pmemsave", "id": 794, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 794}}
+{"send": {"execute": "pmemsave", "id": 795, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 795}}
+{"send": {"execute": "pmemsave", "id": 796, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 796}}
+{"send": {"execute": "pmemsave", "id": 797, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 797}}
+{"send": {"execute": "pmemsave", "id": 798, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 798}}
+{"send": {"execute": "pmemsave", "id": 799, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 799}}
+{"send": {"execute": "pmemsave", "id": 800, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 800}}
+{"send": {"execute": "pmemsave", "id": 801, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 801}}
+{"send": {"execute": "pmemsave", "id": 802, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 802}}
+{"send": {"execute": "pmemsave", "id": 803, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 803}}
+{"send": {"execute": "pmemsave", "id": 804, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 804}}
+{"send": {"execute": "pmemsave", "id": 805, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 805}}
+{"send": {"execute": "pmemsave", "id": 806, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 806}}
+{"send": {"execute": "pmemsave", "id": 807, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 807}}
+{"send": {"execute": "pmemsave", "id": 808, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 808}}
+{"send": {"execute": "pmemsave", "id": 809, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 809}}
+{"send": {"execute": "pmemsave", "id": 810, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 810}}
+{"send": {"execute": "pmemsave", "id": 811, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 811}}
+{"send": {"execute": "pmemsave", "id": 812, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 812}}
+{"send": {"execute": "pmemsave", "id": 813, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 813}}
+{"send": {"execute": "pmemsave", "id": 814, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 814}}
+{"send": {"execute": "pmemsave", "id": 815, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 815}}
+{"send": {"execute": "pmemsave", "id": 816, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 816}}
+{"send": {"execute": "pmemsave", "id": 817, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 817}}
+{"send": {"execute": "pmemsave", "id": 818, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 818}}
+{"send": {"execute": "pmemsave", "id": 819, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 819}}
+{"send": {"execute": "pmemsave", "id": 820, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 820}}
+{"send": {"execute": "pmemsave", "id": 821, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 821}}
+{"send": {"execute": "pmemsave", "id": 822, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 822}}
+{"send": {"execute": "pmemsave", "id": 823, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 823}}
+{"send": {"execute": "pmemsave", "id": 824, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 824}}
+{"send": {"execute": "pmemsave", "id": 825, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 825}}
+{"send": {"execute": "pmemsave", "id": 826, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 826}}
+{"send": {"execute": "pmemsave", "id": 827, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 827}}
+{"send": {"execute": "pmemsave", "id": 828, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 828}}
+{"send": {"execute": "pmemsave", "id": 829, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 829}}
+{"send": {"execute": "pmemsave", "id": 830, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 830}}
+{"send": {"execute": "pmemsave", "id": 831, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 831}}
+{"send": {"execute": "pmemsave", "id": 832, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 832}}
+{"send": {"execute": "pmemsave", "id": 833, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 833}}
+{"send": {"execute": "pmemsave", "id": 834, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 834}}
+{"send": {"execute": "pmemsave", "id": 835, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 835}}
+{"send": {"execute": "pmemsave", "id": 836, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 836}}
+{"send": {"execute": "pmemsave", "id": 837, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 837}}
+{"send": {"execute": "pmemsave", "id": 838, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 838}}
+{"send": {"execute": "pmemsave", "id": 839, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 839}}
+{"send": {"execute": "pmemsave", "id": 840, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 840}}
+{"send": {"execute": "pmemsave", "id": 841, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 841}}
+{"send": {"execute": "pmemsave", "id": 842, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 842}}
+{"send": {"execute": "pmemsave", "id": 843, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 843}}
+{"send": {"execute": "pmemsave", "id": 844, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 844}}
+{"send": {"execute": "pmemsave", "id": 845, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 845}}
+{"send": {"execute": "pmemsave", "id": 846, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 846}}
+{"send": {"execute": "pmemsave", "id": 847, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 847}}
+{"send": {"execute": "pmemsave", "id": 848, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 848}}
+{"send": {"execute": "pmemsave", "id": 849, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 849}}
+{"send": {"execute": "pmemsave", "id": 850, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 850}}
+{"send": {"execute": "pmemsave", "id": 851, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 851}}
+{"send": {"execute": "pmemsave", "id": 852, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 852}}
+{"send": {"execute": "pmemsave", "id": 853, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 853}}
+{"send": {"execute": "pmemsave", "id": 854, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 854}}
+{"send": {"execute": "pmemsave", "id": 855, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 855}}
+{"send": {"execute": "pmemsave", "id": 856, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 856}}
+{"send": {"execute": "pmemsave", "id": 857, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 857}}
+{"send": {"execute": "pmemsave", "id": 858, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 858}}
+{"send": {"execute": "pmemsave", "id": 859, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 859}}
+{"send": {"execute": "pmemsave", "id": 860, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 860}}
+{"send": {"execute": "pmemsave", "id": 861, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 861}}
+{"send": {"execute": "pmemsave", "id": 862, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 862}}
+{"send": {"execute": "pmemsave", "id": 863, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 863}}
+{"send": {"execute": "pmemsave", "id": 864, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 864}}
+{"send": {"execute": "pmemsave", "id": 865, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 865}}
+{"send": {"execute": "pmemsave", "id": 866, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 866}}
+{"send": {"execute": "pmemsave", "id": 867, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 867}}
+{"send": {"execute": "pmemsave", "id": 868, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 868}}
+{"send": {"execute": "pmemsave", "id": 869, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 869}}
+{"send": {"execute": "pmemsave", "id": 870, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 870}}
+{"send": {"execute": "pmemsave", "id": 871, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 871}}
+{"send": {"execute": "pmemsave", "id": 872, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 872}}
+{"send": {"execute": "pmemsave", "id": 873, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 873}}
+{"send": {"execute": "pmemsave", "id": 874, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 874}}
+{"send": {"execute": "pmemsave", "id": 875, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 875}}
+{"send": {"execute": "pmemsave", "id": 876, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 876}}
+{"send": {"execute": "pmemsave", "id": 877, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 877}}
+{"send": {"execute": "pmemsave", "id": 878, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 878}}
+{"send": {"execute": "pmemsave", "id": 879, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 879}}
+{"send": {"execute": "pmemsave", "id": 880, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 880}}
+{"send": {"execute": "pmemsave", "id": 881, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 881}}
+{"send": {"execute": "pmemsave", "id": 882, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 882}}
+{"send": {"execute": "pmemsave", "id": 883, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 883}}
+{"send": {"execute": "pmemsave", "id": 884, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 884}}
+{"send": {"execute": "pmemsave", "id": 885, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 885}}
+{"send": {"execute": "pmemsave", "id": 886, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 886}}
+{"send": {"execute": "pmemsave", "id": 887, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 887}}
+{"send": {"execute": "pmemsave", "id": 888, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 888}}
+{"send": {"execute": "pmemsave", "id": 889, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 889}}
+{"send": {"execute": "pmemsave", "id": 890, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 890}}
+{"send": {"execute": "pmemsave", "id": 891, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 891}}
+{"send": {"execute": "pmemsave", "id": 892, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 892}}
+{"send": {"execute": "pmemsave", "id": 893, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 893}}
+{"send": {"execute": "pmemsave", "id": 894, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 894}}
+{"send": {"execute": "pmemsave", "id": 895, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 895}}
+{"send": {"execute": "pmemsave", "id": 896, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 896}}
+{"send": {"execute": "pmemsave", "id": 897, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 897}}
+{"send": {"execute": "pmemsave", "id": 898, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 898}}
+{"send": {"execute": "pmemsave", "id": 899, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 899}}
+{"send": {"execute": "pmemsave", "id": 900, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 900}}
+{"send": {"execute": "pmemsave", "id": 901, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 901}}
+{"send": {"execute": "pmemsave", "id": 902, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 902}}
+{"send": {"execute": "pmemsave", "id": 903, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 903}}
+{"send": {"execute": "pmemsave", "id": 904, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 904}}
+{"send": {"execute": "pmemsave", "id": 905, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 905}}
+{"send": {"execute": "pmemsave", "id": 906, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 906}}
+{"send": {"execute": "pmemsave", "id": 907, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 907}}
+{"send": {"execute": "pmemsave", "id": 908, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 908}}
+{"send": {"execute": "pmemsave", "id": 909, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 909}}
+{"send": {"execute": "pmemsave", "id": 910, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 910}}
+{"send": {"execute": "pmemsave", "id": 911, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 911}}
+{"send": {"execute": "pmemsave", "id": 912, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 912}}
+{"send": {"execute": "pmemsave", "id": 913, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 913}}
+{"send": {"execute": "pmemsave", "id": 914, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 914}}
+{"send": {"execute": "pmemsave", "id": 915, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 915}}
+{"send": {"execute": "pmemsave", "id": 916, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 916}}
+{"send": {"execute": "pmemsave", "id": 917, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 917}}
+{"send": {"execute": "pmemsave", "id": 918, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 918}}
+{"send": {"execute": "pmemsave", "id": 919, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 919}}
+{"send": {"execute": "pmemsave", "id": 920, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 920}}
+{"send": {"execute": "pmemsave", "id": 921, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 921}}
+{"send": {"execute": "pmemsave", "id": 922, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 922}}
+{"send": {"execute": "pmemsave", "id": 923, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 923}}
+{"send": {"execute": "pmemsave", "id": 924, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 924}}
+{"send": {"execute": "pmemsave", "id": 925, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 925}}
+{"send": {"execute": "pmemsave", "id": 926, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 926}}
+{"send": {"execute": "pmemsave", "id": 927, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 927}}
+{"send": {"execute": "pmemsave", "id": 928, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 928}}
+{"send": {"execute": "pmemsave", "id": 929, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 929}}
+{"send": {"execute": "pmemsave", "id": 930, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 930}}
+{"send": {"execute": "pmemsave", "id": 931, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 931}}
+{"send": {"execute": "pmemsave", "id": 932, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 932}}
+{"send": {"execute": "pmemsave", "id": 933, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 933}}
+{"send": {"execute": "pmemsave", "id": 934, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 934}}
+{"send": {"execute": "pmemsave", "id": 935, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 935}}
+{"send": {"execute": "pmemsave", "id": 936, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 936}}
+{"send": {"execute": "pmemsave", "id": 937, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 937}}
+{"send": {"execute": "pmemsave", "id": 938, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 938}}
+{"send": {"execute": "pmemsave", "id": 939, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 939}}
+{"send": {"execute": "pmemsave", "id": 940, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 940}}
+{"send": {"execute": "pmemsave", "id": 941, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 941}}
+{"send": {"execute": "pmemsave", "id": 942, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 942}}
+{"send": {"execute": "pmemsave", "id": 943, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 943}}
+{"send": {"execute": "pmemsave", "id": 944, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 944}}
+{"send": {"execute": "pmemsave", "id": 945, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 945}}
+{"send": {"execute": "pmemsave", "id": 946, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 946}}
+{"send": {"execute": "pmemsave", "id": 947, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 947}}
+{"send": {"execute": "pmemsave", "id": 948, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 948}}
+{"send": {"execute": "pmemsave", "id": 949, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 949}}
+{"send": {"execute": "pmemsave", "id": 950, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 950}}
+{"send": {"execute": "pmemsave", "id": 951, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 951}}
+{"send": {"execute": "pmemsave", "id": 952, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 952}}
+{"send": {"execute": "pmemsave", "id": 953, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 953}}
+{"send": {"execute": "pmemsave", "id": 954, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 954}}
+{"send": {"execute": "pmemsave", "id": 955, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 955}}
+{"send": {"execute": "pmemsave", "id": 956, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 956}}
+{"send": {"execute": "pmemsave", "id": 957, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 957}}
+{"send": {"execute": "pmemsave", "id": 958, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 958}}
+{"send": {"execute": "pmemsave", "id": 959, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 959}}
+{"send": {"execute": "pmemsave", "id": 960, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 960}}
+{"send": {"execute": "pmemsave", "id": 961, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 961}}
+{"send": {"execute": "pmemsave", "id": 962, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 962}}
+{"send": {"execute": "pmemsave", "id": 963, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 963}}
+{"send": {"execute": "pmemsave", "id": 964, "arguments": {"val": 6627216, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q308-lifecycle-003/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 964}}
+{"send": {"execute": "quit", "id": 965}}
+{"receive": {"timestamp": {"seconds": 1789242105, "microseconds": 238658}, "event": "SHUTDOWN", "data": {"guest": false, "reason": "host-qmp-quit"}}}
+{"receive": {"return": {}, "id": 965}}

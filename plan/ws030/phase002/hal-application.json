@@ -1,0 +1,10 @@
+{
+  "applied_at": "2026-09-12T17:23:39.477111+00:00",
+  "approved_patch_sha256": "e6ec9e6c2deda41b840fa6f10846438d091f3a20ce782b9251b7979ac7591c8d",
+  "scope": [
+    "include/hal/hal.h",
+    "src/hal/amd64/space.c"
+  ],
+  "approval": "https://github.com/awemorris/zedBSD/issues/390#issuecomment-5647471812",
+  "build_runtime": "not yet run"
+}

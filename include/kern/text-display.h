@@ -23,15 +23,31 @@
 #ifndef KERN_TEXT_DISPLAY_H
 #define KERN_TEXT_DISPLAY_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 /* Light grey on black, the default text attribute on every board. */
 #define KERN_TEXT_ATTRIB_NORMAL	0x07U
 
 /*
+ * One caller-owned RAM destination for a retained text-grid snapshot.
+ *
+ * Null pixels with zero bytes queries geometry. Successful rendering writes
+ * tightly packed BGRA8888 pixels with zero alpha; stride is reported in bytes.
+ * The destination remains caller-owned and no framebuffer MMIO is read.
+ */
+struct kern_text_snapshot {
+	uint32_t *pixels;
+	size_t bytes;
+	unsigned width;
+	unsigned height;
+	unsigned stride;
+};
+
+/*
  * One board's character output.
  *
- * Every entry is required. The display driver holds the cell state; this
+ * Every entry before snapshot is required. The display driver holds the cell state; this
  * table is only the way in.
  */
 struct kern_text_ops {
@@ -63,6 +79,9 @@ struct kern_text_ops {
 	/* Stops and restarts output while a graphics mode owns the screen. */
 	void (*suspend)(void);
 	void (*resume)(void);
+
+	/* Optionally renders retained text into an independent caller-owned RAM image. */
+	int (*snapshot)(struct kern_text_snapshot *snapshot);
 };
 
 /*
@@ -89,5 +108,11 @@ void kern_text_show_cursor(int visible);
 void kern_text_update_cursor(void);
 void kern_text_suspend(void);
 void kern_text_resume(void);
+
+/* Renders or queries an optional retained-cell snapshot, without reading display memory. */
+int kern_text_snapshot(struct kern_text_snapshot *snapshot);
+
+/* Changes after completed text mutations; consumers compare successive observations. */
+uint32_t kern_text_generation(void);
 
 #endif

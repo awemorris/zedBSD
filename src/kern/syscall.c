@@ -47,6 +47,7 @@
 #include "kern/usync.h"
 #include "kern/vm-object.h"
 #include "kern/vmspace.h"
+#include "kern/vm-device.h"
 
 #include <uapi/dirent.h>
 #include <uapi/atomic.h>
@@ -3167,6 +3168,9 @@ sys_mmap_call(
 {
 	struct process *process;
 	struct file *file;
+	struct vm_device_mapping *device_mapping;
+	int access_mode;
+	int device_exact;
 	uintptr_t mapped;
 	uint32_t prot;
 	size_t data_size;
@@ -3209,6 +3213,72 @@ sys_mmap_call(
 		file = filedesc_get_ref(process->fd, (int)args[4]);
 		if (file == NULL)
 			return -EBADF;
+
+		/* Device mappings share a retained backend view, never a file cache. */
+		if (file->f_inode != NULL &&
+		    file->f_inode->i_type == INODE_CHAR) {
+			/* Mapping authority cannot exceed the shared read/write rights of this original open. */
+			access_mode = file_status_flags_get(file) & O_ACCMODE;
+			if (!shared ||
+			    (args[2] & PROT_EXEC) != 0 ||
+			    access_mode == O_WRONLY ||
+			    ((args[2] & PROT_WRITE) != 0 &&
+			     access_mode == O_RDONLY)) {
+				(void)file_close(file);
+				return -EACCES;
+			}
+			/* An ordinary character device may omit mapping support entirely. */
+			if (file->f_ops == NULL || file->f_ops->mmap == NULL) {
+				(void)file_close(file);
+				return -EOPNOTSUPP;
+			}
+
+			/* Retains a temporary mapping reference before VM insertion. */
+			device_mapping = NULL;
+			size = (args[1] + SYSCALL_PAGE_MASK) & ~SYSCALL_PAGE_MASK;
+			error = vm_prot((int)args[2], &prot);
+			if (error == 0) {
+				/* Acquires a resource hold before the VM can publish its physical view. */
+				error = file->f_ops->mmap(
+					file,
+					(off_t)args[5],
+					size,
+					prot,
+					&device_mapping);
+			}
+
+			/* A successful backend must transfer a real retained mapping reference. */
+			if (error == 0 && device_mapping == NULL)
+				error = EIO;
+
+			/* Exact placement is requested only by the supported non-replacement mmap flag. */
+			device_exact = 0;
+			if ((args[3] & MAP_FIXED_NOREPLACE) != 0)
+				device_exact = 1;
+
+			/* Publishes shared device storage only after protection and backend acquisition succeed. */
+			if (error == 0) {
+				error = vmspace_map_device(
+					process->vmspace,
+					args[0],
+					size,
+					prot,
+					device_mapping,
+					device_exact,
+					&mapped);
+			}
+
+			/* Successful VM ownership outlives this syscall and fd ref. */
+			if (device_mapping != NULL)
+				vm_device_put(device_mapping);
+			(void)file_close(file);
+			if (error != 0)
+				return -error;
+
+			/* Succeeded: the VM region now retains shared storage beyond descriptor close. */
+			return (intptr_t)mapped;
+		}
+
 		if (file->f_inode == NULL ||
 		    file->f_inode->i_type != INODE_REG ||
 		    (file_status_flags_get(file) & O_ACCMODE) == O_WRONLY) {

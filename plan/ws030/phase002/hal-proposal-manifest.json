@@ -1,0 +1,7 @@
+{
+  "state": "proposal only; no HAL source modified or candidate build/run",
+  "review": "root and gpu_dynamic_tests read-only review; v2 resolves width, protection/cache policy and unsigned limit findings",
+  "base_space_sha256": "ef9730f03baeffa9896b609dacba655eb49ed632c4373a57ecb8536bd40136d0",
+  "base_header_sha256": "d98b9601423f8d931e7f60677c89ee42b4f26cd8e64307462bad2b0c4fe58e81",
+  "patch_sha256": "e6ec9e6c2deda41b840fa6f10846438d091f3a20ce782b9251b7979ac7591c8d"
+}

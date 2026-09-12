@@ -1,53 +1,39 @@
 <!-- awesome-plan project=zedbsd record=ws014-p005 -->
 
-# WS014 p005: テクスチャ付き回転直方体で3D shader/APIを検証
+# WS014 p005: 標準Vulkan APIによるテクスチャ付き回転直方体
 
 <!-- awesome-plan-current:start -->
 Status: cleared
 Phase disposition: normal
 Parent: [WS014](https://github.com/awemorris/zedBSD/issues/15)
-Last Queue: q307 / q307-i01 cleared
+Last Queue: q308 / q308-i04 cleared
 Active Queue: none
-Before: ws014-p004 planning
+Acceptance: q308-lifecycle-003 and final API/ABI/ownership/style evidence
 <!-- awesome-plan-current:end -->
 
 Combined ID: ws014-p005
 Primary Milestone: MG006
 
-## ユーザー指示と単一の到達点
+## 訂正理由と単一の到達点
 
-2026-09-13、ユーザーがp004の前に `userland/base/vkdemo` を作り、テクスチャ付き直方体を時間とともに回転させてvertex shaderとfragment shaderの実行、および実装APIの不足を確認するよう依頼した。新しいp005として扱い、順序をp003 → p005 → p004へ更新する。ユーザーは「GitHubは承認します」と明示した。
+ユーザーが指定するvkdemoは純粋な標準Vulkan APIアプリであり、直接Venus wire/GPU ioctlを符号化する有限clientではない。旧q307は実shader/texture/depth/回転/6画面一致/正常回収を検証したが、このAPI境界を満たしていなかったためp005の現在clearを失効してunclearedへ戻す。今回q308で標準API化する訂正をin-progressとして再開する。依存するlibrary出力が揃うまでq308-i04はpendingで、依存実装へ先行しない。
 
-p003のclear/copyによる2帯検証を前提に、実際のgraphics pipeline、頂点入力、shader、テクスチャsample、depth、描画と回転を一つのデモで確認する。一般的なlibvulkan.soや全Vulkan適合を追加目標にしない。
+単一到達点は、標準headerと `/lib/libvulkan.so` を使う `userland/base/vkdemo` が、テクスチャ付き非等辺直方体をvertex/fragment shader・depthで描画し、時刻とともに回転させdirect-display surface/swapchainへpresentできること。汎用library全体の実装責任は新しい [WS030](https://github.com/awemorris/zedBSD/issues/388) が持つ。WS014のGPU bring-up目標へ別の標準library目標を混ぜない。
 
-## 実装・API方針
+## 実装と受け入れ
 
-`userland/base/vkdemo/` を独立したamd64 packageとして作り、/bin/vkdemoへ配置する。初期画像は320x240程度、非等辺の直方体、独自GLSLのvertex/fragment shader、実際のVkImage/View/Samplerを用いたチェック模様texture、depth付きoffscreen描画とする。vertex shaderが時刻のpush constantから回転・透視変換を行い、fragment shaderが補間UVからtextureをsampleする。CPUが完成した直方体画像を描いて転送する方式ではない。
+- アプリは標準 `<vulkan/vulkan.h>` のvk APIだけでGPUへアクセスし、Venus/K内部header、GPU ioctl、kernel resource ID、backend command番号に依存しない。物理device・display/plane/modeを標準APIで選択し、surface/swapchain/imageを管理する。
+- vkdemoをlibvulkan.soへ動的linkし、DT_NEEDEDと `/lib/ld.so`、公開headerだけのcompile/linkを確認する。独自GLSL→SPIR-V、texture、36頂点、depth、同じrender関数による固定/実時間frameという元の描画要件を維持する。
+- acquire/submit/present、memory mapping/可視性、VkFence等を標準APIで使い、GPU readbackと実VNC画像を独立したray/texture期待値へ照合する。複数frame・通常アニメーション・正常終了・同VMの再openを最終sourceで新しく確認する。
+- 必要なWS030 p003出力が現行sourceにあり、宣言能力と同期・表示意味論が成立することを確認してから実行する。新しい試験を旧q307成功で代用せず、追加API不足・変更範囲・検証・制限を記録する。
 
-p003の通常GPU登録とcapset/blob/read/write/command/presentを再利用する。必要ならユーザー空間の有限Venus codec/session部分を共通化し、3D object/pipeline/frame状態はvkdemo内に置く。現時点では新K ioctlやHAL変更は不要と見込む。実利用で不足が確定した場合だけ現行U/K責務内のAPIを補い、同じ責務資料へ記録する。HALの全改変は別の具体的許可が必要であり、今回の計画を追加HAL変更の許可と解釈しない。
+## 設計・実行境界
 
-shaderは独自ソースをhostに既存のglslc2025.2-1/glslang15.1.0でSPIR-Vへcompileし、spirv-val2025.1で確認する。元shader、生成物、再生成手順とhashを保存する。上流Mesa等の実装をbaseへ移入しない。host toolsの利用と生成した自作shaderを区別する。
+[WS030](https://github.com/awemorris/zedBSD/issues/388) の標準Vulkan1.0/direct-display契約と [q308](https://github.com/awemorris/zedBSD/issues/362) を適用。EGLは今回cancel、Waylandは将来backend。HAL追加変更は未許可。全C規約、独立実装、有限の対象build/試験、既存private host転送承認を維持。aggregate make checkとgit add/commit/pushは行わない。WS014 p004とnative i915は未実行の後段とする。
 
-## 資源・連続実行
+## q307の過去の実測・試行履歴
 
-同一process/contextで複数frameを描画し、単調時計から時間を進める。診断用に有限duration/frame数と固定時刻sampleを指定できる。同じ描画関数を使い、固定時刻だけ別の実装へ切り替えない。必要なreply/upload/readback blob、scanout storage、pipeline/descriptor/textureは一度確保して再利用する。VkDeviceMemoryの非zero blob exportは一度だけ。32handle/session、64KiB転送、8MiB apertureの範囲を守り、VkFence完了後にcommand pool/fenceをresetして次frameを記録する。
-
-## 受け入れと検証
-
-1. host compiler/validator、対象version、追加wire commandとrenderer1.1.0の実dispatch条件を固定する。
-2. vertexとfragment shaderを含むgraphics pipelineが成功し、直方体の複数面・正しいtexture/UV・depthが実際のGPU readbackと表示で確認できる。
-3. 異なる固定時刻の複数frameについて、独立した幾何/texture期待値と実画面を比較する。面/texel境界の許容だけを明記し、GPU結果から作ったgoldenを正解にしない。clearだけ、無地面、未回転、誤UV、旧frameの偽陽性を防ぐ。
-4. 同一process/contextで時刻とframeが進み、複数回のGPU readback/実画面が変化する。必要ならpresent後の有界capture待合せを診断インタフェースとして使う。通常の連続回転経路と同じrender関数を確認する。
-5. QEMU制御とconsoleはQMP、実GL画像はegl-headless→VNC Unix RAWを使用。試行ごとにsource/shader/image/hash、frame/time、GPU完了、readback、実frame、rendererログを保存する。GPU readbackを表示画像と照合する。
-6. make -j16対象build、C規約全文、必要な有限parser/ownership/画像判定の検査、差分レビューを行う。共通化でp003の経路を変えた場合に限って、その有効な限定回帰を再実行する。
-
-## 実行境界
-
-q307 / q307-i01はこのp005だけ。見積240 active minutes、120分ごとに成果と境界を点検する。各build・VM・pollを有限にし、同じ失敗の無変更再試行は3回以内に制限して原因へ進む。専用host awe@10.0.10.25と使い捨てimageを継続利用し、転送は既存のユーザー明示許可の範囲。既存VMやsystem package設定は変更しない。git add/commit/pushはユーザーが行う。aggregate make checkは使わない。p004・native i915・独立した新目標へQueueを広げない。
-
-## 引き渡し
-
-不足APIと実装済みshader/rendering subset、再現手順、画像・資源・versionの制限をp004へ渡す。p005の完了だけでWS014や全Vulkanを自動完了にしない。p001の未決定も維持する。
+以下は旧scopeで実行したq307の結果。画像・回収の観測と当時のclearは履歴として保持する。現在のp005をclearedとする証拠や標準Vulkan対応の根拠として読み替えない。`plan/history/queue-q307.md` と既存results/evidenceは不変。
 
 ## q307完了: p005 cleared（2026-09-13 JST）
 
@@ -131,3 +117,31 @@ NNNには未使用名を指定する。既定で専用configとbuild directory�
 `evidence/q307-vkdemo-002/` に完全なJSON、6枚の実画像PNG、oracle診断、console/QMP/guest/rendererログを保存した。PNGはPPMのRGB byteを変えず可逆に形式変換したもの。元PPM/build/transferログは `plan/ws014/temp/remote/`。最終sourceは実測manifestの全hashと一致し、追加の同一試験は行っていない。
 
 GitHubには計画・結果・API表とhashを掲載する。source・資料・画像ファイルのgit add/commit/pushはユーザーが行う。ローカルファイルをGitHubへ公開済みのリンクとは扱わない。
+
+## q308 HAL提示差分の承認（2026-09-13・最新）
+
+ユーザーが「この差分の適用と検証を許可する」と回答した。[承認記録](https://github.com/awemorris/zedBSD/issues/390#issuecomment-5647471812) の対象は `plan/ws030/phase002/amd64-device-mapping-proposal.patch`、SHA256 `e6ec9e6c2deda41b840fa6f10846438d091f3a20ce782b9251b7979ac7591c8d`。既存MMIO APIのamd64補完と明示DEVICE usermap・protection/cache検査、hal.hの説明コメントに限り適用と検証を進める。これより前の「HAL未承認・適用待ち」はこの差分について解消した。適用・試験成功はまだ記録していない。別のHAL変更とgit add/commit/pushは許可されたと解釈しない。
+
+## q308 checkpoint001（実装・限定検証の中間結果）
+
+[承認HAL差分の適用・限定試験と実装進捗](https://github.com/awemorris/zedBSD/issues/390#issuecomment-5647774479) を記録。HAL対象・amd64 kernel統合build、HAL/GPU資源寿命/memory共有map/sync/WSIの限定host試験がPASS。全体は未完了で、Phaseのclearanceは変更しない。公開headerは固定Khronos由来1.3.269 headerから1.0 core137＋WSI18をNoctで選択する方式に具体化し、両ABIの配置/定数を照合済み。HAL追加APIなし。256MiB apertureのguest runtime、全entrypoint link/dispatch、残りAPI family、/lib設置と標準vkdemo直接表示の統合受け入れは未検証。以前の「未適用・試験成功なし」はこのcheckpointで述べた範囲について履歴となる。local証拠 `plan/ws030/phase002/checkpoint001.json`。未commitのsourceをGitHub repositoryで読めるとは扱わず、git add/commit/pushはユーザーが行う。
+
+## q308 checkpoint002／第1回時間境界レビュー
+
+[256MiB QEMU受入・PCI cache契約修正・全Vulkan symbol link](https://github.com/awemorris/zedBSD/issues/390#issuecomment-5647977365) を記録。既存Venus経路の49,152画素一致、実PCI/VM回帰試験、memory/descriptor/pipeline/sync/WSIの限定試験がPASS。全137 core＋18 WSIを含むlibvulkan.soと標準vkdemoがlinkし、SONAME/155 exports/依存を検証した。標準アプリのゲスト直接表示、/lib設置、残るAPI peer、最終規約照合は未完了で、各Phaseのclearanceは変更しない。承認HAL差分以外のHAL改変なし、720 active minutes枠内で継続。local証拠 `plan/ws030/phase002/checkpoint002.json`。source/docは未commitのままユーザー担当。
+
+## q308 checkpoint003／標準APIの実ゲスト描画と終了条件
+
+[標準Vulkan6枚描画・通常再起動・155 API検証とconsole復帰の未達](https://github.com/awemorris/zedBSD/issues/392#issuecomment-5648174368) を記録。`q308-standard-vkdemo-002` は /lib/libvulkan.so を使い、実VNC/GPU readback/独立ray-texture oracleを6枚で通過した。SIGINT後の再openも通るが、物理console復帰は `q308-lifecycle-001` で失敗したため修正中。全API peer/dispatch・Noct再生成・能力/破棄失敗レビューは進み、155行の検証台帳を作成した。最終sourceのbuild/実表示・競合・console・規約受入は残っており、clearanceは変更しない。詳細と履歴は `plan/ws030/phase004/checkpoint003.json` と同evidence資料。HALは既承認差分のみ、source/docのgit公開はユーザー担当。
+
+## q308完了: 標準Vulkan・直接表示libraryと標準APIデモ（2026-09-13）
+
+WS030 p001/p002/p003/p004とWS014 p005の標準API訂正をclearedとし、WS030 completed、q308 finished、active Queueなしとする。WS014はincomplete、p001/p004 planning、p004未queue、native i915は別WS029のまま。q307の旧scopeの実測と履歴は保持する。
+
+`libc/include/vulkan/` にVulkan1.0の公開header、`userland/base/libvulkan/` に独立した全137 core＋選択direct-display WSI18の実装を提供し、`/lib/libvulkan.so` に配置した。vkdemoは標準Vulkan/WSIだけを使い、GPU ioctl/Venus codecをアプリへ持ち込まない。ABI、Noct再生成、155実exportとproc-address、全familyの限定意味論試験、U/Kの所有権・権限・失敗回収、適用C規約の独立レビューを実施した。正式CTS認証は主張しない。
+
+最終 `q308-lifecycle-003` は実QEMU10.0.11/virglrenderer1.1.0/Intel ANVで6枚の回転直方体を描画し、実VNC/GPU readback/独立ray-texture oracleが一致（評価対象不一致0）。通常終了後6frame再起動、SIGINT後6frame再起動、640×480文字画面への復帰とechoによる画面更新、別processの表示競合拒否とowner35frame/DONEを確認した。42.671秒、QEMU exit0。最終書式変更後のkernel/appは実行済みbinaryと一致する。
+
+承認済みHAL patch SHA256 `e6ec9e6c2deda41b840fa6f10846438d091f3a20ce782b9251b7979ac7591c8d` のみを適用し、既存hal_space_map_device/device usermapを補完した。追加HAL APIはない。PCI cache属性、queue総数63、allocator破棄、console/query/通知の修正と、先行失敗・再実行理由を保存した。公開coherent HOST_VISIBLE、256MiB aperture、native watchdog等の制約は能力監査へ記録した。
+
+結果は `plan/ws030/results-q308.md`、155行の台帳は `plan/ws030/phase004/api-verification.md`、最終証拠は `plan/ws030/phase004/final-evidence/verification.json`、p005訂正は `plan/ws014/phase005/results-q308.md`、履歴は `plan/history/queue-q308.md`（いずれもlocal/uncommitted）。GitHubは計画Issue/Project/結果コメントの同期であり、source/doc/imageのgit add/commit/pushはユーザーが行う。EGLは今回cancel、Waylandは将来VK_KHR_wayland_surface backendとして追加する。

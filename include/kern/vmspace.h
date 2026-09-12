@@ -46,6 +46,7 @@ struct vm_object_page;
 struct vm_private_page;
 struct vm_region;
 struct vmspace;
+struct vm_device_mapping;
 
 #define VM_PAGE_RESIDENT		0x0001U
 #define VM_PAGE_DIRTY			0x0002U
@@ -82,6 +83,7 @@ struct vmspace;
 enum vm_region_backing {
 	VM_BACKING_ANON = 0,
 	VM_BACKING_FILE,
+	VM_BACKING_DEVICE,
 };
 
 struct vm_private_page {
@@ -157,6 +159,10 @@ struct vm_region {
 	struct file *file;
 	struct vm_object *object;
 	struct file_exec_snapshot *snapshot;
+
+	/* Driver storage is retained independently of descriptor close and splits. */
+	struct vm_device_mapping *device;
+	size_t device_offset;
 	off_t file_offset;
 	uintptr_t data_start;
 	size_t data_size;
@@ -203,6 +209,7 @@ enum vmspace_pinned_page_kind {
 	VMSPACE_PINNED_NONE = 0,
 	VMSPACE_PINNED_PRIVATE,
 	VMSPACE_PINNED_OBJECT,
+	VMSPACE_PINNED_DEVICE,
 };
 
 /*
@@ -215,7 +222,9 @@ struct vmspace_pinned_page {
 	union {
 		struct vm_private_page *private_page;
 		struct vm_object_page *object_page;
+		struct vm_device_mapping *device;
 	} owner;
+	size_t device_offset;
 
 	/*
 	 * Private-page pins copy directly through this immutable frame
@@ -223,6 +232,9 @@ struct vmspace_pinned_page {
 	 */
 	struct kern_pmem memory;
 };
+
+/* Maps a retained device extent; exact requires an unoccupied hint address. */
+int vmspace_map_device(struct vmspace *vm, uintptr_t hint, size_t size, uint32_t prot, struct vm_device_mapping *mapping, int exact, uintptr_t *mapped);
 
 extern struct vmspace kernel_vmspace;
 

@@ -18,6 +18,7 @@
 #include <string.h>
 #include "bootloader/include/amd64-handoff.h"
 #include "kern/klog.h"
+#include "kern/text-display.h"
 #include "kern/pmem.h"
 #include "errno.h"
 #include "kern/platform.h"
@@ -1093,13 +1094,22 @@ static void
 text_console_start(
 	void)
 {
+	int ready;
+
+	/* Publishes the retained-cell renderer before any kernel log is routed to it. */
 	drv_pcat_text_init();
 
-	/* Publishes the handover only once the layer can actually draw. */
-	if (drv_pcat_text_ready()) {
-		__atomic_store_n(&kernel_putc, drv_pcat_text_putc,
-				 __ATOMIC_RELEASE);
+	/* Keeps early output until the complete text backend can draw and report snapshot mutations. */
+	ready = drv_pcat_text_ready();
+	if (ready != 0) {
+		__atomic_store_n(
+			&kernel_putc,
+			kern_text_putc,
+			__ATOMIC_RELEASE);
 	}
+
+	/* Succeeded: available kernel text now uses the same redraw notification as console writes. */
+	return;
 }
 
 /* Supports the cirrus attach operation. */

@@ -1,0 +1,23 @@
+{
+  "files": {
+    "src/kern/pmem.c": "f417f31153d64bfe3d357a9373f3325ca61bbd2edac8e3339fc0f64cdabd2066",
+    "src/drivers/pci/pci-pcat.c": "c0703c87a54abcc9cbfb3e9efda218847a74f8bc5063d13438a822d232c7160b",
+    "include/drivers/pci.h": "8cbcdf7946853913fc646c749d92e192fbb25b12f31d5c04dc3f36a640eb983c",
+    "include/kern/pmem.h": "afe24adf10cf5276d3b7b9de74d81f418b58a42dc5385129420fe87e15a50d65",
+    "include/hal/hal.h": "53d0d191fa9390017b2802329a4e199d04486462970662ec12fbe26753a41130",
+    "plan/ws030/tests/pci-device-cache.c": "f5b47dfa29a669beaa351daed25c4632cf3f6511700842382947041736161d0f",
+    "plan/ws030/tests/run-pci-device-cache-test.py": "d68d0c17d6d3001675039ff14374c1f662facbc55abb1b0115d346f013dc50ec"
+  },
+  "complete_functions": {
+    "src/kern/pmem.c": [
+      "pmem_error",
+      "kern_device_map",
+      "kern_device_unmap"
+    ],
+    "src/drivers/pci/pci-pcat.c": [
+      "pcat_map_bar",
+      "pcat_unmap_bar"
+    ]
+  },
+  "scope": "Real PCI and kernel cache translation; mock HAL, allocator, BAR assignment and logging only."
+}

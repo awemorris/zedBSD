@@ -1,0 +1,605 @@
+--- a/include/hal/hal.h
++++ b/include/hal/hal.h
+@@ -516,6 +516,12 @@
+ 
+ /*
+  * Map an address and complete any required TLB synchronization.
++ *
++ * Ordinary user mappings require managed RAM. HAL_SPACE_DEVICE explicitly
++ * requests caller-authorized device pages: the caller retains the backing
++ * through unmap, and the port must reject execution and cached RAM aliases.
++ * Protection changes preserve this device classification and cache policy.
++ * A port may report HAL_ERR_UNSUPPORTED when device user mappings are absent.
+  */
+ int
+ hal_space_map(
+--- a/src/hal/amd64/space.c
++++ b/src/hal/amd64/space.c
+@@ -37,12 +37,33 @@
+ #define AMD64_ECAM_PD_COUNT 128U
+ #define AMD64_ECAM_VIRTUAL_BASE 0xffffffffd0000000ULL
+ 
++/* Reserves the upper half of the shared MMIO directory for owned mappings. */
++#define AMD64_DEVICE_PD_FIRST 256U
++#define AMD64_DEVICE_PD_COUNT 256U
++#define AMD64_DEVICE_PAGE_COUNT (AMD64_DEVICE_PD_COUNT * 512U)
++#define AMD64_DEVICE_WINDOW_BASE 0xffffffffe0000000ULL
++
+ #define AMD64_FRAMEBUFFER_PD_FIRST 16U
+ #define AMD64_FRAMEBUFFER_PD_COUNT \
+ 	(AMD64_ECAM_PD_FIRST - AMD64_FRAMEBUFFER_PD_FIRST)
+ 
+ #define AMD64_CURRENT_SPACE (amd64_percpu_current()->current_space)
+ #define AMD64_SHOOTDOWN_REQUESTS (AMD64_SMP_MAX_CPUS * 4U)
++
++/*
++ * One kernel device view retained until its final unmap and TLB retirement.
++ * The address-space registry lock protects the sorted list and references.
++ */
++struct amd64_device_mapping {
++	struct amd64_device_mapping *next;
++	hal_physaddr_t physical;
++	size_t requested_size;
++	unsigned first_page;
++	unsigned page_count;
++	unsigned references;
++	uint32_t attributes;
++	void *address;
++};
+ 
+ struct amd64_shootdown_request {
+ 	volatile unsigned active;
+@@ -79,6 +100,15 @@
+ static struct amd64_ram_builder ram_builder;
+ static int ram_active;
+ static uint64_t system_mmio_pd[512] __attribute__((aligned(PAGE_SIZE)));
++/*
++ * Device leaf tables remain attached for the kernel lifetime. Individual views
++ * release their PTEs and slots; at most the reserved 512-MiB window needs tables.
++ */
++static hal_physaddr_t device_leaf_tables[AMD64_DEVICE_PD_COUNT];
++
++/* Sorted active and retiring device views; retiring slots cannot be reused. */
++static struct amd64_device_mapping *device_mappings;
++
+ static uint64_t system_acpi_pd[512] __attribute__((aligned(PAGE_SIZE)));
+ static uint64_t
+     system_acpi_pt[AMD64_ACPI_WINDOW_PT_COUNT][512]
+@@ -120,6 +150,13 @@
+ static uint64_t leaf_flags(uint32_t attr);
+ static void shootdown(hal_space_t handle, void *vaddr, size_t size);
+ static void service_shootdowns(hal_cpu_id_t cpu);
++static int user_page_allowed(hal_physaddr_t physical, uint32_t attr);
++static int device_fixed_range(hal_physaddr_t physical, size_t size, void **address);
++static int device_window_map(hal_physaddr_t physical, size_t size, uint32_t attr, void **address);
++static int device_window_unmap(void *address, size_t size);
++static int device_window_populate(struct amd64_device_mapping *mapping);
++static void device_window_clear(struct amd64_device_mapping *mapping);
++static void device_window_retire(struct amd64_device_mapping *mapping);
+ 
+ /*
+  * Converts a direct-map address to its physical address.
+@@ -194,7 +231,10 @@
+ }
+ 
+ /*
+- * Maps one device range into its fixed kernel window.
++ * Maps a device extent into a retained kernel view.
++ *
++ * Existing legacy windows stay permanent. Other physical extents use owned
++ * page mappings in a separate window shared by every process page table.
+  */
+ int
+ hal_space_map_device(
+@@ -203,36 +243,90 @@
+ 	uint32_t attr,
+ 	void **vaddr)
+ {
+-	void *address;
+-
+-	/* Requires a supported window and a destination. */
+-	address = amd64_device_vaddr(paddr);
+-	if (address == NULL || vaddr == NULL)
+-		return HAL_ERR_INVALID;
+-
+-	/*
+-	 * The fixed device windows are established by early paging, so a
+-	 * repeated map is expected and is not an error. Refreshing the
+-	 * attributes is best effort; the window itself is what the caller
+-	 * needs.
+-	 */
+-	(void)hal_space_map(HAL_SPACE_SYS, address, paddr, size, attr);
+-
+-	/* Reports the mapped window. */
+-	*vaddr = address;
++	int fixed;
++	int error;
++
++	/* Refuses empty requests and invalid output storage before any mapping. */
++	if (vaddr == NULL || size == 0)
++		return HAL_ERR_INVALID;
++
++	/* Device views permit data access only; all aliases remain uncached. */
++	if ((attr & HAL_SPACE_EXEC) != 0 ||
++	    (attr & (HAL_SPACE_READ | HAL_SPACE_WRITE)) == 0 ||
++	    (attr & ~(HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_NOCACHE |
++	    HAL_SPACE_WRITETHRU | HAL_SPACE_DEVICE)) != 0) {
++		return HAL_ERR_INVALID;
++	}
++
++	/* The shared device aliases have one cache policy on this port. */
++	if ((attr & HAL_SPACE_WRITETHRU) != 0)
++		return HAL_ERR_UNSUPPORTED;
++
++	/* Bounds the entire extent within the CPU physical-address width. */
++	if (paddr > acpi_physical_max || size - 1U > acpi_physical_max - paddr)
++		return HAL_ERR_INVALID;
++
++	/* Preserves the boot-established legacy mappings without replacing PTEs. */
++	fixed = device_fixed_range(paddr, size, vaddr);
++	if (fixed)
++		return HAL_OK;
++
++	/* Acquires a page-granular view without relocating the device's BAR. */
++	error = device_window_map(paddr, size, attr, vaddr);
++	if (error != HAL_OK)
++		return error;
++
++	/* Succeeded: the caller owns a view until its matching unmap. */
+ 	return HAL_OK;
+ }
+ 
+ /*
+- * Removes one device mapping.
++ * Releases a kernel device view after every CPU retires its translations.
+  */
+ int
+ hal_space_unmap_device(
+ 	void *vaddr,
+ 	size_t size)
+ {
+-	/* Releases the system-space window. */
+-	return hal_space_unmap(HAL_SPACE_SYS, vaddr, size);
++	uintptr_t address;
++	uint64_t physical;
++	void *fixed_address;
++	int fixed;
++	int error;
++
++	/* Rejects an empty release before decoding a permanent legacy view. */
++	if (vaddr == NULL || size == 0)
++		return HAL_ERR_INVALID;
++
++	/* Recognizes only the exact fixed windows established by early paging. */
++	address = (uintptr_t)vaddr;
++	physical = UINT64_MAX;
++	if (address >= AMD64_LEGACY_MMIO_BASE &&
++	    address - AMD64_LEGACY_MMIO_BASE < 0x60000U) {
++		physical = address - AMD64_LEGACY_MMIO_BASE + 0xa0000U;
++	} else if (address >= 0xffffffffc0000000ULL &&
++	    address - 0xffffffffc0000000ULL < 0x01000000U) {
++		physical = address - 0xffffffffc0000000ULL + 0xf0000000U;
++	} else if (address >= 0xffffffffc1000000ULL &&
++	    address - 0xffffffffc1000000ULL < 0x00200000U) {
++		physical = address - 0xffffffffc1000000ULL + 0xfee00000U;
++	} else if (address >= 0xffffffffc1200000ULL &&
++	    address - 0xffffffffc1200000ULL < 0x00200000U) {
++		physical = address - 0xffffffffc1200000ULL + 0xfec00000U;
++	}
++
++	/* Permanent mappings outlive individual driver references. */
++	fixed = device_fixed_range(physical, size, &fixed_address);
++	if (fixed && fixed_address == vaddr)
++		return HAL_OK;
++
++	/* Retires only a matching live dynamic view. */
++	error = device_window_unmap(vaddr, size);
++	if (error != HAL_OK)
++		return error;
++
++	/* Succeeded: the released view cannot retain a stale device translation. */
++	return HAL_OK;
+ }
+ 
+ /*
+@@ -853,9 +947,9 @@
+ 	uintptr_t address;
+ 	uintptr_t offset;
+ 	uintptr_t rollback;
+-	uint64_t ram_entry;
+ 	bool enabled;
+ 	int entered;
++	int error;
+ 
+ 	/* Resolves the mapping destination and its virtual base. */
+ 	space = handle;
+@@ -881,11 +975,17 @@
+ 	if (size > AMD64_DIRECT_LIMIT - physical)
+ 		return HAL_ERR_INVALID;
+ 
+-	/* A present RAM alias is required; holes and MMIO are never user RAM. */
++	/* Device pages must also fit the physical-address width of this CPU. */
++	if (physical > acpi_physical_max ||
++	    size - 1U > acpi_physical_max - physical) {
++		return HAL_ERR_INVALID;
++	}
++
++	/* Validates every RAM or device page before publishing the first mapping. */
+ 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+-		if (!amd64_ram_lookup(&ram_builder, physical + offset, &ram_entry) ||
+-		    (ram_entry & AMD64_PTE_WRITE) == 0)
+-			return HAL_ERR_INVALID;
++		error = user_page_allowed(physical + offset, attr);
++		if (error != HAL_OK)
++			return error;
+ 	}
+ 
+ 	/* Requires at least one useful access permission. */
+@@ -1001,6 +1101,7 @@
+ 	uint32_t observed;
+ 	bool enabled;
+ 	int entered;
++	int error;
+ 
+ 	/* Resolves the destination and initializes flag observation. */
+ 	space = handle;
+@@ -1036,6 +1137,14 @@
+ 			space_lock_leave(space, enabled);
+ 			space_op_leave(space);
+ 			return HAL_ERR_INVALID;
++		}
++
++		/* A protection change cannot turn device storage into cached or executable RAM. */
++		error = user_page_allowed(*leaf & AMD64_PTE_ADDR_MASK, attr);
++		if (error != HAL_OK) {
++			space_lock_leave(space, enabled);
++			space_op_leave(space);
++			return error;
+ 		}
+ 	}
+ 
+@@ -2303,3 +2412,344 @@
+ 	acpi_discovery_finished = 1;
+ }
+ 
++/* Validates one user page without weakening the existing managed-RAM rule. */
++static int
++user_page_allowed(
++	hal_physaddr_t physical,
++	uint32_t attr)
++{
++	uint64_t entry;
++	int ram_present;
++
++	/* Uses the immutable RAM map to distinguish device storage on every operation. */
++	ram_present = amd64_ram_lookup(&ram_builder, physical, &entry);
++	if ((attr & HAL_SPACE_DEVICE) != 0) {
++		/* A device alias cannot execute or overlap the ordinary cached RAM map. */
++		if ((attr & HAL_SPACE_EXEC) != 0 || ram_present)
++			return HAL_ERR_INVALID;
++
++		/* Matches the cache bits used by the kernel's device view. */
++		if ((attr & HAL_SPACE_WRITETHRU) != 0)
++			return HAL_ERR_UNSUPPORTED;
++	} else if (!ram_present || (entry & AMD64_PTE_WRITE) == 0) {
++		/* Untagged mappings retain the original RAM-only contract. */
++		return HAL_ERR_INVALID;
++	}
++
++	/* Succeeded: the requested attributes preserve this page's storage type. */
++	return HAL_OK;
++}
++
++/* Resolves only extents fully contained by one permanent device window. */
++static int
++device_fixed_range(
++	hal_physaddr_t physical,
++	size_t size,
++	void **address)
++{
++	uint64_t limit;
++
++	/* Refuses empty extents before subtracting from a window boundary. */
++	if (size == 0)
++		return 0;
++
++	/* Selects one of the boot-established, permanently uncached windows. */
++	if (physical >= 0xa0000U && physical < 0x100000U) {
++		limit = 0x100000U;
++	} else if (physical >= 0xf0000000U && physical < 0xf1000000U) {
++		limit = 0xf1000000U;
++	} else if (physical >= 0xfee00000U && physical < 0xff000000U) {
++		limit = 0xff000000U;
++	} else if (physical >= 0xfec00000U && physical < 0xfee00000U) {
++		limit = 0xfee00000U;
++	} else {
++		/* An arbitrary BAR needs an owned page-granular mapping. */
++		return 0;
++	}
++
++	/* A supported starting byte does not authorize crossing its fixed window. */
++	if (size > limit - physical)
++		return 0;
++
++	/* Resolves the validated permanent translation. */
++	*address = amd64_device_vaddr(physical);
++
++	/* Succeeded: the entire extent has a permanent kernel mapping. */
++	return 1;
++}
++
++/* Reserves and populates an owned view in the shared device window. */
++static int
++device_window_map(
++	hal_physaddr_t physical,
++	size_t size,
++	uint32_t attr,
++	void **address)
++{
++	struct amd64_device_mapping *mapping;
++	struct amd64_device_mapping **link;
++	struct amd64_device_mapping *other;
++	hal_physaddr_t aligned;
++	size_t offset;
++	size_t span;
++	uint64_t ram_entry;
++	unsigned count;
++	unsigned first;
++	unsigned index;
++	uint32_t attributes;
++	bool enabled;
++	int ram_present;
++	int error;
++
++	/* Includes both partial boundary pages while preserving the returned offset. */
++	aligned = physical & ~(hal_physaddr_t)(PAGE_SIZE - 1U);
++	offset = (size_t)(physical - aligned);
++	if (size > SIZE_MAX - offset - (PAGE_SIZE - 1U))
++		return HAL_ERR_INVALID;
++
++	span = (size + offset + PAGE_SIZE - 1U) & ~(size_t)(PAGE_SIZE - 1U);
++	if (span > (size_t)AMD64_DEVICE_PAGE_COUNT * PAGE_SIZE)
++		return HAL_ERR_NOMEM;
++
++	count = (unsigned)(span / PAGE_SIZE);
++
++	/* Excludes all RAM, including bytes outside partial device boundary pages. */
++	for (index = 0; index < count; index++) {
++		ram_present = amd64_ram_lookup(&ram_builder,
++		    aligned + (hal_physaddr_t)index * PAGE_SIZE, &ram_entry);
++		if (ram_present)
++			return HAL_ERR_INVALID;
++	}
++
++	/* Normalizes cache policy to the permanent uncached device aliases. */
++	attributes = (attr & (HAL_SPACE_READ | HAL_SPACE_WRITE)) | HAL_SPACE_DEVICE;
++
++	/* Allocates ownership metadata before disabling interrupts for publication. */
++	mapping = kernel_alloc(sizeof(*mapping));
++	if (mapping == NULL)
++		return HAL_ERR_NOMEM;
++
++	hal_memset(mapping, 0, sizeof(*mapping));
++	mapping->physical = physical;
++	mapping->requested_size = size;
++	mapping->page_count = count;
++	mapping->references = 1U;
++	mapping->attributes = attributes;
++
++	/* Shares identical live views and excludes retiring ranges from reuse. */
++	enabled = registry_lock_enter();
++
++	for (other = device_mappings; other != NULL; other = other->next) {
++		if (other->physical == physical &&
++		    other->requested_size == size &&
++		    other->attributes == attributes &&
++		    other->references != 0) {
++			/* A live reference preserves every page in this identical view. */
++			if (other->references == (unsigned)-1) {
++				registry_lock_leave(enabled);
++				kernel_free(mapping);
++				return HAL_ERR_STATE;
++			}
++
++			other->references++;
++			*address = other->address;
++			registry_lock_leave(enabled);
++			kernel_free(mapping);
++			return HAL_OK;
++		}
++	}
++
++	/* Finds the first contiguous hole in the sorted list of retained views. */
++	first = 0;
++	link = &device_mappings;
++	while (*link != NULL) {
++		other = *link;
++		if (count <= other->first_page - first)
++			break;
++
++		first = other->first_page + other->page_count;
++		link = &other->next;
++	}
++
++	/* Refuses window exhaustion without disturbing any active device view. */
++	if (first > AMD64_DEVICE_PAGE_COUNT - count) {
++		registry_lock_leave(enabled);
++		kernel_free(mapping);
++		return HAL_ERR_NOMEM;
++	}
++
++	/* Publishes slot ownership before any page-table entry becomes visible. */
++	mapping->first_page = first;
++	mapping->address = (void *)(uintptr_t)(AMD64_DEVICE_WINDOW_BASE +
++	    (uint64_t)first * PAGE_SIZE + offset);
++	mapping->next = *link;
++	*link = mapping;
++
++	/* Populates only the requested device pages, never neighbouring RAM. */
++	error = device_window_populate(mapping);
++	if (error != HAL_OK) {
++		/* Retain the occupied slots until rollback translations are retired. */
++		mapping->references = 0;
++		device_window_clear(mapping);
++	}
++
++	registry_lock_leave(enabled);
++
++	/* Makes the shared kernel PTE change visible on every ready processor. */
++	shootdown(HAL_SPACE_SYS, NULL, 0);
++
++	/* Releases failed ownership only after every old translation is gone. */
++	if (error != HAL_OK) {
++		device_window_retire(mapping);
++		return error;
++	}
++
++	/* Publishes the requested byte address, retaining the enclosing whole pages. */
++	*address = mapping->address;
++
++	/* Succeeded: the driver owns one independently releasable device view. */
++	return HAL_OK;
++}
++
++/* Installs leaf PTEs while the registry lock retains every mapping slot. */
++static int
++device_window_populate(
++	struct amd64_device_mapping *mapping)
++{
++	uint64_t *table;
++	hal_physaddr_t physical;
++	hal_physaddr_t table_physical;
++	uint64_t flags;
++	unsigned index;
++	unsigned slot;
++	unsigned directory;
++	int error;
++
++	/* Device pages remain supervisor-only and non-global for full TLB retirement. */
++	flags = AMD64_PTE_PRESENT | AMD64_PTE_NOCACHE | AMD64_PTE_NX;
++	if ((mapping->attributes & HAL_SPACE_WRITE) != 0)
++		flags |= AMD64_PTE_WRITE;
++
++	physical = mapping->physical & ~(hal_physaddr_t)(PAGE_SIZE - 1U);
++
++	/* Creates persistent leaf tables only for the occupied directory slots. */
++	for (index = 0; index < mapping->page_count; index++) {
++		slot = mapping->first_page + index;
++		directory = slot / 512U;
++		table_physical = device_leaf_tables[directory];
++		if (table_physical == 0) {
++			/* Reserves ordinary RAM for one kernel leaf table. */
++			error = alloc_page(&table_physical);
++			if (error != HAL_OK)
++				return error;
++
++			table = (uint64_t *)hal_pmem_to_kernel(table_physical);
++			hal_memset(table, 0, PAGE_SIZE);
++			device_leaf_tables[directory] = table_physical;
++			(void)__atomic_fetch_add(&page_table_count, 1U, __ATOMIC_RELAXED);
++			system_mmio_pd[AMD64_DEVICE_PD_FIRST + directory] =
++			    table_physical | AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
++		} else {
++			/* Reuses the leaf table retained from earlier views in this slot. */
++			table = (uint64_t *)hal_pmem_to_kernel(table_physical);
++		}
++
++		/* Publishes exactly one owned physical page without enabling execution. */
++		table[slot % 512U] = (physical + (hal_physaddr_t)index * PAGE_SIZE) | flags;
++	}
++
++	/* Succeeded: every page of this view has a supervisor device PTE. */
++	return HAL_OK;
++}
++
++/* Clears a retiring view while its reserved slots still exclude other maps. */
++static void
++device_window_clear(
++	struct amd64_device_mapping *mapping)
++{
++	uint64_t *table;
++	hal_physaddr_t table_physical;
++	unsigned index;
++	unsigned slot;
++
++	/* Clears every installed leaf, including partially populated failure paths. */
++	for (index = 0; index < mapping->page_count; index++) {
++		slot = mapping->first_page + index;
++		table_physical = device_leaf_tables[slot / 512U];
++		if (table_physical != 0) {
++			/* Persistent empty tables keep directory publication stable on SMP. */
++			table = (uint64_t *)hal_pmem_to_kernel(table_physical);
++			table[slot % 512U] = 0;
++		}
++	}
++}
++
++/* Releases a view only after its PTEs have been invalidated on every CPU. */
++static void
++device_window_retire(
++	struct amd64_device_mapping *mapping)
++{
++	struct amd64_device_mapping **link;
++	bool enabled;
++
++	/* Removes only the exact retiring owner whose TLB acknowledgement completed. */
++	enabled = registry_lock_enter();
++
++	link = &device_mappings;
++	while (*link != NULL && *link != mapping)
++		link = &(*link)->next;
++
++	/* A published view cannot disappear before its final retire operation. */
++	if (*link != mapping || mapping->references != 0)
++		HAL_FATAL("amd64 device view retirement lost ownership");
++
++	*link = mapping->next;
++
++	registry_lock_leave(enabled);
++
++	/* Releases metadata after making the virtual slots available for reuse. */
++	kernel_free(mapping);
++}
++
++/* Drops one exact driver reference and drains the final view's translations. */
++static int
++device_window_unmap(
++	void *address,
++	size_t size)
++{
++	struct amd64_device_mapping *mapping;
++	bool enabled;
++
++	/* Resolves the exact retained view rather than accepting an interior pointer. */
++	enabled = registry_lock_enter();
++
++	for (mapping = device_mappings; mapping != NULL; mapping = mapping->next) {
++		if (mapping->address == address && mapping->requested_size == size)
++			break;
++	}
++
++	/* Stale, partial, or already retiring releases cannot consume ownership. */
++	if (mapping == NULL || mapping->references == 0) {
++		registry_lock_leave(enabled);
++		return HAL_ERR_INVALID;
++	}
++
++	/* Other driver references retain the complete shared view. */
++	mapping->references--;
++	if (mapping->references != 0) {
++		registry_lock_leave(enabled);
++		return HAL_OK;
++	}
++
++	/* Removes PTEs while zero references keep these slots in retirement. */
++	device_window_clear(mapping);
++
++	registry_lock_leave(enabled);
++
++	/* Prevents slot or device reuse before remote processors drop stale aliases. */
++	shootdown(HAL_SPACE_SYS, NULL, 0);
++	device_window_retire(mapping);
++
++	/* Succeeded: no CPU can access the device through this released view. */
++	return HAL_OK;
++}

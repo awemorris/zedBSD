@@ -36,6 +36,17 @@ SOURCE_DIRECTORIES = ['src/drivers/gpu', 'userland/gpu']
 SOURCE_FILES = ['Makefile', 'include/drivers/gpu.h', 'include/drivers/venus.h',
                 'include/uapi/gpu.h', 'src/kern/platform/pcat.c', 'src/hal/amd64/asm.c',
                 'platform/amd64/vmunix.mk', 'platform/amd64/zedbsd.cfg',
+                'include/hal/hal.h', 'src/hal/amd64/space.c',
+                'include/kern/vm-device.h', 'include/kern/vmspace.h',
+                'include/kern/cdev.h', 'include/kern/file.h',
+                'src/kern/vm-device.c', 'src/kern/vmspace.c', 'src/kern/uaccess.c',
+                'src/kern/syscall.c', 'src/kern/cdev.c',
+                'include/drivers/gpu-display.h', 'include/uapi/gpu-display.h',
+                'include/drivers/pci.h', 'src/drivers/pci/pci-pcat.c',
+                'include/kern/text-display.h', 'src/kern/text-display.c',
+                'src/drivers/platform/pcat/graphics/text.c',
+                'src/drivers/platform/pcat/graphics/text.h',
+                'src/drivers/platform/pcat/graphics/backend.c',
                 'config/drivers/pci.drivers', 'plan/ws014/tests/venus-qemu.py',
                 'plan/ws014/tests/run-venus-remote.py', 'plan/ws014/tests/venus_rfb.py']
 
@@ -48,8 +59,10 @@ PROFILES = {
                            'oracle': 'vkdemo_oracle.py'},
                'evidence': [name for name in EVIDENCE_FILES if name != 'frame.ppm'] +
                            [f'frame-{index}.ppm' for index in range(1, 7)] +
-                           [f'oracle-{index}.json' for index in range(1, 7)],
-               'source_directories': ['userland/base/vkdemo'],
+                           [f'oracle-{index}.json' for index in range(1, 7)] +
+                           ['console-return.ppm', 'console-write.ppm'],
+               'source_directories': ['userland/base/vkdemo', 'userland/base/libvulkan',
+                                      'libc/include/vulkan'],
                'source_files': ['userland/base/common/sha256.c', 'userland/base/common/sha256.h',
                                 'plan/ws014/tests/vkdemo-qemu.py',
                                 'plan/ws014/tests/vkdemo_oracle.py',
@@ -417,6 +430,21 @@ def verify_vkdemo_result(args, report, remote):
                 for a, b in zip(ordinary_samples, ordinary_samples[1:])) or
             len({sample['rgb_sha256'] for sample in ordinary_samples}) < 2):
         raise RuntimeError('ordinary vkdemo run did not prove progress and clean reopening/exit')
+    if getattr(args, 'lifecycle', False):
+        lifecycle = remote.get('lifecycle', {})
+        if any(lifecycle.get(key) is not True for key in ('abnormal_exit', 'reopened', 'console_restored')):
+            raise RuntimeError('requested abnormal-exit and console restoration acceptance is incomplete')
+        competition = remote.get('competition', {})
+        if (competition.get('owner') != args.token + '-owner' or
+                competition.get('contender') != args.token + '-contender' or
+                competition.get('rejected') is not True or
+                competition.get('owner_completed') is not True or
+                competition.get('owner_frames', 0) < 3 or
+                competition.get('error') != 'VK_ERROR_NATIVE_WINDOW_IN_USE_KHR'):
+            raise RuntimeError('requested independent process display ownership check is incomplete')
+        for stage, name in [('before', 'console-return.ppm'), ('after', 'console-write.ppm')]:
+            if report['fetched_evidence'].get(name) != lifecycle.get('console_' + stage + '_sha256'):
+                raise RuntimeError('returned console capture hash differs from the remote evidence')
     for role in ('transport_harness', 'oracle'):
         if remote.get(role + '_sha256') != report['artifacts'][role]['sha256']:
             raise RuntimeError(f'remote {role} differs from the uploaded version')
@@ -486,6 +514,8 @@ def run(args):
                    '--render-server', args.render_server]
         if args.profile == 'vkdemo':
             command += ['--token', args.token]
+            if args.lifecycle:
+                command.append('--lifecycle')
         else:
             command += ['--phase', args.phase, '--frame', str(args.frame)]
         if args.boot_only:
@@ -545,6 +575,7 @@ def main(profile='venus'):
     parser.add_argument('--image', type=Path, help='explicit base image; defaults to the selected build directory')
     parser.add_argument('--init', default='/bin/sh', help='init path written only into the disposable image')
     parser.add_argument('--skip-build', action='store_true', help='explicitly reuse and record existing artifacts')
+    parser.add_argument('--lifecycle', action='store_true', help='also verify SIGINT cleanup and visible console restoration')
     parser.add_argument('--phase', choices=['2d', 'venus'] if profile == 'venus' else ['vkdemo'],
                         default=profile)
     parser.add_argument('--frame', type=int, default=1 if profile == 'venus' else 0)
@@ -556,6 +587,8 @@ def main(profile='venus'):
     parser.add_argument('--transfer-timeout', type=int, default=600)
     args = parser.parse_args()
     args.profile = profile
+    if args.lifecycle and profile != 'vkdemo':
+        parser.error('lifecycle verification requires the standard vkdemo profile')
     args.token = 'r' + hashlib.sha256(args.attempt.encode()).hexdigest()[:24]
     if not re.fullmatch(r'[a-z0-9][a-z0-9_.-]{0,63}', args.attempt):
         parser.error('attempt must be one lowercase identifier, at most 64 characters')

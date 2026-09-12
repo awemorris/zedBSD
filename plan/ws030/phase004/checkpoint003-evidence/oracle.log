@@ -1,0 +1,18 @@
+test_camera_ray_and_uv_have_independent_known_values (__main__.OracleTests.test_camera_ray_and_uv_have_independent_known_values) ... ok
+test_clear_and_flat_faces_are_rejected (__main__.OracleTests.test_clear_and_flat_faces_are_rejected) ... ok
+test_fixed_times_match_with_small_bounded_exclusions (__main__.OracleTests.test_fixed_times_match_with_small_bounded_exclusions) ... ok
+test_geometry_payload_and_time_bounds (__main__.OracleTests.test_geometry_payload_and_time_bounds) ... ok
+test_live_rotation_may_have_one_visible_face (__main__.OracleTests.test_live_rotation_may_have_one_visible_face) ... ok
+test_marker_only_accepts_exact_identity_and_schedule (__main__.OracleTests.test_marker_only_accepts_exact_identity_and_schedule) ... ok
+test_one_interior_rgb_error_is_not_tolerated (__main__.OracleTests.test_one_interior_rgb_error_is_not_tolerated) ... ok
+test_same_process_finite_ack_session_and_done (__main__.OracleTests.test_same_process_finite_ack_session_and_done) ... ok
+test_sequence_rejects_missing_stale_reordered_or_stopped_frames (__main__.OracleTests.test_sequence_rejects_missing_stale_reordered_or_stopped_frames) ... ok
+test_wrong_uv_and_unrotated_old_frame_are_rejected (__main__.OracleTests.test_wrong_uv_and_unrotated_old_frame_are_rejected) ... ok
+test_invalid_cli_is_rejected_before_build_or_transfer (__main__.WrapperTests.test_invalid_cli_is_rejected_before_build_or_transfer) ... ok
+test_venus_cli_keeps_defaults_and_vkdemo_uses_isolated_profile (__main__.WrapperTests.test_venus_cli_keeps_defaults_and_vkdemo_uses_isolated_profile) ... ok
+test_venus_result_identity_and_evidence_gate_is_preserved (__main__.WrapperTests.test_venus_result_identity_and_evidence_gate_is_preserved) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 10.235s
+
+OK

@@ -44,7 +44,7 @@ def ppm(path, pixels):
 class OracleTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.images = {at: oracle.reference(at) for at in (0, 500, 1000, 2500)}
+        cls.images = {at: oracle.reference(at) for at in (0, 500, 1000, 1570, 2500)}
         cls.samples = [sample(i, cls.images[at], at)
                        for i, at in enumerate((0, 1000, 2500, 0, 500, 1000))]
 
@@ -56,6 +56,25 @@ class OracleTests(unittest.TestCase):
                 self.assertEqual(result['mismatch_pixels'], 0)
                 self.assertLess(result['excluded_boundary_pixels'], 1200)
                 self.assertGreater(result['checked_foreground_colors'], 3000)
+
+    def test_live_rotation_may_have_one_visible_face(self):
+        # At 1570 ms the analytic camera sees just the +X face of the cuboid.
+        result = oracle.verify_pixels(self.images[1570], 1570)
+        self.assertEqual(set(result['visible_faces']), {'(0, 1)'})
+        self.assertEqual(result['mismatch_pixels'], 0)
+        self.assertTrue(result['passed'])
+
+        # The correct silhouette alone must not admit a flat or stale texture.
+        flat = bytearray(self.images[1570])
+        for index in range(0, len(flat), 3):
+            if tuple(flat[index:index + 3]) != oracle.CLEAR:
+                flat[index:index + 3] = bytes((224, 56, 32))
+        rejected = oracle.verify_pixels(flat, 1570)
+        self.assertFalse(rejected['passed'])
+        self.assertGreater(rejected['mismatch_pixels'], 2500)
+        stale = oracle.verify_pixels(self.images[1000], 1570)
+        self.assertFalse(stale['passed'])
+        self.assertGreater(stale['mismatch_pixels'], 2500)
 
     def test_camera_ray_and_uv_have_independent_known_values(self):
         # The center ray hits the -Z face after undoing the two box rotations.

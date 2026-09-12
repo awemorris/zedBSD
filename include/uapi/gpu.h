@@ -24,6 +24,7 @@
 #define GPU_CAP_TRANSFER		8U
 #define GPU_CAP_COMMAND			16U
 #define GPU_CAP_PRESENT			32U
+#define GPU_CAP_MAPPING			64U
 #define GPU_BLOB_MAPPABLE		1U
 #define GPU_COPY_MAX			65536U
 #define GPU_COMMAND_MAX			65536U
@@ -31,7 +32,6 @@
 #define GPU_PIXEL_BGRA8888		1U
 #define GPU_PIXEL_RGBA8888		2U
 #define GPU_RESOURCE_USAGE_STORAGE	1U
-#define GPU_SESSION_RESOURCE_MAX	32U
 
 #define GPU_GET_INFO			_IOWR('G', 0, struct gpu_info)
 #define GPU_RESOURCE_CREATE		_IOWR('G', 1, struct gpu_resource_create)
@@ -42,6 +42,7 @@
 #define GPU_RESOURCE_WRITE		_IOW('G', 6, struct gpu_transfer)
 #define GPU_COMMAND			_IOW('G', 7, struct gpu_command)
 #define GPU_PRESENT			_IOW('G', 8, struct gpu_present)
+#define GPU_RESOURCE_MAP		_IOWR('G', 9, struct gpu_resource_map)
 
 /*
  * One capability snapshot describing supported operations and allocation limits.
@@ -129,6 +130,18 @@ struct gpu_present {
 	uint32_t stride;
 	uint32_t format;
 	uint64_t frame;
+};
+
+/*
+ * A session-local mmap offset, never a physical address. The caller supplies
+ * a live resource handle and zero output fields; mmap uses the returned offset.
+ */
+struct gpu_resource_map {
+	uint32_t version;
+	uint32_t size;
+	uint64_t handle;
+	uint64_t offset;
+	uint64_t bytes;
 };
 
 #endif

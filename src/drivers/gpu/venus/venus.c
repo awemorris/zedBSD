@@ -21,59 +21,7 @@
 #include <limits.h>
 #include <string.h>
 
-#define VENUS_CAPABILITIES 63U
-#define VENUS_PAGE_BYTES 4096U
-#define VENUS_RESOURCE_STORAGE 1U
-#define VENUS_RESOURCE_BLOB 2U
-
-struct venus_controller;
-
-/* One context owned by a GPU open until its close callback completes. */
-struct venus_session {
-	uint32_t context;
-};
-
-/*
- * One session resource, retained on the controller list through uncertain DMA.
- *
- * Numeric context identity remains valid after its session wrapper retires.
- * Only acknowledged cleanup or controller reset permits local memory release.
- */
-struct venus_resource {
-	struct venus_resource *next;
-	struct venus_controller *controller;
-	struct drv_dma_buffer backing;
-	struct drv_pci_mapping mapping;
-	uint64_t bytes;
-	uint64_t aperture_offset;
-	uint64_t aperture_bytes;
-	uint32_t context;
-	uint32_t identifier;
-	uint32_t kind;
-	uint32_t width;
-	uint32_t height;
-	uint32_t format;
-	unsigned created;
-	unsigned attached;
-	unsigned mapped;
-};
-
-/*
- * One PCI-owned backend, with GPU callbacks serialized by its mutex.
- *
- * GPU publication borrows this object. Resources include quarantined failures;
- * detach may free them only after GPU withdrawal and checked transport reset.
- */
-struct venus_controller {
-	struct venus_transport transport;
-	struct mutex mutex;
-	struct drv_gpu_device *gpu;
-	struct venus_resource *resources;
-	struct venus_resource *scanout;
-	struct venus_session *display_owner;
-	uint32_t next_context;
-	uint32_t next_resource;
-};
+#define VENUS_CAPABILITIES	(63U | GPU_CAP_DISPLAY | GPU_CAP_MAPPING)
 
 static int venus_attach(struct drv_pci_device *device, const struct drv_pci_id *id);
 static int venus_start(struct venus_controller *controller, struct drv_pci_device *device);
@@ -91,6 +39,7 @@ static int venus_resource_read(void *device, void *private_session, void *object
 static int venus_resource_write(void *device, void *private_session, void *object, uint64_t offset, const void *buffer, uint32_t bytes);
 static int venus_command(void *device, void *private_session, const void *buffer, uint32_t bytes);
 static int venus_present(void *device, void *private_session, void *object, const struct gpu_present *request);
+static int venus_resource_map(void *device, void *private_session, void *object, struct drv_gpu_mapping *mapping);
 static int venus_control(struct venus_controller *controller, const void *command, uint32_t bytes);
 static int venus_resource_request(struct venus_controller *controller, uint32_t command, uint32_t context, uint32_t identifier);
 static int venus_resource_allocate(struct venus_controller *controller, struct venus_session *session, uint64_t bytes, uint32_t kind, struct venus_resource **result);
@@ -124,6 +73,79 @@ drv_venus_pci_driver_register(void)
 		return error;
 
 	/* Succeeded: later PCI probing can publish initialized Venus devices. */
+	return 0;
+}
+
+/*
+ * Allocates coherent storage while the caller holds the controller mutex.
+ * The resource list retains every uncertain hardware or allocation lifetime.
+ */
+int
+drv_venus_storage_create_locked(
+	struct venus_controller *controller,
+	struct venus_session *session,
+	uint64_t bytes,
+	struct venus_resource **result)
+{
+	struct venus_resource *resource;
+	int error;
+	int cleanup;
+
+	/* No failure may transfer a partial resource to its caller. */
+	*result = NULL;
+	error = venus_resource_allocate(controller, session, bytes, VENUS_RESOURCE_STORAGE, &resource);
+	if (error != 0)
+		return error;
+
+	/* Creates one bounded coherent backing extent for the host image. */
+	error = drv_dma_alloc_coherent(controller->transport.dma, (size_t)bytes, VENUS_PAGE_BYTES, &resource->backing);
+	if (error != 0) {
+		cleanup = venus_resource_retire(controller, resource);
+		if (cleanup != 0)
+			controller->transport.failed = 1U;
+		return error;
+	}
+
+	/* Neither userspace nor the display may observe uninitialized pixels. */
+	memset(resource->backing.address, 0, (size_t)bytes);
+	*result = resource;
+
+	/* Succeeded: the caller owns a fully initialized resource. */
+	return 0;
+}
+
+/* Prepares private display storage without recursively acquiring its mutex. */
+int
+drv_venus_storage_prepare_locked(
+	struct venus_controller *controller,
+	struct venus_resource *resource,
+	const struct gpu_present *request)
+{
+	int error;
+
+	/* Ordinary and direct display paths share the same host image geometry. */
+	error = venus_storage_initialize(controller, resource, request);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: coherent backing is attached to a compatible host image. */
+	return 0;
+}
+
+/* Retires a private resource only after its caller has ended scanout ownership. */
+int
+drv_venus_resource_release_locked(
+	struct venus_controller *controller,
+	struct venus_resource *resource)
+{
+	int error;
+
+	/* A failed cleanup remains linked until an acknowledged controller reset. */
+	error = venus_resource_release(controller, resource);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: no hardware reference retains the private resource. */
 	return 0;
 }
 
@@ -238,6 +260,11 @@ venus_detach(
 	if (controller->gpu != NULL)
 		return EBUSY;
 
+	/* No console worker may submit another command while controller reset retires DMA. */
+	error = drv_venus_display_stop(controller);
+	if (error != 0)
+		return error;
+
 	/* Reset completion ends all queue, guest-backing and host-blob accesses. */
 	error = drv_venus_transport_stop(&controller->transport);
 	if (error != 0)
@@ -250,6 +277,9 @@ venus_detach(
 		if (error != 0)
 			return error;
 	}
+
+	/* Display metadata contains no remaining hardware references after reset. */
+	drv_venus_display_finish(controller);
 
 	/* Removes PCI's final reference before releasing the backend wrapper. */
 	error = drv_pci_device_set_driver_data(device, NULL);
@@ -274,7 +304,8 @@ venus_publish(
 		VENUS_CAPABILITIES, 0U, venus_open, venus_close, venus_get_info,
 		venus_resource_create, venus_resource_destroy, venus_get_capset,
 		venus_blob_create, venus_resource_read, venus_resource_write,
-		venus_command, venus_present
+		venus_command, venus_present, &drv_venus_display_operations,
+		venus_resource_map
 	};
 	struct venus_controller *controller;
 	int error;
@@ -398,6 +429,9 @@ venus_close(
 	/* Serializes display withdrawal and context teardown with other sessions. */
 	mutex_lock(&controller->mutex);
 
+	/* Retires direct-display leases before their owning context disappears. */
+	drv_venus_display_close_locked(controller, session);
+
 	/* Only the presenting session may release its display reservation. */
 	if (controller->display_owner == session) {
 		error = venus_scanout_disable(controller);
@@ -436,7 +470,7 @@ venus_get_info(
 	(void)device;
 	(void)private_session;
 	info->capabilities = VENUS_CAPABILITIES;
-	info->max_resources = GPU_SESSION_RESOURCE_MAX;
+	info->max_resources = UINT32_MAX;
 	info->max_resource_bytes = VENUS_MAX_RESOURCE_BYTES;
 	memcpy(info->driver_name, "venus", sizeof("venus"));
 
@@ -456,7 +490,6 @@ venus_resource_create(
 	struct venus_session *session;
 	struct venus_resource *resource;
 	int error;
-	int cleanup;
 
 	/* Keeps a failed creation invisible to the core's resource table. */
 	controller = device;
@@ -466,34 +499,14 @@ venus_resource_create(
 	/* Serializes allocation ownership with detach and the control queue. */
 	mutex_lock(&controller->mutex);
 
-	/* Records the resource before a later failure can need quarantine. */
-	error = venus_resource_allocate(
-		controller,
-		session,
-		request->bytes,
-		VENUS_RESOURCE_STORAGE,
-		&resource);
+	/* Uses the same durable allocation owner as private display buffers. */
+	error = drv_venus_storage_create_locked(controller, session, request->bytes, &resource);
 	if (error != 0) {
 		mutex_unlock(&controller->mutex);
 		return error;
 	}
 
-	/* The eventual scanout uses one bounded coherent backing entry. */
-	error = drv_dma_alloc_coherent(
-		controller->transport.dma,
-		(size_t)request->bytes,
-		VENUS_PAGE_BYTES,
-		&resource->backing);
-	if (error != 0) {
-		cleanup = venus_resource_retire(controller, resource);
-		if (cleanup != 0)
-			controller->transport.failed = 1U;
-		mutex_unlock(&controller->mutex);
-		return error;
-	}
-
-	/* Clears the complete allocation before userspace can read it. */
-	memset(resource->backing.address, 0, (size_t)resource->bytes);
+	/* Transfers this zeroed allocation only after complete acquisition. */
 	*result = resource;
 
 	mutex_unlock(&controller->mutex);
@@ -846,6 +859,64 @@ venus_present(
 	mutex_unlock(&controller->mutex);
 
 	/* Succeeded: the virtual display has accepted the copied image update. */
+	return 0;
+}
+
+/* Describes one retained host-visible blob for a real shared user mapping. */
+static int
+venus_resource_map(
+	void *device,
+	void *private_session,
+	void *object,
+	struct drv_gpu_mapping *mapping)
+{
+	struct venus_controller *controller;
+	struct venus_session *session;
+	struct venus_resource *resource;
+	uint64_t physical;
+	int error;
+
+	/* GPU core pins this session and resource until every user mapping retires. */
+	controller = device;
+	session = private_session;
+	resource = object;
+	mutex_lock(&controller->mutex);
+
+	/* Mapping cannot bypass the same ownership checks as copied resource I/O. */
+	error = venus_resource_validate(controller, session, resource, 0U, 0U);
+	if (error != 0) {
+		mutex_unlock(&controller->mutex);
+		return error;
+	}
+
+	/* Ordinary guest storage has no exported host-visible device mapping. */
+	if (resource->kind != VENUS_RESOURCE_BLOB || resource->mapped == 0U) {
+		mutex_unlock(&controller->mutex);
+		return ENOTSUP;
+	}
+
+	/* PCI supplies the actual CPU physical mapping after any BAR relocation. */
+	physical = controller->transport.host_mapping.physical_address;
+	if (controller->transport.host_visible.offset > UINT64_MAX - physical) {
+		mutex_unlock(&controller->mutex);
+		return EOVERFLOW;
+	}
+	physical += controller->transport.host_visible.offset;
+	if (resource->aperture_offset > UINT64_MAX - physical) {
+		mutex_unlock(&controller->mutex);
+		return EOVERFLOW;
+	}
+	physical += resource->aperture_offset;
+
+	/* The retained page-rounded extent preserves the kernel alias cache policy. */
+	memset(mapping, 0, sizeof(*mapping));
+	mapping->physical = physical;
+	mapping->address = resource->mapping.address;
+	mapping->bytes = resource->aperture_bytes;
+	mapping->attributes = DRV_GPU_MAPPING_DEVICE;
+	mutex_unlock(&controller->mutex);
+
+	/* Succeeded: the core can map and pin this exact device extent. */
 	return 0;
 }
 
@@ -1236,6 +1307,9 @@ venus_scanout_disable(
 
 	/* The display no longer references the previously scanned resource. */
 	controller->scanout = NULL;
+	controller->primary_scanout = NULL;
+	controller->primary_width = 0U;
+	controller->primary_height = 0U;
 
 	/* Succeeded: the former scanout backing may be replaced or retired. */
 	return 0;
@@ -1363,6 +1437,11 @@ venus_present_image(
 	if (bytes > resource->bytes - request->offset)
 		return EINVAL;
 
+	/* Direct-display ownership excludes every legacy presentation path. */
+	error = drv_venus_display_legacy_available_locked(controller);
+	if (error != 0)
+		return error;
+
 	/* A second open cannot replace a display reserved by an active presenter. */
 	if (controller->display_owner != NULL && controller->display_owner != session)
 		return EBUSY;
@@ -1401,6 +1480,9 @@ venus_present_image(
 
 	/* Accepted scanout retains this resource and reserves the display session. */
 	controller->scanout = resource;
+	controller->primary_scanout = resource;
+	controller->primary_width = request->width;
+	controller->primary_height = request->height;
 	controller->display_owner = session;
 
 	/* Requests a display update of the newly selected complete rectangle. */

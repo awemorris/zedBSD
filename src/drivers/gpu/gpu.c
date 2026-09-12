@@ -17,6 +17,9 @@
 #include <kern/lock.h>
 #include <kern/poll.h>
 #include <kern/uaccess.h>
+#include <kern/page.h>
+#include <kern/pmem.h>
+#include <kern/vm-device.h>
 
 #include <errno.h>
 #include <limits.h>
@@ -24,7 +27,6 @@
 #include <string.h>
 
 #define GPU_DEVICE_BASE		0x00090000U
-#define GPU_HANDLE_SLOT_BITS	8U
 #define GPU_RESOURCE_STORAGE	1U
 #define GPU_RESOURCE_BLOB	2U
 
@@ -48,13 +50,33 @@ struct drv_gpu_device {
 };
 
 /*
- * One resource owned by a session, a zero handle denotes an unused slot.
+ * One kernel snapshot of a selected display request; it retains no user pointers.
+ */
+union gpu_display_request {
+	struct {
+		uint32_t version;
+		uint32_t size;
+	} header;
+	struct gpu_display_info query;
+	struct gpu_display_mode mode;
+	struct gpu_display_claim claim;
+	struct gpu_display_release release;
+	struct gpu_display_present present;
+	struct gpu_display_wait wait;
+};
+
+/*
+ * One dynamically allocated resource owned by its session until explicit release.
  */
 struct gpu_resource {
+	struct gpu_resource *next;
 	uint64_t handle;
 	uint64_t bytes;
 	void *object;
 	unsigned kind;
+	volatile unsigned mapping_count;
+	uint64_t mapping_offset;
+	struct drv_gpu_mapping mapping;
 };
 
 /*
@@ -67,7 +89,9 @@ struct gpu_resource {
 struct gpu_session {
 	struct drv_gpu_device *device;
 	void *backend;
-	struct gpu_resource resources[GPU_SESSION_RESOURCE_MAX];
+	struct gpu_resource *resources;
+	uint32_t resource_count;
+	uint64_t next_mapping_offset;
 	unsigned writable;
 	unsigned readable;
 	unsigned busy;
@@ -106,7 +130,6 @@ static struct spinlock gpu_registry_lock = {
 	{ 0 }, LOCK_RANK_DEVICE, "GPU registry", 0, 0
 };
 
-
 /*
  * Forward declaration.
  */
@@ -123,15 +146,19 @@ static void gpu_session_leave(struct gpu_session *session);
 static int gpu_info_ioctl(struct gpu_session *session, uintptr_t argument);
 static int gpu_create_ioctl(struct gpu_session *session, uintptr_t argument);
 static int gpu_destroy_ioctl(struct gpu_session *session, uintptr_t argument);
-static int gpu_handle_allocate(unsigned slot, uint64_t *handle);
+static int gpu_handle_allocate(uint64_t *handle);
 static int gpu_resource_lookup(struct gpu_session *session, uint64_t handle, struct gpu_resource **result);
-static int gpu_resource_reserve(struct gpu_session *session, uint64_t bytes, unsigned *slot_out, uint64_t *handle);
+static int gpu_resource_reserve(struct gpu_session *session, uint64_t bytes, struct gpu_resource **result);
 static int gpu_user_range(uint64_t address, uint32_t bytes, uintptr_t *pointer);
 static int gpu_capset_ioctl(struct gpu_session *session, uintptr_t argument);
 static int gpu_blob_ioctl(struct gpu_session *session, uintptr_t argument);
 static int gpu_transfer_ioctl(struct gpu_session *session, uintptr_t argument, unsigned writing);
 static int gpu_command_ioctl(struct gpu_session *session, uintptr_t argument);
 static int gpu_present_ioctl(struct gpu_session *session, uintptr_t argument);
+static int gpu_map_ioctl(struct gpu_session *session, uintptr_t argument);
+static int gpu_mmap(struct file *file, off_t offset, size_t bytes, uint32_t prot, struct vm_device_mapping **result);
+static void gpu_mapping_release(void *owner);
+static int gpu_display_ioctl(struct gpu_session *session, unsigned long command, uintptr_t argument);
 
 /*
  * Registers one initialized backend and publishes its character device.
@@ -326,7 +353,7 @@ gpu_ops_validate(
 	/* Rejects bits that have no defined framework operation. */
 	if ((ops->capabilities & ~(GPU_CAP_RESOURCE | GPU_CAP_CAPSET |
 	    GPU_CAP_BLOB | GPU_CAP_TRANSFER | GPU_CAP_COMMAND |
-	    GPU_CAP_PRESENT)) != 0)
+	    GPU_CAP_PRESENT | GPU_CAP_MAPPING | GPU_CAP_DISPLAY)) != 0)
 		return EOPNOTSUPP;
 
 	/* Storage allocation must agree with its advertised capability. */
@@ -406,6 +433,38 @@ gpu_ops_validate(
 			return EINVAL;
 	}
 
+	/* CPU mappings require a resource allocator and a complete stable view. */
+	if ((ops->capabilities & GPU_CAP_MAPPING) != 0) {
+		/* A CPU view requires owned resource storage for its entire lifetime. */
+		if (ops->resource_map == NULL ||
+		    (ops->capabilities & (GPU_CAP_RESOURCE | GPU_CAP_BLOB)) == 0)
+			return EINVAL;
+	} else if (ops->resource_map != NULL) {
+		return EINVAL;
+	}
+
+	/* Display discovery, ownership and presentation form one complete contract. */
+	if ((ops->capabilities & GPU_CAP_DISPLAY) != 0) {
+		/* Advertising display support requires the complete optional operation table. */
+		if (ops->display == NULL)
+			return EINVAL;
+
+		/* Discovery, lease ownership and completion must all remain available together. */
+		if (ops->display->query == NULL ||
+		    ops->display->mode == NULL ||
+		    ops->display->claim == NULL ||
+		    ops->display->release == NULL ||
+		    ops->display->present == NULL ||
+		    ops->display->wait == NULL)
+			return EINVAL;
+
+		/* Whole-frame presentation consumes storage allocated by this same backend. */
+		if ((ops->capabilities & GPU_CAP_RESOURCE) == 0)
+			return EINVAL;
+	} else if (ops->display != NULL) {
+		return EINVAL;
+	}
+
 	/* Succeeded: every advertised operation has its required lifecycle. */
 	return 0;
 }
@@ -422,7 +481,8 @@ gpu_publish_node(
 		NULL,
 		NULL,
 		gpu_ioctl,
-		gpu_poll
+		gpu_poll,
+		gpu_mmap
 	};
 	struct cdev *node;
 	char name[32];
@@ -568,7 +628,7 @@ gpu_close(
 {
 	struct gpu_session *session;
 	struct drv_gpu_device *device;
-	unsigned index;
+	struct gpu_resource *resource;
 
 	/* An unsuccessful open leaves no session for final-close cleanup. */
 	session = file->f_data;
@@ -579,14 +639,18 @@ gpu_close(
 	file->f_data = NULL;
 	device = session->device;
 
-	/* Destroys all remaining objects while their backend session is valid. */
-	for (index = 0; index < GPU_SESSION_RESOURCE_MAX; index++) {
-		/* Only occupied slots own objects requiring backend cleanup. */
-		if (session->resources[index].handle != 0) {
-			device->ops->resource_destroy(device->private_data,
-			    session->backend,
-			    session->resources[index].object);
-		}
+	/* Destroys all owned objects while their backend session remains valid. */
+	while (session->resources != NULL) {
+		resource = session->resources;
+		session->resources = resource->next;
+		device->ops->resource_destroy(
+			device->private_data,
+			session->backend,
+			resource->object);
+		kern_free(resource);
+
+		/* Final close consumes the session count after each retained object retires. */
+		session->resource_count--;
 	}
 
 	/* Finishes backend cleanup before releasing the device removal barrier. */
@@ -723,6 +787,19 @@ gpu_ioctl(
 		/* Submits an independent kernel copy of the backend command stream. */
 		error = gpu_command_ioctl(session, argument);
 		break;
+	case GPU_RESOURCE_MAP:
+		/* Returns a session-private mmap token without exposing physical addresses. */
+		error = gpu_map_ioctl(session, argument);
+		break;
+	case GPU_DISPLAY_QUERY:
+	case GPU_DISPLAY_MODE:
+	case GPU_DISPLAY_CLAIM:
+	case GPU_DISPLAY_RELEASE:
+	case GPU_DISPLAY_PRESENT:
+	case GPU_DISPLAY_WAIT:
+		/* Native display requests share validation and access admission. */
+		error = gpu_display_ioctl(session, command, argument);
+		break;
 	case GPU_PRESENT:
 		/* Presents only a complete bounded image in ordinary owned storage. */
 		error = gpu_present_ioctl(session, argument);
@@ -814,7 +891,6 @@ gpu_info_ioctl(
 	information.version = GPU_ABI_VERSION;
 	information.size = sizeof(information);
 	information.capabilities = device->ops->capabilities;
-	information.max_resources = GPU_SESSION_RESOURCE_MAX;
 	information.driver_name[sizeof(information.driver_name) - 1U] = '\0';
 
 	/* Returns the initialized snapshot to the requesting process. */
@@ -835,7 +911,7 @@ gpu_create_ioctl(
 	struct gpu_resource_create request;
 	struct drv_gpu_device *device;
 	void *object;
-	unsigned slot;
+	struct gpu_resource *resource;
 	int error;
 
 	/* The original open mode, not later credential changes, grants mutation. */
@@ -865,37 +941,50 @@ gpu_create_ioctl(
 		return EINVAL;
 
 	/* Reserves bounded session ownership before any backend allocation. */
-	error = gpu_resource_reserve(session, request.bytes, &slot, &request.handle);
+	error = gpu_resource_reserve(session, request.bytes, &resource);
 	if (error != 0)
 		return error;
+
+	/* Carries the reserved public identity through the backend allocation transaction. */
+	request.handle = resource->handle;
 
 	/* Backend allocation receives a kernel copy of the validated request. */
 	object = NULL;
-	error = device->ops->resource_create(device->private_data,
-					     session->backend,
-					     &request,
-					     &object);
-	if (error != 0)
+	error = device->ops->resource_create(
+		device->private_data,
+		session->backend,
+		&request,
+		&object);
+	if (error != 0) {
+		kern_free(resource);
 		return error;
+	}
 
 	/* A successful callback must supply an object that can be destroyed. */
-	if (object == NULL)
+	if (object == NULL) {
+		kern_free(resource);
 		return EIO;
+	}
 
 	/* Publishes the handle to the caller before committing the table entry. */
 	error = copyout(&request, argument, sizeof(request));
 	if (error != 0) {
-		device->ops->resource_destroy(device->private_data,
-		    session->backend,
-		    object);
+		device->ops->resource_destroy(
+			device->private_data,
+			session->backend,
+			object);
+		kern_free(resource);
 		return error;
 	}
 
-	/* The busy reservation excludes all other accesses until commit ends. */
-	session->resources[slot].object = object;
-	session->resources[slot].handle = request.handle;
-	session->resources[slot].bytes = request.bytes;
-	session->resources[slot].kind = GPU_RESOURCE_STORAGE;
+	/* Session admission excludes other lookups while ownership is published. */
+	resource->object = object;
+	resource->kind = GPU_RESOURCE_STORAGE;
+	resource->next = session->resources;
+	session->resources = resource;
+
+	/* Published ownership now counts against the backend's per-session capacity. */
+	session->resource_count++;
 
 	/* Succeeded: the caller owns one typed resource handle in this session. */
 	return 0;
@@ -910,7 +999,9 @@ gpu_destroy_ioctl(
 	struct gpu_resource_destroy request;
 	struct drv_gpu_device *device;
 	struct gpu_resource *resource;
+	struct gpu_resource **link;
 	int error;
+	unsigned mapping_count;
 
 	/* A read-only description cannot mutate resources through ioctl. */
 	if (session->writable == 0)
@@ -935,23 +1026,34 @@ gpu_destroy_ioctl(
 	if (error != 0)
 		return error;
 
-	/* Completes backend cleanup before making the slot reusable. */
-	device->ops->resource_destroy(device->private_data,
-				      session->backend,
-				      resource->object);
-	resource->object = NULL;
-	resource->handle = 0;
-	resource->bytes = 0;
-	resource->kind = 0;
+	/* Regions and transient pins retain storage independently of this ioctl. */
+	mapping_count = atomic_raw_load_acquire(&resource->mapping_count);
+	if (mapping_count != 0)
+		return EBUSY;
+
+	/* Session admission preserves the resolved resource and its list link. */
+	link = &session->resources;
+	while (*link != resource)
+		link = &(*link)->next;
+
+	/* Completes backend cleanup before relinquishing session ownership. */
+	device->ops->resource_destroy(
+		device->private_data,
+		session->backend,
+		resource->object);
+	*link = resource->next;
+
+	/* The destroyed object no longer consumes the backend's per-session capacity. */
+	session->resource_count--;
+	kern_free(resource);
 
 	/* Succeeded: the released handle can never identify a future object. */
 	return 0;
 }
 
-/* Stamps a resource slot with a generation that cannot wrap or alias. */
+/* Assigns an opaque resource identity that cannot wrap or alias. */
 static int
 gpu_handle_allocate(
-	unsigned slot,
 	uint64_t *handle)
 {
 	unsigned long irq;
@@ -961,12 +1063,12 @@ gpu_handle_allocate(
 	error = 0;
 	irq = spin_lock_irqsave(&gpu_registry_lock);
 
-	if (gpu_handle_generation == (UINT64_MAX >> GPU_HANDLE_SLOT_BITS)) {
+	if (gpu_handle_generation == UINT64_MAX) {
 		error = EOVERFLOW;
 	} else {
 		/* Zero remains invalid; every attempted allocation consumes a stamp. */
 		gpu_handle_generation++;
-		*handle = (gpu_handle_generation << GPU_HANDLE_SLOT_BITS) | (slot + 1U);
+		*handle = gpu_handle_generation;
 	}
 
 	spin_unlock_irqrestore(&gpu_registry_lock, irq);
@@ -979,7 +1081,7 @@ gpu_handle_allocate(
 	return 0;
 }
 
-/* Resolves one occupied slot with the exact session-owned generation. */
+/* Resolves an exact identity only within its owning open session. */
 static int
 gpu_resource_lookup(
 	struct gpu_session *session,
@@ -987,39 +1089,45 @@ gpu_resource_lookup(
 	struct gpu_resource **result)
 {
 	struct gpu_resource *resource;
-	unsigned slot;
 
-	/* Zero and out-of-range low bytes cannot name a session resource. */
-	slot = (unsigned)(handle & 0xffU);
-	if (slot == 0 || slot > GPU_SESSION_RESOURCE_MAX)
+	/* Zero never identifies a successfully allocated resource. */
+	if (handle == 0)
 		return EINVAL;
 
-	/* The full generation excludes stale handles and other sessions. */
-	resource = &session->resources[slot - 1U];
-	if (resource->handle != handle)
+	/* Searches only this open's ownership list for the globally unique handle. */
+	resource = session->resources;
+	for (;
+	     resource != NULL;
+	     resource = resource->next) {
+		/* A matching identity belongs to this admitted session until the ioctl finishes. */
+		if (resource->handle == handle)
+			break;
+	}
+
+	/* A stale or foreign identity cannot reach any backend callback. */
+	if (resource == NULL)
 		return EINVAL;
 
-	/* Transfers a borrowed slot while this ioctl holds session admission. */
+	/* Transfers a borrowed object whose ownership is protected by session admission. */
 	*result = resource;
 
-	/* Succeeded: only this session can use the resolved backend object. */
+	/* Succeeded: only this open can use the resolved backend resource. */
 	return 0;
 }
 
-/* Reserves a resource slot and stamp after checking the backend byte limit. */
+/* Reserves dynamic ownership after checking this backend's reported limits. */
 static int
 gpu_resource_reserve(
 	struct gpu_session *session,
 	uint64_t bytes,
-	unsigned *slot_out,
-	uint64_t *handle)
+	struct gpu_resource **result)
 {
 	struct drv_gpu_device *device;
 	struct gpu_info information;
-	unsigned slot;
+	struct gpu_resource *resource;
 	int error;
 
-	/* Queries the instance's allocation limit without retaining backend pointers. */
+	/* Queries the instance's capacity without holding a framework spinlock. */
 	device = session->device;
 	memset(&information, 0, sizeof(information));
 	error = device->ops->get_info(
@@ -1029,30 +1137,31 @@ gpu_resource_reserve(
 	if (error != 0)
 		return error;
 
-	/* Empty resources and sizes above the advertised limit cannot be allocated. */
+	/* Empty resources and sizes above the reported byte limit are invalid. */
 	if (bytes == 0 || bytes > information.max_resource_bytes)
 		return EINVAL;
 
-	/* Finds an unowned slot before invoking any fallible backend allocator. */
-	for (slot = 0; slot < GPU_SESSION_RESOURCE_MAX; slot++) {
-		/* A zero handle keeps this slot available to the current session ioctl. */
-		if (session->resources[slot].handle == 0)
-			break;
-	}
-
-	/* Resource accounting remains bounded independently of device count. */
-	if (slot == GPU_SESSION_RESOURCE_MAX)
+	/* Backend capacity is independent of the number of registered GPU devices. */
+	if (session->resource_count >= information.max_resources)
 		return ENOSPC;
 
-	/* Failed later allocation or copyout still consumes this unique stamp. */
-	error = gpu_handle_allocate(slot, handle);
-	if (error != 0)
+	/* Reserves metadata before acquiring a backend object that needs cleanup. */
+	resource = kern_calloc(1U, sizeof(*resource));
+	if (resource == NULL)
+		return ENOMEM;
+
+	/* Even a later failure consumes this non-reusable handle identity. */
+	error = gpu_handle_allocate(&resource->handle);
+	if (error != 0) {
+		kern_free(resource);
 		return error;
+	}
 
-	/* Gives the caller the slot that remains excluded by session admission. */
-	*slot_out = slot;
+	/* The caller publishes ownership only after backend and copyout succeed. */
+	resource->bytes = bytes;
+	*result = resource;
 
-	/* Succeeded: the caller may allocate and then publish one owned object. */
+	/* Succeeded: failure paths now own one metadata record to release. */
 	return 0;
 }
 
@@ -1162,7 +1271,7 @@ gpu_blob_ioctl(
 	struct gpu_blob_create request;
 	void *object;
 	uint32_t resource_id;
-	unsigned slot;
+	struct gpu_resource *resource;
 	int error;
 
 	/* Creation obeys authority captured when this description was opened. */
@@ -1192,9 +1301,12 @@ gpu_blob_ioctl(
 		return EINVAL;
 
 	/* Reserves bounded ownership before asking the driver to create a blob. */
-	error = gpu_resource_reserve(session, request.bytes, &slot, &request.handle);
+	error = gpu_resource_reserve(session, request.bytes, &resource);
 	if (error != 0)
 		return error;
+
+	/* Carries the reserved public identity through the backend allocation transaction. */
+	request.handle = resource->handle;
 
 	/* Receives only backend-owned identity, never a kernel or userspace pointer. */
 	object = NULL;
@@ -1205,16 +1317,21 @@ gpu_blob_ioctl(
 		&request,
 		&object,
 		&resource_id);
-	if (error != 0)
+	if (error != 0) {
+		kern_free(resource);
 		return error;
+	}
 
 	/* A successful allocation must return an object that can be released. */
-	if (object == NULL)
+	if (object == NULL) {
+		kern_free(resource);
 		return EIO;
+	}
 
 	/* A missing protocol identity cannot produce a usable userspace blob. */
 	if (resource_id == 0) {
 		device->ops->resource_destroy(device->private_data, session->backend, object);
+		kern_free(resource);
 		return EIO;
 	}
 
@@ -1223,14 +1340,18 @@ gpu_blob_ioctl(
 	error = copyout(&request, argument, sizeof(request));
 	if (error != 0) {
 		device->ops->resource_destroy(device->private_data, session->backend, object);
+		kern_free(resource);
 		return error;
 	}
 
-	/* Publishes the exact type and allocation extent under session admission. */
-	session->resources[slot].object = object;
-	session->resources[slot].handle = request.handle;
-	session->resources[slot].bytes = request.bytes;
-	session->resources[slot].kind = GPU_RESOURCE_BLOB;
+	/* Publishes the type and extent while session admission excludes lookups. */
+	resource->object = object;
+	resource->kind = GPU_RESOURCE_BLOB;
+	resource->next = session->resources;
+	session->resources = resource;
+
+	/* Published ownership now counts against the backend's per-session capacity. */
+	session->resource_count++;
 
 	/* Succeeded: this description owns the blob and its protocol resource identity. */
 	return 0;
@@ -1510,5 +1631,480 @@ gpu_present_ioctl(
 		return error;
 
 	/* Succeeded: the backend accepted this complete image for presentation. */
+	return 0;
+}
+
+/* Issues a never-reused offset token for one immutable resource mapping. */
+static int
+gpu_map_ioctl(
+	struct gpu_session *session,
+	uintptr_t argument)
+{
+	struct gpu_resource_map request;
+	struct gpu_resource *resource;
+	struct drv_gpu_device *device;
+	struct drv_gpu_mapping view;
+	uint64_t offset;
+	int error;
+
+	/* Mapping discovery requires read authority and advertised support. */
+	if (!session->readable)
+		return EACCES;
+
+	/* Unsupported backends cannot expose an opaque token without a stable mapping. */
+	device = session->device;
+	if ((device->ops->capabilities & GPU_CAP_MAPPING) == 0)
+		return EOPNOTSUPP;
+
+	/* Copies the complete request before interpreting any user-supplied field. */
+	error = copyin(argument, &request, sizeof(request));
+	if (error != 0)
+		return error;
+
+	/* Output-only mapping fields must start empty in the selected ABI version. */
+	if (request.version != GPU_ABI_VERSION ||
+	    request.size != sizeof(request) ||
+	    request.offset != 0 ||
+	    request.bytes != 0)
+		return EINVAL;
+
+	/* A mapping query may borrow only storage owned by this admitted session. */
+	error = gpu_resource_lookup(session, request.handle, &resource);
+	if (error != 0)
+		return error;
+
+	/* The first query validates and caches the resource's lifetime-stable view. */
+	if (resource->mapping_offset == 0) {
+		memset(&view, 0, sizeof(view));
+		error = device->ops->resource_map(
+			device->private_data,
+			session->backend,
+			resource->object,
+			&view);
+		if (error != 0)
+			return error;
+
+		/* A backend view must cover the resource and use only known storage attributes. */
+		if (view.address == NULL ||
+		    view.bytes == 0 ||
+		    view.bytes < resource->bytes ||
+		    view.bytes > SIZE_MAX ||
+		    (view.attributes & ~DRV_GPU_MAPPING_DEVICE) != 0)
+			return EIO;
+
+		/* Every alias and extent must represent whole pages for the VM insertion. */
+		if ((view.physical & (KERN_PAGE_SIZE - 1U)) != 0 ||
+		    ((uintptr_t)view.address & (KERN_PAGE_SIZE - 1U)) != 0 ||
+		    (view.bytes & (KERN_PAGE_SIZE - 1U)) != 0)
+			return EIO;
+
+		/* Reject truncated or wrapped aliases before caching a reusable mapping token. */
+		if (view.physical > UINTPTR_MAX ||
+		    view.bytes - 1U > UINTPTR_MAX - view.physical ||
+		    view.bytes - 1U > UINTPTR_MAX - (uintptr_t)view.address)
+			return EOVERFLOW;
+
+		/* Keep every token within the signed mmap offset domain, never reusing it. */
+		offset = session->next_mapping_offset;
+		if (offset == 0)
+			offset = KERN_PAGE_SIZE;
+
+		/* The complete token extent must remain representable by signed mmap offsets. */
+		if (offset > INT64_MAX || view.bytes > INT64_MAX - offset)
+			return EOVERFLOW;
+
+		/* Advancing this session watermark prevents stale tokens from naming future resources. */
+		resource->mapping = view;
+		resource->mapping_offset = offset;
+		session->next_mapping_offset = offset + view.bytes;
+	}
+
+	/* A failed copyout can be retried with the same live resource handle. */
+	request.offset = resource->mapping_offset;
+	request.bytes = resource->mapping.bytes;
+	error = copyout(&request, argument, sizeof(request));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller received a complete initialized response for its owned object. */
+	return 0;
+}
+
+/* Resolves one session-owned token into a retained, shared VM backing. */
+static int
+gpu_mmap(
+	struct file *file,
+	off_t offset,
+	size_t bytes,
+	uint32_t prot,
+	struct vm_device_mapping **result)
+{
+	struct gpu_session *session;
+	struct gpu_resource *resource;
+	uint64_t displacement;
+	uint32_t maximum;
+	uint32_t attributes;
+	unsigned mapping_count;
+	int error;
+
+	/* No failed request transfers ownership or accepts partial pages. */
+	if (result == NULL)
+		return EINVAL;
+	*result = NULL;
+
+	/* Token offsets and mapped sizes are complete nonempty page extents. */
+	if (offset < 0 ||
+	    bytes == 0 ||
+	    ((uint64_t)offset & (KERN_PAGE_SIZE - 1U)) != 0 ||
+	    (bytes & (KERN_PAGE_SIZE - 1U)) != 0)
+		return EINVAL;
+
+	/* A failed or completed open cannot supply session-owned resource storage. */
+	session = file->f_data;
+	if (session == NULL)
+		return ENODEV;
+
+	/* All device mappings require the read authority used to discover their token. */
+	if (!session->readable)
+		return EACCES;
+
+	/* Preserve the original open rights as the immutable ceiling for future mprotect. */
+	maximum = KERN_PROT_READ;
+	if (session->writable)
+		maximum |= KERN_PROT_WRITE;
+
+	/* Neither initial protection nor later VM changes may exceed that ceiling. */
+	if ((prot & ~maximum) != 0)
+		return EACCES;
+
+	/* Admission excludes resource destruction until its mapping hold is acquired. */
+	error = gpu_session_enter(session);
+	if (error != 0)
+		return error;
+
+	/* Search only resources owned by this open file description. */
+	resource = session->resources;
+	while (resource != NULL) {
+		/* A token names any whole-page subrange within one already discovered view. */
+		if (resource->mapping_offset != 0 &&
+		    (uint64_t)offset >= resource->mapping_offset &&
+		    (uint64_t)offset - resource->mapping_offset < resource->mapping.bytes)
+			break;
+
+		/* Continue within this session; foreign resource tokens cannot be resolved here. */
+		resource = resource->next;
+	}
+
+	/* Unknown or stale tokens must leave session admission without a storage hold. */
+	if (resource == NULL) {
+		gpu_session_leave(session);
+		return EINVAL;
+	}
+
+	/* Bound the requested pages within the token's retained resource view. */
+	displacement = (uint64_t)offset - resource->mapping_offset;
+	if (bytes > resource->mapping.bytes - displacement) {
+		gpu_session_leave(session);
+		return EINVAL;
+	}
+
+	/* Refuse reference exhaustion before a new VM owner could wrap the counter. */
+	mapping_count = atomic_raw_load_acquire(&resource->mapping_count);
+	if (mapping_count == UINT_MAX) {
+		gpu_session_leave(session);
+		return EOVERFLOW;
+	}
+
+	/* The VM owner retains the file; its final callback drops this resource hold. */
+	(void)atomic_raw_fetch_add_relaxed(&resource->mapping_count, 1U);
+	attributes = 0U;
+	if ((resource->mapping.attributes & DRV_GPU_MAPPING_DEVICE) != 0)
+		attributes = VM_DEVICE_MMIO;
+
+	/* A successful VM owner consumes the release callback and independently retains the file. */
+	error = vm_device_create(
+		file,
+		resource->mapping.physical + displacement,
+		(uint8_t *)resource->mapping.address + (size_t)displacement,
+		bytes,
+		attributes,
+		maximum,
+		gpu_mapping_release,
+		resource,
+		result);
+	if (error != 0)
+		gpu_mapping_release(resource);
+
+	/* Resource creation and destruction may resume after the VM hold has been settled. */
+	gpu_session_leave(session);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller owns a VM backing with immutable access rights and storage. */
+	return 0;
+}
+
+/* Finishes all backing access before making the resource destroyable again. */
+static void
+gpu_mapping_release(
+	void *owner)
+{
+	struct gpu_resource *resource;
+
+	/* No field may be accessed after the final decrement permits destruction. */
+	resource = owner;
+	(void)atomic_raw_fetch_add_release(&resource->mapping_count, UINT_MAX);
+
+	/* Succeeded: a zero mapping count now permits the owning session to destroy storage. */
+	return;
+}
+
+/* Validates native display requests before invoking the backend's lease owner. */
+static int
+gpu_display_ioctl(
+	struct gpu_session *session,
+	unsigned long command,
+	uintptr_t argument)
+{
+	union gpu_display_request request;
+	struct drv_gpu_device *device;
+	const struct drv_gpu_display_ops *ops;
+	struct gpu_display_release rollback;
+	struct gpu_resource *resource;
+	uint64_t image_bytes;
+	size_t bytes;
+	uint32_t index;
+	int error;
+	int writing;
+
+	/* Discovery and observation need read authority; ownership changes need write. */
+	device = session->device;
+	if ((device->ops->capabilities & GPU_CAP_DISPLAY) == 0)
+		return EOPNOTSUPP;
+
+	/* A lease change or presentation mutates the display and requires a writable open. */
+	writing = 0;
+	if (command == GPU_DISPLAY_CLAIM ||
+	    command == GPU_DISPLAY_RELEASE ||
+	    command == GPU_DISPLAY_PRESENT)
+		writing = 1;
+
+	/* Read-only opens can enumerate displays and observe owned completion state. */
+	if ((writing && !session->writable) ||
+	    (!writing && !session->readable))
+		return EACCES;
+
+	/* Registration validated all callbacks in this immutable optional operation table. */
+	ops = device->ops->display;
+
+	/* Copy exactly the selected ABI, so a short request cannot overread userspace. */
+	switch (command) {
+	case GPU_DISPLAY_QUERY:
+		bytes = sizeof(request.query);
+		break;
+	case GPU_DISPLAY_MODE:
+		bytes = sizeof(request.mode);
+		break;
+	case GPU_DISPLAY_CLAIM:
+		bytes = sizeof(request.claim);
+		break;
+	case GPU_DISPLAY_RELEASE:
+		bytes = sizeof(request.release);
+		break;
+	case GPU_DISPLAY_PRESENT:
+		bytes = sizeof(request.present);
+		break;
+	case GPU_DISPLAY_WAIT:
+		bytes = sizeof(request.wait);
+		break;
+	default:
+		return EOPNOTSUPP;
+	}
+
+	/* Copies one bounded ABI payload without retaining its original userspace address. */
+	memset(&request, 0, sizeof(request));
+	error = copyin(argument, &request, bytes);
+	if (error != 0)
+		return error;
+
+	/* Requires this command's exact record size before any backend callback can mutate state. */
+	if (request.header.version != GPU_ABI_VERSION || request.header.size != bytes)
+		return EINVAL;
+
+	/* Each operation owns its semantic input and side-effect rollback checks. */
+	switch (command) {
+	case GPU_DISPLAY_QUERY:
+		/* Only the ordinal is an input; never echo caller-supplied output fields. */
+		if (request.query.reserved != 0)
+			return EINVAL;
+
+		/* Carries only the ordinal into the backend's newly zeroed output snapshot. */
+		index = request.query.index;
+		memset(&request.query, 0, sizeof(request.query));
+		request.query.index = index;
+		error = ops->query(device->private_data, session->backend, &request.query);
+		if (error != 0)
+			return error;
+
+		/* A returned display must have a stable identity and a valid ordinal in its snapshot. */
+		request.query.name[sizeof(request.query.name) - 1U] = '\0';
+		if (index != GPU_DISPLAY_COUNT_ONLY &&
+		    (request.query.display_id == 0 ||
+		     request.query.generation == 0 ||
+		     request.query.index >= request.query.count))
+			return EIO;
+		break;
+	case GPU_DISPLAY_MODE:
+		/* Validation is side-effect-free and does not select the active mode. */
+		if (request.mode.display_id == 0 ||
+		    request.mode.generation == 0 ||
+		    request.mode.count != 0 ||
+		    request.mode.flags != 0)
+			return EINVAL;
+
+		/* Only discovery and side-effect-free mode validation are defined in this ABI. */
+		if (request.mode.operation != GPU_DISPLAY_MODE_ENUMERATE &&
+		    request.mode.operation != GPU_DISPLAY_MODE_VALIDATE)
+			return EINVAL;
+
+		/* Enumeration provides geometry as output, while validation requires a complete input mode. */
+		if (request.mode.operation == GPU_DISPLAY_MODE_ENUMERATE) {
+			request.mode.width = 0;
+			request.mode.height = 0;
+			request.mode.refresh_millihz = 0;
+		} else if (request.mode.index != 0 ||
+		    request.mode.width == 0 ||
+		    request.mode.height == 0 ||
+		    request.mode.refresh_millihz == 0) {
+			return EINVAL;
+		}
+
+		/* Lets the backend check the complete mode against this open's current display generation. */
+		error = ops->mode(device->private_data, session->backend, &request.mode);
+		if (error != 0)
+			return error;
+		break;
+	case GPU_DISPLAY_CLAIM:
+		/* A failed copyout must not leave a reservation the caller cannot release. */
+		if (request.claim.display_id == 0 ||
+		    request.claim.generation == 0 ||
+		    request.claim.lease != 0)
+			return EINVAL;
+
+		/* Acquires exclusive native ownership before exposing the new lease identity. */
+		error = ops->claim(device->private_data, session->backend, &request.claim);
+		if (error != 0)
+			return error;
+
+		/* A successful ownership transition must return a usable nonzero release identity. */
+		if (request.claim.lease == 0)
+			return EIO;
+
+		/* Publishes the acquired lease with the core's trusted ABI header. */
+		request.claim.version = GPU_ABI_VERSION;
+		request.claim.size = sizeof(request.claim);
+		error = copyout(&request.claim, argument, sizeof(request.claim));
+		if (error != 0) {
+			/* Copy failure retains no user-visible lease, so return ownership to this backend. */
+			memset(&rollback, 0, sizeof(rollback));
+			rollback.version = GPU_ABI_VERSION;
+			rollback.size = sizeof(rollback);
+			rollback.lease = request.claim.lease;
+			(void)ops->release(device->private_data, session->backend, &rollback);
+			return error;
+		}
+
+		/* Succeeded: this exact open now owns the returned native lease. */
+		return 0;
+	case GPU_DISPLAY_RELEASE:
+		/* Backend arbitration checks the lease belongs to this exact open. */
+		if (request.release.lease == 0)
+			return EINVAL;
+
+		/* Consumes native ownership only after backend arbitration verifies the open and lease. */
+		error = ops->release(device->private_data, session->backend, &request.release);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the native display no longer retains the released lease. */
+		return 0;
+	case GPU_DISPLAY_PRESENT:
+		/* Packed rows must occupy only live ordinary storage in this session. */
+		if (request.present.lease == 0 ||
+		    request.present.generation == 0 ||
+		    request.present.sequence != 0 ||
+		    request.present.flags != GPU_DISPLAY_PRESENT_FIFO)
+			return EINVAL;
+
+		/* Bounds packed row arithmetic before checking any resource extent. */
+		if (request.present.width == 0 ||
+		    request.present.width > UINT32_MAX / 4U ||
+		    request.present.height == 0 ||
+		    request.present.refresh_millihz == 0)
+			return EINVAL;
+
+		/* Accepts only the two packed channel layouts defined by this display ABI. */
+		if (request.present.format != GPU_PIXEL_BGRA8888 &&
+		    request.present.format != GPU_PIXEL_RGBA8888)
+			return EINVAL;
+
+		/* Requires a complete aligned packed row, including any explicit trailing pitch. */
+		if (request.present.stride < request.present.width * 4U ||
+		    (request.present.stride & 3U) != 0)
+			return EINVAL;
+
+		/* Resolves source storage within the same open that owns the presentation request. */
+		error = gpu_resource_lookup(session, request.present.handle, &resource);
+		if (error != 0)
+			return error;
+
+		/* Native presentation may read only live ordinary storage with a valid starting offset. */
+		if (resource->kind != GPU_RESOURCE_STORAGE ||
+		    request.present.offset > resource->bytes)
+			return EINVAL;
+
+		/* Bounds the whole image before the backend can read even its first pixel. */
+		image_bytes = (uint64_t)request.present.stride * request.present.height;
+		if (image_bytes > resource->bytes - request.present.offset)
+			return EINVAL;
+
+		/* Transfers only the resolved kernel resource and a validated immutable request snapshot. */
+		error = ops->present(
+			device->private_data,
+			session->backend,
+			resource->object,
+			&request.present);
+		if (error != 0)
+			return error;
+
+		/* Successful completion must identify a frame in this native lease's sequence. */
+		if (request.present.sequence == 0)
+			return EIO;
+		break;
+	case GPU_DISPLAY_WAIT:
+		/* Observation cannot import stale output values into a backend response. */
+		if (request.wait.lease == 0 ||
+		    request.wait.completed_sequence != 0 ||
+		    request.wait.present_time_ns != 0 ||
+		    request.wait.generation != 0)
+			return EINVAL;
+
+		/* Observes completion only through the backend's own lease and timeout arbitration. */
+		error = ops->wait(device->private_data, session->backend, &request.wait);
+		if (error != 0)
+			return error;
+		break;
+	default:
+		return EOPNOTSUPP;
+	}
+
+	/* The core publishes the ABI header after the backend fills its bounded reply. */
+	request.header.version = GPU_ABI_VERSION;
+	request.header.size = (uint32_t)bytes;
+	error = copyout(&request, argument, bytes);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller received a complete initialized response for its owned object. */
 	return 0;
 }

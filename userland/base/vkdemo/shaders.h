@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -7,10 +5,12 @@
  * SPDX-License-Identifier: Zlib
  */
 
-/* Generated from the original GLSL by shaders/regenerate.py. */
+/*
+ * Generated from the original GLSL by shaders/regenerate.py.
+ */
 
-#ifndef ZEDBSD_VKDEMO_SHADERS_H
-#define ZEDBSD_VKDEMO_SHADERS_H
+#ifndef VKDEMO_SHADERS_H
+#define VKDEMO_SHADERS_H
 
 #include <stdint.h>
 

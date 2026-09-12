@@ -1,0 +1,243 @@
+// zedBSD; Copyright 2026 Awe Morris; SPDX-License-Identifier: Zlib.
+// Maintains original typed marshalling from API declarations and explicit length rules.
+// The build consumes codec.c and codec.h directly; no generator runs during a build.
+func starts(text, prefix) { return String.substring(text, 0, String.charCount(prefix)) == prefix; }
+func trim(text) {
+    var first = 0; var last = String.charCount(text);
+    while (first < last && (String.charAt(text, first) == " " || String.charAt(text, first) == "\t")) { first = first + 1; }
+    while (last > first && (String.charAt(text, last - 1) == " " || String.charAt(text, last - 1) == "\t")) { last = last - 1; }
+    return String.substring(text, first, last - first);
+}
+func lines(text) {
+    var out = []; var begin = 0;
+    for (i in 0..String.charCount(text)) {
+        if (String.charAt(text, i) == "\n") { Array.push(out, String.substring(text, begin, i - begin)); begin = i + 1; }
+    }
+    return out;
+}
+func has(list, name) { for (i in 0..Array.size(list)) { if (list[i] == name) { return true; } } return false; }
+func findRecord(records, name) { for (i in 0..Array.size(records)) { if (records[i][0] == name) { return i; } } return -1; }
+func pointerRule(record, field) {
+    var key = record + "." + field;
+    var rules = [
+        ["VkApplicationInfo.pApplicationName", "", "string"],
+        ["VkApplicationInfo.pEngineName", "", "string"],
+        ["VkInstanceCreateInfo.pApplicationInfo", "1", "one"],
+        ["VkInstanceCreateInfo.ppEnabledLayerNames", "record->enabledLayerCount", "strings"],
+        ["VkInstanceCreateInfo.ppEnabledExtensionNames", "record->enabledExtensionCount", "strings"],
+        ["VkDeviceQueueCreateInfo.pQueuePriorities", "record->queueCount", "array"],
+        ["VkDeviceCreateInfo.pQueueCreateInfos", "record->queueCreateInfoCount", "array"],
+        ["VkDeviceCreateInfo.ppEnabledLayerNames", "record->enabledLayerCount", "strings"],
+        ["VkDeviceCreateInfo.ppEnabledExtensionNames", "record->enabledExtensionCount", "strings"],
+        ["VkDeviceCreateInfo.pEnabledFeatures", "1", "one"],
+        ["VkSubmitInfo.pWaitSemaphores", "record->waitSemaphoreCount", "array"],
+        ["VkSubmitInfo.pWaitDstStageMask", "record->waitSemaphoreCount", "array"],
+        ["VkSubmitInfo.pCommandBuffers", "record->commandBufferCount", "array"],
+        ["VkSubmitInfo.pSignalSemaphores", "record->signalSemaphoreCount", "array"],
+        ["VkSparseBufferMemoryBindInfo.pBinds", "record->bindCount", "array"],
+        ["VkSparseImageOpaqueMemoryBindInfo.pBinds", "record->bindCount", "array"],
+        ["VkSparseImageMemoryBindInfo.pBinds", "record->bindCount", "array"],
+        ["VkBindSparseInfo.pWaitSemaphores", "record->waitSemaphoreCount", "array"],
+        ["VkBindSparseInfo.pBufferBinds", "record->bufferBindCount", "array"],
+        ["VkBindSparseInfo.pImageOpaqueBinds", "record->imageOpaqueBindCount", "array"],
+        ["VkBindSparseInfo.pImageBinds", "record->imageBindCount", "array"],
+        ["VkBindSparseInfo.pSignalSemaphores", "record->signalSemaphoreCount", "array"],
+        ["VkBufferCreateInfo.pQueueFamilyIndices", "record->queueFamilyIndexCount", "array"],
+        ["VkImageCreateInfo.pQueueFamilyIndices", "record->queueFamilyIndexCount", "array"],
+        ["VkShaderModuleCreateInfo.pCode", "record->codeSize / 4", "array"],
+        ["VkPipelineCacheCreateInfo.pInitialData", "record->initialDataSize", "bytes"],
+        ["VkSpecializationInfo.pMapEntries", "record->mapEntryCount", "array"],
+        ["VkSpecializationInfo.pData", "record->dataSize", "bytes"],
+        ["VkPipelineShaderStageCreateInfo.pName", "", "string"],
+        ["VkPipelineShaderStageCreateInfo.pSpecializationInfo", "1", "one"],
+        ["VkPipelineVertexInputStateCreateInfo.pVertexBindingDescriptions", "record->vertexBindingDescriptionCount", "array"],
+        ["VkPipelineVertexInputStateCreateInfo.pVertexAttributeDescriptions", "record->vertexAttributeDescriptionCount", "array"],
+        ["VkPipelineViewportStateCreateInfo.pViewports", "record->viewportCount", "array"],
+        ["VkPipelineViewportStateCreateInfo.pScissors", "record->scissorCount", "array"],
+        ["VkPipelineMultisampleStateCreateInfo.pSampleMask", "((uint32_t)record->rasterizationSamples + 31) / 32", "array"],
+        ["VkPipelineColorBlendStateCreateInfo.pAttachments", "record->attachmentCount", "array"],
+        ["VkPipelineDynamicStateCreateInfo.pDynamicStates", "record->dynamicStateCount", "array"],
+        ["VkPipelineLayoutCreateInfo.pSetLayouts", "record->setLayoutCount", "array"],
+        ["VkPipelineLayoutCreateInfo.pPushConstantRanges", "record->pushConstantRangeCount", "array"],
+        ["VkDescriptorPoolCreateInfo.pPoolSizes", "record->poolSizeCount", "array"],
+        ["VkDescriptorSetAllocateInfo.pSetLayouts", "record->descriptorSetCount", "array"],
+        ["VkDescriptorSetLayoutBinding.pImmutableSamplers", "record->descriptorCount", "array"],
+        ["VkDescriptorSetLayoutCreateInfo.pBindings", "record->bindingCount", "array"],
+        ["VkFramebufferCreateInfo.pAttachments", "record->attachmentCount", "array"],
+        ["VkSubpassDescription.pInputAttachments", "record->inputAttachmentCount", "array"],
+        ["VkSubpassDescription.pColorAttachments", "record->colorAttachmentCount", "array"],
+        ["VkSubpassDescription.pResolveAttachments", "record->colorAttachmentCount", "array"],
+        ["VkSubpassDescription.pDepthStencilAttachment", "1", "one"],
+        ["VkSubpassDescription.pPreserveAttachments", "record->preserveAttachmentCount", "array"],
+        ["VkRenderPassCreateInfo.pAttachments", "record->attachmentCount", "array"],
+        ["VkRenderPassCreateInfo.pSubpasses", "record->subpassCount", "array"],
+        ["VkRenderPassCreateInfo.pDependencies", "record->dependencyCount", "array"],
+        ["VkCommandBufferBeginInfo.pInheritanceInfo", "1", "one"]
+    ];
+    for (i in 0..Array.size(rules)) { if (rules[i][0] == key) { return [rules[i][1], rules[i][2]]; } }
+    System.error("unclassified pointer: " + key);
+}
+func scalar(records, handles, type, expression, indent, decode) {
+    if (findRecord(records, type) >= 0) {
+        if (decode) { return indent + "vulkan_decode_" + type + "(reader, &" + expression + ");\n"; }
+        return indent + "vulkan_encode_" + type + "(writer, &" + expression + ");\n";
+    }
+    if (has(handles, type)) {
+        if (decode) { System.error("local identity cannot be inferred from a wire handle"); }
+        var cast = "(uint64_t)";
+        if (type == "VkInstance" || type == "VkPhysicalDevice" || type == "VkDevice" || type == "VkQueue" || type == "VkCommandBuffer") { cast = "(uint64_t)(uintptr_t)"; }
+        return indent + "vulkan_encode_handle(writer, " + cast + expression + ");\n";
+    }
+    var primitive = "u32";
+    if (type == "float") { primitive = "float"; }
+    if (type == "uint64_t" || type == "VkDeviceSize" || type == "size_t") { primitive = "u64"; }
+    if (decode) {
+        if (type == "size_t") {
+            return "\n" + indent + "/* Rejects a renderer extent outside this application address width. */\n" + indent + "wide = vulkan_read_u64(reader);\n" + indent + "if (wide > SIZE_MAX) {\n" + indent + "\treader->error = VK_ERROR_DEVICE_LOST;\n" + indent + "\treturn;\n" + indent + "}\n\n" + indent + "/* Publishes the extent after proving that this ABI can represent it. */\n" + indent + expression + " = (size_t)wide;\n";
+        }
+        return indent + expression + " = (" + type + ")vulkan_read_" + primitive + "(reader);\n";
+    }
+    if (type == "VkImageLayout") { return indent + "vulkan_write_u32(writer, vulkan_wire_image_layout(" + expression + "));\n"; }
+    return indent + "vulkan_write_" + primitive + "(writer, " + expression + ");\n";
+}
+func canDecode(records, handles, record, depth) {
+    if (depth > 20) { System.error("recursive by-value API structure"); }
+    var fields = record[1];
+    for (i in 0..Array.size(fields)) {
+        var field = fields[i];
+        if (field[2] || has(handles, field[0])) { return false; }
+        var nested = findRecord(records, field[0]);
+        if (nested >= 0 && !canDecode(records, handles, records[nested], depth + 1)) { return false; }
+    }
+    return true;
+}
+func emit(records, handles, record, decode) {
+    var name = record[0]; var fields = record[1]; var array = false; var wide = false;
+    for (i in 0..Array.size(fields)) {
+        if (fields[i][3] != "" || (fields[i][2] && fields[i][1] != "pNext")) { array = true; }
+        if (fields[i][0] == "size_t") { wide = true; }
+    }
+    var direction = "encode"; var verb = "Encodes"; var cursor = "writer"; var cursorType = "vulkan_writer"; var qualifier = "const ";
+    if (decode) { direction = "decode"; verb = "Decodes"; cursor = "reader"; cursorType = "vulkan_reader"; qualifier = ""; }
+    var output = "\n/*\n * " + verb + " " + name + " independently of native structure padding.\n */\nvoid\nvulkan_" + direction + "_" + name + "(\n\tstruct " + cursorType + " *" + cursor + ",\n\t" + qualifier + name + " *record)\n{\n";
+    if (array) { output = output + "\tsize_t index;\n\tuint64_t count;\n"; }
+    if (decode && wide) { output = output + "\tuint64_t wide;\n"; }
+    output = output + "\n\t/* Preserves the first failed field without reading later application storage. */\n\tif (" + cursor + "->error != VK_SUCCESS)\n\t\treturn;\n";
+    var scalars = false;
+    for (i in 0..Array.size(fields)) {
+        var field = fields[i]; var type = field[0]; var member = field[1]; var pointer = field[2]; var extent = field[3]; var expression = "record->" + member;
+        if (pointer || extent != "") { scalars = false; }
+        if (pointer && member == "pNext") {
+            output = output + "\n\t/* No advertised core 1.0 extension adds a chain to this record. */\n\tvulkan_write_u64(writer, 0);\n";
+            continue;
+        }
+        if (pointer) {
+            var rule = pointerRule(name, member);
+            if (rule[1] == "string") {
+                output = output + "\n\t/* Serializes " + member + " with its terminator and protocol byte padding. */\n\tvulkan_write_string(writer, " + expression + ");\n";
+                continue;
+            }
+            var condition = expression + " != NULL";
+            var comment = "Keeps absent " + member + " distinct from its count-selected payload.";
+            if ((name == "VkBufferCreateInfo" || name == "VkImageCreateInfo") && member == "pQueueFamilyIndices") {
+                condition = "record->sharingMode == VK_SHARING_MODE_CONCURRENT && " + condition;
+                comment = "Does not inspect queue-family storage ignored by exclusive ownership.";
+            }
+            if (name == "VkDescriptorSetLayoutBinding" && member == "pImmutableSamplers") {
+                condition = "(record->descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||\n\t     record->descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) &&\n\t    " + condition;
+                comment = "Does not inspect immutable samplers for descriptor types that ignore them.";
+            }
+            output = output + "\n\t/* " + comment + " */\n\tcount = 0;\n\tif (" + condition + ")\n\t\tcount = " + rule[0] + ";\n\n\t/* Publishes the exact 64-bit payload extent before any referenced contents. */\n\tvulkan_write_u64(writer, count);\n";
+            if (rule[1] == "bytes") {
+                output = output + "\tvulkan_write_bytes(writer, " + expression + ", (size_t)count);\n";
+                continue;
+            }
+            if (rule[1] == "one") {
+                output = output + "\n\t/* Traverses the optional record only when its presence marker was emitted. */\n\tif (count != 0)\n\t\tvulkan_encode_" + type + "(writer, " + expression + ");\n";
+                continue;
+            }
+            output = output + "\n\t/* Stops before touching later array elements after a failed output allocation. */\n\tfor (index = 0;\n\t     index < count && writer->error == VK_SUCCESS;\n\t     index++) {\n\t\t/* Serializes each selected element without inheriting native array padding. */\n";
+            if (rule[1] == "strings") { output = output + "\t\tvulkan_write_string(writer, " + expression + "[index]);\n"; }
+            else { output = output + scalar(records, handles, type, expression + "[index]", "\t\t", false); }
+            output = output + "\t}\n";
+            continue;
+        }
+        if (extent != "") {
+            if (decode) {
+                output = output + "\n\t/* Requires the exact declared extent of " + member + " before touching output storage. */\n\tcount = vulkan_read_u64(reader);\n\tif (count != " + extent + ") {\n\t\treader->error = VK_ERROR_DEVICE_LOST;\n\t\treturn;\n\t}\n";
+            } else {
+                output = output + "\n\t/* Includes the required extent marker even though " + member + " has a fixed API length. */\n\tcount = " + extent + ";\n\tvulkan_write_u64(writer, count);\n";
+            }
+            if (type == "char" || type == "uint8_t") {
+                output = output + "\n\t/* Copies the byte array with wire padding independent of its enclosing record. */\n";
+                if (decode) { output = output + "\tvulkan_read_bytes(reader, " + expression + ", " + extent + ");\n"; }
+                else { output = output + "\tvulkan_write_bytes(writer, " + expression + ", " + extent + ");\n"; }
+            } else {
+                output = output + "\n\t/* Traverses only complete fixed-array elements while framing remains valid. */\n\tfor (index = 0;\n\t     index < count && " + cursor + "->error == VK_SUCCESS;\n\t     index++) {\n\t\t/* Uses each element's declared scalar width or nested record encoding. */\n" + scalar(records, handles, type, expression + "[index]", "\t\t", decode) + "\t}\n";
+            }
+            continue;
+        }
+        if (!scalars) {
+            output = output + "\n\t/* Preserves declared field order using explicit protocol widths and nested encoders. */\n";
+            scalars = true;
+        }
+        output = output + scalar(records, handles, type, expression, "\t", decode);
+    }
+    output = output + "\n\t/* Succeeded: every selected field has its specified wire representation. */\n\treturn;\n}\n";
+    if (String.indexOf(output, "for (index") < 0) { var position = String.indexOf(output, "\tsize_t index;\n"); if (position >= 0) { output = String.substring(output, 0, position) + String.substring(output, position + 15, -1); } }
+    if (String.indexOf(output, "count =") < 0) { var position = String.indexOf(output, "\tuint64_t count;\n"); if (position >= 0) { output = String.substring(output, 0, position) + String.substring(output, position + 17, -1); } }
+    var opening = String.indexOf(output, "{\n\n");
+    if (opening >= 0) { output = String.substring(output, 0, opening + 2) + String.substring(output, opening + 3, -1); }
+    return output;
+}
+func main(args) {
+    if (Array.size(args) != 3) { System.error("usage: maintain-codec.noct PUBLIC_HEADER OUTPUT_C OUTPUT_H"); }
+    var input = lines(FileUtil.readText(args[0])); var records = []; var handles = []; var active = ""; var fields = [];
+    var excluded = ["VkBaseInStructure", "VkBaseOutStructure", "VkAllocationCallbacks", "VkGraphicsPipelineCreateInfo", "VkWriteDescriptorSet", "VkDescriptorImageInfo", "VkClearColorValue", "VkClearValue", "VkClearAttachment", "VkRenderPassBeginInfo"];
+    for (i in 0..Array.size(input)) {
+        var line = trim(input[i]);
+        if (starts(line, "#define VK_KHR_surface")) { break; }
+        if (starts(line, "VK_DEFINE_HANDLE(") || starts(line, "VK_DEFINE_NON_DISPATCHABLE_HANDLE(")) {
+            var begin = String.indexOf(line, "(") + 1; var end = String.indexOf(line, ")");
+            Array.push(handles, String.substring(line, begin, end - begin)); continue;
+        }
+        if (starts(line, "typedef struct ")) {
+            var end = String.indexOf(line, " {"); active = String.substring(line, 15, end - 15); fields = []; continue;
+        }
+        if (active == "") { continue; }
+        if (starts(line, "}")) {
+            if (!has(excluded, active)) { Array.push(records, [active, fields]); }
+            active = ""; continue;
+        }
+        var end = String.indexOf(line, ";");
+        if (end < 0) { continue; }
+        var declaration = String.substring(line, 0, end); var last = -1;
+        for (j in 0..String.charCount(declaration)) { if (String.charAt(declaration, j) == " ") { last = j; } }
+        var type = String.substring(declaration, 0, last); var name = String.substring(declaration, last + 1, -1);
+        var pointer = String.indexOf(type, "*") >= 0; var extent = "";
+        if (starts(type, "const ")) { type = String.substring(type, 6, -1); }
+        var star = String.indexOf(type, "*");
+        if (star >= 0) { type = String.substring(type, 0, star); }
+        type = trim(type);
+        var bracket = String.indexOf(name, "[");
+        if (bracket >= 0) { extent = String.substring(name, bracket + 1, String.charCount(name) - bracket - 2); name = String.substring(name, 0, bracket); }
+        Array.push(fields, [type, name, pointer, extent]);
+    }
+    var banner = "/* -*- mode: c; c-file-style: \"linux\"; tab-width: 8; -*- */\n\n/*\n * zedBSD\n * Copyright (C) 2026 Awe Morris\n *\n * SPDX-License-Identifier: Zlib\n */\n\n/* Maintained by tools/maintain-codec.noct from declarations and explicit protocol rules. */\n";
+    var source = banner + "\n#include \"internal.h\"\n";
+    var header = banner + "\n#ifndef ZEDBSD_VULKAN_CODEC_H\n#define ZEDBSD_VULKAN_CODEC_H\n\n/* Translates a local opaque handle into its independently owned renderer identity. */\nvoid\nvulkan_encode_handle(\n\tstruct vulkan_writer *writer,\n\tuint64_t handle);\n\n";
+    var decoders = 0;
+    for (i in 0..Array.size(records)) {
+        var record = records[i]; var name = record[0];
+        source = source + emit(records, handles, record, false);
+        header = header + "\nvoid\nvulkan_encode_" + name + "(\n\tstruct vulkan_writer *writer,\n\tconst " + name + " *record);\n";
+        if (canDecode(records, handles, record, 0)) {
+            source = source + emit(records, handles, record, true);
+            header = header + "\nvoid\nvulkan_decode_" + name + "(\n\tstruct vulkan_reader *reader,\n\t" + name + " *record);\n";
+            decoders = decoders + 1;
+        }
+    }
+    header = header + "\n#endif\n";
+    FileUtil.writeText(args[1], source); FileUtil.writeText(args[2], header);
+    print("typed codec: " + Array.size(records) + " encoders and " + decoders + " output decoders");
+}

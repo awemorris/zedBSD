@@ -1,0 +1,123 @@
+// zedBSD; Copyright 2026 Awe Morris; SPDX-License-Identifier: Zlib.
+// Generates original recording wrappers from public API declarations and explicit pointer rules.
+// Native protocol identifiers are maintained separately; no renderer implementation is imported.
+func starts(text, prefix) { return String.substring(text, 0, String.charCount(prefix)) == prefix; }
+func split(text, separator) {
+    var result = []; var start = 0;
+    for (i in 0..String.charCount(text)) {
+        if (String.substring(text, i, String.charCount(separator)) == separator) {
+            Array.push(result, String.substring(text, start, i - start)); start = i + String.charCount(separator);
+        }
+    }
+    Array.push(result, String.substring(text, start, -1)); return result;
+}
+func trim(text) {
+    var first = 0; var last = String.charCount(text);
+    while (first < last && (String.charAt(text, first) == " " || String.charAt(text, first) == "\t")) { first = first + 1; }
+    while (last > first && (String.charAt(text, last - 1) == " " || String.charAt(text, last - 1) == "\t")) { last = last - 1; }
+    return String.substring(text, first, last - first);
+}
+func has(list, name) { for (i in 0..Array.size(list)) { if (list[i] == name) { return true; } } return false; }
+func pointerCount(command, name, fixed) {
+    if (fixed != "") { return fixed; }
+    var counts = [
+        ["pViewports", "viewportCount"], ["pScissors", "scissorCount"],
+        ["pDescriptorSets", "descriptorSetCount"], ["pDynamicOffsets", "dynamicOffsetCount"],
+        ["pBuffers", "bindingCount"], ["pOffsets", "bindingCount"],
+        ["pRegions", "regionCount"], ["pRanges", "rangeCount"],
+        ["pAttachments", "attachmentCount"], ["pRects", "rectCount"],
+        ["pEvents", "eventCount"], ["pMemoryBarriers", "memoryBarrierCount"],
+        ["pBufferMemoryBarriers", "bufferMemoryBarrierCount"],
+        ["pImageMemoryBarriers", "imageMemoryBarrierCount"],
+        ["pCommandBuffers", "commandBufferCount"]
+    ];
+    for (i in 0..Array.size(counts)) { if (counts[i][0] == name) { return counts[i][1]; } }
+    if (name == "pValues") { return "size"; }
+    if (name == "pData" && command == "vkCmdUpdateBuffer") { return "dataSize"; }
+    if (name == "pColor" || name == "pDepthStencil" || name == "pRenderPassBegin") { return "1"; }
+    System.error("unclassified command pointer: " + command + "." + name);
+}
+func encodeScalar(handles, records, type, expression, indent) {
+    if (has(handles, type)) {
+        var cast = "(uint64_t)";
+        if (type == "VkCommandBuffer") { cast = "(uint64_t)(uintptr_t)"; }
+        return indent + "vulkan_encode_handle(&writer, " + cast + expression + ");\n";
+    }
+    if (type == "VkClearAttachment") { return indent + "command_encode_clear_attachment(&writer, &" + expression + ");\n"; }
+    if (has(records, type)) { return indent + "vulkan_encode_" + type + "(&writer, &" + expression + ");\n"; }
+    if (type == "VkImageLayout") { return indent + "vulkan_write_u32(&writer, vulkan_wire_image_layout(" + expression + "));\n"; }
+    var primitive = "u32";
+    if (type == "float") { primitive = "float"; }
+    if (type == "VkDeviceSize" || type == "uint64_t" || type == "size_t") { primitive = "u64"; }
+    return indent + "vulkan_write_" + primitive + "(&writer, " + expression + ");\n";
+}
+func main(args) {
+    if (Array.size(args) != 2) { System.error("usage: maintain-commands.noct PUBLIC_HEADER OUTPUT_INC"); }
+    var input = split(FileUtil.readText(args[0]), "\n"); var handles = []; var records = [];
+    for (i in 0..Array.size(input)) {
+        var line = trim(input[i]);
+        if (starts(line, "VK_DEFINE_HANDLE(") || starts(line, "VK_DEFINE_NON_DISPATCHABLE_HANDLE(")) {
+            var begin = String.indexOf(line, "(") + 1; var end = String.indexOf(line, ")"); Array.push(handles, String.substring(line, begin, end - begin));
+        }
+        if (starts(line, "typedef struct ")) { var end = String.indexOf(line, " {"); Array.push(records, String.substring(line, 15, end - 15)); }
+    }
+    var output = "/* -*- mode: c; c-file-style: \"linux\"; tab-width: 8; -*- */\n\n/*\n * zedBSD\n * Copyright (C) 2026 Awe Morris\n *\n * SPDX-License-Identifier: Zlib\n */\n\n/* Maintained Vulkan 1.0 recording wrappers; no scene or shader assumptions. */\n";
+    var count = 0;
+    for (i in 0..Array.size(input)) {
+        var line = trim(input[i]); var begin = String.indexOf(line, "*PFN_vkCmd");
+        if (begin < 0) { continue; }
+        var end = String.indexOf(line, ")("); var name = String.substring(line, begin + 5, end - begin - 5);
+        var parameters = split(String.substring(line, end + 2, String.charCount(line) - end - 4), ", ");
+        var declarations = []; var types = []; var names = []; var pointers = []; var extents = []; var loop = false; var array = false;
+        for (j in 0..Array.size(parameters)) {
+            var declaration = trim(parameters[j]); var last = -1;
+            for (k in 0..String.charCount(declaration)) { if (String.charAt(declaration, k) == " ") { last = k; } }
+            var type = String.substring(declaration, 0, last); var member = String.substring(declaration, last + 1, -1); var extent = "";
+            var pointer = String.indexOf(type, "*") >= 0;
+            if (starts(type, "const ")) { type = String.substring(type, 6, -1); }
+            var star = String.indexOf(type, "*"); if (star >= 0) { type = trim(String.substring(type, 0, star)); }
+            var bracket = String.indexOf(member, "[");
+            if (bracket >= 0) { extent = String.substring(member, bracket + 1, String.charCount(member) - bracket - 2); member = String.substring(member, 0, bracket); pointer = true; }
+            Array.push(declarations, declaration); Array.push(types, type); Array.push(names, member); Array.push(pointers, pointer); Array.push(extents, extent);
+            if (pointer) {
+                array = true;
+                var length = pointerCount(name, member, extent);
+                if (length != "1" && type != "void") { loop = true; }
+            }
+        }
+        output = output + "\n/*\n * Records " + name + " with the caller's standard parameters and owned object identities.\n */\nVKAPI_ATTR void VKAPI_CALL\n" + name + "(\n";
+        for (j in 0..Array.size(declarations)) { output = output + "\t" + declarations[j]; if (j + 1 < Array.size(declarations)) { output = output + ",\n"; } else { output = output + ")\n{\n"; } }
+        output = output + "\tstruct VkCommandBuffer_T *command;\n\tstruct vulkan_writer writer;\n\tVkBool32 active;\n";
+        if (loop) { output = output + "\tuint32_t index;\n"; }
+        if (array) { output = output + "\tuint64_t count;\n"; }
+        output = output + "\n\t/* Preserves the first recording failure for vkEndCommandBuffer to report. */\n\tcommand = (struct VkCommandBuffer_T *)commandBuffer;\n\tactive = command_record_begin(command, &writer, VULKAN_OPCODE_" + name + ");\n\tif (!active)\n\t\treturn;\n";
+        var scalars = false;
+        for (j in 1..Array.size(parameters)) {
+            var type = types[j]; var member = names[j];
+            if (!pointers[j]) {
+                if (!scalars) { output = output + "\n\t/* Preserves argument order with explicit scalar widths and owned handle translation. */\n"; scalars = true; }
+                output = output + encodeScalar(handles, records, type, member, "\t"); continue;
+            }
+            scalars = false;
+            output = output + "\n\t/* Keeps absent " + member + " distinct from its count-selected payload. */\n";
+            var length = pointerCount(name, member, extents[j]);
+            output = output + "\tcount = 0;\n\tif (" + member + " != NULL)\n\t\tcount = " + length + ";\n\n\t/* Prefixes referenced contents with their exact 64-bit wire extent. */\n\tvulkan_write_u64(&writer, count);\n";
+            if (type == "void") { output = output + "\tvulkan_write_bytes(&writer, " + member + ", (size_t)count);\n"; continue; }
+            if (length == "1") {
+                var encoder = "vulkan_encode_" + type;
+                var extra = "";
+                if (member == "pColor") { encoder = "command_encode_color"; }
+                if (member == "pDepthStencil") { encoder = "command_encode_depth_ranges"; extra = ", rangeCount, pRanges"; }
+                if (member == "pRenderPassBegin") { encoder = "command_encode_render_begin"; }
+                output = output + "\n\t/* Does not inspect a record whose presence marker is absent. */\n\tif (count != 0)\n\t\t" + encoder + "(&writer, " + member + extra + ");\n";
+            } else {
+                output = output + "\n\t/* Copies only complete caller elements while the command remains encodable. */\n\tfor (index = 0;\n\t     index < count && writer.error == VK_SUCCESS;\n\t     index++) {\n\t\t/* Uses declared element widths rather than native array padding. */\n" + encodeScalar(handles, records, type, member + "[index]", "\t\t") + "\t}\n";
+            }
+        }
+        output = output + "\n\t/* Native recording completion is distinct from later GPU execution completion. */\n\tcommand_record_finish(command, &writer);\n\n\t/* Succeeded: the command is recorded or its first error is retained by the command buffer. */\n\treturn;\n}\n";
+        count = count + 1;
+    }
+    if (count != 44) { System.error("expected forty-four Vulkan 1.0 recording commands, got " + count); }
+    FileUtil.writeText(args[1], output);
+    print("maintained forty-four standard recording entry points");
+}

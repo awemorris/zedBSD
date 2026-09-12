@@ -1,25 +1,28 @@
 # vkdemo
 
-The original zedBSD demo renders a textured, rotating rectangular cuboid through
-Venus Vulkan commands. It executes its own vertex and fragment SPIR-V modules,
-uses a sampled image and depth attachment, waits for a Vulkan fence, reads the
-actual color attachment back, and presents those same bytes through the existing
-GPU packed-pixel presentation interface.
+The original zedBSD demo is a standard Vulkan 1.0 application. It uses the
+public `<vulkan/vulkan.h>` declarations and links against `libvulkan.so`.
+Its vertex and fragment SPIR-V modules draw a sampled, textured cuboid with
+a depth attachment. The application contains no GPU ioctl, device-node access,
+Venus encoding, protocol resource identifiers, or zedBSD graphics ABI calls.
 
-The program implements the finite Vulkan graphics operations needed by this
-scene. Its common wire codec and instance/device/queue bootstrap live in
-[the shared client](../../gpu/venus/client.h). The application owns its graphics
-resources and frame lifecycle. The finite API is not a conformant Vulkan loader
-or a general-purpose Vulkan implementation.
+Direct display uses `VK_KHR_surface`, `VK_KHR_display`, and `VK_KHR_swapchain`.
+The app enumerates devices, displays, modes and planes, creates a compatible
+320×240 display surface and FIFO swapchain, and renders directly into each
+acquired swapchain image. An ordinary offscreen option uses the same graphics
+pipeline, texture, depth and readback operations without acquiring a display.
 
 ## Build and ordinary use
 
 The optional amd64 base package is vkdemo; select it in the image configuration.
-Its normal build consumes the checked-in original shader arrays and requires
-neither a shader compiler nor external runtime libraries.
+Selecting it also selects the `base/libvulkan` dependency. Its normal build
+consumes the checked-in original shader arrays, links a PIE executable using
+`/lib/ld.so`, and installs `/lib/libvulkan.so`. No shader compiler is needed for
+a normal build. Public Vulkan headers are provided in `libc/include/vulkan/`
+and are copied into the target sysroot by its ordinary header installation.
 
     /bin/vkdemo
-    /bin/vkdemo --duration=30 --device=/dev/gpu0
+    /bin/vkdemo --duration=30 --device-index=0
     /bin/vkdemo --duration=0
     /bin/vkdemo --time-ms=1000 --hold=20
 
@@ -30,7 +33,7 @@ frame rate, with a short cooperative pause after each completed frame.
 --time-ms=0..3600000 renders one explicit shader time and retains it for
 --hold=0..120 seconds (default ten).
 
-Each completed frame emits a VKDEMO PRESENT line to standard output. This is
+Each completed display frame emits a VKDEMO PRESENT line to standard output. This is
 also the supported capture interface; continuous use produces continuous frame
 logs, which may be redirected by an ordinary shell. Frame counters advance only
 after real Vulkan completion, readback, and successful presentation. Exit
@@ -117,31 +120,53 @@ The external harness compares the guest RGB hash with the VNC image and applies
 an independent ray-box / face-UV / nearest-texture oracle. This program does not
 generate or compare a CPU reference rendering.
 
-## Resource and protocol boundaries
+## Portable offscreen verification
 
-The program uses the current GPU capset/blob/copy/command/presentation UAPI
-without adding a kernel ioctl or changing HAL. Each invocation opens a fresh
-ordinary GPU session and creates one Venus context. Shared bootstrap IDs 1–4
-belong to instance/physical device/device/queue; application IDs begin at 16.
+On Linux with Vulkan development headers and a system Vulkan implementation:
 
-The upload and readback Vulkan allocations require HOST_VISIBLE and
-HOST_COHERENT memory. Each allocation is exported to a blob **once**, then reused
-for the entire session. Re-exporting the same device-memory identity on each
-frame is invalid for the selected renderer. The 8 MiB mapped host aperture used
-by the current remote loop contains a 4 KiB reply blob plus the approximately
-20 KiB upload and 300 KiB readback allocations.
+    sh plan/ws014/tests/run-vkdemo-vulkan-test.sh /tmp/vkdemo-evidence
 
-The original 64×64 texture is transferred once into its optimal sampled image.
-Each frame resets only a completed command pool/fence, records the graphics
-draw and image-to-buffer copy, submits, and polls the real Vulkan fence.
-Command-stream trailer completion and GPU execution completion remain separate.
-No queue/device-idle or CPU map/unmap Vulkan command is used.
+The runner compiles these same application sources against the system
+`libvulkan`, renders six offscreen frames, checks the actual exported GPU pixels
+with the existing independent ray/texture oracle, closes the session, then runs
+ordinary animation in a second invocation. Standard loader configuration such
+as `VK_DRIVER_FILES` can select an installed driver. The result records the
+reported device and driver selection; software Vulkan and physical GPU results
+remain distinct. This verifies portable rendering and readback, not direct
+display ownership or guest WSI correctness.
 
-Normal teardown destroys exported GPU copies, destroys non-memory Vulkan objects
-in reverse creation order, and frees memory only after all bound buffers and
-images are gone. The reply blob remains alive until common client close.
-Partial initialization, a fatal command error, or a pending submission delegates
-cleanup to context close instead of issuing more potentially invalid commands.
+The equivalent explicit application options are:
+
+    vkdemo --offscreen --time-ms=1000 --hold=0 --output=/tmp/frame.ppm
+    vkdemo --offscreen --verify-session --output=/tmp/frame.ppm
+
+`--output` writes the latest actual GPU RGB readback as a binary PPM before its
+marker is emitted. The six-frame capture protocol waits for acknowledgment
+before overwriting that file. Offscreen markers use `VKDEMO OFFSCREEN` to avoid
+claiming a display presentation.
+
+## Resource and synchronization boundaries
+
+The application allocates and binds image/buffer memory through ordinary Vulkan
+API calls. Upload and readback require host-visible memory; host-coherent memory
+is preferred. If the selected type is noncoherent, whole-allocation flush and
+invalidate operations provide the required visibility. No memory property is
+inferred from a platform device name or a transport capability.
+
+The original texture is uploaded once. Each frame reuses a completed command
+pool and fence, records the draw and image-to-buffer readback, submits, and waits
+up to ten seconds for its Vulkan fence. Direct display waits on an acquire
+semaphore before color attachment use, transitions the image to
+`PRESENT_SRC_KHR`, and submits presentation with a semaphore dedicated to that
+swapchain image. A presentation semaphore is reused only after its image is
+acquired again. FIFO and display ownership are library/backend responsibilities.
+
+Normal close waits for the device to become idle, destroys command and graphics
+objects, unmaps allocations, and frees memory after its bound objects are gone.
+Every successful partial allocation is retained in the same cleanup ledger, so
+initialization failures also release acquired resources. The application uses
+only standard Vulkan completion semantics; it does not inspect transport reply
+buffers or poll protocol command identifiers.
 
 ## Shader provenance and regeneration
 
@@ -160,15 +185,8 @@ The script selects Vulkan 1.1, SPIR-V 1.0, and -O0, validates both modules, and
 publishes their generated artifacts after both stages succeed. Tool calls are
 bounded. Normal guest builds use the committed generated arrays.
 
-The public wire command numbers, structure tags, pointer cardinalities, and
-field ordering were checked against virglrenderer 1.1.0 commit
-1aeaf5e10a9c89096e96d09599aa419d5c50712f, embedded Venus protocol
-git-ca1e9220, wire format 1, Vulkan XML 1.3.269.
-The encoding implementation here is independently written.
-
 Primary references:
 
-- [Pinned official Venus protocol and renderer](https://gitlab.freedesktop.org/virgl/virglrenderer/-/tree/1aeaf5e10a9c89096e96d09599aa419d5c50712f/src/venus)
 - [Shaderc command-line compiler](https://github.com/google/shaderc/blob/main/glslc/README.asciidoc)
 - [Khronos SPIR-V Tools](https://github.com/KhronosGroup/SPIRV-Tools)
 

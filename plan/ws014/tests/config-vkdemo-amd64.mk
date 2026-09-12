@@ -19,6 +19,7 @@ CONFIG_DRIVER_USB_CDC_NCM := n
 CONFIG_DRIVER_USB_CDC_ECM := n
 CONFIG_DRIVER_USB_HID := n
 CONFIG_DRIVER_USB_RTL8822BU := n
-CONFIG_DRIVER_GRAPHICS := n
+# The PC/AT text provider supplies retained console cells after WSI releases scanout.
+CONFIG_DRIVER_GRAPHICS := y
 CONFIG_DRIVER_LGY98 := n
 ZEDBSD_USER_PROGRAMS := vkdemo venus-frame cat ls dmesg sleep sync

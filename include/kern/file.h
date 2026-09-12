@@ -56,6 +56,7 @@
 struct cwdinfo;
 struct ucred;
 struct file;
+struct vm_device_mapping;
 
 enum file_io_kind {
 	FILE_IO_READ,
@@ -197,6 +198,9 @@ struct file_ops {
 	int (*poll)(struct file *, short, short *);
 	int (*fsync)(struct file *);
 	int (*close)(struct file *);
+
+	/* Driver tokens select a shared device view; success transfers one reference the caller releases. */
+	int (*mmap)(struct file *, off_t, size_t, uint32_t, struct vm_device_mapping **);
 };
 
 struct file {

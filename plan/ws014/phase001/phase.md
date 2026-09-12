@@ -3,7 +3,8 @@
 <!-- awesome-plan-current:start -->
 Status: planning
 Phase disposition: normal
-Manual design hold: lifted by user; implementation Queue: none
+Implementation Queue: none for this design Phase
+Standard Vulkan library: [ws030](https://github.com/awemorris/zedBSD/issues/388) under q308; direct-display selected, EGL canceled
 <!-- awesome-plan-current:end -->
 
 # WS014 Phase 001: virtio-gpu / Vulkan表示APIの設計

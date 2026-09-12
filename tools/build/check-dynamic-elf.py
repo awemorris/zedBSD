@@ -62,7 +62,7 @@ def unpack_table(data, offset, count, size, fmt, path, what):
     return [struct.unpack_from(fmt, data, offset + i * size) for i in range(count)]
 
 
-def check(path, machine_name, role):
+def check(path, machine_name, role, expected_needed=None, expected_soname=None, exports_tsv=None):
     data = path.read_bytes()
     elf_class, machine, endian, allowed_relocs = MACHINES[machine_name]
     if len(data) < 64 or data[:4] != b"\x7fELF" or data[4] != elf_class:
@@ -131,13 +131,13 @@ def check(path, machine_name, role):
             relros.append(ph)
         if p_type == 7:
             tls_segments.append(ph)
-    if role == "program":
+    if role in ("program", "application"):
         if interps != [b"/lib/ld.so"]:
             fail(path, "dynamic program must use /lib/ld.so")
         if len(stacks) != 1 or stacks[0] != PF_R | PF_W:
             fail(path, "program requires one non-executable RW stack")
         if tls_segments:
-            fail(path, "ET_EXEC TLS would relax to unsupported IE/LE access")
+            fail(path, "main-executable TLS could relax to unsupported IE/LE access")
     elif interps:
         fail(path, "shared object must not contain PT_INTERP")
     if not relros:
@@ -197,8 +197,8 @@ def check(path, machine_name, role):
             fail(path, "GNU hash requires a valid dynsym")
         symbol_count = len(dynsym[1]) // dynsym[3]
         chain_count = (len(gnu_hash) - prefix) // 4
-        if symoffset > symbol_count or chain_count < symbol_count - symoffset:
-            fail(path, "GNU hash chain does not cover dynsym")
+        if symoffset > symbol_count:
+            fail(path, "GNU hash symbol offset is outside dynsym")
         bucket_fmt = endian + "I"
         bucket_base = 16 + bloom_count * word_size
         for index in range(buckets):
@@ -206,6 +206,8 @@ def check(path, machine_name, role):
                                         bucket_base + index * 4)[0]
             if symbol and not symoffset <= symbol < symbol_count:
                 fail(path, "GNU hash bucket is outside dynsym")
+            if symbol and chain_count < symbol_count - symoffset:
+                fail(path, "GNU hash chain does not cover dynsym")
     if role == "interpreter" and needed:
         fail(path, "ld.so must not have dependencies")
     if role == "libc" and (sonames != ["libc.so"] or needed):
@@ -234,6 +236,16 @@ def check(path, machine_name, role):
     if role == "program" and needed != ["libc.so"]:
         fail(path, "test program must depend only on libc.so")
 
+    if role in ("application", "shared-library"):
+        if needed != (expected_needed or []):
+            fail(path, f"DT_NEEDED differs from the declared dependency contract: {needed}")
+        if rpaths or runpaths:
+            fail(path, "installed application/library must use the ordinary /lib lookup")
+        if role == "application" and sonames:
+            fail(path, "application must not advertise a shared-library SONAME")
+        if role == "shared-library" and sonames != [expected_soname]:
+            fail(path, "shared-library SONAME differs from its installed name")
+
     seen_tlsdesc = False
     for name, (sh, blob, link, entsize) in sections.items():
         if sh[1] not in (9, 4):
@@ -260,8 +272,11 @@ def check(path, machine_name, role):
     if role == "module" and machine_name in ("amd64", "aarch64") and not seen_tlsdesc:
         fail(path, "test module does not exercise TLSDESC")
 
+    exports = set()
+    if exports_tsv is not None and ".dynsym" not in sections:
+        fail(path, "public export verification requires .dynsym")
     if role in ("libc", "module", "rpath-module", "version-definition",
-                "version-consumer") and ".dynsym" in sections:
+                "version-consumer", "application", "shared-library") and ".dynsym" in sections:
         sh, syms, link, entsize = sections[".dynsym"]
         if link >= len(shdrs):
             fail(path, "invalid dynsym string-table link")
@@ -274,6 +289,9 @@ def check(path, machine_name, role):
             name_offset = sym[0]
             shndx = sym[5] if elf_class == 1 else sym[3]
             bind = (sym[3] if elf_class == 1 else sym[1]) >> 4
+            visibility = (sym[4] if elf_class == 1 else sym[2]) & 3
+            if shndx != 0 and bind in (1, 2) and visibility in (0, 3):
+                exports.add(cstring(strings, name_offset, path, "export"))
             if shndx == 0 and bind == 1:
                 name = cstring(strings, name_offset, path, "symbol")
                 if role in ("module", "rpath-module") and name not in {
@@ -290,16 +308,38 @@ def check(path, machine_name, role):
                     fail(path, f"unexpected libc undefined symbol {name}")
 
 
+    if exports_tsv is not None:
+        rows = exports_tsv.read_text().splitlines()
+        if not rows or rows[0].split("\t")[0] != "name":
+            fail(path, "export contract requires a TSV name column")
+        expected_exports = {row.split("\t")[0] for row in rows[1:] if row}
+        if exports != expected_exports:
+            missing = sorted(expected_exports - exports)
+            extra = sorted(exports - expected_exports)
+            fail(path, f"public exports differ: missing={missing}, extra={extra}")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--machine", choices=MACHINES, required=True)
     parser.add_argument("--role", choices=("interpreter", "libc", "module",
                                             "rpath-module", "version-definition",
-                                            "version-consumer", "program"),
+                                            "version-consumer", "program",
+                                            "application", "shared-library"),
                         required=True)
+    parser.add_argument("--needed", action="append", default=[])
+    parser.add_argument("--soname")
+    parser.add_argument("--exports-tsv", type=Path)
     parser.add_argument("elf", type=Path)
     args = parser.parse_args()
-    check(args.elf, args.machine, args.role)
+    if args.role == "shared-library" and not args.soname:
+        parser.error("shared-library requires --soname")
+    if args.role not in ("application", "shared-library"):
+        if args.needed or args.soname or args.exports_tsv:
+            parser.error("explicit dependency/export contracts require a generic role")
+    if args.role == "application" and (args.soname or args.exports_tsv):
+        parser.error("SONAME and public exports apply only to shared-library")
+    check(args.elf, args.machine, args.role, args.needed, args.soname, args.exports_tsv)
 
 
 if __name__ == "__main__":

@@ -60,6 +60,11 @@ build: patch
 			ZEDBSD_CONFIG="$(ZEDBSD_STANDALONE_CONFIG)" \
 			ZEDBSD_USER_PROGRAMS="$(ZEDBSD_STANDALONE_NAME)" \
 			"build/$(ZEDBSD_STANDALONE_PLATFORM_DIR)/bin/$(ZEDBSD_STANDALONE_NAME)"; \
+	elif test "$(ZEDBSD_STANDALONE_TYPE)" = shared-library; then \
+		$(MAKE) -C "$(ZEDBSD_REPO_ROOT)" \
+			ZEDBSD_CONFIG="$(ZEDBSD_STANDALONE_CONFIG)" \
+			ZEDBSD_USER_PROGRAMS="$(ZEDBSD_STANDALONE_NAME)" \
+			"build/$(ZEDBSD_STANDALONE_PLATFORM_DIR)/dynamic/$(ZEDBSD_STANDALONE_NAME).so"; \
 	elif test "$(ZEDBSD_STANDALONE_TYPE)" = library && \
 	    test -n "$(ZEDBSD_STANDALONE_SOURCES)"; then \
 		mkdir -p build; objects=; \
@@ -79,6 +84,12 @@ install: build
 		$(INSTALL) -m "$(ZEDBSD_STANDALONE_MODE)" \
 			"$(ZEDBSD_REPO_ROOT)/build/$(ZEDBSD_STANDALONE_PLATFORM_DIR)/bin/$(ZEDBSD_STANDALONE_NAME)" \
 			"$(DESTDIR)$(ZEDBSD_STANDALONE_BINDIR)/$(ZEDBSD_STANDALONE_NAME)"; \
+	elif test "$(ZEDBSD_STANDALONE_TYPE)" = shared-library; then \
+		libdir="$(if $(filter /,$(PREFIX)),/lib,$(patsubst %/,%,$(PREFIX))/lib)"; \
+		$(INSTALL) -d "$(DESTDIR)$$libdir"; \
+		$(INSTALL) -m 0644 \
+			"$(ZEDBSD_REPO_ROOT)/build/$(ZEDBSD_STANDALONE_PLATFORM_DIR)/dynamic/$(ZEDBSD_STANDALONE_NAME).so" \
+			"$(DESTDIR)$$libdir/$(ZEDBSD_STANDALONE_NAME).so"; \
 	elif test "$(ZEDBSD_STANDALONE_TYPE)" = library && \
 	    test -n "$(ZEDBSD_STANDALONE_SOURCES)"; then \
 		libdir="$(if $(filter /,$(PREFIX)),/lib,$(patsubst %/,%,$(PREFIX))/lib)"; \

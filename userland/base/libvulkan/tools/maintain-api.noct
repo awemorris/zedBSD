@@ -1,0 +1,94 @@
+// zedBSD Vulkan declaration maintenance; Copyright 2026 Awe Morris, Zlib.
+// Reads only the public Khronos registry-derived declaration data, not an implementation.
+// Production builds consume maintained headers and never invoke this tool.
+
+func fail(message) { System.error(message); }
+func starts(text, prefix) {
+    return String.substring(text, 0, String.charCount(prefix)) == prefix;
+}
+func trim(text) {
+    var first = 0; var last = String.charCount(text);
+    while (first < last && (String.charAt(text, first) == " " || String.charAt(text, first) == "\t")) { first = first + 1; }
+    while (last > first && (String.charAt(text, last - 1) == " " || String.charAt(text, last - 1) == "\t" || String.charAt(text, last - 1) == "\r")) { last = last - 1; }
+    return String.substring(text, first, last - first);
+}
+func splitLines(text) {
+    var lines = []; var start = 0;
+    for (i in 0..String.charCount(text)) {
+        if (String.charAt(text, i) == "\n") {
+            Array.push(lines, String.substring(text, start, i - start)); start = i + 1;
+        }
+    }
+    if (start < String.charCount(text)) { Array.push(lines, String.substring(text, start, -1)); }
+    return lines;
+}
+func compact(text) {
+    var out = ""; var space = false;
+    for (i in 0..String.charCount(text)) {
+        var ch = String.charAt(text, i);
+        if (ch == " " || ch == "\t") { space = true; }
+        else {
+            if (space && out != "") { out = out + " "; }
+            out = out + ch; space = false;
+        }
+    }
+    return out;
+}
+func containsAny(text, names) {
+    for (i in 0..Array.size(names)) {
+        if (String.indexOf(text, names[i]) >= 0) { return true; }
+    }
+    return false;
+}
+func main(args) {
+    if (Array.size(args) != 2) { fail("usage: maintain-api.noct PINNED-vulkan_core.h OUTPUT-vulkan_core.h"); }
+    var source = FileUtil.readText(args[0]);
+    if (String.indexOf(source, "#define VK_HEADER_VERSION 269\n") < 0) { fail("expected the pinned Vulkan 1.3.269 API declaration data"); }
+    var lines = splitLines(source); var body = ""; var section = "";
+    var ignored = 0; var prototypes = 0; var coreCount = 0; var wsiCount = 0;
+    var skipTypes = ["VkDeviceGroupPresentMode", "VkImageSwapchainCreateInfoKHR", "VkBindImageMemorySwapchainInfoKHR", "VkAcquireNextImageInfoKHR", "VkDeviceGroupPresentCapabilitiesKHR", "VkDeviceGroupPresentInfoKHR", "VkDeviceGroupSwapchainCreateInfoKHR"];
+    var skipCommands = ["vkGetDeviceGroupPresentCapabilitiesKHR", "vkGetDeviceGroupSurfacePresentModesKHR", "vkGetPhysicalDevicePresentRectanglesKHR", "vkAcquireNextImage2KHR"];
+    for (i in 0..Array.size(lines)) {
+        var line = trim(lines[i]);
+        if (starts(line, "typedef uint32_t VkBool32;")) { section = "core"; }
+        if (starts(line, "// VK_VERSION_1_1 ")) { section = ""; }
+        if (line == "#define VK_KHR_surface 1" || line == "#define VK_KHR_swapchain 1" || line == "#define VK_KHR_display 1" || line == "#define VK_KHR_display_swapchain 1") { section = "wsi"; }
+        if (line == "#define VK_KHR_sampler_mirror_clamp_to_edge 1") { section = ""; }
+        if (section == "") { continue; }
+        if (ignored != 0) {
+            if (ignored == 1 && String.indexOf(line, ";") >= 0) { ignored = 0; }
+            else if (ignored == 2 && starts(line, "}")) { ignored = 0; }
+            continue;
+        }
+        if (section == "wsi" && containsAny(line, skipTypes)) {
+            if (starts(line, "typedef struct ") || starts(line, "typedef enum ")) { ignored = 2; }
+            continue;
+        }
+        if (section == "wsi" && containsAny(line, skipCommands)) {
+            if (starts(line, "VKAPI_ATTR ")) { ignored = 1; }
+            continue;
+        }
+        if (starts(line, "//")) { continue; }
+        var comment = String.indexOf(line, "//");
+        if (comment >= 0) { line = trim(String.substring(line, 0, comment)); }
+        if (starts(line, "VKAPI_ATTR ")) {
+            prototypes = prototypes + 1;
+            if (section == "core") { coreCount = coreCount + 1; }
+            else { wsiCount = wsiCount + 1; }
+        }
+        if (starts(line, "typedef enum ") || starts(line, "typedef struct ") || starts(line, "typedef union ")) {
+            var kindEnd = String.indexOf(line, " {");
+            var role = line;
+            if (kindEnd >= 0) { role = String.substring(line, 8, kindEnd - 8); }
+            body = body + "\n/* Preserves the registry ABI of " + role + " for application calls. */\n";
+        }
+        var normalized = compact(line);
+        if (starts(lines[i], "    ")) { normalized = "\t" + normalized; }
+        body = body + normalized + "\n";
+    }
+    if (coreCount != 137 || wsiCount != 18 || prototypes != 155) { fail("wrong declaration set: " + coreCount + " core and " + wsiCount + " WSI"); }
+    var preamble = FileUtil.readText("userland/base/libvulkan/tools/api-preamble.h.in");
+    var output = preamble + body + "\n#ifdef __cplusplus\n}\n#endif\n\n#endif\n";
+    FileUtil.writeText(args[1], output);
+    print("maintained 137 Vulkan 1.0 core and 18 WSI declarations");
+}

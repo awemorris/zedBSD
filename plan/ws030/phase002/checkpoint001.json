@@ -1,0 +1,26 @@
+{
+  "at": "2026-09-12T18:16:51.694568+00:00",
+  "phase_acceptance": "not cleared; partial implementation and focused host tests",
+  "event": "https://github.com/awemorris/zedBSD/issues/390#issuecomment-5647774479",
+  "approved_HAL_patch": "e6ec9e6c2deda41b840fa6f10846438d091f3a20ce782b9251b7979ac7591c8d",
+  "kernel_build_log": "/tmp/q308-kernel-integration-build.log",
+  "evidence_directory": "plan/ws030/phase002/checkpoint001-evidence",
+  "current_source_hashes": {
+    "src/hal/amd64/space.c": "e4e97a8de5a22456d86737223f96eb0ed09de902b37c78fc00cbd1c3220001a8",
+    "include/hal/hal.h": "53d0d191fa9390017b2802329a4e199d04486462970662ec12fbe26753a41130",
+    "src/kern/vm-device.c": "35f41cc1649f674ade816bbc96cc56174f1121ecfe64e0507077f9fc7bf52b64",
+    "src/kern/vmspace.c": "9f3744816dbc56d886a77ad49a1edb1f89e2ae7fa1c3830822bded1e263da349",
+    "src/kern/uaccess.c": "67eb805b8e7a1753f97dcb076d44228d18f57a7a5281ee4e626a1cd1df2ac3ed",
+    "src/kern/cdev.c": "385a2d7e77e97fdeed988dec252835a98e3052f668c821165dfa37fc380c5fba",
+    "src/kern/syscall.c": "c74fb29cfbe5d8ddf78654e605ac3830f45dbf9166f17ac6584dbb746189fdda",
+    "src/drivers/gpu/gpu.c": "27469879894ed04451fc09e9276b3a88503b37f044075d18f2fcab05491b3d0f",
+    "userland/base/libvulkan/memory.c": "87b79856d3bc1269f56643c51f6b94452dd52206aae9e2a437d1244c12315cfc",
+    "plan/ws030/tests/libvulkan-memory.c": "846c667c2132f03ede0f6125ca11ef92be136e73651a2cd3fa66dcbdce171908",
+    "plan/ws014/tests/gpu-framework.c": "f4b4250b8cee6a329904081f3e4b58981a8766f3b7a405edc1cae4365a8fbad1"
+  },
+  "limitations": [
+    "No new guest boot/runtime or GPU visibility acceptance",
+    "256MiB limit change followed kernel build; larger-aperture runtime not tested",
+    "Remaining Vulkan core families and full link/dispatch/install acceptance pending"
+  ]
+}

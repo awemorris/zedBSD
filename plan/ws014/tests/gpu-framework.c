@@ -25,6 +25,8 @@
 #include <kern/lock.h>
 #include <kern/poll.h>
 #include <kern/uaccess.h>
+#include <kern/vm-device.h>
+#include <kern/device-io.h>
 
 #include <assert.h>
 #include <errno.h>
@@ -33,6 +35,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* This backend advertises more resources than the former fixed per-session table. */
+#define TEST_RESOURCE_QUOTA 96U
 
 #define TEST_GPU_COUNT 40U
 
@@ -68,6 +73,7 @@ struct test_resource {
 	uint64_t bytes;
 	unsigned kind;
 	uint8_t data[4096];
+	void *mapped_data;
 };
 
 /* One open-file description retains its synthetic inode's device generation. */
@@ -169,6 +175,8 @@ static void test_optional_transfer(struct test_file *opened, struct test_file *f
 static void test_optional_command(struct test_file *opened, struct test_backend *backend);
 static void test_optional_present(struct test_file *opened, struct test_backend *backend, uint64_t storage, uint64_t blob);
 
+static int backend_map(void *opaque, void *private_session, void *object, struct drv_gpu_mapping *view);
+static void test_mapping(void);
 static void test_pci_ownership(void);
 static int pci_config_read(void *argument, const struct drv_pci_address *address, unsigned offset, unsigned width, uint32_t *result);
 static int pci_config_write(void *argument, const struct drv_pci_address *address, unsigned offset, unsigned width, uint32_t word);
@@ -207,6 +215,7 @@ main(
 	test_dynamic_devices();
 	test_optional_validation();
 	test_optional_requests();
+	test_mapping();
 
 	/* Records the separately exercised protocol and copied-buffer acceptance paths. */
 	puts("GPU optional operations: capability, blob, transfer, command and presentation PASS");
@@ -489,6 +498,93 @@ kern_logf(
 	return;
 }
 
+/*
+ * Retains the open-file description while a real device mapping borrows its session.
+ */
+void
+file_ref(
+	struct file *file)
+{
+	/* Each mapping reference delays the final backend close and inode generation release. */
+	refcount_get(&file->f_refs);
+
+	/* Succeeded: the mapped session remains alive independently of the caller's descriptor. */
+	return;
+}
+
+/*
+ * Closes the real cdev session only after the last descriptor or mapping reference is released.
+ */
+int
+file_close(
+	struct file *file)
+{
+	struct test_file *opened;
+	int error;
+	int final;
+
+	/* A retained device mapping keeps this file description open after descriptor close. */
+	final = refcount_put(&file->f_refs);
+	if (!final)
+		return 0;
+
+	/* Final close consumes backend state before releasing its borrowed device generation. */
+	opened = (struct test_file *)((char *)file - offsetof(struct test_file, file));
+	error = cdev_file_ops.close(file);
+	assert(error == 0);
+	cdev_release(opened->device);
+	opened->device = NULL;
+
+	/* Succeeded: neither the synthetic inode nor the backend session remains retained. */
+	return 0;
+}
+
+/*
+ * Reads one byte across the fixture's explicit device-memory boundary.
+ */
+uint8_t
+kern_mmio_read8(
+	const volatile void *address)
+{
+	/* Succeeded: the device view supplies the current byte without using a cached RAM alias. */
+	return *(const volatile uint8_t *)address;
+}
+
+/*
+ * Writes one byte through the fixture's explicit device-memory boundary.
+ */
+void
+kern_mmio_write8(
+	volatile void *address,
+	uint8_t value)
+{
+	/* Device-backed VM access reaches the same shared fixture byte through its MMIO operation. */
+	*(volatile uint8_t *)address = value;
+
+	/* Succeeded: other retained mappings can observe the device store. */
+	return;
+}
+
+/*
+ * Accepts a read-order boundary in this single-threaded device-memory fixture.
+ */
+void
+kern_io_read_barrier(void)
+{
+	/* Succeeded: serial host byte operations have no additional ordering work to perform. */
+	return;
+}
+
+/*
+ * Accepts a write-order boundary in this single-threaded device-memory fixture.
+ */
+void
+kern_io_write_barrier(void)
+{
+	/* Succeeded: serial host byte operations have no deferred stores to publish. */
+	return;
+}
+
 /* Opens one backend session without holding a core spinlock. */
 static int
 backend_open(
@@ -585,6 +681,7 @@ backend_get_info(
 	}
 
 	/* Reports a bounded storage contract without claiming display support. */
+	info->max_resources = TEST_RESOURCE_QUOTA;
 	info->max_resource_bytes = 4096;
 
 	/* Different instances can expose different limits through the same ops. */
@@ -661,6 +758,7 @@ backend_destroy(
 	session->live--;
 	backend->live--;
 	backend->destroyed++;
+	free(resource->mapped_data);
 	kern_free(resource);
 
 	/* Succeeded: the allocation no longer belongs to the session. */
@@ -706,6 +804,7 @@ open_file(
 	opened->inode.i_data = opened->device;
 	opened->file.f_inode = &opened->inode;
 	opened->file.f_ops = &cdev_file_ops;
+	refcount_init(&opened->file.f_refs, 1U);
 	atomic_store_release(&opened->file.f_flags, (unsigned)flags);
 	error = cdev_file_ops.open(&opened->file);
 	if (error != 0) {
@@ -725,11 +824,9 @@ close_file(
 {
 	int error;
 
-	/* The real cdev frontend must release all per-open backend state. */
-	error = cdev_file_ops.close(&opened->file);
+	/* Descriptor close defers backend cleanup while real device mappings retain this open description. */
+	error = file_close(&opened->file);
 	expect_error(error, 0);
-	cdev_release(opened->device);
-	opened->device = NULL;
 
 	/* Succeeded: the session and synthetic inode references are released. */
 	return;
@@ -923,7 +1020,7 @@ test_access_and_handles(
 	error = cdev_file_ops.ioctl(&reader.file, GPU_GET_INFO, (uintptr_t)&info);
 	expect_error(error, 0);
 	assert(info.capabilities == GPU_CAP_RESOURCE);
-	assert(info.max_resources == GPU_SESSION_RESOURCE_MAX);
+	assert(info.max_resources == TEST_RESOURCE_QUOTA);
 	assert(info.max_resource_bytes == 4096);
 
 	/* Read-only rights cannot be upgraded by changing mutable file flags. */
@@ -1155,7 +1252,7 @@ test_capacity_and_reentry(
 	assert(reentrant_target == NULL);
 
 	/* Fills the first session's public resource limit with real callbacks. */
-	for (index = 0; index < GPU_SESSION_RESOURCE_MAX; index++) {
+	for (index = 0; index < TEST_RESOURCE_QUOTA; index++) {
 		/* Every successful handle occupies exactly one owned table slot. */
 		prepare_create(&request);
 		error = cdev_file_ops.ioctl(
@@ -1173,7 +1270,7 @@ test_capacity_and_reentry(
 		GPU_RESOURCE_CREATE,
 		(uintptr_t)&request);
 	expect_error(error, ENOSPC);
-	assert(backend.created == GPU_SESSION_RESOURCE_MAX);
+	assert(backend.created == TEST_RESOURCE_QUOTA);
 
 	/* A full neighboring session does not consume this session's capacity. */
 	prepare_create(&request);
@@ -1182,7 +1279,7 @@ test_capacity_and_reentry(
 		GPU_RESOURCE_CREATE,
 		(uintptr_t)&request);
 	expect_error(error, 0);
-	assert(backend.created == GPU_SESSION_RESOURCE_MAX + 1U);
+	assert(backend.created == TEST_RESOURCE_QUOTA + 1U);
 
 	/* Final close releases every occupied slot before backend session close. */
 	close_file(&first);
@@ -2339,5 +2436,194 @@ test_optional_present(
 	assert(backend->presents == presented);
 
 	/* Succeeded: only the complete typed image reached backend display ownership. */
+	return;
+}
+
+/* Provides one page-aligned device view whose lifetime remains owned by its resource. */
+static int
+backend_map(
+	void *opaque,
+	void *private_session,
+	void *object,
+	struct drv_gpu_mapping *view)
+{
+	struct test_resource *resource;
+
+	/* Core mapping admission must resolve both resource ownership and callback execution context. */
+	resource = object;
+	assert(resource->session == private_session);
+	assert(resource->session->backend == opaque);
+	assert(held_spinlocks == 0);
+	assert(resource->bytes <= 4096U);
+
+	/* Repeated mappings borrow one persistent page instead of allocating private copies. */
+	if (resource->mapped_data == NULL) {
+		resource->mapped_data = aligned_alloc(4096U, 4096U);
+		if (resource->mapped_data == NULL)
+			return ENOMEM;
+
+		/* New device storage starts empty before its first shared view is published. */
+		memset(resource->mapped_data, 0, 4096U);
+	}
+
+	/* The real vm-device helper observes a device-backed physical page with explicit MMIO access. */
+	view->physical = (uint64_t)(uintptr_t)resource->mapped_data;
+	view->address = resource->mapped_data;
+	view->bytes = 4096U;
+	view->attributes = DRV_GPU_MAPPING_DEVICE;
+
+	/* Succeeded: resource destruction remains responsible for freeing the shared page after all views retire. */
+	return 0;
+}
+
+/* Exercises session-local mmap tokens, real VM lifetime and delayed final cdev close. */
+static void
+test_mapping(void)
+{
+	struct drv_gpu_ops ops;
+	struct drv_gpu_device *device;
+	struct test_backend backend;
+	struct test_file opened;
+	struct test_file foreign;
+	struct gpu_resource_create create;
+	struct gpu_resource_map request;
+	struct vm_device_mapping *mapping;
+	struct vm_device_mapping *other;
+	uint64_t old_offset;
+	unsigned char value;
+	unsigned char output;
+	unsigned attributes;
+	int error;
+
+	/* Refuse a mapping capability whose required callback is missing. */
+	memset(&backend, 0, sizeof(backend));
+	ops = backend_ops;
+	ops.capabilities |= GPU_CAP_MAPPING;
+	error = drv_gpu_register(&ops, &backend, &device);
+	expect_error(error, EINVAL);
+
+	/* A mapping callback without its advertised capability is also an incomplete contract. */
+	ops.resource_map = backend_map;
+	ops.capabilities &= ~GPU_CAP_MAPPING;
+	error = drv_gpu_register(&ops, &backend, &device);
+	expect_error(error, EINVAL);
+
+	/* The complete mapping contract publishes an ordinary dynamic GPU device. */
+	ops.capabilities |= GPU_CAP_MAPPING;
+	error = drv_gpu_register(&ops, &backend, &device);
+	expect_error(error, 0);
+	error = open_file(&opened, "gpu0", O_RDWR);
+	expect_error(error, 0);
+	error = open_file(&foreign, "gpu0", O_RDWR);
+	expect_error(error, 0);
+	prepare_create(&create);
+	error = cdev_file_ops.ioctl(&opened.file, GPU_RESOURCE_CREATE, (uintptr_t)&create);
+	expect_error(error, 0);
+
+	/* Mapping-token queries resolve resources only inside the calling session. */
+	memset(&request, 0, sizeof(request));
+	request.version = GPU_ABI_VERSION;
+	request.size = sizeof(request);
+	request.handle = create.handle;
+	error = cdev_file_ops.ioctl(&foreign.file, GPU_RESOURCE_MAP, (uintptr_t)&request);
+	expect_error(error, EINVAL);
+
+	/* Failed userspace publication can be retried without consuming the first usable token. */
+	reject_copyout = 1;
+	error = cdev_file_ops.ioctl(&opened.file, GPU_RESOURCE_MAP, (uintptr_t)&request);
+	expect_error(error, EFAULT);
+	error = cdev_file_ops.ioctl(&opened.file, GPU_RESOURCE_MAP, (uintptr_t)&request);
+	expect_error(error, 0);
+	assert(request.offset == 4096U);
+	assert(request.bytes == 4096U);
+	old_offset = request.offset;
+
+	/* A foreign session cannot borrow another session's otherwise valid token. */
+	error = cdev_file_ops.mmap(&foreign.file, (off_t)old_offset, 4096U, HAL_SPACE_READ, &mapping);
+	expect_error(error, EINVAL);
+
+	/* Only page-aligned offsets within the complete resource extent are admitted. */
+	error = cdev_file_ops.mmap(&opened.file, (off_t)old_offset + 1, 4096U, HAL_SPACE_READ, &mapping);
+	expect_error(error, EINVAL);
+	error = cdev_file_ops.mmap(&opened.file, (off_t)old_offset, 8192U, HAL_SPACE_READ, &mapping);
+	expect_error(error, EINVAL);
+
+	/* Device mappings cannot acquire executable permissions. */
+	error = cdev_file_ops.mmap(&opened.file, (off_t)old_offset, 4096U, HAL_SPACE_EXEC, &mapping);
+	expect_error(error, EACCES);
+
+	/* Failed VM metadata allocation transfers no retained mapping to the caller. */
+	reject_allocation = 1;
+	error = cdev_file_ops.mmap(&opened.file, (off_t)old_offset, 4096U, HAL_SPACE_READ, &mapping);
+	expect_error(error, ENOMEM);
+	assert(mapping == NULL);
+
+	/* Independent views retain the same resource while preserving their requested protection ceilings. */
+	error = cdev_file_ops.mmap(&opened.file, (off_t)old_offset, 4096U, HAL_SPACE_READ | HAL_SPACE_WRITE, &mapping);
+	expect_error(error, 0);
+	error = cdev_file_ops.mmap(&opened.file, (off_t)old_offset, 4096U, 0, &other);
+	expect_error(error, 0);
+	error = destroy_handle(&opened, create.handle);
+	expect_error(error, EBUSY);
+	attributes = vm_device_page_attributes(mapping);
+	assert(attributes == (HAL_SPACE_DEVICE | HAL_SPACE_NOCACHE));
+
+	/* Shared device bytes remain visible through both retained mapping owners at the final valid byte. */
+	value = 0x67;
+	error = vm_device_write(mapping, 4095U, &value, 1U);
+	expect_error(error, 0);
+	error = vm_device_read(other, 4095U, &output, 1U);
+	expect_error(error, 0);
+	assert(output == value);
+	error = vm_device_write(mapping, 4096U, &value, 1U);
+	expect_error(error, EFAULT);
+
+	/* Releasing one alias or a temporary reference cannot prematurely free the remaining view. */
+	vm_device_ref(mapping);
+	vm_device_put(mapping);
+	vm_device_put(other);
+	error = destroy_handle(&opened, create.handle);
+	expect_error(error, EBUSY);
+	vm_device_put(mapping);
+	error = destroy_handle(&opened, create.handle);
+	expect_error(error, 0);
+
+	/* A later resource cannot revive a stale mmap offset, including after an earlier copy failure. */
+	prepare_create(&create);
+	error = cdev_file_ops.ioctl(&opened.file, GPU_RESOURCE_CREATE, (uintptr_t)&create);
+	expect_error(error, 0);
+	request.handle = create.handle;
+	request.offset = 0;
+	request.bytes = 0;
+	error = cdev_file_ops.ioctl(&opened.file, GPU_RESOURCE_MAP, (uintptr_t)&request);
+	expect_error(error, 0);
+	assert(request.offset > old_offset);
+	error = cdev_file_ops.mmap(&opened.file, (off_t)old_offset, 4096U, HAL_SPACE_READ, &mapping);
+	expect_error(error, EINVAL);
+	error = cdev_file_ops.mmap(&opened.file, (off_t)request.offset, 4096U, HAL_SPACE_READ, &mapping);
+	expect_error(error, 0);
+
+	/* Descriptor close releases the foreign session but retains the mapped session and its device generation. */
+	close_file(&foreign);
+	close_file(&opened);
+	assert(backend.closes == 1U);
+	assert(backend.live == 1U);
+	assert(opened.device != NULL);
+	error = drv_gpu_unregister(device);
+	expect_error(error, EBUSY);
+	error = vm_device_read(mapping, 0, &output, 1U);
+	expect_error(error, 0);
+
+	/* Final mapping release permits exactly one delayed backend close and completes device retirement. */
+	vm_device_put(mapping);
+	assert(backend.closes == 2U);
+	assert(backend.live == 0);
+	assert(opened.device == NULL);
+	error = drv_gpu_unregister(device);
+	expect_error(error, 0);
+	assert(allocations == 0);
+
+	/* Succeeded: session tokens, shared bytes and final close retain their ordinary ownership rules. */
+	puts("GPU mapping: offset isolation, bounds, rollback, shared bytes and retained close PASS");
 	return;
 }

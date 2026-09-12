@@ -387,7 +387,7 @@ pcat_config_write(
 	return 0;
 }
 
-/* Supports the pcat map bar operation. */
+/* Maps a PCI memory BAR or retains an existing mapping that covers its subrange. */
 static int
 pcat_map_bar(
 	void *context,
@@ -402,126 +402,147 @@ pcat_map_bar(
 	void *address;
 	uint32_t attr;
 	struct pcat_bar_mapping *record;
+	uint64_t relative;
+	size_t offset;
+	int error;
 
+	/* This PC/AT host uses its shared BAR registry rather than a per-call context. */
 	(void)context;
 
-	/* Handles the bar availability. */
-	if (bar == NULL || mapping == NULL || bar->type == DRV_PCI_BAR_IO ||
-	    bar->bus_address == 0 || bar->size == 0) {
-		/* Failed. */
+	/* Refuses absent output storage, port-I/O BARs and unassigned or empty memory ranges. */
+	if (bar == NULL ||
+	    mapping == NULL ||
+	    bar->type == DRV_PCI_BAR_IO ||
+	    bar->bus_address == 0 ||
+	    bar->size == 0)
 		return EINVAL;
+
+	/* Retains existing BAR windows when MSI-X or another consumer needs only a subrange. */
+	for (record = bar_mappings;
+	     record != NULL;
+	     record = record->next) {
+		/* A window belongs to one device and one BAR even when bus addresses coincide. */
+		if (record->device != device || record->bar_index != bar->index)
+			continue;
+
+		/* Computes the subrange offset only after ruling out unsigned underflow. */
+		if (bar->bus_address < record->bus_address)
+			continue;
+
+		/* Checks the full bus-width offset before narrowing it to a virtual byte offset. */
+		relative = bar->bus_address - record->bus_address;
+		if (relative > record->size)
+			continue;
+
+		/* The subrange must fit after its offset without wrapping its physical end. */
+		offset = (size_t)relative;
+		if (bar->size > record->size - offset)
+			continue;
+
+		/* A borrowed handle exposes its own physical base but does not own the full window. */
+		mapping->address = (uint8_t *)record->virtual_address + offset;
+		mapping->physical_address = bar->bus_address;
+		mapping->size = bar->size;
+		mapping->type = bar->type;
+		mapping->private_data[0] = 0;
+		mapping->private_data[1] = (uintptr_t)record;
+
+		/* Outstanding subrange handles prevent the original owner from unmapping the window. */
+		record->references++;
+
+		/* Succeeded: this handle retains the existing window without another hardware mapping. */
+		return 0;
 	}
 
-	/*
-	 * MSI-X tables commonly occupy a small region of a BAR which the device
-	 * driver has already mapped.  Reuse that mapping rather than asking the
-	 * HAL to claim overlapping physical memory a second time.
-	 */
-	for (record = bar_mappings; record != NULL; record = record->next) {
-		/* Handles the record condition. */
-		if (record->device == device &&
-		    record->bar_index == bar->index &&
-		    bar->bus_address >= record->bus_address &&
-		    bar->bus_address - record->bus_address <= record->size &&
-		    bar->size <= record->size - (size_t)(bar->bus_address -
-							 record->bus_address)) {
-			mapping->address = (uint8_t *)record->virtual_address +
-					   (size_t)(bar->bus_address -
-						    record->bus_address);
-			mapping->size = bar->size;
-			mapping->type = bar->type;
-			mapping->private_data[0] = 0;
-			mapping->private_data[1] = (uintptr_t)record;
-			record->references++;
-
-			/* Succeeded. */
-			return 0;
-		}
-	}
-
-	/* Handles the memory availability. */
+	/* Allocates the original window's ownership token before requesting a device mapping. */
 	memory = kern_malloc(sizeof(*memory));
 	if (memory == NULL)
 		return ENOMEM;
+
+	/* Retains the assigned bus range until mapping or relocation determines the final base. */
 	memory->paddr = bar->bus_address;
 	memory->size = (size_t)bar->size;
-	attr = KERN_PROT_READ | KERN_PROT_WRITE |
-		((flags & DRV_PCI_MAP_WRITETHROUGH) ? KERN_DEVICE_WRITETHROUGH
-						    : KERN_DEVICE_UNCACHED);
 
-	/* Checks the device mapping result. */
-	if (kern_device_map(memory->paddr, memory->size, attr,
-				 &address) != 0) {
-		/* The initial PC/AT HAL exposes one 16-MiB PCI MMIO window. */
-		/* A 64-bit BAR may still be reassigned below 4 GiB. */
+	/* kern_device_map accepts cache policy only and supplies access rights itself. */
+	attr = KERN_DEVICE_UNCACHED;
+	if ((flags & DRV_PCI_MAP_WRITETHROUGH) != 0)
+		attr = KERN_DEVICE_WRITETHROUGH;
+
+	/* Attempts the actual assigned physical address before considering legacy BAR relocation. */
+	error = kern_device_map(memory->paddr, memory->size, attr, &address);
+	if (error != 0) {
+		/* The legacy relocation range admits only memory BARs no larger than sixteen MiB. */
 		if ((bar->type != DRV_PCI_BAR_MEMORY32 &&
 		     bar->type != DRV_PCI_BAR_MEMORY64) ||
 		    bar->size > 0x01000000U) {
 			kern_free(memory);
-
-			/* Failed. */
 			return ENOMEM;
 		}
 
-		/* Handles the bar condition. */
+		/* Large eligible BARs use the existing fixed fallback; small ones share the upper range. */
 		if (bar->size >= 0x00400000U) {
 			assigned = 0xf0000000U;
 		} else {
+			/* Aligns the next small window before checking the relocation range's upper bound. */
 			alignment = (uint32_t)bar->size;
-
-			/* Handles the assigned condition. */
-			assigned = (pci_small_mmio_next + alignment - 1U) &
-				   ~(alignment - 1U);
+			assigned = (pci_small_mmio_next + alignment - 1U) & ~(alignment - 1U);
 			if (assigned > 0xf1000000U - bar->size) {
 				kern_free(memory);
-
-				/* Failed. */
 				return ENOMEM;
 			}
 
+			/* Preserves the existing reservation order even if later BAR assignment fails. */
 			pci_small_mmio_next = assigned + (uint32_t)bar->size;
 		}
 
-		/* Checks the drv pci device assign bar result. */
-		if (drv_pci_device_assign_bar(device, bar->index, assigned) !=
-		    0) {
+		/* Completes hardware BAR reassignment before trying the fallback physical address. */
+		error = drv_pci_device_assign_bar(device, bar->index, assigned);
+		if (error != 0) {
 			kern_free(memory);
-
-			/* Failed. */
 			return ENOMEM;
 		}
 
+		/* The original owner must retain the relocated physical base used by the kernel mapping. */
 		memory->paddr = assigned;
-
-		/* Checks the device mapping result. */
-		if (kern_device_map(memory->paddr, memory->size, attr,
-					 &address) != 0) {
+		error = kern_device_map(memory->paddr, memory->size, attr, &address);
+		if (error != 0) {
 			kern_free(memory);
-
-			/* Failed. */
 			return ENOMEM;
 		}
 
-		kern_logf("pci: BAR%u assigned to %08x (%u KiB)\n", bar->index,
-			   assigned, (unsigned)(bar->size / 1024U));
+		/* Records the actual relocated BAR only after its device window exists. */
+		kern_logf(
+			"pci: BAR%u assigned to %08x (%u KiB)\n",
+			bar->index,
+			assigned,
+			(unsigned)(bar->size / 1024U));
 	}
 
+	/* Describes the original owner using the physical address that actually mapped. */
 	mapping->address = address;
+	mapping->physical_address = memory->paddr;
 	mapping->size = memory->size;
 	mapping->type = bar->type;
 	mapping->private_data[0] = (uintptr_t)memory;
 
-	/* Handles the record availability. */
+	/* Allocates shared-range tracking before making this window available to later borrowers. */
 	record = kern_malloc(sizeof(*record));
 	if (record == NULL) {
-		(void)kern_device_unmap(mapping->address, memory->size);
+		/* Preserves the construction failure if releasing the unpublished window also fails. */
+		error = kern_device_unmap(mapping->address, memory->size);
+		if (error != 0) {
+			kern_free(memory);
+			memset(mapping, 0, sizeof(*mapping));
+			return ENOMEM;
+		}
+
+		/* Removes the local ownership token after retiring the unpublished hardware mapping. */
 		kern_free(memory);
 		memset(mapping, 0, sizeof(*mapping));
-
-		/* Failed. */
 		return ENOMEM;
 	}
 
+	/* Initializes the shared record with one reference held by this original owner. */
 	record->device = device;
 	record->bar_index = bar->index;
 	record->bus_address = memory->paddr;
@@ -529,10 +550,12 @@ pcat_map_bar(
 	record->virtual_address = mapping->address;
 	record->references = 1;
 	record->next = bar_mappings;
+
+	/* Publishes the fully mapped range and links the owner's handle to its shared lifetime. */
 	bar_mappings = record;
 	mapping->private_data[1] = (uintptr_t)record;
 
-	/* Succeeded. */
+	/* Succeeded: the caller owns the original window and future subranges can retain it. */
 	return 0;
 }
 

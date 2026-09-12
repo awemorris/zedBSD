@@ -1936,6 +1936,31 @@
       "path": "plan/ws014/phase005/phase.md",
       "number": 387,
       "url": "https://github.com/awemorris/zedBSD/issues/387"
+    },
+    "ws030": {
+      "path": "plan/ws030/ws.md",
+      "number": 388,
+      "url": "https://github.com/awemorris/zedBSD/issues/388"
+    },
+    "ws030-p001": {
+      "path": "plan/ws030/phase001/phase.md",
+      "number": 389,
+      "url": "https://github.com/awemorris/zedBSD/issues/389"
+    },
+    "ws030-p002": {
+      "path": "plan/ws030/phase002/phase.md",
+      "number": 390,
+      "url": "https://github.com/awemorris/zedBSD/issues/390"
+    },
+    "ws030-p003": {
+      "path": "plan/ws030/phase003/phase.md",
+      "number": 391,
+      "url": "https://github.com/awemorris/zedBSD/issues/391"
+    },
+    "ws030-p004": {
+      "path": "plan/ws030/phase004/phase.md",
+      "number": 392,
+      "url": "https://github.com/awemorris/zedBSD/issues/392"
     }
   }
 }

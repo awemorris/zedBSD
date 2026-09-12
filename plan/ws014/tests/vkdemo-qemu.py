@@ -88,6 +88,115 @@ def ordinary_run(args, qmp, output, report, console, deadline):
     raise TimeoutError('ordinary vkdemo START, live progress, DONE and returned shell prompt')
 
 
+def display_competition(args, qmp, output, debug, process, report, deadline):
+    """Require a second process to fail its claim while its owner keeps drawing."""
+    owner = args.token + '-owner'
+    contender = args.token + '-contender'
+    result = {'owner': owner, 'contender': contender, 'rejected': False,
+              'owner_completed': False}
+    report['competition'] = result
+    baseline = debug.stat().st_size
+
+    def text():
+        if process.poll() is not None:
+            raise RuntimeError('QEMU exited during display ownership competition')
+        value = common.guest_text(debug, baseline) + common.console_text(qmp, output, args)
+        if re.search(r'kernel panic|amd64 fault v=', value):
+            raise RuntimeError('kernel failure during display ownership competition')
+        return value
+
+    qmp.text(f'/bin/vkdemo --duration=12 --token={owner} &\n')
+    while time.monotonic() < deadline:
+        value = text()
+        if re.search(r'VKDEMO PRESENT run=' + re.escape(owner) + ' ', value):
+            break
+        time.sleep(0.05)
+    else:
+        raise TimeoutError('background owner did not present before the competing claim')
+
+    qmp.text(f'/bin/vkdemo --duration=1 --token={contender}\n')
+    failure = re.compile(r'VKDEMO FAILED run=' + re.escape(contender) +
+                         r' api=direct display swapchain result=(-?\d+) frames=(\d+)')
+    owner_done = re.compile(r'VKDEMO DONE run=' + re.escape(owner) + r' frames=(\d+)')
+    while time.monotonic() < deadline:
+        value = text()
+        rejected = failure.search(value)
+        if rejected:
+            if rejected.groups() != ('-1000000001', '0'):
+                raise RuntimeError('contender failed for a reason other than native window ownership')
+            result['rejected'] = True
+            result['error'] = 'VK_ERROR_NATIVE_WINDOW_IN_USE_KHR'
+        if re.search(r'VKDEMO FAILED run=' + re.escape(owner) + ' ', value):
+            raise RuntimeError('display owner failed during a rejected competing claim')
+        done = owner_done.search(value)
+        if done and result['rejected']:
+            frames = int(done.group(1))
+            if frames < 3:
+                raise RuntimeError('owner did not continue rendering through the rejected claim')
+            result.update(owner_completed=True, owner_frames=frames)
+            save_report(output, report)
+            return
+        time.sleep(0.05)
+    raise TimeoutError('competing claim rejection and unaffected owner completion')
+
+
+def lifecycle_run(args, qmp, output, debug_path, vnc_path, process, report, console, deadline):
+    """Interrupt a presenting process and capture the returned physical console."""
+    result = {'abnormal_exit': False, 'reopened': False, 'console_restored': False}
+    report['lifecycle'] = result
+    token = args.token + '-abort'
+    qmp.text(f'/bin/vkdemo --verify-session --token={token}\n')
+    marker = None
+    while time.monotonic() < deadline:
+        text = console()
+        marker = parse_marker(text, token, 1)
+        if marker is not None:
+            break
+        time.sleep(0.05)
+    if marker is None:
+        raise TimeoutError('abnormal-exit run did not present its first held frame')
+    result['held_frame'] = marker
+    qmp.call('human-monitor-command', {'command-line': 'sendkey ctrl-c 1'})
+    while time.monotonic() < deadline:
+        text = console()
+        last = text.rfind('VKDEMO PRESENT run=' + token)
+        if last >= 0 and re.search(r'root@[^\r\n]*\$ ', text[last:]):
+            if 'VKDEMO DONE run=' + token in text:
+                raise RuntimeError('interrupted process unexpectedly completed normally')
+            result['abnormal_exit'] = True
+            break
+        time.sleep(0.05)
+    if not result['abnormal_exit']:
+        raise TimeoutError('SIGINT did not terminate the presenting process')
+
+    # This distinct run proves file-close cleanup made the display claim available.
+    saved_token = args.token
+    try:
+        args.token = saved_token + '-after-abort'
+        reopened = {}
+        ordinary_run(args, qmp, output, reopened, console, deadline)
+        result['reopen'] = reopened['ordinary']
+        result['reopened'] = True
+    finally:
+        args.token = saved_token
+
+    # A shell prompt in retained VT memory alone does not prove visible restoration.
+    before = output / 'console-return.ppm'
+    result['console_before'] = capture_rfb(vnc_path, before, 5)
+    result['console_before_sha256'] = common.digest(before)
+    qmp.text('echo console-restoration-check\n')
+    time.sleep(0.30)
+    after = output / 'console-write.ppm'
+    result['console_after'] = capture_rfb(vnc_path, after, 5)
+    result['console_after_sha256'] = common.digest(after)
+    result['console_restored'] = before.read_bytes() != after.read_bytes()
+    save_report(output, report)
+    display_competition(args, qmp, output, debug_path, process, report, deadline)
+    save_report(output, report)
+    if not result['console_restored']:
+        raise RuntimeError('returned shell output did not change the physical console framebuffer')
+
+
 def save_report(output, report):
     (output / 'result.json').write_text(json.dumps(report, indent=2) + '\n')
 
@@ -162,6 +271,8 @@ def exercise(args, qmp, output, debug, vnc_path, process, report):
         if where >= 0 and re.search(r'root@[^\r\n]*\$ ', text[where + len(done):]):
             report['guest_completed'] = True
             ordinary_run(args, qmp, output, report, console, deadline)
+            if getattr(args, 'lifecycle', False):
+                lifecycle_run(args, qmp, output, debug, vnc_path, process, report, console, deadline)
             report['status'] = 'pass'
             save_report(output, report)
             return
@@ -176,6 +287,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--token', required=True)
     parser.add_argument('--timeout', type=int, default=180)
+    parser.add_argument('--lifecycle', action='store_true')
     parser.add_argument('--console-address', type=lambda text: int(text, 0), required=True)
     parser.add_argument('--console-size', type=int, default=32768)
     parser.add_argument('--qemu', default='qemu-system-x86_64')
@@ -185,6 +297,8 @@ def main():
     args = parser.parse_args()
     if not re.fullmatch(r'[a-z0-9-]{1,55}', args.token):
         parser.error('token must contain 1..55 lowercase letters, digits or hyphens')
+    if args.lifecycle and len(args.token) > 43:
+        parser.error('lifecycle token must leave room for per-process suffixes (at most 43)')
     if not 1 <= args.timeout <= 600 or not 1 <= args.console_size <= 1048576:
         parser.error('timeout must be 1..600 and console-size 1..1048576')
     if not 0 <= args.console_address < 1024 ** 3 - args.console_size:

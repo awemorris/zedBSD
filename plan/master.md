@@ -1,10 +1,10 @@
 <!-- awesome-plan-current:start -->
 Active Queue: none
-Last Queue: q307 finished / q307-i01 cleared
-ws014-p005: cleared (textured 3D shaders, rotation and lifecycle verified)
-ws014-p003: cleared
-ws014-p004: planning, not queued
+Last Queue: q308 finished; all five items cleared
+WS030: completed (standard Vulkan1.0/direct-display library)
+ws014-p005: cleared (corrected standard API, real display/lifecycle verified)
 WS014: incomplete
+Next: ws014-p004 planning, not queued; WS029 native i915 deferred
 <!-- awesome-plan-current:end -->
 
 # zedBSD master plan
@@ -32,7 +32,7 @@ Objectives → Milestone Goals → WS → Phase → Queue試行/結果を対応�
 | **MG003：対象機へ導入して単独起動できる** | O2, O4 | 合意した機種・媒体でインストール後の単独起動・ログインを確認できる。実機とQEMUの証拠を区別する。 | [ws003](https://github.com/awemorris/zedBSD/issues/4), [ws004](https://github.com/awemorris/zedBSD/issues/5), [ws019](https://github.com/awemorris/zedBSD/issues/20), [ws020](https://github.com/awemorris/zedBSD/issues/21), [WS028](https://github.com/awemorris/zedBSD/issues/382) |
 | **MG004：データを保持しメモリ/ストレージを実用的に使える** | O1, O2 | 永続化、低メモリ時の進行、媒体世代、既定構成の性能を合意した用途で確認できる。 | [ws016](https://github.com/awemorris/zedBSD/issues/17), [ws024](https://github.com/awemorris/zedBSD/issues/25), [ws025](https://github.com/awemorris/zedBSD/issues/26) |
 | **MG005：シンプルで一貫したネットワーク/サービス管理を利用できる** | O1, O2, O3 | networkd/netconf/serviceの責務・設定・操作が一貫し、永続化と失敗後の復旧を確認できる。 | [ws002](https://github.com/awemorris/zedBSD/issues/3), [ws005](https://github.com/awemorris/zedBSD/issues/6), [ws011](https://github.com/awemorris/zedBSD/issues/12), [ws012](https://github.com/awemorris/zedBSD/issues/13) |
-| **MG006：グラフィカルな操作環境を利用できる** | O2 | 入力・描画・ウィンドウ・端末・GUIツールの一連の操作を合意した環境で確認できる。 | [ws006](https://github.com/awemorris/zedBSD/issues/7), [ws007](https://github.com/awemorris/zedBSD/issues/8), [ws008](https://github.com/awemorris/zedBSD/issues/9), [ws014](https://github.com/awemorris/zedBSD/issues/15), [ws017](https://github.com/awemorris/zedBSD/issues/18), [ws005](ws005/ws.md) |
+| **MG006：グラフィカルな操作環境を利用できる** | O2 | 入力・描画・ウィンドウ・端末・GUIツールの一連の操作を合意した環境で確認できる。 | [ws006](https://github.com/awemorris/zedBSD/issues/7), [ws007](https://github.com/awemorris/zedBSD/issues/8), [ws008](https://github.com/awemorris/zedBSD/issues/9), [ws014](https://github.com/awemorris/zedBSD/issues/15), [ws017](https://github.com/awemorris/zedBSD/issues/18), [ws005](ws005/ws.md), [WS030](https://github.com/awemorris/zedBSD/issues/388) |
 | **MG007：用途別の独自ディストリビューションを構成・配布できる** | O1, O2 | 第三者が用途別に構成し独自ブランドでビルド・配布できる。Linux/Android代替の対象用途・機能/品質基準を具体化し実証する。 | [ws013](https://github.com/awemorris/zedBSD/issues/14), [ws015](https://github.com/awemorris/zedBSD/issues/16) |
 | **MG008：最小HALの移植契約を公開し異なる機種で実証できる** | O4 | 32bit/64bitのHAL契約・移植手順と異種/レトロ機での実証を公開し、移植者が必要な実装を判断できる。 | [ws018](https://github.com/awemorris/zedBSD/issues/19), [ws027](https://github.com/awemorris/zedBSD/issues/374) |
 | **MG009：AI活用OSS開発の経験を検証可能な知見として公開できる** | O5 | 設計権限・レビュー・変更追跡・失敗からの回復について事例と根拠を公開し、知見と未解決の問いを整理する。 | 未割当：成果を担う作業の具体化が必要 |
@@ -50,7 +50,6 @@ Objectives → Milestone Goals → WS → Phase → Queue試行/結果を対応�
 | Goal | 当面の成果 | Milestone | 担当 |
 | --- | --- | --- | --- |
 | fg004 | インストーラ実機動作：PC98 V13、Latitude 5320、SV7、LX6 | MG003 | [WS028](https://github.com/awemorris/zedBSD/issues/382) |
-| [ws029](https://github.com/awemorris/zedBSD/issues/386) | MG006 | i915ネイティブGPU | planning | WS014の検証・API整理後に実機実装。 |
 | fg005 | 有線LAN常駐管理、起動時の接続待機、DEへのネットワーク状態通知 | MG005 / MG006 | [ws005](ws005/ws.md) |
 | fg009 | PowerPC移植：OF/APM+FATからPPCカーネル起動、後続USB root/image統合 | MG008 / MG003 | [ws027](https://github.com/awemorris/zedBSD/issues/374) |
 | fg007 | HAL契約の可読性改善：コンソールAPIの集約、アロケータの kernel_alloc/kernel_free 化、kernel_entry() 前関数の prekern 命名 | MG008 / MG001 | 未定（WS018は完了。再開か新WSかの判断が必要） |
@@ -1339,9 +1338,9 @@ Status: active
 
 ## 現在地
 
-2026-09-11のユーザー指示により現在のPriorityリストを削除。WS025のp029/p030/p032/p038をcleared、WS025をcompletedとし、既存completedのWS019/WS006/WS022/WS002とともに閉鎖する。未実施の検証をPASSへ変更せず、今回の計画上の受け入れとして記録する。q303はfinished/stoppedのまま。active QueueとPriorityリストはない。後続のユーザー指示でfg004（インストーラ）、fg005（ネットワーク）、fg006（V13起動改善）、fg007（HALリファクタリング）を追加した。
+q308を完了し、WS030の標準Vulkan1.0/direct-display libraryとWS014 p005の標準API化訂正を受け入れた。active Queueはない。WS014 p002/p003のclear、p004未実行、WS029 native i915後段を維持。EGLは今回cancel、Waylandは将来backend。
 
-旧Priority順はWS025 → WS006 → WS022 → WS019 → WS002 → WS009。2026-09-11に削除済みであり、実行順・承認として再利用しない。WS009/DOC-54のWS014手動保留は維持する。
+2026-09-11に削除したPriority表は復活させない。閉鎖済みWSと既存Focus、他WSの実行保留は変更しない。q308の依存順は全WSのPriority順位ではない。過去のq307結果と現在のp005 clearance失効は区別する。
 
 ## Workstream registry
 
@@ -1361,7 +1360,7 @@ Future Listへ移したWS013・WS015は次節で管理する。完了WSの詳細
 | [WS010](ws010/ws.md) | MG001 | スクリプト・イメージツール | 完了 | q063。 |
 | [WS011](ws011/ws.md) | MG005 | ネットワーク設定コンソール | 完了（ユーザー確認） | commit confirmed完了。VLANキャンセル、bridgeはF-001へ移管。 |
 | [WS012](ws012/ws.md) | MG005 | サービス管理コンソール | 完了 | q018。 |
-| [WS014](https://github.com/awemorris/zedBSD/issues/15) | MG006 | GPU framework / virtio-gpu bring-up | incomplete | p002/p003 cleared。実Vulkan/画面一致。次はp005の3Dデモ、その後p004 API・規約整理、WS029 i915。 |
+| [WS014](https://github.com/awemorris/zedBSD/issues/15) | MG006 | GPU framework / virtio-gpu bring-up | incomplete | p002/p003/p005 cleared。p005は標準Vulkan APIへ訂正済み。p001/p004 planning、未queue。 |
 | [WS016](ws016/ws.md) | MG004 | 実行時swap制御 | 完了 | q021。 |
 | [WS017](ws017/ws.md) | MG006 | LFB描画高速化 | 依存待ち | WS022後にmmap・Xzed高速描画・受け入れ。 |
 | [WS018](ws018/ws.md) | MG008 | カーネル所有権・構成統一 | 完了 | p001〜p020。I/O後続はWS025。 |
@@ -1375,6 +1374,8 @@ Future Listへ移したWS013・WS015は次節で管理する。完了WSの詳細
 | [WS026](ws026/ws.md) | MG001 | テスト資産の整理 | 計画のみ | 不要・重複テストの整理と現行ソースへの追随。Phase未詳細化・Queue未投入。 |
 | [WS027](https://github.com/awemorris/zedBSD/issues/374) | MG008 | PowerPC移植 | planned | OF/APM+FATからPPC起動、後続USB root/image統合。 |
 | [WS028](https://github.com/awemorris/zedBSD/issues/382) | MG003 | インストーラ実機動作 | planning | 4機種の実機受け入れ。NVMe未動作と設定/組込み仮説を切り分ける。 |
+| [WS029](https://github.com/awemorris/zedBSD/issues/386) | MG006 | i915ネイティブGPU | planning | WS014最終API・規約整理後。今回未実行。 |
+| [WS030](https://github.com/awemorris/zedBSD/issues/388) | MG006 | 標準Vulkan1.0・直接表示library | completed | q308全5件cleared。137core＋18 WSI、実描画・終了・console/所有権を確認。 |
 
 ## Future List(やりたいことリスト)
 
@@ -1594,3 +1595,35 @@ userland/base/vkdemoにテクスチャ付き回転直方体を実装。独自ver
 q307 finished、q307-i01/p005 cleared、active Queueなし。p003/q306の完了を維持し、次はp004（planning、未実行）。p001 planning、WS014 incomplete。native i915は別WS029。汎用libvulkan/ICD・全Vulkan適合・汎用WSI/zero-copyは未実装。
 
 実測結果とAPI表は[p005](https://github.com/awemorris/zedBSD/issues/387)。ローカルのplan/ws014/phase005/results.md、api-coverage.md、evidence/とplan/history/queue-q307.mdへ保存。GitHubは計画/結果本文を同期し、source・資料・画像のgit add/commit/pushはユーザーが行う。
+
+## q308の標準Vulkan計画
+
+[WS030](https://github.com/awemorris/zedBSD/issues/388) が標準Vulkan1.0とdirect-display libraryを所有し、[WS014 p005](https://github.com/awemorris/zedBSD/issues/387) はその出力を使う標準APIデモへ訂正する。現在状態、有限実行scope、依存順は [Queue q308](https://github.com/awemorris/zedBSD/issues/362) を参照。EGLは今回cancel、GLES-on-Vulkan選択時へ保留。Waylandは将来backend。HALの追加改変は未許可。
+
+## q308 HAL提示差分の承認（2026-09-13・最新）
+
+ユーザーが「この差分の適用と検証を許可する」と回答した。[承認記録](https://github.com/awemorris/zedBSD/issues/390#issuecomment-5647471812) の対象は `plan/ws030/phase002/amd64-device-mapping-proposal.patch`、SHA256 `e6ec9e6c2deda41b840fa6f10846438d091f3a20ce782b9251b7979ac7591c8d`。既存MMIO APIのamd64補完と明示DEVICE usermap・protection/cache検査、hal.hの説明コメントに限り適用と検証を進める。これより前の「HAL未承認・適用待ち」はこの差分について解消した。適用・試験成功はまだ記録していない。別のHAL変更とgit add/commit/pushは許可されたと解釈しない。
+
+## q308 checkpoint001（実装・限定検証の中間結果）
+
+[承認HAL差分の適用・限定試験と実装進捗](https://github.com/awemorris/zedBSD/issues/390#issuecomment-5647774479) を記録。HAL対象・amd64 kernel統合build、HAL/GPU資源寿命/memory共有map/sync/WSIの限定host試験がPASS。全体は未完了で、Phaseのclearanceは変更しない。公開headerは固定Khronos由来1.3.269 headerから1.0 core137＋WSI18をNoctで選択する方式に具体化し、両ABIの配置/定数を照合済み。HAL追加APIなし。256MiB apertureのguest runtime、全entrypoint link/dispatch、残りAPI family、/lib設置と標準vkdemo直接表示の統合受け入れは未検証。以前の「未適用・試験成功なし」はこのcheckpointで述べた範囲について履歴となる。local証拠 `plan/ws030/phase002/checkpoint001.json`。未commitのsourceをGitHub repositoryで読めるとは扱わず、git add/commit/pushはユーザーが行う。
+
+## q308 checkpoint002／第1回時間境界レビュー
+
+[256MiB QEMU受入・PCI cache契約修正・全Vulkan symbol link](https://github.com/awemorris/zedBSD/issues/390#issuecomment-5647977365) を記録。既存Venus経路の49,152画素一致、実PCI/VM回帰試験、memory/descriptor/pipeline/sync/WSIの限定試験がPASS。全137 core＋18 WSIを含むlibvulkan.soと標準vkdemoがlinkし、SONAME/155 exports/依存を検証した。標準アプリのゲスト直接表示、/lib設置、残るAPI peer、最終規約照合は未完了で、各Phaseのclearanceは変更しない。承認HAL差分以外のHAL改変なし、720 active minutes枠内で継続。local証拠 `plan/ws030/phase002/checkpoint002.json`。source/docは未commitのままユーザー担当。
+
+## q308 checkpoint003／標準APIの実ゲスト描画と終了条件
+
+[標準Vulkan6枚描画・通常再起動・155 API検証とconsole復帰の未達](https://github.com/awemorris/zedBSD/issues/392#issuecomment-5648174368) を記録。`q308-standard-vkdemo-002` は /lib/libvulkan.so を使い、実VNC/GPU readback/独立ray-texture oracleを6枚で通過した。SIGINT後の再openも通るが、物理console復帰は `q308-lifecycle-001` で失敗したため修正中。全API peer/dispatch・Noct再生成・能力/破棄失敗レビューは進み、155行の検証台帳を作成した。最終sourceのbuild/実表示・競合・console・規約受入は残っており、clearanceは変更しない。詳細と履歴は `plan/ws030/phase004/checkpoint003.json` と同evidence資料。HALは既承認差分のみ、source/docのgit公開はユーザー担当。
+
+## q308完了: 標準Vulkan・直接表示libraryと標準APIデモ（2026-09-13）
+
+WS030 p001/p002/p003/p004とWS014 p005の標準API訂正をclearedとし、WS030 completed、q308 finished、active Queueなしとする。WS014はincomplete、p001/p004 planning、p004未queue、native i915は別WS029のまま。q307の旧scopeの実測と履歴は保持する。
+
+`libc/include/vulkan/` にVulkan1.0の公開header、`userland/base/libvulkan/` に独立した全137 core＋選択direct-display WSI18の実装を提供し、`/lib/libvulkan.so` に配置した。vkdemoは標準Vulkan/WSIだけを使い、GPU ioctl/Venus codecをアプリへ持ち込まない。ABI、Noct再生成、155実exportとproc-address、全familyの限定意味論試験、U/Kの所有権・権限・失敗回収、適用C規約の独立レビューを実施した。正式CTS認証は主張しない。
+
+最終 `q308-lifecycle-003` は実QEMU10.0.11/virglrenderer1.1.0/Intel ANVで6枚の回転直方体を描画し、実VNC/GPU readback/独立ray-texture oracleが一致（評価対象不一致0）。通常終了後6frame再起動、SIGINT後6frame再起動、640×480文字画面への復帰とechoによる画面更新、別processの表示競合拒否とowner35frame/DONEを確認した。42.671秒、QEMU exit0。最終書式変更後のkernel/appは実行済みbinaryと一致する。
+
+承認済みHAL patch SHA256 `e6ec9e6c2deda41b840fa6f10846438d091f3a20ce782b9251b7979ac7591c8d` のみを適用し、既存hal_space_map_device/device usermapを補完した。追加HAL APIはない。PCI cache属性、queue総数63、allocator破棄、console/query/通知の修正と、先行失敗・再実行理由を保存した。公開coherent HOST_VISIBLE、256MiB aperture、native watchdog等の制約は能力監査へ記録した。
+
+結果は `plan/ws030/results-q308.md`、155行の台帳は `plan/ws030/phase004/api-verification.md`、最終証拠は `plan/ws030/phase004/final-evidence/verification.json`、p005訂正は `plan/ws014/phase005/results-q308.md`、履歴は `plan/history/queue-q308.md`（いずれもlocal/uncommitted）。GitHubは計画Issue/Project/結果コメントの同期であり、source/doc/imageのgit add/commit/pushはユーザーが行う。EGLは今回cancel、Waylandは将来VK_KHR_wayland_surface backendとして追加する。

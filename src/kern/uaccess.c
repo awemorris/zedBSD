@@ -14,6 +14,7 @@
  * pin paths live in the high text section because they run during page-in.
  */
 
+#include <kern/vm-device.h>
 #include "kern/uaccess.h"
 #include "kern/kmem.h"
 #include "kern/process.h"
@@ -291,6 +292,13 @@ copyin_pinned(
 			memcpy(bytes, (const uint8_t *)hal_pmem_to_kernel(page->memory.paddr) +
 			    page_offset, chunk);
 			error = 0;
+		} else if (page->kind == VMSPACE_PINNED_DEVICE) {
+			/* The device pin retains the original ordered kernel alias through this copy. */
+			error = vm_device_read(
+				page->owner.device,
+				page->device_offset + page_offset,
+				bytes,
+				chunk);
 		} else if (page->kind == VMSPACE_PINNED_OBJECT) {
 			error = vm_object_page_pin_read(page->owner.object_page,
 			    page_offset, bytes, chunk);
@@ -364,6 +372,13 @@ copyout_pinned(
 			 */
 			vm_private_page_mark_dirty(page->owner.private_page);
 			error = 0;
+		} else if (page->kind == VMSPACE_PINNED_DEVICE) {
+			/* The retained device alias preserves cache policy and original write authority. */
+			error = vm_device_write(
+				page->owner.device,
+				page->device_offset + page_offset,
+				bytes,
+				chunk);
 		} else if (page->kind == VMSPACE_PINNED_OBJECT) {
 			error = vm_object_page_pin_write(page->owner.object_page,
 			    page_offset, bytes, chunk);

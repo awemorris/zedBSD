@@ -1,0 +1,6 @@
+{
+  "src/hal/amd64/space.c": "e4e97a8de5a22456d86737223f96eb0ed09de902b37c78fc00cbd1c3220001a8",
+  "include/hal/hal.h": "53d0d191fa9390017b2802329a4e199d04486462970662ec12fbe26753a41130",
+  "plan/ws030/tests/amd64-device-map.c": "ce03da332b01cba913a4a39761216eb3cfd6090cbea1e933b3197669fbcf7e01",
+  "plan/ws030/tests/run-amd64-device-map.py": "31c2ee5bfc7a431469cc5a64ec184e74616c3259ae271614caddda68f857c8d2"
+}

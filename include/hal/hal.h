@@ -516,6 +516,12 @@ hal_space_switch(
 
 /*
  * Map an address and complete any required TLB synchronization.
+ *
+ * Ordinary user mappings require managed RAM. HAL_SPACE_DEVICE explicitly
+ * requests caller-authorized device pages: the caller retains the backing
+ * through unmap, and the port must reject execution and cached RAM aliases.
+ * Protection changes preserve this device classification and cache policy.
+ * A port may report HAL_ERR_UNSUPPORTED when device user mappings are absent.
  */
 int
 hal_space_map(

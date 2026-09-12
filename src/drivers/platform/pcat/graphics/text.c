@@ -16,6 +16,7 @@
  * discipline above it.
  */
 
+#include <errno.h>
 #include <kern/device-io.h>
 #include <kern/text-display.h>
 #include <kern/lock.h>
@@ -88,6 +89,96 @@ static void scroll_locked(void);
 static void putc_locked(int character);
 static int vga_text_attach_locked(void);
 static void vga_cursor_locked(void);
+
+/*
+ * Renders retained text cells into an independent RAM image without reading display memory.
+ *
+ * The existing cell and glyph renderer is serialized while only its destination changes.
+ * Cursor, cell contents, live surface and output readiness are restored before unlocking.
+ */
+int
+drv_pcat_text_snapshot(
+	struct kern_text_snapshot *snapshot)
+{
+	volatile uint32_t *previous_pixels;
+	enum text_surface previous_surface;
+	unsigned previous_stride;
+	unsigned previous_origin_x;
+	unsigned previous_origin_y;
+	unsigned long irq;
+	size_t required;
+	int previous_rgbx;
+	int previous_ready;
+
+	/* Rejects an absent request before acquiring the renderer's state lock. */
+	if (snapshot == NULL)
+		return EINVAL;
+
+	/* Geometry and retained cells belong to the same locked text-grid snapshot. */
+	irq = spin_lock_irqsave(&text_lock);
+
+	/* A machine with no attached grid cannot provide useful snapshot geometry. */
+	if (text_surface == TEXT_SURFACE_NONE ||
+	    text_columns == 0U ||
+	    text_rows == 0U) {
+		spin_unlock_irqrestore(&text_lock, irq);
+		return ENODEV;
+	}
+
+	/* The fixed cell-array limits bound these products below eight megabytes. */
+	snapshot->width = text_columns * TEXT_GLYPH_WIDTH;
+	snapshot->height = text_rows * TEXT_GLYPH_HEIGHT;
+	snapshot->stride = snapshot->width * sizeof(uint32_t);
+	required = (size_t)snapshot->stride * snapshot->height;
+
+	/* Geometry queries never touch a pixel destination. */
+	if (snapshot->pixels == NULL) {
+		spin_unlock_irqrestore(&text_lock, irq);
+		if (snapshot->bytes != 0U)
+			return EINVAL;
+		return 0;
+	}
+
+	/* Refuses partial destinations before painting any cell or cursor pixel. */
+	if (snapshot->bytes < required) {
+		spin_unlock_irqrestore(&text_lock, irq);
+		return ENOSPC;
+	}
+
+	/* Saves the live destination while preserving all authoritative character and cursor state. */
+	previous_pixels = text_pixels;
+	previous_surface = text_surface;
+	previous_stride = text_stride;
+	previous_origin_x = text_origin_x;
+	previous_origin_y = text_origin_y;
+	previous_rgbx = text_rgbx;
+	previous_ready = text_ready;
+
+	/* Redirects the already initialized glyph renderer to tightly packed BGRA8888 RAM. */
+	text_pixels = snapshot->pixels;
+	text_surface = TEXT_SURFACE_FRAMEBUFFER;
+	text_stride = snapshot->width;
+	text_origin_x = 0U;
+	text_origin_y = 0U;
+	text_rgbx = 0;
+	text_ready = 1;
+	redraw_locked();
+	draw_cell_locked(text_cursor_row, text_cursor_column, text_cursor_visible);
+
+	/* Restores every temporary target field before other console writers can enter. */
+	text_pixels = previous_pixels;
+	text_surface = previous_surface;
+	text_stride = previous_stride;
+	text_origin_x = previous_origin_x;
+	text_origin_y = previous_origin_y;
+	text_rgbx = previous_rgbx;
+	text_ready = previous_ready;
+
+	spin_unlock_irqrestore(&text_lock, irq);
+
+	/* Succeeded: the independent snapshot contains all retained cells and the current cursor. */
+	return 0;
+}
 
 /*
  * Converts one palette index to the framebuffer pixel format.
@@ -308,7 +399,8 @@ static const struct kern_text_ops pcat_text_ops = {
 	.show_cursor = drv_pcat_text_show_cursor,
 	.update_cursor = drv_pcat_text_update_cursor,
 	.suspend = drv_pcat_text_suspend,
-	.resume = drv_pcat_text_resume
+	.resume = drv_pcat_text_resume,
+	.snapshot = drv_pcat_text_snapshot
 };
 
 /*

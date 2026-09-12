@@ -1,0 +1,70 @@
+// zedBSD dispatch metadata maintenance; Copyright 2026 Awe Morris, Zlib.
+// Only API declarations and numeric protocol identifiers are input data.
+
+func trim(text) {
+    var first = 0; var last = String.charCount(text);
+    while (first < last && (String.charAt(text, first) == " " || String.charAt(text, first) == "\t")) { first = first + 1; }
+    while (last > first && (String.charAt(text, last - 1) == " " || String.charAt(text, last - 1) == "\t")) { last = last - 1; }
+    return String.substring(text, first, last - first);
+}
+func starts(text, prefix) { return String.substring(text, 0, String.charCount(prefix)) == prefix; }
+func lines(text) {
+    var out = []; var start = 0;
+    for (i in 0..String.charCount(text)) {
+        if (String.charAt(text, i) == "\n") { Array.push(out, String.substring(text, start, i - start)); start = i + 1; }
+    }
+    return out;
+}
+func main(args) {
+    if (Array.size(args) != 3) { System.error("usage: maintain-dispatch.noct PUBLIC_HEADER PINNED_PROTOCOL_DEFINES OUTPUT_DIRECTORY"); }
+    var source = lines(FileUtil.readText(args[0]));
+    var banner = "/* -*- mode: c; c-file-style: \"linux\"; tab-width: 8; -*- */\n\n/*\n * zedBSD\n * Copyright (C) 2026 Awe Morris\n *\n * SPDX-License-Identifier: Zlib\n */\n\n";
+    var table = banner + "/* Maintained declaration metadata; see libc/include/vulkan/API-PROVENANCE.md. */\n";
+    var manifest = "name\tscope\textension\n"; var extension = "0"; var count = 0;
+    for (i in 0..Array.size(source)) {
+        var line = trim(source[i]);
+        if (line == "#define VK_KHR_surface 1") { extension = "VULKAN_INSTANCE_SURFACE"; }
+        if (line == "#define VK_KHR_display 1") { extension = "VULKAN_INSTANCE_DISPLAY"; }
+        if (line == "#define VK_KHR_swapchain 1") { extension = "VULKAN_DEVICE_SWAPCHAIN"; }
+        if (line == "#define VK_KHR_display_swapchain 1") { extension = "VULKAN_DEVICE_DISPLAY_SWAPCHAIN"; }
+        var at = String.indexOf(line, "(VKAPI_PTR *PFN_vk");
+        if (at < 0) { continue; }
+        var rest = String.substring(line, at + 16, -1);
+        var end = String.indexOf(rest, ")(");
+        if (end < 0) { System.error("unrecognized PFN declaration"); }
+        var name = String.substring(rest, 0, end);
+        var arguments = String.substring(rest, end + 2, -1);
+        if (name == "vkVoidFunction" || name == "vkAllocationFunction" || name == "vkReallocationFunction" || name == "vkFreeFunction" || name == "vkInternalAllocationNotification" || name == "vkInternalFreeNotification") { continue; }
+        var scope = "VULKAN_ENTRY_INSTANCE";
+        if (starts(arguments, "VkDevice ") || starts(arguments, "VkQueue ") || starts(arguments, "VkCommandBuffer ")) { scope = "VULKAN_ENTRY_DEVICE"; }
+        if (name == "vkCreateInstance" || name == "vkEnumerateInstanceExtensionProperties" || name == "vkEnumerateInstanceLayerProperties" || name == "vkGetInstanceProcAddr") { scope = "VULKAN_ENTRY_GLOBAL"; }
+        table = table + "\t{\"" + name + "\", (PFN_vkVoidFunction)" + name + ", " + scope + ", " + extension + "},\n";
+        manifest = manifest + name + "\t" + scope + "\t" + extension + "\n";
+        count = count + 1;
+    }
+    if (count != 155) { System.error("expected 155 public command records, got " + count); }
+    var protocol = lines(FileUtil.readText(args[1]));
+    var opcodes = banner + "/*\n * Numeric declarations selected from virglrenderer 1.1.0 Venus protocol.\n * Copyright 2020 Google LLC; SPDX-License-Identifier: MIT.\n * See LICENSE-PROTOCOL for the retained upstream license.\n */\n\n/* Maintained protocol IDs; no renderer implementation is included. */\n#ifndef ZEDBSD_VULKAN_OPCODES_H\n#define ZEDBSD_VULKAN_OPCODES_H\n\n/* Identifies commands in pinned Venus wire-format 1. */\nenum vulkan_opcode {\n";
+    var core = 0;
+    for (i in 0..Array.size(protocol)) {
+        var line = trim(protocol[i]);
+        if (!starts(line, "VK_COMMAND_TYPE_vk")) { continue; }
+        var at = String.indexOf(line, "_EXT = ");
+        if (at < 0) { continue; }
+        var name = String.substring(line, 16, at - 16);
+        var number = String.substring(line, at + 7, -1);
+        var comma = String.indexOf(number, ",");
+        if (comma >= 0) { number = String.substring(number, 0, comma); }
+        var id = Int.from(number);
+        if (id <= 136 || name == "vkEnumerateInstanceVersion" || name == "vkGetDeviceQueue2" || name == "vkSetReplyCommandStreamMESA" || name == "vkSeekReplyCommandStreamMESA" || name == "vkExecuteCommandStreamsMESA") {
+            opcodes = opcodes + "\tVULKAN_OPCODE_" + name + " = " + number + ",\n";
+            if (id <= 136) { core = core + 1; }
+        }
+    }
+    if (core != 137) { System.error("expected 137 core protocol numbers, got " + core); }
+    opcodes = String.substring(opcodes, 0, String.charCount(opcodes) - 2) + "\n};\n\n#endif\n";
+    FileUtil.writeText(args[2] + "/dispatch-table.inc", table);
+    FileUtil.writeText(args[2] + "/api-commands.tsv", manifest);
+    FileUtil.writeText(args[2] + "/opcodes.h", opcodes);
+    print("maintained 155 dispatch records and 142 pinned wire identifiers");
+}
