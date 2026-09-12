@@ -580,3 +580,68 @@ q305ではPCI側が既存の汎用service callbackから通常のGPU register/un
 | resource_create / resource_destroy | capabilityと対で任意。session所有の世代handle、失敗rollback、close cleanup |
 
 q305の公開APIは`drv_gpu_register(ops, private_data, **device)`と`drv_gpu_unregister(device)`。PCI側の通常service callbackがこれらを呼び、hardware detach前に解除する。使用中は非公開化後EBUSYとしてhandleとhardwareを保持する。mmap/submit/fence/display/Venusはp003への不足で未実装。p001全体はplanningのまま。
+
+## p003の実装済みGPU契約（q306 / 2026-09-12）
+
+この節は [GPU内部ヘッダー](../../include/drivers/gpu.h)、[GPU UAPIヘッダー](../../include/uapi/gpu.h)、[GPUコア](../../src/drivers/gpu/gpu.c) にある現行実装の記録。前の275関数のU/K分担表と44 callback候補表の意味は変更しない。p002末尾の未実装項目はq305完了時点の記録であり、p003で具体化した範囲を以下に示す。実装の存在、ホストの単体試験、QEMUでの実描画確認は別の結果として扱い、p003の完了は実行証拠で判断する。
+
+### versionと登録の互換性
+
+| 境界 | 現在値 | 維持したもの／今回追加したもの |
+| --- | --- | --- |
+| K内の `struct drv_gpu_ops` | `DRV_GPU_INTERFACE_VERSION = 2`、`size = sizeof(struct drv_gpu_ops)`、`reserved = 0` | p002の5 memberに任意の6 memberを追加。version 1の関数表をversion 2として解釈せず、全in-tree driverを同じヘッダーでbuildする |
+| U/K間の固定幅要求 | `GPU_ABI_VERSION = 1` | 既存の `GPU_GET_INFO`、`GPU_RESOURCE_CREATE`、`GPU_RESOURCE_DESTROY` と56/32/16 byteの各layoutを維持し、別番号の6 ioctlを追加 |
+| device登録・解除 | `drv_gpu_register(ops, private_data, **device)` / `drv_gpu_unregister(device)` | 通常の動的登録、複数deviceによる不変ops共有、PCI非依存、EBUSY時の所有権維持はq305のまま |
+| sessionのresource管理 | `GPU_SESSION_RESOURCE_MAX = 32` | STORAGEとBLOBが同じ32 slotを共有。coreが型・byte長・世代付きhandleを保持し、別sessionや破棄済みhandleを拒否 |
+
+UAPIのversion 1維持は、K内の古い関数表も受け入れるという意味ではない。登録時は内部versionとsizeを厳密に確認する。各ioctlでも要求ごとのversionとsizeを厳密に確認し、未知ioctlや未対応機能は `EOPNOTSUPP`。任意機能の有無は `GPU_GET_INFO` のcapabilitiesから確認する。
+
+### p003で追加した任意callback
+
+以下の `device` は登録時の `private_data`、`session` は `open` が生成したbackend固有状態、`object` はcoreが所有handleから解決したbackend資源を表す。いずれもK内部のポインタであり、Uから指定しない。`int` の結果は成功0または正のerrno。正確な型はヘッダーを正とする。
+
+| memberと型 | capability | K側の実装責務と返却時点 |
+| --- | --- | --- |
+| `int (*get_capset)(void *device, void *session, struct gpu_capset *request)` | `GPU_CAP_CAPSET = 2` | coreがゼロ初期化したinline領域へcapsetを返す。coreは返却bytesが要求capacity以下か確認し、version/size/selectorを元の要求に固定してcopyout |
+| `int (*blob_create)(void *device, void *session, const struct gpu_blob_create *request, void **object, uint32_t *resource_id)` | `GPU_CAP_BLOB = 4` | sessionのblobを確保し、opaque objectと非zeroのprotocol resource IDを返す。coreが先に確保したhandleと結び付ける。確保失敗はbackendが回収し、返却copyout失敗はcoreが `resource_destroy` を呼ぶ |
+| `int (*resource_read)(void *device, void *session, void *object, uint64_t offset, void *buffer, uint32_t bytes)` | `GPU_CAP_TRANSFER = 8` | 所有resourceからcoreのkernel bufferへcopyを完了して戻る。その後coreがUへcopyoutする。Uの生ポインタは受け取らない |
+| `int (*resource_write)(void *device, void *session, void *object, uint64_t offset, const void *buffer, uint32_t bytes)` | `GPU_CAP_TRANSFER = 8` | coreがcopyin済みのkernel bufferを所有resourceへcopyし、入力bufferを使い終えてから戻る |
+| `int (*command)(void *device, void *session, const void *buffer, uint32_t bytes)` | `GPU_CAP_COMMAND = 16` | 検証・copyin済みの有限command streamをbackendへ渡す。戻った後coreのbufferは破棄されるため、遅延使用に必要な内容はbackendが保持する。成功は受付を表し、Vulkan実行完了ではない |
+| `int (*present)(void *device, void *session, void *object, const struct gpu_present *request)` | `GPU_CAP_PRESENT = 32` | core検証済みのSTORAGE画像についてbackendが表示所有権を調停し、scanoutへ提示する。blobの直接presentや汎用swapchainの画像解放通知を提供する契約ではない |
+
+`open` / `close` / `get_info` は引き続き必須。`resource_create` は `GPU_CAP_RESOURCE = 1` と一致させる。`resource_destroy` はRESOURCEまたはBLOBのどちらかを公開する場合に必須となり、両方の資源に共通の最終回収callbackとして使う。TRANSFERはread/writeの両方が必要。各任意bitとcallbackの有無が一致しない関数表、未知のcapability bitは登録を拒否する。
+
+coreはcallbackをspinlock内で呼ばず、同じopen descriptionでは1 ioctlだけを受け入れる。別session間の並行実行はbackendが共有状態を保護する。明示破棄、返却失敗のrollback、最後のcloseで同じ資源回収経路を使い、全resource_destroy後にcloseを呼ぶ。backendがtimeout後のDMAを保持する場合も、その所有権はbackendに残し、reset確認前に再利用・解放しない。
+
+### p003で追加したUAPI
+
+全要求はUが `version = GPU_ABI_VERSION` と自身の正確な `size` を設定する。`address` は64 bit整数として符号化したUのbuffer位置であり、Kが表現幅、末尾のoverflow、copyin/copyout時の領域と権限を検証する。callbackへ渡すのはKのcopyのみ。以下のsizeとioctl番号はILP32/LP64共通。
+
+| ioctl | 要求型・size・番号 | Uが指定する内容／受け取るもの | Kの共通検証と権利 |
+| --- | --- | --- | --- |
+| `GPU_GET_CAPSET` | `struct gpu_capset`、280 byte、`0xc1184703` | capset_id、capset_version、capacity → bytesと `data[256]` | capacityは1..256、入力bytesは0。inline出力をゼロ初期化し、backendの返却長を確認 |
+| `GPU_BLOB_CREATE` | `struct gpu_blob_create`、40 byte、`0xc0284704` | bytes、blob_id、flags → handleとresource_id | open時の書込み権利、device上限、空きslot、入力handle/resource_id=0。flagsは `GPU_BLOB_MAPPABLE` 以外のbitを拒否。返却失敗はrollback |
+| `GPU_RESOURCE_READ` | `struct gpu_transfer`、40 byte、`0x80284705` | handle、offset、address、bytes。address先へ読み出す | open時の読出し権利、reserved=0、bytesは1..65536、同じsessionのhandle、資源内の全範囲を確認 |
+| `GPU_RESOURCE_WRITE` | `struct gpu_transfer`、40 byte、`0x80284706` | handle、offset、address、bytes。address先から書き込む | open時の書込み権利とREADと同じ長さ・所有権・範囲検証。copyin失敗時はbackendを呼ばない |
+| `GPU_COMMAND` | `struct gpu_command`、24 byte、`0x80184707` | address、bytes、flags=0 | open時の書込み権利、bytesは4..65536かつ4の倍数。KはVulkan構造体やVkResultを解釈せず、有限の転送bufferを渡す |
+| `GPU_PRESENT` | `struct gpu_present`、48 byte、`0x80304708` | handle、offset、width、height、stride、format、frame | open時の書込み権利。width/heightは1..4096、strideはwidth×4以上、formatはBGRA8888=1またはRGBA8888=2。同じsessionのSTORAGEだけを認め、offsetからstride×height全体が資源内か確認 |
+
+`GPU_RESOURCE_READ` のioctl自体は `_IOW`。固定要求をUからKへ渡し、実データは要求のaddress先へ別のcopyoutで返すためである。BLOBの破棄にも既存 `GPU_RESOURCE_DESTROY` を使い、新しいdestroy ioctlは増やさない。初期のroot限定open、open時の権利を後から拡張しない制約、切断時の `ENODEV` とpollの `POLLERR/POLLHUP` は維持する。`frame` は試行識別用の値であり、fenceや表示完了counterではない。
+
+### この契約を使うVenusの実装範囲
+
+Uの `venus-frame` がVulkan object、wire format 1のcommand、返信、VkResultとVkFenceを扱う。KのVenus backendはPCI、virtqueue、openごとのrenderer context、capset 4、HOST3D blob、copy転送とscanoutを扱う。返信用blob_id=0とVkDeviceMemoryの非zero blob_idは区別し、Kのopaque handle、protocol resource ID、UのVk object IDも別の名前空間として扱う。
+
+今回の `command` は候補表のtransportを具体化した有限転送口であり、Vulkan関数ごとのioctlを設けたものではない。virtqueue受付、Venus返信、Vulkan fence完了、実画面の取得を別々に確認する。Uは返信末尾のmarkerを別readで確認してから本文を読み、Vulkan fence完了後にreadback blobの画素を取り出す。検証した同じ画素をSTORAGEへcopyしてpresentする。
+
+実装対象は256×192の2帯をVulkan clear/copyで生成する独立クライアントと、その表示・回収経路。汎用 `libvulkan.so` / ICD、全Vulkan API、Vulkan WSI拡張、device mmap、zero-copy swapchain、汎用sync object、vblank/present完了通知、cursor/hotplug、native i915はこの実装済み一覧に含めない。44 callback案の `submit` / `display_present` / event群などがすべて現行ヘッダーに入ったという意味でもない。
+
+transportと観測の詳細は [Venus transport資料](venus-transport.md)、実行手順は [リモート検証README](tests/README-venus-remote.md)、Uの対応commandと出典は [クライアントREADME](../../userland/gpu/venus/README.md) を参照する。QEMUでVulkan描画を確認できたかどうかはp003の試行記録を正とし、この契約表だけで完了を宣言しない。
+
+## p005の3D描画経路と共有Uクライアント（q307）
+
+`userland/base/vkdemo/` は自作のvertex/fragment shader、テクスチャ付き非等辺直方体、depth、時刻のpush constantを使う有限のgraphics client。p003のwire/reply/bootstrapを `userland/gpu/venus/client.[ch]` に共通化し、caller所有のsession構造体へ通信状態を保持する。scene、pipeline、descriptor、画像・buffer・fenceの寿命とframeループは各アプリが所有する。`venus-frame` もこの共通clientを使う。
+
+[追加APIの表](phase005/api-coverage.md) はformat照会、shader module、graphics pipeline、image view/sampler、descriptor、renderpass/framebuffer、vertex/descriptor binding、draw、push constant、texture upload、fence/pool再利用を記録する。これらのVulkan状態と符号化はUに属する。Kは既存のcapset/blob/read/write/command/presentを提供する。GPU ioctlやHALの追加はこのデモの実装前提にしていない。
+
+API表の275関数、44callback候補を、今回の有限clientがすべて実装したという意味へ変更しない。対象rendererのwire commandを直接符号化するクライアントであり、汎用libvulkan.so/loader/ICDの公開関数提供は後続課題。現行UAPI v1、K内部ops v2、通常の動的register/unregisterは維持する。実測したAPI不足・画像結果・完了判定は [p005](phase005/phase.md) とその結果を正とする。

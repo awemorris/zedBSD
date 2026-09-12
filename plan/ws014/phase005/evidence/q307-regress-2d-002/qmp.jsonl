@@ -1,0 +1,121 @@
+{"receive": {"QMP": {"version": {"qemu": {"micro": 11, "minor": 0, "major": 10}, "package": "Debian 1:10.0.11+ds-0+deb13u1"}, "capabilities": ["oob"]}}}
+{"send": {"execute": "qmp_capabilities", "id": 1}}
+{"receive": {"return": {}, "id": 1}}
+{"send": {"execute": "query-pci", "id": 2}}
+{"receive": {"return": [{"bus": 0, "devices": [{"irq_pin": 0, "bus": 0, "qdev_id": "", "slot": 0, "class_info": {"class": 1536, "desc": "Host bridge"}, "id": {"device": 4663, "subsystem-vendor": 6900, "vendor": 32902, "subsystem": 4352}, "function": 0, "regions": []}, {"irq_pin": 0, "bus": 0, "qdev_id": "", "slot": 1, "class_info": {"class": 1537, "desc": "ISA bridge"}, "id": {"device": 28672, "subsystem-vendor": 6900, "vendor": 32902, "subsystem": 4352}, "function": 0, "regions": []}, {"irq_pin": 0, "bus": 0, "qdev_id": "", "slot": 1, "class_info": {"class": 257, "desc": "IDE controller"}, "id": {"device": 28688, "subsystem-vendor": 6900, "vendor": 32902, "subsystem": 4352}, "function": 1, "regions": [{"bar": 4, "size": 16, "address": -1, "type": "io"}]}, {"irq_pin": 1, "bus": 0, "qdev_id": "", "irq": 0, "slot": 1, "class_info": {"class": 1664, "desc": "Bridge"}, "id": {"device": 28947, "subsystem-vendor": 6900, "vendor": 32902, "subsystem": 4352}, "function": 3, "regions": []}, {"irq_pin": 1, "bus": 0, "qdev_id": "venus", "irq": 0, "slot": 2, "class_info": {"class": 768, "desc": "VGA controller"}, "id": {"device": 4176, "subsystem-vendor": 6900, "vendor": 6900, "subsystem": 4352}, "function": 0, "regions": [{"prefetch": true, "mem_type_64": false, "bar": 0, "size": 8388608, "address": -1, "type": "memory"}, {"prefetch": false, "mem_type_64": false, "bar": 1, "size": 4096, "address": -1, "type": "memory"}, {"prefetch": true, "mem_type_64": true, "bar": 2, "size": 16384, "address": -1, "type": "memory"}, {"prefetch": true, "mem_type_64": true, "bar": 4, "size": 8388608, "address": -1, "type": "memory"}, {"prefetch": false, "mem_type_64": false, "bar": 6, "size": 65536, "address": -1, "type": "memory"}]}]}], "id": 2}}
+{"send": {"execute": "query-version", "id": 3}}
+{"receive": {"return": {"qemu": {"micro": 11, "minor": 0, "major": 10}, "package": "Debian 1:10.0.11+ds-0+deb13u1"}, "id": 3}}
+{"send": {"execute": "pmemsave", "id": 4, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-regress-2d-002/capture/console.bin"}}}
+{"receive": {"timestamp": {"seconds": 1789229233, "microseconds": 407044}, "event": "RTC_CHANGE", "data": {"offset": 0, "qom-path": "/machine/unattached/device[5]/rtc"}}}
+{"receive": {"return": {}, "id": 4}}
+{"send": {"execute": "pmemsave", "id": 5, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-regress-2d-002/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 5}}
+{"send": {"execute": "screendump", "id": 6, "arguments": {"filename": "/home/awe/zedbsd-q306-venus/q307-regress-2d-002/capture/boot.ppm", "device": "venus", "head": 0}}}
+{"receive": {"return": {}, "id": 6}}
+{"send": {"execute": "human-monitor-command", "id": 7, "arguments": {"command-line": "sendkey slash 1"}}}
+{"receive": {"return": "", "id": 7}}
+{"send": {"execute": "human-monitor-command", "id": 8, "arguments": {"command-line": "sendkey b 1"}}}
+{"receive": {"return": "", "id": 8}}
+{"send": {"execute": "human-monitor-command", "id": 9, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 9}}
+{"send": {"execute": "human-monitor-command", "id": 10, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 10}}
+{"send": {"execute": "human-monitor-command", "id": 11, "arguments": {"command-line": "sendkey slash 1"}}}
+{"receive": {"return": "", "id": 11}}
+{"send": {"execute": "human-monitor-command", "id": 12, "arguments": {"command-line": "sendkey v 1"}}}
+{"receive": {"return": "", "id": 12}}
+{"send": {"execute": "human-monitor-command", "id": 13, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 13}}
+{"send": {"execute": "human-monitor-command", "id": 14, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 14}}
+{"send": {"execute": "human-monitor-command", "id": 15, "arguments": {"command-line": "sendkey u 1"}}}
+{"receive": {"return": "", "id": 15}}
+{"send": {"execute": "human-monitor-command", "id": 16, "arguments": {"command-line": "sendkey s 1"}}}
+{"receive": {"return": "", "id": 16}}
+{"send": {"execute": "human-monitor-command", "id": 17, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 17}}
+{"send": {"execute": "human-monitor-command", "id": 18, "arguments": {"command-line": "sendkey f 1"}}}
+{"receive": {"return": "", "id": 18}}
+{"send": {"execute": "human-monitor-command", "id": 19, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 19}}
+{"send": {"execute": "human-monitor-command", "id": 20, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 20}}
+{"send": {"execute": "human-monitor-command", "id": 21, "arguments": {"command-line": "sendkey m 1"}}}
+{"receive": {"return": "", "id": 21}}
+{"send": {"execute": "human-monitor-command", "id": 22, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 22}}
+{"send": {"execute": "human-monitor-command", "id": 23, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 23}}
+{"send": {"execute": "human-monitor-command", "id": 24, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 24}}
+{"send": {"execute": "human-monitor-command", "id": 25, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 25}}
+{"send": {"execute": "human-monitor-command", "id": 26, "arguments": {"command-line": "sendkey p 1"}}}
+{"receive": {"return": "", "id": 26}}
+{"send": {"execute": "human-monitor-command", "id": 27, "arguments": {"command-line": "sendkey h 1"}}}
+{"receive": {"return": "", "id": 27}}
+{"send": {"execute": "human-monitor-command", "id": 28, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 28}}
+{"send": {"execute": "human-monitor-command", "id": 29, "arguments": {"command-line": "sendkey s 1"}}}
+{"receive": {"return": "", "id": 29}}
+{"send": {"execute": "human-monitor-command", "id": 30, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 30}}
+{"send": {"execute": "human-monitor-command", "id": 31, "arguments": {"command-line": "sendkey equal 1"}}}
+{"receive": {"return": "", "id": 31}}
+{"send": {"execute": "human-monitor-command", "id": 32, "arguments": {"command-line": "sendkey 2 1"}}}
+{"receive": {"return": "", "id": 32}}
+{"send": {"execute": "human-monitor-command", "id": 33, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 33}}
+{"send": {"execute": "human-monitor-command", "id": 34, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 34}}
+{"send": {"execute": "human-monitor-command", "id": 35, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 35}}
+{"send": {"execute": "human-monitor-command", "id": 36, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 36}}
+{"send": {"execute": "human-monitor-command", "id": 37, "arguments": {"command-line": "sendkey f 1"}}}
+{"receive": {"return": "", "id": 37}}
+{"send": {"execute": "human-monitor-command", "id": 38, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 38}}
+{"send": {"execute": "human-monitor-command", "id": 39, "arguments": {"command-line": "sendkey a 1"}}}
+{"receive": {"return": "", "id": 39}}
+{"send": {"execute": "human-monitor-command", "id": 40, "arguments": {"command-line": "sendkey m 1"}}}
+{"receive": {"return": "", "id": 40}}
+{"send": {"execute": "human-monitor-command", "id": 41, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 41}}
+{"send": {"execute": "human-monitor-command", "id": 42, "arguments": {"command-line": "sendkey equal 1"}}}
+{"receive": {"return": "", "id": 42}}
+{"send": {"execute": "human-monitor-command", "id": 43, "arguments": {"command-line": "sendkey 2 1"}}}
+{"receive": {"return": "", "id": 43}}
+{"send": {"execute": "human-monitor-command", "id": 44, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 44}}
+{"send": {"execute": "human-monitor-command", "id": 45, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 45}}
+{"send": {"execute": "human-monitor-command", "id": 46, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 46}}
+{"send": {"execute": "human-monitor-command", "id": 47, "arguments": {"command-line": "sendkey h 1"}}}
+{"receive": {"return": "", "id": 47}}
+{"send": {"execute": "human-monitor-command", "id": 48, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 48}}
+{"send": {"execute": "human-monitor-command", "id": 49, "arguments": {"command-line": "sendkey l 1"}}}
+{"receive": {"return": "", "id": 49}}
+{"send": {"execute": "human-monitor-command", "id": 50, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 50}}
+{"send": {"execute": "human-monitor-command", "id": 51, "arguments": {"command-line": "sendkey equal 1"}}}
+{"receive": {"return": "", "id": 51}}
+{"send": {"execute": "human-monitor-command", "id": 52, "arguments": {"command-line": "sendkey 1 1"}}}
+{"receive": {"return": "", "id": 52}}
+{"send": {"execute": "human-monitor-command", "id": 53, "arguments": {"command-line": "sendkey 2 1"}}}
+{"receive": {"return": "", "id": 53}}
+{"send": {"execute": "human-monitor-command", "id": 54, "arguments": {"command-line": "sendkey 0 1"}}}
+{"receive": {"return": "", "id": 54}}
+{"send": {"execute": "human-monitor-command", "id": 55, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"return": "", "id": 55}}
+{"send": {"execute": "pmemsave", "id": 56, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-regress-2d-002/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 56}}
+{"send": {"execute": "pmemsave", "id": 57, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-regress-2d-002/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 57}}
+{"send": {"execute": "quit", "id": 58}}
+{"receive": {"timestamp": {"seconds": 1789229236, "microseconds": 707589}, "event": "VNC_CONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-regress-2d-002/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789229236, "microseconds": 708014}, "event": "VNC_INITIALIZED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-regress-2d-002/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789229236, "microseconds": 723087}, "event": "SHUTDOWN", "data": {"guest": false, "reason": "host-qmp-quit"}}}
+{"receive": {"return": {}, "id": 58}}

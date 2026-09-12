@@ -1,0 +1,45 @@
+{
+  "argv": [
+    "make",
+    "-j16",
+    "BUILD=/home/awe/zedBSD/build/venus-amd64",
+    "ZEDBSD_CONFIG=/home/awe/zedBSD/plan/ws014/tests/config-venus-amd64.mk",
+    "ARCH_IMAGE_DIR=/home/awe/zedBSD/build/venus-amd64/arch-images",
+    "DATA_IMAGE=/home/awe/zedBSD/build/venus-amd64/data.img",
+    "SWAP_IMAGE=/home/awe/zedBSD/build/venus-amd64/swapfile",
+    "disk-image"
+  ],
+  "build_exit_code": 0,
+  "sources": {
+    "files": {
+      "Makefile": "ae677cb7a66ad39cb78928c6ffd4e5c480bf4ded86efbbbf147209359f9b67d9",
+      "config/drivers/pci.drivers": "d098e939615175b236d118a905c4194a176f2913b3752e3fa577e0c1446061f7",
+      "include/drivers/gpu.h": "b776ecfe2953aee70124a4f7a74d3f2e105a069d437e4e9f02dda282a4812b57",
+      "include/drivers/venus.h": "b36beec8e960cafbded47cc88b1eae49d1a47f79a973b1f783634f39b7ca7cfe",
+      "include/uapi/gpu.h": "3a8dce2c189bfe7968bbc4c30470ca216239347f5071d6f9e69872a0fc8351c1",
+      "plan/ws014/tests/config-venus-amd64.mk": "39156dfbb661aa5248c0eb7b17ee2f9fcd89cd79dd509cf8d04e0f15f8d3cfbf",
+      "plan/ws014/tests/run-venus-remote.py": "a2b3d9ab6b91e6e03a3a2310e453434f0e917dd798032c0da388a8df5b807218",
+      "plan/ws014/tests/venus-qemu.py": "e9e0947d89cc33d97e43ae03606e970d560a0d8ccb9055d6d2a8707c1e0e54fc",
+      "plan/ws014/tests/venus_rfb.py": "e8e829cb010da6b9e15275e2c43dd01cdb11994da9f05f944c85ebbd9e5043f6",
+      "platform/amd64/vmunix.mk": "87689872a88cd26de3c803e0dddb2a8465aaf5eb43ab0e1c8d61054b012f6512",
+      "platform/amd64/zedbsd.cfg": "6507a0b467e4ef22bc252d7c565b5b0ef9cdea4b1343a8e186a1beda6231ac03",
+      "src/drivers/gpu/gpu.c": "bdd3f2195e3c8b0c2bbe85d2da25e7a557200b9b3dea2e20fe5c21aeabb33041",
+      "src/drivers/gpu/gpu.c~": "dc36561c17369fa124a506d74de5d41baed592a6b5431aaba5441da983715420",
+      "src/drivers/gpu/venus/internal.h": "834ac923f868035da74a583dd913858a00d842fc3e9559fd092d98fd98f1ce35",
+      "src/drivers/gpu/venus/transport.c": "4cda871b58e80e3c11811c6a0045aa32f16aacb2579801f1e2cdef8531e60b25",
+      "src/drivers/gpu/venus/venus.c": "395ac0d0f40d2a210b9b88433c4981c783b353725dc014d91cf1357697107edc",
+      "src/hal/amd64/asm.c": "9d60ef06392b0bfaf6e3b8e45ec12da90a7bf6ff40feefe9cba8abaa09fcf490",
+      "src/kern/platform/pcat.c": "028f32af103d59448518e0c36094cd20aada4765c1a1485202f18bbd4d4d2868",
+      "userland/gpu/venus/Makefile": "d7d4b0b24f1c3c4eda0d85b7c8f507b0bf7922fc5999684a57d0a379825169b0",
+      "userland/gpu/venus/README.md": "f9b33107c0383ac96d620776f7e04001f70ab20dee65d75ff4fabf02901d52d3",
+      "userland/gpu/venus/venus-frame.c": "48cbc5f66159781ca6ed3eb1eed1c6da45f096177fe08759c5be45180644981c"
+    },
+    "sha256": "41c04b71f25a7fe7870c0ab4f4c4db294f85c2ec3d6fd535d8f83e73d9b0ff5f"
+  },
+  "kernel_sha256": "3a2dd491dd69dd1e27298eab563717c7d81fec78dbab98d3587b33bfc6fc9821",
+  "client_sha256": "75ae9dad7b630d582c0ad69a07fcf330063601dc226d6b87c5184d369529bd03",
+  "kernel_byte_identical_to_venus004": true,
+  "client_byte_identical_to_venus004": true,
+  "last_change": "Six purpose comments corrected; physical line count and all noncomment source bytes preserved.",
+  "runtime_reference": "q306-venus-004"
+}

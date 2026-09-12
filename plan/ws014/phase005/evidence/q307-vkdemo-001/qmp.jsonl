@@ -1,0 +1,248 @@
+{"receive": {"QMP": {"version": {"qemu": {"micro": 11, "minor": 0, "major": 10}, "package": "Debian 1:10.0.11+ds-0+deb13u1"}, "capabilities": ["oob"]}}}
+{"send": {"execute": "qmp_capabilities", "id": 1}}
+{"receive": {"return": {}, "id": 1}}
+{"send": {"execute": "query-pci", "id": 2}}
+{"receive": {"return": [{"bus": 0, "devices": [{"irq_pin": 0, "bus": 0, "qdev_id": "", "slot": 0, "class_info": {"class": 1536, "desc": "Host bridge"}, "id": {"device": 4663, "subsystem-vendor": 6900, "vendor": 32902, "subsystem": 4352}, "function": 0, "regions": []}, {"irq_pin": 0, "bus": 0, "qdev_id": "", "slot": 1, "class_info": {"class": 1537, "desc": "ISA bridge"}, "id": {"device": 28672, "subsystem-vendor": 6900, "vendor": 32902, "subsystem": 4352}, "function": 0, "regions": []}, {"irq_pin": 0, "bus": 0, "qdev_id": "", "slot": 1, "class_info": {"class": 257, "desc": "IDE controller"}, "id": {"device": 28688, "subsystem-vendor": 6900, "vendor": 32902, "subsystem": 4352}, "function": 1, "regions": [{"bar": 4, "size": 16, "address": -1, "type": "io"}]}, {"irq_pin": 1, "bus": 0, "qdev_id": "", "irq": 0, "slot": 1, "class_info": {"class": 1664, "desc": "Bridge"}, "id": {"device": 28947, "subsystem-vendor": 6900, "vendor": 32902, "subsystem": 4352}, "function": 3, "regions": []}, {"irq_pin": 1, "bus": 0, "qdev_id": "venus", "irq": 0, "slot": 2, "class_info": {"class": 768, "desc": "VGA controller"}, "id": {"device": 4176, "subsystem-vendor": 6900, "vendor": 6900, "subsystem": 4352}, "function": 0, "regions": [{"prefetch": true, "mem_type_64": false, "bar": 0, "size": 8388608, "address": -1, "type": "memory"}, {"prefetch": false, "mem_type_64": false, "bar": 1, "size": 4096, "address": -1, "type": "memory"}, {"prefetch": true, "mem_type_64": true, "bar": 2, "size": 16384, "address": -1, "type": "memory"}, {"prefetch": true, "mem_type_64": true, "bar": 4, "size": 8388608, "address": -1, "type": "memory"}, {"prefetch": false, "mem_type_64": false, "bar": 6, "size": 65536, "address": -1, "type": "memory"}]}]}], "id": 2}}
+{"send": {"execute": "query-version", "id": 3}}
+{"receive": {"return": {"qemu": {"micro": 11, "minor": 0, "major": 10}, "package": "Debian 1:10.0.11+ds-0+deb13u1"}, "id": 3}}
+{"send": {"execute": "pmemsave", "id": 4, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"timestamp": {"seconds": 1789228736, "microseconds": 801012}, "event": "RTC_CHANGE", "data": {"offset": 0, "qom-path": "/machine/unattached/device[5]/rtc"}}}
+{"receive": {"return": {}, "id": 4}}
+{"send": {"execute": "pmemsave", "id": 5, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 5}}
+{"send": {"execute": "screendump", "id": 6, "arguments": {"filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/boot.ppm", "device": "venus", "head": 0}}}
+{"receive": {"return": {}, "id": 6}}
+{"send": {"execute": "human-monitor-command", "id": 7, "arguments": {"command-line": "sendkey slash 1"}}}
+{"receive": {"return": "", "id": 7}}
+{"send": {"execute": "human-monitor-command", "id": 8, "arguments": {"command-line": "sendkey b 1"}}}
+{"receive": {"return": "", "id": 8}}
+{"send": {"execute": "human-monitor-command", "id": 9, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 9}}
+{"send": {"execute": "human-monitor-command", "id": 10, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 10}}
+{"send": {"execute": "human-monitor-command", "id": 11, "arguments": {"command-line": "sendkey slash 1"}}}
+{"receive": {"return": "", "id": 11}}
+{"send": {"execute": "human-monitor-command", "id": 12, "arguments": {"command-line": "sendkey v 1"}}}
+{"receive": {"return": "", "id": 12}}
+{"send": {"execute": "human-monitor-command", "id": 13, "arguments": {"command-line": "sendkey k 1"}}}
+{"receive": {"return": "", "id": 13}}
+{"send": {"execute": "human-monitor-command", "id": 14, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 14}}
+{"send": {"execute": "human-monitor-command", "id": 15, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 15}}
+{"send": {"execute": "human-monitor-command", "id": 16, "arguments": {"command-line": "sendkey m 1"}}}
+{"receive": {"return": "", "id": 16}}
+{"send": {"execute": "human-monitor-command", "id": 17, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 17}}
+{"send": {"execute": "human-monitor-command", "id": 18, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 18}}
+{"send": {"execute": "human-monitor-command", "id": 19, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 19}}
+{"send": {"execute": "human-monitor-command", "id": 20, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 20}}
+{"send": {"execute": "human-monitor-command", "id": 21, "arguments": {"command-line": "sendkey v 1"}}}
+{"receive": {"return": "", "id": 21}}
+{"send": {"execute": "human-monitor-command", "id": 22, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 22}}
+{"send": {"execute": "human-monitor-command", "id": 23, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 23}}
+{"send": {"execute": "human-monitor-command", "id": 24, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 24}}
+{"send": {"execute": "human-monitor-command", "id": 25, "arguments": {"command-line": "sendkey f 1"}}}
+{"receive": {"return": "", "id": 25}}
+{"send": {"execute": "human-monitor-command", "id": 26, "arguments": {"command-line": "sendkey y 1"}}}
+{"receive": {"return": "", "id": 26}}
+{"send": {"execute": "human-monitor-command", "id": 27, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 27}}
+{"send": {"execute": "human-monitor-command", "id": 28, "arguments": {"command-line": "sendkey s 1"}}}
+{"receive": {"return": "", "id": 28}}
+{"send": {"execute": "human-monitor-command", "id": 29, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 29}}
+{"send": {"execute": "human-monitor-command", "id": 30, "arguments": {"command-line": "sendkey s 1"}}}
+{"receive": {"return": "", "id": 30}}
+{"send": {"execute": "human-monitor-command", "id": 31, "arguments": {"command-line": "sendkey s 1"}}}
+{"receive": {"return": "", "id": 31}}
+{"send": {"execute": "human-monitor-command", "id": 32, "arguments": {"command-line": "sendkey i 1"}}}
+{"receive": {"return": "", "id": 32}}
+{"send": {"execute": "human-monitor-command", "id": 33, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 33}}
+{"send": {"execute": "human-monitor-command", "id": 34, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 34}}
+{"send": {"execute": "human-monitor-command", "id": 35, "arguments": {"command-line": "sendkey spc 1"}}}
+{"receive": {"return": "", "id": 35}}
+{"send": {"execute": "human-monitor-command", "id": 36, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 36}}
+{"send": {"execute": "human-monitor-command", "id": 37, "arguments": {"command-line": "sendkey minus 1"}}}
+{"receive": {"return": "", "id": 37}}
+{"send": {"execute": "human-monitor-command", "id": 38, "arguments": {"command-line": "sendkey t 1"}}}
+{"receive": {"return": "", "id": 38}}
+{"send": {"execute": "human-monitor-command", "id": 39, "arguments": {"command-line": "sendkey o 1"}}}
+{"receive": {"return": "", "id": 39}}
+{"send": {"execute": "human-monitor-command", "id": 40, "arguments": {"command-line": "sendkey k 1"}}}
+{"receive": {"return": "", "id": 40}}
+{"send": {"execute": "human-monitor-command", "id": 41, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 41}}
+{"send": {"execute": "human-monitor-command", "id": 42, "arguments": {"command-line": "sendkey n 1"}}}
+{"receive": {"return": "", "id": 42}}
+{"send": {"execute": "human-monitor-command", "id": 43, "arguments": {"command-line": "sendkey equal 1"}}}
+{"receive": {"return": "", "id": 43}}
+{"send": {"execute": "human-monitor-command", "id": 44, "arguments": {"command-line": "sendkey r 1"}}}
+{"receive": {"return": "", "id": 44}}
+{"send": {"execute": "human-monitor-command", "id": 45, "arguments": {"command-line": "sendkey c 1"}}}
+{"receive": {"return": "", "id": 45}}
+{"send": {"execute": "human-monitor-command", "id": 46, "arguments": {"command-line": "sendkey 2 1"}}}
+{"receive": {"return": "", "id": 46}}
+{"send": {"execute": "human-monitor-command", "id": 47, "arguments": {"command-line": "sendkey 1 1"}}}
+{"receive": {"return": "", "id": 47}}
+{"send": {"execute": "human-monitor-command", "id": 48, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 48}}
+{"send": {"execute": "human-monitor-command", "id": 49, "arguments": {"command-line": "sendkey 0 1"}}}
+{"receive": {"return": "", "id": 49}}
+{"send": {"execute": "human-monitor-command", "id": 50, "arguments": {"command-line": "sendkey 9 1"}}}
+{"receive": {"return": "", "id": 50}}
+{"send": {"execute": "human-monitor-command", "id": 51, "arguments": {"command-line": "sendkey 6 1"}}}
+{"receive": {"return": "", "id": 51}}
+{"send": {"execute": "human-monitor-command", "id": 52, "arguments": {"command-line": "sendkey 2 1"}}}
+{"receive": {"return": "", "id": 52}}
+{"send": {"execute": "human-monitor-command", "id": 53, "arguments": {"command-line": "sendkey 6 1"}}}
+{"receive": {"return": "", "id": 53}}
+{"send": {"execute": "human-monitor-command", "id": 54, "arguments": {"command-line": "sendkey 5 1"}}}
+{"receive": {"return": "", "id": 54}}
+{"send": {"execute": "human-monitor-command", "id": 55, "arguments": {"command-line": "sendkey 6 1"}}}
+{"receive": {"return": "", "id": 55}}
+{"send": {"execute": "human-monitor-command", "id": 56, "arguments": {"command-line": "sendkey 5 1"}}}
+{"receive": {"return": "", "id": 56}}
+{"send": {"execute": "human-monitor-command", "id": 57, "arguments": {"command-line": "sendkey e 1"}}}
+{"receive": {"return": "", "id": 57}}
+{"send": {"execute": "human-monitor-command", "id": 58, "arguments": {"command-line": "sendkey 4 1"}}}
+{"receive": {"return": "", "id": 58}}
+{"send": {"execute": "human-monitor-command", "id": 59, "arguments": {"command-line": "sendkey b 1"}}}
+{"receive": {"return": "", "id": 59}}
+{"send": {"execute": "human-monitor-command", "id": 60, "arguments": {"command-line": "sendkey 4 1"}}}
+{"receive": {"return": "", "id": 60}}
+{"send": {"execute": "human-monitor-command", "id": 61, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 61}}
+{"send": {"execute": "human-monitor-command", "id": 62, "arguments": {"command-line": "sendkey 4 1"}}}
+{"receive": {"return": "", "id": 62}}
+{"send": {"execute": "human-monitor-command", "id": 63, "arguments": {"command-line": "sendkey 8 1"}}}
+{"receive": {"return": "", "id": 63}}
+{"send": {"execute": "human-monitor-command", "id": 64, "arguments": {"command-line": "sendkey 5 1"}}}
+{"receive": {"return": "", "id": 64}}
+{"send": {"execute": "human-monitor-command", "id": 65, "arguments": {"command-line": "sendkey 1 1"}}}
+{"receive": {"return": "", "id": 65}}
+{"send": {"execute": "human-monitor-command", "id": 66, "arguments": {"command-line": "sendkey d 1"}}}
+{"receive": {"return": "", "id": 66}}
+{"send": {"execute": "human-monitor-command", "id": 67, "arguments": {"command-line": "sendkey 7 1"}}}
+{"receive": {"return": "", "id": 67}}
+{"send": {"execute": "human-monitor-command", "id": 68, "arguments": {"command-line": "sendkey b 1"}}}
+{"receive": {"return": "", "id": 68}}
+{"send": {"execute": "human-monitor-command", "id": 69, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"return": "", "id": 69}}
+{"send": {"execute": "pmemsave", "id": 70, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 70}}
+{"send": {"execute": "pmemsave", "id": 71, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 71}}
+{"send": {"execute": "pmemsave", "id": 72, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 72}}
+{"send": {"execute": "pmemsave", "id": 73, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 73}}
+{"send": {"execute": "pmemsave", "id": 74, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 74}}
+{"send": {"execute": "pmemsave", "id": 75, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 75}}
+{"send": {"execute": "pmemsave", "id": 76, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 76}}
+{"send": {"execute": "pmemsave", "id": 77, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 77}}
+{"send": {"execute": "pmemsave", "id": 78, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 78}}
+{"send": {"execute": "pmemsave", "id": 79, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 79}}
+{"send": {"execute": "pmemsave", "id": 80, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 80}}
+{"send": {"execute": "pmemsave", "id": 81, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 81}}
+{"send": {"execute": "pmemsave", "id": 82, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 82}}
+{"send": {"execute": "pmemsave", "id": 83, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 83}}
+{"send": {"execute": "pmemsave", "id": 84, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 84}}
+{"send": {"execute": "pmemsave", "id": 85, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 85}}
+{"send": {"execute": "pmemsave", "id": 86, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 86}}
+{"send": {"execute": "human-monitor-command", "id": 87, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"timestamp": {"seconds": 1789228741, "microseconds": 142015}, "event": "VNC_CONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789228741, "microseconds": 142364}, "event": "VNC_INITIALIZED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789228741, "microseconds": 193236}, "event": "VNC_DISCONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"return": "", "id": 87}}
+{"send": {"execute": "pmemsave", "id": 88, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 88}}
+{"send": {"execute": "pmemsave", "id": 89, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 89}}
+{"send": {"execute": "pmemsave", "id": 90, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 90}}
+{"send": {"execute": "pmemsave", "id": 91, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 91}}
+{"send": {"execute": "human-monitor-command", "id": 92, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"timestamp": {"seconds": 1789228741, "microseconds": 778369}, "event": "VNC_CONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789228741, "microseconds": 778502}, "event": "VNC_INITIALIZED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789228741, "microseconds": 823189}, "event": "VNC_DISCONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"return": "", "id": 92}}
+{"send": {"execute": "pmemsave", "id": 93, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 93}}
+{"send": {"execute": "pmemsave", "id": 94, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 94}}
+{"send": {"execute": "pmemsave", "id": 95, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 95}}
+{"send": {"execute": "pmemsave", "id": 96, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 96}}
+{"send": {"execute": "human-monitor-command", "id": 97, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"timestamp": {"seconds": 1789228742, "microseconds": 397370}, "event": "VNC_CONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789228742, "microseconds": 397787}, "event": "VNC_INITIALIZED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789228742, "microseconds": 453217}, "event": "VNC_DISCONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"return": "", "id": 97}}
+{"send": {"execute": "pmemsave", "id": 98, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 98}}
+{"send": {"execute": "pmemsave", "id": 99, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 99}}
+{"send": {"execute": "pmemsave", "id": 100, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 100}}
+{"send": {"execute": "pmemsave", "id": 101, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 101}}
+{"send": {"execute": "human-monitor-command", "id": 102, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"timestamp": {"seconds": 1789228743, "microseconds": 30062}, "event": "VNC_CONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789228743, "microseconds": 30365}, "event": "VNC_INITIALIZED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789228743, "microseconds": 83214}, "event": "VNC_DISCONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"return": "", "id": 102}}
+{"send": {"execute": "pmemsave", "id": 103, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 103}}
+{"send": {"execute": "pmemsave", "id": 104, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 104}}
+{"send": {"execute": "pmemsave", "id": 105, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 105}}
+{"send": {"execute": "pmemsave", "id": 106, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 106}}
+{"send": {"execute": "human-monitor-command", "id": 107, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"timestamp": {"seconds": 1789228743, "microseconds": 666132}, "event": "VNC_CONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789228743, "microseconds": 666425}, "event": "VNC_INITIALIZED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789228743, "microseconds": 713248}, "event": "VNC_DISCONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"return": "", "id": 107}}
+{"send": {"execute": "pmemsave", "id": 108, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 108}}
+{"send": {"execute": "pmemsave", "id": 109, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 109}}
+{"send": {"execute": "pmemsave", "id": 110, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 110}}
+{"send": {"execute": "pmemsave", "id": 111, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 111}}
+{"send": {"execute": "human-monitor-command", "id": 112, "arguments": {"command-line": "sendkey ret 1"}}}
+{"receive": {"timestamp": {"seconds": 1789228744, "microseconds": 293536}, "event": "VNC_CONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789228744, "microseconds": 293895}, "event": "VNC_INITIALIZED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"timestamp": {"seconds": 1789228744, "microseconds": 343253}, "event": "VNC_DISCONNECTED", "data": {"server": {"auth": "none", "family": "unix", "service": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/vnc.sock", "host": "", "websocket": false}, "client": {"family": "unix", "service": "", "host": "", "websocket": false}}}}
+{"receive": {"return": "", "id": 112}}
+{"send": {"execute": "pmemsave", "id": 113, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 113}}
+{"send": {"execute": "pmemsave", "id": 114, "arguments": {"val": 6592384, "size": 32768, "filename": "/home/awe/zedbsd-q306-venus/q307-vkdemo-001/capture/console.bin"}}}
+{"receive": {"return": {}, "id": 114}}

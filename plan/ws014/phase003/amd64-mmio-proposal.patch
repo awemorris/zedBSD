@@ -1,0 +1,140 @@
+diff --git a/src/hal/amd64/asm.c b/src/hal/amd64/asm.c
+index 448b02c3..eae3fc5b 100644
+--- a/src/hal/amd64/asm.c
++++ b/src/hal/amd64/asm.c
+@@ -317,3 +317,135 @@ amd64_cpu_init(
+ 	/* Initializes the x87 state after enabling the execution environment. */
+ 	__asm__ volatile("fninit");
+ }
++
++/*
++ * Reads one 8-bit device register with the HAL I/O ordering guarantee.
++ */
++uint8_t
++hal_mmio_read8(
++	const volatile void *address)
++{
++	uint8_t contents;
++
++	/* Samples the mapped register exactly once before later device reads. */
++	contents = *(const volatile uint8_t *)address;
++	hal_io_rmb();
++
++	/* Succeeded: reports the register contents observed by this access. */
++	return contents;
++}
++
++/*
++ * Reads one 16-bit device register with the HAL I/O ordering guarantee.
++ */
++uint16_t
++hal_mmio_read16(
++	const volatile void *address)
++{
++	uint16_t contents;
++
++	/* Samples the mapped register exactly once before later device reads. */
++	contents = *(const volatile uint16_t *)address;
++	hal_io_rmb();
++
++	/* Succeeded: reports the register contents observed by this access. */
++	return contents;
++}
++
++/*
++ * Reads one 32-bit device register with the HAL I/O ordering guarantee.
++ */
++uint32_t
++hal_mmio_read32(
++	const volatile void *address)
++{
++	uint32_t contents;
++
++	/* Samples the mapped register exactly once before later device reads. */
++	contents = *(const volatile uint32_t *)address;
++	hal_io_rmb();
++
++	/* Succeeded: reports the register contents observed by this access. */
++	return contents;
++}
++
++/*
++ * Reads one 64-bit device register with the HAL I/O ordering guarantee.
++ */
++uint64_t
++hal_mmio_read64(
++	const volatile void *address)
++{
++	uint64_t contents;
++
++	/* Samples the mapped register exactly once before later device reads. */
++	contents = *(const volatile uint64_t *)address;
++	hal_io_rmb();
++
++	/* Succeeded: reports the register contents observed by this access. */
++	return contents;
++}
++
++/*
++ * Writes one 8-bit device register with the HAL I/O ordering guarantee.
++ */
++void
++hal_mmio_write8(
++	volatile void *address,
++	uint8_t contents)
++{
++	/* Publishes the register update before a later device write can pass it. */
++	*(volatile uint8_t *)address = contents;
++	hal_io_wmb();
++
++	/* Succeeded: the mapped register has received this write. */
++	return;
++}
++
++/*
++ * Writes one 16-bit device register with the HAL I/O ordering guarantee.
++ */
++void
++hal_mmio_write16(
++	volatile void *address,
++	uint16_t contents)
++{
++	/* Publishes the register update before a later device write can pass it. */
++	*(volatile uint16_t *)address = contents;
++	hal_io_wmb();
++
++	/* Succeeded: the mapped register has received this write. */
++	return;
++}
++
++/*
++ * Writes one 32-bit device register with the HAL I/O ordering guarantee.
++ */
++void
++hal_mmio_write32(
++	volatile void *address,
++	uint32_t contents)
++{
++	/* Publishes the register update before a later device write can pass it. */
++	*(volatile uint32_t *)address = contents;
++	hal_io_wmb();
++
++	/* Succeeded: the mapped register has received this write. */
++	return;
++}
++
++/*
++ * Writes one 64-bit device register with the HAL I/O ordering guarantee.
++ */
++void
++hal_mmio_write64(
++	volatile void *address,
++	uint64_t contents)
++{
++	/* Publishes the register update before a later device write can pass it. */
++	*(volatile uint64_t *)address = contents;
++	hal_io_wmb();
++
++	/* Succeeded: the mapped register has received this write. */
++	return;
++}

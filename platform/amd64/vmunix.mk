@@ -123,6 +123,11 @@ AMD64_NVME_SOURCES :=
 ifeq ($(CONFIG_DRIVER_PCI_NVME),y)
 AMD64_NVME_SOURCES += src/drivers/pci/pci-nvme.c
 endif
+AMD64_VENUS_SOURCES :=
+ifeq ($(CONFIG_DRIVER_PCI_VENUS),y)
+AMD64_VENUS_SOURCES += src/drivers/gpu/venus/transport.c \
+	src/drivers/gpu/venus/venus.c
+endif
 AMD64_INTEL_WLAN_SOURCES :=
 ifeq ($(CONFIG_DRIVER_PCI_INTEL_AX211),y)
 AMD64_INTEL_WLAN_SOURCES += src/drivers/wifi/intel-ax211/intel-ax211.c \
@@ -180,6 +185,7 @@ AMD64_KERNEL_SOURCES := \
 	src/drivers/pci/pci-pcat.c src/drivers/usb/usb.c $(AMD64_USB_HCD_SOURCES) \
 	$(AMD64_USB_CLASS_SOURCES) \
 	$(AMD64_NVME_SOURCES) \
+	$(AMD64_VENUS_SOURCES) \
 	$(AMD64_INTEL_WLAN_SOURCES) \
 	src/drivers/platform/pcat/pcat-ide.c src/drivers/ethernet/dp8390.c \
 	src/drivers/isa/ne2000.c src/drivers/platform/pcat/ps2-8042.c \

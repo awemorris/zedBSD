@@ -1,0 +1,100 @@
+{
+  "host": "awe@10.0.10.25",
+  "hostname": "chaos",
+  "method": "ssh -o BatchMode=yes -o ConnectTimeout=10; read-only diagnostics, no VMs launched or host files changed",
+  "os": "Debian GNU/Linux 13.6 (trixie)",
+  "kernel": "6.19.13+deb13-amd64",
+  "gpu": {
+    "pci": "0000:00:02.0",
+    "vendor_device": "8086:46a8",
+    "name": "Intel Alder Lake-UP3 GT2 / Iris Xe Graphics",
+    "kernel_driver": "i915",
+    "vulkan_driver": "Intel open-source Mesa driver (ANV)",
+    "mesa": "25.2.6-1~bpo13+1",
+    "vulkan_api": "1.4.318",
+    "intel_icd": "/usr/share/vulkan/icd.d/intel_icd.json",
+    "software_icd_present": true
+  },
+  "qemu": {
+    "binary": "/usr/bin/qemu-system-x86_64",
+    "version": "10.0.11 (Debian 1:10.0.11+ds-0+deb13u1)",
+    "egl_headless": true,
+    "gpu_device": "virtio-gpu-gl-pci",
+    "properties_present": [
+      "blob",
+      "venus",
+      "hostmem"
+    ],
+    "opengl_module_package": "1:10.0.11+ds-0+deb13u1",
+    "gui_package_installed": false
+  },
+  "virglrenderer": "1.1.0-2",
+  "virglrenderer_pkgconfig": "development pkg-config file absent; runtime package installed",
+  "hardware_vulkan_extensions": [
+    "VK_EXT_external_memory_dma_buf",
+    "VK_EXT_external_memory_host",
+    "VK_EXT_image_drm_format_modifier",
+    "VK_EXT_queue_family_foreign",
+    "VK_KHR_external_fence_fd",
+    "VK_KHR_external_memory_fd",
+    "VK_KHR_external_semaphore_fd",
+    "VK_KHR_synchronization2",
+    "VK_KHR_timeline_semaphore"
+  ],
+  "hardware_features": {
+    "timelineSemaphore": true,
+    "synchronization2": true,
+    "minImportedHostPointerAlignment": 4096
+  },
+  "device_access": {
+    "/dev/kvm": "read/write; KVM_GET_API_VERSION=12",
+    "/dev/dri/renderD128": "read/write",
+    "/dev/udmabuf": "read/write"
+  },
+  "kernel_config": [
+    "CONFIG_KVM=m",
+    "CONFIG_MEMFD_CREATE=y",
+    "CONFIG_DRM_I915=m",
+    "CONFIG_UDMABUF=y"
+  ],
+  "resources": {
+    "MemTotal_kB": 7810624,
+    "MemAvailable_kB": 6096532,
+    "SwapFree_kB": 8065020,
+    "home_available": "171 GiB",
+    "tmp_available": "3.8 GiB tmpfs"
+  },
+  "running_qemu_processes": [],
+  "available_firmware": [
+    "/usr/share/OVMF/OVMF_CODE_4M.fd",
+    "/usr/share/OVMF/OVMF_VARS_4M.fd"
+  ],
+  "proposed_isolated_work_directory": "/home/awe/zedbsd-q306-venus (verified absent; not created)",
+  "existing_unrelated_work": [
+    "/home/awe/qemu (PC98)",
+    "/home/awe/work/qemu-pc98",
+    "/home/awe/src/qemu-pc98",
+    "/home/awe/zedbsd-q124-*"
+  ],
+  "verification_commands": [
+    "uname -a",
+    "id",
+    "lspci -nnk",
+    "qemu-system-x86_64 --version",
+    "qemu-system-x86_64 -display help",
+    "qemu-system-x86_64 -device help",
+    "qemu-system-x86_64 -device virtio-gpu-gl-pci,help",
+    "vulkaninfo --summary",
+    "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/intel_icd.json vulkaninfo",
+    "dpkg-query -W",
+    "df -h /home/awe /tmp",
+    "os.access/stat for KVM/render/udmabuf",
+    "KVM_GET_API_VERSION ioctl only"
+  ],
+  "limitations": [
+    "No QEMU Venus initialization or guest execution yet",
+    "No display server in SSH; vulkaninfo skipped surface info",
+    "Select Intel ICD explicitly to distinguish hardware rendering from llvmpipe",
+    "Use home disk for images/artifacts rather than memory-backed /tmp"
+  ]
+}

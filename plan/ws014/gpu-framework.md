@@ -5,6 +5,10 @@ q305 / q305-i01、2026-09-12。ユーザーが指定した通常のデバイス�
 q304のPCI専用公開table・登録wrapper・一括publish・固定8台の方式は置き換えた。
 旧試験結果はq304履歴に保持し、この契約の検証結果と区別する。
 
+以下の5 callback・capability・未実装項目はq305完了時点の記録。p003で追加した
+内部interface version 2と、version 1を維持したUAPIの現行契約は
+[Vulkan責務資料のp003追記](vulkan-api-responsibilities.md#p003の実装済みgpu契約q306--2026-09-12)を参照する。
+
 ## 公開API
 
 ```c

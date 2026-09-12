@@ -150,3 +150,19 @@ and amd64 build passed. WS014 remains incomplete; p001/p003/p004 are planning.
 Venus/native i915 are not started. Keep changes uncommitted for the user.
 The standing Queue Issue remains open with generic Project Status unset;
 use Awesome Plan Status=finished for q305 and verify both Issue and Project.
+
+## 2026-09-12 HAL変更の承認条件（ユーザー確認）
+
+ユーザーが「HALの改変には許可が必要です」と明示。HAL責務やhal.hの変更に限らず、src/hal/配下の既存宣言への実装追加・補完も、適用可能な明示許可を得てから行う。既存契約の補完を理由に承認不要と解釈しない。レビュー可能な具体差分を用意し、未許可のHAL変更に依存する実装適用・実行試験は待つ。
+
+## q306 completion / p005 next（2026-09-13 latest handoff）
+
+WS014 p003/q306 cleared/finished: Venus driver, independent Vulkan frame client, and remote QEMU loop passed 2D/Vulkan patterns1/2 on awe@10.0.10.25. QMP controls and captures console; GL frames use egl-headless readback plus Unix VNC. Current amd64 aperture is bounded to8MiB. GPU ops v2/UAPI v1. See plan/ws014/phase003/results.md and plan/history/queue-q306.md. User next requests new p005: userland/base/vkdemo textured rotating cuboid to exercise vertex/fragment shaders, before p004. Prepare a separate Queue; q306 remains closed. p001/p004 planning, WS014 incomplete, native i915 is WS029. User explicitly approved GitHub publication; git add/commit/push remains user-owned. Only the exact eight reviewed amd64 MMIO accessor additions were approved; other HAL changes still require prior specific approval.
+
+## q307 active（2026-09-13 latest handoff）
+
+User requested new WS014 p005 at userland/base/vkdemo: textured rotating cuboid exercising vertex/fragment shaders before p004. Queue q307 selects only p005; plan/Issue/Project are synchronized before implementation. p003/q306 remain cleared/finished. Reuse existing GPU UAPI and independent Venus userland codec, adding only demonstrated missing API. No additional HAL change is authorized. Runtime uses the existing private host and transfer approval. Apply full coding-style and finite focused verification; no aggregate make check or git add/commit/push.
+
+## q307完了（2026-09-13 latest handoff）
+
+WS014 p005/q307 cleared/finished. userland/base/vkdemo renders a textured rotating cuboid with original vertex/fragment shaders and depth. q307-vkdemo-002 passed six GPU/readback/VNC/independent-oracle frames, normal cleanup and a second ordinary two-second/twelve-frame run in the same VM. Shared Venus client and graphics U operations added; the existing K transport now honors its ten-second deadline while clocks advance and uses its poll cap only for stalled clocks. No new ioctl or HAL change. See plan/ws014/phase005/results.md and plan/history/queue-q307.md. No active Queue; p004 planning is next, p001 planning and WS014 incomplete, native i915 remains WS029. GitHub synchronization is approved; git add/commit/push remains user-owned. HAL changes beyond the exact p003 eight-accessor approval still require specific prior permission.

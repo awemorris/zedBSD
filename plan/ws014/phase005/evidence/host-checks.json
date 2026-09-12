@@ -1,0 +1,25 @@
+{
+  "scope": "q307 focused checks; hardware acceptance recorded separately",
+  "checks": {
+    "shared_venus_client": "ordinary+ASan/UBSan/leaks+guest-header C89 PASS",
+    "independent_oracle_and_wrapper": "12 finite cases PASS",
+    "shader_regeneration": "7 finite transaction/timeout fixtures PASS; not compiler execution evidence",
+    "vkdemo_cli": "8 accepted +20 rejected cases PASS",
+    "venus_transport": "ordinary+ASan/UBSan/leaks PASS: delayed completion beyond old total-poll cap, stalled clock finite timeout, quarantined DMA/reset and existing queue/parser cases"
+  },
+  "sources": {
+    "userland/gpu/venus/client.c": "f6026539dc2119a757edec34a3eb05889721321f260379c4c5f773459bbdff5b",
+    "userland/gpu/venus/client.h": "11ca52593f3e3375f457f1a6d3d74cac1d59b87fadc2a706e274352e801fe2f2",
+    "userland/gpu/venus/venus-frame.c": "20d476b367a63e28d740a11d0b8b0d614d1d98dcae7fa043783f5feb89b3f033",
+    "plan/ws014/tests/run-venus-client-test.sh": "cc3192ecdf7e5ef9a4475037c4b2ea202763f0240aa8a45867bf9e3457dca30b",
+    "plan/ws014/tests/venus-client.c": "e6cf3000962603ee9d504a7bc600d46f235cd5ea05b434f4351a15c836166b04",
+    "plan/ws014/tests/test-vkdemo-oracle.py": "ea3ecac9c6effae49198e4882c573ff1e85aee22156aa8995600e00857d65aaa",
+    "plan/ws014/tests/test-vkdemo-shaders.py": "dd3dc159b0e83772d2b0debb488ddb6e7ed66088a4dc0cb9b458cc1d855a5ee0",
+    "plan/ws014/tests/run-vkdemo-cli-test.sh": "8663d9357e57116078dd03700fc75b10e3bb60824666a99a823a06811ef42af0",
+    "plan/ws014/tests/vkdemo-cli.c": "98e8be063cd581f6cd4dd7c94c583fe28e83c94be52856444220456ad8f46745",
+    "src/drivers/gpu/venus/transport.c": "00a00c1bb5dcea9d1d7ba8f6827b06e57572e720b5cffb5a5dc128ca303be089",
+    "plan/ws014/tests/venus-transport.c": "139316836733b6011e87840474c45822377566094c59e2ecebcbf19978756b84",
+    "plan/ws014/tests/run-venus-transport-test.sh": "d005e4a59f5fa95e1347ca27fde5c111f030fa585bc0b908b91c1925c23609f8"
+  },
+  "HAL_diff_exactly_matches_approved_p003_proposal": true
+}

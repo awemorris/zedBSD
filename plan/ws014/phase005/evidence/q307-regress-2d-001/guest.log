@@ -1,0 +1,87 @@
+A64 UEFI ENTRY
+A64 CFG MISSING 0x0000000000000000
+A64 CFG MATCH 0x0000000000000001
+A64 CFG SELECTED 0x0000000000000001
+A64 CFG UUID 5A71-A59E
+A64 KERNEL vmunix
+A64 PARAMS boot0=UUID=5A71-A59E video=640x480 overlay-root=boot0:rootfs.img overlay-data=boot0:data.img swap0=boot0:swapfile init=/bin/sh
+A64 UEFI ELF
+A64 RSDP 0x000000003fb7e014
+A64 GOP  0x0000000080000000
+A64 LOW  0x00000000001f0000
+A64 CR4  0x0000000000000668
+A64 MAPSZ 0x00000000000016e0
+A64 DESCSZ 0x0000000000000030
+A64 DESCVER 0x0000000000000001
+A64 RANGES 0x0000000000000024
+A64 MARK 1=EBS 2=MAP 3=CR3 4=KERN
+A64 UEFI READY
+A64 UEFI BOOT SERVICES EXITED
+A64 UEFI EXIT
+
+zedBSD amd64 HAL
+A64 ENTRY PASS
+A64 MEMORY source=2 usable=1018802176 boot_reclaim=48365568 highest_usable=1072033792 allocator=1018150912
+A64 RAM ARENA low=1097728 high=0 runs=2 root=5074944
+A64 RAM MAP bytes=1067167744 tables=268 large=500 small=4539
+A64 RAM ALLOC extents=22 managed=1067167744 metadata=212992 free=1016840192 publication_limit=70368744177664
+A64 PAGING PASS
+A64 IDT READY
+A64 ACPI RSDP PASS rev=2 rsdt=3FB7D074 xsdt=00000000:3FB7D0E8
+A64 ACPI ROOT READY kind=XSDT length=76 entries=5
+A64 ACPI MADT READY length=128 lapic=FEE00000
+A64 ACPI MCFG READY regions=0
+A64 ACPI READY cpus=2 ioapics=1 ecam=0 lapic=FEE00000
+A64 APIC PREFLIGHT PASS id=0 base=00000000:FEE00900 madt=FEE00000 lock=0 result=active-xapic
+A64 LAPIC READY id=0 base=FEE00000
+A64 BOOT RECLAIM released=43646976 bytes ACPI/AP owners retained
+A64 IOAPIC BEGIN index=0 address=FEC00000 gsi=0
+A64 IOAPIC READY index=0 version=00170011 pins=24
+A64 IOAPIC ROUTING READY controllers=1 destination=0
+A64 TIMER CAL BEGIN
+A64 TIMECOUNTER CANDIDATE policy=0 max=32 ratio=0/0 crystal=0 invariant=0 adjust=1
+A64 TIMER CAL READY ticks=626310
+A64 TIMER READY
+A64 CONSOLE IRQ READY
+A64 IRQ READY
+boot: kernel heap, process, and scheduler initialization
+A64 XMM CONTEXT PASS
+A64 APIC PREFLIGHT PASS id=1 base=00000000:FEE00800 madt=FEE00000 lock=0 result=active-xapic
+A64 TIMECOUNTER AP FAIL cpu=1 reason=candidate-unavailable generation=0 rounds=0 width=0:0
+A64 TIMECOUNTER READ cpu=0 status=unavailable reads=64
+A64 TIMECOUNTER READ cpu=1 status=unavailable reads=64
+A64 TIMECOUNTER UNAVAILABLE cpus=2 source=none reason=candidate-unavailable
+I/O pool large=16 small=16 resident=1118208 budget=4194304
+boot: HAL initialized successfully. [cpu 2, memory 1017MB, timer 10ms]
+boot: CPUs ready: 2
+boot: platform device discovery
+usb: URB completion contract q009-release-acquire-v1
+pci: BAR2 assigned to f0800000 (16 KiB)
+pci: BAR4 assigned to f0000000 (8192 KiB)
+venus: offered features 00000101:3000001b
+venus: registered modern PCI Vulkan capset 4
+ata: sda blocks=495616 CHS=491/16/63
+boot: platform devices detected: 1
+A64 TIMER TICK
+boot: parameters: boot0=UUID=5A71-A59E video=640x480 overlay-root=boot0:rootfs.img overlay-data=boot0:data.img swap0=boot0:swapfile init=/bin/sh
+boot: ignored 1 unknown parameter; first=video
+boot: VFS initialization
+vfs: boot BIOS=80 GPT partition=unknown devices=1
+input: /dev/input/event0: PC/AT PS/2 mouse
+input: /dev/input/event1: PC/AT PS/2 keyboard
+vfs: native boot disk=sda physical disks=1
+vfs: scan sda H/S=16/63 blocks=495616: 3 entries
+vfs: sda partition 1 start=00000000:00000800 data=00000000:00000800 blocks=00000000:00020000
+vfs: sda partition 2 start=00000000:00020800 data=00000000:00020800 blocks=00000000:00058000
+vfs: sda partition 3 start=00000000:00000022 data=00000000:00000022 blocks=00000000:000007DE
+vfs: boot0 UUID=5A71-A59E -> /dev/sda2 (private FAT)
+vfs: loop0 <- boot0:rootfs.img (private, read-only)
+vfs: loop1 <- boot0:data.img (private, read-write)
+vfs: root=overlay lower=boot0:rootfs.img upper=boot0:data.img
+swap: swap0 source=boot0:swapfile slots=16383
+swap: active sources=1 total=16383 free=16383
+vfs: mounting runtime filesystems...
+vfs: runtime filesystems mounted
+boot: memory 1042156 KiB total, 1033224 KiB free, 6524 KiB reserved
+boot: starting init /bin/sh
+

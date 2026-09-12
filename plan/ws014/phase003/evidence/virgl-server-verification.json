@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "provenance_json": "/home/awe/zedbsd-q306-venus/dependencies/virgl-server-1.1.0-2/provenance.json",
+  "provenance_sha256": "35f1e19f7c20abcc79095a3b37b209c3031b9edd75fc07a5e45251f2cbb5a02a",
+  "binary_path": "/home/awe/zedbsd-q306-venus/dependencies/virgl-server-1.1.0-2/usr/libexec/virgl_render_server",
+  "binary_sha256": "bfa852200604b9823f9250d376f50d7122b3f1f3631bf8b3de81ada739d53b8e",
+  "package_version": "1.1.0-2",
+  "help_supported": false,
+  "help_result_explanation": "Official 1.1.0 render_server_parse_options supports socket-fd and worker-seccomp options only; --help rejection255 is expected.",
+  "socket_smoke": {
+    "alive_after_start": true,
+    "nop_bytes_sent": 4,
+    "alive_after_nop": true,
+    "status_after_peer_close": 255,
+    "stdout": "",
+    "stderr": ""
+  },
+  "socket_result_explanation": "The private protocol NOP leaves the server running; peer disconnect propagates false from render_client_dispatch and main returns -1 (shell255).",
+  "official_source_revision": "virglrenderer1.1.0 1aeaf5e10a9c89096e96d09599aa419d5c50712f",
+  "verified_ready": true,
+  "package_database_unchanged": true
+}

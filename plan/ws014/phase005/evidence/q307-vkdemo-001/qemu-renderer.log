@@ -1,0 +1,2 @@
+gl_version 46 - core profile enabled
+proxy: proxy server with pid 6761qemu-system-x86_64: terminating on signal 15 from pid 6734 (python3)

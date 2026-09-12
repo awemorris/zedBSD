@@ -1,0 +1,445 @@
+{
+  "artifacts": {
+    "application": {
+      "bytes": 47360,
+      "path": "/home/awe/zedBSD/build/venus-amd64/bin/venus-frame",
+      "sha256": "816c553f8e885f83e4436e91c0dd36fc3d50629077db67ad7265c2e1c78d9d4e"
+    },
+    "base_image": {
+      "bytes": 253755392,
+      "path": "/home/awe/zedBSD/build/venus-amd64/hdd-image.img",
+      "sha256": "bc52c2c891ded5f639bc5b3405557f92e7de6a4d159c592da7c521d0f86b863e"
+    },
+    "harness": {
+      "bytes": 14650,
+      "path": "/home/awe/zedBSD/plan/ws014/tests/venus-qemu.py",
+      "sha256": "5a41f1a81c1c1dd88c67a2911ed4551155d2e78ea346e5a94e700aabc3352b28"
+    },
+    "kernel": {
+      "bytes": 1018320,
+      "path": "/home/awe/zedBSD/build/venus-amd64/vmunix",
+      "sha256": "61c0b6c502f6c848f5b99ddc64530427dcc61cb7de3d5e00eb2884dab7b201cf"
+    },
+    "rfb_client": {
+      "bytes": 9990,
+      "path": "/home/awe/zedBSD/plan/ws014/tests/venus_rfb.py",
+      "sha256": "e8e829cb010da6b9e15275e2c43dd01cdb11994da9f05f944c85ebbd9e5043f6"
+    }
+  },
+  "attempt": "q307-regress-2d-002",
+  "build": {
+    "argv": [
+      "make",
+      "-j16",
+      "BUILD=/home/awe/zedBSD/build/venus-amd64",
+      "ZEDBSD_CONFIG=/home/awe/zedBSD/plan/ws014/tests/config-venus-amd64.mk",
+      "ARCH_IMAGE_DIR=/home/awe/zedBSD/build/venus-amd64/arch-images",
+      "DATA_IMAGE=/home/awe/zedBSD/build/venus-amd64/data.img",
+      "SWAP_IMAGE=/home/awe/zedBSD/build/venus-amd64/swapfile",
+      "disk-image"
+    ],
+    "config": "/home/awe/zedBSD/plan/ws014/tests/config-venus-amd64.mk",
+    "directory": "/home/awe/zedBSD/build/venus-amd64",
+    "skipped": false
+  },
+  "console": {
+    "bytes": 32768,
+    "physical_address": 6592384,
+    "symbol": "vt_history",
+    "virtual_address": 18446744071568660352
+  },
+  "disposable_image": {
+    "embedded_kernel_sha256": "61c0b6c502f6c848f5b99ddc64530427dcc61cb7de3d5e00eb2884dab7b201cf",
+    "init": "/bin/sh",
+    "modified_config_sha256": "07e7d0123fa23e09bb1f42ad338a2fd1289fed4c696ed6d14f56d8cf71dca536",
+    "original_config_sha256": "6507a0b467e4ef22bc252d7c565b5b0ef9cdea4b1343a8e186a1beda6231ac03",
+    "path": "/home/awe/zedBSD/plan/ws014/temp/remote/q307-regress-2d-002/payload/boot.img",
+    "sha256": "9fa4d54607747351c652b5c8f888ab4dd4d0c8d32a248209efd2ec5a858a2b3a"
+  },
+  "elapsed_seconds": 12.473,
+  "expected": {
+    "left": [
+      0,
+      0,
+      255
+    ],
+    "right": [
+      255,
+      255,
+      0
+    ]
+  },
+  "fetched_evidence": {
+    "boot.ppm": "815097f7bf8987c8cc82e5d6bee7197cdbf9e084a4f22b046f4d244354496f56",
+    "console.bin": "d6d73d4a3c51fea855d1ee1492cf13cf93c5c9b329750ad728a125a561e5c74f",
+    "console.log": "5f83201474d7864b026215fc559170cbe8db9f9bdf135297e7b8c798861d5b3d",
+    "frame.ppm": "37f8e1718827f82188f76e644f0928ed78c5b6ae3318db9fb736bd0de0292503",
+    "guest.log": "e1e156e55bb8072b8e62811b37346d98e547c42563aa43489ac3b524da9c1644",
+    "qemu-renderer.log": "6576f024549fb57485ed401e7d1946650c2f228cdb08c118c1b80a892b7f1154",
+    "qmp.jsonl": "bab31ad2b96a9f30a2378ff9ac65b603b1dec0ff1c6a952f5471dda1e3a20299",
+    "result.json": "b4338bcd9ad27c0ae6af39450c2d3968dcb511346a2e613b528dc2c1b34224b5"
+  },
+  "frame": 2,
+  "git_commit": "3236b560a4d796ec01e525482f5819a46d0ccd90",
+  "host": "awe@10.0.10.25",
+  "payload_partition": {
+    "first_lba": 133120,
+    "last_lba": 493567,
+    "offset_bytes": 68157440,
+    "partition": 2
+  },
+  "phase": "2d",
+  "remote_argv": [
+    "timeout",
+    "--signal=TERM",
+    "--kill-after=15s",
+    "420",
+    "python3",
+    "/home/awe/zedbsd-q306-venus/q307-regress-2d-002/venus-qemu.py",
+    "--image",
+    "/home/awe/zedbsd-q306-venus/q307-regress-2d-002/boot.img",
+    "--output",
+    "/home/awe/zedbsd-q306-venus/q307-regress-2d-002/capture",
+    "--timeout",
+    "120",
+    "--console-address",
+    "6592384",
+    "--console-size",
+    "32768",
+    "--render-server",
+    "/home/awe/zedbsd-q306-venus/dependencies/virgl-server-1.1.0-2/usr/libexec/virgl_render_server",
+    "--phase",
+    "2d",
+    "--frame",
+    "2",
+    "--left",
+    "0,0,255",
+    "--right",
+    "255,255,0"
+  ],
+  "remote_attempt": "/home/awe/zedbsd-q306-venus/q307-regress-2d-002",
+  "remote_created": true,
+  "remote_exit_code": 0,
+  "remote_result": {
+    "argv": [
+      "qemu-system-x86_64",
+      "-machine",
+      "pc,accel=kvm,memory-backend=memory",
+      "-cpu",
+      "host",
+      "-m",
+      "1024",
+      "-smp",
+      "2",
+      "-object",
+      "memory-backend-memfd,id=memory,size=1G,share=on",
+      "-drive",
+      "if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd",
+      "-drive",
+      "if=pflash,format=raw,file=/home/awe/zedbsd-q306-venus/q307-regress-2d-002/capture/OVMF_VARS.fd",
+      "-drive",
+      "file=/home/awe/zedbsd-q306-venus/q307-regress-2d-002/capture/guest.img,format=raw,if=ide,index=0",
+      "-vga",
+      "none",
+      "-device",
+      "virtio-vga-gl,id=venus,venus=on,blob=on,hostmem=8M,max_outputs=1",
+      "-display",
+      "egl-headless,rendernode=/dev/dri/renderD128",
+      "-qmp",
+      "unix:/home/awe/zedbsd-q306-venus/q307-regress-2d-002/capture/qmp.sock,server=on,wait=off",
+      "-vnc",
+      "unix:/home/awe/zedbsd-q306-venus/q307-regress-2d-002/capture/vnc.sock",
+      "-monitor",
+      "none",
+      "-serial",
+      "none",
+      "-nic",
+      "none",
+      "-debugcon",
+      "file:/home/awe/zedbsd-q306-venus/q307-regress-2d-002/capture/guest.log",
+      "-no-reboot"
+    ],
+    "boot_surface_available": true,
+    "capture_method": "QEMU egl-headless readback via VNC Unix RAW",
+    "console_address": 6592384,
+    "console_size": 32768,
+    "elapsed_seconds": 3.696,
+    "environment": {
+      "RENDER_SERVER_EXEC_PATH": "/home/awe/zedbsd-q306-venus/dependencies/virgl-server-1.1.0-2/usr/libexec/virgl_render_server",
+      "VIRGL_LOG_LEVEL": "debug",
+      "VK_DRIVER_FILES": "/usr/share/vulkan/icd.d/intel_icd.json"
+    },
+    "expected": [
+      [
+        0,
+        0,
+        255
+      ],
+      [
+        255,
+        255,
+        0
+      ]
+    ],
+    "firmware_sha256": "624e06de18b4fa535e90db7160d00d3d07d206422b89999bf1e27d920264e4e0",
+    "frame": 2,
+    "frame_sha256": "37f8e1718827f82188f76e644f0928ed78c5b6ae3318db9fb736bd0de0292503",
+    "guest_command": "/bin/venus-frame --phase=2d --frame=2 --hold=120",
+    "guest_log_sha256": "e1e156e55bb8072b8e62811b37346d98e547c42563aa43489ac3b524da9c1644",
+    "harness_sha256": "5a41f1a81c1c1dd88c67a2911ed4551155d2e78ea346e5a94e700aabc3352b28",
+    "image_sha256": "9fa4d54607747351c652b5c8f888ab4dd4d0c8d32a248209efd2ec5a858a2b3a",
+    "pci": [
+      {
+        "bus": 0,
+        "devices": [
+          {
+            "bus": 0,
+            "class_info": {
+              "class": 1536,
+              "desc": "Host bridge"
+            },
+            "function": 0,
+            "id": {
+              "device": 4663,
+              "subsystem": 4352,
+              "subsystem-vendor": 6900,
+              "vendor": 32902
+            },
+            "irq_pin": 0,
+            "qdev_id": "",
+            "regions": [],
+            "slot": 0
+          },
+          {
+            "bus": 0,
+            "class_info": {
+              "class": 1537,
+              "desc": "ISA bridge"
+            },
+            "function": 0,
+            "id": {
+              "device": 28672,
+              "subsystem": 4352,
+              "subsystem-vendor": 6900,
+              "vendor": 32902
+            },
+            "irq_pin": 0,
+            "qdev_id": "",
+            "regions": [],
+            "slot": 1
+          },
+          {
+            "bus": 0,
+            "class_info": {
+              "class": 257,
+              "desc": "IDE controller"
+            },
+            "function": 1,
+            "id": {
+              "device": 28688,
+              "subsystem": 4352,
+              "subsystem-vendor": 6900,
+              "vendor": 32902
+            },
+            "irq_pin": 0,
+            "qdev_id": "",
+            "regions": [
+              {
+                "address": -1,
+                "bar": 4,
+                "size": 16,
+                "type": "io"
+              }
+            ],
+            "slot": 1
+          },
+          {
+            "bus": 0,
+            "class_info": {
+              "class": 1664,
+              "desc": "Bridge"
+            },
+            "function": 3,
+            "id": {
+              "device": 28947,
+              "subsystem": 4352,
+              "subsystem-vendor": 6900,
+              "vendor": 32902
+            },
+            "irq": 0,
+            "irq_pin": 1,
+            "qdev_id": "",
+            "regions": [],
+            "slot": 1
+          },
+          {
+            "bus": 0,
+            "class_info": {
+              "class": 768,
+              "desc": "VGA controller"
+            },
+            "function": 0,
+            "id": {
+              "device": 4176,
+              "subsystem": 4352,
+              "subsystem-vendor": 6900,
+              "vendor": 6900
+            },
+            "irq": 0,
+            "irq_pin": 1,
+            "qdev_id": "venus",
+            "regions": [
+              {
+                "address": -1,
+                "bar": 0,
+                "mem_type_64": false,
+                "prefetch": true,
+                "size": 8388608,
+                "type": "memory"
+              },
+              {
+                "address": -1,
+                "bar": 1,
+                "mem_type_64": false,
+                "prefetch": false,
+                "size": 4096,
+                "type": "memory"
+              },
+              {
+                "address": -1,
+                "bar": 2,
+                "mem_type_64": true,
+                "prefetch": true,
+                "size": 16384,
+                "type": "memory"
+              },
+              {
+                "address": -1,
+                "bar": 4,
+                "mem_type_64": true,
+                "prefetch": true,
+                "size": 8388608,
+                "type": "memory"
+              },
+              {
+                "address": -1,
+                "bar": 6,
+                "mem_type_64": false,
+                "prefetch": false,
+                "size": 65536,
+                "type": "memory"
+              }
+            ],
+            "slot": 2
+          }
+        ]
+      }
+    ],
+    "phase": "2d",
+    "pixel_check": "all 49152 RGB pixels match",
+    "qemu_exit_code": 0,
+    "qemu_version": {
+      "package": "Debian 1:10.0.11+ds-0+deb13u1",
+      "qemu": {
+        "major": 10,
+        "micro": 11,
+        "minor": 0
+      }
+    },
+    "render_server_sha256": "bfa852200604b9823f9250d376f50d7122b3f1f3631bf8b3de81ada739d53b8e",
+    "renderer_log_sha256": "6576f024549fb57485ed401e7d1946650c2f228cdb08c118c1b80a892b7f1154",
+    "rfb_capture": {
+      "desktop_resizes": 0,
+      "framebuffer_updates": 1,
+      "height": 192,
+      "initial_geometry": [
+        256,
+        192
+      ],
+      "initial_pixel_format": "2018000100ff00ff00ff100800000000",
+      "last_rectangles": 0,
+      "method": "rfb-raw-unix",
+      "pixel_format": {
+        "big_endian": false,
+        "bits_per_pixel": 32,
+        "blue_shift": 0,
+        "depth": 24,
+        "green_shift": 8,
+        "red_shift": 16
+      },
+      "pixels": 49152,
+      "raw_bytes": 196608,
+      "rectangles": 1,
+      "server_name": "QEMU",
+      "server_version": "RFB 003.008",
+      "sha256": "37f8e1718827f82188f76e644f0928ed78c5b6ae3318db9fb736bd0de0292503",
+      "width": 256
+    },
+    "rfb_client_sha256": "e8e829cb010da6b9e15275e2c43dd01cdb11994da9f05f944c85ebbd9e5043f6",
+    "source_image_sha256": "9fa4d54607747351c652b5c8f888ab4dd4d0c8d32a248209efd2ec5a858a2b3a",
+    "started": "2026-09-12T16:07:12.794751+00:00",
+    "status": "pass",
+    "transport_harness_sha256": "5a41f1a81c1c1dd88c67a2911ed4551155d2e78ea346e5a94e700aabc3352b28"
+  },
+  "remote_watchdog_seconds": 420,
+  "render_server": "/home/awe/zedbsd-q306-venus/dependencies/virgl-server-1.1.0-2/usr/libexec/virgl_render_server",
+  "sources_after_build": {
+    "files": {
+      "Makefile": "ae677cb7a66ad39cb78928c6ffd4e5c480bf4ded86efbbbf147209359f9b67d9",
+      "config/drivers/pci.drivers": "d098e939615175b236d118a905c4194a176f2913b3752e3fa577e0c1446061f7",
+      "include/drivers/gpu.h": "b776ecfe2953aee70124a4f7a74d3f2e105a069d437e4e9f02dda282a4812b57",
+      "include/drivers/venus.h": "b36beec8e960cafbded47cc88b1eae49d1a47f79a973b1f783634f39b7ca7cfe",
+      "include/uapi/gpu.h": "3a8dce2c189bfe7968bbc4c30470ca216239347f5071d6f9e69872a0fc8351c1",
+      "plan/ws014/tests/config-venus-amd64.mk": "39156dfbb661aa5248c0eb7b17ee2f9fcd89cd79dd509cf8d04e0f15f8d3cfbf",
+      "plan/ws014/tests/run-venus-remote.py": "a22c714ad45e444cdbafb60ef87a87bcf68504943e70bf28c0aa433adef58896",
+      "plan/ws014/tests/venus-qemu.py": "5a41f1a81c1c1dd88c67a2911ed4551155d2e78ea346e5a94e700aabc3352b28",
+      "plan/ws014/tests/venus_rfb.py": "e8e829cb010da6b9e15275e2c43dd01cdb11994da9f05f944c85ebbd9e5043f6",
+      "platform/amd64/vmunix.mk": "87689872a88cd26de3c803e0dddb2a8465aaf5eb43ab0e1c8d61054b012f6512",
+      "platform/amd64/zedbsd.cfg": "6507a0b467e4ef22bc252d7c565b5b0ef9cdea4b1343a8e186a1beda6231ac03",
+      "src/drivers/gpu/gpu.c": "bdd3f2195e3c8b0c2bbe85d2da25e7a557200b9b3dea2e20fe5c21aeabb33041",
+      "src/drivers/gpu/gpu.c~": "dc36561c17369fa124a506d74de5d41baed592a6b5431aaba5441da983715420",
+      "src/drivers/gpu/venus/internal.h": "834ac923f868035da74a583dd913858a00d842fc3e9559fd092d98fd98f1ce35",
+      "src/drivers/gpu/venus/transport.c": "00a00c1bb5dcea9d1d7ba8f6827b06e57572e720b5cffb5a5dc128ca303be089",
+      "src/drivers/gpu/venus/venus.c": "395ac0d0f40d2a210b9b88433c4981c783b353725dc014d91cf1357697107edc",
+      "src/hal/amd64/asm.c": "9d60ef06392b0bfaf6e3b8e45ec12da90a7bf6ff40feefe9cba8abaa09fcf490",
+      "src/kern/platform/pcat.c": "028f32af103d59448518e0c36094cd20aada4765c1a1485202f18bbd4d4d2868",
+      "userland/gpu/venus/Makefile": "feea7fc8eff6418458683a443b2c1401a4b171440a9750d5e7ff5d0491fab964",
+      "userland/gpu/venus/README.md": "f9b33107c0383ac96d620776f7e04001f70ab20dee65d75ff4fabf02901d52d3",
+      "userland/gpu/venus/client.c": "f6026539dc2119a757edec34a3eb05889721321f260379c4c5f773459bbdff5b",
+      "userland/gpu/venus/client.h": "11ca52593f3e3375f457f1a6d3d74cac1d59b87fadc2a706e274352e801fe2f2",
+      "userland/gpu/venus/venus-frame.c": "20d476b367a63e28d740a11d0b8b0d614d1d98dcae7fa043783f5feb89b3f033"
+    },
+    "sha256": "8377236c83f083cc6961d1d4db0322069cc449025975e0230ed9941063914b44"
+  },
+  "sources_before_build": {
+    "files": {
+      "Makefile": "ae677cb7a66ad39cb78928c6ffd4e5c480bf4ded86efbbbf147209359f9b67d9",
+      "config/drivers/pci.drivers": "d098e939615175b236d118a905c4194a176f2913b3752e3fa577e0c1446061f7",
+      "include/drivers/gpu.h": "b776ecfe2953aee70124a4f7a74d3f2e105a069d437e4e9f02dda282a4812b57",
+      "include/drivers/venus.h": "b36beec8e960cafbded47cc88b1eae49d1a47f79a973b1f783634f39b7ca7cfe",
+      "include/uapi/gpu.h": "3a8dce2c189bfe7968bbc4c30470ca216239347f5071d6f9e69872a0fc8351c1",
+      "plan/ws014/tests/config-venus-amd64.mk": "39156dfbb661aa5248c0eb7b17ee2f9fcd89cd79dd509cf8d04e0f15f8d3cfbf",
+      "plan/ws014/tests/run-venus-remote.py": "a22c714ad45e444cdbafb60ef87a87bcf68504943e70bf28c0aa433adef58896",
+      "plan/ws014/tests/venus-qemu.py": "5a41f1a81c1c1dd88c67a2911ed4551155d2e78ea346e5a94e700aabc3352b28",
+      "plan/ws014/tests/venus_rfb.py": "e8e829cb010da6b9e15275e2c43dd01cdb11994da9f05f944c85ebbd9e5043f6",
+      "platform/amd64/vmunix.mk": "87689872a88cd26de3c803e0dddb2a8465aaf5eb43ab0e1c8d61054b012f6512",
+      "platform/amd64/zedbsd.cfg": "6507a0b467e4ef22bc252d7c565b5b0ef9cdea4b1343a8e186a1beda6231ac03",
+      "src/drivers/gpu/gpu.c": "bdd3f2195e3c8b0c2bbe85d2da25e7a557200b9b3dea2e20fe5c21aeabb33041",
+      "src/drivers/gpu/gpu.c~": "dc36561c17369fa124a506d74de5d41baed592a6b5431aaba5441da983715420",
+      "src/drivers/gpu/venus/internal.h": "834ac923f868035da74a583dd913858a00d842fc3e9559fd092d98fd98f1ce35",
+      "src/drivers/gpu/venus/transport.c": "00a00c1bb5dcea9d1d7ba8f6827b06e57572e720b5cffb5a5dc128ca303be089",
+      "src/drivers/gpu/venus/venus.c": "395ac0d0f40d2a210b9b88433c4981c783b353725dc014d91cf1357697107edc",
+      "src/hal/amd64/asm.c": "9d60ef06392b0bfaf6e3b8e45ec12da90a7bf6ff40feefe9cba8abaa09fcf490",
+      "src/kern/platform/pcat.c": "028f32af103d59448518e0c36094cd20aada4765c1a1485202f18bbd4d4d2868",
+      "userland/gpu/venus/Makefile": "feea7fc8eff6418458683a443b2c1401a4b171440a9750d5e7ff5d0491fab964",
+      "userland/gpu/venus/README.md": "f9b33107c0383ac96d620776f7e04001f70ab20dee65d75ff4fabf02901d52d3",
+      "userland/gpu/venus/client.c": "f6026539dc2119a757edec34a3eb05889721321f260379c4c5f773459bbdff5b",
+      "userland/gpu/venus/client.h": "11ca52593f3e3375f457f1a6d3d74cac1d59b87fadc2a706e274352e801fe2f2",
+      "userland/gpu/venus/venus-frame.c": "20d476b367a63e28d740a11d0b8b0d614d1d98dcae7fa043783f5feb89b3f033"
+    },
+    "sha256": "8377236c83f083cc6961d1d4db0322069cc449025975e0230ed9941063914b44"
+  },
+  "started": "2026-09-12T16:07:05.605536+00:00",
+  "status": "pass",
+  "wrapper_sha256": "a22c714ad45e444cdbafb60ef87a87bcf68504943e70bf28c0aa433adef58896"
+}

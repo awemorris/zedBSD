@@ -1,0 +1,13 @@
+{
+  "attempt": "q307-vkdemo-002",
+  "all_recorded_sources_match_final_working_tree": true,
+  "sources_sha256": "346dfa34727a604bab262c1e77e0087c7da12b6c59ffe2aabd175b291914c245",
+  "kernel_sha256": "61c0b6c502f6c848f5b99ddc64530427dcc61cb7de3d5e00eb2884dab7b201cf",
+  "application_sha256": "70af6dd5304e031a2f77c8c3a3d49e39f93d176495a1f2adb16bd17f12a0bf56",
+  "image_sha256": "5d6d2237fbeb7fda1d6e710a0d604bbb1493619aa4980cc0d80d9c8ceb993c22",
+  "ordinary_frames": 12,
+  "fixed_frames": 3,
+  "live_frames": 3,
+  "qemu_exit_code": 0,
+  "no_new_HAL_change": true
+}

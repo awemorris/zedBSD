@@ -791,8 +791,7 @@ test.
 
 ## 13. Copyright header
 
-Source code files start with the Emacs modeline, followed by one blank line.
-The copyright header then begins with:
+Source code files start with the copyright header.
 
 ```
 /*

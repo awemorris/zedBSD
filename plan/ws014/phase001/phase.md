@@ -211,3 +211,11 @@ q305の公開APIは`drv_gpu_register(ops, private_data, **device)`と`drv_gpu_un
 <!-- q305-design:start -->
 q305完了。p002は通常のops/動的登録契約でcleared。GPU/PCI/cdev/devfs限定test・sanitizers・amd64 build PASS。完全な契約と証拠は[p002](https://github.com/awemorris/zedBSD/issues/383)。p001全体はplanning。
 <!-- q305-design:end -->
+
+<!-- q306-design:start -->
+p003実行開始（q306）。ユーザー指定のVenus専用driverと実guest Vulkan描画に必要なops/UAPIを補う。通常登録契約とU/K分離を維持。詳細は[p003](https://github.com/awemorris/zedBSD/issues/384)。p001全体はplanning。
+<!-- q306-design:end -->
+
+<!-- q306-result:start -->
+p003/q306 cleared（2026-09-13）。現行ops v2/UAPI v1と6callback/6ioctlを同じU/K資料へ追記し、このIssueのq306契約コメントへ全文掲載。p001はplanning、次p005→p004は未実行。実測結果は[p003](https://github.com/awemorris/zedBSD/issues/384)。
+<!-- q306-result:end -->

@@ -1,0 +1,24 @@
+{
+  "license": "Zlib",
+  "source": "Original zedBSD GLSL; compiled artifact of the same source",
+  "target_env": "vulkan1.1",
+  "target_spv": "spv1.0",
+  "compiler": "shaderc 2025.2-1\nspirv-tools 2025.1~rc1-1\nglslang 15.1.0+1.4.309.0-1\n\nTarget: SPIR-V 1.0",
+  "validator": "SPIRV-Tools v2025.1 unknown hash, 2025-03-18T14:15:19+00:00\nTargets:\n  SPIR-V 1.0\n  SPIR-V 1.1\n  SPIR-V 1.2\n  SPIR-V 1.3\n  SPIR-V 1.4\n  SPIR-V 1.5\n  SPIR-V 1.6\n  SPIR-V 1.2 (under OpenCL 2.2 Full Profile semantics)\n  SPIR-V 1.0 (under Vulkan 1.0 semantics)\n  SPIR-V 1.3 (under Vulkan 1.1 semantics)\n  SPIR-V 1.4 (under Vulkan 1.1 semantics)\n  SPIR-V 1.5 (under Vulkan 1.2 semantics)\n  SPIR-V 1.6 (under Vulkan 1.3 semantics) SPIR-V 1.6 (under Vulkan 1.4 semantics)",
+  "shaders": {
+    "vertex": {
+      "source": "cuboid.vert",
+      "source_sha256": "450a57283e0ff252c3b5f25dc2df7f9f5d6c58688a22329ce417864a25d7f010",
+      "binary": "cuboid.vert.spv",
+      "binary_sha256": "0d87783e0bfcfdaa36fc9e8149b6523387470862e70f1360ba43d10010765cdf",
+      "bytes": 3076
+    },
+    "fragment": {
+      "source": "cuboid.frag",
+      "source_sha256": "f9d355d0fb03da9a63e4cd157e7fdb7575f74a9726eac6290795c5a2aa5957c8",
+      "binary": "cuboid.frag.spv",
+      "binary_sha256": "011e2b5719098b95a70a7023b2fec8ae38ca836c0a92fda6d7568b4418b4b658",
+      "bytes": 644
+    }
+  }
+}

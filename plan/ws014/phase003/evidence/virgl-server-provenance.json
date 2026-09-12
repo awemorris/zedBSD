@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "recorded_utc": "2026-09-12T14:43:34.306257+00:00",
+  "download_url": "https://deb.debian.org/debian/pool/main/v/virglrenderer/virgl-server_1.1.0-2_amd64.deb",
+  "package": "virgl-server",
+  "version": "1.1.0-2",
+  "architecture": "amd64",
+  "package_path": "/home/awe/zedbsd-q306-venus/dependencies/virgl-server-1.1.0-2/virgl-server_1.1.0-2_amd64.deb",
+  "package_bytes": 213608,
+  "package_sha256": "91e3161288f9712c5897a99ce9da1b37b9ac088d3645779cf5ec4759e66825f1",
+  "binary_path": "/home/awe/zedbsd-q306-venus/dependencies/virgl-server-1.1.0-2/usr/libexec/virgl_render_server",
+  "binary_sha256": "bfa852200604b9823f9250d376f50d7122b3f1f3631bf8b3de81ada739d53b8e",
+  "render_server_exec_path": "/home/awe/zedbsd-q306-venus/dependencies/virgl-server-1.1.0-2/usr/libexec/virgl_render_server",
+  "ldd": {
+    "status": 0,
+    "stdout": "\tlinux-vdso.so.1 (0x00007f6ac7f27000)\n\tlibvulkan.so.1 => /lib/x86_64-linux-gnu/libvulkan.so.1 (0x00007f6ac7d59000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f6ac7b65000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f6ac7f29000)\n",
+    "stderr": ""
+  },
+  "help": {
+    "status": 255,
+    "stdout": "",
+    "stderr": "/home/awe/zedbsd-q306-venus/dependencies/virgl-server-1.1.0-2/usr/libexec/virgl_render_server: unrecognized option '--help'\nvirgl_render_server[4204]: unknown option specified\n"
+  },
+  "dpkg_status_sha256_before": "3e1325af7ef616e34c726def94fd062da4776dc2f0e266e283542a465a37e148",
+  "dpkg_status_sha256_after": "3e1325af7ef616e34c726def94fd062da4776dc2f0e266e283542a465a37e148",
+  "package_database_unchanged": true,
+  "installation_method": "dpkg-deb -x into dedicated task directory; no system package installation"
+}

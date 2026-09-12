@@ -1,6 +1,10 @@
 # QEMU＋Venusの画面取得と自動デバッグ計画
 
-2026-09-12 / WS014 p003の資料。ユーザーが計画への記録を指示した。まだホスト接続・動作確認・ループ実行はしていない。
+2026-09-12 / WS014 p003の資料。
+
+q306実行中の現行契約は [Venus transport](venus-transport.md)、再現コマンドは [リモート検証README](tests/README-venus-remote.md)、結果は [p003](phase003/phase.md) を参照する。Linux i915/ANVホストの環境・GPU登録・2D実画面の全件一致を確認済み。QEMU10.0.11はGL scanoutにQMP screendumpを使えないため、egl-headlessのreadback画像をVNC Unix RAWで取得する。QMPは起動制御・console取得を担当する。hostmemは現行amd64 MMIO窓に収まる8MiBを基準とする。Vulkan側の最終判定はPhaseの実行証拠で確定する。
+
+以下は実行前の候補・受け入れ検討の履歴であり、取得方式と対応範囲は上記の実測済み契約を優先する。
 
 ## 構成と受け入れ
 
@@ -40,3 +44,5 @@ virtio-gpu基本2Dは複数scanout、cursor、display変更通知、RAM→host�
 - [Virtio GPU仕様ソース](https://github.com/oasis-tcs/virtio-spec/blob/master/device-types/gpu/description.tex)
 
 2026-09-12参照。開発時は実際に用いるリビジョンを記録する。
+
+2026-09-13 JST 最終結果: q306で2DとVenusのframe1/2を実行し、GPU readbackとVNC実画面が全件一致。p003の有限受け入れを達成。詳細はphase003/results.mdと証跡JSON。一般的なVulkan実装・native i915・p004の実行とは区別する。

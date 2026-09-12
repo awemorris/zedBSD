@@ -17,7 +17,7 @@
 #include <uapi/gpu.h>
 #include <stdint.h>
 
-#define DRV_GPU_INTERFACE_VERSION	1U
+#define DRV_GPU_INTERFACE_VERSION	2U
 
 struct drv_gpu_device;
 
@@ -28,7 +28,12 @@ struct drv_gpu_device;
  *  - Distinct sessions may execute concurrently, a single session
  *    admits one ioctl at a time.
  *  - Open failure must unwind its own state.
- *  - Resource-create failure must unwind its own allocation.
+ *  - Resource and blob allocation failures must unwind their own state.
+ *  - Optional capabilities require their complete callback pair or operation.
+ *  - All buffers passed to optional operations are validated kernel copies.
+ *  - Resource read/write finish copying before returning; command receipt is
+ *    independent of Vulkan execution completion.
+ *  - Present accepts storage resources; the backend owns display arbitration.
  *  - Close and resource_destroy cannot fail and must finish using the state
  *    before returning.
  *  - Unregister preserves private_data until all sessions close; the owner
@@ -45,6 +50,12 @@ struct drv_gpu_ops {
 	int (*get_info)(void *, void *, struct gpu_info *);
 	int (*resource_create)(void *, void *, const struct gpu_resource_create *, void **);
 	void (*resource_destroy)(void *, void *, void *);
+	int (*get_capset)(void *, void *, struct gpu_capset *);
+	int (*blob_create)(void *, void *, const struct gpu_blob_create *, void **, uint32_t *);
+	int (*resource_read)(void *, void *, void *, uint64_t, void *, uint32_t);
+	int (*resource_write)(void *, void *, void *, uint64_t, const void *, uint32_t);
+	int (*command)(void *, void *, const void *, uint32_t);
+	int (*present)(void *, void *, void *, const struct gpu_present *);
 };
 
 /*

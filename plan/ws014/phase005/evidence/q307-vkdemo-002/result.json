@@ -1,0 +1,677 @@
+{
+  "started": "2026-09-12T16:06:34.646497+00:00",
+  "image_sha256": "5d6d2237fbeb7fda1d6e710a0d604bbb1493619aa4980cc0d80d9c8ceb993c22",
+  "source_image_sha256": "5d6d2237fbeb7fda1d6e710a0d604bbb1493619aa4980cc0d80d9c8ceb993c22",
+  "argv": [
+    "qemu-system-x86_64",
+    "-machine",
+    "pc,accel=kvm,memory-backend=memory",
+    "-cpu",
+    "host",
+    "-m",
+    "1024",
+    "-smp",
+    "2",
+    "-object",
+    "memory-backend-memfd,id=memory,size=1G,share=on",
+    "-drive",
+    "if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd",
+    "-drive",
+    "if=pflash,format=raw,file=/home/awe/zedbsd-q306-venus/q307-vkdemo-002/capture/OVMF_VARS.fd",
+    "-drive",
+    "file=/home/awe/zedbsd-q306-venus/q307-vkdemo-002/capture/guest.img,format=raw,if=ide,index=0",
+    "-vga",
+    "none",
+    "-device",
+    "virtio-vga-gl,id=venus,venus=on,blob=on,hostmem=8M,max_outputs=1",
+    "-display",
+    "egl-headless,rendernode=/dev/dri/renderD128",
+    "-qmp",
+    "unix:/home/awe/zedbsd-q306-venus/q307-vkdemo-002/capture/qmp.sock,server=on,wait=off",
+    "-vnc",
+    "unix:/home/awe/zedbsd-q306-venus/q307-vkdemo-002/capture/vnc.sock",
+    "-monitor",
+    "none",
+    "-serial",
+    "none",
+    "-nic",
+    "none",
+    "-debugcon",
+    "file:/home/awe/zedbsd-q306-venus/q307-vkdemo-002/capture/guest.log",
+    "-no-reboot"
+  ],
+  "environment": {
+    "VK_DRIVER_FILES": "/usr/share/vulkan/icd.d/intel_icd.json",
+    "VIRGL_LOG_LEVEL": "debug",
+    "RENDER_SERVER_EXEC_PATH": "/home/awe/zedbsd-q306-venus/dependencies/virgl-server-1.1.0-2/usr/libexec/virgl_render_server"
+  },
+  "phase": "vkdemo",
+  "frame": 0,
+  "status": "pass",
+  "harness_sha256": "a3c830c3471c4c25966c1da74a3ef8b9f6cf76e2182af9c31d78f41f6517bb0c",
+  "transport_harness_sha256": "5a41f1a81c1c1dd88c67a2911ed4551155d2e78ea346e5a94e700aabc3352b28",
+  "firmware_sha256": "624e06de18b4fa535e90db7160d00d3d07d206422b89999bf1e27d920264e4e0",
+  "render_server_sha256": "bfa852200604b9823f9250d376f50d7122b3f1f3631bf8b3de81ada739d53b8e",
+  "capture_method": "QEMU egl-headless readback via VNC Unix RAW",
+  "rfb_client_sha256": "e8e829cb010da6b9e15275e2c43dd01cdb11994da9f05f944c85ebbd9e5043f6",
+  "console_address": 6592384,
+  "console_size": 32768,
+  "pci": [
+    {
+      "bus": 0,
+      "devices": [
+        {
+          "irq_pin": 0,
+          "bus": 0,
+          "qdev_id": "",
+          "slot": 0,
+          "class_info": {
+            "class": 1536,
+            "desc": "Host bridge"
+          },
+          "id": {
+            "device": 4663,
+            "subsystem-vendor": 6900,
+            "vendor": 32902,
+            "subsystem": 4352
+          },
+          "function": 0,
+          "regions": []
+        },
+        {
+          "irq_pin": 0,
+          "bus": 0,
+          "qdev_id": "",
+          "slot": 1,
+          "class_info": {
+            "class": 1537,
+            "desc": "ISA bridge"
+          },
+          "id": {
+            "device": 28672,
+            "subsystem-vendor": 6900,
+            "vendor": 32902,
+            "subsystem": 4352
+          },
+          "function": 0,
+          "regions": []
+        },
+        {
+          "irq_pin": 0,
+          "bus": 0,
+          "qdev_id": "",
+          "slot": 1,
+          "class_info": {
+            "class": 257,
+            "desc": "IDE controller"
+          },
+          "id": {
+            "device": 28688,
+            "subsystem-vendor": 6900,
+            "vendor": 32902,
+            "subsystem": 4352
+          },
+          "function": 1,
+          "regions": [
+            {
+              "bar": 4,
+              "size": 16,
+              "address": -1,
+              "type": "io"
+            }
+          ]
+        },
+        {
+          "irq_pin": 1,
+          "bus": 0,
+          "qdev_id": "",
+          "irq": 0,
+          "slot": 1,
+          "class_info": {
+            "class": 1664,
+            "desc": "Bridge"
+          },
+          "id": {
+            "device": 28947,
+            "subsystem-vendor": 6900,
+            "vendor": 32902,
+            "subsystem": 4352
+          },
+          "function": 3,
+          "regions": []
+        },
+        {
+          "irq_pin": 1,
+          "bus": 0,
+          "qdev_id": "venus",
+          "irq": 0,
+          "slot": 2,
+          "class_info": {
+            "class": 768,
+            "desc": "VGA controller"
+          },
+          "id": {
+            "device": 4176,
+            "subsystem-vendor": 6900,
+            "vendor": 6900,
+            "subsystem": 4352
+          },
+          "function": 0,
+          "regions": [
+            {
+              "prefetch": true,
+              "mem_type_64": false,
+              "bar": 0,
+              "size": 8388608,
+              "address": -1,
+              "type": "memory"
+            },
+            {
+              "prefetch": false,
+              "mem_type_64": false,
+              "bar": 1,
+              "size": 4096,
+              "address": -1,
+              "type": "memory"
+            },
+            {
+              "prefetch": true,
+              "mem_type_64": true,
+              "bar": 2,
+              "size": 16384,
+              "address": -1,
+              "type": "memory"
+            },
+            {
+              "prefetch": true,
+              "mem_type_64": true,
+              "bar": 4,
+              "size": 8388608,
+              "address": -1,
+              "type": "memory"
+            },
+            {
+              "prefetch": false,
+              "mem_type_64": false,
+              "bar": 6,
+              "size": 65536,
+              "address": -1,
+              "type": "memory"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "qemu_version": {
+    "qemu": {
+      "micro": 11,
+      "minor": 0,
+      "major": 10
+    },
+    "package": "Debian 1:10.0.11+ds-0+deb13u1"
+  },
+  "boot_surface_available": true,
+  "token": "ree676af97e52f22f2eb45511",
+  "oracle_sha256": "a1d7fba8c873f5fa845ff6fc78159a70611b68eea6fed1ee06b1dd61b96a1a03",
+  "samples": [
+    {
+      "run": "ree676af97e52f22f2eb45511",
+      "mode": "fixed",
+      "sample": 1,
+      "frame": 1,
+      "time_ms": 0,
+      "rgb_sha256": "7523debe5f925b33c94af8b0a306d6bcf62c78d520a9091d42d53ba032b105ff",
+      "width": 320,
+      "height": 240,
+      "capture": {
+        "method": "rfb-raw-unix",
+        "rectangles": 1,
+        "framebuffer_updates": 1,
+        "desktop_resizes": 0,
+        "last_rectangles": 0,
+        "raw_bytes": 307200,
+        "pixel_format": {
+          "bits_per_pixel": 32,
+          "depth": 24,
+          "big_endian": false,
+          "red_shift": 16,
+          "green_shift": 8,
+          "blue_shift": 0
+        },
+        "server_version": "RFB 003.008",
+        "server_name": "QEMU",
+        "initial_geometry": [
+          320,
+          240
+        ],
+        "initial_pixel_format": "2018000100ff00ff00ff100800000000",
+        "width": 320,
+        "height": 240,
+        "pixels": 76800,
+        "sha256": "241b33a0c276774d1a4c96729ed8f507a5929498b63d3cb299048e2598cb0912"
+      },
+      "oracle": {
+        "passed": true,
+        "time_ms": 0,
+        "width": 320,
+        "height": 240,
+        "rgb_sha256": "7523debe5f925b33c94af8b0a306d6bcf62c78d520a9091d42d53ba032b105ff",
+        "checked_pixels": 75841,
+        "excluded_boundary_pixels": 959,
+        "foreground_pixels": 7968,
+        "visible_faces": {
+          "(2, -1)": 6775,
+          "(0, 1)": 604,
+          "(1, -1)": 589
+        },
+        "checked_foreground_colors": 4003,
+        "mismatch_pixels": 0,
+        "mismatch_examples": [],
+        "geometry_margin_pixels": 0.3,
+        "texel_margin": 0.02,
+        "maximum_excluded_fraction": 0.05
+      },
+      "frame_sha256": "241b33a0c276774d1a4c96729ed8f507a5929498b63d3cb299048e2598cb0912",
+      "filename": "frame-1.ppm",
+      "oracle_result_sha256": "63ba6bc3905be13ba14f1cfc59f88fb870bcc95c4326d46500872ad3e45b2433"
+    },
+    {
+      "run": "ree676af97e52f22f2eb45511",
+      "mode": "fixed",
+      "sample": 2,
+      "frame": 2,
+      "time_ms": 1000,
+      "rgb_sha256": "6a446b50d2a1b40c743a77347615576bc0cb65e9eb55ef2209e7ed8a0f03e9ac",
+      "width": 320,
+      "height": 240,
+      "capture": {
+        "method": "rfb-raw-unix",
+        "rectangles": 1,
+        "framebuffer_updates": 1,
+        "desktop_resizes": 0,
+        "last_rectangles": 0,
+        "raw_bytes": 307200,
+        "pixel_format": {
+          "bits_per_pixel": 32,
+          "depth": 24,
+          "big_endian": false,
+          "red_shift": 16,
+          "green_shift": 8,
+          "blue_shift": 0
+        },
+        "server_version": "RFB 003.008",
+        "server_name": "QEMU",
+        "initial_geometry": [
+          320,
+          240
+        ],
+        "initial_pixel_format": "2018000100ff00ff00ff100800000000",
+        "width": 320,
+        "height": 240,
+        "pixels": 76800,
+        "sha256": "244dccdab8d9dfca68bec9cb0e41dc32c748ac0f46b0c313837ffba87b543834"
+      },
+      "oracle": {
+        "passed": true,
+        "time_ms": 1000,
+        "width": 320,
+        "height": 240,
+        "rgb_sha256": "6a446b50d2a1b40c743a77347615576bc0cb65e9eb55ef2209e7ed8a0f03e9ac",
+        "checked_pixels": 76045,
+        "excluded_boundary_pixels": 755,
+        "foreground_pixels": 6757,
+        "visible_faces": {
+          "(0, 1)": 4256,
+          "(2, -1)": 1677,
+          "(1, -1)": 824
+        },
+        "checked_foreground_colors": 3711,
+        "mismatch_pixels": 0,
+        "mismatch_examples": [],
+        "geometry_margin_pixels": 0.3,
+        "texel_margin": 0.02,
+        "maximum_excluded_fraction": 0.05
+      },
+      "frame_sha256": "244dccdab8d9dfca68bec9cb0e41dc32c748ac0f46b0c313837ffba87b543834",
+      "filename": "frame-2.ppm",
+      "oracle_result_sha256": "ed5f5be63e7e7bfe43e16e5508958d3af7cfe6922b61e183e2c2ea391125ed56"
+    },
+    {
+      "run": "ree676af97e52f22f2eb45511",
+      "mode": "fixed",
+      "sample": 3,
+      "frame": 3,
+      "time_ms": 2500,
+      "rgb_sha256": "9461546422e2d66bc6fd3d8679447ea05a70384fd82bfa0dc0cdc27af4d719b1",
+      "width": 320,
+      "height": 240,
+      "capture": {
+        "method": "rfb-raw-unix",
+        "rectangles": 1,
+        "framebuffer_updates": 1,
+        "desktop_resizes": 0,
+        "last_rectangles": 0,
+        "raw_bytes": 307200,
+        "pixel_format": {
+          "bits_per_pixel": 32,
+          "depth": 24,
+          "big_endian": false,
+          "red_shift": 16,
+          "green_shift": 8,
+          "blue_shift": 0
+        },
+        "server_version": "RFB 003.008",
+        "server_name": "QEMU",
+        "initial_geometry": [
+          320,
+          240
+        ],
+        "initial_pixel_format": "2018000100ff00ff00ff100800000000",
+        "width": 320,
+        "height": 240,
+        "pixels": 76800,
+        "sha256": "cabd1b3995f9b4fe0300fabb48b5fb8f280aabd78d1fc3ed9030ebd91ecb4094"
+      },
+      "oracle": {
+        "passed": true,
+        "time_ms": 2500,
+        "width": 320,
+        "height": 240,
+        "rgb_sha256": "9461546422e2d66bc6fd3d8679447ea05a70384fd82bfa0dc0cdc27af4d719b1",
+        "checked_pixels": 76089,
+        "excluded_boundary_pixels": 711,
+        "foreground_pixels": 6262,
+        "visible_faces": {
+          "(0, 1)": 3745,
+          "(1, 1)": 2517
+        },
+        "checked_foreground_colors": 3756,
+        "mismatch_pixels": 0,
+        "mismatch_examples": [],
+        "geometry_margin_pixels": 0.3,
+        "texel_margin": 0.02,
+        "maximum_excluded_fraction": 0.05
+      },
+      "frame_sha256": "cabd1b3995f9b4fe0300fabb48b5fb8f280aabd78d1fc3ed9030ebd91ecb4094",
+      "filename": "frame-3.ppm",
+      "oracle_result_sha256": "0caa41829bf46c27ae0c9d531843abc6525f76a34ae34ebdaf0f51f67f0dceea"
+    },
+    {
+      "run": "ree676af97e52f22f2eb45511",
+      "mode": "live",
+      "sample": 1,
+      "frame": 4,
+      "time_ms": 0,
+      "rgb_sha256": "7523debe5f925b33c94af8b0a306d6bcf62c78d520a9091d42d53ba032b105ff",
+      "width": 320,
+      "height": 240,
+      "capture": {
+        "method": "rfb-raw-unix",
+        "rectangles": 1,
+        "framebuffer_updates": 1,
+        "desktop_resizes": 0,
+        "last_rectangles": 0,
+        "raw_bytes": 307200,
+        "pixel_format": {
+          "bits_per_pixel": 32,
+          "depth": 24,
+          "big_endian": false,
+          "red_shift": 16,
+          "green_shift": 8,
+          "blue_shift": 0
+        },
+        "server_version": "RFB 003.008",
+        "server_name": "QEMU",
+        "initial_geometry": [
+          320,
+          240
+        ],
+        "initial_pixel_format": "2018000100ff00ff00ff100800000000",
+        "width": 320,
+        "height": 240,
+        "pixels": 76800,
+        "sha256": "241b33a0c276774d1a4c96729ed8f507a5929498b63d3cb299048e2598cb0912"
+      },
+      "oracle": {
+        "passed": true,
+        "time_ms": 0,
+        "width": 320,
+        "height": 240,
+        "rgb_sha256": "7523debe5f925b33c94af8b0a306d6bcf62c78d520a9091d42d53ba032b105ff",
+        "checked_pixels": 75841,
+        "excluded_boundary_pixels": 959,
+        "foreground_pixels": 7968,
+        "visible_faces": {
+          "(2, -1)": 6775,
+          "(0, 1)": 604,
+          "(1, -1)": 589
+        },
+        "checked_foreground_colors": 4003,
+        "mismatch_pixels": 0,
+        "mismatch_examples": [],
+        "geometry_margin_pixels": 0.3,
+        "texel_margin": 0.02,
+        "maximum_excluded_fraction": 0.05
+      },
+      "frame_sha256": "241b33a0c276774d1a4c96729ed8f507a5929498b63d3cb299048e2598cb0912",
+      "filename": "frame-4.ppm",
+      "oracle_result_sha256": "63ba6bc3905be13ba14f1cfc59f88fb870bcc95c4326d46500872ad3e45b2433"
+    },
+    {
+      "run": "ree676af97e52f22f2eb45511",
+      "mode": "live",
+      "sample": 2,
+      "frame": 5,
+      "time_ms": 640,
+      "rgb_sha256": "3d657f63f3dfae276b0e879d204cc4d8bbf07fdf939f90bff3df3499678d92db",
+      "width": 320,
+      "height": 240,
+      "capture": {
+        "method": "rfb-raw-unix",
+        "rectangles": 1,
+        "framebuffer_updates": 1,
+        "desktop_resizes": 0,
+        "last_rectangles": 0,
+        "raw_bytes": 307200,
+        "pixel_format": {
+          "bits_per_pixel": 32,
+          "depth": 24,
+          "big_endian": false,
+          "red_shift": 16,
+          "green_shift": 8,
+          "blue_shift": 0
+        },
+        "server_version": "RFB 003.008",
+        "server_name": "QEMU",
+        "initial_geometry": [
+          320,
+          240
+        ],
+        "initial_pixel_format": "2018000100ff00ff00ff100800000000",
+        "width": 320,
+        "height": 240,
+        "pixels": 76800,
+        "sha256": "ef894b17d94063036fd3b9a1f8fbc0f6c9d2ac9145d21fb0be075a9b8d669dfe"
+      },
+      "oracle": {
+        "passed": true,
+        "time_ms": 640,
+        "width": 320,
+        "height": 240,
+        "rgb_sha256": "3d657f63f3dfae276b0e879d204cc4d8bbf07fdf939f90bff3df3499678d92db",
+        "checked_pixels": 75907,
+        "excluded_boundary_pixels": 893,
+        "foreground_pixels": 7707,
+        "visible_faces": {
+          "(2, -1)": 3595,
+          "(0, 1)": 2937,
+          "(1, -1)": 1175
+        },
+        "checked_foreground_colors": 3786,
+        "mismatch_pixels": 0,
+        "mismatch_examples": [],
+        "geometry_margin_pixels": 0.3,
+        "texel_margin": 0.02,
+        "maximum_excluded_fraction": 0.05
+      },
+      "frame_sha256": "ef894b17d94063036fd3b9a1f8fbc0f6c9d2ac9145d21fb0be075a9b8d669dfe",
+      "filename": "frame-5.ppm",
+      "oracle_result_sha256": "2ef312832dc9b7b26cbb923e0ac8456cc10621735ab5bb6988ac6618df37fcd4"
+    },
+    {
+      "run": "ree676af97e52f22f2eb45511",
+      "mode": "live",
+      "sample": 3,
+      "frame": 6,
+      "time_ms": 1250,
+      "rgb_sha256": "c3af7a0d7c243b76f00faf174fba69ccfc5d3a803838b50e4ca5dc4021784fda",
+      "width": 320,
+      "height": 240,
+      "capture": {
+        "method": "rfb-raw-unix",
+        "rectangles": 1,
+        "framebuffer_updates": 1,
+        "desktop_resizes": 0,
+        "last_rectangles": 0,
+        "raw_bytes": 307200,
+        "pixel_format": {
+          "bits_per_pixel": 32,
+          "depth": 24,
+          "big_endian": false,
+          "red_shift": 16,
+          "green_shift": 8,
+          "blue_shift": 0
+        },
+        "server_version": "RFB 003.008",
+        "server_name": "QEMU",
+        "initial_geometry": [
+          320,
+          240
+        ],
+        "initial_pixel_format": "2018000100ff00ff00ff100800000000",
+        "width": 320,
+        "height": 240,
+        "pixels": 76800,
+        "sha256": "c127dd02f86eb372fb7f10dece47c64b1a843bdc6f99bc1541de37d88420691d"
+      },
+      "oracle": {
+        "passed": true,
+        "time_ms": 1250,
+        "width": 320,
+        "height": 240,
+        "rgb_sha256": "c3af7a0d7c243b76f00faf174fba69ccfc5d3a803838b50e4ca5dc4021784fda",
+        "checked_pixels": 76166,
+        "excluded_boundary_pixels": 634,
+        "foreground_pixels": 5781,
+        "visible_faces": {
+          "(0, 1)": 4963,
+          "(2, -1)": 526,
+          "(1, -1)": 292
+        },
+        "checked_foreground_colors": 3749,
+        "mismatch_pixels": 0,
+        "mismatch_examples": [],
+        "geometry_margin_pixels": 0.3,
+        "texel_margin": 0.02,
+        "maximum_excluded_fraction": 0.05
+      },
+      "frame_sha256": "c127dd02f86eb372fb7f10dece47c64b1a843bdc6f99bc1541de37d88420691d",
+      "filename": "frame-6.ppm",
+      "oracle_result_sha256": "685039cfba47f8c182f34af272583b0b2efe63ea7954e4465e3bc81b1fe50d95"
+    }
+  ],
+  "frames": 6,
+  "guest_command": "/bin/vkdemo --verify-session --token=ree676af97e52f22f2eb45511",
+  "sequence": {
+    "frames": 6,
+    "fixed_times_ms": [
+      0,
+      1000,
+      2500
+    ],
+    "live_times_ms": [
+      0,
+      640,
+      1250
+    ],
+    "same_process": true,
+    "distinct_frames_per_mode": 3
+  },
+  "guest_completed": true,
+  "ordinary": {
+    "token": "ree676af97e52f22f2eb45511-ordinary",
+    "guest_command": "/bin/vkdemo --duration=2 --token=ree676af97e52f22f2eb45511-ordinary",
+    "start_seen": true,
+    "samples": [
+      {
+        "frame": 1,
+        "time_ms": 0,
+        "rgb_sha256": "7523debe5f925b33c94af8b0a306d6bcf62c78d520a9091d42d53ba032b105ff"
+      },
+      {
+        "frame": 2,
+        "time_ms": 180,
+        "rgb_sha256": "270921e9ab0e792d0ffff45f331a7b29d4812ef85a2f7042b26cb96f22468a14"
+      },
+      {
+        "frame": 3,
+        "time_ms": 360,
+        "rgb_sha256": "650cc438b17fd5d0f8e9f077d905cbad883da12d65ee74d39c8249c4b230e50d"
+      },
+      {
+        "frame": 4,
+        "time_ms": 540,
+        "rgb_sha256": "ba9eb2fb5af6e45f396d6a79e93c663993961f11286bd8fc23204ac63d08d4fc"
+      },
+      {
+        "frame": 5,
+        "time_ms": 720,
+        "rgb_sha256": "8ee124efcbbda14c4eefa55b2e573029344a112fc98568971d82cbbe427134b3"
+      },
+      {
+        "frame": 6,
+        "time_ms": 900,
+        "rgb_sha256": "ad7f7b536012ae7067f410f5f47a5d48b61f008dbc5778aa5e9b764a9db64597"
+      },
+      {
+        "frame": 7,
+        "time_ms": 1080,
+        "rgb_sha256": "7ee1c310b1082b2894442445a93e1eb37844de9ccbb368ee5f924b77c5cf997d"
+      },
+      {
+        "frame": 8,
+        "time_ms": 1260,
+        "rgb_sha256": "81fca86ce6675a4b5adb432f24a3adf2963235f25d858b5036934628a63b6a08"
+      },
+      {
+        "frame": 9,
+        "time_ms": 1440,
+        "rgb_sha256": "516645078c94d9849591f887a826a07fa9606aba7ef20bf1b2f963b100e5ef6c"
+      },
+      {
+        "frame": 10,
+        "time_ms": 1620,
+        "rgb_sha256": "b2601859710e47589fc66cd068ef8e2e7d874cab206cdc40cd56333764abe435"
+      },
+      {
+        "frame": 11,
+        "time_ms": 1800,
+        "rgb_sha256": "1fcf07057d93e95440d392e2f13f753f09a7b9df8ee3bcfda2f7ec76cb4efa9f"
+      },
+      {
+        "frame": 12,
+        "time_ms": 1980,
+        "rgb_sha256": "3aad6b56d8c06e76141855b9b2d5a04c354a4ac099bfbfd7f230ee3a00d44645"
+      }
+    ],
+    "completed": true,
+    "frames": 12,
+    "first_time_ms": 0,
+    "last_time_ms": 1980
+  },
+  "qemu_exit_code": 0,
+  "elapsed_seconds": 13.964,
+  "guest_log_sha256": "edc76f1813e4403f8faeedb57648439344af0458d1203fa22753dab51d2ea0ab",
+  "renderer_log_sha256": "b1e651aca0072573c0383ae5419bb5e36f54507f9f63b580b8034c463622113d"
+}

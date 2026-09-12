@@ -1,0 +1,5 @@
+{
+  "status": "fail",
+  "scope": "six shader/readback/VNC/oracle frames passed, but cleanup timed out; not p005 acceptance",
+  "original_attempt": "q307-vkdemo-001"
+}

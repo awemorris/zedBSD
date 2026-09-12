@@ -46,6 +46,14 @@ struct test_backend {
 	int open_error;
 	int create_error;
 	uint64_t max_bytes;
+	unsigned commands;
+	unsigned reads;
+	unsigned writes;
+	unsigned presents;
+	unsigned bad_capset;
+	unsigned bad_blob_id;
+	uint32_t last_command;
+	struct test_session *present_owner;
 };
 
 /* One backend session remains allocated until its matching close callback. */
@@ -57,6 +65,9 @@ struct test_session {
 /* One resource belongs to its creating session until destroy or final close. */
 struct test_resource {
 	struct test_session *session;
+	uint64_t bytes;
+	unsigned kind;
+	uint8_t data[4096];
 };
 
 /* One open-file description retains its synthetic inode's device generation. */
@@ -100,6 +111,9 @@ static unsigned allocations;
 /* The next requested copy failure tests rollback after a real allocation. */
 static unsigned reject_copyout;
 
+/* A countdown selects either descriptor copyin or its subsequent payload copy. */
+static unsigned reject_copyin;
+
 /* Zero disables failure; a countdown selects one subsequent allocation. */
 static unsigned reject_allocation;
 
@@ -142,6 +156,18 @@ static void test_capacity_and_reentry(void);
 static void test_registration_rollback(void);
 static void test_dynamic_devices(void);
 static void test_callback_retirement(void);
+static void optional_ops_prepare(struct drv_gpu_ops *ops);
+static int backend_capset(void *opaque, void *session_data, struct gpu_capset *request);
+static int backend_blob(void *opaque, void *session_data, const struct gpu_blob_create *request, void **result, uint32_t *resource_id);
+static int backend_resource_read(void *opaque, void *session_data, void *object, uint64_t offset, void *buffer, uint32_t bytes);
+static int backend_resource_write(void *opaque, void *session_data, void *object, uint64_t offset, const void *buffer, uint32_t bytes);
+static int backend_command(void *opaque, void *session_data, const void *buffer, uint32_t bytes);
+static int backend_present(void *opaque, void *session_data, void *object, const struct gpu_present *request);
+static void test_optional_validation(void);
+static void test_optional_requests(void);
+static void test_optional_transfer(struct test_file *opened, struct test_file *foreign, struct test_backend *backend, uint64_t handle);
+static void test_optional_command(struct test_file *opened, struct test_backend *backend);
+static void test_optional_present(struct test_file *opened, struct test_backend *backend, uint64_t storage, uint64_t blob);
 
 static void test_pci_ownership(void);
 static int pci_config_read(void *argument, const struct drv_pci_address *address, unsigned offset, unsigned width, uint32_t *result);
@@ -179,6 +205,11 @@ main(
 	test_callback_retirement();
 	test_registration_rollback();
 	test_dynamic_devices();
+	test_optional_validation();
+	test_optional_requests();
+
+	/* Records the separately exercised protocol and copied-buffer acceptance paths. */
+	puts("GPU optional operations: capability, blob, transfer, command and presentation PASS");
 
 	/* Confirms every retained generation and caller credential was released. */
 	assert(allocations == 0);
@@ -397,6 +428,15 @@ copyin(
 	void *destination,
 	size_t size)
 {
+	/* Selects either the fixed request or the following embedded buffer copy. */
+	if (reject_copyin != 0) {
+		reject_copyin--;
+
+		/* Only the selected copy faults; cleanup uses ordinary allocator behavior. */
+		if (reject_copyin == 0)
+			return EFAULT;
+	}
+
 	/* A missing userspace address faults before callback dispatch. */
 	if (source == 0)
 		return EFAULT;
@@ -494,6 +534,10 @@ backend_close(
 	session = session_data;
 	assert(session->backend == backend);
 	assert(session->live == 0);
+	/* Final close releases any backend-owned presentation reservation. */
+	if (backend->present_owner == session)
+		backend->present_owner = NULL;
+
 	backend->closes++;
 	kern_free(session);
 
@@ -581,6 +625,8 @@ backend_create(
 		return ENOMEM;
 
 	resource->session = session;
+	resource->bytes = request->bytes;
+	resource->kind = 1;
 	session->live++;
 	backend->created++;
 	backend->live++;
@@ -1638,4 +1684,660 @@ pci_unpublish_gpu(
 
 	/* Succeeded: PCI can now call the hardware destructor. */
 	return 0;
+}
+
+/* Supplies an optional backend with independently testable protocol operations. */
+static void
+optional_ops_prepare(
+	struct drv_gpu_ops *ops)
+{
+	/* Retains the ordinary lifecycle while advertising each implemented addition. */
+	*ops = backend_ops;
+	ops->capabilities = GPU_CAP_RESOURCE | GPU_CAP_CAPSET | GPU_CAP_BLOB |
+		GPU_CAP_TRANSFER | GPU_CAP_COMMAND | GPU_CAP_PRESENT;
+	ops->get_capset = backend_capset;
+	ops->blob_create = backend_blob;
+	ops->resource_read = backend_resource_read;
+	ops->resource_write = backend_resource_write;
+	ops->command = backend_command;
+	ops->present = backend_present;
+
+	/* Succeeded: the optional contract is ready for ordinary registration. */
+	return;
+}
+
+/* Supplies a small deterministic capability payload for the copied query. */
+static int
+backend_capset(
+	void *opaque,
+	void *session_data,
+	struct gpu_capset *request)
+{
+	struct test_backend *backend;
+	struct test_session *session;
+
+	/* Confirms that capset dispatch retains session ownership and no spinlock. */
+	assert(held_spinlocks == 0);
+	backend = opaque;
+	session = session_data;
+	assert(session->backend == backend);
+
+	/* The synthetic backend implements one protocol identifier and version. */
+	if (request->capset_id != 4 || request->capset_version != 0)
+		return EOPNOTSUPP;
+
+	/* The complete capability payload must fit the caller's supplied capacity. */
+	if (request->capacity < 8)
+		return ENOSPC;
+
+	/* Writes a recognizable initialized payload into the inline kernel buffer. */
+	memcpy(request->data, "CAPSET04", 8);
+	request->bytes = 8;
+
+	/* A malformed backend response tests the core's output-bound enforcement. */
+	if (backend->bad_capset != 0)
+		request->bytes = request->capacity + 1U;
+
+	/* Succeeded: the core must still validate the returned payload extent. */
+	return 0;
+}
+
+/* Creates a typed blob using the same allocation ownership as ordinary storage. */
+static int
+backend_blob(
+	void *opaque,
+	void *session_data,
+	const struct gpu_blob_create *request,
+	void **result,
+	uint32_t *resource_id)
+{
+	struct test_backend *backend;
+	struct gpu_resource_create storage;
+	struct test_resource *resource;
+	int error;
+
+	/* Reuses the existing allocator so failure accounting remains independent. */
+	backend = opaque;
+	memset(&storage, 0, sizeof(storage));
+	storage.bytes = request->bytes;
+	error = backend_create(opaque, session_data, &storage, result);
+	if (error != 0)
+		return error;
+
+	/* Gives the core a protocol identifier distinct from its opaque handle. */
+	resource = *result;
+	resource->kind = 2;
+	*resource_id = backend->created;
+
+	/* A missing protocol identity requires core rollback of the new object. */
+	if (backend->bad_blob_id != 0)
+		*resource_id = 0;
+
+	/* Succeeded: destroy owns this allocation even for a rejected output ID. */
+	return 0;
+}
+
+/* Reads a validated resource range into an exclusively kernel-owned buffer. */
+static int
+backend_resource_read(
+	void *opaque,
+	void *session_data,
+	void *object,
+	uint64_t offset,
+	void *buffer,
+	uint32_t bytes)
+{
+	struct test_backend *backend;
+	struct test_session *session;
+	struct test_resource *resource;
+
+	/* Validates core dispatch ownership without interpreting any user pointer. */
+	assert(held_spinlocks == 0);
+	backend = opaque;
+	session = session_data;
+	resource = object;
+	assert(session->backend == backend);
+	assert(resource->session == session);
+	assert(offset <= resource->bytes);
+	assert(bytes <= resource->bytes - offset);
+	assert(offset + bytes <= sizeof(resource->data));
+
+	/* Copies ordinary test storage so the core's readback can be compared exactly. */
+	memcpy(buffer, resource->data + (size_t)offset, bytes);
+	backend->reads++;
+
+	/* Succeeded: the supplied kernel buffer contains the requested bytes. */
+	return 0;
+}
+
+/* Writes a validated kernel snapshot into a session-owned resource range. */
+static int
+backend_resource_write(
+	void *opaque,
+	void *session_data,
+	void *object,
+	uint64_t offset,
+	const void *buffer,
+	uint32_t bytes)
+{
+	struct test_backend *backend;
+	struct test_session *session;
+	struct test_resource *resource;
+
+	/* Confirms that bounds and ownership were resolved before callback dispatch. */
+	assert(held_spinlocks == 0);
+	backend = opaque;
+	session = session_data;
+	resource = object;
+	assert(session->backend == backend);
+	assert(resource->session == session);
+	assert(offset <= resource->bytes);
+	assert(bytes <= resource->bytes - offset);
+	assert(offset + bytes <= sizeof(resource->data));
+
+	/* Persists the copied bytes so later readback observes the exact snapshot. */
+	memcpy(resource->data + (size_t)offset, buffer, bytes);
+	backend->writes++;
+
+	/* Succeeded: the backend consumed every byte before returning. */
+	return 0;
+}
+
+/* Records one copied command word without claiming completion of GPU execution. */
+static int
+backend_command(
+	void *opaque,
+	void *session_data,
+	const void *buffer,
+	uint32_t bytes)
+{
+	struct test_backend *backend;
+	struct test_session *session;
+
+	/* Checks the protocol extent passed by the core rather than an encoded pointer. */
+	assert(held_spinlocks == 0);
+	backend = opaque;
+	session = session_data;
+	assert(session->backend == backend);
+	assert(bytes != 0 && bytes <= GPU_COMMAND_MAX);
+	assert((bytes & 3U) == 0);
+
+	/* Captures the first command word before the staging buffer is released. */
+	memcpy(&backend->last_command, buffer, sizeof(backend->last_command));
+	backend->commands++;
+
+	/* Succeeded: only command receipt is recorded by this mock protocol. */
+	return 0;
+}
+
+/* Arbitrates display ownership only after the core resolves a bounded image. */
+static int
+backend_present(
+	void *opaque,
+	void *session_data,
+	void *object,
+	const struct gpu_present *request)
+{
+	struct test_backend *backend;
+	struct test_session *session;
+	struct test_resource *resource;
+
+	/* A backend must receive only ordinary storage belonging to its session. */
+	assert(held_spinlocks == 0);
+	backend = opaque;
+	session = session_data;
+	resource = object;
+	assert(session->backend == backend);
+	assert(resource->session == session);
+	assert(resource->kind == 1);
+	assert(request->offset + (uint64_t)request->stride * request->height <=
+		resource->bytes);
+
+	/* Another live presenting session retains backend display ownership. */
+	if (backend->present_owner != NULL && backend->present_owner != session)
+		return EBUSY;
+
+	/* Records the session whose final close must relinquish presentation. */
+	backend->present_owner = session;
+	backend->presents++;
+
+	/* Succeeded: the display backend accepted one fully bounded image. */
+	return 0;
+}
+
+/* Rejects incomplete optional contracts without publishing an unusable device. */
+static void
+test_optional_validation(
+	void)
+{
+	struct drv_gpu_ops ops;
+	struct drv_gpu_device *device;
+	struct test_backend backend;
+	int error;
+
+	/* Initializes backend state without allocating a live registration. */
+	memset(&backend, 0, sizeof(backend));
+
+	/* Transfer support requires both directions even if only reads are attempted. */
+	optional_ops_prepare(&ops);
+	ops.resource_write = NULL;
+	error = drv_gpu_register(&ops, &backend, &device);
+	expect_error(error, EINVAL);
+	assert(device == NULL);
+
+	/* Blob-only support still requires the shared resource destructor. */
+	optional_ops_prepare(&ops);
+	ops.capabilities = GPU_CAP_BLOB;
+	ops.resource_create = NULL;
+	ops.resource_destroy = NULL;
+	ops.get_capset = NULL;
+	ops.resource_read = NULL;
+	ops.resource_write = NULL;
+	ops.command = NULL;
+	ops.present = NULL;
+	error = drv_gpu_register(&ops, &backend, &device);
+	expect_error(error, EINVAL);
+
+	/* Hidden optional callbacks cannot contradict advertised capabilities. */
+	optional_ops_prepare(&ops);
+	ops.capabilities &= ~GPU_CAP_COMMAND;
+	error = drv_gpu_register(&ops, &backend, &device);
+	expect_error(error, EINVAL);
+
+	/* Unknown capability bits remain unsupported after extending the known set. */
+	optional_ops_prepare(&ops);
+	ops.capabilities |= 0x80000000U;
+	error = drv_gpu_register(&ops, &backend, &device);
+	expect_error(error, EOPNOTSUPP);
+	assert(allocations == 0);
+
+	/* Succeeded: malformed extensions retained no device or backend ownership. */
+	return;
+}
+
+/* Exercises copied capability data, typed blobs and original descriptor rights. */
+static void
+test_optional_requests(
+	void)
+{
+	struct drv_gpu_ops ops;
+	struct drv_gpu_device *device;
+	struct test_backend backend;
+	struct test_file opened;
+	struct test_file foreign;
+	struct test_file reader;
+	struct test_file writer;
+	struct gpu_capset capset;
+	struct gpu_blob_create blob;
+	struct gpu_resource_create storage;
+	struct gpu_present present;
+	uint64_t blob_handle;
+	uint64_t storage_handle;
+	unsigned created;
+	unsigned index;
+	int error;
+	int comparison;
+
+	/* Registers all optional operations through the unchanged device API. */
+	optional_ops_prepare(&ops);
+	memset(&backend, 0, sizeof(backend));
+	error = drv_gpu_register(&ops, &backend, &device);
+	expect_error(error, 0);
+	error = open_file(&opened, "gpu0", O_RDWR);
+	expect_error(error, 0);
+	error = open_file(&foreign, "gpu0", O_RDWR);
+	expect_error(error, 0);
+	error = open_file(&reader, "gpu0", O_RDONLY);
+	expect_error(error, 0);
+	error = open_file(&writer, "gpu0", O_WRONLY);
+	expect_error(error, 0);
+
+	/* Queries one complete inline capset without transmitting a user pointer. */
+	memset(&capset, 0, sizeof(capset));
+	capset.version = GPU_ABI_VERSION;
+	capset.size = sizeof(capset);
+	capset.capset_id = 4;
+	capset.capacity = GPU_CAPSET_MAX;
+	error = cdev_file_ops.ioctl(&opened.file, GPU_GET_CAPSET, (uintptr_t)&capset);
+	expect_error(error, 0);
+	assert(capset.bytes == 8);
+	comparison = memcmp(capset.data, "CAPSET04", 8);
+	assert(comparison == 0);
+
+	/* The unfilled inline reply tail must contain no prior kernel storage. */
+	for (index = capset.bytes; index < GPU_CAPSET_MAX; index++)
+		assert(capset.data[index] == 0);
+
+	/* Output counts and excessive capacities cannot be accepted as new inputs. */
+	error = cdev_file_ops.ioctl(&opened.file, GPU_GET_CAPSET, (uintptr_t)&capset);
+	expect_error(error, EINVAL);
+	capset.bytes = 0;
+	capset.capacity = GPU_CAPSET_MAX + 1U;
+	error = cdev_file_ops.ioctl(&opened.file, GPU_GET_CAPSET, (uintptr_t)&capset);
+	expect_error(error, EINVAL);
+	capset.capacity = GPU_CAPSET_MAX;
+	capset.version++;
+	error = cdev_file_ops.ioctl(&opened.file, GPU_GET_CAPSET, (uintptr_t)&capset);
+	expect_error(error, EINVAL);
+	capset.version = GPU_ABI_VERSION;
+
+	/* A backend's oversized result is rejected before publishing any response. */
+	backend.bad_capset = 1;
+	error = cdev_file_ops.ioctl(&opened.file, GPU_GET_CAPSET, (uintptr_t)&capset);
+	expect_error(error, EIO);
+	backend.bad_capset = 0;
+
+	/* Read-only descriptors cannot gain mutation rights from later flag changes. */
+	atomic_store_release(&reader.file.f_flags, O_RDWR);
+	error = cdev_file_ops.ioctl(&reader.file, GPU_BLOB_CREATE, 0);
+	expect_error(error, EACCES);
+	error = cdev_file_ops.ioctl(&reader.file, GPU_RESOURCE_WRITE, 0);
+	expect_error(error, EACCES);
+	error = cdev_file_ops.ioctl(&reader.file, GPU_COMMAND, 0);
+	expect_error(error, EACCES);
+	error = cdev_file_ops.ioctl(&reader.file, GPU_PRESENT, 0);
+	expect_error(error, EACCES);
+
+	/* Write-only descriptors similarly cannot acquire readback authority. */
+	atomic_store_release(&writer.file.f_flags, O_RDWR);
+	error = cdev_file_ops.ioctl(&writer.file, GPU_RESOURCE_READ, 0);
+	expect_error(error, EACCES);
+
+	/* A blob copyout failure destroys the unreturned backend allocation. */
+	memset(&blob, 0, sizeof(blob));
+	blob.version = GPU_ABI_VERSION;
+	blob.size = sizeof(blob);
+	blob.bytes = 4096;
+	blob.flags = GPU_BLOB_MAPPABLE;
+	created = backend.created;
+	reject_copyout = 1;
+	error = cdev_file_ops.ioctl(&opened.file, GPU_BLOB_CREATE, (uintptr_t)&blob);
+	expect_error(error, EFAULT);
+	assert(backend.created == created + 1U);
+	assert(backend.live == 0);
+	assert(blob.handle == 0);
+
+	/* Missing protocol resource IDs also roll back successfully allocated blobs. */
+	backend.bad_blob_id = 1;
+	error = cdev_file_ops.ioctl(&opened.file, GPU_BLOB_CREATE, (uintptr_t)&blob);
+	expect_error(error, EIO);
+	assert(backend.live == 0);
+	backend.bad_blob_id = 0;
+
+	/* A normal blob returns distinct opaque and protocol identity fields. */
+	error = cdev_file_ops.ioctl(&opened.file, GPU_BLOB_CREATE, (uintptr_t)&blob);
+	expect_error(error, 0);
+	assert(blob.handle != 0);
+	assert(blob.resource_id != 0);
+	blob_handle = blob.handle;
+
+	/* Reusing nonzero output fields cannot accidentally create another blob. */
+	error = cdev_file_ops.ioctl(&opened.file, GPU_BLOB_CREATE, (uintptr_t)&blob);
+	expect_error(error, EINVAL);
+	blob.handle = 0;
+	blob.resource_id = 0;
+	blob.flags = 0x80000000U;
+	error = cdev_file_ops.ioctl(&opened.file, GPU_BLOB_CREATE, (uintptr_t)&blob);
+	expect_error(error, EINVAL);
+
+	/* Allocates ordinary storage for typed presentation and transfer checks. */
+	prepare_create(&storage);
+	storage.bytes = 4096;
+	error = cdev_file_ops.ioctl(&opened.file, GPU_RESOURCE_CREATE, (uintptr_t)&storage);
+	expect_error(error, 0);
+	storage_handle = storage.handle;
+	test_optional_transfer(&opened, &foreign, &backend, blob_handle);
+	test_optional_transfer(&opened, &foreign, &backend, storage_handle);
+	test_optional_command(&opened, &backend);
+	test_optional_present(&opened, &backend, storage_handle, blob_handle);
+
+	/* Gives another session valid storage before testing backend display exclusion. */
+	prepare_create(&storage);
+	storage.bytes = 1024;
+	error = cdev_file_ops.ioctl(&foreign.file, GPU_RESOURCE_CREATE, (uintptr_t)&storage);
+	expect_error(error, 0);
+	memset(&present, 0, sizeof(present));
+	present.version = GPU_ABI_VERSION;
+	present.size = sizeof(present);
+	present.handle = storage.handle;
+	present.width = 16;
+	present.height = 16;
+	present.stride = 64;
+	present.format = GPU_PIXEL_BGRA8888;
+	error = cdev_file_ops.ioctl(&foreign.file, GPU_PRESENT, (uintptr_t)&present);
+	expect_error(error, EBUSY);
+
+	/* Final close frees display ownership before another session presents. */
+	close_file(&opened);
+	error = cdev_file_ops.ioctl(&foreign.file, GPU_PRESENT, (uintptr_t)&present);
+	expect_error(error, 0);
+	close_file(&foreign);
+	close_file(&reader);
+	close_file(&writer);
+	assert(backend.live == 0);
+	assert(backend.created == backend.destroyed);
+	assert(backend.present_owner == NULL);
+	error = drv_gpu_unregister(device);
+	expect_error(error, 0);
+	assert(allocations == 0);
+
+	/* Succeeded: optional operations preserved capability, type and session ownership. */
+	return;
+}
+
+/* Verifies exact resource bounds, session isolation and copied-buffer rollback. */
+static void
+test_optional_transfer(
+	struct test_file *opened,
+	struct test_file *foreign,
+	struct test_backend *backend,
+	uint64_t handle)
+{
+	struct gpu_transfer transfer;
+	uint8_t source[16];
+	uint8_t destination[16];
+	unsigned writes;
+	unsigned baseline;
+	int error;
+	int comparison;
+
+	/* Copies one recognizable range into the final bytes of a resource. */
+	memset(source, 0x5a, sizeof(source));
+	memset(destination, 0, sizeof(destination));
+	memset(&transfer, 0, sizeof(transfer));
+	transfer.version = GPU_ABI_VERSION;
+	transfer.size = sizeof(transfer);
+	transfer.handle = handle;
+	transfer.offset = 4096 - sizeof(source);
+	transfer.address = (uintptr_t)source;
+	transfer.bytes = sizeof(source);
+	error = cdev_file_ops.ioctl(&opened->file, GPU_RESOURCE_WRITE, (uintptr_t)&transfer);
+	expect_error(error, 0);
+
+	/* Reads the same exact range through independent kernel staging memory. */
+	transfer.address = (uintptr_t)destination;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_RESOURCE_READ, (uintptr_t)&transfer);
+	expect_error(error, 0);
+	comparison = memcmp(source, destination, sizeof(source));
+	assert(comparison == 0);
+
+	/* Foreign sessions cannot use a handle even when it names an existing resource. */
+	error = cdev_file_ops.ioctl(&foreign->file, GPU_RESOURCE_READ, (uintptr_t)&transfer);
+	expect_error(error, EINVAL);
+
+	/* One byte beyond the exact allocated extent is rejected before dispatch. */
+	transfer.offset++;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_RESOURCE_READ, (uintptr_t)&transfer);
+	expect_error(error, EINVAL);
+	transfer.offset = UINT64_MAX;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_RESOURCE_READ, (uintptr_t)&transfer);
+	expect_error(error, EINVAL);
+	transfer.offset = 0;
+
+	/* Per-copy limits are checked before resource and pointer access. */
+	transfer.bytes = GPU_COPY_MAX + 1U;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_RESOURCE_READ, (uintptr_t)&transfer);
+	expect_error(error, EINVAL);
+	transfer.bytes = sizeof(source);
+	transfer.reserved = 1;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_RESOURCE_READ, (uintptr_t)&transfer);
+	expect_error(error, EINVAL);
+	transfer.reserved = 0;
+
+	/* The encoded last-byte address must not wrap the native address space. */
+	transfer.address = UINT64_MAX;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_RESOURCE_READ, (uintptr_t)&transfer);
+	expect_error(error, EFAULT);
+	transfer.address = 0;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_RESOURCE_WRITE, (uintptr_t)&transfer);
+	expect_error(error, EFAULT);
+	transfer.address = (uintptr_t)source;
+
+	/* Payload copyin failure must free staging without changing backend bytes. */
+	baseline = allocations;
+	writes = backend->writes;
+	reject_copyin = 2;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_RESOURCE_WRITE, (uintptr_t)&transfer);
+	expect_error(error, EFAULT);
+	assert(backend->writes == writes);
+	assert(allocations == baseline);
+
+	/* Failed readback copyout retains the resource and releases staging memory. */
+	transfer.address = (uintptr_t)destination;
+	reject_copyout = 1;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_RESOURCE_READ, (uintptr_t)&transfer);
+	expect_error(error, EFAULT);
+	assert(allocations == baseline);
+
+	/* Allocation failure cannot dispatch a write with missing staging storage. */
+	reject_allocation = 1;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_RESOURCE_WRITE, (uintptr_t)&transfer);
+	expect_error(error, ENOMEM);
+	assert(backend->writes == writes);
+	assert(allocations == baseline);
+
+	/* Succeeded: resource copies retained exact bounds and independent ownership. */
+	return;
+}
+
+/* Exercises command-word bounds and prevents failed copies from reaching the driver. */
+static void
+test_optional_command(
+	struct test_file *opened,
+	struct test_backend *backend)
+{
+	struct gpu_command command;
+	uint32_t words[2];
+	unsigned submitted;
+	unsigned baseline;
+	int error;
+
+	/* Submits one aligned copied command stream through the optional operation. */
+	words[0] = 0x12345678U;
+	words[1] = 0x87654321U;
+	memset(&command, 0, sizeof(command));
+	command.version = GPU_ABI_VERSION;
+	command.size = sizeof(command);
+	command.address = (uintptr_t)words;
+	command.bytes = sizeof(words);
+	error = cdev_file_ops.ioctl(&opened->file, GPU_COMMAND, (uintptr_t)&command);
+	expect_error(error, 0);
+	assert(backend->last_command == words[0]);
+	submitted = backend->commands;
+	baseline = allocations;
+
+	/* Non-word lengths, empty streams and oversized requests never reach dispatch. */
+	command.bytes = 3;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_COMMAND, (uintptr_t)&command);
+	expect_error(error, EINVAL);
+	command.bytes = 0;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_COMMAND, (uintptr_t)&command);
+	expect_error(error, EINVAL);
+	command.bytes = GPU_COMMAND_MAX + 4U;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_COMMAND, (uintptr_t)&command);
+	expect_error(error, EINVAL);
+	command.bytes = sizeof(words);
+
+	/* Unknown submission flags and wrapping pointers are refused independently. */
+	command.flags = 1;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_COMMAND, (uintptr_t)&command);
+	expect_error(error, EINVAL);
+	command.flags = 0;
+	command.address = UINT64_MAX;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_COMMAND, (uintptr_t)&command);
+	expect_error(error, EFAULT);
+	command.address = (uintptr_t)words;
+
+	/* A failed payload copy cannot leave staging or partially submit a command. */
+	reject_copyin = 2;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_COMMAND, (uintptr_t)&command);
+	expect_error(error, EFAULT);
+	assert(backend->commands == submitted);
+	assert(allocations == baseline);
+
+	/* Succeeded: command bounds and copy ownership prevent malformed dispatch. */
+	return;
+}
+
+/* Checks that only complete images in ordinary storage reach presentation. */
+static void
+test_optional_present(
+	struct test_file *opened,
+	struct test_backend *backend,
+	uint64_t storage,
+	uint64_t blob)
+{
+	struct gpu_present present;
+	unsigned presented;
+	int error;
+
+	/* Presents a valid image whose extent fits the supplied storage resource. */
+	memset(&present, 0, sizeof(present));
+	present.version = GPU_ABI_VERSION;
+	present.size = sizeof(present);
+	present.handle = storage;
+	present.width = 16;
+	present.height = 16;
+	present.stride = 64;
+	present.format = GPU_PIXEL_BGRA8888;
+	present.frame = 7;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_PRESENT, (uintptr_t)&present);
+	expect_error(error, 0);
+	presented = backend->presents;
+
+	/* A protocol blob must be copied to storage before it can be presented. */
+	present.handle = blob;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_PRESENT, (uintptr_t)&present);
+	expect_error(error, EINVAL);
+	present.handle = storage;
+
+	/* Invalid dimensions are rejected before row-byte arithmetic. */
+	present.width = 4097;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_PRESENT, (uintptr_t)&present);
+	expect_error(error, EINVAL);
+	present.width = 16;
+	present.height = 0;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_PRESENT, (uintptr_t)&present);
+	expect_error(error, EINVAL);
+	present.height = 16;
+
+	/* Row overlap, excessive row extent and unsupported formats cannot display. */
+	present.stride = 63;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_PRESENT, (uintptr_t)&present);
+	expect_error(error, EINVAL);
+	present.stride = UINT32_MAX;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_PRESENT, (uintptr_t)&present);
+	expect_error(error, EINVAL);
+	present.stride = 64;
+	present.format = 0;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_PRESENT, (uintptr_t)&present);
+	expect_error(error, EINVAL);
+	present.format = GPU_PIXEL_RGBA8888;
+	present.offset = 4096;
+	error = cdev_file_ops.ioctl(&opened->file, GPU_PRESENT, (uintptr_t)&present);
+	expect_error(error, EINVAL);
+	assert(backend->presents == presented);
+
+	/* Succeeded: only the complete typed image reached backend display ownership. */
+	return;
 }

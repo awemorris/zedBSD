@@ -17,3 +17,5 @@ No aggregate `make check`. No newly installed formatter/linter or mass formattin
 Versions are observations, not a new required toolchain pin. Record actual tools
 and results on each relevant Phase. A WS's standards review needs its own agreed
 scope and execution authority; do not fabricate conformance for prior user acceptance.
+
+2026-09-12ユーザー確認: HAL配下の全変更は事前に具体差分への明示許可を確認する。既存宣言への実装補完も対象。自動formatter/buildの成功は適用許可を意味しない。Guardrailを参照。

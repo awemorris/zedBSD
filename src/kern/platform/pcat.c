@@ -37,6 +37,9 @@
 #if CONFIG_DRIVER_PCI_INTEL_AX211
 #include <drivers/pci-intel-ax211.h>
 #endif
+#if CONFIG_DRIVER_PCI_VENUS
+#include <drivers/venus.h>
+#endif
 #if CONFIG_DRIVER_USB_STORAGE
 #include "drivers/usb-storage.h"
 #include <drivers/usb-uas.h>
@@ -93,6 +96,9 @@ kern_platform_init(
 	unsigned i;
 #if CONFIG_DRIVER_NE2000
 	int network_error;
+#endif
+#if CONFIG_DRIVER_PCI_VENUS
+	int venus_error;
 #endif
 
 	count = 0;
@@ -162,6 +168,13 @@ kern_platform_init(
 #if CONFIG_DRIVER_PCI_NVME
 	if (drv_pci_nvme_driver_register() != 0)
 		kern_logf("nvme: PCI driver registration failed\n");
+#endif
+#if CONFIG_DRIVER_PCI_VENUS
+	/* Binds Venus through the same PCI lifecycle as other devices. */
+	venus_error = drv_venus_pci_driver_register();
+	if (venus_error != 0)
+		kern_logf("pci: Venus driver registration failed (%d)\n", venus_error);
+
 #endif
 #if CONFIG_DRIVER_PCI_INTEL_AX211
 	if (drv_pci_intel_ax211_driver_register() != 0)
