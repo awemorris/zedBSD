@@ -41,6 +41,7 @@ static void crtc_write(struct pc98_cirrus *backend, uint8_t index, uint8_t value
 static uint8_t crtc_read(struct pc98_cirrus *backend, uint8_t index);
 static void hidden_dac_write(struct pc98_cirrus *backend, uint8_t value);
 static void load_rgb332_palette(struct pc98_cirrus *backend);
+static void load_ramp_palette(struct pc98_cirrus *backend);
 static int coregraph_id_present(struct pc98_cirrus *backend);
 static void coregraph_gate_enter(struct pc98_cirrus *backend);
 static void coregraph_gate_leave(struct pc98_cirrus *backend);
@@ -268,6 +269,22 @@ load_rgb332_palette(
 	}
 }
 
+/* Loads the linear DAC ramp the 24-bit mode runs through. */
+static void
+load_ramp_palette(
+	struct pc98_cirrus *backend)
+{
+	unsigned i;
+
+	out8(backend, CIRRUS_IO + 6U, 0xffU);
+	out8(backend, CIRRUS_IO + 8U, 0);
+	for (i = 0; i < 256; i++) {
+		out8(backend, CIRRUS_IO + 9U, (uint8_t)(i >> 2));
+		out8(backend, CIRRUS_IO + 9U, (uint8_t)(i >> 2));
+		out8(backend, CIRRUS_IO + 9U, (uint8_t)(i >> 2));
+	}
+}
+
 /* Supports the coregraph id present operation. */
 static int
 coregraph_id_present(
@@ -320,25 +337,36 @@ coregraph_mode_640x480(
 	struct pc98_cirrus *backend,
 	unsigned bits_per_pixel)
 {
-	uint8_t value_local;
-	uint8_t value_local1;
 	static const uint8_t seq_index[] = {
 		0x00, 0x01, 0x02, 0x03, 0x04, 0x07, 0x08, 0x0b, 0x0c, 0x0d,
 		0x0e, 0x0f, 0x16, 0x18, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f};
-	static const uint8_t seq_value[] = {
+	/* The 8-bit and 24-bit streams recovered from NEC's CIRRUS.SYS. */
+	static const uint8_t seq_value_8[] = {
 		0x01, 0x01, 0x0f, 0x00, 0x0e, 0x11, 0x00, 0x66, 0x48, 0x56,
 		0x60, 0x30, 0x58, 0x40, 0x3b, 0x23, 0x3d, 0x3b, 0x20};
-	static const uint8_t crtc[0x1c] = {
+	static const uint8_t seq_value_24[] = {
+		0x01, 0x01, 0x0f, 0x00, 0x0e, 0x15, 0x00, 0x3a, 0x48, 0x56,
+		0x60, 0x30, 0x58, 0x40, 0x16, 0x23, 0x3d, 0x3b, 0x20};
+	static const uint8_t crtc_8[0x1c] = {
 		0x5f, 0x4f, 0x50, 0x84, 0x54, 0x80, 0x0b, 0x3e, 0x00, 0x40,
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xe5, 0x87, 0xdf, 0x50,
 		0x00, 0xe7, 0x04, 0xe3, 0xff, 0x00, 0x90, 0x22};
+	static const uint8_t crtc_24[0x1c] = {
+		0x5f, 0x4f, 0x50, 0x84, 0x53, 0x9f, 0x0b, 0x3e, 0x00, 0x40,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xe5, 0x87, 0xdf, 0x00,
+		0x00, 0xe7, 0x04, 0xe3, 0xff, 0x00, 0x90, 0x32};
 	static const uint8_t graphics[9] = {0x00, 0x00, 0x00, 0x00, 0x00,
 					    0x40, 0x05, 0x0f, 0xff};
 	static const uint8_t attribute[21] = {
 		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
 		0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
 		0x0e, 0x0f, 0x41, 0x00, 0x0f, 0x00, 0x00};
+	const uint8_t *seq_value;
+	const uint8_t *crtc;
 	unsigned i;
+
+	seq_value = bits_per_pixel == 24U ? seq_value_24 : seq_value_8;
+	crtc = bits_per_pixel == 24U ? crtc_24 : crtc_8;
 
 	gfx_write(backend, 0x33U, 0);
 	gfx_write(backend, 0x31U, 0x04U);
@@ -346,13 +374,8 @@ coregraph_mode_640x480(
 	seq_write(backend, 0x06U, 0x12U);
 	seq_write(backend, 0x12U, 0);
 	/* Process each remaining element. */
-	for (i = 0; i < sizeof(seq_index); i++) {
-		/* Handles the seq index condition. */
-		value_local = seq_value[i];
-		if (seq_index[i] == 0x07U && bits_per_pixel == 24U)
-			value_local = 0x15U;
-		seq_write(backend, seq_index[i], value_local);
-	}
+	for (i = 0; i < sizeof(seq_index); i++)
+		seq_write(backend, seq_index[i], seq_value[i]);
 
 	seq_write(backend, 0x0fU,
 		  (uint8_t)((seq_read(backend, 0x0fU) & 0xdfU) | 0x20U));
@@ -361,13 +384,8 @@ coregraph_mode_640x480(
 	seq_write(backend, 0x00U, 0x03U);
 	crtc_write(backend, 0x11U, 0x20U);
 	/* Process each remaining element. */
-	for (i = 0; i < sizeof(crtc); i++) {
-		/* Checks the current index. */
-		value_local1 = crtc[i];
-		if (i == 0x13U && bits_per_pixel == 24U)
-			value_local1 = 0xf0U;
-		crtc_write(backend, (uint8_t)i, value_local1);
-	}
+	for (i = 0; i < 0x1cU; i++)
+		crtc_write(backend, (uint8_t)i, crtc[i]);
 
 	/* Process each remaining element. */
 	for (i = 0; i < sizeof(graphics); i++)
@@ -381,7 +399,7 @@ coregraph_mode_640x480(
 
 	(void)in8(backend, CIRRUS_STATUS);
 	out8(backend, CIRRUS_IO, 0x20U);
-	hidden_dac_write(backend, bits_per_pixel == 24U ? 0xc5U : 0x20U);
+	hidden_dac_write(backend, bits_per_pixel == 24U ? 0xe5U : 0x20U);
 	out8(backend, CIRRUS_IO + 6U, 0xffU);
 	gfx_write(backend, 0x09U, 0);
 	gfx_write(backend, 0x0aU, 0);
@@ -391,9 +409,13 @@ coregraph_mode_640x480(
 	gfx_write(backend, 0x31U, 0x04U);
 	gfx_write(backend, 0x31U, 0);
 
-	/* Handles the bits per pixel condition. */
+	/* Loads the palette the depth needs: RGB332 for 8, a ramp for 24. */
 	if (bits_per_pixel == 8U)
 		load_rgb332_palette(backend);
+	else
+		load_ramp_palette(backend);
+
+	/* Leaves the screen blanked until the caller has cleared it. */
 	seq_write(backend, 0x01U, 0x21U);
 }
 
@@ -495,16 +517,26 @@ cirrus_enter(
 	/* Checks the wab read result. */
 	if (wab_read(backend, WAB_REG_LINEAR) != 0xf0U)
 		goto fail;
+	/*
+	 * NEC's driver opens the board-side gate before the VGA stream, and
+	 * the V13 needs it that way: programmed the other way round, the
+	 * clock and mux logic stays in the GDC configuration while the
+	 * accelerator holds the relay, and the monitor shows nothing usable.
+	 * The stream leaves the screen blanked, so the switch is not seen.
+	 */
+	coregraph_gate_enter(backend);
 	coregraph_mode_640x480(backend, bits_per_pixel);
 
 	/*
-	 * Keep the motherboard GDC on the monitor while Cirrus is configured
-	 * and its visible framebuffer is erased.  WAB_REG_RELAY bit 1 in
-	 * coregraph_gate_enter() is the actual GDC-to-Cirrus scanout switch.
+	 * Resets the BitBLT engine before touching the aperture: a stale
+	 * system-source command would consume the clear as FIFO data.
 	 */
+	gfx_write(backend, 0x31U, 0x04U);
+	gfx_write(backend, 0x31U, 0);
 	for (i = 0; i < visible_bytes; i++)
 		backend->framebuffer[i] = 0;
-	coregraph_gate_enter(backend);
+
+	/* Screen on; control register 03h already selected the accelerator. */
 	seq_write(backend, 0x01U, 0x01U);
 	backend->bits_per_pixel = (uint8_t)bits_per_pixel;
 	backend->active = 1;

@@ -116,3 +116,7 @@ WS003 remains closed, never reusable. WS027 owns PowerPC porting. No Queue start
 ## 2026-09-12 GPU planning handoff
 
 WS014/p001 architecture discussion resumed by user; first target is QEMU virtio-gpu, superseding i915-first/manual design hold. Vulkan display API is a proposal, not a frozen ABI. Linux DRM compatibility is not required, but OS memory/sync/display/permission machinery remains necessary. No implementation Queue. Other WS holds stay unchanged. See WS014 and p001; old review cases remain design inputs, not runtime tests.
+
+## 2026-09-12 GPU phase sequence
+
+WS014 p001 supplies design decisions; p002 implements only the GPU framework; p003 integrates virtio-gpu/Venus and the capture/debug loop on Linux i915+ANV host, refining API gaps; p004 reviews final API and full standards. Native guest i915 is the separate WS029 after WS014. Read plan/ws014/qemu-venus-debug-loop.md. No Queue started. User will git add/commit documentation; do not add/commit/push.

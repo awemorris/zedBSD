@@ -56,6 +56,7 @@ Objectives → Milestone Goals → WS → Phase → Queue試行/結果を対応�
 | Goal | 当面の成果 | Milestone | 担当 |
 | --- | --- | --- | --- |
 | fg004 | インストーラ実機動作：PC98 V13、Latitude 5320、SV7、LX6 | MG003 | [WS028](https://github.com/awemorris/zedBSD/issues/382) |
+| [ws029](https://github.com/awemorris/zedBSD/issues/386) | MG006 | i915ネイティブGPU | planning | WS014の検証・API整理後に実機実装。 |
 | fg005 | 有線LAN常駐管理、起動時の接続待機、DEへのネットワーク状態通知 | MG005 / MG006 | [ws005](ws005/ws.md) |
 | fg009 | PowerPC移植：OF/APM+FATからPPCカーネル起動、後続USB root/image統合 | MG008 / MG003 | [ws027](https://github.com/awemorris/zedBSD/issues/374) |
 | fg007 | HAL契約の可読性改善：コンソールAPIの集約、アロケータの kernel_alloc/kernel_free 化、kernel_entry() 前関数の prekern 命名 | MG008 / MG001 | 未定（WS018は完了。再開か新WSかの判断が必要） |
@@ -272,6 +273,54 @@ toolchain smoke は PASS、world ビルドはエラーなし、QEMU でログイ
 
 注意点として、パッチの削除行は上流の本文と一致させる必要があるため、
 接頭辞移行の対象外である。追加行だけが新しい名前を使う。
+
+## PC-98 実機：Cirrus を有効にすると表示が消える（2026-09-12、未コミット、実機未検証）
+
+実機が init から先へ進んだ後の報告。Cirrus（Core-Graph）へ切り替えると
+モニタ出力が無くなる。QEMU の coregraph では以前から正常。
+
+### 比較対象
+
+以前この実機で表示できていた `~/StratoHAL/src/98disp_cirrus.c` と比較した。
+そのドライバの Core-Graph 経路（内部パス 08h、V13 の ID 5Bh）は
+NEC の CIRRUS.SYS から回収したレジスタ列で、V13 で動作している。
+
+### 差分と原因
+
+1. **ゲート列の順序が逆。** ボード側のゲート列（68h、6Ah の 07h/8Fh/06h、
+   制御レジスタ 03h、5Fh の待ち 2 回、スリープラッチ）を、zedBSD は
+   VGA モードストリームの後に出していた。GDC がモニタを持ったまま
+   チップを組む、という意図のコメント付き。参照は「必ずストリームの前」と
+   明記し、逆にするとリレーはアクセラレータ側なのにクロックとマルチプレクサが
+   GDC 構成のままになり、流れて周期的に消える絵か、何も出ない、と書いている。
+   エミュレータにはその調停が無いので順序の違いが見えない。
+2. **24bpp のレジスタ表が回収列とずれていた。** SR0B、SR1B、CR04、CR05、
+   CR13、CR1B、隠し DAC が 8bpp の値に一部置換を加えたものだった。
+   回収列は 24bpp のピッチを 2048 バイトに固定する（CR13=00h、CR1B=32h）。
+   zedBSD は 1920 で組んでいた。
+3. 24bpp のパレットを読み込んでいなかった。参照はリニアなランプを入れる。
+
+### 修正
+
+`display-cirrus.c` と `display-cirrus.h`。ゲート列をストリームの前に移し、
+ストリームは SR01 でブランクのまま終える。BitBLT エンジンをリセットしてから
+可視領域をクリアし、最後に SR01 で表示を入れる。24bpp の表を参照と一致させ、
+ストライドを 2048 にし、ランプパレットを入れる。8bpp の表は元から一致。
+
+### 確認
+
+QEMU 64 MB で `startx`。Xzed が 24bpp を選び、
+`graphics: Cirrus mode 640x480x24 stride=2048` でデスクトップが正常に出た。
+QEMU はもともとこの障害を再現しないので、実証は実機でしかできない。
+
+### 直らなかった場合の変数
+
+起動時に `hal_pc98_enable_high_memory()` が 43Bh に 04h を書くようになった
+（16 MB 超のゲート）。参照ドライバは 439h/43Bh を一切触らない。
+Core-Graph の LFB は F0000000h なので 15–16 MB の窓とは無関係のはずだが、
+実機で切り分ける際はこの書き込みを外して試す価値がある。
+また X を抜けた後の `dmesg` に `graphics:` 行が残るので、
+enter が Cirrus と GDC のどちらで成功したかはそれで分かる。
 
 ## PC-98 実機：exec 後の最初のデータアクセスで #GP（2026-09-12、未コミット、実機未検証）
 
@@ -1318,7 +1367,7 @@ Future Listへ移したWS013・WS015は次節で管理する。完了WSの詳細
 | [WS010](ws010/ws.md) | MG001 | スクリプト・イメージツール | 完了 | q063。 |
 | [WS011](ws011/ws.md) | MG005 | ネットワーク設定コンソール | 完了（ユーザー確認） | commit confirmed完了。VLANキャンセル、bridgeはF-001へ移管。 |
 | [WS012](ws012/ws.md) | MG005 | サービス管理コンソール | 完了 | q018。 |
-| [WS014](https://github.com/awemorris/zedBSD/issues/15) | MG006 | virtio-gpu bring-up | planning | p001設計再開。2D出力からVulkan描画・表示APIの境界を具体化。 |
+| [WS014](https://github.com/awemorris/zedBSD/issues/15) | MG006 | GPU framework / virtio-gpu bring-up | planning | p002 framework → p003 Venus debug/API改善 → p004規約確認。その後WS029 i915。 |
 | [WS016](ws016/ws.md) | MG004 | 実行時swap制御 | 完了 | q021。 |
 | [WS017](ws017/ws.md) | MG006 | LFB描画高速化 | 依存待ち | WS022後にmmap・Xzed高速描画・受け入れ。 |
 | [WS018](ws018/ws.md) | MG008 | カーネル所有権・構成統一 | 完了 | p001〜p020。I/O後続はWS025。 |
@@ -1435,3 +1484,21 @@ Vulkanのディスプレイ拡張をOSの公式なユーザー向け表示APIと
 ## 2026-09-12 責務分類をU/Kに統一
 
 ユーザー指示により、[Vulkan API責務表](https://github.com/awemorris/zedBSD/issues/213#vulkan-api-responsibility-table)の275関数を、U（ユーザー空間実装）とK（GPUドライバ）の二つの責務欄だけで整理した。旧Q/C/R分類と境界列を削除。キャッシュ・記録・転送は責務欄の説明として保持する。ドライバへの照会はK、結果の整形等はUであり、キャッシュ可能性を別分類にしない。関数集合とplanning状態、Queue未開始は維持。
+
+## 2026-09-12 GPUドライバ関数インタフェース案
+
+ユーザー依頼により、[同じ責務資料](https://github.com/awemorris/zedBSD/issues/213#vulkan-api-responsibility-table)へK側インタフェース44件の表を追記。仮の関数シグネチャ、入力・出力、Kの責務、対応するVulkan APIを記載した。接続/context、resource/mapping、transport/submit/sync、display/event、および任意機能の群に整理し、初期2Dと後続Venusの範囲を区別した。
+
+275関数のU/K表は保持。今回の関数名・型・構造体は設計案で、実装済み/ABI確定ではない。WS014/p001はplanning、実装Queueなし。git commit/pushなし。
+
+## 2026-09-12 GPU interfaceをcallback構造体へ変更
+
+ユーザー判断により、[GPU責務資料](https://github.com/awemorris/zedBSD/issues/213#vulkan-api-responsibility-table)の44操作をstruct drv_gpu_interfaceの関数ポインタメンバーへ変更。個別drv_gpu_*関数の公開案を置換した。PCI側がattach成功後にinterface/private data等をGPUコアへ登録し、GPUコアが/dev/gpuNを公開・dispatchする。detach/rollbackと参照寿命も記録した。
+
+現行PCI attachはint戻り値のみでGPU登録の引渡し機構は未実装。構造体とPCI側class/service連携の詳細は設計事項。275関数のU/K分類を維持し、コード・Queue・Phase状態は変更しない。
+
+## 2026-09-12 GPU実装の段階化
+
+ユーザー指定の順序をPhase化: [ws014-p002](https://github.com/awemorris/zedBSD/issues/383)（GPUフレームワークのみ）→[ws014-p003](https://github.com/awemorris/zedBSD/issues/384)（QEMU＋Venusの画面取得・自動デバッグ、API不足の修正）→[ws014-p004](https://github.com/awemorris/zedBSD/issues/385)（最終API整理・規約全文確認）。既存p001は設計判断を供給し、未決定を完了扱いしない。次段階のi915ネイティブ実装は単一目標の[ws029](https://github.com/awemorris/zedBSD/issues/386)へ分離する。
+
+Linux i915＋ANVホスト、egl-headless＋QMP screendump、frame更新によるキャプチャ検証、serial/画像/renderer証拠の保存をp003へ記録。実ホストでの動作は未確認。275関数のU/K表と44callback案は出発点で、p002/p003の実装結果により不足を補い整理する。実装Queueは未開始。資料のgit add/commitはユーザーが行い、エージェントはadd/commit/pushしない。

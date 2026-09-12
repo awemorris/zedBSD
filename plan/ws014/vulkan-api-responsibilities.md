@@ -422,3 +422,151 @@ ioctlの粒度はこの表の関数数から決めない。device/context、reso
 ## 検証範囲
 
 固定したXMLの対象関数集合とMarkdownの関数行を照合し、欠落・重複・空欄がないことを確認する。これは資料の網羅性確認であり、driver動作、Vulkan conformance、QEMU表示の検証ではない。実装Queueは開始していない。
+
+## K：struct drv_gpu_interfaceの関数ポインタ案
+
+上の275関数のK欄を、カーネルが提供する共通操作へまとめた案。操作は`struct drv_gpu_interface`の関数ポインタメンバーとして定義する案で、個々の`drv_gpu_*`グローバル関数は公開しない。具体driverの実装関数はstaticとし、メンバーへ設定する。既存実装や確定済みヘッダーではない。ユーザー空間がカーネル関数を直接リンクして呼ぶ意味ではなく、`/dev/gpu0`のopen/close/ioctl/mmap/poll等の入口から呼び出す想定。GPUサブシステムがVFS入口と共通検証を持ち、登録されたinterfaceを通じてdriverを呼ぶ。ioctl番号、構造体の実際のレイアウト、既存device/VFSフックへの適合は次の設計事項とする。
+
+**この節はすべてKのcallback候補。** Vulkanのinstance、pipeline、descriptor、command buffer等のユーザー側管理は前の表のUに残す。Vulkanと同じ個数のioctlを作るのではなく、必要な操作をこの単位で提供する。
+
+### 共通の引数・戻り値規約
+
+- 以下は簡略化したC風シグネチャ。`s`は`struct drv_gpu_session *`で、openした接続の所有権・handle表・権限を保持するカーネル内オブジェクト。ユーザーがそのアドレスを指定することはできない。
+- 戻り値は原則`int`のカーネルエラーコード（成功0）、値は`out_*`へ返す案。`VkResult`への変換はUが行う。エラー番号・符号は現行カーネルの規約へ合わせ、ここでは固定しない。`close`だけは後始末の完遂を責務とする`void`案。
+- `*_id`はsession所有の型付きhandleを表す固定幅整数の案。generation等で古いhandleの再利用を検出する。CPU物理アドレス、kernel pointer、host Vkハンドルとは別物。
+- `req`/`out`は下の表で要素を示す要求・結果構造体。内部関数へ渡す時点では、入口処理でユーザーからコピー・検証済みのカーネル領域。wire形式ではsize/version、固定幅整数、配列のcount/offsetを使い、生のポインタやpNextを送らない。
+- 配列照会は`capacity`と実際の`count`を分け、不足容量時の再照会を可能にする。入力・出力の長さ、個数の上限、整数overflow、handle所有権を入口と該当操作で検証する。
+- `timeout_ns`は非負の相対時間、0はpoll。無期限待機は別flagとし、device lost・接続終了時に待機者を起こす。clockとtimeout精度はABI詳細で固定する。
+- 非同期操作の成功は受付成功。結果の`completion_id`には完了の種類を持たせる。transport受付/応答、GPU実行完了、表示進行、画像再使用可能を相互に代用しない。
+
+### 接続・能力・実行context
+
+| drv_gpu_interfaceのメンバー案 | 入力 → 出力 | ドライバが実装する責務 | 対応する主なvk API／利用箇所 |
+| --- | --- | --- | --- |
+| `int (*open)(device, credentials, out_session)` | device・呼出元資格 → session | 接続とhandle表を作成し、render/display権限を分ける。VFS openから利用 | `vkCreateDevice`、physical device列挙の接続 |
+| `void (*close)(s)` | session → なし | 新規操作を止め、waitを解除。進行中処理とscanoutの参照を保護し、所有資源・表示権を回収 | `vkDestroyDevice`、プロセス終了 |
+| `int (*get_info)(s, query, out_info)` | query種別・容量 → version、device ID、heap、queue、制限、状態等 | Kが所有する実情報とdriver能力を返す。Vulkan feature全体の合成・対応宣言はU | `vkGetPhysicalDevice*`、`vkEnumeratePhysicalDevices` |
+| `int (*get_capset)(s, req, out_capset)` | capset ID/version・容量 → 対応capsetデータ | virtioのprotocol/backend能力を照会。表示能力とは分ける | Venus選択、device拡張・feature照合 |
+| `int (*context_create)(s, req, out_context_id)` | backend/protocol、flags → context handle | 隔離された実行/転送contextを作成。未対応protocolを拒否 | `vkCreateDevice` |
+| `int (*context_destroy)(s, context_id)` | context handle → 状態 | context受付を終了し、進行中参照を処理して回収 | `vkDestroyDevice` |
+| `int (*queue_create)(s, req, out_queue_id)` | context、実行種別、要求flags → queue handle | scheduling/transportのqueueを確保。複数VkQueueとの対応はUと協議し固定 | `vkCreateDevice`、`vkGetDeviceQueue*`の準備 |
+| `int (*queue_destroy)(s, queue_id)` | queue handle → 状態 | 新規submitを止め、未完了・待機者を解決してqueue参照を解放 | `vkDestroyDevice` |
+
+### resource・メモリ
+
+buffer/imageの論理オブジェクトとVkDeviceMemoryの結合はUまたはhost backendが管理し、ここではKのbacking/resourceを扱う。`VkBuffer`、`VkImage`、Kのresourceを常に一対一とはしない。
+
+| drv_gpu_interfaceのメンバー案 | 入力 → 出力 | ドライバが実装する責務 | 対応する主なvk API／利用箇所 |
+| --- | --- | --- | --- |
+| `int (*resource_create)(s, req, out_resource)` | size、backing種別、usage、必要なら2D format/extent/stride → resource ID・割当情報 | RAM/共有blob/2D resource等を確保。mapping/scanout可能性を検証し、過剰割当を防止 | `vkAllocateMemory`、swapchain作成、2D bring-up |
+| `int (*resource_destroy)(s, resource_id)` | resource ID → 状態 | 公開handleを無効化。実際のbackingはGPU/scanout参照消滅後に回収 | `vkFreeMemory`、関連resource解放 |
+| `int (*resource_get_info)(s, resource_id, out_info)` | resource ID → size、配置、commit量、mapping条件等 | 実際のK resource状態を返す。Vulkan画像layoutがhost所有ならその照会はtransport経由 | `vkGetDeviceMemoryCommitment`、memory/layout照会の一部 |
+| `int (*mapping_create)(s, req, out_mapping)` | resource、offset/length、保護属性 → mapping token | mmap用の所有権付きtokenを発行。任意の物理範囲をmapさせない | `vkMapMemory*` |
+| `int (*mapping_map)(s, token, vm_request, out_mapping_ref)` | token・VFS/VMからの要求 → mapping参照 | mmapフックでユーザーaddress spaceに適切なcache属性・保護を設定。ユーザーVAを決めるのはVM | `vkMapMemory*`、共有command領域 |
+| `int (*mapping_destroy)(s, mapping_id)` | mapping ID → 状態 | 対応mapping/tokenを解除し参照を回収。実mapの寿命はVFS/VMと連携 | `vkUnmapMemory*`、プロセス終了 |
+| `int (*resource_cache_sync)(s, req)` | resource、範囲、CPU→device/device→CPU → 状態 | 必要なcache/共有メモリ可視性処理。coherentなら合法なno-opも可能。GPU実行待機は別 | `vkFlushMappedMemoryRanges`、`vkInvalidateMappedMemoryRanges` |
+| `int (*resource_bind)(s, req, out_binding_id)` | context、resource、範囲、用途、必要ならVA条件 → binding ID | contextへのresource attach、必要なGPU VA bindingと範囲検証。hostのVk bindとは区別 | `vkBind*Memory*`のK支援、submitで使うresource登録 |
+| `int (*resource_unbind)(s, binding_id)` | binding ID → 状態 | 実行中参照と整合を保ってcontext/VA結合を解除 | resource/contextの後始末 |
+| `int (*resource_get_address)(s, req, out_address)` | binding、address種別 → GPU/opaque address | KがVAを所有するbackendのみ。Venusでhostが所有するアドレスはhost照会で取得し、K resource IDと混同しない | `vkGetBufferDeviceAddress`、capture address系 |
+| `int (*resource_transfer)(s, req, out_completion_id)` | resource、方向、矩形/範囲、offset/stride → transfer完了ID | 2D backingとhost resource間の転送・必要なflushを実行。host Vulkanの画像コピー全般とは区別 | 2D scanout準備、WSIコピー経路 |
+
+### transport・実行・同期
+
+`transport_send`はhost操作の転送、`submit`は実行とその依存関係の受付。実装上同じvirtqueue等を使っても、呼出側へ返す完了の意味は分ける。両者の処理を重複して送らない。
+
+| drv_gpu_interfaceのメンバー案 | 入力 → 出力 | ドライバが実装する責務 | 対応する主なvk API／利用箇所 |
+| --- | --- | --- | --- |
+| `int (*transport_send)(s, req, out_request_id)` | context、登録済みcommand/reply resourceの範囲、protocol → request ID | Venus等のhost操作を送信。外枠・resource参照を検証しhost応答と対応付ける。GPU実行完了は保証しない | pipeline/descriptor/query等のhost処理、`vkCmd*`記録の転送 |
+| `int (*transport_receive)(s, req, out_reply)` | request ID、容量、timeout → 応答状態・返信長 | 応答の到着とサイズを確認し、指定reply領域/結果を返す。blocking/非blockingを区別 | host能力照会、object作成結果、cache/queryデータ取得 |
+| `int (*submit)(s, req, out_completion_id)` | queue、command範囲、resource参照、wait/signal依存 → GPU完了ID | 参照を保持して実行要求を送る。hostでの実行完了を追跡しdevice lostを通知。Vk submitをUがencodeする場合はそのpayloadを一度だけ送信 | `vkQueueSubmit*`、記録済み`vkCmd*`の実行 |
+| `int (*queue_wait_idle)(s, queue_id, timeout_ns)` | queue、timeout → 状態 | そのqueueの受付済みGPU処理の完了を待つ。device全体の待機はUがqueueを集約可能 | `vkQueueWaitIdle`、`vkDeviceWaitIdle` |
+| `int (*sync_create)(s, req, out_sync_id)` | binary/timeline、初期状態 → sync ID | K待機・GPU/host連携が必要な同期オブジェクトを作成 | fence/semaphore作成、必要なevent連携 |
+| `int (*sync_destroy)(s, sync_id)` | sync ID → 状態 | handleを無効化し、進行中submit・waitの参照を安全に解決 | fence/semaphore/eventの解放 |
+| `int (*sync_get)(s, sync_id, out_state)` | sync ID → 通知状態・timeline値 | K/hostで観測した実行同期状態を返す | `vkGetFenceStatus`、`vkGetSemaphoreCounterValue`、event状態 |
+| `int (*sync_wait)(s, req, out_result)` | sync/value配列、all/any、timeout → 到達結果 | 同期条件の待機・起床、timeout/device lostを処理 | `vkWaitForFences`、`vkWaitSemaphores` |
+| `int (*sync_signal)(s, req)` | sync ID、値 → 状態 | host側からsignal可能な同期だけを更新。GPU完了を表すfenceの偽造signalは許可しない | `vkSignalSemaphore`、host event set |
+| `int (*sync_reset)(s, req)` | sync ID配列 → 状態 | reset可能な同期状態を更新。timelineを任意に巻き戻さない | `vkResetFences`、host event reset |
+| `int (*completion_wait)(s, req, out_result)` | completion/request ID、要求する完了種別、timeout → 結果 | transfer、GPU、display等を型付きで待機。未対応の表示観測をGPU fenceで代用しない | transport・transfer・submit・presentの共通待機 |
+
+VenusのVkFence/VkSemaphoreをそのままK同期へ一対一に移すことは前提にしない。U/hostの同期とKの完了通知を結び付ける必要がある場合だけ上記sync操作を使い、対応表・通知の順序・循環待機防止をprotocol設計で定める。`vkCmdSetEvent`等のGPU命令をhost側`sync_signal`で代替しない。
+
+### display・present・通知
+
+| drv_gpu_interfaceのメンバー案 | 入力 → 出力 | ドライバが実装する責務 | 対応する主なvk API／利用箇所 |
+| --- | --- | --- | --- |
+| `int (*display_get_info)(s, req, out_info)` | display/plane/modeの照会種別、ID、容量 → 情報・世代 | display、mode、planeと組合せ制約を列挙。切断・再接続で古いIDを検出 | `vkGet*Display*`、`vkGet*Surface*`、device-group present照会 |
+| `int (*display_acquire)(s, req, out_lease_id)` | display ID、制御要求 → lease ID | display制御の排他的所有権を許可。render権限だけでは取得不可 | direct-display WSIの制御取得（Vulkan関数との一対一対応なし） |
+| `int (*display_release)(s, lease_id)` | lease ID → 状態 | 所有権を返却し、必要ならconsole/bootfb providerへ復帰 | `vkReleaseDisplayEXT`、close |
+| `int (*display_test)(s, req, out_constraints)` | lease/display、mode/plane、format/extent/配置 → 可否・制約 | 表示構成が実現可能か確認。実表示は変更しない | `vkCreateDisplayModeKHR`、surface/swapchain作成前の確認 |
+| `int (*display_present)(s, req, out_present)` | lease、resource/binding、mode/plane、領域、render待機依存 → present ID・画像解放ID | render依存とbuffer可視性を満たし、必要なmode変更とscanoutを行う。古い画像が再使用可能になった時点を通知 | `vkQueuePresentKHR`、`vkAcquireNextImage*`の画像寿命連携 |
+| `int (*display_get_progress)(s, req, out_progress)` | present ID/counter種別 → 対応する進行状態・counter | backendが実際に観測できるdisplay完了・counterだけを返す | `vkWaitForPresent*`、`vkGetSwapchainCounterEXT` |
+| `int (*display_set_power)(s, req)` | lease/display、電源状態 → 状態 | 対応する出力の電源制御。未対応backendでは機能を公開しない | `vkDisplayPowerControlEXT` |
+| `int (*event_subscribe)(s, req, out_subscription_id)` | 対象device/display、event mask → subscription ID | hotplug/device lost/実表示event等の購読を登録。アクセス権とbackend対応を検証 | `vkRegisterDeviceEventEXT`、`vkRegisterDisplayEventEXT` |
+| `int (*event_unsubscribe)(s, subscription_id)` | subscription ID → 状態 | 購読と参照を解放 | event監視終了、close |
+| `int (*event_read)(s, req, out_events)` | 容量、非blocking指定 → event配列・sequence | read/ioctl等からeventを取得。欠落・overflowを検出可能にし再照会へ誘導 | WSIの状態更新、fence通知との連携 |
+| `int (*poll)(s, requested_events, out_ready)` | VFS poll要求 → ready mask | event/応答の読み出し可能性・device lost等を通知。GPU完了そのものとは区別 | Uの待機ループ、VFS poll |
+
+display presentでは、受付、画像解放、表示進行を別々に扱う。`vkAcquireNextImage*`が必要とする画像再使用可能性を、単なるhost応答で判断しない。`vkCreateSharedSwapchainsKHR`等で複数出力を支える場合は複数plane/outputを一要求で表現できるかと原子性を追加設計する。初期virtio-gpuで証明できないpresent mode・counter・電源拡張はadvertiseしない。
+
+### 機能を選択した場合だけ追加するKインタフェース
+
+| drv_gpu_interfaceのメンバー案 | 入力 → 出力 | ドライバが実装する責務 | 対応する主なvk API／条件 |
+| --- | --- | --- | --- |
+| `int (*sparse_bind)(s, req, out_completion_id)` | queue、resource範囲と疎なbinding配列、同期依存 → 完了ID | sparse mappingの検証・更新・同期。Venusではhost処理とK backingの責務を分ける | `vkQueueBindSparse`。sparse対応を選択した場合のみ |
+| `int (*resource_export)(s, req, out_share_handle)` | resource、範囲、権利 → 移譲可能handle | 他接続/プロセスへの共有権限を制限 | 外部memory拡張等。現在の275関数の対象外、将来候補 |
+| `int (*resource_import)(s, req, out_resource_id)` | share handle、要求権利 → 当sessionのresource ID | 型・権利を確認して共有参照を作成 | 外部memory拡張等。現在の275関数の対象外、将来候補 |
+
+GPU reset、割込み処理、PCI attach/detach、DMA map/unmapはこれらを支えるドライバ内部処理であり、ユーザー向け操作として無条件には公開しない。device lost時の復旧は全sessionの隔離・参照回収と整合させる。既存HALの責務変更はこの表では行わない。
+
+### 初期bring-upで具体化する範囲
+
+最初はopen/close、info、resource/mapping/cache、2D transfer、display情報・所有権・present、必要な完了/event通知を具体化する。Venusのcontext/transport/submit/sync群は描画経路の段階で詳細化する。capabilityを公開する場合に必要な機能と、後続の任意機能を区別し、全関数を最初から実装する計画にはしない。
+
+この表はKの操作候補を一覧化したもの。正式なC型、ioctl構造体・サイズ・番号、同期state machine、2D/Venusの具体的なprotocol対応は未確定。既存275関数のU/K表と本節の対応をレビューしてからp001のABI設計を確定する。
+
+## interface構造体とPCI経由の登録
+
+2026-09-12ユーザー判断: GPU操作を`struct drv_gpu_interface`の関数ポインタにまとめ、GPUサブシステムへ登録する。PCI接続GPUの登録開始・解除はPCI側のライフサイクルから行う。個別GPU driverが独立した初期化経路からGPUサブシステムへ直接登録する方式にはしない。
+
+### 構造体の形
+
+以下は抜粋した型の模式図。完全な定義は上の44メンバー表をもとに作成し、ここではABIを固定しない。
+
+```c
+struct drv_gpu_interface {
+    uint32_t version;
+    uint32_t size;
+    int (*open)(struct drv_gpu_device *, const struct credentials *,
+        struct drv_gpu_session **);
+    void (*close)(struct drv_gpu_session *);
+    int (*get_info)(struct drv_gpu_session *,
+        const struct gpu_info_request *, struct gpu_info_result *);
+    int (*resource_create)(struct drv_gpu_session *,
+        const struct gpu_resource_request *, struct gpu_resource_result *);
+    int (*submit)(struct drv_gpu_session *,
+        const struct gpu_submit_request *, struct gpu_submit_result *);
+    int (*display_present)(struct drv_gpu_session *,
+        const struct gpu_present_request *, struct gpu_present_result *);
+    /* 残るメンバーは上表参照。型名も仮称。 */
+};
+```
+
+driverは`static const struct drv_gpu_interface`を定義し、`.submit = virtio_gpu_submit`等のstatic実装関数を設定する。GPUごとの可変状態はinterfaceへ格納せず、登録するdevice instanceのprivate dataに保持する。複数のGPU instanceで同じimmutableなinterfaceを共有できる。sessionから所属device/private dataを参照できるようにする。
+
+これはカーネル内のdriver contractであり、ユーザー向けioctl ABIではない。ユーザー空間へ関数ポインタを渡さない。`version/size`はdriver contractの整合確認用で、wire ABIのversionとは別。必須callbackとcapabilityを対応付け、任意callbackがNULLなら該当機能を公開しない。GPUコアが提供できる共通処理はコアで実装し、個別driverへhandle表やVFS処理の重複実装を要求しない。
+
+### 登録・公開・解除の責務
+
+| 担当 | 操作と引き渡すもの | 責務 |
+| --- | --- | --- |
+| 個別GPU driver | PCI driver descriptor、staticなGPU interface、deviceごとの初期化結果 | PCI ID matchとハードウェア初期化を提供し、初期化済みinstanceとinterfaceをPCI側へ引き渡す。GPU登録を別のグローバル初期化から開始しない |
+| PCIサブシステム側の連携処理 | attach成功後にGPU registration descriptorを取得 | `PCI device + interface + private data + capabilities`をGPUサブシステムへ登録する。登録契機とrollback/detach順序を所有する |
+| GPUサブシステム | descriptor検証、device instance生成 | interfaceのversion/必須callbackを検証し、安定したinstance参照と`/dev/gpuN`を公開する。VFS/権限/handle管理を共通化し、必要な操作をcallbackへdispatchする |
+| PCIサブシステム側の連携処理 | detachまたは登録失敗 | GPUコアへ停止・unregisterを依頼する。新規open/submit停止、既存参照の処理、DMA停止とdevice資源解放の順序を調整する |
+| GPUコアと個別driver | unregister/quiesce/最終回収 | device lostを通知しwaitを解除、使用中callbackとsession参照を安全に処理する。interface/private dataを利用中に破棄しない。物理切断時も無効MMIOへアクセスしない |
+
+順序案は `PCI match → driver attach/初期化 → PCI側がGPU登録 → /dev/gpuN公開`。公開前の失敗はGPU登録とハードウェア初期化を巻き戻す。detachでは公開停止・処理停止を先に行い、使用中参照とDMAの安全を確保してからBAR/IRQ/private dataを解放する。
+
+静的確認した現行PCI APIでは、`struct drv_pci_driver`はmatch/attach/detach等を持ち、`drv_pci_device_probe()`がdriverのattachを呼ぶ。**attachの戻り値はintだけで、GPU interfaceを受け取って登録する仕組みはまだ存在しない。** deviceにclass/service descriptorを付けてPCI側が取得する案など、引き渡し方法をp001で具体化する。GPU専用処理をPCI coreへ直書きするかどうかも未確定で、PCI側のclass/service連携処理として分離できる形を検討する。
+
+確認対象はローカルの`include/drivers/pci.h`の`struct drv_pci_driver`と`src/drivers/pci/pci.c`のprobe/detach。これは現行動作の読取りであり、PCI/GPUコードは変更していない。将来の非PCI GPUでもinterface自体を再利用できるよう、PCI parent情報はdevice登録descriptor側に置く。
