@@ -1,3 +1,18 @@
+<!-- awesome-plan-current:start -->
+
+## 現在状態 — 2026-09-12
+
+Active Queue: none
+fg006: completed
+
+2026-09-12、ユーザーがWS003 p022・p023・p024の完了を報告し、MarkdownとGitHubの更新を指示した。3 Phaseをcleared（disposition: normal）として受け入れ、fg006を完了とする。WS003はインストーラ等の残件があるためincompleteを維持する。新しいQueueは作成せず、保留中の実行は再開しない。
+
+対象: [p022](https://github.com/awemorris/zedBSD/issues/88)、[p023](https://github.com/awemorris/zedBSD/issues/89)、[p024](https://github.com/awemorris/zedBSD/issues/90)。
+
+根拠は今回のユーザー完了報告。既存Markdownの自動検証・旧試行の結果は履歴として保持する。今回エージェントがbuild・QEMU・実機検証を再実施したものではなく、新しいartifact hashやroot/init/login到達点は報告されていないため追加しない。旧試行のunclearedや未実施項目を過去に遡ってPASSへ変更しない。
+
+<!-- awesome-plan-current:end -->
+
 # zedBSD master plan
 
 [GitHub Project — zedBSD / Awesome Plan](https://github.com/users/awemorris/projects/2)
@@ -42,7 +57,6 @@ Objectives → Milestone Goals → WS → Phase → Queue試行/結果を対応�
 | --- | --- | --- | --- |
 | fg004 | PC98、Dell Latitude 5320、Let's Note SV7、Let's Note LX6でインストールが行える | MG003 | [ws003](ws003/ws.md) |
 | fg005 | 有線LAN常駐管理、起動時の接続待機、DEへのネットワーク状態通知 | MG005 / MG006 | [ws005](ws005/ws.md) |
-| fg006 | PC-9821V13での起動改善：LBA0実行後のビープ停止を解消し、通常起動を進める | MG003 / MG008 | [ws003-p022](ws003/phase022/phase.md) → [ws003-p023](ws003/phase023/phase.md) → [ws003-p024](ws003/phase024/phase.md) |
 | fg007 | HAL契約の可読性改善：コンソールAPIの集約、アロケータの kernel_alloc/kernel_free 化、kernel_entry() 前関数の prekern 命名 | MG008 / MG001 | 未定（WS018は完了。再開か新WSかの判断が必要） |
 
 2026-09-11ユーザー指定。4機種は順位ではない。旧fg001〜fg003は履歴のまま。旧Priorityリストを再作成せず、順序付けは未指定として保持する。
@@ -257,6 +271,44 @@ toolchain smoke は PASS、world ビルドはエラーなし、QEMU でログイ
 
 注意点として、パッチの削除行は上流の本文と一致させる必要があるため、
 接頭辞移行の対象外である。追加行だけが新しい名前を使う。
+
+## PC-98 実機で swap0 prepare が失敗する（2026-09-12、未コミット、実機未検証）
+
+GDC と PBR の修正後、実機は画面が正常に読めるところまで進み、
+`vfs: swap0 prepare failed (error 21)` で VFS 初期化が止まる。直前に
+`ide: sda flush LBA=2048 count=0 ... stage=request status=50 error=00` が
+出ている。status 50 はドライブが正常に待機している状態で、ドライブ側の
+エラーではない。
+
+### 原因
+
+21 は EOPNOTSUPP。pc98-ide の flush は、IDENTIFY のワード 83 で FLUSH CACHE
+の対応を申告しないドライブに対して、ワード 87 のキャッシュ報告が有効かつ
+無効化されている場合だけ 0 を返し、それ以外は EOPNOTSUPP を返していた。
+ATA-4 より前のドライブはワード 83 も 87 も有効でないので、実機の
+ドライブは必ず EOPNOTSUPP になる。
+
+スワップファイルの準備は、エクステントを確定するために起動 FAT を同期
+する。その同期の末尾の bio_flush がこの EOPNOTSUPP を返し、swap の準備、
+ひいては VFS 初期化全体が失敗する。
+
+QEMU の IDE モデルは FLUSH CACHE 対応を申告するので再現しない。
+
+### 修正
+
+FLUSH CACHE を持たないドライブには、ホストがコミットを頼む手段がない。
+書き込みはドライブが完了を報告した時点で終わっている。bio_flush は
+先行する書き込みの完了をすでに待っているので、そこで flush は完了
+したものとして 0 を返す。PC/AT の IDE ドライバと SD ドライバも同じ
+扱いである。使わなくなったワード 85/87 の読み取りは削除した。
+
+実機のログで説明がつくよう、プローブ時に
+`ide: sda has no FLUSH CACHE; flushes complete with the writes` を 1 回出す。
+
+### 状態
+
+QEMU の内蔵 ROM で起動から init まで回帰なし（QEMU のドライブは
+FLUSH CACHE 対応なので、この経路自体は通らない）。実機での確認は未実施。
 
 ## PC-98 実機の画面の乱れ（2026-09-12、未コミット、実機未検証）
 
@@ -1002,7 +1054,7 @@ Future Listへ移したWS013・WS015は次節で管理する。完了WSの詳細
 | --- | --- | --- | --- | --- |
 | [WS001](ws001/ws.md) | MG002 | POSIX準拠 | 継続 | 準拠性台帳・コード規約の残件。 |
 | [WS002](ws002/ws.md) | MG005 | システムサービス | completed | p021をユーザー判断でcleared。p023/p024完了、POSIXの引継ぎと既知バグの再発条件は保持。 2026-09-11ユーザー指示で閉鎖。 |
-| [WS003](ws003/ws.md) | MG003 | x86・PC-98実機対応 | incomplete | fg004の4機種インストーラとfg006のV13起動改善。p022→p023→p024をユーザー指定の実行Phaseとする。その他の残件を保持。 |
+| [WS003](ws003/ws.md) | MG003 | x86・PC-98実機対応 | incomplete | fg006のp022/p023/p024は2026-09-12ユーザー報告でcleared。fg004の4機種インストーラほか残件を保持。 |
 | [WS004](ws004/ws.md) | MG003 | ハードウェア拡張 | 継続 | 主要USB/WLAN経路完了。NVMe実機・転送・ドライバ共通化等の後続項目を保持。 |
 | [WS005](ws005/ws.md) | MG005 | ネットワーク・WLAN | incomplete | fg005: net lan、network-enable（どちらかIP・既定30秒・timeoutでも起動継続）、DE状態通知をp013〜p017で計画。既存p001〜p012の完了は維持。 |
 | [WS006](ws006/ws.md) | MG006 | 入力・evdev | completed | q147。両USB構成の通常ビルドで実Xzed/PTYとUSB-root/HID受け入れ。 2026-09-11ユーザー指示で閉鎖。 |

@@ -1,10 +1,25 @@
+<!-- awesome-plan-current:start -->
+
+## 現在状態 — 2026-09-12
+
+Status: incomplete
+Current Focused Goals: fg004 (fg006 completed)
+
+2026-09-12、ユーザーがWS003 p022・p023・p024の完了を報告し、MarkdownとGitHubの更新を指示した。3 Phaseをcleared（disposition: normal）として受け入れ、fg006を完了とする。WS003はインストーラ等の残件があるためincompleteを維持する。新しいQueueは作成せず、保留中の実行は再開しない。
+
+対象: [p022](https://github.com/awemorris/zedBSD/issues/88)、[p023](https://github.com/awemorris/zedBSD/issues/89)、[p024](https://github.com/awemorris/zedBSD/issues/90)。
+
+根拠は今回のユーザー完了報告。既存Markdownの自動検証・旧試行の結果は履歴として保持する。今回エージェントがbuild・QEMU・実機検証を再実施したものではなく、新しいartifact hashやroot/init/login到達点は報告されていないため追加しない。旧試行のunclearedや未実施項目を過去に遡ってPASSへ変更しない。
+
+<!-- awesome-plan-current:end -->
+
 # WS003: real-hardware bring-up
 
 <!-- installer-bringup-current:start -->
 
 ## Current focus — 2026-09-11 installer bring-up
 
-Status: incomplete。親: [master](../master.md)。Primary Milestone: MG003。Focused Goals: fg004, fg006。
+Status: incomplete。親: [master](../master.md)。Primary Milestone: MG003。Focused Goals: fg004（fg006は2026-09-12完了）。
 現在のPriorityリストは削除済みのまま。今回の機種一覧は順位ではない。Queue: none。今回のユーザー指示は計画更新であり、開発・実機操作は開始しない。
 
 ### ゴールと担当
@@ -146,9 +161,9 @@ Shared tests: [WS003 test index](tests/README.md)
 | `ws003-p019` | [Latitude NVMe native installation and boot](phase019/phase.md) | planning | fg004のLatitude native候補。方式選択後に詳細化。 |
 | `ws003-p020` | [Panasonic CF-SV7 early ACPI/interrupt bring-up](phase020/phase.md) | Completed (`q033`, 2026-08-30) | The single physical boot passed IRQ/XMM/HAL and continued through xHCI, USB storage, and VFS; early-init automated gates remain passing |
 | `ws003-p021` | [Portable GPT image extent on larger USB media](phase021/phase.md) | Completed (`q034`, 2026-08-30) | Generic bounded-GPT host/QEMU gates pass and the frozen image boots successfully on the CF-SV7 through USB-root overlay/init/login |
-| `ws003-p022` | [PC-9821V13 IPL stack and disk-read contract](phase022/phase.md) | uncleared | fg006: 現行stack/BIOS読込み契約。p023へ安全な診断前提を渡す。 |
-| `ws003-p023` | [PC-9821V13 IPL entry localization](phase023/phase.md) | uncleared | fg006: LBA0実行後の停止位置特定。p024へ根拠を渡す。 |
-| `ws003-p024` | [PC-9821V13 Stage-1 fixed-read compatibility](phase024/phase.md) | uncleared | fg006: 原因に対応した修正・通常V13起動確認。fg004へ成果を渡す。 |
+| `ws003-p022` | [PC-9821V13 IPL stack and disk-read contract](phase022/phase.md) | cleared | 2026-09-12ユーザー完了報告で受け入れ。旧試行は履歴として保持。 |
+| `ws003-p023` | [PC-9821V13 IPL entry localization](phase023/phase.md) | cleared | 2026-09-12ユーザー完了報告で受け入れ。旧試行は履歴として保持。 |
+| `ws003-p024` | [PC-9821V13 Stage-1 fixed-read compatibility](phase024/phase.md) | cleared | 2026-09-12ユーザー完了報告で受け入れ。旧試行は履歴として保持。 |
 | `ws003-p025` | [HAL clock-source split and amd64 SMP monotonic counter](phase025/phase.md) | Automatic milestone complete (`q066`); shared physical observation pending | The approved epoch/counter API pair, private calibration, complete admitted-CPU validation, same-build fault-injection rebuild gate, and positive/negative SMP KVM evidence pass; close it with p038's one final direct boot |
 | `ws003-p026` | [ws003-p026](phase026/phase.md) | planned | 2026-09-11インストーラ実機bring-up計画。 |
 | `ws003-p027` | [ws003-p027](phase027/phase.md) | planned | 2026-09-11インストーラ実機bring-up計画。 |

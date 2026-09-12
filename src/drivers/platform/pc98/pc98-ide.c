@@ -75,9 +75,8 @@ struct ide_unit {
 	uint16_t native_sectors;
 	uint16_t firmware_heads;
 	uint16_t firmware_sectors;
+	/* FLUSH CACHE is in the command set (IDENTIFY word 83 bit 12). */
 	uint8_t flush_supported;
-	uint8_t write_cache_known;
-	uint8_t write_cache_enabled;
 };
 
 static struct ide_unit units[IDE_UNIT_MAX];
@@ -191,10 +190,6 @@ drv_pc98_ide_init(
 			unit->flush_supported =
 				(data[83] & 0xc000U) == 0x4000U &&
 				(data[83] & 0x1000U) != 0;
-			unit->write_cache_known =
-				(data[87] & 0xc000U) == 0x4000U;
-			unit->write_cache_enabled = unit->write_cache_known &&
-						    (data[85] & 0x0020U) != 0;
 
 			/* Handles the unit condition. */
 			if (unit->use_lba) {
@@ -249,6 +244,11 @@ drv_pc98_ide_init(
 				unit->present = 1;
 				unit_order[unit_count] = unit;
 				unit_count++;
+				if (!unit->flush_supported)
+					kern_logf("ide: %s has no FLUSH CACHE; "
+						   "flushes complete with the "
+						   "writes\n",
+						   unit->disk->d_name);
 			}
 		}
 	}
@@ -759,15 +759,15 @@ pio_flush(
 	struct ide_unit *unit = dev->d_data;
 	uint8_t status;
 
-	/* Handles the unit condition. */
-	if (!unit->flush_supported) {
-		/*
-		 * A valid disabled-cache report needs no media flush command.
-		 */
-		return unit->write_cache_known && !unit->write_cache_enabled
-			       ? 0
-			       : EOPNOTSUPP;
-	}
+	/*
+	 * A drive without FLUSH CACHE offers nothing the host can ask it to
+	 * commit: a write is done when the drive says it is. The caller has
+	 * already waited for every earlier write, so the flush is complete.
+	 * Drives before ATA-4, which is every drive a real PC-98 shipped
+	 * with, report no command set at all and land here.
+	 */
+	if (!unit->flush_supported)
+		return 0;
 
 	/* Checks the select unit result. */
 	if (!select_unit(unit, 0, unit->use_lba))
