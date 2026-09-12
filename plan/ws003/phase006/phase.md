@@ -1,3 +1,19 @@
+<!-- awesome-plan project=zedbsd record=ws003-p006 -->
+
+<!-- awesome-plan-current:start -->
+
+Status: cleared
+Phase disposition: normal
+Lifecycle: closed
+Current Focus: No
+
+既存の完了・受け入れを保持。2026-09-12のWS003終了にあたり現在状態を明示。今回新たな試験・受け入れを追加していない。
+
+<!-- awesome-plan-current:end -->
+
+<details>
+<summary>終了前の計画・試行履歴（現在の再実行指示ではない）</summary>
+
 # WS003 Phase 006: xHCI halted-endpoint recovery
 
 Last updated: 2026-08-26
@@ -100,3 +116,5 @@ No p006 work remains. Repeatability remains the later BR-T30 gate.
 
 Full BOT STALL fault injection on real devices remains later U5 coverage. It
 does not require an intermediate physical confirmation during q013.
+
+</details>

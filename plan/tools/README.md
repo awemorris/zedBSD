@@ -97,3 +97,12 @@ The exact repaired remote state has not been independently audited in this task.
 These checks are required agent review; `sync.py publish` verifies an Issue body
 only and does not implement this whole audit. This documentation update does not
 run a remote repair, change the approved plan or resume the held Queue.
+
+## WS selection before planning (2026-09-12 user policy)
+
+Choose or create a WS by one concrete goal, never by a broad subject cluster.
+MG groups related outcomes. Do not reuse a completed or retired WS for a new
+goal; create a new WS and retain origin links. At retirement, audit every child
+Issue and preserve uncleared outcomes at the user-selected deferred destination.
+WS003 is retired permanently. PowerPC porting now belongs to WS027; installer
+hardware acceptance, if selected again, must have its own new single-goal WS.

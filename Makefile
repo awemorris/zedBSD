@@ -28,18 +28,11 @@ CC := gcc
 HOSTCC ?= cc
 HOSTCXX ?= c++
 PYTHON ?= python3
-include userland/base/noct/version.mk
 ZEDBSD_TOPLEVEL_BUILD := 1
 include toolchain/llvm/llvm.mk
-ZEDBSD_HOST_NOCT_SOURCE_DIR := build/NoctLang
-ZEDBSD_HOST_NOCT_BUILD_DIR := $(ZEDBSD_HOST_NOCT_SOURCE_DIR)/build-static
-ZEDBSD_HOST_NOCT := $(ZEDBSD_HOST_NOCT_BUILD_DIR)/noct
-ZEDBSD_HOST_NOCT_CMAKE_OPTIONS := -DNOCT_ENABLE_API_PROCESS=ON \
-	-DNOCT_VERSION=$(ZEDBSD_NOCT_VERSION)
-NOCT ?= $(abspath $(ZEDBSD_HOST_NOCT))
-ZEDBSD_HOST_NOCT_STATE_DIR := build/host-noct-state
-ZEDBSD_HOST_NOCT_SOURCE_STAMP := $(ZEDBSD_HOST_NOCT_SOURCE_DIR)/.zedbsd-source-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_PATCH_LEVEL)
-ZEDBSD_HOST_NOCT_BUILD_STAMP := $(ZEDBSD_HOST_NOCT_STATE_DIR)/built-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_PATCH_LEVEL)-process
+# Noct is a userland package and keeps its own build; this only records
+# that the build's scripts need the interpreter it produces for the host.
+# The package defines NOCT and NOCT_HOST_BUILD_STAMP when it is read.
 ZEDBSD_IMAGE_HOST := build/zedimage-host
 .DEFAULT_GOAL := disk-image
 
@@ -383,25 +376,7 @@ list-targets:
 	@printf 'Focused checks:\n'; \
  for target in $(ZEDBSD_CHECK_TARGETS); do printf ' %s\n' "$$target"; done
 
-$(ZEDBSD_HOST_NOCT): $(ZEDBSD_HOST_NOCT_SOURCE_STAMP) \
-		| $(NOCT_HOST_SOURCE_VERIFIED)
-	@mkdir -p "$(ZEDBSD_HOST_NOCT_STATE_DIR)"
-	cd "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" && cmake --preset static \
- $(ZEDBSD_HOST_NOCT_CMAKE_OPTIONS)
-	cd "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" && cmake --build --preset static --parallel 16
-	@test -x "$(ZEDBSD_HOST_NOCT)"
-	@touch "$(ZEDBSD_HOST_NOCT_BUILD_STAMP)"
-
-$(ZEDBSD_HOST_NOCT_BUILD_STAMP): $(ZEDBSD_HOST_NOCT)
-	@test -x "$(ZEDBSD_HOST_NOCT)"
-	@touch $@
-
-.PHONY: noct-toolchain-smoke
-noct-toolchain-smoke: $(ZEDBSD_HOST_NOCT_BUILD_STAMP) plan/ws010/tests/toolchain-smoke.noct
-	$(NOCT) plan/ws010/tests/toolchain-smoke.noct \
- $(abspath build/noct-toolchain-smoke.txt)
-
-toolchain: $(ZEDBSD_HOST_NOCT_BUILD_STAMP) noct-toolchain-smoke llvm-toolchain \
+toolchain: $(NOCT_HOST_BUILD_STAMP) noct-toolchain-smoke llvm-toolchain \
 	sysroots
 
 .PHONY: download

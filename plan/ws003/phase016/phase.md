@@ -1,3 +1,19 @@
+<!-- awesome-plan project=zedbsd record=ws003-p016 -->
+
+<!-- awesome-plan-current:start -->
+
+Status: cleared
+Phase disposition: normal
+Lifecycle: closed
+Current Focus: No
+
+既存の完了・受け入れを保持。2026-09-12のWS003終了にあたり現在状態を明示。今回新たな試験・受け入れを追加していない。
+
+<!-- awesome-plan-current:end -->
+
+<details>
+<summary>終了前の計画・試行履歴（現在の再実行指示ではない）</summary>
+
 # WS003 Phase 016: static image boot parameters and Python-regression removal
 
 Last updated: 2026-08-28
@@ -203,3 +219,5 @@ Completed in q023 without reaching the reconsideration boundary.
   containing no boot filesystem image, after the parameter handoff had passed.
 - `make -j16`, script syntax checks, source audits, image/helper tests, and
   `git diff --check` passed. `make check` and `.internal/` were not used.
+
+</details>

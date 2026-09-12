@@ -1,3 +1,19 @@
+<!-- awesome-plan project=zedbsd record=ws003-p011 -->
+
+<!-- awesome-plan-current:start -->
+
+Status: cleared
+Phase disposition: normal
+Lifecycle: closed
+Current Focus: No
+
+既存の完了・受け入れを保持。2026-09-12のWS003終了にあたり現在状態を明示。今回新たな試験・受け入れを追加していない。
+
+<!-- awesome-plan-current:end -->
+
+<details>
+<summary>終了前の計画・試行履歴（現在の再実行指示ではない）</summary>
+
 # WS003 Phase 011: common boot-parameter core and init selection
 
 Last updated: 2026-08-27
@@ -123,3 +139,5 @@ reference contract.
   parameter markers plus default-init and explicit `init=/bin/sh` cells confirm
   the common parser and init-selection behavior on i386 PC/AT, i386 PC-98,
   amd64 BIOS, and amd64 UEFI.
+
+</details>

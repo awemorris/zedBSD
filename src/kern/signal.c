@@ -17,6 +17,7 @@
  */
 
 #include "kern/signal.h"
+#include "kern/klog.h"
 #include "kern/cred.h"
 #include "kern/process.h"
 #include "kern/process-timer.h"
@@ -802,6 +803,21 @@ retry:
 			/* SIGCONT may have made SIGHUP or another signal deliverable. */
 			goto retry;
 		}
+
+		/*
+		 * A fault-derived signal means the program went wrong, so it
+		 * is worth a line; the trap handler left the faulting
+		 * instruction and address on the thread. A service stopped
+		 * with SIGTERM takes the default action too, and says nothing.
+		 */
+		if (signo == SIGSEGV || signo == SIGBUS || signo == SIGILL ||
+		    signo == SIGFPE || signo == SIGTRAP || signo == SIGABRT)
+			kern_logf("kern: pid %ld killed by signal %d "
+				  "(vector %u) at %p, address %p\n",
+				  (long)process->pid, signo,
+				  (unsigned)thread->fault_vector,
+				  (void *)thread->fault_eip,
+				  (void *)thread->fault_address);
 
 		exit1_signal(signo);
 	}

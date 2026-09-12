@@ -84,3 +84,35 @@ These Phases are cleared by user report, fg006 complete; earlier uncleared,
 execution-candidate and p022-hold statements are historical. WS003 remains
 incomplete for other work. No Queue execution resumes. Do not invent new test
 results or physical artifact details. Preserve unrelated pending planning drafts.
+
+## 2026-09-12 PPC Open Firmware planning
+
+Current fg009 / WS003 p033-p039: read `plan/ws003/ppc-openfirmware-plan.md`.
+User chose APM+FAT with a firmware-loadable independent loader, zedboot.cfg,
+and vmunix on the same FAT. The first milestone is p033-p035: QEMU mac99 IDE
+firmware boot through PPC kernel initialization; no root/image mount requirement.
+XCOFF is the initial loader format candidate, not firmware-direct ELF loading.
+UEFI currently uses zedbsd.cfg; retain its name and reuse its grammar for the
+explicitly requested PPC zedboot.cfg. Later phases cover amd64 OHCI, PPC user ABI,
+and USB boot/rootfs.img/data.img integration. No Queue execution is authorized
+by this planning request. Preserve fg006 completion and unrelated user changes.
+
+
+## WSの単一目標と終了後の扱い（2026-09-12ユーザー指示）
+
+WSは一つの具体的な到達目標を持つ。目標を達成したWS、またはユーザーが終了したWSは再利用・再開して別の目標を追加しない。似た領域だからという理由で一つのWSへまとめない。機種対応などの上位分類・到達点はMGが担い、インストーラ実機動作、PowerPC移植などは別のWSを作る。
+一つの目標に必要な依存作業をPhaseへ分解することは可能だが、独立した別目標をPhaseとして混ぜない。WS終了時は子Phaseを全件照合し、未完了は完了に改変せず、ユーザー指定の保留先または別WSへ引き継いで元Phaseを終了する。旧ID、結果、転送先を残す。今回WS003は終了・再利用禁止、PPC移植はWS027へ、その他の未完了はFuture Workへ移す。
+
+Current PPC plan: plan/ws027/ws.md. Old WS003 references are historical; follow new WS027 p001-p007.
+
+## 2026-09-12 latest installer handoff
+
+WS028 / fg004 now owns installer hardware acceptance and the NVMe failure report.
+The menuconfig-absence hypothesis is recorded, while current source contains
+CONFIG_DRIVER_PCI_NVME for amd64/i386; deployed config/image is not verified.
+Installer portion of Future F-004 is transferred to WS028; other items stay deferred.
+WS003 remains closed, never reusable. WS027 owns PowerPC porting. No Queue started.
+
+## 2026-09-12 GPU planning handoff
+
+WS014/p001 architecture discussion resumed by user; first target is QEMU virtio-gpu, superseding i915-first/manual design hold. Vulkan display API is a proposal, not a frozen ABI. Linux DRM compatibility is not required, but OS memory/sync/display/permission machinery remains necessary. No implementation Queue. Other WS holds stay unchanged. See WS014 and p001; old review cases remain design inputs, not runtime tests.

@@ -35,12 +35,12 @@ Objectives → Milestone Goals → WS → Phase → Queue試行/結果を対応�
 | --- | --- | --- | --- |
 | **MG001：継続開発できる基盤が揃う** | O4, O5 | 文書化した環境でビルドでき、設計境界・規約・試験・制限を追跡できる。 | [ws009](https://github.com/awemorris/zedBSD/issues/10), [ws010](https://github.com/awemorris/zedBSD/issues/11), [ws021](https://github.com/awemorris/zedBSD/issues/22), [ws023](https://github.com/awemorris/zedBSD/issues/24), [ws026](https://github.com/awemorris/zedBSD/issues/27) |
 | **MG002：UNIXアプリケーションの実行基盤が成立する** | O1 | プロセス・メモリ・libc・ローダ/TLSの対応範囲を、互換性台帳と代表アプリの結果で確認できる。 | [ws001](https://github.com/awemorris/zedBSD/issues/2), [ws022](https://github.com/awemorris/zedBSD/issues/23) |
-| **MG003：対象機へ導入して単独起動できる** | O2, O4 | 合意した機種・媒体でインストール後の単独起動・ログインを確認できる。実機とQEMUの証拠を区別する。 | [ws003](https://github.com/awemorris/zedBSD/issues/4), [ws004](https://github.com/awemorris/zedBSD/issues/5), [ws019](https://github.com/awemorris/zedBSD/issues/20), [ws020](https://github.com/awemorris/zedBSD/issues/21) |
+| **MG003：対象機へ導入して単独起動できる** | O2, O4 | 合意した機種・媒体でインストール後の単独起動・ログインを確認できる。実機とQEMUの証拠を区別する。 | [ws003](https://github.com/awemorris/zedBSD/issues/4), [ws004](https://github.com/awemorris/zedBSD/issues/5), [ws019](https://github.com/awemorris/zedBSD/issues/20), [ws020](https://github.com/awemorris/zedBSD/issues/21), [WS028](https://github.com/awemorris/zedBSD/issues/382) |
 | **MG004：データを保持しメモリ/ストレージを実用的に使える** | O1, O2 | 永続化、低メモリ時の進行、媒体世代、既定構成の性能を合意した用途で確認できる。 | [ws016](https://github.com/awemorris/zedBSD/issues/17), [ws024](https://github.com/awemorris/zedBSD/issues/25), [ws025](https://github.com/awemorris/zedBSD/issues/26) |
 | **MG005：シンプルで一貫したネットワーク/サービス管理を利用できる** | O1, O2, O3 | networkd/netconf/serviceの責務・設定・操作が一貫し、永続化と失敗後の復旧を確認できる。 | [ws002](https://github.com/awemorris/zedBSD/issues/3), [ws005](https://github.com/awemorris/zedBSD/issues/6), [ws011](https://github.com/awemorris/zedBSD/issues/12), [ws012](https://github.com/awemorris/zedBSD/issues/13) |
 | **MG006：グラフィカルな操作環境を利用できる** | O2 | 入力・描画・ウィンドウ・端末・GUIツールの一連の操作を合意した環境で確認できる。 | [ws006](https://github.com/awemorris/zedBSD/issues/7), [ws007](https://github.com/awemorris/zedBSD/issues/8), [ws008](https://github.com/awemorris/zedBSD/issues/9), [ws014](https://github.com/awemorris/zedBSD/issues/15), [ws017](https://github.com/awemorris/zedBSD/issues/18), [ws005](ws005/ws.md) |
 | **MG007：用途別の独自ディストリビューションを構成・配布できる** | O1, O2 | 第三者が用途別に構成し独自ブランドでビルド・配布できる。Linux/Android代替の対象用途・機能/品質基準を具体化し実証する。 | [ws013](https://github.com/awemorris/zedBSD/issues/14), [ws015](https://github.com/awemorris/zedBSD/issues/16) |
-| **MG008：最小HALの移植契約を公開し異なる機種で実証できる** | O4 | 32bit/64bitのHAL契約・移植手順と異種/レトロ機での実証を公開し、移植者が必要な実装を判断できる。 | [ws018](https://github.com/awemorris/zedBSD/issues/19) |
+| **MG008：最小HALの移植契約を公開し異なる機種で実証できる** | O4 | 32bit/64bitのHAL契約・移植手順と異種/レトロ機での実証を公開し、移植者が必要な実装を判断できる。 | [ws018](https://github.com/awemorris/zedBSD/issues/19), [ws027](https://github.com/awemorris/zedBSD/issues/374) |
 | **MG009：AI活用OSS開発の経験を検証可能な知見として公開できる** | O5 | 設計権限・レビュー・変更追跡・失敗からの回復について事例と根拠を公開し、知見と未解決の問いを整理する。 | 未割当：成果を担う作業の具体化が必要 |
 
 ### 未充足・保留の扱い
@@ -55,8 +55,9 @@ Objectives → Milestone Goals → WS → Phase → Queue試行/結果を対応�
 
 | Goal | 当面の成果 | Milestone | 担当 |
 | --- | --- | --- | --- |
-| fg004 | PC98、Dell Latitude 5320、Let's Note SV7、Let's Note LX6でインストールが行える | MG003 | [ws003](ws003/ws.md) |
+| fg004 | インストーラ実機動作：PC98 V13、Latitude 5320、SV7、LX6 | MG003 | [WS028](https://github.com/awemorris/zedBSD/issues/382) |
 | fg005 | 有線LAN常駐管理、起動時の接続待機、DEへのネットワーク状態通知 | MG005 / MG006 | [ws005](ws005/ws.md) |
+| fg009 | PowerPC移植：OF/APM+FATからPPCカーネル起動、後続USB root/image統合 | MG008 / MG003 | [ws027](https://github.com/awemorris/zedBSD/issues/374) |
 | fg007 | HAL契約の可読性改善：コンソールAPIの集約、アロケータの kernel_alloc/kernel_free 化、kernel_entry() 前関数の prekern 命名 | MG008 / MG001 | 未定（WS018は完了。再開か新WSかの判断が必要） |
 
 2026-09-11ユーザー指定。4機種は順位ではない。旧fg001〜fg003は履歴のまま。旧Priorityリストを再作成せず、順序付けは未指定として保持する。
@@ -271,6 +272,195 @@ toolchain smoke は PASS、world ビルドはエラーなし、QEMU でログイ
 
 注意点として、パッチの削除行は上流の本文と一致させる必要があるため、
 接頭辞移行の対象外である。追加行だけが新しい名前を使う。
+
+## PC-98 実機：exec 後の最初のデータアクセスで #GP（2026-09-12、未コミット、実機未検証）
+
+前項の診断を入れた実機の結果：
+
+    kern: pid 2 killed by signal 11 at 0x00400004, address 0x00000000
+    init: mount -a killed by signal 11
+    kern: pid 3 killed by signal 11 at 0x00400004, address 0x00000000
+    init: swapon -a killed by signal 11
+
+メモリ行は `65536 KiB total, 58712 KiB free`。16 MB 超のゲートを開けても
+症状は変わらなかったので、前項の仮説は主因ではなかった。
+
+### 切り分け
+
+0x00400004 は crt0 の 3 命令目 `movl (%ebx), %eax`（`%ebx = %esp`）で、
+プログラムが最初にメモリに触る場所である。2 つのプロセスが同じ命令で
+死ぬので偶発ではない。address が 0 なのは、ページフォールトではなく
+一般保護例外（CR2 が無い）と読むのが自然。
+
+### 原因
+
+i386 のトラップ入口は `pushl %ds; pushl %es; pushal` で DS と ES を
+`struct interrupt_frame.regs` の中に保存し、出口は `popal; popl %es;
+popl %ds; iret` でそこから戻す。`hal_task_exec_current()` は新しい
+プログラムのフレームを `hal_memset(&frame->regs, 0, ...)` で作るので、
+DS と ES が NULL セレクタのままユーザモードに戻る。最初のデータアクセスで
+#GP になる。
+
+init（pid 1）はこの経路を通らない。`set_initial_resume_frame()` が
+DS/ES/FS/GS を正しく入れる。fork の子も親の resume フレームを引き継ぐ。
+exec だけがセグメントを落とす。
+
+QEMU の TCG は 32 ビットモードのデータアクセスで NULL セレクタを
+検査しない。だからエミュレータでは一度も出なかった。
+
+### 修正
+
+`hal_task_exec_current()` で memset の直後に
+`frame->regs.ds = frame->regs.es = SEG_USER_DATA | SEG_RPL_3` を入れた。
+FS はフレームに含まれず元の値を保ち、GS は直後の TLS 設定で再ロードされる。
+amd64 はフレームにデータセレクタを持たないので同じ問題はない。
+
+カーネルログにトラップベクタ番号を追加した
+（`kern: pid N killed by signal S (vector V) at PC, address A`）。
+13 なら #GP、14 なら #PF と読める。
+
+### 確認
+
+pc98・pcat・amd64 の 3 つともビルド成功。pc98 は QEMU 64 MB で
+ログインまで、amd64 は init 起動まで回帰なし。QEMU はもともと
+この障害を再現しないので、修正の実証は実機でしかできない。
+
+### 前項との関係
+
+16 MB 超のゲートを開ける変更は残す。ゲートが閉じていれば
+`bsp_mem_probe()` が数えたページの一部は実体を持たないので、
+それ自体は正しい修正である。ただし今回の障害の主因ではなかった。
+
+## noct が毎回 cmake を呼ぶ／特別扱いの整理（2026-09-12、未コミット）
+
+トップレベルで make すると毎回
+
+    cd 'userland/base/noct/noct' && ... cmake --preset zedbsd-amd64 ...
+
+が走り、キャッシュ変数と未使用変数の警告が大量に出る、という報告。
+
+### 原因 1：ビルドが .PHONY だった
+
+`noct-zedbsd` が .PHONY で、`$(BUILD)/bin/noct` がそれに依存していた。
+make は毎回 cmake の configure と build を実行し、できたてのコピーが
+`build/<platform>/bin/noct` を新しくするので、アーチ overlay と
+ディスクイメージまで毎回作り直していた。
+
+成果物をターゲットにするだけでは解決しない。cmake は何もすることが
+なければバイナリのタイムスタンプを触らないので、バイナリは常に
+きっかけより古いままで、次も木に入ってしまう。
+
+そこでビルドの記録をスタンプに残す。前提条件は実際に成果物を決めるもの、
+すなわち展開・検証済みソース、パッケージ Makefile（cmake オプション）、
+リンク先の sysroot である。
+
+sysroot は .PHONY の `sysroot-<arch>` ではなく完了スタンプで指す。
+以前は .PHONY を前提条件にしていたため毎回 cmake が走る代わりに、
+libc を変えたときに再リンクされるかどうかが cmake 任せだった。
+いまは libc を変えると確実に再リンクされる。
+
+### 原因 2：ホスト側 noct がトップレベルに直書きされていた
+
+トップレベル Makefile が、ホスト用ソースの場所、スタンプ名、cmake
+オプション、ビルド規則を独自に持っていた。パッケージ側にも同じパスの
+定義があり、二重管理になっていた。
+
+noct に関するものはすべて `userland/base/noct` に寄せた。トップレベルは
+`$(NOCT)` と `$(NOCT_HOST_BUILD_STAMP)` を使うだけである。ホスト用
+インタプリタをパッケージ内でビルドすること自体は残る。ビルドスクリプトが
+それで動くので、ターゲットのプログラムが 1 つも存在しない段階で必要になる。
+これはツールの性質であって、プログラムの特別扱いではない。
+
+### 確認
+
+| 対象 | 修正前 | 修正後 |
+| --- | --- | --- |
+| `make disk-image`（更新なし） | 1.57 s、cmake 出力あり | 0.18 s、出力なし |
+| `make toolchain`（更新なし） | 0.15 s | 0.15 s |
+| ディスクイメージ | 毎回作り直し | 変更時のみ |
+
+依存の効きも確認した。パッケージ Makefile を触ると cmake が走る。
+カーネルソースを触るとカーネルとイメージが作り直される。
+libc を触ると sysroot が更新されて noct が再リンクされる。
+`build/NoctLang` のソーススタンプを触るとホスト側が再ビルドされる。
+pc98・pcat・amd64 の 3 つともビルド成功、pc98 と amd64 は QEMU で
+ログインまたは init 起動まで確認。
+
+### 残る既知の挙動
+
+pc98 と pcat は `build/arch-images/i386.ufs` を共有し、収録ファイルが
+異なる。したがって 2 つの構成を交互にビルドすると毎回作り直しになる。
+単独ではどちらも無出力。これは以前からの性質で、今回は触っていない。
+
+## PC-98 実機で init の子プロセスが全部死ぬ（2026-09-12、未コミット、実機未検証）
+
+GDC・PBR・IDE flush の修正後、実機は init まで到達するようになった。
+しかし `mount -a` と `swapon -a` が失敗し、syslogd・networkd・cron・
+getty_console がすべて起動直後に終了して再起動ループになる。
+QEMU では 486/Pentium、16 MB/64 MB のどれでも再現しない。
+
+### 切り分け
+
+init 自身は動いている。`/etc/rc.conf` の読み込みに成功し、サービス定義を
+持ち、fork も成功している。`spawn_service` は execv 失敗時に
+`init: exec ...: <errno>` を出すが、実機にその行はない。つまり exec は
+成功し、プログラムは起動直後に死んでいる。
+
+実機のメモリは 64 MB（ユーザ報告）。QEMU も 64 MB で回していたので
+メモリ量の違いではない。
+
+### 原因
+
+PC-9821 は 16 MB を超えるメモリをゲートの後ろに置く。I/O 439h のビット 2 が
+立っている間、その範囲へのアクセスは通らない。ボードの BIOS は POST で
+メモリを数え、ゲートの状態に関係なくワークエリア 594h に報告する。
+カーネルはそれを物理ページマップに加え、ページを配り、書いても読んでも
+何も返ってこない。
+
+ゲートを開く手順は `hal_pc98_enable_high_memory()` として書かれていたが、
+**一度も呼ばれていなかった**。ヘッダに宣言もなく、参照も存在しない。
+
+カーネル自身は 1 MB に読み込まれ、起動中の確保は 16 MB 未満から取れるので、
+64 MB の機械でも普通に起動する。init が fork を始めてからページを失う。
+テキストやスタックがゲートの向こうに載ったプログラムは、未書き込みの
+メモリを読んででたらめを実行し、即座に死ぬ。エミュレータにはこのゲートが
+ないので影響を受けない。
+
+### 修正
+
+ボードの最初のエントリ `bsp_boot_init()` の先頭でゲートを開く。
+ページマップが数える前である。16 MB を超えるメモリがない機械では無害。
+手順そのものは既存コードで、配線しただけである。
+
+### あわせて入れた診断
+
+原因の特定に時間がかかったのは、プロセスが黙って死んでいたためである。
+恒久的に残す形で 3 つ足した。
+
+- フォールト由来のシグナル（SIGSEGV/SIGBUS/SIGILL/SIGFPE/SIGTRAP/SIGABRT）で
+  殺されたプロセスを、pid・シグナル番号・フォールトした命令とアドレスとともに
+  カーネルログに出す。トラップハンドラがスレッドに残していた値を使う。
+  SIGTERM での停止は従来どおり無言。
+- init の起動コマンド（mount/swapon）が、execv 失敗時に errno を、
+  子の失敗時に終了ステータスまたはシグナル番号を出す。サービス側には
+  すでにあった報告を揃えた。
+- 起動時にメモリの内訳を 1 行出す。init 起動の直前なので、システムが
+  上がったあとも画面に残る位置である。
+
+### 確認
+
+QEMU 64 MB でログインまで回帰なし。`boot: memory 65536 KiB total,
+58744 KiB free, 4632 KiB reserved` を確認。PC/AT と amd64 もビルド成功、
+amd64 は QEMU で init 起動まで確認（`boot: memory 523772 KiB total`）。
+実機での確認は未実施。
+
+### 実機で直らなかった場合
+
+ゲートの手順は 439h ビット 2 のほかに F2h/F6h/F8h/43Bh も触る。
+439h ビット 2 だけに絞るのが次の切り分けになる。
+それでも直らなければ、新しいカーネルログの
+`kern: pid N killed by signal S at PC, address A` が出るはずなので、
+その値から追う。
 
 ## トップレベル make の起動が遅い（2026-09-12、未コミット）
 
@@ -1118,7 +1308,7 @@ Future Listへ移したWS013・WS015は次節で管理する。完了WSの詳細
 | --- | --- | --- | --- | --- |
 | [WS001](ws001/ws.md) | MG002 | POSIX準拠 | 継続 | 準拠性台帳・コード規約の残件。 |
 | [WS002](ws002/ws.md) | MG005 | システムサービス | completed | p021をユーザー判断でcleared。p023/p024完了、POSIXの引継ぎと既知バグの再発条件は保持。 2026-09-11ユーザー指示で閉鎖。 |
-| [WS003](ws003/ws.md) | MG003 | x86・PC-98実機対応 | incomplete | fg006のp022/p023/p024は2026-09-12ユーザー報告でcleared。fg004の4機種インストーラほか残件を保持。 |
+| [WS003](https://github.com/awemorris/zedBSD/issues/4) | MG003 | 旧実機bring-up（終了・再利用禁止） | closed / 未完了は保留 | PPCはWS027、その他の未完了はFuture Work F-004へ。 |
 | [WS004](ws004/ws.md) | MG003 | ハードウェア拡張 | 継続 | 主要USB/WLAN経路完了。NVMe実機・転送・ドライバ共通化等の後続項目を保持。 |
 | [WS005](ws005/ws.md) | MG005 | ネットワーク・WLAN | incomplete | fg005: net lan、network-enable（どちらかIP・既定30秒・timeoutでも起動継続）、DE状態通知をp013〜p017で計画。既存p001〜p012の完了は維持。 |
 | [WS006](ws006/ws.md) | MG006 | 入力・evdev | completed | q147。両USB構成の通常ビルドで実Xzed/PTYとUSB-root/HID受け入れ。 2026-09-11ユーザー指示で閉鎖。 |
@@ -1128,7 +1318,7 @@ Future Listへ移したWS013・WS015は次節で管理する。完了WSの詳細
 | [WS010](ws010/ws.md) | MG001 | スクリプト・イメージツール | 完了 | q063。 |
 | [WS011](ws011/ws.md) | MG005 | ネットワーク設定コンソール | 完了（ユーザー確認） | commit confirmed完了。VLANキャンセル、bridgeはF-001へ移管。 |
 | [WS012](ws012/ws.md) | MG005 | サービス管理コンソール | 完了 | q018。 |
-| [WS014](ws014/ws.md) | MG006 | ネイティブGPU | 明示保留 | GPU設計の保留解除時に再開。 |
+| [WS014](https://github.com/awemorris/zedBSD/issues/15) | MG006 | virtio-gpu bring-up | planning | p001設計再開。2D出力からVulkan描画・表示APIの境界を具体化。 |
 | [WS016](ws016/ws.md) | MG004 | 実行時swap制御 | 完了 | q021。 |
 | [WS017](ws017/ws.md) | MG006 | LFB描画高速化 | 依存待ち | WS022後にmmap・Xzed高速描画・受け入れ。 |
 | [WS018](ws018/ws.md) | MG008 | カーネル所有権・構成統一 | 完了 | p001〜p020。I/O後続はWS025。 |
@@ -1140,6 +1330,8 @@ Future Listへ移したWS013・WS015は次節で管理する。完了WSの詳細
 | [WS024](ws024/ws.md) | MG004 | 単一64-bit UFS | 完了 | q102。 |
 | [WS025](ws025/ws.md) | MG004 | I/O・キャッシュ・物理メモリ | completed | 2026-09-11ユーザー判断でp029/p030/p032/p038をcleared、WSを閉鎖。p028 canceledを維持。 |
 | [WS026](ws026/ws.md) | MG001 | テスト資産の整理 | 計画のみ | 不要・重複テストの整理と現行ソースへの追随。Phase未詳細化・Queue未投入。 |
+| [WS027](https://github.com/awemorris/zedBSD/issues/374) | MG008 | PowerPC移植 | planned | OF/APM+FATからPPC起動、後続USB root/image統合。 |
+| [WS028](https://github.com/awemorris/zedBSD/issues/382) | MG003 | インストーラ実機動作 | planning | 4機種の実機受け入れ。NVMe未動作と設定/組込み仮説を切り分ける。 |
 
 ## Future List(やりたいことリスト)
 
@@ -1195,3 +1387,51 @@ GitHub Milestones: [MG001](https://github.com/awemorris/zedBSD/milestone/1) · [
 ## 2026-09-11 実行保留
 
 ユーザーがp022のキュー実行を保留。fg004/fg005/fg006とp022→p023→p024の計画は保持し、active Queueは作成せず、build・実機操作・実装は開始していない。MasterのGitHub同期は今回明示された範囲で行う。
+
+## 2026-09-12 fg009: PPC Open Firmware / APM+FAT
+
+PowerBook G4 A1010 / 867MHzを移植先とし、まずQEMU mac99上で、Open Firmware → APM+FATの独自ローダ → zedboot.cfg → 同じFATのvmunix → PPCカーネル初期化を成立させる。後続でamd64上のUSB OHCI、PPCユーザーABI、USB root、rootfs.img/data.imgのループバック利用へ進む。今回は計画のみ。
+
+最初の到達点はp033→p034→p035。rootfs.img/data.imgは後続p038。設定名は今回指定のzedboot.cfg（現行UEFIはzedbsd.cfg）、kernel=vmunix。独自ローダはXCOFFを第一候補とし、OFによるELF直接ロードに依存しない。
+
+- [ws003-p033](https://github.com/awemorris/zedBSD/issues/367): OF起動契約・APM/FAT imageとXCOFFローダ入口 (planned)
+- [ws003-p034](https://github.com/awemorris/zedBSD/issues/368): zedboot.cfg・FAT読み取り・PPC ELF handoff (planned)
+- [ws003-p035](https://github.com/awemorris/zedBSD/issues/369): PPC HAL・mac99基板対応とカーネル初期起動 (planned)
+- [ws003-p036](https://github.com/awemorris/zedBSD/issues/370): amd64でUSB OHCI・USBストレージを検証 (planning)
+- [ws003-p037](https://github.com/awemorris/zedBSD/issues/371): PPCユーザーABI・libcとinit到達 (planning)
+- [ws003-p038](https://github.com/awemorris/zedBSD/issues/372): PPC USB boot・rootfs.img/data.img統合 (planning)
+- [ws003-p039](https://github.com/awemorris/zedBSD/issues/373): PPC/OHCI変更の最終規約・統合確認 (planning)
+
+全体の共通契約は各Phase本文に記載。実行Queueは作成せず、既存の実行保留、fg006完了、他WSの判断を保持する。
+
+## 2026-09-12 WS003終了・WS027新設
+
+ユーザーがPPCを新規移植として独立WSへ移すよう指示し、WS003を閉じて再利用しないことを指定した。その他の未完了は「未完了のまま保留事項へ移し、WS003内のPhaseは終了する」と明示。目標達成や試験PASSを追加する判断ではない。
+
+PPC移植は[ws027](https://github.com/awemorris/zedBSD/issues/374)のp001-p007（旧WS003 p033-p039）へ移管。初期到達点はp003まで。その他の未完了は[Future Work F-004](https://github.com/awemorris/zedBSD/issues/364)へ保留移管。fg009はWS027、fg004は保留。WS003は終了・再利用禁止。実行Queueは作らない。
+
+## 2026-09-12 インストーラ実機動作を独立WS化
+
+ユーザー指示により[WS028](https://github.com/awemorris/zedBSD/issues/382)を新設。単一目標はPC98 V13、Latitude 5320、SV7、LX6でインストーラを実行し、インストール先から起動・loginできること。fg004をこのWSで再選択する。PPC移植は[WS027](https://github.com/awemorris/zedBSD/issues/374)に分離済み。WS003は閉鎖済み・再利用禁止。
+
+NVMeが実機で動作していないというユーザー報告と、menuconfigにNVMe項目がないだけかもしれないという仮説をWS028へ記録。現行pci.driversには項目があり、amd64/i386の組込み・登録経路もある。実機使用config/imageとの一致と失敗境界は未確認。
+
+Future Work F-004のうち旧WS003 p018/p019とp026-p032はWS028への引継ぎ対象とする。その他は保留のまま。元Phaseは閉じたまま保持し、新しい実行Phase・Queueはまだ作らない。
+
+## 2026-09-12 GPU計画更新
+
+ユーザー指示により、[WS014](https://github.com/awemorris/zedBSD/issues/15)の初期bring-up対象をi915からQEMU virtio-gpuへ変更する。未完了・未着手の既存目標の具体化であり、終了WSの再利用ではない。[p001](https://github.com/awemorris/zedBSD/issues/213)の設計検討の手動保留を解除しplanningとする。実装Queueは作成・再開しない。WS009など他WSの保留は自動解除しない。
+
+Vulkanのディスプレイ拡張をOSの公式なユーザー向け表示APIとする案を検討する。正式採用やABI凍結は未決定。Linux DRM互換を必須としない従来方針は維持するが、メモリ管理、同期、画面出力、所有権・権限を担うOS/ドライバ機構は必要。Vulkan APIをそのままカーネルABIへコピーしない。
+
+## 2026-09-12 Vulkan API関数別の責務表
+
+ユーザー依頼により、Vulkan 1.0〜1.4の全コア234関数と選択した表示関連拡張41関数、計275関数について、libvulkan.so側（loader/ICD/WSIを含むユーザー空間実装）とzedBSD GPUドライバ側の責務を一関数一行の表にした。
+
+[WS014 p001の関数別責務表](https://github.com/awemorris/zedBSD/issues/213#vulkan-api-responsibility-table)に全文を掲載する。固定したKhronosレジストリとの集合照合で欠落・重複・空欄なし。libvulkan.so単体の構成とloader/ICD分離の違い、Venus転送、記録/submit/表示の違い、対象外拡張、対応宣言ではないことを明記した。
+
+設計資料でありAPI/ABI採用確定やPhaseクリアランスではない。WS014/p001はplanning、Queueは未開始。Markdownはローカル作業ツリーにも保存し、git commit/pushはしていない。
+
+## 2026-09-12 責務分類をU/Kに統一
+
+ユーザー指示により、[Vulkan API責務表](https://github.com/awemorris/zedBSD/issues/213#vulkan-api-responsibility-table)の275関数を、U（ユーザー空間実装）とK（GPUドライバ）の二つの責務欄だけで整理した。旧Q/C/R分類と境界列を削除。キャッシュ・記録・転送は責務欄の説明として保持する。ドライバへの照会はK、結果の整形等はUであり、キャッシュ可能性を別分類にしない。関数集合とplanning状態、Queue未開始は維持。

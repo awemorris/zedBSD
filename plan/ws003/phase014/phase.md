@@ -1,3 +1,19 @@
+<!-- awesome-plan project=zedbsd record=ws003-p014 -->
+
+<!-- awesome-plan-current:start -->
+
+Status: cleared
+Phase disposition: normal
+Lifecycle: closed
+Current Focus: No
+
+既存の完了・受け入れを保持。2026-09-12のWS003終了にあたり現在状態を明示。今回新たな試験・受け入れを追加していない。
+
+<!-- awesome-plan-current:end -->
+
+<details>
+<summary>終了前の計画・試行履歴（現在の再実行指示ではない）</summary>
+
 # WS003 Phase 014: multi-source swap activation
 
 Last updated: 2026-08-27
@@ -192,3 +208,5 @@ dependency of p014.
 Stop if aggregate slot counts exceed the existing 32-bit VM slot identity, if
 the header migration cannot preserve current images safely, or if shutdown
 cannot drain every source without a VM lifecycle redesign.
+
+</details>

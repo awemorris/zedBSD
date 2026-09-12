@@ -311,9 +311,16 @@ hal_task_exec_current(
 	if (result != 0)
 		return -1;
 
-	/* Rebuilds the active frame at the new user entry and stack. */
+	/*
+	 * Rebuilds the active frame at the new user entry and stack. The
+	 * register block also holds DS and ES, which the trap exit restores
+	 * before iret; they must name the user data segment again, or the
+	 * program's first data access faults on hardware that checks.
+	 */
 	frame = running_task->active_user_frame;
 	hal_memset(&frame->regs, 0, sizeof(frame->regs));
+	frame->regs.ds = SEG_USER_DATA | SEG_RPL_3;
+	frame->regs.es = SEG_USER_DATA | SEG_RPL_3;
 	frame->eip = (uint32_t)entry;
 	frame->cs = SEG_USER_CODE | SEG_RPL_3;
 	frame->eflags = EFLAGS_IF | EFLAGS_RSV1 | EFLAGS_IOPL_0;

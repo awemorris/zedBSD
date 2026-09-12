@@ -1,3 +1,19 @@
+<!-- awesome-plan project=zedbsd record=ws003-p021 -->
+
+<!-- awesome-plan-current:start -->
+
+Status: cleared
+Phase disposition: normal
+Lifecycle: closed
+Current Focus: No
+
+既存の完了・受け入れを保持。2026-09-12のWS003終了にあたり現在状態を明示。今回新たな試験・受け入れを追加していない。
+
+<!-- awesome-plan-current:end -->
+
+<details>
+<summary>終了前の計画・試行履歴（現在の再実行指示ではない）</summary>
+
 # WS003 Phase 021: portable GPT image extent on larger USB media
 
 Last updated: 2026-08-30
@@ -242,3 +258,5 @@ a safe validation extent without weakening q030 corruption checks, if firmware
 itself requires GPT relocation before loading zedBSD, or if consuming trailing
 capacity becomes a requirement. Destructive repair and expansion belong to
 `diskpart`/installer work, not this boot-time Phase.
+
+</details>

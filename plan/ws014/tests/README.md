@@ -16,3 +16,7 @@ cases, not executable conformance tests.
 | `GPU-D004` | Mandatory, reduced GLES2-class, optional, and unsupported capabilities are explicit |
 | `GPU-D005` | Display takeover, fallback, console, panic, and permission ownership are deterministic |
 | `GPU-D006` | WS004, WS007, WS008, WS009, i915, Vulkan, and GLES responsibilities have one owner each |
+
+## 2026-09-12 GPU planning handoff
+
+WS014/p001 architecture discussion resumed by user; first target is QEMU virtio-gpu, superseding i915-first/manual design hold. Vulkan display API is a proposal, not a frozen ABI. Linux DRM compatibility is not required, but OS memory/sync/display/permission machinery remains necessary. No implementation Queue. Other WS holds stay unchanged. See WS014 and p001; old review cases remain design inputs, not runtime tests.

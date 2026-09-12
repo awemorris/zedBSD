@@ -35,11 +35,36 @@ NOCT_SOURCE_VERIFIED := \
 NOCT_HOST_SOURCE_VERIFIED := \
 	$(NOCT_HOST_SOURCE_DIR)/.zedbsd-source-verified-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_PATCH_LEVEL)
 
+# The interpreter built for the build machine. The build's own scripts
+# run on it, so it exists before any target program does; $(NOCT) is how
+# the rest of the tree asks for it.
+NOCT_HOST_BUILD_DIR := $(NOCT_HOST_SOURCE_DIR)/build-static
+NOCT_HOST_ARTIFACT := $(NOCT_HOST_BUILD_DIR)/noct
+NOCT_HOST_STATE_DIR := $(if $(ZEDBSD_TOPLEVEL_BUILD),build/host-noct-state,\
+	$(abspath $(ZEDBSD_NOCT_ROOT)/build/host-noct-state))
+NOCT_HOST_BUILD_STAMP := \
+	$(NOCT_HOST_STATE_DIR)/built-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_PATCH_LEVEL)-process
+NOCT_HOST_CMAKE_OPTIONS := -DNOCT_ENABLE_API_PROCESS=ON \
+	-DNOCT_VERSION=$(ZEDBSD_NOCT_VERSION)
+NOCT ?= $(abspath $(NOCT_HOST_ARTIFACT))
+
 NOCT_ZEDBSD_ARCH := $(if $(filter i386,$(ZEDBSD_ARCHITECTURE)),i386,amd64)
 NOCT_ZEDBSD_SYSROOT = $(if $(filter i386,$(NOCT_ZEDBSD_ARCH)),$(ZEDBSD_SYSROOT_I386),$(ZEDBSD_SYSROOT_AMD64))
 NOCT_ZEDBSD_CMAKE_OPTIONS := $(if $(filter i386,$(NOCT_ZEDBSD_ARCH)),--toolchain $(ZEDBSD_NOCT_PACKAGE_ROOT)/zedbsd-i386.cmake -DNOCT_ENABLE_JIT=OFF,)
 NOCT_ZEDBSD_BUILD_DIR := $(NOCT_SOURCE_DIR)/build-zedbsd-$(NOCT_ZEDBSD_ARCH)
 NOCT_ZEDBSD_ARTIFACT := $(NOCT_ZEDBSD_BUILD_DIR)/noct
+
+# cmake leaves the interpreter's timestamp alone when it has nothing to
+# do, so the build records itself here instead of in its own output.
+NOCT_ZEDBSD_BUILD_STAMP := \
+	$(NOCT_ZEDBSD_BUILD_DIR)/.zedbsd-built-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_PATCH_LEVEL)
+
+# The sysroot the interpreter links against, named by the stamp that says
+# it is complete. sysroot.mk is included after this package, so its own
+# variables are not available here yet; the top level settled the path for
+# the selected architecture before any package was read.
+NOCT_ZEDBSD_SYSROOT_STAMP := $(if $(ZEDBSD_TARGET_SYSROOT),\
+	$(ZEDBSD_TARGET_SYSROOT)/.zedbsd-sysroot-complete,)
 NOCT_PACKAGE_HOLORIS := $(NOCT_SOURCE_DIR)/resources/apps/holoris/holoris.noct
 
 # i386 uses the interpreter for the PC98 i486 baseline. Remacs stays held
@@ -249,7 +274,11 @@ patch: noct-target-source-verify
 $(NOCT_PACKAGE_HOLORIS): | $(NOCT_SOURCE_VERIFIED)
 	@test -f '$@'
 
-noct-zedbsd: $(NOCT_SOURCE_VERIFIED) sysroot-$(NOCT_ZEDBSD_ARCH)
+# Entered only when the record of the last build is older than what the
+# interpreter is built from, so an unchanged tree costs nothing and
+# prints nothing.
+$(NOCT_ZEDBSD_BUILD_STAMP): $(NOCT_SOURCE_VERIFIED) \
+		$(ZEDBSD_NOCT_PACKAGE_MAKEFILE) $(NOCT_ZEDBSD_SYSROOT_STAMP)
 	cd '$(NOCT_SOURCE_DIR)' && \
 		ZEDBSD_SOURCE_DIR='$(ZEDBSD_NOCT_ROOT)' \
 		ZEDBSD_SYSROOT='$(NOCT_ZEDBSD_SYSROOT)' \
@@ -262,9 +291,33 @@ noct-zedbsd: $(NOCT_SOURCE_VERIFIED) sysroot-$(NOCT_ZEDBSD_ARCH)
 		ZEDBSD_LLVM_BIN='$(ZEDBSD_LLVM_INSTALL)/bin' \
 		cmake --build build-zedbsd-$(NOCT_ZEDBSD_ARCH) --parallel 16
 	@test -x '$(NOCT_ZEDBSD_ARTIFACT)'
+	@touch '$@'
+
+noct-zedbsd: $(NOCT_ZEDBSD_BUILD_STAMP)
+
+$(NOCT_HOST_ARTIFACT): $(NOCT_HOST_SOURCE_STAMP) \
+		| $(NOCT_HOST_SOURCE_VERIFIED)
+	@mkdir -p '$(NOCT_HOST_STATE_DIR)'
+	cd '$(NOCT_HOST_SOURCE_DIR)' && cmake --preset static \
+		$(NOCT_HOST_CMAKE_OPTIONS)
+	cd '$(NOCT_HOST_SOURCE_DIR)' && \
+		cmake --build --preset static --parallel 16
+	@test -x '$@'
+	@touch '$(NOCT_HOST_BUILD_STAMP)'
+
+$(NOCT_HOST_BUILD_STAMP): $(NOCT_HOST_ARTIFACT)
+	@test -x '$(NOCT_HOST_ARTIFACT)'
+	@mkdir -p '$(@D)'
+	@touch '$@'
+
+.PHONY: noct-toolchain-smoke
+noct-toolchain-smoke: $(NOCT_HOST_BUILD_STAMP) \
+		plan/ws010/tests/toolchain-smoke.noct
+	$(NOCT) plan/ws010/tests/toolchain-smoke.noct \
+		$(abspath build/noct-toolchain-smoke.txt)
 
 ifneq ($(filter amd64 i386,$(ZEDBSD_ARCHITECTURE)),)
-$(BUILD)/bin/noct: noct-zedbsd
+$(BUILD)/bin/noct: $(NOCT_ZEDBSD_BUILD_STAMP)
 	@mkdir -p $(dir $@)
 	cp -f '$(NOCT_ZEDBSD_ARTIFACT)' '$@'
 	@cmp -s '$(NOCT_ZEDBSD_ARTIFACT)' '$@' || { \

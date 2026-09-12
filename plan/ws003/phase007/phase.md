@@ -1,3 +1,19 @@
+<!-- awesome-plan project=zedbsd record=ws003-p007 -->
+
+<!-- awesome-plan-current:start -->
+
+Status: cleared
+Phase disposition: normal
+Lifecycle: closed
+Current Focus: No
+
+既存の完了・受け入れを保持。2026-09-12のWS003終了にあたり現在状態を明示。今回新たな試験・受け入れを追加していない。
+
+<!-- awesome-plan-current:end -->
+
+<details>
+<summary>終了前の計画・試行履歴（現在の再実行指示ではない）</summary>
+
 # WS003 Phase 007: shared DMA allocation synchronization
 
 Last updated: 2026-08-26
@@ -94,3 +110,5 @@ debt is not used by the current xHCI path; a future IOMMU implementation must
 add mapping-to-allocation pin/reference ownership before supporting live
 mapping/free concurrency. IOMMU isolation and scalable per-device allocation
 accounting remain separate hardware work.
+
+</details>

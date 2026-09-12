@@ -1,3 +1,19 @@
+<!-- awesome-plan project=zedbsd record=ws003-p003 -->
+
+<!-- awesome-plan-current:start -->
+
+Status: uncleared
+Phase disposition: canceled
+Lifecycle: closed
+Current Focus: No
+
+2026-09-12ユーザー指示で本Phaseを終了。未完了事項は[Future Work F-004](https://github.com/awemorris/zedBSD/issues/364)へ保留として移管。試験PASSやclearedへ変更しない。再選択時は新WSを作る。
+
+<!-- awesome-plan-current:end -->
+
+<details>
+<summary>終了前の計画・試行履歴（現在の再実行指示ではない）</summary>
+
 # WS003 Phase 003: Latitude xHCI capability/MMIO bring-up
 
 Last updated: 2026-08-26
@@ -334,3 +350,5 @@ physical repetition is required.
 
 - [Intel xHCI specification and current revisions](https://www.intel.com/content/www/us/en/products/docs/io/universal-serial-bus/universal-serial-bus-specifications.html)
 - [Intel 500 Series PCH datasheet, volume 2](https://cdrdv2-public.intel.com/631120/631120-002.pdf)
+
+</details>

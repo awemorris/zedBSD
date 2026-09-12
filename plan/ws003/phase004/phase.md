@@ -1,3 +1,19 @@
+<!-- awesome-plan project=zedbsd record=ws003-p004 -->
+
+<!-- awesome-plan-current:start -->
+
+Status: cleared
+Phase disposition: normal
+Lifecycle: closed
+Current Focus: No
+
+既存の完了・受け入れを保持。2026-09-12のWS003終了にあたり現在状態を明示。今回新たな試験・受け入れを追加していない。
+
+<!-- awesome-plan-current:end -->
+
+<details>
+<summary>終了前の計画・試行履歴（現在の再実行指示ではない）</summary>
+
 # WS003 Phase 004: Latitude xHCI device enumeration
 
 Last updated: 2026-08-26
@@ -221,3 +237,5 @@ later BR-T30 gate.
 ## Reference
 
 - [Intel xHCI Requirements Specification 1.2b](https://cdrdv2-public.intel.com/625472/625472_xHCI_Rev1_2b.pdf), especially sections 4.3.1, 4.6.9, 4.8.3, 4.11.2.2, 4.11.2.4, 6.2.3, and 6.4.1.2.
+
+</details>

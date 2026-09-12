@@ -138,6 +138,7 @@ boot_start(
 	unsigned platform_device_count)
 {
 	const struct kern_boot_parameters *boot_parameters;
+	struct hal_memstat memory;
 	const char *boot_parameter_line;
 	const char *init_path;
 	const char *name;
@@ -198,6 +199,14 @@ boot_start(
 	if (!kern_boot_parameters_source_present())
 		init_path = KERN_INIT_PATH;
 #endif
+
+	/* States what the board gave us, while the log is still on screen. */
+	hal_get_memstat(&memory);
+	kern_logf("boot: memory %lu KiB total, %lu KiB free, "
+		  "%lu KiB reserved\n",
+		  (unsigned long)(memory.physical_total / 1024U),
+		  (unsigned long)(memory.physical_free / 1024U),
+		  (unsigned long)(memory.physical_reserved / 1024U));
 
 	/* Starts init and reports a failure to do so. */
 	kern_logf("boot: starting init %s\n\n", init_path);

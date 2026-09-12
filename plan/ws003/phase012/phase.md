@@ -1,3 +1,19 @@
+<!-- awesome-plan project=zedbsd record=ws003-p012 -->
+
+<!-- awesome-plan-current:start -->
+
+Status: cleared
+Phase disposition: normal
+Lifecycle: closed
+Current Focus: No
+
+既存の完了・受け入れを保持。2026-09-12のWS003終了にあたり現在状態を明示。今回新たな試験・受け入れを追加していない。
+
+<!-- awesome-plan-current:end -->
+
+<details>
+<summary>終了前の計画・試行履歴（現在の再実行指示ではない）</summary>
+
 # WS003 Phase 012: x86 boot-parameter handoff
 
 Last updated: 2026-08-27
@@ -152,3 +168,5 @@ nonempty data that the original strict NUL-terminated converter rejected
 before kernel load. The corrective design and physical acceptance are tracked
 separately as [ws003-p017](../phase017/phase.md)
 rather than rewriting this Phase's q015 historical result.
+
+</details>

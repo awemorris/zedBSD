@@ -1831,6 +1831,86 @@
       "path": "plan/history/index.md",
       "number": 366,
       "url": "https://github.com/awemorris/zedBSD/issues/366"
+    },
+    "ws003-p033": {
+      "path": "plan/ws003/phase033/phase.md",
+      "number": 367,
+      "url": "https://github.com/awemorris/zedBSD/issues/367"
+    },
+    "ws003-p034": {
+      "path": "plan/ws003/phase034/phase.md",
+      "number": 368,
+      "url": "https://github.com/awemorris/zedBSD/issues/368"
+    },
+    "ws003-p035": {
+      "path": "plan/ws003/phase035/phase.md",
+      "number": 369,
+      "url": "https://github.com/awemorris/zedBSD/issues/369"
+    },
+    "ws003-p036": {
+      "path": "plan/ws003/phase036/phase.md",
+      "number": 370,
+      "url": "https://github.com/awemorris/zedBSD/issues/370"
+    },
+    "ws003-p037": {
+      "path": "plan/ws003/phase037/phase.md",
+      "number": 371,
+      "url": "https://github.com/awemorris/zedBSD/issues/371"
+    },
+    "ws003-p038": {
+      "path": "plan/ws003/phase038/phase.md",
+      "number": 372,
+      "url": "https://github.com/awemorris/zedBSD/issues/372"
+    },
+    "ws003-p039": {
+      "path": "plan/ws003/phase039/phase.md",
+      "number": 373,
+      "url": "https://github.com/awemorris/zedBSD/issues/373"
+    },
+    "ws027": {
+      "path": "plan/ws027/ws.md",
+      "number": 374,
+      "url": "https://github.com/awemorris/zedBSD/issues/374"
+    },
+    "ws027-p001": {
+      "path": "plan/ws027/phase001/phase.md",
+      "number": 375,
+      "url": "https://github.com/awemorris/zedBSD/issues/375"
+    },
+    "ws027-p002": {
+      "path": "plan/ws027/phase002/phase.md",
+      "number": 376,
+      "url": "https://github.com/awemorris/zedBSD/issues/376"
+    },
+    "ws027-p003": {
+      "path": "plan/ws027/phase003/phase.md",
+      "number": 377,
+      "url": "https://github.com/awemorris/zedBSD/issues/377"
+    },
+    "ws027-p004": {
+      "path": "plan/ws027/phase004/phase.md",
+      "number": 378,
+      "url": "https://github.com/awemorris/zedBSD/issues/378"
+    },
+    "ws027-p005": {
+      "path": "plan/ws027/phase005/phase.md",
+      "number": 379,
+      "url": "https://github.com/awemorris/zedBSD/issues/379"
+    },
+    "ws027-p006": {
+      "path": "plan/ws027/phase006/phase.md",
+      "number": 380,
+      "url": "https://github.com/awemorris/zedBSD/issues/380"
+    },
+    "ws027-p007": {
+      "path": "plan/ws027/phase007/phase.md",
+      "number": 381,
+      "url": "https://github.com/awemorris/zedBSD/issues/381"
+    },
+    "ws028": {
+      "path": "plan/ws028/ws.md",
+      "number": 382,
+      "url": "https://github.com/awemorris/zedBSD/issues/382"
     }
   }
 }

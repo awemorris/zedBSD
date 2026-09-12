@@ -84,3 +84,24 @@ fg005 / WS005 p013–p017 adds LAN management, boot network-enable and DE state 
 ## 2026-09-11 V13 focused-goal addition
 
 fg006 selects WS003 p022 -> p023 -> p024 for PC-9821V13 boot improvement. Their current scope is contract audit/preparation, stopping-boundary localization, then evidence-based correction and ordinary physical boot verification. fg004/fg005 stay active; the old Priority list stays removed. Planning only, no active execution Queue. Cumulative GitHub publication drafts remain pending approval.
+
+## Latest WS lifecycle decision (2026-09-12)
+
+WS003 is retired and must not be reused. Its incomplete non-PPC work is deferred
+to Future Work F-004; this is not clearance or proof of original goal acceptance.
+PPC porting is WS027 / fg009, Primary MG008, Related MG003. Old WS003 p033-p039
+are canceled origin records; current planning is WS027 p001-p007.
+WSs each have one goal; related subjects are organized by MG, not by reopening
+or extending finished WSs. Guardrail contains the user-specified rule.
+
+## 2026-09-12 latest installer handoff
+
+WS028 / fg004 now owns installer hardware acceptance and the NVMe failure report.
+The menuconfig-absence hypothesis is recorded, while current source contains
+CONFIG_DRIVER_PCI_NVME for amd64/i386; deployed config/image is not verified.
+Installer portion of Future F-004 is transferred to WS028; other items stay deferred.
+WS003 remains closed, never reusable. WS027 owns PowerPC porting. No Queue started.
+
+## 2026-09-12 GPU planning handoff
+
+WS014/p001 architecture discussion resumed by user; first target is QEMU virtio-gpu, superseding i915-first/manual design hold. Vulkan display API is a proposal, not a frozen ABI. Linux DRM compatibility is not required, but OS memory/sync/display/permission machinery remains necessary. No implementation Queue. Other WS holds stay unchanged. See WS014 and p001; old review cases remain design inputs, not runtime tests.

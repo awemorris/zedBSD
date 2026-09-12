@@ -1,3 +1,19 @@
+<!-- awesome-plan project=zedbsd record=ws003-p019 -->
+
+<!-- awesome-plan-current:start -->
+
+Status: planning
+Phase disposition: canceled
+Lifecycle: closed
+Current Focus: No
+
+2026-09-12ユーザー指示で本Phaseを終了。未完了事項は[Future Work F-004](https://github.com/awemorris/zedBSD/issues/364)へ保留として移管。試験PASSやclearedへ変更しない。再選択時は新WSを作る。
+
+<!-- awesome-plan-current:end -->
+
+<details>
+<summary>終了前の計画・試行履歴（現在の再実行指示ではない）</summary>
+
 # WS003 Phase 019: Latitude NVMe native installation and boot
 
 <!-- installer-bringup-current:start -->
@@ -48,3 +64,5 @@ and accepted the destructive/native product and safety contracts in QEMU.
 An explicitly selected native root boots through the installed UEFI loader to
 init/login/root shell, with the final physical repeatability gate stated by the
 later accepted WS019 contract.
+
+</details>

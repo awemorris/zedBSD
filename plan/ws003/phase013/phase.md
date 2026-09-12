@@ -1,3 +1,19 @@
+<!-- awesome-plan project=zedbsd record=ws003-p013 -->
+
+<!-- awesome-plan-current:start -->
+
+Status: cleared
+Phase disposition: normal
+Lifecycle: closed
+Current Focus: No
+
+既存の完了・受け入れを保持。2026-09-12のWS003終了にあたり現在状態を明示。今回新たな試験・受け入れを追加していない。
+
+<!-- awesome-plan-current:end -->
+
+<details>
+<summary>終了前の計画・試行履歴（現在の再実行指示ではない）</summary>
+
 # WS003 Phase 013: boot slots and root-source selection
 
 Last updated: 2026-08-27
@@ -135,3 +151,5 @@ Stop if supporting four slots requires a public mount namespace/UAPI, if a
 selected boot filesystem cannot be kept alive without leaking a global mount,
 or if the existing overlay recursion guard cannot represent the selected
 files safely.
+
+</details>

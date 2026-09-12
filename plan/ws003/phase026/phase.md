@@ -1,3 +1,19 @@
+<!-- awesome-plan project=zedbsd record=ws003-p026 -->
+
+<!-- awesome-plan-current:start -->
+
+Status: planned
+Phase disposition: canceled
+Lifecycle: closed
+Current Focus: No
+
+2026-09-12ユーザー指示で本Phaseを終了。未完了事項は[Future Work F-004](https://github.com/awemorris/zedBSD/issues/364)へ保留として移管。試験PASSやclearedへ変更しない。再選択時は新WSを作る。
+
+<!-- awesome-plan-current:end -->
+
+<details>
+<summary>終了前の計画・試行履歴（現在の再実行指示ではない）</summary>
+
 # ws003-p026: PC98 QEMUの /sbin 配置修復
 
 Phase ID: `ws003-p026`
@@ -28,3 +44,5 @@ Decision source: current user, this task (planning only).
 `include/hal/hal.h`・HAL責務は別の明示指示なしに変更しない。RTL8822Bのライセンス分離を保持。既存変更を保持し、aggregate `make check`、commit、pushは行わない。
 実装前に有限Queueの範囲・時間枠を決める。検証は変更箇所に対応するfocused checkと選択構成の `make -j16`。PC98は維持対象qemu-pc98、amd64はqemu-system-x86_64を使い、共有build/runtimeは直列。試験用媒体は使い捨て。実機書込み対象・起動方式は具体化してから扱う。
 結果にはsource/config・image hash、コマンド、観測、未実施項目、残課題を記録。旧QEMU/実機証拠を現在の成果物の合格へ読み替えない。実機成功をQEMU成功で代用しない。
+
+</details>

@@ -41,6 +41,13 @@ bsp_boot_init(
 	uintptr_t raw_address;
 	uint32_t table_bytes;
 
+	/*
+	 * Opens memory above 16 MB before anything counts or allocates it.
+	 * The board reports that memory either way, so leaving the gate shut
+	 * would put pages in the map that answer no access.
+	 */
+	hal_pc98_enable_high_memory();
+
 	/* Starts with no publishable handoff and binds the raw IPL record. */
 	boot_info_valid = 0;
 	raw = raw_boot_info;

@@ -1,3 +1,19 @@
+<!-- awesome-plan project=zedbsd record=ws003-p002 -->
+
+<!-- awesome-plan-current:start -->
+
+Status: cleared
+Phase disposition: normal
+Lifecycle: closed
+Current Focus: No
+
+既存の完了・受け入れを保持。2026-09-12のWS003終了にあたり現在状態を明示。今回新たな試験・受け入れを追加していない。
+
+<!-- awesome-plan-current:end -->
+
+<details>
+<summary>終了前の計画・試行履歴（現在の再実行指示ではない）</summary>
+
 # WS003 Phase 002: Latitude UEFI memory-map normalization
 
 Last updated: 2026-08-26
@@ -195,3 +211,5 @@ corrected final image. All three runs crossed the old boundary and exposed
 `xhci: attach failed at capabilities (13)`
 on both physical xHCI functions; see
 [latitude-xhci-evidence.md](../tests/latitude-xhci-evidence.md).
+
+</details>

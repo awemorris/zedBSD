@@ -270,6 +270,8 @@ run_startup_command(
 	}
 	if (child == 0) {
 		execv(path, arguments);
+		fprintf(stderr, "init: exec %s: %s\n", path,
+			strerror(errno));
 		_exit(127);
 	}
 
@@ -281,8 +283,13 @@ run_startup_command(
 		fprintf(stderr, "init: %s -a: wait: %s\n", name, strerror(errno));
 		return;
 	}
-	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
-		fprintf(stderr, "init: %s -a failed\n", name);
+	/* Says how it failed: an exit status, or the signal that killed it. */
+	if (WIFSIGNALED(status))
+		fprintf(stderr, "init: %s -a killed by signal %d\n", name,
+			WTERMSIG(status));
+	else if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+		fprintf(stderr, "init: %s -a failed (status %d)\n", name,
+			WIFEXITED(status) ? WEXITSTATUS(status) : -1);
 }
 
 /* Supports the load services operation. */

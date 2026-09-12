@@ -1,3 +1,19 @@
+<!-- awesome-plan project=zedbsd record=ws003-p025 -->
+
+<!-- awesome-plan-current:start -->
+
+Status: uncleared
+Phase disposition: canceled
+Lifecycle: closed
+Current Focus: No
+
+2026-09-12ユーザー指示で本Phaseを終了。未完了事項は[Future Work F-004](https://github.com/awemorris/zedBSD/issues/364)へ保留として移管。試験PASSやclearedへ変更しない。再選択時は新WSを作る。
+
+<!-- awesome-plan-current:end -->
+
+<details>
+<summary>終了前の計画・試行履歴（現在の再実行指示ではない）</summary>
+
 # WS003 Phase 025: HAL clock-source split and amd64 SMP monotonic counter
 
 Last updated: 2026-09-03
@@ -160,3 +176,5 @@ architectural implementations, CPUID.15/PIT frequency policy, and the AX211
 checked consumer. It is not completion evidence: amd64 currently exposes the
 BSP result before AP validation and keeps timecounter state in the LAPIC module.
 Q066 must correct those boundaries rather than merely committing the draft.
+
+</details>

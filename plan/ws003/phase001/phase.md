@@ -1,3 +1,19 @@
+<!-- awesome-plan project=zedbsd record=ws003-p001 -->
+
+<!-- awesome-plan-current:start -->
+
+Status: uncleared
+Phase disposition: canceled
+Lifecycle: closed
+Current Focus: No
+
+2026-09-12ユーザー指示で本Phaseを終了。未完了事項は[Future Work F-004](https://github.com/awemorris/zedBSD/issues/364)へ保留として移管。試験PASSやclearedへ変更しない。再選択時は新WSを作る。
+
+<!-- awesome-plan-current:end -->
+
+<details>
+<summary>終了前の計画・試行履歴（現在の再実行指示ではない）</summary>
+
 # ws003-p001: Latitude 5320 hardware inventory
 
 WSID: `ws003`  
@@ -56,3 +72,5 @@ Not met. No hardware identity has been inferred without evidence.
 Physical Latitude 5320 access or a user-supplied inventory captured there is
 required. Resume with DMI/firmware information and PCI/USB numeric IDs. Driver
 family choices remain provisional.
+
+</details>

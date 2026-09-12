@@ -1,3 +1,19 @@
+<!-- awesome-plan project=zedbsd record=ws003-p018 -->
+
+<!-- awesome-plan-current:start -->
+
+Status: planned
+Phase disposition: canceled
+Lifecycle: closed
+Current Focus: No
+
+2026-09-12ユーザー指示で本Phaseを終了。未完了事項は[Future Work F-004](https://github.com/awemorris/zedBSD/issues/364)へ保留として移管。試験PASSやclearedへ変更しない。再選択時は新WSを作る。
+
+<!-- awesome-plan-current:end -->
+
+<details>
+<summary>終了前の計画・試行履歴（現在の再実行指示ではない）</summary>
+
 # WS003 Phase 018: Latitude existing-FAT NVMe overlay installation and boot
 
 <!-- installer-bringup-current:start -->
@@ -79,3 +95,5 @@ Stop and return to planning if the Latitude cannot launch the fallback loader
 even through explicit firmware file selection, if the disk lacks the required
 existing FAT32 destinations, or if success would require formatting, GPT
 mutation, overwriting a conflicting file, or creating a Boot entry.
+
+</details>
