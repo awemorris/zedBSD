@@ -8,6 +8,7 @@ Active Queue: none
 Last Queue: q308
 Result: q308-i01 / i02 / i03 / i04 / i05 cleared
 Executor: none
+Outlook: ws014-p006 planned, then ws014-p004 planning; not queued
 <!-- awesome-plan-current:end -->
 
 Authorization: current user、2026-09-13の現行会話。標準APIのvkdemo、公開headerとlibvulkan.so、全Vulkan1.0、direct-display WSIを実装し作業を続行する指示。GitHub同期も明示承認済み。EGLは最新指示でcancel、Waylandは将来backend。
@@ -44,7 +45,7 @@ WS030全体とWS014全体を相互の前提にしない。p005が使うのはp00
 
 GuardrailとC規約全文、独立実装、対象make -j16と意味のある限定検証を適用。HALの追加変更は未許可、aggregate make checkは禁止、git add/commit/pushはユーザー所有。awe@10.0.10.25と既存private QEMU環境/image転送の承認を維持し、実機i915やホストsystem設定へ拡張しない。
 
-今回の後はWS014 p004の最終framework/API/規約確認、その後WS029 native i915が候補。どちらもこのQueueに含めない。EGL/GLES-on-Vulkan、Waylandは将来選択待ち。削除済みPriority表は再作成しない。
+現在の候補は[WS014 p006](https://github.com/awemorris/zedBSD/issues/393)のkernel handle・GPU共有・最小Wayland、その後p004の最終framework/API/規約確認、WS029 native i915。全件未queue。q308の承認scopeと履歴へ追加しない。EGL/GLES-on-Vulkanは別途選択待ち。削除済みPriority表は再作成しない。
 
 ## 先行履歴
 
@@ -89,3 +90,11 @@ WS030 p001/p002/p003/p004とWS014 p005の標準API訂正をclearedとし、WS030
 承認済みHAL patch SHA256 `e6ec9e6c2deda41b840fa6f10846438d091f3a20ce782b9251b7979ac7591c8d` のみを適用し、既存hal_space_map_device/device usermapを補完した。追加HAL APIはない。PCI cache属性、queue総数63、allocator破棄、console/query/通知の修正と、先行失敗・再実行理由を保存した。公開coherent HOST_VISIBLE、256MiB aperture、native watchdog等の制約は能力監査へ記録した。
 
 結果は `plan/ws030/results-q308.md`、155行の台帳は `plan/ws030/phase004/api-verification.md`、最終証拠は `plan/ws030/phase004/final-evidence/verification.json`、p005訂正は `plan/ws014/phase005/results-q308.md`、履歴は `plan/history/queue-q308.md`（いずれもlocal/uncommitted）。GitHubは計画Issue/Project/結果コメントの同期であり、source/doc/imageのgit add/commit/pushはユーザーが行う。EGLは今回cancel、Waylandは将来VK_KHR_wayland_surface backendとして追加する。
+
+## WS014 p006追加: kernel handle・GPU共有・最小Wayland（2026-09-13）
+
+ユーザー指定により[WS014 p006](https://github.com/awemorris/zedBSD/issues/393)を一つのplanned Phaseとして追加した。kernel_handle/handle_fd_*とSCM_RIGHTS、GPU/Venusの別context共有、GPU画像を扱えるWSI、VK_KHR_wayland_surface、最小client library、全画面zwl、標準APIのwltestを本Phaseで実装・検証する計画。コード配置はlibc/include/wayland/、userland/base/libwayland/・zwl/・wltest/、公開libraryは/lib/libwayland-client.so。
+
+中核のK/driver実装を先に進め、Wayland通信/WSI/試験アプリを接続して実測から設計を改善する。新経路はCPU readbackを必須にせず、GPU allocationの実共有と同期・寿命を確認する。linux-dmabuf-v1、ゲストdma-buf/DRM、EGL、一般DEは採用しない。内部の段取りは別Phaseへ分割しない。
+
+順序はp005 cleared → p006 planned → p004 planning。p004はp006の最終ソース/API/検証を受けて規約確認する。WS030 completedとq308 finished、既存Phaseのclearを維持。今回作成したのは計画であり、active Queue・新しい実装/試験結果はない。HALの追加差分は従来どおり個別承認、git add/commit/pushはユーザー担当。

@@ -3,7 +3,7 @@ Active Queue: none
 Last finished Queue: q308
 WS030: completed; all four Phases cleared
 ws014-p005: cleared, corrected standard API
-WS014: incomplete; p004 planning, not queued
+WS014: incomplete; p006 planned then p004 planning; not queued
 WS003: retired, reuse prohibited
 <!-- awesome-plan-current:end -->
 
@@ -18,6 +18,14 @@ WS003: retired, reuse prohibited
 [q308](https://github.com/awemorris/zedBSD/issues/362) の順序はWS030 p001→p002→p003→WS014 p005→WS030 p004。ユーザーは全実装・作業継続・GitHub同期を明示承認済み。見積720 active minutes、120分ごと点検、各command/VM/poll有限、無変更retry3回まで。HALの追加変更・aggregate make check・git add/commit/pushは許可しない。既存private hostへの転送許可を維持する。
 
 全API、必須能力/limits、memory可視性、同期、FIFO/image再利用の意味論を未検証のままcompleteとしない。詳細はWS030の実装契約。依存するsource変更は計画・native lifecycle/親子依存・Projectの同期とreadback後に開始する。
+
+## WS014 p006追加: kernel handle・GPU共有・最小Wayland（2026-09-13）
+
+ユーザー指定により[WS014 p006](https://github.com/awemorris/zedBSD/issues/393)を一つのplanned Phaseとして追加した。kernel_handle/handle_fd_*とSCM_RIGHTS、GPU/Venusの別context共有、GPU画像を扱えるWSI、VK_KHR_wayland_surface、最小client library、全画面zwl、標準APIのwltestを本Phaseで実装・検証する計画。コード配置はlibc/include/wayland/、userland/base/libwayland/・zwl/・wltest/、公開libraryは/lib/libwayland-client.so。
+
+中核のK/driver実装を先に進め、Wayland通信/WSI/試験アプリを接続して実測から設計を改善する。新経路はCPU readbackを必須にせず、GPU allocationの実共有と同期・寿命を確認する。linux-dmabuf-v1、ゲストdma-buf/DRM、EGL、一般DEは採用しない。内部の段取りは別Phaseへ分割しない。
+
+順序はp005 cleared → p006 planned → p004 planning。p004はp006の最終ソース/API/検証を受けて規約確認する。WS030 completedとq308 finished、既存Phaseのclearを維持。今回作成したのは計画であり、active Queue・新しい実装/試験結果はない。HALの追加差分は従来どおり個別承認、git add/commit/pushはユーザー担当。
 
 ## q307完了: p005 cleared（2026-09-13 JST）
 

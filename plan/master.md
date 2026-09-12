@@ -4,7 +4,7 @@ Last Queue: q308 finished; all five items cleared
 WS030: completed (standard Vulkan1.0/direct-display library)
 ws014-p005: cleared (corrected standard API, real display/lifecycle verified)
 WS014: incomplete
-Next: ws014-p004 planning, not queued; WS029 native i915 deferred
+Next: ws014-p006 planned, then ws014-p004 planning; both not queued; WS029 native i915 deferred
 <!-- awesome-plan-current:end -->
 
 # zedBSD master plan
@@ -1338,7 +1338,7 @@ Status: active
 
 ## 現在地
 
-q308を完了し、WS030の標準Vulkan1.0/direct-display libraryとWS014 p005の標準API化訂正を受け入れた。active Queueはない。WS014 p002/p003のclear、p004未実行、WS029 native i915後段を維持。EGLは今回cancel、Waylandは将来backend。
+q308完了とWS030/p005の受入を維持し、次の計画として[WS014 p006](https://github.com/awemorris/zedBSD/issues/393)のkernel handle・GPU共有・最小Wayland WSIを追加した。p006 planned → p004 planningの順で、active Queueはない。EGLは今回cancel、native i915は後段のWS029。
 
 2026-09-11に削除したPriority表は復活させない。閉鎖済みWSと既存Focus、他WSの実行保留は変更しない。q308の依存順は全WSのPriority順位ではない。過去のq307結果と現在のp005 clearance失効は区別する。
 
@@ -1360,7 +1360,7 @@ Future Listへ移したWS013・WS015は次節で管理する。完了WSの詳細
 | [WS010](ws010/ws.md) | MG001 | スクリプト・イメージツール | 完了 | q063。 |
 | [WS011](ws011/ws.md) | MG005 | ネットワーク設定コンソール | 完了（ユーザー確認） | commit confirmed完了。VLANキャンセル、bridgeはF-001へ移管。 |
 | [WS012](ws012/ws.md) | MG005 | サービス管理コンソール | 完了 | q018。 |
-| [WS014](https://github.com/awemorris/zedBSD/issues/15) | MG006 | GPU framework / virtio-gpu bring-up | incomplete | p002/p003/p005 cleared。p005は標準Vulkan APIへ訂正済み。p001/p004 planning、未queue。 |
+| [WS014](https://github.com/awemorris/zedBSD/issues/15) | MG006 | GPU framework / virtio-gpu bring-up | incomplete | p002/p003/p005 cleared。p006 planned（kernel handle・GPU共有・最小Wayland）、その後p004。p001/p004 planning、全件未queue。 |
 | [WS016](ws016/ws.md) | MG004 | 実行時swap制御 | 完了 | q021。 |
 | [WS017](ws017/ws.md) | MG006 | LFB描画高速化 | 依存待ち | WS022後にmmap・Xzed高速描画・受け入れ。 |
 | [WS018](ws018/ws.md) | MG008 | カーネル所有権・構成統一 | 完了 | p001〜p020。I/O後続はWS025。 |
@@ -1627,3 +1627,11 @@ WS030 p001/p002/p003/p004とWS014 p005の標準API訂正をclearedとし、WS030
 承認済みHAL patch SHA256 `e6ec9e6c2deda41b840fa6f10846438d091f3a20ce782b9251b7979ac7591c8d` のみを適用し、既存hal_space_map_device/device usermapを補完した。追加HAL APIはない。PCI cache属性、queue総数63、allocator破棄、console/query/通知の修正と、先行失敗・再実行理由を保存した。公開coherent HOST_VISIBLE、256MiB aperture、native watchdog等の制約は能力監査へ記録した。
 
 結果は `plan/ws030/results-q308.md`、155行の台帳は `plan/ws030/phase004/api-verification.md`、最終証拠は `plan/ws030/phase004/final-evidence/verification.json`、p005訂正は `plan/ws014/phase005/results-q308.md`、履歴は `plan/history/queue-q308.md`（いずれもlocal/uncommitted）。GitHubは計画Issue/Project/結果コメントの同期であり、source/doc/imageのgit add/commit/pushはユーザーが行う。EGLは今回cancel、Waylandは将来VK_KHR_wayland_surface backendとして追加する。
+
+## WS014 p006追加: kernel handle・GPU共有・最小Wayland（2026-09-13）
+
+ユーザー指定により[WS014 p006](https://github.com/awemorris/zedBSD/issues/393)を一つのplanned Phaseとして追加した。kernel_handle/handle_fd_*とSCM_RIGHTS、GPU/Venusの別context共有、GPU画像を扱えるWSI、VK_KHR_wayland_surface、最小client library、全画面zwl、標準APIのwltestを本Phaseで実装・検証する計画。コード配置はlibc/include/wayland/、userland/base/libwayland/・zwl/・wltest/、公開libraryは/lib/libwayland-client.so。
+
+中核のK/driver実装を先に進め、Wayland通信/WSI/試験アプリを接続して実測から設計を改善する。新経路はCPU readbackを必須にせず、GPU allocationの実共有と同期・寿命を確認する。linux-dmabuf-v1、ゲストdma-buf/DRM、EGL、一般DEは採用しない。内部の段取りは別Phaseへ分割しない。
+
+順序はp005 cleared → p006 planned → p004 planning。p004はp006の最終ソース/API/検証を受けて規約確認する。WS030 completedとq308 finished、既存Phaseのclearを維持。今回作成したのは計画であり、active Queue・新しい実装/試験結果はない。HALの追加差分は従来どおり個別承認、git add/commit/pushはユーザー担当。

@@ -1961,6 +1961,11 @@
       "path": "plan/ws030/phase004/phase.md",
       "number": 392,
       "url": "https://github.com/awemorris/zedBSD/issues/392"
+    },
+    "ws014-p006": {
+      "path": "plan/ws014/phase006/phase.md",
+      "number": 393,
+      "url": "https://github.com/awemorris/zedBSD/issues/393"
     }
   }
 }

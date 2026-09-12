@@ -7,7 +7,7 @@ Status: planning
 Phase disposition: normal
 Parent: [WS014](https://github.com/awemorris/zedBSD/issues/15)
 Queue: none
-Dependencies: corrected ws014-p005 and ws030-p004 final library contract
+Dependencies: ws014-p006 final shared-GPU/Wayland output; corrected ws014-p005 and ws030-p004 library contract
 <!-- awesome-plan-current:end -->
 
 Combined ID: `ws014-p004`
@@ -15,11 +15,11 @@ Primary Milestone: MG006
 
 ## 目標・依存
 
-p002/p003/p005で修正された最終ソースとU/K・callback・PCI連携資料を照合し、WS014の受け入れを確認する。p003の描画基盤に加え、p005のテクスチャ付き3D shader描画の必要出力が成立してから行う。
+p002/p003/p005/p006で修正された最終ソースとU/K・callback・PCI連携資料を照合し、WS014の受け入れを確認する。p003の描画基盤に加え、p005のテクスチャ付き3D shader描画とp006のkernel handle・GPU共有・最小Wayland WSIの必要出力が成立してから行う。
 
 ## 手順・受け入れ
 
-適用するcoding-style.md/Guardrail全文を読み、変更範囲の規約・層分け・所有権・参照寿命・エラー経路をレビューして残る問題を解決する。公開するversion/feature、必須/任意callback、未対応機能を整理する。p003/p005の最終ソースでのbuild・実画面取得ループ証拠を確認し、修正によって必要な限定回帰だけを行う。変更がない場合は既存の有効な検証を無意味に繰り返さない。
+適用するcoding-style.md/Guardrail全文を読み、変更範囲の規約・層分け・所有権・参照寿命・エラー経路をレビューして残る問題を解決する。公開するversion/feature、必須/任意callback、未対応機能を整理する。p003/p005/p006の最終ソースでのbuild・実画面取得ループ証拠を確認し、修正によって必要な限定回帰だけを行う。変更がない場合は既存の有効な検証を無意味に繰り返さない。
 
 ## 引き渡し
 
@@ -50,3 +50,11 @@ p002/p003/p005で修正された最終ソースとU/K・callback・PCI連携資�
 WS030はVulkan1.0 core137＋direct-display WSI18と/lib/libvulkan.soを完成し、WS014 p005は標準APIだけのアプリへ訂正済み。q308-lifecycle-003で実描画6枚、正常/異常終了後の再open、640×480 console復帰・文字更新、別process表示競合拒否を確認した。GPU dynamic resources/device mmap/共有VM、PCI cache契約、native display lease/virtual FIFO、文字snapshot/workerを最終framework/API確認の入力にする。
 
 詳細は [WS030](https://github.com/awemorris/zedBSD/issues/388) と [p005](https://github.com/awemorris/zedBSD/issues/387) のq308結果。本p004はplanning・未queueのまま。WS030 p004の標準library受け入れを本p004のclearanceへ流用しない。native i915は別WS029。HALは既承認patchを超えて変更しない。
+
+## WS014 p006追加: kernel handle・GPU共有・最小Wayland（2026-09-13）
+
+ユーザー指定により[WS014 p006](https://github.com/awemorris/zedBSD/issues/393)を一つのplanned Phaseとして追加した。kernel_handle/handle_fd_*とSCM_RIGHTS、GPU/Venusの別context共有、GPU画像を扱えるWSI、VK_KHR_wayland_surface、最小client library、全画面zwl、標準APIのwltestを本Phaseで実装・検証する計画。コード配置はlibc/include/wayland/、userland/base/libwayland/・zwl/・wltest/、公開libraryは/lib/libwayland-client.so。
+
+中核のK/driver実装を先に進め、Wayland通信/WSI/試験アプリを接続して実測から設計を改善する。新経路はCPU readbackを必須にせず、GPU allocationの実共有と同期・寿命を確認する。linux-dmabuf-v1、ゲストdma-buf/DRM、EGL、一般DEは採用しない。内部の段取りは別Phaseへ分割しない。
+
+順序はp005 cleared → p006 planned → p004 planning。p004はp006の最終ソース/API/検証を受けて規約確認する。WS030 completedとq308 finished、既存Phaseのclearを維持。今回作成したのは計画であり、active Queue・新しい実装/試験結果はない。HALの追加差分は従来どおり個別承認、git add/commit/pushはユーザー担当。
