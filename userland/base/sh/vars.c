@@ -22,7 +22,9 @@
 
 #include "userland/base/sh/vars.h"
 #include "userland/base/sh/shell.h"
+#include "userland/base/sh/expand.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -104,6 +106,14 @@ static int compare_variables(const void *left, const void *right);
 static struct variable **sorted_variables(size_t *count);
 static void restore_saved(struct saved_variable *saved);
 static int is_exported_value(const struct variable *variable);
+static char *converted_value(const char *value, int flags);
+static void print_declare(const struct variable *variable);
+static void print_declare_value(const char *value);
+
+/* The attributes declare can give, which sh_var_flags reports. */
+#define VAR_ATTRIBUTES \
+	(SH_VAR_EXPORT | SH_VAR_READONLY | SH_VAR_INTEGER | SH_VAR_LOWER | \
+	 SH_VAR_UPPER)
 
 /*
  * Reports whether a string is a name (XBD 3.216): a letter or underscore,
@@ -191,8 +201,8 @@ sh_var_flags(
 	if (variable == NULL)
 		return -1;
 
-	/* Succeeded: the export and read-only attributes. */
-	return variable->flags & (SH_VAR_EXPORT | SH_VAR_READONLY);
+	/* Succeeded: the attributes. */
+	return variable->flags & VAR_ATTRIBUTES;
 }
 
 /*
@@ -212,14 +222,20 @@ sh_var_set(
 	if (variable != NULL && (variable->flags & SH_VAR_READONLY) != 0)
 		return -1;
 
+	/*
+	 * The value, converted as the attributes say (evaluating it may set
+	 * other variables, but frees no entry).
+	 */
+	copy = NULL;
+	if (value != NULL)
+		copy = converted_value(value, flags |
+				       (variable != NULL ? variable->flags : 0));
+
 	/* Makes the entry when there is none. */
 	if (variable == NULL)
 		variable = create_variable(name);
 
 	/* Replaces the value. */
-	copy = NULL;
-	if (value != NULL)
-		copy = sh_strdup(value);
 	free(variable->value);
 	variable->value = copy;
 
@@ -324,6 +340,25 @@ sh_var_add_flags(
 
 	/* Adds the attributes. */
 	variable->flags |= flags;
+}
+
+/*
+ * Takes attributes off a variable; the read-only one is never taken off.
+ */
+void
+sh_var_remove_flags(
+	const char *name,
+	int flags)
+{
+	struct variable *variable;
+
+	/* A name that is not there has no attributes. */
+	variable = find_variable(name);
+	if (variable == NULL)
+		return;
+
+	/* Takes them off. */
+	variable->flags &= ~(flags & ~SH_VAR_READONLY);
 }
 
 /*
@@ -487,6 +522,50 @@ sh_var_print(
 
 		/* Each variable is a line of its own. */
 		putchar('\n');
+	}
+
+	/* The sorted copy was only for the listing. */
+	free(sorted);
+}
+
+/*
+ * Prints one variable as declare -p does.  Returns 0 when there is no such
+ * variable.
+ */
+int
+sh_var_print_declare(
+	const char *name)
+{
+	struct variable *variable;
+
+	/* A name that is not there is not printed. */
+	variable = find_variable(name);
+	if (variable == NULL)
+		return 0;
+
+	/* Succeeded: the line. */
+	print_declare(variable);
+	return 1;
+}
+
+/*
+ * Prints, as declare -p does, every variable that has all the attributes
+ * given (every variable for none).
+ */
+void
+sh_var_print_declared(
+	int flags)
+{
+	struct variable **sorted;
+	size_t count;
+	size_t index;
+
+	/* In the order of their names. */
+	sorted = sorted_variables(&count);
+	for (index = 0; index < count; index++) {
+		if ((sorted[index]->flags & flags) != flags)
+			continue;
+		print_declare(sorted[index]);
 	}
 
 	/* The sorted copy was only for the listing. */
@@ -869,6 +948,135 @@ restore_saved(
 	free(saved->name);
 	free(saved->value);
 	free(saved);
+}
+
+/*
+ * Returns a copy of a value converted as the attributes say: evaluated as
+ * an arithmetic expression (an error in it is the shell's error), or made
+ * lower or upper case.
+ */
+static char *
+converted_value(
+	const char *value,
+	int flags)
+{
+	struct sh_expand_context context;
+	const char *error_text;
+	char number[24];
+	char *copy;
+	size_t index;
+	long result;
+	int ok;
+
+	/* An integer: the value of the expression. */
+	if ((flags & SH_VAR_INTEGER) != 0) {
+		sh_expand_context_fill(&context);
+		ok = sh_expand_arithmetic(value, &context, &result, &error_text);
+		if (!ok)
+			sh_error("%s", error_text);
+		snprintf(number, sizeof(number), "%ld", result);
+		return sh_strdup(number);
+	}
+
+	/* Lower or upper case, letter by letter. */
+	copy = sh_strdup(value);
+	for (index = 0; copy[index] != '\0'; index++) {
+		if ((flags & SH_VAR_LOWER) != 0)
+			copy[index] = (char)tolower((unsigned char)copy[index]);
+		else if ((flags & SH_VAR_UPPER) != 0)
+			copy[index] = (char)toupper((unsigned char)copy[index]);
+	}
+
+	/* Succeeded: the value to hold. */
+	return copy;
+}
+
+/*
+ * Prints a variable as declare -p does: its attributes (-- for none), and
+ * its value when it has one, in double quotes, or in $'...' when it holds
+ * a control character.
+ */
+static void
+print_declare(
+	const struct variable *variable)
+{
+	const char *value;
+	int flags;
+
+	/* The attributes, in the order bash prints them. */
+	flags = variable->flags & VAR_ATTRIBUTES;
+	fputs("declare -", stdout);
+	if (flags == 0)
+		putchar('-');
+	if ((flags & SH_VAR_INTEGER) != 0)
+		putchar('i');
+	if ((flags & SH_VAR_LOWER) != 0)
+		putchar('l');
+	if ((flags & SH_VAR_READONLY) != 0)
+		putchar('r');
+	if ((flags & SH_VAR_UPPER) != 0)
+		putchar('u');
+	if ((flags & SH_VAR_EXPORT) != 0)
+		putchar('x');
+	printf(" %s", variable->name);
+
+	/* The value, when it is set. */
+	value = sh_var_get(variable->name);
+	if (value != NULL) {
+		putchar('=');
+		print_declare_value(value);
+	}
+
+	/* A line each. */
+	putchar('\n');
+}
+
+/* Prints a value quoted as declare -p quotes it. */
+static void
+print_declare_value(
+	const char *value)
+{
+	static const char escapes[] = "\a" "a" "\b" "b" "\033" "e" "\f" "f"
+				      "\n" "n" "\r" "r" "\t" "t" "\v" "v";
+	const char *cursor;
+	const char *escape;
+	int control;
+
+	/* Is there a control character? */
+	control = 0;
+	for (cursor = value; *cursor != '\0'; cursor++) {
+		if ((unsigned char)*cursor < 0x20 || *cursor == 0x7f)
+			control = 1;
+	}
+
+	/* Without one: double quotes, with \ before " \ $ and `. */
+	if (!control) {
+		putchar('"');
+		for (cursor = value; *cursor != '\0'; cursor++) {
+			if (*cursor == '"' || *cursor == '\\' ||
+			    *cursor == '$' || *cursor == '`')
+				putchar('\\');
+			putchar(*cursor);
+		}
+		putchar('"');
+		return;
+	}
+
+	/* With one: $'...', with the control characters as escapes. */
+	fputs("$'", stdout);
+	for (cursor = value; *cursor != '\0'; cursor++) {
+		escape = memchr(escapes, *cursor, sizeof(escapes) - 1U);
+		if (escape != NULL && (escape - escapes) % 2 == 0) {
+			printf("\\%c", escape[1]);
+		} else if (*cursor == '\'' || *cursor == '\\') {
+			printf("\\%c", *cursor);
+		} else if ((unsigned char)*cursor < 0x20 || *cursor == 0x7f) {
+			printf("\\%03o", (unsigned char)*cursor);
+		} else {
+			putchar(*cursor);
+		}
+	}
+	putchar('\'');
 }
 
 /* Reports whether a variable goes into the environment: exported, with a value. */

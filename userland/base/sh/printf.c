@@ -14,12 +14,16 @@
  * backslash escapes in every operand.  printf applies its format again and
  * again while arguments are left; a width or precision given as * is taken
  * from the arguments and written into the conversion before it is made.
+ * printf -v name (bash) puts the output in a variable instead, and %q
+ * (bash) quotes its argument so that the shell reads it back.
  */
 
 #include "userland/base/sh/shell.h"
+#include "userland/base/sh/vars.h"
 
 #include <errno.h>
 #include <inttypes.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,6 +44,17 @@ struct printf_state {
 	int stop;
 };
 
+/* The output of printf -v, collected until printf ends. */
+struct printf_capture {
+	char *text;
+	size_t length;
+	size_t capacity;
+};
+
+/* The output printf -v collects, while collecting is set. */
+static struct printf_capture printf_capture;
+static int printf_collecting;
+
 static int echo_escape(const char **text);
 static int echo_octal(const char **text, int digits_before);
 static int printf_format(struct printf_state *state, const char *format);
@@ -54,8 +69,12 @@ static uintmax_t printf_unsigned(struct printf_state *state, const char *text);
 static double printf_double(struct printf_state *state, const char *text);
 static void number_error(struct printf_state *state, const char *text, const char *end, int error);
 static char *expand_b(struct printf_state *state, const char *text);
+static const char *quote_q(const char *text);
 static size_t read_escape(const char *text, char *value, int in_b);
 static int is_flag(char value);
+static void out_char(int value);
+static void out_format(const char *spec, ...) __attribute__((format(printf, 1, 2)));
+static void capture_add(const char *text, size_t length);
 
 /*
  * Implements echo.
@@ -115,11 +134,27 @@ sh_builtin_printf(
 	char **argv)
 {
 	struct printf_state state;
+	const char *variable;
 	int index;
 	int used;
+	int set;
 
-	/* printf format [argument...]; it takes no options but --. */
+	/* -v name (or -vname) puts the output in the variable. */
 	index = 1;
+	variable = NULL;
+	if (index < argc && strncmp(argv[index], "-v", 2) == 0) {
+		variable = argv[index] + 2;
+		if (*variable == '\0' && index + 1 < argc)
+			variable = argv[++index];
+		index++;
+		if (!sh_var_name(variable)) {
+			fprintf(stderr, "printf: %s: not a valid identifier\n",
+				variable);
+			return 2;
+		}
+	}
+
+	/* printf format [argument...]; otherwise it takes no options but --. */
 	if (index < argc && argv[index][0] == '-' && argv[index][1] != '\0') {
 		if (argv[index][1] != '-' || argv[index][2] != '\0') {
 			fprintf(stderr, "printf: Illegal option %s\n",
@@ -144,12 +179,29 @@ sh_builtin_printf(
 	state.status = 0;
 	state.stop = 0;
 
+	/* The output is collected for -v. */
+	memset(&printf_capture, 0, sizeof(printf_capture));
+	printf_collecting = variable != NULL;
+
 	/* Applies the format until the arguments run out, or it uses none. */
 	do {
 		used = printf_format(&state, argv[index]);
 		if (state.stop || used == 0)
 			break;
 	} while (state.used < state.count);
+
+	/* -v: the variable takes what was collected (up to a NUL byte). */
+	if (variable != NULL) {
+		capture_add("", 1);
+		printf_collecting = 0;
+		set = sh_var_set(variable, printf_capture.text, 0);
+		free(printf_capture.text);
+		printf_capture.text = NULL;
+		if (set != 0) {
+			fprintf(stderr, "printf: %s: is read only\n", variable);
+			return 1;
+		}
+	}
 
 	/* Succeeded: 1 when an argument was not a number, 2 for a bad format. */
 	return state.status;
@@ -267,20 +319,20 @@ printf_format(
 		/* A backslash escape. */
 		if (*cursor == '\\') {
 			length = read_escape(cursor + 1, &value, 0);
-			putchar(value);
+			out_char(value);
 			cursor += length;
 			continue;
 		}
 
 		/* An ordinary character, or %% for a percent sign. */
 		if (*cursor != '%') {
-			putchar(*cursor);
+			out_char(*cursor);
 			continue;
 		}
 
 		/* %% is a percent sign. */
 		if (cursor[1] == '%') {
-			putchar('%');
+			out_char('%');
 			cursor++;
 			continue;
 		}
@@ -433,7 +485,7 @@ convert(
 		spec[out++] = conversion;
 		spec[out] = '\0';
 		signed_value = printf_integer(state, printf_next(state));
-		printf(spec, signed_value);
+		out_format(spec, signed_value);
 		return 1;
 	case 'o':
 	case 'u':
@@ -443,7 +495,7 @@ convert(
 		spec[out++] = conversion;
 		spec[out] = '\0';
 		unsigned_value = printf_unsigned(state, printf_next(state));
-		printf(spec, unsigned_value);
+		out_format(spec, unsigned_value);
 		return 1;
 	case 'e':
 	case 'E':
@@ -456,13 +508,18 @@ convert(
 		spec[out++] = conversion;
 		spec[out] = '\0';
 		real_value = printf_double(state, printf_next(state));
-		printf(spec, real_value);
+		out_format(spec, real_value);
 		return 1;
 	case 'c':
 		spec[out++] = 'c';
 		spec[out] = '\0';
 		text = printf_next(state);
-		printf(spec, text[0]);
+		out_format(spec, text[0]);
+		return 1;
+	case 'q':
+		spec[out++] = 's';
+		spec[out] = '\0';
+		out_format(spec, quote_q(printf_next(state)));
 		return 1;
 	case 's':
 	case 'b':
@@ -493,7 +550,7 @@ convert_string(
 		text = expand_b(state, text);
 
 	/* Written as a string. */
-	printf(spec, text);
+	out_format(spec, text);
 }
 
 /* Returns the next argument, or "" when none is left. */
@@ -660,6 +717,75 @@ expand_b(
 }
 
 /*
+ * Quotes a %q argument into a temporary string as bash does: '' for an
+ * empty one, $'...' with escapes when it holds a control character, and
+ * otherwise a backslash before each character the shell treats specially
+ * (# and ~ only at the start).
+ */
+static const char *
+quote_q(
+	const char *text)
+{
+	static const char special[] = " !\"$&'()*,;<>?[\\]^`{|}";
+	static const char escapes[] = "\a" "a" "\b" "b" "\033" "e" "\f" "f"
+				      "\n" "n" "\r" "r" "\t" "t" "\v" "v";
+	const char *cursor;
+	const char *escape;
+	char *quoted;
+	size_t out;
+	int control;
+
+	/* Nothing is ''. */
+	if (*text == '\0')
+		return "''";
+
+	/* At most four bytes for each, and $'' around them. */
+	quoted = sh_temp_own(sh_malloc(strlen(text) * 4U + 4U));
+	out = 0;
+	control = 0;
+	for (cursor = text; *cursor != '\0'; cursor++) {
+		if ((unsigned char)*cursor < 0x20 || *cursor == 0x7f)
+			control = 1;
+	}
+
+	/* With a control character: $'...'. */
+	if (control) {
+		quoted[out++] = '$';
+		quoted[out++] = '\'';
+		for (cursor = text; *cursor != '\0'; cursor++) {
+			escape = memchr(escapes, *cursor, sizeof(escapes) - 1U);
+			if (escape != NULL && (escape - escapes) % 2 == 0) {
+				quoted[out++] = '\\';
+				quoted[out++] = escape[1];
+			} else if (*cursor == '\'' || *cursor == '\\') {
+				quoted[out++] = '\\';
+				quoted[out++] = *cursor;
+			} else if ((unsigned char)*cursor < 0x20 || *cursor == 0x7f) {
+				out += (size_t)snprintf(quoted + out, 5, "\\%03o",
+							(unsigned char)*cursor);
+			} else {
+				quoted[out++] = *cursor;
+			}
+		}
+		quoted[out++] = '\'';
+		quoted[out] = '\0';
+		return quoted;
+	}
+
+	/* Otherwise a backslash before each special character. */
+	for (cursor = text; *cursor != '\0'; cursor++) {
+		if (strchr(special, *cursor) != NULL ||
+		    (cursor == text && (*cursor == '#' || *cursor == '~')))
+			quoted[out++] = '\\';
+		quoted[out++] = *cursor;
+	}
+	quoted[out] = '\0';
+
+	/* Succeeded: the text, freed with the command. */
+	return quoted;
+}
+
+/*
  * Reads the escape after a backslash; sets *value and returns how many
  * characters it took (0 for a backslash that escapes nothing, which stands
  * for itself).  In %b, \0 takes up to three more octal digits; in the
@@ -755,4 +881,80 @@ is_flag(
 
 	/* Not a flag. */
 	return 0;
+}
+
+/* Writes a character of printf's output. */
+static void
+out_char(
+	int value)
+{
+	char byte;
+
+	/* To the standard output, unless -v collects it. */
+	if (!printf_collecting) {
+		putchar(value);
+		return;
+	}
+	byte = (char)value;
+	capture_add(&byte, 1);
+}
+
+/* Writes one conversion of printf's output. */
+static void
+out_format(
+	const char *spec,
+	...)
+{
+	va_list arguments;
+	char small[128];
+	char *large;
+	int length;
+
+	/* To the standard output, unless -v collects it. */
+	va_start(arguments, spec);
+	if (!printf_collecting) {
+		(void)vprintf(spec, arguments);
+		va_end(arguments);
+		return;
+	}
+
+	/* Formatted into a buffer, a larger one when it does not fit. */
+	length = vsnprintf(small, sizeof(small), spec, arguments);
+	va_end(arguments);
+	if (length < 0)
+		return;
+	if ((size_t)length < sizeof(small)) {
+		capture_add(small, (size_t)length);
+		return;
+	}
+	large = sh_malloc((size_t)length + 1U);
+	va_start(arguments, spec);
+	(void)vsnprintf(large, (size_t)length + 1U, spec, arguments);
+	va_end(arguments);
+	capture_add(large, (size_t)length);
+	free(large);
+}
+
+/* Adds bytes to what printf -v collects. */
+static void
+capture_add(
+	const char *text,
+	size_t length)
+{
+	struct printf_capture *capture;
+	size_t capacity;
+
+	/* Grows the buffer, doubling it. */
+	capture = &printf_capture;
+	if (capture->length + length > capture->capacity) {
+		capacity = capture->capacity == 0 ? 64 : capture->capacity;
+		while (capacity < capture->length + length)
+			capacity *= 2;
+		capture->text = sh_realloc(capture->text, capacity);
+		capture->capacity = capacity;
+	}
+
+	/* Appends them. */
+	memcpy(capture->text + capture->length, text, length);
+	capture->length += length;
 }

@@ -85,6 +85,37 @@ sh_eval_arith_text(
 	return 1;
 }
 
+/*
+ * Implements let (bash): evaluates each operand as an arithmetic
+ * expression; the status is 0 when the last one is not 0.
+ */
+int
+sh_builtin_let(
+	int argc,
+	char **argv)
+{
+	long value;
+	int index;
+	int ok;
+
+	/* At least one expression. */
+	if (argc < 2) {
+		fprintf(stderr, "let: expression expected\n");
+		return 1;
+	}
+
+	/* Each in turn; an error stops them with status 1. */
+	value = 0;
+	for (index = 1; index < argc; index++) {
+		ok = sh_eval_arith_text(argv[index], &value);
+		if (!ok)
+			return 1;
+	}
+
+	/* Succeeded: whether the last was true. */
+	return value != 0 ? 0 : 1;
+}
+
 /* Evaluates a part of the expression: 1, 0, or -1 on an error. */
 static int
 eval_node(

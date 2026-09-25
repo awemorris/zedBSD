@@ -74,6 +74,18 @@ static char *operand_name(const char *operand, const char **equals);
 static int parse_count(const char *text, int *count);
 static int is_double_dash(const char *word);
 static void skip_double_dash(int *argc, char ***argv);
+static int declare_variables(int argc, char **argv, const char *command, int local);
+static int declare_options(int argc, char **argv, const char *command, int *index, int *add, int *remove, int *mode);
+static int declare_one(const char *operand, const char *command, int local, int add, int remove);
+static int declare_functions(int argc, char **argv, int index, int names_only);
+static int compare_names(const void *left, const void *right);
+static void dot_parameters_restore(struct sh_parameters *saved, int generation);
+
+/* What declare does besides setting: -p prints, -f and -F print functions. */
+#define DECLARE_PRINT		0x01
+#define DECLARE_FUNCTIONS	0x02
+#define DECLARE_FUNCTION_NAMES	0x04
+#define DECLARE_GLOBAL		0x08
 
 /*
  * Finds a defined function.
@@ -216,7 +228,7 @@ sh_find_command(
 	}
 
 	/* Then a function. */
-	if ((flags & SH_FIND_NO_FUNCTIONS) == 0) {
+	if ((flags & (SH_FIND_NO_FUNCTIONS | SH_FIND_BUILTIN_ONLY)) == 0) {
 		function = sh_function_find(name);
 		if (function != NULL) {
 			entry->kind = SH_COMMAND_FUNCTION;
@@ -229,6 +241,12 @@ sh_find_command(
 	if (builtin != NULL) {
 		entry->kind = SH_COMMAND_BUILTIN;
 		entry->builtin = builtin;
+		return;
+	}
+
+	/* builtin looks no further. */
+	if ((flags & SH_FIND_BUILTIN_ONLY) != 0) {
+		entry->kind = SH_COMMAND_NOT_FOUND;
 		return;
 	}
 
@@ -410,15 +428,21 @@ sh_path_changed(
 }
 
 /*
- * Implements the dot builtin: reads and runs the commands of a file in this
- * shell.
+ * Implements the dot builtin (and source): reads and runs the commands of a
+ * file in this shell.  Operands after the file (bash) are the positional
+ * parameters while it runs, and are put back after it unless it set others.
  */
 int
 sh_builtin_dot(
 	int argc,
 	char **argv)
 {
+	struct sh_parameters saved_parameters;
+	struct sh_handler handler;
 	char path[PATH_MAX];
+	int generation;
+	int given;
+	int kind;
 	const char *search;
 	const char *slash;
 	int descriptor;
@@ -449,6 +473,26 @@ sh_builtin_dot(
 		sh_error(".: cannot open %s: %s", path, strerror(errno));
 	descriptor = sh_descriptor_high(descriptor);
 
+	/* Operands after the file are the positional parameters. */
+	given = argc > 2;
+	generation = sh_parameters_generation;
+	if (given) {
+		saved_parameters = sh_parameters;
+		sh_parameters.count = 0;
+		sh_parameters.values = NULL;
+		sh_parameters.owned = 0;
+		sh_parameters_set(argc - 2, argv + 2);
+
+		/* An exception out of the file puts them back too. */
+		sh_handler_push(&handler);
+		kind = setjmp(handler.environment);
+		if (kind != 0) {
+			sh_handler_unwind(&handler);
+			dot_parameters_restore(&saved_parameters, generation);
+			sh_raise(kind);
+		}
+	}
+
 	/* Runs its commands; a return ends it. */
 	sh_input_push_file(descriptor, 0);
 	sh_dot_nest++;
@@ -458,6 +502,12 @@ sh_builtin_dot(
 	if (sh_skip == SH_SKIP_RETURN) {
 		sh_skip = SH_SKIP_NONE;
 		status = sh_status;
+	}
+
+	/* The parameters before it, unless it set others. */
+	if (given) {
+		sh_handler_pop(&handler);
+		dot_parameters_restore(&saved_parameters, generation);
 	}
 
 	/* Succeeded: the status of the last command. */
@@ -911,6 +961,11 @@ sh_builtin_local(
 	if (sh_function_nest == 0)
 		sh_error("local: not in a function");
 
+	/* Attributes as declare takes them (bash): -i, -r, -x and the like. */
+	if (argc > 1 && (argv[1][0] == '-' || argv[1][0] == '+') &&
+	    argv[1][1] != '\0')
+		return declare_variables(argc, argv, "local", 1);
+
 	/* Each operand is a name, with an optional value, or -. */
 	for (index = 1; index < argc; index++) {
 		/* - saves the options. */
@@ -933,6 +988,361 @@ sh_builtin_local(
 
 	/* Succeeded. */
 	return 0;
+}
+
+/*
+ * Implements declare and typeset (bash): gives names attributes (-i -l -u
+ * -r -x, taken off with +), with values where given, local to a function
+ * unless -g; -p prints variables as declare would set them again, -f and
+ * -F print functions.  Arrays (-a, -A) and references (-n) are not kept.
+ */
+int
+sh_builtin_declare(
+	int argc,
+	char **argv)
+{
+	int status;
+
+	/* Local in a function, as bash makes them. */
+	status = declare_variables(argc, argv, argv[0], sh_function_nest > 0);
+
+	/* Succeeded: 1 when a name could not be declared. */
+	return status;
+}
+
+/*
+ * Implements builtin (bash): runs a builtin, even when a function has its
+ * name.
+ */
+int
+sh_builtin_builtin(
+	int argc,
+	char **argv)
+{
+	const struct sh_builtin *builtin;
+	int status;
+
+	/* With no name, there is nothing to run. */
+	skip_double_dash(&argc, &argv);
+	if (argc < 2)
+		return 0;
+
+	/* The name must be a builtin's. */
+	builtin = sh_builtin_find(argv[1]);
+	if (builtin == NULL) {
+		fprintf(stderr, "builtin: %s: not a shell builtin\n", argv[1]);
+		return 1;
+	}
+
+	/* Succeeded: the builtin's status. */
+	status = builtin->run(argc - 1, argv + 1);
+	return status;
+}
+
+/*
+ * Declares names for declare, typeset and local with options.  local is 1
+ * when the names become local to the function (unless -g).
+ */
+static int
+declare_variables(
+	int argc,
+	char **argv,
+	const char *command,
+	int local)
+{
+	int index;
+	int add;
+	int remove;
+	int mode;
+	int status;
+	int valid;
+
+	/* The options. */
+	valid = declare_options(argc, argv, command, &index, &add, &remove, &mode);
+	if (!valid)
+		return 2;
+	if ((mode & DECLARE_GLOBAL) != 0)
+		local = 0;
+
+	/* -f and -F are about functions. */
+	if ((mode & (DECLARE_FUNCTIONS | DECLARE_FUNCTION_NAMES)) != 0)
+		return declare_functions(argc, argv, index,
+					 (mode & DECLARE_FUNCTION_NAMES) != 0);
+
+	/* No names: a listing, as declare -p, or as set for bare declare. */
+	if (index >= argc) {
+		if ((mode & DECLARE_PRINT) != 0 || add != 0)
+			sh_var_print_declared(add);
+		else
+			sh_var_print(0, NULL);
+		return 0;
+	}
+
+	/* -p with names prints them. */
+	status = 0;
+	if ((mode & DECLARE_PRINT) != 0) {
+		for (; index < argc; index++) {
+			if (!sh_var_print_declare(argv[index])) {
+				fprintf(stderr, "%s: %s: not found\n", command,
+					argv[index]);
+				status = 1;
+			}
+		}
+		return status;
+	}
+
+	/* Each name, with its value when one is given. */
+	for (; index < argc; index++) {
+		if (declare_one(argv[index], command, local, add, remove) != 0)
+			status = 1;
+	}
+
+	/* Succeeded: 1 when a name could not be declared. */
+	return status;
+}
+
+/*
+ * Reads the options of declare: attributes to add (-) or take off (+), and
+ * what else to do.  Returns 0 after reporting an option it does not take.
+ */
+static int
+declare_options(
+	int argc,
+	char **argv,
+	const char *command,
+	int *index,
+	int *add,
+	int *remove,
+	int *mode)
+{
+	const char *cursor;
+	int flag;
+	int plus;
+
+	/* Words that begin with - or + and have more, up to --. */
+	*add = 0;
+	*remove = 0;
+	*mode = 0;
+	for (*index = 1; *index < argc; (*index)++) {
+		cursor = argv[*index];
+		if ((cursor[0] != '-' && cursor[0] != '+') || cursor[1] == '\0')
+			break;
+		if (strcmp(cursor, "--") == 0) {
+			(*index)++;
+			break;
+		}
+
+		/* Each letter. */
+		plus = cursor[0] == '+';
+		for (cursor++; *cursor != '\0'; cursor++) {
+			flag = 0;
+			switch (*cursor) {
+			case 'i':
+				flag = SH_VAR_INTEGER;
+				break;
+			case 'l':
+				flag = SH_VAR_LOWER;
+				break;
+			case 'u':
+				flag = SH_VAR_UPPER;
+				break;
+			case 'r':
+				flag = SH_VAR_READONLY;
+				break;
+			case 'x':
+				flag = SH_VAR_EXPORT;
+				break;
+			case 'p':
+				*mode |= DECLARE_PRINT;
+				break;
+			case 'f':
+				*mode |= DECLARE_FUNCTIONS;
+				break;
+			case 'F':
+				*mode |= DECLARE_FUNCTION_NAMES;
+				break;
+			case 'g':
+				*mode |= DECLARE_GLOBAL;
+				break;
+			case 'a':
+			case 'A':
+			case 'n':
+				fprintf(stderr, "%s: -%c: not supported by this shell\n",
+					command, *cursor);
+				return 0;
+			default:
+				fprintf(stderr, "%s: -%c: invalid option\n", command,
+					*cursor);
+				return 0;
+			}
+			if (plus)
+				*remove |= flag;
+			else
+				*add |= flag;
+		}
+	}
+
+	/* -l and -u exclude each other; the last given wins in bash. */
+	if ((*add & SH_VAR_LOWER) != 0 && (*add & SH_VAR_UPPER) != 0)
+		*add &= ~SH_VAR_LOWER;
+
+	/* Succeeded. */
+	return 1;
+}
+
+/*
+ * Declares one name: local when asked, the attributes taken off and given,
+ * then the value, then read-only last.  Returns 1 after reporting a name
+ * that is not a name, or a read-only variable given a value.
+ */
+static int
+declare_one(
+	const char *operand,
+	const char *command,
+	int local,
+	int add,
+	int remove)
+{
+	const char *equals;
+	char *name;
+	int flags;
+	int set;
+
+	/* The name. */
+	name = operand_name(operand, &equals);
+	if (name == NULL) {
+		if (strcmp(command, "local") == 0)
+			sh_error("local: %s: bad variable name", operand);
+		fprintf(stderr, "%s: `%s': not a valid identifier\n", command,
+			operand);
+		return 1;
+	}
+
+	/* A read-only one keeps its value and its attributes. */
+	flags = sh_var_flags(name);
+	if (flags >= 0 && (flags & SH_VAR_READONLY) != 0 &&
+	    (equals != NULL || (remove & SH_VAR_READONLY) != 0)) {
+		fprintf(stderr, "%s: %s: readonly variable\n", command, name);
+		return 1;
+	}
+
+	/* Local to the function, when it is one. */
+	if (local)
+		(void)sh_var_make_local(name);
+
+	/* The attributes, so that the value is converted as they say. */
+	if ((add & SH_VAR_LOWER) != 0)
+		remove |= SH_VAR_UPPER;
+	if ((add & SH_VAR_UPPER) != 0)
+		remove |= SH_VAR_LOWER;
+	sh_var_remove_flags(name, remove);
+	sh_var_add_flags(name, add & ~SH_VAR_READONLY);
+
+	/* The value. */
+	if (equals != NULL) {
+		set = sh_var_set(name, equals + 1, 0);
+		if (set != 0) {
+			fprintf(stderr, "%s: %s: readonly variable\n", command,
+				name);
+			return 1;
+		}
+	}
+
+	/* Read-only last, so that the value above could be set. */
+	sh_var_add_flags(name, add & SH_VAR_READONLY);
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Prints functions for declare -f (their definitions) and -F (their
+ * names): the ones named, or all in the order of their names.  Returns 1
+ * when a name has no function.
+ */
+static int
+declare_functions(
+	int argc,
+	char **argv,
+	int index,
+	int names_only)
+{
+	struct sh_function *function;
+	const char **names;
+	size_t count;
+	size_t at;
+	int status;
+
+	/* The ones named; a name with no function makes the status 1. */
+	status = 0;
+	if (index < argc) {
+		for (; index < argc; index++) {
+			function = sh_function_find(argv[index]);
+			if (function == NULL)
+				status = 1;
+			else if (names_only)
+				printf("%s\n", argv[index]);
+			else
+				sh_function_print(argv[index]);
+		}
+		return status;
+	}
+
+	/* All of them, sorted. */
+	count = 0;
+	for (function = functions; function != NULL; function = function->next)
+		count++;
+	names = sh_malloc((count + 1U) * sizeof(*names));
+	at = 0;
+	for (function = functions; function != NULL; function = function->next)
+		names[at++] = function->name;
+	qsort(names, count, sizeof(*names), compare_names);
+	for (at = 0; at < count; at++) {
+		if (names_only)
+			printf("declare -f %s\n", names[at]);
+		else
+			sh_function_print(names[at]);
+	}
+	free(names);
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Puts back the positional parameters after dot with operands: the ones
+ * saved, unless set replaced them outside a function (then those stay, as
+ * bash keeps them).
+ */
+static void
+dot_parameters_restore(
+	struct sh_parameters *saved,
+	int generation)
+{
+	/* The file set its own: they stay, and the saved ones go. */
+	if (sh_parameters_generation != generation && sh_function_nest == 0) {
+		sh_parameters_free(saved);
+		return;
+	}
+
+	/* Otherwise the ones before it come back. */
+	sh_parameters_free(&sh_parameters);
+	sh_parameters = *saved;
+}
+
+/* Orders names for qsort. */
+static int
+compare_names(
+	const void *left,
+	const void *right)
+{
+	const char *const *first;
+	const char *const *second;
+
+	/* By their bytes. */
+	first = left;
+	second = right;
+	return strcmp(*first, *second);
 }
 
 /*

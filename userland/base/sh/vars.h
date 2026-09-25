@@ -22,6 +22,14 @@
 #define SH_VAR_EXPORT	0x01
 #define SH_VAR_READONLY	0x02
 
+/*
+ * The attributes of declare (bash): a value assigned is evaluated as an
+ * arithmetic expression, or made lower or upper case.
+ */
+#define SH_VAR_INTEGER	0x04
+#define SH_VAR_LOWER	0x08
+#define SH_VAR_UPPER	0x10
+
 /* Reports whether a string is a name (XBD 3.216). */
 int sh_var_name(const char *);
 
@@ -49,6 +57,9 @@ int sh_var_unset(const char *);
 /* Adds attributes to a variable, creating it unset when there is none. */
 void sh_var_add_flags(const char *, int);
 
+/* Takes the declare attributes (not read-only) off a variable. */
+void sh_var_remove_flags(const char *, int);
+
 /* Imports the environment the shell was started with. */
 void sh_var_import_environment(char **);
 
@@ -67,6 +78,13 @@ void sh_var_environment_free(char **);
  * them back (export -p, readonly -p), or every set variable (set).
  */
 void sh_var_print(int, const char *);
+
+/*
+ * Prints variables as declare -p does: one name (returning 0 when there is
+ * no such variable), or every variable with all the attributes given.
+ */
+int sh_var_print_declare(const char *);
+void sh_var_print_declared(int);
 
 /* Local variables of functions. */
 void sh_var_local_push(void);

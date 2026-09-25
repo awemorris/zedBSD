@@ -77,6 +77,26 @@ BASH_REFERENCE = {
 	('var-sub-quote.test.sh', "$'' allowed within VarSub arguments"),
 	('var-sub.test.sh', 'Descriptor redirect to bad "$@"'),
 	('xtrace.test.sh', 'xtrace with newlines'),
+	# ws065-p003: builtins dash does not have (builtin, declare, typeset,
+	# source, printf -v, test ==).
+	('bool-parse.test.sh', 'test builtin: ( == ) is confusing: equality test or non-empty string test'),
+	('builtin-bracket.test.sh', '== and = does not do glob'),
+	('builtin-eval-source.test.sh', 'Source from a function, mutating argv and defining a local var'),
+	('builtin-eval-source.test.sh', 'Source with arguments'),
+	('builtin-kill.test.sh', 'kill -L also shows signals'),
+	('builtin-kill.test.sh', 'kill -l shows signals'),
+	('builtin-kill.test.sh', 'kill HUP pid gives the correct error'),
+	('builtin-meta-assign.test.sh', '\\builtin declare - ble.sh relies on it'),
+	('builtin-meta-assign.test.sh', 'builtin declare,local'),
+	('builtin-meta-assign.test.sh', 'builtin typeset, export,readonly'),
+	('builtin-meta-assign.test.sh', 'dynamic builtin command ASSIGN, command builtin ASSIGN'),
+	('builtin-meta-assign.test.sh', 'export, builtin export'),
+	('builtin-meta-assign.test.sh', 'static builtin command ASSIGN, command builtin ASSIGN'),
+	('builtin-meta.test.sh', 'builtin'),
+	('builtin-meta.test.sh', 'builtin usage'),
+	('builtin-printf.test.sh', 'printf -v dynamic scope'),
+	('builtin-special.test.sh', 'command, builtin - both can be redefined, not special (regression)'),
+	('builtin-type.test.sh', 'more special builtins'),
 }
 BASH = ["/usr/bin/bash", "--posix"]
 

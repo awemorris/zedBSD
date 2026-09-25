@@ -84,6 +84,9 @@ int sh_skip_count;
 /* How many loops, function calls and dot scripts are running. */
 int sh_loop_nest;
 int sh_function_nest;
+
+/* Counts the times set replaced the positional parameters. */
+int sh_parameters_generation;
 int sh_dot_nest;
 
 /*
@@ -718,8 +721,10 @@ eval_simple(
 
 /*
  * Counts the leading words of command [-p] [--] that name a command to look
- * up without functions (and, with -p, on the default PATH), and sets the
- * flags of that lookup.  command with -v or -V is left as the command.
+ * up without functions (and, with -p, on the default PATH), and of builtin
+ * [--] (bash) that name a builtin, and sets the flags of that lookup.
+ * command with -v or -V, and builtin before a name that is no builtin, are
+ * left as the command.
  */
 static size_t
 command_prefix(
@@ -733,15 +738,27 @@ command_prefix(
 	int prefix_flags;
 	int compare;
 
-	/* A function named command is a function like any other. */
+	/* Each "command", with its -p and --, or "builtin" and --. */
 	*find_flags = 0;
-	function = sh_function_find("command");
-	if (function != NULL)
-		return 0;
-
-	/* Each "command", with its -p and --. */
 	index = 0;
 	while (index < arguments->count) {
+		/* A function of either name is a function like any other. */
+		function = sh_function_find(arguments->words[index]);
+		if (function != NULL)
+			break;
+		compare = strcmp(arguments->words[index], "builtin");
+		if (compare == 0) {
+			next = index + 1;
+			if (next < arguments->count &&
+			    strcmp(arguments->words[next], "--") == 0)
+				next++;
+			if (next >= arguments->count ||
+			    sh_builtin_find(arguments->words[next]) == NULL)
+				break;
+			*find_flags = SH_FIND_BUILTIN_ONLY;
+			index = next;
+			continue;
+		}
 		compare = strcmp(arguments->words[index], "command");
 		if (compare != 0)
 			break;
@@ -769,7 +786,7 @@ command_prefix(
 		/* command alone, or with other options, is the builtin. */
 		if (prefix_flags == 0 || next >= arguments->count)
 			break;
-		*find_flags |= prefix_flags;
+		*find_flags = (*find_flags & ~SH_FIND_BUILTIN_ONLY) | prefix_flags;
 		index = next;
 	}
 

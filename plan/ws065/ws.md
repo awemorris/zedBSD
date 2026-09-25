@@ -8,8 +8,8 @@ Primary Milestone: MG002
 Related Milestones: MG006
 Objectives: O2
 Parent: [Master](../master.md)
-Queue: q453（ws065-p003）
-Resume point: p001・p002 cleared。p003（builtin の拡張）
+Queue: none（規約の ws065-p004 は最後にまとめて）
+Resume point: p001〜p003 cleared。p004（規約）は規約の Phase 群と一緒に最後
 <!-- awesome-plan-current:end -->
 
 ## 目標
@@ -48,7 +48,7 @@ GNU/Linux の `/bin/sh` script（`/bin/sh` が bash の distribution で書か�
 | --- | --- | --- | --- |
 | [ws065-p001](phase001/phase.md) | 構文: `$'...'`、`[[ ]]`、`function`、`(( ))`、`\|&`、`<<<`、`>& file`、`<( )`・`>( )` | cleared（q451-i01。bash を参照にする 16/16、dash との差分 host 1412/1425・guest 1400/1442（差は説明のつく 6 件と BUG-054）） | — |
 | [ws065-p002](phase002/phase.md) | 展開: `${v:o:l}`、`${v/p/r}`・`${v//p/r}`・`${v/#p/r}`・`${v/%p/r}`、`${v^}`・`${v^^}`・`${v,}`・`${v,,}`、`${!v}` | cleared（q452-i01。bash を参照にする 21/21、dash との差分 host 1433/1447・guest 1405/1447（新たな差は dash に無い `${x//}` の 1 件）） | p001 |
-| [ws065-p003](phase003/phase.md) | builtin: `source`、`let`、`test ==`、`declare`・`typeset`、`pushd`・`popd`・`dirs`、`printf -v`、`builtin` | planned | p001 |
+| [ws065-p003](phase003/phase.md) | builtin: `source`、`let`、`test ==`、`declare`・`typeset`、`pushd`・`popd`・`dirs`、`printf -v`、`builtin` | cleared（q453-i01。bash を参照にする 33/33、dash との差分 host 1438/1458・guest 1412/1458（新たな差 6 件は F-019）） | p001 |
 | [ws065-p004](phase004/phase.md) | 規約の適合 | planned | p001〜p003 |
 
 ## 受け入れ

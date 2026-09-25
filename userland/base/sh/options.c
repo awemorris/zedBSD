@@ -196,6 +196,7 @@ sh_set_builtin(
 	 */
 	if (index < argc || explicit) {
 		sh_parameters_set(argc - index, argv + index);
+		sh_parameters_generation++;
 		(void)sh_var_set("OPTIND", "1", 0);
 	}
 

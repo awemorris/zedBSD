@@ -69,6 +69,7 @@
 #define SH_FIND_NO_FUNCTIONS	0x01	/* command: functions are skipped */
 #define SH_FIND_DEFAULT_PATH	0x02	/* command -p: the default PATH */
 #define SH_FIND_NO_REMEMBER	0x04	/* a lookup for a subshell: the path is not remembered */
+#define SH_FIND_BUILTIN_ONLY	0x08	/* builtin: only a builtin */
 
 /* The builtin flags (struct sh_builtin flags). */
 #define SH_BUILTIN_SPECIAL	0x01	/* a special builtin (XCU 2.14) */
@@ -324,6 +325,9 @@ extern int sh_skip;
 extern int sh_skip_count;
 extern int sh_loop_nest;
 extern int sh_function_nest;
+
+/* Counts the times set replaced the positional parameters. */
+extern int sh_parameters_generation;
 extern int sh_dot_nest;
 extern int sh_last_substitution_status;
 extern int sh_command_line;
@@ -436,6 +440,12 @@ int sh_builtin_hash(int, char **);
 int sh_builtin_unset(int, char **);
 int sh_builtin_export(int, char **);
 int sh_builtin_local(int, char **);
+int sh_builtin_declare(int, char **);
+int sh_builtin_pushd(int, char **);
+int sh_builtin_popd(int, char **);
+int sh_builtin_dirs(int, char **);
+int sh_builtin_let(int, char **);
+int sh_builtin_builtin(int, char **);
 
 /* Options (options.c). */
 const char *sh_option_letters(void);

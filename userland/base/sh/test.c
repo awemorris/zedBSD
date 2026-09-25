@@ -80,6 +80,7 @@ static const struct test_word test_words[] = {
 	{ "(", TEST_LPAREN, TEST_OP_NONE },
 	{ ")", TEST_RPAREN, TEST_OP_NONE },
 	{ "=", TEST_BINARY, TEST_OP_STRING_EQ },
+	{ "==", TEST_BINARY, TEST_OP_STRING_EQ },
 	{ "!=", TEST_BINARY, TEST_OP_STRING_NE },
 	{ "<", TEST_BINARY, TEST_OP_STRING_LT },
 	{ ">", TEST_BINARY, TEST_OP_STRING_GT },
