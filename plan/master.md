@@ -1,9 +1,9 @@
 <!-- awesome-plan project=zedbsd record=master -->
 
 <!-- awesome-plan-current:start -->
-Active Queue: なし（次の提案: 規約の Phase 群）。直近の終了: q453（ws065-p003 cleared: sh の builtin の bash 拡張）
-Current Focused Goal: fg011 — expat の configure と compile を Linux と同等の水準にする（2026-09-25 ユーザー「直近の目標」。優先は bug 修正と性能改善、新規実装はそれに付随するものだけ（design policy 10-5）。fg010 — Wayland デスクトップ（2026-10-17 の OSC Tokyo Fall のデモ）は継続）
-Next: fg011: configure は host の 2 倍以内を達成（q438: `/root` 17〜20 秒・tmpfs 13 秒、host 11.2 秒。make は直列で 20〜25 秒、host `-j1` 15.2 秒）。残り: ws062-p003（既定を native に、q439 提案）、WS061 の `cc t.c -o t` の計測と規約の Phase、判断待ちの F-015（UFS の delayed write）・F-016（並列の make）。BUG-052（tmpfs 32 MiB）。判断待ち: ws046-p014 の check（bash が無い）。WS056 p001 の判断（BUG-046）は継続。WS060（journal）・BUG-036・039・041・WS055 は fg011 の後。RPi4 実機の HDMI1・serial の確認はユーザー待ち、RPi4 の USB（WS048）は後回し。fg010 の合成（ws035-p052〜p057）は p051 の設計の承認待ち
+Active Queue: なし（次の Queue はユーザーの選択待ち）。直近の終了: q453（ws065-p003 cleared: sh の builtin の bash 拡張）
+Current Focused Goal: fg010 — Wayland デスクトップ（2026-10-17 の OSC Tokyo Fall のデモ）。fg011（expat の configure と compile を Linux と同等に）は達成して終了（2026-09-26 ユーザー「パフォーマンス問題はいったん終了しましょう」。configure 7.1〜7.5 秒・host 10.7 秒、`make -j1` 9.9〜10.4 秒・host 15.5 秒、`make -j4` 4.0〜4.1 秒・host 5.1 秒、`cc t.c -o t` 75〜85 ms・host 83〜85 ms）。`ld.so` の最適化は WS066（後で）
+Next: 性能の後始末: WS061・WS064・WS065・WS063 の規約の Phase。以前の残り: ws062-p003（既定を native に、q439 提案）、WS061 の `cc t.c -o t` の計測と規約の Phase、判断待ちの F-015（UFS の delayed write）・F-016（並列の make）。BUG-052（tmpfs 32 MiB）。判断待ち: ws046-p014 の check（bash が無い）。WS056 p001 の判断（BUG-046）は継続。WS060（journal）・BUG-036・039・041・WS055 は fg011 の後。RPi4 実機の HDMI1・serial の確認はユーザー待ち、RPi4 の USB（WS048）は後回し。fg010 の合成（ws035-p052〜p057）は p051 の設計の承認待ち
 <!-- awesome-plan-current:end -->
 
 # zedBSD Master
@@ -128,6 +128,7 @@ fg005 有線 LAN、fg007 HAL の可読性、fg009 PowerPC）は定義を残す�
 | [WS063](ws063/ws.md) | MG004 | UFS の journal を既定にする（journal の無い image は mount の時に作る、`nojournal`）（2026-09-26 ユーザー指示） | incomplete | 既定の有効化・作成・`nojournal` は ws060-p003 で入れ、root の強制終了の試験は UFS OK。残り: p001（v2 の tail の volume）、p002（規約と回帰） |
 | [WS064](ws064/ws.md) | MG002 | base の make の並列（`-j`）と、並列の make の時間を host と同等以上に（2026-09-26 ユーザー指示） | incomplete | p001・p002・p004 cleared（`-j`・jobserver、sh の posix_spawn。`make -j4` 4.18〜4.38 秒・host 5.14〜5.18 秒）。残り: 規約 p003（最後） |
 | [WS065](ws065/ws.md) | MG002 | `/bin/sh` に POSIX が未規定とする bash 拡張を足す（2026-09-26 ユーザー指示） | incomplete | p001（構文）・p002（展開）・p003（builtin）cleared。p004（規約）は最後 |
+| [WS066](ws066/ws.md) | MG002 | 動的 link の program の起動を速くする（`ld.so` の最適化）（2026-09-26 ユーザー「あとでやるリスト」） | planning | p001（費用の内訳と設計）。優先度は低い |
 
 完了した WS の Phase の記録は 2026-09-24 に plan から削除した（git の履歴に残る）。
 
@@ -135,7 +136,7 @@ fg005 有線 LAN、fg007 HAL の可読性、fg009 PowerPC）は定義を残す�
 
 依存による実行順とは別のもの。Queue の権限は変えない。
 
-0. **WS062**・**WS061**（fg011: expat の configure と compile。2026-09-25 ユーザー「直近の目標」と layout の変更の指示）。
+0. **WS061・WS064・WS065・WS063 の規約の Phase**（fg011 は 2026-09-26 に終了。性能の作業の後始末で、ユーザーの指示で最後に回していたもの）。WS062（layout の既定の切り替え p003）。
 1. **WS035**（fg010: Wayland デスクトップ）。zdesktop の合成（p051 の承認 → p052〜p055）、タイトル・フレーム（p025）、タスクバー（p013）、
    文字の libtruetype 化（p027）。GPU の土台の問題は WS014・WS031 で直す。
 2. **WS014・WS031**（デスクトップが使う GPU の土台。fg010 で必要になった分）。
@@ -144,6 +145,7 @@ fg005 有線 LAN、fg007 HAL の可読性、fg009 PowerPC）は定義を残す�
 5. **WS034**（アプリの導入）、WS005・WS033（有線 LAN）。
 6. **WS049・WS050・WS051・WS052**（2026-09-24 ユーザー指示で追加: ACPI の AML interpreter、UCSI、DP Alt Mode、S0i3。WS049 が他の 3 つの前提。優先度はユーザーの指示を待つ）。
 7. その他（WS001、WS004、WS007、WS009、WS017、WS026〜WS029）。WS037〜WS039 は番号の予約のみ。
+8. **WS066**（`ld.so` の最適化。2026-09-26 ユーザー「あとでやるリスト」）。
 
 ## Upcoming Work Outlook
 
