@@ -30,6 +30,7 @@
 #include "userland/base/sh/arithmetic.h"
 #include "userland/base/sh/glob.h"
 
+#include <ctype.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -94,7 +95,13 @@ struct brace {
 	size_t name_length;
 	int special;		/* @ or *, which are the positionals */
 	int length_wanted;	/* ${#name} */
-	char op[3];		/* "", "-", "=", "?", "+", "%", "%%", "#", "##" */
+	int indirect;		/* ${!name}: the parameter named by the value (bash) */
+	/*
+	 * "", "-", "=", "?", "+", "%", "%%", "#", "##"; and bash's ":" (a
+	 * substring), "/" "//" "/#" "/%" (a replacement), "^" "^^" "," ",,"
+	 * (a change of case), which POSIX calls bad substitutions.
+	 */
+	char op[3];
 	int colon;		/* the operator had a : before it */
 	const char *word;
 	size_t word_length;
@@ -153,6 +160,18 @@ static void positional_parameter(struct expander *x, const char *name, size_t le
 static int unset_error(struct expander *x, const char *name, size_t length);
 static void append_value(struct xbuf *out, const char *value, int quoted);
 static void append_positionals(struct expander *x, char which, int quoted, struct xbuf *out);
+static void append_list(struct expander *x, char which, const char *const *values, int count, int quoted, struct xbuf *out);
+static int indirect_parameter(struct expander *x, struct brace *brace);
+static int brace_substring(struct expander *x, const struct brace *brace, int quoted, struct xbuf *out);
+static int substring_bounds(struct expander *x, const struct brace *brace, long *offset, long *length, int *has_length);
+static int arithmetic_part(struct expander *x, const char *text, size_t length, long *value);
+static int brace_transform(struct expander *x, const struct brace *brace, int quoted, struct xbuf *out);
+static char *transform_one(struct expander *x, const struct brace *brace, const char *value, const struct xbuf *pattern, const struct xbuf *replacement);
+static char *replace_pattern(const char *value, const char *op, const char *text, const unsigned char *marks, const char *with, const unsigned char *with_marks);
+static char *change_case(const char *value, const char *op, const char *text, const unsigned char *marks);
+static size_t split_replacement(const char *word, size_t length);
+static size_t character_offset(struct expander *x, const char *value, size_t characters);
+static const char **positional_slice(struct expander *x, long offset, long length, int has_length, int *count);
 static void append_char(struct xbuf *out, char value, unsigned char attr);
 static void append_mark(struct xbuf *out, unsigned char mark);
 static char *buffer_string(const struct xbuf *in, unsigned char **quoted);
@@ -920,6 +939,13 @@ expand_brace(
 			return 0;
 	}
 
+	/* ${!name}: the value names the parameter whose value is used. */
+	if (brace.indirect) {
+		ok = indirect_parameter(x, &brace);
+		if (!ok)
+			return 0;
+	}
+
 	/* ${#name}. */
 	if (brace.length_wanted)
 		return brace_length(x, &brace, reader->quoted, out);
@@ -936,6 +962,12 @@ expand_brace(
 	case '%':
 	case '#':
 		return brace_trim(x, &brace, reader->quoted, out);
+	case ':':
+		return brace_substring(x, &brace, reader->quoted, out);
+	case '/':
+	case '^':
+	case ',':
+		return brace_transform(x, &brace, reader->quoted, out);
 	default:
 		break;
 	}
@@ -957,6 +989,21 @@ parse_brace(
 
 	/* Nothing is known about the expansion yet. */
 	memset(brace, 0, sizeof(*brace));
+
+	/*
+	 * ${!name}, ${!1} and ${!#}: indirection (bash); ${!} and ${!-word}
+	 * and the like are $!.
+	 */
+	if (length > 1 && text[0] == '!') {
+		name_length = scan_name(text + 1, length - 1U);
+		if (name_length != 0 &&
+		    (text[1] == '_' || isalnum((unsigned char)text[1]) ||
+		     (text[1] == '#' && length == 2))) {
+			brace->indirect = 1;
+			text++;
+			length--;
+		}
+	}
 
 	/* ${#name} is the length; ${#} alone, and ${#-...}, are about $#. */
 	if (length > 1 && text[0] == '#') {
@@ -1020,6 +1067,40 @@ parse_brace_operator(
 		brace->op[0] = first;
 		brace->word++;
 		brace->word_length--;
+		return 1;
+	}
+
+	/* bash's :offset:length. */
+	if (first == ':') {
+		brace->op[0] = ':';
+		brace->word++;
+		brace->word_length--;
+		return 1;
+	}
+
+	/* bash's /pattern/string, //, /# and /%. */
+	if (first == '/') {
+		brace->op[0] = '/';
+		brace->word++;
+		brace->word_length--;
+		if (second == '/' || second == '#' || second == '%') {
+			brace->op[1] = second;
+			brace->word++;
+			brace->word_length--;
+		}
+		return 1;
+	}
+
+	/* bash's ^ ^^ , ,, (a change of case). */
+	if (first == '^' || first == ',') {
+		brace->op[0] = first;
+		brace->word++;
+		brace->word_length--;
+		if (second == first) {
+			brace->op[1] = first;
+			brace->word++;
+			brace->word_length--;
+		}
 		return 1;
 	}
 
@@ -1951,6 +2032,555 @@ append_value(
 }
 
 /*
+ * Replaces the value of ${!name} with the value of the parameter it
+ * names (bash): a name, a positional parameter, or a special one.
+ */
+static int
+indirect_parameter(
+	struct expander *x,
+	struct brace *brace)
+{
+	const char *target;
+	size_t length;
+	int ok;
+
+	/* The value must name a parameter. */
+	target = brace->value;
+	length = strlen(target);
+	if (brace->special || length == 0 ||
+	    scan_name(target, length) != length) {
+		x->error = "bad substitution";
+		return 0;
+	}
+
+	/* Succeeded: that parameter's value. */
+	ok = parameter(x, target, length, &brace->value, &brace->set);
+	return ok;
+}
+
+/*
+ * Expands ${name:offset} and ${name:offset:length} (bash): characters of
+ * the value, or of @ and * the parameters themselves, from offset (from
+ * the end when it is negative), length of them (up to that many from the
+ * end when it is negative).
+ */
+static int
+brace_substring(
+	struct expander *x,
+	const struct brace *brace,
+	int quoted,
+	struct xbuf *out)
+{
+	const char **values;
+	char *part;
+	long offset;
+	long length;
+	long characters;
+	long end;
+	size_t start_byte;
+	size_t end_byte;
+	int has_length;
+	int count;
+	int ok;
+
+	/* An unset parameter is a fault under set -u. */
+	if (!brace->set && !brace->special && x->context->unset_is_error)
+		return unset_error(x, brace->name, brace->name_length);
+	ok = substring_bounds(x, brace, &offset, &length, &has_length);
+	if (!ok)
+		return 0;
+
+	/* @ and *: the parameters themselves. */
+	if (brace->special) {
+		if (has_length && length < 0) {
+			x->error = "substring expression < 0";
+			return 0;
+		}
+		values = positional_slice(x, offset, length, has_length, &count);
+		append_list(x, brace->name[0], values, count, quoted, out);
+		free(values);
+		return 1;
+	}
+
+	/* A value: offset and length in characters. */
+	characters = (long)character_count(x, brace->value);
+	if (offset < 0)
+		offset += characters;
+	if (offset < 0 || offset > characters)
+		offset = characters;
+	end = characters;
+	if (has_length) {
+		if (length < 0) {
+			end = characters + length;
+			if (end < offset) {
+				x->error = "substring expression < 0";
+				return 0;
+			}
+		} else if (length < characters - offset) {
+			end = offset + length;
+		}
+	}
+
+	/* Succeeded: those characters; quoted, the field exists. */
+	start_byte = character_offset(x, brace->value, (size_t)offset);
+	end_byte = character_offset(x, brace->value, (size_t)end);
+	part = sh_strndup(brace->value + start_byte, end_byte - start_byte);
+	if (quoted)
+		append_mark(out, X_KEEP);
+	append_value(out, part, quoted);
+	free(part);
+	return 1;
+}
+
+/*
+ * Evaluates the offset and the length of ${name:offset:length}, each an
+ * arithmetic expression; the length is after the first : that no ?,
+ * parenthesis or quotation holds.
+ */
+static int
+substring_bounds(
+	struct expander *x,
+	const struct brace *brace,
+	long *offset,
+	long *length,
+	int *has_length)
+{
+	const char *word;
+	size_t index;
+	size_t split;
+	int depth;
+	int pending;
+	int ok;
+
+	/* Where the length begins. */
+	word = brace->word;
+	split = brace->word_length;
+	depth = 0;
+	pending = 0;
+	for (index = 0; index < brace->word_length; index++) {
+		if (word[index] == '(')
+			depth++;
+		else if (word[index] == ')')
+			depth--;
+		else if (word[index] == '?' && depth == 0)
+			pending++;
+		else if (word[index] == ':' && depth == 0 && pending > 0)
+			pending--;
+		else if (word[index] == ':' && depth == 0) {
+			split = index;
+			break;
+		}
+	}
+
+	/* The offset, which must be there. */
+	ok = arithmetic_part(x, word, split, offset);
+	if (!ok)
+		return 0;
+
+	/* The length, when there is one (an empty one is 0). */
+	*has_length = split < brace->word_length;
+	*length = 0;
+	if (*has_length) {
+		ok = arithmetic_part(x, word + split + 1,
+				     brace->word_length - split - 1U, length);
+		if (!ok)
+			return 0;
+	}
+
+	/* Succeeded. */
+	return 1;
+}
+
+/* Evaluates part of a word as an arithmetic expression; blank is 0. */
+static int
+arithmetic_part(
+	struct expander *x,
+	const char *text,
+	size_t length,
+	long *value)
+{
+	const char *error_text;
+	char *expression;
+	size_t index;
+	int blank;
+	int ok;
+
+	/* A part with nothing but blanks is 0. */
+	blank = 1;
+	for (index = 0; index < length; index++) {
+		if (text[index] != ' ' && text[index] != '\t')
+			blank = 0;
+	}
+	*value = 0;
+	if (blank)
+		return 1;
+
+	/* The expression, expanded as $(( )) is. */
+	expression = sh_strndup(text, length);
+	ok = sh_expand_arithmetic(expression, x->context, value, &error_text);
+	free(expression);
+	if (!ok) {
+		x->error = error_text;
+		return 0;
+	}
+
+	/* Succeeded. */
+	return 1;
+}
+
+/*
+ * Returns the parameters of ${@:offset:length}: $0 is at offset 0 and the
+ * positional parameters after it; a negative offset counts back from the
+ * end.  The caller frees the array (not the values).
+ */
+static const char **
+positional_slice(
+	struct expander *x,
+	long offset,
+	long length,
+	int has_length,
+	int *count)
+{
+	const char **values;
+	long total;
+	long index;
+	long taken;
+
+	/* $0 and the positionals. */
+	total = (long)x->context->positional_count + 1;
+	values = sh_malloc((size_t)total * sizeof(*values));
+	*count = 0;
+	if (offset < 0)
+		offset += total;
+	if (offset < 0 || offset >= total)
+		return values;
+
+	/* The ones in range. */
+	taken = total - offset;
+	if (has_length && length < taken)
+		taken = length;
+	for (index = offset; index < offset + taken; index++) {
+		if (index == 0)
+			values[(*count)++] = x->context->shell_name;
+		else
+			values[(*count)++] = x->context->positional[index - 1];
+	}
+
+	/* Succeeded. */
+	return values;
+}
+
+/* Returns the byte offset of a character of a value (UTF-8 aware). */
+static size_t
+character_offset(
+	struct expander *x,
+	const char *value,
+	size_t characters)
+{
+	const unsigned char *cursor;
+	size_t seen;
+
+	/* Bytes, unless the locale is UTF-8. */
+	if (!locale_is_utf8(x)) {
+		seen = strlen(value);
+		return characters < seen ? characters : seen;
+	}
+
+	/* The byte where the character begins. */
+	seen = 0;
+	for (cursor = (const unsigned char *)value; *cursor != '\0'; cursor++) {
+		if ((*cursor & 0xc0U) != 0x80U) {
+			if (seen == characters)
+				break;
+			seen++;
+		}
+	}
+
+	/* Succeeded. */
+	return (size_t)(cursor - (const unsigned char *)value);
+}
+
+/*
+ * Expands ${name/pattern/string} and the like, and ${name^pattern} and
+ * the like (bash): each parameter of @ and *, or the value, changed.
+ */
+static int
+brace_transform(
+	struct expander *x,
+	const struct brace *brace,
+	int quoted,
+	struct xbuf *out)
+{
+	struct xbuf pattern;
+	struct xbuf replacement;
+	const char **values;
+	char **changed;
+	char *result;
+	size_t split;
+	int count;
+	int index;
+	int ok;
+
+	/* An unset parameter is a fault under set -u. */
+	if (!brace->set && !brace->special && x->context->unset_is_error)
+		return unset_error(x, brace->name, brace->name_length);
+
+	/* The pattern (and for / the string), read as a pattern of trim is. */
+	memset(&pattern, 0, sizeof(pattern));
+	memset(&replacement, 0, sizeof(replacement));
+	split = brace->word_length;
+	if (brace->op[0] == '/')
+		split = split_replacement(brace->word, brace->word_length);
+	ok = expand_text(x, brace->word, split, 0, 0, 0, &pattern);
+	if (ok && brace->op[0] == '/' && split < brace->word_length)
+		ok = expand_text(x, brace->word + split + 1,
+				 brace->word_length - split - 1U, 0, 0, 0,
+				 &replacement);
+	if (!ok) {
+		buffer_free(&pattern);
+		buffer_free(&replacement);
+		return 0;
+	}
+
+	/* @ and *: each parameter changed. */
+	if (brace->special) {
+		count = x->context->positional_count;
+		values = sh_malloc(((size_t)count + 1U) * sizeof(*values));
+		changed = sh_malloc(((size_t)count + 1U) * sizeof(*changed));
+		for (index = 0; index < count; index++) {
+			changed[index] = transform_one(x, brace,
+			    x->context->positional[index], &pattern, &replacement);
+			values[index] = changed[index];
+		}
+		append_list(x, brace->name[0], values, count, quoted, out);
+		for (index = 0; index < count; index++)
+			free(changed[index]);
+		free(changed);
+		free(values);
+	} else {
+		result = transform_one(x, brace, brace->value, &pattern,
+				       &replacement);
+		if (quoted)
+			append_mark(out, X_KEEP);
+		append_value(out, result, quoted);
+		free(result);
+	}
+
+	/* Succeeded. */
+	buffer_free(&pattern);
+	buffer_free(&replacement);
+	return 1;
+}
+
+/* Changes one value by the operator of a brace; the caller frees it. */
+static char *
+transform_one(
+	struct expander *x,
+	const struct brace *brace,
+	const char *value,
+	const struct xbuf *pattern,
+	const struct xbuf *replacement)
+{
+	unsigned char *marks;
+	unsigned char *with_marks;
+	char *text;
+	char *with;
+	char *result;
+
+	/* The pattern and the string, with their quoted characters marked. */
+	(void)x;
+	text = buffer_string(pattern, &marks);
+	with = buffer_string(replacement, &with_marks);
+	if (brace->op[0] == '/')
+		result = replace_pattern(value, brace->op, text, marks, with,
+					 with_marks);
+	else
+		result = change_case(value, brace->op, text, marks);
+	free(text);
+	free(marks);
+	free(with);
+	free(with_marks);
+
+	/* Succeeded. */
+	return result;
+}
+
+/*
+ * Replaces the longest match of a pattern: the first (/), every one (//),
+ * one at the start (/#) or at the end (/%).  An & of the string that no
+ * quote holds stands for the match (bash's patsub_replacement).
+ */
+static char *
+replace_pattern(
+	const char *value,
+	const char *op,
+	const char *text,
+	const unsigned char *marks,
+	const char *with,
+	const unsigned char *with_marks)
+{
+	struct xbuf out;
+	char *candidate;
+	char *result;
+	size_t length;
+	size_t start;
+	size_t size;
+	size_t match;
+	size_t index;
+	int found;
+	int matched;
+
+	/* An empty pattern changes nothing, except at an anchor. */
+	length = strlen(value);
+	memset(&out, 0, sizeof(out));
+	candidate = sh_malloc(length + 1U);
+	start = 0;
+	while (start <= length) {
+		/* The longest match at this place (only at the anchor for # and %). */
+		found = 0;
+		match = 0;
+		if (!(op[1] == '#' && start > 0)) {
+			for (size = length - start + 1U; size > 0; size--) {
+				if (op[1] == '%' && start + size - 1U != length)
+					continue;
+				memcpy(candidate, value + start, size - 1U);
+				candidate[size - 1U] = '\0';
+				if (size == 1U && text[0] != '\0' &&
+				    op[1] != '#' && op[1] != '%')
+					break;
+				matched = sh_glob_match(text, marks, candidate);
+				if (matched) {
+					found = 1;
+					match = size - 1U;
+					break;
+				}
+			}
+		}
+		if (text[0] == '\0' && op[1] != '#' && op[1] != '%')
+			found = 0;
+
+		/* A match: the string, with & as the match. */
+		if (found) {
+			for (index = 0; with[index] != '\0'; index++) {
+				if (with[index] == '&' &&
+				    (with_marks == NULL || !with_marks[index])) {
+					memcpy(candidate, value + start, match);
+					candidate[match] = '\0';
+					append_value(&out, candidate, 1);
+				} else {
+					append_char(&out, with[index], X_QUOTED);
+				}
+			}
+			start += match;
+
+			/* Only // goes on; an empty match moves past a character. */
+			if (op[1] != '/') {
+				append_value(&out, value + start, 1);
+				break;
+			}
+			if (match > 0)
+				continue;
+		}
+
+		/* The character here stays. */
+		if (start < length)
+			append_char(&out, value[start], X_QUOTED);
+		start++;
+	}
+	free(candidate);
+
+	/* Succeeded: the changed value. */
+	result = buffer_string(&out, NULL);
+	buffer_free(&out);
+	return result;
+}
+
+/*
+ * Changes the case of the first character (^ ,) or of every one (^^ ,,)
+ * that the pattern matches (any character when there is none).
+ */
+static char *
+change_case(
+	const char *value,
+	const char *op,
+	const char *text,
+	const unsigned char *marks)
+{
+	char *result;
+	char single[2];
+	size_t index;
+	int matched;
+	int upper;
+
+	/* A copy, changed in place. */
+	result = sh_strdup(value);
+	upper = op[0] == '^';
+	for (index = 0; result[index] != '\0'; index++) {
+		single[0] = result[index];
+		single[1] = '\0';
+		matched = 1;
+		if (text[0] != '\0')
+			matched = sh_glob_match(text, marks, single);
+		if (matched) {
+			if (upper && result[index] >= 'a' && result[index] <= 'z')
+				result[index] = (char)(result[index] - 'a' + 'A');
+			if (!upper && result[index] >= 'A' && result[index] <= 'Z')
+				result[index] = (char)(result[index] - 'A' + 'a');
+		}
+
+		/* ^ and , change only the first character. */
+		if (op[1] == '\0')
+			break;
+	}
+
+	/* Succeeded. */
+	return result;
+}
+
+/*
+ * Returns where the / that ends the pattern of ${name/pattern/string}
+ * is, or the length when there is none; quoted and escaped slashes and
+ * those inside expansions do not count.
+ */
+static size_t
+split_replacement(
+	const char *word,
+	size_t length)
+{
+	const char *end;
+	size_t index;
+
+	/* Walks the word, skipping what is quoted or inside an expansion. */
+	for (index = 0; index < length; index++) {
+		if (word[index] == '\\') {
+			index++;
+			continue;
+		}
+		if (word[index] == '\'' || word[index] == '"') {
+			end = word[index] == '\'' ? sh_skip_single(word + index) :
+			      sh_skip_double(word + index);
+			if (end == NULL)
+				return length;
+			index = (size_t)(end - word) - 1U;
+			continue;
+		}
+		if (word[index] == '$' && index + 1 < length &&
+		    (word[index + 1] == '{' || word[index + 1] == '(')) {
+			end = sh_skip_expansion(word + index, 0);
+			if (end == NULL)
+				return length;
+			index = (size_t)(end - word) - 1U;
+			continue;
+		}
+		if (word[index] == '/')
+			return index;
+	}
+
+	/* No string: the match is deleted. */
+	return length;
+}
+
+/*
  * Adds the positional parameters.  "$@" makes one field of each; "$*" makes
  * one field joined by the first character of IFS; unquoted, both make one
  * field of each, to be split further.
@@ -1962,6 +2592,21 @@ append_positionals(
 	int quoted,
 	struct xbuf *out)
 {
+	/* The positionals, as a list. */
+	append_list(x, which, (const char *const *)x->context->positional,
+		    x->context->positional_count, quoted, out);
+}
+
+/* Adds a list of values as "$@" (which is @) or "$*" (*) adds the positionals. */
+static void
+append_list(
+	struct expander *x,
+	char which,
+	const char *const *values,
+	int count,
+	int quoted,
+	struct xbuf *out)
+{
 	const char *ifs;
 	int index;
 
@@ -1969,23 +2614,23 @@ append_positionals(
 	if (quoted && which == '*') {
 		ifs = ifs_value(x);
 		append_mark(out, X_KEEP);
-		for (index = 0; index < x->context->positional_count; index++) {
+		for (index = 0; index < count; index++) {
 			if (index > 0 && ifs[0] != '\0')
 				append_char(out, ifs[0], X_QUOTED);
-			append_value(out, x->context->positional[index], 1);
+			append_value(out, values[index], 1);
 		}
 
-		/* The parameters are written. */
+		/* The values are written. */
 		return;
 	}
 
 	/* Otherwise a field each, with a boundary between them. */
-	for (index = 0; index < x->context->positional_count; index++) {
+	for (index = 0; index < count; index++) {
 		if (index > 0)
 			append_mark(out, X_BREAK);
 		if (quoted)
 			append_mark(out, X_KEEP);
-		append_value(out, x->context->positional[index], quoted);
+		append_value(out, values[index], quoted);
 	}
 }
 

@@ -98,3 +98,39 @@ cat <(echo ps)
 while read l; do echo "got $l"; done < <(printf 'a\nb\n')
 cat <(echo one) <(echo two)
 echo into > >(cat); sleep 1
+
+#### ${name:offset:length} (ws065-p002)
+v=abcdef
+echo ${v:1:2} ${v:3} ${v: -2} ${v: -3:2} ${v:1:-2} "[${v:10}]" ${v:(-2)} ${v:1+1:1}
+i=1; echo ${v:i:1} ${v:i+1} "${v:0:1}" "${v: 1}"
+set -- a b c d
+echo ${@:2}; echo ${@:2:2}; echo ${@: -1}; echo "${*:2:2}"
+unset u; echo "[${u:1}]" ${u:-d} ${v:+p} ${w:=set} $w
+
+#### ${name/pattern/string} and its forms (ws065-p002)
+v=abc; echo "${v/b/[&]}" "${v/b/[\&]}" "${v/b/"&"}"
+v=aXbXc; echo ${v//X/-} ${v/#a/S} ${v/%c/E} ${v/#/P} ${v/%/Q} ${v/} ${v//} ${v/X}
+v=aaa; echo ${v//a*/X} ${v/a*/X} ${v//?/&&}
+v=a/b/c; echo ${v//\//_} ${v//"/"/:}
+v='x*y'; echo "${v/\*/S}" "${v/'*'/T}" "${v/*/U}"
+p=b; v=abcb; echo ${v//$p/Z} ${v/"$p"/W} ${v//[ac]/.} ${v/[!a]/_}
+set -- ab cb; echo ${@/b/X}; for w in "${@/b/X Y}"; do echo "<$w>"; done
+
+#### ${name^} ${name^^} ${name,} ${name,,} (ws065-p002)
+v=hello; echo ${v^} ${v^^} ${v,} ${v,,} ${v^^[el]}
+V=HELLO; echo ${V,} ${V,,}
+set -- ab cb; echo "${@^^}"
+
+#### ${!name} (ws065-p002)
+x=y; y=z; echo ${!x}
+set -- p q; n=2; echo ${!n}
+x=v; v=abc; echo ${!x:-d} ${!x/b/B}; x=u; echo "[${!x:-dflt}]"
+(x=1bad; echo ${!x}) 2>/dev/null || echo bad
+true & p=$!; [ "${!}" = "$p" ] && echo same; echo "[${!-x}]" | tr -d 0-9; wait
+
+#### set -u and the new expansions (ws065-p002)
+set -u; v=a; echo ${v:0} ${v/a/b}
+(echo ${u:1}) 2>/dev/null || echo e1
+(echo ${u/a/b}) 2>/dev/null || echo e2
+(echo ${u^}) 2>/dev/null || echo e3
+(x=u; echo ${!x}) 2>/dev/null || echo e4

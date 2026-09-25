@@ -4,8 +4,8 @@
 
 Phase ID: `ws065-p003`
 Parent: [WS065](../ws.md)
-Status: planned
-Queue: none
+Status: in-progress
+Queue: q453-i01
 Disposition: normal
 
 ## 範囲
