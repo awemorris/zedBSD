@@ -300,7 +300,11 @@ $(ZEDBSD_LLVM_INSTALL_STAMP):
 		echo 'LLVM: accepted installation is missing its license' >&2; exit 1; }
 	@touch '$@'
 else
-$(ZEDBSD_LLVM_INSTALL_STAMP): $(ZEDBSD_LLVM_CONFIG_IDENTITY)
+# The source is extracted here, before the sub-make starts: the sysroot's
+# builtins also need it, and two makes extracting one tree at once fail on
+# its lock (a fresh -j build, as in CI).
+$(ZEDBSD_LLVM_INSTALL_STAMP): $(ZEDBSD_LLVM_CONFIG_IDENTITY) \
+		| $(ZEDBSD_LLVM_SOURCE_VERIFIED)
 	@$(MAKE) --no-print-directory llvm-build
 	@set -eu; \
 	if test -d '$(ZEDBSD_LLVM_INSTALL)' && \
