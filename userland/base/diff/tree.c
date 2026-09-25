@@ -30,7 +30,7 @@ struct pair {
 struct comparison {
 	struct pair *pairs;
 	int recursive, metadata, brief;
-	int (*text)(const char *, const char *);
+	int (*text)(const char *, const char *, const char *, const char *);
 };
 
 /* Owns a sorted, complete directory census. */
@@ -53,6 +53,9 @@ static int compare_node(struct comparison *context, const char *left, const char
 static int compare_directory(struct comparison *context, const char *left, const char *right, unsigned depth);
 static int read_chunk(int fd, unsigned char *buffer, size_t *length);
 static int compare_file(const char *left, const char *right, const struct stat *a, const struct stat *b, int *binary);
+static int is_stream(const char *path);
+static int compare_streams(struct comparison *context, const char *left, const char *right);
+static int spool(const char *path, char *copy, size_t size);
 
 /* Reports an inspection failure, distinct from a proven difference. */
 static int
@@ -397,7 +400,7 @@ compare_node(struct comparison *context, const char *left, const char *right, un
 			if (binary || context->brief || context->metadata)
 				status = different(left, right, "contents");
 			else {
-				status = context->text(left, right);
+				status = context->text(left, right, left, right);
 				/* Two reads that disagree about equality cannot prove a match. */
 				if (status == 0)
 					status = 2;
@@ -437,7 +440,7 @@ compare_node(struct comparison *context, const char *left, const char *right, un
 
 /* Compares two operands and releases all invocation-owned inode mappings. */
 int
-diff_tree(const char *left, const char *right, int recursive, int metadata, int brief, int (*text)(const char *, const char *))
+diff_tree(const char *left, const char *right, int recursive, int metadata, int brief, int (*text)(const char *, const char *, const char *, const char *))
 {
 	struct comparison context;
 	struct pair *next;
@@ -448,7 +451,12 @@ diff_tree(const char *left, const char *right, int recursive, int metadata, int 
 	context.metadata = metadata;
 	context.brief = brief;
 	context.text = text;
-	status = compare_node(&context, left, right, 0);
+
+	/* A pipe or a device operand (such as <(command)) is compared by its contents. */
+	if (is_stream(left) || is_stream(right))
+		status = compare_streams(&context, left, right);
+	else
+		status = compare_node(&context, left, right, 0);
 	while (context.pairs != NULL) {
 		next = context.pairs->next;
 		free(context.pairs);
@@ -456,3 +464,110 @@ diff_tree(const char *left, const char *right, int recursive, int metadata, int 
 	}
 	return status;
 }
+
+/* Reports whether an operand is a FIFO or a character device, read only once. */
+static int
+is_stream(const char *path)
+{
+	struct stat status;
+
+	if (stat(path, &status) != 0)
+		return 0;
+	return S_ISFIFO(status.st_mode) || S_ISCHR(status.st_mode);
+}
+
+/*
+ * Compares two operands of which one at least can be read only once: both are
+ * copied into temporary files, which are compared as regular files, and the
+ * output names the operands.
+ */
+static int
+compare_streams(struct comparison *context, const char *left, const char *right)
+{
+	char left_copy[PATH_MAX], right_copy[PATH_MAX];
+	struct stat a, b;
+	int status, binary;
+
+	left_copy[0] = right_copy[0] = '\0';
+	status = spool(left, left_copy, sizeof(left_copy));
+	if (status == 0)
+		status = spool(right, right_copy, sizeof(right_copy));
+	if (status == 0 && (stat(left_copy, &a) != 0 || stat(right_copy, &b) != 0))
+		status = error("temporary copy");
+	if (status == 0) {
+		binary = 0;
+		status = compare_file(left_copy, right_copy, &a, &b, &binary);
+		if (status == 1) {
+			if (binary || context->brief || context->metadata)
+				status = different(left, right, "contents");
+			else {
+				status = context->text(left_copy, right_copy, left, right);
+				/* Two reads that disagree about equality cannot prove a match. */
+				if (status == 0)
+					status = 2;
+			}
+		}
+	}
+	if (left_copy[0] != '\0')
+		(void)unlink(left_copy);
+	if (right_copy[0] != '\0')
+		(void)unlink(right_copy);
+	return status;
+}
+
+/* Copies an operand into a new temporary file, whose name is left in copy. */
+static int
+spool(const char *path, char *copy, size_t size)
+{
+	unsigned char buffer[8192];
+	const char *directory;
+	ssize_t count, written, done;
+	int in, out, status;
+
+	directory = getenv("TMPDIR");
+	if (directory == NULL || directory[0] == '\0')
+		directory = "/tmp";
+	if ((size_t)snprintf(copy, size, "%s/diff.XXXXXX", directory) >= size) {
+		copy[0] = '\0';
+		errno = ENAMETOOLONG;
+		return error(directory);
+	}
+	out = mkstemp(copy);
+	if (out < 0) {
+		copy[0] = '\0';
+		return error(directory);
+	}
+	in = open(path, O_RDONLY);
+	if (in < 0) {
+		(void)close(out);
+		return error(path);
+	}
+	status = 0;
+	for (;;) {
+		count = read(in, buffer, sizeof(buffer));
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count < 0) {
+			status = error(path);
+			break;
+		}
+		if (count == 0)
+			break;
+		for (done = 0; done < count; done += written) {
+			written = write(out, buffer + done, (size_t)(count - done));
+			if (written < 0 && errno == EINTR)
+				written = 0;
+			else if (written < 0) {
+				status = error(copy);
+				break;
+			}
+		}
+		if (status != 0)
+			break;
+	}
+	(void)close(in);
+	if (close(out) != 0 && status == 0)
+		status = error(copy);
+	return status;
+}
+

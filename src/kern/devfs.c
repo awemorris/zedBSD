@@ -35,6 +35,9 @@
 #include "kern/uaccess.h"
 #include "kern/partition.h"
 #include "kern/cred.h"
+#include "kern/pipe.h"
+#include "kern/process.h"
+#include "kern/thread.h"
 #include <kern/kcrt.h>
 
 #include <uapi/block.h>
@@ -462,12 +465,14 @@ devfs_fixed_inode(
  * the common case: it is what a shell's process substitution passes this
  * way, so a scheme that cannot express dup cannot serve the main use.
  *
- * The listing of /dev/fd does not depend on the caller: every node from 0
- * to KERN_OPEN_MAX - 1 is present for everyone, as it is on SunOS, and only
- * the open resolves against the caller.  A filesystem that instead showed
- * each process only its own descriptors -- the 4.4BSD fdescfs -- has to
- * answer readdir per caller and must keep its lookups out of the name
- * cache, since a path would no longer name the same object for everyone.
+ * /dev/fd shows each process only its own descriptors, as the 4.4BSD
+ * fdescfs and Linux do: readdir lists the descriptors the caller holds, and
+ * a lookup of a number the caller does not hold fails with ENOENT.  The
+ * answers differ between callers, which is safe because the fixed devfs
+ * directories keep their children out of the name cache.  (Listing every
+ * number up to KERN_OPEN_MAX for everyone, as SunOS does, made a node for
+ * each and so ran the shared inode pool dry: BUG-054.)  stat of a node
+ * reports the file the descriptor holds, not the node (see the stat path).
  */
 static DEVFS_HIGH int
 devfs_descriptor_open(
@@ -478,6 +483,38 @@ devfs_descriptor_open(
 
 	/* Reports successful completion. */
 	return 0;
+}
+
+/*
+ * Reports whether the calling process holds a descriptor and, when it does,
+ * sets *type to the type of the file it holds there.
+ */
+static DEVFS_HIGH int
+devfs_descriptor_held(
+	uint64_t descriptor,
+	enum inode_type *type)
+{
+	struct process *process;
+	struct file *file;
+
+	/* A caller without a descriptor table holds nothing. */
+	process = curthread != NULL ? curthread->proc : NULL;
+	if (process == NULL || process->fd == NULL)
+		return 0;
+	if (filedesc_get_file(process->fd, (int)descriptor, &file) != 0)
+		return 0;
+
+	/* The type of what it holds: a file's, or a pipe's or a socket's. */
+	if (file->f_inode != NULL)
+		*type = file->f_inode->i_type;
+	else if (pipe_file_is_pipe(file))
+		*type = INODE_FIFO;
+	else
+		*type = INODE_SOCKET;
+	(void)file_close(file);
+
+	/* Succeeded: the caller holds it. */
+	return 1;
 }
 
 /* One node under /dev/fd, which the open path turns into a descriptor. */
@@ -498,7 +535,12 @@ devfs_descriptor_inode(
 	ino_t number,
 	struct inode **result)
 {
+	enum inode_type type;
 	struct inode *inode;
+
+	/* Only a descriptor the caller holds has a name. */
+	if (!devfs_descriptor_held(descriptor, &type))
+		return ENOENT;
 
 	/* Creates the node unless it is already cached. */
 	if (inode_get(directory->i_mount, number, &inode) != 0) {
@@ -859,6 +901,7 @@ devfs_dir_open(
 	struct devfs_dir_state *state;
 	struct devfs_dir_entry *entry;
 	struct cdev **snapshot;
+	enum inode_type descriptor_type;
 	size_t allocation_bytes;
 	unsigned indices[8];
 	unsigned count;
@@ -883,7 +926,7 @@ devfs_dir_open(
 			return error;
 	}
 
-	/* Only /dev/fd lists the descriptor numbers. */
+	/* Only /dev/fd lists the descriptor numbers (those the caller holds). */
 	descriptor_count = 0;
 	if (file->f_inode->i_ino == DEVFS_FD_INO)
 		descriptor_count = KERN_OPEN_MAX;
@@ -949,12 +992,10 @@ devfs_dir_open(
 			state->count++;
 		}
 	} else if (file->f_inode->i_ino == DEVFS_FD_INO) {
-		/*
-		 * Every descriptor number the process table can hold is
-		 * listed, for every caller alike; the open is what resolves
-		 * against the caller.
-		 */
+		/* The descriptors the caller holds, with the types they hold. */
 		for (index = 0; index < (unsigned)KERN_OPEN_MAX; index++) {
+			if (!devfs_descriptor_held(index, &descriptor_type))
+				continue;
 			entry = &state->entries[state->count];
 			number = index;
 			used = 0;
@@ -972,7 +1013,7 @@ devfs_dir_open(
 
 			entry->name[used] = '\0';
 			entry->ino = (ino_t)(DEVFS_FD_INO_BASE + index);
-			entry->type = INODE_CHAR;
+			entry->type = descriptor_type;
 			state->count++;
 		}
 	} else if (file->f_inode->i_ino == DEVFS_INPUT_INO) {

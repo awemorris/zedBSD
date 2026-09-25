@@ -196,6 +196,7 @@ static SYSCALL_EXT intptr_t sys_write_call(const uintptr_t args[6]);
 static intptr_t sys_lseek_call(const uintptr_t args[6]);
 static intptr_t sys_fstat_call(const uintptr_t args[6]);
 static int pseudo_file_getattr(struct process *process, struct file *file, struct stat *status);
+static int descriptor_getattr(struct process *process, int descriptor, struct stat *status);
 static uint32_t dirent_type(enum inode_type type);
 static intptr_t sys_getdents_call(const uintptr_t args[6]);
 static intptr_t sys_chdir_call(const uintptr_t args[6]);
@@ -3091,13 +3092,45 @@ pseudo_file_getattr(
 	return 0;
 }
 
+/*
+ * Describes what a descriptor of a process holds, for fstat and for stat
+ * of a /dev/fd node.
+ */
+static int
+descriptor_getattr(
+	struct process *process,
+	int descriptor,
+	struct stat *status)
+{
+	struct file *file;
+	int error;
+
+	/* Kernel handles have no filesystem stat identity. */
+	error = filedesc_get_file(process->fd, descriptor, &file);
+	if (error != 0)
+		return error;
+
+	/*
+	 * An anonymous pipe or a socket has no inode, but POSIX still
+	 * describes it by its type; other files without an inode (kernel
+	 * handles) have nothing to describe.
+	 */
+	if (file->f_inode == NULL)
+		error = pseudo_file_getattr(process, file, status);
+	else
+		error = inode_getattr(file->f_inode, status);
+	(void)file_close(file);
+
+	/* Reports the outcome of the query. */
+	return error;
+}
+
 /* Handles fstat(2). */
 static intptr_t
 sys_fstat_call(
 	const uintptr_t args[6])
 {
 	struct process *process;
-	struct file *file;
 	struct stat status;
 	int error;
 
@@ -3106,23 +3139,10 @@ sys_fstat_call(
 	if (process == NULL)
 		return -EBADF;
 
-	/* Kernel handles have no filesystem stat identity. */
-	error = filedesc_get_file(process->fd, (int)args[0], &file);
-	if (error != 0)
-		return -error;
-
-	/*
-	 * An anonymous pipe or a socket has no inode, but POSIX still
-	 * describes it by its type; other files without an inode (kernel
-	 * handles) have nothing to describe.
-	 */
-	if (file->f_inode == NULL)
-		error = pseudo_file_getattr(process, file, &status);
-	else
-		error = inode_getattr(file->f_inode, &status);
+	/* The attributes of what the descriptor holds. */
+	error = descriptor_getattr(process, (int)args[0], &status);
 	if (error == 0)
 		error = copyout(&status, args[1], sizeof(status));
-	(void)file_close(file);
 
 	/* Reports the outcome of the query. */
 	if (error != 0)
@@ -4796,8 +4816,16 @@ sys_stat_path_call(
 		error = namei_path_flags_at(context, pathname, namei_flags, &path);
 	}
 
+	/*
+	 * A /dev/fd node reports the file its descriptor holds, as fstat of
+	 * the descriptor would (BUG-054); anything else, its own attributes.
+	 */
 	if (error == 0) {
-		error = inode_getattr(path.p_inode, &status);
+		if (path.p_inode->i_descriptor_alias != 0U)
+			error = descriptor_getattr(process,
+			    (int)(path.p_inode->i_rdev & 0xffffU), &status);
+		else
+			error = inode_getattr(path.p_inode, &status);
 		path_release(&path);
 	}
 

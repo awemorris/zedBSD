@@ -1,13 +1,13 @@
 <!-- awesome-plan project=zedbsd record=past-log -->
 
 <!-- awesome-plan-current:start -->
-Active Queue: なし
-Last finished Queue: q453（ws065-p003 cleared。sh の builtin の bash 拡張）
+Active Queue: q455（ws067-p002）
+Last finished Queue: q454（ws067-p001 cleared。BUG-054 resolved）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q453（2026-09-26）
+## 最新: q443〜q454（2026-09-26）
 
 [q443](queue-q443.md): ws063-p001 cleared。journal の大きさを mkfs で記録し、mount で `.ufs-journal`（extent）を再利用・再確保・作成する。
 [q444](queue-q444.md): ws061-p008 cleared。libc の同期の system call を減らし、make（直列）12.8〜13.1 秒（host `-j1` 15.2 秒）。
@@ -20,6 +20,7 @@ Last finished Queue: q453（ws065-p003 cleared。sh の builtin の bash 拡張�
 [q451](queue-q451.md): ws065-p001 cleared。sh に POSIX が未規定とする bash の構文（`$'...'`、`[[ ]]`、`function`、`(( ))`、`for (( ))`、`\|&`、`<<<`、`>& file`、`<( )`）。BUG-054 を記録。
 [q452](queue-q452.md): ws065-p002 cleared。sh に bash の展開（`${v:o:l}`、`${v/p/r}` の類、`${v^^}`・`${v,,}` の類、`${!v}`）。bash の参照 21/21、dash との差は dash に無い `${x//}` の 1 件だけ増えた。
 [q453](queue-q453.md): ws065-p003 cleared。sh に bash の builtin（`source`、`let`、`test ==`、`declare`・`typeset`、`printf -v`・`%q`、`builtin`、`pushd`・`popd`・`dirs`）。静的 link の効果を測り F-020 に記録（expat で 0〜3%）。
+[q454](queue-q454.md): ws067-p001 cleared。`/dev/fd` を呼んだ process の descriptor に（一覧・lookup・stat）、diff が pipe を中身で比べる。BUG-054 resolved（QEMU）。
 
 ## 前: q439〜q442（2026-09-26）
 

@@ -23,8 +23,8 @@ struct lines {
 
 static int load(const char *p, struct lines *l);
 static void release_lines(struct lines *lines);
-static int text_diff(const char *left, const char *right);
-extern int diff_tree(const char *left, const char *right, int recursive, int metadata, int brief, int (*text)(const char *, const char *));
+static int text_diff(const char *left, const char *right, const char *left_label, const char *right_label);
+extern int diff_tree(const char *left, const char *right, int recursive, int metadata, int brief, int (*text)(const char *, const char *, const char *, const char *));
 
 /*
  * Runs the diff command.
@@ -68,9 +68,9 @@ main(
 	return status;
 }
 
-/* Prints the existing text difference format after byte comparison. */
+/* Prints the existing text difference format after byte comparison; the labels name the files. */
 static int
-text_diff(const char *left, const char *right)
+text_diff(const char *left, const char *right, const char *left_label, const char *right_label)
 {
 	const char *argv[] = {"diff", left, right};
 	struct lines a = {0}, b = {0};
@@ -94,7 +94,7 @@ text_diff(const char *left, const char *right)
 			/* Handles the different condition. */
 			if (!different) {
 				printf("--- %s\n+++ %s\n@@ -1,%lu +1,%lu @@\n",
-				       argv[1], argv[2], (unsigned long)a.n,
+				       left_label, right_label, (unsigned long)a.n,
 				       (unsigned long)b.n);
 			}
 

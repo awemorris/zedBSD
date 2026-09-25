@@ -97,6 +97,7 @@ echo st=$?
 cat <(echo ps)
 while read l; do echo "got $l"; done < <(printf 'a\nb\n')
 cat <(echo one) <(echo two)
+diff <(echo 1) <(echo 1); echo same $?; diff <(echo 1) <(echo 2) >/dev/null; echo differ $?
 echo into > >(cat); sleep 1
 
 #### ${name:offset:length} (ws065-p002)

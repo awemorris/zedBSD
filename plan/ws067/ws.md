@@ -8,8 +8,8 @@ Primary Milestone: MG002
 Related Milestones: MG004
 Objectives: O1
 Parent: [Master](../master.md)
-Queue: q454（ws067-p001）
-Resume point: p001（devfs・stat・diff の修正）
+Queue: q455（ws067-p002）
+Resume point: p001 cleared（BUG-054 resolved）。p002（規約）
 <!-- awesome-plan-current:end -->
 
 ## 目標
@@ -22,5 +22,5 @@ Resume point: p001（devfs・stat・diff の修正）
 
 | Phase | 内容 | Status | 依存 |
 | --- | --- | --- | --- |
-| [ws067-p001](phase001/phase.md) | devfs の `/dev/fd` の一覧と lookup、stat の descriptor への置き換え、`diff` の FIFO・文字 device の中身の比較 | in-progress（q454-i01） | — |
+| [ws067-p001](phase001/phase.md) | devfs の `/dev/fd` の一覧と lookup、stat の descriptor への置き換え、`diff` の FIFO・文字 device の中身の比較 | cleared（q454-i01。guest の再現手順が全て期待どおり、sh の差分 1412/1458 で変わらず、boot PASS） | — |
 | [ws067-p002](phase002/phase.md) | 規約の適合（WS067 で変えた source） | planned | p001 |
