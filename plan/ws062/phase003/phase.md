@@ -4,8 +4,8 @@
 
 Phase ID: `ws062-p003`
 Parent: [WS062](../ws.md)
-Status: planned
-Queue: none
+Status: in-progress
+Queue: q456-i01
 
 ## 目的
 

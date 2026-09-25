@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=master -->
 
 <!-- awesome-plan-current:start -->
-Active Queue: q455（ws067-p002、WS067 の規約）。直近: q454（ws067-p001 cleared、BUG-054 resolved）。直近の終了: q453（ws065-p003 cleared: sh の builtin の bash 拡張）
+Active Queue: q456（ws062-p003、disk image の既定を native に）。直近: q455（WS067 completed、BUG-054 resolved）。直近の終了: q453（ws065-p003 cleared: sh の builtin の bash 拡張）
 Current Focused Goal: fg010 — Wayland デスクトップ（2026-10-17 の OSC Tokyo Fall のデモ）。fg011（expat の configure と compile を Linux と同等に）は達成して終了（2026-09-26 ユーザー「パフォーマンス問題はいったん終了しましょう」。configure 7.1〜7.5 秒・host 10.7 秒、`make -j1` 9.9〜10.4 秒・host 15.5 秒、`make -j4` 4.0〜4.1 秒・host 5.1 秒、`cc t.c -o t` 75〜85 ms・host 83〜85 ms）。`ld.so` の最適化は WS066（後で）
 Next: 2026-09-26 ユーザー指示の順: BUG-054（WS067）→ disk image の既定を native に（ws062-p003）→ WS035（fg010）。sh・make・vfork・mutex・性能・journal の規約の Phase（ws065-p004・ws064-p003・ws061-p011・ws063-p002）は作業中に問題が出たらすぐ対応、出なければ後回し。以前の残り: ws062-p003（既定を native に、q439 提案）、WS061 の `cc t.c -o t` の計測と規約の Phase、判断待ちの F-015（UFS の delayed write）・F-016（並列の make）。BUG-052（tmpfs 32 MiB）。判断待ち: ws046-p014 の check（bash が無い）。WS056 p001 の判断（BUG-046）は継続。WS060（journal）・BUG-036・039・041・WS055 は fg011 の後。RPi4 実機の HDMI1・serial の確認はユーザー待ち、RPi4 の USB（WS048）は後回し。fg010 の合成（ws035-p052〜p057）は p051 の設計の承認待ち
 <!-- awesome-plan-current:end -->
@@ -128,7 +128,7 @@ fg005 有線 LAN、fg007 HAL の可読性、fg009 PowerPC）は定義を残す�
 | [WS063](ws063/ws.md) | MG004 | UFS の journal を既定にする（journal の無い image は mount の時に作る、`nojournal`）（2026-09-26 ユーザー指示） | incomplete | 既定の有効化・作成・`nojournal` は ws060-p003 で入れ、root の強制終了の試験は UFS OK。残り: p001（v2 の tail の volume）、p002（規約と回帰） |
 | [WS064](ws064/ws.md) | MG002 | base の make の並列（`-j`）と、並列の make の時間を host と同等以上に（2026-09-26 ユーザー指示） | incomplete | p001・p002・p004 cleared（`-j`・jobserver、sh の posix_spawn。`make -j4` 4.18〜4.38 秒・host 5.14〜5.18 秒）。残り: 規約 p003（最後） |
 | [WS065](ws065/ws.md) | MG002 | `/bin/sh` に POSIX が未規定とする bash 拡張を足す（2026-09-26 ユーザー指示） | incomplete | p001（構文）・p002（展開）・p003（builtin）cleared。p004（規約）は最後 |
-| [WS067](ws067/ws.md) | MG002 | `/dev/fd` を呼んだ process の descriptor に合わせる（BUG-054、2026-09-26 ユーザー「最優先」） | incomplete | p001 cleared（BUG-054 resolved）。p002（規約）を q455 で |
+| [WS067](ws067/ws.md) | MG002 | `/dev/fd` を呼んだ process の descriptor に合わせる（BUG-054、2026-09-26 ユーザー「最優先」） | completed | BUG-054 resolved（QEMU）。p001・p002 cleared |
 | [WS066](ws066/ws.md) | MG002 | 動的 link の program の起動を速くする（`ld.so` の最適化）（2026-09-26 ユーザー「あとでやるリスト」） | planning | p001（費用の内訳と設計）。優先度は低い |
 
 完了した WS の Phase の記録は 2026-09-24 に plan から削除した（git の履歴に残る）。

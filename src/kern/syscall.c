@@ -4775,6 +4775,7 @@ sys_stat_path_call(
 	char pathname[PATH_MAX];
 	uintptr_t pathname_address;
 	uintptr_t status_address;
+	int descriptor;
 	int dirfd;
 	unsigned namei_flags;
 	int error;
@@ -4821,11 +4822,12 @@ sys_stat_path_call(
 	 * the descriptor would (BUG-054); anything else, its own attributes.
 	 */
 	if (error == 0) {
-		if (path.p_inode->i_descriptor_alias != 0U)
-			error = descriptor_getattr(process,
-			    (int)(path.p_inode->i_rdev & 0xffffU), &status);
-		else
+		if (path.p_inode->i_descriptor_alias != 0U) {
+			descriptor = (int)(path.p_inode->i_rdev & 0xffffU);
+			error = descriptor_getattr(process, descriptor, &status);
+		} else {
 			error = inode_getattr(path.p_inode, &status);
+		}
 		path_release(&path);
 	}
 

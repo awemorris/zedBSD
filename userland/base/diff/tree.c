@@ -445,6 +445,7 @@ diff_tree(const char *left, const char *right, int recursive, int metadata, int 
 	struct comparison context;
 	struct pair *next;
 	int status;
+	int stream;
 
 	memset(&context, 0, sizeof(context));
 	context.recursive = recursive;
@@ -453,7 +454,10 @@ diff_tree(const char *left, const char *right, int recursive, int metadata, int 
 	context.text = text;
 
 	/* A pipe or a device operand (such as <(command)) is compared by its contents. */
-	if (is_stream(left) || is_stream(right))
+	stream = is_stream(left);
+	if (!stream)
+		stream = is_stream(right);
+	if (stream)
 		status = compare_streams(&context, left, right);
 	else
 		status = compare_node(&context, left, right, 0);
@@ -467,13 +471,27 @@ diff_tree(const char *left, const char *right, int recursive, int metadata, int 
 
 /* Reports whether an operand is a FIFO or a character device, read only once. */
 static int
-is_stream(const char *path)
+is_stream(
+	const char *path)
 {
 	struct stat status;
+	mode_t type;
+	int examined;
 
-	if (stat(path, &status) != 0)
+	/* An operand that cannot be examined is left to the ordinary comparison. */
+	examined = stat(path, &status);
+	if (examined != 0)
 		return 0;
-	return S_ISFIFO(status.st_mode) || S_ISCHR(status.st_mode);
+
+	/* A pipe or a device can be read only once. */
+	type = status.st_mode & S_IFMT;
+	if (type == S_IFIFO)
+		return 1;
+	if (type == S_IFCHR)
+		return 1;
+
+	/* Anything else can be read again. */
+	return 0;
 }
 
 /*
@@ -482,66 +500,103 @@ is_stream(const char *path)
  * output names the operands.
  */
 static int
-compare_streams(struct comparison *context, const char *left, const char *right)
+compare_streams(
+	struct comparison *context,
+	const char *left,
+	const char *right)
 {
-	char left_copy[PATH_MAX], right_copy[PATH_MAX];
-	struct stat a, b;
-	int status, binary;
+	char left_copy[PATH_MAX];
+	char right_copy[PATH_MAX];
+	struct stat a;
+	struct stat b;
+	int status;
+	int examined;
+	int binary;
 
-	left_copy[0] = right_copy[0] = '\0';
+	/* Copies both operands. */
+	left_copy[0] = '\0';
+	right_copy[0] = '\0';
 	status = spool(left, left_copy, sizeof(left_copy));
 	if (status == 0)
 		status = spool(right, right_copy, sizeof(right_copy));
-	if (status == 0 && (stat(left_copy, &a) != 0 || stat(right_copy, &b) != 0))
-		status = error("temporary copy");
+
+	/* Examines the copies. */
 	if (status == 0) {
-		binary = 0;
-		status = compare_file(left_copy, right_copy, &a, &b, &binary);
-		if (status == 1) {
-			if (binary || context->brief || context->metadata)
-				status = different(left, right, "contents");
-			else {
-				status = context->text(left_copy, right_copy, left, right);
-				/* Two reads that disagree about equality cannot prove a match. */
-				if (status == 0)
-					status = 2;
-			}
-		}
+		examined = stat(left_copy, &a);
+		if (examined == 0)
+			examined = stat(right_copy, &b);
+		if (examined != 0)
+			status = error("temporary copy");
 	}
+
+	/* Compares their bytes, then shows the lines that differ under the operands' names. */
+	binary = 0;
+	if (status == 0)
+		status = compare_file(left_copy, right_copy, &a, &b, &binary);
+	if (status == 1 && (binary || context->brief || context->metadata)) {
+		status = different(left, right, "contents");
+	} else if (status == 1) {
+		status = context->text(left_copy, right_copy, left, right);
+
+		/* Two reads that disagree about equality cannot prove a match. */
+		if (status == 0)
+			status = 2;
+	}
+
+	/* Removes the copies. */
 	if (left_copy[0] != '\0')
 		(void)unlink(left_copy);
 	if (right_copy[0] != '\0')
 		(void)unlink(right_copy);
+
+	/* Reports 0 for the same contents, 1 for different, 2 for trouble. */
 	return status;
 }
 
 /* Copies an operand into a new temporary file, whose name is left in copy. */
 static int
-spool(const char *path, char *copy, size_t size)
+spool(
+	const char *path,
+	char *copy,
+	size_t size)
 {
 	unsigned char buffer[8192];
 	const char *directory;
-	ssize_t count, written, done;
-	int in, out, status;
+	ssize_t count;
+	ssize_t written;
+	ssize_t done;
+	int length;
+	int in;
+	int out;
+	int status;
+	int closed;
 
+	/* Names the copy in TMPDIR, or /tmp. */
 	directory = getenv("TMPDIR");
 	if (directory == NULL || directory[0] == '\0')
 		directory = "/tmp";
-	if ((size_t)snprintf(copy, size, "%s/diff.XXXXXX", directory) >= size) {
+	length = snprintf(copy, size, "%s/diff.XXXXXX", directory);
+	if (length < 0 || (size_t)length >= size) {
 		copy[0] = '\0';
 		errno = ENAMETOOLONG;
 		return error(directory);
 	}
+
+	/* Creates the copy. */
 	out = mkstemp(copy);
 	if (out < 0) {
 		copy[0] = '\0';
 		return error(directory);
 	}
+
+	/* Opens the operand. */
 	in = open(path, O_RDONLY);
 	if (in < 0) {
 		(void)close(out);
 		return error(path);
 	}
+
+	/* Copies everything the operand gives until its end. */
 	status = 0;
 	for (;;) {
 		count = read(in, buffer, sizeof(buffer));
@@ -551,23 +606,33 @@ spool(const char *path, char *copy, size_t size)
 			status = error(path);
 			break;
 		}
+
+		/* The end of the operand ends the copy. */
 		if (count == 0)
 			break;
+
+		/* Writes the whole chunk. */
 		for (done = 0; done < count; done += written) {
 			written = write(out, buffer + done, (size_t)(count - done));
-			if (written < 0 && errno == EINTR)
+			if (written < 0 && errno == EINTR) {
 				written = 0;
-			else if (written < 0) {
+			} else if (written < 0) {
 				status = error(copy);
 				break;
 			}
 		}
+
+		/* A failed write ends the copy. */
 		if (status != 0)
 			break;
 	}
+
+	/* Closes both; a copy that could not be closed was not written. */
 	(void)close(in);
-	if (close(out) != 0 && status == 0)
+	closed = close(out);
+	if (closed != 0 && status == 0)
 		status = error(copy);
+
+	/* Reports 0 when the copy is complete. */
 	return status;
 }
-

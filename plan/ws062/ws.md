@@ -8,7 +8,7 @@ Primary Milestone: MG004
 Related Milestones: MG002（fg011: configure の性能）
 Objectives: O1, O2
 Parent: [Master](../master.md)
-Queue: q437（finished）
+Queue: q456（ws062-p003）
 Resume point: p003（既定の切り替え）。configure（`/root`）の tmpfs との差（UFS の同期書き）は F-015 の判断待ち
 <!-- awesome-plan-current:end -->
 
@@ -42,5 +42,5 @@ design policy 2.3（installer v1: payload は FAT、native root は後の仕事�
 | --- | --- | --- | --- |
 | [ws062-p001](phase001/phase.md) | native の layout の image の生成（`zedimage-host`・Makefile の variant・検査器）と QEMU の起動 | cleared（q436-i01。`--layout native`、検査器、`ZEDBSD_VARIANT=native`。QEMU で boot・root は `/dev/sda2` の UFS（rw）・swap は partition・SSH） | — |
 | [ws062-p002](phase002/phase.md) | native の image で harness・swap・性能（configure）・回帰を確かめ、直す | cleared（q437-i01。NVMe の起動、4 GiB の root・swap、BUG-053 の修正。configure は tmpfs 12.8 秒・`/root` 23〜25 秒（p005 の後）で +20% は未達、原因は UFS の write-through と flush（F-015、判断待ち）） | p001 |
-| [ws062-p003](phase003/phase.md) | amd64 の既定と試験の道具（guest.py・boot-test・guest-batches）を native にする。文書 | planned | p002 |
+| [ws062-p003](phase003/phase.md) | amd64 の既定と試験の道具（guest.py・boot-test・guest-batches）を native にする。文書 | in-progress（q456-i01） | p002 |
 | [ws062-p004](phase004/phase.md) | 規約の全文との照合（変えた全 source） | planned | p003 |

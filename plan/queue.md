@@ -1,19 +1,19 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue q455: WS067 の規約（ws067-p002）
+# Queue q456: disk image の既定を native に（ws062-p003）
 
 <!-- awesome-plan-current:start -->
 Status: active（2026-09-26）
-Active Queue: q455
+Active Queue: q456
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
 
-Approval: 2026-09-26 ユーザー「BUG-054の修正を最優先、ディスクイメージをnativeに変更したあと、ws035を次に優先。…これで進めてください。」範囲は [ws067-p002](ws067/phase002/phase.md)（BUG-054 の修正の WS を閉じる規約の Phase）。
+Approval: 2026-09-26 ユーザー「BUG-054の修正を最優先、ディスクイメージをnativeに変更したあと、ws035を次に優先。…これで進めてください。」範囲は [ws062-p003](ws062/phase003/phase.md)。
 
 | Order | Attempt | Phase | Status |
 | --- | --- | --- | --- |
-| 1 | q455-i01 | [ws067-p002](ws067/phase002/phase.md) | in-progress |
+| 1 | q456-i01 | [ws062-p003](ws062/phase003/phase.md) | in-progress |
 
-依存: ws067-p001（cleared）。
+依存: ws062-p002（cleared）。
 
-Upcoming Work Outlook: ws062-p003（disk image の既定を native に）、WS035（fg010）。
+Upcoming Work Outlook: WS035（fg010）。ws062-p004（規約）は問題が出たときか WS062 を閉じるとき。

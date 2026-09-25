@@ -121,6 +121,7 @@ static DEVFS_HIGH int devfs_mount_impl(struct mount *mountp);
 static DEVFS_HIGH int devfs_statvfs(struct mount *mountp, struct statvfs *result);
 static void devfs_cdev_release(void *data);
 static void devfs_release_inode(struct inode *inode);
+static DEVFS_HIGH int devfs_descriptor_held(uint64_t descriptor, enum inode_type *type);
 
 static const struct file_ops devfs_block_ops = {
 	.open = block_open,
@@ -495,25 +496,37 @@ devfs_descriptor_held(
 	enum inode_type *type)
 {
 	struct process *process;
+	struct thread *thread;
 	struct file *file;
+	int error;
+	int pipe;
 
 	/* A caller without a descriptor table holds nothing. */
-	process = curthread != NULL ? curthread->proc : NULL;
+	thread = curthread;
+	if (thread == NULL)
+		return 0;
+	process = thread->proc;
 	if (process == NULL || process->fd == NULL)
 		return 0;
-	if (filedesc_get_file(process->fd, (int)descriptor, &file) != 0)
+
+	/* Takes a reference to what the descriptor holds, if anything. */
+	error = filedesc_get_file(process->fd, (int)descriptor, &file);
+	if (error != 0)
 		return 0;
 
 	/* The type of what it holds: a file's, or a pipe's or a socket's. */
+	pipe = 0;
+	if (file->f_inode == NULL)
+		pipe = pipe_file_is_pipe(file);
 	if (file->f_inode != NULL)
 		*type = file->f_inode->i_type;
-	else if (pipe_file_is_pipe(file))
+	else if (pipe)
 		*type = INODE_FIFO;
 	else
 		*type = INODE_SOCKET;
-	(void)file_close(file);
 
-	/* Succeeded: the caller holds it. */
+	/* Drops the reference; the caller holds it. */
+	(void)file_close(file);
 	return 1;
 }
 
@@ -537,9 +550,11 @@ devfs_descriptor_inode(
 {
 	enum inode_type type;
 	struct inode *inode;
+	int held;
 
 	/* Only a descriptor the caller holds has a name. */
-	if (!devfs_descriptor_held(descriptor, &type))
+	held = devfs_descriptor_held(descriptor, &type);
+	if (!held)
 		return ENOENT;
 
 	/* Creates the node unless it is already cached. */
@@ -903,6 +918,7 @@ devfs_dir_open(
 	struct cdev **snapshot;
 	enum inode_type descriptor_type;
 	size_t allocation_bytes;
+	int held;
 	unsigned indices[8];
 	unsigned count;
 	unsigned character_count;
@@ -994,8 +1010,11 @@ devfs_dir_open(
 	} else if (file->f_inode->i_ino == DEVFS_FD_INO) {
 		/* The descriptors the caller holds, with the types they hold. */
 		for (index = 0; index < (unsigned)KERN_OPEN_MAX; index++) {
-			if (!devfs_descriptor_held(index, &descriptor_type))
+			/* Skips a number the caller does not hold. */
+			held = devfs_descriptor_held(index, &descriptor_type);
+			if (!held)
 				continue;
+
 			entry = &state->entries[state->count];
 			number = index;
 			used = 0;
