@@ -29,6 +29,7 @@ struct sh_expand_context {
 	const char *(*lookup)(void *, const char *);
 	int (*assign)(void *, const char *, const char *);
 	int (*command_substitute)(void *, const char *, char **);
+	int (*process_substitute)(void *, const struct sh_token *, char **);
 	void *lookup_context;
 	const char *shell_name;
 	int positional_count;

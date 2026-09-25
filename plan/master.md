@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=master -->
 
 <!-- awesome-plan-current:start -->
-Active Queue: なし（次は規約の適合、ユーザーの指示で最後）。直近の終了: q450（ws064-p004 cleared: sh の fork 1417 → 214、configure 7.1 秒・host 10.7 秒、`make -j4` 4.2〜4.4 秒・host 5.14 秒）
+Active Queue: q452（ws065-p002、sh の展開の拡張）。直近の終了: q451（ws065-p001 cleared: sh の構文の bash 拡張）
 Current Focused Goal: fg011 — expat の configure と compile を Linux と同等の水準にする（2026-09-25 ユーザー「直近の目標」。優先は bug 修正と性能改善、新規実装はそれに付随するものだけ（design policy 10-5）。fg010 — Wayland デスクトップ（2026-10-17 の OSC Tokyo Fall のデモ）は継続）
 Next: fg011: configure は host の 2 倍以内を達成（q438: `/root` 17〜20 秒・tmpfs 13 秒、host 11.2 秒。make は直列で 20〜25 秒、host `-j1` 15.2 秒）。残り: ws062-p003（既定を native に、q439 提案）、WS061 の `cc t.c -o t` の計測と規約の Phase、判断待ちの F-015（UFS の delayed write）・F-016（並列の make）。BUG-052（tmpfs 32 MiB）。判断待ち: ws046-p014 の check（bash が無い）。WS056 p001 の判断（BUG-046）は継続。WS060（journal）・BUG-036・039・041・WS055 は fg011 の後。RPi4 実機の HDMI1・serial の確認はユーザー待ち、RPi4 の USB（WS048）は後回し。fg010 の合成（ws035-p052〜p057）は p051 の設計の承認待ち
 <!-- awesome-plan-current:end -->
@@ -127,6 +127,7 @@ fg005 有線 LAN、fg007 HAL の可読性、fg009 PowerPC）は定義を残す�
 | [WS062](ws062/ws.md) | MG004 | amd64 の disk image を ESP の vmunix・UFS の root partition・swap partition に（2026-09-25 ユーザー指示） | incomplete | p001・p002 cleared（q436・q437）。p003（既定の切り替え）q439 提案 |
 | [WS063](ws063/ws.md) | MG004 | UFS の journal を既定にする（journal の無い image は mount の時に作る、`nojournal`）（2026-09-26 ユーザー指示） | incomplete | 既定の有効化・作成・`nojournal` は ws060-p003 で入れ、root の強制終了の試験は UFS OK。残り: p001（v2 の tail の volume）、p002（規約と回帰） |
 | [WS064](ws064/ws.md) | MG002 | base の make の並列（`-j`）と、並列の make の時間を host と同等以上に（2026-09-26 ユーザー指示） | incomplete | p001・p002・p004 cleared（`-j`・jobserver、sh の posix_spawn。`make -j4` 4.18〜4.38 秒・host 5.14〜5.18 秒）。残り: 規約 p003（最後） |
+| [WS065](ws065/ws.md) | MG002 | `/bin/sh` に POSIX が未規定とする bash 拡張を足す（2026-09-26 ユーザー指示） | incomplete | p001 cleared（構文）。p002（展開）を q452 で実行中 |
 
 完了した WS の Phase の記録は 2026-09-24 に plan から削除した（git の履歴に残る）。
 

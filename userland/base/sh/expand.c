@@ -109,6 +109,9 @@ static char expand_message[512];
 
 int sh_expand_fatal;
 
+static int expand_process(struct expander *x, const struct sh_token *token, struct xbuf *out);
+static size_t character_count(struct expander *x, const char *value);
+static int locale_is_utf8(struct expander *x);
 static int expand_token(struct expander *x, const struct sh_token *token, struct xbuf *out);
 static int expand_text(struct expander *x, const char *text, size_t length, int in_double, int quoted, int mode, struct xbuf *out);
 static int expand_next(struct expander *x, struct reader *reader, struct xbuf *out);
@@ -339,6 +342,37 @@ sh_fields_free(
 	fields->count = 0;
 }
 
+/*
+ * Expands a process substitution: the shell starts the command with a
+ * pipe and the word is the /dev/fd name of the shell's end.
+ */
+static int
+expand_process(
+	struct expander *x,
+	const struct sh_token *token,
+	struct xbuf *out)
+{
+	const char *cursor;
+	char *path;
+	int ran;
+
+	/* The shell runs it; the name is one quoted word. */
+	path = NULL;
+	ran = 0;
+	if (x->context->process_substitute != NULL)
+		ran = x->context->process_substitute(x->context->lookup_context,
+						     token, &path);
+	if (!ran)
+		return 0;
+	for (cursor = path; *cursor != '\0'; cursor++)
+		append_char(out, *cursor, X_QUOTED);
+	append_mark(out, X_KEEP);
+	free(path);
+
+	/* Succeeded. */
+	return 1;
+}
+
 /* Expands a token: a here-document body, or a word from its raw text. */
 static int
 expand_token(
@@ -347,6 +381,10 @@ expand_token(
 	struct xbuf *out)
 {
 	size_t index;
+
+	/* <( ) and >( ) become the name of a pipe to a command (bash). */
+	if (token->process != 0)
+		return expand_process(x, token, out);
 
 	/* A here-document with a quoted delimiter is taken as written. */
 	if (token->heredoc == SH_HEREDOC_LITERAL) {
@@ -1001,6 +1039,70 @@ parse_brace_operator(
 	return 1;
 }
 
+/*
+ * Reports whether the shell's locale for characters is UTF-8: the first
+ * of LC_ALL, LC_CTYPE and LANG that is set names it.
+ */
+static int
+locale_is_utf8(
+	struct expander *x)
+{
+	static const char *const names[] = { "LC_ALL", "LC_CTYPE", "LANG" };
+	const char *value;
+	const char *cursor;
+	size_t index;
+
+	/* The first one set decides. */
+	for (index = 0; index < sizeof(names) / sizeof(names[0]); index++) {
+		value = NULL;
+		if (x->context->lookup != NULL)
+			value = x->context->lookup(x->context->lookup_context,
+						   names[index]);
+		if (value == NULL || value[0] == '\0')
+			continue;
+
+		/* A codeset of UTF-8 (or utf8), whatever its case. */
+		for (cursor = value; *cursor != '\0'; cursor++) {
+			if ((cursor[0] == 'U' || cursor[0] == 'u') &&
+			    (cursor[1] == 'T' || cursor[1] == 't') &&
+			    (cursor[2] == 'F' || cursor[2] == 'f') &&
+			    ((cursor[3] == '-' && cursor[4] == '8') || cursor[3] == '8'))
+				return 1;
+		}
+		return 0;
+	}
+
+	/* The POSIX locale. */
+	return 0;
+}
+
+/*
+ * Counts the characters of a value (XCU 2.6.2, ${#parameter}): bytes,
+ * or in a UTF-8 locale the bytes that start a character.
+ */
+static size_t
+character_count(
+	struct expander *x,
+	const char *value)
+{
+	const unsigned char *cursor;
+	size_t count;
+
+	/* Bytes, unless the locale is UTF-8. */
+	if (!locale_is_utf8(x))
+		return strlen(value);
+
+	/* Each byte that is not a continuation byte starts a character. */
+	count = 0;
+	for (cursor = (const unsigned char *)value; *cursor != '\0'; cursor++) {
+		if ((*cursor & 0xc0U) != 0x80U)
+			count++;
+	}
+
+	/* Succeeded. */
+	return count;
+}
+
 /* Expands ${#name}: the length of the value, or the number of positionals. */
 static int
 brace_length(
@@ -1019,7 +1121,7 @@ brace_length(
 		/* An unset parameter is a fault under set -u. */
 		if (!brace->set && x->context->unset_is_error)
 			return unset_error(x, brace->name, brace->name_length);
-		count = strlen(brace->value);
+		count = character_count(x, brace->value);
 	}
 
 	/* Succeeded: the number. */

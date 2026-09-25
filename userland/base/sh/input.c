@@ -186,6 +186,30 @@ sh_input_push_back_text(
 }
 
 /*
+ * Gives back text the parser read and decided to read again: it leaves
+ * every capture in progress (as sh_input_ungetc does for a character) and
+ * is read before anything else.
+ */
+void
+sh_input_give_back_text(
+	const char *text,
+	size_t length)
+{
+	int index;
+
+	/* The characters leave the captures they were added to. */
+	for (index = 0; index < input_capture_count; index++) {
+		if (input_captures[index].length >= length)
+			input_captures[index].length -= length;
+		else
+			input_captures[index].length = 0;
+	}
+
+	/* Read again first. */
+	sh_input_push_back_text(text, length);
+}
+
+/*
  * Pops the innermost source.
  */
 void

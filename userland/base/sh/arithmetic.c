@@ -97,7 +97,9 @@ static const struct operator_text assignment_operators[] = {
 	{ NULL, 0 }
 };
 
+static int parse_comma(struct arithmetic *state, struct operand *result);
 static int parse_assignment(struct arithmetic *state, struct operand *result);
+static int step_variable(struct arithmetic *state, struct operand *result, int increment, int prefix);
 static int assignment_operator(const char *cursor, int *op, size_t *length);
 static int assign_operand(struct arithmetic *state, struct operand *result, int op);
 static int parse_conditional(struct arithmetic *state, struct operand *result);
@@ -155,7 +157,7 @@ sh_arithmetic_eval(
 	}
 
 	/* The expression. */
-	parsed = parse_assignment(&state, &value);
+	parsed = parse_comma(&state, &value);
 	if (!parsed && state.error == NULL)
 		state.error = "arithmetic expression: syntax error";
 	if (!parsed) {
@@ -173,6 +175,33 @@ sh_arithmetic_eval(
 	/* Succeeded. */
 	*result = value.value;
 	*error_text = NULL;
+	return 1;
+}
+
+/*
+ * Parses expressions joined by commas (bash; XCU 2.6.4 does not require
+ * the comma operator): each is evaluated, and the value is the last.
+ */
+static int
+parse_comma(
+	struct arithmetic *state,
+	struct operand *result)
+{
+	int ok;
+
+	/* The first, then each after a comma. */
+	ok = parse_assignment(state, result);
+	for (;;) {
+		if (!ok)
+			return 0;
+		skip_space(state);
+		if (*state->cursor != ',')
+			break;
+		state->cursor++;
+		ok = parse_assignment(state, result);
+	}
+
+	/* Succeeded. */
 	return 1;
 }
 
@@ -692,10 +721,18 @@ parse_unary(
 	if (op != '+' && op != '-' && op != '~' && op != '!')
 		return parse_primary(state, result);
 
-	/* ++ and -- are not operators of the shell. */
-	if ((op == '+' || op == '-') && state->cursor[1] == op) {
-		state->error = "arithmetic expression: expecting primary";
-		return 0;
+	/*
+	 * ++ and -- before a variable increment or decrement it first (XCU
+	 * 2.6.4 does not require them; bash's meaning); before anything
+	 * else they are two signs, as dash reads them.
+	 */
+	if ((op == '+' || op == '-') && state->cursor[1] == op &&
+	    is_name_start(state->cursor[2])) {
+		state->cursor += 2;
+		ok = parse_variable(state, result);
+		if (!ok)
+			return 0;
+		return step_variable(state, result, op == '+', 1);
 	}
 
 	/* The operand. */
@@ -725,8 +762,10 @@ parse_primary(
 	struct arithmetic *state,
 	struct operand *result)
 {
+	char op;
 	int digit;
 	int name;
+	int ok;
 
 	/* A parenthesized expression. */
 	skip_space(state);
@@ -739,10 +778,22 @@ parse_primary(
 	if (digit >= 0 && digit <= 9)
 		return parse_number(state, result);
 
-	/* A variable. */
+	/* A variable, which ++ or -- after it steps once its value is read. */
 	name = is_name_start(*state->cursor);
-	if (name)
-		return parse_variable(state, result);
+	if (name) {
+		ok = parse_variable(state, result);
+		if (!ok)
+			return 0;
+		op = state->cursor[0];
+		if ((op == '+' || op == '-') && state->cursor[1] == op &&
+		    !is_name_start(state->cursor[2]) &&
+		    digit_value(state->cursor[2]) < 0 &&
+		    state->cursor[2] != '(') {
+			state->cursor += 2;
+			return step_variable(state, result, op == '+', 0);
+		}
+		return 1;
+	}
 
 	/* Anything else. */
 	state->error = "arithmetic expression: expecting primary";
@@ -759,7 +810,7 @@ parse_parenthesized(
 
 	/* The expression inside. */
 	state->cursor++;
-	ok = parse_assignment(state, result);
+	ok = parse_comma(state, result);
 	if (!ok)
 		return 0;
 
@@ -1066,5 +1117,41 @@ store(
 	}
 
 	/* Succeeded. */
+	return 1;
+}
+
+/*
+ * Steps a variable just read by one, up or down, and gives the value
+ * after (prefix) or before (postfix) the step; the result is a value,
+ * no longer the variable.
+ */
+static int
+step_variable(
+	struct arithmetic *state,
+	struct operand *result,
+	int increment,
+	int prefix)
+{
+	long long before;
+	long long after;
+	int ok;
+
+	/* The value, one up or one down. */
+	before = result->value;
+	if (increment)
+		after = (long long)((unsigned long long)before + 1ULL);
+	else
+		after = (long long)((unsigned long long)before - 1ULL);
+
+	/* Stored where the value is used. */
+	if (state->evaluate) {
+		ok = store(state, result->name, after);
+		if (!ok)
+			return 0;
+	}
+
+	/* Succeeded. */
+	result->value = prefix ? after : before;
+	result->name[0] = '\0';
 	return 1;
 }

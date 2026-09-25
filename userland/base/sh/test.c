@@ -760,3 +760,53 @@ test_integer(
 	/* Succeeded. */
 	return 1;
 }
+
+/*
+ * Evaluates a unary file or string test for [[ ... ]]: -a is -e.  Returns
+ * 1 or 0, or -1 when op is not one test knows.
+ */
+int
+sh_test_unary(
+	const char *op,
+	const char *operand)
+{
+	struct test_state state;
+	char name[3];
+	int kind;
+
+	/* -a is -e here, where it is no conjunction. */
+	name[0] = '-';
+	name[1] = op[1];
+	name[2] = '\0';
+	if (op[1] == 'a')
+		name[1] = 'e';
+	kind = test_word_kind(name);
+	if (kind != TEST_UNARY)
+		return -1;
+
+	/* Succeeded: the test. */
+	memset(&state, 0, sizeof(state));
+	return test_unary(name, operand, &state) != 0;
+}
+
+/*
+ * Evaluates -nt, -ot or -ef for [[ ... ]]: 1 or 0, or -1 when op is none
+ * of them.
+ */
+int
+sh_test_file_compare(
+	const char *op,
+	const char *left,
+	const char *right)
+{
+	int code;
+
+	/* Only the file comparisons. */
+	code = test_binary_op(op);
+	if (code != TEST_OP_NEWER && code != TEST_OP_OLDER &&
+	    code != TEST_OP_SAME_FILE)
+		return -1;
+
+	/* Succeeded. */
+	return test_files(code, left, right);
+}

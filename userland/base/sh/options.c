@@ -618,3 +618,22 @@ getopts_result(
 	/* Succeeded: an option was read. */
 	return 0;
 }
+
+/*
+ * Reports whether the option of a long name is on: 1 or 0, or -1 when no
+ * option has the name ([[ -o name ]]).
+ */
+int
+sh_option_named(
+	const char *name)
+{
+	int index;
+
+	/* The option, if there is one. */
+	index = option_by_name(name);
+	if (index < 0)
+		return -1;
+
+	/* Succeeded: whether it is on. */
+	return sh_option[index] != 0;
+}

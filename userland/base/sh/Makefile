@@ -5,7 +5,7 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 ZEDBSD_SH_SOURCES := userland/base/sh/main.c \
 	userland/base/sh/alias.c userland/base/sh/arithmetic.c \
 	userland/base/sh/builtins.c userland/base/sh/cd.c \
-	userland/base/sh/command.c userland/base/sh/exec.c \
+	userland/base/sh/command.c userland/base/sh/cond.c userland/base/sh/exec.c \
 	userland/base/sh/expand.c userland/base/sh/glob.c userland/base/sh/history.c \
 	userland/base/sh/input.c userland/base/sh/jobs.c \
 	userland/base/sh/limits.c userland/base/sh/options.c \

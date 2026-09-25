@@ -33,7 +33,7 @@ struct text_buffer {
 
 /* The operators of the redirection kinds, indexed by SH_REDIR_*. */
 static const char *const redirection_operators[] = {
-	"", "<", ">", ">|", ">>", "<>", "<&", ">&", "<<"
+	"", "<", ">", ">|", ">>", "<>", "<&", ">&", "<<", "<<<"
 };
 
 static void show_node(struct text_buffer *buffer, struct sh_node *node);
@@ -206,6 +206,25 @@ show_compound(
 		append(buffer, "{ ");
 		show_list(buffer, node->u.body);
 		append(buffer, "; }");
+		break;
+	case SH_NODE_COND:
+		append(buffer, "[[ ... ]]");
+		break;
+	case SH_NODE_ARITH:
+		append(buffer, "((");
+		append(buffer, node->u.arith);
+		append(buffer, "))");
+		break;
+	case SH_NODE_ARITH_FOR:
+		append(buffer, "for ((");
+		append(buffer, node->u.arith_for.init);
+		append(buffer, "; ");
+		append(buffer, node->u.arith_for.test);
+		append(buffer, "; ");
+		append(buffer, node->u.arith_for.step);
+		append(buffer, ")); do ");
+		show_list(buffer, node->u.arith_for.body);
+		append(buffer, "; done");
 		break;
 	case SH_NODE_SUBSHELL:
 		append(buffer, "(");

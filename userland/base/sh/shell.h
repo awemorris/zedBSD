@@ -48,6 +48,7 @@
 #define SH_REDIR_DUP_INPUT	6	/* <& */
 #define SH_REDIR_DUP_OUTPUT	7	/* >& */
 #define SH_REDIR_HEREDOC	8	/* << and <<- */
+#define SH_REDIR_HERESTRING	9	/* <<<, a bash extension */
 
 /* What sh_fork starts (its mode). */
 #define SH_FORK_NO_JOB		0	/* a command substitution, waited for directly */
@@ -114,8 +115,30 @@ enum sh_node_kind {
 	SH_NODE_CASE,
 	SH_NODE_GROUP,
 	SH_NODE_SUBSHELL,
-	SH_NODE_FUNCTION
+	SH_NODE_FUNCTION,
+	SH_NODE_COND,		/* [[ ... ]], a bash extension */
+	SH_NODE_ARITH,		/* (( ... )), a bash extension */
+	SH_NODE_ARITH_FOR	/* for (( ...; ...; ... )), a bash extension */
 };
+
+/* What a part of a [[ ... ]] expression is. */
+#define SH_COND_WORD	0	/* a word: true when it is not empty */
+#define SH_COND_UNARY	1	/* -f word and the like */
+#define SH_COND_BINARY	2	/* word == word and the like */
+#define SH_COND_NOT	3	/* ! expression */
+#define SH_COND_AND	4	/* expression && expression */
+#define SH_COND_OR	5	/* expression || expression */
+
+/* A part of a [[ ... ]] expression, as the parser read it. */
+struct sh_cond {
+	int kind;
+	char op[4];			/* the operator: -f, ==, =~, <, -eq ... */
+	struct sh_token *left;		/* the word, or the left operand */
+	struct sh_token *right;		/* the right operand of a binary one */
+	struct sh_cond *first;		/* the operand of !, or the left of && and || */
+	struct sh_cond *second;		/* the right of && and || */
+};
+
 
 /*
  * A block of memory that one parse allocates its tree and its words from.
@@ -216,6 +239,20 @@ struct sh_node {
 			const char *name;
 			struct sh_node *body;
 		} function;
+
+		/* [[ ... ]]. */
+		struct sh_cond *cond;
+
+		/* (( ... )): the expression as written. */
+		const char *arith;
+
+		/* for (( init; test; step )) body. */
+		struct {
+			const char *init;
+			const char *test;
+			const char *step;
+			struct sh_node *body;
+		} arith_for;
 	} u;
 };
 
@@ -325,6 +362,7 @@ void sh_input_push_string(const char *, size_t, int);
 void sh_input_push_file(int, int);
 void sh_input_push_alias(const char *, void *);
 void sh_input_push_back_text(const char *, size_t);
+void sh_input_give_back_text(const char *, size_t);
 void sh_input_pop(void);
 int sh_input_depth(void);
 void sh_input_unwind(int);
@@ -357,6 +395,17 @@ int sh_eval_string(const char *, int);
 int sh_eval_input(int);
 int sh_run_command_substitution(const char *, char **);
 void sh_expand_context_fill(void *);
+
+/* cond.c: [[ ... ]] and (( ... )), bash extensions. */
+int sh_eval_cond(const struct sh_cond *);
+int sh_eval_arith_text(const char *, long *);
+
+/* test.c: the tests [[ ... ]] shares with test. */
+int sh_test_unary(const char *, const char *);
+int sh_test_file_compare(const char *, const char *, const char *);
+
+/* options.c: whether a named option is on ([[ -o name ]]). */
+int sh_option_named(const char *);
 void sh_parameters_set(int, char **);
 void sh_parameters_free(struct sh_parameters *);
 void sh_xtrace(int, char **, size_t);

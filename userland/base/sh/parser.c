@@ -37,36 +37,49 @@
 #define T_AND		5
 #define T_OR		6
 #define T_PIPE		7
-#define T_LPAREN	8
-#define T_RPAREN	9
-#define T_LESS		10
-#define T_GREAT		11
-#define T_DGREAT	12
-#define T_CLOBBER	13
-#define T_LESSGREAT	14
-#define T_LESSAND	15
-#define T_GREATAND	16
-#define T_DLESS		17
-#define T_DLESSDASH	18
-#define T_WORD		19
+#define T_PIPEAMP	8	/* |&, a bash extension (a syntax error in POSIX) */
+#define T_LPAREN	9
+#define T_RPAREN	10
+#define T_LESS		11
+#define T_GREAT		12
+#define T_DGREAT	13
+#define T_CLOBBER	14
+#define T_LESSGREAT	15
+#define T_LESSAND	16
+#define T_GREATAND	17
+#define T_DLESS		18
+#define T_DLESSDASH	19
+#define T_TLESS		20	/* <<<, a bash extension (a syntax error in POSIX) */
+#define T_WORD		21
+
+/* The first and last tokens that start a redirection. */
+#define T_REDIRECT_FIRST	T_LESS
+#define T_REDIRECT_LAST		T_TLESS
 
 /* The reserved words, recognized from a word where the grammar allows. */
-#define T_IF		20
-#define T_THEN		21
-#define T_ELSE		22
-#define T_ELIF		23
-#define T_FI		24
-#define T_DO		25
-#define T_DONE		26
-#define T_CASE		27
-#define T_ESAC		28
-#define T_WHILE		29
-#define T_UNTIL		30
-#define T_FOR		31
-#define T_IN		32
-#define T_LBRACE	33
-#define T_RBRACE	34
-#define T_BANG		35
+#define T_IF		22
+#define T_THEN		23
+#define T_ELSE		24
+#define T_ELIF		25
+#define T_FI		26
+#define T_DO		27
+#define T_DONE		28
+#define T_CASE		29
+#define T_ESAC		30
+#define T_WHILE		31
+#define T_UNTIL		32
+#define T_FOR		33
+#define T_IN		34
+#define T_LBRACE	35
+#define T_RBRACE	36
+#define T_BANG		37
+
+/*
+ * [[ and function, which XCU 2.4 lets a shell reserve with results it
+ * leaves unspecified; bash gives them their meaning here.
+ */
+#define T_DLBRACKET	38
+#define T_FUNCTION	39
 
 /* What next_token may do with the word it reads (its flags). */
 #define CHECK_NEWLINE	0x01	/* skip newlines first */
@@ -130,6 +143,7 @@ struct keyword {
 /* The reserved words (XCU 2.4). */
 static const struct keyword keywords[] = {
 	{ "!", T_BANG },
+	{ "[[", T_DLBRACKET },
 	{ "case", T_CASE },
 	{ "do", T_DO },
 	{ "done", T_DONE },
@@ -138,6 +152,7 @@ static const struct keyword keywords[] = {
 	{ "esac", T_ESAC },
 	{ "fi", T_FI },
 	{ "for", T_FOR },
+	{ "function", T_FUNCTION },
 	{ "if", T_IF },
 	{ "in", T_IN },
 	{ "then", T_THEN },
@@ -150,10 +165,10 @@ static const struct keyword keywords[] = {
 
 /* How each token is named in a syntax error. */
 static const char *const token_names[] = {
-	"end of file", "newline", ";", ";;", "&", "&&", "||", "|", "(", ")",
-	"<", ">", ">>", ">|", "<>", "<&", ">&", "<<", "<<-", "word",
+	"end of file", "newline", ";", ";;", "&", "&&", "||", "|", "|&", "(",
+	")", "<", ">", ">>", ">|", "<>", "<&", ">&", "<<", "<<-", "<<<", "word",
 	"if", "then", "else", "elif", "fi", "do", "done", "case", "esac",
-	"while", "until", "for", "in", "{", "}", "!"
+	"while", "until", "for", "in", "{", "}", "!", "[[", "function"
 };
 
 static struct sh_node *parse_list(struct parser *parser, int mode, int allow_empty);
@@ -170,6 +185,18 @@ static struct sh_node *parse_group(struct parser *parser, enum sh_node_kind kind
 static void parse_trailing_redirections(struct parser *parser, struct sh_node *node);
 static struct sh_redirection *parse_redirection(struct parser *parser, int token);
 static void expect(struct parser *parser, int token);
+static void add_stderr_to_pipe(struct parser *parser, struct sh_node *command);
+static struct sh_node *parse_function_keyword(struct parser *parser);
+static struct sh_cond *parse_cond_or(struct parser *parser, int first);
+static struct sh_cond *parse_cond_and(struct parser *parser);
+static struct sh_cond *parse_cond_not(struct parser *parser);
+static struct sh_cond *parse_cond_primary(struct parser *parser);
+static int cond_closing(struct parser *parser, int token);
+static const char *cond_binary_operator(struct parser *parser, int token);
+static struct sh_token *lex_regex_word(struct parser *parser);
+static struct sh_node *parse_arith_command(struct parser *parser);
+static struct sh_node *parse_arith_for(struct parser *parser);
+static char *read_arith_text(int *complete);
 static void syntax_error(struct parser *parser, int token) __attribute__((noreturn));
 static struct sh_node *node_new(struct parser *parser, enum sh_node_kind kind);
 static struct sh_node *node_binary(struct parser *parser, enum sh_node_kind kind, struct sh_node *left, struct sh_node *right);
@@ -182,6 +209,11 @@ static int lex(struct parser *parser);
 static int lex_operator(struct parser *parser, int value);
 static int lex_word(struct parser *parser, int value);
 static void lex_single(struct word_buffer *buffer);
+static int lex_process_substitution(struct parser *parser, int direction);
+static void lex_dollar_single(struct word_buffer *buffer);
+static int dollar_single_escape(unsigned long *code);
+static void buffer_add_quoted(struct word_buffer *buffer, int value);
+static void buffer_add_utf8(struct word_buffer *buffer, unsigned long code);
 static void lex_double(struct parser *parser, struct word_buffer *buffer);
 static void lex_dollar(struct parser *parser, struct word_buffer *buffer, int in_double);
 static void lex_brace(struct parser *parser, struct word_buffer *buffer, int in_double);
@@ -455,10 +487,14 @@ parse_pipeline(
 	pipeline = NULL;
 	for (;;) {
 		token = next_token(parser, 0);
-		if (token != T_PIPE) {
+		if (token != T_PIPE && token != T_PIPEAMP) {
 			push_token(parser);
 			break;
 		}
+
+		/* |& also sends the standard error of the command before it (2>&1). */
+		if (token == T_PIPEAMP)
+			add_stderr_to_pipe(parser, command);
 
 		/* The first | makes the pipeline of the command before it. */
 		if (pipeline == NULL) {
@@ -521,8 +557,20 @@ parse_command(
 		node = parse_group(parser, SH_NODE_GROUP, T_RBRACE);
 		break;
 	case T_LPAREN:
-		node = parse_group(parser, SH_NODE_SUBSHELL, T_RPAREN);
+		node = parse_arith_command(parser);
+		if (node == NULL)
+			node = parse_group(parser, SH_NODE_SUBSHELL, T_RPAREN);
 		break;
+	case T_DLBRACKET:
+		node = node_new(parser, SH_NODE_COND);
+		node->u.cond = parse_cond_or(parser, 1);
+		token = next_token(parser, 0);
+		if (!cond_closing(parser, token))
+			syntax_error(parser, token);
+		break;
+	case T_FUNCTION:
+		node = parse_function_keyword(parser);
+		return node;
 	case T_WORD:
 	case T_LESS:
 	case T_GREAT:
@@ -533,6 +581,7 @@ parse_command(
 	case T_GREATAND:
 	case T_DLESS:
 	case T_DLESSDASH:
+	case T_TLESS:
 		push_token(parser);
 		node = parse_simple(parser);
 		return node;
@@ -571,7 +620,7 @@ parse_simple(
 		token = next_token(parser, flags);
 
 		/* A redirection may stand anywhere among the words. */
-		if (token >= T_LESS && token <= T_DLESSDASH) {
+		if (token >= T_REDIRECT_FIRST && token <= T_REDIRECT_LAST) {
 			redirection = parse_redirection(parser, token);
 			*tail = redirection;
 			tail = &redirection->next;
@@ -720,6 +769,11 @@ parse_for(
 	int token;
 	int valid;
 
+	/* for (( ... )) is the arithmetic loop. */
+	node = parse_arith_for(parser);
+	if (node != NULL)
+		return node;
+
 	/* The variable must be a name, written plainly. */
 	node = node_new(parser, SH_NODE_FOR);
 	token = next_token(parser, 0);
@@ -860,7 +914,7 @@ parse_trailing_redirections(
 		tail = &(*tail)->next;
 	for (;;) {
 		token = next_token(parser, 0);
-		if (token < T_LESS || token > T_DLESSDASH) {
+		if (token < T_REDIRECT_FIRST || token > T_REDIRECT_LAST) {
 			push_token(parser);
 			break;
 		}
@@ -922,6 +976,10 @@ parse_redirection(
 		redirection->op = SH_REDIR_DUP_OUTPUT;
 		redirection->descriptor = 1;
 		break;
+	case T_TLESS:
+		redirection->op = SH_REDIR_HERESTRING;
+		redirection->descriptor = 0;
+		break;
 	default:
 		redirection->op = SH_REDIR_HEREDOC;
 		redirection->descriptor = 0;
@@ -968,6 +1026,510 @@ parse_redirection(
 
 	/* Succeeded: the redirection. */
 	return redirection;
+}
+
+/*
+ * Parses a function definition written with the reserved word function
+ * (bash): function name { ... }, or function name() and a command.
+ */
+static struct sh_node *
+parse_function_keyword(
+	struct parser *parser)
+{
+	struct sh_token *name;
+	struct sh_node *node;
+	int token;
+	int valid;
+
+	/* The name, written plainly. */
+	token = next_token(parser, 0);
+	valid = 0;
+	if (token == T_WORD)
+		valid = is_plain_word(parser->word, NULL);
+	if (valid)
+		valid = sh_var_name(parser->word->raw);
+	if (!valid)
+		sh_error("syntax error: bad function name");
+	name = parser->word;
+
+	/* () may follow; parse_function reads from after the (. */
+	token = next_token(parser, 0);
+	if (token == T_LPAREN) {
+		node = parse_function(parser, name);
+		return node;
+	}
+	push_token(parser);
+
+	/* Without (), the body follows after any newlines. */
+	(void)next_token(parser, CHECK_NEWLINE | CHECK_KEYWORD | CHECK_ALIAS);
+	push_token(parser);
+	node = node_new(parser, SH_NODE_FUNCTION);
+	node->u.function.name = name->raw;
+	node->u.function.body = parse_command(parser);
+
+	/* Succeeded: the definition. */
+	return node;
+}
+
+/*
+ * Parses the || level of a [[ ... ]] expression.  Newlines may stand
+ * before an operand.
+ */
+static struct sh_cond *
+parse_cond_or(
+	struct parser *parser,
+	int first)
+{
+	struct sh_cond *node;
+	struct sh_cond *joined;
+	int token;
+
+	/* The first operand, then each one joined by ||. */
+	(void)first;
+	node = parse_cond_and(parser);
+	for (;;) {
+		token = next_token(parser, 0);
+		if (token != T_OR) {
+			push_token(parser);
+			break;
+		}
+		joined = sh_arena_alloc(parser->arena, sizeof(*joined));
+		joined->kind = SH_COND_OR;
+		joined->first = node;
+		joined->second = parse_cond_and(parser);
+		node = joined;
+	}
+
+	/* Succeeded. */
+	return node;
+}
+
+/* Parses the && level of a [[ ... ]] expression. */
+static struct sh_cond *
+parse_cond_and(
+	struct parser *parser)
+{
+	struct sh_cond *node;
+	struct sh_cond *joined;
+	int token;
+
+	/* The first operand, then each one joined by &&. */
+	node = parse_cond_not(parser);
+	for (;;) {
+		token = next_token(parser, 0);
+		if (token != T_AND) {
+			push_token(parser);
+			break;
+		}
+		joined = sh_arena_alloc(parser->arena, sizeof(*joined));
+		joined->kind = SH_COND_AND;
+		joined->first = node;
+		joined->second = parse_cond_not(parser);
+		node = joined;
+	}
+
+	/* Succeeded. */
+	return node;
+}
+
+/* Parses ! before a primary of a [[ ... ]] expression. */
+static struct sh_cond *
+parse_cond_not(
+	struct parser *parser)
+{
+	struct sh_cond *node;
+	int token;
+
+	/* ! negates what follows. */
+	token = next_token(parser, CHECK_NEWLINE);
+	if (token == T_WORD && is_plain_word(parser->word, "!")) {
+		node = sh_arena_alloc(parser->arena, sizeof(*node));
+		node->kind = SH_COND_NOT;
+		node->first = parse_cond_not(parser);
+		return node;
+	}
+	push_token(parser);
+
+	/* Succeeded: a primary. */
+	return parse_cond_primary(parser);
+}
+
+/*
+ * Parses a primary of a [[ ... ]] expression: ( expression ), a unary
+ * test, a binary test, or a word.  The words are not split or globbed.
+ */
+static struct sh_cond *
+parse_cond_primary(
+	struct parser *parser)
+{
+	struct sh_cond *node;
+	struct sh_token *word;
+	struct sh_token *operand;
+	const char *op;
+	int token;
+	int unary;
+
+	/* ( expression ). */
+	token = next_token(parser, CHECK_NEWLINE);
+	if (token == T_LPAREN) {
+		node = parse_cond_or(parser, 0);
+		token = next_token(parser, CHECK_NEWLINE);
+		if (token != T_RPAREN)
+			syntax_error(parser, token);
+		return node;
+	}
+
+	/* Otherwise a word, which may not be the closing ]]. */
+	if (token != T_WORD || cond_closing(parser, token))
+		syntax_error(parser, token);
+	word = parser->word;
+	node = sh_arena_alloc(parser->arena, sizeof(*node));
+	node->left = word;
+
+	/*
+	 * A binary operator after the word, unless the word is a unary
+	 * operator and nothing follows the second word: [[ -f == ]] tests
+	 * a file named ==, as in bash.
+	 */
+	unary = is_plain_word(word, NULL) && word->raw_length == 2 &&
+		word->raw[0] == '-' &&
+		strchr("abcdefghknoprstuvwxzGLNOSR", word->raw[1]) != NULL;
+	token = next_token(parser, 0);
+	op = cond_binary_operator(parser, token);
+	if (op != NULL && unary && token == T_WORD) {
+		operand = parser->word;
+		token = next_token(parser, 0);
+		push_token(parser);
+		if (token != T_WORD || cond_closing(parser, token)) {
+			node->kind = SH_COND_UNARY;
+			snprintf(node->op, sizeof(node->op), "%s", word->raw);
+			node->left = operand;
+			return node;
+		}
+	}
+	if (op != NULL) {
+		node->kind = SH_COND_BINARY;
+		snprintf(node->op, sizeof(node->op), "%s", op);
+		if (strcmp(op, "=~") == 0) {
+			node->right = lex_regex_word(parser);
+			return node;
+		}
+		token = next_token(parser, 0);
+		if (token != T_WORD || cond_closing(parser, token))
+			syntax_error(parser, token);
+		node->right = parser->word;
+		return node;
+	}
+
+	/* A unary operator and its operand. */
+	if (unary && token == T_WORD && !cond_closing(parser, token)) {
+		node->kind = SH_COND_UNARY;
+		snprintf(node->op, sizeof(node->op), "%s", word->raw);
+		node->left = parser->word;
+		return node;
+	}
+
+	/* A word alone. */
+	push_token(parser);
+	node->kind = SH_COND_WORD;
+	return node;
+}
+
+/* Reports whether a token is the ]] that closes [[. */
+static int
+cond_closing(
+	struct parser *parser,
+	int token)
+{
+	/* ]] written plainly. */
+	if (token != T_WORD)
+		return 0;
+	return is_plain_word(parser->word, "]]");
+}
+
+/* Returns the binary operator a token is inside [[ ... ]], or NULL. */
+static const char *
+cond_binary_operator(
+	struct parser *parser,
+	int token)
+{
+	static const char *const operators[] = {
+		"==", "=", "!=", "=~", "-eq", "-ne", "-lt", "-le", "-gt", "-ge",
+		"-nt", "-ot", "-ef", NULL
+	};
+	int index;
+
+	/* < and > are read as redirection operators. */
+	if (token == T_LESS && parser->io_number < 0)
+		return "<";
+	if (token == T_GREAT && parser->io_number < 0)
+		return ">";
+	if (token != T_WORD)
+		return NULL;
+
+	/* The word operators. */
+	for (index = 0; operators[index] != NULL; index++) {
+		if (is_plain_word(parser->word, operators[index]))
+			return operators[index];
+	}
+
+	/* Not one. */
+	return NULL;
+}
+
+/*
+ * Reads the regular expression after =~ as one word: parentheses and |
+ * belong to it, and it ends at a blank outside parentheses.
+ */
+static struct sh_token *
+lex_regex_word(
+	struct parser *parser)
+{
+	struct sh_token *word;
+	struct word_buffer buffer;
+	int value;
+	int depth;
+
+	/* Skips the blanks before it. */
+	do
+		value = getc_continued();
+	while (value == ' ' || value == '\t');
+
+	/* The characters up to a blank or a newline at depth 0. */
+	memset(&buffer, 0, sizeof(buffer));
+	depth = 0;
+	for (;;) {
+		if (value == EOF || value == '\n')
+			break;
+		if ((value == ' ' || value == '\t') && depth == 0)
+			break;
+		if (value == ')' && depth == 0)
+			break;
+		if (value == '(') {
+			depth++;
+			buffer_add(&buffer, value);
+		} else if (value == ')') {
+			depth--;
+			buffer_add(&buffer, value);
+		} else if (value == '\\') {
+			buffer_add(&buffer, value);
+			value = sh_input_getc();
+			if (value == EOF)
+				break;
+			buffer_add(&buffer, value);
+		} else if (value == '\'') {
+			buffer_add(&buffer, value);
+			lex_single(&buffer);
+		} else if (value == '"') {
+			buffer_add(&buffer, value);
+			lex_double(parser, &buffer);
+		} else if (value == '$') {
+			lex_dollar(parser, &buffer, 0);
+		} else {
+			buffer_add(&buffer, value);
+		}
+		value = getc_continued();
+	}
+	sh_input_ungetc(value);
+
+	/* The word. */
+	if (buffer.text == NULL)
+		sh_error("syntax error: missing regular expression after =~");
+	word = make_word(parser, buffer.text, buffer.length);
+	free(buffer.text);
+
+	/* Succeeded. */
+	return word;
+}
+
+/*
+ * Parses (( expression )) after the first (, when the second follows at
+ * once (bash).  Returns NULL, having given the text back, when what
+ * follows is not one arithmetic expression, so that it is read as
+ * nested subshells.
+ */
+static struct sh_node *
+parse_arith_command(
+	struct parser *parser)
+{
+	struct sh_node *node;
+	char *text;
+	int value;
+	int complete;
+
+	/* ( must be followed by ( directly. */
+	value = sh_input_getc();
+	if (value != '(') {
+		sh_input_ungetc(value);
+		return NULL;
+	}
+
+	/* The text up to )). */
+	text = read_arith_text(&complete);
+	if (!complete) {
+		sh_input_give_back_text(text, strlen(text));
+		sh_input_give_back_text("(", 1);
+		free(text);
+		return NULL;
+	}
+
+	/* The command. */
+	node = node_new(parser, SH_NODE_ARITH);
+	node->u.arith = sh_arena_strndup(parser->arena, text, strlen(text));
+	free(text);
+
+	/* Succeeded. */
+	return node;
+}
+
+/*
+ * Parses for (( init; test; step )) and its body (bash), after for, or
+ * returns NULL when for is followed by anything else.
+ */
+static struct sh_node *
+parse_arith_for(
+	struct parser *parser)
+{
+	struct sh_node *node;
+	char *text;
+	char *parts[3];
+	char *cursor;
+	int value;
+	int second;
+	int complete;
+	int depth;
+	int index;
+	int token;
+
+	/* for, blanks, then (( directly. */
+	if (parser->pushed)
+		return NULL;
+	do
+		value = getc_continued();
+	while (value == ' ' || value == '\t');
+	if (value != '(') {
+		sh_input_ungetc(value);
+		return NULL;
+	}
+	second = sh_input_getc();
+	if (second != '(') {
+		sh_input_ungetc(second);
+		sh_input_ungetc(value);
+		return NULL;
+	}
+	text = read_arith_text(&complete);
+	if (!complete)
+		sh_error("syntax error: bad for loop");
+
+	/* The three expressions, split at the semicolons outside parentheses. */
+	parts[0] = text;
+	index = 1;
+	depth = 0;
+	for (cursor = text; *cursor != '\0'; cursor++) {
+		if (*cursor == '(')
+			depth++;
+		else if (*cursor == ')')
+			depth--;
+		else if (*cursor == ';' && depth == 0 && index < 3) {
+			*cursor = '\0';
+			parts[index++] = cursor + 1;
+		}
+	}
+	if (index != 3)
+		sh_error("syntax error: bad for loop");
+	node = node_new(parser, SH_NODE_ARITH_FOR);
+	node->u.arith_for.init = sh_arena_strndup(parser->arena, parts[0], strlen(parts[0]));
+	node->u.arith_for.test = sh_arena_strndup(parser->arena, parts[1], strlen(parts[1]));
+	node->u.arith_for.step = sh_arena_strndup(parser->arena, parts[2], strlen(parts[2]));
+	free(text);
+
+	/* ; or newlines, then do ... done or { ... }. */
+	token = next_token(parser, CHECK_NEWLINE | CHECK_KEYWORD);
+	if (token == T_SEMI)
+		token = next_token(parser, CHECK_NEWLINE | CHECK_KEYWORD);
+	if (token == T_LBRACE) {
+		node->u.arith_for.body = parse_group(parser, SH_NODE_GROUP, T_RBRACE);
+		return node;
+	}
+	if (token != T_DO)
+		syntax_error(parser, token);
+	node->u.arith_for.body = parse_list(parser, LIST_COMPOUND, 0);
+	expect(parser, T_DONE);
+
+	/* Succeeded. */
+	return node;
+}
+
+/*
+ * Reads the text of an arithmetic command after ((, up to the )) that
+ * closes it, counting parentheses.  *complete is cleared when a ) at
+ * depth 0 is not followed by another; the text read, with that ) and
+ * what followed, is returned all the same, for the caller to give back.
+ */
+static char *
+read_arith_text(
+	int *complete)
+{
+	struct word_buffer buffer;
+	int value;
+	int depth;
+
+	/* The characters, keeping count of parentheses. */
+	memset(&buffer, 0, sizeof(buffer));
+	depth = 0;
+	*complete = 0;
+	for (;;) {
+		value = getc_continued();
+		if (value == SH_INPUT_END_OF_ALIAS)
+			continue;
+		if (value == EOF)
+			unterminated("arithmetic command");
+		if (value == '(') {
+			depth++;
+		} else if (value == ')' && depth > 0) {
+			depth--;
+		} else if (value == ')') {
+			value = sh_input_getc();
+			if (value == ')') {
+				*complete = 1;
+				break;
+			}
+			buffer_add(&buffer, ')');
+			if (value != EOF)
+				buffer_add(&buffer, value);
+			break;
+		}
+		buffer_add(&buffer, value);
+	}
+
+	/* Succeeded: the text, which the caller frees. */
+	if (buffer.text == NULL)
+		return sh_strdup("");
+	return buffer.text;
+}
+
+/*
+ * Adds 2>&1 after the redirections of a command that |& joins to the next,
+ * as bash does: its standard error goes where its standard output goes,
+ * into the pipe.
+ */
+static void
+add_stderr_to_pipe(
+	struct parser *parser,
+	struct sh_node *command)
+{
+	struct sh_redirection *redirection;
+	struct sh_redirection **tail;
+
+	/* 2>&1, at the end of the command's redirections. */
+	redirection = sh_arena_alloc(parser->arena, sizeof(*redirection));
+	redirection->op = SH_REDIR_DUP_OUTPUT;
+	redirection->descriptor = 2;
+	redirection->word = make_word(parser, "1", 1);
+	tail = &command->redirections;
+	while (*tail != NULL)
+		tail = &(*tail)->next;
+	*tail = redirection;
 }
 
 /* Reads a token that must be the one given, as a reserved word if it is one. */
@@ -1223,6 +1785,7 @@ lex(
 	struct parser *parser)
 {
 	int value;
+	int next;
 	int operator;
 	int token;
 
@@ -1256,6 +1819,19 @@ lex(
 		if (parser->heredocs != NULL)
 			read_heredocs(parser);
 		return T_NEWLINE;
+	}
+
+	/*
+	 * <( and >( start a process substitution (bash), which POSIX reads
+	 * as a redirection followed by a syntax error.
+	 */
+	if (value == '<' || value == '>') {
+		next = getc_continued();
+		if (next == '(') {
+			token = lex_process_substitution(parser, value);
+			return token;
+		}
+		sh_input_ungetc(next);
 	}
 
 	/* An operator. */
@@ -1300,6 +1876,8 @@ lex_operator(
 	case '|':
 		if (next == '|')
 			return T_OR;
+		if (next == '&')
+			return T_PIPEAMP;
 		sh_input_ungetc(next);
 		return T_PIPE;
 	case '<':
@@ -1309,6 +1887,10 @@ lex_operator(
 				parser->dash = 1;
 				return T_DLESSDASH;
 			}
+
+			/* <<<: a here-string. */
+			if (next == '<')
+				return T_TLESS;
 
 			/* << alone. */
 			sh_input_ungetc(next);
@@ -1411,6 +1993,30 @@ lex_word(
 	return T_WORD;
 }
 
+/*
+ * Reads a process substitution after <( or >(: the commands up to the
+ * closing parenthesis, as a word that expansion turns into /dev/fd/N.
+ */
+static int
+lex_process_substitution(
+	struct parser *parser,
+	int direction)
+{
+	struct word_buffer buffer;
+
+	/* The text, as written, with its commands parsed for their errors. */
+	memset(&buffer, 0, sizeof(buffer));
+	buffer_add(&buffer, direction);
+	buffer_add(&buffer, '(');
+	lex_substitution(parser, &buffer);
+	parser->word = make_word(parser, buffer.text, buffer.length);
+	parser->word->process = direction;
+	free(buffer.text);
+
+	/* Succeeded: a word. */
+	return T_WORD;
+}
+
 /* Reads a single quotation, after its opening quote. */
 static void
 lex_single(
@@ -1428,6 +2034,232 @@ lex_single(
 		buffer_add(buffer, value);
 		if (value == '\'')
 			break;
+	}
+}
+
+/*
+ * Reads a dollar-single-quotation, after $': the backslash escapes of
+ * XCU 2.2.4 (and bash's \e, \E, \u and \U) give the characters they
+ * stand for, which go into the word as a single quotation, so that the
+ * rest of the shell sees plain quoted text.  A NUL ends the text, as in
+ * bash; what follows it up to the closing quote is dropped.
+ */
+static void
+lex_dollar_single(
+	struct word_buffer *buffer)
+{
+	unsigned long code;
+	int value;
+	int ended;
+	int kind;
+
+	/* The text, opened as a single quotation. */
+	buffer_add(buffer, '\'');
+	ended = 0;
+	for (;;) {
+		value = sh_input_getc();
+		if (value == SH_INPUT_END_OF_ALIAS)
+			continue;
+		if (value == EOF)
+			unterminated("quoted string");
+		if (value == '\'')
+			break;
+
+		/* A plain character is itself. */
+		if (value != '\\') {
+			if (!ended)
+				buffer_add_quoted(buffer, value);
+			continue;
+		}
+
+		/* An escape: a byte, or a character written in UTF-8. */
+		kind = dollar_single_escape(&code);
+		if (ended)
+			continue;
+		if (kind == 0) {
+			buffer_add_quoted(buffer, '\\');
+			buffer_add_quoted(buffer, (int)code);
+			continue;
+		}
+		if (kind == 2) {
+			buffer_add_utf8(buffer, code);
+			continue;
+		}
+		if (code == 0) {
+			ended = 1;
+			continue;
+		}
+		buffer_add_quoted(buffer, (int)code);
+	}
+
+	/* The quotation closes. */
+	buffer_add(buffer, '\'');
+}
+
+/*
+ * Reads the escape after a backslash in $'...'.  Returns 1 with a byte in
+ * *code, 2 with a character to write in UTF-8, or 0 when the backslash
+ * escapes nothing (*code is then the character after it, kept with it).
+ */
+static int
+dollar_single_escape(
+	unsigned long *code)
+{
+	unsigned long value;
+	int digits;
+	int limit;
+	int base;
+	int kind;
+	int next;
+	int digit;
+
+	/* The character after the backslash. */
+	next = sh_input_getc();
+	if (next == EOF)
+		unterminated("quoted string");
+
+	/* The single-letter escapes. */
+	kind = 1;
+	switch (next) {
+	case 'a':
+		*code = 7;
+		return 1;
+	case 'b':
+		*code = 8;
+		return 1;
+	case 'e':
+	case 'E':
+		*code = 27;
+		return 1;
+	case 'f':
+		*code = 12;
+		return 1;
+	case 'n':
+		*code = 10;
+		return 1;
+	case 'r':
+		*code = 13;
+		return 1;
+	case 't':
+		*code = 9;
+		return 1;
+	case 'v':
+		*code = 11;
+		return 1;
+	case '\\':
+	case '\'':
+	case '"':
+	case '?':
+		*code = (unsigned long)next;
+		return 1;
+	case 'c':
+		/* \cX: the control character of X. */
+		next = sh_input_getc();
+		if (next == EOF)
+			unterminated("quoted string");
+		if (next == '\\')
+			(void)sh_input_getc();
+		*code = (unsigned long)next & 0x1fU;
+		return 1;
+	default:
+		break;
+	}
+
+	/* Octal (up to three digits), hexadecimal and Unicode escapes. */
+	base = 0;
+	limit = 0;
+	if (next >= '0' && next <= '7') {
+		base = 8;
+		limit = 3;
+		sh_input_ungetc(next);
+	} else if (next == 'x') {
+		base = 16;
+		limit = 2;
+	} else if (next == 'u') {
+		base = 16;
+		limit = 4;
+		kind = 2;
+	} else if (next == 'U') {
+		base = 16;
+		limit = 8;
+		kind = 2;
+	}
+
+	/* Any other character is not an escape. */
+	if (base == 0) {
+		*code = (unsigned long)next;
+		return 0;
+	}
+
+	/* The digits. */
+	value = 0;
+	for (digits = 0; digits < limit; digits++) {
+		next = sh_input_getc();
+		digit = -1;
+		if (next >= '0' && next <= '9')
+			digit = next - '0';
+		else if (base == 16 && next >= 'a' && next <= 'f')
+			digit = next - 'a' + 10;
+		else if (base == 16 && next >= 'A' && next <= 'F')
+			digit = next - 'A' + 10;
+		if (digit < 0 || digit >= base) {
+			sh_input_ungetc(next);
+			break;
+		}
+		value = value * (unsigned long)base + (unsigned long)digit;
+	}
+
+	/* A \x or \u without digits is kept as written. */
+	if (digits == 0 && base == 16) {
+		*code = kind == 2 ? (limit == 4 ? 'u' : 'U') : 'x';
+		return 0;
+	}
+
+	/* Succeeded. */
+	*code = value & (kind == 2 ? 0x1fffffUL : 0xffUL);
+	return kind;
+}
+
+/* Adds a character inside a single quotation, a quote as '\''. */
+static void
+buffer_add_quoted(
+	struct word_buffer *buffer,
+	int value)
+{
+	/* A quote closes the quotation, is escaped, and opens it again. */
+	if (value == '\'') {
+		buffer_add(buffer, '\'');
+		buffer_add(buffer, '\\');
+		buffer_add(buffer, '\'');
+		buffer_add(buffer, '\'');
+		return;
+	}
+
+	/* Anything else is itself. */
+	buffer_add(buffer, value);
+}
+
+/* Adds a character, written in UTF-8, inside a single quotation. */
+static void
+buffer_add_utf8(
+	struct word_buffer *buffer,
+	unsigned long code)
+{
+	/* One to four bytes by the size of the code. */
+	if (code < 0x80UL) {
+		buffer_add_quoted(buffer, (int)code);
+	} else if (code < 0x800UL) {
+		buffer_add(buffer, (int)(0xc0UL | (code >> 6)));
+		buffer_add(buffer, (int)(0x80UL | (code & 0x3fUL)));
+	} else if (code < 0x10000UL) {
+		buffer_add(buffer, (int)(0xe0UL | (code >> 12)));
+		buffer_add(buffer, (int)(0x80UL | ((code >> 6) & 0x3fUL)));
+		buffer_add(buffer, (int)(0x80UL | (code & 0x3fUL)));
+	} else {
+		buffer_add(buffer, (int)(0xf0UL | (code >> 18)));
+		buffer_add(buffer, (int)(0x80UL | ((code >> 12) & 0x3fUL)));
+		buffer_add(buffer, (int)(0x80UL | ((code >> 6) & 0x3fUL)));
+		buffer_add(buffer, (int)(0x80UL | (code & 0x3fUL)));
 	}
 }
 
@@ -1481,6 +2313,13 @@ lex_dollar(
 	/* Looks at what follows the dollar sign. */
 	buffer_add(buffer, '$');
 	value = getc_continued();
+
+	/* $'...' (XCU 2.2.4, Issue 8) is written out as the quotation it means. */
+	if (value == '\'' && !in_double) {
+		buffer->length--;
+		lex_dollar_single(buffer);
+		return;
+	}
 	if (value == '{') {
 		buffer_add(buffer, value);
 		lex_brace(parser, buffer, in_double);

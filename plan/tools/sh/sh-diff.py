@@ -48,6 +48,48 @@ def dash_lacks(file_name: str, case_name: str) -> bool:
 	return file_name == "vars-special.test.sh" and "$LINENO" in case_name
 
 
+# Cases that use an extension WS065 added where POSIX leaves the result
+# unspecified or calls it a syntax error ($'...', [[ ]], (( )), for ((;;)),
+# >& file and the like): dash reads them otherwise (it runs (( as nested
+# subshells, for one), so they are scored against bash --posix instead.
+BASH_REFERENCE = {
+	('var-op-len.test.sh', '${#s} respects LC_ALL - length in bytes or code points'),
+	('arith.test.sh', 'Logical Ops Short Circuit'),
+	('arith.test.sh', 'More 64-bit ops'),
+	('bool-parse.test.sh', 'Allowed: [[ = ]] and [[ == ]]'),
+	('bool-parse.test.sh', '[[ -f -f ]] and [[ -f == ]]'),
+	('bugs.test.sh', 'for loop (issue #1446)'),
+	('bugs.test.sh', 'for loop 2 (issue #1446)'),
+	('bugs.test.sh', '(( status bug'),
+	('builtin-bracket.test.sh', 'More negative numbers'),
+	('builtin-printf.test.sh', 'printf %c unicode - prints the first BYTE of a string - it does not respect UTF-8'),
+	('nul-bytes.test.sh', 'printf - literal NUL in format string'),
+	('nul-bytes.test.sh', 'NUL bytes with test -n'),
+	('nul-bytes.test.sh', 'NUL bytes with test -f'),
+	('nul-bytes.test.sh', 'NUL bytes with ${#s} (OSH and zsh agree)'),
+	('paren-ambiguity.test.sh', '(( closed with )) after multiple lines is parse error - #2337'),
+	('quote.test.sh', "$'' with newlines"),
+	('quote.test.sh', "$'' octal escapes don't have leading 0"),
+	('quote.test.sh', "$'' octal escapes with fewer than 3 chars"),
+	('quote.test.sh', "$'' supports \\cA escape for Ctrl-A - mask with 0x1f"),
+	('redirect-command.test.sh', 'redirect bash extensions:   [[  ((  for (('),
+	('redirect.test.sh', 'Descriptor redirect with filename'),
+	('var-sub-quote.test.sh', "$'' allowed within VarSub arguments"),
+	('var-sub.test.sh', 'Descriptor redirect to bad "$@"'),
+	('xtrace.test.sh', 'xtrace with newlines'),
+}
+BASH = ["/usr/bin/bash", "--posix"]
+
+
+def reference_for(file: str, name: str, ref: str) -> list[str]:
+	"""The reference shell of one case, as a command."""
+	if (file.rpartition("/")[2], name) in BASH_REFERENCE:
+		return BASH
+	if file.endswith("/bash-extensions.sh"):
+		return BASH
+	return [ref]
+
+
 def parse_file(path: Path, require_dash: bool) -> list[tuple[str, str]]:
 	"""Returns (name, code) of every scorable case of one spec file."""
 	text = path.read_text(errors="replace")
@@ -87,20 +129,21 @@ def parse_file(path: Path, require_dash: bool) -> list[tuple[str, str]]:
 REPO_ROOT = ""
 
 
-def run(shell: str, code: str, work: Path) -> tuple[bytes, int]:
-	"""Runs one case with one shell in a fresh directory."""
+def run(shell: str | list[str], code: str, work: Path) -> tuple[bytes, int]:
+	"""Runs one case with one shell (a path, or a command) in a fresh directory."""
+	command = shell if isinstance(shell, list) else [shell]
 	script = work / "case.sh"
 	script.write_text(code)
 	env = {
 		"PATH": "/usr/bin:/bin",
 		"HOME": str(work),
 		"TMP": str(work),
-		"SH": shell,
+		"SH": command[0],
 		"LC_ALL": "C",
 		"REPO_ROOT": REPO_ROOT,
 	}
 	try:
-		result = subprocess.run([shell, str(script)], cwd=work, env=env,
+		result = subprocess.run(command + [str(script)], cwd=work, env=env,
 		    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
 		    stderr=subprocess.DEVNULL, timeout=TIMEOUT)
 		return result.stdout, result.returncode
@@ -113,7 +156,7 @@ def compare(args: tuple[str, str, str, str, str]) -> tuple[str, str, bool, str]:
 	# Both shells run in the same directory, emptied in between, so that a
 	# case printing its directory sees the same path.
 	with tempfile.TemporaryDirectory(prefix="ws042-") as a:
-		want = run(ref, code, Path(a))
+		want = run(reference_for(file, name, ref), code, Path(a))
 		subprocess.run(["find", a, "-mindepth", "1", "-delete"], check=False)
 		subprocess.run(["chmod", "-R", "u+rwx", a], check=False)
 		got = run(shell, code, Path(a))
@@ -130,7 +173,7 @@ def compare(args: tuple[str, str, str, str, str]) -> tuple[str, str, bool, str]:
 def export_one(args: tuple[int, tuple, Path]) -> None:
 	index, (file, name, code, ref, _shell), out = args
 	with tempfile.TemporaryDirectory(prefix="ws042-") as a:
-		want = run(ref, code, Path(a))
+		want = run(reference_for(file, name, ref), code, Path(a))
 	# Two small files per case keep the bundle within a guest's tmpfs: the
 	# code, and the expectation (status, name, then the output).
 	# A guest's tmpfs holds a limited number of entries per directory, so

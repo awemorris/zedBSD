@@ -1,13 +1,13 @@
 <!-- awesome-plan project=zedbsd record=past-log -->
 
 <!-- awesome-plan-current:start -->
-Active Queue: なし
-Last finished Queue: q450（ws064-p004 cleared。sh の fork 1417 → 214、`make -j4` 4.18〜4.38 秒）
+Active Queue: q452（ws065-p002）
+Last finished Queue: q451（ws065-p001 cleared。sh の構文の bash 拡張）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q450（2026-09-26）
+## 最新: q443〜q451（2026-09-26）
 
 [q443](queue-q443.md): ws063-p001 cleared。journal の大きさを mkfs で記録し、mount で `.ufs-journal`（extent）を再利用・再確保・作成する。
 [q444](queue-q444.md): ws061-p008 cleared。libc の同期の system call を減らし、make（直列）12.8〜13.1 秒（host `-j1` 15.2 秒）。
@@ -17,6 +17,7 @@ Last finished Queue: q450（ws064-p004 cleared。sh の fork 1417 → 214、`mak
 [q448](queue-q448.md): ws064-p001 cleared。base の make の `-j`（歩きの更新、job の表、GNU 互換の jobserver、`.WAIT`・`.NOTPARALLEL`）。差分試験 100/100、guest の expat `make -j4` 7.3〜7.8 秒（host 5.06 秒）。
 [q449](queue-q449.md): ws064-p002 cleared。kernel の mutex の速い道、`vfork`（system call と libc）と vfork の posix_spawn、make・sh の posix_spawn、fork・destroy の VM の大域の lock の保持の短縮、逆写像の O(1)。`make -j4` 4.94〜5.00 秒（host 5.14〜5.18 秒）、configure 8.2〜8.9 秒、直列 11.3 秒。
 [q450](queue-q450.md): ws064-p004 cleared。sh の pipeline・command substitution・`unset` の subshell を fork せずに（posix_spawn、shell の中の `echo`・`printf`）。fork: make 1417 → 214、configure 966 → 423。configure 7.1 秒、直列 10.7 秒、`make -j4` 4.2〜4.4 秒。
+[q451](queue-q451.md): ws065-p001 cleared。sh に POSIX が未規定とする bash の構文（`$'...'`、`[[ ]]`、`function`、`(( ))`、`for (( ))`、`\|&`、`<<<`、`>& file`、`<( )`）。BUG-054 を記録。
 
 ## 前: q439〜q442（2026-09-26）
 

@@ -47,6 +47,7 @@ struct sh_token {
 	char *raw;
 	size_t raw_length;
 	int heredoc;
+	int process;	/* '<' or '>' for <( ) or >( ) (bash), else 0 */
 };
 
 /*
