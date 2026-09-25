@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=past-log -->
 
 <!-- awesome-plan-current:start -->
-Active Queue: なし
+Active Queue: q457（ws035-p052）
 Last finished Queue: q456（ws062-p003 cleared。amd64 の既定を native に）
 <!-- awesome-plan-current:end -->
 

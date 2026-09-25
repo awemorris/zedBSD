@@ -4,9 +4,9 @@
 
 Phase ID: `ws035-p052`
 Parent: [WS035](../ws.md)
-Status: in-progress（sq001-i01）
+Status: in-progress（q457-i01）
 Phase disposition: normal
-Queue: secondary queue sq001（[queue-secondary.md](../../queue-secondary.md)、sq001-i01）
+Queue: q457-i01（前の試行 sq001-i01 は uncleared、下の「試行の記録」）
 設計: [compositing-design.md](../compositing-design.md)（2026-09-25 承認）の D0・D1・D2（GPU の画像）・D3（sampling の fence）・D4（1 回目）・D6・D10（枠だけ）
 
 ## 目的
@@ -74,6 +74,11 @@ vgem の render node の上の zink（Lavapipe）を使う。
 - guest の memory は 8 GiB。
 
 Venus の host（chaos）の iGPU の切替は、作業者の判断で行わなかった（自動の許可が得られなかった）。
+
+## 試行の記録
+
+- sq001-i01（2026-09-25、secondary queue、サブエージェント）: uncleared。試験環境（上の節）と import の回避策の判断（[secondary-deferred.md](../secondary-deferred.md)）を残したが、zwl の実装は commit されていない（`userland/base/zwl` に合成の source は無い、`zdtest` も無い）。secondary queue は後に廃止（2026-09-26 のユーザーの規則: サブエージェントを使わない）。
+- q457-i01（2026-09-26、メインセッション）: 実行中。
 
 ## 結果
 
