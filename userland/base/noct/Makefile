@@ -328,8 +328,8 @@ noct-clean:
 
 .PHONY: noct-toolchain-smoke
 noct-toolchain-smoke: $(NOCT_HOST_BUILD_STAMP) \
-		plan/ws010/tests/toolchain-smoke.noct
-	$(NOCT) plan/ws010/tests/toolchain-smoke.noct \
+		tools/build/noct-toolchain-smoke.noct
+	$(NOCT) tools/build/noct-toolchain-smoke.noct \
 		$(abspath build/noct-toolchain-smoke.txt)
 
 ifneq ($(filter amd64 i386,$(ZEDBSD_ARCHITECTURE)),)

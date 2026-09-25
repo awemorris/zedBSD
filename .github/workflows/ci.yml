@@ -36,13 +36,14 @@ jobs:
           cp config/ci/config-amd64.mk config.mk
           make -j16
           mkdir -p artifacts
-          cp build/amd64/hdd-image.img artifacts/zedbsd-amd64.img
+          # The 2 GiB native image is published gzip-compressed.
+          gzip -9 -c build/amd64/hdd-image.img > artifacts/zedbsd-amd64.img.gz
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
           name: artifacts
-          path: artifacts/*.img
+          path: artifacts/*.img.gz
 
   release:
     name: Create GitHub Release
@@ -76,7 +77,7 @@ jobs:
             
             | CPU     | Machine      | File                  | Description                                             |
             |---------|--------------|-----------------------|---------------------------------------------------------|
-            | amd64   | PC (UEFI)    | `zedbsd-amd64.img`    | USB image.                                              |
+            | amd64   | PC (UEFI)    | `zedbsd-amd64.img.gz` | USB image, gzip-compressed (`gunzip` before writing).   |
 
           files: |
-            artifacts/zedbsd-amd64.img
+            artifacts/zedbsd-amd64.img.gz

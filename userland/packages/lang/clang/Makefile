@@ -253,7 +253,7 @@ ZEDBSD_CLANG_LINK_OBJECTS := crt1.o libclang_rt.builtins.a
 # The copy is the C library of this build, the one /lib holds: the external
 # dynamic directory belongs to the default build directory, and taking it
 # from there gave an image built elsewhere a library older than its own /lib.
-ZEDBSD_CLANG_RUNTIME_LIBC := $(strip $(if $(ZEDBSD_TOPLEVEL_BUILD),$(abspath $(BUILD))/dynamic/libc.so,$(ZEDBSD_EXTERNAL_DYNAMIC)/libc.so))
+ZEDBSD_CLANG_RUNTIME_LIBC := $(strip $(if $(ZEDBSD_TOPLEVEL_BUILD),$(BUILD)/dynamic/libc.so,$(ZEDBSD_EXTERNAL_DYNAMIC)/libc.so))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter clang,$(ZEDBSD_USER_PROGRAMS)),\
 	$(ZEDBSD_CLANG_STAGED) $(ZEDBSD_CLANG_LICENSE) $(ZEDBSD_CLANG_RUNTIME_LIBC))
