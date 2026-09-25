@@ -29,6 +29,7 @@ jobs:
 
       - name: Install pinned LLVM toolchain cache
         run: |
+          make toolchain-cache
           make -j16 toolchain
 
       - name: Build amd64
