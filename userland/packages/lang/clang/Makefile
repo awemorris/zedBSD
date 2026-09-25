@@ -137,7 +137,11 @@ ZEDBSD_CLANG_CMAKE_OPTIONS := \
 	-DLLD_INCLUDE_TESTS=OFF \
 	-DLLVM_TOOL_LLVM_SHLIB_BUILD=ON
 
-$(ZEDBSD_CLANG_PATCHED): $(ZEDBSD_CLANG_SOURCE_STAMP) $(ZEDBSD_CLANG_PATCHES)
+# The toolchain verifies the tree against the release and its own patch, and
+# builds the host generators from it, before these patches change it.  With
+# the binary cache both first happen here (llvm-native-tools).
+$(ZEDBSD_CLANG_PATCHED): $(ZEDBSD_CLANG_SOURCE_STAMP) $(ZEDBSD_CLANG_PATCHES) \
+	$(if $(ZEDBSD_TOPLEVEL_BUILD),| $(ZEDBSD_LLVM_NATIVE_STAMP))
 	@set -eu; for patch in $(ZEDBSD_CLANG_PATCHES); do \
 		if patch -p1 -R --dry-run -f -d '$(ZEDBSD_CLANG_SOURCE)' \
 			< "$$patch" >/dev/null 2>&1; then \

@@ -277,6 +277,21 @@ $(ZEDBSD_LLVM_BUILD_STAMP): $(ZEDBSD_LLVM_CONFIG_STAMP) \
 
 llvm-build: $(ZEDBSD_LLVM_BUILD_STAMP)
 
+# The generators the cross build of the clang package runs on the host.  A
+# source build of the toolchain makes them; with the binary cache (which holds
+# only the installed tools) this builds just them, a small part of LLVM.
+ZEDBSD_LLVM_NATIVE_TOOLS := llvm-min-tblgen llvm-tblgen clang-tblgen lldb-tblgen
+ZEDBSD_LLVM_NATIVE_STAMP := $(ZEDBSD_LLVM_BUILD)/.zedbsd-native-tools
+
+$(ZEDBSD_LLVM_NATIVE_STAMP): $(ZEDBSD_LLVM_CONFIG_STAMP) \
+		$(ZEDBSD_LLVM_CONFIG_IDENTITY)
+	cmake --build '$(ZEDBSD_LLVM_BUILD)' --target $(ZEDBSD_LLVM_NATIVE_TOOLS) \
+		--parallel $(ZEDBSD_BUILD_JOBS)
+	@touch '$@'
+
+.PHONY: llvm-native-tools
+llvm-native-tools: $(ZEDBSD_LLVM_NATIVE_STAMP)
+
 # An installation that already carries this version and patch identity is the
 # accepted result, however it got there: a source build, or the verified binary
 # cache. Recording that here is what keeps `make toolchain-cache` meaningful --

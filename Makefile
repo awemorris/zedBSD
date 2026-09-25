@@ -450,8 +450,11 @@ list-targets:
 	@printf 'Focused checks:\n'; \
  for target in $(ZEDBSD_CHECK_TARGETS); do printf ' %s\n' "$$target"; done
 
+# The LLVM source is verified, and the host generators the clang package's
+# cross build runs are built from it, here: with the binary cache nothing else
+# does either before packages start using (and patching) that source tree.
 toolchain: $(NOCT_HOST_BUILD_STAMP) noct-toolchain-smoke llvm-toolchain \
-	sysroots
+	sysroots $(ZEDBSD_LLVM_SOURCE_VERIFIED) $(ZEDBSD_LLVM_NATIVE_STAMP)
 
 .PHONY: download
 download: $(sort $(ZEDBSD_USERLAND_DOWNLOAD_TARGETS)) llvm-download
