@@ -362,8 +362,9 @@ def main() -> int:
 	start_parser.add_argument("--cpus", type=int, default=4)
 	start_parser.add_argument("--symbols", default=None)
 	start_parser.add_argument("--qemu-extra", default=None)
-	start_parser.add_argument("--disk", choices=("usb", "nvme"), default="usb",
-	    help="how the boot disk is attached (default usb)")
+	# NVMe, the disk the native image is tested on (WS062).
+	start_parser.add_argument("--disk", choices=("usb", "nvme"), default="nvme",
+	    help="how the boot disk is attached (default nvme)")
 	start_parser.add_argument("--no-kvm", action="store_true")
 	start_parser.add_argument(
 		"--ovmf-code", default="/usr/share/OVMF/OVMF_CODE_4M.fd")

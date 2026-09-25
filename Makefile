@@ -136,7 +136,9 @@ $(ZEDBSD_KERNEL_LTO_STAMP): FORCE_ZEDBSD_KERNEL_LTO
 # image metadata only: do not add them to ZEDBSD_CPPFLAGS, source lists, object
 # lists, or firmware-loader selection.
 ZEDBSD_VARIANTS_i386_pcat := default
-ZEDBSD_VARIANTS_amd64_pcat := hybrid uefi bios native
+# amd64 defaults to native (WS062): UEFI, the kernel on the ESP, a UFS root
+# partition and a swap partition.  hybrid, uefi and bios stay selectable.
+ZEDBSD_VARIANTS_amd64_pcat := native hybrid uefi bios
 ZEDBSD_VARIANTS_i386_pc98 := default
 ZEDBSD_VARIANTS_arm64_rpi4 := default
 ZEDBSD_VARIANTS_sparcv9_sun4u := default

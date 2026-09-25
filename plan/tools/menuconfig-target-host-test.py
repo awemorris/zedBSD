@@ -94,6 +94,7 @@ def main() -> None:
     if set(menu.BOARD_VARIANTS) != expected_targets:
         fail("board Variant table is incomplete")
     if menu.BOARD_VARIANTS[("amd64", "pcat")] != [
+            ("native", "UEFI, UFS root partition (for PC/AT)"),
             ("hybrid", "UEFI + BIOS (for PC/AT)"),
             ("uefi", "UEFI (for Apple)"),
             ("bios", "BIOS (for PC/AT)")]:
@@ -194,7 +195,7 @@ def main() -> None:
             "ZEDBSD_VARIANT := broken\n",
             encoding="utf-8")
         restored = menu.load(invalid_path)
-        if restored["ZEDBSD_VARIANT"] != "hybrid":
+        if restored["ZEDBSD_VARIANT"] != "native":
             fail("invalid menu values were not repaired")
         for goals in [[], ["disk-image"], ["build/amd64/hdd-image.img"],
                       ["build/x68k/zedbsd-x68k.hd"]]:

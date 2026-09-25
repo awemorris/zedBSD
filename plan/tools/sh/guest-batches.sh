@@ -3,13 +3,15 @@
 # 40 at a time, starting the guest again every 10 batches (BUG-029), and
 # writes each batch's FAIL lines and PASS count to OUTPUT; the last line is
 # ALL-BATCHES-FINISHED.  The guest image must be built already.
-#   sh plan/tools/sh/guest-batches.sh [OUTPUT]   (default build/ws042/guest-all.out)
+#   [IMAGE=...] sh plan/tools/sh/guest-batches.sh [OUTPUT]
+#   (default OUTPUT build/ws042/guest-all.out; IMAGE the native guest image
+#   build/ws053-full-hal-guest/hdd-image.img, booted from NVMe)
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 out=${1:-build/ws042/guest-all.out}
 work=build/ws042/guest-batches
-export GUEST_RUNTIME=build/ws043-guest-run
-image=build/ws043-guest/hdd-image.img
+export GUEST_RUNTIME=${GUEST_RUNTIME:-build/ws042/guest-run}
+image=${IMAGE:-build/ws053-full-hal-guest/hdd-image.img}
 
 # The oils test data the cases read (REPO_ROOT on the guest is /root/oils).
 rm -rf "$work"
@@ -26,7 +28,7 @@ n=0
 for batch in "$work"/batch.*; do
 	if [ $((n % 10)) -eq 0 ]; then
 		python3 plan/tools/guest/guest.py stop >/dev/null 2>&1
-		python3 plan/tools/guest/guest.py start "$image" >/dev/null 2>&1
+		python3 plan/tools/guest/guest.py start --disk nvme "$image" >/dev/null 2>&1
 		python3 plan/tools/guest/guest.py wait >/dev/null 2>&1
 		python3 plan/tools/guest/guest.py put plan/tools/sh/guest-diff.sh /tmp/guest-diff.sh
 		python3 plan/tools/guest/guest.py put "$work/oils.tar" /root/oils.tar

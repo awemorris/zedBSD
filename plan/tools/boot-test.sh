@@ -9,11 +9,12 @@
 #
 #   plan/tools/boot-test.sh [IMAGE]
 #
-#   IMAGE          disk image to boot (default build/amd64/hdd-image.img)
+#   IMAGE          disk image to boot, as the operand or in the environment
+#                  (default build/amd64/hdd-image.img)
 #   OUTPUT         where the screenshot and logs go (default build/boot-test)
 #   BOOT_TIMEOUT   seconds to wait for the login prompt (default 180)
 #   QEMU           emulator to run (default depends on BOOT_MODE)
-#   BOOT_MODE      uefi-usb (default), uefi-nvme, bios-ide or raspi4b
+#   BOOT_MODE      uefi-nvme (default), uefi-usb, bios-ide or raspi4b
 #
 # BOOT_MODE=bios-ide boots the image the way i386 machines are booted: the
 # firmware is the PC BIOS and the disk is on IDE.  Those kernels put their
@@ -31,10 +32,10 @@
 set -euo pipefail
 
 root=$(cd -- "$(dirname -- "$0")/../.." && pwd)
-image=${1:-$root/build/amd64/hdd-image.img}
+image=${1:-${IMAGE:-$root/build/amd64/hdd-image.img}}
 output=${OUTPUT:-$root/build/boot-test}
 boot_timeout=${BOOT_TIMEOUT:-180}
-boot_mode=${BOOT_MODE:-uefi-usb}
+boot_mode=${BOOT_MODE:-uefi-nvme}
 code=${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}
 vars=${OVMF_VARS:-/usr/share/OVMF/OVMF_VARS_4M.fd}
 

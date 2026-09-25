@@ -55,3 +55,7 @@ bash と違う点（残す）: 読み取り専用への代入の誤りの status
 
 `source`（と `.` の operand）、`let`、`test ==`、`declare`・`typeset`（`-i`・`-l`・`-u`・`-r`・`-x`・`-g`・`-p`・`-f`・`-F`）と `local` の同じ option、`printf -v`・`%q`、`builtin`、`pushd`・`popd`・`dirs` を bash と同じ意味で足した。POSIX の意味の dash との差分は変わらない（新たな差は dash に無い機能か、F-019 に記録した既存の差）。
 
+## 訂正（2026-09-26、ws062-p003 で判明）
+
+上の boot test は `IMAGE=build/ws053-full-hal-guest/hdd-image.img` を環境変数で渡したが、当時の `plan/tools/boot-test.sh` は image を引数でしか受け取らず、実際には 2026-09-24 の hybrid の `build/amd64/hdd-image.img`（この Phase の変更を含まない）を起動していた。この Phase の変更を含む image の起動は、同日の guest（`build/ws053-full-hal-guest`、native、NVMe）への SSH の試験で確かめていた。WS067 までの変更を全て含む guest image の boot test を改めて行い PASS（`build/boot-test-amd64-guest-recheck/login.png`、native の root と swap の partition を確認）。`boot-test.sh` は `IMAGE=` も受け取るように直した（ws062-p003）。
+

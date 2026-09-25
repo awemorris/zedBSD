@@ -46,6 +46,7 @@ BOARD_LABELS = {
 BOARD_VARIANTS = {
     ("i386", "pcat"): [("default", "Default")],
     ("amd64", "pcat"): [
+        ("native", "UEFI, UFS root partition (for PC/AT)"),
         ("hybrid", "UEFI + BIOS (for PC/AT)"),
         ("uefi", "UEFI (for Apple)"),
         ("bios", "BIOS (for PC/AT)"),

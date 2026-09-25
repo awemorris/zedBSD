@@ -56,6 +56,12 @@ partially support the following:
 The complete prerequisite, configuration, image, and QEMU procedure is
 in the [build-from-source guide](docs/howto/build-from-source.md).
 
+On amd64 the default disk image is the `native` layout: a GPT disk whose ESP
+holds the UEFI loader and the kernel, a read-write UFS root partition, and a
+swap partition.  It boots through UEFI (`make run` starts QEMU with OVMF and an
+NVMe disk).  The `hybrid` (UEFI and BIOS), `uefi` and `bios` layouts can be
+chosen in `make menuconfig`.
+
 The build commands are:
 
 ```sh

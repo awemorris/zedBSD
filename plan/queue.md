@@ -1,19 +1,13 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue q456: disk image の既定を native に（ws062-p003）
+# Queue: なし（次は WS035）
 
 <!-- awesome-plan-current:start -->
-Status: active（2026-09-26）
-Active Queue: q456
+Status: proposed（2026-09-26）
+Active Queue: none
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
 
-Approval: 2026-09-26 ユーザー「BUG-054の修正を最優先、ディスクイメージをnativeに変更したあと、ws035を次に優先。…これで進めてください。」範囲は [ws062-p003](ws062/phase003/phase.md)。
+直前: [q456](history/queue-q456.md)（ws062-p003 cleared）。
 
-| Order | Attempt | Phase | Status |
-| --- | --- | --- | --- |
-| 1 | q456-i01 | [ws062-p003](ws062/phase003/phase.md) | in-progress |
-
-依存: ws062-p002（cleared）。
-
-Upcoming Work Outlook: WS035（fg010）。ws062-p004（規約）は問題が出たときか WS062 を閉じるとき。
+Upcoming Work Outlook: WS035（fg010、2026-09-26 ユーザー指示で次の優先）。

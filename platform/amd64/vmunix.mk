@@ -1114,16 +1114,19 @@ ifeq ($(ZEDBSD_VARIANT),native)
 # rootpart=; swap is a partition of its own.  Nothing is layered: a write
 # to the root goes to its partition, not through a loop device into a file
 # on FAT.  The root image is built from the same staged tree as the overlay
-# layout's rootfs.img, with room and inodes to be written to.
+# layout's rootfs.img, with room and inodes to be written to.  The root and
+# swap are 1 GiB each, a 2 GiB image that CI publishes gzip-compressed
+# (2026-09-26 user direction).
 AMD64_NATIVE_UEFI_ZEDBSD_CONFIG := $(AMD64_PLATFORM)/zedbsd-native-uefi.cfg
-AMD64_NATIVE_ROOT_MIB ?= 4096
+AMD64_NATIVE_ROOT_MIB ?= 1024
 AMD64_NATIVE_ROOT_INODES ?= 65536
-AMD64_NATIVE_SWAP_MIB ?= 4096
-AMD64_NATIVE_ROOT_IMAGE := $(ZEDBSD_ROOTFS_IMAGE_DIR)/amd64-native-root.ufs
+AMD64_NATIVE_SWAP_MIB ?= 1024
+# The sizes are in the names, so that changing one makes the image again.
+AMD64_NATIVE_ROOT_IMAGE := $(ZEDBSD_ROOTFS_IMAGE_DIR)/amd64-native-root-$(AMD64_NATIVE_ROOT_MIB)m.ufs
 ifneq ($(ZEDBSD_TEST_IMAGE_TAG),)
-AMD64_NATIVE_ROOT_IMAGE := $(ZEDBSD_ROOTFS_IMAGE_DIR)/amd64-native-root-$(ZEDBSD_TEST_IMAGE_TAG).ufs
+AMD64_NATIVE_ROOT_IMAGE := $(ZEDBSD_ROOTFS_IMAGE_DIR)/amd64-native-root-$(AMD64_NATIVE_ROOT_MIB)m-$(ZEDBSD_TEST_IMAGE_TAG).ufs
 endif
-AMD64_NATIVE_SWAP_IMAGE := $(BUILD)/native-swap.img
+AMD64_NATIVE_SWAP_IMAGE := $(BUILD)/native-swap-$(AMD64_NATIVE_SWAP_MIB)m.img
 
 $(AMD64_NATIVE_ROOT_IMAGE): $(BUILD)/rootfs/.stamp $(ARCH_UFS_IMAGE_TOOLS)
 	@mkdir -p $(dir $@)

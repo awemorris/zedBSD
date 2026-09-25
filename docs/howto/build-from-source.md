@@ -115,6 +115,7 @@ provides the following image profiles in this order:
 
 | Menu label | Saved value | Image boot paths | Expected firmware behavior |
 | --- | --- | --- | --- |
+| `UEFI, UFS root partition (for PC/AT)` | `native` (default) | GPT: ESP with the UEFI loader, `vmunix` and `zedbsd.cfg`; a UFS root partition mounted read-write; a swap partition | Boots with OVMF; does not boot with SeaBIOS |
 | `UEFI + BIOS (for PC/AT)` | `hybrid` | Complete GPT/ESP plus compatibility BIOS path | Boots with OVMF and SeaBIOS |
 | `UEFI (for Apple)` | `uefi` | Pure Protective MBR, primary GPT, ESP, and payload FAT32; no BIOS payload | Boots with OVMF; does not boot with SeaBIOS |
 | `BIOS (for PC/AT)` | `bios` | Legacy MBR and BIOS payload; no GPT or ESP | Boots with SeaBIOS; does not boot with OVMF |
@@ -191,9 +192,12 @@ For a selected BIOS-capable profile, the simplest launch is:
 make run
 ```
 
-On amd64, `make run` uses the default QEMU PC machine and SeaBIOS. It is
-therefore suitable for `hybrid` and `bios`, but a correctly built `uefi` image
-is expected not to boot through that command. Use an OVMF launch or the
+On amd64 with the default `native` profile, `make run` boots the image through
+OVMF (`OVMF_CODE`, `OVMF_VARS`, by default under `/usr/share/OVMF/`) from an
+NVMe disk, with a copy of the variables file under the build directory. For the
+other profiles it uses the default QEMU PC machine and SeaBIOS, which suits
+`hybrid` and `bios`; a correctly built `uefi` image is expected not to boot
+through that command. Use an OVMF launch or the
 maintained six-cell runner above for the UEFI path; give every run a disposable
 writable OVMF variables file and never let firmware modify the source image
 used as retained evidence.

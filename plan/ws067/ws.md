@@ -23,6 +23,7 @@ Resume point: —（完了）
 - `userland/base/diff/`: operand の一方でも FIFO か文字 device なら、両方を一時 file に写して比べ、出力は operand の名前で出す。
 - 検証（QEMU 8 GiB 4 vCPU NVMe）: BUG-054 の再現手順が全て期待どおり（`ls /dev/fd` は開いた descriptor だけ、`ls -lL` は regular・pipe を正しく、`diff <(echo 1) <(echo 1)` は 0・`<(echo 2)` は 1、`ls -l /dev/fd` の 50 回の繰り返しの後も SSH が生きる、一時 file は残らない）。sh の差分試験 guest 1412/1458（変わらず、`diff <(..) <(..)` の case を戻した）。build warning 0、boot test PASS（p001・p002）。規約: style-check の指摘は変えた行で 0、全文の規約で見直した。
 - 実機は未実施。
+- 訂正（2026-09-26、ws062-p003 で判明）: p001・p002 の boot test は `IMAGE=` の環境変数が当時の `boot-test.sh` に無視され、2026-09-24 の hybrid の `build/amd64/hdd-image.img` を起動していた。変更を含む guest image の起動は同日の SSH の試験で確かめており、改めて guest image の boot test を行い PASS（`build/boot-test-amd64-guest-recheck/login.png`）。
 
 ## 制限・移管
 

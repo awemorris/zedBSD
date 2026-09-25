@@ -1,13 +1,13 @@
 <!-- awesome-plan project=zedbsd record=past-log -->
 
 <!-- awesome-plan-current:start -->
-Active Queue: q456（ws062-p003）
-Last finished Queue: q455（ws067-p002 cleared。WS067 completed）
+Active Queue: なし
+Last finished Queue: q456（ws062-p003 cleared。amd64 の既定を native に）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q455（2026-09-26）
+## 最新: q443〜q456（2026-09-26）
 
 [q443](queue-q443.md): ws063-p001 cleared。journal の大きさを mkfs で記録し、mount で `.ufs-journal`（extent）を再利用・再確保・作成する。
 [q444](queue-q444.md): ws061-p008 cleared。libc の同期の system call を減らし、make（直列）12.8〜13.1 秒（host `-j1` 15.2 秒）。
@@ -22,6 +22,7 @@ Last finished Queue: q455（ws067-p002 cleared。WS067 completed）
 [q453](queue-q453.md): ws065-p003 cleared。sh に bash の builtin（`source`、`let`、`test ==`、`declare`・`typeset`、`printf -v`・`%q`、`builtin`、`pushd`・`popd`・`dirs`）。静的 link の効果を測り F-020 に記録（expat で 0〜3%）。
 [q454](queue-q454.md): ws067-p001 cleared。`/dev/fd` を呼んだ process の descriptor に（一覧・lookup・stat）、diff が pipe を中身で比べる。BUG-054 resolved（QEMU）。
 [q455](queue-q455.md): ws067-p002 cleared（規約）。WS067 completed。
+[q456](queue-q456.md): ws062-p003 cleared。amd64 の既定の image を native（ESP・UFS root・swap partition、各 1 GiB の 2 GiB）に、CI は gzip で公開。CI の失敗（toolchain の smoke の消失）と clang の libc.so の依存の退行を直した。
 
 ## 前: q439〜q442（2026-09-26）
 

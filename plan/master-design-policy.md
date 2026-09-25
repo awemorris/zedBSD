@@ -56,8 +56,16 @@ disk. The ESP receives `EFI/BOOT/BOOTX64.EFI`; the selected payload filesystem
 receives `vmunix`, `zedbsd.cfg`, `rootfs.img`, `data.img`, and `swapfile`.
 Unrelated files and partitions are preserved. Resize, move, GPT creation,
 filesystem creation, native root, and general dual-boot assistance are later
-work. USB boot remains the recommended way to try zedBSD without modifying
-internal storage.
+work for the installer. USB boot remains the recommended way to try zedBSD
+without modifying internal storage.
+
+The built amd64 disk image, by contrast, defaults to the `native` layout since
+2026-09-26 (WS062, user direction of 2026-09-25): the ESP holds the UEFI loader,
+`vmunix` and `zedbsd.cfg`, the root is a UFS partition mounted read-write, and
+swap is a partition of its own, so nothing is layered through a loop device on
+FAT. It boots through UEFI only. The `hybrid` (UEFI and BIOS, payload FAT with
+`rootfs.img`, `data.img` and `swapfile`), `uefi` and `bios` layouts remain
+selectable, and installer v1 above still installs the payload-FAT form.
 
 Installer v1 does not create, reorder, or delete UEFI `Boot####` variables. It
 installs the standard fallback/recovery pathname and accepts one firmware
