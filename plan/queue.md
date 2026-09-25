@@ -1,13 +1,17 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue: なし（提案待ち）
+# Queue q454: BUG-054 の修正（ws067-p001）
 
 <!-- awesome-plan-current:start -->
-Status: proposed（2026-09-26、承認なし）
-Active Queue: none
+Status: active（2026-09-26）
+Active Queue: q454
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
 
-直前: [q453](history/queue-q453.md)（ws065-p003 cleared）。
+Approval: 2026-09-26 ユーザー「BUG-054の修正を最優先、ディスクイメージをnativeに変更したあと、ws035を次に優先。sh,make,vfork,mutex,性能,journalは作業中に問題が生じたときにすぐ対応で、問題が生じなければ後回しでOK。これで進めてください。」範囲は [ws067-p001](ws067/phase001/phase.md)。
 
-Upcoming Work Outlook: 規約（ws065-p004・ws061-p011・ws064-p003・ws063-p002、ユーザーの指示で最後）。F-020（静的 link・make の直接実行）と F-019（sh の残りの bash 互換）は判断待ち。
+| Order | Attempt | Phase | Status |
+| --- | --- | --- | --- |
+| 1 | q454-i01 | [ws067-p001](ws067/phase001/phase.md) | in-progress |
+
+Upcoming Work Outlook: ws067-p002（規約）、ws062-p003（disk image の既定を native に）、WS035（fg010）。規約の ws065-p004・ws064-p003・ws061-p011・ws063-p002 は問題が出たときだけ（ユーザー指示）。
