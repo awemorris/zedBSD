@@ -37,12 +37,12 @@
 #include "../../memory.h"
 #include "../../mmio.h"
 #include "../../tlb.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 /* How long a draw may take. */
 #define I915_TEST_GPU_DRAW_TIMEOUT_MS	2000U
@@ -384,10 +384,10 @@ drv_i915_test_display_lcdd(
 		return;
 
 	/* Nothing is known of an earlier run's images. */
-	memset(i915_test_lcdd_variant, 0, sizeof(i915_test_lcdd_variant));
-	memset(i915_test_lcdd_hash, 0, sizeof(i915_test_lcdd_hash));
-	memset(i915_test_lcdd_hash_set, 0, sizeof(i915_test_lcdd_hash_set));
-	memset(rep, 0, sizeof(*rep));
+	kern_memset(i915_test_lcdd_variant, 0, sizeof(i915_test_lcdd_variant));
+	kern_memset(i915_test_lcdd_hash, 0, sizeof(i915_test_lcdd_hash));
+	kern_memset(i915_test_lcdd_hash_set, 0, sizeof(i915_test_lcdd_hash_set));
+	kern_memset(rep, 0, sizeof(*rep));
 	i915_test_lcdd_probe_result = I915_TEST_LCDD_PROBE_NOT_REACHED;
 	i915_test_lcdd_probe_tries = 0U;
 	i915_test_lcdd_probe_lead = 0U;
@@ -511,7 +511,7 @@ i915_test_gpu_begin(
 
 	/* The run; the hardware must be idle and the inputs complete. */
 	k = drv_i915_test_lcd_start(display, NULL);
-	memset(&i915_test_gpu_env, 0, sizeof(i915_test_gpu_env));
+	kern_memset(&i915_test_gpu_env, 0, sizeof(i915_test_gpu_env));
 	preflight_error = drv_i915_lcd_kernel_preflight(k);
 	fill_error = 0;
 	if (preflight_error == 0)
@@ -627,7 +627,7 @@ i915_test_lcdg_draw(
 	}
 
 	/* The GPU draws into the same pages through the PPGTT. */
-	memset(fr, 0, sizeof(*fr));
+	kern_memset(fr, 0, sizeof(*fr));
 	error = drv_i915_test_fhd_render_run(fr, d->es, d->vm, d->gm, d->mmio, d->uncore_lock, I915_TEST_GPU_DRAW_TIMEOUT_MS, so->obj);
 	ggtt_first = drv_i915_gt_ggtt_read_pte(d->gm, so->obj->ggtt_page);
 	ggtt_last = drv_i915_gt_ggtt_read_pte(d->gm, so->obj->ggtt_page + fr->rt_pages - 1U);
@@ -711,7 +711,7 @@ i915_test_lcdd_verify(
 
 	/* Reads what is in memory, against the expected image of that variant. */
 	drv_i915_gt_clflush(so->cpu, so->size);
-	memset(&i915_test_lcdd_check, 0, sizeof(i915_test_lcdd_check));
+	kern_memset(&i915_test_lcdd_check, 0, sizeof(i915_test_lcdd_check));
 	i915_test_lcdd_check.variant = i915_test_lcdd_variant[index];
 	bad = drv_i915_test_fhd_render_verify(&i915_test_lcdd_check, so->cpu, so->pitch);
 
@@ -742,7 +742,7 @@ i915_test_lcdd_buffers(
 		if (error == 0)
 			error = drv_i915_scanout_pin(&i915_test_lcdd_buf[index], owners[index]);
 		if (error == 0) {
-			memset(&i915_test_lcdd_map[index], 0, sizeof(i915_test_lcdd_map[index]));
+			kern_memset(&i915_test_lcdd_map[index], 0, sizeof(i915_test_lcdd_map[index]));
 			error = drv_i915_test_fhd_rt_map(&i915_test_lcdd_map[index], d->gm, d->vm, i915_test_lcdd_buf[index].obj, vas[index]);
 		}
 	}
@@ -794,7 +794,7 @@ i915_test_lcdd_draw(
 	display = container_of(k, struct i915_display, lk);
 
 	/* The draw into the premapped target. */
-	memset(x, 0, sizeof(*x));
+	kern_memset(x, 0, sizeof(*x));
 	error = drv_i915_test_fhd_render_run_ex(x, d->es, d->vm, d->gm, d->mmio, d->uncore_lock, I915_TEST_GPU_DRAW_TIMEOUT_MS, i915_test_lcdd_buf[index].obj, i915_test_lcdd_map[index].va, variant, 1);
 	kern_logf("i915: LCD-D draw %u: into buffer %c (not on the display) variant %u at 0x%llx | rc=%d outcome=%d gpu_done=%d | markers %08x/%08x/%08x ps %08x | pixels %u/%u (stale %u, first bad %d,%d) | tex changed %u guard bad %u | walk first/mid/last=%d | hash %016llx\n",
 	    round,

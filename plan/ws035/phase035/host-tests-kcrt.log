@@ -1,0 +1,10 @@
+kcrt (normal): nm -u names no memcpy/memset/memmove/memcmp
+kcrt-test: PASS (105 checks)
+kcrt (sanitize): nm -u names no memcpy/memset/memmove/memcmp
+kcrt-test: PASS (105 checks)
+explicit: kern_memset_explicit keeps 4 clearing instruction(s) after the last use at -O2 (kern_memset control: 0)
+heap (normal): kern-heap-test: PASS (55 checks)
+heap (sanitize): kern-heap-test: PASS (55 checks)
+heap (trace): kern-heap-test: PASS (77 checks)
+heap (trace-sanitize): kern-heap-test: PASS (77 checks)
+run-kcrt-host-tests: PASS

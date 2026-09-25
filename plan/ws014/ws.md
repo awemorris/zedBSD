@@ -1,22 +1,16 @@
 <!-- awesome-plan project=zedbsd record=ws014 -->
 
-<!-- awesome-plan-current:start -->
-Status: incomplete
-Implementation Queue: none
-Last verified Phases: p002/p003/p005/p006/p007/p008/p009/p010
-Last Queue: q313 finished
-Next: p004 planning, not queued; p001 decisions retained
-<!-- awesome-plan-current:end -->
-
 # WS014: virtio-gpu bring-up
 
-WSID: `ws014`
+<!-- awesome-plan-current:start -->
 Status: incomplete
 Primary Milestone: MG006
 Related Milestones: MG003
 Objectives: O2, O4
-Parent: [Master](https://github.com/awemorris/zedBSD/issues/1)
-Last verified Phase: ws014-p006 (q309-i01, GPU-sharing/Wayland/native scanout acceptance)
+Parent: [Master](../master.md)
+Queue: なし
+Resume point: p004（最終 API と規約の確認）が planning・未 queue
+<!-- awesome-plan-current:end -->
 
 ## 単一の目標と完了条件
 
@@ -135,21 +129,6 @@ WS014はincomplete。p001の残る設計判断とp003/p004はplanning、Venus/�
 
 # WS014: native GPU stack
 
-<!-- traceability:start -->
-
-## Goal traceability
-
-- Primary Milestone: **MG006 — グラフィカルな操作環境を利用できる**
-- Related Milestones: MG003
-- Objectives: O2, O4
-- 貢献する成果: ネイティブGPUを支える。手動保留を維持。
-- 上位定義: [MasterのObjectives / Milestone Goals](https://github.com/awemorris/zedBSD/issues/1)
-
-既存Phaseは本WSを親として上位成果に接続する。Primaryは分類と責任の所在であり、
-各PhaseがRelatedすべてを満たすという意味ではない。成果・検証・限界は各Phaseの
-現行記録を根拠とする。今回の対応付けは状態変更・未定義作業の追加・実行許可ではない。
-
-<!-- traceability:end -->
 
 
 Last updated: 2026-08-27
@@ -316,7 +295,7 @@ q307 finished、q307-i01/p005 cleared、active Queueなし。p003/q306の完了�
 
 ## q308: 標準Vulkan 1.0・直接表示libraryとp005訂正
 
-2026-09-13のユーザー確定指示に従い、標準Vulkan 1.0全137core＋VK_KHR_surface/display/swapchain/display_swapchainを提供する単一目標の [WS030](https://github.com/awemorris/zedBSD/issues/388) を新設した。公開headerはlibc/include/vulkan/、独立実装はuserland/base/libvulkan/、配置は/lib/libvulkan.so。EGLは今回cancelし将来GLES-on-Vulkan時へ、Waylandは将来backendとする。上流実装は移入せず、固定した公式XMLから宣言・定数を独立生成する。
+2026-09-13のユーザー確定指示に従い、標準Vulkan 1.0全137core＋VK_KHR_surface/display/swapchain/display_swapchainを提供する単一目標の [WS030](https://github.com/awemorris/zedBSD/issues/388) を新設した。公開headerはinclude/libc/vulkan/、独立実装はuserland/base/libvulkan/、配置は/lib/libvulkan.so。EGLは今回cancelし将来GLES-on-Vulkan時へ、Waylandは将来backendとする。上流実装は移入せず、固定した公式XMLから宣言・定数を独立生成する。
 
 [WS014 p005](https://github.com/awemorris/zedBSD/issues/387) のq307旧clearは、直接Venus wire/GPU ioctlを使う有限clientであり「純粋な標準Vulkan APIアプリ」を満たさないため失効（uncleared）。q307の6画像・正常回収・同VM再openという実測と当時の試行履歴は保存し、新しいq308-i04で標準API化を訂正する。p005はin-progressとして再開し、Queue itemは必要library出力までpending。p002/p003のclear、WS014 incomplete、p004未実行、別WS029 i915後段を維持する。
 
@@ -328,7 +307,7 @@ q307 finished、q307-i01/p005 cleared、active Queueなし。p003/q306の完了�
 
 WS030 p001/p002/p003/p004とWS014 p005の標準API訂正をclearedとし、WS030 completed、q308 finished、active Queueなしとする。WS014はincomplete、p001/p004 planning、p004未queue、native i915は別WS029のまま。q307の旧scopeの実測と履歴は保持する。
 
-`libc/include/vulkan/` にVulkan1.0の公開header、`userland/base/libvulkan/` に独立した全137 core＋選択direct-display WSI18の実装を提供し、`/lib/libvulkan.so` に配置した。vkdemoは標準Vulkan/WSIだけを使い、GPU ioctl/Venus codecをアプリへ持ち込まない。ABI、Noct再生成、155実exportとproc-address、全familyの限定意味論試験、U/Kの所有権・権限・失敗回収、適用C規約の独立レビューを実施した。正式CTS認証は主張しない。
+`include/libc/vulkan/` にVulkan1.0の公開header、`userland/base/libvulkan/` に独立した全137 core＋選択direct-display WSI18の実装を提供し、`/lib/libvulkan.so` に配置した。vkdemoは標準Vulkan/WSIだけを使い、GPU ioctl/Venus codecをアプリへ持ち込まない。ABI、Noct再生成、155実exportとproc-address、全familyの限定意味論試験、U/Kの所有権・権限・失敗回収、適用C規約の独立レビューを実施した。正式CTS認証は主張しない。
 
 最終 `q308-lifecycle-003` は実QEMU10.0.11/virglrenderer1.1.0/Intel ANVで6枚の回転直方体を描画し、実VNC/GPU readback/独立ray-texture oracleが一致（評価対象不一致0）。通常終了後6frame再起動、SIGINT後6frame再起動、640×480文字画面への復帰とechoによる画面更新、別processの表示競合拒否とowner35frame/DONEを確認した。42.671秒、QEMU exit0。最終書式変更後のkernel/appは実行済みbinaryと一致する。
 
@@ -338,7 +317,7 @@ WS030 p001/p002/p003/p004とWS014 p005の標準API訂正をclearedとし、WS030
 
 ## WS014 p006追加: kernel handle・GPU共有・最小Wayland（2026-09-13）
 
-ユーザー指定により[WS014 p006](https://github.com/awemorris/zedBSD/issues/393)を一つのplanned Phaseとして追加した。kernel_handle/handle_fd_*とSCM_RIGHTS、GPU/Venusの別context共有、GPU画像を扱えるWSI、VK_KHR_wayland_surface、最小client library、全画面zwl、標準APIのwltestを本Phaseで実装・検証する計画。コード配置はlibc/include/wayland/、userland/base/libwayland/・zwl/・wltest/、公開libraryは/lib/libwayland-client.so。
+ユーザー指定により[WS014 p006](https://github.com/awemorris/zedBSD/issues/393)を一つのplanned Phaseとして追加した。kernel_handle/handle_fd_*とSCM_RIGHTS、GPU/Venusの別context共有、GPU画像を扱えるWSI、VK_KHR_wayland_surface、最小client library、全画面zwl、標準APIのwltestを本Phaseで実装・検証する計画。コード配置はinclude/libc/wayland/、userland/base/libwayland/・zwl/・wltest/、公開libraryは/lib/libwayland-client.so。
 
 中核のK/driver実装を先に進め、Wayland通信/WSI/試験アプリを接続して実測から設計を改善する。新経路はCPU readbackを必須にせず、GPU allocationの実共有と同期・寿命を確認する。linux-dmabuf-v1、ゲストdma-buf/DRM、EGL、一般DEは採用しない。内部の段取りは別Phaseへ分割しない。
 

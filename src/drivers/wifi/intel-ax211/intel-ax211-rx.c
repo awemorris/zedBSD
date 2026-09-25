@@ -51,10 +51,10 @@
  */
 
 #include "intel-ax211-rx.h"
+#include <kern/kcrt.h>
 
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #define AX211_RX_STATUS_CRC_OK 0x00000001U
 #define AX211_RX_STATUS_OVERRUN_OK 0x00000002U
@@ -206,7 +206,7 @@ drv_intel_ax211_rx_mpdu_decode(
 	if (frame_length < 2U)
 		return INTEL_AX211_RX_TRUNCATED;
 
-	memset(&decoded, 0, sizeof(decoded));
+	kern_memset(&decoded, 0, sizeof(decoded));
 	decoded.status = ax211_rx_get_le32(descriptor + 12U);
 
 	/* Handles the decoded condition. */
@@ -295,16 +295,16 @@ drv_intel_ax211_rx_mpdu_decode(
 
 	/* Handles the mac flags condition. */
 	if ((mac_flags & AX211_RX_MAC_FLAG_PADDING) != 0U) {
-		memcpy(output, frame, padding_offset);
-		memcpy(output + padding_offset, frame + padding_offset + 2U,
+		kern_memcpy(output, frame, padding_offset);
+		kern_memcpy(output + padding_offset, frame + padding_offset + 2U,
 		       copied_length - padding_offset);
 	} else {
-		memcpy(output, frame, copied_length);
+		kern_memcpy(output, frame, copied_length);
 	}
 
 	/* Handles the common trailer length condition. */
 	if (common_trailer_length != 0U)
-		memset(output + copied_length, 0, common_trailer_length);
+		kern_memset(output + copied_length, 0, common_trailer_length);
 	frame_control = ax211_rx_get_le16(output);
 
 	/* Checks the operation result. */

@@ -1,0 +1,30 @@
+phase	kind	file	line	target	change	text
+p023	c-include	include/hal/types.h	9	libc/include/stdbool.h	keep-root libc/include->include	#include <stdbool.h>
+p023	c-include	include/hal/types.h	10	libc/include/stddef.h	keep-root libc/include->include	#include <stddef.h>
+p023	c-include	include/hal/types.h	11	libc/include/stdint.h	keep-root libc/include->include	#include <stdint.h>
+p023	c-include	src/hal/amd64/bsp-pcat/cons.c	22	libc/include/string.h	keep-root libc/include->include	#include <string.h>
+p023	c-include	src/hal/amd64/bsp-pcat/handoff-validation.c	14	libc/include/stddef.h	keep-root libc/include->include	#include <stddef.h>
+p023	c-include	src/hal/amd64/bsp-pcat/handoff-validation.h	17	libc/include/stdint.h	keep-root libc/include->include	#include <stdint.h>
+p023	c-include	src/hal/amd64/framebuffer-map.h	4	libc/include/stdint.h	keep-root libc/include->include	#include <stdint.h>
+p023	c-include	src/hal/amd64/int.c	15	libc/include/errno.h	keep-root libc/include->include	#include <errno.h>
+p023	c-include	src/hal/amd64/pmem-range.h	5	libc/include/stdint.h	keep-root libc/include->include	#include <stdint.h>
+p023	c-include	src/hal/amd64/ram-map.h	5	libc/include/stdint.h	keep-root libc/include->include	#include <stdint.h>
+p023	c-include	src/hal/arm64/int.c	7	libc/include/errno.h	keep-root libc/include->include	#include <errno.h>
+p023	c-include	src/hal/i386/bsp-pc98/cons.c	27	libc/include/string.h	keep-root libc/include->include	#include <string.h>
+p023	c-include	src/hal/i386/bsp-pc98/display.c	14	libc/include/stdint.h	keep-root libc/include->include	#include <stdint.h>
+p023	c-include	src/hal/i386/bsp-pc98/jisx0208.c	15	libc/include/stdint.h	keep-root libc/include->include	#include <stdint.h>
+p023	c-include	src/hal/i386/bsp-pcat/cons.c	22	libc/include/string.h	keep-root libc/include->include	#include <string.h>
+p023	c-include	src/hal/i386/int.c	14	libc/include/errno.h	keep-root libc/include->include	#include <errno.h>
+p023	c-include	src/hal/m68k/bsp-x68k/console.c	7	libc/include/string.h	keep-root libc/include->include	#include <string.h>
+p023	c-include	src/hal/m68k/bsp-x68k/handoff.c	5	libc/include/stddef.h	keep-root libc/include->include	#include <stddef.h>
+p023	c-include	src/hal/m68k/bsp-x68k/keyboard-map.h	7	libc/include/stdint.h	keep-root libc/include->include	#include <stdint.h>
+p023	c-include	src/hal/m68k/bsp-x68k/keyboard.c	10	libc/include/string.h	keep-root libc/include->include	#include <string.h>
+p023	c-include	src/hal/m68k/trap.c	4	libc/include/errno.h	keep-root libc/include->include	#include <errno.h>
+p023	c-include	src/hal/sparcv9/trap.c	11	libc/include/errno.h	keep-root libc/include->include	#include <errno.h>
+p023	c-include	src/hal/x86/boot-parameters.h	15	libc/include/stddef.h	keep-root libc/include->include	#include <stddef.h>
+p004	c-include	src/hal/arm64/bsp-rpi4/boot.c	3	include/kern/rpi4/boot.h	kern/rpi4/boot.h -> kern/boot/rpi4.h	#include <kern/rpi4/boot.h>
+p004	c-include	src/hal/i386/bsp-pc98/boot.c	12	include/boot/pc98-handoff.h	boot/pc98-handoff.h -> kern/boot/pc98-handoff.h	#include <boot/pc98-handoff.h>
+p004	c-include	src/hal/sparcv9/bsp.h	4	include/kern/sun4u/boot.h	kern/sun4u/boot.h -> kern/boot/sun4u.h	#include <kern/sun4u/boot.h>
+p004	c-include	src/hal/sparcv9/cmain.c	4	include/kern/sun4u/boot.h	kern/sun4u/boot.h -> kern/boot/sun4u.h	#include <kern/sun4u/boot.h>
+p004	c-include	src/hal/x86/boot-parameters.c	13	include/boot/pc98-handoff.h	boot/pc98-handoff.h -> kern/boot/pc98-handoff.h	#include <boot/pc98-handoff.h>
+p004	c-include	src/hal/x86/boot-parameters.h	16	include/boot/parameter-handoff.h	boot/parameter-handoff.h -> kern/boot/parameter-handoff.h	#include <boot/parameter-handoff.h>

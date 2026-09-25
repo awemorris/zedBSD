@@ -74,14 +74,14 @@
 #include "plane.h"
 #include "../mmio.h"
 #include "../power.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 #include <kern/kmem.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <limits.h>
 #include <stddef.h>
-#include <string.h>
 
 /*
  * The SAGV / QGV PCODE mailbox (i915_reg.h): the request and the fields of
@@ -453,7 +453,7 @@ drv_i915_bw_init_hw(
 
 	/* Starts from an empty memory description and at least one channel. */
 	incomputable = 0;
-	memset(&qi, 0, sizeof(qi));
+	kern_memset(&qi, 0, sizeof(qi));
 	if (di->num_channels < 1u) {
 		num_channels = 1;
 	} else {
@@ -1089,7 +1089,7 @@ drv_i915_lcd_ms_wm_compute_off(
 	new_dbuf->slices[pipe] = i915_skl_compute_dbuf_slices(&ms->crtc, new_dbuf->active_pipes, new_dbuf->joined_mbus);
 	new_dbuf->enabled_slices = i915_intel_dbuf_enabled_slices(new_dbuf);
 	new_dbuf->weight[pipe] = 0;
-	memset(&new_dbuf->ddb[pipe], 0, sizeof(new_dbuf->ddb[pipe]));
+	kern_memset(&new_dbuf->ddb[pipe], 0, sizeof(new_dbuf->ddb[pipe]));
 
 	/* A change of the slices, the MBUS joining or the active pipes serializes the global state. */
 	new_dbuf->base.changed = false;
@@ -1151,7 +1151,7 @@ drv_i915_lcd_dbuf_forget(
 	struct i915_wm_world *wm_world)
 {
 	/* No state is published any more. */
-	memset(&wm_world->i915_lcd_dbuf_dev, 0, sizeof(wm_world->i915_lcd_dbuf_dev));
+	kern_memset(&wm_world->i915_lcd_dbuf_dev, 0, sizeof(wm_world->i915_lcd_dbuf_dev));
 	wm_world->i915_lcd_dbuf_dev_valid = 0;
 }
 
@@ -2194,7 +2194,7 @@ i915_skl_cursor_allocation(
 	/* The cursor plane and the device of the state. */
 	plane = to_intel_plane(crtc_state->uapi.crtc->cursor);
 	i915 = i915_lcd_to_i915(crtc_state->uapi.crtc->dev);
-	memset(&wm, 0, sizeof(wm));
+	kern_memset(&wm, 0, sizeof(wm));
 	min_ddb_alloc = 0;
 
 	/*
@@ -3071,7 +3071,7 @@ i915_icl_build_plane_wm(
 		return 0;
 
 	/* The watermarks start cleared. */
-	memset(wm, 0, sizeof(*wm));
+	kern_memset(wm, 0, sizeof(*wm));
 
 	/* A planar pair: the linked Y plane and this UV plane; otherwise the visible plane alone. */
 	if (plane_state->planar_linked_plane) {
@@ -3157,7 +3157,7 @@ i915_skl_build_plane_wm(
 	fb = plane_state->hw.fb;
 
 	/* The watermarks start cleared. */
-	memset(wm, 0, sizeof(*wm));
+	kern_memset(wm, 0, sizeof(*wm));
 
 	/* An invisible plane keeps them cleared. */
 	visible = drv_i915_wm_plane_visible(crtc_state, plane_state);
@@ -3357,7 +3357,7 @@ i915_skl_check_wm_level(
 	/* A level that does not fit is cleared. */
 	size = skl_ddb_entry_size(ddb);
 	if (wm->min_ddb_alloc > size)
-		memset(wm, 0, sizeof(*wm));
+		kern_memset(wm, 0, sizeof(*wm));
 }
 
 /* Disables an NV12 level pair when either half does not fit (skl_check_nv12_wm_level()). */
@@ -3385,8 +3385,8 @@ i915_skl_check_nv12_wm_level(
 
 	/* Clears both halves when either does not fit. */
 	if (clear) {
-		memset(wm, 0, sizeof(*wm));
-		memset(uv_wm, 0, sizeof(*uv_wm));
+		kern_memset(wm, 0, sizeof(*wm));
+		kern_memset(uv_wm, 0, sizeof(*uv_wm));
 	}
 }
 
@@ -3521,8 +3521,8 @@ i915_skl_crtc_allocate_plane_ddb(
 	blocks = 0;
 
 	/* Clear the partitioning for disabled planes. */
-	memset(crtc_state->wm.skl.plane_ddb, 0, sizeof(crtc_state->wm.skl.plane_ddb));
-	memset(crtc_state->wm.skl.plane_ddb_y, 0, sizeof(crtc_state->wm.skl.plane_ddb_y));
+	kern_memset(crtc_state->wm.skl.plane_ddb, 0, sizeof(crtc_state->wm.skl.plane_ddb));
+	kern_memset(crtc_state->wm.skl.plane_ddb_y, 0, sizeof(crtc_state->wm.skl.plane_ddb_y));
 
 	/* An inactive crtc has no planes to allocate for. */
 	if (!crtc_state->hw.active)
@@ -4245,14 +4245,14 @@ i915_skl_wm_get_hw_state(
 		pipe = crtc->pipe;
 
 		/* The watermarks of an active crtc; the raw ones are the same. */
-		memset(&crtc_state->wm.skl.optimal, 0,
+		kern_memset(&crtc_state->wm.skl.optimal, 0,
 		       sizeof(crtc_state->wm.skl.optimal));
 		if (crtc_state->hw.active)
 			i915_skl_pipe_wm_get_hw_state(crtc, &crtc_state->wm.skl.optimal);
 		crtc_state->wm.skl.raw = crtc_state->wm.skl.optimal;
 
 		/* The pipe's DDB is the union of its planes' entries. */
-		memset(&dbuf_state->ddb[pipe], 0, sizeof(dbuf_state->ddb[pipe]));
+		kern_memset(&dbuf_state->ddb[pipe], 0, sizeof(dbuf_state->ddb[pipe]));
 		for_each_plane_id_on_crtc(crtc, plane_id) {
 			ddb = &crtc_state->wm.skl.plane_ddb[plane_id];
 			ddb_y = &crtc_state->wm.skl.plane_ddb_y[plane_id];
@@ -4324,7 +4324,7 @@ i915_skl_dbuf_is_misconfigured(
 
 	/* The DBUF state of the readout, and no entries yet. */
 	dbuf_state = i915_takeover_intel_atomic_get_dbuf_state(wm);
-	memset(entries, 0, sizeof(entries));
+	kern_memset(entries, 0, sizeof(entries));
 
 	/* for_each_intel_crtc(): collects every crtc's absolute DDB entry. */
 	index = 0u;
@@ -4413,7 +4413,7 @@ i915_skl_wm_sanitize(
 
 		/* No plane may be left active; the DDB entry is cleared. */
 		I915_LCD_DRM_WARN_ON(&i915->drm, crtc_state->active_planes != 0);
-		memset(&crtc_state->wm.skl.ddb, 0, sizeof(crtc_state->wm.skl.ddb));
+		kern_memset(&crtc_state->wm.skl.ddb, 0, sizeof(crtc_state->wm.skl.ddb));
 
 		/* The next crtc of the registry. */
 		index++;

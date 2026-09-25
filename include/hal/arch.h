@@ -66,6 +66,11 @@
  */
 #define HAL_ATOMIC_STYLE	HAL_ATOMIC_STYLE_NATIVE
 
+/*
+ * A host test has no timer; it counts its tick in milliseconds.
+ */
+#define HAL_TIMER_FREQUENCY	(1000U)
+
 # if !defined(__ASSEMBLER__) && !defined(_ASM_SRC_)
 static inline bool
 hal_atomic_uint_try_acquire(

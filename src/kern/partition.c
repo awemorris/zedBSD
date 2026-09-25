@@ -17,10 +17,10 @@
 #include "kern/kmem.h"
 #include "kern/buf.h"
 #include "kern/backing-claim.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <limits.h>
-#include <string.h>
 
 struct reload_workspace {
 	struct partition entries[PARTITION_MAX];
@@ -136,7 +136,7 @@ partition_retire_media(
 		for (i = 0; i < PARTITION_POOL_MAX; i++) {
 			if (partitions[i].p_disk != NULL &&
 			    partitions[i].p_parent == parent) {
-				memset(&partitions[i], 0, sizeof(partitions[i]));
+				kern_memset(&partitions[i], 0, sizeof(partitions[i]));
 				(void)atomic_raw_fetch_add_release(&partitions_count, (unsigned)-1);
 			}
 		}
@@ -297,9 +297,9 @@ partition_reload_claimed(
 	    (parent->d_flags & DISK_PARTITION) != 0)
 		return EINVAL;
 	if (active_scheme == NULL ||
-	    (strcmp(active_scheme->name, "pcat-auto") != 0 &&
-	     strcmp(active_scheme->name, "gpt") != 0 &&
-	     strcmp(active_scheme->name, "mbr") != 0) ||
+	    (kern_strcmp(active_scheme->name, "pcat-auto") != 0 &&
+	     kern_strcmp(active_scheme->name, "gpt") != 0 &&
+	     kern_strcmp(active_scheme->name, "mbr") != 0) ||
 	    (parent->d_block_size != 512 && parent->d_block_size != 4096))
 		return EOPNOTSUPP;
 
@@ -485,7 +485,7 @@ reload_release_candidates(
 	for (i = 0; i < count; i++) {
 		work->new_disks[i]->d_parent = NULL;
 		(void)disk_destroy(work->new_disks[i]);
-		memset(work->new_slots[i], 0, sizeof(*work->new_slots[i]));
+		kern_memset(work->new_slots[i], 0, sizeof(*work->new_slots[i]));
 	}
 }
 
@@ -533,7 +533,7 @@ partition_reload_owned(
 		partition = &partitions[i];
 		if (partition->p_disk != NULL && partition->p_parent == parent) {
 			(void)disk_destroy(partition->p_disk);
-			memset(partition, 0, sizeof(*partition));
+			kern_memset(partition, 0, sizeof(*partition));
 			(void)atomic_raw_fetch_add_release(&partitions_count, (unsigned)-1);
 		}
 	}

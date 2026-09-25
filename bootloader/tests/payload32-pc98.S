@@ -1,6 +1,6 @@
 /* PC-98 ELF32 native MBR-loader payload. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "include/boot/pc98-handoff.h"
+#include "include/kern/boot.h"
 .code32
 .section .text
 .global _start

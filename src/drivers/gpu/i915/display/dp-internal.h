@@ -51,6 +51,7 @@
 #define DRIVERS_GPU_I915_DISPLAY_DP_INTERNAL_H
 
 #include "internal.h"
+#include <kern/kcrt.h>
 
 #ifdef I915_DISPLAY_LINUX_WORLD
 #error "display/dp-internal.h: another Linux environment is already included"
@@ -799,7 +800,7 @@ i915_dp_memcpy(
 		return dst;
 
 	/* Copies the bytes. */
-	memcpy(dst, src, n);
+	kern_memcpy(dst, src, n);
 
 	/* Succeeded: reports the destination, as memcpy() does. */
 	return dst;
@@ -1076,7 +1077,7 @@ i915_dp_init_delayed_work(
 	void (*fn)(struct work_struct *))
 {
 	/* Clears the work, which also selects slot 0 (I915_DP_WORK_VDD_OFF), and sets its body. */
-	memset(dw, 0, sizeof(*dw));
+	kern_memset(dw, 0, sizeof(*dw));
 	dw->fn = fn;
 }
 

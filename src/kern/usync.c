@@ -19,7 +19,7 @@
 #include "kern/process.h"
 #include "kern/uaccess.h"
 #include "kern/waitq.h"
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
 
 #define USYNC_BUCKETS 32U

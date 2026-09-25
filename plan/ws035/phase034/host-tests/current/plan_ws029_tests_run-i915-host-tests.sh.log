@@ -1,0 +1,5 @@
+i915 ppgtt host test PASS
+i915 ppgtt host test PASS
+/usr/bin/ld: /tmp/ccv1pNM4.o: in function `i915_command_submit':
+command.c:(.text+0x5d7): undefined reference to `drv_i915_perf_now'
+collect2: error: ld returned 1 exit status

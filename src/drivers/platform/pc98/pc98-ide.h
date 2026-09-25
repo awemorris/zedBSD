@@ -14,7 +14,7 @@
 
 #include "kern/disk.h"
 
-struct boot_device;
+struct kern_boot_device;
 
 /*
  * Probe both banks and register every present ATA disk with the block
@@ -23,7 +23,7 @@ struct boot_device;
  * list fall back to their IDENTIFY geometry.  Returns the number of
  * disks registered.
  */
-unsigned drv_pc98_ide_init(const struct boot_device *bios_devices,
+unsigned drv_pc98_ide_init(const struct kern_boot_device *bios_devices,
 			   unsigned bios_device_count);
 
 /* The ordinal-th registered IDE disk, in probe (bank-major) order. */

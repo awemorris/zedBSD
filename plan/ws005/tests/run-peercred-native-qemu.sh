@@ -135,7 +135,7 @@ fi
 cp --reflink=auto --sparse=always "$source_image" "$run_image"
 source_hash=$(sha256sum "$source_image" | awk '{print $1}')
 cc -std=c11 -Wall -Wextra -Werror \
-	"$repo/plan/ws003/tests/boot-parameter-image-tool.c" \
+	"$repo/plan/tools/boot-parameter-image-tool.c" \
 	-o "$decoder"
 
 marker_count()

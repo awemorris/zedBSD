@@ -9,7 +9,7 @@
  * Per-disk PC-98 partition format selection.
  */
 
-#include <drivers/disklabel.h>
+#include <drivers/disklabel/disklabel.h>
 
 #define PC98_TABLE_LBA 1U
 #define PC98_ENTRY_SIZE 32U

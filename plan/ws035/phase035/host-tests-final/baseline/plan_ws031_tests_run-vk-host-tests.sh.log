@@ -1,0 +1,83 @@
+i915 vk cmd host test PASS
+i915 vk cmd host test PASS
+i915 vk spirv host test PASS
+i915 vk spirv host test PASS
+  local: store 5 / load / store 2 / load -> (5, 2), 5-2 = 3, 2-5 = -3
+  vector: (1,2,4,8) extracted, reversed, shuffled and rebuilt without losing a component
+  access chain: one component of a local overwritten, inputs / outputs addressed by component
+  arithmetic: dot = 70, negate = -70, 70-5 = 65, 5-70 = -65, vector * scalar per component
+  refusals: unset local, partial local, dynamic index, initializer, size mismatch, input store, back edge, return in a loop, switch, vertex OpKill, Flat
+  cuboid.vert.spv (-O0, as shipped): 50 IR instructions, 44 values; gl_Position and texture_coordinate match the GLSL source for 4 vertices x 3 times
+  cuboid.frag.spv: texture(checker, texture_coordinate) with u, v in the right order, 4 components out
+  GLSL.std.450: abs floor fract sqrt exp2 log2 pow inversesqrt min max clamp mix normalize, and a / b, over 11 inputs
+  comparisons: < > <= >= == != && || ?: ! mix(bool), NaN on either side, -0 == 0
+  comparisons: the twelve FOrd* / FUnord* opcodes, ordered and unordered, with NaN on either or both sides
+  control flow: nested if / else, && via phi, ?: via a local, discard in and out of branches, at 4096 pixels (2432 discarded)
+  control flow: a return in a branch leaves the channels that took it out of the stores after the merge
+  vertex: normalize, max(dot, 0) with a constant vec3 (OpConstantComposite), clamp
+  mview: mview.vert (normalize, max, OpConstantComposite) against its GLSL; mview.frag; cutout.frag discards below alpha 0.5
+  feature: mat4 uniform read as columns times a vec4 plus an offset; vec4, array element and mat4 column of a block; 3 samplers of 2 sets
+  generality: matrix / int / float / loop / spill fragment shaders match regenerate.py at 5 x 4096 pixels (5 loops in loop.frag)
+  generality: 16 varyings out and in, 5 of 16 read, 16 attributes, row-/column-major placement chain
+  remainders: SRem(-7,3) = -1, SRem(7,-3) = 1, SMod(-7,3) = 2, SMod(7,-3) = -2, FRem(-7.5,2) = -1.5, FMod = 0.5
+i915 vk lower host test PASS
+  local: store 5 / load / store 2 / load -> (5, 2), 5-2 = 3, 2-5 = -3
+  vector: (1,2,4,8) extracted, reversed, shuffled and rebuilt without losing a component
+  access chain: one component of a local overwritten, inputs / outputs addressed by component
+  arithmetic: dot = 70, negate = -70, 70-5 = 65, 5-70 = -65, vector * scalar per component
+  refusals: unset local, partial local, dynamic index, initializer, size mismatch, input store, back edge, return in a loop, switch, vertex OpKill, Flat
+  cuboid.vert.spv (-O0, as shipped): 50 IR instructions, 44 values; gl_Position and texture_coordinate match the GLSL source for 4 vertices x 3 times
+  cuboid.frag.spv: texture(checker, texture_coordinate) with u, v in the right order, 4 components out
+  GLSL.std.450: abs floor fract sqrt exp2 log2 pow inversesqrt min max clamp mix normalize, and a / b, over 11 inputs
+  comparisons: < > <= >= == != && || ?: ! mix(bool), NaN on either side, -0 == 0
+  comparisons: the twelve FOrd* / FUnord* opcodes, ordered and unordered, with NaN on either or both sides
+  control flow: nested if / else, && via phi, ?: via a local, discard in and out of branches, at 4096 pixels (2432 discarded)
+  control flow: a return in a branch leaves the channels that took it out of the stores after the merge
+  vertex: normalize, max(dot, 0) with a constant vec3 (OpConstantComposite), clamp
+  mview: mview.vert (normalize, max, OpConstantComposite) against its GLSL; mview.frag; cutout.frag discards below alpha 0.5
+  feature: mat4 uniform read as columns times a vec4 plus an offset; vec4, array element and mat4 column of a block; 3 samplers of 2 sets
+  generality: matrix / int / float / loop / spill fragment shaders match regenerate.py at 5 x 4096 pixels (5 loops in loop.frag)
+  generality: 16 varyings out and in, 5 of 16 read, 16 attributes, row-/column-major placement chain
+  remainders: SRem(-7,3) = -1, SRem(7,-3) = 1, SMod(-7,3) = 2, SMod(7,-3) = -2, FRem(-7.5,2) = -1.5, FMod = 0.5
+i915 vk lower host test PASS
+i915 vk res host test PASS
+i915 vk res host test PASS
+i915 vk resdispatch host test PASS
+i915 vk resdispatch host test PASS
+i915 vk sync host test PASS
+i915 vk sync host test PASS
+i915 vk eu host test PASS
+i915 vk eu host test PASS
+  cuboid.vert.spv: 50 IR instructions -> 70 EU instructions, value registers r16..r23
+  cuboid.vert.spv: the generated EU words compute gl_Position / texture_coordinate of the GLSL source for 8 vertices (instruction-semantics model, not hardware)
+  compiled: mview.vert, mview.frag, cutout.frag and the 16 stage-C and feature test shaders
+  feature shaders: uniform blocks laid out in the push data (vertex 3, fragment 3 registers), 3 samplers from 2 sets
+  EU model: unary / exponent / minmax / divide shaders compute their GLSL for 32 x 8 channels
+  EU model: compare.frag -- per channel <, >, <=, >=, ==, != (NaN), &&, || (phi selects), ?:, !
+  EU model: branch.frag diverges in 86 dispatches; discard.frag leaves 256 fully discarded and 96 partly discarded dispatches, each ending with the write masked to the live pixels
+  EU model: cells.vert passes its value on, vsmath.vert computes normalize / max(dot) / clamp for 8 vertices
+  EU model: mview.vert (payload to r17, values from r19, payload untouched), mview.frag, cutout.frag (discard below alpha 0.5)
+  EU model: generality matrix / int / float / loop / spill shaders match regenerate.py at 5 x 4096 pixels; loop.frag: 10030 divergent WHILE passes; spill.frag: 2048 bytes of scratch a thread, 30720 scratch writes (4096 on some channels only) and 51712 reads, 2048 divergent WHILE passes
+  EU model: vio16.vert (16 attributes, 16 varyings): gathered VUE, 2048 bytes of scratch a thread, 41 scratch writes, 41 reads; all 18 slots right
+  EU model: vary16.vert stages 16 varyings, vary16.frag / subset.frag (5 of 16) read them, vin16.vert reads 16 attributes, matrix.vert places its corners; a hand-made 16 attributes + 16 varyings gathers its VUE
+i915 vk compile host test PASS
+  cuboid.vert.spv: 50 IR instructions -> 70 EU instructions, value registers r16..r23
+  cuboid.vert.spv: the generated EU words compute gl_Position / texture_coordinate of the GLSL source for 8 vertices (instruction-semantics model, not hardware)
+  compiled: mview.vert, mview.frag, cutout.frag and the 16 stage-C and feature test shaders
+  feature shaders: uniform blocks laid out in the push data (vertex 3, fragment 3 registers), 3 samplers from 2 sets
+  EU model: unary / exponent / minmax / divide shaders compute their GLSL for 32 x 8 channels
+  EU model: compare.frag -- per channel <, >, <=, >=, ==, != (NaN), &&, || (phi selects), ?:, !
+  EU model: branch.frag diverges in 86 dispatches; discard.frag leaves 256 fully discarded and 96 partly discarded dispatches, each ending with the write masked to the live pixels
+  EU model: cells.vert passes its value on, vsmath.vert computes normalize / max(dot) / clamp for 8 vertices
+  EU model: mview.vert (payload to r17, values from r19, payload untouched), mview.frag, cutout.frag (discard below alpha 0.5)
+  EU model: generality matrix / int / float / loop / spill shaders match regenerate.py at 5 x 4096 pixels; loop.frag: 10030 divergent WHILE passes; spill.frag: 2048 bytes of scratch a thread, 30720 scratch writes (4096 on some channels only) and 51712 reads, 2048 divergent WHILE passes
+  EU model: vio16.vert (16 attributes, 16 varyings): gathered VUE, 2048 bytes of scratch a thread, 41 scratch writes, 41 reads; all 18 slots right
+  EU model: vary16.vert stages 16 varyings, vary16.frag / subset.frag (5 of 16) read them, vin16.vert reads 16 attributes, matrix.vert places its corners; a hand-made 16 attributes + 16 varyings gathers its VUE
+i915 vk compile host test PASS
+  varyings: 5 of 16 routed by location through SBE_SWIZ; an unwritten location refused; 16 attributes; 16 attributes + 16 varyings and spill.frag spill 2 KiB a thread into the scratch fields of 3DSTATE_VS / PS
+i915 vk pipe host test PASS
+  varyings: 5 of 16 routed by location through SBE_SWIZ; an unwritten location refused; 16 attributes; 16 attributes + 16 varyings and spill.frag spill 2 KiB a thread into the scratch fields of 3DSTATE_VS / PS
+i915 vk pipe host test PASS
+i915 vk cmdbuf host test PASS
+i915 vk cmdbuf host test PASS
+WS031 vk host fixtures PASS: cmd spirv lower res resdispatch sync eu compile pipe cmdbuf

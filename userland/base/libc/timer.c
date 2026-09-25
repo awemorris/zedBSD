@@ -473,6 +473,8 @@ timer_service_start_locked(
 	struct sigaction action;
 	pthread_attr_t attributes;
 	pthread_t worker;
+	sigset_t blocked;
+	sigset_t saved;
 	int error;
 
 	/* Handles the timer service ready condition. */
@@ -496,7 +498,21 @@ timer_service_start_locked(
 	}
 	(void)pthread_attr_init(&attributes);
 	(void)pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
+
+	/*
+	 * The worker is a thread of the library, not of the program.  It must
+	 * start with every signal blocked, or a process-directed signal that
+	 * the program's threads block (to sigwait for it, say) is delivered to
+	 * the worker instead and takes its default action there.  The worker
+	 * unblocks only its own wake signal.  Raw sigprocmask, because the
+	 * public helpers reject the reserved signal above SIGRTMAX.
+	 */
+	blocked = ~(sigset_t)0;
+	(void)timer_syscall(KERN_SYS_sigprocmask, SIG_BLOCK, (uintptr_t)&blocked,
+			    (uintptr_t)&saved, 0);
 	error = pthread_create(&worker, &attributes, timer_worker, NULL);
+	(void)timer_syscall(KERN_SYS_sigprocmask, SIG_SETMASK, (uintptr_t)&saved,
+			    0, 0);
 	(void)pthread_attr_destroy(&attributes);
 
 	/* Handles an operation failure. */
@@ -710,7 +726,11 @@ timer_dispatch_pending(
 	struct libc_timer_slot *record;
 	struct timer_callback *callback;
 	pthread_t thread;
+	sigset_t wake_signal;
 	int error;
+
+	/* The worker's own wake bit, kept out of the threads it creates. */
+	wake_signal = (sigset_t)1ULL << (LIBC_TIMER_WAKE_SIGNAL - 1U);
 
 	/* Process each remaining element. */
 	while (count-- != 0) {
@@ -737,8 +757,17 @@ timer_dispatch_pending(
 		callback->attributes = record->attributes;
 		(void)pthread_mutex_unlock(&timer_lock);
 
+		/*
+		 * The callback thread must not inherit the worker's unblocked
+		 * wake signal, or a later wake could interrupt the program's
+		 * callback instead of reaching the worker.
+		 */
+		(void)timer_syscall(KERN_SYS_sigprocmask, SIG_BLOCK,
+				    (uintptr_t)&wake_signal, 0, 0);
 		error = pthread_create(&thread, &callback->attributes,
 				       timer_callback_start, callback);
+		(void)timer_syscall(KERN_SYS_sigprocmask, SIG_UNBLOCK,
+				    (uintptr_t)&wake_signal, 0, 0);
 
 		/*
  * Notification happens asynchronously, so POSIX provides no

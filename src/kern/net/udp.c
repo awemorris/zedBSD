@@ -23,10 +23,10 @@
 #include "kern/kmem.h"
 #include "internal.h"
 #include "wire.h"
+#include <kern/kcrt.h>
 
 #include <uapi/netinet.h>
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 #define UDP_EPHEMERAL_FIRST 49152U
 #define UDP_EPHEMERAL_LAST  65535U
@@ -353,7 +353,7 @@ udp_sendto(
 	if (address != NULL) {
 		if (address_length < sizeof(output) || address->sa_family != AF_INET)
 			return -EINVAL;
-		memcpy(&output, address, sizeof(output));
+		kern_memcpy(&output, address, sizeof(output));
 		destination = net_ntohl(output.sin_addr.s_addr);
 		destination_port = net_ntohs(output.sin_port);
 	} else if (endpoint->inet.inet_flags & INET_SOCKET_CONNECTED) {
@@ -438,9 +438,9 @@ udp_sendto(
 		goto fail;
 	}
 
-	memset(udp, 0, sizeof(*udp));
+	kern_memset(udp, 0, sizeof(*udp));
 	if (length != 0)
-		memcpy(payload, buffer, length);
+		kern_memcpy(payload, buffer, length);
 	wire_put16(udp->source, endpoint->inet.local_port);
 	wire_put16(udp->destination, destination_port);
 	wire_put16(udp->length, (uint16_t)packet->length);
@@ -503,7 +503,7 @@ udp_recvfrom(
 	else
 		copied = packet->length;
 	if (copied != 0)
-		memcpy(buffer, packet->data, copied);
+		kern_memcpy(buffer, packet->data, copied);
 
 	/* Copies the source address, reporting its full length. */
 	if (address != NULL && address_length != NULL) {
@@ -512,7 +512,7 @@ udp_recvfrom(
 			output = *address_length;
 		else
 			output = actual;
-		memcpy(address, packet->source_address, output);
+		kern_memcpy(address, packet->source_address, output);
 		*address_length = actual;
 	}
 
@@ -588,7 +588,7 @@ udp_setsockopt(
 	if (level == SOL_SOCKET && option == SO_BROADCAST) {
 		if (value == NULL || length != sizeof(enabled))
 			return EINVAL;
-		memcpy(&enabled, value, sizeof(enabled));
+		kern_memcpy(&enabled, value, sizeof(enabled));
 		if (enabled)
 			endpoint->inet.inet_flags |= INET_SOCKET_BROADCAST;
 		else
@@ -627,7 +627,7 @@ udp_getsockopt(
 		if (value == NULL || length == NULL || *length < sizeof(enabled))
 			return EINVAL;
 		enabled = (endpoint->inet.inet_flags & INET_SOCKET_BROADCAST) != 0;
-		memcpy(value, &enabled, sizeof(enabled));
+		kern_memcpy(value, &enabled, sizeof(enabled));
 		*length = sizeof(enabled);
 		return 0;
 	}
@@ -753,11 +753,11 @@ udp_input(
 	}
 
 	/* Names the sender in the packet's source address. */
-	memset(&address, 0, sizeof(address));
+	kern_memset(&address, 0, sizeof(address));
 	address.sin_family = AF_INET;
 	address.sin_port = net_htons(source_port);
 	address.sin_addr.s_addr = net_htonl(source);
-	memcpy(packet->source_address, &address, sizeof(address));
+	kern_memcpy(packet->source_address, &address, sizeof(address));
 	packet->source_length = sizeof(address);
 
 	/* Queues the datagram on the socket. */

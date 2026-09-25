@@ -53,7 +53,7 @@
 #ifndef KERN_DRIVERS_INTEL_AX211_DMA_H
 #define KERN_DRIVERS_INTEL_AX211_DMA_H
 
-#include <drivers/dma.h>
+#include <drivers/generic/dma.h>
 
 #include "intel-ax211-internal.h"
 

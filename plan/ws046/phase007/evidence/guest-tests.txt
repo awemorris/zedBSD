@@ -1,0 +1,24 @@
+smp=0
+POSIX_R2_FAIL: realtime-signal-capacity
+r2=0
+syscall getppid              1395 ns/op
+pipe round trip             64950 ns/op
+fork+exit+wait            1401500 ns/op
+fork+exec true+wait       9523333 ns/op
+read file whole            685000 ns/op
+anon page fault             40771 ns/op
+file page fault             22222 ns/op
+syscall getppid              1380 ns/op
+pipe round trip             54500 ns/op
+fork+exit+wait            1228500 ns/op
+fork+exec true+wait       9613333 ns/op
+read file whole            695000 ns/op
+anon page fault             41809 ns/op
+file page fault             23611 ns/op
+syscall getppid              1360 ns/op
+pipe round trip             70300 ns/op
+fork+exit+wait            1638500 ns/op
+fork+exec true+wait       9923333 ns/op
+read file whole            585000 ns/op
+anon page fault             38879 ns/op
+file page fault             22222 ns/op

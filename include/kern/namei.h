@@ -16,6 +16,7 @@
 #include "kern/lock.h"
 #include "kern/mount.h"
 #include <limits.h>
+#include <uapi/limits.h>
 
 #ifndef NAME_MAX
 #define NAME_MAX		255U

@@ -218,9 +218,12 @@ networkd_lan_observe(
 	} else if (item->generation != generation) {
 		/*
 		 * The name was reused by another device.  Nothing this
-		 * daemon decided about the old one is true of the new one.
+		 * daemon decided about the old one is true of the new one:
+		 * it has not been brought up and no cable has been seen in it.
 		 */
 		item->state = NETWORKD_LAN_IDLE;
+		item->raised = 0;
+		item->carrier = 0;
 	}
 	item->ifindex = ifindex;
 	item->generation = generation;
@@ -371,6 +374,57 @@ networkd_lan_next(
 		return 0;
 	}
 
+	/*
+	 * An interface the configuration wants but that has no cable is
+	 * brought up once, so that its driver can report the link at all;
+	 * the carrier event then asks for it to be configured.
+	 */
+	for (index = 0U; index < lan->interface_count; index++) {
+		const struct networkd_lan_interface *item =
+		    &lan->interfaces[index];
+
+		/* Only a present interface without a cable, not raised yet. */
+		if (item->carrier || item->raised)
+			continue;
+		policy = find_policy(lan, item->name);
+
+		/* An interface the configuration does not name is left alone. */
+		if (policy == NULL ||
+		    policy->mode == NETWORKD_LAN_MODE_DISABLED)
+			continue;
+		work->action = NETWORKD_LAN_ACTION_RAISE;
+		strncpy(work->interface, item->name,
+			sizeof(work->interface) - 1U);
+		work->policy = *policy;
+
+		/* Reports successful completion. */
+		return 0;
+	}
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/*
+ * Records that the daemon has brought an interface up to watch its link.
+ */
+int
+networkd_lan_raised(
+	struct networkd_lan *lan,
+	const char *name)
+{
+	struct networkd_lan_interface *item;
+
+	/* Rejects what cannot be recorded. */
+	if (lan == NULL || !name_valid(name))
+		return -1;
+	item = find_interface(lan, name);
+
+	/* Handles an interface that went while the work was being done. */
+	if (item == NULL)
+		return -1;
+	item->raised = 1;
+
 	/* Reports successful completion. */
 	return 0;
 }
@@ -427,6 +481,9 @@ networkd_lan_down(
 	if (item == NULL)
 		return -1;
 	item->state = NETWORKD_LAN_IDLE;
+
+	/* A down interface cannot report its next cable; it is raised again. */
+	item->raised = 0;
 
 	/* Reports successful completion. */
 	return 0;

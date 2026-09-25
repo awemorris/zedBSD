@@ -1,34 +1,16 @@
+<!-- awesome-plan project=zedbsd record=ws017 -->
+
 # WS017: `/dev/graphics` linear-framebuffer fast path
 
-<!-- traceability:start -->
-
-## Goal traceability
-
-- Primary Milestone: **MG006 — グラフィカルな操作環境を利用できる**
-- Related Milestones: なし
-- Objectives: O2
-- 貢献する成果: LFB描画を改善しGUI操作へ接続する。
-- 上位定義: [MasterのObjectives / Milestone Goals](https://github.com/awemorris/zedBSD/issues/1)
-
-既存Phaseは本WSを親として上位成果に接続する。Primaryは分類と責任の所在であり、
-各PhaseがRelatedすべてを満たすという意味ではない。成果・検証・限界は各Phaseの
-現行記録を根拠とする。今回の対応付けは状態変更・未定義作業の追加・実行許可ではない。
-
-<!-- traceability:end -->
-
-
-Last updated: 2026-09-05
-
-WSID: `ws017`
-
-Status: Queue-ready; the initial-protection `mprotect` ceiling is selected
-
-Parent: [master plan](../master.md)
-
-Last verified Phase: none
-
-Resume point: after the higher-priority WS009, WS011, WS019, and WS022 work,
-Queue `ws017-p001` followed by p002--p004.
+<!-- awesome-plan-current:start -->
+Status: planned
+Primary Milestone: MG006
+Related Milestones: なし
+Objectives: O2
+Parent: [Master](../master.md)
+Queue: なし
+Resume point: WS022 は完了済み。mmap・Xzed の高速描画・受け入れの Phase が未実行
+<!-- awesome-plan-current:end -->
 
 Shared tests: [WS017 test index](tests/README.md)
 

@@ -9,7 +9,7 @@
  * X68000 SCSI disk mark and partition decoder.
  */
 
-#include <drivers/disklabel.h>
+#include <drivers/disklabel/disklabel.h>
 
 #define X68K_TABLE_OFFSET 2048U
 #define X68K_ENTRY_OFFSET 16U

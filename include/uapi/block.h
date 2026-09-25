@@ -14,7 +14,7 @@ extern "C" {
 
 #include <stdint.h>
 #include <stddef.h>
-#include <sys/ioctl.h>
+#include <uapi/ioctl.h>
 
 #define KERN_BLOCK_VERSION	1U
 #define KERN_BLOCK_NAME_MAX	32U

@@ -1,0 +1,19 @@
+intel ax211 Gen3 TX ring tests passed
+intel ax211 Gen3 TX ring tests passed
+intel ax211 Gen3 TX ring tests passed
+In file included from /tmp/p034/baseline-head/include/drivers/generic/dma.h:16,
+                 from /tmp/p034/baseline-head/src/drivers/wifi/intel-ax211/intel-ax211-tx-ring.h:58,
+                 from /tmp/p034/baseline-head/src/drivers/wifi/intel-ax211/intel-ax211-tx-ring.c:55:
+/tmp/p034/baseline-head/src/drivers/wifi/intel-ax211/intel-ax211-tx-ring.c: In function 'ax211_tx_queue_command_encode':
+/tmp/p034/baseline-head/src/drivers/wifi/intel-ax211/intel-ax211-tx-ring.c:849:55: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+  849 |         ax211_tx_ring_put_le32(command + 4U, UINT32_C(1) << station_id);
+      |                                                       ^
+/tmp/p034/baseline-head/libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+/tmp/p034/baseline-head/libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+/tmp/p034/baseline-head/src/drivers/wifi/intel-ax211/intel-ax211-tx-ring.c:849:46: note: in expansion of macro 'UINT32_C'
+  849 |         ax211_tx_ring_put_le32(command + 4U, UINT32_C(1) << station_id);
+      |                                              ^~~~~~~~

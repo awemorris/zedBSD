@@ -8,8 +8,11 @@
 /*
  * Per-process file descriptor tables.
  *
- * A table is a fixed array of slots that are free, live with an object and
- * its descriptor flags, or reserved for a multi-descriptor operation.
+ * A table is an array of slots that are free, live with an object and its
+ * descriptor flags, or reserved for a multi-descriptor operation.  It starts
+ * small and grows (filedesc_grow) when a search finds no free slot below the
+ * process limit; a grown array replaces the old one under the lock, so a slot
+ * is only ever addressed while the lock is held.
  * Reservations let a socketpair or pipe claim its descriptors atomically
  * while dup2() waits for a reserved slot to settle.  Detaching a file
  * also releases the process's record locks on it.
@@ -21,9 +24,17 @@
 #include "kern/poll.h"
 #include "kern/record-lock.h"
 #include "kern/test-checkpoint.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
+#include <uapi/socket.h>
+
+/* A received message's rights are claimed by one reservation. */
+_Static_assert(KERN_MSG_FD_MAX <= FILEDESC_RESERVE_MAX,
+    "a reservation must hold a message's descriptors");
+
+/* How many descriptors close-on-exec detaches at a time. */
+#define FILEDESC_BATCH	32U
 
 /*
  * File-cache builds provide descriptor-close cancellation; other builds omit it.
@@ -40,6 +51,9 @@ static void descriptor_record_unlock(struct filedesc *fd, const struct fd_object
 static void descriptor_readahead_cancel(const struct fd_object *object);
 static int filedesc_take_kind(struct filedesc *fd, int descriptor, enum fd_object_type kind, struct fd_object *result);
 static void slot_make_reserved(struct filedesc_entry *entry, uint64_t id);
+static int filedesc_grow(struct filedesc *fd, unsigned wanted);
+static unsigned slot_span_locked(const struct filedesc *fd);
+static void notify_table_pollers(struct filedesc *fd);
 
 /*
  * Creates an empty descriptor table for a process.
@@ -53,6 +67,15 @@ filedesc_create(
 	/* Allocates the table with every slot free and the full limit. */
 	fd = kern_calloc(1, sizeof(*fd));
 	if (fd != NULL) {
+		fd->entries = kern_calloc(FILEDESC_INITIAL_SLOTS,
+		    sizeof(*fd->entries));
+		if (fd->entries == NULL) {
+			kern_free(fd);
+
+			/* Failed: no memory for the first slots. */
+			return NULL;
+		}
+		fd->capacity = FILEDESC_INITIAL_SLOTS;
 		refcount_init(&fd->refs, 1);
 		spin_init(&fd->lock, LOCK_RANK_FILEDESC, "file descriptor table");
 		waitq_init(&fd->reservation_waitq,
@@ -86,10 +109,11 @@ void
 filedesc_destroy(
 	struct filedesc *fd)
 {
-	struct fd_object detached[KERN_OPEN_MAX];
+	struct filedesc_entry *entries;
+	struct fd_object object;
 	unsigned long irq;
-	int descriptor;
-	int count;
+	unsigned capacity;
+	unsigned descriptor;
 	int last;
 
 	/* A missing table needs no cleanup. */
@@ -101,37 +125,39 @@ filedesc_destroy(
 	if (!last)
 		return;
 
-	/* Detach every object before any callback can reenter a descriptor table. */
-	count = 0;
+	/*
+	 * Withdraws the whole namespace before any callback can reenter a
+	 * descriptor table: the slots leave the table and are walked here.
+	 */
 	irq = spin_lock_irqsave(&fd->lock);
-
-	/* Every live slot contributes exactly one detached ownership reference. */
-	for (descriptor = 0; descriptor < KERN_OPEN_MAX; descriptor++) {
-		/* Reserved slots carry no object ownership. */
-		if (fd->entries[descriptor].state == FILEDESC_SLOT_LIVE)
-			detached[count++] = fd->entries[descriptor].object;
-
-		/* The dying table can never publish this slot again. */
-		slot_make_free(&fd->entries[descriptor]);
-	}
-
+	entries = fd->entries;
+	capacity = fd->capacity;
+	fd->entries = NULL;
+	fd->capacity = 0;
 	spin_unlock_irqrestore(&fd->lock, irq);
 
 	/* Wake readiness scans after withdrawing the whole namespace. */
-	poll_notify();
+	notify_table_pollers(fd);
 
-	/* Preserve process record-lock release before any file backend closes. */
-	for (descriptor = 0; descriptor < count; descriptor++)
-		descriptor_record_unlock(fd, &detached[descriptor]);
+	/* Every process record lock goes first, before any file backend closes. */
+	for (descriptor = 0; descriptor < capacity; descriptor++) {
+		if (entries[descriptor].state == FILEDESC_SLOT_LIVE)
+			descriptor_record_unlock(fd, &entries[descriptor].object);
+	}
 
-	/* Final destruction runs outside the table lock for both object classes. */
-	for (descriptor = 0; descriptor < count; descriptor++) {
-		descriptor_readahead_cancel(&detached[descriptor]);
-		(void)fd_object_put(&detached[descriptor]);
+	/* Each live slot gives up its one ownership reference. */
+	for (descriptor = 0; descriptor < capacity; descriptor++) {
+		if (entries[descriptor].state != FILEDESC_SLOT_LIVE)
+			continue;
+		object = entries[descriptor].object;
+		slot_make_free(&entries[descriptor]);
+		descriptor_readahead_cancel(&object);
+		(void)fd_object_put(&object);
 	}
 
 	/* The table no longer contributes to global descriptor accounting. */
 	(void)atomic_raw_fetch_add_relaxed(&filedesc_live.value, (unsigned)-1);
+	kern_free(entries);
 	kern_free(fd);
 
 	/* Succeeded: the final table and all detached references are retired. */
@@ -348,7 +374,9 @@ filedesc_clone(
 	struct filedesc *copy;
 	struct fd_object object;
 	unsigned long irq;
-	int descriptor;
+	unsigned capacity;
+	unsigned descriptor;
+	int error;
 
 	/* Rejects a missing source or result. */
 	if (source == NULL || result == NULL)
@@ -359,13 +387,28 @@ filedesc_clone(
 	if (copy == NULL)
 		return ENOMEM;
 
-	/* Inherit the source namespace while close cannot withdraw its references. */
-	irq = spin_lock_irqsave(&source->lock);
+	/*
+	 * Inherit the source namespace while close cannot withdraw its
+	 * references.  The copy is first grown to the source's size; the
+	 * source can grow meanwhile, which only means growing again.
+	 */
+	for (;;) {
+		irq = spin_lock_irqsave(&source->lock);
+		capacity = source->capacity;
+		if (copy->capacity >= capacity)
+			break;
+		spin_unlock_irqrestore(&source->lock, irq);
+		error = filedesc_grow(copy, capacity);
+		if (error != 0) {
+			filedesc_destroy(copy);
+			return error;
+		}
+	}
 
 	copy->soft_limit = source->soft_limit;
 
 	/* Preserve each inheritable descriptor's object class, position and flags. */
-	for (descriptor = 0; descriptor < KERN_OPEN_MAX; descriptor++) {
+	for (descriptor = 0; descriptor < capacity; descriptor++) {
 		/* Unpublished slots and close-on-fork descriptors do not enter the child. */
 		if (source->entries[descriptor].state != FILEDESC_SLOT_LIVE ||
 		    (source->entries[descriptor].flags & FILEDESC_CLOFORK) != 0)
@@ -407,7 +450,8 @@ filedesc_get_flags(
 	/* Reads the flags of a live slot. */
 	irq = spin_lock_irqsave(&fd->lock);
 
-	if (fd->entries[descriptor].state != FILEDESC_SLOT_LIVE) {
+	if ((unsigned)descriptor >= fd->capacity ||
+	    fd->entries[descriptor].state != FILEDESC_SLOT_LIVE) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EBADF;
 	}
@@ -440,7 +484,8 @@ filedesc_set_flags(
 	/* Sets the flags of a live slot. */
 	irq = spin_lock_irqsave(&fd->lock);
 
-	if (fd->entries[descriptor].state != FILEDESC_SLOT_LIVE) {
+	if ((unsigned)descriptor >= fd->capacity ||
+	    fd->entries[descriptor].state != FILEDESC_SLOT_LIVE) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EBADF;
 	}
@@ -467,6 +512,7 @@ filedesc_dup(
 	struct fd_object object;
 	unsigned long irq;
 	int descriptor;
+	int error;
 
 	/* Rejects a descriptor out of range, then any other bad operand. */
 	if (oldfd < 0 || oldfd >= KERN_OPEN_MAX)
@@ -480,20 +526,33 @@ filedesc_dup(
 	    (flags & ~FILEDESC_FLAG_MASK) != 0)
 		return EINVAL;
 
+retry:
 	/* Hold the source namespace stable through duplicate publication. */
 	irq = spin_lock_irqsave(&fd->lock);
 
 	/* A reserved or closed source exposes no object to duplicate. */
-	if (fd->entries[oldfd].state != FILEDESC_SLOT_LIVE) {
+	if ((unsigned)oldfd >= fd->capacity ||
+	    fd->entries[oldfd].state != FILEDESC_SLOT_LIVE) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EBADF;
 	}
 
 	/* Finds the first free slot under the limit. */
-	for (descriptor = minimum; descriptor < (int)fd->soft_limit; descriptor++) {
+	for (descriptor = minimum; descriptor < (int)slot_span_locked(fd);
+	     descriptor++) {
 		/* Reservations remain unavailable until their transaction settles. */
 		if (fd->entries[descriptor].state == FILEDESC_SLOT_FREE)
 			break;
+	}
+
+	/* A full table below the limit grows, then the search runs again. */
+	if (descriptor >= (int)slot_span_locked(fd) &&
+	    descriptor < (int)fd->soft_limit) {
+		spin_unlock_irqrestore(&fd->lock, irq);
+		error = filedesc_grow(fd, (unsigned)descriptor + 1U);
+		if (error != 0)
+			return error;
+		goto retry;
 	}
 
 	/* No destination below the current process limit could be selected. */
@@ -511,7 +570,7 @@ filedesc_dup(
 	spin_unlock_irqrestore(&fd->lock, irq);
 
 	/* Readiness scanners must observe the newly published descriptor identity. */
-	poll_notify();
+	notify_table_pollers(fd);
 
 	/* Succeeded: the duplicate owns its reference to the source object. */
 	return 0;
@@ -546,13 +605,21 @@ filedesc_dup2(
 	    (flags & ~FILEDESC_FLAG_MASK) != 0)
 		return EBADF;
 
+	/* A target below the limit but past the table's end needs the table grown. */
+	if ((unsigned)newfd < filedesc_get_limit(fd)) {
+		error = filedesc_grow(fd, (unsigned)newfd + 1U);
+		if (error != 0)
+			return error;
+	}
+
 	/* Re-checks the source and waits while the target is reserved. */
 	irq = spin_lock_irqsave(&fd->lock);
 
 	/* A wakeup must revalidate the source and the destination reservation. */
 	while (1) {
 		/* Concurrent source close can invalidate the requested duplication. */
-		if (fd->entries[oldfd].state != FILEDESC_SLOT_LIVE) {
+		if ((unsigned)oldfd >= fd->capacity ||
+		    fd->entries[oldfd].state != FILEDESC_SLOT_LIVE) {
 			spin_unlock_irqrestore(&fd->lock, irq);
 			return EBADF;
 		}
@@ -568,7 +635,8 @@ filedesc_dup2(
 		}
 
 		/* A changed process limit can make the target unavailable after a wakeup. */
-		if ((unsigned)newfd >= fd->soft_limit) {
+		if ((unsigned)newfd >= fd->soft_limit ||
+		    (unsigned)newfd >= fd->capacity) {
 			spin_unlock_irqrestore(&fd->lock, irq);
 			return EBADF;
 		}
@@ -605,7 +673,7 @@ filedesc_dup2(
 	spin_unlock_irqrestore(&fd->lock, irq);
 
 	/* Notify scanners after the atomic destination replacement is visible. */
-	poll_notify();
+	notify_table_pollers(fd);
 
 	/* File record locks and either backend's destruction stay outside the lock. */
 	descriptor_record_unlock(fd, &displaced);
@@ -633,11 +701,8 @@ filedesc_install_pair(
 	unsigned long irq;
 	int first_slot;
 	int second_slot;
+	int error;
 	int i;
-
-	/* Both required positions remain unselected until the locked table scan. */
-	first_slot = -1;
-	second_slot = -1;
 
 	/* Rejects a missing operand or unknown flags. */
 	if (fd == NULL ||
@@ -647,11 +712,16 @@ filedesc_install_pair(
 	    ((first_flags | second_flags) & ~FILEDESC_FLAG_MASK) != 0)
 		return EINVAL;
 
+retry:
+	/* Both required positions remain unselected until the locked table scan. */
+	first_slot = -1;
+	second_slot = -1;
+
 	/* Finds the two lowest free slots under the limit. */
 	irq = spin_lock_irqsave(&fd->lock);
 
 	/* Select distinct free positions without publishing either file prematurely. */
-	for (i = 0; i < (int)fd->soft_limit; i++) {
+	for (i = 0; i < (int)slot_span_locked(fd); i++) {
 		/* Live and reserved slots cannot accept either supplied reference. */
 		if (fd->entries[i].state != FILEDESC_SLOT_FREE)
 			continue;
@@ -663,6 +733,16 @@ filedesc_install_pair(
 			second_slot = i;
 			break;
 		}
+	}
+
+	/* A full table below the limit grows, then the search runs again. */
+	if (second_slot < 0 && fd->capacity < fd->soft_limit) {
+		i = (int)fd->capacity;
+		spin_unlock_irqrestore(&fd->lock, irq);
+		error = filedesc_grow(fd, (unsigned)i + 2U);
+		if (error != 0)
+			return error;
+		goto retry;
 	}
 
 	/* A single free position cannot satisfy this atomic pair installation. */
@@ -688,7 +768,7 @@ filedesc_install_pair(
 	spin_unlock_irqrestore(&fd->lock, irq);
 
 	/* Publish readiness changes only after both descriptors are live. */
-	poll_notify();
+	notify_table_pollers(fd);
 
 	/* Succeeded: the namespace owns both supplied file references. */
 	return 0;
@@ -737,26 +817,38 @@ filedesc_reserve_many(
 	unsigned flags,
 	struct filedesc_reservation *reservation)
 {
+	unsigned capacity;
 	unsigned found;
 	unsigned index;
 	unsigned long irq;
-
-	found = 0;
+	int error;
 
 	/* Rejects a missing operand, too many descriptors, or unknown flags. */
 	if (fd == NULL ||
 	    reservation == NULL ||
-	    count > KERN_OPEN_MAX ||
+	    count > FILEDESC_RESERVE_MAX ||
 	    (flags & ~FILEDESC_FLAG_MASK) != 0)
 		return EINVAL;
-	memset(reservation, 0, sizeof(*reservation));
+	kern_memset(reservation, 0, sizeof(*reservation));
 
+retry:
 	/* Collects the lowest free slots under the limit. */
+	found = 0;
 	irq = spin_lock_irqsave(&fd->lock);
 
-	for (index = 0; index < fd->soft_limit && found < count; index++) {
+	for (index = 0; index < slot_span_locked(fd) && found < count; index++) {
 		if (fd->entries[index].state == FILEDESC_SLOT_FREE)
 			reservation->slots[found++] = (int)index;
+	}
+
+	/* A full table below the limit grows, then the search runs again. */
+	if (found != count && fd->capacity < fd->soft_limit) {
+		capacity = fd->capacity;
+		spin_unlock_irqrestore(&fd->lock, irq);
+		error = filedesc_grow(fd, capacity + (count - found));
+		if (error != 0)
+			return error;
+		goto retry;
 	}
 
 	if (found != count) {
@@ -798,12 +890,12 @@ filedesc_commit_reserved(
 	struct file **files,
 	int *descriptors)
 {
-	struct fd_object objects[KERN_OPEN_MAX];
+	struct fd_object objects[FILEDESC_RESERVE_MAX];
 	unsigned index;
 	int error;
 
 	/* Validate the bounded group before constructing file carriers. */
-	if (reservation == NULL || reservation->count > KERN_OPEN_MAX)
+	if (reservation == NULL || reservation->count > FILEDESC_RESERVE_MAX)
 		return EINVAL;
 
 	/* A nonempty reservation requires a file pointer array. */
@@ -848,7 +940,7 @@ filedesc_abort_reserved(
 	for (index = 0; index < reservation->count; index++) {
 		slot = reservation->slots[index];
 		if (slot >= 0 &&
-		    slot < KERN_OPEN_MAX &&
+		    (unsigned)slot < fd->capacity &&
 		    fd->entries[slot].state == FILEDESC_SLOT_RESERVED &&
 		    fd->entries[slot].reservation_id == reservation->generation)
 			slot_make_free(&fd->entries[slot]);
@@ -859,9 +951,9 @@ filedesc_abort_reserved(
 
 	spin_unlock_irqrestore(&fd->lock, irq);
 
-	/* Drops the reservation's table reference. */
+	/* Wakes this table's polls, then drops the reservation's reference. */
+	notify_table_pollers(fd);
 	filedesc_destroy(fd);
-	poll_notify();
 }
 
 /*
@@ -921,45 +1013,54 @@ void
 filedesc_close_on_exec(
 	struct filedesc *fd)
 {
-	struct fd_object detached[KERN_OPEN_MAX];
+	struct fd_object detached[FILEDESC_BATCH];
 	unsigned long irq;
-	int descriptor;
-	int count;
+	unsigned descriptor;
+	unsigned count;
+	unsigned index;
 
 	/* A process without a table has nothing to discard. */
 	if (fd == NULL)
 		return;
 
-	/* Withdraw marked slots before invoking any object destructor. */
-	count = 0;
-	irq = spin_lock_irqsave(&fd->lock);
+	/*
+	 * Withdraws the marked slots a batch at a time, so the detached
+	 * references fit on the stack; a withdrawn slot is free and is not
+	 * found again.
+	 */
+	do {
+		count = 0;
+		irq = spin_lock_irqsave(&fd->lock);
 
-	/* Close flags belong to descriptors, independently of their object class. */
-	for (descriptor = 0; descriptor < KERN_OPEN_MAX; descriptor++) {
-		/* Unmarked and reserved slots do not belong to this close pass. */
-		if (fd->entries[descriptor].state != FILEDESC_SLOT_LIVE ||
-		    (fd->entries[descriptor].flags & FILEDESC_CLOEXEC) == 0)
-			continue;
+		/* Close flags belong to descriptors, independently of their object class. */
+		for (descriptor = 0; descriptor < fd->capacity &&
+		     count < FILEDESC_BATCH; descriptor++) {
+			/* Unmarked and reserved slots do not belong to this close pass. */
+			if (fd->entries[descriptor].state != FILEDESC_SLOT_LIVE ||
+			    (fd->entries[descriptor].flags & FILEDESC_CLOEXEC) == 0)
+				continue;
 
-		/* Each withdrawn slot transfers one ownership reference to cleanup. */
-		detached[count++] = fd->entries[descriptor].object;
-		slot_make_free(&fd->entries[descriptor]);
-	}
+			/* Each withdrawn slot transfers one ownership reference to cleanup. */
+			detached[count++] = fd->entries[descriptor].object;
+			slot_make_free(&fd->entries[descriptor]);
+		}
 
-	spin_unlock_irqrestore(&fd->lock, irq);
+		spin_unlock_irqrestore(&fd->lock, irq);
 
-	/* Readiness scanners must see the now-closed descriptors. */
-	poll_notify();
+		/* Readiness scanners must see the now-closed descriptors. */
+		if (count != 0)
+			notify_table_pollers(fd);
 
-	/* Drop file record locks before closing any file backend. */
-	for (descriptor = 0; descriptor < count; descriptor++)
-		descriptor_record_unlock(fd, &detached[descriptor]);
+		/* Drop file record locks before closing any file backend. */
+		for (index = 0; index < count; index++)
+			descriptor_record_unlock(fd, &detached[index]);
 
-	/* Handle callbacks cannot execute while the descriptor lock is held. */
-	for (descriptor = 0; descriptor < count; descriptor++) {
-		descriptor_readahead_cancel(&detached[descriptor]);
-		(void)fd_object_put(&detached[descriptor]);
-	}
+		/* Handle callbacks cannot execute while the descriptor lock is held. */
+		for (index = 0; index < count; index++) {
+			descriptor_readahead_cancel(&detached[index]);
+			(void)fd_object_put(&detached[index]);
+		}
+	} while (count == FILEDESC_BATCH);
 
 	/* Succeeded: the new process image inherits none of the marked descriptors. */
 	return;
@@ -1021,7 +1122,8 @@ filedesc_get_object_ref(
 	irq = spin_lock_irqsave(&fd->lock);
 
 	/* A reservation does not expose the future descriptor before commit. */
-	if (fd->entries[descriptor].state != FILEDESC_SLOT_LIVE) {
+	if ((unsigned)descriptor >= fd->capacity ||
+	    fd->entries[descriptor].state != FILEDESC_SLOT_LIVE) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EBADF;
 	}
@@ -1053,6 +1155,7 @@ filedesc_install_object_from(
 	int *descriptor)
 {
 	unsigned long irq;
+	int error;
 	int slot;
 	int valid;
 
@@ -1069,14 +1172,24 @@ filedesc_install_object_from(
 	if (!valid)
 		return EINVAL;
 
+retry:
 	/* Find the lowest free slot under the current process limit. */
 	irq = spin_lock_irqsave(&fd->lock);
 
 	/* Reserved slots remain unavailable until their transaction finishes. */
-	for (slot = minimum; slot < (int)fd->soft_limit; slot++) {
+	for (slot = minimum; slot < (int)slot_span_locked(fd); slot++) {
 		/* The selected slot receives ownership without changing its reference count. */
 		if (fd->entries[slot].state == FILEDESC_SLOT_FREE)
 			break;
+	}
+
+	/* A full table below the limit grows, then the search runs again. */
+	if (slot >= (int)slot_span_locked(fd) && slot < (int)fd->soft_limit) {
+		spin_unlock_irqrestore(&fd->lock, irq);
+		error = filedesc_grow(fd, (unsigned)slot + 1U);
+		if (error != 0)
+			return error;
+		goto retry;
 	}
 
 	/* A full table leaves the caller's ownership unchanged. */
@@ -1092,7 +1205,7 @@ filedesc_install_object_from(
 	spin_unlock_irqrestore(&fd->lock, irq);
 
 	/* Readiness scans must observe the newly live descriptor. */
-	poll_notify();
+	notify_table_pollers(fd);
 
 	/* Succeeded: the table owns the supplied reference. */
 	return 0;
@@ -1109,6 +1222,7 @@ filedesc_install_object_at(
 	int descriptor)
 {
 	unsigned long irq;
+	int error;
 	int valid;
 
 	/* Reject invalid publication coordinates without consuming ownership. */
@@ -1123,11 +1237,19 @@ filedesc_install_object_at(
 	if (!valid)
 		return EINVAL;
 
+	/* A position below the limit but past the table's end needs the table grown. */
+	if ((unsigned)descriptor < filedesc_get_limit(fd)) {
+		error = filedesc_grow(fd, (unsigned)descriptor + 1U);
+		if (error != 0)
+			return error;
+	}
+
 	/* Protect the limit check and publication as one operation. */
 	irq = spin_lock_irqsave(&fd->lock);
 
 	/* No new descriptor may exceed the current process soft limit. */
-	if ((unsigned)descriptor >= fd->soft_limit) {
+	if ((unsigned)descriptor >= fd->soft_limit ||
+	    (unsigned)descriptor >= fd->capacity) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EMFILE;
 	}
@@ -1144,7 +1266,7 @@ filedesc_install_object_at(
 	spin_unlock_irqrestore(&fd->lock, irq);
 
 	/* Notify waiters after the descriptor becomes visible. */
-	poll_notify();
+	notify_table_pollers(fd);
 
 	/* Succeeded: the selected descriptor owns the supplied reference. */
 	return 0;
@@ -1188,7 +1310,7 @@ filedesc_commit_objects(
 	/* Refuse malformed transactions before indexing their bounded slot arrays. */
 	if (reservation == NULL ||
 	    !reservation->active ||
-	    reservation->count > KERN_OPEN_MAX ||
+	    reservation->count > FILEDESC_RESERVE_MAX ||
 	    (reservation->count != 0 &&
 	     (objects == NULL || descriptors == NULL)))
 		return EINVAL;
@@ -1208,7 +1330,7 @@ filedesc_commit_objects(
 	for (index = 0; index < reservation->count; index++) {
 		slot = reservation->slots[index];
 		if (slot < 0 ||
-		    slot >= KERN_OPEN_MAX ||
+		    (unsigned)slot >= fd->capacity ||
 		    fd->entries[slot].state != FILEDESC_SLOT_RESERVED ||
 		    fd->entries[slot].reservation_id != reservation->generation) {
 			spin_unlock_irqrestore(&fd->lock, irq);
@@ -1230,12 +1352,62 @@ filedesc_commit_objects(
 
 	spin_unlock_irqrestore(&fd->lock, irq);
 
+	/* Wakes this table's polls before the reservation's reference goes. */
+	notify_table_pollers(fd);
+
 	/* The committed descriptors, not the reservation, now own their objects. */
 	filedesc_destroy(fd);
-	poll_notify();
 
 	/* Succeeded: the table owns every committed reference. */
 	return 0;
+}
+
+/*
+ * Counts a poll that is about to scan this table's descriptor numbers.
+ *
+ * The count is published before the poll reads the channel sequence and
+ * scans, so a table change either lands before the scan, which sees it,
+ * or after, when notify_table_pollers() sees the count and wakes the poll.
+ */
+void
+filedesc_poll_begin(
+	struct filedesc *fd)
+{
+	/* Publishes the poll before it reads the channel sequence. */
+	(void)__atomic_fetch_add(&fd->pollers, 1U, __ATOMIC_SEQ_CST);
+}
+
+/*
+ * Withdraws a poll counted by filedesc_poll_begin().
+ */
+void
+filedesc_poll_end(
+	struct filedesc *fd)
+{
+	/* The poll no longer scans this table. */
+	(void)__atomic_fetch_sub(&fd->pollers, 1U, __ATOMIC_SEQ_CST);
+}
+
+/*
+ * Wakes the polls that may depend on a change to this table.
+ *
+ * A descriptor number's meaning matters only to a poll scanning this table;
+ * a change to what an object is ready for is announced by the object's own
+ * code.  So a table no poll is scanning, such as a short-lived child's,
+ * wakes nobody.  The fence orders the change, already published under the
+ * table lock, before the count is read.
+ */
+static void
+notify_table_pollers(
+	struct filedesc *fd)
+{
+	unsigned pollers;
+
+	/* Wakes the poll channel only while a poll scans this table. */
+	__atomic_thread_fence(__ATOMIC_SEQ_CST);
+	pollers = __atomic_load_n(&fd->pollers, __ATOMIC_SEQ_CST);
+	if (pollers != 0)
+		poll_notify();
 }
 
 /* Marks a slot free. */
@@ -1349,7 +1521,8 @@ filedesc_take_kind(
 	irq = spin_lock_irqsave(&fd->lock);
 
 	/* A reserved descriptor is not yet an object that close can consume. */
-	if (fd->entries[descriptor].state != FILEDESC_SLOT_LIVE) {
+	if ((unsigned)descriptor >= fd->capacity ||
+	    fd->entries[descriptor].state != FILEDESC_SLOT_LIVE) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EBADF;
 	}
@@ -1367,10 +1540,83 @@ filedesc_take_kind(
 	spin_unlock_irqrestore(&fd->lock, irq);
 
 	/* Descriptor side effects run before returning the ownership to its caller. */
-	poll_notify();
+	notify_table_pollers(fd);
 	descriptor_record_unlock(fd, result);
 	descriptor_readahead_cancel(result);
 
 	/* Succeeded: the caller owns the reference and the descriptor is free. */
 	return 0;
+}
+
+/*
+ * Makes the table hold at least wanted slots.
+ *
+ * Called without the lock: the larger array is allocated first, then swapped
+ * in under the lock unless another thread grew the table meanwhile.  The
+ * capacity doubles, so a table reaches KERN_OPEN_MAX in a few steps.
+ */
+static int
+filedesc_grow(
+	struct filedesc *fd,
+	unsigned wanted)
+{
+	struct filedesc_entry *entries;
+	struct filedesc_entry *old;
+	unsigned long irq;
+	unsigned capacity;
+
+	/* Rejects a size past the hard maximum. */
+	if (wanted > KERN_OPEN_MAX)
+		return EMFILE;
+
+	/* Samples the current size. */
+	irq = spin_lock_irqsave(&fd->lock);
+	capacity = fd->capacity;
+	spin_unlock_irqrestore(&fd->lock, irq);
+
+	/* Handles a table already large enough, or one being destroyed. */
+	if (capacity >= wanted)
+		return 0;
+	if (capacity == 0)
+		return EBADF;
+
+	/* Doubles until the wanted slot fits, within the hard maximum. */
+	while (capacity < wanted)
+		capacity *= 2U;
+	if (capacity > KERN_OPEN_MAX)
+		capacity = KERN_OPEN_MAX;
+
+	/* Zeroed slots are free slots. */
+	entries = kern_calloc(capacity, sizeof(*entries));
+	if (entries == NULL)
+		return ENOMEM;
+
+	/* Swaps the larger array in, unless another thread already grew it. */
+	old = NULL;
+	irq = spin_lock_irqsave(&fd->lock);
+	if (fd->capacity < capacity) {
+		kern_memcpy(entries, fd->entries,
+		    (size_t)fd->capacity * sizeof(*entries));
+		old = fd->entries;
+		fd->entries = entries;
+		fd->capacity = capacity;
+		entries = NULL;
+	}
+	spin_unlock_irqrestore(&fd->lock, irq);
+
+	/* Frees whichever array is no longer used. */
+	kern_free(old);
+	kern_free(entries);
+
+	/* Succeeded: the table holds the wanted slots. */
+	return 0;
+}
+
+/* Reports how many slots a search may use: the smaller of the size and limit. */
+static unsigned
+slot_span_locked(
+	const struct filedesc *fd)
+{
+	/* Succeeded: the searchable span. */
+	return fd->capacity < fd->soft_limit ? fd->capacity : fd->soft_limit;
 }

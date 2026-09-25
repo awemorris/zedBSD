@@ -3,7 +3,10 @@
 #include "../bsp.h"
 #include "mailbox.h"
 #include "framebuffer.h"
+#include "font.h"
+#include "led.h"
 
+#define TAG_GET_PHYSICAL 0x00040003U
 #define TAG_PHYSICAL 0x00048003U
 #define TAG_VIRTUAL 0x00048004U
 #define TAG_DEPTH 0x00048005U
@@ -21,56 +24,6 @@ static const uint32_t palette[16]={
 	0x555555,0x5555ff,0x55ff55,0x55ffff,0xff5555,0xff55ff,0xffff55,0xffffff
 };
 
-static const uint8_t digits[10][7]={
-	{14,17,19,21,25,17,14},{4,12,4,4,4,4,14},
-	{14,17,1,2,4,8,31},{30,1,1,14,1,1,30},
-	{2,6,10,18,31,2,2},{31,16,16,30,1,1,30},
-	{14,16,16,30,17,17,14},{31,1,2,4,8,8,8},
-	{14,17,17,14,17,17,14},{14,17,17,15,1,1,14}
-};
-static const uint8_t letters[26][7]={
-	{14,17,17,31,17,17,17},{30,17,17,30,17,17,30},
-	{14,17,16,16,16,17,14},{30,17,17,17,17,17,30},
-	{31,16,16,30,16,16,31},{31,16,16,30,16,16,16},
-	{14,17,16,23,17,17,15},{17,17,17,31,17,17,17},
-	{14,4,4,4,4,4,14},{7,2,2,2,18,18,12},
-	{17,18,20,24,20,18,17},{16,16,16,16,16,16,31},
-	{17,27,21,21,17,17,17},{17,25,21,19,17,17,17},
-	{14,17,17,17,17,17,14},{30,17,17,30,16,16,16},
-	{14,17,17,17,21,18,13},{30,17,17,30,20,18,17},
-	{15,16,16,14,1,1,30},{31,4,4,4,4,4,4},
-	{17,17,17,17,17,17,14},{17,17,17,17,17,10,4},
-	{17,17,17,21,21,21,10},{17,17,10,4,10,17,17},
-	{17,17,10,4,4,4,4},{31,1,2,4,8,16,31}
-};
-
-static uint8_t glyph_row(int character,unsigned row)
-{
-	if(row>=7)return 0;
-	if(character>='0'&&character<='9')return digits[character-'0'][row];
-	if(character>='a'&&character<='z')character-='a'-'A';
-	if(character>='A'&&character<='Z')return letters[character-'A'][row];
-	switch(character){
-	case '-':return row==3?31:0;case '_':return row==6?31:0;
-	case '=':return row==2||row==4?31:0;case '|':return 4;
-	case '.':return row==6?4:0;case ',':return row==5?4:row==6?8:0;
-	case ':':return row==2||row==5?4:0;case ';':return row==2?4:row==5?4:row==6?8:0;
-	case '/':return (uint8_t)(1U<<(4U-(row*5U/7U)));
-	case '\\':return (uint8_t)(1U<<(row*5U/7U));
-	case '+':return row==3?31:(row>=1&&row<=5?4:0);
-	case '!':return row<5?4:row==6?4:0;case '?':return (uint8_t[]){14,17,1,2,4,0,4}[row];
-	case '[':return row==0||row==6?14:8;case ']':return row==0||row==6?14:2;
-	case '(':return row==0||row==6?2:row==1||row==5?4:8;
-	case ')':return row==0||row==6?8:row==1||row==5?4:2;
-	case '<':return row==3?8:row==2||row==4?4:row==1||row==5?2:0;
-	case '>':return row==3?2:row==2||row==4?4:row==1||row==5?8:0;
-	case '#':return row==2||row==4?31:row>0&&row<6?10:0;
-	case '*':return row==2?21:row==3?14:row==4?21:0;
-	case '"':return row<2?10:0;case '\'':return row<2?4:0;
-	default:return 0;
-	}
-}
-
 static uint32_t colour(uint8_t index)
 {
 	uint32_t c=palette[index&15U];
@@ -84,16 +37,76 @@ static void put_pixel(unsigned x,unsigned y,uint32_t value)
 	*p=value;
 }
 
-void rpi4_framebuffer_cell(unsigned row,unsigned column,int character,uint8_t attribute)
+/*
+ * Makes rows of pixels reach memory.  The framebuffer is written through
+ * the cacheable direct map, and the display reads memory past the CPU's
+ * caches, so a pixel that stays in the data cache is never shown.
+ */
+static void
+flush_rows(
+	unsigned x,
+	unsigned y,
+	unsigned columns,
+	unsigned rows)
 {
-	uint32_t fg=colour(attribute&15U),bg=colour(attribute>>4);
-	unsigned x=x_origin+column*8U,y=y_origin+row*16U;
-	if(!pixels||row>=25||column>=80)return;
-	for(unsigned py=0;py<16;py++){
-		uint8_t bits=(py==0||py==15)?0:glyph_row(character,(py-1U)/2U);
-		for(unsigned px=0;px<8;px++)
-			put_pixel(x+px,y+py,(px>=1&&px<=5&&(bits&(1U<<(5U-px))))?fg:bg);
+	uintptr_t start;
+	unsigned line;
+
+	/* Each row's bytes, cleaned from the data cache to memory. */
+	for (line = 0; line < rows; line++) {
+		start = (uintptr_t)(pixels + (size_t)(y + line) * pitch + (size_t)x * 4U);
+		hal_dcache_clean_range(start, (size_t)columns * 4U);
 	}
+
+	/* The display is outside the CPU's shareable domain: a full barrier. */
+	__asm__ volatile("dsb sy" ::: "memory");
+}
+
+/*
+ * Paints one character cell: a glyph of the 8x16 console font in the
+ * attribute's foreground on its background.
+ */
+void
+rpi4_framebuffer_cell(
+	unsigned row,
+	unsigned column,
+	int character,
+	uint8_t attribute)
+{
+	const uint8_t *glyph;
+	uint32_t foreground;
+	uint32_t background;
+	uint32_t value;
+	unsigned x;
+	unsigned y;
+	unsigned line;
+	unsigned bit;
+	uint8_t bits;
+
+	/* Nothing to paint before the framebuffer exists, or off the grid. */
+	if (pixels == 0 || row >= 25U || column >= 80U)
+		return;
+
+	/* The glyph of the character (the font covers every byte value). */
+	glyph = &rpi4_font8x16[((unsigned)character & 0xffU) * RPI4_FONT_HEIGHT];
+	foreground = colour(attribute & 15U);
+	background = colour(attribute >> 4);
+	x = x_origin + column * 8U;
+	y = y_origin + row * RPI4_FONT_HEIGHT;
+
+	/* Each row, from its leftmost pixel in the high bit. */
+	for (line = 0; line < RPI4_FONT_HEIGHT; line++) {
+		bits = glyph[line];
+		for (bit = 0; bit < 8U; bit++) {
+			value = background;
+			if ((bits & (0x80U >> bit)) != 0)
+				value = foreground;
+			put_pixel(x + bit, y + line, value);
+		}
+	}
+
+	/* The cell, out to the memory the display reads. */
+	flush_rows(x, y, 8U, RPI4_FONT_HEIGHT);
 }
 
 void rpi4_framebuffer_cursor(unsigned row,unsigned column,int visible)
@@ -101,15 +114,32 @@ void rpi4_framebuffer_cursor(unsigned row,unsigned column,int visible)
 	if(!pixels||!visible||row>=25||column>=80)return;
 	for(unsigned y=14;y<16;y++)for(unsigned x=0;x<8;x++)
 		put_pixel(x_origin+column*8U+x,y_origin+row*16U+y,colour(15));
+	flush_rows(x_origin+column*8U,y_origin+row*16U+14U,8U,2U);
 }
 
 int rpi4_framebuffer_init(uintptr_t mailbox_phys)
 {
 	unsigned i=0;
+	uint32_t want_width=640U,want_height=480U;
 #define WORD(v) request[i++]=(v)
+	/*
+	 * The size the firmware set up for the display (config.txt's
+	 * framebuffer_width and framebuffer_height, or the mode's), so that the
+	 * framebuffer is scanned out as it is, without scaling; 640x480 when the
+	 * firmware reports none (QEMU).
+	 */
 	WORD(0);WORD(0);
-	WORD(TAG_PHYSICAL);WORD(8);WORD(8);WORD(640);WORD(480);
-	WORD(TAG_VIRTUAL);WORD(8);WORD(8);WORD(640);WORD(480);
+	WORD(TAG_GET_PHYSICAL);WORD(8);WORD(0);WORD(0);WORD(0);
+	WORD(0);
+	request[0]=i*4U;
+	if(rpi4_mailbox_property(mailbox_phys,request,request[0])==0&&
+	   request[5]>=640U&&request[6]>=400U&&request[5]<=4096U&&request[6]<=4096U){
+		want_width=request[5];want_height=request[6];
+	}
+	i=0;
+	WORD(0);WORD(0);
+	WORD(TAG_PHYSICAL);WORD(8);WORD(8);WORD(want_width);WORD(want_height);
+	WORD(TAG_VIRTUAL);WORD(8);WORD(8);WORD(want_width);WORD(want_height);
 	WORD(TAG_DEPTH);WORD(4);WORD(4);WORD(32);
 	WORD(TAG_ORDER);WORD(4);WORD(4);WORD(1);
 	WORD(TAG_ALLOCATE);WORD(8);WORD(8);WORD(4096);WORD(0);
@@ -124,8 +154,69 @@ int rpi4_framebuffer_init(uintptr_t mailbox_phys)
 	x_origin=(width-640U)/2U;y_origin=(height-400U)/2U;
 	rpi4_boot_set_framebuffer(pixels_phys,pixels_size,width,height,pitch,order);
 	for(unsigned y=0;y<height;y++)for(unsigned x=0;x<width;x++)put_pixel(x,y,0);
+	hal_dcache_clean_range((uintptr_t)pixels,(size_t)pixels_size);
+	__asm__ volatile("dsb sy" ::: "memory");
 	return 0;
 #undef WORD
 }
 
 int rpi4_framebuffer_ready(void){return pixels!=0;}
+
+/*
+ * Shows a test pattern for three seconds: the left third red, the middle
+ * green and the right blue, with a white frame 16 pixels wide.  Seen on a
+ * board, it tells whether the display shows what the CPU writes, where, and
+ * in which colour order.
+ */
+void
+rpi4_framebuffer_test_pattern(
+	void)
+{
+	uint32_t value;
+	unsigned x;
+	unsigned y;
+
+	/* Nothing to show without a framebuffer. */
+	if (pixels == 0)
+		return;
+
+	/* Each pixel: the frame, or the colour of its third. */
+	for (y = 0; y < height; y++) {
+		for (x = 0; x < width; x++) {
+			value = colour(12);
+			if (x >= width / 3U)
+				value = colour(10);
+			if (x >= width / 3U * 2U)
+				value = colour(9);
+			if (x < 16U || y < 16U || x >= width - 16U || y >= height - 16U)
+				value = colour(15);
+			put_pixel(x, y, value);
+		}
+	}
+
+	/* Out to memory, then time to look at it. */
+	hal_dcache_clean_range((uintptr_t)pixels, (size_t)pixels_size);
+	__asm__ volatile("dsb sy" ::: "memory");
+	rpi4_delay_ms(3000U);
+
+	/* Black again for the console. */
+	for (y = 0; y < height; y++) {
+		for (x = 0; x < width; x++)
+			put_pixel(x, y, 0);
+	}
+	hal_dcache_clean_range((uintptr_t)pixels, (size_t)pixels_size);
+	__asm__ volatile("dsb sy" ::: "memory");
+}
+
+/*
+ * Reports what the firmware gave for the framebuffer.
+ */
+void
+rpi4_framebuffer_describe(
+	void)
+{
+	/* The size, the row length, the order and where it is. */
+	hal_printf("RPI4 FRAMEBUFFER %ux%u pitch=%u order=%u phys=%llx size=%llx\n",
+	    width, height, pitch, order,
+	    (unsigned long long)pixels_phys, (unsigned long long)pixels_size);
+}

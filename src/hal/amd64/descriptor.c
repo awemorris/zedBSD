@@ -14,6 +14,9 @@
 #include <hal/hal.h>
 #include "defs.h"
 #include "descriptor.h"
+#include "asm.h"
+#include "int.h"
+#include "percpu.h"
 
 struct amd64_tss {
 	uint32_t reserved0;
@@ -34,6 +37,7 @@ struct descriptor_state {
 	uint64_t gdt[7] __attribute__((aligned(16)));
 	struct amd64_tss tss __attribute__((aligned(16)));
 	uint8_t double_fault_stack[PAGE_SIZE * 4] __attribute__((aligned(16)));
+	uint8_t nmi_stack[PAGE_SIZE * 4] __attribute__((aligned(16)));
 };
 
 typedef char amd64_tss_size_must_be_104[
@@ -61,8 +65,8 @@ amd64_descriptor_init(
 	/* Installs kernel and user code and data descriptors unchanged. */
 	state->gdt[1] = 0x00af9a000000ffffULL;
 	state->gdt[2] = 0x00cf92000000ffffULL;
-	state->gdt[3] = 0x00affa000000ffffULL;
-	state->gdt[4] = 0x00cff2000000ffffULL;
+	state->gdt[3] = 0x00cff2000000ffffULL;
+	state->gdt[4] = 0x00affa000000ffffULL;
 
 	/* Encodes the private TSS as the final two GDT entries. */
 	low = (sizeof(state->tss) - 1U) & 0xffffU;
@@ -73,9 +77,15 @@ amd64_descriptor_init(
 	state->gdt[5] = low;
 	state->gdt[6] = base >> 32;
 
-	/* Provides IST1 for double faults and disables the I/O bitmap. */
+	/*
+	 * Provides IST1 for double faults and IST2 for NMIs, and disables the
+	 * I/O bitmap.  An NMI can arrive between SYSCALL and its stack switch,
+	 * while the stack pointer is still the user's.
+	 */
 	state->tss.ist1 = (uintptr_t)state->double_fault_stack +
 	    sizeof(state->double_fault_stack);
+	state->tss.ist2 = (uintptr_t)state->nmi_stack +
+	    sizeof(state->nmi_stack);
 	state->tss.iomap_base = sizeof(state->tss);
 
 	/* Loads the completed GDT and its TSS descriptor. */
@@ -91,6 +101,40 @@ void
 amd64_set_tss_rsp0(
 	uintptr_t stack_top)
 {
+	struct amd64_percpu *cpu;
+
 	/* Publishes the stack used by privilege-level transitions. */
 	states[hal_cpu_current()].tss.rsp0 = stack_top;
+
+	/*
+	 * SYSCALL switches stacks by hand, to the same top, once this CPU's
+	 * private state is selected.
+	 */
+	__asm__ volatile("movq %%gs:0, %0" : "=r"(cpu));
+	if (cpu != NULL && cpu->self == cpu)
+		cpu->syscall_rsp = stack_top;
+}
+
+/*
+ * Enables the SYSCALL instruction on the current CPU: its entry, the
+ * segments it and SYSRET load, and the flags it clears.
+ */
+void
+amd64_syscall_init(
+	void)
+{
+	uint64_t efer;
+
+	/* Kernel CS/SS from 0x08; user SS/CS from 0x10 + 8 and 0x10 + 16. */
+	asm_write_msr(AMD64_MSR_STAR,
+	    ((uint64_t)(SEG_USER_DATA - 8U) << 48) |
+	    ((uint64_t)SEG_KERNEL_CODE << 32));
+	asm_write_msr(AMD64_MSR_LSTAR, (uint64_t)(uintptr_t)amd64_syscall_fast_entry);
+
+	/* Enters with interrupts, traps, direction, alignment checks and NT clear. */
+	asm_write_msr(AMD64_MSR_FMASK, 0x00047700U);
+
+	/* Turns SYSCALL on. */
+	efer = asm_read_msr(AMD64_MSR_EFER);
+	asm_write_msr(AMD64_MSR_EFER, efer | AMD64_EFER_SCE);
 }

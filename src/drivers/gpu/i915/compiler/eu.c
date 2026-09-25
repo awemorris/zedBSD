@@ -39,11 +39,11 @@
  */
 
 #include "eu.h"
+#include <kern/kcrt.h>
 
 #include <kern/kmem.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 #include "../intel/eu-encoding-gen12.h"
 
@@ -234,7 +234,7 @@ drv_i915_eu_grf_uw_half(
 	struct i915_eu_reg reg;
 
 	/* Names the register as unsigned words. */
-	memset(&reg, 0, sizeof(reg));
+	kern_memset(&reg, 0, sizeof(reg));
 	reg.file = EU_FILE_GRF;
 	reg.nr = nr;
 	reg.type = EU_TYPE_UW;
@@ -267,7 +267,7 @@ drv_i915_eu_grf_scalar(
 	struct i915_eu_reg reg;
 
 	/* Names the register and the float inside it. */
-	memset(&reg, 0, sizeof(reg));
+	kern_memset(&reg, 0, sizeof(reg));
 	reg.file = EU_FILE_GRF;
 	reg.nr = nr;
 	reg.subnr = subnr;
@@ -324,7 +324,7 @@ drv_i915_eu_imm_f(
 	struct i915_eu_reg reg;
 
 	/* Carries the float bits unchanged; no floating point is involved. */
-	memset(&reg, 0, sizeof(reg));
+	kern_memset(&reg, 0, sizeof(reg));
 	reg.file = EU_FILE_IMM;
 	reg.type = EU_TYPE_F;
 	reg.immediate = bits;
@@ -343,7 +343,7 @@ drv_i915_eu_imm_d(
 	struct i915_eu_reg reg;
 
 	/* Carries the integer bits unchanged. */
-	memset(&reg, 0, sizeof(reg));
+	kern_memset(&reg, 0, sizeof(reg));
 	reg.file = EU_FILE_IMM;
 	reg.type = EU_TYPE_D;
 	reg.immediate = value;
@@ -362,7 +362,7 @@ drv_i915_eu_imm_ud(
 	struct i915_eu_reg reg;
 
 	/* Carries the integer bits unchanged. */
-	memset(&reg, 0, sizeof(reg));
+	kern_memset(&reg, 0, sizeof(reg));
 	reg.file = EU_FILE_IMM;
 	reg.type = EU_TYPE_UD;
 	reg.immediate = value;
@@ -742,7 +742,7 @@ drv_i915_eu_flag_load(
 	}
 
 	/* The flag register and the byte of its subregister, as a 16-bit destination. */
-	memset(&dst, 0, sizeof(dst));
+	kern_memset(&dst, 0, sizeof(dst));
 	dst.file = EU_FILE_ARF;
 	dst.nr = EU_ARF_FLAG + (uint32_t)flag / 2U;
 	dst.subnr = ((uint32_t)flag % 2U) * 2U;
@@ -1247,7 +1247,7 @@ i915_eu_grf_typed(
 	struct i915_eu_reg reg;
 
 	/* Names the register and the type its channels are read as. */
-	memset(&reg, 0, sizeof(reg));
+	kern_memset(&reg, 0, sizeof(reg));
 	reg.file = EU_FILE_GRF;
 	reg.nr = nr;
 	reg.type = type;
@@ -1292,7 +1292,7 @@ i915_eu_reserve(
 
 		/* Moves the instructions encoded so far into the larger storage. */
 		if (buffer->words != NULL) {
-			memcpy(grown, buffer->words, buffer->count * sizeof(uint32_t));
+			kern_memcpy(grown, buffer->words, buffer->count * sizeof(uint32_t));
 			kern_free(buffer->words);
 		}
 
@@ -1303,7 +1303,7 @@ i915_eu_reserve(
 
 	/* The new instruction starts zeroed so only set fields carry bits. */
 	inst = &buffer->words[buffer->count];
-	memset(inst, 0, GEN12_EU_DWORDS * sizeof(uint32_t));
+	kern_memset(inst, 0, GEN12_EU_DWORDS * sizeof(uint32_t));
 	buffer->count += GEN12_EU_DWORDS;
 
 	/* Succeeded: the caller fills the four words. */

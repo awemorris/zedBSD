@@ -1010,7 +1010,11 @@ typedef uint64_t __u64;
 #define I915_LCD_SCHEDULE_TIMEOUT(i915, pipe, t) \
 	I915_LCD_FLIP_OPS(i915)->vblank_sleep(I915_LCD_FLIP_OPS(i915)->ctx, (pipe), (t))
 
-/* msecs_to_jiffies_timeout(): msecs_to_jiffies(m) + 1 with the kernel's 10 ms tick. */
+/*
+ * msecs_to_jiffies_timeout(): msecs_to_jiffies(m) + 1, counted in the display
+ * code's own 10 ms tick.  It is not the kernel tick: vblank_sleep turns it
+ * back into milliseconds, so it holds at any KERN_CLOCK_HZ.
+ */
 #define msecs_to_jiffies_timeout(m) ((long)(((m) + 9) / 10) + 1)
 
 /*

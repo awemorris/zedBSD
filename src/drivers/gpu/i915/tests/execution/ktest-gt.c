@@ -30,6 +30,7 @@
 #include "ktest.h"
 #include "eu-test.h"
 #include "../fixtures/draw-fixture.h"
+#include <kern/kcrt.h>
 
 #include "../../context.h"
 #include "../../defaults.h"
@@ -50,15 +51,14 @@
 #include "../../display/hotplug.h"
 #include "../../display/power.h"
 
-#include <drivers/dma.h>
+#include <drivers/generic/dma.h>
 #include <hal/hal.h>
 #include <kern/kmem.h>
 #include <kern/lock.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "../../intel/commands.h"
 #include "../../intel/gt-regs.h"
@@ -457,7 +457,7 @@ i915_fake_open(
 	struct i915_fake_mmio *fake)
 {
 	/* Clears the model and binds the block to it. */
-	memset(fake, 0, sizeof(*fake));
+	kern_memset(fake, 0, sizeof(*fake));
 	drv_i915_mmio_init(mmio, &i915_fake_mmio_ops, fake, NULL, 0U, NULL);
 }
 
@@ -660,7 +660,7 @@ i915_ktest_gt_sseu(
 
 	/* Decodes a part with six DSS and nothing fused off. */
 	i915_ktest_gt_fuses_open(t, 0x3fU);
-	memset(&t->info, 0, sizeof(t->info));
+	kern_memset(&t->info, 0, sizeof(t->info));
 	(void)drv_i915_gt_init_mmio(&t->info, 12, I915_KTEST_ADLP_ENGINES, &t->mmio);
 
 	/* Gen12 has one slice, six DSS and sixteen EUs per DSS. */
@@ -685,7 +685,7 @@ i915_ktest_gt_sseu(
 	 */
 	drv_i915_raw_write32(&t->mmio, I915_KTEST_REG_EU_DISABLE, 0x03U);
 	drv_i915_raw_write32(&t->mmio, I915_KTEST_REG_DSS_ENABLE, 0x03U);
-	memset(&t->info, 0, sizeof(t->info));
+	kern_memset(&t->info, 0, sizeof(t->info));
 	(void)drv_i915_gt_init_mmio(&t->info, 12, I915_KTEST_ADLP_ENGINES, &t->mmio);
 
 	/* EUs 0 to 3 are gone, and the absent DSS stay empty. */
@@ -712,7 +712,7 @@ i915_ktest_gt_clock(
 	i915_ktest_gt_fuses_open(t, 0x3fU);
 	drv_i915_raw_write32(&t->mmio, I915_KTEST_REG_CTC_MODE, 0U);
 	drv_i915_raw_write32(&t->mmio, I915_KTEST_REG_RPM_CONFIG0, (2U << 3) | (3U << 1));
-	memset(&t->info, 0, sizeof(t->info));
+	kern_memset(&t->info, 0, sizeof(t->info));
 	(void)drv_i915_gt_init_mmio(&t->info, 12, I915_KTEST_ADLP_ENGINES, &t->mmio);
 
 	/* The crystal frequency passes unchanged, with its period in whole nanoseconds. */
@@ -723,7 +723,7 @@ i915_ktest_gt_clock(
 
 	/* A shift parameter of 1 divides the timestamp clock by four. */
 	drv_i915_raw_write32(&t->mmio, I915_KTEST_REG_RPM_CONFIG0, (2U << 3) | (1U << 1));
-	memset(&t->info, 0, sizeof(t->info));
+	kern_memset(&t->info, 0, sizeof(t->info));
 	(void)drv_i915_gt_init_mmio(&t->info, 12, I915_KTEST_ADLP_ENGINES, &t->mmio);
 
 	/* The frequency is the crystal shifted down by 3 - 1. */
@@ -747,7 +747,7 @@ i915_ktest_gt_engine_fuses(
 	/* Reads a part with no L3 bank and no media engine fused off. */
 	i915_ktest_gt_fuses_open(t, 0x3fU);
 	drv_i915_raw_write32(&t->mmio, I915_KTEST_REG_MIRROR_FUSE3, 0U);
-	memset(&t->info, 0, sizeof(t->info));
+	kern_memset(&t->info, 0, sizeof(t->info));
 	error = drv_i915_gt_init_mmio(&t->info, 12, I915_KTEST_ADLP_ENGINES, &t->mmio);
 
 	/* RCS0(0), BCS0(1), VCS0(8), VCS2(10), VECS0(16) with the reference bases; VCS2 is BSD3, not BSD2. */
@@ -768,7 +768,7 @@ i915_ktest_gt_engine_fuses(
 
 	/* Fuses off video decode instance 2. */
 	drv_i915_raw_write32(&t->mmio, I915_KTEST_REG_MEDIA_FUSE, 1U << 2);
-	memset(&t->info, 0, sizeof(t->info));
+	kern_memset(&t->info, 0, sizeof(t->info));
 	(void)drv_i915_gt_init_mmio(&t->info, 12, I915_KTEST_ADLP_ENGINES, &t->mmio);
 
 	/* That engine, and only that one, is dropped. */
@@ -791,7 +791,7 @@ i915_ktest_gt_fault(
 	/* Leaves a valid fault of engine 3 pending in RING_FAULT_REG. */
 	i915_ktest_gt_fuses_open(t, 0x3fU);
 	drv_i915_raw_write32(&t->mmio, 0xcec4U, 0x1U | (3U << 12));
-	memset(&t->info, 0, sizeof(t->info));
+	kern_memset(&t->info, 0, sizeof(t->info));
 	t->fake.wt_n = 0U;
 	(void)drv_i915_gt_init_mmio(&t->info, 12, I915_KTEST_ADLP_ENGINES, &t->mmio);
 
@@ -819,11 +819,11 @@ i915_ktest_gt_irq(
 
 	/* Builds the GT the handler maps identities back to. */
 	i915_ktest_gt_fuses_open(t, 0x3fU);
-	memset(&t->info, 0, sizeof(t->info));
+	kern_memset(&t->info, 0, sizeof(t->info));
 	(void)drv_i915_gt_init_mmio(&t->info, 12, I915_KTEST_ADLP_ENGINES, &t->mmio);
 
 	/* Binds a fresh interrupt device to the model and the GT. */
-	memset(&t->irq, 0, sizeof(t->irq));
+	kern_memset(&t->irq, 0, sizeof(t->irq));
 	t->irq.m = &t->mmio;
 	t->irq.gt = &t->info;
 
@@ -909,7 +909,7 @@ i915_ktest_gt_workarounds(
 
 	/* Builds a GT whose lowest live DSS is 1 (DSS 1 to 5 present). */
 	i915_ktest_gt_fuses_open(t, 0x3eU);
-	memset(&t->wa_gt, 0, sizeof(t->wa_gt));
+	kern_memset(&t->wa_gt, 0, sizeof(t->wa_gt));
 	(void)drv_i915_gt_init_mmio(&t->wa_gt, 12, I915_KTEST_ADLP_ENGINES, &t->mmio);
 
 	/* Finds the render and copy engines. */
@@ -926,7 +926,7 @@ i915_ktest_gt_workarounds(
 	}
 
 	/* The GT list of gen12_gt_workarounds_init(). */
-	memset(&t->wa_init, 0, sizeof(t->wa_init));
+	kern_memset(&t->wa_init, 0, sizeof(t->wa_init));
 	i915_ktest_gt_wa_gt_list(ktest, t);
 
 	/* The engine lists need the render engine. */
@@ -1375,7 +1375,7 @@ i915_ktest_gt_wa_apply(
 
 	/* Applies and verifies the list. */
 	t->fake.wt_n = 0U;
-	memset(&result, 0, sizeof(result));
+	kern_memset(&result, 0, sizeof(result));
 	drv_i915_wa_list_apply(list, &t->mmio, 1, &result);
 
 	/* The masked entry writes its mask word; the no-verify one is written but not checked. */
@@ -1400,7 +1400,7 @@ i915_ktest_gt_wa_apply(
 	 * is still the reference's `val != old || !wa->clr` rule.
 	 */
 	t->fake.wt_n = 0U;
-	memset(&result, 0, sizeof(result));
+	kern_memset(&result, 0, sizeof(result));
 	drv_i915_wa_list_apply(list, &t->mmio, 0, &result);
 	drv_i915_ktest_check(
 		ktest,
@@ -1412,7 +1412,7 @@ i915_ktest_gt_wa_apply(
 	drv_i915_wa_write_or(list, 0x100cU, 0x2U, 0, "locked");
 	drv_i915_raw_write32(&t->mmio, 0x100cU, 0U);
 	t->fake.gen_n = 0U;
-	memset(&result, 0, sizeof(result));
+	kern_memset(&result, 0, sizeof(result));
 	drv_i915_wa_list_apply(list, &t->mmio, 1, &result);
 
 	/* The verify pass reports the stuck register. */
@@ -1433,7 +1433,7 @@ i915_ktest_gt_rc6(
 	int control_write;
 
 	/* Enables RC6 on the workaround GT (VCS0 and VCS2 present). */
-	memset(&t->rc6, 0, sizeof(t->rc6));
+	kern_memset(&t->rc6, 0, sizeof(t->rc6));
 	drv_i915_rc6_init(&t->rc6, &t->mmio);
 	t->fake.wt_n = 0U;
 	drv_i915_gen11_rc6_enable(&t->rc6, &t->mmio, &t->wa_gt);
@@ -1473,7 +1473,7 @@ i915_ktest_gt_rps(
 	 */
 	drv_i915_raw_write32(&t->mmio, 0x140000U + 0x5998U, (0x0aU << 0) | (0x02U << 16));
 	drv_i915_raw_write32(&t->mmio, 0x140000U + 0x5ef0U, 0x06U << 8);
-	memset(&t->rps, 0, sizeof(t->rps));
+	kern_memset(&t->rps, 0, sizeof(t->rps));
 	drv_i915_rps_init(&t->rps, &sb_lock, &t->mmio);
 
 	/* The caps are scaled from 50 MHz to 16.67 MHz units. */
@@ -1517,7 +1517,7 @@ i915_ktest_gt_forcewake_map(
 	 * only RENDER and GT are held reads as all-ones and its writes are
 	 * dropped, silently.
 	 */
-	memset(&t->fake, 0, sizeof(t->fake));
+	kern_memset(&t->fake, 0, sizeof(t->fake));
 	ranges = drv_i915_mmio_gen12_ranges(&range_count);
 	drv_i915_mmio_init(&t->mmio, &i915_fake_mmio_ops, &t->fake, ranges, range_count, NULL);
 
@@ -1877,7 +1877,7 @@ i915_ktest_gt_execlists_setup(
 	rcs = &t->rcs;
 
 	/* Describes the render engine. */
-	memset(&t->rcs_info, 0, sizeof(t->rcs_info));
+	kern_memset(&t->rcs_info, 0, sizeof(t->rcs_info));
 	t->rcs_info.id = I915_RCS0;
 	t->rcs_info.class = I915_RENDER_CLASS;
 	t->rcs_info.instance = 0;
@@ -1886,7 +1886,7 @@ i915_ktest_gt_execlists_setup(
 	t->rcs_info.context_size = 14U * 4096U;
 
 	/* One slice with slice power gating. */
-	memset(&t->sseu, 0, sizeof(t->sseu));
+	kern_memset(&t->sseu, 0, sizeof(t->sseu));
 	t->sseu.slice_mask = 0x1U;
 	t->sseu.has_slice_pg = 1;
 
@@ -1931,7 +1931,7 @@ i915_ktest_gt_engine_descriptor(
 	int error;
 
 	/* Describes the second video decode engine. */
-	memset(&t->vcs2_info, 0, sizeof(t->vcs2_info));
+	kern_memset(&t->vcs2_info, 0, sizeof(t->vcs2_info));
 	t->vcs2_info.id = I915_VCS2;
 	t->vcs2_info.class = I915_VIDEO_DECODE_CLASS;
 	t->vcs2_info.instance = 2;
@@ -2273,7 +2273,7 @@ i915_ktest_gt_context_xcs(
 	int error;
 
 	/* Describes the first video decode engine. */
-	memset(&t->vcs0_info, 0, sizeof(t->vcs0_info));
+	kern_memset(&t->vcs0_info, 0, sizeof(t->vcs0_info));
 	t->vcs0_info.id = I915_VCS0;
 	t->vcs0_info.class = I915_VIDEO_DECODE_CLASS;
 	t->vcs0_info.instance = 0;
@@ -2472,7 +2472,7 @@ i915_ktest_gt_copy_engine(
 	int error;
 
 	/* Describes the copy engine. */
-	memset(&t->bcs_info, 0, sizeof(t->bcs_info));
+	kern_memset(&t->bcs_info, 0, sizeof(t->bcs_info));
 	t->bcs_info.id = I915_BCS0;
 	t->bcs_info.class = I915_COPY_ENGINE_CLASS;
 	t->bcs_info.instance = 0;
@@ -2855,8 +2855,8 @@ i915_ktest_gt_defaults_gt(
 	struct i915_engine_info *engine;
 
 	/* Starts from an empty GT and empty tables. */
-	memset(&t->defaults_gt, 0, sizeof(t->defaults_gt));
-	memset(&t->defaults_init, 0, sizeof(t->defaults_init));
+	kern_memset(&t->defaults_gt, 0, sizeof(t->defaults_gt));
+	kern_memset(&t->defaults_init, 0, sizeof(t->defaults_init));
 
 	/* The copy engine. */
 	engine = &t->defaults_gt.engines[0];
@@ -2911,7 +2911,7 @@ i915_ktest_gt_defaults(
 	i915_ktest_gt_defaults_inherit(ktest, t);
 
 	/* Records the defaults with nothing answering, for 1 ms. */
-	memset(d, 0, sizeof(*d));
+	kern_memset(d, 0, sizeof(*d));
 	error = drv_i915_engines_record_defaults(d, &t->engines, &t->defaults_init, &t->gm, &t->pp, &t->mmio, &t->wedge_lock, 1U);
 
 	/* The timeout is EIO, the GT is wedged (reset), and the record contexts are still put. */
@@ -3054,7 +3054,7 @@ i915_ktest_gt_verify_wa_steps(
 	/* Submits the stores. */
 	drv_i915_execlists_reset_csb_pointers(e0, &t->mmio);
 	t->fake.wt_n = 0U;
-	memset(vw, 0, sizeof(*vw));
+	kern_memset(vw, 0, sizeof(*vw));
 	error = drv_i915_engine_verify_wa_submit(vw, 0U, &t->engines, wl, &t->gm, &t->mmio);
 
 	/* Looks for one store per entry, to the scratch page at four bytes per list index. */
@@ -3517,7 +3517,7 @@ i915_ktest_gt_hotplug_setup(
 	hp = &t->hotplug;
 
 	/* Two encoders, on the pins of ports A and B. */
-	memset(hp, 0, sizeof(*hp));
+	kern_memset(hp, 0, sizeof(*hp));
 	hp->encoder_pin[0] = I915_HPD_PORT_A;
 	hp->encoder_pin[1] = I915_HPD_PORT_B;
 	hp->n_encoders = 2U;
@@ -3607,7 +3607,7 @@ i915_ktest_gt_dc6(
 	}
 
 	/* The DC_off well of an XE_LPD display that allows DC5 and DC6 and targets DC6. */
-	memset(&well, 0, sizeof(well));
+	kern_memset(&well, 0, sizeof(well));
 	well.name = "DC_off";
 	well.ops = I915_PW_OPS_DC_OFF;
 	pwc = &display->pwc;
@@ -3696,7 +3696,7 @@ i915_ktest_gt_pxp(
 	live1 = t->gm.objects_live;
 
 	/* Without has_pxp there is no PXP GT. */
-	memset(px, 0, sizeof(*px));
+	kern_memset(px, 0, sizeof(*px));
 	error = drv_i915_pxp_init(px, &t->engines, &t->pp, &t->gm, 0);
 	drv_i915_ktest_check(ktest, error == ENODEV && px->inited == 0, "p7: P7-PXP-NONE without has_pxp there is no PXP GT");
 
@@ -3750,7 +3750,7 @@ i915_ktest_gt_eu_batch(
 	cmds = t->batch_a;
 
 	/* Builds the compute batch. */
-	memset(t->batch_a, 0, sizeof(t->batch_a));
+	kern_memset(t->batch_a, 0, sizeof(t->batch_a));
 	count = drv_i915_test_eu_build_batch(t->batch_a, I915_KTEST_BATCH_DWORDS, I915_TEST_EU_SHARED_VA, I915_TEST_EU_SHARED_VA, I915_KTEST_EU_MAX_THREADS);
 
 	/* Finds the last position of each packet. */
@@ -3834,7 +3834,7 @@ i915_ktest_gt_eu_pipeline_select(
 	bad = t->batch_b;
 
 	/* Classifies the batch's select words; independent of the emitter's macro. */
-	memset(&check, 0, sizeof(check));
+	kern_memset(&check, 0, sizeof(check));
 	error = drv_i915_test_eu_check_pipeline_select(cmds, count, &check);
 	word3d = 0U;
 	if (check.idx_3d < count)
@@ -3856,15 +3856,15 @@ i915_ktest_gt_eu_pipeline_select(
 		"eu: EU-PIPESEL the emitter's words are exactly 0x69041310 (3D) then 0x69041312 (GPGPU), Type3/SubType1/Op1/SubOp4");
 
 	/* Turns both select words back into the old, mis-encoded ones. */
-	memset(t->batch_b, 0, sizeof(t->batch_b));
-	memcpy(bad, cmds, count * sizeof(uint32_t));
+	kern_memset(t->batch_b, 0, sizeof(t->batch_b));
+	kern_memcpy(bad, cmds, count * sizeof(uint32_t));
 	if (check.idx_3d < count)
 		bad[check.idx_3d] ^= 0x08000000U;
 	if (check.idx_gpgpu < count)
 		bad[check.idx_gpgpu] ^= 0x08000000U;
 
 	/* Classifies the altered batch. */
-	memset(&check, 0, sizeof(check));
+	kern_memset(&check, 0, sizeof(check));
 	error = drv_i915_test_eu_check_pipeline_select(bad, count, &check);
 	bad_word = 0U;
 	if (check.idx_bad < count)
@@ -3901,10 +3901,10 @@ i915_ktest_gt_draw_batch(
 	bad = t->batch_b;
 
 	/* Builds the draw batch with the fixture's MOCS and classifies its select words. */
-	memset(t->batch_a, 0, sizeof(t->batch_a));
+	kern_memset(t->batch_a, 0, sizeof(t->batch_a));
 	mocs = drv_i915_draw_fixture_mocs();
 	count = drv_i915_draw_fixture_build_batch(t->batch_a, I915_KTEST_BATCH_DWORDS, I915_DRAW_FIXTURE_STATE_VA, mocs);
-	memset(&check, 0, sizeof(check));
+	kern_memset(&check, 0, sizeof(check));
 	error = drv_i915_test_draw_check_pipeline_select(cmds, count, &check);
 
 	/* Finds the 3DPRIMITIVE: RECTLIST, 3 vertices, 1 instance. */
@@ -3939,10 +3939,10 @@ i915_ktest_gt_draw_batch(
 		"draw: DRAW-BATCH PIPE_CONTROL, PIPELINE_SELECT(3D)=0x69041310 at dword 6, SBA, one 3DPRIMITIVE RECTLIST(3 vertices, 1 instance), BB_END");
 
 	/* Turns the select word back into the old, mis-encoded one. */
-	memset(t->batch_b, 0, sizeof(t->batch_b));
-	memcpy(bad, cmds, count * sizeof(uint32_t));
+	kern_memset(t->batch_b, 0, sizeof(t->batch_b));
+	kern_memcpy(bad, cmds, count * sizeof(uint32_t));
 	bad[6] ^= 0x08000000U;
-	memset(&check, 0, sizeof(check));
+	kern_memset(&check, 0, sizeof(check));
 	error = drv_i915_test_draw_check_pipeline_select(bad, count, &check);
 
 	/* 0x61041310 (the GPGPU_CSR_BASE_ADDRESS header) is rejected. */
@@ -3970,7 +3970,7 @@ i915_ktest_gt_draw_state(
 	state = t->state_a;
 
 	/* Writes the state page for a render target at 0x100402000. */
-	memset(t->state_a, 0, sizeof(t->state_a));
+	kern_memset(t->state_a, 0, sizeof(t->state_a));
 	drv_i915_draw_fixture_write_state(t->state_a, 0x100402000ULL, mocs);
 
 	/* Binding table -> surface state -> RT; the PS kernel at +1024 with its A64 marker store; markers clear. */
@@ -3998,8 +3998,8 @@ i915_ktest_gt_pins(
 	uint64_t draw_hash;
 
 	/* Builds both batches into clean buffers. */
-	memset(t->batch_a, 0, sizeof(t->batch_a));
-	memset(t->batch_b, 0, sizeof(t->batch_b));
+	kern_memset(t->batch_a, 0, sizeof(t->batch_a));
+	kern_memset(t->batch_b, 0, sizeof(t->batch_b));
 	compute_count = drv_i915_test_eu_build_batch(t->batch_a, I915_KTEST_BATCH_DWORDS, I915_TEST_EU_SHARED_VA, I915_TEST_EU_SHARED_VA, I915_KTEST_EU_MAX_THREADS);
 	draw_count = drv_i915_draw_fixture_build_batch(t->batch_b, I915_KTEST_BATCH_DWORDS, I915_DRAW_FIXTURE_STATE_VA, 6U);
 
@@ -4067,11 +4067,11 @@ i915_ktest_gt_tex_batch(
 	draw = t->batch_b;
 
 	/* Builds the textured and the single-colour batch and classifies the textured one's select words. */
-	memset(t->batch_a, 0, sizeof(t->batch_a));
-	memset(t->batch_b, 0, sizeof(t->batch_b));
+	kern_memset(t->batch_a, 0, sizeof(t->batch_a));
+	kern_memset(t->batch_b, 0, sizeof(t->batch_b));
 	tex_count = drv_i915_tex_fixture_build_batch(t->batch_a, I915_KTEST_BATCH_DWORDS, I915_DRAW_FIXTURE_STATE_VA, 6U);
 	draw_count = drv_i915_draw_fixture_build_batch(t->batch_b, I915_KTEST_BATCH_DWORDS, I915_DRAW_FIXTURE_STATE_VA, 6U);
-	memset(&check, 0, sizeof(check));
+	kern_memset(&check, 0, sizeof(check));
 	error = drv_i915_test_draw_check_pipeline_select(tex, tex_count, &check);
 
 	/* Finds the sampler state pointers, 3DSTATE_PS and 3DSTATE_PS_EXTRA. */
@@ -4144,7 +4144,7 @@ i915_ktest_gt_tex_state(
 	state = t->state_a;
 
 	/* Writes the state page. */
-	memset(t->state_a, 0, sizeof(t->state_a));
+	kern_memset(t->state_a, 0, sizeof(t->state_a));
 	drv_i915_tex_fixture_write_state(t->state_a, 0x100402000ULL, I915_TEX_FIXTURE_TEX_VA, 6U);
 
 	/*
@@ -4216,7 +4216,7 @@ i915_ktest_gt_tex_expect(
 	texel_1_0_far = drv_i915_tex_fixture_expected_pixel(pat0, 7U, 3U);
 	texel_0_1 = drv_i915_tex_fixture_expected_pixel(pat0, 0U, 4U);
 	corner = drv_i915_tex_fixture_expected_pixel(pat0, 31U, 31U);
-	differ = memcmp(t->pattern[0], t->pattern[1], I915_TEX_FIXTURE_TEX_BYTES);
+	differ = kern_memcmp(t->pattern[0], t->pattern[1], I915_TEX_FIXTURE_TEX_BYTES);
 
 	/* expected(x,y) = texel(x/4, y/4) packed B,G,R,A; origin upper left; the image identifies position. */
 	drv_i915_ktest_check(
@@ -4246,8 +4246,8 @@ i915_ktest_gt_tex_ab(
 	sb = t->state_b;
 
 	/* Writes the state page with A bound and with B bound. */
-	memset(t->state_a, 0, sizeof(t->state_a));
-	memset(t->state_b, 0, sizeof(t->state_b));
+	kern_memset(t->state_a, 0, sizeof(t->state_a));
+	kern_memset(t->state_b, 0, sizeof(t->state_b));
 	drv_i915_tex_fixture_write_state_ab(t->state_a, 0x100402000ULL, I915_TEX_FIXTURE_TEX_VA, I915_TEX_FIXTURE_TEX_B_VA, 0U, 6U);
 	drv_i915_tex_fixture_write_state_ab(t->state_b, 0x100402000ULL, I915_TEX_FIXTURE_TEX_VA, I915_TEX_FIXTURE_TEX_B_VA, 1U, 6U);
 
@@ -4297,9 +4297,9 @@ i915_ktest_gt_tex_variants(
 	v1_texel_1_0 = drv_i915_tex_fixture_expected_pixel(t->pattern[1], 4U, 0U);
 	v2_origin = drv_i915_tex_fixture_expected_pixel(t->pattern[2], 0U, 0U);
 	v2_corner = drv_i915_tex_fixture_expected_pixel(t->pattern[2], 31U, 31U);
-	differ_01 = memcmp(t->pattern[0], t->pattern[1], I915_TEX_FIXTURE_TEX_BYTES);
-	differ_02 = memcmp(t->pattern[0], t->pattern[2], I915_TEX_FIXTURE_TEX_BYTES);
-	differ_12 = memcmp(t->pattern[1], t->pattern[2], I915_TEX_FIXTURE_TEX_BYTES);
+	differ_01 = kern_memcmp(t->pattern[0], t->pattern[1], I915_TEX_FIXTURE_TEX_BYTES);
+	differ_02 = kern_memcmp(t->pattern[0], t->pattern[2], I915_TEX_FIXTURE_TEX_BYTES);
+	differ_12 = kern_memcmp(t->pattern[1], t->pattern[2], I915_TEX_FIXTURE_TEX_BYTES);
 	drv_i915_ktest_check(
 		ktest,
 		v1_origin == 0xffef1010U &&
@@ -4327,8 +4327,8 @@ i915_ktest_gt_bilinear(
 	sl = t->state_b;
 
 	/* Writes the state page with nearest and with bilinear filtering. */
-	memset(t->state_a, 0, sizeof(t->state_a));
-	memset(t->state_b, 0, sizeof(t->state_b));
+	kern_memset(t->state_a, 0, sizeof(t->state_a));
+	kern_memset(t->state_b, 0, sizeof(t->state_b));
 	drv_i915_tex_fixture_write_state_ab_filter(t->state_a, 0x100402000ULL, I915_TEX_FIXTURE_TEX_VA, I915_TEX_FIXTURE_TEX_B_VA, 0U, 0U, 6U);
 	drv_i915_tex_fixture_write_state_ab_filter(t->state_b, 0x100402000ULL, I915_TEX_FIXTURE_TEX_VA, I915_TEX_FIXTURE_TEX_B_VA, 0U, 1U, 6U);
 
@@ -4427,7 +4427,7 @@ i915_ktest_gt_eu_pt(
 	link_flags = I915_GEN8_PAGE_PRESENT_B | I915_GEN8_PAGE_RW_B;
 
 	/* Builds an address space with two pages at the shared address and one page inserted. */
-	memset(&walk, 0, sizeof(walk));
+	kern_memset(&walk, 0, sizeof(walk));
 	error = drv_i915_gt_ppgtt_create(&t->gm, pp);
 	if (error == 0)
 		error = drv_i915_gt_ppgtt_alloc_range(&t->gm, pp, I915_TEST_EU_SHARED_VA, 2U * 4096U);
@@ -4491,7 +4491,7 @@ i915_ktest_gt_eu_pt_unmapped(
 	addr_mask = 0x0000fffffffff000ULL;
 
 	/* Walks the neighbouring page, allocated but never inserted. */
-	memset(&walk, 0, sizeof(walk));
+	kern_memset(&walk, 0, sizeof(walk));
 	error = drv_i915_test_ppgtt_walk(pp, I915_TEST_EU_SHARED_VA + 4096U, &walk);
 
 	/* It reads the scratch PTE: the uncached data page. */
@@ -4506,7 +4506,7 @@ i915_ktest_gt_eu_pt_unmapped(
 		"eu: EU-PT an unmapped page inside an allocated range points at scratch[0] (uncached data page)");
 
 	/* Walks PML4 index 1, never allocated. */
-	memset(&walk, 0, sizeof(walk));
+	kern_memset(&walk, 0, sizeof(walk));
 	error = drv_i915_test_ppgtt_walk(pp, 0x0000008000000000ULL, &walk);
 
 	/* It reads the scratch PDP encoding at the first level (PPAT_UNCACHED, gen8_init_scratch()). */

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#include <drivers/dma.h>
+#include <drivers/generic/dma.h>
 
 #include <errno.h>
 #include <stdint.h>

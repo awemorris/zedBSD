@@ -42,7 +42,7 @@ objects_for() {
 			echo "build/pcat/drivers/${rest%.c}.o"
 		fi
 		;;
-	src/softfloat/*)
+	src/libc/*)
 		rest=$(basename "$src" .c)
 		if [ "$arch" = 64 ]; then
 			echo "build/amd64/dynamic/float/$rest.o"
@@ -60,7 +60,7 @@ representative_for() {
 	case $1 in
 	src/kern/*)	echo src/kern/waitq.c ;;
 	src/drivers/*)	echo src/drivers/ethernet/dp8390.c ;;
-	src/softfloat/*) echo src/softfloat/zed-softfloat.c ;;
+	src/libc/*) echo src/libc/softfloat.c ;;
 	esac
 }
 

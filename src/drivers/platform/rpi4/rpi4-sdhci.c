@@ -12,8 +12,9 @@
 #include "drivers/platform/rpi4/rpi4-sdhci.h"
 
 #include <kern/disk.h>
+#include <kern/lock.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include "kern/klog.h"
 #include "kern/device-io.h"
 
@@ -57,6 +58,16 @@ struct rpi4_sd_unit {
 	struct disk *disk;
 	uint32_t rca;
 	int high_capacity;
+
+	/*
+	 * The halves of the register pairs written as one word (see w16):
+	 * the transfer mode until the command, the block size until the count.
+	 */
+	uint16_t transfer_mode;
+	uint16_t block_size;
+
+	/* One command at a time: the controller has one set of registers. */
+	struct mutex lock;
 };
 
 static struct rpi4_sd_unit unit;
@@ -114,6 +125,7 @@ drv_rpi4_sdhci_init(
 	/* Handles the unit condition. */
 	if (!unit.disk)
 		return ENOMEM;
+	(void)mutex_init(&unit.lock, LOCK_RANK_DISK, "sdhci");
 	unit.disk->d_name[0] = 'm';
 	unit.disk->d_name[1] = 'm';
 	unit.disk->d_name[2] = 'c';
@@ -170,18 +182,21 @@ r32(
 	return function_result;
 }
 
-/* Supports the r16 operation. */
+/*
+ * Reads a 16-bit register.  The BCM2711 EMMC2 (an iProc SDHCI) takes only
+ * 32-bit accesses, so the word that holds it is read and the half taken out.
+ */
 static uint16_t
 r16(
 	unsigned offset)
 {
-	uint16_t function_result;
+	uint32_t word;
+	unsigned shift;
 
-	/* Obtains the hal mmio read16 result. */
-	function_result = kern_mmio_read16(unit.base + offset);
-
-	/* Returns the computed result. */
-	return function_result;
+	/* The word, and the half of it at the offset. */
+	word = r32(offset & ~3U);
+	shift = (offset & 2U) * 8U;
+	return (uint16_t)(word >> shift);
 }
 
 /* Supports the controller init operation. */
@@ -320,13 +335,24 @@ controller_init(
 	return 0;
 }
 
-/* Supports the w8 operation. */
+/*
+ * Writes an 8-bit register as a read-modify-write of the word that holds it,
+ * since the controller takes only 32-bit accesses.
+ */
 static void
 w8(
 	unsigned offset,
 	uint8_t value)
 {
-	kern_mmio_write8(unit.base + offset, value);
+	uint32_t word;
+	unsigned shift;
+
+	/* The other bytes of the word keep what they hold. */
+	word = r32(offset & ~3U);
+	shift = (offset & 3U) * 8U;
+	word &= ~(0xffU << shift);
+	word |= (uint32_t)value << shift;
+	w32(offset & ~3U, word);
 }
 
 /* Supports the counter operation. */
@@ -355,18 +381,18 @@ frequency(
 	return value;
 }
 
-/* Supports the r8 operation. */
+/* Reads an 8-bit register, from the word that holds it (as r16). */
 static uint8_t
 r8(
 	unsigned offset)
 {
-	uint8_t function_result;
+	uint32_t word;
+	unsigned shift;
 
-	/* Obtains the hal mmio read8 result. */
-	function_result = kern_mmio_read8(unit.base + offset);
-
-	/* Returns the computed result. */
-	return function_result;
+	/* The word, and the byte of it at the offset. */
+	word = r32(offset & ~3U);
+	shift = (offset & 3U) * 8U;
+	return (uint8_t)(word >> shift);
 }
 
 /* Supports the w32 operation. */
@@ -415,13 +441,53 @@ set_clock(
 	return 0;
 }
 
-/* Supports the w16 operation. */
+/*
+ * Writes a 16-bit register with 32-bit accesses only.
+ *
+ * Two pairs cannot be written half at a time: writing the command starts
+ * it, so the transfer mode must go in the same write, and the block size is
+ * written with the block count, as Linux's iProc driver does.  The first
+ * half of each pair is kept until the second is written.  Any other
+ * register is a read-modify-write of its word.
+ */
 static void
 w16(
 	unsigned offset,
 	uint16_t value)
 {
-	kern_mmio_write16(unit.base + offset, value);
+	uint32_t word;
+	unsigned shift;
+
+	/* The first halves of the pairs are kept. */
+	if (offset == REG_TRANSFER_MODE) {
+		unit.transfer_mode = value;
+		return;
+	}
+	if (offset == REG_BLOCK_SIZE) {
+		unit.block_size = value;
+		return;
+	}
+
+	/* The command goes out with the transfer mode, which is then used up. */
+	if (offset == REG_COMMAND) {
+		w32(REG_TRANSFER_MODE,
+		    ((uint32_t)value << 16) | unit.transfer_mode);
+		unit.transfer_mode = 0;
+		return;
+	}
+
+	/* The block count goes out with the block size. */
+	if (offset == REG_BLOCK_COUNT) {
+		w32(REG_BLOCK_SIZE, ((uint32_t)value << 16) | unit.block_size);
+		return;
+	}
+
+	/* Anything else: the other half of the word keeps what it holds. */
+	word = r32(offset & ~3U);
+	shift = (offset & 2U) * 8U;
+	word &= ~(0xffffU << shift);
+	word |= (uint32_t)value << shift;
+	w32(offset & ~3U, word);
 }
 
 /* Supports the command operation. */
@@ -595,6 +661,8 @@ sd_submit(
 	else if (bio->b_op != BIO_READ && bio->b_op != BIO_WRITE)
 		error = EOPNOTSUPP;
 	else {
+		mutex_lock(&unit.lock);
+
 		/* Process each remaining element. */
 		for (i_index_for = 0;
 		     i_index_for < bio->b_block_count && error == 0;
@@ -604,6 +672,7 @@ sd_submit(
 				bio->b_mapped_block + i_index_for,
 				data + (size_t)i_index_for * 512U);
 		}
+		mutex_unlock(&unit.lock);
 	}
 
 	/* Checks the operation status. */

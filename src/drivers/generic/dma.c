@@ -9,16 +9,16 @@
  * Generic no-IOMMU DMA implementation.
  */
 
-#include <drivers/dma.h>
-#include <errno.h>
+#include <drivers/generic/dma.h>
+#include <uapi/errno.h>
 #include <kern/io-stats.h>
 #include <kern/cache-memory.h>
 #include <kern/lock.h>
 #include <limits.h>
-#include <string.h>
 #include <kern/pmem.h>
 #include "kern/kmem.h"
 #include "kern/panic.h"
+#include <kern/kcrt.h>
 
 struct dma_allocation {
 	struct kern_pmem memory;
@@ -94,7 +94,7 @@ drv_dma_device_create(
 	device = kern_malloc(sizeof(*device));
 	if (device == NULL)
 		return ENOMEM;
-	memset(device, 0, sizeof(*device));
+	kern_memset(device, 0, sizeof(*device));
 	device->constraints = *constraints;
 	spin_init(&device->lock, LOCK_RANK_DEVICE, "DMA allocation list");
 	*result = device;
@@ -243,7 +243,7 @@ drv_dma_alloc_coherent(
 		return ENOMEM;
 	}
 
-	memset(allocation, 0, sizeof(*allocation));
+	kern_memset(allocation, 0, sizeof(*allocation));
 
 	/* Checks the hal page get page size result. */
 	if (alignment < kern_page_size(1))
@@ -407,7 +407,7 @@ drv_dma_free_coherent(
 		}
 
 		kern_free(allocation);
-		memset(buffer, 0, sizeof(*buffer));
+		kern_memset(buffer, 0, sizeof(*buffer));
 	}
 
 	device_operation_end(device);
@@ -607,7 +607,7 @@ drv_dma_vector_create(
 		return ENOMEM;
 	}
 
-	memset(vector, 0, sizeof(*vector));
+	kern_memset(vector, 0, sizeof(*vector));
 	vector->device = device;
 	vector->size = size;
 	vector->charged = sizeof(*vector);

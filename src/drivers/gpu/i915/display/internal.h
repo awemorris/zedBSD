@@ -73,7 +73,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
+#include <kern/kcrt.h>
 #include <kern/lock.h>
 #include <kern/waitq.h>
 
@@ -2175,7 +2175,7 @@ struct i915_lcd_emit {
 	 * The synchronous plane update (intel_pipe_update_start / _end) and its completion event:
 	 *   vblank_get / vblank_put   drm_crtc_vblank_get / _put of the pipe (0 / -EINVAL)
 	 *   vblank_sleep              schedule_timeout() on the pipe's vblank wait queue: sleep until the pipe's next vblank
-	 *                             interrupt or `ticks` 10 ms ticks; returns the ticks left (0 = timed out)
+	 *                             interrupt or `ticks` display ticks of 10 ms (not kernel ticks); returns the ticks left (0 = timed out)
 	 *   irq_off / irq_on          local_irq_disable / _enable around the short update section
 	 *   arm_event                 drm_crtc_arm_vblank_event(): the event completes at the pipe's next vblank after now
 	 *   wait_event                wait for that completion (0; -110 not within timeout_ms; -5 time base / wait fault)

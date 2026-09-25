@@ -1,0 +1,2 @@
+PASS display-only GPU: native query/constraints, checked foreign backing, rejected DMA/cache mismatch, copyout rollback, source exit, final pin ordering and display wait/signal fences
+PASS display-only GPU: native query/constraints, checked foreign backing, rejected DMA/cache mismatch, copyout rollback, source exit, final pin ordering and display wait/signal fences

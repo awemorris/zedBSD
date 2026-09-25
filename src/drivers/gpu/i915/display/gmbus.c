@@ -52,12 +52,12 @@
 
 #include "hotplug-internal.h"
 #include "gmbus.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 #include <kern/lock.h>
 
 #include <stddef.h>
-#include <string.h>
 
 /* The force_bit bit a transfer sets when GMBUS asked to be retried over GPIO. */
 #define GMBUS_FORCE_BIT_RETRY (1U << 31)
@@ -232,8 +232,8 @@ drv_i915_hpd_gmbus_adapter(
 	i915->display.gmbus.mmio_base = PCH_DISPLAY_BASE;
 
 	/* Names the adapter "i915 gmbus <pin name>". */
-	memset(bus, 0, sizeof(*bus));
-	memcpy(bus->adapter.name, "i915 gmbus ", I915_GMBUS_NAME_PREFIX_LENGTH);
+	kern_memset(bus, 0, sizeof(*bus));
+	kern_memcpy(bus->adapter.name, "i915 gmbus ", I915_GMBUS_NAME_PREFIX_LENGTH);
 	name = names[pin];
 	position = I915_GMBUS_NAME_PREFIX_LENGTH;
 	while (*name != '\0' && position < sizeof(bus->adapter.name) - 1u) {
@@ -267,7 +267,7 @@ drv_i915_hpd_gmbus_forget(
 	struct i915_hpd_world *world)
 {
 	/* Clears the buses and marks the controller lock as not prepared. */
-	memset(world->hpd_gmbus_bus, 0, sizeof(world->hpd_gmbus_bus));
+	kern_memset(world->hpd_gmbus_bus, 0, sizeof(world->hpd_gmbus_bus));
 	world->hpd_gmbus_mutex_inited = 0;
 }
 

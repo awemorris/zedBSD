@@ -1,0 +1,9 @@
+GPU UAPI: ILP32/LP64 sizes, offsets and ioctl encoding PASS
+GPU mapping: offset isolation, bounds, rollback, shared bytes and retained close PASS
+GPU optional operations: capability, blob, transfer, command and presentation PASS
+GPU framework: dynamic registration, permissions, handles and retirement PASS
+PCI to GPU registration: ordering, busy removal and rollback PASS
+GPU mapping: offset isolation, bounds, rollback, shared bytes and retained close PASS
+GPU optional operations: capability, blob, transfer, command and presentation PASS
+GPU framework: dynamic registration, permissions, handles and retirement PASS
+PCI to GPU registration: ordering, busy removal and rollback PASS

@@ -21,12 +21,12 @@ for target in i386-unknown-zedbsd x86_64-unknown-zedbsd; do
         standard=c11
         if [ "$language" = c++ ]; then standard=c++11; fi
         build/llvm/bin/clang --target="$target" -x "$language" -std="$standard" \
-            -ffreestanding -nostdinc -Wall -Wextra -Werror -Ilibc/include -Iinclude \
+            -ffreestanding -nostdinc -Wall -Wextra -Werror -Ilibc/include -DKERN_UAPI_NATIVE -Iinclude \
             -fsyntax-only plan/ws014/phase006/tests/wayland-abi.c
         for variant in maintained reference; do
             build/llvm/bin/clang --target="$target" -x "$language" -std="$standard" \
                 -ffreestanding -nostdinc -Wall -Wextra -Werror -Wno-comment \
-                -I"$work/$variant" -I"$reference_core" -Ilibc/include -I/usr/include \
+                -I"$work/$variant" -I"$reference_core" -Ilibc/include -DKERN_UAPI_NATIVE -I/usr/include \
                 -c plan/ws014/phase006/tests/vulkan-wayland-abi.c -o "$work/$variant.o"
             build/llvm/bin/llvm-objcopy --dump-section .rodata="$work/$variant.bin" \
                 "$work/$variant.o"

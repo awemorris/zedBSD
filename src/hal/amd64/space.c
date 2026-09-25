@@ -28,6 +28,15 @@
 
 #define AMD64_USER_LIMIT 0x0000800000000000ULL
 
+/*
+ * The entry that points to a page table carries, in the bits the hardware
+ * ignores (52..62), how many entries of that table are present.  It makes
+ * "is this table empty" a single load instead of a scan of 512 entries,
+ * which the unmap path asked for every table of the space on every call.
+ */
+#define AMD64_PTE_COUNT_SHIFT  52
+#define AMD64_PTE_COUNT_MASK   (0x7ffULL << AMD64_PTE_COUNT_SHIFT)
+
 _Static_assert(AMD64_RAM_BASE == AMD64_DIRECT_BASE, "RAM window base agreement");
 _Static_assert(AMD64_RAM_LIMIT == AMD64_DIRECT_LIMIT, "RAM window size agreement");
 
@@ -65,6 +74,15 @@ struct amd64_device_mapping {
 	uint32_t attributes;
 	void *address;
 };
+
+/* The largest shootdown range invalidated page by page rather than whole. */
+#define AMD64_INVLPG_MAX_PAGES 32U
+
+/* The smallest unmap that frees the page tables it empties: one leaf table's span. */
+#define AMD64_DETACH_MIN_BYTES (512U * PAGE_SIZE)
+
+/* The offset bits inside one leaf table's span, for rounding up to the next span. */
+#define AMD64_LEAF_SPAN_MASK ((uintptr_t)AMD64_DETACH_MIN_BYTES - 1U)
 
 struct amd64_shootdown_request {
 	volatile unsigned active;
@@ -144,8 +162,12 @@ static bool space_lock_enter(struct amd64_space *space);
 static void space_lock_leave(struct amd64_space *space, bool enabled);
 static int valid_user_range(uintptr_t address, size_t size);
 static struct amd64_table_page *allocate_table(struct amd64_space *space, uint64_t *parent, unsigned parent_index);
-static uint64_t *walk_leaf(struct amd64_space *space, uintptr_t address, int create);
-static int table_is_empty(const uint64_t *table);
+static void table_count_adjust(uint64_t *owner, int delta);
+static uint64_t *walk_leaf(struct amd64_space *space, uintptr_t address, int create, uint64_t **owner);
+static int table_is_empty(const struct amd64_table_page *page);
+static uint64_t *table_owner_of(struct amd64_space *space, uint64_t *table);
+static void flush_request_range(hal_space_t handle, void *vaddr, size_t size);
+static uint64_t *table_at(uint64_t entry);
 static struct amd64_table_page *detach_empty_tables(struct amd64_space *space);
 static void free_detached_tables(struct amd64_table_page *page);
 static uint64_t leaf_flags(uint32_t attr);
@@ -176,6 +198,43 @@ amd64_direct_to_phys(
 	if (!ram_active || !amd64_ram_lookup(&ram_builder, physical, &entry))
 		return UINTPTR_MAX;
 	return (uintptr_t)physical;
+}
+
+/*
+ * Tests whether the direct map aliases every page of a physical range.
+ *
+ * Walks the RAM map page by page, stepping over a whole 2 MiB leaf at once,
+ * so the answer is exact at page granularity.
+ */
+int
+amd64_direct_covers(
+	uint64_t base,
+	uint64_t end)
+{
+	uint64_t address;
+	uint64_t entry;
+	int present;
+
+	/* Reports nothing covered before the direct map is live. */
+	if (!ram_active)
+		return 0;
+
+	/* Probes each leaf that the range touches. */
+	address = base & ~(uint64_t)(PAGE_SIZE - 1U);
+	while (address < end) {
+		present = amd64_ram_lookup(&ram_builder, address, &entry);
+		if (!present)
+			return 0;
+
+		/* Steps over the whole leaf that maps this address. */
+		if ((entry & AMD64_PTE_LARGE) != 0)
+			address = (address + 0x200000U) & ~(uint64_t)0x1fffffU;
+		else
+			address += PAGE_SIZE;
+	}
+
+	/* Reports a fully aliased range. */
+	return 1;
 }
 
 /*
@@ -832,8 +891,12 @@ hal_space_destroy(
 	if (*link == NULL || space->destroying)
 		HAL_FATAL("invalid amd64 space destroy");
 
-	/* Retires and unlinks the space before releasing the registry. */
-	space->destroying = 1U;
+	/*
+	 * Retires and unlinks the space before releasing the registry.  The
+	 * flag is published sequentially consistent against the ownership
+	 * count taken in space_op_enter(), see there.
+	 */
+	__atomic_store_n(&space->destroying, 1U, __ATOMIC_SEQ_CST);
 	*link = space->registry_next;
 	registry_lock_leave(enabled);
 
@@ -842,9 +905,7 @@ hal_space_destroy(
 	 * ownership of the page-table storage.
 	 */
 	for (;;) {
-		enabled = registry_lock_enter();
-		active = space->active_ops;
-		registry_lock_leave(enabled);
+		active = __atomic_load_n(&space->active_ops, __ATOMIC_SEQ_CST);
 
 		/* Leaves the wait once every admitted operation has departed. */
 		if (active == 0)
@@ -964,6 +1025,7 @@ hal_space_map(
 {
 	struct amd64_space *space;
 	struct amd64_table_page *detached;
+	uint64_t *owner;
 	uint64_t *leaf;
 	uintptr_t address;
 	uintptr_t offset;
@@ -1023,7 +1085,7 @@ hal_space_map(
 
 	/* Verifies that every destination leaf is currently unmapped. */
 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
-		leaf = walk_leaf(space, address + offset, 0);
+		leaf = walk_leaf(space, address + offset, 0, NULL);
 
 		/* Rejects an overlap with an existing mapping. */
 		if (leaf != NULL && (*leaf & AMD64_PTE_PRESENT)) {
@@ -1035,7 +1097,7 @@ hal_space_map(
 
 	/* Installs each requested leaf mapping. */
 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
-		leaf = walk_leaf(space, address + offset, 1);
+		leaf = walk_leaf(space, address + offset, 1, &owner);
 
 		/* Rolls back all installed leaves when table allocation fails. */
 		if (leaf == NULL) {
@@ -1043,11 +1105,13 @@ hal_space_map(
 			for (rollback = 0;
 			     rollback < offset;
 			     rollback += PAGE_SIZE) {
-				leaf = walk_leaf(space, address + rollback, 0);
+				leaf = walk_leaf(space, address + rollback, 0, &owner);
 
-				/* Clears the leaf when its table remains reachable. */
-				if (leaf != NULL)
+				/* Clears a present leaf and uncounts it in its table. */
+				if (leaf != NULL && (*leaf & AMD64_PTE_PRESENT) != 0) {
 					*leaf = 0;
+					table_count_adjust(owner, -1);
+				}
 			}
 
 			/* Disconnects page tables made empty by rollback. */
@@ -1067,12 +1131,18 @@ hal_space_map(
 			return HAL_ERR_NOMEM;
 		}
 
-		/* Publishes this requested leaf mapping. */
+		/* Publishes this requested leaf mapping, counting a new one. */
+		if ((*leaf & AMD64_PTE_PRESENT) == 0)
+			table_count_adjust(owner, 1);
 		*leaf = (physical + offset) | leaf_flags(attr);
 	}
 
-	/* Invalidates translations on CPUs currently using this space. */
-	shootdown(space, pointer, size);
+	/*
+	 * Needs no invalidation: every leaf was checked not present above,
+	 * and an x86 processor caches neither a not-present translation nor
+	 * a not-present paging-structure entry, so no CPU can hold a stale
+	 * view of these addresses.
+	 */
 
 	/* Releases mapping and lifetime serialization. */
 	space_lock_leave(space, enabled);
@@ -1151,7 +1221,7 @@ hal_space_prot_query(
 
 	/* Validates the complete range before publishing any permission change. */
 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
-		leaf = walk_leaf(space, address + offset, 0);
+		leaf = walk_leaf(space, address + offset, 0, NULL);
 
 		/* Rejects a hole in the requested mapped range. */
 		if (leaf == NULL || !(*leaf & AMD64_PTE_PRESENT)) {
@@ -1171,7 +1241,7 @@ hal_space_prot_query(
 
 	/* Replaces each leaf while preserving accessed and dirty observations. */
 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
-		leaf = walk_leaf(space, address + offset, 0);
+		leaf = walk_leaf(space, address + offset, 0, NULL);
 		old = __atomic_load_n(leaf, __ATOMIC_ACQUIRE);
 
 		/* Retries the replacement if hardware updates the leaf concurrently. */
@@ -1204,7 +1274,7 @@ hal_space_prot_query(
 	 * those CPUs acknowledged the shootdown.
 	 */
 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
-		leaf = walk_leaf(space, address + offset, 0);
+		leaf = walk_leaf(space, address + offset, 0, NULL);
 
 		/* Detects an unexpected page-table topology change. */
 		if (leaf == NULL) {
@@ -1258,6 +1328,7 @@ hal_space_unmap(
 {
 	struct amd64_space *space;
 	struct amd64_table_page *detached;
+	uint64_t *owner;
 	uint64_t *leaf;
 	uintptr_t address;
 	uintptr_t offset;
@@ -1290,18 +1361,40 @@ hal_space_unmap(
 
 	/* Clears every reachable leaf in the requested range. */
 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
-		leaf = walk_leaf(space, address + offset, 0);
+		leaf = walk_leaf(space, address + offset, 0, &owner);
 
-		/* Clears the mapping when its leaf table exists. */
-		if (leaf != NULL)
+		/*
+		 * Without a leaf table nothing up to the next 2 MiB boundary is
+		 * mapped, so the walk continues from there instead of asking
+		 * about each of the remaining pages of that table's span.
+		 */
+		if (leaf == NULL) {
+			offset = ((address + offset) | AMD64_LEAF_SPAN_MASK) + 1U - address;
+			offset -= PAGE_SIZE;
+			continue;
+		}
+
+		/* Clears a present mapping and uncounts it in its table. */
+		if ((*leaf & AMD64_PTE_PRESENT) != 0) {
 			*leaf = 0;
+			table_count_adjust(owner, -1);
+		}
 	}
 
 	/*
 	 * Disconnects empty tables before acknowledgement while retaining their
 	 * storage until every stale translation and page walk has ended.
+	 *
+	 * Only an unmap as large as one leaf table's span does so.  A smaller
+	 * one is a page leaving for swap, a copy-on-write replacement or a
+	 * short munmap: the same addresses are usually mapped again soon, and
+	 * a table freed here would have to be allocated again by the fault
+	 * that maps them, when memory is shortest.  An empty table left behind
+	 * is freed by the next large unmap or when the space is destroyed.
 	 */
-	detached = detach_empty_tables(space);
+	detached = NULL;
+	if (size >= AMD64_DETACH_MIN_BYTES)
+		detached = detach_empty_tables(space);
 
 	/* Flushes the full space when parent entries were disconnected. */
 	if (detached != NULL) {
@@ -1351,7 +1444,7 @@ hal_space_query(
 
 	/* Reads the leaf under the page-table serializer. */
 	enabled = space_lock_enter(space);
-	leaf = walk_leaf(space, (uintptr_t)pointer, 0);
+	leaf = walk_leaf(space, (uintptr_t)pointer, 0, NULL);
 	*flags = leaf != NULL && (*leaf & AMD64_PTE_PRESENT) ?
 	    HAL_SPACE_PAGE_PRESENT : 0;
 
@@ -1411,7 +1504,7 @@ hal_space_clear_flags(
 
 	/* Locates the leaf under the page-table serializer. */
 	enabled = space_lock_enter(space);
-	leaf = walk_leaf(space, (uintptr_t)pointer, 0);
+	leaf = walk_leaf(space, (uintptr_t)pointer, 0, NULL);
 
 	/* Rejects an absent mapping. */
 	if (leaf == NULL || !(*leaf & AMD64_PTE_PRESENT)) {
@@ -1695,24 +1788,27 @@ static int
 space_op_enter(
 	struct amd64_space *space)
 {
-	struct amd64_space *item;
-	bool enabled;
+	unsigned destroying;
 
-	/* Searches the live registry while retirement is excluded. */
-	enabled = registry_lock_enter();
-	item = space_registry;
-	while (item != NULL && item != space)
-		item = item->registry_next;
+	/* Rejects a handle that is not a live address-space record. */
+	if (space->magic != AMD64_SPACE_MAGIC)
+		return 0;
 
-	/* Rejects an unknown or retiring address space. */
-	if (item == NULL || item->destroying) {
-		registry_lock_leave(enabled);
+	/*
+	 * Takes ownership first, then looks for retirement, and the retiring
+	 * side sets the flag first and then waits for the count: whichever
+	 * order the two race in, a retirement either sees this operation or
+	 * this operation sees the retirement.  Both steps are sequentially
+	 * consistent so neither side can reorder its two accesses.
+	 */
+	(void)__atomic_fetch_add(&space->active_ops, 1U, __ATOMIC_SEQ_CST);
+	destroying = __atomic_load_n(&space->destroying, __ATOMIC_SEQ_CST);
+
+	/* Backs out of a space that is being retired. */
+	if (destroying != 0) {
+		(void)__atomic_fetch_sub(&space->active_ops, 1U, __ATOMIC_SEQ_CST);
 		return 0;
 	}
-
-	/* Records lifetime ownership before releasing the registry. */
-	item->active_ops++;
-	registry_lock_leave(enabled);
 
 	/* Reports successful admission. */
 	return 1;
@@ -1723,18 +1819,14 @@ static void
 space_op_leave(
 	struct amd64_space *space)
 {
-	bool enabled;
+	unsigned previous;
 
-	/* Serializes the lifetime ownership update. */
-	enabled = registry_lock_enter();
+	/* Releases lifetime ownership; the retiring side waits for zero. */
+	previous = __atomic_fetch_sub(&space->active_ops, 1U, __ATOMIC_SEQ_CST);
 
 	/* Detects an unbalanced operation release. */
-	if (space->active_ops == 0)
+	if (previous == 0)
 		HAL_FATAL("amd64 space operation counter underflow");
-
-	/* Releases lifetime ownership before leaving the registry lock. */
-	space->active_ops--;
-	registry_lock_leave(enabled);
 }
 
 /* Acquires one address space's page-table lock. */
@@ -1846,22 +1938,48 @@ allocate_table(
 	return page;
 }
 
+/* Adds to the present-entry count kept in the entry that owns a table. */
+static void
+table_count_adjust(
+	uint64_t *owner,
+	int delta)
+{
+	uint64_t count;
+
+	/* The top-level table has no owning entry and no count. */
+	if (owner == NULL)
+		return;
+
+	/* Moves the count by delta, staying inside its 11 bits. */
+	count = (*owner & AMD64_PTE_COUNT_MASK) >> AMD64_PTE_COUNT_SHIFT;
+	if (delta < 0 && count < (uint64_t)(-delta))
+		HAL_FATAL("amd64 page table present count underflow");
+	count += (uint64_t)delta;
+	if (count > 512U)
+		HAL_FATAL("amd64 page table present count overflow");
+	*owner = (*owner & ~AMD64_PTE_COUNT_MASK) |
+	    (count << AMD64_PTE_COUNT_SHIFT);
+}
+
 /* Finds or creates the leaf entry for a virtual address. */
 static uint64_t *
 walk_leaf(
 	struct amd64_space *space,
 	uintptr_t address,
-	int create)
+	int create,
+	uint64_t **owner)
 {
 	unsigned shifts[3] = { 39, 30, 21 };
 	struct amd64_table_page *page;
 	uint64_t *table;
+	uint64_t *table_owner;
 	uint64_t entry;
 	unsigned level;
 	unsigned index;
 
 	/* Descends the three page-table levels above the leaf. */
 	table = space->pml4;
+	table_owner = NULL;
 	for (level = 0; level < 3; level++) {
 		index = (unsigned)(address >> shifts[level]) & 511U;
 		entry = table[index];
@@ -1885,6 +2003,9 @@ walk_leaf(
 			if (address < AMD64_USER_LIMIT)
 				entry |= AMD64_PTE_USER;
 			table[index] = entry;
+
+			/* The parent table now holds one more present entry. */
+			table_count_adjust(table_owner, 1);
 		}
 
 		/* Rejects an unexpected large page in a user-table path. */
@@ -1892,30 +2013,90 @@ walk_leaf(
 			return NULL;
 
 		/* Descends through the selected subordinate table. */
-		table = amd64_phys_to_direct(
-			(uintptr_t)(entry & AMD64_PTE_ADDR_MASK));
+		table_owner = &table[index];
+		table = table_at(entry);
 	}
+
+	/* Tells the caller which entry owns the leaf table, for its count. */
+	if (owner != NULL)
+		*owner = table_owner;
 
 	/* Reports the leaf entry selected by the address. */
 	return &table[(address >> 12) & 511U];
 }
 
-/* Tests whether a subordinate page table has no present entries. */
+/* Tests whether a table holds no present entry, from its owner's count. */
 static int
 table_is_empty(
-	const uint64_t *table)
+	const struct amd64_table_page *page)
 {
-	unsigned index;
+	uint64_t entry;
 
-	/* Searches for any present entry. */
-	for (index = 0; index < 512; index++) {
-		/* Reports a table which still owns a child mapping. */
-		if (table[index] & AMD64_PTE_PRESENT)
-			return 0;
-	}
+	/* The count lives in the parent's entry that points to this table. */
+	entry = page->parent[page->parent_index];
 
 	/* Reports an empty table. */
-	return 1;
+	if ((entry & AMD64_PTE_COUNT_MASK) == 0)
+		return 1;
+
+	/* Reports a table which still owns a child mapping. */
+	return 0;
+}
+
+/* Finds the entry that owns a table, or NULL for the top-level table. */
+static uint64_t *
+table_owner_of(
+	struct amd64_space *space,
+	uint64_t *table)
+{
+	struct amd64_table_page *page;
+	uint64_t physical;
+
+	/* The top-level table is owned by the space, not by an entry. */
+	if (table == space->pml4)
+		return NULL;
+
+	/* Every table is reached through the direct map, so its offset there is its address. */
+	physical = (uint64_t)((uintptr_t)table - (uintptr_t)AMD64_DIRECT_BASE);
+
+	/* Finds the record of the table among the space's tables. */
+	for (page = space->tables; page != NULL; page = page->next) {
+		if ((uint64_t)page->paddr == physical)
+			return &page->parent[page->parent_index];
+	}
+
+	/* An unrecorded table is a broken ownership link. */
+	HAL_FATAL("amd64 page table without an ownership record");
+	return NULL;
+}
+
+/*
+ * Converts a present non-leaf entry to the table it names.
+ *
+ * Page tables are RAM the HAL allocated and cleared through the direct map
+ * (allocate_table()), so the walk needs no RAM-map lookup to reach them:
+ * the direct map places every such table at a fixed offset.  Before the
+ * direct map is live the checked conversion is used.
+ */
+static uint64_t *
+table_at(
+	uint64_t entry)
+{
+	uint64_t physical;
+
+	/* Takes the table's physical address out of the entry. */
+	physical = entry & AMD64_PTE_ADDR_MASK;
+
+	/* Uses the checked conversion until the direct map is active. */
+	if (!ram_active)
+		return amd64_phys_to_direct((uintptr_t)physical);
+
+	/* Refuses an address beyond the direct map. */
+	if (physical >= AMD64_DIRECT_LIMIT)
+		HAL_FATAL("amd64 page table outside the direct map");
+
+	/* Reports the table's direct-map address. */
+	return (uint64_t *)((uintptr_t)AMD64_DIRECT_BASE + (uintptr_t)physical);
 }
 
 /* Detaches every empty table without releasing its storage. */
@@ -1928,6 +2109,7 @@ detach_empty_tables(
 	struct amd64_table_page *page;
 	uint64_t expected;
 	uint64_t parent_entry;
+	int empty;
 	int reclaimed;
 
 	/* Starts with an empty detached-table result list. */
@@ -1947,7 +2129,8 @@ detach_empty_tables(
 			expected = (uintptr_t)page->paddr;
 
 			/* Keeps nonempty tables linked in the hardware tree. */
-			if (!table_is_empty(amd64_phys_to_direct(page->paddr))) {
+			empty = table_is_empty(page);
+			if (!empty) {
 				link = &page->next;
 				continue;
 			}
@@ -1963,6 +2146,7 @@ detach_empty_tables(
 
 			/* Disconnects and transfers the empty table to the result list. */
 			page->parent[page->parent_index] = 0;
+			table_count_adjust(table_owner_of(space, page->parent), -1);
 			*link = page->next;
 			page->next = detached;
 			detached = page;
@@ -2044,6 +2228,16 @@ shootdown(
 	uint64_t pending;
 	int reserved;
 	int status;
+	bool enabled;
+
+	/*
+	 * Stays on one CPU for the whole request.  A caller moved to another
+	 * CPU after the sender is captured would leave the old CPU out of the
+	 * targets while it may still hold the space, and would acknowledge the
+	 * old CPU's bit from the new one.  Reciprocal requests are polled
+	 * below, so waiting with interrupts disabled cannot deadlock.
+	 */
+	enabled = hal_irq_disable();
 
 	/* Captures the sending CPU and initializes request construction. */
 	sender = hal_cpu_current();
@@ -2051,9 +2245,8 @@ shootdown(
 	pending = 0;
 
 	/*
-	 * Reserves a pool entry rather than indexing by sender CPU.  A timer
-	 * interrupt can preempt a waiting thread and run another thread on the
-	 * same CPU.
+	 * Reserves a pool entry rather than indexing by sender CPU, so the
+	 * pool does not depend on how many requests one CPU can have open.
 	 */
 	for (slot = 0; slot < AMD64_SHOOTDOWN_REQUESTS; slot++) {
 		expected = 0;
@@ -2130,7 +2323,7 @@ shootdown(
 
 	/* Invalidates the sender when it currently uses the affected space. */
 	if (handle == HAL_SPACE_SYS || AMD64_CURRENT_SPACE == handle)
-		asm_flush_tlb();
+		flush_request_range(handle, vaddr, size);
 
 	/*
 	 * Waits for acknowledgements while servicing reciprocal requests.  Page
@@ -2144,6 +2337,44 @@ shootdown(
 
 	/* Releases the acknowledged request slot. */
 	__atomic_store_n(&request->active, 0U, __ATOMIC_RELEASE);
+
+	/* Restores the caller's interrupt state. */
+	if (enabled)
+		hal_irq_enable();
+}
+
+/*
+ * Invalidates this CPU's translations for one shootdown request.
+ *
+ * A small user range is invalidated page by page, which keeps the rest of
+ * the TLB; a request with no range, a large one, or one for the system
+ * space reloads CR3 as before.
+ */
+static void
+flush_request_range(
+	hal_space_t handle,
+	void *vaddr,
+	size_t size)
+{
+	uintptr_t address;
+	uintptr_t end;
+
+	/* Flushes everything for a whole-space, large, or system request. */
+	if (handle == HAL_SPACE_SYS ||
+	    vaddr == NULL ||
+	    size == 0 ||
+	    size > AMD64_INVLPG_MAX_PAGES * PAGE_SIZE) {
+		asm_flush_tlb();
+		return;
+	}
+
+	/* Invalidates each page of the range. */
+	address = (uintptr_t)vaddr & ~(uintptr_t)(PAGE_SIZE - 1U);
+	end = (uintptr_t)vaddr + size;
+	while (address < end) {
+		__asm__ volatile("invlpg (%0)" : : "r"(address) : "memory");
+		address += PAGE_SIZE;
+	}
 }
 
 /* Services all active shootdown requests targeting one CPU. */
@@ -2177,7 +2408,7 @@ service_shootdowns(
 			continue;
 
 		/* Flushes locally before acknowledging the request. */
-		asm_flush_tlb();
+		flush_request_range(request->space, request->vaddr, request->size);
 		(void)__atomic_fetch_and(
 		    &request->pending,
 		    ~bit,

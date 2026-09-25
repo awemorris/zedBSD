@@ -14,10 +14,10 @@
 #include "device-info.h"
 #include "engine.h"
 #include "memory.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 #include "intel/gt-regs.h"
 
@@ -55,7 +55,7 @@ drv_i915_pxp_init(
 		return EINVAL;
 
 	/* Starts from an empty state. */
-	memset(x, 0, sizeof(*x));
+	kern_memset(x, 0, sizeof(*x));
 
 	/* Finds the first video decode engine of the root GT. */
 	vdbox = 0;

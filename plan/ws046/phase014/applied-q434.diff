@@ -1,0 +1,369 @@
+diff --git a/include/kern/vmspace.h b/include/kern/vmspace.h
+index e97c2672..ec15d30d 100644
+--- a/include/kern/vmspace.h
++++ b/include/kern/vmspace.h
+@@ -79,6 +79,12 @@ struct vm_device_mapping;
+ #define VM_REGION_BRK			0x0008U
+ #define VM_REGION_SHARED		0x0010U
+ #define VM_REGION_ELF_ZERO_TAIL		0x0020U
++/*
++ * A MAP_PRIVATE file region that maps the file's cached pages read-only and
++ * copies one on its first write, as an exec snapshot does; its object is the
++ * file's shared VM object.
++ */
++#define VM_REGION_PRIVATE_OBJECT	0x0040U
+ 
+ enum vm_region_backing {
+ 	VM_BACKING_ANON = 0,
+diff --git a/src/kern/vmspace.c b/src/kern/vmspace.c
+index 1bb8ab2e..3e78834a 100644
+--- a/src/kern/vmspace.c
++++ b/src/kern/vmspace.c
+@@ -196,7 +196,7 @@ static int prepare_region(uintptr_t start, size_t size, uint32_t prot, enum vm_r
+ static void discard_prepared_region(struct vm_region *region);
+ static int vmspace_map_anon_locked(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot, struct vm_region **result);
+ static int vmspace_map_anon_fixed_noreplace_locked(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot, struct vm_region **result);
+-static int vmspace_map_file_locked(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot, struct file *file, off_t file_offset, uintptr_t data_start, size_t data_size, struct vm_region **result);
++static int vmspace_map_file_locked(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot, struct file *file, off_t file_offset, uintptr_t data_start, size_t data_size, struct vm_object *object, struct vm_region **result);
+ static int vmspace_map_file_shared_locked(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot, struct file *file, off_t file_offset, size_t data_size, struct vm_object *object, struct vm_region **result);
+ static int vmspace_map_stack_locked(struct vmspace *vm, uintptr_t top, size_t size, size_t guard_size);
+ static struct vm_region * find_region_locked(struct vmspace *vm, uintptr_t address, size_t size);
+@@ -221,7 +221,8 @@ static int vmspace_copy_from_locked(struct vmspace *vm, void *destination, uintp
+ static int vmspace_find_free_range_bounded_locked(struct vmspace *vm, uintptr_t minimum, uintptr_t maximum, size_t size, size_t alignment, uintptr_t *mapped);
+ static int vmspace_find_free_range_locked(struct vmspace *vm, uintptr_t hint, size_t size, size_t alignment, uintptr_t *mapped);
+ static int vmspace_map_find_locked(struct vmspace *vm, uintptr_t hint, size_t size, uint32_t prot, uintptr_t *mapped);
+-static int vmspace_map_file_find_locked(struct vmspace *vm, uintptr_t hint, size_t size, uint32_t prot, struct file *file, off_t offset, size_t data_size, uintptr_t *mapped);
++static int vmspace_map_file_find_locked(struct vmspace *vm, uintptr_t hint, size_t size, uint32_t prot, struct file *file, off_t offset, size_t data_size, struct vm_object *object, uintptr_t *mapped);
++static struct vm_object *private_file_object(struct file *file);
+ static int vmspace_map_file_shared_find_locked(struct vmspace *vm, uintptr_t hint, size_t size, uint32_t prot, struct file *file, off_t offset, size_t data_size, struct vm_object *object, uintptr_t *mapped);
+ static void free_vm_page(struct vmspace *vm, struct vm_page *page);
+ static void free_region_pages(struct vmspace *vm, struct vm_region *region);
+@@ -994,6 +995,7 @@ vmspace_fault(
+ 	int map_pressure;
+ 	int retry_fault;
+ 	int snapshot_cached;
++	int cow_object;
+ 	int swapped;
+ 	uint64_t maximum_offset;
+ 	unsigned long irq;
+@@ -1071,7 +1073,9 @@ retry:
+ 
+ 	/* An existing object mapping is served by the object cache. */
+ 	if (page != NULL && page->object_page != NULL) {
+-		if (region->snapshot != NULL && (required == HAL_SPACE_WRITE ||
++		cow_object = region->snapshot != NULL ||
++		    (region->flags & VM_REGION_PRIVATE_OBJECT) != 0;
++		if (cow_object && (required == HAL_SPACE_WRITE ||
+ 		    (page->flags & VM_MAPPING_MAPPED) == 0)) {
+ 			page->flags |= VM_MAPPING_BUSY;
+ 			region->hold_count++;
+@@ -1406,9 +1410,21 @@ retry:
+ 		return 0;
+ 	}
+ 
++	/*
++	 * A private region maps its object's page only where the page is all
++	 * file data; a page the data ends in, or past it, is filled below.
++	 */
++	cow_object = 0;
++	if ((region->flags & VM_REGION_PRIVATE_OBJECT) != 0 &&
++	    page_address >= region->data_start &&
++	    page_address - region->data_start + PAGE_SIZE <= region->data_size)
++		cow_object = 1;
++
+ 	/* A shared object page is mapped straight from the object cache. */
+-	if (region->object != NULL || region->snapshot != NULL) {
+-		snapshot_cached = region->snapshot != NULL;
++	if ((region->object != NULL &&
++	    ((region->flags & VM_REGION_PRIVATE_OBJECT) == 0 || cow_object)) ||
++	    region->snapshot != NULL) {
++		snapshot_cached = region->snapshot != NULL || cow_object;
+ 		if (sizeof(off_t) == 8)
+ 			maximum_offset = (uint64_t)INT64_MAX;
+ 		else
+@@ -1448,17 +1464,19 @@ retry:
+ 				error = EIO;
+ 				goto remove_placeholder;
+ 			}
++		}
+ 
++		/* A snapshot's or a private region's page is copied on its first write. */
++		if (snapshot_cached)
+ 			page->flags |= VM_MAPPING_COW;
+-		}
+ 
+-		/* Maps the object page, read-only when a snapshot owns it. */
++		/* Maps the object page, read-only when it is copied on write. */
+ 		page->object_page = object_page;
+ 		mapped = hal_space_map(vm->space,
+ 				      (void *)page_address,
+ 				      object_page->pmem.paddr,
+ 				      PAGE_SIZE,
+-				      region->snapshot != NULL ?
++				      snapshot_cached ?
+ 				      region->prot & ~HAL_SPACE_WRITE :
+ 				      region->prot) == HAL_OK;
+ 		if (!mapped) {
+@@ -2152,8 +2170,8 @@ vmspace_sync(
+ 		if (overlap_end > end)
+ 			overlap_end = end;
+ 
+-		/* Takes a reference on the object so it survives the unlock. */
+-		if (region->object != NULL) {
++		/* Takes a shared region's object so it survives the unlock. */
++		if (region->object != NULL && (region->flags & VM_REGION_SHARED) != 0) {
+ 			object = region->object;
+ 			vm_object_ref(object);
+ 			offset = region->file_offset +
+@@ -2636,22 +2654,31 @@ vmspace_map_file(
+ 	size_t data_size,
+ 	struct vm_region **result)
+ {
++	struct vm_object *object;
+ 	int error;
+ 
+ 	if (vm == NULL || vm == &kernel_vmspace)
+ 		return EINVAL;
++
++	/* Takes the file's object before the VM locks. */
++	object = private_file_object(file);
++
+ 	/* Runs the mapping under the metadata and space locks. */
+ 	vm_metadata_enter();
+ 	mutex_lock(&vm->lock);
+ 
+ 	error = vmspace_map_file_locked(vm, start, size, prot, file, offset,
+-	    data_start, data_size, result);
++	    data_start, data_size, object, result);
+ 	if (error == 0)
+ 		vmspace_generation_advance_locked(vm);
+ 
+ 	mutex_unlock(&vm->lock);
+ 	vm_metadata_leave();
+ 
++	/* A mapping that failed gives the object back. */
++	if (error != 0 && object != NULL)
++		vm_object_put(object);
++
+ 	/* Reports the failure. */
+ 	if (error != 0)
+ 		return error;
+@@ -2756,6 +2783,11 @@ vmspace_map_file_fixed(
+ 		error = vm_object_get_shared(file, &object);
+ 		if (error != 0)
+ 			return error;
++	} else {
++		/* A private mapping maps the file's cached pages when it can. */
++		object = private_file_object(file);
++		if (object != NULL)
++			flags |= VM_REGION_PRIVATE_OBJECT;
+ 	}
+ 
+ 	/* Prepares the region fully before replacing the old mappings. */
+@@ -3105,21 +3137,31 @@ vmspace_map_file_find(
+ 	size_t data_size,
+ 	uintptr_t *mapped)
+ {
++	struct vm_object *object;
+ 	int error;
+ 
+ 	if (vm == NULL || vm == &kernel_vmspace)
+ 		return EINVAL;
++
++	/* Takes the file's object before the VM locks. */
++	object = private_file_object(file);
++
+ 	/* Runs the mapping under the metadata and space locks. */
+ 	vm_metadata_enter();
+ 	mutex_lock(&vm->lock);
+ 
+-	error = vmspace_map_file_find_locked(vm, hint, size, prot, file, offset, data_size, mapped);
++	/* Maps the file at a free range, handing the region the object. */
++	error = vmspace_map_file_find_locked(vm, hint, size, prot, file, offset, data_size, object, mapped);
+ 	if (error == 0)
+ 		vmspace_generation_advance_locked(vm);
+ 
+ 	mutex_unlock(&vm->lock);
+ 	vm_metadata_leave();
+ 
++	/* A mapping that failed gives the object back. */
++	if (error != 0 && object != NULL)
++		vm_object_put(object);
++
+ 	/* Reports the failure. */
+ 	if (error != 0)
+ 		return error;
+@@ -3928,8 +3970,14 @@ vmspace_fork_locked(
+ 		if (source_region->object != NULL) {
+ 			vm_object_ref(source_region->object);
+ 			copy_region->object = source_region->object;
+-			/* Shared object pages are mapped lazily in the child. */
+-			continue;
++
++			/*
++			 * Shared object pages are mapped lazily in the child.  A
++			 * private region also has pages it copied on write, which
++			 * the loop below shares with the child.
++			 */
++			if ((source_region->flags & VM_REGION_PRIVATE_OBJECT) == 0)
++				continue;
+ 		}
+ 
+ 		/* Gives the child a mapping descriptor for every one the parent has. */
+@@ -4352,9 +4400,12 @@ vmspace_map_file_locked(
+ 	off_t file_offset,
+ 	uintptr_t data_start,
+ 	size_t data_size,
++	struct vm_object *object,
+ 	struct vm_region **result)
+ {
++	struct vm_region *region;
+ 	size_t commit_size;
++	unsigned flags;
+ 	int error;
+ 
+ 	/* Only a writable private file mapping needs commit. */
+@@ -4363,15 +4414,48 @@ vmspace_map_file_locked(
+ 	else
+ 		commit_size = 0;
+ 
+-	/* Reports the failure. */
+-	error = map_region(vm, start, size, prot, VM_BACKING_FILE, file, file_offset, data_start, data_size, 0, commit_size, result);
++	/* A region given the file's object maps its cached pages, copying on write. */
++	flags = 0;
++	if (object != NULL)
++		flags = VM_REGION_PRIVATE_OBJECT;
++
++	/* Maps the region. */
++	error = map_region(vm, start, size, prot, VM_BACKING_FILE, file, file_offset, data_start, data_size, flags, commit_size, &region);
+ 	if (error != 0)
+ 		return error;
+ 
++	/* The region takes the caller's object reference. */
++	region->object = object;
++	if (result != NULL)
++		*result = region;
++
+ 	/* Succeeded. */
+ 	return 0;
+ }
+ 
++/*
++ * Takes the shared VM object of a file a private mapping may map its cached
++ * pages from, or NULL when the file has none (the mapping then copies each
++ * page from the file).  The caller holds no VM lock: finding the object may
++ * take the file system's locks first.
++ */
++static struct vm_object *
++private_file_object(
++	struct file *file)
++{
++	struct vm_object *object;
++	int error;
++
++	/* Asks for the object; a file without one maps page by page. */
++	object = NULL;
++	error = vm_object_get_shared(file, &object);
++	if (error != 0)
++		return NULL;
++
++	/* Reports the object with the reference the region will take. */
++	return object;
++}
++
+ /* Maps a shared file region at a free range; the caller holds the VM locks. */
+ static int
+ vmspace_map_file_shared_locked(
+@@ -5335,6 +5419,7 @@ vmspace_map_file_find_locked(
+ 	struct file *file,
+ 	off_t offset,
+ 	size_t data_size,
++	struct vm_object *object,
+ 	uintptr_t *mapped)
+ {
+ 	uintptr_t start;
+@@ -5352,7 +5437,8 @@ vmspace_map_file_find_locked(
+ 	if (data_size > size)
+ 		data_size = size;
+ 
+-	error = vmspace_map_file_locked(vm, start, rounded, prot, file, offset, start, data_size, NULL);
++	/* Maps the region, which takes the object reference. */
++	error = vmspace_map_file_locked(vm, start, rounded, prot, file, offset, start, data_size, object, NULL);
+ 	if (error == 0)
+ 		*mapped = start;
+ 
+@@ -6199,9 +6285,17 @@ vmspace_protect_locked(
+ 
+ 	first = region;
+ 
+-	/* A region becoming accessible or writable needs commit first. */
++	/*
++	 * A region becoming accessible or writable needs commit first.  A
++	 * shared region writes into its object and needs none; a private
++	 * region that maps its object's pages copies them on write, so it
++	 * does.
++	 */
+ 	for (; region != NULL && region->start < end; region = region->next) {
+-		if (region->commit_size == 0 && region->object == NULL &&
++		if (region->commit_size == 0 &&
++		    (region->flags & VM_REGION_SHARED) == 0 &&
++		    (region->object == NULL ||
++		    (region->flags & VM_REGION_PRIVATE_OBJECT) != 0) &&
+ 		    ((region->backing == VM_BACKING_ANON && prot != 0) ||
+ 		     (region->backing == VM_BACKING_FILE &&
+ 		      (prot & HAL_SPACE_WRITE) != 0))) {
+@@ -6287,7 +6381,10 @@ vmspace_protect_locked(
+ 		for (page = region->pages; page != NULL; page = page->next)
+ 			page->flags &= ~(VM_MAPPING_PROTECT_REMOVED |
+ 			    VM_MAPPING_PROTECT_ADDED);
+-		if (region->commit_size == 0 && region->object == NULL &&
++		if (region->commit_size == 0 &&
++		    (region->flags & VM_REGION_SHARED) == 0 &&
++		    (region->object == NULL ||
++		    (region->flags & VM_REGION_PRIVATE_OBJECT) != 0) &&
+ 		    ((region->backing == VM_BACKING_ANON && prot != 0) ||
+ 		     (region->backing == VM_BACKING_FILE &&
+ 		      (prot & HAL_SPACE_WRITE) != 0)))
+@@ -6454,6 +6551,7 @@ vmspace_exec_cache_fault(
+ 	uint32_t prot;
+ 	unsigned long irq;
+ 	int error, writing, unmapped;
++	int pinned;
+ 
+ 	/* The region's snapshot pins the immutable source during allocation and copy. */
+ 	source = page->object_page;
+@@ -6476,7 +6574,23 @@ vmspace_exec_cache_fault(
+ 			if (fresh->generation == 0)
+ 				fresh->generation++;
+ 			spin_unlock_irqrestore(&fresh->state_lock, irq);
+-			error = vm_object_page_pin_read(source, 0, hal_pmem_to_kernel(fresh->pmem.paddr), PAGE_SIZE);
++
++			/*
++			 * A snapshot pins its pages; a private region's page is
++			 * only mapped, so it is pinned for the copy.
++			 */
++			pinned = 0;
++			if (region->snapshot == NULL) {
++				error = vm_object_page_pin(source);
++				if (error == 0)
++					pinned = 1;
++			}
++
++			/* Copies the page into the private one. */
++			if (error == 0)
++				error = vm_object_page_pin_read(source, 0, hal_pmem_to_kernel(fresh->pmem.paddr), PAGE_SIZE);
++			if (pinned)
++				vm_object_page_unpin(source);
+ 			if (error == 0)
+ 				vm_private_page_mark_dirty(fresh);
+ 		}
+@@ -6502,7 +6616,8 @@ vmspace_exec_cache_fault(
+ 
+ 	if (error == 0 && (find_region_locked(vm, address, 1) != region ||
+ 	    find_page(region, address) != page || page->object_page != source ||
+-	    region->snapshot == NULL || region->prot != prot || (prot & required) == 0))
++	    (region->snapshot == NULL && (region->flags & VM_REGION_PRIVATE_OBJECT) == 0) ||
++	    region->prot != prot || (prot & required) == 0))
+ 		error = EAGAIN;
+ 
+ 	if (error == 0 && hal_space_map(vm->space, (void *)address,

@@ -21,9 +21,9 @@
 #include "kern/kmem.h"
 #include "kern/test-checkpoint.h"
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
-#include <string.h>
+#include <kern/kcrt.h>
 
 struct thread thread0;
 static tid_t next_tid = 1;

@@ -9,7 +9,7 @@
  * Big-endian Sun disklabel partition scanner.
  */
 
-#include <drivers/disklabel.h>
+#include <drivers/disklabel/disklabel.h>
 
 static int scan(const struct partition_scheme *s, struct disk *d, struct partition *e, unsigned capacity);
 static uint16_t be16(const uint8_t *p);

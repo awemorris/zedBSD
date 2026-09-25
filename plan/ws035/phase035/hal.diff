@@ -1,0 +1,130 @@
+diff --git a/src/hal/amd64/bsp-pcat/cons.c b/src/hal/amd64/bsp-pcat/cons.c
+index b22cf22e..671e7fdd 100644
+--- a/src/hal/amd64/bsp-pcat/cons.c
++++ b/src/hal/amd64/bsp-pcat/cons.c
+@@ -19,7 +19,7 @@
+ 
+ #include <hal/hal.h>
+ 
+-#include <string.h>
++#include <kern/kcrt.h>
+ 
+ #include "../asm.h"
+ #include "../defs.h"
+diff --git a/src/hal/amd64/int.c b/src/hal/amd64/int.c
+index a4ed15a3..8ede017e 100644
+--- a/src/hal/amd64/int.c
++++ b/src/hal/amd64/int.c
+@@ -12,7 +12,7 @@
+  */
+ 
+ #include <hal/hal.h>
+-#include <errno.h>
++#include <uapi/errno.h>
+ #include "int.h"
+ #include "task.h"
+ #include "irq.h"
+diff --git a/src/hal/arm64/int.c b/src/hal/arm64/int.c
+index 5b5602eb..21fa145b 100644
+--- a/src/hal/arm64/int.c
++++ b/src/hal/arm64/int.c
+@@ -4,7 +4,7 @@
+ #include "task.h"
+ #include "irq.h"
+ #include "bsp-rpi4/gic.h"
+-#include <errno.h>
++#include <uapi/errno.h>
+ 
+ extern char arm64_vectors[];
+ void rpi4_timer_init(void);
+diff --git a/src/hal/i386/bsp-pc98/cons.c b/src/hal/i386/bsp-pc98/cons.c
+index 827e9d74..c35e35db 100644
+--- a/src/hal/i386/bsp-pc98/cons.c
++++ b/src/hal/i386/bsp-pc98/cons.c
+@@ -24,7 +24,7 @@
+ 
+ #include <hal/hal.h>
+ 
+-#include <string.h>
++#include <kern/kcrt.h>
+ 
+ #include "../defs.h"
+ #include "../irq.h"
+diff --git a/src/hal/i386/bsp-pcat/cons.c b/src/hal/i386/bsp-pcat/cons.c
+index 9ba42285..3098d362 100644
+--- a/src/hal/i386/bsp-pcat/cons.c
++++ b/src/hal/i386/bsp-pcat/cons.c
+@@ -19,7 +19,7 @@
+ 
+ #include <hal/hal.h>
+ 
+-#include <string.h>
++#include <kern/kcrt.h>
+ 
+ #include "../asm.h"
+ #include "../defs.h"
+diff --git a/src/hal/i386/int.c b/src/hal/i386/int.c
+index 5b0a8fe2..534f28ba 100644
+--- a/src/hal/i386/int.c
++++ b/src/hal/i386/int.c
+@@ -11,7 +11,7 @@
+ 
+ #include <hal/hal.h>
+ 
+-#include <errno.h>
++#include <uapi/errno.h>
+ 
+ #include "asm.h"
+ #include "int.h"
+diff --git a/src/hal/m68k/bsp-x68k/console.c b/src/hal/m68k/bsp-x68k/console.c
+index a2a043d6..9af21af7 100644
+--- a/src/hal/m68k/bsp-x68k/console.c
++++ b/src/hal/m68k/bsp-x68k/console.c
+@@ -4,7 +4,7 @@
+ #include <hal/hal.h>
+ #include "mmio.h"
+ 
+-#include <string.h>
++#include <kern/kcrt.h>
+ 
+ #define X68K_TVRAM_PLANE_BYTES 0x00020000U
+ #define X68K_TEXT_ROW_BYTES    128U
+diff --git a/src/hal/m68k/bsp-x68k/keyboard.c b/src/hal/m68k/bsp-x68k/keyboard.c
+index 057b162b..69ffbe05 100644
+--- a/src/hal/m68k/bsp-x68k/keyboard.c
++++ b/src/hal/m68k/bsp-x68k/keyboard.c
+@@ -7,7 +7,7 @@
+ #include "mmio.h"
+ #include "../../cons-wait.h"
+ 
+-#include <string.h>
++#include <kern/kcrt.h>
+ 
+ #define X68K_KEYBOARD_VECTOR 0x4c
+ /* 128 physical scans, two resync markers, and one ring sentinel. */
+diff --git a/src/hal/m68k/trap.c b/src/hal/m68k/trap.c
+index c27dfced..1bdd3eb2 100644
+--- a/src/hal/m68k/trap.c
++++ b/src/hal/m68k/trap.c
+@@ -1,7 +1,7 @@
+ /* MC68030 exception, syscall, and autovector dispatch. */
+ /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
+ 
+-#include <errno.h>
++#include <uapi/errno.h>
+ #include <hal/hal.h>
+ #include "exception.h"
+ #include "frame-offsets.h"
+diff --git a/src/hal/sparcv9/trap.c b/src/hal/sparcv9/trap.c
+index 75ee82d0..5b50b51f 100644
+--- a/src/hal/sparcv9/trap.c
++++ b/src/hal/sparcv9/trap.c
+@@ -8,7 +8,7 @@
+ #include "task.h"
+ #include "trap.h"
+ #include "irq.h"
+-#include <errno.h>
++#include <uapi/errno.h>
+ 
+ extern char sparcv9_trap_table[];
+ static int user_fault_active;

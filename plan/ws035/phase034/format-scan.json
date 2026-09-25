@@ -1,0 +1,300 @@
+{
+ "tool": "plan/ws035/tests/kcrt-format-scan.py",
+ "scope_files": 658,
+ "sinks": {
+  "DRM_INFO": {
+   "kind": "engine",
+   "format_argument": 0
+  },
+  "DRM_INFO_ONCE": {
+   "kind": "engine",
+   "format_argument": 0
+  },
+  "I915_DP_DRM_DBG": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "I915_DP_DRM_DBG_KMS": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "I915_DP_DRM_DEBUG_DRIVER": {
+   "kind": "check-only",
+   "format_argument": 0
+  },
+  "I915_DP_DRM_DEBUG_KMS": {
+   "kind": "check-only",
+   "format_argument": 0
+  },
+  "I915_DP_DRM_ERR": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "I915_DP_DRM_INFO": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "I915_DP_DRM_NOTICE": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "I915_DP_DRM_WARN": {
+   "kind": "check-only",
+   "format_argument": 2
+  },
+  "I915_DP_DRM_WARN_MSG": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "I915_DP_LOG": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "I915_HPD_DRM_DBG": {
+   "kind": "engine",
+   "format_argument": 1
+  },
+  "I915_HPD_DRM_DBG_KMS": {
+   "kind": "engine",
+   "format_argument": 1
+  },
+  "I915_HPD_DRM_ERR": {
+   "kind": "engine",
+   "format_argument": 1
+  },
+  "I915_HPD_DRM_INFO": {
+   "kind": "engine",
+   "format_argument": 1
+  },
+  "I915_LCD_DRM_DBG_KMS": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "I915_LCD_DRM_ERR": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "I915_OPREGION_DRM_ERR": {
+   "kind": "engine",
+   "format_argument": 1
+  },
+  "I915_STATE_WARN": {
+   "kind": "check-only",
+   "format_argument": 2
+  },
+  "I915_TAKEOVER_DRM_NOTICE": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "I915_VBT_DRM_DBG": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "I915_VBT_DRM_DBG_KMS": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "I915_VBT_DRM_DEBUG_DRIVER": {
+   "kind": "check-only",
+   "format_argument": 0
+  },
+  "I915_VBT_DRM_DEBUG_KMS": {
+   "kind": "check-only",
+   "format_argument": 0
+  },
+  "I915_VBT_DRM_ERR": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "I915_VBT_DRM_INFO": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "I915_VBT_DRM_NOTICE": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "I915_VBT_DRM_WARN": {
+   "kind": "check-only",
+   "format_argument": 2
+  },
+  "I915_VBT_DRM_WARN_MSG": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "I915_VBT_LOG": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "VFS_LOG": {
+   "kind": "engine",
+   "format_argument": 0
+  },
+  "drm_dbg_dp": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "drm_dbg_kms_ratelimited": {
+   "kind": "check-only",
+   "format_argument": 1
+  },
+  "drv_i915_lcd_fmtcheck": {
+   "kind": "check-only",
+   "format_argument": 0
+  },
+  "drv_i915_vbt_fmtcheck": {
+   "kind": "check-only",
+   "format_argument": 0
+  },
+  "kern_logf": {
+   "kind": "engine",
+   "format_argument": 0
+  },
+  "kern_snprintf": {
+   "kind": "engine",
+   "format_argument": 2
+  },
+  "kern_vsnprintf": {
+   "kind": "engine",
+   "format_argument": 2
+  },
+  "lt_dbg": {
+   "kind": "check-only",
+   "format_argument": 2
+  },
+  "lt_err": {
+   "kind": "check-only",
+   "format_argument": 2
+  }
+ },
+ "calls_scanned": {
+  "engine": 1213,
+  "check-only": 240
+ },
+ "conversion_counts": {
+  "engine": {
+   "%016llx": 37,
+   "%02X": 14,
+   "%02u": 13,
+   "%02x": 236,
+   "%03u": 2,
+   "%03x": 3,
+   "%04u": 2,
+   "%04x": 71,
+   "%05x": 17,
+   "%06x": 1,
+   "%08X": 6,
+   "%08llx": 8,
+   "%08x": 436,
+   "%2u": 3,
+   "%3d": 1,
+   "%3u": 2,
+   "%c": 38,
+   "%d": 873,
+   "%i": 1,
+   "%ld": 2,
+   "%llu": 83,
+   "%llx": 82,
+   "%lu": 4,
+   "%lx": 1,
+   "%p": 7,
+   "%s": 483,
+   "%u": 1533,
+   "%x": 165
+  },
+  "check-only": {
+   "%#04x": 2,
+   "%#x": 3,
+   "%*p": 5,
+   "%.*s": 2,
+   "%02x": 8,
+   "%05x": 2,
+   "%08x": 19,
+   "%3d": 2,
+   "%c": 23,
+   "%d": 204,
+   "%i": 1,
+   "%ld": 2,
+   "%lld": 1,
+   "%s": 160,
+   "%u": 28,
+   "%x": 27,
+   "%zu": 5
+  }
+ },
+ "engine_outside_subset": [],
+ "check_only_outside_subset": [
+  {
+   "file": "src/drivers/gpu/i915/display/dp-sink.c",
+   "line": 1922,
+   "sink": "I915_DP_DRM_DBG_KMS",
+   "spec": "%*p",
+   "problems": [
+    "* width"
+   ]
+  },
+  {
+   "file": "src/drivers/gpu/i915/display/dp-sink.c",
+   "line": 1956,
+   "sink": "I915_DP_DRM_DBG_KMS",
+   "spec": "%*p",
+   "problems": [
+    "* width"
+   ]
+  },
+  {
+   "file": "src/drivers/gpu/i915/display/dp-sink.c",
+   "line": 1662,
+   "sink": "drm_dbg_dp",
+   "spec": "%*p",
+   "problems": [
+    "* width"
+   ]
+  },
+  {
+   "file": "src/drivers/gpu/i915/display/dp.c",
+   "line": 1459,
+   "sink": "lt_dbg",
+   "spec": "%*p",
+   "problems": [
+    "* width"
+   ]
+  },
+  {
+   "file": "src/drivers/gpu/i915/display/dp.c",
+   "line": 1486,
+   "sink": "lt_dbg",
+   "spec": "%*p",
+   "problems": [
+    "* width"
+   ]
+  },
+  {
+   "file": "src/drivers/gpu/i915/display/vbt.c",
+   "line": 3162,
+   "sink": "I915_VBT_DRM_DBG_KMS",
+   "spec": "%.*s",
+   "problems": [
+    "precision"
+   ]
+  },
+  {
+   "file": "src/drivers/gpu/i915/display/vbt.c",
+   "line": 4737,
+   "sink": "I915_VBT_DRM_DBG_KMS",
+   "spec": "%.*s",
+   "problems": [
+    "precision"
+   ]
+  }
+ ],
+ "nonliteral_formats": [
+  {
+   "file": "src/kern/klog.c",
+   "line": 118,
+   "sink": "kern_vsnprintf",
+   "kind": "engine",
+   "format": "format"
+  }
+ ]
+}

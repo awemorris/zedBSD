@@ -7,12 +7,18 @@ ZEDBSD_VARIANT := hybrid
 
 CONFIG_KERNEL_TEST_CHECKPOINTS := n
 CONFIG_BUF_CACHE_KIB := 0
-CONFIG_DRIVER_NE2000 := n
+CONFIG_GPU_JOB_RESERVATION_MS := 10000
+CONFIG_GPU_JOB_EXECUTION_MS := 60000
+CONFIG_GPU_JOB_STOP_MS := 10000
+CONFIG_GPU_CONTROL_MS := 10000
+CONFIG_DRIVER_NE2000 := y
 CONFIG_DRIVER_PCI_UHCI := y
 CONFIG_DRIVER_PCI_EHCI := y
 CONFIG_DRIVER_PCI_XHCI := y
 CONFIG_DRIVER_PCI_NVME := y
 CONFIG_DRIVER_PCI_INTEL_AX211 := y
+CONFIG_DRIVER_PCI_VENUS := y
+CONFIG_DRIVER_PCI_I915 := y
 CONFIG_DRIVER_USB_STORAGE := y
 CONFIG_DRIVER_USB_CDC_NCM := y
 CONFIG_DRIVER_USB_CDC_ECM := y
@@ -21,7 +27,4 @@ CONFIG_DRIVER_USB_RTL8822BU := y
 CONFIG_DRIVER_GRAPHICS := y
 CONFIG_DRIVER_LGY98 := n
 
-ZEDBSD_USER_PROGRAMS := Xzed zshell zterm zwm admin ar at awk basename batch bc blkid cal cat cflow chgrp chmod chown cksum cmp comm compress cp crontab csplit curses cut cxref date dd delta df dhcpc diff dirname diskpart dmesg du ed expand expr fetch file find fmt fold fuser gencat get getconf gettext grep halt head host hostname iconv id ifconfig infocmp ipcrm ipcs join kill less link ln locale localedef logger login logname lp lpr ls m4 mailx mesg mkdir mkfifo mkfs mkswap more msgfmt mv newgrp ngettext nice nl nm noct nohup nslookup ntpdate od paste patch pathchk pax ping poweroff pr prs ps readlink realpath reboot renice rm rmdel rmdir route sact sccs sed service shutdown sleep sort split stat strings stty swapoff swapon tabs tail talk tee terminfo-extra terminfo tic time timeout top touch tput tr truncate tsort tty uname uncompress unexpand unget uniq unlink uudecode uuencode val wc what who wifi write xargs zcat intelax211-firmware i915-firmware rtl8822b-firmware sync
-
-# Exercise the public Noct installer in the maintained amd64 profile.
-ZEDBSD_USER_PROGRAMS += zedinst
+ZEDBSD_USER_PROGRAMS := admin ar at awk basename batch bc blkid cal cat cflow chgrp chmod chown cksum cmp comm compress cp crontab csplit curses cut cxref date dd delta df dhcpc diff dirname diskpart dmesg du ed expand expr fetch file find fmt fold fuser gencat get getconf gettext grep halt head host hostname iconv id ifconfig infocmp ipcrm ipcs join kill less libtruetype libzdesktop libvulkan libwayland-client link ln locale localedef logger login logname lp lpr ls m4 mailx mesg mkdir mkfifo mkfs mkswap more msgfmt mv mview newgrp ngettext nice nl nm noct nohup nslookup ntpdate od paste patch pathchk pax ping poweroff pr prs ps readlink realpath reboot renice rm rmdel rmdir route sact sccs sed service shutdown sleep sort split stat strings stty swapoff swapon sync tabs tail talk tee terminfo-extra terminfo tic time timeout top touch tput tr truncate tsort tty uname uncompress unexpand unget uniq unlink uudecode uuencode val vkdemo wc what lspci lsusb which who wifi write xargs zcat zwl i915-firmware intelax211-firmware rtl8822b-firmware libcxx remacs clang openssh openssl echo false printf test true seq tac whoami egrep fgrep env make make

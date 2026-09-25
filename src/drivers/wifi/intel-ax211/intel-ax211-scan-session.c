@@ -53,8 +53,8 @@
  */
 
 #include "intel-ax211-scan-session.h"
+#include <kern/kcrt.h>
 
-#include <string.h>
 
 #define AX211_SCAN_ABORT_RESPONSE_SIZE 4U
 #define AX211_SCAN_ABORT_STATUS_SUCCESS 0U
@@ -100,8 +100,8 @@ drv_intel_ax211_scan_session_init(
 	}
 
 	/* Reads which command versions the firmware offers. */
-	memset(session, 0, sizeof(*session));
-	memcpy(session->command_version_bytes, command_table->bytes,
+	kern_memset(session, 0, sizeof(*session));
+	kern_memcpy(session->command_version_bytes, command_table->bytes,
 	       sizeof(session->command_version_bytes));
 
 	/* Checks the drv intel ax211 scan api89 validate result. */
@@ -111,7 +111,7 @@ drv_intel_ax211_scan_session_init(
 	if (result != INTEL_AX211_PROTOCOL_OK ||
 	    drv_intel_ax211_scan_api89_validate(&copied) !=
 		    INTEL_AX211_SCAN_OK) {
-		memset(session, 0, sizeof(*session));
+		kern_memset(session, 0, sizeof(*session));
 
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_SESSION_UNSUPPORTED;
@@ -121,7 +121,7 @@ drv_intel_ax211_scan_session_init(
 	result = drv_intel_ax211_scan_profile_from_nvm(
 		nvm, mcc, station_address, &session->full_profile);
 	if (result != INTEL_AX211_SCAN_OK) {
-		memset(session, 0, sizeof(*session));
+		kern_memset(session, 0, sizeof(*session));
 
 		/* Obtains the ax211 scan session scan result result. */
 		error = ax211_scan_session_scan_result(result);
@@ -219,7 +219,7 @@ drv_intel_ax211_scan_session_begin_channel(
 		INTEL_AX211_SCAN_SESSION_COMMAND_TIMEOUT_US,
 		INTEL_AX211_SCAN_SESSION_WAIT_START_ACK);
 	if (result != INTEL_AX211_SCAN_SESSION_OK) {
-		memset(&session->scan, 0, sizeof(session->scan));
+		kern_memset(&session->scan, 0, sizeof(session->scan));
 		session->phase = INTEL_AX211_SCAN_SESSION_TERMINAL;
 		session->terminal_result = (uint8_t)result;
 	}
@@ -310,7 +310,7 @@ drv_intel_ax211_scan_session_notification(
 		return error;
 	}
 
-	memset(&decoded, 0, sizeof(decoded));
+	kern_memset(&decoded, 0, sizeof(decoded));
 	result = drv_intel_ax211_scan_event_accept(&session->scan, message,
 						   now_us, &decoded);
 
@@ -331,7 +331,7 @@ drv_intel_ax211_scan_session_notification(
 	    result == INTEL_AX211_SCAN_SESSION_ABORTED ||
 	    result == INTEL_AX211_SCAN_SESSION_FAILED ||
 	    result == INTEL_AX211_SCAN_SESSION_OK) {
-		memset(event, 0, sizeof(*event));
+		kern_memset(event, 0, sizeof(*event));
 		event->common_generation = session->common_generation;
 		event->channel = session->channel;
 		event->firmware = decoded;
@@ -481,7 +481,7 @@ drv_intel_ax211_scan_session_expire(
 		/* Handles the now us condition. */
 		if (now_us < session->command_deadline)
 			return INTEL_AX211_SCAN_SESSION_OK;
-		memset(&expired, 0, sizeof(expired));
+		kern_memset(&expired, 0, sizeof(expired));
 
 		/* Checks the operation result. */
 		result = drv_intel_ax211_command_timeout_oldest(
@@ -627,9 +627,9 @@ ax211_scan_session_channel_profile(
 	for (index = 0U; index < session->full_profile.channel_count; index++) {
 		/* Handles the session condition. */
 		if (session->full_profile.channel[index] == channel) {
-			memset(&session->channel_profile, 0,
+			kern_memset(&session->channel_profile, 0,
 			       sizeof(session->channel_profile));
-			memcpy(session->channel_profile.station_address,
+			kern_memcpy(session->channel_profile.station_address,
 			       session->full_profile.station_address, 6U);
 			session->channel_profile.channel_width_mhz =
 				session->full_profile.channel_width_mhz;
@@ -662,7 +662,7 @@ ax211_scan_session_submit(
 	/* Handles the now us condition. */
 	if (now_us > UINT64_MAX - timeout_us)
 		return INTEL_AX211_SCAN_SESSION_INVALID;
-	memset(&request, 0, sizeof(request));
+	kern_memset(&request, 0, sizeof(request));
 	request.command.group = INTEL_AX211_SCAN_GROUP_LONG;
 	request.command.opcode = opcode;
 
@@ -820,7 +820,7 @@ ax211_scan_session_ack(
 	/* Handles the abort status availability. */
 	response_capacity = 0U;
 	if (abort_status != NULL) {
-		memset(response, 0, sizeof(response));
+		kern_memset(response, 0, sizeof(response));
 		response_bytes = response;
 		response_capacity = sizeof(response);
 	}

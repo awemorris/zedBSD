@@ -1,0 +1,13 @@
+GPU build selection: amd64 Venus=n PASS
+GPU build selection: amd64 Venus=y PASS
+GPU build selection: rpi4 Venus=n PASS
+GPU build selection: rpi4 Venus=y PASS
+GPU build selection: i386 Venus=n PASS
+GPU build selection: i386 Venus=y PASS
+GPU build selection: pc98 Venus=n PASS
+GPU build selection: pc98 Venus=y PASS
+GPU build selection: sun4u Venus=n PASS
+GPU build selection: sun4u Venus=y PASS
+GPU build selection: x68k Venus=n PASS
+GPU build selection: x68k Venus=y PASS
+GPU framework and fence are conditional together; generic fd/handle remain in all six lists PASS

@@ -382,10 +382,19 @@ static void
 sem_lock(
 	sem_t *sem)
 {
-	/* Continue while the operation condition remains true. */
-	while (__atomic_exchange_n(&sem->guard, 1, __ATOMIC_ACQUIRE) != 0) {
+	uint32_t expected;
+
+	/*
+	 * Takes a free guard as held (1); otherwise marks it waited on (2) and
+	 * sleeps, so that an unlock enters the kernel only for a sleeper.
+	 */
+	expected = 0;
+	if (__atomic_compare_exchange_n(&sem->guard, &expected, 1, 0,
+					__ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+		return;
+	while (__atomic_exchange_n(&sem->guard, 2, __ATOMIC_ACQUIRE) != 0) {
 		(void)__syscall6(KERN_SYS_usync, (uintptr_t)&sem->guard,
-				 KERN_USYNC_WAIT, 1, 0, 0,
+				 KERN_USYNC_WAIT, 2, 0, 0,
 				 sem->pshared ? 0 : KERN_USYNC_PRIVATE);
 	}
 }
@@ -395,10 +404,11 @@ static void
 sem_unlock(
 	sem_t *sem)
 {
-	__atomic_store_n(&sem->guard, 0, __ATOMIC_RELEASE);
-	(void)__syscall6(KERN_SYS_usync, (uintptr_t)&sem->guard,
-			 KERN_USYNC_WAKE, 0, 0, 1,
-			 sem->pshared ? 0 : KERN_USYNC_PRIVATE);
+	/* Frees the guard, waking one sleeper only when one may wait. */
+	if (__atomic_exchange_n(&sem->guard, 0, __ATOMIC_RELEASE) == 2)
+		(void)__syscall6(KERN_SYS_usync, (uintptr_t)&sem->guard,
+				 KERN_USYNC_WAKE, 0, 0, 1,
+				 sem->pshared ? 0 : KERN_USYNC_PRIVATE);
 }
 
 /* Supports the sem wait common operation. */

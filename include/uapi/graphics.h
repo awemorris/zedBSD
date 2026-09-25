@@ -17,7 +17,7 @@ extern "C" {
 #endif
 
 #include <stdint.h>
-#include <sys/ioctl.h>
+#include <uapi/ioctl.h>
 #include <uapi/types.h>
 
 #define KERN_GRAPHICS_IOC_GROUP	'g'

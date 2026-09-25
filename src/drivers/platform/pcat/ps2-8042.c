@@ -9,12 +9,12 @@
  * IBM PC/AT i8042 PS/2 mouse driver
  */
 
-#include "drivers/hid/ps2-8042.h"
+#include "drivers/platform/pcat/ps2-8042.h"
 #include "kern/input-device.h"
 #include "kern/input-keymap.h"
 #include "kern/lock.h"
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <limits.h>
 #include <stdint.h>
 #include "kern/irq.h"

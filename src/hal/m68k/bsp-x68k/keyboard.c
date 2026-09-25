@@ -7,7 +7,7 @@
 #include "mmio.h"
 #include "../../cons-wait.h"
 
-#include <string.h>
+#include <kern/kcrt.h>
 
 #define X68K_KEYBOARD_VECTOR 0x4c
 /* 128 physical scans, two resync markers, and one ring sentinel. */

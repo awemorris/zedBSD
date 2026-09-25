@@ -50,9 +50,9 @@
  */
 
 #include "intel-ax211-key.h"
+#include <kern/kcrt.h>
 
 #include <stdint.h>
-#include <string.h>
 
 #define AX211_KEY_ACTION_ADD 1U
 #define AX211_KEY_ACTION_REMOVE 3U
@@ -110,7 +110,7 @@ drv_intel_ax211_key_add_encode(
 	/* Checks the ax211 key request valid result. */
 	if (!ax211_key_request_valid(request) || output == NULL)
 		return INTEL_AX211_KEY_INVALID;
-	memset(output, 0, INTEL_AX211_KEY_COMMAND_SIZE);
+	kern_memset(output, 0, INTEL_AX211_KEY_COMMAND_SIZE);
 
 	/* Handles the request condition. */
 	flags = AX211_KEY_FLAG_CCMP;
@@ -120,7 +120,7 @@ drv_intel_ax211_key_add_encode(
 	ax211_key_put_le32(output + 4U, AX211_KEY_STATION_MASK);
 	ax211_key_put_le32(output + 8U, request->key_index);
 	ax211_key_put_le32(output + 12U, flags);
-	memcpy(output + 16U, request->key, INTEL_AX211_KEY_BYTES);
+	kern_memcpy(output + 16U, request->key, INTEL_AX211_KEY_BYTES);
 	ax211_key_put_le64(output + 64U, request->receive_packet_number);
 
 	/* Returns the computed result. */
@@ -149,7 +149,7 @@ drv_intel_ax211_key_remove_encode(
 		/* Returns the computed result. */
 		return INTEL_AX211_KEY_INVALID;
 	}
-	memset(output, 0, INTEL_AX211_KEY_COMMAND_SIZE);
+	kern_memset(output, 0, INTEL_AX211_KEY_COMMAND_SIZE);
 
 	/* Handles the kind condition. */
 	flags = AX211_KEY_FLAG_CCMP;
@@ -198,7 +198,7 @@ drv_intel_ax211_key_state_init(
 		/* Returns the computed result. */
 		return INTEL_AX211_KEY_INVALID;
 	}
-	memset(state, 0, sizeof(*state));
+	kern_memset(state, 0, sizeof(*state));
 	state->hardware_epoch = hardware_epoch;
 	state->connection_generation = connection_generation;
 	state->initialized = 1U;
@@ -317,12 +317,12 @@ drv_intel_ax211_key_state_activate(
 	/* Handles the found condition. */
 	if (!found)
 		return INTEL_AX211_KEY_MISSING;
-	memset(state->active_group, 0, sizeof(state->active_group));
+	kern_memset(state->active_group, 0, sizeof(state->active_group));
 	state->active_pairwise = pairwise_generation;
 	state->active_group[group_index] = group_generation;
 	state->active_group_index = group_index;
 	state->staged_pairwise = 0U;
-	memset(state->staged_group, 0, sizeof(state->staged_group));
+	kern_memset(state->staged_group, 0, sizeof(state->staged_group));
 
 	/* Returns the computed result. */
 	return INTEL_AX211_KEY_OK;

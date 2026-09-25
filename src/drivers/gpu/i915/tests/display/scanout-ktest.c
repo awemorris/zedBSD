@@ -17,6 +17,7 @@
  */
 
 #include "display-ktest.h"
+#include <kern/kcrt.h>
 
 #include "../execution/ktest.h"
 
@@ -25,12 +26,11 @@
 #include "../../ggtt.h"
 #include "../../memory.h"
 
-#include <drivers/dma.h>
+#include <drivers/generic/dma.h>
 #include <kern/klog.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdint.h>
-#include <string.h>
 
 /* How many entries the stand-in GGTT has (64 MiB of GGTT space). */
 #define I915_SCANOUT_KTEST_TABLE_ENTRIES	16384U
@@ -751,5 +751,5 @@ i915_scanout_ktest_abandon(
 		drv_i915_gt_object_destroy(gm, object);
 	}
 
-	memset(so, 0, sizeof(*so));
+	kern_memset(so, 0, sizeof(*so));
 }

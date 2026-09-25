@@ -1,0 +1,54 @@
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `drv_pci_intel_ax211_devices_ready':
+intel-ax211-pci-test.c:(.text+0x13d): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `ax211_pci_attach':
+intel-ax211-pci-test.c:(.text+0x1c6): undefined reference to `kern_malloc'
+/usr/bin/ld: intel-ax211-pci-test.c:(.text+0x3ab): undefined reference to `kern_logf'
+/usr/bin/ld: intel-ax211-pci-test.c:(.text+0x3ea): undefined reference to `kern_logf'
+/usr/bin/ld: intel-ax211-pci-test.c:(.text+0x466): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `ax211_pci_detach':
+intel-ax211-pci-test.c:(.text+0x703): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `ax211_pci_read32':
+intel-ax211-pci-test.c:(.text+0x83a): undefined reference to `kern_io_read_barrier'
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `ax211_pci_quarantine':
+intel-ax211-pci-test.c:(.text+0xec2): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `ax211_pci_recovery_latch_locked':
+intel-ax211-pci-test.c:(.text+0x1a11): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `ax211_pci_recovery_run_locked':
+intel-ax211-pci-test.c:(.text+0x1b57): undefined reference to `kern_logf'
+/usr/bin/ld: intel-ax211-pci-test.c:(.text+0x1b70): undefined reference to `kern_logf'
+/usr/bin/ld: intel-ax211-pci-test.c:(.text+0x1cab): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccApYmO7.o:intel-ax211-pci-test.c:(.text+0x1cd0): more undefined references to `kern_logf' follow
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `ax211_pci_receive_event':
+intel-ax211-pci-test.c:(.text+0x2cbe): undefined reference to `kern_io_read_barrier'
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `ax211_pci_publish_pnvm':
+intel-ax211-pci-test.c:(.text+0x2f71): undefined reference to `kern_io_write_barrier'
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `ax211_pci_scan_command_dispatch':
+intel-ax211-pci-test.c:(.text+0x3e70): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `ax211_pci_scan_notification_dispatch':
+intel-ax211-pci-test.c:(.text+0x40d1): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `ax211_pci_scan_report_error':
+intel-ax211-pci-test.c:(.text+0x44b5): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `ax211_pci_tx_sync_for_device':
+intel-ax211-pci-test.c:(.text+0x4b7c): undefined reference to `kern_io_write_barrier'
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `ax211_pci_tx_write32':
+intel-ax211-pci-test.c:(.text+0x4bdd): undefined reference to `kern_io_write_barrier'
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `ax211_pci_sram_read_locked':
+intel-ax211-pci-test.c:(.text+0x4e3a): undefined reference to `kern_io_barrier'
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `ax211_pci_firmware_error_dump':
+intel-ax211-pci-test.c:(.text+0x4f3d): undefined reference to `kern_logf'
+/usr/bin/ld: intel-ax211-pci-test.c:(.text+0x5047): undefined reference to `kern_logf'
+/usr/bin/ld: intel-ax211-pci-test.c:(.text+0x5069): undefined reference to `kern_logf'
+/usr/bin/ld: intel-ax211-pci-test.c:(.text+0x50c0): undefined reference to `kern_logf'
+/usr/bin/ld: intel-ax211-pci-test.c:(.text+0x50e2): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccApYmO7.o:intel-ax211-pci-test.c:(.text+0x55d9): more undefined references to `kern_logf' follow
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `ax211_net_release':
+intel-ax211-pci-test.c:(.text+0x8f9c): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `ax211_radio_scan_stop':
+intel-ax211-pci-test.c:(.text+0x94d3): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccApYmO7.o: in function `ax211_radio_connect_start':
+intel-ax211-pci-test.c:(.text+0x967c): undefined reference to `kern_logf'
+/usr/bin/ld: intel-ax211-pci-test.c:(.text+0x985f): undefined reference to `kern_logf'
+/usr/bin/ld: intel-ax211-pci-test.c:(.text+0x9940): undefined reference to `kern_logf'
+/usr/bin/ld: intel-ax211-pci-test.c:(.text+0x995c): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccApYmO7.o:intel-ax211-pci-test.c:(.text+0x9a8d): more undefined references to `kern_logf' follow
+collect2: error: ld returned 1 exit status

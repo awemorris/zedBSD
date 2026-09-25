@@ -36,5 +36,5 @@ ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$work/sanitized"
 # Existing guest headers use restrict; preserve that spelling for this C89 check.
 cc -std=c89 -Drestrict=__restrict -Wall -Wextra -Werror \
     -Wdeclaration-after-statement -Wshadow -Wconversion -fsyntax-only \
-    -I"$repo/libc/include" -I"$repo/include" \
+    -I"$repo/include/libc" -DKERN_UAPI_NATIVE -I"$repo/include" \
     "$repo/userland/gpu/venus/client.c" "$repo/userland/gpu/venus/venus-frame.c"

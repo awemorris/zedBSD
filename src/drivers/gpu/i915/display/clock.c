@@ -79,6 +79,7 @@
 #include "modeset-internal.h"
 #include "takeover-internal.h"
 #include "clock.h"
+#include <kern/kcrt.h>
 
 #include "../mmio.h"
 #include "../power.h"
@@ -86,8 +87,7 @@
 
 #include <kern/klog.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 /* The CDCLK reference clock select of SKL_DSSM (i915_reg.h). */
 #define SKL_DSSM				0x51004u
@@ -977,11 +977,11 @@ drv_i915_icl_hdmi_wrpll(
 	int calc_result;
 
 	/* Builds a device view with only the reference clock set. */
-	memset(&i915, 0, sizeof(i915));
-	memset(&crtc, 0, sizeof(crtc));
-	memset(&cs, 0, sizeof(cs));
-	memset(&params, 0, sizeof(params));
-	memset(&hw, 0, sizeof(hw));
+	kern_memset(&i915, 0, sizeof(i915));
+	kern_memset(&crtc, 0, sizeof(crtc));
+	kern_memset(&cs, 0, sizeof(cs));
+	kern_memset(&params, 0, sizeof(params));
+	kern_memset(&hw, 0, sizeof(hw));
 	i915.display.dpll.ref_clks.nssc = ref_nssc;
 
 	/* Links a crtc state of the clock to it. */
@@ -1031,10 +1031,10 @@ drv_i915_icl_dp_combo_pll(
 	 * text kept the view in a function static cleared at every call; an
 	 * automatic one holds the same value and nothing survives the call.
 	 */
-	memset(&i915, 0, sizeof(i915));
-	memset(&crtc_state, 0, sizeof(crtc_state));
-	memset(&params, 0, sizeof(params));
-	memset(&hw, 0, sizeof(hw));
+	kern_memset(&i915, 0, sizeof(i915));
+	kern_memset(&crtc_state, 0, sizeof(crtc_state));
+	kern_memset(&params, 0, sizeof(params));
+	kern_memset(&hw, 0, sizeof(hw));
 	i915.display.dpll.ref_clks.nssc = ref_nssc;
 
 	/* Links a crtc state of the clock to it. */
@@ -1088,8 +1088,8 @@ drv_i915_lcd_dpll_pool_bind(
 	/* Builds DPLL 0 and DPLL 1 once (the reference's adlp_plls[]: no power domain). */
 	if (!world->i915_lcd_dpll_pool_inited) {
 		for (index = 0; index < 2; index++) {
-			memset(&world->i915_lcd_dpll_pool[index], 0, sizeof(world->i915_lcd_dpll_pool[index]));
-			memset(&world->i915_lcd_dpll_pool_state[index], 0, sizeof(world->i915_lcd_dpll_pool_state[index]));
+			kern_memset(&world->i915_lcd_dpll_pool[index], 0, sizeof(world->i915_lcd_dpll_pool[index]));
+			kern_memset(&world->i915_lcd_dpll_pool_state[index], 0, sizeof(world->i915_lcd_dpll_pool_state[index]));
 
 			/* Describes the PLL. */
 			if (index == DPLL_ID_ICL_DPLL1) {
@@ -1151,8 +1151,8 @@ drv_i915_lcd_dplls_reset(
 
 	/* Clears both PLLs and their atomic states. */
 	for (index = 0; index < 2; index++) {
-		memset(&world->i915_lcd_dpll_pool[index], 0, sizeof(world->i915_lcd_dpll_pool[index]));
-		memset(&world->i915_lcd_dpll_pool_state[index], 0, sizeof(world->i915_lcd_dpll_pool_state[index]));
+		kern_memset(&world->i915_lcd_dpll_pool[index], 0, sizeof(world->i915_lcd_dpll_pool[index]));
+		kern_memset(&world->i915_lcd_dpll_pool_state[index], 0, sizeof(world->i915_lcd_dpll_pool_state[index]));
 	}
 }
 
@@ -2545,7 +2545,7 @@ i915_find_shared_dpll(
 		}
 
 		/* A PLL with the same state is shared. */
-		differs = memcmp(pll_state,
+		differs = kern_memcmp(pll_state,
 				 &shared_dpll[pll->index].hw_state,
 				 sizeof(*pll_state));
 		if (differs == 0) {

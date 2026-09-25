@@ -64,6 +64,7 @@
 
 #include "opregion-internal.h"
 #include "opregion.h"
+#include <kern/kcrt.h>
 
 #include <hal/hal.h>
 #include <kern/clock.h>
@@ -360,11 +361,11 @@ drv_i915_acpi_notifier_call_chain(
 	unsigned calls;
 
 	/* Builds the event. */
-	memset(&event, 0, sizeof(event));
+	kern_memset(&event, 0, sizeof(event));
 	if (device_class != NULL)
-		strncpy(event.device_class, device_class, sizeof(event.device_class) - 1u);
+		kern_strncpy(event.device_class, device_class, sizeof(event.device_class) - 1u);
 	if (bus_id != NULL)
-		strncpy(event.bus_id, bus_id, sizeof(event.bus_id) - 1u);
+		kern_strncpy(event.bus_id, bus_id, sizeof(event.bus_id) - 1u);
 	event.type = type;
 	event.data = data;
 
@@ -512,7 +513,7 @@ drv_i915_opregion_shadow_setup(
 		return EBUSY;
 
 	/* Starts a new instance on the shadow. */
-	memset(&world->i915_opregion_dev.display.opregion, 0, sizeof(world->i915_opregion_dev.display.opregion));
+	kern_memset(&world->i915_opregion_dev.display.opregion, 0, sizeof(world->i915_opregion_dev.display.opregion));
 	world->i915_opregion_dev.display.params.vbt_firmware = NULL;
 	world->i915_opregion_asls = asls_token;
 	world->i915_opregion_backend = "SHADOW";
@@ -584,8 +585,8 @@ drv_i915_opregion_firmware_setup(
 	minor = ((const volatile u8 *)op)[0x16];
 	rvda = 0u;
 	rvds = 0u;
-	memcpy(&rvda, (const u8 *)op + OPREGION_ASLE_OFFSET + 186, 8);
-	memcpy(&rvds, (const u8 *)op + OPREGION_ASLE_OFFSET + 194, 4);
+	kern_memcpy(&rvda, (const u8 *)op + OPREGION_ASLE_OFFSET + 186, 8);
+	kern_memcpy(&rvds, (const u8 *)op + OPREGION_ASLE_OFFSET + 194, 4);
 
 	/* Maps the RVDA VBT read-only at the address the Linux setup computes. */
 	if (major >= 2u &&
@@ -610,7 +611,7 @@ drv_i915_opregion_firmware_setup(
 	}
 
 	/* Starts a new instance on the firmware's region. */
-	memset(&world->i915_opregion_dev.display.opregion, 0, sizeof(world->i915_opregion_dev.display.opregion));
+	kern_memset(&world->i915_opregion_dev.display.opregion, 0, sizeof(world->i915_opregion_dev.display.opregion));
 	world->i915_opregion_dev.display.params.vbt_firmware = NULL;
 	world->i915_opregion_asls = asls;
 	world->i915_opregion_backend = "FIRMWARE";
@@ -839,7 +840,7 @@ drv_i915_opregion_mbox_read(
 	world = display->opregion_world;
 	value = 0u;
 	if (world->i915_opregion_dev.display.opregion.header != NULL && off + 4u <= OPREGION_SIZE)
-		memcpy(&value, (const u8 *)world->i915_opregion_dev.display.opregion.header + off, 4);
+		kern_memcpy(&value, (const u8 *)world->i915_opregion_dev.display.opregion.header + off, 4);
 
 	/* Succeeded: reports the word, or 0. */
 	return value;
@@ -861,7 +862,7 @@ drv_i915_opregion_mbox_write(
 	/* Writes the word when the instance is set up and the offset fits. */
 	world = display->opregion_world;
 	if (world->i915_opregion_dev.display.opregion.header != NULL && off + 4u <= OPREGION_SIZE)
-		memcpy((u8 *)world->i915_opregion_dev.display.opregion.header + off, &v, 4);
+		kern_memcpy((u8 *)world->i915_opregion_dev.display.opregion.header + off, &v, 4);
 }
 
 /*
@@ -979,7 +980,7 @@ drv_i915_opregion_service_start(
 	world->i915_opregion_dev.unordered_wq = wq;
 	world->i915_opregion_policy = policy;
 	world->i915_opregion_nbl = 0u;
-	memset(&world->i915_opregion_wstats, 0, sizeof(world->i915_opregion_wstats));
+	kern_memset(&world->i915_opregion_wstats, 0, sizeof(world->i915_opregion_wstats));
 
 	/* Succeeded: the service is started. */
 	return 0;
@@ -1023,7 +1024,7 @@ drv_i915_opregion_add_connector(
 
 	/* Fills the target: its hook, its state's index and its connector. */
 	target = &world->i915_opregion_bl[index];
-	memset(target, 0, sizeof(*target));
+	kern_memset(target, 0, sizeof(*target));
 	target->set_acpi = set_acpi;
 	target->ctx = ctx;
 	target->state.target = index;
@@ -1431,8 +1432,8 @@ drv_i915_opregion_setup(
 		return ENOMEM;
 
 	/* Refuses a region without the OpRegion signature. */
-	memcpy(buf, base, sizeof(buf));
-	compared = memcmp(buf, OPREGION_SIGNATURE, 16);
+	kern_memcpy(buf, base, sizeof(buf));
+	compared = kern_memcmp(buf, OPREGION_SIGNATURE, 16);
 	if (compared != 0) {
 		I915_OPREGION_DRM_DBG(&dev_priv->drm, "opregion signature mismatch\n");
 		memunmap(base);
@@ -1476,7 +1477,7 @@ drv_i915_acpi_device_id_update(
 	u32 display_type;
 
 	/* No connector of any type has been numbered yet. */
-	memset(seen, 0, sizeof(seen));
+	kern_memset(seen, 0, sizeof(seen));
 
 	/* Numbers the connectors within their display type, in list order. */
 	world = i915_opregion_world_of(dev_priv);
@@ -1839,7 +1840,7 @@ i915_opregion_video_event(
 	opregion = container_of(nb, struct intel_opregion, acpi_notifier);
 	event = data;
 	ret = NOTIFY_OK;
-	compared = strcmp(event->device_class, ACPI_VIDEO_CLASS);
+	compared = kern_strcmp(event->device_class, ACPI_VIDEO_CLASS);
 	if (compared != 0)
 		return NOTIFY_DONE;
 

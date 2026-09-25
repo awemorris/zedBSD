@@ -16,13 +16,13 @@
  */
 
 #include "kern/boot.h"
+#include <kern/kcrt.h>
 
 #include "kern/block-identity.h"
 #include "kern/fat.h"
 #include "kern/namei.h"
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 struct parameter_name {
 	const char *text;
@@ -49,7 +49,7 @@ static const struct parameter_name parameter_names[KERN_BOOT_PARAMETER_COUNT] = 
 static char firmware_source[KERN_BOOT_SOURCE_SELECTOR_SIZE];
 static char configuration_source[KERN_BOOT_SOURCE_SELECTOR_SIZE];
 static uint64_t configuration_matches;
-static int provenance_selector(const struct boot_partition_identity *identity, char *output);
+static int provenance_selector(const struct kern_boot_partition_identity *identity, char *output);
 
 static struct kern_boot_parameters current_parameters;
 static int current_parameters_valid;
@@ -66,7 +66,7 @@ static int runtime_mount_lookup(struct kern_boot_source_slot *source, const char
 
 /* Copies boot provenance before firmware storage can be reclaimed. */
 int
-kern_boot_provenance_set(const struct boot_provenance *record)
+kern_boot_provenance_set(const struct kern_boot_provenance *record)
 {
 	char firmware[KERN_BOOT_SOURCE_SELECTOR_SIZE];
 	char configuration[KERN_BOOT_SOURCE_SELECTOR_SIZE];
@@ -85,8 +85,8 @@ kern_boot_provenance_set(const struct boot_provenance *record)
 		error = provenance_selector(&record->configuration, configuration);
 	if (error != 0)
 		return error;
-	memcpy(firmware_source, firmware, sizeof(firmware_source));
-	memcpy(configuration_source, configuration, sizeof(configuration_source));
+	kern_memcpy(firmware_source, firmware, sizeof(firmware_source));
+	kern_memcpy(configuration_source, configuration, sizeof(configuration_source));
 	configuration_matches = record->config_matches;
 	return 0;
 }
@@ -528,14 +528,14 @@ kern_boot_source_selector_validate(
 		return EINVAL;
 
 	/* A device path carries a device name. */
-	if (strncmp(selector, "/dev/", 5U) == 0) {
+	if (kern_strncmp(selector, "/dev/", 5U) == 0) {
 		error = selector_text(selector + 5U, DISK_NAME_MAX, 1);
 		return error;
 	}
 
 	/* An identity prefix carries identity text. */
 	for (index = 0; index < sizeof(identities) / sizeof(identities[0]); index++) {
-		if (strncmp(selector,
+		if (kern_strncmp(selector,
 			    identities[index].prefix,
 			    identities[index].length) == 0) {
 			error = selector_text(selector + identities[index].length,
@@ -545,7 +545,7 @@ kern_boot_source_selector_validate(
 	}
 
 	/* Anything else with an equals sign is an unknown identity. */
-	if (strchr(selector, '=') != NULL)
+	if (kern_strchr(selector, '=') != NULL)
 		return EINVAL;
 
 	/* A bare name is a device name. */
@@ -618,7 +618,7 @@ kern_boot_source_reference_parse(
 
 	/* Records the slot and the path. */
 	reference->slot = (unsigned)(text[4] - '0');
-	memcpy(reference->relative, path, length + 1U);
+	kern_memcpy(reference->relative, path, length + 1U);
 
 	/* Reports the parsed reference. */
 	return 0;
@@ -711,7 +711,7 @@ kern_boot_source_context_init(
 {
 	/* Ignores a missing context. */
 	if (context != NULL)
-		memset(context, 0, sizeof(*context));
+		kern_memset(context, 0, sizeof(*context));
 }
 
 /*
@@ -750,7 +750,7 @@ kern_boot_source_context_destroy(
 			continue;
 		}
 
-		memset(source, 0, sizeof(*source));
+		kern_memset(source, 0, sizeof(*source));
 	}
 
 	/* Reports the first unmount failure. */
@@ -1153,7 +1153,7 @@ kern_boot_source_release_unused(
 			continue;
 		}
 
-		memset(source, 0, sizeof(*source));
+		kern_memset(source, 0, sizeof(*source));
 	}
 
 	/* Reports the first unmount failure. */
@@ -1352,14 +1352,14 @@ runtime_mount_lookup(
 
 /* Formats only supported, nonempty GPT signatures into stable selectors. */
 static int
-provenance_selector(const struct boot_partition_identity *identity, char *output)
+provenance_selector(const struct kern_boot_partition_identity *identity, char *output)
 {
 	static const uint8_t order[16] = {3, 2, 1, 0, 5, 4, 7, 6, 8, 9, 10, 11, 12, 13, 14, 15};
 	static const char digits[] = "0123456789abcdef";
 	unsigned i, position, nonzero;
 	uint8_t byte;
 
-	memset(output, 0, KERN_BOOT_SOURCE_SELECTOR_SIZE);
+	kern_memset(output, 0, KERN_BOOT_SOURCE_SELECTOR_SIZE);
 	if (identity->index == 0 || identity->block_count == 0 ||
 	    identity->first_lba > UINT64_MAX - identity->block_count)
 		return EINVAL;
@@ -1372,7 +1372,7 @@ provenance_selector(const struct boot_partition_identity *identity, char *output
 		nonzero |= identity->signature[i];
 	if (nonzero == 0)
 		return EINVAL;
-	memcpy(output, "PARTUUID=", 9);
+	kern_memcpy(output, "PARTUUID=", 9);
 	position = 9;
 	for (i = 0; i < 16; i++) {
 		if (i == 4 || i == 6 || i == 8 || i == 10)

@@ -1,38 +1,16 @@
+<!-- awesome-plan project=zedbsd record=ws001 -->
+
 # WS001: POSIX.1-2024 compliance
 
-<!-- traceability:start -->
-
-## Goal traceability
-
-- Primary Milestone: **MG002 — UNIXアプリケーションの実行基盤が成立する**
-- Related Milestones: MG005
-- Objectives: O1, O2, O3
-- 貢献する成果: POSIX/UNIX互換APIと対応範囲を整える。
-- 上位定義: [MasterのObjectives / Milestone Goals](https://github.com/awemorris/zedBSD/issues/1)
-
-既存Phaseは本WSを親として上位成果に接続する。Primaryは分類と責任の所在であり、
-各PhaseがRelatedすべてを満たすという意味ではない。成果・検証・限界は各Phaseの
-現行記録を根拠とする。今回の対応付けは状態変更・未定義作業の追加・実行許可ではない。
-
-<!-- traceability:end -->
-
-
-Last updated: 2026-09-01
-
-WSID: `ws001`
-
-Status: in progress; compliance ledger remains active
-
-Parent: [master plan](../master.md)
-
-Last verified Phase: `ws001-p023`
-
-Resume point: q050 completed canonical p022/p023; completed WS005 consumed
-their released VFS dependencies. The POSIX compliance ledger remains active;
-select the next unresolved p020 audit item while completed p021 and p022/p023
-remain regression inputs. Concurrent q042 source and focused-host
-milestones originally used the colliding pre-merge identifiers p015 and p016;
-their active Phase IDs are `ws001-p022` and `ws001-p023`.
+<!-- awesome-plan-current:start -->
+Status: incomplete
+Primary Milestone: MG002
+Related Milestones: MG005
+Objectives: O1, O2, O3
+Parent: [Master](../master.md)
+Queue: なし
+Resume point: POSIX 準拠性の台帳とコード規約の残件。本文の台帳から次の Phase を切り出す
+<!-- awesome-plan-current:end -->
 
 Shared tests: [WS001 test index](tests/README.md)
 
@@ -133,7 +111,7 @@ state across components.
 | [`ws001-p010`](phase010/phase.md) | detailed removal and local reimplementation design for `bc`, `ed`, and `m4` |
 | [legacy Phase 0–10 plan](history/phase000-010-legacy-plan.md) | historical execution plan and phase acceptance policy |
 | [WS002](../ws002/ws.md) | completed post-Phase-10 service architecture and Phase 11–20 baseline |
-| [`ws002-p020`](../ws002/phase020/phase.md) | completed synchronous net-service implementation milestone and its handoffs |
+| `ws002-p020`（削除済み。git の履歴にある） | completed synchronous net-service implementation milestone and its handoffs |
 | Open Group Issue 8 pages | normative behavior to be reviewed; repository documents and tests do not replace the standard |
 
 When these artifacts disagree, do not choose the more optimistic status.
@@ -232,7 +210,7 @@ master's conservative hand-off policy.
 Phase 20 was selected from the Phase 15/19 networking and service-readiness
 hand-offs and completed its implementation milestone on 2026-08-25.  All
 focused host/build/QEMU gates in
-[`ws002-p020`](../ws002/phase020/phase.md) passes. This narrows the
+`ws002-p020`（削除済み。git の履歴にある） passes. This narrows the
 networking hand-offs but does not claim DHCP renewal, Wi-Fi, IPv6, exhaustive
 startup-failure injection, or POSIX conformance.
 
@@ -250,15 +228,15 @@ may be implemented while its consuming utility remains non-conforming.
 | KERN-IPC-03 | System V shared memory | implemented-unreviewed | `ipcrm`, `ipcs` | create/attach/stat/remove path exists; verify attachment lifecycle, permissions, limits, stale IDs, and removal races |
 | KERN-CRED-01 | credentials and process identity | partial | `id`, `chown`, `chgrp`, `newgrp`, `ps` | q050 proves effective-credential ownership before UFS1/UFS2/tmpfs/overlay publication, FAT representability rejection, set-GID inheritance, and safe read-only quarantine when rollback cleanup itself fails; broader real/effective IDs, supplementary groups, set-ID transitions, permission checks, and account-database integration remain |
 | KERN-SIG-01 | signals and process groups | partial | `kill`, `sh`, `time`, `wait` | basic signaling works; prove process-group targets, job-control delivery, stopped/continued children, saved statuses, interruption, and permissions |
-| KERN-WAIT-01 | child wait and accounting | partial | `wait`, `time`, `sh` | basic `waitpid()` works; multiple saved statuses, non-child behavior, signal status, stopped jobs, and user/system CPU accounting remain; missing-login exit/reap invalid-free remains tracked by [`ws002-p021`](../ws002/phase021/phase.md) |
+| KERN-WAIT-01 | child wait and accounting | partial | `wait`, `time`, `sh` | basic `waitpid()` works; multiple saved statuses, non-child behavior, signal status, stopped jobs, and user/system CPU accounting remain; missing-login exit/reap invalid-free remains tracked by `ws002-p021`（削除済み。git の履歴にある） |
 | KERN-TTY-01 | tty line discipline and termios | partial | `stty`, `sh`, `mesg`, `tty`, `newgrp` | canonical/raw and common flags exist; audit all required flags, speeds, control characters, VMIN/VTIME, drains/flushes, signals, and error atomicity |
-| KERN-PTY-01 | pseudo terminals and controlling tty | implemented-unreviewed | shell/job control, terminal tests | UNIX98-style PTY path exists; prove session/controlling-terminal acquisition, foreground groups, hangup, permissions, and lifecycle; missing-login exit/reap invalid-free remains tracked by [`ws002-p021`](../ws002/phase021/phase.md) |
+| KERN-PTY-01 | pseudo terminals and controlling tty | implemented-unreviewed | shell/job control, terminal tests | UNIX98-style PTY path exists; prove session/controlling-terminal acquisition, foreground groups, hangup, permissions, and lifecycle; missing-login exit/reap invalid-free remains tracked by `ws002-p021`（削除済み。git の履歴にある） |
 | KERN-CLOCK-01 | clocks and clock setting | partial | `date`, `touch`, libc time | `clock_settime()` exists; prove privilege checks, valid ranges, clock selection, timezone-facing behavior, interruption, and filesystem timestamp integration |
 | KERN-VFS-01 | pathname, metadata, and traversal semantics | partial | file utilities | q050 proves credential-aware object creation/rollback and truthful UFS1/UFS2/overlay directory `fsync`, with FAT/tmpfs directory sync explicitly `EOPNOTSUPP`; recursive symlink policies, mount boundaries, broader hard-link/metadata races, and family-wide error semantics remain |
 | KERN-FSSTAT-01 | filesystem capacity/accounting | partial | `df`, `du` | provide and verify stable filesystem/device identity, portable block accounting, mount lookup, overflow behavior, and permission/error cases |
 | KERN-RSRC-01 | priorities | reviewed | `nice`, `renice` | declared current scope has reviewed utility evidence; keep regression and permission/range tests |
 | KERN-RSRC-02 | resource limits | reviewed | `ulimit`, shell | declared current scope has reviewed utility evidence; expand when new limit classes are exposed |
-| KERN-BOOT-01 | init/service lifecycle | implemented-unreviewed | `/sbin/init`, service providers | native PID 1 boots and initiates ordered shutdown in QEMU; complete crash-loop, required-failure, stop-timeout, cycle, credential, and recovery evidence; missing-login exit/reap invalid-free remains tracked by [`ws002-p021`](../ws002/phase021/phase.md) |
+| KERN-BOOT-01 | init/service lifecycle | implemented-unreviewed | `/sbin/init`, service providers | native PID 1 boots and initiates ordered shutdown in QEMU; complete crash-loop, required-failure, stop-timeout, cycle, credential, and recovery evidence; missing-login exit/reap invalid-free remains tracked by `ws002-p021`（削除済み。git の履歴にある） |
 | KERN-NET-01 | loopback and interface control | implemented-unreviewed | `networkd`, `net`, socket users | four-CPU QEMU proves NE2000 receive/transmit, a real DHCP lease, default route, DNS, static `lo0`, up/down, and dp8390 SMP serialization; counters, aliases, IPv6, broader NICs, stress/race coverage, and full ioctl review remain |
 | KERN-NET-02 | AF_UNIX peer identity | implementation extension | `networkd`, local control protocols | `SO_PEERCRED` returns one immutable connection-time 12-byte `zedbsd_peercred` snapshot for connected AF_UNIX streams; this is a zedBSD extension, not a POSIX/SUS conformance interface, and its pathname/socketpair/SCM_RIGHTS lifecycle evidence is owned by `ws005-p003` |
 | KERN-POLL-01 | UNIX listener readiness | partial | `init`, `networkd` | listener `poll()` did not wake reliably after a queued AF_UNIX stream connection in Phase 19; daemons use a bounded one-second nonblocking accept loop pending a focused kernel repair |
@@ -317,7 +295,7 @@ dependency even when they are not POSIX public APIs.
 | SVC-TALK-01 | `talk` | disabled-profile | installed failure command | local rendezvous provider and service only if UP/XSI profile is enabled |
 | SVC-INIT-01 | PID 1 and service manager | implemented-unreviewed | native `/sbin/init`, `/sbin/service`, `/etc/rc.conf`, and `/etc/service.d`; Phase 20 adds explicit `after`/`requires`, startup states, and FD 3 readiness, with networkd restart and orderly shutdown passing QEMU | prove crash loops, cycles, required/optional failures, malformed reload, stop timeout, persistence, scheduled-work restart, and the remaining shutdown actions |
 | SVC-NOTIFY-01 | daemon startup readiness | implemented-unreviewed | private FD 3 READY/FAIL protocol, bounded timeout/parser, descriptor hygiene, terminal startup states, dependency propagation, and service status are implemented; QEMU proves networkd READY before `net boot` | add runtime fault injection for fragmented/malformed/duplicate/oversized records, FAIL, premature exit, timeout, and every descriptor-leak/restart edge |
-| SVC-GETTY-01 | getty/login session | partial | production QEMU accepts the explicitly passwordless root account and starts `/bin/sh` in `/root` without daemon churn | prove utmpx transitions, logout, hangup, getty respawn, locked-account rejection, and hashed-password authentication; missing-login exit/reap invalid-free remains tracked by [`ws002-p021`](../ws002/phase021/phase.md) |
+| SVC-GETTY-01 | getty/login session | partial | production QEMU accepts the explicitly passwordless root account and starts `/bin/sh` in `/root` without daemon churn | prove utmpx transitions, logout, hangup, getty respawn, locked-account rejection, and hashed-password authentication; missing-login exit/reap invalid-free remains tracked by `ws002-p021`（削除済み。git の履歴にある） |
 | SVC-NET-01 | networkd/net | partial | synchronous `net boot` and lightweight networkd orchestrate local ifconfig/route/dhcpc; four-CPU QEMU proves NE2000 DHCP address/default route/DNS, restart, up/down, and direct-ifconfig recovery | DHCP renewal, Wi-Fi, IPv6, unprivileged reads, broad link events, resolver failure policy, and remaining failure/recovery evidence stay later work |
 | SVC-TIME-01 | ntpdate | partial | local bounded NTPv4 client, disabled by default | controlled QEMU server, malformed/spoofed/unreachable cases, DNS timeout, clock privilege/error evidence; periodic `ntpd` remains a later project |
 

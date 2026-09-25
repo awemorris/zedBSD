@@ -1,5 +1,5 @@
 /* CDC NCM NTH16/NDP16 production-code fixture. */
-#include <drivers/usb-cdc-ncm.h>
+#include <drivers/usb/usb-cdc-ncm.h>
 
 #include <assert.h>
 #include <errno.h>

@@ -29,7 +29,7 @@
 #include <kern/sched.h>
 #include <kern/waitq.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdbool.h>
 #include <stddef.h>
 

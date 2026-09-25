@@ -19,16 +19,16 @@
 #include "internal.h"
 #include "object.h"
 #include "reply.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 #include <kern/kmem.h>
 
-#include <vulkan/vulkan_core.h>
+#include <libc/vulkan/vulkan_core.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "vulkan-codec.inc"
 
@@ -76,7 +76,7 @@ drv_i915_gfx_create_image(
 	int error;
 
 	/* Decodes the create info behind the device and its presence marker. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	i915_vkc_dec_VkImageCreateInfo(reader, &session->arena, &info);
@@ -145,7 +145,7 @@ drv_i915_gfx_create_image_view(
 	int error;
 
 	/* Decodes the create info behind the device and its presence marker. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	i915_vkc_dec_VkImageViewCreateInfo(reader, &session->arena, &info);
@@ -220,7 +220,7 @@ drv_i915_gfx_create_sampler(
 	uint64_t identity;
 
 	/* Decodes the create info behind the device and its presence marker. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	i915_vkc_dec_VkSamplerCreateInfo(reader, &session->arena, &info);
@@ -280,7 +280,7 @@ drv_i915_gfx_subresource_layout(
 	image = drv_i915_object_lookup(session->vk, I915_VK_OBJ_IMAGE, image_id);
 
 	/* Decodes the subresource when it is present; an absent one is level 0. */
-	memset(&subresource, 0, sizeof(subresource));
+	kern_memset(&subresource, 0, sizeof(subresource));
 	present = drv_i915_wire_read_u64(reader);
 	if (present != 0U)
 		i915_vkc_dec_VkImageSubresource(reader, &session->arena, &subresource);
@@ -296,7 +296,7 @@ drv_i915_gfx_subresource_layout(
 	 * array and depth pitch.  A single-level image is its whole allocation,
 	 * padding rows of a depth image included.
 	 */
-	memset(&layout, 0, sizeof(layout));
+	kern_memset(&layout, 0, sizeof(layout));
 	if (image != NULL && subresource.mipLevel < image->levels) {
 		i915_gfx_level_origin(image, subresource.mipLevel, &level_x, &level_y);
 		level_width = i915_gfx_minify(image->width, subresource.mipLevel);
@@ -627,5 +627,5 @@ i915_gfx_float_bits(
 	const float *source)
 {
 	/* The bytes of the float are its bit pattern. */
-	memcpy(destination, source, sizeof(*destination));
+	kern_memcpy(destination, source, sizeof(*destination));
 }

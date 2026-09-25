@@ -10,10 +10,10 @@
  */
 
 #include "rtl8822b-internal.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <limits.h>
-#include <string.h>
 
 #define RTL8822B_REG_CR 0x0100U
 #define RTL8822B_REG_RCR 0x0608U
@@ -259,7 +259,7 @@ drv_rtl8822b_cam_program_ccmp(
 		/* Failed. */
 		return EINVAL;
 	}
-	memset(words, 0, sizeof(words));
+	kern_memset(words, 0, sizeof(words));
 	words[0] = cam_ccmp_word0(key_index, group, address);
 	words[1] = (uint32_t)address[2] | ((uint32_t)address[3] << 8) |
 		   ((uint32_t)address[4] << 16) | ((uint32_t)address[5] << 24);
@@ -318,7 +318,7 @@ drv_rtl8822b_cam_stage_ccmp(
 		/* Failed. */
 		return EINVAL;
 	}
-	memset(words, 0, sizeof(words));
+	kern_memset(words, 0, sizeof(words));
 	words[1] = (uint32_t)address[2] | ((uint32_t)address[3] << 8) |
 		   ((uint32_t)address[4] << 16) | ((uint32_t)address[5] << 24);
 	/* Process each remaining element. */
@@ -443,7 +443,7 @@ drv_rtl8822b_data_frame_prepare(
 	/* Handles the capacity condition. */
 	if (capacity < total)
 		return ENOSPC;
-	memset(wire, 0, total);
+	kern_memset(wire, 0, total);
 
 	/* Handles the frame condition. */
 	word0 = (uint32_t)frame_length |
@@ -473,7 +473,7 @@ drv_rtl8822b_data_frame_prepare(
 	for (index = 0U; index < 16U; index++)
 		checksum ^= load_le16(wire + index * 2U);
 	store_le16(wire + 28U, checksum);
-	memcpy(wire + RTL8822B_DATA_TX_DESCRIPTOR_SIZE, frame, frame_length);
+	kern_memcpy(wire + RTL8822B_DATA_TX_DESCRIPTOR_SIZE, frame, frame_length);
 	*wire_length = total;
 	/* Succeeded. */
 	return 0;

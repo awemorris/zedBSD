@@ -19,7 +19,7 @@
 
 #include <hal/hal.h>
 
-#include <string.h>
+#include <kern/kcrt.h>
 
 #include "../asm.h"
 #include "../defs.h"

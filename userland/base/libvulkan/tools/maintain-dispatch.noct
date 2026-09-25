@@ -17,9 +17,9 @@ func lines(text) {
 }
 func main(args) {
     if (Array.size(args) != 3) { System.error("usage: maintain-dispatch.noct PUBLIC_HEADER PINNED_PROTOCOL_DEFINES OUTPUT_DIRECTORY"); }
-    var source = lines(FileUtil.readText(args[0]) + FileUtil.readText("libc/include/vulkan/vulkan_wayland.h") + FileUtil.readText("libc/include/vulkan/vulkan_external.h"));
+    var source = lines(FileUtil.readText(args[0]) + FileUtil.readText("include/libc/vulkan/vulkan_wayland.h") + FileUtil.readText("include/libc/vulkan/vulkan_external.h"));
     var banner = "/*\n * zedBSD\n * Copyright (C) 2026 Awe Morris\n *\n * SPDX-License-Identifier: Zlib\n */\n\n";
-    var table = banner + "/*\n * Maintained declaration metadata, see libc/include/vulkan/API-PROVENANCE.md.\n */\n\n";
+    var table = banner + "/*\n * Maintained declaration metadata, see include/libc/vulkan/API-PROVENANCE.md.\n */\n\n";
     var manifest = "name\tscope\textension\n"; var extension = "0"; var count = 0;
     for (i in 0..Array.size(source)) {
         var line = trim(source[i]);

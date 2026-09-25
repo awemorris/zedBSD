@@ -24,18 +24,18 @@
 #include "resource.h"
 #include "session.h"
 #include "render/render.h"
+#include <kern/kcrt.h>
 
-#include <drivers/gpu.h>
-#include <drivers/gpu-share.h>
+#include <drivers/gpu/gpu.h>
+#include <drivers/gpu/gpu-share.h>
 #include <kern/klog.h>
 #include <kern/kmem.h>
 #include <kern/lock.h>
 #include <kern/pmem.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 static int i915_resource_create(void *opaque, void *private_session, const struct gpu_resource_create *request, void **result);
 static void i915_resource_destroy(void *opaque, void *private_session, void *private_object);
@@ -388,7 +388,7 @@ i915_resource_map(
 	}
 
 	/* Hands the client the exact page-aligned extent of the blob. */
-	memset(mapping, 0, sizeof(*mapping));
+	kern_memset(mapping, 0, sizeof(*mapping));
 	mapping->physical = (uint64_t)backing->run.paddr;
 	mapping->address = address;
 	mapping->bytes = backing->bytes;

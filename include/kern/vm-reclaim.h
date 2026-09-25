@@ -12,6 +12,7 @@
 #ifndef KERN_KERN_VM_RECLAIM_H
 #define KERN_KERN_VM_RECLAIM_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 struct vm_page;
@@ -108,6 +109,35 @@ vm_page_untrack(
 int
 vm_reclaim_one(
 	struct vm_page *avoid);
+
+/*
+ * Allocates one page frame for a fault, reclaiming until one is free.
+ *
+ * Commit is charged before a page is faulted, so a frame always exists in
+ * memory or swap; a single reclaim can still lose its frame to another CPU
+ * or find every candidate busy with swap I/O.  This retries, waiting a
+ * little between attempts when reclaim made no progress, and fails only
+ * after a bounded time.  The avoided mapping is the one being faulted.
+ */
+int
+vm_reclaim_frame(
+	struct kern_pmem *memory,
+	struct vm_page *avoid);
+
+/*
+ * Waits until memory has been freed or a short time has passed, waking the
+ * page-out worker first.  For a fault that could not map for lack of
+ * page-table memory.
+ */
+void
+vm_reclaim_wait_free(void);
+
+/*
+ * Reports the free physical memory in bytes for a caller about to take a
+ * page: the fault path's estimate, exact near the reserve.
+ */
+size_t
+vm_free_bytes_estimate(void);
 
 /*
  * Fault paths which retain BUSY VM/object state must not enter object

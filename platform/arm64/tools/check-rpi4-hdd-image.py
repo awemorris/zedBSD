@@ -13,6 +13,7 @@ SECTOR = 512
 PARTITION_LBA = 2048
 PARTITION_BLOCKS = 262144
 IMAGE_BLOCKS = 524288
+ROOT_LBA = 264192
 
 
 def fail(message: str) -> None:
@@ -47,8 +48,19 @@ def check(args: argparse.Namespace) -> None:
         if (entry[0], entry[2], entry[4], entry[5]) != \
                 (0x80, 0x06, PARTITION_LBA, PARTITION_BLOCKS):
             fail("partition 1 is not the expected active FAT16 extent")
-        if any(mbr[0x1CE:0x1FE]):
-            fail("unexpected additional MBR partition")
+        if args.ufs_root is None:
+            if any(mbr[0x1CE:0x1FE]):
+                fail("unexpected additional MBR partition")
+        else:
+            root = struct.unpack_from("<B3sB3sII", mbr, 0x1CE)
+            blocks = args.ufs_root.stat().st_size // SECTOR
+            if (root[2], root[4], root[5]) != (0xA5, ROOT_LBA, blocks):
+                fail("partition 2 is not the expected UFS root extent")
+            if any(mbr[0x1DE:0x1FE]):
+                fail("unexpected additional MBR partition")
+            stream.seek(ROOT_LBA * SECTOR)
+            if stream.read(blocks * SECTOR) != args.ufs_root.read_bytes():
+                fail("partition 2 differs from the UFS root image")
         stream.seek(PARTITION_LBA * SECTOR)
         bpb = stream.read(SECTOR)
         if struct.unpack_from("<H", bpb, 11)[0] != SECTOR or \
@@ -56,7 +68,8 @@ def check(args: argparse.Namespace) -> None:
             fail("partition 1 is not FAT16")
 
     same_file(args.image, "vmunix", args.kernel)
-    same_file(args.image, "rootfs.img", args.arch_image)
+    if args.arch_image is not None:
+        same_file(args.image, "rootfs.img", args.arch_image)
     same_file(args.image, "data.img", args.data_image)
     same_file(args.image, "swapfile", args.swapfile)
     same_file(args.image, "config.txt", args.config)
@@ -67,6 +80,9 @@ def check(args: argparse.Namespace) -> None:
     kernel = extract(args.image, "vmunix")
     if len(kernel) < 64 or kernel[56:60] != b"ARM\x64":
         fail("vmunix has no Linux arm64 Image header")
+    if args.arch_image is None:
+        print("Raspberry Pi 4 image check: PASS")
+        return
     with tempfile.TemporaryDirectory(prefix="zedbsd-rpi4-root-check-") as work:
         inner = Path(work) / "aarch64.img"
         inner.write_bytes(extract(args.image, "rootfs.img"))
@@ -79,7 +95,8 @@ def check(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--kernel", type=Path, required=True)
-    parser.add_argument("--arch-image", type=Path, required=True)
+    parser.add_argument("--arch-image", type=Path)
+    parser.add_argument("--ufs-root", type=Path)
     parser.add_argument("--data-image", type=Path, required=True)
     parser.add_argument("--swapfile", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)

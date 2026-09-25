@@ -1,103 +1,38 @@
-# WS022: ELF `PT_TLS` and static thread-local storage
+<!-- awesome-plan project=zedbsd record=ws022 -->
+
+# WS022: ELF の PT_TLS と static TLS
 
 <!-- awesome-plan-current:start -->
-
-## Current state — 2026-09-11 user decision
-
 Status: completed
-
-Decision source: current user, 2026-09-11, this task.
-
-q128のamd64/i386 TLS・dynamic回帰・PC98確認による既存completed判定を維持し、今回の明示指示によりIssueを閉じる。
-
-今回の処理は計画上の受け入れ・閉鎖であり、ソース変更・ビルド・実行試験は行っていない。再開点なし。
-
-[Master](https://github.com/awemorris/zedBSD/issues/1) · [Past Log](https://github.com/awemorris/zedBSD/issues/366)
-
+Completed: 2026-09-11（q128、ユーザー指示で閉鎖）
+Primary Milestone: MG002
+Related Milestones: なし
+Objectives: O1
+Parent: [Master](../master.md)
+Queue: なし
+Resume point: なし（新しい要求は新しい WS として立てる。この WS は再開しない）
 <!-- awesome-plan-current:end -->
 
-## 既存の計画・試行履歴
+## 目標
 
-以下の旧状態・残件・再開条件は過去の記録。現在の状態と追加完了条件の扱いは上記ユーザー判断を優先する。
+ELF の thread-local storage（PT_TLS）を loader と pthread で扱えるようにする。
 
+## 結果
 
-<!-- traceability:start -->
+TLS の ABI 契約と ELF fixture、実行ファイルの TLS の読み込みと初期 thread、pthread の TLS の寿命を実装し、amd64・i386 の static TLS と dynamic の回帰、PC-98 で確認した。
 
-## Goal traceability
+## 制限・移管
 
-- Primary Milestone: **MG002 — UNIXアプリケーションの実行基盤が成立する**
-- Related Milestones: なし
-- Objectives: O1
-- 貢献する成果: ELF TLS/TCBとアプリ実行基盤を提供する。
-- 上位定義: [MasterのObjectives / Milestone Goals](https://github.com/awemorris/zedBSD/issues/1)
+なし。
 
-既存Phaseは本WSを親として上位成果に接続する。Primaryは分類と責任の所在であり、
-各PhaseがRelatedすべてを満たすという意味ではない。成果・検証・限界は各Phaseの
-現行記録を根拠とする。今回の対応付けは状態変更・未定義作業の追加・実行許可ではない。
+## Phase 一覧
 
-<!-- traceability:end -->
-
-
-Last updated: 2026-09-05
-
-WSID: `ws022`
-
-Status: completed (q128); amd64/i386 static TLSとdynamic回帰、PC98確認完了
-
-Parent: [master plan](../master.md)
-
-## Objective
-
-Implement the ELF `PT_TLS` program-header contract so statically linked zedBSD
-executables can use C thread-local storage without replacing it with
-process-global state. The initial thread and every subsequently created
-pthread must receive an independent, correctly aligned TLS image initialized
-from the executable's file image and zero-filled through `p_memsz`.
-
-This work follows WS021. WS021 deliberately keeps static executables free of
-`PT_TLS` while migrating the compiler and linker; WS022 removes that temporary
-restriction as a separately testable ELF/runtime change.
-
-## Fixed boundaries
-
-- Treat `PT_TLS` as an ELF loader and thread-runtime contract, not as a source
-  generator or compiler workaround.
-- Validate `p_filesz <= p_memsz`, alignment, file/memory ranges, integer
-  overflow, duplicate segments, and implementation bounds before committing a
-  new process image.
-- Install the initial thread pointer before entering user code. A failed TLS
-  allocation or malformed image fails `exec` atomically.
-- `pthread_create()` allocates and initializes a distinct TLS block before the
-  child can run; exit and failed creation release it exactly once.
-- Preserve the existing zedBSD TCB and `thread_self` syscall boundary unless
-  p001 proves that a documented ABI revision is required. Any public ABI
-  revision must be recorded before p002 implementation.
-- Cover both `x86_64-unknown-zedbsd` and `i386-unknown-zedbsd`. Other
-  architectures follow after their project toolchains exist.
-- General dynamic TLS allocation for arbitrary post-startup `dlopen()` modules
-  is outside the first completion boundary unless p001 shows it is inseparable
-  from the existing rtld contract. Such a finding becomes a separate Phase.
-
-## Phase registry
-
-| Phase | Status | Required result |
+| Phase | 内容 | Status |
 | --- | --- | --- |
-| [`ws022-p001`](phase001/phase.md) | Completed q127 | Freeze the x86 TLS/TCB layout and malformed/valid ELF fixture matrix against compiler-emitted `PT_TLS` objects |
-| [`ws022-p002`](phase002/phase.md) | Completed q128 | Kernel exec validates, maps, initializes, and installs the initial executable TLS image atomically |
-| [`ws022-p003`](phase003/phase.md) | Completed q128 | libc/pthread allocates independent TLS per thread and static x86 QEMU acceptance passes |
+| ws022-p001 | TLS ABI contract and ELF fixtures | cleared（q127） |
+| ws022-p002 | executable TLS loading and initial thread | cleared（q128） |
+| ws022-p003 | pthread TLS lifetime and runtime acceptance | cleared（q128） |
 
-## Completion conditions
+## 記録の所在
 
-- Compiler-emitted static amd64 and i386 executables retain a valid `PT_TLS`
-  segment and run without replacing `_Thread_local` objects with globals.
-- Initialized and zero-filled TLS variables have the expected values on the
-  initial thread and remain independent across concurrently running pthreads.
-- Every malformed, duplicate, overflowing, misaligned, truncated, or
-  over-bounds `PT_TLS` fixture fails before the old process image is lost.
-- Repeated thread create/join and failed-create paths show no double free,
-  stale thread pointer, cross-thread alias, or leaked TLS mapping.
-- Focused host/ELF tests, `make -j16`, amd64 QEMU, and i386 PC/AT QEMU pass.
-
-## Completion evidence
-
-[p003 results](phase003/results.md)に両x86 compiler/loader/pthread/signal/fork/dynamic TLS、PC98、通常buildの証拠を集約。[利用者向けTLS契約](../../docs/reference/tls.md)。
+各 Phase の計画・結果・試験は、2026-09-24 の plan 整理で削除した。git の commit `04bc9eab` 以前の `plan/ws022/` にある。Queue ごとの履歴は [plan/history](../history/index.md) に残る。

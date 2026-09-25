@@ -24,7 +24,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "libc/include/locale-format.h"
+#include "include/libc/locale-format.h"
 
 struct key_metadata {
 	int category;

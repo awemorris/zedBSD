@@ -13,7 +13,7 @@
 #define KERN_UAPI_CONSOLE_H
 
 #include <stdint.h>
-#include <sys/ioctl.h>
+#include <uapi/ioctl.h>
 #include <uapi/types.h>
 
 #define KERN_CONSOLE_IOC_GROUP	'c'

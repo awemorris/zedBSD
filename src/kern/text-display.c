@@ -14,7 +14,7 @@
  * a lock here would put one on the path of every character.
  */
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 
 #include "kern/text-display.h"

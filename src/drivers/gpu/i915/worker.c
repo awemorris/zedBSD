@@ -32,6 +32,7 @@
 #include "sync.h"
 #include "worker.h"
 #include "perf.h"
+#include <kern/kcrt.h>
 
 #include <kern/clock.h>
 #include <hal/hal.h>
@@ -41,10 +42,9 @@
 #include <kern/sched.h>
 #include <kern/waitq.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "intel/commands.h"
 
@@ -381,7 +381,7 @@ drv_i915_worker_context_create(
 	int error;
 
 	/* Starts the session context as a record of its engine, space and id. */
-	memset(context, 0, sizeof(*context));
+	kern_memset(context, 0, sizeof(*context));
 	context->engine = engine;
 	context->vm = vm;
 	context->sw_id = sw_id;
@@ -416,7 +416,7 @@ drv_i915_worker_context_create(
 		return ENOMEM;
 	}
 
-	memset(record, 0, sizeof(*record));
+	kern_memset(record, 0, sizeof(*record));
 
 	/*
 	 * The address space is the session's own (plain memory, built by
@@ -585,7 +585,7 @@ drv_i915_worker_run_sync(
 	int error;
 
 	/* Describes the batch. */
-	memset(&item, 0, sizeof(item));
+	kern_memset(&item, 0, sizeof(item));
 	item.kind = I915_WORKER_SYNC_BATCH;
 	item.context = context;
 	item.batch_va = batch_va;
@@ -619,7 +619,7 @@ drv_i915_worker_sync_display(
 	int error;
 
 	/* Describes the item. */
-	memset(&item, 0, sizeof(item));
+	kern_memset(&item, 0, sizeof(item));
 	item.kind = kind;
 	item.present = present;
 
@@ -977,7 +977,7 @@ i915_worker_run(
 
 	/* Starts the request on the context's timeline; each request takes two seqnos. */
 	rq = &record->rq;
-	memset(rq, 0, sizeof(*rq));
+	kern_memset(rq, 0, sizeof(*rq));
 	record->tl_seqno += 2U;
 	error = drv_i915_request_create(
 		rq,

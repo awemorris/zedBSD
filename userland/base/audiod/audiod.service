@@ -1,0 +1,5 @@
+type=daemon
+command=/sbin/audiod
+after=syslogd
+restart=on-failure
+required=NO

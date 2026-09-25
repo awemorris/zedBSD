@@ -10,7 +10,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/types.h>
+#include <uapi/types.h>
 
 /*
  * exec argument and environment strings plus their pointer tables share this
@@ -22,6 +22,14 @@
 #define KERN_SPAWN_ARG_MAX	KERN_EXEC_VECTOR_MAX
 #define KERN_SPAWN_ENV_MAX	KERN_EXEC_VECTOR_MAX
 #define KERN_SPAWN_STRING_MAX	KERN_ARG_MAX
+
+/*
+ * The unit of every field of process_times_record: 1/KERN_PROCESS_TIMES_HZ
+ * of a second.  It is fixed by the ABI and does not follow the kernel's
+ * tick, which differs by architecture; the kernel converts.  libc reports it
+ * as sysconf(_SC_CLK_TCK).
+ */
+#define KERN_PROCESS_TIMES_HZ	100U
 
 struct process_times_record {
 	uint64_t self_ticks;

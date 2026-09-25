@@ -10,8 +10,9 @@
  */
 
 #include "internal.h"
+#include <kern/kcrt.h>
 
-#include <drivers/gpu.h>
+#include <drivers/gpu/gpu.h>
 #include <kern/clock.h>
 #include <kern/device-io.h>
 #include <kern/klog.h>
@@ -20,9 +21,8 @@
 #include <kern/sched.h>
 #include <kern/thread.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <limits.h>
-#include <string.h>
 
 #define VENUS_RING_AVAILABLE		1024U
 #define VENUS_RING_USED			1280U
@@ -221,7 +221,7 @@ drv_venus_transport_job_reserve(
 
 	/* Prepare the complete empty protocol marker without publishing a descriptor yet. */
 	packet = request->request.address;
-	memset(packet, 0, 32U);
+	kern_memset(packet, 0, 32U);
 	drv_venus_header(packet, 0x0207U, context);
 
 	/* FENCE and INFO_RING_IDX require an actual queue-domain acknowledgement. */
@@ -235,7 +235,7 @@ drv_venus_transport_job_reserve(
 	packet[20U] = (uint8_t)timeline;
 
 	/* A reused response cannot satisfy validation before this marker completes. */
-	memset(request->response.address, 0, VENUS_RESPONSE_BYTES);
+	kern_memset(request->response.address, 0, VENUS_RESPONSE_BYTES);
 
 	/* Common job policy owns the producer and execution deadlines for this retained slot. */
 	request->context = context;
@@ -590,7 +590,7 @@ drv_venus_transport_quiesce(
 	/* Exact private framing cannot be mistaken for a standard Venus opcode stream. */
 	request = &transport->requests[index];
 	packet = request->request.address;
-	memset(packet, 0, 48U);
+	kern_memset(packet, 0, 48U);
 	drv_venus_header(packet, 0x0207U, context);
 	drv_venus_store32(packet + 4U, 3U);
 	request->fence = transport->next_fence++;
@@ -598,7 +598,7 @@ drv_venus_transport_quiesce(
 	drv_venus_store32(packet + 24U, 16U);
 	drv_venus_store32(packet + 32U, 0x5a425351U);
 	drv_venus_store32(packet + 36U, 1U);
-	memset(request->response.address, 0, VENUS_RESPONSE_BYTES);
+	kern_memset(request->response.address, 0, VENUS_RESPONSE_BYTES);
 	request->context = context;
 	request->flags = 3U;
 	request->completion = NULL;
@@ -807,7 +807,7 @@ drv_venus_transport_stop(
 	}
 
 	/* Invalidates the capability view borrowed by every now-inactive blob. */
-	memset(&transport->host_visible.mapping, 0, sizeof(transport->host_visible.mapping));
+	kern_memset(&transport->host_visible.mapping, 0, sizeof(transport->host_visible.mapping));
 
 	/* Releases each complete register BAR only once after all queue work ends. */
 	for (index = 0; index < 6U; index++) {
@@ -818,10 +818,10 @@ drv_venus_transport_stop(
 	}
 
 	/* Invalidates borrowed capability views after their containing BARs retire. */
-	memset(&transport->configuration.mapping, 0, sizeof(transport->configuration.mapping));
-	memset(&transport->notify.mapping, 0, sizeof(transport->notify.mapping));
-	memset(&transport->isr.mapping, 0, sizeof(transport->isr.mapping));
-	memset(&transport->common.mapping, 0, sizeof(transport->common.mapping));
+	kern_memset(&transport->configuration.mapping, 0, sizeof(transport->configuration.mapping));
+	kern_memset(&transport->notify.mapping, 0, sizeof(transport->notify.mapping));
+	kern_memset(&transport->isr.mapping, 0, sizeof(transport->isr.mapping));
+	kern_memset(&transport->common.mapping, 0, sizeof(transport->common.mapping));
 
 	/* Restores the saved command state only after all allocations retire. */
 	if (transport->saved != 0) {
@@ -902,7 +902,7 @@ drv_venus_transport_command(
 
 	/* Device completion makes these exact bytes immutable for the original caller. */
 	if (error == 0 && request->bytes != 0U)
-		memcpy(response, request->response.address, request->bytes);
+		kern_memcpy(response, request->response.address, request->bytes);
 
 	/* Checked used completion permits reuse; uncertain DMA stays quarantined. */
 	if (request->state == VENUS_SLOT_COMPLETE)
@@ -960,7 +960,7 @@ drv_venus_transport_submit(
 	drv_venus_header(packet, 0x0207U, context);
 	drv_venus_store32(packet + 24U, bytes);
 	if (bytes != 0U)
-		memcpy(packet + 32U, command, bytes);
+		kern_memcpy(packet + 32U, command, bytes);
 
 	/* Context fencing requires both protocol flags; FENCE alone names the legacy GL path. */
 	queue_marker = 0U;
@@ -1164,7 +1164,7 @@ drv_venus_header(
 
 	/* Clears flags, fence and ring fields instead of inventing GPU completion. */
 	bytes = buffer;
-	memset(bytes, 0, VENUS_HEADER_BYTES);
+	kern_memset(bytes, 0, VENUS_HEADER_BYTES);
 	drv_venus_store32(bytes, command);
 	drv_venus_store32(bytes + 16U, context);
 
@@ -1298,7 +1298,7 @@ venus_capabilities(
 	int error;
 
 	/* Tracks each capability offset to reject malformed linked cycles. */
-	memset(visited, 0, sizeof(visited));
+	kern_memset(visited, 0, sizeof(visited));
 	error = drv_pci_device_config_read8(transport->pci, 0x34U, &offset);
 	if (error != 0)
 		return error;
@@ -1718,7 +1718,7 @@ venus_queue_start(
 
 	/* Zeroes initial indices and enables normal used-ring interrupt notification. */
 	ring = transport->ring.address;
-	memset(ring, 0, 4096U);
+	kern_memset(ring, 0, 4096U);
 	drv_venus_store16(ring + VENUS_RING_AVAILABLE, 0U);
 
 	/* Every descriptor pair owns independent persistent command and reply bytes. */
@@ -1793,7 +1793,7 @@ venus_capset_find(
 	found = 0U;
 	for (index = 0; index < count; index++) {
 		/* Requests one capability descriptor in the device-advertised range. */
-		memset(command, 0, sizeof(command));
+		kern_memset(command, 0, sizeof(command));
 		drv_venus_header(command, 0x0108U, 0U);
 		drv_venus_store32(command + 24U, index);
 		error = drv_venus_transport_command(
@@ -1859,7 +1859,7 @@ venus_strict_queue_find(
 		return 0;
 
 	/* Query the full payload instead of trusting its advertised length as proof of semantics. */
-	memset(command, 0, sizeof(command));
+	kern_memset(command, 0, sizeof(command));
 	drv_venus_header(command, 0x0109U, 0U);
 	drv_venus_store32(command + 24U, 4U);
 	error = drv_venus_transport_command(
@@ -2007,8 +2007,8 @@ venus_request_post(
 	}
 
 	/* Copies bounded bytes while the queue lock excludes descriptor publication races. */
-	memcpy(request->request.address, command, bytes);
-	memset(request->response.address, 0, VENUS_RESPONSE_BYTES);
+	kern_memcpy(request->request.address, command, bytes);
+	kern_memset(request->response.address, 0, VENUS_RESPONSE_BYTES);
 	drv_venus_store64((uint8_t *)request->request.address + 8U, request->fence);
 	request->context = drv_venus_load32((const uint8_t *)command + 16U);
 	request->completion = completion;

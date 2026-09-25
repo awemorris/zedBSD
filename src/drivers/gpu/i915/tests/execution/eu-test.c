@@ -28,6 +28,7 @@
 
 #include "eu-internal.h"
 #include "scenarios.h"
+#include <kern/kcrt.h>
 
 #include "../../context.h"
 #include "../../engine.h"
@@ -47,10 +48,9 @@
 #include <kern/klog.h>
 #include <kern/lock.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "../../intel/commands.h"
 #include "../../intel/gt-regs.h"
@@ -329,7 +329,7 @@ drv_i915_test_eu_check_pipeline_select(
 	unsigned k;
 
 	/* Counts every select-like word, remembering where the first of each kind is. */
-	memset(&found, 0, sizeof(found));
+	kern_memset(&found, 0, sizeof(found));
 	for (k = 0U; k < count; k++) {
 		dword = cmds[k];
 		if (dword == 0x69041310U) {
@@ -865,7 +865,7 @@ drv_i915_test_eu_run(
 		return EINVAL;
 
 	/* Finds the render engine. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	error = i915_eu_find_render(t, es);
 	if (error != 0)
 		return error;
@@ -1046,7 +1046,7 @@ drv_i915_test_eu_repeat(
 		/* Starts the round's record and picks its context. */
 		round = &t->round[r];
 		polls_before = t->polls;
-		memset(round, 0, sizeof(*round));
+		kern_memset(round, 0, sizeof(*round));
 		t->n_rounds = r + 1U;
 		error = i915_eu_round_context(t, round, ge, vm, gm, same_ctx, r, &ce, &tl);
 		if (error != 0)
@@ -1194,7 +1194,7 @@ drv_i915_test_mcr_probe_wa(
 		return EINVAL;
 
 	/* Takes the multicast lock; the probe records whether it could. */
-	memset(probe, 0, sizeof(*probe));
+	kern_memset(probe, 0, sizeof(*probe));
 	error = drv_i915_mcr_lock(m, 0U);
 	probe->lock_rc = error;
 	if (error != 0)
@@ -1662,7 +1662,7 @@ i915_eu_write_shared(
 	idd = page + I915_TEST_EU_IDD_OFFSET / 4U;
 
 	/* The kernel at its start pointer. */
-	memcpy((char *)t->shared->cpu + I915_TEST_EU_KSP_OFFSET, drv_i915_test_eu_kernel, sizeof(drv_i915_test_eu_kernel));
+	kern_memcpy((char *)t->shared->cpu + I915_TEST_EU_KSP_OFFSET, drv_i915_test_eu_kernel, sizeof(drv_i915_test_eu_kernel));
 
 	/* The descriptor: the kernel start pointer, the sampler count field and one thread per group. */
 	idd[0] = I915_TEST_EU_KSP_OFFSET;

@@ -17,9 +17,9 @@
  */
 
 #include "wlan-wpa2.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 #define WPA2_EAPOL_MIC_OFFSET 81U
 #define WPA2_EAPOL_MIC_LENGTH WLAN_WPA2_KEY_MIC_LENGTH
@@ -94,7 +94,7 @@ wlan_wpa2_engine_init(
 		return EINVAL;
 
 	/* Starts idle with no secrets. */
-	memset(engine, 0, sizeof(*engine));
+	kern_memset(engine, 0, sizeof(*engine));
 	engine->ops = ops;
 	engine->callback_context = callback_context;
 	engine->state = WLAN_WPA2_STATE_IDLE;
@@ -663,7 +663,7 @@ wlan_wpa2_engine_stop(
 	engine->last_error = error;
 	engine->generation = 0U;
 	engine->key_generation = 0U;
-	memset(&engine->profile, 0, sizeof(engine->profile));
+	kern_memset(&engine->profile, 0, sizeof(engine->profile));
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -1244,7 +1244,7 @@ cache_and_submit(
 
 	/* A new frame starts a fresh retry budget. */
 	engine->tx_kind = kind;
-	memcpy(engine->tx_destination, destination,
+	kern_memcpy(engine->tx_destination, destination,
 	    sizeof(engine->tx_destination));
 	engine->tx_length = length;
 	engine->retry_count = 0U;
@@ -1372,12 +1372,12 @@ eapol_mic_calculate(
 		return EINVAL;
 
 	/* Hashes the copy with a zeroed MIC and keeps the leading bytes. */
-	memcpy(copy, frame, length);
-	memset(copy + WPA2_EAPOL_MIC_OFFSET, 0, WPA2_EAPOL_MIC_LENGTH);
+	kern_memcpy(copy, frame, length);
+	kern_memset(copy + WPA2_EAPOL_MIC_OFFSET, 0, WPA2_EAPOL_MIC_LENGTH);
 	error = wlan_hmac_sha1(kck, WLAN_WPA2_KCK_LENGTH, copy, length,
 	    digest);
 	if (error == 0)
-		memcpy(mic, digest, WLAN_WPA2_KEY_MIC_LENGTH);
+		kern_memcpy(mic, digest, WLAN_WPA2_KEY_MIC_LENGTH);
 	wlan_crypto_erase(copy, sizeof(copy));
 	wlan_crypto_erase(digest, sizeof(digest));
 
@@ -1424,12 +1424,12 @@ ordered_copy(
 	const uint8_t *right,
 	size_t length)
 {
-	if (memcmp(left, right, length) < 0) {
-		memcpy(output, left, length);
-		memcpy(output + length, right, length);
+	if (kern_memcmp(left, right, length) < 0) {
+		kern_memcpy(output, left, length);
+		kern_memcpy(output + length, right, length);
 	} else {
-		memcpy(output, right, length);
-		memcpy(output + length, left, length);
+		kern_memcpy(output, right, length);
+		kern_memcpy(output + length, left, length);
 	}
 }
 
@@ -1475,7 +1475,7 @@ build_message_2(
 	int error;
 
 	/* Builds the frame and fills in its MIC. */
-	memset(&key, 0, sizeof(key));
+	kern_memset(&key, 0, sizeof(key));
 	error = wlan_wpa2_rsn_build_ccmp_psk(rsn, sizeof(rsn), &rsn_length);
 	if (error != 0) {
 		error = fail(engine, error);
@@ -1485,7 +1485,7 @@ build_message_2(
 	key.message = WLAN_WPA2_EAPOL_MESSAGE_2;
 	key.protocol_version = engine->protocol_version;
 	key.replay_counter = engine->message_1_replay_counter;
-	memcpy(key.nonce, engine->snonce, sizeof(key.nonce));
+	kern_memcpy(key.nonce, engine->snonce, sizeof(key.nonce));
 	key.key_data = rsn;
 	key.key_data_length = rsn_length;
 	error = wlan_wpa2_eapol_key_build(engine->tx_frame,
@@ -1494,7 +1494,7 @@ build_message_2(
 		error = eapol_mic_calculate(engine->ptk, engine->tx_frame,
 		    length, mic);
 	if (error == 0)
-		memcpy(engine->tx_frame + WPA2_EAPOL_MIC_OFFSET, mic,
+		kern_memcpy(engine->tx_frame + WPA2_EAPOL_MIC_OFFSET, mic,
 		    sizeof(mic));
 	wlan_crypto_erase(&key, sizeof(key));
 	wlan_crypto_erase(rsn, sizeof(rsn));
@@ -1529,7 +1529,7 @@ build_message_4(
 	int error;
 
 	/* Builds the frame and fills in its MIC. */
-	memset(&key, 0, sizeof(key));
+	kern_memset(&key, 0, sizeof(key));
 	key.message = WLAN_WPA2_EAPOL_MESSAGE_4;
 	key.protocol_version = engine->protocol_version;
 	key.replay_counter = engine->message_3_replay_counter;
@@ -1539,7 +1539,7 @@ build_message_4(
 		error = eapol_mic_calculate(engine->ptk, engine->tx_frame,
 		    length, mic);
 	if (error == 0)
-		memcpy(engine->tx_frame + WPA2_EAPOL_MIC_OFFSET, mic,
+		kern_memcpy(engine->tx_frame + WPA2_EAPOL_MIC_OFFSET, mic,
 		    sizeof(mic));
 	wlan_crypto_erase(&key, sizeof(key));
 	wlan_crypto_erase(mic, sizeof(mic));
@@ -1573,7 +1573,7 @@ build_group_message_2(
 	int error;
 
 	/* Builds the frame and fills in its MIC. */
-	memset(&key, 0, sizeof(key));
+	kern_memset(&key, 0, sizeof(key));
 	key.message = WLAN_WPA2_EAPOL_GROUP_MESSAGE_2;
 	key.protocol_version = engine->protocol_version;
 	key.replay_counter = engine->group_replay_counter;
@@ -1583,7 +1583,7 @@ build_group_message_2(
 		error = eapol_mic_calculate(engine->ptk, engine->tx_frame,
 		    length, mic);
 	if (error == 0)
-		memcpy(engine->tx_frame + WPA2_EAPOL_MIC_OFFSET, mic,
+		kern_memcpy(engine->tx_frame + WPA2_EAPOL_MIC_OFFSET, mic,
 		    sizeof(mic));
 	wlan_crypto_erase(&key, sizeof(key));
 	wlan_crypto_erase(mic, sizeof(mic));
@@ -1712,7 +1712,7 @@ install_keys(
 		engine->pending_group_receive_packet_number =
 		    receive_packet_number;
 		engine->pending_group_key_generation = group_generation;
-		memcpy(engine->pending_gtk, gtk->key,
+		kern_memcpy(engine->pending_gtk, gtk->key,
 		    sizeof(engine->pending_gtk));
 		error = program_pending_pairwise_keys(engine);
 		return error;
@@ -1728,7 +1728,7 @@ install_keys(
 		return error;
 	engine->gtk_index = gtk->key_index;
 	engine->group_receive_packet_number = receive_packet_number;
-	memcpy(engine->gtk, gtk->key, sizeof(engine->gtk));
+	kern_memcpy(engine->gtk, gtk->key, sizeof(engine->gtk));
 	engine->group_key_generation = group_generation;
 	engine->group_installed = 1U;
 	error = engine->ops->key_install(engine->callback_context,
@@ -1751,7 +1751,7 @@ message_1_first(
 	/* Records the authenticator's nonce and draws our own. */
 	engine->protocol_version = key->protocol_version;
 	engine->message_1_replay_counter = key->replay_counter;
-	memcpy(engine->anonce, key->nonce, sizeof(engine->anonce));
+	kern_memcpy(engine->anonce, key->nonce, sizeof(engine->anonce));
 	error = engine->ops->entropy_fill(engine->callback_context,
 	    engine->snonce, sizeof(engine->snonce));
 	if (error != 0 || bytes_zero(engine->snonce, sizeof(engine->snonce))) {
@@ -1943,7 +1943,7 @@ group_message_1(
 	staged_new = 0;
 
 	/* Only an authorized station with keys accepts a fresh replay counter. */
-	memset(&gtk, 0, sizeof(gtk));
+	kern_memset(&gtk, 0, sizeof(gtk));
 	if (!engine->authorized ||
 	    !engine->pairwise_installed ||
 	    !engine->group_installed ||
@@ -2047,7 +2047,7 @@ group_message_1(
 
 		if (error == 0) {
 			engine->group_replay_counter = key->replay_counter;
-			memcpy(engine->group_message_digest, digest,
+			kern_memcpy(engine->group_message_digest, digest,
 			    sizeof(engine->group_message_digest));
 		}
 
@@ -2087,7 +2087,7 @@ group_message_1(
 		engine->old_group_retired = 0U;
 		engine->old_pairwise_retired = 0U;
 		engine->pending_group_programmed = 0U;
-		memcpy(engine->pending_gtk, gtk.key,
+		kern_memcpy(engine->pending_gtk, gtk.key,
 		    sizeof(engine->pending_gtk));
 
 		/*
@@ -2102,7 +2102,7 @@ group_message_1(
 
 	if (error == 0 || (error == EBUSY && staged_new)) {
 		engine->group_replay_counter = key->replay_counter;
-		memcpy(engine->group_message_digest, digest,
+		kern_memcpy(engine->group_message_digest, digest,
 		    sizeof(engine->group_message_digest));
 		engine->group_message_accepted = 1U;
 	}
@@ -2165,7 +2165,7 @@ message_3_retransmit(
 	receive_packet_number = 0U;
 
 	/* The repeat must follow an accepted message 3 with the same nonce. */
-	memset(&gtk, 0, sizeof(gtk));
+	kern_memset(&gtk, 0, sizeof(gtk));
 	if (!engine->message_3_accepted ||
 	    key->protocol_version != engine->protocol_version ||
 	    key->replay_counter < engine->message_3_replay_counter ||
@@ -2245,7 +2245,7 @@ message_3_retransmit(
 
 		if (error == 0) {
 			engine->message_3_replay_counter = key->replay_counter;
-			memcpy(engine->message_3_digest, digest,
+			kern_memcpy(engine->message_3_digest, digest,
 			    sizeof(engine->message_3_digest));
 		}
 	}
@@ -2300,7 +2300,7 @@ message_3_first(
 	plaintext_length = 0U;
 
 	/* The message must continue this handshake with a fresh counter. */
-	memset(&gtk, 0, sizeof(gtk));
+	kern_memset(&gtk, 0, sizeof(gtk));
 	if (key->protocol_version != engine->protocol_version ||
 	    key->replay_counter <= engine->message_1_replay_counter ||
 	    !wlan_crypto_equal(key->nonce, engine->anonce,
@@ -2434,7 +2434,7 @@ group_rekey_commit(
 	engine->group_receive_packet_number =
 	    engine->pending_group_receive_packet_number;
 	engine->group_key_generation = engine->pending_group_key_generation;
-	memcpy(engine->gtk, engine->pending_gtk, sizeof(engine->gtk));
+	kern_memcpy(engine->gtk, engine->pending_gtk, sizeof(engine->gtk));
 	engine->group_installed = 1U;
 	engine->pending_group_installed = 0U;
 	engine->pending_group_programmed = 0U;
@@ -2531,7 +2531,7 @@ pairwise_rekey_commit(
 	engine->gtk_index = engine->pending_gtk_index;
 	engine->group_receive_packet_number =
 	    engine->pending_group_receive_packet_number;
-	memcpy(engine->gtk, engine->pending_gtk, sizeof(engine->gtk));
+	kern_memcpy(engine->gtk, engine->pending_gtk, sizeof(engine->gtk));
 	engine->pairwise_installed = 1U;
 	engine->group_installed = 1U;
 	engine->pending_pairwise_installed = 0U;

@@ -25,7 +25,7 @@
 #include <hal/hal.h>
 #include <kern/klog.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 
 /*

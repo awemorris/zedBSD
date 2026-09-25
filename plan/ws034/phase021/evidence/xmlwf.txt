@@ -1,0 +1,5 @@
+good rc=0
+/root/bad.xml:1:22: mismatched tag
+bad rc=2
+xmlwf using expat_2.8.5
+sizeof(XML_Char)=1, sizeof(XML_LChar)=1, XML_DTD, XML_CONTEXT_BYTES=1024, XML_NS, XML_BLAP_MAX_AMP=100, XML_BLAP_ACT_THRES=8388608, XML_GE, XML_AT_MAX_AMP=100, XML_AT_ACT_THRES=67108864

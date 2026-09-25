@@ -21,16 +21,16 @@
 #include "gfx.h"
 #include "internal.h"
 #include "object.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 #include <kern/kmem.h>
 
-#include <vulkan/vulkan_core.h>
+#include <libc/vulkan/vulkan_core.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "vulkan-codec.inc"
 
@@ -313,7 +313,7 @@ i915_command_pool_create(
 	int error;
 
 	/* Decodes the create info and the identity; the flags are not acted on. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	i915_vkc_dec_VkCommandPoolCreateInfo(reader, &session->arena, &info);
@@ -466,7 +466,7 @@ i915_command_buffers_allocate(
 	int error;
 
 	/* Decodes the allocate info and the number of buffers, at most sixteen. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	i915_vkc_dec_VkCommandBufferAllocateInfo(reader, &session->arena, &info);
@@ -575,7 +575,7 @@ i915_command_buffer_begin(
 	uint32_t result;
 
 	/* Decodes the buffer and the begin info; the begin info is not acted on. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	identity = drv_i915_wire_read_u64(reader);
 	cmdbuf = drv_i915_object_lookup(session->vk, I915_VK_OBJ_COMMAND_BUFFER, identity);
 	present = drv_i915_wire_read_u64(reader);
@@ -698,7 +698,7 @@ i915_command_op(
 
 	/* Hands a recording with nowhere to go the discarded operation. */
 	if (cmdbuf == NULL || cmdbuf->overflow != 0) {
-		memset(&i915_command_discard_op, 0, sizeof(i915_command_discard_op));
+		kern_memset(&i915_command_discard_op, 0, sizeof(i915_command_discard_op));
 		return &i915_command_discard_op;
 	}
 
@@ -707,7 +707,7 @@ i915_command_op(
 	cmdbuf->op_count++;
 
 	/* Starts it empty, of the given kind. */
-	memset(op, 0, sizeof(*op));
+	kern_memset(op, 0, sizeof(*op));
 	op->kind = kind;
 
 	/* Succeeded: the operation is the buffer's newest. */
@@ -749,7 +749,7 @@ i915_command_grow(
 
 	/* Moves the recorded operations over and frees the old list. */
 	if (cmdbuf->op_count != 0U)
-		memcpy(ops, cmdbuf->ops, (size_t)cmdbuf->op_count * sizeof(*ops));
+		kern_memcpy(ops, cmdbuf->ops, (size_t)cmdbuf->op_count * sizeof(*ops));
 	kern_free(cmdbuf->ops);
 
 	/* The buffer records into the larger list from now on. */
@@ -859,7 +859,7 @@ i915_record_clear_image(
 	(void)drv_i915_wire_read_u32(reader);
 
 	/* Decodes the four words of the clear colour: the union's tag, then an array of four. */
-	memset(colour, 0, sizeof(colour));
+	kern_memset(colour, 0, sizeof(colour));
 	present = drv_i915_wire_read_u64(reader);
 	if (present != 0U) {
 		(void)drv_i915_wire_read_u32(reader);
@@ -879,11 +879,11 @@ i915_record_clear_image(
 	/* Records one clear for each range, with the levels it names. */
 	for (index = 0U; index < count; index++) {
 		/* A range the stream ends inside of reads as zeros; the recording is then refused below. */
-		memset(&range, 0, sizeof(range));
+		kern_memset(&range, 0, sizeof(range));
 		i915_vkc_dec_VkImageSubresourceRange(reader, &session->arena, &range);
 		op = i915_command_op(cmdbuf, I915_GFX_OP_CLEAR_IMAGE);
 		op->u.clear_image.image = image;
-		memcpy(op->u.clear_image.words, colour, sizeof(colour));
+		kern_memcpy(op->u.clear_image.words, colour, sizeof(colour));
 		op->u.clear_image.base_level = range.baseMipLevel;
 		op->u.clear_image.level_count = range.levelCount;
 	}
@@ -1059,7 +1059,7 @@ i915_record_begin_pass(
 	/* Records the clear value of every attachment the operation has room for. */
 	for (index = 0U; index < count; index++) {
 		/* Decodes one clear value: a depth and stencil pair, or four colour words. */
-		memset(words, 0, sizeof(words));
+		kern_memset(words, 0, sizeof(words));
 		is_depth = drv_i915_wire_read_u32(reader);
 		if (is_depth != 0U) {
 			words[0] = drv_i915_wire_read_u32(reader);
@@ -1076,7 +1076,7 @@ i915_record_begin_pass(
 		/* Keeps the value of an attachment the pass can have. */
 		if (index < I915_GFX_MAX_ATTACHMENTS) {
 			op->u.begin.clear_is_depth[index] = is_depth;
-			memcpy(op->u.begin.clear_words[index], words, sizeof(words));
+			kern_memcpy(op->u.begin.clear_words[index], words, sizeof(words));
 			op->u.begin.clear_count = (uint32_t)index + 1U;
 		}
 	}
@@ -1125,7 +1125,7 @@ i915_record_clear_attachments(
 
 	/* Decodes every attachment's value: a depth and stencil pair, or four colour words. */
 	for (index = 0U; index < attachments; index++) {
-		memset(words[index], 0, sizeof(words[index]));
+		kern_memset(words[index], 0, sizeof(words[index]));
 		(void)drv_i915_wire_read_u32(reader);
 		(void)drv_i915_wire_read_u32(reader);
 		is_depth[index] = drv_i915_wire_read_u32(reader);
@@ -1157,7 +1157,7 @@ i915_record_clear_attachments(
 		for (rect = 0U; rect < count; rect++) {
 			op = i915_command_op(cmdbuf, I915_GFX_OP_CLEAR_ATTACHMENT);
 			op->u.clear_attachment.is_depth = is_depth[index];
-			memcpy(op->u.clear_attachment.words, words[index], sizeof(words[index]));
+			kern_memcpy(op->u.clear_attachment.words, words[index], sizeof(words[index]));
 			op->u.clear_attachment.rect.x = rects[rect].rect.offset.x;
 			op->u.clear_attachment.rect.y = rects[rect].rect.offset.y;
 			op->u.clear_attachment.rect.w = rects[rect].rect.extent.width;
@@ -1473,7 +1473,7 @@ i915_record_set_viewport(
 
 	/* Decodes every viewport and records the one that lands on viewport 0. */
 	for (index = 0U; index < count; index++) {
-		memset(&viewport, 0, sizeof(viewport));
+		kern_memset(&viewport, 0, sizeof(viewport));
 		i915_vkc_dec_VkViewport(reader, &session->arena, &viewport);
 		if (reader->error != 0)
 			return EINVAL;
@@ -1481,12 +1481,12 @@ i915_record_set_viewport(
 		/* Keeps viewport 0 as float bits; the others have no place in the pipeline. */
 		if ((uint64_t)first + index == 0U) {
 			op = i915_command_op(cmdbuf, I915_GFX_OP_SET_VIEWPORT);
-			memcpy(&op->u.viewport[0], &viewport.x, sizeof(op->u.viewport[0]));
-			memcpy(&op->u.viewport[1], &viewport.y, sizeof(op->u.viewport[1]));
-			memcpy(&op->u.viewport[2], &viewport.width, sizeof(op->u.viewport[2]));
-			memcpy(&op->u.viewport[3], &viewport.height, sizeof(op->u.viewport[3]));
-			memcpy(&op->u.viewport[4], &viewport.minDepth, sizeof(op->u.viewport[4]));
-			memcpy(&op->u.viewport[5], &viewport.maxDepth, sizeof(op->u.viewport[5]));
+			kern_memcpy(&op->u.viewport[0], &viewport.x, sizeof(op->u.viewport[0]));
+			kern_memcpy(&op->u.viewport[1], &viewport.y, sizeof(op->u.viewport[1]));
+			kern_memcpy(&op->u.viewport[2], &viewport.width, sizeof(op->u.viewport[2]));
+			kern_memcpy(&op->u.viewport[3], &viewport.height, sizeof(op->u.viewport[3]));
+			kern_memcpy(&op->u.viewport[4], &viewport.minDepth, sizeof(op->u.viewport[4]));
+			kern_memcpy(&op->u.viewport[5], &viewport.maxDepth, sizeof(op->u.viewport[5]));
 		}
 	}
 
@@ -1521,7 +1521,7 @@ i915_record_set_scissor(
 
 	/* Decodes every scissor and records the one that lands on scissor 0. */
 	for (index = 0U; index < count; index++) {
-		memset(&scissor, 0, sizeof(scissor));
+		kern_memset(&scissor, 0, sizeof(scissor));
 		i915_vkc_dec_VkRect2D(reader, &session->arena, &scissor);
 		if (reader->error != 0)
 			return EINVAL;
@@ -1816,14 +1816,14 @@ i915_execute_clear(
 			return error;
 
 		/* Takes the value: the depth bits through the R32_FLOAT view, or the four colour words. */
-		memset(words, 0, sizeof(words));
+		kern_memset(words, 0, sizeof(words));
 		if (op->u.begin.clear_is_depth[index] != 0U) {
 			surface.format = VK_FORMAT_R32_SFLOAT;
 			surface.width = image->pitch / 4U;
 			surface.height = (uint32_t)(image->bytes / image->pitch);
 			words[0] = op->u.begin.clear_words[index][0];
 		} else {
-			memcpy(words, op->u.begin.clear_words[index], sizeof(words));
+			kern_memcpy(words, op->u.begin.clear_words[index], sizeof(words));
 		}
 
 		/* Fills the whole surface. */
@@ -2311,7 +2311,7 @@ i915_execute_draw(
 	int error;
 
 	/* Describes the draw: its counts and firsts, and for an indexed draw the vertex offset. */
-	memset(&args, 0, sizeof(args));
+	kern_memset(&args, 0, sizeof(args));
 	if (op->kind == I915_GFX_OP_DRAW_INDEXED) {
 		args.indexed = 1;
 		args.count = op->u.draw_indexed.index_count;
@@ -2356,7 +2356,7 @@ i915_command_buffer_execute(
 	int error;
 
 	/* Starts with nothing bound. */
-	memset(&state, 0, sizeof(state));
+	kern_memset(&state, 0, sizeof(state));
 	error = 0;
 
 	/* Runs the operations until one fails. */
@@ -2402,14 +2402,14 @@ i915_command_buffer_execute(
 			/* A set past the tracked ones is ignored; a bound set brings its dynamic offsets. */
 			if (op->u.descriptor.set < I915_GFX_MAX_SETS) {
 				state.dset[op->u.descriptor.set] = op->u.descriptor.dset;
-				memcpy(state.dynamic_offsets[op->u.descriptor.set],
+				kern_memcpy(state.dynamic_offsets[op->u.descriptor.set],
 				       op->u.descriptor.dynamic_offsets,
 				       sizeof(state.dynamic_offsets[op->u.descriptor.set]));
 			}
 
 			break;
 		case I915_GFX_OP_PUSH_CONSTANTS:
-			memcpy(state.push + op->u.push.offset, op->u.push.bytes, op->u.push.size);
+			kern_memcpy(state.push + op->u.push.offset, op->u.push.bytes, op->u.push.size);
 			break;
 		case I915_GFX_OP_CLEAR_ATTACHMENT:
 			error = i915_execute_clear_attachment(session, &state, op);
@@ -2424,7 +2424,7 @@ i915_command_buffer_execute(
 			state.index.type = op->u.index.type;
 			break;
 		case I915_GFX_OP_SET_VIEWPORT:
-			memcpy(state.viewport, op->u.viewport, sizeof(state.viewport));
+			kern_memcpy(state.viewport, op->u.viewport, sizeof(state.viewport));
 			state.viewport_set = 1;
 			break;
 		case I915_GFX_OP_SET_SCISSOR:
@@ -2432,7 +2432,7 @@ i915_command_buffer_execute(
 			state.scissor_set = 1;
 			break;
 		case I915_GFX_OP_SET_BLEND_CONSTANTS:
-			memcpy(state.blend_constants, op->u.blend_constants, sizeof(state.blend_constants));
+			kern_memcpy(state.blend_constants, op->u.blend_constants, sizeof(state.blend_constants));
 			state.blend_constants_set = 1;
 			break;
 		case I915_GFX_OP_COPY_BUFFER:

@@ -21,10 +21,10 @@
 #include "kern/kmem.h"
 #include "internal.h"
 #include "wire.h"
+#include <kern/kcrt.h>
 
 #include <uapi/netinet.h>
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 #define ICMP_ECHO_REPLY   0U
 #define ICMP_ECHO_REQUEST 8U
@@ -205,7 +205,7 @@ icmp_sendto(
 		if (address_length < sizeof(destination_address) ||
 		    address->sa_family != AF_INET)
 			return -EINVAL;
-		memcpy(&destination_address, address, sizeof(destination_address));
+		kern_memcpy(&destination_address, address, sizeof(destination_address));
 		destination = net_ntohl(destination_address.sin_addr.s_addr);
 	} else if (endpoint->inet.inet_flags & INET_SOCKET_CONNECTED) {
 		destination = endpoint->inet.remote_address;
@@ -223,7 +223,7 @@ icmp_sendto(
 		return -EMSGSIZE;
 	}
 
-	memcpy(payload, buffer, length);
+	kern_memcpy(payload, buffer, length);
 
 	/* Computes the checksum over the message with the field cleared. */
 	payload[2] = 0;
@@ -277,7 +277,7 @@ icmp_recvfrom(
 		copied = length;
 	else
 		copied = packet->length;
-	memcpy(buffer, packet->data, copied);
+	kern_memcpy(buffer, packet->data, copied);
 
 	/* Copies the source address, reporting its full length. */
 	if (address != NULL && address_length != NULL) {
@@ -286,7 +286,7 @@ icmp_recvfrom(
 			output = *address_length;
 		else
 			output = actual;
-		memcpy(address, packet->source_address, output);
+		kern_memcpy(address, packet->source_address, output);
 		*address_length = actual;
 	}
 
@@ -434,10 +434,10 @@ icmp_deliver(
 			copy->l4_offset = PACKET_OFFSET_NONE;
 
 		/* Names the sender in the copy's source address. */
-		memset(&address, 0, sizeof(address));
+		kern_memset(&address, 0, sizeof(address));
 		address.sin_family = AF_INET;
 		address.sin_addr.s_addr = net_htonl(source);
-		memcpy(copy->source_address, &address, sizeof(address));
+		kern_memcpy(copy->source_address, &address, sizeof(address));
 		copy->source_length = sizeof(address);
 		(void)socket_enqueue_packet(&endpoint->inet.socket, copy);
 		socket_release(&endpoint->inet.socket);

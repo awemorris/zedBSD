@@ -40,6 +40,8 @@
 #include "kern/page.h"
 #include "kern/sched.h"
 #include "kern/signal.h"
+#include "kern/cdev.h"
+#include "kern/random.h"
 #include "kern/user-probe.h"
 #include "kern/sysctl.h"
 #include "kern/thread.h"
@@ -48,6 +50,7 @@
 #include "kern/vm-object.h"
 #include "kern/vmspace.h"
 #include "kern/vm-device.h"
+#include <kern/kcrt.h>
 
 #include <uapi/dirent.h>
 #include <uapi/atomic.h>
@@ -63,33 +66,35 @@
 #include <uapi/select.h>
 #include <uapi/usync.h>
 #include <uapi/thread.h>
-#include <errno.h>
-#include <fcntl.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
 #include <limits.h>
+#include <uapi/limits.h>
 #include <stdint.h>
-#include <string.h>
-#include <sys/mman.h>
-#include <sys/resource.h>
-#include <sys/time.h>
-#include <sys/mount.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <sys/statvfs.h>
-#include <sys/sysctl.h>
-#include <sys/wait.h>
-#include <time.h>
-#include <unistd.h>
-#include <stdlib.h>
+#include <uapi/mman.h>
+#include <uapi/time.h>
+#include <uapi/mount.h>
+#include <uapi/socket.h>
+#include <uapi/stat.h>
+#include <uapi/statvfs.h>
+#include <uapi/wait.h>
+#include <uapi/unistd.h>
 
 #define SYSCALL_IO_CHUNK 512U
+/* The largest bounce buffer a pipe, socket or device transfer allocates. */
+#define SYSCALL_STREAM_CHUNK (64U * 1024U)
 #define SYSCALL_SOCKET_BUFFER_MAX (64U * 1024U)
 #define SOCKET_SEND_FLAGS (MSG_DONTWAIT | MSG_NOSIGNAL)
 #define SOCKET_RECV_FLAGS (MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC | MSG_WAITALL)
 #define SYSCALL_SOCKET_OPTION_MAX 128U
-#define SYSCALL_PAGE_MASK (KERN_PAGE_SIZE - 1U)
+/*
+ * The page mask at the width of a syscall argument: a narrower mask would
+ * drop the high half of a 64-bit length when its complement is applied.
+ */
+#define SYSCALL_PAGE_MASK ((uintptr_t)KERN_PAGE_SIZE - 1U)
 #define SYSCALL_ATOMIC_CHUNK 128U
+/* A poll or select of this many descriptors keeps its array on the stack. */
+#define SYSCALL_POLL_INLINE 32U
 #define SYSCALL_EXT __attribute__((section(".hightext")))
 #define SYSCALL_SYSCTL_VALUE_MAX 512U
 #define SYSCALL_SYSCTL_OUTPUT_MAX (1024U * 1024U)
@@ -153,7 +158,9 @@ static int syscall_stop_should_redispatch(enum signal_stop_return_result result)
 #endif
 static int poll_timeout(uintptr_t address, uint64_t *deadline, int *immediate);
 static intptr_t sys_ppoll_call(const uintptr_t args[6]);
-static int pselect_pin(uintptr_t address, struct uaccess_pin *pin, fd_set *value);
+static int pselect_pin(uintptr_t address, size_t bytes, struct uaccess_pin *pin, fd_set *value);
+static int pselect_isset(const fd_set *set, unsigned fd);
+static void pselect_set(fd_set *set, unsigned fd);
 static intptr_t sys_pselect_call(const uintptr_t args[6]);
 static intptr_t sys_sysctl_call(const uintptr_t args[6]);
 static struct process *current_process(void);
@@ -183,10 +190,12 @@ static int syscall_context_at(struct process *process, int dirfd, struct cwdinfo
 static intptr_t sys_open_call(const uintptr_t args[6], int at);
 static intptr_t sys_close_call(const uintptr_t args[6]);
 static SYSCALL_EXT intptr_t sys_read_call(const uintptr_t args[6]);
-static uint8_t *syscall_regular_buffer(struct file *file, size_t length, uint8_t *fallback, size_t *capacity);
+static uint8_t *syscall_io_buffer(struct file *file, size_t length, uint8_t *fallback, size_t *capacity);
+static void syscall_io_buffer_release(struct file *file, uint8_t *buffer, uint8_t *fallback);
 static SYSCALL_EXT intptr_t sys_write_call(const uintptr_t args[6]);
 static intptr_t sys_lseek_call(const uintptr_t args[6]);
 static intptr_t sys_fstat_call(const uintptr_t args[6]);
+static int pseudo_file_getattr(struct process *process, struct file *file, struct stat *status);
 static uint32_t dirent_type(enum inode_type type);
 static intptr_t sys_getdents_call(const uintptr_t args[6]);
 static intptr_t sys_chdir_call(const uintptr_t args[6]);
@@ -222,6 +231,7 @@ static intptr_t sys_fsync_call(const uintptr_t args[6]);
 static intptr_t sys_stat_path_call(const uintptr_t args[6], int at, int nofollow);
 static intptr_t sys_truncate_call(const uintptr_t args[6], int by_fd);
 static SYSCALL_EXT intptr_t sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address, uintptr_t option, int new_dirfd, uintptr_t new_address);
+static SYSCALL_EXT int mkdir_dot_error(struct cwdinfo *context, const char *pathname);
 static intptr_t sys_mutation_call(uint32_t number, const uintptr_t args[6]);
 static intptr_t sys_mutation_at_call(uint32_t number, const uintptr_t args[6]);
 static intptr_t sys_umask_call(const uintptr_t args[6]);
@@ -278,6 +288,7 @@ static intptr_t sys_dup2_call(const uintptr_t args[6], int is_dup3);
 static intptr_t sys_fcntl_call(const uintptr_t args[6]);
 static intptr_t sys_pipe2_call(const uintptr_t args[6], int plain);
 static intptr_t sys_fork_call(const uintptr_t args[6]);
+static intptr_t sys_vfork_call(const uintptr_t args[6]);
 static intptr_t sys_sched_yield_call(const uintptr_t args[6]);
 static intptr_t sys_times_call(const uintptr_t args[6]);
 static int priority_matches(struct process *target, struct process *caller, int which, id_t who);
@@ -558,7 +569,7 @@ poll_mask_enter(
 	int error;
 
 	/* Leaves the mask alone when the caller supplied none. */
-	memset(guard, 0, sizeof(*guard));
+	kern_memset(guard, 0, sizeof(*guard));
 	if (address == 0)
 		return 0;
 
@@ -705,7 +716,8 @@ static intptr_t
 sys_ppoll_call(
 	const uintptr_t args[6])
 {
-	struct pollfd fds[KERN_OPEN_MAX];
+	struct pollfd inline_fds[SYSCALL_POLL_INLINE];
+	struct pollfd *fds;
 	struct uaccess_pin pin;
 	struct poll_mask_guard guard;
 	struct process *process;
@@ -721,23 +733,34 @@ sys_ppoll_call(
 	ready = 0;
 
 	/* Pins and copies the descriptor array. */
-	memset(&pin, 0, sizeof(pin));
-	memset(&guard, 0, sizeof(guard));
+	kern_memset(&pin, 0, sizeof(pin));
+	kern_memset(&guard, 0, sizeof(guard));
 	if (args[1] > KERN_OPEN_MAX)
 		return -EINVAL;
 	bytes = (size_t)count * sizeof(fds[0]);
+
+	/* A long array is copied to the heap rather than the kernel stack. */
+	fds = inline_fds;
+	if (count > SYSCALL_POLL_INLINE) {
+		fds = kern_malloc(bytes);
+		if (fds == NULL)
+			return -ENOMEM;
+	}
 	if (bytes != 0) {
 		error = uaccess_pin(args[0], bytes,
 		    HAL_SPACE_READ | HAL_SPACE_WRITE, &pin);
-		if (error != 0)
-			return -error;
-		error = copyin_pinned(&pin, 0, fds, bytes);
+		if (error == 0) {
+			error = copyin_pinned(&pin, 0, fds, bytes);
+			if (error != 0)
+				uaccess_unpin(&pin);
+		}
 		if (error != 0) {
-			uaccess_unpin(&pin);
+			if (fds != inline_fds)
+				kern_free(fds);
 			return -error;
 		}
 	} else {
-		memset(fds, 0, sizeof(fds));
+		kern_memset(inline_fds, 0, sizeof(inline_fds));
 	}
 
 	/* Waits under the temporary mask and copies the results back. */
@@ -752,36 +775,43 @@ sys_ppoll_call(
 	if (error == 0 && bytes != 0)
 		error = copyout_pinned(&pin, 0, fds, bytes);
 	uaccess_unpin(&pin);
+	if (fds != inline_fds)
+		kern_free(fds);
 	if (error != 0)
 		return -error;
 	return ready;
 }
 
-/* Pins and copies in one optional fd_set of pselect(). */
+/*
+ * Pins and copies in the first bytes of one optional fd_set of pselect().
+ *
+ * Only the words that hold descriptors below nfds are touched, as on other
+ * systems: a caller may pass a set smaller than fd_set when nfds is small,
+ * and a program built when fd_set held 32 descriptors still passes 4 bytes.
+ */
 static int
 pselect_pin(
 	uintptr_t address,
+	size_t bytes,
 	struct uaccess_pin *pin,
 	fd_set *value)
 {
 	int error;
 
 	/* Reports an empty pin when the caller supplied no address. */
-	memset(pin, 0, sizeof(*pin));
-	memset(value, 0, sizeof(*value));
-	if (address == 0)
+	kern_memset(pin, 0, sizeof(*pin));
+	kern_memset(value, 0, sizeof(*value));
+	if (address == 0 || bytes == 0)
 		return 0;
 
-	/* Pins the user object for the whole call. */
-	error = uaccess_pin(address, sizeof(*value),
+	/* Pins the user words for the whole call. */
+	error = uaccess_pin(address, bytes,
 	    HAL_SPACE_READ | HAL_SPACE_WRITE, pin);
 	if (error != 0)
 		return error;
 
 	/* Reads the initial value through the pin. */
-
-	/* Reports the failure. */
-	error = copyin_pinned(pin, 0, value, sizeof(*value));
+	error = copyin_pinned(pin, 0, value, bytes);
 	if (error != 0)
 		return error;
 
@@ -789,25 +819,42 @@ pselect_pin(
 	return 0;
 }
 
+/* Reports whether descriptor fd is in set. */
+static int
+pselect_isset(
+	const fd_set *set,
+	unsigned fd)
+{
+	return (set->fds_bits[fd / KERN_NFDBITS] &
+	    ((uint32_t)1U << (fd % KERN_NFDBITS))) != 0U;
+}
+
+/* Adds descriptor fd to set. */
+static void
+pselect_set(
+	fd_set *set,
+	unsigned fd)
+{
+	set->fds_bits[fd / KERN_NFDBITS] |= (uint32_t)1U << (fd % KERN_NFDBITS);
+}
+
 /* Handles pselect(2) on top of the poll machinery. */
 static intptr_t
 sys_pselect_call(
 	const uintptr_t args[6])
 {
-	struct pollfd fds[KERN_OPEN_MAX];
+	struct pollfd inline_fds[SYSCALL_POLL_INLINE];
+	struct pollfd *fds;
 	struct uaccess_pin read_pin;
 	struct uaccess_pin write_pin;
 	struct uaccess_pin except_pin;
-	fd_set input_read;
-	fd_set input_write;
-	fd_set input_except;
-	fd_set output_read;
-	fd_set output_write;
-	fd_set output_except;
+	fd_set read_set;
+	fd_set write_set;
+	fd_set except_set;
 	struct poll_mask_guard guard;
 	struct process *process;
 	uint64_t deadline;
-	uint32_t valid_mask;
+	size_t bytes;
 	int nfds;
 	int immediate;
 	int ready;
@@ -815,7 +862,7 @@ sys_pselect_call(
 	int result;
 	nfds_t count;
 	nfds_t i;
-	uint32_t bit;
+	unsigned fd;
 	short events;
 	short revents;
 
@@ -824,47 +871,57 @@ sys_pselect_call(
 	ready = 0;
 	result = 0;
 	count = 0;
+	fds = inline_fds;
 
-	/* Pins the three sets. */
-	memset(&read_pin, 0, sizeof(read_pin));
-	memset(&write_pin, 0, sizeof(write_pin));
-	memset(&except_pin, 0, sizeof(except_pin));
-	memset(&guard, 0, sizeof(guard));
-	if (nfds < 0 || nfds > KERN_OPEN_MAX)
+	/* Pins the words of the three sets that hold descriptors below nfds. */
+	kern_memset(&read_pin, 0, sizeof(read_pin));
+	kern_memset(&write_pin, 0, sizeof(write_pin));
+	kern_memset(&except_pin, 0, sizeof(except_pin));
+	kern_memset(&guard, 0, sizeof(guard));
+	if (nfds < 0 || nfds > KERN_FD_SETSIZE)
 		return -EINVAL;
-	error = pselect_pin(args[1], &read_pin, &input_read);
+	bytes = (((size_t)nfds + KERN_NFDBITS - 1U) / KERN_NFDBITS) *
+	    sizeof(uint32_t);
+	error = pselect_pin(args[1], bytes, &read_pin, &read_set);
 	if (error == 0)
-		error = pselect_pin(args[2], &write_pin, &input_write);
+		error = pselect_pin(args[2], bytes, &write_pin, &write_set);
 	if (error == 0)
-		error = pselect_pin(args[3], &except_pin, &input_except);
+		error = pselect_pin(args[3], bytes, &except_pin, &except_set);
 	if (error != 0)
 		goto out;
 
-	/* Converts the sets into a pollfd array. */
-	if (nfds == 32)
-		valid_mask = UINT32_MAX;
-	else if (nfds == 0)
-		valid_mask = 0U;
-	else
-		valid_mask = ((uint32_t)1U << (unsigned)nfds) - 1U;
-	input_read.bits[0] &= valid_mask;
-	input_write.bits[0] &= valid_mask;
-	input_except.bits[0] &= valid_mask;
-	for (i = 0; i < (nfds_t)nfds; i++) {
-		bit = (uint32_t)1U << i;
-		events = 0;
-		if ((input_read.bits[0] & bit) != 0)
-			events |= POLLIN | POLLRDNORM;
-		if ((input_write.bits[0] & bit) != 0)
-			events |= POLLOUT | POLLWRNORM;
-		if ((input_except.bits[0] & bit) != 0)
-			events |= POLLPRI;
-		if (events != 0) {
-			fds[count].fd = (int)i;
-			fds[count].events = events;
-			fds[count].revents = 0;
-			count++;
+	/* Room for one entry a descriptor; a long one goes on the heap. */
+	if ((unsigned)nfds > SYSCALL_POLL_INLINE) {
+		fds = kern_malloc((size_t)nfds * sizeof(fds[0]));
+		if (fds == NULL) {
+			fds = inline_fds;
+			error = ENOMEM;
+			goto out;
 		}
+	}
+
+	/*
+	 * Converts the sets into a pollfd array.  A set bit at or above
+	 * KERN_OPEN_MAX cannot name an open descriptor.
+	 */
+	for (fd = 0; fd < (unsigned)nfds; fd++) {
+		events = 0;
+		if (pselect_isset(&read_set, fd))
+			events |= POLLIN | POLLRDNORM;
+		if (pselect_isset(&write_set, fd))
+			events |= POLLOUT | POLLWRNORM;
+		if (pselect_isset(&except_set, fd))
+			events |= POLLPRI;
+		if (events == 0)
+			continue;
+		if (fd >= KERN_OPEN_MAX) {
+			error = EBADF;
+			goto out;
+		}
+		fds[count].fd = (int)fd;
+		fds[count].events = events;
+		fds[count].revents = 0;
+		count++;
 	}
 
 	/* Waits under the temporary mask. */
@@ -880,52 +937,57 @@ sys_pselect_call(
 		goto out;
 	(void)ready;
 
-	/* Converts the results back into sets. */
-	memset(&output_read, 0, sizeof(output_read));
-	memset(&output_write, 0, sizeof(output_write));
-	memset(&output_except, 0, sizeof(output_except));
+	/*
+	 * Converts the results back into sets.  What each descriptor asked
+	 * for is kept in its events, so the sets are reused for the output.
+	 */
+	kern_memset(&read_set, 0, sizeof(read_set));
+	kern_memset(&write_set, 0, sizeof(write_set));
+	kern_memset(&except_set, 0, sizeof(except_set));
 	for (i = 0; i < count; i++) {
-		bit = (uint32_t)1U << (unsigned)fds[i].fd;
+		fd = (unsigned)fds[i].fd;
+		events = fds[i].events;
 		revents = fds[i].revents;
 		if ((revents & POLLNVAL) != 0) {
 			error = EBADF;
 			goto out;
 		}
 
-		if ((input_read.bits[0] & bit) != 0 &&
+		/* Reports readiness for reading. */
+		if ((events & POLLIN) != 0 &&
 		    (revents & (POLLIN | POLLRDNORM | POLLERR | POLLHUP)) != 0) {
-			output_read.bits[0] |= bit;
+			pselect_set(&read_set, fd);
 			result++;
 		}
 
-		if ((input_write.bits[0] & bit) != 0 &&
+		/* Reports readiness for writing. */
+		if ((events & POLLOUT) != 0 &&
 		    (revents & (POLLOUT | POLLWRNORM | POLLERR)) != 0) {
-			output_write.bits[0] |= bit;
+			pselect_set(&write_set, fd);
 			result++;
 		}
 
 		/* Reports an exceptional condition the caller asked about. */
-		if ((input_except.bits[0] & bit) != 0 &&
+		if ((events & POLLPRI) != 0 &&
 		    (revents & POLLPRI) != 0) {
-			output_except.bits[0] |= bit;
+			pselect_set(&except_set, fd);
 			result++;
 		}
 	}
 
 	/* Copies each requested set back through its pin. */
 	if (read_pin.active)
-		error = copyout_pinned(&read_pin, 0, &output_read,
-		    sizeof(output_read));
+		error = copyout_pinned(&read_pin, 0, &read_set, bytes);
 	if (error == 0 && write_pin.active)
-		error = copyout_pinned(&write_pin, 0, &output_write,
-		    sizeof(output_write));
+		error = copyout_pinned(&write_pin, 0, &write_set, bytes);
 	if (error == 0 && except_pin.active)
-		error = copyout_pinned(&except_pin, 0, &output_except,
-		    sizeof(output_except));
+		error = copyout_pinned(&except_pin, 0, &except_set, bytes);
 out:
 	uaccess_unpin(&except_pin);
 	uaccess_unpin(&write_pin);
 	uaccess_unpin(&read_pin);
+	if (fds != inline_fds)
+		kern_free(fds);
 	if (error != 0)
 		return -error;
 	return result;
@@ -1107,7 +1169,7 @@ copy_sockaddr_in(
 		return EINVAL;
 
 	/* Reads the address into cleared storage. */
-	memset(storage, 0, sizeof(*storage));
+	kern_memset(storage, 0, sizeof(*storage));
 
 	/* Reports the failure. */
 	error = copyin(address, storage, length);
@@ -1187,7 +1249,7 @@ sockaddr_output_pin(
 		return EINVAL;
 
 	/* Leaves the pin empty when the caller wants no address back. */
-	memset(pin, 0, sizeof(*pin));
+	kern_memset(pin, 0, sizeof(*pin));
 	if (address == 0 && length_address == 0)
 		return 0;
 
@@ -1659,7 +1721,7 @@ sys_accept_call(
 	}
 
 	/* Reserves a descriptor and a file before the connection is taken. */
-	memset(&reservation, 0, sizeof(reservation));
+	kern_memset(&reservation, 0, sizeof(reservation));
 	error = filedesc_reserve_many(process->fd, 1, descriptor_flags,
 	    &reservation);
 	if (error == 0)
@@ -1672,7 +1734,7 @@ sys_accept_call(
 	}
 
 	/* Accepts a connection. */
-	memset(&address, 0, sizeof(address));
+	kern_memset(&address, 0, sizeof(address));
 	if (args[1] != 0) {
 		address_argument = (struct sockaddr *)&address;
 		length_argument = &length;
@@ -1921,7 +1983,7 @@ sys_recvfrom_call(
 	}
 
 	/* Receives and copies the data and the source address out. */
-	memset(&address, 0, sizeof(address));
+	kern_memset(&address, 0, sizeof(address));
 	if (args[4] != 0) {
 		address_argument = (struct sockaddr *)&address;
 		length_argument = &length;
@@ -2229,7 +2291,7 @@ sys_recvmsg_call(
 		receive_flags &= ~MSG_WAITALL;
 		if (reference.socket->type != SOCK_STREAM)
 			receive_flags |= MSG_TRUNC;
-		memset(&address, 0, sizeof(address));
+		kern_memset(&address, 0, sizeof(address));
 		do {
 			if (buffer_capacity != 0)
 				buffer_argument = (uint8_t *)buffer + (size_t)wire_result;
@@ -2298,8 +2360,8 @@ sys_recvmsg_call(
 	}
 
 	/* Begins an AF_UNIX receive transaction that may carry descriptors. */
-	memset(&transaction, 0, sizeof(transaction));
-	memset(&reservation, 0, sizeof(reservation));
+	kern_memset(&transaction, 0, sizeof(transaction));
+	kern_memset(&reservation, 0, sizeof(reservation));
 	if (buffer_capacity != 0)
 		data = buffer;
 	else
@@ -2460,7 +2522,7 @@ sys_socket_name_call(
 	}
 
 	/* Asks the protocol for the requested end of the connection. */
-	memset(&address, 0, sizeof(address));
+	kern_memset(&address, 0, sizeof(address));
 	if (peer) {
 		if (socket->ops == NULL || socket->ops->getpeername == NULL) {
 			result = socket_result(&reference, -EOPNOTSUPP);
@@ -2662,7 +2724,7 @@ sys_open_call(
 		return -EINVAL;
 
 	/* Reserves the descriptor before opening, then opens with the caller's credential. */
-	memset(&reservation, 0, sizeof(reservation));
+	kern_memset(&reservation, 0, sizeof(reservation));
 	error = copyinstr(path_address, path, sizeof(path), NULL);
 	held = NULL;
 	if (error == 0 && path[0] == '/')
@@ -2727,21 +2789,52 @@ sys_close_call(
 	return 0;
 }
 
-/* Borrows shared scratch without allocation or waiting; streams retain stack I/O. */
+/*
+ * Picks the bounce buffer of one transfer.
+ *
+ * A short transfer uses the caller's stack buffer.  A regular file borrows
+ * shared scratch without allocation or waiting.  A pipe, socket or device
+ * gets a heap buffer of up to SYSCALL_STREAM_CHUNK: it may block while it
+ * holds it, so it does not take from the shared pool, and a read of it ends
+ * after one backend transfer, so a stack-sized buffer would cut every read
+ * to SYSCALL_IO_CHUNK bytes.  Any buffer it cannot get falls back to the
+ * stack one.
+ */
 static uint8_t *
-syscall_regular_buffer(struct file *file, size_t length, uint8_t *fallback,
+syscall_io_buffer(struct file *file, size_t length, uint8_t *fallback,
 	size_t *capacity)
 {
 	uint8_t *buffer;
+	size_t size;
 
 	*capacity = SYSCALL_IO_CHUNK;
-	if (length <= SYSCALL_IO_CHUNK || file->f_inode == NULL ||
-	    file->f_inode->i_type != INODE_REG)
+	if (length <= SYSCALL_IO_CHUNK)
 		return fallback;
-	buffer = io_pool_borrow(length, capacity);
+	if (file->f_inode != NULL && file->f_inode->i_type == INODE_REG) {
+		buffer = io_pool_borrow(length, capacity);
+		if (buffer == NULL)
+			return fallback;
+		return buffer;
+	}
+	size = length < SYSCALL_STREAM_CHUNK ? length : SYSCALL_STREAM_CHUNK;
+	buffer = kern_malloc(size);
 	if (buffer == NULL)
 		return fallback;
+	*capacity = size;
 	return buffer;
+}
+
+/* Gives back a bounce buffer syscall_io_buffer() picked for the same file. */
+static void
+syscall_io_buffer_release(struct file *file, uint8_t *buffer,
+	uint8_t *fallback)
+{
+	if (buffer == fallback)
+		return;
+	if (file->f_inode != NULL && file->f_inode->i_type == INODE_REG)
+		io_pool_release(buffer);
+	else
+		kern_free(buffer);
 }
 
 /* Handles read(2) through a bounce buffer. */
@@ -2780,11 +2873,10 @@ sys_read_call(
 	}
 
 	/* Takes a staging buffer and opens the transfer. */
-	buffer = syscall_regular_buffer(file, length, small_buffer, &capacity);
+	buffer = syscall_io_buffer(file, length, small_buffer, &capacity);
 	error = file_io_begin(file, FILE_IO_READ, 0, 0, &io);
 	if (error != 0) {
-		if (buffer != small_buffer)
-			io_pool_release(buffer);
+		syscall_io_buffer_release(file, buffer, small_buffer);
 		uaccess_unpin(&pin);
 		(void)file_close(file);
 		return -error;
@@ -2826,11 +2918,16 @@ sys_read_call(
 		 * A stream/device read completes after the first successful
 		 * backend transfer.  Re-entering it merely because the syscall
 		 * bounce buffer was filled can turn an available short read
-		 * into a second block.
+		 * into a second block.  A device whose reads never wait is
+		 * read on, until a signal arrives, so that a long request is
+		 * filled as it is on other systems.
 		 */
 		if (file->f_inode == NULL ||
 		    (file->f_inode->i_type != INODE_REG &&
-		     file->f_inode->i_type != INODE_BLOCK))
+		     file->f_inode->i_type != INODE_BLOCK &&
+		     !cdev_file_read_never_waits(file)))
+			break;
+		if (curthread != NULL && signal_pending_unblocked(curthread))
 			break;
 	}
 
@@ -2838,8 +2935,7 @@ sys_read_call(
 	result = (intptr_t)done;
 out:
 	result = file_io_complete(&io, result);
-	if (buffer != small_buffer)
-		io_pool_release(buffer);
+	syscall_io_buffer_release(file, buffer, small_buffer);
 	uaccess_unpin(&pin);
 	(void)file_close(file);
 	return result;
@@ -2882,12 +2978,11 @@ sys_write_call(
 	}
 
 	/* Takes a staging buffer and opens the transfer. */
-	buffer = syscall_regular_buffer(file, length, small_buffer, &capacity);
+	buffer = syscall_io_buffer(file, length, small_buffer, &capacity);
 	error = file_io_begin_cred(file, FILE_IO_WRITE, 0, 0, process->cred,
 	    &io);
 	if (error != 0) {
-		if (buffer != small_buffer)
-			io_pool_release(buffer);
+		syscall_io_buffer_release(file, buffer, small_buffer);
 		uaccess_unpin(&pin);
 		(void)file_close(file);
 		return -error;
@@ -2937,8 +3032,7 @@ sys_write_call(
 	result = (intptr_t)done;
 out:
 	result = file_io_complete(&io, result);
-	if (buffer != small_buffer)
-		io_pool_release(buffer);
+	syscall_io_buffer_release(file, buffer, small_buffer);
 	uaccess_unpin(&pin);
 	(void)file_close(file);
 	return result;
@@ -2966,6 +3060,37 @@ sys_lseek_call(
 	return result;
 }
 
+/*
+ * Describes a pipe or socket that has no inode: its type, one link, the
+ * caller's identity as owner, and a number that tells two such files apart.
+ * Sizes and times are left zero, as POSIX leaves them unspecified.
+ */
+static int
+pseudo_file_getattr(
+	struct process *process,
+	struct file *file,
+	struct stat *status)
+{
+	kern_memset(status, 0, sizeof(*status));
+	if (pipe_file_is_pipe(file))
+		status->st_mode = S_IFIFO | 0600;
+	else if (socket_from_file(file) != NULL)
+		status->st_mode = S_IFSOCK | 0777;
+	else
+		return EINVAL;
+
+	status->st_nlink = 1;
+	status->st_ino = (ino_t)((uintptr_t)file / sizeof(*file));
+	status->st_blksize = 4096;
+	if (process->cred != NULL) {
+		status->st_uid = process->cred->euid;
+		status->st_gid = process->cred->egid;
+	}
+
+	/* Succeeded. */
+	return 0;
+}
+
 /* Handles fstat(2). */
 static intptr_t
 sys_fstat_call(
@@ -2986,14 +3111,15 @@ sys_fstat_call(
 	if (error != 0)
 		return -error;
 
-	/* Rejects an open file that has no inode to describe. */
-	if (file->f_inode == NULL) {
-		(void)file_close(file);
-		return -EINVAL;
-	}
-
-	/* Reads the attributes and copies them out. */
-	error = inode_getattr(file->f_inode, &status);
+	/*
+	 * An anonymous pipe or a socket has no inode, but POSIX still
+	 * describes it by its type; other files without an inode (kernel
+	 * handles) have nothing to describe.
+	 */
+	if (file->f_inode == NULL)
+		error = pseudo_file_getattr(process, file, &status);
+	else
+		error = inode_getattr(file->f_inode, &status);
 	if (error == 0)
 		error = copyout(&status, args[1], sizeof(status));
 	(void)file_close(file);
@@ -3077,10 +3203,10 @@ sys_getdents_call(
 	}
 
 	/* Renders the entry in the layout the caller expects and copies it out. */
-	memset(&output, 0, sizeof(output));
+	kern_memset(&output, 0, sizeof(output));
 	output.d_ino = entry.d_ino;
 	output.d_type = dirent_type(entry.d_type);
-	strncpy(output.d_name, entry.d_name, sizeof(output.d_name) - 1U);
+	kern_strncpy(output.d_name, entry.d_name, sizeof(output.d_name) - 1U);
 	error = copyout_pinned(&pin, 0, &output, sizeof(output));
 	uaccess_unpin(&pin);
 	(void)file_close(file);
@@ -3192,7 +3318,7 @@ sys_setproctitle_call(
 	/* An empty request restores the title the program started with. */
 	length = (size_t)args[1];
 	if (args[0] == 0 || length == 0U) {
-		memcpy(process->command, process->command_initial,
+		kern_memcpy(process->command, process->command_initial,
 		    sizeof(process->command));
 		return 0;
 	}
@@ -3206,7 +3332,7 @@ sys_setproctitle_call(
 	if (error != 0)
 		return -error;
 	title[length] = '\0';
-	memcpy(process->command, title, length + 1U);
+	kern_memcpy(process->command, title, length + 1U);
 	return 0;
 }
 
@@ -3231,7 +3357,7 @@ sys_getcwd_call(
 		return -error;
 
 	/* Rejects a buffer the path does not fit in. */
-	length = strlen(path) + 1U;
+	length = kern_strlen(path) + 1U;
 	if (length > args[1])
 		return -ERANGE;
 
@@ -3298,8 +3424,14 @@ sys_mmap_call(
 	if ((args[3] & (MAP_PRIVATE | MAP_SHARED)) != MAP_PRIVATE &&
 	    (args[3] & (MAP_PRIVATE | MAP_SHARED)) != MAP_SHARED)
 		return -EINVAL;
+	/* MAP_FIXED replaces what is mapped in the range (POSIX). */
+	/*
+	 * MAP_NORESERVE asks for lazy commitment, which this kernel never
+	 * grants: reservation is free and commitment is strict, so the flag
+	 * is accepted and changes nothing.
+	 */
 	if ((args[3] & ~(MAP_PRIVATE | MAP_SHARED | MAP_ANONYMOUS |
-	    MAP_FIXED_NOREPLACE)) != 0)
+	    MAP_FIXED | MAP_FIXED_NOREPLACE | MAP_NORESERVE)) != 0)
 		return -EOPNOTSUPP;
 	fixed = (args[3] & MAP_FIXED) != 0;
 	if (fixed && (args[3] & MAP_FIXED_NOREPLACE) != 0)
@@ -3580,6 +3712,7 @@ sys_ioctl_call(
 {
 	struct process *process;
 	struct file *file;
+	int nonblocking;
 	int error;
 
 	/* Resolves the descriptor to an open file. */
@@ -3595,6 +3728,18 @@ sys_ioctl_call(
 	/* An absent descriptor is distinct from a non-I/O handle. */
 	if (error != 0)
 		return -error;
+
+	/* Non-blocking mode belongs to the file description, whatever it is. */
+	if (args[1] == FIONBIO) {
+		error = copyin(args[2], &nonblocking, sizeof(nonblocking));
+		if (error == 0)
+			file_status_flags_update(file, O_NONBLOCK,
+			    nonblocking != 0 ? O_NONBLOCK : 0);
+		(void)file_close(file);
+		if (error != 0)
+			return -error;
+		return 0;
+	}
 
 	/* Only an actual open file description receives this request. */
 	error = file_ioctl(file, args[1], args[2]);
@@ -3843,20 +3988,21 @@ sys_mount_call(
 		return -EINVAL;
 	if (!cred_is_superuser(process->cred))
 		return -EPERM;
-	if ((flags & ~(int)(MNT_RDONLY | MNT_NOSUID)) != 0)
+	if ((flags & ~(int)(MNT_RDONLY | MNT_NOSUID | MNT_WRITETHRU |
+	    MNT_NOJOURNAL)) != 0)
 		return -EINVAL;
 
 	/* Copies the type, the directory, and the optional arguments. */
 	error = copyinstr(args[0], type, sizeof(type), NULL);
 	if (error == 0)
 		error = copyinstr(args[1], directory, sizeof(directory), NULL);
-	memset(&requested, 0, sizeof(requested));
-	memset(&internal, 0, sizeof(internal));
+	kern_memset(&requested, 0, sizeof(requested));
+	kern_memset(&internal, 0, sizeof(internal));
 	if (error == 0 && args[3] != 0) {
 		error = copyin(args[3], &requested, sizeof(requested));
 		if (error == 0 && (requested.size != sizeof(requested) ||
 		    requested.version != KERN_MOUNT_ARGS_VERSION ||
-		    memchr(requested.fspec, '\0', sizeof(requested.fspec)) == NULL))
+		    kern_memchr(requested.fspec, '\0', sizeof(requested.fspec)) == NULL))
 			error = EINVAL;
 		if (error == 0 && requested.fspec[0] != '\0')
 			internal.fspec = requested.fspec;
@@ -3869,6 +4015,10 @@ sys_mount_call(
 			mount_flags |= MOUNT_READ_ONLY;
 		if ((flags & MNT_NOSUID) != 0)
 			mount_flags |= MOUNT_NOSUID;
+		if ((flags & MNT_WRITETHRU) != 0)
+			mount_flags |= MOUNT_WRITE_THROUGH;
+		if ((flags & MNT_NOJOURNAL) != 0)
+			mount_flags |= MOUNT_NO_JOURNAL;
 		if (internal.fspec != NULL)
 			mount_arguments = &internal;
 		else
@@ -4281,11 +4431,10 @@ sys_positional_call(
 	}
 
 	/* Takes a staging buffer and opens the transfer. */
-	buffer = syscall_regular_buffer(file, length, small_buffer, &capacity);
+	buffer = syscall_io_buffer(file, length, small_buffer, &capacity);
 	error = file_io_begin_cred(file, operation, offset, 0, credential, &io);
 	if (error != 0) {
-		if (buffer != small_buffer)
-			io_pool_release(buffer);
+		syscall_io_buffer_release(file, buffer, small_buffer);
 		uaccess_unpin(&pin);
 		(void)file_close(file);
 		return -error;
@@ -4352,8 +4501,7 @@ copy_error:
 		result = -error;
 out:
 	result = file_io_complete(&io, result);
-	if (buffer != small_buffer)
-		io_pool_release(buffer);
+	syscall_io_buffer_release(file, buffer, small_buffer);
 	uaccess_unpin(&pin);
 	(void)file_close(file);
 	return result;
@@ -4445,7 +4593,7 @@ sys_vector_call(
 	}
 
 	/* Takes a staging buffer and opens the transfer under the size limit. */
-	buffer = syscall_regular_buffer(file, (size_t)total, small_buffer,
+	buffer = syscall_io_buffer(file, (size_t)total, small_buffer,
 	    &capacity);
 	error = file_io_begin_cred(file, operation, 0, 0, credential, &io);
 	if (error != 0)
@@ -4549,8 +4697,7 @@ fail:
 out:
 	if (io_started)
 		total = file_io_complete(&io, total);
-	if (buffer != small_buffer)
-		io_pool_release(buffer);
+	syscall_io_buffer_release(file, buffer, small_buffer);
 	if (file != NULL)
 		(void)file_close(file);
 	while (pinned != 0) {
@@ -4741,6 +4888,53 @@ sys_truncate_call(
 	return 0;
 }
 
+/*
+ * Gives the error of a mkdir whose parent lookup refused the last
+ * component: EEXIST when it is . or .. and the whole path resolves (the
+ * directory is there, as mkdir -p expects), the lookup's own error when it
+ * does not, and EINVAL for any other refusal.
+ */
+static SYSCALL_EXT int
+mkdir_dot_error(
+	struct cwdinfo *context,
+	const char *pathname)
+{
+	struct path existing;
+	size_t length;
+	size_t start;
+	int dot;
+	int dot_dot;
+	int error;
+
+	/* The last component, trailing slashes ignored. */
+	length = kern_strlen(pathname);
+	while (length > 1 && pathname[length - 1U] == '/')
+		length--;
+	start = length;
+	while (start > 0 && pathname[start - 1U] != '/')
+		start--;
+
+	/* Only . and .. are refused for being there already. */
+	dot = 0;
+	if (length - start == 1U && pathname[start] == '.')
+		dot = 1;
+	dot_dot = 0;
+	if (length - start == 2U && pathname[start] == '.' && pathname[start + 1U] == '.')
+		dot_dot = 1;
+	if (!dot && !dot_dot)
+		return EINVAL;
+
+	/* The whole path must resolve for the directory to be there. */
+	path_init(&existing);
+	error = namei_path_at(context, pathname, &existing);
+	if (error != 0)
+		return error;
+	path_release(&existing);
+
+	/* Succeeded: the directory exists. */
+	return EEXIST;
+}
+
 /* Performs mkdir, unlink, rmdir, or rename with resolved parents. */
 static SYSCALL_EXT intptr_t
 sys_mutation_common(
@@ -4812,6 +5006,10 @@ sys_mutation_common(
 
 	error = namei_parent_path_at(context, pathname, &parent, &name,
 	    storage);
+
+	/* mkdir of . or .. names a directory that is there: EEXIST, as POSIX says. */
+	if (error == EINVAL && number == KERN_SYS_mkdir)
+		error = mkdir_dot_error(context, pathname);
 	if (error != 0)
 		goto out_held;
 
@@ -5132,7 +5330,7 @@ sys_cred_getres_call(
 	error = 0;
 
 	/* Pins all three outputs before reading the credential. */
-	memset(pins, 0, sizeof(pins));
+	kern_memset(pins, 0, sizeof(pins));
 	for (i = 0; i < 3; i++) {
 		error = uaccess_pin(args[i], sizeof(values[i]), HAL_SPACE_WRITE,
 		    &pins[i]);
@@ -5184,7 +5382,7 @@ sys_getentropy_call(
 	size = (size_t)args[1];
 
 	/* Rejects a request larger than one draw may be. */
-	memset(&pin, 0, sizeof(pin));
+	kern_memset(&pin, 0, sizeof(pin));
 	if (size > GETENTROPY_MAX)
 		return -EINVAL;
 
@@ -5197,12 +5395,11 @@ sys_getentropy_call(
 	if (error != 0)
 		return -error;
 
-	/* Draws the bytes, copies them out, and erases the staging. */
-	if (!hal_entropy_fill(entropy, size))
-		error = ENOSYS;
-	else
+	/* Draws the bytes once seeded, copies them out, and erases the staging. */
+	error = kern_random_read(entropy, size, KERN_RANDOM_WAIT);
+	if (error == 0)
 		error = copyout_pinned(&pin, 0, entropy, size);
-	memset_explicit(entropy, 0, sizeof(entropy));
+	kern_memset_explicit(entropy, 0, sizeof(entropy));
 	uaccess_unpin(&pin);
 
 	/* Reports the outcome of the call. */
@@ -5266,7 +5463,7 @@ user_atomic_equal(
 			error = copyin_pinned(right, offset, right_bytes, amount);
 		if (error != 0)
 			return error;
-		if (memcmp(left_bytes, right_bytes, amount) != 0) {
+		if (kern_memcmp(left_bytes, right_bytes, amount) != 0) {
 			*equal = 0;
 			return 0;
 		}
@@ -5299,9 +5496,9 @@ sys_atomic_call(
 	equal = 0;
 
 	/* Pins every operand with the access its operation needs. */
-	memset(&object, 0, sizeof(object));
-	memset(&first, 0, sizeof(first));
-	memset(&second, 0, sizeof(second));
+	kern_memset(&object, 0, sizeof(object));
+	kern_memset(&first, 0, sizeof(first));
+	kern_memset(&second, 0, sizeof(second));
 	if (size == 0 ||
 	    operation > KERN_ATOMIC_COMPARE_EXCHANGE ||
 	    args[0] == 0 ||
@@ -5685,7 +5882,7 @@ sys_inode_ref_acquire(
 	int error;
 
 	/* Refuses the call without descriptors and a current directory. */
-	memset(reference, 0, sizeof(*reference));
+	kern_memset(reference, 0, sizeof(*reference));
 	if (process == NULL || process->fd == NULL || process->cwdi == NULL)
 		return EINVAL;
 
@@ -5695,7 +5892,7 @@ sys_inode_ref_acquire(
 		if (reference->file == NULL || reference->file->f_inode == NULL) {
 			if (reference->file != NULL)
 				(void)file_close(reference->file);
-			memset(reference, 0, sizeof(*reference));
+			kern_memset(reference, 0, sizeof(*reference));
 			return EBADF;
 		}
 
@@ -6203,7 +6400,7 @@ sys_utimens_common(
 
 	/* A missing times array means now for both timestamps. */
 	if (times_address == 0) {
-		memset(times, 0, sizeof(times));
+		kern_memset(times, 0, sizeof(times));
 		times[0].tv_nsec = UTIME_NOW;
 		times[1].tv_nsec = UTIME_NOW;
 	} else {
@@ -6626,7 +6823,7 @@ sys_sigaction_call(
 	    &previous);
 	if (error != 0)
 		return -error;
-	memset(&old, 0, sizeof(old));
+	kern_memset(&old, 0, sizeof(old));
 	old.__sa_handler_value = previous.handler;
 	old.sa_mask = previous.mask;
 	old.sa_flags = previous.flags;
@@ -6864,7 +7061,7 @@ sys_sigaltstack_call(
 		return -EINVAL;
 
 	/* Snapshots the current stack, marking it in use when it is. */
-	memset(&old, 0, sizeof(old));
+	kern_memset(&old, 0, sizeof(old));
 	old.ss_sp = (uapi_ptr_t)curthread->signal_altstack_base;
 	old.ss_size = curthread->signal_altstack_size;
 	old.ss_flags = (int32_t)curthread->signal_altstack_flags;
@@ -6933,12 +7130,12 @@ sys_sigtimedwait_call(
 		deadline = sched_ticks();
 
 	/* Waits, then converts the kernel signal info to the user layout. */
-	memset(&selected, 0, sizeof(selected));
+	kern_memset(&selected, 0, sizeof(selected));
 	error = signal_timedwait(curthread, set, deadline, args[2] != 0,
 	    &selected, &signo);
 	if (error != 0)
 		return -error;
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	info.si_signo = signo;
 	info.si_errno = selected.error;
 	info.si_code = selected.code;
@@ -6946,7 +7143,7 @@ sys_sigtimedwait_call(
 	info.si_uid = selected.uid;
 	info.si_status = selected.status;
 	info.si_addr = selected.address;
-	memcpy(&info.si_value, &selected.value, sizeof(selected.value));
+	kern_memcpy(&info.si_value, &selected.value, sizeof(selected.value));
 	if (args[1] != 0) {
 		error = copyout(&info, args[1], sizeof(info));
 		if (error != 0)
@@ -6985,7 +7182,7 @@ sys_sigqueue_call(
 	target = process_find_ref(pid);
 	if (target == NULL)
 		return -ESRCH;
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	info.code = SI_QUEUE;
 	info.pid = sender->pid;
 	if (sender->cred != NULL)
@@ -7024,13 +7221,21 @@ sys_thread_create_call(
 		return -EINVAL;
 
 	/* The new thread starts only once its id has been reported. */
-	memset(&pin, 0, sizeof(pin));
+	kern_memset(&pin, 0, sizeof(pin));
 	error = uaccess_pin(args[5], sizeof(tid), HAL_SPACE_WRITE, &pin);
 	if (error != 0)
 		return -error;
 	error = thread_create(process, args[0], args[1], &thread);
 	if (error == 0) {
 		hal_task_set_tls(thread->task, args[3]);
+
+		/*
+		 * The new thread inherits the creator's signal mask, as
+		 * pthread_create() promises and as a forked child does; a
+		 * library thread created under a full mask must not become
+		 * the one thread that a process-directed signal can reach.
+		 */
+		thread->signal_mask = curthread->signal_mask;
 		tid = thread->tid;
 		error = copyout_pinned(&pin, 0, &tid, sizeof(tid));
 		if (error == 0)
@@ -7125,7 +7330,7 @@ sys_thread_join_call(
 	/* Records who is joining and how the wait may end. */
 	cancelable = (args[2] & KERN_THREAD_JOIN_CANCELABLE) != 0;
 	owner = curthread->tid;
-	memset(&pin, 0, sizeof(pin));
+	kern_memset(&pin, 0, sizeof(pin));
 
 	/* Claims the target for this joiner. */
 	target = thread_find_ref((tid_t)args[0]);
@@ -7619,13 +7824,13 @@ sys_sigreturn_call(
 	restored_mask = context.uc_sigmask & SIGNAL_VALID_MASK &
 	    ~POLL_SIGNAL_BIT(SIGKILL) & ~POLL_SIGNAL_BIT(SIGSTOP);
 	context.uc_sigmask = level->saved_ucontext.uc_sigmask;
-	if (memcmp(&context, &level->saved_ucontext, sizeof(context)) != 0)
+	if (kern_memcmp(&context, &level->saved_ucontext, sizeof(context)) != 0)
 		return -EINVAL;
 
 	/* Restores the machine state and pops the signal level. */
 	restart = level->restart_on_return != 0;
 	restart_number = level->restart_number;
-	memcpy(restart_args, level->restart_args, sizeof(restart_args));
+	kern_memcpy(restart_args, level->restart_args, sizeof(restart_args));
 	if (hal_task_signal_return((uint32_t)args[0], &restored) != 0)
 		return -EINVAL;
 	if (level->used_altstack && curthread->signal_on_altstack_depth != 0)
@@ -7637,7 +7842,7 @@ sys_sigreturn_call(
 	spin_unlock_irqrestore(&curthread->proc->lock, irq);
 
 	/* Retires this handler level and restores the token of the one below. */
-	memset(level, 0, sizeof(*level));
+	kern_memset(level, 0, sizeof(*level));
 	curthread->signal_depth--;
 	if (curthread->signal_depth == 0)
 		curthread->signal_token = 0;
@@ -7649,7 +7854,7 @@ sys_sigreturn_call(
 	curthread->syscall_restart_valid = 0;
 	if (restart) {
 		curthread->syscall_restart_number = restart_number;
-		memcpy(curthread->syscall_restart_args, restart_args,
+		kern_memcpy(curthread->syscall_restart_args, restart_args,
 		    sizeof(curthread->syscall_restart_args));
 		curthread->syscall_redispatch_valid = 1;
 	}
@@ -7966,6 +8171,24 @@ sys_fork_call(
 	return child->pid;
 }
 
+/* Handles the vfork system call under posix_spawn. */
+static intptr_t
+sys_vfork_call(
+	const uintptr_t args[6])
+{
+	struct process *parent;
+	pid_t child;
+	int error;
+
+	/* Creates the borrowing child and waits until it execs or ends. */
+	parent = current_process();
+	(void)args;
+	error = process_vfork(parent, &child);
+	if (error != 0)
+		return -error;
+	return child;
+}
+
 /* Handles sched_yield(2). */
 static intptr_t
 sys_sched_yield_call(
@@ -7980,6 +8203,15 @@ sys_sched_yield_call(
 		return -EINVAL;
 	sched_yield();
 	return 0;
+}
+
+/* Converts kernel ticks to the fixed unit of the times(2) record, rounding down. */
+static uint64_t
+times_units(
+	uint64_t ticks)
+{
+	/* Returns the computed result. */
+	return kern_ticks_to_rate(ticks, KERN_PROCESS_TIMES_HZ);
 }
 
 /* Handles times(2). */
@@ -8013,15 +8245,21 @@ sys_times_call(
 	    record_size != sizeof(result))
 		return -EINVAL;
 
-	/* Samples the accounting counters. */
-	user_ticks = atomic_u64_load_acquire(&process->user_ticks);
-	system_ticks = atomic_u64_load_acquire(&process->system_ticks);
-	child_user_ticks = atomic_u64_load_acquire(&process->child_user_ticks);
-	child_system_ticks = atomic_u64_load_acquire(
-	    &process->child_system_ticks);
+	/*
+	 * Samples the accounting counters in the record's unit.  User and
+	 * system time are converted apart, so their sums keep system time no
+	 * larger than the total.
+	 */
+	user_ticks = times_units(atomic_u64_load_acquire(&process->user_ticks));
+	system_ticks = times_units(
+	    atomic_u64_load_acquire(&process->system_ticks));
+	child_user_ticks = times_units(
+	    atomic_u64_load_acquire(&process->child_user_ticks));
+	child_system_ticks = times_units(
+	    atomic_u64_load_acquire(&process->child_system_ticks));
 	result.self_ticks = user_ticks + system_ticks;
 	result.child_ticks = child_user_ticks + child_system_ticks;
-	result.elapsed_ticks = sched_ticks();
+	result.elapsed_ticks = times_units(sched_ticks());
 	result.system_ticks = system_ticks;
 	result.child_system_ticks = child_system_ticks;
 
@@ -8248,7 +8486,7 @@ sys_getrusage_call(
 		return -EINVAL;
 
 	/* Reports the caller's own or its children's CPU time. */
-	memset(&usage, 0, sizeof(usage));
+	kern_memset(&usage, 0, sizeof(usage));
 	if ((int)args[0] == RUSAGE_SELF) {
 		user_ticks = atomic_u64_load_acquire(&process->user_ticks);
 		system_ticks = atomic_u64_load_acquire(&process->system_ticks);
@@ -8307,7 +8545,7 @@ timer_snapshot(
 	uint64_t interval;
 
 	(void)process_itimer_get(process, which, &remaining, &interval);
-	memset(value, 0, sizeof(*value));
+	kern_memset(value, 0, sizeof(*value));
 	ticks_to_timeval(remaining, &value->it_value);
 	ticks_to_timeval(interval, &value->it_interval);
 }
@@ -8388,7 +8626,7 @@ sys_setitimer_call(
 	/* Arms the timer and reports the previous setting. */
 	(void)process_itimer_set(process, which, remaining, interval,
 	    &old_remaining, &old_interval);
-	memset(&old, 0, sizeof(old));
+	kern_memset(&old, 0, sizeof(old));
 	ticks_to_timeval(old_remaining, &old.it_value);
 	ticks_to_timeval(old_interval, &old.it_interval);
 	if (args[2] != 0) {
@@ -8515,7 +8753,7 @@ sys_waitpid_call(
 		if (error != 0)
 			return -error;
 	} else {
-		memset(&pin, 0, sizeof(pin));
+		kern_memset(&pin, 0, sizeof(pin));
 	}
 
 	/* Commits the event straight away when no status is wanted. */
@@ -8552,6 +8790,17 @@ static SYSCALL_EXT intptr_t
 sys_ptrace_call(
 	const uintptr_t args[6])
 {
+#if !defined(__x86_64__)
+
+	/*
+	 * The registers a debugger reads are described in <uapi/reg.h> for
+	 * amd64 only, so src/kern/ptrace.c is not part of the other kernels
+	 * yet.  Those report the request as one this system does not have.
+	 */
+	(void)args;
+	return -ENOSYS;
+
+#else
 	intptr_t result;
 	int error;
 
@@ -8565,6 +8814,8 @@ sys_ptrace_call(
 
 	/* Reports what the request returned. */
 	return result;
+
+#endif
 }
 
 
@@ -8590,7 +8841,7 @@ sys_wait4_call(
 	process = current_process();
 	status = 0;
 	error = 0;
-	memset(&usage, 0, sizeof(usage));
+	kern_memset(&usage, 0, sizeof(usage));
 
 	/* Rejects options this kernel does not know, and unused arguments. */
 	if (args[4] != 0 ||
@@ -8605,7 +8856,7 @@ sys_wait4_call(
 		if (error != 0)
 			return -error;
 	} else {
-		memset(&pin, 0, sizeof(pin));
+		kern_memset(&pin, 0, sizeof(pin));
 	}
 	result = process_wait_select(process, (pid_t)args[0], (int)args[2],
 	    &event);
@@ -8718,7 +8969,7 @@ sys_waitid_call(
 		return result;
 
 	/* Fills the signal information for the selected event. */
-	memset(&information, 0, sizeof(information));
+	kern_memset(&information, 0, sizeof(information));
 	if (result == 0) {
 		error = copyout(&information, args[2], sizeof(information));
 		if (error != 0)
@@ -9139,6 +9390,9 @@ syscall_dispatch_body(
 	case KERN_SYS_fork:
 		result = sys_fork_call(args);
 		break;
+	case KERN_SYS_vfork:
+		result = sys_vfork_call(args);
+		break;
 	case KERN_SYS_sched_yield:
 		result = sys_sched_yield_call(args);
 		break;
@@ -9488,7 +9742,7 @@ kernel_syscall_handler(
 	hal_irq_enable();
 
 	/* Takes a private copy of the arguments a restart may reuse. */
-	memcpy(dispatch_args, args, sizeof(dispatch_args));
+	kern_memcpy(dispatch_args, args, sizeof(dispatch_args));
 
 	/* Arms the restart state and pins the credentials. */
 	syscall_restart_state_begin(thread);
@@ -9499,7 +9753,7 @@ kernel_syscall_handler(
 	for (;;) {
 		if (thread != NULL && dispatch_number != KERN_SYS_sigreturn) {
 			thread->syscall_restart_number = dispatch_number;
-			memcpy(thread->syscall_restart_args, dispatch_args,
+			kern_memcpy(thread->syscall_restart_args, dispatch_args,
 			    sizeof(thread->syscall_restart_args));
 			thread->syscall_restart_valid = 0;
 			thread->syscall_redispatch_valid = 0;
@@ -9523,7 +9777,7 @@ kernel_syscall_handler(
 		if (thread != NULL && dispatch_number == KERN_SYS_sigreturn &&
 		    thread->syscall_redispatch_valid) {
 			dispatch_number = thread->syscall_restart_number;
-			memcpy(dispatch_args, thread->syscall_restart_args,
+			kern_memcpy(dispatch_args, thread->syscall_restart_args,
 			    sizeof(dispatch_args));
 			thread->syscall_redispatch_valid = 0;
 			syscall_restart_state_begin(thread);

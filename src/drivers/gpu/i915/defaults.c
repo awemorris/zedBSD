@@ -19,10 +19,10 @@
 #include "submit.h"
 #include "sync.h"
 #include "workarounds.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 #include "intel/gt-regs.h"
 
@@ -202,7 +202,7 @@ i915_defaults_submit(
 		return EINVAL;
 
 	/* Starts from an empty recording. */
-	memset(d, 0, sizeof(*d));
+	kern_memset(d, 0, sizeof(*d));
 
 	/* Submits the record request of every engine; the first failure stops the pass. */
 	for (index = 0U; index < es->n; index++) {
@@ -532,7 +532,7 @@ i915_defaults_finish(
 		}
 
 		/* Copies the whole image and hands the copy to the engine's slot. */
-		memcpy(copy->cpu, d->ce[index].state->cpu, d->ce[index].state_bytes);
+		kern_memcpy(copy->cpu, d->ce[index].state->cpu, d->ce[index].state_bytes);
 		d->default_state[index] = copy;
 	}
 

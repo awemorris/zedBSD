@@ -20,12 +20,12 @@
 #include "gfx.h"
 #include "heap.h"
 #include "math.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "../intel/commands.h"
 #include "../intel/genxml.h"
@@ -199,7 +199,7 @@ drv_i915_gfx_write_state(
 	/* Locates the two heaps and clears the whole slot. */
 	surface = (uint32_t *)(void *)(page + I915_GFX_SURFACE_HEAP);
 	dynamic = (uint32_t *)(void *)(page + I915_GFX_DYNAMIC_HEAP);
-	memset(page, 0, I915_GFX_SLOT_BYTES);
+	kern_memset(page, 0, I915_GFX_SLOT_BYTES);
 
 	/* Writes the binding table, the surfaces and the samplers. */
 	error = i915_state_write_surfaces(surface, dynamic, state, kernels, target, mocs);
@@ -279,7 +279,7 @@ drv_i915_gfx_surface_write(
 	 * path bit, MOCS and QPitch; width and height; pitch; mip tail start 1;
 	 * identity channel select; the address.
 	 */
-	memset(rss, 0, GEN12_RENDER_SURFACE_STATE_DWORDS * 4U);
+	kern_memset(rss, 0, GEN12_RENDER_SURFACE_STATE_DWORDS * 4U);
 	rss[0] = (GEN12_SURFTYPE_2D << 29) |
 	    (format << 18) |
 	    (GEN12_SURFACE_ALIGN_4 << 16) |
@@ -393,7 +393,7 @@ drv_i915_gfx_instruction_heap_clear(
 
 	/* Repeats the end-of-thread instructions over the whole window. */
 	for (at = 0U; at + sizeof(i915_gfx_eot_only) <= I915_GFX_INSTRUCTION_BYTES; at += sizeof(i915_gfx_eot_only))
-		memcpy(window + at, i915_gfx_eot_only, sizeof(i915_gfx_eot_only));
+		kern_memcpy(window + at, i915_gfx_eot_only, sizeof(i915_gfx_eot_only));
 }
 
 /*
@@ -1404,7 +1404,7 @@ i915_image_surface_write(
 	 * the mip count, the first level and the mip tail start; identity
 	 * channel select; the address.
 	 */
-	memset(rss, 0, GEN12_RENDER_SURFACE_STATE_DWORDS * 4U);
+	kern_memset(rss, 0, GEN12_RENDER_SURFACE_STATE_DWORDS * 4U);
 	rss[0] = (GEN12_SURFTYPE_2D << 29) |
 	    (format << 18) |
 	    (GEN12_SURFACE_ALIGN_4 << 16) |
@@ -1534,7 +1534,7 @@ i915_state_write_push(
 	constant_bytes = layout->constant_bytes;
 	if (constant_bytes > I915_GFX_PUSH_BYTES)
 		constant_bytes = I915_GFX_PUSH_BYTES;
-	memcpy(data, state->push, constant_bytes);
+	kern_memcpy(data, state->push, constant_bytes);
 
 	/* Copies each uniform block's range after them. */
 	for (index = 0U; index < layout->block_count; index++) {
@@ -1583,7 +1583,7 @@ i915_state_write_push(
 		source = drv_i915_gfx_memory_cpu(buffer->memory, buffer->offset + start, bytes);
 		if (source == NULL)
 			return EINVAL;
-		memcpy(data + block->push_offset, source, (size_t)bytes);
+		kern_memcpy(data + block->push_offset, source, (size_t)bytes);
 	}
 
 	/* Succeeded: the stage's push data is in place. */
@@ -1792,7 +1792,7 @@ i915_blend_equation(
 	int second;
 
 	/* Starts with blending off, which is all a pipeline without blending asks for. */
-	memset(equation, 0, sizeof(*equation));
+	kern_memset(equation, 0, sizeof(*equation));
 	if (pipeline->blend_enable == 0U)
 		return;
 
@@ -1832,7 +1832,7 @@ i915_blend_equation(
 
 	/* XXX: the shaders write no second source, so such an equation is not blended. */
 	if (second != 0) {
-		memset(equation, 0, sizeof(*equation));
+		kern_memset(equation, 0, sizeof(*equation));
 		return;
 	}
 

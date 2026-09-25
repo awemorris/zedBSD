@@ -10,16 +10,16 @@
  */
 
 #include "rtl8822b-internal.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <limits.h>
-#include <string.h>
 
 #ifndef RTL8822B_HOST_TEST
 #include "kern/file.h"
 #include "kern/kmem.h"
 #include "kern/vfs.h"
-#include <fcntl.h>
+#include <uapi/fcntl.h>
 #endif
 
 #define RTL8822B_FW_SIGNATURE 0x8822U
@@ -419,7 +419,7 @@ sha256_init(
 		0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
 		0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U};
 
-	memcpy(context->state, initial_state, sizeof(initial_state));
+	kern_memcpy(context->state, initial_state, sizeof(initial_state));
 	context->byte_count = 0;
 	context->block_length = 0;
 }
@@ -441,7 +441,7 @@ sha256_update(
 		available = sizeof(context->block) - context->block_length;
 		copy = length < available ? length : available;
 
-		memcpy(context->block + context->block_length, data, copy);
+		kern_memcpy(context->block + context->block_length, data, copy);
 		context->block_length += copy;
 		context->byte_count += copy;
 		data += copy;
@@ -470,13 +470,13 @@ sha256_final(
 
 	/* Handles the context condition. */
 	if (context->block_length > 56U) {
-		memset(context->block + context->block_length, 0,
+		kern_memset(context->block + context->block_length, 0,
 		       sizeof(context->block) - context->block_length);
 		sha256_transform(context, context->block);
 		context->block_length = 0;
 	}
 
-	memset(context->block + context->block_length, 0,
+	kern_memset(context->block + context->block_length, 0,
 	       56U - context->block_length);
 	/* Process each remaining element. */
 	for (index = 0; index < 8U; index++) {
@@ -494,7 +494,7 @@ sha256_final(
 		digest[index * 4U + 3U] = (uint8_t)context->state[index];
 	}
 
-	memset(context, 0, sizeof(*context));
+	kern_memset(context, 0, sizeof(*context));
 }
 
 /*
@@ -545,7 +545,7 @@ firmware_validate_expected(
 	/* Handles the data availability. */
 	if (data == NULL || expected_digest == NULL || view == NULL)
 		return EINVAL;
-	memset(view, 0, sizeof(*view));
+	kern_memset(view, 0, sizeof(*view));
 
 	/* Checks the current data length. */
 	if (length != RTL8822B_FIRMWARE_SIZE)
@@ -573,15 +573,15 @@ firmware_validate_expected(
 		return error;
 
 	/* Handles the memcmp condition. */
-	if (memcmp(actual_digest, expected_digest, sizeof(actual_digest)) !=
+	if (kern_memcmp(actual_digest, expected_digest, sizeof(actual_digest)) !=
 	    0) {
-		memset(actual_digest, 0, sizeof(actual_digest));
+		kern_memset(actual_digest, 0, sizeof(actual_digest));
 
 		/* Failed. */
 		return EILSEQ;
 	}
 
-	memset(actual_digest, 0, sizeof(actual_digest));
+	kern_memset(actual_digest, 0, sizeof(actual_digest));
 
 	/* Describes the image the fixed layout says this is. */
 	result.bytes = data;
@@ -690,7 +690,7 @@ drv_rtl8822b_firmware_release(
 		kern_free(firmware->bytes);
 	}
 
-	memset(firmware, 0, sizeof(*firmware));
+	kern_memset(firmware, 0, sizeof(*firmware));
 }
 
 /*
@@ -713,8 +713,8 @@ drv_rtl8822b_firmware_load(
 	error = firmware_blob_state(firmware, &replace_owned);
 	if (error != 0)
 		return error;
-	memset(&lease, 0, sizeof(lease));
-	memset(&result, 0, sizeof(result));
+	kern_memset(&lease, 0, sizeof(lease));
+	kern_memset(&result, 0, sizeof(result));
 
 	/* Checks the operation status. */
 	error = file_openat(&kern_cwdinfo, RTL8822B_FIRMWARE_PATH,
@@ -866,7 +866,7 @@ firmware_walk_segment(
 			/* Failed. */
 			return EOVERFLOW;
 		}
-		memset(&chunk, 0, sizeof(chunk));
+		kern_memset(&chunk, 0, sizeof(chunk));
 		chunk.segment = segment;
 		chunk.file_offset = file_offset + offset;
 		chunk.destination = destination + (uint32_t)offset;
@@ -1051,7 +1051,7 @@ drv_rtl8822b_firmware_tx_descriptor(
 		/* Failed. */
 		return EINVAL;
 	}
-	memset(descriptor, 0, RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE);
+	kern_memset(descriptor, 0, RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE);
 	store_le32(
 		descriptor,
 		(uint32_t)payload_length |
@@ -1094,7 +1094,7 @@ drv_rtl8822b_efuse_decode(
 		/* Failed. */
 		return EINVAL;
 	}
-	memset(logical, 0xff, logical_length);
+	kern_memset(logical, 0xff, logical_length);
 	/* Process each remaining element. */
 	while (physical_index < usable) {
 		/* Handles the header1 condition. */
@@ -1159,14 +1159,14 @@ drv_rtl8822b_chip_identity_parse(
 	/* Handles the identity availability. */
 	if (identity == NULL)
 		return EINVAL;
-	memset(identity, 0, sizeof(*identity));
+	kern_memset(identity, 0, sizeof(*identity));
 
 	/* Handles the cut condition. */
 	cut = (sys_cfg1 >> RTL8822B_SYS_CFG1_CUT_SHIFT) &
 	      RTL8822B_SYS_CFG1_CUT_MASK;
 	if (cut > RTL8822B_CUT_G)
 		return EOPNOTSUPP;
-	memset(&result, 0, sizeof(result));
+	kern_memset(&result, 0, sizeof(result));
 	result.cut = (uint8_t)cut;
 	result.rf_path_count =
 		(sys_cfg1 & RTL8822B_SYS_CFG1_RF_2T2R) != 0U ? 2U : 1U;
@@ -1371,14 +1371,14 @@ drv_rtl8822bu_board_parse(
 		/* Failed. */
 		return EINVAL;
 	}
-	memset(board, 0, sizeof(*board));
-	memset(&result, 0, sizeof(result));
+	kern_memset(board, 0, sizeof(*board));
+	kern_memset(&result, 0, sizeof(result));
 
 	/* Checks the operation status. */
 	error = drv_rtl8822b_chip_identity_parse(sys_cfg1, &result.chip);
 	if (error != 0)
 		return error;
-	memcpy(result.mac_address, logical + RTL8822BU_EFUSE_MAC_OFFSET,
+	kern_memcpy(result.mac_address, logical + RTL8822BU_EFUSE_MAC_OFFSET,
 	       sizeof(result.mac_address));
 
 	/* Checks the mac address valid result. */
@@ -1404,15 +1404,15 @@ drv_rtl8822bu_board_parse(
 			path * RTL8822B_EFUSE_TX_POWER_STRIDE;
 
 		/* Reads the per-path power tables out of the fuse block. */
-		memcpy(result.tx_power_2g[path].cck_base, power,
+		kern_memcpy(result.tx_power_2g[path].cck_base, power,
 		       sizeof(result.tx_power_2g[path].cck_base));
-		memcpy(result.tx_power_2g[path].bw40_base,
+		kern_memcpy(result.tx_power_2g[path].bw40_base,
 		       power + RTL8822B_2G_CCK_GROUP_COUNT,
 		       sizeof(result.tx_power_2g[path].bw40_base));
 		nibble = power[RTL8822B_EFUSE_2G_HT1_DIFF_OFFSET] & 0x0fU;
 		result.tx_power_2g[path].ofdm_diff =
 			(int8_t)(nibble < 8U ? nibble : (int)nibble - 16);
-		memcpy(result.tx_power_5g[path].bw40_base,
+		kern_memcpy(result.tx_power_5g[path].bw40_base,
 		       power + RTL8822B_EFUSE_5G_BW40_OFFSET,
 		       sizeof(result.tx_power_5g[path].bw40_base));
 		nibble = power[RTL8822B_EFUSE_5G_HT1_DIFF_OFFSET] & 0x0fU;
@@ -1467,7 +1467,7 @@ drv_rtl8822b_rx_packet_parse(
 	/* Refuses missing storage before clearing the output record. */
 	if (bytes == NULL || packet == NULL)
 		return EINVAL;
-	memset(packet, 0, sizeof(*packet));
+	kern_memset(packet, 0, sizeof(*packet));
 
 	/* Requires the complete descriptor before decoding its layout. */
 	if (length < RTL8822B_RX_DESCRIPTOR_SIZE)
@@ -1531,7 +1531,7 @@ drv_rtl8822b_rx_packet_parse(
 	}
 
 	/* Initializes shared layout fields and absent receive metadata. */
-	memset(&result, 0, sizeof(result));
+	kern_memset(&result, 0, sizeof(result));
 	result.aggregate_length = aligned;
 	result.payload = bytes + payload_offset;
 	result.rssi_dbm = -128;
@@ -3426,7 +3426,7 @@ radio_channel_apply(
 	if (!drv_rtl8822b_board_active_channel_allowed(&radio->board, channel))
 		return EOPNOTSUPP;
 	radio->power_limits_valid = 0U;
-	memset(&journal, 0, sizeof(journal));
+	kern_memset(&journal, 0, sizeof(journal));
 
 	/* Checks the operation status. */
 	error = journal_update(radio, &journal, RTL8822B_REG_TX_PAUSE, 1U,
@@ -4853,7 +4853,7 @@ drv_rtl8822b_radio_power_on(
 		/* Failed. */
 		return EINVAL;
 	}
-	memset(radio, 0, sizeof(*radio));
+	kern_memset(radio, 0, sizeof(*radio));
 	radio->transport = *transport;
 	radio->board = *board;
 
@@ -5250,7 +5250,7 @@ drv_rtl8822b_radio_stop(
 	 * inverse.
 	 */
 	if (first_error == 0)
-		memset(radio, 0, sizeof(*radio));
+		kern_memset(radio, 0, sizeof(*radio));
 
 	/* Failed. */
 	if (first_error != 0)
@@ -5301,7 +5301,7 @@ probe_request_valid(
 	if (radio == NULL || frame == NULL || length < 26U ||
 	    length > RTL8822B_MANAGEMENT_MPDU_MAX ||
 	    load_le16(frame) != 0x0040U ||
-	    memcmp(frame + 10U, radio->board.mac_address, 6U) != 0) {
+	    kern_memcmp(frame + 10U, radio->board.mac_address, 6U) != 0) {
 		/* Succeeded. */
 		return 0;
 	}
@@ -5388,7 +5388,7 @@ radio_management_frame_prepare(
 	/* Handles the capacity condition. */
 	if (capacity < total)
 		return ENOSPC;
-	memset(wire, 0, total);
+	kern_memset(wire, 0, total);
 	store_le32(wire,
 		   (uint32_t)frame_length |
 			   ((uint32_t)RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE
@@ -5407,7 +5407,7 @@ radio_management_frame_prepare(
 	for (index = 0U; index < 16U; index++)
 		checksum ^= load_le16(wire + index * 2U);
 	store_le16(wire + 28U, checksum);
-	memcpy(wire + RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE, frame,
+	kern_memcpy(wire + RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE, frame,
 	       frame_length);
 	*wire_length = total;
 	/* Succeeded. */
@@ -5473,11 +5473,11 @@ drv_rtl8822b_radio_deauthentication_prepare(
 		return EINVAL;
 	}
 
-	memset(frame, 0, sizeof(frame));
+	kern_memset(frame, 0, sizeof(frame));
 	frame[0] = 0xc0U;
-	memcpy(frame + 4U, bssid, 6U);
-	memcpy(frame + 10U, station, 6U);
-	memcpy(frame + 16U, bssid, 6U);
+	kern_memcpy(frame + 4U, bssid, 6U);
+	kern_memcpy(frame + 10U, station, 6U);
+	kern_memcpy(frame + 16U, bssid, 6U);
 	store_le16(frame + 24U, reason);
 	error = radio_management_frame_prepare(radio,
 					       wire,
@@ -5485,7 +5485,7 @@ drv_rtl8822b_radio_deauthentication_prepare(
 					       frame,
 					       sizeof(frame),
 					       wire_length);
-	memset(frame, 0, sizeof(frame));
+	kern_memset(frame, 0, sizeof(frame));
 
 	/* Reports the failure. */
 	if (error != 0)

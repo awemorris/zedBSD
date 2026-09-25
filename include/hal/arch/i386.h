@@ -9,6 +9,14 @@
 #define HAL_HAL_ARCH_I386_H
 
 /*
+ * The periodic tick, in hertz.  Every time the kernel keeps is counted in
+ * these ticks, and every conversion to and from milliseconds uses this value.
+ * The PC/AT and PC-98 ports are kept for demonstration, not speed; this is
+ * the rate their PIT has always run at.
+ */
+#define HAL_TIMER_FREQUENCY	(100U)
+
+/*
  * Signal Frame
  */
 

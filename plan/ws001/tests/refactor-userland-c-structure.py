@@ -206,13 +206,13 @@ def refactor_c(path, text):
     functions = STRUCTURE.parse_functions(text)
     if not functions:
         return text, "no-functions"
-    if path.as_posix().endswith("/libc/atomic-runtime.c"):
+    if path.as_posix().endswith("/src/libc/atomic-runtime.c"):
         return refactor_atomic_runtime(path, text), "macro-generated"
     if path.as_posix().endswith("/rtld/rtld.c"):
         return refactor_rtld(path, text), "conditional"
     conditional = has_conditional_function_regions(text, functions)
     safe_conditional_preamble = path.as_posix().endswith(
-        ("/libc/posix.c", "/libc/pthread.c"))
+        ("/src/libc/posix.c", "/src/libc/pthread.c"))
     if conditional and not safe_conditional_preamble:
         return text, "conditional"
 

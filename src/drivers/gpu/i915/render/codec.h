@@ -25,11 +25,11 @@
 
 #include "internal.h"
 
-#include <vulkan/vulkan_core.h>
+#include <libc/vulkan/vulkan_core.h>
 
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
+#include <kern/kcrt.h>
 
 uint32_t drv_i915_wire_read_u32(struct i915_wire_reader *reader);
 uint64_t drv_i915_wire_read_u64(struct i915_wire_reader *reader);

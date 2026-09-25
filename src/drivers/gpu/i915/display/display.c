@@ -41,6 +41,7 @@
 #include "takeover.h"
 #include "vbt-parse.h"
 #include "watermark.h"
+#include <kern/kcrt.h>
 
 #ifdef I915_TEST_CAPTURE
 #include "capture.h"
@@ -54,10 +55,10 @@
 #include "../runtime-pm.h"
 #include "../trace.h"
 
-#include <drivers/gpu.h>
-#include <drivers/gpu-display.h>
-#include <drivers/gpu-scanout.h>
-#include <drivers/pci.h>
+#include <drivers/gpu/gpu.h>
+#include <drivers/gpu/gpu-display.h>
+#include <drivers/gpu/gpu-scanout.h>
+#include <drivers/pci/pci.h>
 #include <hal/hal.h>
 #include <kern/clock.h>
 #include <kern/klog.h>
@@ -66,9 +67,8 @@
 #include <kern/sched.h>
 #include <kern/waitq.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 /* PCI configuration: the OpRegion base (ASLS), the revision and the subsystem ids. */
 #define I915_PCI_ASLS			0xfcU
@@ -441,7 +441,7 @@ drv_i915_display_irq_prepare(
 	pch = &display->pch;
 
 	/* Finds the PCH: display version, Alder Lake-P, a display, running as a guest. */
-	memset(pch, 0, sizeof(*pch));
+	kern_memset(pch, 0, sizeof(*pch));
 	drv_i915_detect_pch(display, pch, (int)device->gt.display_ver, 1, 1, 1);
 	kern_logf("i915: P4 intel_detect_pch: type=%d id=0x%04x source=%d bridges=%u bridge_dev=0x%04x subsys=%04x:%04x\n",
 	    pch->type,
@@ -1619,7 +1619,7 @@ i915_display_native_check(
 	gt = &device->gt;
 
 	/* The registers, the OpRegion base, the aperture and the GGTT the driver writes. */
-	memset(&nd, 0, sizeof(nd));
+	kern_memset(&nd, 0, sizeof(nd));
 	nd.mmio = &gt->mmio;
 	nd.asls = drv_i915_pci_read32(&gt->pci, I915_PCI_ASLS);
 	nd.gmadr_base = gt->gmadr_base;
@@ -1703,19 +1703,19 @@ i915_display_core_init(
 	step = drv_i915_adlp_display_step(revid);
 
 	/* The CDCLK state and hooks of this display. */
-	memset(&display->cdclk, 0, sizeof(display->cdclk));
+	kern_memset(&display->cdclk, 0, sizeof(display->cdclk));
 	drv_i915_init_cdclk_hooks(&display->cdclk, (int)gt->display_ver, step, gt->is_alderlake_p);
 	display->cdclk.m = &gt->mmio;
 	display->cdclk.sb_lock = &gt->sb_lock;
 
 	/* The power-well context: registers, the VGA client, interrupts not enabled yet. */
-	memset(&display->pwc, 0, sizeof(display->pwc));
+	kern_memset(&display->pwc, 0, sizeof(display->pwc));
 	display->pwc.mmio = &gt->mmio;
 	display->pwc.vga = &display->vga_client;
 	display->pwc.irqs_enabled = 0;
 
 	/* The display core over the one power, CDCLK, MMIO and sideband state. */
-	memset(dcore, 0, sizeof(*dcore));
+	kern_memset(dcore, 0, sizeof(*dcore));
 	dcore->pd = &display->power_domains;
 	dcore->cd = &display->cdclk;
 	dcore->pwc = &display->pwc;
@@ -1805,7 +1805,7 @@ i915_display_dmc_init(
 		path = "i915/adlp_dmc.bin";
 
 	/* Queues the load. */
-	memset(&display->dmc_dev, 0, sizeof(display->dmc_dev));
+	kern_memset(&display->dmc_dev, 0, sizeof(display->dmc_dev));
 	drv_i915_dmc_init(&display->dmc_dev, &display->dmc_wq, &gt->mmio, &display->power_domains, &display->pwc, (int)gt->display_ver, gt->is_alderlake_p, stepping, substepping, path);
 	display->dmc_inited = 1;
 	display->pwc.display_ver = (int)gt->display_ver;
@@ -1843,7 +1843,7 @@ i915_display_noirq_tail(
 	dstate = &display->dstate;
 
 	/* The mode config, with FBC's module parameter at its default. */
-	memset(dstate, 0, sizeof(*dstate));
+	kern_memset(dstate, 0, sizeof(*dstate));
 	dstate->enable_fbc_param = -1;
 	drv_i915_mode_config_init(dstate, (int)gt->display_ver, I915_PLAT_NONE);
 	display->dstate_inited = 1;
@@ -2542,7 +2542,7 @@ i915_display_query(
 		request->physical_height_mm = height_mm;
 	}
 
-	memcpy(request->name, "eDP panel", sizeof("eDP panel"));
+	kern_memcpy(request->name, "eDP panel", sizeof("eDP panel"));
 
 	/* Succeeded: the display is described. */
 	return 0;

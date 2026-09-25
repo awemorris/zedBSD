@@ -24,7 +24,7 @@
 #include <kern/thread.h>
 #include <kern/test-checkpoint.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 
 static void waitq_remove(struct wait_queue *queue, struct wait_token *token);
 

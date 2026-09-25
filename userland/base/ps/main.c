@@ -20,6 +20,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
+#include <uapi/process.h>
 #include <uapi/system.h>
 
 #define PS_MAX_PROCESSES 256
@@ -480,7 +481,7 @@ print_value(
 		printf("%d", 20 + process->nice_value);
 		break;
 	case FIELD_TIME:
-		seconds = process->cpu_ticks / 100;
+		seconds = process->cpu_ticks / KERN_PROCESS_TIMES_HZ;
 		printf("%02llu:%02llu:%02llu", seconds / 3600,
 		       seconds / 60 % 60, seconds % 60);
 		break;

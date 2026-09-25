@@ -10,7 +10,7 @@
  */
 
 #include "boot-parameters.h"
-#include <boot/pc98-handoff.h>
+#include <kern/boot.h>
 
 static void
 copy_default(char destination[KERN_BOOT_PARAMETERS_STORAGE_SIZE])

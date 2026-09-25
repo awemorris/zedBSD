@@ -16,10 +16,10 @@
 #include "i915.h"
 #include "memory.h"
 #include "ppgtt.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 #include "intel/gt-regs.h"
 
@@ -53,7 +53,7 @@ drv_i915_migrate_init(
 		return EINVAL;
 
 	/* Starts from an empty migrate state. */
-	memset(m, 0, sizeof(*m));
+	kern_memset(m, 0, sizeof(*m));
 
 	/* Finds the first copy engine (first_copy_engine()). */
 	found = i915_migrate_first_copy_engine(es, &m->engine_idx);

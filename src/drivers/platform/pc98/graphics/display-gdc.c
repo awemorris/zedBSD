@@ -10,8 +10,8 @@
  */
 
 #include "drivers/platform/pc98/graphics/display-gdc.h"
+#include <kern/kcrt.h>
 
-#include <string.h>
 
 #define GDC_WIDTH 640U
 #define GDC_HEIGHT 400U
@@ -79,7 +79,7 @@ drv_pc98_gdc_default(
 	pc98_out8_fn port_out8,
 	void *io_context)
 {
-	memset(backend, 0, sizeof(*backend));
+	kern_memset(backend, 0, sizeof(*backend));
 	backend->bios_context = bios_context;
 	backend->display_reset = display_reset;
 	backend->display_stop = display_stop;
@@ -103,7 +103,7 @@ drv_pc98_gdc_make_hal(
 	/* Handles the hal availability. */
 	if (hal == NULL || backend == NULL)
 		return 0;
-	memset(hal, 0, sizeof(*hal));
+	kern_memset(hal, 0, sizeof(*hal));
 	hal->display.context = backend;
 	hal->display.enter = gdc_enter;
 	hal->display.leave = gdc_leave;

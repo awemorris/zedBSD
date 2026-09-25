@@ -1,3 +1,0 @@
-func path_contract(): string {
-    return "NOCT-P010-PATH-FIRST";
-}

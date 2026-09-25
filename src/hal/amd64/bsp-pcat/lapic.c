@@ -12,7 +12,6 @@
  */
 
 #include <hal/hal.h>
-#include <kern/clock.h>
 #include "lapic.h"
 #include "acpi.h"
 #include "early-init-policy.h"
@@ -284,9 +283,10 @@ amd64_lapic_timer_start(
 		/*
 		 * Publishes APIC calibration before optional PIT TSC completion.
 		 * The window is 10 ms (100 Hz); the period is scaled to the
-		 * kernel's tick rate.
+		 * HAL tick rate.
 		 */
-		timer_initial = (uint32_t)(((uint64_t)elapsed * 100U) / KERN_CLOCK_HZ);
+		timer_initial = (uint32_t)(((uint64_t)elapsed * 100U) /
+		    HAL_TIMER_FREQUENCY);
 		if (measure_tsc) {
 			amd64_timecounter_pit_complete(
 				tsc_start,

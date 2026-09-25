@@ -218,9 +218,7 @@ $(eval $(call ZEDBSD_USERLAND_PACKAGE,clang,clang compiler,*,n,package,,y,\
 # object file, which is the set the plan named.
 #
 # clang decides what language it is compiling from the name it was run as,
-# so clang++ is a second copy rather than a link: the image format places
-# files, and a copy of a small driver costs less than teaching it to place
-# links.
+# so clang++ is a link to it under the other name.
 ZEDBSD_CLANG_TOOLS := ld.lld llvm-ar llvm-ranlib llvm-nm llvm-objcopy \
 	llvm-objdump llvm-readelf llvm-strip lldb lldb-server
 ZEDBSD_CLANG_LIBS := libLLVM.so.23.1 libclang-cpp.so.23.1 liblldb.so.23.1
@@ -238,22 +236,30 @@ ZEDBSD_CLANG_RESOURCE_HEADERS = $(wildcard $(ZEDBSD_CLANG_RESOURCE_DIR)/*.h)
 # same files are placed where an empty sysroot leaves the driver looking --
 # /usr/include and /usr/lib.
 #
-# The shared C library is copied rather than linked to: the image format
-# places files and cannot make a link.  The copy costs a megabyte and is not
-# a second library -- the loader answers DT_NEEDED by soname, so a program
-# linked against this copy loads the /lib one it was going to load anyway.
+# cc and ld are links to clang and ld.lld, the names build scripts
+# (autoconf, libtool) look for.  A link rather than a script that runs the
+# tool: a compile runs cc hundreds of times in a configure, and a script
+# costs a shell start on every one.
+#
+# The shared C library is copied rather than linked to.  The copy costs a
+# megabyte and is not a second library -- the loader answers DT_NEEDED by
+# soname, so a program linked against this copy loads the /lib one it was
+# going to load anyway.
 ZEDBSD_CLANG_SYSROOT_INCLUDE := $(ZEDBSD_EXTERNAL_SYSROOT)/usr/include
 ZEDBSD_CLANG_SYSROOT_HEADERS = \
 	$(shell find $(ZEDBSD_CLANG_SYSROOT_INCLUDE) -type f -name '*.h' 2>/dev/null)
 ZEDBSD_CLANG_LINK_OBJECTS := crt1.o libclang_rt.builtins.a
-ZEDBSD_CLANG_RUNTIME_LIBC := $(ZEDBSD_EXTERNAL_DYNAMIC)/libc.so
+#
+# The copy is the C library of this build, the one /lib holds: the external
+# dynamic directory belongs to the default build directory, and taking it
+# from there gave an image built elsewhere a library older than its own /lib.
+ZEDBSD_CLANG_RUNTIME_LIBC := $(strip $(if $(ZEDBSD_TOPLEVEL_BUILD),$(abspath $(BUILD))/dynamic/libc.so,$(ZEDBSD_EXTERNAL_DYNAMIC)/libc.so))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter clang,$(ZEDBSD_USER_PROGRAMS)),\
-	$(ZEDBSD_CLANG_STAGED) $(ZEDBSD_CLANG_LICENSE))
+	$(ZEDBSD_CLANG_STAGED) $(ZEDBSD_CLANG_LICENSE) $(ZEDBSD_CLANG_RUNTIME_LIBC))
 
 ZEDBSD_PACKAGE_FILES += $(if $(filter clang,$(ZEDBSD_USER_PROGRAMS)),\
 	--file /usr/bin/clang=$(ZEDBSD_CLANG_BINDIR)/clang-23 \
-	--file /usr/bin/clang++=$(ZEDBSD_CLANG_BINDIR)/clang-23 \
 	$(foreach tool,$(ZEDBSD_CLANG_TOOLS),\
 	 --file /usr/bin/$(tool)=$(ZEDBSD_CLANG_BINDIR)/$(tool)) \
 	$(foreach library,$(ZEDBSD_CLANG_LIBS),\
@@ -266,7 +272,9 @@ ZEDBSD_PACKAGE_FILES += $(if $(filter clang,$(ZEDBSD_USER_PROGRAMS)),\
 	 --file /usr/lib/$(object)=$(ZEDBSD_EXTERNAL_SYSROOT)/usr/lib/$(object)) \
 	--file /usr/lib/libc.so=$(ZEDBSD_CLANG_RUNTIME_LIBC) \
 	--file /usr/share/licenses/clang/LICENSE.TXT=$(ZEDBSD_CLANG_LICENSE) \
-	--mode /usr/bin/clang=0755 --mode /usr/bin/clang++=0755 \
+	--mode /usr/bin/clang=0755 \
 	$(foreach tool,$(ZEDBSD_CLANG_TOOLS),--mode /usr/bin/$(tool)=0755) \
 	$(foreach library,$(ZEDBSD_CLANG_LIBS),--mode /usr/lib/$(library)=0755) \
 	--mode /usr/lib/libc.so=0755)
+ZEDBSD_PACKAGE_LINKS += $(if $(filter clang,$(ZEDBSD_USER_PROGRAMS)),\
+	/usr/bin/clang++=clang /usr/bin/cc=clang /usr/bin/ld=ld.lld)

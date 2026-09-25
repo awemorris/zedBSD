@@ -1,0 +1,9 @@
+=== ich9-mmap-then-write
+serial: logged in
+AUDIOTEST MMAPPLAY frames=24000 frontier=114688 polls=27 ms=523 lead=8192 copy=1
+AUDIOTEST PLAY frames=48000 transferred=200856 underruns=0 ms=1023
+guest-status=0
+wav: format=1 channels=2 rate=48000 bits=16 frames=74387
+pattern: 24000 frames bit-exact from frame 0
+pattern: 48000 frames bit-exact from frame 25666
+check-status=0

@@ -1,0 +1,2 @@
+kcrt-format-scan: engine calls 1213, outside subset 0; check-only calls 240, outside subset 7; non-literal 1
+  non-literal: src/kern/klog.c:118 kern_vsnprintf(format)

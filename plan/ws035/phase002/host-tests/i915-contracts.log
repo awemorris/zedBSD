@@ -1,0 +1,147 @@
+=== mmio: ordinary ===
+== MMIO/forcewake/MCR contract tests (mock, GPU-free) ==
+[domain: register-to-forcewake-domain mapping]
+[FW-1: refcounted get/nested/put/put with one wake + one sleep]
+[MMIO-1: forcewaked access requires the domain held]
+[MMIO-2: masked RMW touches only masked bits]
+[MMIO-2b: Intel masked write: single write, no read-modify-write]
+[MMIO-3: posting read issues a bus read]
+[MMIO-4: auto access takes/releases forcewake around the access]
+[FW-2: ACK timeout returns error and does not leave a held ref]
+[FW-3: over-put is detected, not silently ignored]
+[MCR: steering is an exclusive locked section]
+[balance: no forcewake left held at end]
+== 43 checks, 0 failures ==
+=== mmio: ASan/UBSan ===
+== MMIO/forcewake/MCR contract tests (mock, GPU-free) ==
+[domain: register-to-forcewake-domain mapping]
+[FW-1: refcounted get/nested/put/put with one wake + one sleep]
+[MMIO-1: forcewaked access requires the domain held]
+[MMIO-2: masked RMW touches only masked bits]
+[MMIO-2b: Intel masked write: single write, no read-modify-write]
+[MMIO-3: posting read issues a bus read]
+[MMIO-4: auto access takes/releases forcewake around the access]
+[FW-2: ACK timeout returns error and does not leave a held ref]
+[FW-3: over-put is detected, not silently ignored]
+[MCR: steering is an exclusive locked section]
+[balance: no forcewake left held at end]
+== 43 checks, 0 failures ==
+=== dma: ordinary ===
+== DMA contract tests (mock backend, GPU-free) ==
+[set_info: return contract 0/errno]
+[DMA-1: non-identity mapping]
+[DMA-2: scattered pages are not base + i*PAGE]
+[DMA-3: coalescing: mapped nents < orig nents; unmap uses orig]
+[DMA-4: mapping failure: 0 return, resources released]
+[DMA-5: unmap refused while pinned into a GPU page table]
+[DMA-6: sync_for_device before use, sync_for_cpu after]
+[trace: overflow is counted (a gap != 'not run')]
+== 41 checks, 0 failures ==
+=== dma: ASan/UBSan ===
+== DMA contract tests (mock backend, GPU-free) ==
+[set_info: return contract 0/errno]
+[DMA-1: non-identity mapping]
+[DMA-2: scattered pages are not base + i*PAGE]
+[DMA-3: coalescing: mapped nents < orig nents; unmap uses orig]
+[DMA-4: mapping failure: 0 return, resources released]
+[DMA-5: unmap refused while pinned into a GPU page table]
+[DMA-6: sync_for_device before use, sync_for_cpu after]
+[trace: overflow is counted (a gap != 'not run')]
+== 41 checks, 0 failures ==
+=== pci: ordinary ===
+== PCI contract tests (mock config space, GPU-free) ==
+[cfg: typed width access assembles little-endian (pci_bus_read_config_*)]
+[cap: present caps found; absent -> 0 (pci_find_capability)]
+[bar: BAR classification IO vs MEM (pci resource flags)]
+[enable: MEM-only device enables MEM decode, NOT IO (pci_enable_resources)]
+[enable: device with an IO BAR also enables IO decode]
+[refcount: enable x2 / disable x1 leaves the device enabled (pci_enable_device / pci_disable_device)]
+[msi: setup allocates a vector, builds message from it, then enables (pci_enable_msi)]
+[msi: absent MSI cap: ENODEV, no config write, fall back to INTx]
+[msi: vector allocation failure: not enabled, no leak]
+[msi: message-config failure after alloc releases the vector]
+[power: set_power_state with no PM cap writes nothing]
+== 46 checks, 0 failures ==
+=== pci: ASan/UBSan ===
+== PCI contract tests (mock config space, GPU-free) ==
+[cfg: typed width access assembles little-endian (pci_bus_read_config_*)]
+[cap: present caps found; absent -> 0 (pci_find_capability)]
+[bar: BAR classification IO vs MEM (pci resource flags)]
+[enable: MEM-only device enables MEM decode, NOT IO (pci_enable_resources)]
+[enable: device with an IO BAR also enables IO decode]
+[refcount: enable x2 / disable x1 leaves the device enabled (pci_enable_device / pci_disable_device)]
+[msi: setup allocates a vector, builds message from it, then enables (pci_enable_msi)]
+[msi: absent MSI cap: ENODEV, no config write, fall back to INTx]
+[msi: vector allocation failure: not enabled, no leak]
+[msi: message-config failure after alloc releases the vector]
+[power: set_power_state with no PM cap writes nothing]
+== 46 checks, 0 failures ==
+=== rpm: ordinary ===
+== runtime-PM contract tests (GPU-free) ==
+[init: init_early initialises struct; autosuspend NOT enabled]
+[probe: put during probe does not suspend (autosuspend off)]
+[get_sync: while active only bumps the count]
+[enable: after enable, an idle put suspends]
+[get_sync: resume failure leaves usage incremented (caller must put)]
+[resume_and_get: resume failure unwinds usage (caller must not put)]
+[resume: a successful resume_and_get brings the device back]
+== 20 checks, 0 failures ==
+=== rpm: ASan/UBSan ===
+== runtime-PM contract tests (GPU-free) ==
+[init: init_early initialises struct; autosuspend NOT enabled]
+[probe: put during probe does not suspend (autosuspend off)]
+[get_sync: while active only bumps the count]
+[enable: after enable, an idle put suspends]
+[get_sync: resume failure leaves usage incremented (caller must put)]
+[resume_and_get: resume failure unwinds usage (caller must not put)]
+[resume: a successful resume_and_get brings the device back]
+== 20 checks, 0 failures ==
+=== pte: ordinary ===
+== GGTT/PPGTT PTE encoder contract tests (GPU-free) ==
+[range: whole [addr,addr+len) must fit under the mask]
+[ggtt: SMEM PTE = dma | PRESENT, LM bit clear]
+[ppgtt: leaf PTE = dma | PRESENT | RW (bit1 = RW, not LM)]
+[distinct: GGTT and PPGTT encode the same address differently]
+[wide: a DMA address above 4 GiB keeps its high bits]
+[align: a misaligned DMA address is rejected (not masked into range)]
+[oob: an out-of-range DMA address is rejected, not corrected]
+== 21 checks, 0 failures ==
+=== pte: ASan/UBSan ===
+== GGTT/PPGTT PTE encoder contract tests (GPU-free) ==
+[range: whole [addr,addr+len) must fit under the mask]
+[ggtt: SMEM PTE = dma | PRESENT, LM bit clear]
+[ppgtt: leaf PTE = dma | PRESENT | RW (bit1 = RW, not LM)]
+[distinct: GGTT and PPGTT encode the same address differently]
+[wide: a DMA address above 4 GiB keeps its high bits]
+[align: a misaligned DMA address is rejected (not masked into range)]
+[oob: an out-of-range DMA address is rejected, not corrected]
+== 21 checks, 0 failures ==
+=== sync: ordinary ===
+== sync / deferred-work contract tests (GPU-free) ==
+[SYNC-1: completion signalled before wait returns immediately]
+[SYNC-2: wait times out when never completed]
+[SYNC-3: completion signalled mid-wait is observed]
+[SYNC-4: N completes satisfy N waits, then timeout]
+[SYNC-5: reinit discards unconsumed signals]
+[WQ-1: queue_work does not run the work inline]
+[WQ-3: cancel before run prevents execution]
+[WQ-5: queueing an already-queued work is a no-op]
+[WQ-8: cancel_work_sync removes pending work, guarantees not running]
+== 42 checks, 0 failures ==
+=== sync: ASan/UBSan ===
+== sync / deferred-work contract tests (GPU-free) ==
+[SYNC-1: completion signalled before wait returns immediately]
+[SYNC-2: wait times out when never completed]
+[SYNC-3: completion signalled mid-wait is observed]
+[SYNC-4: N completes satisfy N waits, then timeout]
+[SYNC-5: reinit discards unconsumed signals]
+[WQ-1: queue_work does not run the work inline]
+[WQ-3: cancel before run prevents execution]
+[WQ-5: queueing an already-queued work is a no-op]
+[WQ-8: cancel_work_sync removes pending work, guarantees not running]
+== 42 checks, 0 failures ==
+i915 contract tests PASS: mmio dma pci rpm pte sync (ordinary + ASan/UBSan)
+
+real	0m8.469s
+user	0m6.717s
+sys	0m1.763s

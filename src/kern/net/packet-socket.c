@@ -20,9 +20,9 @@
 #include "kern/net/net-device.h"
 #include "kern/net/packet-buf.h"
 #include "kern/kmem.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 struct packet_endpoint {
 	struct socket socket;
@@ -135,15 +135,15 @@ packet_socket_deliver(
 		}
 
 		/* Describes the sender in the copy's source address. */
-		memset(&address, 0, sizeof(address));
+		kern_memset(&address, 0, sizeof(address));
 		address.sl2_family = AF_PACKET;
 		address.sl2_protocol = net_htons(packet->protocol);
 		address.sl2_ifindex = packet->device->ifindex;
 		address.sl2_hatype = L2_HARDWARE_ETHER;
 		address.sl2_pkttype = packet_type;
 		address.sl2_halen = 6;
-		memcpy(address.sl2_addr, source, 6);
-		memcpy(copy->source_address, &address, sizeof(address));
+		kern_memcpy(address.sl2_addr, source, 6);
+		kern_memcpy(copy->source_address, &address, sizeof(address));
 		copy->source_length = sizeof(address);
 		(void)socket_enqueue_packet(&endpoint->socket, copy);
 		socket_release(&endpoint->socket);
@@ -263,7 +263,7 @@ packet_sendto(
 		return -EMSGSIZE;
 	}
 
-	memcpy(data, buffer, length);
+	kern_memcpy(data, buffer, length);
 
 	/* Transmits it as is. */
 	error = net_device_transmit(device, packet);
@@ -308,7 +308,7 @@ packet_recvfrom(
 		copied = length;
 	else
 		copied = packet->length;
-	memcpy(buffer, packet->data, copied);
+	kern_memcpy(buffer, packet->data, copied);
 
 	/* Copies the source address, reporting its full length. */
 	if (address != NULL && address_length != NULL) {
@@ -317,7 +317,7 @@ packet_recvfrom(
 			output = *address_length;
 		else
 			output = source_length;
-		memcpy(address, packet->source_address, output);
+		kern_memcpy(address, packet->source_address, output);
 		*address_length = source_length;
 	}
 

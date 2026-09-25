@@ -1,5 +1,7 @@
 # WS031 p016 計画: executor の未実装機能
 
+Phase disposition: canceled（2026-09-23、`plan/ws031/ws.md`「残課題のブレークダウン」の子Phaseへ分割。確認項目・範囲の正本はこの文書に残す）
+
 ユーザー決定（2026-09-23）: p014 の後回し一覧のうち executor（`src/drivers/gpu/i915/render/`）の未実装機能を本 Phase にまとめ、
 計画だけ作って実行は後回しにする。
 

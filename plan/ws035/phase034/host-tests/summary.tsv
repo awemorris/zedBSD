@@ -1,0 +1,47 @@
+test	baseline	current	same	baseline_first_error	current_first_error
+src/drivers/gpu/i915/tests/contracts/run.sh	0	0	yes		
+plan/ws031/tests/run-vk-host-tests.sh	0	0	yes		
+plan/ws014/tests/run-gpu-fence-close-test.sh	0	0	yes		
+plan/ws014/tests/run-gpu-fence-payload-test.sh	0	0	yes		
+plan/ws014/tests/run-gpu-fence-reuse-test.sh	0	0	yes		
+plan/ws014/tests/run-gpu-fence-test.sh	0	0	yes		
+plan/ws014/tests/run-gpu-framework-test.sh	0	0	yes		
+plan/ws014/tests/run-gpu-job-test.sh	0	0	yes		
+plan/ws014/tests/run-gpu-placement-test.sh	0	0	yes		
+plan/ws014/tests/run-gpu-scanout-test.sh	0	0	yes		
+plan/ws014/tests/run-gpu-sharing-test.sh	0	0	yes		
+plan/ws014/tests/run-gpu-supervision-test.sh	0	0	yes		
+plan/ws014/tests/run-gpu-topology-test.sh	0	0	yes		
+plan/ws014/tests/run-pci-service-lifecycle-host.sh	0	0	yes		
+plan/ws014/tests/run-gpu-build-selection-test.py	0	0	yes		
+plan/ws029/tests/run-i915-build-selection-test.py	0	0	yes		
+plan/ws031/tests/run-mview-host-test.sh	0	0	yes		
+plan/ws031/tests/run-capture-host-test.sh	1	1	no	src/drivers/gpu/i915/display/present.c:699:(.text.i915_present_release_locked+0xec): undefined reference to `drv_i915_perf_report'	src/drivers/gpu/i915/display/present.c:700:(.text.i915_present_release_locked+0xec): undefined reference to `drv_i915_perf_report'
+plan/ws031/tests/run-dp-host-test.sh	1	1	no	src/drivers/gpu/i915/display/present.c:699:(.text.i915_present_release_locked+0xec): undefined reference to `drv_i915_perf_report'	src/drivers/gpu/i915/display/present.c:700:(.text.i915_present_release_locked+0xec): undefined reference to `drv_i915_perf_report'
+plan/ws031/tests/run-lcd-host-test.sh	1	1	no	src/drivers/gpu/i915/display/present.c:699:(.text.i915_present_release_locked+0xec): undefined reference to `drv_i915_perf_report'	src/drivers/gpu/i915/display/present.c:700:(.text.i915_present_release_locked+0xec): undefined reference to `drv_i915_perf_report'
+plan/ws031/tests/run-lcd-modeset-host-test.sh	1	1	no	src/drivers/gpu/i915/display/present.c:699:(.text.i915_present_release_locked+0xec): undefined reference to `drv_i915_perf_report'	src/drivers/gpu/i915/display/present.c:700:(.text.i915_present_release_locked+0xec): undefined reference to `drv_i915_perf_report'
+plan/ws031/tests/run-native-decide-host-test.sh	1	1	no	src/drivers/gpu/i915/display/present.c:699:(.text.i915_present_release_locked+0xec): undefined reference to `drv_i915_perf_report'	src/drivers/gpu/i915/display/present.c:700:(.text.i915_present_release_locked+0xec): undefined reference to `drv_i915_perf_report'
+plan/ws031/tests/run-opregion-host-test.sh	1	1	no	src/drivers/gpu/i915/display/present.c:699:(.text.i915_present_release_locked+0xec): undefined reference to `drv_i915_perf_report'	src/drivers/gpu/i915/display/present.c:700:(.text.i915_present_release_locked+0xec): undefined reference to `drv_i915_perf_report'
+plan/ws029/tests/run-i915-host-tests.sh	1	1	yes	command.c:(.text+0x5d7): undefined reference to `drv_i915_perf_now'	command.c:(.text+0x5d7): undefined reference to `drv_i915_perf_now'
+plan/ws018/tests/run-disklabel-host-test.sh	1	1	yes		
+plan/ws004/tests/run-gpt-host-test.sh	1	1	yes	plan/ws004/tests/gpt-host-test.c:686:56: error: invalid suffix "__UINT64_C_SUFFIX__" on integer constant	plan/ws004/tests/gpt-host-test.c:686:56: error: invalid suffix "__UINT64_C_SUFFIX__" on integer constant
+plan/ws018/tests/run-input-hid-host-test.sh	1	1	yes		
+plan/ws004/tests/run-intel-ax211-dma-test.sh	0	0	yes		
+plan/ws004/tests/run-intel-ax211-pci-test.sh	1	1	yes (after the fixture include fix; offset differs)	intel-ax211-pci-test.c:(.text+0x13d): undefined reference to `kern_logf'	intel-ax211-pci-test.c:(.text+0x1c1): undefined reference to `kern_logf'
+plan/ws004/tests/run-intel-ax211-tx-ring-test.sh	1	1	no	src/drivers/wifi/intel-ax211/intel-ax211-tx-ring.c:849:55: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant	src/drivers/wifi/intel-ax211/intel-ax211-tx-ring.c:850:55: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+plan/ws004/tests/run-nvme-admin-test.sh	0	0	yes		
+plan/ws004/tests/run-nvme-io-test.sh	0	0	yes		
+plan/ws018/tests/run-platform-layout-audit.sh	1	1	yes		
+plan/ws019/tests/run-storage-foundation-test.sh	1	1	no	src/kern/disk.c:2933:29: error: invalid suffix "__UINT64_C_SUFFIX__" on integer constant	src/kern/disk.c:2934:29: error: invalid suffix "__UINT64_C_SUFFIX__" on integer constant
+plan/ws025/tests/run-uas-command-host.sh	1	1	yes	mktemp: failed to create directory via template '//plan/ws025/temp/uas-command.XXXXXX': No such file or directory	mktemp: failed to create directory via template '//plan/ws025/temp/uas-command.XXXXXX': No such file or directory
+plan/ws025/tests/run-uas-descriptor-host.sh	1	1	yes	mktemp: failed to create directory via template '//plan/ws025/temp/uas-descriptor.XXXXXX': No such file or directory	mktemp: failed to create directory via template '//plan/ws025/temp/uas-descriptor.XXXXXX': No such file or directory
+plan/ws025/tests/run-uas-super-host.sh	1	1	yes	mktemp: failed to create directory via template '//plan/ws025/temp/uas-super.XXXXXX': No such file or directory	mktemp: failed to create directory via template '//plan/ws025/temp/uas-super.XXXXXX': No such file or directory
+plan/ws025/tests/run-uas-transport-host.sh	1	1	yes	mktemp: failed to create directory via template '//plan/ws025/temp/uas-transport.XXXXXX': No such file or directory	mktemp: failed to create directory via template '//plan/ws025/temp/uas-transport.XXXXXX': No such file or directory
+plan/ws004/tests/run-usb-cdc-ncm-wire-test.sh	0	0	yes		
+plan/ws006/tests/run-usb-hid-driver-test.sh	1	1	yes	include/kern/atomic.h:49:1: error: conflicting types for 'atomic_raw_load_acquire'; have 'unsigned int(const volatile unsigned int *)'	include/kern/atomic.h:49:1: error: conflicting types for 'atomic_raw_load_acquire'; have 'unsigned int(const volatile unsigned int *)'
+plan/ws004/tests/run-usb-recovery-contract-test.sh	1	1	yes		
+plan/ws004/tests/run-usb-rtl8822bu-driver-test.sh	1	1	no	usb-rtl8822bu-driver-test.c:(.text+0x7c84): undefined reference to `kern_malloc'	usb-rtl8822bu-driver-test.c:(.text+0x7d14): undefined reference to `kern_malloc'
+plan/ws002/tests/run-usb-shutdown-host.sh	1	1	no	src/drivers/usb/usb.c:5083:(.text.device_quarantine_selection+0x49): undefined reference to `kern_logf'	src/drivers/usb/usb.c:5084:(.text.device_quarantine_selection+0x49): undefined reference to `kern_logf'
+plan/ws004/tests/run-xhci-concurrent-urbs-test.sh	1	1	yes		
+plan/ws004/tests/run-xhci-superspeed-interrupt-context-test.sh	1	1	yes		
+plan/ws018/tests/run-legacy-bootfs-removal-host-test.sh	1	1	yes	grep: src/kern/system-device.c: No such file or directory	grep: src/kern/system-device.c: No such file or directory

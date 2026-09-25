@@ -1,0 +1,74 @@
+PASS 40/40
+PASS 40/40
+PASS 40/40
+FAIL oils/background.test.sh :: wait -n with arguments - arguments are respected (status 0, expected 0)
+FAIL oils/background.test.sh :: Signal message for killed background job (status 2, expected 0)
+PASS 38/40
+PASS 40/40
+PASS 40/40
+PASS 40/40
+FAIL oils/builtin-cd.test.sh :: arguments to pwd (status 0, expected 0)
+PASS 39/40
+PASS 40/40
+FAIL oils/builtin-kill.test.sh :: kill -15 %% kills current job (status 0, expected 0)
+FAIL oils/builtin-kill.test.sh :: kill -15 %- kills previous job (status 0, expected 0)
+FAIL oils/builtin-kill.test.sh :: kill pid and job at once (status 0, expected 0)
+FAIL oils/builtin-meta-assign.test.sh :: command local (status 0, expected 0)
+FAIL oils/builtin-meta.test.sh :: command -v executable, builtin (status 0, expected 0)
+PASS 35/40
+FAIL oils/builtin-meta.test.sh :: command -v doesn't find executable dir (status 0, expected 0)
+FAIL oils/builtin-misc.test.sh :: Print shell strings with weird chars: set and printf %q and ${x@Q} (status 2, expected 2)
+FAIL oils/builtin-misc.test.sh :: Print shell strings with normal chars: set and printf %q and ${x@Q} (status 2, expected 2)
+FAIL oils/builtin-misc.test.sh :: time pipeline (status 0, expected 0)
+PASS 36/40
+PASS 40/40
+FAIL oils/builtin-process.test.sh :: ulimit -f 1 prevents files larger 512 bytes (status 156, expected -25)
+FAIL oils/builtin-set.test.sh :: set -o lists options (status 2, expected 0)
+PASS 38/40
+FAIL oils/builtin-trap.test.sh :: trap -p is like trap: it prints the handlers and full signal names (status 0, expected 2)
+PASS 39/40
+FAIL oils/builtin-umask.test.sh :: 'umask' without args prints the umask (status 0, expected 0)
+FAIL oils/builtin-umask.test.sh :: 'umask -S' prints symbolic umask (status 0, expected 0)
+PASS 38/40
+PASS 40/40
+FAIL oils/command_.test.sh :: hash without args prints the cache (status 0, expected 0)
+FAIL oils/command_.test.sh :: hash with args (status 0, expected 0)
+PASS 38/40
+FAIL oils/divergence.test.sh :: builtin cat crashes a subshell (#2530) (status 0, expected 0)
+FAIL oils/errexit.test.sh :: errexit and time { } (status 1, expected 127)
+PASS 38/40
+FAIL oils/exit-status.test.sh :: subshell OverflowError https://github.com/oilshell/oil/issues/996 (status 0, expected 0)
+FAIL oils/exit-status.test.sh :: func subshell OverflowError https://github.com/oilshell/oil/issues/996 (status 0, expected 0)
+PASS 38/40
+FAIL oils/glob.test.sh :: glob can expand to command and arg (status 127, expected 0)
+PASS 39/40
+PASS 40/40
+PASS 40/40
+FAIL oils/parse-errors.test.sh :: Long Token - 65535 bytes (status 1, expected 0)
+FAIL oils/parse-errors.test.sh :: Token that's too long for Oils - 65536 bytes (status 1, expected 0)
+PASS 38/40
+PASS 40/40
+PASS 40/40
+PASS 40/40
+FAIL oils/sh-options.test.sh :: shopt -p -o prints 'set' options (status 2, expected 1)
+FAIL oils/sh-options.test.sh :: noclobber on &> > (status 0, expected 0)
+FAIL oils/sh-options.test.sh :: noclobber on &>> >> (status 0, expected 0)
+FAIL oils/sh-options.test.sh :: shopt -s nounset works in YSH, not in bash (status 0, expected 0)
+PASS 36/40
+FAIL oils/sh-usage.test.sh :: --rcfile in non-interactive shell prints warnings (status 0, expected 0)
+PASS 39/40
+PASS 40/40
+FAIL oils/var-num.test.sh :: $0 with -c (status 2, expected 0)
+FAIL oils/var-num.test.sh :: $0 with stdin (status 2, expected 0)
+FAIL oils/var-num.test.sh :: $0 with -i (status 2, expected 0)
+PASS 37/40
+FAIL oils/var-op-test.test.sh :: $* ("" "") and - and + (IFS=) (status 0, expected 0)
+PASS 39/40
+PASS 40/40
+FAIL oils/vars-special.test.sh :: $HOME is NOT set (status 0, expected 0)
+FAIL oils/vars-special.test.sh :: $PPID (status 0, expected 0)
+PASS 38/40
+PASS 40/40
+PASS 40/40
+PASS 25/25
+ALL-BATCHES-FINISHED

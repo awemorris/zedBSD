@@ -12,13 +12,14 @@
  * publishes its disk as the single boot device.
  */
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
-#include <drivers/disklabel.h>
+#include <drivers/disklabel/disklabel.h>
 #include <kern/disk.h>
 #include <kern/platform.h>
-#include <kern/sun4u/boot.h>
+#include <kern/boot.h>
 #include "drivers/platform/sun4u/sun4u-cmd646.h"
+#include <kern/kcrt.h>
 
 /*
  * Publishes the boot devices described by the sun4u boot handoff.
@@ -28,11 +29,11 @@
  */
 size_t
 kern_platform_init(
-	const struct boot_handoff *h,
-	struct boot_device *d,
+	const struct kern_boot_handoff *h,
+	struct kern_boot_device *d,
 	size_t capacity)
 {
-	const struct sun4u_boot_handoff *s;
+	const struct kern_sun4u_boot_handoff *s;
 
 	s = (const void *)h;
 
@@ -56,7 +57,7 @@ kern_platform_init(
 		return 0;
 
 	/* Publishes the IDE disk as the boot device. */
-	hal_memset(d, 0, sizeof(*d));
+	kern_memset(d, 0, sizeof(*d));
 	d->device_class = KERN_DEV_IDE;
 	d->display_index = 0;
 	d->bios_id = 0x80;
@@ -72,7 +73,7 @@ kern_platform_init(
  */
 void
 kern_platform_refresh_devices(
-	const struct boot_device *d,
+	const struct kern_boot_device *d,
 	size_t n)
 {
 	(void)d;
@@ -95,7 +96,7 @@ kern_platform_input_init(
  */
 struct disk *
 kern_platform_block_device(
-	const struct boot_device *d)
+	const struct kern_boot_device *d)
 {
 	struct disk *disk;
 

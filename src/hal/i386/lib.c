@@ -532,6 +532,39 @@ hal_io_wmb(
 	hal_wmb();
 }
 
+/*
+ * Reads one 8-bit device register with the HAL I/O ordering guarantee.
+ */
+uint8_t
+hal_mmio_read8(
+	const volatile void *address)
+{
+	uint8_t contents;
+
+	/* Samples the mapped register exactly once before later device reads. */
+	contents = *(const volatile uint8_t *)address;
+	hal_io_rmb();
+
+	/* Succeeded: reports the register contents observed by this access. */
+	return contents;
+}
+
+/*
+ * Writes one 8-bit device register with the HAL I/O ordering guarantee.
+ */
+void
+hal_mmio_write8(
+	volatile void *address,
+	uint8_t contents)
+{
+	/* Publishes the register update before a later device write can pass it. */
+	*(volatile uint8_t *)address = contents;
+	hal_io_wmb();
+
+	/* Succeeded: the mapped register has received this write. */
+	return;
+}
+
 /* Writes one unsigned value in the requested base and field width. */
 static void
 put_unsigned(

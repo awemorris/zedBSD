@@ -6,7 +6,7 @@ CC ?= cc
 OBJCOPY ?= objcopy
 
 CPPFLAGS := -DKERN_USER_ABI_LP64 -I$(REPO)/include \
-	-I$(REPO)/include/uapi -I$(REPO)/src -I$(REPO)/libc/include -I$(REPO)
+	-I$(REPO)/include/uapi -I$(REPO)/src -I$(REPO)/include/libc -DKERN_UAPI_NATIVE -I$(REPO)
 CFLAGS := -std=c11 -O0 -Wall -Wextra -Werror -ffunction-sections \
 	-fdata-sections
 LDFLAGS := -Wl,--gc-sections

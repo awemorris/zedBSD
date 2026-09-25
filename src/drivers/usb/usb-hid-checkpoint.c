@@ -11,15 +11,15 @@
  * Test: USB HID interrupt checkpoint
  */
 
-#include <drivers/usb.h>
-#include <errno.h>
+#include <drivers/usb/usb.h>
+#include <uapi/errno.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
 #include <stdint.h>
-#include <string.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
+#include <kern/kcrt.h>
 
 #define USB_HID_CLASS			0x03U
 #define CHECKPOINT_DRAIN_TIMEOUT_MS	5000U
@@ -226,7 +226,7 @@ checkpoint_arm(
 	error = checkpoint_begin_submit(checkpoint);
 	if (error != 0)
 		return error;
-	memset(checkpoint->buffer, 0, checkpoint->buffer_size);
+	kern_memset(checkpoint->buffer, 0, checkpoint->buffer_size);
 
 	/* Checks the operation status. */
 	error = drv_usb_urb_setup(checkpoint->urb, checkpoint->buffer,
@@ -381,7 +381,7 @@ checkpoint_attach(
 	checkpoint = kern_malloc(sizeof(*checkpoint));
 	if (checkpoint == NULL)
 		return ENOMEM;
-	memset(checkpoint, 0, sizeof(*checkpoint));
+	kern_memset(checkpoint, 0, sizeof(*checkpoint));
 	checkpoint->buffer = kern_malloc(buffer_size);
 
 	/* Handles the buffer availability. */

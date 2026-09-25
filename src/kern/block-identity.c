@@ -19,9 +19,9 @@
 #include <kern/mount.h>
 #include <kern/partition.h>
 #include <kern/swap.h>
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 static int read_bytes(struct disk *disk, uint64_t offset, size_t length, uint8_t *output);
 static void partition_identity_fill(struct disk *disk, struct block_identity *identity);
@@ -60,12 +60,12 @@ block_identity_get(
 	}
 
 	/* Starts from the partition identity. */
-	memset(identity, 0, sizeof(*identity));
+	kern_memset(identity, 0, sizeof(*identity));
 	partition_identity_fill(disk, identity);
 
 	/* Probes for a filesystem and for a swap header. */
-	memset(&filesystem, 0, sizeof(filesystem));
-	memset(&swap, 0, sizeof(swap));
+	kern_memset(&filesystem, 0, sizeof(filesystem));
+	kern_memset(&swap, 0, sizeof(swap));
 	filesystem_error = filesystem_identify(disk, &filesystem);
 	swap_error = swap_identify(disk, &swap);
 	if (filesystem_error == 0 && swap_error == 0)
@@ -120,9 +120,9 @@ block_identity_resolve(
 	*result = NULL;
 
 	/* A plain device name is looked up directly. */
-	if (strncmp(selector, "/dev/", 5U) == 0)
+	if (kern_strncmp(selector, "/dev/", 5U) == 0)
 		selector += 5U;
-	if (strchr(selector, '=') == NULL) {
+	if (kern_strchr(selector, '=') == NULL) {
 		match = disk_find(selector);
 		if (match == NULL)
 			return ENOENT;
@@ -131,16 +131,16 @@ block_identity_resolve(
 	}
 
 	/* Splits an identity selector into the field and the value. */
-	if (strncmp(selector, "UUID=", 5U) == 0) {
+	if (kern_strncmp(selector, "UUID=", 5U) == 0) {
 		required = KERN_BLKID_UUID;
 		value = selector + 5U;
-	} else if (strncmp(selector, "LABEL=", 6U) == 0) {
+	} else if (kern_strncmp(selector, "LABEL=", 6U) == 0) {
 		required = KERN_BLKID_LABEL;
 		value = selector + 6U;
-	} else if (strncmp(selector, "PARTUUID=", 9U) == 0) {
+	} else if (kern_strncmp(selector, "PARTUUID=", 9U) == 0) {
 		required = KERN_BLKID_PARTUUID;
 		value = selector + 9U;
-	} else if (strncmp(selector, "PARTLABEL=", 10U) == 0) {
+	} else if (kern_strncmp(selector, "PARTLABEL=", 10U) == 0) {
 		required = KERN_BLKID_PARTLABEL;
 		value = selector + 10U;
 	} else {
@@ -159,7 +159,7 @@ block_identity_resolve(
 		/* A partition field needs no header read. */
 		if (required == KERN_BLKID_PARTUUID ||
 		    required == KERN_BLKID_PARTLABEL) {
-			memset(&identity, 0, sizeof(identity));
+			kern_memset(&identity, 0, sizeof(identity));
 			partition_identity_fill(candidate, &identity);
 			if (identity.flags != 0U)
 				error = 0;
@@ -257,7 +257,7 @@ read_bytes(
 		}
 
 		/* Copies the overlapping bytes and advances the cursor. */
-		memcpy(output, block + within, amount);
+		kern_memcpy(output, block + within, amount);
 		output += amount;
 		offset += amount;
 		length -= amount;
@@ -288,14 +288,14 @@ partition_identity_fill(
 
 	/* Copies the UUID without traversing tables another disk may reload. */
 	if ((part->p_flags & PARTITION_HAS_UUID) != 0U) {
-		memcpy(identity->partuuid, part->p_uuid, sizeof(identity->partuuid));
+		kern_memcpy(identity->partuuid, part->p_uuid, sizeof(identity->partuuid));
 		identity->partuuid[sizeof(identity->partuuid) - 1U] = '\0';
 		identity->flags |= KERN_BLKID_PARTUUID;
 	}
 
 	/* Copies the label supplied by the same pinned record. */
 	if ((part->p_flags & PARTITION_HAS_LABEL) != 0U) {
-		memcpy(identity->partlabel, part->p_label, sizeof(identity->partlabel));
+		kern_memcpy(identity->partlabel, part->p_label, sizeof(identity->partlabel));
 		identity->partlabel[sizeof(identity->partlabel) - 1U] = '\0';
 		identity->flags |= KERN_BLKID_PARTLABEL;
 	}
@@ -330,21 +330,21 @@ swap_identify(
 	error = read_bytes(disk, 0U, sizeof(header), header);
 	if (error != 0)
 		return error;
-	if (memcmp(header, "ZEDSWAP1", 8U) != 0 &&
-	    memcmp(header, "ZEDSWAP2", 8U) != 0)
+	if (kern_memcmp(header, "ZEDSWAP1", 8U) != 0 &&
+	    kern_memcmp(header, "ZEDSWAP2", 8U) != 0)
 		return EOPNOTSUPP;
 	error = swap_header_parse(header, bytes, &info);
 	if (error != 0)
 		return error;
 
 	/* Describes the swap area by type, UUID, and label. */
-	memset(identity, 0, sizeof(*identity));
-	strcpy(identity->type, "swap");
+	kern_memset(identity, 0, sizeof(*identity));
+	kern_strcpy(identity->type, "swap");
 	identity->flags = KERN_BLKID_TYPE;
 	if (swap_header_uuid_format(&info, identity->uuid, sizeof(identity->uuid)) == 0)
 		identity->flags |= KERN_BLKID_UUID;
 	if (info.label[0] != '\0') {
-		strcpy(identity->label, info.label);
+		kern_strcpy(identity->label, info.label);
 		identity->flags |= KERN_BLKID_LABEL;
 	}
 
@@ -360,17 +360,17 @@ identity_merge_filesystem(
 {
 	/* Copies each field the filesystem provides. */
 	if ((filesystem->flags & KERN_BLKID_TYPE) != 0U) {
-		memcpy(identity->type, filesystem->type, sizeof(identity->type));
+		kern_memcpy(identity->type, filesystem->type, sizeof(identity->type));
 		identity->flags |= KERN_BLKID_TYPE;
 	}
 
 	if ((filesystem->flags & KERN_BLKID_UUID) != 0U) {
-		memcpy(identity->uuid, filesystem->uuid, sizeof(identity->uuid));
+		kern_memcpy(identity->uuid, filesystem->uuid, sizeof(identity->uuid));
 		identity->flags |= KERN_BLKID_UUID;
 	}
 
 	if ((filesystem->flags & KERN_BLKID_LABEL) != 0U) {
-		memcpy(identity->label, filesystem->label, sizeof(identity->label));
+		kern_memcpy(identity->label, filesystem->label, sizeof(identity->label));
 		identity->flags |= KERN_BLKID_LABEL;
 	}
 }
@@ -381,13 +381,13 @@ identity_load_cached(
 	const struct disk *disk,
 	struct block_identity *identity)
 {
-	memset(identity, 0, sizeof(*identity));
+	kern_memset(identity, 0, sizeof(*identity));
 	identity->flags = disk->d_identity_flags;
-	memcpy(identity->type, disk->d_identity_type, sizeof(identity->type));
-	memcpy(identity->uuid, disk->d_identity_uuid, sizeof(identity->uuid));
-	memcpy(identity->label, disk->d_identity_label, sizeof(identity->label));
-	memcpy(identity->partuuid, disk->d_identity_partuuid, sizeof(identity->partuuid));
-	memcpy(identity->partlabel, disk->d_identity_partlabel, sizeof(identity->partlabel));
+	kern_memcpy(identity->type, disk->d_identity_type, sizeof(identity->type));
+	kern_memcpy(identity->uuid, disk->d_identity_uuid, sizeof(identity->uuid));
+	kern_memcpy(identity->label, disk->d_identity_label, sizeof(identity->label));
+	kern_memcpy(identity->partuuid, disk->d_identity_partuuid, sizeof(identity->partuuid));
+	kern_memcpy(identity->partlabel, disk->d_identity_partlabel, sizeof(identity->partlabel));
 }
 
 /* Caches an identity on a disk. */
@@ -397,11 +397,11 @@ identity_store_cached(
 	const struct block_identity *identity)
 {
 	disk->d_identity_flags = identity->flags;
-	memcpy(disk->d_identity_type, identity->type, sizeof(disk->d_identity_type));
-	memcpy(disk->d_identity_uuid, identity->uuid, sizeof(disk->d_identity_uuid));
-	memcpy(disk->d_identity_label, identity->label, sizeof(disk->d_identity_label));
-	memcpy(disk->d_identity_partuuid, identity->partuuid, sizeof(disk->d_identity_partuuid));
-	memcpy(disk->d_identity_partlabel, identity->partlabel, sizeof(disk->d_identity_partlabel));
+	kern_memcpy(disk->d_identity_type, identity->type, sizeof(disk->d_identity_type));
+	kern_memcpy(disk->d_identity_uuid, identity->uuid, sizeof(disk->d_identity_uuid));
+	kern_memcpy(disk->d_identity_label, identity->label, sizeof(disk->d_identity_label));
+	kern_memcpy(disk->d_identity_partuuid, identity->partuuid, sizeof(disk->d_identity_partuuid));
+	kern_memcpy(disk->d_identity_partlabel, identity->partlabel, sizeof(disk->d_identity_partlabel));
 	disk->d_identity_valid = 1U;
 }
 

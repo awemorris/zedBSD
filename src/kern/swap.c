@@ -17,10 +17,9 @@
 #include "kern/swap.h"
 #include "kern/kmem.h"
 #include "kern/lock.h"
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
 #include <stddef.h>
-#include <string.h>
 #include <kern/swap-boot.h>
 #include <kern/block-identity.h>
 #include <kern/boot.h>
@@ -41,9 +40,10 @@
 #include <kern/klog.h>
 #include <kern/vm-commit.h>
 #include <kern/vm-reclaim.h>
-#include <fcntl.h>
+#include <uapi/fcntl.h>
 #include <limits.h>
-#include <sys/stat.h>
+#include <uapi/stat.h>
+#include <kern/kcrt.h>
 
 #define FAT_SWAP_EXTENT_MAX 1024U
 
@@ -170,7 +170,7 @@ swap_init(
 {
 	/* Ignores a missing backend. */
 	if (backend != NULL)
-		memset(backend, 0, sizeof(*backend));
+		kern_memset(backend, 0, sizeof(*backend));
 }
 
 /*
@@ -416,7 +416,7 @@ swap_source_cancel_prepare(
 	/* Clears the tombstone. */
 	irq = spin_lock_irqsave(&swap_lock);
 
-	memset(source, 0, sizeof(*source));
+	kern_memset(source, 0, sizeof(*source));
 
 	spin_unlock_irqrestore(&swap_lock, irq);
 
@@ -658,7 +658,7 @@ swap_flush(
 	/* Rejects a missing backend. */
 	if (backend == NULL)
 		return EINVAL;
-	memset(reserved, 0, sizeof(reserved));
+	kern_memset(reserved, 0, sizeof(reserved));
 
 	/* Only an enabled backend with no removal in progress flushes. */
 	irq = spin_lock_irqsave(&swap_lock);
@@ -927,7 +927,7 @@ swap_source_remove(
 	/* Clears the tombstone. */
 	irq = spin_lock_irqsave(&swap_lock);
 
-	memset(source, 0, sizeof(*source));
+	kern_memset(source, 0, sizeof(*source));
 
 	spin_unlock_irqrestore(&swap_lock, irq);
 
@@ -959,7 +959,7 @@ swap_shutdown(
 	/* A missing or disabled backend needs no shutdown. */
 	if (backend == NULL)
 		return 0;
-	memset(detached, 0, sizeof(detached));
+	kern_memset(detached, 0, sizeof(detached));
 	irq = spin_lock_irqsave(&swap_lock);
 
 	if (!backend->enabled) {
@@ -994,7 +994,7 @@ swap_shutdown(
 		if (source->state == SWAP_SOURCE_STATE_INACTIVE)
 			continue;
 		detached[source_id] = *source;
-		memset(source, 0, sizeof(*source));
+		kern_memset(source, 0, sizeof(*source));
 		source->state = SWAP_SOURCE_STATE_REMOVING;
 	}
 
@@ -1031,7 +1031,7 @@ swap_shutdown(
 	/* Clears the backend. */
 	irq = spin_lock_irqsave(&swap_lock);
 
-	memset(backend, 0, sizeof(*backend));
+	kern_memset(backend, 0, sizeof(*backend));
 
 	spin_unlock_irqrestore(&swap_lock, irq);
 
@@ -1437,15 +1437,15 @@ kern_swap_control_get(
 		return error;
 
 	/* Copies the snapshot into the caller's record. */
-	memset(result, 0, sizeof(*result));
+	kern_memset(result, 0, sizeof(*result));
 	result->source_id = snapshot.source_id;
 	result->state = snapshot.state;
 	result->header_version = snapshot.header_version;
 	result->total_pages = snapshot.total_pages;
 	result->used_pages = snapshot.used_pages;
-	memcpy(result->uuid, snapshot.uuid, sizeof(result->uuid));
-	memcpy(result->label, snapshot.label, sizeof(result->label));
-	memcpy(result->source, snapshot.diagnostic, sizeof(result->source));
+	kern_memcpy(result->uuid, snapshot.uuid, sizeof(result->uuid));
+	kern_memcpy(result->label, snapshot.label, sizeof(result->label));
+	kern_memcpy(result->source, snapshot.diagnostic, sizeof(result->source));
 
 	/* Reports the described source. */
 	return 0;
@@ -1468,7 +1468,7 @@ swap_header_checksum(
 		return 0;
 
 	/* Selects the checksum field of the encoded version. */
-	checksum_offset = memcmp(header, "ZEDSWAP2", 8U) == 0 ? 60U : 28U;
+	checksum_offset = kern_memcmp(header, "ZEDSWAP2", 8U) == 0 ? 60U : 28U;
 
 	/* Includes all header bytes with the checksum field treated as zero. */
 	for (i = 0; i < KERN_SWAP_HEADER_SIZE; i++) {
@@ -1508,8 +1508,8 @@ swap_header_parse(
 		return EINVAL;
 
 	/* Initializes the result before selecting a supported header version. */
-	memset(&parsed, 0, sizeof(parsed));
-	if (memcmp(header, magic_v1, sizeof(magic_v1)) == 0) {
+	kern_memset(&parsed, 0, sizeof(parsed));
+	if (kern_memcmp(header, magic_v1, sizeof(magic_v1)) == 0) {
 		/* Validates the legacy fixed-size header. */
 		if ((backing_bytes != KERN_SWAP_FILE_MIN_BYTES &&
 		     backing_bytes != KERN_SWAP_FILE_MAX_BYTES) ||
@@ -1536,7 +1536,7 @@ swap_header_parse(
 		parsed.version = 1U;
 		parsed.backing_bytes = backing_bytes;
 		parsed.slot_count = slots;
-	} else if (memcmp(header, magic_v2, sizeof(magic_v2)) == 0) {
+	} else if (kern_memcmp(header, magic_v2, sizeof(magic_v2)) == 0) {
 		/* Computes the modern format's caller-sized slot range. */
 		slots = backing_bytes / SWAP_PAGE_SIZE - 1U;
 		terminated = 0;
@@ -1662,7 +1662,7 @@ kern_swap_source_init(
 	struct kern_swap_source *source)
 {
 	if (source != NULL)
-		memset(source, 0, sizeof(*source));
+		kern_memset(source, 0, sizeof(*source));
 }
 
 /*
@@ -1845,8 +1845,8 @@ kern_swap_source_prepare_file(
 	source->identity_inode = data->inode;
 	source->slot_count = (uint32_t)header_info.slot_count;
 	source->header_version = header_info.version;
-	memcpy(source->uuid, header_info.uuid, sizeof(source->uuid));
-	memcpy(source->label, header_info.label, sizeof(source->label));
+	kern_memcpy(source->uuid, header_info.uuid, sizeof(source->uuid));
+	kern_memcpy(source->label, header_info.label, sizeof(source->label));
 	source->parameter_index = parameter_index;
 	active_extents_add(data->extent_count);
 	data = NULL;
@@ -1979,8 +1979,8 @@ kern_swap_source_prepare_raw(
 	source->identity_disk = disk;
 	source->slot_count = (uint32_t)header_info.slot_count;
 	source->header_version = header_info.version;
-	memcpy(source->uuid, header_info.uuid, sizeof(source->uuid));
-	memcpy(source->label, header_info.label, sizeof(source->label));
+	kern_memcpy(source->uuid, header_info.uuid, sizeof(source->uuid));
+	kern_memcpy(source->label, header_info.label, sizeof(source->label));
 	source->parameter_index = parameter_index;
 
 	/* Reports the prepared source. */
@@ -2028,7 +2028,7 @@ kern_swap_source_set_diagnostic(
 
 	if (length == 0 || length > KERN_SWAP_SOURCE_TEXT_MAX)
 		return EINVAL;
-	memcpy(source->diagnostic, diagnostic, length + 1U);
+	kern_memcpy(source->diagnostic, diagnostic, length + 1U);
 
 	/* Reports the recorded text. */
 	return 0;
@@ -2042,7 +2042,7 @@ kern_swap_source_set_init(
 	struct kern_swap_source_set *set)
 {
 	if (set != NULL) {
-		memset(set, 0, sizeof(*set));
+		kern_memset(set, 0, sizeof(*set));
 		swap_init(&set->backend);
 	}
 }
@@ -2684,7 +2684,7 @@ kern_swap_source_set_snapshot(
 		return EBUSY;
 
 	/* An absent or merely prepared source reports inactive. */
-	memset(snapshot, 0, sizeof(*snapshot));
+	kern_memset(snapshot, 0, sizeof(*snapshot));
 	snapshot->source_id = source_id;
 	if (stats.state == SWAP_SOURCE_STATE_INACTIVE ||
 	    stats.state == SWAP_SOURCE_STATE_PREPARED) {
@@ -2703,9 +2703,9 @@ kern_swap_source_set_snapshot(
 	snapshot->header_version = metadata.header_version;
 	snapshot->total_pages = stats.total_slots;
 	snapshot->used_pages = stats.allocated_slots;
-	memcpy(snapshot->uuid, metadata.uuid, sizeof(snapshot->uuid));
-	memcpy(snapshot->label, metadata.label, sizeof(snapshot->label));
-	memcpy(snapshot->diagnostic, metadata.diagnostic,
+	kern_memcpy(snapshot->uuid, metadata.uuid, sizeof(snapshot->uuid));
+	kern_memcpy(snapshot->label, metadata.label, sizeof(snapshot->label));
+	kern_memcpy(snapshot->diagnostic, metadata.diagnostic,
 	    sizeof(snapshot->diagnostic));
 
 	/* Reports the filled snapshot. */
@@ -2995,9 +2995,9 @@ is_boot_reference(
 	/* A reference starts with "boot" and carries a colon. */
 	if (value == NULL)
 		return 0;
-	if (strncmp(value, "boot", 4U) != 0)
+	if (kern_strncmp(value, "boot", 4U) != 0)
 		return 0;
-	if (strchr(value, ':') == NULL)
+	if (kern_strchr(value, ':') == NULL)
 		return 0;
 
 	/* Reports a boot reference. */
@@ -3035,11 +3035,11 @@ selector_is_disk(
 	const char *selector)
 {
 	/* Device paths and identity selectors name disks. */
-	if (strncmp(selector, "/dev/", 5U) == 0)
+	if (kern_strncmp(selector, "/dev/", 5U) == 0)
 		return 1;
-	if (strncmp(selector, "UUID=", 5U) == 0)
+	if (kern_strncmp(selector, "UUID=", 5U) == 0)
 		return 1;
-	if (strncmp(selector, "PARTUUID=", 9U) == 0)
+	if (kern_strncmp(selector, "PARTUUID=", 9U) == 0)
 		return 1;
 
 	/* Anything else is a file path. */

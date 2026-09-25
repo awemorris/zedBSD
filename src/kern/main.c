@@ -15,7 +15,7 @@
  */
 
 #include "hal/hal.h"
-#include <drivers/i915.h>
+#include <drivers/pci/pci-i915.h>
 #include "kern/kernel.h"
 #include "kern/vfs.h"
 #include "kern/init.h"
@@ -25,19 +25,19 @@
 #include "kern/thread.h"
 #include "kern/vm-commit.h"
 #include "kern/vm-reclaim.h"
+#include <kern/kcrt.h>
 
-#include <string.h>
 
 #ifndef KERN_INIT_PATH
 #define KERN_INIT_PATH "/sbin/init"
 #endif
 
-static struct boot_handoff handoff_snapshot;
-static const struct boot_device *boot_devices;
+static struct kern_boot_handoff handoff_snapshot;
+static const struct kern_boot_device *boot_devices;
 static unsigned boot_device_count;
 
 static void boot_worker(void *argument);
-static void boot_start(const struct boot_handoff *h, const struct boot_device *platform_devices, unsigned platform_device_count);
+static void boot_start(const struct kern_boot_handoff *h, const struct kern_boot_device *platform_devices, unsigned platform_device_count);
 
 /*
  * Reports the BIOS identifier of the device the system booted from.
@@ -64,7 +64,7 @@ kern_boot_device_count(
 /*
  * Reports one published boot device by index.
  */
-const struct boot_device *
+const struct kern_boot_device *
 kern_boot_device_at(
 	unsigned index)
 {
@@ -83,8 +83,8 @@ kern_boot_device_at(
  */
 void
 kernel_main(
-	const struct boot_handoff *h,
-	const struct boot_device *platform_devices,
+	const struct kern_boot_handoff *h,
+	const struct kern_boot_device *platform_devices,
 	unsigned platform_device_count)
 {
 	struct thread *worker;
@@ -95,7 +95,7 @@ kernel_main(
 	 * not retain that identity mapping, so persistent kernel services must
 	 * refer to a kernel-owned copy after init has started.
 	 */
-	memcpy(&handoff_snapshot, h, sizeof(handoff_snapshot));
+	kern_memcpy(&handoff_snapshot, h, sizeof(handoff_snapshot));
 	boot_devices = platform_devices;
 	boot_device_count = platform_device_count;
 
@@ -134,8 +134,8 @@ boot_worker(
 /* Parses the boot parameters, mounts the root, and starts init. */
 static void
 boot_start(
-	const struct boot_handoff *h,
-	const struct boot_device *platform_devices,
+	const struct kern_boot_handoff *h,
+	const struct kern_boot_device *platform_devices,
 	unsigned platform_device_count)
 {
 	const struct kern_boot_parameters *boot_parameters;

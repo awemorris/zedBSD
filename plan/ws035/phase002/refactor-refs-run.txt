@@ -1,0 +1,55 @@
+{
+ "p002": {
+  "lines": 0,
+  "lines_needing_edit": 0,
+  "lines_plan_records": 0,
+  "include_root_changes": {},
+  "files": 0,
+  "hal_lines": 0,
+  "hal_lines_needing_edit": 0,
+  "moved": 38,
+  "stale_lines": 525,
+  "stale_lines_checked": 1
+ },
+ "p003": {
+  "lines": 1662,
+  "lines_needing_edit": 131,
+  "lines_plan_records": 1514,
+  "include_root_changes": {
+   "keep-root .->src": 14
+  },
+  "files": 145,
+  "hal_lines": 0,
+  "hal_lines_needing_edit": 0,
+  "moved": 0,
+  "stale_lines": 0,
+  "stale_lines_checked": 0
+ },
+ "p023": {
+  "lines": 9697,
+  "lines_needing_edit": 281,
+  "lines_plan_records": 3358,
+  "include_root_changes": {
+   "keep-root libc/include->include": 6052
+  },
+  "files": 1908,
+  "hal_lines": 23,
+  "hal_lines_needing_edit": 0,
+  "moved": 0,
+  "stale_lines": 0,
+  "stale_lines_checked": 0
+ },
+ "p004": {
+  "lines": 125,
+  "lines_needing_edit": 49,
+  "lines_plan_records": 74,
+  "include_root_changes": {},
+  "files": 50,
+  "hal_lines": 6,
+  "hal_lines_needing_edit": 6,
+  "moved": 0,
+  "stale_lines": 0,
+  "stale_lines_checked": 0
+ }
+}
+collisions: 3

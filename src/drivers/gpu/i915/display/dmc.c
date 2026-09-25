@@ -54,6 +54,7 @@
 #include "modeset-internal.h"
 #include "dmc.h"
 #include "power.h"
+#include <kern/kcrt.h>
 
 #include "../intel/mreg.h"
 
@@ -64,8 +65,7 @@
 #include <kern/klog.h>
 #include <kern/sched.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 /* The reference's firmware layout limits (intel_dmc.c). */
 #define PACKAGE_MAX_FW_INFO_ENTRIES	20
@@ -252,7 +252,7 @@ drv_i915_dmc_prepare(
 	struct i915_display *display;
 
 	/* Starts from an empty parse. */
-	memset(dmc, 0, sizeof(*dmc));
+	kern_memset(dmc, 0, sizeof(*dmc));
 	dmc->display_ver = display_ver;
 	dmc->stepping = stepping;
 	dmc->substepping = substepping;
@@ -628,7 +628,7 @@ i915_arena_copy(
 
 	/* Copies it after what is already stored. */
 	dst = &display->g_dmc_arena[display->g_dmc_arena_used];
-	memcpy(dst, src, n);
+	kern_memcpy(dst, src, n);
 	display->g_dmc_arena_used += n;
 
 	/* Succeeded: the copy is the display's. */

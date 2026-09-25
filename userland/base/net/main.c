@@ -74,6 +74,7 @@ static void console_help(enum console_mode mode);
 static int console_operational(struct console *console, int count, char **words);
 static int console_show(struct console *console, int count, char **words);
 static int backend(const char *operation, const char *operands, int display);
+static int watch_network(void);
 static int backend_scoped(const char *, const char *, uint32_t);
 static int backend_opcode(const char *operation, uint32_t *opcode);
 static int backend_payload(uint32_t opcode, const char *operands,
@@ -96,7 +97,7 @@ static int wifi_command(int argc, char **argv);
 static int wifi_backend(uint32_t, const unsigned char *, size_t, int);
 static int lan_command(int argc, char **argv);
 static int startup_command(void);
-static int start_detached(const char *operation);
+static int start_detached(uint32_t opcode);
 static int lan_send_policy(void);
 static int configure_loopback(const struct netconf_interface *item);
 static int mask_from_prefix(unsigned prefix, char *output, size_t capacity);
@@ -127,6 +128,125 @@ static int console_commit(struct console *, int, char **);
 static int console_rollback(struct console *);
 static int startup_matches(const struct console *, char *, size_t);
 static void release_writer_lock(struct console *);
+
+
+/*
+ * Watches the network and prints each state the daemon reports.
+ *
+ * The connection is not half-closed after the request: it stays open in
+ * both directions for as long as the watch lasts, and the daemon writes
+ * into it whenever something moves.  Each frame is the same text "net show"
+ * prints, so a reader that can read one can read the other.
+ *
+ * Runs until the daemon stops or the watcher is interrupted.
+ */
+static int
+watch_network(
+	void)
+{
+	struct sockaddr_un address;
+	struct networkd_protocol_header request, response;
+	struct networkd_field_reader reader;
+	struct networkd_field field;
+	unsigned char payload[NETWORKD_RESPONSE_MAX];
+	int descriptor;
+	int saved;
+
+	descriptor = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+
+	/* Handles the socket failure. */
+	if (descriptor < 0) {
+		fprintf(stderr, "net: watch: %s\n", strerror(errno));
+		return 1;
+	}
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	strcpy(address.sun_path, NETWORKD_SOCKET);
+
+	/* Handles a daemon that is not listening. */
+	if (connect(descriptor, (struct sockaddr *)&address,
+	    sizeof(address)) != 0) {
+		saved = errno;
+		close(descriptor);
+		fprintf(stderr, "net: watch: %s\n", strerror(saved));
+		return 1;
+	}
+	request.request_id = 1U;
+	request.opcode = NETWORKD_OP_SUBSCRIBE;
+	request.payload_length = 0U;
+
+	/* Handles a request that cannot be sent. */
+	if (networkd_protocol_write_frame(descriptor, &request, NULL) != 0) {
+		saved = errno;
+		close(descriptor);
+		fprintf(stderr, "net: watch: %s\n", strerror(saved));
+		return 1;
+	}
+
+	/* Process each state the daemon reports, until it stops reporting. */
+	for (;;) {
+		uint32_t status, error;
+		const unsigned char *stage;
+		size_t stage_length;
+
+		/* Stops when the daemon closes or the transport fails. */
+		if (networkd_protocol_read_frame(descriptor, &response,
+		    payload, sizeof(payload), NETWORKD_RESPONSE_MAX) != 0)
+			break;
+		networkd_field_reader_init(&reader, payload,
+					   response.payload_length);
+		status = NETWORKD_RESULT_OK;
+		error = 0;
+		stage = NULL;
+		stage_length = 0;
+
+		/* Process each field of the frame. */
+		while (networkd_field_read(&reader, &field) == 0) {
+			/* Handles the outcome of the frame. */
+			if (field.type == NETWORKD_FIELD_STATUS) {
+				(void)networkd_field_read_u32(&field, &status);
+				continue;
+			}
+
+			/* Handles the reason for a refusal. */
+			if (field.type == NETWORKD_FIELD_ERROR) {
+				(void)networkd_field_read_u32(&field, &error);
+				continue;
+			}
+
+			/* Handles the stage a refusal came from. */
+			if (field.type == NETWORKD_FIELD_STAGE) {
+				stage = field.value;
+				stage_length = field.length;
+				continue;
+			}
+
+			/* Skips every field but the state itself. */
+			if (field.type != NETWORKD_FIELD_OUTPUT)
+				continue;
+			(void)fwrite(field.value, 1U, field.length, stdout);
+		}
+		(void)fflush(stdout);
+
+		/*
+		 * A refusal is said, not swallowed: a watcher that the daemon
+		 * turned away would otherwise print nothing and exit as if the
+		 * daemon had simply stopped.
+		 */
+		if (status != NETWORKD_RESULT_OK) {
+			fprintf(stderr, "net: watch: %.*s: %s\n",
+				(int)stage_length,
+				stage != NULL ? (const char *)stage : "refused",
+				strerror(error != 0 ? (int)error : EIO));
+			close(descriptor);
+			return 1;
+		}
+	}
+	close(descriptor);
+
+	/* Succeeded: the watch ended because the daemon did. */
+	return 0;
+}
 
 /*
  * Runs the net command.
@@ -1195,6 +1315,15 @@ dispatch(
 	}
 
 	/* Handles the selected command-line operation. */
+	if (argc == 2 && strcmp(argv[1], "watch") == 0) {
+		/* Obtains the watch result. */
+		function_result = watch_network();
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Handles the selected command-line operation. */
 	if (argc >= 2 && strcmp(argv[1], "show") == 0 && argc <= 3) {
 		/* Obtains the backend result. */
 		function_result = backend("SHOW", argc == 3 ? argv[2] : NULL, 1);
@@ -1313,6 +1442,7 @@ command_help(
 	     "  net                         enter the interactive console\n"
 	     "  net help                    show this help\n"
 	     "  net show [interface]        show networkd state\n"
+	     "  net watch                   print the state each time it changes\n"
 	     "  net up interface            bring a link up\n"
 	     "  net down interface          bring a link down\n"
 	     "  net dhcp interface [--timeout=seconds]\n"
@@ -1885,7 +2015,7 @@ startup_command(
 	 * as long as it takes, and the wired side has no reason to stand
 	 * behind it; what the attempt reports goes to the log.
 	 */
-	(void)start_detached("WIFI_ENABLE");
+	(void)start_detached(NETWORKD_OP_WIFI_ENABLE);
 
 	/* A machine that was not told to wait is started. */
 	if (!wait_requested())
@@ -1905,7 +2035,7 @@ startup_command(
  */
 static int
 start_detached(
-	const char *operation)
+	uint32_t opcode)
 {
 	pid_t child;
 	int status;
@@ -1923,7 +2053,7 @@ start_detached(
 		if (fork() != 0)
 			_exit(0);
 		(void)setsid();
-		_exit(backend(operation, NULL, 0) == 0 ? 0 : 1);
+		_exit(wifi_backend(opcode, NULL, 0U, 0) == 0 ? 0 : 1);
 	}
 	status = 0;
 
@@ -1944,6 +2074,7 @@ usage(
 		"usage: net [command]\n"
 		"       net help\n"
 		"       net show [interface]\n"
+		"       net watch\n"
 		"       net up|down interface\n"
 		"       net dhcp interface [--timeout=seconds]\n"
 		"       net static interface ipv4 address netmask mask\n"

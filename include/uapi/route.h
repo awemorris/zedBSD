@@ -38,6 +38,12 @@ extern "C" {
 #define RTM_IFINFO_CARRIER_DOWN	2U
 #define RTM_IFINFO_REMOVAL	3U
 
+/*
+ * A device was published.  Its interface index is new, so a consumer that
+ * does not hold it reads every interface again.
+ */
+#define RTM_IFINFO_ARRIVAL	4U
+
 #define RTM_IFINFO_F_OVERFLOW	0x00000001U
 
 #define SIOCADDRT	0x0000890bUL

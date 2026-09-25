@@ -12,7 +12,7 @@
 #ifndef KERN_KERN_PROCESS_H
 #define KERN_KERN_PROCESS_H
 
-#include <sys/types.h>
+#include <uapi/types.h>
 #include <stdint.h>
 #include <uapi/signal.h>
 #include <kern/signal.h>
@@ -63,6 +63,8 @@ struct process_wait_event {
 #define PROCESS_WAIT_EVENT_STOPPED	0x02U
 #define PROCESS_WAIT_EVENT_CONTINUED	0x04U
 
+struct process_vfork_wait;
+
 struct process {
 	refcount_t refs;
 	struct spinlock lock;
@@ -96,6 +98,13 @@ struct process {
 	unsigned did_exec;
 	unsigned execing;
 	unsigned thread_count;
+
+	/*
+	 * The parent's wait while this child borrows its address space
+	 * (vfork), or NULL.  Taken under lock by whichever of exec or the
+	 * child's end comes first.
+	 */
+	struct process_vfork_wait *vfork_wait;
 
 	/*
 	 * Stop notification is committed only after all live threads
@@ -319,6 +328,15 @@ int
 process_fork(
 	struct process *parent,
 	struct process **result);
+
+int
+process_vfork(
+	struct process *parent,
+	pid_t *result);
+
+void
+process_vfork_release(
+	struct process *process);
 
 void
 process_publish(

@@ -10,13 +10,13 @@
  * LGY-98 is a C-bus dp8390-compatible board manufactured by Melco.
  */
 
-#include "drivers/pc98-lgy98.h"
-#include "drivers/dp8390.h"
+#include "drivers/platform/pc98/pc98-lgy98.h"
+#include "drivers/ethernet/dp8390.h"
 #include "kern/net/net-device.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
-#include <string.h>
 
 #include "hal/i386/i386.h"
 #include "kern/irq.h"
@@ -79,7 +79,7 @@ drv_pc98_lgy98_init(
 	 */
 	if (asm_inb(LGY_IO_BASE) == 0xffU)
 		return ENODEV;
-	memset(&lgy_dp, 0, sizeof(lgy_dp));
+	kern_memset(&lgy_dp, 0, sizeof(lgy_dp));
 	lgy_dp.bus = &lgy_bus_ops;
 	lgy_dp.tx_start_page = LGY_TX_START;
 	lgy_dp.rx_start_page = LGY_RX_START;
@@ -95,11 +95,11 @@ drv_pc98_lgy98_init(
 	lgy_device = net_device_alloc();
 	if (lgy_device == NULL)
 		return ENOSPC;
-	strcpy(lgy_device->name, "ne0");
+	kern_strcpy(lgy_device->name, "ne0");
 	lgy_device->mtu = 1500;
 	lgy_device->hwaddr_len = 6;
 	lgy_device->flags = NET_DEVICE_BROADCAST;
-	memcpy(lgy_device->hwaddr, prom, 6);
+	kern_memcpy(lgy_device->hwaddr, prom, 6);
 
 	/* Checks the operation status. */
 	error = drv_dp8390_attach(&lgy_dp, lgy_device);

@@ -112,3 +112,9 @@ is an exact byte match for the declared chain-loader input.
   never counts as success merely because some other disk could boot.
 - Source-audit evidence distinguishes production, test-only, unreferenced, and
   uncertain. Uncertain files are retained and recorded as follow-up work.
+
+## 2026-09-24: 動かない試験の削除（ws034-p049）
+
+build できない、または今の source と合わなくなった試験を、書き直さずに削除した（ユーザー指示）。
+削除した file の一覧は [`plan/ws034/phase049/deleted-tests.txt`](../../ws034/phase049/deleted-tests.txt)。
+上の説明のうち、そこに載っている file の記述は履歴である。

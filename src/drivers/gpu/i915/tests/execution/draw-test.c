@@ -30,13 +30,13 @@
 #include "../../mmio.h"
 #include "../../ppgtt.h"
 #include "../../submit.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "../../intel/gt-regs.h"
 
@@ -774,7 +774,7 @@ i915_draw_env_init(
 	struct i915_device *device)
 {
 	/* Names the GT's pieces the tests submit through. */
-	memset(env, 0, sizeof(*env));
+	kern_memset(env, 0, sizeof(*env));
 	env->es = &device->gt.engines;
 	env->vm = &device->gt.ppgtt;
 	env->gm = &device->gt.mem;
@@ -1230,7 +1230,7 @@ i915_test_draw_run(
 	int error;
 
 	/* Starts from an empty record. */
-	memset(d, 0, sizeof(*d));
+	kern_memset(d, 0, sizeof(*d));
 	t = &d->t;
 
 	/* Finds the engine the draw runs on. */
@@ -1261,7 +1261,7 @@ i915_test_draw_run(
 
 	/* Writes the fixture: a cleared target, the state page and the batch. */
 	d->mocs = drv_i915_draw_fixture_mocs();
-	memset(d->rt->cpu, 0, 4096U);
+	kern_memset(d->rt->cpu, 0, 4096U);
 	drv_i915_draw_fixture_write_state(t->shared->cpu, I915_TEST_DRAW_RT_VA, d->mocs);
 	t->batch_dwords = drv_i915_draw_fixture_build_batch(
 		(uint32_t *)t->batch->cpu,
@@ -1372,7 +1372,7 @@ i915_test_tex_run(
 	int error;
 
 	/* Starts from an empty record. */
-	memset(x, 0, sizeof(*x));
+	kern_memset(x, 0, sizeof(*x));
 	t = &x->t;
 	x->first_bad_x = -1;
 	x->first_bad_y = -1;
@@ -1559,8 +1559,8 @@ i915_r1_write_c1_state(
 	idd = page + I915_TEST_EU_IDD_OFFSET / 4U;
 
 	/* Clears the page and copies the store kernel to its start pointer. */
-	memset(page_cpu, 0, 4096U);
-	memcpy((char *)page_cpu + I915_TEST_EU_KSP_OFFSET, drv_i915_test_eu_kernel, sizeof(drv_i915_test_eu_kernel));
+	kern_memset(page_cpu, 0, 4096U);
+	kern_memcpy((char *)page_cpu + I915_TEST_EU_KSP_OFFSET, drv_i915_test_eu_kernel, sizeof(drv_i915_test_eu_kernel));
 
 	/* Writes the interface descriptor: the kernel start pointer and one thread per group. */
 	idd[0] = I915_TEST_EU_KSP_OFFSET;
@@ -1693,7 +1693,7 @@ i915_test_r1_run(
 	int wait_rc;
 
 	/* Starts from an empty record. */
-	memset(r, 0, sizeof(*r));
+	kern_memset(r, 0, sizeof(*r));
 	r->n_planned = (unsigned)(sizeof(i915_test_r1_plan_ctx) - 1U);
 
 	/* Creates the objects and the batches. */
@@ -1751,7 +1751,7 @@ i915_test_r1_step_prepare(
 	cx = &r->ctx[(unsigned)(i915_test_r1_plan_ctx[s] - 'A')];
 
 	/* Starts the step's record. */
-	memset(st, 0, sizeof(*st));
+	kern_memset(st, 0, sizeof(*st));
 	r->n_steps = s + 1U;
 	st->ctx = i915_test_r1_plan_ctx[s];
 	st->kind = i915_test_r1_plan_kind[s];
@@ -2109,7 +2109,7 @@ i915_test_t3_run_plan(
 	int wait_rc;
 
 	/* Starts from an empty record. */
-	memset(x, 0, sizeof(*x));
+	kern_memset(x, 0, sizeof(*x));
 	x->n_planned = n_plan;
 
 	/* Creates the objects and the batch. */
@@ -2169,7 +2169,7 @@ i915_test_t3_step_prepare(
 	cx = &x->ctx[(unsigned)(row->ctx - 'A')];
 
 	/* Starts the step's record. */
-	memset(st, 0, sizeof(*st));
+	kern_memset(st, 0, sizeof(*st));
 	x->n_steps = s + 1U;
 	st->ctx = row->ctx;
 	st->bind = row->bind;

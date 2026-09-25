@@ -1,26 +1,16 @@
+<!-- awesome-plan project=zedbsd record=ws026 -->
+
 # WS026: テスト資産の整理
 
-<!-- traceability:start -->
-
-## Goal traceability
-
-- Primary Milestone: **MG001 — 継続開発できる基盤が揃う**
-- Related Milestones: MG009
-- Objectives: O4, O5
-- 貢献する成果: テストの目的・範囲・保守性を整理する。AI開発研究そのものの完了とは扱わない。
-- 上位定義: [MasterのObjectives / Milestone Goals](https://github.com/awemorris/zedBSD/issues/1)
-
-既存Phaseは本WSを親として上位成果に接続する。Primaryは分類と責任の所在であり、
-各PhaseがRelatedすべてを満たすという意味ではない。成果・検証・限界は各Phaseの
-現行記録を根拠とする。今回の対応付けは状態変更・未定義作業の追加・実行許可ではない。
-
-<!-- traceability:end -->
-
-
-Last updated: 2026-09-10
-WSID: `ws026`
-Status: planned（概要のみ。Phase未定義・Queue未投入）
-Parent: [master plan](../master.md)
+<!-- awesome-plan-current:start -->
+Status: planning
+Primary Milestone: MG001
+Related Milestones: MG009
+Objectives: O4, O5
+Parent: [Master](../master.md)
+Queue: なし
+Resume point: 概要のみ。Phase 未定義
+<!-- awesome-plan-current:end -->
 
 ## 目的
 
@@ -42,7 +32,7 @@ Parent: [master plan](../master.md)
 
 ## 関連
 
-[WS025-p031](../ws025/phase031/phase.md)は
+WS025-p031（削除済み。git の履歴にある）は
 q188でユーザー受け入れ済み。そのclearは維持する。残る旧テストの整理は
 本WSへ引き継ぎ、p031や後続I/O実装の再ブロック条件にしない。
 現在のPriority全6項目へ本WSを追加する指示ではない。
@@ -51,3 +41,10 @@ q188でユーザー受け入れ済み。そのclearは維持する。残る旧�
 
 不要・重複テストが整理され、維持対象が現行実装に接続され、目的・実行方法・
 検証範囲を把握できる状態。具体的なPhaseと検証範囲は着手時に定める。
+
+
+## 2026-09-23 追加の対象
+
+`plan/ws018/tests/run-input-hid-host-test.sh` が、削除済みの `include/drivers/hid/ps2-mouse.h` と存在しない `src/drivers/hid` を参照していて動かない（ws035-p002で発見、移動前から失敗）。直すか廃止するかを、このWSで扱う。
+
+`plan/ws018/tests/run-legacy-bootfs-removal-host-test.sh` も、参照するパス（`system-device.c`）と名前（`ZEDBSD_HANDOFF_*`）が古く、移動前から失敗している（ws035-p034で確認）。直すか廃止するかを、このWSで扱う。

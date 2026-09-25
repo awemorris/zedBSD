@@ -214,3 +214,10 @@ two interface generations, retained nonempty packet-capture evidence, and
 left its source image and production configuration hashes unchanged.  This
 completes `HW-T22`, `NET-T42`, this Phase, and q049 without claiming a new
 physical-device result.
+
+## 注記（2026-09-24、ws035-p039）
+
+今の tree で試し直すと、**`usb-net` を boot disk と同じ xHCI に付けた構成は、約 3 回に 1 回起動しなかった**
+（`usb-storage: BOT CBW error=42`）。原因は xHCI driver の IMAN の読み戻しで、ws035-p039 で直した。
+別の xHCI では DHCP・ping が通る。UHCI（と EHCI の companion）では 64 byte の倍数の frame を取りこぼす
+（ws035-p044）。QEMU の `usb-net` は full speed の device である。詳細は [ws035-p039](../../ws035/phase039/phase.md)。

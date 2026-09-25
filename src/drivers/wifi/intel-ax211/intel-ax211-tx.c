@@ -51,10 +51,10 @@
  */
 
 #include "intel-ax211-tx.h"
+#include <kern/kcrt.h>
 
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #define AX211_TX_FLAG_COMMAND_RATE 0x0001U
 #define AX211_TX_FLAG_ENCRYPT_DISABLE 0x0002U
@@ -169,7 +169,7 @@ drv_intel_ax211_tx_prepare(
 	if (firmware_length > UINT16_MAX)
 		return INTEL_AX211_TX_OVERSIZED;
 
-	memset(&encoded, 0, sizeof(encoded));
+	kern_memset(&encoded, 0, sizeof(encoded));
 	flags = 0U;
 	rate = AX211_TX_RATE_ANTENNA_A |
 	       (request->band_5ghz ? AX211_TX_RATE_6M_OFDM
@@ -212,7 +212,7 @@ drv_intel_ax211_tx_prepare(
 	ax211_tx_put_le16(encoded.command + 2U, flags);
 	ax211_tx_put_le32(encoded.command + 4U, offload);
 	ax211_tx_put_le32(encoded.command + 16U, rate);
-	memcpy(encoded.command + INTEL_AX211_TX_COMMAND_FIXED_SIZE,
+	kern_memcpy(encoded.command + INTEL_AX211_TX_COMMAND_FIXED_SIZE,
 	       request->frame, header_length);
 	encoded.command_length =
 		INTEL_AX211_TX_COMMAND_FIXED_SIZE + header_length + padding;
@@ -313,7 +313,7 @@ drv_intel_ax211_tx_completion_decode(
 		 AX211_TX_STATUS_MASK;
 
 	/* Renders the notification as one completion record. */
-	memset(&decoded, 0, sizeof(decoded));
+	kern_memset(&decoded, 0, sizeof(decoded));
 	decoded.hardware_generation = hardware_generation;
 	decoded.scheduler_sequence = scheduler_sequence;
 	decoded.queue = response_queue;

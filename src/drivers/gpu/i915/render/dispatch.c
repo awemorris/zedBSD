@@ -28,7 +28,7 @@
 
 #include <kern/klog.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdint.h>
 
 static enum i915_vk_object_kind i915_dispatch_route(uint32_t opcode);

@@ -1,0 +1,4 @@
+type=oneshot
+command=/bin/sh /etc/networkd-watch-test.sh
+after=networkd,networking
+required=NO

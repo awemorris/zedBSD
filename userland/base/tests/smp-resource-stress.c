@@ -46,6 +46,9 @@ main(
 	pid_t children[WORKERS];
 	unsigned worker;
 	int system_fd;
+	int settled;
+	int snapshot_error;
+	unsigned retry;
 	int status;
 
 	system_fd = open("/dev/system", O_RDONLY);
@@ -117,8 +120,22 @@ main(
 		return 6;
 	}
 
-	/* Handles a failed resources equal operation. */
-	if (!resources_equal(&before, &after)) {
+	/*
+	 * The kernel finishes a process's teardown after waitpid() returns,
+	 * so the counts may still carry the last child for a moment.  Takes
+	 * the snapshot again for up to five seconds before calling it a leak.
+	 */
+	settled = resources_equal(&before, &after);
+	for (retry = 0; retry < 50U && !settled; retry++) {
+		usleep(100000);
+		snapshot_error = resource_snapshot(system_fd, &after);
+		if (snapshot_error != 0)
+			break;
+		settled = resources_equal(&before, &after);
+	}
+
+	/* A difference that outlives the teardown is a leak. */
+	if (!settled) {
 		print_resource_delta(&before, &after);
 		printf("SMP_STRESS_FAIL:resource-baseline\n");
 
@@ -165,6 +182,9 @@ resource_snapshot(
 	int function_result;
 
 	memset(resources, 0, sizeof(*resources));
+
+	/* Empties the page cache first: what it keeps is not a leak. */
+	(void)ioctl(system_fd, KERN_SYSTEM_DROP_CACHES, 0);
 
 	/* Obtains the ioctl result. */
 	function_result = ioctl(system_fd, KERN_SYSTEM_GET_RESOURCES, resources);

@@ -4,7 +4,7 @@
 #include "task.h"
 #include "irq.h"
 #include "bsp-rpi4/gic.h"
-#include <errno.h>
+#include <uapi/errno.h>
 
 extern char arm64_vectors[];
 void rpi4_timer_init(void);

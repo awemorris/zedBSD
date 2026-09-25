@@ -34,7 +34,7 @@ venus.PROFILES['i915'] = {
     'modules': {'transport_harness': 'venus-qemu.py', 'rfb_client': 'venus_rfb.py'},
     'evidence': EVIDENCE,
     'source_directories': ['src/drivers/gpu/i915', 'userland/base/tests/gpu-i915', 'plan/ws029/tests'],
-    'source_files': ['include/drivers/i915.h'],
+    'source_files': ['include/drivers/pci/pci-i915.h'],
 }
 HOST_SCRIPT = REPO / 'plan/ws029/tests/host-igd.sh'
 STATE_KEYS = ['driver', 'gdm', 'dev_vfio', 'drm_nodes']

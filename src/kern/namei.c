@@ -19,11 +19,11 @@
 #include "kern/cred.h"
 #include "kern/file.h"
 #include "kern/mount.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <fcntl.h>
-#include <string.h>
-#include <unistd.h>
+#include <uapi/errno.h>
+#include <uapi/fcntl.h>
+#include <uapi/unistd.h>
 
 /* Some VFS host tests deliberately link without the process subsystem. */
 extern const struct ucred *cred_current(void) __attribute__((weak));
@@ -93,7 +93,7 @@ namei_path_flags_at(
 		cred = cred_current();
 
 	/* Works on a private copy that symbolic links can rewrite. */
-	memcpy(work, path, length + 1U);
+	kern_memcpy(work, path, length + 1U);
 	path = work;
 	trailing = path[length - 1U] == '/';
 
@@ -219,10 +219,10 @@ namei_path_flags_at(
 				goto fail;
 			}
 
-			memcpy(combined, target, (size_t)target_length);
-			memcpy(combined + target_length, path + position,
+			kern_memcpy(combined, target, (size_t)target_length);
+			kern_memcpy(combined + target_length, path + position,
 				remainder + 1U);
-			memcpy(work, combined,
+			kern_memcpy(work, combined,
 				(size_t)target_length + remainder + 1U);
 			length = (size_t)target_length + remainder;
 			path = work;
@@ -375,9 +375,9 @@ namei_parent_path_at(
 		return EINVAL;
 
 	/* Copies the name, refusing dot and dot-dot. */
-	memcpy(storage, path + start, length - start);
+	kern_memcpy(storage, path + start, length - start);
 	storage[length - start] = '\0';
-	if (!strcmp(storage, ".") || !strcmp(storage, ".."))
+	if (!kern_strcmp(storage, ".") || !kern_strcmp(storage, ".."))
 		return EINVAL;
 	last->cn_nameptr = storage;
 	last->cn_namelen = length - start;
@@ -391,7 +391,7 @@ namei_parent_path_at(
 		parent_length = start;
 		while (parent_length > 1 && path[parent_length - 1U] == '/')
 			parent_length--;
-		memcpy(prefix, path, parent_length);
+		kern_memcpy(prefix, path, parent_length);
 		prefix[parent_length] = '\0';
 	}
 
@@ -457,7 +457,7 @@ cwdinfo_init(
 		return EINVAL;
 
 	/* Starts with one reference and both paths at the root. */
-	memset(context, 0, sizeof(*context));
+	kern_memset(context, 0, sizeof(*context));
 	refcount_init(&context->refs, 1);
 	spin_init(&context->lock, LOCK_RANK_PROCESS, "cwdinfo");
 	path_set(&context->root, root->p_mount, root->p_inode);
@@ -481,7 +481,7 @@ cwdinfo_destroy(
 	/* Drops both paths and clears the record. */
 	path_release(&context->root);
 	path_release(&context->cwd);
-	memset(context, 0, sizeof(*context));
+	kern_memset(context, 0, sizeof(*context));
 }
 
 /*
@@ -809,7 +809,7 @@ child_path(
 	int error;
 
 	component.cn_nameptr = name;
-	component.cn_namelen = strlen(name);
+	component.cn_namelen = kern_strlen(name);
 	component.cn_flags = COMPONENT_LAST;
 
 	/* A mount point on the name enters the mounted filesystem. */
@@ -860,8 +860,8 @@ find_child_name(
 		if (eof)
 			break;
 		if (entry.d_name[0] == '\0' ||
-		    !strcmp(entry.d_name, ".") ||
-		    !strcmp(entry.d_name, ".."))
+		    !kern_strcmp(entry.d_name, ".") ||
+		    !kern_strcmp(entry.d_name, ".."))
 			continue;
 		error = child_path(parent, entry.d_name, &candidate);
 		if (error == ENOENT)
@@ -869,7 +869,7 @@ find_child_name(
 		if (error != 0)
 			break;
 		if (path_equal(&candidate, child)) {
-			strcpy(name, entry.d_name);
+			kern_strcpy(name, entry.d_name);
 			path_release(&candidate);
 			error = 0;
 			goto out;
@@ -932,14 +932,14 @@ getcwd_once(
 		/* A mount root is named by its mount, other directories by scanning. */
 		error = mount_cross_path_parent(&current, &parent);
 		if (error == 0) {
-			length = strlen(current.p_mount->m_name);
+			length = kern_strlen(current.p_mount->m_name);
 			if (length == 0 || length > NAME_MAX) {
 				path_release(&parent);
 				error = ENOENT;
 				break;
 			}
 
-			memcpy(name, current.p_mount->m_name, length + 1U);
+			kern_memcpy(name, current.p_mount->m_name, length + 1U);
 		} else if (error == ENOENT) {
 			error = inode_lookup(current.p_inode, &dotdot,
 			    &parent_inode);
@@ -959,7 +959,7 @@ getcwd_once(
 				break;
 			}
 
-			length = strlen(name);
+			length = kern_strlen(name);
 		} else {
 			break;
 		}
@@ -972,7 +972,7 @@ getcwd_once(
 		}
 
 		position -= length;
-		memcpy(reverse + position, name, length);
+		kern_memcpy(reverse + position, name, length);
 		reverse[--position] = '/';
 		path_release(&current);
 		current = parent;
@@ -989,7 +989,7 @@ getcwd_once(
 	/* Copies the path when it fits. */
 	if (sizeof(reverse) - position > capacity)
 		return ERANGE;
-	memcpy(buffer, reverse + position, sizeof(reverse) - position);
+	kern_memcpy(buffer, reverse + position, sizeof(reverse) - position);
 
 	/* Reports the built path. */
 	return 0;

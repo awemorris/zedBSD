@@ -21,6 +21,7 @@
  */
 
 #include "ktest.h"
+#include <kern/kcrt.h>
 
 #include "../../display/internal.h"
 #include "../../display/display.h"
@@ -37,10 +38,9 @@
 #include <kern/kmem.h>
 #include <kern/lock.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 /* How many register writes the model records, in order. */
 #define I915_FAKE_WRITE_RECORDS		96U
@@ -660,7 +660,7 @@ static void
 i915_fake_open(void)
 {
 	/* Clears the model. */
-	memset(&i915_probe_fake, 0, sizeof(i915_probe_fake));
+	kern_memset(&i915_probe_fake, 0, sizeof(i915_probe_fake));
 
 	/* Points the register access at the model with no forcewake ranges. */
 	drv_i915_mmio_init(&i915_probe_mmio, &i915_fake_mmio_ops, &i915_probe_fake, NULL, 0U, NULL);
@@ -846,7 +846,7 @@ static void
 i915_vga_record_reset(void)
 {
 	/* Starts the record over. */
-	memset(&i915_probe_vga, 0, sizeof(i915_probe_vga));
+	kern_memset(&i915_probe_vga, 0, sizeof(i915_probe_vga));
 }
 
 /* Reads the fixture's frame counter, first raising the requested pipe's vblank through the display handler. */
@@ -970,18 +970,18 @@ i915_probe_irq_setup(void)
 	i915_probe_wells_set(1);
 
 	/* An Alder Lake PCH. */
-	memset(&display->pch, 0, sizeof(display->pch));
+	kern_memset(&display->pch, 0, sizeof(display->pch));
 	display->pch.type = I915_PCH_ADP;
 
 	/* The interrupt device: the model, execlists, and the private display's interrupt half. */
-	memset(&i915_probe_irq, 0, sizeof(i915_probe_irq));
+	kern_memset(&i915_probe_irq, 0, sizeof(i915_probe_irq));
 	i915_probe_irq.m = &i915_probe_mmio;
 	i915_probe_irq.submission = I915_SUBMISSION_EXECLISTS;
 	i915_probe_irq.display_ops = &i915_probe_irq_display_ops;
 	i915_probe_irq.display_context = d;
 
 	/* The display interrupt half: ADL-P with pipes and transcoders A to D and a display. */
-	memset(d, 0, sizeof(*d));
+	kern_memset(d, 0, sizeof(*d));
 	d->irq = &i915_probe_irq;
 	d->m = &i915_probe_mmio;
 	d->pd = &display->power_domains;
@@ -1207,7 +1207,7 @@ i915_probe_irq_guc(
 	struct i915_ktest *ktest)
 {
 	/* A GT-only interrupt device on the model, with GuC submission. */
-	memset(&i915_probe_guc_irq, 0, sizeof(i915_probe_guc_irq));
+	kern_memset(&i915_probe_guc_irq, 0, sizeof(i915_probe_guc_irq));
 	i915_probe_guc_irq.m = &i915_probe_mmio;
 	i915_probe_guc_irq.submission = I915_SUBMISSION_GUC;
 
@@ -1890,7 +1890,7 @@ i915_probe_irq_nodisplay(
 	struct i915_display_irq nodisplay;
 
 	/* A display interrupt half that reports no display. */
-	memset(&nodisplay, 0, sizeof(nodisplay));
+	kern_memset(&nodisplay, 0, sizeof(nodisplay));
 	nodisplay.irq = &i915_probe_irq;
 	nodisplay.m = &i915_probe_mmio;
 	nodisplay.pd = &i915_probe_display->power_domains;
@@ -1935,7 +1935,7 @@ i915_probe_wm(
 	i915_probe_fake.pcode_script_length = 2U;
 
 	/* Reads the latencies into empty records. */
-	memset(ng, 0, sizeof(*ng));
+	kern_memset(ng, 0, sizeof(*ng));
 	drv_i915_skl_setup_wm_latency(ng, 13, &i915_probe_sb_lock, &i915_probe_mmio, 0);
 
 	/* HAS_HW_SAGV_WM gives 6 levels, not 8. */
@@ -2024,7 +2024,7 @@ i915_probe_dpll(
 	t = &i915_probe_nogem_scratch;
 
 	/* Builds the ADL-P DPLL records. */
-	memset(ng, 0, sizeof(*ng));
+	kern_memset(ng, 0, sizeof(*ng));
 	drv_i915_shared_dpll_init(ng, 13, 1);
 	drv_i915_ktest_check(ktest,
 	    ng->dpll_mgr_present == 1 &&
@@ -2044,7 +2044,7 @@ i915_probe_dpll(
 	    "p5a: P5A-DPLL adlp_plls = DPLL0/1 + TBT + TC1..4 with the reference ids");
 
 	/* Display 14 gets no table invented. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	drv_i915_shared_dpll_init(t, 14, 0);
 	drv_i915_ktest_check(ktest,
 	    t->dpll_mgr_present == 0 && t->num_dplls == 0U,
@@ -2063,7 +2063,7 @@ i915_probe_dpll_native(
 	t = &i915_probe_nogem_scratch;
 
 	/* ADL-P DPLL records on an empty register model. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	drv_i915_shared_dpll_init(t, 13, 1);
 	i915_fake_open();
 
@@ -2114,7 +2114,7 @@ i915_probe_dpll_unused(
 	t = &i915_probe_nogem_scratch;
 
 	/* ADL-P DPLL records on an empty register model. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	drv_i915_shared_dpll_init(t, 13, 1);
 	i915_fake_open();
 
@@ -2158,7 +2158,7 @@ i915_probe_dpll_tc(
 	t = &i915_probe_nogem_scratch;
 
 	/* ADL-P DPLL records on an empty register model with DPLL1 on. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	drv_i915_shared_dpll_init(t, 13, 1);
 	i915_fake_open();
 	drv_i915_raw_write32(&i915_probe_mmio, 0x46014U, 0xc0000000U);
@@ -2196,7 +2196,7 @@ i915_probe_crtc(
 	ng = &i915_probe_nogem;
 
 	/* Creates pipe A's crtc in empty records. */
-	memset(ng, 0, sizeof(*ng));
+	kern_memset(ng, 0, sizeof(*ng));
 	created = drv_i915_crtc_init(ng, 13, 0U);
 
 	/* Plane ids 0,1,2,3,4 and 7. */
@@ -2223,7 +2223,7 @@ i915_probe_max_cdclk(
 	struct i915_display_nogem *ng;
 
 	ng = &i915_probe_nogem;
-	memset(ng, 0, sizeof(*ng));
+	kern_memset(ng, 0, sizeof(*ng));
 
 	/* A 38.4 MHz reference. */
 	drv_i915_update_max_cdclk(ng, 13, 38400U);
@@ -2251,7 +2251,7 @@ i915_probe_wa(
 
 	/* The ADL-P arm on registers with the bits in the opposite state. */
 	i915_fake_open();
-	memset(ng, 0, sizeof(*ng));
+	kern_memset(ng, 0, sizeof(*ng));
 	drv_i915_raw_write32(&i915_probe_mmio, 0x46540U, 0U);
 	drv_i915_raw_write32(&i915_probe_mmio, 0x46430U, 0xffffffffU);
 	i915_probe_fake.write_count = 0U;
@@ -2265,7 +2265,7 @@ i915_probe_wa(
 	    "p5a: P5A-WA Wa_22011091694 sets DPCE_GATING_DIS, Bspec49189 clears DDI_CLOCK_REG_ACCESS");
 
 	/* Display 13 that is not ADL-P has no arm. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	i915_probe_fake.write_count = 0U;
 	drv_i915_display_wa_apply(t, &i915_probe_mmio, 13, 0);
 	drv_i915_ktest_check(ktest,
@@ -2275,7 +2275,7 @@ i915_probe_wa(
 	    "p5a: P5A-WA display 13 that is not ADL-P has no arm and writes nothing");
 
 	/* The xe_d arm: Tiger Lake and friends. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	drv_i915_raw_write32(&i915_probe_mmio, 0x43224U, 0xffffffffU);
 	drv_i915_raw_write32(&i915_probe_mmio, 0x101038U, 0xffffffffU);
 	i915_probe_fake.write_count = 0U;
@@ -2378,9 +2378,9 @@ i915_probe_outputs(
 	port_mask = (1U << 0) | (1U << 1) | (1U << 3) | (1U << 4) | (1U << 5) | (1U << 6);
 
 	/* The default children, the output setup on an empty register model. */
-	memset(&i915_probe_vbt, 0, sizeof(i915_probe_vbt));
+	kern_memset(&i915_probe_vbt, 0, sizeof(i915_probe_vbt));
 	drv_i915_bios_init_vbt_missing_defaults(&i915_probe_vbt);
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	i915_fake_open();
 	drv_i915_setup_outputs(t, 13, port_mask, &i915_probe_vbt, &i915_probe_mmio);
 
@@ -2429,13 +2429,13 @@ i915_probe_outputs_early(
 	ok = 1;
 
 	/* One child. */
-	memset(v2, 0, sizeof(*v2));
+	kern_memset(v2, 0, sizeof(*v2));
 	v2->num_display_devices = 1U;
 
 	/* A DVO port that maps to no port at all. */
 	v2->display_devices[0].dvo_port = 99U;
 	v2->display_devices[0].device_type = 0x4U;
-	memset(t2, 0, sizeof(*t2));
+	kern_memset(t2, 0, sizeof(*t2));
 	drv_i915_setup_outputs(t2, 13, port_mask, v2, &i915_probe_mmio);
 	if (t2->num_encoders != 0U || t2->ddi_skip_reason[0] != I915_DDI_SKIP_PORT_NONE)
 		ok = 0;
@@ -2443,14 +2443,14 @@ i915_probe_outputs_early(
 	/* A DSI child takes the icl_dsi_init path, not intel_ddi_init (HDMIA, MIPI_OUTPUT). */
 	v2->display_devices[0].dvo_port = 0U;
 	v2->display_devices[0].device_type = 1U << 10;
-	memset(t2, 0, sizeof(*t2));
+	kern_memset(t2, 0, sizeof(*t2));
 	drv_i915_setup_outputs(t2, 13, port_mask, v2, &i915_probe_mmio);
 	if (t2->num_encoders != 0U || t2->ddi_skip_reason[0] != I915_DDI_SKIP_DSI)
 		ok = 0;
 
 	/* Neither DVI/HDMI nor DP: the reference respects it. */
 	v2->display_devices[0].device_type = 0U;
-	memset(t2, 0, sizeof(*t2));
+	kern_memset(t2, 0, sizeof(*t2));
 	drv_i915_setup_outputs(t2, 13, port_mask, v2, &i915_probe_mmio);
 	if (t2->num_encoders != 0U || t2->ddi_skip_reason[0] != I915_DDI_SKIP_NOT_DVI_HDMI_DP)
 		ok = 0;
@@ -2461,7 +2461,7 @@ i915_probe_outputs_early(
 	v2->display_devices[0].device_type = 0x4U;
 	v2->display_devices[1].dvo_port = 10U;
 	v2->display_devices[1].device_type = 0x4U;
-	memset(t2, 0, sizeof(*t2));
+	kern_memset(t2, 0, sizeof(*t2));
 	drv_i915_setup_outputs(t2, 13, port_mask, v2, &i915_probe_mmio);
 	if (t2->num_encoders != 1U || t2->ddi_skip_reason[0] != I915_DDI_SKIP_PORT_IN_USE)
 		ok = 0;
@@ -2483,7 +2483,7 @@ i915_probe_ddi_clock(
 	ok = 1;
 
 	/* A combo encoder on PHY B, whose DDI_CLK_OFF is bit 11. */
-	memset(&combo, 0, sizeof(combo));
+	kern_memset(&combo, 0, sizeof(combo));
 	combo.port = I915_PORT_B;
 	combo.phy = I915_PHY_B;
 	combo.clk_funcs = I915_DDI_CLK_ICL_COMBO;
@@ -2507,7 +2507,7 @@ i915_probe_ddi_clock(
 		ok = 0;
 
 	/* A Type-C encoder on TC1 needs both a DDI_CLK_SEL other than NONE and its TC clock not off. */
-	memset(&tc, 0, sizeof(tc));
+	kern_memset(&tc, 0, sizeof(tc));
 	tc.port = I915_PORT_TC1;
 	tc.phy = I915_PHY_F;
 	tc.clk_funcs = I915_DDI_CLK_ICL_TC;
@@ -2559,17 +2559,17 @@ i915_probe_readout(
 	/* A fresh ADL-P power-well map and a well context on the model, every well on. */
 	drv_i915_trace_init(&display->dc_trace);
 	(void)drv_i915_power_domains_init(&display->power_domains, 13U, -1, 1, &display->dc_trace);
-	memset(&display->pwc, 0, sizeof(display->pwc));
+	kern_memset(&display->pwc, 0, sizeof(display->pwc));
 	display->pwc.mmio = &i915_probe_mmio;
 	display->pwc.vga = &display->vga_client;
 	i915_probe_wells_set(1);
 
 	/* Four crtcs, the DPLLs and the default outputs. */
-	memset(rd, 0, sizeof(*rd));
+	kern_memset(rd, 0, sizeof(*rd));
 	for (pipe = 0U; pipe < 4U; pipe++)
 		(void)drv_i915_crtc_init(rd, 13, pipe);
 	drv_i915_shared_dpll_init(rd, 13, 1);
-	memset(&i915_probe_vbt, 0, sizeof(i915_probe_vbt));
+	kern_memset(&i915_probe_vbt, 0, sizeof(i915_probe_vbt));
 	drv_i915_bios_init_vbt_missing_defaults(&i915_probe_vbt);
 	drv_i915_setup_outputs(rd, 13, port_mask, &i915_probe_vbt, &i915_probe_mmio);
 
@@ -2694,7 +2694,7 @@ i915_probe_sanitize_quiet(
 	drv_i915_modeset_readout_hw_state(&i915_probe_nogem_readout, 13, &i915_probe_mmio, &display->power_domains, &display->pwc);
 
 	/* Only the shape the sanitize needs: four crtcs and the DPLLs. */
-	memset(q, 0, sizeof(*q));
+	kern_memset(q, 0, sizeof(*q));
 	for (pipe = 0U; pipe < 4U; pipe++)
 		(void)drv_i915_crtc_init(q, 13, pipe);
 	drv_i915_shared_dpll_init(q, 13, 1);
@@ -2732,7 +2732,7 @@ i915_probe_sanitize_dpll(
 	q = &i915_probe_nogem_scratch;
 
 	/* DPLL0 on and unused, DPLL1 on and used by pipe B, the TBT PLL off. */
-	memset(q, 0, sizeof(*q));
+	kern_memset(q, 0, sizeof(*q));
 	drv_i915_shared_dpll_init(q, 13, 1);
 	q->dplls[0].on = 1;
 	q->dplls[0].active_mask = 0U;
@@ -2768,7 +2768,7 @@ i915_probe_sanitize_cmtg(
 	q = &i915_probe_nogem_scratch;
 
 	/* DPLL0 and DPLL1 on and in use. */
-	memset(q, 0, sizeof(*q));
+	kern_memset(q, 0, sizeof(*q));
 	drv_i915_shared_dpll_init(q, 13, 1);
 	q->dplls[0].on = 1;
 	q->dplls[0].active_mask = 0x1U;
@@ -2796,7 +2796,7 @@ i915_probe_sanitize_fbc(
 	q = &i915_probe_nogem_scratch;
 
 	/* DPFC_CTL with the enable bit set. */
-	memset(q, 0, sizeof(*q));
+	kern_memset(q, 0, sizeof(*q));
 	drv_i915_raw_write32(&i915_probe_mmio, 0x43208U, (1U << 31) | 0x5U);
 	i915_probe_fake.write_count = 0U;
 	drv_i915_modeset_sanitize_hw_state(q, 13, I915_STEP_D0, 0x1U, &i915_probe_mmio, &display->power_domains, &display->pwc);
@@ -2807,7 +2807,7 @@ i915_probe_sanitize_fbc(
 
 	/* DPFC_CTL clear. */
 	drv_i915_raw_write32(&i915_probe_mmio, 0x43208U, 0U);
-	memset(q, 0, sizeof(*q));
+	kern_memset(q, 0, sizeof(*q));
 	i915_probe_fake.write_count = 0U;
 	drv_i915_modeset_sanitize_hw_state(q, 13, I915_STEP_D0, 0x1U, &i915_probe_mmio, &display->power_domains, &display->pwc);
 	touched = i915_fake_find(0x43208U, 0U, 0xffffffffU);
@@ -2830,7 +2830,7 @@ i915_probe_sanitize_encoder_clock(
 	q = &i915_probe_nogem_scratch;
 
 	/* A disabled encoder on PHY A and an encoder in use on PHY B. */
-	memset(q, 0, sizeof(*q));
+	kern_memset(q, 0, sizeof(*q));
 	q->num_encoders = 2U;
 	q->encoders[0].port = I915_PORT_A;
 	q->encoders[0].phy = I915_PHY_A;
@@ -2867,7 +2867,7 @@ i915_probe_sanitize_active(
 	q = &i915_probe_nogem_scratch;
 
 	/* Pipe B active with no encoder. */
-	memset(q, 0, sizeof(*q));
+	kern_memset(q, 0, sizeof(*q));
 	(void)drv_i915_crtc_init(q, 13, 1U);
 	q->crtcs[1].state.active = 1;
 
@@ -2911,7 +2911,7 @@ i915_probe_sanitize_well(
 
 	/* Counts the wells on, sanitizes, and counts again. */
 	before = i915_probe_count_enabled_wells();
-	memset(q, 0, sizeof(*q));
+	kern_memset(q, 0, sizeof(*q));
 	drv_i915_modeset_sanitize_hw_state(q, 13, I915_STEP_D0, 0U, &i915_probe_mmio, &display->power_domains, &display->pwc);
 	after = i915_probe_count_enabled_wells();
 	drv_i915_ktest_check(ktest,

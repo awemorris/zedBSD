@@ -63,6 +63,18 @@ struct pthread_tcb {
 
 static struct pthread_tcb main_tcb;
 static struct pthread_tcb *tcb_list;
+
+/*
+ * Fast paths for a process with one thread.  Finding the calling thread's
+ * control block is a system call (the thread pointer is read back from the
+ * kernel), and stdio, the cancellation points in read() and write() and
+ * pthread_setcancelstate() all ask for it.  Until a second thread is created
+ * the answer is main_tcb, and until pthread_cancel() is called no thread can
+ * have a cancellation pending.
+ */
+static volatile uint32_t main_attached;
+static volatile uint32_t threads_created;
+static volatile uint32_t cancel_requested;
 static void (*key_destructor[KEY_MAX])(void *);
 
 static volatile uint32_t key_lock;
@@ -111,6 +123,23 @@ static struct pthread_tcb *registry_remove(pthread_t tid);
 static int ensure_detached_reaper(void);
 static int usync_wait_word_absolute(volatile uint32_t *address, uint32_t value, const struct timespec *absolute, int pshared, int cancelable, clockid_t clock);
 static int cond_wait(pthread_cond_t *c, pthread_mutex_t *m, const struct timespec *absolute, clockid_t clock);
+
+/* The top bit of a condition's sequence: a thread may be waiting on it. */
+#define COND_WAITERS 0x80000000U
+
+/*
+ * How many times a lock that is held is looked at again, with a pause in
+ * between, before the thread sleeps on it (adaptive spinning): a holder
+ * running on another CPU often lets go within that time, and the sleep and
+ * wakeup through the kernel are saved.  LIBC_LOCK_SPIN in the environment
+ * sets it at startup; 0 sleeps at once.
+ */
+#define LOCK_SPIN_DEFAULT 100U
+unsigned __libc_lock_spin = LOCK_SPIN_DEFAULT;
+static void lock_spin(volatile uint32_t *word);
+
+/* The top bit of a read-write lock's sequence: a thread may be waiting. */
+#define RWLOCK_WAITERS 0x80000000U
 static int cancel_pending(void);
 static void rwlock_guard_lock(pthread_rwlock_t *lock);
 static void rwlock_guard_unlock(pthread_rwlock_t *lock);
@@ -183,7 +212,7 @@ void
 __stdio_lock_wait(
 	volatile uint32_t *word)
 {
-	(void)usync_wait_word(word, 1U, NULL);
+	(void)usync_wait_word(word, 2U, NULL);
 }
 
 /*
@@ -458,6 +487,9 @@ pthread_create(
 	initial_stack -= sizeof(uintptr_t);
 	*(uintptr_t *)initial_stack = 0U;
 #endif
+
+	/* From here on the calling thread is no longer the only one. */
+	__atomic_store_n(&threads_created, 1U, __ATOMIC_SEQ_CST);
 
 	/* Starts the trampoline with its architecture's ordinary function-entry stack. */
 	error =
@@ -735,6 +767,8 @@ __pthread_fork_child(
 
 	/* Handles the self availability. */
 	if (self != NULL) {
+		/* The child's thread has its own identity. */
+		self->tid = (pthread_t)call(KERN_SYS_thread_self, 0, 0, 0, 0, 0, 0);
 		self->next = NULL;
 		self->detached_next = NULL;
 		self->detached_queued = 0;
@@ -1182,6 +1216,7 @@ pthread_mutex_trylock(
 	pthread_mutex_t *m)
 {
 	pthread_t self;
+	uint32_t expected;
 
 	/* Handles the m availability. */
 	if (m == NULL)
@@ -1203,8 +1238,14 @@ pthread_mutex_trylock(
 			return EDEADLK;
 	}
 
-	/* Handles a failed atomic exchange n operation. */
-	if (__atomic_exchange_n(&m->locked, 1, __ATOMIC_ACQUIRE) != 0)
+	/*
+	 * Takes a free mutex as held without waiters (1).  The word is 0 when
+	 * free, 1 when held, and 2 when held with a thread asleep on it, so
+	 * that unlocking wakes the kernel only when someone waits.
+	 */
+	expected = 0;
+	if (!__atomic_compare_exchange_n(&m->locked, &expected, 1, 0,
+					 __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
 		return EBUSY;
 	m->owner = self;
 	m->count = 1;
@@ -1222,12 +1263,29 @@ pthread_mutex_lock(
 {
 	int error;
 
-	/* Continue while the operation condition remains true. */
-	while ((error = pthread_mutex_trylock(m)) == EBUSY)
-		(void)usync_wait_word_flags(&m->locked, 1, NULL, m->pshared);
+	/* Takes a free mutex without entering the kernel. */
+	error = pthread_mutex_trylock(m);
+	if (error != EBUSY)
+		return error;
 
-	/* Returns the computed result. */
-	return error;
+	/* Spins briefly for a holder on another CPU, then tries again. */
+	lock_spin(&m->locked);
+	error = pthread_mutex_trylock(m);
+	if (error != EBUSY)
+		return error;
+
+	/*
+	 * Marks the mutex as waited on (2) and sleeps until an unlock frees
+	 * it; the exchange that finds it free takes it, still marked, so the
+	 * next unlock wakes any other sleeper.
+	 */
+	while (__atomic_exchange_n(&m->locked, 2, __ATOMIC_ACQUIRE) != 0)
+		(void)usync_wait_word_flags(&m->locked, 2, NULL, m->pshared);
+	m->owner = pthread_self();
+	m->count = 1;
+
+	/* Reports successful completion. */
+	return 0;
 }
 
 /*
@@ -1245,18 +1303,25 @@ pthread_mutex_clocklock(
 	if (m == NULL)
 		return EINVAL;
 
-	/* Continue while the operation condition remains true. */
-	while ((error = pthread_mutex_trylock(m)) == EBUSY) {
-		error = usync_wait_word_absolute(&m->locked, 1, absolute,
+	/* Takes a free mutex without entering the kernel. */
+	error = pthread_mutex_trylock(m);
+	if (error != EBUSY)
+		return error;
+
+	/* Marks the mutex as waited on and sleeps until it is free or late. */
+	while (__atomic_exchange_n(&m->locked, 2, __ATOMIC_ACQUIRE) != 0) {
+		error = usync_wait_word_absolute(&m->locked, 2, absolute,
 						 m->pshared, 0, clock);
 
 		/* Handles an operation failure. */
 		if (error != 0 && error != EAGAIN && error != EINTR)
 			return error;
 	}
+	m->owner = pthread_self();
+	m->count = 1;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports successful completion. */
+	return 0;
 }
 
 /*
@@ -1292,8 +1357,10 @@ pthread_mutex_unlock(
 		return 0;
 	m->owner = 0;
 	m->count = 0;
-	__atomic_store_n(&m->locked, 0, __ATOMIC_RELEASE);
-	usync_wake_word_flags(&m->locked, 1, m->pshared);
+
+	/* Frees the mutex, waking one sleeper only when one may wait. */
+	if (__atomic_exchange_n(&m->locked, 0, __ATOMIC_RELEASE) == 2)
+		usync_wake_word_flags(&m->locked, 1, m->pshared);
 
 	/* Reports successful completion. */
 	return 0;
@@ -1479,11 +1546,22 @@ int
 pthread_cond_signal(
 	pthread_cond_t *c)
 {
+	uint32_t old;
+
 	/* Handles the c availability. */
 	if (c == NULL)
 		return EINVAL;
-	__atomic_add_fetch(&c->sequence, 1, __ATOMIC_RELEASE);
-	usync_wake_word_flags(&c->sequence, 1, c->pshared);
+
+	/* Advances the count, keeping the waiters mark for the rest. */
+	old = __atomic_load_n(&c->sequence, __ATOMIC_RELAXED);
+	while (!__atomic_compare_exchange_n(&c->sequence, &old,
+	    (old & COND_WAITERS) | ((old + 1U) & ~COND_WAITERS), 0,
+	    __ATOMIC_RELEASE, __ATOMIC_RELAXED))
+		;
+
+	/* Wakes one sleeper only when one may wait. */
+	if ((old & COND_WAITERS) != 0)
+		usync_wake_word_flags(&c->sequence, 1, c->pshared);
 
 	/* Reports successful completion. */
 	return 0;
@@ -1496,11 +1574,21 @@ int
 pthread_cond_broadcast(
 	pthread_cond_t *c)
 {
+	uint32_t old;
+
 	/* Handles the c availability. */
 	if (c == NULL)
 		return EINVAL;
-	__atomic_add_fetch(&c->sequence, 1, __ATOMIC_RELEASE);
-	usync_wake_word_flags(&c->sequence, UINT32_MAX, c->pshared);
+
+	/* Advances the count and clears the waiters mark: all will wake. */
+	old = __atomic_load_n(&c->sequence, __ATOMIC_RELAXED);
+	while (!__atomic_compare_exchange_n(&c->sequence, &old,
+	    (old + 1U) & ~COND_WAITERS, 0, __ATOMIC_RELEASE, __ATOMIC_RELAXED))
+		;
+
+	/* Wakes every sleeper only when one may wait. */
+	if ((old & COND_WAITERS) != 0)
+		usync_wake_word_flags(&c->sequence, UINT32_MAX, c->pshared);
 
 	/* Reports successful completion. */
 	return 0;
@@ -1591,7 +1679,16 @@ pthread_rwlock_rdlock(
 		/* Handles an operation failure. */
 		if (error != EBUSY)
 			return error;
-		sequence = __atomic_load_n(&lock->sequence, __ATOMIC_ACQUIRE);
+
+		/*
+		 * Marks the lock as waited on and tries once more, so that an
+		 * unlock before the mark is not slept through.
+		 */
+		sequence = __atomic_or_fetch(&lock->sequence, RWLOCK_WAITERS,
+					     __ATOMIC_ACQ_REL);
+		error = pthread_rwlock_tryrdlock(lock);
+		if (error != EBUSY)
+			return error;
 		error = usync_wait_word_flags(&lock->sequence, sequence, NULL,
 					      lock->pshared);
 
@@ -1624,7 +1721,16 @@ pthread_rwlock_clockrdlock(
 		/* Handles an operation failure. */
 		if (error != EBUSY)
 			return error;
-		sequence = __atomic_load_n(&lock->sequence, __ATOMIC_ACQUIRE);
+
+		/*
+		 * Marks the lock as waited on and tries once more, so that an
+		 * unlock before the mark is not slept through.
+		 */
+		sequence = __atomic_or_fetch(&lock->sequence, RWLOCK_WAITERS,
+					     __ATOMIC_ACQ_REL);
+		error = pthread_rwlock_tryrdlock(lock);
+		if (error != EBUSY)
+			return error;
 		error =
 		    usync_wait_word_absolute(&lock->sequence, sequence,
 					     absolute, lock->pshared, 0, clock);
@@ -1700,7 +1806,16 @@ pthread_rwlock_wrlock(
 		/* Handles an operation failure. */
 		if (error != EBUSY)
 			return error;
-		sequence = __atomic_load_n(&lock->sequence, __ATOMIC_ACQUIRE);
+
+		/*
+		 * Marks the lock as waited on and tries once more, so that an
+		 * unlock before the mark is not slept through.
+		 */
+		sequence = __atomic_or_fetch(&lock->sequence, RWLOCK_WAITERS,
+					     __ATOMIC_ACQ_REL);
+		error = pthread_rwlock_trywrlock(lock);
+		if (error != EBUSY)
+			return error;
 		error = usync_wait_word_flags(&lock->sequence, sequence, NULL,
 					      lock->pshared);
 
@@ -1733,7 +1848,16 @@ pthread_rwlock_clockwrlock(
 		/* Handles an operation failure. */
 		if (error != EBUSY)
 			return error;
-		sequence = __atomic_load_n(&lock->sequence, __ATOMIC_ACQUIRE);
+
+		/*
+		 * Marks the lock as waited on and tries once more, so that an
+		 * unlock before the mark is not slept through.
+		 */
+		sequence = __atomic_or_fetch(&lock->sequence, RWLOCK_WAITERS,
+					     __ATOMIC_ACQ_REL);
+		error = pthread_rwlock_trywrlock(lock);
+		if (error != EBUSY)
+			return error;
 		error =
 		    usync_wait_word_absolute(&lock->sequence, sequence,
 					     absolute, lock->pshared, 0, clock);
@@ -1768,6 +1892,7 @@ int
 pthread_rwlock_unlock(
 	pthread_rwlock_t *lock)
 {
+	uint32_t old;
 	int error;
 
 	error = 0;
@@ -1785,13 +1910,19 @@ pthread_rwlock_unlock(
 	else
 		error = EPERM;
 
-	/* Handles an operation failure. */
-	if (error == 0)
-		(void)__atomic_add_fetch(&lock->sequence, 1, __ATOMIC_RELEASE);
+	/* Advances the count and clears the waiters mark: all will wake. */
+	old = 0;
+	if (error == 0) {
+		old = __atomic_load_n(&lock->sequence, __ATOMIC_RELAXED);
+		while (!__atomic_compare_exchange_n(&lock->sequence, &old,
+		    (old + 1U) & ~RWLOCK_WAITERS, 0, __ATOMIC_RELEASE,
+		    __ATOMIC_RELAXED))
+			;
+	}
 	rwlock_guard_unlock(lock);
 
-	/* Handles an operation failure. */
-	if (error == 0) {
+	/* Wakes the sleepers only when one may wait. */
+	if (error == 0 && (old & RWLOCK_WAITERS) != 0) {
 		usync_wake_word_flags(&lock->sequence, UINT32_MAX,
 				      lock->pshared);
 	}
@@ -2091,21 +2222,34 @@ pthread_once(
 	/* Handles the once availability. */
 	if (once == NULL || function == NULL)
 		return EINVAL;
-	previous = __atomic_exchange_n(&once->state, 1, __ATOMIC_ACQ_REL);
 
-	/* Handles the previous condition. */
-	if (previous == 0) {
+	/*
+	 * Returns at once when the function has run, the usual case, without
+	 * writing the word.  The state is 0 before, 1 while it runs, 3 while
+	 * it runs with a thread waiting, and 2 after.
+	 */
+	if (__atomic_load_n(&once->state, __ATOMIC_ACQUIRE) == 2)
+		return 0;
+
+	/* The thread that moves 0 to 1 runs the function. */
+	previous = 0;
+	if (__atomic_compare_exchange_n(&once->state, &previous, 1, 0,
+					__ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
 		function();
-		__atomic_store_n(&once->state, 2, __ATOMIC_RELEASE);
-		usync_wake_word(&once->state, UINT32_MAX);
-	} else {
-		/* Handles the previous condition. */
-		if (previous == 2) {
-			__atomic_store_n(&once->state, 2, __ATOMIC_RELEASE);
+		previous = __atomic_exchange_n(&once->state, 2, __ATOMIC_RELEASE);
+		if (previous == 3)
 			usync_wake_word(&once->state, UINT32_MAX);
+	} else {
+		/* Marks the run as waited on, then sleeps until it is done. */
+		while (previous != 2) {
+			if (previous == 1)
+				(void)__atomic_compare_exchange_n(&once->state,
+				    &previous, 3, 0, __ATOMIC_ACQ_REL,
+				    __ATOMIC_ACQUIRE);
+			if (previous != 2)
+				(void)usync_wait_word(&once->state, 3, NULL);
+			previous = __atomic_load_n(&once->state, __ATOMIC_ACQUIRE);
 		}
-		while (__atomic_load_n(&once->state, __ATOMIC_ACQUIRE) != 2)
-			(void)usync_wait_word(&once->state, 1, NULL);
 	}
 
 	/* Reports successful completion. */
@@ -2249,6 +2393,8 @@ pthread_cancel(
 {
 	intptr_t result;
 
+	/* Published before the request, so the target's check sees it. */
+	__atomic_store_n(&cancel_requested, 1U, __ATOMIC_SEQ_CST);
 	result = call(KERN_SYS_thread_cancel, thread,
 			       KERN_THREAD_CANCEL_REQUEST, 0, 0, 0, 0);
 
@@ -2337,6 +2483,9 @@ pthread_testcancel(
 	struct pthread_tcb *tcb;
 	intptr_t pending;
 
+	/* Handles a process in which nothing was ever cancelled. */
+	if (__atomic_load_n(&cancel_requested, __ATOMIC_ACQUIRE) == 0)
+		return;
 	ensure_main();
 	tcb = self_tcb();
 
@@ -2832,13 +2981,25 @@ static void
 word_lock(
 	volatile uint32_t *word)
 {
-	/* Continue until the operation reaches a terminal state. */
-	for (;;) {
-		/* Handles a failed atomic exchange n operation. */
-		if (__atomic_exchange_n(word, 1, __ATOMIC_ACQUIRE) == 0)
-			return;
-		(void)usync_wait_word(word, 1, NULL);
-	}
+	uint32_t expected;
+
+	/*
+	 * Takes a free word as held (1); otherwise marks it waited on (2) and
+	 * sleeps, so that an unlock enters the kernel only for a sleeper.
+	 */
+	expected = 0;
+	if (__atomic_compare_exchange_n(word, &expected, 1, 0,
+					__ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+		return;
+
+	/* Spins briefly for a holder on another CPU, then tries again. */
+	lock_spin(word);
+	expected = 0;
+	if (__atomic_compare_exchange_n(word, &expected, 1, 0,
+					__ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+		return;
+	while (__atomic_exchange_n(word, 2, __ATOMIC_ACQUIRE) != 0)
+		(void)usync_wait_word(word, 2, NULL);
 }
 
 /* Supports the usync wait word operation. */
@@ -2922,8 +3083,9 @@ static void
 word_unlock(
 	volatile uint32_t *word)
 {
-	__atomic_store_n(word, 0, __ATOMIC_RELEASE);
-	usync_wake_word(word, 1);
+	/* Frees the word, waking one sleeper only when one may wait. */
+	if (__atomic_exchange_n(word, 0, __ATOMIC_RELEASE) == 2)
+		usync_wake_word(word, 1);
 }
 
 /* Supports the usync wake word operation. */
@@ -2953,6 +3115,11 @@ self_tcb(
 {
 	struct pthread_tcb *function_result;
 
+	/* Handles a process whose only thread is the attached main thread. */
+	if (__atomic_load_n(&threads_created, __ATOMIC_ACQUIRE) == 0 &&
+	    __atomic_load_n(&main_attached, __ATOMIC_ACQUIRE) != 0)
+		return &main_tcb;
+
 	/* Computes the function result. */
 	function_result = (struct pthread_tcb *)RTLD_CALL(pthread_private)();
 
@@ -2980,6 +3147,7 @@ ensure_main(
 	}
 	main_tcb.runtime_tcb = (struct __rtld_tcb *)(uintptr_t)__syscall6(
 	    KERN_SYS_thread_self, KERN_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
+	__atomic_store_n(&main_attached, 1U, __ATOMIC_RELEASE);
 }
 
 /* Supports the registry add operation. */
@@ -3107,6 +3275,8 @@ ensure_detached_reaper(
 	void)
 {
 	int error;
+	sigset_t blocked;
+	sigset_t saved;
 
 	error = 0;
 
@@ -3115,8 +3285,22 @@ ensure_detached_reaper(
 	/* Handles the detached reaper started condition. */
 	if (!detached_reaper_started) {
 		detached_reaper_started = 1;
+
+		/*
+		 * The reaper is a thread of the library, not of the program.
+		 * It starts with every signal blocked, or a process-directed
+		 * signal that the program's threads block (to sigwait for it)
+		 * is delivered to the reaper and takes its default action
+		 * there.  Raw sigprocmask: the mask is all bits, beyond what
+		 * the public helpers accept.
+		 */
+		blocked = ~(sigset_t)0;
+		(void)__syscall6(KERN_SYS_sigprocmask, SIG_BLOCK,
+				 (uintptr_t)&blocked, (uintptr_t)&saved, 0, 0, 0);
 		error = pthread_create(&detached_reaper_tid, NULL,
 				       detached_reaper, NULL);
+		(void)__syscall6(KERN_SYS_sigprocmask, SIG_SETMASK,
+				 (uintptr_t)&saved, 0, 0, 0, 0);
 
 		/* Handles an operation failure. */
 		if (error != 0)
@@ -3175,7 +3359,10 @@ cond_wait(
 	if (c == NULL || m == NULL)
 		return EINVAL;
 	pthread_testcancel();
-	sequence = __atomic_load_n(&c->sequence, __ATOMIC_ACQUIRE);
+
+	/* Marks the condition as waited on, so that a signal wakes the kernel. */
+	sequence = __atomic_or_fetch(&c->sequence, COND_WAITERS,
+				     __ATOMIC_ACQ_REL);
 	error = pthread_mutex_unlock(m);
 
 	/* Handles an operation failure. */
@@ -3260,9 +3447,25 @@ static void
 rwlock_guard_lock(
 	pthread_rwlock_t *lock)
 {
-	/* Continue while the operation condition remains true. */
-	while (__atomic_exchange_n(&lock->guard, 1, __ATOMIC_ACQUIRE) != 0) {
-		(void)usync_wait_word_flags(&lock->guard, 1, NULL,
+	uint32_t expected;
+
+	/*
+	 * Takes a free guard as held (1); otherwise marks it waited on (2)
+	 * and sleeps, so that only an unlock with a sleeper enters the kernel.
+	 */
+	expected = 0;
+	if (__atomic_compare_exchange_n(&lock->guard, &expected, 1, 0,
+					__ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+		return;
+
+	/* Spins briefly for a holder on another CPU, then tries again. */
+	lock_spin(&lock->guard);
+	expected = 0;
+	if (__atomic_compare_exchange_n(&lock->guard, &expected, 1, 0,
+					__ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+		return;
+	while (__atomic_exchange_n(&lock->guard, 2, __ATOMIC_ACQUIRE) != 0) {
+		(void)usync_wait_word_flags(&lock->guard, 2, NULL,
 					    lock->pshared);
 	}
 }
@@ -3272,8 +3475,9 @@ static void
 rwlock_guard_unlock(
 	pthread_rwlock_t *lock)
 {
-	__atomic_store_n(&lock->guard, 0, __ATOMIC_RELEASE);
-	usync_wake_word_flags(&lock->guard, 1, lock->pshared);
+	/* Frees the guard, waking one sleeper only when one may wait. */
+	if (__atomic_exchange_n(&lock->guard, 0, __ATOMIC_RELEASE) == 2)
+		usync_wake_word_flags(&lock->guard, 1, lock->pshared);
 }
 
 /* Supports the barrier guard lock operation. */
@@ -3281,9 +3485,25 @@ static void
 barrier_guard_lock(
 	pthread_barrier_t *barrier)
 {
-	/* Continue while the operation condition remains true. */
-	while (__atomic_exchange_n(&barrier->guard, 1, __ATOMIC_ACQUIRE) != 0) {
-		(void)usync_wait_word_flags(&barrier->guard, 1, NULL,
+	uint32_t expected;
+
+	/*
+	 * Takes a free guard as held (1); otherwise marks it waited on (2)
+	 * and sleeps, so that only an unlock with a sleeper enters the kernel.
+	 */
+	expected = 0;
+	if (__atomic_compare_exchange_n(&barrier->guard, &expected, 1, 0,
+					__ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+		return;
+
+	/* Spins briefly for a holder on another CPU, then tries again. */
+	lock_spin(&barrier->guard);
+	expected = 0;
+	if (__atomic_compare_exchange_n(&barrier->guard, &expected, 1, 0,
+					__ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+		return;
+	while (__atomic_exchange_n(&barrier->guard, 2, __ATOMIC_ACQUIRE) != 0) {
+		(void)usync_wait_word_flags(&barrier->guard, 2, NULL,
 					    barrier->pshared);
 	}
 }
@@ -3293,8 +3513,9 @@ static void
 barrier_guard_unlock(
 	pthread_barrier_t *barrier)
 {
-	__atomic_store_n(&barrier->guard, 0, __ATOMIC_RELEASE);
-	usync_wake_word_flags(&barrier->guard, 1, barrier->pshared);
+	/* Frees the guard, waking one sleeper only when one may wait. */
+	if (__atomic_exchange_n(&barrier->guard, 0, __ATOMIC_RELEASE) == 2)
+		usync_wake_word_flags(&barrier->guard, 1, barrier->pshared);
 }
 
 /* Supports the c11 result operation. */
@@ -3497,3 +3718,25 @@ __cxa_thread_atexit(void (*destructor)(void *), void *object, void *handle)
 	/* Returns the computed result. */
 	return __cxa_thread_atexit_impl(destructor, object, handle);
 }
+
+/*
+ * Waits a little, in user space, for a held lock word to become free.
+ */
+static void
+lock_spin(
+	volatile uint32_t *word)
+{
+	unsigned count;
+
+	/* Looks again until the word is free or the budget is spent. */
+	for (count = 0; count < __libc_lock_spin; count++) {
+		if (__atomic_load_n(word, __ATOMIC_RELAXED) == 0)
+			return;
+#if defined(__x86_64__) || defined(__i386__)
+		__asm__ volatile("pause" ::: "memory");
+#elif defined(__aarch64__)
+		__asm__ volatile("yield" ::: "memory");
+#endif
+	}
+}
+

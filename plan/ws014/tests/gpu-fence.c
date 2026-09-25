@@ -12,7 +12,7 @@
 #include <kern/process.h>
 #include <kern/filedesc.h>
 #include <kern/handle.h>
-#include <drivers/gpu-fence.h>
+#include <drivers/gpu/gpu-fence.h>
 #include <uapi/gpu-fence.h>
 
 /* One backend completion remains owned until explicit delivery or the matching session drain. */

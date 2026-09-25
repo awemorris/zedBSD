@@ -23,7 +23,7 @@
 
 #include <kern/lock.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 
 /* The hotplug and GMBUS registers of the south display the model answers. */

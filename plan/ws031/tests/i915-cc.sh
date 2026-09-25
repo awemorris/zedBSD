@@ -1,8 +1,0 @@
-#!/bin/sh
-# Compiles one i915 kernel source with the kernel flags (syntax/type check, no link).
-# I915_CC_CPPFLAGS adds flags, e.g. I915_CC_CPPFLAGS=-DI915_TEST_VBT=1 for the test build's explicit VBT.
-cd ~/zedBSD-gpu || exit 1
-for f in "$@"; do
-	/home/awe/zedBSD-gpu/build/llvm/bin/clang --target=x86_64-unknown-zedbsd --sysroot=/home/awe/zedBSD-gpu/build/amd64/sysroot -nostdinc -isystem /home/awe/zedBSD-gpu/build/amd64/sysroot/usr/include -Iinclude -Isrc -I. -DHAL_ARCH_AMD64 -DHAL_BOARD_PCAT -DHAL_PCAT_DEBUGCON -DKERN_USER_ABI_LP64 -DPCAT_VGA_APERTURE_ADDRESS=0xffffffffc1400000ULL -DPCAT_CIRRUS_APERTURE_ADDRESS=0xffffffffc0000000ULL -DCONFIG_DRIVER_NE2000=0 -DCONFIG_DRIVER_LGY98=0 -DCONFIG_DRIVER_GRAPHICS=1 -DCONFIG_DRIVER_GRAPHICS_DEVICE=1 -DCONFIG_DRIVER_PCI_UHCI=1 -DCONFIG_DRIVER_PCI_EHCI=1 -DCONFIG_DRIVER_PCI_XHCI=1 -DCONFIG_DRIVER_PCI_NVME=1 -DCONFIG_DRIVER_PCI_VENUS=0 -DCONFIG_DRIVER_PCI_I915=1 -DCONFIG_DRIVER_PCI_INTEL_AX211=1 -DCONFIG_DRIVER_USB_STORAGE=1 -DCONFIG_DRIVER_USB_CDC_NCM=1 -DCONFIG_DRIVER_USB_CDC_ECM=1 -DCONFIG_DRIVER_USB_HID=1 -DCONFIG_DRIVER_USB_RTL8822BU=1 -DCONFIG_KERNEL_USB_HID_CHECKPOINT=0 -DCONFIG_BUF_CACHE_KIB=0 -DCONFIG_GPU_JOB_RESERVATION_MS=10000 -DCONFIG_GPU_JOB_EXECUTION_MS=60000 -DCONFIG_GPU_JOB_STOP_MS=10000 -DCONFIG_GPU_CONTROL_MS=10000 -m64 -mcmodel=kernel -mno-red-zone -mgeneral-regs-only -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror -Wframe-larger-than=8192 ${I915_CC_CPPFLAGS:-} -c "$f" -o /tmp/i915-cc-$$.o || exit 1
-done
-echo i915-cc: ok

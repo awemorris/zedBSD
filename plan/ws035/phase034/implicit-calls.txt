@@ -1,0 +1,37 @@
+# amd64: probe link with kcrt.c -DKERN_KCRT_NO_STANDARD_NAMES: status 1, undefined symbols: memcpy memset
+# amd64: object<TAB>standard names referred<TAB>textual call in source (file:line) or implicit
+build/ws035-p034/amd64/kern64/src/drivers/fs/fat.o	memset	implicit
+build/ws035-p034/amd64/kern64/src/drivers/pci/pci-nvme.o	memcpy	implicit
+build/ws035-p034/amd64/kern64/src/drivers/wifi/intel-ax211/intel-ax211-boot.o	memcpy	implicit
+build/ws035-p034/amd64/kern64/src/drivers/wifi/intel-ax211/intel-ax211-firmware.o	memcpy	implicit
+build/ws035-p034/amd64/kern64/src/drivers/wifi/intel-ax211/intel-ax211-protocol.o	memcpy	implicit
+build/ws035-p034/amd64/kern64/src/drivers/wifi/intel-ax211/intel-ax211-runtime-start.o	memcpy	implicit
+build/ws035-p034/amd64/kern64/src/drivers/wifi/intel-ax211/intel-ax211-runtime.o	memcpy	implicit
+build/ws035-p034/amd64/kern64/src/drivers/wifi/intel-ax211/intel-ax211-scan-session.o	memcpy	implicit
+build/ws035-p034/amd64/kern64/src/drivers/wifi/intel-ax211/intel-ax211-tx.o	memcpy	implicit
+build/ws035-p034/amd64/kern64/src/drivers/wifi/intel-ax211/intel-ax211.o	memcpy	implicit
+build/ws035-p034/amd64/kern64/src/drivers/wifi/rtl8822b/rtl8822b.o	memcpy	implicit
+build/ws035-p034/amd64/kern64/src/kern/acl.o	memcpy	implicit
+build/ws035-p034/amd64/kern64/src/kern/mount.o	memcpy	implicit
+build/ws035-p034/amd64/kern64/src/kern/net/wifi/wlan-wpa2.o	memcpy	implicit
+build/ws035-p034/amd64/kern64/src/kern/net/wifi/wlan.o	memcpy	implicit
+build/ws035-p034/amd64/kern64/src/kern/partition.o	memcpy	implicit
+build/ws035-p034/amd64/kern64/src/kern/swap.o	memcpy	implicit
+build/ws035-p034/amd64/src/hal/amd64/bsp-pcat/boot.o	memcpy	implicit
+build/ws035-p034/amd64/src/hal/amd64/task.o	memcpy	implicit
+# i915-amd64: probe link with kcrt.c -DKERN_KCRT_NO_STANDARD_NAMES: status 1, undefined symbols: memcpy memset
+# i915-amd64: object<TAB>standard names referred<TAB>textual call in source (file:line) or implicit
+build/ws035-p034/i915-amd64/kern64/src/drivers/fs/fat.o	memset	implicit
+build/ws035-p034/i915-amd64/kern64/src/drivers/gpu/gpu.o	memcpy	implicit
+build/ws035-p034/i915-amd64/kern64/src/drivers/gpu/i915/compiler/spirv.o	memcpy	implicit
+build/ws035-p034/i915-amd64/kern64/src/drivers/gpu/i915/display/clock.o	memcpy	implicit
+build/ws035-p034/i915-amd64/kern64/src/drivers/gpu/i915/display/modeset.o	memcpy	implicit
+build/ws035-p034/i915-amd64/kern64/src/drivers/gpu/i915/display/watermark.o	memcpy	implicit
+build/ws035-p034/i915-amd64/kern64/src/kern/acl.o	memcpy	implicit
+build/ws035-p034/i915-amd64/kern64/src/kern/mount.o	memcpy	implicit
+build/ws035-p034/i915-amd64/kern64/src/kern/net/wifi/wlan-wpa2.o	memcpy	implicit
+build/ws035-p034/i915-amd64/kern64/src/kern/net/wifi/wlan.o	memcpy	implicit
+build/ws035-p034/i915-amd64/kern64/src/kern/partition.o	memcpy	implicit
+build/ws035-p034/i915-amd64/kern64/src/kern/swap.o	memcpy	implicit
+build/ws035-p034/i915-amd64/src/hal/amd64/bsp-pcat/boot.o	memcpy	implicit
+build/ws035-p034/i915-amd64/src/hal/amd64/task.o	memcpy	implicit

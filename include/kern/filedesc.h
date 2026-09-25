@@ -17,7 +17,17 @@
 #include <kern/lock.h>
 #include <kern/waitq.h>
 
-#define KERN_OPEN_MAX		32
+/*
+ * The most descriptors a process can have, and so the largest RLIMIT_NOFILE.
+ * It equals FD_SETSIZE, so select() can name every descriptor.  A table starts
+ * with FILEDESC_INITIAL_SLOTS slots and grows, doubling, as descriptors are
+ * opened; it never shrinks.
+ */
+#define KERN_OPEN_MAX		1024
+#define FILEDESC_INITIAL_SLOTS	32
+
+/* The most descriptors one reservation claims (a message's rights, a pair). */
+#define FILEDESC_RESERVE_MAX	16
 #define FILEDESC_CLOEXEC	0x00000001U
 #define FILEDESC_CLOFORK	0x00000002U
 #define FILEDESC_FLAG_MASK	(FILEDESC_CLOEXEC | FILEDESC_CLOFORK)
@@ -45,14 +55,24 @@ struct filedesc {
 	unsigned soft_limit;
 	uint64_t reservation_generation;
 	struct wait_queue reservation_waitq;
-	struct filedesc_entry entries[KERN_OPEN_MAX];
+
+	/* The slots, capacity of them; replaced whole, under the lock, to grow. */
+	struct filedesc_entry *entries;
+	unsigned capacity;
+
+	/*
+	 * The polls scanning this table's descriptor numbers, counted from
+	 * before each reads the channel sequence until it returns.  A change
+	 * to the table wakes the poll channel only while this is not zero.
+	 */
+	unsigned pollers;
 };
 
 struct filedesc_reservation {
 	struct filedesc *table;
 	unsigned count;
 	unsigned flags;
-	int slots[KERN_OPEN_MAX];
+	int slots[FILEDESC_RESERVE_MAX];
 	uint64_t generation;
 	unsigned active;
 };
@@ -63,6 +83,14 @@ filedesc_create(
 
 void
 filedesc_ref(
+	struct filedesc *fd);
+
+void
+filedesc_poll_begin(
+	struct filedesc *fd);
+
+void
+filedesc_poll_end(
 	struct filedesc *fd);
 
 void

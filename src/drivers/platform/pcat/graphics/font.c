@@ -11,8 +11,8 @@
 
 #include "drivers/platform/pcat/graphics/font.h"
 #include "drivers/platform/pcat/graphics/vgafont.h"
+#include <kern/kcrt.h>
 
-#include <string.h>
 #include "kern/klog.h"
 #include "kern/platform.h"
 
@@ -52,7 +52,7 @@ drv_pcat_font_init(
 	/* Handles the boot font availability. */
 	boot_font = kern_boot_handoff("pcat.boot-font");
 	if (boot_font != NULL) {
-		memcpy(ascii_font, boot_font, sizeof(ascii_font));
+		kern_memcpy(ascii_font, boot_font, sizeof(ascii_font));
 		font_valid = 1;
 		kern_logf("graphics: BIOS 8x16 ASCII font handoff accepted\n");
 
@@ -61,7 +61,7 @@ drv_pcat_font_init(
 	}
 
 	/* UEFI has no VGA BIOS font handoff and may not expose VGA plane 2. */
-	memcpy(ascii_font, drv_pcat_vgafont16, sizeof(ascii_font));
+	kern_memcpy(ascii_font, drv_pcat_vgafont16, sizeof(ascii_font));
 	font_valid = 1;
 	kern_logf("graphics: built-in VGA 8x16 font selected\n");
 }
@@ -117,8 +117,8 @@ drv_pcat_font_get_glyph(
 	/* Handles the codepoint condition. */
 	if (codepoint >= ASCII_GLYPHS)
 		codepoint = '?';
-	memset(bitmap, 0, 32);
-	memcpy(bitmap, ascii_font[codepoint], GLYPH_HEIGHT);
+	kern_memset(bitmap, 0, 32);
+	kern_memcpy(bitmap, ascii_font[codepoint], GLYPH_HEIGHT);
 	*width = 8;
 	*height = GLYPH_HEIGHT;
 	/* Reports operation failure. */

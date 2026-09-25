@@ -7,6 +7,7 @@
 #include "int.h"
 #include "task.h"
 #include "bsp-rpi4/framebuffer.h"
+#include "bsp-rpi4/led.h"
 
 void
 arm64_cmain(uintptr_t fdt_phys)
@@ -17,6 +18,9 @@ arm64_cmain(uintptr_t fdt_phys)
 
 	prekern_bsp_cons_init();
 
+	/* The activity LED counts the stages of the early boot in blinks. */
+	rpi4_led_init();
+	rpi4_led_stage(1);
 	hal_puts("RPI4 ENTRY\n");
 
 	if (arm64_current_el() != 1)
@@ -33,19 +37,30 @@ arm64_cmain(uintptr_t fdt_phys)
 		HAL_FATAL("invalid firmware FDT");
 	}
 	hal_printf("RPI4 FDT PASS phys=%p size=%u\n", (void *)fdt_phys, info.totalsize);
+	rpi4_led_stage(2);
 	hal_printf("RPI4 MMIO uart=%llx gic=%llx/%llx sd=%llx\n",
 	    info.uart_base, info.gic_dist_base, info.gic_cpu_base, info.sdhci_base);
 	rpi4_boot_set_info(&info, fdt_phys);
-	if(rpi4_framebuffer_init(info.mailbox_base)==0)
+	if(rpi4_framebuffer_init(info.mailbox_base)==0){
 		hal_puts("RPI4 FRAMEBUFFER PASS\n");
-	else
+		rpi4_framebuffer_describe();
+		rpi4_led_stage(3);
+		rpi4_framebuffer_test_pattern();
+		rpi4_framebuffer_describe();
+	}else{
 		hal_puts("RPI4 framebuffer unavailable; UART-only console\n");
+		rpi4_led_stage(6);
+	}
 	arm64_page_init();
 	arm64_space_init();
 	arm64_context_selftest();
 	arm64_int_init();
 	prekern_bsp_cons_irq_init();
 	hal_irq_enable();
+
+	/* The LED stays lit once the kernel proper starts. */
+	rpi4_led_stage(4);
+	rpi4_led_set(1);
 	kernel_entry(rpi4_kernel_handoff());
 	for (;;) arm64_wfi();
 }

@@ -100,8 +100,8 @@ openssl: $(ZEDBSD_OPENSSL_STAGED)
 
 # ---------------------------------------------------------------- packaging
 
-# The runtime loader searches /lib, so the shared objects go there rather than
-# to the /usr/lib the staged tree uses.
+# The shared objects go to /usr/lib like every package's; the runtime loader
+# searches /lib (the base system) and then /usr/lib (packages).
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,openssl,OpenSSL cryptography,*,n,package,,y,\
 	packages/security,security/openssl,))
 
@@ -109,8 +109,8 @@ ZEDBSD_PACKAGE_INPUTS += $(if $(filter openssl,$(ZEDBSD_USER_PROGRAMS)),\
 	$(ZEDBSD_OPENSSL_LIBCRYPTO) $(ZEDBSD_OPENSSL_LIBSSL) \
 	$(ZEDBSD_OPENSSL_APP) $(ZEDBSD_OPENSSL_CONF) $(ZEDBSD_OPENSSL_LICENSE))
 ZEDBSD_PACKAGE_FILES += $(if $(filter openssl,$(ZEDBSD_USER_PROGRAMS)),\
-	--file /lib/libcrypto.so=$(ZEDBSD_OPENSSL_LIBCRYPTO) \
-	--file /lib/libssl.so=$(ZEDBSD_OPENSSL_LIBSSL) \
+	--file /usr/lib/libcrypto.so=$(ZEDBSD_OPENSSL_LIBCRYPTO) \
+	--file /usr/lib/libssl.so=$(ZEDBSD_OPENSSL_LIBSSL) \
 	--file $(ZEDBSD_PACKAGE_BINDIR)/openssl=$(ZEDBSD_OPENSSL_APP) \
 	--file /etc/ssl/openssl.cnf=$(ZEDBSD_OPENSSL_CONF) \
 	--file /usr/share/licenses/openssl/LICENSE.txt=$(ZEDBSD_OPENSSL_LICENSE))

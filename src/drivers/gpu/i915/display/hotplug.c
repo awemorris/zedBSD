@@ -101,6 +101,7 @@
 #include "hdmi.h"
 #include "power.h"
 #include "../mmio.h"
+#include <kern/kcrt.h>
 
 #include <kern/clock.h>
 #include <kern/klog.h>
@@ -108,9 +109,8 @@
 #include <kern/lock.h>
 #include <kern/sched.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 /* The HPD interrupts a pin may raise within a detection period before it counts as a storm. */
 #define HPD_STORM_DEFAULT_THRESHOLD	50
@@ -302,8 +302,8 @@ drv_i915_hpd_init_pins(
 	int pin;
 
 	/* Starts with no pin raising anything. */
-	memset(hp->hpd, 0, sizeof(hp->hpd));
-	memset(hp->pch_hpd, 0, sizeof(hp->pch_hpd));
+	kern_memset(hp->hpd, 0, sizeof(hp->hpd));
+	kern_memset(hp->pch_hpd, 0, sizeof(hp->pch_hpd));
 
 	/* hpd->hpd = hpd_gen11 (DISPLAY_VER >= 11, < 14): the TC and TBT bits of each TC pin. */
 	if (display_ver >= 11 && display_ver < 14) {
@@ -458,8 +458,8 @@ drv_i915_hpd_start(
 		return EBUSY;
 
 	/* Clears the instance and the device of the Linux text. */
-	memset(&world->hpd, 0, sizeof(world->hpd));
-	memset(&world->hpd_i915, 0, sizeof(world->hpd_i915));
+	kern_memset(&world->hpd, 0, sizeof(world->hpd));
+	kern_memset(&world->hpd_i915, 0, sizeof(world->hpd_i915));
 	i915 = &world->hpd_i915;
 
 	/* Records what the instance runs on. */
@@ -753,7 +753,7 @@ drv_i915_hpd_summary(
 	struct i915_hpd_world *world;
 
 	/* A display without a world reports an empty summary. */
-	memset(s, 0, sizeof(*s));
+	kern_memset(s, 0, sizeof(*s));
 	world = i915_hpd_display_world(display);
 	if (world == NULL)
 		return;
@@ -3097,8 +3097,8 @@ i915_hpd_make_objects(
 			is_edp = 1;
 
 		/* Starts both objects empty. */
-		memset(dp, 0, sizeof(*dp));
-		memset(ic, 0, sizeof(*ic));
+		kern_memset(dp, 0, sizeof(*dp));
+		kern_memset(ic, 0, sizeof(*ic));
 
 		/* The encoder is named "DDI <port letter>". */
 		enc_name[0] = 'D';
@@ -3162,7 +3162,7 @@ i915_hpd_make_objects(
 			dp->hdmi.attached_connector = ic;
 
 			/* Named "HDMI-A-<n>"; the first HDMI connector is the one the path watches. */
-			memcpy(conn_name, "HDMI-A-", 7);
+			kern_memcpy(conn_name, "HDMI-A-", 7);
 			conn_name[7] = (char)('1' + n_hdmi);
 			conn_name[8] = '\0';
 			n_hdmi++;
@@ -3175,7 +3175,7 @@ i915_hpd_make_objects(
 			dp->dp.attached_connector = ic;
 
 			/* Named "eDP-<n>". */
-			memcpy(conn_name, "eDP-", 4);
+			kern_memcpy(conn_name, "eDP-", 4);
 			conn_name[4] = (char)('1' + n_edp);
 			conn_name[5] = '\0';
 			n_edp++;
@@ -3187,7 +3187,7 @@ i915_hpd_make_objects(
 			dp->dp.attached_connector = ic;
 
 			/* Named "DP-<n>". */
-			memcpy(conn_name, "DP-", 3);
+			kern_memcpy(conn_name, "DP-", 3);
 			conn_name[3] = (char)('1' + n_dp);
 			conn_name[4] = '\0';
 			n_dp++;

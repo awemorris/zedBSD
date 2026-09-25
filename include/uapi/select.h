@@ -10,10 +10,16 @@
 
 #include <stdint.h>
 
-#define KERN_FD_SETSIZE	32
+/*
+ * A descriptor set holds FD_SETSIZE bits, the same count as other POSIX
+ * systems.  select() reads and writes only the words that hold descriptors
+ * below its nfds argument.
+ */
+#define KERN_FD_SETSIZE	1024
+#define KERN_NFDBITS	32
 
 typedef struct fd_set {
-	uint32_t bits[1];
+	uint32_t fds_bits[KERN_FD_SETSIZE / KERN_NFDBITS];
 } fd_set;
 
 #endif

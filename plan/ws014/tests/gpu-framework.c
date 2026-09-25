@@ -15,8 +15,8 @@
  * not claim to execute the complete VFS or emulate any graphics hardware.
  */
 
-#include <drivers/gpu.h>
-#include <drivers/pci.h>
+#include <drivers/gpu/gpu.h>
+#include <drivers/pci/pci.h>
 #include <kern/cdev.h>
 #include <kern/cred.h>
 #include <kern/file.h>

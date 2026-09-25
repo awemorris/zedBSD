@@ -1,7 +1,7 @@
 #!/bin/sh
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
-python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025/tests/prepare-driver-fragments.py" --source src/drivers/wifi/intel-ax211/intel-ax211.c
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/tools/driver-fragments/prepare.py" --source src/drivers/wifi/intel-ax211/intel-ax211.c
 
 test_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$test_dir/../../.." && pwd)
@@ -12,7 +12,7 @@ cc=${CC:-cc}
 warnings="-std=c11 -Wall -Wextra -Werror"
 defines="-DINTEL_AX211_DMA_HOST_TEST"
 includes="-I$repo_root/include -I$repo_root/include/uapi -I$repo_root/src"
-core=$repo_root/plan/ws025/temp/p031-driver-fragments/src/drivers/intel-ax211.c
+core=$repo_root/build/driver-fragments/src/drivers/intel-ax211.c
 dma=$repo_root/src/drivers/wifi/intel-ax211/intel-ax211-dma.c
 fixture=$test_dir/intel-ax211-dma-test.c
 objects=
@@ -58,7 +58,7 @@ $cc $warnings -O0 -fanalyzer $defines $includes \
 "$build_dir/analyzer"
 
 # Private codecs and DMA ownership stay ABI-width-clean.
-abi_includes="-I$repo_root/libc/include -I$repo_root/include/uapi"
+abi_includes="-I$repo_root/include/libc -DKERN_UAPI_NATIVE -I$repo_root/include/uapi"
 abi_includes="$abi_includes -I$repo_root/include -I$repo_root/src"
 # shellcheck disable=SC2086
 $cc $warnings -m64 -nostdinc $abi_includes -fsyntax-only "$dma"

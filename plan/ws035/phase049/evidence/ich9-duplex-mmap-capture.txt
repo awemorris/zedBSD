@@ -1,0 +1,6 @@
+=== ich9-duplex-mmap-capture
+serial: logged in
+AUDIOTEST MMAPCAPTURE bytes=192512 fragments=47 ms=1012
+AUDIOTEST MMAPCAPTURE bytes=577536 fragments=141 ms=3007
+AUDIOTEST CAPTURE bytes=192000 ms=1016 overruns=0
+guest-status=0

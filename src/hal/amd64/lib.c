@@ -51,12 +51,20 @@ hal_memset(
 	int value,
 	size_t size)
 {
-	uint8_t *byte;
+	void *cursor;
+	size_t remaining;
 
-	/* Fills the requested bytes in ascending address order. */
-	byte = destination;
-	while (size-- != 0)
-		*byte++ = (uint8_t)value;
+	/*
+	 * Fills with the string store, which the processor runs as a fast
+	 * block operation: a page table or a page is cleared in a few hundred
+	 * cycles where a byte loop took a few thousand.
+	 */
+	cursor = destination;
+	remaining = size;
+	__asm__ volatile("cld; rep stosb"
+	    : "+D"(cursor), "+c"(remaining)
+	    : "a"((uint8_t)value)
+	    : "memory", "cc");
 
 	/* Returns the original destination. */
 	return destination;
@@ -71,12 +79,16 @@ hal_memset16(
 	uint16_t value,
 	size_t count)
 {
-	uint16_t *element;
+	uint16_t *cursor;
+	size_t remaining;
 
-	/* Fills the requested elements in ascending address order. */
-	element = destination;
-	while (count-- != 0)
-		*element++ = value;
+	/* Fills with the word store in ascending address order. */
+	cursor = destination;
+	remaining = count;
+	__asm__ volatile("cld; rep stosw"
+	    : "+D"(cursor), "+c"(remaining)
+	    : "a"(value)
+	    : "memory", "cc");
 
 	/* Returns the original destination. */
 	return destination;
@@ -91,12 +103,16 @@ hal_memset32(
 	uint32_t value,
 	size_t count)
 {
-	uint32_t *element;
+	uint32_t *cursor;
+	size_t remaining;
 
-	/* Fills the requested elements in ascending address order. */
-	element = destination;
-	while (count-- != 0)
-		*element++ = value;
+	/* Fills with the doubleword store in ascending address order. */
+	cursor = destination;
+	remaining = count;
+	__asm__ volatile("cld; rep stosl"
+	    : "+D"(cursor), "+c"(remaining)
+	    : "a"(value)
+	    : "memory", "cc");
 
 	/* Returns the original destination. */
 	return destination;
@@ -111,14 +127,18 @@ hal_memcpy(
 	const void *source,
 	size_t size)
 {
-	uint8_t *destination_byte;
-	const uint8_t *source_byte;
+	void *to;
+	const void *from;
+	size_t remaining;
 
-	/* Copies the requested bytes in ascending address order. */
-	destination_byte = destination;
-	source_byte = source;
-	while (size-- != 0)
-		*destination_byte++ = *source_byte++;
+	/* Copies with the string move, a fast block operation on this CPU. */
+	to = destination;
+	from = source;
+	remaining = size;
+	__asm__ volatile("cld; rep movsb"
+	    : "+D"(to), "+S"(from), "+c"(remaining)
+	    :
+	    : "memory", "cc");
 
 	/* Returns the original destination. */
 	return destination;

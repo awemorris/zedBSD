@@ -14,7 +14,7 @@ extern "C" {
 
 #include <stdint.h>
 #include <stddef.h>
-#include <sys/ioctl.h>
+#include <uapi/ioctl.h>
 
 #define KERN_SYSTEM_GET_MOUNTS _IOWR('s', 12, struct kern_mount_query)
 

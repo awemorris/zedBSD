@@ -10,6 +10,7 @@
  */
 
 #include "perf.h"
+#include <kern/kcrt.h>
 
 #include <kern/clock.h>
 #include <kern/klog.h>
@@ -18,7 +19,6 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <string.h>
 
 /* How long one window lasts before its totals are logged, in nanoseconds (five seconds). */
 #define I915_PERF_WINDOW_NS	5000000000ULL
@@ -36,7 +36,7 @@ drv_i915_perf_init(
 	struct i915_perf *perf)
 {
 	/* Starts with no sample and prepares the lock. */
-	memset(perf, 0, sizeof(*perf));
+	kern_memset(perf, 0, sizeof(*perf));
 	spin_init(&perf->lock, LOCK_RANK_DEVICE, "i915 perf");
 	perf->ready = 1;
 }
@@ -147,11 +147,11 @@ drv_i915_perf_report(
 		return;
 	}
 
-	memcpy(window.total, perf->total, sizeof(window.total));
-	memcpy(window.count, perf->count, sizeof(window.count));
+	kern_memcpy(window.total, perf->total, sizeof(window.total));
+	kern_memcpy(window.count, perf->count, sizeof(window.count));
 	perf->window_start = now;
-	memset(perf->total, 0, sizeof(perf->total));
-	memset(perf->count, 0, sizeof(perf->count));
+	kern_memset(perf->total, 0, sizeof(perf->total));
+	kern_memset(perf->count, 0, sizeof(perf->count));
 
 	spin_unlock_irqrestore(&perf->lock, irq);
 

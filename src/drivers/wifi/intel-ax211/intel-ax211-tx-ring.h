@@ -55,7 +55,7 @@
 #ifndef KERN_DRIVERS_INTEL_AX211_TX_RING_H
 #define KERN_DRIVERS_INTEL_AX211_TX_RING_H
 
-#include <drivers/dma.h>
+#include <drivers/generic/dma.h>
 
 #include <stddef.h>
 #include <stdint.h>

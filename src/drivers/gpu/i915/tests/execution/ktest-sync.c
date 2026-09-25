@@ -20,6 +20,7 @@
  */
 
 #include "ktest.h"
+#include <kern/kcrt.h>
 
 #include "../../mmio.h"
 #include "../../power.h"
@@ -39,10 +40,9 @@
 #include <kern/thread.h>
 #include <kern/waitq.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 /* How many works the cross-CPU test queues, one generation each. */
 #define I915_KTEST_XCPU_GENS		64U
@@ -816,7 +816,7 @@ i915_ktest_dram_decode(
 	int error;
 
 	/* A DDR4 word with two channels, four QGV points and three PSF points decodes. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	error = drv_i915_dram_decode(0x00003420U, &info);
 	drv_i915_ktest_check(ktest, error == 0, "dram_decode: valid word decodes");
 	drv_i915_ktest_check(ktest,
@@ -854,8 +854,8 @@ i915_ktest_dram_bw(
 	i915_fake_open(&i915_ktest_mmio, &i915_ktest_fake);
 	i915_ktest_fake.script = ok_seq;
 	i915_ktest_fake.script_len = 6U;
-	memset(&info, 0, sizeof(info));
-	memset(&bw, 0, sizeof(bw));
+	kern_memset(&info, 0, sizeof(info));
+	kern_memset(&bw, 0, sizeof(bw));
 	error = drv_i915_dram_detect(&sb_lock, &i915_ktest_mmio, &info);
 	drv_i915_ktest_check(ktest, error == 0 && info.num_qgv_points == 4U, "dram_detect: decodes global info over PCODE");
 
@@ -899,8 +899,8 @@ i915_ktest_dram_bw_psf_failure(
 	i915_fake_open(&i915_ktest_mmio, &i915_ktest_fake);
 	i915_ktest_fake.script = psf_fail_seq;
 	i915_ktest_fake.script_len = 6U;
-	memset(&info, 0, sizeof(info));
-	memset(&bw, 0, sizeof(bw));
+	kern_memset(&info, 0, sizeof(info));
+	kern_memset(&bw, 0, sizeof(bw));
 	(void)drv_i915_dram_detect(sb_lock, &i915_ktest_mmio, &info);
 	error = drv_i915_bw_init_hw(sb_lock, &i915_ktest_mmio, &info, &bw);
 	drv_i915_ktest_check(ktest, error == 0, "bw_init: a PSF read failure is tolerated");
@@ -1167,7 +1167,7 @@ i915_ktest_late_fuse(
 	drv_i915_trace_init(&i915_ktest_trace);
 	i915_fake_open(&i915_ktest_mmio, &i915_ktest_fake);
 	(void)drv_i915_power_domains_init(&i915_ktest_power_domains, 13U, -1, 1, &i915_ktest_trace);
-	memset(&pwc, 0, sizeof(pwc));
+	kern_memset(&pwc, 0, sizeof(pwc));
 	pwc.mmio = &i915_ktest_mmio;
 	index = drv_i915_power_well_by_id(&i915_ktest_power_domains, I915_SKL_DISP_PW_1);
 
@@ -1216,7 +1216,7 @@ i915_fake_open(
 	struct i915_fake_mmio *fake)
 {
 	/* Clears the model and binds the block to it with no domain map and no trace. */
-	memset(fake, 0, sizeof(*fake));
+	kern_memset(fake, 0, sizeof(*fake));
 	drv_i915_mmio_init(mmio, &i915_fake_mmio_ops, fake, NULL, 0U, NULL);
 }
 

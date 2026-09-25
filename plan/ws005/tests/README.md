@@ -99,3 +99,9 @@ attempt without leaking the credential.  A terminal/pipe pair of
 scenarios proves that the scan countdown refreshes one line in place with
 `\r` only on an interactive terminal and emits one line per refresh
 otherwise.
+
+## 2026-09-24: 動かない試験の削除（ws034-p049）
+
+build できない、または今の source と合わなくなった試験を、書き直さずに削除した（ユーザー指示）。
+削除した file の一覧は [`plan/ws034/phase049/deleted-tests.txt`](../../ws034/phase049/deleted-tests.txt)。
+上の説明のうち、そこに載っている file の記述は履歴である。

@@ -1,0 +1,1 @@
+src/drivers/gpu/i915/tests/contracts/run.sh baseline=0 current=0 same=yes

@@ -42,14 +42,14 @@
 #include "../execution/ktest.h"
 #include "../../display/hotplug.h"
 #include "../../display/hdmi.h"
+#include <kern/kcrt.h>
 
 #include <kern/kmem.h>
 #include <kern/klog.h>
 #include <kern/sched.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdint.h>
-#include <string.h>
 
 /* The SDEIIR / SDEISR bits of the DDI A and DDI B hotplug pins. */
 #define I915_TEST_SDE_DDI_A		0x10000u
@@ -210,8 +210,8 @@ i915_make_edid(
 	unsigned sum;
 
 	/* The fixed header. */
-	memset(model_edid, 0, sizeof(model_edid));
-	memcpy(model_edid, header, 8);
+	kern_memset(model_edid, 0, sizeof(model_edid));
+	kern_memcpy(model_edid, header, 8);
 
 	/* The manufacturer "ZED" (0 11010 00101 00100) and the product 0x1234. */
 	model_edid[8] = 0x68;
@@ -359,9 +359,9 @@ i915_start_tests(
 
 	/* Clears the model's state and prepares the sleep. */
 	drv_i915_completion_init(&model_sleep, "hpd-ktest-sleep");
-	memset(&model_hotplug, 0, sizeof(model_hotplug));
-	memset(&model_nogem, 0, sizeof(model_nogem));
-	memset(&model_fake, 0, sizeof(model_fake));
+	kern_memset(&model_hotplug, 0, sizeof(model_hotplug));
+	kern_memset(&model_nogem, 0, sizeof(model_nogem));
+	kern_memset(&model_fake, 0, sizeof(model_fake));
 
 	/* The target's outputs: eDP on A, HDMI on B, DP on TC1 and TC2. */
 	i915_set_encoder(0u, 0, 0, 0, 0, 1, I915_TEST_DEVICE_TYPE_EDP);
@@ -403,9 +403,9 @@ i915_start_tests(
 		hdmi_name = drv_i915_hpd_connector_name(model_display, (unsigned)hdmi);
 		edp_name = drv_i915_hpd_connector_name(model_display, 0u);
 		dp_name = drv_i915_hpd_connector_name(model_display, 2u);
-		hdmi_named = strcmp(hdmi_name, "HDMI-A-1");
-		edp_named = strcmp(edp_name, "eDP-1");
-		dp_named = strcmp(dp_name, "DP-1");
+		hdmi_named = kern_strcmp(hdmi_name, "HDMI-A-1");
+		edp_named = kern_strcmp(edp_name, "eDP-1");
+		dp_named = kern_strcmp(dp_name, "DP-1");
 		if (hdmi_named == 0 &&
 		    edp_named == 0 &&
 		    dp_named == 0)
@@ -516,7 +516,7 @@ i915_plug_tests(
 	/* The stored bytes are the sink's, read without a NAK. */
 	edid_differs = 1;
 	if (edid != NULL && edid_size == 128u)
-		edid_differs = memcmp(edid, model_edid, 128);
+		edid_differs = kern_memcmp(edid, model_edid, 128);
 	passed = 0;
 	if (edid_differs == 0 &&
 	    model_fake.gm_reads >= 32u &&

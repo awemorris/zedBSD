@@ -1,0 +1,120 @@
+--- gnu.sh :: subst, patsubst, strip, findstring, filter, filter-out, sort
+--- ref status 0
+[c.C a.o b.C  a.o d.h]
+[c.o a.o b.o a.o d.h]
+[a b]
+[b.c][]
+[c.c b.c d.h]
+[c.c b.c d.h]
+[a.o b.c c.c d.h]
+
+--- ours status 0
+[]
+[]
+[]
+[][]
+[]
+[]
+[]
+
+--- gnu.sh :: word, wordlist, words, firstword, lastword
+--- ref status 0
+two / two three / 4 / one / four
+
+--- ours status 0
+/ / / /
+
+--- gnu.sh :: dir, notdir, suffix, basename, addsuffix, addprefix, join
+--- ref status 0
+src/ ./ /x/|a.c b.h y|.c .h|src/a b /x/y
+a.o b.o|p/a p/b|a1 b2 3
+
+--- ours status 0
+|||
+||
+
+--- gnu.sh :: wildcard
+--- ref status 0
+a.c b.c []
+
+--- ours status 0
+[]
+
+--- gnu.sh :: shell and !=
+--- ref status 0
+one two
+
+--- ours status 0
+
+
+--- gnu.sh :: foreach, if, or, and
+--- ref status 0
+<a> <b> <c>
+yes no []
+[z] [c] []
+
+--- ours status 0
+
+[]
+[] [] []
+
+--- gnu.sh :: call and a user function
+--- ref status 0
+b a <x|2 1>
+
+--- ours status 0
+ 
+
+--- gnu.sh :: eval defines rules
+--- ref status 0
+rule for x
+rule for y
+
+--- ours status 2
+
+--- gnu.sh :: origin and flavor, value
+--- ref status 0
+file environment command line undefined recursive simple $(B)
+
+--- ours status 0
+
+
+--- gnu.sh :: info, warning to stderr, error stops
+--- ref status 0
+at parse time
+recipe
+status=2
+
+--- ours status 0
+status=2
+
+--- gnu.sh :: target-specific variables
+--- ref status 0
+a -O -g
+b -O
+
+--- ours status 2
+
+--- gnu.sh :: target-specific variables reach the prerequisites
+--- ref status 0
+dep from-all
+all from-all
+
+--- ours status 2
+
+--- gnu.sh :: VPATH and vpath find prerequisites elsewhere
+--- ref status 0
+srcdir/a.c include/b.h
+
+--- ours status 2
+
+--- gnu.sh :: a missing included file that a rule makes is made and read
+--- ref status 0
+generated
+
+--- ours status 2
+
+automake.sh                  15/  15
+gnu.sh                       17/  31
+posix.sh                     45/  45
+TOTAL 77/91

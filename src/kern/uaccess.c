@@ -23,12 +23,12 @@
 #include "kern/vm-object.h"
 #include "kern/vm-reclaim.h"
 #include "kern/vmspace.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
 #include <kern/pmem.h>
 #include <limits.h>
-#include <string.h>
 
 #define UACCESS_EXT __attribute__((section(".hightext")))
 #define PAGE_SIZE KERN_PAGE_SIZE
@@ -154,7 +154,7 @@ uaccess_pin_vmspace(
 		return EINVAL;
 
 	/* An empty range needs no pages. */
-	memset(pin, 0, sizeof(*pin));
+	kern_memset(pin, 0, sizeof(*pin));
 	if (size == 0)
 		return 0;
 
@@ -243,7 +243,7 @@ uaccess_unpin(
 	/* Releases the pages and clears the pin. */
 	vmspace_unpin_user_pages(pin->pages, pin->page_count);
 	kern_free(pin->pages);
-	memset(pin, 0, sizeof(*pin));
+	kern_memset(pin, 0, sizeof(*pin));
 }
 
 /*
@@ -289,7 +289,7 @@ copyin_pinned(
 
 		/* Reads through the backing that pinned the page. */
 		if (page->kind == VMSPACE_PINNED_PRIVATE) {
-			memcpy(bytes, (const uint8_t *)hal_pmem_to_kernel(page->memory.paddr) +
+			kern_memcpy(bytes, (const uint8_t *)hal_pmem_to_kernel(page->memory.paddr) +
 			    page_offset, chunk);
 			error = 0;
 		} else if (page->kind == VMSPACE_PINNED_DEVICE) {
@@ -361,7 +361,7 @@ copyout_pinned(
 
 		/* Writes through the backing that pinned the page. */
 		if (page->kind == VMSPACE_PINNED_PRIVATE) {
-			memcpy((uint8_t *)hal_pmem_to_kernel(page->memory.paddr) + page_offset,
+			kern_memcpy((uint8_t *)hal_pmem_to_kernel(page->memory.paddr) + page_offset,
 			    bytes, chunk);
 
 			/*

@@ -9,4 +9,4 @@
  * Compatibility include for loader source paths.
  */
 
-#include "../../include/boot/parameter-handoff.h"
+#include "../../include/kern/boot.h"

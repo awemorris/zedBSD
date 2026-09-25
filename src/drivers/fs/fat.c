@@ -17,11 +17,11 @@
 #include <kern/io-stats.h>
 #include "kern/namecache.h"
 #include "kern/namei.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdint.h>
-#include <string.h>
-#include <sys/statvfs.h>
+#include <uapi/statvfs.h>
 
 /*
  * Sector, BPB, cache, and shared FAT primitives.
@@ -1237,7 +1237,7 @@ fat_engine_invalidate(
 
 	filesystem->sector_cache_valid = 0;
 	filesystem->sector_cache_dirty = 0;
-	memset(filesystem->clean_sectors, 0, sizeof(filesystem->clean_sectors));
+	kern_memset(filesystem->clean_sectors, 0, sizeof(filesystem->clean_sectors));
 	fat_chain_invalidate(filesystem);
 }
 
@@ -1283,7 +1283,7 @@ fat_engine_read_sector_result(
 		/* A slot holding this sector saves a read of the volume. */
 		slot = &filesystem->clean_sectors[index];
 		if (slot->valid && slot->lba == lba) {
-			memcpy(saved, slot->bytes, sizeof(saved));
+			kern_memcpy(saved, slot->bytes, sizeof(saved));
 			slot->valid = 0;
 			found = 1;
 			break;
@@ -1298,7 +1298,7 @@ fat_engine_read_sector_result(
 		slot = &filesystem->clean_sectors[filesystem->clean_rotor];
 		filesystem->clean_rotor =
 			(filesystem->clean_rotor + 1U) % FAT_CLEAN_SLOTS;
-		memcpy(slot->bytes, filesystem->sector_cache,
+		kern_memcpy(slot->bytes, filesystem->sector_cache,
 			sizeof(slot->bytes));
 		slot->lba = filesystem->sector_cache_lba;
 		slot->valid = 1;
@@ -1312,7 +1312,7 @@ fat_engine_read_sector_result(
 	 * miss.
 	 */
 	if (found) {
-		memcpy(filesystem->sector_cache, saved, sizeof(saved));
+		kern_memcpy(filesystem->sector_cache, saved, sizeof(saved));
 		io_stats_record(IO_FAT_SECTOR_HIT, 512);
 	} else {
 		io_stats_record(IO_FAT_SECTOR_MISS, 512);
@@ -3574,7 +3574,7 @@ fat_table_transaction(
 			return error;
 		}
 
-		memcpy(slots[n].new_bytes, slots[n].old_bytes, 512);
+		kern_memcpy(slots[n].new_bytes, slots[n].old_bytes, 512);
 	}
 
 	/*
@@ -3829,7 +3829,7 @@ fat_directory_transaction(
 			return error;
 		}
 
-		memcpy(slots[n].new_bytes, slots[n].old_bytes, 512U);
+		kern_memcpy(slots[n].new_bytes, slots[n].old_bytes, 512U);
 	}
 
 	/* Lays every record of the batch into its staged sector. */
@@ -3843,7 +3843,7 @@ fat_directory_transaction(
 			return EIO;
 		}
 
-		memcpy(bytes + offsets[n], entries[n], 32U);
+		kern_memcpy(bytes + offsets[n], entries[n], 32U);
 	}
 
 	/*
@@ -6301,8 +6301,8 @@ fat32_create_entry(
 				    fat_lfn_checksum(sfn));
 	}
 
-	memset(entries[lfn_count], 0, 32U);
-	memcpy(entries[lfn_count], sfn, 11U);
+	kern_memset(entries[lfn_count], 0, 32U);
+	kern_memcpy(entries[lfn_count], sfn, 11U);
 	entries[lfn_count][11] = attributes;
 
 	fat_raw_put_dir_cluster(filesystem, entries[lfn_count], first_cluster);
@@ -6587,7 +6587,7 @@ fat_raw_delete_location(
 	if (index == limit)
 		return ENOENT;
 
-	memcpy(target, raw, sizeof(target));
+	kern_memcpy(target, raw, sizeof(target));
 
 	/*
 	 * Collect all associated records before changing directory
@@ -6611,14 +6611,14 @@ fat_raw_delete_location(
 
 		lbas[count] = lba;
 		offsets[count] = offset;
-		memcpy(entries[count++], raw, 32U);
+		kern_memcpy(entries[count++], raw, 32U);
 
 		index--;
 	}
 
 	lbas[count] = target_lba;
 	offsets[count] = target_offset;
-	memcpy(entries[count++], target, 32U);
+	kern_memcpy(entries[count++], target, 32U);
 
 	/* Every record of the name is marked erased together. */
 	for (n = 0; n < count; n++)
@@ -7956,7 +7956,7 @@ fat_metadata_load(
 		line = buffer + offset;
 
 		/* A line ends at the newline, or at the end of the file. */
-		end = strchr(line, '\n');
+		end = kern_strchr(line, '\n');
 		if (end != NULL)
 			*end = '\0';
 
@@ -7964,22 +7964,22 @@ fat_metadata_load(
 		if (end != NULL)
 			newline = 1U;
 
-		offset += (uint32_t)strlen(line) + newline;
+		offset += (uint32_t)kern_strlen(line) + newline;
 
 		/* The mode follows the path, after the first colon. */
-		mode = strchr(line, ':');
+		mode = kern_strchr(line, ':');
 		if (mode == NULL)
 			continue;
 		*mode++ = '\0';
 
 		/* The owner follows the mode, after the second. */
-		uid = strchr(mode, ':');
+		uid = kern_strchr(mode, ':');
 		if (uid == NULL)
 			continue;
 		*uid++ = '\0';
 
 		/* And the group follows the owner, after the third. */
-		gid = strchr(uid, ':');
+		gid = kern_strchr(uid, ':');
 		if (gid == NULL)
 			continue;
 		*gid++ = '\0';
@@ -7987,7 +7987,7 @@ fat_metadata_load(
 		/*
 		 * Skips a line that carries a field this format does not have.
 		 */
-		trailing = strchr(gid, ':');
+		trailing = kern_strchr(gid, ':');
 		if (trailing != NULL)
 			continue;
 
@@ -8002,7 +8002,7 @@ fat_metadata_load(
 			continue;
 
 		/* Skips a path too long for the table to hold. */
-		path_length = strlen(line);
+		path_length = kern_strlen(line);
 		if (path_length >= sizeof(metadata->path))
 			continue;
 
@@ -8025,7 +8025,7 @@ fat_metadata_load(
 			continue;
 
 		/* Records one presented mode and owner. */
-		strcpy(metadata->path, line);
+		kern_strcpy(metadata->path, line);
 		metadata->mode = (mode_t)mode_value;
 		metadata->uid = (uid_t)uid_value;
 		metadata->gid = (gid_t)gid_value;
@@ -8048,7 +8048,7 @@ fat_metadata_find(
 	     i < state->metadata->count;
 	     i++) {
 		/* An entry whose path is the one being looked for. */
-		difference = strcmp(state->metadata->entries[i].path, path);
+		difference = kern_strcmp(state->metadata->entries[i].path, path);
 		if (difference == 0)
 			return &state->metadata->entries[i];
 	}
@@ -8130,7 +8130,7 @@ fat_alloc_inode(
 		/* This slot is free, so it becomes the new inode. */
 		if (!fat_inodes[i].used) {
 			fat_inodes[i].used = 1;
-			memset(&fat_inodes[i].info, 0,
+			kern_memset(&fat_inodes[i].info, 0,
 				sizeof(fat_inodes[i].info));
 			fat_inodes[i].path[0] = '\0';
 
@@ -8158,7 +8158,7 @@ fat_free_inode(
 	/* A slot is cleared under the lock that hands them out. */
 	if (slot != NULL) {
 		irq = spin_lock_irqsave(&fat_pool_lock);
-		memset(slot, 0, sizeof(*slot));
+		kern_memset(slot, 0, sizeof(*slot));
 		spin_unlock_irqrestore(&fat_pool_lock, irq);
 	}
 }
@@ -8185,7 +8185,7 @@ join_path(
 	 * the separator that follows it unless the parent is the root, the
 	 * component itself, and the terminator.
 	 */
-	parent_length = strlen(parent);
+	parent_length = kern_strlen(parent);
 	if (parent_length + (parent_length != 0) + name->cn_namelen >=
 	    KERN_PATH_MAX)
 		return ENAMETOOLONG;
@@ -8194,12 +8194,12 @@ join_path(
 	 * Copies the parent, separating it from the component unless it is
 	 * root.
 	 */
-	memcpy(output, parent, parent_length);
+	kern_memcpy(output, parent, parent_length);
 	if (parent_length != 0)
 		output[parent_length++] = '/';
 
 	/* Appends the component and terminates the result. */
-	memcpy(output + parent_length, name->cn_nameptr, name->cn_namelen);
+	kern_memcpy(output + parent_length, name->cn_nameptr, name->cn_namelen);
 	output[parent_length + name->cn_namelen] = '\0';
 
 	/* Succeeded: the caller now holds the full path. */
@@ -8645,7 +8645,7 @@ fat_make_inode(
 
 	/* A path longer than a slot could hold. */
 	slot = fat_slot(inode);
-	path_length = strlen(path);
+	path_length = kern_strlen(path);
 	if (slot == NULL || path_length >= KERN_PATH_MAX) {
 		inode_release(inode);
 
@@ -8654,7 +8654,7 @@ fat_make_inode(
 	}
 
 	/* Fills the inode from the directory entry that describes it. */
-	strcpy(slot->path, path);
+	kern_strcpy(slot->path, path);
 	info->fi_first_cluster = first_cluster;
 	info->fi_dirent_lba = lba;
 	info->fi_dirent_offset = offset;
@@ -8737,7 +8737,7 @@ fat_stat_path(
 	if (fsresult != 0)
 		return fsresult;
 
-	slash = strrchr(path, '/');
+	slash = kern_strrchr(path, '/');
 
 	/* The canonical path is the parent plus the stored name. */
 	prefix_length = 0;
@@ -8745,12 +8745,12 @@ fat_stat_path(
 		prefix_length = (size_t)(slash - path + 1);
 
 	/* The stored name has to fit after the parent that precedes it. */
-	name_length = strlen(entry.name);
+	name_length = kern_strlen(entry.name);
 	if (prefix_length + name_length >= sizeof(canonical))
 		return ENAMETOOLONG;
 
-	memcpy(canonical, path, prefix_length);
-	strcpy(canonical + prefix_length, entry.name);
+	kern_memcpy(canonical, path, prefix_length);
+	kern_strcpy(canonical + prefix_length, entry.name);
 
 	/* Builds the kernel inode of the record that was found. */
 	error = fat_make_inode(mountp,
@@ -8803,7 +8803,7 @@ fat_stat_path_casefold(
 	/* Reports why the path could not be resolved. */
 	if (fsresult != 0)
 		return fsresult;
-	slash = strrchr(path, '/');
+	slash = kern_strrchr(path, '/');
 
 	/* The canonical path is the parent plus the stored name. */
 	prefix_length = 0;
@@ -8811,12 +8811,12 @@ fat_stat_path_casefold(
 		prefix_length = (size_t)(slash - path + 1);
 
 	/* The stored name has to fit after the parent that precedes it. */
-	name_length = strlen(entry.name);
+	name_length = kern_strlen(entry.name);
 	if (prefix_length + name_length >= sizeof(canonical))
 		return ENAMETOOLONG;
 
-	memcpy(canonical, path, prefix_length);
-	strcpy(canonical + prefix_length, entry.name);
+	kern_memcpy(canonical, path, prefix_length);
+	kern_strcpy(canonical + prefix_length, entry.name);
 
 	/* Builds the kernel inode of the record that was found. */
 	error = fat_make_inode(mountp,
@@ -8876,8 +8876,8 @@ fat_lookup_unlocked(
 		}
 
 		/* The parent's path is this one with its last name cut off. */
-		strcpy(path, parent);
-		slash = strrchr(path, '/');
+		kern_strcpy(path, parent);
+		slash = kern_strrchr(path, '/');
 
 		/* A path with no slash left in it names a child of the root. */
 		if (slash == NULL) {
@@ -8964,7 +8964,7 @@ fat_getattr(
 	struct inode *inode,
 	struct stat *status)
 {
-	memset(status, 0, sizeof(*status));
+	kern_memset(status, 0, sizeof(*status));
 	status->st_dev = inode->i_mount->m_disk->d_dev;
 	status->st_ino = inode->i_ino;
 	status->st_mode = inode->i_mode;
@@ -9084,7 +9084,7 @@ fat_setattr_unlocked(
 	if (result != 0)
 		return result;
 
-	memcpy(saved, sector + info->fi_dirent_offset, sizeof(saved));
+	kern_memcpy(saved, sector + info->fi_dirent_offset, sizeof(saved));
 	sector += info->fi_dirent_offset;
 
 	/* The mode is stored as the read-only bit and nothing else. */
@@ -9115,7 +9115,7 @@ fat_setattr_unlocked(
 		restored = fat_engine_write_sector_result(
 			state, info->fi_dirent_lba, &rollback);
 		if (restored == 0) {
-			memcpy(rollback + info->fi_dirent_offset, saved,
+			kern_memcpy(rollback + info->fi_dirent_offset, saved,
 			       sizeof(saved));
 			(void)fat_engine_mark_sector_dirty(state);
 		}
@@ -9178,7 +9178,7 @@ fat_file_get(
 	for (i = 0; i < FAT_FILE_MAX; i++) {
 		/* This slot is free, so it becomes the open file. */
 		if (!fat_files[i].used) {
-			memset(&fat_files[i], 0, sizeof(fat_files[i]));
+			kern_memset(&fat_files[i], 0, sizeof(fat_files[i]));
 			fat_files[i].used = 1;
 			fat_files[i].owner = file->f_inode;
 			slot = &fat_files[i];
@@ -9197,7 +9197,7 @@ fat_file_get(
 	opened = fat_raw_open(mount_state, fat_path(file->f_inode), slot);
 	if (opened != 0) {
 		irq = spin_lock_irqsave(&fat_pool_lock);
-		memset(slot, 0, sizeof(*slot));
+		kern_memset(slot, 0, sizeof(*slot));
 		spin_unlock_irqrestore(&fat_pool_lock, irq);
 
 		/* Reports that no result is available. */
@@ -9494,7 +9494,7 @@ fat_flush_pending_closes(
 			fat_sync_inode_state(owner, state);
 
 		irq = spin_lock_irqsave(&fat_pool_lock);
-		memset(state, 0, sizeof(*state));
+		kern_memset(state, 0, sizeof(*state));
 		spin_unlock_irqrestore(&fat_pool_lock, irq);
 	}
 
@@ -9723,7 +9723,7 @@ fat_readdir_unlocked(
 		return result;
 
 	component.cn_nameptr = decoded.name;
-	component.cn_namelen = strlen(decoded.name);
+	component.cn_namelen = kern_strlen(decoded.name);
 	component.cn_flags = COMPONENT_LAST;
 
 	/* The child's path is the directory's plus its own name. */
@@ -9736,10 +9736,10 @@ fat_readdir_unlocked(
 	if (error != 0)
 		return EIO;
 
-	memset(entry, 0, sizeof(*entry));
+	kern_memset(entry, 0, sizeof(*entry));
 	entry->d_ino = child->i_ino;
 	entry->d_type = child->i_type;
-	strncpy(entry->d_name, decoded.name, NAME_MAX);
+	kern_strncpy(entry->d_name, decoded.name, NAME_MAX);
 	entry->d_name[NAME_MAX] = '\0';
 
 	inode_release(child);
@@ -9827,7 +9827,7 @@ fat_close_file(
 			state->pending_close = 1;
 			state->owner = NULL;
 		} else {
-			memset(state, 0, sizeof(*state));
+			kern_memset(state, 0, sizeof(*state));
 		}
 
 		spin_unlock_irqrestore(&fat_pool_lock, irq);
@@ -10520,12 +10520,12 @@ fat_path_descendant(
 	int difference;
 
 	/* Nothing lies under an empty parent name. */
-	length = strlen(parent);
+	length = kern_strlen(parent);
 	if (length == 0)
 		return 0;
 
 	/* The parent name has to be a prefix of the path. */
-	difference = memcmp(parent, path, length);
+	difference = kern_memcmp(parent, path, length);
 	if (difference != 0)
 		return 0;
 
@@ -10553,8 +10553,8 @@ fat_repath_descendants(
 	int below;
 
 	/* Measures both names once, outside the walk. */
-	old_length = strlen(old_path);
-	new_length = strlen(new_path);
+	old_length = kern_strlen(old_path);
+	new_length = kern_strlen(new_path);
 
 	/* Walks the inode pool under its lock. */
 	irq = spin_lock_irqsave(&fat_pool_lock);
@@ -10576,11 +10576,11 @@ fat_repath_descendants(
 		/*
 		 * Rebuilds the path with the new name in front of the suffix.
 		 */
-		suffix = strlen(fat_inodes[i].path + old_length);
-		memcpy(replacement, new_path, new_length);
-		memcpy(replacement + new_length,
+		suffix = kern_strlen(fat_inodes[i].path + old_length);
+		kern_memcpy(replacement, new_path, new_length);
+		kern_memcpy(replacement + new_length,
 			fat_inodes[i].path + old_length, suffix + 1U);
-		strcpy(fat_inodes[i].path, replacement);
+		kern_strcpy(fat_inodes[i].path, replacement);
 	}
 
 	spin_unlock_irqrestore(&fat_pool_lock, irq);
@@ -10608,8 +10608,8 @@ fat_repath_descendants_possible(
 	int below;
 
 	/* Measures both names once, outside the search. */
-	old_length = strlen(old_path);
-	new_length = strlen(new_path);
+	old_length = kern_strlen(old_path);
+	new_length = kern_strlen(new_path);
 	error = 0;
 
 	/* Walks the inode pool under its lock. */
@@ -10632,7 +10632,7 @@ fat_repath_descendants_possible(
 		/*
 		 * Refuses the rename when this inode's new path would not fit.
 		 */
-		suffix = strlen(fat_inodes[i].path + old_length);
+		suffix = kern_strlen(fat_inodes[i].path + old_length);
 		if (new_length + suffix >= KERN_PATH_MAX) {
 			error = ENAMETOOLONG;
 			break;
@@ -10706,7 +10706,7 @@ fat_rename_unlocked(
 		return EIO;
 	}
 
-	strcpy(old_canonical, fat_path(source));
+	kern_strcpy(old_canonical, fat_path(source));
 
 	/* Resolves whatever the new name already refers to, if anything. */
 	target_error = fat_lookup_unlocked(new_directory, new_name, &target);
@@ -10751,7 +10751,7 @@ fat_rename_unlocked(
 			return EIO;
 		}
 
-		strcpy(new_canonical, fat_path(target));
+		kern_strcpy(new_canonical, fat_path(target));
 	} else {
 		/* The volume may spell the new name differently. */
 		error = fat_raw_canonical_basename(state,
@@ -10765,7 +10765,7 @@ fat_rename_unlocked(
 		}
 
 		canonical_name.cn_nameptr = canonical_basename;
-		canonical_name.cn_namelen = strlen(canonical_basename);
+		canonical_name.cn_namelen = kern_strlen(canonical_basename);
 		canonical_name.cn_flags = COMPONENT_LAST;
 
 		/* The canonical path is the parent's plus that spelling. */
@@ -10865,7 +10865,7 @@ fat_rename_unlocked(
 
 	irq = spin_lock_irqsave(&fat_pool_lock);
 
-	strcpy(fat_slot(source)->path, new_canonical);
+	kern_strcpy(fat_slot(source)->path, new_canonical);
 
 	spin_unlock_irqrestore(&fat_pool_lock, irq);
 
@@ -11156,8 +11156,8 @@ fat_identify(
 		return error;
 
 	/* Reports the type, which is all a volume without a label carries. */
-	memset(identity, 0, sizeof(*identity));
-	strcpy(identity->type, "vfat");
+	kern_memset(identity, 0, sizeof(*identity));
+	kern_strcpy(identity->type, "vfat");
 	identity->flags = KERN_BLKID_TYPE;
 
 	/* FAT32 moved the extended fields further into the boot sector. */
@@ -11179,7 +11179,7 @@ fat_identify(
 	/* Renders the serial number in the two-group form tools expect. */
 	serial = fat_engine_get32(boot + serial_offset);
 	fat_hex32(identity->uuid, serial);
-	memmove(identity->uuid + 5, identity->uuid + 4, 4U);
+	kern_memmove(identity->uuid + 5, identity->uuid + 4, 4U);
 	identity->uuid[4] = '-';
 	identity->uuid[9] = '\0';
 	identity->flags |= KERN_BLKID_UUID;
@@ -11191,7 +11191,7 @@ fat_identify(
 		       11U);
 	difference = 1;
 	if (identity->label[0] != '\0')
-		difference = strcmp(identity->label, "NO NAME");
+		difference = kern_strcmp(identity->label, "NO NAME");
 
 	/* The placeholder label every unnamed volume carries. */
 	if (difference != 0)
@@ -11239,7 +11239,7 @@ fat_mount_impl(
 		/* This slot is free, so it becomes the new mount. */
 		if (!fat_mounts[i].used) {
 			state = &fat_mounts[i];
-			memset(state, 0, sizeof(*state));
+			kern_memset(state, 0, sizeof(*state));
 			state->used = 1;
 			break;
 		}
@@ -11252,7 +11252,7 @@ fat_mount_impl(
 		return ENOSPC;
 
 	/* Takes the table the recorded modes and owners are read into. */
-	memset(&fat_metadata_tables[i], 0, sizeof(fat_metadata_tables[i]));
+	kern_memset(&fat_metadata_tables[i], 0, sizeof(fat_metadata_tables[i]));
 	state->metadata = &fat_metadata_tables[i];
 	(void)mutex_init(&state->lock, LOCK_RANK_INODE, "FAT mount");
 	state->disk = mountp->m_disk;
@@ -11284,9 +11284,9 @@ fat_mount_impl(
 	if (result != 0) {
 		irq = spin_lock_irqsave(&fat_pool_lock);
 
-		memset(&fat_metadata_tables[i], 0,
+		kern_memset(&fat_metadata_tables[i], 0,
 			sizeof(fat_metadata_tables[i]));
-		memset(state, 0, sizeof(*state));
+		kern_memset(state, 0, sizeof(*state));
 
 		spin_unlock_irqrestore(&fat_pool_lock, irq);
 
@@ -11302,9 +11302,9 @@ fat_mount_impl(
 	if (root == NULL) {
 		irq = spin_lock_irqsave(&fat_pool_lock);
 
-		memset(&fat_metadata_tables[i], 0,
+		kern_memset(&fat_metadata_tables[i], 0,
 			sizeof(fat_metadata_tables[i]));
-		memset(state, 0, sizeof(*state));
+		kern_memset(state, 0, sizeof(*state));
 
 		spin_unlock_irqrestore(&fat_pool_lock, irq);
 
@@ -11420,11 +11420,11 @@ fat_unmount_impl(
 
 	irq = spin_lock_irqsave(&fat_pool_lock);
 
-	memset(state, 0, sizeof(*state));
+	kern_memset(state, 0, sizeof(*state));
 
 	/* The recorded modes and owners go back with the slot. */
 	if (metadata != NULL)
-		memset(metadata, 0, sizeof(*metadata));
+		kern_memset(metadata, 0, sizeof(*metadata));
 
 	spin_unlock_irqrestore(&fat_pool_lock, irq);
 
@@ -11453,7 +11453,7 @@ fat_statvfs(
 	/* Counts the clusters the allocation table calls free. */
 	error = fat_engine_count_free_clusters(state, &free_clusters);
 	if (error == 0) {
-		memset(result, 0, sizeof(*result));
+		kern_memset(result, 0, sizeof(*result));
 		result->f_bsize = (uint64_t)fat->sectors_per_cluster * 512U;
 		result->f_frsize = result->f_bsize;
 		result->f_blocks = fat->cluster_count;

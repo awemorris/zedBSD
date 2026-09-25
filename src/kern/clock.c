@@ -16,6 +16,7 @@
  * by the timer and sleep paths.
  */
 
+#include "kern/random.h"
 #include "kern/clock.h"
 #include "kern/atomic.h"
 #include "kern/cred.h"
@@ -25,7 +26,7 @@
 #include "kern/waitq.h"
 #include "kern/lock.h"
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
 #include <limits.h>
 
@@ -97,6 +98,8 @@ kernel_timer_handler(
 
 	sched_clock_cpu(cpu, now);
 
+	/* The tick's timing against the counter feeds the random pool. */
+	kern_random_tick(cpu);
 }
 
 /*
@@ -193,8 +196,12 @@ clock_milliseconds(
 	/* Scales the tick counter to milliseconds. */
 	ticks = clock_ticks();
 
-	/* Reports the elapsed milliseconds. */
-	return ticks * (1000U / KERN_CLOCK_HZ);
+	/*
+	 * Reports the elapsed milliseconds.  1000 / KERN_CLOCK_HZ is not used:
+	 * it is zero once the tick is finer than a millisecond, and wrong
+	 * whenever the rate does not divide a thousand.
+	 */
+	return kern_ticks_to_ms(ticks);
 }
 
 /*
@@ -613,7 +620,7 @@ void
 kern_usleep_range(unsigned min_us, unsigned max_us)
 {
 	/*
-	 * Yielding sleep-range on the EXISTING 10ms periodic tick (no HAL change,
+	 * Yielding sleep-range on the EXISTING periodic tick (no HAL change,
 	 * no high-resolution one-shot).  The minimum-wait deadline is computed ONCE
 	 * from the monotonic counter (earliest = base + min_us); a wake re-checks
 	 * that SAME deadline and never extends it.  Whenever the deadline is not yet
@@ -621,7 +628,7 @@ kern_usleep_range(unsigned min_us, unsigned max_us)
 	 * its deadline and yield the CPU (waitq_sleep -> sched_sleep_locked), so
 	 * another thread on this CPU runs; on wake we re-read the monotonic counter
 	 * and only return once at least min_us has elapsed.  This is coarse: the
-	 * actual wake is at 10ms tick granularity and may be LATER than [min,max_us]
+	 * actual wake is at tick granularity (1/KERN_CLOCK_HZ) and may be LATER than [min,max_us]
 	 * -- callers (PCODE re-request, register slow polls) MUST re-check their
 	 * condition after the sleep, which they do.  waitq_sleep removes the wait
 	 * token on return, so no timer state outlives this frame.
@@ -630,7 +637,7 @@ kern_usleep_range(unsigned min_us, unsigned max_us)
 	struct wait_queue wq;
 	struct spinlock lk;
 
-	(void)max_us;   /* upper bound is advisory; the 10ms tick coarsens the wake */
+	(void)max_us;   /* upper bound is advisory; the tick coarsens the wake */
 	if (!kern_rtc_read_counter(&base, &freq) || freq == 0u)
 		return;
 	earliest = base + ((uint64_t)min_us * freq) / 1000000u;

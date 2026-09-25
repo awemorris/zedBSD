@@ -18,14 +18,14 @@
 #include "ppgtt.h"
 #include "memory.h"
 #include "ggtt.h"
+#include <kern/kcrt.h>
 
 #include <kern/device-io.h>
 #include <kern/kmem.h>
 #include <kern/pmem.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 #include "intel/gt-regs.h"
 
@@ -136,7 +136,7 @@ drv_i915_gt_ppgtt_create(
 		return EINVAL;
 
 	/* Starts from an empty four-level space. */
-	memset(pp, 0, sizeof(*pp));
+	kern_memset(pp, 0, sizeof(*pp));
 	pp->top = I915_PPGTT_TOP;
 	pp->top_count = I915_PPGTT_TOP_COUNT;
 
@@ -468,7 +468,7 @@ drv_i915_ppgtt_create(
 	/* A space is created once; the caller destroys it before reuse. */
 	if (vm->created != 0U)
 		return EBUSY;
-	memset(vm, 0, sizeof(*vm));
+	kern_memset(vm, 0, sizeof(*vm));
 
 	/* Allocates the zeroed data page every unmapped address reads. */
 	error = i915_ppgtt_page_alloc(vm, &vm->scratch[0], 0U);

@@ -29,23 +29,73 @@
 #include "kern/disk.h"
 #include "kern/cache-memory.h"
 #include "kern/writeback.h"
-#include <errno.h>
-#include <string.h>
-#include <sys/mman.h>
+#include <uapi/errno.h>
+#include <uapi/mman.h>
 #include "kern/lock.h"
 #include "kern/swap.h"
 #include <hal/hal.h>
 #include <kern/pmem.h>
 #include <limits.h>
 #include "kern/sched.h"
+#include "kern/clock.h"
+#include "kern/thread.h"
+#include "kern/process.h"
+#include "kern/signal.h"
+#include "kern/klog.h"
+#include <uapi/signal.h>
+#include <kern/kcrt.h>
 
 #define PAGE_SIZE			KERN_PAGE_SIZE
 #define VM_OBJECT_DATA			__attribute__((section(".vfs_bss")))
 #define VM_OBJECT_FAULT_RECLAIM_RETRIES	4U
 #define VM_OBJECT_FAULT_RESERVE_PAGES	4U
-#define VM_OBJECT_BACKING_SNAPSHOT_MAX	192U
-#define VM_OBJECT_CACHE_OBJECTS		32U
+#define VM_OBJECT_BACKING_SNAPSHOT_MAX	1024U
+#define VM_OBJECT_CACHE_OBJECTS		256U
 #define VM_OBJECT_CACHE_PAGES		16U /* Bounded transfer vector, not retention. */
+#define VM_OBJECT_HASH_BITS		10U
+#define VM_OBJECT_HASH_BUCKETS		(1U << VM_OBJECT_HASH_BITS)
+
+/*
+ * How many queued pages one reclaim examines at most.
+ *
+ * The clock below clears the accessed bit of each page it passes over, so
+ * a second sweep finds a victim; the bound keeps one reclaim from walking
+ * all of memory when everything was touched at once.
+ */
+#define VM_RECLAIM_SCAN_MAX		4096U
+
+/*
+ * The free-page watermarks, in pages, as a share of managed memory.
+ *
+ * Below the low mark the page-out worker is woken and reclaims until the
+ * high mark.  The min mark is a reserve: a user frame is never taken from
+ * it, so page tables, kernel records and the memory swap I/O needs can
+ * still be allocated while user faults wait for the worker.  Each mark
+ * has a floor for a small machine.
+ */
+#define VM_FREE_MIN_SHARE		512U
+#define VM_FREE_MIN_FLOOR		256U
+
+/* How long one wait for free memory lasts, in scheduler ticks. */
+#define VM_FREE_WAIT_TICKS		10U
+
+/*
+ * How many frames the fault path takes on one reading of the allocator's
+ * free count, and how far above the reserve the estimate must stay for
+ * the reading to be trusted at all.
+ */
+#define VM_FREE_SNAPSHOT_MAX_TAKEN	64U
+#define VM_FREE_SNAPSHOT_MARGIN		256U
+
+/* How many such waits an object-page fault makes before it gives up, ten seconds. */
+#define VM_OBJECT_FAULT_WAITS		1000U
+
+/*
+ * How long a fault waits with no frame at all before the out-of-memory
+ * killer runs, in seconds.  Commit guarantees the memory exists in RAM or
+ * swap, so this is reached only when swap cannot be written.
+ */
+#define VM_OOM_WAIT_SECONDS		10U
 #define VM_PAGE_TRACKED			0x0010U
 #define stats				vm_reclaim_counters
 
@@ -74,6 +124,15 @@ struct vm_page_slab {
 static struct vm_object *shared_objects VM_OBJECT_DATA;
 
 /*
+ * The registry's objects again, chained by the inode they cache.
+ *
+ * A file read or fault finds its inode's object here instead of walking
+ * every published object with interrupts disabled.  The chains hold
+ * exactly the objects of shared_objects, and change under the same lock.
+ */
+static struct vm_object *object_hash[VM_OBJECT_HASH_BUCKETS] VM_OBJECT_DATA;
+
+/*
  * How many objects the registry holds.
  */
 static unsigned object_count VM_OBJECT_DATA;
@@ -85,6 +144,14 @@ static unsigned object_count VM_OBJECT_DATA;
  * reused is recognized by the generation that came with it.
  */
 static uint64_t object_registry_generation VM_OBJECT_DATA;
+
+/*
+ * The use count stamped on an object each time it is admitted or referenced.
+ *
+ * It only ever increases under the registry lock, so the cache object with
+ * the lowest stamp is the least recently used one.
+ */
+static uint64_t object_use_generation VM_OBJECT_DATA;
 
 /*
  * How many registry entries exist only because the page cache asked for them.
@@ -149,6 +216,63 @@ static unsigned metadata_depth;
  * The list of private pages that reclaim may write to swap.
  */
 static struct vm_private_page *page_queue;
+
+/*
+ * The oldest end of the reclaim queue, where the clock hand starts.
+ *
+ * Pages enter at the head; one that was used since the hand last passed
+ * is moved back to the head, so the tail holds the pages left alone the
+ * longest.
+ */
+static struct vm_private_page *page_queue_tail;
+
+/*
+ * The tracked backings whose page is on swap.
+ *
+ * They leave the reclaim queue when they are written out, so the clock
+ * never walks pages that cannot be reclaimed, and return to it when they
+ * are read back in.  Draining a swap source finds its pages here.
+ */
+static struct vm_private_page *swapped_queue;
+
+/*
+ * Guards the page-out worker's state and the two wait queues below.
+ */
+static struct spinlock pageout_lock;
+
+/*
+ * Where the page-out worker sleeps until the free count falls below the
+ * low mark.
+ */
+static struct wait_queue pageout_waitq;
+
+/*
+ * Where a fault that found no frame above the reserve sleeps until the
+ * worker or a free makes room.
+ */
+static struct wait_queue free_waitq;
+
+/*
+ * Whether the page-out worker has been started, and whether it has been
+ * asked to run since it last looked.
+ */
+static int pageout_started;
+static int pageout_requested;
+
+/*
+ * The free-page count as the allocator last reported it, and how many
+ * frames the fault path has asked for since.
+ *
+ * Reading the allocator takes its global lock and walks its extents, too
+ * much for every frame.  Between readings the count is estimated as the
+ * snapshot less the frames asked for since; frees are not counted, so the
+ * estimate errs low.  The allocator is read again after a bounded number
+ * of frames, or whenever the estimate comes near the reserve, where the
+ * decision has to be exact.  Both are updated without a lock: a lost
+ * increment only makes the next reading come a little later.
+ */
+static size_t free_snapshot_pages;
+static size_t free_snapshot_taken;
 
 /*
  * The mutex that guards the private page queue above.
@@ -233,6 +357,7 @@ static void clear_page_dirty_locked(struct vm_object_page *page);
 static void free_object_page(struct vm_object_page *page);
 static int object_can_destroy(struct vm_object *object);
 static int unlink_object_locked(struct vm_object *object);
+static unsigned object_hash_index(const struct inode *inode);
 static void destroy_object(struct vm_object *object);
 static void retain_object(struct vm_object *object, int error);
 static int object_wait_resize(struct vm_object *object);
@@ -277,11 +402,23 @@ static int write_dirty_pages(struct vm_object *object, uint64_t generation, off_
 static size_t object_prefetch_consume(struct vm_object_page *page, size_t start, size_t length);
 static void object_prefetch_retire(struct vm_object_page *page);
 static uint32_t mapping_prot(const struct vm_page *page);
+static void queue_insert(struct vm_private_page *backing);
 static void queue_remove(struct vm_private_page *backing);
+static void swapped_insert(struct vm_private_page *backing);
 static int backing_wired_or_avoided(struct vm_private_page *backing, struct vm_page *avoid);
 static int backing_has_wired_mapping(struct vm_private_page *backing);
 static int backing_has_busy_mapping(struct vm_private_page *backing);
 static uint32_t backing_pte_flags(struct vm_private_page *backing);
+static void backing_clear_accessed(struct vm_private_page *backing);
+static int backing_hold_spaces(struct vm_private_page *backing);
+static void backing_release_spaces(struct vm_private_page *backing);
+static int reclaim_take_candidate(struct vm_private_page *backing);
+static size_t vm_free_pages(void);
+static size_t vm_free_pages_exact(void);
+static size_t vm_free_min_pages(void);
+static void pageout_kick(void);
+static void pageout_worker(void *argument);
+static int vm_oom_kill(void);
 static void vmspace_fault_wake(struct vmspace *vm);
 static void pin_backing_mappings(struct vm_private_page *backing);
 static void unpin_backing_mappings(struct vm_private_page *backing);
@@ -494,6 +631,11 @@ vm_object_put(
 	int anonymous;
 	bool enabled;
 	uint64_t sequence;
+	unsigned long irq;
+	int clean;
+	int dirty;
+	int busy;
+	int destroyable;
 
 	/* Starts with nothing unlinked and no writer to close. */
 	removed = 0;
@@ -551,14 +693,50 @@ retry_mapping:
 	/*
 	 * DETACHING excludes new mappings, so final writeback does not need
 	 * the cross-vm metadata lock which a waiting mapper may already hold.
+	 * An object with nothing dirty and nothing in flight has nothing to
+	 * write back, and the walk over its pages is skipped: a short process
+	 * that only read a large library would otherwise pay for every page.
 	 */
-	error = vm_object_sync_range_internal(object, 0, SIZE_MAX, MS_SYNC, 1, 0, 0);
+	irq = spin_lock_irqsave(&object->lock);
+	dirty = object_has_dirty_pages_locked(object);
+	busy = object_has_busy_pages_locked(object);
+	spin_unlock_irqrestore(&object->lock, irq);
+	clean = 1;
+	if (dirty || busy)
+		clean = 0;
+	error = 0;
+	if (!clean)
+		error = vm_object_sync_range_internal(object, 0, SIZE_MAX, MS_SYNC, 1, 0, 0);
+
+	/*
+	 * A file object that its last mapping is leaving stays as a cache
+	 * object, so the next process that maps the same file finds its pages;
+	 * the least recently used cache object makes room when the cache is
+	 * full.  An object without a read handle cannot be kept.
+	 */
+	if (!anonymous && error == 0 &&
+	    (object->flags & VM_OBJECT_CACHE_REFERENCE) == 0 &&
+	    object->file != NULL &&
+	    cache_objects >= VM_OBJECT_CACHE_OBJECTS)
+		(void)object_cache_evict_one(NULL);
 
 	/* Unlinks a clean object, or retains one that still has dirty pages. */
 	enabled = registry_lock();
 	if (object->mapping_count != 0 ||
 	    (object->flags & VM_OBJECT_DETACHING) == 0)
 		HAL_FATAL("VM object teardown state changed during writeback");
+
+	/* Admits the leaving object to the cache when there is room for it. */
+	destroyable = object_can_destroy(object);
+	if (!anonymous && error == 0 &&
+	    (object->flags & VM_OBJECT_CACHE_REFERENCE) == 0 &&
+	    object->file != NULL &&
+	    cache_objects < VM_OBJECT_CACHE_OBJECTS &&
+	    destroyable) {
+		object->flags |= VM_OBJECT_CACHE_REFERENCE;
+		cache_objects++;
+		object->last_use = ++object_use_generation;
+	}
 	if (!anonymous && error == 0 && object_cache_retainable(object)) {
 		object->flags &= ~VM_OBJECT_DETACHING;
 		write_file = object->write_file;
@@ -820,7 +998,7 @@ vm_object_content_begin(
 	    (uint64_t)offset + length < (uint64_t)offset)
 		return EINVAL;
 
-	memset(content, 0, sizeof(*content));
+	kern_memset(content, 0, sizeof(*content));
 
 	/* An empty range needs no transaction. */
 	if (length == 0)
@@ -1247,7 +1425,7 @@ retry_lookup:
 		irq = spin_lock_irqsave(&object->lock);
 		if (page->hold_count == 0)
 			HAL_FATAL("VM object coherent read lost fault hold");
-		memcpy(bytes + done, (const uint8_t *)hal_pmem_to_kernel(page->pmem.paddr) + in_page,
+		kern_memcpy(bytes + done, (const uint8_t *)hal_pmem_to_kernel(page->pmem.paddr) + in_page,
 		    chunk);
 
 		/* Credits the prefetch that made this page resident. */
@@ -1306,7 +1484,7 @@ vm_object_resize_begin(
 	/* Rejects a missing inode or result, or a negative size. */
 	if (inode == NULL || resize == NULL || target_size < 0)
 		return EINVAL;
-	memset(resize, 0, sizeof(*resize));
+	kern_memset(resize, 0, sizeof(*resize));
 
 	/* Only one transaction runs, and never under a read lease. */
 	enabled = registry_lock();
@@ -1499,6 +1677,9 @@ vm_object_fault(
 	ssize_t count;
 	unsigned long irq;
 	unsigned read_retries;
+	unsigned waits;
+	int reclaimed;
+	int owned;
 	int error;
 	uint64_t sequence;
 
@@ -1580,15 +1761,20 @@ retry:
 	if (offset >= fault_size)
 		return ENXIO;
 
-	/* Allocates a new busy page, reclaiming once when memory is short. */
+	/*
+	 * Allocates a new busy page, reclaiming and then waiting while memory
+	 * is short.  A caller inside the metadata lock cannot wait.
+	 */
 	page = alloc_object_page(object, offset, 0);
-	if (page == NULL) {
-		if (vm_reclaim_one(NULL) != 0)
-			return ENOMEM;
-
+	for (waits = 0; page == NULL; waits++) {
+		reclaimed = vm_reclaim_one(NULL);
+		if (reclaimed != 0) {
+			owned = vm_metadata_owned();
+			if (owned || waits >= VM_OBJECT_FAULT_WAITS)
+				return ENOMEM;
+			vm_reclaim_wait_free();
+		}
 		page = alloc_object_page(object, offset, 0);
-		if (page == NULL)
-			return ENOMEM;
 	}
 
 	/* Publishes it unless the world changed or another fault won. */
@@ -1616,7 +1802,7 @@ retry:
 
 read_page:
 	/* Reads the page's data, zero-filling past the end of file. */
-	memset((void *)hal_pmem_to_kernel(page->pmem.paddr), 0, PAGE_SIZE);
+	kern_memset((void *)hal_pmem_to_kernel(page->pmem.paddr), 0, PAGE_SIZE);
 	length = (size_t)(fault_size - offset);
 	if (length > PAGE_SIZE)
 		length = PAGE_SIZE;
@@ -1893,6 +2079,69 @@ vm_object_fault_release(
 }
 
 /*
+ * Holds a page the object already caches, without reading or waiting.
+ *
+ * Fault-around maps the neighbours of a faulting page only when they are
+ * already there: a page that is absent, being read, failed, past the end
+ * of the file, or inside a resize or content transaction is left to its
+ * own fault.  The hold is released as vm_object_fault()'s is.
+ */
+int
+vm_object_fault_resident(
+	struct vm_object *object,
+	off_t offset,
+	struct vm_object_page **result)
+{
+	struct vm_object_page *page;
+	unsigned long irq;
+	int error;
+
+	/* Rejects a missing object or result, or an unaligned offset. */
+	if (object == NULL ||
+	    result == NULL ||
+	    offset < 0 ||
+	    (offset & (PAGE_SIZE - 1U)) != 0)
+		return EINVAL;
+
+	/* Looks the page up under the object lock. */
+	error = 0;
+	page = NULL;
+	irq = spin_lock_irqsave(&object->lock);
+
+	/* Leaves the page to its own fault while a transaction runs. */
+	if ((object->flags & (VM_OBJECT_RESIZING | VM_OBJECT_CONTENT)) != 0)
+		error = EAGAIN;
+
+	/* Leaves a page past the end of the file to its own fault. */
+	if (error == 0 && offset >= object->logical_size)
+		error = ENXIO;
+
+	/* Finds the cached page. */
+	if (error == 0) {
+		page = find_page(object, offset);
+		if (page == NULL)
+			error = ENOENT;
+	}
+
+	/* Skips a page being read or one whose read failed. */
+	if (error == 0 &&
+	    (page->flags & (VM_OBJECT_PAGE_BUSY | VM_OBJECT_PAGE_ERROR)) != 0)
+		error = EAGAIN;
+
+	/* Holds the page for the caller's mapping. */
+	if (error == 0) {
+		page->hold_count++;
+		*result = page;
+	}
+
+	/* Lets the object's other users in. */
+	spin_unlock_irqrestore(&object->lock, irq);
+
+	/* Reports whether the page was held. */
+	return error;
+}
+
+/*
  * Converts a fault hold into a reverse mapping.
  */
 void
@@ -1915,6 +2164,9 @@ vm_object_mapping_add(
 		HAL_FATAL("mapping VM object page without fault hold");
 
 	mapping->object_next = object_page->mappings;
+	if (mapping->object_next != NULL)
+		mapping->object_next->object_link = &mapping->object_next;
+	mapping->object_link = &object_page->mappings;
 
 	object_page->mappings = mapping;
 	object_page->mapping_count++;
@@ -1936,17 +2188,23 @@ vm_object_mapping_remove_locked(
 {
 	struct vm_page **link;
 
-	for (link = &object_page->mappings; *link != NULL;
-	     link = &(*link)->object_next) {
-		if (*link == mapping) {
-			*link = mapping->object_next;
-			mapping->object_next = NULL;
-			if (object_page->mapping_count == 0)
-				HAL_FATAL("VM object mapping counter underflow");
-			object_page->mapping_count--;
-			return;
-		}
-	}
+	/*
+	 * The page knows the link that points at it, so it leaves without a
+	 * walk of the list, which a page of a shared library makes as long
+	 * as the number of processes.  A page that is not linked is left as
+	 * it is.
+	 */
+	link = mapping->object_link;
+	if (link == NULL || *link != mapping)
+		return;
+	*link = mapping->object_next;
+	if (mapping->object_next != NULL)
+		mapping->object_next->object_link = link;
+	mapping->object_next = NULL;
+	mapping->object_link = NULL;
+	if (object_page->mapping_count == 0)
+		HAL_FATAL("VM object mapping counter underflow");
+	object_page->mapping_count--;
 }
 
 /*
@@ -2076,7 +2334,8 @@ retry_lookup:
 	/* Holds the object as an operation, waiting out teardown and resize. */
 	object = NULL;
 	enabled = registry_lock();
-	for (object = shared_objects; object != NULL; object = object->next) {
+	for (object = object_hash[object_hash_index(inode)]; object != NULL;
+	     object = object->hash_next) {
 		if (object->inode != inode)
 			continue;
 		if ((object->flags & VM_OBJECT_DETACHING) != 0) {
@@ -2885,8 +3144,8 @@ vm_object_content_prepare_delayed(
 	if (count > 16 || ticket->reserved < (uint64_t)count * PAGE_SIZE)
 		return EAGAIN;
 
-	memset(pages, 0, sizeof(pages));
-	memset(fresh, 0, sizeof(fresh));
+	kern_memset(pages, 0, sizeof(pages));
+	kern_memset(fresh, 0, sizeof(fresh));
 	error = 0;
 
 	/*
@@ -2949,7 +3208,7 @@ vm_object_content_prepare_delayed(
 
 			fresh[index] = 1;
 
-			memset(hal_pmem_to_kernel(pages[index]->pmem.paddr), 0, PAGE_SIZE);
+			kern_memset(hal_pmem_to_kernel(pages[index]->pmem.paddr), 0, PAGE_SIZE);
 
 			wanted = (size_t)(object->logical_size - (off_t)current);
 			if (wanted > PAGE_SIZE)
@@ -3170,7 +3429,7 @@ vm_object_prefetch_prepare(
 	if (length > KERN_IO_BATCH_MAX)
 		return EINVAL;
 
-	memset(fill, 0, sizeof(*fill));
+	kern_memset(fill, 0, sizeof(*fill));
 
 	/*
 	 * Leaves absent or transitioning objects to demand-driven cache
@@ -3322,8 +3581,8 @@ vm_object_prefetch_complete(
 		valid = fill->length - (size_t)index * PAGE_SIZE;
 		if (valid > PAGE_SIZE)
 			valid = PAGE_SIZE;
-		memset(hal_pmem_to_kernel(page->pmem.paddr), 0, PAGE_SIZE);
-		memcpy(hal_pmem_to_kernel(page->pmem.paddr), (const uint8_t *)bytes +
+		kern_memset(hal_pmem_to_kernel(page->pmem.paddr), 0, PAGE_SIZE);
+		kern_memcpy(hal_pmem_to_kernel(page->pmem.paddr), (const uint8_t *)bytes +
 		    (size_t)index * PAGE_SIZE, valid);
 		page->flags = 0;
 		page->content_generation = fill->content_generation;
@@ -3427,7 +3686,7 @@ vm_object_prefetch_abort(
 		disk_cache_release(fill->disk);
 
 	/* Empties the descriptor so a second cancellation does nothing. */
-	memset(fill, 0, sizeof(*fill));
+	kern_memset(fill, 0, sizeof(*fill));
 
 	/* Stops qualifying this owner for clean reclaim before dropping its pin. */
 	enabled = registry_lock();
@@ -3494,7 +3753,7 @@ vm_commit_init(
 	 * capacity before user commitment can begin.
 	 */
 	if (!commit_swap_seeded) {
-		memset(&commit_stats, 0, sizeof(commit_stats));
+		kern_memset(&commit_stats, 0, sizeof(commit_stats));
 		commit_stats.swap_pages = swap_pages;
 	} else if (commit_stats.swap_pages != swap_pages) {
 		spin_unlock_irqrestore(&commit_lock, irq);
@@ -3649,7 +3908,7 @@ vm_commit_get_stats(
 	/* Copies the statistics under the lock. */
 	irq = spin_lock_irqsave(&commit_lock);
 
-	memcpy(output, &commit_stats, sizeof(*output));
+	kern_memcpy(output, &commit_stats, sizeof(*output));
 
 	spin_unlock_irqrestore(&commit_lock, irq);
 }
@@ -3816,6 +4075,8 @@ vm_private_page_init(
 
 	backing->generation = 1;
 	backing->swap_slot = SWAP_SLOT_NONE;
+	backing->queue_next = NULL;
+	backing->queue_prev = NULL;
 }
 
 /*
@@ -3859,7 +4120,7 @@ vm_private_page_put(
 		HAL_FATAL("destroying active VM private backing");
 
 	memory = backing->pmem;
-	memset(&backing->pmem, 0, sizeof(backing->pmem));
+	kern_memset(&backing->pmem, 0, sizeof(backing->pmem));
 
 	slot = backing->swap_slot;
 	backing->swap_slot = SWAP_SLOT_NONE;
@@ -4191,11 +4452,11 @@ vm_private_page_in_owned(
 	struct vm_private_page *backing,
 	struct vm_page *accounting_page)
 {
-
 	struct swap_backend *backend;
 	uint32_t slot;
 	unsigned long irq;
 	int error;
+	int tracked;
 	struct kern_pmem memory;
 
 	/* Rejects a missing operand or a backing that is not owned and swapped. */
@@ -4220,19 +4481,8 @@ vm_private_page_in_owned(
 
 	spin_unlock_irqrestore(&backing->state_lock, irq);
 
-	/* Allocates a page, reclaiming once when memory is short, and reads it. */
-	if (vm_private_page_alloc(&backing->pmem) == HAL_OK)
-		error = 0;
-	else
-		error = ENOMEM;
-
-	/* Reclaims once and tries again before giving up on memory. */
-	if (error != 0 && vm_reclaim_one(accounting_page) == 0) {
-		if (vm_private_page_alloc(&backing->pmem) == HAL_OK)
-			error = 0;
-		else
-			error = ENOMEM;
-	}
+	/* Allocates a page, reclaiming until one is free, and reads it. */
+	error = vm_reclaim_frame(&backing->pmem, accounting_page);
 
 	if (error == 0)
 		error = swap_read_page(backend, slot,
@@ -4242,7 +4492,7 @@ vm_private_page_in_owned(
 	if (error != 0) {
 		if (backing->pmem.size != 0) {
 			memory = backing->pmem;
-			memset(&backing->pmem, 0, sizeof(backing->pmem));
+			kern_memset(&backing->pmem, 0, sizeof(backing->pmem));
 			(void)hal_pmem_free(&memory.paddr, memory.size);
 		}
 
@@ -4272,9 +4522,20 @@ vm_private_page_in_owned(
 	 * dirty until a later reclaim writes it to an active source.
 	 */
 	backing->flags |= VM_PAGE_RESIDENT | VM_PAGE_DIRTY;
+	tracked = (backing->flags & VM_PAGE_TRACKED) != 0;
 	private_page_advance_locked(backing);
 
 	spin_unlock_irqrestore(&backing->state_lock, irq);
+
+	/* Moves a tracked backing from the swapped list back to the reclaim queue. */
+	if (tracked) {
+		vm_metadata_enter();
+		mutex_lock(&reclaim_lock);
+		queue_remove(backing);
+		queue_insert(backing);
+		mutex_unlock(&reclaim_lock);
+		vm_metadata_leave();
+	}
 
 	vm_page_note_in(accounting_page);
 
@@ -4296,6 +4557,7 @@ vm_page_track(
 	struct vm_private_page *backing;
 	unsigned long irq;
 	int resident;
+	int swapped;
 
 	/* Ignores a page without a private backing. */
 	if (page == NULL)
@@ -4322,12 +4584,15 @@ vm_page_track(
 
 	/* Notes whether the page is in memory, for the count kept below. */
 	resident = (backing->flags & VM_PAGE_RESIDENT) != 0;
+	swapped = (backing->flags & VM_PAGE_SWAPPED) != 0;
 
 	spin_unlock_irqrestore(&backing->state_lock, irq);
 
-	/* Puts the backing at the head of the reclaim queue. */
-	backing->queue_next = page_queue;
-	page_queue = backing;
+	/* Puts a resident backing on the reclaim queue, a swapped one on the swapped list. */
+	if (resident)
+		queue_insert(backing);
+	else if (swapped)
+		swapped_insert(backing);
 
 	/* Counts a resident page towards what reclaim can free. */
 	if (resident)
@@ -4445,10 +4710,15 @@ vm_page_replace_private(
 	old_irq = spin_lock_irqsave(&old->state_lock);
 
 	/*
-	 * Traps unless the caller owns the old backing for I/O and at least
-	 * one mapping still refers to it.
+	 * Traps unless the caller holds the old backing and at least one
+	 * mapping still refers to it.  Holding it is owning it for I/O, or,
+	 * for a copy-on-write break of a page another process has pinned,
+	 * holding a pin of its own: a pin keeps owners, reclaim and swap away
+	 * just as ownership does, and the reverse mapping list is changed
+	 * below under reclaim_lock either way.
 	 */
-	if ((old->flags & VM_PAGE_BUSY) == 0 || old->mapping_count == 0)
+	if (((old->flags & VM_PAGE_BUSY) == 0 && old->pin_count == 0) ||
+	    old->mapping_count == 0)
 		HAL_FATAL("replacing an unowned VM private backing");
 
 	spin_unlock_irqrestore(&old->state_lock, old_irq);
@@ -4499,10 +4769,10 @@ vm_page_replace_private(
 
 	/* Links the page into the fresh backing's reverse mapping list. */
 	fresh->mappings = page;
-	fresh->queue_next = page_queue;
 
 	/* Puts the fresh backing at the head of the reclaim queue. */
-	page_queue = fresh;
+	if (fresh_resident)
+		queue_insert(fresh);
 
 	/* Counts a resident page towards what reclaim can free. */
 	if (fresh_resident)
@@ -4623,8 +4893,17 @@ vm_reclaim_init(
 	vm_metadata_init();
 
 	page_queue = NULL;
+	page_queue_tail = NULL;
+	swapped_queue = NULL;
 
-	memset(&stats, 0, sizeof(stats));
+	/* The page-out worker starts on first need, once threads exist. */
+	spin_init(&pageout_lock, LOCK_RANK_VM_OBJECT, "VM page-out");
+	waitq_init(&pageout_waitq, "VM page-out");
+	waitq_init(&free_waitq, "VM free memory");
+	pageout_started = 0;
+	pageout_requested = 0;
+
+	kern_memset(&stats, 0, sizeof(stats));
 
 	(void)mutex_init(&reclaim_lock, LOCK_RANK_VMSPACE, "VM reclaim");
 }
@@ -4848,6 +5127,352 @@ vm_reclaim_one(
 }
 
 /*
+ * Allocates one page frame for a fault, reclaiming until one is free.
+ *
+ * A user frame is taken only while the free count is above the reserve,
+ * so the page tables and records the same fault needs next can still be
+ * allocated.  Below it the fault wakes the page-out worker, reclaims a
+ * page itself, and when nothing could be reclaimed sleeps until memory is
+ * freed.  It does not give up: commit guarantees the memory.  After a long
+ * wait with nothing freed the out-of-memory killer picks a victim.
+ */
+int
+vm_reclaim_frame(
+	struct kern_pmem *memory,
+	struct vm_page *avoid)
+{
+	uint64_t started;
+	uint64_t now;
+	size_t free_pages;
+	size_t minimum;
+	unsigned long irq;
+	uint64_t sequence;
+	int error;
+	int owned;
+	int killed;
+
+	/* A caller inside the metadata lock must not sleep while others wait on it. */
+	owned = vm_metadata_owned();
+	minimum = vm_free_min_pages();
+	started = sched_ticks();
+
+	/* Tries, reclaims and waits until a frame is taken. */
+	for (;;) {
+		/* Takes a free frame while the reserve stays intact. */
+		free_pages = vm_free_pages();
+		if (free_pages > minimum || owned) {
+			error = vm_private_page_alloc(memory);
+			if (error == HAL_OK) {
+				if (free_pages < 2U * minimum)
+					pageout_kick();
+				return 0;
+			}
+		}
+
+		/* Asks the worker to refill and reclaims a page directly. */
+		pageout_kick();
+		error = vm_reclaim_one(avoid);
+		if (error == 0)
+			continue;
+
+		/* A caller that cannot sleep reports the shortage. */
+		if (owned)
+			return ENOMEM;
+
+		/* Sleeps until the worker or a free makes room, briefly. */
+		irq = spin_lock_irqsave(&pageout_lock);
+		sequence = waitq_sequence(&free_waitq);
+		(void)waitq_sleep(&free_waitq, &pageout_lock, sequence,
+		    sched_ticks() + VM_FREE_WAIT_TICKS, 0);
+		spin_unlock_irqrestore(&pageout_lock, irq);
+
+		/* A thread that was killed while waiting stops waiting. */
+		killed = signal_kill_pending(thread_current());
+		if (killed)
+			return ENOMEM;
+
+		/* Kills the largest process when nothing has been freed for long. */
+		now = sched_ticks();
+		if (now - started < (uint64_t)VM_OOM_WAIT_SECONDS * KERN_CLOCK_HZ)
+			continue;
+		killed = vm_oom_kill();
+		if (!killed)
+			return ENOMEM;
+		started = now;
+	}
+}
+
+/*
+ * Waits until memory has been freed or a short time has passed.
+ *
+ * Used by a fault that could not map a page for lack of page-table memory:
+ * it wakes the page-out worker and sleeps on the same queue as a fault
+ * that could not get a frame.
+ */
+void
+vm_reclaim_wait_free(
+	void)
+{
+	unsigned long irq;
+	uint64_t sequence;
+
+	/* Asks the worker to refill. */
+	pageout_kick();
+
+	/* Sleeps until memory is freed, briefly. */
+	irq = spin_lock_irqsave(&pageout_lock);
+	sequence = waitq_sequence(&free_waitq);
+	(void)waitq_sleep(&free_waitq, &pageout_lock, sequence,
+	    sched_ticks() + VM_FREE_WAIT_TICKS, 0);
+	spin_unlock_irqrestore(&pageout_lock, irq);
+}
+
+/*
+ * Reports the free physical memory in bytes for a caller about to take a page.
+ *
+ * The value is the fault path's estimate, which errs low and is read
+ * exactly near the reserve; a cache deciding whether to grow needs no more.
+ */
+size_t
+vm_free_bytes_estimate(
+	void)
+{
+	size_t pages;
+
+	/* Counts the caller's page against the current reading. */
+	pages = vm_free_pages();
+
+	/* Reports the estimate in bytes. */
+	return pages * PAGE_SIZE;
+}
+
+/* Reads the allocator's free page count and starts a fresh estimate from it. */
+static size_t
+vm_free_pages_exact(
+	void)
+{
+	struct hal_memstat stats;
+
+	/* Reads the allocator's free count. */
+	hal_get_memstat(&stats);
+
+	/* The reading becomes the snapshot the estimate counts down from. */
+	free_snapshot_pages = stats.physical_free / PAGE_SIZE;
+	free_snapshot_taken = 0;
+
+	/* Reports the exact count. */
+	return free_snapshot_pages;
+}
+
+/*
+ * Reports the free physical pages for one frame the caller is about to take.
+ *
+ * The count is an estimate that errs low, see free_snapshot_pages; it is
+ * read exactly whenever it matters for the reserve.
+ */
+static size_t
+vm_free_pages(
+	void)
+{
+	size_t estimate;
+	size_t minimum;
+	size_t exact;
+
+	/* The snapshot less the frames taken since bounds the free count from below. */
+	minimum = vm_free_min_pages();
+	estimate = 0;
+	if (free_snapshot_pages > free_snapshot_taken)
+		estimate = free_snapshot_pages - free_snapshot_taken;
+
+	/* Trusts a fresh estimate that leaves the reserve well clear. */
+	if (free_snapshot_taken < VM_FREE_SNAPSHOT_MAX_TAKEN &&
+	    estimate >= minimum + VM_FREE_SNAPSHOT_MARGIN) {
+		free_snapshot_taken++;
+		return estimate;
+	}
+
+	/* Reads the allocator, counting the frame this caller takes next. */
+	exact = vm_free_pages_exact();
+	free_snapshot_taken = 1;
+
+	/* Reports the fresh reading. */
+	return exact;
+}
+
+/* Reports the reserve of free pages a user frame may not take. */
+static size_t
+vm_free_min_pages(
+	void)
+{
+	static size_t cached;
+	struct hal_memstat stats;
+	size_t minimum;
+
+	/* Managed memory does not change, so the reserve is computed once. */
+	if (cached != 0)
+		return cached;
+
+	/* Takes a share of managed memory, with a floor for a small machine. */
+	hal_get_memstat(&stats);
+	minimum = stats.physical_total / PAGE_SIZE / VM_FREE_MIN_SHARE;
+	if (minimum < VM_FREE_MIN_FLOOR)
+		minimum = VM_FREE_MIN_FLOOR;
+	cached = minimum;
+	return minimum;
+}
+
+/* Wakes the page-out worker, starting it on first use. */
+static void
+pageout_kick(
+	void)
+{
+	struct thread *thread;
+	unsigned long irq;
+	int start;
+	int error;
+
+	/* Marks the request and notes whether the worker still has to start. */
+	irq = spin_lock_irqsave(&pageout_lock);
+	pageout_requested = 1;
+	start = !pageout_started;
+	if (start)
+		pageout_started = 1;
+	waitq_wake_all(&pageout_waitq);
+	spin_unlock_irqrestore(&pageout_lock, irq);
+
+	/* Starts the worker once; a failure leaves faults to reclaim directly. */
+	if (!start)
+		return;
+	error = kthread_create(pageout_worker, NULL, SCHED_PRIORITY_DEFAULT, &thread);
+	if (error != 0) {
+		irq = spin_lock_irqsave(&pageout_lock);
+		pageout_started = 0;
+		spin_unlock_irqrestore(&pageout_lock, irq);
+		return;
+	}
+
+	/* Lets the worker run. */
+	thread_start(thread);
+}
+
+/*
+ * Keeps free memory between the low and high marks.
+ *
+ * It sleeps until woken or a tenth of a second passes, reclaims until the
+ * high mark (three times the reserve) or until nothing more can be taken,
+ * and wakes the faults waiting for memory.
+ */
+static void
+pageout_worker(
+	void *argument)
+{
+	unsigned long irq;
+	uint64_t sequence;
+	size_t minimum;
+	size_t free_pages;
+	unsigned taken;
+	int error;
+	int failed;
+
+	/* The worker takes no argument and keeps memory above the same reserve. */
+	(void)argument;
+	minimum = vm_free_min_pages();
+
+	/* Runs for the life of the kernel. */
+	for (;;) {
+		/* Sleeps until asked, or checks again after a tenth of a second. */
+		irq = spin_lock_irqsave(&pageout_lock);
+		sequence = waitq_sequence(&pageout_waitq);
+		if (!pageout_requested) {
+			(void)waitq_sleep(&pageout_waitq, &pageout_lock, sequence,
+			    sched_ticks() + KERN_CLOCK_HZ / 10U, 0);
+		}
+
+		/* Consumes the request it is about to serve. */
+		pageout_requested = 0;
+		spin_unlock_irqrestore(&pageout_lock, irq);
+
+		/* Reclaims to the high mark, waking waiters as memory frees. */
+		taken = 0;
+		failed = 0;
+		for (;;) {
+			free_pages = vm_free_pages_exact();
+			if (free_pages >= 3U * minimum)
+				break;
+			error = vm_reclaim_one(NULL);
+			if (error != 0) {
+				failed = 1;
+				break;
+			}
+			taken++;
+			if ((taken % 16U) == 0) {
+				irq = spin_lock_irqsave(&pageout_lock);
+				waitq_wake_all(&free_waitq);
+				spin_unlock_irqrestore(&pageout_lock, irq);
+			}
+		}
+
+		/* Wakes every fault waiting for memory. */
+		irq = spin_lock_irqsave(&pageout_lock);
+		waitq_wake_all(&free_waitq);
+		spin_unlock_irqrestore(&pageout_lock, irq);
+
+		/* Leaves the CPU alone for a moment when nothing could be reclaimed. */
+		if (failed)
+			kern_usleep_range(5000U, 10000U);
+	}
+}
+
+/*
+ * Kills the process with the most mapped memory, sparing init and the
+ * kernel.  Reports whether one was killed.
+ */
+static int
+vm_oom_kill(
+	void)
+{
+	struct process *process;
+	struct process *victim;
+	uint64_t largest;
+	uint64_t mapped;
+	pid_t cursor;
+
+	/* Walks every process for the largest address space. */
+	victim = NULL;
+	largest = 0;
+	cursor = 1;
+	process = process_find_next_ref(cursor);
+	while (process != NULL) {
+		cursor = process->pid;
+		mapped = 0;
+		if (process->vmspace != NULL)
+			mapped = process->vmspace->mapped_virtual_bytes;
+		if (mapped > largest) {
+			if (victim != NULL)
+				process_release(victim);
+			victim = process;
+			largest = mapped;
+		} else {
+			process_release(process);
+		}
+
+		/* Moves to the next process by PID. */
+		process = process_find_next_ref(cursor);
+	}
+
+	/* Reports that no process could be chosen. */
+	if (victim == NULL)
+		return 0;
+
+	/* Kills the victim and says so. */
+	kern_logf("kern: out of memory: killed pid %ld (%llu bytes mapped)\n",
+	    (long)victim->pid, (unsigned long long)largest);
+	(void)signal_send_process(victim, SIGKILL);
+	process_release(victim);
+	return 1;
+}
+
+/*
  * Counts a page fault.
  */
 void
@@ -4884,7 +5509,7 @@ vm_reclaim_get_stats(
 	vm_metadata_enter();
 	mutex_lock(&reclaim_lock);
 
-	memcpy(output, &stats, sizeof(*output));
+	kern_memcpy(output, &stats, sizeof(*output));
 
 	/* Clears the fields this pass classifies for itself. */
 	output->anonymous_resident = 0;
@@ -4986,7 +5611,7 @@ vm_reclaim_drain_swap_source_cancelable(
 		 */
 		vm_metadata_enter();
 		mutex_lock(&reclaim_lock);
-		for (backing = page_queue; backing != NULL;
+		for (backing = swapped_queue; backing != NULL;
 		     backing = backing->queue_next) {
 			if (!private_page_targets_source(backing, source_id))
 				continue;
@@ -5101,7 +5726,13 @@ vm_reclaim_drain_swap_source(
 /*
  * Reclaims one resident private page, avoiding a given mapping.
  *
- * Unreferenced pages are preferred over recently accessed ones.
+ * The victim is chosen by a clock over the reclaim queue: the hand starts
+ * at the oldest page, and a page used since the hand last passed has its
+ * accessed bit cleared and goes back to the newest end, a second chance.
+ * The first page found unused is taken.  The walk is bounded; when it ends
+ * without one, the first usable page it passed is taken instead, so memory
+ * that was all touched at once is still reclaimed in constant time per
+ * page rather than by walking every page twice.
  * Reports EAGAIN when no candidate is available.
  */
 int
@@ -5109,50 +5740,80 @@ vm_reclaim_private_one(
 	struct vm_page *avoid)
 {
 	struct vm_private_page *selected;
-	unsigned pass;
+	struct vm_private_page *fallback;
+	struct vm_private_page *previous;
 	int file_candidate;
 	struct vm_private_page *backing;
 	unsigned state_flags;
 	unsigned long irq;
+	unsigned scanned;
 	uint32_t flags;
 	int error;
+	int busy;
 
 	selected = NULL;
+	fallback = NULL;
 	file_candidate = 0;
 
-	/* The first pass skips accessed pages; the second takes any. */
+	/* Walks the queue from its oldest end under the reclaim lock. */
 	vm_metadata_enter();
 	mutex_lock(&reclaim_lock);
 
-	for (pass = 0; pass < 2; pass++) {
-		for (backing = page_queue; backing != NULL;
-		     backing = backing->queue_next) {
-			/* Skips a backing that is absent, busy, wired or avoided. */
-			irq = spin_lock_irqsave(&backing->state_lock);
-			state_flags = backing->flags;
-			spin_unlock_irqrestore(&backing->state_lock, irq);
-			if ((state_flags & VM_PAGE_RESIDENT) == 0 ||
-			    (state_flags & VM_PAGE_BUSY) != 0 ||
-			    backing_wired_or_avoided(backing, avoid))
-				continue;
+	/* Moves the hand from the oldest page toward the newest. */
+	backing = page_queue_tail;
+	for (scanned = 0; backing != NULL && scanned < VM_RECLAIM_SCAN_MAX; scanned++) {
+		previous = backing->queue_prev;
 
-			/* Leaves a recently accessed page to the second pass. */
-			flags = backing_pte_flags(backing);
-			if (pass == 0 && (flags & HAL_SPACE_PAGE_ACCESSED))
-				continue;
-
-			/* Takes the backing and pins its mappings for the reclaim. */
-			file_candidate = backing->mappings != NULL &&
-			    backing->mappings->region->backing == VM_BACKING_FILE;
-			if (vm_private_page_io_try_acquire(backing) != 0)
-				continue;
-			pin_backing_mappings(backing);
-			selected = backing;
-			goto out;
+		/* Skips a backing that is absent, busy, wired or avoided. */
+		irq = spin_lock_irqsave(&backing->state_lock);
+		state_flags = backing->flags;
+		spin_unlock_irqrestore(&backing->state_lock, irq);
+		busy = (state_flags & VM_PAGE_RESIDENT) == 0 ||
+		    (state_flags & VM_PAGE_BUSY) != 0;
+		if (!busy)
+			busy = backing_wired_or_avoided(backing, avoid);
+		if (busy) {
+			backing = previous;
+			continue;
 		}
+
+		/* Gives a recently used page a second chance at the newest end. */
+		flags = backing_pte_flags(backing);
+		if ((flags & HAL_SPACE_PAGE_ACCESSED) != 0) {
+			backing_clear_accessed(backing);
+			queue_remove(backing);
+			queue_insert(backing);
+			if (fallback == NULL)
+				fallback = backing;
+			backing = previous;
+			continue;
+		}
+
+		/* Takes the first unused page whose I/O and address spaces it can hold. */
+		error = reclaim_take_candidate(backing);
+		if (error == 0) {
+			selected = backing;
+			break;
+		}
+
+		/* Moves on past a page another reclaim owns. */
+		backing = previous;
 	}
 
-out:
+	/* Falls back to the first usable page the walk passed over. */
+	if (selected == NULL && fallback != NULL) {
+		error = reclaim_take_candidate(fallback);
+		if (error == 0)
+			selected = fallback;
+	}
+
+	/* Pins the victim's mappings, then drops the check's extra references. */
+	if (selected != NULL) {
+		file_candidate = selected->mappings != NULL &&
+		    selected->mappings->region->backing == VM_BACKING_FILE;
+		pin_backing_mappings(selected);
+		backing_release_spaces(selected);
+	}
 
 	mutex_unlock(&reclaim_lock);
 	vm_metadata_leave();
@@ -5190,6 +5851,7 @@ vm_object_get_shared_internal(
 	bool enabled;
 	uint64_t sequence;
 	struct vm_object *existing;
+	unsigned bucket;
 
 	/* Rejects a missing file or result, or a file without an inode. */
 	if (file == NULL || result == NULL)
@@ -5210,7 +5872,8 @@ vm_object_get_shared_internal(
 retry_lookup:
 	/* Joins a published object, waiting out one that is detaching. */
 	enabled = registry_lock();
-	for (object = shared_objects; object != NULL; object = object->next) {
+	for (object = object_hash[object_hash_index(inode)]; object != NULL;
+	     object = object->hash_next) {
 		if (object->inode != inode)
 			continue;
 		if ((object->flags & VM_OBJECT_DETACHING) != 0) {
@@ -5288,8 +5951,8 @@ retry_lookup:
 
 	/* Another CPU may have published the inode while allocation slept. */
 	enabled = registry_lock();
-	for (existing = shared_objects; existing != NULL;
-	     existing = existing->next) {
+	for (existing = object_hash[object_hash_index(inode)]; existing != NULL;
+	     existing = existing->hash_next) {
 		if (existing->inode != inode)
 			continue;
 
@@ -5335,6 +5998,7 @@ retry_lookup:
 	}
 
 	object->registry_generation = ++object_registry_generation;
+	object->last_use = ++object_use_generation;
 
 	/* Publishes the new object with the inode's current end of file. */
 	object_initialize_eof_locked(object, inode);
@@ -5344,9 +6008,18 @@ retry_lookup:
 		cache_objects++;
 	}
 
-	/* Links the object into the registry. */
+	/* Links the object into the registry list. */
+	bucket = object_hash_index(inode);
+	object->previous = NULL;
 	object->next = shared_objects;
+	if (shared_objects != NULL)
+		shared_objects->previous = object;
 	shared_objects = object;
+
+	/* Links it into its inode's hash chain. */
+	object->hash_next = object_hash[bucket];
+	object_hash[bucket] = object;
+	object->flags |= VM_OBJECT_REGISTERED;
 	object_count++;
 	registry_unlock(enabled);
 	*result = object;
@@ -5393,11 +6066,14 @@ find_object_by_inode_locked(
 {
 	struct vm_object *object;
 
-	for (object = shared_objects; object != NULL; object = object->next) {
+	/* Walks the inode's hash chain to its object. */
+	for (object = object_hash[object_hash_index(inode)]; object != NULL;
+	     object = object->hash_next) {
 		if (object->inode == inode)
 			return object;
 	}
 
+	/* Reports an inode the registry holds no object for. */
 	return NULL;
 }
 
@@ -5574,7 +6250,7 @@ alloc_vm_page(
 	int error;
 
 	/* Asks the HAL for one page of ordinary memory. */
-	memset(memory, 0, sizeof(*memory));
+	kern_memset(memory, 0, sizeof(*memory));
 
 	/* Returns a short allocation rather than leaving it behind. */
 	error = vm_private_page_alloc(memory);
@@ -5955,34 +6631,73 @@ unlink_object_locked(
 	struct vm_object *object)
 {
 	struct vm_object **link;
+	unsigned bucket;
 
 	/* Refuses to unlink an object that still owns work. */
 	if (!object_can_destroy(object))
 		HAL_FATAL("destroying unsynchronized VM object");
 
-	/* Finds the link that holds the object and splices it out. */
-	for (link = &shared_objects; *link != NULL; link = &(*link)->next) {
-		if (*link == object) {
-			*link = object->next;
-			object->next = NULL;
+	/* Reports an object the registry does not hold. */
+	if ((object->flags & VM_OBJECT_REGISTERED) == 0)
+		return 0;
 
-			/* Discharges the object from the registry counters. */
-			if (object_count == 0)
-				HAL_FATAL("VM object counter underflow");
-			object_count--;
-			if ((object->flags & VM_OBJECT_CACHE_REFERENCE) != 0) {
-				if (cache_objects == 0)
-					HAL_FATAL("VM cache reference counter underflow");
-				cache_objects--;
-				object->flags &= ~VM_OBJECT_CACHE_REFERENCE;
-			}
+	/* Splices the object out of the registry list. */
+	if (object->previous != NULL)
+		object->previous->next = object->next;
+	else
+		shared_objects = object->next;
+	if (object->next != NULL)
+		object->next->previous = object->previous;
+	object->next = NULL;
+	object->previous = NULL;
 
-			return 1;
-		}
+	/* Finds the link in the inode's hash chain that holds the object. */
+	bucket = object_hash_index(object->inode);
+	link = &object_hash[bucket];
+	while (*link != NULL && *link != object)
+		link = &(*link)->hash_next;
+	if (*link == NULL)
+		HAL_FATAL("VM object missing from its hash chain");
+
+	/* Splices it out of the chain. */
+	*link = object->hash_next;
+	object->hash_next = NULL;
+	object->flags &= ~VM_OBJECT_REGISTERED;
+
+	/* Discharges the object from the registry counters. */
+	if (object_count == 0)
+		HAL_FATAL("VM object counter underflow");
+	object_count--;
+	if ((object->flags & VM_OBJECT_CACHE_REFERENCE) != 0) {
+		if (cache_objects == 0)
+			HAL_FATAL("VM cache reference counter underflow");
+		cache_objects--;
+		object->flags &= ~VM_OBJECT_CACHE_REFERENCE;
 	}
 
-	/* Reports an object the registry did not hold. */
-	return 0;
+	/* Reports the removal. */
+	return 1;
+}
+
+/*
+ * Names the registry hash bucket of an inode.
+ *
+ * Inodes are heap records at least 16 bytes apart, so the low bits carry
+ * nothing; the rest is spread by Knuth's multiplicative constant.
+ */
+static unsigned
+object_hash_index(
+	const struct inode *inode)
+{
+	uint32_t key;
+	uint32_t spread;
+
+	/* Drops the alignment bits of the address. */
+	key = (uint32_t)((uintptr_t)inode >> 4);
+
+	/* Takes the top bits of the product as the bucket. */
+	spread = key * 2654435761U;
+	return (unsigned)(spread >> (32U - VM_OBJECT_HASH_BITS));
 }
 
 /* Frees an object, its pages, its files, and its commitment. */
@@ -6198,7 +6913,7 @@ vm_object_content_finish(
 				continue;
 
 			/* Copies the overlapping bytes into the page. */
-			memcpy((uint8_t *)hal_pmem_to_kernel(page->pmem.paddr) +
+			kern_memcpy((uint8_t *)hal_pmem_to_kernel(page->pmem.paddr) +
 			       (copy_start - page_start),
 			       (const uint8_t *)buffer +
 			       (copy_start - write_start),
@@ -6268,7 +6983,7 @@ vm_object_content_finish(
 	}
 
 	/* Empties the descriptor so a second finish does nothing. */
-	memset(content, 0, sizeof(*content));
+	kern_memset(content, 0, sizeof(*content));
 }
 
 /* Ends a resize transaction, publishing the size and settling the orphans. */
@@ -6414,7 +7129,7 @@ vm_object_resize_finish(
 	}
 
 	/* Empties the descriptor so a second finish does nothing. */
-	memset(resize, 0, sizeof(*resize));
+	kern_memset(resize, 0, sizeof(*resize));
 }
 
 /* Copies into or out of a pinned page once it is not busy. */
@@ -6478,10 +7193,10 @@ vm_object_page_pin_copy(
 	 * Commit discards the orphan without ever putting it on writeback.
 	 */
 	if (write) {
-		memcpy((uint8_t *)hal_pmem_to_kernel(page->pmem.paddr) + offset, buffer, length);
+		kern_memcpy((uint8_t *)hal_pmem_to_kernel(page->pmem.paddr) + offset, buffer, length);
 		object_page_dirty_mark(page);
 	} else {
-		memcpy(buffer, (const uint8_t *)hal_pmem_to_kernel(page->pmem.paddr) + offset, length);
+		kern_memcpy(buffer, (const uint8_t *)hal_pmem_to_kernel(page->pmem.paddr) + offset, length);
 	}
 
 	spin_unlock_irqrestore(&object->lock, irq);
@@ -7116,7 +7831,7 @@ object_slab_alloc(
 	if (object_memory_reserve(CACHE_MEMORY_FILE_META, optional) != 0)
 		return NULL;
 
-	memset(&memory, 0, sizeof(memory));
+	kern_memset(&memory, 0, sizeof(memory));
 
 	if (alloc_vm_page(&memory) != HAL_OK) {
 		if (cache_memory_cancel != NULL)
@@ -7131,7 +7846,7 @@ object_slab_alloc(
 	 * Formats aligned descriptors without consuming the fixed kernel heap.
 	 */
 	slab = hal_pmem_to_kernel(memory.paddr);
-	memset(slab, 0, PAGE_SIZE);
+	kern_memset(slab, 0, PAGE_SIZE);
 	slab->memory = memory;
 
 	/*
@@ -7211,7 +7926,7 @@ object_descriptor_alloc(
 
 	object_slab_unlock(enabled);
 
-	memset(page, 0, sizeof(*page));
+	kern_memset(page, 0, sizeof(*page));
 	page->metadata_slab = slab;
 
 	return page;
@@ -7233,7 +7948,7 @@ object_descriptor_free(
 	 * retirement.
 	 */
 	slab = page->metadata_slab;
-	memset(&memory, 0, sizeof(memory));
+	kern_memset(&memory, 0, sizeof(memory));
 	enabled = object_slab_lock();
 	if (slab == NULL || slab->used == 0)
 		HAL_FATAL("VM page descriptor ownership underflow");
@@ -7616,6 +8331,9 @@ object_reference_locked(
 
 	refcount_get(&object->refs);
 
+	/* Marks the object as the most recently used for the cache's eviction. */
+	object->last_use = ++object_use_generation;
+
 	/* Reports the reference published with its registry ownership. */
 	return 0;
 }
@@ -7646,13 +8364,16 @@ object_cache_evict_one(
 	struct mount *mount)
 {
 	struct vm_object *object;
+	struct vm_object *oldest;
 	bool enabled;
+	int unlinked;
 
 	/*
 	 * Leaves every mandatory mapping, operation, pin and failure owner
 	 * intact.
 	 */
 	enabled = registry_lock();
+	oldest = NULL;
 
 	for (object = shared_objects; object != NULL; object = object->next) {
 		if (object_mount_reserved(object))
@@ -7671,12 +8392,18 @@ object_cache_evict_one(
 		    object->write_file->f_path.p_mount != mount))
 			continue;
 
-		/* Takes the object out of the registry. */
-		if (!unlink_object_locked(object))
-			HAL_FATAL("VM cache eviction lost registry entry");
-		break;
+		/* Remembers the least recently used of the evictable objects. */
+		if (oldest == NULL || object->last_use < oldest->last_use)
+			oldest = object;
 	}
 
+	/* Takes the least recently used object out of the registry. */
+	object = oldest;
+	unlinked = 1;
+	if (object != NULL)
+		unlinked = unlink_object_locked(object);
+	if (!unlinked)
+		HAL_FATAL("VM cache eviction lost registry entry");
 	registry_unlock(enabled);
 
 	/* Reports that the cache held nothing evictable. */
@@ -7918,7 +8645,7 @@ object_cache_read_missing(
 	 * Fills the run once; the explicit internal purpose prevents recursive
 	 * caching.
 	 */
-	memset(scratch, 0, transfer);
+	kern_memset(scratch, 0, transfer);
 	error = file_io_begin(object->file, FILE_IO_PREAD, base, FILE_IO_VM_OBJECT, &io);
 	if (error != 0) {
 		count = -(ssize_t)error;
@@ -7947,8 +8674,8 @@ object_cache_read_missing(
 		if (valid > PAGE_SIZE)
 			valid = PAGE_SIZE;
 		if (count >= (ssize_t)((size_t)index * PAGE_SIZE + valid)) {
-			memset(hal_pmem_to_kernel(page->pmem.paddr), 0, PAGE_SIZE);
-			memcpy(hal_pmem_to_kernel(page->pmem.paddr), (uint8_t *)scratch +
+			kern_memset(hal_pmem_to_kernel(page->pmem.paddr), 0, PAGE_SIZE);
+			kern_memcpy(hal_pmem_to_kernel(page->pmem.paddr), (uint8_t *)scratch +
 			    (size_t)index * PAGE_SIZE, valid);
 			page->flags = 0;
 			page->error = 0;
@@ -7970,7 +8697,7 @@ object_cache_read_missing(
 		copied = (size_t)count - in_page;
 		if (copied > wanted)
 			copied = wanted;
-		memcpy(buffer, (uint8_t *)scratch + in_page, copied);
+		kern_memcpy(buffer, (uint8_t *)scratch + in_page, copied);
 	}
 
 	io_pool_release(scratch);
@@ -8114,7 +8841,7 @@ write_dirty_pages(
 			if (amount > PAGE_SIZE)
 				amount = PAGE_SIZE;
 
-			memcpy((char *)scratch + bytes, hal_pmem_to_kernel(page->pmem.paddr), amount);
+			kern_memcpy((char *)scratch + bytes, hal_pmem_to_kernel(page->pmem.paddr), amount);
 
 			bytes += amount;
 
@@ -8273,20 +9000,78 @@ mapping_prot(
 	return prot;
 }
 
-/* Unlinks a backing from the reclaim queue. */
+/* Puts a backing at the head of the reclaim queue; the caller holds the reclaim lock. */
+static void
+queue_insert(
+	struct vm_private_page *backing)
+{
+	/* Refuses a backing that is already on a list. */
+	if (backing->queue_kind != VM_QUEUE_NONE)
+		HAL_FATAL("VM private backing is already queued");
+
+	/* Links the backing in front of the old head. */
+	backing->queue_prev = NULL;
+	backing->queue_next = page_queue;
+	if (page_queue != NULL)
+		page_queue->queue_prev = backing;
+	page_queue = backing;
+	backing->queue_kind = VM_QUEUE_RECLAIM;
+
+	/* The first backing is also the oldest. */
+	if (page_queue_tail == NULL)
+		page_queue_tail = backing;
+}
+
+/* Puts a backing at the head of the swapped list; the caller holds the reclaim lock. */
+static void
+swapped_insert(
+	struct vm_private_page *backing)
+{
+	/* Refuses a backing that is already on a list. */
+	if (backing->queue_kind != VM_QUEUE_NONE)
+		HAL_FATAL("VM private backing is already queued");
+
+	/* Links the backing in front of the old head. */
+	backing->queue_prev = NULL;
+	backing->queue_next = swapped_queue;
+	if (swapped_queue != NULL)
+		swapped_queue->queue_prev = backing;
+	swapped_queue = backing;
+	backing->queue_kind = VM_QUEUE_SWAPPED;
+}
+
+/*
+ * Takes a backing off the reclaim queue; the caller holds the reclaim lock.
+ *
+ * Each backing knows its neighbours, so this does not walk the queue: a walk
+ * from the head made tearing down a process cost its pages times every
+ * tracked page of the system (BUG-033).  A backing that is not on the queue
+ * is left alone.
+ */
 static void
 queue_remove(
 	struct vm_private_page *backing)
 {
-	struct vm_private_page **link;
+	/* A backing on no list is left alone. */
+	if (backing->queue_kind == VM_QUEUE_NONE)
+		return;
 
-	link = &page_queue;
+	/* Joins the neighbours around the backing, on whichever list it is. */
+	if (backing->queue_prev != NULL)
+		backing->queue_prev->queue_next = backing->queue_next;
+	else if (backing->queue_kind == VM_QUEUE_RECLAIM)
+		page_queue = backing->queue_next;
+	else
+		swapped_queue = backing->queue_next;
+	if (backing->queue_next != NULL)
+		backing->queue_next->queue_prev = backing->queue_prev;
+	else if (backing->queue_kind == VM_QUEUE_RECLAIM)
+		page_queue_tail = backing->queue_prev;
 
-	while (*link != NULL && *link != backing)
-		link = &(*link)->queue_next;
-
-	if (*link == backing)
-		*link = backing->queue_next;
+	/* Leaves the backing off the lists. */
+	backing->queue_kind = VM_QUEUE_NONE;
+	backing->queue_next = NULL;
+	backing->queue_prev = NULL;
 }
 
 /* Tests whether any mapping is wired, busy, or the one to avoid. */
@@ -8337,6 +9122,96 @@ backing_has_busy_mapping(
 	}
 
 	return 0;
+}
+
+/*
+ * Takes a reclaim candidate: holds every address space that maps it, then
+ * its I/O ownership.  The caller holds the metadata and reclaim locks.
+ *
+ * An address space whose last reference is gone is being torn down; its
+ * pages stay on the reclaim queue until the teardown untracks them, and
+ * pinning one would take a reference on a dead space.  Such a candidate
+ * is refused.  Reports 0 when the candidate is taken, holding one extra
+ * reference per mapping for the caller to drop after pinning.
+ */
+static int
+reclaim_take_candidate(
+	struct vm_private_page *backing)
+{
+	int held;
+	int error;
+
+	/* Refuses a page of an address space that is going away. */
+	held = backing_hold_spaces(backing);
+	if (!held)
+		return EBUSY;
+
+	/* Takes the I/O ownership, or lets the spaces go again. */
+	error = vm_private_page_io_try_acquire(backing);
+	if (error != 0) {
+		backing_release_spaces(backing);
+		return error;
+	}
+
+	/* Reports the taken candidate. */
+	return 0;
+}
+
+/*
+ * Holds every address space that maps a backing; the caller holds the
+ * metadata and reclaim locks.  Reports 0, holding nothing, when one of
+ * them has already lost its last reference.
+ */
+static int
+backing_hold_spaces(
+	struct vm_private_page *backing)
+{
+	struct vm_page *page;
+	struct vm_page *undo;
+	int acquired;
+
+	/* Tries each mapping's address space in turn. */
+	for (page = backing->mappings; page != NULL; page = page->private_next) {
+		acquired = vmspace_tryref(page->vm);
+		if (acquired)
+			continue;
+
+		/* Drops what was taken before the dead space. */
+		for (undo = backing->mappings; undo != page; undo = undo->private_next)
+			vmspace_put_deferred(undo->vm);
+		return 0;
+	}
+
+	/* Reports every space held. */
+	return 1;
+}
+
+/* Drops the references backing_hold_spaces() took. */
+static void
+backing_release_spaces(
+	struct vm_private_page *backing)
+{
+	struct vm_page *page;
+
+	/* Releases one reference per mapping, never the last. */
+	for (page = backing->mappings; page != NULL; page = page->private_next)
+		vmspace_put_deferred(page->vm);
+}
+
+/* Clears the accessed PTE flag of every mapping of a backing. */
+static void
+backing_clear_accessed(
+	struct vm_private_page *backing)
+{
+	struct vm_page *page;
+
+	/* Clears the flag in each live mapping; a failure only leaves it set. */
+	for (page = backing->mappings; page != NULL; page = page->private_next) {
+		if (!(page->flags & VM_MAPPING_MAPPED))
+			continue;
+		(void)hal_space_clear_flags(page->vm->space, (void *)page->address,
+		    HAL_SPACE_PAGE_ACCESSED);
+	}
 }
 
 /* Combines the accessed and dirty PTE flags of every mapping. */
@@ -8685,7 +9560,7 @@ swap_out_backing_owned(
 	    (backing->flags & VM_PAGE_SWAPPED) != 0)
 		HAL_FATAL("VM swap-out state changed under I/O owner");
 
-	memset(&backing->pmem, 0, sizeof(backing->pmem));
+	kern_memset(&backing->pmem, 0, sizeof(backing->pmem));
 	backing->swap_slot = slot;
 	backing->flags &= ~(VM_PAGE_RESIDENT | VM_PAGE_DIRTY);
 	backing->flags |= VM_PAGE_SWAPPED;
@@ -8696,6 +9571,10 @@ swap_out_backing_owned(
 
 	/* Releases the mappings and moves the page between the counters. */
 	unpin_backing_mappings(backing);
+
+	/* Moves the backing from the reclaim queue to the swapped list. */
+	queue_remove(backing);
+	swapped_insert(backing);
 
 	if (stats.resident)
 		stats.resident--;
@@ -8784,7 +9663,7 @@ discard_file_backing_owned(
 
 	memory = backing->pmem;
 
-	memset(&backing->pmem, 0, sizeof(backing->pmem));
+	kern_memset(&backing->pmem, 0, sizeof(backing->pmem));
 
 	private_page_advance_locked(backing);
 

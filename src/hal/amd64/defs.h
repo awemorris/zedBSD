@@ -14,7 +14,6 @@
 #ifndef KERN_HAL_AMD64_DEFS_H
 #define KERN_HAL_AMD64_DEFS_H
 
-#define CLOCK_HZ               100
 #define PAGE_SIZE              4096
 #define AMD64_IMAGE_BASE       0xffffffff80000000
 #define AMD64_DIRECT_BASE      0xffff800000000000
@@ -25,13 +24,27 @@
 
 #define SEG_KERNEL_CODE        0x08
 #define SEG_KERNEL_DATA        0x10
-#define SEG_USER_CODE          0x18
-#define SEG_USER_DATA          0x20
+/*
+ * User data comes before user code: SYSRET loads SS from STAR[63:48] + 8
+ * and CS from STAR[63:48] + 16.
+ */
+#define SEG_USER_DATA          0x18
+#define SEG_USER_CODE          0x20
 #define SEG_TSS                0x28
+
+/* Per-CPU offsets the SYSCALL entry reads through GS (see percpu.h). */
+#define AMD64_PERCPU_SYSCALL_RSP     8
+#define AMD64_PERCPU_SYSCALL_SCRATCH 16
 
 #define INT_DEBUG              0x01
 #define INT_PAGEFAULT          0x0e
 #define INT_SYSCALL            0xc2
+/*
+ * The frame marker of a system call entered by the SYSCALL instruction;
+ * never an IDT vector.  Its second argument is in r10, and it returns by
+ * SYSRET while the marker stands.
+ */
+#define INT_SYSCALL_FAST       0xc3
 #define AMD64_VECTOR_MSI_BASE  0xd0
 #define AMD64_VECTOR_MSI_COUNT 16
 #define INT_IRQ_BASE           0xe0
@@ -55,6 +68,11 @@
 
 #define AMD64_MSR_IA32_PAT     0x00000277U
 #define AMD64_MSR_IA32_MTRR_DEF_TYPE 0x000002ffU
+#define AMD64_MSR_EFER         0xc0000080U
+#define AMD64_MSR_STAR         0xc0000081U
+#define AMD64_MSR_LSTAR        0xc0000082U
+#define AMD64_MSR_FMASK        0xc0000084U
+#define AMD64_EFER_SCE         0x00000001U
 #define AMD64_MSR_FS_BASE      0xc0000100U
 #define AMD64_MSR_GS_BASE      0xc0000101U
 

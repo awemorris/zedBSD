@@ -12,7 +12,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <errno.h>
+#include <uapi/errno.h>
 
 #define IO_CONTEXT_THROUGH 0x01U
 #define IO_CONTEXT_DRAIN 0x02U

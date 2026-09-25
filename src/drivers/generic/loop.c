@@ -22,12 +22,12 @@
 #include "kern/lock.h"
 #include "kern/mount.h"
 #include "kern/namei.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <fcntl.h>
+#include <uapi/errno.h>
+#include <uapi/fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <string.h>
 #include "kern/klog.h"
 
 #define LOOP_SECTOR_SIZE 512U
@@ -89,7 +89,7 @@ drv_loop_init(
 	unsigned i;
 
 	spin_init(&loop_lock, LOCK_RANK_DISK, "loop registry");
-	memset(loops, 0, sizeof(loops));
+	kern_memset(loops, 0, sizeof(loops));
 	/* Process each element required by the operation. */
 	for (i = 0; i < LOOP_MAX_DEVICES; i++)
 		loops[i].index = i;
@@ -417,7 +417,7 @@ fail_refs:
 	backing_claim_release(claim);
 	irq = spin_lock_irqsave(&loop_lock);
 
-	memset(loop, 0, sizeof(*loop));
+	kern_memset(loop, 0, sizeof(*loop));
 	loop->index = i;
 
 	spin_unlock_irqrestore(&loop_lock, irq);
@@ -550,7 +550,7 @@ drv_loop_detach(
 	loop->backing->f_backing_claim = NULL;
 	backing_claim_release(loop->claim);
 	(void)file_close(loop->backing);
-	memset(loop, 0, sizeof(*loop));
+	kern_memset(loop, 0, sizeof(*loop));
 	loop->index = index;
 
 	/* Succeeded. */
@@ -621,7 +621,7 @@ loop_backing_valid(
 	/* Handles the i mount availability. */
 	if (inode->i_mount != NULL && inode->i_mount->m_type != NULL &&
 	    inode->i_mount->m_type->fs_name != NULL &&
-	    !strcmp(inode->i_mount->m_type->fs_name, "overlay")) {
+	    !kern_strcmp(inode->i_mount->m_type->fs_name, "overlay")) {
 		/* Failed. */
 		return ELOOP;
 	}
@@ -653,7 +653,7 @@ loop_finalize_claim(
 	/* Handles the claim availability. */
 	if (claim == NULL)
 		return 0;
-	memset(&collection, 0, sizeof(collection));
+	kern_memset(&collection, 0, sizeof(collection));
 
 	/* Checks the operation status. */
 	error = file_backing_extents(backing, loop_collect_extent, &collection);

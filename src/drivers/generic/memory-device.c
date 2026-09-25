@@ -7,15 +7,19 @@
 #include <kern/cdev.h>
 #include <kern/memory-device.h>
 #include <uapi/poll.h>
-#include <errno.h>
+#include <uapi/errno.h>
 #include <kern/file.h>
 #include <stdint.h>
-#include <string.h>
+#include <kern/kcrt.h>
+#include <kern/random.h>
 
 static ssize_t null_read(struct file *file, void *buffer, size_t size);
 static ssize_t zero_read(struct file *file, void *buffer, size_t size);
 static ssize_t discard_write(struct file *file, const void *buffer, size_t size);
 static ssize_t full_write(struct file *file, const void *buffer, size_t size);
+static ssize_t random_read(struct file *file, void *buffer, size_t size);
+static ssize_t urandom_read(struct file *file, void *buffer, size_t size);
+static ssize_t random_write(struct file *file, const void *buffer, size_t size);
 static int memory_poll(struct file *file, short events, short *revents);
 static off_t memory_seek(struct file *file, off_t offset, int whence);
 
@@ -39,7 +43,29 @@ static const struct cdev_ops null_ops = {
 /* Immutable operations shared by every open of the zero source. */
 static const struct cdev_ops zero_ops = {
 	.read = zero_read,
+	.flags = CDEV_READ_NEVER_WAITS,
 	.write = discard_write,
+	.poll = memory_poll,
+	.seek = memory_seek,
+};
+
+/*
+ * The kernel random number generator (src/kern/random.c).  random waits
+ * until the generator is seeded, urandom does not; both mix what is written
+ * into the pool without crediting it.
+ */
+static const struct cdev_ops random_ops = {
+	.read = random_read,
+	.flags = CDEV_READ_NEVER_WAITS,
+	.write = random_write,
+	.poll = memory_poll,
+	.seek = memory_seek,
+};
+
+static const struct cdev_ops urandom_ops = {
+	.read = urandom_read,
+	.flags = CDEV_READ_NEVER_WAITS,
+	.write = random_write,
 	.poll = memory_poll,
 	.seek = memory_seek,
 };
@@ -53,6 +79,7 @@ static const struct cdev_ops zero_ops = {
  */
 static const struct cdev_ops full_ops = {
 	.read = zero_read,
+	.flags = CDEV_READ_NEVER_WAITS,
 	.write = full_write,
 	.poll = memory_poll,
 	.seek = memory_seek,
@@ -68,6 +95,7 @@ drv_memory_device_register(
 	struct cdev *null_device;
 	struct cdev *zero_device;
 	struct cdev *full_device;
+	struct cdev *random_device;
 	int error;
 
 	/* Owns a reference so a partial registration can be rolled back. */
@@ -96,11 +124,65 @@ drv_memory_device_register(
 		return error;
 	}
 
+	/* The random devices are optional: a failure leaves the others. */
+	if (cdev_register_managed("random", 0x00010006U, &random_ops,
+	    NULL, NULL, &random_device) == 0)
+		cdev_release(random_device);
+	if (cdev_register_managed("urandom", 0x00010007U, &urandom_ops,
+	    NULL, NULL, &random_device) == 0)
+		cdev_release(random_device);
+
 	/* Leaves all three immutable devices owned by the registry. */
 	cdev_release(full_device);
 	cdev_release(zero_device);
 	cdev_release(null_device);
 	return 0;
+}
+
+/* Reads random bytes once the generator is seeded. */
+static ssize_t
+random_read(
+	struct file *file,
+	void *buffer,
+	size_t size)
+{
+	int error;
+
+	(void)file;
+	error = kern_random_read(buffer, size, KERN_RANDOM_WAIT);
+
+	/* Succeeded: every byte, or the wait's error. */
+	return error != 0 ? -(ssize_t)error : (ssize_t)size;
+}
+
+/* Reads random bytes without waiting for the seed. */
+static ssize_t
+urandom_read(
+	struct file *file,
+	void *buffer,
+	size_t size)
+{
+	int error;
+
+	(void)file;
+	error = kern_random_read(buffer, size, 0);
+
+	/* Succeeded: every byte. */
+	return error != 0 ? -(ssize_t)error : (ssize_t)size;
+}
+
+/* Mixes written bytes into the pool. */
+static ssize_t
+random_write(
+	struct file *file,
+	const void *buffer,
+	size_t size)
+{
+	(void)file;
+	kern_random_add(buffer, size);
+
+	/* Succeeded: every byte was taken. */
+	return (ssize_t)size;
 }
 
 /* Reports immediate end of file without touching the buffer. */
@@ -129,7 +211,7 @@ zero_read(
 
 	/* A zero-length request does not dereference its buffer. */
 	if (size != 0)
-		memset(buffer, 0, size);
+		kern_memset(buffer, 0, size);
 
 	/* Supplies every requested byte without retaining state. */
 	return (ssize_t)size;

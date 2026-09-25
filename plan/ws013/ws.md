@@ -1,38 +1,16 @@
+<!-- awesome-plan project=zedbsd record=ws013 -->
+
 # WS013: CPAR container partitioning
 
-<!-- traceability:start -->
-
-## Goal traceability
-
-- Primary Milestone: **MG007 — 用途別の独自ディストリビューションを構成・配布できる**
-- Related Milestones: MG002
-- Objectives: O1, O2
-- 貢献する成果: 用途別構成の隔離/資源管理に寄与する。Future扱いを維持。
-- 上位定義: [MasterのObjectives / Milestone Goals](https://github.com/awemorris/zedBSD/issues/1)
-
-既存Phaseは本WSを親として上位成果に接続する。Primaryは分類と責任の所在であり、
-各PhaseがRelatedすべてを満たすという意味ではない。成果・検証・限界は各Phaseの
-現行記録を根拠とする。今回の対応付けは状態変更・未定義作業の追加・実行許可ではない。
-
-<!-- traceability:end -->
-
-
-Last updated: 2026-09-09
-
-WSID: `ws013`
-
-Status: future — master Future List F-002へ移管（2026-09-09）
-
-現在の管理先: [master Future List](../master.md#future-listやりたいことリスト)。
-現行Priority・Queueから外す。以下の設計・旧保留IDは再開時の参考として保持する。
-
-Parent: [master plan](../master.md)
-
-Last verified Phases: `ws013-p005` and `ws013-p006`; p001 remains the
-architecture discussion ledger
-
-Resume point: Future List F-002をユーザーが着手対象として選び直した時点で設計を更新する。
-完了済みのPhaseは維持し、将来項目への移動によって取り消さない。
+<!-- awesome-plan-current:start -->
+Status: incomplete
+Primary Milestone: MG007
+Related Milestones: MG002
+Objectives: O1, O2
+Parent: [Master](../master.md)
+Queue: なし
+Resume point: p002〜p006 の boot 設定基盤は完了。残り（runtime の隔離・CLI・service container）は Future Work F-002 に保留し、昇格されるまで再開しない
+<!-- awesome-plan-current:end -->
 
 Shared reviews: [WS013 review index](tests/README.md)
 

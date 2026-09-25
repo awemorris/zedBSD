@@ -45,13 +45,13 @@
 #include "edid.h"
 #include "pipe.h"
 #include "plane.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 #include <kern/lock.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 /* The PCI_ANY_ID of a quirk entry: any subsystem id matches. */
 #define I915_PCI_ANY_ID ((int)(-1))
@@ -748,7 +748,7 @@ drv_i915_lcd_compute(
 	/* Starts a clean result; the notes of this calculation are counted from 0 in its world. */
 	edid = (const struct edid *)edid128;
 	index = 0;
-	memset(out, 0, sizeof(*out));
+	kern_memset(out, 0, sizeof(*out));
 	i915_state_sink_world = world;
 	world->lcd_notes = 0;
 
@@ -893,7 +893,7 @@ drv_i915_lcd_compute_hdmi(
 		return EINVAL;
 
 	/* The mode, and the 4-lane, 24 bpp link its TMDS clock runs at. */
-	memset(out, 0, sizeof(*out));
+	kern_memset(out, 0, sizeof(*out));
 	out->mode = *mode;
 	out->link.rate_khz = mode->clock_khz;
 	out->link.lanes = 4;
@@ -935,8 +935,8 @@ drv_i915_lcd_emit_plane(
 		return EINVAL;
 
 	/* Starts an empty list and a recorder backend that appends to it. */
-	memset(out, 0, sizeof(*out));
-	memset(&emit, 0, sizeof(emit));
+	kern_memset(out, 0, sizeof(*out));
+	kern_memset(&emit, 0, sizeof(emit));
 	i915_state_bind_recorder(&emit, out);
 
 	/* Runs the plane writer against the recorder. */
@@ -979,7 +979,7 @@ drv_i915_lcd_words_step(
 			continue;
 
 		/* A step of the name ends the search. */
-		compared = strcmp(w->w[i].step, name);
+		compared = kern_strcmp(w->w[i].step, name);
 		if (compared == 0)
 			return (int)i;
 	}
@@ -1057,8 +1057,8 @@ drv_i915_lcd_emit_cpu_transcoder(
 		return EINVAL;
 
 	/* Starts an empty list, and the mode and M/N of the state. */
-	memset(out, 0, sizeof(*out));
-	memset(&emit, 0, sizeof(emit));
+	kern_memset(out, 0, sizeof(*out));
+	kern_memset(&emit, 0, sizeof(emit));
 	i915_state_to_mode(s, &mode, &m_n);
 	i915_state_bind_recorder(&emit, out);
 
@@ -1118,8 +1118,8 @@ drv_i915_lcd_emit_ddi(
 
 	/* Starts an empty list, and the mode and M/N of the state. */
 	buf = 0u;
-	memset(out, 0, sizeof(*out));
-	memset(&emit, 0, sizeof(emit));
+	kern_memset(out, 0, sizeof(*out));
+	kern_memset(&emit, 0, sizeof(emit));
 	i915_state_to_mode(s, &mode, &m_n);
 	i915_state_bind_recorder(&emit, out);
 
@@ -1183,8 +1183,8 @@ drv_i915_lcd_emit_transcoder(
 	 * The mode's timings without sync flags: the transcoder words do not
 	 * carry the polarities.
 	 */
-	memset(out, 0, sizeof(*out));
-	memset(&mode, 0, sizeof(mode));
+	kern_memset(out, 0, sizeof(*out));
+	kern_memset(&mode, 0, sizeof(mode));
 	mode.clock = s->mode.clock_khz;
 	mode.hdisplay = s->mode.hdisplay;
 	mode.hsync_start = s->mode.hsync_start;
@@ -1203,7 +1203,7 @@ drv_i915_lcd_emit_transcoder(
 	m_n.link_n = s->link.link_n;
 
 	/* A recorder backend that appends to the list. */
-	memset(&emit, 0, sizeof(emit));
+	kern_memset(&emit, 0, sizeof(emit));
 	i915_state_bind_recorder(&emit, out);
 
 	/* Runs the transcoder writer against the recorder. */
@@ -1497,7 +1497,7 @@ i915_state_record_step(
 	}
 
 	/* Records the step at its position. */
-	memset(&out->w[out->n], 0, sizeof(out->w[out->n]));
+	kern_memset(&out->w[out->n], 0, sizeof(out->w[out->n]));
 	out->w[out->n].step = name;
 	out->n++;
 }
@@ -1523,7 +1523,7 @@ i915_state_to_mode(
 	struct intel_link_m_n *m_n)
 {
 	/* The mode's timings. */
-	memset(mode, 0, sizeof(*mode));
+	kern_memset(mode, 0, sizeof(*mode));
 	mode->clock = s->mode.clock_khz;
 	mode->hdisplay = s->mode.hdisplay;
 	mode->hsync_start = s->mode.hsync_start;
@@ -1549,7 +1549,7 @@ i915_state_to_mode(
 	}
 
 	/* The M/N values. */
-	memset(m_n, 0, sizeof(*m_n));
+	kern_memset(m_n, 0, sizeof(*m_n));
 	m_n->tu = s->link.tu;
 	m_n->data_m = s->link.data_m;
 	m_n->data_n = s->link.data_n;

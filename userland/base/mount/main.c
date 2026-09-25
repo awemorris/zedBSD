@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -54,12 +55,14 @@ list_mounts(void)
 	}
 	for (i = 0; i < query->count; i++) {
 		const struct kern_mount_info *entry = &query->entries[i];
-		printf("%s%s on %s type %s (%s%s%s)\n",
+		printf("%s%s on %s type %s (%s%s%s%s%s)\n",
 		    entry->device != 0 && !(entry->kind & KERN_MOUNT_INFO_BIND) ?
 		    "/dev/" : "", entry->source[0] ? entry->source : entry->type,
 		    entry->target, entry->type,
 		    entry->flags & MNT_RDONLY ? "ro" : "rw",
 		    entry->flags & MNT_NOSUID ? ",nosuid" : "",
+		    entry->flags & MNT_WRITETHRU ? ",writethru" : "",
+		    entry->flags & MNT_NOJOURNAL ? ",nojournal" : "",
 		    entry->kind & KERN_MOUNT_INFO_BIND ? ",bind" : "");
 	}
 	free(query);
@@ -124,6 +127,10 @@ main(
 				flags |= MNT_RDONLY;
 			else if (strcmp(option, "nosuid") == 0)
 				flags |= MNT_NOSUID;
+			else if (strcmp(option, "writethru") == 0)
+				flags |= MNT_WRITETHRU;
+			else if (strcmp(option, "nojournal") == 0)
+				flags |= MNT_NOJOURNAL;
 			else if (strncmp(option, "fspec=", 6) == 0) {
 				source = option + 6;
 			} else {
@@ -153,7 +160,7 @@ main(
 	/* Handles the type availability. */
 	if (type == NULL || target == NULL) {
 		fprintf(stderr,
-			"usage: mount -t type [-r] [-o ro|nosuid|fspec=disk] "
+			"usage: mount -t type [-r] [-o ro|nosuid|writethru|nojournal|fspec=disk] "
 			"[disk] directory\n");
 
 		/* Reports operation failure. */
@@ -329,6 +336,10 @@ mount_fstab_entry(
 			flags |= MNT_RDONLY;
 		else if (strcmp(option, "nosuid") == 0)
 			flags |= MNT_NOSUID;
+		else if (strcmp(option, "writethru") == 0)
+			flags |= MNT_WRITETHRU;
+		else if (strcmp(option, "nojournal") == 0)
+			flags |= MNT_NOJOURNAL;
 		else if (strcmp(option, "nofail") == 0)
 			nofail = 1;
 		else if (strcmp(option, "rw") != 0 &&

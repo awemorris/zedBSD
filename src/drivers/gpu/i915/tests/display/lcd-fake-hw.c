@@ -17,11 +17,11 @@
  */
 
 #include "lcd-fake-hw.h"
+#include <kern/kcrt.h>
 
 #include "../../display/dp-sink.h"
 #include "../../display/modeset.h"
 
-#include <string.h>
 
 /* The combo PLL enable register and its bits. */
 #define I915_LCD_FAKE_DPLL_ENABLE(id)           (0x46010U + 4U * (unsigned)(id))
@@ -136,7 +136,7 @@ drv_i915_lcd_fake_init(
 	unsigned vtotal)
 {
 	/* Starts every register, counter and fault at zero, on the instances watched. */
-	memset(hw, 0, sizeof(*hw));
+	kern_memset(hw, 0, sizeof(*hw));
 	hw->dpf = dpf;
 	hw->pipe = pipe;
 	hw->port = port;
@@ -153,7 +153,7 @@ drv_i915_lcd_fake_init(
 	*i915_lcd_fake_slot(hw, I915_LCD_FAKE_DE_PIPE_IMR(pipe)) = 0xffffffffU;
 
 	/* The sink: link status not trained, in D0, training behaviour attached. */
-	memset(dpf->dpcd + 0x202, 0, 6U);
+	kern_memset(dpf->dpcd + 0x202, 0, 6U);
 	dpf->dpcd[0x600] = 1U;
 	dpf->on_dpcd_write = i915_lcd_fake_sink_on_dpcd_write;
 	dpf->on_dpcd_write_ctx = hw;

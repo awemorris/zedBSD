@@ -11,7 +11,7 @@
 
 #include <hal/hal.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 
 #include "asm.h"
 #include "int.h"

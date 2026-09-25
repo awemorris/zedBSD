@@ -10,7 +10,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/types.h>
+#include <uapi/types.h>
 
 #define POSIX_ACL_XATTR_ACCESS		"system.posix_acl_access"
 #define POSIX_ACL_XATTR_DEFAULT		"system.posix_acl_default"

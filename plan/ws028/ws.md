@@ -3,15 +3,13 @@
 # WS028: インストーラ実機動作
 
 <!-- awesome-plan-current:start -->
-
 Status: planning
 Primary Milestone: MG003
 Related Milestones: MG004
 Objectives: O2, O4
-Focused Goal: fg004
-Parent: [Master](https://github.com/awemorris/zedBSD/issues/1)
-Queue: none
-
+Parent: [Master](../master.md)
+Queue: なし
+Resume point: 4 機種の実機受け入れ。NVMe の未動作を切り分ける
 <!-- awesome-plan-current:end -->
 
 ## 単一の到達目標
@@ -47,7 +45,7 @@ Queue: none
 
 ## WS003からの引継ぎ
 
-[Future Work F-004](https://github.com/awemorris/zedBSD/issues/364)に保持したインストーラ関連部分（旧WS003 p018/p019、p026-p032）を本WSの計画入力として引き継ぐ。旧IDは終了済みの履歴として保持し、本WSで実行を具体化するときは新Phaseを作る。PPCの旧p033-p039はWS027に移管済みで対象外。
+[旧 WS003 の Phase の全文](inherited-ws003.md)（Future Work F-004 から移した）のインストーラ関連部分（旧WS003 p018/p019、p026-p032）を本WSの計画入力として引き継ぐ。旧IDは終了済みの履歴として保持し、本WSで実行を具体化するときは新Phaseを作る。PPCの旧p033-p039はWS027に移管済みで対象外。
 
 引き継ぐ課題はPC98 QEMUの/sbin表示、PC98 PCI/USBのmenuconfig、LX6のUSB bootパーティション選択、機種別受け入れと最終規約確認。ただし大規模リファクタリングとその後の修正があるため、以前の報告を今も未修正と断定せず最新コード/実機結果と照合する。旧p022-p024のユーザー完了判断を取り消さない。BUGの解決状態も証拠なしに変更しない。
 

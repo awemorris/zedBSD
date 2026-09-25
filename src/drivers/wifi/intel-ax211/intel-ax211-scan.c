@@ -53,8 +53,8 @@
  */
 
 #include "intel-ax211-scan.h"
+#include <kern/kcrt.h>
 
-#include <string.h>
 
 #define AX211_SCAN_GENERAL_OFFSET 8U
 #define AX211_SCAN_CHANNEL_OFFSET 44U
@@ -112,8 +112,8 @@ drv_intel_ax211_scan_profile_from_nvm(
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_INVALID;
 	}
-	memset(&parsed, 0, sizeof(parsed));
-	memcpy(parsed.station_address, station_address, 6U);
+	kern_memset(&parsed, 0, sizeof(parsed));
+	kern_memcpy(parsed.station_address, station_address, 6U);
 	parsed.channel_width_mhz = INTEL_AX211_SCAN_CHANNEL_WIDTH_MHZ;
 	/* Process each remaining element. */
 	for (index = 0U; index < nvm->channel_24ghz_count; index++) {
@@ -200,7 +200,7 @@ drv_intel_ax211_scan_request_encode(
 	/* Checks the ax211 scan profile valid result. */
 	if (!ax211_scan_profile_valid(profile) || output == NULL)
 		return INTEL_AX211_SCAN_INVALID;
-	memset(output, 0, INTEL_AX211_SCAN_REQUEST_SIZE);
+	kern_memset(output, 0, INTEL_AX211_SCAN_REQUEST_SIZE);
 	ax211_scan_put_le32(output, INTEL_AX211_SCAN_UID);
 	ax211_scan_put_le32(output + 4U, INTEL_AX211_SCAN_PRIORITY);
 	flags = AX211_SCAN_FLAG_PASS_ALL | AX211_SCAN_FLAG_ITERATION_COMPLETE |
@@ -255,7 +255,7 @@ drv_intel_ax211_scan_abort_encode(
 	/* Handles the output availability. */
 	if (output == NULL)
 		return INTEL_AX211_SCAN_INVALID;
-	memset(output, 0, INTEL_AX211_SCAN_ABORT_SIZE);
+	kern_memset(output, 0, INTEL_AX211_SCAN_ABORT_SIZE);
 
 	/* Returns the computed result. */
 	return INTEL_AX211_SCAN_OK;
@@ -288,7 +288,7 @@ drv_intel_ax211_scan_begin(
 	result = drv_intel_ax211_scan_api89_validate(table);
 	if (result != INTEL_AX211_SCAN_OK)
 		return result;
-	memset(&started, 0, sizeof(started));
+	kern_memset(&started, 0, sizeof(started));
 	started.generation = generation;
 	started.acknowledgement_deadline =
 		now_us + INTEL_AX211_SCAN_ACK_TIMEOUT_US;
@@ -616,19 +616,19 @@ ax211_scan_probe_encode(
 	/* Builds a broadcast probe request with the basic rate elements. */
 	frame = probe + 20U;
 	frame[0] = 0x40U;
-	memset(frame + 4U, 0xff, 6U);
-	memcpy(frame + 10U, profile->station_address, 6U);
-	memset(frame + 16U, 0xff, 6U);
+	kern_memset(frame + 4U, 0xff, 6U);
+	kern_memcpy(frame + 10U, profile->station_address, 6U);
+	kern_memset(frame + 16U, 0xff, 6U);
 	frame[24U] = 0U;
 	frame[25U] = 0U;
 	offset = 26U;
 	frame[offset++] = 1U;
 	frame[offset++] = 8U;
-	memcpy(frame + offset, rates, 8U);
+	kern_memcpy(frame + offset, rates, 8U);
 	offset += 8U;
 	frame[offset++] = 50U;
 	frame[offset++] = 4U;
-	memcpy(frame + offset, rates + 8U, 4U);
+	kern_memcpy(frame + offset, rates + 8U, 4U);
 	offset += 4U;
 	frame[offset++] = 3U;
 	frame[offset++] = 1U;
@@ -702,7 +702,7 @@ ax211_scan_complete_decode(
 	bytes = message->payload;
 	if (ax211_scan_get_le32(bytes) != INTEL_AX211_SCAN_UID)
 		return INTEL_AX211_SCAN_OUT_OF_ORDER;
-	memset(event, 0, sizeof(*event));
+	kern_memset(event, 0, sizeof(*event));
 	event->kind = INTEL_AX211_SCAN_EVENT_COMPLETE;
 	event->last_schedule = bytes[4U];
 	event->last_iteration = bytes[5U];
@@ -790,7 +790,7 @@ ax211_scan_iteration_decode(
 	expected = 16U + count * 8U;
 	if (message->payload_length < expected)
 		return INTEL_AX211_SCAN_TRUNCATED;
-	memset(event, 0, sizeof(*event));
+	kern_memset(event, 0, sizeof(*event));
 	event->kind = INTEL_AX211_SCAN_EVENT_ITERATION_COMPLETE;
 	event->channel_count = count;
 	event->status = bytes[5U];

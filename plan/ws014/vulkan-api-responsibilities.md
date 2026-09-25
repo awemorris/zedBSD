@@ -665,7 +665,7 @@ API表の275関数、44callback候補を、今回の有限clientがすべて実�
 | `vkCreateWaylandSurfaceKHR` | アプリ所有のwl_display/wl_surfaceを借りてVkSurfaceKHRを作り、WSI専用queueとproxy wrapper、registry/factoryを管理する。アプリqueueとxdg role/configureを変更しない | Wayland接続のAF_UNIX transportを支える。VkSurface専用ioctlは不要。後の共有画像import/presentにGPU capabilityと資源寿命を提供する |
 | `vkGetPhysicalDeviceWaylandPresentationSupportKHR` | queue family、GPU_CAP_SHARE、接続状態と実factory広告を照合する。temporary queueでprobeし、アプリlistenerをdispatchしない | GPU/backend能力を供給。fd import時にtyped capabilityと同一deviceをauthoritativeに検証する。現factoryにdevice identity広告がないためquery単体でmulti-GPU適合を宣言しない |
 
-この2関数と作成recordの宣言はKhronos Vulkan-Headers v1.3.269の`vulkan_wayland.h`、VK_KHR_wayland_surface revision 6を固定して照合した。SHA/URL/licenseは`libc/include/vulkan/API-PROVENANCE.md`を参照。初期275設計関数とは別の補遺で、Vulkan 1.1以降や全拡張を実装したという意味ではない。
+この2関数と作成recordの宣言はKhronos Vulkan-Headers v1.3.269の`vulkan_wayland.h`、VK_KHR_wayland_surface revision 6を固定して照合した。SHA/URL/licenseは`include/libc/vulkan/API-PROVENANCE.md`を参照。初期275設計関数とは別の補遺で、Vulkan 1.1以降や全拡張を実装したという意味ではない。
 
 ### 既存標準APIで具体化した共有画像の責務
 

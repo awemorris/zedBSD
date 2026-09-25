@@ -29,13 +29,13 @@
 #include "../../memory.h"
 #include "../../mmio.h"
 #include "../../workqueue.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 #include <kern/sched.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 /* The picture of LCD-O, and how long each brightness holds for the camera. */
 #define I915_TEST_LCDO_PATTERN		131U
@@ -184,7 +184,7 @@ drv_i915_test_display_lcdo(
 	/* The run; the hardware must be idle and the inputs complete. */
 	k = drv_i915_test_lcd_start(display, NULL);
 	d = k->d;
-	memset(env, 0, sizeof(*env));
+	kern_memset(env, 0, sizeof(*env));
 	preflight_error = drv_i915_lcd_kernel_preflight(k);
 	fill_error = 0;
 	if (preflight_error == 0)
@@ -280,7 +280,7 @@ i915_test_lcdo_read(
 	uint32_t value;
 
 	/* The shadow is bytes; the field may be unaligned for the compiler. */
-	memcpy(&value, i915_test_lcdo_shadow + offset, sizeof(value));
+	kern_memcpy(&value, i915_test_lcdo_shadow + offset, sizeof(value));
 
 	/* Reports the field. */
 	return value;
@@ -293,7 +293,7 @@ i915_test_lcdo_write(
 	uint32_t value)
 {
 	/* The shadow is bytes; the field may be unaligned for the compiler. */
-	memcpy(i915_test_lcdo_shadow + offset, &value, sizeof(value));
+	kern_memcpy(i915_test_lcdo_shadow + offset, &value, sizeof(value));
 }
 
 /* The backlight target of the service: the ACPI brightness on the running panel. */
@@ -372,12 +372,12 @@ i915_test_lcdo_service_start(
 
 	/* A fresh shadow in the OpRegion format. */
 	mailboxes = I915_TEST_OPREGION_MBOXES;
-	memset(i915_test_lcdo_shadow, 0, sizeof(i915_test_lcdo_shadow));
-	memcpy(i915_test_lcdo_shadow, i915_test_opregion_signature, sizeof(i915_test_opregion_signature));
+	kern_memset(i915_test_lcdo_shadow, 0, sizeof(i915_test_lcdo_shadow));
+	kern_memcpy(i915_test_lcdo_shadow, i915_test_opregion_signature, sizeof(i915_test_opregion_signature));
 	i915_test_lcdo_shadow[I915_TEST_OPREGION_SIZE_KIB] = 8U;
 	i915_test_lcdo_shadow[I915_TEST_OPREGION_VER_MINOR] = 1U;
 	i915_test_lcdo_shadow[I915_TEST_OPREGION_VER_MAJOR] = 2U;
-	memcpy(i915_test_lcdo_shadow + I915_TEST_OPREGION_MBOX, &mailboxes, sizeof(mailboxes));
+	kern_memcpy(i915_test_lcdo_shadow + I915_TEST_OPREGION_MBOX, &mailboxes, sizeof(mailboxes));
 
 	/* The service's worker queue lives as long as the device. */
 	if (!i915_test_lcdo_wq_live) {

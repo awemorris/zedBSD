@@ -3,6 +3,8 @@
 #include <hal/types.h>
 int rpi4_framebuffer_init(uintptr_t mailbox_phys);
 int rpi4_framebuffer_ready(void);
+void rpi4_framebuffer_test_pattern(void);
+void rpi4_framebuffer_describe(void);
 void rpi4_framebuffer_cell(unsigned row,unsigned column,int character,uint8_t attribute);
 void rpi4_framebuffer_cursor(unsigned row,unsigned column,int visible);
 #endif

@@ -9,7 +9,7 @@
  * NEC PC-98 uPD8255 bus mouse drive
  */
 
-#include "drivers/hid/pc98-busmouse.h"
+#include "drivers/platform/pc98/pc98-busmouse.h"
 #include "kern/input-device.h"
 #include "kern/lock.h"
 #ifdef WS018_INPUT_HID_HOST_TEST
@@ -22,7 +22,7 @@ void thread_start(struct thread *);
 #include "kern/thread.h"
 #endif
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
 #include <limits.h>
 #include <stdint.h>

@@ -1,0 +1,5 @@
+Bus 000 Device 000: ID 0000:0000 root hub
+Bus 000 Device 001: ID 46f4:0001
+Bus 000 Device 002: ID 0627:0001
+Bus 001 Device 000: ID 0000:0000 root hub
+Bus 001 Device 001: ID 0627:0001

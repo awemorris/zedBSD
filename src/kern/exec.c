@@ -31,15 +31,15 @@
 #include "kern/signal.h"
 #include "kern/resource-limit.h"
 #include "kern/test-checkpoint.h"
+#include <kern/kcrt.h>
 
 #include <uapi/auxv.h>
 #include <uapi/process.h>
-#include <errno.h>
-#include <fcntl.h>
+#include <uapi/errno.h>
+#include <uapi/fcntl.h>
 #include <hal/hal.h>
 #include <stdint.h>
-#include <string.h>
-#include <unistd.h>
+#include <uapi/unistd.h>
 #include "kern/klog.h"
 
 #define EXEC_ARG_MAX KERN_SPAWN_ARG_MAX
@@ -112,7 +112,7 @@ exec_shebang_parse(
 	/* Rejects missing contents or a missing result. */
 	if ((contents == NULL && size != 0) || result == NULL)
 		return -EINVAL;
-	memset(result, 0, sizeof(*result));
+	kern_memset(result, 0, sizeof(*result));
 
 	/* A file without the magic has no interpreter. */
 	if (size < 2U || bytes[0] != '#' || bytes[1] != '!')
@@ -149,7 +149,7 @@ exec_shebang_parse(
 
 	if (path_end - begin >= sizeof(result->interpreter))
 		return -ENAMETOOLONG;
-	memcpy(result->interpreter, bytes + begin, path_end - begin);
+	kern_memcpy(result->interpreter, bytes + begin, path_end - begin);
 	result->interpreter[path_end - begin] = '\0';
 
 	/*
@@ -175,7 +175,7 @@ exec_shebang_parse(
 		length = argument_end - argument_begin;
 		if (length >= sizeof(result->optional_argument))
 			return -E2BIG;
-		memcpy(result->optional_argument, bytes + argument_begin, length);
+		kern_memcpy(result->optional_argument, bytes + argument_begin, length);
 		result->optional_argument[length] = '\0';
 		result->has_optional_argument = 1;
 	}
@@ -395,7 +395,7 @@ exec_build_initial_stack(
 	while (argv[argc] != NULL) {
 		if (argc >= EXEC_ARG_MAX)
 			return E2BIG;
-		length = strlen(argv[argc]) + 1U;
+		length = kern_strlen(argv[argc]) + 1U;
 		if (length > EXEC_STRING_MAX - total)
 			return E2BIG;
 		total += length;
@@ -406,7 +406,7 @@ exec_build_initial_stack(
 		while (envp[envc] != NULL) {
 			if (envc >= EXEC_ENV_MAX)
 				return E2BIG;
-			length = strlen(envp[envc]) + 1U;
+			length = kern_strlen(envp[envc]) + 1U;
 			if (length > EXEC_STRING_MAX - total)
 				return E2BIG;
 			total += length;
@@ -414,7 +414,7 @@ exec_build_initial_stack(
 		}
 	}
 
-	length = strlen(aux->exec_path) + 1U;
+	length = kern_strlen(aux->exec_path) + 1U;
 	if (length > EXEC_STRING_MAX - total)
 		return E2BIG;
 	total += length;
@@ -444,14 +444,14 @@ exec_build_initial_stack(
 	sp = vm->stack_top;
 
 	/* Copies the executable path and the strings from the top down. */
-	length = strlen(aux->exec_path) + 1U;
+	length = kern_strlen(aux->exec_path) + 1U;
 	sp -= length;
 	error = vmspace_copy_to(vm, sp, aux->exec_path, length);
 	if (error != 0)
 		goto out;
 	execfn_address = (exec_user_word_t)sp;
 	for (i = envc; i != 0; i--) {
-		length = strlen(envp[i - 1U]) + 1U;
+		length = kern_strlen(envp[i - 1U]) + 1U;
 		sp -= length;
 		error = vmspace_copy_to(vm, sp, envp[i - 1U], length);
 		if (error != 0)
@@ -460,7 +460,7 @@ exec_build_initial_stack(
 	}
 
 	for (i = argc; i != 0; i--) {
-		length = strlen(argv[i - 1U]) + 1U;
+		length = kern_strlen(argv[i - 1U]) + 1U;
 		sp -= length;
 		error = vmspace_copy_to(vm, sp, argv[i - 1U], length);
 		if (error != 0)
@@ -572,7 +572,7 @@ process_spawn_from(
 	secure = 0;
 	stage = "resolve executable";
 
-	memset(&target, 0, sizeof(target));
+	kern_memset(&target, 0, sizeof(target));
 
 	/* Rejects a missing operand or a parent without a directory. */
 	if (parent == NULL ||
@@ -663,16 +663,16 @@ process_spawn_from(
 	 * requested /bin/sh rescue PID 1 is interactive and therefore claims
 	 * it.
 	 */
-	if (process->pid != 1 || strcmp(path, "/bin/sh") == 0)
+	if (process->pid != 1 || kern_strcmp(path, "/bin/sh") == 0)
 		tty_attach_console(process);
 
 	/* Creates the initial thread and checks the executable once more. */
 	stage = "create initial thread";
-	strncpy(process->command, argv[0], sizeof(process->command) - 1U);
+	kern_strncpy(process->command, argv[0], sizeof(process->command) - 1U);
 	process->command[sizeof(process->command) - 1U] = '\0';
 
 	/* Kept apart so that setproctitle can put the original back. */
-	memcpy(process->command_initial, process->command,
+	kern_memcpy(process->command_initial, process->command,
 	    sizeof(process->command_initial));
 	error = thread_create(process, execution_entry, sp, &thread);
 	if (error != 0)
@@ -800,7 +800,7 @@ process_spawn_init(
 {
 	char *argv[2];
 	char *envp[] = {"HOME=/home", "PATH=/bin:/sbin:/usr/bin",
-			"REMACS_SKK_DICT=/home/skkjisyo.dic", NULL};
+			"REMACS_SKK_DICT=/usr/share/remacs/skkjisyo.dic", NULL};
 	int error;
 
 	/* Runs the path as its own argument. */
@@ -874,10 +874,10 @@ script_argv_copy(
 {
 	size_t copy_length;
 
-	copy_length = strlen(value) + 1U;
+	copy_length = kern_strlen(value) + 1U;
 	vector[*index] = *cursor;
 	(*index)++;
-	memcpy(*cursor, value, copy_length);
+	kern_memcpy(*cursor, value, copy_length);
 	*cursor += copy_length;
 }
 
@@ -985,7 +985,7 @@ exec_target_release(
 		(void)file_close(target->file);
 	if (target->argv_owned)
 		exec_script_argv_free(target->argv);
-	memset(target, 0, sizeof(*target));
+	kern_memset(target, 0, sizeof(*target));
 }
 
 /* Resolves a path through its #! interpreters to the ELF image to load. */
@@ -1023,7 +1023,7 @@ exec_target_resolve(
 		return EINVAL;
 
 	/* Starts from the given file or opens the path. */
-	memset(target, 0, sizeof(*target));
+	kern_memset(target, 0, sizeof(*target));
 	target->argv = (char **)argv;
 	if (provided_file != NULL) {
 		file_ref(provided_file);
@@ -1038,12 +1038,12 @@ exec_target_resolve(
 	if (error != 0)
 		goto fail;
 	if (reopenable_path) {
-		if (strlen(path) >= sizeof(paths[0])) {
+		if (kern_strlen(path) >= sizeof(paths[0])) {
 			error = ENAMETOOLONG;
 			goto fail;
 		}
 
-		strcpy(paths[path_count++], path);
+		kern_strcpy(paths[path_count++], path);
 	}
 
 	/*
@@ -1106,7 +1106,7 @@ exec_target_resolve(
 		}
 
 		for (i = 0; i < path_count; i++) {
-			if (!strcmp(paths[i], shebang.interpreter)) {
+			if (!kern_strcmp(paths[i], shebang.interpreter)) {
 				error = ELOOP;
 				goto fail;
 			}
@@ -1135,7 +1135,7 @@ exec_target_resolve(
 						 &target->lease);
 		if (error != 0)
 			goto fail;
-		strcpy(paths[path_count++], shebang.interpreter);
+		kern_strcpy(paths[path_count++], shebang.interpreter);
 		target->script_depth++;
 	}
 
@@ -1205,7 +1205,7 @@ fill_auxv_info(
 	unsigned secure,
 	const char *path)
 {
-	memset(aux, 0, sizeof(*aux));
+	kern_memset(aux, 0, sizeof(*aux));
 	aux->program_headers = image->program_headers;
 	aux->interpreter_base = interpreter_base;
 	aux->program_entry = image->entry;
@@ -1298,7 +1298,7 @@ process_exec_file(
 	prospective_cred = NULL;
 	secure = 0;
 
-	memset(&target, 0, sizeof(target));
+	kern_memset(&target, 0, sizeof(target));
 
 	/* Only the calling user process may exec itself. */
 	if (process == NULL ||
@@ -1456,6 +1456,9 @@ process_exec_file(
 
 	spin_unlock_irqrestore(&process->lock, process_irq);
 
+	/* A vfork child no longer uses its parent's address space. */
+	process_vfork_release(process);
+
 	new_vm = NULL;
 
 	/*
@@ -1475,11 +1478,11 @@ process_exec_file(
 	process_timer_cleanup(process);
 	signal_exec(process);
 	process->did_exec = 1;
-	strncpy(process->command, argv[0], sizeof(process->command) - 1U);
+	kern_strncpy(process->command, argv[0], sizeof(process->command) - 1U);
 	process->command[sizeof(process->command) - 1U] = '\0';
 
 	/* Kept apart so that setproctitle can put the original back. */
-	memcpy(process->command_initial, process->command,
+	kern_memcpy(process->command_initial, process->command,
 	    sizeof(process->command_initial));
 	vmspace_put(old_vm);
 out:

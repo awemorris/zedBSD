@@ -34,6 +34,9 @@ asm_task_dispatch:
 .global amd64_kernel_task_entry
 .type amd64_kernel_task_entry, @function
 amd64_kernel_task_entry:
+	/* Releases the departed task with interrupts still off (rsp is 16-aligned here), then enables them. */
+	call amd64_task_finish_switch
+	sti
 	popq %rax
 	popq %rdi
 	call *%rax
@@ -44,12 +47,18 @@ amd64_kernel_task_entry:
 .global amd64_user_task_entry
 .type amd64_user_task_entry, @function
 amd64_user_task_entry:
+	/* Releases the departed task; the 5-word iret frame leaves rsp 8 off alignment. */
+	subq $8, %rsp
+	call amd64_task_finish_switch
+	addq $8, %rsp
 	iretq
 .size amd64_user_task_entry, .-amd64_user_task_entry
 
 .global amd64_user_frame_entry
 .type amd64_user_frame_entry, @function
 amd64_user_frame_entry:
+	/* Releases the departed task; the 22-word frame leaves rsp 16-aligned. */
+	call amd64_task_finish_switch
 	popq %r15
 	popq %r14
 	popq %r13

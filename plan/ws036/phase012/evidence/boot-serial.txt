@@ -1,0 +1,54 @@
+RPI4 ENTRY
+RPI4 EL1 PASS
+RPI4 FDT PASS phys=0000000008000000 size=132814
+RPI4 MMIO uart=fe201000 gic=ff841000/ff842000 sd=fe340000
+RPI4 FRAMEBUFFER PASS
+ARM64 MEMORY MAP PASS total=960 MiB free=955 MiB
+ARM64 PAGING PASS
+ARM64 W^X PASS
+ARM64 CONTEXT PASS
+ARM64 EXCEPTION PASS
+ARM64 IRQ READY
+ARM64 TIMER TICK
+boot: kernel heap, process, and scheduler initialization
+I/O pool large=16 small=16 resident=1118208 budget=4194304
+boot: HAL initialized successfully. [cpu 1, memory 960MB, timer 1ms]
+boot: CPUs ready: 1
+boot: platform device discovery
+sdhci: base=0x00000000fe340000 caps=52134b4 present=1fa0000 version=2402
+sdhci: CMD8 error=5 irq=18001
+sdhci: ACMD41 error=5 irq=18001 ocr=0
+sdhci: init error=42 status=0 present=1fa0000
+sdhci: base=0x00000000fe300000 caps=52134b4 present=1ff0000 version=2402
+sdhci: CMD8 response=1aa
+sdhci: mmcblk0 ready (byte addressing)
+sdhci: using QEMU legacy-controller fallback
+boot: platform devices detected: 1
+boot: parameters: 
+boot: VFS initialization
+vfs: absent parameter source; using legacy autoroot
+vfs: boot BIOS=80 MBR partition=1 devices=1
+vfs: native boot disk=mmcblk0 physical disks=1
+vfs: scan mmcblk0 geometry error=21: 4 entries
+vfs: mmcblk0 partition 1 start=00000000:00000800 data=00000000:00000800 blocks=00000000:00040000
+vfs: mmcblk0 partition 2 start=00000000:00040800 data=00000000:00040800 blocks=00000000:00018800
+vfs: mmcblk0 partition 3 has zero blocks; not published
+vfs: mmcblk0 partition 4 has zero blocks; not published
+vfs: mounting runtime filesystems...
+vfs: runtime filesystems mounted
+boot: memory 983040 KiB total, 977264 KiB free, 4336 KiB reserved
+boot: starting init /sbin/init
+
+init: started syslogd pid 4
+init: started audiod pid 5
+audiod: no device, 48000 Hz, 1024 frames a period, write
+init: started networkd pid 6
+networkd: auth result=admitted role=root-all pid=7 euid=0 egid=0
+networkd: auth result=admitted role=root-all pid=7 euid=0 egid=0
+networkd: auth result=admitted role=root-all pid=7 euid=0 egid=0
+networkd: auth result=admitted role=root-all pid=11 euid=0 egid=0
+init: started cron pid 12
+init: started getty_console pid 13
+init: system running
+
+login: 

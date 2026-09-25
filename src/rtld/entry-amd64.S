@@ -32,13 +32,15 @@ rtld_syscall6:
 	movq %rdi, %rax
 	movq %rsi, %rbx
 	movq %rdx, %r10
-	movq %rcx, %r11
-	movq %r10, %rcx
-	movq %r11, %rdx
+	movq %rcx, %rdx
 	movq %r8, %rsi
 	movq %r9, %rdi
 	movq 24(%rsp), %rbp
-	int $0xc2
+	/*
+	 * SYSCALL takes the second argument in r10, since it keeps the return
+	 * address in rcx; rcx and r11 do not survive the call.
+	 */
+	syscall
 	popq %rbp
 	popq %rbx
 	ret

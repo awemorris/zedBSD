@@ -10,7 +10,7 @@
 
 #include <uapi/signal.h>
 #include <stdint.h>
-#include <time.h>
+#include <uapi/time.h>
 
 struct process;
 struct itimerspec;

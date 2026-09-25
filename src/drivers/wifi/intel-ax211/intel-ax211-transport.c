@@ -50,10 +50,10 @@
  */
 
 #include "intel-ax211-transport.h"
+#include <kern/kcrt.h>
 
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #define AX211_COMMAND_TFD_SIZE 65536U
 #define AX211_COMMAND_BYTE_COUNT_SIZE 2048U
@@ -178,7 +178,7 @@ drv_intel_ax211_transport_init(
 		return INTEL_AX211_TRANSPORT_INVALID;
 
 	/* Initializes an unpublished and fail-closed transport state. */
-	memset(transport, 0, sizeof(*transport));
+	kern_memset(transport, 0, sizeof(*transport));
 	transport->ops = ops;
 	transport->argument = argument;
 	transport->profile = *profile;
@@ -189,7 +189,7 @@ drv_intel_ax211_transport_init(
 					   AX211_COMMAND_QUEUE,
 					   INTEL_AX211_COMMAND_RING_SIZE);
 	if (result != INTEL_AX211_OK) {
-		memset(transport, 0, sizeof(*transport));
+		kern_memset(transport, 0, sizeof(*transport));
 
 		/* Returns the computed result. */
 		return INTEL_AX211_TRANSPORT_INVALID;
@@ -296,19 +296,19 @@ drv_intel_ax211_transport_initialize_rings(
 	}
 
 	/* Clears every host-owned command and completion object. */
-	memset(transport->memory.command_tfd, 0,
+	kern_memset(transport->memory.command_tfd, 0,
 	       transport->memory.command_tfd_size);
-	memset(transport->memory.command_byte_count, 0,
+	kern_memset(transport->memory.command_byte_count, 0,
 	       transport->memory.command_byte_count_size);
-	memset(transport->memory.command_slots, 0,
+	kern_memset(transport->memory.command_slots, 0,
 	       transport->memory.command_slots_size);
-	memset(transport->memory.command_external, 0,
+	kern_memset(transport->memory.command_external, 0,
 	       transport->memory.command_external_size);
-	memset(transport->memory.rx_completion, 0,
+	kern_memset(transport->memory.rx_completion, 0,
 	       transport->memory.rx_completion_size);
-	memset(transport->memory.rx_status, 0,
+	kern_memset(transport->memory.rx_status, 0,
 	       transport->memory.rx_status_size);
-	memset(transport->rx_published, 0, sizeof(transport->rx_published));
+	kern_memset(transport->rx_published, 0, sizeof(transport->rx_published));
 
 	/*
 	 * Publishes the cleared command objects before any doorbell can ring.
@@ -1079,7 +1079,7 @@ drv_intel_ax211_transport_command_prepare_inline(
 	 * just as the pinned OpenBSD implementation does for firmware API
 	 * >= 50.
 	 */
-	memset(slot, 0, INTEL_AX211_TRANSPORT_COMMAND_SLOT_SIZE);
+	kern_memset(slot, 0, INTEL_AX211_TRANSPORT_COMMAND_SLOT_SIZE);
 	header_size = INTEL_AX211_WIDE_COMMAND_HEADER_SIZE;
 
 	/* Handles the command condition. */
@@ -1105,12 +1105,12 @@ drv_intel_ax211_transport_command_prepare_inline(
 
 	/* Handles the payload length condition. */
 	if (payload_length != 0U)
-		memcpy(slot + header_size, payload, payload_length);
+		kern_memcpy(slot + header_size, payload, payload_length);
 
 	/* Encodes one TFD pointing at the stable command slot. */
 	if (slot_offset >
 	    UINT64_MAX - transport->memory.command_slots_device_address) {
-		memset(slot, 0, INTEL_AX211_TRANSPORT_COMMAND_SLOT_SIZE);
+		kern_memset(slot, 0, INTEL_AX211_TRANSPORT_COMMAND_SLOT_SIZE);
 		ax211_command_rollback(transport);
 
 		/* Returns the computed result. */
@@ -1138,7 +1138,7 @@ drv_intel_ax211_transport_command_prepare_inline(
 	/* Handles the core result condition. */
 	core_result = drv_intel_ax211_tfd_encode(tfd, buffer, buffer_count);
 	if (core_result != INTEL_AX211_OK) {
-		memset(slot, 0, INTEL_AX211_TRANSPORT_COMMAND_SLOT_SIZE);
+		kern_memset(slot, 0, INTEL_AX211_TRANSPORT_COMMAND_SLOT_SIZE);
 		ax211_command_rollback(transport);
 
 		/* Returns the computed result. */
@@ -1161,8 +1161,8 @@ drv_intel_ax211_transport_command_prepare_inline(
 
 	/* Checks the operation result. */
 	if (result != INTEL_AX211_TRANSPORT_OK) {
-		memset(slot, 0, INTEL_AX211_TRANSPORT_COMMAND_SLOT_SIZE);
-		memset(tfd, 0, INTEL_AX211_TFD_SIZE);
+		kern_memset(slot, 0, INTEL_AX211_TRANSPORT_COMMAND_SLOT_SIZE);
+		kern_memset(tfd, 0, INTEL_AX211_TFD_SIZE);
 		ax211_command_rollback(transport);
 
 		/* Failed. */
@@ -1241,7 +1241,7 @@ drv_intel_ax211_transport_command_prepare_external(
 	external = transport->memory.command_external;
 	tfd = transport->memory.command_tfd + tfd_offset;
 
-	memset(external, 0, transport->memory.command_external_size);
+	kern_memset(external, 0, transport->memory.command_external_size);
 	header_size = INTEL_AX211_WIDE_COMMAND_HEADER_SIZE;
 
 	/* Handles the command condition. */
@@ -1265,7 +1265,7 @@ drv_intel_ax211_transport_command_prepare_external(
 		return INTEL_AX211_TRANSPORT_INVALID;
 	}
 
-	memcpy(external + header_size, payload, payload_length);
+	kern_memcpy(external + header_size, payload, payload_length);
 	total_length = header_size + payload_length;
 	buffer[0].address = transport->memory.command_external_device_address;
 	buffer[0].length = AX211_COMMAND_FIRST_TRANSFER_SIZE;
@@ -1277,7 +1277,7 @@ drv_intel_ax211_transport_command_prepare_external(
 	/* Handles the core result condition. */
 	core_result = drv_intel_ax211_tfd_encode(tfd, buffer, 2U);
 	if (core_result != INTEL_AX211_OK) {
-		memset(external, 0, transport->memory.command_external_size);
+		kern_memset(external, 0, transport->memory.command_external_size);
 		ax211_command_rollback(transport);
 
 		/* Returns the computed result. */
@@ -1297,8 +1297,8 @@ drv_intel_ax211_transport_command_prepare_external(
 
 	/* Checks the operation result. */
 	if (result != INTEL_AX211_TRANSPORT_OK) {
-		memset(external, 0, transport->memory.command_external_size);
-		memset(tfd, 0, INTEL_AX211_TFD_SIZE);
+		kern_memset(external, 0, transport->memory.command_external_size);
+		kern_memset(tfd, 0, INTEL_AX211_TFD_SIZE);
 
 		/* Handles the scrub result condition. */
 		scrub_result = ax211_command_external_scrub(transport);
@@ -1421,9 +1421,9 @@ drv_intel_ax211_transport_command_abort_prepared(
 	slot_offset =
 		(size_t)token->index * INTEL_AX211_TRANSPORT_COMMAND_SLOT_SIZE;
 	tfd_offset = (size_t)token->index * INTEL_AX211_TFD_SIZE;
-	memset(transport->memory.command_slots + slot_offset, 0,
+	kern_memset(transport->memory.command_slots + slot_offset, 0,
 	       INTEL_AX211_TRANSPORT_COMMAND_SLOT_SIZE);
-	memset(transport->memory.command_tfd + tfd_offset, 0,
+	kern_memset(transport->memory.command_tfd + tfd_offset, 0,
 	       INTEL_AX211_TFD_SIZE);
 
 	/* Handles the external condition. */
@@ -1458,12 +1458,12 @@ drv_intel_ax211_transport_command_abort_prepared(
 
 	/* Handles the external condition. */
 	if (external) {
-		memset(&transport->command_external_token, 0,
+		kern_memset(&transport->command_external_token, 0,
 		       sizeof(transport->command_external_token));
 		transport->command_external_active = 0U;
 	}
 
-	memset(&transport->command_prepared_token, 0,
+	kern_memset(&transport->command_prepared_token, 0,
 	       sizeof(transport->command_prepared_token));
 	transport->command_prepared = 0U;
 	transport->command_reset_required = 0U;
@@ -1543,9 +1543,9 @@ drv_intel_ax211_transport_command_complete(
 	external = ax211_command_external_matches(transport, token);
 
 	/* Scrubs retired host-command bytes before the slot can be reused. */
-	memset(transport->memory.command_slots + slot_offset, 0,
+	kern_memset(transport->memory.command_slots + slot_offset, 0,
 	       INTEL_AX211_TRANSPORT_COMMAND_SLOT_SIZE);
-	memset(transport->memory.command_tfd + tfd_offset, 0,
+	kern_memset(transport->memory.command_tfd + tfd_offset, 0,
 	       INTEL_AX211_TFD_SIZE);
 
 	/* Handles the external condition. */
@@ -1591,7 +1591,7 @@ drv_intel_ax211_transport_command_complete(
 
 	/* Handles the external condition. */
 	if (external) {
-		memset(&transport->command_external_token, 0,
+		kern_memset(&transport->command_external_token, 0,
 		       sizeof(transport->command_external_token));
 		transport->command_external_active = 0U;
 	}
@@ -1658,13 +1658,13 @@ drv_intel_ax211_transport_command_after_device_reset(
 	/*
 	 * The caller's reset guarantee makes every prior doorbell unobservable.
 	 */
-	memset(transport->memory.command_slots, 0,
+	kern_memset(transport->memory.command_slots, 0,
 	       transport->memory.command_slots_size);
-	memset(transport->memory.command_tfd, 0,
+	kern_memset(transport->memory.command_tfd, 0,
 	       transport->memory.command_tfd_size);
-	memset(transport->memory.command_byte_count, 0,
+	kern_memset(transport->memory.command_byte_count, 0,
 	       transport->memory.command_byte_count_size);
-	memset(transport->memory.command_external, 0,
+	kern_memset(transport->memory.command_external, 0,
 	       transport->memory.command_external_size);
 
 	/* Checks the operation result. */
@@ -1708,9 +1708,9 @@ drv_intel_ax211_transport_command_after_device_reset(
 		return INTEL_AX211_TRANSPORT_FAILED;
 	}
 
-	memset(&transport->command_prepared_token, 0,
+	kern_memset(&transport->command_prepared_token, 0,
 	       sizeof(transport->command_prepared_token));
-	memset(&transport->command_external_token, 0,
+	kern_memset(&transport->command_external_token, 0,
 	       sizeof(transport->command_external_token));
 	transport->command_prepared = 0U;
 	transport->command_external_active = 0U;
@@ -2222,7 +2222,7 @@ ax211_publish_rx_descriptor(
 
 	/* Checks the operation result. */
 	if (result != INTEL_AX211_TRANSPORT_OK) {
-		memset(descriptor, 0, INTEL_AX211_TRANSPORT_RX_DESCRIPTOR_SIZE);
+		kern_memset(descriptor, 0, INTEL_AX211_TRANSPORT_RX_DESCRIPTOR_SIZE);
 		ax211_set_published(transport, index, 0);
 
 		/* Failed. */
@@ -2317,7 +2317,7 @@ ax211_command_external_scrub(
 {
 	int error;
 
-	memset(transport->memory.command_external, 0,
+	kern_memset(transport->memory.command_external, 0,
 	       transport->memory.command_external_size);
 
 	/* Obtains the ax211 dma sync result. */

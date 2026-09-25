@@ -17,6 +17,7 @@
  */
 
 #include "kern/process.h"
+#include <kern/kcrt.h>
 #ifndef KERN_PROCESS_TEST
 #include "kern/process-timer.h"
 #include <uapi/ptrace.h>
@@ -39,10 +40,9 @@ void process_timer_cleanup(struct process *);
 #include "kern/namei.h"
 #include "kern/test-checkpoint.h"
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
-#include <string.h>
-#include <sys/wait.h>
+#include <uapi/wait.h>
 
 struct process process0;
 struct process_retired_cred {
@@ -56,10 +56,24 @@ static struct process *all_processes;
 static struct process *creating_processes;
 static pid_t next_pid = 1;
 static struct thread *reaper_thread;
+
+/*
+ * How many processes carry PROCESS_PGRP_NOTIFY and still await their
+ * SIGHUP and SIGCONT.
+ *
+ * Kept under process_tree_lock with the flags.  The orphaning recheck
+ * runs on every exit and group change, and the delivery pass that follows
+ * it walks the whole process table; a zero here lets that pass be skipped,
+ * which is nearly always.
+ */
+static unsigned pgrp_notify_pending;
 static struct spinlock process_tree_lock = {
 	{ 0 }, LOCK_RANK_PROCESS_TREE, "process tree", 0, 0
 };
 #define PROCESS_EXT __attribute__((section(".hightext")))
+
+/* The armed real interval timers one tick collects before it walks by PID. */
+#define PROCESS_ITIMER_REAL_BATCH 16U
 
 struct process_stop_notification {
 	struct process *process;
@@ -74,6 +88,7 @@ static void process_vmspace_reaper_notify(void *argument);
 static void process_reaper_notify(void);
 static PROCESS_EXT void reparent_children(struct process *process);
 static int process_reap_threads(struct process *process);
+static int fork_process(struct process *parent, struct process **result, struct process_vfork_wait *vfork_wait);
 static int process_autoreap_claim(struct process *process);
 static int process_autoreap_commit(struct process *process);
 static void process_reaper(void *argument);
@@ -124,8 +139,8 @@ process_init(
 		return;
 
 	/* Sets up process0 as a running root process in the kernel space. */
-	memset(&process0, 0, sizeof(process0));
-	memset(&thread0, 0, sizeof(thread0));
+	kern_memset(&process0, 0, sizeof(process0));
+	kern_memset(&thread0, 0, sizeof(thread0));
 	refcount_init(&process0.refs, 1);
 	spin_init(&process0.lock, LOCK_RANK_PROCESS, "process0");
 	(void)mutex_init(&process0.resource_lock, LOCK_RANK_PROCESS_RESOURCE,
@@ -1214,6 +1229,17 @@ process_create(
 }
 
 /*
+ * The wait of a parent whose vfork child borrows its address space.  It
+ * lives on the parent's kernel stack for as long as the parent waits.
+ */
+struct process_vfork_wait {
+	struct spinlock lock;
+	struct wait_queue waitq;
+	int released;
+	pid_t child;			/* noted before the child runs, which may end it at once */
+};
+
+/*
  * Forks the calling process.
  *
  * The child gets copies of the descriptor table and address space, a
@@ -1224,6 +1250,97 @@ int
 process_fork(
 	struct process *parent,
 	struct process **result)
+{
+	int error;
+
+	/* A copy of the address space. */
+	error = fork_process(parent, result, NULL);
+
+	/* Reports the child or the failure. */
+	return error;
+}
+
+/*
+ * Forks the calling process into a child that borrows the caller's
+ * address space until it execs or ends; the calling thread waits until
+ * then (vfork).  The child gets a copy of the descriptor table, as fork
+ * gives it.  Reports the child's pid once it no longer uses the address
+ * space; the child itself may be gone by then (autoreaped).
+ */
+int
+process_vfork(
+	struct process *parent,
+	pid_t *result)
+{
+	struct process_vfork_wait wait;
+	struct process *child;
+	unsigned long irq;
+	uint64_t sequence;
+	int error;
+
+	/* The wait the child ends. */
+	spin_init(&wait.lock, LOCK_RANK_PROCESS, "vfork wait");
+	waitq_init(&wait.waitq, "vfork wait");
+	wait.released = 0;
+
+	/* The child, sharing the address space. */
+	error = fork_process(parent, &child, &wait);
+	if (error != 0)
+		return error;
+
+	/*
+	 * Waits, not interruptibly, until the child execs or ends: until
+	 * then it runs on this process's memory, and this thread's stack is
+	 * where the child's exec or end finds this wait.
+	 */
+	irq = spin_lock_irqsave(&wait.lock);
+	while (!wait.released) {
+		sequence = waitq_sequence(&wait.waitq);
+		(void)waitq_sleep(&wait.waitq, &wait.lock, sequence, 0, 0);
+	}
+	spin_unlock_irqrestore(&wait.lock, irq);
+
+	/* Succeeded: the child no longer uses this address space. */
+	*result = wait.child;
+	return 0;
+}
+
+/*
+ * Ends a vfork child's borrowing of its parent's address space: the
+ * child has execed, or ends.  The parent's waiting thread goes on.
+ */
+void
+process_vfork_release(
+	struct process *process)
+{
+	struct process_vfork_wait *wait;
+	unsigned long irq;
+
+	/* Takes the wait once, whichever of exec and the end comes first. */
+	irq = spin_lock_irqsave(&process->lock);
+	wait = process->vfork_wait;
+	process->vfork_wait = NULL;
+	spin_unlock_irqrestore(&process->lock, irq);
+	if (wait == NULL)
+		return;
+
+	/* The parent may return as soon as the lock is let go; nothing here touches the wait after that. */
+	irq = spin_lock_irqsave(&wait->lock);
+	wait->released = 1;
+	waitq_wake_all(&wait->waitq);
+	spin_unlock_irqrestore(&wait->lock, irq);
+}
+
+/*
+ * Makes the child of fork or vfork.  Without a vfork wait the child
+ * gets a copy of the address space; with one it shares the parent's
+ * until process_vfork_release().
+ */
+static int
+fork_process(
+	struct process *parent,
+	struct process **result,
+	struct process_vfork_wait *vfork_wait)
 {
 	struct process *child;
 	struct filedesc *files;
@@ -1254,13 +1371,25 @@ process_fork(
 	filedesc_destroy(child->fd);
 	child->fd = files;
 	files = NULL;
-	error = vmspace_fork(parent->vmspace, &child->vmspace);
-	if (error != 0)
-		goto fail;
+	if (vfork_wait != NULL) {
+		vmspace_ref(parent->vmspace);
+		child->vmspace = parent->vmspace;
+		child->vfork_wait = vfork_wait;
+		vfork_wait->child = child->pid;
+	} else {
+		error = vmspace_fork(parent->vmspace, &child->vmspace);
+		if (error != 0)
+			goto fail;
+	}
 
 	/* The copied stack still holds the auxiliary vector where it was. */
 	child->auxv_address = parent->auxv_address;
 	child->auxv_size = parent->auxv_size;
+
+	/* The child runs the same program until it execs, so it has its name. */
+	kern_memcpy(child->command, parent->command, sizeof(child->command));
+	kern_memcpy(child->command_initial, parent->command_initial,
+	    sizeof(child->command_initial));
 
 	/* Forks the task and thread, then publishes and starts the child. */
 	task = hal_task_fork_current(child->vmspace->space, 0);
@@ -1437,6 +1566,12 @@ process_free_mem(
 		}
 	}
 
+	/* A dead process is never signalled, so its mark leaves the pending count. */
+	if ((process->flags & PROCESS_PGRP_NOTIFY) != 0) {
+		process->flags &= ~PROCESS_PGRP_NOTIFY;
+		pgrp_notify_pending--;
+	}
+
 	process->state = PROCESS_DEAD;
 	process_group_recheck_locked(old_session, old_pgrp, 1);
 
@@ -1544,7 +1679,7 @@ process_wait_select_mask(
 	    (event_mask & ~(PROCESS_WAIT_EVENT_EXITED |
 	    PROCESS_WAIT_EVENT_STOPPED | PROCESS_WAIT_EVENT_CONTINUED)) != 0)
 		return -EINVAL;
-	memset(event, 0, sizeof(*event));
+	kern_memset(event, 0, sizeof(*event));
 
 	/* Scans the children, sleeping between scans unless WNOHANG. */
 	irq = spin_lock_irqsave(&process_tree_lock);
@@ -1717,7 +1852,7 @@ out:
 	/* Drops the event's reference on success. */
 	if (error == 0) {
 		process_release(child);
-		memset(event, 0, sizeof(*event));
+		kern_memset(event, 0, sizeof(*event));
 	}
 
 	/* Reports why the commit failed. */
@@ -1755,7 +1890,7 @@ process_wait_abort(
 	spin_unlock_irqrestore(&process_tree_lock, irq);
 
 	process_release(child);
-	memset(event, 0, sizeof(*event));
+	kern_memset(event, 0, sizeof(*event));
 }
 
 /*
@@ -2122,19 +2257,76 @@ void
 process_itimer_real_tick_all(
 	void)
 {
+	struct process *armed[PROCESS_ITIMER_REAL_BATCH];
 	struct process *process;
 	struct signal_info info;
+	unsigned long irq;
+	uint64_t remaining;
+	unsigned count;
+	unsigned index;
+	int overflow;
+	int expired;
 	pid_t cursor;
 
 	cursor = -1;
-	memset(&info, 0, sizeof(info));
+	count = 0;
+	overflow = 0;
+	kern_memset(&info, 0, sizeof(info));
 	info.code = SI_TIMER;
 
 	/*
-	 * Hold a process reference, not the global tree lock, while queuing
+	 * Collects the processes whose real timer is armed in one pass.
+	 *
+	 * This runs on every tick, and almost no process arms the timer, so
+	 * the common tick reads each process once and takes no reference.  A
+	 * timer armed while the pass runs is counted from the next tick.
+	 */
+	irq = spin_lock_irqsave(&process_tree_lock);
+	for (process = all_processes; process != NULL; process = process->all_next) {
+		if (process == &process0 || process->state == PROCESS_DEAD)
+			continue;
+		remaining = atomic_u64_load_acquire(&process->itimer_remaining[0]);
+		if (remaining == 0)
+			continue;
+
+		/* Leaves a crowded tick to the ordered walk below. */
+		if (count == PROCESS_ITIMER_REAL_BATCH) {
+			overflow = 1;
+			break;
+		}
+
+		/* Keeps the process until its tick is counted. */
+		process_ref(process);
+		armed[count] = process;
+		count++;
+	}
+
+	/* Lets fork and exit at the registry again. */
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+
+	/*
+	 * Holds a process reference, not the global tree lock, while queuing
 	 * the signal.  Delivery can wake a remote CPU and must not extend the
 	 * process registry critical section on every timer tick.
 	 */
+	if (!overflow) {
+		for (index = 0; index < count; index++) {
+			process = armed[index];
+			expired = 0;
+			if (process->state != PROCESS_DEAD)
+				expired = process_itimer_tick(process, 0);
+			if (expired)
+				(void)signal_send_process_info(process, SIGALRM, &info);
+			process_release(process);
+		}
+
+		/* Reports the tick counted. */
+		return;
+	}
+
+	/* Drops the batch and ticks every process in PID order instead. */
+	for (index = 0; index < count; index++)
+		process_release(armed[index]);
 	process = process_find_next_ref(cursor);
 	while (process != NULL) {
 		cursor = process->pid;
@@ -2194,11 +2386,13 @@ process_thread_retired(
 	int autoreap;
 	int final_cleanup;
 	int last;
+	int waited;
 
 	/* Starts assuming this is the last thread and nothing to notify. */
 	parent = NULL;
 	dead_vmspace = NULL;
 	notify = 0;
+	waited = 0;
 	autoreap = 0;
 	final_cleanup = 0;
 	last = 1;
@@ -2224,26 +2418,40 @@ process_thread_retired(
 	}
 
 	if (last && process != &process0 && process->state == PROCESS_EXITING) {
-		/*
-		 * No task can enter this address space again.  Keep only
-		 * wait-visible metadata in the zombie instead of pinning all
-		 * user mappings until the parent reaps it.
-		 */
-		dead_vmspace = process->vmspace;
-		process->vmspace = NULL;
 		process->state = PROCESS_ZOMBIE;
 		final_cleanup = 1;
 		parent = process->parent;
 		if (parent != NULL)
 			process_ref(parent);
-		if (parent != NULL)
-			child_waiters_wake(parent);
 		notify = parent != NULL && parent != &process0;
 		autoreap = (process->flags & PROCESS_AUTOREAP) != 0;
+
+		/*
+		 * No task can enter this address space again.  A parent asleep
+		 * in wait is about to reap the zombie, and the reap frees the
+		 * space in the parent's own context, while it would only wait;
+		 * otherwise only wait-visible metadata stays in the zombie
+		 * instead of pinning all user mappings until the parent reaps
+		 * it, and the reaper frees the space on whichever CPU.
+		 */
+		if (notify && !autoreap && parent->child_waitq.head != NULL)
+			waited = 1;
+		if (!waited) {
+			dead_vmspace = process->vmspace;
+			process->vmspace = NULL;
+		}
+
+		/* Wakes the parent's waiters to find the zombie. */
+		if (parent != NULL)
+			child_waiters_wake(parent);
 	}
 
 	spin_unlock_irqrestore(&process->lock, process_irq);
 	spin_unlock_irqrestore(&process_tree_lock, irq);
+
+	/* A vfork child that ends gives its parent's address space back. */
+	if (final_cleanup)
+		process_vfork_release(process);
 
 	/*
 	 * Exit performs an early teardown before terminating sibling threads.
@@ -2262,7 +2470,7 @@ process_thread_retired(
 
 	/* Tells the parent how the child ended. */
 	if (notify) {
-		memset(&info, 0, sizeof(info));
+		kern_memset(&info, 0, sizeof(info));
 		if ((process->exit_status & 0x7f) == 0)
 			info.code = CLD_EXITED;
 		else
@@ -2397,8 +2605,12 @@ process_group_recheck_locked(
 			member->flags |= PROCESS_PGRP_ORPHANED;
 		else
 			member->flags &= ~PROCESS_PGRP_ORPHANED;
-		if (notify && !was_orphaned && orphaned && stopped)
+		if (notify && !was_orphaned && orphaned && stopped &&
+		    (member->flags & PROCESS_PGRP_NOTIFY) == 0) {
+			/* The count lets the delivery pass know there is work. */
 			member->flags |= PROCESS_PGRP_NOTIFY;
+			pgrp_notify_pending++;
+		}
 	}
 }
 
@@ -2410,9 +2622,17 @@ process_group_deliver_notifications(
 	struct process *process;
 	pid_t cursor;
 	unsigned long irq;
+	unsigned pending;
 	int notify;
 
 	cursor = -1;
+
+	/* Skips the table walk when no process is marked, the usual case. */
+	irq = spin_lock_irqsave(&process_tree_lock);
+	pending = pgrp_notify_pending;
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+	if (pending == 0)
+		return;
 
 	/* Takes each mark under the tree lock and signals outside it. */
 	process = process_find_next_ref(cursor);
@@ -2421,7 +2641,11 @@ process_group_deliver_notifications(
 		irq = spin_lock_irqsave(&process_tree_lock);
 		notify = (process->flags & PROCESS_PGRP_NOTIFY) != 0;
 		process->flags &= ~PROCESS_PGRP_NOTIFY;
+		if (notify)
+			pgrp_notify_pending--;
 		spin_unlock_irqrestore(&process_tree_lock, irq);
+
+		/* Signals the process whose mark was taken. */
 		if (notify) {
 			(void)signal_send_process(process, SIGHUP);
 			(void)signal_send_process(process, SIGCONT);
@@ -2738,7 +2962,7 @@ notify_parent_job_event_tree_locked(
 		return;
 
 	/* Describes the event. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	info.code = code;
 	info.pid = process->pid;
 	if (process->cred != NULL)
@@ -3236,7 +3460,7 @@ process_trace_stop(
 	 * A stop that carries no description of its signal still says which
 	 * signal it was, because that is what a debugger asks first.
 	 */
-	memset(&process->trace_siginfo, 0, sizeof(process->trace_siginfo));
+	kern_memset(&process->trace_siginfo, 0, sizeof(process->trace_siginfo));
 	if (info != NULL)
 		process->trace_siginfo = *info;
 	else

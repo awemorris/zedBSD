@@ -13,7 +13,7 @@
 
 #include <kern/disk.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include "kern/klog.h"
 #include "kern/device-io.h"
 

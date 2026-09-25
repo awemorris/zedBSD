@@ -22,13 +22,13 @@
 #include "scenarios.h"
 #include "../display/scenarios.h"
 #include "../render/scenarios.h"
+#include <kern/kcrt.h>
 
 #include "../../i915.h"
 
 #include <kern/klog.h>
 
 #include <stddef.h>
-#include <string.h>
 
 /* Turns the scenario's bare name into a string, after expanding the macro that carries it. */
 #define I915_TEST_STRING(name)		#name
@@ -212,7 +212,7 @@ i915_test_find(
 	/* Compares the name with every entry of the table. */
 	count = sizeof(i915_test_scenarios) / sizeof(i915_test_scenarios[0]);
 	for (i = 0U; i < count; i++) {
-		differs = strcmp(i915_test_scenarios[i].name, name);
+		differs = kern_strcmp(i915_test_scenarios[i].name, name);
 		if (differs == 0)
 			return &i915_test_scenarios[i];
 	}

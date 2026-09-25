@@ -28,10 +28,10 @@
 #include "kern/posix-acl.h"
 #include "kern/vm-object.h"
 #include <hal/hal.h>
+#include <kern/kcrt.h>
 
 #include <uapi/rename.h>
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 extern int posix_acl_chmod(struct inode *inode, mode_t mode) __attribute__((weak));
 extern int posix_acl_inherit(struct inode *parent, struct inode *child,
@@ -50,8 +50,8 @@ extern void vm_object_resize_abort(struct vm_object_resize *resize)
 extern int vm_object_discard_mount_refs(struct mount *, struct inode *, unsigned *)
     __attribute__((weak));
 
-#define INODE_COMMON_MAX 256U
-#define INODE_CACHE_MAX 512U
+#define INODE_COMMON_MAX 512U
+#define INODE_CACHE_MAX 2048U
 #define VFS_BSS __attribute__((section(".vfs_bss")))
 #define INODE_HIGH __attribute__((section(".hightext")))
 #define INODE_CACHE_RESERVED ((struct inode *)(uintptr_t)1U)
@@ -162,7 +162,7 @@ inode_alloc(
 	}
 
 	/* One cache reference and one reference returned to the caller. */
-	memset(inode, 0, sizeof(*inode));
+	kern_memset(inode, 0, sizeof(*inode));
 	inode->i_mount = mountp;
 	inode->i_dirseq = 1;
 	refcount_init(&inode->i_refs, 2);
@@ -717,11 +717,8 @@ inode_getattr(
 	}
 
 	/* Derives the record from the cached inode fields. */
-	memset(status, 0, sizeof(*status));
-	if (inode->i_mount != NULL && inode->i_mount->m_disk != NULL)
-		status->st_dev = inode->i_mount->m_disk->d_dev;
-	else
-		status->st_dev = 0;
+	kern_memset(status, 0, sizeof(*status));
+	status->st_dev = mount_device_number(inode->i_mount);
 	status->st_ino = inode->i_ino;
 	status->st_mode = inode->i_mode;
 	status->st_nlink = inode->i_linkcount;
@@ -964,7 +961,7 @@ inode_creation_request_user(
 	    type > INODE_FIFO ||
 	    (mode & S_IFMT) != 0)
 		return EINVAL;
-	memset(request, 0, sizeof(*request));
+	kern_memset(request, 0, sizeof(*request));
 
 	/*
 	 * Authorization and the set-GID/GID snapshot are one metadata
@@ -1019,7 +1016,7 @@ inode_creation_request_system(
 	    type > INODE_FIFO ||
 	    (mode & S_IFMT) != 0)
 		return EINVAL;
-	memset(request, 0, sizeof(*request));
+	kern_memset(request, 0, sizeof(*request));
 	request->origin = INODE_CREATION_SYSTEM;
 	request->type = type;
 	request->mode = mode & 07777U;
@@ -1045,7 +1042,7 @@ inode_creation_request_preserve(
 	    source->i_type <= INODE_NONE ||
 	    source->i_type > INODE_FIFO)
 		return EINVAL;
-	memset(request, 0, sizeof(*request));
+	kern_memset(request, 0, sizeof(*request));
 	request->origin = INODE_CREATION_PRESERVE;
 	request->type = source->i_type;
 	request->mode = source->i_mode & 07777U;
@@ -1179,7 +1176,7 @@ inode_truncate_transaction(
 
 	/* Initializes the outcome even when backing admission refuses the call. */
 	if (result != NULL) {
-		memset(result, 0, sizeof(*result));
+		kern_memset(result, 0, sizeof(*result));
 		if (i != NULL)
 			result->actual_size = i->i_size;
 	}
@@ -2385,7 +2382,7 @@ destroy_inode(
 	mountp = inode->i_mount;
 	pindex = common_index(inode);
 	if (pindex >= 0) {
-		memset(inode, 0, sizeof(*inode));
+		kern_memset(inode, 0, sizeof(*inode));
 		irq = spin_lock_irqsave(&inode_cache_lock);
 		common_used[pindex] = 0;
 		spin_unlock_irqrestore(&inode_cache_lock, irq);
@@ -2645,7 +2642,7 @@ inode_truncate_transaction_impl(
 	/* Reports the current size even on a rejected request. */
 	if (result == NULL)
 		result = &local_result;
-	memset(result, 0, sizeof(*result));
+	kern_memset(result, 0, sizeof(*result));
 	if (i != NULL)
 		result->actual_size = i->i_size;
 	else
@@ -2699,7 +2696,7 @@ retry:
 	}
 
 	/* Publishes and prepares the resize. */
-	memset(&resize, 0, sizeof(resize));
+	kern_memset(&resize, 0, sizeof(resize));
 	if (vm_resize) {
 		error = vm_object_resize_begin(i, request->size, &resize);
 		if (error == EBUSY || error == EAGAIN) {
@@ -2751,7 +2748,7 @@ retry:
 
 	/* Runs the filesystem truncate and commits the published size. */
 	if (delegated) {
-		memset(&inner, 0, sizeof(inner));
+		kern_memset(&inner, 0, sizeof(inner));
 		inner.actual_size = i->i_size;
 		error = i->i_op->truncate_limited(i, request, &inner);
 

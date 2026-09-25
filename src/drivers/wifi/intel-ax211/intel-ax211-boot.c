@@ -7,8 +7,8 @@
  */
 
 #include "intel-ax211-boot.h"
+#include <kern/kcrt.h>
 
-#include <string.h>
 
 enum ax211_boot_notification {
 	AX211_BOOT_NOTIFICATION_ALIVE = 1,
@@ -80,7 +80,7 @@ drv_intel_ax211_boot_init(
 	}
 
 	/* Publishes a fully initialized, otherwise empty coordinator. */
-	memset(boot, 0, sizeof(*boot));
+	kern_memset(boot, 0, sizeof(*boot));
 	boot->ops = ops;
 	boot->argument = argument;
 	boot->dma_device = dma_device;
@@ -312,14 +312,14 @@ static void
 ax211_boot_run_state_clear(
 	struct intel_ax211_boot *boot)
 {
-	memset(&boot->files, 0, sizeof(boot->files));
-	memset(&boot->dma, 0, sizeof(boot->dma));
-	memset(&boot->commands, 0, sizeof(boot->commands));
-	memset(&boot->alive, 0, sizeof(boot->alive));
-	memset(&boot->nvm, 0, sizeof(boot->nvm));
-	memset(boot->command_version_bytes, 0,
+	kern_memset(&boot->files, 0, sizeof(boot->files));
+	kern_memset(&boot->dma, 0, sizeof(boot->dma));
+	kern_memset(&boot->commands, 0, sizeof(boot->commands));
+	kern_memset(&boot->alive, 0, sizeof(boot->alive));
+	kern_memset(&boot->nvm, 0, sizeof(boot->nvm));
+	kern_memset(boot->command_version_bytes, 0,
 	       sizeof(boot->command_version_bytes));
-	memset(boot->event_bytes, 0, sizeof(boot->event_bytes));
+	kern_memset(boot->event_bytes, 0, sizeof(boot->event_bytes));
 	boot->files_loaded = 0U;
 	boot->dma_prepared = 0U;
 	boot->dma_exposed = 0U;
@@ -385,7 +385,7 @@ ax211_boot_load_and_pin(
 	}
 
 	/* Pins the table before any path may release firmware-file storage. */
-	memcpy(boot->command_version_bytes, boot->files.ucode_bytes + offset,
+	kern_memcpy(boot->command_version_bytes, boot->files.ucode_bytes + offset,
 	       length);
 
 	/* Checks the operation result. */
@@ -703,7 +703,7 @@ ax211_boot_start_device(
 		/* Returns the computed result. */
 		return INTEL_AX211_BOOT_DMA;
 	}
-	memset(&mmio_boot, 0, sizeof(mmio_boot));
+	kern_memset(&mmio_boot, 0, sizeof(mmio_boot));
 	mmio_boot.context_address = boot->dma.context.device_address;
 	mmio_boot.iml_address = boot->dma.iml.device_address;
 	mmio_boot.iml_size = (uint32_t)boot->dma.iml.size;
@@ -822,7 +822,7 @@ ax211_boot_receive(
 	int result;
 
 	/* Lets the controller fill only the coordinator-owned fixed buffer. */
-	memset(&received, 0, sizeof(received));
+	kern_memset(&received, 0, sizeof(received));
 
 	/* Checks the operation result. */
 	result = boot->ops->receive_event(boot->argument, deadline,
@@ -868,7 +868,7 @@ ax211_boot_receive(
 		/* Returns the computed result. */
 		return INTEL_AX211_BOOT_PROTOCOL;
 	}
-	memset(message, 0, sizeof(*message));
+	kern_memset(message, 0, sizeof(*message));
 	message->opcode = event->command.opcode;
 	message->group = event->flags &
 			 (uint8_t)~INTEL_AX211_PROTOCOL_COMMAND_FAILED_MASK;
@@ -987,7 +987,7 @@ ax211_boot_select_and_publish_pnvm(
 	int result;
 
 	/* Selects only the exact three-word SKU from accepted ALIVE. */
-	memset(&sku, 0, sizeof(sku));
+	kern_memset(&sku, 0, sizeof(sku));
 	sku.data[0] = boot->alive.sku[0];
 	sku.data[1] = boot->alive.sku[1];
 	sku.data[2] = boot->alive.sku[2];
@@ -1099,7 +1099,7 @@ ax211_boot_send_extended_cfg(
 		return error;
 	}
 
-	memset(&request, 0, sizeof(request));
+	kern_memset(&request, 0, sizeof(request));
 	request.command.opcode = INTEL_AX211_INIT_EXTENDED_CFG_OPCODE;
 	request.command.group = INTEL_AX211_INIT_SYSTEM_GROUP;
 
@@ -1132,7 +1132,7 @@ ax211_boot_send_extended_cfg(
 	}
 
 	response_length = 0U;
-	memset(response, 0, sizeof(response));
+	kern_memset(response, 0, sizeof(response));
 
 	/* Checks the operation result. */
 	result = ax211_boot_wait_command(boot, deadline, response,
@@ -1145,7 +1145,7 @@ ax211_boot_send_extended_cfg(
 	if (result == INTEL_AX211_BOOT_OK &&
 	    ax211_boot_get_le32(response) != 0U)
 		result = INTEL_AX211_BOOT_COMMAND;
-	memset(response, 0, sizeof(response));
+	kern_memset(response, 0, sizeof(response));
 
 	/* Returns the computed result. */
 	return result;
@@ -1376,7 +1376,7 @@ ax211_boot_send_nvm_get_info(
 		return INTEL_AX211_BOOT_PROTOCOL;
 
 	/* Reconstructs the validated response envelope for the NVM codec. */
-	memset(&pending, 0, sizeof(pending));
+	kern_memset(&pending, 0, sizeof(pending));
 	pending.opcode = INTEL_AX211_PROTOCOL_NVM_GET_INFO_OPCODE;
 	pending.group = INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM;
 	pending.response_version = INTEL_AX211_PROTOCOL_NVM_GET_INFO_VERSION;
@@ -1385,7 +1385,7 @@ ax211_boot_send_nvm_get_info(
 	pending.generation = boot->generation;
 	pending.minimum_response_length = sizeof(response);
 	pending.maximum_response_length = sizeof(response);
-	memset(&message, 0, sizeof(message));
+	kern_memset(&message, 0, sizeof(message));
 	message.opcode = pending.opcode;
 	message.group = pending.group;
 	message.version = pending.response_version;
@@ -1396,7 +1396,7 @@ ax211_boot_send_nvm_get_info(
 	message.payload_length = response_length;
 	result = drv_intel_ax211_protocol_nvm_get_info_decode(
 		&message, &pending, &boot->nvm);
-	memset(response, 0, sizeof(response));
+	kern_memset(response, 0, sizeof(response));
 	if (result != INTEL_AX211_PROTOCOL_OK) {
 		/* Obtains the ax211 boot protocol result result. */
 		error = ax211_boot_protocol_result(result);

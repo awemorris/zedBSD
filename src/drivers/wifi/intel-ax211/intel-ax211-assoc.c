@@ -55,8 +55,8 @@
  */
 
 #include "intel-ax211-assoc.h"
+#include <kern/kcrt.h>
 
-#include <string.h>
 
 #define AX211_ASSOC_RESOURCE_PHY 0x01U
 #define AX211_ASSOC_RESOURCE_MAC 0x02U
@@ -170,10 +170,10 @@ drv_intel_ax211_assoc_mcast_filter_encode(
 	/* Handles the output capacity condition. */
 	if (output_capacity < INTEL_AX211_ASSOC_MCAST_FILTER_SIZE)
 		return INTEL_AX211_ASSOC_BUFFER_TOO_SMALL;
-	memset(output, 0, INTEL_AX211_ASSOC_MCAST_FILTER_SIZE);
+	kern_memset(output, 0, INTEL_AX211_ASSOC_MCAST_FILTER_SIZE);
 	output[0U] = 1U;
 	output[3U] = 1U;
-	memcpy(output + 4U, bssid, 6U);
+	kern_memcpy(output + 4U, bssid, 6U);
 
 	/* Returns the computed result. */
 	return INTEL_AX211_ASSOC_OK;
@@ -246,7 +246,7 @@ drv_intel_ax211_assoc_mac_power_encode(
 	/* Handles the keep alive seconds condition. */
 	if (keep_alive_seconds > UINT16_MAX)
 		return INTEL_AX211_ASSOC_OVERSIZED;
-	memset(output, 0, INTEL_AX211_ASSOC_MAC_POWER_SIZE);
+	kern_memset(output, 0, INTEL_AX211_ASSOC_MAC_POWER_SIZE);
 	ax211_assoc_put_le32(output, INTEL_AX211_ASSOC_MAC_ID);
 	ax211_assoc_put_le16(output + 4U, 0U);
 	ax211_assoc_put_le16(output + 6U, (uint16_t)keep_alive_seconds);
@@ -443,7 +443,7 @@ drv_intel_ax211_assoc_begin(
 	next_sequence = state->initialized ? state->next_sequence : 1U;
 	last_completed_sequence =
 		state->initialized ? state->last_completed_sequence : 0U;
-	memset(state, 0, sizeof(*state));
+	kern_memset(state, 0, sizeof(*state));
 	state->profile = *profile;
 	state->common_generation = common_generation;
 	state->hardware_epoch = hardware_epoch;
@@ -458,7 +458,7 @@ drv_intel_ax211_assoc_begin(
 	result = ax211_assoc_set_step(state, INTEL_AX211_ASSOC_STEP_MAC_ADD,
 				      now_us);
 	if (result != INTEL_AX211_ASSOC_OK)
-		memset(state, 0, sizeof(*state));
+		kern_memset(state, 0, sizeof(*state));
 
 	/* Returns the computed result. */
 	return result;
@@ -887,7 +887,7 @@ drv_intel_ax211_assoc_drive(
 		if (result != INTEL_AX211_ASSOC_OK)
 			return result;
 
-		memset(&reply, 0, sizeof(reply));
+		kern_memset(&reply, 0, sizeof(reply));
 		result = ops->exchange(argument, &command, &reply);
 
 		/* Checks the operation result. */
@@ -1068,7 +1068,7 @@ ax211_assoc_profile_valid(
 	if (profile == NULL ||
 	    !ax211_assoc_address_valid(profile->station_address) ||
 	    !ax211_assoc_address_valid(profile->bssid) ||
-	    memcmp(profile->station_address, profile->bssid, 6U) == 0 ||
+	    kern_memcmp(profile->station_address, profile->bssid, 6U) == 0 ||
 	    !channel_valid ||
 	    profile->channel_width_mhz != INTEL_AX211_ASSOC_CHANNEL_WIDTH_MHZ ||
 	    profile->rx_chain_mask == 0U || profile->rx_chain_mask > 7U ||
@@ -1277,7 +1277,7 @@ ax211_assoc_command_base(
 	const struct intel_ax211_assoc_state *state,
 	struct intel_ax211_assoc_command *command)
 {
-	memset(command, 0, sizeof(*command));
+	kern_memset(command, 0, sizeof(*command));
 	command->step = state->step;
 	command->sequence = state->active_sequence;
 	command->common_generation = state->common_generation;
@@ -1311,7 +1311,7 @@ ax211_assoc_mac_config_encode(
 		return;
 	ax211_assoc_put_le32(command->payload + 8U,
 			     AX211_ASSOC_MAC_TYPE_BSS_STATION);
-	memcpy(command->payload + 12U, state->profile.station_address, 6U);
+	kern_memcpy(command->payload + 12U, state->profile.station_address, 6U);
 
 	/*
 	 * The common WLAN liveness contract is refreshed by delivered beacons.
@@ -1360,7 +1360,7 @@ ax211_assoc_link_config_encode(
 	if (action == AX211_ASSOC_ACTION_REMOVE)
 		return;
 	ax211_assoc_put_le32(command->payload + 8U, INTEL_AX211_ASSOC_MAC_ID);
-	memcpy(command->payload + 16U, state->profile.station_address, 6U);
+	kern_memcpy(command->payload + 16U, state->profile.station_address, 6U);
 
 	/* Handles the action condition. */
 	if (action == AX211_ASSOC_ACTION_ADD)
@@ -1487,8 +1487,8 @@ ax211_assoc_station_config_encode(
 	command->payload_length = INTEL_AX211_ASSOC_STATION_CONFIG_SIZE;
 	ax211_assoc_put_le32(command->payload, INTEL_AX211_ASSOC_STATION_ID);
 	ax211_assoc_put_le32(command->payload + 4U, INTEL_AX211_ASSOC_LINK_ID);
-	memcpy(command->payload + 8U, state->profile.bssid, 6U);
-	memcpy(command->payload + 16U, state->profile.bssid, 6U);
+	kern_memcpy(command->payload + 8U, state->profile.bssid, 6U);
+	kern_memcpy(command->payload + 16U, state->profile.bssid, 6U);
 	ax211_assoc_put_le32(command->payload + 24U,
 			     AX211_ASSOC_STATION_TYPE_PEER);
 
@@ -1616,7 +1616,7 @@ ax211_assoc_command_matches(
 		command->hardware_epoch == expected.hardware_epoch &&
 		command->deadline == expected.deadline &&
 		command->payload_length == expected.payload_length &&
-		memcmp(command->payload, expected.payload,
+		kern_memcmp(command->payload, expected.payload,
 		       expected.payload_length) == 0;
 
 	/* Returns the computed result. */

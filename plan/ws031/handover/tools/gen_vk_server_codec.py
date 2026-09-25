@@ -43,15 +43,15 @@ def elem_stmt_dec(stmt, ptr):
     """One loop-body statement of an ENCODER, turned into a decode of element [index] of `mem`."""
     e = re.escape("record->" + ptr + "[index]")
     if re.fullmatch(r"vulkan_write_u32\(writer, (vulkan_wire_image_layout\()?%s\)?\);" % e, stmt):
-        return 4, "{ uint32_t v = drv_i915_wire_read_u32(r); memcpy((char *)mem + index * 4u, &v, 4u); }"
+        return 4, "{ uint32_t v = drv_i915_wire_read_u32(r); kern_memcpy((char *)mem + index * 4u, &v, 4u); }"
     if re.fullmatch(r"vulkan_write_float\(writer, %s\);" % e, stmt):
-        return 4, "{ uint32_t v = drv_i915_wire_read_u32(r); memcpy((char *)mem + index * 4u, &v, 4u); }"
+        return 4, "{ uint32_t v = drv_i915_wire_read_u32(r); kern_memcpy((char *)mem + index * 4u, &v, 4u); }"
     if re.fullmatch(r"vulkan_write_u64\(writer, %s\);" % e, stmt):
-        return 8, "{ uint64_t v = drv_i915_wire_read_u64(r); memcpy((char *)mem + index * 8u, &v, 8u); }"
+        return 8, "{ uint64_t v = drv_i915_wire_read_u64(r); kern_memcpy((char *)mem + index * 8u, &v, 8u); }"
     if re.fullmatch(r"vulkan_encode_handle\(writer, \(uint64_t\)(\(uintptr_t\))?%s\);" % e, stmt):
-        return 8, "{ uint64_t v = drv_i915_wire_read_u64(r); memcpy((char *)mem + index * 8u, &v, 8u); }"
+        return 8, "{ uint64_t v = drv_i915_wire_read_u64(r); kern_memcpy((char *)mem + index * 8u, &v, 8u); }"
     if re.fullmatch(r"vulkan_write_string\(writer, %s\);" % e, stmt):
-        return "sizeof(char *)", "{ const char *v = i915_vkc_read_string(r, a); memcpy((char *)mem + index * sizeof(char *), &v, sizeof(v)); }"
+        return "sizeof(char *)", "{ const char *v = i915_vkc_read_string(r, a); kern_memcpy((char *)mem + index * sizeof(char *), &v, sizeof(v)); }"
     m = re.fullmatch(r"vulkan_encode_(Vk\w+)\(writer, &%s\);" % e, stmt)
     if m:
         t = m.group(1)

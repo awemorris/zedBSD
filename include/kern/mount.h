@@ -21,6 +21,7 @@
 #include "kern/lock.h"
 #include "kern/waitq.h"
 #include <limits.h>
+#include <uapi/limits.h>
 
 #ifndef PATH_MAX
 #define PATH_MAX		256U
@@ -35,6 +36,10 @@
 #define MOUNT_MAX		64U
 #define MOUNT_READ_ONLY		0x00000001U
 #define MOUNT_NOSUID		0x00000002U
+/* The same bit as MNT_WRITETHRU: writes reach the device synchronously. */
+#define MOUNT_WRITE_THROUGH	0x00000004U
+/* The same bit as MNT_NOJOURNAL: no journal of metadata changes. */
+#define MOUNT_NO_JOURNAL	0x00000008U
 #define MOUNT_PRIVATE_INTERNAL	0x00000002U
 #define FILESYSTEM_NODEV	0x00000001U
 
@@ -267,6 +272,12 @@ int
 mount_statvfs(
 	struct mount *mountp,
 	struct statvfs *result);
+
+/*
+ * Reports the device number a mount's files carry in st_dev: the disk's
+ * number, or a synthetic one for a mount without a disk.
+ */
+dev_t mount_device_number(const struct mount *mountp);
 
 int
 mount_quotactl(

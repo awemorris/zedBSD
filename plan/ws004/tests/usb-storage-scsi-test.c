@@ -1,5 +1,5 @@
 /* USB storage SCSI response regression fixture. */
-#include <drivers/usb-storage-scsi.h>
+#include <drivers/usb/usb-storage-scsi.h>
 
 #include <assert.h>
 #include <stdio.h>

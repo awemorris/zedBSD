@@ -53,8 +53,8 @@
  */
 
 #include "intel-ax211-command.h"
+#include <kern/kcrt.h>
 
-#include <string.h>
 
 static int ax211_command_transaction_valid( const struct intel_ax211_command_transaction *transaction);
 static int ax211_command_request_valid(const struct intel_ax211_command_request *request);
@@ -89,7 +89,7 @@ drv_intel_ax211_command_transaction_init(
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_INVALID;
 	}
-	memset(transaction, 0, sizeof(*transaction));
+	kern_memset(transaction, 0, sizeof(*transaction));
 	transaction->transport = transport;
 	transaction->max_pending = max_pending;
 	transaction->next_generation = 1U;
@@ -110,7 +110,7 @@ drv_intel_ax211_command_nvm_access_complete_encode(
 	/* Handles the output availability. */
 	if (output == NULL)
 		return INTEL_AX211_COMMAND_INVALID;
-	memset(output, 0, 4U);
+	kern_memset(output, 0, 4U);
 
 	/* Returns the computed result. */
 	return INTEL_AX211_COMMAND_OK;
@@ -126,7 +126,7 @@ drv_intel_ax211_command_nvm_get_info_encode(
 	/* Handles the output availability. */
 	if (output == NULL)
 		return INTEL_AX211_COMMAND_INVALID;
-	memset(output, 0, 4U);
+	kern_memset(output, 0, 4U);
 
 	/* Returns the computed result. */
 	return INTEL_AX211_COMMAND_OK;
@@ -276,7 +276,7 @@ drv_intel_ax211_command_submit_nvm_access_complete(
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_INVALID;
 	}
-	memset(&request, 0, sizeof(request));
+	kern_memset(&request, 0, sizeof(request));
 	request.command.group = INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM;
 	request.command.opcode =
 		INTEL_AX211_PROTOCOL_NVM_ACCESS_COMPLETE_OPCODE;
@@ -315,7 +315,7 @@ drv_intel_ax211_command_submit_nvm_get_info(
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_INVALID;
 	}
-	memset(&request, 0, sizeof(request));
+	kern_memset(&request, 0, sizeof(request));
 	request.command.group = INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM;
 	request.command.opcode = INTEL_AX211_PROTOCOL_NVM_GET_INFO_OPCODE;
 	request.command.version = 0U;
@@ -403,7 +403,7 @@ drv_intel_ax211_command_complete(
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_OUT_OF_ORDER;
 	}
-	memset(&message, 0, sizeof(message));
+	kern_memset(&message, 0, sizeof(message));
 	message.opcode = event.command.opcode;
 	wire_group = event.flags &
 		     (uint8_t)~INTEL_AX211_PROTOCOL_COMMAND_FAILED_MASK;
@@ -455,7 +455,7 @@ drv_intel_ax211_command_complete(
 
 	/* Checks the operation result. */
 	if (result == INTEL_AX211_COMMAND_OK && message.payload_length != 0U)
-		memcpy(response, message.payload, message.payload_length);
+		kern_memcpy(response, message.payload, message.payload_length);
 
 	/* Checks the operation result. */
 	if (result == INTEL_AX211_COMMAND_OK)

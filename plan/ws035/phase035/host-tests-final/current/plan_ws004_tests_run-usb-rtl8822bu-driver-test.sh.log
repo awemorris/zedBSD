@@ -1,0 +1,50 @@
+/usr/bin/ld: /tmp/cc3pzrtZ.o: in function `rtl8822bu_attach':
+usb-rtl8822bu-driver-test.c:(.text+0x7d14): undefined reference to `kern_malloc'
+/usr/bin/ld: usb-rtl8822bu-driver-test.c:(.text+0x7df2): undefined reference to `kern_free'
+/usr/bin/ld: usb-rtl8822bu-driver-test.c:(.text+0x7e25): undefined reference to `kern_free'
+/usr/bin/ld: usb-rtl8822bu-driver-test.c:(.text+0x7e49): undefined reference to `kern_malloc'
+/usr/bin/ld: usb-rtl8822bu-driver-test.c:(.text+0x7ff0): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/cc3pzrtZ.o: in function `rtl8822bu_register_processing_delay':
+usb-rtl8822bu-driver-test.c:(.text+0x94bb): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/cc3pzrtZ.o: in function `rtl8822bu_register_transfer':
+usb-rtl8822bu-driver-test.c:(.text+0x9621): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/cc3pzrtZ.o: in function `rtl8822bu_board_read':
+usb-rtl8822bu-driver-test.c:(.text+0x9ce0): undefined reference to `kern_malloc'
+/usr/bin/ld: usb-rtl8822bu-driver-test.c:(.text+0x9cee): undefined reference to `kern_malloc'
+/usr/bin/ld: usb-rtl8822bu-driver-test.c:(.text+0x9d0c): undefined reference to `kern_free'
+/usr/bin/ld: usb-rtl8822bu-driver-test.c:(.text+0x9d18): undefined reference to `kern_free'
+/usr/bin/ld: usb-rtl8822bu-driver-test.c:(.text+0x9dd2): undefined reference to `kern_free'
+/usr/bin/ld: usb-rtl8822bu-driver-test.c:(.text+0x9dde): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/cc3pzrtZ.o: in function `rtl8822bu_firmware_download_model':
+usb-rtl8822bu-driver-test.c:(.text+0xac3e): undefined reference to `kern_malloc'
+/usr/bin/ld: usb-rtl8822bu-driver-test.c:(.text+0xaf3d): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/cc3pzrtZ.o: in function `rtl8822bu_frame_transmit_private':
+usb-rtl8822bu-driver-test.c:(.text+0xd927): undefined reference to `kern_logf'
+/usr/bin/ld: usb-rtl8822bu-driver-test.c:(.text+0xd950): undefined reference to `kern_malloc'
+/usr/bin/ld: usb-rtl8822bu-driver-test.c:(.text+0xdafb): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/cc3pzrtZ.o: in function `rtl8822bu_frame_transmit':
+usb-rtl8822bu-driver-test.c:(.text+0xdd2e): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/cc3pzrtZ.o: in function `rtl8822bu_rx_report':
+usb-rtl8822bu-driver-test.c:(.text+0xe532): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/cc3pzrtZ.o: in function `rtl8822bu_scan_channel_start':
+usb-rtl8822bu-driver-test.c:(.text+0xeb60): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/cc3pzrtZ.o: in function `rtl8822bu_connect_start':
+usb-rtl8822bu-driver-test.c:(.text+0xf253): undefined reference to `kern_logf'
+/usr/bin/ld: usb-rtl8822bu-driver-test.c:(.text+0xf644): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/cc3pzrtZ.o:usb-rtl8822bu-driver-test.c:(.text+0xf72b): more undefined references to `kern_logf' follow
+/usr/bin/ld: /tmp/cc3pzrtZ.o: in function `rtl8822bu_management_transmit':
+usb-rtl8822bu-driver-test.c:(.text+0x12e35): undefined reference to `kern_malloc'
+/usr/bin/ld: usb-rtl8822bu-driver-test.c:(.text+0x12fbb): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/cc3pzrtZ.o: in function `rtl8822bu_recovery_tx_snapshot':
+usb-rtl8822bu-driver-test.c:(.text+0x13d18): undefined reference to `kern_logf'
+/usr/bin/ld: usb-rtl8822bu-driver-test.c:(.text+0x13f10): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/cc3pzrtZ.o: in function `rtl8822bu_runtime_recover':
+usb-rtl8822bu-driver-test.c:(.text+0x140ef): undefined reference to `kern_logf'
+/usr/bin/ld: usb-rtl8822bu-driver-test.c:(.text+0x1411a): undefined reference to `kern_logf'
+/usr/bin/ld: usb-rtl8822bu-driver-test.c:(.text+0x143a1): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/cc3pzrtZ.o:usb-rtl8822bu-driver-test.c:(.text+0x1444f): more undefined references to `kern_logf' follow
+/usr/bin/ld: /tmp/cc3pzrtZ.o: in function `rtl8822bu_release':
+usb-rtl8822bu-driver-test.c:(.text+0x14f8a): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/cc3pzrtZ.o: in function `rtl8822bu_usb_resources_free':
+usb-rtl8822bu-driver-test.c:(.text+0x14ff5): undefined reference to `kern_free'
+collect2: error: ld returned 1 exit status

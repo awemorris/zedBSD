@@ -9,9 +9,10 @@
  * NVMe controller driver
  */
 
-#include <drivers/pci-nvme.h>
-#include <drivers/pci-nvme-protocol.h>
-#include <drivers/pci.h>
+#include <drivers/pci/pci-nvme.h>
+#include <drivers/pci/pci-nvme-protocol.h>
+#include <drivers/pci/pci.h>
+#include <kern/kcrt.h>
 
 #include <kern/atomic.h>
 #include <kern/clock.h>
@@ -24,8 +25,7 @@
 #include <kern/waitq.h>
 
 #include <limits.h>
-#include <string.h>
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
@@ -569,7 +569,7 @@ drv_nvme_lifecycle_init(
 {
 	/* Handles the lifecycle availability. */
 	if (lifecycle != NULL)
-		memset(lifecycle, 0, sizeof(*lifecycle));
+		kern_memset(lifecycle, 0, sizeof(*lifecycle));
 }
 
 /*
@@ -974,7 +974,7 @@ drv_nvme_detach_flush_init(
 {
 	/* Handles the lifecycle availability. */
 	if (lifecycle != NULL)
-		memset(lifecycle, 0, sizeof(*lifecycle));
+		kern_memset(lifecycle, 0, sizeof(*lifecycle));
 }
 
 /* Records that a detach has one more flush to wait for. */
@@ -1060,7 +1060,7 @@ drv_nvme_io_lifecycle_init(
 {
 	/* Handles the lifecycle availability. */
 	if (lifecycle != NULL)
-		memset(lifecycle, 0, sizeof(*lifecycle));
+		kern_memset(lifecycle, 0, sizeof(*lifecycle));
 }
 
 /* Marks the I/O path as ready to take requests. */
@@ -1340,7 +1340,7 @@ drv_nvme_shutdown_lifecycle_init(
 {
 	/* Handles the lifecycle availability. */
 	if (lifecycle != NULL)
-		memset(lifecycle, 0, sizeof(*lifecycle));
+		kern_memset(lifecycle, 0, sizeof(*lifecycle));
 }
 
 /* Records the first failure a shutdown met. */
@@ -1460,7 +1460,7 @@ nvme_attach(
 	controller = kern_malloc(sizeof(*controller));
 	if (controller == NULL)
 		return ENOMEM;
-	memset(controller, 0, sizeof(*controller));
+	kern_memset(controller, 0, sizeof(*controller));
 
 	/* Reserve a unique name before this attach can publish or quarantine. */
 	registry_irq = spin_lock_irqsave(&nvme_registry_lock);
@@ -1617,7 +1617,7 @@ nvme_attach(
 	stage = "capabilities";
 	controller->capability = nvme_read64(controller, DRV_NVME_REG_CAP);
 	controller->version = nvme_read32(controller, DRV_NVME_REG_VS);
-	memset(&snapshot, 0, sizeof(snapshot));
+	kern_memset(&snapshot, 0, sizeof(snapshot));
 	snapshot.mapping_size = controller->mapping.size;
 	snapshot.capability = controller->capability;
 	snapshot.version = controller->version;
@@ -3709,7 +3709,7 @@ nvme_identify(
 	int error;
 	struct drv_nvme_command command;
 
-	memset(controller->identify_dma.address, 0,
+	kern_memset(controller->identify_dma.address, 0,
 	       controller->identify_dma.size);
 
 	/* Checks the drv nvme identify command result. */
@@ -4266,7 +4266,7 @@ nvme_io_start(
 	slot = *result;
 
 	if (opcode == DRV_NVME_NVM_WRITE) {
-		memcpy(slot->bounce_dma.address, bytes,
+		kern_memcpy(slot->bounce_dma.address, bytes,
 		       (size_t)block_count * controller->namespace_block_size);
 	}
 
@@ -4310,7 +4310,7 @@ nvme_io_execute(
 	error = nvme_io_wait_completion(controller, slot, &recovery_owner);
 	if (error == 0 && opcode == DRV_NVME_NVM_READ) {
 		kern_io_read_barrier();
-		memcpy(bytes, slot->bounce_dma.address,
+		kern_memcpy(bytes, slot->bounce_dma.address,
 		    (size_t)block_count * controller->namespace_block_size);
 	}
 	nvme_io_slot_release(controller, slot);
@@ -4411,7 +4411,7 @@ nvme_io_pipeline(
 		if (error == 0) {
 			if (opcode == DRV_NVME_NVM_READ) {
 				kern_io_read_barrier();
-				memcpy(entry->bytes, entry->slot->bounce_dma.address,
+				kern_memcpy(entry->bytes, entry->slot->bounce_dma.address,
 				    entry->length);
 			}
 			*transferred += entry->length;
@@ -4720,11 +4720,11 @@ nvme_dma_allocate(
 		goto fail;
 	}
 
-	memset(controller->admin_submission_dma.address, 0,
+	kern_memset(controller->admin_submission_dma.address, 0,
 	       controller->admin_submission_dma.size);
-	memset(controller->admin_completion_dma.address, 0,
+	kern_memset(controller->admin_completion_dma.address, 0,
 	       controller->admin_completion_dma.size);
-	memset(controller->identify_dma.address, 0,
+	kern_memset(controller->identify_dma.address, 0,
 	       controller->identify_dma.size);
 	controller->admin_submission = controller->admin_submission_dma.address;
 	controller->admin_completion = controller->admin_completion_dma.address;
@@ -4843,9 +4843,9 @@ nvme_io_dma_allocate(
 		goto fail;
 	}
 
-	memset(controller->io_submission_dma.address, 0,
+	kern_memset(controller->io_submission_dma.address, 0,
 	       controller->io_submission_dma.size);
-	memset(controller->io_completion_dma.address, 0,
+	kern_memset(controller->io_completion_dma.address, 0,
 	       controller->io_completion_dma.size);
 	controller->io_submission = controller->io_submission_dma.address;
 	controller->io_completion = controller->io_completion_dma.address;
@@ -4914,9 +4914,9 @@ nvme_io_queue_memory_reset(
 
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
-	memset(controller->io_submission_dma.address, 0,
+	kern_memset(controller->io_submission_dma.address, 0,
 	       controller->io_submission_dma.size);
-	memset(controller->io_completion_dma.address, 0,
+	kern_memset(controller->io_completion_dma.address, 0,
 	       controller->io_completion_dma.size);
 	irq = spin_lock_irqsave(&controller->command_lock);
 
@@ -5103,9 +5103,9 @@ nvme_admin_queue_memory_reset(
 
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
-	memset(controller->admin_submission_dma.address, 0,
+	kern_memset(controller->admin_submission_dma.address, 0,
 	       controller->admin_submission_dma.size);
-	memset(controller->admin_completion_dma.address, 0,
+	kern_memset(controller->admin_completion_dma.address, 0,
 	       controller->admin_completion_dma.size);
 	irq = spin_lock_irqsave(&controller->command_lock);
 

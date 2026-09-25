@@ -6,3 +6,4 @@ CONFIG_DRIVER_PCI_NVME|bool|PCI NVMe storage controller|i386,amd64|y|
 CONFIG_DRIVER_PCI_INTEL_AX211|bool|Intel AX211 CNVio2 WLAN (experimental)|amd64|n|
 CONFIG_DRIVER_PCI_VENUS|bool|Venus GPU (QEMU Vulkan transport)|amd64|n|
 CONFIG_DRIVER_PCI_I915|bool|Intel i915 GPU (Alder Lake-P, experimental)|amd64|n|
+CONFIG_DRIVER_PCI_HDA|bool|HD Audio controller (/dev/dsp)|amd64|y|

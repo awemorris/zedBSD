@@ -27,6 +27,7 @@
 
 #include "firmware-override.h"
 #include "ktest.h"
+#include <kern/kcrt.h>
 
 #include "../../display/internal.h"
 #include "../../display/clock.h"
@@ -48,9 +49,8 @@
 #include <kern/lock.h>
 #include <kern/sched.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdint.h>
-#include <string.h>
 
 /* The fuse status the power-well enable waits on (SKL_FUSE_STATUS). */
 #define I915_KTEST_FUSE_STATUS		0x42000U
@@ -900,7 +900,7 @@ i915_ktest_mmio_open(
 	struct i915_ktest_display_fixture *fx)
 {
 	/* Every register starts at 0, with nothing scripted. */
-	memset(&fx->fake, 0, sizeof(fx->fake));
+	kern_memset(&fx->fake, 0, sizeof(fx->fake));
 
 	/* No forcewake ranges: every register of the model is always on. */
 	drv_i915_mmio_init(&fx->mmio, &i915_ktest_fake_mmio_ops, &fx->fake, NULL, 0U, NULL);
@@ -1064,7 +1064,7 @@ i915_ktest_dmc_bad_request(
 	fx = context;
 
 	/* Any other image is absent. */
-	compared = strcmp(name, I915_KTEST_DMC_NAME);
+	compared = kern_strcmp(name, I915_KTEST_DMC_NAME);
 	if (compared != 0) {
 		firmware->data = NULL;
 		firmware->size = 0U;
@@ -1108,7 +1108,7 @@ i915_ktest_pwc_reset(
 	 * resets the legacy VGA ports through the recorder.
 	 */
 	pwc = &fx->display.pwc;
-	memset(pwc, 0, sizeof(*pwc));
+	kern_memset(pwc, 0, sizeof(*pwc));
 	pwc->mmio = &fx->mmio;
 	pwc->vga = &fx->display.vga_client;
 }
@@ -1122,7 +1122,7 @@ i915_ktest_cdclk_reset(
 
 	/* ADL-P, display stepping D0. */
 	cd = &fx->display.cdclk;
-	memset(cd, 0, sizeof(*cd));
+	kern_memset(cd, 0, sizeof(*cd));
 	drv_i915_init_cdclk_hooks(cd, 13, I915_STEP_D0, 1);
 
 	/* The register model and the PCODE lock. */
@@ -1161,7 +1161,7 @@ i915_ktest_make_vbt(
 
 	/* The signature: "$VBT", or a broken one. */
 	vbt = fx->vbt_buffer;
-	memset(vbt, 0, I915_KTEST_VBT_BUFFER);
+	kern_memset(vbt, 0, I915_KTEST_VBT_BUFFER);
 	vbt[0] = (uint8_t)'X';
 	if (good_signature)
 		vbt[0] = (uint8_t)'$';
@@ -1211,7 +1211,7 @@ i915_ktest_drm(
 
 	/* Brings the test display's DRM device up. */
 	ddev = &fx->display.drm_dev;
-	memset(ddev, 0, sizeof(*ddev));
+	kern_memset(ddev, 0, sizeof(*ddev));
 	error = drv_i915_drm_dev_init(ddev, NULL, 0x3U);
 	drv_i915_ktest_check(ktest, error == 0, "drm: dev_init");
 
@@ -1256,7 +1256,7 @@ i915_ktest_drm_bounds(
 
 	/* A crtc count of 0 is refused. */
 	ddev = &fx->display.drm_dev;
-	memset(ddev, 0, sizeof(*ddev));
+	kern_memset(ddev, 0, sizeof(*ddev));
 	(void)drv_i915_drm_dev_init(ddev, NULL, 0U);
 	error = drv_i915_drm_vblank_init(ddev, 0U);
 	drv_i915_ktest_check(ktest, error == EINVAL, "drm: reject 0 CRTCs");
@@ -1270,7 +1270,7 @@ i915_ktest_drm_bounds(
 	drv_i915_drm_dev_fini(ddev);
 
 	/* Fills the managed-action list. */
-	memset(ddev, 0, sizeof(*ddev));
+	kern_memset(ddev, 0, sizeof(*ddev));
 	(void)drv_i915_drm_dev_init(ddev, NULL, 0U);
 	for (k = 0U; k < I915_DRMM_MAX; k++)
 		(void)drv_i915_drmm_add_action_or_reset(ddev, i915_ktest_drm_action, &fx->drm_actions_ran);
@@ -1285,7 +1285,7 @@ i915_ktest_drm_bounds(
 	drv_i915_drm_dev_fini(ddev);
 
 	/* A crtc cleanup that cannot be registered unwinds the vblank init. */
-	memset(ddev, 0, sizeof(*ddev));
+	kern_memset(ddev, 0, sizeof(*ddev));
 	(void)drv_i915_drm_dev_init(ddev, NULL, 0U);
 	for (k = 0U; k < I915_DRMM_MAX; k++)
 		(void)drv_i915_drmm_add_action_or_reset(ddev, i915_ktest_drm_action, &fx->drm_actions_ran);
@@ -1335,7 +1335,7 @@ i915_ktest_bios(
 	/* The block walk reads the BDB version and counts both blocks. */
 	length = i915_ktest_make_vbt(fx, 1);
 	vbt = &fx->vbt;
-	memset(vbt, 0, sizeof(*vbt));
+	kern_memset(vbt, 0, sizeof(*vbt));
 	error = drv_i915_bios_process_vbt(vbt, fx->vbt_buffer, length);
 	drv_i915_ktest_check(
 		ktest,
@@ -1346,7 +1346,7 @@ i915_ktest_bios(
 		"bios: process_vbt parses BDB header + walks blocks");
 
 	/* A missing VBT stands for the three non-Type-C DDI ports. */
-	memset(vbt, 0, sizeof(*vbt));
+	kern_memset(vbt, 0, sizeof(*vbt));
 	drv_i915_bios_init_vbt_missing_defaults(vbt);
 	drv_i915_ktest_check(
 		ktest,
@@ -1755,7 +1755,7 @@ i915_ktest_power_async(
 	pd = &fx->display.power_domains;
 	pwc = &fx->display.pwc;
 	recorder = &fx->async;
-	memset(recorder, 0, sizeof(*recorder));
+	kern_memset(recorder, 0, sizeof(*recorder));
 	drv_i915_display_power_async_bind(pd, &i915_ktest_async_ops, recorder, pwc);
 
 	/* The last reference is parked, not dropped: the well stays on and the work is queued for 100 ms. */
@@ -2024,7 +2024,7 @@ i915_ktest_cdclk_init(
 
 	/* The hooks select the ADL-P table and the Tiger Lake functions, with crawl and without squash. */
 	cd = &fx->display.cdclk;
-	memset(cd, 0, sizeof(*cd));
+	kern_memset(cd, 0, sizeof(*cd));
 	drv_i915_init_cdclk_hooks(cd, 13, step, 1);
 	table = drv_i915_adlp_cdclk_table();
 	drv_i915_ktest_check(
@@ -2056,7 +2056,7 @@ i915_ktest_cdclk_readout(
 	drv_i915_raw_write32(&fx->mmio, I915_KTEST_CDCLK_CTL, 0x518U);
 
 	/* The readout decodes the reference, the VCO, the bypass, the CDCLK and the voltage level. */
-	memset(&cfg, 0, sizeof(cfg));
+	kern_memset(&cfg, 0, sizeof(cfg));
 	drv_i915_bxt_get_cdclk(cd, &cfg);
 	drv_i915_ktest_check(
 		ktest,
@@ -2098,7 +2098,7 @@ i915_ktest_cdclk_readout(
 	cd->hw.bypass = 19200U;
 	cd->hw.vco = ~0U;
 	cd->hw.cdclk = 0U;
-	memset(&cfg, 0, sizeof(cfg));
+	kern_memset(&cfg, 0, sizeof(cfg));
 	cfg.cdclk = 652800U;
 	cfg.vco = 1305600U;
 	cfg.voltage_level = 3U;
@@ -2212,7 +2212,7 @@ i915_ktest_cdclk_crawl(
 	cd->hw.bypass = 19200U;
 	cd->hw.cdclk = 307200U;
 	cd->hw.vco = 614400U;
-	memset(&cfg, 0, sizeof(cfg));
+	kern_memset(&cfg, 0, sizeof(cfg));
 	cfg.cdclk = 556800U;
 	cfg.vco = 1113600U;
 	cfg.voltage_level = 2U;
@@ -2245,7 +2245,7 @@ i915_ktest_cdclk_crawl(
 	cd->hw.bypass = 19200U;
 	cd->hw.cdclk = 556800U;
 	cd->hw.vco = 1113600U;
-	memset(&cfg, 0, sizeof(cfg));
+	kern_memset(&cfg, 0, sizeof(cfg));
 	cfg.cdclk = 556800U;
 	cfg.vco = 1113600U;
 	cfg.voltage_level = 2U;
@@ -2284,7 +2284,7 @@ i915_ktest_cdclk_notify_fail(
 	cd->hw.cdclk = 307200U;
 	cd->hw.vco = 614400U;
 	cd->hw.voltage_level = 0U;
-	memset(&cfg, 0, sizeof(cfg));
+	kern_memset(&cfg, 0, sizeof(cfg));
 	cfg.cdclk = 556800U;
 	cfg.vco = 1113600U;
 	cfg.voltage_level = 2U;
@@ -2335,7 +2335,7 @@ i915_ktest_core_setup(
 
 	/* The core shares the one map, CDCLK, well context, register access and PCODE lock. */
 	dc = &display->dcore;
-	memset(dc, 0, sizeof(*dc));
+	kern_memset(dc, 0, sizeof(*dc));
 	dc->pd = &display->power_domains;
 	dc->cd = &display->cdclk;
 	dc->pwc = &display->pwc;
@@ -2361,7 +2361,7 @@ i915_ktest_core_setup(
 	pwc->allowed_dc_mask = display->power_domains.allowed_dc_mask;
 
 	/* The VGA recorder starts empty. */
-	memset(&fx->vga, 0, sizeof(fx->vga));
+	kern_memset(&fx->vga, 0, sizeof(fx->vga));
 }
 
 /* Tests the display-core bring-up when the PHYs and the CDCLK need an init. */
@@ -2603,7 +2603,7 @@ i915_ktest_dmc_provider(
 	 * Serves an image of the test's own.  The replacement is driver-wide;
 	 * it is removed before anything else requests firmware.
 	 */
-	memset(test_image, 0, sizeof(test_image));
+	kern_memset(test_image, 0, sizeof(test_image));
 	test_image[0] = 0x5aU;
 	override.request = i915_ktest_firmware_image_request;
 	override.context = test_image;
@@ -2882,7 +2882,7 @@ i915_ktest_dmc_async_cases(
 
 	/* The worker loads the default image and gives the DMC's reference back: the counts net to 0. */
 	refcounts_before = i915_ktest_well_refcounts(pd);
-	memset(dev, 0, sizeof(*dev));
+	kern_memset(dev, 0, sizeof(*dev));
 	drv_i915_dmc_init(dev, &fx->display.dmc_wq, &fx->mmio, pd, &fx->display.pwc, 13, 1, 'D', '0', NULL);
 	(void)drv_i915_flush_work(&fx->display.dmc_wq, &dev->work, drv_i915_ktest_deadline_ms(2000U));
 	refcounts_after = i915_ktest_well_refcounts(pd);
@@ -2900,7 +2900,7 @@ i915_ktest_dmc_async_cases(
 	drv_i915_dmc_fini(dev, drv_i915_ktest_deadline_ms(2000U));
 
 	/* An absent image asks for the fallback, loads nothing and keeps the DMC's reference. */
-	memset(dev, 0, sizeof(*dev));
+	kern_memset(dev, 0, sizeof(*dev));
 	drv_i915_dmc_init(dev, &fx->display.dmc_wq, &fx->mmio, pd, &fx->display.pwc, 13, 1, 'D', '0', "i915/absent.bin");
 	(void)drv_i915_flush_work(&fx->display.dmc_wq, &dev->work, drv_i915_ktest_deadline_ms(2000U));
 	drv_i915_ktest_check(
@@ -2960,7 +2960,7 @@ i915_ktest_dmc_bad_fw_cases(
 	/* Copies the blob and gives the MAIN header the unknown version 7. */
 	error = drv_i915_firmware_request(&fw, I915_KTEST_DMC_NAME);
 	if (error == 0 && fw.size == I915_KTEST_DMC_SIZE)
-		memcpy(fx->dmc_badcopy, fw.data, I915_KTEST_DMC_SIZE);
+		kern_memcpy(fx->dmc_badcopy, fw.data, I915_KTEST_DMC_SIZE);
 	drv_i915_firmware_release(&fw);
 	fx->dmc_badcopy[I915_KTEST_DMC_MAIN_VERSION_BYTE] = 7U;
 
@@ -2975,7 +2975,7 @@ i915_ktest_dmc_bad_fw_cases(
 
 	/* The header is refused: nothing is programmed and the DMC's reference stays held. */
 	dev = &fx->display.dmc_dev;
-	memset(dev, 0, sizeof(*dev));
+	kern_memset(dev, 0, sizeof(*dev));
 	drv_i915_dmc_init(dev, &fx->display.dmc_wq, &fx->mmio, &fx->display.power_domains, &fx->display.pwc, 13, 1, 'D', '0', NULL);
 	(void)drv_i915_flush_work(&fx->display.dmc_wq, &dev->work, drv_i915_ktest_deadline_ms(2000U));
 	drv_i915_ktest_check(
@@ -3012,7 +3012,7 @@ i915_ktest_state_bw_fixture(
 	unsigned k;
 
 	/* Three QGV and two PSF points per group; group 0 has one plane, the others four. */
-	memset(bw, 0, sizeof(*bw));
+	kern_memset(bw, 0, sizeof(*bw));
 	for (k = 0U; k < (unsigned)I915_BW_GROUPS; k++) {
 		bw->max[k].num_qgv_points = 3U;
 		bw->max[k].num_psf_gv_points = 2U;
@@ -3046,7 +3046,7 @@ i915_ktest_state_mode(
 
 	/* ADL-P takes the modern arms: 16K limits, 256 cursors and an empty global list. */
 	ds = &fx->display.dstate;
-	memset(ds, 0, sizeof(*ds));
+	kern_memset(ds, 0, sizeof(*ds));
 	drv_i915_mode_config_init(ds, 13, I915_PLAT_NONE);
 	drv_i915_ktest_check(
 		ktest,
@@ -3082,37 +3082,37 @@ i915_ktest_state_mode_ladders(
 	ok = 1U;
 
 	/* Version 4: 8K and no asynchronous flips. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	drv_i915_mode_config_init(t, 4, I915_PLAT_NONE);
 	if (t->mode_config.max_width != 8192U || t->mode_config.async_page_flip != 0)
 		ok = 0U;
 
 	/* Version 3: 4K. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	drv_i915_mode_config_init(t, 3, I915_PLAT_NONE);
 	if (t->mode_config.max_width != 4096U)
 		ok = 0U;
 
 	/* Version 2: 2K. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	drv_i915_mode_config_init(t, 2, I915_PLAT_NONE);
 	if (t->mode_config.max_width != 2048U)
 		ok = 0U;
 
 	/* The 845G cursor: 64 by 1023. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	drv_i915_mode_config_init(t, 4, I915_PLAT_I845G);
 	if (t->mode_config.cursor_width != 64U || t->mode_config.cursor_height != 1023U)
 		ok = 0U;
 
 	/* The 865G cursor: 512 by 1023. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	drv_i915_mode_config_init(t, 4, I915_PLAT_I865G);
 	if (t->mode_config.cursor_width != 512U || t->mode_config.cursor_height != 1023U)
 		ok = 0U;
 
 	/* The 915GM cursor: 64 by 64. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	drv_i915_mode_config_init(t, 3, I915_PLAT_I915GM);
 	if (t->mode_config.cursor_width != 64U || t->mode_config.cursor_height != 64U)
 		ok = 0U;
@@ -3161,7 +3161,7 @@ i915_ktest_state_objects(
 
 	/* Registers the four objects, with SAGV enabled so the bandwidth init forces it off. */
 	ds = &fx->display.dstate;
-	memset(ds, 0, sizeof(*ds));
+	kern_memset(ds, 0, sizeof(*ds));
 	drv_i915_mode_config_init(ds, 13, I915_PLAT_NONE);
 	error = drv_i915_cdclk_init(ds);
 	error |= drv_i915_color_init(ds, 13);
@@ -3232,7 +3232,7 @@ i915_ktest_state_sagv_skip(
 
 	/* No PCODE script: any transaction would be counted. */
 	ds = &fx->display.dstate;
-	memset(ds, 0, sizeof(*ds));
+	kern_memset(ds, 0, sizeof(*ds));
 	drv_i915_mode_config_init(ds, 13, I915_PLAT_NONE);
 	i915_ktest_mmio_open(fx);
 	fx->bw.sagv_status = (int)I915_SAGV_NOT_CONTROLLED;
@@ -3266,7 +3266,7 @@ i915_ktest_state_sagv_fail(
 
 	/* Every PCODE transaction ends with an error status. */
 	ds = &fx->display.dstate;
-	memset(ds, 0, sizeof(*ds));
+	kern_memset(ds, 0, sizeof(*ds));
 	drv_i915_mode_config_init(ds, 13, I915_PLAT_NONE);
 	i915_ktest_mmio_open(fx);
 	fx->fake.pcode_sticky_status = 0x2;
@@ -3303,7 +3303,7 @@ i915_ktest_state_color(
 
 	/* Version 13 has nothing to do; version 10 is not a silent success. */
 	t = &fx->scratch_state;
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	error13 = drv_i915_color_init(t, 13);
 	done13 = t->color_done;
 	error10 = drv_i915_color_init(t, 10);
@@ -3329,7 +3329,7 @@ i915_ktest_state_quirks(
 	t = &fx->scratch_state;
 
 	/* ADL-P matches nothing; the DMI list is walked without a backend. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	drv_i915_init_quirks(t, 0x46a8U, 0x8086U, 0x2212U);
 	if (t->quirk_mask != 0U ||
 	    t->quirk_hooks_fired != 0U ||
@@ -3338,13 +3338,13 @@ i915_ktest_state_quirks(
 		ok = 0U;
 
 	/* The Acer C720 entry fires on its exact device and subsystem. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	drv_i915_init_quirks(t, 0x0a06U, 0x1025U, 0x0a11U);
 	if (t->quirk_mask != (1U << I915_QUIRK_BACKLIGHT_PRESENT) || t->quirk_hooks_fired != 1U)
 		ok = 0U;
 
 	/* The right device with the wrong subsystem matches nothing. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	drv_i915_init_quirks(t, 0x0a06U, 0x1025U, 0x9999U);
 	if (t->quirk_mask != 0U)
 		ok = 0U;
@@ -3396,7 +3396,7 @@ i915_ktest_state_fbc_cases(
 	ok = 1U;
 
 	/* ADL-P: FBC A with the IVB functions and its lock, the option on, no VT-d workaround. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	t->enable_fbc_param = -1;
 	drv_i915_fbc_init(t, 13, 0x1U, 0, I915_PLAT_NONE);
 	if (t->fbc_created != 1U ||
@@ -3412,7 +3412,7 @@ i915_ktest_state_fbc_cases(
 	}
 
 	/* enable_fbc=0 sanitizes to 0 but the instances are still created. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	t->enable_fbc_param = 0;
 	drv_i915_fbc_init(t, 13, 0x3U, 0, I915_PLAT_NONE);
 	if (t->enable_fbc_sanitized != 0 || t->fbc_created != 2U || t->fbc[1] == NULL) {
@@ -3422,21 +3422,21 @@ i915_ktest_state_fbc_cases(
 	}
 
 	/* No FBC in the runtime mask: the option sanitizes to 0 and nothing is created. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	t->enable_fbc_param = -1;
 	drv_i915_fbc_init(t, 13, 0x0U, 0, I915_PLAT_NONE);
 	if (t->enable_fbc_sanitized != 0 || t->fbc_created != 0U)
 		ok = 0U;
 
 	/* WaFbcTurnOffFbcWhenHyperVisorIsUsed: Skylake with VT-d loses FBC. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	t->enable_fbc_param = -1;
 	drv_i915_fbc_init(t, 9, 0x1U, 1, I915_PLAT_SKYLAKE);
 	if (t->fbc_vtd_wa != 1 || t->fbc_mask != 0U || t->fbc_created != 0U)
 		ok = 0U;
 
 	/* VT-d on anything but Skylake or Broxton keeps FBC. */
-	memset(t, 0, sizeof(*t));
+	kern_memset(t, 0, sizeof(*t));
 	t->enable_fbc_param = -1;
 	drv_i915_fbc_init(t, 13, 0x1U, 1, I915_PLAT_NONE);
 	if (t->fbc_vtd_wa != 0 || t->fbc_created != 1U)
@@ -3466,7 +3466,7 @@ i915_ktest_state_fbc_ladder(
 
 	/* Each version picks its own functions. */
 	for (i = 0U; i < sizeof(versions) / sizeof(versions[0]); i++) {
-		memset(t, 0, sizeof(*t));
+		kern_memset(t, 0, sizeof(*t));
 		drv_i915_fbc_init(t, versions[i], 0x1U, 0, I915_PLAT_NONE);
 		if (t->fbc[0] == NULL) {
 			ok = 0U;
@@ -3489,7 +3489,7 @@ i915_ktest_state_fini(
 
 	/* Builds the mode configuration, the CDCLK and DBUF objects and FBC A. */
 	ds = &fx->display.dstate;
-	memset(ds, 0, sizeof(*ds));
+	kern_memset(ds, 0, sizeof(*ds));
 	drv_i915_mode_config_init(ds, 13, I915_PLAT_NONE);
 	(void)drv_i915_cdclk_init(ds);
 	(void)drv_i915_dbuf_init(ds);

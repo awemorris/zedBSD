@@ -10,7 +10,7 @@ acceptance; individual implementation tests establish the supported subset.
 
 ## Feature selection
 
-The source of truth is [features.h](../../libc/include/features.h).
+The source of truth is [features.h](../../include/libc/features.h).
 Its current declarations include:
 
 | Declaration | Current value / selection |

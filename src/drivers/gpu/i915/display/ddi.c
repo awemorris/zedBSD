@@ -72,6 +72,7 @@
 #include "dp.h"
 #include "hdmi-mode.h"
 #include "pipe.h"
+#include <kern/kcrt.h>
 
 /*
  * ==== Types ====
@@ -426,11 +427,11 @@ drv_i915_ddi_emit(
 	/* Clears the recorder's device and crtc state and the local objects. */
 	i915 = &world->i915_ddi_emit_i915;
 	crtc_state = &world->i915_ddi_emit_crtc_state;
-	memset(i915, 0, sizeof(*i915));
-	memset(&crtc, 0, sizeof(crtc));
-	memset(crtc_state, 0, sizeof(*crtc_state));
-	memset(&dig_port, 0, sizeof(dig_port));
-	memset(&conn_state, 0, sizeof(conn_state));
+	kern_memset(i915, 0, sizeof(*i915));
+	kern_memset(&crtc, 0, sizeof(crtc));
+	kern_memset(crtc_state, 0, sizeof(*crtc_state));
+	kern_memset(&dig_port, 0, sizeof(dig_port));
+	kern_memset(&conn_state, 0, sizeof(conn_state));
 
 	/* Binds the device to the backend and the crtc to the device. */
 	i915->emit = emit;

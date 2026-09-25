@@ -8,51 +8,114 @@
  */
 
 /*
- * Implements the zedBSD sleep userland command.
+ * Suspends execution for an interval (POSIX XCU sleep).
+ *
+ *	sleep time
+ *
+ * time is a non-negative number of seconds.  A fraction after a point
+ * (sleep 0.1) is taken too, as GNU and the BSDs do.
  */
 
 #include "userland/base/common/command.h"
 
 #include <errno.h>
-#include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 
+static int parse_interval(const char *text, struct timespec *interval);
+static void usage(void);
+
 /*
- * Runs the sleep command.
+ * Runs sleep.
  */
 int
 main(
 	int argc,
 	char **argv)
 {
-	unsigned long long seconds;
-	struct timespec request, remaining;
+	struct timespec request;
+	struct timespec remaining;
+	int valid;
+	int error;
 
-	/* Validates the command-line arguments. */
-	if (argc != 2 || command_parse_ull(argv[1], &seconds) != 0 ||
-	    (time_t)seconds < 0 ||
-	    (unsigned long long)(time_t)seconds != seconds) {
-		fprintf(stderr, "usage: sleep seconds\n");
+	/* One interval. */
+	if (argc != 2)
+		usage();
+	valid = parse_interval(argv[1], &request);
+	if (!valid)
+		usage();
 
-		/* Reports operation failure. */
-		return 1;
-	}
-
-	/* Continue while the operation condition remains true. */
-	request.tv_sec = (time_t)seconds;
-	request.tv_nsec = 0;
-	while (nanosleep(&request, &remaining) != 0) {
-		/* Handles the reported system error. */
+	/* The wait, resumed after a signal that does not end the process. */
+	for (;;) {
+		error = nanosleep(&request, &remaining);
+		if (error == 0)
+			break;
 		if (errno != EINTR) {
 			command_error("sleep", NULL);
-
-			/* Reports operation failure. */
 			return 1;
 		}
+
+		/* The rest of the interval. */
 		request = remaining;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
+}
+
+/*
+ * Reads digits, and a point and digits after them, into seconds and
+ * nanoseconds.  Returns 0 when the text is not such a number.
+ */
+static int
+parse_interval(
+	const char *text,
+	struct timespec *interval)
+{
+	const char *cursor;
+	long long seconds;
+	long nanoseconds;
+	long scale;
+	int digits;
+
+	/* The whole seconds. */
+	seconds = 0;
+	digits = 0;
+	for (cursor = text; *cursor >= '0' && *cursor <= '9'; cursor++) {
+		if (seconds > 100000000000LL)
+			return 0;
+		seconds = seconds * 10 + (*cursor - '0');
+		digits++;
+	}
+
+	/* The fraction, to nanoseconds; digits past them are dropped. */
+	nanoseconds = 0;
+	if (*cursor == '.') {
+		scale = 100000000L;
+		for (cursor++; *cursor >= '0' && *cursor <= '9'; cursor++) {
+			nanoseconds += (long)(*cursor - '0') * scale;
+			scale /= 10;
+			digits++;
+		}
+	}
+
+	/* Nothing else may follow, and a digit must be there. */
+	if (*cursor != '\0' || digits == 0)
+		return 0;
+
+	/* Succeeded. */
+	interval->tv_sec = (time_t)seconds;
+	interval->tv_nsec = nanoseconds;
+	return 1;
+}
+
+/* Reports the usage and ends sleep. */
+static void
+usage(
+	void)
+{
+	/* The form. */
+	fprintf(stderr, "usage: sleep seconds\n");
+	exit(1);
 }

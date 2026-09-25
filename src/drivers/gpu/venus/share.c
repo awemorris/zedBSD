@@ -10,14 +10,14 @@
  */
 
 #include "internal.h"
+#include <kern/kcrt.h>
 
-#include <drivers/gpu-share.h>
+#include <drivers/gpu/gpu-share.h>
 #include <kern/kmem.h>
 #include <kern/klog.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <limits.h>
-#include <string.h>
 
 /*
  * One renderer context's attachment to an allocation shared by session aliases.
@@ -201,7 +201,7 @@ share_export(
 			resource->share->image = *image;
 
 		/* Later image capabilities must preserve the same native display interpretation. */
-		different = memcmp(&resource->share->image, image, sizeof(*image));
+		different = kern_memcmp(&resource->share->image, image, sizeof(*image));
 		if (different != 0) {
 			mutex_unlock(&controller->mutex);
 			return EINVAL;

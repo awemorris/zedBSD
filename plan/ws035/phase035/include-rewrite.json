@@ -1,0 +1,3741 @@
+{
+ "tool": "plan/ws035/tests/kernel-include-rewrite.py",
+ "scope_files": 856,
+ "changed_files": 309,
+ "changes": {
+  "errno.h -> uapi/errno.h": 246,
+  "fcntl.h -> removed": 3,
+  "fcntl.h -> uapi/fcntl.h": 18,
+  "limits.h -> limits.h + uapi/limits.h": 6,
+  "poll.h -> uapi/poll.h": 1,
+  "stdio.h -> removed": 4,
+  "stdio.h -> uapi/unistd.h": 1,
+  "stdlib.h -> removed": 1,
+  "string.h -> kern/kcrt.h": 9,
+  "string.h -> removed": 221,
+  "sys/mman.h -> uapi/mman.h": 3,
+  "sys/mount.h -> uapi/mount.h": 1,
+  "sys/resource.h -> removed": 1,
+  "sys/select.h -> removed": 1,
+  "sys/socket.h -> uapi/socket.h": 1,
+  "sys/stat.h -> uapi/stat.h": 4,
+  "sys/statvfs.h -> uapi/statvfs.h": 6,
+  "sys/sysctl.h -> removed": 1,
+  "sys/time.h -> uapi/time.h": 1,
+  "sys/types.h -> uapi/types.h": 14,
+  "sys/un.h -> uapi/un.h": 1,
+  "sys/wait.h -> uapi/wait.h": 2,
+  "termios.h -> uapi/termios.h": 1,
+  "time.h -> removed": 1,
+  "time.h -> uapi/time.h": 2,
+  "unistd.h -> uapi/unistd.h": 7,
+  "vulkan/vulkan_core.h -> libc/vulkan/vulkan_core.h": 14
+ },
+ "files": {
+  "include/drivers/pci/pci-nvme-protocol.h": [
+   {
+    "line": 15,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "include/kern/cdev.h": [
+   {
+    "line": 20,
+    "from": "sys/types.h",
+    "to": "uapi/types.h"
+   }
+  ],
+  "include/kern/clock.h": [
+   {
+    "line": 17,
+    "from": "time.h",
+    "to": "uapi/time.h"
+   }
+  ],
+  "include/kern/cred.h": [
+   {
+    "line": 12,
+    "from": "sys/types.h",
+    "to": "uapi/types.h"
+   }
+  ],
+  "include/kern/disk.h": [
+   {
+    "line": 17,
+    "from": "sys/types.h",
+    "to": "uapi/types.h"
+   }
+  ],
+  "include/kern/exec.h": [
+   {
+    "line": 17,
+    "from": "limits.h",
+    "to": "limits.h + uapi/limits.h"
+   },
+   {
+    "line": 18,
+    "from": "sys/stat.h",
+    "to": "uapi/stat.h"
+   }
+  ],
+  "include/kern/file-backing.h": [
+   {
+    "line": 10,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "include/kern/file.h": [
+   {
+    "line": 24,
+    "from": "fcntl.h",
+    "to": "uapi/fcntl.h"
+   },
+   {
+    "line": 25,
+    "from": "limits.h",
+    "to": "limits.h + uapi/limits.h"
+   }
+  ],
+  "include/kern/inode.h": [
+   {
+    "line": 17,
+    "from": "sys/stat.h",
+    "to": "uapi/stat.h"
+   },
+   {
+    "line": 18,
+    "from": "sys/types.h",
+    "to": "uapi/types.h"
+   }
+  ],
+  "include/kern/io-context.h": [
+   {
+    "line": 15,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "include/kern/mount.h": [
+   {
+    "line": 23,
+    "from": "limits.h",
+    "to": "limits.h + uapi/limits.h"
+   }
+  ],
+  "include/kern/namei.h": [
+   {
+    "line": 18,
+    "from": "limits.h",
+    "to": "limits.h + uapi/limits.h"
+   }
+  ],
+  "include/kern/net/socket.h": [
+   {
+    "line": 22,
+    "from": "sys/types.h",
+    "to": "uapi/types.h"
+   }
+  ],
+  "include/kern/posix-acl.h": [
+   {
+    "line": 13,
+    "from": "sys/types.h",
+    "to": "uapi/types.h"
+   }
+  ],
+  "include/kern/process-timer.h": [
+   {
+    "line": 13,
+    "from": "time.h",
+    "to": "uapi/time.h"
+   }
+  ],
+  "include/kern/process.h": [
+   {
+    "line": 15,
+    "from": "sys/types.h",
+    "to": "uapi/types.h"
+   }
+  ],
+  "include/kern/quota.h": [
+   {
+    "line": 15,
+    "from": "sys/types.h",
+    "to": "uapi/types.h"
+   }
+  ],
+  "include/kern/signal.h": [
+   {
+    "line": 17,
+    "from": "sys/types.h",
+    "to": "uapi/types.h"
+   }
+  ],
+  "include/kern/thread.h": [
+   {
+    "line": 21,
+    "from": "sys/types.h",
+    "to": "uapi/types.h"
+   }
+  ],
+  "include/kern/tty.h": [
+   {
+    "line": 13,
+    "from": "sys/types.h",
+    "to": "uapi/types.h"
+   }
+  ],
+  "include/kern/uaccess.h": [
+   {
+    "line": 17,
+    "from": "sys/types.h",
+    "to": "uapi/types.h"
+   }
+  ],
+  "include/kern/vm-object.h": [
+   {
+    "line": 24,
+    "from": "sys/types.h",
+    "to": "uapi/types.h"
+   }
+  ],
+  "include/kern/vmspace.h": [
+   {
+    "line": 22,
+    "from": "sys/types.h",
+    "to": "uapi/types.h"
+   }
+  ],
+  "plan/ws004/tests/pci-msi-qemu.c": [
+   {
+    "line": 5,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 7,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/disklabel/gpt.c": [
+   {
+    "line": 15,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 18,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/disklabel/pcat.c": [
+   {
+    "line": 15,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 17,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/ethernet/dp8390.c": [
+   {
+    "line": 17,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 18,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/fs/fat.c": [
+   {
+    "line": 22,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 24,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 25,
+    "from": "sys/statvfs.h",
+    "to": "uapi/statvfs.h"
+   }
+  ],
+  "src/drivers/fs/overlayfs.c": [
+   {
+    "line": 29,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 30,
+    "from": "fcntl.h",
+    "to": "uapi/fcntl.h"
+   },
+   {
+    "line": 32,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/fs/ufs.c": [
+   {
+    "line": 48,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 49,
+    "from": "limits.h",
+    "to": "limits.h + uapi/limits.h"
+   },
+   {
+    "line": 52,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 53,
+    "from": "sys/statvfs.h",
+    "to": "uapi/statvfs.h"
+   }
+  ],
+  "src/drivers/generic/console.c": [
+   {
+    "line": 27,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 28,
+    "from": "fcntl.h",
+    "to": "uapi/fcntl.h"
+   },
+   {
+    "line": 30,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/generic/dma.c": [
+   {
+    "line": 13,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 18,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/generic/input.c": [
+   {
+    "line": 29,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 30,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 31,
+    "from": "fcntl.h",
+    "to": "uapi/fcntl.h"
+   },
+   {
+    "line": 32,
+    "from": "stdio.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 33,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/generic/loop.c": [
+   {
+    "line": 27,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 28,
+    "from": "fcntl.h",
+    "to": "uapi/fcntl.h"
+   },
+   {
+    "line": 31,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/generic/memory-device.c": [
+   {
+    "line": 10,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 13,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/generic/system-device.c": [
+   {
+    "line": 39,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 40,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/gpu-fence.c": [
+   {
+    "line": 19,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/gpu.c": [
+   {
+    "line": 40,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 42,
+    "from": "stdio.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 43,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/command.c": [
+   {
+    "line": 39,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 42,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/compiler/compile.c": [
+   {
+    "line": 44,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 45,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/compiler/eu.c": [
+   {
+    "line": 46,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 47,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/compiler/spirv.c": [
+   {
+    "line": 70,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 71,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/context.c": [
+   {
+    "line": 27,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 30,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/defaults.c": [
+   {
+    "line": 24,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 26,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/device.c": [
+   {
+    "line": 40,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 42,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/capture.c": [
+   {
+    "line": 102,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 104,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/clock.c": [
+   {
+    "line": 90,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 91,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/diagnostics.c": [
+   {
+    "line": 53,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 56,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/display.c": [
+   {
+    "line": 70,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 72,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/dmc.c": [
+   {
+    "line": 68,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 69,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/dp-sink.c": [
+   {
+    "line": 74,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/dp.c": [
+   {
+    "line": 121,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/edid.c": [
+   {
+    "line": 93,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/gmbus.c": [
+   {
+    "line": 61,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/hdmi.c": [
+   {
+    "line": 66,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/hotplug-internal.h": [
+   {
+    "line": 84,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/hotplug.c": [
+   {
+    "line": 112,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 114,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/internal.h": [
+   {
+    "line": 76,
+    "from": "string.h",
+    "to": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/interrupts.c": [
+   {
+    "line": 46,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 48,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/modeset.c": [
+   {
+    "line": 73,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 75,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/opregion-internal.h": [
+   {
+    "line": 47,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/plane.c": [
+   {
+    "line": 68,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/power.c": [
+   {
+    "line": 57,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 58,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/present.c": [
+   {
+    "line": 61,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 63,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/scanout.c": [
+   {
+    "line": 52,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 54,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/state.c": [
+   {
+    "line": 53,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 55,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/takeover.c": [
+   {
+    "line": 85,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 88,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/vblank.c": [
+   {
+    "line": 41,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/vbt.c": [
+   {
+    "line": 66,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/display/watermark.c": [
+   {
+    "line": 82,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 85,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/dma.c": [
+   {
+    "line": 25,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/engine.c": [
+   {
+    "line": 28,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 30,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/firmware.c": [
+   {
+    "line": 23,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 24,
+    "from": "fcntl.h",
+    "to": "uapi/fcntl.h"
+   },
+   {
+    "line": 26,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/ggtt.c": [
+   {
+    "line": 25,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/i915.c": [
+   {
+    "line": 36,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 38,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/irq.c": [
+   {
+    "line": 28,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/job.c": [
+   {
+    "line": 28,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/memory.c": [
+   {
+    "line": 29,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 31,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/migrate.c": [
+   {
+    "line": 21,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 23,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/mmio.c": [
+   {
+    "line": 22,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/pci.c": [
+   {
+    "line": 24,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/perf.c": [
+   {
+    "line": 22,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/power.c": [
+   {
+    "line": 28,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/ppgtt.c": [
+   {
+    "line": 27,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 29,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/pxp.c": [
+   {
+    "line": 19,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 21,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/blit.c": [
+   {
+    "line": 41,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 44,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/codec.c": [
+   {
+    "line": 22,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/codec.h": [
+   {
+    "line": 28,
+    "from": "vulkan/vulkan_core.h",
+    "to": "libc/vulkan/vulkan_core.h"
+   },
+   {
+    "line": 32,
+    "from": "string.h",
+    "to": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/command.c": [
+   {
+    "line": 29,
+    "from": "vulkan/vulkan_core.h",
+    "to": "libc/vulkan/vulkan_core.h"
+   },
+   {
+    "line": 31,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 34,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/descriptor.c": [
+   {
+    "line": 28,
+    "from": "vulkan/vulkan_core.h",
+    "to": "libc/vulkan/vulkan_core.h"
+   },
+   {
+    "line": 30,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 33,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/dispatch.c": [
+   {
+    "line": 31,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/draw.c": [
+   {
+    "line": 37,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 40,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/fence.c": [
+   {
+    "line": 28,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/gfx.h": [
+   {
+    "line": 37,
+    "from": "vulkan/vulkan_core.h",
+    "to": "libc/vulkan/vulkan_core.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/image.c": [
+   {
+    "line": 27,
+    "from": "vulkan/vulkan_core.h",
+    "to": "libc/vulkan/vulkan_core.h"
+   },
+   {
+    "line": 29,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 32,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/instance.c": [
+   {
+    "line": 28,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 30,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/memory.c": [
+   {
+    "line": 30,
+    "from": "vulkan/vulkan_core.h",
+    "to": "libc/vulkan/vulkan_core.h"
+   },
+   {
+    "line": 32,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 35,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/object.c": [
+   {
+    "line": 21,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 23,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/objects.c": [
+   {
+    "line": 32,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/pipeline-prepare.c": [
+   {
+    "line": 31,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 34,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/pipeline.c": [
+   {
+    "line": 28,
+    "from": "vulkan/vulkan_core.h",
+    "to": "libc/vulkan/vulkan_core.h"
+   },
+   {
+    "line": 30,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 33,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/render-pass.c": [
+   {
+    "line": 26,
+    "from": "vulkan/vulkan_core.h",
+    "to": "libc/vulkan/vulkan_core.h"
+   },
+   {
+    "line": 28,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 31,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/reply.c": [
+   {
+    "line": 20,
+    "from": "vulkan/vulkan_core.h",
+    "to": "libc/vulkan/vulkan_core.h"
+   },
+   {
+    "line": 22,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/state.c": [
+   {
+    "line": 27,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 29,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/sync.c": [
+   {
+    "line": 23,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/transport.c": [
+   {
+    "line": 29,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 32,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/render/vulkan.c": [
+   {
+    "line": 30,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 33,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/request-queue.c": [
+   {
+    "line": 25,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 27,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/request.c": [
+   {
+    "line": 26,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 28,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/reset.c": [
+   {
+    "line": 34,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/resource.c": [
+   {
+    "line": 36,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 39,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/session.c": [
+   {
+    "line": 33,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 36,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/submit.c": [
+   {
+    "line": 23,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 25,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/sync.c": [
+   {
+    "line": 32,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/display/aux.c": [
+   {
+    "line": 44,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 46,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/display/dp-fake-hw.c": [
+   {
+    "line": 24,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/display/edp-ktest.c": [
+   {
+    "line": 39,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 41,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/display/edp-sync-ktest.c": [
+   {
+    "line": 40,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/display/hdmi-output.c": [
+   {
+    "line": 44,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 46,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/display/hpd-ktest.c": [
+   {
+    "line": 51,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 53,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/display/hpd-model.c": [
+   {
+    "line": 26,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/display/lcd-fake-hw.c": [
+   {
+    "line": 25,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/display/lcd-flip.c": [
+   {
+    "line": 31,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 33,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/display/lcd-gpu.c": [
+   {
+    "line": 44,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 46,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/display/lcd-modeset-ktest.c": [
+   {
+    "line": 54,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 56,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/display/lcd-opregion.c": [
+   {
+    "line": 37,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 39,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/display/lcd-run.c": [
+   {
+    "line": 45,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 47,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/display/lcd-show-ktest.c": [
+   {
+    "line": 61,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 63,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/display/lcdg-ktest.c": [
+   {
+    "line": 51,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 53,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/display/opregion-ktest.c": [
+   {
+    "line": 30,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 32,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/display/scanout-ktest.c": [
+   {
+    "line": 32,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 34,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/execution/draw-test.c": [
+   {
+    "line": 37,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 40,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/execution/eu-test.c": [
+   {
+    "line": 51,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 54,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/execution/fhd-render.c": [
+   {
+    "line": 32,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 34,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/execution/ktest-display-probe.c": [
+   {
+    "line": 41,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 44,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/execution/ktest-display.c": [
+   {
+    "line": 52,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 54,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/execution/ktest-gt.c": [
+   {
+    "line": 59,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 62,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/execution/ktest-sync.c": [
+   {
+    "line": 43,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 46,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/execution/ktest.c": [
+   {
+    "line": 23,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/execution/ppgtt-walk.c": [
+   {
+    "line": 22,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 25,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/execution/runner.c": [
+   {
+    "line": 32,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/fixtures/draw-fixture.c": [
+   {
+    "line": 32,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/render/compiler.c": [
+   {
+    "line": 52,
+    "from": "vulkan/vulkan_core.h",
+    "to": "libc/vulkan/vulkan_core.h"
+   },
+   {
+    "line": 54,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 57,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/render/executor.c": [
+   {
+    "line": 50,
+    "from": "vulkan/vulkan_core.h",
+    "to": "libc/vulkan/vulkan_core.h"
+   },
+   {
+    "line": 52,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 55,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/render/features.c": [
+   {
+    "line": 55,
+    "from": "vulkan/vulkan_core.h",
+    "to": "libc/vulkan/vulkan_core.h"
+   },
+   {
+    "line": 57,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 60,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/render/generality.c": [
+   {
+    "line": 65,
+    "from": "vulkan/vulkan_core.h",
+    "to": "libc/vulkan/vulkan_core.h"
+   },
+   {
+    "line": 67,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 70,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tests/render/readback.c": [
+   {
+    "line": 24,
+    "from": "vulkan/vulkan_core.h",
+    "to": "libc/vulkan/vulkan_core.h"
+   }
+  ],
+  "src/drivers/gpu/i915/tlb.c": [
+   {
+    "line": 40,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/gpu/i915/verify-workarounds.c": [
+   {
+    "line": 29,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 32,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/i915/worker.c": [
+   {
+    "line": 45,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 48,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/venus/display.c": [
+   {
+    "line": 25,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 26,
+    "from": "stdio.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 27,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/venus/share.c": [
+   {
+    "line": 19,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 21,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/venus/transport.c": [
+   {
+    "line": 24,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 26,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/gpu/venus/venus.c": [
+   {
+    "line": 24,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 26,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/isa/ne2000.c": [
+   {
+    "line": 17,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 19,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/pci/pci-ehci.c": [
+   {
+    "line": 15,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 20,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/pci/pci-nvme.c": [
+   {
+    "line": 28,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 29,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/pci/pci-pcat.c": [
+   {
+    "line": 14,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 16,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/pci/pci-uhci.c": [
+   {
+    "line": 15,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 19,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/pci/pci-xhci.c": [
+   {
+    "line": 26,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 28,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/pci/pci.c": [
+   {
+    "line": 15,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 16,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/platform/pc98/graphics/backend.c": [
+   {
+    "line": 21,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 24,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/platform/pc98/graphics/display-auto.c": [
+   {
+    "line": 15,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/platform/pc98/graphics/display-cirrus.c": [
+   {
+    "line": 15,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/platform/pc98/graphics/display-gdc.c": [
+   {
+    "line": 15,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/platform/pc98/graphics/display-glyph.c": [
+   {
+    "line": 15,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/platform/pc98/graphics/pc98-graphics.c": [
+   {
+    "line": 22,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 24,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/platform/pc98/pc98-busmouse.c": [
+   {
+    "line": 25,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/platform/pc98/pc98-ide.c": [
+   {
+    "line": 24,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/platform/pc98/pc98-keyboard.c": [
+   {
+    "line": 22,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/platform/pc98/pc98-lgy98.c": [
+   {
+    "line": 18,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 20,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/platform/pcat/graphics/backend.c": [
+   {
+    "line": 18,
+    "from": "string.h",
+    "to": "kern/kcrt.h"
+   },
+   {
+    "line": 23,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/platform/pcat/graphics/font.c": [
+   {
+    "line": 16,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/platform/pcat/graphics/pcat-graphics.c": [
+   {
+    "line": 22,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 24,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/platform/pcat/graphics/text.c": [
+   {
+    "line": 19,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/platform/pcat/pcat-ide.c": [
+   {
+    "line": 13,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/platform/pcat/ps2-8042.c": [
+   {
+    "line": 17,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/platform/rpi4/rpi4-sdhci.c": [
+   {
+    "line": 16,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/platform/sun4u/sun4u-cmd646.c": [
+   {
+    "line": 16,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/platform/x68k/x68k-spc-disk.c": [
+   {
+    "line": 14,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/drivers/usb/usb-cdc-ecm.c": [
+   {
+    "line": 16,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 22,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/usb/usb-cdc-ncm-net.c": [
+   {
+    "line": 16,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 22,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/usb/usb-cdc-ncm.c": [
+   {
+    "line": 15,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 17,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/usb/usb-hid-checkpoint.c": [
+   {
+    "line": 15,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 20,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/usb/usb-hid.c": [
+   {
+    "line": 25,
+    "from": "stdio.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 26,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 27,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 28,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/usb/usb-rtl8822bu.c": [
+   {
+    "line": 20,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 27,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/usb/usb-storage.c": [
+   {
+    "line": 16,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 23,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/usb/usb-uas-disk.c": [
+   {
+    "line": 22,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 23,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/usb/usb-uas-transport.c": [
+   {
+    "line": 17,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 18,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/usb/usb-uas.c": [
+   {
+    "line": 17,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 18,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/usb/usb.c": [
+   {
+    "line": 19,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 23,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-assoc.c": [
+   {
+    "line": 60,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-boot.c": [
+   {
+    "line": 12,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-bss.c": [
+   {
+    "line": 62,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-command.c": [
+   {
+    "line": 58,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-dma.c": [
+   {
+    "line": 56,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 57,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-firmware.c": [
+   {
+    "line": 12,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 13,
+    "from": "fcntl.h",
+    "to": "uapi/fcntl.h"
+   },
+   {
+    "line": 14,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-key.c": [
+   {
+    "line": 56,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-mmio.c": [
+   {
+    "line": 57,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-pci-mmio.c": [
+   {
+    "line": 12,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 15,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-protocol.c": [
+   {
+    "line": 58,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-runtime-start.c": [
+   {
+    "line": 12,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-runtime.c": [
+   {
+    "line": 58,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-rx.c": [
+   {
+    "line": 58,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-scan-session.c": [
+   {
+    "line": 58,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-scan.c": [
+   {
+    "line": 58,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-transport-backend.c": [
+   {
+    "line": 14,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-transport.c": [
+   {
+    "line": 57,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-tx-ring.c": [
+   {
+    "line": 58,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211-tx.c": [
+   {
+    "line": 58,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/intel-ax211/intel-ax211.c": [
+   {
+    "line": 55,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 1225,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 1234,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/rtl8822b/rtl8822b-security.c": [
+   {
+    "line": 15,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 17,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/drivers/wifi/rtl8822b/rtl8822b.c": [
+   {
+    "line": 15,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 17,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 23,
+    "from": "fcntl.h",
+    "to": "uapi/fcntl.h"
+   }
+  ],
+  "src/hal/amd64/bsp-pcat/cons.c": [
+   {
+    "line": 22,
+    "from": "string.h",
+    "to": "kern/kcrt.h"
+   }
+  ],
+  "src/hal/amd64/int.c": [
+   {
+    "line": 15,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/hal/arm64/int.c": [
+   {
+    "line": 7,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/hal/i386/bsp-pc98/cons.c": [
+   {
+    "line": 27,
+    "from": "string.h",
+    "to": "kern/kcrt.h"
+   }
+  ],
+  "src/hal/i386/bsp-pcat/cons.c": [
+   {
+    "line": 22,
+    "from": "string.h",
+    "to": "kern/kcrt.h"
+   }
+  ],
+  "src/hal/i386/int.c": [
+   {
+    "line": 14,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/hal/m68k/bsp-x68k/console.c": [
+   {
+    "line": 7,
+    "from": "string.h",
+    "to": "kern/kcrt.h"
+   }
+  ],
+  "src/hal/m68k/bsp-x68k/keyboard.c": [
+   {
+    "line": 10,
+    "from": "string.h",
+    "to": "kern/kcrt.h"
+   }
+  ],
+  "src/hal/m68k/trap.c": [
+   {
+    "line": 4,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/hal/sparcv9/trap.c": [
+   {
+    "line": 11,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/kern/acl.c": [
+   {
+    "line": 22,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 23,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 24,
+    "from": "unistd.h",
+    "to": "uapi/unistd.h"
+   }
+  ],
+  "src/kern/backing-claim.c": [
+   {
+    "line": 29,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 30,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/block-identity.c": [
+   {
+    "line": 24,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 25,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/boot.c": [
+   {
+    "line": 25,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 26,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/buf.c": [
+   {
+    "line": 25,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 26,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/cache.c": [
+   {
+    "line": 21,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 22,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/cdev.c": [
+   {
+    "line": 26,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 28,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/clock.c": [
+   {
+    "line": 28,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/kern/cred.c": [
+   {
+    "line": 25,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 26,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 27,
+    "from": "unistd.h",
+    "to": "uapi/unistd.h"
+   }
+  ],
+  "src/kern/cwdinfo.c": [
+   {
+    "line": 16,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 17,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/devfs.c": [
+   {
+    "line": 41,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 42,
+    "from": "fcntl.h",
+    "to": "uapi/fcntl.h"
+   },
+   {
+    "line": 45,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 46,
+    "from": "sys/statvfs.h",
+    "to": "uapi/statvfs.h"
+   }
+  ],
+  "src/kern/disk.c": [
+   {
+    "line": 31,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 35,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/elf.c": [
+   {
+    "line": 30,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 32,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/entry.c": [
+   {
+    "line": 20,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/exec.c": [
+   {
+    "line": 38,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 39,
+    "from": "fcntl.h",
+    "to": "uapi/fcntl.h"
+   },
+   {
+    "line": 42,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 43,
+    "from": "unistd.h",
+    "to": "uapi/unistd.h"
+   }
+  ],
+  "src/kern/fd-object.c": [
+   {
+    "line": 15,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/kern/file.c": [
+   {
+    "line": 40,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 41,
+    "from": "fcntl.h",
+    "to": null,
+    "duplicate_of": "uapi/fcntl.h"
+   },
+   {
+    "line": 44,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 45,
+    "from": "unistd.h",
+    "to": "uapi/unistd.h"
+   }
+  ],
+  "src/kern/filedesc.c": [
+   {
+    "line": 26,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 27,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/handle.c": [
+   {
+    "line": 18,
+    "from": "fcntl.h",
+    "to": "uapi/fcntl.h"
+   },
+   {
+    "line": 19,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/kern/inode.c": [
+   {
+    "line": 34,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 35,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/io.c": [
+   {
+    "line": 24,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/irq.c": [
+   {
+    "line": 18,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/kern/klog.c": [
+   {
+    "line": 21,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/lock.c": [
+   {
+    "line": 22,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/kern/main.c": [
+   {
+    "line": 30,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/mount.c": [
+   {
+    "line": 31,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 32,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 33,
+    "from": "sys/statvfs.h",
+    "to": "uapi/statvfs.h"
+   }
+  ],
+  "src/kern/namecache.c": [
+   {
+    "line": 25,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 26,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/namei.c": [
+   {
+    "line": 24,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 25,
+    "from": "fcntl.h",
+    "to": "uapi/fcntl.h"
+   },
+   {
+    "line": 26,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 27,
+    "from": "unistd.h",
+    "to": "uapi/unistd.h"
+   }
+  ],
+  "src/kern/net/arp.c": [
+   {
+    "line": 30,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 31,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/core.c": [
+   {
+    "line": 34,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 37,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/ethernet.c": [
+   {
+    "line": 23,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 24,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/icmp.c": [
+   {
+    "line": 27,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 28,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/inet-socket.c": [
+   {
+    "line": 32,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 34,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/ipv4.c": [
+   {
+    "line": 27,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 28,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/net-device.c": [
+   {
+    "line": 27,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 29,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/packet-buf.c": [
+   {
+    "line": 24,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 26,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/packet-socket.c": [
+   {
+    "line": 25,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 26,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/route-socket.c": [
+   {
+    "line": 19,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 20,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/route.c": [
+   {
+    "line": 26,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 28,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/socket-file.c": [
+   {
+    "line": 22,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 23,
+    "from": "fcntl.h",
+    "to": "uapi/fcntl.h"
+   }
+  ],
+  "src/kern/net/socket.c": [
+   {
+    "line": 29,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 31,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/tcp.c": [
+   {
+    "line": 40,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 41,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/udp.c": [
+   {
+    "line": 29,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 30,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/unix-socket.c": [
+   {
+    "line": 36,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 38,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 39,
+    "from": "sys/un.h",
+    "to": "uapi/un.h"
+   },
+   {
+    "line": 40,
+    "from": "unistd.h",
+    "to": "uapi/unistd.h"
+   }
+  ],
+  "src/kern/net/wifi/wlan-crypto.c": [
+   {
+    "line": 21,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 23,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/wifi/wlan-frame.c": [
+   {
+    "line": 20,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 21,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/wifi/wlan-l2.c": [
+   {
+    "line": 21,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 22,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/wifi/wlan-wpa2-codec.c": [
+   {
+    "line": 21,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 22,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/wifi/wlan-wpa2.c": [
+   {
+    "line": 22,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 23,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/net/wifi/wlan.c": [
+   {
+    "line": 31,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 34,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/partition.c": [
+   {
+    "line": 22,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 24,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/pipe.c": [
+   {
+    "line": 28,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 29,
+    "from": "fcntl.h",
+    "to": "uapi/fcntl.h"
+   },
+   {
+    "line": 31,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/platform/pc98.c": [
+   {
+    "line": 30,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/kern/platform/pcat.c": [
+   {
+    "line": 70,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/kern/platform/rpi4.c": [
+   {
+    "line": 15,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/kern/platform/sun4u.c": [
+   {
+    "line": 15,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/kern/platform/x68k.c": [
+   {
+    "line": 16,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/kern/pmem.c": [
+   {
+    "line": 18,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/kern/poll.c": [
+   {
+    "line": 28,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 29,
+    "from": "fcntl.h",
+    "to": "uapi/fcntl.h"
+   }
+  ],
+  "src/kern/process.c": [
+   {
+    "line": 43,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 45,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 46,
+    "from": "sys/wait.h",
+    "to": "uapi/wait.h"
+   }
+  ],
+  "src/kern/ptrace.c": [
+   {
+    "line": 33,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 35,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/quota.c": [
+   {
+    "line": 21,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 22,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/readahead.c": [
+   {
+    "line": 20,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 21,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/record-lock.c": [
+   {
+    "line": 26,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 27,
+    "from": "fcntl.h",
+    "to": null,
+    "duplicate_of": "uapi/fcntl.h"
+   },
+   {
+    "line": 29,
+    "from": "stdio.h",
+    "to": "uapi/unistd.h"
+   }
+  ],
+  "src/kern/resource.c": [
+   {
+    "line": 30,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 36,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/kern/sched.c": [
+   {
+    "line": 30,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 36,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 109,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/shutdown.c": [
+   {
+    "line": 19,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/kern/signal.c": [
+   {
+    "line": 30,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 33,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/swap.c": [
+   {
+    "line": 20,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 23,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 44,
+    "from": "fcntl.h",
+    "to": "uapi/fcntl.h"
+   },
+   {
+    "line": 46,
+    "from": "sys/stat.h",
+    "to": "uapi/stat.h"
+   }
+  ],
+  "src/kern/syscall.c": [
+   {
+    "line": 67,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 68,
+    "from": "fcntl.h",
+    "to": null,
+    "duplicate_of": "uapi/fcntl.h"
+   },
+   {
+    "line": 70,
+    "from": "limits.h",
+    "to": "limits.h + uapi/limits.h"
+   },
+   {
+    "line": 72,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 73,
+    "from": "sys/mman.h",
+    "to": "uapi/mman.h"
+   },
+   {
+    "line": 74,
+    "from": "sys/resource.h",
+    "to": null,
+    "duplicate_of": "uapi/resource.h"
+   },
+   {
+    "line": 75,
+    "from": "sys/time.h",
+    "to": "uapi/time.h"
+   },
+   {
+    "line": 76,
+    "from": "sys/mount.h",
+    "to": "uapi/mount.h"
+   },
+   {
+    "line": 77,
+    "from": "sys/select.h",
+    "to": null,
+    "duplicate_of": "uapi/select.h"
+   },
+   {
+    "line": 78,
+    "from": "sys/socket.h",
+    "to": "uapi/socket.h"
+   },
+   {
+    "line": 79,
+    "from": "sys/stat.h",
+    "to": "uapi/stat.h"
+   },
+   {
+    "line": 80,
+    "from": "sys/statvfs.h",
+    "to": "uapi/statvfs.h"
+   },
+   {
+    "line": 81,
+    "from": "sys/sysctl.h",
+    "to": null,
+    "duplicate_of": "uapi/sysctl.h"
+   },
+   {
+    "line": 82,
+    "from": "sys/wait.h",
+    "to": "uapi/wait.h"
+   },
+   {
+    "line": 83,
+    "from": "time.h",
+    "to": null,
+    "duplicate_of": "uapi/time.h"
+   },
+   {
+    "line": 84,
+    "from": "unistd.h",
+    "to": "uapi/unistd.h"
+   },
+   {
+    "line": 85,
+    "from": "stdlib.h",
+    "to": null
+   }
+  ],
+  "src/kern/sysctl.c": [
+   {
+    "line": 29,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 32,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/test-fault.c": [
+   {
+    "line": 21,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 23,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/text-display.c": [
+   {
+    "line": 17,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/kern/thread.c": [
+   {
+    "line": 24,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 26,
+    "from": "string.h",
+    "to": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/timer.c": [
+   {
+    "line": 28,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 30,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/tmpfs.c": [
+   {
+    "line": 28,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 30,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 31,
+    "from": "sys/statvfs.h",
+    "to": "uapi/statvfs.h"
+   }
+  ],
+  "src/kern/tty.c": [
+   {
+    "line": 37,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 38,
+    "from": "fcntl.h",
+    "to": "uapi/fcntl.h"
+   },
+   {
+    "line": 41,
+    "from": "poll.h",
+    "to": "uapi/poll.h"
+   },
+   {
+    "line": 42,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 43,
+    "from": "termios.h",
+    "to": "uapi/termios.h"
+   }
+  ],
+  "src/kern/uaccess.c": [
+   {
+    "line": 28,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 32,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/user-probe.c": [
+   {
+    "line": 25,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 27,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/usync.c": [
+   {
+    "line": 22,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/kern/vfs.c": [
+   {
+    "line": 48,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 49,
+    "from": "fcntl.h",
+    "to": "uapi/fcntl.h"
+   },
+   {
+    "line": 51,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/vm-device.c": [
+   {
+    "line": 20,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 21,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ],
+  "src/kern/vm.c": [
+   {
+    "line": 32,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 33,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 34,
+    "from": "sys/mman.h",
+    "to": "uapi/mman.h"
+   }
+  ],
+  "src/kern/vmspace.c": [
+   {
+    "line": 30,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 31,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   },
+   {
+    "line": 32,
+    "from": "sys/mman.h",
+    "to": "uapi/mman.h"
+   }
+  ],
+  "src/kern/waitq.c": [
+   {
+    "line": 27,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   }
+  ],
+  "src/kern/writeback.c": [
+   {
+    "line": 22,
+    "from": "errno.h",
+    "to": "uapi/errno.h"
+   },
+   {
+    "line": 23,
+    "from": "string.h",
+    "to": null,
+    "duplicate_of": "kern/kcrt.h"
+   }
+  ]
+ }
+}

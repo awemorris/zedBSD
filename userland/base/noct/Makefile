@@ -71,7 +71,7 @@ NOCT_PACKAGE_HOLORIS := $(NOCT_SOURCE_DIR)/resources/apps/holoris/holoris.noct
 
 # i386 uses the interpreter for the PC98 i486 baseline. Remacs stays held
 # independently until its own application acceptance is scheduled.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,noct,Noct language,*,n,package,,y,\
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,noct,Noct language,amd64 i386 pc98,n,package,,y,\
 	packages/lang,base/noct,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter noct,$(ZEDBSD_USER_PROGRAMS)),\
@@ -281,16 +281,20 @@ $(NOCT_PACKAGE_HOLORIS): | $(NOCT_SOURCE_VERIFIED)
 # interpreter is built from, so an unchanged tree costs nothing and
 # prints nothing.
 $(NOCT_ZEDBSD_BUILD_STAMP): $(NOCT_SOURCE_VERIFIED) \
-		$(ZEDBSD_NOCT_PACKAGE_MAKEFILE) $(NOCT_ZEDBSD_SYSROOT_STAMP)
+		$(ZEDBSD_NOCT_PACKAGE_MAKEFILE) $(NOCT_ZEDBSD_SYSROOT_STAMP) \
+		$(dir $(ZEDBSD_NOCT_PACKAGE_MAKEFILE))zedbsd.cmake \
+		$(BUILD)/dynamic/libc.so $(BUILD)/dynamic/ld.so
 	cd '$(NOCT_SOURCE_DIR)' && \
 		ZEDBSD_SOURCE_DIR='$(ZEDBSD_NOCT_ROOT)' \
 		ZEDBSD_SYSROOT='$(NOCT_ZEDBSD_SYSROOT)' \
+		ZEDBSD_DYNAMIC_DIR='$(abspath $(BUILD))/dynamic' \
 		ZEDBSD_LLVM_BIN='$(ZEDBSD_LLVM_INSTALL)/bin' \
 		cmake --preset zedbsd-amd64 -B build-zedbsd-$(NOCT_ZEDBSD_ARCH) $(NOCT_ZEDBSD_CMAKE_OPTIONS) \
 		-DNOCT_VERSION='$(ZEDBSD_NOCT_VERSION)'
 	cd '$(NOCT_SOURCE_DIR)' && \
 		ZEDBSD_SOURCE_DIR='$(ZEDBSD_NOCT_ROOT)' \
 		ZEDBSD_SYSROOT='$(NOCT_ZEDBSD_SYSROOT)' \
+		ZEDBSD_DYNAMIC_DIR='$(abspath $(BUILD))/dynamic' \
 		ZEDBSD_LLVM_BIN='$(ZEDBSD_LLVM_INSTALL)/bin' \
 		cmake --build build-zedbsd-$(NOCT_ZEDBSD_ARCH) --parallel $(ZEDBSD_BUILD_JOBS)
 	@test -x '$(NOCT_ZEDBSD_ARTIFACT)'

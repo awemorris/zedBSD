@@ -9,15 +9,15 @@
  * PCI Configuration Mechanism #1 host.
  */
 
-#include <drivers/pci-pcat.h>
-#include <drivers/pci.h>
-#include <errno.h>
+#include <drivers/pci/pci-pcat.h>
+#include <drivers/pci/pci.h>
+#include <uapi/errno.h>
 #include <kern/pmem.h>
-#include <string.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
 #include "kern/device-io.h"
 #include "kern/irq.h"
+#include <kern/kcrt.h>
 
 #define PCI_CONFIG_ADDRESS 0x0cf8U
 #define PCI_CONFIG_DATA 0x0cfcU
@@ -532,13 +532,13 @@ pcat_map_bar(
 		error = kern_device_unmap(mapping->address, memory->size);
 		if (error != 0) {
 			kern_free(memory);
-			memset(mapping, 0, sizeof(*mapping));
+			kern_memset(mapping, 0, sizeof(*mapping));
 			return ENOMEM;
 		}
 
 		/* Removes the local ownership token after retiring the unpublished hardware mapping. */
 		kern_free(memory);
-		memset(mapping, 0, sizeof(*mapping));
+		kern_memset(mapping, 0, sizeof(*mapping));
 		return ENOMEM;
 	}
 
@@ -580,7 +580,7 @@ pcat_unmap_bar(
 		/* Handles the record availability. */
 		if (record != NULL && record->references != 0)
 			record->references--;
-		memset(mapping, 0, sizeof(*mapping));
+		kern_memset(mapping, 0, sizeof(*mapping));
 
 		/* Returns the computed result. */
 		return;
@@ -615,7 +615,7 @@ pcat_unmap_bar(
 
 	(void)kern_device_unmap(mapping->address, memory->size);
 	kern_free(memory);
-	memset(mapping, 0, sizeof(*mapping));
+	kern_memset(mapping, 0, sizeof(*mapping));
 }
 
 /* Supports the pcat allocate irqs operation. */

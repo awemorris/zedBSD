@@ -1,0 +1,314 @@
+diff --git a/src/hal/amd64/space.c b/src/hal/amd64/space.c
+index 946ef66f..49d50e6b 100644
+--- a/src/hal/amd64/space.c
++++ b/src/hal/amd64/space.c
+@@ -28,6 +28,15 @@
+ 
+ #define AMD64_USER_LIMIT 0x0000800000000000ULL
+ 
++/*
++ * The entry that points to a page table carries, in the bits the hardware
++ * ignores (52..62), how many entries of that table are present.  It makes
++ * "is this table empty" a single load instead of a scan of 512 entries,
++ * which the unmap path asked for every table of the space on every call.
++ */
++#define AMD64_PTE_COUNT_SHIFT  52
++#define AMD64_PTE_COUNT_MASK   (0x7ffULL << AMD64_PTE_COUNT_SHIFT)
++
+ _Static_assert(AMD64_RAM_BASE == AMD64_DIRECT_BASE, "RAM window base agreement");
+ _Static_assert(AMD64_RAM_LIMIT == AMD64_DIRECT_LIMIT, "RAM window size agreement");
+ 
+@@ -144,8 +153,10 @@ static bool space_lock_enter(struct amd64_space *space);
+ static void space_lock_leave(struct amd64_space *space, bool enabled);
+ static int valid_user_range(uintptr_t address, size_t size);
+ static struct amd64_table_page *allocate_table(struct amd64_space *space, uint64_t *parent, unsigned parent_index);
+-static uint64_t *walk_leaf(struct amd64_space *space, uintptr_t address, int create);
+-static int table_is_empty(const uint64_t *table);
++static void table_count_adjust(uint64_t *owner, int delta);
++static uint64_t *walk_leaf(struct amd64_space *space, uintptr_t address, int create, uint64_t **owner);
++static int table_is_empty(const struct amd64_table_page *page);
++static uint64_t *table_owner_of(struct amd64_space *space, uint64_t *table);
+ static struct amd64_table_page *detach_empty_tables(struct amd64_space *space);
+ static void free_detached_tables(struct amd64_table_page *page);
+ static uint64_t leaf_flags(uint32_t attr);
+@@ -964,6 +975,7 @@ hal_space_map(
+ {
+ 	struct amd64_space *space;
+ 	struct amd64_table_page *detached;
++	uint64_t *owner;
+ 	uint64_t *leaf;
+ 	uintptr_t address;
+ 	uintptr_t offset;
+@@ -1023,7 +1035,7 @@ hal_space_map(
+ 
+ 	/* Verifies that every destination leaf is currently unmapped. */
+ 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+-		leaf = walk_leaf(space, address + offset, 0);
++		leaf = walk_leaf(space, address + offset, 0, NULL);
+ 
+ 		/* Rejects an overlap with an existing mapping. */
+ 		if (leaf != NULL && (*leaf & AMD64_PTE_PRESENT)) {
+@@ -1035,7 +1047,7 @@ hal_space_map(
+ 
+ 	/* Installs each requested leaf mapping. */
+ 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+-		leaf = walk_leaf(space, address + offset, 1);
++		leaf = walk_leaf(space, address + offset, 1, &owner);
+ 
+ 		/* Rolls back all installed leaves when table allocation fails. */
+ 		if (leaf == NULL) {
+@@ -1043,11 +1055,13 @@ hal_space_map(
+ 			for (rollback = 0;
+ 			     rollback < offset;
+ 			     rollback += PAGE_SIZE) {
+-				leaf = walk_leaf(space, address + rollback, 0);
++				leaf = walk_leaf(space, address + rollback, 0, &owner);
+ 
+-				/* Clears the leaf when its table remains reachable. */
+-				if (leaf != NULL)
++				/* Clears a present leaf and uncounts it in its table. */
++				if (leaf != NULL && (*leaf & AMD64_PTE_PRESENT) != 0) {
+ 					*leaf = 0;
++					table_count_adjust(owner, -1);
++				}
+ 			}
+ 
+ 			/* Disconnects page tables made empty by rollback. */
+@@ -1067,7 +1081,9 @@ hal_space_map(
+ 			return HAL_ERR_NOMEM;
+ 		}
+ 
+-		/* Publishes this requested leaf mapping. */
++		/* Publishes this requested leaf mapping, counting a new one. */
++		if ((*leaf & AMD64_PTE_PRESENT) == 0)
++			table_count_adjust(owner, 1);
+ 		*leaf = (physical + offset) | leaf_flags(attr);
+ 	}
+ 
+@@ -1151,7 +1167,7 @@ hal_space_prot_query(
+ 
+ 	/* Validates the complete range before publishing any permission change. */
+ 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+-		leaf = walk_leaf(space, address + offset, 0);
++		leaf = walk_leaf(space, address + offset, 0, NULL);
+ 
+ 		/* Rejects a hole in the requested mapped range. */
+ 		if (leaf == NULL || !(*leaf & AMD64_PTE_PRESENT)) {
+@@ -1171,7 +1187,7 @@ hal_space_prot_query(
+ 
+ 	/* Replaces each leaf while preserving accessed and dirty observations. */
+ 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+-		leaf = walk_leaf(space, address + offset, 0);
++		leaf = walk_leaf(space, address + offset, 0, NULL);
+ 		old = __atomic_load_n(leaf, __ATOMIC_ACQUIRE);
+ 
+ 		/* Retries the replacement if hardware updates the leaf concurrently. */
+@@ -1204,7 +1220,7 @@ hal_space_prot_query(
+ 	 * those CPUs acknowledged the shootdown.
+ 	 */
+ 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+-		leaf = walk_leaf(space, address + offset, 0);
++		leaf = walk_leaf(space, address + offset, 0, NULL);
+ 
+ 		/* Detects an unexpected page-table topology change. */
+ 		if (leaf == NULL) {
+@@ -1258,6 +1274,7 @@ hal_space_unmap(
+ {
+ 	struct amd64_space *space;
+ 	struct amd64_table_page *detached;
++	uint64_t *owner;
+ 	uint64_t *leaf;
+ 	uintptr_t address;
+ 	uintptr_t offset;
+@@ -1290,11 +1307,13 @@ hal_space_unmap(
+ 
+ 	/* Clears every reachable leaf in the requested range. */
+ 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+-		leaf = walk_leaf(space, address + offset, 0);
++		leaf = walk_leaf(space, address + offset, 0, &owner);
+ 
+-		/* Clears the mapping when its leaf table exists. */
+-		if (leaf != NULL)
++		/* Clears a present mapping and uncounts it in its table. */
++		if (leaf != NULL && (*leaf & AMD64_PTE_PRESENT) != 0) {
+ 			*leaf = 0;
++			table_count_adjust(owner, -1);
++		}
+ 	}
+ 
+ 	/*
+@@ -1351,7 +1370,7 @@ hal_space_query(
+ 
+ 	/* Reads the leaf under the page-table serializer. */
+ 	enabled = space_lock_enter(space);
+-	leaf = walk_leaf(space, (uintptr_t)pointer, 0);
++	leaf = walk_leaf(space, (uintptr_t)pointer, 0, NULL);
+ 	*flags = leaf != NULL && (*leaf & AMD64_PTE_PRESENT) ?
+ 	    HAL_SPACE_PAGE_PRESENT : 0;
+ 
+@@ -1411,7 +1430,7 @@ hal_space_clear_flags(
+ 
+ 	/* Locates the leaf under the page-table serializer. */
+ 	enabled = space_lock_enter(space);
+-	leaf = walk_leaf(space, (uintptr_t)pointer, 0);
++	leaf = walk_leaf(space, (uintptr_t)pointer, 0, NULL);
+ 
+ 	/* Rejects an absent mapping. */
+ 	if (leaf == NULL || !(*leaf & AMD64_PTE_PRESENT)) {
+@@ -1846,22 +1865,48 @@ allocate_table(
+ 	return page;
+ }
+ 
++/* Adds to the present-entry count kept in the entry that owns a table. */
++static void
++table_count_adjust(
++	uint64_t *owner,
++	int delta)
++{
++	uint64_t count;
++
++	/* The top-level table has no owning entry and no count. */
++	if (owner == NULL)
++		return;
++
++	/* Moves the count by delta, staying inside its 11 bits. */
++	count = (*owner & AMD64_PTE_COUNT_MASK) >> AMD64_PTE_COUNT_SHIFT;
++	if (delta < 0 && count < (uint64_t)(-delta))
++		HAL_FATAL("amd64 page table present count underflow");
++	count += (uint64_t)delta;
++	if (count > 512U)
++		HAL_FATAL("amd64 page table present count overflow");
++	*owner = (*owner & ~AMD64_PTE_COUNT_MASK) |
++	    (count << AMD64_PTE_COUNT_SHIFT);
++}
++
+ /* Finds or creates the leaf entry for a virtual address. */
+ static uint64_t *
+ walk_leaf(
+ 	struct amd64_space *space,
+ 	uintptr_t address,
+-	int create)
++	int create,
++	uint64_t **owner)
+ {
+ 	unsigned shifts[3] = { 39, 30, 21 };
+ 	struct amd64_table_page *page;
+ 	uint64_t *table;
++	uint64_t *table_owner;
+ 	uint64_t entry;
+ 	unsigned level;
+ 	unsigned index;
+ 
+ 	/* Descends the three page-table levels above the leaf. */
+ 	table = space->pml4;
++	table_owner = NULL;
+ 	for (level = 0; level < 3; level++) {
+ 		index = (unsigned)(address >> shifts[level]) & 511U;
+ 		entry = table[index];
+@@ -1885,6 +1930,9 @@ walk_leaf(
+ 			if (address < AMD64_USER_LIMIT)
+ 				entry |= AMD64_PTE_USER;
+ 			table[index] = entry;
++
++			/* The parent table now holds one more present entry. */
++			table_count_adjust(table_owner, 1);
+ 		}
+ 
+ 		/* Rejects an unexpected large page in a user-table path. */
+@@ -1892,30 +1940,60 @@ walk_leaf(
+ 			return NULL;
+ 
+ 		/* Descends through the selected subordinate table. */
++		table_owner = &table[index];
+ 		table = amd64_phys_to_direct(
+ 			(uintptr_t)(entry & AMD64_PTE_ADDR_MASK));
+ 	}
+ 
++	/* Tells the caller which entry owns the leaf table, for its count. */
++	if (owner != NULL)
++		*owner = table_owner;
++
+ 	/* Reports the leaf entry selected by the address. */
+ 	return &table[(address >> 12) & 511U];
+ }
+ 
+-/* Tests whether a subordinate page table has no present entries. */
++/* Tests whether a table holds no present entry, from its owner's count. */
+ static int
+ table_is_empty(
+-	const uint64_t *table)
++	const struct amd64_table_page *page)
+ {
+-	unsigned index;
++	uint64_t entry;
+ 
+-	/* Searches for any present entry. */
+-	for (index = 0; index < 512; index++) {
+-		/* Reports a table which still owns a child mapping. */
+-		if (table[index] & AMD64_PTE_PRESENT)
+-			return 0;
+-	}
++	/* The count lives in the parent's entry that points to this table. */
++	entry = page->parent[page->parent_index];
+ 
+ 	/* Reports an empty table. */
+-	return 1;
++	if ((entry & AMD64_PTE_COUNT_MASK) == 0)
++		return 1;
++
++	/* Reports a table which still owns a child mapping. */
++	return 0;
++}
++
++/* Finds the entry that owns a table, or NULL for the top-level table. */
++static uint64_t *
++table_owner_of(
++	struct amd64_space *space,
++	uint64_t *table)
++{
++	struct amd64_table_page *page;
++	void *mapped;
++
++	/* The top-level table is owned by the space, not by an entry. */
++	if (table == space->pml4)
++		return NULL;
++
++	/* Finds the record of the table among the space's tables. */
++	for (page = space->tables; page != NULL; page = page->next) {
++		mapped = amd64_phys_to_direct(page->paddr);
++		if (mapped == (void *)table)
++			return &page->parent[page->parent_index];
++	}
++
++	/* An unrecorded table is a broken ownership link. */
++	HAL_FATAL("amd64 page table without an ownership record");
++	return NULL;
+ }
+ 
+ /* Detaches every empty table without releasing its storage. */
+@@ -1928,6 +2006,7 @@ detach_empty_tables(
+ 	struct amd64_table_page *page;
+ 	uint64_t expected;
+ 	uint64_t parent_entry;
++	int empty;
+ 	int reclaimed;
+ 
+ 	/* Starts with an empty detached-table result list. */
+@@ -1947,7 +2026,8 @@ detach_empty_tables(
+ 			expected = (uintptr_t)page->paddr;
+ 
+ 			/* Keeps nonempty tables linked in the hardware tree. */
+-			if (!table_is_empty(amd64_phys_to_direct(page->paddr))) {
++			empty = table_is_empty(page);
++			if (!empty) {
+ 				link = &page->next;
+ 				continue;
+ 			}
+@@ -1963,6 +2043,7 @@ detach_empty_tables(
+ 
+ 			/* Disconnects and transfers the empty table to the result list. */
+ 			page->parent[page->parent_index] = 0;
++			table_count_adjust(table_owner_of(space, page->parent), -1);
+ 			*link = page->next;
+ 			page->next = detached;
+ 			detached = page;

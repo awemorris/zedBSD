@@ -5,6 +5,6 @@ disk-image: world bootloader $(DISK_IMAGE_ARTIFACT)
 
 check-disk-image: $(DISK_IMAGE_ARTIFACT)
 	$(PYTHON) platform/arm64/tools/check-rpi4-hdd-image.py \
-		--kernel $(BUILD)/vmunix --arch-image $(AARCH64_ARCH_IMAGE) \
+		--kernel $(BUILD)/vmunix --ufs-root $(BUILD)/ufs-root.img \
 		--data-image $(DATA_IMAGE) --swapfile $(SWAP_IMAGE) \
 		--config $(ARM64_PLATFORM)/config.txt $<

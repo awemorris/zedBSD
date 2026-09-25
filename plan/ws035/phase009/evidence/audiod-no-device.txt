@@ -1,0 +1,13 @@
+=== audiod-no-device
+serial: logged in
+NAME        STATUS    ENABLED   PID
+audiod      running   yes       5
+
+TYPE        daemon
+COMMAND     /sbin/audiod
+RESTART     on-failure
+AFTER       syslogd
+REQUIRES    -
+AUDIODTEST PLAY streams=1 frames=48000 ms=1033 underruns=0
+AUDIODTEST CAPTURE frames=48128 ms=982 overruns=0
+guest-status=0

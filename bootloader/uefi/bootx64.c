@@ -79,7 +79,7 @@ struct loader_context {
 };
 
 struct discovered_volume {
-	struct boot_provenance provenance;
+	struct kern_boot_provenance provenance;
 	EFI_HANDLE handle;
 	EFI_FILE_PROTOCOL *root;
 	EFI_FILE_PROTOCOL *config;
@@ -1193,7 +1193,7 @@ build_bootstrap(uint64_t low_base, const struct zbl_elf64_plan *plan,
 		const struct zbl_uefi_framebuffer_mapping *framebuffer_mapping,
 		uint32_t boot_volume_serial, uint8_t partition_scheme,
 		const struct kern_boot_parameter_record *parameters,
-		const struct boot_provenance *provenance)
+		const struct kern_boot_provenance *provenance)
 {
 	uint8_t *low = (void *)(uintptr_t)low_base;
 	uint64_t *pml4 = (void *)(low + LOW_PML4_OFFSET);

@@ -8,16 +8,13 @@
 #ifndef KERN_FAT_H
 #define KERN_FAT_H
 
+#include "kern/boot.h"
 #include "kern/file.h"
 #include "kern/mount.h"
 
 #include <stdint.h>
 
-enum bootfat_type {
-	KERN_FAT12 = 12,
-	KERN_FAT16 = 16,
-	KERN_FAT32 = 32,
-};
+/* enum bootfat_type is declared in <kern/boot.h>; the boot source names it. */
 
 extern const struct filesystem_type drv_fat_filesystem_type;
 

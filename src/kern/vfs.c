@@ -29,6 +29,7 @@
 #include "kern/cdev.h"
 #include "kern/console-device.h"
 #include "kern/input-device.h"
+#include <kern/kcrt.h>
 #if CONFIG_DRIVER_GRAPHICS_DEVICE
 #include "kern/graphics-device.h"
 #endif
@@ -44,10 +45,9 @@
 #include "kern/swap-control.h"
 #include "kern/swap-source.h"
 
-#include <errno.h>
-#include <fcntl.h>
+#include <uapi/errno.h>
+#include <uapi/fcntl.h>
 #include <hal/hal.h>
-#include <string.h>
 
 #include <uapi/sysctl.h>
 
@@ -118,8 +118,8 @@ static int vfs_disk_range_resolve(struct disk *disk, struct vfs_disk_range *rang
 static int vfs_swap_validate_raw(void *opaque, struct disk *candidate);
 static int vfs_fail(const char *stage, int error);
 static int vfs_ensure_root_directory(const struct path *root, const char *name, mode_t mode);
-static void vfs_log_boot_handoff(const struct boot_handoff *handoff, unsigned device_count);
-static void vfs_scan_physical_disks(const struct boot_handoff *handoff, struct disk *boot_physical, struct disk **loader_boot_partition);
+static void vfs_log_boot_handoff(const struct kern_boot_handoff *handoff, unsigned device_count);
+static void vfs_scan_physical_disks(const struct kern_boot_handoff *handoff, struct disk *boot_physical, struct disk **loader_boot_partition);
 #if defined(VFS_LEGACY_NULL_AUTOROOT)
 static VFS_HIGH int ufs_root_marker_matches(struct disk *disk, int *matches);
 #if defined(HAL_ARCH_ARM64)
@@ -155,7 +155,7 @@ kern_vfs_root_image_info(struct root_image_info *result)
 
 	if (result == NULL)
 		return EINVAL;
-	memset(result, 0, sizeof(*result));
+	kern_memset(result, 0, sizeof(*result));
 	result->version = ROOT_IMAGE_VERSION;
 	root = mount_root_get_ref();
 	if (root == NULL)
@@ -220,8 +220,8 @@ kern_vfs_root_image_info(struct root_image_info *result)
  */
 int
 kern_vfs_init(
-	const struct boot_handoff *handoff,
-	const struct boot_device *devices,
+	const struct kern_boot_handoff *handoff,
+	const struct kern_boot_device *devices,
 	unsigned device_count)
 {
 	struct disk *boot_physical;
@@ -627,7 +627,7 @@ root_ready:
 	error = kern_boot_source_publish_runtime(&boot_sources);
 	if (error != 0)
 		goto out_root;
-	memset(&swap_control_context, 0,
+	kern_memset(&swap_control_context, 0,
 	    sizeof(swap_control_context));
 	swap_control_context.boot_sources = &boot_sources;
 	if (root_partition != NULL) {
@@ -635,7 +635,7 @@ root_ready:
 		swap_control_context.native_root = root_partition;
 	}
 
-	memset(&registration, 0, sizeof(registration));
+	kern_memset(&registration, 0, sizeof(registration));
 	registration.sources = &swap_sources;
 	registration.resolver = &vfs_swap_resolver;
 	registration.resolver_context = &swap_control_context;
@@ -823,7 +823,7 @@ vfs_ensure_root_directory(
 
 	/* An existing entry must be a directory. */
 	component.cn_nameptr = name;
-	component.cn_namelen = strlen(name);
+	component.cn_namelen = kern_strlen(name);
 	component.cn_flags = COMPONENT_LAST;
 	error = inode_lookup(root->p_inode, &component, &inode);
 	if (error == 0) {
@@ -857,7 +857,7 @@ vfs_ensure_root_directory(
 /* Logs the boot device and partition the loader handed off. */
 static void
 vfs_log_boot_handoff(
-	const struct boot_handoff *handoff,
+	const struct kern_boot_handoff *handoff,
 	unsigned device_count)
 {
 	if (handoff->version == KERN_HANDOFF_VERSION_SUN4U) {
@@ -906,7 +906,7 @@ vfs_log_boot_handoff(
 /* Scans the physical disks, publishes their partitions, and finds the loader's. */
 static void
 vfs_scan_physical_disks(
-	const struct boot_handoff *handoff,
+	const struct kern_boot_handoff *handoff,
 	struct disk *boot_physical,
 	struct disk **loader_boot_partition)
 {
@@ -1069,7 +1069,7 @@ ufs_root_marker_matches(
 	}
 
 	*matches = count == (ssize_t)(sizeof(expected) - 1U) &&
-		   memcmp(value, expected, sizeof(expected) - 1U) == 0;
+		   kern_memcmp(value, expected, sizeof(expected) - 1U) == 0;
 out:
 	if (file != NULL)
 		(void)file_close(file);
@@ -1091,7 +1091,7 @@ static void
 vfs_legacy_overlay_setup_init(
 	struct vfs_legacy_overlay_setup *setup)
 {
-	memset(setup, 0, sizeof(*setup));
+	kern_memset(setup, 0, sizeof(*setup));
 	path_init(&setup->lower_root);
 	path_init(&setup->upper_root);
 }
@@ -1224,7 +1224,7 @@ vfs_mount_legacy_arm_overlay(
 	    setup.lower_mount->m_root);
 	path_set(&setup.upper_root, setup.upper_mount,
 	    setup.upper_mount->m_root);
-	memset(&args, 0, sizeof(args));
+	kern_memset(&args, 0, sizeof(args));
 	args.upper = setup.upper_root;
 	args.lower = setup.lower_root;
 	args.flags = OVERLAY_READ_WRITE;
@@ -1355,7 +1355,7 @@ static void
 vfs_overlay_setup_init(
 	struct vfs_overlay_setup *setup)
 {
-	memset(setup, 0, sizeof(*setup));
+	kern_memset(setup, 0, sizeof(*setup));
 	path_init(&setup->lower_file_path);
 	path_init(&setup->upper_file_path);
 	path_init(&setup->lower_root);
@@ -1569,7 +1569,7 @@ vfs_mount_overlay_root(
 		goto fail;
 
 	/* Stacks the overlay as the root. */
-	memset(&args, 0, sizeof(args));
+	kern_memset(&args, 0, sizeof(args));
 	args.upper = setup.upper_root;
 	args.lower = setup.lower_root;
 	args.flags = OVERLAY_READ_WRITE;

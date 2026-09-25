@@ -9,6 +9,13 @@
 #define HAL_HAL_ARCH_M68030_H
 
 /*
+ * The periodic tick, in hertz.  Every time the kernel keeps is counted in
+ * these ticks, and every conversion to and from milliseconds uses this value.
+ * Not a supported port (2026-09-23); kept at the rate it was written for.
+ */
+#define HAL_TIMER_FREQUENCY	(100U)
+
+/*
  * Signal Frame
  */
 

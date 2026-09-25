@@ -19,8 +19,7 @@
 #include <kern/atomic.h>
 #include <kern/page.h>
 #include <hal/hal.h>
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 #include <kern/loop.h>
 #include <kern/io-context.h>
 #include <stddef.h>
@@ -30,6 +29,7 @@
 #include <kern/vm-object.h>
 #include <kern/thread.h>
 #include <kern/sched.h>
+#include <kern/kcrt.h>
 
 #define WRITEBACK_GLOBAL_MAX (64ULL * 1024U * 1024U)
 
@@ -182,7 +182,7 @@ writeback_budget_attach(
 
 	/* Publishes an empty budget in the free slot. */
 	if (error == 0) {
-		memset(budget, 0, sizeof(*budget));
+		kern_memset(budget, 0, sizeof(*budget));
 		budget->disk = leaf;
 		budgets[available] = budget;
 	}
@@ -236,7 +236,7 @@ writeback_budget_detach(
 	}
 
 	disk = budget->disk;
-	memset(budget, 0, sizeof(*budget));
+	kern_memset(budget, 0, sizeof(*budget));
 	budget_unlock(enabled);
 
 	/* Releases the device only after the budget is unreachable. */
@@ -295,7 +295,7 @@ writeback_ticket_reserve(
 		return EINVAL;
 	if (ticket->budget != NULL)
 		return EBUSY;
-	memset(ticket, 0, sizeof(*ticket));
+	kern_memset(ticket, 0, sizeof(*ticket));
 
 	/* Refuses a budget that is unregistered or draining. */
 	budget_current_limits(&limits);
@@ -391,7 +391,7 @@ writeback_ticket_release(
 	reserved_bytes -= ticket->reserved;
 	budget->tickets--;
 	live_tickets--;
-	memset(ticket, 0, sizeof(*ticket));
+	kern_memset(ticket, 0, sizeof(*ticket));
 	budget_unlock(enabled);
 }
 
@@ -436,7 +436,7 @@ writeback_budget_snapshot(
 		return;
 
 	/* Fills the limits before entering the accounting guard. */
-	memset(stats, 0, sizeof(*stats));
+	kern_memset(stats, 0, sizeof(*stats));
 	budget_current_limits(stats);
 
 	/* Copies the totals and counts the registered devices. */
@@ -470,7 +470,7 @@ writeback_budget_read(
 	/* Validates the destination before entering the accounting guard. */
 	if (snapshot == NULL || snapshot == budget)
 		return EINVAL;
-	memset(snapshot, 0, sizeof(*snapshot));
+	kern_memset(snapshot, 0, sizeof(*snapshot));
 
 	/* Copies the whole budget of a registered device. */
 	enabled = budget_lock();
@@ -842,7 +842,7 @@ writeback_unmount_finish(
 	    policy->worker != worker)
 		HAL_FATAL("writeback unmount lost policy");
 	worker->unmount = NULL;
-	memset(token, 0, sizeof(*token));
+	kern_memset(token, 0, sizeof(*token));
 	if (!committed) {
 		worker_restore(worker);
 		mutex_unlock(&policy_control);
@@ -988,7 +988,7 @@ writeback_policy_snapshot(
 	/* Reports an empty policy before lazy initialization. */
 	if (stats == NULL)
 		return;
-	memset(stats, 0, sizeof(*stats));
+	kern_memset(stats, 0, sizeof(*stats));
 	if (atomic_load_acquire(&policy_initialized) != 2)
 		return;
 	irq = spin_lock_irqsave(&policy_registry);
@@ -1033,8 +1033,8 @@ writeback_policy_report(
 	if (buffer == NULL)
 		return;
 	output = buffer;
-	memset(output, 0, sizeof(struct writeback_report));
-	memset(&header, 0, sizeof(header));
+	kern_memset(output, 0, sizeof(struct writeback_report));
+	kern_memset(&header, 0, sizeof(header));
 	header.version = WRITEBACK_REPORT_VERSION;
 	writeback_budget_snapshot(&totals);
 	header.high = totals.high;
@@ -1045,7 +1045,7 @@ writeback_policy_report(
 	header.tickets = totals.tickets;
 	header.refusals = totals.refusals;
 	if (atomic_load_acquire(&policy_initialized) != 2) {
-		memcpy(output, &header, sizeof(header));
+		kern_memcpy(output, &header, sizeof(header));
 		return;
 	}
 
@@ -1070,11 +1070,11 @@ writeback_policy_report(
 		if (header.count == WRITEBACK_REPORT_MOUNTS)
 			HAL_FATAL("writeback report capacity differs from mount table");
 		worker = policies[index].worker;
-		memset(&entry, 0, sizeof(entry));
-		memcpy(entry.path, policies[index].mount->m_path, sizeof(entry.path));
+		kern_memset(&entry, 0, sizeof(entry));
+		kern_memcpy(entry.path, policies[index].mount->m_path, sizeof(entry.path));
 		entry.path[sizeof(entry.path) - 1U] = '\0';
 		if (worker->leaf != NULL) {
-			memcpy(entry.device, worker->leaf->d_name, sizeof(entry.device));
+			kern_memcpy(entry.device, worker->leaf->d_name, sizeof(entry.device));
 			entry.device[sizeof(entry.device) - 1U] = '\0';
 		}
 
@@ -1085,12 +1085,12 @@ writeback_policy_report(
 		}
 
 		entry.state = worker->state;
-		memcpy(output + offsetof(struct writeback_report, mounts) +
+		kern_memcpy(output + offsetof(struct writeback_report, mounts) +
 		    header.count * sizeof(entry), &entry, sizeof(entry));
 		header.count++;
 	}
 
-	memcpy(output, &header, sizeof(header));
+	kern_memcpy(output, &header, sizeof(header));
 
 	spin_unlock_irqrestore(&policy_registry, irq);
 }
@@ -1219,7 +1219,7 @@ worker_prepare(struct writeback_worker *worker)
 	}
 
 	if (worker->memory.size == 0) {
-		memset(&memory, 0, sizeof(memory));
+		kern_memset(&memory, 0, sizeof(memory));
 		error = io_scratch_alloc(WB_MEMORY, &memory);
 		if (error != HAL_OK || memory.vaddr == NULL || memory.size < WB_MEMORY) {
 			if (memory.size != 0 && io_scratch_free(&memory) != HAL_OK)
@@ -1235,7 +1235,7 @@ worker_prepare(struct writeback_worker *worker)
 		}
 
 		cache_memory_commit(CACHE_MEMORY_WORKER, memory.size);
-		memset(memory.vaddr, 0, memory.size);
+		kern_memset(memory.vaddr, 0, memory.size);
 		irq = spin_lock_irqsave(&policy_registry);
 		worker->memory = memory;
 		worker->charged = 1;
@@ -1271,7 +1271,7 @@ worker_dispose(struct writeback_worker *worker)
 		if (worker->charged)
 			cache_memory_release(CACHE_MEMORY_WORKER, worker->memory.size);
 		irq = spin_lock_irqsave(&policy_registry);
-		memset(&worker->memory, 0, sizeof(worker->memory));
+		kern_memset(&worker->memory, 0, sizeof(worker->memory));
 		worker->charged = 0;
 		spin_unlock_irqrestore(&policy_registry, irq);
 	}

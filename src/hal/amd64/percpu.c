@@ -60,9 +60,13 @@ amd64_percpu_current(
 {
 	struct amd64_percpu *cpu;
 
-	/* Reads the state pointer published in IA32_GS_BASE. */
-	cpu = (struct amd64_percpu *)(uintptr_t)
-	    asm_read_msr(AMD64_MSR_GS_BASE);
+	/*
+	 * Reads the state's self pointer through GS, whose base is the state
+	 * IA32_GS_BASE was set to: one load instead of an rdmsr, which every
+	 * lock and every thread_current() pays for.  self is the first field
+	 * (ws046-p009, approved 2026-09-25).
+	 */
+	__asm__ volatile("movq %%gs:0, %0" : "=r"(cpu));
 
 	/* Rejects an absent or self-inconsistent selection. */
 	if (cpu == NULL || cpu->self != cpu)

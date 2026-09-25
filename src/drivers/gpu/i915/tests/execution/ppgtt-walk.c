@@ -14,14 +14,14 @@
  */
 
 #include "eu-test.h"
+#include <kern/kcrt.h>
 
 #include "../../memory.h"
 #include "../../ppgtt.h"
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 /* The address bits of a page-table entry. */
 #define I915_TEST_WALK_ADDRESS_MASK	0x0000fffffffff000ULL
@@ -61,7 +61,7 @@ drv_i915_test_ppgtt_walk(
 		return EINVAL;
 
 	/* Starts an empty record at the top directory, which PDP0 of a context names. */
-	memset(walk, 0, sizeof(*walk));
+	kern_memset(walk, 0, sizeof(*walk));
 	walk->va = va;
 	walk->top_dma = pp->top_pd_dma;
 	page_index = va >> 12;

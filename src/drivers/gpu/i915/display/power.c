@@ -44,6 +44,7 @@
 #include "phy.h"
 #include "takeover.h"
 #include "modeset.h"
+#include <kern/kcrt.h>
 
 #include "../mmio.h"
 #include "../sync.h"
@@ -53,8 +54,7 @@
 #include <kern/lock.h>
 #include <kern/waitq.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 /* The trace stage of the display noirq bring-up (the old probe's stage P3). */
 #define I915_POWER_TRACE_STAGE_NOIRQ	4U
@@ -1272,7 +1272,7 @@ drv_i915_dc_off_enable(
 
 	/* Reads the CDCLK into a temporary and compares it with the saved state. */
 	if (pwc->cd != NULL) {
-		memset(&readout, 0, sizeof(readout));
+		kern_memset(&readout, 0, sizeof(readout));
 		drv_i915_bxt_get_cdclk(pwc->cd, &readout);
 		pwc->dc_off_cdclk_readouts++;
 		if (readout.cdclk != pwc->cd->hw.cdclk || readout.vco != pwc->cd->hw.vco) {

@@ -1,0 +1,1 @@
+{"return": "  Device 0.1, Port 1, Speed 5000 Mb/s, Product QEMU USB MSD, ID: rootstick\r\n  Device 0.2, Port 2, Speed 480 Mb/s, Product QEMU USB Keyboard\r\n  Device 0.3, Port 3, Speed 480 Mb/s, Product QEMU USB Tablet\r\n  Device 1.1, Port 1, Speed 480 Mb/s, Product QEMU USB Mouse\r\n"}

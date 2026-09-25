@@ -53,8 +53,8 @@
  */
 
 #include "intel-ax211-protocol.h"
+#include <kern/kcrt.h>
 
-#include <string.h>
 
 struct ax211_required_version {
 	uint8_t group;
@@ -130,7 +130,7 @@ drv_intel_ax211_protocol_command_version_lookup(
 		/* Returns the computed result. */
 		return INTEL_AX211_PROTOCOL_INVALID;
 	}
-	memset(&candidate, 0, sizeof(candidate));
+	kern_memset(&candidate, 0, sizeof(candidate));
 	/* Process each remaining element. */
 	for (index = 0; index < table->count; index++) {
 		ax211_protocol_version_at(table, index, &entry);
@@ -269,7 +269,7 @@ drv_intel_ax211_protocol_alive_decode(
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return result;
 	bytes = message->payload;
-	memset(&decoded, 0, sizeof(decoded));
+	kern_memset(&decoded, 0, sizeof(decoded));
 	decoded.status = ax211_protocol_get_le16(bytes);
 	decoded.flags = ax211_protocol_get_le16(bytes + 2U);
 	ax211_protocol_lmac_decode(bytes + 4U, &decoded.lmac[0]);
@@ -405,7 +405,7 @@ drv_intel_ax211_protocol_nvm_get_info_decode(
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return result;
 	bytes = message->payload;
-	memset(&decoded, 0, sizeof(decoded));
+	kern_memset(&decoded, 0, sizeof(decoded));
 	decoded.general_flags = ax211_protocol_get_le32(bytes);
 	decoded.nvm_version = ax211_protocol_get_le16(bytes + 4U);
 	decoded.board_type = bytes[6];

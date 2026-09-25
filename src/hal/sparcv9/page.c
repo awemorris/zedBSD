@@ -57,7 +57,7 @@ reserve_range(uint64_t base, uint64_t size)
 void
 sparcv9_page_init(void)
 {
-	const struct sun4u_boot_handoff *h = sun4u_boot_handoff();
+	const struct kern_sun4u_boot_handoff *h = sun4u_boot_handoff();
 	uint64_t top = 0;
 	unsigned i;
 	for (i = 0; i < h->installed_count; i++) {

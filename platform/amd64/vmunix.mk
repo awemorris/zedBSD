@@ -65,8 +65,11 @@ EFI_CFLAGS := -std=c11 -ffreestanding -fshort-wchar -mno-red-zone \
 	-fno-unwind-tables -fno-ident -ffunction-sections -fdata-sections \
 	-Os -Wall -Wextra -Werror -I.
 
-AMD64_CPPFLAGS := -nostdinc \
-	-isystem $(ZEDBSD_SYSROOT_AMD64)/usr/include \
+# The kernel and the HAL read the compiler's freestanding headers (stdint.h,
+# stddef.h, stdbool.h, stdarg.h, limits.h) and the tree's own include/ and
+# src/, never the C library: -nostdlibinc keeps only the compiler's resource
+# directory from the system search list, so the sysroot is not read.
+AMD64_CPPFLAGS := -nostdlibinc \
 	-Iinclude -Isrc -I. \
 	-DHAL_ARCH_AMD64 -DHAL_BOARD_PCAT -DHAL_PCAT_DEBUGCON \
 	-DKERN_USER_ABI_LP64 \
@@ -77,8 +80,12 @@ AMD64_CFLAGS := -m64 -mcmodel=kernel -mno-red-zone -mgeneral-regs-only \
 	-ffreestanding -fno-pic -fno-pie -fno-stack-protector \
 	-fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
-	-Wframe-larger-than=8192
+	-Wframe-larger-than=8192 -fno-builtin
 AMD64_KERNEL_LIBC_CFLAGS := $(filter-out -mgeneral-regs-only,$(AMD64_CFLAGS))
+# Link-time optimization of vmunix (ws053): ZEDBSD_KERNEL_LTO_CFLAGS (from the
+# top Makefile) goes to every C object of the kernel, its drivers and the
+# HAL; the assembly stays native.
+AMD64_KERNEL_LTO_CFLAGS := $(ZEDBSD_KERNEL_LTO_CFLAGS)
 
 AMD64_HAL_SOURCES := src/hal/x86/rtc.c src/hal/x86/boot-parameters.c \
 	src/hal/x86/io.c \
@@ -123,6 +130,10 @@ endif
 AMD64_NVME_SOURCES :=
 ifeq ($(CONFIG_DRIVER_PCI_NVME),y)
 AMD64_NVME_SOURCES += src/drivers/pci/pci-nvme.c
+endif
+AMD64_HDA_SOURCES :=
+ifeq ($(CONFIG_DRIVER_PCI_HDA),y)
+AMD64_HDA_SOURCES += src/drivers/pci/pci-hda.c
 endif
 AMD64_VENUS_SOURCES :=
 ifeq ($(CONFIG_DRIVER_PCI_VENUS),y)
@@ -191,6 +202,9 @@ endif
 ifeq ($(CONFIG_DRIVER_USB_HID),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-hid.c
 endif
+ifeq ($(CONFIG_DRIVER_USB_HUB),y)
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-hub.c
+endif
 ifeq ($(CONFIG_DRIVER_USB_RTL8822BU),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/wifi/rtl8822b/rtl8822b.c \
 	src/drivers/wifi/rtl8822b/rtl8822b-security.c \
@@ -214,14 +228,16 @@ AMD64_KERNEL_SOURCES := \
 	$(AMD64_USB_CLASS_SOURCES) \
 	$(AMD64_NVME_SOURCES) \
 	$(AMD64_VENUS_SOURCES) \
+	$(AMD64_HDA_SOURCES) \
 	$(AMD64_I915_SOURCES) \
 	$(AMD64_INTEL_WLAN_SOURCES) \
 	src/drivers/platform/pcat/pcat-ide.c src/drivers/ethernet/dp8390.c \
 	src/drivers/isa/ne2000.c src/drivers/platform/pcat/ps2-8042.c \
 	src/drivers/disklabel/mbr.c src/drivers/disklabel/gpt.c \
 	src/drivers/disklabel/pcat.c src/kern/platform/pcat.c \
-	src/kern/panic.c src/kern/entry.c src/kern/clock.c \
-	src/kern/timer.c src/kern/klog.c \
+	src/kern/panic.c src/kern/entry.c src/kern/heap.c src/kern/clock.c \
+	src/kern/timer.c src/kern/klog.c src/kern/kcrt.c \
+	src/kern/random.c src/kern/random-crypto.c \
 	src/kern/device-io.c src/kern/irq.c src/kern/pmem.c \
 	src/kern/test-checkpoint.c \
 	src/kern/lock.c src/kern/waitq.c \
@@ -236,7 +252,7 @@ AMD64_KERNEL_SOURCES := \
 	src/drivers/generic/console.c \
 	src/drivers/generic/input.c \
 	$(KERN_GPU_SOURCES) \
-	src/kern/locale-record.c \
+	$(KERN_AUDIO_SOURCES) \
 	src/kern/tty.c \
 	src/drivers/generic/system-device.c src/drivers/generic/memory-device.c src/kern/shutdown.c \
 	src/drivers/platform/pcat/graphics/vgafont.c src/kern/init.c
@@ -258,17 +274,21 @@ AMD64_KERNEL_SOURCES += $(KERN_ACL_SOURCES)
 AMD64_KERNEL_SOURCES += $(KERN_QUOTA_SOURCES)
 AMD64_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kern64/%.o,\
 	$(AMD64_KERNEL_SOURCES))
-AMD64_KERNEL_LIBC_OBJS := $(patsubst %.c,$(BUILD)/kern64/%.o,\
-	$(ZEDBSD_LIBC_SOURCES))
-AMD64_VMUNIX_OBJS := $(AMD64_HAL_OBJS) $(AMD64_KERNEL_OBJS) \
-	$(AMD64_KERNEL_LIBC_OBJS)
+# The kernel links no C library object: kcrt (src/kern/kcrt.c) and the
+# kernel heap (src/kern/heap.c) supply what it used from libc.
+AMD64_VMUNIX_OBJS := $(AMD64_HAL_OBJS) $(AMD64_KERNEL_OBJS)
 ifneq ($(strip $(ZEDBSD_CONFIG)),)
 $(AMD64_VMUNIX_OBJS): $(ZEDBSD_CONFIG)
 $(AMD64_VMUNIX_OBJS): platform/amd64/vmunix.mk
 endif
 $(AMD64_VMUNIX_OBJS): $(ZEDBSD_PLATFORM_CONFIG_STAMP)
-# -MMD omits installed system headers. A refreshed ABI must rebuild consumers.
-$(AMD64_VMUNIX_OBJS): $(ZEDBSD_SYSROOT_AMD64)/.zedbsd-sysroot-complete
+$(AMD64_VMUNIX_OBJS): $(ZEDBSD_KERNEL_LTO_STAMP)
+# The kernel reads no C library source or header (the sysroot is not a
+# prerequisite): no libc source may appear in the link list, and the link
+# recipe checks every object's -MMD dependencies (check-kernel-includes.noct).
+$(if $(filter libc/% src/libc/%,$(AMD64_KERNEL_SOURCES)),\
+	$(error a C library source is in the amd64 kernel link list: \
+	$(filter libc/% src/libc/%,$(AMD64_KERNEL_SOURCES))))
 $(BUILD)/kern64/src/kern/vfs.o \
 	$(BUILD)/kern64/src/kern/platform/pcat.o: \
 	$(ZEDBSD_GRAPHICS_CONFIG_STAMP)
@@ -281,35 +301,36 @@ $(BUILD)/src/hal/amd64/%.o: src/hal/amd64/%.S
 
 $(BUILD)/src/hal/amd64/%.o: src/hal/amd64/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) -MMD -MP -c $< -o $@
+	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) $(AMD64_KERNEL_LTO_CFLAGS) -MMD -MP -c $< -o $@
 
 # Shared x86 HAL sources must use the amd64 flags as well. Without this
 # rule the generic i386 pattern can leave a 32-bit object in build/amd64.
-	@mkdir -p $(dir $@)
-	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) -MMD -MP -c $< -o $@
-
 $(BUILD)/src/hal/x86/%.o: src/hal/x86/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) -MMD -MP -c $< -o $@
+	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) $(AMD64_KERNEL_LTO_CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD)/kern64/src/kern/%.o: src/kern/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) -MMD -MP -c $< -o $@
+	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) $(AMD64_KERNEL_LTO_CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD)/kern64/src/drivers/%.o: src/drivers/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) -MMD -MP -c $< -o $@
+	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) $(AMD64_KERNEL_LTO_CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD)/kern64/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(AMD64_CPPFLAGS) $(AMD64_KERNEL_LIBC_CFLAGS) -fno-builtin \
- -fno-strict-aliasing -MMD -MP -c $< -o $@
+ -fno-strict-aliasing $(AMD64_KERNEL_LTO_CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD)/vmunix: $(AMD64_VMUNIX_OBJS) $(ZEDBSD_GRAPHICS_CONFIG_STAMP) \
 	$(AMD64_PLATFORM)/vmunix.ld \
-	platform/amd64/tools/check-amd64-vmunix.noct
+	platform/amd64/tools/check-amd64-vmunix.noct \
+	platform/amd64/tools/check-kernel-includes.noct
 	$(LD) -m elf_x86_64 --gc-sections -z max-page-size=4096 \
- -T $(AMD64_PLATFORM)/vmunix.ld -nostdlib $(AMD64_VMUNIX_OBJS) -o $@
+ -T $(AMD64_PLATFORM)/vmunix.ld -nostdlib -Map $@.map \
+ $(AMD64_VMUNIX_OBJS) -o $@
+	$(NOCT) --path=tools/build platform/amd64/tools/check-kernel-includes.noct \
+ $(wildcard $(AMD64_VMUNIX_OBJS:.o=.d)) || { rm -f $@; exit 1; }
 	$(NOCT) --path=tools/build platform/amd64/tools/check-amd64-vmunix.noct $@
 
 $(BUILD)/bootloader/stage1.o: $(BIOS_LOADER)/stage1.S \
@@ -386,13 +407,13 @@ $(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
 	bootloader/include/boot-parameter-handoff.h \
 	bootloader/include/boot-parameter-record.inc \
 	bootloader/uefi/zedbsd-config.h \
-	include/boot/parameter-handoff.h include/boot/parameters.h
+	include/kern/boot.h
 	@mkdir -p $(dir $@)
 	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
 
 $(BUILD)/bootloader/bios-zedbsd-config.i386.o: \
 	bootloader/uefi/zedbsd-config.c bootloader/uefi/zedbsd-config.h \
-	bootloader/include/boot-parameter-handoff.h include/boot/parameters.h
+	bootloader/include/boot-parameter-handoff.h include/kern/boot.h
 	@mkdir -p $(dir $@)
 	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
  -fno-stack-protector -fno-asynchronous-unwind-tables \
@@ -436,7 +457,7 @@ $(BUILD)/uefi/bootx64.o: $(UEFI_LOADER)/bootx64.c \
 	bootloader/include/amd64-handoff.h \
 	bootloader/include/amd64-kernel-image.h \
 	bootloader/include/boot-parameter-handoff.h \
-	include/boot/parameter-handoff.h include/boot/parameters.h
+	include/kern/boot.h
 	@mkdir -p $(dir $@)
 	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
 
@@ -452,14 +473,14 @@ $(BUILD)/uefi/framebuffer.o: $(UEFI_LOADER)/framebuffer.c \
 
 $(BUILD)/uefi/video.o: $(UEFI_LOADER)/video.c $(UEFI_LOADER)/video.h \
 	$(UEFI_LOADER)/include/uefi.h bootloader/include/boot-parameter-handoff.h \
-	include/boot/parameter-handoff.h include/boot/parameters.h
+	include/kern/boot.h
 	@mkdir -p $(dir $@)
 	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
 
 $(BUILD)/uefi/zedbsd-config.o: $(UEFI_LOADER)/zedbsd-config.c \
 	$(UEFI_LOADER)/zedbsd-config.h \
 	bootloader/include/boot-parameter-handoff.h \
-	include/boot/parameter-handoff.h include/boot/parameters.h
+	include/kern/boot.h
 	@mkdir -p $(dir $@)
 	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
 
@@ -476,7 +497,7 @@ $(BUILD)/uefi/memory-map.o: $(UEFI_LOADER)/memory-map.c \
 
 $(BUILD)/src/hal/amd64/locore.o: bootloader/include/amd64-handoff.h \
 	bootloader/include/boot-parameter-handoff.h \
-	include/boot/parameter-handoff.h include/boot/parameters.h
+	include/kern/boot.h
 
 $(BUILD)/uefi/transition.o: $(UEFI_LOADER)/transition.S
 	@mkdir -p $(dir $@)
@@ -513,11 +534,11 @@ AMD64_USER_RUNTIME_SOURCES := userland/base/libc/posix.c userland/base/libc/dlfc
 	userland/base/libc/socket.c userland/base/libc/resolver.c \
 	userland/base/libc/resolver-dns.c \
 	userland/base/libc/signal.c userland/base/libc/account.c userland/base/libc/crypt.c \
-	userland/base/libc/utmpx.c libc/heap.c libc/string.c libc/ctype.c \
-	libc/locale.c libc/wide.c \
-	libc/int64.c libc/strto.c libc/format.c libc/stdio.c \
+	userland/base/libc/utmpx.c src/libc/heap.c src/libc/string.c src/libc/ctype.c \
+	src/libc/locale.c src/libc/wide.c \
+	src/libc/int64.c src/libc/strto.c src/libc/format.c src/libc/stdio.c \
 	$(ZEDBSD_LIBC_USER_EXTRA_SOURCES)
-AMD64_USER_LIBC_OBJS := $(BUILD)/user64/src/crt/crt0-amd64.o \
+AMD64_USER_LIBC_OBJS := $(BUILD)/user64/src/libc/crt/crt0-amd64.o \
 	$(patsubst %.c,$(BUILD)/user64/%.o,$(AMD64_USER_RUNTIME_SOURCES))
 # User programs consume the canonical target sysroot. The relocatable libc
 # bundle preserves the established whole-runtime static link semantics while
@@ -531,12 +552,31 @@ AMD64_USER_READLINE_OBJ := $(BUILD)/user64/userland/base/libedit/readline.o
 AMD64_USER_READLINE_LIB := $(BUILD)/lib/libreadline.a
 AMD64_USER_ELF_CHECK := tools/build/check-user-elf.noct
 
+# The base programs are position-independent executables that load
+# /lib/libc.so through /lib/ld.so; their objects are the -fPIC ones built
+# under $(BUILD)/dynamic/obj.  (The POSIX-R and other test ELF files below
+# stay static: they test the static runtime itself.)
+AMD64_APP_OBJ := $(BUILD)/dynamic/obj
+AMD64_APP_INPUTS := $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
+	$(BUILD)/dynamic/libc.so $(BUILD)/dynamic/ld.so \
+	tools/build/check-dynamic-elf.py
+AMD64_APP_LINK = $(CC) -m64 -nostdlib -pie -Wl,--no-relax -Wl,--gc-sections \
+ -Wl,--hash-style=sysv,-z,now,-z,relro,-z,separate-code \
+ -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
+ -Wl,--dynamic-linker=/lib/ld.so $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o
+AMD64_APP_LIBS = -L$(BUILD)/dynamic -Wl,-rpath-link,$(BUILD)/dynamic -l:libc.so
+AMD64_APP_CHECK = $(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 \
+ --role application --needed libc.so
+AMD64_APP_SH_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(AMD64_APP_OBJ),sh) \
+	$(AMD64_APP_OBJ)/userland/base/libedit/readline.o
+$(AMD64_APP_SH_OBJS): DYNAMIC_CPPFLAGS += -Iuserland/base/libedit
+
 $(BUILD)/user64/%.o: %.c $(ZEDBSD_SYSROOT_AMD64)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(CC) $(AMD64_USER_CPPFLAGS) $(AMD64_USER_CFLAGS) \
  -fno-strict-aliasing -MMD -MP -c $< -o $@
 
-$(BUILD)/user64/src/crt/crt0-amd64.o: src/crt/crt0-amd64.S \
+$(BUILD)/user64/src/libc/crt/crt0-amd64.o: src/libc/crt/crt0-amd64.S \
 	include/hal/arch.h include/hal/arch/amd64.h
 	@mkdir -p $(dir $@)
 	$(CC) $(AMD64_USER_CPPFLAGS) $(AMD64_USER_CFLAGS) -c $< -o $@
@@ -547,8 +587,11 @@ $(AMD64_USER_READLINE_LIB): $(AMD64_USER_READLINE_OBJ)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
 
+# /lib/libcurses.a is what a program built on or for the target links, and
+# those programs are position independent, so the archive holds the
+# position-independent objects the shared libraries are built from.
 AMD64_USER_CURSES_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,\
-	$(BUILD)/user64,curses)
+	$(BUILD)/dynamic/obj,curses)
 $(BUILD)/lib/libcurses.a: $(AMD64_USER_CURSES_OBJS)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
@@ -581,21 +624,6 @@ $(BUILD)/POSIX-R2-REMAINING.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
  $(BUILD)/user64/userland/base/tests/posix-r2-remaining.o -o $@
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
-# WS008 NOCT-T020 test-only executable. It is not part of the base-system
-# program registry; the owning QEMU runner explicitly builds and injects it
-# into a disposable image.
-AMD64_NOCT_JIT_VM_PROBE_OBJ := \
-	$(BUILD)/user64/plan/ws008/tests/noct-jit-vm-probe.o
-$(BUILD)/NOCT-JIT-VM-PROBE.ELF: $(AMD64_USER_LIBC_OBJS) \
-	$(AMD64_NOCT_JIT_VM_PROBE_OBJ) $(AMD64_PLATFORM)/user.ld \
-	$(AMD64_USER_ELF_CHECK)
-	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
- -z max-page-size=4096 -z stack-size=0x100000 \
- -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
- $(AMD64_NOCT_JIT_VM_PROBE_OBJ) -o $@
-	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
-	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
-
 $(BUILD)/SUSV4-XSI.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 	$(BUILD)/user64/userland/base/tests/susv4-xsi.o \
 	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
@@ -608,17 +636,10 @@ $(BUILD)/SUSV4-XSI.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 
 susv4-xsi-user-test: $(BUILD)/SUSV4-XSI.ELF
 
-$(BUILD)/bin/sh: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SH_OBJS) \
-	$(AMD64_USER_READLINE_LIB) \
-	$(AMD64_PLATFORM)/user.ld \
-	$(AMD64_USER_ELF_CHECK)
+$(BUILD)/bin/sh: $(AMD64_APP_INPUTS) $(AMD64_APP_SH_OBJS)
 	@mkdir -p $(dir $@)
-	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
- -z max-page-size=4096 -z stack-size=0x100000 \
- -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
- $(AMD64_USER_SH_OBJS) $(AMD64_USER_READLINE_LIB) -o $@
-	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
-	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+	$(AMD64_APP_LINK) $(AMD64_APP_SH_OBJS) $(AMD64_APP_LIBS) -o $@
+	$(AMD64_APP_CHECK) $@
 
 $(BUILD)/SMP-STRESS.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 	$(BUILD)/user64/userland/base/tests/smp-resource-stress.o \
@@ -630,27 +651,17 @@ $(BUILD)/SMP-STRESS.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
-AMD64_USER_SYSCTL_OBJ := $(BUILD)/user64/userland/base/sysctl/main.o
-$(BUILD)/bin/sysctl: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SYSCTL_OBJ) \
-	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+AMD64_USER_SYSCTL_OBJ := $(AMD64_APP_OBJ)/userland/base/sysctl/main.o
+$(BUILD)/bin/sysctl: $(AMD64_APP_INPUTS) $(AMD64_USER_SYSCTL_OBJ)
 	@mkdir -p $(dir $@)
-	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
- -z max-page-size=4096 -z stack-size=0x100000 \
- -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
- $(AMD64_USER_SYSCTL_OBJ) -o $@
-	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
-	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+	$(AMD64_APP_LINK) $(AMD64_USER_SYSCTL_OBJ) $(AMD64_APP_LIBS) -o $@
+	$(AMD64_APP_CHECK) $@
 
-AMD64_USER_MOUNT_OBJ := $(BUILD)/user64/userland/base/mount/main.o
-$(BUILD)/bin/mount: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_MOUNT_OBJ) \
-	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+AMD64_USER_MOUNT_OBJ := $(AMD64_APP_OBJ)/userland/base/mount/main.o
+$(BUILD)/bin/mount: $(AMD64_APP_INPUTS) $(AMD64_USER_MOUNT_OBJ)
 	@mkdir -p $(dir $@)
-	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
- -z max-page-size=4096 -z stack-size=0x100000 \
- -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
- $(AMD64_USER_MOUNT_OBJ) -o $@
-	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
-	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+	$(AMD64_APP_LINK) $(AMD64_USER_MOUNT_OBJ) $(AMD64_APP_LIBS) -o $@
+	$(AMD64_APP_CHECK) $@
 $(BUILD)/bin/umount: $(BUILD)/bin/mount
 	@mkdir -p $(dir $@)
 	cp -f $< $@
@@ -659,42 +670,31 @@ $(BUILD)/bin/umount: $(BUILD)/bin/mount
 
 USER_NET_COMMANDS := $(USERLAND_SELECTED_NETWORK_PROGRAMS)
 USER_NET_COMMAND_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_NET_COMMANDS))
-AMD64_USER_NET_COMMON_OBJS := $(BUILD)/user64/userland/base/net/netutil.o \
-	$(BUILD)/user64/userland/base/net/dhcp.o
-AMD64_USER_NET_COMMAND_OBJS := $(addsuffix /main.o, \
-	$(addprefix $(BUILD)/user64/userland/,$(USER_NET_COMMANDS)))
+AMD64_USER_NET_COMMON_OBJS := $(AMD64_APP_OBJ)/userland/base/net/netutil.o \
+	$(AMD64_APP_OBJ)/userland/base/net/dhcp.o
 
 define AMD64_USER_NET_COMMAND
-$(BUILD)/bin/$(1): $(AMD64_USER_NET_LIBC_OBJS) \
-	$(AMD64_USER_NET_COMMON_OBJS) $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,$(1)) \
-	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+$(BUILD)/bin/$(1): $(AMD64_APP_INPUTS) $(AMD64_USER_NET_COMMON_OBJS) \
+	$(call ZEDBSD_USERLAND_OBJECTS,$(AMD64_APP_OBJ),$(1))
 	@mkdir -p $$(dir $$@)
-	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
- -z max-page-size=4096 -z stack-size=0x100000 \
- -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
- $(AMD64_USER_NET_COMMON_OBJS) \
- $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,$(1)) -o $$@
-	@test -z "$$$$($(NM) -u $$@)" || { $(NM) -u $$@; exit 1; }
-	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $$@
+	$(AMD64_APP_LINK) $(AMD64_USER_NET_COMMON_OBJS) \
+ $(call ZEDBSD_USERLAND_OBJECTS,$(AMD64_APP_OBJ),$(1)) $(AMD64_APP_LIBS) -o $$@
+	$(AMD64_APP_CHECK) $$@
 endef
 $(foreach command,$(USER_NET_COMMANDS),\
 	$(eval $(call AMD64_USER_NET_COMMAND,$(command))))
 USER_BASIC_COMMANDS := $(filter $(ZEDBSD_USER_PROGRAMS),$(USERLAND_BASIC_PROGRAMS))
 USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
-AMD64_USER_BASIC_COMMON_OBJ := $(BUILD)/user64/userland/base/common/command.o $(BUILD)/user64/userland/base/common/pager.o
+AMD64_USER_BASIC_COMMON_OBJ := $(AMD64_APP_OBJ)/userland/base/common/command.o \
+	$(AMD64_APP_OBJ)/userland/base/common/pager.o
 
 define AMD64_USER_BASIC_COMMAND
-$(BUILD)/bin/$(1): $(AMD64_USER_LIBC_OBJS) \
-	$(AMD64_USER_BASIC_COMMON_OBJ) $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,$(1)) \
-	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+$(BUILD)/bin/$(1): $(AMD64_APP_INPUTS) $(AMD64_USER_BASIC_COMMON_OBJ) \
+	$(call ZEDBSD_USERLAND_OBJECTS,$(AMD64_APP_OBJ),$(1))
 	@mkdir -p $$(dir $$@)
-	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
- -z max-page-size=4096 -z stack-size=0x100000 \
- -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
- $(AMD64_USER_BASIC_COMMON_OBJ) \
- $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,$(1)) -o $$@
-	@test -z "$$$$($(NM) -u $$@)" || { $(NM) -u $$@; exit 1; }
-	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $$@
+	$(AMD64_APP_LINK) $(AMD64_USER_BASIC_COMMON_OBJ) \
+ $(call ZEDBSD_USERLAND_OBJECTS,$(AMD64_APP_OBJ),$(1)) $(AMD64_APP_LIBS) -o $$@
+	$(AMD64_APP_CHECK) $$@
 endef
 $(foreach command,$(filter-out vkdemo wltest mview gpu-share-test gpu-fence-test,$(USER_BASIC_COMMANDS)),\
 	$(eval $(call AMD64_USER_BASIC_COMMAND,$(command))))
@@ -716,10 +716,10 @@ DYNAMIC_LIBC_SOURCES := userland/base/libc/posix.c userland/base/libc/poll.c \
 	userland/base/libc/semaphore.c userland/base/libc/mqueue.c userland/base/libc/dlfcn.c \
 	userland/base/libc/socket.c userland/base/libc/resolver.c \
 	userland/base/libc/resolver-dns.c userland/base/libc/signal.c \
-	userland/base/libc/account.c userland/base/libc/crypt.c userland/base/libc/utmpx.c libc/heap.c \
-	libc/string.c libc/ctype.c libc/locale.c libc/wide.c libc/int64.c \
-	libc/strto.c libc/format.c \
-	libc/stdio.c $(ZEDBSD_LIBC_USER_EXTRA_SOURCES)
+	userland/base/libc/account.c userland/base/libc/crypt.c userland/base/libc/utmpx.c src/libc/heap.c \
+	src/libc/string.c src/libc/ctype.c src/libc/locale.c src/libc/wide.c src/libc/int64.c \
+	src/libc/strto.c src/libc/format.c \
+	src/libc/stdio.c $(ZEDBSD_LIBC_USER_EXTRA_SOURCES)
 DYNAMIC_LIBC_OBJS := $(patsubst %.c,$(DYNAMIC_DIR)/obj/%.o,\
 	$(DYNAMIC_LIBC_SOURCES)) $(DYNAMIC_DIR)/obj/userland/base/libc/syscall.o
 DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/src/rtld/entry.o \
@@ -728,7 +728,7 @@ DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/src/rtld/entry.o \
 	$(DYNAMIC_DIR)/obj/src/rtld/string.o
 DYNAMIC_FLOAT_DIR := $(DYNAMIC_DIR)/float
 DYNAMIC_LIBM_OBJ := $(DYNAMIC_FLOAT_DIR)/math.o
-DYNAMIC_FLOAT_PARSE_OBJS := $(DYNAMIC_FLOAT_DIR)/zed-softfloat.o \
+DYNAMIC_FLOAT_PARSE_OBJS := $(DYNAMIC_FLOAT_DIR)/softfloat.o \
 	$(DYNAMIC_FLOAT_DIR)/float-parse.o
 DYNAMIC_LIBC_OBJS += $(DYNAMIC_LIBM_OBJ) $(DYNAMIC_FLOAT_PARSE_OBJS)
 
@@ -752,24 +752,24 @@ $(DYNAMIC_DIR)/obj/src/rtld/tlsdesc.o: src/rtld/tlsdesc-amd64.S
 
 $(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o: DYNAMIC_CFLAGS += -mtls-dialect=gnu2
 
-$(DYNAMIC_LIBM_OBJ): libc/math.c src/softfloat/zed-softfloat.h
+$(DYNAMIC_LIBM_OBJ): src/libc/math.c src/libc/softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -Iinclude -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Iinclude/libc -Iinclude -I. $(DYNAMIC_CFLAGS) \
  -mlong-double-64 -c $< -o $@
 
-$(DYNAMIC_FLOAT_DIR)/zed-softfloat.o: src/softfloat/zed-softfloat.c \
-	src/softfloat/zed-softfloat.h
+$(DYNAMIC_FLOAT_DIR)/softfloat.o: src/libc/softfloat.c \
+	src/libc/softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -Iinclude -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Iinclude/libc -Iinclude -I. $(DYNAMIC_CFLAGS) \
  -mlong-double-64 -c $< -o $@
 
-$(DYNAMIC_FLOAT_DIR)/float-parse.o: libc/float-parse.c \
-	src/softfloat/zed-softfloat.h
+$(DYNAMIC_FLOAT_DIR)/float-parse.o: src/libc/float-parse.c \
+	src/libc/softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -Iinclude -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Iinclude/libc -Iinclude -I. $(DYNAMIC_CFLAGS) \
  -mlong-double-64 -c $< -o $@
 
-$(DYNAMIC_DIR)/obj/src/crt/crt1.o: src/crt/crt1-amd64.S
+$(DYNAMIC_DIR)/obj/src/libc/crt/crt1.o: src/libc/crt/crt1-amd64.S
 	@mkdir -p $(dir $@)
 	$(CC) -m64 -c $< -o $@
 
@@ -784,7 +784,7 @@ $(DYNAMIC_DIR)/libc.so: $(DYNAMIC_LIBC_OBJS)
 # The utility library.  It holds what is not part of the C library and not
 # wanted by every program, and is built from the same tree so that the two
 # cannot drift apart.
-DYNAMIC_LIBUTIL_OBJS := $(DYNAMIC_DIR)/obj/libc/libutil.o
+DYNAMIC_LIBUTIL_OBJS := $(DYNAMIC_DIR)/obj/src/libc/libutil.o
 
 $(DYNAMIC_DIR)/libutil.so: $(DYNAMIC_LIBUTIL_OBJS) $(DYNAMIC_DIR)/libc.so \
 	tools/build/check-dynamic-elf.py
@@ -805,6 +805,31 @@ $(DYNAMIC_DIR)/libwayland-client.so: $(DYNAMIC_WAYLAND_OBJS) $(DYNAMIC_DIR)/libc
  $(DYNAMIC_WAYLAND_OBJS) -L$(DYNAMIC_DIR) -l:libc.so -o $@
 	$(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 --role shared-library \
  --needed libc.so --soname libwayland-client.so $@
+
+# The TrueType reader draws glyphs for whoever puts text on a display; it
+# needs nothing but the C library and the mathematics in it.
+DYNAMIC_TRUETYPE_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libtruetype)
+
+$(DYNAMIC_DIR)/libtruetype.so: $(DYNAMIC_TRUETYPE_OBJS) $(DYNAMIC_DIR)/libc.so \
+	userland/base/libtruetype/exports.map tools/build/check-dynamic-elf.py
+	$(LD) -m elf_x86_64 -shared -soname libtruetype.so --hash-style=both \
+ -z defs -z now -z relro -z separate-code -z stack-size=0x100000 \
+ --version-script=userland/base/libtruetype/exports.map \
+ $(DYNAMIC_TRUETYPE_OBJS) -L$(DYNAMIC_DIR) -l:libc.so -o $@
+	$(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 --role shared-library \
+ --needed libc.so --soname libtruetype.so $@
+
+# The desktop's way into the system; it needs nothing but the C library.
+DYNAMIC_ZDESKTOP_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libzdesktop)
+
+$(DYNAMIC_DIR)/libzdesktop.so: $(DYNAMIC_ZDESKTOP_OBJS) $(DYNAMIC_DIR)/libc.so \
+	userland/base/libzdesktop/exports.map tools/build/check-dynamic-elf.py
+	$(LD) -m elf_x86_64 -shared -soname libzdesktop.so --hash-style=both \
+ -z defs -z now -z relro -z separate-code -z stack-size=0x100000 \
+ --version-script=userland/base/libzdesktop/exports.map \
+ $(DYNAMIC_ZDESKTOP_OBJS) -L$(DYNAMIC_DIR) -l:libc.so -o $@
+	$(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 --role shared-library \
+ --needed libc.so --soname libzdesktop.so $@
 
 # Vulkan is an ordinary shared dependency of the portable base application.
 DYNAMIC_VULKAN_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libvulkan)
@@ -1013,13 +1038,13 @@ AMD64_ARCH_FILES += $(ZEDBSD_TEST_EXTRA_FILES)
 AMD64_ARCH_INPUTS += $(ZEDBSD_TEST_RC_CONF) \
 	$(wildcard $(foreach a,$(ZEDBSD_TEST_EXTRA_FILES),$(lastword $(subst =, ,$(a)))))
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AMD64_ARCH_IMAGE),amd64,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))
-$(eval $(call ZEDBSD_ROOTFS_TAR_RULE,$(BUILD)/rootfs.tar.gz,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))
-AMD64_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/amd64.ufs
-# E-127: a test rootfs gets its own cached image, never the shared one
+$(eval $(call ZEDBSD_ROOTFS_TREE_RULE,amd64,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))
+AMD64_ARCH_UFS_IMAGE := $(ZEDBSD_ROOTFS_IMAGE_DIR)/amd64.ufs
+# E-127: a test rootfs gets its own cached image, apart from the build's own
 ifneq ($(ZEDBSD_TEST_IMAGE_TAG),)
-AMD64_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/amd64-$(ZEDBSD_TEST_IMAGE_TAG).ufs
+AMD64_ARCH_UFS_IMAGE := $(ZEDBSD_ROOTFS_IMAGE_DIR)/amd64-$(ZEDBSD_TEST_IMAGE_TAG).ufs
 endif
-$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_ARCH_UFS_IMAGE),amd64,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))
+$(eval $(call ZEDBSD_ROOTFS_UFS_IMAGE_RULE,$(AMD64_ARCH_UFS_IMAGE),amd64))
 rootfs: $(BUILD)/rootfs/.stamp
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
@@ -1083,6 +1108,53 @@ $(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
  --swapfile $(SWAP_IMAGE) \
  --fragment-kernel $@
 
+ifeq ($(ZEDBSD_VARIANT),native)
+# WS062: the native layout.  The ESP carries the UEFI loader, the kernel and
+# zedbsd.cfg; the root is a UFS partition mounted read-write through
+# rootpart=; swap is a partition of its own.  Nothing is layered: a write
+# to the root goes to its partition, not through a loop device into a file
+# on FAT.  The root image is built from the same staged tree as the overlay
+# layout's rootfs.img, with room and inodes to be written to.
+AMD64_NATIVE_UEFI_ZEDBSD_CONFIG := $(AMD64_PLATFORM)/zedbsd-native-uefi.cfg
+AMD64_NATIVE_ROOT_MIB ?= 4096
+AMD64_NATIVE_ROOT_INODES ?= 65536
+AMD64_NATIVE_SWAP_MIB ?= 4096
+AMD64_NATIVE_ROOT_IMAGE := $(ZEDBSD_ROOTFS_IMAGE_DIR)/amd64-native-root.ufs
+ifneq ($(ZEDBSD_TEST_IMAGE_TAG),)
+AMD64_NATIVE_ROOT_IMAGE := $(ZEDBSD_ROOTFS_IMAGE_DIR)/amd64-native-root-$(ZEDBSD_TEST_IMAGE_TAG).ufs
+endif
+AMD64_NATIVE_SWAP_IMAGE := $(BUILD)/native-swap.img
+
+$(AMD64_NATIVE_ROOT_IMAGE): $(BUILD)/rootfs/.stamp $(ARCH_UFS_IMAGE_TOOLS)
+	@mkdir -p $(dir $@)
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) \
+ $(BUILD_TOOLS_DIR)/make-arch-overlay-ufs.noct \
+ --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force \
+ --profile amd64 --output $@ --tree $(BUILD)/rootfs \
+ --size-mib $(AMD64_NATIVE_ROOT_MIB) --min-inodes $(AMD64_NATIVE_ROOT_INODES)
+
+$(AMD64_NATIVE_SWAP_IMAGE): $(BUILD_TOOLS_DIR)/make-swapfile.noct
+	@mkdir -p $(dir $@)
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/make-swapfile.noct \
+ --size-mib $(AMD64_NATIVE_SWAP_MIB) --output $@
+
+$(BUILD)/hdd-image.img: $(BUILD)/vmunix $(BUILD)/uefi/BOOTX64.EFI \
+	$(AMD64_NATIVE_UEFI_ZEDBSD_CONFIG) $(AMD64_NATIVE_ROOT_IMAGE) \
+	$(AMD64_NATIVE_SWAP_IMAGE) $(ZEDBSD_IMAGE_HOST) \
+	$(AMD64_IMAGE_CONTRACT_STAMP) \
+	platform/amd64/tools/check-amd64-native-image.py
+	$(ZEDBSD_IMAGE_HOST) disk --machine pcat --layout native \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_NATIVE_UEFI_ZEDBSD_CONFIG) \
+ --ufs-root $(AMD64_NATIVE_ROOT_IMAGE) --swapfile $(AMD64_NATIVE_SWAP_IMAGE) \
+ $@.unchecked
+	$(PYTHON) platform/amd64/tools/check-amd64-native-image.py \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_NATIVE_UEFI_ZEDBSD_CONFIG) \
+ --ufs-root $(AMD64_NATIVE_ROOT_IMAGE) --swap $(AMD64_NATIVE_SWAP_IMAGE) \
+ $@.unchecked
+	mv -f $@.unchecked $@
+else
 $(BUILD)/hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage1-native.bin \
 	$(BUILD)/bootloader/stage2-chain.bin $(BUILD)/bootloader/partition-pbr.bin \
@@ -1106,6 +1178,7 @@ $(BUILD)/hdd-image.img: $(BUILD)/bootloader/stage1.bin \
  --arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
  --arch-format ufs --data-image $(DATA_IMAGE) \
  --swapfile $(SWAP_IMAGE) $@
+endif
 
 AMD64_DEFERRED_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-deferred-test.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_DEFERRED_TEST_UFS),amd64,\
@@ -1539,4 +1612,4 @@ $(BUILD)/bootloader/common-memory-map.i386.o: bootloader/common/memory-map.c boo
  -c $< -o $@
 
 # The copied boot-source record is part of the UEFI producer ABI.
-$(BUILD)/uefi/bootx64.o $(BUILD)/uefi/volume-discovery.o: include/boot/provenance.h
+$(BUILD)/uefi/bootx64.o $(BUILD)/uefi/volume-discovery.o: include/kern/boot.h

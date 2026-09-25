@@ -24,7 +24,7 @@
 
 #include <hal/hal.h>
 
-#include <string.h>
+#include <kern/kcrt.h>
 
 #include "../defs.h"
 #include "../irq.h"

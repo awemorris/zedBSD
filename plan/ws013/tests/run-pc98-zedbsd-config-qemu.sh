@@ -52,7 +52,7 @@ temporary=$(mktemp -d /tmp/ws013-p006-pc98.XXXXXX)
 trap 'rm -rf -- "$temporary"' EXIT HUP INT TERM
 decoder=$temporary/boot-parameter-image-tool
 cc -std=c11 -Wall -Wextra -Werror \
-	"$repo/plan/ws003/tests/boot-parameter-image-tool.c" \
+	"$repo/plan/tools/boot-parameter-image-tool.c" \
 	-o "$decoder"
 
 qemu_common=(

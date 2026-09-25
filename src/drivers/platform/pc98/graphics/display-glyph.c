@@ -10,8 +10,8 @@
  */
 
 #include "drivers/platform/pc98/graphics/display-glyph.h"
+#include <kern/kcrt.h>
 
-#include <string.h>
 
 /* Share the kernel's JIS X 0208 table instead of carrying a duplicate. */
 extern const uint16_t hal_pc98_jisx0208_to_ucs[7896];
@@ -110,7 +110,7 @@ drv_pc98_glyph_default(
 	pc98_out8_fn port_out8,
 	void *io_context)
 {
-	memset(backend, 0, sizeof(*backend));
+	kern_memset(backend, 0, sizeof(*backend));
 	backend->port_in8 = port_in8;
 	backend->port_out8 = port_out8;
 	backend->io_context = io_context;
@@ -133,7 +133,7 @@ drv_pc98_glyph_make_hal(
 		/* Succeeded. */
 		return 0;
 	}
-	memset(hal, 0, sizeof(*hal));
+	kern_memset(hal, 0, sizeof(*hal));
 	hal->context = backend;
 	hal->measure = glyph_measure;
 	hal->draw = glyph_draw;
@@ -178,7 +178,7 @@ read_font(
 			/* Handles the backend condition. */
 			if (backend->cache[index].valid &&
 			    backend->cache[index].jis == jis) {
-				memcpy(font, backend->cache[index].font, 32);
+				kern_memcpy(font, backend->cache[index].font, 32);
 
 				/* Reports operation failure. */
 				return 1;
@@ -186,7 +186,7 @@ read_font(
 		}
 	}
 
-	memset(font, 0, 32);
+	kern_memset(font, 0, 32);
 	wait_vsync(backend);
 	backend->port_out8(backend->io_context, 0x68, 0x0b);
 
@@ -229,7 +229,7 @@ read_font(
 		index = backend->cache_next++ % 64U;
 		backend->cache[index].jis = jis;
 		backend->cache[index].valid = 1;
-		memcpy(backend->cache[index].font, font, 32);
+		kern_memcpy(backend->cache[index].font, font, 32);
 	}
 
 	/* Reports operation failure. */

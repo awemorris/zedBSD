@@ -24,10 +24,10 @@
 #include "kern/thread.h"
 #include "internal.h"
 #include "wire.h"
+#include <kern/kcrt.h>
 
 #include <uapi/netinet.h>
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 #define ARP_CACHE_MAX 16U
 #define ARP_HARDWARE_ETHERNET 1U
@@ -80,7 +80,7 @@ arp_purge_device(
 		if (!cache[index].valid || cache[index].device != device)
 			continue;
 		references[count++] = cache[index].device;
-		memset(&cache[index], 0, sizeof(cache[index]));
+		kern_memset(&cache[index], 0, sizeof(cache[index]));
 	}
 
 	if (count != 0)
@@ -121,7 +121,7 @@ arp_resolve(
 	if (address == INADDR_BROADCAST ||
 	    (inet_interface_address(device, &local, &mask, &broadcast) == 0 &&
 	     address == broadcast)) {
-		memset(hardware, 0xff, 6);
+		kern_memset(hardware, 0xff, 6);
 		return 0;
 	}
 
@@ -246,7 +246,7 @@ arp_init(
 	}
 
 	/* Starts with an empty cache. */
-	memset(cache, 0, sizeof(cache));
+	kern_memset(cache, 0, sizeof(cache));
 	replacement = 0;
 	spin_init(&cache_lock, LOCK_RANK_NETWORK, "ARP cache");
 	waitq_init(&cache_waitq, "ARP resolution");
@@ -276,7 +276,7 @@ arp_lookup_locked(
 		if (cache[index].valid &&
 		    cache[index].device == device &&
 		    cache[index].address == address) {
-			memcpy(hardware, cache[index].hardware, 6);
+			kern_memcpy(hardware, cache[index].hardware, 6);
 			return 0;
 		}
 	}
@@ -342,7 +342,7 @@ arp_learn(
 	/* Publishes the entry and wakes the waiting resolvers. */
 	cache[slot].device = device;
 	cache[slot].address = address;
-	memcpy(cache[slot].hardware, hardware, 6);
+	kern_memcpy(cache[slot].hardware, hardware, 6);
 	cache[slot].valid = 1;
 	waitq_wake_all(&cache_waitq);
 
@@ -386,16 +386,16 @@ arp_send(
 	}
 
 	/* Fills the Ethernet/IPv4 ARP body. */
-	memset(arp, 0, sizeof(*arp));
+	kern_memset(arp, 0, sizeof(*arp));
 	wire_put16(arp->hardware_type, ARP_HARDWARE_ETHERNET);
 	wire_put16(arp->protocol_type, ETHERNET_TYPE_IPV4);
 	arp->hardware_length = 6;
 	arp->protocol_length = 4;
 	wire_put16(arp->operation, operation);
-	memcpy(arp->sender_hardware, device->hwaddr, 6);
+	kern_memcpy(arp->sender_hardware, device->hwaddr, 6);
 	wire_put32(arp->sender_protocol, source);
 	if (target_hardware != NULL)
-		memcpy(arp->target_hardware, target_hardware, 6);
+		kern_memcpy(arp->target_hardware, target_hardware, 6);
 	wire_put32(arp->target_protocol, target_address);
 
 	/* A request is broadcast; a reply goes to the requester. */

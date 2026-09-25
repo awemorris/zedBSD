@@ -1,0 +1,4 @@
+kernel handle/fd/SCM_RIGHTS: lifecycle, reservation, typed transfer, abort and cleanup PASS
+GPU fence payload: SCM_RIGHTS, exact-generation reset, producer authority, timeout and level poll PASS
+kernel handle/fd/SCM_RIGHTS: lifecycle, reservation, typed transfer, abort and cleanup PASS
+GPU fence payload: SCM_RIGHTS, exact-generation reset, producer authority, timeout and level poll PASS

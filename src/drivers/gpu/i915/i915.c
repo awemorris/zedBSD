@@ -23,18 +23,18 @@
 #include "resource.h"
 #include "session.h"
 #include "render/render.h"
+#include <kern/kcrt.h>
 
-#include <drivers/gpu.h>
-#include <drivers/i915.h>
-#include <drivers/pci.h>
+#include <drivers/gpu/gpu.h>
+#include <drivers/pci/pci-i915.h>
+#include <drivers/pci/pci.h>
 #include <kern/klog.h>
 #include <kern/kmem.h>
 #include <kern/lock.h>
 #include <kern/waitq.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 #include "intel/pci-ids.h"
 
@@ -52,7 +52,7 @@ static int i915_detach(struct drv_pci_device *pci, unsigned flags);
  * start log instead of programming the wrong registers.
  */
 int
-drv_i915_pci_driver_register(void)
+drv_pci_i915_driver_register(void)
 {
 	static const struct drv_pci_id identifiers[] = {
 		INTEL_TGL_IDS(I915_ID),
@@ -131,7 +131,7 @@ drv_i915_publish(
 	 */
 	for (index = 0U; index < I915_ENGINE_COUNT; index++) {
 		engine = &device->engines[index];
-		memset(engine, 0, sizeof(*engine));
+		kern_memset(engine, 0, sizeof(*engine));
 		engine->device = device;
 		engine->index = index;
 
@@ -154,7 +154,7 @@ drv_i915_publish(
 
 	/* Describes the node: its interface, its capabilities and every operation. */
 	ops = &device->gpu_ops;
-	memset(ops, 0, sizeof(*ops));
+	kern_memset(ops, 0, sizeof(*ops));
 	ops->version = DRV_GPU_INTERFACE_VERSION;
 	ops->size = sizeof(struct drv_gpu_ops);
 	ops->capabilities = I915_CAPABILITIES;

@@ -18,10 +18,10 @@
 #include "pci.h"
 #include "trace.h"
 
-#include <drivers/pci.h>
+#include <drivers/pci/pci.h>
 #include <hal/hal.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 
 /*

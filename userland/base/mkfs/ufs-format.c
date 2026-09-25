@@ -80,6 +80,10 @@ static void format_inode(uint8_t *buffer, uint32_t number, uint16_t mode, uint16
 static int format_inodes(struct format_context *context);
 static void make_cg(struct format_context *context, unsigned index, uint8_t *buffer);
 static void make_super(struct format_context *context, uint8_t *buffer);
+static void make_journal_request(uint8_t *buffer, uint64_t bytes);
+
+/* The journal size to record in MiB, or -1 for the default for the size. */
+static int64_t format_journal_mib = -1;
 
 /*
  * Validates the exact geometry supported by the maintained image backend.
@@ -1024,6 +1028,9 @@ make_super(
 	put64(buffer, UFS_FS_MAXFILESIZE, UINT64_C(0x7fffffffffffffff));
 	put32(buffer, UFS_FS_MAGIC, UFS_MAGIC);
 
+	/* Records the journal size the kernel makes the journal file with. */
+	make_journal_request(buffer, context->fragments * FORMAT_FRAGMENT);
+
 	/* Sum full and partial free blocks across all cylinder groups. */
 	free_blocks = 0;
 	partial_fragments = 0;
@@ -1126,3 +1133,60 @@ format_tail(
 	error = transfer(context, (cursor + 1U) * 512U, buffer, sizeof(buffer));
 	return error;
 }
+
+/*
+ * Chooses the journal size mkfs records; -1 selects the default for the
+ * volume's size.
+ */
+void
+ufs_format_set_journal_mib(
+	int64_t mib)
+{
+	format_journal_mib = mib;
+}
+
+/*
+ * Records the journal size in the superblock's spare words ("ZJ3R"): the
+ * ext4 (e2fsprogs) default for the volume's size, capped at 128 MiB, unless
+ * one was chosen.  The kernel makes the journal file of that size when it
+ * mounts the volume.
+ */
+static void
+make_journal_request(
+	uint8_t *buffer,
+	uint64_t bytes)
+{
+	uint8_t *record;
+	uint32_t mib;
+	uint32_t value;
+	unsigned index;
+
+	/* Takes the chosen size, or the table's for the volume. */
+	if (format_journal_mib >= 0)
+		mib = (uint32_t)format_journal_mib;
+	else if (bytes < (8ULL << 20))
+		mib = 0;
+	else if (bytes < (128ULL << 20))
+		mib = 4;
+	else if (bytes < (1ULL << 30))
+		mib = 16;
+	else if (bytes < (2ULL << 30))
+		mib = 32;
+	else if (bytes < (16ULL << 30))
+		mib = 64;
+	else
+		mib = 128;
+
+	/* Seals the record with the journal's FNV-1a checksum. */
+	record = buffer + 1248U;
+	memcpy(record, "ZJ3R", 4U);
+	put32(record, 4U, 1U);
+	put32(record, 8U, mib);
+	value = 2166136261U;
+	for (index = 0; index < 12U; index++) {
+		value ^= record[index];
+		value *= 16777619U;
+	}
+	put32(record, 12U, value);
+}
+

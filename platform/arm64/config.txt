@@ -1,10 +1,30 @@
 [pi4]
 arm_64bit=1
 kernel=vmunix
+# vmunix is linked to run at 0x80000; the firmware's 64-bit default is 0x200000.
+kernel_address=0x80000
 device_tree=bcm2711-rpi-4-b.dtb
 enable_gic=1
 enable_uart=1
+# The PL011 clock the kernel divides for 115200 baud (uart.c).
+init_uart_clock=48000000
+# The firmware logs its own boot on the same UART, which shows whether the
+# serial line works before the kernel starts.
+uart_2ndstage=1
 dtoverlay=disable-bt
 framebuffer_depth=32
 framebuffer_ignore_alpha=1
-hdmi_force_hotplug=1
+# No forced hotplug: forcing it (which applies to HDMI0) made an empty HDMI0
+# display 0, so the kernel's framebuffer went there while a monitor on HDMI1
+# kept the firmware's picture.  Without it, the display actually attached is
+# display 0 on either port.
+# A fixed 1920x1080 60 Hz (DMT mode 82) that a monitor keeps in sync, on both
+# ports, no overscan border, and a framebuffer of the same size, scanned out
+# 1:1.
+hdmi_group:0=2
+hdmi_mode:0=82
+hdmi_group:1=2
+hdmi_mode:1=82
+disable_overscan=1
+framebuffer_width=1920
+framebuffer_height=1080

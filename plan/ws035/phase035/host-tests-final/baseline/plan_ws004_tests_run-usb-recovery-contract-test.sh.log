@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/tmp/p035/baseline-head/plan/tools/driver-fragments/prepare.py", line 56, in <module>
+    prepare(parser.parse_args().source)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/p035/baseline-head/plan/tools/driver-fragments/prepare.py", line 35, in prepare
+    raise RuntimeError('Missing or ambiguous production section: ' + old)
+RuntimeError: Missing or ambiguous production section: src/drivers/disklabel/pc98-auto.c

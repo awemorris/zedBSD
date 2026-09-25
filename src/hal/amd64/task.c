@@ -231,7 +231,9 @@ hal_task_fork_current(
 	resume = (uintptr_t *)((uintptr_t)child->sys_stack +
 	    AMD64_SYS_STACK_SIZE - sizeof(*source) - 8U * sizeof(uintptr_t));
 	hal_memset(resume, 0, 8U * sizeof(uintptr_t));
-	resume[6] = 0x202U;
+
+	/* Interrupts stay off until the frame entry stub has released the departed task. */
+	resume[6] = 0x2U;
 	resume[7] = (uintptr_t)amd64_user_frame_entry;
 	copy = (struct amd64_interrupt_frame *)(resume + 8);
 	*copy = *source;
@@ -558,8 +560,13 @@ hal_task_context_switch(
 	if (target_cpu != current_cpu)
 		HAL_FATAL("amd64 HAL task resumed on wrong CPU");
 
-	/* Transfers running ownership in release order. */
-	__atomic_store_n(&from->run_cpu, -1, __ATOMIC_RELEASE);
+	/*
+	 * The departing task stays marked as running until the arriving
+	 * context has left its stack: amd64_task_finish_switch() clears it
+	 * after the stack switch below, so that another CPU cannot resume a
+	 * task whose stack is still being pushed to.
+	 */
+	amd64_percpu_current()->switching_from = from;
 	current_cpu = hal_cpu_current();
 	__atomic_store_n(&to->run_cpu, (int)current_cpu, __ATOMIC_RELEASE);
 
@@ -594,6 +601,34 @@ hal_task_context_switch(
 	    : "r"(to_fpregs)
 	    : "memory");
 	asm_task_dispatch(&from->resume_rsp, &to->resume_rsp);
+
+	/* Resumed here by a later switch; releases the task that made it. */
+	amd64_task_finish_switch();
+}
+
+/*
+ * Marks the task this CPU just switched away from as no longer running.
+ *
+ * Every context that starts running on a CPU calls this first, whether it
+ * resumed through asm_task_dispatch() or entered through one of the new
+ * task stubs.  Only after this may hal_task_transfer() move that task to
+ * another CPU.
+ */
+void
+amd64_task_finish_switch(
+	void)
+{
+	struct amd64_percpu *cpu;
+	struct amd64_task *departed;
+
+	/* Takes the departing task recorded by hal_task_context_switch(). */
+	cpu = amd64_percpu_current();
+	departed = cpu->switching_from;
+	cpu->switching_from = NULL;
+
+	/* Publishes that the departed task's stack is free to resume elsewhere. */
+	if (departed != NULL)
+		__atomic_store_n(&departed->run_cpu, -1, __ATOMIC_RELEASE);
 }
 
 /*
@@ -629,8 +664,24 @@ hal_task_t
 hal_task_get_current(
 	void)
 {
-	/* Returns the GS-selected current task. */
-	return running_task;
+	struct amd64_task *task;
+
+	/* Traps on an absent selection; the CPU may change after this. */
+	(void)amd64_percpu_current();
+
+	/*
+	 * Reads the running task in one GS-relative load.  Loading the state
+	 * pointer and then the field is two loads, and a caller preempted and
+	 * moved to another CPU between them would read the old CPU's task:
+	 * another thread's.  One load is taken whole on one CPU, where the
+	 * caller is the running task.
+	 */
+	__asm__ volatile("movq %%gs:%c1, %0"
+			 : "=r"(task)
+			 : "i"(AMD64_PERCPU_RUNNING_TASK));
+
+	/* Returns the current task. */
+	return task;
 }
 
 /*
@@ -1016,8 +1067,13 @@ build_initial_stack(
 		*--stack = (uintptr_t)amd64_user_task_entry;
 	}
 
-	/* Builds the register prefix consumed by the dispatch assembly. */
-	*--stack = 0x202U;
+	/*
+	 * Builds the register prefix consumed by the dispatch assembly.  The
+	 * flags leave interrupts off, so the entry stub can release the task
+	 * this CPU departed from before any interrupt could switch again; the
+	 * kernel stub enables them, the user stubs return through iretq.
+	 */
+	*--stack = 0x2U;
 	*--stack = 0;
 	*--stack = 0;
 	*--stack = 0;
@@ -1177,6 +1233,12 @@ hal_task_set_user_gpregs(
 	frame->r14 = registers->r14;
 	frame->r15 = registers->r15;
 	frame->rip = registers->rip;
+
+	/*
+	 * Returns by IRETQ: SYSRET would replace rcx and r11, which the new
+	 * registers set.
+	 */
+	frame->vector = INT_SYSCALL;
 
 	/* The segment selectors are the kernel's and are not taken. */
 	frame->rflags = (frame->rflags & ~AMD64_USER_RFLAGS_MASK) |

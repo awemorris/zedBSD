@@ -51,6 +51,7 @@
  */
 
 #include "dp-internal.h"
+#include <kern/kcrt.h>
 
 /* The size of one EDID block (Linux drm_edid.h). */
 #define EDID_LENGTH 128
@@ -301,7 +302,7 @@ i915_edid_read_block(
 	valid = 0;
 	for (try = 0; try < I915_EDID_BLOCK_TRIES; try++) {
 		/* Reads the block into a cleared buffer. */
-		memset(buf, 0, EDID_LENGTH);
+		kern_memset(buf, 0, EDID_LENGTH);
 		failed = i915_drm_do_probe_ddc_edid(ddc, buf, block, EDID_LENGTH);
 		if (failed != 0)
 			return -I915_DP_EIO;

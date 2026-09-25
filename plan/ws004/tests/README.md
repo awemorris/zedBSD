@@ -675,7 +675,7 @@ one lock domain:
 cc -std=c11 -I. -Wall -Wextra -Werror \
   -Dmalloc=zed_test_malloc -Dcalloc=zed_test_calloc \
   -Drealloc=zed_test_realloc -Dfree=zed_test_free \
-  -c libc/heap.c -o /tmp/ws004-heap.o
+  -c src/libc/heap.c -o /tmp/ws004-heap.o
 cc -std=c11 -I. -Wall -Wextra -Werror -pthread \
   plan/ws004/tests/kernel-heap-lock-test.c \
   /tmp/ws004-heap.o -o /tmp/ws004-kernel-heap-lock-test
@@ -1193,3 +1193,9 @@ The targeted
 checks retirement error attribution, first-error/ownership preservation and
 exclusion of child contents from failure logs in ordinary, sanitizer and
 analyzer modes.
+
+## 2026-09-24: 動かない試験の削除（ws034-p049）
+
+build できない、または今の source と合わなくなった試験を、書き直さずに削除した（ユーザー指示）。
+削除した file の一覧は [`plan/ws034/phase049/deleted-tests.txt`](../../ws034/phase049/deleted-tests.txt)。
+上の説明のうち、そこに載っている file の記述は履歴である。

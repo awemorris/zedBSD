@@ -18,16 +18,16 @@
 #include "internal.h"
 #include "object.h"
 #include "reply.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 #include <kern/kmem.h>
 
-#include <vulkan/vulkan_core.h>
+#include <libc/vulkan/vulkan_core.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "vulkan-codec.inc"
 
@@ -57,7 +57,7 @@ drv_i915_gfx_create_render_pass(
 	int error;
 
 	/* Decodes the create info behind the device and its presence marker. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	i915_vkc_dec_VkRenderPassCreateInfo(reader, &session->arena, &info);
@@ -138,7 +138,7 @@ drv_i915_gfx_create_framebuffer(
 	int error;
 
 	/* Decodes the create info behind the device and its presence marker. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	i915_vkc_dec_VkFramebufferCreateInfo(reader, &session->arena, &info);
@@ -162,7 +162,7 @@ drv_i915_gfx_create_framebuffer(
 		framebuffer->view_count = info.attachmentCount;
 		for (index = 0U; index < info.attachmentCount; index++) {
 			/* The decoded handles are the wire's 64-bit identities, eight bytes apart. */
-			memcpy(&view_id, (const char *)info.pAttachments + index * 8U, sizeof(view_id));
+			kern_memcpy(&view_id, (const char *)info.pAttachments + index * 8U, sizeof(view_id));
 			framebuffer->views[index] = drv_i915_object_lookup(session->vk, I915_VK_OBJ_IMAGE_VIEW, view_id);
 		}
 	}

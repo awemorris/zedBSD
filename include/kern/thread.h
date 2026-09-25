@@ -18,7 +18,7 @@
 #include <kern/atomic.h>
 #include <kern/signal.h>
 #include <uapi/signal.h>
-#include <sys/types.h>
+#include <uapi/types.h>
 #include <stdint.h>
 
 struct process;

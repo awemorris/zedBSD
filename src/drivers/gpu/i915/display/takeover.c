@@ -52,6 +52,7 @@
 #include "watermark-internal.h"
 #include "takeover-internal.h"
 #include "takeover.h"
+#include <kern/kcrt.h>
 
 #include "clock.h"
 #include "color.h"
@@ -73,7 +74,7 @@
 #include "bootloader/include/amd64-handoff.h"
 #include "drivers/platform/pcat/graphics/backend.h"
 
-#include <drivers/pci.h>
+#include <drivers/pci/pci.h>
 #include <hal/hal.h>
 #include <kern/device-io.h>
 
@@ -81,10 +82,9 @@
 #include <kern/kmem.h>
 #include <kern/platform.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 /*
  * The trace stage of the display noirq bring-up.
@@ -1016,7 +1016,7 @@ drv_i915_display_nogem_front(
 		is_adlp = 1;
 
 	/* Starts from empty records. */
-	memset(d, 0, sizeof(*d));
+	kern_memset(d, 0, sizeof(*d));
 
 	/* intel_wm_init() -> skl_wm_init() for display 9 and later. */
 	i915_sagv_init(d, display_ver, sb_lock, m, bw);
@@ -1333,7 +1333,7 @@ drv_i915_crtc_init(
 
 	/* Starts the crtc from an empty record. */
 	crtc = &d->crtcs[pipe];
-	memset(crtc, 0, sizeof(*crtc));
+	kern_memset(crtc, 0, sizeof(*crtc));
 	crtc->pipe = pipe;
 
 	/* num_scalers[pipe] = 2 for DISPLAY_VER >= 11. */
@@ -2401,7 +2401,7 @@ drv_i915_vga_register(
 	 * i915->gmch.pdev = pci_get_domain_bus_and_slot(0, 0, PCI_DEVFN(0, 0)).
 	 * The decode callback needs it to reach GMCH_CTRL on the host bridge.
 	 */
-	memset(&bridge, 0, sizeof(bridge));
+	kern_memset(&bridge, 0, sizeof(bridge));
 	c->gmch = drv_pci_find_device(&bridge);
 	if (c->gmch == NULL)
 		drv_i915_trace_record(trace, I915_TAKEOVER_TRACE_STAGE, I915_TRACE_NOTE, "intel_vga_register:no_gmch_bridge", 0U, 0U);
@@ -2562,7 +2562,7 @@ drv_i915_native_precheck(
 	unsigned index;
 
 	/* Starts from an empty report. */
-	memset(r, 0, sizeof(*r));
+	kern_memset(r, 0, sizeof(*r));
 
 	/* Records the platform and the GGTT pages the driver writes. */
 	r->hypervisor = i915_cpu_hypervisor();
@@ -2853,7 +2853,7 @@ drv_i915_opregion_read_data(
 	vbtcopy = display->i915_opregion_read_data_vbtcopy;
 
 	/* Starts with the runtime protocol disabled, which it always is here. */
-	memset(out, 0, sizeof(*out));
+	kern_memset(out, 0, sizeof(*out));
 	out->runtime_enabled = 0;
 	out->runtime_reason = "ACPI_RUNTIME_UNAVAILABLE (no AML / ACPI event delivery in zedBSD): the OpRegion is used as data only";
 
@@ -3302,7 +3302,7 @@ i915_n1_build_device(
 	/* Clears the whole registry: nothing of an earlier readout survives. */
 	n1 = &takeover->n1;
 	i915 = &n1->i915;
-	memset(n1, 0, sizeof(*n1));
+	kern_memset(n1, 0, sizeof(*n1));
 
 	/* The backend and the two display locks of the device. */
 	i915->emit = ops;
@@ -3314,7 +3314,7 @@ i915_n1_build_device(
 	i915->display.dmc.fw_mask = cfg->dmc_fw_mask;
 
 	/* The watermark latencies and the SAGV block time the normal initialisation read. */
-	memcpy(i915->display.wm.skl_latency, cfg->wm_latency, sizeof(i915->display.wm.skl_latency));
+	kern_memcpy(i915->display.wm.skl_latency, cfg->wm_latency, sizeof(i915->display.wm.skl_latency));
 	i915->display.wm.num_levels = cfg->wm_num_levels;
 	i915->display.wm.ipc_enabled = cfg->wm_ipc_enabled != 0;
 	i915->display.sagv.block_time_us = cfg->sagv_block_time_us;
@@ -3400,7 +3400,7 @@ i915_n1_fill_report(
 
 	/* Starts from an empty report: no pipe, transcoder, PLL or port yet. */
 	n1 = &takeover->n1;
-	memset(out, 0, sizeof(*out));
+	kern_memset(out, 0, sizeof(*out));
 	out->pipe = -1;
 	out->cpu_transcoder = -1;
 	out->dpll_id = -1;

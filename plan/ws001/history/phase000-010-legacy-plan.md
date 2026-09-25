@@ -484,7 +484,7 @@ unimplemented POSIX behavior is tracked in
   `Makefile` package registration.
 - Put genuinely shared command code under `userland/base/common/` in focused
   modules. Do not turn unrelated commands into one large multi-call binary.
-- Keep public libc declarations in `libc/include/`, architecture-neutral libc
+- Keep public libc declarations in `include/libc/`, architecture-neutral libc
   implementation in `libc/` or `userland/base/libc/` according to the current
   ownership convention, and generic kernel work in `src/kern/`.
 - Platform makefiles may provide ABI-specific linking, but must not maintain

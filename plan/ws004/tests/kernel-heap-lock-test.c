@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "libc/heap.h"
+#include "src/libc/heap.h"
 
 #define SLOT_COUNT 256U
 #define RANDOM_OPERATIONS 100000U

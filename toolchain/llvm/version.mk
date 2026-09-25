@@ -13,4 +13,4 @@ override ZEDBSD_LLVM_CACHE_TAG := rev-0
 override ZEDBSD_LLVM_CACHE_ASSET := zedbsd-llvm-23.1.0-x86_64-linux.tar.gz
 # Filled from the accepted deterministic archive before the release asset is
 # uploaded. A cache download must never run with this sentinel value.
-override ZEDBSD_LLVM_CACHE_SHA256 := 91b82e965bba779e9254162f733d1f76b9f9a5b1829cfdb401829ce744ddd499
+override ZEDBSD_LLVM_CACHE_SHA256 := 7dab5e3c8dc7202174320abd5470e17117a7c24ff1575999f3d413dba4152b4c

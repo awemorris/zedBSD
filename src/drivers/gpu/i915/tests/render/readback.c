@@ -21,7 +21,7 @@
 
 #include <kern/klog.h>
 
-#include <vulkan/vulkan_core.h>
+#include <libc/vulkan/vulkan_core.h>
 
 #include <stddef.h>
 #include <stdint.h>

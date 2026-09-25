@@ -38,6 +38,7 @@ struct copy_options {
 	int preserve_times;
 	int recursive;
 	int preserve_links;
+	int force;
 	struct copy_link **links;
 	struct copy_report *report;
 };
@@ -107,6 +108,8 @@ main(int argc, char **argv)
 			report_path = option + 14;
 		else if (!strcmp(option, "-R") || !strcmp(option, "-r"))
 			options.recursive = 1;
+		else if (!strcmp(option, "-f"))
+			options.force = 1;
 		else if (!strcmp(option, "-a") || !strcmp(option, "--archive")) {
 			options.recursive = 1;
 			options.preserve_mode = 1;
@@ -125,7 +128,7 @@ main(int argc, char **argv)
 		}
 	}
 	if (argc - first < 2) {
-		fprintf(stderr, "usage: cp [-R|-a] [-T] [-n|--update=none-fail] "
+		fprintf(stderr, "usage: cp [-R|-a] [-f] [-T] [-n|--update=none-fail] "
 				"[--attributes-only] [-p|--preserve=mode] [--report-file=path] "
 				"source... destination\n");
 		return 1;
@@ -226,6 +229,7 @@ static int
 copy_file(const char *source, const char *destination,
 	  const struct copy_options *options, const char **failed_operand)
 {
+	int removed;
 	struct stat from, to;
 	mode_t mode, previous_mask;
 	int input, output, flags, error, saved;
@@ -270,6 +274,16 @@ copy_file(const char *source, const char *destination,
 		previous_mask = umask(0);
 	output = open(destination, flags, mode);
 	saved = errno;
+
+	/* -f: a destination that cannot be opened is removed and made anew. */
+	if (output < 0 && options->force && !options->exclusive &&
+	    (saved == EACCES || saved == EPERM)) {
+		removed = unlink(destination);
+		if (removed == 0) {
+			output = open(destination, flags, mode);
+			saved = errno;
+		}
+	}
 	if (options->preserve_mode)
 		(void)umask(previous_mask);
 	if (output < 0) {

@@ -7,10 +7,9 @@ Status: incomplete
 Primary Milestone: MG006
 Related Milestones: MG003
 Objectives: O2, O4
-Parent: [Master](https://github.com/awemorris/zedBSD/issues/1)
-Queue: q314 finished
-Target: Dell Latitude 5330 / Alder Lake-P 8086:46a8 via VFIO passthrough on awe@10.0.10.25
-Design: plan/ws029/i915-design.md
+Parent: [Master](../master.md)
+Queue: なし
+Resume point: q314 で p001〜p007 cleared。cold VFIO attach の間欠的な停止などを後続として登録済み
 <!-- awesome-plan-current:end -->
 
 ## 単一目標

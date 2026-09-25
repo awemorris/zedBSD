@@ -19,8 +19,9 @@ diff --git a/cmake/toolchains/zedbsd-amd64.cmake b/cmake/toolchains/zedbsd-amd64
 +++ b/cmake/toolchains/zedbsd-amd64.cmake
 @@ -40,7 +40,7 @@ set(_NOCT_ZEDBSD_REQUIRED_FILES
 -  include/uapi/zedbsd/system.h
+-  libc/include/stdint.h
 +  include/uapi/system.h
-   libc/include/stdint.h
++  include/libc/stdint.h
    platform/amd64/user.ld
 -  userland/packages/lang/noct/zedbsd.cmake
 +  userland/base/noct/zedbsd.cmake

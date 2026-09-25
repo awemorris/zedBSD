@@ -35,14 +35,14 @@
 #include "kern/uaccess.h"
 #include "kern/partition.h"
 #include "kern/cred.h"
+#include <kern/kcrt.h>
 
 #include <uapi/block.h>
-#include <errno.h>
-#include <fcntl.h>
+#include <uapi/errno.h>
+#include <uapi/fcntl.h>
 #include <limits.h>
 #include <stdint.h>
-#include <string.h>
-#include <sys/statvfs.h>
+#include <uapi/statvfs.h>
 
 #define DEVFS_BLOCK_INO_BASE 0x100000000ULL
 #define DEVFS_NAME_MAX 32U
@@ -290,10 +290,10 @@ component_equal(
 	size_t length;
 
 	/* The lengths and the bytes must agree. */
-	length = strlen(text);
+	length = kern_strlen(text);
 	if (component->cn_namelen != length)
 		return 0;
-	if (memcmp(component->cn_nameptr, text, length) != 0)
+	if (kern_memcmp(component->cn_nameptr, text, length) != 0)
 		return 0;
 
 	/* Reports a matching component. */
@@ -313,7 +313,7 @@ component_copy(
 		return ENOENT;
 
 	/* Copies and terminates the name. */
-	memcpy(name, component->cn_nameptr, component->cn_namelen);
+	kern_memcpy(name, component->cn_nameptr, component->cn_namelen);
 	name[component->cn_namelen] = '\0';
 
 	/* Reports the copied name. */
@@ -326,7 +326,7 @@ event_name(
 	const char *name)
 {
 	/* Event nodes are named event<n>. */
-	if (strncmp(name, "event", 5) != 0)
+	if (kern_strncmp(name, "event", 5) != 0)
 		return 0;
 	return 1;
 }
@@ -627,7 +627,7 @@ devfs_lookup(
 	/* /dev/fd names the caller's own descriptors by their number. */
 	if (directory->i_ino == DEVFS_FD_INO) {
 		number = 0;
-		if (component->cn_namelen == 0 || component->cn_namelen > 3U)
+		if (component->cn_namelen == 0 || component->cn_namelen > 4U)
 			return ENOENT;
 		for (i = 0; i < component->cn_namelen; i++) {
 			digit = (unsigned char)component->cn_nameptr[i];
@@ -727,7 +727,8 @@ devfs_getattr(
 	struct inode *inode,
 	struct stat *status)
 {
-	memset(status, 0, sizeof(*status));
+	kern_memset(status, 0, sizeof(*status));
+	status->st_dev = mount_device_number(inode->i_mount);
 	status->st_ino = inode->i_ino;
 	status->st_mode = inode->i_mode;
 	status->st_nlink = inode->i_linkcount;
@@ -751,7 +752,7 @@ dir_name_exists(
 
 	/* Prevents block nodes from duplicating a character-device name. */
 	for (index = 0; index < state->count; index++) {
-		comparison = strcmp(state->entries[index].name, name);
+		comparison = kern_strcmp(state->entries[index].name, name);
 		if (comparison == 0)
 			return 1;
 	}
@@ -788,7 +789,7 @@ devfs_directory_add_cdevs(
 
 		/* Records immutable identity without retaining devices until close. */
 		entry = &state->entries[state->count];
-		memcpy(entry->name, device->name, DEVFS_NAME_MAX);
+		kern_memcpy(entry->name, device->name, DEVFS_NAME_MAX);
 		entry->name[DEVFS_NAME_MAX - 1U] = '\0';
 		entry->ino = (ino_t)(DEVFS_CHAR_INO_BASE + generation);
 		entry->type = INODE_CHAR;
@@ -863,6 +864,7 @@ devfs_dir_open(
 	unsigned count;
 	unsigned character_count;
 	unsigned capacity;
+	unsigned descriptor_count;
 	unsigned disk_count;
 	unsigned index;
 	unsigned number;
@@ -881,14 +883,19 @@ devfs_dir_open(
 			return error;
 	}
 
+	/* Only /dev/fd lists the descriptor numbers. */
+	descriptor_count = 0;
+	if (file->f_inode->i_ino == DEVFS_FD_INO)
+		descriptor_count = KERN_OPEN_MAX;
+
 	/* Reserves room for all non-character entries without count overflow. */
-	if (character_count > UINT_MAX - DISK_MAX - KERN_OPEN_MAX - 10U) {
+	if (character_count > UINT_MAX - DISK_MAX - descriptor_count - 10U) {
 		devfs_cdev_snapshot_release(snapshot, character_count);
 		return EOVERFLOW;
 	}
 
 	/* Includes all existing disk slots, terminal slots and fixed directories. */
-	capacity = character_count + DISK_MAX + KERN_OPEN_MAX + 10U;
+	capacity = character_count + DISK_MAX + descriptor_count + 10U;
 
 	/* Rejects byte counts that cannot be represented by this architecture. */
 	allocation_bytes = (size_t)capacity * sizeof(*entry);
@@ -974,28 +981,28 @@ devfs_dir_open(
 	} else {
 		/* Publishes the fixed shared-memory directory in the root listing. */
 		entry = &state->entries[state->count];
-		strcpy(entry->name, "shm");
+		kern_strcpy(entry->name, "shm");
 		entry->ino = DEVFS_SHM_INO;
 		entry->type = INODE_DIR;
 		state->count++;
 
 		/* Publishes the fixed terminal directory in the root listing. */
 		entry = &state->entries[state->count];
-		strcpy(entry->name, "pts");
+		kern_strcpy(entry->name, "pts");
 		entry->ino = DEVFS_PTS_INO;
 		entry->type = INODE_DIR;
 		state->count++;
 
 		/* Publishes the fixed event directory in the root listing. */
 		entry = &state->entries[state->count];
-		strcpy(entry->name, "input");
+		kern_strcpy(entry->name, "input");
 		entry->ino = DEVFS_INPUT_INO;
 		entry->type = INODE_DIR;
 		state->count++;
 
 		/* Publishes the fixed descriptor directory in the root listing. */
 		entry = &state->entries[state->count];
-		strcpy(entry->name, "fd");
+		kern_strcpy(entry->name, "fd");
 		entry->ino = DEVFS_FD_INO;
 		entry->type = INODE_DIR;
 		state->count++;
@@ -1007,7 +1014,7 @@ devfs_dir_open(
 			};
 
 			entry = &state->entries[state->count];
-			strcpy(entry->name, standard[index]);
+			kern_strcpy(entry->name, standard[index]);
 			entry->ino = (ino_t)(DEVFS_STD_INO_BASE + index);
 			entry->type = INODE_CHAR;
 			state->count++;
@@ -1034,7 +1041,7 @@ devfs_dir_open(
 
 			/* Records the block name and its existing device-number identity. */
 			entry = &state->entries[state->count];
-			memcpy(entry->name, disks[index].name, DEVFS_NAME_MAX);
+			kern_memcpy(entry->name, disks[index].name, DEVFS_NAME_MAX);
 			entry->name[DEVFS_NAME_MAX - 1U] = '\0';
 			entry->ino = (ino_t)(DEVFS_BLOCK_INO_BASE +
 				(uint64_t)disks[index].dev);
@@ -1113,10 +1120,10 @@ devfs_readdir(
 	}
 
 	/* Copies immutable snapshot data and advances the directory position. */
-	memset(entry, 0, sizeof(*entry));
+	kern_memset(entry, 0, sizeof(*entry));
 	entry->d_ino = state->entries[index].ino;
 	entry->d_type = state->entries[index].type;
-	strcpy(entry->d_name, state->entries[index].name);
+	kern_strcpy(entry->d_name, state->entries[index].name);
 	file->f_offset++;
 	*eof = 0;
 
@@ -1229,7 +1236,7 @@ block_pread_data(
 			return -error;
 		}
 
-		memcpy(output + total, bounce + within, count);
+		kern_memcpy(output + total, bounce + within, count);
 		total += count;
 		position += count;
 	}
@@ -1325,7 +1332,7 @@ block_pwrite_data(
 		if (error != 0)
 			return -error;
 	} else {
-		memset(&guard, 0, sizeof(guard));
+		kern_memset(&guard, 0, sizeof(guard));
 	}
 	/* Reserved I/O bypasses the cache. Invalidate overlapping clean lines
 	 * while foreign cache admissions and descriptor operations are excluded. */
@@ -1360,10 +1367,10 @@ block_pwrite_data(
 				return -error;
 			}
 		} else {
-			memset(bounce, 0, sizeof(bounce));
+			kern_memset(bounce, 0, sizeof(bounce));
 		}
 
-		memcpy(bounce + within, input + total, count);
+		kern_memcpy(bounce + within, input + total, count);
 		if (file->f_block_claim != NULL)
 			error = disk_write_direct_claimed(disk, block, 1, bounce, file->f_block_claim);
 		else
@@ -1471,7 +1478,7 @@ block_reserve(
 	error = disk_block_info(disk, &current);
 	if (error != 0)
 		return error;
-	if (memcmp(&current, &expected, sizeof(current)) != 0)
+	if (kern_memcmp(&current, &expected, sizeof(current)) != 0)
 		return ESTALE;
 	if (disk->d_media_backing != NULL || (disk->d_flags & DISK_FILE_BACKED) != 0 ||
 	    (disk->d_parent != NULL && (disk->d_parent->d_parent != NULL ||
@@ -1670,7 +1677,7 @@ devfs_statvfs(
 		sizeof(indices) / sizeof(indices[0]));
 
 	/* Reports no reserved free-inode pool for this synthesized filesystem. */
-	memset(result, 0, sizeof(*result));
+	kern_memset(result, 0, sizeof(*result));
 	result->f_bsize = 1U;
 	result->f_frsize = 1U;
 	result->f_files = (fsfilcnt_t)character_count + disk_count +

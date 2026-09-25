@@ -35,9 +35,9 @@ match `awesome-plan project=zedbsd record=...` markers, compare to the shared
 `records.json` mapping and actual paths. Fetch current bodies/comments, preserve
 local changes, initialize separate remote and local bases in `.sync/`. Missing
 records are investigated, not recreated. Queue history before adoption and
-legacy Bug details remain indexed files; see migration-status.md.
+legacy Bug details remain indexed files.
 
-Never rerun plan/tmp/github-import/upload.py or prior one-shot deploy scripts.
+The one-shot import/deploy scripts were removed on 2026-09-24; do not recreate them.
 Their snapshots are not the current Issue state.
 
 

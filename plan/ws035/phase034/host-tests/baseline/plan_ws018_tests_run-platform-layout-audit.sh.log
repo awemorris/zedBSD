@@ -1,0 +1,7 @@
+KA-T011: unexpected src/drivers/disklabel contents:
+gpt.c
+mbr.c
+pc98.c
+pcat.c
+sun.c
+x68k.c

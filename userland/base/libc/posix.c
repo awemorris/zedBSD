@@ -12,8 +12,8 @@
  */
 
 #include "userland/base/libc/syscall.h"
-#include "libc/heap.h"
-#include "libc/stdio-internal.h"
+#include "src/libc/heap.h"
+#include "src/libc/stdio-internal.h"
 
 #include <uapi/auxv.h>
 #include <uapi/dirent.h>
@@ -22,6 +22,7 @@
 #include <sys/file.h>
 #include <sys/random.h>
 #include <uapi/system.h>
+#include <uapi/mountinfo.h>
 #include <sys/sysctl.h>
 #include <uapi/process.h>
 #include <uapi/netif.h>
@@ -35,11 +36,13 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <limits.h>
+#include <mntent.h>
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdio.h>
+#include <stdio_ext.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
@@ -60,6 +63,7 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+#include <utime.h>
 
 #ifndef KERN_USER_PAGE_SIZE
 #define KERN_USER_PAGE_SIZE 4096
@@ -159,6 +163,28 @@ static int aio_submit(struct aiocb *control, int writing, int notify);
 static void aio_notify(const struct sigevent *event);
 static struct __spawn_action *spawn_action_add(posix_spawn_file_actions_t *actions);
 static int posix_spawn_common(pid_t *result, const char *path, const posix_spawn_file_actions_t *actions, const posix_spawnattr_t *attr, char *const argv[], char *const envp[], int search);
+static int posix_spawn_fork(pid_t *result, const char *path, const posix_spawn_file_actions_t *actions, const posix_spawnattr_t *attr, char *const argv[], char *const envp[], int search);
+#if defined(__x86_64__)
+/* The size of the stack a posix_spawn child runs on until it execs. */
+#define SPAWN_CHILD_STACK 24576
+
+/* What a posix_spawn child reads, and where it leaves the error of an exec that failed. */
+struct spawn_request {
+	const char *path;
+	const posix_spawn_file_actions_t *actions;
+	const posix_spawnattr_t *attr;
+	char *const *argv;
+	char *const *environment;
+	int search;
+	sigset_t mask;
+	volatile int error;
+};
+
+long __vfork_spawn(void (*entry)(void *), void *argument, void *stack_top);
+long __vfork_error(long raw);
+extern sigset_t __libc_caught_signals;
+static void spawn_child(void *argument);
+#endif
 static int spawn_child_setup(const posix_spawn_file_actions_t *actions, const posix_spawnattr_t *attr);
 static int spawn_exec_search(const char *file, char *const argv[], char *const environment[]);
 static const char *spawn_environment_path(char *const environment[]);
@@ -191,6 +217,11 @@ static int strftime_number(char **output, size_t *remaining, int value, int widt
 static void iso_week(const struct tm *value, int *year, int *week);
 static int iso_weeks_in_year(int year);
 static size_t user_heap_grow(void *context, void *end, size_t minimum);
+static int mount_table_write(int *result);
+static size_t mount_table_line(const struct kern_mount_info *entry, char *line, size_t size);
+static size_t mount_table_append(char *line, size_t size, size_t length, const char *word, int escape);
+static void mount_table_unescape(char *word);
+static int write_all_bytes(int fd, const char *buffer, size_t length);
 
 /*
  * Implements the getopt operation.
@@ -1518,8 +1549,8 @@ sysconf(
 	/* Returns the computed result. */
 	return function_result;
 	case _SC_CLK_TCK:
-		/* Returns the computed result. */
-		return 100;
+		/* Returns the fixed unit of the times(2) record. */
+		return (long)KERN_PROCESS_TIMES_HZ;
 	case _SC_JOB_CONTROL:
 		/* Returns the computed result. */
 		return _POSIX_JOB_CONTROL;
@@ -2562,6 +2593,233 @@ fstatvfs(
 }
 
 /*
+ * Opens the mount table as a stream of mtab lines.
+ *
+ * MOUNTED is not a file on zedBSD: the kernel answers KERN_SYSTEM_GET_MOUNTS.
+ * The answer is written in mtab form to an unlinked temporary file, so the
+ * caller holds a real stream that getmntent() parses and endmntent() or
+ * fclose() closes.  Any other path is opened as the file it names.
+ */
+FILE *
+setmntent(
+	const char *path,
+	const char *mode)
+{
+	FILE *stream;
+	int is_table;
+	int difference;
+	int fd;
+	int error;
+
+	/* Refuses a missing path or mode. */
+	if (path == NULL || mode == NULL) {
+		errno = EINVAL;
+		return NULL;
+	}
+
+	/* Only the mount table itself comes from the kernel. */
+	is_table = 0;
+	difference = strcmp(path, MOUNTED);
+	if (difference == 0)
+		is_table = 1;
+	difference = strcmp(path, "/proc/mounts");
+	if (difference == 0)
+		is_table = 1;
+
+	/* An ordinary file (fstab) is the stream itself. */
+	if (!is_table) {
+		stream = fopen(path, mode);
+		return stream;
+	}
+
+	/* Writes the kernel's list in mtab form to an unlinked file. */
+	error = mount_table_write(&fd);
+	if (error != 0) {
+		errno = error;
+		return NULL;
+	}
+
+	/* Hands the file back as a read stream positioned at its start. */
+	stream = fdopen(fd, "r");
+	if (stream == NULL) {
+		error = errno;
+		(void)close(fd);
+		errno = error;
+		return NULL;
+	}
+
+	/* Succeeded: the caller owns the stream. */
+	return stream;
+}
+
+/*
+ * Reads the next mount table entry from a stream.
+ *
+ * The entry and its strings live in static storage, as in glibc, and are
+ * overwritten by the next call.
+ */
+struct mntent *
+getmntent(
+	FILE *stream)
+{
+	static struct mntent entry;
+	static char line[KERN_MOUNT_INFO_PATH_MAX * 2U + 64U];
+	char *fields[6];
+	char *cursor;
+	char *text;
+	unsigned count;
+	unsigned index;
+
+	/* Refuses a missing stream. */
+	if (stream == NULL) {
+		errno = EINVAL;
+		return NULL;
+	}
+
+	/* Reads lines until one carries an entry. */
+	for (;;) {
+		text = fgets(line, (int)sizeof(line), stream);
+		if (text == NULL)
+			return NULL;
+
+		/* Splits the line at blanks into its fields. */
+		count = 0;
+		cursor = line;
+		while (count < 6U) {
+			while (*cursor == ' ' || *cursor == '\t')
+				cursor++;
+			if (*cursor == '\0' || *cursor == '\n' || *cursor == '#')
+				break;
+			fields[count++] = cursor;
+			while (*cursor != '\0' && *cursor != ' ' &&
+			       *cursor != '\t' && *cursor != '\n')
+				cursor++;
+			if (*cursor != '\0')
+				*cursor++ = '\0';
+		}
+
+		/* A blank or comment line carries nothing. */
+		if (count == 0)
+			continue;
+
+		/* Fills the missing fields with their defaults. */
+		for (index = count; index < 4U; index++)
+			fields[index] = (char *)"";
+		for (index = 4U; index < 6U; index++) {
+			if (index >= count)
+				fields[index] = (char *)"0";
+		}
+
+		/* The line carries an entry. */
+		break;
+	}
+
+	/* Undoes the mtab escapes in the names and options read from the line. */
+	for (index = 0; index < 4U && index < count; index++)
+		mount_table_unescape(fields[index]);
+
+	/* Publishes the entry. */
+	entry.mnt_fsname = fields[0];
+	entry.mnt_dir = fields[1];
+	entry.mnt_type = fields[2];
+	entry.mnt_opts = fields[3];
+	entry.mnt_freq = atoi(fields[4]);
+	entry.mnt_passno = atoi(fields[5]);
+
+	/* Succeeded: the entry is valid until the next call. */
+	return &entry;
+}
+
+/*
+ * Appends an entry to a mount table stream.
+ *
+ * The mount table is the kernel's, so nothing can be added to it; a
+ * failure is reported as glibc does, with a nonzero result.
+ */
+int
+addmntent(
+	FILE *stream,
+	const struct mntent *entry)
+{
+	(void)stream;
+	(void)entry;
+
+	/* Reports that the table cannot be written. */
+	errno = EROFS;
+	return 1;
+}
+
+/*
+ * Closes a mount table stream.
+ *
+ * The result is always 1, as in glibc.
+ */
+int
+endmntent(
+	FILE *stream)
+{
+	/* A missing stream is closed already. */
+	if (stream != NULL)
+		(void)fclose(stream);
+
+	/* Reports the close. */
+	return 1;
+}
+
+/*
+ * Finds an option in an entry's option list.
+ *
+ * The option matches a whole comma-separated word, or the part of one
+ * before its "=" value.
+ */
+char *
+hasmntopt(
+	const struct mntent *entry,
+	const char *option)
+{
+	const char *cursor;
+	const char *end;
+	size_t length;
+	size_t word_length;
+	int difference;
+	int same;
+
+	/* Refuses a missing entry or option. */
+	if (entry == NULL || entry->mnt_opts == NULL || option == NULL)
+		return NULL;
+
+	/* Compares each comma-separated word with the option. */
+	length = strlen(option);
+	cursor = entry->mnt_opts;
+	while (*cursor != '\0') {
+		end = cursor;
+		while (*end != '\0' && *end != ',')
+			end++;
+
+		/* The word matches whole, or up to its "=" value. */
+		same = 0;
+		word_length = (size_t)(end - cursor);
+		if (word_length >= length) {
+			difference = memcmp(cursor, option, length);
+			if (difference == 0 && word_length == length)
+				same = 1;
+			else if (difference == 0 && cursor[length] == '=')
+				same = 1;
+		}
+
+		/* Reports the word that matched. */
+		if (same)
+			return (char *)cursor;
+		cursor = end;
+		if (*cursor == ',')
+			cursor++;
+	}
+
+	/* The option is not in the list. */
+	return NULL;
+}
+
+/*
  * Implements the quotactl operation.
  */
 int
@@ -3470,6 +3728,47 @@ posix_spawn_file_actions_addfchdir(
 }
 
 /*
+ * Adds a chdir action under the name glibc gives it.
+ *
+ * gnulib and programs written for glibc look for the _np names; they are
+ * the standard functions.
+ */
+int
+posix_spawn_file_actions_addchdir_np(
+	posix_spawn_file_actions_t *actions,
+	const char *path)
+{
+	int error;
+
+	/* Records the action under its standard name. */
+	error = posix_spawn_file_actions_addchdir(actions, path);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the action is queued. */
+	return 0;
+}
+
+/*
+ * Adds an fchdir action under the name glibc gives it.
+ */
+int
+posix_spawn_file_actions_addfchdir_np(
+	posix_spawn_file_actions_t *actions,
+	int fd)
+{
+	int error;
+
+	/* Records the action under its standard name. */
+	error = posix_spawn_file_actions_addfchdir(actions, fd);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the action is queued. */
+	return 0;
+}
+
+/*
  * Implements the posix spawnattr init operation.
  */
 int
@@ -3687,6 +3986,38 @@ posix_spawnp(
 	/* Returns the computed result. */
 	return function_result;
 }
+
+#if defined(__x86_64__)
+/*
+ * Sets errno for a vfork that failed; the assembly entry jumps here with
+ * the negative error, as the caller's own return.
+ */
+long
+__vfork_error(
+	long raw)
+{
+	/* The error, and the failure value. */
+	errno = (int)-raw;
+	return -1;
+}
+#else
+/*
+ * Implements vfork where the vfork system call has no entry yet: a fork,
+ * which gives every guarantee vfork gives.
+ */
+pid_t
+vfork(
+	void)
+{
+	pid_t function_result;
+
+	/* A copy of the address space. */
+	function_result = fork();
+
+	/* Returns the computed result. */
+	return function_result;
+}
+#endif
 
 /*
  * Implements the fork operation.
@@ -4513,6 +4844,45 @@ utimensat(
 
 	/* Returns the computed result. */
 	return function_result;
+}
+
+/*
+ * Sets a file's access and modification times in whole seconds.
+ *
+ * A null times pointer sets both to now, as utimensat() does with a null
+ * array.
+ */
+int
+utime(
+	const char *path,
+	const struct utimbuf *times)
+{
+	struct timespec stamps[2];
+	int error;
+
+	/* Sets both times to now when no times are given. */
+	if (times == NULL) {
+		error = utimensat(AT_FDCWD, path, NULL, 0);
+		if (error != 0)
+			return -1;
+
+		/* Succeeded: the file carries the current time. */
+		return 0;
+	}
+
+	/* Spells the seconds as timespecs with no fraction. */
+	stamps[0].tv_sec = times->actime;
+	stamps[0].tv_nsec = 0;
+	stamps[1].tv_sec = times->modtime;
+	stamps[1].tv_nsec = 0;
+
+	/* Sets the times through the modern call. */
+	error = utimensat(AT_FDCWD, path, stamps, 0);
+	if (error != 0)
+		return -1;
+
+	/* Succeeded: the file carries the given times. */
+	return 0;
 }
 
 /*
@@ -6192,6 +6562,327 @@ ftell(
 }
 
 /*
+ * Seeks with a file offset instead of a long.
+ *
+ * The stream's own arithmetic is in long; an offset a long cannot hold is
+ * refused with EOVERFLOW rather than truncated.
+ */
+int
+fseeko(
+	FILE *stream,
+	off_t offset,
+	int whence)
+{
+	int error;
+
+	/* Refuses an offset the long form cannot carry. */
+	if (offset > (off_t)LONG_MAX || offset < (off_t)LONG_MIN) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+
+	/* Seeks with the long form. */
+	error = fseek(stream, (long)offset, whence);
+	if (error != 0)
+		return -1;
+
+	/* Succeeded: the stream is at the new position. */
+	return 0;
+}
+
+/*
+ * Reports the stream position as a file offset.
+ */
+off_t
+ftello(
+	FILE *stream)
+{
+	uint64_t position;
+	int old;
+
+	/* Refuses a missing stream. */
+	if (stream == NULL) {
+		errno = EINVAL;
+		return (off_t)-1;
+	}
+
+	/* Samples the position under the stream lock. */
+	stream_enter(stream, &old);
+	position = stream->position;
+	stream_leave(stream, old);
+
+	/* Refuses a position an off_t cannot hold. */
+	if (position > (uint64_t)INT64_MAX) {
+		errno = EOVERFLOW;
+		return (off_t)-1;
+	}
+
+	/* Succeeded: reports the position. */
+	return (off_t)position;
+}
+
+/*
+ * Reports the size of the stream's buffer.
+ */
+size_t
+__fbufsize(
+	FILE *stream)
+{
+	size_t size;
+	int old;
+
+	/* An unbuffered or missing stream holds nothing. */
+	if (stream == NULL)
+		return 0;
+
+	/* Samples the size under the stream lock. */
+	stream_enter(stream, &old);
+	size = stream->buffer_size;
+	stream_leave(stream, old);
+
+	/* Reports the size. */
+	return size;
+}
+
+/*
+ * Reports how many written bytes wait in the buffer.
+ */
+size_t
+__fpending(
+	FILE *stream)
+{
+	size_t pending;
+	int old;
+
+	/* A missing stream holds nothing. */
+	if (stream == NULL)
+		return 0;
+
+	/* Only a stream last written to has output waiting. */
+	stream_enter(stream, &old);
+	pending = 0;
+	if (stream->last_operation == 2)
+		pending = stream->buffer_length;
+	stream_leave(stream, old);
+
+	/* Reports the count. */
+	return pending;
+}
+
+/*
+ * Reports how many read bytes wait in the buffer, counting a pushed-back
+ * character.
+ */
+size_t
+__freadahead(
+	FILE *stream)
+{
+	size_t ahead;
+	int old;
+
+	/* A missing stream holds nothing. */
+	if (stream == NULL)
+		return 0;
+
+	/* Only a stream last read from has input waiting. */
+	stream_enter(stream, &old);
+	ahead = 0;
+	if (stream->last_operation == 1) {
+		ahead = stream->buffer_length - stream->buffer_start;
+		if (stream->ungot_character != EOF)
+			ahead++;
+	}
+
+	/* Releases the stream. */
+	stream_leave(stream, old);
+
+	/* Reports the count. */
+	return ahead;
+}
+
+/*
+ * Reports whether the stream is line buffered.
+ */
+int
+__flbf(
+	FILE *stream)
+{
+	int line_buffered;
+	int old;
+
+	/* A missing stream is not. */
+	if (stream == NULL)
+		return 0;
+
+	/* Samples the buffering mode under the stream lock. */
+	stream_enter(stream, &old);
+	line_buffered = 0;
+	if (stream->buffering_mode == _IOLBF)
+		line_buffered = 1;
+	stream_leave(stream, old);
+
+	/* Reports the mode. */
+	return line_buffered;
+}
+
+/*
+ * Reports whether the stream was opened for reading.
+ */
+int
+__freadable(
+	FILE *stream)
+{
+	int readable;
+
+	/* A missing stream is not. */
+	if (stream == NULL)
+		return 0;
+
+	/* The mode bits are fixed at open, so no lock is needed. */
+	readable = 0;
+	if ((stream->mode & 1U) != 0)
+		readable = 1;
+
+	/* Reports the mode. */
+	return readable;
+}
+
+/*
+ * Reports whether the stream was opened for writing.
+ */
+int
+__fwritable(
+	FILE *stream)
+{
+	int writable;
+
+	/* A missing stream is not. */
+	if (stream == NULL)
+		return 0;
+
+	/* The mode bits are fixed at open, so no lock is needed. */
+	writable = 0;
+	if ((stream->mode & 2U) != 0)
+		writable = 1;
+
+	/* Reports the mode. */
+	return writable;
+}
+
+/*
+ * Reports whether the stream is read-only or was last read from.
+ */
+int
+__freading(
+	FILE *stream)
+{
+	int reading;
+	int old;
+
+	/* A missing stream is not. */
+	if (stream == NULL)
+		return 0;
+
+	/* A read-only stream always reads; otherwise the last operation tells. */
+	stream_enter(stream, &old);
+	reading = 0;
+	if ((stream->mode & 2U) == 0)
+		reading = 1;
+	else if (stream->last_operation == 1)
+		reading = 1;
+	stream_leave(stream, old);
+
+	/* Reports the direction. */
+	return reading;
+}
+
+/*
+ * Reports whether the stream is write-only or was last written to.
+ */
+int
+__fwriting(
+	FILE *stream)
+{
+	int writing;
+	int old;
+
+	/* A missing stream is not. */
+	if (stream == NULL)
+		return 0;
+
+	/* A write-only stream always writes; otherwise the last operation tells. */
+	stream_enter(stream, &old);
+	writing = 0;
+	if ((stream->mode & 1U) == 0)
+		writing = 1;
+	else if (stream->last_operation == 2)
+		writing = 1;
+	stream_leave(stream, old);
+
+	/* Reports the direction. */
+	return writing;
+}
+
+/*
+ * Discards what the buffers hold, in both directions.
+ *
+ * Unlike fpurge(), the error and end-of-file flags are left as they are.
+ */
+void
+__fpurge(
+	FILE *stream)
+{
+	int old;
+
+	/* A missing stream has nothing to discard. */
+	if (stream == NULL)
+		return;
+
+	/* Empties the buffer and forgets a pushed-back character. */
+	stream_enter(stream, &old);
+	stream->buffer_start = stream->buffer_length = 0;
+	stream->ungot_character = EOF;
+	stream_leave(stream, old);
+}
+
+/*
+ * Sets the stream's error flag.
+ */
+void
+__fseterr(
+	FILE *stream)
+{
+	int old;
+
+	/* A missing stream has no flag. */
+	if (stream == NULL)
+		return;
+
+	/* Marks the stream in error, as a failed operation would. */
+	stream_enter(stream, &old);
+	stream->error = 1;
+	stream_leave(stream, old);
+}
+
+/*
+ * Reports the stream's locking mode.
+ *
+ * Every stream locks itself; the caller cannot take that over, so the
+ * request is answered with the mode in force.
+ */
+int
+__fsetlocking(
+	FILE *stream,
+	int type)
+{
+	(void)stream;
+	(void)type;
+
+	/* The stream keeps locking internally. */
+	return FSETLOCKING_INTERNAL;
+}
+
+/*
  * Implements the setvbuf operation.
  */
 int
@@ -7174,13 +7865,13 @@ clock(
 		return (clock_t)-1;
 
 	/* Handles the record condition. */
-	if (record.self_ticks > UINT64_MAX / (CLOCKS_PER_SEC / 100L)) {
+	if (record.self_ticks > UINT64_MAX / (CLOCKS_PER_SEC / (long)KERN_PROCESS_TIMES_HZ)) {
 		errno = EOVERFLOW;
 
 		/* Returns the computed result. */
 		return (clock_t)-1;
 	}
-	value = record.self_ticks * (CLOCKS_PER_SEC / 100L);
+	value = record.self_ticks * (CLOCKS_PER_SEC / (long)KERN_PROCESS_TIMES_HZ);
 
 	/* Validates the current value. */
 	if (value > (uint64_t)LONG_MAX) {
@@ -7320,6 +8011,39 @@ __libc_panic(
 /*
  * Implements the libc init operation.
  */
+/* The adaptive spin budget of libc's locks (pthread.c). */
+extern unsigned __libc_lock_spin;
+
+/*
+ * Takes LIBC_LOCK_SPIN=N from one environment entry: the number of looks
+ * a held lock gets before the thread sleeps on it.  Parsed by hand at
+ * startup, before any lock or getenv() can run.
+ */
+static void
+lock_spin_from_environment(
+	const char *entry)
+{
+	static const char name[] = "LIBC_LOCK_SPIN=";
+	unsigned value;
+	size_t index;
+
+	/* Ignores every other entry. */
+	for (index = 0; index + 1U < sizeof(name); index++) {
+		if (entry[index] != name[index])
+			return;
+	}
+
+	/* Takes up to 1,000,000 in decimal; anything else is left alone. */
+	value = 0;
+	for (entry += sizeof(name) - 1U; *entry >= '0' && *entry <= '9'; entry++) {
+		value = value * 10U + (unsigned)(*entry - '0');
+		if (value > 1000000U)
+			return;
+	}
+	if (*entry == '\0')
+		__libc_lock_spin = value;
+}
+
 void
 __libc_init(
 	int argc,
@@ -7332,11 +8056,27 @@ __libc_init(
 	void *arena;
 	size_t env_count;
 	unsigned auxiliary_count;
+	int terminal;
+	sigset_t wake_signal;
+
+	/*
+	 * The reserved signal that wakes libc's SIGEV_THREAD worker is not the
+	 * program's to see: it is blocked in the initial thread here, every
+	 * thread the program creates inherits that, and only the worker
+	 * unblocks it.  Otherwise the kernel may hand a timer's wake to a
+	 * program thread, whose blocking call then returns EINTR.  The bit is
+	 * built directly because the public helpers stop at SIGRTMAX.
+	 */
+	wake_signal = (sigset_t)1ULL << (__ZEDBSD_SIGEV_THREAD_SIGNAL - 1U);
+	(void)__syscall6(KERN_SYS_sigprocmask, SIG_BLOCK, (uintptr_t)&wake_signal,
+			 0, 0, 0, 0);
 
 	/* Continue while the operation condition remains true. */
 	environment_end = envp;
-	while (environment_end != NULL && *environment_end != NULL)
+	while (environment_end != NULL && *environment_end != NULL) {
+		lock_spin_from_environment(*environment_end);
 		environment_end++;
+	}
 	auxiliary =
 	    environment_end != NULL ? (uintptr_t *)(environment_end + 1) : NULL;
 
@@ -7391,6 +8131,16 @@ __libc_init(
 	 * thread before the runtime linker invokes any of them. */
 	if (__pthread_initialize_main != NULL)
 		__pthread_initialize_main();
+
+	/*
+	 * Standard output is line buffered on a terminal and fully buffered
+	 * otherwise (C and POSIX).  isatty sets errno for anything else, and
+	 * errno is zero again when main starts.
+	 */
+	terminal = isatty(STDOUT_FILENO);
+	if (!terminal)
+		stdout->buffering_mode = _IOFBF;
+	errno = 0;
 #if defined(KERN_DYNAMIC_LIBC)
 	__rtld_exports.startup_init();
 #else
@@ -7673,7 +8423,7 @@ spawn_action_add(
 
 /* Supports the posix spawn common operation. */
 static int
-posix_spawn_common(
+posix_spawn_fork(
 	pid_t *result,
 	const char *path,
 	const posix_spawn_file_actions_t *actions,
@@ -7754,6 +8504,148 @@ posix_spawn_common(
 	/* Reports successful completion. */
 	return 0;
 }
+
+#if defined(__x86_64__)
+/*
+ * Spawns a program the way the vfork system call allows: the child runs
+ * in this process's memory, on a stack of its own, until it execs, and
+ * the caller waits until then.  Nothing of the address space is copied,
+ * and an exec that fails is reported here directly.  Every signal is
+ * blocked around the child, which puts back the caller's mask (and the
+ * default action of any signal this process handles) just before it
+ * execs, so that no handler of this process runs in the child.
+ */
+static int
+posix_spawn_common(
+	pid_t *result,
+	const char *path,
+	const posix_spawn_file_actions_t *actions,
+	const posix_spawnattr_t *attr,
+	char *const argv[],
+	char *const envp[],
+	int search)
+{
+	struct spawn_request request;
+	unsigned char stack[SPAWN_CHILD_STACK] __attribute__((aligned(16)));
+	sigset_t every;
+	long child;
+	int saved_errno;
+
+	/* Validates the command-line arguments. */
+	if (result == NULL || path == NULL || argv == NULL)
+		return EINVAL;
+
+	/* What the child reads. */
+	request.path = path;
+	request.actions = actions;
+	request.attr = attr;
+	request.argv = argv;
+	request.environment = envp != NULL ? envp : environ;
+	request.search = search;
+	request.error = 0;
+
+	/* Every signal, the library's own among them, waits until the child has execed. */
+	saved_errno = errno;
+	every = ~(sigset_t)0;
+	if (call(KERN_SYS_sigprocmask, SIG_BLOCK, (uintptr_t)&every,
+		 (uintptr_t)&request.mask, 0, 0, 0) < 0)
+		return errno;
+
+	/* The child, which has execed or ended when this returns. */
+	child = __vfork_spawn(spawn_child, &request, stack + sizeof(stack));
+	(void)call(KERN_SYS_sigprocmask, SIG_SETMASK, (uintptr_t)&request.mask,
+		   0, 0, 0, 0);
+	errno = saved_errno;
+
+	/* A kernel without the vfork system call: a copy of the address space. */
+	if (child == -ENOSYS)
+		return posix_spawn_fork(result, path, actions, attr, argv, envp,
+		    search);
+
+	/* The child could not be made. */
+	if (child < 0)
+		return (int)-child;
+
+	/* The child could not exec: it has ended, and is reaped here. */
+	if (request.error != 0) {
+		(void)waitpid((pid_t)child, NULL, 0);
+		errno = saved_errno;
+		return request.error;
+	}
+
+	/* Succeeded. */
+	*result = (pid_t)child;
+	return 0;
+}
+
+/*
+ * Runs in a posix_spawn child, on its own stack in the parent's memory:
+ * puts back the signal state, carries out the spawn attributes and file
+ * actions, and execs.  An error is left in the request for the parent.
+ */
+static void
+spawn_child(
+	void *argument)
+{
+	struct spawn_request *request;
+	struct sigaction action;
+	int signo;
+	int error;
+
+	/* No handler of the parent may run here: those signals go back to their default. */
+	request = argument;
+	memset(&action, 0, sizeof(action));
+	action.sa_handler = SIG_DFL;
+	for (signo = 1; signo <= SIGRTMAX; signo++) {
+		if (sigismember(&__libc_caught_signals, signo) == 1)
+			(void)sigaction(signo, &action, NULL);
+	}
+
+	/* The new program gets the caller's mask, unless the attributes set one. */
+	(void)call(KERN_SYS_sigprocmask, SIG_SETMASK, (uintptr_t)&request->mask,
+		   0, 0, 0, 0);
+
+	/* The attributes and the file actions, then the program. */
+	error = spawn_child_setup(request->actions, request->attr);
+	if (error == 0) {
+		if (request->search) {
+			(void)spawn_exec_search(request->path, request->argv,
+			    request->environment);
+		} else {
+			(void)execve(request->path, request->argv,
+			    request->environment);
+		}
+		error = errno;
+		if (error == 0)
+			error = EIO;
+	}
+
+	/* The parent reads why, and reaps this child. */
+	request->error = error;
+	_exit(127);
+}
+#else
+static int
+posix_spawn_common(
+	pid_t *result,
+	const char *path,
+	const posix_spawn_file_actions_t *actions,
+	const posix_spawnattr_t *attr,
+	char *const argv[],
+	char *const envp[],
+	int search)
+{
+	int function_result;
+
+	/* A copy of the address space. */
+	function_result = posix_spawn_fork(result, path, actions, attr, argv,
+	    envp, search);
+
+	/* Returns the computed result. */
+	return function_result;
+}
+#endif
+
 
 /* Supports the spawn child setup operation. */
 static int
@@ -8843,4 +9735,243 @@ user_heap_grow(
 
 	/* Returns the computed result. */
 	return amount;
+}
+
+/* Writes the kernel's mount list in mtab form to an unlinked file. */
+static int
+mount_table_write(
+	int *result)
+{
+	static unsigned sequence;
+	struct kern_mount_query *query;
+	const struct kern_mount_info *entry;
+	char name[64];
+	char line[KERN_MOUNT_INFO_PATH_MAX * 2U + 64U];
+	size_t length;
+	unsigned index;
+	int system_fd;
+	int fd;
+	int error;
+	off_t position;
+
+	/* Asks the kernel for every mounted file system. */
+	query = calloc(1, sizeof(*query) + KERN_MOUNT_INFO_MAX * sizeof(query->entries[0]));
+	if (query == NULL)
+		return ENOMEM;
+	query->version = KERN_MOUNT_INFO_VERSION;
+	query->struct_size = sizeof(*query);
+	query->capacity = KERN_MOUNT_INFO_MAX;
+	system_fd = open("/dev/system", O_RDONLY | O_CLOEXEC);
+	if (system_fd < 0) {
+		error = errno;
+		free(query);
+		return error;
+	}
+
+	/* The query fills in the entries and their count. */
+	error = ioctl(system_fd, KERN_SYSTEM_GET_MOUNTS, query);
+	if (error != 0)
+		error = errno;
+	(void)close(system_fd);
+	if (error != 0) {
+		free(query);
+		return error;
+	}
+
+	/* Makes a private file that no name refers to. */
+	(void)snprintf(name, sizeof(name), "/tmp/.mtab.%ld.%u", (long)getpid(),
+		       __atomic_add_fetch(&sequence, 1U, __ATOMIC_RELAXED));
+	fd = open(name, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+	if (fd < 0) {
+		error = errno;
+		free(query);
+		return error;
+	}
+
+	/* The name goes away at once; the descriptor keeps the file. */
+	(void)unlink(name);
+
+	/* Writes one mtab line per mounted file system. */
+	for (index = 0; index < query->count; index++) {
+		entry = &query->entries[index];
+		length = mount_table_line(entry, line, sizeof(line));
+		error = write_all_bytes(fd, line, length);
+		if (error != 0) {
+			(void)close(fd);
+			free(query);
+			return error;
+		}
+	}
+
+	/* The list is on the file now. */
+	free(query);
+
+	/* Leaves the file positioned at its start for the reader. */
+	position = lseek(fd, 0, SEEK_SET);
+	if (position != 0) {
+		error = errno;
+		(void)close(fd);
+		return error;
+	}
+
+	/* Succeeded: the caller owns the descriptor. */
+	*result = fd;
+	return 0;
+}
+
+/* Formats one kernel mount record as an mtab line. */
+static size_t
+mount_table_line(
+	const struct kern_mount_info *entry,
+	char *line,
+	size_t size)
+{
+	size_t length;
+	int bind;
+
+	/* A device mount names its device; a pseudo file system its type. */
+	bind = (entry->kind & KERN_MOUNT_INFO_BIND) != 0;
+	length = 0;
+	if (entry->device != 0 && !bind)
+		length = mount_table_append(line, size, length, "/dev/", 0);
+	if (entry->source[0] != '\0')
+		length = mount_table_append(line, size, length, entry->source, 1);
+	else
+		length = mount_table_append(line, size, length, entry->type, 1);
+
+	/* The mount point and the file system type. */
+	length = mount_table_append(line, size, length, " ", 0);
+	length = mount_table_append(line, size, length, entry->target, 1);
+	length = mount_table_append(line, size, length, " ", 0);
+	length = mount_table_append(line, size, length, entry->type, 1);
+
+	/* The options that the flags say. */
+	length = mount_table_append(line, size, length, " ", 0);
+	if ((entry->flags & MNT_RDONLY) != 0)
+		length = mount_table_append(line, size, length, "ro", 0);
+	else
+		length = mount_table_append(line, size, length, "rw", 0);
+	if ((entry->flags & MNT_NOSUID) != 0)
+		length = mount_table_append(line, size, length, ",nosuid", 0);
+	if (bind)
+		length = mount_table_append(line, size, length, ",bind", 0);
+
+	/* No dump frequency and no fsck pass, then the end of the line. */
+	length = mount_table_append(line, size, length, " 0 0\n", 0);
+
+	/* Reports the length of the line. */
+	return length;
+}
+
+/* Appends a word to an mtab line, escaping the characters that split it. */
+static size_t
+mount_table_append(
+	char *line,
+	size_t size,
+	size_t length,
+	const char *word,
+	int escape)
+{
+	static const char octal[] = "01234567";
+	unsigned char c;
+	int separator;
+
+	/* Copies each character, spelling a blank or backslash in octal. */
+	for (; *word != '\0'; word++) {
+		c = (unsigned char)*word;
+
+		/* A separator inside a name becomes \ooo as in glibc's mtab. */
+		separator = 0;
+		if (c == ' ' || c == '\t' || c == '\n' || c == '\\')
+			separator = 1;
+		if (escape && separator) {
+			if (length + 4U >= size)
+				break;
+			line[length++] = '\\';
+			line[length++] = octal[(c >> 6) & 7U];
+			line[length++] = octal[(c >> 3) & 7U];
+			line[length++] = octal[c & 7U];
+			continue;
+		}
+
+		/* Anything else, and the line's own separators, is copied as it is. */
+		if (length + 1U >= size)
+			break;
+		line[length++] = (char)c;
+	}
+
+	/* Terminates the line so far. */
+	line[length] = '\0';
+
+	/* Reports the new length. */
+	return length;
+}
+
+/* Undoes the \ooo escapes of an mtab word in place. */
+static void
+mount_table_unescape(
+	char *word)
+{
+	char *in;
+	char *out;
+	int value;
+	int digit;
+	int index;
+
+	/* Copies the word onto itself, shortening each escape. */
+	in = word;
+	out = word;
+	while (*in != '\0') {
+		/* A backslash and three octal digits stand for one byte. */
+		if (*in == '\\') {
+			value = 0;
+			for (index = 1; index <= 3; index++) {
+				digit = in[index];
+				if (digit < '0' || digit > '7')
+					break;
+				value = value * 8 + (digit - '0');
+			}
+
+			/* Three digits complete an escape. */
+			if (index == 4) {
+				*out++ = (char)value;
+				in += 4;
+				continue;
+			}
+		}
+
+		/* Anything else is copied as it is. */
+		*out++ = *in++;
+	}
+
+	/* Terminates the shortened word. */
+	*out = '\0';
+}
+
+/* Writes a whole buffer to a descriptor, retrying short writes. */
+static int
+write_all_bytes(
+	int fd,
+	const char *buffer,
+	size_t length)
+{
+	ssize_t written;
+
+	/* Writes until the buffer is out. */
+	while (length != 0) {
+		written = write(fd, buffer, length);
+		if (written < 0) {
+			/* A signal only interrupts; anything else is the error. */
+			if (errno == EINTR)
+				continue;
+			return errno;
+		}
+
+		/* Moves past what was written. */
+		buffer += written;
+		length -= (size_t)written;
+	}
+
+	/* Succeeded: everything is on the file. */
+	return 0;
 }

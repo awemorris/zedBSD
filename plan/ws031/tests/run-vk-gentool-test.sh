@@ -8,7 +8,7 @@ repo=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 gentool=${GENTOOL:-$repo/plan/ws031/mesa-refs/mesa/build-gentool/src/intel/compiler/gen/gentool}
 work=$(mktemp -d "${TMPDIR:-/tmp}/ws031-gentool.XXXXXX")
 trap "rm -rf -- \"$work\"" EXIT HUP INT TERM
-base="-std=gnu11 -Wall -Wextra -Werror -DKERN_USER_ABI_LP64 -I$repo/include -I$repo -idirafter $repo/libc/include"
+base="-std=gnu11 -Wall -Wextra -Werror -DKERN_USER_ABI_LP64 -I$repo/include -I$repo -idirafter $repo/include/libc"
 
 disasm() {	# binary -> text on stdout
 	if [ -n "${BRW_TOOLS:-}" ]; then

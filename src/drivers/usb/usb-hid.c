@@ -11,20 +11,18 @@
  * USB Human Interface Device input driver
  */
 
-#include <drivers/hid/hid-report.h>
-#include <drivers/usb-hid.h>
-#include <drivers/usb.h>
+#include <drivers/usb/hid-report.h>
+#include <drivers/usb/usb-hid.h>
+#include <drivers/usb/usb.h>
 #include <kern/input-device.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
 #include <kern/kmem.h>
+#include <kern/kcrt.h>
 
 #include <stdint.h>
-#include <stdio.h>
-#include <string.h>
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 #include "kern/klog.h"
 
 #define HID_ITEM_TYPE_MAIN		0U
@@ -431,7 +429,7 @@ usb_hid_attach(
 	hid = kern_malloc(sizeof(*hid));
 	if (hid == NULL)
 		return ENOMEM;
-	memset(hid, 0, sizeof(*hid));
+	kern_memset(hid, 0, sizeof(*hid));
 	hid->interface = interface;
 	hid->device = drv_usb_interface_device(interface);
 	spin_init(&hid->lock, LOCK_RANK_DEVICE, "usb hid");
@@ -926,7 +924,7 @@ usb_hid_identity(
 	address = drv_usb_device_address(hid->device);
 	port = drv_usb_device_port(hid->device);
 	interface_number = drv_usb_interface_number(hid->interface);
-	(void)snprintf(hid->physical_path, sizeof(hid->physical_path),
+	(void)kern_snprintf(hid->physical_path, sizeof(hid->physical_path),
 		       "usb%u/port%u/device%u/interface%u", bus, port, address,
 		       interface_number);
 	hid->unique_id[0] = '\0';
@@ -951,11 +949,11 @@ usb_hid_identity(
 
 	/* Handles the usb hid has capability condition. */
 	if (usb_hid_has_capability(hid, EV_ABS, ABS_X))
-		(void)snprintf(hid->name, sizeof(hid->name), "USB HID tablet");
+		(void)kern_snprintf(hid->name, sizeof(hid->name), "USB HID tablet");
 	else if (usb_hid_has_capability(hid, EV_REL, REL_X))
-		(void)snprintf(hid->name, sizeof(hid->name), "USB HID mouse");
+		(void)kern_snprintf(hid->name, sizeof(hid->name), "USB HID mouse");
 	else
-		(void)snprintf(hid->name, sizeof(hid->name),
+		(void)kern_snprintf(hid->name, sizeof(hid->name),
 			       "USB HID keyboard");
 }
 
@@ -1030,7 +1028,7 @@ usb_hid_arm(
 	error = usb_hid_begin_submit(hid);
 	if (error != 0)
 		return error;
-	memset(hid->buffer, 0, hid->buffer_size);
+	kern_memset(hid->buffer, 0, hid->buffer_size);
 
 	/* Checks the operation status. */
 	error = drv_usb_urb_setup(hid->urb, hid->buffer, hid->buffer_size,
@@ -1110,7 +1108,7 @@ usb_hid_publish_report(
 	state = usb_hid_report_state(hid, decoded.report_id);
 	if (state == NULL)
 		return;
-	memset(current, 0, sizeof(current));
+	kern_memset(current, 0, sizeof(current));
 	/* Process each remaining element. */
 	for (index = 0; index < decoded.value_count; index++) {
 		/* Handles the value local condition. */
@@ -1125,8 +1123,8 @@ usb_hid_publish_report(
 
 	/* Checks the operation status. */
 	if (!decoded.keyboard_error) {
-		memcpy(state->held, current, sizeof(state->held));
-		memset(aggregate, 0, sizeof(aggregate));
+		kern_memcpy(state->held, current, sizeof(state->held));
+		kern_memset(aggregate, 0, sizeof(aggregate));
 		/* Process each remaining element. */
 		for (index = 0; index < hid->report_count; index++) {
 			/* Process each element required by the operation. */
@@ -1153,7 +1151,7 @@ usb_hid_publish_report(
 			emitted = 1;
 		}
 
-		memcpy(hid->held, aggregate, sizeof(hid->held));
+		kern_memcpy(hid->held, aggregate, sizeof(hid->held));
 	}
 
 	/* Process each remaining element. */
@@ -1451,7 +1449,7 @@ usb_hid_activate(
 		goto out;
 	hid->worker = worker;
 	usb_descriptor = drv_usb_device_descriptor(hid->device);
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	info.name = hid->name;
 	info.physical_path = hid->physical_path;
 	info.unique_id = hid->unique_id;
@@ -1604,7 +1602,7 @@ static void
 local_clear(
 	struct hid_local_state *local)
 {
-	memset(local, 0, sizeof(*local));
+	kern_memset(local, 0, sizeof(*local));
 }
 
 /* Reports one collected usage, with its page attached. */
@@ -1737,7 +1735,7 @@ add_report(
 	if (layout->report_count >= HID_REPORT_ID_COUNT_MAX)
 		return E2BIG;
 	report = &layout->reports[layout->report_count++];
-	memset(report, 0, sizeof(*report));
+	kern_memset(report, 0, sizeof(*report));
 	report->id = id;
 	*result = report;
 	/* Succeeded. */
@@ -1803,7 +1801,7 @@ add_absolute_axis(
 	if (layout->absolute_axis_count >= ABS_MAX + 1U)
 		return E2BIG;
 	axis = &layout->absolute_axes[layout->absolute_axis_count++];
-	memset(axis, 0, sizeof(*axis));
+	kern_memset(axis, 0, sizeof(*axis));
 	axis->code = code;
 	axis->info.minimum = minimum;
 	axis->info.maximum = maximum;
@@ -2147,7 +2145,7 @@ add_field(
 		return error;
 	}
 	field = &layout->fields[layout->field_count++];
-	memset(field, 0, sizeof(*field));
+	kern_memset(field, 0, sizeof(*field));
 	field->bit_offset = bit_offset;
 	field->usage_minimum = usage_minimum;
 	field->usage_maximum = usage_maximum;
@@ -2798,7 +2796,7 @@ drv_hid_report_layout_parse(
 		return ENOMEM;
 	layout->descriptor_size = length;
 	layout->profile = HID_LAYOUT_PROFILE_DESCRIPTOR;
-	memcpy(layout->descriptor, descriptor, length);
+	kern_memcpy(layout->descriptor, descriptor, length);
 
 	/* Handles the parser availability. */
 	parser = kern_calloc(1, sizeof(*parser));
@@ -3339,7 +3337,7 @@ drv_hid_report_decode(
 		}
 	}
 
-	memset(result, 0, sizeof(*result));
+	kern_memset(result, 0, sizeof(*result));
 	result->report_id = report_id;
 	result->keyboard_error = (uint8_t)keyboard_error;
 	/* Process each remaining element. */
@@ -3386,7 +3384,7 @@ drv_hid_report_decode(
 					     field_local1->code, value_local3);
 		}
 		if (error != 0) {
-			memset(result, 0, sizeof(*result));
+			kern_memset(result, 0, sizeof(*result));
 
 			/* Failed. */
 			return error;

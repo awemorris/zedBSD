@@ -59,7 +59,7 @@ descriptor decoder exists; it is not an operational storage transport.
 
 ## Interfaces and policy
 
-Public C headers live in [libc/include](../../libc/include); zedBSD-specific
+Public C headers live in [include/libc](../../include/libc); zedBSD-specific
 records live in [include/uapi/zedbsd](../../include/uapi/zedbsd). Kernel-private
 headers and HAL structures are not application contracts. Build applications
 against the selected target sysroot rather than a host OS's ioctl layouts.

@@ -9,4 +9,4 @@ LIBWAYLAND_SOURCES := userland/base/libwayland/client.c \
 
 # The public SONAME follows the standard client library spelling.
 LIBWAYLAND_IMAGE_DATA := $(if $(ZEDBSD_TOPLEVEL_BUILD),/lib/libwayland-client.so=$(BUILD)/dynamic/libwayland-client.so)
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,libwayland-client,Wayland client,*,n,library,$(LIBWAYLAND_SOURCES),y,base,base/libwayland,,,shared-library,$(LIBWAYLAND_IMAGE_DATA),,lib))
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,libwayland-client,Wayland client,amd64,y,library,$(LIBWAYLAND_SOURCES),y,base,base/libwayland,,,shared-library,$(LIBWAYLAND_IMAGE_DATA),,lib))

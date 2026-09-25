@@ -1,0 +1,60 @@
+# ws034-p001 distfile manifest (2026-09-23). Tab separated.
+# key	version	archive	url	verify-kind	verify-url...
+# verify-kind: sig (detached OpenPGP signature), sha256-file, sha512-file,
+#   sha256sums-signed (signed list), gh-digest (GitHub release asset digest,
+#   filled in by fetch script from the API), dsc (Debian signed .dsc), none
+bash	5.3	bash-5.3.tar.gz	https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz	sig	https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz.sig
+coreutils	9.12	coreutils-9.12.tar.xz	https://ftp.gnu.org/gnu/coreutils/coreutils-9.12.tar.xz	sig	https://ftp.gnu.org/gnu/coreutils/coreutils-9.12.tar.xz.sig
+ca-certificates-debian	20260816	ca-certificates_20260816.tar.xz	https://deb.debian.org/debian/pool/main/c/ca-certificates/ca-certificates_20260816.tar.xz	dsc	https://deb.debian.org/debian/pool/main/c/ca-certificates/ca-certificates_20260816.dsc
+zlib	1.3.2	zlib-1.3.2.tar.xz	https://zlib.net/zlib-1.3.2.tar.xz	sig	https://zlib.net/zlib-1.3.2.tar.xz.asc
+expat	2.8.5	expat-2.8.5.tar.xz	https://github.com/libexpat/libexpat/releases/download/R_2_8_5/expat-2.8.5.tar.xz	sig	https://github.com/libexpat/libexpat/releases/download/R_2_8_5/expat-2.8.5.tar.xz.asc
+curl	8.22.0	curl-8.22.0.tar.xz	https://curl.se/download/curl-8.22.0.tar.xz	sig	https://curl.se/download/curl-8.22.0.tar.xz.asc
+wget	1.25.0	wget-1.25.0.tar.gz	https://ftp.gnu.org/gnu/wget/wget-1.25.0.tar.gz	sig	https://ftp.gnu.org/gnu/wget/wget-1.25.0.tar.gz.sig
+git	2.55.0	git-2.55.0.tar.xz	https://mirrors.edge.kernel.org/pub/software/scm/git/git-2.55.0.tar.xz	sha256sums-signed	https://mirrors.edge.kernel.org/pub/software/scm/git/sha256sums.asc
+emacs	31.1	emacs-31.1.tar.xz	https://ftp.gnu.org/gnu/emacs/emacs-31.1.tar.xz	sig	https://ftp.gnu.org/gnu/emacs/emacs-31.1.tar.xz.sig
+vim	9.2.1125	vim-9.2.1125.tar.gz	https://github.com/vim/vim/archive/refs/tags/v9.2.1125.tar.gz	none
+binutils	2.47	binutils-2.47.tar.xz	https://ftp.gnu.org/gnu/binutils/binutils-2.47.tar.xz	sig	https://ftp.gnu.org/gnu/binutils/binutils-2.47.tar.xz.sig
+gmp	6.3.0	gmp-6.3.0.tar.xz	https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz	sig	https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz.sig
+mpfr	4.2.2	mpfr-4.2.2.tar.xz	https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.xz	sig	https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.xz.sig
+mpc	1.3.1	mpc-1.3.1.tar.gz	https://ftp.gnu.org/gnu/mpc/mpc-1.3.1.tar.gz	sig	https://ftp.gnu.org/gnu/mpc/mpc-1.3.1.tar.gz.sig
+isl	0.24	isl-0.24.tar.bz2	https://gcc.gnu.org/pub/gcc/infrastructure/isl-0.24.tar.bz2	none
+gcc	16.2.0	gcc-16.2.0.tar.xz	https://ftp.gnu.org/gnu/gcc/gcc-16.2.0/gcc-16.2.0.tar.xz	sig	https://ftp.gnu.org/gnu/gcc/gcc-16.2.0/gcc-16.2.0.tar.xz.sig
+gdb	17.2	gdb-17.2.tar.xz	https://ftp.gnu.org/gnu/gdb/gdb-17.2.tar.xz	sig	https://ftp.gnu.org/gnu/gdb/gdb-17.2.tar.xz.sig
+meson	1.12.0	meson-1.12.0.tar.gz	https://github.com/mesonbuild/meson/releases/download/1.12.0/meson-1.12.0.tar.gz	sig	https://github.com/mesonbuild/meson/releases/download/1.12.0/meson-1.12.0.tar.gz.asc
+ninja	1.13.2	ninja-1.13.2.tar.gz	https://github.com/ninja-build/ninja/archive/refs/tags/v1.13.2.tar.gz	none
+libffi	3.8.0	libffi-3.8.0.tar.gz	https://github.com/libffi/libffi/releases/download/v3.8.0/libffi-3.8.0.tar.gz	gh-digest	libffi/libffi v3.8.0
+pcre2	10.48	pcre2-10.48.tar.bz2	https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.48/pcre2-10.48.tar.bz2	sig	https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.48/pcre2-10.48.tar.bz2.sig
+glib	2.90.0	glib-2.90.0.tar.xz	https://download.gnome.org/sources/glib/2.90/glib-2.90.0.tar.xz	sha256-file	https://download.gnome.org/sources/glib/2.90/glib-2.90.0.sha256sum
+libpng	1.6.58	libpng-1.6.58.tar.xz	https://download.sourceforge.net/libpng/libpng-1.6.58.tar.xz	none
+freetype	2.14.3	freetype-2.14.3.tar.xz	https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz	sig	https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz.sig
+harfbuzz	14.5.0	harfbuzz-14.5.0.tar.xz	https://github.com/harfbuzz/harfbuzz/releases/download/14.5.0/harfbuzz-14.5.0.tar.xz	gh-digest	harfbuzz/harfbuzz 14.5.0
+fontconfig	2.18.3	fontconfig-2.18.3.tar.xz	https://gitlab.freedesktop.org/api/v4/projects/890/packages/generic/fontconfig/2.18.3/fontconfig-2.18.3.tar.xz	sha256-file	https://gitlab.freedesktop.org/api/v4/projects/890/packages/generic/fontconfig/2.18.3/fontconfig-2.18.3.tar.xz.sha256sum
+pixman	0.46.4	pixman-0.46.4.tar.xz	https://cairographics.org/releases/pixman-0.46.4.tar.xz	sha512-file	https://cairographics.org/releases/pixman-0.46.4.tar.xz.sha512
+cairo	1.18.6	cairo-1.18.6.tar.xz	https://cairographics.org/releases/cairo-1.18.6.tar.xz	sha256-file	https://cairographics.org/releases/cairo-1.18.6.tar.xz.sha256sum
+pango	1.58.2	pango-1.58.2.tar.xz	https://download.gnome.org/sources/pango/1.58/pango-1.58.2.tar.xz	sha256-file	https://download.gnome.org/sources/pango/1.58/pango-1.58.2.sha256sum
+fribidi	1.0.17	fribidi-1.0.17.tar.xz	https://github.com/fribidi/fribidi/releases/download/v1.0.17/fribidi-1.0.17.tar.xz	gh-digest	fribidi/fribidi v1.0.17
+gdk-pixbuf	2.44.8	gdk-pixbuf-2.44.8.tar.xz	https://download.gnome.org/sources/gdk-pixbuf/2.44/gdk-pixbuf-2.44.8.tar.xz	sha256-file	https://download.gnome.org/sources/gdk-pixbuf/2.44/gdk-pixbuf-2.44.8.sha256sum
+libjpeg-turbo	3.2.0	libjpeg-turbo-3.2.0.tar.gz	https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.0/libjpeg-turbo-3.2.0.tar.gz	sig	https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.0/libjpeg-turbo-3.2.0.tar.gz.sig
+graphene	1.10.8	graphene-1.10.8.tar.xz	https://download.gnome.org/sources/graphene/1.10/graphene-1.10.8.tar.xz	sha256-file	https://download.gnome.org/sources/graphene/1.10/graphene-1.10.8.sha256sum
+libepoxy	1.5.10	libepoxy-1.5.10.tar.xz	https://download.gnome.org/sources/libepoxy/1.5/libepoxy-1.5.10.tar.xz	sha256-file	https://download.gnome.org/sources/libepoxy/1.5/libepoxy-1.5.10.sha256sum
+libxkbcommon	1.13.2	libxkbcommon-1.13.2.tar.gz	https://github.com/xkbcommon/libxkbcommon/archive/refs/tags/xkbcommon-1.13.2.tar.gz	none
+xkeyboard-config	2.48	xkeyboard-config-2.48.tar.xz	https://www.x.org/releases/individual/data/xkeyboard-config/xkeyboard-config-2.48.tar.xz	sig	https://www.x.org/releases/individual/data/xkeyboard-config/xkeyboard-config-2.48.tar.xz.sig
+wayland	1.26.0	wayland-1.26.0.tar.xz	https://gitlab.freedesktop.org/-/project/121/uploads/5f5d2e19a230e8b8250d9a7c2f280846/wayland-1.26.0.tar.xz	sig	https://gitlab.freedesktop.org/-/project/121/uploads/8470f1b7d7225fe33ccda52e955d4e64/wayland-1.26.0.tar.xz.sig	https://gitlab.freedesktop.org/-/project/121/uploads/ecb0f35f346551c6b4015d9f5341bd2f/wayland-1.26.0.tar.xz.sha256sum
+wayland-protocols	1.49	wayland-protocols-1.49.tar.xz	https://gitlab.freedesktop.org/-/project/2891/uploads/7ed597f0cad076a17fe36f8860596f8c/wayland-protocols-1.49.tar.xz	sig	https://gitlab.freedesktop.org/-/project/2891/uploads/2eef3050ed35526c58d0d361f7b822b2/wayland-protocols-1.49.tar.xz.sig	https://gitlab.freedesktop.org/-/project/2891/uploads/19d00791387d3c01c226f57da03a5b74/wayland-protocols-1.49.tar.xz.sha256sum
+gtk4	4.24.0	gtk-4.24.0.tar.xz	https://download.gnome.org/sources/gtk/4.24/gtk-4.24.0.tar.xz	sha256-file	https://download.gnome.org/sources/gtk/4.24/gtk-4.24.0.sha256sum
+qt6-qtbase	6.11.2	qtbase-everywhere-src-6.11.2.tar.xz	https://download.qt.io/official_releases/qt/6.11/6.11.2/submodules/qtbase-everywhere-src-6.11.2.tar.xz	sha256-file	https://download.qt.io/official_releases/qt/6.11/6.11.2/submodules/qtbase-everywhere-src-6.11.2.tar.xz.sha256
+qt6-qtwayland	6.11.2	qtwayland-everywhere-src-6.11.2.tar.xz	https://download.qt.io/official_releases/qt/6.11/6.11.2/submodules/qtwayland-everywhere-src-6.11.2.tar.xz	sha256-file	https://download.qt.io/official_releases/qt/6.11/6.11.2/submodules/qtwayland-everywhere-src-6.11.2.tar.xz.sha256
+gtk3	3.24.52	gtk-3.24.52.tar.xz	https://download.gnome.org/sources/gtk/3.24/gtk-3.24.52.tar.xz	sha256-file	https://download.gnome.org/sources/gtk/3.24/gtk-3.24.52.sha256sum
+at-spi2-core	2.62.0.1	at-spi2-core-2.62.0.1.tar.xz	https://download.gnome.org/sources/at-spi2-core/2.62/at-spi2-core-2.62.0.1.tar.xz	sha256-file	https://download.gnome.org/sources/at-spi2-core/2.62/at-spi2-core-2.62.0.1.sha256sum
+qt5-qtbase	5.15.19	qtbase-everywhere-opensource-src-5.15.19.tar.xz	https://download.qt.io/archive/qt/5.15/5.15.19/submodules/qtbase-everywhere-opensource-src-5.15.19.tar.xz	sha256-file	https://download.qt.io/archive/qt/5.15/5.15.19/submodules/qtbase-everywhere-opensource-src-5.15.19.tar.xz.sha256
+qt5-qtwayland	5.15.19	qtwayland-everywhere-opensource-src-5.15.19.tar.xz	https://download.qt.io/archive/qt/5.15/5.15.19/submodules/qtwayland-everywhere-opensource-src-5.15.19.tar.xz	sha256-file	https://download.qt.io/archive/qt/5.15/5.15.19/submodules/qtwayland-everywhere-opensource-src-5.15.19.tar.xz.sha256
+qt5-qtsvg	5.15.19	qtsvg-everywhere-opensource-src-5.15.19.tar.xz	https://download.qt.io/archive/qt/5.15/5.15.19/submodules/qtsvg-everywhere-opensource-src-5.15.19.tar.xz	sha256-file	https://download.qt.io/archive/qt/5.15/5.15.19/submodules/qtsvg-everywhere-opensource-src-5.15.19.tar.xz.sha256
+ffmpeg	8.1.3	ffmpeg-8.1.3.tar.xz	https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz	sig	https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz.asc
+vlc	3.0.24	vlc-3.0.24.tar.xz	https://download.videolan.org/pub/videolan/vlc/3.0.24/vlc-3.0.24.tar.xz	sig	https://download.videolan.org/pub/videolan/vlc/3.0.24/vlc-3.0.24.tar.xz.asc	https://download.videolan.org/pub/videolan/vlc/3.0.24/vlc-3.0.24.tar.xz.sha256
+ca-certificates-curl	2026-08-13	cacert-2026-08-13.pem	https://curl.se/ca/cacert-2026-08-13.pem	sha256-file	https://curl.se/ca/cacert-2026-08-13.pem.sha256
+# Dependencies found in p001 that the phase list did not name (see package-inventory.md section 4).
+libtiff	4.7.2	tiff-4.7.2.tar.xz	https://download.osgeo.org/libtiff/tiff-4.7.2.tar.xz	sig	https://download.osgeo.org/libtiff/tiff-4.7.2.tar.xz.sig
+gperf	3.3	gperf-3.3.tar.gz	https://ftp.gnu.org/gnu/gperf/gperf-3.3.tar.gz	sig	https://ftp.gnu.org/gnu/gperf/gperf-3.3.tar.gz.sig
+libiconv	1.19	libiconv-1.19.tar.gz	https://ftp.gnu.org/gnu/libiconv/libiconv-1.19.tar.gz	sig	https://ftp.gnu.org/gnu/libiconv/libiconv-1.19.tar.gz.sig
+ncurses	6.6	ncurses-6.6.tar.gz	https://ftp.gnu.org/gnu/ncurses/ncurses-6.6.tar.gz	sig	https://ftp.gnu.org/gnu/ncurses/ncurses-6.6.tar.gz.sig
+atk-standalone	2.38.0	atk-2.38.0.tar.xz	https://download.gnome.org/sources/atk/2.38/atk-2.38.0.tar.xz	sha256-file	https://download.gnome.org/sources/atk/2.38/atk-2.38.0.sha256sum

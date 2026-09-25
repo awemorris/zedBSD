@@ -145,6 +145,7 @@ def architecture_driver_path(platform: str) -> Path:
 
 def all_option_files() -> list[Path]:
     result = [CONFIG_DIR / "kernel-options.list",
+              CONFIG_DIR / "rootfs-options.list",
               CONFIG_DIR / "drivers" / "isa.drivers",
               CONFIG_DIR / "drivers" / "pci.drivers",
               CONFIG_DIR / "drivers" / "usb.drivers",
@@ -255,8 +256,11 @@ def save(path: Path, values: dict[str, object]) -> None:
                 continue
             lines.append(f"{key} := {values.get(key, 'n')}")
             emitted.add(key)
+    # A selection that does not build for this platform stays in the menu's
+    # state, so switching the target back keeps it, but is not written.
     programs = values.get("ZEDBSD_USER_PROGRAMS", set())
-    ordered = [row[0] for row in user_program_rows() if row[0] in programs]
+    ordered = [row[0] for row in user_program_rows()
+               if row[0] in programs and applies(row[2], platform)]
     lines.extend(["", "ZEDBSD_USER_PROGRAMS := " + " ".join(ordered)])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -591,6 +595,7 @@ def tui(screen, values: dict[str, object], output: Path) -> None:
             ("Select kernel option", "kernel-options"),
             ("Select drivers", "drivers"),
             ("Select user programs", "user-programs"),
+            ("Select root file system option", "rootfs-options"),
             ("Build toolchain", "build-toolchain"),
             ("Build kernel", "build-kernel"),
             ("Build rootfs", "build-rootfs"),
@@ -619,6 +624,10 @@ def tui(screen, values: dict[str, object], output: Path) -> None:
             select_drivers(screen, values)
         elif action == "user-programs":
             select_programs(screen, values)
+        elif action == "rootfs-options":
+            edit_options(screen, "Select root file system option",
+                         option_rows(CONFIG_DIR / "rootfs-options.list",
+                                     str(values["ZEDBSD_PLATFORM"])), values)
         elif action == "build-toolchain":
             build(screen, values, output, "toolchain")
         elif action == "build-kernel":

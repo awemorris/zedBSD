@@ -25,6 +25,7 @@
 
 #include "edp-ktest.h"
 #include "display-ktest.h"
+#include <kern/kcrt.h>
 
 #include "../execution/ktest.h"
 #include "../../display/internal.h"
@@ -36,7 +37,6 @@
 #include <kern/sched.h>
 
 #include <stdint.h>
-#include <string.h>
 
 /* The PP_CONTROL register of PPS 0, and its bit that forces VDD on. */
 #define I915_EDP_SYNC_PP_CONTROL 0xc7204u
@@ -234,7 +234,7 @@ i915_edp_sync_delayed_work(
 
 	/* Prepares the body. */
 	body = &i915_edp_sync_body;
-	memset(body, 0, sizeof(*body));
+	kern_memset(body, 0, sizeof(*body));
 	drv_i915_completion_init(&body->started, "dw-started");
 	drv_i915_completion_init(&body->release, "dw-release");
 	drv_i915_completion_init(&body->done, "dw-done");
@@ -538,7 +538,7 @@ i915_edp_sync_fresh(
 
 	/* The real locks and delayed work; the backend is the hooks' context. */
 	env = &i915_edp_sync_env;
-	memset(env, 0, sizeof(*env));
+	kern_memset(env, 0, sizeof(*env));
 	drv_i915_dp_kernel_bind_sync(i915_edp_sync_kernel, env);
 
 	/* The registers and waits of the model. */
@@ -652,7 +652,7 @@ i915_edp_sync_edp(
 	 * The shortest delays Linux's rules give: T11_T12 of 1 plus 100 ms,
 	 * rounded up, is 200 ms, and five of them are 1 s.
 	 */
-	memset(&cfg, 0, sizeof(cfg));
+	kern_memset(&cfg, 0, sizeof(cfg));
 	cfg.rawclk_khz = 19200u;
 	cfg.t1_t3 = 100u;
 	cfg.t8 = 10u;

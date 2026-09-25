@@ -22,13 +22,13 @@
 #include "../execution/ktest.h"
 #include "../../i915.h"
 #include "../../display/opregion.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 #include <kern/sched.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdint.h>
-#include <string.h>
 
 /*
  * The address the shadow mailbox stands at.  It is an unaligned "physical"
@@ -256,7 +256,7 @@ i915_shadow_read(
 	uint32_t value;
 
 	/* Copies the word out; the offset need not be aligned. */
-	memcpy(&value, shadow_region + offset, 4);
+	kern_memcpy(&value, shadow_region + offset, 4);
 
 	/* Succeeded: reports the word. */
 	return value;
@@ -269,7 +269,7 @@ i915_shadow_write(
 	uint32_t value)
 {
 	/* Copies the word in; the offset need not be aligned. */
-	memcpy(shadow_region + offset, &value, 4);
+	kern_memcpy(shadow_region + offset, &value, 4);
 }
 
 /* Writes a 16-bit word of the shadow VBT. */
@@ -279,7 +279,7 @@ i915_vbt_write16(
 	uint16_t value)
 {
 	/* Copies the word in; the offset need not be aligned. */
-	memcpy(shadow_vbt + offset, &value, 2);
+	kern_memcpy(shadow_vbt + offset, &value, 2);
 }
 
 /* Fills the shadow OpRegion with an empty version 2.1 header announcing the given mailboxes. */
@@ -293,14 +293,14 @@ i915_shadow_init(
 	};
 
 	/* Starts from an empty region with the OpRegion signature. */
-	memset(shadow_region, 0, sizeof(shadow_region));
-	memcpy(shadow_region, signature, 16);
+	kern_memset(shadow_region, 0, sizeof(shadow_region));
+	kern_memcpy(shadow_region, signature, 16);
 
 	/* The header: 8 KiB, version 2.1, and the mailboxes. */
 	shadow_region[I915_TEST_OVER_SIZE] = 8u;
 	shadow_region[I915_TEST_OVER_MINOR] = 1u;
 	shadow_region[I915_TEST_OVER_MAJOR] = 2u;
-	memcpy(shadow_region + I915_TEST_MBOXES_OFFSET, &mboxes, 4);
+	kern_memcpy(shadow_region + I915_TEST_MBOXES_OFFSET, &mboxes, 4);
 }
 
 /* Fills the shadow VBT: a VBT header (48 bytes) followed by a BDB header (22 bytes). */
@@ -318,16 +318,16 @@ i915_shadow_vbt_init(void)
 	uint32_t bdb_offset;
 
 	/* The VBT header: signature, version 100, header 48 bytes, VBT 96 bytes, BDB at 48. */
-	memset(shadow_vbt, 0, sizeof(shadow_vbt));
-	memcpy(shadow_vbt, vbt_signature, 20);
+	kern_memset(shadow_vbt, 0, sizeof(shadow_vbt));
+	kern_memcpy(shadow_vbt, vbt_signature, 20);
 	i915_vbt_write16(20, 100);
 	i915_vbt_write16(22, 48);
 	i915_vbt_write16(24, 96);
 	bdb_offset = 48u;
-	memcpy(shadow_vbt + 28, &bdb_offset, 4);
+	kern_memcpy(shadow_vbt + 28, &bdb_offset, 4);
 
 	/* The BDB header: signature, version 249, header 22 bytes, BDB 48 bytes. */
-	memcpy(shadow_vbt + 48, bdb_signature, 16);
+	kern_memcpy(shadow_vbt + 48, bdb_signature, 16);
 	i915_vbt_write16(64, 249);
 	i915_vbt_write16(66, 22);
 	i915_vbt_write16(68, 48);
@@ -480,8 +480,8 @@ i915_setup_tests(
 	i915_shadow_vbt_init();
 	rvda = I915_TEST_RVDA_OFFSET;
 	rvds = sizeof(shadow_vbt);
-	memcpy(shadow_region + I915_TEST_ASLE_RVDA, &rvda, 8);
-	memcpy(shadow_region + I915_TEST_ASLE_RVDS, &rvds, 4);
+	kern_memcpy(shadow_region + I915_TEST_ASLE_RVDA, &rvda, 8);
+	kern_memcpy(shadow_region + I915_TEST_ASLE_RVDS, &rvds, 4);
 	i915_shadow_write(I915_TEST_CHPD, 0u);
 	i915_shadow_write(I915_TEST_ASLE_ARDY, 0x77u);
 
@@ -494,7 +494,7 @@ i915_setup_tests(
 
 	/* The instance is bound to the shadow when the setup succeeded. */
 	backend = drv_i915_opregion_mailbox_backend(display);
-	shadow_bound = strcmp(backend, "SHADOW");
+	shadow_bound = kern_strcmp(backend, "SHADOW");
 	passed = 0;
 	if (error == 0 && shadow_bound == 0)
 		passed = 1;
@@ -703,7 +703,7 @@ i915_chain_tests(
 	int passed;
 
 	/* The second receiver runs after the service's block. */
-	memset(&other, 0, sizeof(other));
+	kern_memset(&other, 0, sizeof(other));
 	other.notifier_call = i915_other_receiver;
 	other.priority = -1;
 	other_calls = 0;
@@ -898,7 +898,7 @@ i915_unregister_tests(
 	(void)drv_i915_opregion_cleanup(display);
 	drv_i915_opregion_counters(display, &unported, &boundaries, &unmaps);
 	backend = drv_i915_opregion_mailbox_backend(display);
-	unbound = strcmp(backend, "NONE");
+	unbound = kern_strcmp(backend, "NONE");
 	passed = 0;
 	if (unbound == 0 &&
 	    unmaps >= 2u &&
@@ -1087,7 +1087,7 @@ i915_lifecycle_tests(
 	if (error == 0) {
 		error = drv_i915_opregion_shadow_setup(display, I915_TEST_ASLS_TOKEN);
 		backend = drv_i915_opregion_mailbox_backend(display);
-		unbound = strcmp(backend, "NONE");
+		unbound = kern_strcmp(backend, "NONE");
 		if (error == EINVAL && unbound == 0)
 			passed = 1;
 	}
@@ -1111,7 +1111,7 @@ i915_lifecycle_tests(
 	drv_i915_ktest_check(ktest, passed, "opregion: OP-L-REINIT setup + register again on a fresh shadow: registered, service epoch advanced");
 
 	/* A slow receiver registers; the worker delivers an event to it. */
-	memset(&slow, 0, sizeof(slow));
+	kern_memset(&slow, 0, sizeof(slow));
 	slow.notifier_call = i915_slow_receiver;
 	slow.priority = 10;
 	slow_finished = 0;
@@ -1195,7 +1195,7 @@ i915_lifecycle_tests(
 	/* The work is idle, so the cleanup releases the instance. */
 	cleaned = drv_i915_opregion_cleanup(display);
 	backend = drv_i915_opregion_mailbox_backend(display);
-	unbound = strcmp(backend, "NONE");
+	unbound = kern_strcmp(backend, "NONE");
 	passed = 0;
 	if (cleaned == 0 && unbound == 0)
 		passed = 1;

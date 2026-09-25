@@ -90,7 +90,8 @@
  * drm_mode_get_hv_timing() and drm_mode_set_crtcinfo().
  */
 
-#include <errno.h>
+#include <uapi/errno.h>
+#include <kern/kcrt.h>
 
 #include "internal.h"
 #include "modeset-internal.h"
@@ -151,7 +152,7 @@ drv_i915_drm_mode_init(
 	const struct drm_display_mode *src)
 {
 	/* Clears the destination, including its list head. */
-	memset(dst, 0, sizeof(*dst));
+	kern_memset(dst, 0, sizeof(*dst));
 
 	/* Copies the mode over the cleared destination. */
 	drv_i915_drm_mode_copy(dst, src);
@@ -309,7 +310,7 @@ drv_i915_edid_preferred_mode(
 	 * Describes the connector the conversion logs about: the panel, on the
 	 * parser's own DRM device.  Only the base block is handed over.
 	 */
-	memset(&connector, 0, sizeof(connector));
+	kern_memset(&connector, 0, sizeof(connector));
 	connector.name = "eDP-1";
 	connector.dev = &world->i915_edid_preferred_mode_dev;
 	drm_edid.edid = edid;
@@ -575,7 +576,7 @@ i915_edid_mode_create(
 	world->edid_mode_taken = 1;
 
 	/* Clears the object for the new mode. */
-	memset(&world->edid_mode_object, 0, sizeof(world->edid_mode_object));
+	kern_memset(&world->edid_mode_object, 0, sizeof(world->edid_mode_object));
 
 	/* Succeeded: the caller owns the mode object. */
 	return &world->edid_mode_object;

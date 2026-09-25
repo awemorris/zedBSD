@@ -28,12 +28,12 @@
 #include <kern/inode.h>
 #include <kern/thread.h>
 #include <kern/page.h>
-#include <errno.h>
+#include <uapi/errno.h>
 #include <limits.h>
 #include <hal/hal.h>
 #include <kern/pmem.h>
-#include <string.h>
 #include <uapi/block.h>
+#include <kern/kcrt.h>
 
 #define DISK_ALLOCATED		1U
 #define DISK_LIVE		2U
@@ -1127,7 +1127,7 @@ disk_block_info(
 	}
 
 	/* Publishes one coherent device, parent and sector-geometry snapshot. */
-	memset(info, 0, sizeof(*info));
+	kern_memset(info, 0, sizeof(*info));
 	info->version = KERN_BLOCK_VERSION;
 	info->struct_size = sizeof(*info);
 	info->device = (uint32_t)disk->d_dev;
@@ -1141,7 +1141,7 @@ disk_block_info(
 	info->sector_size = disk->d_block_size;
 	info->sector_count = disk->d_block_count;
 	info->parent_offset = disk->d_parent_offset;
-	memcpy(info->name, disk->d_name, sizeof(info->name));
+	kern_memcpy(info->name, disk->d_name, sizeof(info->name));
 
 	disk_unlock(enabled);
 
@@ -1881,7 +1881,7 @@ bio_flush(
 	spin_unlock_irqrestore(&leaf->d_lock, irq);
 
 	/* Issues a real barrier after the complete captured prefix. */
-	memset(&bio, 0, sizeof(bio));
+	kern_memset(&bio, 0, sizeof(bio));
 	bio.b_op = BIO_FLUSH;
 	error = bio_submit(disk, &bio);
 	if (error == 0)
@@ -2379,7 +2379,7 @@ bio_async_enable(struct disk *disk)
 	    ~(size_t)(KERN_PAGE_SIZE - 1U);
 
 	allocation_size = controls + ASYNC_SLOTS * KERN_IO_BATCH_MAX;
-	memset(&memory, 0, sizeof(memory));
+	kern_memset(&memory, 0, sizeof(memory));
 	memory.size = allocation_size;
 	error = hal_pmem_alloc(allocation_size, KERN_PAGE_SIZE,
 			       &memory.paddr);
@@ -2392,7 +2392,7 @@ bio_async_enable(struct disk *disk)
 	if (error != 0)
 		goto failed_memory;
 	cache_memory_commit(CACHE_MEMORY_IO_POOL, memory.size);
-	memset(hal_pmem_to_kernel(memory.paddr), 0, memory.size);
+	kern_memset(hal_pmem_to_kernel(memory.paddr), 0, memory.size);
 	if (!endpoint->started) {
 		error = kthread_create(async_worker, endpoint, SCHED_PRIORITY_DEFAULT, &thread);
 		if (error != 0) {
@@ -2488,7 +2488,7 @@ bio_async_disable(struct disk *disk)
 		}
 
 		cache_memory_release(CACHE_MEMORY_IO_POOL, endpoint->memory.size);
-		memset(&endpoint->memory, 0, sizeof(endpoint->memory));
+		kern_memset(&endpoint->memory, 0, sizeof(endpoint->memory));
 		endpoint->requests = NULL;
 		endpoint->cache_token = NULL;
 		endpoint->leaf = NULL;
@@ -2569,8 +2569,8 @@ bio_async_prepare(struct disk *disk, enum bio_op op, uint64_t block,
 
 	endpoint = request->endpoint;
 	refcount_init(&request->refs, 1);
-	memset(&request->bio, 0, sizeof(request->bio));
-	memset(&request->guard, 0, sizeof(request->guard));
+	kern_memset(&request->bio, 0, sizeof(request->bio));
+	kern_memset(&request->guard, 0, sizeof(request->guard));
 	request->disk = disk;
 	disk_ref(disk);
 	request->cache_token = token;
@@ -2607,7 +2607,7 @@ bio_async_prepare(struct disk *disk, enum bio_op op, uint64_t block,
 
 	bytes = (size_t)count * disk->d_block_size;
 	if (op == BIO_WRITE)
-		memcpy(request->payload, write_data, bytes);
+		kern_memcpy(request->payload, write_data, bytes);
 	request->bio.b_context = inherited;
 	request->bio.b_op = op;
 	request->bio.b_block = block;
@@ -2865,7 +2865,7 @@ disk_transfer_vector_context(
 		if (op == BIO_WRITE) {
 			offset = 0;
 			for (index = 0; index < count; index++) {
-				memcpy((char *)scratch + offset, vectors[index].data, vectors[index].length);
+				kern_memcpy((char *)scratch + offset, vectors[index].data, vectors[index].length);
 				offset += vectors[index].length;
 			}
 		}
@@ -2882,7 +2882,7 @@ disk_transfer_vector_context(
 				length = vectors[index].length;
 				if (length > confirmed - offset)
 					length = confirmed - offset;
-				memcpy(vectors[index].data, (char *)scratch + offset, length);
+				kern_memcpy(vectors[index].data, (char *)scratch + offset, length);
 				offset += length;
 			}
 		}
@@ -3625,7 +3625,7 @@ disk_transfer_direct(
 		if (disk->d_max_transfer_blocks != 0 &&
 		    chunk > disk->d_max_transfer_blocks)
 			chunk = disk->d_max_transfer_blocks;
-		memset(&bio, 0, sizeof(bio));
+		kern_memset(&bio, 0, sizeof(bio));
 		bio.b_context = child;
 		bio.b_op = op;
 		bio.b_block = block;

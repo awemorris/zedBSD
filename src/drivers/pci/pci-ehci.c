@@ -9,18 +9,19 @@
  * PCI EHCI host controller driver
  */
 
-#include <drivers/pci-ehci.h>
-#include <drivers/pci.h>
-#include <drivers/usb.h>
-#include <errno.h>
+#include <drivers/pci/pci-ehci.h>
+#include <drivers/pci/pci.h>
+#include <drivers/usb/usb.h>
+#include <uapi/errno.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
+#include <kern/clock.h>
 #include <kern/thread.h>
 #include <limits.h>
-#include <string.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
 #include "kern/device-io.h"
+#include <kern/kcrt.h>
 
 #define EHCI_USBCMD 0x00U
 #define EHCI_USBSTS 0x04U
@@ -88,11 +89,11 @@
 #define EHCI_MAX_QTDS 124U
 #define EHCI_PCI_COMMAND 0x04U
 #define EHCI_PCI_COMMAND_MASTER 0x0004U
-#define EHCI_QUIESCE_TICKS 100U
+#define EHCI_QUIESCE_TICKS KERN_MS_TO_TICKS(1000U)
 #define EHCI_HARDWARE_STOP_WAIT_TICKS (EHCI_QUIESCE_TICKS * 3U)
-#define EHCI_RETIRE_TICKS 100U
-#define EHCI_ROOT_POLL_TICKS 10U
-#define EHCI_PORT_POWER_GOOD_TICKS 2U
+#define EHCI_RETIRE_TICKS KERN_MS_TO_TICKS(1000U)
+#define EHCI_ROOT_POLL_TICKS KERN_MS_TO_TICKS(100U)
+#define EHCI_PORT_POWER_GOOD_TICKS KERN_MS_TO_TICKS(20U)
 #define EHCI_PERIODIC_FRAMES 1024U
 #define EHCI_PERIODIC_LEVELS 11U
 #define EHCI_PERIODIC_NODES ((EHCI_PERIODIC_FRAMES * 2U) - 1U)
@@ -943,14 +944,14 @@ ehci_schedule_release(
 				      &controller->reclaim_request.bounce);
 	}
 
-	memset(&controller->reclaim_request, 0,
+	kern_memset(&controller->reclaim_request, 0,
 	       sizeof(controller->reclaim_request));
 
 	/* Handles the address availability. */
 	if (controller->async_head_memory.address != NULL) {
 		drv_dma_free_coherent(controller->hcd.dma,
 				      &controller->async_head_memory);
-		memset(&controller->async_head_memory, 0,
+		kern_memset(&controller->async_head_memory, 0,
 		       sizeof(controller->async_head_memory));
 		controller->async_head = NULL;
 	}
@@ -959,7 +960,7 @@ ehci_schedule_release(
 	if (controller->periodic_skeleton_memory.address != NULL) {
 		drv_dma_free_coherent(controller->hcd.dma,
 				      &controller->periodic_skeleton_memory);
-		memset(&controller->periodic_skeleton_memory, 0,
+		kern_memset(&controller->periodic_skeleton_memory, 0,
 		       sizeof(controller->periodic_skeleton_memory));
 		controller->periodic_skeleton = NULL;
 	}
@@ -968,7 +969,7 @@ ehci_schedule_release(
 	if (controller->periodic.address != NULL) {
 		drv_dma_free_coherent(controller->hcd.dma,
 				      &controller->periodic);
-		memset(&controller->periodic, 0, sizeof(controller->periodic));
+		kern_memset(&controller->periodic, 0, sizeof(controller->periodic));
 	}
 }
 
@@ -1031,7 +1032,7 @@ ehci_schedule_initialize(
 
 	controller->periodic_skeleton =
 		controller->periodic_skeleton_memory.address;
-	memset(controller->periodic_skeleton, 0,
+	kern_memset(controller->periodic_skeleton, 0,
 	       EHCI_PERIODIC_NODES * sizeof(*controller->periodic_skeleton));
 	/* Process each remaining element. */
 	for (index = 0; index < EHCI_PERIODIC_NODES; index++) {
@@ -1063,7 +1064,7 @@ ehci_schedule_initialize(
 	}
 
 	/* Builds the asynchronous list head that points at itself. */
-	memset(controller->async_head_memory.address, 0, 4096U);
+	kern_memset(controller->async_head_memory.address, 0, 4096U);
 	controller->async_head = controller->async_head_memory.address;
 	controller->async_head->horizontal =
 		(uint32_t)controller->async_head_memory.device_address |
@@ -1245,13 +1246,13 @@ ehci_start(
 	__atomic_store_n(&controller->fatal_stopping, 0U, __ATOMIC_RELEASE);
 
 	/* Clears the periodic schedule and its budget tables. */
-	memset(controller->periodic_heads, 0,
+	kern_memset(controller->periodic_heads, 0,
 	       sizeof(controller->periodic_heads));
-	memset(controller->periodic_phase_next, 0,
+	kern_memset(controller->periodic_phase_next, 0,
 	       sizeof(controller->periodic_phase_next));
-	memset(controller->periodic_microframe_phase_next, 0,
+	kern_memset(controller->periodic_microframe_phase_next, 0,
 	       sizeof(controller->periodic_microframe_phase_next));
-	memset(controller->periodic_budget, 0,
+	kern_memset(controller->periodic_budget, 0,
 	       sizeof(controller->periodic_budget));
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
@@ -1660,7 +1661,7 @@ ehci_request_free(
 			__builtin_trap();
 		schedule = request->schedule;
 		bounce = request->bounce;
-		memset(request, 0, sizeof(*request));
+		kern_memset(request, 0, sizeof(*request));
 		request->schedule = schedule;
 		request->bounce = bounce;
 		request->reclaim_reserved = true;
@@ -1726,7 +1727,7 @@ ehci_reclaim_request_acquire(
 	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	memset(request, 0, sizeof(*request));
+	kern_memset(request, 0, sizeof(*request));
 	request->schedule = schedule;
 	request->bounce = bounce;
 	request->reclaim_reserved = true;
@@ -1919,7 +1920,7 @@ ehci_build_request(
 		request = kern_malloc(sizeof(*request));
 		if (request == NULL)
 			return ENOMEM;
-		memset(request, 0, sizeof(*request));
+		kern_memset(request, 0, sizeof(*request));
 	}
 
 	request->urb = urb;
@@ -1971,7 +1972,7 @@ ehci_build_request(
 		goto fail;
 	}
 
-	memset(request->schedule.address, 0, 4096U);
+	kern_memset(request->schedule.address, 0, 4096U);
 	request->qh = request->schedule.address;
 	request->qtds =
 		(struct ehci_qtd *)((uint8_t *)request->schedule.address +
@@ -1981,7 +1982,7 @@ ehci_build_request(
 
 	/* Handles the control availability. */
 	if (control != NULL) {
-		memcpy(request->bounce.address, control, sizeof(*control));
+		kern_memcpy(request->bounce.address, control, sizeof(*control));
 
 		/* Checks the operation status. */
 		error = ehci_add_qtd(request, EHCI_PID_SETUP, 0, 8U,
@@ -1992,7 +1993,7 @@ ehci_build_request(
 
 		/* Handles the request condition. */
 		if (!request->input && length != 0) {
-			memcpy((uint8_t *)request->bounce.address + 8U,
+			kern_memcpy((uint8_t *)request->bounce.address + 8U,
 			       drv_usb_urb_buffer(urb), length);
 		}
 
@@ -2041,7 +2042,7 @@ ehci_build_request(
 
 		/* Handles the request condition. */
 		if (!request->input && length != 0) {
-			memcpy((uint8_t *)request->bounce.address + 8U,
+			kern_memcpy((uint8_t *)request->bounce.address + 8U,
 			       drv_usb_urb_buffer(urb), length);
 		}
 
@@ -3303,7 +3304,7 @@ ehci_complete_retired_request(
 
 		/* Handles the request condition. */
 		if (request->input && actual != 0) {
-			memcpy(drv_usb_urb_buffer(urb),
+			kern_memcpy(drv_usb_urb_buffer(urb),
 			       (uint8_t *)request->bounce.address + 8U, actual);
 		}
 	} else {
@@ -4128,7 +4129,7 @@ ehci_root_worker_start(
 	__atomic_store_n(&controller->root_stopping, 0U, __ATOMIC_RELEASE);
 	__atomic_store_n(&controller->root_pending, 0U, __ATOMIC_RELEASE);
 	__atomic_store_n(&controller->root_force_scan, 1U, __ATOMIC_RELEASE);
-	memset(controller->root_port_status, 0,
+	kern_memset(controller->root_port_status, 0,
 	       sizeof(controller->root_port_status));
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
@@ -4665,7 +4666,7 @@ ehci_root_status(
 	/* Handles the buffer availability. */
 	if (buffer == NULL || size < bytes)
 		return EINVAL;
-	memset(bits, 0, bytes);
+	kern_memset(bits, 0, bytes);
 	/* Process each remaining element. */
 	for (port = 0; port < hcd->root_port_count; port++) {
 		/* Checks the operation status. */
@@ -4750,7 +4751,7 @@ ehci_root_control(
 		/* Checks the operation status. */
 		if ((status & EHCI_PORT_OVER_CURRENT_CHANGE) != 0)
 			value |= 0x80000U;
-		memcpy(buffer, &value, sizeof(value));
+		kern_memcpy(buffer, &value, sizeof(value));
 
 		/* Handles the actual availability. */
 		if (actual != NULL)
@@ -5329,7 +5330,7 @@ ehci_attach(
 	controller = kern_malloc(sizeof(*controller));
 	if (controller == NULL)
 		return ENOMEM;
-	memset(controller, 0, sizeof(*controller));
+	kern_memset(controller, 0, sizeof(*controller));
 	spin_init(&controller->active_lock, LOCK_RANK_DEVICE,
 		  "EHCI request/schedule");
 	controller->pci = device;

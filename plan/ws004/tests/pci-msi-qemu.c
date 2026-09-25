@@ -1,10 +1,10 @@
 /* QEMU EDU MSI delivery fixture; built only with kernel test checkpoints. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 
-#include <drivers/pci.h>
-#include <errno.h>
+#include <drivers/pci/pci.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
-#include <string.h>
+#include <kern/kcrt.h>
 
 #define EDU_VENDOR 0x1234U
 #define EDU_PRODUCT 0x11e8U
@@ -82,7 +82,7 @@ edu_attach(struct drv_pci_device *device, const struct drv_pci_id *id)
 	uint32_t msi_address_low, msi_address_high;
 	int error;
 	(void)id;
-	memset(&fixture, 0, sizeof(fixture));
+	kern_memset(&fixture, 0, sizeof(fixture));
 	fixture.device = device;
 	if ((error = drv_pci_device_claim_bar(device, 0)) != 0 ||
 	    (error = drv_pci_device_map_bar(device, 0,
@@ -133,7 +133,7 @@ edu_detach(struct drv_pci_device *device, unsigned flags)
 	drv_pci_device_free_irqs(device, &fixture.irq, 1);
 	drv_pci_device_unmap_bar(device, &fixture.registers);
 	drv_pci_device_release_bar(device, 0);
-	memset(&fixture, 0, sizeof(fixture));
+	kern_memset(&fixture, 0, sizeof(fixture));
 	return 0;
 }
 

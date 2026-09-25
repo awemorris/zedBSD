@@ -20,16 +20,16 @@
 #include "gfx.h"
 #include "object.h"
 #include "transport.h"
+#include <kern/kcrt.h>
 
 #include <kern/device-io.h>
 #include <kern/klog.h>
 #include <kern/kmem.h>
 #include <uapi/gpu.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 /* VK_MAKE_VERSION(1, 3, 269): the Vulkan headers version the wire was generated from. */
 #define I915_CAPSET_VK_XML_VERSION	0x0040310DU
@@ -223,7 +223,7 @@ drv_i915_render_get_capset(
 
 	/* Copies the one capset the client reads before it opens. */
 	capset->bytes = vk->capset_bytes;
-	memcpy(capset->data, vk->capset, vk->capset_bytes);
+	kern_memcpy(capset->data, vk->capset, vk->capset_bytes);
 
 	/* Succeeded: the client can open the node as a Vulkan backend. */
 	return 0;
@@ -261,7 +261,7 @@ i915_render_capset_fill(
 	 * a Venus capability record with one supported revision and every
 	 * other field clear.
 	 */
-	memset(vk->capset, 0, sizeof(vk->capset));
+	kern_memset(vk->capset, 0, sizeof(vk->capset));
 	vk->capset[0] = 1U;
 	vk->capset_bytes = 156U;
 

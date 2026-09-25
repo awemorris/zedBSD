@@ -19,7 +19,7 @@
 #include "bootloader/include/mbr.inc"
 #include "bootloader/include/fat16.inc"
 #include "bootloader/include/elf.inc"
-#include "include/boot/pc98-handoff.h"
+#include "include/kern/boot.h"
 #include "bootloader/bios/fat-directory.h"
 #include "bootloader/uefi/zedbsd-config.h"
 

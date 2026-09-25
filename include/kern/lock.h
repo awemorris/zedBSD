@@ -59,6 +59,8 @@ enum lock_rank {
 	LOCK_RANK_CONSOLE_TEXT = 137,
 	LOCK_RANK_POLL = 140,
 	LOCK_RANK_USYNC = 145,
+	/* The random pool: taken from the timer tick, wakes the scheduler. */
+	LOCK_RANK_RANDOM = 147,
 	LOCK_RANK_SCHEDULER = 200,
 	LOCK_RANK_KLOG = 250
 };

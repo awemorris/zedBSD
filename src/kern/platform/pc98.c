@@ -17,17 +17,17 @@
 #include "kern/platform.h"
 #include "kern/disk.h"
 #include "kern/partition.h"
-#include <drivers/disklabel.h>
+#include <drivers/disklabel/disklabel.h>
 #include "drivers/platform/pc98/pc98-ide.h"
-#include "drivers/hid/pc98-busmouse.h"
+#include "drivers/platform/pc98/pc98-busmouse.h"
 #include "drivers/platform/pc98/pc98-keyboard.h"
 #if CONFIG_DRIVER_LGY98
-#include "drivers/pc98-lgy98.h"
+#include "drivers/platform/pc98/pc98-lgy98.h"
 #endif
 #if CONFIG_DRIVER_GRAPHICS_DEVICE
-#include "drivers/graphics/pc98.h"
+#include "drivers/platform/pc98/graphics/pc98.h"
 #endif
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
 #include "kern/klog.h"
 
@@ -40,11 +40,11 @@
  */
 size_t
 kern_platform_init(
-	const struct boot_handoff *handoff,
-	struct boot_device *devices,
+	const struct kern_boot_handoff *handoff,
+	struct kern_boot_device *devices,
 	size_t capacity)
 {
-	const struct boot_device *initial;
+	const struct kern_boot_device *initial;
 	size_t count;
 	size_t index;
 #if CONFIG_DRIVER_LGY98
@@ -73,7 +73,7 @@ kern_platform_init(
 		return 0;
 
 	/* Copies every present floppy, IDE, or SCSI entry that fits. */
-	initial = (const struct boot_device *)handoff->device_table;
+	initial = (const struct kern_boot_device *)handoff->device_table;
 	for (index = 0; index < handoff->device_count && count < capacity; index++) {
 		if ((initial[index].device_class != KERN_DEV_FDD &&
 		     initial[index].device_class != KERN_DEV_IDE &&
@@ -122,7 +122,7 @@ kern_platform_init(
  */
 void
 kern_platform_refresh_devices(
-	const struct boot_device *devices,
+	const struct kern_boot_device *devices,
 	size_t count)
 {
 	(void)devices;
@@ -165,7 +165,7 @@ kern_platform_input_init(
  */
 struct disk *
 kern_platform_block_device(
-	const struct boot_device *device)
+	const struct kern_boot_device *device)
 {
 	struct disk *disk;
 

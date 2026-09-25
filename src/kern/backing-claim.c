@@ -16,6 +16,7 @@
  */
 
 #include <kern/backing-claim.h>
+#include <kern/kcrt.h>
 
 #include <kern/disk.h>
 #include <kern/fat.h>
@@ -25,8 +26,7 @@
 #include <kern/lock.h>
 #include <kern/mount.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 #define BACKING_CLAIM_MAX 16U
 #define BACKING_MUTATION_MAX 64U
@@ -384,7 +384,7 @@ finalize_claim(struct backing_claim *claim, struct file *file,
 
 	data_count = count;
 	metadata_count = 0;
-	memset(&metadata, 0, sizeof(metadata));
+	kern_memset(&metadata, 0, sizeof(metadata));
 	if (file != NULL) {
 		metadata.claim = claim;
 		metadata.disk = file->f_inode->i_mount->m_disk;
@@ -731,7 +731,7 @@ backing_mutation_begin_inode_claimed(
 	 * claim.
 	 */
 	if (error == EOPNOTSUPP || error == EINVAL) {
-		memset(guard, 0, sizeof(*guard));
+		kern_memset(guard, 0, sizeof(*guard));
 		return 0;
 	}
 
@@ -866,13 +866,13 @@ backing_mutation_end(
 
 	if (mutations[guard->slot].used &&
 	    mutations[guard->slot].generation == guard->generation) {
-		memset(&mutations[guard->slot], 0, sizeof(mutations[guard->slot]));
+		kern_memset(&mutations[guard->slot], 0, sizeof(mutations[guard->slot]));
 	}
 
 	spin_unlock_irqrestore(&claim_lock, irq);
 
 	/* Deactivates the guard. */
-	memset(guard, 0, sizeof(*guard));
+	kern_memset(guard, 0, sizeof(*guard));
 }
 
 /*
@@ -1345,7 +1345,7 @@ mutation_reserve(
 	if (guard == NULL)
 		return EINVAL;
 
-	memset(guard, 0, sizeof(*guard));
+	kern_memset(guard, 0, sizeof(*guard));
 
 	irq = spin_lock_irqsave(&claim_lock);
 

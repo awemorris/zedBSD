@@ -27,9 +27,10 @@ def require_file(path: Path) -> None:
 
 
 def create(args: argparse.Namespace) -> None:
-    for path in (args.kernel, args.arch_image, args.data_image, args.swapfile,
-                 args.config):
+    for path in (args.kernel, args.data_image, args.swapfile, args.config):
         require_file(path)
+    if args.arch_image is not None:
+        require_file(args.arch_image)
     for name in FIRMWARE_FILES:
         require_file(args.firmware_dir / name)
     overlay = args.firmware_dir / "overlays" / "disable-bt.dtbo"
@@ -64,14 +65,15 @@ def create(args: argparse.Namespace) -> None:
             "::/overlays/disable-bt.dtbo")
         run("mcopy", "-i", spec, str(args.config), "::/config.txt")
         run("mcopy", "-i", spec, str(args.kernel), "::/vmunix")
-        run("mcopy", "-i", spec, str(args.arch_image),
-            "::/rootfs.img")
+        if args.arch_image is not None:
+            run("mcopy", "-i", spec, str(args.arch_image), "::/rootfs.img")
         run("mcopy", "-i", spec, str(args.data_image), "::/data.img")
         run("mcopy", "-i", spec, str(args.swapfile), "::/swapfile")
 
         checker = Path(__file__).with_name("check-rpi4-hdd-image.py")
-        run("python3", str(checker), "--kernel", str(args.kernel),
-            "--arch-image", str(args.arch_image),
+        arch = [] if args.arch_image is None else \
+            ["--arch-image", str(args.arch_image)]
+        run("python3", str(checker), "--kernel", str(args.kernel), *arch,
             "--data-image", str(args.data_image),
             "--swapfile", str(args.swapfile), "--config", str(args.config),
             str(temporary))
@@ -84,7 +86,8 @@ def create(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--kernel", type=Path, required=True)
-    parser.add_argument("--arch-image", type=Path, required=True)
+    # The FAT overlay image is optional: a UFS root partition replaces it.
+    parser.add_argument("--arch-image", type=Path)
     parser.add_argument("--data-image", type=Path, required=True)
     parser.add_argument("--swapfile", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)

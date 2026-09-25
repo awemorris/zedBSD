@@ -13,7 +13,7 @@
 #define KERN_BOOTLOADER_AMD64_HANDOFF_H
 
 #include "boot-parameter-handoff.h"
-#include "../../include/boot/provenance.h"
+#include "../../include/kern/boot.h"
 
 /*
  * Values carried by the root-partition fields in the ZBL6 ABI.
@@ -273,7 +273,7 @@ struct zbl6_handoff_v6_uefi {
 struct zbl6_handoff_v7_uefi {
 	struct zbl6_handoff_v5_uefi prefix;
 	struct zbl6_memory_handoff memory;
-	struct boot_provenance provenance;
+	struct kern_boot_provenance provenance;
 } __attribute__((packed));
 
 _Static_assert(sizeof(struct zbl6_handoff_v7_uefi) == ZBL6_HANDOFF_V7_UEFI_SIZE, "ZBL6 V7 UEFI size");

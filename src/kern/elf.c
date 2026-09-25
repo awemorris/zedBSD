@@ -24,11 +24,11 @@
 #include "kern/kmem.h"
 #include "kern/page.h"
 #include "kern/vmspace.h"
+#include <kern/kcrt.h>
 
 #include <uapi/tls.h>
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdint.h>
-#include <string.h>
 
 #define ELF_PHNUM_MAX 32U
 #define PAGE_SIZE KERN_PAGE_SIZE
@@ -575,7 +575,7 @@ read_headers(
 	file_size = (uint64_t)lease->size;
 	if (file_size > ELF_OFF_MAX)
 		return ENOEXEC;
-	memset(header, 0, sizeof(*header));
+	kern_memset(header, 0, sizeof(*header));
 
 	if (elf_class == ELFCLASS32) {
 		/* Reads and checks the 32-bit identification and header. */
@@ -897,7 +897,7 @@ load_static_tls(
 		goto free_mapping;
 
 	/* Only the shared prefix is known to the loader; the tail remains zero. */
-	memset(&prefix, 0, sizeof(prefix));
+	kern_memset(&prefix, 0, sizeof(prefix));
 	prefix.self = tp;
 	prefix.mapping_base = mapping;
 	prefix.mapping_size = mapping_size;
@@ -1002,7 +1002,7 @@ validate_and_load(
 
 	/* Starts from the default stack size and the normalized headers. */
 	vmspace_layout_init();
-	memset(image, 0, sizeof(*image));
+	kern_memset(image, 0, sizeof(*image));
 	image->stack_size = EXEC_STACK_DEFAULT_SIZE;
 	error = read_headers(lease, elf_class, &header, &programs, &file_size);
 	if (error != 0)
@@ -1058,8 +1058,8 @@ validate_and_load(
 			    read_exact(lease, (off_t)program->offset, image->interpreter,
 			    (size_t)program->filesz) != 0 ||
 			    image->interpreter[program->filesz - 1U] != '\0' ||
-			    strlen(image->interpreter) + 1U != program->filesz ||
-			    strcmp(image->interpreter, EXEC_INTERP_PATH) != 0)
+			    kern_strlen(image->interpreter) + 1U != program->filesz ||
+			    kern_strcmp(image->interpreter, EXEC_INTERP_PATH) != 0)
 				goto invalid;
 			continue;
 		}
@@ -1401,7 +1401,7 @@ copy_image32(
 	destination->program_header_size = source->program_header_size;
 	destination->program_header_count = source->program_header_count;
 	destination->has_interpreter = source->has_interpreter;
-	memcpy(destination->interpreter, source->interpreter,
+	kern_memcpy(destination->interpreter, source->interpreter,
 	    sizeof(destination->interpreter));
 }
 
@@ -1421,6 +1421,6 @@ copy_image64(
 	destination->program_header_size = source->program_header_size;
 	destination->program_header_count = source->program_header_count;
 	destination->has_interpreter = source->has_interpreter;
-	memcpy(destination->interpreter, source->interpreter,
+	kern_memcpy(destination->interpreter, source->interpreter,
 	    sizeof(destination->interpreter));
 }

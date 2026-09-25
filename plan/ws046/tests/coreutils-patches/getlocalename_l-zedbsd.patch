@@ -1,0 +1,16 @@
+--- /tmp/vitest/getlocalename_l-unsafe.c.orig	2026-09-25 10:58:51.113118482 +0900
++++ lib/getlocalename_l-unsafe.c	2026-09-25 10:58:51.145118277 +0900
+@@ -658,6 +658,13 @@
+         /* It's the "C" or "POSIX" locale.  */
+         return (struct string_with_storage) { "C", STORAGE_INDEFINITE };
+ # endif
++#elif defined __ZEDBSD__ && HAVE_GETLOCALENAME_L
++      /* zedBSD: the POSIX.1-2024 function.  */
++#  undef getlocalename_l
++      {
++        const char *name = getlocalename_l (category, locale);
++        return (struct string_with_storage) { name, STORAGE_OBJECT };
++      }
+ #elif defined __ANDROID__
+       /* Android API level >= 21 */
+       struct __locale_t {

@@ -27,6 +27,7 @@
 #include "internal.h"
 #include "math.h"
 #include "state.h"
+#include <kern/kcrt.h>
 
 #include "../compiler/compiler.h"
 #include "../i915.h"
@@ -37,10 +38,9 @@
 #include <kern/device-io.h>
 #include <kern/klog.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "../intel/genxml.h"
 
@@ -312,9 +312,9 @@ i915_blit_compile(
 	int error;
 
 	/* Starts from an empty shader. */
-	memset(instructions, 0, sizeof(instructions));
-	memset(&ir, 0, sizeof(ir));
-	memset(&uniform, 0, sizeof(uniform));
+	kern_memset(instructions, 0, sizeof(instructions));
+	kern_memset(&ir, 0, sizeof(ir));
+	kern_memset(&uniform, 0, sizeof(uniform));
 	count = 0U;
 
 	/* Produces the colour values: sampled at the coordinate for a copy, the inputs for a fill. */
@@ -468,7 +468,7 @@ i915_blit_record(
 	 * Describes the pixel kernel for its packets: one attribute, the
 	 * kernel's payload start and its sampled images.
 	 */
-	memset(&kernels, 0, sizeof(kernels));
+	kern_memset(&kernels, 0, sizeof(kernels));
 	kernels.varyings = 1U;
 	kernels.ps_grf_start = kernel->dispatch_grf_start;
 	kernels.ps_samplers = kernel->sampler_count;
@@ -532,7 +532,7 @@ i915_blit_write_state(
 	int error;
 
 	/* Clears the whole slot and locates the two heaps. */
-	memset(page, 0, I915_GFX_SLOT_BYTES);
+	kern_memset(page, 0, I915_GFX_SLOT_BYTES);
 	surface = (uint32_t *)(void *)(page + I915_GFX_SURFACE_HEAP);
 	dynamic = (uint32_t *)(void *)(page + I915_GFX_DYNAMIC_HEAP);
 
@@ -560,7 +560,7 @@ i915_blit_write_state(
 	filter = VK_FILTER_NEAREST;
 	if (linear)
 		filter = VK_FILTER_LINEAR;
-	memset(&sampler, 0, sizeof(sampler));
+	kern_memset(&sampler, 0, sizeof(sampler));
 	sampler.mag_filter = filter;
 	sampler.min_filter = filter;
 	sampler.address_u = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -620,7 +620,7 @@ i915_blit_write_vertices(
 	for (index = 0U; index < 3U; index++) {
 		/* A fill carries the clear value at every corner. */
 		if (src == NULL) {
-			memcpy(attributes[index], clear, sizeof(attributes[index]));
+			kern_memcpy(attributes[index], clear, sizeof(attributes[index]));
 			continue;
 		}
 
@@ -661,7 +661,7 @@ i915_blit_write_vertices(
 		/* Completes the position and copies the attribute after it; the header stays zero. */
 		vertex[6] = 0U;
 		vertex[7] = I915_FLOAT_ONE;
-		memcpy(&vertex[8], attributes[index], sizeof(attributes[index]));
+		kern_memcpy(&vertex[8], attributes[index], sizeof(attributes[index]));
 	}
 }
 
@@ -808,7 +808,7 @@ i915_blit_build_batch(
 	drv_i915_batch_zero(batch, GEN12_CMD_3DSTATE_CLEAR_PARAMS, GEN12_3DSTATE_CLEAR_PARAMS_DWORDS);
 
 	/* Describes the one rectangle: three vertices in order, one instance. */
-	memset(&primitive, 0, sizeof(primitive));
+	kern_memset(&primitive, 0, sizeof(primitive));
 	primitive.topology = GEN12_3DPRIM_RECTLIST;
 	primitive.vertex_count = 3U;
 	primitive.instance_count = 1U;

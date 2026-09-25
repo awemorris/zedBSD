@@ -18,7 +18,7 @@ The optional amd64 base package is vkdemo; select it in the image configuration.
 Selecting it also selects the `base/libvulkan` dependency. Its normal build
 consumes the checked-in original shader arrays, links a PIE executable using
 `/lib/ld.so`, and installs `/lib/libvulkan.so`. No shader compiler is needed for
-a normal build. Public Vulkan headers are provided in `libc/include/vulkan/`
+a normal build. Public Vulkan headers are provided in `include/libc/vulkan/`
 and are copied into the target sysroot by its ordinary header installation.
 
     /bin/vkdemo

@@ -76,6 +76,11 @@ func main(args) {
     if (format == "v1" && (uuid != "" || label != "")) {
         zbFail("v1 swapfiles do not carry UUID or label");
     }
+    // Noct's integers are 32-bit: the byte count is written as two halves
+    // and the file is sized by truncate in MiB, so a 4 GiB swap works.
+    var sizeLow = (sizeMiB % 4096) * 1048576;
+    var sizeHigh = sizeMiB / 4096;
+    var pages = sizeMiB * 256 - 1;
     var size = sizeMiB * 1024 * 1024;
     var header = Packed.uint8(64);
     if (format == "v1") {
@@ -91,8 +96,10 @@ func main(args) {
         zbPut16LE(header, 8, 2);
         zbPut16LE(header, 10, 64);
         zbPut32LE(header, 12, 4096);
-        zbPut64LE(header, 16, size);
-        zbPut64LE(header, 24, size / 4096 - 1);
+        zbPut32LE(header, 16, sizeLow);
+        zbPut32LE(header, 20, sizeHigh);
+        zbPut32LE(header, 24, pages);
+        zbPut32LE(header, 28, 0);
         putUuid(header, uuid);
         putLabel(header, label);
         zbPut32LE(header, 60, swapChecksum(header, 60));
@@ -102,7 +109,7 @@ func main(args) {
     var file = File.open(temporary, "wb");
     File.writeAll(file, header, 0, 64);
     File.close(file);
-    if (System.shell("truncate -s " + size + " " + zbShellQuote(temporary)) != 0) {
+    if (System.shell("truncate -s " + sizeMiB + "M " + zbShellQuote(temporary)) != 0) {
         zbFail("cannot allocate swapfile");
     }
     if (System.shell("mv -f " + zbShellQuote(temporary) + " " + zbShellQuote(output)) != 0) {

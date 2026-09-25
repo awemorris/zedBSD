@@ -42,6 +42,9 @@ void
 amd64_notify_entry(void);
 
 void
+amd64_syscall_fast_entry(void);
+
+void
 amd64_tlb_entry(void);
 
 void

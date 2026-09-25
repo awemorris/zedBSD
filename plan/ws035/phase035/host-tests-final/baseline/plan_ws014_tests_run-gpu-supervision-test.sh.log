@@ -1,0 +1,2 @@
+GPU supervision: foreign capacity, 64-record self-reap, observer pin, backend domain, 10s/60s policy, local drain, late callback, global fallback, reset gate, per-context isolation, idle reset reclaim, reservation reclaim and metadata-only close PASS
+GPU supervision: foreign capacity, 64-record self-reap, observer pin, backend domain, 10s/60s policy, local drain, late callback, global fallback, reset gate, per-context isolation, idle reset reclaim, reservation reclaim and metadata-only close PASS

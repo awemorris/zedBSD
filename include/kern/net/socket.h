@@ -19,7 +19,7 @@
 #include <uapi/socket.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/types.h>
+#include <uapi/types.h>
 
 #define SOCKET_MAX 32U
 #define SOCKET_RECEIVE_MESSAGES_MAX 8U
@@ -134,6 +134,7 @@ int socket_tryref(struct socket *socket);
 void socket_close_endpoint(struct socket *socket);
 void socket_release(struct socket *socket);
 int socket_enqueue_packet(struct socket *socket, struct packet_buf *packet);
+int socket_enqueue_stream(struct socket *socket, struct packet_buf *packet);
 int socket_enqueue_packet_wait(struct socket *socket, struct packet_buf *packet,
 			       int flags, uint64_t timeout_ticks);
 int socket_requeue_packet_front(struct socket *socket,

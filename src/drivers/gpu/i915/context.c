@@ -22,11 +22,11 @@
 #include "memory.h"
 #include "ppgtt.h"
 #include "request.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "intel/commands.h"
 #include "intel/gt-regs.h"
@@ -110,7 +110,7 @@ drv_i915_lrc_alloc(
 		return EINVAL;
 
 	/* Starts from an empty context bound to its engine and address space. */
-	memset(ce, 0, sizeof(*ce));
+	kern_memset(ce, 0, sizeof(*ce));
 	ce->ge = ge;
 	ce->vm = vm;
 	ce->sw_id = sw_id;
@@ -165,18 +165,18 @@ drv_i915_lrc_init_state(
 			copy_bytes = ce->ge->default_state->bytes;
 		if (copy_bytes > ce->state_bytes)
 			copy_bytes = ce->state_bytes;
-		memcpy(ce->state->cpu, ce->ge->default_state->cpu, copy_bytes);
+		kern_memcpy(ce->state->cpu, ce->ge->default_state->cpu, copy_bytes);
 
 		/* A valid saved image may be restored (CONTEXT_VALID_BIT). */
 		inhibit = 0;
 	}
 
 	/* Clears the per-process status page, including the per-context counters. */
-	memset(ce->state->cpu, 0, I915_LRC_PAGE_BYTES);
+	kern_memset(ce->state->cpu, 0, I915_LRC_PAGE_BYTES);
 
 	/* Clears the indirect workaround and storage page. */
 	if (ce->wa_bb_page != 0U) {
-		memset((char *)ce->state->cpu + ce->wa_bb_page * I915_LRC_PAGE_BYTES,
+		kern_memset((char *)ce->state->cpu + ce->wa_bb_page * I915_LRC_PAGE_BYTES,
 		       0,
 		       I915_LRC_PAGE_BYTES);
 	}
@@ -537,7 +537,7 @@ i915_lrc_init_regs(
 
 	/* Starts an inhibited image from a clean register page. */
 	if (inhibit != 0)
-		memset(ce->lrc_reg_state, 0, I915_LRC_PAGE_BYTES);
+		kern_memset(ce->lrc_reg_state, 0, I915_LRC_PAGE_BYTES);
 
 	/* Chooses the layout by the engine class. */
 	offsets = gen12_xcs_offsets;

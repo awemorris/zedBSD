@@ -1,0 +1,1108 @@
+# ws035-p001 baseline x68k-user-k: 2026-09-23T03:22:29+09:00
+# git HEAD 8df6d585c3fe5d1cc3ff84405aa979631bb5e1ad
+# make -j32 BUILD=build/ws035-p001/x68k-user-k ZEDBSD_CONFIG=plan/ws035/tests/config-x68k.mk ZEDBSD_LLVM_INSTALL=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/llvm ZEDBSD_LLVM_BUILD=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/llvm-build ZEDBSD_LLVM_SOURCE=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/llvm-source ZEDBSD_LLVM_DISTDIR=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/llvm-distfiles ZEDBSD_TARGET_LLVM_BIN=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/llvm/bin ZEDBSD_SYSROOT_AMD64=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/sysroot/amd64 ZEDBSD_SYSROOT_I386=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/sysroot/i386 NOCT_HOST_SOURCE_DIR=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/NoctLang NOCT_HOST_STATE_DIR=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/host-noct-state ZEDBSD_NOCT_DISTDIR=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/noct-distfiles -k build/ws035-p001/x68k-user-k/bin/sh build/ws035-p001/x68k-user-k/bin/admin build/ws035-p001/x68k-user-k/bin/ar build/ws035-p001/x68k-user-k/bin/at build/ws035-p001/x68k-user-k/bin/awk build/ws035-p001/x68k-user-k/bin/basename build/ws035-p001/x68k-user-k/bin/batch build/ws035-p001/x68k-user-k/bin/bc build/ws035-p001/x68k-user-k/bin/blkid build/ws035-p001/x68k-user-k/bin/cal build/ws035-p001/x68k-user-k/bin/cat build/ws035-p001/x68k-user-k/bin/cflow build/ws035-p001/x68k-user-k/bin/chgrp build/ws035-p001/x68k-user-k/bin/chmod build/ws035-p001/x68k-user-k/bin/chown build/ws035-p001/x68k-user-k/bin/cksum build/ws035-p001/x68k-user-k/bin/cmp build/ws035-p001/x68k-user-k/bin/comm build/ws035-p001/x68k-user-k/bin/compress build/ws035-p001/x68k-user-k/bin/cp build/ws035-p001/x68k-user-k/bin/cron build/ws035-p001/x68k-user-k/bin/crontab build/ws035-p001/x68k-user-k/bin/csplit build/ws035-p001/x68k-user-k/bin/cut build/ws035-p001/x68k-user-k/bin/cxref build/ws035-p001/x68k-user-k/bin/date build/ws035-p001/x68k-user-k/bin/dd build/ws035-p001/x68k-user-k/bin/delta build/ws035-p001/x68k-user-k/bin/df build/ws035-p001/x68k-user-k/bin/diff build/ws035-p001/x68k-user-k/bin/dirname build/ws035-p001/x68k-user-k/bin/diskpart build/ws035-p001/x68k-user-k/bin/dmesg build/ws035-p001/x68k-user-k/bin/du build/ws035-p001/x68k-user-k/bin/ed build/ws035-p001/x68k-user-k/bin/expand build/ws035-p001/x68k-user-k/bin/expr build/ws035-p001/x68k-user-k/bin/file build/ws035-p001/x68k-user-k/bin/find build/ws035-p001/x68k-user-k/bin/fmt build/ws035-p001/x68k-user-k/bin/fold build/ws035-p001/x68k-user-k/bin/fuser build/ws035-p001/x68k-user-k/bin/gencat build/ws035-p001/x68k-user-k/bin/get build/ws035-p001/x68k-user-k/bin/getconf build/ws035-p001/x68k-user-k/bin/gettext build/ws035-p001/x68k-user-k/bin/getty build/ws035-p001/x68k-user-k/bin/grep build/ws035-p001/x68k-user-k/bin/halt build/ws035-p001/x68k-user-k/bin/head build/ws035-p001/x68k-user-k/bin/hostname build/ws035-p001/x68k-user-k/bin/iconv build/ws035-p001/x68k-user-k/bin/id build/ws035-p001/x68k-user-k/bin/infocmp build/ws035-p001/x68k-user-k/bin/init build/ws035-p001/x68k-user-k/bin/ipcrm build/ws035-p001/x68k-user-k/bin/ipcs build/ws035-p001/x68k-user-k/bin/join build/ws035-p001/x68k-user-k/bin/kill build/ws035-p001/x68k-user-k/bin/less build/ws035-p001/x68k-user-k/bin/link build/ws035-p001/x68k-user-k/bin/ln build/ws035-p001/x68k-user-k/bin/locale build/ws035-p001/x68k-user-k/bin/localedef build/ws035-p001/x68k-user-k/bin/logger build/ws035-p001/x68k-user-k/bin/login build/ws035-p001/x68k-user-k/bin/logname build/ws035-p001/x68k-user-k/bin/lp build/ws035-p001/x68k-user-k/bin/lpr build/ws035-p001/x68k-user-k/bin/ls build/ws035-p001/x68k-user-k/bin/m4 build/ws035-p001/x68k-user-k/bin/mailx build/ws035-p001/x68k-user-k/bin/mesg build/ws035-p001/x68k-user-k/bin/mkdir build/ws035-p001/x68k-user-k/bin/mkfifo build/ws035-p001/x68k-user-k/bin/mkfs build/ws035-p001/x68k-user-k/bin/mkswap build/ws035-p001/x68k-user-k/bin/more build/ws035-p001/x68k-user-k/bin/msgfmt build/ws035-p001/x68k-user-k/bin/mv build/ws035-p001/x68k-user-k/bin/newgrp build/ws035-p001/x68k-user-k/bin/ngettext build/ws035-p001/x68k-user-k/bin/nice build/ws035-p001/x68k-user-k/bin/nl build/ws035-p001/x68k-user-k/bin/nm build/ws035-p001/x68k-user-k/bin/nohup build/ws035-p001/x68k-user-k/bin/ntpdate build/ws035-p001/x68k-user-k/bin/od build/ws035-p001/x68k-user-k/bin/paste build/ws035-p001/x68k-user-k/bin/patch build/ws035-p001/x68k-user-k/bin/pathchk build/ws035-p001/x68k-user-k/bin/pax build/ws035-p001/x68k-user-k/bin/poweroff build/ws035-p001/x68k-user-k/bin/pr build/ws035-p001/x68k-user-k/bin/prs build/ws035-p001/x68k-user-k/bin/ps build/ws035-p001/x68k-user-k/bin/readlink build/ws035-p001/x68k-user-k/bin/realpath build/ws035-p001/x68k-user-k/bin/reboot build/ws035-p001/x68k-user-k/bin/renice build/ws035-p001/x68k-user-k/bin/rm build/ws035-p001/x68k-user-k/bin/rmdel build/ws035-p001/x68k-user-k/bin/rmdir build/ws035-p001/x68k-user-k/bin/sact build/ws035-p001/x68k-user-k/bin/sccs build/ws035-p001/x68k-user-k/bin/sed build/ws035-p001/x68k-user-k/bin/service build/ws035-p001/x68k-user-k/bin/shutdown build/ws035-p001/x68k-user-k/bin/sleep build/ws035-p001/x68k-user-k/bin/sort build/ws035-p001/x68k-user-k/bin/split build/ws035-p001/x68k-user-k/bin/stat build/ws035-p001/x68k-user-k/bin/strings build/ws035-p001/x68k-user-k/bin/stty build/ws035-p001/x68k-user-k/bin/swapoff build/ws035-p001/x68k-user-k/bin/swapon build/ws035-p001/x68k-user-k/bin/sync build/ws035-p001/x68k-user-k/bin/syslogd build/ws035-p001/x68k-user-k/bin/tabs build/ws035-p001/x68k-user-k/bin/tail build/ws035-p001/x68k-user-k/bin/talk build/ws035-p001/x68k-user-k/bin/tee build/ws035-p001/x68k-user-k/bin/tic build/ws035-p001/x68k-user-k/bin/time build/ws035-p001/x68k-user-k/bin/timeout build/ws035-p001/x68k-user-k/bin/top build/ws035-p001/x68k-user-k/bin/touch build/ws035-p001/x68k-user-k/bin/tput build/ws035-p001/x68k-user-k/bin/tr build/ws035-p001/x68k-user-k/bin/truncate build/ws035-p001/x68k-user-k/bin/tsort build/ws035-p001/x68k-user-k/bin/tty build/ws035-p001/x68k-user-k/bin/uname build/ws035-p001/x68k-user-k/bin/uncompress build/ws035-p001/x68k-user-k/bin/unexpand build/ws035-p001/x68k-user-k/bin/unget build/ws035-p001/x68k-user-k/bin/uniq build/ws035-p001/x68k-user-k/bin/unlink build/ws035-p001/x68k-user-k/bin/uudecode build/ws035-p001/x68k-user-k/bin/uuencode build/ws035-p001/x68k-user-k/bin/val build/ws035-p001/x68k-user-k/bin/wc build/ws035-p001/x68k-user-k/bin/what build/ws035-p001/x68k-user-k/bin/who build/ws035-p001/x68k-user-k/bin/write build/ws035-p001/x68k-user-k/bin/xargs build/ws035-p001/x68k-user-k/bin/zcat
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror -c src/crt/crt0-m68k.S -o build/ws035-p001/x68k-user-k/user/src/crt/crt0-m68k.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/libc/posix.c -o build/ws035-p001/x68k-user-k/user/userland/base/libc/posix.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/libc/static-tls.c -o build/ws035-p001/x68k-user-k/user/userland/base/libc/static-tls.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/libc/poll.c -o build/ws035-p001/x68k-user-k/user/userland/base/libc/poll.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/libc/termios.c -o build/ws035-p001/x68k-user-k/user/userland/base/libc/termios.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/libc/pthread.c -o build/ws035-p001/x68k-user-k/user/userland/base/libc/pthread.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/libc/timer.c -o build/ws035-p001/x68k-user-k/user/userland/base/libc/timer.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/libc/shm.c -o build/ws035-p001/x68k-user-k/user/userland/base/libc/shm.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/libc/semaphore.c -o build/ws035-p001/x68k-user-k/user/userland/base/libc/semaphore.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/libc/mqueue.c -o build/ws035-p001/x68k-user-k/user/userland/base/libc/mqueue.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/libc/socket.c -o build/ws035-p001/x68k-user-k/user/userland/base/libc/socket.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/libc/account.c -o build/ws035-p001/x68k-user-k/user/userland/base/libc/account.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/libc/signal.c -o build/ws035-p001/x68k-user-k/user/userland/base/libc/signal.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/libc/crypt.c -o build/ws035-p001/x68k-user-k/user/userland/base/libc/crypt.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/libc/utmpx.c -o build/ws035-p001/x68k-user-k/user/userland/base/libc/utmpx.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/heap.c -o build/ws035-p001/x68k-user-k/user/libc/heap.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/string.c -o build/ws035-p001/x68k-user-k/user/libc/string.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/ctype.c -o build/ws035-p001/x68k-user-k/user/libc/ctype.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/locale.c -o build/ws035-p001/x68k-user-k/user/libc/locale.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/wide.c -o build/ws035-p001/x68k-user-k/user/libc/wide.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/int64.c -o build/ws035-p001/x68k-user-k/user/libc/int64.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/strto.c -o build/ws035-p001/x68k-user-k/user/libc/strto.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/format.c -o build/ws035-p001/x68k-user-k/user/libc/format.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/stdio.c -o build/ws035-p001/x68k-user-k/user/libc/stdio.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/libc/atomic-runtime.c -o build/ws035-p001/x68k-user-k/user/userland/base/libc/atomic-runtime.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/string-extra.c -o build/ws035-p001/x68k-user-k/user/libc/string-extra.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/fenv.c -o build/ws035-p001/x68k-user-k/user/libc/fenv.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/wide-extra.c -o build/ws035-p001/x68k-user-k/user/libc/wide-extra.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/inttypes.c -o build/ws035-p001/x68k-user-k/user/libc/inttypes.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/stdlib-extra.c -o build/ws035-p001/x68k-user-k/user/libc/stdlib-extra.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/time-extra.c -o build/ws035-p001/x68k-user-k/user/libc/time-extra.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/stdio-extra.c -o build/ws035-p001/x68k-user-k/user/libc/stdio-extra.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/setjmp.c -o build/ws035-p001/x68k-user-k/user/libc/setjmp.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/err.c -o build/ws035-p001/x68k-user-k/user/libc/err.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/libgen.c -o build/ws035-p001/x68k-user-k/user/libc/libgen.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/search.c -o build/ws035-p001/x68k-user-k/user/libc/search.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/random48.c -o build/ws035-p001/x68k-user-k/user/libc/random48.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/random.c -o build/ws035-p001/x68k-user-k/user/libc/random.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/xsi-crypto.c -o build/ws035-p001/x68k-user-k/user/libc/xsi-crypto.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/ftw.c -o build/ws035-p001/x68k-user-k/user/libc/ftw.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/ndbm.c -o build/ws035-p001/x68k-user-k/user/libc/ndbm.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/realpath.c -o build/ws035-p001/x68k-user-k/user/libc/realpath.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/tempnam.c -o build/ws035-p001/x68k-user-k/user/libc/tempnam.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/xsi-process.c -o build/ws035-p001/x68k-user-k/user/libc/xsi-process.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/fmtmsg.c -o build/ws035-p001/x68k-user-k/user/libc/fmtmsg.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/syslog.c -o build/ws035-p001/x68k-user-k/user/libc/syslog.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/sysv-ipc.c -o build/ws035-p001/x68k-user-k/user/libc/sysv-ipc.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/catalog.c -o build/ws035-p001/x68k-user-k/user/libc/catalog.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/locale-db.c -o build/ws035-p001/x68k-user-k/user/libc/locale-db.o
+userland/base/libc/posix.c: In function 'exit':
+userland/base/libc/posix.c:7301:33: error: the comparison will always evaluate as 'true' for the address of '__rtld_process_fini' will never be NULL [-Werror=address]
+ 7301 |         if (__rtld_process_fini != NULL)
+      |                                 ^~
+userland/base/libc/posix.c:103:6: note: '__rtld_process_fini' declared here
+  103 | void __rtld_process_fini(void) {}
+      |      ^~~~~~~~~~~~~~~~~~~
+userland/base/libc/posix.c: In function '__libc_init':
+userland/base/libc/posix.c:7399:33: error: the comparison will always evaluate as 'true' for the address of '__rtld_startup_init' will never be NULL [-Werror=address]
+ 7399 |         if (__rtld_startup_init != NULL)
+      |                                 ^~
+userland/base/libc/posix.c:104:6: note: '__rtld_startup_init' declared here
+  104 | void __rtld_startup_init(void) {}
+      |      ^~~~~~~~~~~~~~~~~~~
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/fnmatch.c -o build/ws035-p001/x68k-user-k/user/libc/fnmatch.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/openbsd.c -o build/ws035-p001/x68k-user-k/user/libc/openbsd.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/openbsd-vis.c -o build/ws035-p001/x68k-user-k/user/libc/openbsd-vis.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/openbsd-base64.c -o build/ws035-p001/x68k-user-k/user/libc/openbsd-base64.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/readpassphrase.c -o build/ws035-p001/x68k-user-k/user/libc/readpassphrase.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/openbsd-opts.c -o build/ws035-p001/x68k-user-k/user/libc/openbsd-opts.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/openbsd-glob.c -o build/ws035-p001/x68k-user-k/user/libc/openbsd-glob.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/openbsd-digest.c -o build/ws035-p001/x68k-user-k/user/libc/openbsd-digest.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/openbsd-sha2.c -o build/ws035-p001/x68k-user-k/user/libc/openbsd-sha2.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/libc/resolv.c -o build/ws035-p001/x68k-user-k/user/userland/base/libc/resolv.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/regex/regcomp.c -o build/ws035-p001/x68k-user-k/user/libc/regex/regcomp.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/regex/regexec.c -o build/ws035-p001/x68k-user-k/user/libc/regex/regexec.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/regex/regerror.c -o build/ws035-p001/x68k-user-k/user/libc/regex/regerror.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c libc/regex/tre-mem.c -o build/ws035-p001/x68k-user-k/user/libc/regex/tre-mem.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -Iuserland/base/libedit -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/sh/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/sh/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -Iuserland/base/libedit -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/sh/builtins.c -o build/ws035-p001/x68k-user-k/user/userland/base/sh/builtins.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -Iuserland/base/libedit -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/sh/lexer.c -o build/ws035-p001/x68k-user-k/user/userland/base/sh/lexer.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -Iuserland/base/libedit -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/sh/expand.c -o build/ws035-p001/x68k-user-k/user/userland/base/sh/expand.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -Iuserland/base/libedit -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/sh/glob.c -o build/ws035-p001/x68k-user-k/user/userland/base/sh/glob.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -Iuserland/base/libedit -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/sh/vars.c -o build/ws035-p001/x68k-user-k/user/userland/base/sh/vars.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -Iuserland/base/libedit -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/sh/arithmetic.c -o build/ws035-p001/x68k-user-k/user/userland/base/sh/arithmetic.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -Iuserland/base/libedit -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/sh/alias.c -o build/ws035-p001/x68k-user-k/user/userland/base/sh/alias.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -Iuserland/base/libedit -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/sh/parser.c -o build/ws035-p001/x68k-user-k/user/userland/base/sh/parser.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -Iuserland/base/libedit -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/libedit/readline.c -o build/ws035-p001/x68k-user-k/user/userland/base/libedit/readline.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/common/command.c -o build/ws035-p001/x68k-user-k/user/userland/base/common/command.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/common/pager.c -o build/ws035-p001/x68k-user-k/user/userland/base/common/pager.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/sccs/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/sccs/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/common/sccs.c -o build/ws035-p001/x68k-user-k/user/userland/base/common/sccs.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/ar/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/ar/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/common/archive.c -o build/ws035-p001/x68k-user-k/user/userland/base/common/archive.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/common/elf_symbols.c -o build/ws035-p001/x68k-user-k/user/userland/base/common/elf_symbols.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/at/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/at/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/awk/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/awk/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/basename/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/basename/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/bc/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/bc/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/bc/number.c -o build/ws035-p001/x68k-user-k/user/userland/base/bc/number.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/blkid/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/blkid/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/cal/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/cal/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/cat/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/cat/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/cflow/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/cflow/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/common/c_parser.c -o build/ws035-p001/x68k-user-k/user/userland/base/common/c_parser.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/chgrp/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/chgrp/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/chmod/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/chmod/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/chown/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/chown/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/cksum/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/cksum/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/common/sha256.c -o build/ws035-p001/x68k-user-k/user/userland/base/common/sha256.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/cmp/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/cmp/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/comm/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/comm/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/compress/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/compress/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/common/lzw.c -o build/ws035-p001/x68k-user-k/user/userland/base/common/lzw.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/cp/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/cp/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/cron/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/cron/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/crontab/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/crontab/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/csplit/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/csplit/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/cut/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/cut/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/cxref/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/cxref/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/date/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/date/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/dd/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/dd/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/df/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/df/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/diff/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/diff/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/diff/tree.c -o build/ws035-p001/x68k-user-k/user/userland/base/diff/tree.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/dirname/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/dirname/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/diskpart/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/diskpart/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/diskpart/table.c -o build/ws035-p001/x68k-user-k/user/userland/base/diskpart/table.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/dmesg/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/dmesg/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/du/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/du/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/ed/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/ed/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/ed/buffer.c -o build/ws035-p001/x68k-user-k/user/userland/base/ed/buffer.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/expand/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/expand/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/expr/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/expr/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/file/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/file/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/find/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/find/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/fmt/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/fmt/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/fold/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/fold/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/fuser/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/fuser/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/gencat/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/gencat/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/getconf/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/getconf/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/gettext/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/gettext/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/getty/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/getty/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/grep/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/grep/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/shutdown-control/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/shutdown-control/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/service/zsv1-protocol.c -o build/ws035-p001/x68k-user-k/user/userland/base/service/zsv1-protocol.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/service/zsv1-client.c -o build/ws035-p001/x68k-user-k/user/userland/base/service/zsv1-client.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/head/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/head/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/hostname/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/hostname/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/iconv/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/iconv/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/id/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/id/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/infocmp/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/infocmp/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/common/terminfo.c -o build/ws035-p001/x68k-user-k/user/userland/base/common/terminfo.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/init/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/init/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/service/service-config.c -o build/ws035-p001/x68k-user-k/user/userland/base/service/service-config.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/service/rcconf.c -o build/ws035-p001/x68k-user-k/user/userland/base/service/rcconf.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/service/zsv1-server.c -o build/ws035-p001/x68k-user-k/user/userland/base/service/zsv1-server.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/ipcrm/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/ipcrm/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/ipcs/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/ipcs/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/join/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/join/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/kill/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/kill/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/less/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/less/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/link/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/link/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/ln/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/ln/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/locale/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/locale/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/localedef/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/localedef/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/logger/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/logger/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/login/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/login/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/logname/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/logname/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/lp/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/lp/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/lp/lpd-client.c -o build/ws035-p001/x68k-user-k/user/userland/base/lp/lpd-client.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/ls/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/ls/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/m4/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/m4/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/m4/engine.c -o build/ws035-p001/x68k-user-k/user/userland/base/m4/engine.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/deferred-stub/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/deferred-stub/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/mesg/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/mesg/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/mkdir/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/mkdir/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/mkfifo/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/mkfifo/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/mkfs/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/mkfs/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/mkfs/ufs-format.c -o build/ws035-p001/x68k-user-k/user/userland/base/mkfs/ufs-format.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/mkfs/fat32-format.c -o build/ws035-p001/x68k-user-k/user/userland/base/mkfs/fat32-format.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/mkfs/block-command.c -o build/ws035-p001/x68k-user-k/user/userland/base/mkfs/block-command.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/common/format-file.c -o build/ws035-p001/x68k-user-k/user/userland/base/common/format-file.o
+In file included from userland/base/mkfs/ufs-format.h:17,
+                 from userland/base/mkfs/ufs-format.c:14:
+userland/base/mkfs/ufs-format.c: In function 'ufs_format_validate_size':
+userland/base/mkfs/ufs-format.h:19:39: error: invalid suffix "__UINT64_C_SUFFIX__" on integer constant
+   19 | #define UFS_FORMAT_MIN_BYTES UINT64_C(4194304)
+      |                                       ^~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:114:25: note: in expansion of macro '__ZED_INT_C'
+  114 | #define UINT64_C(value) __ZED_INT_C(value, __UINT64_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/ufs-format.h:19:30: note: in expansion of macro 'UINT64_C'
+   19 | #define UFS_FORMAT_MIN_BYTES UINT64_C(4194304)
+      |                              ^~~~~~~~
+userland/base/mkfs/ufs-format.c:92:21: note: in expansion of macro 'UFS_FORMAT_MIN_BYTES'
+   92 |         if (bytes < UFS_FORMAT_MIN_BYTES || bytes > UFS_FORMAT_MAX_BYTES)
+      |                     ^~~~~~~~~~~~~~~~~~~~
+userland/base/mkfs/ufs-format.h:20:39: error: invalid suffix "__UINT64_C_SUFFIX__" on integer constant
+   20 | #define UFS_FORMAT_MAX_BYTES UINT64_C(2147482624)
+      |                                       ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:114:25: note: in expansion of macro '__ZED_INT_C'
+  114 | #define UINT64_C(value) __ZED_INT_C(value, __UINT64_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/ufs-format.h:20:30: note: in expansion of macro 'UINT64_C'
+   20 | #define UFS_FORMAT_MAX_BYTES UINT64_C(2147482624)
+      |                              ^~~~~~~~
+userland/base/mkfs/ufs-format.c:92:53: note: in expansion of macro 'UFS_FORMAT_MAX_BYTES'
+   92 |         if (bytes < UFS_FORMAT_MIN_BYTES || bytes > UFS_FORMAT_MAX_BYTES)
+      |                                                     ^~~~~~~~~~~~~~~~~~~~
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/mkfs/ufs-super.c -o build/ws035-p001/x68k-user-k/user/userland/base/mkfs/ufs-super.o
+userland/base/mkfs/ufs-format.c: In function 'record_crc':
+userland/base/mkfs/ufs-format.c:459:24: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+  459 |         crc = UINT32_C(0xffffffff);
+      |                        ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/ufs-format.c:459:15: note: in expansion of macro 'UINT32_C'
+  459 |         crc = UINT32_C(0xffffffff);
+      |               ^~~~~~~~
+userland/base/mkfs/ufs-format.c:467:61: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+  467 |                                 crc = (crc >> 1) ^ UINT32_C(0xedb88320);
+      |                                                             ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/ufs-format.c:467:52: note: in expansion of macro 'UINT32_C'
+  467 |                                 crc = (crc >> 1) ^ UINT32_C(0xedb88320);
+      |                                                    ^~~~~~~~
+userland/base/mkfs/ufs-format.c:474:31: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+  474 |         return crc ^ UINT32_C(0xffffffff);
+      |                               ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/ufs-format.c:474:22: note: in expansion of macro 'UINT32_C'
+  474 |         return crc ^ UINT32_C(0xffffffff);
+      |                      ^~~~~~~~
+userland/base/mkfs/ufs-format.c: In function 'initialize_context':
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/mkfs/ufs-endian.c -o build/ws035-p001/x68k-user-k/user/userland/base/mkfs/ufs-endian.o
+userland/base/mkfs/ufs-format.h:19:39: error: invalid suffix "__UINT64_C_SUFFIX__" on integer constant
+   19 | #define UFS_FORMAT_MIN_BYTES UINT64_C(4194304)
+      |                                       ^~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:114:25: note: in expansion of macro '__ZED_INT_C'
+  114 | #define UINT64_C(value) __ZED_INT_C(value, __UINT64_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/ufs-format.h:19:30: note: in expansion of macro 'UINT64_C'
+   19 | #define UFS_FORMAT_MIN_BYTES UINT64_C(4194304)
+      |                              ^~~~~~~~
+userland/base/mkfs/ufs-format.c:491:21: note: in expansion of macro 'UFS_FORMAT_MIN_BYTES'
+  491 |         if (bytes < UFS_FORMAT_MIN_BYTES || bytes % FORMAT_FRAGMENT != 0)
+      |                     ^~~~~~~~~~~~~~~~~~~~
+In file included from userland/base/mkfs/fat32-format.h:5,
+                 from userland/base/mkfs/fat32-format.c:3:
+userland/base/mkfs/fat32-format.c: In function 'fat32_format_geometry':
+userland/base/mkfs/fat32-format.c:68:41: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+   68 |                 if (clusters > UINT32_C(0x0fffffee))
+      |                                         ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/fat32-format.c:68:32: note: in expansion of macro 'UINT32_C'
+   68 |                 if (clusters > UINT32_C(0x0fffffee))
+      |                                ^~~~~~~~
+userland/base/mkfs/fat32-format.c: In function 'make_sector':
+userland/base/mkfs/fat32-format.c:161:43: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+  161 |                 put32(buffer, 0, UINT32_C(0x41615252));
+      |                                           ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/fat32-format.c:161:34: note: in expansion of macro 'UINT32_C'
+  161 |                 put32(buffer, 0, UINT32_C(0x41615252));
+      |                                  ^~~~~~~~
+userland/base/mkfs/fat32-format.c:162:45: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+  162 |                 put32(buffer, 484, UINT32_C(0x61417272));
+      |                                             ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/fat32-format.c:162:36: note: in expansion of macro 'UINT32_C'
+  162 |                 put32(buffer, 484, UINT32_C(0x61417272));
+      |                                    ^~~~~~~~
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/mkswap/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/mkswap/main.o
+userland/base/mkfs/fat32-format.c:165:45: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+  165 |                 put32(buffer, 508, UINT32_C(0xaa550000));
+      |                                             ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/fat32-format.c:165:36: note: in expansion of macro 'UINT32_C'
+  165 |                 put32(buffer, 508, UINT32_C(0xaa550000));
+      |                                    ^~~~~~~~
+userland/base/mkfs/fat32-format.c:169:43: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+  169 |                 put32(buffer, 0, UINT32_C(0x0ffffff8));
+      |                                           ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/fat32-format.c:169:34: note: in expansion of macro 'UINT32_C'
+  169 |                 put32(buffer, 0, UINT32_C(0x0ffffff8));
+      |                                  ^~~~~~~~
+userland/base/mkfs/fat32-format.c:170:43: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+  170 |                 put32(buffer, 4, UINT32_C(0x0fffffff));
+      |                                           ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/fat32-format.c:170:34: note: in expansion of macro 'UINT32_C'
+  170 |                 put32(buffer, 4, UINT32_C(0x0fffffff));
+      |                                  ^~~~~~~~
+userland/base/mkfs/fat32-format.c:171:43: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+  171 |                 put32(buffer, 8, UINT32_C(0x0fffffff));
+      |                                           ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/fat32-format.c:171:34: note: in expansion of macro 'UINT32_C'
+  171 |                 put32(buffer, 8, UINT32_C(0x0fffffff));
+      |                                  ^~~~~~~~
+userland/base/mkfs/ufs-format.c: In function 'make_super':
+userland/base/mkfs/ufs-format.c:1024:52: error: invalid suffix "__UINT64_C_SUFFIX__" on integer constant
+ 1024 |         put64(buffer, UFS_FS_MAXFILESIZE, UINT64_C(0x7fffffffffffffff));
+      |                                                    ^~~~~~~~~~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:114:25: note: in expansion of macro '__ZED_INT_C'
+  114 | #define UINT64_C(value) __ZED_INT_C(value, __UINT64_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/ufs-format.c:1024:43: note: in expansion of macro 'UINT64_C'
+ 1024 |         put64(buffer, UFS_FS_MAXFILESIZE, UINT64_C(0x7fffffffffffffff));
+      |                                           ^~~~~~~~
+userland/base/mkfs/ufs-format.c: In function 'locator_digest':
+In file included from userland/base/mkfs/ufs-disk.h:8,
+                 from userland/base/mkfs/ufs-super.h:6,
+                 from userland/base/mkfs/ufs-super.c:4:
+userland/base/mkfs/ufs-super.c: In function 'ufs_super_decode':
+make: *** [platform/x68k/vmunix.mk:220: build/ws035-p001/x68k-user-k/user/userland/base/mkfs/fat32-format.o] Error 1
+userland/base/mkfs/ufs-super.c:93:23: error: invalid suffix "__UINT64_C_SUFFIX__" on integer constant
+   93 |             (UINT64_C(1) << super->bshift) != super->bsize ||
+      |                       ^
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:114:25: note: in expansion of macro '__ZED_INT_C'
+  114 | #define UINT64_C(value) __ZED_INT_C(value, __UINT64_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/ufs-super.c:93:14: note: in expansion of macro 'UINT64_C'
+   93 |             (UINT64_C(1) << super->bshift) != super->bsize ||
+      |              ^~~~~~~~
+userland/base/mkfs/ufs-super.c:94:23: error: invalid suffix "__UINT64_C_SUFFIX__" on integer constant
+   94 |             (UINT64_C(1) << super->fshift) != super->fsize ||
+      |                       ^
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:114:25: note: in expansion of macro '__ZED_INT_C'
+  114 | #define UINT64_C(value) __ZED_INT_C(value, __UINT64_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/ufs-super.c:94:14: note: in expansion of macro 'UINT64_C'
+   94 |             (UINT64_C(1) << super->fshift) != super->fsize ||
+      |              ^~~~~~~~
+userland/base/mkfs/ufs-super.c:95:23: error: invalid suffix "__UINT64_C_SUFFIX__" on integer constant
+   95 |             (UINT64_C(1) << super->fragshift) != super->frag ||
+      |                       ^
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:114:25: note: in expansion of macro '__ZED_INT_C'
+  114 | #define UINT64_C(value) __ZED_INT_C(value, __UINT64_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/ufs-super.c:95:14: note: in expansion of macro 'UINT64_C'
+   95 |             (UINT64_C(1) << super->fragshift) != super->frag ||
+      |              ^~~~~~~~
+userland/base/mkfs/ufs-super.c:96:23: error: invalid suffix "__UINT64_C_SUFFIX__" on integer constant
+   96 |             (UINT64_C(512) << super->fsbtodb) != super->fsize ||
+      |                       ^~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:114:25: note: in expansion of macro '__ZED_INT_C'
+  114 | #define UINT64_C(value) __ZED_INT_C(value, __UINT64_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/ufs-super.c:96:14: note: in expansion of macro 'UINT64_C'
+   96 |             (UINT64_C(512) << super->fsbtodb) != super->fsize ||
+      |              ^~~~~~~~
+userland/base/mkfs/ufs-format.c:1057:26: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+ 1057 |         value = UINT32_C(2166136261);
+      |                          ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/ufs-format.c:1057:17: note: in expansion of macro 'UINT32_C'
+ 1057 |         value = UINT32_C(2166136261);
+      |                 ^~~~~~~~
+userland/base/mkfs/ufs-format.c:1060:35: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+ 1060 |                 value *= UINT32_C(16777619);
+      |                                   ^~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+userland/base/mkfs/ufs-format.c:1060:26: note: in expansion of macro 'UINT32_C'
+ 1060 |                 value *= UINT32_C(16777619);
+      |                          ^~~~~~~~
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/mkswap/swap-format.c -o build/ws035-p001/x68k-user-k/user/userland/base/mkswap/swap-format.o
+make: *** [platform/x68k/vmunix.mk:219: build/ws035-p001/x68k-user-k/user/userland/base/mkfs/ufs-super.o] Error 1
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/mkswap/swap-codec.c -o build/ws035-p001/x68k-user-k/user/userland/base/mkswap/swap-codec.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/more/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/more/main.o
+userland/base/mkfs/ufs-format.c: In function 'record_crc':
+userland/base/mkfs/ufs-format.c:475:1: error: control reaches end of non-void function [-Werror=return-type]
+  475 | }
+      | ^
+cc1: all warnings being treated as errors
+make: *** [platform/x68k/vmunix.mk:220: build/ws035-p001/x68k-user-k/user/userland/base/mkfs/ufs-format.o] Error 1
+In file included from userland/base/mkswap/swap-format.h:13,
+                 from userland/base/mkswap/swap-format.c:14:
+include/kern/swap.h:23:50: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+   23 | #define SWAP_SLOT_SOURCE_MASK           UINT32_C(0x60000000)
+      |                                                  ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+include/kern/swap.h:23:41: note: in expansion of macro 'UINT32_C'
+   23 | #define SWAP_SLOT_SOURCE_MASK           UINT32_C(0x60000000)
+      |                                         ^~~~~~~~
+include/kern/swap.h:67:17: note: in expansion of macro 'SWAP_SLOT_SOURCE_MASK'
+   67 | _Static_assert((SWAP_SLOT_SOURCE_MASK | SWAP_SLOT_LOCAL_MASK) ==
+      |                 ^~~~~~~~~~~~~~~~~~~~~
+include/kern/swap.h:22:50: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+   22 | #define SWAP_SLOT_LOCAL_MASK            UINT32_C(0x1fffffff)
+      |                                                  ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+include/kern/swap.h:22:41: note: in expansion of macro 'UINT32_C'
+   22 | #define SWAP_SLOT_LOCAL_MASK            UINT32_C(0x1fffffff)
+      |                                         ^~~~~~~~
+include/kern/swap.h:67:41: note: in expansion of macro 'SWAP_SLOT_LOCAL_MASK'
+   67 | _Static_assert((SWAP_SLOT_SOURCE_MASK | SWAP_SLOT_LOCAL_MASK) ==
+      |                                         ^~~~~~~~~~~~~~~~~~~~
+include/kern/swap.h:24:50: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+   24 | #define SWAP_SLOT_VALID_MASK            UINT32_C(0x7fffffff)
+      |                                                  ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+include/kern/swap.h:24:41: note: in expansion of macro 'UINT32_C'
+   24 | #define SWAP_SLOT_VALID_MASK            UINT32_C(0x7fffffff)
+      |                                         ^~~~~~~~
+include/kern/swap.h:68:5: note: in expansion of macro 'SWAP_SLOT_VALID_MASK'
+   68 |     SWAP_SLOT_VALID_MASK, "swap token fields must cover bits 0 through 30");
+      |     ^~~~~~~~~~~~~~~~~~~~
+In file included from userland/base/mkswap/swap-format.c:17:
+include/kern/swap.h:67:16: error: expression in static assertion is not an integer
+   67 | _Static_assert((SWAP_SLOT_SOURCE_MASK | SWAP_SLOT_LOCAL_MASK) ==
+      |                ^
+include/kern/swap.h:23:50: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+   23 | #define SWAP_SLOT_SOURCE_MASK           UINT32_C(0x60000000)
+      |                                                  ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+include/kern/swap.h:23:41: note: in expansion of macro 'UINT32_C'
+   23 | #define SWAP_SLOT_SOURCE_MASK           UINT32_C(0x60000000)
+      |                                         ^~~~~~~~
+include/kern/swap.h:69:17: note: in expansion of macro 'SWAP_SLOT_SOURCE_MASK'
+   69 | _Static_assert((SWAP_SLOT_SOURCE_MASK & SWAP_SLOT_LOCAL_MASK) == 0,
+      |                 ^~~~~~~~~~~~~~~~~~~~~
+include/kern/swap.h:22:50: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+   22 | #define SWAP_SLOT_LOCAL_MASK            UINT32_C(0x1fffffff)
+      |                                                  ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+include/kern/swap.h:22:41: note: in expansion of macro 'UINT32_C'
+   22 | #define SWAP_SLOT_LOCAL_MASK            UINT32_C(0x1fffffff)
+      |                                         ^~~~~~~~
+include/kern/swap.h:69:41: note: in expansion of macro 'SWAP_SLOT_LOCAL_MASK'
+   69 | _Static_assert((SWAP_SLOT_SOURCE_MASK & SWAP_SLOT_LOCAL_MASK) == 0,
+      |                                         ^~~~~~~~~~~~~~~~~~~~
+include/kern/swap.h:69:16: error: expression in static assertion is not an integer
+   69 | _Static_assert((SWAP_SLOT_SOURCE_MASK & SWAP_SLOT_LOCAL_MASK) == 0,
+      |                ^
+include/kern/swap.h:24:50: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+   24 | #define SWAP_SLOT_VALID_MASK            UINT32_C(0x7fffffff)
+      |                                                  ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+include/kern/swap.h:24:41: note: in expansion of macro 'UINT32_C'
+   24 | #define SWAP_SLOT_VALID_MASK            UINT32_C(0x7fffffff)
+      |                                         ^~~~~~~~
+include/kern/swap.h:71:35: note: in expansion of macro 'SWAP_SLOT_VALID_MASK'
+   71 | _Static_assert((SWAP_SLOT_NONE & ~SWAP_SLOT_VALID_MASK) != 0,
+      |                                   ^~~~~~~~~~~~~~~~~~~~
+include/kern/swap.h:71:16: error: expression in static assertion is not an integer
+   71 | _Static_assert((SWAP_SLOT_NONE & ~SWAP_SLOT_VALID_MASK) != 0,
+      |                ^
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/msgfmt/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/msgfmt/main.o
+In file included from include/kern/swap.h:16,
+                 from userland/base/mkswap/swap-codec.c:12:
+include/kern/swap.h:23:50: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+   23 | #define SWAP_SLOT_SOURCE_MASK           UINT32_C(0x60000000)
+      |                                                  ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+include/kern/swap.h:23:41: note: in expansion of macro 'UINT32_C'
+   23 | #define SWAP_SLOT_SOURCE_MASK           UINT32_C(0x60000000)
+      |                                         ^~~~~~~~
+include/kern/swap.h:67:17: note: in expansion of macro 'SWAP_SLOT_SOURCE_MASK'
+   67 | _Static_assert((SWAP_SLOT_SOURCE_MASK | SWAP_SLOT_LOCAL_MASK) ==
+      |                 ^~~~~~~~~~~~~~~~~~~~~
+include/kern/swap.h:22:50: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+   22 | #define SWAP_SLOT_LOCAL_MASK            UINT32_C(0x1fffffff)
+      |                                                  ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+include/kern/swap.h:22:41: note: in expansion of macro 'UINT32_C'
+   22 | #define SWAP_SLOT_LOCAL_MASK            UINT32_C(0x1fffffff)
+      |                                         ^~~~~~~~
+include/kern/swap.h:67:41: note: in expansion of macro 'SWAP_SLOT_LOCAL_MASK'
+   67 | _Static_assert((SWAP_SLOT_SOURCE_MASK | SWAP_SLOT_LOCAL_MASK) ==
+      |                                         ^~~~~~~~~~~~~~~~~~~~
+include/kern/swap.h:24:50: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+   24 | #define SWAP_SLOT_VALID_MASK            UINT32_C(0x7fffffff)
+      |                                                  ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+include/kern/swap.h:24:41: note: in expansion of macro 'UINT32_C'
+   24 | #define SWAP_SLOT_VALID_MASK            UINT32_C(0x7fffffff)
+      |                                         ^~~~~~~~
+include/kern/swap.h:68:5: note: in expansion of macro 'SWAP_SLOT_VALID_MASK'
+   68 |     SWAP_SLOT_VALID_MASK, "swap token fields must cover bits 0 through 30");
+      |     ^~~~~~~~~~~~~~~~~~~~
+include/kern/swap.h:67:16: error: expression in static assertion is not an integer
+   67 | _Static_assert((SWAP_SLOT_SOURCE_MASK | SWAP_SLOT_LOCAL_MASK) ==
+      |                ^
+include/kern/swap.h:23:50: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+   23 | #define SWAP_SLOT_SOURCE_MASK           UINT32_C(0x60000000)
+      |                                                  ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+include/kern/swap.h:23:41: note: in expansion of macro 'UINT32_C'
+   23 | #define SWAP_SLOT_SOURCE_MASK           UINT32_C(0x60000000)
+      |                                         ^~~~~~~~
+include/kern/swap.h:69:17: note: in expansion of macro 'SWAP_SLOT_SOURCE_MASK'
+   69 | _Static_assert((SWAP_SLOT_SOURCE_MASK & SWAP_SLOT_LOCAL_MASK) == 0,
+      |                 ^~~~~~~~~~~~~~~~~~~~~
+include/kern/swap.h:22:50: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+   22 | #define SWAP_SLOT_LOCAL_MASK            UINT32_C(0x1fffffff)
+      |                                                  ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+include/kern/swap.h:22:41: note: in expansion of macro 'UINT32_C'
+   22 | #define SWAP_SLOT_LOCAL_MASK            UINT32_C(0x1fffffff)
+      |                                         ^~~~~~~~
+include/kern/swap.h:69:41: note: in expansion of macro 'SWAP_SLOT_LOCAL_MASK'
+   69 | _Static_assert((SWAP_SLOT_SOURCE_MASK & SWAP_SLOT_LOCAL_MASK) == 0,
+      |                                         ^~~~~~~~~~~~~~~~~~~~
+include/kern/swap.h:69:16: error: expression in static assertion is not an integer
+   69 | _Static_assert((SWAP_SLOT_SOURCE_MASK & SWAP_SLOT_LOCAL_MASK) == 0,
+      |                ^
+include/kern/swap.h:24:50: error: invalid suffix "__UINT32_C_SUFFIX__" on integer constant
+   24 | #define SWAP_SLOT_VALID_MASK            UINT32_C(0x7fffffff)
+      |                                                  ^~~~~~~~~~
+libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+libc/include/stdint.h:112:25: note: in expansion of macro '__ZED_INT_C'
+  112 | #define UINT32_C(value) __ZED_INT_C(value, __UINT32_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+include/kern/swap.h:24:41: note: in expansion of macro 'UINT32_C'
+   24 | #define SWAP_SLOT_VALID_MASK            UINT32_C(0x7fffffff)
+      |                                         ^~~~~~~~
+include/kern/swap.h:71:35: note: in expansion of macro 'SWAP_SLOT_VALID_MASK'
+   71 | _Static_assert((SWAP_SLOT_NONE & ~SWAP_SLOT_VALID_MASK) != 0,
+      |                                   ^~~~~~~~~~~~~~~~~~~~
+include/kern/swap.h:71:16: error: expression in static assertion is not an integer
+   71 | _Static_assert((SWAP_SLOT_NONE & ~SWAP_SLOT_VALID_MASK) != 0,
+      |                ^
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/mv/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/mv/main.o
+make: *** [platform/x68k/vmunix.mk:220: build/ws035-p001/x68k-user-k/user/userland/base/mkswap/swap-format.o] Error 1
+make: *** [platform/x68k/vmunix.mk:219: build/ws035-p001/x68k-user-k/user/userland/base/mkswap/swap-codec.o] Error 1
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/newgrp/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/newgrp/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/nice/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/nice/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/nl/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/nl/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/nm/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/nm/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/nohup/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/nohup/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/ntpdate/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/ntpdate/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/od/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/od/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/paste/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/paste/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/patch/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/patch/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/pathchk/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/pathchk/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/pax/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/pax/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/pr/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/pr/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/ps/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/ps/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/readlink/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/readlink/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/realpath/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/realpath/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/renice/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/renice/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/rm/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/rm/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/rmdir/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/rmdir/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/sed/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/sed/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/service/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/service/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/service/service-command.c -o build/ws035-p001/x68k-user-k/user/userland/base/service/service-command.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/service/service-console.c -o build/ws035-p001/x68k-user-k/user/userland/base/service/service-console.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/sleep/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/sleep/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/sort/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/sort/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/split/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/split/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/stat/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/stat/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/strings/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/strings/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/stty/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/stty/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/swapoff/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/swapoff/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/swapon/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/swapon/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/sync/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/sync/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/syslogd/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/syslogd/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/tabs/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/tabs/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/tail/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/tail/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/tee/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/tee/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/tic/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/tic/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/time/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/time/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/timeout/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/timeout/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/top/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/top/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/touch/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/touch/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/tput/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/tput/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/tr/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/tr/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/truncate/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/truncate/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/tsort/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/tsort/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/tty/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/tty/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/uname/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/uname/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/unexpand/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/unexpand/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/uniq/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/uniq/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/unlink/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/unlink/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/uudecode/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/uudecode/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/common/uucodec.c -o build/ws035-p001/x68k-user-k/user/userland/base/common/uucodec.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/uuencode/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/uuencode/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/wc/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/wc/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/who/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/who/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/write/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/write/main.o
+m68k-linux-gnu-gcc -nostdinc -Iinclude -Isrc -I. -Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K -DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+ -fno-strict-aliasing -MMD -MP -c userland/base/xargs/main.c -o build/ws035-p001/x68k-user-k/user/userland/base/xargs/main.o
+ar rcs build/ws035-p001/x68k-user-k/lib/libreadline.a build/ws035-p001/x68k-user-k/user/userland/base/libedit/readline.o
+cc1: all warnings being treated as errors
+make: *** [platform/x68k/vmunix.mk:219: build/ws035-p001/x68k-user-k/user/userland/base/libc/posix.o] Error 1
+make: Target 'build/ws035-p001/x68k-user-k/bin/sh' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/admin' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/ar' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/at' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/awk' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/basename' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/batch' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/bc' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/blkid' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/cal' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/cat' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/cflow' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/chgrp' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/chmod' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/chown' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/cksum' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/cmp' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/comm' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/compress' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/cp' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/cron' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/crontab' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/csplit' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/cut' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/cxref' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/date' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/dd' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/delta' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/df' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/diff' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/dirname' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/diskpart' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/dmesg' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/du' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/ed' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/expand' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/expr' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/file' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/find' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/fmt' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/fold' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/fuser' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/gencat' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/get' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/getconf' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/gettext' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/getty' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/grep' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/halt' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/head' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/hostname' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/iconv' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/id' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/infocmp' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/init' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/ipcrm' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/ipcs' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/join' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/kill' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/less' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/link' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/ln' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/locale' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/localedef' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/logger' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/login' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/logname' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/lp' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/lpr' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/ls' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/m4' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/mailx' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/mesg' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/mkdir' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/mkfifo' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/mkfs' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/mkswap' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/more' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/msgfmt' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/mv' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/newgrp' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/ngettext' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/nice' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/nl' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/nm' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/nohup' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/ntpdate' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/od' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/paste' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/patch' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/pathchk' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/pax' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/poweroff' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/pr' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/prs' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/ps' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/readlink' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/realpath' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/reboot' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/renice' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/rm' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/rmdel' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/rmdir' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/sact' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/sccs' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/sed' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/service' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/shutdown' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/sleep' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/sort' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/split' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/stat' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/strings' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/stty' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/swapoff' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/swapon' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/sync' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/syslogd' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/tabs' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/tail' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/talk' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/tee' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/tic' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/time' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/timeout' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/top' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/touch' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/tput' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/tr' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/truncate' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/tsort' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/tty' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/uname' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/uncompress' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/unexpand' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/unget' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/uniq' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/unlink' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/uudecode' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/uuencode' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/val' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/wc' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/what' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/who' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/write' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/xargs' not remade because of errors.
+make: Target 'build/ws035-p001/x68k-user-k/bin/zcat' not remade because of errors.
+x68k-user-k status=2 seconds=1 warnings=0 error_lines=47

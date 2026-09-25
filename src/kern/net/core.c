@@ -29,11 +29,11 @@
 #include "kern/lock.h"
 #include "kern/sched.h"
 #include "kern/thread.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
 #include <stdbool.h>
-#include <string.h>
 #include "kern/klog.h"
 
 #define NET_POLL_BUDGET 16U
@@ -179,7 +179,7 @@ net_init(
 	worker_thread = NULL;
 	worker_generation = 1U;
 	network_stopping = 0;
-	memset(&network_stats, 0, sizeof(network_stats));
+	kern_memset(&network_stats, 0, sizeof(network_stats));
 
 	spin_unlock_irqrestore(&input_lock, irq);
 
@@ -400,7 +400,7 @@ loopback_init(
 	loopback_device = net_device_alloc();
 	if (loopback_device == NULL)
 		return ENOMEM;
-	strcpy(loopback_device->name, "lo0");
+	kern_strcpy(loopback_device->name, "lo0");
 	loopback_device->mtu = 65535;
 	loopback_device->hwaddr_len = 6;
 	loopback_device->hwaddr[5] = 1;

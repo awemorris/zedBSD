@@ -1,0 +1,15 @@
+=== audiod-sum
+serial: logged in
+NAME        STATUS    ENABLED   PID
+audiod      running   yes       5
+
+TYPE        daemon
+COMMAND     /sbin/audiod
+RESTART     on-failure
+AFTER       syslogd
+REQUIRES    -
+AUDIODTEST PLAY streams=2 frames=48000 ms=1111 underruns=0
+guest-status=0
+wav: format=1 channels=2 rate=48000 bits=16 frames=356783
+windows: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 8000 8000 8000 8000 8000
+check-status=0

@@ -33,6 +33,7 @@
  */
 
 #include "scenarios.h"
+#include <kern/kcrt.h>
 
 #include "../../compiler/compiler.h"
 #include "../../i915.h"
@@ -44,19 +45,18 @@
 #include "../../render/object.h"
 #include "../../render/render.h"
 
-#include <drivers/gpu.h>
+#include <drivers/gpu/gpu.h>
 #include <kern/clock.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
 
-#include <vulkan/vulkan_core.h>
+#include <libc/vulkan/vulkan_core.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 /* The side of the square target, in pixels. */
 #define I915_VKE1_SIZE			64U
@@ -368,7 +368,7 @@ i915_vke1_thread(
 
 	/* Opens the session and makes every object the steps use. */
 	x = &i915_vke1_state;
-	memset(x, 0, sizeof(*x));
+	kern_memset(x, 0, sizeof(*x));
 	x->device = device;
 	error = i915_vke1_setup(x);
 	if (error != 0) {
@@ -676,7 +676,7 @@ i915_vke1_pipeline_init(
 	struct i915_gfx_shader *fragment)
 {
 	/* The two stages. */
-	memset(pipeline, 0, sizeof(*pipeline));
+	kern_memset(pipeline, 0, sizeof(*pipeline));
 	pipeline->vertex = vertex;
 	pipeline->fragment = fragment;
 
@@ -733,7 +733,7 @@ i915_vke1_blend_init(
 	pipeline->color_write_disable = ~blend->write_mask & 0xfU;
 
 	/* Every pipeline has the same constants; the dynamic case must not use them. */
-	memcpy(pipeline->blend_constants, i915_vke1_pipeline_constants, sizeof(pipeline->blend_constants));
+	kern_memcpy(pipeline->blend_constants, i915_vke1_pipeline_constants, sizeof(pipeline->blend_constants));
 	pipeline->dynamic_blend_constants = blend->dynamic_constants;
 }
 
@@ -944,18 +944,18 @@ i915_vke1_data_write(
 	drv_i915_gt_clflush(words, I915_VKE1_VERTEX_BYTES);
 
 	/* The indices of one quad. */
-	memcpy(x->cpu + I915_VKE1_INDEX_OFFSET, quad_indices, sizeof(quad_indices));
+	kern_memcpy(x->cpu + I915_VKE1_INDEX_OFFSET, quad_indices, sizeof(quad_indices));
 	drv_i915_gt_clflush(x->cpu + I915_VKE1_INDEX_OFFSET, I915_VKE1_INDEX_BYTES);
 
 	/* The transforms and the materials, the second of each at the second block's offset. */
-	memset(x->cpu + I915_VKE1_TRANSFORM_OFFSET, 0, I915_VKE1_UNIFORM_BYTES);
-	memset(x->cpu + I915_VKE1_MATERIAL_OFFSET, 0, I915_VKE1_UNIFORM_BYTES);
-	memcpy(x->cpu + I915_VKE1_TRANSFORM_OFFSET, i915_vke1_transforms, I915_VKE1_TRANSFORM_FLOATS * 4U);
-	memcpy(x->cpu + I915_VKE1_TRANSFORM_OFFSET + I915_VKE1_SECOND_BLOCK,
+	kern_memset(x->cpu + I915_VKE1_TRANSFORM_OFFSET, 0, I915_VKE1_UNIFORM_BYTES);
+	kern_memset(x->cpu + I915_VKE1_MATERIAL_OFFSET, 0, I915_VKE1_UNIFORM_BYTES);
+	kern_memcpy(x->cpu + I915_VKE1_TRANSFORM_OFFSET, i915_vke1_transforms, I915_VKE1_TRANSFORM_FLOATS * 4U);
+	kern_memcpy(x->cpu + I915_VKE1_TRANSFORM_OFFSET + I915_VKE1_SECOND_BLOCK,
 	       &i915_vke1_transforms[I915_VKE1_TRANSFORM_FLOATS],
 	       I915_VKE1_TRANSFORM_FLOATS * 4U);
-	memcpy(x->cpu + I915_VKE1_MATERIAL_OFFSET, i915_vke1_materials, I915_VKE1_MATERIAL_FLOATS * 4U);
-	memcpy(x->cpu + I915_VKE1_MATERIAL_OFFSET + I915_VKE1_SECOND_BLOCK,
+	kern_memcpy(x->cpu + I915_VKE1_MATERIAL_OFFSET, i915_vke1_materials, I915_VKE1_MATERIAL_FLOATS * 4U);
+	kern_memcpy(x->cpu + I915_VKE1_MATERIAL_OFFSET + I915_VKE1_SECOND_BLOCK,
 	       &i915_vke1_materials[I915_VKE1_MATERIAL_FLOATS],
 	       I915_VKE1_MATERIAL_FLOATS * 4U);
 	drv_i915_gt_clflush(x->cpu + I915_VKE1_TRANSFORM_OFFSET, I915_VKE1_UNIFORM_BYTES);
@@ -964,7 +964,7 @@ i915_vke1_data_write(
 	/* The two texels of each texture, at the start of its first row. */
 	for (index = 0U; index < I915_VKE1_TEXTURES; index++) {
 		texels = (uint32_t *)(void *)(x->cpu + x->textures[index].offset);
-		memset(texels, 0, (size_t)x->textures[index].bytes);
+		kern_memset(texels, 0, (size_t)x->textures[index].bytes);
 		texels[0] = i915_vke1_texels[index * 2U];
 		texels[1] = i915_vke1_texels[index * 2U + 1U];
 		drv_i915_gt_clflush(texels, (size_t)x->textures[index].bytes);
@@ -1000,7 +1000,7 @@ i915_vke1_quad_write(
 		words[corner * 8U + 1U] = i915_vke1_ndc[y];
 		words[corner * 8U + 2U] = I915_VKE1_F_0;
 		words[corner * 8U + 3U] = I915_VKE1_F_1;
-		memcpy(&words[corner * 8U + 4U], color, 4U * sizeof(color[0]));
+		kern_memcpy(&words[corner * 8U + 4U], color, 4U * sizeof(color[0]));
 	}
 }
 
@@ -1063,7 +1063,7 @@ i915_vke1_put32(
 		return;
 	}
 
-	memcpy(x->wire + x->used, &value, 4U);
+	kern_memcpy(x->wire + x->used, &value, 4U);
 	x->used += 4U;
 }
 
@@ -1129,7 +1129,7 @@ i915_vke1_reply32(
 	if (offset + 4U > x->reply_bytes)
 		return 0U;
 
-	memcpy(&value, x->reply + offset, 4U);
+	kern_memcpy(&value, x->reply + offset, 4U);
 
 	/* Succeeded: the word at the offset. */
 	return value;

@@ -10,12 +10,12 @@
  */
 
 #include <kern/klog.h>
-#include <drivers/gpu.h>
-#include <drivers/gpu-scanout.h>
+#include <drivers/gpu/gpu.h>
+#include <drivers/gpu/gpu-scanout.h>
 #include <uapi/gpu-allocation.h>
 #include <uapi/gpu-fence.h>
 #include <uapi/gpu-job.h>
-#include <drivers/gpu-fence.h>
+#include <drivers/gpu/gpu-fence.h>
 #include <kern/cdev.h>
 #include <kern/cred.h>
 #include <kern/file.h>
@@ -35,11 +35,10 @@
 #include <hal/hal.h>
 #include <kern/sched.h>
 #include <kern/waitq.h>
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <limits.h>
-#include <stdio.h>
-#include <string.h>
 
 #define GPU_DEVICE_BASE		0x00090000U
 #define GPU_RESOURCE_STORAGE	1U
@@ -436,7 +435,7 @@ drv_gpu_complete(
 		if (binding->job != 0U) {
 			retired[retired_count] = binding->handle;
 			retired_count++;
-			memset(binding, 0, sizeof(*binding));
+			kern_memset(binding, 0, sizeof(*binding));
 		}
 	}
 
@@ -1055,21 +1054,18 @@ gpu_publish_node(
 {
 	/* Immutable dispatch shared by every published cdev generation. */
 	static const struct cdev_ops gpu_file_operations = {
-		gpu_open,
-		gpu_close,
-		NULL,
-		NULL,
-		gpu_ioctl,
-		gpu_poll,
-		NULL,
-		gpu_mmap
+		.open = gpu_open,
+		.close = gpu_close,
+		.ioctl = gpu_ioctl,
+		.poll = gpu_poll,
+		.mmap = gpu_mmap
 	};
 	struct cdev *node;
 	char name[32];
 	int error;
 
 	/* Formats a bounded name from a framework-controlled slot number. */
-	snprintf(name, sizeof(name), "gpu%u", device->number);
+	kern_snprintf(name, sizeof(name), "gpu%u", device->number);
 
 	/* A cdev generation keeps its wrapper alive even after backend removal. */
 	refcount_get(&device->references);
@@ -1876,7 +1872,7 @@ gpu_info_ioctl(
 		return EINVAL;
 
 	/* Zeroes the complete reply so unwritten fields never expose memory. */
-	memset(&information, 0, sizeof(information));
+	kern_memset(&information, 0, sizeof(information));
 	device = session->device;
 	error = device->ops->get_info(device->private_data,
 				      session->backend,
@@ -2133,7 +2129,7 @@ gpu_resource_reserve(
 
 	/* Queries the instance's capacity without holding a framework spinlock. */
 	device = session->device;
-	memset(&information, 0, sizeof(information));
+	kern_memset(&information, 0, sizeof(information));
 	error = device->ops->get_info(
 		device->private_data,
 		session->backend,
@@ -2232,7 +2228,7 @@ gpu_capset_ioctl(
 		return EINVAL;
 
 	/* Zeroes unused payload bytes before the backend fills its capability data. */
-	memset(&response, 0, sizeof(response));
+	kern_memset(&response, 0, sizeof(response));
 	response.version = GPU_ABI_VERSION;
 	response.size = sizeof(response);
 	response.capset_id = request.capset_id;
@@ -2292,7 +2288,7 @@ gpu_blob_ioctl(
 		return EOPNOTSUPP;
 
 	/* Both layouts share the old prefix while only the new command reads placement conditions. */
-	memset(&extended, 0, sizeof(extended));
+	kern_memset(&extended, 0, sizeof(extended));
 	bytes = sizeof(request);
 	if (placed != 0U)
 		bytes = sizeof(extended);
@@ -2747,7 +2743,7 @@ gpu_map_ioctl(
 
 	/* The first query validates and caches the resource's lifetime-stable view. */
 	if (resource->mapping_offset == 0) {
-		memset(&view, 0, sizeof(view));
+		kern_memset(&view, 0, sizeof(view));
 		error = device->ops->resource_map(
 			device->private_data,
 			session->backend,
@@ -2994,7 +2990,7 @@ gpu_display_ioctl(
 	}
 
 	/* Copies one bounded ABI payload without retaining its original userspace address. */
-	memset(&request, 0, sizeof(request));
+	kern_memset(&request, 0, sizeof(request));
 	error = copyin(argument, &request, bytes);
 	if (error != 0)
 		return error;
@@ -3012,7 +3008,7 @@ gpu_display_ioctl(
 
 		/* Carries only the ordinal into the backend's newly zeroed output snapshot. */
 		index = request.query.index;
-		memset(&request.query, 0, sizeof(request.query));
+		kern_memset(&request.query, 0, sizeof(request.query));
 		request.query.index = index;
 		error = ops->query(device->private_data, session->backend, &request.query);
 		if (error != 0)
@@ -3084,7 +3080,7 @@ gpu_display_ioctl(
 		error = copyout(&request.claim, argument, sizeof(request.claim));
 		if (error != 0) {
 			/* Copy failure retains no user-visible lease, so return ownership to this backend. */
-			memset(&rollback, 0, sizeof(rollback));
+			kern_memset(&rollback, 0, sizeof(rollback));
 			rollback.version = GPU_ABI_VERSION;
 			rollback.size = sizeof(rollback);
 			rollback.lease = request.claim.lease;
@@ -3384,8 +3380,8 @@ gpu_allocation_import_ioctl(
 		return EINVAL;
 
 	/* Receiver-supplied metadata can never replace the stored sender contract. */
-	memset(&empty, 0, sizeof(empty));
-	different = memcmp(&request.allocation, &empty, sizeof(empty));
+	kern_memset(&empty, 0, sizeof(empty));
+	different = kern_memcmp(&request.allocation, &empty, sizeof(empty));
 	if (different != 0)
 		return EINVAL;
 
@@ -3502,7 +3498,7 @@ gpu_device_query_ioctl(
 
 	/* Ordinary existing drivers derive roles from the operations they actually implement. */
 	device = session->device;
-	memset(&request, 0, sizeof(request));
+	kern_memset(&request, 0, sizeof(request));
 	if (device->ops->scanout != NULL) {
 		error = device->ops->scanout->query_device(
 			device->private_data,
@@ -3646,7 +3642,7 @@ gpu_scanout_import(
 		return EOPNOTSUPP;
 
 	/* The lookup reference keeps the source anchor and its physical page array alive. */
-	memset(&backing, 0, sizeof(backing));
+	kern_memset(&backing, 0, sizeof(backing));
 	error = shared->device->ops->share->get_scanout_backing(
 		shared->device->private_data,
 		shared->object,
@@ -3828,7 +3824,7 @@ gpu_export_install(
 		flags |= FILEDESC_CLOFORK;
 
 	/* Reservation prevents another thread from closing and reusing a failed export slot. */
-	memset(&reservation, 0, sizeof(reservation));
+	kern_memset(&reservation, 0, sizeof(reservation));
 	error = filedesc_reserve_many(thread->proc->fd, 1U, flags, &reservation);
 	if (error != 0)
 		return error;
@@ -3842,7 +3838,7 @@ gpu_export_install(
 	}
 
 	/* Successful commit consumes the caller's one owned handle reference. */
-	memset(&object, 0, sizeof(object));
+	kern_memset(&object, 0, sizeof(object));
 	object.type = FD_OBJECT_HANDLE;
 	object.data.handle = handle;
 	error = filedesc_commit_objects(&reservation, &object, &descriptor);
@@ -3997,8 +3993,8 @@ gpu_import_ioctl(
 		return EINVAL;
 
 	/* Never trust receiver-supplied descriptions in place of the exported immutable metadata. */
-	memset(&empty, 0, sizeof(empty));
-	different = memcmp(&request.image, &empty, sizeof(empty));
+	kern_memset(&empty, 0, sizeof(empty));
+	different = kern_memcmp(&request.image, &empty, sizeof(empty));
 	if (different != 0)
 		return EINVAL;
 
@@ -4439,7 +4435,7 @@ gpu_job_unbind(
 		/* Preserve pending state after definite nonacceptance; terminal errors stay terminal. */
 		handle = binding->handle;
 		(void)drv_gpu_fence_unbind(handle, binding->generation, session);
-		memset(binding, 0, sizeof(*binding));
+		kern_memset(binding, 0, sizeof(*binding));
 		break;
 	}
 
@@ -4849,7 +4845,7 @@ gpu_completion_reserve(
 			continue;
 
 		/* Publishes the owning session before a backend may complete immediately. */
-		memset(completion, 0, sizeof(*completion));
+		kern_memset(completion, 0, sizeof(*completion));
 		completion->session = session;
 		completion->sequence = sequence;
 		completion->listed = 1U;

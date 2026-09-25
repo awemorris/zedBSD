@@ -26,7 +26,12 @@ ZEDBSD_PACKAGE_INPUTS += $(if $(filter remacs,$(ZEDBSD_USER_PROGRAMS)),\
 	$(REMACS_NAP) $(REMACS_DICTIONARY))
 ZEDBSD_PACKAGE_FILES += $(if $(filter remacs,$(ZEDBSD_USER_PROGRAMS)),\
 	--file $(ZEDBSD_PACKAGE_BINDIR)/remacs.nap=$(REMACS_NAP) \
-	--file /home/skkjisyo.dic=$(REMACS_DICTIONARY))
+	--file /usr/share/remacs/skkjisyo.dic=$(REMACS_DICTIONARY))
+
+# The dictionary is one of the cloned files, so the clone produces it.  Saying
+# so keeps a tree without build/sources from stopping with "no rule to make".
+$(REMACS_DICTIONARY): $(REMACS_SOURCE_STAMP)
+	@test -f $@
 
 $(REMACS_SOURCE_STAMP):
 	@mkdir -p $(dir $(REMACS_SOURCE_DIR))

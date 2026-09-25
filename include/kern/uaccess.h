@@ -14,7 +14,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/types.h>
+#include <uapi/types.h>
 
 struct vmspace;
 struct vmspace_pinned_page;

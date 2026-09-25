@@ -24,11 +24,11 @@
 #include "kern/mount.h"
 #include "kern/klog.h"
 #include "kern/lock.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
 #include <stdint.h>
-#include <string.h>
 #include <uapi/sysctl.h>
 
 #define SYSCTL_NAME_MAX 64U
@@ -145,9 +145,9 @@ kern_sysctl(
 	if (namelen == 2 && name[0] == CTL_HW && name[1] == HW_MEMORY_STATS) {
 		if (newp != NULL || newlen != 0)
 			return EPERM;
-		memset(&hal_memory, 0, sizeof(hal_memory));
+		kern_memset(&hal_memory, 0, sizeof(hal_memory));
 		hal_get_memstat(&hal_memory);
-		memset(&memory, 0, sizeof(memory));
+		kern_memset(&memory, 0, sizeof(memory));
 		memory.version = MEMORY_STATS_VERSION;
 		memory.boot_ranges_valid = hal_memory.boot_ranges_valid;
 		memory.boot_range_count = hal_memory.boot_range_count;
@@ -192,7 +192,7 @@ kern_sysctl(
 			return sysctl_output(oldp, oldlenp, &matches, sizeof(matches));
 		}
 		selector = kern_boot_source_selector(name[1] == KERN_BOOT_CONFIGURATION);
-		return sysctl_output(oldp, oldlenp, selector, strlen(selector) + 1);
+		return sysctl_output(oldp, oldlenp, selector, kern_strlen(selector) + 1);
 	}
 
 	/* Handles the kernel leaves. */
@@ -218,7 +218,7 @@ kern_sysctl(
 
 				/* Installs the new name. */
 				irq = spin_lock_irqsave(&hostname_lock);
-				memcpy(hostname, new_name, newlen);
+				kern_memcpy(hostname, new_name, newlen);
 				hostname[newlen] = '\0';
 				spin_unlock_irqrestore(&hostname_lock, irq);
 			} else if (newlen != 0) {
@@ -227,7 +227,7 @@ kern_sysctl(
 
 			/* Reports the current name with its terminator. */
 			irq = spin_lock_irqsave(&hostname_lock);
-			length = strlen(hostname) + 1U;
+			length = kern_strlen(hostname) + 1U;
 			error = sysctl_output(oldp, oldlenp, hostname, length);
 			spin_unlock_irqrestore(&hostname_lock, irq);
 			return error;
@@ -318,7 +318,7 @@ kern_sysctl(
 			return EPERM;
 		if (newlen != sizeof(value))
 			return EINVAL;
-		memcpy(&value, newp, sizeof(value));
+		kern_memcpy(&value, newp, sizeof(value));
 		error = cache_memory_set_target(value);
 		return error;
 	}
@@ -353,7 +353,7 @@ kern_sysctl(
 			return EPERM;
 		if (newlen != sizeof(value))
 			return EINVAL;
-		memcpy(&value, newp, sizeof(value));
+		kern_memcpy(&value, newp, sizeof(value));
 		error = buf_set_max_bytes(value);
 		return error;
 	case VFS_BUFCACHE_CURRENT_BYTES:
@@ -455,7 +455,7 @@ sysctl_output(
 		return ENOMEM;
 
 	/* Copies the value. */
-	memcpy(oldp, value, size);
+	kern_memcpy(oldp, value, size);
 
 	/* Reports the copied value. */
 	return 0;
@@ -487,7 +487,7 @@ sysctl_meta(
 		    name[newlen - 1U] != '\0')
 			return EINVAL;
 		for (i = 0; i < sizeof(leaves) / sizeof(leaves[0]); i++) {
-			if (!strcmp(name, leaves[i].name)) {
+			if (!kern_strcmp(name, leaves[i].name)) {
 				error = sysctl_output(oldp, oldlenp, leaves[i].oid,
 				    leaves[i].oidlen * sizeof(int));
 				return error;
@@ -507,7 +507,7 @@ sysctl_meta(
 		leaf = find_oid(newp, (unsigned)(newlen / sizeof(int)));
 		if (leaf == NULL)
 			return ENOENT;
-		error = sysctl_output(oldp, oldlenp, leaf->name, strlen(leaf->name) + 1U);
+		error = sysctl_output(oldp, oldlenp, leaf->name, kern_strlen(leaf->name) + 1U);
 		return error;
 	}
 
@@ -580,9 +580,9 @@ sysctl_writeback(
 		return EOPNOTSUPP;
 	if (newlen != sizeof(request) || oldp != NULL || oldlenp != NULL)
 		return EINVAL;
-	memcpy(&request, newp, sizeof(request));
+	kern_memcpy(&request, newp, sizeof(request));
 	if (request.version != WRITEBACK_REPORT_VERSION || request.enabled > 1 ||
-	    request.path[0] != '/' || memchr(request.path, '\0', sizeof(request.path)) == NULL)
+	    request.path[0] != '/' || kern_memchr(request.path, '\0', sizeof(request.path)) == NULL)
 		return EINVAL;
 	mount = mount_find_ref(request.path);
 	if (mount == NULL)

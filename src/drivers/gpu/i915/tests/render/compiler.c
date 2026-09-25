@@ -30,6 +30,7 @@
  */
 
 #include "scenarios.h"
+#include <kern/kcrt.h>
 
 #include "../../compiler/compiler.h"
 #include "../../i915.h"
@@ -41,19 +42,18 @@
 #include "../../render/internal.h"
 #include "../../render/render.h"
 
-#include <drivers/gpu.h>
+#include <drivers/gpu/gpu.h>
 #include <kern/clock.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
 
-#include <vulkan/vulkan_core.h>
+#include <libc/vulkan/vulkan_core.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "../fixtures/compiler-shaders-gen.inc"
 
@@ -295,7 +295,7 @@ i915_vkc_thread(
 
 	/* Opens the session and makes the storage and the objects the steps use. */
 	x = &i915_vkc_state;
-	memset(x, 0, sizeof(*x));
+	kern_memset(x, 0, sizeof(*x));
 	x->device = device;
 	error = i915_vkc_setup(x);
 	if (error != 0) {
@@ -479,7 +479,7 @@ i915_vkc_pipeline_init(
 	x->fragment.word_count = step->fragment_words;
 
 	/* The two stages. */
-	memset(&x->pipeline, 0, sizeof(x->pipeline));
+	kern_memset(&x->pipeline, 0, sizeof(x->pipeline));
 	x->pipeline.vertex = &x->vertex;
 	x->pipeline.fragment = &x->fragment;
 
@@ -616,7 +616,7 @@ i915_vkc_quad_write(
 
 		/* Starts the vertex empty. */
 		vertex = words + index * I915_VKC_VERTEX_WORDS;
-		memset(vertex, 0, I915_VKC_VERTEX_WORDS * 4U);
+		kern_memset(vertex, 0, I915_VKC_VERTEX_WORDS * 4U);
 
 		/* The position: the cell edge in NDC, depth one half. */
 		vertex[0] = i915_vkc_ndc[left + x * (right - left)];
@@ -679,19 +679,19 @@ i915_vkc_step_run(
 	}
 
 	/* Writes the vertices and clears the target. */
-	memset(&x->args, 0, sizeof(x->args));
+	kern_memset(&x->args, 0, sizeof(x->args));
 	x->args.count = i915_vkc_vertices_write(x, step);
 	x->args.instance_count = 1U;
 	i915_vkc_clear(x);
 
 	/* The draw state: the pass, the framebuffer, the pipeline, the vertices, mview's push constants. */
-	memset(&x->state, 0, sizeof(x->state));
+	kern_memset(&x->state, 0, sizeof(x->state));
 	x->state.pass = &x->pass;
 	x->state.framebuffer = &x->framebuffer;
 	x->state.pipeline = &x->pipeline;
 	x->state.vertex[0].buffer = &x->vertices;
 	x->state.vertex[0].offset = 0U;
-	memcpy(x->state.push, i915_vkc_mview_push, sizeof(i915_vkc_mview_push));
+	kern_memcpy(x->state.push, i915_vkc_mview_push, sizeof(i915_vkc_mview_push));
 
 	/* Draws; the draw runs to its end on the GPU before it returns. */
 	error = drv_i915_gfx_draw(x->render, &x->state, &x->args);

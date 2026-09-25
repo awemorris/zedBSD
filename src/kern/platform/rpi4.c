@@ -12,13 +12,14 @@
  * SD card as the single boot device.
  */
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
-#include <drivers/disklabel.h>
+#include <drivers/disklabel/disklabel.h>
 #include <kern/disk.h>
 #include <kern/partition.h>
 #include <kern/platform.h>
-#include <kern/rpi4/boot.h>
+#include <kern/boot.h>
+#include "drivers/platform/rpi4/rpi4-console.h"
 #include "drivers/platform/rpi4/rpi4-sdhci.h"
 
 /*
@@ -29,12 +30,12 @@
  */
 size_t
 kern_platform_init(
-	const struct boot_handoff *handoff,
-	struct boot_device *devices,
+	const struct kern_boot_handoff *handoff,
+	struct kern_boot_device *devices,
 	size_t capacity)
 {
 	const struct rpi4_boot_handoff *rpi4;
-	struct boot_device *device;
+	struct kern_boot_device *device;
 	unsigned i;
 
 	rpi4 = (const void *)handoff;
@@ -51,6 +52,9 @@ kern_platform_init(
 	    rpi4->extension_size < sizeof(*rpi4) - sizeof(rpi4->common) ||
 	    rpi4->sdhci_phys == 0)
 		return 0;
+
+	/* Publishes the serial console as /dev/console's output. */
+	drv_rpi4_console_init();
 
 	/* Selects the MBR partition scheme and starts the SD controller. */
 	partition_set_scheme(&drv_partition_scheme_mbr);
@@ -92,7 +96,7 @@ kern_platform_init(
  */
 void
 kern_platform_refresh_devices(
-	const struct boot_device *d,
+	const struct kern_boot_device *d,
 	size_t n)
 {
 	(void)d;
@@ -100,14 +104,19 @@ kern_platform_refresh_devices(
 }
 
 /*
- * Initializes platform input devices; the Pi 4 has none.
+ * Initializes platform input: the serial port feeds the console.
  */
 int
 kern_platform_input_init(
 	void)
 {
-	/* Reports success without any input device. */
-	return 0;
+	int function_result;
+
+	/* Starts reading the serial port. */
+	function_result = drv_rpi4_console_start_input();
+
+	/* Returns the computed result. */
+	return function_result;
 }
 
 /*
@@ -115,7 +124,7 @@ kern_platform_input_init(
  */
 struct disk *
 kern_platform_block_device(
-	const struct boot_device *d)
+	const struct kern_boot_device *d)
 {
 	struct disk *disk;
 

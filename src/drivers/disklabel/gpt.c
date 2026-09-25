@@ -9,12 +9,12 @@
  * Strict, read-only GUID Partition Table parser.
  */
 
-#include <drivers/disklabel.h>
+#include <drivers/disklabel/disklabel.h>
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <kern/kmem.h>
 #include <stdint.h>
-#include <string.h>
 #include "kern/klog.h"
 
 #define GPT_HEADER_MIN_SIZE 92U
@@ -343,7 +343,7 @@ read_table_bytes(
 		/* Checks the disk read result. */
 		if (disk_read(disk, lba, 1U, block) != 0)
 			return -EIO;
-		memcpy(output, block + within, amount);
+		kern_memcpy(output, block + within, amount);
 		output += amount;
 		offset += amount;
 		size -= amount;
@@ -453,7 +453,7 @@ gpt_name(
 	uint32_t value;
 	unsigned at = 0U, unit = 0U;
 
-	memset(output, 0, PARTITION_LABEL_MAX);
+	kern_memset(output, 0, PARTITION_LABEL_MAX);
 	/* Continue while the operation condition remains true. */
 	while (unit < 36U) {
 		first = (uint16_t)raw[unit * 2U] |
@@ -645,7 +645,7 @@ validate_entries(
 		/* Process each element required by the operation. */
 		for (prior = 0U; prior < active; prior++) {
 			/* Handles the memcmp condition. */
-			if (memcmp(records[prior].unique_guid, raw + 16U,
+			if (kern_memcmp(records[prior].unique_guid, raw + 16U,
 				   16U) == 0 ||
 			    (first <= records[prior].last &&
 			     records[prior].first <= last)) {
@@ -658,7 +658,7 @@ validate_entries(
 		if (error != 0)
 			break;
 		record = &records[active];
-		memcpy(record->unique_guid, raw + 16U, 16U);
+		kern_memcpy(record->unique_guid, raw + 16U, 16U);
 		record->first = first;
 		record->last = last;
 
@@ -667,7 +667,7 @@ validate_entries(
 			entry = &entries[active];
 
 			/* Describes the partition this entry covers. */
-			memset(entry, 0, sizeof(*entry));
+			kern_memset(entry, 0, sizeof(*entry));
 			entry->p_parent = disk;
 			entry->p_index = index;
 			entry->p_start_block = first;
@@ -678,7 +678,7 @@ validate_entries(
 
 			/* Handles the label condition. */
 			if (label[0] != '\0') {
-				memcpy(entry->p_label, label,
+				kern_memcpy(entry->p_label, label,
 				       sizeof(entry->p_label));
 				entry->p_flags |= PARTITION_HAS_LABEL;
 			}
@@ -711,14 +711,14 @@ read_header(
 	uint32_t expected_header_crc;
 	uint32_t header_size;
 
-	memset(copy, 0, sizeof(*copy));
+	kern_memset(copy, 0, sizeof(*copy));
 
 	/* Checks the disk read result. */
 	if (disk_read(disk, header_lba, 1U, block) != 0)
 		return -EIO;
 
 	/* Checks the get32 result. */
-	if (memcmp(block, "EFI PART", 8U) != 0 ||
+	if (kern_memcmp(block, "EFI PART", 8U) != 0 ||
 	    get32(block + 8U) != 0x00010000U) {
 		/* Failed. */
 		return -EINVAL;
@@ -734,7 +734,7 @@ read_header(
 		return -EINVAL;
 	}
 	expected_header_crc = get32(block + 16U);
-	memset(block + 16U, 0, 4U);
+	kern_memset(block + 16U, 0, 4U);
 
 	/* Checks the crc32 result. */
 	if (crc32(block, header_size) != expected_header_crc)
@@ -744,7 +744,7 @@ read_header(
 	copy->alternate_lba = get64(block + 32U);
 	copy->first_usable = get64(block + 40U);
 	copy->last_usable = get64(block + 48U);
-	memcpy(copy->disk_guid, block + 56U, sizeof(copy->disk_guid));
+	kern_memcpy(copy->disk_guid, block + 56U, sizeof(copy->disk_guid));
 	copy->table_lba = get64(block + 72U);
 	copy->entry_count = get32(block + 80U);
 	copy->entry_size = get32(block + 84U);
@@ -878,7 +878,7 @@ copy_headers_equal(
 			  left->entry_size == right->entry_size &&
 			  left->table_bytes == right->table_bytes &&
 			  left->active_count == right->active_count &&
-			  memcmp(left->disk_guid, right->disk_guid,
+			  kern_memcmp(left->disk_guid, right->disk_guid,
 				 sizeof(left->disk_guid)) == 0;
 
 	/* Returns the computed result. */
@@ -921,7 +921,7 @@ copy_tables_equal(
 		}
 
 		/* Handles the memcmp condition. */
-		if (memcmp(left_block, right_block, amount) != 0) {
+		if (kern_memcmp(left_block, right_block, amount) != 0) {
 			equal = 0;
 			goto out;
 		}
@@ -1057,7 +1057,7 @@ recover_backup_candidates(
 	*output_copy = copies[chosen];
 	/* Handles the chosen condition. */
 	if (chosen != 0U) {
-		memcpy(output_entries, candidate_entries[chosen],
+		kern_memcpy(output_entries, candidate_entries[chosen],
 		       capacity * sizeof(*output_entries));
 	}
 
@@ -1310,7 +1310,7 @@ selected_copy:
 			   disk->d_name, advertised_last_text, gpt_last_text);
 	}
 
-	memcpy(entries, selected_entries,
+	kern_memcpy(entries, selected_entries,
 	       selected->active_count * sizeof(*entries));
 
 	/* Handles the bounded condition. */

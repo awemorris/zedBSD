@@ -22,6 +22,33 @@
 /*
  * Runs the explicit UFS regular-file formatter.
  */
+/*
+ * Takes the journal size from --journal-size=MIB: whole MiB from 0 (no
+ * journal) to 1024.  Reports -1 for anything else.
+ */
+static int
+parse_journal_mib(
+	const char *text)
+{
+	uint64_t value;
+
+	/* Accepts decimal digits only, and at most 1024. */
+	if (*text == '\0')
+		return -1;
+	value = 0;
+	for (; *text != '\0'; text++) {
+		if (*text < '0' || *text > '9')
+			return -1;
+		value = value * 10U + (uint64_t)(*text - '0');
+		if (value > 1024U)
+			return -1;
+	}
+
+	/* Chooses the size the format records. */
+	ufs_format_set_journal_mib((int64_t)value);
+	return 0;
+}
+
 int
 main(
 	int argc,
@@ -54,9 +81,9 @@ main(
 	if (argc >= 4 && strcmp(argv[1], "-t") == 0 && strcmp(argv[2], "ufs") == 0 &&
 	    strcmp(argv[3], "--profile=native") == 0)
 		return mkfs_block_command(argc, argv);
-	if (argc < 4 || argc > 6 || strcmp(argv[1], "-t") != 0 ||
+	if (argc < 4 || argc > 7 || strcmp(argv[1], "-t") != 0 ||
 	    strcmp(argv[2], "ufs") != 0) {
-		fprintf(stderr, "usage: mkfs -t ufs [--profile=journal-snapshot] [--verify-pristine] FILE\n");
+		fprintf(stderr, "usage: mkfs -t ufs [--profile=journal-snapshot] [--verify-pristine] [--journal-size=MIB] FILE\n");
 		return 2;
 	}
 
@@ -68,6 +95,9 @@ main(
 			pristine = 1;
 		else if (strcmp(argv[index], "--profile=journal-snapshot") == 0 && !profile)
 			profile = 1;
+		else if (strncmp(argv[index], "--journal-size=", 15) == 0 &&
+		    parse_journal_mib(argv[index] + 15) == 0)
+			continue;
 		else {
 			fprintf(stderr, "mkfs: unsupported or repeated option\n");
 			return 2;

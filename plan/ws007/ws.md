@@ -1,43 +1,16 @@
+<!-- awesome-plan project=zedbsd record=ws007 -->
+
 # WS007: graphics and desktop
 
-<!-- traceability:start -->
-
-## Goal traceability
-
-- Primary Milestone: **MG006 — グラフィカルな操作環境を利用できる**
-- Related Milestones: なし
-- Objectives: O2
-- 貢献する成果: グラフィックスとデスクトップの操作を成立させる。
-- 上位定義: [MasterのObjectives / Milestone Goals](https://github.com/awemorris/zedBSD/issues/1)
-
-既存Phaseは本WSを親として上位成果に接続する。Primaryは分類と責任の所在であり、
-各PhaseがRelatedすべてを満たすという意味ではない。成果・検証・限界は各Phaseの
-現行記録を根拠とする。今回の対応付けは状態変更・未定義作業の追加・実行許可ではない。
-
-<!-- traceability:end -->
-
-
-Last updated: 2026-08-31
-
-WSID: `ws007`
-
-Status: active; X11 launch and the independently reproduced q039 PC-98 PIC
-cascade regression are repaired. q043 exhausts the maintained local PC-98
-display/input matrix without reproducing the newer user-observed failure, so
-`ws007-p004` is retained honestly as `uncleared`; the separate amd64 report
-also remains carried
-
-Parent: [master plan](../master.md)
-
-Last verified Phase: `ws007-p003` complete; `ws007-p004` uncleared in q043;
-`ws007-p002` carried forward
-
-Resume point: obtain the exact failing image, qemu-pc98 binary, full argv,
-interactive display backend, GUI grab/focus state, and observed pointer
-behavior. The maintained build exposes only `-display none`; its frozen
-headless cell passes exactly `(320,240) -> (420,290)`. Do not make a
-speculative second PIC or Xzed repair. The different amd64 p002 report remains
-carried pending its original reproducer.
+<!-- awesome-plan-current:start -->
+Status: incomplete
+Primary Milestone: MG006
+Related Milestones: なし
+Objectives: O2
+Parent: [Master](../master.md)
+Queue: なし
+Resume point: p004 の GUI 再現条件、amd64 の残件、統合試験。デスクトップの本体は WS035 が担う
+<!-- awesome-plan-current:end -->
 
 Shared tests: [WS007 test index](tests/README.md)
 

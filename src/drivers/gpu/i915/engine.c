@@ -21,12 +21,12 @@
 #include "submit.h"
 #include "sync.h"
 #include "workarounds.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 #include "intel/gt-regs.h"
 
@@ -71,7 +71,7 @@ drv_i915_engine_setup_common(
 		return EINVAL;
 
 	/* Starts from an empty engine state bound to its information. */
-	memset(ge, 0, sizeof(*ge));
+	kern_memset(ge, 0, sizeof(*ge));
 	ge->info = info;
 
 	/* Allocates the status page. */
@@ -393,7 +393,7 @@ drv_i915_engines_init(
 		return EINVAL;
 
 	/* Starts from an empty engine set. */
-	memset(es, 0, sizeof(*es));
+	kern_memset(es, 0, sizeof(*es));
 
 	/* Sets up each engine the GT reports, up to the engines the set can hold. */
 	error = 0;

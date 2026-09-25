@@ -1,0 +1,30 @@
+/bin/sh
+which: nosuchcmd: not found
+rc=1
+silent=1
+/bin/ls
+abs=0
+root@zedbsd:/root$ Û
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

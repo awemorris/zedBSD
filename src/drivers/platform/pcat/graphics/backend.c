@@ -12,15 +12,15 @@
 #include "drivers/platform/pcat/graphics/backend.h"
 #include "drivers/platform/pcat/graphics/font.h"
 #include "drivers/platform/pcat/graphics/text.h"
-#include "drivers/graphics/pcat.h"
+#include "drivers/platform/pcat/graphics/pcat.h"
 
-#include <drivers/pci.h>
-#include <string.h>
+#include <drivers/pci/pci.h>
+#include <kern/kcrt.h>
 #include "bootloader/include/amd64-handoff.h"
 #include "kern/klog.h"
 #include "kern/text-display.h"
 #include "kern/pmem.h"
-#include "errno.h"
+#include <uapi/errno.h>
 #include "kern/platform.h"
 
 #define WIDTH 640U

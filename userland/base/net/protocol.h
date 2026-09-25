@@ -71,8 +71,35 @@ enum networkd_opcode {
 	 * heard.  A caller that wants to know the outcome asks SHOW.
 	 */
 	NETWORKD_OP_LAN_ENABLE = 48,
-	NETWORKD_OP_LAN_DISABLE = 49
+	NETWORKD_OP_LAN_DISABLE = 49,
+
+	/*
+	 * Watching the network instead of asking about it.
+	 *
+	 * SUBSCRIBE does not end its connection.  The daemon answers it once
+	 * with the state as it stands, and then sends the same answer again
+	 * whenever that state changes, until the watcher closes.  A taskbar
+	 * that would otherwise ask SHOW on a timer reads this instead: it
+	 * shows the change when it happens, and nothing is spent while
+	 * nothing happens.
+	 *
+	 * Every frame on a watch carries the id of the SUBSCRIBE that opened
+	 * it.  The protocol has no id zero -- the header encoder refuses it --
+	 * and a watch connection carries nothing but that one subscription,
+	 * so reusing its id cannot be mistaken for the answer to anything else.
+	 */
+	NETWORKD_OP_SUBSCRIBE = 64
 };
+
+/*
+ * How many watchers the daemon keeps.
+ *
+ * The daemon is the only thing that can configure the network, so a watcher
+ * is a program the operator is running, not a connection from anywhere.
+ * A small number is enough, and a fixed one means a watcher cannot make the
+ * daemon allocate.
+ */
+#define NETWORKD_SUBSCRIBER_MAX		8U
 
 enum networkd_field_type {
 	NETWORKD_FIELD_STATUS = 1,

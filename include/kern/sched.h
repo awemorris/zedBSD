@@ -13,6 +13,7 @@
 #define KERN_KERN_SCHED_H
 
 #include <hal/hal.h>
+#include <kern/clock.h>
 #include <stdint.h>
 
 struct thread;
@@ -22,12 +23,22 @@ struct spinlock;
 #define SCHED_PRIOR_HIGH	0
 #define SCHED_PRIOR_LOW		15
 #define SCHED_PRIORITY_DEFAULT	8
-#define SCHED_QUANTUM_TICKS	5U
+/*
+ * The time a thread runs before another of its priority gets a turn.  It
+ * is set in milliseconds and counted in ticks of this platform's timer,
+ * at least one.
+ */
+#define SCHED_QUANTUM_MS	10U
+#define SCHED_QUANTUM_TICKS						\
+	((uint32_t)(KERN_MS_TO_TICKS(SCHED_QUANTUM_MS) != 0U ?		\
+	    KERN_MS_TO_TICKS(SCHED_QUANTUM_MS) : 1U))
 
 enum sched_queue_kind {
 	SCHED_QUEUE_NONE = 0,
 	SCHED_QUEUE_RUN,
 	SCHED_QUEUE_SLEEP,
+	/* Runnable, woken to run before the thread it found running. */
+	SCHED_QUEUE_WOKEN,
 };
 
 struct sched {
@@ -40,6 +51,8 @@ struct sched {
 	unsigned woken_same_cpu;
 #endif
 	unsigned queue_kind;
+	/* The scheduler tick at which the thread last joined a run queue. */
+	uint64_t queued_tick;
 	hal_cpu_id_t cpu;
 	hal_cpu_id_t last_cpu;
 	unsigned need_migrate;
@@ -90,6 +103,14 @@ sched_switch(void);
 
 void
 sched_yield(void);
+
+/*
+ * Switches to a thread whose wakeup asked to run before the current one,
+ * if any did.  Called where the current thread may give up the CPU, such
+ * as on its way back to user mode.
+ */
+void
+sched_preempt_point(void);
 
 /*
  * Disable/enable preemption on the current CPU (nesting).  While disabled the

@@ -1,6 +1,6 @@
 #include <hal/hal.h>
 #include "../bsp.h"
-#include <kern/rpi4/boot.h>
+#include <kern/boot.h>
 
 static struct rpi4_fdt_info boot_info;
 static uintptr_t boot_fdt;

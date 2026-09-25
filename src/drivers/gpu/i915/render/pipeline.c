@@ -20,16 +20,16 @@
 #include "internal.h"
 #include "object.h"
 #include "reply.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 #include <kern/kmem.h>
 
-#include <vulkan/vulkan_core.h>
+#include <libc/vulkan/vulkan_core.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "vulkan-codec.inc"
 
@@ -68,7 +68,7 @@ drv_i915_gfx_create_pipeline_layout(
 	uint32_t *layout;
 
 	/* Decodes the create info behind the device and its presence marker. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	i915_vkc_dec_VkPipelineLayoutCreateInfo(reader, &session->arena, &info);
@@ -107,7 +107,7 @@ drv_i915_gfx_create_shader(
 	uint32_t words;
 
 	/* Decodes the create info behind the device and its presence marker. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	i915_vkc_dec_VkShaderModuleCreateInfo(reader, &session->arena, &info);
@@ -135,7 +135,7 @@ drv_i915_gfx_create_shader(
 	if (shader != NULL) {
 		shader->words = (uint32_t *)(shader + 1);
 		shader->word_count = words;
-		memcpy(shader->words, info.pCode, (size_t)words * 4U);
+		kern_memcpy(shader->words, info.pCode, (size_t)words * 4U);
 	}
 
 	/* Publishes the module and answers; a failed allocation is reported there. */
@@ -180,7 +180,7 @@ drv_i915_gfx_create_pipelines(
 		return EINVAL;
 
 	/* Allocates and decodes each pipeline, up to the first failure. */
-	memset(pipelines, 0, sizeof(pipelines));
+	kern_memset(pipelines, 0, sizeof(pipelines));
 	error = 0;
 	for (index = 0U; index < count; index++) {
 		pipelines[index] = kern_calloc(1U, sizeof(*pipelines[index]));
@@ -333,7 +333,7 @@ i915_gfx_decode_pipeline(
 	/* Decodes the input assembly state, which gives the topology. */
 	present = drv_i915_wire_read_u64(reader);
 	if (present != 0U) {
-		memset(&assembly, 0, sizeof(assembly));
+		kern_memset(&assembly, 0, sizeof(assembly));
 		i915_vkc_dec_VkPipelineInputAssemblyStateCreateInfo(reader, &session->arena, &assembly);
 		pipeline->topology = assembly.topology;
 	}
@@ -341,7 +341,7 @@ i915_gfx_decode_pipeline(
 	/* Decodes the tessellation state; nothing of it is used. */
 	present = drv_i915_wire_read_u64(reader);
 	if (present != 0U) {
-		memset(&tessellation, 0, sizeof(tessellation));
+		kern_memset(&tessellation, 0, sizeof(tessellation));
 		i915_vkc_dec_VkPipelineTessellationStateCreateInfo(reader, &session->arena, &tessellation);
 	}
 
@@ -355,7 +355,7 @@ i915_gfx_decode_pipeline(
 	/* Decodes the rasterization state, which gives the culling. */
 	present = drv_i915_wire_read_u64(reader);
 	if (present != 0U) {
-		memset(&raster, 0, sizeof(raster));
+		kern_memset(&raster, 0, sizeof(raster));
 		i915_vkc_dec_VkPipelineRasterizationStateCreateInfo(reader, &session->arena, &raster);
 		pipeline->cull_mode = raster.cullMode;
 		pipeline->front_face = raster.frontFace;
@@ -364,14 +364,14 @@ i915_gfx_decode_pipeline(
 	/* Decodes the multisample state; nothing of it is used. */
 	present = drv_i915_wire_read_u64(reader);
 	if (present != 0U) {
-		memset(&multisample, 0, sizeof(multisample));
+		kern_memset(&multisample, 0, sizeof(multisample));
 		i915_vkc_dec_VkPipelineMultisampleStateCreateInfo(reader, &session->arena, &multisample);
 	}
 
 	/* Decodes the depth and stencil state, which gives the depth test. */
 	present = drv_i915_wire_read_u64(reader);
 	if (present != 0U) {
-		memset(&depth, 0, sizeof(depth));
+		kern_memset(&depth, 0, sizeof(depth));
 		i915_vkc_dec_VkPipelineDepthStencilStateCreateInfo(reader, &session->arena, &depth);
 		pipeline->depth_test = depth.depthTestEnable;
 		pipeline->depth_write = depth.depthWriteEnable;
@@ -443,7 +443,7 @@ i915_gfx_decode_stages(
 
 	/* Decodes each stage and keeps the modules of the stages that run. */
 	for (index = 0U; index < stages; index++) {
-		memset(&stage, 0, sizeof(stage));
+		kern_memset(&stage, 0, sizeof(stage));
 		i915_vkc_dec_VkPipelineShaderStageCreateInfo(reader, &session->arena, &stage);
 		module_id = (uint64_t)(uintptr_t)stage.module;
 		shader = drv_i915_object_lookup(session->vk, I915_VK_OBJ_SHADER_MODULE, module_id);
@@ -473,7 +473,7 @@ i915_gfx_decode_vertex_input(
 	uint32_t index;
 
 	/* Decodes the record. */
-	memset(&vertex_input, 0, sizeof(vertex_input));
+	kern_memset(&vertex_input, 0, sizeof(vertex_input));
 	i915_vkc_dec_VkPipelineVertexInputStateCreateInfo(reader, &session->arena, &vertex_input);
 
 	/* Refuses more bindings or attributes than a pipeline holds. */
@@ -526,7 +526,7 @@ i915_gfx_decode_viewport(
 	VkPipelineViewportStateCreateInfo viewport;
 
 	/* Decodes the record. */
-	memset(&viewport, 0, sizeof(viewport));
+	kern_memset(&viewport, 0, sizeof(viewport));
 	i915_vkc_dec_VkPipelineViewportStateCreateInfo(reader, &session->arena, &viewport);
 
 	/* A record that did not decode keeps nothing. */
@@ -569,7 +569,7 @@ i915_gfx_decode_blend(
 	const VkPipelineColorBlendAttachmentState *attachment;
 
 	/* Decodes the record. */
-	memset(&blend, 0, sizeof(blend));
+	kern_memset(&blend, 0, sizeof(blend));
 	i915_vkc_dec_VkPipelineColorBlendStateCreateInfo(reader, &session->arena, &blend);
 
 	/* A record that did not decode says nothing. */
@@ -626,7 +626,7 @@ i915_gfx_decode_dynamic(
 	uint32_t state;
 
 	/* Decodes the record. */
-	memset(&dynamic, 0, sizeof(dynamic));
+	kern_memset(&dynamic, 0, sizeof(dynamic));
 	i915_vkc_dec_VkPipelineDynamicStateCreateInfo(reader, &session->arena, &dynamic);
 
 	/* A record that did not decode says nothing. */
@@ -661,7 +661,7 @@ i915_gfx_float_bits(
 	const float *source)
 {
 	/* Copies the bits without converting them. */
-	memcpy(destination, source, sizeof(*destination));
+	kern_memcpy(destination, source, sizeof(*destination));
 }
 
 /* Frees the pipelines of a create that failed before any was prepared. */

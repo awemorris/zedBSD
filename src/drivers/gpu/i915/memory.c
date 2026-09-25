@@ -18,16 +18,16 @@
 #include "memory.h"
 #include "ggtt.h"
 #include "ppgtt.h"
+#include <kern/kcrt.h>
 
 #include <kern/device-io.h>
 #include <kern/klog.h>
 #include <kern/kmem.h>
 #include <kern/pmem.h>
-#include <drivers/dma.h>
+#include <drivers/generic/dma.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 /*
  * Prepares the GT memory over the mapped GGTT page table.
@@ -58,7 +58,7 @@ drv_i915_gt_mem_init(
 		return EINVAL;
 
 	/* Starts from an empty pool and empty windows. */
-	memset(gm, 0, sizeof(*gm));
+	kern_memset(gm, 0, sizeof(*gm));
 
 	/* Refuses a table that the window would fill down to its bottom. */
 	if (entries <= I915_GT_GGTT_PAGES)
@@ -236,7 +236,7 @@ drv_i915_gt_object_create(
 	}
 
 	/* Zeroes the pages the GPU may read before anything writes them. */
-	memset(object->cpu, 0, (size_t)bytes);
+	kern_memset(object->cpu, 0, (size_t)bytes);
 
 	/* Publishes the object as live and unbound. */
 	object->bytes = bytes;
@@ -456,7 +456,7 @@ drv_i915_gem_create(
 	}
 
 	/* Zeroes the run so previous owners' data stays out of a new resource. */
-	memset(object->address, 0, (size_t)rounded);
+	kern_memset(object->address, 0, (size_t)rounded);
 	object->bytes = rounded;
 	object->pages = (unsigned)(rounded / I915_PAGE_BYTES);
 
@@ -634,7 +634,7 @@ drv_i915_gem_read(
 	/* GPU writes are visible through the LLC; the barrier orders against later reads. */
 	kern_io_read_barrier();
 	source = object->address;
-	memcpy(buffer, source + offset, bytes);
+	kern_memcpy(buffer, source + offset, bytes);
 
 	/* Succeeded: the caller's buffer holds a snapshot of the object. */
 	return 0;
@@ -662,7 +662,7 @@ drv_i915_gem_write(
 
 	/* The barrier publishes the bytes before a later submission can consume them. */
 	destination = object->address;
-	memcpy(destination + offset, buffer, bytes);
+	kern_memcpy(destination + offset, buffer, bytes);
 	kern_io_write_barrier();
 
 	/* Succeeded: the GPU sees the new contents on its next access. */

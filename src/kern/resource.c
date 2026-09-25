@@ -27,13 +27,13 @@
 #include "kern/net/net-device.h"
 #include "kern/net/packet-buf.h"
 #include "kern/net/socket.h"
-#include <string.h>
 #include "kern/resource-limit.h"
 #include "kern/cred.h"
 #include "kern/clock.h"
 #include "kern/exec.h"
 #include "kern/signal.h"
-#include <errno.h>
+#include <uapi/errno.h>
+#include <kern/kcrt.h>
 
 static uint64_t resource_cap(int resource);
 
@@ -56,7 +56,7 @@ kern_resource_snapshot(
 		return;
 
 	/* Counts the process, file, filesystem, and memory objects. */
-	memset(out, 0, sizeof(*out));
+	kern_memset(out, 0, sizeof(*out));
 	process_resource_count(&out->process, &out->thread);
 	out->filedesc = filedesc_count();
 	out->file = file_count();
@@ -99,7 +99,7 @@ kern_resource_equal(
 		return 0;
 
 	/* Compares every count. */
-	if (memcmp(a, b, sizeof(*a)) != 0)
+	if (kern_memcmp(a, b, sizeof(*a)) != 0)
 		return 0;
 
 	/* Reports identical snapshots. */
@@ -120,7 +120,7 @@ resource_limits_default(
 		return;
 
 	/* Starts every limit at its default. */
-	memset(limits, 0, sizeof(*limits));
+	kern_memset(limits, 0, sizeof(*limits));
 	address_cap = vmspace_address_cap();
 	limits->values[RLIMIT_NOFILE].current = KERN_OPEN_MAX;
 	limits->values[RLIMIT_NOFILE].maximum = KERN_OPEN_MAX;

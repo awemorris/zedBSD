@@ -20,6 +20,7 @@
 #define UFS_FORMAT_MAX_BYTES UINT64_C(2147482624)
 
 int ufs_format_validate_size(uint64_t bytes);
+void ufs_format_set_journal_mib(int64_t mib);
 int ufs_format_write(int fd, uint64_t bytes);
 int ufs_format_verify(int fd, uint64_t bytes);
 int ufs_format_pristine(int fd, uint64_t bytes);

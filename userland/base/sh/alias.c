@@ -8,416 +8,254 @@
  */
 
 /*
- * Implements the zedBSD userland alias component.
+ * The alias table.  The parser expands an alias by reading its text as
+ * input (see parser.c); this file only keeps the names and texts.
  */
 
 #include "userland/base/sh/alias.h"
+#include "userland/base/sh/shell.h"
 
-#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-struct shell_alias {
-	struct shell_alias *next;
+/*
+ * One alias: a name and the text that replaces it.
+ *
+ * Both strings belong to the entry, which lives until unalias removes it or
+ * an alias of the same name replaces its text.
+ */
+struct alias {
+	struct alias *next;
 	char *name;
 	char *value;
 };
 
-static struct shell_alias *aliases;
+/*
+ * The aliases, newest first.
+ *
+ * Only the alias and unalias builtins change the list; the parser reads it
+ * when a word stands where a command name may.  The parser copies the text
+ * it reads, so an alias may be replaced while its text is being read.
+ */
+static struct alias *aliases;
 
-static struct shell_alias *find_alias(const char *name);
+static struct alias *find_alias(const char *name);
 static int valid_name(const char *name);
-static char *copy_string(const char *source);
-static int assignment_word(const char *text);
-static int token_unquoted(const struct sh_token *token);
-static int splice_alias(struct sh_token_list *list, size_t position, const char *value, const char **error_text);
+static int compare_aliases(const void *left, const void *right);
 
 /*
- * Implements the sh alias get operation.
+ * Returns an alias's text, or NULL.
  */
 const char *
 sh_alias_get(
 	const char *name)
 {
-	struct shell_alias *item;
+	struct alias *alias;
 
-	item = find_alias(name);
+	/* Looks the name up; a name with no alias has no text. */
+	alias = find_alias(name);
+	if (alias == NULL)
+		return NULL;
 
-	/* Returns the computed result. */
-	return item == NULL ? NULL : item->value;
+	/* Succeeded: the text. */
+	return alias->value;
 }
 
 /*
- * Implements the sh alias set operation.
+ * Defines an alias, replacing one of the same name.
  */
 int
 sh_alias_set(
 	const char *name,
 	const char *value)
 {
-	struct shell_alias *item;
-	char *copy;
+	struct alias *alias;
+	int valid;
 
-	/* Handles a failed valid name operation. */
-	if (!valid_name(name)) {
-		errno = EINVAL;
-
-		/* Reports operation failure. */
+	/* Refuses a name holding characters the parser would split at. */
+	valid = valid_name(name);
+	if (!valid)
 		return -1;
+
+	/* Finds the alias of that name, or makes one at the head. */
+	alias = find_alias(name);
+	if (alias == NULL) {
+		alias = sh_malloc(sizeof(*alias));
+		alias->name = sh_strdup(name);
+		alias->value = NULL;
+		alias->next = aliases;
+		aliases = alias;
 	}
-	copy = copy_string(value);
 
-	/* Handles the copy availability. */
-	if (copy == NULL)
-		return -1;
-	item = find_alias(name);
+	/* Replaces its text. */
+	free(alias->value);
+	alias->value = sh_strdup(value);
 
-	/* Handles the item availability. */
-	if (item == NULL) {
-		item = calloc(1, sizeof(*item));
-
-		/* Handles the item availability. */
-		if (item == NULL) {
-			free(copy);
-
-			/* Reports operation failure. */
-			return -1;
-		}
-		item->name = copy_string(name);
-
-		/* Handles the name availability. */
-		if (item->name == NULL) {
-			free(copy);
-			free(item);
-
-			/* Reports operation failure. */
-			return -1;
-		}
-		item->next = aliases;
-		aliases = item;
-	}
-	free(item->value);
-	item->value = copy;
-
-	/* Reports successful completion. */
+	/* Succeeded: the alias holds the text. */
 	return 0;
 }
 
 /*
- * Implements the sh alias unset operation.
+ * Removes an alias.
  */
 int
 sh_alias_unset(
 	const char *name)
 {
-	struct shell_alias *item;
-	struct shell_alias **link;
+	struct alias **link;
+	struct alias *alias;
+	int compare;
 
-	/* Continue while the operation condition remains true. */
+	/* Finds the link that points at the alias of that name. */
 	link = &aliases;
 	while (*link != NULL) {
-		item = *link;
-
-		/* Selects the matching value. */
-		if (strcmp(item->name, name) != 0) {
-			link = &item->next;
-			continue;
-		}
-		*link = item->next;
-		free(item->name);
-		free(item->value);
-		free(item);
-
-		/* Reports successful completion. */
-		return 0;
+		compare = strcmp((*link)->name, name);
+		if (compare == 0)
+			break;
+		link = &(*link)->next;
 	}
-	errno = ENOENT;
 
-	/* Reports operation failure. */
-	return -1;
+	/* Reports a name that has no alias. */
+	alias = *link;
+	if (alias == NULL)
+		return -1;
+
+	/* Unlinks and frees it. */
+	*link = alias->next;
+	free(alias->name);
+	free(alias->value);
+	free(alias);
+
+	/* Succeeded: the name has no alias now. */
+	return 0;
 }
 
 /*
- * Implements the sh alias clear operation.
+ * Removes every alias.
  */
 void
 sh_alias_clear(
 	void)
 {
-	struct shell_alias *next;
+	struct alias *alias;
 
-	/* Continue while the operation condition remains true. */
+	/* Frees the list from its head. */
 	while (aliases != NULL) {
-		next = aliases->next;
-		free(aliases->name);
-		free(aliases->value);
-		free(aliases);
-		aliases = next;
+		alias = aliases;
+		aliases = alias->next;
+		free(alias->name);
+		free(alias->value);
+		free(alias);
 	}
 }
 
 /*
- * Implements the sh alias print operation.
+ * Prints one alias, or every alias in the order of their names, as
+ * name='text' (as dash quotes it).
  */
 void
 sh_alias_print(
-	void)
+	const char *name)
 {
-	struct shell_alias *item;
+	struct alias **sorted;
+	struct alias *alias;
+	size_t count;
+	size_t index;
 
-	/* Process each linked entry. */
-	for (item = aliases; item != NULL; item = item->next)
-		printf("alias %s='%s'\n", item->name, item->value);
-}
-
-/*
- * Implements the sh alias expand operation.
- */
-int
-sh_alias_expand(
-	struct sh_token_list *list,
-	const char **error_text)
-{
-	const char *value;
-	struct sh_token *token;
-	size_t position;
-	int command_position;
-	int skip_redirection_word;
-	unsigned expansions;
-
-	/* Process each remaining element. */
-	position = 0;
-	command_position = 1;
-	skip_redirection_word = 0;
-	expansions = 0;
-	while (position + 1U < list->count) {
-		token = &list->tokens[position];
-
-		/* Handles the token condition. */
-		if (token->type == SH_TOKEN_INPUT ||
-		    token->type == SH_TOKEN_OUTPUT ||
-		    token->type == SH_TOKEN_APPEND) {
-			skip_redirection_word = 1;
-			position++;
-			continue;
-		}
-
-		/* Handles the token condition. */
-		if (token->type == SH_TOKEN_SEMI ||
-		    token->type == SH_TOKEN_AMP ||
-		    token->type == SH_TOKEN_AND_IF ||
-		    token->type == SH_TOKEN_OR_IF ||
-		    token->type == SH_TOKEN_PIPE) {
-			command_position = 1;
-			skip_redirection_word = 0;
-			position++;
-			continue;
-		}
-
-		/* Handles the token condition. */
-		if (token->type != SH_TOKEN_WORD) {
-			position++;
-			continue;
-		}
-
-		/* Handles the skip redirection word condition. */
-		if (skip_redirection_word) {
-			skip_redirection_word = 0;
-			position++;
-			continue;
-		}
-
-		/* Handles a failed assignment word operation. */
-		if (command_position && assignment_word(token->text)) {
-			position++;
-			continue;
-		}
-
-		/* Handles the command position condition. */
-		if (command_position && token_unquoted(token)) {
-			value = sh_alias_get(token->text);
-
-			/* Handles the value availability. */
-			if (value != NULL) {
-				/* Handles the expansions condition. */
-				if (++expansions > 32U) {
-					*error_text =
-					    "recursive alias expansion";
-
-					/* Reports successful completion. */
-					return 0;
-				}
-
-				/* Handles an operation failure. */
-				if (!splice_alias(list, position, value,
-						  error_text))
-
-					/* Reports successful completion. */
-					return 0;
-				continue;
-			}
-		}
-		command_position = 0;
-		position++;
+	/* One alias, when a name is given and has one. */
+	if (name != NULL) {
+		alias = find_alias(name);
+		if (alias == NULL)
+			return;
+		printf("%s=", alias->name);
+		sh_print_quoted_always(alias->value);
+		putchar('\n');
+		return;
 	}
-	*error_text = NULL;
-	/* Reports operation failure. */
-	return 1;
+
+	/* Counts the aliases. */
+	count = 0;
+	for (alias = aliases; alias != NULL; alias = alias->next)
+		count++;
+
+	/* Collects them into an array. */
+	sorted = sh_malloc((count + 1U) * sizeof(*sorted));
+	count = 0;
+	for (alias = aliases; alias != NULL; alias = alias->next)
+		sorted[count++] = alias;
+
+	/* Sorts them by name. */
+	qsort(sorted, count, sizeof(*sorted), compare_aliases);
+
+	/* Prints each one. */
+	for (index = 0; index < count; index++) {
+		printf("%s=", sorted[index]->name);
+		sh_print_quoted_always(sorted[index]->value);
+		putchar('\n');
+	}
+
+	/* The sorted copy was only for the listing. */
+	free(sorted);
 }
 
-/* Supports the find alias operation. */
-static struct shell_alias *
+/* Finds an alias by name. */
+static struct alias *
 find_alias(
 	const char *name)
 {
-	struct shell_alias *item;
+	struct alias *alias;
+	int compare;
 
-	/* Process each linked entry. */
-	for (item = aliases; item != NULL; item = item->next) {
-		/* Selects the matching value. */
-		if (strcmp(item->name, name) == 0)
-			return item;
+	/* Walks the list for the name. */
+	for (alias = aliases; alias != NULL; alias = alias->next) {
+		compare = strcmp(alias->name, name);
+		if (compare == 0)
+			return alias;
 	}
 
-	/* Reports that no result is available. */
+	/* No alias has that name. */
 	return NULL;
 }
 
-/* Supports the valid name operation. */
+/* Reports whether a word may name an alias. */
 static int
 valid_name(
 	const char *name)
 {
-	/* Validates the current name. */
+	const char *cursor;
+	const char *special;
+
+	/* An empty name names nothing. */
 	if (*name == '\0')
 		return 0;
 
-	/* Continue while the operation condition remains true. */
-	while (*name != '\0') {
-		/* Validates the current name. */
-		if (*name == '/' || *name == '=' || *name == ' ' ||
-		    *name == '\t' || *name == ';' || *name == '|' ||
-		    *name == '&')
-			/* Reports successful completion. */
-			return 0;
-		name++;
-	}
-
-	/* Reports operation failure. */
-	return 1;
-}
-
-/* Supports the copy string operation. */
-static char *
-copy_string(
-	const char *source)
-{
-	size_t length;
-	char *copy;
-
-	length = strlen(source) + 1U;
-	copy = malloc(length);
-
-	/* Handles the copy availability. */
-	if (copy != NULL)
-		memcpy(copy, source, length);
-
-	/* Returns the computed result. */
-	return copy;
-}
-
-/* Supports the assignment word operation. */
-static int
-assignment_word(
-	const char *text)
-{
-	const char *cursor;
-
-	cursor = text;
-
-	/* Checks the current cursor position. */
-	if (!((*cursor >= 'A' && *cursor <= 'Z') ||
-	      (*cursor >= 'a' && *cursor <= 'z') || *cursor == '_'))
-
-		/* Reports successful completion. */
-		return 0;
-
-	/* Continue while the operation condition remains true. */
-	while ((*++cursor >= 'A' && *cursor <= 'Z') ||
-	       (*cursor >= 'a' && *cursor <= 'z') || *cursor == '_' ||
-	       (*cursor >= '0' && *cursor <= '9'))
-		;
-
-	/* Returns the computed result. */
-	return *cursor == '=';
-}
-
-/* Supports the token unquoted operation. */
-static int
-token_unquoted(
-	const struct sh_token *token)
-{
-	size_t index;
-
-	/* Process each remaining element. */
-	for (index = 0; index < token->length; index++) {
-		/* Handles the token condition. */
-		if (token->quote[index] != SH_QUOTE_UNQUOTED)
+	/* Refuses any character the parser treats specially. */
+	for (cursor = name; *cursor != '\0'; cursor++) {
+		special = strchr(" \t\n;&|<>()$`\\\"'=", *cursor);
+		if (special != NULL)
 			return 0;
 	}
 
-	/* Reports operation failure. */
+	/* Succeeded: the word may name an alias. */
 	return 1;
 }
 
-/* Supports the splice alias operation. */
+/* Orders aliases by name, for qsort. */
 static int
-splice_alias(
-	struct sh_token_list *list,
-	size_t position,
-	const char *value,
-	const char **error_text)
+compare_aliases(
+	const void *left,
+	const void *right)
 {
-	struct sh_token_list replacement;
-	struct sh_token *larger;
-	size_t inserted, tail;
+	const struct alias *const *a;
+	const struct alias *const *b;
+	int order;
 
-	/* Handles an operation failure. */
-	if (!sh_lex(value, &replacement, error_text))
-		return 0;
-	inserted = replacement.count - 1U;
-	tail = list->count - position - 1U;
+	/* Compares the names bytewise. */
+	a = left;
+	b = right;
+	order = strcmp((*a)->name, (*b)->name);
 
-	/* Handles the inserted condition. */
-	if (inserted > (size_t)-1 - list->count + 1U) {
-		sh_tokens_free(&replacement);
-		*error_text = "alias expansion is too large";
-		/* Reports successful completion. */
-		return 0;
-	}
-	larger = realloc(list->tokens,
-			 (list->count - 1U + inserted) * sizeof(*larger));
-
-	/* Handles the larger availability. */
-	if (larger == NULL) {
-		sh_tokens_free(&replacement);
-		*error_text = "out of memory";
-		/* Reports successful completion. */
-		return 0;
-	}
-	list->tokens = larger;
-	free(list->tokens[position].text);
-	free(list->tokens[position].quote);
-	memmove(list->tokens + position + inserted,
-		list->tokens + position + 1U, tail * sizeof(*list->tokens));
-	memcpy(list->tokens + position, replacement.tokens,
-	       inserted * sizeof(*list->tokens));
-	list->count = list->count - 1U + inserted;
-	free(replacement.tokens[inserted].text);
-	free(replacement.tokens[inserted].quote);
-	free(replacement.tokens);
-
-	/* Reports operation failure. */
-	return 1;
+	/* Succeeded: their order. */
+	return order;
 }

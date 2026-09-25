@@ -9,7 +9,7 @@
  * Emit one fixed-size versioned parameter record into an assembly image.
  */
 
-#include "include/boot/parameter-handoff.h"
+#include "include/kern/boot.h"
 
 .macro KERN_EMIT_BOOT_PARAMETER_RECORD
 	.long KERN_BOOT_PARAMETER_RECORD_MAGIC

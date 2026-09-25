@@ -6,210 +6,108 @@
  */
 
 /*
- * Boot handoff and BIOS call
+ * Architecture-independent boot parameters and boot-source ownership.
+ *
+ * This header is the public boot-interface ledger.  Declarations are
+ * appended or changed only after a recorded architecture/API
+ * decision, not as an implementation-refactoring convenience.
  */
 
-#ifndef KERN_ABI_H
-#define KERN_ABI_H
+#ifndef KERN_BOOT_H
+#define KERN_BOOT_H
+
+#define KERN_HANDOFF_MAGIC				0x48323842U
+#define KERN_HANDOFF_VERSION_PC98			2U
+#define KERN_HANDOFF_VERSION_MULTIBOOT			3U
+#define KERN_HANDOFF_VERSION_SUN4U			4U
+#define KERN_HANDOFF_VERSION_X68K			5U
+
+#define KERN_BOOT_SOURCE_SLOT_COUNT			4U
+
+#define KERN_BOOT_PARAMETERS_TEXT_MAX			3071
+#define KERN_BOOT_PARAMETERS_STORAGE_SIZE		(KERN_BOOT_PARAMETERS_TEXT_MAX + 1)
+#define KERN_BOOT_PARAMETERS_DEFAULT_TEXT		KERN_IMAGE_BOOT_PARAMETERS_TEXT
+#define KERN_BOOT_PARAMETERS_INIT_PATH_MAX		255U
+#define KERN_BOOT_PARAMETERS_UNKNOWN_NAME_MAX		31U
+
+#define KERN_BOOT_PARAMETER_OFFSET_ABSENT		UINT16_MAX
+#define KERN_BOOT_PARAMETER_RECORD_MAGIC		0x31525042
+#define KERN_BOOT_PARAMETER_RECORD_VERSION		1
+#define KERN_BOOT_PARAMETER_RECORD_FLAG_TEXT		(1 << 0)
+#define KERN_BOOT_PARAMETER_RECORD_HEADER_SIZE		16
+#define KERN_BOOT_PARAMETER_RECORD_SIZE 		(KERN_BOOT_PARAMETER_RECORD_HEADER_SIZE + KERN_BOOT_PARAMETERS_STORAGE_SIZE)
+#define KERN_BOOT_PARAMETER_RECORD_MAGIC_OFFSET		0U
+#define KERN_BOOT_PARAMETER_RECORD_VERSION_OFFSET 	4U
+#define KERN_BOOT_PARAMETER_RECORD_SIZE_OFFSET		6U
+#define KERN_BOOT_PARAMETER_RECORD_FLAGS_OFFSET		8U
+#define KERN_BOOT_PARAMETER_RECORD_LENGTH_OFFSET	10U
+#define KERN_BOOT_PARAMETER_RECORD_RESERVED_OFFSET	12U
+#define KERN_BOOT_PARAMETER_RECORD_TEXT_OFFSET 		16U
+
+#define KERN_PARTITION_SCHEME_LBA			0U
+#define KERN_PARTITION_SCHEME_MBR			1U
+#define KERN_PARTITION_SCHEME_SUN			2U
+#define KERN_PARTITION_SCHEME_X68K			3U
+#define KERN_PARTITION_SCHEME_GPT			4U
+#define KERN_PARTITION_INDEX_UNKNOWN			0U
+
+#define KERN_BOOT_PARTITION_LBA_UNKNOWN			0xffffffffU
+
+#define KERN_IMAGE_BOOT_PARAMETERS_TEXT 		"overlay-root=boot0:rootfs.img overlay-data=boot0:data.img swap0=boot0:swapfile"
+
+#define KERN_MEMORY_AVAILABLE				1U
+#define KERN_MEMORY_RESERVED				2U
+
+#define KERN_BOOT_PROVENANCE_VERSION			1U
+#define KERN_BOOT_PROVENANCE_SIZE			88U
+#define KERN_BOOT_SOURCE_SELECTOR_SIZE			46U
+
+/* XXX: To be removed. */
+#define KERN_X68K_HANDOFF_MAGIC				0x58363848U /* "X68H" */
+#define KERN_X68K_HANDOFF_VERSION			1U
+#define KERN_X68K_MAX_MEMORY_REGIONS			4U
+
+/* XXX: To be removed. Use the common one. */
+#define KERN_PC98_HANDOFF_COMMON_SIZE			24
+#define KERN_PC98_PARAMETER_RECORD_OFFSET		KERN_PC98_HANDOFF_COMMON_SIZE
+#define KERN_PC98_PARAMETER_HANDOFF_SIZE		(KERN_PC98_HANDOFF_COMMON_SIZE + KERN_BOOT_PARAMETER_RECORD_SIZE)
+
+/* XXX: To be removed. Use the common one. */
+#define KERN_RPI4_HANDOFF_MAGIC	0x34495052U
+
+/* XXX: To be removed. Use the common one. */
+#define KERN_SUN4U_HANDOFF_MAGIC	0x53345548U /* "S4UH" */
+#define KERN_SUN4U_HANDOFF_VERSION	1U
+#define KERN_SUN4U_MAX_MEMORY_RANGES	16U
+#define KERN_SUN4U_BOOTPATH_SIZE	256U
+
+#ifndef __ASSEMBLER__
 
 #include <stddef.h>
 #include <stdint.h>
 
-#include <boot/parameters.h>
-#include <boot/provenance.h>
-
-int kern_boot_provenance_set(const struct boot_provenance *record);
-const char *kern_boot_source_selector(unsigned configuration);
-uint64_t kern_boot_config_matches(void);
+/* Declared by the name lookup; only pointers are used. */
+struct path;
 
 /*
- * Shared data contract between the real-mode Stage 1 and 32-bit Stage 2.
- */
-
-#define KERN_STAGE2_MAGIC	0x53383942U  /* "B98S" */
-#define KERN_HANDOFF_MAGIC	0x48323842U /* "B82H" */
-
-struct boot_stage2_header {
-	uint32_t magic;
-	uint16_t version;
-	uint16_t header_size;
-	uint32_t image_size;
-	uint32_t entry_offset;
-	uint32_t payload_checksum;
-} __attribute__((packed));
-
-struct boot_handoff {
-	uint32_t magic;
-	uint16_t version;
-	uint16_t size;
-	uint8_t device_count;
-	uint8_t boot_bios_id;
-	/*
-	 * Version 2 treats these bytes as a reserved zero word and selects the
-	 * boot partition by LBA.  Version 3 carries the partition scheme: legacy
-	 * loaders may carry a one-based MBR primary-partition index, while UEFI v5
-	 * carries the actual MBR/GPT style with an unknown index and resolves its
-	 * selected FAT by UUID.
-	 */
-	uint8_t boot_partition_scheme;
-	uint8_t boot_partition_index;
-	uint32_t device_table;
-	uint32_t bios_gateway;
-	uint32_t boot_partition_lba;
-} __attribute__((packed));
-
-#define KERN_HANDOFF_VERSION_PC98		2U
-#define KERN_HANDOFF_VERSION_MULTIBOOT	3U
-#define KERN_HANDOFF_VERSION_SUN4U		4U
-#define KERN_HANDOFF_VERSION_X68K		5U
-#define KERN_PARTITION_SCHEME_LBA		0U
-#define KERN_PARTITION_SCHEME_MBR		1U
-#define KERN_PARTITION_SCHEME_SUN		2U
-#define KERN_PARTITION_SCHEME_X68K		3U
-#define KERN_PARTITION_SCHEME_GPT		4U
-#define KERN_PARTITION_INDEX_UNKNOWN		0U
-#define KERN_BOOT_PARTITION_LBA_UNKNOWN	0xffffffffU
-
-#define KERN_X68K_HANDOFF_MAGIC		0x58363848U /* "X68H" */
-#define KERN_X68K_HANDOFF_VERSION		1U
-#define KERN_X68K_MAX_MEMORY_REGIONS		4U
-
-#define KERN_MEMORY_AVAILABLE			1U
-#define KERN_MEMORY_RESERVED			2U
-
-struct boot_memory_region32 {
-	uint32_t base;
-	uint32_t size;
-	uint32_t type;
-} __attribute__((packed));
-
-struct x68k_boot_handoff {
-	struct boot_handoff common;
-	uint32_t extension_magic;
-	uint16_t extension_version;
-	uint16_t extension_size;
-	uint32_t ram_bytes;
-	uint32_t kernel_phys_start;
-	uint32_t kernel_phys_end;
-	uint32_t loader_phys_start;
-	uint32_t loader_phys_end;
-	uint32_t memory_region_count;
-	struct boot_memory_region32
-		memory_regions[KERN_X68K_MAX_MEMORY_REGIONS];
-} __attribute__((packed));
-
-_Static_assert(
-	sizeof(struct x68k_boot_handoff) == 104,
-	"zedBSD X68k handoff ABI must remain 104 bytes");
-
-enum bios_service {
-	KERN_BIOS_DISK_READ = 1,
-	KERN_BIOS_KEY_READ = 2,
-	KERN_BIOS_KEY_POLL = 3,
-	KERN_BIOS_DISPLAY_RESET = 4,
-	KERN_BIOS_RETURN_MENU = 5,
-
-	/*
-	 * Service 6 was the retired IPLware bridge; the number stays unused.
-	 */
-	KERN_BIOS_REPROBE = 7,
-	KERN_BIOS_CHAIN_BOOT = 8,
-	KERN_BIOS_CLOCK_SECOND = 9,
-
-	/*
-	 * Probe exactly request.bios_id; request.status is a device-class hint.
-	 */
-	KERN_BIOS_PROBE_FIXED = 10,
-
-	/*
-	 * One 512-byte fixed-disk write through the low-memory BIOS bounce
-	 * area.
-	 */
-	KERN_BIOS_DISK_WRITE = 11,
-
-	/*
-	 * Stop displaying G-VRAM (INT 18h, AH=41h).
-	 */
-	KERN_BIOS_DISPLAY_STOP = 12,
-
-	/*
-	 * One byte of the BIOS real-time key state table; request.status
-	 * selects the scan-code group (0..15).
-	 */
-	KERN_BIOS_KEY_STATE = 13,
-};
-
-struct bios_request {
-	uint16_t service;
-	uint16_t status;
-	uint8_t bios_id;
-	uint8_t heads;
-	uint8_t sectors;
-	uint8_t reserved;
-	uint32_t lba;
-	uint32_t buffer;
-} __attribute__((packed));
-
-typedef uint32_t (
-	*bios_gateway_fn)(
-	struct bios_request *request);
-
-_Static_assert(
-	sizeof(struct boot_stage2_header) == 20,
-	"zedBSD Stage 2 header must remain 20 bytes");
-
-_Static_assert(
-	sizeof(struct boot_handoff) == 24,
-	"zedBSD handoff version 2 must remain 24 bytes");
-
-_Static_assert(
-	sizeof(struct bios_request) == 16,
-	"zedBSD BIOS request must remain 16 bytes");
-
-enum boot_device_class {
-	KERN_DEV_FDD = 1,
-	KERN_DEV_IDE = 2,
-	KERN_DEV_SCSI = 3,
-	KERN_DEV_SD = 4,
-};
-
-enum boot_device_flags {
-	KERN_DEV_PRESENT = 1U << 0,
-	KERN_DEV_HAS_GEOMETRY = 1U << 1,
-	KERN_DEV_BOOT_ORIGIN = 1U << 2,
-};
-
-/*
- * Firmware-discovered boot device descriptor shared with the kernel.
- */
-struct boot_device {
-	uint8_t device_class;
-	uint8_t display_index;
-	uint8_t bios_id;
-	uint8_t flags;
-	uint16_t sector_size;
-	uint16_t cylinders;
-	uint8_t heads;
-	uint8_t sectors;
-	uint8_t controller_location;
-	uint8_t reserved[5];
-} __attribute__((packed));
-
-_Static_assert(
-	sizeof(struct boot_device) == 16,
-	"zedBSD device descriptor ABI must remain 16 bytes");
-
-/*
- * Architecture-independent boot parameters and boot-source ownership.
+ * The FAT variants a boot source may be.
  *
- * This header is the public boot-interface ledger.  Declarations are appended
- * or changed only after a recorded architecture/API decision, not as an
- * implementation-refactoring convenience.
+ * This lives here, rather than with the file system in <kern/fat.h>, because
+ * the boot-source declarations below name it and the boot loader reads this
+ * header: an enumeration cannot be declared without its members, and the file
+ * system header carries the whole VFS with it.
  */
+enum bootfat_type {
+	KERN_FAT12 = 12,
+	KERN_FAT16 = 16,
+	KERN_FAT32 = 32,
+};
 
-#define KERN_BOOT_PARAMETERS_INIT_PATH_MAX 255U
-#define KERN_BOOT_PARAMETERS_UNKNOWN_NAME_MAX 31U
-#define KERN_BOOT_PARAMETER_OFFSET_ABSENT UINT16_MAX
+enum kern_boot_root_mode {
+	KERN_BOOT_ROOT_INVALID = 0,
+	KERN_BOOT_ROOT_NATIVE,
+	KERN_BOOT_ROOT_OVERLAY,
+};
 
 enum kern_boot_parameter_key {
 	KERN_BOOT_PARAMETER_BOOT0,
@@ -227,9 +125,46 @@ enum kern_boot_parameter_key {
 	KERN_BOOT_PARAMETER_COUNT
 };
 
+enum kern_boot_source_failure_stage {
+	KERN_BOOT_SOURCE_FAILURE_NONE = 0,
+	KERN_BOOT_SOURCE_FAILURE_SELECTOR,
+	KERN_BOOT_SOURCE_FAILURE_RESOLVE,
+	KERN_BOOT_SOURCE_FAILURE_PARTITION,
+	KERN_BOOT_SOURCE_FAILURE_DUPLICATE,
+	KERN_BOOT_SOURCE_FAILURE_FILESYSTEM,
+	KERN_BOOT_SOURCE_FAILURE_MOUNT,
+};
+
+enum kern_boot_device_class {
+	KERN_DEV_FDD = 1,
+	KERN_DEV_IDE = 2,
+	KERN_DEV_SCSI = 3,
+	KERN_DEV_SD = 4,
+};
+
+enum kern_boot_device_flags {
+	KERN_DEV_PRESENT = 1U << 0,
+	KERN_DEV_HAS_GEOMETRY = 1U << 1,
+	KERN_DEV_BOOT_ORIGIN = 1U << 2,
+};
+
+struct kern_boot_handoff {
+	uint32_t magic;
+	uint16_t version;
+	uint16_t size;
+	uint8_t device_count;
+	uint8_t boot_bios_id;
+	uint8_t boot_partition_scheme;
+	uint8_t boot_partition_index;
+	uint32_t device_table;
+	uint32_t bios_gateway;
+	uint32_t boot_partition_lba;
+} __attribute__((packed));
+
 /*
- * Values are offsets into storage so the structure remains self-contained
- * when a host fixture or a future handoff path copies it.
+ * Values are offsets into storage so the structure remains
+ * self-contained when a host fixture or a future handoff path copies
+ * it.
  */
 struct kern_boot_parameters {
 	char storage[KERN_BOOT_PARAMETERS_STORAGE_SIZE];
@@ -238,6 +173,133 @@ struct kern_boot_parameters {
 	unsigned unknown_name_truncated;
 	char unknown_name[KERN_BOOT_PARAMETERS_UNKNOWN_NAME_MAX + 1U];
 };
+
+struct kern_boot_parameter_record {
+	uint32_t magic;
+	uint16_t version;
+	uint16_t size;
+	uint16_t flags;
+	uint16_t length;
+	uint32_t reserved;
+	char text[KERN_BOOT_PARAMETERS_STORAGE_SIZE];
+} __attribute__((packed));
+
+/* Firmware-discovered boot device descriptor shared with the kernel. */
+struct kern_boot_device {
+	uint8_t device_class;
+	uint8_t display_index;
+	uint8_t bios_id;
+	uint8_t flags;
+	uint16_t sector_size;
+	uint16_t cylinders;
+	uint8_t heads;
+	uint8_t sectors;
+	uint8_t controller_location;
+	uint8_t reserved[5];
+} __attribute__((packed));
+
+struct kern_boot_source_reference {
+	unsigned slot;
+
+	/* Matches the stable kernel path limit without importing VFS internals. */
+	char relative[256U];
+};
+
+struct kern_boot_source_slot {
+	/* disk is borrowed from runtime_mount while runtime_mount is non-NULL. */
+	struct disk *disk;
+
+	/* Owned private mount until release or promotion. */
+	struct mount *mount;
+
+	/*
+	 * System-lifetime lookup anchor.  Normally identical to mount; after a
+	 * boot filesystem is promoted to the namespace root it remains a borrowed
+	 * pointer to that root mount while mount becomes NULL.
+	 */
+	struct mount *runtime_mount;
+	unsigned configured;
+	unsigned retained;
+	unsigned promoted;
+};
+
+struct kern_boot_source_context {
+	struct kern_boot_source_slot slot[KERN_BOOT_SOURCE_SLOT_COUNT];
+	unsigned failure_slot;
+	enum kern_boot_source_failure_stage failure_stage;
+	int cleanup_error;
+	/* Immutable once set.  Published contexts have system lifetime. */
+	unsigned runtime_published;
+};
+
+struct kern_boot_partition_identity {
+	uint32_t scheme;
+	uint32_t index;
+	uint64_t first_lba;
+	uint64_t block_count;
+	uint8_t signature[16];
+};
+
+struct kern_boot_provenance {
+	uint32_t version;
+	uint32_t config_matches;
+	struct kern_boot_partition_identity firmware;
+	struct kern_boot_partition_identity configuration;
+};
+
+/* XXX: To be removed. Use the common one. */
+struct kern_pc98_parameter_handoff {
+	struct kern_boot_handoff common;
+	struct kern_boot_parameter_record parameters;
+} __attribute__((packed));
+
+/* XXX: To be removed. Use the common one. */
+struct rpi4_boot_handoff {
+	struct kern_boot_handoff common;
+	uint32_t extension_magic;
+	uint16_t extension_version;
+	uint16_t extension_size;
+	uint64_t fdt_phys;
+	uint64_t framebuffer_phys;
+	uint64_t framebuffer_size;
+	uint64_t sdhci_phys;
+	uint32_t framebuffer_width;
+	uint32_t framebuffer_height;
+	uint32_t framebuffer_pitch;
+	uint32_t framebuffer_format;
+	uint32_t sdhci_irq;
+	uint32_t reserved[3];
+} __attribute__((packed));
+
+/* XXX: To be removed. Use the common one. */
+struct kern_sun4u_memory_range {
+	uint64_t base;
+	uint64_t size;
+} __attribute__((packed));
+
+/* XXX: To be removed. Use the common one. */
+struct kern_sun4u_boot_handoff {
+	struct kern_boot_handoff common;
+	uint32_t extension_magic;
+	uint16_t extension_version;
+	uint16_t extension_size;
+	uint64_t tick_frequency;
+	uint8_t installed_count;
+	uint8_t available_count;
+	uint8_t boot_channel;
+	uint8_t boot_drive;
+	struct kern_sun4u_memory_range installed[KERN_SUN4U_MAX_MEMORY_RANGES];
+	struct kern_sun4u_memory_range available[KERN_SUN4U_MAX_MEMORY_RANGES];
+	uint64_t pci_io_base;
+	uint32_t serial_io_offset;
+	uint16_t ide_vendor;
+	uint16_t ide_device;
+	uint16_t ide_primary_command;
+	uint16_t ide_primary_control;
+	uint16_t ide_secondary_command;
+	uint16_t ide_secondary_control;
+	char bootpath[KERN_SUN4U_BOOTPATH_SIZE];
+} __attribute__((packed));
 
 /*
  * Parse at most input_capacity readable bytes, including the terminating NUL.
@@ -303,7 +365,8 @@ kern_boot_parameters_initialize(
 	size_t input_capacity);
 
 const struct kern_boot_parameters *
-kern_boot_parameters_current(void);
+kern_boot_parameters_current(
+	void);
 
 /*
  * True only when the valid kernel-global instance was initialized from an
@@ -311,61 +374,20 @@ kern_boot_parameters_current(void);
  * (NULL, zero capacity) from a present but empty string.
  */
 int
-kern_boot_parameters_source_present(void);
+kern_boot_parameters_source_present(
+	void);
 
-#define KERN_BOOT_SOURCE_SLOT_COUNT 4U
+int
+kern_boot_provenance_set(
+	const struct kern_boot_provenance *record);
 
-struct disk;
-struct mount;
-struct path;
-enum bootfat_type;
+const char *
+kern_boot_source_selector(
+	unsigned configuration);
 
-struct kern_boot_source_reference {
-	unsigned slot;
-	/* Matches the stable kernel path limit without importing VFS internals. */
-	char relative[256U];
-};
-
-enum kern_boot_root_mode {
-	KERN_BOOT_ROOT_INVALID = 0,
-	KERN_BOOT_ROOT_NATIVE,
-	KERN_BOOT_ROOT_OVERLAY,
-};
-
-enum kern_boot_source_failure_stage {
-	KERN_BOOT_SOURCE_FAILURE_NONE = 0,
-	KERN_BOOT_SOURCE_FAILURE_SELECTOR,
-	KERN_BOOT_SOURCE_FAILURE_RESOLVE,
-	KERN_BOOT_SOURCE_FAILURE_PARTITION,
-	KERN_BOOT_SOURCE_FAILURE_DUPLICATE,
-	KERN_BOOT_SOURCE_FAILURE_FILESYSTEM,
-	KERN_BOOT_SOURCE_FAILURE_MOUNT,
-};
-
-struct kern_boot_source_slot {
-	/* disk is borrowed from runtime_mount while runtime_mount is non-NULL. */
-	struct disk *disk;
-	/* Owned private mount until release or promotion. */
-	struct mount *mount;
-	/*
-	 * System-lifetime lookup anchor.  Normally identical to mount; after a
-	 * boot filesystem is promoted to the namespace root it remains a borrowed
-	 * pointer to that root mount while mount becomes NULL.
-	 */
-	struct mount *runtime_mount;
-	unsigned configured;
-	unsigned retained;
-	unsigned promoted;
-};
-
-struct kern_boot_source_context {
-	struct kern_boot_source_slot slot[KERN_BOOT_SOURCE_SLOT_COUNT];
-	unsigned failure_slot;
-	enum kern_boot_source_failure_stage failure_stage;
-	int cleanup_error;
-	/* Immutable once set.  Published contexts have system lifetime. */
-	unsigned runtime_published;
-};
+uint64_t
+kern_boot_config_matches(
+	void);
 
 int
 kern_boot_source_selector_validate(
@@ -453,5 +475,7 @@ kern_boot_source_release_unused(
 int
 kern_boot_source_context_destroy(
 	struct kern_boot_source_context *context);
+
+#endif /* __ASSEMBLER__ */
 
 #endif

@@ -11,8 +11,9 @@
  */
 
 #include "internal.h"
+#include <kern/kcrt.h>
 
-#include <drivers/gpu.h>
+#include <drivers/gpu/gpu.h>
 #include <kern/clock.h>
 #include <kern/device-io.h>
 #include <kern/kmem.h>
@@ -21,9 +22,7 @@
 #include <kern/text-display.h>
 #include <kern/thread.h>
 
-#include <errno.h>
-#include <stdio.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 #define VENUS_DISPLAY_REFRESH		50000U
 #define VENUS_DISPLAY_MAX_REFRESH	(KERN_CLOCK_HZ * 1000U)
@@ -481,7 +480,7 @@ display_console_start(
 		return 0;
 
 	/* Optional text support cannot prevent graphics use on a platform without retained cells. */
-	memset(&snapshot, 0, sizeof(snapshot));
+	kern_memset(&snapshot, 0, sizeof(snapshot));
 	error = kern_text_snapshot(&snapshot);
 	if (error == ENOTSUP || error == ENODEV)
 		return 0;
@@ -550,7 +549,7 @@ display_console_update(
 		return 0;
 
 	/* A geometry query is based on retained cells, never a read of the abandoned firmware framebuffer. */
-	memset(&snapshot, 0, sizeof(snapshot));
+	kern_memset(&snapshot, 0, sizeof(snapshot));
 	error = kern_text_snapshot(&snapshot);
 	if (error != 0)
 		return error;
@@ -598,7 +597,7 @@ display_console_update(
 		return error;
 
 	/* The same private front/back transfer path preserves full-frame visibility and checked fences. */
-	memset(&request, 0, sizeof(request));
+	kern_memset(&request, 0, sizeof(request));
 	request.width = snapshot.width;
 	request.height = snapshot.height;
 	request.stride = snapshot.stride;
@@ -744,7 +743,7 @@ display_query(
 	request->refresh_millihz = output->preferred_refresh;
 	request->physical_width_mm = output->physical_width_mm;
 	request->physical_height_mm = output->physical_height_mm;
-	snprintf(request->name, sizeof(request->name), "Venus virtual display %u", request->index);
+	kern_snprintf(request->name, sizeof(request->name), "Venus virtual display %u", request->index);
 	mutex_unlock(&controller->mutex);
 
 	/* Succeeded: the caller has a bounded, generation-tagged display snapshot. */
@@ -1296,7 +1295,7 @@ display_release_output(
 
 	/* A completed disable ends the display's reference to its front image. */
 	if (output->front != NULL || output->shared_front != NULL) {
-		memset(command, 0, sizeof(command));
+		kern_memset(command, 0, sizeof(command));
 		drv_venus_header(command, 0x0103U, 0U);
 		drv_venus_store32(command + 40U, output->identifier - 1U);
 		error = display_fenced(controller, command, sizeof(command));
@@ -1380,7 +1379,7 @@ display_prepare(
 	}
 
 	/* Initializes host geometry before any transfer or virtual display update. */
-	memset(&geometry, 0, sizeof(geometry));
+	kern_memset(&geometry, 0, sizeof(geometry));
 	geometry.width = request->width;
 	geometry.height = request->height;
 	geometry.stride = request->width * 4U;
@@ -1434,14 +1433,14 @@ display_frame(
 	destination = output->back->backing.address;
 	pixels = (const uint8_t *)source->backing.address + (size_t)request->offset;
 	for (row = 0U; row < request->height; row++) {
-		memcpy(
+		kern_memcpy(
 			destination + (size_t)row * request->width * 4U,
 			pixels + (size_t)row * request->stride,
 			(size_t)request->width * 4U);
 	}
 
 	/* A transport receipt alone cannot prove the GL transfer has completed. */
-	memset(command, 0, sizeof(command));
+	kern_memset(command, 0, sizeof(command));
 	drv_venus_header(command, 0x0105U, 0U);
 	drv_venus_store32(command + 32U, request->width);
 	drv_venus_store32(command + 36U, request->height);
@@ -1457,7 +1456,7 @@ display_frame(
 		return error;
 
 	/* Geometry and the fully transferred image change in the same scanout command. */
-	memset(command, 0, 48U);
+	kern_memset(command, 0, 48U);
 	drv_venus_header(command, 0x0103U, 0U);
 	drv_venus_store32(command + 32U, request->width);
 	drv_venus_store32(command + 36U, request->height);
@@ -1488,7 +1487,7 @@ display_frame(
 	}
 
 	/* Completes the whole visible update before reporting a reusable source image. */
-	memset(command, 0, 48U);
+	kern_memset(command, 0, 48U);
 	drv_venus_header(command, 0x0104U, 0U);
 	drv_venus_store32(command + 32U, request->width);
 	drv_venus_store32(command + 36U, request->height);
@@ -1566,7 +1565,7 @@ display_blob_frame(
 		format = 1U;
 
 	/* The host imports the retained allocation directly into its GL display path. */
-	memset(command, 0, sizeof(command));
+	kern_memset(command, 0, sizeof(command));
 	drv_venus_header(command, 0x010dU, 0U);
 	drv_venus_store32(command + 32U, image->width);
 	drv_venus_store32(command + 36U, image->height);
@@ -1602,7 +1601,7 @@ display_blob_frame(
 		drv_venus_share_put_locked(controller, previous);
 
 	/* Publish damage for the GPU-resident image without a transfer-to-host command. */
-	memset(command, 0, 48U);
+	kern_memset(command, 0, 48U);
 	drv_venus_header(command, 0x0104U, 0U);
 	drv_venus_store32(command + 32U, image->width);
 	drv_venus_store32(command + 36U, image->height);
@@ -1805,7 +1804,7 @@ display_timings_refresh(
 		return 0;
 
 	/* Virtio addresses EDID by its zero-based native scanout identifier. */
-	memset(command, 0, sizeof(command));
+	kern_memset(command, 0, sizeof(command));
 	drv_venus_header(command, 0x010aU, 0U);
 	drv_venus_store32(command + 24U, output->identifier - 1U);
 	error = display_status(controller, command, sizeof(command), response, sizeof(response), 0x1104U);
@@ -1890,7 +1889,7 @@ display_edid_parse(
 		return EINVAL;
 
 	/* The EDID signature and version distinguish timings from unrelated device data. */
-	different = memcmp(edid, header, sizeof(header));
+	different = kern_memcmp(edid, header, sizeof(header));
 	if (different != 0 ||
 	    edid[18] != 1U ||
 	    edid[19] > 4U)

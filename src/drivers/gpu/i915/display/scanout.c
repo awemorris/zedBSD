@@ -37,20 +37,20 @@
 
 #include "internal.h"
 #include "scanout.h"
+#include <kern/kcrt.h>
 
 #include "../i915.h"
 #include "../ggtt.h"
 #include "../memory.h"
 #include "../ppgtt.h"
 
-#include <drivers/gpu.h>
-#include <drivers/gpu-scanout.h>
+#include <drivers/gpu/gpu.h>
+#include <drivers/gpu/gpu-scanout.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 /* The stride alignment of a linear surface. */
 #define I915_SCANOUT_STRIDE_ALIGN	64U
@@ -117,7 +117,7 @@ drv_i915_scanout_create(
 	if (so->state != I915_SCANOUT_NONE || so->obj != NULL)
 		return EBUSY;
 
-	memset(so, 0, sizeof(*so));
+	kern_memset(so, 0, sizeof(*so));
 
 	/* Refuses, before any allocation, every layout but the one supported. */
 	if (format != I915_FOURCC_XRGB8888 || modifier != I915_MOD_LINEAR)
@@ -147,7 +147,7 @@ drv_i915_scanout_create(
 	/* Allocates the backing; a failure leaves the storage empty. */
 	so->obj = drv_i915_gt_object_create(gm, so->size);
 	if (so->obj == NULL) {
-		memset(so, 0, sizeof(*so));
+		kern_memset(so, 0, sizeof(*so));
 		return ENOMEM;
 	}
 
@@ -335,7 +335,7 @@ drv_i915_scanout_destroy(
 
 	/* Frees the backing and empties the storage. */
 	drv_i915_gt_object_destroy(so->gm, so->obj);
-	memset(so, 0, sizeof(*so));
+	kern_memset(so, 0, sizeof(*so));
 
 	/* Succeeded: the storage is empty again. */
 	return 0;

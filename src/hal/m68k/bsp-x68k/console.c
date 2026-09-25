@@ -4,7 +4,7 @@
 #include <hal/hal.h>
 #include "mmio.h"
 
-#include <string.h>
+#include <kern/kcrt.h>
 
 #define X68K_TVRAM_PLANE_BYTES 0x00020000U
 #define X68K_TEXT_ROW_BYTES    128U

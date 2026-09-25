@@ -19,8 +19,8 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 #include <uapi/types.h>
-#include <sys/time.h>
-#include <sys/types.h>
+#include <uapi/time.h>
+#include <uapi/types.h>
 
 typedef uint16_t sa_family_t;
 typedef uint32_t socklen_t;

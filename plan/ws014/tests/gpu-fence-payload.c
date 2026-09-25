@@ -9,7 +9,7 @@
 #define main handle_fixture_main
 #include "handle-fd.c"
 #undef main
-#include <drivers/gpu-fence.h>
+#include <drivers/gpu/gpu-fence.h>
 
 /* Exercises generation, producer authority and readiness after every original fd owner disappears. */
 int

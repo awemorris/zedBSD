@@ -37,12 +37,12 @@
 #include "../../i915.h"
 #include "../../memory.h"
 #include "../../mmio.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 /* How long the HDMI-B picture and the two DUAL pictures stay up. */
 #ifndef I915_TEST_HDMIB_WINDOW_MS
@@ -175,7 +175,7 @@ drv_i915_test_display_hdmib(
 	}
 
 	/* A single-screen run on port B, pipe B: the PLL pool starts empty. */
-	memset(&params, 0, sizeof(params));
+	kern_memset(&params, 0, sizeof(params));
 	params.output_hdmi = 1;
 	params.port = I915_TEST_HDMI_PORT;
 	params.pipe = I915_TEST_HDMI_PIPE;
@@ -667,8 +667,8 @@ i915_test_dual_begin(
 
 	/* The run, and the screens cleared. */
 	k = drv_i915_test_lcd_start(display, NULL);
-	memset(&i915_test_dual_a, 0, sizeof(i915_test_dual_a));
-	memset(&i915_test_dual_b, 0, sizeof(i915_test_dual_b));
+	kern_memset(&i915_test_dual_a, 0, sizeof(i915_test_dual_a));
+	kern_memset(&i915_test_dual_b, 0, sizeof(i915_test_dual_b));
 
 	/* This run owns the device's PLL pool and DBUF state. */
 	drv_i915_lcd_dplls_reset(display->lcd_world);

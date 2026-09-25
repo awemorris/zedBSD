@@ -24,6 +24,7 @@
 #include "display-ktest.h"
 #include "lcd-gpu.h"
 #include "lcd-run.h"
+#include <kern/kcrt.h>
 
 #include "../execution/eu-test.h"
 #include "../execution/fhd-render.h"
@@ -43,13 +44,12 @@
 #include "../../ppgtt.h"
 #include "../../tlb.h"
 
-#include <drivers/dma.h>
+#include <drivers/generic/dma.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdint.h>
-#include <string.h>
 
 /* How many engines the invalidation is asked for: RCS0, BCS0, VCS0, VCS2 and VECS0. */
 #define I915_LCDG_KTEST_ENGINES		5U
@@ -433,13 +433,13 @@ i915_lcdg_ktest_setup(void)
 	unsigned index;
 
 	/* The register block reaches the model; no range needs forcewake. */
-	memset(&i915_lcdg_ktest_model, 0, sizeof(i915_lcdg_ktest_model));
+	kern_memset(&i915_lcdg_ktest_model, 0, sizeof(i915_lcdg_ktest_model));
 	drv_i915_mmio_init(&i915_lcdg_ktest_mmio, &i915_lcdg_ktest_ops, &i915_lcdg_ktest_model, NULL, 0U, NULL);
 	spin_init(&i915_lcdg_ktest_uncore_lock, LOCK_RANK_DEVICE, "lcdg-ktest-uncore");
 
 	/* Names each engine's class and instance; nothing else of an engine is used. */
-	memset(&i915_lcdg_ktest_engines, 0, sizeof(i915_lcdg_ktest_engines));
-	memset(i915_lcdg_ktest_engine_info, 0, sizeof(i915_lcdg_ktest_engine_info));
+	kern_memset(&i915_lcdg_ktest_engines, 0, sizeof(i915_lcdg_ktest_engines));
+	kern_memset(i915_lcdg_ktest_engine_info, 0, sizeof(i915_lcdg_ktest_engine_info));
 	for (index = 0U; index < I915_LCDG_KTEST_ENGINES; index++) {
 		i915_lcdg_ktest_engine_info[index].class = engine_class[index];
 		i915_lcdg_ktest_engine_info[index].instance = engine_instance[index];
@@ -448,7 +448,7 @@ i915_lcdg_ktest_setup(void)
 	i915_lcdg_ktest_engines.n = I915_LCDG_KTEST_ENGINES;
 
 	/* The timeout lines of the part name the model and the test. */
-	memset(&i915_lcdg_ktest_tlb, 0, sizeof(i915_lcdg_ktest_tlb));
+	kern_memset(&i915_lcdg_ktest_tlb, 0, sizeof(i915_lcdg_ktest_tlb));
 	i915_lcdg_ktest_tlb.backend = "MODEL";
 	i915_lcdg_ktest_tlb.test_id = "lcdg-ktest";
 }
@@ -642,7 +642,7 @@ i915_lcdg_ktest_map_draw(
 	vm = &i915_lcdg_ktest_vm;
 
 	/* Starts an empty draw into the target's usual address. */
-	memset(x, 0, sizeof(*x));
+	kern_memset(x, 0, sizeof(*x));
 	x->rt_va = I915_TEX_FHD_RT_VA;
 
 	/* Creates the state page, the batch and the texture. */
@@ -1023,7 +1023,7 @@ i915_lcdg_ktest_buffer(void)
 	so = &i915_lcdg_ktest_so;
 
 	/* An empty storage for a 64x64 buffer. */
-	memset(so, 0, sizeof(*so));
+	kern_memset(so, 0, sizeof(*so));
 	error = drv_i915_scanout_create(&i915_lcdg_ktest_gm, 64U, 64U, I915_FOURCC_XRGB8888, I915_MOD_LINEAR, so);
 	if (error != 0)
 		return error;

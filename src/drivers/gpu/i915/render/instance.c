@@ -21,12 +21,12 @@
 #include "instance.h"
 #include "codec.h"
 #include "object.h"
+#include <kern/kcrt.h>
 
 #include "../i915.h"
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "vulkan-codec.inc"
 
@@ -162,7 +162,7 @@ i915_instance_create(
 	int error;
 
 	/* Decodes the create info when it is present; nothing of it is kept. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	present = drv_i915_wire_read_u64(reader);
 	if (present != 0U)
 		i915_vkc_dec_VkInstanceCreateInfo(reader, &session->arena, &info);
@@ -266,7 +266,7 @@ i915_instance_properties(
 	properties->driverVersion = 1U;
 	properties->vendorID = 0x8086U;
 	properties->deviceType = VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
-	memcpy(properties->deviceName, name, sizeof(name));
+	kern_memcpy(properties->deviceName, name, sizeof(name));
 
 	/* Reports the PCI product, or zero for an executor without a device. */
 	if (session->vk->i915 != NULL) {
@@ -509,7 +509,7 @@ i915_instance_queue_families(
 		return EINVAL;
 
 	/* Describes one family of one queue: graphics, with the compute and transfer it implies, on RCS0. */
-	memset(&family, 0, sizeof(family));
+	kern_memset(&family, 0, sizeof(family));
 	family.queueFlags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT;
 	family.queueCount = 1U;
 	family.minImageTransferGranularity.width = 1U;
@@ -534,7 +534,7 @@ i915_instance_format_features(
 	VkFormatProperties *properties)
 {
 	/* A format not listed below has no feature. */
-	memset(properties, 0, sizeof(*properties));
+	kern_memset(properties, 0, sizeof(*properties));
 
 	/*
 	 * XXX: the three formats the executor lays out; nothing else is claimed.
@@ -663,7 +663,7 @@ i915_instance_image_format_properties(
 
 	/* Looks the format up and takes the features of the tiling asked about. */
 	i915_instance_format_features(format, &properties);
-	memset(&image, 0, sizeof(image));
+	kern_memset(&image, 0, sizeof(image));
 	features = properties.optimalTilingFeatures;
 	if (tiling == VK_IMAGE_TILING_LINEAR)
 		features = properties.linearTilingFeatures;
@@ -721,7 +721,7 @@ i915_instance_create_device(
 	int error;
 
 	/* Skips the physical device and decodes the create info when it is present; nothing of it is kept. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	(void)drv_i915_wire_read_u64(reader);
 	present = drv_i915_wire_read_u64(reader);
 	if (present != 0U)
@@ -844,5 +844,5 @@ i915_instance_set_float(
 	uint32_t bits)
 {
 	/* Stores the bits unchanged. */
-	memcpy(destination, &bits, sizeof(bits));
+	kern_memcpy(destination, &bits, sizeof(bits));
 }

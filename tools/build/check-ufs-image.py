@@ -94,9 +94,10 @@ class UFS:
         if index:
             backup=memoryview(self.data)[(self.cgstart(index)+self.sblk)*self.fsize:
                                          (self.cgstart(index)+self.sblk)*self.fsize+8192]
-            # Mounted UFS updates the primary clean byte and summary counters.
+            # Mounted UFS updates the primary clean byte and summary counters,
+            # and names its batched journal in spare words 1220..1247.
             # Backup geometry remains authoritative; only those live fields may differ.
-            mutable = {209, *range(1008, 1040)} if self.runtime else set()
+            mutable = {209, *range(1008, 1040), *range(1220, 1248)} if self.runtime else set()
             if len(backup) != 8192 or any(backup[offset] != self.sb[offset]
                     for offset in range(1376) if offset not in mutable):
                 raise ValueError(f'cylinder group {index}: stale backup superblock')

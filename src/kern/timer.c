@@ -17,6 +17,7 @@
  */
 
 #include "kern/process-timer.h"
+#include <kern/kcrt.h>
 
 #include "kern/clock.h"
 #include "kern/lock.h"
@@ -24,9 +25,8 @@
 #include "kern/signal.h"
 #include "kern/test-checkpoint.h"
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <limits.h>
-#include <string.h>
 
 #define PROCESS_TIMER_MAX 128U
 #define TIMER_SLOT_BITS 8U
@@ -75,7 +75,7 @@ void
 process_timer_init(
 	void)
 {
-	memset(process_timers, 0, sizeof(process_timers));
+	kern_memset(process_timers, 0, sizeof(process_timers));
 	spin_init(&process_timer_lock, LOCK_RANK_PROCESS_TREE, "process timers");
 }
 
@@ -106,7 +106,7 @@ process_timer_create(
 		return EINVAL;
 
 	/* Takes the requested event, defaulting to SIGALRM. */
-	memset(&event, 0, sizeof(event));
+	kern_memset(&event, 0, sizeof(event));
 	if (requested != NULL) {
 		event = *requested;
 	} else {
@@ -155,7 +155,7 @@ process_timer_create(
 	generation = process_timers[slot].generation + 1U;
 	if (generation == 0)
 		generation = 1;
-	memset(&process_timers[slot], 0, sizeof(process_timers[slot]));
+	kern_memset(&process_timers[slot], 0, sizeof(process_timers[slot]));
 	process_timers[slot].generation = generation;
 
 	/* Publishes the timer, which holds a reference on its owner. */
@@ -541,7 +541,7 @@ process_timer_tick(
 			notifications[count].owner = timer->owner;
 			process_ref(timer->owner);
 			notifications[count].signo = timer->event.sigev_signo;
-			memset(&notifications[count].info, 0,
+			kern_memset(&notifications[count].info, 0,
 			    sizeof(notifications[count].info));
 			notifications[count].info.code = SI_TIMER;
 			notifications[count].info.value =

@@ -55,10 +55,10 @@
  */
 
 #include "intel-ax211-bss.h"
+#include <kern/kcrt.h>
 
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #define AX211_BSS_FRAME_VERSION_MASK 0x0003U
 #define AX211_BSS_FRAME_TYPE_MASK 0x000cU
@@ -168,7 +168,7 @@ drv_intel_ax211_bss_decode(
 	if (!ax211_bss_address_valid(frame + AX211_BSS_BSSID_OFFSET))
 		return INTEL_AX211_BSS_MALFORMED;
 
-	memset(&ies, 0, sizeof(ies));
+	kern_memset(&ies, 0, sizeof(ies));
 
 	/* Checks the operation result. */
 	result = ax211_bss_ies_decode(
@@ -182,8 +182,8 @@ drv_intel_ax211_bss_decode(
 		return INTEL_AX211_BSS_MALFORMED;
 
 	/* Renders the frame and its receive context as one entry. */
-	memset(&decoded, 0, sizeof(decoded));
-	memcpy(decoded.bssid, frame + AX211_BSS_BSSID_OFFSET,
+	kern_memset(&decoded, 0, sizeof(decoded));
+	kern_memcpy(decoded.bssid, frame + AX211_BSS_BSSID_OFFSET,
 	       sizeof(decoded.bssid));
 	decoded.observation_generation = observation_generation;
 	decoded.frame_timestamp =
@@ -224,7 +224,7 @@ drv_intel_ax211_bss_cache_init(
 	/* Handles the cache availability. */
 	if (cache == NULL || hardware_epoch == 0U)
 		return INTEL_AX211_BSS_INVALID;
-	memset(cache, 0, sizeof(*cache));
+	kern_memset(cache, 0, sizeof(*cache));
 	cache->hardware_epoch = hardware_epoch;
 	cache->initialized = 1U;
 
@@ -259,7 +259,7 @@ drv_intel_ax211_bss_cache_observe(
 	for (index = 0U; index < INTEL_AX211_BSS_CACHE_LIMIT; index++) {
 		/* Handles the cache condition. */
 		if (cache->entry[index].valid != 0U &&
-		    memcmp(cache->entry[index].bssid, entry->bssid,
+		    kern_memcmp(cache->entry[index].bssid, entry->bssid,
 			   sizeof(entry->bssid)) == 0) {
 			/* Handles the entry condition. */
 			if (entry->observation_generation <
@@ -372,7 +372,7 @@ drv_intel_ax211_bss_cache_lookup(
 		/* Handles the cache condition. */
 		if (cache->entry[index].valid != 0U &&
 		    cache->entry[index].channel == channel &&
-		    memcmp(cache->entry[index].bssid, bssid,
+		    kern_memcmp(cache->entry[index].bssid, bssid,
 			   INTEL_AX211_BSS_ADDRESS_SIZE) == 0) {
 			/* Handles the cache condition. */
 			if (cache->entry[index].hardware_epoch !=
@@ -416,8 +416,8 @@ drv_intel_ax211_bss_assoc_metadata(
 	/* Handles the entry condition. */
 	if (entry->hardware_epoch != hardware_epoch)
 		return INTEL_AX211_BSS_STALE;
-	memset(&decoded, 0, sizeof(decoded));
-	memcpy(decoded.bssid, entry->bssid, sizeof(decoded.bssid));
+	kern_memset(&decoded, 0, sizeof(decoded));
+	kern_memcpy(decoded.bssid, entry->bssid, sizeof(decoded.bssid));
 	decoded.common_generation = connection_generation;
 	decoded.observation_generation = entry->observation_generation;
 	decoded.beacon_tsf = entry->frame_timestamp;
@@ -708,7 +708,7 @@ ax211_bss_entry_worse(
 		return left->last_seen_ticks < right->last_seen_ticks;
 
 	/* Computes the function result. */
-	error = memcmp(left->bssid, right->bssid,
+	error = kern_memcmp(left->bssid, right->bssid,
 				 INTEL_AX211_BSS_ADDRESS_SIZE) > 0;
 
 	/* Returns the computed result. */

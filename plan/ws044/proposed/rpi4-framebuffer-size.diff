@@ -1,0 +1,59 @@
+diff --git a/src/hal/arm64/bsp-rpi4/framebuffer.c b/src/hal/arm64/bsp-rpi4/framebuffer.c
+index f53ba726..c6aab5b4 100644
+--- a/src/hal/arm64/bsp-rpi4/framebuffer.c
++++ b/src/hal/arm64/bsp-rpi4/framebuffer.c
+@@ -5,6 +5,7 @@
+ #include "framebuffer.h"
+ #include "font.h"
+ 
++#define TAG_GET_PHYSICAL 0x00040003U
+ #define TAG_PHYSICAL 0x00048003U
+ #define TAG_VIRTUAL 0x00048004U
+ #define TAG_DEPTH 0x00048005U
+@@ -55,6 +56,9 @@ flush_rows(
+ 		start = (uintptr_t)(pixels + (size_t)(y + line) * pitch + (size_t)x * 4U);
+ 		hal_dcache_clean_range(start, (size_t)columns * 4U);
+ 	}
++
++	/* The display is outside the CPU's shareable domain: a full barrier. */
++	__asm__ volatile("dsb sy" ::: "memory");
+ }
+ 
+ /*
+@@ -115,10 +119,26 @@ void rpi4_framebuffer_cursor(unsigned row,unsigned column,int visible)
+ int rpi4_framebuffer_init(uintptr_t mailbox_phys)
+ {
+ 	unsigned i=0;
++	uint32_t want_width=640U,want_height=480U;
+ #define WORD(v) request[i++]=(v)
++	/*
++	 * The size the firmware set up for the display (config.txt's
++	 * framebuffer_width and framebuffer_height, or the mode's), so that the
++	 * framebuffer is scanned out as it is, without scaling; 640x480 when the
++	 * firmware reports none (QEMU).
++	 */
++	WORD(0);WORD(0);
++	WORD(TAG_GET_PHYSICAL);WORD(8);WORD(0);WORD(0);WORD(0);
++	WORD(0);
++	request[0]=i*4U;
++	if(rpi4_mailbox_property(mailbox_phys,request,request[0])==0&&
++	   request[5]>=640U&&request[6]>=400U&&request[5]<=4096U&&request[6]<=4096U){
++		want_width=request[5];want_height=request[6];
++	}
++	i=0;
+ 	WORD(0);WORD(0);
+-	WORD(TAG_PHYSICAL);WORD(8);WORD(8);WORD(640);WORD(480);
+-	WORD(TAG_VIRTUAL);WORD(8);WORD(8);WORD(640);WORD(480);
++	WORD(TAG_PHYSICAL);WORD(8);WORD(8);WORD(want_width);WORD(want_height);
++	WORD(TAG_VIRTUAL);WORD(8);WORD(8);WORD(want_width);WORD(want_height);
+ 	WORD(TAG_DEPTH);WORD(4);WORD(4);WORD(32);
+ 	WORD(TAG_ORDER);WORD(4);WORD(4);WORD(1);
+ 	WORD(TAG_ALLOCATE);WORD(8);WORD(8);WORD(4096);WORD(0);
+@@ -134,6 +154,7 @@ int rpi4_framebuffer_init(uintptr_t mailbox_phys)
+ 	rpi4_boot_set_framebuffer(pixels_phys,pixels_size,width,height,pitch,order);
+ 	for(unsigned y=0;y<height;y++)for(unsigned x=0;x<width;x++)put_pixel(x,y,0);
+ 	hal_dcache_clean_range((uintptr_t)pixels,(size_t)pixels_size);
++	__asm__ volatile("dsb sy" ::: "memory");
+ 	return 0;
+ #undef WORD
+ }

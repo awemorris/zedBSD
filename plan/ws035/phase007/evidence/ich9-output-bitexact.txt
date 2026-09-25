@@ -1,0 +1,9 @@
+=== ich9-output-bitexact
+serial: logged in
+hda: codec 0, 1 output pin(s), input no, volume no, 2 format(s), MSI
+AUDIOTEST INFO format=1 channels=2 rate=48000 fragment=4096 count=8 frame=4 volume=100/100/0
+AUDIOTEST PLAY frames=96000 transferred=393312 underruns=0 ms=2008
+guest-status=0
+wav: format=1 channels=2 rate=48000 bits=16 frames=96624
+pattern: 96000 frames bit-exact from frame 0; leading non-silent samples=0
+check-status=0

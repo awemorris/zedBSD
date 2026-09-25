@@ -9,12 +9,12 @@
  * Common dp8390 Ethernet driver
  */
 
-#include "drivers/dp8390.h"
+#include "drivers/ethernet/dp8390.h"
 #include "kern/net/net-device.h"
 #include "kern/net/packet-buf.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 /* DP8390 page-zero registers. */
 #define DP_CR 0x00U
@@ -325,8 +325,8 @@ dp_start_transmit(
 
 	/* Handles the packet condition. */
 	if (packet->length < DP_MIN_FRAME) {
-		memset(frame, 0, sizeof(frame));
-		memcpy(frame, packet->data, packet->length);
+		kern_memset(frame, 0, sizeof(frame));
+		kern_memcpy(frame, packet->data, packet->length);
 		error = dma_write(dp, (uint16_t)dp->tx_start_page << 8, frame,
 				  sizeof(frame));
 	} else {

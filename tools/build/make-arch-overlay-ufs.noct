@@ -5,19 +5,56 @@ func splitSpec(spec, option) {
     var at=String.indexOf(spec,"="); if(at<=0){zbFail(option+" requires DESTINATION=VALUE");}
     return [String.substring(spec,0,at),String.substring(spec,at+1,-1)];
 }
+// Without --size-mib the image is sized from what was actually staged, so
+// that adding a package cannot silently overflow a fixed capacity.  On top of
+// the file bytes UFS needs inodes, cylinder-group metadata and fragment
+// rounding, and nothing here rewards being frugal: the measured size is
+// doubled and given a fixed margin.
+func measureMiB(root, output) {
+    var report=output+".size.tmp";
+    if(System.shell("du -sk "+zbShellQuote(root)+" > "+zbShellQuote(report))!=0){zbFail("cannot measure the staging root");}
+    var measured=FileUtil.readText(report);
+    System.shell("rm -f "+zbShellQuote(report));
+    var stop=String.indexOf(measured,"\t");
+    if(stop<=0){zbFail("cannot read the staging root size");}
+    return (zbParseNumber(String.substring(measured,0,stop))*2)/1024+32;
+}
+
 func main(args){
-    var profile="";var output="";var backend="";var sizeMiB=0;var files=[];var modes=[];var force=false;var i=0;
+    var profile="";var output="";var backend="";var sizeMiB=0;var minInodes=0;var files=[];var modes=[];var force=false;var tree="";var i=0;
     while(i<Array.size(args)){
         if(args[i]=="--profile"&&i+1<Array.size(args)){profile=args[i+1];i=i+2;}
         else if(args[i]=="--output"&&i+1<Array.size(args)){output=args[i+1];i=i+2;}
         else if(args[i]=="--backend"&&i+1<Array.size(args)){backend=args[i+1];i=i+2;}
+        else if(args[i]=="--tree"&&i+1<Array.size(args)){tree=args[i+1];i=i+2;}
         else if(args[i]=="--size-mib"&&i+1<Array.size(args)){sizeMiB=zbParseNumber(args[i+1]);i=i+2;}
+        // A root that is written to later (the native root partition) asks for
+        // inodes beyond what the staged tree needs.
+        else if(args[i]=="--min-inodes"&&i+1<Array.size(args)){minInodes=zbParseNumber(args[i+1]);i=i+2;}
         else if(args[i]=="--file"&&i+1<Array.size(args)){Array.push(files,args[i+1]);i=i+2;}
         else if(args[i]=="--mode"&&i+1<Array.size(args)){Array.push(modes,args[i+1]);i=i+2;}
         else if(args[i]=="--force"){force=true;i=i+1;}
         else {zbFail("invalid make-arch-overlay-ufs argument: "+args[i]);}
     }
-    if((profile!="i386"&&profile!="amd64")||output==""||backend==""||(sizeMiB!=0&&sizeMiB<16)){zbFail("missing/invalid arch UFS arguments");}
+    if((profile!="i386"&&profile!="amd64"&&profile!="aarch64")||output==""||backend==""||(sizeMiB!=0&&sizeMiB<16)){zbFail("missing/invalid arch UFS arguments");}
+
+    // --tree names a finished root that the build already staged, which is the
+    // one the image must carry.  Staging it a second time from a file list
+    // would copy through a second set of rules, and symbolic links, directory
+    // modes and anything added to the tree by a package would not survive it.
+    if(tree!=""){
+        if(Array.size(files)!=0||Array.size(modes)!=0){zbFail("--tree takes no --file or --mode");}
+        if(System.shell("test -d "+zbShellQuote(tree))!=0){zbFail("staged root is not a directory: "+tree);}
+        if(System.shell("test -f "+zbShellQuote(tree+"/bin/sh"))!=0){zbFail("staged root has no /bin/sh: "+tree);}
+        if(sizeMiB==0){sizeMiB=measureMiB(tree,output);}
+        // Half again as many inodes as entries, so that a later package does
+        // not have to be matched by a change here.
+        var want=ufsCountEntries(tree,output+".count.tmp")*3/2+256;
+        if(want<minInodes){want=minInodes;}
+        ufsBuildProfileInodesMiB(backend,sizeMiB,tree,output+".tmp","ordinary",want);
+        if(System.shell("mv -f "+zbShellQuote(output+".tmp")+" "+zbShellQuote(output))!=0){zbFail("cannot publish architecture image");}
+        return;
+    }
     var root=output+".root.tmp";
     var dirs=["bin","sbin","lib","etc","var","root","home","usr/bin","dev","boot","tmp","run","shm","var/empty","usr/sbin","usr/libexec","etc/ssh"];
     var prepare="rm -rf "+zbShellQuote(root)+" && mkdir -p";
@@ -41,15 +78,7 @@ func main(args){
     // On top of the file bytes UFS needs inodes, cylinder-group metadata and
     // fragment rounding, and nothing here rewards being frugal: the measured
     // size is doubled and given a fixed margin.
-    if(sizeMiB==0){
-        var report=output+".size.tmp";
-        if(System.shell("du -sk "+zbShellQuote(root)+" > "+zbShellQuote(report))!=0){zbFail("cannot measure the staging root");}
-        var measured=FileUtil.readText(report);
-        System.shell("rm -f "+zbShellQuote(report));
-        var stop=String.indexOf(measured,"\t");
-        if(stop<=0){zbFail("cannot read the staging root size");}
-        sizeMiB=(zbParseNumber(String.substring(measured,0,stop))*2)/1024+32;
-    }
+    if(sizeMiB==0){sizeMiB=measureMiB(root,output);}
     ufsBuild(backend,sizeMiB*1024*1024,root,output+".tmp");
     if(System.shell("mv -f "+zbShellQuote(output+".tmp")+" "+zbShellQuote(output)+" && rm -rf "+zbShellQuote(root))!=0){zbFail("cannot publish architecture image");}
 }

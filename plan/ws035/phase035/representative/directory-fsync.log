@@ -1,0 +1,5 @@
+cc -DKERN_USER_ABI_LP64 -I/home/awe/zedBSD-rpi4/include -I/home/awe/zedBSD-rpi4/include/uapi -I/home/awe/zedBSD-rpi4/src -I/home/awe/zedBSD-rpi4/libc/include -DKERN_UAPI_NATIVE -I/home/awe/zedBSD-rpi4 -std=c11 -O0 -Wall -Wextra -Werror -ffunction-sections -fdata-sections  -c /home/awe/zedBSD-rpi4/src/kern/file.c -o /tmp/p035/dirfsync/file.o
+cc -DKERN_USER_ABI_LP64 -I/home/awe/zedBSD-rpi4/include -I/home/awe/zedBSD-rpi4/include/uapi -I/home/awe/zedBSD-rpi4/src -I/home/awe/zedBSD-rpi4/libc/include -DKERN_UAPI_NATIVE -I/home/awe/zedBSD-rpi4 -std=c11 -O0 -Wall -Wextra -Werror -ffunction-sections -fdata-sections  -DWS001_P016_VFS /home/awe/zedBSD-rpi4/plan/ws001/tests/directory-fsync-host-test.c /tmp/p035/dirfsync/file.o -Wl,--gc-sections  /home/awe/zedBSD-rpi4/src/kern/io-stats.c -o /tmp/p035/dirfsync/vfs-test
+cc1: fatal error: /home/awe/zedBSD-rpi4/src/kern/io-stats.c: No such file or directory
+compilation terminated.
+make: *** [plan/ws001/tests/directory-fsync-host-test.mk:52: /tmp/p035/dirfsync/vfs-test] Error 1

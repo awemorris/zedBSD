@@ -1,0 +1,24 @@
+## p023.d:
+build/x/kern64/src/kern/fake.o: src/kern/fake.c include/kern/kcrt.h \
+ include/stdio.h
+include/stdio.h:
+## result:
+kernel include check: /tmp/p035/fake/p023.d: build/x/kern64/src/kern/fake.o reads include/stdio.h
+:4: Error: kernel include check: FAIL (1 outside the kernel tree)
+exit=1
+## libc.d:
+build/x/kern64/src/kern/fake2.o: src/kern/fake2.c \
+ libc/include/string.h src/kern/../../libc/include/errno.h \
+ /usr/include/stdio.h include/libc/vulkan/vulkan_core.h
+## result:
+kernel include check: /tmp/p035/fake/libc.d: build/x/kern64/src/kern/fake2.o reads libc/include/string.h
+kernel include check: /tmp/p035/fake/libc.d: build/x/kern64/src/kern/fake2.o reads src/kern/../../libc/include/errno.h
+kernel include check: /tmp/p035/fake/libc.d: build/x/kern64/src/kern/fake2.o reads /usr/include/stdio.h
+:4: Error: kernel include check: FAIL (3 outside the kernel tree)
+exit=1
+## ok.d:
+build/x/kern64/src/kern/ok.o: src/kern/ok.c include/uapi/errno.h \
+ include/libc/vulkan/vulkan_core.h bootloader/include/../../include/boot/parameters.h
+## result:
+kernel include check: PASS (1 objects, 4 dependencies)
+exit=0

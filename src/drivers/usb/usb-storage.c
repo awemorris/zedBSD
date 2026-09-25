@@ -9,20 +9,21 @@
  * USB Mass Storage Bulk-Only Transport and minimal SCSI disk driver
  */
 
-#include <drivers/usb-storage.h>
-#include <drivers/usb-storage-bot.h>
-#include <drivers/usb-storage-scsi.h>
-#include <drivers/usb.h>
-#include <errno.h>
+#include <drivers/usb/usb-storage.h>
+#include <drivers/usb/usb-storage-bot.h>
+#include <drivers/usb/usb-storage-scsi.h>
+#include <drivers/usb/usb.h>
+#include <uapi/errno.h>
 #include <kern/disk.h>
 #include <kern/partition.h>
 #include <kern/io-stats.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
+#include <kern/clock.h>
 #include <kern/thread.h>
-#include <string.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
+#include <kern/kcrt.h>
 
 #define USB_MASS_STORAGE_CLASS		0x08U
 #define USB_MASS_STORAGE_SCSI		0x06U
@@ -34,6 +35,8 @@
 #define BOT_CSW_SIGNATURE		0x53425355U
 #define BOT_DIRECTION_IN		0x80U
 #define BOT_TIMEOUT_MS			5000U
+#define STORAGE_CONTROL_POLL_MS		1000U
+#define STORAGE_CONTROL_STOP_MS		20000U
 
 #define SCSI_TEST_UNIT_READY		0x00U
 #define SCSI_REQUEST_SENSE		0x03U
@@ -266,7 +269,9 @@ storage_timeout(
 	now = sched_ticks();
 	if (now >= storage->command_deadline)
 		return 0;
-	remaining = (storage->command_deadline - now) * 10U;
+	remaining = kern_ticks_to_ms(storage->command_deadline - now);
+	if (remaining == 0)
+		remaining = 1;
 
 	/* Returns the computed result. */
 	return remaining < timeout ? (unsigned)remaining : timeout;
@@ -441,7 +446,7 @@ storage_control(
 	/* Handles the timeout condition. */
 	if (timeout != 0) {
 		now = sched_ticks();
-		ticks = ((uint64_t)timeout + 9U) / 10U;
+		ticks = kern_ms_to_ticks(timeout);
 
 		deadline = UINT64_MAX - now < ticks ? UINT64_MAX : now + ticks;
 	}
@@ -654,8 +659,8 @@ bot_command_locked(
 		/* Failed. */
 		return EINVAL;
 	}
-	memset(&cbw, 0, sizeof(cbw));
-	memset(&csw, 0, sizeof(csw));
+	kern_memset(&cbw, 0, sizeof(cbw));
+	kern_memset(&csw, 0, sizeof(csw));
 	put_le32(cbw.signature, BOT_CBW_SIGNATURE);
 
 	/* Handles the tag condition. */
@@ -667,7 +672,7 @@ bot_command_locked(
 	cbw.flags = input ? BOT_DIRECTION_IN : 0;
 	cbw.lun = storage->lun;
 	cbw.command_length = (uint8_t)cdb_length;
-	memcpy(cbw.command, cdb, cdb_length);
+	kern_memcpy(cbw.command, cdb, cdb_length);
 
 	/* Validates the current input. */
 	if (input != 0 && ((const uint8_t *)cdb)[0] == SCSI_READ_10 &&
@@ -828,11 +833,11 @@ request_sense_locked(
 	size_t actual = 0;
 	int error;
 
-	memset(sense, 0, sizeof(sense));
+	kern_memset(sense, 0, sizeof(sense));
 
 	/* Handles the decoded availability. */
 	if (decoded != NULL)
-		memset(decoded, 0, sizeof(*decoded));
+		kern_memset(decoded, 0, sizeof(*decoded));
 
 	/* Checks the operation status. */
 	error = bot_command_locked(storage, command, sizeof(command), sense,
@@ -867,9 +872,9 @@ storage_reconfigure_locked(
 	previous = storage->flush_policy;
 	storage->media_state = STORAGE_RECONFIGURE;
 	disk_persistence_forget(storage->disk);
-	memset(&cache, 0, sizeof(cache));
-	memset(mode, 0, sizeof(mode));
-	memset(&sense, 0, sizeof(sense));
+	kern_memset(&cache, 0, sizeof(cache));
+	kern_memset(mode, 0, sizeof(mode));
+	kern_memset(&sense, 0, sizeof(sense));
 	(void)drv_usb_scsi_make_mode_sense6_cache_cdb(
 		mode_command, sizeof(mode_command), sizeof(mode));
 
@@ -890,7 +895,7 @@ storage_reconfigure_locked(
 	 * Flush the old policy's accepted writes before publishing a new
 	 * policy.
 	 */
-	memset(sync_command, 0, sizeof(sync_command));
+	kern_memset(sync_command, 0, sizeof(sync_command));
 	sync_command[0] = SCSI_SYNCHRONIZE_CACHE_10;
 
 	/* Checks the operation status. */
@@ -966,17 +971,17 @@ bot_command_sense_locked(
 	/* Handles the cdb availability. */
 	if (cdb == NULL || cdb_length == 0 || cdb_length > sizeof(retry_cdb))
 		return EINVAL;
-	memcpy(retry_cdb, cdb, cdb_length);
+	kern_memcpy(retry_cdb, cdb, cdb_length);
 	cdb = retry_cdb;
 
-	storage->command_deadline = now + (3U * BOT_TIMEOUT_MS + 9U) / 10U;
+	storage->command_deadline = now + kern_ms_to_ticks(3U * BOT_TIMEOUT_MS);
 
 	/* Handles the sense availability. */
 	if (sense == NULL)
 		sense = &local_sense;
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-		memset(sense, 0, sizeof(*sense));
+		kern_memset(sense, 0, sizeof(*sense));
 		command_failed = 0;
 
 		/* Checks the operation status. */
@@ -1209,8 +1214,8 @@ scsi_configure_flush_policy(
 	size_t actual = 0;
 	int error;
 
-	memset(&cache, 0, sizeof(cache));
-	memset(mode, 0, sizeof(mode));
+	kern_memset(&cache, 0, sizeof(cache));
+	kern_memset(mode, 0, sizeof(mode));
 
 	/* Checks the drv usb scsi make mode sense6 cache cdb result. */
 	if (!drv_usb_scsi_make_mode_sense6_cache_cdb(
@@ -1297,7 +1302,7 @@ scsi_probe(
 	if (medium_absent != NULL)
 		*medium_absent = 0;
 
-	memset(inquiry, 0, sizeof(inquiry));
+	kern_memset(inquiry, 0, sizeof(inquiry));
 
 	/* Checks the operation status. */
 	error = bot_command(storage, inquiry_command, sizeof(inquiry_command),
@@ -1347,7 +1352,7 @@ scsi_probe(
 		return error;
 	}
 
-	memset(capacity, 0, sizeof(capacity));
+	kern_memset(capacity, 0, sizeof(capacity));
 
 	/* Checks the operation status. */
 	error = bot_command_sense(storage, capacity_command,
@@ -1387,7 +1392,7 @@ storage_submit(
 	size_t expected = 0;
 	int error;
 
-	memset(&sense, 0, sizeof(sense));
+	kern_memset(&sense, 0, sizeof(sense));
 	mutex_lock(&storage->lock);
 
 	/* Handles the storage condition. */
@@ -1790,7 +1795,8 @@ storage_control_worker(
 
 		/* Checks the atomic raw load acquire result. */
 		if (!atomic_raw_load_acquire(&storage->control_stopping))
-			sched_sleep(sched_ticks() + 100U);
+			sched_sleep(sched_ticks() +
+			    kern_ms_to_ticks(STORAGE_CONTROL_POLL_MS));
 	}
 }
 
@@ -1831,7 +1837,7 @@ storage_control_stop(
 		return 0;
 	atomic_raw_store_release(&storage->control_stopping, 1U);
 	kernel_notify_task(worker->task);
-	deadline = sched_ticks() + 2000U;
+	deadline = sched_ticks() + kern_ms_to_ticks(STORAGE_CONTROL_STOP_MS);
 	/* Continue while the operation condition remains true. */
 	while (atomic_raw_load_acquire((volatile unsigned *)&worker->state) !=
 	       THREAD_ZOMBIE) {
@@ -1871,7 +1877,7 @@ storage_attach(
 	storage = kern_malloc(sizeof(*storage));
 	if (storage == NULL)
 		return ENOMEM;
-	memset(storage, 0, sizeof(*storage));
+	kern_memset(storage, 0, sizeof(*storage));
 	storage->interface = interface;
 	storage->device = drv_usb_interface_device(interface);
 	storage->bulk_in = drv_usb_interface_find_endpoint(

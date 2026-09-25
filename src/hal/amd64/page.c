@@ -50,6 +50,14 @@ static int boot_memory_released;
 static uint64_t managed_pages;
 static uint64_t metadata_bytes;
 static int range_ready;
+
+/*
+ * Set when every managed RAM extent was found in the direct map at boot.
+ *
+ * hal_pmem_to_kernel() then converts an address inside an extent by
+ * offset alone instead of walking the RAM map for every call.
+ */
+static int extents_direct_mapped;
 static uint32_t phys_pages;
 static uint64_t boot_usable_bytes;
 static uint64_t boot_reclaim_bytes;
@@ -61,6 +69,22 @@ static uint32_t allocated_pages;
 static volatile unsigned pmem_lock;
 static uint64_t pmem_entered_cycles;
 static uint64_t pmem_max_irqoff_cycles;
+
+/*
+ * A stack of single pages freed most recently, handed out again first.
+ *
+ * The extent allocator is next-fit and walks forward through free memory,
+ * so without this a stream of page allocations and frees touches pages
+ * that were never used since boot: cold in every cache and, under a
+ * hypervisor, not yet backed by host memory.  The stack keeps the pages
+ * last freed, which are the warmest.  It holds only unconstrained
+ * single-page runs, is filled by hal_pmem_free() and drained by
+ * hal_pmem_alloc(), and is protected by pmem_lock.  Its pages count as
+ * allocated in the extents and as free in hal_get_memstat().
+ */
+#define PMEM_PAGE_STACK_MAX 8192U
+static hal_physaddr_t pmem_page_stack[PMEM_PAGE_STACK_MAX];
+static uint32_t pmem_page_stack_count;
 
 void hal_amd64_space_memory_stats(uint32_t *count, uint32_t *page_tables);
 
@@ -83,6 +107,12 @@ static int free_ram(hal_physaddr_t paddr, size_t size);
 static int pmem_alloc_unlocked(size_t size, size_t alignment,
     uint64_t maximum, uint64_t boundary, hal_physaddr_t *paddr);
 static int pmem_free_unlocked(hal_physaddr_t *block, size_t size);
+static int extents_in_direct_map(void);
+static struct amd64_pmem_extent *extent_of_page(hal_physaddr_t paddr, uint64_t *index);
+static int page_stack_push(hal_physaddr_t paddr);
+static int page_stack_pop(hal_physaddr_t *paddr);
+static void page_stack_drain(void);
+static int pmem_alloc_or_drain(size_t size, size_t alignment, uint64_t maximum, uint64_t boundary, hal_physaddr_t *paddr);
 
 /*
  * Initializes the amd64 physical-memory allocation maps.
@@ -289,10 +319,21 @@ hal_pmem_alloc(
 {
 	bool enabled;
 	int error;
+	int single;
 
-	/* Performs the complete allocation while holding the global lock. */
+	/* A single page with no alignment beyond a page may come from the stack. */
+	single = 0;
+	if (block != NULL && req_size != 0 && req_size <= PAGE_SIZE &&
+	    req_align <= PAGE_SIZE)
+		single = 1;
+
+	/* Takes the page freed most recently when the stack has one. */
 	enabled = pmem_lock_enter();
-	error = pmem_alloc_unlocked(req_size, req_align, UINT64_MAX, 0, block);
+	error = HAL_ERR_NOMEM;
+	if (single)
+		error = page_stack_pop(block);
+	if (error != HAL_OK)
+		error = pmem_alloc_or_drain(req_size, req_align, UINT64_MAX, 0, block);
 	pmem_lock_leave(enabled);
 
 	/* Returns the allocation result unchanged. */
@@ -315,7 +356,7 @@ hal_pmem_alloc_limited(
 
 	/* Performs the constrained allocation while holding the global lock. */
 	enabled = pmem_lock_enter();
-	error = pmem_alloc_unlocked(
+	error = pmem_alloc_or_drain(
 		req_size,
 		req_align,
 		(uint64_t)max_paddr,
@@ -340,10 +381,27 @@ hal_pmem_free(
 {
 	bool enabled;
 	int error;
+	int single;
+	int stacked;
 
-	/* Performs the complete release while holding the global lock. */
+	/* A whole single page is kept on the stack for the next allocation. */
+	single = 0;
+	if (block != NULL && size != 0 && size <= PAGE_SIZE)
+		single = 1;
+
+	/* Stacks the page, or gives the run back to its extent. */
 	enabled = pmem_lock_enter();
-	error = pmem_free_unlocked(block, size);
+	stacked = 0;
+	if (single)
+		stacked = page_stack_push(*block);
+	if (stacked) {
+		*block = 0;
+		error = HAL_OK;
+	} else {
+		error = pmem_free_unlocked(block, size);
+	}
+
+	/* Leaves the allocator with the page placed. */
 	pmem_lock_leave(enabled);
 
 	/* Returns the release result unchanged. */
@@ -357,8 +415,50 @@ void *
 hal_pmem_to_kernel(
 	hal_physaddr_t paddr)
 {
+	struct amd64_pmem_extent *extent;
+	uint32_t index;
+
+	/* Converts an address inside a verified managed extent by offset. */
+	if (extents_direct_mapped) {
+		for (index = 0; index < ram_extent_count; index++) {
+			extent = &ram_extents[index];
+			if (paddr < extent->base ||
+			    paddr - extent->base >= extent->pages * PAGE_SIZE)
+				continue;
+			return (void *)((uintptr_t)AMD64_DIRECT_BASE + (uintptr_t)paddr);
+		}
+	}
+
 	/* RAM is direct-mapped; anything else has no kernel alias. */
 	return amd64_phys_to_direct((uintptr_t)paddr);
+}
+
+/*
+ * Tests whether the direct map aliases every managed extent.
+ *
+ * Runs once at boot, before the allocator is published; an extent with any
+ * page outside the direct map leaves every conversion on the checked path.
+ */
+static int
+extents_in_direct_map(
+	void)
+{
+	struct amd64_pmem_extent *extent;
+	uint64_t end;
+	uint32_t index;
+	int covered;
+
+	/* Checks every extent page by page. */
+	for (index = 0; index < ram_extent_count; index++) {
+		extent = &ram_extents[index];
+		end = extent->base + extent->pages * PAGE_SIZE;
+		covered = amd64_direct_covers(extent->base, end);
+		if (!covered)
+			return 0;
+	}
+
+	/* Reports that the offset conversion is safe for every extent. */
+	return 1;
 }
 
 /*
@@ -424,6 +524,10 @@ hal_get_memstat(
 		if (ram_extents[index].max_scan_words > stats->allocator_max_extent_scan_words)
 			stats->allocator_max_extent_scan_words = ram_extents[index].max_scan_words;
 	}
+
+	/* Pages waiting on the stack are free to the caller, not allocated. */
+	stats->physical_free += (size_t)pmem_page_stack_count * PAGE_SIZE;
+	stats->physical_allocated -= (size_t)pmem_page_stack_count * PAGE_SIZE;
 
 	hal_amd64_task_memory_stats(
 		&stats->task_count,
@@ -731,6 +835,7 @@ prekern_amd64_range_page_init(void)
 	for (index = 0; index < ram_extent_count; index++)
 		free_pages += ram_extents[index].free_pages;
 	allocator_initial_bytes = free_pages * PAGE_SIZE;
+	extents_direct_mapped = extents_in_direct_map();
 	range_ready = 1;
 	hal_printf("A64 RAM ALLOC extents=%u managed=%llu metadata=%llu free=%llu publication_limit=%llu\n",
 	    ram_extent_count, (unsigned long long)(managed_pages * PAGE_SIZE),
@@ -1019,4 +1124,162 @@ next_retired_page(uint64_t physical, uint64_t end)
 			next = base;
 	}
 	return next;
+}
+
+/* Finds the extent that manages a page and the page's index in it. */
+static struct amd64_pmem_extent *
+extent_of_page(
+	hal_physaddr_t paddr,
+	uint64_t *index)
+{
+	struct amd64_pmem_extent *extent;
+	uint32_t position;
+
+	/* Rejects an address that is not the start of a page. */
+	if ((paddr & (PAGE_SIZE - 1U)) != 0)
+		return NULL;
+
+	/* Searches every published extent for the one holding the page. */
+	for (position = 0; position < ram_extent_count; position++) {
+		extent = &ram_extents[position];
+		if (paddr < extent->base)
+			continue;
+		if ((paddr - extent->base) / PAGE_SIZE >= extent->pages)
+			continue;
+
+		/* Reports the extent and the page's position in its bitmaps. */
+		*index = (paddr - extent->base) / PAGE_SIZE;
+		return extent;
+	}
+
+	/* Reports a page outside managed RAM. */
+	return NULL;
+}
+
+/*
+ * Keeps one freed single page on the stack; the caller holds pmem_lock.
+ *
+ * The page must be exactly one live single-page allocation of an extent:
+ * its used, head and tail bits are set and it is not reserved.  While the
+ * page waits on the stack its head bit is cleared, so a second free of the
+ * same page fails in the extent as a double free would today, and the bit
+ * is set again when the page is handed out.
+ */
+static int
+page_stack_push(
+	hal_physaddr_t paddr)
+{
+	struct amd64_pmem_extent *extent;
+	uint64_t index;
+	uint64_t word;
+	uint64_t bit;
+
+	/* Leaves a full stack alone; the extent takes the page back. */
+	if (pmem_page_stack_count >= PMEM_PAGE_STACK_MAX)
+		return 0;
+
+	/* Resolves the owning extent, or leaves an unknown page to the extent path. */
+	extent = extent_of_page(paddr, &index);
+	if (extent == NULL)
+		return 0;
+
+	/* Requires a live, unreserved, single-page allocation. */
+	word = index / 64U;
+	bit = UINT64_C(1) << (index % 64U);
+	if ((extent->used[word] & bit) == 0)
+		return 0;
+	if ((extent->reserved[word] & bit) != 0)
+		return 0;
+	if ((extent->heads[word] & bit) == 0)
+		return 0;
+	if ((extent->tails[word] & bit) == 0)
+		return 0;
+
+	/* A cleared head bit marks the page as waiting on the stack. */
+	extent->heads[word] &= ~bit;
+	pmem_page_stack[pmem_page_stack_count] = paddr;
+	pmem_page_stack_count++;
+
+	/* Reports that the stack took the page. */
+	return 1;
+}
+
+/* Hands out the page freed most recently; the caller holds pmem_lock. */
+static int
+page_stack_pop(
+	hal_physaddr_t *paddr)
+{
+	struct amd64_pmem_extent *extent;
+	uint64_t index;
+
+	/* Reports an empty stack. */
+	if (pmem_page_stack_count == 0)
+		return HAL_ERR_NOMEM;
+
+	/* Takes the top page and makes it a live allocation again. */
+	pmem_page_stack_count--;
+	*paddr = pmem_page_stack[pmem_page_stack_count];
+	extent = extent_of_page(*paddr, &index);
+	if (extent == NULL)
+		HAL_FATAL("amd64 page stack holds a page outside managed RAM");
+	extent->heads[index / 64U] |= UINT64_C(1) << (index % 64U);
+
+	/* Succeeded: the caller owns the page. */
+	return HAL_OK;
+}
+
+/*
+ * Gives every stacked page back to its extent; the caller holds pmem_lock.
+ *
+ * The stacked pages count as free, but only a single unconstrained page
+ * can be taken from the stack.  A larger or constrained allocation, such
+ * as a device's DMA buffer, needs them back in the extents, or it fails
+ * under memory pressure while the memory statistics report room.
+ */
+static void
+page_stack_drain(
+	void)
+{
+	struct amd64_pmem_extent *extent;
+	hal_physaddr_t paddr;
+	uint64_t index;
+	int error;
+
+	/* Makes each page a live allocation again and frees it to its extent. */
+	while (pmem_page_stack_count != 0) {
+		pmem_page_stack_count--;
+		paddr = pmem_page_stack[pmem_page_stack_count];
+		extent = extent_of_page(paddr, &index);
+		if (extent == NULL)
+			HAL_FATAL("amd64 page stack holds a page outside managed RAM");
+		extent->heads[index / 64U] |= UINT64_C(1) << (index % 64U);
+		error = pmem_free_unlocked(&paddr, PAGE_SIZE);
+		if (error != HAL_OK)
+			HAL_FATAL("amd64 page stack drain failed");
+	}
+}
+
+/*
+ * Allocates from the extents, giving the stacked pages back and trying
+ * again when the extents alone cannot satisfy the request; the caller
+ * holds pmem_lock.
+ */
+static int
+pmem_alloc_or_drain(
+	size_t size,
+	size_t alignment,
+	uint64_t maximum,
+	uint64_t boundary,
+	hal_physaddr_t *paddr)
+{
+	int error;
+
+	/* Tries the extents as they are. */
+	error = pmem_alloc_unlocked(size, alignment, maximum, boundary, paddr);
+	if (error == HAL_OK || pmem_page_stack_count == 0)
+		return error;
+
+	/* Tries again with every stacked page back in its extent. */
+	page_stack_drain();
+	return pmem_alloc_unlocked(size, alignment, maximum, boundary, paddr);
 }

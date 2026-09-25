@@ -1,0 +1,25 @@
+GPU build selection: amd64 Venus=n i915=n PASS
+GPU build selection: amd64 Venus=n i915=y PASS
+GPU build selection: amd64 Venus=y i915=n PASS
+GPU build selection: amd64 Venus=y i915=y PASS
+GPU build selection: rpi4 Venus=n i915=n PASS
+GPU build selection: rpi4 Venus=n i915=y PASS
+GPU build selection: rpi4 Venus=y i915=n PASS
+GPU build selection: rpi4 Venus=y i915=y PASS
+GPU build selection: i386 Venus=n i915=n PASS
+GPU build selection: i386 Venus=n i915=y PASS
+GPU build selection: i386 Venus=y i915=n PASS
+GPU build selection: i386 Venus=y i915=y PASS
+GPU build selection: pc98 Venus=n i915=n PASS
+GPU build selection: pc98 Venus=n i915=y PASS
+GPU build selection: pc98 Venus=y i915=n PASS
+GPU build selection: pc98 Venus=y i915=y PASS
+GPU build selection: sun4u Venus=n i915=n PASS
+GPU build selection: sun4u Venus=n i915=y PASS
+GPU build selection: sun4u Venus=y i915=n PASS
+GPU build selection: sun4u Venus=y i915=y PASS
+GPU build selection: x68k Venus=n i915=n PASS
+GPU build selection: x68k Venus=n i915=y PASS
+GPU build selection: x68k Venus=y i915=n PASS
+GPU build selection: x68k Venus=y i915=y PASS
+GPU framework follows either backend; i915 objects appear only on amd64 with CONFIG_DRIVER_PCI_I915=y PASS

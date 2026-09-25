@@ -15,7 +15,7 @@
  * representation, so a driver can hold one without naming a HAL type.
  */
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
 
 #include "kern/irq.h"

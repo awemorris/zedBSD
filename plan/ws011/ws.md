@@ -1,58 +1,44 @@
-# WS011: network configuration console
+<!-- awesome-plan project=zedbsd record=ws011 -->
 
-<!-- traceability:start -->
+# WS011: ネットワーク設定 console
 
-## Goal traceability
+<!-- awesome-plan-current:start -->
+Status: completed
+Completed: 2026-09-09（ユーザー確認）
+Primary Milestone: MG005
+Related Milestones: MG003
+Objectives: O1, O2, O3, O4
+Parent: [Master](../master.md)
+Queue: なし
+Resume point: なし（新しい要求は新しい WS として立てる。この WS は再開しない）
+<!-- awesome-plan-current:end -->
 
-- Primary Milestone: **MG005 — シンプルで一貫したネットワーク/サービス管理を利用できる**
-- Related Milestones: MG003
-- Objectives: O1, O2, O3, O4
-- 貢献する成果: 永続化・復旧可能なネットワーク設定操作を提供する。
-- 上位定義: [MasterのObjectives / Milestone Goals](https://github.com/awemorris/zedBSD/issues/1)
+## 目標
 
-既存Phaseは本WSを親として上位成果に接続する。Primaryは分類と責任の所在であり、
-各PhaseがRelatedすべてを満たすという意味ではない。成果・検証・限界は各Phaseの
-現行記録を根拠とする。今回の対応付けは状態変更・未定義作業の追加・実行許可ではない。
+`net.conf` の形式と `net` の対話 console を作り、設定の永続化と、失敗しても元に戻る confirmed commit を提供する。
 
-<!-- traceability:end -->
+## 結果
 
+`net.conf` v1 の parser、対話 console、永続化と起動時の移行、confirmed commit の設計・実装・自動と実機の受け入れ、overlay への公開の修正を行った。
 
-Last updated: 2026-09-09
-WSID: `ws011`
-Status: completed — commit confirmedはユーザー確認により完了。
-Parent: [master](../master.md)
+## 制限・移管
 
-## 完了と範囲変更
+VLAN は取り消し、bridge は Future Work F-001 へ移した。
 
-- p001〜p003、p005〜p007、p009の実装・自動受け入れは既存証拠を保持する。
-- p008は今回のユーザーの完了判定を受け入れ、追加の実機試験待ちを終了する。
-  新しい試験ログや未観測の細部を合格として捏造しない。
-- VLANはキャンセル。bridgeは [master Future List](../master.md#future-listやりたいことリスト) F-001へ移管。
-- p004の旧VLAN/bridge一括計画とMB-010は現行の残作業ではない。
-  bridgeを選び直した場合、VLANを含めず独立したPhaseとして設計する。
+## Phase 一覧
 
-## 現行契約
+| Phase | 内容 | Status |
+| --- | --- | --- |
+| ws011-p001 | `net.conf` v1 format and parser | cleared |
+| ws011-p002 | interactive `net` console | cleared |
+| ws011-p003 | persistence and boot migration | cleared |
+| ws011-p004 | VLAN and bridge interfaces | canceled（VLAN は取消し、bridge は Future Work F-001 へ） |
+| ws011-p005 | confirmed-commit design | cleared |
+| ws011-p006 | confirmed-commit implementation | cleared（q073） |
+| ws011-p007 | confirmed-commit automatic acceptance | cleared（q075） |
+| ws011-p008 | confirmed-commit physical acceptance | cleared |
+| ws011-p009 | confirmed-commit overlay publication correction | cleared（q075） |
 
-`/sbin/net`の対話設定、`/etc/net.conf`の永続化、`commit`、
-`commit confirmed MINUTES`、`rollback`を保持する。
-直接の`/sbin/ifconfig`は復旧経路として維持する。旧`apply`/`save`/`discard`は撤去済み。
+## 記録の所在
 
-## Phase registry
-
-| Combined ID | Phase | Status | Completion result |
-| --- | --- | --- | --- |
-| `ws011-p001` | [`net.conf` v1 format and parser](phase001/phase.md) | Complete | Strict native parser/model/writer and host/native build gates pass |
-| `ws011-p002` | [Interactive `net` console](phase002/phase.md) | Complete | Three modes, candidate safety, argv sharing, help/history, and native image gates pass |
-| `ws011-p003` | [Persistence and boot migration](phase003/phase.md) | Complete software milestone | Atomic authoritative configuration and boot/request evidence retained; current WS completion accepted by the user |
-| `ws011-p004` | [VLAN and bridge interfaces](phase004/phase.md) | Cancelled / transferred | VLANキャンセル。bridgeのみmaster Future List F-001へ移管。 |
-| `ws011-p005` | [Confirmed-commit design](phase005/phase.md) | Complete design (2026-09-05) | Session-only candidate/token, networkd rollback timer, delayed config publication, and implementation bounds are frozen |
-| `ws011-p006` | [Confirmed-commit implementation](phase006/phase.md) | Complete (`q073`, 2026-09-05) | Complete reconcile, interactive confirmed commit, volatile networkd rollback, serialized delayed publication, focused regressions, and amd64/i386 builds pass |
-| `ws011-p007` | [Confirmed-commit automatic acceptance](phase007/phase.md) | Complete (`q075`, 2026-09-05) | Q074 T020 plus all four post-fix q075 T021 cells prove timeout recovery, confirmed persistence, no late rollback, reboot and connectivity |
-| `ws011-p008` | [Confirmed-commit physical acceptance](phase008/phase.md) | Complete (user-accepted, 2026-09-09) | ユーザーがcommit confirmed完了と判定。新たな実機試験を実行したという主張ではない。 |
-| `ws011-p009` | [Confirmed-commit overlay publication correction](phase009/phase.md) | Complete (`q075`) | FAT validation/seek/write fusion removes reproduced traversal amplification; old/new cost, corruption/growth faults, supported builds and four post-fix T021 cells pass |
-
-## 再開と参照
-
-現行WSに未完了の実行Phaseはない。新しい要求を選ぶ場合にPhaseを追加する。
-既存の回帰試験は [tests](tests/README.md)、詳細設計・受け入れは各Phaseを参照。
-[整理前のWS全文](ws-history-2026-09-09.md)は旧VLAN/bridgeモデル等の履歴として保持する。
+各 Phase の計画・結果・試験は、2026-09-24 の plan 整理で削除した。git の commit `04bc9eab` 以前の `plan/ws011/` にある。Queue ごとの履歴は [plan/history](../history/index.md) に残る。

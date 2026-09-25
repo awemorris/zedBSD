@@ -63,8 +63,9 @@
 #include "takeover-internal.h"
 #include "plane.h"
 #include "pipe.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 
 static bool i915_icl_is_hdr_plane(struct drm_i915_private *dev_priv, enum plane_id plane_id);
 static unsigned int i915_skl_plane_stride_mult(const struct drm_framebuffer *fb, int color_plane, unsigned int rotation);
@@ -257,12 +258,12 @@ drv_i915_plane_emit(
 		return EINVAL;
 
 	/* Starts every object from zero. */
-	memset(i915, 0, sizeof(*i915));
-	memset(&crtc, 0, sizeof(crtc));
-	memset(crtc_state, 0, sizeof(*crtc_state));
-	memset(&plane, 0, sizeof(plane));
-	memset(plane_state, 0, sizeof(*plane_state));
-	memset(&fb, 0, sizeof(fb));
+	kern_memset(i915, 0, sizeof(*i915));
+	kern_memset(&crtc, 0, sizeof(crtc));
+	kern_memset(crtc_state, 0, sizeof(*crtc_state));
+	kern_memset(&plane, 0, sizeof(plane));
+	kern_memset(plane_state, 0, sizeof(*plane_state));
+	kern_memset(&fb, 0, sizeof(fb));
 
 	/* The device writes through the caller's backend. */
 	i915->emit = emit;
@@ -353,9 +354,9 @@ drv_i915_lcd_ms_plane_prepare(
 		return EINVAL;
 
 	/* Starts the plane, its state and the framebuffer from zero. */
-	memset(&ms->plane, 0, sizeof(ms->plane));
-	memset(&ms->plane_state, 0, sizeof(ms->plane_state));
-	memset(&ms->fb, 0, sizeof(ms->fb));
+	kern_memset(&ms->plane, 0, sizeof(ms->plane));
+	kern_memset(&ms->plane_state, 0, sizeof(ms->plane_state));
+	kern_memset(&ms->fb, 0, sizeof(ms->fb));
 
 	/* The primary plane of the object's pipe. */
 	ms->plane.base.dev = &ms->i915.drm;

@@ -1,0 +1,2 @@
+GPU fence dependency: signal fd close/reuse during real wait preserves original capability PASS
+GPU fence dependency: signal fd close/reuse during real wait preserves original capability PASS

@@ -16,11 +16,11 @@
 #include "kern/lock.h"
 #include "kern/uaccess.h"
 #include "drivers/platform/pc98/graphics/backend.h"
+#include <kern/kcrt.h>
 
 #include <uapi/graphics.h>
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
-#include <string.h>
 
 #define GRAPHICS_CAPABILITIES                                                  \
 	(KERN_GRAPHICS_CAP_FILL | KERN_GRAPHICS_CAP_LINE |                 \
@@ -144,7 +144,7 @@ graphics_open(
 	} else {
 		graphics_owner = file;
 		graphics_entered = 0;
-		memset(&graphics_mode, 0, sizeof(graphics_mode));
+		kern_memset(&graphics_mode, 0, sizeof(graphics_mode));
 	}
 
 	mutex_unlock(&graphics_lock);
@@ -230,7 +230,7 @@ graphics_enter(
 		/* Failed. */
 		return EINVAL;
 	}
-	memset(&graphics_mode, 0, sizeof(graphics_mode));
+	kern_memset(&graphics_mode, 0, sizeof(graphics_mode));
 	graphics_mode.preferred_width = request.preferred_width;
 	graphics_mode.preferred_height = request.preferred_height;
 	graphics_mode.preferred_bits_per_pixel =
@@ -502,7 +502,7 @@ graphics_blit(
 	error = load_palette(&request);
 	if (error != 0)
 		return error;
-	memset(&image, 0, sizeof(image));
+	kern_memset(&image, 0, sizeof(image));
 	image.format = request.format == KERN_GRAPHICS_FORMAT_RGB24 ? 2U : 1U;
 	image.width = request.width;
 	image.height = 1;

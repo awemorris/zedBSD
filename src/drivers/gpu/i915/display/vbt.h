@@ -88,6 +88,7 @@
 #define DRIVERS_GPU_I915_DISPLAY_VBT_H
 
 #include "internal.h"
+#include <kern/kcrt.h>
 
 #ifdef I915_DISPLAY_LINUX_WORLD
 #error "display/vbt.h: another Linux environment is already included"
@@ -631,7 +632,7 @@ i915_vbt_kmemdup(
 		return NULL;
 
 	/* Copies the source bytes into it. */
-	memcpy(copy, src, len);
+	kern_memcpy(copy, src, len);
 
 	/* Succeeded: the caller owns the copy until the arena is released. */
 	return copy;

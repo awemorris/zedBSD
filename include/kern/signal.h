@@ -14,7 +14,7 @@
 
 #include <uapi/signal.h>
 #include <stdint.h>
-#include <sys/types.h>
+#include <uapi/types.h>
 
 struct process;
 
@@ -98,6 +98,15 @@ signal_kill(
 
 int
 signal_pending_unblocked(
+	const struct thread *thread);
+
+/*
+ * Reports whether a SIGKILL is pending for the thread or its process, so
+ * that a kernel path waiting for a resource can stop waiting and let the
+ * thread go to its death.
+ */
+int
+signal_kill_pending(
 	const struct thread *thread);
 
 /*

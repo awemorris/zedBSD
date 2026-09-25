@@ -31,6 +31,7 @@
 #include "hotplug.h"
 #include "opregion.h"
 #include "power.h"
+#include <kern/kcrt.h>
 
 #include "../i915.h"
 #include "../irq.h"
@@ -42,9 +43,8 @@
 #include <kern/lock.h>
 #include <kern/sched.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 /* The display interrupt summary control and the master control's display bits. */
 #define GEN11_DISPLAY_INT_CTL		0x44200U
@@ -207,7 +207,7 @@ drv_i915_display_irq_bind(
 	d = &display->irq;
 
 	/* Starts from an empty display interrupt state. */
-	memset(d, 0, sizeof(*d));
+	kern_memset(d, 0, sizeof(*d));
 
 	/* Names the device's registers and the power state the pipes live in. */
 	d->irq = irq;
@@ -270,7 +270,7 @@ drv_i915_irq_vblank_init(
 	unsigned pipe;
 
 	/* Starts from an empty vblank state. */
-	memset(v, 0, sizeof(*v));
+	kern_memset(v, 0, sizeof(*v));
 
 	/* Creates the lock that stands for the Linux irq_lock. */
 	spin_init(&v->lock, LOCK_RANK_DEVICE, "i915-irq-lock");

@@ -1,0 +1,2192 @@
+{
+ "tool": "plan/ws035/tests/uapi-move-ledger.py",
+ "kernel_files": 852,
+ "take_from_libc": {
+  "dirent.h": {
+   "struct dirent": {
+    "users": 11,
+    "example": [
+     "include/kern/file.h",
+     "include/kern/mount.h",
+     "src/drivers/fs/fat.c"
+    ],
+    "kernel_defines_too": true
+   }
+  },
+  "errno.h": {
+   "E2BIG": {
+    "users": 15,
+    "example": [
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/ufs.c",
+     "src/drivers/generic/dma.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EACCES": {
+    "users": 23,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "src/drivers/generic/input.c",
+     "src/drivers/gpu/gpu.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EADDRINUSE": {
+    "users": 4,
+    "example": [
+     "src/drivers/fs/overlayfs.c",
+     "src/kern/inode.c",
+     "src/kern/net/tcp.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EADDRNOTAVAIL": {
+    "users": 4,
+    "example": [
+     "src/kern/net/arp.c",
+     "src/kern/net/inet-socket.c",
+     "src/kern/net/tcp.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EAFNOSUPPORT": {
+    "users": 4,
+    "example": [
+     "src/kern/net/inet-socket.c",
+     "src/kern/net/route.c",
+     "src/kern/net/socket.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EAGAIN": {
+    "users": 53,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "src/drivers/generic/input.c",
+     "src/drivers/generic/loop.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EALREADY": {
+    "users": 15,
+    "example": [
+     "src/drivers/gpu/gpu.c",
+     "src/drivers/pci/pci-ehci.c",
+     "src/drivers/pci/pci-nvme.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EBADF": {
+    "users": 12,
+    "example": [
+     "src/drivers/generic/loop.c",
+     "src/drivers/gpu/gpu.c",
+     "src/drivers/platform/pc98/graphics/pc98-graphics.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EBUSY": {
+    "users": 100,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "src/drivers/fs/ufs.c",
+     "src/drivers/generic/dma.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ECANCELED": {
+    "users": 4,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "src/drivers/gpu/gpu.c",
+     "src/kern/disk.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ECHILD": {
+    "users": 1,
+    "example": [
+     "src/kern/process.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ECONNABORTED": {
+    "users": 1,
+    "example": [
+     "src/kern/net/tcp.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ECONNREFUSED": {
+    "users": 2,
+    "example": [
+     "src/kern/net/unix-socket.c",
+     "src/kern/net/wifi/wlan-wpa2.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ECONNRESET": {
+    "users": 2,
+    "example": [
+     "src/kern/net/tcp.c",
+     "src/kern/net/wifi/wlan.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EDEADLK": {
+    "users": 2,
+    "example": [
+     "src/drivers/fs/overlayfs.c",
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EDESTADDRREQ": {
+    "users": 4,
+    "example": [
+     "src/kern/net/icmp.c",
+     "src/kern/net/tcp.c",
+     "src/kern/net/udp.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EDQUOT": {
+    "users": 1,
+    "example": [
+     "src/kern/quota.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EEXIST": {
+    "users": 27,
+    "example": [
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/overlayfs.c",
+     "src/drivers/fs/ufs.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EFAULT": {
+    "users": 17,
+    "example": [
+     "src/drivers/gpu/gpu.c",
+     "src/drivers/gpu/i915/display/capture.c",
+     "src/drivers/gpu/i915/memory.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EFBIG": {
+    "users": 7,
+    "example": [
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/ufs.c",
+     "src/drivers/generic/loop.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EHOSTUNREACH": {
+    "users": 1,
+    "example": [
+     "src/kern/net/arp.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EILSEQ": {
+    "users": 5,
+    "example": [
+     "src/drivers/usb/usb-rtl8822bu.c",
+     "src/drivers/usb/usb.c",
+     "src/drivers/wifi/intel-ax211/intel-ax211-firmware.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EINPROGRESS": {
+    "users": 2,
+    "example": [
+     "src/drivers/usb/usb-rtl8822bu.c",
+     "src/kern/net/tcp.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EINTR": {
+    "users": 14,
+    "example": [
+     "src/drivers/generic/input.c",
+     "src/kern/file.c",
+     "src/kern/lock.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EINVAL": {
+    "users": 203,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "include/kern/file-backing.h",
+     "include/kern/io-context.h"
+    ],
+    "kernel_defines_too": false
+   },
+   "EIO": {
+    "users": 114,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "plan/ws004/tests/pci-msi-qemu.c",
+     "src/drivers/disklabel/gpt.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EISCONN": {
+    "users": 2,
+    "example": [
+     "src/kern/net/tcp.c",
+     "src/kern/net/unix-socket.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EISDIR": {
+    "users": 7,
+    "example": [
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/overlayfs.c",
+     "src/drivers/fs/ufs.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ELOOP": {
+    "users": 8,
+    "example": [
+     "include/kern/io-context.h",
+     "src/drivers/fs/overlayfs.c",
+     "src/drivers/generic/loop.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EMFILE": {
+    "users": 3,
+    "example": [
+     "src/drivers/platform/pc98/pc98-busmouse.c",
+     "src/drivers/platform/pcat/ps2-8042.c",
+     "src/kern/filedesc.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EMLINK": {
+    "users": 1,
+    "example": [
+     "src/drivers/fs/ufs.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EMSGSIZE": {
+    "users": 22,
+    "example": [
+     "src/drivers/ethernet/dp8390.c",
+     "src/drivers/gpu/i915/render/vulkan.c",
+     "src/drivers/gpu/venus/transport.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "ENAMETOOLONG": {
+    "users": 13,
+    "example": [
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/overlayfs.c",
+     "src/drivers/fs/ufs.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENETDOWN": {
+    "users": 8,
+    "example": [
+     "src/drivers/ethernet/dp8390.c",
+     "src/drivers/usb/usb-cdc-ecm.c",
+     "src/drivers/usb/usb-cdc-ncm-net.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENETUNREACH": {
+    "users": 4,
+    "example": [
+     "src/kern/net/ipv4.c",
+     "src/kern/net/route.c",
+     "src/kern/net/tcp.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENFILE": {
+    "users": 3,
+    "example": [
+     "src/kern/file.c",
+     "src/kern/net/socket.c",
+     "src/kern/tty.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENOBUFS": {
+    "users": 15,
+    "example": [
+     "src/drivers/ethernet/dp8390.c",
+     "src/drivers/usb/usb-cdc-ecm.c",
+     "src/drivers/usb/usb-cdc-ncm-net.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENODATA": {
+    "users": 6,
+    "example": [
+     "src/drivers/fs/ufs.c",
+     "src/drivers/gpu/i915/display/vbt.c",
+     "src/kern/acl.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENODEV": {
+    "users": 64,
+    "example": [
+     "src/drivers/ethernet/dp8390.c",
+     "src/drivers/generic/input.c",
+     "src/drivers/generic/loop.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENOENT": {
+    "users": 50,
+    "example": [
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/overlayfs.c",
+     "src/drivers/fs/ufs.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENOEXEC": {
+    "users": 2,
+    "example": [
+     "src/kern/elf.c",
+     "src/kern/exec.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENOMEM": {
+    "users": 121,
+    "example": [
+     "src/drivers/disklabel/gpt.c",
+     "src/drivers/disklabel/pcat.c",
+     "src/drivers/fs/fat.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENOPROTOOPT": {
+    "users": 4,
+    "example": [
+     "src/kern/net/socket.c",
+     "src/kern/net/tcp.c",
+     "src/kern/net/unix-socket.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENOSPC": {
+    "users": 66,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "src/drivers/disklabel/gpt.c",
+     "src/drivers/fs/fat.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENOSYS": {
+    "users": 3,
+    "example": [
+     "src/drivers/gpu/i915/display/state.c",
+     "src/drivers/gpu/i915/tests/execution/ktest-display.c",
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENOTCONN": {
+    "users": 6,
+    "example": [
+     "src/drivers/usb/usb-rtl8822bu.c",
+     "src/drivers/wifi/intel-ax211/intel-ax211.c",
+     "src/kern/net/inet-socket.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENOTDIR": {
+    "users": 10,
+    "example": [
+     "src/drivers/fs/overlayfs.c",
+     "src/drivers/fs/ufs.c",
+     "src/kern/cred.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENOTEMPTY": {
+    "users": 4,
+    "example": [
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/overlayfs.c",
+     "src/drivers/fs/ufs.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENOTSOCK": {
+    "users": 1,
+    "example": [
+     "src/kern/net/unix-socket.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENOTSUP": {
+    "users": 33,
+    "example": [
+     "src/drivers/generic/dma.c",
+     "src/drivers/gpu/gpu.c",
+     "src/drivers/gpu/i915/command.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENOTTY": {
+    "users": 5,
+    "example": [
+     "src/drivers/generic/input.c",
+     "src/drivers/generic/loop.c",
+     "src/kern/net/wifi/wlan.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ENXIO": {
+    "users": 25,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "src/drivers/fs/overlayfs.c",
+     "src/drivers/generic/loop.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EOPNOTSUPP": {
+    "users": 71,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "include/kern/file-backing.h",
+     "include/kern/io-context.h"
+    ],
+    "kernel_defines_too": false
+   },
+   "EOVERFLOW": {
+    "users": 56,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "src/drivers/disklabel/gpt.c",
+     "src/drivers/fs/fat.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EPERM": {
+    "users": 22,
+    "example": [
+     "src/drivers/fs/ufs.c",
+     "src/drivers/generic/system-device.c",
+     "src/drivers/gpu/gpu-fence.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EPIPE": {
+    "users": 9,
+    "example": [
+     "src/drivers/usb/usb-cdc-ecm.c",
+     "src/drivers/usb/usb-cdc-ncm-net.c",
+     "src/drivers/usb/usb-rtl8822bu.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EPROTONOSUPPORT": {
+    "users": 9,
+    "example": [
+     "src/kern/net/icmp.c",
+     "src/kern/net/inet-socket.c",
+     "src/kern/net/packet-socket.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ERANGE": {
+    "users": 12,
+    "example": [
+     "src/drivers/fs/ufs.c",
+     "src/drivers/gpu/i915/display/scanout.c",
+     "src/drivers/gpu/i915/ggtt.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EROFS": {
+    "users": 15,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/overlayfs.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ESPIPE": {
+    "users": 2,
+    "example": [
+     "src/kern/cdev.c",
+     "src/kern/file.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ESRCH": {
+    "users": 7,
+    "example": [
+     "src/drivers/gpu/gpu.c",
+     "src/kern/process.c",
+     "src/kern/ptrace.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ESTALE": {
+    "users": 15,
+    "example": [
+     "src/drivers/gpu/gpu-fence.c",
+     "src/drivers/gpu/i915/display/capture.c",
+     "src/drivers/gpu/i915/display/display.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ETIMEDOUT": {
+    "users": 62,
+    "example": [
+     "src/drivers/ethernet/dp8390.c",
+     "src/drivers/gpu/gpu.c",
+     "src/drivers/gpu/i915/display/diagnostics.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "EWOULDBLOCK": {
+    "users": 1,
+    "example": [
+     "src/kern/net/net-device.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "EXDEV": {
+    "users": 7,
+    "example": [
+     "src/drivers/fs/overlayfs.c",
+     "src/drivers/fs/ufs.c",
+     "src/drivers/gpu/gpu-fence.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "errno": {
+    "users": 244,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "include/kern/file-backing.h",
+     "include/kern/io-context.h"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "fcntl.h": {
+   "AT_EACCESS": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "AT_FDCWD": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "AT_REMOVEDIR": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "AT_SYMLINK_FOLLOW": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "AT_SYMLINK_NOFOLLOW": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "FD_CLOEXEC": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "FD_CLOFORK": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "F_DUPFD": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "F_DUPFD_CLOEXEC": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "F_DUPFD_CLOFORK": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "F_GETFD": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "F_GETFL": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "F_GETLK": {
+    "users": 2,
+    "example": [
+     "src/kern/record-lock.c",
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "F_GETOWN": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "F_OFD_GETLK": {
+    "users": 2,
+    "example": [
+     "src/kern/record-lock.c",
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "F_OFD_SETLK": {
+    "users": 2,
+    "example": [
+     "src/kern/record-lock.c",
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "F_OFD_SETLKW": {
+    "users": 2,
+    "example": [
+     "src/kern/record-lock.c",
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "F_RDLCK": {
+    "users": 1,
+    "example": [
+     "src/kern/record-lock.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "F_SETFD": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "F_SETFL": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "F_SETLK": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "F_SETLKW": {
+    "users": 2,
+    "example": [
+     "src/kern/record-lock.c",
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "F_SETOWN": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "F_UNLCK": {
+    "users": 1,
+    "example": [
+     "src/kern/record-lock.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "F_WRLCK": {
+    "users": 1,
+    "example": [
+     "src/kern/record-lock.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "O_ACCMODE": {
+    "users": 13,
+    "example": [
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/overlayfs.c",
+     "src/drivers/generic/input.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "O_APPEND": {
+    "users": 5,
+    "example": [
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/overlayfs.c",
+     "src/kern/file.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "O_CLOEXEC": {
+    "users": 3,
+    "example": [
+     "src/kern/handle.c",
+     "src/kern/pipe.c",
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "O_CLOFORK": {
+    "users": 3,
+    "example": [
+     "src/kern/handle.c",
+     "src/kern/pipe.c",
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "O_CREAT": {
+    "users": 2,
+    "example": [
+     "src/drivers/fs/overlayfs.c",
+     "src/kern/file.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "O_DIRECTORY": {
+    "users": 4,
+    "example": [
+     "include/kern/file.h",
+     "src/drivers/fs/overlayfs.c",
+     "src/kern/file.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "O_DSYNC": {
+    "users": 1,
+    "example": [
+     "src/kern/file.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "O_EXCL": {
+    "users": 2,
+    "example": [
+     "src/drivers/fs/overlayfs.c",
+     "src/kern/file.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "O_NOCTTY": {
+    "users": 2,
+    "example": [
+     "src/kern/file.c",
+     "src/kern/tty.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "O_NOFOLLOW": {
+    "users": 5,
+    "example": [
+     "include/kern/file.h",
+     "src/drivers/wifi/intel-ax211/intel-ax211-firmware.c",
+     "src/drivers/wifi/rtl8822b/rtl8822b.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "O_NONBLOCK": {
+    "users": 6,
+    "example": [
+     "src/drivers/generic/input.c",
+     "src/kern/file.c",
+     "src/kern/net/socket-file.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "O_RDONLY": {
+    "users": 17,
+    "example": [
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/overlayfs.c",
+     "src/drivers/generic/loop.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "O_RDWR": {
+    "users": 9,
+    "example": [
+     "src/drivers/fs/overlayfs.c",
+     "src/drivers/generic/loop.c",
+     "src/kern/devfs.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "O_SYNC": {
+    "users": 1,
+    "example": [
+     "src/kern/file.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "O_TRUNC": {
+    "users": 2,
+    "example": [
+     "src/drivers/fs/overlayfs.c",
+     "src/kern/file.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "O_WRONLY": {
+    "users": 8,
+    "example": [
+     "src/drivers/generic/input.c",
+     "src/drivers/gpu/gpu.c",
+     "src/kern/exec.c"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "getopt.h": {
+   "optional_argument": {
+    "users": 2,
+    "example": [
+     "include/kern/exec.h",
+     "src/kern/exec.c"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "limits.h": {
+   "GETENTROPY_MAX": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "INT_MAX": {
+    "users": 4,
+    "example": [
+     "src/drivers/gpu/i915/display/pipe.c",
+     "src/kern/kcrt.c",
+     "src/kern/timer.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "INT_MIN": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "NAME_MAX": {
+    "users": 14,
+    "example": [
+     "include/kern/file.h",
+     "include/kern/mount.h",
+     "include/kern/namei.h"
+    ],
+    "kernel_defines_too": true
+   },
+   "PATH_MAX": {
+    "users": 5,
+    "example": [
+     "include/kern/exec.h",
+     "include/kern/mount.h",
+     "include/kern/namei.h"
+    ],
+    "kernel_defines_too": true
+   },
+   "SSIZE_MAX": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "UINT_MAX": {
+    "users": 27,
+    "example": [
+     "include/kern/atomic.h",
+     "src/drivers/generic/dma.c",
+     "src/drivers/gpu/gpu.c"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "link.h": {
+   "PT_DYNAMIC": {
+    "users": 2,
+    "example": [
+     "include/kern/elf.h",
+     "src/kern/elf.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "PT_GNU_STACK": {
+    "users": 2,
+    "example": [
+     "include/kern/elf.h",
+     "src/kern/elf.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "PT_INTERP": {
+    "users": 2,
+    "example": [
+     "include/kern/elf.h",
+     "src/kern/elf.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "PT_LOAD": {
+    "users": 2,
+    "example": [
+     "include/kern/elf.h",
+     "src/kern/elf.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "PT_NULL": {
+    "users": 1,
+    "example": [
+     "include/kern/elf.h"
+    ],
+    "kernel_defines_too": true
+   },
+   "PT_PHDR": {
+    "users": 2,
+    "example": [
+     "include/kern/elf.h",
+     "src/kern/elf.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "PT_TLS": {
+    "users": 2,
+    "example": [
+     "include/kern/elf.h",
+     "src/kern/elf.c"
+    ],
+    "kernel_defines_too": true
+   }
+  },
+  "search.h": {
+   "leaf": {
+    "users": 16,
+    "example": [
+     "include/kern/writeback.h",
+     "src/drivers/fs/ufs.c",
+     "src/hal/amd64/bsp-pcat/cons.c"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "stdarg.h": {
+   "va_arg": {
+    "users": 1,
+    "example": [
+     "src/kern/kcrt.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "va_copy": {
+    "users": 1,
+    "example": [
+     "src/kern/kcrt.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "va_end": {
+    "users": 3,
+    "example": [
+     "include/kern/kcrt.h",
+     "src/kern/kcrt.c",
+     "src/kern/klog.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "va_list": {
+    "users": 3,
+    "example": [
+     "include/kern/kcrt.h",
+     "src/kern/kcrt.c",
+     "src/kern/klog.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "va_start": {
+    "users": 3,
+    "example": [
+     "include/kern/kcrt.h",
+     "src/kern/kcrt.c",
+     "src/kern/klog.c"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "stdbool.h": {
+   "bool": {
+    "users": 124,
+    "example": [
+     "include/drivers/pci/pci.h",
+     "include/drivers/usb/usb.h",
+     "include/hal/arch.h"
+    ],
+    "kernel_defines_too": true
+   },
+   "false": {
+    "users": 58,
+    "example": [
+     "src/drivers/generic/loop.c",
+     "src/drivers/gpu/i915/display/aux.c",
+     "src/drivers/gpu/i915/display/clock.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "true": {
+    "users": 47,
+    "example": [
+     "plan/ws004/tests/pci-msi-qemu.c",
+     "src/drivers/generic/loop.c",
+     "src/drivers/gpu/i915/display/clock.c"
+    ],
+    "kernel_defines_too": true
+   }
+  },
+  "stddef.h": {
+   "NULL": {
+    "users": 370,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "include/drivers/pci/pci-xhci-capability.h",
+     "include/drivers/pci/pci-xhci-control.h"
+    ],
+    "kernel_defines_too": true
+   },
+   "offsetof": {
+    "users": 6,
+    "example": [
+     "src/drivers/gpu/i915/display/internal.h",
+     "src/drivers/gpu/i915/display/takeover-internal.h",
+     "src/kern/net/unix-socket.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ptrdiff_t": {
+    "users": 1,
+    "example": [
+     "src/kern/kcrt.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "size_t": {
+    "users": 322,
+    "example": [
+     "include/drivers/disklabel/disklabel.h",
+     "include/drivers/generic/dma.h",
+     "include/drivers/pci/pci-nvme-protocol.h"
+    ],
+    "kernel_defines_too": true
+   }
+  },
+  "stdint.h": {
+   "INT32_MAX": {
+    "users": 13,
+    "example": [
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/ufs.c",
+     "src/drivers/generic/loop.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "INT32_MIN": {
+    "users": 3,
+    "example": [
+     "src/kern/file.c",
+     "src/kern/process.c",
+     "src/kern/signal.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "INT64_MAX": {
+    "users": 11,
+    "example": [
+     "src/drivers/fs/ufs.c",
+     "src/drivers/generic/memory-device.c",
+     "src/drivers/gpu/gpu.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "INT64_MIN": {
+    "users": 3,
+    "example": [
+     "src/kern/clock.c",
+     "src/kern/file.c",
+     "src/kern/record-lock.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "INTPTR_MAX": {
+    "users": 5,
+    "example": [
+     "src/hal/amd64/space.c",
+     "src/hal/arm64/space.c",
+     "src/hal/i386/space.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "SIZE_MAX": {
+    "users": 36,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/ufs.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "UINT16_C": {
+    "users": 1,
+    "example": [
+     "include/drivers/usb/usb-cdc-ncm.h"
+    ],
+    "kernel_defines_too": false
+   },
+   "UINT16_MAX": {
+    "users": 17,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "include/kern/boot.h",
+     "include/kern/net/packet-buf.h"
+    ],
+    "kernel_defines_too": false
+   },
+   "UINT32_C": {
+    "users": 8,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "include/drivers/usb/usb-cdc-ncm.h",
+     "include/kern/swap.h"
+    ],
+    "kernel_defines_too": false
+   },
+   "UINT32_MAX": {
+    "users": 56,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "include/drivers/pci/pci-xhci-capability.h",
+     "include/drivers/pci/pci-xhci-control.h"
+    ],
+    "kernel_defines_too": false
+   },
+   "UINT64_C": {
+    "users": 16,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "include/drivers/pci/pci-xhci-control.h",
+     "src/drivers/disklabel/gpt.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "UINT64_MAX": {
+    "users": 77,
+    "example": [
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "include/kern/io-epoch.h",
+     "include/kern/user-probe.h"
+    ],
+    "kernel_defines_too": false
+   },
+   "UINT8_C": {
+    "users": 2,
+    "example": [
+     "include/drivers/usb/usb-cdc-ncm.h",
+     "src/drivers/wifi/intel-ax211/intel-ax211-scan.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "UINT8_MAX": {
+    "users": 4,
+    "example": [
+     "src/drivers/usb/usb-rtl8822bu.c",
+     "src/drivers/usb/usb.c",
+     "src/drivers/wifi/intel-ax211/intel-ax211-protocol.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "UINTPTR_MAX": {
+    "users": 17,
+    "example": [
+     "include/kern/user-probe.h",
+     "src/drivers/gpu/gpu.c",
+     "src/drivers/platform/pc98/graphics/pc98-graphics.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "int16_t": {
+    "users": 2,
+    "example": [
+     "src/drivers/gpu/i915/display/internal.h",
+     "src/kern/record-lock.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "int32_t": {
+    "users": 48,
+    "example": [
+     "include/drivers/usb/hid-report.h",
+     "include/kern/clock.h",
+     "include/kern/elf.h"
+    ],
+    "kernel_defines_too": false
+   },
+   "int64_t": {
+    "users": 20,
+    "example": [
+     "include/kern/clock.h",
+     "include/kern/elf.h",
+     "src/drivers/fs/fat.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "int8_t": {
+    "users": 6,
+    "example": [
+     "src/drivers/gpu/i915/display/internal.h",
+     "src/drivers/platform/pc98/pc98-busmouse.c",
+     "src/drivers/platform/pcat/ps2-8042.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "intmax_t": {
+    "users": 1,
+    "example": [
+     "src/kern/kcrt.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "intptr_t": {
+    "users": 10,
+    "example": [
+     "include/hal/hal.h",
+     "include/kern/process.h",
+     "src/hal/amd64/task.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "uint16_t": {
+    "users": 210,
+    "example": [
+     "include/drivers/ethernet/dp8390.h",
+     "include/drivers/pci/pci-nvme-protocol.h",
+     "include/drivers/pci/pci-xhci-capability.h"
+    ],
+    "kernel_defines_too": true
+   },
+   "uint32_t": {
+    "users": 505,
+    "example": [
+     "include/drivers/gpu/gpu-fence.h",
+     "include/drivers/gpu/gpu-scanout.h",
+     "include/drivers/gpu/gpu-share.h"
+    ],
+    "kernel_defines_too": true
+   },
+   "uint64_t": {
+    "users": 433,
+    "example": [
+     "include/drivers/disklabel/disklabel.h",
+     "include/drivers/generic/dma.h",
+     "include/drivers/gpu/gpu-display.h"
+    ],
+    "kernel_defines_too": true
+   },
+   "uint8_t": {
+    "users": 361,
+    "example": [
+     "include/drivers/disklabel/disklabel.h",
+     "include/drivers/ethernet/dp8390.h",
+     "include/drivers/pci/pci-nvme-protocol.h"
+    ],
+    "kernel_defines_too": true
+   },
+   "uintmax_t": {
+    "users": 2,
+    "example": [
+     "src/kern/kcrt.c",
+     "src/kern/vmspace.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "uintptr_t": {
+    "users": 164,
+    "example": [
+     "include/drivers/generic/dma.h",
+     "include/drivers/pci/pci.h",
+     "include/drivers/usb/usb.h"
+    ],
+    "kernel_defines_too": true
+   }
+  },
+  "stdio.h": {
+   "SEEK_CUR": {
+    "users": 1,
+    "example": [
+     "src/kern/record-lock.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "SEEK_END": {
+    "users": 1,
+    "example": [
+     "src/kern/record-lock.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "SEEK_SET": {
+    "users": 1,
+    "example": [
+     "src/kern/record-lock.c"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "stdnoreturn.h": {
+   "noreturn": {
+    "users": 16,
+    "example": [
+     "include/kern/panic.h",
+     "include/kern/platform.h",
+     "include/kern/process.h"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "sys/ioctl.h": {
+   "KERN_IOC_INOUT": {
+    "users": 1,
+    "example": [
+     "src/kern/net/inet-socket.c"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "sys/mman.h": {
+   "MAP_ANONYMOUS": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "MAP_FIXED": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "MAP_FIXED_NOREPLACE": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "MAP_PRIVATE": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "MAP_SHARED": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "MS_ASYNC": {
+    "users": 2,
+    "example": [
+     "src/kern/vm.c",
+     "src/kern/vmspace.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "MS_INVALIDATE": {
+    "users": 2,
+    "example": [
+     "src/kern/vm.c",
+     "src/kern/vmspace.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "MS_SYNC": {
+    "users": 2,
+    "example": [
+     "src/kern/vm.c",
+     "src/kern/vmspace.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "PROT_EXEC": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "PROT_READ": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "PROT_WRITE": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "sys/mount.h": {
+   "KERN_MOUNT_ARGS_VERSION": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "MNT_NOSUID": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "MNT_RDONLY": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "struct mount_args": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "sys/param.h": {
+   "roundup": {
+    "users": 2,
+    "example": [
+     "src/drivers/gpu/i915/display/dp-internal.h",
+     "src/drivers/gpu/i915/display/panel.c"
+    ],
+    "kernel_defines_too": true
+   }
+  },
+  "sys/resource.h": {
+   "PRIO_PGRP": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "PRIO_PROCESS": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "PRIO_USER": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "RUSAGE_CHILDREN": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "RUSAGE_SELF": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "struct rusage": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "sys/stat.h": {
+   "S_IFBLK": {
+    "users": 4,
+    "example": [
+     "include/kern/inode.h",
+     "src/kern/devfs.c",
+     "src/kern/inode.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "S_IFCHR": {
+    "users": 4,
+    "example": [
+     "include/kern/inode.h",
+     "src/kern/devfs.c",
+     "src/kern/inode.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "S_IFDIR": {
+    "users": 5,
+    "example": [
+     "include/kern/inode.h",
+     "src/drivers/fs/fat.c",
+     "src/kern/devfs.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "S_IFIFO": {
+    "users": 3,
+    "example": [
+     "include/kern/inode.h",
+     "src/kern/inode.c",
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "S_IFLNK": {
+    "users": 2,
+    "example": [
+     "include/kern/inode.h",
+     "src/kern/inode.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "S_IFMT": {
+    "users": 5,
+    "example": [
+     "include/kern/inode.h",
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/ufs.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "S_IFREG": {
+    "users": 3,
+    "example": [
+     "include/kern/inode.h",
+     "src/drivers/fs/fat.c",
+     "src/kern/inode.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "S_IFSOCK": {
+    "users": 2,
+    "example": [
+     "include/kern/inode.h",
+     "src/kern/inode.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "S_ISGID": {
+    "users": 5,
+    "example": [
+     "include/kern/inode.h",
+     "src/kern/cred.c",
+     "src/kern/exec.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "S_ISREG": {
+    "users": 1,
+    "example": [
+     "src/kern/vfs.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "S_ISUID": {
+    "users": 4,
+    "example": [
+     "include/kern/inode.h",
+     "src/kern/cred.c",
+     "src/kern/exec.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "S_ISVTX": {
+    "users": 2,
+    "example": [
+     "include/kern/inode.h",
+     "src/kern/cred.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "S_IWGRP": {
+    "users": 1,
+    "example": [
+     "src/kern/swap.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "S_IWOTH": {
+    "users": 1,
+    "example": [
+     "src/kern/swap.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "S_IWUSR": {
+    "users": 1,
+    "example": [
+     "src/kern/swap.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "st_atime": {
+    "users": 4,
+    "example": [
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/ufs.c",
+     "src/kern/inode.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "st_ctime": {
+    "users": 4,
+    "example": [
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/ufs.c",
+     "src/kern/inode.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "st_mtime": {
+    "users": 4,
+    "example": [
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/ufs.c",
+     "src/kern/inode.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "struct stat": {
+    "users": 12,
+    "example": [
+     "include/kern/exec.h",
+     "include/kern/inode.h",
+     "src/drivers/fs/fat.c"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "sys/statvfs.h": {
+   "ST_LOCAL": {
+    "users": 1,
+    "example": [
+     "src/kern/mount.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ST_NOSUID": {
+    "users": 1,
+    "example": [
+     "src/kern/mount.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ST_RDONLY": {
+    "users": 1,
+    "example": [
+     "src/kern/mount.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "fsfilcnt_t": {
+    "users": 1,
+    "example": [
+     "src/kern/devfs.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "struct statvfs": {
+    "users": 8,
+    "example": [
+     "include/kern/mount.h",
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/overlayfs.c"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "sys/time.h": {
+   "struct itimerval": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "struct timeval": {
+    "users": 2,
+    "example": [
+     "src/kern/net/socket.c",
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "sys/types.h": {
+   "blkcnt_t": {
+    "users": 4,
+    "example": [
+     "src/drivers/fs/fat.c",
+     "src/drivers/fs/ufs.c",
+     "src/kern/inode.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "dev_t": {
+    "users": 12,
+    "example": [
+     "include/kern/cdev.h",
+     "include/kern/disk.h",
+     "include/kern/inode.h"
+    ],
+    "kernel_defines_too": false
+   },
+   "gid_t": {
+    "users": 12,
+    "example": [
+     "include/kern/cred.h",
+     "include/kern/inode.h",
+     "include/kern/quota.h"
+    ],
+    "kernel_defines_too": false
+   },
+   "id_t": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "ino_t": {
+    "users": 7,
+    "example": [
+     "include/kern/file.h",
+     "include/kern/inode.h",
+     "src/drivers/fs/fat.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "mode_t": {
+    "users": 17,
+    "example": [
+     "include/kern/file.h",
+     "include/kern/inode.h",
+     "include/kern/net/socket.h"
+    ],
+    "kernel_defines_too": true
+   },
+   "nlink_t": {
+    "users": 2,
+    "example": [
+     "include/kern/inode.h",
+     "src/drivers/fs/ufs.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "off_t": {
+    "users": 27,
+    "example": [
+     "include/kern/cdev.h",
+     "include/kern/file.h",
+     "include/kern/inode.h"
+    ],
+    "kernel_defines_too": false
+   },
+   "pid_t": {
+    "users": 7,
+    "example": [
+     "include/kern/process.h",
+     "include/kern/signal.h",
+     "src/kern/process.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "ssize_t": {
+    "users": 42,
+    "example": [
+     "include/kern/cdev.h",
+     "include/kern/cred.h",
+     "include/kern/file.h"
+    ],
+    "kernel_defines_too": false
+   },
+   "tid_t": {
+    "users": 6,
+    "example": [
+     "include/kern/process.h",
+     "include/kern/thread.h",
+     "src/kern/process.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "uid_t": {
+    "users": 14,
+    "example": [
+     "include/kern/cred.h",
+     "include/kern/inode.h",
+     "include/kern/process.h"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "sys/un.h": {
+   "UNIX_PATH_MAX": {
+    "users": 1,
+    "example": [
+     "src/kern/net/unix-socket.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "struct sockaddr_un": {
+    "users": 1,
+    "example": [
+     "src/kern/net/unix-socket.c"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "sys/wait.h": {
+   "P_ALL": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "P_PGID": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "P_PID": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "WCONTINUED": {
+    "users": 2,
+    "example": [
+     "src/kern/process.c",
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "WEXITED": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "WEXITSTATUS": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "WIFEXITED": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "WNOHANG": {
+    "users": 2,
+    "example": [
+     "src/kern/process.c",
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "WNOWAIT": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "WSTOPPED": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "WSTOPSIG": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "WTERMSIG": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "WUNTRACED": {
+    "users": 2,
+    "example": [
+     "src/kern/process.c",
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "idtype_t": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "time.h": {
+   "CLOCK_MONOTONIC": {
+    "users": 3,
+    "example": [
+     "src/kern/clock.c",
+     "src/kern/syscall.c",
+     "src/kern/timer.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "CLOCK_REALTIME": {
+    "users": 3,
+    "example": [
+     "src/kern/clock.c",
+     "src/kern/syscall.c",
+     "src/kern/timer.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "TIMER_ABSTIME": {
+    "users": 1,
+    "example": [
+     "src/kern/timer.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "UTIME_NOW": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "UTIME_OMIT": {
+    "users": 1,
+    "example": [
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "clockid_t": {
+    "users": 5,
+    "example": [
+     "include/kern/clock.h",
+     "include/kern/process-timer.h",
+     "src/kern/clock.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "struct itimerspec": {
+    "users": 3,
+    "example": [
+     "include/kern/process-timer.h",
+     "src/kern/syscall.c",
+     "src/kern/timer.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "struct timespec": {
+    "users": 4,
+    "example": [
+     "include/kern/clock.h",
+     "src/kern/clock.c",
+     "src/kern/syscall.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "time_t": {
+    "users": 9,
+    "example": [
+     "include/kern/clock.h",
+     "include/kern/inode.h",
+     "src/drivers/fs/fat.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "timer_t": {
+    "users": 3,
+    "example": [
+     "include/kern/process-timer.h",
+     "src/kern/syscall.c",
+     "src/kern/timer.c"
+    ],
+    "kernel_defines_too": false
+   }
+  },
+  "unistd.h": {
+   "F_OK": {
+    "users": 1,
+    "example": [
+     "src/kern/cred.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "R_OK": {
+    "users": 4,
+    "example": [
+     "src/kern/acl.c",
+     "src/kern/cred.c",
+     "src/kern/file.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "SEEK_DATA": {
+    "users": 2,
+    "example": [
+     "include/kern/file.h",
+     "src/kern/file.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "SEEK_HOLE": {
+    "users": 2,
+    "example": [
+     "include/kern/file.h",
+     "src/kern/file.c"
+    ],
+    "kernel_defines_too": true
+   },
+   "W_OK": {
+    "users": 5,
+    "example": [
+     "src/kern/acl.c",
+     "src/kern/cred.c",
+     "src/kern/file.c"
+    ],
+    "kernel_defines_too": false
+   },
+   "X_OK": {
+    "users": 5,
+    "example": [
+     "src/kern/acl.c",
+     "src/kern/cred.c",
+     "src/kern/exec.c"
+    ],
+    "kernel_defines_too": false
+   }
+  }
+ },
+ "already_in_uapi": {
+  "link.h": [
+   "KERN_USER_ABI_LP64"
+  ],
+  "sys/types.h": [
+   "KERN_USER_ABI_LP64"
+  ]
+ }
+}

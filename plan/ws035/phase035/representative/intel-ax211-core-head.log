@@ -1,0 +1,4 @@
+/tmp/p035/head2/build/driver-fragments/src/drivers/intel-ax211.c:51:10: fatal error: kern/kcrt.h: No such file or directory
+   51 | #include <kern/kcrt.h>
+      |          ^~~~~~~~~~~~~
+compilation terminated.

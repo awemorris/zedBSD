@@ -3,7 +3,7 @@
 Vulkan 1.0 の137 core commandと、Vulkan 1.0に適用される
 `VK_KHR_surface`、`VK_KHR_display`、`VK_KHR_swapchain`、
 `VK_KHR_display_swapchain` の18 commandを提供する共有ライブラリです。
-公開ヘッダは `libc/include/vulkan/`、インストール先は
+公開ヘッダは `include/libc/vulkan/`、インストール先は
 `/lib/libvulkan.so`、SONAMEは `libvulkan.so` です。
 
 アプリは標準Vulkan APIを使います。zedBSDのGPU ioctl、resource ID、
@@ -62,7 +62,7 @@ contextをdevice-lostとして終了する場合があります。
 
 ## 宣言とprotocolの来歴
 
-[API-PROVENANCE.md](../../../libc/include/vulkan/API-PROVENANCE.md) に
+[API-PROVENANCE.md](../../../include/libc/vulkan/API-PROVENANCE.md) に
 固定した公式宣言の版・hash・ライセンスとNoct再生成手順を記録しています。
 実装は独立して記述し、Mesa、loader、virglrendererのC実装を移入していません。
 公開APIとprotocol IDの必要なライセンス表示はそれぞれの資料を参照してください。

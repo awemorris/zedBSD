@@ -23,6 +23,7 @@
 
 #include "edp-ktest.h"
 #include "display-ktest.h"
+#include <kern/kcrt.h>
 
 #include "../execution/ktest.h"
 #include "../../i915.h"
@@ -35,9 +36,8 @@
 #include <kern/clock.h>
 #include <kern/kmem.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdint.h>
-#include <string.h>
 
 /* The PP_CONTROL bit that forces VDD on. */
 #define I915_EDP_KTEST_VDD_FORCE 8u
@@ -187,7 +187,7 @@ drv_i915_display_ktest_edp_world_enter(
 	int error;
 
 	/* Starts with nothing borrowed. */
-	memset(borrow, 0, sizeof(*borrow));
+	kern_memset(borrow, 0, sizeof(*borrow));
 	display = NULL;
 	if (ktest->device != NULL)
 		display = ktest->device->display;
@@ -226,8 +226,8 @@ drv_i915_display_ktest_edp_world_enter(
 		 * Sets the resident panel's world aside and empties it: the Linux
 		 * text keeps reaching the same world, which now has no live eDP.
 		 */
-		memcpy(saved, display->dp_world, sizeof(*saved));
-		memset(display->dp_world, 0, sizeof(*display->dp_world));
+		kern_memcpy(saved, display->dp_world, sizeof(*saved));
+		kern_memset(display->dp_world, 0, sizeof(*display->dp_world));
 		carrier->dp_world = display->dp_world;
 		borrow->world = display->dp_world;
 		borrow->saved = saved;
@@ -258,13 +258,13 @@ drv_i915_display_ktest_edp_world_leave(
 	if (borrow->created) {
 		drv_i915_dp_world_destroy(borrow->carrier);
 	} else {
-		memcpy(borrow->world, borrow->saved, sizeof(*borrow->world));
+		kern_memcpy(borrow->world, borrow->saved, sizeof(*borrow->world));
 		kern_free(borrow->saved);
 	}
 
 	/* Frees the carrier. */
 	kern_free(borrow->carrier);
-	memset(borrow, 0, sizeof(*borrow));
+	kern_memset(borrow, 0, sizeof(*borrow));
 }
 
 /*
@@ -328,7 +328,7 @@ i915_edp_ktest_target_cfg(
 	struct i915_edp_config *cfg)
 {
 	/* Starts from port A, AUX A and no controller. */
-	memset(cfg, 0, sizeof(*cfg));
+	kern_memset(cfg, 0, sizeof(*cfg));
 
 	/* The raw clock the target reported. */
 	cfg->rawclk_khz = 19200u;
@@ -424,7 +424,7 @@ i915_edp_ktest_captured(void)
 	if (!res->dpcd_ok)
 		return 0;
 
-	compared = memcmp(res->dpcd, i915_dp_fixture_dpcd_000, I915_EDP_KTEST_DPCD_BYTES);
+	compared = kern_memcmp(res->dpcd, i915_dp_fixture_dpcd_000, I915_EDP_KTEST_DPCD_BYTES);
 	if (compared != 0)
 		return 0;
 
@@ -432,7 +432,7 @@ i915_edp_ktest_captured(void)
 	if (!res->edp_dpcd_ok)
 		return 0;
 
-	compared = memcmp(res->edp_dpcd, i915_dp_fixture_dpcd_700, I915_EDP_KTEST_EDP_DPCD_BYTES);
+	compared = kern_memcmp(res->edp_dpcd, i915_dp_fixture_dpcd_700, I915_EDP_KTEST_EDP_DPCD_BYTES);
 	if (compared != 0)
 		return 0;
 
@@ -442,7 +442,7 @@ i915_edp_ktest_captured(void)
 	if (res->edid_blocks != 1u)
 		return 0;
 
-	compared = memcmp(res->edid, i915_dp_fixture_edid, I915_EDP_KTEST_EDID_BYTES);
+	compared = kern_memcmp(res->edid, i915_dp_fixture_edid, I915_EDP_KTEST_EDID_BYTES);
 	if (compared != 0)
 		return 0;
 
@@ -659,8 +659,8 @@ i915_edp_ktest_retry(
 	 * forbidden sizes 21 and 0, a reserved reply and a 5-byte short read.
 	 */
 	i915_edp_ktest_fresh(world);
-	memset(params, 0, sizeof(params));
-	memset(faults, I915_DP_FAKE_OK, sizeof(faults));
+	kern_memset(params, 0, sizeof(params));
+	kern_memset(faults, I915_DP_FAKE_OK, sizeof(faults));
 	faults[0] = I915_DP_FAKE_NATIVE_DEFER;
 	faults[1] = I915_DP_FAKE_NATIVE_NACK;
 	faults[2] = I915_DP_FAKE_RECEIVE_ERROR;
@@ -676,8 +676,8 @@ i915_edp_ktest_retry(
 	end = drv_i915_edp_end(world, &i915_edp_ktest_res);
 
 	/* The data read equals the captured panel and everything is released. */
-	dpcd_compared = memcmp(i915_edp_ktest_res.dpcd, i915_dp_fixture_dpcd_000, I915_EDP_KTEST_DPCD_BYTES);
-	edid_compared = memcmp(i915_edp_ktest_res.edid, i915_dp_fixture_edid, I915_EDP_KTEST_EDID_BYTES);
+	dpcd_compared = kern_memcmp(i915_edp_ktest_res.dpcd, i915_dp_fixture_dpcd_000, I915_EDP_KTEST_DPCD_BYTES);
+	edid_compared = kern_memcmp(i915_edp_ktest_res.edid, i915_dp_fixture_edid, I915_EDP_KTEST_EDID_BYTES);
 	passed = 0;
 	if (rc == 0 &&
 	    dpcd_compared == 0 &&
@@ -712,8 +712,8 @@ i915_edp_ktest_i2c(
 	 * 16-byte EDID read to answer with 4 bytes.
 	 */
 	i915_edp_ktest_fresh(world);
-	memset(faults, I915_DP_FAKE_OK, sizeof(faults));
-	memset(params, 0, sizeof(params));
+	kern_memset(faults, I915_DP_FAKE_OK, sizeof(faults));
+	kern_memset(params, 0, sizeof(params));
 	faults[6] = I915_DP_FAKE_I2C_DEFER;
 	faults[7] = I915_DP_FAKE_I2C_DEFER;
 	faults[11] = I915_DP_FAKE_SHORT_REPLY;
@@ -725,7 +725,7 @@ i915_edp_ktest_i2c(
 	end = drv_i915_edp_end(world, &i915_edp_ktest_res);
 
 	/* Both DEFERs were retried, the EDID has no gap or repeat and everything is released. */
-	edid_compared = memcmp(i915_edp_ktest_res.edid, i915_dp_fixture_edid, I915_EDP_KTEST_EDID_BYTES);
+	edid_compared = kern_memcmp(i915_edp_ktest_res.edid, i915_dp_fixture_edid, I915_EDP_KTEST_EDID_BYTES);
 	passed = 0;
 	if (rc == 0 &&
 	    i915_edp_ktest_res.i2c_defers == 2u &&
@@ -1105,7 +1105,7 @@ i915_edp_ktest_lcd_a_fit(
 	int rc;
 
 	/* A sink of RBR x1 only. */
-	memcpy(one_lane, i915_dp_fixture_dpcd_000, sizeof(one_lane));
+	kern_memcpy(one_lane, i915_dp_fixture_dpcd_000, sizeof(one_lane));
 	one_lane[1] = 0x06u;
 	one_lane[2] = 0x01u;
 

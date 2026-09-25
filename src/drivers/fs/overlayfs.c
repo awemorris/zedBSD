@@ -17,6 +17,7 @@
  * read-only rather than expose an inconsistent namespace.
  */
 
+#include "kern/mount.h"
 #include "kern/overlayfs.h"
 #include "kern/file.h"
 #include "kern/inode.h"
@@ -24,13 +25,14 @@
 #include "kern/namecache.h"
 #include "kern/namei.h"
 #include "kern/pipe.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <fcntl.h>
+#include <uapi/errno.h>
+#include <uapi/fcntl.h>
 #include <stdint.h>
-#include <string.h>
 
-#define OVERLAY_INODE_MAX 256U
+/* Matches the VFS inode cache: an overlay inode lives as long as its cached inode. */
+#define OVERLAY_INODE_MAX 4096U
 /*
  * One identity per inode slot: an identity is held exactly as long
  * as the inode that uses it, so the table cannot be asked for more
@@ -454,7 +456,7 @@ drv_overlay_mount_at(
 		name++;
 
 	/* What is left has to be a name, and one single component of a path. */
-	separator = strchr(name, '/');
+	separator = kern_strchr(name, '/');
 	if (name[0] == '\0' || separator != NULL)
 		return EINVAL;
 
@@ -508,8 +510,8 @@ overlay_content_host_pwrite(
 		return -EINVAL;
 
 	/* Binds the outer file to the real one for the duration of the call. */
-	memset(&file_info, 0, sizeof(file_info));
-	memset(&inode_info, 0, sizeof(inode_info));
+	kern_memset(&file_info, 0, sizeof(file_info));
+	kern_memset(&inode_info, 0, sizeof(inode_info));
 	file_info.real = real;
 	inode_info.upper.p_inode = real->f_inode;
 	saved_file_data = outer->f_data;
@@ -556,12 +558,12 @@ overlay_content_host_truncate(
 		return EINVAL;
 
 	/* Builds a minimal writable overlay around the real inode. */
-	memset(&state, 0, sizeof(state));
-	memset(&inode_info, 0, sizeof(inode_info));
-	memset(&upper_type, 0, sizeof(upper_type));
-	memset(&outer_mount, 0, sizeof(outer_mount));
-	memset(&upper_mount, 0, sizeof(upper_mount));
-	memset(&host_ops, 0, sizeof(host_ops));
+	kern_memset(&state, 0, sizeof(state));
+	kern_memset(&inode_info, 0, sizeof(inode_info));
+	kern_memset(&upper_type, 0, sizeof(upper_type));
+	kern_memset(&outer_mount, 0, sizeof(outer_mount));
+	kern_memset(&upper_mount, 0, sizeof(upper_mount));
+	kern_memset(&host_ops, 0, sizeof(host_ops));
 	state.flags = OVERLAY_READ_WRITE;
 	outer_mount.m_data = &state;
 	upper_mount.m_type = &upper_type;
@@ -601,9 +603,9 @@ overlay_content_host_layers_supported(
 	int supported;
 
 	/* Builds a mount pair of the requested layer kinds. */
-	memset(&upper, 0, sizeof(upper));
-	memset(&lower, 0, sizeof(lower));
-	memset(&args, 0, sizeof(args));
+	kern_memset(&upper, 0, sizeof(upper));
+	kern_memset(&lower, 0, sizeof(lower));
+	kern_memset(&args, 0, sizeof(args));
 	if (upper_overlay)
 		upper.m_type = &overlay_filesystem_type;
 	if (lower_overlay)
@@ -776,7 +778,7 @@ overlay_metadata_find(
 			continue;
 
 		/* Compares the slot's path with the one being looked for. */
-		difference = strcmp(entries[i].path, path);
+		difference = kern_strcmp(entries[i].path, path);
 		if (difference == 0)
 			return (int)i;
 	}
@@ -817,9 +819,9 @@ overlay_metadata_apply(
 		for (i = 0; i < OVERLAY_METADATA_MAX; i++) {
 			if (!entries[i].used) {
 				index = (int)i;
-				memset(&entries[i], 0, sizeof(entries[i]));
+				kern_memset(&entries[i], 0, sizeof(entries[i]));
 				entries[i].used = 1;
-				strcpy(entries[i].path, path);
+				kern_strcpy(entries[i].path, path);
 				break;
 			}
 		}
@@ -836,7 +838,7 @@ overlay_metadata_apply(
 		entries[index].flags &= (uint8_t)~bit;
 	entries[index].sequence = sequence;
 	if (entries[index].flags == 0)
-		memset(&entries[index], 0, sizeof(entries[index]));
+		kern_memset(&entries[index], 0, sizeof(entries[index]));
 	return 0;
 }
 
@@ -880,7 +882,7 @@ overlay_metadata_digest(
 
 			/* Skips every path already emitted in this order. */
 			if (emitted != 0) {
-				difference = strcmp(entries[i].path, previous);
+				difference = kern_strcmp(entries[i].path, previous);
 				if (difference <= 0)
 					continue;
 			}
@@ -892,7 +894,7 @@ overlay_metadata_digest(
 			}
 
 			/* And any smaller path takes its place. */
-			difference = strcmp(entries[i].path,
+			difference = kern_strcmp(entries[i].path,
 					    entries[best].path);
 			if (difference < 0)
 				best = (int)i;
@@ -903,9 +905,9 @@ overlay_metadata_digest(
 		/* Folds the path and its flag into the running digest. */
 		crc = overlay_crc_update(crc,
 		    (const uint8_t *)entries[best].path,
-		    strlen(entries[best].path) + 1U);
+		    kern_strlen(entries[best].path) + 1U);
 		crc = overlay_crc_update(crc, &entries[best].flags, 1U);
-		strcpy(previous, entries[best].path);
+		kern_strcpy(previous, entries[best].path);
 		emitted++;
 	}
 
@@ -977,7 +979,7 @@ overlay_snapshot_apply(
 	int existing;
 
 	/* Compares the record against the snapshot-record signature. */
-	signature = memcmp(record, "ZOVLSNP\0", 8);
+	signature = kern_memcmp(record, "ZOVLSNP\0", 8);
 	if (signature != 0)
 		return EINVAL;	/* Failed. */
 
@@ -1015,7 +1017,7 @@ overlay_snapshot_apply(
 		return EINVAL;	/* Failed. */
 
 	/* A record written for a different mount is not this one's. */
-	identity = memcmp(record + 0x20, id, 4);
+	identity = kern_memcmp(record + 0x20, id, 4);
 	if (identity != 0)
 		return EINVAL;	/* Failed. */
 
@@ -1031,11 +1033,11 @@ overlay_snapshot_apply(
 		return EINVAL;	/* Failed. */
 
 	/* Takes the path the record names as a string of its own. */
-	memcpy(path, record + 0x28, length);
+	kern_memcpy(path, record + 0x28, length);
 	path[length] = '\0';
 
 	/* A path is stored relative to the root, so it cannot start at one. */
-	root = strchr(path, '/');
+	root = kern_strchr(path, '/');
 	if (root == path)
 		return EINVAL;	/* Failed. */
 
@@ -1050,7 +1052,7 @@ overlay_snapshot_apply(
 			view->metadata[i].used = 1;
 			view->metadata[i].flags = (uint8_t)flags;
 			view->metadata[i].sequence = sequence;
-			strcpy(view->metadata[i].path, path);
+			kern_strcpy(view->metadata[i].path, path);
 			return 0;
 		}
 	}
@@ -1078,7 +1080,7 @@ overlay_operation_apply(
 	int applied;
 
 	/* Compares the record against the operation-record signature. */
-	signature = memcmp(record, "ZOVLOP\0\0", 8);
+	signature = kern_memcmp(record, "ZOVLOP\0\0", 8);
 	if (signature != 0)
 		return EINVAL;	/* Failed. */
 
@@ -1113,7 +1115,7 @@ overlay_operation_apply(
 		return EINVAL;	/* Failed. */
 
 	/* A record written for a different mount is not this one's. */
-	identity = memcmp(record + 0x20, id, 4);
+	identity = kern_memcmp(record + 0x20, id, 4);
 	if (identity != 0)
 		return EINVAL;	/* Failed. */
 
@@ -1129,7 +1131,7 @@ overlay_operation_apply(
 		return EINVAL;	/* Failed. */
 
 	/* Takes the path the record names as a string of its own. */
-	memcpy(path, record + 0x28, length);
+	kern_memcpy(path, record + 0x28, length);
 	path[length] = '\0';
 
 	/* Applies the change the record recorded to the table being rebuilt. */
@@ -1175,7 +1177,7 @@ overlay_validate_slot(
 	 * The slot header names the epoch, the snapshot count, and the commit
 	 * sector.
 	 */
-	memset(view, 0, sizeof(*view));
+	kern_memset(view, 0, sizeof(*view));
 	error = overlay_read_record(state->journal[slot], 0, record);
 	if (error != 0)
 		return error;
@@ -1185,7 +1187,7 @@ overlay_validate_slot(
 		return 0;
 
 	/* Compares the sector against the slot-header signature. */
-	signature = memcmp(record, "ZOVLSLT\0", 8);
+	signature = kern_memcmp(record, "ZOVLSLT\0", 8);
 	if (signature != 0)
 		return 0;
 
@@ -1204,7 +1206,7 @@ overlay_validate_slot(
 		return 0;
 
 	/* A slot written for a different mount is not this one's. */
-	identity = memcmp(record + 0x10, id, 4);
+	identity = kern_memcmp(record + 0x10, id, 4);
 	if (identity != 0)
 		return 0;
 
@@ -1279,7 +1281,7 @@ overlay_validate_slot(
 		return 0;
 
 	/* Compares the sector against the commit-record signature. */
-	signature = memcmp(commit, "ZOVLCMT\0", 8);
+	signature = kern_memcmp(commit, "ZOVLCMT\0", 8);
 	if (signature != 0)
 		return 0;
 
@@ -1294,7 +1296,7 @@ overlay_validate_slot(
 		return 0;
 
 	/* A commit written for a different mount is not this one's. */
-	identity = memcmp(commit + 0x0c, id, 4);
+	identity = kern_memcmp(commit + 0x0c, id, 4);
 	if (identity != 0)
 		return 0;
 
@@ -1370,10 +1372,10 @@ overlay_open_journal(
 	int flags;
 
 	/* The journal must be a regular file of exactly the journal size. */
-	strcpy(name, ".zovl0");
+	kern_strcpy(name, ".zovl0");
 	name[5] = (char)('0' + slot);
 	component.cn_nameptr = name;
-	component.cn_namelen = strlen(name);
+	component.cn_namelen = kern_strlen(name);
 	component.cn_flags = 0;
 	error = inode_lookup(state->upper_root.p_inode, &component, &inode);
 	if (error != 0)
@@ -1468,7 +1470,7 @@ overlay_journal_load(
 	}
 
 	/* Takes the table, the epoch and the position of the chosen slot. */
-	memcpy(state->metadata, views[chosen]->metadata,
+	kern_memcpy(state->metadata, views[chosen]->metadata,
 	       sizeof(state->metadata));
 	state->active_slot = chosen;
 	state->epoch = views[chosen]->epoch;
@@ -1549,7 +1551,7 @@ overlay_metadata_sorted_index(
 
 		/* Skips every path that does not sort after the given one. */
 		if (after != NULL) {
-			difference = strcmp(entries[i].path, after);
+			difference = kern_strcmp(entries[i].path, after);
 			if (difference <= 0)
 				continue;
 		}
@@ -1561,7 +1563,7 @@ overlay_metadata_sorted_index(
 		}
 
 		/* And any smaller path takes its place. */
-		difference = strcmp(entries[i].path, entries[best].path);
+		difference = kern_strcmp(entries[i].path, entries[best].path);
 		if (difference < 0)
 			best = (int)i;
 	}
@@ -1602,10 +1604,10 @@ overlay_journal_compact_impl(
 		return ENOSPC;
 
 	/* Writes the slot header. */
-	memset(record, 0, sizeof(record));
+	kern_memset(record, 0, sizeof(record));
 
 	/* The signature and version a reader identifies the slot by. */
-	memcpy(record, "ZOVLSLT\0", 8);
+	kern_memcpy(record, "ZOVLSLT\0", 8);
 	overlay_put16(record + 8, 1);
 
 	/* How long the header is, and how long each record of the slot is. */
@@ -1613,7 +1615,7 @@ overlay_journal_compact_impl(
 	overlay_put32(record + 0x0c, OVERLAY_RECORD_BYTES);
 
 	/* Which mount the slot belongs to. */
-	memcpy(record + 0x10, id, 4);
+	kern_memcpy(record + 0x10, id, 4);
 
 	/* The epoch this slot is being published under. */
 	overlay_put64(record + 0x18, epoch);
@@ -1642,13 +1644,13 @@ overlay_journal_compact_impl(
 		index = overlay_metadata_sorted_index(state->metadata, after);
 		if (index < 0)
 			return EIO;
-		length = strlen(state->metadata[index].path);
-		memset(record, 0, sizeof(record));
+		length = kern_strlen(state->metadata[index].path);
+		kern_memset(record, 0, sizeof(record));
 
 		/*
 		 * The signature and version a reader identifies the entry by.
 		 */
-		memcpy(record, "ZOVLSNP\0", 8);
+		kern_memcpy(record, "ZOVLSNP\0", 8);
 		overlay_put16(record + 8, 1);
 
 		/* Why the path is in the table, and how long the path is. */
@@ -1661,10 +1663,10 @@ overlay_journal_compact_impl(
 			state->metadata[index].sequence);
 
 		/* Which mount the entry belongs to. */
-		memcpy(record + 0x20, id, 4);
+		kern_memcpy(record + 0x20, id, 4);
 
 		/* The path itself, which the header gave the length of. */
-		memcpy(record + 0x28, state->metadata[index].path, length);
+		kern_memcpy(record + 0x28, state->metadata[index].path, length);
 
 		/* And a checksum over the whole record. */
 		overlay_put32(record + 508, overlay_record_crc(record));
@@ -1673,18 +1675,18 @@ overlay_journal_compact_impl(
 		if (error != 0)
 			return error;
 		digest = overlay_crc_update(digest, record, sizeof(record));
-		strcpy(previous, state->metadata[index].path);
+		kern_strcpy(previous, state->metadata[index].path);
 	}
 
 	/* Writes the commit record and makes the slot durable. */
-	memset(record, 0, sizeof(record));
+	kern_memset(record, 0, sizeof(record));
 
 	/* The signature and version a reader identifies the commit by. */
-	memcpy(record, "ZOVLCMT\0", 8);
+	kern_memcpy(record, "ZOVLCMT\0", 8);
 	overlay_put16(record + 8, 1);
 
 	/* Which mount the slot belongs to. */
-	memcpy(record + 0x0c, id, 4);
+	kern_memcpy(record + 0x0c, id, 4);
 
 	/* Every field of the header, repeated so the two can be compared. */
 	overlay_put64(record + 0x10, epoch);
@@ -1752,7 +1754,7 @@ overlay_journal_append_impl(
 		return EROFS;
 	if (path == NULL || path[0] == '\0' || path[0] == '/')
 		return EINVAL;
-	length = strlen(path);
+	length = kern_strlen(path);
 	if (length >= KERN_PATH_MAX || length > OVERLAY_PATH_RECORD_MAX)
 		return ENAMETOOLONG;
 
@@ -1781,10 +1783,10 @@ overlay_journal_append_impl(
 
 	/* Writes the record durably, then applies it. */
 	sequence = state->sequence + 1U;
-	memset(record, 0, sizeof(record));
+	kern_memset(record, 0, sizeof(record));
 
 	/* The signature and version a reader identifies the record by. */
-	memcpy(record, "ZOVLOP\0\0", 8);
+	kern_memcpy(record, "ZOVLOP\0\0", 8);
 	overlay_put16(record + 8, 1);
 
 	/* Which change to the table it stands for, and the path it names. */
@@ -1796,10 +1798,10 @@ overlay_journal_append_impl(
 	overlay_put64(record + 0x18, sequence);
 
 	/* Which mount the record belongs to. */
-	memcpy(record + 0x20, overlay_id(state), 4);
+	kern_memcpy(record + 0x20, overlay_id(state), 4);
 
 	/* The path itself, which the header gave the length of. */
-	memcpy(record + 0x28, path, length);
+	kern_memcpy(record + 0x28, path, length);
 
 	/* And a checksum over the whole record. */
 	overlay_put32(record + 508, overlay_record_crc(record));
@@ -1878,7 +1880,7 @@ overlay_alloc_inode(
 	for (i = 0; i < OVERLAY_INODE_MAX; i++) {
 		if (!overlay_inodes[i].used) {
 			overlay_inodes[i].used = 1;
-			memset(&overlay_inodes[i].info, 0,
+			kern_memset(&overlay_inodes[i].info, 0,
 			       sizeof(overlay_inodes[i].info));
 			return &overlay_inodes[i].inode;
 		}
@@ -1897,7 +1899,7 @@ overlay_free_inode(
 
 	index = overlay_slot_index(inode);
 	if (index >= 0)
-		memset(&overlay_inodes[index], 0,
+		kern_memset(&overlay_inodes[index], 0,
 		    sizeof(overlay_inodes[index]));
 }
 
@@ -1986,7 +1988,7 @@ overlay_info_snapshot(
 	if (lower != NULL && info->lower.p_inode != NULL)
 		path_set(lower, info->lower.p_mount, info->lower.p_inode);
 	if (relative != NULL)
-		strcpy(relative, info->path);
+		kern_strcpy(relative, info->path);
 
 	mutex_unlock(&inode->i_lock);
 
@@ -2007,7 +2009,7 @@ overlay_temporary_name(
 		return 0;
 
 	/* Every temporary name is exactly ten characters long. */
-	length = strlen(name);
+	length = kern_strlen(name);
 	if (length != 10U)
 		return 0;
 
@@ -2016,7 +2018,7 @@ overlay_temporary_name(
 		return 0;
 
 	/* And it ends with the suffix that marks it as temporary. */
-	suffix = strcmp(name + 6, ".tmp");
+	suffix = kern_strcmp(name + 6, ".tmp");
 	if (suffix != 0)
 		return 0;
 
@@ -2044,11 +2046,11 @@ overlay_reserved_name(
 		return 0;
 
 	/* The two journal slots each have a name of their own. */
-	difference = strcmp(name, ".zovl0");
+	difference = kern_strcmp(name, ".zovl0");
 	if (difference == 0)
 		return 1;
 
-	difference = strcmp(name, ".zovl1");
+	difference = kern_strcmp(name, ".zovl1");
 	if (difference == 0)
 		return 1;
 
@@ -2071,7 +2073,7 @@ overlay_component_text(
 	    component->cn_namelen == 0 ||
 	    component->cn_namelen > NAME_MAX)
 		return EINVAL;
-	memcpy(name, component->cn_nameptr, component->cn_namelen);
+	kern_memcpy(name, component->cn_nameptr, component->cn_namelen);
 	name[component->cn_namelen] = '\0';
 	return 0;
 }
@@ -2088,8 +2090,8 @@ overlay_join(
 	size_t separator_length;
 	const char *separator;
 
-	parent_length = strlen(parent);
-	name_length = strlen(name);
+	parent_length = kern_strlen(parent);
+	name_length = kern_strlen(name);
 
 	/* The root needs no separator; the result must fit. */
 	if (parent_length != 0)
@@ -2097,20 +2099,20 @@ overlay_join(
 	else
 		separator_length = 0;
 	/* A component with no name, or one that is itself a path. */
-	separator = strchr(name, '/');
+	separator = kern_strchr(name, '/');
 	if (name_length == 0 || separator != NULL)
 		return ENAMETOOLONG;
 
 	/* And a result the caller buffer could not hold. */
 	if (parent_length + separator_length + name_length >= KERN_PATH_MAX)
 		return ENAMETOOLONG;
-	memcpy(result, parent, parent_length);
+	kern_memcpy(result, parent, parent_length);
 	if (parent_length != 0) {
 		result[parent_length] = '/';
 		parent_length++;
 	}
 
-	memcpy(result + parent_length, name, name_length + 1U);
+	kern_memcpy(result + parent_length, name, name_length + 1U);
 	return 0;
 }
 
@@ -2136,7 +2138,7 @@ overlay_identity_get(
 		/* Compares only the slots that still name a live path. */
 		difference = 1;
 		if (state->identities[i].state == OVERLAY_ID_ACTIVE)
-			difference = strcmp(state->identities[i].path, path);
+			difference = kern_strcmp(state->identities[i].path, path);
 
 		/* An identity already made for this path is reused. */
 		if (difference == 0) {
@@ -2156,7 +2158,7 @@ overlay_identity_get(
 	state->identities[free_index].state = OVERLAY_ID_ACTIVE;
 	state->identities[free_index].ino = state->next_ino;
 	state->next_ino++;
-	strcpy(state->identities[free_index].path, path);
+	kern_strcpy(state->identities[free_index].path, path);
 	*index_out = free_index;
 	*ino_out = state->identities[free_index].ino;
 	if (created_out != NULL)
@@ -2306,7 +2308,7 @@ overlay_make_inode(
 	inode = inode_alloc(mountp);
 	if (inode == NULL) {
 		if (identity_created)
-			memset(&state->identities[identity], 0,
+			kern_memset(&state->identities[identity], 0,
 			    sizeof(state->identities[identity]));
 		return ENOSPC;
 	}
@@ -2316,7 +2318,7 @@ overlay_make_inode(
 	if (slot < 0) {
 		inode_release(inode);
 		if (identity_created)
-			memset(&state->identities[identity], 0,
+			kern_memset(&state->identities[identity], 0,
 			    sizeof(state->identities[identity]));
 		return EIO;
 	}
@@ -2330,7 +2332,7 @@ overlay_make_inode(
 	if (lower != NULL && lower->p_inode != NULL)
 		path_set(&info->lower, lower->p_mount, lower->p_inode);
 	info->identity_index = identity;
-	strcpy(info->path, relative);
+	kern_strcpy(info->path, relative);
 	inode->i_ino = ino;
 	inode->i_data = info;
 	overlay_refresh(inode);
@@ -2393,7 +2395,7 @@ overlay_lookup(
 			goto out_directories;
 		}
 
-		slash = strrchr(parent_path, '/');
+		slash = kern_strrchr(parent_path, '/');
 		if (slash == NULL)
 			parent_path[0] = '\0';
 		else
@@ -2510,7 +2512,7 @@ overlay_getattr(
 	if (error == 0) {
 		overlay_refresh(inode);
 		status->st_ino = inode->i_ino;
-		status->st_dev = 0;
+		status->st_dev = mount_device_number(inode->i_mount);
 	}
 
 	/* Reports the failure. */
@@ -2551,12 +2553,12 @@ overlay_find_relative(
 
 	/* Walks one component at a time. */
 	while (*at != '\0') {
-		end = strchr(at, '/');
+		end = kern_strchr(at, '/');
 		component.cn_nameptr = at;
 		if (end != NULL)
 			component.cn_namelen = (size_t)(end - at);
 		else
-			component.cn_namelen = strlen(at);
+			component.cn_namelen = kern_strlen(at);
 		if (end == NULL)
 			component.cn_flags = COMPONENT_LAST;
 		else
@@ -2590,18 +2592,18 @@ overlay_split_path(
 		return EINVAL;
 
 	/* Everything before the last slash is the parent. */
-	slash = strrchr(path, '/');
+	slash = kern_strrchr(path, '/');
 	if (slash == NULL) {
 		parent[0] = '\0';
 		name->cn_nameptr = path;
 	} else {
 		length = (size_t)(slash - path);
-		memcpy(parent, path, length);
+		kern_memcpy(parent, path, length);
 		parent[length] = '\0';
 		name->cn_nameptr = slash + 1;
 	}
 
-	name->cn_namelen = strlen(name->cn_nameptr);
+	name->cn_namelen = kern_strlen(name->cn_nameptr);
 	name->cn_flags = COMPONENT_LAST;
 	if (name->cn_namelen == 0)
 		return EINVAL;
@@ -2648,7 +2650,7 @@ overlay_publish_upper(
 	}
 
 	if (relative != NULL)
-		strcpy(info->path, relative);
+		kern_strcpy(info->path, relative);
 	overlay_refresh_locked(inode);
 
 	mutex_unlock(&inode->i_lock);
@@ -2737,7 +2739,7 @@ overlay_materialization_complete(
 		next = entry->next;
 		if (error != 0) {
 			name.cn_nameptr = entry->name;
-			name.cn_namelen = strlen(entry->name);
+			name.cn_namelen = kern_strlen(entry->name);
 			name.cn_flags = COMPONENT_LAST;
 			one_error = inode_rmdir(entry->parent_upper.p_inode,
 			    &name);
@@ -2898,7 +2900,7 @@ overlay_ensure_upper_dir_tracked(
 				path_init(&pending->created_upper);
 				path_set(&pending->created_upper,
 				    created_path.p_mount, created_path.p_inode);
-				memcpy(pending->name, name.cn_nameptr,
+				kern_memcpy(pending->name, name.cn_nameptr,
 				    name.cn_namelen);
 				pending->name[name.cn_namelen] = '\0';
 				pending->next = transaction->created;
@@ -4049,8 +4051,8 @@ overlay_path_is_below(
 	int difference;
 
 	/* Requires the path to start at the root. */
-	length = strlen(root);
-	difference = strncmp(path, root, length);
+	length = kern_strlen(root);
+	difference = kern_strncmp(path, root, length);
 	if (difference != 0)
 		return 0;
 
@@ -4081,8 +4083,8 @@ overlay_repath_preflight(
 	int difference;
 	int below;
 
-	old_length = strlen(old_path);
-	new_length = strlen(new_path);
+	old_length = kern_strlen(old_path);
+	new_length = kern_strlen(new_path);
 
 	/*
 	 * Every active identity below the old path must fit under the new one.
@@ -4103,15 +4105,15 @@ overlay_repath_preflight(
 		/*
 		 * The rewritten path has to fit in the buffer it is built in.
 		 */
-		suffix_length = strlen(suffix);
+		suffix_length = kern_strlen(suffix);
 		if (new_length + suffix_length >= sizeof(candidate))
 			return ENAMETOOLONG;
 
 		/*
 		 * The rewritten path may only collide with the replaced object.
 		 */
-		strcpy(candidate, new_path);
-		strcat(candidate, suffix);
+		kern_strcpy(candidate, new_path);
+		kern_strcat(candidate, suffix);
 		for (j = 0; j < OVERLAY_IDENTITY_MAX; j++) {
 			/* A slot that names nothing cannot be collided with. */
 			if (state->identities[j].state != OVERLAY_ID_ACTIVE)
@@ -4124,7 +4126,7 @@ overlay_repath_preflight(
 				continue;
 
 			/* Only an identity of the same path is a collision. */
-			difference = strcmp(state->identities[j].path,
+			difference = kern_strcmp(state->identities[j].path,
 					    candidate);
 			if (difference != 0)
 				continue;
@@ -4160,7 +4162,7 @@ overlay_repath_commit(
 	struct inode *inode;
 	int below;
 
-	old_length = strlen(old_path);
+	old_length = kern_strlen(old_path);
 
 	/* Rewrites the identity table. */
 	for (i = 0; i < OVERLAY_IDENTITY_MAX; i++) {
@@ -4173,9 +4175,9 @@ overlay_repath_commit(
 		if (!below)
 			continue;
 
-		strcpy(updated, new_path);
-		strcat(updated, state->identities[i].path + old_length);
-		strcpy(state->identities[i].path, updated);
+		kern_strcpy(updated, new_path);
+		kern_strcat(updated, state->identities[i].path + old_length);
+		kern_strcpy(state->identities[i].path, updated);
 	}
 
 	/* Rewrites every cached inode of this mount under its lock. */
@@ -4190,9 +4192,9 @@ overlay_repath_commit(
 		/* Only an inode inside the subtree has its path rewritten. */
 		below = overlay_path_is_below(info->path, old_path);
 		if (below) {
-			strcpy(updated, new_path);
-			strcat(updated, info->path + old_length);
-			strcpy(info->path, updated);
+			kern_strcpy(updated, new_path);
+			kern_strcat(updated, info->path + old_length);
+			kern_strcpy(info->path, updated);
 		}
 
 		mutex_unlock(&inode->i_lock);
@@ -4366,7 +4368,7 @@ overlay_rename(
 		overlay_repath_commit(state, source->i_mount, old_relative,
 			new_relative);
 	else
-		strcpy(state->identities[identity].path, new_relative);
+		kern_strcpy(state->identities[identity].path, new_relative);
 	overlay_publish_upper(source, &new_upper_path, 1, new_relative);
 	if (target != NULL && target != source)
 		overlay_retire_inode(target);
@@ -4692,7 +4694,7 @@ overlay_truncate_upper(
 		error = inode_truncate_transaction(upper.p_inode,
 		    &inner_request, &inner_result);
 	else
-		memset(&inner_result, 0, sizeof(inner_result));
+		kern_memset(&inner_result, 0, sizeof(inner_result));
 	result->limit_exceeded = inner_result.limit_exceeded;
 
 	/*
@@ -4848,7 +4850,7 @@ overlay_reclaim(
 	 */
 	if (state != NULL && info->identity_index < OVERLAY_IDENTITY_MAX &&
 	    !overlay_identity_in_use(state, info->identity_index, inode))
-		memset(&state->identities[info->identity_index], 0,
+		kern_memset(&state->identities[info->identity_index], 0,
 		       sizeof(state->identities[info->identity_index]));
 }
 
@@ -5218,7 +5220,7 @@ overlay_dir_upper_has(
 
 	/* Looks the name up in the upper directory. */
 	component.cn_nameptr = name;
-	component.cn_namelen = strlen(name);
+	component.cn_namelen = kern_strlen(name);
 	component.cn_flags = 0;
 	error = inode_lookup(upper.p_inode, &component, &found);
 	if (error == 0)
@@ -5269,17 +5271,17 @@ overlay_dir_emit(
 
 	/* Resolves the name to the inode the entry describes. */
 	component.cn_nameptr = name;
-	component.cn_namelen = strlen(name);
+	component.cn_namelen = kern_strlen(name);
 	component.cn_flags = 0;
 	error = inode_lookup(file->f_inode, &component, &child);
 	if (error != 0)
 		return error;
 
 	/* Fills the entry from the inode and releases it. */
-	memset(entry, 0, sizeof(*entry));
+	kern_memset(entry, 0, sizeof(*entry));
 	entry->d_ino = child->i_ino;
 	entry->d_type = child->i_type;
-	strncpy(entry->d_name, name, NAME_MAX);
+	kern_strncpy(entry->d_name, name, NAME_MAX);
 	entry->d_name[NAME_MAX] = '\0';
 	inode_release(child);
 	return 0;
@@ -5339,8 +5341,8 @@ overlay_readdir(
 		 * Dot entries, reserved names, and shadowed lower names are
 		 * skipped.
 		 */
-		dot = strcmp(real_entry.d_name, ".");
-		dotdot = strcmp(real_entry.d_name, "..");
+		dot = kern_strcmp(real_entry.d_name, ".");
+		dotdot = kern_strcmp(real_entry.d_name, "..");
 		if (dot == 0 || dotdot == 0)
 			continue;
 
@@ -5517,7 +5519,7 @@ overlay_cleanup_temps(
 			if (!temporary)
 				continue;
 			component.cn_nameptr = entry.d_name;
-			component.cn_namelen = strlen(entry.d_name);
+			component.cn_namelen = kern_strlen(entry.d_name);
 			component.cn_flags = COMPONENT_LAST;
 			error = inode_lookup(directory->p_inode, &component,
 			    &child);
@@ -5559,8 +5561,8 @@ overlay_cleanup_temps(
 		error = file_readdir(file, &entry, &eof);
 		if (error != 0 || eof)
 			break;
-		dot = strcmp(entry.d_name, ".");
-		dotdot = strcmp(entry.d_name, "..");
+		dot = kern_strcmp(entry.d_name, ".");
+		dotdot = kern_strcmp(entry.d_name, "..");
 		if (dot == 0 || dotdot == 0)
 			continue;
 
@@ -5572,7 +5574,7 @@ overlay_cleanup_temps(
 
 		/* Descends into every child directory of this one. */
 		component.cn_nameptr = entry.d_name;
-		component.cn_namelen = strlen(entry.d_name);
+		component.cn_namelen = kern_strlen(entry.d_name);
 		component.cn_flags = 0;
 		error = inode_lookup(directory->p_inode, &component, &child);
 		if (error != 0)

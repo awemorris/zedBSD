@@ -30,8 +30,9 @@ def build(args: argparse.Namespace) -> None:
     try:
         temporary.unlink()
         base=Path(__file__).with_name('make-rpi4-hdd-image.py')
+        arch=[] if args.arch_image is None else ['--arch-image',str(args.arch_image)]
         run('python3',str(base),'--force','--kernel',str(args.kernel),
-            '--arch-image',str(args.arch_image),'--data-image',str(args.data_image),
+            *arch,'--data-image',str(args.data_image),
             '--swapfile',str(args.swapfile),'--config',str(args.config),
             '--firmware-dir',str(args.firmware_dir),str(temporary))
         blocks=args.ufs_root.stat().st_size//SECTOR
@@ -53,7 +54,7 @@ def build(args: argparse.Namespace) -> None:
 def main() -> None:
     parser=argparse.ArgumentParser()
     parser.add_argument('--kernel',type=Path,required=True)
-    parser.add_argument('--arch-image',type=Path,required=True)
+    parser.add_argument('--arch-image',type=Path)
     parser.add_argument('--data-image',type=Path,required=True)
     parser.add_argument('--swapfile',type=Path,required=True)
     parser.add_argument('--ufs-root',type=Path,required=True)

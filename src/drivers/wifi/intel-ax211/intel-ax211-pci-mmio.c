@@ -7,11 +7,11 @@
  */
 
 #include "intel-ax211-pci-mmio.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <kern/sched.h>
 #include <limits.h>
-#include <string.h>
 #include "kern/device-io.h"
 #include "kern/atomic.h"
 #include "kern/clock.h"
@@ -71,13 +71,13 @@ drv_intel_ax211_pci_mmio_backend_init(
 		/* Failed. */
 		return EINVAL;
 	}
-	memset(&candidate, 0, sizeof(candidate));
+	kern_memset(&candidate, 0, sizeof(candidate));
 
 	/* Checks the hal rtc read counter result. */
 	if (!kern_rtc_read_counter(&origin_counter, &frequency_hz) ||
 	    frequency_hz < AX211_COUNTER_FREQUENCY_MIN_HZ ||
 	    frequency_hz > AX211_COUNTER_FREQUENCY_MAX_HZ) {
-		memset(backend, 0, sizeof(*backend));
+		kern_memset(backend, 0, sizeof(*backend));
 
 		/* Failed. */
 		return ENOTSUP;

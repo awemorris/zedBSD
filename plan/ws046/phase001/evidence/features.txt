@@ -1,0 +1,102 @@
+## expat-2.8.5（dependency tracking あり） (7 Makefiles)
+assign =                                       1761  Makefile:53
+automatic $(@D)                                   5  examples/Makefile:451
+automatic $*                                      3  tests/Makefile:439
+automatic $<                                     19  doc/Makefile:618
+automatic $?                                     14  Makefile:531
+automatic $@                                    121  Makefile:166
+directive include                                41  examples/Makefile:446
+recipe prefix -                                 156  Makefile:575
+recipe prefix @                                 140  Makefile:529
+recursive $(MAKE)                                75  Makefile:267
+rule double-colon                                35  Makefile:1197
+rule pattern                                     35  Makefile:1197
+rule suffix .c.lo                                 5  examples/Makefile:472
+rule suffix .c.o                                  5  examples/Makefile:456
+rule suffix .c.obj                                5  examples/Makefile:464
+rule suffix .log.trs                              1  tests/Makefile:887
+rule suffix .test.log                             1  tests/Makefile:1056
+special .INTERMEDIATE                             1  Makefile:824
+special .MAKE                                     7  Makefile:1098
+special .NOEXPORT                                 7  Makefile:1194
+special .PHONY                                   14  Makefile:1100
+special .PRECIOUS                                 7  Makefile:1121
+special .SUFFIXES                                12  Makefile:527
+variable MAKEFLAGS                               75  Makefile:64
+
+## zlib-1.3.2 (4 Makefiles)
+assign =                                         48  Makefile:15
+automatic $@                                     52  Makefile:119
+recipe prefix -                                  43  Makefile:131
+recipe prefix @                                  78  Makefile:88
+recursive $(MAKE)                                 2  Makefile:375
+
+## coreutils-9.12 の Makefile（automake の出力）(1 Makefiles)
+assign =                                       3775  Makefile:446
+automatic $(@D)                                   1  Makefile:13794
+automatic $*                                      6  Makefile:5029
+automatic $<                                      8  Makefile:13805
+automatic $?                                      2  Makefile:9874
+automatic $@                                    406  Makefile:1347
+recipe prefix -                                1866  Makefile:9919
+recipe prefix @                                 231  Makefile:9872
+recursive $(MAKE)                                26  Makefile:8914
+rule double-colon                                 5  Makefile:30989
+rule pattern                                      5  Makefile:30989
+rule suffix .c.o                                  1  Makefile:13799
+rule suffix .c.obj                                1  Makefile:13807
+rule suffix .dvi.ps                               1  Makefile:24819
+rule suffix .log.trs                              1  Makefile:25064
+rule suffix .pl.log                               1  Makefile:25240
+rule suffix .sh.log                               1  Makefile:25226
+rule suffix .version                              1  Makefile:27563
+rule suffix .x.1                                  1  Makefile:30942
+rule suffix .y.c                                  1  Makefile:24749
+special .MAKE                                     1  Makefile:27508
+special .NOEXPORT                                 1  Makefile:30986
+special .PHONY                                   11  Makefile:27511
+special .PRECIOUS                                 1  Makefile:27538
+special .SUFFIXES                                 2  Makefile:9869
+variable MAKEFLAGS                               21  Makefile:457
+
+## coreutils-9.12 の maint.mk（GNUmakefile が読む、maintainer 用）(1 Makefiles)
+assign :=                                        10  Makefile:22
+assign =                                        175  Makefile:27
+automatic $*                                      3  Makefile:212
+automatic $<                                      4  Makefile:1320
+automatic $@                                     23  Makefile:96
+directive define                                  5  Makefile:297
+directive else                                    3  Makefile:89
+directive endef                                   5  Makefile:300
+directive endif                                  10  Makefile:74
+directive export                                 11  Makefile:177
+directive ifdef                                   1  Makefile:129
+directive ifeq                                    8  Makefile:67
+directive ifneq                                   1  Makefile:183
+function addprefix                                2  Makefile:1165
+function and                                      2  Makefile:38
+function basename                                 1  Makefile:206
+function call                                     2  Makefile:138
+function error                                    3  Makefile:44
+function filter                                   1  Makefile:1715
+function filter-out                               1  Makefile:220
+function findstring                               4  Makefile:38
+function if                                       4  Makefile:44
+function join                                     1  Makefile:1165
+function notdir                                   1  Makefile:923
+function or                                       2  Makefile:44
+function origin                                   4  Makefile:67
+function patsubst                                 6  Makefile:202
+function shell                                    8  Makefile:55
+function sort                                     2  Makefile:187
+function strip                                    4  Makefile:44
+function subst                                   10  Makefile:83
+function wildcard                                 2  Makefile:155
+function word                                     2  Makefile:131
+recipe prefix @                                 116  Makefile:196
+recursive $(MAKE)                                18  Makefile:460
+rule order-only prerequisite                      1  Makefile:55
+rule pattern                                      1  Makefile:1644
+special .PHONY                                   16  Makefile:189
+variable MAKEFLAGS                                3  Makefile:1765
+

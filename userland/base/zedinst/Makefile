@@ -10,7 +10,7 @@ ZEDINST_DATA := $(foreach module,$(ZEDINST_MODULES),\
  /lib/zedinst/$(module).noct=userland/base/zedinst/$(module).noct)
 ZEDINST_DATA += $(foreach asset,menu menu-focus review review-focus progress progress-focus,\
  /lib/zedinst/assets/$(asset).bmp=userland/base/zedinst/assets/$(asset).bmp)
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,zedinst,zedinst,*,n,package,,y,base,base/zedinst,base/noct,0755,program,$(ZEDINST_DATA),,sbin))
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,zedinst,zedinst,amd64 i386 pc98,y,package,,y,base,base/zedinst,base/noct,0755,program,$(ZEDINST_DATA),,sbin))
 
 ifdef ZEDBSD_TOPLEVEL_BUILD
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter zedinst,$(ZEDBSD_USER_PROGRAMS)),$(BUILD)/bin/zedinst $(BUILD)/bin/zedinst-graphic)

@@ -1,0 +1,116 @@
+In file included from /home/awe/zedBSD-rpi4/include/kern/lock.h:10,
+                 from /home/awe/zedBSD-rpi4/plan/ws006/tests/../../../src/drivers/usb/usb-hid.c:18,
+                 from /home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:93:
+/home/awe/zedBSD-rpi4/include/kern/atomic.h:49:1: error: conflicting types for 'atomic_raw_load_acquire'; have 'unsigned int(const volatile unsigned int *)'
+   49 | atomic_raw_load_acquire(
+      | ^~~~~~~~~~~~~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:82:24: note: previous definition of 'atomic_raw_load_acquire' with type 'unsigned int(volatile unsigned int *)'
+   82 | static inline unsigned atomic_raw_load_acquire(volatile unsigned *value)
+      |                        ^~~~~~~~~~~~~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:54:26: error: expected identifier before numeric constant
+   54 | #define LOCK_RANK_DEVICE 100
+      |                          ^~~
+/home/awe/zedBSD-rpi4/include/kern/lock.h:44:9: note: in expansion of macro 'LOCK_RANK_DEVICE'
+   44 |         LOCK_RANK_DEVICE = 125,
+      |         ^~~~~~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/include/kern/lock.h:68:8: error: redefinition of 'struct spinlock'
+   68 | struct spinlock {
+      |        ^~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:57:8: note: originally defined here
+   57 | struct spinlock {
+      |        ^~~~~~~~
+/home/awe/zedBSD-rpi4/include/kern/lock.h:84:1: error: conflicting types for 'spin_init'; have 'void(struct spinlock *, enum lock_rank,  const char *)'
+   84 | spin_init(
+      | ^~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:76:20: note: previous definition of 'spin_init' with type 'void(struct spinlock *, int,  const char *)'
+   76 | static inline void spin_init(struct spinlock *lock, int rank, const char *name)
+      |                    ^~~~~~~~~
+/home/awe/zedBSD-rpi4/include/kern/lock.h:102:1: error: conflicting types for 'spin_lock_irqsave'; have 'long unsigned int(struct spinlock *)'
+  102 | spin_lock_irqsave(
+      | ^~~~~~~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:65:29: note: previous definition of 'spin_lock_irqsave' with type 'long unsigned int(struct spinlock *)'
+   65 | static inline unsigned long spin_lock_irqsave(struct spinlock *lock)
+      |                             ^~~~~~~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/include/kern/lock.h:106:1: error: conflicting types for 'spin_unlock_irqrestore'; have 'void(struct spinlock *, long unsigned int)'
+  106 | spin_unlock_irqrestore(
+      | ^~~~~~~~~~~~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:70:20: note: previous definition of 'spin_unlock_irqrestore' with type 'void(struct spinlock *, long unsigned int)'
+   70 | static inline void spin_unlock_irqrestore(struct spinlock *lock,
+      |                    ^~~~~~~~~~~~~~~~~~~~~~
+In file included from /home/awe/zedBSD-rpi4/include/kern/signal.h:15,
+                 from /home/awe/zedBSD-rpi4/include/kern/thread.h:19,
+                 from /home/awe/zedBSD-rpi4/plan/ws006/tests/../../../src/drivers/usb/usb-hid.c:20:
+/home/awe/zedBSD-rpi4/include/uapi/signal.h:129:18: error: conflicting types for 'sigset_t'; have 'uint64_t' {aka 'long unsigned int'}
+  129 | typedef uint64_t sigset_t;
+      |                  ^~~~~~~~
+In file included from /usr/include/x86_64-linux-gnu/sys/select.h:33,
+                 from /usr/include/x86_64-linux-gnu/sys/time.h:32,
+                 from /home/awe/zedBSD-rpi4/include/uapi/time.h:77,
+                 from /home/awe/zedBSD-rpi4/include/uapi/time.h:76,
+                 from /home/awe/zedBSD-rpi4/include/uapi/input.h:17,
+                 from /home/awe/zedBSD-rpi4/include/kern/input-capability.h:5,
+                 from /home/awe/zedBSD-rpi4/include/kern/input-device.h:5,
+                 from /home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:3:
+/usr/include/x86_64-linux-gnu/bits/types/sigset_t.h:7:20: note: previous declaration of 'sigset_t' with type 'sigset_t'
+    7 | typedef __sigset_t sigset_t;
+      |                    ^~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:56:23: error: expected identifier before numeric constant
+   56 | #define THREAD_ZOMBIE 5
+      |                       ^
+/home/awe/zedBSD-rpi4/include/kern/thread.h:46:9: note: in expansion of macro 'THREAD_ZOMBIE'
+   46 |         THREAD_ZOMBIE,
+      |         ^~~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/include/kern/thread.h:51:8: error: redefinition of 'struct thread'
+   51 | struct thread {
+      |        ^~~~~~
+/home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:60:8: note: originally defined here
+   60 | struct thread {
+      |        ^~~~~~
+/home/awe/zedBSD-rpi4/include/kern/thread.h:53:9: error: unknown type name 'tid_t'; did you mean 'pid_t'?
+   53 |         tid_t tid;
+      |         ^~~~~
+      |         pid_t
+/home/awe/zedBSD-rpi4/include/kern/thread.h:79:9: error: unknown type name 'tid_t'; did you mean 'pid_t'?
+   79 |         tid_t join_owner_tid;
+      |         ^~~~~
+      |         pid_t
+/home/awe/zedBSD-rpi4/include/kern/thread.h:202:1: error: conflicting types for 'kthread_create'; have 'int(void (*)(void *), void *, int,  struct thread **)'
+  202 | kthread_create(
+      | ^~~~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:89:5: note: previous declaration of 'kthread_create' with type 'int(void (*)(void *), void *, int,  struct thread **)'
+   89 | int kthread_create(void (*)(void *), void *, int, struct thread **);
+      |     ^~~~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/include/kern/thread.h:220:1: error: conflicting types for 'thread_start'; have 'void(struct thread *)'
+  220 | thread_start(
+      | ^~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:90:6: note: previous declaration of 'thread_start' with type 'void(struct thread *)'
+   90 | void thread_start(struct thread *);
+      |      ^~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/include/kern/thread.h:240:1: error: conflicting types for 'thread_wait'; have 'int(struct thread *, int *)'
+  240 | thread_wait(
+      | ^~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:91:5: note: previous declaration of 'thread_wait' with type 'int(struct thread *, void **)'
+   91 | int thread_wait(struct thread *, void **);
+      |     ^~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:446:1: error: conflicting types for 'kthread_create'; have 'int(void (*)(void *), void *, int,  struct thread **)'
+  446 | kthread_create(void (*entry)(void *), void *argument, int priority,
+      | ^~~~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:89:5: note: previous declaration of 'kthread_create' with type 'int(void (*)(void *), void *, int,  struct thread **)'
+   89 | int kthread_create(void (*)(void *), void *, int, struct thread **);
+      |     ^~~~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:459:1: error: conflicting types for 'thread_start'; have 'void(struct thread *)'
+  459 | thread_start(struct thread *thread)
+      | ^~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:90:6: note: previous declaration of 'thread_start' with type 'void(struct thread *)'
+   90 | void thread_start(struct thread *);
+      |      ^~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:465:1: error: conflicting types for 'thread_wait'; have 'int(struct thread *, void **)'
+  465 | thread_wait(struct thread *thread, void **status)
+      | ^~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:91:5: note: previous declaration of 'thread_wait' with type 'int(struct thread *, void **)'
+   91 | int thread_wait(struct thread *, void **);
+      |     ^~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws006/tests/usb-hid-driver-test.c:64:23: error: 'curthread' defined but not used [-Werror=unused-variable]
+   64 | static struct thread *curthread;
+      |                       ^~~~~~~~~
+cc1: all warnings being treated as errors

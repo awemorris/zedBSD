@@ -53,8 +53,8 @@
  */
 
 #include "intel-ax211-tx-ring.h"
+#include <kern/kcrt.h>
 
-#include <string.h>
 
 #define AX211_TX_QUEUE_OPERATION_ADD 0U
 #define AX211_TX_QUEUE_CB_SIZE 5U
@@ -151,7 +151,7 @@ drv_intel_ax211_tx_ring_allocate(
 	/* Checks the drv dma device is coherent result. */
 	if (!drv_dma_device_is_coherent(dma_device))
 		return INTEL_AX211_TX_RING_UNSUPPORTED;
-	memset(ring, 0, sizeof(*ring));
+	kern_memset(ring, 0, sizeof(*ring));
 	ring->dma_device = dma_device;
 	ring->ops = ops;
 	ring->ops_argument = ops_argument;
@@ -185,7 +185,7 @@ drv_intel_ax211_tx_ring_allocate(
 	/* Checks the operation result. */
 	if (result != INTEL_AX211_TX_RING_OK) {
 		ax211_tx_ring_allocations_release(ring);
-		memset(ring, 0, sizeof(*ring));
+		kern_memset(ring, 0, sizeof(*ring));
 
 		/* Failed. */
 		return result;
@@ -216,7 +216,7 @@ drv_intel_ax211_tx_ring_queue_add_build(
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_INVALID;
 	}
-	memset(&candidate, 0, sizeof(candidate));
+	kern_memset(&candidate, 0, sizeof(candidate));
 	candidate.tfd_address = ring->tfd.device_address;
 	candidate.byte_count_address = ring->byte_count.device_address;
 	candidate.station_id = station_id;
@@ -539,7 +539,7 @@ drv_intel_ax211_tx_ring_complete(
 	/* Handles the completion condition. */
 	if (completion.byte_count != slot->frame_length)
 		return INTEL_AX211_TX_RING_MALFORMED;
-	memset(&candidate, 0, sizeof(candidate));
+	kern_memset(&candidate, 0, sizeof(candidate));
 	candidate.handle = slot->handle;
 	candidate.sequence_control = completion.sequence_control;
 	candidate.byte_count = completion.byte_count;
@@ -671,7 +671,7 @@ drv_intel_ax211_tx_ring_release(
 	if (result != INTEL_AX211_TX_RING_OK)
 		return result;
 	ax211_tx_ring_allocations_release(ring);
-	memset(ring, 0, sizeof(*ring));
+	kern_memset(ring, 0, sizeof(*ring));
 
 	/* Returns the computed result. */
 	return INTEL_AX211_TX_RING_OK;
@@ -699,13 +699,13 @@ ax211_tx_ring_buffer_allocate(
 		if (buffer->address != NULL && buffer->size != 0U)
 			ax211_tx_ring_scrub(buffer->address, buffer->size);
 		drv_dma_free_coherent(ring->dma_device, buffer);
-		memset(buffer, 0, sizeof(*buffer));
+		kern_memset(buffer, 0, sizeof(*buffer));
 
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_IO_ERROR;
 	}
 
-	memset(buffer->address, 0, buffer->size);
+	kern_memset(buffer->address, 0, buffer->size);
 
 	/* Returns the computed result. */
 	return INTEL_AX211_TX_RING_OK;
@@ -785,7 +785,7 @@ ax211_tx_ring_buffer_release(
 		drv_dma_free_coherent(ring->dma_device, buffer);
 	}
 
-	memset(buffer, 0, sizeof(*buffer));
+	kern_memset(buffer, 0, sizeof(*buffer));
 }
 
 /* Supports the ax211 tx ring valid operation. */
@@ -844,7 +844,7 @@ ax211_tx_queue_command_encode(
 	uint64_t byte_count_address,
 	uint64_t tfd_address)
 {
-	memset(command, 0, INTEL_AX211_TX_QUEUE_CONFIG_COMMAND_SIZE);
+	kern_memset(command, 0, INTEL_AX211_TX_QUEUE_CONFIG_COMMAND_SIZE);
 	ax211_tx_ring_put_le32(command, AX211_TX_QUEUE_OPERATION_ADD);
 	ax211_tx_ring_put_le32(command + 4U, UINT32_C(1) << station_id);
 	command[8U] = tid;
@@ -899,7 +899,7 @@ ax211_tx_queue_config_valid(
 
 	/* Computes the function result. */
 	error =
-		memcmp(expected, config->command, sizeof(expected)) == 0;
+		kern_memcmp(expected, config->command, sizeof(expected)) == 0;
 
 	/* Returns the computed result. */
 	return error;
@@ -1026,19 +1026,19 @@ ax211_tx_ring_slot_stage(
 	      (size_t)index * INTEL_AX211_TX_RING_TFD_SIZE;
 	byte_count = (uint8_t *)ring->byte_count.address +
 		     (size_t)index * sizeof(uint16_t);
-	memset(command, 0, slot->command.size);
-	memset(payload, 0, slot->payload.size);
-	memset(tfd, 0, INTEL_AX211_TX_RING_TFD_SIZE);
+	kern_memset(command, 0, slot->command.size);
+	kern_memset(payload, 0, slot->payload.size);
+	kern_memset(tfd, 0, INTEL_AX211_TX_RING_TFD_SIZE);
 	command[0U] = INTEL_AX211_TX_OPCODE;
 	command[1U] = 0U;
 	command[2U] = index;
 	command[3U] = (uint8_t)(ring->queue & 0x1fU);
-	memcpy(command + AX211_TX_NARROW_HEADER_SIZE, prepared->command,
+	kern_memcpy(command + AX211_TX_NARROW_HEADER_SIZE, prepared->command,
 	       prepared->command_length);
 
 	/* Handles the prepared condition. */
 	if (prepared->payload_length != 0U) {
-		memcpy(payload, request->frame + prepared->payload_offset,
+		kern_memcpy(payload, request->frame + prepared->payload_offset,
 		       prepared->payload_length);
 	}
 
@@ -1064,7 +1064,7 @@ ax211_tx_ring_slot_stage(
 	if (prepared->frame_length > AX211_TX_BC_LENGTH_MASK)
 		return INTEL_AX211_TX_RING_MALFORMED;
 	ax211_tx_ring_put_le16(byte_count, prepared->frame_length);
-	memset(&slot->handle, 0, sizeof(slot->handle));
+	kern_memset(&slot->handle, 0, sizeof(slot->handle));
 	slot->handle.connection_generation = prepared->connection_generation;
 	slot->handle.cookie = prepared->cookie;
 	slot->handle.key_generation = prepared->key_generation;
@@ -1127,7 +1127,7 @@ ax211_tx_ring_slot_scrub(
 	ax211_tx_ring_scrub(slot->payload.address, slot->payload.size);
 	ax211_tx_ring_scrub(tfd, INTEL_AX211_TX_RING_TFD_SIZE);
 	ax211_tx_ring_scrub(byte_count, sizeof(uint16_t));
-	memset(&slot->handle, 0, sizeof(slot->handle));
+	kern_memset(&slot->handle, 0, sizeof(slot->handle));
 	slot->frame_length = 0U;
 	slot->active = 0U;
 	slot->uncertain = 0U;

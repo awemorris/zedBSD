@@ -12,7 +12,7 @@
 #include <kern/fd-object.h>
 #include <kern/file.h>
 #include <kern/handle.h>
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 
 /*

@@ -1,0 +1,3 @@
+lp64: entries=474 libc_changed=0 uapi_defined=380 uapi_differs=0 required_missing=0
+ilp32: entries=474 libc_changed=0 uapi_defined=380 uapi_differs=0 required_missing=0
+uapi value ledger check: PASS

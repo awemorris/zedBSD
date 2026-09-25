@@ -1,7 +1,7 @@
 /* zedBSD SPARC V9/sun4u early C entry. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
-#include <kern/sun4u/boot.h>
+#include <kern/boot.h>
 #include <hal/hal.h>
 #include "bsp.h"
 #include "space.h"
@@ -13,9 +13,9 @@ void sparcv9_io_init(uint64_t base);
 void sparcv9_timer_init(uint64_t frequency);
 
 static int
-handoff_valid(const struct sun4u_boot_handoff *handoff)
+handoff_valid(const struct kern_sun4u_boot_handoff *handoff)
 {
-	return handoff != (const struct sun4u_boot_handoff *)0 &&
+	return handoff != (const struct kern_sun4u_boot_handoff *)0 &&
 	    handoff->common.magic == KERN_HANDOFF_MAGIC &&
 	    handoff->common.version == KERN_HANDOFF_VERSION_SUN4U &&
 	    handoff->common.size == sizeof(*handoff) &&
@@ -33,7 +33,7 @@ handoff_valid(const struct sun4u_boot_handoff *handoff)
 }
 
 void
-sparcv9_cmain(const struct sun4u_boot_handoff *handoff)
+sparcv9_cmain(const struct kern_sun4u_boot_handoff *handoff)
 {
 	if (!handoff_valid(handoff))
 		for (;;)

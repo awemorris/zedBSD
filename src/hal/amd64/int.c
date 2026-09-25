@@ -12,7 +12,7 @@
  */
 
 #include <hal/hal.h>
-#include <errno.h>
+#include <uapi/errno.h>
 #include "int.h"
 #include "task.h"
 #include "irq.h"
@@ -86,8 +86,12 @@ prekern_amd64_int_init(
 	 */
 	set_gate(3, 3, amd64_fault_table[3]);
 
-	/* Selects the dedicated double-fault stack. */
+	/*
+	 * Selects the dedicated double-fault stack, and the NMI stack: an NMI
+	 * may arrive right after SYSCALL, before the kernel stack is loaded.
+	 */
 	idt[8].ist = 1;
+	idt[2].ist = 2;
 
 	/* Installs the legacy IRQ entry points. */
 	for (index = 0; index < 16; index++)
@@ -195,10 +199,17 @@ int_handler(
 		amd64_error_interrupt();
 	} else if (vector == AMD64_VECTOR_SPURIOUS) {
 		/* Leaves the unacknowledged APIC spurious vector untouched. */
-	} else if (vector == INT_SYSCALL && (frame->cs & 3U) == 3U) {
-		/* Copies syscall arguments in the established register order. */
+	} else if ((vector == INT_SYSCALL || vector == INT_SYSCALL_FAST) &&
+	    (frame->cs & 3U) == 3U) {
+		/*
+		 * Copies syscall arguments in the established register order;
+		 * SYSCALL uses rcx for the return address, so its second
+		 * argument comes in r10.
+		 */
 		args[0] = (uintptr_t)frame->rbx;
 		args[1] = (uintptr_t)frame->rcx;
+		if (vector == INT_SYSCALL_FAST)
+			args[1] = (uintptr_t)frame->r10;
 		args[2] = (uintptr_t)frame->rdx;
 		args[3] = (uintptr_t)frame->rsi;
 		args[4] = (uintptr_t)frame->rdi;
@@ -226,6 +237,17 @@ int_handler(
 		kernel_user_return_handler();
 		amd64_task_leave_user_frame();
 	}
+
+	/*
+	 * Returns by SYSRET only to a user code segment and a canonical
+	 * address: SYSRET to a non-canonical one faults in ring zero with the
+	 * user's stack.  Anything else returns by IRETQ.
+	 */
+	if (frame->vector == INT_SYSCALL_FAST &&
+	    (frame->cs != (SEG_USER_CODE | 3U) ||
+	    frame->ss != (SEG_USER_DATA | 3U) ||
+	    (uint64_t)((int64_t)(frame->rip << 16) >> 16) != frame->rip))
+		frame->vector = INT_SYSCALL;
 }
 
 /* Classifies vectors that can interrupt a userspace instruction. */

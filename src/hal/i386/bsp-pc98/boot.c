@@ -9,7 +9,7 @@
  * The PC-98 native IPL handoff implementation.
  */
 
-#include <boot/pc98-handoff.h>
+#include <kern/boot.h>
 #include <hal/hal.h>
 #include <kern/boot.h>
 
@@ -20,8 +20,8 @@
 #define PC98_BOOT_DEVICE_MAX 4U
 #define PC98_IDENTITY_MAP_END 0x08000000U
 
-static struct boot_handoff kernel_handoff;
-static struct boot_device kernel_boot_devices[PC98_BOOT_DEVICE_MAX];
+static struct kern_boot_handoff kernel_handoff;
+static struct kern_boot_device kernel_boot_devices[PC98_BOOT_DEVICE_MAX];
 static char boot_command_line[KERN_BOOT_PARAMETERS_STORAGE_SIZE];
 static int boot_info_valid;
 
@@ -34,8 +34,8 @@ void
 bsp_boot_init(
 	const void *raw_boot_info)
 {
-	const struct boot_handoff *raw;
-	const struct boot_device *devices;
+	const struct kern_boot_handoff *raw;
+	const struct kern_boot_device *devices;
 	enum x86_boot_parameters_result parameter_result;
 	enum x86_pc98_handoff_form form;
 	uintptr_t raw_address;
@@ -95,7 +95,7 @@ bsp_boot_init(
 	    table_bytes > PC98_IDENTITY_MAP_END - raw->device_table) {
 		return;
 	}
-	devices = (const struct boot_device *)(uintptr_t)raw->device_table;
+	devices = (const struct kern_boot_device *)(uintptr_t)raw->device_table;
 
 	/* Copies versioned boot parameters or publishes an empty parameter set. */
 	if (form == X86_PC98_HANDOFF_PARAMETERS) {

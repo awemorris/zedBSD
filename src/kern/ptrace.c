@@ -30,9 +30,9 @@
 #include "kern/sched.h"
 #include <uapi/ptrace.h>
 #include <uapi/reg.h>
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
-#include <string.h>
+#include <kern/kcrt.h>
 
 /*
  * Finds a thread of a process by the identifier a debugger names it with.
@@ -525,7 +525,7 @@ kern_ptrace(
 		user_fpreg.fp_opcode = fpregs.opcode;
 		user_fpreg.fp_instruction_pointer = fpregs.instruction_pointer;
 		user_fpreg.fp_data_pointer = fpregs.data_pointer;
-		memcpy(user_fpreg.fp_stack, fpregs.stack,
+		kern_memcpy(user_fpreg.fp_stack, fpregs.stack,
 		    sizeof(user_fpreg.fp_stack));
 		error = vmspace_copy_to(caller->vmspace, address, &user_fpreg,
 		    sizeof(user_fpreg));
@@ -547,7 +547,7 @@ kern_ptrace(
 		fpregs.opcode = user_fpreg.fp_opcode;
 		fpregs.instruction_pointer = user_fpreg.fp_instruction_pointer;
 		fpregs.data_pointer = user_fpreg.fp_data_pointer;
-		memcpy(fpregs.stack, user_fpreg.fp_stack,
+		kern_memcpy(fpregs.stack, user_fpreg.fp_stack,
 		    sizeof(fpregs.stack));
 		if (hal_task_set_user_fpregs(thread->task, &fpregs) != 0)
 			error = EINVAL;
@@ -565,7 +565,7 @@ kern_ptrace(
 		}
 		user_xmmreg.xmm_control = vregs.control;
 		user_xmmreg.xmm_control_mask = vregs.control_mask;
-		memcpy(user_xmmreg.xmm_register, vregs.xmm,
+		kern_memcpy(user_xmmreg.xmm_register, vregs.xmm,
 		    sizeof(user_xmmreg.xmm_register));
 		error = vmspace_copy_to(caller->vmspace, address,
 		    &user_xmmreg, sizeof(user_xmmreg));
@@ -583,7 +583,7 @@ kern_ptrace(
 			break;
 		vregs.control = user_xmmreg.xmm_control;
 		vregs.control_mask = user_xmmreg.xmm_control_mask;
-		memcpy(vregs.xmm, user_xmmreg.xmm_register,
+		kern_memcpy(vregs.xmm, user_xmmreg.xmm_register,
 		    sizeof(vregs.xmm));
 		if (hal_task_set_user_vregs(thread->task, &vregs) != 0)
 			error = EINVAL;
@@ -744,7 +744,7 @@ kern_ptrace(
 		{
 			struct ptrace_siginfo siginfo;
 
-			memset(&siginfo, 0, sizeof(siginfo));
+			kern_memset(&siginfo, 0, sizeof(siginfo));
 			siginfo.psi_siginfo = process->trace_siginfo;
 			siginfo.psi_thread = (int)process->trace_thread;
 			error = vmspace_copy_to(caller->vmspace, address,

@@ -28,6 +28,7 @@
  */
 
 #include "scenarios.h"
+#include <kern/kcrt.h>
 
 #include "../../compiler/compiler.h"
 #include "../../i915.h"
@@ -39,19 +40,18 @@
 #include "../../render/object.h"
 #include "../../render/render.h"
 
-#include <drivers/gpu.h>
+#include <drivers/gpu/gpu.h>
 #include <kern/clock.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
 
-#include <vulkan/vulkan_core.h>
+#include <libc/vulkan/vulkan_core.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "../fixtures/executor-shaders-gen.inc"
 
@@ -424,7 +424,7 @@ i915_vkx_thread(
 
 	/* Opens the session and makes every object the steps use. */
 	x = &i915_vkx_state;
-	memset(x, 0, sizeof(*x));
+	kern_memset(x, 0, sizeof(*x));
 	x->device = device;
 	error = i915_vkx_setup(x);
 	if (error != 0) {
@@ -793,7 +793,7 @@ i915_vkx_pipeline_init(
 	int dynamic)
 {
 	/* The two stages. */
-	memset(pipeline, 0, sizeof(*pipeline));
+	kern_memset(pipeline, 0, sizeof(*pipeline));
 	pipeline->vertex = &x->place;
 	pipeline->fragment = fragment;
 
@@ -949,7 +949,7 @@ i915_vkx_quad_write(
 		words[corner * 8U + 1U] = i915_vkx_ndc[y];
 		words[corner * 8U + 2U] = I915_VKX_F_0;
 		words[corner * 8U + 3U] = I915_VKX_F_1;
-		memcpy(&words[corner * 8U + 4U], color, 4U * sizeof(color[0]));
+		kern_memcpy(&words[corner * 8U + 4U], color, 4U * sizeof(color[0]));
 	}
 }
 
@@ -978,8 +978,8 @@ i915_vkx_indices_write(
 
 	/* Writes both kinds and flushes them before the GPU reads them. */
 	indices = x->cpu + I915_VKX_INDEX_OFFSET;
-	memcpy(indices, short_indices, sizeof(short_indices));
-	memcpy(indices + I915_VKX_INDEX32_OFFSET, long_indices, sizeof(long_indices));
+	kern_memcpy(indices, short_indices, sizeof(short_indices));
+	kern_memcpy(indices + I915_VKX_INDEX32_OFFSET, long_indices, sizeof(long_indices));
 	drv_i915_gt_clflush(indices, I915_VKX_INDEX_BYTES);
 }
 
@@ -995,7 +995,7 @@ i915_vkx_put32(
 		return;
 	}
 
-	memcpy(x->wire + x->used, &value, 4U);
+	kern_memcpy(x->wire + x->used, &value, 4U);
 	x->used += 4U;
 }
 
@@ -1061,7 +1061,7 @@ i915_vkx_reply32(
 	if (offset + 4U > x->reply_bytes)
 		return 0U;
 
-	memcpy(&value, x->reply + offset, 4U);
+	kern_memcpy(&value, x->reply + offset, 4U);
 
 	/* Succeeded: the word at the offset. */
 	return value;
@@ -1592,8 +1592,8 @@ i915_vkx_step_copy(
 	destination = x->cpu + I915_VKX_DESTINATION_OFFSET;
 	for (index = 0U; index < I915_VKX_COPY_BYTES / 4U; index++)
 		source[index] = index * 0x9e3779b1U + 0x12345U;
-	memset(destination, 0xcd, I915_VKX_COPY_BYTES);
-	memset(x->model, 0xcd, I915_VKX_COPY_BYTES);
+	kern_memset(destination, 0xcd, I915_VKX_COPY_BYTES);
+	kern_memset(x->model, 0xcd, I915_VKX_COPY_BYTES);
 	drv_i915_gt_clflush(source, I915_VKX_COPY_BYTES);
 	drv_i915_gt_clflush(destination, I915_VKX_COPY_BYTES);
 
@@ -1619,7 +1619,7 @@ i915_vkx_step_copy(
 
 	/* Makes the model: every region copied on the CPU. */
 	for (index = 0U; index < 4U; index++) {
-		memcpy(x->model + regions[index][1],
+		kern_memcpy(x->model + regions[index][1],
 		       (const uint8_t *)source + regions[index][0],
 		       (size_t)regions[index][2]);
 	}
@@ -1676,7 +1676,7 @@ i915_vkx_step_grid(
 	i915_vkx_bind_indices(x, I915_VKX_INDEX32_OFFSET, VK_INDEX_TYPE_UINT32);
 
 	/* Records one push and one draw for each cell. */
-	memset(block, 0, sizeof(block));
+	kern_memset(block, 0, sizeof(block));
 	for (cell = 0U; cell < 64U; cell++) {
 		/* The cell's offset: its column and row in steps of 0.25. */
 		column = cell % 8U;
@@ -1804,7 +1804,7 @@ i915_vkx_mip_sampler_init(
 	uint32_t max_lod)
 {
 	/* Linear within a level, clamped to the edge. */
-	memset(sampler, 0, sizeof(*sampler));
+	kern_memset(sampler, 0, sizeof(*sampler));
 	sampler->mag_filter = VK_FILTER_LINEAR;
 	sampler->min_filter = VK_FILTER_LINEAR;
 	sampler->address_u = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -2279,7 +2279,7 @@ i915_vkx_step_mip_blit(
 
 	/* Clears the readback area so that a level never written cannot pass. */
 	readback = (uint32_t *)(void *)(x->cpu + I915_VKX_DESTINATION_OFFSET);
-	memset(readback, 0, I915_VKX_COPY_BYTES);
+	kern_memset(readback, 0, I915_VKX_COPY_BYTES);
 	drv_i915_gt_clflush(readback, I915_VKX_COPY_BYTES);
 
 	/* Records the upload of level 0 and the blit of every further level from the one above. */

@@ -116,8 +116,9 @@
 #include "modeset-internal.h"
 #include "dp.h"
 #include "panel-backlight.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 
 static struct drm_i915_private *i915_dp_cur_i915(const struct drm_dp_aux *aux);
 static u8 i915_dp_lttpr_common_cap(const u8 caps[DP_LTTPR_COMMON_CAP_SIZE], int r);
@@ -304,7 +305,7 @@ drv_i915_drm_dp_dpcd_read_phy_link_status(
 	I915_LCD_WARN_ON(ret != DP_LINK_STATUS_SIZE - 1);
 
 	/* Convert the LTTPR to the sink PHY link status layout. */
-	memmove(&link_status[DP_SINK_STATUS - DP_LANE0_1_STATUS + 1],
+	kern_memmove(&link_status[DP_SINK_STATUS - DP_LANE0_1_STATUS + 1],
 		&link_status[DP_SINK_STATUS - DP_LANE0_1_STATUS],
 		DP_LINK_STATUS_SIZE - (DP_SINK_STATUS - DP_LANE0_1_STATUS) - 1);
 	link_status[DP_SINK_STATUS - DP_LANE0_1_STATUS] = 0;
@@ -630,7 +631,7 @@ drv_i915_dp_set_link_params(
 	int lane_count)
 {
 	/* Starts the training set from the lowest levels. */
-	memset(intel_dp->train_set, 0, sizeof(intel_dp->train_set));
+	kern_memset(intel_dp->train_set, 0, sizeof(intel_dp->train_set));
 
 	/*
 	 * link_trained tells the LTTPR detection that the link is not active
@@ -1413,7 +1414,7 @@ i915_dp_reset_lttpr_common_caps(
 	struct intel_dp *intel_dp)
 {
 	/* Clears every capability byte. */
-	memset(intel_dp->lttpr_common_caps, 0, sizeof(intel_dp->lttpr_common_caps));
+	kern_memset(intel_dp->lttpr_common_caps, 0, sizeof(intel_dp->lttpr_common_caps));
 }
 
 /* Forgets the LTTPR count, so no LTTPR is trained (the Linux intel_dp_reset_lttpr_count()). */
@@ -2124,7 +2125,7 @@ i915_dp_set_link_train(
 
 	/* DP_TRAINING_LANEx_SET follow DP_TRAINING_PATTERN_SET */
 	buf[0] = dp_train_pat;
-	memcpy(buf + 1, intel_dp->train_set, crtc_state->lane_count);
+	kern_memcpy(buf + 1, intel_dp->train_set, crtc_state->lane_count);
 	len = crtc_state->lane_count + 1;
 
 	/* Writes the pattern and the lanes' levels in one transfer. */
@@ -2246,7 +2247,7 @@ i915_dp_reset_link_train(
 	bool written;
 
 	/* Programs the lowest levels. */
-	memset(intel_dp->train_set, 0, sizeof(intel_dp->train_set));
+	kern_memset(intel_dp->train_set, 0, sizeof(intel_dp->train_set));
 	i915_dp_set_signal_levels(intel_dp, crtc_state, dp_phy);
 
 	/* Sets the pattern with those levels. */
@@ -2600,7 +2601,7 @@ i915_dp_link_training_clock_recovery(
 	bool changed;
 	bool reached;
 
-	memset(old_link_status, 0, sizeof(old_link_status));
+	kern_memset(old_link_status, 0, sizeof(old_link_status));
 	max_vswing_reached = false;
 
 	/* Finds the device whose sink the port reaches and sleeps on. */
@@ -2687,7 +2688,7 @@ i915_dp_link_training_clock_recovery(
 		}
 
 		/* Keeps the status for the next comparison. */
-		memcpy(old_link_status, link_status, sizeof(link_status));
+		kern_memcpy(old_link_status, link_status, sizeof(link_status));
 
 		/* Remembers that the levels cannot go higher. */
 		reached = i915_dp_link_max_vswing_reached(intel_dp, crtc_state);
@@ -3215,7 +3216,7 @@ i915_edp_init_source_oui(
 	i915_lcd_ssize_t transferred;
 	int differs;
 
-	memset(buf, 0, sizeof(buf));
+	kern_memset(buf, 0, sizeof(buf));
 
 	/* Finds the device whose sink the port reaches. */
 	cur_i915 = i915_dp_cur_i915(&intel_dp->aux);
@@ -3230,7 +3231,7 @@ i915_edp_init_source_oui(
 			I915_LCD_DRM_ERR(NULL, "Failed to read source OUI\n");
 
 		/* Assume the OUI was written now. */
-		differs = memcmp(oui, buf, sizeof(oui));
+		differs = kern_memcmp(oui, buf, sizeof(oui));
 		if (differs == 0) {
 			intel_dp->last_oui_write = I915_LCD_JIFFIES;
 			return;

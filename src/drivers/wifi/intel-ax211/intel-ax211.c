@@ -50,8 +50,8 @@
  */
 
 #include "intel-ax211-internal.h"
+#include <kern/kcrt.h>
 
-#include <string.h>
 
 enum {
 	AX211_TLV_PROBE_MAX_LEN = 6,
@@ -290,7 +290,7 @@ drv_intel_ax211_firmware_parse(
 		return INTEL_AX211_INVALID;
 	}
 
-	memset(&parsed, 0, sizeof(parsed));
+	kern_memset(&parsed, 0, sizeof(parsed));
 	parsed.header_version = ax211_get_le32(bytes + 72U);
 	parsed.build = ax211_get_le32(bytes + 76U);
 	offset = INTEL_AX211_TLV_HEADER_SIZE;
@@ -600,7 +600,7 @@ drv_intel_ax211_pnvm_parse(
 	/* Handles the bytes availability. */
 	if (bytes == NULL || sku == NULL || manifest == NULL)
 		return INTEL_AX211_INVALID;
-	memset(&candidate, 0, sizeof(candidate));
+	kern_memset(&candidate, 0, sizeof(candidate));
 	/* Process each remaining element. */
 	while (offset < length) {
 		/* Checks the current data length. */
@@ -641,7 +641,7 @@ drv_intel_ax211_pnvm_parse(
 			active = drv_intel_ax211_sku_equal(&found, sku);
 			version_seen = 0;
 			hardware_match = 0;
-			memset(&candidate, 0, sizeof(candidate));
+			kern_memset(&candidate, 0, sizeof(candidate));
 			candidate.sku = found;
 		} else if (type == AX211_TLV_PNVM_VERSION) {
 			/* Handles the tlv length condition. */
@@ -746,7 +746,7 @@ drv_intel_ax211_pnvm_inspect(
 	/* Handles the bytes availability. */
 	if (bytes == NULL || inventory == NULL)
 		return INTEL_AX211_INVALID;
-	memset(&found, 0, sizeof(found));
+	kern_memset(&found, 0, sizeof(found));
 	/* Process each remaining element. */
 	while (offset < length) {
 		/* Checks the current data length. */
@@ -846,7 +846,7 @@ drv_intel_ax211_context_info_gen3_encode(
 		/* Returns the computed result. */
 		return INTEL_AX211_INVALID;
 	}
-	memset(output, 0, INTEL_AX211_CONTEXT_INFO_GEN3_SIZE);
+	kern_memset(output, 0, INTEL_AX211_CONTEXT_INFO_GEN3_SIZE);
 	ax211_put_le16(output, context->version);
 	ax211_put_le16(output + 2U, INTEL_AX211_CONTEXT_INFO_GEN3_SIZE / 4U);
 	ax211_put_le32(output + 4U, context->config);
@@ -890,7 +890,7 @@ drv_intel_ax211_rx_transfer_descriptor_encode(
 	/* Handles the output availability. */
 	if (output == NULL)
 		return INTEL_AX211_INVALID;
-	memset(output, 0, INTEL_AX211_RX_TRANSFER_DESCRIPTOR_SIZE);
+	kern_memset(output, 0, INTEL_AX211_RX_TRANSFER_DESCRIPTOR_SIZE);
 	ax211_put_le16(output, buffer_id);
 	ax211_put_le64(output + 8U, address);
 
@@ -934,7 +934,7 @@ drv_intel_ax211_tfd_encode(
 		/* Returns the computed result. */
 		return INTEL_AX211_INVALID;
 	}
-	memset(output, 0, INTEL_AX211_TFD_SIZE);
+	kern_memset(output, 0, INTEL_AX211_TFD_SIZE);
 	ax211_put_le16(output, (uint16_t)buffer_count);
 	/* Process each remaining element. */
 	for (index = 0; index < buffer_count; index++) {
@@ -1036,7 +1036,7 @@ drv_intel_ax211_event_decode(
 	/* Handles the frame length condition. */
 	if (frame_length > length - 4U)
 		return INTEL_AX211_TRUNCATED;
-	memset(event, 0, sizeof(*event));
+	kern_memset(event, 0, sizeof(*event));
 	event->command.opcode = bytes[4];
 	event->flags = bytes[5];
 	event->index = bytes[6];
@@ -1065,7 +1065,7 @@ drv_intel_ax211_ring_init(
 		/* Returns the computed result. */
 		return INTEL_AX211_INVALID;
 	}
-	memset(ring, 0, sizeof(*ring));
+	kern_memset(ring, 0, sizeof(*ring));
 	ring->capacity = capacity;
 	ring->queue = queue;
 
@@ -1175,7 +1175,7 @@ drv_intel_ax211_staging_set(
 
 	/* Checks the current data length. */
 	if (length != 0U)
-		memcpy(staging->bytes, data, length);
+		kern_memcpy(staging->bytes, data, length);
 	staging->length = length;
 
 	/* Returns the computed result. */
@@ -1206,8 +1206,8 @@ drv_intel_ax211_staging_clear(
  * SPDX-License-Identifier: Zlib
  */
 
-#include <drivers/pci-intel-ax211.h>
-#include <drivers/pci.h>
+#include <drivers/wifi/intel-ax211/pci-intel-ax211.h>
+#include <drivers/pci/pci.h>
 
 #include "intel-ax211-assoc.h"
 #include "intel-ax211-bss.h"
@@ -1221,7 +1221,7 @@ drv_intel_ax211_staging_clear(
 #include "intel-ax211-transport-backend.h"
 #include "intel-ax211-tx-ring.h"
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <limits.h>
 #include <kern/clock.h>
 #include <kern/lock.h>
@@ -1230,7 +1230,6 @@ drv_intel_ax211_staging_clear(
 #include <kern/net/wlan.h>
 #include <kern/sched.h>
 #include <stdint.h>
-#include <string.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
 #include "kern/device-io.h"
@@ -1710,8 +1709,8 @@ ax211_pci_attach(
 	controller = kern_malloc(sizeof(*controller));
 	if (controller == NULL)
 		return ENOMEM;
-	memset(controller, 0, sizeof(*controller));
-	memset(&profile, 0, sizeof(profile));
+	kern_memset(controller, 0, sizeof(*controller));
+	kern_memset(&profile, 0, sizeof(profile));
 	controller->device = device;
 	stage = "lifecycle-lock";
 
@@ -2034,7 +2033,7 @@ ax211_pci_profile(
 	/* Handles the controller availability. */
 	if (controller == NULL || profile == NULL)
 		return EINVAL;
-	memset(profile, 0, sizeof(*profile));
+	kern_memset(profile, 0, sizeof(*profile));
 	mac_type =
 		(controller->hardware_revision & AX211_CSR_HW_REV_TYPE_MASK) >>
 		AX211_CSR_HW_REV_TYPE_SHIFT;
@@ -2428,7 +2427,7 @@ ax211_pci_refresh_one(
 	int error;
 	int stop_error;
 
-	memset(mac_address, 0, sizeof(mac_address));
+	kern_memset(mac_address, 0, sizeof(mac_address));
 	mutex_lock(&controller->lifecycle_lock);
 
 	hardware_attempted = 0;
@@ -2493,7 +2492,7 @@ ax211_pci_publish(
 		return ENOSPC;
 	device->flags = NET_DEVICE_BROADCAST | NET_DEVICE_MULTICAST;
 	device->mtu = AX211_MTU;
-	memcpy(device->hwaddr, mac_address, AX211_MAC_ADDRESS_SIZE);
+	kern_memcpy(device->hwaddr, mac_address, AX211_MAC_ADDRESS_SIZE);
 	device->hwaddr_len = AX211_MAC_ADDRESS_SIZE;
 	device->capabilities = NET_DEVICE_CAP_WLAN;
 	device->ops = &ax211_net_ops;
@@ -2501,7 +2500,7 @@ ax211_pci_publish(
 	error = ENOSPC;
 	/* Process each remaining element. */
 	for (index = 0U; index < NET_DEVICE_MAX; index++) {
-		memcpy(device->name, "wlan", 4U);
+		kern_memcpy(device->name, "wlan", 4U);
 		device->name[4] = (char)('0' + index);
 		device->name[5] = '\0';
 
@@ -2531,7 +2530,7 @@ ax211_pci_publish(
 		error = wlan_station_attach(device, &ax211_radio_ops,
 					    controller, &profile, &station);
 	} else {
-		memset(&profile, 0, sizeof(profile));
+		kern_memset(&profile, 0, sizeof(profile));
 	}
 
 	ax211_pci_scrub(&profile, sizeof(profile));
@@ -2563,7 +2562,7 @@ ax211_pci_scan_profile(
 {
 	unsigned channel;
 
-	memset(profile, 0, sizeof(*profile));
+	kern_memset(profile, 0, sizeof(*profile));
 	profile->channel_count = AX211_PASSIVE_CHANNEL_COUNT;
 	/* Process each remaining element. */
 	for (channel = 1U; channel <= profile->channel_count; channel++) {
@@ -3190,7 +3189,7 @@ ax211_pci_receive_epoch_begin(
 	controller->receive_enabled = 0U;
 	controller->irq_latched = 0U;
 	controller->active_dma = NULL;
-	memset(controller->last_receive_header, 0,
+	kern_memset(controller->last_receive_header, 0,
 	       sizeof(controller->last_receive_header));
 	controller->last_receive_length = 0U;
 	controller->last_receive_version = 0U;
@@ -3249,7 +3248,7 @@ ax211_pci_transport_bind(
 	if (result != 0 || !drv_dma_device_is_coherent(dma->device))
 		return -1;
 
-	memset(&memory, 0, sizeof(memory));
+	kern_memset(&memory, 0, sizeof(memory));
 	bus_master_enabled = 0;
 
 	/* Checks the operation result. */
@@ -3380,7 +3379,7 @@ ax211_pci_receive_event(
 		/* Returns the computed result. */
 		return INTEL_AX211_BOOT_RECEIVE_IO;
 	}
-	memset(event, 0, sizeof(*event));
+	kern_memset(event, 0, sizeof(*event));
 	receive_result = INTEL_AX211_BOOT_RECEIVE_IO;
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
@@ -3394,7 +3393,7 @@ ax211_pci_receive_event(
 		spin_unlock_irqrestore(&controller->interrupt_lock, enabled);
 		if (result != 0)
 			return INTEL_AX211_BOOT_RECEIVE_IO;
-		memset(&causes, 0, sizeof(causes));
+		kern_memset(&causes, 0, sizeof(causes));
 
 		/* Checks the operation result. */
 		result = drv_intel_ax211_transport_interrupt_claim(
@@ -3437,7 +3436,7 @@ ax211_pci_receive_event(
 				return INTEL_AX211_BOOT_RECEIVE_IO;
 		}
 
-		memset(&completion, 0, sizeof(completion));
+		kern_memset(&completion, 0, sizeof(completion));
 
 		/* Checks the operation result. */
 		result = controller->transport.rx_active
@@ -3466,7 +3465,7 @@ ax211_pci_receive_event(
 			    total_length <= INTEL_AX211_BOOT_EVENT_CAPACITY &&
 			    total_length <= buffer->size &&
 			    total_length <= capacity) {
-				memcpy(bytes, buffer->address, total_length);
+				kern_memcpy(bytes, buffer->address, total_length);
 				receive_result = INTEL_AX211_BOOT_RECEIVE_OK;
 			} else {
 				receive_result = INTEL_AX211_BOOT_RECEIVE_IO;
@@ -3495,7 +3494,7 @@ ax211_pci_receive_event(
 			event->notification_version =
 				ax211_pci_notification_version(bytes,
 							       total_length);
-			memcpy(controller->last_receive_header, bytes,
+			kern_memcpy(controller->last_receive_header, bytes,
 			       sizeof(controller->last_receive_header));
 			controller->last_receive_length = total_length;
 			controller->last_receive_version =
@@ -3846,8 +3845,8 @@ ax211_pci_scan_initialize(
 		/* Failed. */
 		return EINVAL;
 	}
-	memset(&table, 0, sizeof(table));
-	memset(&mcc, 0, sizeof(mcc));
+	kern_memset(&table, 0, sizeof(table));
+	kern_memset(&mcc, 0, sizeof(mcc));
 	table.bytes = controller->runtime_start.command_version_bytes;
 	table.count = INTEL_AX211_PROTOCOL_API89_COMMAND_COUNT;
 
@@ -3884,7 +3883,7 @@ ax211_pci_scan_initialize(
 		return error;
 	}
 
-	memset(&profile, 0, sizeof(profile));
+	kern_memset(&profile, 0, sizeof(profile));
 
 	/* Checks the operation result. */
 	result = ax211_pci_runtime_scan_profile(controller, &profile);
@@ -3952,7 +3951,7 @@ ax211_pci_runtime_scan_profile(
 		/* Failed. */
 		return EINVAL;
 	}
-	memset(profile, 0, sizeof(*profile));
+	kern_memset(profile, 0, sizeof(*profile));
 	profile->channel_count = (uint32_t)source->channel_count;
 	/* Process each remaining element. */
 	for (index = 0U; index < source->channel_count; index++) {
@@ -4079,7 +4078,7 @@ ax211_pci_event_message(
 		/* Failed. */
 		return EIO;
 	}
-	memset(message, 0, sizeof(*message));
+	kern_memset(message, 0, sizeof(*message));
 	message->opcode = event->command.opcode;
 	message->group = event->flags &
 			 (uint8_t)~INTEL_AX211_PROTOCOL_COMMAND_FAILED_MASK;
@@ -4194,7 +4193,7 @@ ax211_pci_scan_notification_dispatch(
 	/* Handles the controller condition. */
 	if (!controller->scan_initialized)
 		return 0;
-	memset(&reported, 0, sizeof(reported));
+	kern_memset(&reported, 0, sizeof(reported));
 
 	/* Checks the operation status. */
 	result = drv_intel_ax211_scan_session_notification(
@@ -4265,8 +4264,8 @@ ax211_pci_rx_dispatch(
 	int result;
 
 	/* Decodes the frame into cleared staging. */
-	memset(&bss_entry, 0, sizeof(bss_entry));
-	memset(&mpdu, 0, sizeof(mpdu));
+	kern_memset(&bss_entry, 0, sizeof(bss_entry));
+	kern_memset(&mpdu, 0, sizeof(mpdu));
 	ax211_pci_scrub(controller->runtime_frame,
 			sizeof(controller->runtime_frame));
 
@@ -4433,8 +4432,8 @@ ax211_pci_runtime_event_dispatch(
 		/* Failed. */
 		return EINVAL;
 	}
-	memset(&decoded, 0, sizeof(decoded));
-	memset(&message, 0, sizeof(message));
+	kern_memset(&decoded, 0, sizeof(decoded));
+	kern_memset(&message, 0, sizeof(message));
 
 	/* Checks the operation result. */
 	result = ax211_pci_event_message(bytes, length, event, &decoded,
@@ -4539,9 +4538,9 @@ ax211_pci_deferred_event_enqueue(
 		 controller->deferred_event_count) %
 		AX211_DEFERRED_EVENT_LIMIT;
 	slot = &controller->deferred_event[index];
-	memset(slot, 0, sizeof(*slot));
+	kern_memset(slot, 0, sizeof(*slot));
 	slot->received = *received;
-	memcpy(slot->bytes, bytes, received->length);
+	kern_memcpy(slot->bytes, bytes, received->length);
 	controller->deferred_event_count++;
 
 	/* Handles the net device availability. */
@@ -4577,7 +4576,7 @@ ax211_pci_deferred_event_drain_one(
 		return EIO;
 	}
 	received = slot->received;
-	memcpy(controller->deferred_dispatch_event, slot->bytes,
+	kern_memcpy(controller->deferred_dispatch_event, slot->bytes,
 	       received.length);
 	ax211_pci_scrub(slot, sizeof(*slot));
 	controller->deferred_event_head =
@@ -4780,7 +4779,7 @@ ax211_pci_sram_read_locked(
 		if (controller->mmio.ops->csr_read32(controller->mmio.argument,
 						     AX211_HBUS_TARG_MEM_RDAT,
 						     &words[index]) != 0) {
-			memset(words, 0, count * sizeof(*words));
+			kern_memset(words, 0, count * sizeof(*words));
 
 			/* Failed. */
 			return EIO;
@@ -4820,8 +4819,8 @@ ax211_pci_firmware_error_dump(
 		return;
 	}
 
-	memset(lmac, 0, sizeof(lmac));
-	memset(umac, 0, sizeof(umac));
+	kern_memset(lmac, 0, sizeof(lmac));
+	kern_memset(umac, 0, sizeof(umac));
 	lmac_address =
 		controller->runtime_start.alive.lmac[0].error_event_table;
 	umac_address = controller->runtime_start.alive.umac.error_info &
@@ -4906,13 +4905,13 @@ ax211_pci_direct_command(
 	*response_length = 0U;
 	/* Handles the completed message availability. */
 	if (completed_message != NULL)
-		memset(completed_message, 0, sizeof(*completed_message));
+		kern_memset(completed_message, 0, sizeof(*completed_message));
 
 	/* Handles the completed pending availability. */
 	if (completed_pending != NULL)
-		memset(completed_pending, 0, sizeof(*completed_pending));
-	memset(&handle, 0, sizeof(handle));
-	memset(&pending, 0, sizeof(pending));
+		kern_memset(completed_pending, 0, sizeof(*completed_pending));
+	kern_memset(&handle, 0, sizeof(handle));
+	kern_memset(&pending, 0, sizeof(pending));
 	controller->command_fh_causes = 0U;
 	controller->command_hw_causes = 0U;
 	controller->command_raw_fh_causes = 0U;
@@ -4953,7 +4952,7 @@ ax211_pci_direct_command(
 	index = 0U;
 	/* Process each remaining element. */
 	while (result == 0 && index < AX211_DIRECT_EVENT_LIMIT) {
-		memset(&received, 0, sizeof(received));
+		kern_memset(&received, 0, sizeof(received));
 
 		/* Checks the operation result. */
 		result = ax211_pci_receive_event(
@@ -5199,7 +5198,7 @@ ax211_pci_assoc_exchange(
 		if (result != INTEL_AX211_TX_RING_OK ||
 		    command->payload_length !=
 			    sizeof(controller->tx_queue_config.command) ||
-		    memcmp(command->payload,
+		    kern_memcmp(command->payload,
 			   controller->tx_queue_config.command,
 			   sizeof(controller->tx_queue_config.command)) != 0) {
 			/* Returns the computed result. */
@@ -5207,7 +5206,7 @@ ax211_pci_assoc_exchange(
 		}
 	}
 
-	memset(&request, 0, sizeof(request));
+	kern_memset(&request, 0, sizeof(request));
 	request.command.group = command->group;
 	request.command.opcode = command->opcode;
 	request.command.version =
@@ -5219,9 +5218,9 @@ ax211_pci_assoc_exchange(
 	request.response_version = command->response_version;
 	request.minimum_response_length = minimum;
 	request.maximum_response_length = maximum;
-	memset(&message, 0, sizeof(message));
-	memset(&pending, 0, sizeof(pending));
-	memset(reply, 0, sizeof(*reply));
+	kern_memset(&message, 0, sizeof(message));
+	kern_memset(&pending, 0, sizeof(pending));
+	kern_memset(reply, 0, sizeof(*reply));
 	response_length = 0U;
 
 	/* Checks the operation result. */
@@ -5435,7 +5434,7 @@ ax211_pci_assoc_profile(
 		/* Failed. */
 		return EINVAL;
 	}
-	memset(&entry, 0, sizeof(entry));
+	kern_memset(&entry, 0, sizeof(entry));
 
 	/* Checks the operation result. */
 	result = drv_intel_ax211_bss_cache_lookup(
@@ -5443,7 +5442,7 @@ ax211_pci_assoc_profile(
 		controller->hardware_epoch, &entry);
 	if (result != INTEL_AX211_BSS_OK)
 		return result == INTEL_AX211_BSS_NOT_FOUND ? ENOENT : ESTALE;
-	memset(&metadata, 0, sizeof(metadata));
+	kern_memset(&metadata, 0, sizeof(metadata));
 
 	/* Checks the operation result. */
 	result = drv_intel_ax211_bss_assoc_metadata(
@@ -5451,7 +5450,7 @@ ax211_pci_assoc_profile(
 		&metadata);
 	if (result != INTEL_AX211_BSS_OK)
 		return EIO;
-	memset(&queue, 0, sizeof(queue));
+	kern_memset(&queue, 0, sizeof(queue));
 
 	/* Checks the operation result. */
 	result = drv_intel_ax211_tx_ring_queue_add_build(
@@ -5465,9 +5464,9 @@ ax211_pci_assoc_profile(
 		return error;
 	}
 
-	memset(profile, 0, sizeof(*profile));
-	memcpy(profile->station_address, controller->net_device->hwaddr, 6U);
-	memcpy(profile->bssid, metadata.bssid, 6U);
+	kern_memset(profile, 0, sizeof(*profile));
+	kern_memcpy(profile->station_address, controller->net_device->hwaddr, 6U);
+	kern_memcpy(profile->bssid, metadata.bssid, 6U);
 	profile->channel = metadata.channel;
 	profile->channel_width_mhz = INTEL_AX211_ASSOC_CHANNEL_WIDTH_MHZ;
 	profile->rx_chain_mask = controller->runtime_start.nvm.rx_chain_mask;
@@ -5669,7 +5668,7 @@ ax211_pci_mcast_filter_configure(
 	/* Handles the controller availability. */
 	if (controller == NULL || !controller->selected_bss_valid)
 		return EINVAL;
-	memset(payload, 0, sizeof(payload));
+	kern_memset(payload, 0, sizeof(payload));
 
 	/* Checks the operation result. */
 	result = drv_intel_ax211_assoc_mcast_filter_encode(
@@ -5684,7 +5683,7 @@ ax211_pci_mcast_filter_configure(
 		return error;
 	}
 
-	memset(&request, 0, sizeof(request));
+	kern_memset(&request, 0, sizeof(request));
 	request.command.group = INTEL_AX211_ASSOC_GROUP_LEGACY;
 	request.command.opcode = INTEL_AX211_ASSOC_MCAST_FILTER_OPCODE;
 	request.command.version = INTEL_AX211_ASSOC_MCAST_FILTER_VERSION;
@@ -5737,8 +5736,8 @@ ax211_pci_mac_power_configure(
 			 1024U +
 		 999U) /
 		1000U;
-	memset(payload, 0, sizeof(payload));
-	memset(response, 0, sizeof(response));
+	kern_memset(payload, 0, sizeof(payload));
+	kern_memset(response, 0, sizeof(response));
 
 	/* Checks the operation result. */
 	result = drv_intel_ax211_assoc_mac_power_encode(
@@ -5754,7 +5753,7 @@ ax211_pci_mac_power_configure(
 		return error;
 	}
 
-	memset(&request, 0, sizeof(request));
+	kern_memset(&request, 0, sizeof(request));
 	request.command.group = INTEL_AX211_ASSOC_GROUP_LEGACY;
 	request.command.opcode = INTEL_AX211_ASSOC_MAC_POWER_OPCODE;
 	request.command.version = INTEL_AX211_ASSOC_MAC_POWER_VERSION;
@@ -5818,7 +5817,7 @@ ax211_pci_keys_remove_all(
 
 		/* Handles the generation condition. */
 		if (generation != 0U) {
-			memset(command, 0, sizeof(command));
+			kern_memset(command, 0, sizeof(command));
 
 			/* Checks the operation result. */
 			result = ax211_pci_key_result_errno(
@@ -5847,7 +5846,7 @@ ax211_pci_keys_remove_all(
 
 		/* Handles the generation condition. */
 		if (generation != 0U) {
-			memset(command, 0, sizeof(command));
+			kern_memset(command, 0, sizeof(command));
 
 			/* Checks the operation result. */
 			result = ax211_pci_key_result_errno(
@@ -5883,7 +5882,7 @@ ax211_pci_key_command(
 	/* Handles the controller availability. */
 	if (controller == NULL || payload == NULL)
 		return EINVAL;
-	memset(&request, 0, sizeof(request));
+	kern_memset(&request, 0, sizeof(request));
 	request.command.group = INTEL_AX211_KEY_GROUP;
 	request.command.opcode = INTEL_AX211_KEY_OPCODE;
 
@@ -5896,7 +5895,7 @@ ax211_pci_key_command(
 	request.response_version = INTEL_AX211_KEY_RESPONSE_VERSION;
 	request.minimum_response_length = 0U;
 	request.maximum_response_length = sizeof(response);
-	memset(response, 0, sizeof(response));
+	kern_memset(response, 0, sizeof(response));
 	response_length = 0U;
 	result = ax211_pci_direct_command(controller, &request, deadline_ticks,
 					  response, sizeof(response),
@@ -5928,7 +5927,7 @@ ax211_pci_staged_key_store(
 		    staged->request.kind == request->kind &&
 		    staged->request.key_index == request->key_index &&
 		    (staged->programmed ||
-		     memcmp(staged->request.key, request->key,
+		     kern_memcmp(staged->request.key, request->key,
 			    INTEL_AX211_KEY_BYTES) == 0)) {
 			/* Succeeded. */
 			return 0;
@@ -5963,7 +5962,7 @@ ax211_pci_staged_key_program(
 	/* Handles the staged condition. */
 	if (staged->programmed)
 		return 0;
-	memset(command, 0, sizeof(command));
+	kern_memset(command, 0, sizeof(command));
 
 	/* Checks the operation result. */
 	result = ax211_pci_key_result_errno(
@@ -6047,7 +6046,7 @@ ax211_pci_key_request_address_valid(
 		/* Computes the function result. */
 		error =
 			request->key_index == 0U &&
-			memcmp(request->address,
+			kern_memcmp(request->address,
 			       controller->selected_metadata.bssid, 6U) == 0;
 
 		/* Failed. */
@@ -6057,7 +6056,7 @@ ax211_pci_key_request_address_valid(
 	/* Computes the function result. */
 	error =
 		request->kind == WLAN_RADIO_KEY_GROUP &&
-		memcmp(request->address, broadcast, sizeof(broadcast)) == 0;
+		kern_memcmp(request->address, broadcast, sizeof(broadcast)) == 0;
 
 	/* Returns the computed result. */
 	return error;
@@ -6130,7 +6129,7 @@ ax211_pci_tx_submit(
 	if (result != 0)
 		return result;
 	(void)deadline_us;
-	memset(&handle, 0, sizeof(handle));
+	kern_memset(&handle, 0, sizeof(handle));
 
 	/* Checks the operation result. */
 	result = drv_intel_ax211_tx_ring_submit(&controller->tx_ring, request,
@@ -6176,7 +6175,7 @@ ax211_pci_tx_dispatch(
 	/* Handles the controller condition. */
 	if (!controller->tx_ring_allocated)
 		return 0;
-	memset(&retired, 0, sizeof(retired));
+	kern_memset(&retired, 0, sizeof(retired));
 	tx_message = *message;
 	tx_message.queue &= 0x7fU;
 
@@ -6264,7 +6263,7 @@ ax211_pci_tx_timeout_check(
 		/* Succeeded. */
 		return 0;
 	}
-	memset(&handle, 0, sizeof(handle));
+	kern_memset(&handle, 0, sizeof(handle));
 
 	/* Checks the operation result. */
 	result = drv_intel_ax211_tx_ring_timeout_oldest(&controller->tx_ring,
@@ -6331,7 +6330,7 @@ ax211_pci_connection_rx_dispatch(
 	type = frame_control & 0x000cU;
 	if (type != 0U && type != 0x0008U)
 		return 0;
-	memset(&report, 0, sizeof(report));
+	kern_memset(&report, 0, sizeof(report));
 	report.generation = controller->connection_generation;
 	report.frame = mpdu->frame;
 	report.length = mpdu->length;
@@ -6467,8 +6466,8 @@ ax211_net_open(
 		controller->operation_admission_open = 0U;
 		controller->session_stopped = 0U;
 		dma_device = drv_pci_device_dma(controller->device);
-		memset(&table, 0, sizeof(table));
-		memset(&nvm, 0, sizeof(nvm));
+		kern_memset(&table, 0, sizeof(table));
+		kern_memset(&nvm, 0, sizeof(nvm));
 		boot_result = INTEL_AX211_BOOT_OK;
 		runtime_result = INTEL_AX211_RUNTIME_START_OK;
 		stage = "dma-coherency";
@@ -7005,7 +7004,7 @@ ax211_net_poll_receive(
 			break;
 		}
 
-		memset(&event, 0, sizeof(event));
+		kern_memset(&event, 0, sizeof(event));
 
 		/* Checks the operation result. */
 		result = ax211_pci_receive_event(
@@ -7476,9 +7475,9 @@ ax211_radio_connect_start(
 		return result;
 	}
 
-	memset(&profile, 0, sizeof(profile));
+	kern_memset(&profile, 0, sizeof(profile));
 	result = ax211_pci_assoc_profile(controller, bss, generation, &profile);
-	memset(&table, 0, sizeof(table));
+	kern_memset(&table, 0, sizeof(table));
 	if (result == 0) {
 		table.bytes = controller->runtime_start.command_version_bytes;
 		table.count = INTEL_AX211_PROTOCOL_API89_COMMAND_COUNT;
@@ -7667,7 +7666,7 @@ ax211_radio_management_transmit(
 
 		result = ENETDOWN;
 	} else {
-		memset(&request, 0, sizeof(request));
+		kern_memset(&request, 0, sizeof(request));
 		request.connection_generation = generation;
 		request.frame = frame;
 		request.length = length;
@@ -7728,10 +7727,10 @@ ax211_radio_association_set(
 	    !controller->selected_bss_valid)
 		result = ENETDOWN;
 	else if (controller->connection_generation != generation ||
-		 memcmp(bssid, controller->selected_metadata.bssid, 6U) != 0) {
+		 kern_memcmp(bssid, controller->selected_metadata.bssid, 6U) != 0) {
 		result = ESTALE;
 	} else {
-		memset(&update, 0, sizeof(update));
+		kern_memset(&update, 0, sizeof(update));
 		update.association_id = aid;
 		update.dtim_period = controller->selected_metadata.dtim_period;
 		update.dtim_count = controller->selected_metadata.dtim_count;
@@ -7878,7 +7877,7 @@ ax211_radio_frame_transmit(
 	else if (controller->connection_generation != request->generation) {
 		result = ESTALE;
 	} else {
-		memset(&tx, 0, sizeof(tx));
+		kern_memset(&tx, 0, sizeof(tx));
 		tx.connection_generation = request->generation;
 		tx.cookie = request->cookie;
 		tx.key_generation = request->key_generation;
@@ -7971,7 +7970,7 @@ ax211_radio_key_install(
 	}
 	mutex_lock(&controller->lifecycle_lock);
 
-	memset(&key, 0, sizeof(key));
+	kern_memset(&key, 0, sizeof(key));
 
 	/* Handles the controller condition. */
 	if (!controller->runtime_active || controller->close_pending ||
@@ -7990,7 +7989,7 @@ ax211_radio_key_install(
 		key.kind = request->kind == WLAN_RADIO_KEY_PAIRWISE
 				   ? INTEL_AX211_KEY_PAIRWISE
 				   : INTEL_AX211_KEY_GROUP_KEY;
-		memcpy(key.key, request->key, sizeof(key.key));
+		kern_memcpy(key.key, request->key, sizeof(key.key));
 		staged = key.kind == INTEL_AX211_KEY_PAIRWISE
 				 ? &controller->staged_pairwise_key
 				 : &controller->staged_group_key[key.key_index];
@@ -8132,7 +8131,7 @@ ax211_radio_key_delete(
 	private_kind = kind == WLAN_RADIO_KEY_PAIRWISE
 			       ? INTEL_AX211_KEY_PAIRWISE
 			       : INTEL_AX211_KEY_GROUP_KEY;
-	memset(command, 0, sizeof(command));
+	kern_memset(command, 0, sizeof(command));
 	mutex_lock(&controller->lifecycle_lock);
 
 	/*
@@ -8294,7 +8293,7 @@ ax211_radio_keys_activate(
 		}
 
 		old_pairwise = controller->keys.active_pairwise;
-		memcpy(old_group, controller->keys.active_group,
+		kern_memcpy(old_group, controller->keys.active_group,
 		       sizeof(old_group));
 		command_crossed = 0;
 

@@ -9,8 +9,8 @@
  * PC/AT ATA PIO driver
  */
 
-#include "drivers/pcat-ide.h"
-#include <errno.h>
+#include "drivers/platform/pcat/pcat-ide.h"
+#include <uapi/errno.h>
 #include <kern/lock.h>
 #include "kern/klog.h"
 

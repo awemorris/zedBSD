@@ -22,14 +22,12 @@
 #include "kern/poll.h"
 #include "kern/uaccess.h"
 #include "kern/waitq.h"
+#include <kern/kcrt.h>
 
 #include <uapi/input.h>
 
-#include <errno.h>
-#include <string.h>
-#include <fcntl.h>
-#include <stdio.h>
-#include <string.h>
+#include <uapi/errno.h>
+#include <uapi/fcntl.h>
 #include "kern/klog.h"
 
 #define INPUT_DEVICE_MAX 8U
@@ -330,7 +328,7 @@ drv_input_device_register(
 
 	spin_unlock_irqrestore(&registry_lock, irq);
 
-	(void)snprintf(node, sizeof(node), "event%u", device->number);
+	(void)kern_snprintf(node, sizeof(node), "event%u", device->number);
 
 	/* Gives the future cdev finalizer its device-lifetime reference. */
 	input_device_ref(device);
@@ -556,7 +554,7 @@ drv_input_capability_state_init(
 		/* Failed. */
 		return EINVAL;
 	}
-	memset(state, 0, sizeof(*state));
+	kern_memset(state, 0, sizeof(*state));
 	/* Process each remaining element. */
 	for (i = 0; i < capability_count; i++) {
 		/* Checks the capability code valid result. */
@@ -730,7 +728,7 @@ drv_input_device_unregister(
 
 	was_resyncing = device->resyncing;
 	device->resyncing = 0;
-	memcpy(held, device->capability_state.key_state, sizeof(held));
+	kern_memcpy(held, device->capability_state.key_state, sizeof(held));
 
 	/* Handles the was resyncing condition. */
 	if (was_resyncing) {
@@ -1031,7 +1029,7 @@ void
 drv_input_keymap_init(
 	struct input_keymap_state *state)
 {
-	memset(state, 0, sizeof(*state));
+	kern_memset(state, 0, sizeof(*state));
 }
 
 /*
@@ -1203,7 +1201,7 @@ drv_input_keymap_event_from_code(
 	/* Handles the event availability. */
 	if (event == NULL || (value != 0 && value != 1 && value != 2))
 		return 0;
-	memset(event, 0, sizeof(*event));
+	kern_memset(event, 0, sizeof(*event));
 	/* Process each remaining element. */
 	for (index = 0; index < sizeof(letter_codes) / sizeof(letter_codes[0]);
 	     index++) {
@@ -1341,7 +1339,7 @@ void
 drv_input_queue_init(
 	struct input_queue *queue)
 {
-	memset(queue, 0, sizeof(*queue));
+	kern_memset(queue, 0, sizeof(*queue));
 }
 
 /*
@@ -1392,7 +1390,7 @@ drv_input_queue_read(
 
 	/* Handles the reader condition. */
 	if (reader->sequence < queue->first_sequence) {
-		memset(&events[count], 0, sizeof(events[count]));
+		kern_memset(&events[count], 0, sizeof(events[count]));
 		events[count].type = EV_SYN;
 		events[count].code = SYN_DROPPED;
 		count++;
@@ -1654,7 +1652,7 @@ report_timestamp(
 	struct input_event *event,
 	uint64_t milliseconds)
 {
-	memset(event, 0, sizeof(*event));
+	kern_memset(event, 0, sizeof(*event));
 	event->time.tv_sec = (time_t)(milliseconds / 1000U);
 	event->time.tv_usec = (int64_t)((milliseconds % 1000U) * 1000U);
 }
@@ -1665,7 +1663,7 @@ report_init(
 	struct input_report *report,
 	struct input_device *device)
 {
-	memset(report, 0, sizeof(*report));
+	kern_memset(report, 0, sizeof(*report));
 	report->device = device;
 	report->device_id = device->number;
 }
@@ -2014,7 +2012,7 @@ copy_text(
 {
 	int error;
 	size_t capacity = (request >> 16) & 0x1fffU;
-	size_t length = strlen(text) + 1U;
+	size_t length = kern_strlen(text) + 1U;
 
 	/* Handles the capacity condition. */
 	if (capacity == 0)
@@ -2118,7 +2116,7 @@ copy_key_state(
 
 	(void)drv_input_capability_key_state(&device->capability_state, &bits,
 					     &size);
-	memcpy(snapshot, bits, sizeof(snapshot));
+	kern_memcpy(snapshot, bits, sizeof(snapshot));
 
 	spin_unlock_irqrestore(&device->lock, irq);
 
@@ -2336,9 +2334,9 @@ copy_info_text(
 		source = "";
 
 	/* Checks the strlen result. */
-	if (strlen(source) >= INPUT_TEXT_MAX)
+	if (kern_strlen(source) >= INPUT_TEXT_MAX)
 		return ENAMETOOLONG;
-	strcpy(destination, source);
+	kern_strcpy(destination, source);
 
 	/* Succeeded. */
 	return 0;
@@ -2359,7 +2357,7 @@ input_device_resync_begin(
 
 	/* Handles the device condition. */
 	if (device->registered && !device->retiring) {
-		memset(device->resync_key_state, 0,
+		kern_memset(device->resync_key_state, 0,
 		       sizeof(device->resync_key_state));
 		device->resyncing = 1;
 		published = 1;
@@ -2449,7 +2447,7 @@ input_device_resync_end(
 	/* Handles the device condition. */
 	if (device->registered && !device->retiring && device->resyncing) {
 		device->resyncing = 0;
-		memcpy(device->capability_state.key_state,
+		kern_memcpy(device->capability_state.key_state,
 		       device->resync_key_state,
 		       sizeof(device->capability_state.key_state));
 		report_timestamp(&event, milliseconds);
@@ -2543,7 +2541,7 @@ find_symbol(
 	/* Process each remaining element. */
 	for (index = 0; index < sizeof(symbols) / sizeof(symbols[0]); index++) {
 		/* Selects the matching value. */
-		if (strcmp(name, symbols[index].name) == 0)
+		if (kern_strcmp(name, symbols[index].name) == 0)
 			return &symbols[index];
 	}
 
@@ -2565,7 +2563,7 @@ function_number(
 		return symbol[1] - '0';
 
 	/* Selects the matching value. */
-	if (strcmp(symbol, "f10") == 0)
+	if (kern_strcmp(symbol, "f10") == 0)
 		return 10;
 
 	/* Succeeded. */
@@ -2581,21 +2579,21 @@ update_modifier(
 	int press)
 {
 	/* Selects the matching value. */
-	if (strcmp(symbol, "leftshift") == 0)
+	if (kern_strcmp(symbol, "leftshift") == 0)
 		state->left_shift = (uint8_t)down;
-	else if (strcmp(symbol, "rightshift") == 0)
+	else if (kern_strcmp(symbol, "rightshift") == 0)
 		state->right_shift = (uint8_t)down;
-	else if (strcmp(symbol, "leftctrl") == 0)
+	else if (kern_strcmp(symbol, "leftctrl") == 0)
 		state->left_control = (uint8_t)down;
-	else if (strcmp(symbol, "rightctrl") == 0)
+	else if (kern_strcmp(symbol, "rightctrl") == 0)
 		state->right_control = (uint8_t)down;
-	else if (strcmp(symbol, "leftalt") == 0)
+	else if (kern_strcmp(symbol, "leftalt") == 0)
 		state->left_graph = (uint8_t)down;
-	else if (strcmp(symbol, "rightalt") == 0)
+	else if (kern_strcmp(symbol, "rightalt") == 0)
 		state->right_graph = (uint8_t)down;
-	else if (strcmp(symbol, "capslock") == 0 && press)
+	else if (kern_strcmp(symbol, "capslock") == 0 && press)
 		state->caps_lock ^= 1U;
-	else if (strcmp(symbol, "kana") == 0 && press)
+	else if (kern_strcmp(symbol, "kana") == 0 && press)
 		state->kana_lock ^= 1U;
 }
 

@@ -11,9 +11,9 @@
 
 #include "kern/namei.h"
 #include "kern/kmem.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 #define CWDINFO_DYNAMIC 0x00000001U
 
@@ -41,7 +41,7 @@ cwdinfo_clone(
 		return ENOMEM;
 
 	/* Initializes the copy as a dynamically owned record. */
-	memset(copy, 0, sizeof(*copy));
+	kern_memset(copy, 0, sizeof(*copy));
 	refcount_init(&copy->refs, 1);
 	spin_init(&copy->lock, LOCK_RANK_PROCESS, "cwdinfo");
 	copy->flags = CWDINFO_DYNAMIC;
@@ -107,5 +107,5 @@ cwdinfo_release(
 	if (dynamic)
 		kern_free(context);
 	else
-		memset(context, 0, sizeof(*context));
+		kern_memset(context, 0, sizeof(*context));
 }

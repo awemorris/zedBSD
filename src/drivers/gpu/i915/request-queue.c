@@ -16,14 +16,14 @@
 #include "i915.h"
 #include "request-queue.h"
 #include "session.h"
+#include <kern/kcrt.h>
 
-#include <drivers/gpu.h>
+#include <drivers/gpu/gpu.h>
 #include <kern/lock.h>
 #include <kern/waitq.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 static void i915_request_unlink(struct i915_engine *engine, struct i915_request *request);
 
@@ -60,7 +60,7 @@ drv_i915_request_alloc(
 		return EAGAIN;
 
 	/* Starts the slot as a queued request that names its session and callback. */
-	memset(request, 0, sizeof(*request));
+	kern_memset(request, 0, sizeof(*request));
 	request->state = I915_REQUEST_QUEUED;
 	request->session = session;
 	request->completion = completion;

@@ -1,0 +1,25 @@
+=== audiod-shrink
+serial: logged in
+NAME        STATUS    ENABLED   PID
+audiod      running   yes       5
+
+TYPE        daemon
+COMMAND     /sbin/audiod
+RESTART     on-failure
+AFTER       syslogd
+REQUIRES    -
+AUDIODTEST PLAY streams=1 frames=48000 ms=1119 underruns=0
+AUDIODTEST SHRINK survived
+NAME        STATUS    ENABLED   PID
+audiod      running   yes       5
+
+TYPE        daemon
+COMMAND     /sbin/audiod
+RESTART     on-failure
+AFTER       syslogd
+REQUIRES    -
+guest-status=0
+wav: format=1 channels=2 rate=48000 bits=16 frames=349930
+pattern: 48000 frames bit-exact from frame 282624
+pattern: leading non-silent samples=0
+check-status=0

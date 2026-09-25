@@ -1,0 +1,8 @@
+[15]
+curl: (28) Operation timed out after 20001 milliseconds with 0 bytes received
+curl-cacert rc=28
+head: /tmp/page.html: No such file or directory
+curl: (28) Connection timed out after 20000 milliseconds
+curl-default rc=28
+*   CAfile: /root/ca.pem
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):

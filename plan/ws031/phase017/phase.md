@@ -1,5 +1,7 @@
 # WS031 p017 計画: compiler の未実装機能
 
+Phase disposition: canceled（2026-09-23、`plan/ws031/ws.md`「残課題のブレークダウン」の子Phaseへ分割。確認項目・範囲の正本はこの文書に残す）
+
 ユーザー決定（2026-09-23）: p014 の後回し一覧のうち SPIR-V compiler（`src/drivers/gpu/i915/compiler/`）の未実装機能を本 Phase に
 まとめ、計画だけ作って実行は後回しにする。
 

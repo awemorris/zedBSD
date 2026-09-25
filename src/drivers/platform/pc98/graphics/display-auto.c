@@ -10,8 +10,8 @@
  */
 
 #include "drivers/platform/pc98/graphics/display-auto.h"
+#include <kern/kcrt.h>
 
-#include <string.h>
 
 static int auto_enter(void *context, struct pc98_display_info *info);
 static void auto_leave(void *context);
@@ -36,7 +36,7 @@ drv_pc98_auto_default(
 	void *io_context,
 	volatile uint8_t *cirrus_framebuffer)
 {
-	memset(backend, 0, sizeof(*backend));
+	kern_memset(backend, 0, sizeof(*backend));
 	drv_pc98_cirrus_default(&backend->cirrus, port_in8, port_out8,
 				io_context, cirrus_framebuffer);
 	drv_pc98_gdc_default(&backend->gdc, display_reset, display_stop,
@@ -62,7 +62,7 @@ drv_pc98_auto_make_hal(
 		/* Succeeded. */
 		return 0;
 	}
-	memset(hal, 0, sizeof(*hal));
+	kern_memset(hal, 0, sizeof(*hal));
 	hal->display.context = backend;
 	hal->display.enter = auto_enter;
 	hal->display.leave = auto_leave;

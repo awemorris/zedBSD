@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
-#include <drivers/pci-nvme-protocol.h>
+#include <drivers/pci/pci-nvme-protocol.h>
 
 #include <errno.h>
 #include <stdint.h>

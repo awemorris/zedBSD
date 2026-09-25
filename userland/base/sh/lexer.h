@@ -8,7 +8,9 @@
  */
 
 /*
- * Declares the zedBSD userland lexer interface.
+ * The words of the shell language as the parser hands them to expansion,
+ * and the scanners that find where a quotation or an expansion ends in the
+ * text of a word.
  */
 
 #ifndef KERN_USERLAND_SH_LEXER_H
@@ -16,48 +18,7 @@
 
 #include <stddef.h>
 
-/* How many here-documents one line may open. */
-#define SH_HEREDOC_MAX 8
-
-enum sh_token_type {
-	SH_TOKEN_WORD,
-	SH_TOKEN_SEMI,
-
-	/* The end of one arm of a case command. */
-	SH_TOKEN_DSEMI,
-	SH_TOKEN_AMP,
-	SH_TOKEN_AND_IF,
-	SH_TOKEN_OR_IF,
-	SH_TOKEN_PIPE,
-	SH_TOKEN_INPUT,
-	SH_TOKEN_OUTPUT,
-	SH_TOKEN_APPEND,
-
-	/*
-	 * A newline ends a command as a semicolon does, but it is a separate
-	 * token because the places it may appear are not the same: it is
-	 * allowed, and ignored, after the words that open a compound command.
-	 */
-	SH_TOKEN_NEWLINE,
-
-	/* Grouping, and the parentheses a case pattern and a function use. */
-	SH_TOKEN_LPAREN,
-	SH_TOKEN_RPAREN,
-
-	/* A body that follows in the input rather than naming a file. */
-	SH_TOKEN_DLESS,
-	SH_TOKEN_DLESSDASH,
-
-	/* Redirections that name another descriptor instead of a file. */
-	SH_TOKEN_LESSAND,
-	SH_TOKEN_GREATAND,
-	SH_TOKEN_LESSGREAT,
-
-	/* A truncating redirection that overrides the noclobber setting. */
-	SH_TOKEN_CLOBBER,
-	SH_TOKEN_END
-};
-
+/* How a character of a word's quote-removed text was quoted. */
 enum sh_quote_type {
 	SH_QUOTE_UNQUOTED,
 	SH_QUOTE_SINGLE,
@@ -65,29 +26,38 @@ enum sh_quote_type {
 	SH_QUOTE_ESCAPED
 };
 
+/* What a here-document body holds (struct sh_token heredoc). */
+#define SH_HEREDOC_NONE		0
+#define SH_HEREDOC_EXPAND	1	/* the delimiter was not quoted */
+#define SH_HEREDOC_LITERAL	2	/* the delimiter was quoted */
+
+/*
+ * One word, as written and with its quotes removed.
+ *
+ * raw is what expansion reads: the word as it was written, quotes and
+ * substitutions and all, less any line continuation.  text is the word with
+ * its quotes removed, with how each character was quoted, which is what the
+ * grammar looks at: an assignment's name, a here-document's delimiter.  A
+ * here-document's body is a word whose raw text is the body.
+ */
 struct sh_token {
-	enum sh_token_type type;
 	char *text;
 	unsigned char *quote;
 	size_t length;
-
-	/*
-	 * The descriptor a redirection was written with, as in the 2 of
-	 * `2>file', or -1 where none was.  A number counts as part of the
-	 * redirection only when nothing separates it from the operator,
-	 * which is what tells `2>file' from `echo 2 >file'.
-	 */
-	int io_number;
+	char *raw;
+	size_t raw_length;
+	int heredoc;
 };
 
-struct sh_token_list {
-	struct sh_token *tokens;
-	size_t count;
-};
-
-/* Returns zero and leaves error_text pointing at a static diagnostic on error.
+/*
+ * Find where a construct ends in the text of a word, and return the first
+ * character after it, or NULL when the text ends first: a single quotation,
+ * a double quotation, or an expansion ($name, ${...}, $(...), $((...)) or a
+ * backquoted command), all at their opening character.  in_double is set
+ * inside a double quotation, where a single quote is ordinary.
  */
-int sh_lex(const char *, struct sh_token_list *, const char **error_text);
-void sh_tokens_free(struct sh_token_list *);
+const char *sh_skip_single(const char *text);
+const char *sh_skip_double(const char *text);
+const char *sh_skip_expansion(const char *text, int in_double);
 
 #endif

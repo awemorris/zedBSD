@@ -16,10 +16,10 @@
  */
 
 #include "wlan-crypto.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdint.h>
-#include <string.h>
 
 #define SHA1_LENGTH_MAX_BYTES (UINT64_MAX / 8U)
 #define WPA_PRF_OUTPUT_MAX (256U * WLAN_SHA1_DIGEST_SIZE)
@@ -120,7 +120,7 @@ wlan_sha1_init(
 	context->total_bytes = 0U;
 	context->block_length = 0U;
 	context->failed = 0;
-	memset(context->block, 0, sizeof(context->block));
+	kern_memset(context->block, 0, sizeof(context->block));
 
 	/* Reports the started computation. */
 	return 0;
@@ -164,7 +164,7 @@ wlan_sha1_update(
 		amount = WLAN_SHA1_BLOCK_SIZE - context->block_length;
 		if (amount > length)
 			amount = length;
-		memcpy(context->block + context->block_length, bytes, amount);
+		kern_memcpy(context->block + context->block_length, bytes, amount);
 		context->block_length += amount;
 		bytes += amount;
 		length -= amount;
@@ -207,13 +207,13 @@ wlan_sha1_final(
 	bit_length = context->total_bytes * 8U;
 	context->block[context->block_length++] = 0x80U;
 	if (context->block_length > 56U) {
-		memset(context->block + context->block_length, 0,
+		kern_memset(context->block + context->block_length, 0,
 		    WLAN_SHA1_BLOCK_SIZE - context->block_length);
 		sha1_transform(context, context->block);
 		context->block_length = 0U;
 	}
 
-	memset(context->block + context->block_length, 0,
+	kern_memset(context->block + context->block_length, 0,
 	    56U - context->block_length);
 	for (index = 0U; index < 8U; index++)
 		context->block[63U - index] = (uint8_t)(bit_length >>
@@ -304,8 +304,8 @@ wlan_hmac_sha1_init(
 		return EINVAL;
 
 	/* Normalizes the key to one block, hashing a long one. */
-	memset(key_block, 0, sizeof(key_block));
-	memset(key_digest, 0, sizeof(key_digest));
+	kern_memset(key_block, 0, sizeof(key_block));
+	kern_memset(key_digest, 0, sizeof(key_digest));
 	key_bytes = (const uint8_t *)key;
 	normalized_length = key_length;
 	if (key_length > WLAN_SHA1_BLOCK_SIZE) {
@@ -317,7 +317,7 @@ wlan_hmac_sha1_init(
 	}
 
 	if (normalized_length != 0U)
-		memcpy(key_block, key_bytes, normalized_length);
+		kern_memcpy(key_block, key_bytes, normalized_length);
 
 	/* Derives the inner and outer pads and starts both hashes. */
 	for (index = 0U; index < WLAN_SHA1_BLOCK_SIZE; index++) {
@@ -559,13 +559,13 @@ wlan_pbkdf2_hmac_sha1(
 			error = wlan_hmac_sha1_final(&hmac, current);
 		if (error != 0)
 			break;
-		memcpy(accumulated, current, sizeof(accumulated));
+		kern_memcpy(accumulated, current, sizeof(accumulated));
 		for (iteration = 1U; iteration < iterations; iteration++) {
 			error = wlan_hmac_sha1(password, password_length, current,
 			    sizeof(current), next);
 			if (error != 0)
 				break;
-			memcpy(current, next, sizeof(current));
+			kern_memcpy(current, next, sizeof(current));
 			for (index = 0U; index < WLAN_SHA1_DIGEST_SIZE; index++)
 				accumulated[index] ^= current[index];
 		}
@@ -575,7 +575,7 @@ wlan_pbkdf2_hmac_sha1(
 		amount = output_length - offset;
 		if (amount > WLAN_SHA1_DIGEST_SIZE)
 			amount = WLAN_SHA1_DIGEST_SIZE;
-		memcpy(output + offset, accumulated, amount);
+		kern_memcpy(output + offset, accumulated, amount);
 		offset += amount;
 	}
 
@@ -671,7 +671,7 @@ wlan_crypto_prf_sha1(
 		amount = output_length - offset;
 		if (amount > WLAN_SHA1_DIGEST_SIZE)
 			amount = WLAN_SHA1_DIGEST_SIZE;
-		memcpy(output + offset, digest, amount);
+		kern_memcpy(output + offset, digest, amount);
 		offset += amount;
 	}
 
@@ -773,14 +773,14 @@ wlan_rfc3394_unwrap(
 
 	/* Runs the six unwrapping rounds over the 64-bit registers. */
 	*output_length = 0U;
-	memcpy(accumulator, wrapped, sizeof(accumulator));
-	memcpy(output, wrapped + 8U, needed);
+	kern_memcpy(accumulator, wrapped, sizeof(accumulator));
+	kern_memcpy(output, wrapped + 8U, needed);
 	n = needed / 8U;
 	aes128_expand_key(kek, expanded);
 	for (round = 5; round >= 0; round--) {
 		for (index = n; index > 0U; index--) {
 			t = (uint64_t)n * (uint64_t)round + (uint64_t)index;
-			memcpy(block, accumulator, 8U);
+			kern_memcpy(block, accumulator, 8U);
 			block[7] ^= (uint8_t)t;
 			block[6] ^= (uint8_t)(t >> 8);
 			block[5] ^= (uint8_t)(t >> 16);
@@ -789,10 +789,10 @@ wlan_rfc3394_unwrap(
 			block[2] ^= (uint8_t)(t >> 40);
 			block[1] ^= (uint8_t)(t >> 48);
 			block[0] ^= (uint8_t)(t >> 56);
-			memcpy(block + 8U, output + (index - 1U) * 8U, 8U);
+			kern_memcpy(block + 8U, output + (index - 1U) * 8U, 8U);
 			aes128_decrypt_expanded(expanded, block, decrypted);
-			memcpy(accumulator, decrypted, 8U);
-			memcpy(output + (index - 1U) * 8U, decrypted + 8U, 8U);
+			kern_memcpy(accumulator, decrypted, 8U);
+			kern_memcpy(output + (index - 1U) * 8U, decrypted + 8U, 8U);
 		}
 	}
 
@@ -1053,7 +1053,7 @@ aes128_expand_key(
 	uint8_t first;
 
 	/* Derives each word from the previous one and the word 16 bytes back. */
-	memcpy(expanded, key, 16U);
+	kern_memcpy(expanded, key, 16U);
 	generated = 16U;
 	rcon_index = 0U;
 	while (generated < 176U) {
@@ -1138,7 +1138,7 @@ aes_shift_rows(
 	temporary[13] = state[1];
 	temporary[14] = state[6];
 	temporary[15] = state[11];
-	memcpy(state, temporary, sizeof(temporary));
+	kern_memcpy(state, temporary, sizeof(temporary));
 	wlan_crypto_erase(temporary, sizeof(temporary));
 }
 
@@ -1166,7 +1166,7 @@ aes_inverse_shift_rows(
 	temporary[13] = state[9];
 	temporary[14] = state[6];
 	temporary[15] = state[3];
-	memcpy(state, temporary, sizeof(temporary));
+	kern_memcpy(state, temporary, sizeof(temporary));
 	wlan_crypto_erase(temporary, sizeof(temporary));
 }
 
@@ -1241,7 +1241,7 @@ aes128_encrypt_expanded(
 	unsigned round;
 
 	/* Runs the initial key addition, nine full rounds, and the final round. */
-	memcpy(state, input, sizeof(state));
+	kern_memcpy(state, input, sizeof(state));
 	aes_add_round_key(state, expanded);
 	for (round = 1U; round < 10U; round++) {
 		aes_sub_bytes(state);
@@ -1253,7 +1253,7 @@ aes128_encrypt_expanded(
 	aes_sub_bytes(state);
 	aes_shift_rows(state);
 	aes_add_round_key(state, expanded + 160U);
-	memcpy(output, state, sizeof(state));
+	kern_memcpy(output, state, sizeof(state));
 	wlan_crypto_erase(state, sizeof(state));
 }
 
@@ -1268,7 +1268,7 @@ aes128_decrypt_expanded(
 	unsigned round;
 
 	/* Runs the rounds of encryption in reverse with the inverse steps. */
-	memcpy(state, input, sizeof(state));
+	kern_memcpy(state, input, sizeof(state));
 	aes_add_round_key(state, expanded + 160U);
 	for (round = 9U; round > 0U; round--) {
 		aes_inverse_shift_rows(state);
@@ -1280,6 +1280,6 @@ aes128_decrypt_expanded(
 	aes_inverse_shift_rows(state);
 	aes_inverse_sub_bytes(state);
 	aes_add_round_key(state, expanded);
-	memcpy(output, state, sizeof(state));
+	kern_memcpy(output, state, sizeof(state));
 	wlan_crypto_erase(state, sizeof(state));
 }

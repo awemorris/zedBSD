@@ -20,9 +20,9 @@
 #include "kern/namei.h"
 #include "kern/lock.h"
 #include "kern/test-checkpoint.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 struct namecache_entry {
 	struct inode *parent;
@@ -184,7 +184,7 @@ namecache_enter(
 	 */
 	entries[slot].parent_dirseq = observed_sequence;
 	entries[slot].length = name->cn_namelen;
-	memcpy(entries[slot].name, name->cn_nameptr, name->cn_namelen);
+	kern_memcpy(entries[slot].name, name->cn_nameptr, name->cn_namelen);
 	entries[slot].name[name->cn_namelen] = '\0';
 
 	spin_unlock_irqrestore(&namecache_lock, irq);
@@ -307,7 +307,7 @@ matches(
 		return 0;
 
 	/* The name bytes must match. */
-	if (memcmp(entry->name, name->cn_nameptr, name->cn_namelen) != 0)
+	if (kern_memcmp(entry->name, name->cn_nameptr, name->cn_namelen) != 0)
 		return 0;
 
 	/* Reports a match. */
@@ -324,7 +324,7 @@ detach(
 	/* Transfers the references before clearing the slot. */
 	*parent = entry->parent;
 	*child = entry->child;
-	memset(entry, 0, sizeof(*entry));
+	kern_memset(entry, 0, sizeof(*entry));
 }
 
 /* Releases the references that an entry held. */

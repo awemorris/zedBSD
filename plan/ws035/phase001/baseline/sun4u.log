@@ -1,0 +1,6 @@
+# ws035-p001 baseline sun4u: 2026-09-23T03:20:10+09:00
+# git HEAD 8df6d585c3fe5d1cc3ff84405aa979631bb5e1ad
+# make -j32 BUILD=build/ws035-p001/sun4u ZEDBSD_CONFIG=plan/ws035/tests/config-sun4u.mk ZEDBSD_LLVM_INSTALL=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/llvm ZEDBSD_LLVM_BUILD=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/llvm-build ZEDBSD_LLVM_SOURCE=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/llvm-source ZEDBSD_LLVM_DISTDIR=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/llvm-distfiles ZEDBSD_TARGET_LLVM_BIN=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/llvm/bin ZEDBSD_SYSROOT_AMD64=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/sysroot/amd64 ZEDBSD_SYSROOT_I386=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/sysroot/i386 NOCT_HOST_SOURCE_DIR=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/NoctLang NOCT_HOST_STATE_DIR=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/host-noct-state ZEDBSD_NOCT_DISTDIR=/home/awe/zedBSD-rpi4/build/ws035-p001/toolchain/noct-distfiles vmunix
+make: *** No rule to make target 'src/hal/pmem-constraints.c', needed by 'build/ws035-p001/sun4u/src/hal/pmem-constraints.o'.  Stop.
+make: *** Waiting for unfinished jobs....
+sun4u status=2 seconds=1 warnings=0 error_lines=2

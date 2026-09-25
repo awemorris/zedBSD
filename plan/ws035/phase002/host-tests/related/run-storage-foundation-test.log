@@ -1,0 +1,92 @@
+In file included from /home/awe/zedBSD-rpi4/libc/include/locale.h:16,
+                 from /home/awe/zedBSD-rpi4/libc/include/stdio.h:11,
+                 from /home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:4:
+/home/awe/zedBSD-rpi4/src/kern/disk.c: In function 'disk_media_idle_locked':
+/home/awe/zedBSD-rpi4/src/kern/disk.c:2933:29: error: invalid suffix "__UINT64_C_SUFFIX__" on integer constant
+ 2933 |         expected = UINT64_C(1) + extra + parent->d_buffer_refs;
+      |                             ^
+/home/awe/zedBSD-rpi4/libc/include/stdint.h:104:42: note: in definition of macro '__ZED_INT_C_PASTE'
+  104 | #define __ZED_INT_C_PASTE(value, suffix) value ## suffix
+      |                                          ^~~~~
+/home/awe/zedBSD-rpi4/libc/include/stdint.h:114:25: note: in expansion of macro '__ZED_INT_C'
+  114 | #define UINT64_C(value) __ZED_INT_C(value, __UINT64_C_SUFFIX__)
+      |                         ^~~~~~~~~~~
+/home/awe/zedBSD-rpi4/src/kern/disk.c:2933:20: note: in expansion of macro 'UINT64_C'
+ 2933 |         expected = UINT64_C(1) + extra + parent->d_buffer_refs;
+      |                    ^~~~~~~~
+In file included from /home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:11:
+/home/awe/zedBSD-rpi4/src/kern/devfs.c: In function 'block_reserve':
+/home/awe/zedBSD-rpi4/src/kern/devfs.c:1462:44: error: 'O_ACCMODE' undeclared (first use in this function)
+ 1462 |         if ((file_status_flags_get(file) & O_ACCMODE) != O_RDWR)
+      |                                            ^~~~~~~~~
+/home/awe/zedBSD-rpi4/src/kern/devfs.c:1462:44: note: each undeclared identifier is reported only once for each function it appears in
+/home/awe/zedBSD-rpi4/src/kern/devfs.c:1462:58: error: 'O_RDWR' undeclared (first use in this function)
+ 1462 |         if ((file_status_flags_get(file) & O_ACCMODE) != O_RDWR)
+      |                                                          ^~~~~~
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c: In function 'test_block':
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:146:34: error: storage size of 'info' isn't known
+  146 |         struct zedbsd_block_info info;
+      |                                  ^~~~
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:146:34: error: unused variable 'info' [-Werror=unused-variable]
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c: In function 'test_mounts':
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:191:34: error: array type has incomplete element type 'struct zedbsd_mount_info'
+  191 |         struct zedbsd_mount_info info[3];
+      |                                  ^~~~
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:191:34: error: unused variable 'info' [-Werror=unused-variable]
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c: In function 'test_admin':
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:341:34: error: storage size of 'info' isn't known
+  341 |         struct zedbsd_block_info info, changed;
+      |                                  ^~~~
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:341:40: error: storage size of 'changed' isn't known
+  341 |         struct zedbsd_block_info info, changed;
+      |                                        ^~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:356:56: error: 'ZEDBSD_BLOCK_VERSION' undeclared (first use in this function); did you mean 'KERN_BLOCK_VERSION'?
+  356 |         memset(&info, 0, sizeof(info)); info.version = ZEDBSD_BLOCK_VERSION; info.struct_size = sizeof(info);
+      |                                                        ^~~~~~~~~~~~~~~~~~~~
+      |                                                        KERN_BLOCK_VERSION
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:359:45: error: 'O_RDWR' undeclared (first use in this function)
+  359 |         atomic_store_release(&file.f_flags, O_RDWR);
+      |                                             ^~~~~~
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:388:32: error: 'ZEDBSD_BLOCK_FILE_BACKED' undeclared (first use in this function); did you mean 'KERN_BLOCK_FILE_BACKED'?
+  388 |         CHECK((changed.flags & ZEDBSD_BLOCK_FILE_BACKED) != 0);
+      |                                ^~~~~~~~~~~~~~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:35:77: note: in definition of macro 'CHECK'
+   35 | #define CHECK(x) do { __atomic_add_fetch(&checks,1,__ATOMIC_RELAXED); if (!(x)) { \
+      |                                                                             ^
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:341:40: error: unused variable 'changed' [-Werror=unused-variable]
+  341 |         struct zedbsd_block_info info, changed;
+      |                                        ^~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:341:34: error: unused variable 'info' [-Werror=unused-variable]
+  341 |         struct zedbsd_block_info info, changed;
+      |                                  ^~~~
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c: In function 'test_partition_admin':
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:443:16: error: variable 'info' has initializer but incomplete type
+  443 |         struct zedbsd_block_info info = {0}, sibling_info = {0};
+      |                ^~~~~~~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:443:42: error: excess elements in struct initializer [-Werror]
+  443 |         struct zedbsd_block_info info = {0}, sibling_info = {0};
+      |                                          ^
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:443:42: note: (near initialization for 'info')
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:443:34: error: storage size of 'info' isn't known
+  443 |         struct zedbsd_block_info info = {0}, sibling_info = {0};
+      |                                  ^~~~
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:443:16: error: variable 'sibling_info' has initializer but incomplete type
+  443 |         struct zedbsd_block_info info = {0}, sibling_info = {0};
+      |                ^~~~~~~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:443:62: error: excess elements in struct initializer [-Werror]
+  443 |         struct zedbsd_block_info info = {0}, sibling_info = {0};
+      |                                                              ^
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:443:62: note: (near initialization for 'sibling_info')
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:443:46: error: storage size of 'sibling_info' isn't known
+  443 |         struct zedbsd_block_info info = {0}, sibling_info = {0};
+      |                                              ^~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:454:52: error: 'O_RDWR' undeclared (first use in this function)
+  454 |         atomic_store_release(&parent_file.f_flags, O_RDWR);
+      |                                                    ^~~~~~
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:443:46: error: unused variable 'sibling_info' [-Werror=unused-variable]
+  443 |         struct zedbsd_block_info info = {0}, sibling_info = {0};
+      |                                              ^~~~~~~~~~~~
+/home/awe/zedBSD-rpi4/plan/ws019/tests/storage-foundation-test.c:443:34: error: unused variable 'info' [-Werror=unused-variable]
+  443 |         struct zedbsd_block_info info = {0}, sibling_info = {0};
+      |                                  ^~~~
+cc1: all warnings being treated as errors

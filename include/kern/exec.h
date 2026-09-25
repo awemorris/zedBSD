@@ -15,7 +15,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <limits.h>
-#include <sys/stat.h>
+#include <uapi/limits.h>
+#include <uapi/stat.h>
 #include <kern/page.h>
 
 struct file;

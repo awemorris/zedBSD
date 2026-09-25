@@ -77,7 +77,14 @@ enum networkd_lan_action {
 	NETWORKD_LAN_ACTION_DOWN,
 
 	/* An event was lost; read every interface again before deciding. */
-	NETWORKD_LAN_ACTION_RESNAPSHOT
+	NETWORKD_LAN_ACTION_RESNAPSHOT,
+
+	/*
+	 * Bring an interface up that has no cable yet, without configuring
+	 * it.  A USB adapter reports its link only once it is up, so an
+	 * interface left down would never be seen to get a cable.
+	 */
+	NETWORKD_LAN_ACTION_RAISE
 };
 
 struct networkd_lan_interface {
@@ -86,6 +93,12 @@ struct networkd_lan_interface {
 	uint64_t generation;
 	enum networkd_lan_state state;
 	int carrier;
+
+	/*
+	 * Brought up by the daemon to watch its link.  Cleared when the
+	 * daemon takes it down, so it is raised again to see the next cable.
+	 */
+	int raised;
 
 	/* Cleared before a snapshot and set again by it, to find removals. */
 	int present;
@@ -152,6 +165,7 @@ int networkd_lan_configured(struct networkd_lan *, const char *, int obtained);
 
 /* Records that an interface was taken down. */
 int networkd_lan_down(struct networkd_lan *, const char *);
+int networkd_lan_raised(struct networkd_lan *, const char *);
 
 /*
  * Derives the link-local address an interface falls back to, from its

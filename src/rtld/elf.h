@@ -47,8 +47,8 @@
 #define PT_INTERP 3
 #define PT_PHDR 6
 #define PT_TLS 7
-#define PT_GNU_STACK 0x6474e551U
-#define PT_GNU_RELRO 0x6474e552U
+#define PT_GNU_STACK 0x6474e551
+#define PT_GNU_RELRO 0x6474e552
 #define PF_X 1U
 #define PF_W 2U
 #define PF_R 4U

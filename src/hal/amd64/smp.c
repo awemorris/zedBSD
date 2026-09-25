@@ -250,6 +250,7 @@ amd64_ap_entry(
 	cpu->current_space = HAL_SPACE_SYS;
 	amd64_descriptor_init();
 	amd64_int_load();
+	amd64_syscall_init();
 
 	/* Validates and enables this secondary CPU's local APIC. */
 	error = amd64_lapic_init_secondary(cpu->apic_id, &startup_error);

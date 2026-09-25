@@ -21,10 +21,10 @@
 #include "kern/kmem.h"
 #include "kern/lock.h"
 #include "kern/poll.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <limits.h>
-#include <string.h>
 
 /*
  * The kernel-lifetime publication list, initially empty before drivers run.
@@ -183,7 +183,7 @@ cdev_register_managed(
 		return ENOMEM;
 
 	/* Prepares immutable dispatch data and caller plus registry ownership. */
-	strcpy(device->name, name);
+	kern_strcpy(device->name, name);
 	device->rdev = rdev;
 	device->ops = ops;
 	device->data = data;
@@ -199,7 +199,7 @@ cdev_register_managed(
 	for (existing = devices;
 	     existing != NULL;
 	     existing = existing->registry_next) {
-		comparison = strcmp(existing->name, name);
+		comparison = kern_strcmp(existing->name, name);
 		if (comparison == 0) {
 			error = EEXIST;
 			break;
@@ -409,7 +409,7 @@ cdev_find_ref(
 	/* Searches the publication list in registration order. */
 	device = devices;
 	while (device != NULL) {
-		comparison = strcmp(device->name, name);
+		comparison = kern_strcmp(device->name, name);
 		if (comparison == 0) {
 			cdev_ref(device);
 			break;
@@ -574,6 +574,25 @@ cdev_count(
 
 	/* Succeeded: reports the current namespace size. */
 	return count;
+}
+
+/*
+ * Reports whether a file is a device whose reads never wait.
+ */
+int
+cdev_file_read_never_waits(
+	struct file *file)
+{
+	const struct cdev *device;
+
+	/* Only a file opened through a device has device operations. */
+	if (file == NULL || file->f_ops != &cdev_file_ops)
+		return 0;
+	device = file_cdev(file);
+
+	/* Reports the device's declaration. */
+	return device != NULL &&
+	    (device->ops->flags & CDEV_READ_NEVER_WAITS) != 0;
 }
 
 /* Finds the device generation behind a file's inode, or none. */
@@ -834,12 +853,12 @@ cdev_name_valid(
 		return 0;
 
 	/* The name must fit the record and contain no slash. */
-	length = strlen(name);
+	length = kern_strlen(name);
 	if (length == 0 || length >= sizeof(((struct cdev *)0)->name))
 		return 0;
 
 	/* A registry name must remain a single devfs path component. */
-	slash = strchr(name, '/');
+	slash = kern_strchr(name, '/');
 	if (slash != NULL)
 		return 0;
 

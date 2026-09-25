@@ -18,6 +18,7 @@
  */
 
 #include "kern/tty.h"
+#include <kern/kcrt.h>
 
 #include "kern/clock.h"
 #include "kern/file.h"
@@ -33,13 +34,12 @@
 #include "kern/uaccess.h"
 #include "kern/waitq.h"
 
-#include <errno.h>
-#include <fcntl.h>
+#include <uapi/errno.h>
+#include <uapi/fcntl.h>
 #include <hal/hal.h>
 #include "kern/text-display.h"
-#include <poll.h>
-#include <string.h>
-#include <termios.h>
+#include <uapi/poll.h>
+#include <uapi/termios.h>
 
 #define TTY_LINE_MAX 256U
 #define TTY_RECORDS 8U
@@ -168,6 +168,7 @@ static void tty_echo_append(struct tty_input_result *result, uint8_t byte);
 static void tty_echo_character(const struct tty *tty, struct tty_input_result *result, uint8_t byte);
 static void tty_echo_erase(const struct tty *tty, struct tty_input_result *result, uint8_t byte);
 static void tty_input_byte_locked(struct tty *tty, uint8_t byte, struct tty_input_result *result);
+static void tty_switch_mode_locked(struct tty *tty, unsigned old_lflag);
 static int tty_process_controls(struct tty *tty, struct process *process);
 static void tty_advance_association_locked(struct tty *tty);
 static int tty_assign_controlling(struct tty *tty, struct process *process);
@@ -235,8 +236,8 @@ tty_console_init(
 	unsigned i;
 
 	/* Starts every console empty with the first one active. */
-	memset(console_ttys, 0, sizeof(console_ttys));
-	memset(vt_history_used, 0, sizeof(vt_history_used));
+	kern_memset(console_ttys, 0, sizeof(console_ttys));
+	kern_memset(vt_history_used, 0, sizeof(vt_history_used));
 	active_vt = 0;
 	spin_init(&console_output_lock, LOCK_RANK_TTY, "console output");
 	for (i = 0; i < TTY_VT_COUNT; i++) {
@@ -313,7 +314,6 @@ tty_console_input_event(
 	uint32_t event)
 {
 	struct tty *tty;
-	struct tty_input_result result;
 	unsigned key;
 	unsigned long irq;
 	uint8_t byte;
@@ -424,6 +424,21 @@ tty_console_input_event(
 		byte = (uint8_t)(byte - 'A' + 1);
 
 	/* Runs the line discipline and delivers its echo and signal. */
+	tty_console_input_byte(byte);
+}
+
+/*
+ * Feeds one character to the active console.
+ */
+void
+tty_console_input_byte(
+	uint8_t byte)
+{
+	struct tty *tty;
+	struct tty_input_result result;
+	unsigned long irq;
+
+	tty = &console_ttys[active_vt];
 	irq = spin_lock_irqsave(&tty->lock);
 
 	tty_input_byte_locked(tty, byte, &result);
@@ -1188,7 +1203,7 @@ tty_pty_register(
 	spin_init(&pty_registry_lock, LOCK_RANK_TTY, "pty registry");
 	for (i = 0; i < PTY_MAX; i++) {
 		pair = &pty_pairs[i];
-		memset(pair, 0, sizeof(*pair));
+		kern_memset(pair, 0, sizeof(*pair));
 		pair->index = i;
 		spin_init(&pair->lock, LOCK_RANK_TTY, "pty pair");
 		waitq_init(&pair->output_waitq, "pty master output");
@@ -1223,7 +1238,7 @@ tty_test_vlnext_ixon(
 	uint8_t stop;
 
 	/* VLNEXT arms the quote without adding to the line. */
-	memset(&tty, 0, sizeof(tty));
+	kern_memset(&tty, 0, sizeof(tty));
 	tty_default_termios(&tty.termios);
 	stop = tty.termios.c_cc[VSTOP];
 	tty_input_byte_locked(&tty, tty.termios.c_cc[VLNEXT], &result);
@@ -1264,8 +1279,8 @@ static void
 tty_default_termios(
 	struct termios *termios)
 {
-	memset(termios, 0, sizeof(*termios));
-	memset(termios->c_cc, TTY_VDISABLE, sizeof(termios->c_cc));
+	kern_memset(termios, 0, sizeof(*termios));
+	kern_memset(termios->c_cc, TTY_VDISABLE, sizeof(termios->c_cc));
 	termios->c_iflag = ICRNL | IXON;
 	termios->c_oflag = OPOST | ONLCR;
 	termios->c_cflag = CREAD | CS8 | CLOCAL;
@@ -1539,12 +1554,12 @@ tty_echo(
 		vt_history_used[vt] = 0;
 	} else if (vt_history_used[vt] + length > TTY_VT_HISTORY) {
 		drop = vt_history_used[vt] + length - TTY_VT_HISTORY;
-		memmove(vt_history[vt], vt_history[vt] + drop,
+		kern_memmove(vt_history[vt], vt_history[vt] + drop,
 		    vt_history_used[vt] - drop);
 		vt_history_used[vt] -= drop;
 	}
 
-	memcpy(vt_history[vt] + vt_history_used[vt], bytes, length);
+	kern_memcpy(vt_history[vt] + vt_history_used[vt], bytes, length);
 	vt_history_used[vt] += length;
 	if (vt == active_vt)
 		tty_render(vt, bytes, length);
@@ -1566,7 +1581,7 @@ tty_commit_locked(
 
 	/* Copies the line into the next record and wakes the readers. */
 	record = &tty->records[tty->record_head];
-	memcpy(record->data, tty->edit, tty->edit_used);
+	kern_memcpy(record->data, tty->edit, tty->edit_used);
 	record->length = tty->edit_used;
 	record->offset = 0;
 	record->eof = eof;
@@ -1646,6 +1661,71 @@ tty_echo_erase(
 	}
 }
 
+/*
+ * Carries what was typed across a change between line and character input.
+ *
+ * Lines being edited or waiting to be read live apart from the characters a
+ * non-canonical read takes, so a program that switches modes while input is
+ * pending (a shell's line editor does, before every command) would otherwise
+ * find nothing, or only part of what was typed.  Leaving canonical mode makes
+ * the unread lines, then the line being edited, readable as characters, in
+ * the order they were typed.  Entering it turns the pending characters into
+ * lines, each ending at a newline or VEOL, the rest becoming the line being
+ * edited.  termios already holds the new settings.
+ */
+static void
+tty_switch_mode_locked(
+	struct tty *tty,
+	unsigned old_lflag)
+{
+	struct tty_record *record;
+	unsigned new_lflag;
+	uint8_t byte;
+	size_t i;
+
+	new_lflag = tty->termios.c_lflag;
+
+	/* Leaving canonical mode: lines become characters. */
+	if ((old_lflag & ICANON) != 0 && (new_lflag & ICANON) == 0) {
+		while (tty->record_used != 0) {
+			record = &tty->records[tty->record_tail];
+			for (i = record->offset; i < record->length; i++) {
+				if (tty->input_used == TTY_INPUT_MAX)
+					break;
+				tty->input[tty->input_head] = record->data[i];
+				tty->input_head = (tty->input_head + 1U) % TTY_INPUT_MAX;
+				tty->input_used++;
+			}
+			tty->record_tail = (tty->record_tail + 1U) % TTY_RECORDS;
+			tty->record_used--;
+		}
+		for (i = 0; i < tty->edit_used; i++) {
+			if (tty->input_used == TTY_INPUT_MAX)
+				break;
+			tty->input[tty->input_head] = tty->edit[i];
+			tty->input_head = (tty->input_head + 1U) % TTY_INPUT_MAX;
+			tty->input_used++;
+		}
+		tty->edit_used = 0;
+		return;
+	}
+
+	/* Entering canonical mode: characters become lines. */
+	if ((old_lflag & ICANON) == 0 && (new_lflag & ICANON) != 0) {
+		while (tty->input_used != 0) {
+			byte = tty->input[tty->input_tail];
+			tty->input_tail = (tty->input_tail + 1U) % TTY_INPUT_MAX;
+			tty->input_used--;
+			if (tty->edit_used < TTY_LINE_MAX) {
+				tty->edit[tty->edit_used] = byte;
+				tty->edit_used++;
+			}
+			if (byte == '\n' || tty_cc_matches(tty, VEOL, byte))
+				tty_commit_locked(tty, 0);
+		}
+	}
+}
+
 /* Runs the line discipline on one input byte; the caller delivers the echo unlocked. */
 static void
 tty_input_byte_locked(
@@ -1661,7 +1741,7 @@ tty_input_byte_locked(
 	quoted = 0;
 
 	/* Applies the input translations. */
-	memset(result, 0, sizeof(*result));
+	kern_memset(result, 0, sizeof(*result));
 	if (byte == '\r') {
 		if ((tty->termios.c_iflag & IGNCR) != 0)
 			goto out;
@@ -2085,7 +2165,7 @@ tty_read_canonical(
 		count = record->length - record->offset;
 		if (count > size)
 			count = size;
-		memcpy(output, record->data + record->offset, count);
+		kern_memcpy(output, record->data + record->offset, count);
 		record->offset += count;
 	}
 
@@ -2274,6 +2354,7 @@ tty_ioctl_instance(
 	unsigned long irq;
 	int error;
 	int flow_resumed;
+	unsigned old_lflag;
 	int changed;
 	int queue;
 	int action;
@@ -2328,7 +2409,9 @@ tty_ioctl_instance(
 			flow_resumed = 1;
 		}
 
+		old_lflag = tty->termios.c_lflag;
 		tty->termios = termios_value;
+		tty_switch_mode_locked(tty, old_lflag);
 		waitq_wake_all(&tty->read_waitq);
 		waitq_wake_all(&tty->write_waitq);
 		spin_unlock_irqrestore(&tty->lock, irq);
@@ -2349,7 +2432,7 @@ tty_ioctl_instance(
 		if (error != 0)
 			return error;
 		irq = spin_lock_irqsave(&tty->lock);
-		changed = memcmp(&tty->winsize, &winsize_value,
+		changed = kern_memcmp(&tty->winsize, &winsize_value,
 		    sizeof(winsize_value)) != 0;
 		tty->winsize = winsize_value;
 		session = tty->session;

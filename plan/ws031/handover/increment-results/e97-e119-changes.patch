@@ -160,7 +160,28 @@ index 00000000..f390d4fc
 +Get:8 http://archive.ubuntu.com/ubuntu noble/universe amd64 intel-gpu-tools amd64 1.28-1ubuntu2 [1,707 kB]
 +Fetched 2,739 kB in 2s (1,381 kB/s)
 +Selecting previously unselected package edid-decode.
-+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 89995 files and directories currently installed.)
++(Reading database ... 
+(Reading database ... 5%
+(Reading database ... 10%
+(Reading database ... 15%
+(Reading database ... 20%
+(Reading database ... 25%
+(Reading database ... 30%
+(Reading database ... 35%
+(Reading database ... 40%
+(Reading database ... 45%
+(Reading database ... 50%
+(Reading database ... 55%
+(Reading database ... 60%
+(Reading database ... 65%
+(Reading database ... 70%
+(Reading database ... 75%
+(Reading database ... 80%
+(Reading database ... 85%
+(Reading database ... 90%
+(Reading database ... 95%
+(Reading database ... 100%
+(Reading database ... 89995 files and directories currently installed.)
 +Preparing to unpack .../0-edid-decode_0.1~git20220315.cb74358c2896-1.1_amd64.deb ...
 +Unpacking edid-decode (0.1~git20220315.cb74358c2896-1.1) ...
 +Selecting previously unselected package libpixman-1-0:amd64.
@@ -148931,7 +148952,7 @@ index 00000000..9ca503b5
 +
 +## 2. libvulkan
 +
-+- 場所: `userland/base/libvulkan/`、`/lib/libvulkan.so`。公開 header は `libc/include/vulkan/`。
++- 場所: `userland/base/libvulkan/`、`/lib/libvulkan.so`。公開 header は `include/libc/vulkan/`。
 +- **Khronos の loader ではない。** Venus wire protocol の client として Vulkan を実装する、プロジェクト固有のライブラリ。ICD も layer も無い。README は「現在の backend は amd64 zedBSD 上の Venus」とし、SPIR-V は native driver へそのまま渡すと書いている。
 +- entry point: `api-commands.tsv` と `dispatch-table.inc` で 169 個（README の 155 とは不一致）。Vulkan 1.0 core 137、拡張 32（surface 5、display 7、swapchain 5、display_swapchain 1、wayland 2、properties2 7、external memory 3、external fence 3）。
 +- 明らかな stub は見つからなかった（例: `vkQueueBindSparse` は実際に encode して enqueue、`queue.c:85`）。全数の監査はしていない。
@@ -198386,7 +198407,7 @@ index b8072bc5..e46fb1df 100755
  compiler=${CC:-cc}
 -tests=${1:-"cmd spirv res resdispatch sync eu compile pipe cmdbuf"}
 +tests=${1:-"cmd spirv lower res resdispatch sync eu compile pipe cmdbuf"}
- base="-std=gnu11 -Wall -Wextra -Werror -Wdeclaration-after-statement -DKERN_USER_ABI_LP64 -DVK_REPO=\"$repo\" -I$repo/include -I$repo -idirafter $repo/libc/include"
+ base="-std=gnu11 -Wall -Wextra -Werror -Wdeclaration-after-statement -DKERN_USER_ABI_LP64 -DVK_REPO=\"$repo\" -I$repo/include -I$repo -idirafter $repo/include/libc"
  
  for name in $tests; do
      source="$repo/plan/ws031/tests/i915-vk-$name-test.c"

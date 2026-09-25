@@ -10,7 +10,8 @@
 struct file;
 struct file_ops;
 
-#define KERN_PIPE_CAPACITY	4096U
+/* What a pipe holds before a writer waits (4 pages; Linux holds 16). */
+#define KERN_PIPE_CAPACITY	16384U
 #define KERN_PIPE_BUF	512U
 
 _Static_assert(

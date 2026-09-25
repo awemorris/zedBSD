@@ -15,9 +15,9 @@
 #include <kern/kmem.h>
 #include <kern/pmem.h>
 #include <kern/page.h>
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 /*
  * Creates one immutable mapping owner without allocating or freeing its storage.
@@ -184,7 +184,7 @@ vm_device_read(
 
 	/* Ordinary DMA RAM keeps its established cached alias. */
 	if ((mapping->attributes & VM_DEVICE_MMIO) == 0) {
-		memcpy(destination, (const uint8_t *)mapping->address + offset, bytes);
+		kern_memcpy(destination, (const uint8_t *)mapping->address + offset, bytes);
 
 		/* Succeeded: the retained RAM alias supplied the entire requested range. */
 		return 0;
@@ -234,7 +234,7 @@ vm_device_write(
 
 	/* Ordinary DMA RAM uses its existing cached kernel alias. */
 	if ((mapping->attributes & VM_DEVICE_MMIO) == 0) {
-		memcpy((uint8_t *)mapping->address + offset, source, bytes);
+		kern_memcpy((uint8_t *)mapping->address + offset, source, bytes);
 
 		/* Succeeded: the retained RAM alias received the entire requested range. */
 		return 0;

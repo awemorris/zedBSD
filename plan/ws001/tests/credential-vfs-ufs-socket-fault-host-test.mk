@@ -6,7 +6,7 @@ CC ?= cc
 OBJCOPY ?= objcopy
 
 CPPFLAGS := -DKERN_USER_ABI_LP64 -I$(REPO)/include \
-	-I$(REPO)/include/uapi -I$(REPO)/src -I$(REPO)/libc/include -I$(REPO)
+	-I$(REPO)/include/uapi -I$(REPO)/src -I$(REPO)/include/libc -DKERN_UAPI_NATIVE -I$(REPO)
 CFLAGS := -std=c11 -O0 -Wall -Wextra -Werror -ffunction-sections \
 	-fdata-sections
 LDFLAGS := -Wl,--gc-sections $(REPO)/src/kern/io-stats.c
@@ -41,7 +41,7 @@ $(OUT):
 
 
 
-$(OUT)/ufs.o: $(REPO)/plan/ws025/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-vfs.c $(SELF) | $(OUT)
+$(OUT)/ufs.o: $(REPO)/build/driver-fragments/src/drivers/fs/ufs/ufs-vfs.c $(SELF) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 	$(OBJCOPY) \
 		--redefine-sym restore_directory_block=ws001_ufs_restore_directory_block \
@@ -53,7 +53,7 @@ $(OUT)/ufs.o: $(REPO)/plan/ws025/temp/p031-driver-fragments/src/drivers/fs/ufs/u
 		--globalize-symbol=ws001_ufs_discard_new_inode_after_error \
 		--globalize-symbol=ws001_ufs_mknod $@
 
-$(OUT)/ufs-endian.o: $(REPO)/plan/ws025/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-endian.c $(SELF) | $(OUT)
+$(OUT)/ufs-endian.o: $(REPO)/build/driver-fragments/src/drivers/fs/ufs/ufs-endian.c $(SELF) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 

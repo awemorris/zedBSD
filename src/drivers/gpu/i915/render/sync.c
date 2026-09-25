@@ -20,7 +20,7 @@
 
 #include <kern/kmem.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
 

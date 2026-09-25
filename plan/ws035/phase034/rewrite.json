@@ -1,0 +1,1722 @@
+{
+ "tool": "plan/ws035/tests/kcrt-rewrite.py",
+ "scope_files": 658,
+ "changed_files": 232,
+ "call_replacements": {
+  "hal_memset": 4,
+  "memchr": 5,
+  "memcmp": 107,
+  "memcpy": 720,
+  "memmove": 4,
+  "memset": 1548,
+  "memset_explicit": 1,
+  "snprintf": 7,
+  "strcat": 5,
+  "strchr": 15,
+  "strcmp": 73,
+  "strcpy": 57,
+  "strlen": 75,
+  "strncmp": 22,
+  "strncpy": 10,
+  "strnlen": 3,
+  "strrchr": 5,
+  "strstr": 1
+ },
+ "call_replacements_total": 2662,
+ "include_insertions": 229,
+ "include_removals": 0,
+ "fragments_without_include_block": {
+  "src/drivers/gpu/i915/render/vulkan-codec.inc": [
+   "src/drivers/gpu/i915/render/command.c",
+   "src/drivers/gpu/i915/render/descriptor.c",
+   "src/drivers/gpu/i915/render/image.c",
+   "src/drivers/gpu/i915/render/instance.c",
+   "src/drivers/gpu/i915/render/memory.c",
+   "src/drivers/gpu/i915/render/pipeline.c",
+   "src/drivers/gpu/i915/render/render-pass.c"
+  ]
+ },
+ "skipped_in_comment_or_literal": [
+  {
+   "file": "src/drivers/gpu/i915/display/dp-internal.h",
+   "line": 787,
+   "name": "memcpy"
+  },
+  {
+   "file": "src/drivers/gpu/i915/display/dp-internal.h",
+   "line": 804,
+   "name": "memcpy"
+  }
+ ],
+ "files": {
+  "plan/ws004/tests/pci-msi-qemu.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/disklabel/gpt.c": {
+   "calls": {
+    "memcpy": 6,
+    "memset": 4,
+    "memcmp": 4
+   },
+   "include_inserted": true
+  },
+  "src/drivers/disklabel/pcat.c": {
+   "calls": {
+    "memcmp": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/ethernet/dp8390.c": {
+   "calls": {
+    "memset": 1,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/fs/fat.c": {
+   "calls": {
+    "memset": 20,
+    "memcpy": 18,
+    "strchr": 5,
+    "strlen": 15,
+    "strcpy": 10,
+    "strcmp": 2,
+    "strrchr": 3,
+    "strncpy": 1,
+    "memcmp": 1,
+    "memmove": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/fs/overlayfs.c": {
+   "calls": {
+    "strchr": 4,
+    "memset": 25,
+    "strcmp": 14,
+    "strcpy": 15,
+    "strlen": 19,
+    "memcmp": 8,
+    "memcpy": 18,
+    "strrchr": 2,
+    "strncmp": 1,
+    "strcat": 3,
+    "strncpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/fs/ufs.c": {
+   "calls": {
+    "memset": 36,
+    "memcpy": 69,
+    "memcmp": 12,
+    "strcpy": 2,
+    "strlen": 3,
+    "strcmp": 4,
+    "strncmp": 4
+   },
+   "include_inserted": true
+  },
+  "src/drivers/generic/console.c": {
+   "calls": {
+    "strcmp": 1,
+    "memcpy": 3,
+    "memset": 9
+   },
+   "include_inserted": true
+  },
+  "src/drivers/generic/dma.c": {
+   "calls": {
+    "memset": 4
+   },
+   "include_inserted": true
+  },
+  "src/drivers/generic/input.c": {
+   "calls": {
+    "snprintf": 1,
+    "memset": 8,
+    "memcpy": 3,
+    "strlen": 2,
+    "strcpy": 1,
+    "strcmp": 10
+   },
+   "include_inserted": true
+  },
+  "src/drivers/generic/loop.c": {
+   "calls": {
+    "memset": 4,
+    "strcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/generic/memory-device.c": {
+   "calls": {
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/generic/system-device.c": {
+   "calls": {
+    "memset": 8,
+    "memcpy": 4,
+    "memchr": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/gpu.c": {
+   "calls": {
+    "memset": 17,
+    "snprintf": 1,
+    "memcmp": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/command.c": {
+   "calls": {
+    "memset": 1,
+    "memcpy": 14
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/compiler/compile.c": {
+   "calls": {
+    "memset": 2,
+    "memcpy": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/compiler/eu.c": {
+   "calls": {
+    "memset": 8,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/compiler/spirv.c": {
+   "calls": {
+    "memset": 4,
+    "memcpy": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/context.c": {
+   "calls": {
+    "memset": 4,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/defaults.c": {
+   "calls": {
+    "memset": 1,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/device.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/capture.c": {
+   "calls": {
+    "memset": 4,
+    "memcpy": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/clock.c": {
+   "calls": {
+    "memset": 13,
+    "memcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/ddi.c": {
+   "calls": {
+    "memset": 5
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/diagnostics.c": {
+   "calls": {
+    "memset": 3,
+    "strstr": 1,
+    "strcmp": 1,
+    "strncmp": 2,
+    "strlen": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/display.c": {
+   "calls": {
+    "memset": 7,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/dmc.c": {
+   "calls": {
+    "memset": 1,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/dp-internal.h": {
+   "calls": {
+    "memcpy": 1,
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/dp-sink.c": {
+   "calls": {
+    "memset": 7,
+    "memcpy": 3,
+    "memcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/dp.c": {
+   "calls": {
+    "memmove": 1,
+    "memset": 5,
+    "memcpy": 2,
+    "memcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/edid-read.c": {
+   "calls": {
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/edid.c": {
+   "calls": {
+    "memset": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/gmbus.c": {
+   "calls": {
+    "memset": 2,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/hdmi.c": {
+   "calls": {
+    "memset": 3,
+    "memcmp": 1,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/hotplug.c": {
+   "calls": {
+    "memset": 7,
+    "memcpy": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/interrupts.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/modeset.c": {
+   "calls": {
+    "memset": 12,
+    "memcpy": 7
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/opregion.c": {
+   "calls": {
+    "memset": 6,
+    "strncpy": 2,
+    "memcpy": 5,
+    "memcmp": 1,
+    "strcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/panel.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/pipe.c": {
+   "calls": {
+    "memset": 7
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/plane.c": {
+   "calls": {
+    "memset": 9
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/power.c": {
+   "calls": {
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/present.c": {
+   "calls": {
+    "memset": 5
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/scanout.c": {
+   "calls": {
+    "memset": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/state.c": {
+   "calls": {
+    "memset": 14,
+    "strcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/takeover.c": {
+   "calls": {
+    "memset": 7,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/vbt.c": {
+   "calls": {
+    "memset": 6,
+    "memcmp": 3,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/vbt.h": {
+   "calls": {
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/display/watermark.c": {
+   "calls": {
+    "memset": 15
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/engine.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/firmware.c": {
+   "calls": {
+    "strlen": 2,
+    "memcpy": 2,
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/i915.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/memory.c": {
+   "calls": {
+    "memset": 3,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/migrate.c": {
+   "calls": {
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/perf.c": {
+   "calls": {
+    "memset": 3,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/ppgtt.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/pxp.c": {
+   "calls": {
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/render/blit.c": {
+   "calls": {
+    "memset": 7,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/render/codec.c": {
+   "calls": {
+    "memcpy": 4,
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/render/command.c": {
+   "calls": {
+    "memset": 14,
+    "memcpy": 15
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/render/descriptor.c": {
+   "calls": {
+    "memset": 4
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/render/draw.c": {
+   "calls": {
+    "memcpy": 2,
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/render/image.c": {
+   "calls": {
+    "memset": 5,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/render/instance.c": {
+   "calls": {
+    "memset": 5,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/render/memory.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/render/object.c": {
+   "calls": {
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/render/pipeline-prepare.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/render/pipeline.c": {
+   "calls": {
+    "memset": 13,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/render/render-pass.c": {
+   "calls": {
+    "memset": 2,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/render/state.c": {
+   "calls": {
+    "memset": 5,
+    "memcpy": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/render/transport.c": {
+   "calls": {
+    "memcpy": 4
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/render/vulkan-codec.inc": {
+   "calls": {
+    "memcpy": 21
+   }
+  },
+  "src/drivers/gpu/i915/render/vulkan.c": {
+   "calls": {
+    "memcpy": 1,
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/request-queue.c": {
+   "calls": {
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/request.c": {
+   "calls": {
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/resource.c": {
+   "calls": {
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/session.c": {
+   "calls": {
+    "memset": 1,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/submit.c": {
+   "calls": {
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/display/aux.c": {
+   "calls": {
+    "memset": 1,
+    "memcmp": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/display/dp-fake-hw.c": {
+   "calls": {
+    "memset": 2,
+    "memcpy": 4
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/display/edp-ktest.c": {
+   "calls": {
+    "memset": 8,
+    "memcpy": 3,
+    "memcmp": 6
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/display/edp-sync-ktest.c": {
+   "calls": {
+    "memset": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/display/hdmi-output.c": {
+   "calls": {
+    "memset": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/display/hpd-ktest.c": {
+   "calls": {
+    "memset": 4,
+    "memcpy": 1,
+    "strcmp": 3,
+    "memcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/display/lcd-fake-hw.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/display/lcd-flip.c": {
+   "calls": {
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/display/lcd-gpu.c": {
+   "calls": {
+    "memset": 9
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/display/lcd-modeset-ktest.c": {
+   "calls": {
+    "memcpy": 7,
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/display/lcd-opregion.c": {
+   "calls": {
+    "memset": 2,
+    "memcpy": 4
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/display/lcd-run.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/display/lcd-show-ktest.c": {
+   "calls": {
+    "memcpy": 7,
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/display/lcdg-ktest.c": {
+   "calls": {
+    "memset": 6
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/display/opregion-ktest.c": {
+   "calls": {
+    "memcpy": 10,
+    "memset": 4,
+    "strcmp": 4
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/display/scanout-ktest.c": {
+   "calls": {
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/execution/draw-test.c": {
+   "calls": {
+    "memset": 9,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/execution/eu-test.c": {
+   "calls": {
+    "memset": 4,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/execution/fhd-render.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/execution/ktest-display-probe.c": {
+   "calls": {
+    "memset": 38
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/execution/ktest-display.c": {
+   "calls": {
+    "memset": 45,
+    "strcmp": 1,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/execution/ktest-gt.c": {
+   "calls": {
+    "memset": 52,
+    "memcpy": 2,
+    "memcmp": 4
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/execution/ktest-sync.c": {
+   "calls": {
+    "memset": 7
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/execution/ppgtt-walk.c": {
+   "calls": {
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/execution/runner.c": {
+   "calls": {
+    "strcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/fixtures/draw-fixture.c": {
+   "calls": {
+    "memset": 7,
+    "memcpy": 6,
+    "memcmp": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/render/compiler.c": {
+   "calls": {
+    "memset": 5,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/render/executor.c": {
+   "calls": {
+    "memset": 7,
+    "memcpy": 6
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/render/features.c": {
+   "calls": {
+    "memset": 5,
+    "memcpy": 9
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/tests/render/generality.c": {
+   "calls": {
+    "memset": 7,
+    "memcpy": 8
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/verify-workarounds.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/i915/worker.c": {
+   "calls": {
+    "memset": 5
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/venus/display.c": {
+   "calls": {
+    "memset": 11,
+    "snprintf": 1,
+    "memcpy": 1,
+    "memcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/venus/share.c": {
+   "calls": {
+    "memcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/venus/transport.c": {
+   "calls": {
+    "memset": 15,
+    "memcpy": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/gpu/venus/venus.c": {
+   "calls": {
+    "memset": 16,
+    "memcpy": 4
+   },
+   "include_inserted": true
+  },
+  "src/drivers/isa/ne2000.c": {
+   "calls": {
+    "memset": 1,
+    "strcpy": 1,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/pci/pci-ehci.c": {
+   "calls": {
+    "memset": 17,
+    "memcpy": 5
+   },
+   "include_inserted": true
+  },
+  "src/drivers/pci/pci-nvme.c": {
+   "calls": {
+    "memset": 16,
+    "memcpy": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/pci/pci-pcat.c": {
+   "calls": {
+    "memset": 4
+   },
+   "include_inserted": true
+  },
+  "src/drivers/pci/pci-uhci.c": {
+   "calls": {
+    "memset": 10,
+    "memcpy": 5
+   },
+   "include_inserted": true
+  },
+  "src/drivers/pci/pci-xhci.c": {
+   "calls": {
+    "memset": 32,
+    "memcpy": 5
+   },
+   "include_inserted": true
+  },
+  "src/drivers/pci/pci.c": {
+   "calls": {
+    "memset": 6,
+    "memcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/platform/pc98/graphics/backend.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/platform/pc98/graphics/display-auto.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/platform/pc98/graphics/display-cirrus.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/platform/pc98/graphics/display-gdc.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/platform/pc98/graphics/display-glyph.c": {
+   "calls": {
+    "memset": 3,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/platform/pc98/graphics/pc98-graphics.c": {
+   "calls": {
+    "memset": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/platform/pc98/pc98-lgy98.c": {
+   "calls": {
+    "memset": 1,
+    "strcpy": 1,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/platform/pcat/graphics/font.c": {
+   "calls": {
+    "memcpy": 3,
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/platform/pcat/graphics/pcat-graphics.c": {
+   "calls": {
+    "memset": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/usb/usb-cdc-ecm.c": {
+   "calls": {
+    "memset": 2,
+    "strlen": 1,
+    "memcpy": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/usb/usb-cdc-ncm-net.c": {
+   "calls": {
+    "memset": 3,
+    "strlen": 1,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/usb/usb-cdc-ncm.c": {
+   "calls": {
+    "memset": 7,
+    "memmove": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/usb/usb-hid-checkpoint.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/usb/usb-hid.c": {
+   "calls": {
+    "memset": 11,
+    "snprintf": 4,
+    "memcpy": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/usb/usb-rtl8822bu.c": {
+   "calls": {
+    "memset": 41,
+    "memcpy": 9,
+    "memcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/usb/usb-storage.c": {
+   "calls": {
+    "memset": 15,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/usb/usb-uas-disk.c": {
+   "calls": {
+    "memset": 7,
+    "memcpy": 2,
+    "memcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/usb/usb-uas-transport.c": {
+   "calls": {
+    "memset": 4,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/usb/usb-uas.c": {
+   "calls": {
+    "memset": 5,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/usb/usb.c": {
+   "calls": {
+    "memset": 13,
+    "memcpy": 7
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-assoc.c": {
+   "calls": {
+    "memset": 6,
+    "memcpy": 5,
+    "memcmp": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-boot.c": {
+   "calls": {
+    "memset": 18,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-bss.c": {
+   "calls": {
+    "memset": 4,
+    "memcpy": 2,
+    "memcmp": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-command.c": {
+   "calls": {
+    "memset": 6,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-dma.c": {
+   "calls": {
+    "memcpy": 3,
+    "memset": 6
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-firmware.c": {
+   "calls": {
+    "memset": 6,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-key.c": {
+   "calls": {
+    "memset": 5,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-mmio.c": {
+   "calls": {
+    "memset": 2,
+    "memcpy": 1,
+    "memcmp": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-pci-mmio.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-protocol.c": {
+   "calls": {
+    "memset": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-runtime-start.c": {
+   "calls": {
+    "memset": 21,
+    "memcpy": 1,
+    "memcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-runtime.c": {
+   "calls": {
+    "memset": 4,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-rx.c": {
+   "calls": {
+    "memset": 2,
+    "memcpy": 3
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-scan-session.c": {
+   "calls": {
+    "memset": 10,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-scan.c": {
+   "calls": {
+    "memset": 8,
+    "memcpy": 4
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-transport-backend.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-transport.c": {
+   "calls": {
+    "memset": 33,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-tx-ring.c": {
+   "calls": {
+    "memset": 14,
+    "memcmp": 1,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211-tx.c": {
+   "calls": {
+    "memset": 2,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/intel-ax211/intel-ax211.c": {
+   "calls": {
+    "memset": 71,
+    "memcpy": 11,
+    "memcmp": 5
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/rtl8822b/rtl8822b-security.c": {
+   "calls": {
+    "memset": 3,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/drivers/wifi/rtl8822b/rtl8822b.c": {
+   "calls": {
+    "memcpy": 10,
+    "memset": 24,
+    "memcmp": 2
+   },
+   "include_inserted": true
+  },
+  "src/kern/acl.c": {
+   "calls": {
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/backing-claim.c": {
+   "calls": {
+    "memset": 5
+   },
+   "include_inserted": true
+  },
+  "src/kern/block-identity.c": {
+   "calls": {
+    "memset": 6,
+    "strncmp": 5,
+    "strchr": 1,
+    "memcpy": 16,
+    "memcmp": 2,
+    "strcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/kern/boot.c": {
+   "calls": {
+    "memcpy": 4,
+    "strncmp": 2,
+    "strchr": 1,
+    "memset": 4
+   },
+   "include_inserted": true
+  },
+  "src/kern/buf.c": {
+   "calls": {
+    "memset": 5,
+    "memcpy": 4
+   },
+   "include_inserted": true
+  },
+  "src/kern/cache.c": {
+   "calls": {
+    "memset": 4,
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/cdev.c": {
+   "calls": {
+    "strcpy": 1,
+    "strcmp": 2,
+    "strlen": 1,
+    "strchr": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/cred.c": {
+   "calls": {
+    "memcpy": 2,
+    "memcmp": 1,
+    "strcmp": 1,
+    "strncmp": 3
+   },
+   "include_inserted": true
+  },
+  "src/kern/cwdinfo.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/kern/devfs.c": {
+   "calls": {
+    "strlen": 1,
+    "memcmp": 2,
+    "memcpy": 5,
+    "strncmp": 1,
+    "memset": 5,
+    "strcmp": 1,
+    "strcpy": 6
+   },
+   "include_inserted": true
+  },
+  "src/kern/disk.c": {
+   "calls": {
+    "memset": 8,
+    "memcpy": 4
+   },
+   "include_inserted": true
+  },
+  "src/kern/elf.c": {
+   "calls": {
+    "memset": 3,
+    "strlen": 1,
+    "strcmp": 1,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/kern/entry.c": {
+   "calls": {
+    "memset": 2
+   }
+  },
+  "src/kern/exec.c": {
+   "calls": {
+    "memset": 6,
+    "memcpy": 5,
+    "strlen": 8,
+    "strcmp": 2,
+    "strncpy": 2,
+    "strcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/kern/file.c": {
+   "calls": {
+    "memset": 20
+   },
+   "include_inserted": true
+  },
+  "src/kern/filedesc.c": {
+   "calls": {
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/inode.c": {
+   "calls": {
+    "memset": 10
+   },
+   "include_inserted": true
+  },
+  "src/kern/io.c": {
+   "calls": {
+    "hal_memset": 2,
+    "memset": 3
+   },
+   "include_inserted": true
+  },
+  "src/kern/klog.c": {
+   "calls": {
+    "memcpy": 1
+   }
+  },
+  "src/kern/main.c": {
+   "calls": {
+    "memcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/mount.c": {
+   "calls": {
+    "memset": 13,
+    "strcmp": 11,
+    "strcpy": 7,
+    "strchr": 2,
+    "strlen": 7,
+    "memcmp": 2,
+    "strncpy": 1,
+    "memchr": 1,
+    "strcat": 2
+   },
+   "include_inserted": true
+  },
+  "src/kern/namecache.c": {
+   "calls": {
+    "memcpy": 1,
+    "memcmp": 1,
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/namei.c": {
+   "calls": {
+    "memcpy": 9,
+    "strcmp": 4,
+    "memset": 2,
+    "strlen": 3,
+    "strcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/arp.c": {
+   "calls": {
+    "memset": 4,
+    "memcpy": 4
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/core.c": {
+   "calls": {
+    "memset": 1,
+    "strcpy": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/ethernet.c": {
+   "calls": {
+    "memset": 1,
+    "memcmp": 1,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/icmp.c": {
+   "calls": {
+    "memcpy": 5,
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/inet-socket.c": {
+   "calls": {
+    "memset": 14,
+    "memcpy": 6,
+    "strlen": 1,
+    "strnlen": 2,
+    "memchr": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/ipv4.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/net-device.c": {
+   "calls": {
+    "memset": 6,
+    "strcmp": 2,
+    "strnlen": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/packet-buf.c": {
+   "calls": {
+    "memset": 3,
+    "memcpy": 4
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/packet-socket.c": {
+   "calls": {
+    "memset": 1,
+    "memcpy": 5
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/route-socket.c": {
+   "calls": {
+    "memset": 1,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/route.c": {
+   "calls": {
+    "memset": 8
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/socket.c": {
+   "calls": {
+    "memset": 2,
+    "memcpy": 9
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/tcp.c": {
+   "calls": {
+    "memcpy": 6,
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/udp.c": {
+   "calls": {
+    "memcpy": 7,
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/unix-socket.c": {
+   "calls": {
+    "memset": 4,
+    "memcpy": 10,
+    "strcpy": 4,
+    "strncpy": 2,
+    "strlen": 2
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/wifi/wlan-crypto.c": {
+   "calls": {
+    "memset": 5,
+    "memcpy": 19
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/wifi/wlan-frame.c": {
+   "calls": {
+    "memset": 1,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/wifi/wlan-l2.c": {
+   "calls": {
+    "memset": 1,
+    "memcpy": 7,
+    "memcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/wifi/wlan-wpa2-codec.c": {
+   "calls": {
+    "memcpy": 24,
+    "memset": 5,
+    "memcmp": 4
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/wifi/wlan-wpa2.c": {
+   "calls": {
+    "memset": 9,
+    "memcpy": 20,
+    "memcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/net/wifi/wlan.c": {
+   "calls": {
+    "memset": 31,
+    "memcmp": 7,
+    "memcpy": 29
+   },
+   "include_inserted": true
+  },
+  "src/kern/partition.c": {
+   "calls": {
+    "memset": 3,
+    "strcmp": 3
+   },
+   "include_inserted": true
+  },
+  "src/kern/pipe.c": {
+   "calls": {
+    "memcpy": 4
+   },
+   "include_inserted": true
+  },
+  "src/kern/platform/sun4u.c": {
+   "calls": {
+    "hal_memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/platform/x68k.c": {
+   "calls": {
+    "hal_memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/process.c": {
+   "calls": {
+    "memset": 9
+   },
+   "include_inserted": true
+  },
+  "src/kern/ptrace.c": {
+   "calls": {
+    "memcpy": 4,
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/quota.c": {
+   "calls": {
+    "memset": 6,
+    "memcpy": 1,
+    "memcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/readahead.c": {
+   "calls": {
+    "memset": 7
+   },
+   "include_inserted": true
+  },
+  "src/kern/resource.c": {
+   "calls": {
+    "memset": 2,
+    "memcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/sched.c": {
+   "calls": {
+    "memset": 2
+   },
+   "include_inserted": true
+  },
+  "src/kern/signal.c": {
+   "calls": {
+    "memset": 21,
+    "memcpy": 4
+   },
+   "include_inserted": true
+  },
+  "src/kern/swap.c": {
+   "calls": {
+    "memset": 12,
+    "memcpy": 11,
+    "memcmp": 3,
+    "strncmp": 4,
+    "strchr": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/syscall.c": {
+   "calls": {
+    "memset": 49,
+    "strncpy": 1,
+    "memcpy": 8,
+    "strlen": 1,
+    "memchr": 1,
+    "memset_explicit": 1,
+    "memcmp": 2
+   },
+   "include_inserted": true
+  },
+  "src/kern/sysctl.c": {
+   "calls": {
+    "memset": 2,
+    "strlen": 3,
+    "memcpy": 5,
+    "strcmp": 1,
+    "memchr": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/test-fault.c": {
+   "calls": {
+    "memset": 5
+   },
+   "include_inserted": true
+  },
+  "src/kern/timer.c": {
+   "calls": {
+    "memset": 4
+   },
+   "include_inserted": true
+  },
+  "src/kern/tmpfs.c": {
+   "calls": {
+    "strcmp": 1,
+    "memcpy": 10,
+    "strlen": 2,
+    "memcmp": 1,
+    "memset": 5,
+    "strcpy": 3
+   },
+   "include_inserted": true
+  },
+  "src/kern/tty.c": {
+   "calls": {
+    "memset": 7,
+    "memmove": 1,
+    "memcpy": 3,
+    "memcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/uaccess.c": {
+   "calls": {
+    "memset": 2,
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/kern/user-probe.c": {
+   "calls": {
+    "memset": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/vfs.c": {
+   "calls": {
+    "memset": 7,
+    "strlen": 1,
+    "memcmp": 1
+   },
+   "include_inserted": true
+  },
+  "src/kern/vm-device.c": {
+   "calls": {
+    "memcpy": 2
+   },
+   "include_inserted": true
+  },
+  "src/kern/vm.c": {
+   "calls": {
+    "memset": 24,
+    "memcpy": 10
+   },
+   "include_inserted": true
+  },
+  "src/kern/vmspace.c": {
+   "calls": {
+    "memset": 10,
+    "memcpy": 3
+   },
+   "include_inserted": true
+  },
+  "src/kern/writeback.c": {
+   "calls": {
+    "memset": 14,
+    "memcpy": 5
+   },
+   "include_inserted": true
+  }
+ }
+}

@@ -9,7 +9,7 @@
 #define KERN_KERN_CRED_H
 
 #include <kern/atomic.h>
-#include <sys/types.h>
+#include <uapi/types.h>
 
 #define KERN_NGROUPS_MAX	16U
 

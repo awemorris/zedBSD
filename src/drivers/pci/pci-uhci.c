@@ -9,17 +9,18 @@
  * PCI UHCI host controller driver
  */
 
-#include <drivers/pci-uhci.h>
-#include <drivers/pci.h>
-#include <drivers/usb.h>
-#include <errno.h>
+#include <drivers/pci/pci-uhci.h>
+#include <drivers/pci/pci.h>
+#include <drivers/usb/usb.h>
+#include <uapi/errno.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
+#include <kern/clock.h>
 #include <kern/thread.h>
-#include <string.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
 #include "kern/device-io.h"
+#include <kern/kcrt.h>
 
 #define UHCI_USBCMD 0x00U
 #define UHCI_USBSTS 0x02U
@@ -64,21 +65,19 @@
 #define UHCI_MAX_TDS 255U
 #define UHCI_PCI_COMMAND 0x04U
 #define UHCI_PCI_MASTER 0x0004U
-#define UHCI_IRQ_DRAIN_TICKS 100U
-#define UHCI_RETIRE_TICKS 100U
-#define UHCI_QUIESCE_TICKS 100U
-#define UHCI_ADVANCE_POLL_TICKS 1U
+#define UHCI_IRQ_DRAIN_TICKS KERN_MS_TO_TICKS(1000U)
+#define UHCI_RETIRE_TICKS KERN_MS_TO_TICKS(1000U)
+#define UHCI_QUIESCE_TICKS KERN_MS_TO_TICKS(1000U)
+#define UHCI_ADVANCE_POLL_TICKS KERN_MS_TO_TICKS(10U)
 
 /*
  * Match the established UHCI stuck-QH threshold: a normal TD-status/QH-element
  * writeback window must not be mistaken for the early-Intel element bug.
  */
-#define UHCI_QH_STALL_TICKS 20U
+#define UHCI_QH_STALL_TICKS KERN_MS_TO_TICKS(200U)
 
-/*
- * The kernel clock is 100 Hz, so ten ticks are a bounded 100-ms poll.
- */
-#define UHCI_ROOT_POLL_TICKS 10U
+/* A bounded 100-ms poll of the root ports. */
+#define UHCI_ROOT_POLL_TICKS KERN_MS_TO_TICKS(100U)
 #define UHCI_PERIODIC_LEVELS 8U
 #define UHCI_MAX_PERIODIC_INTERVAL (1U << (UHCI_PERIODIC_LEVELS - 1U))
 #define UHCI_ASYNC_SKELETON UHCI_PERIODIC_LEVELS
@@ -201,6 +200,7 @@ static int uhci_wait_submissions(struct uhci_controller *controller);
 static int uhci_quiesce(struct drv_usb_hcd *hcd);
 static int uhci_quiesce_requests(struct uhci_controller *controller);
 static void uhci_retirement_begin_locked(struct uhci_controller *controller, struct uhci_request *request, enum uhci_request_state state);
+static int uhci_td_short_in(const struct uhci_td *td);
 static void uhci_request_advance_clear(struct uhci_request *request);
 static void uhci_schedule_unlink_locked(struct uhci_controller *controller, struct uhci_request *request);
 static struct uhci_request ** uhci_schedule_head(struct uhci_controller *controller, struct uhci_request *request, struct uhci_qh **anchor);
@@ -498,14 +498,14 @@ uhci_schedule_release(
 				      &controller->reclaim_request.bounce);
 	}
 
-	memset(&controller->reclaim_request, 0,
+	kern_memset(&controller->reclaim_request, 0,
 	       sizeof(controller->reclaim_request));
 
 	/* Handles the address availability. */
 	if (controller->skeleton_memory.address != NULL) {
 		drv_dma_free_coherent(controller->hcd.dma,
 				      &controller->skeleton_memory);
-		memset(&controller->skeleton_memory, 0,
+		kern_memset(&controller->skeleton_memory, 0,
 		       sizeof(controller->skeleton_memory));
 		controller->skeleton = NULL;
 	}
@@ -514,7 +514,7 @@ uhci_schedule_release(
 	if (controller->frame_list.address != NULL) {
 		drv_dma_free_coherent(controller->hcd.dma,
 				      &controller->frame_list);
-		memset(&controller->frame_list, 0,
+		kern_memset(&controller->frame_list, 0,
 		       sizeof(controller->frame_list));
 	}
 }
@@ -582,7 +582,7 @@ uhci_schedule_initialize(
 
 	controller->reclaim_request.reclaim_reserved = true;
 	controller->skeleton = controller->skeleton_memory.address;
-	memset(controller->skeleton, 0,
+	kern_memset(controller->skeleton, 0,
 	       UHCI_SKELETON_COUNT * sizeof(*controller->skeleton));
 	/* Process each remaining element. */
 	for (index = 0; index < UHCI_SKELETON_COUNT; index++)
@@ -743,7 +743,7 @@ uhci_start(
 	controller->periodic_bit_times = 0;
 	controller->active = NULL;
 	controller->asynchronous = NULL;
-	memset(controller->periodic, 0, sizeof(controller->periodic));
+	kern_memset(controller->periodic, 0, sizeof(controller->periodic));
 	controller->retirement_head = NULL;
 	controller->retirement_tail = NULL;
 	controller->retirement_pending = 0;
@@ -1663,7 +1663,7 @@ uhci_finish_completion(
 
 	/* Handles the request condition. */
 	if (request->input && actual != 0) {
-		memcpy(drv_usb_urb_buffer(urb),
+		kern_memcpy(drv_usb_urb_buffer(urb),
 		       (uint8_t *)request->bounce.address + 8U, actual);
 	}
 
@@ -1732,6 +1732,7 @@ uhci_request_actual(
 	unsigned td_index;
 	uint32_t status;
 	size_t count;
+	size_t expected;
 	size_t actual = 0;
 	size_t requested = drv_usb_urb_length(request->urb);
 	unsigned index;
@@ -1748,11 +1749,10 @@ uhci_request_actual(
 		if ((status & UHCI_TD_ACTIVE) != 0)
 			break;
 
-		/* Checks the remaining item count. */
-		count = status & 0x7ffU;
-		if (count == 0x7ffU)
-			continue;
-		count++;
+		/* Counts what the TD moved; an encoded 0x7ff is zero bytes. */
+		count = ((status & 0x7ffU) + 1U) & 0x7ffU;
+		expected = (((request->tds[td_index].token >> 21) & 0x7ffU) + 1U) &
+			   0x7ffU;
 
 		/* Checks the remaining item count. */
 		if (count > requested - actual) {
@@ -1761,6 +1761,10 @@ uhci_request_actual(
 		}
 
 		actual += count;
+
+		/* A short packet is the last one that moved data. */
+		if (count < expected)
+			break;
 	}
 
 	/* Returns the computed result. */
@@ -1876,7 +1880,7 @@ uhci_request_free(
 			__builtin_trap();
 		schedule = r->schedule;
 		bounce = r->bounce;
-		memset(r, 0, sizeof(*r));
+		kern_memset(r, 0, sizeof(*r));
 		r->schedule = schedule;
 		r->bounce = bounce;
 		r->reclaim_reserved = true;
@@ -2175,7 +2179,7 @@ uhci_reclaim_request_acquire(
 	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	memset(request, 0, sizeof(*request));
+	kern_memset(request, 0, sizeof(*request));
 	request->schedule = schedule;
 	request->bounce = bounce;
 	request->reclaim_reserved = true;
@@ -2440,6 +2444,7 @@ uhci_build_request(
 	size_t length, offset = 0;
 	unsigned packet, address, endpoint, toggle = 0, required_tds;
 	unsigned zero_packet;
+	unsigned index;
 	int error;
 
 	/* Handles the urb availability. */
@@ -2517,7 +2522,7 @@ uhci_build_request(
 		r = kern_malloc(sizeof(*r));
 		if (r == NULL)
 			return ENOMEM;
-		memset(r, 0, sizeof(*r));
+		kern_memset(r, 0, sizeof(*r));
 	}
 
 	r->urb = urb;
@@ -2573,7 +2578,7 @@ uhci_build_request(
 		goto fail;
 	}
 
-	memset(r->schedule.address, 0, 4096U);
+	kern_memset(r->schedule.address, 0, 4096U);
 	r->qh = r->schedule.address;
 	r->tds = (struct uhci_td *)((uint8_t *)r->schedule.address + 16U);
 
@@ -2586,7 +2591,7 @@ uhci_build_request(
 
 	/* Handles the control availability. */
 	if (control != NULL) {
-		memcpy(r->bounce.address, control, sizeof(*control));
+		kern_memcpy(r->bounce.address, control, sizeof(*control));
 
 		/* Checks the operation status. */
 		error = uhci_add_td(r, UHCI_PID_SETUP, address, 0, 0, 8U,
@@ -2597,7 +2602,7 @@ uhci_build_request(
 
 		/* Handles the r condition. */
 		if (!r->input && length != 0) {
-			memcpy((uint8_t *)r->bounce.address + 8U,
+			kern_memcpy((uint8_t *)r->bounce.address + 8U,
 			       drv_usb_urb_buffer(urb), length);
 		}
 
@@ -2634,7 +2639,7 @@ uhci_build_request(
 
 		/* Handles the r condition. */
 		if (!r->input && length != 0) {
-			memcpy((uint8_t *)r->bounce.address + 8U,
+			kern_memcpy((uint8_t *)r->bounce.address + 8U,
 			       drv_usb_urb_buffer(urb), length);
 		}
 
@@ -2668,6 +2673,18 @@ uhci_build_request(
 		}
 
 		r->data_count = r->td_count;
+
+		/*
+		 * A bulk or interrupt IN ends at its first short packet: SPD
+		 * makes the controller stop the queue there, so the frame after
+		 * it is not received into the rest of this request.  A device
+		 * ends a transfer that fills its last packet exactly with a
+		 * zero-length one, which is short as well.
+		 */
+		if (r->input) {
+			for (index = 0; index < r->td_count; index++)
+				r->tds[index].status |= UHCI_TD_SHORT_PACKET;
+		}
 	}
 
 	/* Handles the r condition. */
@@ -2925,6 +2942,36 @@ uhci_request_qh_progress_locked(
 	return 0;
 }
 
+/*
+ * Reports whether a finished TD is an IN that came back short under SPD.
+ *
+ * Only such a TD stops the controller's queue before the request's last
+ * TD.  A zero-length packet counts as short.
+ */
+static int
+uhci_td_short_in(
+	const struct uhci_td *td)
+{
+	unsigned actual;
+	unsigned expected;
+
+	/* Only an inactive IN with SPD set can have stopped the queue. */
+	if ((td->status & (UHCI_TD_ACTIVE | UHCI_TD_SHORT_PACKET)) !=
+	    UHCI_TD_SHORT_PACKET)
+		return 0;
+	if ((td->token & 0xffU) != UHCI_PID_IN)
+		return 0;
+
+	/* Compares the bytes received with the TD's maximum; 0x7ff encodes zero. */
+	actual = ((td->status & 0x7ffU) + 1U) & 0x7ffU;
+	expected = (((td->token >> 21) & 0x7ffU) + 1U) & 0x7ffU;
+	if (actual >= expected)
+		return 0;
+
+	/* Succeeded: the TD is short. */
+	return 1;
+}
+
 /* Reports the status the last descriptor of a request holds. */
 static int
 uhci_request_terminal(
@@ -2955,6 +3002,17 @@ uhci_request_terminal(
 					  : DRV_USB_URB_IO_ERROR;
 			*terminal_td_count = index + 1U;
 			/* Reports operation failure. */
+			return 1;
+		}
+
+		/*
+		 * A short IN under SPD ends the request: the controller has
+		 * stopped the queue on it, and the TDs after it stay ACTIVE and
+		 * will never run.
+		 */
+		if (uhci_td_short_in(&request->tds[index])) {
+			*result = DRV_USB_URB_COMPLETE;
+			*terminal_td_count = index + 1U;
 			return 1;
 		}
 	}
@@ -3808,7 +3866,7 @@ uhci_root_hub_control(
 		/* Validates the current value. */
 		if ((value & UHCI_PORT_PEC) != 0)
 			status |= 0x20000U;
-		memcpy(buffer, &status, sizeof(status));
+		kern_memcpy(buffer, &status, sizeof(status));
 
 		/* Handles the actual availability. */
 		if (actual != NULL)
@@ -4271,7 +4329,7 @@ uhci_attach(
 	controller = kern_malloc(sizeof(*controller));
 	if (controller == NULL)
 		return ENOMEM;
-	memset(controller, 0, sizeof(*controller));
+	kern_memset(controller, 0, sizeof(*controller));
 	spin_init(&controller->active_lock, LOCK_RANK_DEVICE,
 		  "UHCI active request");
 	controller->pci = device;

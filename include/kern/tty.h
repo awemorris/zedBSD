@@ -10,7 +10,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/types.h>
+#include <uapi/types.h>
 
 struct file;
 struct process;
@@ -22,6 +22,21 @@ tty_console_init(void);
 void
 tty_console_input_event(
 	uint32_t event);
+
+/*
+ * Feeds one character to the active console.
+ *
+ * A keyboard reports which key moved and the console works out what that
+ * means; a serial line carries the character itself, already decided by the
+ * terminal at the other end.  This is the way in for the second kind, and
+ * it runs the same line discipline the first kind ends up in, so that what
+ * arrives over a cable and what arrives from a keyboard are read alike.
+ *
+ * Safe to call from an interrupt.
+ */
+void
+tty_console_input_byte(
+	uint8_t byte);
 
 unsigned
 tty_vt_count(void);

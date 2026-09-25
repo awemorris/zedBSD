@@ -370,7 +370,7 @@ parse_multiply(
 		} else if (strcmp(operation, "*") == 0) {
 			failed = __builtin_mul_overflow(a, b, &number);
 		} else if (b == 0) {
-			parser_error(parser, 3, "division by zero");
+			parser_error(parser, 2, "division by zero");
 			failed = 1;
 		} else if (a == LLONG_MIN && b == -1) {
 			parser_error(parser, 3, "integer overflow");

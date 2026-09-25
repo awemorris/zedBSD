@@ -48,7 +48,7 @@ fatal: src/hal/amd64/int.c:129: unhandled amd64 fault
 ```
 
 `addr2line -e build/amd64/vmunix -f -C 0xffffffff8026a0df` resolves the fault
-to `remove_free()` in `libc/heap.c`. Disassembly identifies the faulting
+to `remove_free()` in `src/libc/heap.c`. Disassembly identifies the faulting
 instruction as the store through `block->next_free` while unlinking a free
 block. Later interleaved faults in `hal_cpu_idle` and framebuffer output
 occurred during concurrent fatal reporting and are secondary evidence only.

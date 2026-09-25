@@ -8,9 +8,13 @@
 # every declared property holds, and extraction refuses members that could
 # write outside the destination.
 #
+# A release that is one plain file rather than an archive (a certificate
+# bundle, say) is named with the root "-": its size and SHA-256 are checked
+# and nothing is looked for inside it.  It is never extracted.
+#
 # usage:
-#   archive.sh verify  <archive> <size> <sha256> <root>
-#   archive.sh fetch   <url> <archive> <size> <sha256> <root>
+#   archive.sh verify  <archive> <size> <sha256> <root|->
+#   archive.sh fetch   <url> <archive> <size> <sha256> <root|->
 #   archive.sh extract <archive> <root> <destination> [patch...]
 set -eu
 
@@ -41,6 +45,9 @@ verify_archive() {
 	va_got_hash=$(${ZEDBSD_SHA256:-sha256sum} "$va_archive" | awk '{print $1}')
 	test "$va_got_hash" = "$va_hash" ||
 		fail "archive SHA-256 mismatch: expected $va_hash, got $va_got_hash: $va_archive"
+
+	# A single file has no members to examine.
+	test "$va_root" != - || return 0
 
 	# Every member must sit under the one declared release directory, and no
 	# member may name an absolute path or step above it.
@@ -121,6 +128,7 @@ extract)
 	*) fail "destination must be an absolute path: $destination" ;;
 	esac
 	test "$destination" != / || fail "refusing to use / as a destination"
+	test "$root" != - || fail "a single file is not extracted: $archive"
 
 	parent=${destination%/*}
 	mkdir -p "$parent"

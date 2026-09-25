@@ -11,7 +11,7 @@
 
 #include "drivers/platform/x68k/x68k-spc-disk.h"
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <kern/disk.h>
 #include "kern/klog.h"
 

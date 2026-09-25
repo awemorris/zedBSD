@@ -11,17 +11,17 @@
  * Integrated USB CDC ECM network driver
  */
 
-#include <drivers/usb-cdc-ecm.h>
-#include <drivers/usb.h>
-#include <errno.h>
+#include <drivers/usb/usb-cdc-ecm.h>
+#include <drivers/usb/usb.h>
+#include <uapi/errno.h>
 #include <kern/lock.h>
 #include <kern/net/net-device.h>
 #include <kern/net/packet-buf.h>
 #include <kern/sched.h>
 #include <limits.h>
-#include <string.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
+#include <kern/kcrt.h>
 
 #define ECM_COMMUNICATION_CLASS 0x02U
 #define ECM_COMMUNICATION_SUBCLASS 0x06U
@@ -46,6 +46,13 @@
 #define ECM_ETHERNET_HEADER_SIZE 14U
 #define ECM_MTU 1500U
 #define ECM_FRAME_SIZE (ECM_ETHERNET_HEADER_SIZE + ECM_MTU)
+
+/*
+ * Frames held while the one transmit transfer is busy.  The packet pool is
+ * small and shared by the whole stack, so the queue stays short; a burst
+ * of acknowledgements fits, and only a longer one is dropped.
+ */
+#define ECM_TX_QUEUE_MAX 8U
 #define ECM_TRANSFER_TIMEOUT_MS 5000U
 #define ECM_CONTROL_TIMEOUT_MS 1000U
 #define ECM_REARM_RETRY_MAX 3U
@@ -102,6 +109,15 @@ struct ecm_adapter {
 	unsigned notification_retries;
 	unsigned rx_retries;
 	unsigned tx_busy;
+	/*
+	 * Frames waiting for the transmit transfer, linked through their
+	 * next field and owned by the adapter.  The adapter lock guards the
+	 * list; each transmit completion sends the head, and stop frees what
+	 * is left.
+	 */
+	struct packet_buf *tx_queue_head;
+	struct packet_buf *tx_queue_tail;
+	unsigned tx_queue_count;
 	int stop_error;
 	uint32_t upstream_bps;
 	uint32_t downstream_bps;
@@ -129,6 +145,8 @@ static int ecm_stop(struct ecm_adapter *adapter);
 static int ecm_open(struct net_device *device);
 static void ecm_close(struct net_device *device);
 static int ecm_transmit(struct net_device *device, struct packet_buf *packet);
+static int ecm_tx_submit(struct ecm_adapter *adapter, struct packet_buf *packet);
+static void ecm_tx_queue_free(struct ecm_adapter *adapter);
 static void ecm_notification_process(struct ecm_adapter *adapter);
 static int ecm_rearm(struct ecm_adapter *adapter, int notification);
 static int ecm_poll_enter(struct ecm_adapter *adapter);
@@ -511,7 +529,7 @@ ecm_binding_parse(
 	uint8_t mac_string = 0;
 	uint16_t max_segment_size = 0;
 
-	memset(binding, 0, sizeof(*binding));
+	kern_memset(binding, 0, sizeof(*binding));
 
 	/* Checks the drv usb interface alternate count result. */
 	control_descriptor = drv_usb_interface_descriptor(control);
@@ -620,7 +638,7 @@ ecm_get_mac(
 	/* Checks the drv usb device get string result. */
 	if (drv_usb_device_get_string(binding->device, binding->mac_string, 0,
 				      string, sizeof(string)) != 0 ||
-	    strlen(string) != 12U) {
+	    kern_strlen(string) != 12U) {
 		/* Failed. */
 		return EINVAL;
 	}
@@ -929,6 +947,9 @@ ecm_stop(
 
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
+	/* Drops the frames still waiting; no transfer refers to them. */
+	ecm_tx_queue_free(adapter);
+
 	/* Handles the net device availability. */
 	if (adapter->net_device != NULL)
 		(void)net_device_set_carrier(adapter->net_device, 0);
@@ -1000,7 +1021,10 @@ ecm_close(
 	(void)ecm_stop(adapter);
 }
 
-/* Sends one packet on the data endpoint. */
+/*
+ * Sends one packet on the data endpoint, or queues it while the transmit
+ * transfer is busy.
+ */
 static int
 ecm_transmit(
 	struct net_device *device,
@@ -1008,9 +1032,8 @@ ecm_transmit(
 {
 	struct ecm_adapter *adapter = device->driver_data;
 	unsigned long irq;
-	unsigned flags = 0;
 	size_t length;
-	int error = 0;
+	int error;
 
 	/* Handles the packet availability. */
 	if (packet == NULL)
@@ -1028,15 +1051,6 @@ ecm_transmit(
 		return ENETDOWN;
 	}
 
-	/* Handles the adapter condition. */
-	if (adapter->tx_busy) {
-		spin_unlock_irqrestore(&adapter->lock, irq);
-		packet_buf_free(packet);
-
-		/* Failed. */
-		return ENOBUFS;
-	}
-
 	/* Checks the current data length. */
 	if (length < ECM_ETHERNET_HEADER_SIZE || length > ECM_FRAME_SIZE) {
 		spin_unlock_irqrestore(&adapter->lock, irq);
@@ -1046,12 +1060,63 @@ ecm_transmit(
 		return EMSGSIZE;
 	}
 
+	/* Queues the frame behind a busy transfer; only a full queue drops it. */
+	if (adapter->tx_busy) {
+		if (adapter->tx_queue_count >= ECM_TX_QUEUE_MAX) {
+			spin_unlock_irqrestore(&adapter->lock, irq);
+			packet_buf_free(packet);
+
+			/* Failed. */
+			return ENOBUFS;
+		}
+
+		packet->next = NULL;
+		if (adapter->tx_queue_tail != NULL)
+			adapter->tx_queue_tail->next = packet;
+		else
+			adapter->tx_queue_head = packet;
+		adapter->tx_queue_tail = packet;
+		adapter->tx_queue_count++;
+		spin_unlock_irqrestore(&adapter->lock, irq);
+
+		/* Succeeded: a transmit completion sends it. */
+		return 0;
+	}
+
+	/* tx_busy makes this caller the transfer's owner; starts_active holds off teardown. */
 	adapter->tx_busy = 1;
 	adapter->starts_active++;
 
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
-	memcpy(adapter->tx_buffer, packet->data, length);
+	/* Sends the frame. */
+	error = ecm_tx_submit(adapter, packet);
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Copies one frame into the transmit buffer and submits the transfer.
+ *
+ * The caller has set tx_busy and counted itself in starts_active under the
+ * adapter lock.  The packet is consumed.  On failure tx_busy is cleared.
+ */
+static int
+ecm_tx_submit(
+	struct ecm_adapter *adapter,
+	struct packet_buf *packet)
+{
+	unsigned long irq;
+	unsigned flags = 0;
+	size_t length;
+	int error = 0;
+
+	/* Copies the frame; the transfer never refers to the packet. */
+	length = packet->length;
+	kern_memcpy(adapter->tx_buffer, packet->data, length);
 	packet_buf_free(packet);
 
 	/* Handles the adapter condition. */
@@ -1061,7 +1126,7 @@ ecm_transmit(
 
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
-	/* Checks the operation status. */
+	/* A frame that fills its last packet exactly ends with a zero-length one. */
 	if (error == 0 && length != 0 &&
 	    length % adapter->bulk_out_max_packet_size == 0)
 		flags |= DRV_USB_URB_ZERO_PACKET;
@@ -1093,6 +1158,35 @@ ecm_transmit(
 
 	/* Succeeded. */
 	return 0;
+}
+
+/* Frees every frame still waiting for the transmit transfer. */
+static void
+ecm_tx_queue_free(
+	struct ecm_adapter *adapter)
+{
+	struct packet_buf *packets;
+	struct packet_buf *packet;
+	unsigned long irq;
+
+	/* Takes the whole list under the lock. */
+	irq = spin_lock_irqsave(&adapter->lock);
+
+	packets = adapter->tx_queue_head;
+	adapter->tx_queue_head = NULL;
+	adapter->tx_queue_tail = NULL;
+	adapter->tx_queue_count = 0;
+
+	spin_unlock_irqrestore(&adapter->lock, irq);
+
+	/* Frees it outside the lock. */
+	for (;;) {
+		packet = packets;
+		if (packet == NULL)
+			break;
+		packets = packet->next;
+		packet_buf_free(packet);
+	}
 }
 
 /* Takes one notification the device has sent. */
@@ -1306,7 +1400,9 @@ static int
 ecm_poll_tx_completion(
 	struct ecm_adapter *adapter)
 {
+	struct packet_buf *packet;
 	unsigned long irq;
+	int error;
 
 	/* Checks the ecm take pending result. */
 	if (!ecm_take_pending(adapter, &adapter->tx_ready))
@@ -1332,11 +1428,39 @@ ecm_poll_tx_completion(
 		return 0;
 	}
 
-	irq = spin_lock_irqsave(&adapter->lock);
+	/*
+	 * Hands the transfer to the next waiting frame, keeping tx_busy, or
+	 * frees it when none waits.  A frame whose submit fails is dropped
+	 * and the next one is tried, so the queue never stalls behind it.
+	 */
+	for (;;) {
+		irq = spin_lock_irqsave(&adapter->lock);
 
-	adapter->tx_busy = 0;
+		packet = adapter->tx_queue_head;
+		if (packet != NULL) {
+			adapter->tx_queue_head = packet->next;
+			if (adapter->tx_queue_head == NULL)
+				adapter->tx_queue_tail = NULL;
+			adapter->tx_queue_count--;
+			packet->next = NULL;
+			adapter->tx_busy = 1;
+			adapter->starts_active++;
+		} else {
+			adapter->tx_busy = 0;
+		}
 
-	spin_unlock_irqrestore(&adapter->lock, irq);
+		spin_unlock_irqrestore(&adapter->lock, irq);
+
+		if (packet == NULL)
+			break;
+
+		error = ecm_tx_submit(adapter, packet);
+		if (error == 0)
+			break;
+
+		if (adapter->net_device != NULL)
+			adapter->net_device->tx_dropped++;
+	}
 
 	/* Reports operation failure. */
 	return 1;
@@ -1409,7 +1533,7 @@ ecm_poll_rx_completion(
 		if (destination == NULL)
 			error = EMSGSIZE;
 		else
-			memcpy(destination, adapter->rx_buffer, length);
+			kern_memcpy(destination, adapter->rx_buffer, length);
 	}
 	if (error == 0) {
 		net_device_receive(device, packet);
@@ -1631,7 +1755,7 @@ ecm_net_device_create(
 		return ENOSPC;
 	device->flags = NET_DEVICE_BROADCAST | NET_DEVICE_MULTICAST;
 	device->mtu = ECM_MTU;
-	memcpy(device->hwaddr, mac, 6U);
+	kern_memcpy(device->hwaddr, mac, 6U);
 	device->hwaddr_len = 6U;
 	device->ops = &ecm_net_ops;
 	device->driver_data = adapter;
@@ -1682,7 +1806,7 @@ ecm_attach(
 	adapter = kern_malloc(sizeof(*adapter));
 	if (adapter == NULL)
 		return ENOMEM;
-	memset(adapter, 0, sizeof(*adapter));
+	kern_memset(adapter, 0, sizeof(*adapter));
 	adapter->usb_device = binding.device;
 	adapter->control = binding.control;
 	adapter->data = binding.data;

@@ -31,20 +31,19 @@
 #include "kern/thread.h"
 #include "kern/vm-object.h"
 #include "kern/fat.h"
+#include <kern/kcrt.h>
 
 static int file_substitute_descriptor(struct inode *inode, int flags,
     struct file **result);
 #include "kern/kmem.h"
 #include "kern/uaccess.h"
-#include <errno.h>
-#include <fcntl.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
 #include <stdint.h>
-#include <string.h>
-#include <unistd.h>
+#include <uapi/unistd.h>
 #include <uapi/fcntl.h>
 
-#define FILE_MAX 192U
+#define FILE_MAX 2048U
 
 #define VFS_BSS __attribute__((section(".vfs_bss")))
 
@@ -664,7 +663,7 @@ file_content_lease_begin(
 	/* Only a readable regular file with content support can be leased. */
 	if (file == NULL || lease == NULL)
 		return EINVAL;
-	memset(lease, 0, sizeof(*lease));
+	kern_memset(lease, 0, sizeof(*lease));
 	content_inode = file_vm_inode(file);
 	if (file->f_inode == NULL ||
 	    file->f_inode->i_type != INODE_REG ||
@@ -789,7 +788,7 @@ file_content_lease_begin(
 
 fail_file:
 	(void)file_close(file);
-	memset(lease, 0, sizeof(*lease));
+	kern_memset(lease, 0, sizeof(*lease));
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -820,7 +819,7 @@ file_exec_snapshot_begin(struct file *file, struct file_content_lease *lease)
 	    disk_cache_acquire == NULL || disk_cache_release == NULL ||
 	    !file_vm_content_available())
 		return file_content_lease_begin(file, lease);
-	memset(lease, 0, sizeof(*lease));
+	kern_memset(lease, 0, sizeof(*lease));
 	if (inode->i_size < 0 || (uint64_t)inode->i_size > SIZE_MAX)
 		return inode->i_size < 0 ? EIO : EFBIG;
 	file_ref(file);
@@ -868,7 +867,7 @@ file_exec_snapshot_begin(struct file *file, struct file_content_lease *lease)
 fail:
 	if (lease->read_disk != NULL)
 		disk_cache_release(lease->read_disk);
-	memset(lease, 0, sizeof(*lease));
+	kern_memset(lease, 0, sizeof(*lease));
 	(void)file_close(file);
 
 	/* Reports the failure. */
@@ -1050,7 +1049,7 @@ file_content_lease_end(
 			disk_cache_release(lease->read_disk);
 		if (lease->transferred)
 			inode_touch(file->f_inode, INODE_ATTR_ATIME);
-		memset(lease, 0, sizeof(*lease));
+		kern_memset(lease, 0, sizeof(*lease));
 		(void)file_close(file);
 		return;
 	}
@@ -1066,7 +1065,7 @@ file_content_lease_end(
 
 	mutex_unlock(&lease->io_inode->i_io_lock);
 
-	memset(lease, 0, sizeof(*lease));
+	kern_memset(lease, 0, sizeof(*lease));
 	(void)file_close(file);
 }
 
@@ -1137,7 +1136,7 @@ file_io_begin_cred(
 		return EOPNOTSUPP;
 
 	/* Records the transaction and finds the content inode. */
-	memset(io, 0, sizeof(*io));
+	kern_memset(io, 0, sizeof(*io));
 	io->file = file;
 	if (file->f_inode != NULL && file->f_inode->i_type == INODE_REG)
 		io->content_inode = file_vm_inode(file);
@@ -1147,7 +1146,7 @@ file_io_begin_cred(
 	    (io->content_inode == NULL ||
 	     io->content_inode->i_type != INODE_REG)) {
 		file_io_resources_release(io);
-		memset(io, 0, sizeof(*io));
+		kern_memset(io, 0, sizeof(*io));
 		return EIO;
 	}
 
@@ -1223,7 +1222,7 @@ file_io_begin_cred(
 			if (io->held_position)
 				mutex_unlock(&file->f_lock);
 			file_io_resources_release(io);
-			memset(io, 0, sizeof(*io));
+			kern_memset(io, 0, sizeof(*io));
 			return error;
 		}
 
@@ -1238,7 +1237,7 @@ file_io_begin_cred(
 				if (io->held_position)
 					mutex_unlock(&file->f_lock);
 				file_io_resources_release(io);
-				memset(io, 0, sizeof(*io));
+				kern_memset(io, 0, sizeof(*io));
 				return error;
 			}
 
@@ -1261,7 +1260,7 @@ file_io_begin_cred(
 					if (io->held_position)
 						mutex_unlock(&file->f_lock);
 					file_io_resources_release(io);
-					memset(io, 0, sizeof(*io));
+					kern_memset(io, 0, sizeof(*io));
 					return error;
 				}
 			}
@@ -1289,7 +1288,7 @@ file_io_begin_cred(
 			if (io->held_position)
 				mutex_unlock(&file->f_lock);
 			file_io_resources_release(io);
-			memset(io, 0, sizeof(*io));
+			kern_memset(io, 0, sizeof(*io));
 			return error;
 		}
 	}
@@ -1410,8 +1409,8 @@ file_io_transfer(
 	file = io->file;
 	io_stats_record(file_io_is_write(io->kind) ? IO_FILE_WRITE : IO_FILE_READ,
 	    length);
-	memset(&resize, 0, sizeof(resize));
-	memset(&content, 0, sizeof(content));
+	kern_memset(&resize, 0, sizeof(resize));
+	kern_memset(&content, 0, sizeof(content));
 
 	/* Keeps every formatter transfer inside its original, immutable EOF. */
 	if (file_io_is_write(io->kind) && file->f_format_claim != NULL) {
@@ -1559,8 +1558,8 @@ transaction_retry:
 	 */
 	length = requested_length;
 	io->growth_limit_hit = 0;
-	memset(&resize, 0, sizeof(resize));
-	memset(&content, 0, sizeof(content));
+	kern_memset(&resize, 0, sizeof(resize));
+	kern_memset(&content, 0, sizeof(content));
 	if (io->append_requested && !io->append_positioned &&
 	    io->content_inode != NULL)
 		io->offset = io->content_inode->i_size;
@@ -1986,7 +1985,7 @@ file_io_end(
 		mutex_unlock(&file->f_lock);
 	backing_mutation_end(&io->backing_guard);
 	file_io_resources_release(io);
-	memset(io, 0, sizeof(*io));
+	kern_memset(io, 0, sizeof(*io));
 }
 
 /*
@@ -2521,7 +2520,7 @@ file_alloc(
 	for (i = 0; i < FILE_MAX; i++) {
 		if (!file_used[i]) {
 			file_used[i] = 1;
-			memset(&files[i], 0, sizeof(files[i]));
+			kern_memset(&files[i], 0, sizeof(files[i]));
 			refcount_init(&files[i].f_refs, 1);
 			(void)mutex_init(&files[i].f_lock, LOCK_RANK_FILE,
 			    "open file");
@@ -2549,7 +2548,7 @@ file_free(
 
 	for (i = 0; i < FILE_MAX; i++) {
 		if (&files[i] == file) {
-			memset(file, 0, sizeof(*file));
+			kern_memset(file, 0, sizeof(*file));
 			file_used[i] = 0;
 			break;
 		}
@@ -2820,7 +2819,7 @@ file_format_finalize(
 	int error;
 
 	/* Counts complete extents while the preparing claim prevents mutation. */
-	memset(&collection, 0, sizeof(collection));
+	kern_memset(&collection, 0, sizeof(collection));
 	collection.disk = file->f_inode->i_mount->m_disk;
 	collection.blocks = size / 512U;
 	error = file_backing_extents(file, file_format_collect_extent, &collection);

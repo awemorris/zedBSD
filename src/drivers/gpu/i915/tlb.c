@@ -37,7 +37,7 @@
 #include <kern/klog.h>
 #include <kern/lock.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 
 /* The per-class TLB invalidation registers of Gen12. */

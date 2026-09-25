@@ -19,8 +19,8 @@
 #include "kern/filedesc.h"
 #include "kern/poll.h"
 
-#include <errno.h>
-#include <fcntl.h>
+#include <uapi/errno.h>
+#include <uapi/fcntl.h>
 
 static ssize_t socket_file_read(struct file *file, void *buffer, size_t length);
 static ssize_t socket_file_write(struct file *file, const void *buffer, size_t length);

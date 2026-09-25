@@ -41,12 +41,12 @@ variant held.
 ## Host build notes
 
 - The production files are compiled with the host compiler against the tree's
-  `include/`, with the host C library preferred (`-idirafter libc/include`).
+  `include/`, with the host C library preferred (`-idirafter include/libc`).
   `errno` values are therefore the host's; the tests compare symbolic names
   (`EINVAL`, `EBUSY`, ...), never numbers.
 - `workqueue.c` and `host_thread.c` include `kern/thread.h`, whose
   `<sys/types.h>` clashes with the host's; `run.sh` builds those two against
-  the zedBSD C library headers (`-I libc/include`).
+  the zedBSD C library headers (`-I include/libc`).
 - No production file is changed or conditionally compiled for the tests.
 
 ## Changes from the old suite (`i915-old/parity/tests/`)

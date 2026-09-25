@@ -38,7 +38,7 @@
 
 #include <kern/irq.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 
 static bool i915_pipe_scanline_is_moving(struct drm_i915_private *dev_priv, enum pipe pipe);
 static void i915_wait_for_pipe_scanline_moving(struct intel_crtc *crtc, bool state);
@@ -478,7 +478,7 @@ drv_i915_lcd_kernel_vblank_sleep(
 		k->sleep_irq_off++;
 	}
 
-	/* Waits for one new vblank of the pipe, at most the ticks asked for (10 ms each). */
+	/* Waits for one new vblank of the pipe, at most the display ticks asked for (10 ms each, not kernel ticks). */
 	error = drv_i915_wait_vblank(k->d->irq, (unsigned)pipe, 1u, (unsigned)ticks * 10u, i915_lcd_kernel_frame, k, 0);
 	k->vblank_sleeps++;
 

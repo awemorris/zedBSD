@@ -51,6 +51,7 @@
 #include "dp-internal.h"
 #include "dp-sink.h"
 #include "panel.h"
+#include <kern/kcrt.h>
 
 /*
  * The PP_STATUS values the panel-status waits look for.
@@ -874,7 +875,7 @@ drv_i915_pps_init_late(
 
 	i915_pps_init_late(intel_dp);
 
-	memset(&intel_dp->pps.pps_delays, 0, sizeof(intel_dp->pps.pps_delays));
+	kern_memset(&intel_dp->pps.pps_delays, 0, sizeof(intel_dp->pps.pps_delays));
 	i915_pps_init_delays(intel_dp);
 	i915_pps_init_registers(intel_dp, false);
 
@@ -1205,7 +1206,7 @@ i915_pps_get_registers(
 	dev_priv = i915_dp_dp_to_i915(intel_dp);
 
 	/* Starts from no registers. */
-	memset(regs, 0, sizeof(*regs));
+	kern_memset(regs, 0, sizeof(*regs));
 
 	/* Finds the sequencer, reprogramming a reset one on BXT/GLK. */
 	if (IS_VALLEYVIEW(dev_priv) || IS_CHERRYVIEW(dev_priv)) {

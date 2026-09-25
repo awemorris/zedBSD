@@ -30,7 +30,7 @@
 #ifndef DRIVERS_GPU_I915_MEMORY_H
 #define DRIVERS_GPU_I915_MEMORY_H
 
-#include <drivers/dma.h>
+#include <drivers/generic/dma.h>
 #include <kern/pmem.h>
 #include <stddef.h>
 #include <stdint.h>

@@ -1,4 +1,16 @@
+<!-- awesome-plan project=zedbsd record=ws005 -->
+
 # WS005: networking and WLAN
+
+<!-- awesome-plan-current:start -->
+Status: incomplete
+Primary Milestone: MG005
+Related Milestones: MG006
+Objectives: O1, O2, O3
+Parent: [Master](../master.md)
+Queue: なし
+Resume point: fg005: 有線 LAN の常駐管理と起動時の接続待機（p013〜p017、p016 は ws035-p018 へ移管済み）
+<!-- awesome-plan-current:end -->
 
 <!-- network-improvements-current:start -->
 
@@ -17,21 +29,6 @@ net wifi enableの現行sourceはポリシー有効化とバックグラウン�
 <!-- network-improvements-current:end -->
 
 
-<!-- traceability:start -->
-
-## Goal traceability
-
-- Primary Milestone: **MG005 — シンプルで一貫したネットワーク/サービス管理を利用できる**
-- Related Milestones: MG006（ネットワーク状態通知とDE表示反映）
-- Objectives: O1, O2, O3
-- 貢献する成果: ネットワーク/WLANの通信基盤を提供する。
-- 上位定義: [MasterのObjectives / Milestone Goals](https://github.com/awemorris/zedBSD/issues/1)
-
-既存Phaseは本WSを親として上位成果に接続する。Primaryは分類と責任の所在であり、
-各PhaseがRelatedすべてを満たすという意味ではない。成果・検証・限界は各Phaseの
-現行記録を根拠とする。今回の対応付けは状態変更・未定義作業の追加・実行許可ではない。
-
-<!-- traceability:end -->
 
 
 Last updated: 2026-09-06

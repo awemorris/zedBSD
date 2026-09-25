@@ -57,6 +57,7 @@
 #include "vblank.h"
 #include "vbt-parse.h"
 #include "watermark.h"
+#include <kern/kcrt.h>
 
 #include "../i915.h"
 #include "../ggtt.h"
@@ -69,9 +70,8 @@
 #include <kern/lock.h>
 #include <kern/irq.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 /* The display version the platform predicates answer before the probe sets one. */
 #define I915_LCD_DEFAULT_DISPLAY_VER	13
@@ -447,7 +447,7 @@ drv_i915_lcd_modeset_status(
 
 	world = display->lcd_world;
 	ms = i915_modeset_selected_screen(world);
-	memset(out, 0, sizeof(*out));
+	kern_memset(out, 0, sizeof(*out));
 
 	/* How far the screen got. */
 	out->prepared = ms->prepared;
@@ -458,7 +458,7 @@ drv_i915_lcd_modeset_status(
 	out->link_rate = ms->dig_port.dp.link_rate;
 	out->lane_count = ms->dig_port.dp.lane_count;
 	out->link_trained_flag = ms->dig_port.dp.link_trained;
-	memcpy(out->train_set, ms->dig_port.dp.train_set, sizeof(out->train_set));
+	kern_memcpy(out->train_set, ms->dig_port.dp.train_set, sizeof(out->train_set));
 	out->ddi_buf_ctl_value = ms->dig_port.dp.DP;
 
 	/* The shared DPLL the crtc was given, when it has one. */
@@ -1080,7 +1080,7 @@ drv_i915_lcd_modeset_discard_model(
 		return EPERM;
 
 	/* Forgets the screen and its retained state. */
-	memset(&world->ms_pool[world->ms_sel], 0, sizeof(world->ms_pool[world->ms_sel]));
+	kern_memset(&world->ms_pool[world->ms_sel], 0, sizeof(world->ms_pool[world->ms_sel]));
 	world->ms_retained_pool[world->ms_sel] = 0;
 	world->ms_retained_ops_pool[world->ms_sel] = NULL;
 
@@ -1709,13 +1709,13 @@ drv_i915_lcd_kernel_resident_run(
 	drv_i915_lcd_kernel_locks_init(display);
 
 	/* Starts the run with its hooks bound over the normal initialisation's objects. */
-	memset(k, 0, sizeof(*k));
+	kern_memset(k, 0, sizeof(*k));
 	k->locks = display->lcdb_locks;
 	k->d = d;
 	drv_i915_lcd_kernel_bind_ops(k);
 
 	/* The hardware must be as the initialisation left it, and the inputs must be complete. */
-	memset(env, 0, sizeof(*env));
+	kern_memset(env, 0, sizeof(*env));
 	preflight_error = drv_i915_lcd_kernel_preflight(k);
 	fill_error = 0;
 	if (preflight_error == 0)
@@ -1843,7 +1843,7 @@ drv_i915_lcd_kernel_bind_ops(
 	struct i915_lcd_kernel *k)
 {
 	/* Starts with every hook empty; the run is their context. */
-	memset(&k->ops, 0, sizeof(k->ops));
+	kern_memset(&k->ops, 0, sizeof(k->ops));
 	k->ops.ctx = k;
 
 	/* Registers, waits and time. */
@@ -2026,7 +2026,7 @@ drv_i915_lcd_kernel_fill_cfg(
 	pn = &display->fill_cfg_pn;
 
 	/* Reads the panel's VBT data for port A. */
-	memset(c, 0, sizeof(*c));
+	kern_memset(c, 0, sizeof(*c));
 	panel_error = drv_i915_vbt_init_panel(&edp->vbt->parsed, 0, edp->res.edid, pn);
 	if (panel_error != 0) {
 		kern_logf("i915: LCD-B input: the VBT has no panel data for port A (rc=%d)\n", panel_error);
@@ -2044,8 +2044,8 @@ drv_i915_lcd_kernel_fill_cfg(
 	c->saved_port_bits = edp->ddi_buf_ctl_readout & I915_LCD_SAVED_PORT_BITS;
 
 	/* The sink's capabilities from the resident eDP. */
-	memcpy(c->dpcd, edp->res.dpcd, sizeof(c->dpcd));
-	memcpy(c->edp_dpcd, edp->res.edp_dpcd, sizeof(c->edp_dpcd));
+	kern_memcpy(c->dpcd, edp->res.dpcd, sizeof(c->dpcd));
+	kern_memcpy(c->edp_dpcd, edp->res.edp_dpcd, sizeof(c->edp_dpcd));
 
 	/* The panel's VBT eDP and backlight blocks. */
 	c->vbt_low_vswing = pn->edp_low_vswing;
@@ -2258,9 +2258,9 @@ i915_modeset_read_link_status(
 	bool ok;
 
 	/* Reads DPCD 0x202 onwards of the DPRX. */
-	memset(ls, 0, sizeof(ls));
+	kern_memset(ls, 0, sizeof(ls));
 	out->link_status_rc = drv_i915_drm_dp_dpcd_read_phy_link_status(&ms->dig_port.dp.aux, DP_PHY_DPRX, ls);
-	memcpy(out->link_status, ls, sizeof(out->link_status));
+	kern_memcpy(out->link_status, ls, sizeof(out->link_status));
 
 	/* Judges the status only when it was read. */
 	out->cr_ok = 0;
@@ -2346,7 +2346,7 @@ i915_modeset_flip_arm(
 	ms_ops = world->ms_ops_pool[world->ms_sel];
 
 	/* Nothing written yet: the flip is refused until it is not. */
-	memset(res, 0, sizeof(*res));
+	kern_memset(res, 0, sizeof(*res));
 	res->result = I915_LCD_FLIP_REFUSED;
 	res->old_surf = ms->cur_surf;
 	res->new_surf = new_surf;
@@ -2473,7 +2473,7 @@ i915_modeset_prepare_state(
 	ms = i915_modeset_selected_screen(world);
 
 	/* Clears the object; it belongs to this world (the flip's interrupt nesting and the device bookkeeping live there). */
-	memset(ms, 0, sizeof(*ms));
+	kern_memset(ms, 0, sizeof(*ms));
 	ms->world = world;
 	ms->output_hdmi = cfg->output_hdmi;
 	ms->hdmi_level_shift = cfg->vbt_hdmi_level_shift;
@@ -2491,7 +2491,7 @@ i915_modeset_prepare_state(
 	ms->i915.display.backlight.lock.which = I915_LCD_LOCK_BACKLIGHT;
 	ms->i915.display.vbt.override_afc_startup = cfg->vbt_override_afc_startup != 0;
 	ms->i915.display.dmc.fw_mask = cfg->dmc_fw_mask;
-	memcpy(ms->i915.display.wm.skl_latency, cfg->wm_latency, sizeof(ms->i915.display.wm.skl_latency));
+	kern_memcpy(ms->i915.display.wm.skl_latency, cfg->wm_latency, sizeof(ms->i915.display.wm.skl_latency));
 	ms->i915.display.wm.num_levels = cfg->wm_num_levels;
 	ms->i915.display.wm.ipc_enabled = cfg->wm_ipc_enabled != 0;
 	ms->i915.display.sagv.block_time_us = cfg->sagv_block_time_us;
@@ -2637,8 +2637,8 @@ i915_modeset_prepare_state(
 
 	/* The DP object: its connector, the sink's capabilities and the AUX name. */
 	ms->dig_port.dp.attached_connector = &ms->connector;
-	memcpy(ms->dig_port.dp.dpcd, cfg->dpcd, sizeof(ms->dig_port.dp.dpcd));
-	memcpy(ms->dig_port.dp.edp_dpcd, cfg->edp_dpcd, sizeof(ms->dig_port.dp.edp_dpcd));
+	kern_memcpy(ms->dig_port.dp.dpcd, cfg->dpcd, sizeof(ms->dig_port.dp.dpcd));
+	kern_memcpy(ms->dig_port.dp.edp_dpcd, cfg->edp_dpcd, sizeof(ms->dig_port.dp.edp_dpcd));
 	ms->dig_port.dp.aux.name = "AUX";
 
 	/* The connector and the panel's VBT data. */
@@ -2669,7 +2669,7 @@ i915_modeset_prepare_state(
 	 * carries it: the reference's rule over the device's pool, not a fixed
 	 * id (cfg->dpll_id is only the caller's expectation).
 	 */
-	memset(&want, 0, sizeof(want));
+	kern_memset(&want, 0, sizeof(want));
 	want.cfgcr0 = s->pll.cfgcr0;
 	want.cfgcr1 = s->pll.cfgcr1;
 	want.div0 = s->pll.div0;
@@ -3029,7 +3029,7 @@ i915_show_begin(
 		return EBUSY;
 
 	/* A fresh report of this run over the display's run log. */
-	memset(r, 0, sizeof(*r));
+	kern_memset(r, 0, sizeof(*r));
 	r->output_hdmi = env->cfg.output_hdmi;
 	r->first_error_trace_at = -1;
 	r->cleanup_first_error_trace_at = -1;
@@ -3476,7 +3476,7 @@ i915_resident_buffers(
 
 	/* Black outside the application's image, visible to the display. */
 	for (i = 0; i < 2; i++) {
-		memset(display->resident_buf[i].cpu, 0, display->resident_buf[i].size);
+		kern_memset(display->resident_buf[i].cpu, 0, display->resident_buf[i].size);
 		drv_i915_scanout_publish(&display->resident_buf[i]);
 	}
 

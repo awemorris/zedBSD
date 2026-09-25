@@ -21,16 +21,16 @@
 #include "heap.h"
 #include "internal.h"
 #include "state.h"
+#include <kern/kcrt.h>
 
 #include "../compiler/compiler.h"
 #include "../i915.h"
 
 #include <kern/klog.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 static int i915_pipeline_compile_stage(const struct i915_gfx_shader *shader, enum i915_shader_stage stage, struct i915_shader_binary **result);
 static int i915_pipeline_kernels_fit(const struct i915_gfx_pipeline *pipeline);
@@ -143,7 +143,7 @@ drv_i915_gfx_pipeline_kernels(
 	int found;
 
 	/* Starts from nothing. */
-	memset(kernels, 0, sizeof(*kernels));
+	kern_memset(kernels, 0, sizeof(*kernels));
 	vertex = pipeline->vs_binary;
 	fragment = pipeline->fs_binary;
 
@@ -219,7 +219,7 @@ i915_pipeline_compile_stage(
 	int error;
 
 	/* Parses the SPIR-V into the compiler's IR. */
-	memset(&diagnostic, 0, sizeof(diagnostic));
+	kern_memset(&diagnostic, 0, sizeof(diagnostic));
 	error = drv_i915_shader_parse(shader->words, shader->word_count, stage, &ir, &diagnostic);
 	if (error != 0) {
 		reason = "?";

@@ -7,10 +7,10 @@
  */
 
 #include "intel-ax211-transport-backend.h"
+#include <kern/kcrt.h>
 
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 #include "kern/device-io.h"
 
 /* Kept local so this C89-clean private boundary does not import HAL inlines. */
@@ -61,7 +61,7 @@ drv_intel_ax211_transport_backend_init(
 	/* Handles the backend availability. */
 	if (backend == NULL || mmio == NULL || pci_mmio == NULL || dma == NULL)
 		return INTEL_AX211_TRANSPORT_BACKEND_INVALID;
-	memset(&candidate, 0, sizeof(candidate));
+	kern_memset(&candidate, 0, sizeof(candidate));
 	candidate.mmio = mmio;
 	candidate.pci_mmio = pci_mmio;
 	candidate.dma = dma;
@@ -115,7 +115,7 @@ drv_intel_ax211_transport_backend_ring_memory(
 	/* Checks the drv dma device is coherent result. */
 	if (!drv_dma_device_is_coherent(backend->dma->device))
 		return INTEL_AX211_TRANSPORT_BACKEND_NOT_COHERENT;
-	memset(&candidate, 0, sizeof(candidate));
+	kern_memset(&candidate, 0, sizeof(candidate));
 	candidate.command_tfd = backend->dma->command_tfd.address;
 	candidate.command_tfd_size = backend->dma->command_tfd.size;
 	candidate.command_byte_count = backend->dma->command_byte_count.address;

@@ -36,6 +36,7 @@
 #include "internal.h"
 #include "modeset-internal.h"
 #include "watermark-internal.h"
+#include <kern/kcrt.h>
 
 /* The backlight PWM registers and the DDI / transcoder registers the table names. */
 #include "../intel/mreg.h"
@@ -49,10 +50,9 @@
 #include <kern/clock.h>
 #include <kern/klog.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 /* The step name prefix that marks a callee deliberately not connected. */
 #define I915_TRACE_DECIDED_PREFIX	"(decided) "
@@ -235,7 +235,7 @@ drv_i915_lcd_trace_init(
 	struct i915_lcd_emit *backend)
 {
 	/* Starts an empty record with no error seen. */
-	memset(trace, 0, sizeof(*trace));
+	kern_memset(trace, 0, sizeof(*trace));
 	trace->backend = backend;
 	trace->first_error_at = -1;
 
@@ -345,7 +345,7 @@ drv_i915_lcd_trace_find(
 				continue;
 
 			/* The name matches when it contains the one searched for. */
-			found = strstr(entry->name, name);
+			found = kern_strstr(entry->name, name);
 			if (found != NULL)
 				return (int)index;
 		} else if (entry->a == a) {
@@ -374,7 +374,7 @@ drv_i915_lcd_observer_init(
 	int pipe)
 {
 	/* Starts with no sample and no period. */
-	memset(observer, 0, sizeof(*observer));
+	kern_memset(observer, 0, sizeof(*observer));
 	observer->hw = hw;
 	observer->pipe = pipe;
 
@@ -688,7 +688,7 @@ drv_i915_lcd_reg_by_name(
 
 	/* Looks the name up among the rows. */
 	for (index = 0; index < count; index++) {
-		order = strcmp(table[index].name, name);
+		order = kern_strcmp(table[index].name, name);
 		if (order == 0)
 			return table[index].reg;
 	}
@@ -1185,7 +1185,7 @@ drv_i915_lcd_kernel_step(
 	k = ctx;
 
 	/* A decided callee is counted and printed as it is. */
-	prefix = strncmp(name, I915_TRACE_DECIDED_PREFIX, I915_TRACE_DECIDED_PREFIX_LEN);
+	prefix = kern_strncmp(name, I915_TRACE_DECIDED_PREFIX, I915_TRACE_DECIDED_PREFIX_LEN);
 	if (prefix == 0) {
 		k->decided++;
 		kern_logf("i915: LCD-B %s\n", name);
@@ -1518,7 +1518,7 @@ i915_trace_add(
 
 	/* Takes the next entry and starts it as one operation of the kind. */
 	entry = &trace->e[trace->n++];
-	memset(entry, 0, sizeof(*entry));
+	kern_memset(entry, 0, sizeof(*entry));
 	entry->kind = (uint8_t)kind;
 	entry->n = 1u;
 
@@ -2135,7 +2135,7 @@ i915_trace_step(
 	trace = ctx;
 
 	/* A decided callee is counted apart from an unported one. */
-	prefix = strncmp(name, I915_TRACE_DECIDED_PREFIX, I915_TRACE_DECIDED_PREFIX_LEN);
+	prefix = kern_strncmp(name, I915_TRACE_DECIDED_PREFIX, I915_TRACE_DECIDED_PREFIX_LEN);
 	if (prefix == 0) {
 		trace->decided++;
 		i915_trace_named(trace, I915_LCD_T_DECIDED, name);
@@ -2435,7 +2435,7 @@ i915_log_line_end(
 		return "\n";
 
 	/* A text that ends with a newline needs none. */
-	length = strlen(text);
+	length = kern_strlen(text);
 	if (text[length - 1u] == '\n')
 		return "";
 

@@ -21,7 +21,7 @@
 #include "drivers/platform/pc98/pc98-ide.h"
 #include "kern/boot.h"
 #include "kern/lock.h"
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
 #include "kern/klog.h"
 
@@ -87,7 +87,7 @@ static const char *failure_stage;
 static struct mutex controller_lock;
 
 
-static const struct boot_device * bios_device_for_slot(const struct boot_device *devices, unsigned count, unsigned slot);
+static const struct kern_boot_device * bios_device_for_slot(const struct kern_boot_device *devices, unsigned count, unsigned slot);
 static int reset_bank(uint8_t bank);
 static void select_bank(uint8_t bank);
 static void outb(uint16_t port, uint8_t value);
@@ -121,11 +121,11 @@ static const struct disk_ops pc98_ide_disk_ops = {
  */
 unsigned
 drv_pc98_ide_init(
-	const struct boot_device *bios_devices,
+	const struct kern_boot_device *bios_devices,
 	unsigned bios_device_count)
 {
 	struct ide_unit *unit;
-	const struct boot_device *bios_dev;
+	const struct kern_boot_device *bios_dev;
 	uint64_t sector_count;
 	uint8_t bank;
 	uint8_t drive;
@@ -287,9 +287,9 @@ drv_pc98_ide_bios_unit(
 }
 
 /* Supports the bios device for slot operation. */
-static const struct boot_device *
+static const struct kern_boot_device *
 bios_device_for_slot(
-	const struct boot_device *devices,
+	const struct kern_boot_device *devices,
 	unsigned count,
 	unsigned slot)
 {

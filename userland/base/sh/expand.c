@@ -8,41 +8,202 @@
  */
 
 /*
- * Implements the zedBSD userland expand component.
+ * Word expansion (POSIX XCU 2.6).
+ *
+ * The text of a word is read once, left to right.  What it produces goes into
+ * a buffer that keeps, for each character, whether it was quoted (it is then
+ * never split, and stands for itself in a pattern) and whether it came from
+ * an unquoted expansion (only such characters are split at IFS).  Two marks
+ * that are not characters travel in the same buffer: one where "$@" puts the
+ * boundary between two parameters, and one that says a field exists even if
+ * it ends up empty, as "" or "$empty" does.  Field splitting then reads the
+ * buffer, and quote removal has already happened: the quotes never entered
+ * it.
+ *
+ * Memory comes from sh_malloc, which raises the shell's error when there is
+ * none; a function here returns 0 only for a fault of the expansion itself,
+ * with the message in the expander.
  */
 
+#include "userland/base/sh/shell.h"
 #include "userland/base/sh/expand.h"
 #include "userland/base/sh/arithmetic.h"
 #include "userland/base/sh/glob.h"
 
+#include <pwd.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-struct expand_buffer {
+/* How expand_text reads its text (the mode of a reader). */
+#define M_HEREDOC	0x01	/* a here-document body: " is ordinary */
+#define M_BRACE		0x02	/* the word of ${...} in "...": \} is } */
+#define M_SPLIT		0x04	/* the word of ${...} unquoted: split it too */
+
+/* The attributes of one entry of an expansion buffer. */
+#define X_QUOTED	0x01	/* quoted: not split, literal in a pattern */
+#define X_SPLIT		0x02	/* from an unquoted expansion: split at IFS */
+#define X_BREAK		0x04	/* not a character: a boundary of "$@" */
+#define X_KEEP		0x08	/* not a character: the field exists */
+
+/* What a character is to field splitting. */
+#define SPLIT_NONE	0	/* part of a field */
+#define SPLIT_WHITE	1	/* IFS white space */
+#define SPLIT_OTHER	2	/* another IFS character */
+
+/* The longest parameter name copied for a lookup or an assignment. */
+#define NAME_MAX_LENGTH 256
+
+/* An expansion buffer: characters and their attributes. */
+struct xbuf {
 	char *data;
-	unsigned char *quoted;
+	unsigned char *attr;
 	size_t length;
 	size_t capacity;
-	int preserve_empty;
 };
 
-static int expand_raw(const struct sh_token *token, const struct sh_expand_context *context, struct expand_buffer *buffer, const char **error_text);
-static int append_bytes(struct expand_buffer *buffer, const char *data, size_t length, int quoted);
-static int buffer_reserve(struct expand_buffer *buffer, size_t additional);
-static void buffer_free(struct expand_buffer *buffer);
-static int append_number(struct expand_buffer *buffer, long value, int quoted);
-static int append_positionals(struct expand_buffer *buffer, const struct sh_expand_context *context, int quoted);
-static int name_character(char value);
+/* The state of one expansion. */
+struct expander {
+	const struct sh_expand_context *context;
+	const char *error;
+
+	/* Set while expanding an assignment, for the tilde rules of one. */
+	int assignment;
+};
+
+/* Text being expanded, and how it is read. */
+struct reader {
+	const char *text;
+	size_t length;
+	size_t position;
+
+	/*
+	 * in_double: the text is inside a double quotation, where a
+	 * backslash protects only $ ` " \ and a newline, and a single quote
+	 * is ordinary.  quoted: what is produced is quoted.  mode: the M_
+	 * flags.
+	 */
+	int in_double;
+	int quoted;
+	int mode;
+};
+
+/* A parsed ${...}: the parameter, the operator and the word. */
+struct brace {
+	const char *name;
+	size_t name_length;
+	int special;		/* @ or *, which are the positionals */
+	int length_wanted;	/* ${#name} */
+	char op[3];		/* "", "-", "=", "?", "+", "%", "%%", "#", "##" */
+	int colon;		/* the operator had a : before it */
+	const char *word;
+	size_t word_length;
+
+	/* The value, and whether the parameter is set. */
+	const char *value;
+	int set;
+};
+
+/* The message of the last fault, which outlives the call. */
+static char expand_message[512];
+
+int sh_expand_fatal;
+
+static int expand_token(struct expander *x, const struct sh_token *token, struct xbuf *out);
+static int expand_text(struct expander *x, const char *text, size_t length, int in_double, int quoted, int mode, struct xbuf *out);
+static int expand_next(struct expander *x, struct reader *reader, struct xbuf *out);
+static int tilde_starts(const struct expander *x, const struct reader *reader);
+static void expand_backslash(struct reader *reader, struct xbuf *out);
+static int backslash_protects(const struct reader *reader, char next);
+static void expand_single(struct reader *reader, struct xbuf *out);
+static int expand_double(struct expander *x, struct reader *reader, struct xbuf *out);
+static int is_bare_at(const char *text, size_t length);
+static int expand_backquote(struct expander *x, struct reader *reader, struct xbuf *out);
+static int expand_dollar(struct expander *x, struct reader *reader, struct xbuf *out);
+static int expand_enclosed(struct expander *x, struct reader *reader, struct xbuf *out);
+static int expand_simple(struct expander *x, struct reader *reader, size_t name_length, struct xbuf *out);
+static int expand_brace(struct expander *x, const char *text, size_t length, const struct reader *reader, struct xbuf *out);
+static int parse_brace(const char *text, size_t length, struct brace *brace);
+static int parse_brace_operator(struct brace *brace);
+static int brace_length(struct expander *x, const struct brace *brace, int quoted, struct xbuf *out);
+static int brace_uses_word(struct expander *x, const struct brace *brace);
+static int brace_is_null(struct expander *x, const struct brace *brace);
+static int brace_word(struct expander *x, const struct brace *brace, const struct reader *reader, struct xbuf *out);
+static int brace_alternative(struct expander *x, const struct brace *brace, const struct reader *reader, struct xbuf *out);
+static int brace_assign(struct expander *x, const struct brace *brace, const struct reader *reader, struct xbuf *out);
+static int brace_error(struct expander *x, const struct brace *brace, const struct reader *reader, struct xbuf *out);
+static int brace_trim(struct expander *x, const struct brace *brace, int quoted, struct xbuf *out);
+static int brace_value(struct expander *x, const struct brace *brace, int quoted, struct xbuf *out);
+static int brace_word_string(struct expander *x, const struct brace *brace, const struct reader *reader, char **string);
+static void trim(const char *value, const struct xbuf *pattern, const char *op, int quoted, struct xbuf *out);
+static size_t trim_prefix(const char *value, size_t length, const char *text, const unsigned char *marks, int longest, char *candidate);
+static size_t trim_suffix(const char *value, size_t length, const char *text, const unsigned char *marks, int longest, char *candidate);
+static void expand_tilde(struct expander *x, struct reader *reader, struct xbuf *out);
+static size_t tilde_end(const struct expander *x, const struct reader *reader, int *plain);
+static const char *home_directory(struct expander *x, const char *user);
+static int arithmetic_form(const char *start, const char *end);
+static int command_output(struct expander *x, const char *source, int quoted, struct xbuf *out);
+static int arithmetic(struct expander *x, const char *text, size_t length, int quoted, struct xbuf *out);
+static int parameter(struct expander *x, const char *name, size_t length, const char **value, int *set);
+static void special_parameter(struct expander *x, char name, const char **value, int *set);
+static void positional_parameter(struct expander *x, const char *name, size_t length, const char **value, int *set);
+static int unset_error(struct expander *x, const char *name, size_t length);
+static void append_value(struct xbuf *out, const char *value, int quoted);
+static void append_positionals(struct expander *x, char which, int quoted, struct xbuf *out);
+static void append_char(struct xbuf *out, char value, unsigned char attr);
+static void append_mark(struct xbuf *out, unsigned char mark);
+static char *buffer_string(const struct xbuf *in, unsigned char **quoted);
+static void buffer_free(struct xbuf *buffer);
+static void split_fields(struct expander *x, const struct xbuf *in, struct sh_field_list *fields);
+static int split_class(const char *ifs, const struct xbuf *in, size_t index);
+static size_t skip_split_white(const char *ifs, const struct xbuf *in, size_t index);
+static void field_add(struct sh_field_list *fields, const struct xbuf *in);
+static int positional_null(struct expander *x);
+static const char *lookup(struct expander *x, const char *name);
+static const char *ifs_value(struct expander *x);
+static int assignment_prefix(const struct sh_token *token);
+static size_t scan_name(const char *text, size_t length);
+static int is_special(char value);
 static int name_start(char value);
-static const char *lookup_parameter(const struct sh_expand_context *context, const char *name, size_t length, char **allocated_name);
-static int append_buffer(struct expand_buffer *target, const struct expand_buffer *source);
-static int append_parameter(struct expand_buffer *buffer, const char *name, size_t length, int quoted, const struct sh_expand_context *context);
-static int field_append(struct sh_field_list *list, const char *data, const unsigned char *quoted_data, size_t length, int quoted_default);
-static int is_ifs(char value, const char *ifs);
-static int trim_parameter(const char *source, const char *pattern, const unsigned char *pattern_quoted, char operation, int longest, size_t *start, size_t *end);
+static int name_char(char value);
+static const char *failure(const struct expander *x);
 
 /*
- * Implements the sh expand word operation.
+ * Expands a word with every expansion and field splitting.
+ */
+int
+sh_expand_fields(
+	const struct sh_token *token,
+	const struct sh_expand_context *context,
+	struct sh_field_list *fields,
+	const char **error_text)
+{
+	struct expander x;
+	struct xbuf out;
+	int ok;
+
+	/* The expansion. */
+	memset(fields, 0, sizeof(*fields));
+	memset(&x, 0, sizeof(x));
+	memset(&out, 0, sizeof(out));
+	x.context = context;
+	sh_expand_fatal = 0;
+	ok = expand_token(&x, token, &out);
+	if (!ok) {
+		*error_text = failure(&x);
+		buffer_free(&out);
+		return 0;
+	}
+
+	/* Succeeded: the fields it splits into. */
+	split_fields(&x, &out, fields);
+	buffer_free(&out);
+	*error_text = NULL;
+	return 1;
+}
+
+/*
+ * Expands a word into one string without field splitting.
  */
 int
 sh_expand_word(
@@ -51,1260 +212,2148 @@ sh_expand_word(
 	char **result,
 	const char **error_text)
 {
-	struct expand_buffer buffer;
+	struct expander x;
+	struct xbuf out;
+	int ok;
 
+	/* The expansion, with the tilde rules of an assignment for one. */
+	memset(&x, 0, sizeof(x));
+	memset(&out, 0, sizeof(out));
+	x.context = context;
+	x.assignment = assignment_prefix(token);
+	sh_expand_fatal = 0;
 	*result = NULL;
-	/* Handles an operation failure. */
-	if (!expand_raw(token, context, &buffer, error_text))
+	ok = expand_token(&x, token, &out);
+	if (!ok) {
+		*error_text = failure(&x);
+		buffer_free(&out);
 		return 0;
-	*result = buffer.data;
-	free(buffer.quoted);
+	}
 
-	/* Reports operation failure. */
+	/* Succeeded: one string. */
+	*result = buffer_string(&out, NULL);
+	buffer_free(&out);
+	*error_text = NULL;
 	return 1;
 }
 
 /*
- * Implements the sh expand fields operation.
+ * Expands a pattern into one string and the marks of its quoted characters.
  */
 int
-sh_expand_fields(
+sh_expand_pattern(
 	const struct sh_token *token,
 	const struct sh_expand_context *context,
-	struct sh_field_list *list,
+	char **result,
+	unsigned char **quoted,
 	const char **error_text)
 {
-	int argument;
-	size_t start;
-	struct expand_buffer buffer;
-	const char *ifs = context->lookup == NULL
-			      ? getenv("IFS")
-			      : context->lookup(context->lookup_context, "IFS");
-	size_t position;
+	struct expander x;
+	struct xbuf out;
+	int ok;
 
-	position = 0;
-	memset(list, 0, sizeof(*list));
-
-	/* Handles the token condition. */
-	if (token->length == 2 && token->text[0] == '$' &&
-	    token->text[1] == '@' && token->quote[0] != SH_QUOTE_SINGLE &&
-	    token->quote[0] != SH_QUOTE_ESCAPED) {
-		/* Process each remaining element. */
-		for (argument = 0; argument < context->positional_count;
-		     argument++) {
-			/* Handles a failed field append operation. */
-			if (!field_append(list, context->positional[argument],
-					  NULL,
-					  strlen(context->positional[argument]),
-					  token->quote[0] == SH_QUOTE_DOUBLE))
-				goto direct_no_memory;
-		}
-		*error_text = NULL;
-		/* Reports operation failure. */
-		return 1;
-	}
-
-	/* Handles the ifs availability. */
-	if (ifs == NULL)
-		ifs = " \t\n";
-
-	/* Handles an operation failure. */
-	if (!expand_raw(token, context, &buffer, error_text))
+	/* The expansion. */
+	memset(&x, 0, sizeof(x));
+	memset(&out, 0, sizeof(out));
+	x.context = context;
+	sh_expand_fatal = 0;
+	*result = NULL;
+	*quoted = NULL;
+	ok = expand_token(&x, token, &out);
+	if (!ok) {
+		*error_text = failure(&x);
+		buffer_free(&out);
 		return 0;
-
-	/* Process each remaining element. */
-	while (position < buffer.length) {
-		/* Process each remaining element. */
-		while (position < buffer.length && !buffer.quoted[position] &&
-		       is_ifs(buffer.data[position], ifs))
-			position++;
-
-		/* Process each remaining element. */
-		start = position;
-		while (position < buffer.length &&
-		       (buffer.quoted[position] ||
-			!is_ifs(buffer.data[position], ifs)))
-			position++;
-
-		/* Handles a failed field append operation. */
-		if (position != start &&
-		    !field_append(list, buffer.data + start,
-				  buffer.quoted + start, position - start, 0))
-			goto no_memory;
 	}
 
-	/* Handles a failed field append operation. */
-	if (list->count == 0 && buffer.preserve_empty &&
-	    !field_append(list, "", NULL, 0, 1))
-		goto no_memory;
-	buffer_free(&buffer);
-
-	/* Reports operation failure. */
+	/* Succeeded: one string and its marks. */
+	*result = buffer_string(&out, quoted);
+	buffer_free(&out);
+	*error_text = NULL;
 	return 1;
-no_memory:
-	buffer_free(&buffer);
-	sh_fields_free(list);
-	*error_text = "out of memory";
-	/* Reports successful completion. */
-	return 0;
-direct_no_memory:
-	sh_fields_free(list);
-	*error_text = "out of memory";
-	/* Reports successful completion. */
-	return 0;
 }
 
 /*
- * Implements the sh fields free operation.
+ * Expands a string as an arithmetic expression and evaluates it.
+ */
+int
+sh_expand_arithmetic(
+	const char *text,
+	const struct sh_expand_context *context,
+	long *result,
+	const char **error_text)
+{
+	struct expander x;
+	struct xbuf out;
+	char *expression;
+	long long value;
+	int ok;
+
+	/* The expansions in it, as in a here-document. */
+	memset(&x, 0, sizeof(x));
+	memset(&out, 0, sizeof(out));
+	x.context = context;
+	ok = expand_text(&x, text, strlen(text), 1, 1, M_HEREDOC, &out);
+	if (!ok) {
+		*error_text = failure(&x);
+		buffer_free(&out);
+		return 0;
+	}
+
+	/* The expanded text of the expression. */
+	expression = buffer_string(&out, NULL);
+	buffer_free(&out);
+
+	/* The expression. */
+	value = 0;
+	ok = sh_arithmetic_eval(expression, context->lookup, context->assign,
+				context->lookup_context, &value, error_text);
+	free(expression);
+	*result = (long)value;
+
+	/* Succeeded when the expression was valid. */
+	return ok;
+}
+
+/*
+ * Frees a field list.
  */
 void
 sh_fields_free(
-	struct sh_field_list *list)
+	struct sh_field_list *fields)
 {
 	size_t index;
 
-	/* Process each remaining element. */
-	for (index = 0; index < list->count; index++)
-		free(list->fields[index]);
-
-	/* Process each remaining element. */
-	for (index = 0; index < list->count; index++)
-		free(list->quoted[index]);
-	free(list->fields);
-	free(list->quoted);
-	list->fields = NULL;
-	list->quoted = NULL;
-	list->count = 0;
-}
-
-/* Supports the expand raw operation. */
-static int
-expand_raw(
-	const struct sh_token *token,
-	const struct sh_expand_context *context,
-	struct expand_buffer *buffer,
-	const char **error_text)
-{
-	const char *home;
-	long number;
-	const char *argument;
-	size_t scan_local1;
-	size_t start_local2;
-	int depth_local3;
-	size_t scan_local;
-	size_t start_local;
-	int depth_local;
-	size_t start_local6;
-	size_t depth_local4;
-	size_t scan_local5;
-	size_t start_local7;
-	size_t end;
-	char *expression;
-	long arithmetic_value;
-	char current;
-	char inner_quote;
-	char *source, *substitution;
-	size_t name_end;
-	size_t name_length;
-	int colon;
-	char operation;
-	int doubled;
-	int length_wanted;
-	unsigned char *pattern_quote;
-	char *name;
-	const char *parameter;
-	int set, use_word;
-	struct expand_buffer word;
-	struct sh_token word_token;
-	unsigned char quote;
-	char value;
-	size_t index;
-	int output_quoted;
-
-	index = 0;
-	memset(buffer, 0, sizeof(*buffer));
-
-	/* Process each remaining element. */
-	buffer->preserve_empty = token->length == 0;
-	*error_text = NULL;
-	while (index < token->length) {
-		quote = token->quote[index];
-		value = token->text[index];
-		output_quoted = quote != SH_QUOTE_UNQUOTED;
-
-		/* Validates the current value. */
-		if (value == '~' && quote == SH_QUOTE_UNQUOTED &&
-		    (index == 0 ||
-		     (token->text[index - 1U] == '=' &&
-		      token->quote[index - 1U] == SH_QUOTE_UNQUOTED)) &&
-		    (index + 1U == token->length ||
-		     token->text[index + 1U] == '/')) {
-			home = context->lookup == NULL
-		? getenv("HOME")
-		: context->lookup(context->lookup_context,
-			  "HOME");
-
-			/* Handles a failed append bytes operation. */
-			if (home != NULL &&
-			    !append_bytes(buffer, home, strlen(home), 0))
-				goto no_memory;
-
-			/* Handles a failed append bytes operation. */
-			if (home == NULL && !append_bytes(buffer, "~", 1U, 0))
-				goto no_memory;
-			index++;
-			continue;
-		}
-
-		/* Handles the output quoted condition. */
-		if (output_quoted)
-			buffer->preserve_empty = 1;
-
-		/* Validates the current value. */
-		if (value != '$' || quote == SH_QUOTE_SINGLE ||
-		    quote == SH_QUOTE_ESCAPED || index + 1U == token->length) {
-			/* Handles a failed append bytes operation. */
-			if (!append_bytes(buffer, &value, 1U, output_quoted))
-				goto no_memory;
-			index++;
-			continue;
-		}
-		output_quoted = quote == SH_QUOTE_DOUBLE;
-		value = token->text[index + 1U];
-
-		/* Validates the current value. */
-		if (value == '(') {
-			/* Checks the current index. */
-			if (index + 2U < token->length &&
-			    token->text[index + 2U] == '(') {
-				scan_local = index + 3U;
-				start_local = scan_local;
-				depth_local = 1;
-
-				/* Process each remaining element. */
-				while (scan_local < token->length && depth_local != 0) {
-					/* Handles the token condition. */
-					if (token->text[scan_local] == '(')
-						depth_local++;
-					else if (token->text[scan_local] == ')')
-						depth_local--;
-
-					/* Handles the depth local condition. */
-					if (depth_local != 0)
-						scan_local++;
-				}
-
-				/* Handles the depth local condition. */
-				if (depth_local != 0 || scan_local + 1U >= token->length ||
-				    token->text[scan_local + 1U] != ')') {
-					*error_text =
-					    "unterminated arithmetic expansion";
-					buffer_free(buffer);
-
-					/* Reports successful completion. */
-					return 0;
-				}
-				expression = malloc(scan_local - start_local + 1U);
-
-				/* Handles the expression availability. */
-				if (expression == NULL)
-					goto no_memory;
-				memcpy(expression, token->text + start_local,
-				       scan_local - start_local);
-				expression[scan_local - start_local] = '\0';
-
-				/* Handles an operation failure. */
-				if (!sh_arithmetic_eval(
-					expression, context->lookup,
-					context->lookup_context,
-					&arithmetic_value, error_text)) {
-					free(expression);
-					buffer_free(buffer);
-
-					/* Reports successful completion. */
-					return 0;
-				}
-				free(expression);
-
-				/* Handles a failed append number operation. */
-				if (!append_number(buffer, arithmetic_value,
-						   output_quoted))
-					goto no_memory;
-				index = scan_local + 2U;
-				continue;
-			}
-
-			/* Process each remaining element. */
-			scan_local1 = index + 2U;
-			start_local2 = scan_local1;
-			depth_local3 = 1;
-			inner_quote = '\0';
-			substitution = NULL;
-			while (scan_local1 < token->length && depth_local3 != 0) {
-				current = token->text[scan_local1++];
-
-				/* Handles the current condition. */
-				if (current == '\\' && scan_local1 < token->length) {
-					scan_local1++;
-					continue;
-				}
-
-				/* Handles the current condition. */
-				if ((current == '\'' || current == '"') &&
-				    (inner_quote == '\0' ||
-				     inner_quote == current)) {
-					inner_quote = inner_quote == '\0'
-							  ? current
-							  : '\0';
-				}
-
-				/* Handles the inner quote condition. */
-				if (inner_quote == '\0') {
-					/* Handles the current condition. */
-					if (current == '(')
-						depth_local3++;
-
-					/* Handles the current condition. */
-					if (current == ')')
-						depth_local3--;
-				}
-			}
-
-			/* Handles the depth local3 condition. */
-			if (depth_local3 != 0) {
-				*error_text =
-				    "unterminated command substitution";
-				buffer_free(buffer);
-
-				/* Reports successful completion. */
-				return 0;
-			}
-			source = malloc(scan_local1 - start_local2);
-
-			/* Handles the source availability. */
-			if (source == NULL)
-				goto no_memory;
-			memcpy(source, token->text + start_local2, scan_local1 - start_local2 - 1U);
-			source[scan_local1 - start_local2 - 1U] = '\0';
-
-			/* Handles a failed command substitute operation. */
-			if (context->command_substitute == NULL ||
-			    !context->command_substitute(
-				context->lookup_context, source,
-				&substitution)) {
-				free(source);
-				free(substitution);
-				*error_text = "command substitution failed";
-				buffer_free(buffer);
-
-				/* Reports successful completion. */
-				return 0;
-			}
-			free(source);
-
-			/* Handles a failed append bytes operation. */
-			if (!append_bytes(buffer, substitution,
-					  strlen(substitution),
-					  output_quoted)) {
-				free(substitution);
-				goto no_memory;
-			}
-			free(substitution);
-			index = scan_local1;
-			continue;
-		}
-
-		/* Validates the current value. */
-		if (value == '?' || value == '$' || value == '!' ||
-		    value == '#') {
-			number = value == '?'   ? context->status
-		      : value == '$' ? context->shell_pid
-		      : value == '!'
-		  ? context->last_job
-		  : context->positional_count;
-
-			/* Handles a failed append number operation. */
-			if (!append_number(buffer, number, output_quoted))
-				goto no_memory;
-			index += 2U;
-			continue;
-		}
-
-		/* Validates the current value. */
-		if (value == '*' || value == '@') {
-			/* Handles a failed append positionals operation. */
-			if (!append_positionals(buffer, context, output_quoted))
-				goto no_memory;
-			index += 2U;
-			continue;
-		}
-
-		/* Validates the current value. */
-		if (value >= '0' && value <= '9') {
-			argument = value == '0' ? context->shell_name
-		    : value - '1' < context->positional_count
-		? context->positional[value - '1']
-		: NULL;
-
-			/* Handles a failed append bytes operation. */
-			if (argument != NULL &&
-			    !append_bytes(buffer, argument, strlen(argument),
-					  output_quoted))
-				goto no_memory;
-			index += 2U;
-			continue;
-		}
-
-		/* Validates the current value. */
-		if (value == '{') {
-			start_local6 = index + 2U;
-			name_end = start_local6;
-			colon = 0;
-			operation = '\0';
-			name = NULL;
-			doubled = 0;
-			length_wanted = 0;
-
-			use_word = 0;
-
-			/*
-			 * A special parameter may be written in braces, where
-			 * it means exactly what it means on its own.
-			 */
-			if (start_local6 + 1U < token->length &&
-			    token->text[start_local6 + 1U] == '}' &&
-			    strchr("?$!#*@", token->text[start_local6]) !=
-			    NULL) {
-				value = token->text[start_local6];
-
-				/* Handles the value condition. */
-				if (value == '*' || value == '@') {
-					/* Handles a failed append operation. */
-					if (!append_positionals(buffer, context,
-								output_quoted))
-						goto no_memory;
-				} else {
-					number = value == '?' ? context->status
-					    : value == '$' ? context->shell_pid
-					    : value == '!' ? context->last_job
-					    : context->positional_count;
-
-					/* Handles a failed append operation. */
-					if (!append_number(buffer, number,
-							   output_quoted))
-						goto no_memory;
-				}
-				index = start_local6 + 2U;
-				continue;
-			}
-
-			/* A positional parameter may be written in braces too. */
-			if (start_local6 + 1U < token->length &&
-			    token->text[start_local6 + 1U] == '}' &&
-			    token->text[start_local6] >= '0' &&
-			    token->text[start_local6] <= '9') {
-				value = token->text[start_local6];
-				argument = value == '0' ? context->shell_name
-				    : value - '1' < context->positional_count
-				? context->positional[value - '1']
-				: NULL;
-
-				/* Handles a failed append bytes operation. */
-				if (argument != NULL &&
-				    !append_bytes(buffer, argument,
-						  strlen(argument),
-						  output_quoted))
-					goto no_memory;
-				index = start_local6 + 2U;
-				continue;
-			}
-
-			/*
-			 * A number sign before the name asks how long the
-			 * value is rather than what it is.
-			 */
-			if (start_local6 + 1U < token->length &&
-			    token->text[start_local6] == '#' &&
-			    token->text[start_local6 + 1U] != '}') {
-				length_wanted = 1;
-				start_local6++;
-			}
-
-			/*
-			 * How long the positional parameters are, taken
-			 * together, is how many of them there are.
-			 */
-			if (length_wanted && start_local6 + 1U < token->length &&
-			    (token->text[start_local6] == '@' ||
-			     token->text[start_local6] == '*') &&
-			    token->text[start_local6 + 1U] == '}') {
-				/* Handles a failed append number operation. */
-				if (!append_number(buffer,
-						   context->positional_count,
-						   output_quoted))
-					goto no_memory;
-				index = start_local6 + 2U;
-				continue;
-			}
-			name_end = start_local6;
-
-			/*
-			 * A positional parameter is a run of digits and a
-			 * special one is a single character; either may
-			 * carry an operation, as in ${1:-word}, so the name
-			 * is read here before the operation is looked for.
-			 */
-			if (start_local6 < token->length &&
-			    token->text[start_local6] >= '0' &&
-			    token->text[start_local6] <= '9') {
-				while (name_end < token->length &&
-				       token->text[name_end] >= '0' &&
-				       token->text[name_end] <= '9')
-					name_end++;
-			} else if (start_local6 < token->length &&
-				   strchr("?$!#*@",
-					  token->text[start_local6]) != NULL) {
-				name_end = start_local6 + 1U;
-			} else {
-				/* Process each remaining element. */
-				while (name_end < token->length &&
-				       name_character(token->text[name_end]))
-					name_end++;
-
-				/* Handles a failed name start operation. */
-				if (name_end == start_local6 ||
-				    !name_start(token->text[start_local6])) {
-					*error_text = "invalid parameter name";
-					buffer_free(buffer);
-
-					/* Reports successful completion. */
-					return 0;
-				}
-			}
-			end = name_end;
-			name_length = name_end - start_local6;
-
-			/* Checks the current endpoint. */
-			if (end < token->length && token->text[end] == ':') {
-				colon = 1;
-				end++;
-			}
-
-			/* Handles a failed strchr operation. */
-			if (end < token->length &&
-			    strchr("-+=?", token->text[end]) != NULL)
-				operation = token->text[end++];
-			else if (!colon && end < token->length &&
-				 (token->text[end] == '#' ||
-				  token->text[end] == '%')) {
-				/*
-				 * A number sign removes what the pattern
-				 * matches from the front and a per cent sign
-				 * from the back; written twice, the longest
-				 * such part goes rather than the shortest.
-				 */
-				operation = token->text[end++];
-				if (end < token->length &&
-				    token->text[end] == operation) {
-					doubled = 1;
-					end++;
-				}
-			} else if (colon) {
-				*error_text = "unsupported parameter expansion";
-				buffer_free(buffer);
-
-				/* Reports successful completion. */
-				return 0;
-			}
-
-			/* Validates the selected operation. */
-			if (operation == '\0' &&
-			    (end >= token->length || token->text[end] != '}')) {
-				*error_text = "unsupported parameter expansion";
-				buffer_free(buffer);
-
-				/* Reports successful completion. */
-				return 0;
-			}
-
-			/* Process each remaining element. */
-			depth_local4 = 1U;
-			scan_local5 = end;
-			while (scan_local5 < token->length && depth_local4 != 0) {
-				/* Handles the scan local5 condition. */
-				if (scan_local5 + 1U < token->length &&
-				    token->text[scan_local5] == '$' &&
-				    token->text[scan_local5 + 1U] == '{') {
-					depth_local4++;
-					scan_local5 += 2U;
-					continue;
-				}
-
-				/* Handles the token condition. */
-				if (token->text[scan_local5] == '}')
-					depth_local4--;
-
-				/* Handles the depth local4 condition. */
-				if (depth_local4 != 0)
-					scan_local5++;
-			}
-
-			/* Handles the depth local4 condition. */
-			if (depth_local4 != 0) {
-				*error_text =
-				    "unterminated parameter expansion";
-				buffer_free(buffer);
-
-				/* Reports successful completion. */
-				return 0;
-			}
-			name_end = scan_local5;
-			parameter = lookup_parameter(context,
-						     token->text + start_local6,
-						     name_length, &name);
-
-			/* Handles the name availability. */
-			if (name == NULL)
-				goto no_memory;
-			set = parameter != NULL &&
-			      (!colon || parameter[0] != '\0');
-
-			/* Validates the selected operation. */
-			if (operation == '\0') {
-				/* Handles a parameter that was never set. */
-				if (parameter == NULL && !length_wanted &&
-				    context->unset_is_error) {
-					*error_text = "parameter is unset";
-					free(name);
-					buffer_free(buffer);
-
-					/* Reports successful completion. */
-					return 0;
-				}
-
-				/* A parameter that is unset is of no length. */
-				if (length_wanted) {
-					/* Handles a failed append operation. */
-					if (!append_number(buffer,
-					    parameter != NULL ?
-					    (long)strlen(parameter) : 0L,
-					    output_quoted)) {
-						free(name);
-						goto no_memory;
-					}
-					free(name);
-					index = name_end + 1U;
-					continue;
-				}
-
-				/* Handles a failed append bytes operation. */
-				if (parameter != NULL &&
-				    !append_bytes(buffer, parameter,
-						  strlen(parameter),
-						  output_quoted)) {
-					free(name);
-					goto no_memory;
-				}
-				free(name);
-				index = name_end + 1U;
-				continue;
-			}
-			use_word = operation == '+' ? set : !set;
-			memset(&word_token, 0, sizeof(word_token));
-			word_token.type = SH_TOKEN_WORD;
-			word_token.text = token->text + end;
-			word_token.quote = token->quote + end;
-			word_token.length = name_end - end;
-			pattern_quote = NULL;
-
-			/*
-			 * Within the braces a double quotation is the one
-			 * written around the whole word, and it does not make
-			 * a pattern character stand for itself.  A single
-			 * quotation or a backslash written inside does, so
-			 * only those are kept.
-			 */
-			if (operation == '#' || operation == '%') {
-				pattern_quote = malloc(word_token.length + 1U);
-
-				/* Handles a failed malloc operation. */
-				if (pattern_quote == NULL) {
-					free(name);
-					goto no_memory;
-				}
-
-				/* Process each remaining element. */
-				for (scan_local5 = 0;
-				     scan_local5 < word_token.length;
-				     scan_local5++)
-					pattern_quote[scan_local5] =
-					    word_token.quote[scan_local5] ==
-					    SH_QUOTE_DOUBLE ?
-					    SH_QUOTE_UNQUOTED :
-					    word_token.quote[scan_local5];
-				word_token.quote = pattern_quote;
-			}
-
-			/* Handles an operation failure. */
-			if (!expand_raw(&word_token, context, &word,
-					error_text)) {
-				free(pattern_quote);
-				free(name);
-				buffer_free(buffer);
-
-				/* Reports successful completion. */
-				return 0;
-			}
-			free(pattern_quote);
-
-			/* Validates the selected operation. */
-			if (operation == '#' || operation == '%') {
-				const char *source;
-				size_t keep_start;
-				size_t keep_end;
-
-				source = parameter != NULL ? parameter : "";
-
-				/* Handles a failed trim parameter operation. */
-				if (!trim_parameter(source, word.data,
-						    word.quoted, operation,
-						    doubled, &keep_start,
-						    &keep_end)) {
-					buffer_free(&word);
-					free(name);
-					goto no_memory;
-				}
-
-				/* Handles a failed append bytes operation. */
-				if (!append_bytes(buffer, source + keep_start,
-						  keep_end - keep_start,
-						  output_quoted)) {
-					buffer_free(&word);
-					free(name);
-					goto no_memory;
-				}
-				buffer_free(&word);
-				free(name);
-				index = name_end + 1U;
-				continue;
-			}
-
-			/* Validates the selected operation. */
-			if (operation == '?' && !set) {
-				*error_text = word.length == 0
-						  ? "parameter is unset or null"
-						  : "parameter expansion "
-						    "requested an error";
-				buffer_free(&word);
-				free(name);
-				buffer_free(buffer);
-
-				/* Reports successful completion. */
-				return 0;
-			}
-
-			/* Validates the selected operation. */
-			if (operation == '=' && !set) {
-				/* Handles a failed assign operation. */
-				if (context->assign == NULL ||
-				    context->assign(context->lookup_context,
-						    name, word.data) != 0) {
-					*error_text =
-					    "parameter assignment failed";
-					buffer_free(&word);
-					free(name);
-					buffer_free(buffer);
-
-					/* Reports successful completion. */
-					return 0;
-				}
-				use_word = 1;
-			}
-
-			/* Handles the use word condition. */
-			if (use_word) {
-				/* Handles a failed append buffer operation. */
-				if (!append_buffer(buffer, &word)) {
-					buffer_free(&word);
-					free(name);
-					goto no_memory;
-				}
-			} else if (parameter != NULL && operation != '+' &&
-				   !append_bytes(buffer, parameter,
-						 strlen(parameter),
-						 output_quoted)) {
-				buffer_free(&word);
-				free(name);
-				goto no_memory;
-			}
-			buffer_free(&word);
-			free(name);
-			index = name_end + 1U;
-			continue;
-		}
-
-		/* Handles the name start condition. */
-		if (name_start(value)) {
-			/* Process each remaining element. */
-			start_local7 = index + 1U;
-			end = start_local7 + 1U;
-			while (end < token->length &&
-			       name_character(token->text[end]))
-				end++;
-
-			/* Handles a failed append parameter operation. */
-			set = append_parameter(buffer,
-					       token->text + start_local7,
-					       end - start_local7,
-					       output_quoted, context);
-
-			/* Handles a parameter the shell was told to require. */
-			if (set < 0) {
-				*error_text = "parameter is unset";
-				buffer_free(buffer);
-
-				/* Reports successful completion. */
-				return 0;
-			}
-			if (!set)
-				goto no_memory;
-			index = end;
-			continue;
-		}
-
-		/* Handles a failed append bytes operation. */
-		if (!append_bytes(buffer, "$", 1U, output_quoted))
-			goto no_memory;
-		index++;
+	/* Each field and its marks, then the arrays. */
+	for (index = 0; index < fields->count; index++) {
+		free(fields->fields[index]);
+		if (fields->quoted != NULL)
+			free(fields->quoted[index]);
 	}
 
-	/* Handles a failed buffer reserve operation. */
-	if (!buffer_reserve(buffer, 0))
-		goto no_memory;
-	buffer->data[buffer->length] = '\0';
+	/* The arrays themselves. */
+	free(fields->fields);
+	free(fields->quoted);
+	fields->fields = NULL;
+	fields->quoted = NULL;
+	fields->count = 0;
+}
 
-	/* Reports operation failure. */
+/* Expands a token: a here-document body, or a word from its raw text. */
+static int
+expand_token(
+	struct expander *x,
+	const struct sh_token *token,
+	struct xbuf *out)
+{
+	size_t index;
+
+	/* A here-document with a quoted delimiter is taken as written. */
+	if (token->heredoc == SH_HEREDOC_LITERAL) {
+		for (index = 0; index < token->raw_length; index++)
+			append_char(out, token->raw[index], X_QUOTED);
+		append_mark(out, X_KEEP);
+		return 1;
+	}
+
+	/* One with an unquoted delimiter is expanded, as if quoted. */
+	if (token->heredoc == SH_HEREDOC_EXPAND) {
+		append_mark(out, X_KEEP);
+		return expand_text(x, token->raw, token->raw_length, 1, 1,
+				   M_HEREDOC, out);
+	}
+
+	/* A word made without raw text is taken as it stands. */
+	if (token->raw == NULL) {
+		for (index = 0; index < token->length; index++)
+			append_char(out, token->text[index], X_QUOTED);
+		append_mark(out, X_KEEP);
+		return 1;
+	}
+
+	/* Succeeded when the text expanded. */
+	return expand_text(x, token->raw, token->raw_length, 0, 0, 0, out);
+}
+
+/*
+ * Expands text into out.  in_double, quoted and mode are as in struct
+ * reader.
+ */
+static int
+expand_text(
+	struct expander *x,
+	const char *text,
+	size_t length,
+	int in_double,
+	int quoted,
+	int mode,
+	struct xbuf *out)
+{
+	struct reader reader;
+	int ok;
+
+	/* The text, from its start. */
+	reader.text = text;
+	reader.length = length;
+	reader.position = 0;
+	reader.in_double = in_double;
+	reader.quoted = quoted;
+	reader.mode = mode;
+
+	/* Each construct in turn. */
+	while (reader.position < reader.length) {
+		ok = expand_next(x, &reader, out);
+		if (!ok)
+			return 0;
+	}
+
+	/* Succeeded. */
 	return 1;
-no_memory:
-	buffer_free(buffer);
-	*error_text = "out of memory";
-	/* Reports successful completion. */
+}
+
+/* Expands the construct, or the character, at the reader's position. */
+static int
+expand_next(
+	struct expander *x,
+	struct reader *reader,
+	struct xbuf *out)
+{
+	unsigned char attr;
+	char value;
+	int tilde;
+
+	/* A tilde that begins the word, or a part of an assignment. */
+	tilde = tilde_starts(x, reader);
+	if (tilde) {
+		expand_tilde(x, reader, out);
+		return 1;
+	}
+
+	/* The quoting and expansion characters. */
+	value = reader->text[reader->position];
+	switch (value) {
+	case '\\':
+		expand_backslash(reader, out);
+		return 1;
+	case '\'':
+		if (reader->in_double)
+			break;
+		expand_single(reader, out);
+		return 1;
+	case '"':
+		if ((reader->mode & M_HEREDOC) != 0)
+			break;
+		return expand_double(x, reader, out);
+	case '`':
+		return expand_backquote(x, reader, out);
+	case '$':
+		return expand_dollar(x, reader, out);
+	default:
+		break;
+	}
+
+	/* An ordinary character: quoted, split, or neither. */
+	attr = 0;
+	if (reader->quoted)
+		attr = X_QUOTED;
+	else if ((reader->mode & M_SPLIT) != 0)
+		attr = X_SPLIT;
+	append_char(out, value, attr);
+	reader->position++;
+
+	/* Succeeded. */
+	return 1;
+}
+
+/*
+ * Reports whether a tilde prefix starts at the position: an unquoted ~ at
+ * the start of the word, or, in an assignment, after a : or after the first
+ * =.
+ */
+static int
+tilde_starts(
+	const struct expander *x,
+	const struct reader *reader)
+{
+	const char *text;
+	const char *equals;
+	size_t position;
+
+	/* An unquoted tilde. */
+	text = reader->text;
+	position = reader->position;
+	if (text[position] != '~' || reader->in_double)
+		return 0;
+
+	/* The start of the word. */
+	if (position == 0)
+		return 1;
+
+	/* In an assignment, after a colon. */
+	if (!x->assignment)
+		return 0;
+	if (text[position - 1] == ':')
+		return 1;
+
+	/* Or right after the = that ends the name. */
+	if (text[position - 1] != '=')
+		return 0;
+	equals = memchr(text, '=', position - 1);
+	if (equals != NULL)
+		return 0;
+
+	/* Succeeded: it does. */
+	return 1;
+}
+
+/*
+ * Expands a backslash: it quotes the next character, removes itself and a
+ * newline, or (inside double quotes, before a character it does not
+ * protect) stands for itself.
+ */
+static void
+expand_backslash(
+	struct reader *reader,
+	struct xbuf *out)
+{
+	unsigned char attr;
+	char next;
+	int protects;
+
+	/* A backslash that ends the text stands for itself. */
+	attr = 0;
+	if (reader->quoted)
+		attr = X_QUOTED;
+	else if ((reader->mode & M_SPLIT) != 0)
+		attr = X_SPLIT;
+	if (reader->position + 1 >= reader->length) {
+		append_char(out, '\\', attr);
+		reader->position++;
+		return;
+	}
+
+	/* Inside double quotes it protects only some characters. */
+	next = reader->text[reader->position + 1];
+	protects = backslash_protects(reader, next);
+	if (!protects) {
+		append_char(out, '\\', attr);
+		reader->position++;
+		return;
+	}
+
+	/* A backslash and a newline are removed. */
+	reader->position += 2;
+	if (next == '\n')
+		return;
+
+	/* Any other character is quoted. */
+	append_char(out, next, X_QUOTED);
+}
+
+/* Reports whether a backslash quotes the character after it. */
+static int
+backslash_protects(
+	const struct reader *reader,
+	char next)
+{
+	const char *protected_characters;
+	const char *found;
+
+	/* Outside double quotes, every character. */
+	if (!reader->in_double)
+		return 1;
+
+	/* Inside, $ ` \ newline, and " (not in a here-document) or }. */
+	if ((reader->mode & M_HEREDOC) != 0)
+		protected_characters = "$`\\\n";
+	else if ((reader->mode & M_BRACE) != 0)
+		protected_characters = "$`\"\\\n}";
+	else
+		protected_characters = "$`\"\\\n";
+	found = strchr(protected_characters, next);
+	if (found == NULL)
+		return 0;
+
+	/* Succeeded: it does. */
+	return 1;
+}
+
+/* Expands a single quotation: its characters, all quoted. */
+static void
+expand_single(
+	struct reader *reader,
+	struct xbuf *out)
+{
+	const char *end;
+	size_t stop;
+
+	/* Where the closing quote is (the end, when there is none). */
+	end = sh_skip_single(reader->text + reader->position);
+	stop = reader->length;
+	if (end != NULL)
+		stop = (size_t)(end - reader->text) - 1U;
+
+	/* The field exists, even when the quotation is empty. */
+	append_mark(out, X_KEEP);
+	for (reader->position++; reader->position < stop; reader->position++)
+		append_char(out, reader->text[reader->position], X_QUOTED);
+	reader->position = stop + 1U;
+}
+
+/* Expands a double quotation: its contents, quoted. */
+static int
+expand_double(
+	struct expander *x,
+	struct reader *reader,
+	struct xbuf *out)
+{
+	const char *end;
+	const char *inside;
+	size_t stop;
+	size_t length;
+	int bare;
+	int ok;
+
+	/* Where the closing quote is (the end, when there is none). */
+	end = sh_skip_double(reader->text + reader->position);
+	stop = reader->length;
+	if (end != NULL)
+		stop = (size_t)(end - reader->text) - 1U;
+	inside = reader->text + reader->position + 1;
+	length = stop - reader->position - 1U;
+	reader->position = stop + 1U;
+
+	/* "$@" with no parameters is no field at all. */
+	bare = is_bare_at(inside, length);
+	if (bare && x->context->positional_count == 0)
+		return 1;
+
+	/* Succeeded when the contents expanded; the field exists. */
+	append_mark(out, X_KEEP);
+	ok = expand_text(x, inside, length, 1, 1, 0, out);
+	return ok;
+}
+
+/* Reports whether text is exactly $@ or ${@}. */
+static int
+is_bare_at(
+	const char *text,
+	size_t length)
+{
+	int compare;
+
+	/* $@ */
+	if (length == 2) {
+		compare = memcmp(text, "$@", 2);
+		if (compare == 0)
+			return 1;
+	}
+
+	/* ${@} */
+	if (length == 4) {
+		compare = memcmp(text, "${@}", 4);
+		if (compare == 0)
+			return 1;
+	}
+
+	/* Anything else. */
 	return 0;
 }
 
-/* Supports the append bytes operation. */
+/*
+ * Runs a backquoted command: inside it a backslash protects only $ ` \ (and
+ * " inside a double quotation), and is removed before the command is read.
+ */
 static int
-append_bytes(
-	struct expand_buffer *buffer,
-	const char *data,
-	size_t length,
-	int quoted)
+expand_backquote(
+	struct expander *x,
+	struct reader *reader,
+	struct xbuf *out)
 {
-	/* Handles a failed buffer reserve operation. */
-	if (!buffer_reserve(buffer, length))
-		return 0;
-	memcpy(buffer->data + buffer->length, data, length);
-	memset(buffer->quoted + buffer->length, quoted != 0, length);
-	buffer->length += length;
-	buffer->data[buffer->length] = '\0';
+	const char *text;
+	const char *end;
+	char *source;
+	char next;
+	size_t length;
+	size_t index;
+	size_t used;
+	int ok;
 
-	/* Reports operation failure. */
-	return 1;
-}
-
-/* Supports the buffer reserve operation. */
-static int
-buffer_reserve(
-	struct expand_buffer *buffer,
-	size_t additional)
-{
-	char *data;
-	unsigned char *quoted;
-	size_t needed;
-	size_t capacity = buffer->capacity == 0 ? 32U : buffer->capacity;
-
-	needed = buffer->length + additional + 1U;
-
-	/* Handles the needed condition. */
-	if (needed < buffer->length)
-		return 0;
-
-	/* Continue while the operation condition remains true. */
-	while (capacity < needed) {
-		/* Handles the capacity condition. */
-		if (capacity > (size_t)-1 / 2U)
-			return 0;
-		capacity *= 2U;
+	/* The text between the backquotes (to the end, when unclosed). */
+	text = reader->text + reader->position + 1;
+	end = sh_skip_expansion(reader->text + reader->position,
+				reader->in_double);
+	if (end == NULL) {
+		length = reader->length - reader->position - 1U;
+		reader->position = reader->length;
+	} else {
+		length = (size_t)(end - text) - 1U;
+		reader->position = (size_t)(end - reader->text);
 	}
 
-	/* Handles the capacity condition. */
-	if (capacity == buffer->capacity)
+	/* The command, with its protecting backslashes removed. */
+	source = sh_malloc(length + 1U);
+	used = 0;
+	for (index = 0; index < length; index++) {
+		next = '\0';
+		if (text[index] == '\\' && index + 1 < length)
+			next = text[index + 1];
+		if (next == '$' || next == '`' || next == '\\')
+			index++;
+		else if (next == '"' && reader->in_double)
+			index++;
+		source[used++] = text[index];
+	}
+
+	/* The source ends with a null. */
+	source[used] = '\0';
+
+	/* Succeeded when its output was added. */
+	ok = command_output(x, source, reader->quoted, out);
+	free(source);
+	return ok;
+}
+
+/* Expands one dollar sign, and moves past what it began. */
+static int
+expand_dollar(
+	struct expander *x,
+	struct reader *reader,
+	struct xbuf *out)
+{
+	unsigned char attr;
+	size_t name_length;
+	char next;
+	int start;
+	int special;
+
+	/* A dollar sign that ends the text stands for itself. */
+	attr = 0;
+	if (reader->quoted)
+		attr = X_QUOTED;
+	if (reader->position + 1 >= reader->length) {
+		reader->position++;
+		append_char(out, '$', attr);
 		return 1;
-	data = realloc(buffer->data, capacity);
+	}
 
-	/* Handles the data availability. */
-	if (data == NULL)
+	/* ${...}, $(...) and $((...)). */
+	next = reader->text[reader->position + 1];
+	if (next == '{' || next == '(')
+		return expand_enclosed(x, reader, out);
+
+	/* $@ and $*. */
+	if (next == '@' || next == '*') {
+		reader->position += 2;
+		append_positionals(x, next, reader->quoted, out);
+		return 1;
+	}
+
+	/* A name, or one digit or special character. */
+	name_length = 0;
+	start = name_start(next);
+	special = is_special(next);
+	if (start) {
+		name_length = scan_name(reader->text + reader->position + 1,
+					reader->length - reader->position - 1);
+	} else if (special || (next >= '0' && next <= '9')) {
+		name_length = 1;
+	}
+
+	/* A dollar sign that begins nothing stands for itself. */
+	if (name_length == 0) {
+		reader->position++;
+		append_char(out, '$', attr);
+		return 1;
+	}
+
+	/* Succeeded when the parameter was added. */
+	return expand_simple(x, reader, name_length, out);
+}
+
+/* Expands ${...}, $(...) or $((...)) at the position. */
+static int
+expand_enclosed(
+	struct expander *x,
+	struct reader *reader,
+	struct xbuf *out)
+{
+	const char *start;
+	const char *end;
+	char *source;
+	size_t inner;
+	int form;
+	int ok;
+
+	/* Where it ends, which must be within the text. */
+	start = reader->text + reader->position;
+	end = sh_skip_expansion(start, reader->in_double);
+	if (end == NULL || (size_t)(end - reader->text) > reader->length) {
+		if (start[1] == '{')
+			x->error = "unterminated parameter expansion";
+		else
+			x->error = "unterminated command substitution";
 		return 0;
-	buffer->data = data;
-	quoted = realloc(buffer->quoted, capacity);
+	}
 
-	/* Handles the quoted availability. */
-	if (quoted == NULL)
+	/* The reader moves past the expansion. */
+	reader->position = (size_t)(end - reader->text);
+	inner = (size_t)(end - start);
+
+	/* ${...}. */
+	if (start[1] == '{')
+		return expand_brace(x, start + 2, inner - 3U, reader, out);
+
+	/* $((...)). */
+	form = arithmetic_form(start, end);
+	if (form)
+		return arithmetic(x, start + 3, inner - 5U, reader->quoted, out);
+
+	/* $(...): the command. */
+	source = sh_strndup(start + 2, inner - 3U);
+	ok = command_output(x, source, reader->quoted, out);
+	free(source);
+
+	/* Succeeded when the command's output was added. */
+	return ok;
+}
+
+/* Expands $name, $digit or a special parameter of name_length characters. */
+static int
+expand_simple(
+	struct expander *x,
+	struct reader *reader,
+	size_t name_length,
+	struct xbuf *out)
+{
+	const char *name;
+	const char *value;
+	int set;
+	int ok;
+
+	/* The value. */
+	name = reader->text + reader->position + 1;
+	reader->position += 1U + name_length;
+	ok = parameter(x, name, name_length, &value, &set);
+	if (!ok)
 		return 0;
-	buffer->quoted = quoted;
-	buffer->capacity = capacity;
 
-	/* Reports operation failure. */
+	/* An unset parameter is a fault under set -u. */
+	if (!set && x->context->unset_is_error)
+		return unset_error(x, name, name_length);
+
+	/* Succeeded: the value; quoted, the field exists. */
+	if (reader->quoted)
+		append_mark(out, X_KEEP);
+	append_value(out, value, reader->quoted);
 	return 1;
 }
 
-/* Supports the buffer free operation. */
+/*
+ * Expands the inside of ${...}: the name, the operator, and the word, which
+ * is only expanded when the operator uses it.
+ */
+static int
+expand_brace(
+	struct expander *x,
+	const char *text,
+	size_t length,
+	const struct reader *reader,
+	struct xbuf *out)
+{
+	struct brace brace;
+	int valid;
+	int ok;
+
+	/* The parts. */
+	valid = parse_brace(text, length, &brace);
+	if (!valid) {
+		x->error = "bad substitution";
+		return 0;
+	}
+
+	/* The value; @ and * are read where they are used. */
+	brace.value = NULL;
+	brace.set = 1;
+	if (!brace.special) {
+		ok = parameter(x, brace.name, brace.name_length, &brace.value,
+			       &brace.set);
+		if (!ok)
+			return 0;
+	}
+
+	/* ${#name}. */
+	if (brace.length_wanted)
+		return brace_length(x, &brace, reader->quoted, out);
+
+	/* Dispatches on the operator. */
+	switch (brace.op[0]) {
+	case '-':
+	case '+':
+		return brace_alternative(x, &brace, reader, out);
+	case '=':
+		return brace_assign(x, &brace, reader, out);
+	case '?':
+		return brace_error(x, &brace, reader, out);
+	case '%':
+	case '#':
+		return brace_trim(x, &brace, reader->quoted, out);
+	default:
+		break;
+	}
+
+	/* Succeeded: the plain value. */
+	return brace_value(x, &brace, reader->quoted, out);
+}
+
+/*
+ * Parses the inside of ${...}.  Returns 0 for a bad substitution.
+ */
+static int
+parse_brace(
+	const char *text,
+	size_t length,
+	struct brace *brace)
+{
+	size_t name_length;
+
+	/* Nothing is known about the expansion yet. */
+	memset(brace, 0, sizeof(*brace));
+
+	/* ${#name} is the length; ${#} alone, and ${#-...}, are about $#. */
+	if (length > 1 && text[0] == '#') {
+		name_length = scan_name(text + 1, length - 1U);
+		if (name_length != 0 && 1U + name_length == length) {
+			brace->length_wanted = 1;
+			text++;
+			length--;
+		}
+	}
+
+	/* The name: a name, a run of digits, or one special character. */
+	name_length = scan_name(text, length);
+	if (name_length == 0)
+		return 0;
+	brace->name = text;
+	brace->name_length = name_length;
+	if (text[0] == '@' || text[0] == '*')
+		brace->special = 1;
+
+	/* The operator and the word. */
+	brace->word = text + name_length;
+	brace->word_length = length - name_length;
+	if (brace->word_length == 0)
+		return 1;
+	if (brace->length_wanted)
+		return 0;
+
+	/* Succeeded when the operator is one. */
+	return parse_brace_operator(brace);
+}
+
+/* Parses the operator that begins the word of ${...}. */
+static int
+parse_brace_operator(
+	struct brace *brace)
+{
+	const char *word;
+	char first;
+	char second;
+
+	/* The first two characters after the name, which spell the operator. */
+	word = brace->word;
+	first = word[0];
+	second = '\0';
+	if (brace->word_length > 1)
+		second = word[1];
+
+	/* :- := :? :+ */
+	if (first == ':' &&
+	    (second == '-' || second == '=' || second == '?' || second == '+')) {
+		brace->colon = 1;
+		brace->op[0] = second;
+		brace->word += 2;
+		brace->word_length -= 2;
+		return 1;
+	}
+
+	/* - = ? + */
+	if (first == '-' || first == '=' || first == '?' || first == '+') {
+		brace->op[0] = first;
+		brace->word++;
+		brace->word_length--;
+		return 1;
+	}
+
+	/* Anything else but % %% # ## is bad. */
+	if (first != '%' && first != '#')
+		return 0;
+	brace->op[0] = first;
+	brace->word++;
+	brace->word_length--;
+	if (second == first) {
+		brace->op[1] = first;
+		brace->word++;
+		brace->word_length--;
+	}
+
+	/* Succeeded. */
+	return 1;
+}
+
+/* Expands ${#name}: the length of the value, or the number of positionals. */
+static int
+brace_length(
+	struct expander *x,
+	const struct brace *brace,
+	int quoted,
+	struct xbuf *out)
+{
+	char number[32];
+	size_t count;
+
+	/* ${#@} and ${#*} count the positionals. */
+	if (brace->special) {
+		count = (size_t)x->context->positional_count;
+	} else {
+		/* An unset parameter is a fault under set -u. */
+		if (!brace->set && x->context->unset_is_error)
+			return unset_error(x, brace->name, brace->name_length);
+		count = strlen(brace->value);
+	}
+
+	/* Succeeded: the number. */
+	(void)snprintf(number, sizeof(number), "%zu", count);
+	append_value(out, number, quoted);
+	return 1;
+}
+
+/*
+ * Reports whether the operator uses its word: - = ? when the parameter is
+ * unset (or null, with :), + when it is set (and not null, with :).
+ */
+static int
+brace_uses_word(
+	struct expander *x,
+	const struct brace *brace)
+{
+	int null;
+
+	/* Null counts only with a colon. */
+	null = 0;
+	if (brace->colon)
+		null = brace_is_null(x, brace);
+
+	/* + uses it for a set, non-null parameter. */
+	if (brace->op[0] == '+') {
+		if (!brace->set || null)
+			return 0;
+		return 1;
+	}
+
+	/* The others for an unset or null one. */
+	if (!brace->set || null)
+		return 1;
+	return 0;
+}
+
+/* Reports whether the parameter's value is empty. */
+static int
+brace_is_null(
+	struct expander *x,
+	const struct brace *brace)
+{
+	/* $@ and $* joined. */
+	if (brace->special)
+		return positional_null(x);
+
+	/* Any other parameter. */
+	if (brace->value[0] == '\0')
+		return 1;
+	return 0;
+}
+
+/*
+ * Expands the word of ${...} as the operator reads it: quoted inside double
+ * quotes (where \} is }), split otherwise.
+ */
+static int
+brace_word(
+	struct expander *x,
+	const struct brace *brace,
+	const struct reader *reader,
+	struct xbuf *out)
+{
+	int mode;
+
+	/* The mode of the word. */
+	mode = 0;
+	if (reader->in_double)
+		mode = M_BRACE;
+	else if (!reader->quoted)
+		mode = M_SPLIT;
+
+	/* Succeeded when it expanded. */
+	return expand_text(x, brace->word, brace->word_length,
+			   reader->in_double, reader->quoted, mode, out);
+}
+
+/* Expands ${name-word} or ${name+word} (with or without :). */
+static int
+brace_alternative(
+	struct expander *x,
+	const struct brace *brace,
+	const struct reader *reader,
+	struct xbuf *out)
+{
+	int use;
+
+	/* The word, when the operator uses it. */
+	use = brace_uses_word(x, brace);
+	if (use)
+		return brace_word(x, brace, reader, out);
+
+	/* + with the parameter unset is nothing (an empty field, quoted). */
+	if (brace->op[0] == '+') {
+		if (reader->quoted)
+			append_mark(out, X_KEEP);
+		return 1;
+	}
+
+	/* Succeeded: - with the parameter set is its value. */
+	return brace_value(x, brace, reader->quoted, out);
+}
+
+/* Expands ${name=word}: assigns the word when the parameter is unset. */
+static int
+brace_assign(
+	struct expander *x,
+	const struct brace *brace,
+	const struct reader *reader,
+	struct xbuf *out)
+{
+	char name[NAME_MAX_LENGTH];
+	char *string;
+	int assigned;
+	int variable;
+	int use;
+	int ok;
+
+	/* A set parameter is its value. */
+	use = brace_uses_word(x, brace);
+	if (!use)
+		return brace_value(x, brace, reader->quoted, out);
+
+	/* Only a variable can be assigned. */
+	variable = name_start(brace->name[0]);
+	if (brace->special || !variable) {
+		(void)snprintf(expand_message, sizeof(expand_message),
+			       "%.*s: cannot assign in this way",
+			       (int)brace->name_length, brace->name);
+		x->error = expand_message;
+		sh_expand_fatal = 1;
+		return 0;
+	}
+
+	/* The word, as one string. */
+	ok = brace_word_string(x, brace, reader, &string);
+	if (!ok)
+		return 0;
+
+	/* Assigned. */
+	(void)snprintf(name, sizeof(name), "%.*s", (int)brace->name_length,
+		       brace->name);
+	assigned = 0;
+	if (x->context->assign != NULL)
+		assigned = x->context->assign(x->context->lookup_context, name, string);
+	if (!assigned) {
+		free(string);
+		x->error = "cannot assign";
+		sh_expand_fatal = 1;
+		return 0;
+	}
+
+	/* Succeeded: the value assigned. */
+	if (reader->quoted)
+		append_mark(out, X_KEEP);
+	append_value(out, string, reader->quoted);
+	free(string);
+	return 1;
+}
+
+/*
+ * Expands ${name?word}: an unset (or null) parameter is a fault with the
+ * word as its message (and 0 is returned); a set one is its value.
+ */
+static int
+brace_error(
+	struct expander *x,
+	const struct brace *brace,
+	const struct reader *reader,
+	struct xbuf *out)
+{
+	const char *message;
+	char *string;
+	int use;
+	int ok;
+
+	/* A set parameter is its value. */
+	use = brace_uses_word(x, brace);
+	if (!use)
+		return brace_value(x, brace, reader->quoted, out);
+
+	/* The message: the word, or what is wrong. */
+	string = NULL;
+	if (brace->word_length > 0) {
+		ok = brace_word_string(x, brace, reader, &string);
+		if (!ok)
+			return 0;
+	}
+
+	/* The message is the word, or a default one. */
+	message = string;
+	if (message == NULL && brace->set)
+		message = "parameter null";
+	if (message == NULL)
+		message = "parameter not set";
+
+	/* The fault. */
+	(void)snprintf(expand_message, sizeof(expand_message), "%.*s: %s",
+		       (int)brace->name_length, brace->name, message);
+	free(string);
+	x->error = expand_message;
+	sh_expand_fatal = 1;
+	return 0;
+}
+
+/*
+ * Expands ${name%word} and the rest: the value without the prefix or suffix
+ * the pattern matches.
+ */
+static int
+brace_trim(
+	struct expander *x,
+	const struct brace *brace,
+	int quoted,
+	struct xbuf *out)
+{
+	struct xbuf pattern;
+	struct xbuf joined;
+	char *string;
+	int ok;
+
+	/* An unset parameter is a fault under set -u. */
+	if (!brace->set && !brace->special && x->context->unset_is_error)
+		return unset_error(x, brace->name, brace->name_length);
+
+	/*
+	 * The pattern is read as if it stood on its own: quotes in it quote
+	 * even inside a double quotation.
+	 */
+	memset(&pattern, 0, sizeof(pattern));
+	ok = expand_text(x, brace->word, brace->word_length, 0, 0, 0,
+			 &pattern);
+	if (!ok) {
+		buffer_free(&pattern);
+		return 0;
+	}
+
+	/* The value; for @ and *, "$*" as one string. */
+	if (brace->special) {
+		memset(&joined, 0, sizeof(joined));
+		append_positionals(x, '*', 1, &joined);
+		string = buffer_string(&joined, NULL);
+		buffer_free(&joined);
+		trim(string, &pattern, brace->op, quoted, out);
+		free(string);
+	} else {
+		trim(brace->value, &pattern, brace->op, quoted, out);
+	}
+
+	/* The pattern is no longer needed. */
+	buffer_free(&pattern);
+
+	/* Succeeded. */
+	return 1;
+}
+
+/* Expands a ${...} to the parameter's own value. */
+static int
+brace_value(
+	struct expander *x,
+	const struct brace *brace,
+	int quoted,
+	struct xbuf *out)
+{
+	/* An unset parameter with no operator is a fault under set -u. */
+	if (brace->op[0] == '\0' && !brace->set && !brace->special &&
+	    x->context->unset_is_error)
+		return unset_error(x, brace->name, brace->name_length);
+
+	/* @ and *. */
+	if (brace->special) {
+		append_positionals(x, brace->name[0], quoted, out);
+		return 1;
+	}
+
+	/* Succeeded: the value; quoted, the field exists. */
+	if (quoted)
+		append_mark(out, X_KEEP);
+	append_value(out, brace->value, quoted);
+	return 1;
+}
+
+/* Expands the word of ${...} quoted, as one string, which the caller frees. */
+static int
+brace_word_string(
+	struct expander *x,
+	const struct brace *brace,
+	const struct reader *reader,
+	char **string)
+{
+	struct xbuf word;
+	int mode;
+	int ok;
+
+	/* Quoted; inside double quotes, \} is }. */
+	mode = 0;
+	if (reader->in_double)
+		mode = M_BRACE;
+	memset(&word, 0, sizeof(word));
+	ok = expand_text(x, brace->word, brace->word_length, reader->in_double,
+			 1, mode, &word);
+	if (!ok) {
+		buffer_free(&word);
+		return 0;
+	}
+
+	/* Succeeded. */
+	*string = buffer_string(&word, NULL);
+	buffer_free(&word);
+	return 1;
+}
+
+/*
+ * Removes the shortest or longest prefix (#, ##) or suffix (%, %%) that the
+ * pattern matches from value, and adds the rest to out.
+ */
+static void
+trim(
+	const char *value,
+	const struct xbuf *pattern,
+	const char *op,
+	int quoted,
+	struct xbuf *out)
+{
+	unsigned char *marks;
+	char *text;
+	char *candidate;
+	char *rest;
+	size_t length;
+	size_t start;
+	size_t end;
+	int longest;
+
+	/* The pattern and its marks, and room for a part of the value. */
+	text = buffer_string(pattern, &marks);
+	length = strlen(value);
+	candidate = sh_malloc(length + 1U);
+	longest = 0;
+	if (op[1] != '\0')
+		longest = 1;
+
+	/* What is kept. */
+	start = 0;
+	end = length;
+	if (op[0] == '#')
+		start = trim_prefix(value, length, text, marks, longest, candidate);
+	else
+		end = trim_suffix(value, length, text, marks, longest, candidate);
+	free(candidate);
+	free(text);
+	free(marks);
+
+	/* The rest; quoted, the field exists. */
+	if (quoted)
+		append_mark(out, X_KEEP);
+	rest = sh_strndup(value + start, end - start);
+	append_value(out, rest, quoted);
+	free(rest);
+}
+
+/*
+ * Returns the length of the prefix to remove: the shortest one the pattern
+ * matches (trying lengths upwards), or the longest (downwards), or 0.
+ */
+static size_t
+trim_prefix(
+	const char *value,
+	size_t length,
+	const char *text,
+	const unsigned char *marks,
+	int longest,
+	char *candidate)
+{
+	size_t cut;
+	size_t size;
+	int matched;
+
+	/* Each length in turn. */
+	for (cut = 0; cut <= length; cut++) {
+		size = cut;
+		if (longest)
+			size = length - cut;
+		memcpy(candidate, value, size);
+		candidate[size] = '\0';
+		matched = sh_glob_match(text, marks, candidate);
+		if (matched)
+			return size;
+	}
+
+	/* No prefix matches. */
+	return 0;
+}
+
+/*
+ * Returns where the suffix to remove starts: the shortest one the pattern
+ * matches (trying the latest start first), or the longest (the earliest),
+ * or the end of the value.
+ */
+static size_t
+trim_suffix(
+	const char *value,
+	size_t length,
+	const char *text,
+	const unsigned char *marks,
+	int longest,
+	char *candidate)
+{
+	size_t cut;
+	size_t from;
+	int matched;
+
+	/* Each start in turn. */
+	for (cut = 0; cut <= length; cut++) {
+		from = length - cut;
+		if (longest)
+			from = cut;
+		memcpy(candidate, value + from, length - from);
+		candidate[length - from] = '\0';
+		matched = sh_glob_match(text, marks, candidate);
+		if (matched)
+			return from;
+	}
+
+	/* No suffix matches. */
+	return length;
+}
+
+/*
+ * Expands a tilde prefix: ~ is $HOME, ~name the home of the user.  A prefix
+ * with anything quoted in it is not one, and stays as written.
+ */
+static void
+expand_tilde(
+	struct expander *x,
+	struct reader *reader,
+	struct xbuf *out)
+{
+	const char *home;
+	char *user;
+	size_t start;
+	size_t end;
+	size_t index;
+	int plain;
+
+	/* The prefix: up to a slash (or a colon, in an assignment). */
+	start = reader->position;
+	end = tilde_end(x, reader, &plain);
+	if (plain) {
+		reader->position++;
+		append_char(out, '~', 0);
+		return;
+	}
+
+	/* The home directory of the user it names. */
+	user = sh_strndup(reader->text + start + 1, end - start - 1U);
+	home = home_directory(x, user);
+	free(user);
+	reader->position = end;
+
+	/* An unknown user leaves the prefix as written. */
+	if (home == NULL) {
+		for (index = start; index < end; index++)
+			append_char(out, reader->text[index], 0);
+		return;
+	}
+
+	/* The directory, quoted. */
+	append_mark(out, X_KEEP);
+	append_value(out, home, 1);
+}
+
+/*
+ * Returns where a tilde prefix ends.  *plain is set when it is not one (a
+ * quoting or expansion character in it, or a name too long), and the tilde
+ * is then an ordinary character.
+ */
+static size_t
+tilde_end(
+	const struct expander *x,
+	const struct reader *reader,
+	int *plain)
+{
+	size_t end;
+	char value;
+
+	/* The prefix runs to a slash, or a colon in an assignment; it is plain until a quote is seen. */
+	*plain = 0;
+	for (end = reader->position + 1; end < reader->length; end++) {
+		/* A slash ends it; so does a colon in an assignment. */
+		value = reader->text[end];
+		if (value == '/')
+			break;
+		if (value == ':' && x->assignment)
+			break;
+
+		/* A quote or an expansion makes it no prefix. */
+		switch (value) {
+		case '\\':
+		case '\'':
+		case '"':
+		case '$':
+		case '`':
+			*plain = 1;
+			return end;
+		default:
+			break;
+		}
+	}
+
+	/* A user name longer than any is no prefix either. */
+	if (end - reader->position - 1U >= NAME_MAX_LENGTH)
+		*plain = 1;
+
+	/* Succeeded: the end. */
+	return end;
+}
+
+/* Returns the home directory of a user, or $HOME for "", or NULL. */
+static const char *
+home_directory(
+	struct expander *x,
+	const char *user)
+{
+	struct passwd *entry;
+
+	/* ~ alone is $HOME. */
+	if (user[0] == '\0')
+		return lookup(x, "HOME");
+
+	/* ~name is the user's directory. */
+	entry = getpwnam(user);
+	if (entry == NULL)
+		return NULL;
+
+	/* Succeeded. */
+	return entry->pw_dir;
+}
+
+/*
+ * Reports whether $( ... ) at start, ending before end, is an arithmetic
+ * expansion: it opens with "((", closes with "))", and the parentheses
+ * between them balance.  $((a);(b)) is a command that begins with a subshell.
+ */
+static int
+arithmetic_form(
+	const char *start,
+	const char *end)
+{
+	const char *check;
+	int depth;
+
+	/* $(( and )). */
+	if (end - start < 5)
+		return 0;
+	if (start[2] != '(' || end[-1] != ')' || end[-2] != ')')
+		return 0;
+
+	/* The parentheses between them never close more than they open. */
+	depth = 0;
+	for (check = start + 3; check < end - 2; check++) {
+		if (*check == '(')
+			depth++;
+		if (*check == ')')
+			depth--;
+		if (depth < 0)
+			return 0;
+	}
+
+	/* Succeeded: whether they balance. */
+	if (depth != 0)
+		return 0;
+	return 1;
+}
+
+/* Runs a command substitution and adds its output. */
+static int
+command_output(
+	struct expander *x,
+	const char *source,
+	int quoted,
+	struct xbuf *out)
+{
+	char *output;
+	int ran;
+
+	/* The command, run by the shell. */
+	output = NULL;
+	ran = 0;
+	if (x->context->command_substitute != NULL)
+		ran = x->context->command_substitute(x->context->lookup_context, source, &output);
+	if (!ran) {
+		free(output);
+		x->error = "command substitution failed";
+		return 0;
+	}
+
+	/* Succeeded: its output; quoted, the field exists. */
+	if (quoted)
+		append_mark(out, X_KEEP);
+	append_value(out, output, quoted);
+	free(output);
+	return 1;
+}
+
+/* Expands and evaluates the inside of $((...)). */
+static int
+arithmetic(
+	struct expander *x,
+	const char *text,
+	size_t length,
+	int quoted,
+	struct xbuf *out)
+{
+	struct xbuf expression;
+	const char *error_text;
+	char *string;
+	char number[32];
+	long long value;
+	int ok;
+
+	/* The expansions in it, as in a here-document. */
+	memset(&expression, 0, sizeof(expression));
+	ok = expand_text(x, text, length, 1, 1, M_HEREDOC, &expression);
+	if (!ok) {
+		buffer_free(&expression);
+		return 0;
+	}
+
+	/* The value of the expression. */
+	string = buffer_string(&expression, NULL);
+	buffer_free(&expression);
+
+	/* The expression; a fault stops the shell. */
+	ok = sh_arithmetic_eval(string, x->context->lookup, x->context->assign,
+				x->context->lookup_context, &value,
+				&error_text);
+	free(string);
+	if (!ok) {
+		x->error = error_text;
+		sh_expand_fatal = 1;
+		return 0;
+	}
+
+	/* Succeeded: the number; quoted, the field exists. */
+	(void)snprintf(number, sizeof(number), "%lld", value);
+	if (quoted)
+		append_mark(out, X_KEEP);
+	append_value(out, number, quoted);
+	return 1;
+}
+
+/*
+ * Reads a parameter: a name, a positional number or a special parameter
+ * other than @ and *.  *set is cleared for one that is not set, whose value
+ * is then "".
+ */
+static int
+parameter(
+	struct expander *x,
+	const char *name,
+	size_t length,
+	const char **value,
+	int *set)
+{
+	char copy[NAME_MAX_LENGTH];
+	int special;
+
+	/* Empty and set until the parameter says otherwise. */
+	*value = "";
+	*set = 1;
+
+	/* # ? $ ! -. */
+	special = is_special(name[0]);
+	if (length == 1 && special) {
+		special_parameter(x, name[0], value, set);
+		return 1;
+	}
+
+	/* A positional parameter, or $0. */
+	if (name[0] >= '0' && name[0] <= '9') {
+		positional_parameter(x, name, length, value, set);
+		return 1;
+	}
+
+	/* A variable. */
+	if (length >= sizeof(copy)) {
+		x->error = "parameter name too long";
+		return 0;
+	}
+
+	/* The name, with its terminator. */
+	memcpy(copy, name, length);
+	copy[length] = '\0';
+	*value = lookup(x, copy);
+	if (*value == NULL) {
+		*set = 0;
+		*value = "";
+	}
+
+	/* Succeeded. */
+	return 1;
+}
+
+/* Reads $#, $?, $$, $! or $-. */
+static void
+special_parameter(
+	struct expander *x,
+	char name,
+	const char **value,
+	int *set)
+{
+	static char number[32];
+	const struct sh_expand_context *context;
+
+	/* Dispatches on the character. */
+	context = x->context;
+	switch (name) {
+	case '#':
+		(void)snprintf(number, sizeof(number), "%d",
+			       context->positional_count);
+		break;
+	case '?':
+		(void)snprintf(number, sizeof(number), "%d", context->status);
+		break;
+	case '$':
+		(void)snprintf(number, sizeof(number), "%ld",
+			       context->shell_pid);
+		break;
+	case '!':
+		/* No background job yet: unset. */
+		if (context->last_job <= 0) {
+			*set = 0;
+			return;
+		}
+
+		/* The process ID of the last background job. */
+		(void)snprintf(number, sizeof(number), "%ld",
+			       context->last_job);
+		break;
+	default:
+		/* $-: the letters of the options. */
+		if (context->options != NULL)
+			*value = context->options;
+		return;
+	}
+
+	/* The number. */
+	*value = number;
+}
+
+/*
+ * Reads $0 or a positional parameter, whose number is the length digits at
+ * name; one past the last is unset.
+ */
+static void
+positional_parameter(
+	struct expander *x,
+	const char *name,
+	size_t length,
+	const char **value,
+	int *set)
+{
+	const struct sh_expand_context *context;
+	size_t digit;
+	long index;
+
+	/* The number (one too large for any list is past the last). */
+	context = x->context;
+	index = 0;
+	for (digit = 0; digit < length; digit++) {
+		index = index * 10 + (name[digit] - '0');
+		if (index > context->positional_count)
+			break;
+	}
+
+	/* $0 is the name of the shell or the script. */
+	if (index == 0) {
+		*value = "sh";
+		if (context->shell_name != NULL)
+			*value = context->shell_name;
+		return;
+	}
+
+	/* One past the last is unset. */
+	if (index > context->positional_count) {
+		*set = 0;
+		return;
+	}
+
+	/* The parameter. */
+	*value = context->positional[index - 1];
+}
+
+/* Reports an unset parameter under set -u; the shell stops.  Returns 0. */
+static int
+unset_error(
+	struct expander *x,
+	const char *name,
+	size_t length)
+{
+	/* The message, which outlives the call. */
+	(void)snprintf(expand_message, sizeof(expand_message),
+		       "%.*s: parameter not set", (int)length, name);
+	x->error = expand_message;
+	sh_expand_fatal = 1;
+
+	/* A fault. */
+	return 0;
+}
+
+/* Adds a value: quoted, or split at IFS later. */
+static void
+append_value(
+	struct xbuf *out,
+	const char *value,
+	int quoted)
+{
+	unsigned char attr;
+
+	/* Each character, with the attribute. */
+	attr = X_SPLIT;
+	if (quoted)
+		attr = X_QUOTED;
+	for (; *value != '\0'; value++)
+		append_char(out, *value, attr);
+}
+
+/*
+ * Adds the positional parameters.  "$@" makes one field of each; "$*" makes
+ * one field joined by the first character of IFS; unquoted, both make one
+ * field of each, to be split further.
+ */
+static void
+append_positionals(
+	struct expander *x,
+	char which,
+	int quoted,
+	struct xbuf *out)
+{
+	const char *ifs;
+	int index;
+
+	/* "$*": one field, joined. */
+	if (quoted && which == '*') {
+		ifs = ifs_value(x);
+		append_mark(out, X_KEEP);
+		for (index = 0; index < x->context->positional_count; index++) {
+			if (index > 0 && ifs[0] != '\0')
+				append_char(out, ifs[0], X_QUOTED);
+			append_value(out, x->context->positional[index], 1);
+		}
+
+		/* The parameters are written. */
+		return;
+	}
+
+	/* Otherwise a field each, with a boundary between them. */
+	for (index = 0; index < x->context->positional_count; index++) {
+		if (index > 0)
+			append_mark(out, X_BREAK);
+		if (quoted)
+			append_mark(out, X_KEEP);
+		append_value(out, x->context->positional[index], quoted);
+	}
+}
+
+/*
+ * Splits the buffer into fields (POSIX XCU 2.6.5).  IFS white space around
+ * a field is dropped and a run of it is one separator; any other IFS
+ * character is a separator of its own, with the white space beside it, so
+ * two of them in a row have an empty field between them.
+ */
+static void
+split_fields(
+	struct expander *x,
+	const struct xbuf *in,
+	struct sh_field_list *fields)
+{
+	struct xbuf field;
+	const char *ifs;
+	size_t index;
+	size_t scan;
+	int have;
+	int class;
+	int white;
+
+	/* Walks the expanded text, cutting fields at IFS characters that no quote protects. */
+	memset(&field, 0, sizeof(field));
+	ifs = ifs_value(x);
+	have = 0;
+	index = 0;
+	while (index < in->length) {
+		/* A boundary of "$@" ends a field. */
+		if ((in->attr[index] & X_BREAK) != 0) {
+			if (have)
+				field_add(fields, &field);
+			field.length = 0;
+			have = 0;
+			index++;
+			continue;
+		}
+
+		/* A mark that the field exists. */
+		if ((in->attr[index] & X_KEEP) != 0) {
+			have = 1;
+			index++;
+			continue;
+		}
+
+		/* A character of the field. */
+		class = split_class(ifs, in, index);
+		if (class == SPLIT_NONE) {
+			append_char(&field, in->data[index], in->attr[index]);
+			have = 1;
+			index++;
+			continue;
+		}
+
+		/*
+		 * A separator: white space, then at most one other IFS
+		 * character and the white space after it.
+		 */
+		scan = skip_split_white(ifs, in, index);
+		white = 1;
+		class = split_class(ifs, in, scan);
+		if (class == SPLIT_OTHER) {
+			white = 0;
+			scan = skip_split_white(ifs, in, scan + 1U);
+		}
+
+		/* It ends a field; one of white space alone needs a field. */
+		if (have || !white)
+			field_add(fields, &field);
+		field.length = 0;
+		have = 0;
+		index = scan;
+	}
+
+	/* The last field. */
+	if (have)
+		field_add(fields, &field);
+	buffer_free(&field);
+}
+
+/* Classifies an entry of the buffer for field splitting. */
+static int
+split_class(
+	const char *ifs,
+	const struct xbuf *in,
+	size_t index)
+{
+	const char *found;
+	char value;
+
+	/* Only characters of unquoted expansions are split. */
+	if (index >= in->length)
+		return SPLIT_NONE;
+	if ((in->attr[index] & X_SPLIT) == 0)
+		return SPLIT_NONE;
+
+	/* At the characters of IFS. */
+	value = in->data[index];
+	if (value == '\0' || ifs[0] == '\0')
+		return SPLIT_NONE;
+	found = strchr(ifs, value);
+	if (found == NULL)
+		return SPLIT_NONE;
+
+	/* White space, or another separator. */
+	if (value == ' ' || value == '\t' || value == '\n')
+		return SPLIT_WHITE;
+	return SPLIT_OTHER;
+}
+
+/* Returns the index after a run of IFS white space. */
+static size_t
+skip_split_white(
+	const char *ifs,
+	const struct xbuf *in,
+	size_t index)
+{
+	int class;
+
+	/* Each one. */
+	for (;;) {
+		class = split_class(ifs, in, index);
+		if (class != SPLIT_WHITE)
+			break;
+		index++;
+	}
+
+	/* Succeeded: the first other entry. */
+	return index;
+}
+
+/* Adds the characters of a buffer as a field. */
+static void
+field_add(
+	struct sh_field_list *fields,
+	const struct xbuf *in)
+{
+	unsigned char *quoted;
+	char *text;
+	size_t count;
+	size_t index;
+
+	/* Room for one more. */
+	count = fields->count + 1U;
+	fields->fields = sh_realloc(fields->fields,
+				    count * sizeof(*fields->fields));
+	fields->quoted = sh_realloc(fields->quoted,
+				    count * sizeof(*fields->quoted));
+
+	/* The characters, and which of them were quoted. */
+	text = sh_malloc(in->length + 1U);
+	quoted = sh_malloc(in->length + 1U);
+	for (index = 0; index < in->length; index++) {
+		text[index] = in->data[index];
+		quoted[index] = 0;
+		if ((in->attr[index] & X_QUOTED) != 0)
+			quoted[index] = 1;
+	}
+
+	/* The copies end with a null. */
+	text[in->length] = '\0';
+	quoted[in->length] = 0;
+
+	/* The field. */
+	fields->fields[fields->count] = text;
+	fields->quoted[fields->count] = quoted;
+	fields->count = count;
+}
+
+/*
+ * Makes one string of a buffer without splitting: the fields of "$@" are
+ * joined by a space.  quoted, when given, receives the marks; the caller
+ * frees both.
+ */
+static char *
+buffer_string(
+	const struct xbuf *in,
+	unsigned char **quoted)
+{
+	unsigned char *marks;
+	char *text;
+	size_t index;
+	size_t used;
+	int first;
+
+	/* Copies the text without its marks, a space for each "$@" boundary. */
+	text = sh_malloc(in->length + 1U);
+	marks = sh_malloc(in->length + 1U);
+	used = 0;
+	first = 1;
+	for (index = 0; index < in->length; index++) {
+		/* A mark that the field exists adds nothing. */
+		if ((in->attr[index] & X_KEEP) != 0)
+			continue;
+
+		/* A boundary of "$@" is a space (after the first field). */
+		if ((in->attr[index] & X_BREAK) != 0) {
+			if (!first) {
+				text[used] = ' ';
+				marks[used] = 1;
+				used++;
+			}
+
+			continue;
+		}
+
+		/* A character. */
+		first = 0;
+		text[used] = in->data[index];
+		marks[used] = 0;
+		if ((in->attr[index] & X_QUOTED) != 0)
+			marks[used] = 1;
+		used++;
+	}
+
+	/* The copies end with a null. */
+	text[used] = '\0';
+	marks[used] = 0;
+
+	/* Succeeded: the string, and the marks when they were asked for. */
+	if (quoted != NULL)
+		*quoted = marks;
+	else
+		free(marks);
+	return text;
+}
+
+/* Adds one character. */
+static void
+append_char(
+	struct xbuf *out,
+	char value,
+	unsigned char attr)
+{
+	size_t capacity;
+
+	/* Room for it. */
+	if (out->length == out->capacity) {
+		capacity = 64;
+		if (out->capacity != 0)
+			capacity = out->capacity * 2U;
+		out->data = sh_realloc(out->data, capacity);
+		out->attr = sh_realloc(out->attr, capacity);
+		out->capacity = capacity;
+	}
+
+	/* The character. */
+	out->data[out->length] = value;
+	out->attr[out->length] = attr;
+	out->length++;
+}
+
+/* Adds a mark that is not a character. */
+static void
+append_mark(
+	struct xbuf *out,
+	unsigned char mark)
+{
+	/* An entry with no character. */
+	append_char(out, '\0', mark);
+}
+
+/* Frees a buffer. */
 static void
 buffer_free(
-	struct expand_buffer *buffer)
+	struct xbuf *buffer)
 {
+	/* The characters and the attributes. */
 	free(buffer->data);
-	free(buffer->quoted);
+	free(buffer->attr);
 	memset(buffer, 0, sizeof(*buffer));
 }
 
-/* Supports the append number operation. */
+/*
+ * Reports whether $@ or $* joined is empty: no parameters, or empty ones
+ * joined by nothing (IFS empty) or only one.
+ */
 static int
-append_number(
-	struct expand_buffer *buffer,
-	long value,
-	int quoted)
+positional_null(
+	struct expander *x)
 {
-	int function_result;
-	char digits[32];
-	unsigned long magnitude;
-	size_t position;
-	int negative;
-
-	position = sizeof(digits);
-	negative = value < 0;
-
-	/* Handles the negative condition. */
-	if (negative)
-		magnitude = (unsigned long)(-(value + 1L)) + 1UL;
-	else
-		magnitude = (unsigned long)value;
-	do {
-		digits[--position] = (char)('0' + magnitude % 10UL);
-		magnitude /= 10UL;
-	} while (magnitude != 0);
-
-	/* Handles the negative condition. */
-	if (negative)
-		digits[--position] = '-';
-
-	/* Obtains the append bytes result. */
-	function_result = append_bytes(buffer, digits + position,
-			    sizeof(digits) - position, quoted);
-
-	/* Returns the computed result. */
-	return function_result;
-}
-
-/* Supports the append positionals operation. */
-static int
-append_positionals(
-	struct expand_buffer *buffer,
-	const struct sh_expand_context *context,
-	int quoted)
-{
-	const char *ifs = context->lookup == NULL
-			      ? getenv("IFS")
-			      : context->lookup(context->lookup_context, "IFS");
-	char separator = ifs == NULL ? ' ' : ifs[0];
+	const char *ifs;
 	int index;
 
-	/* Process each remaining element. */
-	for (index = 0; index < context->positional_count; index++) {
-		/* Handles a failed append bytes operation. */
-		if (index != 0 && separator != '\0' &&
-		    !append_bytes(buffer, &separator, 1U, quoted))
-
-			/* Reports successful completion. */
-			return 0;
-
-		/* Handles a failed append bytes operation. */
-		if (!append_bytes(buffer, context->positional[index],
-				  strlen(context->positional[index]), quoted))
-
-			/* Reports successful completion. */
+	/* Any non-empty parameter makes it non-null. */
+	for (index = 0; index < x->context->positional_count; index++) {
+		if (x->context->positional[index][0] != '\0')
 			return 0;
 	}
 
-	/* Reports operation failure. */
+	/* One parameter, or none, is null; more make at least separators. */
+	if (x->context->positional_count <= 1)
+		return 1;
+
+	/* Several empty ones are joined by the first character of IFS. */
+	ifs = ifs_value(x);
+	if (ifs[0] != '\0')
+		return 0;
+
+	/* Succeeded: null, with no separator between them. */
 	return 1;
 }
 
-/* Supports the name character operation. */
-static int
-name_character(
-	char value)
+/* Reads a variable: from the shell, or from the environment. */
+static const char *
+lookup(
+	struct expander *x,
+	const char *name)
 {
-	int function_result;
+	/* The shell's lookup. */
+	if (x->context->lookup != NULL)
+		return x->context->lookup(x->context->lookup_context, name);
 
-	/* Computes the function result. */
-	function_result = name_start(value) || (value >= '0' && value <= '9');
-
-	/* Returns the computed result. */
-	return function_result;
+	/* Succeeded: the environment. */
+	return getenv(name);
 }
 
-/* Supports the name start operation. */
+/* Reports the separators: IFS, or blank, tab and newline when it is unset. */
+static const char *
+ifs_value(
+	struct expander *x)
+{
+	const char *ifs;
+
+	/* IFS. */
+	ifs = lookup(x, "IFS");
+	if (ifs == NULL)
+		return " \t\n";
+
+	/* Succeeded. */
+	return ifs;
+}
+
+/* Reports whether a word is an assignment: an unquoted name and =. */
+static int
+assignment_prefix(
+	const struct sh_token *token)
+{
+	size_t index;
+	int start;
+	int name;
+
+	/* An unquoted name start. */
+	if (token->text == NULL || token->length == 0 || token->quote == NULL)
+		return 0;
+	start = name_start(token->text[0]);
+	if (!start || token->quote[0] != SH_QUOTE_UNQUOTED)
+		return 0;
+
+	/* Unquoted name characters up to an =. */
+	for (index = 1; index < token->length; index++) {
+		if (token->quote[index] != SH_QUOTE_UNQUOTED)
+			return 0;
+		if (token->text[index] == '=')
+			return 1;
+		name = name_char(token->text[index]);
+		if (!name)
+			return 0;
+	}
+
+	/* No equals sign. */
+	return 0;
+}
+
+/*
+ * Returns the length of the parameter name at text: a name, a run of
+ * digits, or one special character (@ * # ? - $ !).  0 when it is none.
+ */
+static size_t
+scan_name(
+	const char *text,
+	size_t length)
+{
+	size_t name_length;
+	int start;
+	int special;
+
+	/* Nothing is no parameter. */
+	if (length == 0)
+		return 0;
+
+	/* A name. */
+	start = name_start(text[0]);
+	if (start) {
+		for (name_length = 1; name_length < length; name_length++) {
+			start = name_char(text[name_length]);
+			if (!start)
+				break;
+		}
+
+		/* Succeeded: the length of the name. */
+		return name_length;
+	}
+
+	/* A run of digits. */
+	if (text[0] >= '0' && text[0] <= '9') {
+		name_length = 1;
+		while (name_length < length && text[name_length] >= '0' &&
+		       text[name_length] <= '9')
+			name_length++;
+		return name_length;
+	}
+
+	/* One special character. */
+	special = is_special(text[0]);
+	if (special || text[0] == '@' || text[0] == '*')
+		return 1;
+
+	/* None. */
+	return 0;
+}
+
+/* Reports whether a character is a special parameter # ? - $ !. */
+static int
+is_special(
+	char value)
+{
+	/* The five. */
+	switch (value) {
+	case '#':
+	case '?':
+	case '-':
+	case '$':
+	case '!':
+		return 1;
+	default:
+		break;
+	}
+
+	/* Anything else. */
+	return 0;
+}
+
+/* Reports whether a character may begin a name. */
 static int
 name_start(
 	char value)
 {
-	/* Returns the computed result. */
-	return (value >= 'A' && value <= 'Z') ||
-	       (value >= 'a' && value <= 'z') || value == '_';
-}
-
-/* Supports the lookup parameter operation. */
-static const char *
-lookup_parameter(
-	const struct sh_expand_context *context,
-	const char *name,
-	size_t length,
-	char **allocated_name)
-{
-	const char *value;
-
-	*allocated_name = malloc(length + 1U);
-	/* Handles the allocated name availability. */
-	if (*allocated_name == NULL)
-		return NULL;
-	memcpy(*allocated_name, name, length);
-	(*allocated_name)[length] = '\0';
-
-	/*
-	 * A parameter named by a number is one of the words the shell was
-	 * called with, and is not looked for among the variables: the two
-	 * are different things that happen to be written alike.
-	 */
-	if (length != 0 && (*allocated_name)[0] >= '0' &&
-	    (*allocated_name)[0] <= '9') {
-		long position = strtol(*allocated_name, NULL, 10);
-
-		/* Handles the name of the shell itself. */
-		if (position == 0)
-			return context->shell_name;
-
-		/* Returns the computed result. */
-		return position <= (long)context->positional_count ?
-		       context->positional[position - 1] : NULL;
-	}
-	value = context->lookup == NULL
-		    ? getenv(*allocated_name)
-		    : context->lookup(context->lookup_context, *allocated_name);
-
-	/* Returns the computed result. */
-	return value;
-}
-
-/* Supports the append buffer operation. */
-static int
-append_buffer(
-	struct expand_buffer *target,
-	const struct expand_buffer *source)
-{
-	/* Handles a failed buffer reserve operation. */
-	if (!buffer_reserve(target, source->length))
-		return 0;
-	memcpy(target->data + target->length, source->data, source->length);
-	memcpy(target->quoted + target->length, source->quoted, source->length);
-	target->length += source->length;
-	target->data[target->length] = '\0';
-
-	/* Handles the source condition. */
-	if (source->preserve_empty)
-		target->preserve_empty = 1;
-
-	/* Reports operation failure. */
-	return 1;
-}
-
-/* Supports the append parameter operation. */
-static int
-append_parameter(
-	struct expand_buffer *buffer,
-	const char *name,
-	size_t length,
-	int quoted,
-	const struct sh_expand_context *context)
-{
-	int function_result;
-	char *copy;
-	const char *value;
-
-	copy = malloc(length + 1U);
-
-	/* Handles the copy availability. */
-	if (copy == NULL)
-		return 0;
-	memcpy(copy, name, length);
-	copy[length] = '\0';
-	value = context->lookup == NULL
-		    ? getenv(copy)
-		    : context->lookup(context->lookup_context, copy);
-	free(copy);
-
-	/*
-	 * A parameter that was never set is an empty word, unless the shell
-	 * was asked to treat it as the mistake it usually is.
-	 */
-	if (value == NULL && context->unset_is_error)
-		return -1;
-
-	/* Computes the function result. */
-	function_result = value == NULL ||
-	       append_bytes(buffer, value, strlen(value), quoted);
-
-	/* Returns the computed result. */
-	return function_result;
-}
-
-/* Supports the field append operation. */
-static int
-field_append(
-	struct sh_field_list *list,
-	const char *data,
-	const unsigned char *quoted_data,
-	size_t length,
-	int quoted_default)
-{
-	char **larger;
-	unsigned char **larger_quoted;
-	char *field;
-	unsigned char *quoted;
-
-	field = malloc(length + 1U);
-	quoted = malloc(length == 0 ? 1U : length);
-
-	/* Handles the field availability. */
-	if (field == NULL || quoted == NULL) {
-		free(field);
-		free(quoted);
-
-		/* Reports successful completion. */
-		return 0;
-	}
-	memcpy(field, data, length);
-	field[length] = '\0';
-
-	/* Handles the quoted data availability. */
-	if (quoted_data != NULL)
-		memcpy(quoted, quoted_data, length);
-	else
-		memset(quoted, quoted_default != 0, length);
-	larger = realloc(list->fields, (list->count + 1U) * sizeof(*larger));
-
-	/* Handles the larger availability. */
-	if (larger == NULL) {
-		free(field);
-		free(quoted);
-
-		/* Reports successful completion. */
-		return 0;
-	}
-	list->fields = larger;
-	larger_quoted =
-	    realloc(list->quoted, (list->count + 1U) * sizeof(*larger_quoted));
-
-	/* Handles the larger quoted availability. */
-	if (larger_quoted == NULL) {
-		free(field);
-		free(quoted);
-
-		/* Reports successful completion. */
-		return 0;
-	}
-	list->quoted = larger_quoted;
-	list->fields[list->count++] = field;
-	list->quoted[list->count - 1U] = quoted;
-
-	/* Reports operation failure. */
-	return 1;
-}
-
-/*
- * Supports the trim parameter operation.
- *
- * Reports which part of the value is kept once the pattern has taken what
- * it matches from one end of it.  Nothing matching leaves the whole value,
- * which is what the standard asks for.
- */
-static int
-trim_parameter(
-	const char *source,
-	const char *pattern,
-	const unsigned char *pattern_quoted,
-	char operation,
-	int longest,
-	size_t *start,
-	size_t *end)
-{
-	char *candidate;
-	size_t length;
-	size_t step;
-	size_t taken;
-
-	length = strlen(source);
-	*start = 0;
-	*end = length;
-
-	/* A pattern of nothing matches nothing but nothing. */
-	if (pattern == NULL)
+	/* A letter or _. */
+	if (value >= 'a' && value <= 'z')
 		return 1;
-	candidate = malloc(length + 1U);
-
-	/* Handles a failed malloc operation. */
-	if (candidate == NULL)
-		return 0;
-
-	/* Process each remaining element. */
-	for (step = 0; step <= length; step++) {
-		/* The longest part is looked for from the far end inward. */
-		taken = longest ? length - step : step;
-
-		/* Handles the selected end of the value. */
-		if (operation == '#') {
-			memcpy(candidate, source, taken);
-			candidate[taken] = '\0';
-
-			/* Handles the matched condition. */
-			if (sh_glob_match(pattern, pattern_quoted,
-					  candidate)) {
-				*start = taken;
-				break;
-			}
-		} else if (sh_glob_match(pattern, pattern_quoted,
-					 source + length - taken)) {
-			*end = length - taken;
-			break;
-		}
-	}
-	free(candidate);
-
-	/* Reports operation failure. */
-	return 1;
+	if (value >= 'A' && value <= 'Z')
+		return 1;
+	if (value == '_')
+		return 1;
+	return 0;
 }
 
-/* Supports the is ifs operation. */
+/* Reports whether a character may continue a name. */
 static int
-is_ifs(
-	char value,
-	const char *ifs)
+name_char(
+	char value)
 {
-	int function_result;
+	int start;
 
-	/* Computes the function result. */
-	function_result = strchr(ifs, value) != NULL;
+	/* A digit, or what may begin one. */
+	if (value >= '0' && value <= '9')
+		return 1;
+	start = name_start(value);
+	return start;
+}
 
-	/* Returns the computed result. */
-	return function_result;
+/* Returns the message of a failed expansion. */
+static const char *
+failure(
+	const struct expander *x)
+{
+	/* The fault recorded, or a general one. */
+	if (x->error != NULL)
+		return x->error;
+	return "bad expansion";
 }

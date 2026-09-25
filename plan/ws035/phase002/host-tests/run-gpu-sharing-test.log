@@ -1,0 +1,4 @@
+GPU allocation fd: opaque metadata, image-protocol rejection, rollback, same-GPU identity and independent lifetime PASS
+GPU capability fd: real handle/table transfer, export/import copyout rollback, allocation failure, immutable metadata, GPU isolation, producer exit, capability-only withdrawal barrier and final release PASS
+GPU allocation fd: opaque metadata, image-protocol rejection, rollback, same-GPU identity and independent lifetime PASS
+GPU capability fd: real handle/table transfer, export/import copyout rollback, allocation failure, immutable metadata, GPU isolation, producer exit, capability-only withdrawal barrier and final release PASS

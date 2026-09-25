@@ -38,8 +38,8 @@
 
 struct atomic_record {
 	uint32_t counter;
-	uint32_t left;
-	uint32_t right;
+	uint16_t left;
+	uint16_t right;
 };
 
 static int test_tmpfs(void);
@@ -295,10 +295,35 @@ test_scm_rights(
 	int function_result;
 	int pair[2], data[2], fillers[32], fill_count, received;
 	char byte;
+	struct rlimit saved_limit;
+	struct rlimit small_limit;
+	int limit_error;
+	int verdict;
 
 	fill_count = 0;
 	received = -1;
 	byte = 0;
+
+	/*
+	 * The fillers must run into EMFILE, and the system's own limit
+	 * (KERN_OPEN_MAX) is far more than 32 descriptors, so lower the soft
+	 * limit to 16 for this test: the seven descriptors below plus a few
+	 * fillers reach it.
+	 */
+	limit_error = getrlimit(RLIMIT_NOFILE, &saved_limit);
+	if (limit_error != 0) {
+		verdict = failure("scm-getrlimit");
+		return verdict;
+	}
+
+	/* Keeps the hard limit; only the soft limit is lowered. */
+	small_limit = saved_limit;
+	small_limit.rlim_cur = 16;
+	limit_error = setrlimit(RLIMIT_NOFILE, &small_limit);
+	if (limit_error != 0) {
+		verdict = failure("scm-setrlimit");
+		return verdict;
+	}
 
 	/* Handles a failed socketpair operation. */
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0 || pipe(data) != 0 ||
@@ -321,6 +346,7 @@ test_scm_rights(
 	    errno != EMFILE || fill_count == 0) {
 		/* Obtains the failure result. */
 		function_result = failure("scm-emfile");
+		(void)setrlimit(RLIMIT_NOFILE, &saved_limit);
 
 		/* Returns the computed result. */
 		return function_result;
@@ -333,11 +359,19 @@ test_scm_rights(
 	    read(data[0], &byte, 1) != 1 || byte != 'r') {
 		/* Obtains the failure result. */
 		function_result = failure("scm-retry");
+		(void)setrlimit(RLIMIT_NOFILE, &saved_limit);
 
 		/* Returns the computed result. */
 		return function_result;
 	}
 	(void)close(received);
+
+	/* The rest of the test, and the tests after it, use the real limit. */
+	limit_error = setrlimit(RLIMIT_NOFILE, &saved_limit);
+	if (limit_error != 0) {
+		verdict = failure("scm-restore-rlimit");
+		return verdict;
+	}
 
 	/* Process each remaining element. */
 	while (fill_count != 0)
@@ -1476,8 +1510,9 @@ test_posix2024_apis(
 	    open("/tmp/r2r-posix-close", O_CREAT | O_TRUNC | O_RDWR, 0600);
 
 	/* Handles the reported system error. */
-	if (descriptor < 0 || posix_close(descriptor, 1) != EINVAL ||
-	    fcntl(descriptor, F_GETFD) != -1 || errno != EBADF) {
+	if (descriptor < 0 || posix_close(descriptor, 1) != -1 ||
+	    errno != EINVAL || fcntl(descriptor, F_GETFD) != -1 ||
+	    errno != EBADF) {
 		/* Obtains the failure result. */
 		function_result = failure("posix-close");
 

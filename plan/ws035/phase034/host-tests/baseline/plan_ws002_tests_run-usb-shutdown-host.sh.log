@@ -1,0 +1,90 @@
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `device_quarantine_selection':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:5083:(.text.device_quarantine_selection+0x49): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `free_configuration':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:5314:(.text.free_configuration+0x1e): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:5318:(.text.free_configuration+0x2c): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:5306:(.text.free_configuration+0x54): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:5305:(.text.free_configuration+0x6e): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:5309:(.text.free_configuration+0x78): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `usb_delay_ticks':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:5376:(.text.usb_delay_ticks+0xf): undefined reference to `kern_compiler_barrier'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `urb_put':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:6850:(.text.urb_put+0x6e): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:6859:(.text.urb_put+0x83): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:6858:(.text.urb_put+0xaa): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `drv_usb_init':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:330:(.text.drv_usb_init+0x66): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `drv_usb_hcd_register':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:518:(.text.drv_usb_hcd_register+0x126): undefined reference to `kern_malloc'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:534:(.text.drv_usb_hcd_register+0x19d): undefined reference to `kern_malloc'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `allocate_root_hub':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:4739:(.text.drv_usb_hcd_register+0x1cd): undefined reference to `kern_malloc'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `drv_usb_hcd_register':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:574:(.text.drv_usb_hcd_register+0x27d): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:528:(.text.drv_usb_hcd_register+0x287): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:539:(.text.drv_usb_hcd_register+0x296): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:561:(.text.drv_usb_hcd_register+0x2a6): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:562:(.text.drv_usb_hcd_register+0x2af): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:563:(.text.drv_usb_hcd_register+0x2b7): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/ccxSpIFP.o:/tmp/p034/baseline-head/src/drivers/usb/usb.c:551: more undefined references to `kern_free' follow
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `device_quiesce':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:4672:(.text.device_quiesce+0xd5): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `drv_usb_shutdown':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:403:(.text.drv_usb_shutdown+0x1f3): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:461:(.text.drv_usb_shutdown+0x267): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:436:(.text.drv_usb_shutdown+0x27d): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `drv_usb_urb_alloc':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:1872:(.text.drv_usb_urb_alloc+0xd4): undefined reference to `kern_malloc'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:1889:(.text.drv_usb_urb_alloc+0x144): undefined reference to `kern_malloc'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:1893:(.text.drv_usb_urb_alloc+0x1ab): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `device_release':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:5186:(.text.device_release+0xd1): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `free_configurations':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:5277:(.text.device_release+0x110): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `device_finalize':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:5255:(.text.device_release+0x168): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:5256:(.text.device_release+0x170): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:5260:(.text.device_release+0x19e): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `drv_usb_urb_reserve_transfer':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:2029:(.text.drv_usb_urb_reserve_transfer+0x182): undefined reference to `kern_malloc'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:2039:(.text.drv_usb_urb_reserve_transfer+0x1a1): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:2090:(.text.drv_usb_urb_reserve_transfer+0x274): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `drv_usb_urb_reserve_sync':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:1956:(.text.drv_usb_urb_reserve_sync+0x50): undefined reference to `kern_malloc'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:1964:(.text.drv_usb_urb_reserve_sync+0x83): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `drv_usb_urb_submit':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:2395:(.text.drv_usb_urb_submit+0x3eb): undefined reference to `kern_irq_disable'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:2408:(.text.drv_usb_urb_submit+0x406): undefined reference to `kern_irq_enable'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `drv_usb_hcd_root_hub_changed':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:771:(.text.drv_usb_hcd_root_hub_changed+0xd7): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:848:(.text.drv_usb_hcd_root_hub_changed+0x25a): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `destroy_device':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:4923:(.text.drv_usb_hcd_root_hub_changed+0x3d1): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `enumerate_port':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:5396:(.text.drv_usb_hcd_root_hub_changed+0x48d): undefined reference to `kern_malloc'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:5518:(.text.drv_usb_hcd_root_hub_changed+0x806): undefined reference to `kern_malloc'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `enumerate_configuration':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:5714:(.text.drv_usb_hcd_root_hub_changed+0x8f6): undefined reference to `kern_malloc'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:5727:(.text.drv_usb_hcd_root_hub_changed+0x968): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `configuration_iads_prepare':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:6120:(.text.drv_usb_hcd_root_hub_changed+0xae7): undefined reference to `kern_malloc'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `parse_configuration':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:5846:(.text.drv_usb_hcd_root_hub_changed+0xb6c): undefined reference to `kern_malloc'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:5900:(.text.drv_usb_hcd_root_hub_changed+0xbea): undefined reference to `kern_malloc'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:5906:(.text.drv_usb_hcd_root_hub_changed+0xbfb): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:5884:(.text.drv_usb_hcd_root_hub_changed+0xd2f): undefined reference to `kern_malloc'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `enumerate_port':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:5573:(.text.drv_usb_hcd_root_hub_changed+0x137d): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `interface_report_probe':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:6601:(.text.drv_usb_hcd_root_hub_changed+0x13bf): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:6631:(.text.drv_usb_hcd_root_hub_changed+0x1492): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:6613:(.text.drv_usb_hcd_root_hub_changed+0x14f2): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/p034/baseline-head/src/drivers/usb/usb.c:6624:(.text.drv_usb_hcd_root_hub_changed+0x152f): undefined reference to `kern_logf'
+/usr/bin/ld: /tmp/ccxSpIFP.o:/tmp/p034/baseline-head/src/drivers/usb/usb.c:6639: more undefined references to `kern_logf' follow
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `enumerate_configuration':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:5727:(.text.drv_usb_hcd_root_hub_changed+0x1639): undefined reference to `kern_free'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `drv_usb_driver_register':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:4238:(.text.drv_usb_driver_register+0x44): undefined reference to `kern_malloc'
+/usr/bin/ld: /tmp/ccxSpIFP.o: in function `drv_usb_driver_unregister':
+/tmp/p034/baseline-head/src/drivers/usb/usb.c:4266:(.text.drv_usb_driver_unregister+0x44): undefined reference to `kern_free'
+collect2: error: ld returned 1 exit status

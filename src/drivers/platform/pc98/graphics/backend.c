@@ -10,17 +10,17 @@
  */
 
 #include "drivers/platform/pc98/graphics/backend.h"
-#include "drivers/graphics/pc98.h"
+#include "drivers/platform/pc98/graphics/pc98.h"
 #include "drivers/platform/pc98/graphics/display-auto.h"
 #include "drivers/platform/pc98/graphics/display.h"
 #include "hal/i386/bsp-pc98/display.h"
+#include <kern/kcrt.h>
 
 #include <hal/hal.h>
 
-#include <string.h>
 #include "kern/klog.h"
 #include "text.h"
-#include "errno.h"
+#include <uapi/errno.h>
 #include "kern/pmem.h"
 
 #define CIRRUS_PADDR 0xf0000000U
@@ -88,7 +88,7 @@ drv_pc98_graphics_backend_enter(
 	/* Handles the mode availability. */
 	if (mode == NULL || native_display.enter == NULL)
 		return 0;
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	info.preferred_bits_per_pixel = mode->preferred_bits_per_pixel;
 	kern_logf("graphics: enter request: preferred %u bpp\n",
 		   mode->preferred_bits_per_pixel);
@@ -221,7 +221,7 @@ drv_pc98_graphics_backend_blit(
 	/* Handles the image availability. */
 	if (image == NULL || image->palette_size > 256U)
 		return 0;
-	memset(&native, 0, sizeof(native));
+	kern_memset(&native, 0, sizeof(native));
 	native.format = image->format == 1U ? PC98_DISPLAY_IMAGE_INDEX8
 					    : PC98_DISPLAY_IMAGE_RGB24;
 	native.width = image->width;

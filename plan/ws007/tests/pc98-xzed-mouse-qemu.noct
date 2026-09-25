@@ -126,7 +126,7 @@ func main(args) {
     run("test -x " + zbShellQuote(qemu) + " && test -s " +
         zbShellQuote(image), "qemu-pc98 and image preflight");
     run("cc -std=c11 -Wall -Wextra -Werror " + zbShellQuote(
-        repo + "/plan/ws003/tests/boot-parameter-image-tool.c") +
+        repo + "/plan/tools/boot-parameter-image-tool.c") +
         " -o " + zbShellQuote(decoder), "VRAM decoder build");
     run("cc -std=c11 -Wall -Wextra -Werror " + zbShellQuote(
         repo + "/plan/ws007/tests/xzed-cursor-ppm-test.c") +

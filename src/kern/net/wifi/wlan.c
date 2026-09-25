@@ -17,6 +17,7 @@
  */
 
 #include "kern/net/wlan.h"
+#include <kern/kcrt.h>
 
 #include "kern/clock.h"
 #include "kern/lock.h"
@@ -27,10 +28,9 @@
 
 #include <hal/hal.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <limits.h>
 #include <stdint.h>
-#include <string.h>
 
 #define WLAN_LOCAL_ASSOC_CAPABILITY 0x0011U
 #define WLAN_ASSOC_CAPABILITY_SHORT_SLOT_TIME 0x0400U
@@ -251,7 +251,7 @@ wlan_core_init(
 	}
 
 	/* Clears every slot and initializes its lock exactly once. */
-	memset(wlan_stations, 0, sizeof(wlan_stations));
+	kern_memset(wlan_stations, 0, sizeof(wlan_stations));
 	spin_init(&wlan_registry_lock, LOCK_RANK_SOCKET_REGISTRY,
 	    "wlan-registry");
 	for (index = 0U; index < NET_DEVICE_MAX; index++)
@@ -374,7 +374,7 @@ wlan_station_attach(
 	station_enabled = spin_lock_irqsave(&free_station->lock);
 
 	/* Describes the new station and starts its WPA2 engine. */
-	memset(&free_station->used, 0,
+	kern_memset(&free_station->used, 0,
 	    sizeof(*free_station) - offsetof(struct wlan_station, used));
 	free_station->device = device;
 	free_station->ops = ops;
@@ -548,7 +548,7 @@ wlan_station_report_scan_bss(
 
 	/* Normalizes the record before staging it. */
 	normalized = *bss;
-	memset(normalized.ssid + normalized.ssid_length, 0,
+	kern_memset(normalized.ssid + normalized.ssid_length, 0,
 	    WLAN_SSID_MAX - normalized.ssid_length);
 	normalized.age_ms = 0U;
 	error = station_enter(station);
@@ -864,7 +864,7 @@ wlan_station_report_frame(
 			enabled = spin_lock_irqsave(&station->lock);
 			if (report->generation == station->connection_generation &&
 			    station_beacon_watch_active_locked(station) &&
-			    memcmp(management_bss.bssid, station->selected.bssid,
+			    kern_memcmp(management_bss.bssid, station->selected.bssid,
 			    6U) == 0) {
 				station_beacon_watch_refresh_locked(station,
 				    station_now_locked(station));
@@ -937,9 +937,9 @@ wlan_station_report_frame(
 			 * ordinary unrelated management traffic.
 			 */
 			if (report->length != 26U ||
-			    memcmp(report->frame + 4U, station->device->hwaddr, 6U) != 0 ||
-			    memcmp(report->frame + 10U, station->selected.bssid, 6U) != 0 ||
-			    memcmp(report->frame + 16U, station->selected.bssid, 6U) != 0) {
+			    kern_memcmp(report->frame + 4U, station->device->hwaddr, 6U) != 0 ||
+			    kern_memcmp(report->frame + 10U, station->selected.bssid, 6U) != 0 ||
+			    kern_memcmp(report->frame + 16U, station->selected.bssid, 6U) != 0) {
 				result = ESTALE;
 				goto out;
 			}
@@ -960,7 +960,7 @@ wlan_station_report_frame(
 	}
 
 	/* Data frames are converted to Ethernet with their key metadata. */
-	memset(&security, 0, sizeof(security));
+	kern_memset(&security, 0, sizeof(security));
 	security.key_generation = report->key_generation;
 	security.packet_number = report->packet_number;
 	security.decrypted = report->decrypted;
@@ -1017,7 +1017,7 @@ wlan_station_report_frame(
 		goto out;
 	}
 
-	memcpy(packet->data, ethernet, ethernet_length);
+	kern_memcpy(packet->data, ethernet, ethernet_length);
 	net_device_receive(station->device, packet);
 	packet = NULL;
 	result = 0;
@@ -1135,7 +1135,7 @@ wlan_station_transmit(
 	}
 
 	station_control_enter(station);
-	memset(&request, 0, sizeof(request));
+	kern_memset(&request, 0, sizeof(request));
 
 	/* Takes the next packet number and cookie of an authorized link. */
 
@@ -1217,7 +1217,7 @@ wlan_station_ioctl(
 	/* A connect request carries a secret that must not outlive the call. */
 	if (request == SIOCSWLANCONNECT) {
 		connect = argument;
-		memcpy(saved, connect->passphrase, sizeof(saved));
+		kern_memcpy(saved, connect->passphrase, sizeof(saved));
 		secure_zero(connect->passphrase, sizeof(connect->passphrase));
 		error = header_validate(device,
 		    (const struct wlan_ioctl_header *)connect, sizeof(*connect));
@@ -1230,7 +1230,7 @@ wlan_station_ioctl(
 		/* Runs the connect request with the saved passphrase restored. */
 		error = station_find_enter(device, &station);
 		if (error == 0) {
-			memcpy(connect->passphrase, saved, sizeof(saved));
+			kern_memcpy(connect->passphrase, saved, sizeof(saved));
 			error = ioctl_connect(station, connect);
 			station_leave(station);
 		}
@@ -2059,14 +2059,14 @@ wlan_station_test_seed_authorized(
 	station->connect_retry_deadline = 0U;
 	station->transmit_packet_number = 0U;
 	station->transmit_cookie = 0U;
-	memset(&station->l2_rx, 0, sizeof(station->l2_rx));
+	kern_memset(&station->l2_rx, 0, sizeof(station->l2_rx));
 	station->l2_rx.pairwise_key_generation = key_generation;
 	station->l2_rx.group_key_generation[1] = group_generation;
 	secure_zero(station->credential, sizeof(station->credential));
 	station->credential_length = 0U;
 
 	/* Seeds an authorized WPA2 engine with fixed keys. */
-	memset(&station->wpa2, 0, sizeof(station->wpa2));
+	kern_memset(&station->wpa2, 0, sizeof(station->wpa2));
 	station->wpa2.ops = &station_wpa2_ops;
 	station->wpa2.callback_context = station;
 	station->wpa2.generation = generation;
@@ -2082,12 +2082,12 @@ wlan_station_test_seed_authorized(
 	station->wpa2.connected_lifetime = 1U;
 	station->wpa2.gtk_index = 1U;
 	station->wpa2.protocol_version = 2U;
-	memset(&station->wpa2.profile, 0, sizeof(station->wpa2.profile));
-	memcpy(station->wpa2.profile.station, station->device->hwaddr, 6U);
-	memcpy(station->wpa2.profile.bssid, bss->bssid, 6U);
-	memcpy(station->wpa2.profile.ssid, bss->ssid, bss->ssid_length);
+	kern_memset(&station->wpa2.profile, 0, sizeof(station->wpa2.profile));
+	kern_memcpy(station->wpa2.profile.station, station->device->hwaddr, 6U);
+	kern_memcpy(station->wpa2.profile.bssid, bss->bssid, 6U);
+	kern_memcpy(station->wpa2.profile.ssid, bss->ssid, bss->ssid_length);
 	station->wpa2.profile.ssid_length = bss->ssid_length;
-	memcpy(station->wpa2.profile.rates, test_rates, sizeof(test_rates));
+	kern_memcpy(station->wpa2.profile.rates, test_rates, sizeof(test_rates));
 	station->wpa2.profile.rate_count = sizeof(test_rates);
 	station->wpa2.profile.channel = bss->channel;
 	station->wpa2.profile.capability = WLAN_LOCAL_ASSOC_CAPABILITY;
@@ -2097,9 +2097,9 @@ wlan_station_test_seed_authorized(
 	    WLAN_CONNECT_TRANSITION_TICKS;
 	station->wpa2.profile.recovery_timeout_ticks =
 	    WLAN_CONNECT_TRANSITION_TICKS * 3U;
-	memset(station->wpa2.pmk, 0x11, sizeof(station->wpa2.pmk));
-	memset(station->wpa2.ptk, 0x22, sizeof(station->wpa2.ptk));
-	memset(station->wpa2.gtk, 0x33, sizeof(station->wpa2.gtk));
+	kern_memset(station->wpa2.pmk, 0x11, sizeof(station->wpa2.pmk));
+	kern_memset(station->wpa2.ptk, 0x22, sizeof(station->wpa2.ptk));
+	kern_memset(station->wpa2.gtk, 0x33, sizeof(station->wpa2.gtk));
 
 	/* Publishes the connected state and raises the carrier. */
 	station->authenticated = 1U;
@@ -2298,9 +2298,9 @@ wlan_station_test_complete_authorized(
 	station->wpa2.pairwise_rekey = 0U;
 	station->wpa2.state = WLAN_WPA2_STATE_AUTHORIZED;
 	station->wpa2.step_deadline_ticks = 0U;
-	memset(station->wpa2.ptk, 0x44, sizeof(station->wpa2.ptk));
-	memset(station->wpa2.gtk, 0x55, sizeof(station->wpa2.gtk));
-	memset(&station->l2_rx, 0, sizeof(station->l2_rx));
+	kern_memset(station->wpa2.ptk, 0x44, sizeof(station->wpa2.ptk));
+	kern_memset(station->wpa2.gtk, 0x55, sizeof(station->wpa2.gtk));
+	kern_memset(&station->l2_rx, 0, sizeof(station->l2_rx));
 	station->l2_rx.pairwise_key_generation = key_generation;
 	station->l2_rx.group_key_generation[1] = group_generation;
 	station->transmit_packet_number = 0U;
@@ -2337,7 +2337,7 @@ wlan_station_test_snapshot(
 	enabled = spin_lock_irqsave(&station->lock);
 
 	/* Copies the whole station state out under one lock hold. */
-	memset(snapshot, 0, sizeof(*snapshot));
+	kern_memset(snapshot, 0, sizeof(*snapshot));
 	snapshot->connection_generation = station->connection_generation;
 	snapshot->connection_deadline = station->connection_deadline;
 	snapshot->connection_step_deadline = station->connection_step_deadline;
@@ -2356,7 +2356,7 @@ wlan_station_test_snapshot(
 	    station->wpa2.pending_group_key_generation;
 	snapshot->pairwise_receive_packet_number =
 	    station->l2_rx.pairwise_packet_number;
-	memcpy(snapshot->group_receive_packet_number,
+	kern_memcpy(snapshot->group_receive_packet_number,
 	    station->l2_rx.group_packet_number,
 	    sizeof(snapshot->group_receive_packet_number));
 	snapshot->pending_group_receive_packet_number =
@@ -2743,7 +2743,7 @@ station_clear_connection_locked(
 	station->connection_step_deadline = 0U;
 	station->beacon_watch_deadline = 0U;
 	station->connect_start_pending = 0;
-	memset(&station->selected, 0, sizeof(station->selected));
+	kern_memset(&station->selected, 0, sizeof(station->selected));
 }
 
 /* Completes a connection retirement and settles the station state; the caller holds the station lock. */
@@ -2757,7 +2757,7 @@ station_finish_connection_retire_locked(
 
 	/* Drops every connection artifact. */
 	station_clear_connection_locked(station);
-	memset(&station->l2_rx, 0, sizeof(station->l2_rx));
+	kern_memset(&station->l2_rx, 0, sizeof(station->l2_rx));
 	station->transmit_packet_number = 0U;
 	station->transmit_cookie = 0U;
 	station->connect_driver_active = 0;
@@ -2978,7 +2978,7 @@ station_wpa_radio_start(
 	enabled = spin_lock_irqsave(&station->lock);
 
 	if (station->selected.channel != channel ||
-	    memcmp(station->selected.bssid, bssid, 6U) != 0) {
+	    kern_memcmp(station->selected.bssid, bssid, 6U) != 0) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return ESTALE;
 	}
@@ -3052,7 +3052,7 @@ station_wpa_transmit(
 		return EOPNOTSUPP;
 
 	/* Classifies the frame the way the radio expects it. */
-	memset(&request, 0, sizeof(request));
+	kern_memset(&request, 0, sizeof(request));
 	if (kind == WLAN_WPA2_TX_MANAGEMENT) {
 		request.frame_class = WLAN_RADIO_FRAME_MANAGEMENT;
 	} else if (kind == WLAN_WPA2_TX_EAPOL) {
@@ -3090,11 +3090,11 @@ station_wpa_transmit(
 		spin_unlock_irqrestore(&station->lock, enabled);
 
 		/* Wraps the EAPOL payload in an Ethernet header and a data MPDU. */
-		memcpy(ethernet, destination, 6U);
-		memcpy(ethernet + 6U, station->device->hwaddr, 6U);
+		kern_memcpy(ethernet, destination, 6U);
+		kern_memcpy(ethernet + 6U, station->device->hwaddr, 6U);
 		ethernet[12U] = 0x88U;
 		ethernet[13U] = 0x8eU;
-		memcpy(ethernet + WLAN_L2_ETHERNET_HEADER_SIZE, frame, length);
+		kern_memcpy(ethernet + WLAN_L2_ETHERNET_HEADER_SIZE, frame, length);
 		error = wlan_l2_build_data(station->device->hwaddr,
 		    station->selected.bssid, ethernet,
 		    WLAN_L2_ETHERNET_HEADER_SIZE + length, protected_frame, 0U,
@@ -3216,7 +3216,7 @@ station_wpa_key_install(
 		return EINVAL;
 
 	/* Builds the radio request. */
-	memset(&request, 0, sizeof(request));
+	kern_memset(&request, 0, sizeof(request));
 	request.generation = generation;
 	request.key_generation = key_generation;
 	request.deadline_ticks = station_wpa_deadline(station);
@@ -3227,10 +3227,10 @@ station_wpa_key_install(
 		request.kind = WLAN_RADIO_KEY_GROUP;
 	request.key_index = key_index;
 	if (kind == WLAN_WPA2_KEY_PAIRWISE)
-		memcpy(request.address, station->selected.bssid, 6U);
+		kern_memcpy(request.address, station->selected.bssid, 6U);
 	else
-		memcpy(request.address, broadcast, 6U);
-	memcpy(request.key, key, sizeof(request.key));
+		kern_memcpy(request.address, broadcast, 6U);
+	kern_memcpy(request.key, key, sizeof(request.key));
 
 	/* A key that is not staged takes effect on the receive path now. */
 	error = station->ops->key_install(station->radio_context, &request);
@@ -3842,7 +3842,7 @@ bssid_compare(
 	const uint8_t left[6],
 	const uint8_t right[6])
 {
-	return memcmp(left, right, 6U);
+	return kern_memcmp(left, right, 6U);
 }
 
 /* Tests whether a BSSID is a nonzero unicast address. */
@@ -3903,20 +3903,20 @@ probe_request_build(
 	}
 
 	/* Leaves capacity for a maximum-length SSID and all eight OFDM rates. */
-	memset(frame, 0, WLAN_PROBE_REQUEST_MAX_SIZE);
+	kern_memset(frame, 0, WLAN_PROBE_REQUEST_MAX_SIZE);
 	frame[0] = 0x40U;
-	memcpy(frame + 4U, broadcast, sizeof(broadcast));
-	memcpy(frame + 10U, station->device->hwaddr, 6U);
-	memcpy(frame + 16U, broadcast, sizeof(broadcast));
+	kern_memcpy(frame + 4U, broadcast, sizeof(broadcast));
+	kern_memcpy(frame + 10U, station->device->hwaddr, 6U);
+	kern_memcpy(frame + 16U, broadcast, sizeof(broadcast));
 	frame[24] = 0U;
 	frame[25] = (uint8_t)ssid_length;
-	memcpy(frame + 26U, station->selected.ssid, ssid_length);
+	kern_memcpy(frame + 26U, station->selected.ssid, ssid_length);
 
 	/* Appends the rate element after the complete SSID element. */
 	offset = 26U + ssid_length;
 	frame[offset++] = 1U;
 	frame[offset++] = (uint8_t)rate_count;
-	memcpy(frame + offset, rates, rate_count);
+	kern_memcpy(frame + offset, rates, rate_count);
 
 	/* Reports the encoded frame length without the unused buffer tail. */
 	return offset + rate_count;
@@ -4045,7 +4045,7 @@ station_select_bss_locked(
 	for (index = 0; index < station->snapshot_count; index++) {
 		candidate = &station->snapshot[index].bss;
 		if (candidate->ssid_length != ssid_length ||
-		    memcmp(candidate->ssid, ssid, ssid_length) != 0 ||
+		    kern_memcmp(candidate->ssid, ssid, ssid_length) != 0 ||
 		    !bss_security_supported(candidate))
 			continue;
 		if (!found || candidate->rssi_dbm > result->rssi_dbm ||
@@ -4070,7 +4070,7 @@ scan_request_output_locked(
 	request->generation = station->scan_generation;
 	request->state = station->scan_state;
 	request->terminal_error = station->scan_error;
-	memset(request->reserved, 0, sizeof(request->reserved));
+	kern_memset(request->reserved, 0, sizeof(request->reserved));
 }
 
 /* Starts or stops a scan for the scan ioctl. */
@@ -4155,7 +4155,7 @@ ioctl_scan(
 		station->scan_step_deadline = 0U;
 		station->staging_count = 0U;
 		station->staging_truncated = 0U;
-		memset(station->staging, 0, sizeof(station->staging));
+		kern_memset(station->staging, 0, sizeof(station->staging));
 		if (station->state == WLAN_STATE_IDLE ||
 		    station->state == WLAN_STATE_FAILED)
 			station->state = WLAN_STATE_SCANNING;
@@ -4239,7 +4239,7 @@ ioctl_scan_status(
 	request->terminal_error = station->scan_error;
 	request->result_count = station->snapshot_count;
 	request->truncated = station->snapshot_truncated;
-	memset(request->reserved, 0, sizeof(request->reserved));
+	kern_memset(request->reserved, 0, sizeof(request->reserved));
 
 	spin_unlock_irqrestore(&station->lock, enabled);
 
@@ -4253,18 +4253,18 @@ entry_age_ms(
 	uint64_t now,
 	uint64_t last_seen)
 {
-	uint64_t ticks;
+	uint64_t milliseconds;
 
 	/* Treats a clock that ran backwards as no elapsed time. */
 	if (now >= last_seen)
-		ticks = now - last_seen;
+		milliseconds = kern_ticks_to_ms(now - last_seen);
 	else
-		ticks = 0U;
+		milliseconds = 0U;
 
 	/* Saturates an age the result cannot hold. */
-	if (ticks > (uint64_t)UINT32_MAX / 10U)
+	if (milliseconds > UINT32_MAX)
 		return UINT32_MAX;
-	return (uint32_t)(ticks * 10U);
+	return (uint32_t)milliseconds;
 }
 
 /* Copies one snapshot entry for the BSS ioctl. */
@@ -4296,9 +4296,9 @@ ioctl_bss(
 	request->bss = station->snapshot[request->index].bss;
 	request->bss.age_ms = entry_age_ms(station_now_locked(station),
 	    station->snapshot[request->index].last_seen);
-	memset(request->bss.reserved, 0, sizeof(request->bss.reserved));
+	kern_memset(request->bss.reserved, 0, sizeof(request->bss.reserved));
 	request->reserved0 = 0U;
-	memset(request->reserved, 0, sizeof(request->reserved));
+	kern_memset(request->reserved, 0, sizeof(request->reserved));
 
 	spin_unlock_irqrestore(&station->lock, enabled);
 
@@ -4324,7 +4324,7 @@ ioctl_connect(
 	control_entered = 0;
 
 	/* Takes the passphrase out of the request before validating it. */
-	memcpy(credential, request->passphrase, sizeof(credential));
+	kern_memcpy(credential, request->passphrase, sizeof(credential));
 	secure_zero(request->passphrase, sizeof(request->passphrase));
 	if (request->ssid_length > WLAN_SSID_MAX ||
 	    request->passphrase_length < WLAN_PASSPHRASE_MIN ||
@@ -4384,7 +4384,7 @@ ioctl_connect(
 	/* Records the selection for the timer to start. */
 	station_clear_connection_locked(station);
 	station->selected = selected;
-	memcpy(station->credential, credential, sizeof(station->credential));
+	kern_memcpy(station->credential, credential, sizeof(station->credential));
 	station->credential_length = request->passphrase_length;
 	station->operation_generation = generation;
 	station->connection_generation = generation;
@@ -4398,13 +4398,13 @@ ioctl_connect(
 	station->connect_retry_deadline = 0U;
 	station->transmit_packet_number = 0U;
 	station->transmit_cookie = 0U;
-	memset(&station->l2_rx, 0, sizeof(station->l2_rx));
+	kern_memset(&station->l2_rx, 0, sizeof(station->l2_rx));
 	error = 0;
 output_locked:
 	request->generation = station->connection_generation;
 	request->state = station->state;
 	request->terminal_error = station->terminal_error;
-	memset(request->reserved, 0, sizeof(request->reserved));
+	kern_memset(request->reserved, 0, sizeof(request->reserved));
 
 	spin_unlock_irqrestore(&station->lock, enabled);
 
@@ -4628,7 +4628,7 @@ ioctl_disconnect(
 		request->generation = station->operation_generation;
 		request->state = station->state;
 		request->terminal_error = error;
-		memset(request->reserved, 0, sizeof(request->reserved));
+		kern_memset(request->reserved, 0, sizeof(request->reserved));
 		spin_unlock_irqrestore(&station->lock, enabled);
 		station_control_leave(station);
 		return error;
@@ -4654,7 +4654,7 @@ ioctl_disconnect(
 	request->generation = generation;
 	request->state = station->state;
 	request->terminal_error = error;
-	memset(request->reserved, 0, sizeof(request->reserved));
+	kern_memset(request->reserved, 0, sizeof(request->reserved));
 
 	spin_unlock_irqrestore(&station->lock, enabled);
 
@@ -4741,7 +4741,7 @@ ioctl_status(
 	else
 		request->terminal_error = 0;
 	request->rssi_dbm = station->selected.rssi_dbm;
-	memcpy(request->bssid, station->selected.bssid,
+	kern_memcpy(request->bssid, station->selected.bssid,
 	    sizeof(request->bssid));
 	request->channel = station->selected.channel;
 	request->reserved0 = 0U;
@@ -4756,7 +4756,7 @@ ioctl_status(
 		request->controlled_port = 0U;
 	}
 
-	memset(request->reserved, 0, sizeof(request->reserved));
+	kern_memset(request->reserved, 0, sizeof(request->reserved));
 
 	spin_unlock_irqrestore(&station->lock, enabled);
 
@@ -4825,7 +4825,7 @@ station_scan_publish_locked(
 	}
 
 	/* Publishes the staged results as the snapshot callers read. */
-	memcpy(station->snapshot, station->staging,
+	kern_memcpy(station->snapshot, station->staging,
 	    sizeof(station->snapshot));
 	station->snapshot_count = station->staging_count;
 	station->snapshot_truncated = station->staging_truncated;
@@ -4924,25 +4924,25 @@ station_connection_start(
 	deadline = station->connection_deadline;
 	selected = station->selected;
 	credential_length = station->credential_length;
-	memcpy(credential, station->credential, sizeof(credential));
+	kern_memcpy(credential, station->credential, sizeof(credential));
 	secure_zero(station->credential, sizeof(station->credential));
 	station->credential_length = 0U;
 
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Builds the engine profile for the selected band. */
-	memset(&profile, 0, sizeof(profile));
-	memcpy(profile.station, station->device->hwaddr,
+	kern_memset(&profile, 0, sizeof(profile));
+	kern_memcpy(profile.station, station->device->hwaddr,
 	    sizeof(profile.station));
-	memcpy(profile.bssid, selected.bssid, sizeof(profile.bssid));
-	memcpy(profile.ssid, selected.ssid, selected.ssid_length);
+	kern_memcpy(profile.bssid, selected.bssid, sizeof(profile.bssid));
+	kern_memcpy(profile.ssid, selected.ssid, selected.ssid_length);
 	profile.ssid_length = selected.ssid_length;
 	if (selected.channel <= 14U) {
-		memcpy(profile.rates, supported_rates_24,
+		kern_memcpy(profile.rates, supported_rates_24,
 		    sizeof(supported_rates_24));
 		profile.rate_count = sizeof(supported_rates_24);
 	} else {
-		memcpy(profile.rates, supported_rates_5,
+		kern_memcpy(profile.rates, supported_rates_5,
 		    sizeof(supported_rates_5));
 		profile.rate_count = sizeof(supported_rates_5);
 	}

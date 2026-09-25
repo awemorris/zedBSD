@@ -63,6 +63,7 @@ prekern_amd64_cmain(
 	/* Installs the BSP descriptor and interrupt tables. */
 	amd64_descriptor_init();
 	prekern_amd64_int_init();
+	amd64_syscall_init();
 
 	hal_puts("A64 IDT READY\n");
 

@@ -38,12 +38,12 @@
 #include "../../i915.h"
 #include "../../memory.h"
 #include "../../mmio.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 /* The frame counter register of pipe A, by its name in the register table. */
 #define I915_TEST_LCD_FRAME_REG		"PIPE_FRMCOUNT_G4X"
@@ -210,7 +210,7 @@ drv_i915_test_lcd_start(
 
 	/* A fresh run over the panel dependencies of the start. */
 	k = &display->lk;
-	memset(k, 0, sizeof(*k));
+	kern_memset(k, 0, sizeof(*k));
 	k->locks = display->lcdb_locks;
 	k->d = &display->rlcd;
 	drv_i915_lcd_kernel_bind_ops(k);
@@ -288,7 +288,7 @@ drv_i915_test_lcd_run_one(
 	}
 
 	/* The hardware must be as the initialisation left it, and the inputs complete. */
-	memset(env, 0, sizeof(*env));
+	kern_memset(env, 0, sizeof(*env));
 	preflight_error = drv_i915_lcd_kernel_preflight(k);
 	fill_error = 0;
 	if (preflight_error == 0)

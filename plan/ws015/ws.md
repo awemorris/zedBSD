@@ -1,42 +1,19 @@
+<!-- awesome-plan project=zedbsd record=ws015 -->
+
 # WS015: μITRON asymmetric real-time domain
 
-<!-- traceability:start -->
-
-## Goal traceability
-
-- Primary Milestone: **MG007 — 用途別の独自ディストリビューションを構成・配布できる**
-- Related Milestones: MG002
-- Objectives: O1, O2
-- 貢献する成果: 必要な組込み用途のリアルタイム機能に寄与する。Future扱いを維持。
-- 上位定義: [MasterのObjectives / Milestone Goals](https://github.com/awemorris/zedBSD/issues/1)
-
-既存Phaseは本WSを親として上位成果に接続する。Primaryは分類と責任の所在であり、
-各PhaseがRelatedすべてを満たすという意味ではない。成果・検証・限界は各Phaseの
-現行記録を根拠とする。今回の対応付けは状態変更・未定義作業の追加・実行許可ではない。
-
-<!-- traceability:end -->
-
-
-Last updated: 2026-09-09
-
-WSID: `ws015`
-
-Status: future — master Future List F-003へ移管（2026-09-09）
-
-現在の管理先: [master Future List](../master.md#future-listやりたいことリスト)。
-現行Priority・Queueから外す。以下の設計・旧保留IDは再開時の参考として保持する。
-
-Parent: [master plan](../master.md)
-
-Last verified Phase: none
-
-Resume point: Future List F-003をユーザーが着手対象として選び直した時点で設計を更新する。
-完了済みのPhaseは維持し、将来項目への移動によって取り消さない。
+<!-- awesome-plan-current:start -->
+Status: planning
+Primary Milestone: MG007
+Related Milestones: MG002
+Objectives: O1, O2
+Parent: [Master](../master.md)
+Queue: なし
+Resume point: Future Work F-003 に保留。昇格されるまで再開しない
+<!-- awesome-plan-current:end -->
 
 Shared reviews: [WS015 review index](tests/README.md)
-
-Architecture note:
-[μITRON-compatible real-time domain](../../docs/architecture/muitron-rt-domain.md)
+Architecture note: [μITRON-compatible real-time domain](../../docs/architecture/muitron-rt-domain.md)
 
 ## Goals
 

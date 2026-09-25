@@ -28,6 +28,9 @@
 
 #define BLOCK_SIZE 512U
 
+/* The largest extension header body this reader accepts. */
+#define EXTENSION_MAX 1048576U
+
 struct tar_header {
 	char name[100];
 	char mode[8];
@@ -62,6 +65,22 @@ struct substitution {
 	struct substitution *next;
 };
 
+/*
+ * What the extension headers before a member say about it.
+ *
+ * A pax extended header (type x) or a GNU long name header (type L or K)
+ * describes the ustar header that follows it.  The fields it overrides
+ * collect here and are taken by that next member, which empties it again.
+ */
+struct extension {
+	char *path;
+	char *linkpath;
+	int have_size;
+	uint64_t size;
+	int have_mtime;
+	uint64_t mtime;
+};
+
 static FILE *archive_file;
 static int exit_status;
 static int verbose;
@@ -90,6 +109,18 @@ static int pad_output(uint64_t length);
 static int remember_link(const struct stat *status, const char *name);
 static int finish_archive(void);
 static int read_archive(int extract, char **patterns, int pattern_count);
+static int extract_member(char type, const char *name, const char *linkname, uint64_t size, uint64_t mode, uint64_t mtime);
+static void extract_directory(const char *name, mode_t mode, time_t mtime);
+static void extract_link(const char *name, const char *linkname, int symbolic);
+static void extract_fifo(const char *name, mode_t mode);
+static int read_extension(char type, uint64_t size, struct extension *extension);
+static int parse_extension_records(const char *records, size_t length, struct extension *extension);
+static int apply_extension_record(const char *key, size_t key_length, const char *value, size_t value_length, struct extension *extension);
+static int key_is(const char *key, size_t key_length, const char *word);
+static int parse_decimal(const char *text, size_t length, uint64_t *value);
+static int take_extension(struct extension *extension, const struct tar_header *header, char **raw_name, char **linkname, uint64_t *size, uint64_t *mtime);
+static char *header_linkname(const struct tar_header *header);
+static void clear_extension(struct extension *extension);
 static int zero_block(const unsigned char *block);
 static int parse_octal(const char *field, size_t length, uint64_t *value);
 static char *archive_name(const struct tar_header *header);
@@ -998,41 +1029,56 @@ read_archive(
 	char **patterns,
 	int pattern_count)
 {
-	char linkname[sizeof(((struct tar_header *)0)->linkname) + 1];
+	struct extension extension;
 	struct tar_header *header;
 	uint64_t size, mode, mtime, stored_checksum;
 	char *raw_name;
 	char *name;
+	char *linkname;
 	int selected;
+	int skip;
+	int safe;
 	int result;
+	int error;
 	unsigned char block[BLOCK_SIZE];
 	int saw_zero;
 
-	/* Continue until the operation reaches a terminal state. */
+	/* No extension header has been read yet. */
+	memset(&extension, 0, sizeof(extension));
+
+	/* Reads one header block per member until the end of the archive. */
 	saw_zero = 0;
 	for (;;) {
 		header = (struct tar_header *)block;
 		result = read_all(archive_file, block, sizeof(block));
 
-		/* Checks the operation result. */
-		if (result == 0)
+		/* An archive that ends without the zero blocks is short. */
+		if (result == 0) {
+			clear_extension(&extension);
+
+			/* Reports the end of the archive, or that it was cut. */
 			return saw_zero ? 0 : -1;
+		}
 
-		/* Checks the operation result. */
-		if (result < 0)
+		/* Reports a read error. */
+		if (result < 0) {
+			clear_extension(&extension);
 			return -1;
+		}
 
-		/* Handles the zero block condition. */
+		/* Two zero blocks in a row end the archive. */
 		if (zero_block(block)) {
-			/* Handles the saw zero condition. */
-			if (saw_zero)
+			/* Reports the end of the archive after the second one. */
+			if (saw_zero) {
+				clear_extension(&extension);
 				return 0;
+			}
 			saw_zero = 1;
 			continue;
 		}
 		saw_zero = 0;
 
-		/* Handles a failed parse octal operation. */
+		/* Refuses a header whose checksum or numeric fields are bad. */
 		if (parse_octal(header->checksum, sizeof(header->checksum),
 				&stored_checksum) != 0 ||
 		    stored_checksum != header_checksum(header) ||
@@ -1043,132 +1089,569 @@ read_archive(
 		    parse_octal(header->mtime, sizeof(header->mtime), &mtime) !=
 			0) {
 			fprintf(stderr, "pax: corrupt archive header\n");
+			clear_extension(&extension);
 
-			/* Reports operation failure. */
+			/* Reports the corrupt header. */
 			return -1;
 		}
-		raw_name = archive_name(header);
-		name = raw_name == NULL ? NULL : transform_name(raw_name);
-		free(raw_name);
 
-		/* Handles the name availability. */
-		if (name == NULL)
+		/* An extension header describes the member that follows it. */
+		if (header->type == 'x' || header->type == 'g' ||
+		    header->type == 'L' || header->type == 'K') {
+			error = read_extension(header->type, size, &extension);
+			if (error != 0) {
+				clear_extension(&extension);
+				return -1;
+			}
+
+			/* The member it describes is the next header. */
+			continue;
+		}
+
+		/* Resolves the member's name, link target, size and time. */
+		error = take_extension(&extension, header, &raw_name, &linkname,
+				       &size, &mtime);
+		if (error != 0)
 			return -1;
+
+		/* Applies the -s substitutions to the name. */
+		name = transform_name(raw_name);
+		free(raw_name);
+		if (name == NULL) {
+			free(linkname);
+			return -1;
+		}
 		selected = matches_patterns(name, patterns, pattern_count);
 
-		/* Handles the extract condition. */
+		/* Decides whether the member is extracted or only passed over. */
+		skip = 0;
 		if (!extract) {
-			/* Handles the selected condition. */
+			/* Lists a selected member instead of extracting it. */
 			if (selected)
 				printf("%s\n", name);
-			free(name);
+			skip = 1;
+		} else if (!selected) {
+			skip = 1;
+		} else {
+			safe = safe_path(name);
 
-			/* Handles a failed skip payload operation. */
-			if (skip_payload(size) != 0)
+			/* Refuses a name that would escape the destination. */
+			if (!safe) {
+				fprintf(stderr,
+					"pax: refusing unsafe archive path: %s\n",
+					name);
+				exit_status = 1;
+				skip = 1;
+			}
+		}
+
+		/* Passes over the body of a member that is not extracted. */
+		if (skip) {
+			free(name);
+			free(linkname);
+			error = skip_payload(size);
+			if (error != 0)
 				return -1;
 			continue;
 		}
 
-		/* Handles the selected condition. */
-		if (!selected) {
-			free(name);
-
-			/* Handles a failed skip payload operation. */
-			if (skip_payload(size) != 0)
-				return -1;
-			continue;
-		}
-
-		/* Handles a failed safe path operation. */
-		if (!safe_path(name)) {
-			fprintf(stderr,
-				"pax: refusing unsafe archive path: %s\n",
-				name);
-			exit_status = 1;
-			free(name);
-
-			/* Handles a failed skip payload operation. */
-			if (skip_payload(size) != 0)
-				return -1;
-			continue;
-		}
-
-		/* Handles the verbose condition. */
+		/* Names the member on -v. */
 		if (verbose)
 			fprintf(stderr, "%s\n", name);
 
-		/* Handles the header condition. */
-		if (header->type == '0' || header->type == '\0') {
-			/* Handles a failed extract regular operation. */
-			if (extract_regular(name, size, (mode_t)mode,
-					    (time_t)mtime) != 0) {
-				warn_path("extract", name);
-				free(name);
-
-				/* Reports operation failure. */
-				return -1;
-			}
-
-			/* Handles a failed consume padding operation. */
-			if (consume_padding(size) != 0) {
-				free(name);
-
-				/* Reports operation failure. */
-				return -1;
-			}
-		} else {
-			memcpy(linkname, header->linkname,
-			       sizeof(header->linkname));
-			linkname[sizeof(header->linkname)] = '\0';
-
-			/* Handles a failed skip payload operation. */
-			if (skip_payload(size) != 0) {
-				free(name);
-
-				/* Reports operation failure. */
-				return -1;
-			}
-
-			/* Handles the header condition. */
-			if (header->type == '5') {
-				/* Handles the reported system error. */
-				if (make_parents(name) != 0 ||
-				    (mkdir(name, (mode_t)mode) != 0 &&
-				     errno != EEXIST))
-					warn_path("mkdir", name);
-				else
-					apply_metadata(name, (mode_t)mode,
-						       (time_t)mtime, 0);
-			} else if (header->type == '2') {
-				/* Handles a failed safe path operation. */
-				if (!safe_path(linkname) ||
-				    make_parents(name) != 0 ||
-				    remove_existing(name, 0) != 0 ||
-				    symlink(linkname, name) != 0)
-					warn_path("symlink", name);
-			} else if (header->type == '1') {
-				/* Handles a failed safe path operation. */
-				if (!safe_path(linkname) ||
-				    make_parents(name) != 0 ||
-				    remove_existing(name, 0) != 0 ||
-				    link(linkname, name) != 0)
-					warn_path("hard link", name);
-			} else if (header->type == '6') {
-				/* Handles a failed make parents operation. */
-				if (make_parents(name) != 0 ||
-				    remove_existing(name, 0) != 0 ||
-				    mkfifo(name, (mode_t)mode) != 0)
-					warn_path("fifo", name);
-			} else {
-				fprintf(stderr,
-					"pax: unsupported archive member type "
-					"%c: %s\n",
-					header->type, name);
-				exit_status = 1;
-			}
-		}
+		/* Creates the member in the file system. */
+		error = extract_member(header->type, name, linkname, size, mode,
+				       mtime);
 		free(name);
+		free(linkname);
+		if (error != 0)
+			return -1;
 	}
+}
+
+/* Creates one member of the archive from its resolved header fields. */
+static int
+extract_member(
+	char type,
+	const char *name,
+	const char *linkname,
+	uint64_t size,
+	uint64_t mode,
+	uint64_t mtime)
+{
+	int error;
+
+	/* A regular file is its body; nothing else has one worth reading. */
+	if (type == '0' || type == '\0') {
+		error = extract_regular(name, size, (mode_t)mode, (time_t)mtime);
+		if (error != 0) {
+			warn_path("extract", name);
+			return -1;
+		}
+
+		/* Skips the padding after the body. */
+		error = consume_padding(size);
+		if (error != 0)
+			return -1;
+
+		/* Succeeded: the file is written. */
+		return 0;
+	}
+
+	/* Passes over a body that a non-regular member should not have. */
+	error = skip_payload(size);
+	if (error != 0)
+		return -1;
+
+	/* Creates the directory, link or fifo the header describes. */
+	if (type == '5') {
+		extract_directory(name, (mode_t)mode, (time_t)mtime);
+	} else if (type == '2') {
+		extract_link(name, linkname, 1);
+	} else if (type == '1') {
+		extract_link(name, linkname, 0);
+	} else if (type == '6') {
+		extract_fifo(name, (mode_t)mode);
+	} else {
+		fprintf(stderr, "pax: unsupported archive member type %c: %s\n",
+			type, name);
+		exit_status = 1;
+	}
+
+	/* Succeeded: a member that could not be made was reported, not fatal. */
+	return 0;
+}
+
+/* Creates a directory member, reusing one that already exists. */
+static void
+extract_directory(
+	const char *name,
+	mode_t mode,
+	time_t mtime)
+{
+	int error;
+
+	/* The parents come first. */
+	error = make_parents(name);
+	if (error != 0) {
+		warn_path("mkdir", name);
+		return;
+	}
+
+	/* Makes the directory itself; one that already exists is kept. */
+	error = mkdir(name, mode);
+	if (error != 0 && errno != EEXIST) {
+		warn_path("mkdir", name);
+		return;
+	}
+
+	/* Gives the directory the archive's mode and time. */
+	apply_metadata(name, mode, mtime, 0);
+}
+
+/* Creates a symbolic or hard link member in place of whatever is there. */
+static void
+extract_link(
+	const char *name,
+	const char *linkname,
+	int symbolic)
+{
+	const char *operation;
+	int safe;
+	int error;
+
+	/* Names the kind of link in any warning. */
+	if (symbolic)
+		operation = "symlink";
+	else
+		operation = "hard link";
+
+	/* Refuses a target that would escape the destination. */
+	safe = safe_path(linkname);
+	if (!safe) {
+		warn_path(operation, name);
+		return;
+	}
+
+	/* Makes room for the link. */
+	error = make_parents(name);
+	if (error == 0)
+		error = remove_existing(name, 0);
+	if (error != 0) {
+		warn_path(operation, name);
+		return;
+	}
+
+	/* Makes the link of the requested kind. */
+	if (symbolic)
+		error = symlink(linkname, name);
+	else
+		error = link(linkname, name);
+	if (error != 0)
+		warn_path(operation, name);
+}
+
+/* Creates a fifo member in place of whatever is there. */
+static void
+extract_fifo(
+	const char *name,
+	mode_t mode)
+{
+	int error;
+
+	/* Makes room for the fifo, then makes it. */
+	error = make_parents(name);
+	if (error == 0)
+		error = remove_existing(name, 0);
+	if (error == 0)
+		error = mkfifo(name, mode);
+	if (error != 0)
+		warn_path("fifo", name);
+}
+
+/* Reads the body of an extension header into the pending extension. */
+static int
+read_extension(
+	char type,
+	uint64_t size,
+	struct extension *extension)
+{
+	char *body;
+	size_t length;
+	int result;
+	int error;
+
+	/* Refuses a body too large to be a set of records or a name. */
+	if (size > EXTENSION_MAX) {
+		fprintf(stderr, "pax: extended header too large\n");
+		return -1;
+	}
+
+	/* Reads the whole body with a terminator after it. */
+	length = (size_t)size;
+	body = malloc(length + 1);
+	if (body == NULL)
+		return -1;
+	result = read_all(archive_file, body, length);
+	if (result != 1) {
+		free(body);
+		return -1;
+	}
+
+	/* The terminator lets a name body be used as a string. */
+	body[length] = '\0';
+
+	/* Skips the padding after the body. */
+	error = consume_padding(size);
+	if (error != 0) {
+		free(body);
+		return -1;
+	}
+
+	/* A GNU long name (L) or long link name (K) is the body itself. */
+	if (type == 'L') {
+		free(extension->path);
+		extension->path = body;
+		return 0;
+	}
+
+	/* The later of two long link names wins, as for the path. */
+	if (type == 'K') {
+		free(extension->linkpath);
+		extension->linkpath = body;
+		return 0;
+	}
+
+	/*
+	 * A global header (g) sets defaults for the rest of the archive.  GNU
+	 * tar only puts a comment there, so its records are not applied.
+	 */
+	if (type == 'g') {
+		free(body);
+		return 0;
+	}
+
+	/* A pax extended header (x) is a list of records for the next member. */
+	error = parse_extension_records(body, length, extension);
+	free(body);
+	if (error != 0) {
+		fprintf(stderr, "pax: corrupt extended header\n");
+		return -1;
+	}
+
+	/* Succeeded: the records are pending for the next member. */
+	return 0;
+}
+
+/* Applies every "length key=value" record of a pax extended header. */
+static int
+parse_extension_records(
+	const char *records,
+	size_t length,
+	struct extension *extension)
+{
+	size_t offset;
+	size_t cursor;
+	size_t record_length;
+	size_t end;
+	const char *key;
+	size_t key_length;
+	const char *value;
+	size_t value_length;
+	int error;
+
+	/* Walks the records; each one starts with its own length in decimal. */
+	offset = 0;
+	while (offset < length) {
+		record_length = 0;
+		cursor = offset;
+		while (cursor < length && records[cursor] >= '0' &&
+		       records[cursor] <= '9') {
+			/* Refuses a length that would not fit. */
+			if (record_length > (SIZE_MAX - 9) / 10)
+				return -1;
+			record_length =
+				record_length * 10 + (size_t)(records[cursor] - '0');
+			cursor++;
+		}
+
+		/* The length is followed by one space. */
+		if (cursor == offset || cursor >= length || records[cursor] != ' ')
+			return -1;
+		cursor++;
+
+		/* The length counts the digits, the space and the newline. */
+		if (record_length < cursor - offset + 1 ||
+		    record_length > length - offset)
+			return -1;
+		end = offset + record_length - 1;
+		if (records[end] != '\n')
+			return -1;
+
+		/* The key runs up to the equals sign, the value to the newline. */
+		key = records + cursor;
+		while (cursor < end && records[cursor] != '=')
+			cursor++;
+		if (cursor == end)
+			return -1;
+		key_length = (size_t)(records + cursor - key);
+		value = records + cursor + 1;
+		value_length = end - (cursor + 1);
+
+		/* Keeps the record when it is one this reader understands. */
+		error = apply_extension_record(key, key_length, value,
+					       value_length, extension);
+		if (error != 0)
+			return -1;
+		offset += record_length;
+	}
+
+	/* Succeeded: every record was well formed. */
+	return 0;
+}
+
+/* Stores one extended header record that overrides a ustar field. */
+static int
+apply_extension_record(
+	const char *key,
+	size_t key_length,
+	const char *value,
+	size_t value_length,
+	struct extension *extension)
+{
+	char *copy;
+	int is_path;
+	int is_linkpath;
+	int is_size;
+	int is_mtime;
+	int error;
+
+	/* Recognizes the keywords this reader applies. */
+	is_path = key_is(key, key_length, "path");
+	is_linkpath = key_is(key, key_length, "linkpath");
+	is_size = key_is(key, key_length, "size");
+	is_mtime = key_is(key, key_length, "mtime");
+
+	/* path and linkpath replace the name and link name of the member. */
+	if (is_path || is_linkpath) {
+		copy = malloc(value_length + 1);
+		if (copy == NULL)
+			return -1;
+		memcpy(copy, value, value_length);
+		copy[value_length] = '\0';
+
+		/* The later of two records for the same field wins. */
+		if (is_path) {
+			free(extension->path);
+			extension->path = copy;
+		} else {
+			free(extension->linkpath);
+			extension->linkpath = copy;
+		}
+
+		/* Succeeded: the string waits for the next member. */
+		return 0;
+	}
+
+	/* size is the true length of a body the octal field cannot hold. */
+	if (is_size) {
+		error = parse_decimal(value, value_length, &extension->size);
+		if (error != 0)
+			return -1;
+		extension->have_size = 1;
+
+		/* Succeeded: the size waits for the next member. */
+		return 0;
+	}
+
+	/* mtime may carry a fraction; whole seconds are all this reader keeps. */
+	if (is_mtime) {
+		error = parse_decimal(value, value_length, &extension->mtime);
+		if (error != 0)
+			return -1;
+		extension->have_mtime = 1;
+
+		/* Succeeded: the time waits for the next member. */
+		return 0;
+	}
+
+	/* Succeeded: any other keyword (uid, gid, charset, ...) is ignored. */
+	return 0;
+}
+
+/* Reports whether a record keyword is the given word. */
+static int
+key_is(
+	const char *key,
+	size_t key_length,
+	const char *word)
+{
+	size_t word_length;
+	int difference;
+	int same;
+
+	/* The keyword must match the whole word, not just a prefix of it. */
+	word_length = strlen(word);
+	same = 0;
+	if (key_length == word_length) {
+		difference = memcmp(key, word, key_length);
+		if (difference == 0)
+			same = 1;
+	}
+
+	/* Reports the comparison. */
+	return same;
+}
+
+/* Parses the whole-number part of a decimal record value. */
+static int
+parse_decimal(
+	const char *text,
+	size_t length,
+	uint64_t *value)
+{
+	size_t index;
+	unsigned digit;
+	uint64_t result;
+
+	/* Reads digits up to the end or a fraction point. */
+	index = 0;
+	result = 0;
+	while (index < length && text[index] != '.') {
+		/* Refuses a sign or any other non-digit. */
+		if (text[index] < '0' || text[index] > '9')
+			return -1;
+		digit = (unsigned)(text[index] - '0');
+
+		/* Refuses a number that does not fit. */
+		if (result > (UINT64_MAX - digit) / 10)
+			return -1;
+		result = result * 10 + digit;
+		index++;
+	}
+
+	/* An empty value is not a number. */
+	if (index == 0)
+		return -1;
+	*value = result;
+
+	/* Succeeded: the fraction, if any, is dropped. */
+	return 0;
+}
+
+/* Takes the member's name, link target, size and time from the pending extension, else the ustar header. */
+static int
+take_extension(
+	struct extension *extension,
+	const struct tar_header *header,
+	char **raw_name,
+	char **linkname,
+	uint64_t *size,
+	uint64_t *mtime)
+{
+	/* The extension's path replaces the ustar prefix and name. */
+	if (extension->path != NULL) {
+		*raw_name = extension->path;
+		extension->path = NULL;
+	} else {
+		*raw_name = archive_name(header);
+	}
+
+	/* The extension's link path replaces the ustar link name. */
+	if (extension->linkpath != NULL) {
+		*linkname = extension->linkpath;
+		extension->linkpath = NULL;
+	} else {
+		*linkname = header_linkname(header);
+	}
+
+	/* The extension's size and time replace the octal fields. */
+	if (extension->have_size)
+		*size = extension->size;
+	if (extension->have_mtime)
+		*mtime = extension->mtime;
+	clear_extension(extension);
+
+	/* Reports an allocation failure with nothing left behind. */
+	if (*raw_name == NULL || *linkname == NULL) {
+		free(*raw_name);
+		free(*linkname);
+		return -1;
+	}
+
+	/* Succeeded: the caller owns both strings. */
+	return 0;
+}
+
+/* Copies the ustar link name field as a terminated string. */
+static char *
+header_linkname(
+	const struct tar_header *header)
+{
+	size_t length;
+	char *linkname;
+
+	/* The field is not terminated when the name fills it. */
+	length = strnlen(header->linkname, sizeof(header->linkname));
+	linkname = malloc(length + 1);
+	if (linkname == NULL)
+		return NULL;
+	memcpy(linkname, header->linkname, length);
+	linkname[length] = '\0';
+
+	/* Succeeded: the caller owns the copy. */
+	return linkname;
+}
+
+/* Frees what a pending extension holds and leaves it empty. */
+static void
+clear_extension(
+	struct extension *extension)
+{
+	/* Drops the strings and forgets the numeric overrides. */
+	free(extension->path);
+	free(extension->linkpath);
+	memset(extension, 0, sizeof(*extension));
 }
 
 /* Supports the zero block operation. */

@@ -1,0 +1,152 @@
+mkdir -p /tmp/p035/dirfsync-head
+cc -DKERN_USER_ABI_LP64 -I/tmp/p035/head2/include -I/tmp/p035/head2/include/uapi -I/tmp/p035/head2/src -I/tmp/p035/head2/libc/include -I/tmp/p035/head2 -std=c11 -O0 -Wall -Wextra -Werror -ffunction-sections -fdata-sections  -c /tmp/p035/head2/src/kern/file.c -o /tmp/p035/dirfsync-head/file.o
+/tmp/p035/head2/src/kern/file.c: In function 'file_openat_cred':
+/tmp/p035/head2/src/kern/file.c:249:24: error: 'O_ACCMODE' undeclared (first use in this function)
+  249 |         if ((flags & ~(O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_APPEND |
+      |                        ^~~~~~~~~
+/tmp/p035/head2/src/kern/file.c:249:24: note: each undeclared identifier is reported only once for each function it appears in
+/tmp/p035/head2/src/kern/file.c:249:36: error: 'O_CREAT' undeclared (first use in this function); did you mean 'CREAD'?
+  249 |         if ((flags & ~(O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_APPEND |
+      |                                    ^~~~~~~
+      |                                    CREAD
+/tmp/p035/head2/src/kern/file.c:249:46: error: 'O_EXCL' undeclared (first use in this function)
+  249 |         if ((flags & ~(O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_APPEND |
+      |                                              ^~~~~~
+/tmp/p035/head2/src/kern/file.c:249:55: error: 'O_TRUNC' undeclared (first use in this function)
+  249 |         if ((flags & ~(O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_APPEND |
+      |                                                       ^~~~~~~
+/tmp/p035/head2/src/kern/file.c:249:65: error: 'O_APPEND' undeclared (first use in this function)
+  249 |         if ((flags & ~(O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_APPEND |
+      |                                                                 ^~~~~~~~
+/tmp/p035/head2/src/kern/file.c:250:38: error: 'O_NONBLOCK' undeclared (first use in this function)
+  250 |                        O_DIRECTORY | O_NONBLOCK | O_NOCTTY | O_NOFOLLOW |
+      |                                      ^~~~~~~~~~
+/tmp/p035/head2/src/kern/file.c:250:51: error: 'O_NOCTTY' undeclared (first use in this function); did you mean 'ENOTTY'?
+  250 |                        O_DIRECTORY | O_NONBLOCK | O_NOCTTY | O_NOFOLLOW |
+      |                                                   ^~~~~~~~
+      |                                                   ENOTTY
+/tmp/p035/head2/src/kern/file.c:251:24: error: 'O_SYNC' undeclared (first use in this function)
+  251 |                        O_SYNC | O_DSYNC)) != 0 ||
+      |                        ^~~~~~
+/tmp/p035/head2/src/kern/file.c:251:33: error: 'O_DSYNC' undeclared (first use in this function)
+  251 |                        O_SYNC | O_DSYNC)) != 0 ||
+      |                                 ^~~~~~~
+/tmp/p035/head2/src/kern/file.c:252:35: error: 'O_RDWR' undeclared (first use in this function)
+  252 |             (flags & O_ACCMODE) > O_RDWR ||
+      |                                   ^~~~~~
+/tmp/p035/head2/src/kern/file.c:272:37: error: 'O_RDONLY' undeclared (first use in this function)
+  272 |             ((flags & O_ACCMODE) != O_RDONLY ||
+      |                                     ^~~~~~~~
+/tmp/p035/head2/src/kern/file.c:344:44: error: 'O_WRONLY' undeclared (first use in this function)
+  344 |                 if ((flags & O_ACCMODE) != O_WRONLY)
+      |                                            ^~~~~~~~
+/tmp/p035/head2/src/kern/file.c: In function 'file_open_resolved':
+/tmp/p035/head2/src/kern/file.c:446:23: error: 'O_CREAT' undeclared (first use in this function); did you mean 'CREAD'?
+  446 |         if ((flags & (O_CREAT | O_EXCL | O_TRUNC)) != 0 ||
+      |                       ^~~~~~~
+      |                       CREAD
+/tmp/p035/head2/src/kern/file.c:446:33: error: 'O_EXCL' undeclared (first use in this function)
+  446 |         if ((flags & (O_CREAT | O_EXCL | O_TRUNC)) != 0 ||
+      |                                 ^~~~~~
+/tmp/p035/head2/src/kern/file.c:446:42: error: 'O_TRUNC' undeclared (first use in this function)
+  446 |         if ((flags & (O_CREAT | O_EXCL | O_TRUNC)) != 0 ||
+      |                                          ^~~~~~~
+/tmp/p035/head2/src/kern/file.c:447:24: error: 'O_ACCMODE' undeclared (first use in this function)
+  447 |             (flags & ~(O_ACCMODE | O_APPEND | O_DIRECTORY | O_NONBLOCK |
+      |                        ^~~~~~~~~
+/tmp/p035/head2/src/kern/file.c:447:36: error: 'O_APPEND' undeclared (first use in this function)
+  447 |             (flags & ~(O_ACCMODE | O_APPEND | O_DIRECTORY | O_NONBLOCK |
+      |                                    ^~~~~~~~
+/tmp/p035/head2/src/kern/file.c:447:61: error: 'O_NONBLOCK' undeclared (first use in this function)
+  447 |             (flags & ~(O_ACCMODE | O_APPEND | O_DIRECTORY | O_NONBLOCK |
+      |                                                             ^~~~~~~~~~
+/tmp/p035/head2/src/kern/file.c:448:13: error: 'O_NOCTTY' undeclared (first use in this function); did you mean 'ENOTTY'?
+  448 |             O_NOCTTY | O_NOFOLLOW | O_SYNC | O_DSYNC)) != 0 ||
+      |             ^~~~~~~~
+      |             ENOTTY
+/tmp/p035/head2/src/kern/file.c:448:37: error: 'O_SYNC' undeclared (first use in this function)
+  448 |             O_NOCTTY | O_NOFOLLOW | O_SYNC | O_DSYNC)) != 0 ||
+      |                                     ^~~~~~
+/tmp/p035/head2/src/kern/file.c:448:46: error: 'O_DSYNC' undeclared (first use in this function)
+  448 |             O_NOCTTY | O_NOFOLLOW | O_SYNC | O_DSYNC)) != 0 ||
+      |                                              ^~~~~~~
+/tmp/p035/head2/src/kern/file.c:449:35: error: 'O_RDWR' undeclared (first use in this function)
+  449 |             (flags & O_ACCMODE) > O_RDWR)
+      |                                   ^~~~~~
+/tmp/p035/head2/src/kern/file.c:459:36: error: 'O_RDONLY' undeclared (first use in this function)
+  459 |             (flags & O_ACCMODE) != O_RDONLY)
+      |                                    ^~~~~~~~
+/tmp/p035/head2/src/kern/file.c: In function 'file_substitute_descriptor':
+/tmp/p035/head2/src/kern/file.c:538:39: error: 'O_ACCMODE' undeclared (first use in this function)
+  538 |         requested = (unsigned)flags & O_ACCMODE;
+      |                                       ^~~~~~~~~
+/tmp/p035/head2/src/kern/file.c:540:27: error: 'O_RDONLY' undeclared (first use in this function)
+  540 |         if ((requested == O_RDONLY || requested == O_RDWR) &&
+      |                           ^~~~~~~~
+/tmp/p035/head2/src/kern/file.c:540:52: error: 'O_RDWR' undeclared (first use in this function)
+  540 |         if ((requested == O_RDONLY || requested == O_RDWR) &&
+      |                                                    ^~~~~~
+/tmp/p035/head2/src/kern/file.c:545:27: error: 'O_WRONLY' undeclared (first use in this function)
+  545 |         if ((requested == O_WRONLY || requested == O_RDWR) &&
+      |                           ^~~~~~~~
+/tmp/p035/head2/src/kern/file.c: In function 'file_content_lease_begin':
+/tmp/p035/head2/src/kern/file.c:679:22: error: 'O_ACCMODE' undeclared (first use in this function)
+  679 |         if ((flags & O_ACCMODE) == O_WRONLY)
+      |                      ^~~~~~~~~
+/tmp/p035/head2/src/kern/file.c:679:36: error: 'O_WRONLY' undeclared (first use in this function)
+  679 |         if ((flags & O_ACCMODE) == O_WRONLY)
+      |                                    ^~~~~~~~
+/tmp/p035/head2/src/kern/file.c: In function 'file_exec_snapshot_begin':
+/tmp/p035/head2/src/kern/file.c:817:44: error: 'O_ACCMODE' undeclared (first use in this function)
+  817 |             (file_status_flags_get(file) & O_ACCMODE) == O_WRONLY ||
+      |                                            ^~~~~~~~~
+/tmp/p035/head2/src/kern/file.c:817:58: error: 'O_WRONLY' undeclared (first use in this function)
+  817 |             (file_status_flags_get(file) & O_ACCMODE) == O_WRONLY ||
+      |                                                          ^~~~~~~~
+/tmp/p035/head2/src/kern/file.c: In function 'file_io_begin_cred':
+/tmp/p035/head2/src/kern/file.c:1117:30: error: 'O_ACCMODE' undeclared (first use in this function)
+ 1117 |                 if ((flags & O_ACCMODE) == O_RDONLY)
+      |                              ^~~~~~~~~
+/tmp/p035/head2/src/kern/file.c:1117:44: error: 'O_RDONLY' undeclared (first use in this function)
+ 1117 |                 if ((flags & O_ACCMODE) == O_RDONLY)
+      |                                            ^~~~~~~~
+/tmp/p035/head2/src/kern/file.c:1120:44: error: 'O_WRONLY' undeclared (first use in this function)
+ 1120 |                 if ((flags & O_ACCMODE) == O_WRONLY)
+      |                                            ^~~~~~~~
+/tmp/p035/head2/src/kern/file.c:1173:23: error: 'O_SYNC' undeclared (first use in this function)
+ 1173 |             (flags & (O_SYNC | O_DSYNC)) != 0 && file->f_inode != NULL &&
+      |                       ^~~~~~
+/tmp/p035/head2/src/kern/file.c:1173:32: error: 'O_DSYNC' undeclared (first use in this function)
+ 1173 |             (flags & (O_SYNC | O_DSYNC)) != 0 && file->f_inode != NULL &&
+      |                                ^~~~~~~
+/tmp/p035/head2/src/kern/file.c:1176:48: error: 'O_APPEND' undeclared (first use in this function)
+ 1176 |         if (!positional && writing && (flags & O_APPEND) != 0)
+      |                                                ^~~~~~~~
+/tmp/p035/head2/src/kern/file.c: In function 'file_io_transfer':
+/tmp/p035/head2/src/kern/file.c:1421:52: error: 'O_APPEND' undeclared (first use in this function)
+ 1421 |                     (file_status_flags_get(file) & O_APPEND) != 0)
+      |                                                    ^~~~~~~~
+/tmp/p035/head2/src/kern/file.c: In function 'file_format_reserve_locked':
+/tmp/p035/head2/src/kern/file.c:2884:22: error: 'O_ACCMODE' undeclared (first use in this function)
+ 2884 |         if ((flags & O_ACCMODE) != O_RDWR)
+      |                      ^~~~~~~~~
+/tmp/p035/head2/src/kern/file.c:2884:36: error: 'O_RDWR' undeclared (first use in this function)
+ 2884 |         if ((flags & O_ACCMODE) != O_RDWR)
+      |                                    ^~~~~~
+/tmp/p035/head2/src/kern/file.c:2889:23: error: 'O_APPEND' undeclared (first use in this function)
+ 2889 |             (flags & (O_APPEND | O_TRUNC)) != 0)
+      |                       ^~~~~~~~
+/tmp/p035/head2/src/kern/file.c:2889:34: error: 'O_TRUNC' undeclared (first use in this function)
+ 2889 |             (flags & (O_APPEND | O_TRUNC)) != 0)
+      |                                  ^~~~~~~
+/tmp/p035/head2/src/kern/file.c: In function 'file_io_writeback_prepare':
+/tmp/p035/head2/src/kern/file.c:3004:23: error: 'O_APPEND' undeclared (first use in this function)
+ 3004 |             (flags & (O_APPEND | O_SYNC | O_DSYNC)) != 0 ||
+      |                       ^~~~~~~~
+/tmp/p035/head2/src/kern/file.c:3004:34: error: 'O_SYNC' undeclared (first use in this function)
+ 3004 |             (flags & (O_APPEND | O_SYNC | O_DSYNC)) != 0 ||
+      |                                  ^~~~~~
+/tmp/p035/head2/src/kern/file.c:3004:43: error: 'O_DSYNC' undeclared (first use in this function)
+ 3004 |             (flags & (O_APPEND | O_SYNC | O_DSYNC)) != 0 ||
+      |                                           ^~~~~~~
+make: *** [plan/ws001/tests/directory-fsync-host-test.mk:49: /tmp/p035/dirfsync-head/file.o] Error 1

@@ -32,6 +32,10 @@
 	andq $-16, %rsp
 	call int_handler
 	movq %rbx, %rsp
+
+	/* A system call entered by SYSCALL returns by SYSRET while marked so. */
+	cmpq $INT_SYSCALL_FAST, 120(%rsp)
+	je amd64_sysret
 	popq %r15
 	popq %r14
 	popq %r13
@@ -54,6 +58,53 @@
 .global amd64_common_interrupt
 amd64_common_interrupt:
 	SAVE_AND_CALL
+
+/*
+ * Returns from a system call by SYSRET: rcx and r11 take the return
+ * address and flags (the SYSCALL ABI gives up their values), and the user
+ * stack is loaded with interrupts off, which SYSRET turns back on from r11.
+ */
+amd64_sysret:
+	popq %r15
+	popq %r14
+	popq %r13
+	popq %r12
+	addq $8, %rsp
+	popq %r10
+	popq %r9
+	popq %r8
+	popq %rbp
+	popq %rdi
+	popq %rsi
+	popq %rdx
+	addq $8, %rsp
+	popq %rbx
+	popq %rax
+	movq 16(%rsp), %rcx
+	movq 32(%rsp), %r11
+	cli
+	movq 40(%rsp), %rsp
+	sysretq
+
+/*
+ * Enters a system call made by SYSCALL: rcx holds the return address, r11
+ * the flags, and the stack is still the user's.  Switches to this CPU's
+ * kernel stack and builds the frame an interrupt gate would have, marked
+ * INT_SYSCALL_FAST, then joins the common path.  Interrupts stay off (the
+ * FMASK clears IF) until the frame is on the kernel stack.
+ */
+.global amd64_syscall_fast_entry
+amd64_syscall_fast_entry:
+	movq %rsp, %gs:AMD64_PERCPU_SYSCALL_SCRATCH
+	movq %gs:AMD64_PERCPU_SYSCALL_RSP, %rsp
+	pushq $(SEG_USER_DATA | 3)
+	pushq %gs:AMD64_PERCPU_SYSCALL_SCRATCH
+	pushq %r11
+	pushq $(SEG_USER_CODE | 3)
+	pushq %rcx
+	pushq $0
+	pushq $INT_SYSCALL_FAST
+	jmp amd64_common_interrupt
 
 .macro ISR_NOERR n
 .Lfault\n:

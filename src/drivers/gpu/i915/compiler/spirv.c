@@ -63,11 +63,11 @@
  */
 
 #include "compiler.h"
+#include <kern/kcrt.h>
 
 #include <kern/kmem.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 /* SPIR-V module header (Khronos SPIR-V spec, section 2.3). */
 #define SPIRV_MAGIC 0x07230203U
@@ -755,7 +755,7 @@ drv_i915_shader_parse(
 	/* The caller receives nothing unless the whole module parses. */
 	*out = NULL;
 	if (diagnostic != NULL)
-		memset(diagnostic, 0, sizeof(*diagnostic));
+		kern_memset(diagnostic, 0, sizeof(*diagnostic));
 
 	/* A module must have a header and a matching magic. */
 	if (word_count < SPIRV_HEADER_WORDS)
@@ -776,7 +776,7 @@ drv_i915_shader_parse(
 	ir->stage = stage;
 
 	/* Prepares the decode state and its id table. */
-	memset(&parser, 0, sizeof(parser));
+	kern_memset(&parser, 0, sizeof(parser));
 	parser.code = words;
 	parser.words = (uint32_t)word_count;
 	parser.bound = words[3];
@@ -4275,7 +4275,7 @@ i915_spirv_lower_logical(
 	/* Resolves the operands; the second of a not is the first again. */
 	left_count = i915_spirv_operand(parser, word[3], left);
 	right_count = left_count;
-	memcpy(right, left, sizeof(right));
+	kern_memcpy(right, left, sizeof(right));
 	if (opcode != OP_LOGICAL_NOT)
 		right_count = i915_spirv_operand(parser, word[4], right);
 
@@ -4647,7 +4647,7 @@ i915_spirv_loop_open(
 
 	/* Describes the loop. */
 	loop = &parser->loops[parser->loop_depth];
-	memset(loop, 0, sizeof(*loop));
+	kern_memset(loop, 0, sizeof(*loop));
 	loop->header = header;
 	loop->merge = merge;
 	loop->continue_target = continue_target;
@@ -4909,7 +4909,7 @@ i915_spirv_carry(
 		if (grown == NULL)
 			return ENOMEM;
 		if (parser->carried != NULL) {
-			memcpy(grown, parser->carried, parser->carried_count * sizeof(*grown));
+			kern_memcpy(grown, parser->carried, parser->carried_count * sizeof(*grown));
 			kern_free(parser->carried);
 		}
 		parser->carried = grown;
@@ -5881,7 +5881,7 @@ i915_spirv_emit(
 		}
 
 		/* Moves the instructions so far into it and publishes it. */
-		memcpy(grown, parser->ir->instructions, parser->ir->instruction_count * sizeof(*grown));
+		kern_memcpy(grown, parser->ir->instructions, parser->ir->instruction_count * sizeof(*grown));
 		kern_free(parser->ir->instructions);
 		parser->ir->instructions = grown;
 		parser->capacity = capacity;
@@ -5892,7 +5892,7 @@ i915_spirv_emit(
 	parser->ir->instruction_count++;
 
 	/* Fills the instruction; the caller sets the operation-specific fields. */
-	memset(inst, 0, sizeof(*inst));
+	kern_memset(inst, 0, sizeof(*inst));
 	inst->op = op;
 	inst->dst = dst;
 	inst->src[0] = source0;

@@ -1,0 +1,10 @@
+baseline libc global symbols: 480
+amd64: linked objects 185, libc objects 0
+amd64: libc symbols in vmunix (besides memcpy, memset): 0 []
+amd64: llvm-nm -u kcrt.o: (empty); defines memcpy True memset True
+amd64: probe link without memcpy/memset: status 1, undefined ['memcpy', 'memset']
+i915-amd64: linked objects 247, libc objects 0
+i915-amd64: libc symbols in vmunix (besides memcpy, memset): 0 []
+i915-amd64: llvm-nm -u kcrt.o: (empty); defines memcpy True memset True
+i915-amd64: probe link without memcpy/memset: status 1, undefined ['memcpy', 'memset']
+kcrt-link-check: PASS

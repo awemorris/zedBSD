@@ -8,234 +8,205 @@
  */
 
 /*
- * Implements the zedBSD head userland command.
+ * Copies the first lines of files (POSIX XCU head).
+ *
+ *	head [-n number | -c number] [file...]
+ *	head -number [file...]		(obsolescent)
+ *
+ * Ten lines by default; -c counts bytes instead (as GNU and the BSDs do).  With several files each is headed by
+ * "==> name <==", with a blank line between them.
  */
 
-#include "userland/base/common/command.h"
-
 #include <errno.h>
-#include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
-static int copy_head(int input, unsigned long long limit, int bytes);
-static int copy_head_lines(int input, unsigned long long limit);
+static int read_options(int argc, char **argv, unsigned long long *count, int *bytes);
+static int parse_count(const char *text, unsigned long long *count);
+static void copy_lines(FILE *stream, unsigned long long count, int bytes);
+static void usage(void);
 
 /*
- * Runs the head command.
+ * Runs head.
  */
 int
 main(
 	int argc,
 	char **argv)
 {
-	int function_result;
-	int descriptor;
-	unsigned long long limit;
-	int bytes, index, failed, files;
+	unsigned long long count;
+	FILE *stream;
+	const char *name;
+	int first;
+	int index;
+	int status;
+	int headers;
+	int printed;
+	int compare;
+	int bytes;
 
-	limit = 10;
-	bytes = 0;
-	index = 1;
-	failed = 0;
+	/* The options. */
+	first = read_options(argc, argv, &count, &bytes);
 
-	/* Handles the selected command-line operation. */
-	if (index < argc &&
-	    (!strcmp(argv[index], "-n") || !strcmp(argv[index], "-c"))) {
-		bytes = argv[index][1] == 'c';
-
-		/* Validates the command-line arguments. */
-		if (++index == argc ||
-		    command_parse_ull(argv[index++], &limit) != 0)
-			goto usage;
+	/* Standard input when there is no file. */
+	if (first >= argc) {
+		copy_lines(stdin, count, bytes);
+		return 0;
 	}
 
-	/* Handles the selected command-line operation. */
-	if (index < argc && !strcmp(argv[index], "--"))
-		index++;
-	files = argc - index;
-
-	/* Handles the files condition. */
-	if (files == 0) {
-		/* Computes the function result. */
-		function_result = (bytes ? copy_head(STDIN_FILENO, limit, 1)
-			      : copy_head_lines(STDIN_FILENO, limit)) != 0;
-
-		/* Returns the computed result. */
-		return function_result;
-	}
-
-	/* Process each remaining command-line operand. */
-	for (; index < argc; index++) {
-		descriptor = !strcmp(argv[index], "-")
-		     ? STDIN_FILENO
-		     : open(argv[index], O_RDONLY);
-
-		/* Checks the file descriptor. */
-		if (descriptor < 0) {
-			command_error("head", argv[index]);
-			failed = 1;
+	/* Nothing written yet; a header for each file when there are several. */
+	status = 0;
+	printed = 0;
+	headers = 0;
+	if (argc - first > 1)
+		headers = 1;
+	for (index = first; index < argc; index++) {
+		/* - is standard input. */
+		name = argv[index];
+		stream = stdin;
+		compare = strcmp(name, "-");
+		if (compare != 0)
+			stream = fopen(name, "r");
+		else
+			name = "standard input";
+		if (stream == NULL) {
+			fprintf(stderr, "head: cannot open '%s' for reading: "
+				"%s\n", name, strerror(errno));
+			status = 1;
 			continue;
 		}
 
-		/* Handles the files condition. */
-		if (files > 1) {
-			printf("%s==> %s <==\n",
-			       index == argc - files ? "" : "\n", argv[index]);
+		/* The header, after a blank line when one came before. */
+		if (headers) {
+			if (printed)
+				putchar('\n');
+			printf("==> %s <==\n", name);
+			printed = 1;
 		}
 
-		/* Handles a failed copy head operation. */
-		if ((bytes ? copy_head(descriptor, limit, 1)
-			   : copy_head_lines(descriptor, limit)) != 0) {
-			command_error("head", argv[index]);
-			failed = 1;
+		/* The lines of the file. */
+		copy_lines(stream, count, bytes);
+		if (stream != stdin)
+			fclose(stream);
+	}
+
+	/* Succeeded. */
+	return status;
+}
+
+/*
+ * Reads the options: -n number, or the obsolescent -number first.
+ * Returns the index of the first operand.
+ */
+static int
+read_options(
+	int argc,
+	char **argv,
+	unsigned long long *count,
+	int *bytes)
+{
+	const char *word;
+	const char *argument;
+	int index;
+	int valid;
+
+	/* Ten lines unless -n or -c says otherwise. */
+	*count = 10;
+	*bytes = 0;
+	for (index = 1; index < argc; index++) {
+		/* An operand, or - alone, ends the options; so does --. */
+		word = argv[index];
+		if (word[0] != '-' || word[1] == '\0')
+			break;
+		if (word[1] == '-' && word[2] == '\0')
+			return index + 1;
+
+		/* -number (obsolescent). */
+		if (word[1] >= '0' && word[1] <= '9') {
+			valid = parse_count(word + 1, count);
+			if (!valid)
+				usage();
+			continue;
 		}
 
-		/* Handles a failed close operation. */
-		if (descriptor != STDIN_FILENO && close(descriptor) != 0) {
-			command_error("head", argv[index]);
-			failed = 1;
+		/* -n number or -c number, or with the number in the word. */
+		if (word[1] != 'n' && word[1] != 'c')
+			usage();
+		*bytes = 0;
+		if (word[1] == 'c')
+			*bytes = 1;
+		argument = word + 2;
+		if (*argument == '\0') {
+			if (index + 1 >= argc)
+				usage();
+			index++;
+			argument = argv[index];
+		}
+
+		/* The count. */
+		valid = parse_count(argument, count);
+		if (!valid) {
+			fprintf(stderr, "head: invalid number of lines: '%s'\n",
+				argument);
+			exit(1);
 		}
 	}
 
-	/* Returns the computed result. */
-	return failed;
-usage:
-	fprintf(stderr, "usage: head [-n number | -c bytes] [file...]\n");
+	/* Succeeded: the first operand. */
+	return index;
+}
 
-	/* Reports operation failure. */
+/* Reads a count of lines: decimal digits only.  Returns 0 when invalid. */
+static int
+parse_count(
+	const char *text,
+	unsigned long long *count)
+{
+	const char *cursor;
+
+	/* At least one digit, and nothing else. */
+	if (*text == '\0')
+		return 0;
+	*count = 0;
+	for (cursor = text; *cursor != '\0'; cursor++) {
+		if (*cursor < '0' || *cursor > '9')
+			return 0;
+		*count = *count * 10U + (unsigned long long)(*cursor - '0');
+	}
+
+	/* Succeeded. */
 	return 1;
 }
 
-/* Supports the copy head operation. */
-static int
-copy_head(
-	int input,
-	unsigned long long limit,
+/* Copies the first count lines (or bytes) of a stream. */
+static void
+copy_lines(
+	FILE *stream,
+	unsigned long long count,
 	int bytes)
 {
-	size_t end;
-	size_t used;
-	size_t wanted;
-	ssize_t got;
-	unsigned char buffer[4096];
-	unsigned long long count;
+	unsigned long long done;
+	int value;
 
-	/* Process each remaining element. */
-	count = 0;
-	while (count < limit) {
-		wanted = sizeof(buffer);
-
-		/* Handles the bytes condition. */
-		if (bytes && limit - count < wanted)
-			wanted = (size_t)(limit - count);
-		got = read(input, buffer, wanted);
-
-		/* Handles the got condition. */
-		if (got == 0)
-			return 0;
-
-		/* Handles the got condition. */
-		if (got < 0) {
-			/* Handles the reported system error. */
-			if (errno == EINTR)
-				continue;
-
-			/* Reports operation failure. */
-			return -1;
-		}
-
-		/* Handles the bytes condition. */
-		if (bytes) {
-			/* Handles a failed command write all operation. */
-			if (command_write_all(STDOUT_FILENO, buffer,
-					      (size_t)got) != 0)
-
-				/* Reports operation failure. */
-				return -1;
-			count += (unsigned long long)got;
-		} else {
-			/* Process each remaining element. */
-			used = 0;
-			while (used < (size_t)got && count < limit) {
-				/* Process each remaining element. */
-				end = used;
-				while (end < (size_t)got && buffer[end] != '\n')
-					end++;
-
-				/* Checks the current endpoint. */
-				if (end < (size_t)got) {
-					end++;
-					count++;
-				}
-
-				/* Handles a failed command write all operation. */
-				if (command_write_all(STDOUT_FILENO,
-						      buffer + used,
-						      end - used) != 0)
-
-					/* Reports operation failure. */
-					return -1;
-				used = end;
-			}
-
-			/*
- * Bytes after the requested newline were read
-			 * speculatively.  This is harmless for named files but
-			 * violates pipeline semantics, so use one-byte reads
-			 * for line mode below instead. */
-			if (used < (size_t)got) {
-				errno = ESPIPE;
-
-				/* Reports operation failure. */
-				return -1;
-			}
-		}
+	/* Byte by byte, counting the newlines or every byte. */
+	done = 0;
+	while (done < count) {
+		value = getc(stream);
+		if (value == EOF)
+			break;
+		putchar(value);
+		if (bytes || value == '\n')
+			done++;
 	}
-
-	/* Reports successful completion. */
-	return 0;
 }
 
-/* Supports the copy head lines operation. */
-static int
-copy_head_lines(
-	int input,
-	unsigned long long limit)
+/* Reports the usage and ends head. */
+static void
+usage(
+	void)
 {
-	ssize_t got;
-	unsigned char byte;
-	unsigned long long lines;
-
-	/* Continue while the operation condition remains true. */
-	lines = 0;
-	while (lines < limit) {
-		got = read(input, &byte, 1);
-
-		/* Handles the got condition. */
-		if (got == 0)
-			return 0;
-
-		/* Handles the got condition. */
-		if (got < 0) {
-			/* Handles the reported system error. */
-			if (errno == EINTR)
-				continue;
-
-			/* Reports operation failure. */
-			return -1;
-		}
-
-		/* Handles a failed command write all operation. */
-		if (command_write_all(STDOUT_FILENO, &byte, 1) != 0)
-			return -1;
-
-		/* Classifies the current byte. */
-		if (byte == '\n')
-			lines++;
-	}
-
-	/* Reports successful completion. */
-	return 0;
+	/* The form. */
+	fprintf(stderr, "usage: head [-n number | -c number] [file...]\n");
+	exit(1);
 }

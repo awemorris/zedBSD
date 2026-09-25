@@ -1,7 +1,7 @@
 #!/bin/sh
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
-python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025/tests/prepare-driver-fragments.py" --source src/drivers/wifi/intel-ax211/intel-ax211.c
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/tools/driver-fragments/prepare.py" --source src/drivers/wifi/intel-ax211/intel-ax211.c
 
 test_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$test_dir/../../.." && pwd)
@@ -10,10 +10,13 @@ trap 'rm -rf "$build_dir"' EXIT HUP INT TERM
 
 cc=${CC:-cc}
 warnings="-std=c11 -Wall -Wextra -Werror"
-source="$repo_root/plan/ws025/temp/p031-driver-fragments/src/drivers/intel-ax211.c"
+source="$repo_root/build/driver-fragments/src/drivers/intel-ax211.c"
 fixture="$test_dir/intel-ax211-core-test.c"
-abi_includes="-I$repo_root/libc/include -I$repo_root/include/uapi"
+abi_includes="-I$repo_root/include/libc -DKERN_UAPI_NATIVE -I$repo_root/include/uapi"
 abi_includes="$abi_includes -I$repo_root/include -I$repo_root/src"
+# The core calls the kernel C runtime (kern_memcpy etc.); on the host its
+# header maps those names to the host C library.
+host_includes="-I$repo_root/include"
 firmware_cache="$repo_root/build/sources/firmware/intelax211"
 firmware_cache="$firmware_cache/dc85ccedc9c973682fbcf4d628ca61174bcc3120"
 firmware="$firmware_cache/iwlwifi-so-a0-gf-a0-89.ucode"
@@ -21,7 +24,7 @@ pnvm="$firmware_cache/iwlwifi-so-a0-gf-a0.pnvm"
 
 # Ordinary amd64 host gate.
 # shellcheck disable=SC2086
-$cc $warnings -O2 "$source" "$fixture" \
+$cc $warnings -O2 $host_includes "$source" "$fixture" \
 	-o "$build_dir/intel-ax211-core"
 "$build_dir/intel-ax211-core"
 if [ -r "$firmware" ] && [ -r "$pnvm" ]; then
@@ -31,7 +34,7 @@ fi
 # Memory-safety and undefined-behaviour gate.
 # shellcheck disable=SC2086
 $cc $warnings -O1 -g -fno-omit-frame-pointer \
-	-fsanitize=address,undefined "$source" "$fixture" \
+	-fsanitize=address,undefined $host_includes "$source" "$fixture" \
 	-o "$build_dir/intel-ax211-core-sanitize"
 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
 	UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
@@ -44,7 +47,7 @@ fi
 
 # Static lifetime/bounds analysis gate.
 # shellcheck disable=SC2086
-$cc $warnings -O0 -fanalyzer "$source" "$fixture" \
+$cc $warnings -O0 -fanalyzer $host_includes "$source" "$fixture" \
 	-o "$build_dir/intel-ax211-core-analyzer"
 "$build_dir/intel-ax211-core-analyzer"
 

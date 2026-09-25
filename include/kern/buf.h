@@ -63,6 +63,13 @@ struct buf {
 	struct buf *b_device_dirty_previous;
 	struct buf *b_device_dirty_next;
 	unsigned b_dirty_linked;
+	/* The scheduler tick at which the buffer last became dirty. */
+	uint64_t b_dirty_tick;
+	/*
+	 * Held by a filesystem journal: the buffer stays dirty and is not
+	 * written back until the journal has committed it and unpins it.
+	 */
+	unsigned b_journal_pin;
 };
 
 /* Zero-initialize before first use. Pins common cache lines, never their busy state. */
@@ -81,6 +88,45 @@ void buf_view_release(struct buf_view *);
 
 int
 buf_init(void);
+
+/*
+ * Starts the thread that writes out aged dirty buffers of write-cached
+ * disks; later calls do nothing.
+ */
+int
+buf_flusher_start(void);
+
+/*
+ * Writes into the cache and pins the lines: they stay dirty and nothing
+ * writes them to the disk until buf_unpin() releases them.  For a journal,
+ * whose blocks may reach their home only after the journal holds them.
+ */
+int
+buf_write_pinned(
+	struct disk *disk,
+	uint64_t block,
+	uint32_t count,
+	const void *data);
+
+/*
+ * Releases the pins buf_write_pinned() set on a range; its lines are then
+ * ordinary dirty lines.
+ */
+int
+buf_unpin(
+	struct disk *disk,
+	uint64_t block,
+	uint32_t count);
+
+/*
+ * Registers a function the flusher calls on every interval, before it
+ * writes aged buffers; NULL removes it.  One slot per argument.
+ */
+int
+buf_flusher_hook(
+	void (*hook)(void *),
+	void *argument,
+	int add);
 int
 buf_read(
 	struct disk *disk,

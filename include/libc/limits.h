@@ -1,0 +1,55 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_LIMITS_H
+#define LIBC_LIMITS_H
+
+#include <uapi/limits.h>
+
+#define TEXTDOMAIN_MAX 255
+#define CHARCLASS_NAME_MAX 14
+#define RE_DUP_MAX 255
+#define MB_LEN_MAX 4
+#define BC_BASE_MAX 99
+#define BC_DIM_MAX 2048
+#define BC_SCALE_MAX 99
+#define BC_STRING_MAX 1000
+#define COLL_WEIGHTS_MAX 2
+#define EXPR_NEST_MAX 32
+#define LINE_MAX 2048
+
+#define CHAR_BIT 8
+#define SCHAR_MIN (-128)
+#define SCHAR_MAX 127
+#define UCHAR_MAX 255U
+#ifdef __CHAR_UNSIGNED__
+#define CHAR_MIN 0
+#define CHAR_MAX UCHAR_MAX
+#else
+#define CHAR_MIN SCHAR_MIN
+#define CHAR_MAX SCHAR_MAX
+#endif
+#define SHRT_MIN (-32767 - 1)
+#define SHRT_MAX 32767
+#define USHRT_MAX 65535U
+#define INT_MIN (-2147483647 - 1)
+#define INT_MAX 2147483647
+#define UINT_MAX 4294967295U
+#if __SIZEOF_LONG__ == 8
+#define LONG_MIN (-9223372036854775807L - 1L)
+#define LONG_MAX 9223372036854775807L
+#define ULONG_MAX 18446744073709551615UL
+#else
+#define LONG_MIN (-2147483647L - 1L)
+#define LONG_MAX 2147483647L
+#define ULONG_MAX 4294967295UL
+#endif
+#define LLONG_MIN (-9223372036854775807LL - 1)
+#define LLONG_MAX 9223372036854775807LL
+#define ULLONG_MAX 18446744073709551615ULL
+
+#endif

@@ -18,6 +18,7 @@
 #include "transport.h"
 #include "codec.h"
 #include "dispatch.h"
+#include <kern/kcrt.h>
 
 #include "../memory.h"
 #include "../session.h"
@@ -25,10 +26,9 @@
 #include <kern/kmem.h>
 #include <kern/pmem.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 /* The transport opcodes. */
 #define I915_OPCODE_ENUMERATE_INSTANCE_VERSION	137U
@@ -85,13 +85,13 @@ drv_i915_render_transport_reply(
 		return NULL;
 
 	/* Reads the opcode; any other first command selects nothing. */
-	memcpy(&opcode, stream, 4U);
+	kern_memcpy(&opcode, stream, 4U);
 	if (opcode != I915_OPCODE_SET_REPLY_STREAM)
 		return NULL;
 
 	/* Reads the resource id and the offset the replies start at. */
-	memcpy(&resource_id, stream + I915_REPLY_SELECTOR_RESOURCE, 4U);
-	memcpy(&offset, stream + I915_REPLY_SELECTOR_OFFSET, 8U);
+	kern_memcpy(&resource_id, stream + I915_REPLY_SELECTOR_RESOURCE, 4U);
+	kern_memcpy(&offset, stream + I915_REPLY_SELECTOR_OFFSET, 8U);
 
 	/* Finds the named blob among the session's resources. */
 	object = i915_transport_resource(session, resource_id);
@@ -342,7 +342,7 @@ i915_transport_execute_streams(
 
 	/* Copies the stream out of the blob, so its bytes cannot change underneath the decoder. */
 	source = kern_pmem_to_kernel(object->run.paddr);
-	memcpy(copy, source + offset, (size_t)bytes);
+	kern_memcpy(copy, source + offset, (size_t)bytes);
 
 	/* Decodes the copy's commands in place of this one, into the same reply. */
 	nested.base = copy;

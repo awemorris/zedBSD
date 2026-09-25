@@ -1,0 +1,15 @@
+# TOTAL: 761
+# PASS:  609
+# SKIP:  152
+# XFAIL: 0
+# FAIL:  0
+# XPASS: 0
+# ERROR: 0
+FAIL: test-update-copyright.sh
+# TOTAL: 603
+# PASS:  496
+# SKIP:  106
+# XFAIL: 0
+# FAIL:  1
+# XPASS: 0
+# ERROR: 0

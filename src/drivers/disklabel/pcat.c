@@ -9,11 +9,11 @@
  * PC/AT per-disk GPT versus legacy MBR selection.
  */
 
-#include <drivers/disklabel.h>
+#include <drivers/disklabel/disklabel.h>
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <kern/kmem.h>
-#include <string.h>
 
 #define MBR_TABLE 0x1beU
 #define MBR_ENTRY_SIZE 16U
@@ -98,7 +98,7 @@ pcat_auto_scan(
 	}
 
 	/* Handles the memcmp condition. */
-	if (memcmp(block, "EFI PART", 8U) == 0)
+	if (kern_memcmp(block, "EFI PART", 8U) == 0)
 		has_gpt_signature = 1;
 
 	/* Handles the gpt signature condition. */
@@ -110,7 +110,7 @@ pcat_auto_scan(
 		}
 
 		/* Handles the memcmp condition. */
-		if (memcmp(block, "EFI PART", 8U) == 0)
+		if (kern_memcmp(block, "EFI PART", 8U) == 0)
 			has_gpt_signature = 1;
 	}
 

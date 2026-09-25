@@ -20,8 +20,8 @@
 
 #include "../../memory.h"
 
-#include <drivers/dma.h>
-#include <drivers/pci.h>
+#include <drivers/generic/dma.h>
+#include <drivers/pci/pci.h>
 #include <hal/hal.h>
 #include <kern/clock.h>
 #include <kern/device-io.h>

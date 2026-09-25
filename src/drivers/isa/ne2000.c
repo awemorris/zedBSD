@@ -9,13 +9,13 @@
  * ISA NE2000 Ethernet driver
  */
 
-#include "drivers/pcat-ne2000.h"
-#include "drivers/dp8390.h"
+#include "drivers/isa/pcat-ne2000.h"
+#include "drivers/ethernet/dp8390.h"
 #include "kern/net/net-device.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdint.h>
-#include <string.h>
 #include "kern/irq.h"
 
 #define NE2000_IO_BASE 0x0300U
@@ -73,7 +73,7 @@ drv_pcat_ne2000_init(void)
 	int irq_registered = 0;
 
 	/* Describes the card at its fixed address and page layout. */
-	memset(&ne2000, 0, sizeof(ne2000));
+	kern_memset(&ne2000, 0, sizeof(ne2000));
 	ne2000.io_base = NE2000_IO_BASE;
 	ne2000.irq = NE2000_IRQ;
 	ne2000.dp.bus = &ne2000_bus_ops;
@@ -92,11 +92,11 @@ drv_pcat_ne2000_init(void)
 	/* Handles the device availability. */
 	if (ne2000.device == NULL)
 		return ENOSPC;
-	strcpy(ne2000.device->name, "ne0");
+	kern_strcpy(ne2000.device->name, "ne0");
 	ne2000.device->mtu = 1500;
 	ne2000.device->hwaddr_len = 6;
 	ne2000.device->flags = NET_DEVICE_BROADCAST;
-	memcpy(ne2000.device->hwaddr, prom, 6);
+	kern_memcpy(ne2000.device->hwaddr, prom, 6);
 
 	/* Checks the operation status. */
 	error = drv_dp8390_attach(&ne2000.dp, ne2000.device);

@@ -40,7 +40,7 @@ implementation:
 
 ```sh
 cc -std=c11 -Wall -Wextra -Werror \
-  -Iinclude -Iinclude/uapi -Isrc -Isrc/hal/i386 -Ilibc/include \
+  -Iinclude -Iinclude/uapi -Isrc -Isrc/hal/i386 -Iinclude/libc \
   plan/ws007/tests/pc98-pic-cascade-test.c \
   -o /tmp/ws007-pc98-pic-cascade-test
 /tmp/ws007-pc98-pic-cascade-test

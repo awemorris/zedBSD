@@ -31,14 +31,14 @@ ZEDBSD_SYSROOT_LIBC_SOURCES := \
 	userland/base/libc/account.c \
 	userland/base/libc/crypt.c \
 	userland/base/libc/utmpx.c \
-	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c \
-	libc/int64.c libc/strto.c libc/format.c libc/stdio.c \
+	src/libc/heap.c src/libc/string.c src/libc/ctype.c src/libc/locale.c src/libc/wide.c \
+	src/libc/int64.c src/libc/strto.c src/libc/format.c src/libc/stdio.c \
 	$(ZEDBSD_LIBC_USER_EXTRA_SOURCES)
 
 ZEDBSD_SYSROOT_COMPILER_RT_SOURCES := \
-	src/softfloat/zed-softfloat.c \
-	src/softfloat/compiler-runtime.c \
-	libc/math.c libc/float-parse.c
+	src/libc/softfloat.c \
+	src/libc/compiler-runtime.c \
+	src/libc/math.c src/libc/float-parse.c
 
 # zedBSD owns its floating-point compiler ABI so i386 kernels do not acquire
 # an x87 dependency. Integer compiler builtins come from the same verified LLVM
@@ -72,7 +72,7 @@ $(ZEDBSD_SYSROOT_LLVM_BUILTIN_SOURCES): | $(ZEDBSD_LLVM_SOURCE_STAMP)
 	@test -f '$@'
 
 ZEDBSD_SYSROOT_PUBLIC_HEADERS := $(shell \
-	find libc/include include/uapi -type f ! -name '*~' -print | LC_ALL=C sort)
+	find include/libc include/libc include/uapi -type f ! -name '*~' -print | LC_ALL=C sort)
 ZEDBSD_SYSROOT_LINKER_SCRIPTS := \
 	platform/amd64/user.ld platform/amd64/vmunix.ld \
 	platform/pcat/user.ld platform/pcat/vmunix.ld \
@@ -85,8 +85,8 @@ ZEDBSD_SYSROOT_INPUTS := $(ZEDBSD_SYSROOT_LIBC_SOURCES) \
 	$(ZEDBSD_SYSROOT_COMPILER_RT_SOURCES) \
 	$(ZEDBSD_SYSROOT_LLVM_BUILTIN_SOURCES) \
 	$(ZEDBSD_SYSROOT_PUBLIC_HEADERS) $(ZEDBSD_SYSROOT_LINKER_SCRIPTS) \
-	src/crt/crt0-amd64.S src/crt/crt1-amd64.S \
-	src/crt/crt0.S src/crt/crt1-i386.S \
+	src/libc/crt/crt0-amd64.S src/libc/crt/crt1-amd64.S \
+	src/libc/crt/crt0-i386.S src/libc/crt/crt1-i386.S \
 	include/hal/arch.h include/hal/arch/amd64.h include/hal/arch/i386.h
 
 define ZEDBSD_BUILD_X86_SYSROOT
@@ -104,7 +104,8 @@ $(1)/.zedbsd-sysroot-complete: $(ZEDBSD_SYSROOT_INPUTS) \
 		"$$$$temporary/usr/lib/zedbsd/pc98" "$$$$temporary/obj"; \
 	for header in $$(ZEDBSD_SYSROOT_PUBLIC_HEADERS); do \
 		case "$$$$header" in \
-		libc/include/*) relative=$$$${header#libc/include/} ;; \
+		include/libc/*) relative=$$$${header#include/libc/} ;; \
+		include/libc/*) relative=$$$${header#include/libc/} ;; \
 		include/uapi/*) relative=$$$${header#include/} ;; \
 		*) echo "sysroot: non-public header in manifest: $$$$header" >&2; exit 1 ;; \
 		esac; \
@@ -114,7 +115,7 @@ $(1)/.zedbsd-sysroot-complete: $(ZEDBSD_SYSROOT_INPUTS) \
 	for source in $$(ZEDBSD_SYSROOT_LIBC_SOURCES); do \
 		object="$$$$temporary/obj/$$$$source.o"; mkdir -p "$$$${object%/*}"; \
 		'$(ZEDBSD_SYSROOT_CLANG)' --target='$(3)' --sysroot="$$$$temporary" \
-			$(4) -D$(5) $(11) -DZEDBSD_STATIC_TLS -nostdinc -Ilibc/include -Iinclude -Isrc -I. \
+			$(4) -D$(5) $(11) -DZEDBSD_STATIC_TLS -nostdinc -Iinclude/libc -Iinclude -Isrc -I. \
 			-ffreestanding -fno-builtin -fno-pic -fno-pie \
 			-fno-stack-protector -fno-asynchronous-unwind-tables \
 			-fno-unwind-tables -fno-common -fno-strict-aliasing \
@@ -130,7 +131,7 @@ $(1)/.zedbsd-sysroot-complete: $(ZEDBSD_SYSROOT_INPUTS) \
 	for source in $$(ZEDBSD_SYSROOT_COMPILER_RT_SOURCES); do \
 		object="$$$$temporary/obj/$$$$source.o"; mkdir -p "$$$${object%/*}"; \
 		'$(ZEDBSD_SYSROOT_CLANG)' --target='$(3)' --sysroot="$$$$temporary" \
-			$(4) -D$(5) $(11) -DZEDBSD_STATIC_TLS -nostdinc -Ilibc/include -Iinclude -Isrc -I. \
+			$(4) -D$(5) $(11) -DZEDBSD_STATIC_TLS -nostdinc -Iinclude/libc -Iinclude -Isrc -I. \
 			-ffreestanding -fno-builtin -fno-pic -fno-pie \
 			-fno-stack-protector -fno-asynchronous-unwind-tables \
 			-fno-unwind-tables -fno-common -fno-strict-aliasing \
@@ -192,7 +193,7 @@ $(1)/.zedbsd-sysroot-complete: $(ZEDBSD_SYSROOT_INPUTS) \
 		-ffreestanding -fno-pic -fno-pie -fno-stack-protector \
 		-c "$$$$temporary/smoke.c" -o "$$$$temporary/smoke.o"; \
 	'$(ZEDBSD_SYSROOT_CLANG)' --target='$(3)' --sysroot="$$$$temporary" \
-		$(4) -nostdlib -static -no-pie -Wl,--build-id=none \
+		$(4) -nostdlib -static -Wl,--build-id=none \
 		-Wl,-T,"$$$$temporary/usr/lib/zedbsd/$(8)/$(9)" \
 		"$$$$temporary/usr/lib/crt0.o" "$$$$temporary/smoke.o" \
 		-Wl,--start-group "$$$$temporary/usr/lib/libc.a" \
@@ -219,8 +220,8 @@ $(1)/.zedbsd-sysroot-complete: $(ZEDBSD_SYSROOT_INPUTS) \
 	mv "$$$$temporary" "$$$$destination"; temporary=; trap - EXIT HUP INT TERM
 endef
 
-$(eval $(call ZEDBSD_BUILD_X86_SYSROOT,$(ZEDBSD_SYSROOT_AMD64),amd64,x86_64-unknown-zedbsd,-m64 -march=x86-64 -mno-red-zone,HAL_ARCH_AMD64,src/crt/crt0-amd64.S,src/crt/crt1-amd64.S,amd64,user.ld,Advanced Micro Devices X86-64,-DKERN_USER_ABI_LP64))
-$(eval $(call ZEDBSD_BUILD_X86_SYSROOT,$(ZEDBSD_SYSROOT_I386),i386,i386-unknown-zedbsd,-m32 -march=i386 -msoft-float -mno-mmx -mno-sse -mno-sse2,HAL_ARCH_I386,src/crt/crt0.S,src/crt/crt1-i386.S,pcat,user.ld,Intel 80386,))
+$(eval $(call ZEDBSD_BUILD_X86_SYSROOT,$(ZEDBSD_SYSROOT_AMD64),amd64,x86_64-unknown-zedbsd,-m64 -march=x86-64 -mno-red-zone,HAL_ARCH_AMD64,src/libc/crt/crt0-amd64.S,src/libc/crt/crt1-amd64.S,amd64,user.ld,Advanced Micro Devices X86-64,-DKERN_USER_ABI_LP64))
+$(eval $(call ZEDBSD_BUILD_X86_SYSROOT,$(ZEDBSD_SYSROOT_I386),i386,i386-unknown-zedbsd,-m32 -march=i386 -msoft-float -mno-mmx -mno-sse -mno-sse2,HAL_ARCH_I386,src/libc/crt/crt0-i386.S,src/libc/crt/crt1-i386.S,pcat,user.ld,Intel 80386,))
 
 .PHONY: sysroot-amd64 sysroot-i386 sysroots
 sysroot-amd64: $(ZEDBSD_SYSROOT_AMD64)/.zedbsd-sysroot-complete

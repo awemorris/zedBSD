@@ -21,17 +21,17 @@
 #include "render.h"
 #include "reply.h"
 #include "../memory.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 #include <kern/kmem.h>
 #include <kern/pmem.h>
 
-#include <vulkan/vulkan_core.h>
+#include <libc/vulkan/vulkan_core.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "vulkan-codec.inc"
 
@@ -401,7 +401,7 @@ drv_i915_gfx_requirements(
 	}
 
 	/* Asks for whole pages: the storage of an allocation is a blob, and a blob is pages. */
-	memset(&requirements, 0, sizeof(requirements));
+	kern_memset(&requirements, 0, sizeof(requirements));
 	requirements.size = (bytes + 4095U) & ~(uint64_t)4095U;
 	requirements.alignment = 4096U;
 
@@ -434,7 +434,7 @@ drv_i915_gfx_create_buffer(
 	uint64_t identity;
 
 	/* Decodes the create info behind the device and its presence marker. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	i915_vkc_dec_VkBufferCreateInfo(reader, &session->arena, &info);

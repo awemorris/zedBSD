@@ -17,4 +17,4 @@ LIBVULKAN_SOURCES := userland/base/libvulkan/objects.c \
 
 # The image metadata owns /lib placement; standalone installation honors PREFIX.
 LIBVULKAN_IMAGE_DATA := $(if $(ZEDBSD_TOPLEVEL_BUILD),/lib/libvulkan.so=$(BUILD)/dynamic/libvulkan.so)
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,libvulkan,Vulkan 1.0,*,n,library,$(LIBVULKAN_SOURCES),y,base,base/libvulkan,base/libwayland,,shared-library,$(LIBVULKAN_IMAGE_DATA),,lib))
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,libvulkan,Vulkan 1.0,amd64,y,library,$(LIBVULKAN_SOURCES),y,base,base/libvulkan,base/libwayland,,shared-library,$(LIBVULKAN_IMAGE_DATA),,lib))

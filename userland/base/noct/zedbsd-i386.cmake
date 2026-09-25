@@ -38,7 +38,7 @@ set(_NOCT_ZEDBSD_REQUIRED_FILES
   Makefile
   include/hal/arch/i386.h
   include/uapi/system.h
-  libc/include/stdint.h
+  include/libc/stdint.h
   platform/pcat/user.ld
   userland/base/noct/zedbsd.cmake
 )

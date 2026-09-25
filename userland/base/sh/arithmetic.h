@@ -8,13 +8,22 @@
  */
 
 /*
- * Declares the zedBSD userland arithmetic interface.
+ * Shell arithmetic (POSIX XCU 2.6.4): signed integers of at least 64 bits,
+ * the operators of C without ++, --, the comma and the address operators,
+ * and assignment to shell variables.
  */
 
 #ifndef KERN_USERLAND_SH_ARITHMETIC_H
 #define KERN_USERLAND_SH_ARITHMETIC_H
 
-int sh_arithmetic_eval(const char *, const char *(*)(void *, const char *),
-		       void *, long *, const char **);
+/*
+ * Evaluates an expression.  lookup reads a variable (NULL when unset), assign
+ * sets one (nonzero on success).  On failure *error_text names the fault.
+ */
+int sh_arithmetic_eval(const char *text,
+		       const char *(*lookup)(void *, const char *),
+		       int (*assign)(void *, const char *, const char *),
+		       void *context, long long *result,
+		       const char **error_text);
 
 #endif

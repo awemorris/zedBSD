@@ -17,7 +17,7 @@
 #include <kern/atomic.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/types.h>
+#include <uapi/types.h>
 
 struct file;
 struct file_ops;
@@ -46,7 +46,16 @@ struct cdev_ops {
 
 	/* Success transfers one retained device view; the caller must release its reference. */
 	int (*mmap)(struct file *, off_t, size_t, uint32_t, struct vm_device_mapping **);
+
+	/* CDEV_READ_NEVER_WAITS and the like. */
+	unsigned flags;
 };
+
+/*
+ * A read never waits for data (zero, null, random): read(2) fills a long
+ * request through several transfers instead of returning after the first.
+ */
+#define CDEV_READ_NEVER_WAITS	0x0001U
 
 /*
  * One immutable device generation retained by registry, driver and inodes.
@@ -134,6 +143,11 @@ cdev_snapshot_alloc(
 
 unsigned
 cdev_count(void);
+
+/* Reports whether a file is a device whose reads never wait. */
+int
+cdev_file_read_never_waits(
+	struct file *file);
 
 extern const struct file_ops cdev_file_ops;
 

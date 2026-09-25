@@ -15,16 +15,18 @@
  * implementation code.
  */
 
-#include <drivers/usb.h>
-#include <errno.h>
+#include <drivers/usb/usb.h>
+#include <uapi/errno.h>
+#include <uapi/system.h>
 #include <kern/atomic.h>
 #include <kern/io-stats.h>
 #include <kern/sched.h>
-#include <string.h>
+#include <kern/clock.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
 #include "kern/device-io.h"
 #include "kern/irq.h"
+#include <kern/kcrt.h>
 
 #define USB_REQ_GET_DESCRIPTOR 6U
 #define USB_REQ_CLEAR_FEATURE 1U
@@ -32,8 +34,10 @@
 #define USB_REQ_SET_CONFIGURATION 9U
 #define USB_REQ_SET_INTERFACE 11U
 #define USB_FEATURE_ENDPOINT_HALT 0U
-#define USB_ADDRESS_RECOVERY_TICKS 2U
-#define USB_RESET_RECOVERY_TICKS 2U
+#define USB_ADDRESS_RECOVERY_MS 20U
+#define USB_RESET_RECOVERY_MS 20U
+#define USB_PORT_RESET_MS 50U
+#define USB_CANCEL_TIMEOUT_MS 1000U
 #define USB_CONTROL_TIMEOUT_MS 1000U
 
 #define USB_DEVICE_LIFECYCLE_DISCONNECTING (1U << 31)
@@ -133,6 +137,9 @@ struct drv_usb_device {
 	void *quarantine_buffer;
 	uintptr_t hcd_private[4];
 	struct drv_usb_endpoint endpoint0;
+
+	/* The ports of a hub below the root, once its driver has made them known. */
+	struct usb_hub_state *hub;
 };
 
 struct drv_usb_bus {
@@ -158,6 +165,17 @@ struct drv_usb_bus {
 	struct drv_usb_bus *next;
 	uint8_t address_used[DRV_USB_MAX_ADDRESS + 1U];
 };
+
+/* The ports of a hub below the root and how its driver reads them. */
+struct usb_hub_state {
+	const struct drv_usb_hub_ops *ops;
+	void *context;
+	unsigned port_count;
+	struct usb_port_state *ports;	/* index 1..port_count */
+};
+
+/* A hub may sit at most this many tiers below the root (the route string). */
+#define USB_HUB_TIER_MAX	5U
 
 struct usb_submit_commit {
 	struct drv_usb_device *device;
@@ -213,6 +231,7 @@ static atomic_uint_t usb_topology_gate;
  * Forward declaration
  */
 static void usb_topology_lock(void);
+static void describe_usb_device(const struct drv_usb_device *device, uint32_t index, struct system_usb_device_info *info);
 static void usb_topology_unlock(void);
 static void device_begin_disconnect(struct drv_usb_device *device);
 static void io_gate_close(atomic_uint_t *gate);
@@ -235,7 +254,11 @@ static struct drv_usb_bus *find_hcd_bus(struct drv_usb_hcd *hcd);
 static int root_port_status(struct drv_usb_hcd *hcd, unsigned port, uint32_t *status);
 static int root_port_acknowledge_changes(struct drv_usb_hcd *hcd, unsigned port, uint32_t status);
 static uint64_t usb_generation_next(uint64_t *generation);
-static struct drv_usb_device *find_port_device(struct drv_usb_bus *bus, unsigned port);
+static struct drv_usb_device *find_port_device(struct drv_usb_bus *bus, struct drv_usb_device *parent, unsigned port);
+static int destroy_children(struct drv_usb_bus *bus, struct drv_usb_device *parent);
+static void hub_scan_locked(struct drv_usb_bus *bus, struct drv_usb_device *hub);
+static int hub_enter(struct drv_usb_device *hub, struct drv_usb_bus **bus);
+static unsigned device_tier(const struct drv_usb_device *device);
 static int device_is_disconnecting(const struct drv_usb_device *device);
 static int destroy_device(struct drv_usb_bus *bus, struct drv_usb_device *device);
 static int device_disable_active_endpoints(struct drv_usb_device *device);
@@ -251,8 +274,8 @@ static void free_configurations(struct drv_usb_device *device);
 static void free_configuration(struct drv_usb_configuration *configuration);
 static void device_publish_configuration(struct drv_usb_device *device, struct drv_usb_configuration *configuration);
 static int legacy_root_port_reset(struct drv_usb_hcd *hcd, unsigned port);
-static void usb_delay_ticks(uint64_t count);
-static int enumerate_port(struct drv_usb_bus *bus, unsigned port, uint32_t status);
+static void usb_delay_ms(uint64_t milliseconds);
+static int enumerate_port(struct drv_usb_bus *bus, struct drv_usb_device *parent, struct usb_port_state *state, unsigned port, uint32_t status);
 static int ep0_packet_size(enum drv_usb_speed speed, uint8_t encoded, unsigned *packet);
 static int allocate_address(struct drv_usb_bus *bus);
 static int enumerate_configuration(struct drv_usb_device *device, unsigned index, struct drv_usb_configuration *configuration);
@@ -518,7 +541,7 @@ drv_usb_hcd_register(
 	bus = kern_malloc(sizeof(*bus));
 	if (bus == NULL)
 		return ENOMEM;
-	memset(bus, 0, sizeof(*bus));
+	kern_memset(bus, 0, sizeof(*bus));
 	bus->number = next_bus_number++;
 	bus->hcd = hcd;
 	bus->address_used[0] = 1;
@@ -542,7 +565,7 @@ drv_usb_hcd_register(
 		return ENOMEM;
 	}
 
-	memset(bus->ports, 0,
+	kern_memset(bus->ports, 0,
 	       ((size_t)hcd->root_port_count + 1U) * sizeof(*bus->ports));
 	bus->root_hub = allocate_root_hub(bus);
 
@@ -794,7 +817,7 @@ drv_usb_hcd_root_hub_changed(
 		bus->ports[port].observed = 1U;
 		bus->ports[port].connected = connected;
 		bus->ports[port].enabled = enabled;
-		present = find_port_device(bus, port);
+		present = find_port_device(bus, bus->root_hub, port);
 
 		/*
 		 * A connection edge identifies a new physical generation even
@@ -840,7 +863,7 @@ drv_usb_hcd_root_hub_changed(
 
 			/* Checks the operation status. */
 			if ((status & 3U) == 3U)
-				error = enumerate_port(bus, port, status);
+				error = enumerate_port(bus, bus->root_hub, &bus->ports[port], port, status);
 			else
 				error = ENODEV;
 		}
@@ -1473,7 +1496,7 @@ drv_usb_device_reset(
 	if (error != 0)
 		goto fail_destructive;
 	device->state = DRV_USB_STATE_ADDRESS;
-	usb_delay_ticks(USB_ADDRESS_RECOVERY_TICKS);
+	usb_delay_ms(USB_ADDRESS_RECOVERY_MS);
 
 	/* Checks the operation status. */
 	error = device_reset_connection_check(bus, device, device_generation,
@@ -1877,7 +1900,7 @@ drv_usb_urb_alloc(
 		return NULL;
 	}
 
-	memset(urb, 0, sizeof(*urb));
+	kern_memset(urb, 0, sizeof(*urb));
 	refcount_init(&urb->references, 1U);
 	urb->device = device;
 	urb->endpoint = endpoint;
@@ -1897,7 +1920,7 @@ drv_usb_urb_alloc(
 			return NULL;
 		}
 
-		memset(urb->iso_packets, 0,
+		kern_memset(urb->iso_packets, 0,
 		       sizeof(*urb->iso_packets) * iso_count);
 	}
 
@@ -2153,7 +2176,7 @@ drv_usb_urb_setup(
 	if (n != 0 && u->sync_buffer != NULL && b != u->sync_buffer &&
 	    (u->endpoint->type == DRV_USB_TRANSFER_CONTROL ||
 	     (u->endpoint->descriptor.address & DRV_USB_DIR_IN) == 0)) {
-		memcpy(u->sync_buffer, b, n);
+		kern_memcpy(u->sync_buffer, b, n);
 		io_stats_record(IO_USB_STAGING_COPY, n);
 	}
 
@@ -2280,7 +2303,7 @@ drv_usb_urb_setup_isochronous(
 		/* Failed. */
 		return EINVAL;
 	}
-	memcpy(u->iso_packets, p, n * sizeof(*p));
+	kern_memcpy(u->iso_packets, p, n * sizeof(*p));
 
 	/* Succeeded. */
 	return 0;
@@ -2468,7 +2491,7 @@ drv_usb_urb_wait(
 		return EINVAL;
 	deadline =
 		urb->timeout_ms
-			? sched_ticks() + ((uint64_t)urb->timeout_ms + 9U) / 10U
+			? sched_ticks() + kern_ms_to_ticks(urb->timeout_ms)
 			: 0;
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
@@ -2516,7 +2539,8 @@ drv_usb_urb_wait(
 
 			/* Handles the cancel deadline condition. */
 			if (cancel_deadline == 0)
-				cancel_deadline = sched_ticks() + 100U;
+				cancel_deadline = sched_ticks() +
+				    kern_ms_to_ticks(USB_CANCEL_TIMEOUT_MS);
 
 			/* Checks the sched ticks result. */
 			if (sched_ticks() >= cancel_deadline)
@@ -2551,7 +2575,7 @@ drv_usb_urb_drain(
 	/* Handles the timeout ms condition. */
 	if (timeout_ms != 0) {
 		now = sched_ticks();
-		ticks = ((uint64_t)timeout_ms + 9U) / 10U;
+		ticks = kern_ms_to_ticks(timeout_ms);
 
 		deadline = UINT64_MAX - now < ticks ? UINT64_MAX : now + ticks;
 	}
@@ -2622,7 +2646,7 @@ drv_usb_urb_wait_reusable(
 	      (u->control.request_type & DRV_USB_DIR_IN) != 0) ||
 	     (u->endpoint->type != DRV_USB_TRANSFER_CONTROL &&
 	      (u->endpoint->descriptor.address & DRV_USB_DIR_IN) != 0))) {
-		memcpy(u->sync_client, u->sync_buffer, u->actual_length);
+		kern_memcpy(u->sync_client, u->sync_buffer, u->actual_length);
 		io_stats_record(IO_USB_STAGING_COPY, u->actual_length);
 	}
 
@@ -4741,7 +4765,7 @@ allocate_root_hub(
 	/* Handles the device availability. */
 	if (device == NULL)
 		return NULL;
-	memset(device, 0, sizeof(*device));
+	kern_memset(device, 0, sizeof(*device));
 	device->bus = bus;
 	device->speed = DRV_USB_SPEED_FULL;
 	device->state = DRV_USB_STATE_CONFIGURED;
@@ -4863,6 +4887,7 @@ usb_generation_next(
 static struct drv_usb_device *
 find_port_device(
 	struct drv_usb_bus *bus,
+	struct drv_usb_device *parent,
 	unsigned port)
 {
 	struct drv_usb_device *d;
@@ -4870,12 +4895,255 @@ find_port_device(
 	/* Process each linked entry. */
 	for (d = bus->devices; d; d = d->next) {
 		/* Checks the current descriptor. */
-		if (d->parent == bus->root_hub && d->port == port)
+		if (d->parent == parent && d->port == port)
 			return d;
 	}
 
 	/* Reports that no result is available. */
 	return NULL;
+}
+
+/*
+ * Destroys every device below a hub, deepest first.  Reports a failure if
+ * any device could not be released; that device stays linked, and the hub
+ * with it, for a later scan to try again.
+ */
+static int
+destroy_children(
+	struct drv_usb_bus *bus,
+	struct drv_usb_device *parent)
+{
+	struct drv_usb_device *child;
+	int error;
+	int result;
+
+	/*
+	 * A release unlinks the device, so the walk starts again after each
+	 * one; a device that fails stays and is passed over until the next
+	 * release.  Every restart follows a release, so the walk ends.
+	 */
+	result = 0;
+restart:
+	for (child = bus->devices; child != NULL; child = child->next) {
+		if (child->parent != parent)
+			continue;
+		error = destroy_device(bus, child);
+		if (error == 0) {
+			result = 0;
+			goto restart;
+		}
+		if (result == 0)
+			result = error;
+	}
+	return result;
+}
+
+/* Reports how many tiers below the root hub a device is: 1 for a root port. */
+static unsigned
+device_tier(
+	const struct drv_usb_device *device)
+{
+	unsigned tier;
+
+	for (tier = 0; device != NULL && device->parent != NULL;
+	     device = device->parent)
+		tier++;
+	return tier;
+}
+
+/*
+ * Takes the topology lock for a hub's own thread, if it is free, and checks
+ * that the hub is still in the tree.  EBUSY leaves the lock untaken.
+ */
+static int
+hub_enter(
+	struct drv_usb_device *hub,
+	struct drv_usb_bus **bus)
+{
+	if (hub == NULL || hub->bus == NULL)
+		return EINVAL;
+	if (!atomic_try_acquire_zero(&usb_topology_gate))
+		return EBUSY;
+	*bus = hub->bus;
+	if (atomic_raw_load_acquire(&(*bus)->stopping) != 0 ||
+	    !device_linked(*bus, hub) || device_is_disconnecting(hub) ||
+	    device_is_quarantined(hub)) {
+		usb_topology_unlock();
+		return ENODEV;
+	}
+	return 0;
+}
+
+/*
+ * Makes a hub's ports known and enumerates what is connected to them.
+ */
+int
+drv_usb_hub_attach_ports(
+	struct drv_usb_device *hub,
+	const struct drv_usb_hub_ops *ops,
+	void *context,
+	unsigned port_count,
+	unsigned multi_tt,
+	unsigned think_time)
+{
+	struct usb_hub_state *state;
+	struct drv_usb_bus *bus;
+	int error;
+
+	/* Refuses an incomplete hub, or one too deep for the route string. */
+	if (ops == NULL || ops->port_status == NULL ||
+	    ops->clear_feature == NULL || ops->port_reset == NULL ||
+	    port_count == 0 || port_count > 255U)
+		return EINVAL;
+	error = hub_enter(hub, &bus);
+	if (error != 0)
+		return error;
+	if (hub->hub != NULL) {
+		usb_topology_unlock();
+		return EALREADY;
+	}
+	if (device_tier(hub) >= USB_HUB_TIER_MAX) {
+		usb_topology_unlock();
+		kern_logf("usb%u: hub %u is too deep; its ports are not used\n",
+		    bus->number, hub->address);
+		return ENOTSUP;
+	}
+
+	/* Holds the ports' state with the hub. */
+	state = kern_malloc(sizeof(*state));
+	if (state == NULL) {
+		usb_topology_unlock();
+		return ENOMEM;
+	}
+	kern_memset(state, 0, sizeof(*state));
+	state->ports = kern_malloc(((size_t)port_count + 1U) * sizeof(*state->ports));
+	if (state->ports == NULL) {
+		kern_free(state);
+		usb_topology_unlock();
+		return ENOMEM;
+	}
+	kern_memset(state->ports, 0, ((size_t)port_count + 1U) * sizeof(*state->ports));
+	state->ops = ops;
+	state->context = context;
+	state->port_count = port_count;
+
+	/* Tells the controller before anything below the hub is addressed. */
+	if (bus->hcd->ops->hub_configure != NULL) {
+		error = bus->hcd->ops->hub_configure(bus->hcd, hub, port_count,
+		    multi_tt, think_time);
+		if (error != 0) {
+			kern_free(state->ports);
+			kern_free(state);
+			usb_topology_unlock();
+			return error;
+		}
+	}
+	hub->hub = state;
+	kern_logf("usb%u: hub %u, %u ports\n", bus->number, hub->address, port_count);
+
+	hub_scan_locked(bus, hub);
+	usb_topology_unlock();
+	return 0;
+}
+
+/* Rescans a hub's ports after its driver saw a change. */
+int
+drv_usb_hub_changed(
+	struct drv_usb_device *hub)
+{
+	struct drv_usb_bus *bus;
+	int error;
+
+	error = hub_enter(hub, &bus);
+	if (error != 0)
+		return error;
+	if (hub->hub != NULL)
+		hub_scan_locked(bus, hub);
+	usb_topology_unlock();
+	return 0;
+}
+
+/*
+ * Brings the devices below a hub in line with its ports, as the root scan
+ * does for root ports: a port whose connection went or changed loses its
+ * device, and a newly connected port is reset and enumerated.  The
+ * topology lock is held.
+ */
+static void
+hub_scan_locked(
+	struct drv_usb_bus *bus,
+	struct drv_usb_device *hub)
+{
+	static const uint16_t change_features[] = {
+		16U, /* C_PORT_CONNECTION */
+		17U, /* C_PORT_ENABLE */
+		18U, /* C_PORT_SUSPEND */
+		19U, /* C_PORT_OVER_CURRENT */
+		20U  /* C_PORT_RESET */
+	};
+	struct usb_hub_state *state;
+	struct usb_port_state *port_state;
+	struct drv_usb_device *present;
+	uint32_t status;
+	unsigned port, index;
+	unsigned connected, enabled, connection_changed, initial, state_changed;
+	int error;
+
+	state = hub->hub;
+	for (port = 1; port <= state->port_count; port++) {
+		port_state = &state->ports[port];
+		status = 0;
+		if (state->ops->port_status(state->context, port, &status) != 0)
+			continue;
+
+		/* Acknowledges each change so that the hub reports the next. */
+		for (index = 0; index < sizeof(change_features) / sizeof(change_features[0]);
+		     index++) {
+			if ((status & (1U << change_features[index])) != 0)
+				(void)state->ops->clear_feature(state->context, port,
+				    change_features[index]);
+		}
+
+		connected = (status & 1U) != 0;
+		enabled = (status & 2U) != 0;
+		connection_changed = (status & (1U << 16)) != 0;
+		initial = !port_state->observed;
+		state_changed = !initial && port_state->connected != connected;
+		if (initial || connection_changed || state_changed)
+			usb_generation_next(&port_state->connection_generation);
+		port_state->observed = 1U;
+		port_state->connected = connected;
+		port_state->enabled = enabled;
+
+		/* A device whose connection went, or was replaced, goes. */
+		present = find_port_device(bus, hub, port);
+		if (present != NULL &&
+		    (!connected || connection_changed || state_changed ||
+		     device_is_disconnecting(present))) {
+			if (destroy_device(bus, present) == 0)
+				present = NULL;
+		}
+		if (!connected || present != NULL)
+			continue;
+		if (!initial && !connection_changed && !state_changed)
+			continue;
+
+		/* Resets the port, then enumerates what is behind it. */
+		error = state->ops->port_reset(state->context, port);
+		if (error == 0)
+			error = state->ops->port_status(state->context, port, &status);
+		if (error == 0) {
+			port_state->connected = (status & 1U) != 0;
+			port_state->enabled = (status & 2U) != 0;
+			if ((status & 3U) == 3U)
+				error = enumerate_port(bus, hub, port_state, port, status);
+			else
+				error = ENODEV;
+		}
+		if (error != 0)
+			kern_logf("usb%u: hub %u port %u enumeration failed (%d)\n",
+			    bus->number, hub->address, port, error);
+	}
 }
 
 /* Asks whether a device is already being disconnected. */
@@ -4905,6 +5173,15 @@ destroy_device(
 	if (device == NULL || device == bus->root_hub)
 		return EINVAL;
 	device_begin_disconnect(device);
+
+	/*
+	 * A hub's devices go first: they reach the controller through it.
+	 * One that cannot be released keeps the hub, so that nothing is left
+	 * pointing at a hub that is gone; a later scan tries again.
+	 */
+	error = destroy_children(bus, device);
+	if (error != 0)
+		return error;
 	detach_error = detach_interfaces(device);
 
 	/*
@@ -5253,6 +5530,12 @@ device_finalize(
 	/* Handles the quarantine buffer availability. */
 	if (device->quarantine_buffer != NULL)
 		kern_free(device->quarantine_buffer);
+
+	/* A hub's ports went with its devices. */
+	if (device->hub != NULL) {
+		kern_free(device->hub->ports);
+		kern_free(device->hub);
+	}
 	kern_free(device);
 
 	/* Handles the report disconnect condition. */
@@ -5316,7 +5599,7 @@ free_configuration(
 	/* Handles the raw availability. */
 	if (configuration->raw != NULL)
 		kern_free(configuration->raw);
-	memset(configuration, 0, sizeof(*configuration));
+	kern_memset(configuration, 0, sizeof(*configuration));
 }
 
 /* Publishes the configuration a device now presents. */
@@ -5344,7 +5627,7 @@ legacy_root_port_reset(
 	error = hcd->ops->root_hub_control(hcd, &request, NULL, 0, &actual);
 	if (error != 0)
 		return error;
-	usb_delay_ticks(5U);
+	usb_delay_ms(USB_PORT_RESET_MS);
 	request.request = 1;
 
 	/* Checks the operation status. */
@@ -5358,18 +5641,18 @@ legacy_root_port_reset(
 	error = hcd->ops->root_hub_control(hcd, &request, NULL, 0, &actual);
 	if (error != 0)
 		return error;
-	usb_delay_ticks(USB_RESET_RECOVERY_TICKS);
+	usb_delay_ms(USB_RESET_RECOVERY_MS);
 
 	/* Succeeded. */
 	return 0;
 }
 
-/* Reports how many ticks a delay in milliseconds takes. */
+/* Busy-waits for a delay given in milliseconds, counted in ticks. */
 static void
-usb_delay_ticks(
-	uint64_t count)
+usb_delay_ms(
+	uint64_t milliseconds)
 {
-	uint64_t deadline = sched_ticks() + count;
+	uint64_t deadline = sched_ticks() + kern_ms_to_ticks(milliseconds);
 
 	/* Continue while the operation condition remains true. */
 	while (sched_ticks() < deadline)
@@ -5380,6 +5663,8 @@ usb_delay_ticks(
 static int
 enumerate_port(
 	struct drv_usb_bus *bus,
+	struct drv_usb_device *parent,
+	struct usb_port_state *state,
 	unsigned port,
 	uint32_t status)
 {
@@ -5396,16 +5681,16 @@ enumerate_port(
 	device = kern_malloc(sizeof(*device));
 	if (device == NULL)
 		return ENOMEM;
-	memset(device, 0, sizeof(*device));
+	kern_memset(device, 0, sizeof(*device));
 	device->bus = bus;
-	device->parent = bus->root_hub;
+	device->parent = parent;
 	device->port = port;
 	device->generation = usb_generation_next(&usb_device_generation);
 
-	/* Handles the bus condition. */
-	if (bus->ports[port].connection_generation == 0)
-		usb_generation_next(&bus->ports[port].connection_generation);
-	device->port_generation = bus->ports[port].connection_generation;
+	/* Stamps the device with the connection it came in on. */
+	if (state->connection_generation == 0)
+		usb_generation_next(&state->connection_generation);
+	device->port_generation = state->connection_generation;
 	device->speed = (status & 0x800U)   ? DRV_USB_SPEED_SUPER
 			: (status & 0x400U) ? DRV_USB_SPEED_HIGH
 			: (status & 0x200U) ? DRV_USB_SPEED_LOW
@@ -5489,7 +5774,7 @@ enumerate_port(
 	if (error != 0)
 		goto fail;
 	device->state = DRV_USB_STATE_ADDRESS;
-	usb_delay_ticks(USB_ADDRESS_RECOVERY_TICKS);
+	usb_delay_ms(USB_ADDRESS_RECOVERY_MS);
 
 	/* Checks the operation status. */
 	error = drv_usb_control(device,
@@ -5524,7 +5809,7 @@ enumerate_port(
 		goto fail;
 	}
 
-	memset(device->configurations, 0,
+	kern_memset(device->configurations, 0,
 	       device->configuration_count * sizeof(*device->configurations));
 	/* Process each remaining element. */
 	for (configuration_index = 0;
@@ -5761,7 +6046,7 @@ parse_configuration(
 	unsigned iad_index = 0;
 	int error;
 
-	memset(configuration, 0, sizeof(*configuration));
+	kern_memset(configuration, 0, sizeof(*configuration));
 	configuration->raw = raw;
 	configuration->raw_length = length;
 	configuration->device = device;
@@ -5772,7 +6057,7 @@ parse_configuration(
 		goto fail;
 	}
 
-	memcpy(&descriptor, raw, sizeof(descriptor));
+	kern_memcpy(&descriptor, raw, sizeof(descriptor));
 
 	/* Checks the file descriptor. */
 	if (descriptor.length < sizeof(descriptor) ||
@@ -5820,7 +6105,7 @@ parse_configuration(
 					offset - current_alternate->raw_offset;
 			}
 
-			memcpy(&interface_descriptor, raw + offset,
+			kern_memcpy(&interface_descriptor, raw + offset,
 			       sizeof(interface_descriptor));
 
 			/* Handles the interface descriptor condition. */
@@ -5851,7 +6136,7 @@ parse_configuration(
 					goto fail;
 				}
 
-				memset(current_interface, 0,
+				kern_memset(current_interface, 0,
 				       sizeof(*current_interface));
 				current_interface->device = device;
 				current_interface->configuration =
@@ -5889,7 +6174,7 @@ parse_configuration(
 				goto fail;
 			}
 
-			memset(current_alternate, 0,
+			kern_memset(current_alternate, 0,
 			       sizeof(*current_alternate));
 			current_alternate->interface = current_interface;
 			current_alternate->descriptor = interface_descriptor;
@@ -5909,7 +6194,7 @@ parse_configuration(
 					goto fail;
 				}
 
-				memset(current_alternate->endpoints, 0,
+				kern_memset(current_alternate->endpoints, 0,
 				       interface_descriptor.endpoint_count *
 					       sizeof(*current_alternate
 							       ->endpoints));
@@ -5933,7 +6218,7 @@ parse_configuration(
 				goto fail;
 			}
 
-			memcpy(&endpoint_descriptor, raw + offset,
+			kern_memcpy(&endpoint_descriptor, raw + offset,
 			       sizeof(endpoint_descriptor));
 
 			/* Handles the endpoint number condition. */
@@ -5990,7 +6275,7 @@ parse_configuration(
 				goto fail;
 			}
 
-			memcpy(&configuration->iads[iad_index++], raw + offset,
+			kern_memcpy(&configuration->iads[iad_index++], raw + offset,
 			       sizeof(configuration->iads[0]));
 			current_endpoint = NULL;
 		} else {
@@ -6122,7 +6407,7 @@ configuration_iads_prepare(
 		/* Handles the iads availability. */
 		if (configuration->iads == NULL)
 			return ENOMEM;
-		memset(configuration->iads, 0,
+		kern_memset(configuration->iads, 0,
 		       count * sizeof(*configuration->iads));
 	}
 
@@ -7725,7 +8010,7 @@ device_control_lock(
 	/* Handles the timeout ms condition. */
 	if (timeout_ms != 0) {
 		now = sched_ticks();
-		ticks = ((uint64_t)timeout_ms + 9U) / 10U;
+		ticks = kern_ms_to_ticks(timeout_ms);
 
 		deadline = UINT64_MAX - now < ticks ? UINT64_MAX : now + ticks;
 	}
@@ -7958,4 +8243,141 @@ endpoint_binding_unpin(
 		return;
 	io_gate_exit(&owner->binding_gate);
 	binding_submitter_put(owner);
+}
+
+/*
+ * Fills in the description of one device while the topology is held still.
+ */
+static void
+describe_usb_device(
+	const struct drv_usb_device *device,
+	uint32_t index,
+	struct system_usb_device_info *info)
+{
+	const struct drv_usb_device *hop;
+	const struct drv_usb_interface *interface;
+	const struct drv_usb_driver *seen[KERN_SYSTEM_USB_DRIVER_NAME_MAX];
+	const char *name;
+	unsigned depth;
+	unsigned count;
+	unsigned known;
+	size_t length;
+	size_t used;
+	unsigned n;
+
+	/* Describes the place on the bus and the speed. */
+	kern_memset(info, 0, sizeof(*info));
+	info->index = index;
+	info->bus = (uint16_t)device->bus->number;
+	info->address = (uint8_t)device->address;
+	info->speed = (uint8_t)device->speed;
+	if (device == device->bus->root_hub)
+		info->flags |= KERN_SYSTEM_USB_ROOT_HUB;
+
+	/* Counts the hubs between the device and its root hub. */
+	depth = 0;
+	for (hop = device; hop->parent != NULL; hop = hop->parent)
+		depth++;
+
+	/* Writes the port on each hub, from the root hub down. */
+	if (depth > KERN_SYSTEM_USB_PORT_DEPTH_MAX)
+		depth = KERN_SYSTEM_USB_PORT_DEPTH_MAX;
+	info->port_depth = (uint8_t)depth;
+	hop = device;
+	for (n = depth; n > 0; n--) {
+		info->port_path[n - 1U] = (uint8_t)hop->port;
+		hop = hop->parent;
+	}
+
+	/* Copies the device descriptor. */
+	info->vendor = device->descriptor.vendor;
+	info->product = device->descriptor.product;
+	info->usb_version = device->descriptor.usb_release;
+	info->device_version = device->descriptor.device_release;
+	info->device_class = device->descriptor.device_class;
+	info->device_subclass = device->descriptor.device_subclass;
+	info->device_protocol = device->descriptor.device_protocol;
+	info->configuration_count = device->descriptor.configuration_count;
+
+	/* Counts the interfaces and names each distinct bound driver once. */
+	count = 0;
+	known = 0;
+	used = 0;
+	for (interface = device->interfaces; interface != NULL;
+	     interface = interface->next) {
+		count++;
+		if (interface->driver == NULL)
+			continue;
+
+		/* Skips a driver already named. */
+		for (n = 0; n < known; n++) {
+			if (seen[n] == interface->driver)
+				break;
+		}
+		if (n < known || known == KERN_SYSTEM_USB_DRIVER_NAME_MAX)
+			continue;
+		seen[known++] = interface->driver;
+
+		/* Appends the name, leaving the last byte as the end. */
+		name = interface->driver->name;
+		if (name == NULL)
+			continue;
+		length = kern_strlen(name);
+		if (used != 0) {
+			/* Stops when not even the separator fits. */
+			if (used + 1U >= sizeof(info->driver) - 1U)
+				break;
+			info->driver[used++] = ',';
+		}
+		if (length > sizeof(info->driver) - 1U - used)
+			length = sizeof(info->driver) - 1U - used;
+		kern_memcpy(&info->driver[used], name, length);
+		used += length;
+	}
+	info->interface_count = (uint8_t)(count > 255U ? 255U : count);
+}
+
+/*
+ * Describes the device at one position of the enumeration for /dev/system.
+ *
+ * Devices come and go, so the walk and the copy happen with the topology
+ * held, and nothing is kept once it is let go.  The order is each bus's
+ * root hub followed by its devices; a device plugged in between two calls
+ * may shift the positions after it, which a lister sees as a changed list.
+ */
+int
+drv_usb_system_describe(
+	uint32_t index,
+	struct system_usb_device_info *info)
+{
+	struct drv_usb_bus *bus;
+	struct drv_usb_device *device;
+	uint32_t remaining;
+
+	remaining = index;
+	usb_topology_lock();
+
+	/* Walks every bus, root hub first. */
+	for (bus = usb_buses; bus != NULL; bus = bus->next) {
+		device = bus->root_hub != NULL ? bus->root_hub : bus->devices;
+		while (device != NULL) {
+			if (remaining == 0) {
+				describe_usb_device(device, index, info);
+				usb_topology_unlock();
+
+				/* Succeeded. */
+				return 0;
+			}
+			remaining--;
+			if (device == bus->root_hub)
+				device = bus->devices;
+			else
+				device = device->next;
+		}
+	}
+
+	usb_topology_unlock();
+
+	/* No device at that position. */
+	return ENOENT;
 }

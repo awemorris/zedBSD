@@ -11,10 +11,10 @@
  * USB Attached SCSI descriptor and high-speed command protocol.
  */
 
-#include <drivers/usb-uas.h>
+#include <drivers/usb/usb-uas.h>
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 struct uas_endpoint_description {
 	struct drv_usb_uas_pipe pipe;
@@ -51,14 +51,14 @@ drv_usb_uas_command_begin(
 	if ((direction == DRV_USB_UAS_NO_DATA) != (expected == 0))
 		return EINVAL;
 
-	memset(wire, 0, 32);
+	kern_memset(wire, 0, 32);
 	wire[0] = 1; /* Command IU, SIMPLE task attribute and no additional CDB. */
 	wire[2] = (uint8_t)(tag >> 8);
 	wire[3] = (uint8_t)tag;
 	wire[9] = (uint8_t)lun; /* Peripheral-device addressing. */
-	memcpy(wire + 16, cdb, cdb_length);
+	kern_memcpy(wire + 16, cdb, cdb_length);
 
-	memset(command, 0, sizeof(*command));
+	kern_memset(command, 0, sizeof(*command));
 	command->tag = tag;
 	command->direction = direction;
 	command->expected = expected;
@@ -164,7 +164,7 @@ drv_usb_uas_decode_configuration(
 	/* Leaves no partially decoded capabilities after any failure. */
 	if (result == NULL)
 		return EINVAL;
-	memset(result, 0, sizeof(*result));
+	kern_memset(result, 0, sizeof(*result));
 	if (raw == NULL || length < 9 || length > 65535U)
 		return EINVAL;
 	if (interface_number > 255U || alternate_setting > 255U)
@@ -205,7 +205,7 @@ drv_usb_uas_decode_configuration(
 		return ENOENT;
 
 	/* Commits the complete value only after the pipe contract is valid. */
-	memset(&decoded, 0, sizeof(decoded));
+	kern_memset(&decoded, 0, sizeof(decoded));
 	error = uas_decode_alternate(bytes + selected, end - selected,
 	    profile, &decoded);
 	if (error != 0)
@@ -248,7 +248,7 @@ uas_decode_alternate(
 	if (length < 9 || bytes[4] != 4 || bytes[5] != 8 ||
 	    bytes[6] != 6 || bytes[7] != 0x62)
 		return EINVAL;
-	memset(endpoints, 0, sizeof(endpoints));
+	kern_memset(endpoints, 0, sizeof(endpoints));
 	endpoint = NULL;
 	count = 0;
 	previous_kind = 4;

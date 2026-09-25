@@ -37,11 +37,11 @@
 
 #include "compiler.h"
 #include "eu.h"
+#include <kern/kcrt.h>
 
 #include <kern/kmem.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 #include "../intel/eu-encoding-gen12.h"
 
@@ -409,7 +409,7 @@ drv_i915_shader_compile(
 	binary->simd = COMPILE_SIMD;
 
 	/* Prepares what lasts over the attempts: every value in a register, the VUE staged. */
-	memset(&state, 0, sizeof(state));
+	kern_memset(&state, 0, sizeof(state));
 	state.ir = ir;
 	drv_i915_eu_init(&state.code);
 
@@ -506,7 +506,7 @@ drv_i915_shader_compile(
 		kern_free(binary);
 		return ENOMEM;
 	}
-	memcpy(binary->code, words, bytes);
+	kern_memcpy(binary->code, words, bytes);
 	binary->code_bytes = (uint32_t)bytes;
 
 	/* Records what a draw has to program around the kernel. */
@@ -618,7 +618,7 @@ i915_compile_reset(
 
 	/* Drops the previous attempt's code and clears everything else. */
 	drv_i915_eu_free(&state->code);
-	memset(state, 0, sizeof(*state));
+	kern_memset(state, 0, sizeof(*state));
 	drv_i915_eu_init(&state->code);
 
 	/* Puts back what lasts. */
@@ -2953,7 +2953,7 @@ i915_compile_describe(
 
 	/* The inputs in payload order. */
 	binary->input_count = state->input_count;
-	memcpy(binary->input_locations, state->inputs, sizeof(state->inputs));
+	kern_memcpy(binary->input_locations, state->inputs, sizeof(state->inputs));
 
 	/* The sampled images in the order the kernel numbers them. */
 	for (index = 0U; index < state->ir->uniform_count; index++) {
@@ -2985,7 +2985,7 @@ i915_compile_describe(
 	/* A vertex shader passes its varyings on; a fragment shader's varyings are its inputs. */
 	if (state->ir->stage == I915_STAGE_VERTEX) {
 		binary->varying_count = state->varying_count;
-		memcpy(binary->varying_locations, state->varyings, sizeof(state->varyings));
+		kern_memcpy(binary->varying_locations, state->varyings, sizeof(state->varyings));
 		binary->dispatch_grf_start = COMPILE_PAYLOAD_GRF;
 	} else {
 		binary->varying_count = state->input_count;

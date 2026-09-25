@@ -9,11 +9,22 @@
  * The PC-98 8253 interval-timer implementation.
  */
 
+#include <hal/hal.h>
+
 #include "../asm.h"
 #include "../clock.h"
 #include "../defs.h"
 #include "../irq.h"
 #include "../pic.h"
+
+/*
+ * The BIOS work-area byte whose bit 7 names the system-clock series, and the
+ * interval timer's input clock for each series.
+ */
+#define PC98_BIOS_SYSTEM_CLOCK	0x501U
+#define PC98_SYSTEM_CLOCK_8MHZ	0x80U
+#define PC98_PIT_CLOCK_8MHZ	1996800U
+#define PC98_PIT_CLOCK_5MHZ	2457600U
 
 /*
  * Programs the PC-98 interval timer and enables its IRQ.
@@ -22,10 +33,22 @@ void
 bsp_timer_init(
 	void)
 {
+	uint32_t clock;
 	uint16_t interval;
 
-	/* Programs channel zero for the board's fixed periodic interval. */
-	interval = 19968;
+	/*
+	 * Takes the timer's input clock from the series the BIOS reports:
+	 * 1.9968 MHz on the 8 MHz series, 2.4576 MHz on the 5/10 MHz series.
+	 */
+	if ((*(volatile uint8_t *)(SYS_START + PC98_BIOS_SYSTEM_CLOCK) &
+	    PC98_SYSTEM_CLOCK_8MHZ) != 0)
+		clock = PC98_PIT_CLOCK_8MHZ;
+	else
+		clock = PC98_PIT_CLOCK_5MHZ;
+
+	/* Programs channel zero for the HAL tick. */
+	interval = (uint16_t)((clock + HAL_TIMER_FREQUENCY / 2U) /
+	    HAL_TIMER_FREQUENCY);
 	asm_outb(0x77, 0x34);
 	asm_outb(0x71, (uint8_t)(interval & 0xff));
 	asm_outb(0x71, (uint8_t)(interval >> 8));

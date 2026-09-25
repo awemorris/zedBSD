@@ -1,0 +1,249 @@
+phase	old	new	note
+p002	include/drivers/disklabel.h	include/drivers/disklabel/disklabel.h	src/drivers/disklabel/*.c
+p002	include/drivers/dma.h	include/drivers/generic/dma.h	src/drivers/generic/dma.c
+p002	include/drivers/dp8390.h	include/drivers/ethernet/dp8390.h	src/drivers/ethernet/dp8390.c
+p002	include/drivers/gpu-display.h	include/drivers/gpu/gpu-display.h	src/drivers/gpu/gpu.c
+p002	include/drivers/gpu-fence.h	include/drivers/gpu/gpu-fence.h	src/drivers/gpu/gpu-fence.c
+p002	include/drivers/gpu-scanout.h	include/drivers/gpu/gpu-scanout.h	src/drivers/gpu/gpu.c
+p002	include/drivers/gpu-share.h	include/drivers/gpu/gpu-share.h	src/drivers/gpu/gpu.c
+p002	include/drivers/gpu.h	include/drivers/gpu/gpu.h	src/drivers/gpu/gpu.c
+p002	include/drivers/graphics/pc98.h	include/drivers/platform/pc98/graphics/pc98.h	src/drivers/platform/pc98/graphics/pc98-graphics.c
+p002	include/drivers/graphics/pcat.h	include/drivers/platform/pcat/graphics/pcat.h	src/drivers/platform/pcat/graphics/pcat-graphics.c
+p002	include/drivers/hid/hid-report.h	include/drivers/usb/hid-report.h	src/drivers/usb/usb-hid.c (only kernel user)
+p002	include/drivers/hid/pc98-busmouse.h	include/drivers/platform/pc98/pc98-busmouse.h	src/drivers/platform/pc98/pc98-busmouse.c
+p002	include/drivers/hid/ps2-8042.h	include/drivers/platform/pcat/ps2-8042.h	src/drivers/platform/pcat/ps2-8042.c
+p002	include/drivers/i915.h	include/drivers/pci/pci-i915.h	src/drivers/gpu/i915/ (PCI registration)
+p002	include/drivers/pc98-lgy98.h	include/drivers/platform/pc98/pc98-lgy98.h	src/drivers/platform/pc98/pc98-lgy98.c
+p002	include/drivers/pcat-ide.h	include/drivers/platform/pcat/pcat-ide.h	src/drivers/platform/pcat/pcat-ide.c
+p002	include/drivers/pcat-ne2000.h	include/drivers/isa/pcat-ne2000.h	src/drivers/isa/ne2000.c
+p002	include/drivers/pci-ehci.h	include/drivers/pci/pci-ehci.h	src/drivers/pci/pci-ehci.c
+p002	include/drivers/pci-intel-ax211.h	include/drivers/wifi/intel-ax211/pci-intel-ax211.h	src/drivers/wifi/intel-ax211/intel-ax211.c
+p002	include/drivers/pci-nvme-protocol.h	include/drivers/pci/pci-nvme-protocol.h	src/drivers/pci/pci-nvme.c
+p002	include/drivers/pci-nvme.h	include/drivers/pci/pci-nvme.h	src/drivers/pci/pci-nvme.c
+p002	include/drivers/pci-pcat.h	include/drivers/pci/pci-pcat.h	src/drivers/pci/pci-pcat.c
+p002	include/drivers/pci-uhci.h	include/drivers/pci/pci-uhci.h	src/drivers/pci/pci-uhci.c
+p002	include/drivers/pci-xhci-capability.h	include/drivers/pci/pci-xhci-capability.h	src/drivers/pci/pci-xhci.c
+p002	include/drivers/pci-xhci-control.h	include/drivers/pci/pci-xhci-control.h	src/drivers/pci/pci-xhci.c
+p002	include/drivers/pci-xhci-lifecycle.h	include/drivers/pci/pci-xhci-lifecycle.h	src/drivers/pci/pci-xhci.c
+p002	include/drivers/pci-xhci.h	include/drivers/pci/pci-xhci.h	src/drivers/pci/pci-xhci.c
+p002	include/drivers/pci.h	include/drivers/pci/pci.h	src/drivers/pci/pci.c
+p002	include/drivers/usb-cdc-ecm.h	include/drivers/usb/usb-cdc-ecm.h	src/drivers/usb/usb-cdc-ecm.c
+p002	include/drivers/usb-cdc-ncm.h	include/drivers/usb/usb-cdc-ncm.h	src/drivers/usb/usb-cdc-ncm.c
+p002	include/drivers/usb-hid.h	include/drivers/usb/usb-hid.h	src/drivers/usb/usb-hid.c
+p002	include/drivers/usb-rtl8822bu.h	include/drivers/usb/usb-rtl8822bu.h	src/drivers/usb/usb-rtl8822bu.c
+p002	include/drivers/usb-storage-bot.h	include/drivers/usb/usb-storage-bot.h	src/drivers/usb/usb-storage.c
+p002	include/drivers/usb-storage-scsi.h	include/drivers/usb/usb-storage-scsi.h	src/drivers/usb/usb-storage.c
+p002	include/drivers/usb-storage.h	include/drivers/usb/usb-storage.h	src/drivers/usb/usb-storage.c
+p002	include/drivers/usb-uas.h	include/drivers/usb/usb-uas.h	src/drivers/usb/usb-uas*.c
+p002	include/drivers/usb.h	include/drivers/usb/usb.h	src/drivers/usb/usb.c
+p002	include/drivers/venus.h	include/drivers/pci/pci-venus.h	src/drivers/gpu/venus/venus.c (PCI registration)
+p003	libc/catalog.c	src/libc/catalog.c	
+p003	libc/ctype.c	src/libc/ctype.c	
+p003	libc/err.c	src/libc/err.c	
+p003	libc/fenv.c	src/libc/fenv.c	
+p003	libc/float-parse.c	src/libc/float-parse.c	
+p003	libc/fmtmsg.c	src/libc/fmtmsg.c	
+p003	libc/fnmatch.c	src/libc/fnmatch.c	
+p003	libc/format.c	src/libc/format.c	
+p003	libc/ftw.c	src/libc/ftw.c	
+p003	libc/heap.c	src/libc/heap.c	
+p003	libc/heap.h	src/libc/heap.h	
+p003	libc/int64.c	src/libc/int64.c	
+p003	libc/inttypes.c	src/libc/inttypes.c	
+p003	libc/libc.mk	src/libc/libc.mk	
+p003	libc/libgen.c	src/libc/libgen.c	
+p003	libc/libutil.c	src/libc/libutil.c	
+p003	libc/locale-db.c	src/libc/locale-db.c	
+p003	libc/locale-db.h	src/libc/locale-db.h	
+p003	libc/locale.c	src/libc/locale.c	
+p003	libc/math.c	src/libc/math.c	
+p003	libc/ndbm.c	src/libc/ndbm.c	
+p003	libc/openbsd-base64.c	src/libc/openbsd-base64.c	
+p003	libc/openbsd-digest.c	src/libc/openbsd-digest.c	
+p003	libc/openbsd-glob.c	src/libc/openbsd-glob.c	
+p003	libc/openbsd-opts.c	src/libc/openbsd-opts.c	
+p003	libc/openbsd-sha2.c	src/libc/openbsd-sha2.c	
+p003	libc/openbsd-vis.c	src/libc/openbsd-vis.c	
+p003	libc/openbsd.c	src/libc/openbsd.c	
+p003	libc/random.c	src/libc/random.c	
+p003	libc/random48.c	src/libc/random48.c	
+p003	libc/readpassphrase.c	src/libc/readpassphrase.c	
+p003	libc/realpath.c	src/libc/realpath.c	
+p003	libc/regex/LICENSE	src/libc/regex/LICENSE	
+p003	libc/regex/regcomp.c	src/libc/regex/regcomp.c	
+p003	libc/regex/regerror.c	src/libc/regex/regerror.c	
+p003	libc/regex/regexec.c	src/libc/regex/regexec.c	
+p003	libc/regex/tre-mem.c	src/libc/regex/tre-mem.c	
+p003	libc/regex/tre.h	src/libc/regex/tre.h	
+p003	libc/search.c	src/libc/search.c	
+p003	libc/setjmp-aarch64.S	src/libc/setjmp-aarch64.S	
+p003	libc/setjmp.c	src/libc/setjmp.c	
+p003	libc/stdio-extra.c	src/libc/stdio-extra.c	
+p003	libc/stdio-internal.h	src/libc/stdio-internal.h	
+p003	libc/stdio.c	src/libc/stdio.c	
+p003	libc/stdlib-extra.c	src/libc/stdlib-extra.c	
+p003	libc/string-extra.c	src/libc/string-extra.c	
+p003	libc/string.c	src/libc/string.c	
+p003	libc/strto.c	src/libc/strto.c	
+p003	libc/syslog.c	src/libc/syslog.c	
+p003	libc/sysv-ipc.c	src/libc/sysv-ipc.c	
+p003	libc/tempnam.c	src/libc/tempnam.c	
+p003	libc/time-extra.c	src/libc/time-extra.c	
+p003	libc/wide-extra.c	src/libc/wide-extra.c	
+p003	libc/wide.c	src/libc/wide.c	
+p003	libc/xsi-crypto.c	src/libc/xsi-crypto.c	
+p003	libc/xsi-process.c	src/libc/xsi-process.c	
+p023	libc/include/X11/X.h	include/X11/X.h	
+p023	libc/include/X11/Xlib.h	include/X11/Xlib.h	
+p023	libc/include/X11/Xzed.h	include/X11/Xzed.h	
+p023	libc/include/X11/keysym.h	include/X11/keysym.h	
+p023	libc/include/aio.h	include/aio.h	
+p023	libc/include/ar.h	include/ar.h	
+p023	libc/include/arpa/inet.h	include/arpa/inet.h	
+p023	libc/include/assert.h	include/assert.h	
+p023	libc/include/atomic-compiler.h	include/atomic-compiler.h	
+p023	libc/include/catalog-format.h	include/catalog-format.h	
+p023	libc/include/crypt.h	include/crypt.h	
+p023	libc/include/ctype.h	include/ctype.h	
+p023	libc/include/curses.h	include/curses.h	
+p023	libc/include/dev/evdev/input-event-codes.h	include/dev/evdev/input-event-codes.h	
+p023	libc/include/dev/evdev/input.h	include/dev/evdev/input.h	
+p023	libc/include/devctl.h	include/devctl.h	
+p023	libc/include/dirent.h	include/dirent.h	
+p023	libc/include/dlfcn.h	include/dlfcn.h	
+p023	libc/include/endian.h	include/endian.h	
+p023	libc/include/err.h	include/err.h	
+p023	libc/include/errno.h	include/errno.h	
+p023	libc/include/fcntl.h	include/fcntl.h	
+p023	libc/include/features.h	include/features.h	
+p023	libc/include/fenv.h	include/fenv.h	
+p023	libc/include/float.h	include/float.h	
+p023	libc/include/fmtmsg.h	include/fmtmsg.h	
+p023	libc/include/fnmatch.h	include/fnmatch.h	
+p023	libc/include/ftw.h	include/ftw.h	
+p023	libc/include/getopt.h	include/getopt.h	
+p023	libc/include/glob.h	include/glob.h	
+p023	libc/include/grp.h	include/grp.h	
+p023	libc/include/inttypes.h	include/inttypes.h	
+p023	libc/include/langinfo.h	include/langinfo.h	
+p023	libc/include/libgen.h	include/libgen.h	
+p023	libc/include/libintl.h	include/libintl.h	
+p023	libc/include/limits.h	include/limits.h	
+p023	libc/include/link.h	include/link.h	
+p023	libc/include/linux/input-event-codes.h	include/linux/input-event-codes.h	
+p023	libc/include/linux/input.h	include/linux/input.h	
+p023	libc/include/locale-format.h	include/locale-format.h	
+p023	libc/include/locale.h	include/locale.h	
+p023	libc/include/machine/endian.h	include/machine/endian.h	
+p023	libc/include/machine/reg.h	include/machine/reg.h	
+p023	libc/include/math.h	include/math.h	
+p023	libc/include/md5.h	include/md5.h	
+p023	libc/include/mqueue.h	include/mqueue.h	
+p023	libc/include/ndbm.h	include/ndbm.h	
+p023	libc/include/net/ethernet.h	include/net/ethernet.h	
+p023	libc/include/net/if.h	include/net/if.h	
+p023	libc/include/net/route.h	include/net/route.h	
+p023	libc/include/netdb.h	include/netdb.h	
+p023	libc/include/netinet/in.h	include/netinet/in.h	
+p023	libc/include/netinet/in_systm.h	include/netinet/in_systm.h	
+p023	libc/include/netinet/ip.h	include/netinet/ip.h	
+p023	libc/include/netinet/tcp.h	include/netinet/tcp.h	
+p023	libc/include/netpacket/packet.h	include/netpacket/packet.h	
+p023	libc/include/nl_types.h	include/nl_types.h	
+p023	libc/include/paths.h	include/paths.h	
+p023	libc/include/poll.h	include/poll.h	
+p023	libc/include/pthread.h	include/pthread.h	
+p023	libc/include/pty.h	include/pty.h	
+p023	libc/include/pwd.h	include/pwd.h	
+p023	libc/include/readpassphrase.h	include/readpassphrase.h	
+p023	libc/include/regex.h	include/regex.h	
+p023	libc/include/resolv.h	include/resolv.h	
+p023	libc/include/rtld-abi.h	include/rtld-abi.h	
+p023	libc/include/sched.h	include/sched.h	
+p023	libc/include/search.h	include/search.h	
+p023	libc/include/semaphore.h	include/semaphore.h	
+p023	libc/include/setjmp.h	include/setjmp.h	
+p023	libc/include/sha1.h	include/sha1.h	
+p023	libc/include/sha2.h	include/sha2.h	
+p023	libc/include/shadow.h	include/shadow.h	
+p023	libc/include/signal.h	include/signal.h	
+p023	libc/include/spawn.h	include/spawn.h	
+p023	libc/include/stdalign.h	include/stdalign.h	
+p023	libc/include/stdarg.h	include/stdarg.h	
+p023	libc/include/stdatomic.h	include/stdatomic.h	
+p023	libc/include/stdbool.h	include/stdbool.h	
+p023	libc/include/stddef.h	include/stddef.h	
+p023	libc/include/stdint.h	include/stdint.h	
+p023	libc/include/stdio.h	include/stdio.h	
+p023	libc/include/stdlib.h	include/stdlib.h	
+p023	libc/include/stdnoreturn.h	include/stdnoreturn.h	
+p023	libc/include/string.h	include/string.h	
+p023	libc/include/strings.h	include/strings.h	
+p023	libc/include/sys/file.h	include/sys/file.h	
+p023	libc/include/sys/ioctl.h	include/sys/ioctl.h	
+p023	libc/include/sys/ipc.h	include/sys/ipc.h	
+p023	libc/include/sys/mman.h	include/sys/mman.h	
+p023	libc/include/sys/mount.h	include/sys/mount.h	
+p023	libc/include/sys/msg.h	include/sys/msg.h	
+p023	libc/include/sys/param.h	include/sys/param.h	
+p023	libc/include/sys/ptrace.h	include/sys/ptrace.h	
+p023	libc/include/sys/queue.h	include/sys/queue.h	
+p023	libc/include/sys/quota.h	include/sys/quota.h	
+p023	libc/include/sys/random.h	include/sys/random.h	
+p023	libc/include/sys/resource.h	include/sys/resource.h	
+p023	libc/include/sys/select.h	include/sys/select.h	
+p023	libc/include/sys/sem.h	include/sys/sem.h	
+p023	libc/include/sys/shm.h	include/sys/shm.h	
+p023	libc/include/sys/snapshot.h	include/sys/snapshot.h	
+p023	libc/include/sys/socket.h	include/sys/socket.h	
+p023	libc/include/sys/stat.h	include/sys/stat.h	
+p023	libc/include/sys/statvfs.h	include/sys/statvfs.h	
+p023	libc/include/sys/sysctl.h	include/sys/sysctl.h	
+p023	libc/include/sys/time.h	include/sys/time.h	
+p023	libc/include/sys/times.h	include/sys/times.h	
+p023	libc/include/sys/tree.h	include/sys/tree.h	
+p023	libc/include/sys/types.h	include/sys/types.h	
+p023	libc/include/sys/uio.h	include/sys/uio.h	
+p023	libc/include/sys/un.h	include/sys/un.h	
+p023	libc/include/sys/utsname.h	include/sys/utsname.h	
+p023	libc/include/sys/wait.h	include/sys/wait.h	
+p023	libc/include/sys/xattr.h	include/sys/xattr.h	
+p023	libc/include/sysexits.h	include/sysexits.h	
+p023	libc/include/syslog.h	include/syslog.h	
+p023	libc/include/terminfo.h	include/terminfo.h	
+p023	libc/include/termios.h	include/termios.h	
+p023	libc/include/threads.h	include/threads.h	
+p023	libc/include/time.h	include/time.h	
+p023	libc/include/uchar.h	include/uchar.h	
+p023	libc/include/ulimit.h	include/ulimit.h	
+p023	libc/include/unistd.h	include/unistd.h	
+p023	libc/include/util.h	include/util.h	
+p023	libc/include/utmpx.h	include/utmpx.h	
+p023	libc/include/vis.h	include/vis.h	
+p023	libc/include/vulkan/API-PROVENANCE.md	include/vulkan/API-PROVENANCE.md	
+p023	libc/include/vulkan/LICENSE-API	include/vulkan/LICENSE-API	
+p023	libc/include/vulkan/vk_platform.h	include/vulkan/vk_platform.h	
+p023	libc/include/vulkan/vulkan.h	include/vulkan/vulkan.h	
+p023	libc/include/vulkan/vulkan_core.h	include/vulkan/vulkan_core.h	
+p023	libc/include/vulkan/vulkan_external.h	include/vulkan/vulkan_external.h	
+p023	libc/include/vulkan/vulkan_wayland.h	include/vulkan/vulkan_wayland.h	
+p023	libc/include/wayland-client-core.h	include/wayland-client-core.h	
+p023	libc/include/wayland-client-protocol.h	include/wayland-client-protocol.h	
+p023	libc/include/wayland-client.h	include/wayland-client.h	
+p023	libc/include/wayland-util.h	include/wayland-util.h	
+p023	libc/include/wayland/API-PROVENANCE.md	include/wayland/API-PROVENANCE.md	
+p023	libc/include/wayland/wayland-client-core.h	include/wayland/wayland-client-core.h	
+p023	libc/include/wayland/wayland-client-protocol.h	include/wayland/wayland-client-protocol.h	
+p023	libc/include/wayland/wayland-client.h	include/wayland/wayland-client.h	
+p023	libc/include/wayland/wayland-util.h	include/wayland/wayland-util.h	
+p023	libc/include/wayland/xdg-shell-client-protocol.h	include/wayland/xdg-shell-client-protocol.h	
+p023	libc/include/wayland/zed-gpu-buffer-v1-client-protocol.h	include/wayland/zed-gpu-buffer-v1-client-protocol.h	
+p023	libc/include/wchar.h	include/wchar.h	
+p023	libc/include/wctype.h	include/wctype.h	
+p023	libc/include/xdg-shell-client-protocol.h	include/xdg-shell-client-protocol.h	
+p004	include/boot/parameter-handoff.h	include/kern/boot/parameter-handoff.h	
+p004	include/boot/parameters.h	include/kern/boot/parameters.h	
+p004	include/boot/pc98-handoff.h	include/kern/boot/pc98-handoff.h	
+p004	include/boot/provenance.h	include/kern/boot/provenance.h	
+p004	include/kern/rpi4/boot.h	include/kern/boot/rpi4.h	
+p004	include/kern/sun4u/boot.h	include/kern/boot/sun4u.h	

@@ -91,6 +91,9 @@ struct rtld_object {
 	const char *runpath;
 	struct rtld_object *loader_parent;
 	unsigned relative_done;
+	/* The writable load segment the last relocation target fell in. */
+	uintptr_t relocation_window_start;
+	uintptr_t relocation_window_end;
 	unsigned relocating;
 	unsigned relocated;
 	unsigned initializing;
@@ -120,6 +123,17 @@ struct rtld_object {
 struct rtld_tlsdesc {
 	uintptr_t resolver;
 	uintptr_t argument;
+};
+
+/*
+ * A name being looked up, with its two hashes computed once rather than
+ * once for every object the search visits.
+ */
+struct rtld_symbol_name {
+	const char *name;
+	uint32_t gnu_hash;
+	uint32_t elf_hash;
+	unsigned hashed;
 };
 
 #define RTLD_HANDLE_MAX 64U
@@ -186,7 +200,9 @@ static uintptr_t static_tls_distance;
 static void *static_tls_template;
 static size_t static_tls_template_size;
 static size_t static_tls_alignment = 1;
+#if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_I386)
 static unsigned static_tls_sealed;
+#endif
 static struct __rtld_tcb *rtld_threads;
 static uint32_t next_object_generation = 1;
 
@@ -341,7 +357,9 @@ static uintptr_t current_tid(void);
 static void loader_unlock(void);
 static void *allocate_tls_block(const struct rtld_tls_module *module);
 static void layout_static_tls(void);
+#if defined(HAL_ARCH_AMD64)
 static uintptr_t static_tls_displacement(const struct rtld_object *owner);
+#endif
 static void initialize_object(struct rtld_object *object);
 static void clear_loader_error(void);
 static void set_loader_error(const char *message);
@@ -431,12 +449,13 @@ static uintptr_t symbol_value(struct rtld_object *object, const Elf_Sym *symbol)
 static uintptr_t lookup_symbol_version(const char *name, const char *required_version, int weak);
 static int reserved_loader_symbol(const char *name);
 static Elf_Sym *lookup_in_object_version(struct rtld_object *object, const char *name, const char *required_version);
-static Elf_Sym *lookup_gnu_hash(struct rtld_object *object, const char *name, const char *required_version);
-static uint32_t gnu_hash_name(const char *name);
+static Elf_Sym *lookup_in_object_hashed(struct rtld_object *object, struct rtld_symbol_name *symbol_name, const char *required_version);
+static Elf_Sym *lookup_gnu_hash(struct rtld_object *object, struct rtld_symbol_name *symbol_name, const char *required_version);
+static int relocation_target_writable(struct rtld_object *object, uintptr_t address, size_t size);
+static void hash_symbol_name(struct rtld_symbol_name *symbol_name);
 static Elf_Sym *match_symbol(struct rtld_object *object, uint32_t index, const char *name, const char *required_version);
 static int symbol_version_matches(struct rtld_object *object, uint32_t symbol_index, const char *required_version);
 static const char *defined_version_name(struct rtld_object *object, uint16_t version_index);
-static uint32_t elf_hash(const char *name);
 static const char *relocation_version_name(struct rtld_object *object, uint32_t symbol_index);
 static const char *required_version_name(struct rtld_object *object, uint16_t version_index);
 static Elf_Sym *resolve_tls_symbol(struct rtld_object *object, uint32_t index, struct rtld_object **owner);
@@ -1690,6 +1709,19 @@ allocate_tls_block(
  * every other module loaded at startup.  The result is a template image of
  * the whole area, which each thread copies into place as it is created.
  */
+#if !defined(HAL_ARCH_AMD64) && !defined(HAL_ARCH_I386)
+static void
+layout_static_tls(
+	void)
+{
+	/*
+	 * A variant I architecture counts upwards from the thread pointer and
+	 * reserves the control block at its base, which the kern_tls_prefix
+	 * contract cannot describe.  The kernel declines static TLS there for
+	 * the same reason, so every module stays dynamic.
+	 */
+}
+#else
 static void
 layout_static_tls(
 	void)
@@ -1706,17 +1738,6 @@ layout_static_tls(
 	if (static_tls_sealed)
 		return;
 	count = 0;
-
-#if !defined(HAL_ARCH_AMD64) && !defined(HAL_ARCH_I386)
-	/*
-	 * A variant I architecture counts upwards from the thread pointer and
-	 * reserves the control block at its base, which the kern_tls_prefix
-	 * contract cannot describe.  The kernel declines static TLS there for
-	 * the same reason, so every module stays dynamic.
-	 */
-	static_tls_sealed = 1;
-	return;
-#else
 
 	/* Handles the main object condition. */
 	if (main_object != NULL && main_object->tls_module_id != 0)
@@ -1782,8 +1803,10 @@ layout_static_tls(
 	static_tls_distance = offset;
 	static_tls_template = image;
 	static_tls_template_size = (size_t)offset;
-#endif
 }
+#endif
+
+#if defined(HAL_ARCH_AMD64)
 
 /*
  * Supports the static tls displacement operation.
@@ -1810,6 +1833,8 @@ static_tls_displacement(
 	/* Returns the computed result. */
 	return (uintptr_t)0 - (uintptr_t)module->static_offset;
 }
+
+#endif
 
 /* Supports the initialize object operation. */
 static void
@@ -3270,6 +3295,54 @@ object_contains(
 	return 0;
 }
 
+/*
+ * Reports whether a relocation may write the bytes at address.  Targets
+ * come in address order, so the writable segment the last one fell in
+ * answers nearly every check without the search over the headers.
+ */
+static int
+relocation_target_writable(
+	struct rtld_object *object,
+	uintptr_t address,
+	size_t size)
+{
+	uintptr_t start, end;
+	unsigned i;
+
+	/* Handles the address condition. */
+	if (address > UINTPTR_MAX - size)
+		return 0;
+
+	/* Handles the address inside the last segment. */
+	if (address >= object->relocation_window_start &&
+	    address + size <= object->relocation_window_end)
+		return 1;
+
+	/* Process each element required by the operation. */
+	for (i = 0; i < object->phnum; i++) {
+		/* Checks the current object. */
+		if (object->phdr[i].p_type != PT_LOAD ||
+		    (object->phdr[i].p_flags & PF_W) == 0)
+			continue;
+		start = object->base + (uintptr_t)object->phdr[i].p_vaddr;
+
+		/* Handles the uintptr t condition. */
+		if ((uintptr_t)object->phdr[i].p_memsz > UINTPTR_MAX - start)
+			continue;
+		end = start + (uintptr_t)object->phdr[i].p_memsz;
+
+		/* Handles the address condition. */
+		if (address >= start && address + size <= end) {
+			object->relocation_window_start = start;
+			object->relocation_window_end = end;
+			return 1;
+		}
+	}
+
+	/* Reports that no result is available. */
+	return 0;
+}
+
 /* Supports the object readable bytes operation. */
 static size_t
 object_readable_bytes(
@@ -3740,13 +3813,12 @@ apply_value(
 		rtld_fatal("relocation target overflow");
 	address = object->base + offset;
 
-	/* Handles a failed object contains operation. */
-	if (!object_contains(object, address,
+	/* Handles a failed relocation target writable operation. */
+	if (!relocation_target_writable(object, address,
 #if defined(HAL_ARCH_SPARCV9)
 			     type == R_SPARC_JMP_SLOT ? 8U * sizeof(uint32_t) :
 #endif
-						      sizeof(uintptr_t),
-			     PF_W))
+						      sizeof(uintptr_t)))
 		rtld_fatal("relocation target is not writable");
 	where = (uintptr_t *)address;
 
@@ -4047,13 +4119,17 @@ lookup_symbol_version(
 	int weak)
 {
 	uintptr_t function_result;
+	struct rtld_symbol_name symbol_name;
 	struct rtld_object *object;
 	Elf_Sym *symbol;
 	unsigned i;
 
+	symbol_name.name = name;
+	symbol_name.hashed = 0;
+
 	/* Handles the reserved loader symbol condition. */
 	if (reserved_loader_symbol(name)) {
-		symbol = lookup_in_object_version(interpreter_object, name,
+		symbol = lookup_in_object_hashed(interpreter_object, &symbol_name,
 						  required_version);
 
 		/* Handles the symbol availability. */
@@ -4070,7 +4146,8 @@ lookup_symbol_version(
 			return 0;
 		rtld_fatal("missing private loader symbol");
 	}
-	symbol = lookup_in_object_version(main_object, name, required_version);
+	symbol = lookup_in_object_hashed(main_object, &symbol_name,
+					 required_version);
 
 	/* Handles the symbol availability. */
 	if (symbol != NULL) {
@@ -4089,8 +4166,8 @@ lookup_symbol_version(
 		if (!object->active || object->unloading ||
 		    object == main_object || object == interpreter_object)
 			continue;
-		symbol =
-		    lookup_in_object_version(object, name, required_version);
+		symbol = lookup_in_object_hashed(object, &symbol_name,
+						 required_version);
 
 		/* Handles the symbol availability. */
 		if (symbol != NULL) {
@@ -4101,7 +4178,7 @@ lookup_symbol_version(
 			return function_result;
 		}
 	}
-	symbol = lookup_in_object_version(interpreter_object, name,
+	symbol = lookup_in_object_hashed(interpreter_object, &symbol_name,
 					  required_version);
 
 	/* Handles the symbol availability. */
@@ -4136,6 +4213,10 @@ reserved_loader_symbol(
 	    "__rtld_process_fini"};
 	size_t i;
 
+	/* Every reserved name begins with two underscores. */
+	if (name[0] != '_' || name[1] != '_')
+		return 0;
+
 	/* Process each remaining element. */
 	for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
 		/* Handles a failed rtld strcmp operation. */
@@ -4154,7 +4235,24 @@ lookup_in_object_version(
 	const char *name,
 	const char *required_version)
 {
-	Elf_Sym *function_result;
+	struct rtld_symbol_name symbol_name;
+
+	symbol_name.name = name;
+	symbol_name.hashed = 0;
+
+	return lookup_in_object_hashed(object, &symbol_name, required_version);
+}
+
+/*
+ * Looks a name up in one object, computing each hash the first time an
+ * object needs it and keeping it for the objects searched after.
+ */
+static Elf_Sym *
+lookup_in_object_hashed(
+	struct rtld_object *object,
+	struct rtld_symbol_name *symbol_name,
+	const char *required_version)
+{
 	Elf_Sym *symbol;
 	uint32_t buckets, index, *bucket, *chain;
 	unsigned traversed;
@@ -4164,29 +4262,25 @@ lookup_in_object_version(
 	/* Handles the object availability. */
 	if (object == NULL || !object->active || object->unloading ||
 	    (object->hash == NULL && object->gnu_bloom == NULL))
-
-		/* Reports that no result is available. */
 		return NULL;
 
 	/* Handles the gnu bloom availability. */
-	if (object->gnu_bloom != NULL) {
-		/* Obtains the lookup gnu hash result. */
-		function_result = lookup_gnu_hash(object, name, required_version);
+	if (object->gnu_bloom != NULL)
+		return lookup_gnu_hash(object, symbol_name, required_version);
 
-		/* Returns the computed result. */
-		return function_result;
-	}
-
-	/* Process each remaining element. */
+	/* Computes the hashes the first time an object needs one. */
+	if (!symbol_name->hashed)
+		hash_symbol_name(symbol_name);
 	buckets = object->hash[0];
 	bucket = object->hash + 2;
 	chain = bucket + buckets;
-	index = bucket[elf_hash(name) % buckets];
+	index = bucket[symbol_name->elf_hash % buckets];
 	while (index != STN_UNDEF && traversed++ < object->symbol_count) {
 		/* Checks the current index. */
 		if (index >= object->symbol_count)
 			rtld_fatal("corrupt symbol hash chain");
-		symbol = match_symbol(object, index, name, required_version);
+		symbol = match_symbol(object, index, symbol_name->name,
+				      required_version);
 
 		/* Handles the symbol availability. */
 		if (symbol != NULL)
@@ -4206,7 +4300,7 @@ lookup_in_object_version(
 static Elf_Sym *
 lookup_gnu_hash(
 	struct rtld_object *object,
-	const char *name,
+	struct rtld_symbol_name *symbol_name,
 	const char *required_version)
 {
 	uint32_t chain_hash;
@@ -4216,7 +4310,10 @@ lookup_gnu_hash(
 	Elf_Addr mask, bloom;
 	uint32_t index;
 
-	hash = gnu_hash_name(name);
+	/* Computes the hashes the first time an object needs one. */
+	if (!symbol_name->hashed)
+		hash_symbol_name(symbol_name);
+	hash = symbol_name->gnu_hash;
 
 	bloom = object->gnu_bloom[(hash / word_bits) &
 				  (object->gnu_bloom_count - 1U)];
@@ -4244,8 +4341,8 @@ lookup_gnu_hash(
 
 		/* Handles the chain hash condition. */
 		if ((chain_hash | 1U) == (hash | 1U)) {
-			symbol =
-			    match_symbol(object, index, name, required_version);
+			symbol = match_symbol(object, index, symbol_name->name,
+					      required_version);
 
 			/* Handles the symbol availability. */
 			if (symbol != NULL)
@@ -4259,20 +4356,30 @@ lookup_gnu_hash(
 	}
 }
 
-/* Supports the gnu hash name operation. */
-static uint32_t
-gnu_hash_name(
-	const char *name)
+/*
+ * Computes both hashes of a name in one pass: a search usually meets
+ * objects with each kind of table, and the names are long.
+ */
+static void
+hash_symbol_name(
+	struct rtld_symbol_name *symbol_name)
 {
-	uint32_t hash;
+	const unsigned char *cursor;
+	uint32_t gnu, elf, high;
 
-	/* Continue while the operation condition remains true. */
-	hash = 5381U;
-	while (*name != '\0')
-		hash = hash * 33U + (unsigned char)*name++;
-
-	/* Returns the computed result. */
-	return hash;
+	gnu = 5381U;
+	elf = 0;
+	for (cursor = (const unsigned char *)symbol_name->name; *cursor != '\0';
+	     cursor++) {
+		gnu = gnu * 33U + *cursor;
+		elf = (elf << 4) + *cursor;
+		high = elf & 0xf0000000U;
+		elf ^= high >> 24;
+		elf &= ~high;
+	}
+	symbol_name->gnu_hash = gnu;
+	symbol_name->elf_hash = elf;
+	symbol_name->hashed = 1;
 }
 
 /* Supports the match symbol operation. */
@@ -4392,29 +4499,6 @@ defined_version_name(
 
 	/* Reports that no result is available. */
 	return NULL;
-}
-
-/* Supports the elf hash operation. */
-static uint32_t
-elf_hash(
-	const char *name)
-{
-	uint32_t hash, high;
-
-	/* Continue while the operation condition remains true. */
-	hash = 0;
-	while (*name != '\0') {
-		hash = (hash << 4) + (unsigned char)*name++;
-		high = hash & 0xf0000000U;
-
-		/* Handles the high condition. */
-		if (high != 0)
-			hash ^= high >> 24;
-		hash &= ~high;
-	}
-
-	/* Returns the computed result. */
-	return hash;
 }
 
 /* Supports the relocation version name operation. */

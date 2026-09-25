@@ -14,6 +14,7 @@
 #include <string.h>
 #include <time.h>
 #include <stdlib.h>
+#include <sys/ioctl.h>
 #include <poll.h>
 #include <uapi/gpu.h>
 #include <uapi/gpu-job.h>

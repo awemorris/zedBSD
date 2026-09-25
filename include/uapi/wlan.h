@@ -13,7 +13,7 @@ extern "C" {
 #endif
 
 #include <stdint.h>
-#include <sys/ioctl.h>
+#include <uapi/ioctl.h>
 #include <uapi/netif.h>
 
 #define KERN_WLAN_IOCTL_GROUP 'W'

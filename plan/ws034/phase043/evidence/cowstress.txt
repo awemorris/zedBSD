@@ -1,0 +1,3 @@
+COWSTRESS PASS bad=0
+pipes-done
+     24

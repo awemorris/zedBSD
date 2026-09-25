@@ -3,14 +3,13 @@
 # WS031: i915ネイティブVulkan実行器
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-09-23 ユーザー判断で継続。p001〜p014 cleared、p015〜p018 planning・後回し）
+Status: incomplete
 Primary Milestone: MG006
 Related Milestones: MG003
 Objectives: O1, O2
-Parent: [Master](https://github.com/awemorris/zedBSD/issues/1)
-Queue: none（実行中の項目なし。統合回帰は p015 の最後）
-Design: plan/ws031/native-vulkan-design.md
-Handover: 本文の「引き継ぎ（2026-09-23）」節
+Parent: [Master](../master.md)
+Queue: なし
+Resume point: p001〜p014 cleared、p015〜p048 planning。WS035 で見つかった GPU 基盤の問題も受ける
 <!-- awesome-plan-current:end -->
 
 ## 単一目標
@@ -61,10 +60,54 @@ WS029のdisplay/scanout後続（[ws029-f003](https://github.com/awemorris/zedBSD
 | ws031-p012 | レビュー: 静的解析・規約全文確認・回帰・制限整理（[phase012](phase012/phase.md)） | cleared | 180 分 |
 | ws031-p013 | Wayland モデルビューア（Venus）: FBX 変換・zwl の seat/pointer/keyboard・mview（[phase013](phase013/phase.md)） | cleared（Venus） | 3 日 |
 | ws031-p014 | モデルビューアを i915 で・シェーダー一通り: executor（索引描画・mip・push・blend）と compiler（制御フロー・discard・行列・UBO）（[phase014](phase014/phase.md)） | cleared（A0・A・B・C・D・E1・E2・E3・性能第 2 回。残りは p015〜p018 へ） | 約 7.5 日（A–E） |
-| ws031-p015 | 準正常系・異常系の確認と小さな欠落の修正（p014 の後回し一覧から）（[phase015](phase015/phase.md)） | planning（後回し） | 2 日 |
-| ws031-p016 | executor の未実装機能: mip/layer への描画・MRT・logic op/dual source・swizzle・descriptor 配列・VS sampler・UBO dataport・tiling（[phase016](phase016/phase.md)） | planning（後回し） | 5〜7 日 |
-| ws031-p017 | compiler の未実装機能: 整数 varying/属性・16/64 bit・local 配列/構造体・動的 index・switch・関数・SWSB・spill 改善（[phase017](phase017/phase.md)） | planning（後回し） | 6〜8 日 |
-| ws031-p018 | 性能の構造改善: 非同期 executor・割込み待ち・scheduler wakeup・frame copy の削減・present mode（[phase018](phase018/phase.md)） | planning（後回し） | 5〜8 日 |
+| ws031-p015 | 準正常系・異常系の確認と小さな欠落の修正（[phase015](phase015/phase.md)） | planning / canceled（2026-09-23 p022〜p029 へ分割） | — |
+| ws031-p016 | executor の未実装機能（[phase016](phase016/phase.md)） | planning / canceled（2026-09-23 p030〜p037 へ分割） | — |
+| ws031-p017 | compiler の未実装機能（[phase017](phase017/phase.md)） | planning / canceled（2026-09-23 p038〜p043 へ分割） | — |
+| ws031-p018 | 性能の構造改善（[phase018](phase018/phase.md)） | planning / canceled（2026-09-23 p044〜p047 と p027 へ分割） | — |
+
+### 残課題のブレークダウン（2026-09-23）
+
+p015〜p018は大きすぎるため、1 Queueのスロットで終わる大きさに分割した。元のPhaseは分割による取消し
+（canceled）とし、確認項目の正本は元の `phase015`〜`phase018/phase.md` に残す。新しいPhaseの範囲は
+その該当項目である。executor・compiler・性能の実装Phaseの前には、方針（デバイスドライバには設計Phase）に
+従って設計Phaseを置く。設計はOpus 5 Highで自動実行し、敵対的レビューも自動で行う。
+
+| Combined ID | Phase | Status | 依存 | 元 | 主なファイル範囲 |
+| --- | --- | --- | --- | --- | --- |
+| ws031-p022 | 確認と修正: 画像・samplerの境界（小さいmip、非正方・奇数寸法、15 level、`maxLod < minLod`、端数LOD） | planning | WS035のrefactor（p002〜p004、p023） | p015 | `render/` |
+| ws031-p023 | 確認と修正: blend・UBOの境界（`SRC_ALPHA_SATURATE`等、float target、動的定数、dynamic offset範囲外、短いUBO range） | planning | 同上 | p015 | `render/` |
+| ws031-p024 | 確認と修正: compilerの境界（0除算・`INT_MIN/-1`、mod・FRem、ループ内discard・sample、shift、入れ子、SBE属性0、spillの組合せ） | planning | 同上 | p015 | `compiler/` |
+| ws031-p025 | 異常系: 範囲外index/offset、command buffer 65536超、descriptor上限、終わらないループ（hangの扱いの記録） | planning | 同上 | p015 | `render/`、`vk/` |
+| ws031-p026 | 小さな欠落: uint8 index、非整列 `vkCmdCopyBuffer`、viewport index>0・負の高さ、compile失敗時のpipeline漏れ、discardのHALT、host試験（ws031のdisplay 6件とws029）が `perf.c` 未linkで `drv_i915_perf_*` のlinkに失敗する件（ws035-p002で発見） | planning | 同上 | p015 | `render/`、`compiler/` |
+| ws031-p027 | present mode（FIFO/MAILBOX/IMMEDIATE）でvsyncを選ぶ。UAPIで運べなければ変更を事前に提示 | planning | 同上 | p015・p018 | `libvulkan`、`zwl`、i915 display |
+| ws031-p028 | 入力とmview: PS/2 keyboardのkeyがzwlに届かない件、QMP abortの回避記録、mviewの再現性・blend material・pixel shadingのLCD写真 | planning | 同上 | p015 | `zwl`、input |
+| ws031-p029 | WS031の統合回帰（p014の回帰一覧を1回） | planning | p022〜p028 | p015 | 試験のみ |
+| ws031-p019 | 設計: executorの未実装機能（p030〜p037） | planning | p022, p023, p025 | 新規 | 文書 |
+| ws031-p020 | 設計: compilerの未実装機能（p038〜p043） | planning | p024 | 新規 | 文書 |
+| ws031-p021 | 設計: 性能の構造（p044〜p047）。schedulerの扱い（本WSか新WSか）の判断を含む | planning | p029 | 新規 | 文書 |
+| ws031-p030 | executor: mip level 0以外・array layerへの描画とattachment clear | planning | p019 | p016 | `render/` |
+| ws031-p031 | executor: 複数colour attachment（MRT） | planning | p019 | p016 | `render/` |
+| ws031-p032 | executor: blendのlogic op・dual source | planning | p019 | p016 | `render/` |
+| ws031-p033 | executor: image viewのformat読替え（MUTABLE_FORMAT）・component swizzle・usage照合 | planning | p019 | p016 | `render/`、`vk/` |
+| ws031-p034 | executor: sampler（anisotropy、depth compare、border colour、unnormalized座標）、mirrored blit | planning | p019 | p016 | `render/` |
+| ws031-p035 | executor: descriptor配列・`vkUpdateDescriptorSets` のcopy・VSのsampled image | planning | p019 | p016 | `render/`、`vk/` |
+| ws031-p036 | executor: UBOのdataport読み出し（push dataの上限超え）とdraw間の順序 | planning | p019 | p016 | `render/`、`compiler/` |
+| ws031-p037 | executor: tiling（Y-tile/Tile4のoptimal image、copy・blit・sampling）。設計で更に分けてよい | planning | p019 | p016 | `render/`、gem |
+| ws031-p038 | compiler: 整数varying（Flat）と整数頂点属性 | planning | p020 | p017 | `compiler/`、`render/` |
+| ws031-p039 | compiler: 16 bit・64 bitの整数と浮動小数 | planning | p020 | p017 | `compiler/` |
+| ws031-p040 | compiler: localの配列・構造体、動的index、行列の`OpPhi`、ループ内で初めてstoreするlocal | planning | p020 | p017 | `compiler/` |
+| ws031-p041 | compiler: `OpSwitch`、関数呼出し（inline化）、ループ内return、trip count 0の形 | planning | p020 | p017 | `compiler/` |
+| ws031-p042 | compiler: SWSBを依存に基づく指定へ、命令の並べ替え | planning | p020, p038〜p041 | p017 | `compiler/` |
+| ws031-p043 | compiler: spillの改善（rematerialization、cost重み付きvictim、再lowerの削減） | planning | p020 | p017 | `compiler/` |
+| ws031-p044 | 性能: 完了待ちをCSBのbusy-pollからuser interruptとwaitqへ | planning | p021 | p018 | engine、request |
+| ws031-p045 | 性能: 非同期executor（submitを即座に返す、fence/semaphoreはGPU完了でsignal、heapの多重化と寿命） | planning | p021, p044, p030〜p037 | p018 | `render/`、`vk/` |
+| ws031-p046 | 性能: frame copyの削減（swapchain imageのaliasing、zdesktopの拡大copyをplane scalerかzero-copy flipへ） | planning | p021, p045, p027 | p018 | `libvulkan`、zdesktop、display |
+| ws031-p047 | 性能: scheduler wakeupの遅延（p021で本WSに収まると判断した場合だけ。収まらなければ新WSへ） | planning | p021 | p018 | kern（範囲はp021で決める） |
+| ws031-p048 | 最終確認: 変更したsource全体の全文規約確認・静的確認・統合回帰 | planning | p022〜p047 | 新規 | 全体 |
+| ws031-p049 | 失敗する GPU の host 試験 3 件の原因を調べて直す（2026-09-24 ws034-p049 の一掃で発見。今の source に対して build でき、結果が失敗する）: `plan/ws014/tests/run-venus-edid-test.sh`（`mode.count == 3` の assert）、`plan/ws030/tests/run-libvulkan-job-race-test.sh`（`race_wait` の `status == 0` の assert、112 秒で止まる）、`plan/ws030/tests/run-libvulkan-external-fence-test.sh`（`vulkan_sync_job_reserve` の確保 72 byte が LeakSanitizer で漏れ）。製品の不具合か試験の古さかを切り分け、試験が古いだけなら削除する | planning | — | 新規 | libvulkan、venus |
+
+並行の目安: `render/` 系と `compiler/` 系のPhaseは同じQueueで並行できる。実機（5330）を使う試験は
+`flock /tmp/i915-hw.lock` で1つずつ流れるので、並行しても実機の実行は直列になる。
 
 段階的な受け入れの単位は Phase 境界と一致しない。増分A（三角形）は複数モジュールの最小経路を横断する最初の実機到達点で、Phase 計画時に「増分Aで必要な関数」を先行実装対象として明示する。増分B・Cで texture/depth・実shader を足す。
 

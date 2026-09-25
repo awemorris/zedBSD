@@ -1,0 +1,12 @@
+subject=CN=curl.se
+issuer=C=US, O=Let's Encrypt, CN=YR2
+notAfter=Nov  2 14:43:23 2026 GMT
+sha256 Fingerprint=4C:0E:98:00:3B:45:66:A7:21:95:10:D5:AC:B1:80:58:D8:35:3F:38:08:56:AA:47:D8:B3:4E:B5:C0:6E:DC:FE
+subject=C=US, O=Let's Encrypt, CN=YR2
+issuer=C=US, O=ISRG, CN=Root YR
+notAfter=Sep  2 23:59:59 2028 GMT
+sha256 Fingerprint=23:8B:85:A0:09:9C:65:B9:70:47:7D:57:24:F1:A1:D4:75:CE:50:58:CF:FE:4E:FA:87:33:89:9B:DB:86:3C:47
+subject=C=US, O=ISRG, CN=Root YR
+issuer=C=US, O=Internet Security Research Group, CN=ISRG Root X1
+notAfter=Sep  2 23:59:59 2032 GMT
+sha256 Fingerprint=07:26:39:D0:B1:40:D5:BF:FA:E1:6A:D9:C3:F6:CC:60:86:04:06:21:F5:1E:E6:1A:6D:46:A8:91:5C:07:CF:76

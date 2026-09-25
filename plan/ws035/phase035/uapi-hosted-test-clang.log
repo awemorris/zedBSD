@@ -1,0 +1,9 @@
+host-build: PASS
+host-run: PASS
+host-uapi-dir-build: PASS
+host-uapi-dir-run: PASS
+host-pedantic: PASS
+native: PASS
+libc-native: PASS
+libc-without-native: PASS (rejected: error: "the zedBSD C library headers are on the include path of a host build; define KERN_UAPI_NATIVE)
+uapi-hosted test: PASS

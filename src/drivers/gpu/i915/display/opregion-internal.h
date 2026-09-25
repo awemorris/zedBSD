@@ -44,7 +44,7 @@
 /* This translation unit is compiled in the OpRegion environment. */
 #define I915_DISPLAY_WORLD_OPREGION 1
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
 

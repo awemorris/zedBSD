@@ -16,9 +16,9 @@
  */
 
 #include "wlan-l2.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 #define WLAN_FC_TYPE_MASK       0x000cU
 #define WLAN_FC_DATA            0x0008U
@@ -96,13 +96,13 @@ wlan_l2_build_data(
 		return ENOSPC;
 
 	/* Writes the data header: frame control, BSSID, station, destination. */
-	memset(mpdu, 0, required);
+	kern_memset(mpdu, 0, required);
 	if (protected_frame)
 		frame_control |= WLAN_FC_PROTECTED;
 	store_le16(mpdu, frame_control);
-	memcpy(mpdu + 4U, bssid, 6U);
-	memcpy(mpdu + 10U, station, 6U);
-	memcpy(mpdu + 16U, ethernet, 6U);
+	kern_memcpy(mpdu + 4U, bssid, 6U);
+	kern_memcpy(mpdu + 10U, station, 6U);
+	kern_memcpy(mpdu + 16U, ethernet, 6U);
 
 	/* Adds the CCMP header of a protected frame. */
 	offset = WLAN_L2_DATA_HEADER_SIZE;
@@ -120,7 +120,7 @@ wlan_l2_build_data(
 	mpdu[offset++] = 0x00U;
 	mpdu[offset++] = ethernet[12U];
 	mpdu[offset++] = ethernet[13U];
-	memcpy(mpdu + offset, ethernet + WLAN_L2_ETHERNET_HEADER_SIZE,
+	kern_memcpy(mpdu + offset, ethernet + WLAN_L2_ETHERNET_HEADER_SIZE,
 	    payload_length);
 	*mpdu_length = required;
 
@@ -268,7 +268,7 @@ wlan_l2_parse_data(
 	/* Requires LLC/SNAP and a payload that fits an Ethernet frame. */
 	if (mpdu_length < offset + WLAN_L2_LLC_SNAP_SIZE)
 		return EINVAL;
-	if (memcmp(mpdu + offset, llc_prefix, sizeof(llc_prefix)) != 0)
+	if (kern_memcmp(mpdu + offset, llc_prefix, sizeof(llc_prefix)) != 0)
 		return EPROTONOSUPPORT;
 	payload_length = mpdu_length - offset - WLAN_L2_LLC_SNAP_SIZE;
 	if (payload_length > WLAN_L2_ETHERNET_MAX -
@@ -278,11 +278,11 @@ wlan_l2_parse_data(
 		return ENOSPC;
 
 	/* Writes the Ethernet frame: destination, source, type, payload. */
-	memcpy(ethernet, mpdu + 4U, 6U);
-	memcpy(ethernet + 6U, mpdu + 16U, 6U);
+	kern_memcpy(ethernet, mpdu + 4U, 6U);
+	kern_memcpy(ethernet + 6U, mpdu + 16U, 6U);
 	ethernet[12U] = mpdu[offset + 6U];
 	ethernet[13U] = mpdu[offset + 7U];
-	memcpy(ethernet + WLAN_L2_ETHERNET_HEADER_SIZE,
+	kern_memcpy(ethernet + WLAN_L2_ETHERNET_HEADER_SIZE,
 	    mpdu + offset + WLAN_L2_LLC_SNAP_SIZE, payload_length);
 
 	/* Advances the replay counter only for an accepted frame. */

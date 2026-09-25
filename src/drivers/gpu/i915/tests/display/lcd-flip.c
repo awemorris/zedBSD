@@ -24,12 +24,12 @@
 #include "../../ggtt.h"
 #include "../../i915.h"
 #include "../../memory.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 /* The two pictures of LCD-C. */
 #define I915_TEST_LCDC_PATTERN_A	121U
@@ -120,7 +120,7 @@ drv_i915_test_display_lcdc(
 	/* The run; the hardware must be idle and the inputs complete. */
 	k = drv_i915_test_lcd_start(display, NULL);
 	d = k->d;
-	memset(env, 0, sizeof(*env));
+	kern_memset(env, 0, sizeof(*env));
 	preflight_error = drv_i915_lcd_kernel_preflight(k);
 	fill_error = 0;
 	if (preflight_error == 0)

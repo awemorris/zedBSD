@@ -1,6 +1,6 @@
 /* WS004-p011 host model for per-endpoint xHCI request ownership. */
-#include <drivers/pci-xhci-lifecycle.h>
-#include <drivers/usb.h>
+#include <drivers/pci/pci-xhci-lifecycle.h>
+#include <drivers/usb/usb.h>
 
 #include <assert.h>
 #include <errno.h>

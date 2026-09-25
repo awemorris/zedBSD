@@ -8,7 +8,7 @@
  * PC/AT MBR primary partition scheme.
  */
 
-#include <drivers/disklabel.h>
+#include <drivers/disklabel/disklabel.h>
 
 #define MBR_TABLE 0x1beU
 #define MBR_ENTRY_SIZE 16U

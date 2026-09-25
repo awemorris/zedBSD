@@ -1,124 +1,46 @@
-# WS023: i386/amd64 HAL coding-style conformance
+<!-- awesome-plan project=zedbsd record=ws023 -->
 
-<!-- traceability:start -->
+# WS023: i386/amd64 HAL のコーディング規約準拠
 
-## Goal traceability
+<!-- awesome-plan-current:start -->
+Status: completed
+Completed: 2026-09-03（q067）
+Primary Milestone: MG001
+Related Milestones: MG008
+Objectives: O4, O5
+Parent: [Master](../master.md)
+Queue: なし
+Resume point: なし（新しい要求は新しい WS として立てる。この WS は再開しない）
+<!-- awesome-plan-current:end -->
 
-- Primary Milestone: **MG001 — 継続開発できる基盤が揃う**
-- Related Milestones: MG008
-- Objectives: O4, O5
-- 貢献する成果: x86 HALの規約準拠と可読性を整える。
-- 上位定義: [MasterのObjectives / Milestone Goals](https://github.com/awemorris/zedBSD/issues/1)
+## 目標
 
-既存Phaseは本WSを親として上位成果に接続する。Primaryは分類と責任の所在であり、
-各PhaseがRelatedすべてを満たすという意味ではない。成果・検証・限界は各Phaseの
-現行記録を根拠とする。今回の対応付けは状態変更・未定義作業の追加・実行許可ではない。
+x86 の HAL の source を plan/coding-style.md に合わせる。
 
-<!-- traceability:end -->
+## 結果
 
+i386 の core・割り込み・VM・task、PC/AT と PC-98 の BSP、amd64 の各 module・割り込み・page・SMP・task・boot・APIC・time・address space・console・input を規約に合わせ、回帰を監査した。
 
-Last updated: 2026-09-03
+## 制限・移管
 
-WSID: `ws023`
+なし。
 
-Status: complete (`q067`)
+## Phase 一覧
 
-Parent: [master plan](../master.md)
-
-## Objective
-
-Apply [the project C coding style](../coding-style.md) to every maintained C
-source and header below `src/hal/i386/` and `src/hal/amd64/`. Restore the
-i386 implementation from mechanically compressed source to reviewable,
-debugger-friendly C, and bring the amd64 HAL to the same source contract.
-
-This is a behavior-preserving source-quality workstream. It must not use
-formatting as authority to change a HAL API or ABI, structure layout, firmware
-handoff, register access, interrupt state, lock ordering, timing, ownership, or
-error semantics.
-
-## Audited baseline
-
-- i386 contains 24 C files and 19 headers, 6,801 lines in total. The principal
-  compressed files are `acpi.c`, `mps.c`, `ioapic.c`, `lapic.c`,
-  `percpu.c`, `smp.c`, and the two BSP PIT implementations.
-- amd64 contains 25 C files and 20 headers, 7,661 lines in total. Only 2 of 348
-  function definitions already use the required definition layout; 26
-  functions have a collapsed one-line body.
-- The inventory found widespread missing modelines, canonical headers,
-  forward declarations, public/static function comments, leading declaration
-  groups, semantic paragraph comments, and explicit return paths.
-- Five i386 files were already staged before this WS was created:
-  `multiboot.h`, `page.c`, `percpu.c`, `pic.h`, and `smp.c`. The user committed
-  them as `b4be6eb` before authorizing q067. They remain fully in scope and are
-  reviewed as inherited edits rather than treated as already conforming.
-
-## Fixed boundaries
-
-- Scope is all maintained `.c` and `.h` files below the two architecture
-  directories. Assembly sources are outside this C-style pass.
-- Preserve exact short-circuit evaluation, I/O and MMIO access order, barriers,
-  volatile semantics, interrupt enable state, lock ordering, allocation
-  ownership, and failure values.
-- Reordering file sections may not alter initialization order, emitted object
-  layout, symbol linkage, conditional compilation, or test-only variants.
-- Every normal static function receives a forward declaration. Public
-  definitions precede static definitions unless conditional compilation makes
-  that impossible; any exception is recorded in the Phase.
-- Ordinary source uses ANSI C declaration placement. Existing compiler
-  extensions needed for ABI/layout or clear static tables are retained rather
-  than mechanically translated. Each retained exception is recorded; it is
-  not precedent for unrelated new syntax.
-- `UNUSED_PARAMETER` is a private source helper, duplicated in each
-  architecture's private `defs.h`. It is not a new public HAL interface.
-- Large tables such as the PC-98 JIS mapping retain their data values and
-  indexing representation. Their surrounding file envelope/declarations are
-  styled without payload churn.
-- No generated prose comments are accepted. Comments describe actual intent,
-  hardware constraints, ownership, or result semantics.
-- A discovered behavior defect is recorded for a separate Phase. It is not
-  repaired covertly in this style-only WS.
-
-## Phase registry
-
-| Phase | Status | Required result |
+| Phase | 内容 | Status |
 | --- | --- | --- |
-| [ws023-p001](phase001/phase.md) | Complete (`q067`) | Preserve the inherited committed edits and restore the compressed i386 APIC/SMP/page/time sources to the canonical form |
-| [ws023-p002](phase002/phase.md) | Complete (`q067`) | Style the remaining i386 low-level, interrupt, and library sources and headers |
-| [ws023-p003](phase003/phase.md) | Complete (`q067`) | Style i386 address-space and task/context code without changing MMU or context semantics |
-| [ws023-p004](phase004/phase.md) | Complete (`q067`) | Style the i386 PC/AT boot, console, and PIC implementation |
-| [ws023-p005](phase005/phase.md) | Complete (`q067`) | Style the i386 PC-98 boot, console, display, PIC, and table envelopes |
-| [ws023-p006](phase006/phase.md) | Complete (`q067`) | Establish the amd64 file envelope/private helper and style the small leaf/core modules |
-| [ws023-p007](phase007/phase.md) | Complete (`q067`) | Style amd64 interrupt, page, SMP, library, and task code |
-| [ws023-p008](phase008/phase.md) | Complete (`q067`) | Style amd64 firmware handoff, APIC, clock, and timecounter code |
-| [ws023-p009](phase009/phase.md) | Complete (`q067`) | Style the large amd64 address-space implementation independently |
-| [ws023-p010](phase010/phase.md) | Complete (`q067`) | Style the large amd64 console/input implementation and all compiled variants |
-| [ws023-p011](phase011/phase.md) | Complete (`q067`) | Prove complete file coverage and run the combined x86 build/runtime regression |
+| ws023-p001 | Restore compressed i386 HAL core source | cleared（q067） |
+| ws023-p002 | Conform the i386 core and interrupt sources | cleared（q067） |
+| ws023-p003 | Conform the i386 VM and task sources | cleared（q067） |
+| ws023-p004 | Conform the i386 PC/AT BSP | cleared（q067） |
+| ws023-p005 | Conform the i386 PC-98 BSP | cleared（q067） |
+| ws023-p006 | Conform amd64 leaf and small core modules | cleared（q067） |
+| ws023-p007 | Conform amd64 interrupt, page, SMP, and task code | cleared（q067） |
+| ws023-p008 | Conform amd64 boot, APIC, and time sources | cleared（q067） |
+| ws023-p009 | Conform the amd64 address-space implementation | cleared（q067） |
+| ws023-p010 | Conform the amd64 console and input implementation | cleared（q067） |
+| ws023-p011 | Complete the x86 HAL style and regression audit | cleared（q067） |
 
-## Completion conditions
+## 記録の所在
 
-- Every one of the 88 audited C/header files has the exact modeline, canonical
-  copyright block, and an accurate file explanation.
-- All function layout, declaration placement, section ordering, function
-  comments, semantic paragraphs, loop/switch comments, debugger-friendly
-  decisions, body symmetry, and return comments meet
-  `plan/coding-style.md`, with only explicitly recorded ABI/table extensions.
-- No prohibited `goto`, declaration in a `for` initializer, compressed
-  multi-statement source, or direct meaningful-call return remains.
-- The inherited `b4be6eb` i386 changes are accounted for in the review evidence
-  and preserved in the final result.
-- Focused HAL fixtures pass, all four configured x86 images build with
-  `make -j16`, and i386 PC/AT, i386 PC-98, amd64 BIOS, and amd64 UEFI reach
-  their bounded QEMU acceptance markers.
-- `git diff --check` passes and the final diff contains no public HAL/API/ABI
-  or behavior change.
-
-## Completion result
-
-Q067 completed all eleven Phases.  The audit accounts for all 88 C/header
-files, strict and focused regressions pass, all four configured images build,
-and the PC/AT, PC-98, amd64 BIOS SMP, and amd64 UEFI SMP runtime cells reach
-their acceptance markers.  See the
-[q067 result ledger](tests/q067-results.md) for exact evidence, retained
-extensions, and pre-existing risks that were intentionally not repaired by
-this style-only Workstream.
+各 Phase の計画・結果・試験は、2026-09-24 の plan 整理で削除した。git の commit `04bc9eab` 以前の `plan/ws023/` にある。Queue ごとの履歴は [plan/history](../history/index.md) に残る。

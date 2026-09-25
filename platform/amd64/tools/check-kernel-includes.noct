@@ -1,0 +1,117 @@
+// zedBSD: the kernel and the HAL read no C library header.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+//
+// usage: check-kernel-includes.noct DEPFILE...
+//
+// Reads the make dependency files (-MMD) of the objects linked into vmunix and
+// fails when an object depends on a file outside the kernel's own tree:
+// include/{kern,hal,drivers,uapi,boot}/, include/libc/vulkan/ (the Vulkan
+// declarations the GPU drivers decode, which are part of the C library by
+// design), src/, bootloader/include/ and plan/ (a test object compiled from
+// its own directory).  The compiler's freestanding headers are system headers
+// and never appear in a -MMD file.
+
+require zedbuild;
+
+// Resolves "." and ".." in a relative path; a path that climbs above the
+// repository keeps its leading "..".
+func normalPath(path) {
+    var parts = [];
+    var part = "";
+    var count = String.charCount(path);
+    for (i in 0..count + 1) {
+        var c = "/";
+        if (i < count) { c = String.charAt(path, i); }
+        if (c != "/") {
+            part = part + c;
+            continue;
+        }
+        if (part == "..") {
+            if (Array.size(parts) > 0 && parts[Array.size(parts) - 1] != "..") {
+                Array.pop(parts);
+            } else {
+                Array.push(parts, part);
+            }
+        } else if (part != "" && part != ".") {
+            Array.push(parts, part);
+        }
+        part = "";
+    }
+    var joined = "";
+    for (i in 0..Array.size(parts)) {
+        if (i > 0) { joined = joined + "/"; }
+        joined = joined + parts[i];
+    }
+    return joined;
+}
+
+// Reports whether a dependency path lies in the kernel's own tree.
+func allowedPath(path) {
+    var prefixes = [
+        "include/kern/", "include/hal/", "include/drivers/", "include/uapi/",
+        "include/boot/", "include/libc/vulkan/", "src/", "bootloader/include/",
+        "plan/"
+    ];
+    if (String.charAt(path, 0) == "/") { return false; }
+    var relative = normalPath(path);
+    if (String.charCount(relative) >= 2 && String.substring(relative, 0, 2) == "..") { return false; }
+    for (i in 0..Array.size(prefixes)) {
+        var prefix = prefixes[i];
+        var length = String.charCount(prefix);
+        if (String.charCount(relative) > length && String.substring(relative, 0, length) == prefix) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Splits a dependency file into its words; a backslash-newline is a space.
+func words(text) {
+    var out = [];
+    var word = "";
+    var count = String.charCount(text);
+    var i = 0;
+    while (i < count) {
+        var c = String.charAt(text, i);
+        if (c == "\\" && i + 1 < count && String.charAt(text, i + 1) == "\n") {
+            c = " ";
+            i = i + 1;
+        }
+        if (c == " " || c == "\t" || c == "\n" || c == "\r") {
+            if (word != "") { Array.push(out, word); }
+            word = "";
+        } else {
+            word = word + c;
+        }
+        i = i + 1;
+    }
+    if (word != "") { Array.push(out, word); }
+    return out;
+}
+
+func main(args) {
+    if (Array.size(args) < 1) { zbFail("usage: check-kernel-includes.noct DEPFILE..."); }
+    var headers = 0;
+    var violations = 0;
+    for (a in 0..Array.size(args)) {
+        var list = words(FileUtil.readText(args[a]));
+        var target = "";
+        for (w in 0..Array.size(list)) {
+            var word = list[w];
+            var last = String.charCount(word) - 1;
+            if (String.charAt(word, last) == ":") {
+                if (target == "") { target = String.substring(word, 0, last); }
+                continue;
+            }
+            headers = headers + 1;
+            if (!allowedPath(word)) {
+                print("kernel include check: " + args[a] + ": " + target + " reads " + word);
+                violations = violations + 1;
+            }
+        }
+    }
+    if (violations != 0) {
+        zbFail("kernel include check: FAIL (" + violations + " outside the kernel tree)");
+    }
+    print("kernel include check: PASS (" + Array.size(args) + " objects, " + headers + " dependencies)");
+}

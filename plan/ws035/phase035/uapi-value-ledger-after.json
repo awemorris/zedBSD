@@ -1,0 +1,8742 @@
+{
+ "libc": {
+  "lp64": {
+   "ARG_MAX": [
+    16384,
+    4,
+    1
+   ],
+   "AT_EACCESS": [
+    1024,
+    4,
+    1
+   ],
+   "AT_FDCWD": [
+    18446744073709551516,
+    4,
+    1
+   ],
+   "AT_REMOVEDIR": [
+    512,
+    4,
+    1
+   ],
+   "AT_SYMLINK_FOLLOW": [
+    2048,
+    4,
+    1
+   ],
+   "AT_SYMLINK_NOFOLLOW": [
+    256,
+    4,
+    1
+   ],
+   "BC_BASE_MAX": [
+    99,
+    4,
+    1
+   ],
+   "BC_DIM_MAX": [
+    2048,
+    4,
+    1
+   ],
+   "BC_SCALE_MAX": [
+    99,
+    4,
+    1
+   ],
+   "BC_STRING_MAX": [
+    1000,
+    4,
+    1
+   ],
+   "BUFSIZ": [
+    4096,
+    4,
+    1
+   ],
+   "CHARCLASS_NAME_MAX": [
+    14,
+    4,
+    1
+   ],
+   "CHAR_BIT": [
+    8,
+    4,
+    1
+   ],
+   "CHAR_MAX": [
+    127,
+    4,
+    1
+   ],
+   "CHAR_MIN": [
+    18446744073709551488,
+    4,
+    1
+   ],
+   "CLOCKS_PER_SEC": [
+    1000000,
+    8,
+    1
+   ],
+   "CLOCK_MONOTONIC": [
+    1,
+    4,
+    1
+   ],
+   "CLOCK_REALTIME": [
+    2,
+    4,
+    1
+   ],
+   "COLL_WEIGHTS_MAX": [
+    2,
+    4,
+    1
+   ],
+   "E2BIG": [
+    28,
+    4,
+    1
+   ],
+   "EACCES": [
+    25,
+    4,
+    1
+   ],
+   "EADDRINUSE": [
+    36,
+    4,
+    1
+   ],
+   "EADDRNOTAVAIL": [
+    37,
+    4,
+    1
+   ],
+   "EAFNOSUPPORT": [
+    35,
+    4,
+    1
+   ],
+   "EAGAIN": [
+    24,
+    4,
+    1
+   ],
+   "EALREADY": [
+    54,
+    4,
+    1
+   ],
+   "EBADF": [
+    19,
+    4,
+    1
+   ],
+   "EBUSY": [
+    17,
+    4,
+    1
+   ],
+   "ECANCELED": [
+    59,
+    4,
+    1
+   ],
+   "ECHILD": [
+    27,
+    4,
+    1
+   ],
+   "ECONNABORTED": [
+    55,
+    4,
+    1
+   ],
+   "ECONNREFUSED": [
+    40,
+    4,
+    1
+   ],
+   "ECONNRESET": [
+    41,
+    4,
+    1
+   ],
+   "EDEADLK": [
+    58,
+    4,
+    1
+   ],
+   "EDESTADDRREQ": [
+    45,
+    4,
+    1
+   ],
+   "EDOM": [
+    1,
+    4,
+    1
+   ],
+   "EDQUOT": [
+    63,
+    4,
+    1
+   ],
+   "EEXIST": [
+    16,
+    4,
+    1
+   ],
+   "EFAULT": [
+    23,
+    4,
+    1
+   ],
+   "EFBIG": [
+    51,
+    4,
+    1
+   ],
+   "EHOSTUNREACH": [
+    43,
+    4,
+    1
+   ],
+   "EIDRM": [
+    65,
+    4,
+    1
+   ],
+   "EILSEQ": [
+    61,
+    4,
+    1
+   ],
+   "EINPROGRESS": [
+    53,
+    4,
+    1
+   ],
+   "EINTR": [
+    7,
+    4,
+    1
+   ],
+   "EINVAL": [
+    3,
+    4,
+    1
+   ],
+   "EIO": [
+    5,
+    4,
+    1
+   ],
+   "EISCONN": [
+    38,
+    4,
+    1
+   ],
+   "EISDIR": [
+    15,
+    4,
+    1
+   ],
+   "ELOOP": [
+    50,
+    4,
+    1
+   ],
+   "EMFILE": [
+    46,
+    4,
+    1
+   ],
+   "EMLINK": [
+    57,
+    4,
+    1
+   ],
+   "EMSGSIZE": [
+    30,
+    4,
+    1
+   ],
+   "ENAMETOOLONG": [
+    11,
+    4,
+    1
+   ],
+   "ENETDOWN": [
+    32,
+    4,
+    1
+   ],
+   "ENETUNREACH": [
+    33,
+    4,
+    1
+   ],
+   "ENFILE": [
+    29,
+    4,
+    1
+   ],
+   "ENOBUFS": [
+    31,
+    4,
+    1
+   ],
+   "ENODATA": [
+    62,
+    4,
+    1
+   ],
+   "ENODEV": [
+    13,
+    4,
+    1
+   ],
+   "ENOENT": [
+    6,
+    4,
+    1
+   ],
+   "ENOEXEC": [
+    22,
+    4,
+    1
+   ],
+   "ENOMEM": [
+    4,
+    4,
+    1
+   ],
+   "ENOMSG": [
+    64,
+    4,
+    1
+   ],
+   "ENOPROTOOPT": [
+    56,
+    4,
+    1
+   ],
+   "ENOSPC": [
+    8,
+    4,
+    1
+   ],
+   "ENOSYS": [
+    20,
+    4,
+    1
+   ],
+   "ENOTCONN": [
+    39,
+    4,
+    1
+   ],
+   "ENOTDIR": [
+    14,
+    4,
+    1
+   ],
+   "ENOTEMPTY": [
+    18,
+    4,
+    1
+   ],
+   "ENOTSOCK": [
+    60,
+    4,
+    1
+   ],
+   "ENOTSUP": [
+    21,
+    4,
+    1
+   ],
+   "ENOTTY": [
+    52,
+    4,
+    1
+   ],
+   "ENXIO": [
+    12,
+    4,
+    1
+   ],
+   "EOF": [
+    18446744073709551615,
+    4,
+    1
+   ],
+   "EOPNOTSUPP": [
+    21,
+    4,
+    1
+   ],
+   "EOVERFLOW": [
+    10,
+    4,
+    1
+   ],
+   "EPERM": [
+    47,
+    4,
+    1
+   ],
+   "EPFNOSUPPORT": [
+    35,
+    4,
+    1
+   ],
+   "EPIPE": [
+    44,
+    4,
+    1
+   ],
+   "EPROTO": [
+    67,
+    4,
+    1
+   ],
+   "EPROTONOSUPPORT": [
+    34,
+    4,
+    1
+   ],
+   "ERANGE": [
+    2,
+    4,
+    1
+   ],
+   "EROFS": [
+    9,
+    4,
+    1
+   ],
+   "ESPIPE": [
+    49,
+    4,
+    1
+   ],
+   "ESRCH": [
+    26,
+    4,
+    1
+   ],
+   "ESTALE": [
+    66,
+    4,
+    1
+   ],
+   "ETIMEDOUT": [
+    42,
+    4,
+    1
+   ],
+   "EWOULDBLOCK": [
+    24,
+    4,
+    1
+   ],
+   "EXDEV": [
+    48,
+    4,
+    1
+   ],
+   "EXPR_NEST_MAX": [
+    32,
+    4,
+    1
+   ],
+   "FD_CLOEXEC": [
+    1,
+    4,
+    1
+   ],
+   "FD_CLOFORK": [
+    2,
+    4,
+    1
+   ],
+   "FILENAME_MAX": [
+    1024,
+    4,
+    1
+   ],
+   "FOPEN_MAX": [
+    16,
+    4,
+    1
+   ],
+   "F_DUPFD": [
+    0,
+    4,
+    1
+   ],
+   "F_DUPFD_CLOEXEC": [
+    5,
+    4,
+    1
+   ],
+   "F_DUPFD_CLOFORK": [
+    11,
+    4,
+    1
+   ],
+   "F_GETFD": [
+    1,
+    4,
+    1
+   ],
+   "F_GETFL": [
+    3,
+    4,
+    1
+   ],
+   "F_GETLK": [
+    6,
+    4,
+    1
+   ],
+   "F_GETOWN": [
+    9,
+    4,
+    1
+   ],
+   "F_LOCK": [
+    1,
+    4,
+    1
+   ],
+   "F_OFD_GETLK": [
+    12,
+    4,
+    1
+   ],
+   "F_OFD_SETLK": [
+    13,
+    4,
+    1
+   ],
+   "F_OFD_SETLKW": [
+    14,
+    4,
+    1
+   ],
+   "F_OK": [
+    0,
+    4,
+    1
+   ],
+   "F_RDLCK": [
+    1,
+    4,
+    1
+   ],
+   "F_SETFD": [
+    2,
+    4,
+    1
+   ],
+   "F_SETFL": [
+    4,
+    4,
+    1
+   ],
+   "F_SETLK": [
+    7,
+    4,
+    1
+   ],
+   "F_SETLKW": [
+    8,
+    4,
+    1
+   ],
+   "F_SETOWN": [
+    10,
+    4,
+    1
+   ],
+   "F_TEST": [
+    3,
+    4,
+    1
+   ],
+   "F_TLOCK": [
+    2,
+    4,
+    1
+   ],
+   "F_ULOCK": [
+    0,
+    4,
+    1
+   ],
+   "F_UNLCK": [
+    3,
+    4,
+    1
+   ],
+   "F_WRLCK": [
+    2,
+    4,
+    1
+   ],
+   "GETENTROPY_MAX": [
+    256,
+    4,
+    1
+   ],
+   "HOST_NAME_MAX": [
+    255,
+    4,
+    1
+   ],
+   "INT_MAX": [
+    2147483647,
+    4,
+    1
+   ],
+   "INT_MIN": [
+    18446744071562067968,
+    4,
+    1
+   ],
+   "ITIMER_PROF": [
+    2,
+    4,
+    1
+   ],
+   "ITIMER_REAL": [
+    0,
+    4,
+    1
+   ],
+   "ITIMER_VIRTUAL": [
+    1,
+    4,
+    1
+   ],
+   "KERN_IOC_IN": [
+    2147483648,
+    8,
+    0
+   ],
+   "KERN_IOC_INOUT": [
+    3221225472,
+    8,
+    0
+   ],
+   "KERN_IOC_OUT": [
+    1073741824,
+    8,
+    0
+   ],
+   "KERN_IOC_VOID": [
+    0,
+    8,
+    0
+   ],
+   "KERN_MOUNT_ARGS_VERSION": [
+    1,
+    4,
+    0
+   ],
+   "KERN_MOUNT_FSPEC_MAX": [
+    32,
+    4,
+    0
+   ],
+   "LINE_MAX": [
+    2048,
+    4,
+    1
+   ],
+   "LLONG_MAX": [
+    9223372036854775807,
+    8,
+    1
+   ],
+   "LLONG_MIN": [
+    9223372036854775808,
+    8,
+    1
+   ],
+   "LONG_MAX": [
+    9223372036854775807,
+    8,
+    1
+   ],
+   "LONG_MIN": [
+    9223372036854775808,
+    8,
+    1
+   ],
+   "L_tmpnam": [
+    32,
+    4,
+    1
+   ],
+   "MADV_DONTNEED": [
+    4,
+    4,
+    1
+   ],
+   "MADV_FREE": [
+    5,
+    4,
+    1
+   ],
+   "MADV_NORMAL": [
+    0,
+    4,
+    1
+   ],
+   "MADV_RANDOM": [
+    1,
+    4,
+    1
+   ],
+   "MADV_SEQUENTIAL": [
+    2,
+    4,
+    1
+   ],
+   "MADV_WILLNEED": [
+    3,
+    4,
+    1
+   ],
+   "MAP_ANON": [
+    32,
+    4,
+    1
+   ],
+   "MAP_ANONYMOUS": [
+    32,
+    4,
+    1
+   ],
+   "MAP_FAILED": [
+    18446744073709551615,
+    8,
+    0
+   ],
+   "MAP_FIXED": [
+    16,
+    4,
+    1
+   ],
+   "MAP_FIXED_NOREPLACE": [
+    1048576,
+    4,
+    1
+   ],
+   "MAP_PRIVATE": [
+    1,
+    4,
+    1
+   ],
+   "MAP_SHARED": [
+    2,
+    4,
+    1
+   ],
+   "MB_LEN_MAX": [
+    4,
+    4,
+    1
+   ],
+   "MNT_LOCAL": [
+    4096,
+    4,
+    0
+   ],
+   "MNT_NOSUID": [
+    2,
+    4,
+    0
+   ],
+   "MNT_RDONLY": [
+    1,
+    4,
+    0
+   ],
+   "MS_ASYNC": [
+    1,
+    4,
+    1
+   ],
+   "MS_INVALIDATE": [
+    2,
+    4,
+    1
+   ],
+   "MS_SYNC": [
+    4,
+    4,
+    1
+   ],
+   "NAME_MAX": [
+    255,
+    4,
+    1
+   ],
+   "O_ACCMODE": [
+    3,
+    4,
+    1
+   ],
+   "O_APPEND": [
+    2048,
+    4,
+    1
+   ],
+   "O_CLOEXEC": [
+    16384,
+    4,
+    1
+   ],
+   "O_CLOFORK": [
+    524288,
+    4,
+    1
+   ],
+   "O_CREAT": [
+    256,
+    4,
+    1
+   ],
+   "O_DIRECTORY": [
+    4096,
+    4,
+    1
+   ],
+   "O_DSYNC": [
+    65536,
+    4,
+    1
+   ],
+   "O_EXCL": [
+    512,
+    4,
+    1
+   ],
+   "O_NOCTTY": [
+    32768,
+    4,
+    1
+   ],
+   "O_NOFOLLOW": [
+    262144,
+    4,
+    1
+   ],
+   "O_NONBLOCK": [
+    8192,
+    4,
+    1
+   ],
+   "O_RDONLY": [
+    0,
+    4,
+    1
+   ],
+   "O_RDWR": [
+    2,
+    4,
+    1
+   ],
+   "O_SYNC": [
+    131072,
+    4,
+    1
+   ],
+   "O_TRUNC": [
+    1024,
+    4,
+    1
+   ],
+   "O_WRONLY": [
+    1,
+    4,
+    1
+   ],
+   "PATH_MAX": [
+    256,
+    4,
+    1
+   ],
+   "POSIX_CLOSE_RESTART": [
+    0,
+    4,
+    1
+   ],
+   "POSIX_MADV_DONTNEED": [
+    4,
+    4,
+    1
+   ],
+   "POSIX_MADV_NORMAL": [
+    0,
+    4,
+    1
+   ],
+   "POSIX_MADV_RANDOM": [
+    1,
+    4,
+    1
+   ],
+   "POSIX_MADV_SEQUENTIAL": [
+    2,
+    4,
+    1
+   ],
+   "POSIX_MADV_WILLNEED": [
+    3,
+    4,
+    1
+   ],
+   "PRIO_PGRP": [
+    1,
+    4,
+    1
+   ],
+   "PRIO_PROCESS": [
+    0,
+    4,
+    1
+   ],
+   "PRIO_USER": [
+    2,
+    4,
+    1
+   ],
+   "PROT_EXEC": [
+    4,
+    4,
+    1
+   ],
+   "PROT_NONE": [
+    0,
+    4,
+    1
+   ],
+   "PROT_READ": [
+    1,
+    4,
+    1
+   ],
+   "PROT_WRITE": [
+    2,
+    4,
+    1
+   ],
+   "RE_DUP_MAX": [
+    255,
+    4,
+    1
+   ],
+   "RTSIG_MAX": [
+    34,
+    4,
+    1
+   ],
+   "RUSAGE_CHILDREN": [
+    18446744073709551615,
+    4,
+    1
+   ],
+   "RUSAGE_SELF": [
+    0,
+    4,
+    1
+   ],
+   "R_OK": [
+    4,
+    4,
+    1
+   ],
+   "SCHAR_MAX": [
+    127,
+    4,
+    1
+   ],
+   "SCHAR_MIN": [
+    18446744073709551488,
+    4,
+    1
+   ],
+   "SEEK_CUR": [
+    1,
+    4,
+    1
+   ],
+   "SEEK_DATA": [
+    3,
+    4,
+    1
+   ],
+   "SEEK_END": [
+    2,
+    4,
+    1
+   ],
+   "SEEK_HOLE": [
+    4,
+    4,
+    1
+   ],
+   "SEEK_SET": [
+    0,
+    4,
+    1
+   ],
+   "SHRT_MAX": [
+    32767,
+    4,
+    1
+   ],
+   "SHRT_MIN": [
+    18446744073709518848,
+    4,
+    1
+   ],
+   "SIGQUEUE_MAX": [
+    32,
+    4,
+    1
+   ],
+   "SSIZE_MAX": [
+    9223372036854775807,
+    8,
+    1
+   ],
+   "STDERR_FILENO": [
+    2,
+    4,
+    1
+   ],
+   "STDIN_FILENO": [
+    0,
+    4,
+    1
+   ],
+   "STDOUT_FILENO": [
+    1,
+    4,
+    1
+   ],
+   "ST_LOCAL": [
+    4,
+    8,
+    0
+   ],
+   "ST_NOSUID": [
+    2,
+    8,
+    0
+   ],
+   "ST_RDONLY": [
+    1,
+    8,
+    0
+   ],
+   "S_IFBLK": [
+    24576,
+    4,
+    0
+   ],
+   "S_IFCHR": [
+    8192,
+    4,
+    0
+   ],
+   "S_IFDIR": [
+    16384,
+    4,
+    0
+   ],
+   "S_IFIFO": [
+    4096,
+    4,
+    0
+   ],
+   "S_IFLNK": [
+    40960,
+    4,
+    0
+   ],
+   "S_IFMT": [
+    61440,
+    4,
+    0
+   ],
+   "S_IFREG": [
+    32768,
+    4,
+    0
+   ],
+   "S_IFSOCK": [
+    49152,
+    4,
+    0
+   ],
+   "S_IRGRP": [
+    32,
+    4,
+    0
+   ],
+   "S_IROTH": [
+    4,
+    4,
+    0
+   ],
+   "S_IRUSR": [
+    256,
+    4,
+    0
+   ],
+   "S_IRWXG": [
+    56,
+    4,
+    0
+   ],
+   "S_IRWXO": [
+    7,
+    4,
+    0
+   ],
+   "S_IRWXU": [
+    448,
+    4,
+    0
+   ],
+   "S_ISGID": [
+    1024,
+    4,
+    0
+   ],
+   "S_ISUID": [
+    2048,
+    4,
+    0
+   ],
+   "S_ISVTX": [
+    512,
+    4,
+    0
+   ],
+   "S_IWGRP": [
+    16,
+    4,
+    0
+   ],
+   "S_IWOTH": [
+    2,
+    4,
+    0
+   ],
+   "S_IWUSR": [
+    128,
+    4,
+    0
+   ],
+   "S_IXGRP": [
+    8,
+    4,
+    0
+   ],
+   "S_IXOTH": [
+    1,
+    4,
+    0
+   ],
+   "S_IXUSR": [
+    64,
+    4,
+    0
+   ],
+   "TEXTDOMAIN_MAX": [
+    255,
+    4,
+    1
+   ],
+   "TIMER_ABSTIME": [
+    1,
+    4,
+    1
+   ],
+   "TIME_UTC": [
+    1,
+    4,
+    1
+   ],
+   "TMP_MAX": [
+    10000,
+    4,
+    1
+   ],
+   "UCHAR_MAX": [
+    255,
+    4,
+    0
+   ],
+   "UINT_MAX": [
+    4294967295,
+    4,
+    0
+   ],
+   "ULLONG_MAX": [
+    18446744073709551615,
+    8,
+    0
+   ],
+   "ULONG_MAX": [
+    18446744073709551615,
+    8,
+    0
+   ],
+   "UNIX_PATH_MAX": [
+    108,
+    4,
+    1
+   ],
+   "USHRT_MAX": [
+    65535,
+    4,
+    0
+   ],
+   "UTIME_NOW": [
+    1073741823,
+    8,
+    1
+   ],
+   "UTIME_OMIT": [
+    1073741822,
+    8,
+    1
+   ],
+   "WCONTINUED": [
+    4,
+    4,
+    1
+   ],
+   "WEXITED": [
+    8,
+    4,
+    1
+   ],
+   "WNOHANG": [
+    1,
+    4,
+    1
+   ],
+   "WNOWAIT": [
+    16,
+    4,
+    1
+   ],
+   "WSTOPPED": [
+    2,
+    4,
+    1
+   ],
+   "WUNTRACED": [
+    2,
+    4,
+    1
+   ],
+   "W_OK": [
+    2,
+    4,
+    1
+   ],
+   "X_OK": [
+    1,
+    4,
+    1
+   ],
+   "_CS_PATH": [
+    1,
+    4,
+    1
+   ],
+   "_IOFBF": [
+    0,
+    4,
+    1
+   ],
+   "_IOLBF": [
+    1,
+    4,
+    1
+   ],
+   "_IONBF": [
+    2,
+    4,
+    1
+   ],
+   "_PC_CHOWN_RESTRICTED": [
+    7,
+    4,
+    1
+   ],
+   "_PC_LINK_MAX": [
+    1,
+    4,
+    1
+   ],
+   "_PC_MAX_CANON": [
+    2,
+    4,
+    1
+   ],
+   "_PC_MAX_INPUT": [
+    3,
+    4,
+    1
+   ],
+   "_PC_NAME_MAX": [
+    4,
+    4,
+    1
+   ],
+   "_PC_NO_TRUNC": [
+    8,
+    4,
+    1
+   ],
+   "_PC_PATH_MAX": [
+    5,
+    4,
+    1
+   ],
+   "_PC_PIPE_BUF": [
+    6,
+    4,
+    1
+   ],
+   "_PC_TEXTDOMAIN_MAX": [
+    10,
+    4,
+    1
+   ],
+   "_PC_VDISABLE": [
+    9,
+    4,
+    1
+   ],
+   "_POSIX_ARG_MAX": [
+    4096,
+    4,
+    1
+   ],
+   "_POSIX_HOST_NAME_MAX": [
+    255,
+    4,
+    1
+   ],
+   "_POSIX_RTSIG_MAX": [
+    8,
+    4,
+    1
+   ],
+   "_POSIX_SIGQUEUE_MAX": [
+    32,
+    4,
+    1
+   ],
+   "_SC_2_VERSION": [
+    12,
+    4,
+    1
+   ],
+   "_SC_ARG_MAX": [
+    13,
+    4,
+    1
+   ],
+   "_SC_CHILD_MAX": [
+    14,
+    4,
+    1
+   ],
+   "_SC_CLK_TCK": [
+    3,
+    4,
+    1
+   ],
+   "_SC_DEVICE_CONTROL": [
+    31,
+    4,
+    1
+   ],
+   "_SC_GETPW_R_SIZE_MAX": [
+    32,
+    4,
+    1
+   ],
+   "_SC_JOB_CONTROL": [
+    4,
+    4,
+    1
+   ],
+   "_SC_MESSAGE_PASSING": [
+    10,
+    4,
+    1
+   ],
+   "_SC_MQ_OPEN_MAX": [
+    24,
+    4,
+    1
+   ],
+   "_SC_MQ_PRIO_MAX": [
+    25,
+    4,
+    1
+   ],
+   "_SC_NPROCESSORS_CONF": [
+    16,
+    4,
+    1
+   ],
+   "_SC_NPROCESSORS_ONLN": [
+    17,
+    4,
+    1
+   ],
+   "_SC_OPEN_MAX": [
+    2,
+    4,
+    1
+   ],
+   "_SC_PAGESIZE": [
+    1,
+    4,
+    1
+   ],
+   "_SC_PAGE_SIZE": [
+    1,
+    4,
+    1
+   ],
+   "_SC_REALTIME_SIGNALS": [
+    7,
+    4,
+    1
+   ],
+   "_SC_RTSIG_MAX": [
+    29,
+    4,
+    1
+   ],
+   "_SC_SEMAPHORES": [
+    9,
+    4,
+    1
+   ],
+   "_SC_SEM_NSEMS_MAX": [
+    22,
+    4,
+    1
+   ],
+   "_SC_SEM_VALUE_MAX": [
+    23,
+    4,
+    1
+   ],
+   "_SC_SHARED_MEMORY_OBJECTS": [
+    8,
+    4,
+    1
+   ],
+   "_SC_SIGQUEUE_MAX": [
+    30,
+    4,
+    1
+   ],
+   "_SC_STREAM_MAX": [
+    15,
+    4,
+    1
+   ],
+   "_SC_THREADS": [
+    5,
+    4,
+    1
+   ],
+   "_SC_THREAD_DESTRUCTOR_ITERATIONS": [
+    19,
+    4,
+    1
+   ],
+   "_SC_THREAD_KEYS_MAX": [
+    18,
+    4,
+    1
+   ],
+   "_SC_THREAD_PROCESS_SHARED": [
+    6,
+    4,
+    1
+   ],
+   "_SC_THREAD_STACK_MIN": [
+    20,
+    4,
+    1
+   ],
+   "_SC_THREAD_THREADS_MAX": [
+    21,
+    4,
+    1
+   ],
+   "_SC_TIMERS": [
+    26,
+    4,
+    1
+   ],
+   "_SC_VERSION": [
+    11,
+    4,
+    1
+   ],
+   "_SC_XOPEN_UNIX": [
+    28,
+    4,
+    1
+   ],
+   "_SC_XOPEN_VERSION": [
+    27,
+    4,
+    1
+   ],
+   "BLKGETIDENTITY": [
+    1092108801,
+    8,
+    0
+   ],
+   "BLKGETINFO": [
+    3227009538,
+    8,
+    0
+   ],
+   "BLKREREADPART": [
+    16899,
+    8,
+    0
+   ],
+   "BLKRESERVE": [
+    2153267716,
+    8,
+    0
+   ],
+   "EVIOCGID": [
+    1074283778,
+    8,
+    0
+   ],
+   "EVIOCGRAB": [
+    2147763600,
+    8,
+    0
+   ],
+   "EVIOCGREP": [
+    1074283779,
+    8,
+    0
+   ],
+   "EVIOCGVERSION": [
+    1074021633,
+    8,
+    0
+   ],
+   "EVIOCSREP": [
+    2148025603,
+    8,
+    0
+   ],
+   "GPU_ALLOCATION_EXPORT": [
+    3233302286,
+    8,
+    0
+   ],
+   "GPU_ALLOCATION_IMPORT": [
+    3233826575,
+    8,
+    0
+   ],
+   "GPU_BLOB_CREATE": [
+    3223865092,
+    8,
+    0
+   ],
+   "GPU_BLOB_CREATE_PLACED": [
+    3225437985,
+    8,
+    0
+   ],
+   "GPU_COMMAND": [
+    2149074695,
+    8,
+    0
+   ],
+   "GPU_COMMAND_SUBMIT": [
+    3223865100,
+    8,
+    0
+   ],
+   "GPU_COMMAND_SUBMIT_SYNC": [
+    3225437974,
+    8,
+    0
+   ],
+   "GPU_COMMAND_WAIT": [
+    3223340813,
+    8,
+    0
+   ],
+   "GPU_DEVICE_QUERY": [
+    3223865118,
+    8,
+    0
+   ],
+   "GPU_DISPLAY_CLAIM": [
+    3223340826,
+    8,
+    0
+   ],
+   "GPU_DISPLAY_CONSTRAINTS": [
+    3224913695,
+    8,
+    0
+   ],
+   "GPU_DISPLAY_EVENTS": [
+    3223865120,
+    8,
+    0
+   ],
+   "GPU_DISPLAY_MODE": [
+    3224389401,
+    8,
+    0
+   ],
+   "GPU_DISPLAY_PRESENT": [
+    3226486556,
+    8,
+    0
+   ],
+   "GPU_DISPLAY_PRESENT_SYNC": [
+    3228059415,
+    8,
+    0
+   ],
+   "GPU_DISPLAY_QUERY": [
+    3231205144,
+    8,
+    0
+   ],
+   "GPU_DISPLAY_RELEASE": [
+    2148550427,
+    8,
+    0
+   ],
+   "GPU_DISPLAY_WAIT": [
+    3224913693,
+    8,
+    0
+   ],
+   "GPU_FENCE_BIND": [
+    2149598997,
+    8,
+    0
+   ],
+   "GPU_FENCE_CREATE": [
+    3223340816,
+    8,
+    0
+   ],
+   "GPU_FENCE_QUERY": [
+    3223865105,
+    8,
+    0
+   ],
+   "GPU_FENCE_RESET": [
+    3223865107,
+    8,
+    0
+   ],
+   "GPU_FENCE_SIGNAL": [
+    3223865108,
+    8,
+    0
+   ],
+   "GPU_FENCE_WAIT": [
+    3223865106,
+    8,
+    0
+   ],
+   "GPU_GET_CAPSET": [
+    3239593731,
+    8,
+    0
+   ],
+   "GPU_GET_INFO": [
+    3224913664,
+    8,
+    0
+   ],
+   "GPU_JOB_CANCEL": [
+    2149074724,
+    8,
+    0
+   ],
+   "GPU_JOB_CAPACITY": [
+    3224389413,
+    8,
+    0
+   ],
+   "GPU_JOB_COMMIT": [
+    2149074723,
+    8,
+    0
+   ],
+   "GPU_JOB_POLICY": [
+    3223865126,
+    8,
+    0
+   ],
+   "GPU_JOB_RESERVE": [
+    3223865122,
+    8,
+    0
+   ],
+   "GPU_PRESENT": [
+    2150647560,
+    8,
+    0
+   ],
+   "GPU_RESOURCE_CREATE": [
+    3223340801,
+    8,
+    0
+   ],
+   "GPU_RESOURCE_DESTROY": [
+    2148550402,
+    8,
+    0
+   ],
+   "GPU_RESOURCE_EXPORT": [
+    3227010826,
+    8,
+    0
+   ],
+   "GPU_RESOURCE_IMPORT": [
+    3227535115,
+    8,
+    0
+   ],
+   "GPU_RESOURCE_MAP": [
+    3223340809,
+    8,
+    0
+   ],
+   "GPU_RESOURCE_READ": [
+    2150123269,
+    8,
+    0
+   ],
+   "GPU_RESOURCE_WRITE": [
+    2150123270,
+    8,
+    0
+   ],
+   "KERN_CONSOLE_CLEAR": [
+    25346,
+    8,
+    0
+   ],
+   "KERN_CONSOLE_CLEAR_ROW": [
+    2147771139,
+    8,
+    0
+   ],
+   "KERN_CONSOLE_CLEAR_TO_EOL": [
+    2148033284,
+    8,
+    0
+   ],
+   "KERN_CONSOLE_GET_CURSOR": [
+    1074553605,
+    8,
+    0
+   ],
+   "KERN_CONSOLE_GET_SIZE": [
+    1074291457,
+    8,
+    0
+   ],
+   "KERN_CONSOLE_ISATTY": [
+    25357,
+    8,
+    0
+   ],
+   "KERN_CONSOLE_SET_CURSOR": [
+    2148295430,
+    8,
+    0
+   ],
+   "KERN_CONSOLE_SHOW_CURSOR": [
+    2148295431,
+    8,
+    0
+   ],
+   "KERN_CONSOLE_WRITE_AT": [
+    2149606152,
+    8,
+    0
+   ],
+   "KERN_SYSTEM_GET_MOUNTS": [
+    3223352076,
+    8,
+    0
+   ],
+   "KERN_SYSTEM_HALT": [
+    29444,
+    8,
+    0
+   ],
+   "KERN_SYSTEM_REBOOT": [
+    29445,
+    8,
+    0
+   ],
+   "TCGETS": [
+    1076655105,
+    8,
+    0
+   ],
+   "TCSBRK": [
+    2147775503,
+    8,
+    0
+   ],
+   "TCSETS": [
+    2150396930,
+    8,
+    0
+   ],
+   "TCSETSF": [
+    2150396932,
+    8,
+    0
+   ],
+   "TCSETSW": [
+    2150396931,
+    8,
+    0
+   ],
+   "TCXONC": [
+    2147775504,
+    8,
+    0
+   ],
+   "TIOCDRAIN": [
+    29713,
+    8,
+    0
+   ],
+   "TIOCFLUSH": [
+    2147775499,
+    8,
+    0
+   ],
+   "TIOCGPGRP": [
+    1074033671,
+    8,
+    0
+   ],
+   "TIOCGPTN": [
+    1074033676,
+    8,
+    0
+   ],
+   "TIOCGSID": [
+    1074033678,
+    8,
+    0
+   ],
+   "TIOCGWINSZ": [
+    1074295813,
+    8,
+    0
+   ],
+   "TIOCNOTTY": [
+    29706,
+    8,
+    0
+   ],
+   "TIOCSCTTY": [
+    29705,
+    8,
+    0
+   ],
+   "TIOCSPGRP": [
+    2147775496,
+    8,
+    0
+   ],
+   "TIOCSPTLCK": [
+    2147775501,
+    8,
+    0
+   ],
+   "TIOCSWINSZ": [
+    2148037638,
+    8,
+    0
+   ],
+   "P_ALL": [
+    0,
+    4,
+    1
+   ],
+   "P_PID": [
+    1,
+    4,
+    1
+   ],
+   "P_PGID": [
+    2,
+    4,
+    1
+   ],
+   "WIFEXITED(0x0100)": [
+    1,
+    4,
+    1
+   ],
+   "WEXITSTATUS(0x2a00)": [
+    42,
+    4,
+    1
+   ],
+   "WIFSIGNALED(0x0009)": [
+    1,
+    4,
+    1
+   ],
+   "WTERMSIG(0x0009)": [
+    9,
+    4,
+    1
+   ],
+   "WIFSTOPPED(0x137f)": [
+    1,
+    4,
+    1
+   ],
+   "WSTOPSIG(0x137f)": [
+    19,
+    4,
+    1
+   ],
+   "WIFCONTINUED(0xffff)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISREG(0100644)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISDIR(0040755)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISBLK(0060600)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISCHR(0020600)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISLNK(0120777)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISSOCK(0140777)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISFIFO(0010600)": [
+    1,
+    4,
+    1
+   ],
+   "sizeof(ssize_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(off_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(blkcnt_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(blksize_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(dev_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(ino_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(mode_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(nlink_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(uid_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(gid_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(pid_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(id_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(tid_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(useconds_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(suseconds_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(reclen_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(time_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(clockid_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(timer_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(fsblkcnt_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(fsfilcnt_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(rlim_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(idtype_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(struct timespec)": [
+    16,
+    8,
+    0
+   ],
+   "offsetof(struct timespec, tv_sec)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct timespec, tv_nsec)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(struct itimerspec)": [
+    32,
+    8,
+    0
+   ],
+   "offsetof(struct itimerspec, it_interval)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct itimerspec, it_value)": [
+    16,
+    8,
+    0
+   ],
+   "sizeof(struct timeval)": [
+    16,
+    8,
+    0
+   ],
+   "offsetof(struct timeval, tv_sec)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct timeval, tv_usec)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(struct itimerval)": [
+    32,
+    8,
+    0
+   ],
+   "offsetof(struct itimerval, it_interval)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct itimerval, it_value)": [
+    16,
+    8,
+    0
+   ],
+   "sizeof(struct stat)": [
+    112,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_dev)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_ino)": [
+    8,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_mode)": [
+    16,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_nlink)": [
+    20,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_uid)": [
+    24,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_gid)": [
+    28,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_rdev)": [
+    32,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_size)": [
+    40,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_atim)": [
+    48,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_mtim)": [
+    64,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_ctim)": [
+    80,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_blksize)": [
+    96,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_blocks)": [
+    104,
+    8,
+    0
+   ],
+   "sizeof(struct statvfs)": [
+    88,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_bsize)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_frsize)": [
+    8,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_blocks)": [
+    16,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_bfree)": [
+    24,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_bavail)": [
+    32,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_files)": [
+    40,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_ffree)": [
+    48,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_favail)": [
+    56,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_fsid)": [
+    64,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_flag)": [
+    72,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_namemax)": [
+    80,
+    8,
+    0
+   ],
+   "sizeof(struct rlimit)": [
+    16,
+    8,
+    0
+   ],
+   "offsetof(struct rlimit, rlim_cur)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct rlimit, rlim_max)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(struct rusage)": [
+    144,
+    8,
+    0
+   ],
+   "offsetof(struct rusage, ru_utime)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct rusage, ru_stime)": [
+    16,
+    8,
+    0
+   ],
+   "offsetof(struct rusage, ru_maxrss)": [
+    32,
+    8,
+    0
+   ],
+   "offsetof(struct rusage, ru_nivcsw)": [
+    136,
+    8,
+    0
+   ],
+   "sizeof(struct mount_args)": [
+    40,
+    8,
+    0
+   ],
+   "offsetof(struct mount_args, size)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct mount_args, version)": [
+    4,
+    8,
+    0
+   ],
+   "offsetof(struct mount_args, fspec)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(struct sockaddr_un)": [
+    110,
+    8,
+    0
+   ],
+   "offsetof(struct sockaddr_un, sun_family)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct sockaddr_un, sun_path)": [
+    2,
+    8,
+    0
+   ]
+  },
+  "ilp32": {
+   "ARG_MAX": [
+    16384,
+    4,
+    1
+   ],
+   "AT_EACCESS": [
+    1024,
+    4,
+    1
+   ],
+   "AT_FDCWD": [
+    18446744073709551516,
+    4,
+    1
+   ],
+   "AT_REMOVEDIR": [
+    512,
+    4,
+    1
+   ],
+   "AT_SYMLINK_FOLLOW": [
+    2048,
+    4,
+    1
+   ],
+   "AT_SYMLINK_NOFOLLOW": [
+    256,
+    4,
+    1
+   ],
+   "BC_BASE_MAX": [
+    99,
+    4,
+    1
+   ],
+   "BC_DIM_MAX": [
+    2048,
+    4,
+    1
+   ],
+   "BC_SCALE_MAX": [
+    99,
+    4,
+    1
+   ],
+   "BC_STRING_MAX": [
+    1000,
+    4,
+    1
+   ],
+   "BUFSIZ": [
+    4096,
+    4,
+    1
+   ],
+   "CHARCLASS_NAME_MAX": [
+    14,
+    4,
+    1
+   ],
+   "CHAR_BIT": [
+    8,
+    4,
+    1
+   ],
+   "CHAR_MAX": [
+    127,
+    4,
+    1
+   ],
+   "CHAR_MIN": [
+    18446744073709551488,
+    4,
+    1
+   ],
+   "CLOCKS_PER_SEC": [
+    1000000,
+    4,
+    1
+   ],
+   "CLOCK_MONOTONIC": [
+    1,
+    4,
+    1
+   ],
+   "CLOCK_REALTIME": [
+    2,
+    4,
+    1
+   ],
+   "COLL_WEIGHTS_MAX": [
+    2,
+    4,
+    1
+   ],
+   "E2BIG": [
+    28,
+    4,
+    1
+   ],
+   "EACCES": [
+    25,
+    4,
+    1
+   ],
+   "EADDRINUSE": [
+    36,
+    4,
+    1
+   ],
+   "EADDRNOTAVAIL": [
+    37,
+    4,
+    1
+   ],
+   "EAFNOSUPPORT": [
+    35,
+    4,
+    1
+   ],
+   "EAGAIN": [
+    24,
+    4,
+    1
+   ],
+   "EALREADY": [
+    54,
+    4,
+    1
+   ],
+   "EBADF": [
+    19,
+    4,
+    1
+   ],
+   "EBUSY": [
+    17,
+    4,
+    1
+   ],
+   "ECANCELED": [
+    59,
+    4,
+    1
+   ],
+   "ECHILD": [
+    27,
+    4,
+    1
+   ],
+   "ECONNABORTED": [
+    55,
+    4,
+    1
+   ],
+   "ECONNREFUSED": [
+    40,
+    4,
+    1
+   ],
+   "ECONNRESET": [
+    41,
+    4,
+    1
+   ],
+   "EDEADLK": [
+    58,
+    4,
+    1
+   ],
+   "EDESTADDRREQ": [
+    45,
+    4,
+    1
+   ],
+   "EDOM": [
+    1,
+    4,
+    1
+   ],
+   "EDQUOT": [
+    63,
+    4,
+    1
+   ],
+   "EEXIST": [
+    16,
+    4,
+    1
+   ],
+   "EFAULT": [
+    23,
+    4,
+    1
+   ],
+   "EFBIG": [
+    51,
+    4,
+    1
+   ],
+   "EHOSTUNREACH": [
+    43,
+    4,
+    1
+   ],
+   "EIDRM": [
+    65,
+    4,
+    1
+   ],
+   "EILSEQ": [
+    61,
+    4,
+    1
+   ],
+   "EINPROGRESS": [
+    53,
+    4,
+    1
+   ],
+   "EINTR": [
+    7,
+    4,
+    1
+   ],
+   "EINVAL": [
+    3,
+    4,
+    1
+   ],
+   "EIO": [
+    5,
+    4,
+    1
+   ],
+   "EISCONN": [
+    38,
+    4,
+    1
+   ],
+   "EISDIR": [
+    15,
+    4,
+    1
+   ],
+   "ELOOP": [
+    50,
+    4,
+    1
+   ],
+   "EMFILE": [
+    46,
+    4,
+    1
+   ],
+   "EMLINK": [
+    57,
+    4,
+    1
+   ],
+   "EMSGSIZE": [
+    30,
+    4,
+    1
+   ],
+   "ENAMETOOLONG": [
+    11,
+    4,
+    1
+   ],
+   "ENETDOWN": [
+    32,
+    4,
+    1
+   ],
+   "ENETUNREACH": [
+    33,
+    4,
+    1
+   ],
+   "ENFILE": [
+    29,
+    4,
+    1
+   ],
+   "ENOBUFS": [
+    31,
+    4,
+    1
+   ],
+   "ENODATA": [
+    62,
+    4,
+    1
+   ],
+   "ENODEV": [
+    13,
+    4,
+    1
+   ],
+   "ENOENT": [
+    6,
+    4,
+    1
+   ],
+   "ENOEXEC": [
+    22,
+    4,
+    1
+   ],
+   "ENOMEM": [
+    4,
+    4,
+    1
+   ],
+   "ENOMSG": [
+    64,
+    4,
+    1
+   ],
+   "ENOPROTOOPT": [
+    56,
+    4,
+    1
+   ],
+   "ENOSPC": [
+    8,
+    4,
+    1
+   ],
+   "ENOSYS": [
+    20,
+    4,
+    1
+   ],
+   "ENOTCONN": [
+    39,
+    4,
+    1
+   ],
+   "ENOTDIR": [
+    14,
+    4,
+    1
+   ],
+   "ENOTEMPTY": [
+    18,
+    4,
+    1
+   ],
+   "ENOTSOCK": [
+    60,
+    4,
+    1
+   ],
+   "ENOTSUP": [
+    21,
+    4,
+    1
+   ],
+   "ENOTTY": [
+    52,
+    4,
+    1
+   ],
+   "ENXIO": [
+    12,
+    4,
+    1
+   ],
+   "EOF": [
+    18446744073709551615,
+    4,
+    1
+   ],
+   "EOPNOTSUPP": [
+    21,
+    4,
+    1
+   ],
+   "EOVERFLOW": [
+    10,
+    4,
+    1
+   ],
+   "EPERM": [
+    47,
+    4,
+    1
+   ],
+   "EPFNOSUPPORT": [
+    35,
+    4,
+    1
+   ],
+   "EPIPE": [
+    44,
+    4,
+    1
+   ],
+   "EPROTO": [
+    67,
+    4,
+    1
+   ],
+   "EPROTONOSUPPORT": [
+    34,
+    4,
+    1
+   ],
+   "ERANGE": [
+    2,
+    4,
+    1
+   ],
+   "EROFS": [
+    9,
+    4,
+    1
+   ],
+   "ESPIPE": [
+    49,
+    4,
+    1
+   ],
+   "ESRCH": [
+    26,
+    4,
+    1
+   ],
+   "ESTALE": [
+    66,
+    4,
+    1
+   ],
+   "ETIMEDOUT": [
+    42,
+    4,
+    1
+   ],
+   "EWOULDBLOCK": [
+    24,
+    4,
+    1
+   ],
+   "EXDEV": [
+    48,
+    4,
+    1
+   ],
+   "EXPR_NEST_MAX": [
+    32,
+    4,
+    1
+   ],
+   "FD_CLOEXEC": [
+    1,
+    4,
+    1
+   ],
+   "FD_CLOFORK": [
+    2,
+    4,
+    1
+   ],
+   "FILENAME_MAX": [
+    1024,
+    4,
+    1
+   ],
+   "FOPEN_MAX": [
+    16,
+    4,
+    1
+   ],
+   "F_DUPFD": [
+    0,
+    4,
+    1
+   ],
+   "F_DUPFD_CLOEXEC": [
+    5,
+    4,
+    1
+   ],
+   "F_DUPFD_CLOFORK": [
+    11,
+    4,
+    1
+   ],
+   "F_GETFD": [
+    1,
+    4,
+    1
+   ],
+   "F_GETFL": [
+    3,
+    4,
+    1
+   ],
+   "F_GETLK": [
+    6,
+    4,
+    1
+   ],
+   "F_GETOWN": [
+    9,
+    4,
+    1
+   ],
+   "F_LOCK": [
+    1,
+    4,
+    1
+   ],
+   "F_OFD_GETLK": [
+    12,
+    4,
+    1
+   ],
+   "F_OFD_SETLK": [
+    13,
+    4,
+    1
+   ],
+   "F_OFD_SETLKW": [
+    14,
+    4,
+    1
+   ],
+   "F_OK": [
+    0,
+    4,
+    1
+   ],
+   "F_RDLCK": [
+    1,
+    4,
+    1
+   ],
+   "F_SETFD": [
+    2,
+    4,
+    1
+   ],
+   "F_SETFL": [
+    4,
+    4,
+    1
+   ],
+   "F_SETLK": [
+    7,
+    4,
+    1
+   ],
+   "F_SETLKW": [
+    8,
+    4,
+    1
+   ],
+   "F_SETOWN": [
+    10,
+    4,
+    1
+   ],
+   "F_TEST": [
+    3,
+    4,
+    1
+   ],
+   "F_TLOCK": [
+    2,
+    4,
+    1
+   ],
+   "F_ULOCK": [
+    0,
+    4,
+    1
+   ],
+   "F_UNLCK": [
+    3,
+    4,
+    1
+   ],
+   "F_WRLCK": [
+    2,
+    4,
+    1
+   ],
+   "GETENTROPY_MAX": [
+    256,
+    4,
+    1
+   ],
+   "HOST_NAME_MAX": [
+    255,
+    4,
+    1
+   ],
+   "INT_MAX": [
+    2147483647,
+    4,
+    1
+   ],
+   "INT_MIN": [
+    18446744071562067968,
+    4,
+    1
+   ],
+   "ITIMER_PROF": [
+    2,
+    4,
+    1
+   ],
+   "ITIMER_REAL": [
+    0,
+    4,
+    1
+   ],
+   "ITIMER_VIRTUAL": [
+    1,
+    4,
+    1
+   ],
+   "KERN_IOC_IN": [
+    2147483648,
+    4,
+    0
+   ],
+   "KERN_IOC_INOUT": [
+    3221225472,
+    4,
+    0
+   ],
+   "KERN_IOC_OUT": [
+    1073741824,
+    4,
+    0
+   ],
+   "KERN_IOC_VOID": [
+    0,
+    4,
+    0
+   ],
+   "KERN_MOUNT_ARGS_VERSION": [
+    1,
+    4,
+    0
+   ],
+   "KERN_MOUNT_FSPEC_MAX": [
+    32,
+    4,
+    0
+   ],
+   "LINE_MAX": [
+    2048,
+    4,
+    1
+   ],
+   "LLONG_MAX": [
+    9223372036854775807,
+    8,
+    1
+   ],
+   "LLONG_MIN": [
+    9223372036854775808,
+    8,
+    1
+   ],
+   "LONG_MAX": [
+    2147483647,
+    4,
+    1
+   ],
+   "LONG_MIN": [
+    18446744071562067968,
+    4,
+    1
+   ],
+   "L_tmpnam": [
+    32,
+    4,
+    1
+   ],
+   "MADV_DONTNEED": [
+    4,
+    4,
+    1
+   ],
+   "MADV_FREE": [
+    5,
+    4,
+    1
+   ],
+   "MADV_NORMAL": [
+    0,
+    4,
+    1
+   ],
+   "MADV_RANDOM": [
+    1,
+    4,
+    1
+   ],
+   "MADV_SEQUENTIAL": [
+    2,
+    4,
+    1
+   ],
+   "MADV_WILLNEED": [
+    3,
+    4,
+    1
+   ],
+   "MAP_ANON": [
+    32,
+    4,
+    1
+   ],
+   "MAP_ANONYMOUS": [
+    32,
+    4,
+    1
+   ],
+   "MAP_FAILED": [
+    4294967295,
+    4,
+    0
+   ],
+   "MAP_FIXED": [
+    16,
+    4,
+    1
+   ],
+   "MAP_FIXED_NOREPLACE": [
+    1048576,
+    4,
+    1
+   ],
+   "MAP_PRIVATE": [
+    1,
+    4,
+    1
+   ],
+   "MAP_SHARED": [
+    2,
+    4,
+    1
+   ],
+   "MB_LEN_MAX": [
+    4,
+    4,
+    1
+   ],
+   "MNT_LOCAL": [
+    4096,
+    4,
+    0
+   ],
+   "MNT_NOSUID": [
+    2,
+    4,
+    0
+   ],
+   "MNT_RDONLY": [
+    1,
+    4,
+    0
+   ],
+   "MS_ASYNC": [
+    1,
+    4,
+    1
+   ],
+   "MS_INVALIDATE": [
+    2,
+    4,
+    1
+   ],
+   "MS_SYNC": [
+    4,
+    4,
+    1
+   ],
+   "NAME_MAX": [
+    255,
+    4,
+    1
+   ],
+   "O_ACCMODE": [
+    3,
+    4,
+    1
+   ],
+   "O_APPEND": [
+    2048,
+    4,
+    1
+   ],
+   "O_CLOEXEC": [
+    16384,
+    4,
+    1
+   ],
+   "O_CLOFORK": [
+    524288,
+    4,
+    1
+   ],
+   "O_CREAT": [
+    256,
+    4,
+    1
+   ],
+   "O_DIRECTORY": [
+    4096,
+    4,
+    1
+   ],
+   "O_DSYNC": [
+    65536,
+    4,
+    1
+   ],
+   "O_EXCL": [
+    512,
+    4,
+    1
+   ],
+   "O_NOCTTY": [
+    32768,
+    4,
+    1
+   ],
+   "O_NOFOLLOW": [
+    262144,
+    4,
+    1
+   ],
+   "O_NONBLOCK": [
+    8192,
+    4,
+    1
+   ],
+   "O_RDONLY": [
+    0,
+    4,
+    1
+   ],
+   "O_RDWR": [
+    2,
+    4,
+    1
+   ],
+   "O_SYNC": [
+    131072,
+    4,
+    1
+   ],
+   "O_TRUNC": [
+    1024,
+    4,
+    1
+   ],
+   "O_WRONLY": [
+    1,
+    4,
+    1
+   ],
+   "PATH_MAX": [
+    256,
+    4,
+    1
+   ],
+   "POSIX_CLOSE_RESTART": [
+    0,
+    4,
+    1
+   ],
+   "POSIX_MADV_DONTNEED": [
+    4,
+    4,
+    1
+   ],
+   "POSIX_MADV_NORMAL": [
+    0,
+    4,
+    1
+   ],
+   "POSIX_MADV_RANDOM": [
+    1,
+    4,
+    1
+   ],
+   "POSIX_MADV_SEQUENTIAL": [
+    2,
+    4,
+    1
+   ],
+   "POSIX_MADV_WILLNEED": [
+    3,
+    4,
+    1
+   ],
+   "PRIO_PGRP": [
+    1,
+    4,
+    1
+   ],
+   "PRIO_PROCESS": [
+    0,
+    4,
+    1
+   ],
+   "PRIO_USER": [
+    2,
+    4,
+    1
+   ],
+   "PROT_EXEC": [
+    4,
+    4,
+    1
+   ],
+   "PROT_NONE": [
+    0,
+    4,
+    1
+   ],
+   "PROT_READ": [
+    1,
+    4,
+    1
+   ],
+   "PROT_WRITE": [
+    2,
+    4,
+    1
+   ],
+   "RE_DUP_MAX": [
+    255,
+    4,
+    1
+   ],
+   "RTSIG_MAX": [
+    34,
+    4,
+    1
+   ],
+   "RUSAGE_CHILDREN": [
+    18446744073709551615,
+    4,
+    1
+   ],
+   "RUSAGE_SELF": [
+    0,
+    4,
+    1
+   ],
+   "R_OK": [
+    4,
+    4,
+    1
+   ],
+   "SCHAR_MAX": [
+    127,
+    4,
+    1
+   ],
+   "SCHAR_MIN": [
+    18446744073709551488,
+    4,
+    1
+   ],
+   "SEEK_CUR": [
+    1,
+    4,
+    1
+   ],
+   "SEEK_DATA": [
+    3,
+    4,
+    1
+   ],
+   "SEEK_END": [
+    2,
+    4,
+    1
+   ],
+   "SEEK_HOLE": [
+    4,
+    4,
+    1
+   ],
+   "SEEK_SET": [
+    0,
+    4,
+    1
+   ],
+   "SHRT_MAX": [
+    32767,
+    4,
+    1
+   ],
+   "SHRT_MIN": [
+    18446744073709518848,
+    4,
+    1
+   ],
+   "SIGQUEUE_MAX": [
+    32,
+    4,
+    1
+   ],
+   "SSIZE_MAX": [
+    2147483647,
+    4,
+    1
+   ],
+   "STDERR_FILENO": [
+    2,
+    4,
+    1
+   ],
+   "STDIN_FILENO": [
+    0,
+    4,
+    1
+   ],
+   "STDOUT_FILENO": [
+    1,
+    4,
+    1
+   ],
+   "ST_LOCAL": [
+    4,
+    4,
+    0
+   ],
+   "ST_NOSUID": [
+    2,
+    4,
+    0
+   ],
+   "ST_RDONLY": [
+    1,
+    4,
+    0
+   ],
+   "S_IFBLK": [
+    24576,
+    4,
+    0
+   ],
+   "S_IFCHR": [
+    8192,
+    4,
+    0
+   ],
+   "S_IFDIR": [
+    16384,
+    4,
+    0
+   ],
+   "S_IFIFO": [
+    4096,
+    4,
+    0
+   ],
+   "S_IFLNK": [
+    40960,
+    4,
+    0
+   ],
+   "S_IFMT": [
+    61440,
+    4,
+    0
+   ],
+   "S_IFREG": [
+    32768,
+    4,
+    0
+   ],
+   "S_IFSOCK": [
+    49152,
+    4,
+    0
+   ],
+   "S_IRGRP": [
+    32,
+    4,
+    0
+   ],
+   "S_IROTH": [
+    4,
+    4,
+    0
+   ],
+   "S_IRUSR": [
+    256,
+    4,
+    0
+   ],
+   "S_IRWXG": [
+    56,
+    4,
+    0
+   ],
+   "S_IRWXO": [
+    7,
+    4,
+    0
+   ],
+   "S_IRWXU": [
+    448,
+    4,
+    0
+   ],
+   "S_ISGID": [
+    1024,
+    4,
+    0
+   ],
+   "S_ISUID": [
+    2048,
+    4,
+    0
+   ],
+   "S_ISVTX": [
+    512,
+    4,
+    0
+   ],
+   "S_IWGRP": [
+    16,
+    4,
+    0
+   ],
+   "S_IWOTH": [
+    2,
+    4,
+    0
+   ],
+   "S_IWUSR": [
+    128,
+    4,
+    0
+   ],
+   "S_IXGRP": [
+    8,
+    4,
+    0
+   ],
+   "S_IXOTH": [
+    1,
+    4,
+    0
+   ],
+   "S_IXUSR": [
+    64,
+    4,
+    0
+   ],
+   "TEXTDOMAIN_MAX": [
+    255,
+    4,
+    1
+   ],
+   "TIMER_ABSTIME": [
+    1,
+    4,
+    1
+   ],
+   "TIME_UTC": [
+    1,
+    4,
+    1
+   ],
+   "TMP_MAX": [
+    10000,
+    4,
+    1
+   ],
+   "UCHAR_MAX": [
+    255,
+    4,
+    0
+   ],
+   "UINT_MAX": [
+    4294967295,
+    4,
+    0
+   ],
+   "ULLONG_MAX": [
+    18446744073709551615,
+    8,
+    0
+   ],
+   "ULONG_MAX": [
+    4294967295,
+    4,
+    0
+   ],
+   "UNIX_PATH_MAX": [
+    108,
+    4,
+    1
+   ],
+   "USHRT_MAX": [
+    65535,
+    4,
+    0
+   ],
+   "UTIME_NOW": [
+    1073741823,
+    4,
+    1
+   ],
+   "UTIME_OMIT": [
+    1073741822,
+    4,
+    1
+   ],
+   "WCONTINUED": [
+    4,
+    4,
+    1
+   ],
+   "WEXITED": [
+    8,
+    4,
+    1
+   ],
+   "WNOHANG": [
+    1,
+    4,
+    1
+   ],
+   "WNOWAIT": [
+    16,
+    4,
+    1
+   ],
+   "WSTOPPED": [
+    2,
+    4,
+    1
+   ],
+   "WUNTRACED": [
+    2,
+    4,
+    1
+   ],
+   "W_OK": [
+    2,
+    4,
+    1
+   ],
+   "X_OK": [
+    1,
+    4,
+    1
+   ],
+   "_CS_PATH": [
+    1,
+    4,
+    1
+   ],
+   "_IOFBF": [
+    0,
+    4,
+    1
+   ],
+   "_IOLBF": [
+    1,
+    4,
+    1
+   ],
+   "_IONBF": [
+    2,
+    4,
+    1
+   ],
+   "_PC_CHOWN_RESTRICTED": [
+    7,
+    4,
+    1
+   ],
+   "_PC_LINK_MAX": [
+    1,
+    4,
+    1
+   ],
+   "_PC_MAX_CANON": [
+    2,
+    4,
+    1
+   ],
+   "_PC_MAX_INPUT": [
+    3,
+    4,
+    1
+   ],
+   "_PC_NAME_MAX": [
+    4,
+    4,
+    1
+   ],
+   "_PC_NO_TRUNC": [
+    8,
+    4,
+    1
+   ],
+   "_PC_PATH_MAX": [
+    5,
+    4,
+    1
+   ],
+   "_PC_PIPE_BUF": [
+    6,
+    4,
+    1
+   ],
+   "_PC_TEXTDOMAIN_MAX": [
+    10,
+    4,
+    1
+   ],
+   "_PC_VDISABLE": [
+    9,
+    4,
+    1
+   ],
+   "_POSIX_ARG_MAX": [
+    4096,
+    4,
+    1
+   ],
+   "_POSIX_HOST_NAME_MAX": [
+    255,
+    4,
+    1
+   ],
+   "_POSIX_RTSIG_MAX": [
+    8,
+    4,
+    1
+   ],
+   "_POSIX_SIGQUEUE_MAX": [
+    32,
+    4,
+    1
+   ],
+   "_SC_2_VERSION": [
+    12,
+    4,
+    1
+   ],
+   "_SC_ARG_MAX": [
+    13,
+    4,
+    1
+   ],
+   "_SC_CHILD_MAX": [
+    14,
+    4,
+    1
+   ],
+   "_SC_CLK_TCK": [
+    3,
+    4,
+    1
+   ],
+   "_SC_DEVICE_CONTROL": [
+    31,
+    4,
+    1
+   ],
+   "_SC_GETPW_R_SIZE_MAX": [
+    32,
+    4,
+    1
+   ],
+   "_SC_JOB_CONTROL": [
+    4,
+    4,
+    1
+   ],
+   "_SC_MESSAGE_PASSING": [
+    10,
+    4,
+    1
+   ],
+   "_SC_MQ_OPEN_MAX": [
+    24,
+    4,
+    1
+   ],
+   "_SC_MQ_PRIO_MAX": [
+    25,
+    4,
+    1
+   ],
+   "_SC_NPROCESSORS_CONF": [
+    16,
+    4,
+    1
+   ],
+   "_SC_NPROCESSORS_ONLN": [
+    17,
+    4,
+    1
+   ],
+   "_SC_OPEN_MAX": [
+    2,
+    4,
+    1
+   ],
+   "_SC_PAGESIZE": [
+    1,
+    4,
+    1
+   ],
+   "_SC_PAGE_SIZE": [
+    1,
+    4,
+    1
+   ],
+   "_SC_REALTIME_SIGNALS": [
+    7,
+    4,
+    1
+   ],
+   "_SC_RTSIG_MAX": [
+    29,
+    4,
+    1
+   ],
+   "_SC_SEMAPHORES": [
+    9,
+    4,
+    1
+   ],
+   "_SC_SEM_NSEMS_MAX": [
+    22,
+    4,
+    1
+   ],
+   "_SC_SEM_VALUE_MAX": [
+    23,
+    4,
+    1
+   ],
+   "_SC_SHARED_MEMORY_OBJECTS": [
+    8,
+    4,
+    1
+   ],
+   "_SC_SIGQUEUE_MAX": [
+    30,
+    4,
+    1
+   ],
+   "_SC_STREAM_MAX": [
+    15,
+    4,
+    1
+   ],
+   "_SC_THREADS": [
+    5,
+    4,
+    1
+   ],
+   "_SC_THREAD_DESTRUCTOR_ITERATIONS": [
+    19,
+    4,
+    1
+   ],
+   "_SC_THREAD_KEYS_MAX": [
+    18,
+    4,
+    1
+   ],
+   "_SC_THREAD_PROCESS_SHARED": [
+    6,
+    4,
+    1
+   ],
+   "_SC_THREAD_STACK_MIN": [
+    20,
+    4,
+    1
+   ],
+   "_SC_THREAD_THREADS_MAX": [
+    21,
+    4,
+    1
+   ],
+   "_SC_TIMERS": [
+    26,
+    4,
+    1
+   ],
+   "_SC_VERSION": [
+    11,
+    4,
+    1
+   ],
+   "_SC_XOPEN_UNIX": [
+    28,
+    4,
+    1
+   ],
+   "_SC_XOPEN_VERSION": [
+    27,
+    4,
+    1
+   ],
+   "BLKGETIDENTITY": [
+    1092108801,
+    4,
+    0
+   ],
+   "BLKGETINFO": [
+    3227009538,
+    4,
+    0
+   ],
+   "BLKREREADPART": [
+    16899,
+    4,
+    0
+   ],
+   "BLKRESERVE": [
+    2153267716,
+    4,
+    0
+   ],
+   "EVIOCGID": [
+    1074283778,
+    4,
+    0
+   ],
+   "EVIOCGRAB": [
+    2147763600,
+    4,
+    0
+   ],
+   "EVIOCGREP": [
+    1074283779,
+    4,
+    0
+   ],
+   "EVIOCGVERSION": [
+    1074021633,
+    4,
+    0
+   ],
+   "EVIOCSREP": [
+    2148025603,
+    4,
+    0
+   ],
+   "GPU_ALLOCATION_EXPORT": [
+    3233302286,
+    4,
+    0
+   ],
+   "GPU_ALLOCATION_IMPORT": [
+    3233826575,
+    4,
+    0
+   ],
+   "GPU_BLOB_CREATE": [
+    3223865092,
+    4,
+    0
+   ],
+   "GPU_BLOB_CREATE_PLACED": [
+    3225437985,
+    4,
+    0
+   ],
+   "GPU_COMMAND": [
+    2149074695,
+    4,
+    0
+   ],
+   "GPU_COMMAND_SUBMIT": [
+    3223865100,
+    4,
+    0
+   ],
+   "GPU_COMMAND_SUBMIT_SYNC": [
+    3225437974,
+    4,
+    0
+   ],
+   "GPU_COMMAND_WAIT": [
+    3223340813,
+    4,
+    0
+   ],
+   "GPU_DEVICE_QUERY": [
+    3223865118,
+    4,
+    0
+   ],
+   "GPU_DISPLAY_CLAIM": [
+    3223340826,
+    4,
+    0
+   ],
+   "GPU_DISPLAY_CONSTRAINTS": [
+    3224913695,
+    4,
+    0
+   ],
+   "GPU_DISPLAY_EVENTS": [
+    3223865120,
+    4,
+    0
+   ],
+   "GPU_DISPLAY_MODE": [
+    3224389401,
+    4,
+    0
+   ],
+   "GPU_DISPLAY_PRESENT": [
+    3226486556,
+    4,
+    0
+   ],
+   "GPU_DISPLAY_PRESENT_SYNC": [
+    3228059415,
+    4,
+    0
+   ],
+   "GPU_DISPLAY_QUERY": [
+    3231205144,
+    4,
+    0
+   ],
+   "GPU_DISPLAY_RELEASE": [
+    2148550427,
+    4,
+    0
+   ],
+   "GPU_DISPLAY_WAIT": [
+    3224913693,
+    4,
+    0
+   ],
+   "GPU_FENCE_BIND": [
+    2149598997,
+    4,
+    0
+   ],
+   "GPU_FENCE_CREATE": [
+    3223340816,
+    4,
+    0
+   ],
+   "GPU_FENCE_QUERY": [
+    3223865105,
+    4,
+    0
+   ],
+   "GPU_FENCE_RESET": [
+    3223865107,
+    4,
+    0
+   ],
+   "GPU_FENCE_SIGNAL": [
+    3223865108,
+    4,
+    0
+   ],
+   "GPU_FENCE_WAIT": [
+    3223865106,
+    4,
+    0
+   ],
+   "GPU_GET_CAPSET": [
+    3239593731,
+    4,
+    0
+   ],
+   "GPU_GET_INFO": [
+    3224913664,
+    4,
+    0
+   ],
+   "GPU_JOB_CANCEL": [
+    2149074724,
+    4,
+    0
+   ],
+   "GPU_JOB_CAPACITY": [
+    3224389413,
+    4,
+    0
+   ],
+   "GPU_JOB_COMMIT": [
+    2149074723,
+    4,
+    0
+   ],
+   "GPU_JOB_POLICY": [
+    3223865126,
+    4,
+    0
+   ],
+   "GPU_JOB_RESERVE": [
+    3223865122,
+    4,
+    0
+   ],
+   "GPU_PRESENT": [
+    2150647560,
+    4,
+    0
+   ],
+   "GPU_RESOURCE_CREATE": [
+    3223340801,
+    4,
+    0
+   ],
+   "GPU_RESOURCE_DESTROY": [
+    2148550402,
+    4,
+    0
+   ],
+   "GPU_RESOURCE_EXPORT": [
+    3227010826,
+    4,
+    0
+   ],
+   "GPU_RESOURCE_IMPORT": [
+    3227535115,
+    4,
+    0
+   ],
+   "GPU_RESOURCE_MAP": [
+    3223340809,
+    4,
+    0
+   ],
+   "GPU_RESOURCE_READ": [
+    2150123269,
+    4,
+    0
+   ],
+   "GPU_RESOURCE_WRITE": [
+    2150123270,
+    4,
+    0
+   ],
+   "KERN_CONSOLE_CLEAR": [
+    25346,
+    4,
+    0
+   ],
+   "KERN_CONSOLE_CLEAR_ROW": [
+    2147771139,
+    4,
+    0
+   ],
+   "KERN_CONSOLE_CLEAR_TO_EOL": [
+    2148033284,
+    4,
+    0
+   ],
+   "KERN_CONSOLE_GET_CURSOR": [
+    1074553605,
+    4,
+    0
+   ],
+   "KERN_CONSOLE_GET_SIZE": [
+    1074291457,
+    4,
+    0
+   ],
+   "KERN_CONSOLE_ISATTY": [
+    25357,
+    4,
+    0
+   ],
+   "KERN_CONSOLE_SET_CURSOR": [
+    2148295430,
+    4,
+    0
+   ],
+   "KERN_CONSOLE_SHOW_CURSOR": [
+    2148295431,
+    4,
+    0
+   ],
+   "KERN_CONSOLE_WRITE_AT": [
+    2148819720,
+    4,
+    0
+   ],
+   "KERN_SYSTEM_GET_MOUNTS": [
+    3223352076,
+    4,
+    0
+   ],
+   "KERN_SYSTEM_HALT": [
+    29444,
+    4,
+    0
+   ],
+   "KERN_SYSTEM_REBOOT": [
+    29445,
+    4,
+    0
+   ],
+   "TCGETS": [
+    1076655105,
+    4,
+    0
+   ],
+   "TCSBRK": [
+    2147775503,
+    4,
+    0
+   ],
+   "TCSETS": [
+    2150396930,
+    4,
+    0
+   ],
+   "TCSETSF": [
+    2150396932,
+    4,
+    0
+   ],
+   "TCSETSW": [
+    2150396931,
+    4,
+    0
+   ],
+   "TCXONC": [
+    2147775504,
+    4,
+    0
+   ],
+   "TIOCDRAIN": [
+    29713,
+    4,
+    0
+   ],
+   "TIOCFLUSH": [
+    2147775499,
+    4,
+    0
+   ],
+   "TIOCGPGRP": [
+    1074033671,
+    4,
+    0
+   ],
+   "TIOCGPTN": [
+    1074033676,
+    4,
+    0
+   ],
+   "TIOCGSID": [
+    1074033678,
+    4,
+    0
+   ],
+   "TIOCGWINSZ": [
+    1074295813,
+    4,
+    0
+   ],
+   "TIOCNOTTY": [
+    29706,
+    4,
+    0
+   ],
+   "TIOCSCTTY": [
+    29705,
+    4,
+    0
+   ],
+   "TIOCSPGRP": [
+    2147775496,
+    4,
+    0
+   ],
+   "TIOCSPTLCK": [
+    2147775501,
+    4,
+    0
+   ],
+   "TIOCSWINSZ": [
+    2148037638,
+    4,
+    0
+   ],
+   "P_ALL": [
+    0,
+    4,
+    1
+   ],
+   "P_PID": [
+    1,
+    4,
+    1
+   ],
+   "P_PGID": [
+    2,
+    4,
+    1
+   ],
+   "WIFEXITED(0x0100)": [
+    1,
+    4,
+    1
+   ],
+   "WEXITSTATUS(0x2a00)": [
+    42,
+    4,
+    1
+   ],
+   "WIFSIGNALED(0x0009)": [
+    1,
+    4,
+    1
+   ],
+   "WTERMSIG(0x0009)": [
+    9,
+    4,
+    1
+   ],
+   "WIFSTOPPED(0x137f)": [
+    1,
+    4,
+    1
+   ],
+   "WSTOPSIG(0x137f)": [
+    19,
+    4,
+    1
+   ],
+   "WIFCONTINUED(0xffff)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISREG(0100644)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISDIR(0040755)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISBLK(0060600)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISCHR(0020600)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISLNK(0120777)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISSOCK(0140777)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISFIFO(0010600)": [
+    1,
+    4,
+    1
+   ],
+   "sizeof(ssize_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(off_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(blkcnt_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(blksize_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(dev_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(ino_t)": [
+    8,
+    4,
+    0
+   ],
+   "sizeof(mode_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(nlink_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(uid_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(gid_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(pid_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(id_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(tid_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(useconds_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(suseconds_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(reclen_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(time_t)": [
+    8,
+    4,
+    0
+   ],
+   "sizeof(clockid_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(timer_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(fsblkcnt_t)": [
+    8,
+    4,
+    0
+   ],
+   "sizeof(fsfilcnt_t)": [
+    8,
+    4,
+    0
+   ],
+   "sizeof(rlim_t)": [
+    8,
+    4,
+    0
+   ],
+   "sizeof(idtype_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(struct timespec)": [
+    12,
+    4,
+    0
+   ],
+   "offsetof(struct timespec, tv_sec)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct timespec, tv_nsec)": [
+    8,
+    4,
+    0
+   ],
+   "sizeof(struct itimerspec)": [
+    24,
+    4,
+    0
+   ],
+   "offsetof(struct itimerspec, it_interval)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct itimerspec, it_value)": [
+    12,
+    4,
+    0
+   ],
+   "sizeof(struct timeval)": [
+    12,
+    4,
+    0
+   ],
+   "offsetof(struct timeval, tv_sec)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct timeval, tv_usec)": [
+    8,
+    4,
+    0
+   ],
+   "sizeof(struct itimerval)": [
+    24,
+    4,
+    0
+   ],
+   "offsetof(struct itimerval, it_interval)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct itimerval, it_value)": [
+    12,
+    4,
+    0
+   ],
+   "sizeof(struct stat)": [
+    80,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_dev)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_ino)": [
+    4,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_mode)": [
+    12,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_nlink)": [
+    16,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_uid)": [
+    20,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_gid)": [
+    24,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_rdev)": [
+    28,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_size)": [
+    32,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_atim)": [
+    36,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_mtim)": [
+    48,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_ctim)": [
+    60,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_blksize)": [
+    72,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_blocks)": [
+    76,
+    4,
+    0
+   ],
+   "sizeof(struct statvfs)": [
+    88,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_bsize)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_frsize)": [
+    8,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_blocks)": [
+    16,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_bfree)": [
+    24,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_bavail)": [
+    32,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_files)": [
+    40,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_ffree)": [
+    48,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_favail)": [
+    56,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_fsid)": [
+    64,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_flag)": [
+    72,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_namemax)": [
+    80,
+    4,
+    0
+   ],
+   "sizeof(struct rlimit)": [
+    16,
+    4,
+    0
+   ],
+   "offsetof(struct rlimit, rlim_cur)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct rlimit, rlim_max)": [
+    8,
+    4,
+    0
+   ],
+   "sizeof(struct rusage)": [
+    80,
+    4,
+    0
+   ],
+   "offsetof(struct rusage, ru_utime)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct rusage, ru_stime)": [
+    12,
+    4,
+    0
+   ],
+   "offsetof(struct rusage, ru_maxrss)": [
+    24,
+    4,
+    0
+   ],
+   "offsetof(struct rusage, ru_nivcsw)": [
+    76,
+    4,
+    0
+   ],
+   "sizeof(struct mount_args)": [
+    40,
+    4,
+    0
+   ],
+   "offsetof(struct mount_args, size)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct mount_args, version)": [
+    4,
+    4,
+    0
+   ],
+   "offsetof(struct mount_args, fspec)": [
+    8,
+    4,
+    0
+   ],
+   "sizeof(struct sockaddr_un)": [
+    110,
+    4,
+    0
+   ],
+   "offsetof(struct sockaddr_un, sun_family)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct sockaddr_un, sun_path)": [
+    2,
+    4,
+    0
+   ]
+  }
+ },
+ "uapi": {
+  "lp64": {
+   "ARG_MAX": [
+    16384,
+    4,
+    1
+   ],
+   "AT_EACCESS": [
+    1024,
+    4,
+    1
+   ],
+   "AT_FDCWD": [
+    18446744073709551516,
+    4,
+    1
+   ],
+   "AT_REMOVEDIR": [
+    512,
+    4,
+    1
+   ],
+   "AT_SYMLINK_FOLLOW": [
+    2048,
+    4,
+    1
+   ],
+   "AT_SYMLINK_NOFOLLOW": [
+    256,
+    4,
+    1
+   ],
+   "BC_BASE_MAX": null,
+   "BC_DIM_MAX": null,
+   "BC_SCALE_MAX": null,
+   "BC_STRING_MAX": null,
+   "BUFSIZ": null,
+   "CHARCLASS_NAME_MAX": null,
+   "CHAR_BIT": null,
+   "CHAR_MAX": null,
+   "CHAR_MIN": null,
+   "CLOCKS_PER_SEC": null,
+   "CLOCK_MONOTONIC": [
+    1,
+    4,
+    1
+   ],
+   "CLOCK_REALTIME": [
+    2,
+    4,
+    1
+   ],
+   "COLL_WEIGHTS_MAX": null,
+   "E2BIG": [
+    28,
+    4,
+    1
+   ],
+   "EACCES": [
+    25,
+    4,
+    1
+   ],
+   "EADDRINUSE": [
+    36,
+    4,
+    1
+   ],
+   "EADDRNOTAVAIL": [
+    37,
+    4,
+    1
+   ],
+   "EAFNOSUPPORT": [
+    35,
+    4,
+    1
+   ],
+   "EAGAIN": [
+    24,
+    4,
+    1
+   ],
+   "EALREADY": [
+    54,
+    4,
+    1
+   ],
+   "EBADF": [
+    19,
+    4,
+    1
+   ],
+   "EBUSY": [
+    17,
+    4,
+    1
+   ],
+   "ECANCELED": [
+    59,
+    4,
+    1
+   ],
+   "ECHILD": [
+    27,
+    4,
+    1
+   ],
+   "ECONNABORTED": [
+    55,
+    4,
+    1
+   ],
+   "ECONNREFUSED": [
+    40,
+    4,
+    1
+   ],
+   "ECONNRESET": [
+    41,
+    4,
+    1
+   ],
+   "EDEADLK": [
+    58,
+    4,
+    1
+   ],
+   "EDESTADDRREQ": [
+    45,
+    4,
+    1
+   ],
+   "EDOM": [
+    1,
+    4,
+    1
+   ],
+   "EDQUOT": [
+    63,
+    4,
+    1
+   ],
+   "EEXIST": [
+    16,
+    4,
+    1
+   ],
+   "EFAULT": [
+    23,
+    4,
+    1
+   ],
+   "EFBIG": [
+    51,
+    4,
+    1
+   ],
+   "EHOSTUNREACH": [
+    43,
+    4,
+    1
+   ],
+   "EIDRM": [
+    65,
+    4,
+    1
+   ],
+   "EILSEQ": [
+    61,
+    4,
+    1
+   ],
+   "EINPROGRESS": [
+    53,
+    4,
+    1
+   ],
+   "EINTR": [
+    7,
+    4,
+    1
+   ],
+   "EINVAL": [
+    3,
+    4,
+    1
+   ],
+   "EIO": [
+    5,
+    4,
+    1
+   ],
+   "EISCONN": [
+    38,
+    4,
+    1
+   ],
+   "EISDIR": [
+    15,
+    4,
+    1
+   ],
+   "ELOOP": [
+    50,
+    4,
+    1
+   ],
+   "EMFILE": [
+    46,
+    4,
+    1
+   ],
+   "EMLINK": [
+    57,
+    4,
+    1
+   ],
+   "EMSGSIZE": [
+    30,
+    4,
+    1
+   ],
+   "ENAMETOOLONG": [
+    11,
+    4,
+    1
+   ],
+   "ENETDOWN": [
+    32,
+    4,
+    1
+   ],
+   "ENETUNREACH": [
+    33,
+    4,
+    1
+   ],
+   "ENFILE": [
+    29,
+    4,
+    1
+   ],
+   "ENOBUFS": [
+    31,
+    4,
+    1
+   ],
+   "ENODATA": [
+    62,
+    4,
+    1
+   ],
+   "ENODEV": [
+    13,
+    4,
+    1
+   ],
+   "ENOENT": [
+    6,
+    4,
+    1
+   ],
+   "ENOEXEC": [
+    22,
+    4,
+    1
+   ],
+   "ENOMEM": [
+    4,
+    4,
+    1
+   ],
+   "ENOMSG": [
+    64,
+    4,
+    1
+   ],
+   "ENOPROTOOPT": [
+    56,
+    4,
+    1
+   ],
+   "ENOSPC": [
+    8,
+    4,
+    1
+   ],
+   "ENOSYS": [
+    20,
+    4,
+    1
+   ],
+   "ENOTCONN": [
+    39,
+    4,
+    1
+   ],
+   "ENOTDIR": [
+    14,
+    4,
+    1
+   ],
+   "ENOTEMPTY": [
+    18,
+    4,
+    1
+   ],
+   "ENOTSOCK": [
+    60,
+    4,
+    1
+   ],
+   "ENOTSUP": [
+    21,
+    4,
+    1
+   ],
+   "ENOTTY": [
+    52,
+    4,
+    1
+   ],
+   "ENXIO": [
+    12,
+    4,
+    1
+   ],
+   "EOF": null,
+   "EOPNOTSUPP": [
+    21,
+    4,
+    1
+   ],
+   "EOVERFLOW": [
+    10,
+    4,
+    1
+   ],
+   "EPERM": [
+    47,
+    4,
+    1
+   ],
+   "EPFNOSUPPORT": [
+    35,
+    4,
+    1
+   ],
+   "EPIPE": [
+    44,
+    4,
+    1
+   ],
+   "EPROTO": [
+    67,
+    4,
+    1
+   ],
+   "EPROTONOSUPPORT": [
+    34,
+    4,
+    1
+   ],
+   "ERANGE": [
+    2,
+    4,
+    1
+   ],
+   "EROFS": [
+    9,
+    4,
+    1
+   ],
+   "ESPIPE": [
+    49,
+    4,
+    1
+   ],
+   "ESRCH": [
+    26,
+    4,
+    1
+   ],
+   "ESTALE": [
+    66,
+    4,
+    1
+   ],
+   "ETIMEDOUT": [
+    42,
+    4,
+    1
+   ],
+   "EWOULDBLOCK": [
+    24,
+    4,
+    1
+   ],
+   "EXDEV": [
+    48,
+    4,
+    1
+   ],
+   "EXPR_NEST_MAX": null,
+   "FD_CLOEXEC": [
+    1,
+    4,
+    1
+   ],
+   "FD_CLOFORK": [
+    2,
+    4,
+    1
+   ],
+   "FILENAME_MAX": null,
+   "FOPEN_MAX": null,
+   "F_DUPFD": [
+    0,
+    4,
+    1
+   ],
+   "F_DUPFD_CLOEXEC": [
+    5,
+    4,
+    1
+   ],
+   "F_DUPFD_CLOFORK": [
+    11,
+    4,
+    1
+   ],
+   "F_GETFD": [
+    1,
+    4,
+    1
+   ],
+   "F_GETFL": [
+    3,
+    4,
+    1
+   ],
+   "F_GETLK": [
+    6,
+    4,
+    1
+   ],
+   "F_GETOWN": [
+    9,
+    4,
+    1
+   ],
+   "F_LOCK": null,
+   "F_OFD_GETLK": [
+    12,
+    4,
+    1
+   ],
+   "F_OFD_SETLK": [
+    13,
+    4,
+    1
+   ],
+   "F_OFD_SETLKW": [
+    14,
+    4,
+    1
+   ],
+   "F_OK": [
+    0,
+    4,
+    1
+   ],
+   "F_RDLCK": [
+    1,
+    4,
+    1
+   ],
+   "F_SETFD": [
+    2,
+    4,
+    1
+   ],
+   "F_SETFL": [
+    4,
+    4,
+    1
+   ],
+   "F_SETLK": [
+    7,
+    4,
+    1
+   ],
+   "F_SETLKW": [
+    8,
+    4,
+    1
+   ],
+   "F_SETOWN": [
+    10,
+    4,
+    1
+   ],
+   "F_TEST": null,
+   "F_TLOCK": null,
+   "F_ULOCK": null,
+   "F_UNLCK": [
+    3,
+    4,
+    1
+   ],
+   "F_WRLCK": [
+    2,
+    4,
+    1
+   ],
+   "GETENTROPY_MAX": [
+    256,
+    4,
+    1
+   ],
+   "HOST_NAME_MAX": [
+    255,
+    4,
+    1
+   ],
+   "INT_MAX": null,
+   "INT_MIN": null,
+   "ITIMER_PROF": [
+    2,
+    4,
+    1
+   ],
+   "ITIMER_REAL": [
+    0,
+    4,
+    1
+   ],
+   "ITIMER_VIRTUAL": [
+    1,
+    4,
+    1
+   ],
+   "KERN_IOC_IN": [
+    2147483648,
+    8,
+    0
+   ],
+   "KERN_IOC_INOUT": [
+    3221225472,
+    8,
+    0
+   ],
+   "KERN_IOC_OUT": [
+    1073741824,
+    8,
+    0
+   ],
+   "KERN_IOC_VOID": [
+    0,
+    8,
+    0
+   ],
+   "KERN_MOUNT_ARGS_VERSION": [
+    1,
+    4,
+    0
+   ],
+   "KERN_MOUNT_FSPEC_MAX": [
+    32,
+    4,
+    0
+   ],
+   "LINE_MAX": null,
+   "LLONG_MAX": null,
+   "LLONG_MIN": null,
+   "LONG_MAX": null,
+   "LONG_MIN": null,
+   "L_tmpnam": null,
+   "MADV_DONTNEED": [
+    4,
+    4,
+    1
+   ],
+   "MADV_FREE": [
+    5,
+    4,
+    1
+   ],
+   "MADV_NORMAL": [
+    0,
+    4,
+    1
+   ],
+   "MADV_RANDOM": [
+    1,
+    4,
+    1
+   ],
+   "MADV_SEQUENTIAL": [
+    2,
+    4,
+    1
+   ],
+   "MADV_WILLNEED": [
+    3,
+    4,
+    1
+   ],
+   "MAP_ANON": [
+    32,
+    4,
+    1
+   ],
+   "MAP_ANONYMOUS": [
+    32,
+    4,
+    1
+   ],
+   "MAP_FAILED": [
+    18446744073709551615,
+    8,
+    0
+   ],
+   "MAP_FIXED": [
+    16,
+    4,
+    1
+   ],
+   "MAP_FIXED_NOREPLACE": [
+    1048576,
+    4,
+    1
+   ],
+   "MAP_PRIVATE": [
+    1,
+    4,
+    1
+   ],
+   "MAP_SHARED": [
+    2,
+    4,
+    1
+   ],
+   "MB_LEN_MAX": null,
+   "MNT_LOCAL": [
+    4096,
+    4,
+    0
+   ],
+   "MNT_NOSUID": [
+    2,
+    4,
+    0
+   ],
+   "MNT_RDONLY": [
+    1,
+    4,
+    0
+   ],
+   "MS_ASYNC": [
+    1,
+    4,
+    1
+   ],
+   "MS_INVALIDATE": [
+    2,
+    4,
+    1
+   ],
+   "MS_SYNC": [
+    4,
+    4,
+    1
+   ],
+   "NAME_MAX": [
+    255,
+    4,
+    1
+   ],
+   "O_ACCMODE": [
+    3,
+    4,
+    1
+   ],
+   "O_APPEND": [
+    2048,
+    4,
+    1
+   ],
+   "O_CLOEXEC": [
+    16384,
+    4,
+    1
+   ],
+   "O_CLOFORK": [
+    524288,
+    4,
+    1
+   ],
+   "O_CREAT": [
+    256,
+    4,
+    1
+   ],
+   "O_DIRECTORY": [
+    4096,
+    4,
+    1
+   ],
+   "O_DSYNC": [
+    65536,
+    4,
+    1
+   ],
+   "O_EXCL": [
+    512,
+    4,
+    1
+   ],
+   "O_NOCTTY": [
+    32768,
+    4,
+    1
+   ],
+   "O_NOFOLLOW": [
+    262144,
+    4,
+    1
+   ],
+   "O_NONBLOCK": [
+    8192,
+    4,
+    1
+   ],
+   "O_RDONLY": [
+    0,
+    4,
+    1
+   ],
+   "O_RDWR": [
+    2,
+    4,
+    1
+   ],
+   "O_SYNC": [
+    131072,
+    4,
+    1
+   ],
+   "O_TRUNC": [
+    1024,
+    4,
+    1
+   ],
+   "O_WRONLY": [
+    1,
+    4,
+    1
+   ],
+   "PATH_MAX": [
+    256,
+    4,
+    1
+   ],
+   "POSIX_CLOSE_RESTART": null,
+   "POSIX_MADV_DONTNEED": null,
+   "POSIX_MADV_NORMAL": null,
+   "POSIX_MADV_RANDOM": null,
+   "POSIX_MADV_SEQUENTIAL": null,
+   "POSIX_MADV_WILLNEED": null,
+   "PRIO_PGRP": [
+    1,
+    4,
+    1
+   ],
+   "PRIO_PROCESS": [
+    0,
+    4,
+    1
+   ],
+   "PRIO_USER": [
+    2,
+    4,
+    1
+   ],
+   "PROT_EXEC": [
+    4,
+    4,
+    1
+   ],
+   "PROT_NONE": [
+    0,
+    4,
+    1
+   ],
+   "PROT_READ": [
+    1,
+    4,
+    1
+   ],
+   "PROT_WRITE": [
+    2,
+    4,
+    1
+   ],
+   "RE_DUP_MAX": null,
+   "RTSIG_MAX": [
+    34,
+    4,
+    1
+   ],
+   "RUSAGE_CHILDREN": [
+    18446744073709551615,
+    4,
+    1
+   ],
+   "RUSAGE_SELF": [
+    0,
+    4,
+    1
+   ],
+   "R_OK": [
+    4,
+    4,
+    1
+   ],
+   "SCHAR_MAX": null,
+   "SCHAR_MIN": null,
+   "SEEK_CUR": [
+    1,
+    4,
+    1
+   ],
+   "SEEK_DATA": [
+    3,
+    4,
+    1
+   ],
+   "SEEK_END": [
+    2,
+    4,
+    1
+   ],
+   "SEEK_HOLE": [
+    4,
+    4,
+    1
+   ],
+   "SEEK_SET": [
+    0,
+    4,
+    1
+   ],
+   "SHRT_MAX": null,
+   "SHRT_MIN": null,
+   "SIGQUEUE_MAX": [
+    32,
+    4,
+    1
+   ],
+   "SSIZE_MAX": [
+    9223372036854775807,
+    8,
+    1
+   ],
+   "STDERR_FILENO": [
+    2,
+    4,
+    1
+   ],
+   "STDIN_FILENO": [
+    0,
+    4,
+    1
+   ],
+   "STDOUT_FILENO": [
+    1,
+    4,
+    1
+   ],
+   "ST_LOCAL": [
+    4,
+    8,
+    0
+   ],
+   "ST_NOSUID": [
+    2,
+    8,
+    0
+   ],
+   "ST_RDONLY": [
+    1,
+    8,
+    0
+   ],
+   "S_IFBLK": [
+    24576,
+    4,
+    0
+   ],
+   "S_IFCHR": [
+    8192,
+    4,
+    0
+   ],
+   "S_IFDIR": [
+    16384,
+    4,
+    0
+   ],
+   "S_IFIFO": [
+    4096,
+    4,
+    0
+   ],
+   "S_IFLNK": [
+    40960,
+    4,
+    0
+   ],
+   "S_IFMT": [
+    61440,
+    4,
+    0
+   ],
+   "S_IFREG": [
+    32768,
+    4,
+    0
+   ],
+   "S_IFSOCK": [
+    49152,
+    4,
+    0
+   ],
+   "S_IRGRP": [
+    32,
+    4,
+    0
+   ],
+   "S_IROTH": [
+    4,
+    4,
+    0
+   ],
+   "S_IRUSR": [
+    256,
+    4,
+    0
+   ],
+   "S_IRWXG": [
+    56,
+    4,
+    0
+   ],
+   "S_IRWXO": [
+    7,
+    4,
+    0
+   ],
+   "S_IRWXU": [
+    448,
+    4,
+    0
+   ],
+   "S_ISGID": [
+    1024,
+    4,
+    0
+   ],
+   "S_ISUID": [
+    2048,
+    4,
+    0
+   ],
+   "S_ISVTX": [
+    512,
+    4,
+    0
+   ],
+   "S_IWGRP": [
+    16,
+    4,
+    0
+   ],
+   "S_IWOTH": [
+    2,
+    4,
+    0
+   ],
+   "S_IWUSR": [
+    128,
+    4,
+    0
+   ],
+   "S_IXGRP": [
+    8,
+    4,
+    0
+   ],
+   "S_IXOTH": [
+    1,
+    4,
+    0
+   ],
+   "S_IXUSR": [
+    64,
+    4,
+    0
+   ],
+   "TEXTDOMAIN_MAX": null,
+   "TIMER_ABSTIME": [
+    1,
+    4,
+    1
+   ],
+   "TIME_UTC": null,
+   "TMP_MAX": null,
+   "UCHAR_MAX": null,
+   "UINT_MAX": null,
+   "ULLONG_MAX": null,
+   "ULONG_MAX": null,
+   "UNIX_PATH_MAX": [
+    108,
+    4,
+    1
+   ],
+   "USHRT_MAX": null,
+   "UTIME_NOW": [
+    1073741823,
+    8,
+    1
+   ],
+   "UTIME_OMIT": [
+    1073741822,
+    8,
+    1
+   ],
+   "WCONTINUED": [
+    4,
+    4,
+    1
+   ],
+   "WEXITED": [
+    8,
+    4,
+    1
+   ],
+   "WNOHANG": [
+    1,
+    4,
+    1
+   ],
+   "WNOWAIT": [
+    16,
+    4,
+    1
+   ],
+   "WSTOPPED": [
+    2,
+    4,
+    1
+   ],
+   "WUNTRACED": [
+    2,
+    4,
+    1
+   ],
+   "W_OK": [
+    2,
+    4,
+    1
+   ],
+   "X_OK": [
+    1,
+    4,
+    1
+   ],
+   "_CS_PATH": null,
+   "_IOFBF": null,
+   "_IOLBF": null,
+   "_IONBF": null,
+   "_PC_CHOWN_RESTRICTED": null,
+   "_PC_LINK_MAX": null,
+   "_PC_MAX_CANON": null,
+   "_PC_MAX_INPUT": null,
+   "_PC_NAME_MAX": null,
+   "_PC_NO_TRUNC": null,
+   "_PC_PATH_MAX": null,
+   "_PC_PIPE_BUF": null,
+   "_PC_TEXTDOMAIN_MAX": null,
+   "_PC_VDISABLE": null,
+   "_POSIX_ARG_MAX": [
+    4096,
+    4,
+    1
+   ],
+   "_POSIX_HOST_NAME_MAX": [
+    255,
+    4,
+    1
+   ],
+   "_POSIX_RTSIG_MAX": [
+    8,
+    4,
+    1
+   ],
+   "_POSIX_SIGQUEUE_MAX": [
+    32,
+    4,
+    1
+   ],
+   "_SC_2_VERSION": null,
+   "_SC_ARG_MAX": null,
+   "_SC_CHILD_MAX": null,
+   "_SC_CLK_TCK": null,
+   "_SC_DEVICE_CONTROL": null,
+   "_SC_GETPW_R_SIZE_MAX": null,
+   "_SC_JOB_CONTROL": null,
+   "_SC_MESSAGE_PASSING": null,
+   "_SC_MQ_OPEN_MAX": null,
+   "_SC_MQ_PRIO_MAX": null,
+   "_SC_NPROCESSORS_CONF": null,
+   "_SC_NPROCESSORS_ONLN": null,
+   "_SC_OPEN_MAX": null,
+   "_SC_PAGESIZE": null,
+   "_SC_PAGE_SIZE": null,
+   "_SC_REALTIME_SIGNALS": null,
+   "_SC_RTSIG_MAX": null,
+   "_SC_SEMAPHORES": null,
+   "_SC_SEM_NSEMS_MAX": null,
+   "_SC_SEM_VALUE_MAX": null,
+   "_SC_SHARED_MEMORY_OBJECTS": null,
+   "_SC_SIGQUEUE_MAX": null,
+   "_SC_STREAM_MAX": null,
+   "_SC_THREADS": null,
+   "_SC_THREAD_DESTRUCTOR_ITERATIONS": null,
+   "_SC_THREAD_KEYS_MAX": null,
+   "_SC_THREAD_PROCESS_SHARED": null,
+   "_SC_THREAD_STACK_MIN": null,
+   "_SC_THREAD_THREADS_MAX": null,
+   "_SC_TIMERS": null,
+   "_SC_VERSION": null,
+   "_SC_XOPEN_UNIX": null,
+   "_SC_XOPEN_VERSION": null,
+   "BLKGETIDENTITY": [
+    1092108801,
+    8,
+    0
+   ],
+   "BLKGETINFO": [
+    3227009538,
+    8,
+    0
+   ],
+   "BLKREREADPART": [
+    16899,
+    8,
+    0
+   ],
+   "BLKRESERVE": [
+    2153267716,
+    8,
+    0
+   ],
+   "EVIOCGID": [
+    1074283778,
+    8,
+    0
+   ],
+   "EVIOCGRAB": [
+    2147763600,
+    8,
+    0
+   ],
+   "EVIOCGREP": [
+    1074283779,
+    8,
+    0
+   ],
+   "EVIOCGVERSION": [
+    1074021633,
+    8,
+    0
+   ],
+   "EVIOCSREP": [
+    2148025603,
+    8,
+    0
+   ],
+   "GPU_ALLOCATION_EXPORT": [
+    3233302286,
+    8,
+    0
+   ],
+   "GPU_ALLOCATION_IMPORT": [
+    3233826575,
+    8,
+    0
+   ],
+   "GPU_BLOB_CREATE": [
+    3223865092,
+    8,
+    0
+   ],
+   "GPU_BLOB_CREATE_PLACED": [
+    3225437985,
+    8,
+    0
+   ],
+   "GPU_COMMAND": [
+    2149074695,
+    8,
+    0
+   ],
+   "GPU_COMMAND_SUBMIT": [
+    3223865100,
+    8,
+    0
+   ],
+   "GPU_COMMAND_SUBMIT_SYNC": [
+    3225437974,
+    8,
+    0
+   ],
+   "GPU_COMMAND_WAIT": [
+    3223340813,
+    8,
+    0
+   ],
+   "GPU_DEVICE_QUERY": [
+    3223865118,
+    8,
+    0
+   ],
+   "GPU_DISPLAY_CLAIM": [
+    3223340826,
+    8,
+    0
+   ],
+   "GPU_DISPLAY_CONSTRAINTS": [
+    3224913695,
+    8,
+    0
+   ],
+   "GPU_DISPLAY_EVENTS": [
+    3223865120,
+    8,
+    0
+   ],
+   "GPU_DISPLAY_MODE": [
+    3224389401,
+    8,
+    0
+   ],
+   "GPU_DISPLAY_PRESENT": [
+    3226486556,
+    8,
+    0
+   ],
+   "GPU_DISPLAY_PRESENT_SYNC": [
+    3228059415,
+    8,
+    0
+   ],
+   "GPU_DISPLAY_QUERY": [
+    3231205144,
+    8,
+    0
+   ],
+   "GPU_DISPLAY_RELEASE": [
+    2148550427,
+    8,
+    0
+   ],
+   "GPU_DISPLAY_WAIT": [
+    3224913693,
+    8,
+    0
+   ],
+   "GPU_FENCE_BIND": [
+    2149598997,
+    8,
+    0
+   ],
+   "GPU_FENCE_CREATE": [
+    3223340816,
+    8,
+    0
+   ],
+   "GPU_FENCE_QUERY": [
+    3223865105,
+    8,
+    0
+   ],
+   "GPU_FENCE_RESET": [
+    3223865107,
+    8,
+    0
+   ],
+   "GPU_FENCE_SIGNAL": [
+    3223865108,
+    8,
+    0
+   ],
+   "GPU_FENCE_WAIT": [
+    3223865106,
+    8,
+    0
+   ],
+   "GPU_GET_CAPSET": [
+    3239593731,
+    8,
+    0
+   ],
+   "GPU_GET_INFO": [
+    3224913664,
+    8,
+    0
+   ],
+   "GPU_JOB_CANCEL": [
+    2149074724,
+    8,
+    0
+   ],
+   "GPU_JOB_CAPACITY": [
+    3224389413,
+    8,
+    0
+   ],
+   "GPU_JOB_COMMIT": [
+    2149074723,
+    8,
+    0
+   ],
+   "GPU_JOB_POLICY": [
+    3223865126,
+    8,
+    0
+   ],
+   "GPU_JOB_RESERVE": [
+    3223865122,
+    8,
+    0
+   ],
+   "GPU_PRESENT": [
+    2150647560,
+    8,
+    0
+   ],
+   "GPU_RESOURCE_CREATE": [
+    3223340801,
+    8,
+    0
+   ],
+   "GPU_RESOURCE_DESTROY": [
+    2148550402,
+    8,
+    0
+   ],
+   "GPU_RESOURCE_EXPORT": [
+    3227010826,
+    8,
+    0
+   ],
+   "GPU_RESOURCE_IMPORT": [
+    3227535115,
+    8,
+    0
+   ],
+   "GPU_RESOURCE_MAP": [
+    3223340809,
+    8,
+    0
+   ],
+   "GPU_RESOURCE_READ": [
+    2150123269,
+    8,
+    0
+   ],
+   "GPU_RESOURCE_WRITE": [
+    2150123270,
+    8,
+    0
+   ],
+   "KERN_CONSOLE_CLEAR": [
+    25346,
+    8,
+    0
+   ],
+   "KERN_CONSOLE_CLEAR_ROW": [
+    2147771139,
+    8,
+    0
+   ],
+   "KERN_CONSOLE_CLEAR_TO_EOL": [
+    2148033284,
+    8,
+    0
+   ],
+   "KERN_CONSOLE_GET_CURSOR": [
+    1074553605,
+    8,
+    0
+   ],
+   "KERN_CONSOLE_GET_SIZE": [
+    1074291457,
+    8,
+    0
+   ],
+   "KERN_CONSOLE_ISATTY": [
+    25357,
+    8,
+    0
+   ],
+   "KERN_CONSOLE_SET_CURSOR": [
+    2148295430,
+    8,
+    0
+   ],
+   "KERN_CONSOLE_SHOW_CURSOR": [
+    2148295431,
+    8,
+    0
+   ],
+   "KERN_CONSOLE_WRITE_AT": [
+    2149606152,
+    8,
+    0
+   ],
+   "KERN_SYSTEM_GET_MOUNTS": [
+    3223352076,
+    8,
+    0
+   ],
+   "KERN_SYSTEM_HALT": [
+    29444,
+    8,
+    0
+   ],
+   "KERN_SYSTEM_REBOOT": [
+    29445,
+    8,
+    0
+   ],
+   "TCGETS": [
+    1076655105,
+    8,
+    0
+   ],
+   "TCSBRK": [
+    2147775503,
+    8,
+    0
+   ],
+   "TCSETS": [
+    2150396930,
+    8,
+    0
+   ],
+   "TCSETSF": [
+    2150396932,
+    8,
+    0
+   ],
+   "TCSETSW": [
+    2150396931,
+    8,
+    0
+   ],
+   "TCXONC": [
+    2147775504,
+    8,
+    0
+   ],
+   "TIOCDRAIN": [
+    29713,
+    8,
+    0
+   ],
+   "TIOCFLUSH": [
+    2147775499,
+    8,
+    0
+   ],
+   "TIOCGPGRP": [
+    1074033671,
+    8,
+    0
+   ],
+   "TIOCGPTN": [
+    1074033676,
+    8,
+    0
+   ],
+   "TIOCGSID": [
+    1074033678,
+    8,
+    0
+   ],
+   "TIOCGWINSZ": [
+    1074295813,
+    8,
+    0
+   ],
+   "TIOCNOTTY": [
+    29706,
+    8,
+    0
+   ],
+   "TIOCSCTTY": [
+    29705,
+    8,
+    0
+   ],
+   "TIOCSPGRP": [
+    2147775496,
+    8,
+    0
+   ],
+   "TIOCSPTLCK": [
+    2147775501,
+    8,
+    0
+   ],
+   "TIOCSWINSZ": [
+    2148037638,
+    8,
+    0
+   ],
+   "P_ALL": [
+    0,
+    4,
+    1
+   ],
+   "P_PID": [
+    1,
+    4,
+    1
+   ],
+   "P_PGID": [
+    2,
+    4,
+    1
+   ],
+   "WIFEXITED(0x0100)": [
+    1,
+    4,
+    1
+   ],
+   "WEXITSTATUS(0x2a00)": [
+    42,
+    4,
+    1
+   ],
+   "WIFSIGNALED(0x0009)": [
+    1,
+    4,
+    1
+   ],
+   "WTERMSIG(0x0009)": [
+    9,
+    4,
+    1
+   ],
+   "WIFSTOPPED(0x137f)": [
+    1,
+    4,
+    1
+   ],
+   "WSTOPSIG(0x137f)": [
+    19,
+    4,
+    1
+   ],
+   "WIFCONTINUED(0xffff)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISREG(0100644)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISDIR(0040755)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISBLK(0060600)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISCHR(0020600)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISLNK(0120777)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISSOCK(0140777)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISFIFO(0010600)": [
+    1,
+    4,
+    1
+   ],
+   "sizeof(ssize_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(off_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(blkcnt_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(blksize_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(dev_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(ino_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(mode_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(nlink_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(uid_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(gid_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(pid_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(id_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(tid_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(useconds_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(suseconds_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(reclen_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(time_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(clockid_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(timer_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(fsblkcnt_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(fsfilcnt_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(rlim_t)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(idtype_t)": [
+    4,
+    8,
+    0
+   ],
+   "sizeof(struct timespec)": [
+    16,
+    8,
+    0
+   ],
+   "offsetof(struct timespec, tv_sec)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct timespec, tv_nsec)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(struct itimerspec)": [
+    32,
+    8,
+    0
+   ],
+   "offsetof(struct itimerspec, it_interval)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct itimerspec, it_value)": [
+    16,
+    8,
+    0
+   ],
+   "sizeof(struct timeval)": [
+    16,
+    8,
+    0
+   ],
+   "offsetof(struct timeval, tv_sec)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct timeval, tv_usec)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(struct itimerval)": [
+    32,
+    8,
+    0
+   ],
+   "offsetof(struct itimerval, it_interval)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct itimerval, it_value)": [
+    16,
+    8,
+    0
+   ],
+   "sizeof(struct stat)": [
+    112,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_dev)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_ino)": [
+    8,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_mode)": [
+    16,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_nlink)": [
+    20,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_uid)": [
+    24,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_gid)": [
+    28,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_rdev)": [
+    32,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_size)": [
+    40,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_atim)": [
+    48,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_mtim)": [
+    64,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_ctim)": [
+    80,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_blksize)": [
+    96,
+    8,
+    0
+   ],
+   "offsetof(struct stat, st_blocks)": [
+    104,
+    8,
+    0
+   ],
+   "sizeof(struct statvfs)": [
+    88,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_bsize)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_frsize)": [
+    8,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_blocks)": [
+    16,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_bfree)": [
+    24,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_bavail)": [
+    32,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_files)": [
+    40,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_ffree)": [
+    48,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_favail)": [
+    56,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_fsid)": [
+    64,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_flag)": [
+    72,
+    8,
+    0
+   ],
+   "offsetof(struct statvfs, f_namemax)": [
+    80,
+    8,
+    0
+   ],
+   "sizeof(struct rlimit)": [
+    16,
+    8,
+    0
+   ],
+   "offsetof(struct rlimit, rlim_cur)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct rlimit, rlim_max)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(struct rusage)": [
+    144,
+    8,
+    0
+   ],
+   "offsetof(struct rusage, ru_utime)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct rusage, ru_stime)": [
+    16,
+    8,
+    0
+   ],
+   "offsetof(struct rusage, ru_maxrss)": [
+    32,
+    8,
+    0
+   ],
+   "offsetof(struct rusage, ru_nivcsw)": [
+    136,
+    8,
+    0
+   ],
+   "sizeof(struct mount_args)": [
+    40,
+    8,
+    0
+   ],
+   "offsetof(struct mount_args, size)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct mount_args, version)": [
+    4,
+    8,
+    0
+   ],
+   "offsetof(struct mount_args, fspec)": [
+    8,
+    8,
+    0
+   ],
+   "sizeof(struct sockaddr_un)": [
+    110,
+    8,
+    0
+   ],
+   "offsetof(struct sockaddr_un, sun_family)": [
+    0,
+    8,
+    0
+   ],
+   "offsetof(struct sockaddr_un, sun_path)": [
+    2,
+    8,
+    0
+   ]
+  },
+  "ilp32": {
+   "ARG_MAX": [
+    16384,
+    4,
+    1
+   ],
+   "AT_EACCESS": [
+    1024,
+    4,
+    1
+   ],
+   "AT_FDCWD": [
+    18446744073709551516,
+    4,
+    1
+   ],
+   "AT_REMOVEDIR": [
+    512,
+    4,
+    1
+   ],
+   "AT_SYMLINK_FOLLOW": [
+    2048,
+    4,
+    1
+   ],
+   "AT_SYMLINK_NOFOLLOW": [
+    256,
+    4,
+    1
+   ],
+   "BC_BASE_MAX": null,
+   "BC_DIM_MAX": null,
+   "BC_SCALE_MAX": null,
+   "BC_STRING_MAX": null,
+   "BUFSIZ": null,
+   "CHARCLASS_NAME_MAX": null,
+   "CHAR_BIT": null,
+   "CHAR_MAX": null,
+   "CHAR_MIN": null,
+   "CLOCKS_PER_SEC": null,
+   "CLOCK_MONOTONIC": [
+    1,
+    4,
+    1
+   ],
+   "CLOCK_REALTIME": [
+    2,
+    4,
+    1
+   ],
+   "COLL_WEIGHTS_MAX": null,
+   "E2BIG": [
+    28,
+    4,
+    1
+   ],
+   "EACCES": [
+    25,
+    4,
+    1
+   ],
+   "EADDRINUSE": [
+    36,
+    4,
+    1
+   ],
+   "EADDRNOTAVAIL": [
+    37,
+    4,
+    1
+   ],
+   "EAFNOSUPPORT": [
+    35,
+    4,
+    1
+   ],
+   "EAGAIN": [
+    24,
+    4,
+    1
+   ],
+   "EALREADY": [
+    54,
+    4,
+    1
+   ],
+   "EBADF": [
+    19,
+    4,
+    1
+   ],
+   "EBUSY": [
+    17,
+    4,
+    1
+   ],
+   "ECANCELED": [
+    59,
+    4,
+    1
+   ],
+   "ECHILD": [
+    27,
+    4,
+    1
+   ],
+   "ECONNABORTED": [
+    55,
+    4,
+    1
+   ],
+   "ECONNREFUSED": [
+    40,
+    4,
+    1
+   ],
+   "ECONNRESET": [
+    41,
+    4,
+    1
+   ],
+   "EDEADLK": [
+    58,
+    4,
+    1
+   ],
+   "EDESTADDRREQ": [
+    45,
+    4,
+    1
+   ],
+   "EDOM": [
+    1,
+    4,
+    1
+   ],
+   "EDQUOT": [
+    63,
+    4,
+    1
+   ],
+   "EEXIST": [
+    16,
+    4,
+    1
+   ],
+   "EFAULT": [
+    23,
+    4,
+    1
+   ],
+   "EFBIG": [
+    51,
+    4,
+    1
+   ],
+   "EHOSTUNREACH": [
+    43,
+    4,
+    1
+   ],
+   "EIDRM": [
+    65,
+    4,
+    1
+   ],
+   "EILSEQ": [
+    61,
+    4,
+    1
+   ],
+   "EINPROGRESS": [
+    53,
+    4,
+    1
+   ],
+   "EINTR": [
+    7,
+    4,
+    1
+   ],
+   "EINVAL": [
+    3,
+    4,
+    1
+   ],
+   "EIO": [
+    5,
+    4,
+    1
+   ],
+   "EISCONN": [
+    38,
+    4,
+    1
+   ],
+   "EISDIR": [
+    15,
+    4,
+    1
+   ],
+   "ELOOP": [
+    50,
+    4,
+    1
+   ],
+   "EMFILE": [
+    46,
+    4,
+    1
+   ],
+   "EMLINK": [
+    57,
+    4,
+    1
+   ],
+   "EMSGSIZE": [
+    30,
+    4,
+    1
+   ],
+   "ENAMETOOLONG": [
+    11,
+    4,
+    1
+   ],
+   "ENETDOWN": [
+    32,
+    4,
+    1
+   ],
+   "ENETUNREACH": [
+    33,
+    4,
+    1
+   ],
+   "ENFILE": [
+    29,
+    4,
+    1
+   ],
+   "ENOBUFS": [
+    31,
+    4,
+    1
+   ],
+   "ENODATA": [
+    62,
+    4,
+    1
+   ],
+   "ENODEV": [
+    13,
+    4,
+    1
+   ],
+   "ENOENT": [
+    6,
+    4,
+    1
+   ],
+   "ENOEXEC": [
+    22,
+    4,
+    1
+   ],
+   "ENOMEM": [
+    4,
+    4,
+    1
+   ],
+   "ENOMSG": [
+    64,
+    4,
+    1
+   ],
+   "ENOPROTOOPT": [
+    56,
+    4,
+    1
+   ],
+   "ENOSPC": [
+    8,
+    4,
+    1
+   ],
+   "ENOSYS": [
+    20,
+    4,
+    1
+   ],
+   "ENOTCONN": [
+    39,
+    4,
+    1
+   ],
+   "ENOTDIR": [
+    14,
+    4,
+    1
+   ],
+   "ENOTEMPTY": [
+    18,
+    4,
+    1
+   ],
+   "ENOTSOCK": [
+    60,
+    4,
+    1
+   ],
+   "ENOTSUP": [
+    21,
+    4,
+    1
+   ],
+   "ENOTTY": [
+    52,
+    4,
+    1
+   ],
+   "ENXIO": [
+    12,
+    4,
+    1
+   ],
+   "EOF": null,
+   "EOPNOTSUPP": [
+    21,
+    4,
+    1
+   ],
+   "EOVERFLOW": [
+    10,
+    4,
+    1
+   ],
+   "EPERM": [
+    47,
+    4,
+    1
+   ],
+   "EPFNOSUPPORT": [
+    35,
+    4,
+    1
+   ],
+   "EPIPE": [
+    44,
+    4,
+    1
+   ],
+   "EPROTO": [
+    67,
+    4,
+    1
+   ],
+   "EPROTONOSUPPORT": [
+    34,
+    4,
+    1
+   ],
+   "ERANGE": [
+    2,
+    4,
+    1
+   ],
+   "EROFS": [
+    9,
+    4,
+    1
+   ],
+   "ESPIPE": [
+    49,
+    4,
+    1
+   ],
+   "ESRCH": [
+    26,
+    4,
+    1
+   ],
+   "ESTALE": [
+    66,
+    4,
+    1
+   ],
+   "ETIMEDOUT": [
+    42,
+    4,
+    1
+   ],
+   "EWOULDBLOCK": [
+    24,
+    4,
+    1
+   ],
+   "EXDEV": [
+    48,
+    4,
+    1
+   ],
+   "EXPR_NEST_MAX": null,
+   "FD_CLOEXEC": [
+    1,
+    4,
+    1
+   ],
+   "FD_CLOFORK": [
+    2,
+    4,
+    1
+   ],
+   "FILENAME_MAX": null,
+   "FOPEN_MAX": null,
+   "F_DUPFD": [
+    0,
+    4,
+    1
+   ],
+   "F_DUPFD_CLOEXEC": [
+    5,
+    4,
+    1
+   ],
+   "F_DUPFD_CLOFORK": [
+    11,
+    4,
+    1
+   ],
+   "F_GETFD": [
+    1,
+    4,
+    1
+   ],
+   "F_GETFL": [
+    3,
+    4,
+    1
+   ],
+   "F_GETLK": [
+    6,
+    4,
+    1
+   ],
+   "F_GETOWN": [
+    9,
+    4,
+    1
+   ],
+   "F_LOCK": null,
+   "F_OFD_GETLK": [
+    12,
+    4,
+    1
+   ],
+   "F_OFD_SETLK": [
+    13,
+    4,
+    1
+   ],
+   "F_OFD_SETLKW": [
+    14,
+    4,
+    1
+   ],
+   "F_OK": [
+    0,
+    4,
+    1
+   ],
+   "F_RDLCK": [
+    1,
+    4,
+    1
+   ],
+   "F_SETFD": [
+    2,
+    4,
+    1
+   ],
+   "F_SETFL": [
+    4,
+    4,
+    1
+   ],
+   "F_SETLK": [
+    7,
+    4,
+    1
+   ],
+   "F_SETLKW": [
+    8,
+    4,
+    1
+   ],
+   "F_SETOWN": [
+    10,
+    4,
+    1
+   ],
+   "F_TEST": null,
+   "F_TLOCK": null,
+   "F_ULOCK": null,
+   "F_UNLCK": [
+    3,
+    4,
+    1
+   ],
+   "F_WRLCK": [
+    2,
+    4,
+    1
+   ],
+   "GETENTROPY_MAX": [
+    256,
+    4,
+    1
+   ],
+   "HOST_NAME_MAX": [
+    255,
+    4,
+    1
+   ],
+   "INT_MAX": null,
+   "INT_MIN": null,
+   "ITIMER_PROF": [
+    2,
+    4,
+    1
+   ],
+   "ITIMER_REAL": [
+    0,
+    4,
+    1
+   ],
+   "ITIMER_VIRTUAL": [
+    1,
+    4,
+    1
+   ],
+   "KERN_IOC_IN": [
+    2147483648,
+    4,
+    0
+   ],
+   "KERN_IOC_INOUT": [
+    3221225472,
+    4,
+    0
+   ],
+   "KERN_IOC_OUT": [
+    1073741824,
+    4,
+    0
+   ],
+   "KERN_IOC_VOID": [
+    0,
+    4,
+    0
+   ],
+   "KERN_MOUNT_ARGS_VERSION": [
+    1,
+    4,
+    0
+   ],
+   "KERN_MOUNT_FSPEC_MAX": [
+    32,
+    4,
+    0
+   ],
+   "LINE_MAX": null,
+   "LLONG_MAX": null,
+   "LLONG_MIN": null,
+   "LONG_MAX": null,
+   "LONG_MIN": null,
+   "L_tmpnam": null,
+   "MADV_DONTNEED": [
+    4,
+    4,
+    1
+   ],
+   "MADV_FREE": [
+    5,
+    4,
+    1
+   ],
+   "MADV_NORMAL": [
+    0,
+    4,
+    1
+   ],
+   "MADV_RANDOM": [
+    1,
+    4,
+    1
+   ],
+   "MADV_SEQUENTIAL": [
+    2,
+    4,
+    1
+   ],
+   "MADV_WILLNEED": [
+    3,
+    4,
+    1
+   ],
+   "MAP_ANON": [
+    32,
+    4,
+    1
+   ],
+   "MAP_ANONYMOUS": [
+    32,
+    4,
+    1
+   ],
+   "MAP_FAILED": [
+    4294967295,
+    4,
+    0
+   ],
+   "MAP_FIXED": [
+    16,
+    4,
+    1
+   ],
+   "MAP_FIXED_NOREPLACE": [
+    1048576,
+    4,
+    1
+   ],
+   "MAP_PRIVATE": [
+    1,
+    4,
+    1
+   ],
+   "MAP_SHARED": [
+    2,
+    4,
+    1
+   ],
+   "MB_LEN_MAX": null,
+   "MNT_LOCAL": [
+    4096,
+    4,
+    0
+   ],
+   "MNT_NOSUID": [
+    2,
+    4,
+    0
+   ],
+   "MNT_RDONLY": [
+    1,
+    4,
+    0
+   ],
+   "MS_ASYNC": [
+    1,
+    4,
+    1
+   ],
+   "MS_INVALIDATE": [
+    2,
+    4,
+    1
+   ],
+   "MS_SYNC": [
+    4,
+    4,
+    1
+   ],
+   "NAME_MAX": [
+    255,
+    4,
+    1
+   ],
+   "O_ACCMODE": [
+    3,
+    4,
+    1
+   ],
+   "O_APPEND": [
+    2048,
+    4,
+    1
+   ],
+   "O_CLOEXEC": [
+    16384,
+    4,
+    1
+   ],
+   "O_CLOFORK": [
+    524288,
+    4,
+    1
+   ],
+   "O_CREAT": [
+    256,
+    4,
+    1
+   ],
+   "O_DIRECTORY": [
+    4096,
+    4,
+    1
+   ],
+   "O_DSYNC": [
+    65536,
+    4,
+    1
+   ],
+   "O_EXCL": [
+    512,
+    4,
+    1
+   ],
+   "O_NOCTTY": [
+    32768,
+    4,
+    1
+   ],
+   "O_NOFOLLOW": [
+    262144,
+    4,
+    1
+   ],
+   "O_NONBLOCK": [
+    8192,
+    4,
+    1
+   ],
+   "O_RDONLY": [
+    0,
+    4,
+    1
+   ],
+   "O_RDWR": [
+    2,
+    4,
+    1
+   ],
+   "O_SYNC": [
+    131072,
+    4,
+    1
+   ],
+   "O_TRUNC": [
+    1024,
+    4,
+    1
+   ],
+   "O_WRONLY": [
+    1,
+    4,
+    1
+   ],
+   "PATH_MAX": [
+    256,
+    4,
+    1
+   ],
+   "POSIX_CLOSE_RESTART": null,
+   "POSIX_MADV_DONTNEED": null,
+   "POSIX_MADV_NORMAL": null,
+   "POSIX_MADV_RANDOM": null,
+   "POSIX_MADV_SEQUENTIAL": null,
+   "POSIX_MADV_WILLNEED": null,
+   "PRIO_PGRP": [
+    1,
+    4,
+    1
+   ],
+   "PRIO_PROCESS": [
+    0,
+    4,
+    1
+   ],
+   "PRIO_USER": [
+    2,
+    4,
+    1
+   ],
+   "PROT_EXEC": [
+    4,
+    4,
+    1
+   ],
+   "PROT_NONE": [
+    0,
+    4,
+    1
+   ],
+   "PROT_READ": [
+    1,
+    4,
+    1
+   ],
+   "PROT_WRITE": [
+    2,
+    4,
+    1
+   ],
+   "RE_DUP_MAX": null,
+   "RTSIG_MAX": [
+    34,
+    4,
+    1
+   ],
+   "RUSAGE_CHILDREN": [
+    18446744073709551615,
+    4,
+    1
+   ],
+   "RUSAGE_SELF": [
+    0,
+    4,
+    1
+   ],
+   "R_OK": [
+    4,
+    4,
+    1
+   ],
+   "SCHAR_MAX": null,
+   "SCHAR_MIN": null,
+   "SEEK_CUR": [
+    1,
+    4,
+    1
+   ],
+   "SEEK_DATA": [
+    3,
+    4,
+    1
+   ],
+   "SEEK_END": [
+    2,
+    4,
+    1
+   ],
+   "SEEK_HOLE": [
+    4,
+    4,
+    1
+   ],
+   "SEEK_SET": [
+    0,
+    4,
+    1
+   ],
+   "SHRT_MAX": null,
+   "SHRT_MIN": null,
+   "SIGQUEUE_MAX": [
+    32,
+    4,
+    1
+   ],
+   "SSIZE_MAX": [
+    2147483647,
+    4,
+    1
+   ],
+   "STDERR_FILENO": [
+    2,
+    4,
+    1
+   ],
+   "STDIN_FILENO": [
+    0,
+    4,
+    1
+   ],
+   "STDOUT_FILENO": [
+    1,
+    4,
+    1
+   ],
+   "ST_LOCAL": [
+    4,
+    4,
+    0
+   ],
+   "ST_NOSUID": [
+    2,
+    4,
+    0
+   ],
+   "ST_RDONLY": [
+    1,
+    4,
+    0
+   ],
+   "S_IFBLK": [
+    24576,
+    4,
+    0
+   ],
+   "S_IFCHR": [
+    8192,
+    4,
+    0
+   ],
+   "S_IFDIR": [
+    16384,
+    4,
+    0
+   ],
+   "S_IFIFO": [
+    4096,
+    4,
+    0
+   ],
+   "S_IFLNK": [
+    40960,
+    4,
+    0
+   ],
+   "S_IFMT": [
+    61440,
+    4,
+    0
+   ],
+   "S_IFREG": [
+    32768,
+    4,
+    0
+   ],
+   "S_IFSOCK": [
+    49152,
+    4,
+    0
+   ],
+   "S_IRGRP": [
+    32,
+    4,
+    0
+   ],
+   "S_IROTH": [
+    4,
+    4,
+    0
+   ],
+   "S_IRUSR": [
+    256,
+    4,
+    0
+   ],
+   "S_IRWXG": [
+    56,
+    4,
+    0
+   ],
+   "S_IRWXO": [
+    7,
+    4,
+    0
+   ],
+   "S_IRWXU": [
+    448,
+    4,
+    0
+   ],
+   "S_ISGID": [
+    1024,
+    4,
+    0
+   ],
+   "S_ISUID": [
+    2048,
+    4,
+    0
+   ],
+   "S_ISVTX": [
+    512,
+    4,
+    0
+   ],
+   "S_IWGRP": [
+    16,
+    4,
+    0
+   ],
+   "S_IWOTH": [
+    2,
+    4,
+    0
+   ],
+   "S_IWUSR": [
+    128,
+    4,
+    0
+   ],
+   "S_IXGRP": [
+    8,
+    4,
+    0
+   ],
+   "S_IXOTH": [
+    1,
+    4,
+    0
+   ],
+   "S_IXUSR": [
+    64,
+    4,
+    0
+   ],
+   "TEXTDOMAIN_MAX": null,
+   "TIMER_ABSTIME": [
+    1,
+    4,
+    1
+   ],
+   "TIME_UTC": null,
+   "TMP_MAX": null,
+   "UCHAR_MAX": null,
+   "UINT_MAX": null,
+   "ULLONG_MAX": null,
+   "ULONG_MAX": null,
+   "UNIX_PATH_MAX": [
+    108,
+    4,
+    1
+   ],
+   "USHRT_MAX": null,
+   "UTIME_NOW": [
+    1073741823,
+    4,
+    1
+   ],
+   "UTIME_OMIT": [
+    1073741822,
+    4,
+    1
+   ],
+   "WCONTINUED": [
+    4,
+    4,
+    1
+   ],
+   "WEXITED": [
+    8,
+    4,
+    1
+   ],
+   "WNOHANG": [
+    1,
+    4,
+    1
+   ],
+   "WNOWAIT": [
+    16,
+    4,
+    1
+   ],
+   "WSTOPPED": [
+    2,
+    4,
+    1
+   ],
+   "WUNTRACED": [
+    2,
+    4,
+    1
+   ],
+   "W_OK": [
+    2,
+    4,
+    1
+   ],
+   "X_OK": [
+    1,
+    4,
+    1
+   ],
+   "_CS_PATH": null,
+   "_IOFBF": null,
+   "_IOLBF": null,
+   "_IONBF": null,
+   "_PC_CHOWN_RESTRICTED": null,
+   "_PC_LINK_MAX": null,
+   "_PC_MAX_CANON": null,
+   "_PC_MAX_INPUT": null,
+   "_PC_NAME_MAX": null,
+   "_PC_NO_TRUNC": null,
+   "_PC_PATH_MAX": null,
+   "_PC_PIPE_BUF": null,
+   "_PC_TEXTDOMAIN_MAX": null,
+   "_PC_VDISABLE": null,
+   "_POSIX_ARG_MAX": [
+    4096,
+    4,
+    1
+   ],
+   "_POSIX_HOST_NAME_MAX": [
+    255,
+    4,
+    1
+   ],
+   "_POSIX_RTSIG_MAX": [
+    8,
+    4,
+    1
+   ],
+   "_POSIX_SIGQUEUE_MAX": [
+    32,
+    4,
+    1
+   ],
+   "_SC_2_VERSION": null,
+   "_SC_ARG_MAX": null,
+   "_SC_CHILD_MAX": null,
+   "_SC_CLK_TCK": null,
+   "_SC_DEVICE_CONTROL": null,
+   "_SC_GETPW_R_SIZE_MAX": null,
+   "_SC_JOB_CONTROL": null,
+   "_SC_MESSAGE_PASSING": null,
+   "_SC_MQ_OPEN_MAX": null,
+   "_SC_MQ_PRIO_MAX": null,
+   "_SC_NPROCESSORS_CONF": null,
+   "_SC_NPROCESSORS_ONLN": null,
+   "_SC_OPEN_MAX": null,
+   "_SC_PAGESIZE": null,
+   "_SC_PAGE_SIZE": null,
+   "_SC_REALTIME_SIGNALS": null,
+   "_SC_RTSIG_MAX": null,
+   "_SC_SEMAPHORES": null,
+   "_SC_SEM_NSEMS_MAX": null,
+   "_SC_SEM_VALUE_MAX": null,
+   "_SC_SHARED_MEMORY_OBJECTS": null,
+   "_SC_SIGQUEUE_MAX": null,
+   "_SC_STREAM_MAX": null,
+   "_SC_THREADS": null,
+   "_SC_THREAD_DESTRUCTOR_ITERATIONS": null,
+   "_SC_THREAD_KEYS_MAX": null,
+   "_SC_THREAD_PROCESS_SHARED": null,
+   "_SC_THREAD_STACK_MIN": null,
+   "_SC_THREAD_THREADS_MAX": null,
+   "_SC_TIMERS": null,
+   "_SC_VERSION": null,
+   "_SC_XOPEN_UNIX": null,
+   "_SC_XOPEN_VERSION": null,
+   "BLKGETIDENTITY": [
+    1092108801,
+    4,
+    0
+   ],
+   "BLKGETINFO": [
+    3227009538,
+    4,
+    0
+   ],
+   "BLKREREADPART": [
+    16899,
+    4,
+    0
+   ],
+   "BLKRESERVE": [
+    2153267716,
+    4,
+    0
+   ],
+   "EVIOCGID": [
+    1074283778,
+    4,
+    0
+   ],
+   "EVIOCGRAB": [
+    2147763600,
+    4,
+    0
+   ],
+   "EVIOCGREP": [
+    1074283779,
+    4,
+    0
+   ],
+   "EVIOCGVERSION": [
+    1074021633,
+    4,
+    0
+   ],
+   "EVIOCSREP": [
+    2148025603,
+    4,
+    0
+   ],
+   "GPU_ALLOCATION_EXPORT": [
+    3233302286,
+    4,
+    0
+   ],
+   "GPU_ALLOCATION_IMPORT": [
+    3233826575,
+    4,
+    0
+   ],
+   "GPU_BLOB_CREATE": [
+    3223865092,
+    4,
+    0
+   ],
+   "GPU_BLOB_CREATE_PLACED": [
+    3225437985,
+    4,
+    0
+   ],
+   "GPU_COMMAND": [
+    2149074695,
+    4,
+    0
+   ],
+   "GPU_COMMAND_SUBMIT": [
+    3223865100,
+    4,
+    0
+   ],
+   "GPU_COMMAND_SUBMIT_SYNC": [
+    3225437974,
+    4,
+    0
+   ],
+   "GPU_COMMAND_WAIT": [
+    3223340813,
+    4,
+    0
+   ],
+   "GPU_DEVICE_QUERY": [
+    3223865118,
+    4,
+    0
+   ],
+   "GPU_DISPLAY_CLAIM": [
+    3223340826,
+    4,
+    0
+   ],
+   "GPU_DISPLAY_CONSTRAINTS": [
+    3224913695,
+    4,
+    0
+   ],
+   "GPU_DISPLAY_EVENTS": [
+    3223865120,
+    4,
+    0
+   ],
+   "GPU_DISPLAY_MODE": [
+    3224389401,
+    4,
+    0
+   ],
+   "GPU_DISPLAY_PRESENT": [
+    3226486556,
+    4,
+    0
+   ],
+   "GPU_DISPLAY_PRESENT_SYNC": [
+    3228059415,
+    4,
+    0
+   ],
+   "GPU_DISPLAY_QUERY": [
+    3231205144,
+    4,
+    0
+   ],
+   "GPU_DISPLAY_RELEASE": [
+    2148550427,
+    4,
+    0
+   ],
+   "GPU_DISPLAY_WAIT": [
+    3224913693,
+    4,
+    0
+   ],
+   "GPU_FENCE_BIND": [
+    2149598997,
+    4,
+    0
+   ],
+   "GPU_FENCE_CREATE": [
+    3223340816,
+    4,
+    0
+   ],
+   "GPU_FENCE_QUERY": [
+    3223865105,
+    4,
+    0
+   ],
+   "GPU_FENCE_RESET": [
+    3223865107,
+    4,
+    0
+   ],
+   "GPU_FENCE_SIGNAL": [
+    3223865108,
+    4,
+    0
+   ],
+   "GPU_FENCE_WAIT": [
+    3223865106,
+    4,
+    0
+   ],
+   "GPU_GET_CAPSET": [
+    3239593731,
+    4,
+    0
+   ],
+   "GPU_GET_INFO": [
+    3224913664,
+    4,
+    0
+   ],
+   "GPU_JOB_CANCEL": [
+    2149074724,
+    4,
+    0
+   ],
+   "GPU_JOB_CAPACITY": [
+    3224389413,
+    4,
+    0
+   ],
+   "GPU_JOB_COMMIT": [
+    2149074723,
+    4,
+    0
+   ],
+   "GPU_JOB_POLICY": [
+    3223865126,
+    4,
+    0
+   ],
+   "GPU_JOB_RESERVE": [
+    3223865122,
+    4,
+    0
+   ],
+   "GPU_PRESENT": [
+    2150647560,
+    4,
+    0
+   ],
+   "GPU_RESOURCE_CREATE": [
+    3223340801,
+    4,
+    0
+   ],
+   "GPU_RESOURCE_DESTROY": [
+    2148550402,
+    4,
+    0
+   ],
+   "GPU_RESOURCE_EXPORT": [
+    3227010826,
+    4,
+    0
+   ],
+   "GPU_RESOURCE_IMPORT": [
+    3227535115,
+    4,
+    0
+   ],
+   "GPU_RESOURCE_MAP": [
+    3223340809,
+    4,
+    0
+   ],
+   "GPU_RESOURCE_READ": [
+    2150123269,
+    4,
+    0
+   ],
+   "GPU_RESOURCE_WRITE": [
+    2150123270,
+    4,
+    0
+   ],
+   "KERN_CONSOLE_CLEAR": [
+    25346,
+    4,
+    0
+   ],
+   "KERN_CONSOLE_CLEAR_ROW": [
+    2147771139,
+    4,
+    0
+   ],
+   "KERN_CONSOLE_CLEAR_TO_EOL": [
+    2148033284,
+    4,
+    0
+   ],
+   "KERN_CONSOLE_GET_CURSOR": [
+    1074553605,
+    4,
+    0
+   ],
+   "KERN_CONSOLE_GET_SIZE": [
+    1074291457,
+    4,
+    0
+   ],
+   "KERN_CONSOLE_ISATTY": [
+    25357,
+    4,
+    0
+   ],
+   "KERN_CONSOLE_SET_CURSOR": [
+    2148295430,
+    4,
+    0
+   ],
+   "KERN_CONSOLE_SHOW_CURSOR": [
+    2148295431,
+    4,
+    0
+   ],
+   "KERN_CONSOLE_WRITE_AT": [
+    2148819720,
+    4,
+    0
+   ],
+   "KERN_SYSTEM_GET_MOUNTS": [
+    3223352076,
+    4,
+    0
+   ],
+   "KERN_SYSTEM_HALT": [
+    29444,
+    4,
+    0
+   ],
+   "KERN_SYSTEM_REBOOT": [
+    29445,
+    4,
+    0
+   ],
+   "TCGETS": [
+    1076655105,
+    4,
+    0
+   ],
+   "TCSBRK": [
+    2147775503,
+    4,
+    0
+   ],
+   "TCSETS": [
+    2150396930,
+    4,
+    0
+   ],
+   "TCSETSF": [
+    2150396932,
+    4,
+    0
+   ],
+   "TCSETSW": [
+    2150396931,
+    4,
+    0
+   ],
+   "TCXONC": [
+    2147775504,
+    4,
+    0
+   ],
+   "TIOCDRAIN": [
+    29713,
+    4,
+    0
+   ],
+   "TIOCFLUSH": [
+    2147775499,
+    4,
+    0
+   ],
+   "TIOCGPGRP": [
+    1074033671,
+    4,
+    0
+   ],
+   "TIOCGPTN": [
+    1074033676,
+    4,
+    0
+   ],
+   "TIOCGSID": [
+    1074033678,
+    4,
+    0
+   ],
+   "TIOCGWINSZ": [
+    1074295813,
+    4,
+    0
+   ],
+   "TIOCNOTTY": [
+    29706,
+    4,
+    0
+   ],
+   "TIOCSCTTY": [
+    29705,
+    4,
+    0
+   ],
+   "TIOCSPGRP": [
+    2147775496,
+    4,
+    0
+   ],
+   "TIOCSPTLCK": [
+    2147775501,
+    4,
+    0
+   ],
+   "TIOCSWINSZ": [
+    2148037638,
+    4,
+    0
+   ],
+   "P_ALL": [
+    0,
+    4,
+    1
+   ],
+   "P_PID": [
+    1,
+    4,
+    1
+   ],
+   "P_PGID": [
+    2,
+    4,
+    1
+   ],
+   "WIFEXITED(0x0100)": [
+    1,
+    4,
+    1
+   ],
+   "WEXITSTATUS(0x2a00)": [
+    42,
+    4,
+    1
+   ],
+   "WIFSIGNALED(0x0009)": [
+    1,
+    4,
+    1
+   ],
+   "WTERMSIG(0x0009)": [
+    9,
+    4,
+    1
+   ],
+   "WIFSTOPPED(0x137f)": [
+    1,
+    4,
+    1
+   ],
+   "WSTOPSIG(0x137f)": [
+    19,
+    4,
+    1
+   ],
+   "WIFCONTINUED(0xffff)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISREG(0100644)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISDIR(0040755)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISBLK(0060600)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISCHR(0020600)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISLNK(0120777)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISSOCK(0140777)": [
+    1,
+    4,
+    1
+   ],
+   "S_ISFIFO(0010600)": [
+    1,
+    4,
+    1
+   ],
+   "sizeof(ssize_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(off_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(blkcnt_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(blksize_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(dev_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(ino_t)": [
+    8,
+    4,
+    0
+   ],
+   "sizeof(mode_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(nlink_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(uid_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(gid_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(pid_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(id_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(tid_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(useconds_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(suseconds_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(reclen_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(time_t)": [
+    8,
+    4,
+    0
+   ],
+   "sizeof(clockid_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(timer_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(fsblkcnt_t)": [
+    8,
+    4,
+    0
+   ],
+   "sizeof(fsfilcnt_t)": [
+    8,
+    4,
+    0
+   ],
+   "sizeof(rlim_t)": [
+    8,
+    4,
+    0
+   ],
+   "sizeof(idtype_t)": [
+    4,
+    4,
+    0
+   ],
+   "sizeof(struct timespec)": [
+    12,
+    4,
+    0
+   ],
+   "offsetof(struct timespec, tv_sec)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct timespec, tv_nsec)": [
+    8,
+    4,
+    0
+   ],
+   "sizeof(struct itimerspec)": [
+    24,
+    4,
+    0
+   ],
+   "offsetof(struct itimerspec, it_interval)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct itimerspec, it_value)": [
+    12,
+    4,
+    0
+   ],
+   "sizeof(struct timeval)": [
+    12,
+    4,
+    0
+   ],
+   "offsetof(struct timeval, tv_sec)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct timeval, tv_usec)": [
+    8,
+    4,
+    0
+   ],
+   "sizeof(struct itimerval)": [
+    24,
+    4,
+    0
+   ],
+   "offsetof(struct itimerval, it_interval)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct itimerval, it_value)": [
+    12,
+    4,
+    0
+   ],
+   "sizeof(struct stat)": [
+    80,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_dev)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_ino)": [
+    4,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_mode)": [
+    12,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_nlink)": [
+    16,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_uid)": [
+    20,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_gid)": [
+    24,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_rdev)": [
+    28,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_size)": [
+    32,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_atim)": [
+    36,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_mtim)": [
+    48,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_ctim)": [
+    60,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_blksize)": [
+    72,
+    4,
+    0
+   ],
+   "offsetof(struct stat, st_blocks)": [
+    76,
+    4,
+    0
+   ],
+   "sizeof(struct statvfs)": [
+    88,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_bsize)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_frsize)": [
+    8,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_blocks)": [
+    16,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_bfree)": [
+    24,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_bavail)": [
+    32,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_files)": [
+    40,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_ffree)": [
+    48,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_favail)": [
+    56,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_fsid)": [
+    64,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_flag)": [
+    72,
+    4,
+    0
+   ],
+   "offsetof(struct statvfs, f_namemax)": [
+    80,
+    4,
+    0
+   ],
+   "sizeof(struct rlimit)": [
+    16,
+    4,
+    0
+   ],
+   "offsetof(struct rlimit, rlim_cur)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct rlimit, rlim_max)": [
+    8,
+    4,
+    0
+   ],
+   "sizeof(struct rusage)": [
+    80,
+    4,
+    0
+   ],
+   "offsetof(struct rusage, ru_utime)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct rusage, ru_stime)": [
+    12,
+    4,
+    0
+   ],
+   "offsetof(struct rusage, ru_maxrss)": [
+    24,
+    4,
+    0
+   ],
+   "offsetof(struct rusage, ru_nivcsw)": [
+    76,
+    4,
+    0
+   ],
+   "sizeof(struct mount_args)": [
+    40,
+    4,
+    0
+   ],
+   "offsetof(struct mount_args, size)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct mount_args, version)": [
+    4,
+    4,
+    0
+   ],
+   "offsetof(struct mount_args, fspec)": [
+    8,
+    4,
+    0
+   ],
+   "sizeof(struct sockaddr_un)": [
+    110,
+    4,
+    0
+   ],
+   "offsetof(struct sockaddr_un, sun_family)": [
+    0,
+    4,
+    0
+   ],
+   "offsetof(struct sockaddr_un, sun_path)": [
+    2,
+    4,
+    0
+   ]
+  }
+ }
+}

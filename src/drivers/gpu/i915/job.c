@@ -22,10 +22,10 @@
 #include "session.h"
 #include "worker.h"
 
-#include <drivers/gpu.h>
+#include <drivers/gpu/gpu.h>
 #include <kern/lock.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
 

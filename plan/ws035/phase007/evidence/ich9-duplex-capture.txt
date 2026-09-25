@@ -1,0 +1,7 @@
+=== ich9-duplex-capture
+serial: logged in
+hda: codec 0, 1 output pin(s), input yes, volume yes, 2 format(s), MSI
+AUDIOTEST CAPTURE bytes=192000 ms=1017 overruns=0
+AUDIOTEST CAPTURE bytes=576000 ms=3008 overruns=0
+AUDIOTEST PLAY frames=48000 transferred=200748 underruns=0 ms=1010
+guest-status=0

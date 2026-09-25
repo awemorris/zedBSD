@@ -50,10 +50,10 @@
  */
 
 #include "intel-ax211-mmio.h"
+#include <kern/kcrt.h>
 
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #define AX211_CSR_HW_IF_CONFIG_REG 0x000U
 #define AX211_CSR_RESET 0x020U
@@ -171,7 +171,7 @@ drv_intel_ax211_mmio_init(
 		return INTEL_AX211_MMIO_INVALID;
 
 	/* Initializes a private, unowned device state. */
-	memset(mmio, 0, sizeof(*mmio));
+	kern_memset(mmio, 0, sizeof(*mmio));
 	mmio->ops = ops;
 	mmio->argument = argument;
 	mmio->profile = *profile;
@@ -568,7 +568,7 @@ drv_intel_ax211_mmio_read_mac(
 	if (!ax211_mmio_valid(mmio) || mac_address == NULL)
 		return INTEL_AX211_MMIO_INVALID;
 
-	memset(candidate, 0, sizeof(candidate));
+	kern_memset(candidate, 0, sizeof(candidate));
 
 	/* Checks the operation result. */
 	result = drv_intel_ax211_mmio_nic_lock(mmio);
@@ -604,7 +604,7 @@ drv_intel_ax211_mmio_read_mac(
 	if (unlock_result != INTEL_AX211_MMIO_OK)
 		result = unlock_result;
 	if (result == INTEL_AX211_MMIO_OK)
-		memcpy(mac_address, candidate, sizeof(candidate));
+		kern_memcpy(mac_address, candidate, sizeof(candidate));
 	ax211_scrub(candidate, sizeof(candidate));
 
 	/* Returns the computed result. */
@@ -1209,15 +1209,15 @@ ax211_mac_valid(
 		return 0;
 
 	/* Handles the memcmp condition. */
-	if (memcmp(address, reserved, sizeof(reserved)) == 0)
+	if (kern_memcmp(address, reserved, sizeof(reserved)) == 0)
 		return 0;
 
 	/* Handles the memcmp condition. */
-	if (memcmp(address, zero, sizeof(zero)) == 0)
+	if (kern_memcmp(address, zero, sizeof(zero)) == 0)
 		return 0;
 
 	/* Handles the memcmp condition. */
-	if (memcmp(address, broadcast, sizeof(broadcast)) == 0)
+	if (kern_memcmp(address, broadcast, sizeof(broadcast)) == 0)
 		return 0;
 
 	/* Reports operation failure. */

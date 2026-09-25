@@ -1,0 +1,11 @@
+/usr/bin/ld: /tmp/ws031-capture-host-test.objects/production-present.o: in function `i915_present_release_locked':
+/home/awe/zedBSD-rpi4/src/drivers/gpu/i915/display/present.c:699:(.text.i915_present_release_locked+0xec): undefined reference to `drv_i915_perf_report'
+/usr/bin/ld: /tmp/ws031-capture-host-test.objects/production-present.o: in function `drv_i915_present_display_present':
+/home/awe/zedBSD-rpi4/src/drivers/gpu/i915/display/present.c:204:(.text.drv_i915_present_display_present+0x148): undefined reference to `drv_i915_perf_now'
+/usr/bin/ld: /tmp/ws031-capture-host-test.objects/production-present.o: in function `i915_present_shared':
+/home/awe/zedBSD-rpi4/src/drivers/gpu/i915/display/present.c:837:(.text.drv_i915_present_display_present+0xbce): undefined reference to `drv_i915_perf_now'
+/usr/bin/ld: /home/awe/zedBSD-rpi4/src/drivers/gpu/i915/display/present.c:839:(.text.drv_i915_present_display_present+0xc3f): undefined reference to `drv_i915_perf_add'
+/usr/bin/ld: /tmp/ws031-capture-host-test.objects/production-present.o: in function `drv_i915_present_display_present':
+/home/awe/zedBSD-rpi4/src/drivers/gpu/i915/display/present.c:278:(.text.drv_i915_present_display_present+0xf8d): undefined reference to `drv_i915_perf_add'
+/usr/bin/ld: /home/awe/zedBSD-rpi4/src/drivers/gpu/i915/display/present.c:279:(.text.drv_i915_present_display_present+0xf9a): undefined reference to `drv_i915_perf_report'
+collect2: error: ld returned 1 exit status

@@ -21,10 +21,10 @@
 #include "kern/net/route.h"
 #include "internal.h"
 #include "wire.h"
+#include <kern/kcrt.h>
 
 #include <uapi/netinet.h>
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 #define IPV4_HEADER_MIN 20U
 #define IPV4_PROTOCOL_MAX 8U
@@ -158,7 +158,7 @@ ipv4_init(
 	int error;
 
 	/* Starts with an empty protocol table. */
-	memset(protocols, 0, sizeof(protocols));
+	kern_memset(protocols, 0, sizeof(protocols));
 	protocol_count = 0;
 	next_identification = 0;
 
@@ -259,7 +259,7 @@ ipv4_output_common(
 		return ENOBUFS;
 	}
 
-	memset(header, 0, sizeof(*header));
+	kern_memset(header, 0, sizeof(*header));
 	header->version_ihl = 0x45U;
 	total = (uint16_t)packet->length;
 	wire_put16(header->total_length, total);

@@ -9,10 +9,11 @@
  * Generic PCI bus core.
  */
 
-#include <drivers/pci.h>
+#include <drivers/pci/pci.h>
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
+#include <uapi/system.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
 #include "kern/atomic.h"
@@ -150,6 +151,7 @@ static int map_msix_entry(struct pci_irq_cookie *cookie);
 static int disestablish_intx(struct pci_irq_cookie *cookie);
 static void pci_irq_dispatch(int irq, kern_irq_ack_t acknowledge, void *argument);
 static void pci_intx_dispatch(int irq, kern_irq_ack_t acknowledge, void *argument);
+static int describe_visit(struct drv_pci_device *device, void *argument);
 
 /*
  * Brings the PCI subsystem into service.
@@ -219,7 +221,7 @@ drv_pci_bus_create_root(
 	bus = kern_malloc(sizeof(*bus));
 	if (bus == NULL)
 		return ENOMEM;
-	memset(bus, 0, sizeof(*bus));
+	kern_memset(bus, 0, sizeof(*bus));
 	bus->segment = segment;
 	bus->number = number;
 	bus->ops = ops;
@@ -252,7 +254,7 @@ drv_pci_bus_create_child(
 	bus = kern_malloc(sizeof(*bus));
 	if (bus == NULL)
 		return ENOMEM;
-	memset(bus, 0, sizeof(*bus));
+	kern_memset(bus, 0, sizeof(*bus));
 	bus->segment = parent->segment;
 	bus->number = number;
 	bus->ops = parent->ops;
@@ -350,7 +352,7 @@ drv_pci_bus_scan(
 			device = kern_malloc(sizeof(*device));
 			if (device == NULL)
 				return ENOMEM;
-			memset(device, 0, sizeof(*device));
+			kern_memset(device, 0, sizeof(*device));
 			device->address = address;
 			device->bus = bus;
 
@@ -591,7 +593,7 @@ drv_pci_find_device(
 		/* Process each linked entry. */
 		for (d = b->devices; d; d = d->next) {
 			/* Handles the memcmp condition. */
-			if (memcmp(&d->address, a, sizeof(*a)) == 0)
+			if (kern_memcmp(&d->address, a, sizeof(*a)) == 0)
 				return d;
 		}
 	}
@@ -1546,7 +1548,7 @@ drv_pci_device_establish_irq(
 	cookie = kern_malloc(sizeof(*cookie));
 	if (cookie == NULL)
 		return ENOMEM;
-	memset(cookie, 0, sizeof(*cookie));
+	kern_memset(cookie, 0, sizeof(*cookie));
 	cookie->device = device;
 	cookie->type = irq->type;
 	cookie->capability = (unsigned)irq->private_data[0];
@@ -2373,7 +2375,7 @@ read_device(
 	for (index = 0; index < limit; index++) {
 		bar = &device->bars[index];
 		offset = PCI_BAR0 + index * 4U;
-		memset(bar, 0, sizeof(*bar));
+		kern_memset(bar, 0, sizeof(*bar));
 		bar->index = index;
 
 		/* Checks the cfg read result. */
@@ -2655,7 +2657,7 @@ establish_intx(
 	candidate = kern_malloc(sizeof(*candidate));
 	if (candidate == NULL)
 		return ENOMEM;
-	memset(candidate, 0, sizeof(*candidate));
+	kern_memset(candidate, 0, sizeof(*candidate));
 	candidate->irq = (int)irq->vector;
 
 	enabled = intx_lock_enter();
@@ -3249,4 +3251,81 @@ pci_intx_dispatch(
 	line->dispatching--;
 	intx_lock_leave(enabled);
 	kern_irq_send_eoi(acknowledge);
+}
+
+/* The position still to count down to, and the function found there. */
+struct describe_walk {
+	uint32_t remaining;
+	struct drv_pci_device *found;
+};
+
+/*
+ * Counts one function of the enumeration, stopping at the one asked for.
+ */
+static int
+describe_visit(
+	struct drv_pci_device *device,
+	void *argument)
+{
+	struct describe_walk *walk = argument;
+
+	/* Stops the walk at the requested position. */
+	if (walk->remaining == 0) {
+		walk->found = device;
+		return EEXIST;
+	}
+
+	/* Counts this function and goes on. */
+	walk->remaining--;
+	return 0;
+}
+
+/*
+ * Describes the function at one position of the enumeration for /dev/system.
+ *
+ * The order is the one drv_pci_foreach_device() walks, which does not change
+ * while the machine runs, so a caller counting up from zero sees every
+ * function once.
+ */
+int
+drv_pci_system_describe(
+	uint32_t index,
+	struct system_pci_device_info *info)
+{
+	struct describe_walk walk;
+	struct drv_pci_device *device;
+	const char *name;
+
+	/* Finds the function at the requested position. */
+	walk.remaining = index;
+	walk.found = NULL;
+	(void)drv_pci_foreach_device(describe_visit, &walk);
+	device = walk.found;
+	if (device == NULL)
+		return ENOENT;
+
+	/* Describes its address, identity and class. */
+	kern_memset(info, 0, sizeof(*info));
+	info->index = index;
+	info->segment = device->address.segment;
+	info->bus = device->address.bus;
+	info->device = device->address.device;
+	info->function = device->address.function;
+	info->revision = drv_pci_device_revision(device);
+	info->base_class = (uint8_t)(device->class_code >> 16);
+	info->subclass = (uint8_t)(device->class_code >> 8);
+	info->programming_interface = (uint8_t)device->class_code;
+	info->header_type = drv_pci_device_header_type(device);
+	info->vendor = drv_pci_device_vendor(device);
+	info->product = drv_pci_device_product(device);
+	info->subvendor = drv_pci_device_subvendor(device);
+	info->subproduct = drv_pci_device_subproduct(device);
+
+	/* Names the bound driver, if any, leaving the last byte as the end. */
+	name = drv_pci_driver_name(drv_pci_device_driver(device));
+	if (name != NULL)
+		kern_strncpy(info->driver, name, sizeof(info->driver) - 1U);
+
+	/* Succeeded. */
+	return 0;
 }

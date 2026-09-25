@@ -17,8 +17,7 @@
 
 #include <kern/readahead.h>
 #include <kern/page.h>
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 #include <kern/cache-memory.h>
 #include <kern/io-scratch.h>
 #include <kern/writeback.h>
@@ -26,6 +25,7 @@
 #include <kern/vm-object.h>
 #include <kern/thread.h>
 #include <kern/sched.h>
+#include <kern/kcrt.h>
 
 #define RA_WORKERS 4U
 
@@ -139,7 +139,7 @@ readahead_observe(
 	/* Rejects impossible demand ranges without overflowing endpoint arithmetic. */
 	if (state == NULL || request == NULL)
 		return EINVAL;
-	memset(request, 0, sizeof(*request));
+	kern_memset(request, 0, sizeof(*request));
 	if (eof > INT64_MAX ||
 	    offset > eof ||
 	    (uint64_t)length > eof - offset) {
@@ -389,22 +389,32 @@ readahead_cancel(
 	unsigned index;
 	unsigned slot;
 	unsigned long irq;
+	int canceled;
 
 	/* Makes unused queues and repeated final-close cancellation harmless. */
 	if (origin == NULL || atomic_load_acquire(&initialized) != 2)
 		return;
 	irq = spin_lock_irqsave(&registry);
 
+	/*
+	 * Wakes only a worker that held a job for the origin: most files are
+	 * closed with no read ahead queued, and waking every worker for them
+	 * would cost another CPU an interrupt on each close.
+	 */
 	for (index = 0; index < RA_WORKERS; index++) {
+		canceled = 0;
 		for (slot = 0; slot < RA_SLOTS; slot++) {
 			job = &workers[index].jobs[slot];
 			if (job->state == RA_FREE || job->origin != origin)
 				continue;
 			job->origin = NULL;
 			job->canceled = 1;
+			canceled = 1;
 		}
 
-		waitq_wake_all(&workers[index].wake);
+		/* Lets the worker drop the canceled jobs. */
+		if (canceled)
+			waitq_wake_all(&workers[index].wake);
 	}
 
 	spin_unlock_irqrestore(&registry, irq);
@@ -519,7 +529,7 @@ readahead_boundary_end(
 	for (link = &boundaries; *link != NULL; link = &(*link)->next) {
 		if (*link == boundary) {
 			*link = boundary->next;
-			memset(boundary, 0, sizeof(*boundary));
+			kern_memset(boundary, 0, sizeof(*boundary));
 			break;
 		}
 	}
@@ -561,7 +571,7 @@ readahead_snapshot(
 	/* Returns an empty optional service before its first initialization. */
 	if (stats == NULL)
 		return;
-	memset(stats, 0, sizeof(*stats));
+	kern_memset(stats, 0, sizeof(*stats));
 	if (atomic_load_acquire(&initialized) != 2)
 		return;
 	irq = spin_lock_irqsave(&registry);
@@ -586,7 +596,7 @@ readahead_report(
 	if (report == NULL)
 		return;
 	readahead_snapshot(&stats);
-	memset(report, 0, sizeof(*report));
+	kern_memset(report, 0, sizeof(*report));
 	report->version = READAHEAD_REPORT_VERSION;
 	report->requested_bytes = stats.requested_bytes;
 	report->started_bytes = stats.started_bytes;
@@ -643,7 +653,7 @@ readahead_trim(
 
 		cache_memory_release(CACHE_MEMORY_WORKER, worker->memory.size);
 		irq = spin_lock_irqsave(&registry);
-		memset(&worker->memory, 0, sizeof(worker->memory));
+		kern_memset(&worker->memory, 0, sizeof(worker->memory));
 		spin_unlock_irqrestore(&registry, irq);
 	}
 
@@ -714,7 +724,7 @@ prepare_worker(
 
 	/* Uses optional shared-budget admission for the actual HAL allocation size. */
 	if (worker->memory.size == 0) {
-		memset(&memory, 0, sizeof(memory));
+		kern_memset(&memory, 0, sizeof(memory));
 		error = io_scratch_alloc(RA_MEMORY, &memory);
 		if (error != HAL_OK || memory.vaddr == NULL || memory.size < RA_MEMORY) {
 			if (memory.size != 0 && io_scratch_free(&memory) != HAL_OK)
@@ -850,7 +860,7 @@ retire_job(
 		disk_cache_release(leaf);
 	irq = spin_lock_irqsave(&registry);
 
-	memset(job, 0, sizeof(*job));
+	kern_memset(job, 0, sizeof(*job));
 	counters.jobs--;
 	waitq_wake_all(&changed);
 	waitq_wake_all(&worker->wake);

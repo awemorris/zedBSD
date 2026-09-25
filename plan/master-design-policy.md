@@ -256,3 +256,14 @@ Stop the active Phase and update its state before changing the plan when:
 - a hard-real-time or POSIX-crash-survival claim cannot be supported by the
   selected core, interrupt, firmware, memory, or shared-kernel isolation model.
 
+
+## 10. メモリの前提と仮想メモリの commit の方針（2026-09-25、ユーザーの指示）
+
+出典: ユーザー 2026-09-25「このOSの開発初期に、極めて古いi386コンピュータで動くようにメモリ使用量を調整していたので、ページキャッシュも含めて、キャッシュサイズが極端に小さくなっています。現在は現代のコンピュータをターゲットにしているので、メモリ使用量はあまり気にしなくていいです。4GBのメインメモリや、16GBくらいのスワップファイルサイズを前提にしてOKです。仮想メモリのreserveとcommitを分離して、reserveはいくらでもできる一方、commitはover commitを禁止して、スワップの裏打ちが必要ということにします。」
+
+1. **メモリの前提**: 主記憶 4 GB、swap file 16 GB 程度を前提にしてよい。メモリの使用量は気にしなくてよい。page cache・buffer cache・VM object cache など、初期の i386 向けに極端に小さくした cache の大きさは現代向けに見直す（[WS058](ws058/ws.md)）。
+2. **VM の reserve と commit の分離**: reserve（address space の確保）は無制限にできる。commit（実際に page を持つ約束）は **over commit を禁止**し、swap の裏打ちが要る（commit の合計が裏打ちを超えるときは失敗させる）。実装がそうなっていなければ直す（[WS057](ws057/ws.md)）。
+   - 決定（2026-09-25、ユーザー）: **裏打ちは物理 + swap**（swap file が無くても起動できるため）。現状の実装（起動時の空き物理 + swap）のとおり。
+3. 優先: パフォーマンス問題の修正、バグ修正、上記の観点の修正を続ける。
+4. 直近の目標（2026-09-25、ユーザー）: **expat の configure と compile を Linux と同等の水準にする**ことを focused goal（fg011）とし、修正と改修をここに集中する。
+5. 優先（2026-09-25、ユーザー）: **新規実装より bug 修正と性能改善を優先する**（それらに付随する新規実装は行う）。bug 修正は積極的に。

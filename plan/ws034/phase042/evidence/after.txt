@@ -1,0 +1,26 @@
+TCPBULK size=100 received=100 corrupt=0 child=0 OK
+TCPBULK size=1024 received=1024 corrupt=0 child=0 OK
+TCPBULK size=1025 received=1025 corrupt=0 child=0 OK
+TCPBULK size=4096 received=4096 corrupt=0 child=0 OK
+TCPBULK size=4097 received=4097 corrupt=0 child=0 OK
+TCPBULK size=6000 received=6000 corrupt=0 child=0 OK
+TCPBULK size=8192 received=8192 corrupt=0 child=0 OK
+TCPBULK size=12288 received=12288 corrupt=0 child=0 OK
+TCPBULK size=16384 received=16384 corrupt=0 child=0 OK
+TCPBULK size=65536 received=65536 corrupt=0 child=0 OK
+TCPBULK size=262144 received=262144 corrupt=0 child=0 OK
+TCPBULK size=65536 received=65536 corrupt=0 child=0 OK
+real 1.036
+TCPBULK size=1048576 TIMEOUT received=298496 FAIL
+real 20.012
+TCPBULK writer stopped sent=300032 errno=39
+TCPBULK size=100 received=100 corrupt=0 child=0 OK
+TCPBULK size=1024 received=1024 corrupt=0 child=0 OK
+TCPBULK size=1025 received=1025 corrupt=0 child=0 OK
+TCPBULK size=1600 received=1600 corrupt=0 child=0 OK
+TCPBULK size=4096 received=4096 corrupt=0 child=0 OK
+TCPBULK size=4097 received=4097 corrupt=0 child=0 OK
+TCPBULK size=16384 received=16384 corrupt=0 child=0 OK
+TCPBULK size=65536 received=65536 corrupt=0 child=0 OK
+TCPBULK size=262144 received=262144 corrupt=0 child=0 OK
+TCPBULK PASS

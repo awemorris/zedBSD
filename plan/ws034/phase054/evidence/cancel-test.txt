@@ -1,0 +1,7 @@
+CANCEL ok fork child pthread_self differs
+CANCEL ok create spinner
+CANCEL ok cancel spinner
+CANCEL ok spinner canceled
+CANCEL ok tmpfile
+CANCEL ok stdio lines whole under contention
+CANCEL DONE 6/6

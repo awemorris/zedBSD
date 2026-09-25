@@ -20,7 +20,7 @@
 #include <kern/klog.h>
 #include <kern/sched.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdint.h>
 
 /*

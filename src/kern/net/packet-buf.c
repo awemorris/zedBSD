@@ -19,10 +19,10 @@
 #include "kern/net/packet-buf.h"
 #include "kern/net/net-device.h"
 #include "kern/test-fault.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdbool.h>
-#include <string.h>
 
 #define NET_BSS __attribute__((section(".net_bss")))
 
@@ -54,7 +54,7 @@ packet_buf_pool_init(
 	bool enabled;
 
 	enabled = packet_lock();
-	memset(packet_pool, 0, sizeof(packet_pool));
+	kern_memset(packet_pool, 0, sizeof(packet_pool));
 	packet_used = 0;
 	packet_unlock(enabled);
 }
@@ -93,7 +93,7 @@ packet_buf_alloc(
 			continue;
 		slot->used = 1;
 		packet_used++;
-		memset(&slot->packet, 0, sizeof(slot->packet));
+		kern_memset(&slot->packet, 0, sizeof(slot->packet));
 		slot->packet.storage = slot->storage;
 		slot->packet.data = slot->storage + headroom;
 		slot->packet.capacity = sizeof(slot->storage);
@@ -173,7 +173,7 @@ packet_buf_free(
 		slot->packet.device = NULL;
 		slot->packet.control = NULL;
 		slot->packet.control_release = NULL;
-		memset(&slot->packet, 0, sizeof(slot->packet));
+		kern_memset(&slot->packet, 0, sizeof(slot->packet));
 		slot->used = 0;
 		if (packet_used != 0)
 			packet_used--;
@@ -334,7 +334,7 @@ packet_buf_copy(
 		return NULL;
 	}
 
-	memcpy(data, source->data, source->length);
+	kern_memcpy(data, source->data, source->length);
 
 	/* Copies the layer offsets, protocol, flags, device, and source. */
 	copy->l2_offset = source->l2_offset;
@@ -347,7 +347,7 @@ packet_buf_copy(
 	if (copy->device != NULL && net_device_ref != NULL)
 		net_device_ref(copy->device);
 	copy->source_length = source->source_length;
-	memcpy(copy->source_address, source->source_address,
+	kern_memcpy(copy->source_address, source->source_address,
 	    sizeof(copy->source_address));
 
 	/* Reports the copy. */
@@ -382,7 +382,7 @@ packet_buf_copy_region(
 		return NULL;
 	}
 
-	memcpy(data, source->storage + offset, length);
+	kern_memcpy(data, source->storage + offset, length);
 
 	/* Copies the protocol, flags, device, and source. */
 	copy->protocol = source->protocol;
@@ -391,7 +391,7 @@ packet_buf_copy_region(
 	if (copy->device != NULL && net_device_ref != NULL)
 		net_device_ref(copy->device);
 	copy->source_length = source->source_length;
-	memcpy(copy->source_address, source->source_address,
+	kern_memcpy(copy->source_address, source->source_address,
 	    sizeof(copy->source_address));
 
 	/* Reports the copy. */

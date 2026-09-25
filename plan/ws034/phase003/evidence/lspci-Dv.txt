@@ -1,0 +1,22 @@
+0000:00:1f.3 0c05: 8086:2930 (rev 02)
+	Subsystem: 1af4:1100
+	Header type: 80
+0000:00:1f.2 0106: 8086:2922 (rev 02) (prog-if 01)
+	Subsystem: 1af4:1100
+	Header type: 80
+0000:00:1f.0 0601: 8086:2918 (rev 02)
+	Subsystem: 1af4:1100
+	Header type: 80
+0000:00:03.0 0c03: 1b36:000d (rev 01) (prog-if 30)
+	Subsystem: 1af4:1100
+	Header type: 00
+0000:00:02.0 0200: 8086:10d3
+	Subsystem: 8086:0000
+	Header type: 00
+0000:00:01.0 0300: 1234:1111 (rev 02)
+	Subsystem: 1af4:1100
+	Header type: 00
+0000:00:00.0 0600: 8086:29c0
+	Subsystem: 1af4:1100
+	Header type: 00
+rc=0

@@ -1,0 +1,30 @@
+Bus 000 Device 000: ID 0000:0000 root hub
+	Port path: 0  Class 09  Speed 12M
+	bcdUSB 0.00  bcdDevice 0.00
+	bDeviceClass 09  bDeviceSubClass 00  bDeviceProtocol 00
+	bNumConfigurations 0  interfaces 0
+Bus 000 Device 001: ID 46f4:0001
+	Port path: 0-1  Class 00  Speed 5000M  Driver usb-storage
+	bcdUSB 3.00  bcdDevice 0.00
+	bDeviceClass 00  bDeviceSubClass 00  bDeviceProtocol 00
+	bNumConfigurations 1  interfaces 1
+Bus 000 Device 002: ID 0627:0001
+	Port path: 0-6  Class 00  Speed 480M  Driver usb-hid
+	bcdUSB 2.00  bcdDevice 0.00
+	bDeviceClass 00  bDeviceSubClass 00  bDeviceProtocol 00
+	bNumConfigurations 1  interfaces 1
+Bus 000 Device 003: ID 0627:0001
+	Port path: 0-7  Class 00  Speed 480M  Driver usb-hid
+	bcdUSB 2.00  bcdDevice 0.00
+	bDeviceClass 00  bDeviceSubClass 00  bDeviceProtocol 00
+	bNumConfigurations 1  interfaces 1
+Bus 001 Device 000: ID 0000:0000 root hub
+	Port path: 1  Class 09  Speed 12M
+	bcdUSB 0.00  bcdDevice 0.00
+	bDeviceClass 09  bDeviceSubClass 00  bDeviceProtocol 00
+	bNumConfigurations 0  interfaces 0
+Bus 001 Device 001: ID 0627:0001
+	Port path: 1-1  Class 00  Speed 480M  Driver usb-hid
+	bcdUSB 2.00  bcdDevice 0.00
+	bDeviceClass 00  bDeviceSubClass 00  bDeviceProtocol 00
+	bNumConfigurations 1  interfaces 1

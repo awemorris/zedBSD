@@ -2,7 +2,7 @@
 
 `libwayland-client.so` supplies the selected standard client transport for
 Vulkan Wayland WSI and ordinary applications. Public headers live below
-`libc/include/wayland/`; thin `<wayland-client.h>` and
+`include/libc/wayland/`; thin `<wayland-client.h>` and
 `<xdg-shell-client-protocol.h>` entry headers preserve standard include spelling.
 The base package is `libwayland-client` in `base/libwayland`, installed at
 `/lib/libwayland-client.so` with the same SONAME.
@@ -40,7 +40,7 @@ remain caller-owned. The private zed_gpu_buffer_v1 factory only carries an fd an
 an opaque metadata array; GPU identity, bounds, immutable metadata and import
 permissions are checked by the compositor/GPU layers.
 
-[API-PROVENANCE.md](../../../libc/include/wayland/API-PROVENANCE.md) records pinned
+[API-PROVENANCE.md](../../../include/libc/wayland/API-PROVENANCE.md) records pinned
 upstream interface facts, hashes, selected scope, limitations and notices.
 Selected core descriptions are wl_display/registry/callback/region/buffer v1,
 wl_compositor/surface/output v4 and wl_seat/pointer/keyboard v5. Selected

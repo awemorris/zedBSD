@@ -14,12 +14,12 @@
  */
 
 #include "object.h"
+#include <kern/kcrt.h>
 
 #include <kern/kmem.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 /*
  * One live Vulkan object under its wire identity.
@@ -145,7 +145,7 @@ drv_i915_object_insert(
 
 		/* Moves the existing entries to the larger array before it replaces them. */
 		if (table->entries != NULL) {
-			memcpy(grown, table->entries, (size_t)table->count * sizeof(*grown));
+			kern_memcpy(grown, table->entries, (size_t)table->count * sizeof(*grown));
 			kern_free(table->entries);
 		}
 

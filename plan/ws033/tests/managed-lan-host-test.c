@@ -129,6 +129,16 @@ main(
 	/* A lease arrived. */
 	check("configuring is recorded",
 	      networkd_lan_configured(&lan, "eth0", 1) == 0);
+
+	/*
+	 * eth1 is wanted but has no cable: it is brought up once so that its
+	 * driver can report the link (a USB adapter reports it only when up).
+	 */
+	check("an uncabled interface is raised to watch its link",
+	      networkd_lan_next(&lan, &work) == 0 &&
+	      work.action == NETWORKD_LAN_ACTION_RAISE &&
+	      strcmp(work.interface, "eth1") == 0);
+	check("raising is recorded", networkd_lan_raised(&lan, "eth1") == 0);
 	check("a configured interface is not configured again",
 	      networkd_lan_next(&lan, &work) == 0 &&
 	      work.action == NETWORKD_LAN_ACTION_NONE);
@@ -162,6 +172,12 @@ main(
 	      networkd_lan_event(&lan, &record) == NETWORKD_LAN_ACTION_DOWN);
 	check("taking it down is recorded",
 	      networkd_lan_down(&lan, "eth0") == 0);
+	check("a down interface is raised again to see its next cable",
+	      networkd_lan_next(&lan, &work) == 0 &&
+	      work.action == NETWORKD_LAN_ACTION_RAISE &&
+	      strcmp(work.interface, "eth0") == 0);
+	check("raising it again is recorded",
+	      networkd_lan_raised(&lan, "eth0") == 0);
 
 	/* And comes back. */
 	record = event(1U, RTM_IFINFO_CARRIER_UP, 0U);
@@ -173,6 +189,40 @@ main(
 	      work.action == NETWORKD_LAN_ACTION_CONFIGURE &&
 	      strcmp(work.interface, "eth0") == 0);
 	(void)networkd_lan_configured(&lan, "eth0", 1);
+
+	/* ws035-p047: an adapter that arrives has an index not held yet. */
+	record = event(9U, RTM_IFINFO_ARRIVAL, 0U);
+	check("an arriving adapter asks for everything to be read again",
+	      networkd_lan_event(&lan, &record) ==
+	      NETWORKD_LAN_ACTION_RESNAPSHOT);
+
+	/*
+	 * ws035-p047: the adapter is unplugged and another takes its name, a
+	 * new generation that is not up, so no cable is seen in it.  It is
+	 * raised again: nothing decided about the old adapter holds for it.
+	 */
+	networkd_lan_snapshot_begin(&lan);
+	(void)networkd_lan_observe(&lan, "eth0", 1U, 2U, 0);
+	(void)networkd_lan_observe(&lan, "eth1", 2U, 1U, 0);
+	(void)networkd_lan_observe(&lan, "eth2", 3U, 1U, 1);
+	networkd_lan_snapshot_end(&lan);
+	check("an adapter that took a used name is raised again",
+	      networkd_lan_next(&lan, &work) == 0 &&
+	      work.action == NETWORKD_LAN_ACTION_RAISE &&
+	      strcmp(work.interface, "eth0") == 0);
+	(void)networkd_lan_raised(&lan, "eth0");
+
+	/*
+	 * A request configures it by hand before its cable is seen.  The
+	 * cable event that bringing it up causes does not configure it again.
+	 */
+	check("a configuration by request is recorded",
+	      networkd_lan_configured(&lan, "eth0", 1) == 0);
+	record = event(1U, RTM_IFINFO_CARRIER_UP, 0U);
+	(void)networkd_lan_event(&lan, &record);
+	check("the cable of an interface configured by request asks nothing",
+	      networkd_lan_next(&lan, &work) == 0 &&
+	      work.action == NETWORKD_LAN_ACTION_NONE);
 
 	/* A lost event means nothing held can be trusted. */
 	record = event(1U, RTM_IFINFO_CARRIER_UP, RTM_IFINFO_F_OVERFLOW);

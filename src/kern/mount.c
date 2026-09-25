@@ -26,15 +26,17 @@
 #include "kern/vm-object.h"
 #include "kern/klog.h"
 #include <hal/hal.h>
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
-#include <sys/statvfs.h>
+#include <uapi/errno.h>
+#include <uapi/statvfs.h>
 #include <uapi/blkid.h>
 #include <uapi/quota.h>
 #include <uapi/snapshot.h>
 #include <uapi/mountinfo.h>
 
+/* The high bit marks a device number the kernel made up for a mount without a disk. */
+#define MOUNT_DEVICE_SYNTHETIC 0x80000000U
 #define FILESYSTEM_MAX 8U
 #define MOUNT_BIND_INTERNAL 0x00000001U
 #define MOUNT_HIGH __attribute__((section(".hightext")))
@@ -130,7 +132,7 @@ path_init(
 	struct path *path)
 {
 	if (path != NULL)
-		memset(path, 0, sizeof(*path));
+		kern_memset(path, 0, sizeof(*path));
 }
 
 /*
@@ -224,7 +226,7 @@ filesystem_register(
 	irq = spin_lock_irqsave(&namespace_lock);
 
 	for (i = 0; i < filesystem_count; i++) {
-		if (!strcmp(filesystems[i]->fs_name, type->fs_name)) {
+		if (!kern_strcmp(filesystems[i]->fs_name, type->fs_name)) {
 			spin_unlock_irqrestore(&namespace_lock, irq);
 			return EEXIST;
 		}
@@ -272,7 +274,7 @@ filesystem_identify(
 	/* Rejects a missing identity or disk. */
 	if (identity == NULL)
 		return EINVAL;
-	memset(identity, 0, sizeof(*identity));
+	kern_memset(identity, 0, sizeof(*identity));
 	if (disk == NULL)
 		return EINVAL;
 
@@ -291,7 +293,7 @@ filesystem_identify(
 
 	/* Asks each type, keeping the first real error and refusing two claims. */
 	for (index = 0; index < snapshot_count; index++) {
-		memset(&candidate, 0, sizeof(candidate));
+		kern_memset(&candidate, 0, sizeof(candidate));
 		error = snapshot[index]->identify(disk, &candidate);
 		if (error == EOPNOTSUPP)
 			continue;
@@ -328,9 +330,9 @@ mount_reset(
 	spin_init(&namespace_lock, LOCK_RANK_NAMESPACE, "mount namespace");
 	(void)mutex_init(&namespace_transaction, LOCK_RANK_VFS_TRANSACTION,
 	    "VFS namespace transaction");
-	memset(mounts, 0, sizeof(mounts));
-	memset(mount_used, 0, sizeof(mount_used));
-	memset(filesystems, 0, sizeof(filesystems));
+	kern_memset(mounts, 0, sizeof(mounts));
+	kern_memset(mount_used, 0, sizeof(mount_used));
+	kern_memset(filesystems, 0, sizeof(filesystems));
 	mount_head = NULL;
 	root_mount = NULL;
 	filesystem_count = 0;
@@ -470,7 +472,7 @@ mount_root_create(
 		return error;
 	}
 
-	strcpy(mountp->m_path, "/");
+	kern_strcpy(mountp->m_path, "/");
 	error = mount_filesystem(mountp, type_name, flags, data);
 	entered = mount_vfs_transaction_join(mountp);
 	irq = spin_lock_irqsave(&namespace_lock);
@@ -699,7 +701,7 @@ mount_private_promote_root(
 	    mountp->m_children != NULL)
 		error = EBUSY;
 	if (error == 0) {
-		strcpy(mountp->m_path, "/");
+		kern_strcpy(mountp->m_path, "/");
 		mountp->m_name[0] = '\0';
 		mountp->m_internal_flags &= ~MOUNT_PRIVATE_INTERNAL;
 		mountp->m_parent = NULL;
@@ -935,6 +937,40 @@ mount_sync_all(
 }
 
 /*
+ * Reports the device number a mount's files carry in st_dev.
+ *
+ * A disk mount reports its disk.  A mount without a disk (tmpfs, devfs,
+ * the overlay root) gets a synthetic number with the high bit set, so it
+ * can never coincide with a disk's number and (st_dev, st_ino) stays
+ * unique across mounts.  A bind mount reports its source's number, so the
+ * same files show the same device through either path.
+ */
+dev_t
+mount_device_number(
+	const struct mount *mountp)
+{
+	dev_t number;
+
+	/* A missing mount has no device. */
+	if (mountp == NULL)
+		return 0;
+
+	/* A bind mount is its source's files. */
+	if (mountp->m_bind_source != NULL) {
+		number = mount_device_number(mountp->m_bind_source);
+		return number;
+	}
+
+	/* A disk mount carries the disk's number. */
+	if (mountp->m_disk != NULL)
+		return mountp->m_disk->d_dev;
+
+	/* Anything else gets the slot number above every disk. */
+	number = (dev_t)(MOUNT_DEVICE_SYNTHETIC | (1U + (unsigned)(mountp - mounts)));
+	return number;
+}
+
+/*
  * Fills a statvfs for a mount.
  *
  * A bind mount reports its source's figures; a type without a statvfs
@@ -962,7 +998,7 @@ mount_statvfs(
 	}
 
 	/* Asks the filesystem, or derives figures from the disk. */
-	memset(result, 0, sizeof(*result));
+	kern_memset(result, 0, sizeof(*result));
 	if (mountp->m_type->statvfs != NULL) {
 		error = mountp->m_type->statvfs(mountp, result);
 	} else {
@@ -1005,6 +1041,11 @@ flags:
 		result->f_flag |= ST_NOSUID;
 	if (result->f_namemax == 0)
 		result->f_namemax = NAME_MAX;
+
+	/* Names the filesystem type, as Solaris does, for programs that show it. */
+	kern_strncpy(result->f_basetype, mountp->m_type->fs_name,
+	    sizeof(result->f_basetype) - 1U);
+	result->f_basetype[sizeof(result->f_basetype) - 1U] = '\0';
 
 	/* Reports the filled structure. */
 	return 0;
@@ -1098,7 +1139,7 @@ mount(
 	    dir == NULL ||
 	    dir[0] != '/' ||
 	    dir[1] == '\0' ||
-	    strchr(dir + 1, '/') != NULL) {
+	    kern_strchr(dir + 1, '/') != NULL) {
 		mount_release(rootp);
 		return EINVAL;
 	}
@@ -1154,7 +1195,7 @@ mount_context(
 		error = fs_chdir_path(snapshot, &target);
 	if (error == 0)
 		error = fs_getcwd(snapshot, canonical, sizeof(canonical));
-	if (error == 0 && !strcmp(canonical, "/"))
+	if (error == 0 && !kern_strcmp(canonical, "/"))
 		error = EBUSY;
 	if (error == 0)
 		error = namei_parent_path_at(snapshot, canonical, &parent,
@@ -1249,7 +1290,7 @@ mount_find_ref(
 
 	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next) {
 		if (mountp->m_state == MOUNT_STATE_LIVE &&
-		    !strcmp(mountp->m_path, path)) {
+		    !kern_strcmp(mountp->m_path, path)) {
 			mount_ref(mountp);
 			spin_unlock_irqrestore(&namespace_lock, irq);
 			return mountp;
@@ -1297,11 +1338,11 @@ mount_lookup_child(
 
 	for (child = directory->p_mount->m_children; child != NULL;
 	     child = child->m_sibling) {
-		length = strlen(child->m_name);
+		length = kern_strlen(child->m_name);
 		if (child->m_cover.p_mount == directory->p_mount &&
 		    same_inode(child->m_cover.p_inode, directory->p_inode) &&
 		    length == component->cn_namelen &&
-		    !memcmp(child->m_name, component->cn_nameptr, length)) {
+		    !kern_memcmp(child->m_name, component->cn_nameptr, length)) {
 			if (child->m_state != MOUNT_STATE_LIVE) {
 				spin_unlock_irqrestore(&namespace_lock, irq);
 				return EBUSY;
@@ -1389,10 +1430,10 @@ mount_readdir_child(
 			continue;
 		}
 
-		memset(entry, 0, sizeof(*entry));
+		kern_memset(entry, 0, sizeof(*entry));
 		entry->d_ino = child->m_root->i_ino;
 		entry->d_type = child->m_root->i_type;
-		strcpy(entry->d_name, child->m_name);
+		kern_strcpy(entry->d_name, child->m_name);
 		(*cursor)++;
 		spin_unlock_irqrestore(&namespace_lock, irq);
 		return 0;
@@ -1418,7 +1459,7 @@ mount_child_shadows(
 
 	/* Looks the name up among the covering mounts. */
 	component.cn_nameptr = name;
-	component.cn_namelen = strlen(name);
+	component.cn_namelen = kern_strlen(name);
 	component.cn_flags = 0;
 	error = mount_lookup_child(directory, &component, &found);
 	if (error == 0)
@@ -1589,7 +1630,7 @@ mount_info_snapshot(
 	}
 
 	count = 0;
-	memset(&context, 0, sizeof(context));
+	kern_memset(&context, 0, sizeof(context));
 	spin_init(&context.lock, LOCK_RANK_PROCESS_RESOURCE, "mount paths");
 	if (root_mount != NULL && root_mount->m_state == MOUNT_STATE_LIVE)
 		path_set(&context.root, root_mount, root_mount->m_root);
@@ -1601,25 +1642,25 @@ mount_info_snapshot(
 		snapshot[count] = mountp;
 		mount_ref(mountp);
 		info = &entries[count++];
-		memset(info, 0, sizeof(*info));
+		kern_memset(info, 0, sizeof(*info));
 		info->flags = mountp->m_flags;
 		source = mountp->m_bind_source;
 		if (source != NULL) {
 			info->kind = KERN_MOUNT_INFO_BIND;
 			if (mount_is_private(source))
-				strcpy(info->source, "(private)");
+				kern_strcpy(info->source, "(private)");
 			else
 				path_set(&sources[count - 1], source, mountp->m_root);
 		} else {
 			source = mountp;
 			if (source->m_disk != NULL)
-				strcpy(info->source, source->m_disk->d_name);
+				kern_strcpy(info->source, source->m_disk->d_name);
 		}
 
 		if (source->m_disk != NULL)
 			info->device = (uint32_t)source->m_disk->d_dev;
 		if (source->m_type != NULL) {
-			strncpy(info->type, source->m_type->fs_name,
+			kern_strncpy(info->type, source->m_type->fs_name,
 			    sizeof(info->type) - 1U);
 		}
 	}
@@ -1750,8 +1791,8 @@ mount_namespace_check_name(
 
 	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next) {
 		if (same_inode(mountp->m_cover.p_inode, directory) &&
-		    strlen(mountp->m_name) == name->cn_namelen &&
-		    !memcmp(mountp->m_name, name->cn_nameptr, name->cn_namelen)) {
+		    kern_strlen(mountp->m_name) == name->cn_namelen &&
+		    !kern_memcmp(mountp->m_name, name->cn_nameptr, name->cn_namelen)) {
 			error = EBUSY;
 			break;
 		}
@@ -1797,7 +1838,7 @@ mount_alloc(
 	for (i = 0; i < MOUNT_MAX; i++) {
 		if (!mount_used[i]) {
 			mount_used[i] = 1;
-			memset(&mounts[i], 0, sizeof(mounts[i]));
+			kern_memset(&mounts[i], 0, sizeof(mounts[i]));
 			refcount_init(&mounts[i].m_refs, 1);
 			(void)mutex_init(&mounts[i].m_lock, LOCK_RANK_NAMESPACE,
 			    "mount");
@@ -1845,7 +1886,7 @@ mount_free(
 			return;
 		}
 
-		memset(mountp, 0, sizeof(*mountp));
+		kern_memset(mountp, 0, sizeof(*mountp));
 		mount_used[i] = 0;
 		break;
 	}
@@ -1888,7 +1929,7 @@ identity_text_valid(
 	/* A flagged field must be a non-empty terminated string. */
 	if (text[0] == '\0')
 		return 0;
-	if (memchr(text, '\0', capacity) == NULL)
+	if (kern_memchr(text, '\0', capacity) == NULL)
 		return 0;
 	return 1;
 }
@@ -1934,12 +1975,12 @@ find_type(
 	/* Considers each type the name selects. */
 	for (i = 0; i < filesystem_count; i++) {
 		type = filesystems[i];
-		if (strcmp(name, "auto") && strcmp(name, type->fs_name))
+		if (kern_strcmp(name, "auto") && kern_strcmp(name, type->fs_name))
 			continue;
 
 		/* A nodev type matches only by exact name. */
 		if ((type->fs_flags & FILESYSTEM_NODEV) != 0) {
-			if (!strcmp(name, type->fs_name))
+			if (!kern_strcmp(name, type->fs_name))
 				return type;
 			continue;
 		}
@@ -1954,7 +1995,7 @@ find_type(
 			return type;
 		if (error != EOPNOTSUPP)
 			*probe_error = error;
-		if (strcmp(name, "auto"))
+		if (kern_strcmp(name, "auto"))
 			break;
 	}
 
@@ -1978,7 +2019,7 @@ mount_filesystem_on_disk(
 	/* Finds the type; "auto" without a disk has nothing to probe. */
 	type = find_type(type_name, disk, &error);
 	if (type == NULL) {
-		if (disk == NULL && !strcmp(type_name, "auto"))
+		if (disk == NULL && !kern_strcmp(type_name, "auto"))
 			return ENXIO;
 		return error;
 	}
@@ -2052,7 +2093,7 @@ mount_filesystem(
 
 	/* A nodev filesystem owns the interpretation of its mount data. */
 	for (i = 0; i < filesystem_count; i++) {
-		if (!strcmp(type_name, filesystems[i]->fs_name) &&
+		if (!kern_strcmp(type_name, filesystems[i]->fs_name) &&
 		    (filesystems[i]->fs_flags & FILESYSTEM_NODEV) != 0) {
 			error = mount_filesystem_on_disk(mountp, type_name, NULL,
 				flags, data);
@@ -2085,13 +2126,13 @@ valid_component(
 	/* Rejects an empty name, a dot name, or one containing a separator. */
 	if (name == NULL ||
 	    name[0] == '\0' ||
-	    !strcmp(name, ".") ||
-	    !strcmp(name, "..") ||
-	    strchr(name, '/') != NULL)
+	    !kern_strcmp(name, ".") ||
+	    !kern_strcmp(name, "..") ||
+	    kern_strchr(name, '/') != NULL)
 		return 0;
 
 	/* Rejects a name longer than one path component may be. */
-	length = strlen(name);
+	length = kern_strlen(name);
 	if (length > NAME_MAX)
 		return 0;
 	return 1;
@@ -2133,11 +2174,11 @@ set_mount_path(
 {
 	struct cwdinfo context;
 	char base[KERN_PATH_MAX];
-	size_t base_length, name_length = strlen(name);
+	size_t base_length, name_length = kern_strlen(name);
 	int error;
 
 	/* Resolves the covered directory to an absolute path. */
-	memset(&context, 0, sizeof(context));
+	kern_memset(&context, 0, sizeof(context));
 	spin_init(&context.lock, LOCK_RANK_PROCESS_RESOURCE, "mount path");
 	path_set(&context.root, root_mount, root_mount->m_root);
 	path_set(&context.cwd, directory->p_mount, directory->p_inode);
@@ -2148,17 +2189,17 @@ set_mount_path(
 		return error;
 
 	/* Refuses a mount point whose path would not fit. */
-	base_length = strlen(base);
+	base_length = kern_strlen(base);
 	if (base_length + (base_length > 1U ? 1U : 0U) + name_length >=
 	    sizeof(mountp->m_path))
 		return ENAMETOOLONG;
 
 	/* Joins the directory and the name into the mount's path. */
-	strcpy(mountp->m_path, base);
+	kern_strcpy(mountp->m_path, base);
 	if (base_length > 1U)
-		strcat(mountp->m_path, "/");
-	strcat(mountp->m_path, name);
-	strcpy(mountp->m_name, name);
+		kern_strcat(mountp->m_path, "/");
+	kern_strcat(mountp->m_path, name);
+	kern_strcpy(mountp->m_name, name);
 
 	/* Reports the recorded path. */
 	return 0;
@@ -2307,7 +2348,7 @@ reserve_mount(
 	const char *name,
 	const struct inode *expected)
 {
-	struct componentname component = { name, strlen(name), 0 };
+	struct componentname component = { name, kern_strlen(name), 0 };
 	struct path existing;
 	unsigned long irq;
 	int error;

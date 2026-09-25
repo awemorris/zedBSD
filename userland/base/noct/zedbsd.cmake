@@ -21,17 +21,19 @@ function(noct_configure_zedbsd_target target)
     set(zedbsd_emulation elf_x86_64)
   endif()
 
-  set(crt0 "${ZEDBSD_SYSROOT}/usr/lib/crt0.o")
-  set(libc_bundle "${ZEDBSD_SYSROOT}/usr/lib/libc.o")
+  # The interpreter is a position-independent executable that loads the
+  # shared C library of the build (ZEDBSD_DYNAMIC_DIR) through /lib/ld.so.
+  if(NOT DEFINED ENV{ZEDBSD_DYNAMIC_DIR} OR "$ENV{ZEDBSD_DYNAMIC_DIR}" STREQUAL "")
+    message(FATAL_ERROR "ZEDBSD_DYNAMIC_DIR must name the build's shared libraries")
+  endif()
+  set(crt0 "${ZEDBSD_SYSROOT}/usr/lib/crt1.o")
+  set(libc_bundle "$ENV{ZEDBSD_DYNAMIC_DIR}/libc.so")
   set(runtime_bundle
       "${ZEDBSD_SYSROOT}/usr/lib/libzedbsd-compiler-rt.o")
   set(llvm_builtins
       "${ZEDBSD_SYSROOT}/usr/lib/libclang_rt.builtins.a")
-  set(linker_script
-      "${ZEDBSD_SYSROOT}/usr/lib/zedbsd/${zedbsd_arch}/user.ld")
   foreach(input IN ITEMS
-      "${crt0}" "${libc_bundle}" "${runtime_bundle}" "${llvm_builtins}"
-      "${linker_script}")
+      "${crt0}" "${libc_bundle}" "${runtime_bundle}" "${llvm_builtins}")
     if(NOT EXISTS "${input}")
       message(FATAL_ERROR "zedBSD Noct sysroot input is missing: ${input}")
     endif()
@@ -44,8 +46,7 @@ function(noct_configure_zedbsd_target target)
     ${zedbsd_compile_options}
     -ffreestanding
     -fno-builtin
-    -fno-pic
-    -fno-pie
+    -fPIE
     -fno-stack-protector
     -fno-asynchronous-unwind-tables
     -fno-unwind-tables
@@ -54,28 +55,40 @@ function(noct_configure_zedbsd_target target)
     -ffunction-sections
     -fdata-sections
   )
+  # The libraries linked into it are position independent too; this comes
+  # after the toolchain's -fno-pie, so it is the one that holds.
+  foreach(library IN ITEMS noct noctapi)
+    if(TARGET "${library}")
+      target_compile_options("${library}" PRIVATE -fPIE)
+    endif()
+  endforeach()
+
+  # The shared C library carries the soft-float runtime; the static runtime
+  # bundle is not position independent and is left out.
   target_link_libraries("${target}" PRIVATE
     "${crt0}"
     "${libc_bundle}"
-    "${runtime_bundle}"
     "${llvm_builtins}"
   )
   target_link_options("${target}" PRIVATE
     -nostdlib
-    -static
-    -no-pie
+    -pie
     "LINKER:-m,${zedbsd_emulation}"
     "LINKER:--gc-sections"
     "LINKER:--build-id=none"
-    "LINKER:-z,max-page-size=4096"
+    "LINKER:--no-relax"
+    "LINKER:--hash-style=sysv"
+    "LINKER:-z,now"
+    "LINKER:-z,relro"
+    "LINKER:-z,separate-code"
     "LINKER:-z,stack-size=0x100000"
-    "LINKER:-T,${linker_script}"
+    "LINKER:--allow-shlib-undefined"
+    "LINKER:--dynamic-linker=/lib/ld.so"
   )
   set_property(TARGET "${target}" APPEND PROPERTY LINK_DEPENDS
     "${crt0}"
     "${libc_bundle}"
     "${runtime_bundle}"
     "${llvm_builtins}"
-    "${linker_script}"
   )
 endfunction()

@@ -24,6 +24,9 @@ amd64_set_tss_rsp0(
 	uintptr_t stack_top);
 
 void
+amd64_syscall_init(void);
+
+void
 amd64_load_gdt(
 	const void *descriptor);
 

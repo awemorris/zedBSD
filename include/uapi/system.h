@@ -18,7 +18,7 @@ extern "C" {
 
 #include <stdint.h>
 #include <stddef.h>
-#include <sys/ioctl.h>
+#include <uapi/ioctl.h>
 
 #define KERN_SYSTEM_IOC_GROUP 's'
 #define KERN_SYSTEM_SWAP_PAGE_SIZE 4096U
@@ -80,6 +80,7 @@ struct process_info {
 	int32_t session;
 	int32_t nice_value;
 	uint32_t has_controlling_terminal;
+	/* CPU times in 1/KERN_PROCESS_TIMES_HZ of a second (<uapi/process.h>). */
 	uint64_t cpu_ticks;
 	uint64_t user_ticks;
 	uint64_t system_ticks;
@@ -159,6 +160,97 @@ _Static_assert(sizeof(struct system_swap_source_info) == 348U,
 _Static_assert(offsetof(struct system_swap_source_info, source) == 60U,
     "runtime swap diagnostic source offset is an ABI contract");
 
+/*
+ * One PCI function, found by its position in the kernel's enumeration.
+ *
+ * The caller sets index and asks for 0, 1, 2 and so on until the request
+ * fails with ENOENT.  A machine without PCI answers ENOENT at once.  Names
+ * for the vendor, device and class numbers are not in the kernel; a program
+ * that wants them brings its own table.  driver is the name of the driver
+ * bound to the function, or empty when none is.  Every field has a fixed
+ * width, so one layout serves ILP32 and LP64 processes.
+ */
+#define KERN_SYSTEM_PCI_DRIVER_NAME_MAX 32U
+
+struct system_pci_device_info {
+	uint32_t index;
+	uint16_t segment;
+	uint8_t bus;
+	uint8_t device;
+	uint8_t function;
+	uint8_t revision;
+	uint8_t base_class;
+	uint8_t subclass;
+	uint8_t programming_interface;
+	uint8_t header_type;
+	uint16_t reserved0;
+	uint16_t vendor;
+	uint16_t product;
+	uint16_t subvendor;
+	uint16_t subproduct;
+	char driver[KERN_SYSTEM_PCI_DRIVER_NAME_MAX];
+	uint32_t reserved[4];
+};
+
+_Static_assert(sizeof(struct system_pci_device_info) == 72U,
+    "PCI device description ABI must be identical on ILP32 and LP64");
+_Static_assert(offsetof(struct system_pci_device_info, vendor) == 16U,
+    "PCI device identity offset is an ABI contract");
+_Static_assert(offsetof(struct system_pci_device_info, driver) == 24U,
+    "PCI device driver name offset is an ABI contract");
+
+/*
+ * One USB device, found by its position in the kernel's enumeration.
+ *
+ * Asked for the same way as a PCI function: index 0, 1, 2 and so on until
+ * ENOENT.  Root hubs are listed too, flagged KERN_SYSTEM_USB_ROOT_HUB, with
+ * address 0.  port_path holds the port on each hub from the root hub down,
+ * port_depth of them; a device on a root port has depth 1.  The descriptor
+ * fields are the device's own.  driver names the drivers bound to its
+ * interfaces, separated by commas, or is empty when none is; a list too long
+ * for the field is cut short.  Every field has a fixed width, so one layout
+ * serves ILP32 and LP64 processes.
+ */
+#define KERN_SYSTEM_USB_DRIVER_NAME_MAX 32U
+#define KERN_SYSTEM_USB_PORT_DEPTH_MAX 7U
+#define KERN_SYSTEM_USB_ROOT_HUB 0x01U
+
+#define KERN_SYSTEM_USB_SPEED_UNKNOWN 0U
+#define KERN_SYSTEM_USB_SPEED_LOW 1U
+#define KERN_SYSTEM_USB_SPEED_FULL 2U
+#define KERN_SYSTEM_USB_SPEED_HIGH 3U
+#define KERN_SYSTEM_USB_SPEED_SUPER 4U
+#define KERN_SYSTEM_USB_SPEED_SUPER_PLUS 5U
+
+struct system_usb_device_info {
+	uint32_t index;
+	uint16_t bus;
+	uint8_t address;
+	uint8_t speed;
+	uint8_t port_depth;
+	uint8_t port_path[KERN_SYSTEM_USB_PORT_DEPTH_MAX];
+	uint16_t vendor;
+	uint16_t product;
+	uint16_t usb_version;
+	uint16_t device_version;
+	uint8_t device_class;
+	uint8_t device_subclass;
+	uint8_t device_protocol;
+	uint8_t configuration_count;
+	uint8_t interface_count;
+	uint8_t flags;
+	uint16_t reserved0;
+	char driver[KERN_SYSTEM_USB_DRIVER_NAME_MAX];
+	uint32_t reserved[4];
+};
+
+_Static_assert(sizeof(struct system_usb_device_info) == 80U,
+    "USB device description ABI must be identical on ILP32 and LP64");
+_Static_assert(offsetof(struct system_usb_device_info, vendor) == 16U,
+    "USB device identity offset is an ABI contract");
+_Static_assert(offsetof(struct system_usb_device_info, driver) == 32U,
+    "USB device driver name offset is an ABI contract");
+
 #define KERN_SYSTEM_GET_INFO                                                 \
 	_IOR(KERN_SYSTEM_IOC_GROUP, 1, struct system_info)
 #define KERN_SYSTEM_GET_DEVICE                                               \
@@ -167,6 +259,8 @@ _Static_assert(offsetof(struct system_swap_source_info, source) == 60U,
 	_IOR(KERN_SYSTEM_IOC_GROUP, 3, struct vm_statistics)
 #define KERN_SYSTEM_HALT _IO(KERN_SYSTEM_IOC_GROUP, 4)
 #define KERN_SYSTEM_REBOOT _IO(KERN_SYSTEM_IOC_GROUP, 5)
+/* Discards every idle object the page cache keeps, so counts return to a baseline. */
+#define KERN_SYSTEM_DROP_CACHES _IO(KERN_SYSTEM_IOC_GROUP, 15)
 #define KERN_SYSTEM_GET_RESOURCES                                            \
 	_IOR(KERN_SYSTEM_IOC_GROUP, 6, struct system_resource_info)
 #define KERN_SYSTEM_GET_PROCESS                                              \
@@ -179,6 +273,11 @@ _Static_assert(offsetof(struct system_swap_source_info, source) == 60U,
 	_IOW(KERN_SYSTEM_IOC_GROUP, 10, struct system_swap_control)
 #define KERN_SYSTEM_GET_SWAP_SOURCE                                          \
 	_IOWR(KERN_SYSTEM_IOC_GROUP, 11, struct system_swap_source_info)
+/* Number 12 is KERN_SYSTEM_GET_MOUNTS in <uapi/mountinfo.h>. */
+#define KERN_SYSTEM_GET_PCI_DEVICE                                           \
+	_IOWR(KERN_SYSTEM_IOC_GROUP, 13, struct system_pci_device_info)
+#define KERN_SYSTEM_GET_USB_DEVICE                                           \
+	_IOWR(KERN_SYSTEM_IOC_GROUP, 14, struct system_usb_device_info)
 
 #ifdef __cplusplus
 }

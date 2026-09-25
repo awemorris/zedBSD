@@ -189,6 +189,14 @@ enum syscall_number {
 	 */
 	KERN_SYS_wait4 = 167,
 	KERN_SYS_ptrace = 168,
+
+	/*
+	 * Creates a child that runs in the caller's address space until it
+	 * replaces its image or exits; the calling thread waits until then
+	 * (vfork(2)).  The C library exports it as vfork() and builds
+	 * posix_spawn on it, running the child on a stack of its own.
+	 */
+	KERN_SYS_vfork = 169,
 };
 
 #endif

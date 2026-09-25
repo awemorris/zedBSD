@@ -1,0 +1,12 @@
+=== ich9-output-volume
+serial: logged in
+hda: codec 0, 1 output pin(s), input no, volume yes, 2 format(s), MSI
+AUDIOTEST PLAY frames=48000 transferred=200880 underruns=0 ms=1013
+AUDIOTEST VOLUME 50/50/0
+AUDIOTEST PLAY frames=48000 transferred=200724 underruns=0 ms=1023
+AUDIOTEST VOLUME 50/50/1
+AUDIOTEST PLAY frames=48000 transferred=200828 underruns=0 ms=1023
+guest-status=0
+wav: format=1 channels=2 rate=48000 bits=16 frames=147367
+windows: 16000 16000 16000 16000 7969 7969 7969 7969 7969 0 0 0 0
+check-status=0

@@ -51,9 +51,9 @@
  */
 
 #include "intel-ax211-dma.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 #define AX211_SCRATCH_CONTROL_FLAGS 0x000f0000U
 #define AX211_SCRATCH_PNVM_BASE_OFFSET 16U
@@ -189,7 +189,7 @@ drv_intel_ax211_dma_prepare_pnvm(
 					      &resources->pnvm[index],
 					      section->length, 1U);
 		if (error == 0) {
-			memcpy(resources->pnvm[index].address,
+			kern_memcpy(resources->pnvm[index].address,
 			       pnvm_bytes + section->file_offset,
 			       section->length);
 			resources->pnvm_total_length += section->length;
@@ -283,7 +283,7 @@ drv_intel_ax211_dma_release(
 
 	/* Handles the device availability. */
 	if (resources->device == NULL) {
-		memset(resources, 0, sizeof(*resources));
+		kern_memset(resources, 0, sizeof(*resources));
 
 		/* Returns the computed result. */
 		return;
@@ -324,7 +324,7 @@ drv_intel_ax211_dma_release(
 	ax211_buffer_release(resources, &resources->prph_info);
 	ax211_buffer_release(resources, &resources->scratch);
 	ax211_buffer_release(resources, &resources->context);
-	memset(resources, 0, sizeof(*resources));
+	kern_memset(resources, 0, sizeof(*resources));
 }
 
 /* Supports the ax211 boot manifest validate operation. */
@@ -522,7 +522,7 @@ ax211_buffer_allocate(
 		return EIO;
 	}
 
-	memset(buffer->address, 0, buffer->size);
+	kern_memset(buffer->address, 0, buffer->size);
 
 	/* Succeeded. */
 	return 0;
@@ -555,7 +555,7 @@ ax211_firmware_buffers_allocate(
 				      manifest->iml_length, 1U);
 	if (error != 0)
 		return error;
-	memcpy(resources->iml.address, bytes + manifest->iml_offset,
+	kern_memcpy(resources->iml.address, bytes + manifest->iml_offset,
 	       manifest->iml_length);
 	/* Process each remaining element. */
 	for (index = 0U; index < manifest->runtime_count && error == 0;
@@ -589,7 +589,7 @@ ax211_firmware_buffers_allocate(
 		error = ax211_buffer_allocate(resources, &image->buffer,
 					      section->length, 1U);
 		if (error == 0) {
-			memcpy(image->buffer.address,
+			kern_memcpy(image->buffer.address,
 			       bytes + section->file_offset, section->length);
 			image->destination = section->destination;
 			image->image_class = (uint8_t)image_class;
@@ -662,7 +662,7 @@ ax211_scratch_build(
 	/* Handles the scratch availability. */
 	if (scratch == NULL)
 		return EINVAL;
-	memset(scratch, 0, resources->scratch.size);
+	kern_memset(scratch, 0, resources->scratch.size);
 	ax211_put_le16(scratch, hardware_revision);
 	ax211_put_le16(scratch + 2U, 0U);
 	ax211_put_le16(scratch + 4U, INTEL_AX211_PRPH_SCRATCH_SIZE / 4U);
@@ -741,7 +741,7 @@ ax211_context_build(
 	int result;
 
 	/* Describes every ring and scratch area to the firmware. */
-	memset(&context, 0, sizeof(context));
+	kern_memset(&context, 0, sizeof(context));
 	context.version = AX211_CONTEXT_VERSION;
 	context.config = AX211_CONTEXT_CONFIG;
 	context.prph_info_base = resources->prph_info.device_address;
@@ -777,5 +777,5 @@ ax211_buffer_release(
 		drv_dma_free_coherent(resources->device, buffer);
 	}
 
-	memset(buffer, 0, sizeof(*buffer));
+	kern_memset(buffer, 0, sizeof(*buffer));
 }

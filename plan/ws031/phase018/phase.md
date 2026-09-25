@@ -1,5 +1,7 @@
 # WS031 p018 計画: 性能の構造改善
 
+Phase disposition: canceled（2026-09-23、`plan/ws031/ws.md`「残課題のブレークダウン」の子Phaseへ分割。確認項目・範囲の正本はこの文書に残す）
+
 ユーザー決定（2026-09-23）: p014 の性能第 2 回（`plan/ws031/phase014/phase.md` §性能 第 2 回）で見つかった構造上の制約を本 Phase に
 まとめ、計画だけ作って実行は後回しにする。現状: mview `--spin=30`（640×480、37k 三角形）で no-vsync 190 fps・5.25 ms/frame、
 vsync 60 fps。GPU 自体の描画は 1.3 ms/frame。

@@ -21,8 +21,9 @@
 #include "kern/lock.h"
 #include "kern/vm-object.h"
 #include "kern/writeback.h"
-#include <fcntl.h>
+#include <uapi/fcntl.h>
 #include <limits.h>
+#include <uapi/limits.h>
 #include <stddef.h>
 #include <stdint.h>
 

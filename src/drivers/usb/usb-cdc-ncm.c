@@ -11,10 +11,10 @@
  * USB CDC NCM NTH16/NDP16 wire codec
  */
 
-#include <drivers/usb-cdc-ncm.h>
-#include <errno.h>
+#include <drivers/usb/usb-cdc-ncm.h>
+#include <uapi/errno.h>
 #include <limits.h>
-#include <string.h>
+#include <kern/kcrt.h>
 
 struct ncm_range {
 	uint16_t offset;
@@ -76,7 +76,7 @@ drv_usb_cdc_ncm_negotiate_nth16(
 
 	/* Handles the profile availability. */
 	if (profile != NULL)
-		memset(profile, 0, sizeof(*profile));
+		kern_memset(profile, 0, sizeof(*profile));
 
 	/* Handles the bytes availability. */
 	if (bytes == NULL || limits == NULL || profile == NULL ||
@@ -117,7 +117,7 @@ drv_usb_cdc_ncm_negotiate_nth16(
 		return EINVAL;
 
 	/* Builds the parameter set from the device's own limits. */
-	memset(&candidate, 0, sizeof(candidate));
+	kern_memset(&candidate, 0, sizeof(candidate));
 	candidate.ntb_in_max_size =
 		clamp_nth16_size(device_in, limits->ntb_in_max_size);
 	candidate.ntb_out_max_size =
@@ -192,7 +192,7 @@ drv_usb_cdc_ncm_make_control_request(
 	/* Checks the profile valid result. */
 	if (!profile_valid(profile) || request == NULL)
 		return EINVAL;
-	memset(request, 0, sizeof(*request));
+	kern_memset(request, 0, sizeof(*request));
 	/* Dispatch the selected operation case. */
 	switch (step) {
 	case DRV_USB_CDC_NCM_CONTROL_SELECT_NTH16:
@@ -232,7 +232,7 @@ drv_usb_cdc_ncm_rx_reset(
 {
 	/* Handles the state availability. */
 	if (state != NULL)
-		memset(state, 0, sizeof(*state));
+		kern_memset(state, 0, sizeof(*state));
 }
 
 /*
@@ -348,12 +348,12 @@ drv_usb_cdc_ncm_build_ntb16(
 	/*
 	 * memmove first permits a caller-owned frame inside the output buffer.
 	 */
-	memmove(bytes + layout.datagram_offset, frame_bytes, frame_length);
-	memset(bytes, 0, layout.datagram_offset);
+	kern_memmove(bytes + layout.datagram_offset, frame_bytes, frame_length);
+	kern_memset(bytes, 0, layout.datagram_offset);
 
 	/* Handles the layout condition. */
 	if (layout.block_length > layout.datagram_offset + frame_length) {
-		memset(bytes + layout.datagram_offset + frame_length, 0,
+		kern_memset(bytes + layout.datagram_offset + frame_length, 0,
 		       layout.block_length -
 			       (layout.datagram_offset + frame_length));
 	}
@@ -699,7 +699,7 @@ validate_ntb16(
 	uint16_t wire_block_length, first_ndp;
 	int error;
 
-	memset(result, 0, sizeof(*result));
+	kern_memset(result, 0, sizeof(*result));
 
 	/* Checks the profile valid result. */
 	if (!profile_valid(profile) || state == NULL || bytes == NULL ||

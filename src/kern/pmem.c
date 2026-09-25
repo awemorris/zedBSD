@@ -15,7 +15,7 @@
  * direct-mapped and needs kern_device_map().
  */
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
 
 #include "kern/clock.h"

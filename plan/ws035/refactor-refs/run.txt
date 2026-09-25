@@ -1,0 +1,43 @@
+{
+ "p002": {
+  "lines": 649,
+  "lines_needing_edit": 231,
+  "lines_plan_records": 418,
+  "include_root_changes": {},
+  "files": 271,
+  "hal_lines": 0,
+  "hal_lines_needing_edit": 0
+ },
+ "p003": {
+  "lines": 378,
+  "lines_needing_edit": 116,
+  "lines_plan_records": 245,
+  "include_root_changes": {
+   "keep-root .->src": 14
+  },
+  "files": 103,
+  "hal_lines": 0,
+  "hal_lines_needing_edit": 0
+ },
+ "p023": {
+  "lines": 6414,
+  "lines_needing_edit": 137,
+  "lines_plan_records": 219,
+  "include_root_changes": {
+   "keep-root libc/include->include": 6052
+  },
+  "files": 1776,
+  "hal_lines": 23,
+  "hal_lines_needing_edit": 0
+ },
+ "p004": {
+  "lines": 55,
+  "lines_needing_edit": 37,
+  "lines_plan_records": 16,
+  "include_root_changes": {},
+  "files": 38,
+  "hal_lines": 6,
+  "hal_lines_needing_edit": 6
+ }
+}
+collisions: 4

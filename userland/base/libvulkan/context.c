@@ -15,6 +15,7 @@
 #include <string.h>
 #include <time.h>
 #include <sys/mman.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #include <uapi/gpu.h>
 #include "internal.h"

@@ -13,15 +13,16 @@
  * the boot origin.
  */
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
-#include <drivers/disklabel.h>
+#include <drivers/disklabel/disklabel.h>
 #include <kern/disk.h>
 #include <kern/platform.h>
 #include <kern/partition.h>
 #include "drivers/platform/x68k/x68k-spc-disk.h"
 #include "hal/m68k/bsp-x68k/bsp.h"
 #include "hal/m68k/bsp-x68k/scsi.h"
+#include <kern/kcrt.h>
 
 /*
  * Publishes the SCSI disks found on the X68000 bus as boot devices.
@@ -31,13 +32,13 @@
  */
 size_t
 kern_platform_init(
-	const struct boot_handoff *common,
-	struct boot_device *devices,
+	const struct kern_boot_handoff *common,
+	struct kern_boot_device *devices,
 	size_t capacity)
 {
 	const struct x68k_boot_handoff *handoff;
 	struct x68k_spc_bus bus;
-	struct boot_device *device;
+	struct kern_boot_device *device;
 	unsigned initiator;
 	unsigned target;
 	size_t count;
@@ -66,7 +67,7 @@ kern_platform_init(
 
 		/* Describes one present SCSI target for the boot record. */
 		device = &devices[count];
-		hal_memset(device, 0, sizeof(*device));
+		kern_memset(device, 0, sizeof(*device));
 		device->device_class = KERN_DEV_SCSI;
 		device->display_index = (uint8_t)count;
 		device->bios_id = (uint8_t)target;
@@ -87,7 +88,7 @@ kern_platform_init(
  */
 void
 kern_platform_refresh_devices(
-	const struct boot_device *d,
+	const struct kern_boot_device *d,
 	size_t n)
 {
 	(void)d;
@@ -110,7 +111,7 @@ kern_platform_input_init(
  */
 struct disk *
 kern_platform_block_device(
-	const struct boot_device *device)
+	const struct kern_boot_device *device)
 {
 	struct disk *disk;
 

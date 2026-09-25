@@ -1,5 +1,6 @@
 # key|kind|label|platforms|default|choices
 CONFIG_KERNEL_TEST_CHECKPOINTS|bool|Kernel test checkpoints|amd64|n|
+CONFIG_PCAT_SERIAL_MIRROR|bool|Mirror the PC/AT text console to COM1 (output only)|amd64|n|
 CONFIG_BUF_CACHE_KIB|choice|Buffer cache limit|*|0|0:automatic,256:256 KiB,1024:1 MiB,4096:4 MiB,16384:16 MiB
 CONFIG_GPU_JOB_RESERVATION_MS|choice|GPU producer reservation timeout|*|10000|1000:1 second,10000:10 seconds,30000:30 seconds
 CONFIG_GPU_JOB_EXECUTION_MS|choice|GPU execution timeout|*|60000|10000:10 seconds,60000:60 seconds,300000:5 minutes

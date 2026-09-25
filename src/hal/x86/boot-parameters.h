@@ -13,7 +13,7 @@
 #define KERN_HAL_X86_BOOT_PARAMETERS_H
 
 #include <stddef.h>
-#include <boot/parameter-handoff.h>
+#include <kern/boot.h>
 
 enum x86_boot_parameters_result {
 	X86_BOOT_PARAMETERS_OK = 0,

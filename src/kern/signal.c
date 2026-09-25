@@ -25,11 +25,11 @@
 #include "kern/sched.h"
 #include "kern/thread.h"
 #include "kern/uaccess.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
 #include <stddef.h>
-#include <string.h>
 
 #define SIGNAL_BIT(n)		((sigset_t)1ULL << ((unsigned)(n) - 1U))
 #define SIGNAL_VALID_MASK	((sigset_t)(UINT64_MAX >> 1U))
@@ -161,7 +161,7 @@ signal_stop_before_return(
 	process = thread->proc;
 	if (process == NULL || process == &process0)
 		return 0;
-	memset(&ignored_info, 0, sizeof(ignored_info));
+	kern_memset(&ignored_info, 0, sizeof(ignored_info));
 
 	/* Gathers the unblocked pending signals, always including the unmaskable. */
 	irq = spin_lock_irqsave(&process->lock);
@@ -205,7 +205,7 @@ signal_stop_before_return(
 		if ((thread->signal_pending & SIGNAL_BIT(signo)) != 0) {
 			thread->signal_pending &= ~SIGNAL_BIT(signo);
 			ignored_info = thread->signal_info[signo];
-			memset(&thread->signal_info[signo], 0,
+			kern_memset(&thread->signal_info[signo], 0,
 			    sizeof(thread->signal_info[signo]));
 		} else {
 			signal_take_process_locked(process, signo, &ignored_info);
@@ -332,6 +332,37 @@ signal_init(
 }
 
 /*
+ * Reports whether a SIGKILL is pending for the thread or its process.
+ */
+int
+signal_kill_pending(
+	const struct thread *thread)
+{
+	struct process *process;
+	unsigned long irq;
+	sigset_t pending;
+	sigset_t kill;
+
+	/* A thread without a process has no signals. */
+	if (thread == NULL)
+		return 0;
+	process = thread->proc;
+	if (process == NULL)
+		return 0;
+
+	/* Samples both pending sets under the process lock. */
+	irq = spin_lock_irqsave(&process->lock);
+	pending = thread->signal_pending | process->signal_pending;
+	spin_unlock_irqrestore(&process->lock, irq);
+
+	/* Reports the unmaskable kill. */
+	kill = SIGNAL_BIT(SIGKILL);
+	if ((pending & kill) != 0)
+		return 1;
+	return 0;
+}
+
+/*
  * Runs the return-to-user policy: termination, stops, and signal delivery.
  */
 void
@@ -348,6 +379,9 @@ kernel_user_return_handler(
 		HAL_FATAL("user-return callback entered with IRQs enabled");
 	sched_accounting_kernel_enter();
 	hal_irq_enable();
+
+	/* A thread woken to run first, on this CPU, runs before we return. */
+	sched_preempt_point();
 
 	/* A retired thread exits; a stopped process waits; signals deliver. */
 	if (curthread != NULL && curthread->terminate_requested)
@@ -374,7 +408,7 @@ signal_send_process(
 	int error;
 
 	/* Describes the signal as coming from the kernel. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	info.code = SI_KERNEL;
 
 	/* Reports why the send failed. */
@@ -460,7 +494,7 @@ signal_send_process_info(
 	/* Anything else keeps the first information record until taken. */
 	if (!queued_notification &&
 	    (process->signal_unqueued_pending & SIGNAL_BIT(signo)) == 0) {
-		memset(&process->signal_info[signo], 0,
+		kern_memset(&process->signal_info[signo], 0,
 		    sizeof(process->signal_info[signo]));
 		if (info != NULL)
 			process->signal_info[signo] = *info;
@@ -527,7 +561,7 @@ signal_kill(
 		return ESRCH;
 
 	/* Describes the signal as sent by the sender's user. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	info.code = SI_USER;
 	info.pid = sender->pid;
 	sender_cred = cred_process_ref(sender);
@@ -597,16 +631,16 @@ signal_fork(
 		return;
 
 	/* The process inherits the actions with nothing pending. */
-	memcpy(child->signal_actions, parent->signal_actions,
+	kern_memcpy(child->signal_actions, parent->signal_actions,
 	    sizeof(child->signal_actions));
 	child->signal_pending = 0;
 	child->signal_unqueued_pending = 0;
-	memset(child->signal_info, 0, sizeof(child->signal_info));
+	kern_memset(child->signal_info, 0, sizeof(child->signal_info));
 
 	/* The thread inherits the mask and alternate stack with nothing pending. */
 	child_thread->signal_mask = parent_thread->signal_mask;
 	child_thread->signal_pending = 0;
-	memset(child_thread->signal_info, 0, sizeof(child_thread->signal_info));
+	kern_memset(child_thread->signal_info, 0, sizeof(child_thread->signal_info));
 	child_thread->signal_token = 0;
 	child_thread->signal_token_counter = 0;
 	child_thread->signal_depth = 0;
@@ -616,7 +650,7 @@ signal_fork(
 	child_thread->signal_on_altstack_depth = 0;
 	child_thread->signal_wait_set = 0;
 	child_thread->signal_waiting = 0;
-	memset(child_thread->signal_levels, 0,
+	kern_memset(child_thread->signal_levels, 0,
 	    sizeof(child_thread->signal_levels));
 	child_thread->syscall_restart_valid = 0;
 	child_thread->syscall_redispatch_valid = 0;
@@ -658,7 +692,7 @@ signal_exec(
 	/* Caught signals revert to the default action. */
 	for (i = 1; i < NSIG; i++) {
 		if (process->signal_actions[i].handler != (uintptr_t)SIG_IGN)
-			memset(&process->signal_actions[i], 0,
+			kern_memset(&process->signal_actions[i], 0,
 			    sizeof(process->signal_actions[i]));
 	}
 
@@ -667,7 +701,7 @@ signal_exec(
 		curthread->signal_token = 0;
 		curthread->signal_token_counter = 0;
 		curthread->signal_depth = 0;
-		memset(curthread->signal_levels, 0,
+		kern_memset(curthread->signal_levels, 0,
 		    sizeof(curthread->signal_levels));
 		curthread->signal_suspended = 0;
 		curthread->signal_altstack_base = 0;
@@ -695,7 +729,7 @@ signal_fill_user_info(
 	int signo,
 	const struct signal_info *info)
 {
-	memset(user_info, 0, sizeof(*user_info));
+	kern_memset(user_info, 0, sizeof(*user_info));
 	user_info->si_signo = signo;
 	user_info->si_errno = info->error;
 	user_info->si_code = info->code;
@@ -703,7 +737,7 @@ signal_fill_user_info(
 	user_info->si_uid = info->uid;
 	user_info->si_status = info->status;
 	user_info->si_addr = (uint64_t)info->address;
-	memcpy(&user_info->si_value, &info->value, sizeof(info->value));
+	kern_memcpy(&user_info->si_value, &info->value, sizeof(info->value));
 }
 
 /*
@@ -759,7 +793,7 @@ signal_deliver_on_user_return(
 	 * space.
 	 */
 	restart_number = thread->syscall_restart_number;
-	memcpy(restart_args, thread->syscall_restart_args,
+	kern_memcpy(restart_args, thread->syscall_restart_args,
 	    sizeof(restart_args));
 	restart_valid = thread->syscall_restart_valid;
 	thread->syscall_restart_valid = 0;
@@ -792,7 +826,7 @@ retry:
 	if ((thread->signal_pending & SIGNAL_BIT(signo)) != 0) {
 		thread->signal_pending &= ~SIGNAL_BIT(signo);
 		selected_info = thread->signal_info[signo];
-		memset(&thread->signal_info[signo], 0,
+		kern_memset(&thread->signal_info[signo], 0,
 		    sizeof(thread->signal_info[signo]));
 	} else {
 		signal_take_process_locked(process, signo, &selected_info);
@@ -914,7 +948,7 @@ retry:
 
 	level = &thread->signal_levels[thread->signal_depth];
 	used_altstack = level->used_altstack;
-	memset(level, 0, sizeof(*level));
+	kern_memset(level, 0, sizeof(*level));
 	level->used_altstack = used_altstack;
 	level->token = token;
 	if (thread->signal_suspended)
@@ -922,14 +956,14 @@ retry:
 	else
 		level->saved_mask = thread->signal_mask;
 	level->restart_number = restart_number;
-	memcpy(level->restart_args, restart_args,
+	kern_memcpy(level->restart_args, restart_args,
 	    sizeof(level->restart_args));
 	level->restart_on_return = restart_valid &&
 	    (action.flags & SA_RESTART) != 0;
 
 	/* Builds the user-visible signal information and context. */
 	signal_fill_user_info(&user_info, signo, &selected_info);
-	memset(&user_context, 0, sizeof(user_context));
+	kern_memset(&user_context, 0, sizeof(user_context));
 	user_context.uc_sigmask = level->saved_mask;
 	user_context.uc_mcontext.mc_pc = (uint64_t)interrupted_pc;
 	user_context.uc_mcontext.mc_sp = (uint64_t)interrupted_sp;
@@ -949,7 +983,7 @@ retry:
 	 * the boundary says, and a processor that is asked to move sixteen
 	 * bytes at once faults when it is one word out.
 	 */
-	memset(&frame, 0, sizeof(frame));
+	kern_memset(&frame, 0, sizeof(frame));
 	sp = (sp - sizeof(frame)) &
 	    ~((uintptr_t)HAL_TASK_SIGNAL_FRAME_ALIGNMENT - 1U);
 #if HAL_TASK_SIGNAL_FRAME_HAS_RESTORER
@@ -1015,7 +1049,7 @@ signal_send_thread(
 	int error;
 
 	/* Describes the signal as coming from the kernel. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	info.code = SI_KERNEL;
 
 	/* Reports why the send failed. */
@@ -1076,7 +1110,7 @@ signal_send_thread_info(
 
 	/* Keeps the first information record until the signal is taken. */
 	if ((thread->signal_pending & SIGNAL_BIT(signo)) == 0) {
-		memset(&thread->signal_info[signo], 0,
+		kern_memset(&thread->signal_info[signo], 0,
 		    sizeof(thread->signal_info[signo]));
 		if (info != NULL)
 			thread->signal_info[signo] = *info;
@@ -1169,7 +1203,7 @@ signal_timedwait(
 			if ((thread->signal_pending & SIGNAL_BIT(signo)) != 0) {
 				thread->signal_pending &= ~SIGNAL_BIT(signo);
 				*info = thread->signal_info[signo];
-				memset(&thread->signal_info[signo], 0,
+				kern_memset(&thread->signal_info[signo], 0,
 				    sizeof(thread->signal_info[signo]));
 			} else {
 				signal_take_process_locked(process, signo, info);
@@ -1397,7 +1431,7 @@ signal_take_process_locked(
 
 	/* Clears the last instance. */
 	process->signal_pending &= ~SIGNAL_BIT(signo);
-	memset(&process->signal_info[signo], 0,
+	kern_memset(&process->signal_info[signo], 0,
 	    sizeof(process->signal_info[signo]));
 }
 
@@ -1427,7 +1461,7 @@ signal_discard_locked(
 		if ((set & SIGNAL_BIT(signo)) != 0) {
 			signal_timer_completion_add(completions, completion_count,
 			    &process->signal_info[signo]);
-			memset(&process->signal_info[signo], 0,
+			kern_memset(&process->signal_info[signo], 0,
 			    sizeof(process->signal_info[signo]));
 		}
 	}
@@ -1456,7 +1490,7 @@ signal_discard_locked(
 		thread->signal_pending &= ~set;
 		for (signo = 1; signo < NSIG; signo++) {
 			if ((set & SIGNAL_BIT(signo)) != 0) {
-				memset(&thread->signal_info[signo], 0,
+				kern_memset(&thread->signal_info[signo], 0,
 				    sizeof(thread->signal_info[signo]));
 			}
 		}

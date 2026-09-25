@@ -1,4 +1,4 @@
-#include <drivers/pci.h>
+#include <drivers/pci/pci.h>
 #include <hal/hal.h>
 
 #include <assert.h>

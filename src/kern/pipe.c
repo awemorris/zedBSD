@@ -23,11 +23,11 @@
 #include "kern/signal.h"
 #include "kern/thread.h"
 #include "kern/waitq.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <fcntl.h>
+#include <uapi/errno.h>
+#include <uapi/fcntl.h>
 #include <stdint.h>
-#include <string.h>
 
 struct pipe {
 	uint8_t data[KERN_PIPE_CAPACITY];
@@ -220,9 +220,9 @@ pipe_read_file(
 				count = length - done;
 			if (contiguous > count)
 				contiguous = count;
-			memcpy(out + done, pipe->data + pipe->read_pos, contiguous);
+			kern_memcpy(out + done, pipe->data + pipe->read_pos, contiguous);
 			if (contiguous < count)
-				memcpy(out + done + contiguous, pipe->data,
+				kern_memcpy(out + done + contiguous, pipe->data,
 				    count - contiguous);
 			pipe->read_pos = (pipe->read_pos + count) %
 			    KERN_PIPE_CAPACITY;
@@ -312,9 +312,9 @@ pipe_write_file(
 				count = length - done;
 			if (contiguous > count)
 				contiguous = count;
-			memcpy(pipe->data + pipe->write_pos, in + done, contiguous);
+			kern_memcpy(pipe->data + pipe->write_pos, in + done, contiguous);
 			if (contiguous < count)
-				memcpy(pipe->data, in + done + contiguous,
+				kern_memcpy(pipe->data, in + done + contiguous,
 				    count - contiguous);
 			pipe->write_pos = (pipe->write_pos + count) %
 			    KERN_PIPE_CAPACITY;

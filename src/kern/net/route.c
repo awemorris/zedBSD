@@ -19,12 +19,12 @@
 #include "kern/net/net-device.h"
 #include "kern/atomic.h"
 #include "kern/uaccess.h"
+#include <kern/kcrt.h>
 
 #include <uapi/netinet.h>
 #include <uapi/route.h>
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdbool.h>
-#include <string.h>
 
 #define ROUTE_MAX 16U
 #define ROUTE_FLAGS_ALLOWED (RTF_UP | RTF_GATEWAY | RTF_HOST | RTF_STATIC | \
@@ -63,8 +63,8 @@ route_init(
 	}
 
 	/* Starts with an empty table. */
-	memset(routes, 0, sizeof(routes));
-	memset(route_used, 0, sizeof(route_used));
+	kern_memset(routes, 0, sizeof(routes));
+	kern_memset(route_used, 0, sizeof(route_used));
 	route_unlock(enabled);
 }
 
@@ -198,7 +198,7 @@ route_delete(
 		    routes[index].device == device) {
 			net_device_release(routes[index].device);
 			route_used[index] = 0;
-			memset(&routes[index], 0, sizeof(routes[index]));
+			kern_memset(&routes[index], 0, sizeof(routes[index]));
 			route_unlock(enabled);
 			return 0;
 		}
@@ -230,7 +230,7 @@ route_purge_device(
 		if (route_used[index] && routes[index].device == device) {
 			net_device_release(routes[index].device);
 			route_used[index] = 0;
-			memset(&routes[index], 0, sizeof(routes[index]));
+			kern_memset(&routes[index], 0, sizeof(routes[index]));
 		}
 	}
 
@@ -346,7 +346,7 @@ route_release(
 	/* Drops the device reference and clears the copy. */
 	if (route->device != NULL)
 		net_device_release(route->device);
-	memset(route, 0, sizeof(*route));
+	kern_memset(route, 0, sizeof(*route));
 }
 
 /*
@@ -384,7 +384,7 @@ route_ioctl(
 		error = route_get_ref(entry.rt_index, &route);
 		if (error != 0)
 			return error;
-		memset(&entry, 0, sizeof(entry));
+		kern_memset(&entry, 0, sizeof(entry));
 		entry.rt_index = ordinal;
 		if (route.device != NULL)
 			entry.rt_ifindex = route.device->ifindex;
@@ -545,7 +545,7 @@ set_sockaddr(
 	struct sockaddr_in *inet;
 
 	inet = (struct sockaddr_in *)address;
-	memset(address, 0, sizeof(*address));
+	kern_memset(address, 0, sizeof(*address));
 	inet->sin_family = AF_INET;
 	inet->sin_addr.s_addr = net_htonl(value);
 }
@@ -591,7 +591,7 @@ route_delete_request(
 	/* Clears the route and drops its device reference. */
 	net_device_release(routes[selected].device);
 	route_used[selected] = 0;
-	memset(&routes[selected], 0, sizeof(routes[selected]));
+	kern_memset(&routes[selected], 0, sizeof(routes[selected]));
 	route_unlock(enabled);
 
 	/* Reports the deleted route. */

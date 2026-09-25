@@ -11,7 +11,7 @@ for mode in ordinary sanitize; do
     fi
     cc -std=gnu11 -O1 -g -Wall -Wextra -Werror -Wdeclaration-after-statement \
         -ffunction-sections -fdata-sections $extra \
-        -I"$repo/include" -idirafter "$repo/libc/include" \
+        -I"$repo/include" -idirafter "$repo/include/libc" \
         "$repo/plan/ws014/tests/venus-edid.c" -Wl,--gc-sections -o "$work/$mode"
     ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 timeout 30 "$work/$mode"
 done

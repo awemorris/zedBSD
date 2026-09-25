@@ -1,16 +1,48 @@
 require zedbuild;
 
-func ufsBuildProfile(backend, size, root, output, profile) {
-    var command = zbShellQuote(backend) + " ufs " + size + " " +
+func ufsBuildProfileInodes(backend, size, root, output, profile, inodes) {
+    ufsBuildSized(backend, "" + size, root, output, profile, inodes);
+}
+
+// Builds an image whose size is given in MiB.  Noct's integers are 32-bit,
+// so a size of 2 GiB or more cannot be expressed in bytes here; the
+// backend takes the count of MiB with an M suffix instead.
+func ufsBuildProfileInodesMiB(backend, sizeMiB, root, output, profile, inodes) {
+    ufsBuildSized(backend, "" + sizeMiB + "M", root, output, profile, inodes);
+}
+
+func ufsBuildSized(backend, sizeText, root, output, profile, inodes) {
+    var command = zbShellQuote(backend) + " ufs " + sizeText + " " +
                   zbShellQuote(root) + " " + zbShellQuote(output);
     if (profile == "journal-snapshot") {
         command = command + " --profile=journal-snapshot";
     } else if (profile != "ordinary") {
         zbFail("unsupported UFS profile");
     }
+    // Inodes are provisioned from the cylinder groups, which the byte size
+    // alone decides.  A root of many small files needs more of them than
+    // that, so the count is asked for when the caller knows it.
+    if (inodes > 0) { command = command + " --inodes=" + inodes; }
     if (System.shell(command) != 0) { zbFail("UFS backend failed"); }
+}
+
+func ufsBuildProfile(backend, size, root, output, profile) {
+    ufsBuildProfileInodes(backend, size, root, output, profile, 0);
 }
 
 func ufsBuild(backend, size, root, output) {
     ufsBuildProfile(backend, size, root, output, "ordinary");
+}
+
+// Counts what the staged root will need one inode for: every directory,
+// file and symbolic link under it, and the root directory itself.
+func ufsCountEntries(root, scratch) {
+    // wc pads its count and ends the line; the number is wanted on its own.
+    if (System.shell("find " + zbShellQuote(root) + " | wc -l | tr -d ' \n' > " +
+                     zbShellQuote(scratch)) != 0) {
+        zbFail("cannot count the staging root entries");
+    }
+    var text = FileUtil.readText(scratch);
+    System.shell("rm -f " + zbShellQuote(scratch));
+    return zbParseNumber(text);
 }

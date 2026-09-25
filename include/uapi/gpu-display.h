@@ -13,7 +13,7 @@
 #define KERN_UAPI_GPU_DISPLAY_H
 
 #include <stdint.h>
-#include <sys/ioctl.h>
+#include <uapi/ioctl.h>
 
 #define GPU_CAP_DISPLAY			128U
 #define GPU_CAP_DISPLAY_EVENTS		4096U

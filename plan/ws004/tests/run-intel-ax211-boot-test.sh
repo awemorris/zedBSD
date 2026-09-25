@@ -1,7 +1,7 @@
 #!/bin/sh
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
-python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025/tests/prepare-driver-fragments.py" --source src/drivers/wifi/intel-ax211/intel-ax211.c
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/tools/driver-fragments/prepare.py" --source src/drivers/wifi/intel-ax211/intel-ax211.c
 
 test_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$test_dir/../../.." && pwd)
@@ -10,14 +10,14 @@ trap 'rm -rf "$build_dir"' EXIT HUP INT TERM
 
 cc=${CC:-cc}
 warnings="-std=c89 -pedantic -Wno-long-long -Wall -Wextra -Werror"
-core="$repo_root/plan/ws025/temp/p031-driver-fragments/src/drivers/intel-ax211.c"
+core="$repo_root/build/driver-fragments/src/drivers/intel-ax211.c"
 protocol="$repo_root/src/drivers/wifi/intel-ax211/intel-ax211-protocol.c"
 init="$repo_root/src/drivers/wifi/intel-ax211/intel-ax211-init.c"
 command="$repo_root/src/drivers/wifi/intel-ax211/intel-ax211-command.c"
 boot="$repo_root/src/drivers/wifi/intel-ax211/intel-ax211-boot.c"
 fixture="$test_dir/intel-ax211-boot-test.c"
 sources="$core $protocol $init $command $boot $fixture"
-abi_includes="-I$repo_root/libc/include -I$repo_root/include/uapi"
+abi_includes="-I$repo_root/include/libc -DKERN_UAPI_NATIVE -I$repo_root/include/uapi"
 abi_includes="$abi_includes -I$repo_root/include -I$repo_root/src"
 
 # Ordinary native gate.

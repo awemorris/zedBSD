@@ -12,8 +12,8 @@
 #ifndef DRIVERS_GPU_VENUS_INTERNAL_H
 #define DRIVERS_GPU_VENUS_INTERNAL_H
 
-#include <drivers/dma.h>
-#include <drivers/pci.h>
+#include <drivers/generic/dma.h>
+#include <drivers/pci/pci.h>
 #include <uapi/gpu.h>
 #include <kern/lock.h>
 #include <kern/waitq.h>

@@ -511,7 +511,7 @@ static void i915_vkc_dec_VkInstanceCreateInfo(struct i915_wire_reader *r, struct
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, sizeof(char *));
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ const char *v = i915_vkc_read_string(r, a); memcpy((char *)mem + index * sizeof(char *), &v, sizeof(v)); }
+			{ const char *v = i915_vkc_read_string(r, a); kern_memcpy((char *)mem + index * sizeof(char *), &v, sizeof(v)); }
 		record->ppEnabledLayerNames = mem;
 	}
 	record->enabledExtensionCount = (__typeof__(record->enabledExtensionCount))drv_i915_wire_read_u32(r);
@@ -520,7 +520,7 @@ static void i915_vkc_dec_VkInstanceCreateInfo(struct i915_wire_reader *r, struct
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, sizeof(char *));
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ const char *v = i915_vkc_read_string(r, a); memcpy((char *)mem + index * sizeof(char *), &v, sizeof(v)); }
+			{ const char *v = i915_vkc_read_string(r, a); kern_memcpy((char *)mem + index * sizeof(char *), &v, sizeof(v)); }
 		record->ppEnabledExtensionNames = mem;
 	}
 }
@@ -1082,7 +1082,7 @@ static void i915_vkc_dec_VkDeviceQueueCreateInfo(struct i915_wire_reader *r, str
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, 4);
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ uint32_t v = drv_i915_wire_read_u32(r); memcpy((char *)mem + index * 4u, &v, 4u); }
+			{ uint32_t v = drv_i915_wire_read_u32(r); kern_memcpy((char *)mem + index * 4u, &v, 4u); }
 		record->pQueuePriorities = mem;
 	}
 }
@@ -1112,7 +1112,7 @@ static void i915_vkc_dec_VkDeviceCreateInfo(struct i915_wire_reader *r, struct i
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, sizeof(char *));
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ const char *v = i915_vkc_read_string(r, a); memcpy((char *)mem + index * sizeof(char *), &v, sizeof(v)); }
+			{ const char *v = i915_vkc_read_string(r, a); kern_memcpy((char *)mem + index * sizeof(char *), &v, sizeof(v)); }
 		record->ppEnabledLayerNames = mem;
 	}
 	record->enabledExtensionCount = (__typeof__(record->enabledExtensionCount))drv_i915_wire_read_u32(r);
@@ -1121,7 +1121,7 @@ static void i915_vkc_dec_VkDeviceCreateInfo(struct i915_wire_reader *r, struct i
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, sizeof(char *));
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ const char *v = i915_vkc_read_string(r, a); memcpy((char *)mem + index * sizeof(char *), &v, sizeof(v)); }
+			{ const char *v = i915_vkc_read_string(r, a); kern_memcpy((char *)mem + index * sizeof(char *), &v, sizeof(v)); }
 		record->ppEnabledExtensionNames = mem;
 	}
 	count = drv_i915_wire_read_u64(r);
@@ -1200,7 +1200,7 @@ static void i915_vkc_dec_VkSubmitInfo(struct i915_wire_reader *r, struct i915_wi
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, 8);
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ uint64_t v = drv_i915_wire_read_u64(r); memcpy((char *)mem + index * 8u, &v, 8u); }
+			{ uint64_t v = drv_i915_wire_read_u64(r); kern_memcpy((char *)mem + index * 8u, &v, 8u); }
 		record->pWaitSemaphores = mem;
 	}
 	count = drv_i915_wire_read_u64(r);
@@ -1208,7 +1208,7 @@ static void i915_vkc_dec_VkSubmitInfo(struct i915_wire_reader *r, struct i915_wi
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, 4);
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ uint32_t v = drv_i915_wire_read_u32(r); memcpy((char *)mem + index * 4u, &v, 4u); }
+			{ uint32_t v = drv_i915_wire_read_u32(r); kern_memcpy((char *)mem + index * 4u, &v, 4u); }
 		record->pWaitDstStageMask = mem;
 	}
 	record->commandBufferCount = (__typeof__(record->commandBufferCount))drv_i915_wire_read_u32(r);
@@ -1217,7 +1217,7 @@ static void i915_vkc_dec_VkSubmitInfo(struct i915_wire_reader *r, struct i915_wi
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, 8);
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ uint64_t v = drv_i915_wire_read_u64(r); memcpy((char *)mem + index * 8u, &v, 8u); }
+			{ uint64_t v = drv_i915_wire_read_u64(r); kern_memcpy((char *)mem + index * 8u, &v, 8u); }
 		record->pCommandBuffers = mem;
 	}
 	record->signalSemaphoreCount = (__typeof__(record->signalSemaphoreCount))drv_i915_wire_read_u32(r);
@@ -1226,7 +1226,7 @@ static void i915_vkc_dec_VkSubmitInfo(struct i915_wire_reader *r, struct i915_wi
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, 8);
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ uint64_t v = drv_i915_wire_read_u64(r); memcpy((char *)mem + index * 8u, &v, 8u); }
+			{ uint64_t v = drv_i915_wire_read_u64(r); kern_memcpy((char *)mem + index * 8u, &v, 8u); }
 		record->pSignalSemaphores = mem;
 	}
 }
@@ -1401,7 +1401,7 @@ static void i915_vkc_dec_VkBindSparseInfo(struct i915_wire_reader *r, struct i91
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, 8);
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ uint64_t v = drv_i915_wire_read_u64(r); memcpy((char *)mem + index * 8u, &v, 8u); }
+			{ uint64_t v = drv_i915_wire_read_u64(r); kern_memcpy((char *)mem + index * 8u, &v, 8u); }
 		record->pWaitSemaphores = mem;
 	}
 	record->bufferBindCount = (__typeof__(record->bufferBindCount))drv_i915_wire_read_u32(r);
@@ -1437,7 +1437,7 @@ static void i915_vkc_dec_VkBindSparseInfo(struct i915_wire_reader *r, struct i91
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, 8);
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ uint64_t v = drv_i915_wire_read_u64(r); memcpy((char *)mem + index * 8u, &v, 8u); }
+			{ uint64_t v = drv_i915_wire_read_u64(r); kern_memcpy((char *)mem + index * 8u, &v, 8u); }
 		record->pSignalSemaphores = mem;
 	}
 }
@@ -1558,7 +1558,7 @@ static void i915_vkc_dec_VkBufferCreateInfo(struct i915_wire_reader *r, struct i
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, 4);
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ uint32_t v = drv_i915_wire_read_u32(r); memcpy((char *)mem + index * 4u, &v, 4u); }
+			{ uint32_t v = drv_i915_wire_read_u32(r); kern_memcpy((char *)mem + index * 4u, &v, 4u); }
 		record->pQueueFamilyIndices = mem;
 	}
 }
@@ -1604,7 +1604,7 @@ static void i915_vkc_dec_VkImageCreateInfo(struct i915_wire_reader *r, struct i9
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, 4);
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ uint32_t v = drv_i915_wire_read_u32(r); memcpy((char *)mem + index * 4u, &v, 4u); }
+			{ uint32_t v = drv_i915_wire_read_u32(r); kern_memcpy((char *)mem + index * 4u, &v, 4u); }
 		record->pQueueFamilyIndices = mem;
 	}
 	record->initialLayout = (__typeof__(record->initialLayout))drv_i915_wire_read_u32(r);
@@ -1691,7 +1691,7 @@ static void i915_vkc_dec_VkShaderModuleCreateInfo(struct i915_wire_reader *r, st
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, 4);
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ uint32_t v = drv_i915_wire_read_u32(r); memcpy((char *)mem + index * 4u, &v, 4u); }
+			{ uint32_t v = drv_i915_wire_read_u32(r); kern_memcpy((char *)mem + index * 4u, &v, 4u); }
 		record->pCode = mem;
 	}
 }
@@ -2002,7 +2002,7 @@ static void i915_vkc_dec_VkPipelineMultisampleStateCreateInfo(struct i915_wire_r
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, 4);
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ uint32_t v = drv_i915_wire_read_u32(r); memcpy((char *)mem + index * 4u, &v, 4u); }
+			{ uint32_t v = drv_i915_wire_read_u32(r); kern_memcpy((char *)mem + index * 4u, &v, 4u); }
 		record->pSampleMask = mem;
 	}
 	record->alphaToCoverageEnable = (__typeof__(record->alphaToCoverageEnable))drv_i915_wire_read_u32(r);
@@ -2133,7 +2133,7 @@ static void i915_vkc_dec_VkPipelineDynamicStateCreateInfo(struct i915_wire_reade
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, 4);
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ uint32_t v = drv_i915_wire_read_u32(r); memcpy((char *)mem + index * 4u, &v, 4u); }
+			{ uint32_t v = drv_i915_wire_read_u32(r); kern_memcpy((char *)mem + index * 4u, &v, 4u); }
 		record->pDynamicStates = mem;
 	}
 }
@@ -2175,7 +2175,7 @@ static void i915_vkc_dec_VkPipelineLayoutCreateInfo(struct i915_wire_reader *r, 
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, 8);
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ uint64_t v = drv_i915_wire_read_u64(r); memcpy((char *)mem + index * 8u, &v, 8u); }
+			{ uint64_t v = drv_i915_wire_read_u64(r); kern_memcpy((char *)mem + index * 8u, &v, 8u); }
 		record->pSetLayouts = mem;
 	}
 	record->pushConstantRangeCount = (__typeof__(record->pushConstantRangeCount))drv_i915_wire_read_u32(r);
@@ -2303,7 +2303,7 @@ static void i915_vkc_dec_VkDescriptorSetAllocateInfo(struct i915_wire_reader *r,
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, 8);
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ uint64_t v = drv_i915_wire_read_u64(r); memcpy((char *)mem + index * 8u, &v, 8u); }
+			{ uint64_t v = drv_i915_wire_read_u64(r); kern_memcpy((char *)mem + index * 8u, &v, 8u); }
 		record->pSetLayouts = mem;
 	}
 }
@@ -2324,7 +2324,7 @@ static void i915_vkc_dec_VkDescriptorSetLayoutBinding(struct i915_wire_reader *r
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, 8);
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ uint64_t v = drv_i915_wire_read_u64(r); memcpy((char *)mem + index * 8u, &v, 8u); }
+			{ uint64_t v = drv_i915_wire_read_u64(r); kern_memcpy((char *)mem + index * 8u, &v, 8u); }
 		record->pImmutableSamplers = mem;
 	}
 }
@@ -2419,7 +2419,7 @@ static void i915_vkc_dec_VkFramebufferCreateInfo(struct i915_wire_reader *r, str
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, 8);
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ uint64_t v = drv_i915_wire_read_u64(r); memcpy((char *)mem + index * 8u, &v, 8u); }
+			{ uint64_t v = drv_i915_wire_read_u64(r); kern_memcpy((char *)mem + index * 8u, &v, 8u); }
 		record->pAttachments = mem;
 	}
 	record->width = (__typeof__(record->width))drv_i915_wire_read_u32(r);
@@ -2476,7 +2476,7 @@ static void i915_vkc_dec_VkSubpassDescription(struct i915_wire_reader *r, struct
 	if (count != 0) {
 		void *mem = i915_vkc_array(r, a, count, 4);
 		for (index = 0; mem != NULL && index < count && r->error == 0; index++)
-			{ uint32_t v = drv_i915_wire_read_u32(r); memcpy((char *)mem + index * 4u, &v, 4u); }
+			{ uint32_t v = drv_i915_wire_read_u32(r); kern_memcpy((char *)mem + index * 4u, &v, 4u); }
 		record->pPreserveAttachments = mem;
 	}
 }

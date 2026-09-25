@@ -6,7 +6,7 @@
  */
 
 /*
- * Maintained declaration metadata, see libc/include/vulkan/API-PROVENANCE.md.
+ * Maintained declaration metadata, see include/libc/vulkan/API-PROVENANCE.md.
  */
 
 	{"vkCreateInstance", (PFN_vkVoidFunction)vkCreateInstance, VULKAN_ENTRY_GLOBAL, 0},

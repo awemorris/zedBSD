@@ -13,8 +13,8 @@ extern "C" {
 #endif
 
 #include <stdint.h>
-#include <sys/ioctl.h>
-#include <sys/time.h>
+#include <uapi/ioctl.h>
+#include <uapi/time.h>
 
 #define KERN_EV_VERSION		0x010001
 #define EV_VERSION		KERN_EV_VERSION

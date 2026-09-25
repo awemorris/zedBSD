@@ -1,0 +1,13 @@
+=== audiod-capture
+serial: logged in
+NAME        STATUS    ENABLED   PID
+audiod      running   yes       5
+
+TYPE        daemon
+COMMAND     /sbin/audiod
+RESTART     on-failure
+AFTER       syslogd
+REQUIRES    -
+AUDIODTEST CAPTURE frames=48128 ms=1015 overruns=0
+AUDIODTEST CAPTURE frames=144384 ms=2968 overruns=0
+guest-status=0

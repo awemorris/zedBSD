@@ -14,8 +14,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/stat.h>
-#include <sys/types.h>
+#include <uapi/stat.h>
+#include <uapi/types.h>
 #include <kern/atomic.h>
 #include <kern/io-error.h>
 #include <kern/lock.h>

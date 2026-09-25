@@ -6,13 +6,13 @@ CC ?= cc
 OBJCOPY ?= objcopy
 
 CPPFLAGS := -DKERN_USER_ABI_LP64 -I$(REPO)/include \
-	-I$(REPO)/include/uapi -I$(REPO)/src -I$(REPO)/libc/include -I$(REPO)
+	-I$(REPO)/include/uapi -I$(REPO)/src -I$(REPO)/include/libc -DKERN_UAPI_NATIVE -I$(REPO)
 BASE_CFLAGS := -std=c11 -O0 -Wall -Wextra -Werror -ffunction-sections \
 	-fdata-sections
 CFLAGS := $(BASE_CFLAGS) $(CFLAGS_EXTRA)
 PRODUCTION_CFLAGS_EXTRA ?= $(CFLAGS_EXTRA)
 PRODUCTION_CFLAGS := $(BASE_CFLAGS) $(PRODUCTION_CFLAGS_EXTRA)
-LDFLAGS := -Wl,--gc-sections $(LDFLAGS_EXTRA) $(REPO)/src/kern/io-stats.c
+LDFLAGS := -Wl,--gc-sections $(LDFLAGS_EXTRA)
 TEST := $(REPO)/plan/ws001/tests/directory-fsync-host-test.c
 SELF := $(lastword $(MAKEFILE_LIST))
 
@@ -53,7 +53,7 @@ $(OUT)/vfs-test: $(TEST) $(OUT)/file.o
 
 
 
-$(OUT)/ufs.o: $(REPO)/plan/ws025/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-vfs.c $(SELF) | $(OUT)
+$(OUT)/ufs.o: $(REPO)/build/driver-fragments/src/drivers/fs/ufs/ufs-vfs.c $(SELF) | $(OUT)
 	$(CC) $(CPPFLAGS) $(PRODUCTION_CFLAGS) -c $< -o $@
 	$(OBJCOPY) --globalize-symbol=ufs_file_sync $@
 
@@ -66,12 +66,12 @@ $(OUT)/ufs-test: $(TEST)  $(OUT)/ufs.o
 
 
 
-$(OUT)/ufs-mutation.o: $(REPO)/plan/ws025/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-vfs.c $(SELF) | $(OUT)
+$(OUT)/ufs-mutation.o: $(REPO)/build/driver-fragments/src/drivers/fs/ufs/ufs-vfs.c $(SELF) | $(OUT)
 	$(CC) $(CPPFLAGS) $(PRODUCTION_CFLAGS) -c $< -o $@
 	$(OBJCOPY) --redefine-sym=dir_replace=ufs_dir_replace $@
 	$(OBJCOPY) --globalize-symbol=ufs_dir_replace $@
 
-$(OUT)/ufs-endian.o: $(REPO)/plan/ws025/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-endian.c $(SELF) | $(OUT)
+$(OUT)/ufs-endian.o: $(REPO)/build/driver-fragments/src/drivers/fs/ufs/ufs-endian.c $(SELF) | $(OUT)
 	$(CC) $(CPPFLAGS) $(PRODUCTION_CFLAGS) -c $< -o $@
 
 $(OUT)/ufs-mutation-test: $(TEST) $(OUT)/ufs-mutation.o \

@@ -1,0 +1,2 @@
+GPU fence: fd rollback, device/owner validation, submit rejection, native-result boundary, consume race and producer exit PASS
+GPU fence: fd rollback, device/owner validation, submit rejection, native-result boundary, consume race and producer exit PASS

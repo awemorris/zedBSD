@@ -72,6 +72,7 @@
 #include "ddi.h"
 #include "dp.h"
 #include "edid.h"
+#include <kern/kcrt.h>
 
 static void i915_reduce_m_n_ratio(u32 *num, u32 *den);
 static void i915_compute_m_n(u32 *ret_m, u32 *ret_n, u32 m, u32 n, u32 constant_n);
@@ -769,9 +770,9 @@ drv_i915_display_emit_transcoder(
 	i915 = &world->i915_display_emit_transcoder_i915;
 
 	/* Starts every object from zero. */
-	memset(i915, 0, sizeof(*i915));
-	memset(&crtc, 0, sizeof(crtc));
-	memset(&crtc_state, 0, sizeof(crtc_state));
+	kern_memset(i915, 0, sizeof(*i915));
+	kern_memset(&crtc, 0, sizeof(crtc));
+	kern_memset(&crtc_state, 0, sizeof(crtc_state));
 
 	/* The device writes through the caller's backend. */
 	i915->emit = emit;
@@ -830,9 +831,9 @@ drv_i915_display_emit_cpu_transcoder(
 	crtc_state = &world->i915_display_emit_cpu_transcoder_crtc_state;
 
 	/* Starts every object from zero. */
-	memset(i915, 0, sizeof(*i915));
-	memset(&crtc, 0, sizeof(crtc));
-	memset(crtc_state, 0, sizeof(*crtc_state));
+	kern_memset(i915, 0, sizeof(*i915));
+	kern_memset(&crtc, 0, sizeof(crtc));
+	kern_memset(crtc_state, 0, sizeof(*crtc_state));
 
 	/* The device writes through the caller's backend. */
 	i915->emit = emit;
@@ -944,7 +945,7 @@ drv_i915_crtc_state_reset(
 	struct intel_crtc *crtc)
 {
 	/* Clears the state and links it to the crtc. */
-	memset(crtc_state, 0, sizeof(*crtc_state));
+	kern_memset(crtc_state, 0, sizeof(*crtc_state));
 	__drm_atomic_helper_crtc_state_reset(&crtc_state->uapi, &crtc->base);
 
 	/* No transcoder, no workaround pipe, no scaler, no link bpp limit. */

@@ -42,6 +42,7 @@
 #include "modeset.h"
 #include "present.h"
 #include "scanout.h"
+#include <kern/kcrt.h>
 
 #include "../i915.h"
 #include "../memory.h"
@@ -49,17 +50,16 @@
 #include "../worker.h"
 #include "../render/blit.h"
 
-#include <drivers/gpu.h>
-#include <drivers/gpu-display.h>
+#include <drivers/gpu/gpu.h>
+#include <drivers/gpu/gpu-display.h>
 #include <kern/clock.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
 #include <kern/pmem.h>
 #include <kern/sched.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 /* The one display of the node and its generation. */
 #define I915_PRESENT_DISPLAY_ID		1U
@@ -126,7 +126,7 @@ drv_i915_present(
 	int error;
 
 	/* Describes the frame. */
-	memset(&item, 0, sizeof(item));
+	kern_memset(&item, 0, sizeof(item));
 	item.pixels = pixels;
 	item.width = width;
 	item.height = height;
@@ -154,7 +154,7 @@ drv_i915_present_release(
 	int error;
 
 	/* A release carries no frame. */
-	memset(&item, 0, sizeof(item));
+	kern_memset(&item, 0, sizeof(item));
 
 	/* Hands it to the worker and waits. */
 	error = drv_i915_worker_sync_display(device, I915_WORKER_SYNC_RELEASE, &item);
@@ -795,7 +795,7 @@ i915_present_shared(
 	storage = object;
 
 	/* The frame as the GPU and the CPU see it. */
-	memset(&blit, 0, sizeof(blit));
+	kern_memset(&blit, 0, sizeof(blit));
 	blit.vk = owner->vk;
 	blit.src.va = 0U;
 	if (storage->va != 0U)
@@ -823,7 +823,7 @@ i915_present_shared(
 	 * in its render context, and arms the flip.  A presentation that waits
 	 * for its flip (FIFO) waits here, outside the worker.
 	 */
-	memset(&item, 0, sizeof(item));
+	kern_memset(&item, 0, sizeof(item));
 	item.context = &owner->contexts[I915_ENGINE_RCS0];
 	item.vm = owner->vm;
 	item.build = i915_present_blit_build;
@@ -1019,7 +1019,7 @@ i915_present_flip(
 	 * thread once the worker has handed the item back, so the worker can run
 	 * the next frame's rendering meanwhile.
 	 */
-	memset(&result, 0, sizeof(result));
+	kern_memset(&result, 0, sizeof(result));
 	start = drv_i915_perf_now();
 	expected = I915_LCD_FLIP_ARMED;
 	error = drv_i915_lcd_modeset_flip_nowait(display, (uint32_t)to->surf, &result);

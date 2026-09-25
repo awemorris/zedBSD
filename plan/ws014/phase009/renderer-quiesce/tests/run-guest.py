@@ -38,7 +38,7 @@ def main():
             shutil.copyfile(selected if selected.exists() else path, target / path.name)
     names = ["plan/ws014/tests/venus-transport.c", "plan/ws014/tests/venus-transport-peer.inc",
              "plan/ws014/tests/venus-backend.c", "plan/ws014/tests/venus-backend-linked.c",
-             "plan/ws030/tests/venus-console.c"]
+             "plan/tools/venus-console.c"]
     for name in names:
         destination = overlay / name
         destination.parent.mkdir(parents=True, exist_ok=True)

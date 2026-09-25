@@ -20,10 +20,10 @@
 #include "kern/process.h"
 #include "kern/posix-acl.h"
 #include "kern/thread.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
-#include <unistd.h>
+#include <uapi/errno.h>
+#include <uapi/unistd.h>
 
 extern unsigned long spin_lock_irqsave(struct spinlock *) __attribute__((weak));
 extern void spin_unlock_irqrestore(struct spinlock *, unsigned long) __attribute__((weak));
@@ -64,7 +64,7 @@ cred_copy(
 	/* Copies every field, then resets the reference count. */
 	cred = kern_calloc(1, sizeof(*cred));
 	if (cred != NULL) {
-		memcpy(cred, source, sizeof(*cred));
+		kern_memcpy(cred, source, sizeof(*cred));
 		refcount_init(&cred->refs, 1);
 	}
 
@@ -589,9 +589,9 @@ vfs_listxattr(
 		}
 
 		length++;
-		if (length > 6 && memcmp(all + offset, "user.", 5) == 0) {
+		if (length > 6 && kern_memcmp(all + offset, "user.", 5) == 0) {
 			if (list != NULL && visible + length <= size)
-				memcpy(list + visible, all + offset, length);
+				kern_memcpy(list + visible, all + offset, length);
 			visible += length;
 		}
 
@@ -653,11 +653,11 @@ xattr_namespace_access(
 	 * including for uid 0.  The UFS control path calls its backend
 	 * directly.
 	 */
-	if (strcmp(name, "system.zedbsd.quota") == 0)
+	if (kern_strcmp(name, "system.zedbsd.quota") == 0)
 		return EPERM;
 
 	/* The user namespace follows the file's own permissions. */
-	if (strncmp(name, "user.", 5) == 0 && name[5] != '\0') {
+	if (kern_strncmp(name, "user.", 5) == 0 && name[5] != '\0') {
 		if (write_access)
 			requested = W_OK;
 		else
@@ -667,8 +667,8 @@ xattr_namespace_access(
 	}
 
 	/* The system and security namespaces are for the superuser. */
-	if ((strncmp(name, "system.", 7) == 0 && name[7] != '\0') ||
-	    (strncmp(name, "security.", 9) == 0 && name[9] != '\0')) {
+	if ((kern_strncmp(name, "system.", 7) == 0 && name[7] != '\0') ||
+	    (kern_strncmp(name, "security.", 9) == 0 && name[9] != '\0')) {
 		if (cred_is_superuser(cred))
 			return 0;
 		return EPERM;

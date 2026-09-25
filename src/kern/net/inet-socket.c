@@ -23,14 +23,14 @@
 #include "kern/cred.h"
 #include "kern/uaccess.h"
 #include "internal.h"
+#include <kern/kcrt.h>
 
 #include <uapi/netif.h>
 #include <uapi/netinet.h>
 #include <uapi/route.h>
 #include <uapi/wlan.h>
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdbool.h>
-#include <string.h>
 
 #define INET_IOCTL_DIRECTION_MASK KERN_IOC_INOUT
 #define INET_IOCTL_SIZE_MASK (0x1fffUL << 16)
@@ -168,7 +168,7 @@ inet_socket_object_init(
 	int protocol,
 	const struct socket_ops *ops)
 {
-	memset(inet, 0, sizeof(*inet));
+	kern_memset(inet, 0, sizeof(*inet));
 	socket_init_object(&inet->socket, AF_INET, type, protocol, ops);
 }
 
@@ -363,8 +363,8 @@ inet_socket_setsockopt(
 	/* Takes a terminated interface name. */
 	if (value == NULL || length == 0 || length > sizeof(name))
 		return EINVAL;
-	memset(name, 0, sizeof(name));
-	memcpy(name, value, length);
+	kern_memset(name, 0, sizeof(name));
+	kern_memcpy(name, value, length);
 	if (name[length - 1U] != '\0')
 		return EINVAL;
 
@@ -408,7 +408,7 @@ inet_socket_getsockopt(
 	/* An unbound socket reports an empty name. */
 	device = net_device_find_by_index_ref(inet->ifindex);
 	if (device != NULL)
-		required = strlen(device->name) + 1U;
+		required = kern_strlen(device->name) + 1U;
 	else
 		required = 1U;
 	if (*length < required) {
@@ -417,9 +417,9 @@ inet_socket_getsockopt(
 	}
 
 	/* Copies the terminated name. */
-	memset(value, 0, required);
+	kern_memset(value, 0, required);
 	if (device != NULL)
-		memcpy(value, device->name, required);
+		kern_memcpy(value, device->name, required);
 	net_device_release(device);
 	*length = (socklen_t)required;
 
@@ -490,9 +490,9 @@ inet_socket_ioctl(
 		    net_device_find_by_index_ref((unsigned)request.ifr_ifindex);
 		if (device == NULL)
 			return ENODEV;
-		memset(request.ifr_name, 0, sizeof(request.ifr_name));
-		memcpy(request.ifr_name, device->name,
-		       strnlen(device->name, sizeof(request.ifr_name) - 1U));
+		kern_memset(request.ifr_name, 0, sizeof(request.ifr_name));
+		kern_memcpy(request.ifr_name, device->name,
+		       kern_strnlen(device->name, sizeof(request.ifr_name) - 1U));
 		error = copyout(&request, argument, sizeof(request));
 		net_device_release(device);
 		return error;
@@ -538,14 +538,14 @@ inet_socket_ioctl(
 		net_device_release(device);
 		return 0;
 	case SIOCGIFHWADDR:
-		memset(request.ifr_hwaddr, 0, sizeof(request.ifr_hwaddr));
-		memcpy(request.ifr_hwaddr, device->hwaddr, device->hwaddr_len);
+		kern_memset(request.ifr_hwaddr, 0, sizeof(request.ifr_hwaddr));
+		kern_memcpy(request.ifr_hwaddr, device->hwaddr, device->hwaddr_len);
 		break;
 	case SIOCGIFMTU:
 		request.ifr_mtu = (int)device->mtu;
 		break;
 	case SIOCGIFSTATS:
-		memset(&request.ifr_data, 0, sizeof(request.ifr_data));
+		kern_memset(&request.ifr_data, 0, sizeof(request.ifr_data));
 		request.ifr_data.ifi_mtu = device->mtu;
 		request.ifr_data.ifi_ipackets = device->rx_packets;
 		request.ifr_data.ifi_ibytes = device->rx_bytes;
@@ -668,7 +668,7 @@ inet_socket_init(
 			references[count++] = interfaces[index].device;
 	}
 
-	memset(interfaces, 0, sizeof(interfaces));
+	kern_memset(interfaces, 0, sizeof(interfaces));
 	interface_unlock(enabled);
 	for (index = 0; index < count; index++)
 		net_device_release(references[index]);
@@ -707,7 +707,7 @@ inet_interface_purge_device(
 	for (index = 0; index < NET_DEVICE_MAX; index++) {
 		if (interfaces[index].device == device) {
 			references[count++] = interfaces[index].device;
-			memset(&interfaces[index], 0,
+			kern_memset(&interfaces[index], 0,
 			       sizeof(interfaces[index]));
 		}
 	}
@@ -821,13 +821,13 @@ interface_ensure(
 	 * values left by a removed interface cannot alias a reconnected
 	 * device.
 	 */
-	memset(&interfaces[free_index], 0, sizeof(interfaces[free_index]));
+	kern_memset(&interfaces[free_index], 0, sizeof(interfaces[free_index]));
 	interfaces[free_index].device = device;
 
 	/* A device that died meanwhile gets its slot and reference back. */
 	if (!net_device_is_live(device)) {
 		release_device = interfaces[free_index].device;
-		memset(&interfaces[free_index], 0,
+		kern_memset(&interfaces[free_index], 0,
 		       sizeof(interfaces[free_index]));
 		error = ENODEV;
 	}
@@ -883,7 +883,7 @@ inet_socket_name(
 		return ENOTCONN;
 
 	/* Builds the address in network order. */
-	memset(&output, 0, sizeof(output));
+	kern_memset(&output, 0, sizeof(output));
 	output.sin_family = AF_INET;
 	if (peer) {
 		output.sin_addr.s_addr = net_htonl(inet->remote_address);
@@ -898,7 +898,7 @@ inet_socket_name(
 		copied = *length;
 	else
 		copied = sizeof(output);
-	memcpy(address, &output, copied);
+	kern_memcpy(address, &output, copied);
 	*length = sizeof(output);
 
 	/* Reports the copied address. */
@@ -940,7 +940,7 @@ set_ifreq_address(
 	struct sockaddr_in *output;
 
 	output = (struct sockaddr_in *)&request->ifr_addr;
-	memset(&request->ifr_addr, 0, sizeof(request->ifr_addr));
+	kern_memset(&request->ifr_addr, 0, sizeof(request->ifr_addr));
 	output->sin_family = AF_INET;
 	output->sin_addr.s_addr = net_htonl(address);
 }
@@ -985,9 +985,9 @@ inet_ioctl_ifconf(
 		device = net_device_at_ref(index);
 		if (device == NULL)
 			break;
-		memset(&request, 0, sizeof(request));
-		memcpy(request.ifr_name, device->name,
-		       strnlen(device->name, sizeof(request.ifr_name) - 1U));
+		kern_memset(&request, 0, sizeof(request));
+		kern_memcpy(request.ifr_name, device->name,
+		       kern_strnlen(device->name, sizeof(request.ifr_name) - 1U));
 		request.ifr_ifindex = (int)device->ifindex;
 		error = copyout(&request, (uintptr_t)configuration.ifc_buf + copied,
 			    sizeof(request));
@@ -1174,7 +1174,7 @@ inet_ioctl_wlan_validate(
 	    header->version != WLAN_ABI_VERSION ||
 	    header->size != size ||
 	    header->ifr_name[0] == '\0' ||
-	    memchr(header->ifr_name, '\0', sizeof(header->ifr_name)) == NULL)
+	    kern_memchr(header->ifr_name, '\0', sizeof(header->ifr_name)) == NULL)
 		return EINVAL;
 
 	/* Reports a valid header. */
@@ -1199,7 +1199,7 @@ inet_ioctl_wlan(
 	query = false;
 
 	/* Classifies the command; changes need the superuser. */
-	memset(&request, 0, sizeof(request));
+	kern_memset(&request, 0, sizeof(request));
 	error = inet_ioctl_wlan_classify(command, &size, &query);
 	if (error != 0)
 		goto out;

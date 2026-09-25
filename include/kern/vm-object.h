@@ -21,7 +21,7 @@
 #include <kern/waitq.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/types.h>
+#include <uapi/types.h>
 
 struct file;
 struct inode;
@@ -42,6 +42,7 @@ struct writeback_ticket;
 #define VM_OBJECT_CONTENT	0x00000008U
 #define VM_OBJECT_ANONYMOUS	0x00000010U
 #define VM_OBJECT_CACHE_REFERENCE	0x00000020U
+#define VM_OBJECT_REGISTERED	0x00000040U
 
 /* Caller-owned speculative fill; zero-initialize and never copy a live token.
  * Request whole pages; prepare clips the final page only at authoritative EOF. */
@@ -110,6 +111,12 @@ struct vm_object_page {
 
 struct vm_object {
 	uint64_t registry_generation;
+
+	/*
+	 * When the object was last admitted or referenced, as a count under
+	 * the registry lock; the cache evicts the idle object with the lowest.
+	 */
+	uint64_t last_use;
 	/*
 	 * One registry reference plus one reference for every mapped region.
 	 */
@@ -174,7 +181,13 @@ struct vm_object {
 	struct vm_object_page *orphan_pages;
 
 	int writeback_error;
+
+	/* The registry list: the next and previous published objects. */
 	struct vm_object *next;
+	struct vm_object *previous;
+
+	/* The next object in the same inode hash bucket of the registry. */
+	struct vm_object *hash_next;
 };
 
 /*
@@ -283,6 +296,12 @@ vm_object_page_pin_write(
 	size_t offset,
 	const void *buffer,
 	size_t length);
+
+int
+vm_object_fault_resident(
+	struct vm_object *object,
+	off_t offset,
+	struct vm_object_page **result);
 
 void
 vm_object_fault_release(

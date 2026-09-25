@@ -18,14 +18,15 @@
 #include <kern/lock.h>
 #include <kern/page.h>
 #include <hal/hal.h>
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 #include <kern/io-scratch.h>
 #include <kern/io-pool.h>
+#include <kern/kcrt.h>
+#include <kern/vm-reclaim.h>
 
 #define CACHE_RECLAIM_BATCH (64U * 1024U)
-#define CACHE_RESERVE_MIN (64U * 1024U)
-#define CACHE_RESERVE_MAX (8U * 1024U * 1024U)
+#define CACHE_RESERVE_MIN (1024U * 1024U)
+#define CACHE_RESERVE_MAX (64U * 1024U * 1024U)
 #define WORKER_BYTES (KERN_IO_BATCH_MAX + KERN_PAGE_SIZE)
 
 static struct cache_memory_stats accounting;
@@ -64,7 +65,7 @@ cache_memory_policy(
 		floor = managed / 4U;
 	floor &= ~(uint64_t)(KERN_PAGE_SIZE - 1U);
 	*reserve = floor;
-	*target = (managed / 4U) & ~(uint64_t)(KERN_PAGE_SIZE - 1U);
+	*target = (managed / 2U) & ~(uint64_t)(KERN_PAGE_SIZE - 1U);
 }
 
 /*
@@ -118,12 +119,16 @@ cache_memory_reserve(
 	bool enabled;
 	int refused;
 
-	/* Validates category and samples physical availability without global locks. */
+	/*
+	 * Validates the category and samples physical availability.  An
+	 * optional reservation uses the VM's free-memory estimate, which is
+	 * exact near the reserve and otherwise spares the allocator lock.
+	 */
 	cache_validate(kind);
-	memset(&memory, 0, sizeof(memory));
+	kern_memset(&memory, 0, sizeof(memory));
 
 	if (optional)
-		hal_get_memstat(&memory);
+		memory.physical_free = vm_free_bytes_estimate();
 
 	enabled = cache_lock();
 	current = accounting.resident_bytes + accounting.pending_bytes;
@@ -361,7 +366,7 @@ cache_memory_get_stats(
 		return;
 
 	enabled = cache_lock();
-	memcpy(stats, &accounting, sizeof(*stats));
+	kern_memcpy(stats, &accounting, sizeof(*stats));
 	cache_unlock(enabled);
 
 	/* Avoids acquiring the physical allocator under cache accounting ownership. */
@@ -389,7 +394,7 @@ cache_worker_init(
 		return EBUSY;
 
 	/* Allocates the region, releasing a short allocation before reporting it. */
-	memset(&memory, 0, sizeof(memory));
+	kern_memset(&memory, 0, sizeof(memory));
 	error = io_scratch_alloc(WORKER_BYTES, &memory);
 	if (error != HAL_OK || memory.vaddr == NULL || memory.size < WORKER_BYTES) {
 		if (memory.size != 0 && io_scratch_free(&memory) != HAL_OK)
@@ -428,7 +433,7 @@ cache_worker_borrow(
 	/* Refuses absent or busy storage without exposing a partial reservation. */
 	if (buffer == NULL)
 		return EINVAL;
-	memset(buffer, 0, sizeof(*buffer));
+	kern_memset(buffer, 0, sizeof(*buffer));
 	expected = 1;
 	if (!atomic_compare_exchange(&worker_state, &expected, 2))
 		return EAGAIN;
@@ -458,7 +463,7 @@ cache_worker_release(
 		HAL_FATAL("invalid cache worker reservation return");
 
 	/* Clears the loan and publishes the reserve as idle again. */
-	memset(buffer, 0, sizeof(*buffer));
+	kern_memset(buffer, 0, sizeof(*buffer));
 	expected = 2;
 	if (!atomic_compare_exchange(&worker_state, &expected, 1))
 		HAL_FATAL("cache worker reservation returned twice");

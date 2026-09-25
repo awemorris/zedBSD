@@ -9,7 +9,7 @@ M68K_OBJCOPY ?= m68k-linux-gnu-objcopy
 X68K_PLATFORM := platform/x68k
 
 M68K_CPPFLAGS := -nostdinc -Iinclude -Isrc -I. \
-	-Ilibc/include -Isrc/hal/m68k -DHAL_ARCH_M68K -DHAL_BOARD_X68K \
+	-Iinclude/libc -Isrc/hal/m68k -DHAL_ARCH_M68K -DHAL_BOARD_X68K \
 	-DKERN_USER_ABI_M68K -DKERN_PAGE_SIZE=4096 \
 	-DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT \
 	-DKERN_INIT_PATH='"/x68k/bin/sh"'
@@ -22,7 +22,7 @@ M68K_USER_CFLAGS := -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie \
 	-fno-builtin -fno-common -ffunction-sections -fdata-sections \
 	-Os -Wall -Wextra -Werror
 M68K_USER_CPPFLAGS := -nostdinc -Iinclude -Isrc -I. \
-	-Ilibc/include -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K \
+	-Iinclude/libc -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K \
 	-DKERN_USER_PAGE_SIZE=4096 \
 	-DKERN_NO_PRINTF_FLOAT
 
@@ -48,15 +48,15 @@ x68k-emulator-rom-host-test:
 
 X68K_CONTRACT_OBJ := $(BUILD)/src/hal/m68k/bsp-x68k/contract.o
 X68K_USER_CONTRACT_OBJ := $(BUILD)/user/userland/x68k-contract.o
-X68K_CRT0_OBJ := $(BUILD)/user/src/crt/crt0-m68k.o
+X68K_CRT0_OBJ := $(BUILD)/user/src/libc/crt/crt0-m68k.o
 X68K_USER_RUNTIME_SOURCES := \
 	userland/base/libc/posix.c userland/base/libc/static-tls.c userland/base/libc/poll.c \
 	userland/base/libc/termios.c \
 	userland/base/libc/pthread.c userland/base/libc/timer.c userland/base/libc/shm.c userland/base/libc/semaphore.c \
 	userland/base/libc/mqueue.c userland/base/libc/socket.c userland/base/libc/signal.c \
 	userland/base/libc/account.c userland/base/libc/crypt.c userland/base/libc/utmpx.c \
-	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c \
-	libc/int64.c libc/strto.c libc/format.c libc/stdio.c \
+	src/libc/heap.c src/libc/string.c src/libc/ctype.c src/libc/locale.c src/libc/wide.c \
+	src/libc/int64.c src/libc/strto.c src/libc/format.c src/libc/stdio.c \
 	$(ZEDBSD_LIBC_USER_EXTRA_SOURCES)
 X68K_USER_SH_SOURCES := $(USERLAND_sh_SOURCES)
 X68K_USER_RUNTIME_OBJS := \
@@ -200,7 +200,7 @@ $(BUILD)/kernel/%.o: %.c
 	$(M68K_CC) $(M68K_CPPFLAGS) $(M68K_KERNEL_CFLAGS) -fno-builtin \
  -fno-strict-aliasing -MMD -MP -c $< -o $@
 
-$(BUILD)/kernel/libc/%.o: libc/%.c
+$(BUILD)/kernel/libc/%.o: src/libc/%.c
 	@mkdir -p $(dir $@)
 	$(M68K_CC) $(M68K_CPPFLAGS) $(M68K_KERNEL_CFLAGS) -fno-builtin \
  -fno-isolate-erroneous-paths-dereference -fno-strict-aliasing \
@@ -243,7 +243,7 @@ $(BUILD)/user/userland/x68k-contract.o: userland/base/x68k-contract.S
 	@mkdir -p $(dir $@)
 	$(M68K_CC) $(M68K_USER_CPPFLAGS) $(M68K_USER_CFLAGS) -c $< -o $@
 
-$(X68K_CRT0_OBJ): src/crt/crt0-m68k.S include/hal/arch.h \
+$(X68K_CRT0_OBJ): src/libc/crt/crt0-m68k.S include/hal/arch.h \
 	include/hal/arch/m68030.h
 	@mkdir -p $(dir $@)
 	$(M68K_CC) $(M68K_USER_CPPFLAGS) $(M68K_USER_CFLAGS) -c $< -o $@
@@ -366,7 +366,7 @@ $(BUILD)/zedbsd-x68k.hd: $(BUILD)/stage1.bin $(BUILD)/stage2.bin \
  --kernel $(BUILD)/vmunix --shell $(BUILD)/bin/sh $@
 
 X68K_ROOTFS_FILES := --file /bin/sh=$(BUILD)/bin/sh
-$(eval $(call ZEDBSD_ROOTFS_TAR_RULE,$(BUILD)/rootfs.tar.gz,$(BUILD)/bin/sh,$(X68K_ROOTFS_FILES)))
+$(eval $(call ZEDBSD_ROOTFS_TREE_RULE,m68k,$(BUILD)/bin/sh,$(X68K_ROOTFS_FILES)))
 
 rootfs: $(BUILD)/rootfs/.stamp
 

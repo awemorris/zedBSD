@@ -23,12 +23,12 @@ sanitized="-O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -
 
 # The driver's own headers come first; the host C library is preferred over
 # the zedBSD one, which is only a fallback.
-host_headers="-DKERN_USER_ABI_LP64 -I$repo/include -I$repo/src -I$repo -idirafter $repo/libc/include"
+host_headers="-DKERN_USER_ABI_LP64 -I$repo/include -I$repo/src -I$repo -idirafter $repo/include/libc"
 
 # kern/thread.h reaches the zedBSD <sys/types.h>, which clashes with the
 # host's; the two files that need the kernel's struct thread are built
 # against the zedBSD C library headers instead.
-kernel_headers="-DKERN_USER_ABI_LP64 -I$repo/include -I$repo/src -I$repo -I$repo/libc/include"
+kernel_headers="-DKERN_USER_ABI_LP64 -I$repo/include -I$repo/src -I$repo -I$repo/include/libc -DKERN_UAPI_NATIVE"
 
 # Names the sources one contract test links, besides the shared recorder and stubs.
 sources_for() {

@@ -14,7 +14,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/types.h>
+#include <uapi/types.h>
 #include <kern/atomic.h>
 #include <kern/lock.h>
 #include <kern/waitq.h>
@@ -29,6 +29,12 @@
 /* Driver guarantees flush persistence and invalidates proofs across reset. */
 #define DISK_FLUSH_PROOF	0x00000008U
 #define DISK_FILE_BACKED	0x00000010U
+/*
+ * Writes through the buffer cache stay dirty in memory and are written by
+ * the flusher, fsync, sync or eviction rather than before the write
+ * returns.  A filesystem sets it for a write-cached mount.
+ */
+#define DISK_WRITE_CACHED	0x00000020U
 
 #define DISK_IOCTL_GET_GEOMETRY	1UL
 

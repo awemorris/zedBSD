@@ -1,0 +1,1182 @@
+[
+ {
+  "key": "bash",
+  "version": "5.3",
+  "archive": "bash-5.3.tar.gz",
+  "url": "https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz",
+  "verify_kind": "sig",
+  "size": 11355854,
+  "sha256": "0d5cd86965f869a26cf64f4b71be7b96f90a3ba8b3d74e27e8e9d9d5550f31ba",
+  "roots": [
+   "bash-5.3"
+  ],
+  "members": 1603,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz.sig",
+    "status": "good",
+    "fingerprint": "7C0135FB088AAF6C66C650B9BB5869F064EA74AB",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "coreutils",
+  "version": "9.12",
+  "archive": "coreutils-9.12.tar.xz",
+  "url": "https://ftp.gnu.org/gnu/coreutils/coreutils-9.12.tar.xz",
+  "verify_kind": "sig",
+  "size": 6704996,
+  "sha256": "a480198559733e9b3da999e90543ac6f888a2caa544d8d664c5a1f17e528e210",
+  "roots": [
+   "coreutils-9.12"
+  ],
+  "members": 3991,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://ftp.gnu.org/gnu/coreutils/coreutils-9.12.tar.xz.sig",
+    "status": "good",
+    "fingerprint": "6C37DC12121A5006BC1DB804DF6FD971306037D9",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "ca-certificates-debian",
+  "version": "20260816",
+  "archive": "ca-certificates_20260816.tar.xz",
+  "url": "https://deb.debian.org/debian/pool/main/c/ca-certificates/ca-certificates_20260816.tar.xz",
+  "verify_kind": "dsc",
+  "size": 271796,
+  "sha256": "d939bcdd0cb058712cf4175bac76997676eb8b68fe9473765e1b40fb3d5b186a",
+  "roots": [
+   "ca-certificates"
+  ],
+  "members": 57,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "debian-dsc-sha256",
+    "file": "https://deb.debian.org/debian/pool/main/c/ca-certificates/ca-certificates_20260816.dsc",
+    "status": "match"
+   },
+   {
+    "method": "openpgp-clearsigned-dsc",
+    "status": "good",
+    "fingerprint": "55781DAB34E61A09EFB88BE19DB0235556F8CFAD",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "zlib",
+  "version": "1.3.2",
+  "archive": "zlib-1.3.2.tar.xz",
+  "url": "https://zlib.net/zlib-1.3.2.tar.xz",
+  "verify_kind": "sig",
+  "size": 1320064,
+  "sha256": "d7a0654783a4da529d1bb793b7ad9c3318020af77667bcae35f95d0e42a792f3",
+  "roots": [
+   "zlib-1.3.2"
+  ],
+  "members": 291,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://zlib.net/zlib-1.3.2.tar.xz.asc",
+    "status": "good",
+    "fingerprint": "5ED46A6721D365587791E2AA783FCD8E58BCAFBA",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "expat",
+  "version": "2.8.5",
+  "archive": "expat-2.8.5.tar.xz",
+  "url": "https://github.com/libexpat/libexpat/releases/download/R_2_8_5/expat-2.8.5.tar.xz",
+  "verify_kind": "sig",
+  "size": 528380,
+  "sha256": "1e727b8933ec51a77a9a9d9afcf8e688bce45d907c13e36ab7393fe36e703182",
+  "roots": [
+   "expat-2.8.5"
+  ],
+  "members": 186,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://github.com/libexpat/libexpat/releases/download/R_2_8_5/expat-2.8.5.tar.xz.asc",
+    "status": "good",
+    "fingerprint": "CB8DE70A90CFBF6C3BF5CC5696262ACFFBD3AEC6",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "curl",
+  "version": "8.22.0",
+  "archive": "curl-8.22.0.tar.xz",
+  "url": "https://curl.se/download/curl-8.22.0.tar.xz",
+  "verify_kind": "sig",
+  "size": 2953092,
+  "sha256": "f7ef3ae8a22e521f289803fe93543eb64c329b58aa73a9e224dfd915a2a5f4f7",
+  "roots": [
+   "curl-8.22.0"
+  ],
+  "members": 4444,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://curl.se/download/curl-8.22.0.tar.xz.asc",
+    "status": "good",
+    "fingerprint": "27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "wget",
+  "version": "1.25.0",
+  "archive": "wget-1.25.0.tar.gz",
+  "url": "https://ftp.gnu.org/gnu/wget/wget-1.25.0.tar.gz",
+  "verify_kind": "sig",
+  "size": 5263736,
+  "sha256": "766e48423e79359ea31e41db9e5c289675947a7fcf2efdcedb726ac9d0da3784",
+  "roots": [
+   "wget-1.25.0"
+  ],
+  "members": 1479,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://ftp.gnu.org/gnu/wget/wget-1.25.0.tar.gz.sig",
+    "status": "good",
+    "fingerprint": "6B98F637D879C5236E277C5C64FF90AAE8C70AF9",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "git",
+  "version": "2.55.0",
+  "archive": "git-2.55.0.tar.xz",
+  "url": "https://mirrors.edge.kernel.org/pub/software/scm/git/git-2.55.0.tar.xz",
+  "verify_kind": "sha256sums-signed",
+  "size": 8177180,
+  "sha256": "457fdb04dc8728e007d4688695e6912e6f680727920f2a40bf11eacc17505357",
+  "roots": [
+   "git-2.55.0"
+  ],
+  "members": 4992,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "published-sha256-list",
+    "file": "https://mirrors.edge.kernel.org/pub/software/scm/git/sha256sums.asc",
+    "status": "match"
+   },
+   {
+    "method": "openpgp-clearsigned-list",
+    "status": "good",
+    "fingerprint": "B8868C80BA62A1FFFAF5FDA9632D3A06589DA6B1",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "emacs",
+  "version": "31.1",
+  "archive": "emacs-31.1.tar.xz",
+  "url": "https://ftp.gnu.org/gnu/emacs/emacs-31.1.tar.xz",
+  "verify_kind": "sig",
+  "size": 57977476,
+  "sha256": "1da5790d9580c81932b5bf700633114468da7b3412d69faa767daebf974f4586",
+  "roots": [
+   "emacs-31.1"
+  ],
+  "members": 7971,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://ftp.gnu.org/gnu/emacs/emacs-31.1.tar.xz.sig",
+    "status": "good",
+    "fingerprint": "9B917007AE030E36E4FC248B695B7AE4BF066240",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "vim",
+  "version": "9.2.1125",
+  "archive": "vim-9.2.1125.tar.gz",
+  "url": "https://github.com/vim/vim/archive/refs/tags/v9.2.1125.tar.gz",
+  "verify_kind": "none",
+  "size": 20194423,
+  "sha256": "6242a0916e07d38c7c25b583e69f413806b772808e95130133a23c9d46cedb32",
+  "roots": [
+   "vim-9.2.1125"
+  ],
+  "members": 8833,
+  "archive_sh_verify": "ok",
+  "checks": []
+ },
+ {
+  "key": "binutils",
+  "version": "2.47",
+  "archive": "binutils-2.47.tar.xz",
+  "url": "https://ftp.gnu.org/gnu/binutils/binutils-2.47.tar.xz",
+  "verify_kind": "sig",
+  "size": 29034716,
+  "sha256": "154ab23b60070e8f27013c22977f1129425d67d1e8acd6e13010e617811e4cff",
+  "roots": [
+   "binutils-2.47"
+  ],
+  "members": 30001,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://ftp.gnu.org/gnu/binutils/binutils-2.47.tar.xz.sig",
+    "status": "good",
+    "fingerprint": "3A24BC1E8FB409FA9F14371813FCEF89DD9E3C4F",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "gmp",
+  "version": "6.3.0",
+  "archive": "gmp-6.3.0.tar.xz",
+  "url": "https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz",
+  "verify_kind": "sig",
+  "size": 2094196,
+  "sha256": "a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898",
+  "roots": [
+   "gmp-6.3.0"
+  ],
+  "members": 2343,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz.sig",
+    "status": "good",
+    "fingerprint": "343C2FF0FBEE5EC2EDBEF399F3599FF828C67298",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "mpfr",
+  "version": "4.2.2",
+  "archive": "mpfr-4.2.2.tar.xz",
+  "url": "https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.xz",
+  "verify_kind": "sig",
+  "size": 1505596,
+  "sha256": "b67ba0383ef7e8a8563734e2e889ef5ec3c3b898a01d00fa0a6869ad81c6ce01",
+  "roots": [
+   "mpfr-4.2.2"
+  ],
+  "members": 591,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.xz.sig",
+    "status": "good",
+    "fingerprint": "A534BE3F83E241D918280AEB5831D11A0D4DB02A",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "mpc",
+  "version": "1.3.1",
+  "archive": "mpc-1.3.1.tar.gz",
+  "url": "https://ftp.gnu.org/gnu/mpc/mpc-1.3.1.tar.gz",
+  "verify_kind": "sig",
+  "size": 773573,
+  "sha256": "ab642492f5cf882b74aa0cb730cd410a81edcdbec895183ce930e706c1c759b8",
+  "roots": [
+   "mpc-1.3.1"
+  ],
+  "members": 357,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://ftp.gnu.org/gnu/mpc/mpc-1.3.1.tar.gz.sig",
+    "status": "good",
+    "fingerprint": "AD17A21EF8AED8F1CC02DBD9F7D5C9BF765C61E3",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "isl",
+  "version": "0.24",
+  "archive": "isl-0.24.tar.bz2",
+  "url": "https://gcc.gnu.org/pub/gcc/infrastructure/isl-0.24.tar.bz2",
+  "verify_kind": "none",
+  "size": 2261594,
+  "sha256": "fcf78dd9656c10eb8cf9fbd5f59a0b6b01386205fe1934b3b287a0a1898145c0",
+  "roots": [
+   "isl-0.24"
+  ],
+  "members": 1328,
+  "archive_sh_verify": "ok",
+  "checks": []
+ },
+ {
+  "key": "gcc",
+  "version": "16.2.0",
+  "archive": "gcc-16.2.0.tar.xz",
+  "url": "https://ftp.gnu.org/gnu/gcc/gcc-16.2.0/gcc-16.2.0.tar.xz",
+  "verify_kind": "sig",
+  "size": 107200820,
+  "sha256": "e6738e29597f733270731aa90600f37ffdc045079dfc27ec7e8192cc81085c3e",
+  "roots": [
+   "gcc-16.2.0"
+  ],
+  "members": 165079,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://ftp.gnu.org/gnu/gcc/gcc-16.2.0/gcc-16.2.0.tar.xz.sig",
+    "status": "good",
+    "fingerprint": "7F74F97C103468EE5D750B583AB00996FC26A641",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "gdb",
+  "version": "17.2",
+  "archive": "gdb-17.2.tar.xz",
+  "url": "https://ftp.gnu.org/gnu/gdb/gdb-17.2.tar.xz",
+  "verify_kind": "sig",
+  "size": 24658624,
+  "sha256": "1c036c0d72e4b3d1fb5c94c88632add6f9d76f4d7c4d2ea793c12a9f19a3228c",
+  "roots": [
+   "gdb-17.2"
+  ],
+  "members": 14436,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://ftp.gnu.org/gnu/gdb/gdb-17.2.tar.xz.sig",
+    "status": "good",
+    "fingerprint": "F40ADB902B24264AA42E50BF92EDB04BFF325CF3",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "meson",
+  "version": "1.12.0",
+  "archive": "meson-1.12.0.tar.gz",
+  "url": "https://github.com/mesonbuild/meson/releases/download/1.12.0/meson-1.12.0.tar.gz",
+  "verify_kind": "sig",
+  "size": 2518280,
+  "sha256": "88afe0c20e52030218924ac37d0c81c59b4b5f3ae3752c8c6d7470c7d365886c",
+  "roots": [
+   "meson-1.12.0"
+  ],
+  "members": 7175,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://github.com/mesonbuild/meson/releases/download/1.12.0/meson-1.12.0.tar.gz.asc",
+    "status": "good",
+    "fingerprint": "19E2D6D9B46D8DAA6288F877C24E631BABB1FE70",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "ninja",
+  "version": "1.13.2",
+  "archive": "ninja-1.13.2.tar.gz",
+  "url": "https://github.com/ninja-build/ninja/archive/refs/tags/v1.13.2.tar.gz",
+  "verify_kind": "none",
+  "size": 292385,
+  "sha256": "974d6b2f4eeefa25625d34da3cb36bdcebe7fbce40f4c16ac0835fd1c0cbae17",
+  "roots": [
+   "ninja-1.13.2"
+  ],
+  "members": 199,
+  "archive_sh_verify": "ok",
+  "checks": []
+ },
+ {
+  "key": "libffi",
+  "version": "3.8.0",
+  "archive": "libffi-3.8.0.tar.gz",
+  "url": "https://github.com/libffi/libffi/releases/download/v3.8.0/libffi-3.8.0.tar.gz",
+  "verify_kind": "gh-digest",
+  "size": 1581626,
+  "sha256": "7da3e2d9a171eb0a038f592ecad3ff2bb2550f3496d87b3b29ad0cf4430c0db4",
+  "roots": [
+   "libffi-3.8.0"
+  ],
+  "members": 534,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "github-release-asset-digest",
+    "published": "sha256:7da3e2d9a171eb0a038f592ecad3ff2bb2550f3496d87b3b29ad0cf4430c0db4",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "pcre2",
+  "version": "10.48",
+  "archive": "pcre2-10.48.tar.bz2",
+  "url": "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.48/pcre2-10.48.tar.bz2",
+  "verify_kind": "sig",
+  "size": 2213024,
+  "sha256": "b6c68fdf6f3ac31388b50aa89ff0fc49c00c987c16e7b5146491d12003f2c8ed",
+  "roots": [
+   "pcre2-10.48"
+  ],
+  "members": 505,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.48/pcre2-10.48.tar.bz2.sig",
+    "status": "good",
+    "fingerprint": "BACF71F10404D5761C09D392021DE40BFB63B406",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "glib",
+  "version": "2.90.0",
+  "archive": "glib-2.90.0.tar.xz",
+  "url": "https://download.gnome.org/sources/glib/2.90/glib-2.90.0.tar.xz",
+  "verify_kind": "sha256-file",
+  "size": 5830480,
+  "sha256": "17d15cac2af80a33271127408e0abc2748eb297c595c2a26409e81e14e7d1b8f",
+  "roots": [
+   "glib-2.90.0"
+  ],
+  "members": 2494,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "published-sha256",
+    "file": "https://download.gnome.org/sources/glib/2.90/glib-2.90.0.sha256sum",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "libpng",
+  "version": "1.6.58",
+  "archive": "libpng-1.6.58.tar.xz",
+  "url": "https://download.sourceforge.net/libpng/libpng-1.6.58.tar.xz",
+  "verify_kind": "none",
+  "size": 1070096,
+  "sha256": "28eb403f51f0f7405249132cecfe82ea5c0ef97f1b32c5a65828814ae0d34775",
+  "roots": [
+   "libpng-1.6.58"
+  ],
+  "members": 669,
+  "archive_sh_verify": "ok",
+  "checks": []
+ },
+ {
+  "key": "freetype",
+  "version": "2.14.3",
+  "archive": "freetype-2.14.3.tar.xz",
+  "url": "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz",
+  "verify_kind": "sig",
+  "size": 2670220,
+  "sha256": "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f",
+  "roots": [
+   "freetype-2.14.3"
+  ],
+  "members": 937,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz.sig",
+    "status": "good",
+    "fingerprint": "E30674707856409FF1948010BE6C3AAC63AD8E3F",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "harfbuzz",
+  "version": "14.5.0",
+  "archive": "harfbuzz-14.5.0.tar.xz",
+  "url": "https://github.com/harfbuzz/harfbuzz/releases/download/14.5.0/harfbuzz-14.5.0.tar.xz",
+  "verify_kind": "gh-digest",
+  "size": 20262956,
+  "sha256": "b7132e148358a45185c9feafd049dbaf243649d3c44414b3534d9c95d18592b9",
+  "roots": [
+   "harfbuzz-14.5.0"
+  ],
+  "members": 4024,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "github-release-asset-digest",
+    "published": "sha256:b7132e148358a45185c9feafd049dbaf243649d3c44414b3534d9c95d18592b9",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "fontconfig",
+  "version": "2.18.3",
+  "archive": "fontconfig-2.18.3.tar.xz",
+  "url": "https://gitlab.freedesktop.org/api/v4/projects/890/packages/generic/fontconfig/2.18.3/fontconfig-2.18.3.tar.xz",
+  "verify_kind": "sha256-file",
+  "size": 1172016,
+  "sha256": "4f7b554a38cdf78c033f666c8871f3749e14a094f65a07f630c91ed0b43d35e3",
+  "roots": [
+   "fontconfig-2.18.3"
+  ],
+  "members": 1093,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "published-sha256",
+    "file": "https://gitlab.freedesktop.org/api/v4/projects/890/packages/generic/fontconfig/2.18.3/fontconfig-2.18.3.tar.xz.sha256sum",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "pixman",
+  "version": "0.46.4",
+  "archive": "pixman-0.46.4.tar.xz",
+  "url": "https://cairographics.org/releases/pixman-0.46.4.tar.xz",
+  "verify_kind": "sha512-file",
+  "size": 660536,
+  "sha256": "a098c33924754ad43f981b740f6d576c70f9ed1006e12221b1845431ebce1239",
+  "roots": [
+   "pixman-0.46.4"
+  ],
+  "members": 235,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "published-sha512",
+    "file": "https://cairographics.org/releases/pixman-0.46.4.tar.xz.sha512",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "cairo",
+  "version": "1.18.6",
+  "archive": "cairo-1.18.6.tar.xz",
+  "url": "https://cairographics.org/releases/cairo-1.18.6.tar.xz",
+  "verify_kind": "sha256-file",
+  "size": 32725456,
+  "sha256": "1c767308174337a74694da0f3ec069c271452163a1ef4540964c50c301f157d4",
+  "roots": [
+   "cairo-1.18.6"
+  ],
+  "members": 4976,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "published-sha256",
+    "file": "https://cairographics.org/releases/cairo-1.18.6.tar.xz.sha256sum",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "pango",
+  "version": "1.58.2",
+  "archive": "pango-1.58.2.tar.xz",
+  "url": "https://download.gnome.org/sources/pango/1.58/pango-1.58.2.tar.xz",
+  "verify_kind": "sha256-file",
+  "size": 1918112,
+  "sha256": "342385b6ca3b7c73455d7c80a13b7dbe4489e00bc3bd4c5bd6ed4dce421e374a",
+  "roots": [
+   "pango-1.58.2"
+  ],
+  "members": 603,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "published-sha256",
+    "file": "https://download.gnome.org/sources/pango/1.58/pango-1.58.2.sha256sum",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "fribidi",
+  "version": "1.0.17",
+  "archive": "fribidi-1.0.17.tar.xz",
+  "url": "https://github.com/fribidi/fribidi/releases/download/v1.0.17/fribidi-1.0.17.tar.xz",
+  "verify_kind": "gh-digest",
+  "size": 1203284,
+  "sha256": "6949dcde27d41cebad1fd741fcafc36d55a1020d2d872d4a6eb3914caabbada2",
+  "roots": [
+   "fribidi-1.0.17"
+  ],
+  "members": 198,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "github-release-asset-digest",
+    "published": "sha256:6949dcde27d41cebad1fd741fcafc36d55a1020d2d872d4a6eb3914caabbada2",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "gdk-pixbuf",
+  "version": "2.44.8",
+  "archive": "gdk-pixbuf-2.44.8.tar.xz",
+  "url": "https://download.gnome.org/sources/gdk-pixbuf/2.44/gdk-pixbuf-2.44.8.tar.xz",
+  "verify_kind": "sha256-file",
+  "size": 6037756,
+  "sha256": "919f529512961a12e81cd4b4b466a48c3933469e7f9a310c6513cd4fb252ba3c",
+  "roots": [
+   "gdk-pixbuf-2.44.8"
+  ],
+  "members": 756,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "published-sha256",
+    "file": "https://download.gnome.org/sources/gdk-pixbuf/2.44/gdk-pixbuf-2.44.8.sha256sum",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "libjpeg-turbo",
+  "version": "3.2.0",
+  "archive": "libjpeg-turbo-3.2.0.tar.gz",
+  "url": "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.0/libjpeg-turbo-3.2.0.tar.gz",
+  "verify_kind": "sig",
+  "size": 2537858,
+  "sha256": "6f30092cef9fb839779646608f4ee14ae3cbac989c47fa05e841b0841f09878e",
+  "roots": [
+   "libjpeg-turbo-3.2.0"
+  ],
+  "members": 644,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.0/libjpeg-turbo-3.2.0.tar.gz.sig",
+    "status": "good",
+    "fingerprint": "0338C8D8D9FDA62CF9C421BD7EC2DBB6F4DBF434",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "graphene",
+  "version": "1.10.8",
+  "archive": "graphene-1.10.8.tar.xz",
+  "url": "https://download.gnome.org/sources/graphene/1.10/graphene-1.10.8.tar.xz",
+  "verify_kind": "sha256-file",
+  "size": 333924,
+  "sha256": "a37bb0e78a419dcbeaa9c7027bcff52f5ec2367c25ec859da31dfde2928f279a",
+  "roots": [
+   "graphene-1.10.8"
+  ],
+  "members": 164,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "published-sha256",
+    "file": "https://download.gnome.org/sources/graphene/1.10/graphene-1.10.8.sha256sum",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "libepoxy",
+  "version": "1.5.10",
+  "archive": "libepoxy-1.5.10.tar.xz",
+  "url": "https://download.gnome.org/sources/libepoxy/1.5/libepoxy-1.5.10.tar.xz",
+  "verify_kind": "sha256-file",
+  "size": 223528,
+  "sha256": "072cda4b59dd098bba8c2363a6247299db1fa89411dc221c8b81b8ee8192e623",
+  "roots": [
+   "libepoxy-1.5.10"
+  ],
+  "members": 77,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "published-sha256",
+    "file": "https://download.gnome.org/sources/libepoxy/1.5/libepoxy-1.5.10.sha256sum",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "libxkbcommon",
+  "version": "1.13.2",
+  "archive": "libxkbcommon-1.13.2.tar.gz",
+  "url": "https://github.com/xkbcommon/libxkbcommon/archive/refs/tags/xkbcommon-1.13.2.tar.gz",
+  "verify_kind": "none",
+  "size": 1243485,
+  "sha256": "acc4d5f7c3cbba5f9f8d08d8bdbeede84ecede46792f47929aa9321873385528",
+  "roots": [
+   "libxkbcommon-xkbcommon-1.13.2"
+  ],
+  "members": 553,
+  "archive_sh_verify": "ok",
+  "checks": []
+ },
+ {
+  "key": "xkeyboard-config",
+  "version": "2.48",
+  "archive": "xkeyboard-config-2.48.tar.xz",
+  "url": "https://www.x.org/releases/individual/data/xkeyboard-config/xkeyboard-config-2.48.tar.xz",
+  "verify_kind": "sig",
+  "size": 953316,
+  "sha256": "b77041324f0109f77161ee43743fe04baa485866af8460d31e476ad3f7648fd5",
+  "roots": [
+   "xkeyboard-config-2.48"
+  ],
+  "members": 446,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://www.x.org/releases/individual/data/xkeyboard-config/xkeyboard-config-2.48.tar.xz.sig",
+    "status": "good",
+    "fingerprint": "FFB4CCD275AAA422F5F9808E0661D98FC933A145",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "wayland",
+  "version": "1.26.0",
+  "archive": "wayland-1.26.0.tar.xz",
+  "url": "https://gitlab.freedesktop.org/-/project/121/uploads/5f5d2e19a230e8b8250d9a7c2f280846/wayland-1.26.0.tar.xz",
+  "verify_kind": "sig",
+  "size": 612384,
+  "sha256": "64176eaa46e4969903e286f8e5ef8331affc17fdf03ac9b58381d2b23162b7a3",
+  "roots": [
+   "wayland-1.26.0"
+  ],
+  "members": 225,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://gitlab.freedesktop.org/-/project/121/uploads/8470f1b7d7225fe33ccda52e955d4e64/wayland-1.26.0.tar.xz.sig",
+    "status": "good",
+    "fingerprint": "34FF9526CFEF0E97A340E2E40FDE7BE0E88F5E48",
+    "key_source": "local-keyring"
+   },
+   {
+    "method": "published-sha256",
+    "file": "https://gitlab.freedesktop.org/-/project/121/uploads/ecb0f35f346551c6b4015d9f5341bd2f/wayland-1.26.0.tar.xz.sha256sum",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "wayland-protocols",
+  "version": "1.49",
+  "archive": "wayland-protocols-1.49.tar.xz",
+  "url": "https://gitlab.freedesktop.org/-/project/2891/uploads/7ed597f0cad076a17fe36f8860596f8c/wayland-protocols-1.49.tar.xz",
+  "verify_kind": "sig",
+  "size": 150612,
+  "sha256": "ec4c8f74942d6dff7ace8b4ce4764f0ef9ff618a935d974ea77edee2ad240b14",
+  "roots": [
+   "wayland-protocols-1.49"
+  ],
+  "members": 221,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://gitlab.freedesktop.org/-/project/2891/uploads/2eef3050ed35526c58d0d361f7b822b2/wayland-protocols-1.49.tar.xz.sig",
+    "status": "good",
+    "fingerprint": "34FF9526CFEF0E97A340E2E40FDE7BE0E88F5E48",
+    "key_source": "local-keyring"
+   },
+   {
+    "method": "published-sha256",
+    "file": "https://gitlab.freedesktop.org/-/project/2891/uploads/19d00791387d3c01c226f57da03a5b74/wayland-protocols-1.49.tar.xz.sha256sum",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "gtk4",
+  "version": "4.24.0",
+  "archive": "gtk-4.24.0.tar.xz",
+  "url": "https://download.gnome.org/sources/gtk/4.24/gtk-4.24.0.tar.xz",
+  "verify_kind": "sha256-file",
+  "size": 17652716,
+  "sha256": "28ba4ac1c04f86eac09b79a163cb163a4c2b54442d9f7eccc04679062a581044",
+  "roots": [
+   "gtk-4.24.0"
+  ],
+  "members": 8335,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "published-sha256",
+    "file": "https://download.gnome.org/sources/gtk/4.24/gtk-4.24.0.sha256sum",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "qt6-qtbase",
+  "version": "6.11.2",
+  "archive": "qtbase-everywhere-src-6.11.2.tar.xz",
+  "url": "https://download.qt.io/official_releases/qt/6.11/6.11.2/submodules/qtbase-everywhere-src-6.11.2.tar.xz",
+  "verify_kind": "sha256-file",
+  "size": 50582668,
+  "sha256": "5b2e00eccaf5a4d8c14134ffa0ea8dfd0a35ae1ffc7f8d87fa4305a1ed23cf22",
+  "roots": [
+   "qtbase-everywhere-src-6.11.2"
+  ],
+  "members": 26851,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "published-sha256",
+    "file": "https://download.qt.io/official_releases/qt/6.11/6.11.2/submodules/qtbase-everywhere-src-6.11.2.tar.xz.sha256",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "qt6-qtwayland",
+  "version": "6.11.2",
+  "archive": "qtwayland-everywhere-src-6.11.2.tar.xz",
+  "url": "https://download.qt.io/official_releases/qt/6.11/6.11.2/submodules/qtwayland-everywhere-src-6.11.2.tar.xz",
+  "verify_kind": "sha256-file",
+  "size": 905288,
+  "sha256": "8eb7615e39332a10f506e8dd70f02d5954bb5949ff54f6dcbf8bd6168222f9df",
+  "roots": [
+   "qtwayland-everywhere-src-6.11.2"
+  ],
+  "members": 854,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "published-sha256",
+    "file": "https://download.qt.io/official_releases/qt/6.11/6.11.2/submodules/qtwayland-everywhere-src-6.11.2.tar.xz.sha256",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "gtk3",
+  "version": "3.24.52",
+  "archive": "gtk-3.24.52.tar.xz",
+  "url": "https://download.gnome.org/sources/gtk/3.24/gtk-3.24.52.tar.xz",
+  "verify_kind": "sha256-file",
+  "size": 13578032,
+  "sha256": "80931fa472a77b9a164f6740e3c0b444fac6770054632d35a7ff9d679e5e7b9f",
+  "roots": [
+   "gtk-3.24.52"
+  ],
+  "members": 4971,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "published-sha256",
+    "file": "https://download.gnome.org/sources/gtk/3.24/gtk-3.24.52.sha256sum",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "at-spi2-core",
+  "version": "2.62.0.1",
+  "archive": "at-spi2-core-2.62.0.1.tar.xz",
+  "url": "https://download.gnome.org/sources/at-spi2-core/2.62/at-spi2-core-2.62.0.1.tar.xz",
+  "verify_kind": "sha256-file",
+  "size": 599704,
+  "sha256": "fa462f1834bae569c5944c34608872f9447e5a2889ba2aa4d5ff9f2d6ff8a395",
+  "roots": [
+   "at-spi2-core-2.62.0.1"
+  ],
+  "members": 527,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "published-sha256",
+    "file": "https://download.gnome.org/sources/at-spi2-core/2.62/at-spi2-core-2.62.0.1.sha256sum",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "qt5-qtbase",
+  "version": "5.15.19",
+  "archive": "qtbase-everywhere-opensource-src-5.15.19.tar.xz",
+  "url": "https://download.qt.io/archive/qt/5.15/5.15.19/submodules/qtbase-everywhere-opensource-src-5.15.19.tar.xz",
+  "verify_kind": "sha256-file",
+  "size": 51588440,
+  "sha256": "51e91c73abacab81e64efd01bf95794e79c0e605ad80947a024769f0dd620a32",
+  "roots": [
+   "qtbase-everywhere-src-5.15.19"
+  ],
+  "members": 28758,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "published-sha256",
+    "file": "https://download.qt.io/archive/qt/5.15/5.15.19/submodules/qtbase-everywhere-opensource-src-5.15.19.tar.xz.sha256",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "qt5-qtwayland",
+  "version": "5.15.19",
+  "archive": "qtwayland-everywhere-opensource-src-5.15.19.tar.xz",
+  "url": "https://download.qt.io/archive/qt/5.15/5.15.19/submodules/qtwayland-everywhere-opensource-src-5.15.19.tar.xz",
+  "verify_kind": "sha256-file",
+  "size": 547652,
+  "sha256": "9efee6413514986353faace0415ad238b5ab00f8ecb0693381f563076e95ec93",
+  "roots": [
+   "qtwayland-everywhere-src-5.15.19"
+  ],
+  "members": 1323,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "published-sha256",
+    "file": "https://download.qt.io/archive/qt/5.15/5.15.19/submodules/qtwayland-everywhere-opensource-src-5.15.19.tar.xz.sha256",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "qt5-qtsvg",
+  "version": "5.15.19",
+  "archive": "qtsvg-everywhere-opensource-src-5.15.19.tar.xz",
+  "url": "https://download.qt.io/archive/qt/5.15/5.15.19/submodules/qtsvg-everywhere-opensource-src-5.15.19.tar.xz",
+  "verify_kind": "sha256-file",
+  "size": 1867700,
+  "sha256": "cabc95fc12fa84c92e95f08660742a0ce297e6db3deadbefbe7fbec4769b8c13",
+  "roots": [
+   "qtsvg-everywhere-src-5.15.19"
+  ],
+  "members": 435,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "published-sha256",
+    "file": "https://download.qt.io/archive/qt/5.15/5.15.19/submodules/qtsvg-everywhere-opensource-src-5.15.19.tar.xz.sha256",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "ffmpeg",
+  "version": "8.1.3",
+  "archive": "ffmpeg-8.1.3.tar.xz",
+  "url": "https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz",
+  "verify_kind": "sig",
+  "size": 11732036,
+  "sha256": "7138d28c96d9d3e3af4ee3d8cad72741f8ffb40da90c1112235dea3ecd3178a3",
+  "roots": [
+   "ffmpeg-8.1.3"
+  ],
+  "members": 10235,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz.asc",
+    "status": "good",
+    "fingerprint": "FCF986EA15E6E293A5644F10B4322F04D67658D8",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "vlc",
+  "version": "3.0.24",
+  "archive": "vlc-3.0.24.tar.xz",
+  "url": "https://download.videolan.org/pub/videolan/vlc/3.0.24/vlc-3.0.24.tar.xz",
+  "verify_kind": "sig",
+  "size": 27620304,
+  "sha256": "e7cab503d1d7d5849b89d2cf0e1ee60d0ef6d012407791b644b9cfc0cc225fdf",
+  "roots": [
+   "vlc-3.0.24"
+  ],
+  "members": 4854,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://download.videolan.org/pub/videolan/vlc/3.0.24/vlc-3.0.24.tar.xz.asc",
+    "status": "no-key",
+    "fingerprint": "1D77C0AE835B911E",
+    "key_source": null
+   },
+   {
+    "method": "published-sha256",
+    "file": "https://download.videolan.org/pub/videolan/vlc/3.0.24/vlc-3.0.24.tar.xz.sha256",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "ca-certificates-curl",
+  "version": "2026-08-13",
+  "archive": "cacert-2026-08-13.pem",
+  "url": "https://curl.se/ca/cacert-2026-08-13.pem",
+  "verify_kind": "sha256-file",
+  "size": 188900,
+  "sha256": "f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9",
+  "roots": null,
+  "members": 0,
+  "checks": [
+   {
+    "method": "published-sha256",
+    "file": "https://curl.se/ca/cacert-2026-08-13.pem.sha256",
+    "status": "match"
+   }
+  ]
+ },
+ {
+  "key": "libtiff",
+  "version": "4.7.2",
+  "archive": "tiff-4.7.2.tar.xz",
+  "url": "https://download.osgeo.org/libtiff/tiff-4.7.2.tar.xz",
+  "verify_kind": "sig",
+  "size": 2409652,
+  "sha256": "4996f0c4f93094719b1ca5c6279b20e588773ba8a247533e486416fb662ddb88",
+  "roots": [
+   "tiff-4.7.2"
+  ],
+  "members": 1106,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://download.osgeo.org/libtiff/tiff-4.7.2.tar.xz.sig",
+    "status": "good",
+    "fingerprint": "B1FA7D81EEB8E66399178B9733EBBFC47B3DD87D",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "gperf",
+  "version": "3.3",
+  "archive": "gperf-3.3.tar.gz",
+  "url": "https://ftp.gnu.org/gnu/gperf/gperf-3.3.tar.gz",
+  "verify_kind": "sig",
+  "size": 1831294,
+  "sha256": "fd87e0aba7e43ae054837afd6cd4db03a3f2693deb3619085e6ed9d8d9604ad8",
+  "roots": [
+   "gperf-3.3"
+  ],
+  "members": 340,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://ftp.gnu.org/gnu/gperf/gperf-3.3.tar.gz.sig",
+    "status": "good",
+    "fingerprint": "E0FFBD975397F77A32AB76ECB6301D9E1BBEAC08",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "libiconv",
+  "version": "1.19",
+  "archive": "libiconv-1.19.tar.gz",
+  "url": "https://ftp.gnu.org/gnu/libiconv/libiconv-1.19.tar.gz",
+  "verify_kind": "sig",
+  "size": 5921103,
+  "sha256": "88dd96a8c0464eca144fc791ae60cd31cd8ee78321e67397e25fc095c4a19aa6",
+  "roots": [
+   "libiconv-1.19"
+  ],
+  "members": 1142,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://ftp.gnu.org/gnu/libiconv/libiconv-1.19.tar.gz.sig",
+    "status": "good",
+    "fingerprint": "E0FFBD975397F77A32AB76ECB6301D9E1BBEAC08",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "ncurses",
+  "version": "6.6",
+  "archive": "ncurses-6.6.tar.gz",
+  "url": "https://ftp.gnu.org/gnu/ncurses/ncurses-6.6.tar.gz",
+  "verify_kind": "sig",
+  "size": 3791150,
+  "sha256": "355b4cbbed880b0381a04c46617b7656e362585d52e9cf84a67e2009b749ff11",
+  "roots": [
+   "ncurses-6.6"
+  ],
+  "members": 1298,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "openpgp-signature",
+    "file": "https://ftp.gnu.org/gnu/ncurses/ncurses-6.6.tar.gz.sig",
+    "status": "good",
+    "fingerprint": "19882D92DDA4C400C22C0D56CC2AF4472167BE03",
+    "key_source": "local-keyring"
+   }
+  ]
+ },
+ {
+  "key": "atk-standalone",
+  "version": "2.38.0",
+  "archive": "atk-2.38.0.tar.xz",
+  "url": "https://download.gnome.org/sources/atk/2.38/atk-2.38.0.tar.xz",
+  "verify_kind": "sha256-file",
+  "size": 303952,
+  "sha256": "ac4de2a4ef4bd5665052952fe169657e65e895c5057dffb3c2a810f6191a0c36",
+  "roots": [
+   "atk-2.38.0"
+  ],
+  "members": 223,
+  "archive_sh_verify": "ok",
+  "checks": [
+   {
+    "method": "published-sha256",
+    "file": "https://download.gnome.org/sources/atk/2.38/atk-2.38.0.sha256sum",
+    "status": "match"
+   }
+  ]
+ }
+]

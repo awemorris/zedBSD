@@ -1,0 +1,69 @@
+{
+ "phase": "ws035-p001",
+ "observed_at": "2026-09-23 between 03:19 and 03:30 +09:00 (three read-only ssh sessions, 60 s limit each)",
+ "host": {
+  "ssh": "awe@10.0.10.25",
+  "hostname": "chaos",
+  "machine": "Dell Latitude 5330 (subsystem 1028:0b02)",
+  "kernel": "6.19.13+deb13-amd64",
+  "cmdline": "BOOT_IMAGE=/boot/vmlinuz-6.19.13+deb13-amd64 root=UUID=034701e3-f60d-42db-9cc5-4ca6296c7cb7 ro quiet",
+  "iommu_units": ["dmar0", "dmar1"],
+  "iommu_group_count": 17,
+  "gdm": "inactive",
+  "qemu_running": false,
+  "sudo_n": "available (checked with 'sudo -n true' only)",
+  "state_changed_by_this_phase": false
+ },
+ "igpu": {
+  "commands": ["~/bigbang/igpu-mode.sh show", "lspci -nnk -s 00:02.0"],
+  "igpu_mode_show": "vfio-pci",
+  "bdf": "0000:00:02.0",
+  "id": "8086:46a8 rev 0c",
+  "name": "Intel Alder Lake-UP3 GT2 [Iris Xe Graphics]",
+  "subsystem": "1028:0b02",
+  "driver_in_use": "vfio-pci",
+  "driver_override": "vfio-pci",
+  "kernel_modules": ["i915", "xe"],
+  "iommu_group": 0,
+  "iommu_group_members": ["0000:00:02.0"],
+  "iommu_group_type": "identity (read from /sys/kernel/iommu_groups/0/type)",
+  "reset_method": "flr pm",
+  "boot_default": "/etc/modprobe.d/vfio-igd.conf: blacklist i915, blacklist xe, options vfio-pci ids=8086:46a8; /etc/modules-load.d/vfio-igd.conf: vfio-pci",
+  "dev_vfio": ["/dev/vfio/0 (root 0600)", "/dev/vfio/vfio"]
+ },
+ "hda": {
+  "commands": ["lspci -nnk -s 00:1f", "readlink /sys/bus/pci/devices/*/iommu_group", "ls /sys/kernel/iommu_groups/15/devices", "cat /proc/asound/cards /proc/asound/card0/codec#*"],
+  "bdf": "0000:00:1f.3",
+  "id": "8086:51c8 rev 01",
+  "name": "Intel Alder Lake PCH-P High Definition Audio Controller",
+  "class": "0x040380 (HDA, audio device 0403)",
+  "subsystem": "1028:0b02",
+  "driver_in_use": "snd_hda_intel",
+  "kernel_modules": ["snd_soc_avs", "snd_sof_pci_intel_tgl", "snd_hda_intel"],
+  "snd_intel_dspcfg_dsp_driver": "0 (auto; legacy HDA driver is bound)",
+  "codecs": ["address 0: Realtek ALC3254", "address 2: Intel Alderlake-P HDMI"],
+  "alsa_card": "0 [PCH] HDA-Intel at 0x6055290000 irq 208",
+  "reset_method": "(empty: the kernel lists no reset method)",
+  "host_audio_users": ["pipewire", "wireplumber", "pipewire -c filter-chain.conf", "pipewire-pulse (user awe)"],
+  "iommu_group": 15,
+  "iommu_group_members": [
+   {"bdf": "0000:00:1f.0", "id": "8086:5182", "name": "Alder Lake PCH eSPI Controller (ISA bridge)", "driver": null},
+   {"bdf": "0000:00:1f.3", "id": "8086:51c8", "name": "Alder Lake PCH-P HDA Controller", "driver": "snd_hda_intel"},
+   {"bdf": "0000:00:1f.4", "id": "8086:51a3", "name": "Alder Lake PCH-P SMBus Host Controller", "driver": "i801_smbus"},
+   {"bdf": "0000:00:1f.5", "id": "8086:51a4", "name": "Alder Lake-P PCH SPI Controller", "driver": null}
+  ],
+  "iommu_group_type": "DMA-FQ",
+  "usb_audio_devices": []
+ },
+ "assessment": {
+  "hda_alone_passthrough": "not possible as configured: VFIO assigns a whole IOMMU group, and group 15 also holds the eSPI (LPC) bridge, the SMBus controller and the SPI flash controller of the PCH (functions of the same multifunction device 00:1f, no ACS isolation). All four would have to leave their host drivers; the eSPI bridge and SPI controller are platform devices of the running host.",
+  "hda_with_igd_same_guest": "the IGD is alone in group 0 and is assignable; the HDA is not independently assignable (above), so IGD + HDA in one guest has the same blocker.",
+  "ways_out_needing_a_human_decision": [
+   "pcie_acs_override is not in the Debian kernel and a cmdline/kernel change is outside the approved host operations",
+   "assign the whole group 15 (eSPI, SMBus, SPI with HDA): risky for the host (platform/firmware devices)",
+   "p008 on QEMU intel-hda only, plus a bare-metal zedBSD boot of the Latitude for the real HDA",
+   "a USB audio device passed through with QEMU usb-host (none attached now)"
+  ],
+  "also_noted": "the HDA reports no reset method; even an assignable HDA could not be reset between guest runs by VFIO"
+ }
+}

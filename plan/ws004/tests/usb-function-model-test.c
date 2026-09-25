@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: Zlib
  */
-#include <drivers/usb.h>
+#include <drivers/usb/usb.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <stdatomic.h>

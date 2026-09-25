@@ -10,7 +10,7 @@ for mode in ordinary sanitize; do
         extra='-fsanitize=address,undefined -fno-omit-frame-pointer -no-pie'
     fi
     cc -std=gnu11 -O1 -g -Wall -Wextra -Werror \
-        -DKERN_USER_ABI_LP64 -I"$root/include" -I"$root/libc/include" \
+        -DKERN_USER_ABI_LP64 -I"$root/include" -I"$root/include/libc" -DKERN_UAPI_NATIVE \
         -I"$root/include/uapi" -ffunction-sections -fdata-sections $extra \
         "$root/plan/ws014/tests/handle-fd.c" \
         "$root/src/kern/handle.c" "$root/src/kern/fd-object.c" \
@@ -22,7 +22,7 @@ for mode in ordinary sanitize; do
         timeout 20 "$work/$mode" >"$work/$mode.log" 2>&1
     cat "$work/$mode.log"
     cc -std=gnu11 -O1 -g -Wall -Wextra -Werror -Wno-unused-function \
-        -DKERN_USER_ABI_LP64 -I"$root/include" -I"$root/libc/include" \
+        -DKERN_USER_ABI_LP64 -I"$root/include" -I"$root/include/libc" -DKERN_UAPI_NATIVE \
         -I"$root/include/uapi" -ffunction-sections -fdata-sections $extra \
         "$root/plan/ws014/tests/handle-fd-syscall.c" \
         "$root/src/kern/handle.c" "$root/src/kern/fd-object.c" \

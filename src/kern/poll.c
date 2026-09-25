@@ -25,8 +25,8 @@
 #include "kern/thread.h"
 #include "kern/waitq.h"
 
-#include <errno.h>
-#include <fcntl.h>
+#include <uapi/errno.h>
+#include <uapi/fcntl.h>
 
 struct poll_channel {
 	struct spinlock lock;
@@ -37,6 +37,7 @@ static struct poll_channel channel;
 static atomic_uint_t channel_ready;
 
 static int poll_scan(struct process *process, struct pollfd *fds, nfds_t count, int *ready);
+static int poll_wait_ready(struct process *process, struct pollfd *fds, nfds_t count, uint64_t deadline, int immediate, int *ready);
 
 /*
  * Initializes the poll event channel.
@@ -209,11 +210,8 @@ kern_poll_wait(
 	int immediate,
 	int *ready)
 {
-	struct thread *thread;
-	uint64_t observed;
+	struct filedesc *table;
 	int error;
-
-	thread = thread_current();
 
 	/* Rejects a missing process, descriptor table, or result. */
 	if (process == NULL ||
@@ -222,6 +220,35 @@ kern_poll_wait(
 	    count > KERN_OPEN_MAX ||
 	    ready == NULL)
 		return EINVAL;
+
+	/*
+	 * Counts this poll on the table for its whole wait, so that changes to
+	 * the table wake it; the table outlives the polling thread's process.
+	 */
+	table = process->fd;
+	filedesc_poll_begin(table);
+	error = poll_wait_ready(process, fds, count, deadline, immediate, ready);
+	filedesc_poll_end(table);
+
+	/* Reports the wait's result. */
+	return error;
+}
+
+/* Scans and sleeps until a polled descriptor is ready or the wait ends. */
+static int
+poll_wait_ready(
+	struct process *process,
+	struct pollfd *fds,
+	nfds_t count,
+	uint64_t deadline,
+	int immediate,
+	int *ready)
+{
+	struct thread *thread;
+	uint64_t observed;
+	int error;
+
+	thread = thread_current();
 
 	/* Scans, then sleeps for the next change, until something is ready. */
 	observed = poll_sequence();

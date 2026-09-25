@@ -174,6 +174,18 @@ static struct networkd_managed_wlan managed_wlan;
  */
 static struct networkd_lan managed_lan;
 
+/*
+ * The watchers, and whether the network has moved since they were last told.
+ *
+ * The flag is set wherever the state changes and acted on once, at the top
+ * of the loop: a single change often arrives as several smaller ones, and a
+ * watcher wants the result rather than each step of it.
+ */
+static int subscribers[NETWORKD_SUBSCRIBER_MAX];
+static uint32_t subscriber_ids[NETWORKD_SUBSCRIBER_MAX];
+static size_t subscriber_count;
+static int state_changed;
+
 /* Set when an event has left the wired policy something to do. */
 static int lan_work_due;
 
@@ -229,7 +241,9 @@ static int lan_address_usable(const char *);
 static void lan_assign_link_local(const char *, uint64_t);
 static void lan_configure(const struct networkd_lan_work *);
 static void lan_take_down(const char *);
+static void lan_raise(const char *);
 static void run_lan_work(void);
+static void lan_note_configured(const char *);
 static void recover_managed_wlan(void);
 static void schedule_automatic_work(unsigned);
 static int automatic_poll_timeout(void);
@@ -248,7 +262,7 @@ static int authenticate_client(int client, struct kern_peercred *peer,
 			       enum networkd_client_role *role);
 static int operation_allowed(enum networkd_client_role role,
 			     const char *operation);
-static void handle_request(int, enum networkd_client_role,
+static int handle_request(int, enum networkd_client_role,
 	const struct kern_peercred *);
 static void dispatch_request(int, struct networkd_request *, enum networkd_client_role, const struct kern_peercred *);
 static void send_wired_observation(int, const struct networkd_request *);
@@ -276,6 +290,15 @@ static int rollback_execute(const char *, char *, size_t, void *);
 static int rollback_parse(const char *, struct networkd_request *, char *,
 	size_t);
 static int show_interfaces(const char *name, char *output, size_t capacity);
+static int subscriber_add(int client, uint32_t request_id);
+static void subscriber_drop(size_t slot);
+static void subscribers_close(void);
+static void subscriber_send(size_t slot, const char *state, size_t length);
+static void notify_subscribers(void);
+static void notify_state_changed(void);
+static void deliver_state_changes(void);
+static int accept_subscriber(int client, enum networkd_client_role role,
+    uint32_t request_id);
 static int append_interface_status(int descriptor, const char *name, char *output, const size_t capacity, size_t *used);
 static int interface_exists(const char *name);
 static int interface_index(const char *, uint32_t *);
@@ -341,7 +364,9 @@ main(
 	int poll_result;
 	int poll_timeout;
 	size_t index;
-	struct pollfd descriptors[2];
+	struct pollfd descriptors[2U + NETWORKD_SUBSCRIBER_MAX];
+	nfds_t descriptor_count;
+	size_t slot;
 	struct kern_peercred peer;
 	enum networkd_client_role role;
 	struct networkd_listener listener;
@@ -390,6 +415,14 @@ main(
 	}
 	notify_init("READY\n");
 	control_listener = listener.descriptor;
+
+	/*
+	 * Records the state as it is before anyone can watch, so that the
+	 * first comparison after a watcher arrives measures a change and not
+	 * the difference between knowing nothing and knowing something.
+	 * Without this the first watcher is told the same state twice.
+	 */
+	deliver_state_changes();
 	wifi_wait_pump = service_wifi_wait;
 	networkd_wifi_child_set_pump(service_wifi_wait);
 
@@ -416,7 +449,22 @@ main(
 		poll_timeout = event_poll_timeout();
 		if (control_input_pending() && (poll_timeout < 0 || poll_timeout > 20))
 			poll_timeout = 20;
-		poll_result = poll(descriptors, 2U, poll_timeout);
+
+		/*
+		 * The watchers are polled too, not because they say anything
+		 * -- they never do -- but so that one going away is noticed
+		 * when it happens rather than at the next change.
+		 */
+		descriptor_count = 2U;
+
+		/* Process each watcher. */
+		for (slot = 0; slot < subscriber_count; slot++) {
+			descriptors[descriptor_count].fd = subscribers[slot];
+			descriptors[descriptor_count].events = 0;
+			descriptors[descriptor_count].revents = 0;
+			descriptor_count++;
+		}
+		poll_result = poll(descriptors, descriptor_count, poll_timeout);
 		if (poll_result < 0) {
 			if (errno == EINTR)
 				continue;
@@ -424,26 +472,50 @@ main(
 		}
 		if (poll_result == 0) {
 			run_due_work();
+			deliver_state_changes();
 			continue;
+		}
+
+		/*
+		 * A watcher that has gone is dropped before anything is sent,
+		 * so that a change is not written into a closed connection.
+		 * The list is walked from the end because dropping refills a
+		 * slot from there.
+		 */
+		slot = subscriber_count;
+
+		/* Process each watcher, newest first. */
+		while (slot > 0U) {
+			slot--;
+
+			/* Skips a watcher that is still connected. */
+			if ((descriptors[2U + slot].revents &
+			    (POLLERR | POLLHUP | POLLNVAL)) == 0)
+				continue;
+			subscriber_drop(slot);
 		}
 		if ((descriptors[1].revents & (POLLIN | POLLERR | POLLHUP)) != 0 &&
 		    process_route_events() != 0) {
 			(void)close(route_events);
 			route_events = -1;
 		}
-		if ((descriptors[0].revents & POLLIN) == 0)
+		if ((descriptors[0].revents & POLLIN) == 0) {
+			deliver_state_changes();
 			continue;
+		}
 		client = accept4(listener.descriptor, NULL, NULL, SOCK_CLOEXEC);
 
 		/* Handles the client condition. */
 		if (client >= 0) {
 			/* Handles a failed authenticate client operation. */
-			if (authenticate_client(client, &peer, &role) == 0)
-				handle_request(client, role, &peer);
-			else
+			if (authenticate_client(client, &peer, &role) != 0) {
 				send_error(client, EACCES,
 				    "authentication failed");
-			close(client);
+				close(client);
+			} else if (!handle_request(client, role, &peer)) {
+				close(client);
+			}
+			deliver_state_changes();
 			if (managed_wlan.state == NETWORKD_WLAN_AUTO_SEARCHING &&
 			    automatic_retry_at == 0U)
 				schedule_automatic_work(
@@ -465,6 +537,7 @@ main(
 		networkd_protocol_clear(&wifi_pending, sizeof(wifi_pending));
 	}
 	control_listener = -1;
+	subscribers_close();
 
 	/* Releases optional observations and incomplete transports on shutdown. */
 	for (index = 0U; index < NETWORKD_WLAN_RADIO_MAX; index++)
@@ -977,6 +1050,12 @@ process_route_events(
 			if (event.rtm_sequence > route_event_sequence)
 				route_event_sequence = event.rtm_sequence;
 			process_route_event(&event);
+
+			/*
+			 * An interface coming up, an address arriving or a
+			 * route changing is what a watcher is watching for.
+			 */
+			notify_state_changed();
 			continue;
 		}
 		if (count < 0 && errno == EINTR)
@@ -1313,6 +1392,7 @@ lan_configure(
 	/* Handles an interface that will not come up at all. */
 	if (run_command_until(arguments, 10U, deadline, diagnostic) != 0) {
 		(void)networkd_lan_configured(&managed_lan, work->interface, 0);
+		notify_state_changed();
 		return;
 	}
 
@@ -1345,6 +1425,7 @@ lan_configure(
 	if (!obtained)
 		lan_assign_link_local(work->interface, deadline);
 	(void)networkd_lan_configured(&managed_lan, work->interface, obtained);
+	notify_state_changed();
 }
 
 /*
@@ -1365,6 +1446,30 @@ lan_take_down(
 	(void)run_command_until(arguments, 10U,
 	    netutil_monotonic_us() + 15000000ULL, diagnostic);
 	(void)networkd_lan_down(&managed_lan, name);
+	notify_state_changed();
+}
+
+/*
+ * Brings an interface up without configuring it, so that its driver can
+ * report the link.  It is marked raised whatever happened, so that an
+ * interface that will not come up is not tried in a loop.
+ */
+static void
+lan_raise(
+	const char *name)
+{
+	char diagnostic[CHILD_OUTPUT_MAX];
+	char *arguments[4];
+
+	/* Runs ifconfig up, bounded like every other step. */
+	diagnostic[0] = '\0';
+	arguments[0] = (char *)"/sbin/ifconfig";
+	arguments[1] = (char *)name;
+	arguments[2] = (char *)"up";
+	arguments[3] = NULL;
+	(void)run_command_until(arguments, 10U,
+	    netutil_monotonic_us() + 15000000ULL, diagnostic);
+	(void)networkd_lan_raised(&managed_lan, name);
 }
 
 /*
@@ -1400,6 +1505,10 @@ run_lan_work(
 			return;
 		if (work.action == NETWORKD_LAN_ACTION_RESNAPSHOT) {
 			lan_snapshot();
+			continue;
+		}
+		if (work.action == NETWORKD_LAN_ACTION_RAISE) {
+			lan_raise(work.interface);
 			continue;
 		}
 		if (work.action != NETWORKD_LAN_ACTION_CONFIGURE)
@@ -1967,6 +2076,219 @@ retire_managed_policy(
 	return 0;
 }
 
+/*
+ * Keeps one watcher's connection open, or reports that there is no room.
+ */
+static int
+subscriber_add(
+	int client,
+	uint32_t request_id)
+{
+	/* Handles a daemon already watching as many as it will. */
+	if (subscriber_count >= NETWORKD_SUBSCRIBER_MAX)
+		return -1;
+	subscribers[subscriber_count] = client;
+	subscriber_ids[subscriber_count] = request_id != 0U ? request_id : 1U;
+	subscriber_count++;
+
+	/* Succeeded: the connection now belongs to the watcher list. */
+	return 0;
+}
+
+/* Closes one watcher and fills its place from the end. */
+static void
+subscriber_drop(
+	size_t slot)
+{
+	/* Handles a slot outside the list. */
+	if (slot >= subscriber_count)
+		return;
+	(void)close(subscribers[slot]);
+	subscriber_count--;
+	subscribers[slot] = subscribers[subscriber_count];
+	subscriber_ids[slot] = subscriber_ids[subscriber_count];
+}
+
+/* Closes every watcher, which is what shutting down owes them. */
+static void
+subscribers_close(
+	void)
+{
+	/* Process each watcher. */
+	while (subscriber_count > 0U)
+		subscriber_drop(subscriber_count - 1U);
+}
+
+/*
+ * Sends one state to one watcher.
+ *
+ * The daemon does not queue for a watcher that is not reading: it is the
+ * only thing that can configure the network, and waiting on a client that
+ * has stopped would stop everything.  A watcher that cannot take the frame
+ * is dropped and may connect again.
+ */
+static void
+subscriber_send(
+	size_t slot,
+	const char *state,
+	size_t length)
+{
+	struct networkd_protocol_header header;
+	struct networkd_field_writer writer;
+	unsigned char payload[NETWORKD_RESPONSE_MAX];
+
+	networkd_field_writer_init(&writer, payload, sizeof(payload));
+
+	/* Handles a state that does not fit the frame. */
+	if (networkd_field_write_u32(&writer, NETWORKD_FIELD_STATUS,
+	    NETWORKD_RESULT_OK) != 0 ||
+	    networkd_field_write_u32(&writer, NETWORKD_FIELD_ERROR, 0U) != 0 ||
+	    (length != 0U && networkd_field_write(&writer,
+	    NETWORKD_FIELD_OUTPUT, state, length) != 0)) {
+		networkd_protocol_clear(payload, sizeof(payload));
+		return;
+	}
+	header.request_id = subscriber_ids[slot];
+	header.opcode = NETWORKD_OP_SUBSCRIBE;
+	header.payload_length = writer.used;
+
+	/* Handles the watcher that is no longer taking what it asked for. */
+	if (networkd_protocol_write_frame(subscribers[slot], &header,
+	    payload) != 0)
+		subscriber_drop(slot);
+	networkd_protocol_clear(payload, sizeof(payload));
+}
+
+/* Tells every watcher what the network looks like now. */
+static void
+notify_subscribers(
+	void)
+{
+	char state[NETWORKD_RESPONSE_OUTPUT_MAX];
+	size_t slot, length;
+
+	/* Handles the daemon nobody is watching. */
+	if (subscriber_count == 0U)
+		return;
+
+	/* Handles a state that cannot be read at all. */
+	if (show_interfaces(NULL, state, sizeof(state)) != 0)
+		return;
+	length = strlen(state);
+	slot = 0;
+
+	/* Process each watcher, which may leave its slot to be refilled. */
+	while (slot < subscriber_count) {
+		size_t before;
+
+		before = subscriber_count;
+		subscriber_send(slot, state, length);
+
+		/* Advances only past a watcher that is still there. */
+		if (subscriber_count == before)
+			slot++;
+	}
+	networkd_protocol_clear(state, sizeof(state));
+}
+
+/*
+ * Records that the network has moved.
+ *
+ * Called wherever the daemon changes an interface, an address, a route or
+ * the Wi-Fi state.  The watchers are told once, at the top of the loop, so
+ * that one operation reaching several of these places sends one frame.
+ */
+static void
+notify_state_changed(
+	void)
+{
+	state_changed = 1;
+}
+
+/*
+ * Takes on one connection as a watcher.
+ *
+ * Reports whether the connection now belongs to the watcher list.  A client
+ * with no right to look, or one arriving when the list is full, is answered
+ * and left for the ordinary path to close.
+ */
+static int
+accept_subscriber(
+	int client,
+	enum networkd_client_role role,
+	uint32_t request_id)
+{
+	char state[NETWORKD_RESPONSE_OUTPUT_MAX];
+	size_t length;
+
+	/* Handles a client with no right to look at the network. */
+	if (!operation_allowed(role, "SHOW")) {
+		send_response(client, request_id, NETWORKD_OP_SUBSCRIBE,
+		    NETWORKD_RESULT_ERROR, EPERM, "operation denied", NULL, 0U);
+		return 0;
+	}
+
+	/*
+	 * A watcher is written to without waiting.  One that has stopped
+	 * reading fills its socket, the next write fails at once, and the
+	 * watcher is dropped rather than holding up the daemon.
+	 */
+	if (fcntl(client, F_SETFL, fcntl(client, F_GETFL) | O_NONBLOCK) != 0) {
+		send_response(client, request_id, NETWORKD_OP_SUBSCRIBE,
+		    NETWORKD_RESULT_ERROR, errno, "cannot watch", NULL, 0U);
+		return 0;
+	}
+
+	/* Handles a daemon already watching as many as it will. */
+	if (subscriber_add(client, request_id) != 0) {
+		send_response(client, request_id, NETWORKD_OP_SUBSCRIBE,
+		    NETWORKD_RESULT_ERROR, EBUSY, "too many watchers",
+		    NULL, 0U);
+		return 0;
+	}
+
+	/*
+	 * The first frame is the state as it stands, so that a watcher does
+	 * not have to ask SHOW once and then watch: what it sees first and
+	 * what it sees later have the same shape.
+	 */
+	length = show_interfaces(NULL, state, sizeof(state)) == 0 ?
+	    strlen(state) : 0U;
+	subscriber_send(subscriber_count - 1U, state, length);
+	networkd_protocol_clear(state, sizeof(state));
+
+	/* Succeeded: the connection is a watcher now. */
+	return 1;
+}
+
+/* Tells the watchers, once, about everything that has moved since last time. */
+static void
+deliver_state_changes(
+	void)
+{
+	static enum networkd_managed_wlan_state told_wlan_state;
+	static int told_wlan_valid;
+
+	/*
+	 * The Wi-Fi state is compared rather than reported from each place
+	 * that changes it.  It is moved from a dozen places -- connecting,
+	 * retiring, the automatic search, the child actor finishing -- and
+	 * one of them forgetting to say so would be a watcher that quietly
+	 * stops being told.  Comparing cannot be forgotten.
+	 */
+	if (!told_wlan_valid || told_wlan_state != managed_wlan.state) {
+		told_wlan_state = managed_wlan.state;
+		told_wlan_valid = 1;
+		state_changed = 1;
+	}
+
+	/* Handles the network that has not moved. */
+	if (!state_changed)
+		return;
+	state_changed = 0;
+	notify_subscribers();
+}
+
 /* Supports the notify init operation. */
 static void
 notify_init(
@@ -2122,22 +2444,35 @@ operation_allowed(
 	return function_result;
 }
 
-/* Reads one request before dispatching it through the common admission path. */
-static void
+/*
+ * Reads one request before dispatching it through the common admission path.
+ *
+ * Reports whether the connection was kept: a watcher's outlives the request
+ * that made it one, and the caller must not close it.
+ */
+static int
 handle_request(
 	int client,
 	enum networkd_client_role role,
 	const struct kern_peercred *peer)
 {
 	struct networkd_request request;
+	int retained;
 
 	/* Retains decoded storage until the synchronous dispatcher returns. */
 	memset(&request, 0, sizeof(request));
+	retained = 0;
 	if (read_request(client, &request) != 0)
 		send_error(client, errno, "malformed request");
+	else if (request.header.opcode == NETWORKD_OP_SUBSCRIBE)
+		retained = accept_subscriber(client, role,
+		    request.header.request_id);
 	else
 		dispatch_request(client, &request, role, peer);
 	networkd_protocol_clear(&request, sizeof(request));
+
+	/* Returns whether the connection now belongs to the watcher list. */
+	return retained;
 }
 
 /* Applies the same admission and transaction checks to immediate and queued work. */
@@ -2454,7 +2789,35 @@ execute_wired_request(
 	}
 	if (result != 0 && *error == 0)
 		*error = EIO;
+
+	/*
+	 * A manual DHCP lease or static address is what the wired policy
+	 * would have given the interface.  Recording it as configured keeps
+	 * the carrier event that bringing the interface up causes from
+	 * configuring it a second time, which would drop the address the
+	 * caller has just started to use.
+	 */
+	if (result == 0 &&
+	    (request->header.opcode == NETWORKD_OP_DHCP ||
+	     request->header.opcode == NETWORKD_OP_STATIC) &&
+	    lan_address_usable(request->interface))
+		lan_note_configured(request->interface);
 	return result;
+}
+
+/*
+ * Records that an interface was configured by a request rather than by
+ * the wired policy.  An interface that has only just arrived may not be
+ * in the policy's table yet, so the table is read again first.
+ */
+static void
+lan_note_configured(
+	const char *name)
+{
+	if (networkd_lan_configured(&managed_lan, name, 1) == 0)
+		return;
+	lan_snapshot();
+	(void)networkd_lan_configured(&managed_lan, name, 1);
 }
 
 /* Validates one rollback line without changing running state. */
@@ -3468,8 +3831,24 @@ read_request(
 	/* Reads and semantically validates one request payload. */
 	if (networkd_protocol_read_frame_timed(descriptor, &request->header,
 	    request->payload, sizeof(request->payload),
-	    NETWORKD_REQUEST_MAX, 5U) != 0 || read_request_end(descriptor) != 0)
+	    NETWORKD_REQUEST_MAX, 5U) != 0)
 		return -1;
+
+	/*
+	 * Every request but a subscription ends with the client closing its
+	 * direction, which is what proves there is nothing more behind it.
+	 *
+	 * A watcher must not do that.  Once one direction of a stream is
+	 * closed the kernel reports the socket hung up on every poll, and the
+	 * daemon would either spin on it or drop it at once.  A watcher keeps
+	 * both directions open for as long as it watches, and its closing the
+	 * connection is how the daemon learns that it has gone.
+	 */
+	if (request->header.opcode != NETWORKD_OP_SUBSCRIBE &&
+	    read_request_end(descriptor) != 0)
+		return -1;
+	if (request->header.opcode == NETWORKD_OP_SUBSCRIBE)
+		return 0;
 
 	/*
 	 * A wired-management request carries one record per interface, so it

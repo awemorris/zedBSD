@@ -16,7 +16,7 @@
  * discipline above it.
  */
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <kern/device-io.h>
 #include <kern/text-display.h>
 #include <kern/lock.h>

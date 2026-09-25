@@ -47,3 +47,9 @@ cases, not executable conformance tests.
 WS014/p001 architecture discussion resumed by user; first target is QEMU virtio-gpu, superseding i915-first/manual design hold. Vulkan display API is a proposal, not a frozen ABI. Linux DRM compatibility is not required, but OS memory/sync/display/permission machinery remains necessary. No implementation Queue. Other WS holds stay unchanged. See WS014 and p001; old review cases remain design inputs, not runtime tests.
 
 </details>
+
+## 2026-09-24: 動かない試験の削除（ws034-p049）
+
+build できない、または今の source と合わなくなった試験を、書き直さずに削除した（ユーザー指示）。
+削除した file の一覧は [`plan/ws034/phase049/deleted-tests.txt`](../../ws034/phase049/deleted-tests.txt)。
+上の説明のうち、そこに載っている file の記述は履歴である。

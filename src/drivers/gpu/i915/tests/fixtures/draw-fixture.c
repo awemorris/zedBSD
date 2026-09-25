@@ -24,11 +24,11 @@
  */
 
 #include "draw-fixture.h"
+#include <kern/kcrt.h>
 
 #include "../../render/heap.h"
 
 #include <stdint.h>
-#include <string.h>
 
 #include "../../intel/commands.h"
 #include "../../intel/genxml.h"
@@ -377,7 +377,7 @@ drv_i915_draw_fixture_write_state(
 	uint32_t mocs)
 {
 	/* Starts from a page of zeroes, which every state not written below relies on. */
-	memset(state_page, 0, I915_DRAW_STATE_PAGE_BYTES);
+	kern_memset(state_page, 0, I915_DRAW_STATE_PAGE_BYTES);
 
 	/* Names the render target. */
 	i915_draw_write_surface_state(state_page, rt_va, mocs);
@@ -451,7 +451,7 @@ drv_i915_tex_fixture_write_state(
 	drv_i915_draw_fixture_write_state(state_page, rt_va, mocs);
 
 	/* Replaces the constant-colour shader with the sampling one. */
-	memset((uint8_t *)state_page + I915_DRAW_FIXTURE_PS_OFFSET, 0, I915_DRAW_KERNEL_ROOM);
+	kern_memset((uint8_t *)state_page + I915_DRAW_FIXTURE_PS_OFFSET, 0, I915_DRAW_KERNEL_ROOM);
 	i915_draw_write_kernel(state_page, texfix_ps, TEXFIX_PS_BYTES);
 
 	/* Points binding table entry 1 at the texture's surface state. */
@@ -459,7 +459,7 @@ drv_i915_tex_fixture_write_state(
 	i915_tex_write_surface_state(heap, I915_TEX_FIXTURE_TEX_RSS_OFFSET, texfix_tex_rss, tex_va);
 
 	/* Writes the nearest sampler. */
-	memcpy(&heap[I915_TEX_FIXTURE_SAMPLER_OFFSET / 4U], texfix_sampler, sizeof(texfix_sampler));
+	kern_memcpy(&heap[I915_TEX_FIXTURE_SAMPLER_OFFSET / 4U], texfix_sampler, sizeof(texfix_sampler));
 }
 
 /*
@@ -621,7 +621,7 @@ drv_i915_tex_fixture_write_state_ab_filter(
 
 	/* Replaces the sampler with the bilinear one when asked to. */
 	if (linear != 0U) {
-		memcpy(&heap[I915_TEX_FIXTURE_SAMPLER_OFFSET / 4U],
+		kern_memcpy(&heap[I915_TEX_FIXTURE_SAMPLER_OFFSET / 4U],
 		       texfix_sampler_linear,
 		       sizeof(texfix_sampler_linear));
 	}
@@ -763,7 +763,7 @@ drv_i915_tex_fixture_fhd_write_state(
 	i915_tex_write_surface_state(heap, I915_DRAW_SURFACE_STATE_OFFSET, texfhd_rt_rss, rt_va);
 
 	/* Replaces the constant-colour shader with the full-HD sampling one. */
-	memset((uint8_t *)state_page + I915_DRAW_FIXTURE_PS_OFFSET, 0, I915_DRAW_KERNEL_ROOM);
+	kern_memset((uint8_t *)state_page + I915_DRAW_FIXTURE_PS_OFFSET, 0, I915_DRAW_KERNEL_ROOM);
 	i915_draw_write_kernel(state_page, texfhd_ps, TEXFHD_PS_BYTES);
 
 	/* Points binding table entry 1 at the texture's surface state. */
@@ -771,7 +771,7 @@ drv_i915_tex_fixture_fhd_write_state(
 	i915_tex_write_surface_state(heap, I915_TEX_FIXTURE_TEX_RSS_OFFSET, texfhd_tex_rss, tex_va);
 
 	/* Writes the nearest sampler. */
-	memcpy(&heap[I915_TEX_FIXTURE_SAMPLER_OFFSET / 4U], texfhd_sampler, sizeof(texfhd_sampler));
+	kern_memcpy(&heap[I915_TEX_FIXTURE_SAMPLER_OFFSET / 4U], texfhd_sampler, sizeof(texfhd_sampler));
 
 	/* Covers the whole 1920x1080 target with the rectangle. */
 	i915_draw_write_vertices(state_page, I915_DRAW_F32_1920, I915_DRAW_F32_1080);
@@ -835,12 +835,12 @@ drv_i915_tex_fixture_fhd_same_texture_state(void)
 	int differs;
 
 	/* Compares the texture's surface states. */
-	differs = memcmp(texfhd_tex_rss, texfix_tex_rss, sizeof(texfix_tex_rss));
+	differs = kern_memcmp(texfhd_tex_rss, texfix_tex_rss, sizeof(texfix_tex_rss));
 	if (differs != 0)
 		return 0;
 
 	/* Compares the samplers. */
-	differs = memcmp(texfhd_sampler, texfix_sampler, sizeof(texfix_sampler));
+	differs = kern_memcmp(texfhd_sampler, texfix_sampler, sizeof(texfix_sampler));
 	if (differs != 0)
 		return 0;
 
@@ -877,7 +877,7 @@ i915_draw_fill_eot(
 	for (at = offset;
 	     at + sizeof(i915_draw_eot_only) <= offset + length;
 	     at += sizeof(i915_draw_eot_only))
-		memcpy((uint8_t *)page + at, i915_draw_eot_only, sizeof(i915_draw_eot_only));
+		kern_memcpy((uint8_t *)page + at, i915_draw_eot_only, sizeof(i915_draw_eot_only));
 }
 
 /* Copies a pixel shader to the kernel offset and carpets the room after it. */
@@ -888,7 +888,7 @@ i915_draw_write_kernel(
 	unsigned kernel_bytes)
 {
 	/* Places the kernel where 3DSTATE_PS names it. */
-	memcpy((uint8_t *)page + I915_DRAW_FIXTURE_PS_OFFSET, kernel, kernel_bytes);
+	kern_memcpy((uint8_t *)page + I915_DRAW_FIXTURE_PS_OFFSET, kernel, kernel_bytes);
 
 	/* Makes a stray thread in the rest of the room retire at once. */
 	i915_draw_fill_eot(page, I915_DRAW_FIXTURE_PS_OFFSET + kernel_bytes, I915_DRAW_KERNEL_ROOM - kernel_bytes);
@@ -908,7 +908,7 @@ i915_draw_write_surface_state(
 
 	/* Starts the surface state from zeroes. */
 	surface = &heap[I915_DRAW_SURFACE_STATE_OFFSET / 4U];
-	memset(surface, 0, GEN12_RENDER_SURFACE_STATE_DWORDS * 4U);
+	kern_memset(surface, 0, GEN12_RENDER_SURFACE_STATE_DWORDS * 4U);
 
 	/* A linear two-dimensional BGRA target; the alignment fields are unused when linear. */
 	surface[0] = (GEN12_SURFTYPE_2D << 29) |
@@ -949,8 +949,8 @@ i915_draw_write_dynamic_state(
 	uint32_t *viewport;
 
 	/* A zeroed colour calculator state, and a zeroed CPS_STATE, which disables coarse pixel shading. */
-	memset(&heap[I915_DRAW_COLOR_CALC_OFFSET / 4U], 0, I915_DRAW_COLOR_CALC_BYTES);
-	memset(&heap[I915_DRAW_CPS_STATE_OFFSET / 4U], 0, GEN12_CPS_STATE_DWORDS * 4U);
+	kern_memset(&heap[I915_DRAW_COLOR_CALC_OFFSET / 4U], 0, I915_DRAW_COLOR_CALC_BYTES);
+	kern_memset(&heap[I915_DRAW_CPS_STATE_OFFSET / 4U], 0, GEN12_CPS_STATE_DWORDS * 4U);
 
 	/* BLEND_STATE is one dword of global controls, then one entry per target. */
 	blend = &heap[I915_DRAW_BLEND_OFFSET / 4U];
@@ -974,7 +974,7 @@ i915_draw_write_vertices(
 	uint32_t *position;
 
 	/* Starts the vertex data from zeroes; the VUE header buffer stays zero. */
-	memset(&page[I915_DRAW_POSITION_OFFSET / 4U], 0, I915_DRAW_POSITION_BYTES);
+	kern_memset(&page[I915_DRAW_POSITION_OFFSET / 4U], 0, I915_DRAW_POSITION_BYTES);
 	position = &page[I915_DRAW_POSITION_OFFSET / 4U];
 
 	/*
@@ -1004,7 +1004,7 @@ i915_tex_write_surface_state(
 
 	/* Copies the sixteen generated dwords. */
 	surface = &heap[offset / 4U];
-	memcpy(surface, template_state, GEN12_RENDER_SURFACE_STATE_DWORDS * 4U);
+	kern_memcpy(surface, template_state, GEN12_RENDER_SURFACE_STATE_DWORDS * 4U);
 
 	/* Replaces the placeholder address with the surface's own. */
 	surface[8] = (uint32_t)tex_va;

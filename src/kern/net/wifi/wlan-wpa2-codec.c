@@ -16,9 +16,9 @@
  */
 
 #include "kern/net/wifi/wlan-wpa2-codec.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 #define IEEE80211_HEADER_LENGTH 24U
 #define IEEE80211_AUTH_LENGTH 30U
@@ -214,11 +214,11 @@ wlan_wpa2_rsn_build_ccmp_psk(
 	output[0] = IEEE80211_IE_RSN;
 	output[1] = 20U;
 	put_le16(output + 2U, 1U);
-	memcpy(output + 4U, rsn_ccmp_suite, 4U);
+	kern_memcpy(output + 4U, rsn_ccmp_suite, 4U);
 	put_le16(output + 8U, 1U);
-	memcpy(output + 10U, rsn_ccmp_suite, 4U);
+	kern_memcpy(output + 10U, rsn_ccmp_suite, 4U);
 	put_le16(output + 14U, 1U);
-	memcpy(output + 16U, rsn_psk_suite, 4U);
+	kern_memcpy(output + 16U, rsn_psk_suite, 4U);
 	put_le16(output + 20U, 0U);
 	*result_length = WLAN_WPA2_RSN_IE_LENGTH;
 
@@ -355,16 +355,16 @@ wlan_wpa2_assoc_request_build(
 	/* Appends the SSID and the rate elements. */
 	output[length++] = IEEE80211_IE_SSID;
 	output[length++] = (uint8_t)ssid_length;
-	memcpy(output + length, ssid, ssid_length);
+	kern_memcpy(output + length, ssid, ssid_length);
 	length += ssid_length;
 	output[length++] = IEEE80211_IE_SUPPORTED_RATES;
 	output[length++] = (uint8_t)first_rates;
-	memcpy(output + length, rates, first_rates);
+	kern_memcpy(output + length, rates, first_rates);
 	length += first_rates;
 	if (rate_count > first_rates) {
 		output[length++] = IEEE80211_IE_EXTENDED_RATES;
 		output[length++] = (uint8_t)(rate_count - first_rates);
-		memcpy(output + length, rates + first_rates,
+		kern_memcpy(output + length, rates + first_rates,
 		    rate_count - first_rates);
 		length += rate_count - first_rates;
 	}
@@ -501,19 +501,19 @@ wlan_wpa2_eapol_key_parse(
 		return EINVAL;
 
 	/* Takes the fixed fields. */
-	memset(&parsed, 0, sizeof(parsed));
+	kern_memset(&parsed, 0, sizeof(parsed));
 	parsed.protocol_version = frame[0];
 	parsed.message = key_info_message(get_be16(frame + 5U));
 	parsed.key_length = get_be16(frame + 7U);
 	parsed.replay_counter = get_be64(frame + 9U);
-	memcpy(parsed.nonce, frame + 17U, sizeof(parsed.nonce));
-	memcpy(parsed.iv, frame + 49U, sizeof(parsed.iv));
-	memcpy(parsed.rsc, frame + 65U, sizeof(parsed.rsc));
+	kern_memcpy(parsed.nonce, frame + 17U, sizeof(parsed.nonce));
+	kern_memcpy(parsed.iv, frame + 49U, sizeof(parsed.iv));
+	kern_memcpy(parsed.rsc, frame + 65U, sizeof(parsed.rsc));
 
 	/* The 8-octet Key ID/reserved field is unused by RSN and must be zero. */
 	if (!all_zero(frame + 73U, 8U))
 		return EINVAL;
-	memcpy(parsed.mic, frame + 81U, sizeof(parsed.mic));
+	kern_memcpy(parsed.mic, frame + 81U, sizeof(parsed.mic));
 
 	/* The key data must fill the rest of the body exactly. */
 	key_data_length = get_be16(frame + 97U);
@@ -555,7 +555,7 @@ wlan_wpa2_eapol_key_build(
 		return ENOSPC;
 
 	/* Writes the header and the fixed fields. */
-	memset(output, 0, length);
+	kern_memset(output, 0, length);
 	output[0] = key->protocol_version;
 	output[1] = EAPOL_PACKET_KEY;
 	put_be16(output + 2U,
@@ -564,15 +564,15 @@ wlan_wpa2_eapol_key_build(
 	put_be16(output + 5U, message_key_info(key->message));
 	put_be16(output + 7U, key->key_length);
 	put_be64(output + 9U, key->replay_counter);
-	memcpy(output + 17U, key->nonce, sizeof(key->nonce));
-	memcpy(output + 49U, key->iv, sizeof(key->iv));
-	memcpy(output + 65U, key->rsc, sizeof(key->rsc));
-	memcpy(output + 81U, key->mic, sizeof(key->mic));
+	kern_memcpy(output + 17U, key->nonce, sizeof(key->nonce));
+	kern_memcpy(output + 49U, key->iv, sizeof(key->iv));
+	kern_memcpy(output + 65U, key->rsc, sizeof(key->rsc));
+	kern_memcpy(output + 81U, key->mic, sizeof(key->mic));
 
 	/* Appends the key data. */
 	put_be16(output + 97U, (uint16_t)key->key_data_length);
 	if (key->key_data_length != 0U)
-		memcpy(output + 99U, key->key_data, key->key_data_length);
+		kern_memcpy(output + 99U, key->key_data, key->key_data_length);
 	*result_length = length;
 
 	/* Reports the built frame. */
@@ -643,13 +643,13 @@ wlan_wpa2_m3_plaintext_build(
 		return ENOSPC;
 
 	/* Writes the selected RSN element and the GTK KDE. */
-	memcpy(output, selected_rsn_ie, sizeof(selected_rsn_ie));
+	kern_memcpy(output, selected_rsn_ie, sizeof(selected_rsn_ie));
 	output[22] = IEEE80211_IE_VENDOR;
 	output[23] = 22U;
-	memcpy(output + 24U, rsn_gtk_kde, sizeof(rsn_gtk_kde));
+	kern_memcpy(output + 24U, rsn_gtk_kde, sizeof(rsn_gtk_kde));
 	output[28] = key_index;
 	output[29] = 0U;
-	memcpy(output + 30U, gtk, WLAN_WPA2_GTK_LENGTH);
+	kern_memcpy(output + 30U, gtk, WLAN_WPA2_GTK_LENGTH);
 
 	/* Canonical KDE padding: vendor-specific ID, zero length. */
 	output[46] = IEEE80211_IE_VENDOR;
@@ -686,13 +686,13 @@ wlan_wpa2_group_plaintext_build(
 	/* Writes the GTK KDE followed by the canonical padding. */
 	output[0] = IEEE80211_IE_VENDOR;
 	output[1] = 22U;
-	memcpy(output + 2U, rsn_gtk_kde, sizeof(rsn_gtk_kde));
+	kern_memcpy(output + 2U, rsn_gtk_kde, sizeof(rsn_gtk_kde));
 	output[6] = key_index;
 	output[7] = 0U;
-	memcpy(output + 8U, gtk, WLAN_WPA2_GTK_LENGTH);
+	kern_memcpy(output + 8U, gtk, WLAN_WPA2_GTK_LENGTH);
 	output[24] = IEEE80211_IE_VENDOR;
 	output[25] = 0U;
-	memset(output + 26U, 0, length - 26U);
+	kern_memset(output + 26U, 0, length - 26U);
 	*result_length = length;
 
 	/* Reports the built plaintext. */
@@ -811,7 +811,7 @@ same_address(
 	const uint8_t *right)
 {
 	/* Reports equality of every byte. */
-	if (memcmp(left, right, WLAN_WPA2_MAC_LENGTH) != 0)
+	if (kern_memcmp(left, right, WLAN_WPA2_MAC_LENGTH) != 0)
 		return 0;
 	return 1;
 }
@@ -838,11 +838,11 @@ management_header_build(
 		return ENOSPC;
 
 	/* Writes the header with a zero duration and fragment number. */
-	memset(output, 0, IEEE80211_HEADER_LENGTH);
+	kern_memset(output, 0, IEEE80211_HEADER_LENGTH);
 	put_le16(output, frame_control);
-	memcpy(output + 4U, destination, WLAN_WPA2_MAC_LENGTH);
-	memcpy(output + 10U, source, WLAN_WPA2_MAC_LENGTH);
-	memcpy(output + 16U, bssid, WLAN_WPA2_MAC_LENGTH);
+	kern_memcpy(output + 4U, destination, WLAN_WPA2_MAC_LENGTH);
+	kern_memcpy(output + 10U, source, WLAN_WPA2_MAC_LENGTH);
+	kern_memcpy(output + 16U, bssid, WLAN_WPA2_MAC_LENGTH);
 	put_le16(output + 22U, (uint16_t)(sequence_number << 4));
 
 	/* Reports the written header. */
@@ -892,7 +892,7 @@ suite_is(
 	const uint8_t expected[4])
 {
 	/* Reports equality of all four bytes. */
-	if (memcmp(suite, expected, 4U) != 0)
+	if (kern_memcmp(suite, expected, 4U) != 0)
 		return 0;
 	return 1;
 }
@@ -1014,7 +1014,7 @@ eapol_key_fields_valid(
 		if (wlan_wpa2_rsn_select_ccmp_psk(key->key_data,
 		    key->key_data_length) != 0)
 			return 0;
-		if (memcmp(key->key_data, selected_rsn_ie,
+		if (kern_memcmp(key->key_data, selected_rsn_ie,
 		    WLAN_WPA2_RSN_IE_LENGTH) != 0)
 			return 0;
 		return 1;
@@ -1129,7 +1129,7 @@ key_plaintext_parse(
 	    (length & 7U) != 0U ||
 	    length > WLAN_WPA2_EAPOL_KEY_DATA_MAX)
 		return EINVAL;
-	memset(&parsed, 0, sizeof(parsed));
+	kern_memset(&parsed, 0, sizeof(parsed));
 
 	/* Walks the elements up to the padding. */
 	while (offset < length) {
@@ -1180,11 +1180,11 @@ key_plaintext_parse(
 			    body[5] != 0U)
 				return EINVAL;
 			parsed.key_index = key_info & 3U;
-			memcpy(parsed.key, body + 6U, sizeof(parsed.key));
+			kern_memcpy(parsed.key, body + 6U, sizeof(parsed.key));
 			have_gtk = 1;
 		} else if (identifier == IEEE80211_IE_VENDOR &&
 		    ie_length >= 4U &&
-		    memcmp(body, rsn_gtk_kde, 3U) == 0) {
+		    kern_memcmp(body, rsn_gtk_kde, 3U) == 0) {
 			/*
 			 * Authenticated RSN key data is extensible.  A KDE with
 			 * the standard RSN OUI but an unimplemented data type

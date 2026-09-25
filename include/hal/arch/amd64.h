@@ -9,6 +9,13 @@
 #define HAL_HAL_ARCH_AMD64_H
 
 /*
+ * The periodic tick, in hertz.  Every time the kernel keeps is counted in
+ * these ticks, and every conversion to and from milliseconds uses this value.
+ * Vulkan rendering on the desktop wants a millisecond tick.
+ */
+#define HAL_TIMER_FREQUENCY	(1000U)
+
+/*
  * Signal Frame
  */
 

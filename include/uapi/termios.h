@@ -9,7 +9,7 @@
 #define KERN_UAPI_TERMIOS_H
 
 #include <stdint.h>
-#include <sys/ioctl.h>
+#include <uapi/ioctl.h>
 
 #define VINTR	0
 #define VQUIT	1

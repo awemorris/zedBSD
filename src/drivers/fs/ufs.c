@@ -43,13 +43,14 @@
 #include <kern/pmem.h>
 #include <kern/inode.h>
 #include <kern/quota.h>
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <limits.h>
+#include <uapi/limits.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
-#include <sys/statvfs.h>
+#include <uapi/statvfs.h>
 #include <uapi/blkid.h>
 #include <uapi/quota.h>
 #include <uapi/snapshot.h>
@@ -288,6 +289,81 @@ struct ufs_io_owner {
 	const struct io_context *context;
 };
 
+/*
+ * The batched metadata journal (v3).
+ *
+ * Metadata writes are pinned in the buffer cache and gathered into a
+ * running transaction; a commit writes their current contents into one of
+ * two slots of a journal file, flushes, writes a commit record, flushes,
+ * and unpins them for the flusher to write home.  See ws060-p002.
+ */
+#define J3_NAME			".ufs-journal"
+#define J3_DEFAULT_MAX_MIB	128U
+#define J3_MAX_MIB		1024U
+#define J3_RANGES_MIN		2048U
+#define J3_RANGES_LIMIT		65536U
+#define J3_DESC_HEADER		64U
+#define J3_DESC_ENTRY		16U
+#define J3_EXTENT_ENTRY		16U
+#define J3_HEADER_FIXED		64U
+#define J3_STAGING_SECTORS	128U
+#define J3_FREED_MAX		16384U
+#define J3_HEADER_MAGIC		0x334a555aU	/* "ZUJ3" */
+#define J3_DESC_MAGIC		0x33444a5aU	/* "ZJD3" */
+#define J3_COMMIT_MAGIC		0x33434a5aU	/* "ZJC3" */
+#define J3_LOCATOR_MAGIC	0x4c334a5aU	/* "ZJ3L" */
+#define J3_REQUEST_MAGIC	0x52334a5aU	/* "ZJ3R" */
+#define J3_VERSION		2U
+#define J3_REQUEST_VERSION	1U
+#define J3_LOCATOR_OFFSET	1220U
+#define J3_REQUEST_OFFSET	1248U
+
+/* One range of a running transaction; a hold is pinned but not logged. */
+struct ufs_j3_range {
+	uint64_t lba;
+	uint32_t count;
+	uint32_t hold;
+};
+
+/* One run of the journal file's sectors on the disk. */
+struct ufs_j3_extent {
+	uint64_t file_sector;
+	uint64_t lba;
+	uint32_t count;
+};
+
+struct ufs_j3 {
+	/* The journal carries the metadata writes of the mount. */
+	int active;
+	/* The volume has a v3 journal: a locator names a valid header. */
+	int present;
+	/* The internal handling of the journal file may look the name up. */
+	int creating;
+	struct mutex lock;
+	uint64_t header_fragment;
+	uint64_t nonce;
+	uint64_t applied;
+	uint64_t sequence;
+	uint64_t total_sectors;
+	uint32_t block_sectors;
+	uint32_t header_sectors;
+	uint32_t slot_sectors;
+	uint32_t payload_max;
+	uint32_t ranges_max;
+	uint32_t desc_sectors_max;
+	struct ufs_j3_extent *extents;
+	unsigned extent_count;
+	struct ufs_j3_range *ranges;
+	unsigned range_count;
+	uint32_t logged_sectors;
+	unsigned *index;
+	uint64_t *freed;
+	unsigned freed_count;
+	uint8_t *staging;
+	/* The mount the flusher's hook commits for, while it is registered. */
+	struct mount *mountp;
+};
+
 /* Share internal object layouts with production-linked lifetime fixtures. */
 struct ufs_mount_state {
 	/* Each borrowed context is protected by its corresponding I/O lock. */
@@ -314,6 +390,10 @@ struct ufs_mount_state {
 	struct mutex snapshot_lock;
 	struct quota_state quota;
 	int journal_enabled;
+	/* The volume's writes are delayed in the buffer cache (DISK_WRITE_CACHED). */
+	int write_cached;
+	/* The batched metadata journal. */
+	struct ufs_j3 j3;
 	int snapshot_available;
 	int writable;
 };
@@ -430,6 +510,21 @@ struct ufs_remove_group {
 	uint8_t *parent_dinode;
 };
 
+/*
+ * What adding a name to a directory changed, so that a failure can undo it.
+ * It lives on the stack of one addition, under the directory's lock.
+ */
+struct dir_addition {
+	uint64_t fragment;	/* the block the record was written to */
+	uint64_t old_direct;	/* that block's pointer before the addition */
+	uint64_t allocated;	/* a block taken for the record, or 0 */
+	uint64_t old_blocks;	/* the directory's block count before */
+	off_t old_size;		/* the directory's size before */
+	uint32_t edited;	/* the index of the block written */
+	int fresh;		/* the block held no records before */
+	int written;		/* a write of the block was attempted */
+};
+
 struct ufs_link_group {
 	struct ufs_metadata_images images;
 	struct ufs_inode_info directory_image;
@@ -446,6 +541,8 @@ struct ufs_rename_group {
 	struct ufs_inode_info new_image;
 	struct ufs_inode_info target_image;
 	uint8_t *memory;
+	uint32_t old_index;	/* the old parent's block holding the old name */
+	uint32_t new_index;	/* the new parent's block the new name goes in */
 };
 
 struct ufs_orphan_scan {
@@ -504,7 +601,8 @@ static int journal_flush(void *context);
 static ssize_t pwrite_inode(struct inode *inode, const void *buffer, size_t length, off_t offset);
 static ssize_t pwrite_inode_context(struct inode *inode, const void *buffer, size_t length, off_t offset, const struct io_context *context);
 static ssize_t ufs_pwrite_context(struct file *file, const void *buffer, size_t length, off_t offset, unsigned flags, const struct ucred *credential, const struct io_context *context);
-static int write_sectors_impl(struct mount *mountp, uint64_t lba, uint32_t count, const void *buffer, const struct io_context *context);
+static int write_sectors_impl(struct mount *mountp, uint64_t lba, uint32_t count, const void *buffer, const struct io_context *context, int content);
+static int write_content_sectors_context(struct mount *mountp, uint64_t lba, uint32_t count, const void *buffer, const struct io_context *context);
 static int write_sectors_context(struct mount *mountp, uint64_t lba, uint32_t count, const void *buffer, const struct io_context *context);
 static int write_sectors(struct mount *mountp, uint64_t lba, uint32_t count, const void *buffer);
 static int observed_disk_read(struct disk *disk, uint64_t block, uint32_t count, void *buffer);
@@ -571,6 +669,7 @@ static int ufs_backing_lock(struct file *file, struct ufs_mount_state **result);
 static int ufs_metadata_tree(struct mount *mountp, uint64_t fragment, unsigned depth, uint64_t blocks, file_metadata_extent_cb callback, void *context);
 static int ufs_file_metadata_extents(struct file *file, file_metadata_extent_cb callback, void *context);
 static int bmap_ensure(struct inode *inode, uint64_t logical, uint64_t *result);
+static int pread_edge(struct inode *inode, uint64_t fragment, size_t within, size_t wanted, uint8_t *buffer, size_t *amount);
 static ssize_t pread_inode(struct inode *inode, void *buffer, size_t length, off_t offset);
 static void metadata_images_init(struct ufs_metadata_images *images, struct mount *mountp, uint8_t *memory, size_t bytes);
 static int metadata_image_get(struct ufs_metadata_images *images, uint64_t fragment, uint8_t **result);
@@ -606,8 +705,21 @@ static int next_dirent(struct inode *directory, off_t *cursor, uint32_t *number,
 static uint16_t dir_minimum(uint8_t length);
 static uint8_t dir_type(enum inode_type type);
 static int restore_directory_block(struct inode *directory, uint64_t fragment, const uint8_t *original, int original_error);
-static int dir_find_record(struct inode *directory, const struct componentname *name, uint8_t *block, uint32_t *offset, uint32_t *previous, uint32_t *number);
+static int dir_check_size(struct inode *directory);
+static uint32_t dir_block_count(struct inode *directory);
+static uint32_t dir_block_length(struct inode *directory, uint32_t index);
+static int dir_check_record(const struct ufs_mount_state *ms, const uint8_t *block, uint32_t length, uint32_t pos);
+static int dir_find_in_block(const struct ufs_mount_state *ms, const uint8_t *block, uint32_t length, const struct componentname *name, uint32_t *offset, uint32_t *previous, uint32_t *number);
+static int dir_find_record(struct inode *directory, const struct componentname *name, uint8_t *block, uint32_t *index, uint32_t *offset, uint32_t *previous, uint32_t *number);
+static int dir_find_slack(const struct ufs_mount_state *ms, const uint8_t *block, uint32_t length, uint16_t need, uint32_t *offset);
+static void dir_put_record(const struct ufs_mount_state *ms, uint8_t *block, uint32_t at, uint32_t number, uint16_t reclen, uint8_t type, const struct componentname *name);
 static int dir_add(struct inode *directory, const struct componentname *name, uint32_t number, uint8_t type);
+static int dir_add_place(struct inode *directory, const struct componentname *name, uint32_t number, uint8_t type, uint8_t *block, uint8_t *original, struct dir_addition *change);
+static int dir_add_finish(struct inode *directory, const struct dir_addition *change, const uint8_t *original, int error);
+static int directory_next_block(struct inode *inode, uint32_t *slot);
+static int directory_insert_block(struct inode *directory, const struct componentname *name, uint8_t *scratch, uint32_t *index, int *grow);
+static int directory_insert_prepare(struct inode *directory, const struct componentname *name, uint32_t *index);
+static int rename_blocks_prepare(struct inode *old_directory, const struct componentname *old_name, struct inode *new_directory, const struct componentname *new_name, struct inode *target, struct ufs_rename_group *group);
 static int dir_remove(struct inode *directory, const struct componentname *name, uint32_t *number);
 static int dir_replace(struct inode *directory, const struct componentname *name, uint32_t number, uint8_t type, uint32_t *old_number, uint8_t *old_type);
 static int name_is_dot(const struct componentname *name);
@@ -620,13 +732,13 @@ static int new_inode(struct inode *directory, const struct inode_creation_reques
 static int ufs_lookup_locked(struct inode *directory, const struct componentname *component, struct inode **result);
 static int remove_group_locked(struct inode *directory, const struct componentname *name, struct inode *target, struct ufs_remove_group *group);
 static int remove_group(struct inode *directory, const struct componentname *name, struct inode *target, int *handled);
-static int directory_image_insert(struct inode *directory, const struct componentname *name, struct inode *target, uint8_t *block);
-static int link_group_locked(struct inode *directory, const struct componentname *name, struct inode *target, struct ufs_link_group *group);
+static int directory_image_insert(struct inode *directory, const struct componentname *name, struct inode *target, uint8_t *block, uint32_t index);
+static int link_group_locked(struct inode *directory, const struct componentname *name, struct inode *target, struct ufs_link_group *group, uint32_t index);
 static int link_group(struct inode *directory, const struct componentname *name, struct inode *target, int *handled);
-static int directory_image_change(struct inode *directory, uint8_t *block, const struct componentname *name, uint32_t expected, uint32_t replacement, uint8_t type);
+static int directory_image_change(struct inode *directory, uint8_t *block, uint32_t index, const struct componentname *name, uint32_t expected, uint32_t replacement, uint8_t type);
 static int rename_group_locked(struct inode *old_directory, const struct componentname *old_name, struct inode *new_directory, const struct componentname *new_name, struct inode *source, struct inode *target, struct ufs_rename_group *group);
 static int rename_group(struct inode *old_directory, const struct componentname *old_name, struct inode *new_directory, const struct componentname *new_name, struct inode *source, struct inode *target, int *handled);
-static int creation_group_locked(struct inode *directory, const struct componentname *name, struct inode *target, struct ufs_link_group *group);
+static int creation_group_locked(struct inode *directory, const struct componentname *name, struct inode *target, struct ufs_link_group *group, uint32_t index);
 static int creation_group(struct inode *directory, const struct componentname *name, struct inode *target, struct ufs_transaction_outcome *outcome);
 static int creation_publish(struct inode *directory, const struct componentname *name, struct inode *target, struct inode **result);
 static int ufs_create(struct inode *directory, const struct componentname *name, const struct inode_creation_request *request, struct inode **result);
@@ -666,6 +778,17 @@ static char ufs_identity_hex(unsigned value);
 static void ufs_identity_hex32(char output[8], uint32_t value);
 static void ufs_identity_label(char *output, size_t capacity, const uint8_t *input, size_t length);
 static int ufs_write_clean(struct mount *mountp, uint8_t clean);
+static int order_barrier(struct mount *mountp);
+static int j3_write(struct ufs_mount_state *ms, struct mount *mountp, uint64_t lba, uint32_t count, const void *buffer, int content);
+static int j3_commit_locked(struct ufs_mount_state *ms, struct mount *mountp);
+static int j3_commit(struct ufs_mount_state *ms, struct mount *mountp);
+static void j3_hook(void *argument);
+static int j3_replay(struct mount *mountp, struct ufs_mount_state *ms);
+static int j3_open(struct mount *mountp, struct ufs_mount_state *ms, struct inode *root);
+static int j3_close(struct mount *mountp, struct ufs_mount_state *ms, int commit);
+static void j3_freed_add(struct ufs_mount_state *ms, uint64_t fragment);
+static int j3_hidden(const struct inode *directory, const struct componentname *component);
+static int write_cached_intended(const struct mount *mountp, const struct ufs_mount_state *ms);
 static int ufs_probe(struct disk *disk);
 static int ufs_quota_rebuild(struct mount *mountp);
 static int ufs_quota_load(struct mount *mountp, struct inode *root);
@@ -810,7 +933,7 @@ drv_ufs_journal_init(
 		return EINVAL;	/* Failed. */
 
 	/* Records the geometry and the device this journal runs over. */
-	memset(journal, 0, sizeof(*journal));
+	kern_memset(journal, 0, sizeof(*journal));
 	journal->io = *io;
 	journal->first_sector = first;
 	journal->sector_count = count;
@@ -922,7 +1045,7 @@ drv_ufs_journal_publishv(
 		return EOVERFLOW;
 
 	/* Builds the descriptor that names the group and its targets. */
-	memset(descriptor, 0, sizeof(descriptor));
+	kern_memset(descriptor, 0, sizeof(descriptor));
 
 	/* The magic word and version a reader identifies the group by. */
 	put32(descriptor, DESC_MAGIC);
@@ -991,7 +1114,7 @@ drv_ufs_journal_publishv(
 	/* Seals the descriptor with a checksum over everything it names. */
 	put32(descriptor + 28, group_checksum(descriptor));
 
-	memset(commit, 0, sizeof(commit));
+	kern_memset(commit, 0, sizeof(commit));
 
 	/* The magic word and version a reader identifies the commit by. */
 	put32(commit, COMMIT_MAGIC);
@@ -1383,7 +1506,7 @@ drv_ufs_journal_read(
 		/* A bound image serves the payload instead of the device. */
 		if (journal->image_valid &&
 		    source >= journal->first_sector + 1U) {
-			memcpy((uint8_t *)buffer + (size_t)done * SECTOR_SIZE,
+			kern_memcpy((uint8_t *)buffer + (size_t)done * SECTOR_SIZE,
 			       journal->image +
 			       (size_t)(source -
 					journal->first_sector) *
@@ -1721,7 +1844,7 @@ drv_ufs_journal_view_release(
 	if (view == NULL || view->journal == NULL)
 		return;
 	journal = view->journal;
-	memset(view, 0, sizeof(*view));
+	kern_memset(view, 0, sizeof(*view));
 	(void)__atomic_fetch_sub(&journal->image_readers, 1U, __ATOMIC_RELEASE);
 }
 
@@ -1765,7 +1888,7 @@ drv_ufs_snapshot_init(
 	records = (sectors - 1U) / 2U;
 	if (records == 0 || map_count < (size_t)records * 2U)
 		return EINVAL;
-	memset(snapshot, 0, sizeof(*snapshot));
+	kern_memset(snapshot, 0, sizeof(*snapshot));
 	snapshot->io = *io;
 	snapshot->volume_sectors = volume;
 	snapshot->first_sector = first;
@@ -1816,7 +1939,7 @@ drv_ufs_snapshot_open(
 		return error;
 
 	/* Compares the sector against the snapshot control signature. */
-	signature = memcmp(control, "ZSN1", 4);
+	signature = kern_memcmp(control, "ZSN1", 4);
 
 	/* A sector without the signature carries no snapshot. */
 	if (signature != 0)
@@ -2046,7 +2169,7 @@ drv_ufs_snapshot_preserve(
 					   1, data);
 		if (error == 0)
 			error = snapshot->io.flush(snapshot->io.context);
-		memset(header, 0, sizeof(header));
+		kern_memset(header, 0, sizeof(header));
 
 		/* The magic word and version a reader identifies it by. */
 		snapshot_put32(header, RECORD_MAGIC);
@@ -2220,7 +2343,7 @@ drv_ufs_super_decode(
 		return EOPNOTSUPP;
 	}
 
-	memset(super, 0, sizeof(*super));
+	kern_memset(super, 0, sizeof(*super));
 
 	/* Where the superblock itself sits inside a cylinder group. */
 	super->sblkno = drv_ufs_get32(buffer, UFS_FS_SBLKNO, swapped);
@@ -2566,7 +2689,7 @@ ufs_identify(
 		return error;
 	}
 
-	strcpy(identity->type, "ufs");
+	kern_strcpy(identity->type, "ufs");
 	identity->flags |= KERN_BLKID_TYPE;
 	first = drv_ufs_get32(buffer, UFS_FS_ID, super.swapped);
 
@@ -2801,7 +2924,7 @@ journal_image_alloc(
 	/*
 	 * Obtains backing without holding a metadata or journal mutation lock.
 	 */
-	memset(&memory, 0, sizeof(memory));
+	kern_memset(&memory, 0, sizeof(memory));
 
 	/* Takes the physical memory the journal image lives in. */
 	error = kern_pmem_alloc(UFS_JOURNAL_IMAGE_BYTES, KERN_PAGE_SIZE,
@@ -2887,7 +3010,7 @@ journal_image_free(
 	if (released != 0)
 		KERN_FATAL("ufs journal backing release failed");
 	cache_memory_release(CACHE_MEMORY_BUF_META, bytes);
-	memset(&ms->journal_memory, 0, sizeof(ms->journal_memory));
+	kern_memset(&ms->journal_memory, 0, sizeof(ms->journal_memory));
 	ms->journal.image = NULL;
 	ms->journal.image_valid = 0;
 }
@@ -2920,8 +3043,8 @@ journal_discover(
 		return error;
 
 	/* Compares the sector against the old and the current signature. */
-	old_signature = memcmp(locator, "ZUJ", 3);
-	signature = memcmp(locator, "ZUJ2", 4);
+	old_signature = kern_memcmp(locator, "ZUJ", 3);
+	signature = kern_memcmp(locator, "ZUJ2", 4);
 
 	/* Refuses a journal written by a version this driver cannot read. */
 	if (old_signature == 0 && signature != 0)
@@ -3019,7 +3142,7 @@ snapshot_discover(
 		return error;
 
 	/* Compares the sector against the journal signature. */
-	signature = memcmp(locator, "ZUJ2", 4);
+	signature = kern_memcmp(locator, "ZUJ2", 4);
 
 	/* A journal locator sits in front of the snapshot one. */
 	if (signature == 0) {
@@ -3060,7 +3183,7 @@ snapshot_discover(
 		return error;
 
 	/* Compares the sector against the snapshot locator signature. */
-	signature = memcmp(locator, "ZSL1", 4);
+	signature = kern_memcmp(locator, "ZSL1", 4);
 
 	/* A sector without the signature carries no snapshot. */
 	if (signature != 0)
@@ -3155,7 +3278,8 @@ write_sectors_impl(
 	uint64_t lba,
 	uint32_t count,
 	const void *buffer,
-	const struct io_context *context)
+	const struct io_context *context,
+	int content)
 {
 	struct ufs_mount_state *ms;
 	int snapshot_locked = 0;
@@ -3181,6 +3305,18 @@ write_sectors_impl(
 			/* Failed: nothing has been written yet. */
 			return error;
 		}
+	}
+
+	/* The batched journal takes the write into its running transaction. */
+	if (ms != NULL && ms->j3.active) {
+		error = j3_write(ms, mountp, lba, count, buffer, content);
+
+		/* Releases the snapshot hold the preservation took. */
+		if (snapshot_locked)
+			mutex_unlock(&ms->snapshot_lock);
+
+		/* Reports how the write went. */
+		return error;
 	}
 
 	/*
@@ -3241,7 +3377,7 @@ write_sectors_context(
 	if (error != 0)
 		return error;
 	io_epoch_begin(&mountp->m_write_epoch);
-	error = write_sectors_impl(mountp, lba, count, buffer, &child);
+	error = write_sectors_impl(mountp, lba, count, buffer, &child, 0);
 	io_epoch_end(&mountp->m_write_epoch);
 
 	/* Reports the failure. */
@@ -3250,6 +3386,33 @@ write_sectors_context(
 
 	/* Succeeded. */
 	return 0;
+}
+
+/*
+ * Writes file content, which a batched journal does not carry, in the
+ * caller's ordering context.
+ */
+static int
+write_content_sectors_context(
+	struct mount *mountp,
+	uint64_t lba,
+	uint32_t count,
+	const void *buffer,
+	const struct io_context *context)
+{
+	struct io_context child;
+	int error;
+
+	/* Opens an ordered child context, so the sectors are written in order. */
+	error = io_context_child(&child, context, IO_CONTEXT_ORDERED);
+	if (error != 0)
+		return error;
+	io_epoch_begin(&mountp->m_write_epoch);
+	error = write_sectors_impl(mountp, lba, count, buffer, &child, 1);
+	io_epoch_end(&mountp->m_write_epoch);
+
+	/* Reports how the write went. */
+	return error;
 }
 
 /* Writes sectors through the mount's own ordering context. */
@@ -3391,7 +3554,7 @@ read_block(
 
 	/* A fragment of zero names a hole, which reads as zeroes. */
 	if (fragment == 0) {
-		memset(buffer, 0, s->bsize);
+		kern_memset(buffer, 0, s->bsize);
 
 		/* Succeeded. */
 		return 0;
@@ -3469,13 +3632,18 @@ write_content_block(
 	int error;
 	const struct ufs_super *s = &state(mountp)->super;
 
-	/* A fragment outside the volume is not written to. */
-	if (fragment != 0 && fragment < s->size &&
-	    s->frag <= s->size - fragment)
-		io_stats_record(IO_UFS_CONTENT_WRITE, s->bsize);
+	/* Refuses a fragment that names no block of this volume. */
+	if (fragment == 0 || fragment >= s->size ||
+	    s->frag > s->size - fragment) {
+		/* Failed. */
+		return EIO;
+	}
+	io_stats_record(IO_UFS_CONTENT_WRITE, s->bsize);
 
-	/* Writes the block the fragment names. */
-	error = write_block(mountp, fragment, buffer);
+	/* Writes the block the fragment names as content. */
+	error = write_content_sectors_context(mountp,
+	    (uint64_t)fragment << s->fsbtodb, s->bsize / UFS_SECTOR_SIZE,
+	    buffer, NULL);
 
 	/* Reports how the write went. */
 	return error;
@@ -3503,7 +3671,7 @@ write_content_context(
 	io_stats_record(IO_UFS_CONTENT_WRITE, super->bsize);
 
 	/* Writes the sectors the fragment covers. */
-	error = write_sectors_context(
+	error = write_content_sectors_context(
 		mountp, fragment << super->fsbtodb,
 		super->bsize / UFS_SECTOR_SIZE, buffer, context);
 
@@ -4219,19 +4387,23 @@ allocate_block_compat(
 			 * Writes the cylinder group back with its new free map.
 			 */
 			error = write_cg(mountp);
-			if (error == 0) {
-				zero = kern_calloc(1, ms->super.bsize);
 
-				/*
-				 * Zeroes the block, because a caller may read
-				 * it before writing.
-				 */
-				absolute = cgstart(&ms->super, cg) + fragment;
+			/*
+			 * Zeroes the block, because a caller may read it
+			 * before writing.  The zeroes are content: a journal
+			 * need not log them, and they reach the device before
+			 * the commit that makes the block reachable.  The
+			 * journal's own file, which nothing reads, is not
+			 * zeroed.
+			 */
+			absolute = cgstart(&ms->super, cg) + fragment;
+			if (error == 0 && !ms->j3.creating) {
+				zero = kern_calloc(1, ms->super.bsize);
 				if (zero == NULL) {
 					error = ENOMEM;
 				} else {
-					error = write_block(mountp, absolute,
-							    zero);
+					error = write_content_block(mountp,
+					    absolute, zero);
 					kern_free(zero);
 				}
 			}
@@ -4468,6 +4640,13 @@ free_block(
 		ms->super.cstotal_nbfree = old_total;
 		error = write_cg_rollback(mountp, error);
 	}
+
+	/*
+	 * Keeps a block freed by the running transaction from reaching disk
+	 * with a new owner's content before the free is committed.
+	 */
+	if (error == 0 && ms->j3.active)
+		j3_freed_add(ms, fragment);
 
 	mutex_unlock(&ms->lock);
 
@@ -5227,8 +5406,8 @@ bmap_ensure(
 				 */
 				rollback_value = persist_inode(inode);
 				if (rollback_value == 0) {
-					rollback_value = disk_sync(
-						inode->i_mount->m_disk);
+					rollback_value = order_barrier(
+						inode->i_mount);
 				}
 
 				/* Only an unreachable block may be freed. */
@@ -5306,7 +5485,7 @@ bmap_ensure(
 			rollback_value = persist_inode(inode);
 			if (rollback_value == 0)
 				rollback_value =
-					disk_sync(inode->i_mount->m_disk);
+					order_barrier(inode->i_mount);
 
 			/* Only an unreachable block may be freed. */
 			if (rollback_value == 0) {
@@ -5383,7 +5562,7 @@ bmap_ensure(
 					drv_ufs_put64(block, (size_t)index * 8U, 0, s->swapped);
 					rollback_error = write_block(inode->i_mount, fragment, block);
 					if (rollback_error == 0) {
-						rollback_error = disk_sync(inode->i_mount->m_disk);
+						rollback_error = order_barrier(inode->i_mount);
 					}
 
 					/*
@@ -5590,6 +5769,11 @@ pread_inode(
 				(uint64_t)fragment << super->fsbtodb,
 				(uint32_t)(amount / UFS_SECTOR_SIZE),
 				(uint8_t *)buffer + done);
+		} else if (fragment != 0 &&
+		    pread_edge(inode, fragment, within,
+		    length - done, (uint8_t *)buffer + done, &amount) == 0) {
+			/* A few sectors of a block were read without staging. */
+			error = 0;
 		} else {
 			/*
 			 * Allocates edge scratch only when the request needs
@@ -5616,7 +5800,7 @@ pread_inode(
 			error = read_content_block(inode->i_mount, fragment,
 						   scratch);
 			if (error == 0) {
-				memcpy((uint8_t *)buffer + done,
+				kern_memcpy((uint8_t *)buffer + done,
 				       scratch + within, amount);
 			}
 		}
@@ -5641,6 +5825,51 @@ pread_inode(
 
 	/* Reports the successfully read prefix. */
 	return (ssize_t)done;
+}
+
+/*
+ * Reads a short piece of one block, only the sectors it covers, into the
+ * caller's buffer.  Reports ENOSPC when the piece spans more sectors than
+ * it stages on the stack, for the caller's whole-block path.
+ */
+static int
+pread_edge(
+	struct inode *inode,
+	uint64_t fragment,
+	size_t within,
+	size_t wanted,
+	uint8_t *buffer,
+	size_t *amount)
+{
+	const struct ufs_super *super;
+	uint8_t edge[4U * UFS_SECTOR_SIZE];
+	size_t first;
+	size_t sectors;
+	size_t length;
+	int error;
+
+	/* Clips the piece to the end of its block and counts its sectors. */
+	super = &state(inode->i_mount)->super;
+	length = super->bsize - within;
+	if (length > wanted)
+		length = wanted;
+	first = within / UFS_SECTOR_SIZE;
+	sectors = (within + length + UFS_SECTOR_SIZE - 1U) / UFS_SECTOR_SIZE -
+	    first;
+	if (sectors * UFS_SECTOR_SIZE > sizeof(edge))
+		return ENOSPC;
+
+	/* Reads the covering sectors and copies the piece out. */
+	io_stats_record(IO_UFS_CONTENT_READ, sectors * UFS_SECTOR_SIZE);
+	error = read_metadata_sectors(inode->i_mount,
+	    (fragment << super->fsbtodb) + first, (uint32_t)sectors, edge);
+	if (error != 0)
+		return error;
+	kern_memcpy(buffer, edge + within % UFS_SECTOR_SIZE, length);
+	*amount = length;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Locates the shared on-disk block containing a dinode. */
@@ -5728,7 +5957,7 @@ encode_inode_locked(
 
 	/* A device inode keeps its number where the first block would be. */
 	if (inode->i_type == INODE_CHAR || inode->i_type == INODE_BLOCK) {
-		memset(raw + UFS_DI_DB, 0, 120U);
+		kern_memset(raw + UFS_DI_DB, 0, 120U);
 
 		drv_ufs_put64(raw,
 			      UFS_DI_DB,
@@ -5745,8 +5974,8 @@ encode_inode_locked(
 	} else if (inode->i_type == INODE_SYMLINK &&
 		   (uint64_t)inode->i_size <= ms->super.maxsymlinklen &&
 		   inode->i_size <= 120) {
-		memset(raw + UFS_DI_DB, 0, 120U);
-		memcpy(raw + UFS_DI_DB, ui->shortlink, (size_t)inode->i_size);
+		kern_memset(raw + UFS_DI_DB, 0, 120U);
+		kern_memcpy(raw + UFS_DI_DB, ui->shortlink, (size_t)inode->i_size);
 	} else {
 		/* Writes the direct block pointers. */
 		for (n = 0; n < UFS_NDADDR; n++) {
@@ -5869,7 +6098,7 @@ metadata_group_commit(
 	/* Takes the mount state this call runs against. */
 	ms = state(mountp);
 
-	memset(outcome, 0, sizeof(*outcome));
+	kern_memset(outcome, 0, sizeof(*outcome));
 
 	/*
 	 * Carries the logical owner through every snapshot and journal
@@ -5987,7 +6216,7 @@ metadata_images_init(
 	/*
 	 * Initializes an empty owner without allocating or publishing metadata.
 	 */
-	memset(images, 0, sizeof(*images));
+	kern_memset(images, 0, sizeof(*images));
 	ms = state(mountp);
 	images->mountp = mountp;
 	images->memory = memory;
@@ -6243,7 +6472,7 @@ allocation_missing_path(
 	if (run->tree_memory == NULL)
 		return ENOMEM;
 
-	memset(run->tree_memory, 0, UFS_NIADDR * super->bsize);
+	kern_memset(run->tree_memory, 0, UFS_NIADDR * super->bsize);
 
 	/* Starts out with no level of the path recorded. */
 	for (n = 0; n < UFS_NIADDR; n++)
@@ -6251,7 +6480,7 @@ allocation_missing_path(
 
 	/* A path already recorded is not recorded twice. */
 	if (run->tree_count != 0)
-		memcpy(run->tree_images[0], run->old_leaf, super->bsize);
+		kern_memcpy(run->tree_images[0], run->old_leaf, super->bsize);
 
 	run->missing_nodes = depth;
 
@@ -6448,7 +6677,7 @@ allocation_run_leaf(
 
 	*count = n;
 
-	memcpy(run->new_leaf, run->old_leaf, super->bsize);
+	kern_memcpy(run->new_leaf, run->old_leaf, super->bsize);
 
 	/* Report a private, unpublished leaf image. */
 	return 0;
@@ -6558,7 +6787,7 @@ allocation_run_reserve(
 				return EIO;
 			}
 
-			memcpy(run->old_cg, ms->cg, ms->super.bsize);
+			kern_memcpy(run->old_cg, ms->cg, ms->super.bsize);
 			run->old_total = ms->super.cstotal_nbfree;
 			run->count = count;
 			run->first = cgstart(&ms->super, cg) + fragment;
@@ -6611,7 +6840,7 @@ allocation_run_abort(
 		if (error == 0)
 			error = persist_inode_locked(inode);
 		if (error == 0)
-			error = disk_sync(inode->i_mount->m_disk);
+			error = order_barrier(inode->i_mount);
 	}
 
 	/*
@@ -6629,13 +6858,13 @@ allocation_run_abort(
 	 * Restore allocation summaries only after no durable pointer can refer
 	 * here.
 	 */
-	memcpy(ms->cg, run->old_cg, ms->super.bsize);
+	kern_memcpy(ms->cg, run->old_cg, ms->super.bsize);
 	ms->super.cstotal_nbfree = run->old_total;
 
 	/* Writes the cylinder group back with the blocks freed. */
 	error = write_cg(inode->i_mount);
 	if (error == 0)
-		error = disk_sync(inode->i_mount->m_disk);
+		error = order_barrier(inode->i_mount);
 	if (error != 0)
 		ms->writable = 0;
 
@@ -6893,7 +7122,7 @@ allocation_write_run(
 	/* Writes the content of the run out to the volume. */
 	if (error == 0) {
 		io_stats_record(IO_UFS_CONTENT_WRITE, bytes);
-		error = write_sectors_context(inode->i_mount,
+		error = write_content_sectors_context(inode->i_mount,
 					      run->first << ms->super.fsbtodb,
 					      (uint32_t)(bytes / UFS_SECTOR_SIZE),
 					      buffer,
@@ -6901,14 +7130,14 @@ allocation_write_run(
 	}
 
 	if (error == 0)
-		error = disk_sync(inode->i_mount->m_disk);
+		error = order_barrier(inode->i_mount);
 
 	/*
 	 * Prepare the new inode and leaf without changing the published inode.
 	 */
 
 	ui = info(inode);
-	memcpy(&run->image, ui, sizeof(run->image));
+	kern_memcpy(&run->image, ui, sizeof(run->image));
 
 	/* A run that grew the tree publishes its new nodes as well. */
 	if (run->tree_count != 0) {
@@ -6986,7 +7215,7 @@ allocation_write_run(
 			error = persist_inode_locked(&run->image.inode);
 
 		if (error == 0)
-			error = disk_sync(inode->i_mount->m_disk);
+			error = order_barrier(inode->i_mount);
 	}
 
 	/*
@@ -6998,8 +7227,8 @@ allocation_write_run(
 	 * A committed group is durable even when the write reported an error.
 	 */
 	if (error == 0 || run->committed) {
-		memcpy(ui->direct, run->image.direct, sizeof(ui->direct));
-		memcpy(ui->indirect, run->image.indirect, sizeof(ui->indirect));
+		kern_memcpy(ui->direct, run->image.direct, sizeof(ui->direct));
+		kern_memcpy(ui->indirect, run->image.indirect, sizeof(ui->indirect));
 		ui->blocks = run->image.blocks;
 		inode->i_size = run->image.inode.i_size;
 		ms->rotor_cg = ms->active_cg;
@@ -7015,7 +7244,7 @@ allocation_write_run(
 		 * transaction.
 		 */
 		if (!run->uncertain) {
-			memcpy(ms->cg, run->old_cg, ms->super.bsize);
+			kern_memcpy(ms->cg, run->old_cg, ms->super.bsize);
 			ms->super.cstotal_nbfree = run->old_total;
 			ms->cg_dirty = 0;
 			retained = 0;
@@ -7168,8 +7397,8 @@ xattr_existing_locked(
 				return EIO;
 		}
 
-		memset(group->data, 0, ms->super.bsize);
-		memcpy(group->data, area, length);
+		kern_memset(group->data, 0, ms->super.bsize);
+		kern_memcpy(group->data, area, length);
 	}
 
 	/*
@@ -7208,7 +7437,7 @@ xattr_existing_locked(
 			error = load_cg_locked(inode->i_mount, cg);
 			if (error != 0)
 				return error;
-			memcpy(group->cg[slot], ms->cg, ms->super.bsize);
+			kern_memcpy(group->cg[slot], ms->cg, ms->super.bsize);
 			group->groups[slot] = cg;
 			group->group_count++;
 		}
@@ -7247,8 +7476,8 @@ xattr_existing_locked(
 	 * Prepares the complete new serialized area and its remaining block
 	 * ownership.
 	 */
-	memcpy(&group->image, ui, sizeof(group->image));
-	memset(group->image.extattr, 0, sizeof(group->image.extattr));
+	kern_memcpy(&group->image, ui, sizeof(group->image));
+	kern_memset(group->image.extattr, 0, sizeof(group->image.extattr));
 
 	/* Keeps whichever attribute blocks the caller asked to retain. */
 	if (keep != 0)
@@ -7328,7 +7557,7 @@ xattr_existing_locked(
 	 * proven commit.
 	 */
 	if (outcome.committed) {
-		memcpy(ui->extattr, group->image.extattr, sizeof(ui->extattr));
+		kern_memcpy(ui->extattr, group->image.extattr, sizeof(ui->extattr));
 		ui->extattr_size = group->image.extattr_size;
 		ui->blocks = group->image.blocks;
 		ms->super.cstotal_nbfree += released;
@@ -7602,7 +7831,7 @@ initial_block_candidate(
 					return EIO;
 				}
 
-				memcpy(group->images.cg[0], ms->cg,
+				kern_memcpy(group->images.cg[0], ms->cg,
 				       ms->super.bsize);
 
 				/*
@@ -7654,7 +7883,7 @@ initial_block_locked(
 	struct ufs_inode_metadata_images *images;
 	struct ufs_journal_extent extents[4];
 	uint64_t dinode_fragment;
-	unsigned n;
+	uint32_t slot;
 	int error;
 
 	/*
@@ -7664,6 +7893,7 @@ initial_block_locked(
 	ms = state(inode->i_mount);
 	ui = info(inode);
 	images = &group->images;
+	slot = 0;
 
 	/* Refuses to write to a volume that is no longer writable. */
 	if (!ms->writable)
@@ -7685,29 +7915,10 @@ initial_block_locked(
 			return EIO;
 		}
 	} else {
-		/*
-		 * A directory block is only the first if the directory is still
-		 * empty.
-		 */
-		if (inode->i_type != INODE_DIR || inode->i_size != 0)
-			return EIO;
-
-		/* Refuses an inode that already names direct blocks. */
-		for (n = 0; n < UFS_NDADDR; n++) {
-			/*
-			 * A direct pointer that is filled means this is not the
-			 * first block.
-			 */
-			if (ui->direct[n] != 0)
-				return EIO;
-		}
-
-		/* Refuses an inode that already names indirect blocks. */
-		for (n = 0; n < UFS_NIADDR; n++) {
-			/* An indirect pointer that is filled means the same. */
-			if (ui->indirect[n] != 0)
-				return EIO;
-		}
+		/* A directory block is the one after the blocks its size covers. */
+		error = directory_next_block(inode, &slot);
+		if (error != 0)
+			return error;
 	}
 
 	/* Picks the block this allocation will take. */
@@ -7719,20 +7930,20 @@ initial_block_locked(
 	 * Prepares a fully initialized payload and a private reference to its
 	 * reservation.
 	 */
-	memset(images->data, 0, ms->super.bsize);
+	kern_memset(images->data, 0, ms->super.bsize);
 
 	/* A caller with data writes it into the block before publishing. */
 	if (length != 0)
-		memcpy(images->data, area, length);
+		kern_memcpy(images->data, area, length);
 
-	memcpy(&images->image, ui, sizeof(images->image));
+	kern_memcpy(&images->image, ui, sizeof(images->image));
 
 	/* An attribute block records its own length in the inode. */
 	if (kind == UFS_INITIAL_XATTR) {
 		images->image.extattr[0] = group->fragment;
 		images->image.extattr_size = (uint32_t)length;
 	} else {
-		images->image.direct[0] = group->fragment;
+		images->image.direct[slot] = group->fragment;
 	}
 
 	images->image.blocks += ms->super.bsize / UFS_SECTOR_SIZE;
@@ -7781,7 +7992,7 @@ initial_block_locked(
 	 * Makes the initialized area visible in RAM only after positive commit.
 	 */
 	if (group->outcome.committed) {
-		memcpy(ms->cg, images->cg[0], ms->super.bsize);
+		kern_memcpy(ms->cg, images->cg[0], ms->super.bsize);
 		ms->super.cstotal_nbfree--;
 		ms->rotor_cg = group->cg;
 
@@ -7790,7 +8001,7 @@ initial_block_locked(
 			ui->extattr[0] = group->fragment;
 			ui->extattr_size = (uint32_t)length;
 		} else {
-			ui->direct[0] = group->fragment;
+			ui->direct[slot] = group->fragment;
 		}
 
 		ui->blocks = images->image.blocks;
@@ -7949,7 +8160,64 @@ xattr_allocate_group(
 	return 0;
 }
 
-/* Allocates empty directory backing without publishing any directory entry. */
+/*
+ * Finds the slot of the block a directory grows into next.
+ *
+ * A directory grows by whole blocks once its size fills the ones it has, so
+ * the next block is the one its size would reach: every slot before it is
+ * filled, it and every slot after it are empty, and no indirect block is
+ * named.  Past the direct blocks the directory cannot grow here.
+ */
+static int
+directory_next_block(
+	struct inode *inode,
+	uint32_t *slot)
+{
+	struct ufs_mount_state *ms;
+	struct ufs_inode_info *ui;
+	uint32_t next;
+	uint32_t n;
+
+	/* Takes the mount state and the private inode. */
+	ms = state(inode->i_mount);
+	ui = info(inode);
+
+	/* Only a directory whose size fills whole blocks grows by one. */
+	if (inode->i_type != INODE_DIR || inode->i_size < 0)
+		return EIO;
+	if ((uint64_t)inode->i_size % ms->super.bsize != 0)
+		return EIO;
+
+	/* Refuses a directory that has used every direct block. */
+	next = (uint32_t)((uint64_t)inode->i_size / ms->super.bsize);
+	if (next >= UFS_NDADDR)
+		return ENOSPC;
+
+	/* The slots before the next one are filled, the rest are empty. */
+	for (n = 0; n < UFS_NDADDR; n++) {
+		/* A filled slot must be before the next one, an empty one not. */
+		if (n < next && ui->direct[n] == 0)
+			return EIO;
+		if (n >= next && ui->direct[n] != 0)
+			return EIO;
+	}
+
+	/* Refuses an inode that already names indirect blocks. */
+	for (n = 0; n < UFS_NIADDR; n++) {
+		/* A directory here never names one. */
+		if (ui->indirect[n] != 0)
+			return EIO;
+	}
+
+	/* Reports the slot the next block takes. */
+	*slot = next;
+	return 0;
+}
+
+/*
+ * Allocates the next empty block of a directory without publishing any
+ * directory entry.
+ */
 static int
 directory_backing_group(
 	struct inode *inode,
@@ -8098,7 +8366,7 @@ pwrite_inode_context(
 					   &mapping_error);
 		if (amount != 0) {
 			io_stats_record(IO_UFS_CONTENT_WRITE, amount);
-			error = write_sectors_context(
+			error = write_content_sectors_context(
 				inode->i_mount,
 				(uint64_t)fragment << ms->super.fsbtodb,
 				(uint32_t)(amount / UFS_SECTOR_SIZE),
@@ -8139,7 +8407,7 @@ pwrite_inode_context(
 					break;
 				}
 
-				memset(scratch, 0, ms->super.bsize);
+				kern_memset(scratch, 0, ms->super.bsize);
 			} else if (within != 0 || amount != ms->super.bsize) {
 				/*
 				 * Reads the block so the untouched bytes
@@ -8154,7 +8422,7 @@ pwrite_inode_context(
 			}
 
 			/* Lays the bytes into the block and writes it. */
-			memcpy(scratch + within, (const uint8_t *)buffer + done,
+			kern_memcpy(scratch + within, (const uint8_t *)buffer + done,
 			       amount);
 			error = write_content_context(inode->i_mount, fragment,
 						      scratch, context);
@@ -8297,7 +8565,7 @@ release_group_locked(
 	if (error != 0)
 		return error;
 
-	memcpy(group->cg, ms->cg, ms->super.bsize);
+	kern_memcpy(group->cg, ms->cg, ms->super.bsize);
 
 	/* Refuses a block the free map already calls free. */
 	for (n = 0; n < ms->super.frag; n++) {
@@ -8318,7 +8586,7 @@ release_group_locked(
 	 * Validates the current reference and changes only a private inode or
 	 * parent.
 	 */
-	memcpy(&group->image, ui, sizeof(group->image));
+	kern_memcpy(&group->image, ui, sizeof(group->image));
 
 	/* A block named by an indirect block is cleared inside it. */
 	if (parent != 0) {
@@ -8397,10 +8665,10 @@ release_group_locked(
 
 	/* Only a committed release may give the quota back. */
 	if (outcome.committed) {
-		memcpy(ms->cg, group->cg, ms->super.bsize);
+		kern_memcpy(ms->cg, group->cg, ms->super.bsize);
 		ms->super.cstotal_nbfree++;
-		memcpy(ui->direct, group->image.direct, sizeof(ui->direct));
-		memcpy(ui->indirect, group->image.indirect,
+		kern_memcpy(ui->direct, group->image.direct, sizeof(ui->direct));
+		kern_memcpy(ui->indirect, group->image.indirect,
 		       sizeof(ui->indirect));
 		ui->blocks = group->image.blocks;
 
@@ -8565,7 +8833,7 @@ detach_inode_block(
 	/* Publishes the inode with the pointer cleared. */
 	error = persist_inode(inode);
 	if (error == 0)
-		error = disk_sync(inode->i_mount->m_disk);
+		error = order_barrier(inode->i_mount);
 	if (error == 0) {
 		error = free_block(inode->i_mount, fragment, inode->i_uid,
 				   inode->i_gid);
@@ -8686,7 +8954,7 @@ truncate_indirect(
 		/* Writes the indirect block back with the entries cleared. */
 		error = write_block(inode->i_mount, root, block);
 		if (error == 0)
-			error = disk_sync(inode->i_mount->m_disk);
+			error = order_barrier(inode->i_mount);
 		if (error == 0) {
 			ui->blocks -= sectors;
 			error = free_block(inode->i_mount, child, inode->i_uid,
@@ -8768,7 +9036,7 @@ ufs_truncate(
 			error = read_content_block(inode->i_mount, fragment, block);
 			if (error != 0)
 				goto out;
-			memset(block + size % ms->super.bsize,
+			kern_memset(block + size % ms->super.bsize,
 			       0,
 			       ms->super.bsize - size % ms->super.bsize);
 
@@ -8981,7 +9249,7 @@ decode_inode_raw(
 	} else if (inode->i_type == INODE_SYMLINK &&
 		   (uint64_t)inode->i_size <= s->maxsymlinklen &&
 		   inode->i_size <= 120) {
-		memcpy(ui->shortlink, raw + UFS_DI_DB, sizeof(ui->shortlink));
+		kern_memcpy(ui->shortlink, raw + UFS_DI_DB, sizeof(ui->shortlink));
 	} else {
 		/* Reads the direct block pointers. */
 		for (n = 0; n < UFS_NDADDR; n++) {
@@ -9283,9 +9551,9 @@ next_dirent(
 	uint16_t reclen;
 	uint8_t namelen;
 	ssize_t count;
-	ssize_t read;
+	size_t wanted;
 	struct ufs_mount_state *ms;
-	uint8_t head[8];
+	uint8_t record[8U + NAME_MAX];
 	int error;
 
 	ms = state(directory->i_mount);
@@ -9318,16 +9586,22 @@ next_dirent(
 		if ((uint64_t)*cursor % UFS_DIRBLKSIZ > UFS_DIRBLKSIZ - 8U)
 			return EIO;
 
-		/* Reads the record header. */
-		count = pread_inode(directory, head, sizeof(head), *cursor);
-		if (count != sizeof(head))
+		/*
+		 * Reads the record header and as much of a name as the rest
+		 * of the directory block can hold, in one read.
+		 */
+		wanted = UFS_DIRBLKSIZ - (size_t)((uint64_t)*cursor % UFS_DIRBLKSIZ);
+		if (wanted > sizeof(record))
+			wanted = sizeof(record);
+		count = pread_inode(directory, record, wanted, *cursor);
+		if (count < 8)
 			return EIO;
-		*number = drv_ufs_get32(head, 0, ms->super.swapped);
-		reclen = drv_ufs_get16(head, 4, ms->super.swapped);
-		*type = head[6];
+		*number = drv_ufs_get32(record, 0, ms->super.swapped);
+		reclen = drv_ufs_get16(record, 4, ms->super.swapped);
+		*type = record[6];
 
 		/* The name length the header declares. */
-		namelen = head[7];
+		namelen = record[7];
 
 		/* A record shorter than its own header cannot be one. */
 		if (reclen < 8U)
@@ -9350,16 +9624,12 @@ next_dirent(
 		    (uint64_t)directory->i_size - (uint64_t)*cursor)
 			return EIO;	/* Failed. */
 
-		/* Reads the name that follows the header. */
-		if (namelen != 0) {
-			read = pread_inode(directory, name, namelen, *cursor + 8);
+		/* A name the record promised must be there in full. */
+		if ((size_t)count < 8U + namelen)
+			return EIO;	/* Failed. */
 
-			/* A name the record promised must be there in full. */
-			if (read != namelen) {
-				/* Failed. */
-				return EIO;
-			}
-		}
+		/* Takes the name that follows the header. */
+		kern_memcpy(name, record + 8, namelen);
 		name[namelen] = '\0';
 		*cursor += reclen;
 
@@ -9441,18 +9711,137 @@ restore_directory_block(
 	return original_error;
 }
 
-/* Looks through a directory block for the record of one name. */
+/*
+ * Checks that a directory's recorded size is one its direct blocks can hold.
+ *
+ * A directory grows by whole record chunks within the direct blocks; the
+ * indirect blocks are read like any file's but never edited here.
+ */
 static int
-dir_find_record(
+dir_check_size(
+	struct inode *directory)
+{
+	struct ufs_mount_state *ms;
+	uint64_t limit;
+
+	/* Takes the mount state this call runs against. */
+	ms = state(directory->i_mount);
+	limit = (uint64_t)UFS_NDADDR * ms->super.bsize;
+
+	/* Refuses a size no run of whole record chunks could have. */
+	if (directory->i_size < 0)
+		return EIO;
+	if ((uint64_t)directory->i_size % UFS_DIRBLKSIZ != 0)
+		return EIO;
+
+	/* Refuses a directory that reaches past its direct blocks. */
+	if ((uint64_t)directory->i_size > limit)
+		return EIO;
+
+	/* The size is one the directory can be edited at. */
+	return 0;
+}
+
+/* Reports how many blocks a directory's recorded size covers. */
+static uint32_t
+dir_block_count(
+	struct inode *directory)
+{
+	struct ufs_mount_state *ms;
+	uint64_t size;
+
+	/* Rounds the size up to whole blocks. */
+	ms = state(directory->i_mount);
+	size = (uint64_t)directory->i_size;
+
+	/* Reports the whole blocks the size reaches into. */
+	return (uint32_t)((size + ms->super.bsize - 1U) / ms->super.bsize);
+}
+
+/* Reports how many bytes of one directory block hold records. */
+static uint32_t
+dir_block_length(
 	struct inode *directory,
+	uint32_t index)
+{
+	struct ufs_mount_state *ms;
+	uint64_t start;
+	uint64_t remaining;
+
+	/* Measures what is left of the directory from the block's start. */
+	ms = state(directory->i_mount);
+	start = (uint64_t)index * ms->super.bsize;
+	remaining = (uint64_t)directory->i_size - start;
+
+	/* A block before the last is full. */
+	if (remaining > ms->super.bsize)
+		return ms->super.bsize;
+
+	/* The last block holds what remains. */
+	return (uint32_t)remaining;
+}
+
+/*
+ * Checks the record at one position of a directory block.
+ *
+ * The record must fit its header and name, keep to a multiple of four bytes,
+ * stay within its record chunk and end before the block's records do.
+ */
+static int
+dir_check_record(
+	const struct ufs_mount_state *ms,
+	const uint8_t *block,
+	uint32_t length,
+	uint32_t pos)
+{
+	uint16_t reclen;
+	uint8_t nlen;
+
+	/* A header that would straddle a chunk or the end is corrupt. */
+	if (length - pos < 8U)
+		return EIO;
+	if (pos % UFS_DIRBLKSIZ > UFS_DIRBLKSIZ - 8U)
+		return EIO;
+
+	/* The record length and the name length the header declares. */
+	reclen = drv_ufs_get16(block, pos + 4U, ms->super.swapped);
+	nlen = block[pos + 7U];
+
+	/* A record shorter than its own header cannot be one. */
+	if (reclen < 8U)
+		return EIO;
+
+	/* Every record length is a multiple of four bytes. */
+	if ((reclen & 3U) != 0)
+		return EIO;
+
+	/* A record may not straddle two record chunks. */
+	if (pos % UFS_DIRBLKSIZ + reclen > UFS_DIRBLKSIZ)
+		return EIO;
+
+	/* Nor run past the records of the block. */
+	if (reclen > length - pos)
+		return EIO;
+
+	/* And the name it declares has to fit inside it. */
+	if (8U + nlen > reclen)
+		return EIO;
+
+	/* The record is well formed. */
+	return 0;
+}
+
+/* Looks through one directory block for the record of a name. */
+static int
+dir_find_in_block(
+	const struct ufs_mount_state *ms,
+	const uint8_t *block,
+	uint32_t length,
 	const struct componentname *name,
-	uint8_t *block,
 	uint32_t *offset,
 	uint32_t *previous,
 	uint32_t *number)
 {
-	struct ufs_mount_state *ms;
-	struct ufs_inode_info *ui;
 	uint32_t ino;
 	uint32_t pos;
 	uint32_t prev;
@@ -9461,81 +9850,28 @@ dir_find_record(
 	int difference;
 	int error;
 
-	/* Takes the mount state this call runs against. */
-	ms = state(directory->i_mount);
-
 	/* Starts the walk at the first record, with nothing before it. */
 	pos = 0;
 	prev = UINT32_MAX;
 
-	/* Takes the private inode the directory block pointer lives in. */
-	ui = info(directory);
-
-	/* Refuses a directory whose recorded size no block could hold. */
-	if (directory->i_size < 0 ||
-	    (uint64_t)directory->i_size > ms->super.bsize ||
-	    (uint64_t)directory->i_size % UFS_DIRBLKSIZ != 0 ||
-	    ui->direct[0] == 0) {
-		/* Failed. */
-		return EIO;
-	}
-
-	/* Reads the block the entries live in. */
-	error = read_block(directory->i_mount, info(directory)->direct[0],
-			   block);
-	if (error)
-		return error;
-
-	/* Walks the entries of the block looking for the name. */
-	while (pos < (uint32_t)directory->i_size) {
-		/*
-		 * A record that reaches past the block means the directory is
-		 * corrupt.
-		 */
-		if ((uint32_t)directory->i_size - pos < 8U ||
-		    pos % UFS_DIRBLKSIZ > UFS_DIRBLKSIZ - 8U) {
-			/* Failed. */
-			return EIO;
-		}
+	/* Walks the records of the block looking for the name. */
+	while (pos < length) {
+		/* Refuses a record that is not well formed. */
+		error = dir_check_record(ms, block, length, pos);
+		if (error != 0)
+			return error;
 
 		/* The inode number, the record length and the name length. */
 		ino = drv_ufs_get32(block, pos, ms->super.swapped);
 		reclen = drv_ufs_get16(block, pos + 4U, ms->super.swapped);
 		nlen = block[pos + 7U];
 
-		/* A record shorter than its own header cannot be one. */
-		if (reclen < 8U)
-			return EIO;	/* Failed. */
-
-		/* Every record length is a multiple of four bytes. */
-		if ((reclen & 3U) != 0)
-			return EIO;	/* Failed. */
-
-		/* A record may not straddle two directory blocks. */
-		if (pos % UFS_DIRBLKSIZ + reclen > UFS_DIRBLKSIZ)
-			return EIO;	/* Failed. */
-
-		/* Nor run past the end of the directory itself. */
-		if (pos + reclen > (uint32_t)directory->i_size)
-			return EIO;	/* Failed. */
-
-		/* And the name it declares has to fit inside it. */
-		if (8U + nlen > reclen)
-			return EIO;	/* Failed. */
-
-		/*
-		 * Compares the record name only when it could possibly match.
-		 */
+		/* Compares the record name only when it could possibly match. */
 		difference = 1;
-		if (ino != 0 && nlen == name->cn_namelen) {
-			difference = memcmp(block + pos + 8U,
-					    name->cn_nameptr,
-					    nlen);
-		}
+		if (ino != 0 && nlen == name->cn_namelen)
+			difference = kern_memcmp(block + pos + 8U, name->cn_nameptr, nlen);
 
-		/*
-		 * The record matches on its inode number and its name together.
-		 */
+		/* The record matches on its inode number and its name together. */
 		if (difference == 0) {
 			*offset = pos;
 			*previous = prev;
@@ -9545,15 +9881,155 @@ dir_find_record(
 			return 0;
 		}
 
+		/* Moves on to the next record. */
 		prev = pos;
 		pos += reclen;
 	}
 
-	/* Failed. */
+	/* The name is not in this block. */
 	return ENOENT;
 }
 
-/* Adds one name to a directory. */
+/*
+ * Looks through the blocks of a directory for the record of one name.
+ *
+ * The block holding the record is left in the buffer; its index among the
+ * directory's blocks is reported with the record's offset inside it and the
+ * offset of the record before it in the same block.
+ */
+static int
+dir_find_record(
+	struct inode *directory,
+	const struct componentname *name,
+	uint8_t *block,
+	uint32_t *index,
+	uint32_t *offset,
+	uint32_t *previous,
+	uint32_t *number)
+{
+	struct ufs_mount_state *ms;
+	struct ufs_inode_info *ui;
+	uint32_t count;
+	uint32_t current;
+	uint32_t length;
+	int error;
+
+	/* Takes the mount state and the private inode. */
+	ms = state(directory->i_mount);
+	ui = info(directory);
+
+	/* Refuses a directory whose size or first block is not usable. */
+	error = dir_check_size(directory);
+	if (error != 0)
+		return error;
+	if (ui->direct[0] == 0)
+		return EIO;
+
+	/* Searches the blocks in order. */
+	count = dir_block_count(directory);
+	for (current = 0; current < count; current++) {
+		/* A block inside the size must have been allocated. */
+		if (ui->direct[current] == 0)
+			return EIO;
+
+		/* Reads the block. */
+		error = read_block(directory->i_mount, ui->direct[current], block);
+		if (error != 0)
+			return error;
+
+		/* Looks for the name among the block's records. */
+		length = dir_block_length(directory, current);
+		error = dir_find_in_block(ms, block, length, name, offset, previous, number);
+		if (error == 0) {
+			*index = current;
+
+			/* Succeeded. */
+			return 0;
+		}
+
+		/* Anything but a miss ends the search. */
+		if (error != ENOENT)
+			return error;
+	}
+
+	/* No block holds the name. */
+	return ENOENT;
+}
+
+/*
+ * Looks through one directory block for a record with room after its own
+ * name for a new record of a given size.
+ */
+static int
+dir_find_slack(
+	const struct ufs_mount_state *ms,
+	const uint8_t *block,
+	uint32_t length,
+	uint16_t need,
+	uint32_t *offset)
+{
+	uint32_t pos;
+	uint16_t reclen;
+	uint16_t minimum;
+	uint8_t nlen;
+	int error;
+
+	/* Walks the records of the block looking for room. */
+	pos = 0;
+	while (pos < length) {
+		/* Refuses a record that is not well formed. */
+		error = dir_check_record(ms, block, length, pos);
+		if (error != 0)
+			return error;
+
+		/* Measures what the record needs and what it has. */
+		reclen = drv_ufs_get16(block, pos + 4U, ms->super.swapped);
+		nlen = block[pos + 7U];
+		minimum = dir_minimum(nlen);
+
+		/* A record with enough slack after its name can be split. */
+		if (reclen - minimum >= need) {
+			*offset = pos;
+
+			/* Succeeded. */
+			return 0;
+		}
+
+		/* Moves on to the next record. */
+		pos += reclen;
+	}
+
+	/* The block has no room for the record. */
+	return ENOENT;
+}
+
+/* Writes one record into a directory block at an offset. */
+static void
+dir_put_record(
+	const struct ufs_mount_state *ms,
+	uint8_t *block,
+	uint32_t at,
+	uint32_t number,
+	uint16_t reclen,
+	uint8_t type,
+	const struct componentname *name)
+{
+	/* The header, then the name. */
+	drv_ufs_put32(block, at, number, ms->super.swapped);
+	drv_ufs_put16(block, at + 4U, reclen, ms->super.swapped);
+	block[at + 6U] = type;
+	block[at + 7U] = (uint8_t)name->cn_namelen;
+	kern_memcpy(block + at + 8U, name->cn_nameptr, name->cn_namelen);
+}
+
+/*
+ * Adds one name to a directory.
+ *
+ * The name goes into the first record with room after it, in any block.
+ * With no such record, a new record chunk is added after the last one, in
+ * the last block when it has room, or else in a new block.  Under the journal
+ * only the first block can be added here; the others wait for its group.
+ */
 static int
 dir_add(
 	struct inode *directory,
@@ -9561,25 +10037,12 @@ dir_add(
 	uint32_t number,
 	uint8_t type)
 {
-	uint32_t at;
 	struct ufs_mount_state *ms;
-	struct ufs_inode_info *ui;
+	struct dir_addition change;
 	uint8_t *block;
 	uint8_t *original;
-	uint16_t need;
 	uint32_t pos;
-	uint64_t old_direct;
-	uint64_t allocated;
-	uint64_t old_blocks;
-	off_t old_size;
 	int error;
-	int rollback;
-	int handled;
-
-	ms = state(directory->i_mount);
-	ui = info(directory);
-	pos = 0;
-	allocated = 0;
 
 	/* A name of nothing, or one longer than a record can hold. */
 	if (name->cn_namelen == 0 || name->cn_namelen > 255U)
@@ -9592,11 +10055,9 @@ dir_add(
 			return EINVAL;
 	}
 
-	pos = 0;
-	need = dir_minimum((uint8_t)name->cn_namelen);
-	block = kern_calloc(1, ms->super.bsize);
-
 	/* Takes the staging the directory block is edited in. */
+	ms = state(directory->i_mount);
+	block = kern_calloc(1, ms->super.bsize);
 	original = kern_malloc(ms->super.bsize);
 	if (block == NULL || original == NULL) {
 		kern_free(block);
@@ -9606,194 +10067,22 @@ dir_add(
 		return ENOMEM;
 	}
 
+	/* Places the record and publishes it, or undoes it, under the lock. */
 	mutex_lock(&directory->i_lock);
 
-	old_size = directory->i_size;
-	old_direct = ui->direct[0];
-	old_blocks = ui->blocks;
-
-	/* Refuses a directory whose recorded size no block could hold. */
-	if (old_size < 0 || (uint64_t)old_size > ms->super.bsize ||
-	    (uint64_t)old_size % UFS_DIRBLKSIZ != 0) {
-		error = EIO;
-		goto out;
-	}
-
-	/* A directory with no block yet gets its first one here. */
-	if (ui->direct[0] == 0) {
-		/*
-		 * Asks whether the journal path has already created the block.
-		 */
-		error = directory_backing_group(directory, &handled);
-		if (handled) {
-			/* Reports why the first block could not be created. */
-			if (error != 0)
-				goto out;
-
-			/*
-			 * Retain committed empty backing if later entry
-			 * publication fails.
-			 */
-			old_direct = ui->direct[0];
-			old_blocks = ui->blocks;
-		} else {
-			/* Takes the first block of the directory. */
-			error = allocate_block(
-				directory->i_mount, directory->i_uid,
-				directory->i_gid, &ui->direct[0]);
-			if (error)
-				goto out;
-			allocated = ui->direct[0];
-			ui->blocks += ms->super.bsize / UFS_SECTOR_SIZE;
-		}
-	}
-
-	/* Reads the block the new entry will be placed in. */
-	error = read_block(directory->i_mount, ui->direct[0], block);
-	if (error)
-		goto out;
-
-	memcpy(original, block, ms->super.bsize);
-
-	/* Walks the entries of the block looking for room. */
-	while (pos < (uint32_t)directory->i_size) {
-		uint16_t reclen;
-		uint8_t nlen;
-		uint16_t minimum;
-
-		/*
-		 * A record that reaches past the block means the directory is
-		 * corrupt.
-		 */
-		if ((uint32_t)directory->i_size - pos < 8U ||
-		    pos % UFS_DIRBLKSIZ > UFS_DIRBLKSIZ - 8U) {
-			error = EIO;
-			goto out;
-		}
-
-		reclen = drv_ufs_get16(block, pos + 4U, ms->super.swapped);
-		nlen = block[pos + 7U];
-		minimum = dir_minimum(nlen);
-
-		/* A record shorter than its own header means the same. */
-		if (reclen < minimum || (reclen & 3U) != 0 ||
-		    pos % UFS_DIRBLKSIZ + reclen > UFS_DIRBLKSIZ ||
-		    reclen > (uint32_t)directory->i_size - pos) {
-			error = EIO;
-			goto out;
-		}
-
-		/*
-		 * An entry with slack after it can be split to hold the new
-		 * name.
-		 */
-		if (reclen - minimum >= need) {
-			at = pos + minimum;
-			/* Shortens the record to what its name needs. */
-			drv_ufs_put16(block, pos + 4U, minimum,
-				      ms->super.swapped);
-
-			/* And gives the bytes it gave up to a new record. */
-			drv_ufs_put32(block, at, number, ms->super.swapped);
-			drv_ufs_put16(block, at + 4U, reclen - minimum,
-				      ms->super.swapped);
-			block[at + 6U] = type;
-			block[at + 7U] = (uint8_t)name->cn_namelen;
-			memcpy(block + at + 8U, name->cn_nameptr,
-			       name->cn_namelen);
-			error = write_block(directory->i_mount, ui->direct[0],
-					    block);
-			goto commit;
-		}
-
-		pos += reclen;
-	}
-
-	/* A directory that would outgrow one block cannot be extended here. */
-	if ((uint64_t)directory->i_size + UFS_DIRBLKSIZ > ms->super.bsize) {
-		error = ENOSPC;
-		goto out;
-	}
-
-	/* Appends a fresh record at the end of the directory block. */
-	pos = (uint32_t)directory->i_size;
-	drv_ufs_put32(block, pos, number, ms->super.swapped);
-	drv_ufs_put16(block, pos + 4U, UFS_DIRBLKSIZ, ms->super.swapped);
-	block[pos + 6U] = type;
-	block[pos + 7U] = (uint8_t)name->cn_namelen;
-	memcpy(block + pos + 8U, name->cn_nameptr, name->cn_namelen);
-	directory->i_size += UFS_DIRBLKSIZ;
-	error = write_block(directory->i_mount, ui->direct[0], block);
-
-commit:
+	/* Notes the directory as it is, then places and publishes the record. */
+	kern_memset(&change, 0, sizeof(change));
+	change.old_size = directory->i_size;
+	change.old_blocks = info(directory)->blocks;
+	error = dir_check_size(directory);
 	if (error == 0)
-		error = persist_inode(directory);
+		error = dir_add_place(directory, name, number, type, block, original, &change);
+	error = dir_add_finish(directory, &change, original, error);
 
-	/* A write that failed puts the directory back the way it was. */
-	if (error != 0) {
-		rollback = restore_directory_block(directory, ui->direct[0],
-						   original, error);
-		directory->i_size = old_size;
-		ui->direct[0] = old_direct;
-		ui->blocks = old_blocks;
-
-		/* Publishes the directory with its new size. */
-		error = persist_inode(directory);
-		if (error == 0)
-			error = disk_sync(directory->i_mount->m_disk);
-		if (error != 0) {
-			ms->writable = 0;
-		} else if (ms->writable && allocated != 0) {
-			/*
-			 * Gives the block back when the directory could not be
-			 * published.
-			 */
-			error = free_block(directory->i_mount, allocated,
-					   directory->i_uid, directory->i_gid);
-			if (error != 0)
-				ms->writable = 0;
-		}
-		if (error == 0)
-			error = rollback;
-	}
-
-out:
-	if (error != 0 && allocated != 0 && ui->direct[0] == allocated) {
-		directory->i_size = old_size;
-		ui->direct[0] = old_direct;
-		ui->blocks = old_blocks;
-
-		/*
-		 * Puts the recorded size back the way the failed write found
-		 * it.
-		 */
-		rollback = persist_inode(directory);
-		if (rollback == 0)
-			rollback = disk_sync(directory->i_mount->m_disk);
-
-		/* A failed restore leaves the volume unwritable. */
-		if (rollback != 0) {
-			ms->writable = 0;
-			error = rollback;
-		} else {
-			rollback = free_block(directory->i_mount,
-					      allocated,
-					      directory->i_uid,
-					      directory->i_gid);
-
-			/*
-			 * A block that could not be freed leaves the volume
-			 * unwritable.
-			 */
-			if (rollback != 0) {
-				ms->writable = 0;
-				error = rollback;
-			}
-		}
-	}
-
+	/* The directory's records, size and blocks are settled. */
 	mutex_unlock(&directory->i_lock);
 
+	/* Gives the staging back. */
 	kern_free(original);
 	kern_free(block);
 
@@ -9805,6 +10094,209 @@ out:
 	return 0;
 }
 
+/*
+ * Places a new record in a directory and writes the block it goes into.
+ *
+ * What it changes is noted in the addition, so that a failure of the write
+ * or of the inode's publication can be undone.
+ */
+static int
+dir_add_place(
+	struct inode *directory,
+	const struct componentname *name,
+	uint32_t number,
+	uint8_t type,
+	uint8_t *block,
+	uint8_t *original,
+	struct dir_addition *change)
+{
+	struct ufs_mount_state *ms;
+	struct ufs_inode_info *ui;
+	uint32_t count;
+	uint32_t current;
+	uint32_t length;
+	uint32_t pos;
+	uint32_t at;
+	uint16_t need;
+	uint16_t reclen;
+	uint16_t minimum;
+	int found;
+	int handled;
+	int error;
+
+	/* Takes the mount state, the private inode, and the room needed. */
+	ms = state(directory->i_mount);
+	ui = info(directory);
+	need = dir_minimum((uint8_t)name->cn_namelen);
+	found = 0;
+	pos = 0;
+
+	/* Looks for a record with room after it, block by block. */
+	count = dir_block_count(directory);
+	for (current = 0; current < count; current++) {
+		/* A block inside the size must have been allocated. */
+		change->fragment = ui->direct[current];
+		if (change->fragment == 0)
+			return EIO;
+
+		/* Reads the block. */
+		error = read_block(directory->i_mount, change->fragment, block);
+		if (error != 0)
+			return error;
+
+		/* Looks for room among the block's records. */
+		length = dir_block_length(directory, current);
+		error = dir_find_slack(ms, block, length, need, &pos);
+		if (error == 0) {
+			found = 1;
+			change->edited = current;
+			break;
+		}
+
+		/* Anything but a block without room ends the search. */
+		if (error != ENOENT)
+			return error;
+	}
+
+	/* Splits the record that has room, giving the new name its slack. */
+	if (found) {
+		kern_memcpy(original, block, ms->super.bsize);
+		change->old_direct = ui->direct[change->edited];
+		reclen = drv_ufs_get16(block, pos + 4U, ms->super.swapped);
+		minimum = dir_minimum(block[pos + 7U]);
+		at = pos + minimum;
+		drv_ufs_put16(block, pos + 4U, minimum, ms->super.swapped);
+		dir_put_record(ms, block, at, number, reclen - minimum, type, name);
+		change->written = 1;
+
+		/* Reports how the write went. */
+		return write_block(directory->i_mount, change->fragment, block);
+	}
+
+	/* A last block with room takes a new record chunk after its last. */
+	if ((uint64_t)directory->i_size % ms->super.bsize != 0) {
+		change->edited = count - 1U;
+		change->old_direct = ui->direct[change->edited];
+		kern_memcpy(original, block, ms->super.bsize);
+		pos = (uint32_t)((uint64_t)directory->i_size % ms->super.bsize);
+		dir_put_record(ms, block, pos, number, UFS_DIRBLKSIZ, type, name);
+		directory->i_size += UFS_DIRBLKSIZ;
+		change->written = 1;
+
+		/* Reports how the write went. */
+		return write_block(directory->i_mount, change->fragment, block);
+	}
+
+	/* Otherwise the record chunk starts a new block, if there can be one. */
+	change->edited = count;
+	if (count >= UFS_NDADDR)
+		return ENOSPC;
+
+	/* Notes the pointer the new block's slot holds now. */
+	change->old_direct = ui->direct[count];
+
+	/* The journal path may add the block itself, in a group of its own. */
+	if (ui->direct[count] == 0) {
+		error = directory_backing_group(directory, &handled);
+		if (handled) {
+			/* Reports why the block could not be added. */
+			if (error != 0)
+				return error;
+
+			/* Keeps the committed empty block if the entry fails. */
+			change->old_direct = ui->direct[count];
+			change->old_blocks = ui->blocks;
+		}
+	}
+
+	/* Takes a new block when there is none. */
+	if (ui->direct[count] == 0) {
+		error = allocate_block(directory->i_mount, directory->i_uid, directory->i_gid, &ui->direct[count]);
+		if (error != 0)
+			return error;
+
+		/* Counts the block as the directory's. */
+		change->allocated = ui->direct[count];
+		ui->blocks += ms->super.bsize / UFS_SECTOR_SIZE;
+	}
+
+	/* Writes the block with the one record chunk the name starts. */
+	change->fresh = 1;
+	change->fragment = ui->direct[count];
+	kern_memset(block, 0, ms->super.bsize);
+	dir_put_record(ms, block, 0, number, UFS_DIRBLKSIZ, type, name);
+	directory->i_size += UFS_DIRBLKSIZ;
+	change->written = 1;
+
+	/* Reports how the write went. */
+	return write_block(directory->i_mount, change->fragment, block);
+}
+
+/*
+ * Publishes a directory after a new record was placed, or undoes the
+ * placement when it or the publication failed.
+ *
+ * Undoing puts back the block's records, then the inode's size and block,
+ * and gives back a block taken for the record once the old size is on disk.
+ * A volume that cannot be put back is left unwritable.
+ */
+static int
+dir_add_finish(
+	struct inode *directory,
+	const struct dir_addition *change,
+	const uint8_t *original,
+	int error)
+{
+	struct ufs_mount_state *ms;
+	struct ufs_inode_info *ui;
+	int rollback;
+
+	/* A placement that wrote nothing changed nothing. */
+	if (!change->written)
+		return error;
+
+	/* Publishes the directory with its new size. */
+	ms = state(directory->i_mount);
+	ui = info(directory);
+	if (error == 0)
+		error = persist_inode(directory);
+	if (error == 0)
+		return 0;
+
+	/* Puts the block's records back unless the block is new. */
+	rollback = error;
+	if (!change->fresh)
+		rollback = restore_directory_block(directory, change->fragment, original, error);
+
+	/* Puts the inode back and publishes it. */
+	directory->i_size = change->old_size;
+	ui->direct[change->edited] = change->old_direct;
+	ui->blocks = change->old_blocks;
+	error = persist_inode(directory);
+	if (error == 0)
+		error = order_barrier(directory->i_mount);
+	if (error != 0) {
+		ms->writable = 0;
+
+		/* Reports why the volume could not be put back. */
+		return error;
+	}
+
+	/* Gives a new block back once the old size is published. */
+	if (ms->writable && change->allocated != 0) {
+		error = free_block(directory->i_mount, change->allocated, directory->i_uid, directory->i_gid);
+		if (error != 0) {
+			ms->writable = 0;
+
+			/* Reports why the block could not be given back. */
+			return error;
+		}
+	}
+
+	/* Reports why the change was undone. */
+	return rollback;
+}
+
 /* Takes one name out of a directory. */
 static int
 dir_remove(
@@ -9812,14 +10304,18 @@ dir_remove(
 	const struct componentname *name,
 	uint32_t *number)
 {
-	uint16_t prior;
 	struct ufs_mount_state *ms;
 	uint8_t *block;
 	uint8_t *original;
+	uint64_t fragment;
+	uint32_t index;
 	uint32_t offset;
 	uint32_t previous;
+	uint16_t reclen;
+	uint16_t prior;
 	int error;
 
+	/* Takes the staging the directory block is edited in. */
 	ms = state(directory->i_mount);
 	block = kern_malloc(ms->super.bsize);
 	original = kern_malloc(ms->super.bsize);
@@ -9833,50 +10329,34 @@ dir_remove(
 		return ENOMEM;
 	}
 
+	/* Edits the record under the directory's lock. */
 	mutex_lock(&directory->i_lock);
 
 	/* Finds the record the name occupies, and the one before it. */
-	error = dir_find_record(directory,
-				name,
-				block,
-				&offset,
-				&previous,
-				number);
+	error = dir_find_record(directory, name, block, &index, &offset, &previous, number);
 	if (error == 0) {
-		uint16_t reclen;
-
-		memcpy(original, block, ms->super.bsize);
-
+		kern_memcpy(original, block, ms->super.bsize);
+		fragment = info(directory)->direct[index];
 		reclen = drv_ufs_get16(block, offset + 4U, ms->super.swapped);
 
-		/* The preceding record absorbs the one being removed. */
-		if (previous != UINT32_MAX &&
-		    previous / UFS_DIRBLKSIZ == offset / UFS_DIRBLKSIZ) {
-			prior = drv_ufs_get16(block,
-					      previous + 4U,
-					      ms->super.swapped);
-			drv_ufs_put16(block,
-				      previous + 4U,
-				      prior + reclen,
-				      ms->super.swapped);
+		/* The preceding record in the same chunk absorbs the one removed. */
+		if (previous != UINT32_MAX && previous / UFS_DIRBLKSIZ == offset / UFS_DIRBLKSIZ) {
+			prior = drv_ufs_get16(block, previous + 4U, ms->super.swapped);
+			drv_ufs_put16(block, previous + 4U, prior + reclen, ms->super.swapped);
 		} else {
 			drv_ufs_put32(block, offset, 0, ms->super.swapped);
 		}
 
 		/* Writes the block back with the record gone. */
-		error = write_block(directory->i_mount,
-				    info(directory)->direct[0],
-				    block);
-		if (error != 0) {
-			error = restore_directory_block(directory,
-							info(directory)->direct[0],
-							original,
-							error);
-		}
+		error = write_block(directory->i_mount, fragment, block);
+		if (error != 0)
+			error = restore_directory_block(directory, fragment, original, error);
 	}
 
+	/* The block holds the edited record, or its old one again. */
 	mutex_unlock(&directory->i_lock);
 
+	/* Gives the staging back. */
 	kern_free(original);
 	kern_free(block);
 
@@ -9901,10 +10381,13 @@ dir_replace(
 	struct ufs_mount_state *ms;
 	uint8_t *block;
 	uint8_t *original;
+	uint64_t fragment;
+	uint32_t index;
 	uint32_t offset;
 	uint32_t previous;
 	int error;
 
+	/* Takes the staging the directory block is edited in. */
 	ms = state(directory->i_mount);
 	block = kern_malloc(ms->super.bsize);
 	original = kern_malloc(ms->super.bsize);
@@ -9918,39 +10401,30 @@ dir_replace(
 		return ENOMEM;
 	}
 
+	/* Edits the record under the directory's lock. */
 	mutex_lock(&directory->i_lock);
 
 	/* Finds the record the name occupies. */
-	error = dir_find_record(directory,
-				name,
-				block,
-				&offset,
-				&previous,
-				old_number);
+	error = dir_find_record(directory, name, block, &index, &offset, &previous, old_number);
 	if (error == 0) {
-		memcpy(original, block, ms->super.bsize);
-		(void)previous;
-
+		kern_memcpy(original, block, ms->super.bsize);
+		fragment = info(directory)->direct[index];
 		*old_type = block[offset + 6U];
 
+		/* Points the record at the new inode. */
 		drv_ufs_put32(block, offset, number, ms->super.swapped);
-
 		block[offset + 6U] = type;
 
 		/* Writes the block back with the record pointing elsewhere. */
-		error = write_block(directory->i_mount,
-				    info(directory)->direct[0],
-				    block);
-		if (error != 0) {
-			error = restore_directory_block(directory,
-							info(directory)->direct[0],
-							original,
-							error);
-		}
+		error = write_block(directory->i_mount, fragment, block);
+		if (error != 0)
+			error = restore_directory_block(directory, fragment, original, error);
 	}
 
+	/* The block holds the edited record, or its old one again. */
 	mutex_unlock(&directory->i_lock);
 
+	/* Gives the staging back. */
 	kern_free(original);
 	kern_free(block);
 
@@ -10089,7 +10563,7 @@ discard_new_inode(
 	/* Publishes the emptied inode before any block is freed. */
 	cleanup = persist_inode(inode);
 	if (cleanup == 0)
-		cleanup = disk_sync(inode->i_mount->m_disk);
+		cleanup = order_barrier(inode->i_mount);
 
 	/* A failed write leaves the volume unwritable. */
 	if (cleanup != 0) {
@@ -10282,7 +10756,7 @@ reserve_inode_locked(
 	 * allocated.
 	 */
 	image = &group->images.image;
-	memcpy(image, info(inode), sizeof(*image));
+	kern_memcpy(image, info(inode), sizeof(*image));
 	image->inode.i_ino = (uint64_t)cg * ms->super.ipg + local;
 	image->inode.i_type = request->type;
 	image->inode.i_mode = kind | (request->mode & 07777U);
@@ -10293,10 +10767,10 @@ reserve_inode_locked(
 	image->inode.i_size = 0;
 	image->blocks = 0;
 	image->extattr_size = 0;
-	memset(image->direct, 0, sizeof(image->direct));
-	memset(image->indirect, 0, sizeof(image->indirect));
-	memset(image->extattr, 0, sizeof(image->extattr));
-	memset(image->shortlink, 0, sizeof(image->shortlink));
+	kern_memset(image->direct, 0, sizeof(image->direct));
+	kern_memset(image->indirect, 0, sizeof(image->indirect));
+	kern_memset(image->extattr, 0, sizeof(image->extattr));
+	kern_memset(image->shortlink, 0, sizeof(image->shortlink));
 	fragment = inode_fragment(&image->inode);
 
 	/* Reads the block the chosen inode lives in. */
@@ -10310,7 +10784,7 @@ reserve_inode_locked(
 	generation = drv_ufs_get32(raw, UFS_DI_GEN, ms->super.swapped) + 1U;
 	if (generation == 0)
 		generation = 1;
-	memset(raw, 0, UFS_DINODE_SIZE);
+	kern_memset(raw, 0, UFS_DINODE_SIZE);
 	image->generation = generation;
 	encode_inode_locked(&image->inode, group->images.dinode);
 	drv_ufs_put32(raw, UFS_DI_GEN, generation, ms->super.swapped);
@@ -10324,7 +10798,7 @@ reserve_inode_locked(
 	/*
 	 * Couples the new identity with inode and directory allocation totals.
 	 */
-	memcpy(group->images.cg, ms->cg, ms->super.bsize);
+	kern_memcpy(group->images.cg, ms->cg, ms->super.bsize);
 	bit_set(group->images.cg + ms->cg_iusedoff, local);
 	drv_ufs_put32(group->images.cg, UFS_CG_NIFREE, free_inodes - 1U,
 		      ms->super.swapped);
@@ -10360,7 +10834,7 @@ reserve_inode_locked(
 	 * reference state.
 	 */
 	if (group->outcome.committed) {
-		memcpy(ms->cg, group->images.cg, ms->super.bsize);
+		kern_memcpy(ms->cg, group->images.cg, ms->super.bsize);
 		ms->super.cstotal_nifree--;
 
 		/* Publishes the directory count the group committed. */
@@ -10658,8 +11132,8 @@ ufs_lookup_locked(
 		/*
 		 * Measures the entry name and compares it with the wanted one.
 		 */
-		length = strlen(name);
-		difference = memcmp(name, component->cn_nameptr,
+		length = kern_strlen(name);
+		difference = kern_memcmp(name, component->cn_nameptr,
 				    component->cn_namelen);
 
 		/*
@@ -10697,6 +11171,10 @@ ufs_lookup(
 	/*
 	 * The caller may already hold the gate, in which case this call waits.
 	 */
+	/* The journal file is the volume's own and no one else's to name. */
+	if (j3_hidden(directory, component))
+		return EPERM;
+
 	gate = &state(directory->i_mount)->namespace_lock;
 	entered = !mutex_owned(gate);
 
@@ -10734,6 +11212,7 @@ remove_group_locked(
 	uint64_t parent_fragment;
 	unsigned count;
 	int removing_directory;
+	uint32_t index;
 	uint32_t offset;
 	uint32_t previous;
 	uint32_t number;
@@ -10760,8 +11239,8 @@ remove_group_locked(
 	}
 
 	/* Finds the record the name occupies, and the one before it. */
-	error = dir_find_record(directory, name, group->directory, &offset,
-				&previous, &number);
+	error = dir_find_record(directory, name, group->directory, &index,
+				&offset, &previous, &number);
 	if (error != 0)
 		return error;
 
@@ -10782,7 +11261,7 @@ remove_group_locked(
 		drv_ufs_put32(group->directory, offset, 0, ms->super.swapped);
 	}
 
-	memcpy(&group->image, info(target), sizeof(group->image));
+	kern_memcpy(&group->image, info(target), sizeof(group->image));
 
 	/* A directory also takes its parent link away. */
 	if (removing_directory)
@@ -10801,7 +11280,7 @@ remove_group_locked(
 	 * block.
 	 */
 	if (removing_directory) {
-		memcpy(&group->parent_image, info(directory),
+		kern_memcpy(&group->parent_image, info(directory),
 		       sizeof(group->parent_image));
 		group->parent_image.inode.i_linkcount--;
 
@@ -10831,7 +11310,7 @@ remove_group_locked(
 	 * Publishes directory bytes and all changed dinodes in one durable
 	 * transaction.
 	 */
-	extents[0].target = info(directory)->direct[0] << ms->super.fsbtodb;
+	extents[0].target = info(directory)->direct[index] << ms->super.fsbtodb;
 	extents[0].sectors = ms->super.bsize / UFS_SECTOR_SIZE;
 	extents[0].payload = group->directory;
 	extents[1].target = fragment << ms->super.fsbtodb;
@@ -10976,36 +11455,43 @@ remove_group(
 }
 
 /*
- * Inserts into a private existing directory block, including reusable empty
- * records.
+ * Inserts a name into one block of a private directory image.
+ *
+ * The name takes the first free record long enough for it, or the slack after
+ * a record's own name.  With no room in the block, a new record chunk is added
+ * after the last one when this is the directory's last block and it has room.
+ * The block's records are all checked first, and a name the block already
+ * holds is refused.
  */
 static int
 directory_image_insert(
 	struct inode *directory,
 	const struct componentname *name,
 	struct inode *target,
-	uint8_t *block)
+	uint8_t *block,
+	uint32_t index)
 {
 	struct ufs_mount_state *ms;
+	uint64_t start;
+	uint32_t length;
 	uint32_t pos;
 	uint32_t at;
 	uint32_t number;
 	uint16_t need;
-	uint16_t length;
+	uint16_t reclen;
 	uint16_t minimum;
 	uint16_t available;
 	uint8_t namesize;
 	unsigned n;
 	int difference;
+	int error;
 
+	/* Starts with no record chosen for the name. */
 	ms = state(directory->i_mount);
 	at = UINT32_MAX;
 	available = 0;
 
-	/*
-	 * Bounds names and the single-block directory before modifying private
-	 * bytes.
-	 */
+	/* Bounds the name before modifying private bytes. */
 	if (name->cn_namelen == 0 || name->cn_namelen > 255U)
 		return EINVAL;
 
@@ -11016,120 +11502,247 @@ directory_image_insert(
 			return EINVAL;
 	}
 
-	/* Refuses a directory whose recorded size no block could hold. */
-	if (directory->i_size < 0 ||
-	    (uint64_t)directory->i_size > ms->super.bsize ||
-	    (uint64_t)directory->i_size % UFS_DIRBLKSIZ != 0) {
-		/* Failed. */
+	/* Refuses a size the direct blocks could not hold, or a block past it. */
+	error = dir_check_size(directory);
+	if (error != 0)
+		return error;
+
+	/* Refuses a block that starts past the directory's end. */
+	start = (uint64_t)index * ms->super.bsize;
+	if (start > (uint64_t)directory->i_size)
 		return EIO;
-	}
+
+	/* Measures the block's records and the room the name needs. */
+	length = dir_block_length(directory, index);
 	need = dir_minimum((uint8_t)name->cn_namelen);
 
-	/*
-	 * Chooses the first available record while validating the complete
-	 * directory.
-	 */
+	/* Checks every record while choosing the first one with room. */
 	pos = 0;
+	while (pos < length) {
+		/* Refuses a record that is not well formed. */
+		error = dir_check_record(ms, block, length, pos);
+		if (error != 0)
+			return error;
 
-	/* Walks the entries of the block looking for room. */
-	while (pos < (uint32_t)directory->i_size) {
-		/*
-		 * A record that reaches past the block means the directory is
-		 * corrupt.
-		 */
-		if ((uint32_t)directory->i_size - pos < 8U ||
-		    pos % UFS_DIRBLKSIZ > UFS_DIRBLKSIZ - 8U) {
-			/* Failed. */
-			return EIO;
-		}
+		/* The inode number, the record length and the name length. */
 		number = drv_ufs_get32(block, pos, ms->super.swapped);
-		length = drv_ufs_get16(block, pos + 4U, ms->super.swapped);
+		reclen = drv_ufs_get16(block, pos + 4U, ms->super.swapped);
 		namesize = block[pos + 7U];
-
-		/* Measures the room this record needs. */
 		minimum = dir_minimum(namesize);
-		if (length < minimum || (length & 3U) != 0 ||
-		    pos % UFS_DIRBLKSIZ + length > UFS_DIRBLKSIZ ||
-		    length > (uint32_t)directory->i_size - pos) {
-			/* Failed. */
-			return EIO;
-		}
 
-		/*
-		 * Compares the record name only when it could possibly match.
-		 */
+		/* Compares the record name only when it could possibly match. */
 		difference = 1;
 		if (number != 0 && namesize == name->cn_namelen)
-			difference = memcmp(block + pos + 8U,
-					    name->cn_nameptr, namesize);
+			difference = kern_memcmp(block + pos + 8U, name->cn_nameptr, namesize);
 
-		/* Refuses a name the directory already holds. */
-		if (difference == 0) {
-			/* Failed. */
+		/* Refuses a name the block already holds. */
+		if (difference == 0)
 			return EEXIST;
-		}
 
-		/* Remembers the first entry that has room for the new name. */
+		/* Remembers the first record that has room for the new name. */
 		if (at == UINT32_MAX) {
-			/* A free entry long enough takes the new name whole. */
-			if (number == 0 && length >= need) {
+			/* A free record long enough takes the new name whole. */
+			if (number == 0 && reclen >= need) {
 				at = pos;
-				available = length;
-			} else if (length - minimum >= need) {
+				available = reclen;
+			} else if (reclen - minimum >= need) {
 				at = pos + minimum;
-				available = length - minimum;
+				available = reclen - minimum;
 			}
 		}
 
-		pos += length;
+		/* Moves on to the next record. */
+		pos += reclen;
 	}
 
-	/* No entry had room, so the directory has to grow. */
+	/* With no room, a last block with space takes a new record chunk. */
 	if (at == UINT32_MAX) {
-		/*
-		 * A directory that would outgrow one block cannot be extended
-		 * here.
-		 */
-		if ((uint64_t)directory->i_size + UFS_DIRBLKSIZ >
-		    ms->super.bsize) {
-			/* Failed. */
+		/* Refuses when this is not the last block or the block is full. */
+		if (start + length != (uint64_t)directory->i_size)
 			return ENOSPC;
-		}
-		at = (uint32_t)directory->i_size;
+		if (length + UFS_DIRBLKSIZ > ms->super.bsize)
+			return ENOSPC;
+
+		/* The name takes the whole new chunk. */
+		at = length;
 		available = UFS_DIRBLKSIZ;
 		directory->i_size += UFS_DIRBLKSIZ;
 	} else {
-		/*
-		 * Splits an occupied predecessor only after every record has
-		 * been checked.
-		 */
+		/* Shortens an occupied record in front of the new one. */
 		pos = 0;
-		/* Walks up to the entry the new name goes into. */
 		while (pos < at) {
-			/* Steps over one record. */
-			length = drv_ufs_get16(block, pos + 4U,
-					       ms->super.swapped);
-			if (pos + length > at) {
-				drv_ufs_put16(block, pos + 4U,
-					      (uint16_t)(at - pos),
-					      ms->super.swapped);
+			/* Steps over one record, cutting the one the name splits. */
+			reclen = drv_ufs_get16(block, pos + 4U, ms->super.swapped);
+			if (pos + reclen > at) {
+				drv_ufs_put16(block, pos + 4U, (uint16_t)(at - pos), ms->super.swapped);
 				break;
 			}
 
-			pos += length;
+			/* Moves on to the next record. */
+			pos += reclen;
 		}
 	}
 
+	/* Writes the new record. */
 	drv_ufs_put32(block, at, (uint32_t)target->i_ino, ms->super.swapped);
 	drv_ufs_put16(block, at + 4U, available, ms->super.swapped);
 	block[at + 6U] = dir_type(target->i_type);
 	block[at + 7U] = (uint8_t)name->cn_namelen;
-	memcpy(block + at + 8U, name->cn_nameptr, name->cn_namelen);
+	kern_memcpy(block + at + 8U, name->cn_nameptr, name->cn_namelen);
 
-	/*
-	 * Returns a complete insertion with no persistent or live inode
-	 * mutation.
-	 */
+	/* The insertion is complete in the private images. */
+	return 0;
+}
+
+/*
+ * Chooses the block of a directory a new name goes into.
+ *
+ * Every block is read: a name any block already holds is refused, and the
+ * first block with a record that has room is chosen.  With none, the last
+ * block is chosen when it has room for another record chunk, or else the
+ * block the directory would grow into; the caller adds that one first.
+ */
+static int
+directory_insert_block(
+	struct inode *directory,
+	const struct componentname *name,
+	uint8_t *scratch,
+	uint32_t *index,
+	int *grow)
+{
+	struct ufs_mount_state *ms;
+	struct ufs_inode_info *ui;
+	uint32_t count;
+	uint32_t current;
+	uint32_t length;
+	uint32_t chosen;
+	uint32_t offset;
+	uint32_t previous;
+	uint32_t number;
+	uint16_t need;
+	int error;
+
+	/* Takes the mount state, the private inode and the room needed. */
+	ms = state(directory->i_mount);
+	ui = info(directory);
+	need = dir_minimum((uint8_t)name->cn_namelen);
+	chosen = UINT32_MAX;
+	*grow = 0;
+
+	/* Refuses a directory whose size its direct blocks could not hold. */
+	error = dir_check_size(directory);
+	if (error != 0)
+		return error;
+
+	/* Reads every block, looking for the name and for room. */
+	count = dir_block_count(directory);
+	for (current = 0; current < count; current++) {
+		/* A block inside the size must have been allocated. */
+		if (ui->direct[current] == 0)
+			return EIO;
+
+		/* Reads the block. */
+		error = read_block(directory->i_mount, ui->direct[current], scratch);
+		if (error != 0)
+			return error;
+
+		/* Refuses a name the block already holds. */
+		length = dir_block_length(directory, current);
+		error = dir_find_in_block(ms, scratch, length, name, &offset, &previous, &number);
+		if (error == 0)
+			return EEXIST;
+		if (error != ENOENT)
+			return error;
+
+		/* Keeps the first block with a record that has room. */
+		if (chosen == UINT32_MAX) {
+			error = dir_find_slack(ms, scratch, length, need, &offset);
+			if (error == 0)
+				chosen = current;
+			else if (error != ENOENT)
+				return error;
+		}
+	}
+
+	/* A block with room takes the name. */
+	if (chosen != UINT32_MAX) {
+		*index = chosen;
+
+		/* Succeeded. */
+		return 0;
+	}
+
+	/* A last block with space takes a new record chunk. */
+	if ((uint64_t)directory->i_size % ms->super.bsize != 0) {
+		*index = count - 1U;
+
+		/* Succeeded. */
+		return 0;
+	}
+
+	/* Otherwise the name starts the next block, if there can be one. */
+	if (count >= UFS_NDADDR)
+		return ENOSPC;
+
+	/* Asks the caller to add the block the name starts. */
+	*index = count;
+	*grow = 1;
+
+	/* Succeeded: the caller adds the block first. */
+	return 0;
+}
+
+/*
+ * Chooses the block a new name goes into and, when every block is full, adds
+ * the next block to the directory in a group of its own.
+ *
+ * The directory's lock is held and the mount's is not.  A directory with no
+ * block yet is grown the same way; a block already there (kept after an
+ * earlier name failed to go in) is used as it is.
+ */
+static int
+directory_insert_prepare(
+	struct inode *directory,
+	const struct componentname *name,
+	uint32_t *index)
+{
+	struct ufs_mount_state *ms;
+	struct ufs_inode_info *ui;
+	uint8_t *scratch;
+	int grow;
+	int handled;
+	int error;
+
+	/* Takes the staging the blocks are read into. */
+	ms = state(directory->i_mount);
+	ui = info(directory);
+	scratch = kern_malloc(ms->super.bsize);
+	if (scratch == NULL)
+		return ENOMEM;
+
+	/* Chooses the block, reading the directory. */
+	grow = 0;
+	error = directory_insert_block(directory, name, scratch, index, &grow);
+
+	/* Gives the staging back. */
+	kern_free(scratch);
+
+	/* Reports why no block could be chosen. */
+	if (error != 0)
+		return error;
+
+	/* Adds the next block when the name starts it and it is not there yet. */
+	if (grow && ui->direct[*index] == 0) {
+		error = directory_backing_group(directory, &handled);
+		if (error == 0 && !handled)
+			error = EOPNOTSUPP;
+	}
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
 	return 0;
 }
 
@@ -11139,7 +11752,8 @@ link_group_locked(
 	struct inode *directory,
 	const struct componentname *name,
 	struct inode *target,
-	struct ufs_link_group *group)
+	struct ufs_link_group *group,
+	uint32_t index)
 {
 	struct ufs_mount_state *ms;
 	int error;
@@ -11155,14 +11769,14 @@ link_group_locked(
 	if (target->i_linkcount == UINT16_MAX)
 		return EMLINK;
 
-	memcpy(&group->directory_image, info(directory), sizeof(group->directory_image));
-	memcpy(&group->target_image, info(target), sizeof(group->target_image));
+	kern_memcpy(&group->directory_image, info(directory), sizeof(group->directory_image));
+	kern_memcpy(&group->target_image, info(target), sizeof(group->target_image));
 
 	group->target_image.inode.i_linkcount++;
 
 	/* Stages the block the new name goes into. */
 	error = metadata_image_get(&group->images,
-				   info(directory)->direct[0],
+				   info(directory)->direct[index],
 				   &group->directory);
 	if (error != 0)
 		return error;
@@ -11170,7 +11784,7 @@ link_group_locked(
 	/* Writes the new name into that block. */
 	error = directory_image_insert(&group->directory_image.inode,
 				       name,
-				       target, group->directory);
+				       target, group->directory, index);
 	if (error != 0)
 		return error;
 
@@ -11230,6 +11844,7 @@ link_group(
 	struct ufs_inode_info *ui;
 	uint64_t directory_fragment;
 	uint64_t target_fragment;
+	uint32_t index;
 	unsigned images;
 	size_t bytes;
 	int error;
@@ -11279,14 +11894,21 @@ link_group(
 
 	metadata_images_init(&group->images, directory->i_mount, group->memory,
 			     bytes);
+
+	/* Chooses the block the name goes into and links it, under the locks. */
 	mutex_lock(&directory->i_lock);
-	mutex_lock(&target->i_lock);
-	mutex_lock(&ms->lock);
 
-	error = link_group_locked(directory, name, target, group);
+	/* Chooses the block, adding one when all are full, then links the name. */
+	error = directory_insert_prepare(directory, name, &index);
+	if (error == 0) {
+		mutex_lock(&target->i_lock);
+		mutex_lock(&ms->lock);
+		error = link_group_locked(directory, name, target, group, index);
+		mutex_unlock(&ms->lock);
+		mutex_unlock(&target->i_lock);
+	}
 
-	mutex_unlock(&ms->lock);
-	mutex_unlock(&target->i_lock);
+	/* The name is published, or the group left nothing behind. */
 	mutex_unlock(&directory->i_lock);
 
 	/* A group that could not be assembled leaves nothing behind. */
@@ -11308,122 +11930,97 @@ link_group(
 }
 
 /*
- * Validates a complete private directory before replacing or removing one name.
+ * Replaces or removes one name in one block of a private directory image.
+ *
+ * Every record of the block is checked first; the name must be there once and
+ * name the inode the change expects.  A replacement points the record at
+ * another inode; a removal joins the record to the one before it in the same
+ * record chunk, or frees it when it is the chunk's first.
  */
 static int
 directory_image_change(
 	struct inode *directory,
 	uint8_t *block,
+	uint32_t index,
 	const struct componentname *name,
 	uint32_t expected,
 	uint32_t replacement,
 	uint8_t type)
 {
 	struct ufs_mount_state *ms;
+	uint32_t length;
 	uint32_t pos;
 	uint32_t previous;
 	uint32_t found;
 	uint32_t prior;
 	uint32_t number;
-	uint32_t minimum;
-	uint16_t length;
+	uint16_t reclen;
 	uint8_t namesize;
 	int difference;
+	int error;
 
-	/*
-	 * Bounds traversal before inspecting record bytes.
-	 */
-
-	/* Takes the mount the image belongs to. */
+	/* Refuses a size the direct blocks could not hold, or a block past it. */
 	ms = state(directory->i_mount);
-	if (directory->i_size < 0 ||
-	    (uint64_t)directory->i_size > ms->super.bsize ||
-	    (uint64_t)directory->i_size % UFS_DIRBLKSIZ != 0) {
-		/* Failed. */
+	error = dir_check_size(directory);
+	if (error != 0)
+		return error;
+	if ((uint64_t)index * ms->super.bsize >= (uint64_t)directory->i_size)
 		return EIO;
-	}
 
-	/*
-	 * Records one matching entry while rejecting malformed or duplicate
-	 * records.
-	 */
+	/* Finds the one record of the name, checking every record. */
+	length = dir_block_length(directory, index);
 	pos = 0;
-	previous = found = prior = UINT32_MAX;
-	while (pos < (uint32_t)directory->i_size) {
-		/*
-		 * A record that reaches past the block means the directory is
-		 * corrupt.
-		 */
-		if ((uint32_t)directory->i_size - pos < 8U)
-			return EIO;
-		length = drv_ufs_get16(block, pos + 4U, ms->super.swapped);
+	previous = UINT32_MAX;
+	found = UINT32_MAX;
+	prior = UINT32_MAX;
+	while (pos < length) {
+		/* Refuses a record that is not well formed. */
+		error = dir_check_record(ms, block, length, pos);
+		if (error != 0)
+			return error;
 
-		/* The name length this record declares. */
+		/* The inode number, the record length and the name length. */
+		number = drv_ufs_get32(block, pos, ms->super.swapped);
+		reclen = drv_ufs_get16(block, pos + 4U, ms->super.swapped);
 		namesize = block[pos + 7U];
 
-		/* The smallest record that could hold a name that long. */
-		minimum = dir_minimum(namesize);
-		if (length < minimum || (length & 3U) != 0 ||
-		    pos % UFS_DIRBLKSIZ + length > UFS_DIRBLKSIZ ||
-		    length > (uint32_t)directory->i_size - pos) {
-			/* Failed. */
-			return EIO;
-		}
-
-		/* The inode number this record names. */
-		number = drv_ufs_get32(block, pos, ms->super.swapped);
-
-		/*
-		 * Compares the record name only when it could possibly match.
-		 */
+		/* Compares the record name only when it could possibly match. */
 		difference = 1;
 		if (number != 0 && namesize == name->cn_namelen)
-			difference = memcmp(block + pos + 8U,
-					    name->cn_nameptr, namesize);
+			difference = kern_memcmp(block + pos + 8U, name->cn_nameptr, namesize);
 
-		/* The record this change is looking for. */
+		/* Refuses a second record of the name, or one naming another inode. */
 		if (difference == 0) {
-			/*
-			 * Refuses a record that is not the one this change
-			 * expects.
-			 */
 			if (found != UINT32_MAX || number != expected)
 				return EIO;
+
+			/* Remembers the record and the one before it. */
 			found = pos;
 			prior = previous;
 		}
 
+		/* Moves on to the next record. */
 		previous = pos;
-		pos += length;
+		pos += reclen;
 	}
 
 	/* Refuses a stale lookup without modifying its private directory. */
 	if (found == UINT32_MAX)
 		return ENOENT;
 
-	/*
-	 * Replaces the inode reference or joins a removed record to its
-	 * predecessor.
-	 */
+	/* Replaces the reference, or joins the removed record to its predecessor. */
 	if (replacement != 0) {
 		drv_ufs_put32(block, found, replacement, ms->super.swapped);
 		block[found + 6U] = type;
-	} else if (prior != UINT32_MAX &&
-		   prior / UFS_DIRBLKSIZ == found / UFS_DIRBLKSIZ) {
-		/* The record being removed and the one in front of it. */
-		length = drv_ufs_get16(block, found + 4U, ms->super.swapped);
-		length += drv_ufs_get16(block, prior + 4U, ms->super.swapped);
-
-		/* The one in front grows over the one that is going away. */
-		drv_ufs_put16(block, prior + 4U, length, ms->super.swapped);
+	} else if (prior != UINT32_MAX && prior / UFS_DIRBLKSIZ == found / UFS_DIRBLKSIZ) {
+		reclen = drv_ufs_get16(block, found + 4U, ms->super.swapped);
+		reclen += drv_ufs_get16(block, prior + 4U, ms->super.swapped);
+		drv_ufs_put16(block, prior + 4U, reclen, ms->super.swapped);
 	} else {
 		drv_ufs_put32(block, found, 0, ms->super.swapped);
 	}
 
-	/*
-	 * Leaves every changed byte private until the enclosing group is
-	 * committed.
-	 */
+	/* Every changed byte stays private until the group commits. */
 	return 0;
 }
 
@@ -11459,9 +12056,9 @@ rename_group_locked(
 	ms = state(old_directory->i_mount);
 	if (!ms->writable)
 		return EROFS;
-	memcpy(&group->old_image, info(old_directory),
+	kern_memcpy(&group->old_image, info(old_directory),
 	       sizeof(group->old_image));
-	memcpy(&group->new_image, info(new_directory),
+	kern_memcpy(&group->new_image, info(new_directory),
 	       sizeof(group->new_image));
 	old_image = &group->old_image.inode;
 
@@ -11503,7 +12100,7 @@ rename_group_locked(
 
 	/* A replaced inode loses the link the old name held. */
 	if (target != NULL) {
-		memcpy(&group->target_image, info(target),
+		kern_memcpy(&group->target_image, info(target),
 		       sizeof(group->target_image));
 
 		/* A replaced directory also loses its own parent link. */
@@ -11520,19 +12117,19 @@ rename_group_locked(
 
 	/* Stages the block the old name lives in. */
 	error = metadata_image_get(&group->images,
-				   info(old_directory)->direct[0], &old_block);
+				   info(old_directory)->direct[group->old_index], &old_block);
 	if (error != 0)
 		return error;
 
 	/* Removes the old name from that block. */
-	error = directory_image_change(old_image, old_block, old_name,
-				       (uint32_t)source->i_ino, 0, 0);
+	error = directory_image_change(old_image, old_block, group->old_index,
+				       old_name, (uint32_t)source->i_ino, 0, 0);
 	if (error != 0)
 		return error;
 
 	/* Stages the block the new name lives in. */
 	error = metadata_image_get(&group->images,
-				   info(new_directory)->direct[0], &new_block);
+				   info(new_directory)->direct[group->new_index], &new_block);
 	if (error != 0)
 		return error;
 
@@ -11540,6 +12137,7 @@ rename_group_locked(
 	if (target != NULL) {
 		error = directory_image_change(new_image,
 					       new_block,
+					       group->new_index,
 					       new_name,
 					       (uint32_t)target->i_ino,
 					       (uint32_t)source->i_ino,
@@ -11548,7 +12146,8 @@ rename_group_locked(
 		error = directory_image_insert(new_image,
 					       new_name,
 					       source,
-					       new_block);
+					       new_block,
+					       group->new_index);
 	}
 	if (error != 0)
 		return error;
@@ -11569,6 +12168,7 @@ rename_group_locked(
 		/* Repoints that parent link at the new parent. */
 		error = directory_image_change(source,
 					       child_block,
+					       0,
 					       &dotdot,
 					       (uint32_t)old_directory->i_ino,
 					       (uint32_t)new_directory->i_ino,
@@ -11643,6 +12243,74 @@ rename_group_locked(
 }
 
 /*
+ * Finds the block the old name is in and the block the new name goes into,
+ * adding the new directory's next block when every block of it is full.
+ *
+ * The inodes' locks are held and the mount's is not.  A rename inside one
+ * full directory reuses the old name's block: the old name leaves room there.
+ */
+static int
+rename_blocks_prepare(
+	struct inode *old_directory,
+	const struct componentname *old_name,
+	struct inode *new_directory,
+	const struct componentname *new_name,
+	struct inode *target,
+	struct ufs_rename_group *group)
+{
+	struct ufs_mount_state *ms;
+	struct ufs_inode_info *ui;
+	uint8_t *scratch;
+	uint32_t offset;
+	uint32_t previous;
+	uint32_t number;
+	int grow;
+	int handled;
+	int error;
+
+	/* Takes the staging the blocks are read into. */
+	ms = state(old_directory->i_mount);
+	ui = info(new_directory);
+	scratch = kern_malloc(ms->super.bsize);
+	if (scratch == NULL)
+		return ENOMEM;
+
+	/* Finds the block the old name is in. */
+	grow = 0;
+	error = dir_find_record(old_directory, old_name, scratch, &group->old_index, &offset, &previous, &number);
+
+	/* A replaced name keeps its block; a new one is given a block. */
+	if (error == 0 && target != NULL) {
+		error = dir_find_record(new_directory, new_name, scratch, &group->new_index, &offset, &previous, &number);
+	} else if (error == 0) {
+		error = directory_insert_block(new_directory, new_name, scratch, &group->new_index, &grow);
+
+		/* A full directory the name stays in takes it where it was. */
+		if (error == ENOSPC && old_directory == new_directory) {
+			group->new_index = group->old_index;
+			error = 0;
+		}
+	}
+
+	/* Gives the staging back. */
+	kern_free(scratch);
+
+	/* Adds the next block when the new name starts it and it is not there yet. */
+	if (error == 0 && grow && ui->direct[group->new_index] == 0) {
+		error = directory_backing_group(new_directory, &handled);
+		if (error == 0 && !handled)
+			error = EOPNOTSUPP;
+	}
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
  * Owns unique inode locks, exact image capacity and rename cache publication.
  */
 static int
@@ -11694,8 +12362,12 @@ rename_group(
 	 * Counts distinct blocks so shared dinodes do not unnecessarily exhaust
 	 * a slot.
 	 */
-	fragments[0] = info(old_directory)->direct[0];
-	fragments[1] = info(new_directory)->direct[0];
+	/*
+	 * The blocks of the two names are chosen once the inodes are locked,
+	 * so they are counted as two blocks no inode shares.
+	 */
+	fragments[0] = UINT64_MAX;
+	fragments[1] = UINT64_MAX - 1U;
 	fragments[2] = inode_fragment(old_directory);
 	fragments[3] = inode_fragment(new_directory);
 
@@ -11773,16 +12445,21 @@ rename_group(
 	for (n = 0; n < lock_count; n++)
 		mutex_lock(&locks[n]->i_lock);
 
+	/* Finds the blocks of both names, adding one when the new name needs it. */
+	error = rename_blocks_prepare(old_directory, old_name, new_directory, new_name, target, group);
+
 	/* Renames the name with every inode of the rename held. */
-	mutex_lock(&ms->lock);
-	error = rename_group_locked(old_directory,
-				    old_name,
-				    new_directory,
-				    new_name,
-				    source,
-				    target,
-				    group);
-	mutex_unlock(&ms->lock);
+	if (error == 0) {
+		mutex_lock(&ms->lock);
+		error = rename_group_locked(old_directory,
+					    old_name,
+					    new_directory,
+					    new_name,
+					    source,
+					    target,
+					    group);
+		mutex_unlock(&ms->lock);
+	}
 
 	/*
 	 * Releases inode ownership before cache publication, including error
@@ -11834,7 +12511,8 @@ creation_group_locked(
 	struct inode *directory,
 	const struct componentname *name,
 	struct inode *target,
-	struct ufs_link_group *group)
+	struct ufs_link_group *group,
+	uint32_t index)
 {
 	struct ufs_mount_state *ms;
 	struct ufs_inode_info *ui;
@@ -11873,8 +12551,8 @@ creation_group_locked(
 	if (kind == 0)
 		return EIO;	/* Failed. */
 
-	/* And the parent has to have the block its names live in. */
-	if (ui->direct[0] == 0)
+	/* And the parent has to have the block the name goes into. */
+	if (index >= UFS_NDADDR || ui->direct[index] == 0)
 		return EIO;	/* Failed. */
 
 	/* A new directory brings a link to its parent with it. */
@@ -11886,9 +12564,9 @@ creation_group_locked(
 	 * Keeps all prepared content while changing only the final link
 	 * relationship.
 	 */
-	memcpy(&group->directory_image, info(directory),
+	kern_memcpy(&group->directory_image, info(directory),
 	       sizeof(group->directory_image));
-	memcpy(&group->target_image, info(target), sizeof(group->target_image));
+	kern_memcpy(&group->target_image, info(target), sizeof(group->target_image));
 	group->target_image.inode.i_linkcount = is_directory ? 2 : 1;
 
 	/* A new directory starts with the two links it names itself by. */
@@ -11896,14 +12574,14 @@ creation_group_locked(
 		group->directory_image.inode.i_linkcount++;
 
 	/* Stages the block the new name goes into. */
-	error = metadata_image_get(&group->images, info(directory)->direct[0],
+	error = metadata_image_get(&group->images, info(directory)->direct[index],
 				   &group->directory);
 	if (error != 0)
 		return error;
 
 	/* Writes the new name into that block. */
 	error = directory_image_insert(&group->directory_image.inode, name,
-				       target, group->directory);
+				       target, group->directory, index);
 	if (error != 0)
 		return error;
 
@@ -11959,16 +12637,15 @@ creation_group(
 {
 	struct ufs_mount_state *ms;
 	struct ufs_link_group *group;
-	struct ufs_inode_info *ui;
+	uint32_t index;
 	size_t bytes;
-	int handled;
 	int error;
 
 	/*
 	 * Establishes an unambiguous unpublished outcome before allocating
 	 * resources.
 	 */
-	memset(outcome, 0, sizeof(*outcome));
+	kern_memset(outcome, 0, sizeof(*outcome));
 
 	/* Refuses a creation whose parent and target are the same inode. */
 	if (directory == target || directory->i_mount != target->i_mount)
@@ -12006,23 +12683,12 @@ creation_group(
 			     bytes);
 	mutex_lock(&directory->i_lock);
 
-	/* Takes the private inode the directory block pointer lives in. */
-	ui = info(directory);
-
-	/* Starts out with the directory block already in place. */
-	error = 0;
-	if (ui->direct[0] == 0) {
-		/*
-		 * Creates the directory block first when it does not exist yet.
-		 */
-		error = directory_backing_group(directory, &handled);
-		if (error == 0 && !handled)
-			error = EOPNOTSUPP;
-	}
+	/* Chooses the block the name goes into, adding one when all are full. */
+	error = directory_insert_prepare(directory, name, &index);
 	if (error == 0) {
 		mutex_lock(&target->i_lock);
 		mutex_lock(&ms->lock);
-		error = creation_group_locked(directory, name, target, group);
+		error = creation_group_locked(directory, name, target, group, index);
 		mutex_unlock(&ms->lock);
 		mutex_unlock(&target->i_lock);
 	}
@@ -12518,8 +13184,8 @@ directory_empty(
 			break;
 
 		/* Compares the name against the two every directory carries. */
-		dot = strcmp(name, ".");
-		dotdot = strcmp(name, "..");
+		dot = kern_strcmp(name, ".");
+		dotdot = kern_strcmp(name, "..");
 
 		/* Any other name means the directory still holds something. */
 		if (dot != 0 && dotdot != 0)
@@ -12736,7 +13402,7 @@ ufs_rename(
 		return EINVAL;
 
 	/* Compares the two names byte for byte. */
-	difference = memcmp(old_name->cn_nameptr, new_name->cn_nameptr,
+	difference = kern_memcmp(old_name->cn_nameptr, new_name->cn_nameptr,
 			    old_name->cn_namelen);
 
 	/* Succeeded: renaming a name onto itself changes nothing. */
@@ -13165,7 +13831,7 @@ ufs_symlink(
 	int error;
 
 	ms = state(directory->i_mount);
-	length = strlen(target);
+	length = kern_strlen(target);
 
 	/* Refuses a target longer than this volume can store in an inode. */
 	if (length > ms->super.maxsymlinklen || length > 120U) {
@@ -13199,7 +13865,7 @@ ufs_symlink(
 		goto out;
 
 	inode->i_size = (off_t)length;
-	memcpy(info(inode)->shortlink, target, length);
+	kern_memcpy(info(inode)->shortlink, target, length);
 
 	/* Publishes the inode with the target written into it. */
 	error = persist_inode(inode);
@@ -13360,11 +14026,22 @@ ufs_readdir(
 	uint32_t number;
 	uint8_t type;
 	char name[NAME_MAX + 1U];
+	struct componentname component;
 	int error = next_dirent(file->f_inode,
 				&file->f_offset,
 				&number,
 				&type,
 				name);
+
+	/* Steps over the journal file, which the volume keeps to itself. */
+	if (error == 0) {
+		component.cn_nameptr = name;
+		component.cn_namelen = kern_strlen(name);
+		component.cn_flags = 0;
+		if (j3_hidden(file->f_inode, &component))
+			error = next_dirent(file->f_inode, &file->f_offset,
+			    &number, &type, name);
+	}
 
 	/* Succeeded: the walk reached the end of the directory. */
 	if (error == ENOENT) {
@@ -13379,7 +14056,7 @@ ufs_readdir(
 		return error;
 
 	/* Renders the record as the entry the caller reads. */
-	memset(entry, 0, sizeof(*entry));
+	kern_memset(entry, 0, sizeof(*entry));
 	entry->d_ino = number;
 
 	/* The type byte of a record has its own encoding. */
@@ -13405,7 +14082,7 @@ ufs_readdir(
 		break;
 	}
 
-	strcpy(entry->d_name, name);
+	kern_strcpy(entry->d_name, name);
 	*eof = 0;
 
 	/* Succeeded. */
@@ -13437,7 +14114,7 @@ ufs_readlink(
 		n = (size_t)inode->i_size;
 		if (n > length)
 			n = length;
-		memcpy(buffer, info(inode)->shortlink, n);
+		kern_memcpy(buffer, info(inode)->shortlink, n);
 
 		/* Succeeded: reports how many bytes the target has. */
 		return (ssize_t)n;
@@ -13480,9 +14157,9 @@ extattr_name(
 	}
 
 	/* Compares the name against each namespace prefix in turn. */
-	user_prefix = strncmp(name, "user.", 5);
-	system_prefix = strncmp(name, "system.", 7);
-	security_prefix = strncmp(name, "security.", 9);
+	user_prefix = kern_strncmp(name, "user.", 5);
+	system_prefix = kern_strncmp(name, "system.", 7);
+	security_prefix = kern_strncmp(name, "security.", 9);
 
 	/* The prefix decides which namespace the attribute lives in. */
 	if (user_prefix == 0) {
@@ -13493,7 +14170,7 @@ extattr_name(
 		part = name + 7;
 
 		/* A name may not reach the security namespace this way. */
-		security_prefix = strncmp(part, "security.", 9);
+		security_prefix = kern_strncmp(part, "security.", 9);
 		if (security_prefix == 0)
 			return EINVAL;
 	} else if (security_prefix == 0) {
@@ -13504,7 +14181,7 @@ extattr_name(
 		return EOPNOTSUPP;
 	}
 
-	*stored_length = strlen(part);
+	*stored_length = kern_strlen(part);
 
 	/* Refuses a name the record header could not hold. */
 	if (*stored_length == 0 || *stored_length > 255U)
@@ -13658,7 +14335,7 @@ extattr_find(
 		difference = 1;
 		if (area[offset + 4U] == name_space &&
 		    disk_name_length == name_length) {
-			difference = memcmp(area + offset +
+			difference = kern_memcmp(area + offset +
 					    UFS_EXTATTR_HEADER_SIZE,
 					    name,
 					    name_length);
@@ -13777,7 +14454,7 @@ extattr_publish(
 		/* Publishes the inode with its attribute blocks gone. */
 		error = persist_inode(inode);
 		if (error == 0)
-			error = disk_sync(inode->i_mount->m_disk);
+			error = order_barrier(inode->i_mount);
 		if (error != 0) {
 			ui->extattr_size = old_size;
 			ui->extattr[0] = old_ext[0];
@@ -13851,7 +14528,7 @@ extattr_publish(
 		return ENOMEM;
 	}
 
-	memcpy(block, area, length);
+	kern_memcpy(block, area, length);
 
 	/* A first attribute needs a block of its own. */
 	if (old_ext[0] == 0) {
@@ -13879,7 +14556,7 @@ extattr_publish(
 	/* Publishes the inode pointing at the new block. */
 	error = persist_inode(inode);
 	if (error == 0)
-		error = disk_sync(inode->i_mount->m_disk);
+		error = order_barrier(inode->i_mount);
 	if (error != 0)
 		goto rollback_metadata;
 
@@ -13907,7 +14584,7 @@ rollback_metadata:
 	/* Puts the inode back the way the failed publication found it. */
 	rollback = persist_inode(inode);
 	if (rollback == 0)
-		rollback = disk_sync(inode->i_mount->m_disk);
+		rollback = order_barrier(inode->i_mount);
 
 	/* A failed restore leaves the volume unwritable. */
 	if (rollback != 0) {
@@ -13985,7 +14662,7 @@ ufs_getxattr(
 	if (error == 0 && value != NULL && size < content_length)
 		error = ERANGE;
 	if (error == 0 && value != NULL && content_length != 0)
-		memcpy(value, area + content_at, content_length);
+		kern_memcpy(value, area + content_at, content_length);
 
 	mutex_unlock(&inode->i_lock);
 
@@ -14097,21 +14774,21 @@ ufs_setxattr(
 
 	/* Copies the records that precede the one being written. */
 	if (at != 0)
-		memcpy(updated, area, at);
+		kern_memcpy(updated, area, at);
 
 	drv_ufs_put32(updated, at, (uint32_t)new_record, ms->super.swapped);
 	updated[at + 4U] = name_space;
 	updated[at + 5U] = (uint8_t)padding;
 	updated[at + 6U] = (uint8_t)stored_length;
-	memcpy(updated + at + UFS_EXTATTR_HEADER_SIZE, stored, stored_length);
+	kern_memcpy(updated + at + UFS_EXTATTR_HEADER_SIZE, stored, stored_length);
 
 	/* Writes the new record into the staging. */
 	if (size != 0)
-		memcpy(updated + at + base, value, size);
+		kern_memcpy(updated + at + base, value, size);
 
 	/* Copies the records that follow the one being written. */
 	if (area_length > at + replaced) {
-		memcpy(updated + at + new_record, area + at + replaced,
+		kern_memcpy(updated + at + new_record, area + at + replaced,
 		       area_length - at - replaced);
 	}
 
@@ -14179,7 +14856,7 @@ ufs_listxattr(
 		/* Compares the stored name against the security prefix. */
 		security = 1;
 		if (nlen >= 9U)
-			security = memcmp(disk_name, "security.", 9);
+			security = kern_memcmp(disk_name, "security.", 9);
 
 		/* The prefix a name is reported with follows its namespace. */
 		if (ns == UFS_EXTATTR_NAMESPACE_USER) {
@@ -14203,8 +14880,8 @@ ufs_listxattr(
 
 		/* Copies the name out when the caller asked for the names. */
 		if (list != NULL) {
-			memcpy(list + needed, prefix, prefix_length);
-			memcpy(list + needed + prefix_length, disk_name, nlen);
+			kern_memcpy(list + needed, prefix, prefix_length);
+			kern_memcpy(list + needed + prefix_length, disk_name, nlen);
 			list[needed + prefix_length + nlen] = '\0';
 		}
 
@@ -14282,11 +14959,11 @@ ufs_removexattr(
 
 		/* Copies the records that precede the one being removed. */
 		if (at != 0)
-			memcpy(updated, area, at);
+			kern_memcpy(updated, area, at);
 
 		/* Copies the records that follow the one being removed. */
 		if (area_length > at + record) {
-			memcpy(updated + at, area + at + record,
+			kern_memcpy(updated + at, area + at + record,
 			       area_length - at - record);
 		}
 	}
@@ -14319,7 +14996,7 @@ ufs_getattr(
 	ui = info(inode);
 
 	/* Renders the in-core inode as the attributes a caller sees. */
-	memset(status, 0, sizeof(*status));
+	kern_memset(status, 0, sizeof(*status));
 	status->st_dev = inode->i_mount->m_disk->d_dev;
 	status->st_ino = inode->i_ino;
 	status->st_mode = inode->i_mode;
@@ -14386,7 +15063,7 @@ ufs_setattr(
 	int error;
 	int quota_moved = 0;
 
-	memset(&quota_transfer_state, 0, sizeof(quota_transfer_state));
+	kern_memset(&quota_transfer_state, 0, sizeof(quota_transfer_state));
 
 	atime_nsec = status->st_atim.tv_nsec;
 	mtime_nsec = status->st_mtim.tv_nsec;
@@ -14703,8 +15380,8 @@ retire_inode_locked(
 	if (is_directory && (directories == 0 || ms->super.cstotal_ndir == 0))
 		return EIO;	/* Failed. */
 
-	memcpy(group->cg, ms->cg, ms->super.bsize);
-	memcpy(&group->image, ui, sizeof(group->image));
+	kern_memcpy(group->cg, ms->cg, ms->super.bsize);
+	kern_memcpy(&group->image, ui, sizeof(group->image));
 	group->image.inode.i_mode = 0;
 	group->image.inode.i_type = INODE_NONE;
 
@@ -14756,7 +15433,7 @@ retire_inode_locked(
 	 * recovered error.
 	 */
 	if (outcome.committed) {
-		memcpy(ms->cg, group->cg, ms->super.bsize);
+		kern_memcpy(ms->cg, group->cg, ms->super.bsize);
 		ms->super.cstotal_nifree++;
 
 		/* Publishes the directory count the group keeps. */
@@ -14940,7 +15617,7 @@ reclaim_unlinked_inode(
 		return error;
 
 	/* The reclaim is only durable once the device has it. */
-	error = disk_sync(inode->i_mount->m_disk);
+	error = order_barrier(inode->i_mount);
 	if (error != 0)
 		return error;
 	error = free_inode_number(inode->i_mount, (uint32_t)inode->i_ino,
@@ -15016,11 +15693,11 @@ creation_unlink_group(
 	if (image == NULL)
 		return ENOMEM;
 	block = (uint8_t *)(image + 1);
-	memset(&outcome, 0, sizeof(outcome));
+	kern_memset(&outcome, 0, sizeof(outcome));
 	mutex_lock(&inode->i_lock);
 	mutex_lock(&ms->lock);
 
-	memcpy(image, info(inode), sizeof(*image));
+	kern_memcpy(image, info(inode), sizeof(*image));
 	image->inode.i_linkcount = 0;
 
 	/* A writable volume publishes the unwind; a read-only one cannot. */
@@ -15524,7 +16201,7 @@ snapshot_disk_publish(
 		/* A slot that holds no disk cannot be taken. */
 		if (disk == NULL)
 			return ENOSPC;
-		memcpy(disk->d_name, "ufssnap", 7);
+		kern_memcpy(disk->d_name, "ufssnap", 7);
 
 		/* The name has room for two digits and no more. */
 		if (number >= 100U)
@@ -15609,6 +16286,7 @@ ufs_state_free(
 
 	journal_image_free(ms);
 	buf_view_release(&ms->cg_view);
+	kern_free(ms->j3.extents);
 	kern_free(ms->snapshot_map);
 	kern_free(ms->cg);
 	kern_free(ms);
@@ -15682,7 +16360,7 @@ orphan_recover_one(
 		return EOPNOTSUPP;
 	}
 
-	memset(owner, 0, sizeof(*owner));
+	kern_memset(owner, 0, sizeof(*owner));
 	owner->inode.i_mount = mountp;
 
 	(void)mutex_init(&owner->inode.i_lock, LOCK_RANK_INODE, "ufs orphan");
@@ -15737,7 +16415,7 @@ orphan_scan_locked(
 		if (error != 0)
 			return error;
 
-		memcpy(scan->bitmap, ms->cg + ms->cg_iusedoff, map_bytes);
+		kern_memcpy(scan->bitmap, ms->cg + ms->cg_iusedoff, map_bytes);
 
 		/*
 		 * Leaves reserved slots and linked namespace owners untouched.
@@ -15895,10 +16573,15 @@ ufs_mount_impl(
 
 	mountp->m_data = ms;
 	(void)mutex_init(&ms->journal_lock, LOCK_RANK_DEVICE, "ufs journal");
+	(void)mutex_init(&ms->j3.lock, LOCK_RANK_DEVICE, "ufs batched journal");
 	(void)mutex_init(&ms->snapshot_lock, LOCK_RANK_DEVICE, "ufs snapshot");
 
 	/* Finds the journal, if this volume carries one. */
 	error = journal_discover(mountp, ms);
+
+	/* Applies the last commit of a batched journal before reading metadata. */
+	if (error == 0 && !ms->journal_enabled)
+		error = j3_replay(mountp, ms);
 	if (error != 0) {
 		mountp->m_data = NULL;
 		ufs_state_free(ms);
@@ -16001,9 +16684,11 @@ ufs_mount_impl(
 	     total_nffree != ms->super.cstotal_nffree)) {
 		/*
 		 * A volume without a journal cannot replay, so it must be
-		 * clean.
+		 * clean -- unless it is mounted write-cached, where a crash can
+		 * leave the totals behind the groups' own counts, which are
+		 * then the truth, as after a journal replay.
 		 */
-		if (!ms->journal_enabled) {
+		if (!ms->journal_enabled && !write_cached_intended(mountp, ms)) {
 			error = EINVAL;
 		} else {
 			ms->super.cstotal_ndir = total_ndir;
@@ -16092,7 +16777,7 @@ ufs_mount_impl(
 	error = next_dirent(root, &cursor, &number, &type, name);
 	if (error == 0) {
 		/* The first entry of every directory names the directory. */
-		difference = strcmp(name, ".");
+		difference = kern_strcmp(name, ".");
 		if (number != UFS_ROOT_INO || difference != 0)
 			error = EIO;
 	}
@@ -16101,7 +16786,7 @@ ufs_mount_impl(
 		error = next_dirent(root, &cursor, &number, &type, name);
 	if (error == 0) {
 		/* The second names the parent, which for the root is itself. */
-		difference = strcmp(name, "..");
+		difference = kern_strcmp(name, "..");
 		if (number != UFS_ROOT_INO || difference != 0)
 			error = EIO;
 	}
@@ -16136,6 +16821,24 @@ ufs_mount_impl(
 
 			/* Failed. */
 			return error;
+		}
+
+		/*
+		 * Delays the volume's writes from here on unless the mount
+		 * asked for write-through or the volume has a journal, whose
+		 * records must reach the device before the blocks they cover.
+		 */
+		if (write_cached_intended(mountp, ms) &&
+		    buf_flusher_start() == 0) {
+			/*
+			 * Journals the metadata unless the mount declines; a
+			 * volume whose journal cannot be opened or made goes
+			 * on without one.
+			 */
+			if ((mountp->m_flags & MOUNT_NO_JOURNAL) == 0)
+				(void)j3_open(mountp, ms, root);
+			ms->write_cached = 1;
+			mountp->m_disk->d_flags |= DISK_WRITE_CACHED;
 		}
 	}
 
@@ -16188,6 +16891,10 @@ ufs_sync(
 
 	mutex_unlock(&ms->journal_lock);
 
+	/* Commits the batched journal's running transaction. */
+	if (error == 0 && ms->j3.active)
+		error = j3_commit(ms, mountp);
+
 	/* The mount is only durable once the device has it. */
 	if (error == 0)
 		error = disk_sync(mountp->m_disk);
@@ -16225,7 +16932,7 @@ ufs_statvfs(
 	nbfree = ms->super.cstotal_nbfree;
 	nffree = ms->super.cstotal_nffree;
 	nifree = ms->super.cstotal_nifree;
-	memset(result, 0, sizeof(*result));
+	kern_memset(result, 0, sizeof(*result));
 	result->f_bsize = ms->super.bsize;
 	result->f_frsize = ms->super.fsize;
 	result->f_blocks = ms->super.dsize;
@@ -16349,7 +17056,7 @@ ufs_quotactl(
 	switch (request->command) {
 	case KERN_QUOTA_SET:
 		/* Builds the record out of the limits the caller named. */
-		memset(&record, 0, sizeof(record));
+		kern_memset(&record, 0, sizeof(record));
 		record.id = request->id;
 		record.block_soft = request->block_soft;
 		record.block_hard = request->block_hard;
@@ -16417,7 +17124,7 @@ ufs_snapshotctl(
 	if (ms == NULL || request == NULL)
 		return EINVAL;
 
-	memset(request->device, 0, sizeof(request->device));
+	kern_memset(request->device, 0, sizeof(request->device));
 
 	/* A volume without snapshot storage has nothing to control. */
 	if (!ms->snapshot_available)
@@ -16495,7 +17202,7 @@ create_finished:
 
 	/* Publishes the snapshot device the request created. */
 	if (ms->snapshot_disk != NULL) {
-		memcpy(request->device, ms->snapshot_disk->d_name,
+		kern_memcpy(request->device, ms->snapshot_disk->d_name,
 		       sizeof(request->device));
 	}
 
@@ -16518,10 +17225,24 @@ ufs_prepare_unmount(
 	if (ms != NULL && ms->snapshot_disk != NULL)
 		return EBUSY;
 
-	/* A writable volume is marked clean on the way out. */
+	/*
+	 * A writable volume is marked clean on the way out.  Its writes go
+	 * through from here on, and the clean marker's sync writes out what
+	 * was delayed.
+	 */
 	error = 0;
+	if (ms != NULL && ms->j3.active)
+		error = j3_close(mountp, ms, 1);
+	if (error != 0)
+		return error;
+	if (ms != NULL && ms->write_cached)
+		mountp->m_disk->d_flags &= ~DISK_WRITE_CACHED;
 	if (ms != NULL && ms->writable)
 		error = ufs_write_clean(mountp, 1);
+
+	/* Delays the writes again when the volume stays mounted. */
+	if (error != 0 && ms != NULL && ms->write_cached)
+		mountp->m_disk->d_flags |= DISK_WRITE_CACHED;
 
 	/* Reports whether the volume could be left clean. */
 	return error;
@@ -16583,6 +17304,10 @@ ufs_unmount(
 	/* A mount that was never set up has nothing to release. */
 	if (mountp && mountp->m_data) {
 		ms = state(mountp);
+		if (ms->j3.active)
+			(void)j3_close(mountp, ms, 0);
+		if (ms->write_cached && mountp->m_disk != NULL)
+			mountp->m_disk->d_flags &= ~DISK_WRITE_CACHED;
 		ufs_state_free(ms);
 		mountp->m_data = NULL;
 	}
@@ -16723,7 +17448,7 @@ clear_record(
 	uint8_t zero[SECTOR_SIZE];
 	int error;
 
-	memset(zero, 0, sizeof(zero));
+	kern_memset(zero, 0, sizeof(zero));
 	error = journal->io.write(journal->io.context, sector, 1, zero);
 
 	/* The clear is only durable once the device has it. */
@@ -16910,7 +17635,7 @@ journal_replay(
 	 * identity.
 	 */
 	if (journal->image_valid) {
-		memcpy(descriptor, journal->image, SECTOR_SIZE);
+		kern_memcpy(descriptor, journal->image, SECTOR_SIZE);
 
 		/*
 		 * Reads the sequence number the descriptor was written under.
@@ -17077,7 +17802,7 @@ journal_replay(
 				 * the device.
 				 */
 				if (journal->image != NULL) {
-					memcpy(sector, journal->image + offset,
+					kern_memcpy(sector, journal->image + offset,
 					       SECTOR_SIZE);
 					offset += SECTOR_SIZE;
 				} else {
@@ -17111,7 +17836,7 @@ journal_replay(
 
 		/* A bound image serves the payload instead of the device. */
 		if (journal->image != NULL) {
-			memcpy(journal->image, descriptor, SECTOR_SIZE);
+			kern_memcpy(journal->image, descriptor, SECTOR_SIZE);
 			journal->image_valid = 1;
 		}
 	}
@@ -17142,7 +17867,7 @@ journal_replay(
 	if (!apply) {
 		/* Releases the view the caller was given. */
 		if (view != NULL)
-			memcpy(view, descriptor, SECTOR_SIZE);
+			kern_memcpy(view, descriptor, SECTOR_SIZE);
 
 		/* Succeeded. */
 		return 0;
@@ -17301,7 +18026,7 @@ journal_view_transfer(
 
 		/* Copies out only when the caller asked for the bytes. */
 		if (copy) {
-			memcpy((uint8_t *)buffer + (size_t)done * SECTOR_SIZE,
+			kern_memcpy((uint8_t *)buffer + (size_t)done * SECTOR_SIZE,
 			       view->image + offset, (size_t)run * SECTOR_SIZE);
 		}
 
@@ -17458,10 +18183,10 @@ write_control(
 	int error;
 
 	/* Builds the control sector the snapshot is described by. */
-	memset(sector, 0, sizeof(sector));
+	kern_memset(sector, 0, sizeof(sector));
 
 	/* The signature and version a reader identifies the sector by. */
-	memcpy(sector, "ZSN1", 4);
+	kern_memcpy(sector, "ZSN1", 4);
 	snapshot_put32(sector + 4, SNAPSHOT_VERSION);
 
 	/* Whether a snapshot is in progress at all. */
@@ -17505,4 +18230,1299 @@ power2(
 
 	/* Reports that the value is a power of two. */
 	return 1;
+}
+
+/*
+ * Makes the writes so far durable before a write that depends on them.
+ *
+ * A write-through volume keeps its metadata consistent on the device at
+ * every step, so that a crash leaves a volume that mounts.  A write-cached
+ * volume gives that up for speed: the barrier is skipped, and fsync, sync
+ * and unmount are what make its writes durable.
+ */
+static int
+order_barrier(
+	struct mount *mountp)
+{
+	/* Skips the barrier while the volume's writes are delayed. */
+	if ((mountp->m_disk->d_flags & DISK_WRITE_CACHED) != 0)
+		return 0;
+
+	/* Writes and flushes everything before the dependent write. */
+	return disk_sync(mountp->m_disk);
+}
+
+/*
+ * Tests whether a writable mount is to delay its writes: a volume without
+ * a journal, mounted without write-through, on a writable disk.
+ */
+static int
+write_cached_intended(
+	const struct mount *mountp,
+	const struct ufs_mount_state *ms)
+{
+	/* Only a writable mount of a writable disk writes at all. */
+	if ((mountp->m_flags & (MOUNT_READ_ONLY | MOUNT_WRITE_THROUGH)) != 0 ||
+	    (mountp->m_disk->d_flags & DISK_READ_ONLY) != 0)
+		return 0;
+
+	/* Reports a volume without a journal. */
+	return !ms->journal_enabled;
+}
+
+
+/*
+ * The batched metadata journal (v3).
+ *
+ * The journal lives in the regular file `.ufs-journal` of the root
+ * directory.  Its first block is a header naming the runs (extents) of
+ * disk sectors the file occupies, which need not be contiguous; the
+ * superblock's spare words name the header (the locator) and hold the size
+ * mkfs recorded for it (the request).  Journal I/O goes to those sectors
+ * directly, never through the file layer.
+ */
+
+/* Names the disk sector of a sector of the journal file. */
+static uint64_t
+j3_sector(
+	const struct ufs_j3 *j3,
+	uint64_t file_sector,
+	uint32_t *run)
+{
+	const struct ufs_j3_extent *extent;
+	unsigned low;
+	unsigned high;
+	unsigned middle;
+
+	/* Finds the extent that holds the sector by its first file sector. */
+	low = 0;
+	high = j3->extent_count;
+	while (high - low > 1U) {
+		middle = low + (high - low) / 2U;
+		if (j3->extents[middle].file_sector <= file_sector)
+			low = middle;
+		else
+			high = middle;
+	}
+	extent = &j3->extents[low];
+
+	/* Reports how many sectors follow in the same extent. */
+	*run = extent->count - (uint32_t)(file_sector - extent->file_sector);
+	return extent->lba + (file_sector - extent->file_sector);
+}
+
+/* Reads or writes sectors of the journal file, an extent at a time. */
+static int
+j3_io(
+	struct mount *mountp,
+	const struct ufs_j3 *j3,
+	uint64_t file_sector,
+	uint32_t count,
+	void *buffer,
+	int write)
+{
+	uint8_t *bytes;
+	uint64_t lba;
+	uint32_t amount;
+	int error;
+
+	/* Refuses sectors past the end of the journal. */
+	if (file_sector + count > j3->total_sectors)
+		return EINVAL;
+
+	/* Transfers the run inside each extent in turn. */
+	bytes = buffer;
+	while (count != 0) {
+		lba = j3_sector(j3, file_sector, &amount);
+		if (amount > count)
+			amount = count;
+		if (write)
+			error = disk_write_filesystem_context(mountp->m_disk,
+			    lba, amount, bytes, NULL);
+		else
+			error = observed_disk_read(mountp->m_disk, lba, amount,
+			    bytes);
+		if (error != 0)
+			return error;
+		bytes += (size_t)amount * SECTOR_SIZE;
+		file_sector += amount;
+		count -= amount;
+	}
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Makes the writes so far durable on the device. */
+static int
+j3_durable(
+	struct mount *mountp)
+{
+	/* Writes the unpinned dirty buffers, then flushes the device. */
+	return disk_sync(mountp->m_disk);
+}
+
+/* Hashes a key into a power-of-two table. */
+static unsigned
+j3_hash(
+	uint64_t key,
+	unsigned size)
+{
+	/* A multiplicative hash spreads neighbouring keys. */
+	return (unsigned)((key * UINT64_C(0x9e3779b97f4a7c15)) >> 40) &
+	    (size - 1U);
+}
+
+/* Adds a range to the running transaction, once for each exact range. */
+static void
+j3_range_add(
+	struct ufs_j3 *j3,
+	uint64_t lba,
+	uint32_t count,
+	uint32_t hold)
+{
+	struct ufs_j3_range *range;
+	unsigned size;
+	unsigned slot;
+	unsigned position;
+
+	/* Finds the range already recorded, or the empty slot for it. */
+	size = 2U * j3->ranges_max;
+	slot = j3_hash(lba, size);
+	for (;;) {
+		position = j3->index[slot];
+		if (position == 0)
+			break;
+		range = &j3->ranges[position - 1U];
+		if (range->lba == lba && range->count == count &&
+		    range->hold == hold)
+			return;
+		slot = (slot + 1U) & (size - 1U);
+	}
+
+	/* Records the new range. */
+	range = &j3->ranges[j3->range_count];
+	range->lba = lba;
+	range->count = count;
+	range->hold = hold;
+	j3->range_count++;
+	j3->index[slot] = j3->range_count;
+	if (!hold)
+		j3->logged_sectors += count;
+}
+
+/* Asks whether a block was freed by the running transaction. */
+static int
+j3_freed_test(
+	const struct ufs_j3 *j3,
+	uint64_t fragment)
+{
+	unsigned slot;
+
+	/* Probes the open-addressed set from the block's hash. */
+	slot = j3_hash(fragment, J3_FREED_MAX);
+	while (j3->freed[slot] != 0) {
+		if (j3->freed[slot] == fragment + 1U)
+			return 1;
+		slot = (slot + 1U) & (J3_FREED_MAX - 1U);
+	}
+
+	/* The block was not freed. */
+	return 0;
+}
+
+/* Records a block the running transaction freed. */
+static void
+j3_freed_add(
+	struct ufs_mount_state *ms,
+	uint64_t fragment)
+{
+	struct ufs_j3 *j3;
+	unsigned slot;
+	int known;
+
+	/* Adds the block under the journal lock; a half-full set takes no more. */
+	j3 = &ms->j3;
+	mutex_lock(&j3->lock);
+	known = 1;
+	if (j3->active && j3->freed_count < J3_FREED_MAX / 2U)
+		known = j3_freed_test(j3, fragment);
+	if (!known) {
+		slot = j3_hash(fragment, J3_FREED_MAX);
+		while (j3->freed[slot] != 0)
+			slot = (slot + 1U) & (J3_FREED_MAX - 1U);
+		j3->freed[slot] = fragment + 1U;
+		j3->freed_count++;
+	}
+	mutex_unlock(&j3->lock);
+}
+
+/* Asks whether content sectors fall in a block freed by the transaction. */
+static int
+j3_content_freed(
+	const struct ufs_mount_state *ms,
+	uint64_t lba,
+	uint32_t count)
+{
+	uint64_t fragment;
+	uint64_t last;
+	uint64_t block;
+	int freed;
+
+	/* Visits each block the sectors touch. */
+	fragment = lba >> ms->super.fsbtodb;
+	last = (lba + count - 1U) >> ms->super.fsbtodb;
+	for (block = fragment - fragment % ms->super.frag; block <= last;
+	     block += ms->super.frag) {
+		freed = j3_freed_test(&ms->j3, block);
+		if (freed)
+			return 1;
+	}
+
+	/* No block of the range was freed. */
+	return 0;
+}
+
+/*
+ * Takes a write into the running transaction.
+ *
+ * Metadata is pinned in the cache and logged.  Content goes to the cache
+ * as an ordinary delayed write, unless it lands in a block the running
+ * transaction freed: then it is pinned until the commit, so that a crash
+ * that undoes the free finds the old owner's block untouched.
+ */
+static int
+j3_write(
+	struct ufs_mount_state *ms,
+	struct mount *mountp,
+	uint64_t lba,
+	uint32_t count,
+	const void *buffer,
+	int content)
+{
+	struct ufs_j3 *j3;
+	int hold;
+	int error;
+
+	j3 = &ms->j3;
+	mutex_lock(&j3->lock);
+
+	/* Content that does not touch a freed block needs no journal. */
+	hold = 0;
+	if (content && j3->freed_count != 0)
+		hold = j3_content_freed(ms, lba, count);
+	if (content && !hold) {
+		mutex_unlock(&j3->lock);
+		io_stats_record(IO_UFS_WRITE,
+		    (uint64_t)count * mountp->m_disk->d_block_size);
+
+		/* Writes the content as an ordinary delayed write. */
+		return disk_write_filesystem_context(mountp->m_disk, lba, count,
+		    buffer, NULL);
+	}
+
+	/* Commits first when the transaction could not hold this write. */
+	error = 0;
+	if (j3->range_count >= j3->ranges_max ||
+	    (!hold && j3->logged_sectors + count > j3->payload_max))
+		error = j3_commit_locked(ms, mountp);
+
+	/* Pins the sectors in the cache and records them. */
+	if (error == 0)
+		error = buf_write_pinned(mountp->m_disk, lba, count, buffer);
+	if (error == 0) {
+		io_stats_record(IO_UFS_WRITE,
+		    (uint64_t)count * mountp->m_disk->d_block_size);
+		j3_range_add(j3, lba, count, (uint32_t)hold);
+	}
+
+	mutex_unlock(&j3->lock);
+
+	/* Reports how the write went. */
+	return error;
+}
+
+/*
+ * Derives the slot layout from the journal's size: two slots after the
+ * header, each a descriptor, a payload and a commit record.
+ */
+static int
+j3_geometry(
+	struct ufs_j3 *j3)
+{
+	uint64_t slot;
+	uint32_t ranges;
+
+	/* Splits what follows the header into two slots. */
+	if (j3->total_sectors <= j3->header_sectors + 4U)
+		return EINVAL;
+	slot = (j3->total_sectors - j3->header_sectors) / 2U;
+	if (slot > UINT32_MAX)
+		return EINVAL;
+
+	/* Lets a larger slot name more ranges, a power of two in bounds. */
+	ranges = J3_RANGES_MIN;
+	while (ranges < J3_RANGES_LIMIT && (uint64_t)ranges * 2U * 16U <= slot)
+		ranges *= 2U;
+	j3->ranges_max = ranges;
+	j3->desc_sectors_max = (J3_DESC_HEADER + ranges * J3_DESC_ENTRY +
+	    SECTOR_SIZE - 1U) / SECTOR_SIZE;
+	if (slot <= (uint64_t)j3->desc_sectors_max + 2U)
+		return EINVAL;
+	j3->slot_sectors = (uint32_t)slot;
+	j3->payload_max = j3->slot_sectors - j3->desc_sectors_max - 1U;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Writes the header block: identity, the last applied commit, the extents. */
+static int
+j3_write_header(
+	struct mount *mountp,
+	struct ufs_j3 *j3)
+{
+	uint8_t *header;
+	size_t bytes;
+	unsigned n;
+	int error;
+
+	/* Builds the header in a zeroed image of its sectors. */
+	bytes = (size_t)j3->header_sectors * SECTOR_SIZE;
+	header = kern_malloc(bytes);
+	if (header == NULL)
+		return ENOMEM;
+	kern_memset(header, 0, bytes);
+	put32(header, J3_HEADER_MAGIC);
+	put32(header + 4, J3_VERSION);
+	put64(header + 8, j3->nonce);
+	put64(header + 16, j3->applied);
+	put64(header + 24, j3->total_sectors);
+	put32(header + 32, j3->slot_sectors);
+	put32(header + 36, j3->extent_count);
+	put32(header + 40, j3->block_sectors);
+	put32(header + 44, j3->header_sectors);
+	for (n = 0; n < j3->extent_count; n++) {
+		put64(header + J3_HEADER_FIXED + J3_EXTENT_ENTRY * n,
+		    j3->extents[n].lba);
+		put32(header + J3_HEADER_FIXED + J3_EXTENT_ENTRY * n + 8,
+		    j3->extents[n].count);
+	}
+	put32(header + 48, checksum(header + J3_HEADER_FIXED,
+	    (size_t)J3_EXTENT_ENTRY * j3->extent_count));
+	put32(header + 52, checksum(header, 52));
+
+	/* Writes it where the first journal sectors lie. */
+	error = j3_io(mountp, j3, 0, j3->header_sectors, header, 1);
+	kern_free(header);
+
+	/* Reports how the write went. */
+	return error;
+}
+
+/*
+ * Commits the running transaction; the caller holds the journal lock.
+ */
+static int
+j3_commit_locked(
+	struct ufs_mount_state *ms,
+	struct mount *mountp)
+{
+	struct ufs_j3 *j3;
+	struct ufs_j3_range *range;
+	uint8_t *descriptor;
+	uint8_t commit[SECTOR_SIZE];
+	uint8_t *entry;
+	uint64_t base;
+	uint64_t cursor;
+	uint32_t desc_sectors;
+	uint32_t logged;
+	uint32_t done;
+	uint32_t amount;
+	uint32_t sum;
+	unsigned n;
+	int error;
+
+	j3 = &ms->j3;
+
+	/* A transaction with nothing logged has nothing to commit. */
+	if (j3->range_count == 0)
+		return 0;
+
+	/*
+	 * Writes what is not pinned -- content and earlier homes -- so that
+	 * it reaches the device before this commit does.
+	 */
+	error = buf_sync(mountp->m_disk);
+	if (error != 0)
+		return error;
+
+	/* Lays the descriptor out before the payload of the slot. */
+	logged = 0;
+	for (n = 0; n < j3->range_count; n++) {
+		if (!j3->ranges[n].hold)
+			logged++;
+	}
+	desc_sectors = (J3_DESC_HEADER + logged * J3_DESC_ENTRY +
+	    SECTOR_SIZE - 1U) / SECTOR_SIZE;
+	descriptor = kern_malloc((size_t)desc_sectors * SECTOR_SIZE);
+	if (descriptor == NULL)
+		return ENOMEM;
+	kern_memset(descriptor, 0, (size_t)desc_sectors * SECTOR_SIZE);
+	put32(descriptor, J3_DESC_MAGIC);
+	put32(descriptor + 4, J3_VERSION);
+	put64(descriptor + 8, j3->sequence);
+	put64(descriptor + 16, j3->nonce);
+	put32(descriptor + 24, logged);
+	put32(descriptor + 28, desc_sectors);
+	put32(descriptor + 32, j3->logged_sectors);
+
+	/* Copies each logged range's current contents into the slot. */
+	base = j3->header_sectors + (j3->sequence & 1U) * j3->slot_sectors;
+	cursor = base + desc_sectors;
+	logged = 0;
+	for (n = 0; error == 0 && n < j3->range_count; n++) {
+		range = &j3->ranges[n];
+		if (range->hold)
+			continue;
+		sum = 0;
+		for (done = 0; error == 0 && done < range->count; done += amount) {
+			amount = range->count - done;
+			if (amount > J3_STAGING_SECTORS)
+				amount = J3_STAGING_SECTORS;
+			error = observed_disk_read(mountp->m_disk,
+			    range->lba + done, amount, j3->staging);
+			if (error == 0) {
+				sum = sum * 16777619U ^ checksum(j3->staging,
+				    (size_t)amount * SECTOR_SIZE);
+				error = j3_io(mountp, j3, cursor, amount,
+				    j3->staging, 1);
+			}
+			cursor += amount;
+		}
+		entry = descriptor + J3_DESC_HEADER + J3_DESC_ENTRY * logged;
+		put64(entry, range->lba);
+		put32(entry + 8, range->count);
+		put32(entry + 12, sum);
+		logged++;
+	}
+	put32(descriptor + 36, checksum(descriptor + J3_DESC_HEADER,
+	    (size_t)logged * J3_DESC_ENTRY));
+	put32(descriptor + 40, checksum(descriptor, 40));
+
+	/* Writes the descriptor and makes the slot durable. */
+	if (error == 0)
+		error = j3_io(mountp, j3, base, desc_sectors, descriptor, 1);
+	if (error == 0)
+		error = j3_durable(mountp);
+
+	/* Writes the commit record, which makes the transaction the current one. */
+	if (error == 0) {
+		kern_memset(commit, 0, sizeof(commit));
+		put32(commit, J3_COMMIT_MAGIC);
+		put32(commit + 4, J3_VERSION);
+		put64(commit + 8, j3->sequence);
+		put64(commit + 16, j3->nonce);
+		put32(commit + 24, get32(descriptor + 40));
+		put32(commit + 28, desc_sectors);
+		put32(commit + 32, checksum(commit, 32));
+		error = j3_io(mountp, j3, base + j3->slot_sectors - 1U, 1,
+		    commit, 1);
+	}
+	if (error == 0)
+		error = j3_durable(mountp);
+	kern_free(descriptor);
+
+	/* A commit that did not complete leaves the volume unwritable. */
+	if (error != 0) {
+		ms->writable = 0;
+
+		/* Failed. */
+		return error;
+	}
+
+	/* Lets the committed sectors go home, and starts a new transaction. */
+	for (n = 0; n < j3->range_count; n++)
+		(void)buf_unpin(mountp->m_disk, j3->ranges[n].lba,
+		    j3->ranges[n].count);
+	j3->range_count = 0;
+	j3->logged_sectors = 0;
+	kern_memset(j3->index, 0, sizeof(unsigned) * 2U * j3->ranges_max);
+	if (j3->freed_count != 0) {
+		kern_memset(j3->freed, 0, sizeof(uint64_t) * J3_FREED_MAX);
+		j3->freed_count = 0;
+	}
+	j3->sequence++;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Commits the running transaction under the journal lock. */
+static int
+j3_commit(
+	struct ufs_mount_state *ms,
+	struct mount *mountp)
+{
+	int error;
+
+	/* Commits only while the journal is in service. */
+	mutex_lock(&ms->j3.lock);
+	error = 0;
+	if (ms->j3.active)
+		error = j3_commit_locked(ms, mountp);
+	mutex_unlock(&ms->j3.lock);
+
+	/* Reports how the commit went. */
+	return error;
+}
+
+/*
+ * Commits on the flusher's interval, between whole namespace operations
+ * and whole mount-lock steps.
+ */
+static void
+j3_hook(
+	void *argument)
+{
+	struct ufs_mount_state *ms;
+
+	/* Takes the locks a metadata operation holds, lowest first. */
+	ms = argument;
+	mutex_lock(&ms->namespace_lock);
+	mutex_lock(&ms->lock);
+	if (ms->j3.mountp != NULL)
+		(void)j3_commit(ms, ms->j3.mountp);
+	mutex_unlock(&ms->lock);
+	mutex_unlock(&ms->namespace_lock);
+}
+
+/* Reads the superblock sector that holds the locator and the request. */
+static int
+j3_super_read(
+	struct mount *mountp,
+	uint8_t sector[SECTOR_SIZE])
+{
+	/* Both live in the superblock's spare words, in one sector. */
+	return observed_disk_read(mountp->m_disk,
+	    (UFS_SBLOCK_OFFSET + J3_LOCATOR_OFFSET) / SECTOR_SIZE, 1, sector);
+}
+
+/* Parses the locator; reports whether the volume names a journal header. */
+static int
+j3_locator_parse(
+	const uint8_t sector[SECTOR_SIZE],
+	uint64_t *fragment,
+	uint64_t *nonce)
+{
+	const uint8_t *locator;
+
+	/* Accepts only a sealed locator of this version. */
+	locator = sector + (UFS_SBLOCK_OFFSET + J3_LOCATOR_OFFSET) % SECTOR_SIZE;
+	if (get32(locator) != J3_LOCATOR_MAGIC ||
+	    get32(locator + 4) != J3_VERSION ||
+	    get32(locator + 24) != checksum(locator, 24))
+		return 0;
+	*fragment = get64(locator + 8);
+	*nonce = get64(locator + 16);
+
+	/* The volume names a journal. */
+	return 1;
+}
+
+/* Parses the size mkfs recorded; reports whether there is a record. */
+static int
+j3_request_parse(
+	const uint8_t sector[SECTOR_SIZE],
+	uint32_t *mib)
+{
+	const uint8_t *request;
+
+	/* Accepts only a sealed record of this version. */
+	request = sector + (UFS_SBLOCK_OFFSET + J3_REQUEST_OFFSET) % SECTOR_SIZE;
+	if (get32(request) != J3_REQUEST_MAGIC ||
+	    get32(request + 4) != J3_REQUEST_VERSION ||
+	    get32(request + 12) != checksum(request, 12))
+		return 0;
+	*mib = get32(request + 8);
+	if (*mib > J3_MAX_MIB)
+		*mib = J3_MAX_MIB;
+
+	/* The volume carries a record. */
+	return 1;
+}
+
+/*
+ * Loads the journal's header: its identity, what was applied, and the
+ * extents of its file.
+ */
+static int
+j3_load(
+	struct mount *mountp,
+	struct ufs_mount_state *ms,
+	uint64_t fragment,
+	uint64_t nonce)
+{
+	struct ufs_j3 *j3;
+	uint8_t *header;
+	uint64_t file_sector;
+	uint32_t block_sectors;
+	uint32_t count;
+	uint32_t n;
+	int error;
+
+	/* Reads the first block, which is the header. */
+	j3 = &ms->j3;
+	block_sectors = ms->super.bsize / SECTOR_SIZE;
+	header = kern_malloc(ms->super.bsize);
+	if (header == NULL)
+		return ENOMEM;
+	error = observed_disk_read(mountp->m_disk,
+	    fragment << ms->super.fsbtodb, block_sectors, header);
+
+	/* Checks the header's identity and its own checksum. */
+	count = 0;
+	if (error == 0 && (get32(header) != J3_HEADER_MAGIC ||
+	    get32(header + 4) != J3_VERSION || get64(header + 8) != nonce ||
+	    get32(header + 52) != checksum(header, 52) ||
+	    get32(header + 40) != block_sectors ||
+	    get32(header + 44) != block_sectors))
+		error = EINVAL;
+	if (error == 0) {
+		count = get32(header + 36);
+		if (count == 0 || J3_HEADER_FIXED +
+		    (uint64_t)count * J3_EXTENT_ENTRY > ms->super.bsize ||
+		    get32(header + 48) != checksum(header + J3_HEADER_FIXED,
+		    (size_t)J3_EXTENT_ENTRY * count))
+			error = EINVAL;
+	}
+
+	/* Takes the extents, numbering the file's sectors as it goes. */
+	if (error == 0) {
+		j3->extents = kern_malloc(sizeof(struct ufs_j3_extent) * count);
+		if (j3->extents == NULL)
+			error = ENOMEM;
+	}
+	file_sector = 0;
+	for (n = 0; error == 0 && n < count; n++) {
+		j3->extents[n].file_sector = file_sector;
+		j3->extents[n].lba = get64(header + J3_HEADER_FIXED +
+		    J3_EXTENT_ENTRY * n);
+		j3->extents[n].count = get32(header + J3_HEADER_FIXED +
+		    J3_EXTENT_ENTRY * n + 8);
+		if (j3->extents[n].count == 0 ||
+		    j3->extents[n].lba + j3->extents[n].count >
+		    mountp->m_disk->d_block_count)
+			error = EINVAL;
+		file_sector += j3->extents[n].count;
+	}
+	if (error == 0) {
+		j3->extent_count = count;
+		j3->header_fragment = fragment;
+		j3->nonce = nonce;
+		j3->applied = get64(header + 16);
+		j3->total_sectors = get64(header + 24);
+		j3->block_sectors = block_sectors;
+		j3->header_sectors = block_sectors;
+		j3->sequence = j3->applied + 1U;
+		if (file_sector != j3->total_sectors)
+			error = EINVAL;
+	}
+	if (error == 0)
+		error = j3_geometry(j3);
+	if (error == 0 && j3->slot_sectors != get32(header + 32))
+		error = EINVAL;
+	kern_free(header);
+
+	/* A header that does not hold together keeps no extents. */
+	if (error != 0) {
+		kern_free(j3->extents);
+		j3->extents = NULL;
+		j3->extent_count = 0;
+	}
+
+	/* Reports how the load went. */
+	return error;
+}
+
+/*
+ * Reads one slot's commit record; reports its sequence when it seals a
+ * commit of this journal, else zero.
+ */
+static uint64_t
+j3_slot_sequence(
+	struct mount *mountp,
+	struct ufs_j3 *j3,
+	unsigned slot,
+	uint32_t *desc_sectors,
+	uint32_t *desc_sum)
+{
+	uint8_t commit[SECTOR_SIZE];
+	uint64_t base;
+	int error;
+
+	/* Reads the record at the end of the slot. */
+	base = j3->header_sectors + (uint64_t)slot * j3->slot_sectors;
+	error = j3_io(mountp, j3, base + j3->slot_sectors - 1U, 1, commit, 0);
+	if (error != 0)
+		return 0;
+
+	/* Accepts only a sealed record of this journal for this slot. */
+	if (get32(commit) != J3_COMMIT_MAGIC || get32(commit + 4) != J3_VERSION ||
+	    get64(commit + 16) != j3->nonce ||
+	    get32(commit + 32) != checksum(commit, 32) ||
+	    (get64(commit + 8) & 1U) != slot)
+		return 0;
+	*desc_sectors = get32(commit + 28);
+	*desc_sum = get32(commit + 24);
+
+	/* Reports the sequence the record seals. */
+	return get64(commit + 8);
+}
+
+/*
+ * Finds the journal the superblock names and applies its newest commit that
+ * is not yet applied.  A volume whose journal cannot be found or read goes
+ * on as one without a journal; the mount makes a new one.
+ */
+static int
+j3_replay(
+	struct mount *mountp,
+	struct ufs_mount_state *ms)
+{
+	struct ufs_j3 *j3;
+	uint8_t sector[SECTOR_SIZE];
+	uint8_t *descriptor;
+	uint8_t *payload;
+	uint8_t *entry;
+	uint64_t fragment;
+	uint64_t nonce;
+	uint64_t sequence[2];
+	uint64_t base;
+	uint64_t cursor;
+	uint64_t lba;
+	uint32_t desc_sectors[2];
+	uint32_t desc_sum[2];
+	uint32_t count;
+	uint32_t entries;
+	uint32_t n;
+	uint32_t done;
+	uint32_t amount;
+	uint32_t sum;
+	unsigned slot;
+	int named;
+	int error;
+
+	/* A volume whose superblock names no usable journal has nothing to apply. */
+	j3 = &ms->j3;
+	error = j3_super_read(mountp, sector);
+	if (error != 0)
+		return error;
+	named = j3_locator_parse(sector, &fragment, &nonce);
+	if (!named)
+		return 0;
+	error = j3_load(mountp, ms, fragment, nonce);
+	if (error == EINVAL)
+		return 0;
+	if (error != 0)
+		return error;
+	j3->present = 1;
+
+	/* Picks the newer of the two slots' commits. */
+	sequence[0] = j3_slot_sequence(mountp, j3, 0, &desc_sectors[0], &desc_sum[0]);
+	sequence[1] = j3_slot_sequence(mountp, j3, 1, &desc_sectors[1], &desc_sum[1]);
+	slot = 0;
+	if (sequence[1] > sequence[0])
+		slot = 1;
+	if (sequence[slot] >= j3->sequence)
+		j3->sequence = sequence[slot] + 1U;
+	if (sequence[slot] <= j3->applied)
+		return 0;
+
+	/* A read-only disk cannot take the transaction home. */
+	if ((mountp->m_disk->d_flags & DISK_READ_ONLY) != 0)
+		return EROFS;
+
+	/* Reads and checks the descriptor the commit seals. */
+	if (desc_sectors[slot] == 0 || desc_sectors[slot] > j3->desc_sectors_max)
+		return EINVAL;
+	descriptor = kern_malloc((size_t)desc_sectors[slot] * SECTOR_SIZE);
+	payload = kern_malloc((size_t)J3_STAGING_SECTORS * SECTOR_SIZE);
+	error = 0;
+	if (descriptor == NULL || payload == NULL)
+		error = ENOMEM;
+	base = j3->header_sectors + (uint64_t)slot * j3->slot_sectors;
+	if (error == 0)
+		error = j3_io(mountp, j3, base, desc_sectors[slot], descriptor, 0);
+	entries = 0;
+	if (error == 0) {
+		entries = get32(descriptor + 24);
+		if (get32(descriptor) != J3_DESC_MAGIC ||
+		    get64(descriptor + 8) != sequence[slot] ||
+		    get64(descriptor + 16) != j3->nonce ||
+		    get32(descriptor + 40) != checksum(descriptor, 40) ||
+		    get32(descriptor + 40) != desc_sum[slot] ||
+		    J3_DESC_HEADER + (uint64_t)entries * J3_DESC_ENTRY >
+		    (uint64_t)desc_sectors[slot] * SECTOR_SIZE ||
+		    get32(descriptor + 36) != checksum(descriptor + J3_DESC_HEADER,
+		    (size_t)entries * J3_DESC_ENTRY))
+			error = EINVAL;
+	}
+
+	/* Checks every payload before writing any home. */
+	cursor = base + desc_sectors[slot];
+	for (n = 0; error == 0 && n < entries; n++) {
+		entry = descriptor + J3_DESC_HEADER + J3_DESC_ENTRY * n;
+		count = get32(entry + 8);
+		sum = 0;
+		for (done = 0; error == 0 && done < count; done += amount) {
+			amount = count - done;
+			if (amount > J3_STAGING_SECTORS)
+				amount = J3_STAGING_SECTORS;
+			error = j3_io(mountp, j3, cursor + done, amount, payload, 0);
+			if (error == 0)
+				sum = sum * 16777619U ^ checksum(payload,
+				    (size_t)amount * SECTOR_SIZE);
+		}
+		if (error == 0 && sum != get32(entry + 12))
+			error = EINVAL;
+		cursor += count;
+	}
+
+	/* Writes every range home, then makes the homes durable. */
+	cursor = base + desc_sectors[slot];
+	for (n = 0; error == 0 && n < entries; n++) {
+		entry = descriptor + J3_DESC_HEADER + J3_DESC_ENTRY * n;
+		lba = get64(entry);
+		count = get32(entry + 8);
+		for (done = 0; error == 0 && done < count; done += amount) {
+			amount = count - done;
+			if (amount > J3_STAGING_SECTORS)
+				amount = J3_STAGING_SECTORS;
+			error = j3_io(mountp, j3, cursor + done, amount, payload, 0);
+			if (error == 0)
+				error = disk_write_filesystem_context(mountp->m_disk,
+				    lba + done, amount, payload, NULL);
+		}
+		cursor += count;
+	}
+	if (error == 0)
+		error = j3_durable(mountp);
+
+	/* Records the transaction as applied. */
+	if (error == 0) {
+		j3->applied = sequence[slot];
+		error = j3_write_header(mountp, j3);
+	}
+	if (error == 0)
+		error = j3_durable(mountp);
+	kern_free(descriptor);
+	kern_free(payload);
+
+	/* Reports how the replay went. */
+	return error;
+}
+
+/*
+ * Picks the journal's size in sectors: what mkfs recorded, or else the
+ * ext4 default for the volume's size, capped at J3_DEFAULT_MAX_MIB.
+ * Either is kept to an eighth of the room the journal may take: the free
+ * space plus what the journal already holds.  Zero means no journal.
+ */
+static uint64_t
+j3_wanted_sectors(
+	struct mount *mountp,
+	struct ufs_mount_state *ms)
+{
+	uint8_t sector[SECTOR_SIZE];
+	uint64_t volume;
+	uint64_t room;
+	uint64_t bytes;
+	uint32_t mib;
+	int recorded;
+	int error;
+
+	/* Takes the size mkfs recorded, when there is one. */
+	error = j3_super_read(mountp, sector);
+	recorded = 0;
+	if (error == 0)
+		recorded = j3_request_parse(sector, &mib);
+
+	/* Otherwise follows the ext4 table for the volume's size. */
+	if (!recorded) {
+		volume = ms->super.size * ms->super.fsize;
+		if (volume < 8ULL << 20)
+			mib = 0;
+		else if (volume < 128ULL << 20)
+			mib = 4;
+		else if (volume < 1ULL << 30)
+			mib = 16;
+		else if (volume < 2ULL << 30)
+			mib = 32;
+		else if (volume < 16ULL << 30)
+			mib = 64;
+		else
+			mib = J3_DEFAULT_MAX_MIB;
+	}
+
+	/* Keeps the journal to an eighth of the room it may take. */
+	bytes = (uint64_t)mib << 20;
+	room = ms->super.cstotal_nbfree * ms->super.bsize;
+	if (ms->j3.present)
+		room += ms->j3.total_sectors * SECTOR_SIZE;
+	if (bytes > room / 8U)
+		bytes = (room / 8U) & ~((1ULL << 20) - 1U);
+	bytes -= bytes % ms->super.bsize;
+
+	/* Reports the size in sectors. */
+	return bytes / SECTOR_SIZE;
+}
+
+/* Names the journal file in the superblock's locator. */
+static int
+j3_locator_write(
+	struct mount *mountp,
+	struct ufs_j3 *j3)
+{
+	uint8_t sector[SECTOR_SIZE];
+	uint8_t *locator;
+	int error;
+
+	/* Rewrites the locator in place, keeping the rest of the sector. */
+	error = j3_super_read(mountp, sector);
+	if (error != 0)
+		return error;
+	locator = sector + (UFS_SBLOCK_OFFSET + J3_LOCATOR_OFFSET) % SECTOR_SIZE;
+	kern_memset(locator, 0, 28);
+	put32(locator, J3_LOCATOR_MAGIC);
+	put32(locator + 4, J3_VERSION);
+	put64(locator + 8, j3->header_fragment);
+	put64(locator + 16, j3->nonce);
+	put32(locator + 24, checksum(locator, 24));
+
+	/* Writes it, before the journal carries any metadata. */
+	return write_sectors(mountp,
+	    (UFS_SBLOCK_OFFSET + J3_LOCATOR_OFFSET) / SECTOR_SIZE, 1, sector);
+}
+
+/*
+ * Delays a mount's writes in the cache; reports whether they already were.
+ */
+static unsigned
+mountp_disk_cached(
+	struct mount *mountp)
+{
+	unsigned cached;
+
+	/* Sets the flag, remembering what it was. */
+	cached = (mountp->m_disk->d_flags & DISK_WRITE_CACHED) != 0;
+	mountp->m_disk->d_flags |= DISK_WRITE_CACHED;
+	return cached;
+}
+
+/*
+ * Gives the journal file the wanted size and records its extents: finds or
+ * creates `.ufs-journal`, cuts it to nothing, allocates its blocks again,
+ * and merges adjacent blocks into extents.
+ */
+static int
+j3_allocate(
+	struct ufs_mount_state *ms,
+	struct inode *root,
+	uint64_t sectors)
+{
+	struct ufs_j3 *j3;
+	struct componentname component;
+	struct inode_creation_request request;
+	struct inode *inode;
+	struct ufs_j3_extent *extents;
+	uint64_t fragment;
+	uint64_t lba;
+	uint64_t blocks;
+	uint64_t n;
+	unsigned capacity;
+	unsigned count;
+	unsigned cached;
+	int error;
+
+	/* Bounds the extents to what one header block can list. */
+	j3 = &ms->j3;
+	j3->block_sectors = ms->super.bsize / SECTOR_SIZE;
+	j3->header_sectors = j3->block_sectors;
+	capacity = (ms->super.bsize - J3_HEADER_FIXED) / J3_EXTENT_ENTRY;
+	extents = kern_malloc(sizeof(struct ufs_j3_extent) * capacity);
+	if (extents == NULL)
+		return ENOMEM;
+
+	/* Finds the file, or creates it; the name is the volume's own. */
+	component.cn_nameptr = J3_NAME;
+	component.cn_namelen = kern_strlen(J3_NAME);
+	component.cn_flags = 0;
+	inode = NULL;
+	j3->creating = 1;
+	error = ufs_lookup(root, &component, &inode);
+	if (error == ENOENT) {
+		error = inode_creation_request_system(INODE_REG, 0600, 0, 0, 0,
+		    &request);
+		if (error == 0)
+			error = ufs_create(root, &component, &request, &inode);
+	}
+	j3->creating = 0;
+
+	/*
+	 * Delays the allocation's metadata writes and makes them durable once
+	 * at the end: a journal file is allocated block by block, and each
+	 * block written through would take a round trip to the device.  A
+	 * crash before the locator names the file leaves it to be cut and
+	 * allocated again at the next mount.
+	 */
+	cached = mountp_disk_cached(root->i_mount);
+
+	/* Gives the old blocks back, then takes the wanted number again. */
+	if (error == 0)
+		error = ufs_truncate(inode, 0);
+	j3->creating = 1;
+	blocks = sectors / j3->block_sectors;
+	count = 0;
+	for (n = 0; error == 0 && n < blocks; n++) {
+		mutex_lock(&inode->i_lock);
+		error = bmap_ensure(inode, n, &fragment);
+		mutex_unlock(&inode->i_lock);
+		if (error != 0)
+			break;
+		lba = fragment << ms->super.fsbtodb;
+		if (n == 0)
+			j3->header_fragment = fragment;
+
+		/* Extends the last extent, or starts one. */
+		if (count != 0 &&
+		    extents[count - 1U].lba + extents[count - 1U].count == lba) {
+			extents[count - 1U].count += j3->block_sectors;
+		} else if (count < capacity) {
+			extents[count].file_sector = n * j3->block_sectors;
+			extents[count].lba = lba;
+			extents[count].count = j3->block_sectors;
+			count++;
+		} else {
+			error = ENOSPC;
+		}
+	}
+	j3->creating = 0;
+	if (error == 0) {
+		inode->i_size = (off_t)(blocks * ms->super.bsize);
+		error = persist_inode(inode);
+	}
+	if (inode != NULL)
+		inode_release(inode);
+	if (!cached)
+		root->i_mount->m_disk->d_flags &= ~DISK_WRITE_CACHED;
+	if (error == 0)
+		error = j3_durable(root->i_mount);
+
+	/* Publishes the extents, or gives up the new ones. */
+	if (error != 0) {
+		kern_free(extents);
+
+		/* Failed. */
+		return error;
+	}
+	kern_free(j3->extents);
+	j3->extents = extents;
+	j3->extent_count = count;
+	j3->total_sectors = blocks * j3->block_sectors;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Makes a fresh journal of the wanted size: a new file layout, a new
+ * identity, empty slots, and a locator naming it.
+ */
+static int
+j3_make(
+	struct mount *mountp,
+	struct ufs_mount_state *ms,
+	struct inode *root,
+	uint64_t sectors)
+{
+	struct ufs_j3 *j3;
+	uint8_t sector[SECTOR_SIZE];
+	unsigned slot;
+	int error;
+
+	/* Allocates the file and lays the slots out. */
+	j3 = &ms->j3;
+	j3->present = 0;
+	error = j3_allocate(ms, root, sectors);
+	if (error == 0)
+		error = j3_geometry(j3);
+
+	/* Writes a header that has applied nothing, and empty commit records. */
+	if (error == 0) {
+		j3->nonce = (sched_ticks() + 1U) * UINT64_C(0x9e3779b97f4a7c15) ^
+		    ms->super.size ^ ((uint64_t)j3->header_fragment << 20) ^
+		    j3->nonce;
+		j3->applied = 0;
+		j3->sequence = 1;
+		error = j3_write_header(mountp, j3);
+	}
+	kern_memset(sector, 0, sizeof(sector));
+	for (slot = 0; error == 0 && slot < 2U; slot++)
+		error = j3_io(mountp, j3, j3->header_sectors +
+		    (uint64_t)(slot + 1U) * j3->slot_sectors - 1U, 1, sector, 1);
+	if (error == 0)
+		error = j3_durable(mountp);
+
+	/* Names the journal in the superblock, last. */
+	if (error == 0)
+		error = j3_locator_write(mountp, j3);
+	if (error == 0)
+		error = j3_durable(mountp);
+	if (error == 0)
+		j3->present = 1;
+
+	/* Reports how the making went. */
+	return error;
+}
+
+/*
+ * Puts the journal in service for a writable mount: reuses the journal the
+ * volume has when it is the wanted size, and otherwise makes it again.
+ */
+static int
+j3_open(
+	struct mount *mountp,
+	struct ufs_mount_state *ms,
+	struct inode *root)
+{
+	struct ufs_j3 *j3;
+	uint64_t wanted;
+	int error;
+
+	/* A volume that wants no journal keeps none in service. */
+	j3 = &ms->j3;
+	wanted = j3_wanted_sectors(mountp, ms);
+	if (wanted <= (uint64_t)ms->super.bsize / SECTOR_SIZE * 8U)
+		return ENOENT;
+
+	/* Makes the journal again when there is none or it has another size. */
+	error = 0;
+	if (!j3->present || j3->total_sectors != wanted)
+		error = j3_make(mountp, ms, root, wanted);
+	if (error != 0)
+		return error;
+
+	/* Takes the memory of the running transaction. */
+	j3->ranges = kern_malloc(sizeof(struct ufs_j3_range) * j3->ranges_max);
+	j3->index = kern_malloc(sizeof(unsigned) * 2U * j3->ranges_max);
+	j3->freed = kern_malloc(sizeof(uint64_t) * J3_FREED_MAX);
+	j3->staging = kern_malloc((size_t)J3_STAGING_SECTORS * SECTOR_SIZE);
+	if (j3->ranges == NULL || j3->index == NULL || j3->freed == NULL ||
+	    j3->staging == NULL) {
+		(void)j3_close(mountp, ms, 0);
+
+		/* Failed. */
+		return ENOMEM;
+	}
+	kern_memset(j3->index, 0, sizeof(unsigned) * 2U * j3->ranges_max);
+	kern_memset(j3->freed, 0, sizeof(uint64_t) * J3_FREED_MAX);
+	j3->range_count = 0;
+	j3->logged_sectors = 0;
+	j3->freed_count = 0;
+
+	/* Carries metadata from here on, and commits on the flusher's interval. */
+	j3->active = 1;
+	j3->mountp = mountp;
+	error = buf_flusher_hook(j3_hook, ms, 1);
+	if (error != 0) {
+		(void)j3_close(mountp, ms, 1);
+
+		/* Failed. */
+		return error;
+	}
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Takes the journal out of service: commits what runs when asked, writes
+ * everything home and records it all as applied.
+ */
+static int
+j3_close(
+	struct mount *mountp,
+	struct ufs_mount_state *ms,
+	int commit)
+{
+	struct ufs_j3 *j3;
+	unsigned n;
+	int error;
+
+	/* Stops the interval commits before taking the journal down. */
+	j3 = &ms->j3;
+	(void)buf_flusher_hook(j3_hook, ms, 0);
+	j3->mountp = NULL;
+
+	/* Commits the running transaction, then carries no more writes. */
+	error = 0;
+	mutex_lock(&j3->lock);
+	if (commit && j3->active && j3->ranges != NULL)
+		error = j3_commit_locked(ms, mountp);
+	if (!commit && j3->ranges != NULL) {
+		for (n = 0; n < j3->range_count; n++)
+			(void)buf_unpin(mountp->m_disk, j3->ranges[n].lba,
+			    j3->ranges[n].count);
+	}
+	j3->active = 0;
+	mutex_unlock(&j3->lock);
+
+	/* Writes the homes and records every commit as applied. */
+	if (commit && error == 0)
+		error = j3_durable(mountp);
+	if (commit && error == 0 && j3->extents != NULL) {
+		j3->applied = j3->sequence - 1U;
+		error = j3_write_header(mountp, j3);
+		if (error == 0)
+			error = j3_durable(mountp);
+	}
+
+	/* Returns the memory of the running transaction. */
+	kern_free(j3->ranges);
+	kern_free(j3->index);
+	kern_free(j3->freed);
+	kern_free(j3->staging);
+	j3->ranges = NULL;
+	j3->index = NULL;
+	j3->freed = NULL;
+	j3->staging = NULL;
+	j3->range_count = 0;
+
+	/* Reports how the last commit went. */
+	return error;
+}
+
+/*
+ * Asks whether a name is the journal file in the root directory.  The name
+ * is the volume's own: nothing through the VFS may create, open, remove or
+ * rename onto it, and a directory listing skips it.
+ */
+static int
+j3_hidden(
+	const struct inode *directory,
+	const struct componentname *component)
+{
+	struct ufs_mount_state *ms;
+	size_t length;
+
+	/* Only the root directory holds the journal, and only it is special. */
+	ms = state(directory->i_mount);
+	if (directory->i_ino != UFS_ROOT_INO || ms == NULL || ms->j3.creating)
+		return 0;
+	length = kern_strlen(J3_NAME);
+
+	/* Reports whether the name is the journal's. */
+	return component->cn_namelen == length &&
+	    kern_memcmp(component->cn_nameptr, J3_NAME, length) == 0;
 }

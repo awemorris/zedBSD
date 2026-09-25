@@ -25,7 +25,7 @@
 #include <kern/klog.h>
 #include <kern/kmem.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 
 /* VK_STRUCTURE_TYPE_FENCE_CREATE_INFO. */

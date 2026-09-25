@@ -1,0 +1,20 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/* Only the calls <truetype.h> declares leave the library. */
+{
+	global:
+		truetype_open;
+		truetype_close;
+		truetype_set_pixel_size;
+		truetype_metrics;
+		truetype_glyph_index;
+		truetype_glyph_metrics;
+		truetype_render_glyph;
+	local:
+		*;
+};

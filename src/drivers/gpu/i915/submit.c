@@ -15,13 +15,13 @@
 #include "mmio.h"
 #include "request.h"
 #include "sync.h"
+#include <kern/kcrt.h>
 
 #include <kern/device-io.h>
 #include <kern/klog.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 #include "intel/gt-regs.h"
 
@@ -65,7 +65,7 @@ drv_i915_execlists_init(
 		return;
 
 	/* Starts with no ports loaded and no counts. */
-	memset(el, 0, sizeof(*el));
+	kern_memset(el, 0, sizeof(*el));
 
 	/* Every software context id is free (GENMASK(BITS_PER_LONG - 2, 0)). */
 	el->context_tag = (((uint64_t)1) << 63) - 1U;

@@ -23,7 +23,7 @@ m68k_x68k_cmain(const struct x68k_boot_handoff *handoff)
 	m68k030_space_init((uintptr_t)m68k030_bootstrap_empty_root);
 	m68k_int_init();
 	x68k_keyboard_init();
-	x68k_timer_init(100);
+	x68k_timer_init(HAL_TIMER_FREQUENCY);
 	hal_puts("X68K MMU/VBR/TIMER PASS\n");
 	kernel_entry(x68k_boot_handoff());
 	HAL_FATAL("X68k kernel_entry returned");

@@ -11,12 +11,12 @@
  * observe that same payload without acquiring the producer's GPU session.
  */
 
-#include <drivers/gpu-fence.h>
+#include <drivers/gpu/gpu-fence.h>
 #include <kern/kmem.h>
 #include <kern/lock.h>
 #include <kern/poll.h>
 #include <kern/waitq.h>
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 
 /* One independently retained payload; its lock protects generation, owner and state. */

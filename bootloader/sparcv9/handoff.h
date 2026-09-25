@@ -12,9 +12,9 @@
 #ifndef KERN_SPARCV9_HANDOFF_H
 #define KERN_SPARCV9_HANDOFF_H
 
-#include <kern/sun4u/boot.h>
+#include <kern/boot.h>
 
-int sparcv9_handoff_build(struct sun4u_boot_handoff *handoff,
+int sparcv9_handoff_build(struct kern_sun4u_boot_handoff *handoff,
 	const char *bootpath);
 
 #endif

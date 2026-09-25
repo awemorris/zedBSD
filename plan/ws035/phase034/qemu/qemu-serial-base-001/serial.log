@@ -1,0 +1,46 @@
+boot: platform devices detected: 1
+boot: parameters: boot0=UUID=114E-BD9C video=640x480 overlay-root=boot0:rootfs.img overlay-data=boot0:data.img swap0=boot0:swapfile
+boot: ignored 1 unknown parameter; first=video
+boot: VFS initialization
+vfs: boot BIOS=80 MBR partition=1 devices=1
+input: /dev/input/event0: PC/AT PS/2 mouse
+input: /dev/input/event1: PC/AT PS/2 keyboard
+vfs: native boot disk=sda physical disks=1
+vfs: scan sda H/S=16/63 blocks=561152: 3 entries
+vfs: sda partition 1 start=00000000:00000800 data=00000000:00000800 blocks=00000000:00020000
+vfs: sda partition 2 start=00000000:00020800 data=00000000:00020800 blocks=00000000:00068000
+vfs: sda partition 3 start=00000000:00000022 data=00000000:00000022 blocks=00000000:000007DE
+vfs: boot0 UUID=114E-BD9C -> /dev/sda2 (private FAT)
+vfs: loop0 <- boot0:rootfs.img (private, read-only)
+vfs: loop1 <- boot0:data.img (private, read-write)
+vfs: root=overlay lower=boot0:rootfs.img upper=boot0:data.img
+swap: swap0 source=boot0:swapfile slots=16383
+swap: active sources=1 total=16383 free=16383
+vfs: mounting runtime filesystems...
+vfs: runtime filesystems mounted
+boot: memory 523772 KiB total, 514124 KiB free, 6868 KiB reserved
+boot: starting init /sbin/init
+
+init: started syslogd pid 4
+init: started networkd pid 5
+networkd: auth result=admitted role=root-all pid=6 euid=0 egid=0
+networkd: auth result=admitted role=root-all pid=6 euid=0 egid=0
+networkd: auth result=admitted role=root-all pid=6 euid=0 egid=0
+net: invalid backend request
+init: started cron pid 11
+init: started getty_console pid 12
+init: system running
+
+login: root
+Password: 
+root@zedbsd:/root$ cmp /bin/cmp /bin/cmp && echo p017guest
+p017guest
+root@zedbsd:/root$ echo p018data | tee /tmp/p018
+p018data
+root@zedbsd:/root$ grep p018data /tmp/p018 && echo p018guest
+p018data
+p018guest
+root@zedbsd:/root$ lp -d invalid /bin/cmp || echo p016guest
+lp: invalid destination: invalid
+p016guest
+root@zedbsd:/root$ 

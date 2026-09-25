@@ -15,9 +15,9 @@
  */
 
 #include "kern/net/wlan.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 #define WLAN_FRAME_FIXED_LENGTH 36U
 #define WLAN_IE_SSID 0U
@@ -93,8 +93,8 @@ wlan_frame_parse_bss(
 		return EINVAL;
 
 	/* Takes the fixed fields. */
-	memset(&parsed, 0, sizeof(parsed));
-	memcpy(parsed.bssid, frame + 16U, sizeof(parsed.bssid));
+	kern_memset(&parsed, 0, sizeof(parsed));
+	kern_memcpy(parsed.bssid, frame + 16U, sizeof(parsed.bssid));
 	parsed.rssi_dbm = rssi_dbm;
 	parsed.beacon_interval_tu = read_le16(frame + 32U);
 	parsed.capability = read_le16(frame + 34U);
@@ -119,7 +119,7 @@ wlan_frame_parse_bss(
 				return EINVAL;
 			have_ssid = 1;
 			parsed.ssid_length = ie_length;
-			memcpy(parsed.ssid, body, ie_length);
+			kern_memcpy(parsed.ssid, body, ie_length);
 		} else if (identifier == WLAN_IE_DS_PARAMETER) {
 			if (have_channel || ie_length != 1U)
 				return EINVAL;

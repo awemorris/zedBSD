@@ -53,8 +53,8 @@
  */
 
 #include "intel-ax211-runtime.h"
+#include <kern/kcrt.h>
 
-#include <string.h>
 
 struct ax211_runtime_version {
 	uint8_t group;
@@ -98,14 +98,14 @@ drv_intel_ax211_runtime_profile_from_manifest(
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_INVALID;
 	}
-	memset(&parsed, 0, sizeof(parsed));
+	kern_memset(&parsed, 0, sizeof(parsed));
 	parsed.tx_chain_mask = nvm->tx_chain_mask;
 	parsed.rx_chain_mask = nvm->rx_chain_mask;
 	parsed.lar_enabled = nvm->lar_enabled ? 1U : 0U;
 	parsed.ltr_enabled = ltr_enabled ? 1U : 0U;
-	memcpy(parsed.api_changes, manifest->api_changes,
+	kern_memcpy(parsed.api_changes, manifest->api_changes,
 	       sizeof(parsed.api_changes));
-	memcpy(parsed.capabilities, manifest->capabilities,
+	kern_memcpy(parsed.capabilities, manifest->capabilities,
 	       sizeof(parsed.capabilities));
 
 	/* Checks the ax211 runtime profile valid result. */
@@ -188,7 +188,7 @@ drv_intel_ax211_runtime_command_encode(
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_INVALID;
 	}
-	memset(&encoded, 0, sizeof(encoded));
+	kern_memset(&encoded, 0, sizeof(encoded));
 
 	/* OpenBSD sends zero in the wide-header version field. */
 	encoded.wire_version = 0U;
@@ -318,7 +318,7 @@ drv_intel_ax211_runtime_mcc_decode(
 	if (message->payload == NULL || message->payload_length < 20U)
 		return INTEL_AX211_RUNTIME_TRUNCATED;
 	bytes = message->payload;
-	memset(&parsed, 0, sizeof(parsed));
+	kern_memset(&parsed, 0, sizeof(parsed));
 	parsed.status = ax211_runtime_get_le32(bytes);
 	parsed.mcc = ax211_runtime_get_le16(bytes + 4U);
 	parsed.capabilities = ax211_runtime_get_le16(bytes + 6U);
@@ -389,7 +389,7 @@ drv_intel_ax211_runtime_begin(
 	result = drv_intel_ax211_runtime_api89_validate(table, profile);
 	if (result != INTEL_AX211_RUNTIME_OK)
 		return result;
-	memset(&started, 0, sizeof(started));
+	kern_memset(&started, 0, sizeof(started));
 	started.profile = *profile;
 	started.generation = generation;
 	started.deadline = now_us + INTEL_AX211_RUNTIME_COMMAND_TIMEOUT_US;

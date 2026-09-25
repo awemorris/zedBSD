@@ -32,7 +32,8 @@ bsp_timer_init(
 	uint16_t divisor;
 
 	/* Programs channel zero for the fixed 100 Hz periodic rate. */
-	divisor = (uint16_t)(1193182U / 100U);
+	divisor = (uint16_t)((1193182U + HAL_TIMER_FREQUENCY / 2U) /
+	    HAL_TIMER_FREQUENCY);
 	asm_outb(0x43U, 0x34U);
 	asm_outb(0x40U, (uint8_t)divisor);
 	asm_outb(0x40U, (uint8_t)(divisor >> 8));

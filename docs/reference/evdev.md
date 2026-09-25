@@ -11,9 +11,10 @@ zedBSD reserves `/dev/input/eventN` for an independently implemented event
 interface whose initial keyboard and pointer subset is source-oriented toward
 Linux and FreeBSD evdev. The authoritative public header is
 [`<uapi/input.h>`](../../include/uapi/input.h). The compatibility
-include paths [`<linux/input.h>`](../../libc/include/linux/input.h) and
-[`<dev/evdev/input.h>`](../../libc/include/dev/evdev/input.h) include that same
-header; they do not provide a second ABI.
+include path [`<dev/evdev/input.h>`](../../include/libc/dev/evdev/input.h)
+includes that same header; it does not provide a second ABI. zedBSD does not
+provide `<linux/input.h>`: the event interface is Linux-compatible in behavior,
+but the headers are deliberately not Linux-compatible.
 
 ## ABI and event stream
 
@@ -195,7 +196,7 @@ cover the source snapshot and atomic state transition.
 
 | Property | Linux | FreeBSD | zedBSD initial profile |
 | --- | --- | --- | --- |
-| Include path | `<linux/input.h>` | `<dev/evdev/input.h>` | Both wrappers plus authoritative `<uapi/input.h>` |
+| Include path | `<linux/input.h>` | `<dev/evdev/input.h>` | FreeBSD wrapper plus authoritative `<uapi/input.h>`; no `<linux/input.h>` |
 | LP64 event layout | Native timeval; 24 bytes on x86-64 | Native timeval; 24 bytes on x86-64 | 24 bytes |
 | i386 event layout | Linux compat/time-mode dependent; commonly 16 bytes | Native FreeBSD timeval layout | 20 bytes because zedBSD `time_t` is 64-bit |
 | ioctl encoding | Linux `_IOC` ABI | FreeBSD ioctl ABI | zedBSD ioctl ABI; source names match but numbers are not binary-compatible |
@@ -217,7 +218,7 @@ incorporated into the zedBSD base system.
 
 | Current claim | Production owner | Executable evidence |
 | --- | --- | --- |
-| Public layout, constants, and wrapper identity | [`input.h`](../../include/uapi/input.h), [Linux wrapper](../../libc/include/linux/input.h), [FreeBSD wrapper](../../libc/include/dev/evdev/input.h) | [IN-T00](../../plan/ws006/tests/evdev-layout-test.c) in LP64 and ILP32 modes |
+| Public layout, constants, and wrapper identity | [`input.h`](../../include/uapi/input.h), [FreeBSD wrapper](../../include/libc/dev/evdev/input.h) | [IN-T00](../../plan/ws006/tests/evdev-layout-test.c) in LP64 and ILP32 modes |
 | Independent queues, read/poll/grab, overflow, and detach | [`input-device.c`](../../src/drivers/generic/input.c), [`input-queue.c`](../../src/drivers/generic/input.c) | [IN-T10 queue fixture](../../plan/ws006/tests/input-queue-test.c), [ownership/lifecycle fixture](../../plan/ws006/tests/input-device-ownership-test.c) |
 | Capability registration and current key/ABS state | [`input-capability.c`](../../src/drivers/generic/input.c) | [IN-T11](../../plan/ws006/tests/input-capability-test.c) and [IN-T12 probe](../../plan/ws006/tests/evdev-capability-probe.c) |
 | Per-source physical/momentary input, console subscription, resync, and detach | [`input-device.c`](../../src/drivers/generic/input.c), [`input-subscriber.c`](../../src/drivers/generic/input.c), [`console.c`](../../src/drivers/generic/console.c) | [q044 ownership runner](../../plan/ws006/tests/run-input-ownership-host-test.sh) and [`ws006-p006`](../../plan/ws006/phase006/phase.md) |

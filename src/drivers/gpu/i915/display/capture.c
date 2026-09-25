@@ -83,6 +83,7 @@
 #include "hotplug.h"
 #include "present.h"
 #include "scanout.h"
+#include <kern/kcrt.h>
 
 #include "../i915.h"
 #include "../memory.h"
@@ -90,17 +91,16 @@
 #include "../session.h"
 #include "../render/blit.h"
 
-#include <drivers/gpu.h>
-#include <drivers/gpu-display.h>
+#include <drivers/gpu/gpu.h>
+#include <drivers/gpu/gpu-display.h>
 #include <kern/clock.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
 #include <kern/pmem.h>
 #include <kern/sched.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 /* The one display of the node and its generation (the panel's ids). */
 #define I915_CAPTURE_DISPLAY_ID		1U
@@ -264,7 +264,7 @@ drv_i915_capture_fini(
 
 	/* Gives the run back and forgets the area. */
 	(void)kern_pmem_free(&i915_capture_area.run);
-	memset(&i915_capture_area, 0, sizeof(i915_capture_area));
+	kern_memset(&i915_capture_area, 0, sizeof(i915_capture_area));
 	kern_logf("i915: capture: area freed\n");
 }
 
@@ -319,7 +319,7 @@ drv_i915_capture_init_header(
 	global = (struct i915_capture_global *)(void *)area;
 
 	/* The magic, the version and the layout of the slots. */
-	memcpy(global->magic, "I915CAP1", sizeof(global->magic));
+	kern_memcpy(global->magic, "I915CAP1", sizeof(global->magic));
 	global->version = I915_CAPTURE_VERSION;
 	global->header_bytes = I915_CAPTURE_HEADER_BYTES;
 	global->slot_count = I915_CAPTURE_SLOTS;
@@ -341,7 +341,7 @@ drv_i915_capture_init_header(
 	/* Names every slot; each stays not ready until its first capture. */
 	for (slot = 0U; slot < I915_CAPTURE_SLOTS; slot++) {
 		header = (struct i915_capture_slot *)(void *)(area + drv_i915_capture_slot_offset(slot));
-		memcpy(header->magic, "I915SLOT", sizeof(header->magic));
+		kern_memcpy(header->magic, "I915SLOT", sizeof(header->magic));
 		header->slot_index = slot;
 		header->ready = 0U;
 	}
@@ -497,7 +497,7 @@ i915_capture_allocate(void)
 	capture->cpu = kern_pmem_to_kernel(capture->run.paddr);
 	if (capture->cpu == NULL) {
 		(void)kern_pmem_free(&capture->run);
-		memset(capture, 0, sizeof(*capture));
+		kern_memset(capture, 0, sizeof(*capture));
 		return EFAULT;
 	}
 
@@ -506,7 +506,7 @@ i915_capture_allocate(void)
 	 * here on the CPU holds no dirty line of it, and only the headers are
 	 * ever written by the CPU again.
 	 */
-	memset(capture->cpu, 0, (size_t)I915_CAPTURE_AREA_BYTES);
+	kern_memset(capture->cpu, 0, (size_t)I915_CAPTURE_AREA_BYTES);
 	drv_i915_capture_init_header(capture->cpu, (uint64_t)capture->run.paddr);
 	drv_i915_gt_clflush(capture->cpu, (size_t)I915_CAPTURE_AREA_BYTES);
 
@@ -583,7 +583,7 @@ i915_capture_query(
 	request->physical_width_mm = I915_CAPTURE_WIDTH_MM;
 	request->physical_height_mm = I915_CAPTURE_HEIGHT_MM;
 
-	memcpy(request->name, "i915 capture", sizeof("i915 capture"));
+	kern_memcpy(request->name, "i915 capture", sizeof("i915 capture"));
 
 	/* Succeeded: the display is described. */
 	return 0;
@@ -815,7 +815,7 @@ i915_capture_present(
 	i915_capture_area.write_count++;
 
 	/* Describes the frame in its slot and publishes it for the host. */
-	memset(&frame, 0, sizeof(frame));
+	kern_memset(&frame, 0, sizeof(frame));
 	frame.sequence = i915_capture_area.write_count;
 	frame.width = request->width;
 	frame.height = request->height;

@@ -10,8 +10,8 @@
  */
 
 #include "drivers/platform/pc98/graphics/display-cirrus.h"
+#include <kern/kcrt.h>
 
-#include <string.h>
 
 #define WAB_INDEX 0x0faaU
 #define WAB_DATA 0x0fabU
@@ -70,7 +70,7 @@ drv_pc98_cirrus_default(
 	void *io_context,
 	volatile uint8_t *framebuffer)
 {
-	memset(backend, 0, sizeof(*backend));
+	kern_memset(backend, 0, sizeof(*backend));
 	backend->port_in8 = port_in8;
 	backend->port_out8 = port_out8;
 	backend->io_context = io_context;
@@ -88,7 +88,7 @@ drv_pc98_cirrus_make_hal(
 	/* Handles the hal availability. */
 	if (hal == NULL || backend == NULL)
 		return 0;
-	memset(hal, 0, sizeof(*hal));
+	kern_memset(hal, 0, sizeof(*hal));
 	hal->display.context = backend;
 	hal->display.enter = cirrus_enter;
 	hal->display.leave = cirrus_leave;

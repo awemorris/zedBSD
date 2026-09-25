@@ -16,7 +16,7 @@
 #include "kern/atomic.h"
 #include "kern/sched.h"
 #include "kern/readahead.h"
-#include <errno.h>
+#include <uapi/errno.h>
 
 extern void net_shutdown_for_boot(void) __attribute__((weak));
 extern void drv_usb_shutdown(void) __attribute__((weak));

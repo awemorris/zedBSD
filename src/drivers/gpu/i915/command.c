@@ -28,17 +28,17 @@
 #include "worker.h"
 #include "render/render.h"
 #include "render/transport.h"
+#include <kern/kcrt.h>
 
-#include <drivers/gpu.h>
+#include <drivers/gpu/gpu.h>
 #include <kern/device-io.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
 #include <kern/waitq.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "intel/commands.h"
 
@@ -106,20 +106,20 @@ drv_i915_stream_parse(
 	uint32_t dword_offset;
 
 	/* Nothing of a rejected stream is reported. */
-	memset(stream, 0, sizeof(*stream));
+	kern_memset(stream, 0, sizeof(*stream));
 	if (bytes < I915_STREAM_HEADER_BYTES)
 		return EINVAL;
 
 	/* Decodes the header's little-endian words at their fixed offsets. */
 	header = buffer;
-	memcpy(&magic, header, 4U);
-	memcpy(&version, header + 4U, 4U);
-	memcpy(&stream->engine, header + 8U, 4U);
-	memcpy(&stream->relocation_count, header + 12U, 4U);
-	memcpy(&stream->batch_dwords, header + 16U, 4U);
-	memcpy(&flags, header + 20U, 4U);
-	memcpy(&reserved_low, header + 24U, 4U);
-	memcpy(&reserved_high, header + 28U, 4U);
+	kern_memcpy(&magic, header, 4U);
+	kern_memcpy(&version, header + 4U, 4U);
+	kern_memcpy(&stream->engine, header + 8U, 4U);
+	kern_memcpy(&stream->relocation_count, header + 12U, 4U);
+	kern_memcpy(&stream->batch_dwords, header + 16U, 4U);
+	kern_memcpy(&flags, header + 20U, 4U);
+	kern_memcpy(&reserved_low, header + 24U, 4U);
+	kern_memcpy(&reserved_high, header + 28U, 4U);
 
 	/* Accepts only version 1 native streams. */
 	if (magic != I915_STREAM_MAGIC || version != I915_STREAM_VERSION)
@@ -160,8 +160,8 @@ drv_i915_stream_parse(
 
 	/* Checks that every relocation patches a 64-bit address inside the batch. */
 	for (index = 0U; index < stream->relocation_count; index++) {
-		memcpy(&dword_offset, stream->relocations + index * I915_STREAM_RELOCATION_BYTES, 4U);
-		memcpy(&reserved_low, stream->relocations + index * I915_STREAM_RELOCATION_BYTES + 4U, 4U);
+		kern_memcpy(&dword_offset, stream->relocations + index * I915_STREAM_RELOCATION_BYTES, 4U);
+		kern_memcpy(&reserved_low, stream->relocations + index * I915_STREAM_RELOCATION_BYTES + 4U, 4U);
 
 		/* Refuses a relocation whose reserved word is not zero. */
 		if (reserved_low != 0U)
@@ -345,7 +345,7 @@ i915_stream_is_foreign(
 		return 0;
 
 	/* Reads the stream's first word. */
-	memcpy(&magic, buffer, 4U);
+	kern_memcpy(&magic, buffer, 4U);
 
 	/* A native stream starts with the native magic. */
 	if (magic == I915_STREAM_MAGIC)
@@ -431,12 +431,12 @@ i915_submit_stream(
 
 	/* Copies the batch: it is never executed from the caller's buffer. */
 	dwords = batch->address;
-	memcpy(dwords, stream.batch, (size_t)stream.batch_dwords * 4U);
+	kern_memcpy(dwords, stream.batch, (size_t)stream.batch_dwords * 4U);
 
 	/* Writes each relocated object's 64-bit address into the copy. */
 	for (index = 0U; index < stream.relocation_count; index++) {
-		memcpy(&dword_offset, stream.relocations + index * I915_STREAM_RELOCATION_BYTES, 4U);
-		memcpy(&handle, stream.relocations + index * I915_STREAM_RELOCATION_BYTES + 8U, 8U);
+		kern_memcpy(&dword_offset, stream.relocations + index * I915_STREAM_RELOCATION_BYTES, 4U);
+		kern_memcpy(&handle, stream.relocations + index * I915_STREAM_RELOCATION_BYTES + 8U, 8U);
 
 		/* Resolves the handle; an unknown one gives the batch back to the pool. */
 		target = i915_session_object(session, handle);

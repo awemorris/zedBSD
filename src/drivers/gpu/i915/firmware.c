@@ -18,11 +18,11 @@
  */
 
 #include "firmware.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <fcntl.h>
+#include <uapi/errno.h>
+#include <uapi/fcntl.h>
 #include <stddef.h>
-#include <string.h>
 
 #include <kern/file.h>
 #include <kern/clock.h>
@@ -170,16 +170,16 @@ i915_firmware_path(
 	size_t name_length;
 
 	/* Measures both parts. */
-	directory_length = strlen(I915_FIRMWARE_DIRECTORY);
-	name_length = strlen(name);
+	directory_length = kern_strlen(I915_FIRMWARE_DIRECTORY);
+	name_length = kern_strlen(name);
 
 	/* Refuses a path that does not fit with its terminating NUL. */
 	if (name_length >= I915_FIRMWARE_PATH_BYTES - directory_length)
 		return ENAMETOOLONG;
 
 	/* Joins the directory and the name. */
-	memcpy(path, I915_FIRMWARE_DIRECTORY, directory_length);
-	memcpy(path + directory_length, name, name_length + 1U);
+	kern_memcpy(path, I915_FIRMWARE_DIRECTORY, directory_length);
+	kern_memcpy(path + directory_length, name, name_length + 1U);
 
 	/* Succeeded: path names the file. */
 	return 0;
@@ -278,7 +278,7 @@ i915_firmware_read_file(
 	int error;
 
 	/* Takes the content lease that fixes the size the read sees. */
-	memset(&lease, 0, sizeof(lease));
+	kern_memset(&lease, 0, sizeof(lease));
 	error = file_content_lease_begin(file, &lease);
 	if (error != 0)
 		return error;

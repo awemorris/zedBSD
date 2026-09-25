@@ -53,7 +53,7 @@ static struct zbl6_boot_allocation boot_allocations[ZBL6_MAX_BOOT_ALLOCATIONS];
 static uint64_t boot_kernel_phys_start;
 static uint64_t boot_kernel_phys_end;
 static int boot_kernel_placement_known;
-static struct boot_handoff kernel_handoff;
+static struct kern_boot_handoff kernel_handoff;
 static uint64_t total_memory;
 static uint8_t boot_font[PCAT_BOOT_FONT_GLYPHS][PCAT_BOOT_FONT_HEIGHT];
 static int boot_font_valid;
@@ -130,7 +130,7 @@ prekern_bsp_boot_init(
 	boot_kernel_phys_end = 0;
 	boot_kernel_placement_known = 0;
 	if (form == ZBL6_HANDOFF_FORM_V7_UEFI) {
-		struct boot_provenance provenance;
+		struct kern_boot_provenance provenance;
 
 		/* The raw packed tail may be unaligned; retain an aligned copy. */
 		hal_memcpy(&provenance,

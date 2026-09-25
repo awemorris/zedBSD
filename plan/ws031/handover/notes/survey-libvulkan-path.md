@@ -32,7 +32,7 @@ Vulkan アプリ（例: userland/base/vkdemo、標準の <vulkan/vulkan.h>）
 
 ## 2. libvulkan
 
-- 場所: `userland/base/libvulkan/`、`/lib/libvulkan.so`。公開 header は `libc/include/vulkan/`。
+- 場所: `userland/base/libvulkan/`、`/lib/libvulkan.so`。公開 header は `include/libc/vulkan/`。
 - **Khronos の loader ではない。** Venus wire protocol の client として Vulkan を実装する、プロジェクト固有のライブラリ。ICD も layer も無い。README は「現在の backend は amd64 zedBSD 上の Venus」とし、SPIR-V は native driver へそのまま渡すと書いている。
 - entry point: `api-commands.tsv` と `dispatch-table.inc` で 169 個（README の 155 とは不一致）。Vulkan 1.0 core 137、拡張 32（surface 5、display 7、swapchain 5、display_swapchain 1、wayland 2、properties2 7、external memory 3、external fence 3）。
 - 明らかな stub は見つからなかった（例: `vkQueueBindSparse` は実際に encode して enqueue、`queue.c:85`）。全数の監査はしていない。

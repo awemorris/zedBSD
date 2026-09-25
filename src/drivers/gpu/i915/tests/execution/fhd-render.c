@@ -27,10 +27,10 @@
 #include "../../ppgtt.h"
 #include "../../submit.h"
 #include "../../tlb.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 /* The GPU page size every mapping of the draw is made in. */
 #define I915_TEST_FHD_PAGE_BYTES	4096U
@@ -279,7 +279,7 @@ drv_i915_test_fhd_render_run_ex(
 		return EINVAL;
 
 	/* Starts a fresh record that borrows the target; no wrong pixel is known yet. */
-	memset(x, 0, sizeof(*x));
+	kern_memset(x, 0, sizeof(*x));
 	t = &x->t;
 	x->rt = rt;
 	x->first_bad_x = -1;
@@ -597,7 +597,7 @@ drv_i915_test_fhd_rt_map(
 		return EINVAL;
 
 	/* Starts a fresh map covering the image, or the whole object when it is shorter. */
-	memset(b, 0, sizeof(*b));
+	kern_memset(b, 0, sizeof(*b));
 	b->rt = rt;
 	b->va = va;
 	b->pages = I915_TEST_FHD_RT_PAGES;

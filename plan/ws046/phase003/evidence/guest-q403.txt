@@ -1,0 +1,4 @@
+automake.sh                  15/  15
+gnu.sh                       31/  31
+posix.sh                     45/  45
+TOTAL 91/91

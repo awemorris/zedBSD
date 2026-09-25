@@ -15,16 +15,16 @@
  *  - TP Archer T3U Plus
  */
 
-#include <drivers/usb-rtl8822bu.h>
-#include <drivers/usb.h>
-#include <errno.h>
+#include <drivers/usb/usb-rtl8822bu.h>
+#include <drivers/usb/usb.h>
+#include <uapi/errno.h>
 #include <kern/clock.h>
 #include <kern/lock.h>
 #include <kern/net/net-device.h>
 #include <kern/net/packet-buf.h>
 #include <kern/net/wlan.h>
 #include <kern/sched.h>
-#include <string.h>
+#include <kern/kcrt.h>
 
 #include "../wifi/rtl8822b/rtl8822b-internal.h"
 #include "kern/klog.h"
@@ -707,7 +707,7 @@ static int rtl8822bu_attach(
 	adapter = kern_malloc(sizeof(*adapter));
 	if (adapter == NULL)
 		return ENOMEM;
-	memset(adapter, 0, sizeof(*adapter));
+	kern_memset(adapter, 0, sizeof(*adapter));
 	rtl8822bu_connection_state_clear_locked(adapter);
 	adapter->usb_device = binding.device;
 	adapter->interface = interface;
@@ -1217,12 +1217,12 @@ rtl8822bu_connection_state_clear_locked(
 	adapter->pairwise_key_generation = 0U;
 	adapter->pairwise_staged_generation = 0U;
 	adapter->pairwise_retired_generation = 0U;
-	memset(adapter->connection_bssid, 0, sizeof(adapter->connection_bssid));
-	memset(adapter->group_key_generation, 0,
+	kern_memset(adapter->connection_bssid, 0, sizeof(adapter->connection_bssid));
+	kern_memset(adapter->group_key_generation, 0,
 	       sizeof(adapter->group_key_generation));
-	memset(adapter->group_staged_generation, 0,
+	kern_memset(adapter->group_staged_generation, 0,
 	       sizeof(adapter->group_staged_generation));
-	memset(adapter->group_retired_generation, 0,
+	kern_memset(adapter->group_retired_generation, 0,
 	       sizeof(adapter->group_retired_generation));
 
 	/* Process each remaining element. */
@@ -1303,7 +1303,7 @@ rtl8822bu_radio_transport_init(
 	struct rtl8822b_radio_transport *transport)
 {
 	/* Carries the binding profile through the private radio transport. */
-	memset(transport, 0, sizeof(*transport));
+	kern_memset(transport, 0, sizeof(*transport));
 	transport->context = adapter;
 	transport->usb_bulk_max_packet_size = adapter->bulk_max_packet_size;
 	transport->read = rtl8822bu_radio_read;
@@ -1542,7 +1542,7 @@ rtl8822bu_binding_parse(
 	 * Reads the candidate identity without requiring an active
 	 * configuration.
 	 */
-	memset(binding, 0, sizeof(*binding));
+	kern_memset(binding, 0, sizeof(*binding));
 	device = drv_usb_interface_device(interface);
 	device_descriptor = drv_usb_device_descriptor(device);
 
@@ -2234,8 +2234,8 @@ rtl8822bu_board_read(
 	}
 
 #endif
-	memset(logical, 0, RTL8822B_EFUSE_LOGICAL_SIZE);
-	memset(physical, 0, RTL8822B_EFUSE_PHYSICAL_SIZE);
+	kern_memset(logical, 0, RTL8822B_EFUSE_LOGICAL_SIZE);
+	kern_memset(physical, 0, RTL8822B_EFUSE_PHYSICAL_SIZE);
 	kern_free(logical);
 	kern_free(physical);
 
@@ -2313,7 +2313,7 @@ rtl8822bu_firmware_save(
 {
 	int error;
 
-	memset(saved, 0, sizeof(*saved));
+	kern_memset(saved, 0, sizeof(*saved));
 
 	/* Checks the operation status. */
 	error = rtl8822bu_read8(adapter, RTL8822BU_REG_TXDMA_PQ_MAP + 1U,
@@ -2543,7 +2543,7 @@ rtl8822bu_firmware_reserved_page(
 						    chunk->wire_payload_length);
 	if (error != 0)
 		return error;
-	memcpy(transfer->wire_buffer + RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE,
+	kern_memcpy(transfer->wire_buffer + RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE,
 	       transfer->view->bytes + chunk->file_offset, chunk->length);
 
 	/* Handles the chunk condition. */
@@ -2770,7 +2770,7 @@ rtl8822bu_firmware_download_model(
 		/* Failed. */
 		return EINVAL;
 	}
-	memset(&transfer, 0, sizeof(transfer));
+	kern_memset(&transfer, 0, sizeof(transfer));
 	transfer.adapter = adapter;
 	transfer.view = view;
 	transfer.wire_buffer = kern_malloc(RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE +
@@ -2873,12 +2873,12 @@ fail_restore:
 out:
 
 	/* Erases the staging the image passed through. */
-	memset(transfer.wire_buffer, 0,
+	kern_memset(transfer.wire_buffer, 0,
 	       RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE +
 		       RTL8822B_FIRMWARE_CHUNK_MAX + 1U);
 	kern_free(transfer.wire_buffer);
-	memset(&transfer, 0, sizeof(transfer));
-	memset(&saved, 0, sizeof(saved));
+	kern_memset(&transfer, 0, sizeof(transfer));
+	kern_memset(&saved, 0, sizeof(saved));
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -3560,11 +3560,11 @@ rtl8822bu_hardware_stop_locked(
 		 * radio/CAM ledger without touching EP0 or an OUT endpoint.
 		 */
 		if (error == 0) {
-			memset(&adapter->radio, 0, sizeof(adapter->radio));
+			kern_memset(&adapter->radio, 0, sizeof(adapter->radio));
 			adapter->radio_running = 0U;
 			adapter->firmware_running = 0U;
 			rtl8822bu_connection_state_clear_locked(adapter);
-			memset(adapter->tx_reports, 0,
+			kern_memset(adapter->tx_reports, 0,
 			       sizeof(adapter->tx_reports));
 			adapter->tx_report_next = 0U;
 			adapter->quarantined = 0U;
@@ -3583,7 +3583,7 @@ rtl8822bu_hardware_stop_locked(
 			adapter->rx_submit_generation = 0U;
 			adapter->rx_inflight_generation = 0U;
 			adapter->rx_completed_generation = 0U;
-			memset(adapter->rx_completion, 0,
+			kern_memset(adapter->rx_completion, 0,
 			       sizeof(adapter->rx_completion));
 			adapter->rx_generation_barrier = 0U;
 			adapter->scan_generation = 0U;
@@ -3650,7 +3650,7 @@ rtl8822bu_hardware_stop_locked(
 		adapter->radio_running = 0U;
 		adapter->firmware_running = 0U;
 		rtl8822bu_connection_state_clear_locked(adapter);
-		memset(adapter->tx_reports, 0, sizeof(adapter->tx_reports));
+		kern_memset(adapter->tx_reports, 0, sizeof(adapter->tx_reports));
 		adapter->tx_report_next = 0U;
 		adapter->tx_quiescing = 0U;
 
@@ -3738,7 +3738,7 @@ rtl8822bu_tx_report_reap_locked(
 		/* Handles the adapter condition. */
 		if (adapter->tx_reports[index].active &&
 		    now >= adapter->tx_reports[index].retire_deadline_ticks) {
-			memset(&adapter->tx_reports[index], 0,
+			kern_memset(&adapter->tx_reports[index], 0,
 			       sizeof(adapter->tx_reports[index]));
 			adapter->tx_reports[index].tombstone = 1U;
 			expired++;
@@ -3851,7 +3851,7 @@ rtl8822bu_tx_report_release(
 	}
 	enabled = spin_lock_irqsave(&adapter->lock);
 
-	memset(&adapter->tx_reports[index], 0,
+	kern_memset(&adapter->tx_reports[index], 0,
 	       sizeof(adapter->tx_reports[index]));
 
 	spin_unlock_irqrestore(&adapter->lock, enabled);
@@ -3883,7 +3883,7 @@ rtl8822bu_tx_report_abandon_attempted(
 		 * it until a checked hardware reset makes every late report
 		 * impossible.
 		 */
-		memset(&adapter->tx_reports[index], 0,
+		kern_memset(&adapter->tx_reports[index], 0,
 		       sizeof(adapter->tx_reports[index]));
 		adapter->tx_reports[index].tombstone = 1U;
 
@@ -4001,7 +4001,7 @@ rtl8822bu_tx_report_complete(
 		return ESTALE;
 	}
 
-	memset(&adapter->tx_reports[index], 0,
+	kern_memset(&adapter->tx_reports[index], 0,
 	       sizeof(adapter->tx_reports[index]));
 
 	/* Checks the operation status. */
@@ -4010,7 +4010,7 @@ rtl8822bu_tx_report_complete(
 
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 
-	memset(result, 0, sizeof(*result));
+	kern_memset(result, 0, sizeof(*result));
 	result->class = RTL8822BU_RX_TX_REPORT;
 	result->connection_generation = pending.connection_generation;
 	result->key_generation = pending.key_generation;
@@ -4307,7 +4307,7 @@ rtl8822bu_frame_transmit_private(
 			error = EIO;
 	}
 
-	memset(wire, 0, capacity);
+	kern_memset(wire, 0, capacity);
 	kern_free(wire);
 out_release:
 
@@ -4453,7 +4453,7 @@ rtl8822bu_rx_classify(
 	/* Handles the adapter availability. */
 	if (adapter == NULL || packet == NULL || result == NULL)
 		return EINVAL;
-	memset(result, 0, sizeof(*result));
+	kern_memset(result, 0, sizeof(*result));
 
 	/* Handles the packet condition. */
 	if (packet->kind == RTL8822B_RX_C2H) {
@@ -4480,7 +4480,7 @@ rtl8822bu_rx_classify(
 	pairwise_key_installed = adapter->pairwise_key_installed;
 	pairwise_key_generation = adapter->pairwise_key_generation;
 	group_key_mask = adapter->group_key_mask;
-	memcpy(group_key_generation, adapter->group_key_generation,
+	kern_memcpy(group_key_generation, adapter->group_key_generation,
 	       sizeof(group_key_generation));
 
 	/* Handles the frame control condition. */
@@ -4580,7 +4580,7 @@ rtl8822bu_rx_classify(
 
 	result->class =
 		packet->payload_length >= llc_offset + sizeof(llc_eapol) &&
-				memcmp(packet->payload + llc_offset, llc_eapol,
+				kern_memcmp(packet->payload + llc_offset, llc_eapol,
 				       sizeof(llc_eapol)) == 0
 			? RTL8822BU_RX_EAPOL
 			: RTL8822BU_RX_DATA;
@@ -4731,7 +4731,7 @@ rtl8822bu_rx_report(
 
 	/* Handles the classified condition. */
 	if (classified.class != RTL8822BU_RX_SCAN) {
-		memset(&frame_report, 0, sizeof(frame_report));
+		kern_memset(&frame_report, 0, sizeof(frame_report));
 		frame_report.generation = classified.connection_generation;
 		frame_report.key_generation = classified.key_generation;
 		frame_report.packet_number = classified.packet_number;
@@ -5130,11 +5130,11 @@ rtl8822bu_security_hardware_clear(
 		adapter->group_key_mask = 0U;
 		adapter->group_staged_mask = 0U;
 		adapter->group_retired_mask = 0U;
-		memset(adapter->group_key_generation, 0,
+		kern_memset(adapter->group_key_generation, 0,
 		       sizeof(adapter->group_key_generation));
-		memset(adapter->group_staged_generation, 0,
+		kern_memset(adapter->group_staged_generation, 0,
 		       sizeof(adapter->group_staged_generation));
-		memset(adapter->group_retired_generation, 0,
+		kern_memset(adapter->group_retired_generation, 0,
 		       sizeof(adapter->group_retired_generation));
 		/* Process each remaining element. */
 		for (slot = 0U; slot < RTL8822BU_GROUP_KEY_COUNT; slot++) {
@@ -5262,7 +5262,7 @@ rtl8822bu_connect_start(
 				adapter->connection_preparing = 1U;
 				adapter->connection_generation = generation;
 				adapter->connection_channel = bss->channel;
-				memcpy(adapter->connection_bssid, bss->bssid,
+				kern_memcpy(adapter->connection_bssid, bss->bssid,
 				       sizeof(adapter->connection_bssid));
 				adapter->scan_generation = 0U;
 				adapter->scan_channel = 0U;
@@ -5657,7 +5657,7 @@ rtl8822bu_association_clear(
 			    generation) {
 			adapter->deauthentication_attempted_generation =
 				generation;
-			memcpy(bssid, adapter->connection_bssid, sizeof(bssid));
+			kern_memcpy(bssid, adapter->connection_bssid, sizeof(bssid));
 			send_deauthentication = 1;
 		}
 
@@ -6761,7 +6761,7 @@ rtl8822bu_deauthenticate_best_effort(
 	}
 
 out:
-	memset(wire, 0, sizeof(wire));
+	kern_memset(wire, 0, sizeof(wire));
 }
 
 static int
@@ -6828,7 +6828,7 @@ rtl8822bu_disconnect(
 			    adapter->connection_generation) {
 			adapter->deauthentication_attempted_generation =
 				adapter->connection_generation;
-			memcpy(bssid, adapter->connection_bssid, sizeof(bssid));
+			kern_memcpy(bssid, adapter->connection_bssid, sizeof(bssid));
 			send_deauthentication = 1;
 		}
 
@@ -7005,7 +7005,7 @@ rtl8822bu_management_transmit(
 			error = EIO;
 	}
 
-	memset(wire, 0, RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + length + 1U);
+	kern_memset(wire, 0, RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + length + 1U);
 	kern_free(wire);
 out_operation:
 
@@ -7225,7 +7225,7 @@ rtl8822bu_h2c_packet_send(
 	 * management TX. Linux rtw88 and RTL8822BU HALMAC populate only packet
 	 * size and QSEL 19.
 	 */
-	memset(wire, 0, sizeof(wire));
+	kern_memset(wire, 0, sizeof(wire));
 	rtl8822bu_store_le32(wire, RTL8822BU_H2C_PACKET_SIZE);
 	rtl8822bu_store_le32(wire + 4U, 19U << 8);
 	checksum = 0U;
@@ -7233,7 +7233,7 @@ rtl8822bu_h2c_packet_send(
 	for (index = 0U; index < 16U; index++)
 		checksum ^= rtl8822bu_load_le16(wire + index * 2U);
 	rtl8822bu_store_le16(wire + 28U, checksum);
-	memcpy(wire + RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE, packet,
+	kern_memcpy(wire + RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE, packet,
 	       RTL8822BU_H2C_PACKET_SIZE);
 
 	/* Caps the synchronous transfer at the remaining startup time. */
@@ -7314,7 +7314,7 @@ rtl8822bu_firmware_info_send(
 	 * Sends GENERAL_INFO first, with sequence zero after each firmware
 	 * reload.
 	 */
-	memset(packet, 0, sizeof(packet));
+	kern_memset(packet, 0, sizeof(packet));
 	packet[0] = 0x01U;
 	packet[1] = 0xffU;
 	packet[2] = 0x0dU;
@@ -7330,7 +7330,7 @@ rtl8822bu_firmware_info_send(
 	 * Sends PHYDM_INFO second; firmware RF enums differ from the path
 	 * count.
 	 */
-	memset(packet, 0, sizeof(packet));
+	kern_memset(packet, 0, sizeof(packet));
 	packet[0] = 0x01U;
 	packet[1] = 0xffU;
 	packet[2] = 0x11U;
@@ -7364,7 +7364,7 @@ rtl8822bu_hardware_start_locked(
 	uint64_t deadline;
 	int error, cleanup_error;
 
-	memset(&firmware, 0, sizeof(firmware));
+	kern_memset(&firmware, 0, sizeof(firmware));
 
 	/* Checks the rtl8822bu ready station result. */
 	if (!rtl8822bu_ready_station(adapter, NULL)) {
@@ -7625,7 +7625,7 @@ rtl8822bu_recovery_tx_snapshot(
 	/* Process each remaining element. */
 	for (index = 0U; index < sizeof(registers) / sizeof(registers[0]);
 	     index++) {
-		memset(bytes, 0, sizeof(bytes));
+		kern_memset(bytes, 0, sizeof(bytes));
 		actual = 0U;
 		value = 0U;
 		error = ETIMEDOUT;
@@ -8100,7 +8100,7 @@ rtl8822bu_poll_receive(
 		}
 
 		spin_unlock_irqrestore(&adapter->lock, enabled);
-		memset(&report, 0, sizeof(report));
+		kern_memset(&report, 0, sizeof(report));
 		report.adapter = adapter;
 
 		/* Checks the operation status. */
@@ -8273,7 +8273,7 @@ rtl8822bu_release(
 	/* Handles the adapter availability. */
 	if (adapter == NULL)
 		return;
-	memset(adapter, 0, sizeof(*adapter));
+	kern_memset(adapter, 0, sizeof(*adapter));
 	kern_free(adapter);
 }
 
@@ -8289,7 +8289,7 @@ rtl8822bu_usb_resources_free(
 
 	/* Handles the rx buffer availability. */
 	if (adapter->rx_buffer != NULL) {
-		memset(adapter->rx_buffer, 0, RTL8822BU_RX_BUFFER_SIZE);
+		kern_memset(adapter->rx_buffer, 0, RTL8822BU_RX_BUFFER_SIZE);
 		kern_free(adapter->rx_buffer);
 		adapter->rx_buffer = NULL;
 	}
@@ -8300,9 +8300,9 @@ rtl8822bu_scan_profile(
 	const struct rtl8822bu_board_info *board,
 	struct wlan_scan_profile *profile)
 {
-	memset(profile, 0, sizeof(*profile));
+	kern_memset(profile, 0, sizeof(*profile));
 	profile->channel_count = rtl8822bu_scan_channel_count(board);
-	memcpy(profile->channels, rtl8822bu_scan_channels,
+	kern_memcpy(profile->channels, rtl8822bu_scan_channels,
 	       profile->channel_count * sizeof(profile->channels[0]));
 }
 
@@ -8324,14 +8324,14 @@ rtl8822bu_net_device_create(
 	adapter->net_device = device;
 	device->flags = NET_DEVICE_BROADCAST | NET_DEVICE_MULTICAST;
 	device->mtu = RTL8822BU_MTU;
-	memcpy(device->hwaddr, adapter->board.mac_address, 6U);
+	kern_memcpy(device->hwaddr, adapter->board.mac_address, 6U);
 	device->hwaddr_len = 6U;
 	device->capabilities = NET_DEVICE_CAP_WLAN;
 	device->ops = &rtl8822bu_net_ops;
 	device->driver_data = adapter;
 	/* Process each remaining element. */
 	for (index = 0U; index < NET_DEVICE_MAX; index++) {
-		memcpy(device->name, "wlan", 4U);
+		kern_memcpy(device->name, "wlan", 4U);
 		device->name[4] = (char)('0' + index);
 		device->name[5] = '\0';
 
@@ -8358,7 +8358,7 @@ rtl8822bu_net_device_create(
 	rtl8822bu_scan_profile(&adapter->board, &profile);
 	error = wlan_station_attach(device, &rtl8822bu_radio_ops, adapter,
 				    &profile, &station);
-	memset(&profile, 0, sizeof(profile));
+	kern_memset(&profile, 0, sizeof(profile));
 	if (error != 0)
 		return error;
 	enabled = spin_lock_irqsave(&adapter->lock);

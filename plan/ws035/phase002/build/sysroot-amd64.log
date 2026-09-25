@@ -1,0 +1,5 @@
+# ws035-p002 build sysroot-amd64: 2026-09-23T05:05:06+09:00
+# git HEAD e7a2fb8701dc864a78f6f3976ac1106df57cc6d7 (working tree has the p002 changes)
+# make -j32 ZEDBSD_TARGET_SYSROOT=/home/awe/zedBSD-rpi4/build/ws035-p002/sysroot/amd64 BUILD=build/ws035-p002/sysroot-amd64 ZEDBSD_CONFIG=config/ci/config-amd64.mk ZEDBSD_SYSROOT_AMD64=/home/awe/zedBSD-rpi4/build/ws035-p002/sysroot/amd64 ZEDBSD_SYSROOT_I386=/home/awe/zedBSD-rpi4/build/ws035-p002/sysroot/i386 NOCT_HOST_SOURCE_DIR=/home/awe/zedBSD-rpi4/build/ws035-p002/noct/NoctLang NOCT_HOST_STATE_DIR=/home/awe/zedBSD-rpi4/build/ws035-p002/noct/host-noct-state ZEDBSD_NOCT_DISTDIR=/home/awe/zedBSD-rpi4/build/ws035-p002/noct/noct-distfiles sysroot-amd64
+clang: warning: argument unused during compilation: '-no-pie' [-Wunused-command-line-argument]
+sysroot-amd64 status=0 seconds=10 warnings=1 error_lines=0

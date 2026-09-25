@@ -7,8 +7,8 @@
  */
 
 #include "intel-ax211-runtime-start.h"
+#include <kern/kcrt.h>
 
-#include <string.h>
 
 enum ax211_runtime_start_notification {
 	AX211_RUNTIME_START_NOTIFICATION_ALIVE = 1,
@@ -91,8 +91,8 @@ drv_intel_ax211_runtime_start_init(
 	 * Owns the exact table instead of retaining the boot coordinator's
 	 * view.
 	 */
-	memset(session, 0, sizeof(*session));
-	memcpy(session->command_version_bytes, command_table->bytes,
+	kern_memset(session, 0, sizeof(*session));
+	kern_memcpy(session->command_version_bytes, command_table->bytes,
 	       sizeof(session->command_version_bytes));
 
 	/* Checks the drv intel ax211 init api89 validate result. */
@@ -102,7 +102,7 @@ drv_intel_ax211_runtime_start_init(
 	if (result != INTEL_AX211_PROTOCOL_OK ||
 	    drv_intel_ax211_init_api89_validate(&copied_table) !=
 		    INTEL_AX211_PROTOCOL_OK) {
-		memset(session, 0, sizeof(*session));
+		kern_memset(session, 0, sizeof(*session));
 
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_PROTOCOL;
@@ -357,15 +357,15 @@ static void
 ax211_runtime_start_run_state_clear(
 	struct intel_ax211_runtime_start *session)
 {
-	memset(&session->files, 0, sizeof(session->files));
-	memset(&session->dma, 0, sizeof(session->dma));
-	memset(&session->commands, 0, sizeof(session->commands));
-	memset(&session->alive, 0, sizeof(session->alive));
-	memset(&session->profile, 0, sizeof(session->profile));
-	memset(&session->runtime, 0, sizeof(session->runtime));
-	memset(&session->mcc, 0, sizeof(session->mcc));
-	memset(session->event_bytes, 0, sizeof(session->event_bytes));
-	memset(session->response_bytes, 0, sizeof(session->response_bytes));
+	kern_memset(&session->files, 0, sizeof(session->files));
+	kern_memset(&session->dma, 0, sizeof(session->dma));
+	kern_memset(&session->commands, 0, sizeof(session->commands));
+	kern_memset(&session->alive, 0, sizeof(session->alive));
+	kern_memset(&session->profile, 0, sizeof(session->profile));
+	kern_memset(&session->runtime, 0, sizeof(session->runtime));
+	kern_memset(&session->mcc, 0, sizeof(session->mcc));
+	kern_memset(session->event_bytes, 0, sizeof(session->event_bytes));
+	kern_memset(session->response_bytes, 0, sizeof(session->response_bytes));
 	session->files_loaded = 0U;
 	session->dma_prepared = 0U;
 	session->dma_exposed = 0U;
@@ -428,7 +428,7 @@ ax211_runtime_start_load_and_profile(
 	if (length != sizeof(session->command_version_bytes) ||
 	    offset > session->files.ucode_size ||
 	    length > session->files.ucode_size - offset ||
-	    memcmp(session->files.ucode_bytes + offset,
+	    kern_memcmp(session->files.ucode_bytes + offset,
 		   session->command_version_bytes, length) != 0) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_FIRMWARE;
@@ -759,7 +759,7 @@ ax211_runtime_start_device(
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_DMA;
 	}
-	memset(&mmio_boot, 0, sizeof(mmio_boot));
+	kern_memset(&mmio_boot, 0, sizeof(mmio_boot));
 	mmio_boot.context_address = session->dma.context.device_address;
 	mmio_boot.iml_address = session->dma.iml.device_address;
 	mmio_boot.iml_size = (uint32_t)session->dma.iml.size;
@@ -876,7 +876,7 @@ ax211_runtime_start_receive(
 	uint64_t now;
 	int result;
 
-	memset(&received, 0, sizeof(received));
+	kern_memset(&received, 0, sizeof(received));
 
 	/* Checks the operation result. */
 	result = session->ops->boot.receive_event(
@@ -913,7 +913,7 @@ ax211_runtime_start_receive(
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_PROTOCOL;
 	}
-	memset(message, 0, sizeof(*message));
+	kern_memset(message, 0, sizeof(*message));
 	message->opcode = event->command.opcode;
 	message->group = event->flags &
 			 (uint8_t)~INTEL_AX211_PROTOCOL_COMMAND_FAILED_MASK;
@@ -1058,7 +1058,7 @@ ax211_runtime_start_select_and_publish_pnvm(
 	int result;
 
 	/* Selects the platform image the reported SKU calls for. */
-	memset(&sku, 0, sizeof(sku));
+	kern_memset(&sku, 0, sizeof(sku));
 	sku.data[0] = session->alive.sku[0];
 	sku.data[1] = session->alive.sku[1];
 	sku.data[2] = session->alive.sku[2];
@@ -1184,7 +1184,7 @@ ax211_runtime_start_send_extended_cfg(
 		return error;
 	}
 
-	memset(&request, 0, sizeof(request));
+	kern_memset(&request, 0, sizeof(request));
 	request.command.opcode = INTEL_AX211_INIT_EXTENDED_CFG_OPCODE;
 	request.command.group = INTEL_AX211_INIT_SYSTEM_GROUP;
 	request.command.version = 0U;
@@ -1200,7 +1200,7 @@ ax211_runtime_start_send_extended_cfg(
 	if (result != INTEL_AX211_RUNTIME_START_OK)
 		return result;
 	response_length = 0U;
-	memset(response, 0, sizeof(response));
+	kern_memset(response, 0, sizeof(response));
 
 	/* Checks the operation result. */
 	result = ax211_runtime_start_wait_command(session, deadline, response,
@@ -1214,7 +1214,7 @@ ax211_runtime_start_send_extended_cfg(
 	if (result == INTEL_AX211_RUNTIME_START_OK &&
 	    ax211_runtime_start_get_le32(response) != 0U)
 		result = INTEL_AX211_RUNTIME_START_COMMAND;
-	memset(response, 0, sizeof(response));
+	kern_memset(response, 0, sizeof(response));
 
 	/* Returns the computed result. */
 	return result;
@@ -1570,7 +1570,7 @@ ax211_runtime_start_send_step(
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_RUNTIME;
 	}
-	memset(&request, 0, sizeof(request));
+	kern_memset(&request, 0, sizeof(request));
 	request.command.group = command->group;
 	request.command.opcode = command->opcode;
 	request.command.version = command->wire_version;
@@ -1617,7 +1617,7 @@ ax211_runtime_start_send_step(
 	}
 
 	/* Rebuilds the response as the message the decoder expects. */
-	memset(&message, 0, sizeof(message));
+	kern_memset(&message, 0, sizeof(message));
 	message.group = command->group;
 	message.opcode = command->opcode;
 	message.version = command->response_version;
@@ -1628,7 +1628,7 @@ ax211_runtime_start_send_step(
 	message.payload_length = response_length;
 	result = drv_intel_ax211_runtime_mcc_decode(
 		&message, session->generation, &session->mcc);
-	memset(session->response_bytes, 0, sizeof(session->response_bytes));
+	kern_memset(session->response_bytes, 0, sizeof(session->response_bytes));
 	if (result != INTEL_AX211_RUNTIME_OK) {
 		/* Obtains the ax211 runtime start runtime result result. */
 		error = ax211_runtime_start_runtime_result(result);

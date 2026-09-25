@@ -12,7 +12,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/types.h>
+#include <uapi/types.h>
 
 #define QUOTA_MAX_RECORDS		64U
 #define QUOTA_DEFAULT_GRACE_SECONDS	(7U * 24U * 60U * 60U)

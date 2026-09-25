@@ -20,9 +20,9 @@
 #include "dma.h"
 #include "trace.h"
 
-#include <drivers/dma.h>
+#include <drivers/generic/dma.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 
 static void i915_dma_note(struct i915_dma *dma, uint16_t op, const char *what, uint64_t argument0, uint64_t argument1);

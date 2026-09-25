@@ -1,0 +1,33 @@
+RANDOM ok getentropy 32
+RANDOM ok getentropy differs
+RANDOM ok getentropy 257 refused
+RANDOM SAMPLE 9951a01bcd89f638e3f90754d90d757e
+RANDOM ok /dev/urandom 1 MiB in one read
+RANDOM ok /dev/urandom half the bits set
+RANDOM ok /dev/random 4 KiB
+RANDOM ok /dev/random write
+RANDOM ok arc4random varies
+RANDOM DONE 8/8
+grep: invalid option
+RANDOM ok getentropy 32
+RANDOM ok getentropy differs
+RANDOM ok getentropy 257 refused
+RANDOM SAMPLE 6a8fb8b984a6eaa53c61d621ab9a0519
+RANDOM ok /dev/urandom 1 MiB in one read
+RANDOM ok /dev/urandom half the bits set
+RANDOM ok /dev/random 4 KiB
+RANDOM ok /dev/random write
+RANDOM ok arc4random varies
+RANDOM DONE 8/8
+grep: invalid option
+RANDOM ok getentropy 32
+RANDOM ok getentropy differs
+RANDOM ok getentropy 257 refused
+RANDOM SAMPLE 49ac2ed19ea6b44737d511221ab0ac30
+RANDOM ok /dev/urandom 1 MiB in one read
+RANDOM ok /dev/urandom half the bits set
+RANDOM ok /dev/random 4 KiB
+RANDOM ok /dev/random write
+RANDOM ok arc4random varies
+RANDOM DONE 8/8
+grep: invalid option

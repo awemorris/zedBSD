@@ -122,4 +122,33 @@ ZEDBSD_USERLAND_PATCH_TARGETS += $(1)-source
 
 endef
 
+# $(1) = package name, for a release that is one plain file, not an archive.
+# ZEDBSD_EXT_<name>_ARCHIVE names the file; it is fetched and checked by size
+# and SHA-256 like an archive, and then used as it is.  There is no ROOT, no
+# extraction and no patch.
+define ZEDBSD_EXTERNAL_FILE
+
+ZEDBSD_EXT_$(1)_DISTFILE := $$(ZEDBSD_EXTERNAL_DISTDIR)/$$(ZEDBSD_EXT_$(1)_ARCHIVE)
+ZEDBSD_EXT_$(1)_WORKDIR := $$(ZEDBSD_EXTERNAL_WORKROOT)/$(1)
+ZEDBSD_EXT_$(1)_ARCHIVE_VERIFIED := \
+	$$(ZEDBSD_EXTERNAL_DISTDIR)/.verified-$$(ZEDBSD_EXT_$(1)_ARCHIVE)
+
+$$(ZEDBSD_EXT_$(1)_DISTFILE):
+	$$(ZEDBSD_EXTERNAL_ARCHIVE_SH) fetch \
+		'$$(ZEDBSD_EXT_$(1)_URL)' '$$@' \
+		'$$(ZEDBSD_EXT_$(1)_SIZE)' '$$(ZEDBSD_EXT_$(1)_SHA256)' -
+
+$$(ZEDBSD_EXT_$(1)_ARCHIVE_VERIFIED): $$(ZEDBSD_EXT_$(1)_DISTFILE)
+	$$(ZEDBSD_EXTERNAL_ARCHIVE_SH) verify '$$<' \
+		'$$(ZEDBSD_EXT_$(1)_SIZE)' '$$(ZEDBSD_EXT_$(1)_SHA256)' -
+	@touch '$$@'
+
+.PHONY: $(1)-download
+$(1)-download: $$(ZEDBSD_EXT_$(1)_ARCHIVE_VERIFIED)
+	@:
+
+ZEDBSD_USERLAND_DOWNLOAD_TARGETS += $(1)-download
+
+endef
+
 endif

@@ -1,0 +1,3 @@
+qs40: meshes=4 vertices=25861 triangles=37000 materials=16 textures=13 groups=16
+qs40: bounds -0.694 0.000 -0.191 .. 0.694 1.607 0.135
+MVIEW HOST PASS checks=98

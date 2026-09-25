@@ -1,0 +1,75 @@
+123S4 MB P1 CF UUID=7980-D915 KERNEL=vmunix PARAMS=boot0=UUID=7980-D915 video=640x480 overlay-root=boot0:rootfs.img overlay-data=boot0:data.img swap0=boot0:swapfile
+KF E6 LD GO
+E820 v6 complete
+
+zedBSD amd64 HAL
+A64 ENTRY PASS
+A64 KERNEL link=200000-6ff000 load=200000-6ff000 (as linked)
+A64 MEMORY source=1 usable=536342528 boot_reclaim=0 highest_usable=536739840 allocator=530452480
+A64 RAM ARENA low=1060864 high=0 runs=2 root=5566464
+A64 RAM MAP bytes=536342528 tables=259 large=253 small=1407
+A64 RAM ALLOC extents=2 managed=536342528 metadata=73728 free=529317888 publication_limit=70368744177664
+A64 PAGING PASS
+A64 IDT READY
+A64 ACPI RSDP PASS rev=0 rsdt=1FFE2418 xsdt=00000000:00000000
+A64 ACPI ROOT READY kind=RSDT length=52 entries=4
+A64 ACPI MADT READY length=144 lapic=FEE00000
+A64 ACPI MCFG READY regions=0
+A64 ACPI READY cpus=4 ioapics=1 ecam=0 lapic=FEE00000
+A64 APIC PREFLIGHT PASS id=0 base=00000000:FEE00900 madt=FEE00000 lock=0 result=active-xapic
+A64 LAPIC READY id=0 base=FEE00000
+A64 BOOT RECLAIM released=0 bytes ACPI/AP owners retained
+A64 IOAPIC BEGIN index=0 address=FEC00000 gsi=0
+A64 IOAPIC READY index=0 version=00170020 pins=24
+A64 IOAPIC ROUTING READY controllers=1 destination=0
+A64 TIMER CAL BEGIN
+A64 TIMECOUNTER CAS-SELFTEST 120-then-110=PASS 110-then-120=PASS
+A64 TIMECOUNTER CANDIDATE policy=0 max=13 ratio=0/0 crystal=0 invariant=0 adjust=0
+A64 TIMER CAL READY ticks=63135
+A64 TIMER READY
+A64 CONSOLE IRQ READY
+A64 IRQ READY
+boot: kernel heap, process, and scheduler initialization
+A64 TIMER TICK
+A64 XMM CONTEXT PASS
+A64 APIC PREFLIGHT PASS id=1 base=00000000:FEE00800 madt=FEE00000 lock=0 result=active-xapic
+A64 TIMECOUNTER AP FAIL cpu=1 reason=candidate-unavailable generation=0 rounds=0 width=0:0
+A64 APIC PREFLIGHT PASS id=2 base=00000000:FEE00800 madt=FEE00000 lock=0 result=active-xapic
+A64 TIMECOUNTER AP FAIL cpu=2 reason=candidate-unavailable generation=0 rounds=0 width=0:0
+A64 APIC PREFLIGHT PASS id=3 base=00000000:FEE00800 madt=FEE00000 lock=0 result=active-xapic
+A64 TIMECOUNTER AP FAIL cpu=3 reason=candidate-unavailable generation=0 rounds=0 width=0:0
+A64 TIMECOUNTER READ cpu=0 status=unavailable reads=64
+A64 TIMECOUNTER READ cpu=1 status=unavailable reads=64
+A64 TIMECOUNTER READ cpu=2 status=unavailable reads=64
+A64 TIMECOUNTER READ cpu=3 status=unavailable reads=64
+A64 TIMECOUNTER UNAVAILABLE cpus=4 source=none reason=candidate-unavailable
+I/O pool large=16 small=16 resident=1118208 budget=4194304
+boot: HAL initialized successfully. [cpu 4, memory 511MB, timer 10ms]
+boot: CPUs ready: 4
+boot: platform device discovery
+usb: URB completion contract q009-release-acquire-v1
+ata: sda blocks=561152 CHS=556/16/63
+graphics: BIOS 8x16 ASCII font handoff accepted
+boot: platform devices detected: 1
+boot: parameters: boot0=UUID=7980-D915 video=640x480 overlay-root=boot0:rootfs.img overlay-data=boot0:data.img swap0=boot0:swapfile
+boot: ignored 1 unknown parameter; first=video
+boot: VFS initialization
+vfs: boot BIOS=80 MBR partition=1 devices=1
+input: /dev/input/event0: PC/AT PS/2 mouse
+input: /dev/input/event1: PC/AT PS/2 keyboard
+vfs: native boot disk=sda physical disks=1
+vfs: scan sda H/S=16/63 blocks=561152: 3 entries
+vfs: sda partition 1 start=00000000:00000800 data=00000000:00000800 blocks=00000000:00020000
+vfs: sda partition 2 start=00000000:00020800 data=00000000:00020800 blocks=00000000:00068000
+vfs: sda partition 3 start=00000000:00000022 data=00000000:00000022 blocks=00000000:000007DE
+vfs: boot0 UUID=7980-D915 -> /dev/sda2 (private FAT)
+vfs: loop0 <- boot0:rootfs.img (private, read-only)
+vfs: loop1 <- boot0:data.img (private, read-write)
+vfs: root=overlay lower=boot0:rootfs.img upper=boot0:data.img
+swap: swap0 source=boot0:swapfile slots=16383
+swap: active sources=1 total=16383 free=16383
+vfs: mounting runtime filesystems...
+vfs: runtime filesystems mounted
+boot: memory 523772 KiB total, 514132 KiB free, 6860 KiB reserved
+boot: starting init /sbin/init
+

@@ -33,6 +33,7 @@
 #include "dp-fixture-latitude5330.h"
 #include "edp-ktest.h"
 #include "lcd-fake-hw.h"
+#include <kern/kcrt.h>
 
 #include "../execution/ktest.h"
 
@@ -50,9 +51,8 @@
 
 #include <kern/kmem.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdint.h>
-#include <string.h>
 
 /* The panel's raw clock (kHz) and the combo PLL's reference (kHz). */
 #define I915_LCD_MODESET_KTEST_RAWCLK_KHZ	19200U
@@ -215,8 +215,8 @@ i915_lcd_modeset_ktest_worlds_save(
 	}
 
 	/* Copies both worlds as the display start left them. */
-	memcpy(saved->lcd, display->lcd_world, sizeof(*saved->lcd));
-	memcpy(saved->wm, display->wm_world, sizeof(*saved->wm));
+	kern_memcpy(saved->lcd, display->lcd_world, sizeof(*saved->lcd));
+	kern_memcpy(saved->wm, display->wm_world, sizeof(*saved->wm));
 
 	/* Succeeded: the model may change the worlds. */
 	return 0;
@@ -232,8 +232,8 @@ i915_lcd_modeset_ktest_worlds_restore(
 	 * The worlds get their bytes back at the same addresses, so the
 	 * pointers they hold into themselves are valid again.
 	 */
-	memcpy(display->lcd_world, saved->lcd, sizeof(*saved->lcd));
-	memcpy(display->wm_world, saved->wm, sizeof(*saved->wm));
+	kern_memcpy(display->lcd_world, saved->lcd, sizeof(*saved->lcd));
+	kern_memcpy(display->wm_world, saved->wm, sizeof(*saved->wm));
 
 	/* Frees the copies. */
 	kern_free(saved->lcd);
@@ -271,7 +271,7 @@ i915_lcd_modeset_ktest_bring_up(
 	drv_i915_lcd_dbuf_forget(display->wm_world);
 
 	/* The panel's VBT power sequence and raw clock; the eDP logs errors only. */
-	memset(&config, 0, sizeof(config));
+	kern_memset(&config, 0, sizeof(config));
 	config.rawclk_khz = I915_LCD_MODESET_KTEST_RAWCLK_KHZ;
 	config.t1_t3 = 2000;
 	config.t8 = 800;
@@ -334,11 +334,11 @@ i915_lcd_modeset_ktest_fill_cfg(void)
 	struct i915_lcd_modeset_cfg *cfg;
 
 	cfg = &i915_lcd_modeset_ktest_cfg;
-	memset(cfg, 0, sizeof(*cfg));
+	kern_memset(cfg, 0, sizeof(*cfg));
 
 	/* The sink's capabilities from the eDP. */
-	memcpy(cfg->dpcd, i915_lcd_modeset_ktest_edp.dpcd, sizeof(cfg->dpcd));
-	memcpy(cfg->edp_dpcd, i915_lcd_modeset_ktest_edp.edp_dpcd, sizeof(cfg->edp_dpcd));
+	kern_memcpy(cfg->dpcd, i915_lcd_modeset_ktest_edp.dpcd, sizeof(cfg->dpcd));
+	kern_memcpy(cfg->edp_dpcd, i915_lcd_modeset_ktest_edp.edp_dpcd, sizeof(cfg->edp_dpcd));
 
 	/* A full-HD linear XRGB8888 framebuffer at a fixed GGTT address. */
 	cfg->fb_fourcc = 0x34325258U;
@@ -348,7 +348,7 @@ i915_lcd_modeset_ktest_fill_cfg(void)
 	cfg->fb_surf = I915_LCD_MODESET_KTEST_FB_SURF;
 
 	/* The watermark latencies, IPC and the SAGV block time. */
-	memcpy(cfg->wm_latency, latency, sizeof(latency));
+	kern_memcpy(cfg->wm_latency, latency, sizeof(latency));
 	cfg->wm_num_levels = 6;
 	cfg->wm_ipc_enabled = 1;
 	cfg->sagv_block_time_us = 35;

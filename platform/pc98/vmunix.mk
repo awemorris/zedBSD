@@ -38,6 +38,10 @@ ZEDBSD_KERN_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
 	-isystem $(ZEDBSD_SYSROOT_I386)/usr/include -Iinclude -Isrc -I.
 ZEDBSD_KERN_CC += $(ZEDBSD_CONFIG_CPPFLAGS)
+# entry.c is built with this compiler rather than the common rule, and it
+# needs to know the machine as every other kernel object does: the tick rate
+# and the architecture's constants come from <hal/arch/i386.h>.
+ZEDBSD_KERN_CC += -DHAL_ARCH_I386
 PC98_GRAPHICS_OBJS :=
 PC98_DISPLAY_OBJS :=
 ifeq ($(CONFIG_DRIVER_GRAPHICS_DEVICE),y)
@@ -56,11 +60,14 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/device-io.o $(BUILD)/src/kern/irq.o \
 	$(BUILD)/src/kern/pmem.o $(BUILD)/src/kern/test-checkpoint.o \
 	$(BUILD)/src/kern/lock.o $(BUILD)/src/kern/klog.o $(BUILD)/src/kern/waitq.o \
+	$(BUILD)/src/kern/kcrt.o $(BUILD)/src/kern/heap.o \
+	$(BUILD)/src/kern/random.o $(BUILD)/src/kern/random-crypto.o \
 	$(BUILD)/src/kern/buf.o $(BUILD)/src/kern/cache.o $(BUILD)/src/kern/readahead.o $(BUILD)/src/kern/writeback.o $(BUILD)/src/kern/io.o $(BUILD)/src/kern/sysctl.o \
 	$(BUILD)/src/kern/resource.o \
 	$(BUILD)/src/kern/poll.o \
 	$(BUILD)/src/kern/usync.o \
 	$(BUILD)/src/kern/process.o $(BUILD)/src/kern/thread.o \
+	$(BUILD)/src/kern/vm-device.o \
 	$(BUILD)/src/kern/sched.o \
 	$(BUILD)/src/kern/vmspace.o \
 	$(BUILD)/src/kern/vm.o \
@@ -77,7 +84,8 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/drivers/generic/console.o \
 	$(BUILD)/src/drivers/generic/input.o \
 	$(KERN_GPU_OBJS) \
-	$(BUILD)/src/kern/locale-record.o \
+	$(KERN_AUDIO_OBJS) \
+	$(if $(KERN_AUDIO_OBJS),$(BUILD)/drivers/generic/dma.o) \
 	$(BUILD)/src/kern/tty.o \
 	$(BUILD)/src/drivers/generic/system-device.o $(BUILD)/src/drivers/generic/memory-device.o $(BUILD)/src/kern/shutdown.o \
 	$(KERN_BOOT_OBJS) \
@@ -119,7 +127,6 @@ STAGE2_OBJS = \
 	$(BUILD)/drivers/disklabel/pc98.o \
 	$(BUILD)/src/kern/platform/pc98.o \
 	$(BUILD)/src/kern/panic.o \
-	$(ZEDBSD_LIBC_OBJECTS) \
 	$(HAL_PC98_OBJS) $(KERN_OBJS) $(ZEDBSD_COMPILER_RT_OBJECTS)
 $(STAGE2_OBJS): $(ZEDBSD_PLATFORM_CONFIG_STAMP)
 $(STAGE2_OBJS): $(ZEDBSD_SYSROOT_I386)/.zedbsd-sysroot-complete
@@ -154,14 +161,14 @@ $(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
 	bootloader/include/mbr.inc bootloader/include/fat16.inc \
 	bootloader/include/elf.inc bootloader/include/boot-parameter-handoff.h \
 	bootloader/uefi/zedbsd-config.h \
-	include/boot/pc98-handoff.h include/boot/parameter-handoff.h \
-	include/boot/parameters.h
+	include/kern/boot.h \
+	include/kern/boot.h
 	@mkdir -p $(dir $@)
 	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
 
 $(BUILD)/bootloader/bios-zedbsd-config.o: \
 	bootloader/uefi/zedbsd-config.c bootloader/uefi/zedbsd-config.h \
-	bootloader/include/boot-parameter-handoff.h include/boot/parameters.h
+	bootloader/include/boot-parameter-handoff.h include/kern/boot.h
 	@mkdir -p $(dir $@)
 	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
  -fno-stack-protector -fno-asynchronous-unwind-tables \
@@ -214,8 +221,8 @@ $(BUILD)/bootloader/partition-pbr.bin: $(BUILD)/bootloader/partition-pbr.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 
 $(BUILD)/bootloader/payload32.o: bootloader/tests/payload32-pc98.S \
-	include/boot/pc98-handoff.h include/boot/parameter-handoff.h \
-	include/boot/parameters.h
+	include/kern/boot.h \
+	include/kern/boot.h
 	@mkdir -p $(dir $@)
 	$(CC) -m32 -I. -c $< -o $@
 
@@ -255,14 +262,14 @@ I386_ARCH_FILES += $(ZEDBSD_ACCOUNT_FILES)
 I386_ARCH_INPUTS += $(ZEDBSD_BASE_DATA_INPUTS)
 I386_ARCH_FILES += $(ZEDBSD_BASE_DATA_FILES)
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(I386_ARCH_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
-$(eval $(call ZEDBSD_ROOTFS_TAR_RULE,$(BUILD)/rootfs.tar.gz,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
-I386_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/i386.ufs
+$(eval $(call ZEDBSD_ROOTFS_TREE_RULE,i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
+I386_ARCH_UFS_IMAGE := $(ZEDBSD_ROOTFS_IMAGE_DIR)/i386.ufs
 PC98_ZEDBSD_CONFIG := $(PC98)/bootzbsd.cfg
 PC98_NATIVE_ZEDBSD_CONFIG := $(PC98)/bootzbsd-native.cfg
 .DELETE_ON_ERROR: $(BUILD)/bios-hdd-image.img \
 	$(BUILD)/ufs-root.img $(BUILD)/ufs-root-hdd-image.img \
 	$(BUILD)/hdd-image.img
-$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(I386_ARCH_UFS_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
+$(eval $(call ZEDBSD_ROOTFS_UFS_IMAGE_RULE,$(I386_ARCH_UFS_IMAGE),i386))
 rootfs: $(BUILD)/rootfs/.stamp
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
@@ -308,7 +315,7 @@ $(BUILD)/hdd-image.img: $(BUILD)/bios-hdd-image.img
 	cp -f $< $@.tmp
 	mv -f $@.tmp $@
 
-USER_LIBC_OBJS := $(BUILD)/src/crt/crt0.o $(BUILD)/userland/base/libc/posix.o \
+USER_LIBC_OBJS := $(BUILD)/src/libc/crt/crt0-i386.o $(BUILD)/userland/base/libc/posix.o \
 	$(BUILD)/userland/base/libc/dlfcn.o \
 	$(BUILD)/userland/base/libc/static-tls.o \
 	$(BUILD)/userland/base/libc/poll.o $(BUILD)/userland/base/libc/termios.o \
@@ -321,10 +328,10 @@ USER_LIBC_OBJS := $(BUILD)/src/crt/crt0.o $(BUILD)/userland/base/libc/posix.o \
 	$(BUILD)/userland/base/libc/resolver-dns.o $(BUILD)/userland/base/libc/signal.o \
 	$(BUILD)/userland/base/libc/account.o $(BUILD)/userland/base/libc/crypt.o \
 	$(BUILD)/userland/base/libc/utmpx.o \
-	$(BUILD)/libc/heap.o $(BUILD)/libc/string.o $(BUILD)/libc/ctype.o \
-	$(BUILD)/libc/locale.o $(BUILD)/libc/wide.o \
-	$(BUILD)/libc/int64.o $(BUILD)/libc/strto.o $(BUILD)/libc/format.o \
-	$(BUILD)/libc/stdio.o \
+	$(BUILD)/src/libc/heap.o $(BUILD)/src/libc/string.o $(BUILD)/src/libc/ctype.o \
+	$(BUILD)/src/libc/locale.o $(BUILD)/src/libc/wide.o \
+	$(BUILD)/src/libc/int64.o $(BUILD)/src/libc/strto.o $(BUILD)/src/libc/format.o \
+	$(BUILD)/src/libc/stdio.o \
 	$(patsubst %.c,$(BUILD)/%.o,$(ZEDBSD_LIBC_USER_EXTRA_SOURCES))
 USER_LIBC_OBJS := \
 	$(ZEDBSD_SYSROOT_I386)/usr/lib/crt0.o \
@@ -334,7 +341,7 @@ USER_CFLAGS := $(ZEDBSD_CFLAGS) -fno-builtin -ffunction-sections \
 	-mno-mmx -mno-sse -mno-sse2
 USER_STACK_LDFLAGS := -z stack-size=0x100000
 USER_ELF_CHECK := $(BUILD_TOOLS_DIR)/check-user-elf.noct
-$(BUILD)/src/crt/crt0.o: src/crt/crt0.S include/hal/arch.h \
+$(BUILD)/src/libc/crt/crt0-i386.o: src/libc/crt/crt0-i386.S include/hal/arch.h \
 	include/hal/arch/i386.h
 	@mkdir -p $(dir $@)
 	$(CC) $(ZEDBSD_CPPFLAGS) $(USER_CFLAGS) -c $< -o $@
@@ -380,15 +387,28 @@ $(BUILD)/lib/libcurses.a: $(USER_CURSES_OBJS)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
 
-$(BUILD)/bin/sh: $(USER_LIBC_OBJS) $(USER_SH_OBJS) $(USER_READLINE_LIB) \
-	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld $(USER_ELF_CHECK)
+# The base programs are position-independent executables that load
+# /lib/libc.so through /lib/ld.so; their objects are the -fPIC ones built
+# under $(BUILD)/dynamic/obj.  (The POSIX-R test ELF files stay static.)
+I386_APP_OBJ := $(BUILD)/dynamic/obj
+I386_APP_INPUTS := $(ZEDBSD_SYSROOT_I386)/usr/lib/crt1.o \
+	$(BUILD)/dynamic/libc.so $(BUILD)/dynamic/ld.so \
+	tools/build/check-dynamic-elf.py
+I386_APP_LINK = $(CC) -m32 -nostdlib -pie -Wl,--no-relax -Wl,--gc-sections \
+ -Wl,--hash-style=sysv,-z,now,-z,relro,-z,separate-code \
+ -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
+ -Wl,--dynamic-linker=/lib/ld.so $(ZEDBSD_SYSROOT_I386)/usr/lib/crt1.o
+I386_APP_LIBS = -L$(BUILD)/dynamic -Wl,-rpath-link,$(BUILD)/dynamic -l:libc.so
+I386_APP_CHECK = $(PYTHON) tools/build/check-dynamic-elf.py --machine i386 \
+ --role application --needed libc.so
+I386_APP_SH_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(I386_APP_OBJ),sh) \
+	$(I386_APP_OBJ)/userland/base/libedit/readline.o
+$(I386_APP_SH_OBJS): DYNAMIC_CPPFLAGS += -Iuserland/base/libedit
+
+$(BUILD)/bin/sh: $(I386_APP_INPUTS) $(I386_APP_SH_OBJS)
 	@mkdir -p $(dir $@)
-	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
- $(USER_STACK_LDFLAGS) \
- -T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) $(USER_SH_OBJS) \
- $(USER_READLINE_LIB) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
-	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
-	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
+	$(I386_APP_LINK) $(I386_APP_SH_OBJS) $(I386_APP_LIBS) -o $@
+	$(I386_APP_CHECK) $@
 
 $(BUILD)/POSIX-R2.ELF: $(USER_LIBC_OBJS) \
 	$(BUILD)/userland/base/tests/posix-r2.o $(PC98)/noct-user.ld \
@@ -411,28 +431,18 @@ $(BUILD)/POSIX-R2-REMAINING.ELF: $(USER_LIBC_OBJS) \
 USER_SYSCTL_OBJ := $(BUILD)/userland/base/sysctl/main.o
 $(USER_SYSCTL_OBJ): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(USER_SYSCTL_OBJ): OBJ_CFLAGS = $(USER_CFLAGS)
-$(BUILD)/bin/sysctl: $(USER_LIBC_OBJS) $(USER_SYSCTL_OBJ) \
-	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld $(USER_ELF_CHECK)
+$(BUILD)/bin/sysctl: $(I386_APP_INPUTS) $(I386_APP_OBJ)/userland/base/sysctl/main.o
 	@mkdir -p $(dir $@)
-	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
- $(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
- $(USER_LIBC_OBJS) $(USER_SYSCTL_OBJ) \
- $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
-	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
-	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
+	$(I386_APP_LINK) $(I386_APP_OBJ)/userland/base/sysctl/main.o $(I386_APP_LIBS) -o $@
+	$(I386_APP_CHECK) $@
 
 USER_MOUNT_OBJ := $(BUILD)/userland/base/mount/main.o
 $(USER_MOUNT_OBJ): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(USER_MOUNT_OBJ): OBJ_CFLAGS = $(USER_CFLAGS)
-$(BUILD)/bin/mount: $(USER_LIBC_OBJS) $(USER_MOUNT_OBJ) \
-	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld $(USER_ELF_CHECK)
+$(BUILD)/bin/mount: $(I386_APP_INPUTS) $(I386_APP_OBJ)/userland/base/mount/main.o
 	@mkdir -p $(dir $@)
-	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
- $(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
- $(USER_LIBC_OBJS) $(USER_MOUNT_OBJ) \
- $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
-	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
-	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
+	$(I386_APP_LINK) $(I386_APP_OBJ)/userland/base/mount/main.o $(I386_APP_LIBS) -o $@
+	$(I386_APP_CHECK) $@
 $(BUILD)/bin/umount: $(BUILD)/bin/mount
 	@mkdir -p $(dir $@)
 	cp -f $< $@
@@ -454,16 +464,12 @@ $(BUILD)/userland/base/libc/resolver.o $(BUILD)/userland/base/libc/resolver-dns.
 	OBJ_CFLAGS = $(USER_CFLAGS)
 
 define PC98_USER_NET_COMMAND
-$(BUILD)/bin/$(1): $(USER_LIBC_OBJS) $(USER_NET_COMMON_OBJS) \
-	$(call ZEDBSD_USERLAND_OBJECTS,$(BUILD),$(1)) $(ZEDBSD_SOFTFLOAT_OBJECTS) \
-	$(PC98)/noct-user.ld $(USER_ELF_CHECK)
+$(BUILD)/bin/$(1): $(I386_APP_INPUTS) $(addprefix $(I386_APP_OBJ)/userland/base/net/,netutil.o dhcp.o) \
+	$(call ZEDBSD_USERLAND_OBJECTS,$(I386_APP_OBJ),$(1))
 	@mkdir -p $$(dir $$@)
-	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
- $(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
- $(USER_LIBC_OBJS) $(USER_NET_COMMON_OBJS) \
- $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD),$(1)) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $$@
-	@test -z "$$$$($(NM) -u $$@)" || { $(NM) -u $$@; exit 1; }
-	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $$@
+	$(I386_APP_LINK) $(addprefix $(I386_APP_OBJ)/userland/base/net/,netutil.o dhcp.o) \
+ $(call ZEDBSD_USERLAND_OBJECTS,$(I386_APP_OBJ),$(1)) $(I386_APP_LIBS) -o $$@
+	$(I386_APP_CHECK) $$@
 endef
 $(foreach command,$(USER_NET_COMMANDS),\
 	$(eval $(call PC98_USER_NET_COMMAND,$(command))))
@@ -474,16 +480,12 @@ $(USER_BASIC_COMMON_OBJ) $(USER_BASIC_COMMAND_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPP
 $(USER_BASIC_COMMON_OBJ) $(USER_BASIC_COMMAND_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
 
 define PC98_USER_BASIC_COMMAND
-$(BUILD)/bin/$(1): $(USER_LIBC_OBJS) $(USER_BASIC_COMMON_OBJ) \
-	$(call ZEDBSD_USERLAND_OBJECTS,$(BUILD),$(1)) $(ZEDBSD_SOFTFLOAT_OBJECTS) \
-	$(PC98)/noct-user.ld $(USER_ELF_CHECK)
+$(BUILD)/bin/$(1): $(I386_APP_INPUTS) $(addprefix $(I386_APP_OBJ)/userland/base/common/,command.o pager.o) \
+	$(call ZEDBSD_USERLAND_OBJECTS,$(I386_APP_OBJ),$(1))
 	@mkdir -p $$(dir $$@)
-	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
- $(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
- $(USER_LIBC_OBJS) $(USER_BASIC_COMMON_OBJ) \
- $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD),$(1)) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $$@
-	@test -z "$$$$($(NM) -u $$@)" || { $(NM) -u $$@; exit 1; }
-	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $$@
+	$(I386_APP_LINK) $(addprefix $(I386_APP_OBJ)/userland/base/common/,command.o pager.o) \
+ $(call ZEDBSD_USERLAND_OBJECTS,$(I386_APP_OBJ),$(1)) $(I386_APP_LIBS) -o $$@
+	$(I386_APP_CHECK) $$@
 endef
 $(foreach command,$(USER_BASIC_COMMANDS),\
 	$(eval $(call PC98_USER_BASIC_COMMAND,$(command))))
@@ -502,10 +504,10 @@ DYNAMIC_LIBC_SOURCES := userland/base/libc/posix.c userland/base/libc/poll.c \
 	userland/base/libc/semaphore.c userland/base/libc/mqueue.c userland/base/libc/dlfcn.c \
 	userland/base/libc/socket.c userland/base/libc/resolver.c \
 	userland/base/libc/resolver-dns.c userland/base/libc/signal.c \
-	userland/base/libc/account.c userland/base/libc/crypt.c userland/base/libc/utmpx.c libc/heap.c \
-	libc/string.c libc/ctype.c libc/locale.c libc/wide.c libc/int64.c \
-	libc/strto.c libc/format.c \
-	libc/stdio.c $(ZEDBSD_LIBC_USER_EXTRA_SOURCES)
+	userland/base/libc/account.c userland/base/libc/crypt.c userland/base/libc/utmpx.c src/libc/heap.c \
+	src/libc/string.c src/libc/ctype.c src/libc/locale.c src/libc/wide.c src/libc/int64.c \
+	src/libc/strto.c src/libc/format.c \
+	src/libc/stdio.c $(ZEDBSD_LIBC_USER_EXTRA_SOURCES)
 DYNAMIC_LIBC_OBJS := $(patsubst %.c,$(DYNAMIC_DIR)/obj/%.o,\
 	$(DYNAMIC_LIBC_SOURCES)) $(DYNAMIC_DIR)/obj/userland/base/libc/syscall.o
 DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/src/rtld/entry.o \
@@ -513,7 +515,7 @@ DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/src/rtld/entry.o \
 	$(DYNAMIC_DIR)/obj/src/rtld/string.o
 DYNAMIC_SOFTFLOAT_DIR := $(DYNAMIC_DIR)/softfloat
 DYNAMIC_COMPILER_RT_OBJS := $(addprefix $(DYNAMIC_SOFTFLOAT_DIR)/,\
-	zed-softfloat.o compiler-runtime.o)
+	softfloat.o compiler-runtime.o)
 DYNAMIC_LIBM_OBJ := $(DYNAMIC_SOFTFLOAT_DIR)/math.o
 DYNAMIC_FLOAT_PARSE_OBJ := $(DYNAMIC_SOFTFLOAT_DIR)/float-parse.o
 DYNAMIC_LIBC_OBJS += $(DYNAMIC_COMPILER_RT_OBJS) \
@@ -533,21 +535,21 @@ $(DYNAMIC_DIR)/obj/src/rtld/entry.o: src/rtld/entry-i386.S
 	@mkdir -p $(dir $@)
 	$(CC) -m32 -c $< -o $@
 
-$(DYNAMIC_SOFTFLOAT_DIR)/%.o: src/softfloat/%.c \
-	src/softfloat/zed-softfloat.h
+$(DYNAMIC_SOFTFLOAT_DIR)/%.o: src/libc/%.c \
+	src/libc/softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -Iinclude -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Iinclude/libc -Iinclude -I. $(DYNAMIC_CFLAGS) \
  -mlong-double-64 -c $< -o $@
 
-$(DYNAMIC_FLOAT_PARSE_OBJ): libc/float-parse.c \
-	src/softfloat/zed-softfloat.h
+$(DYNAMIC_FLOAT_PARSE_OBJ): src/libc/float-parse.c \
+	src/libc/softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -Iinclude -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Iinclude/libc -Iinclude -I. $(DYNAMIC_CFLAGS) \
  -mlong-double-64 -c $< -o $@
 
-$(DYNAMIC_LIBM_OBJ): libc/math.c src/softfloat/zed-softfloat.h
+$(DYNAMIC_LIBM_OBJ): src/libc/math.c src/libc/softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -Iinclude -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Iinclude/libc -Iinclude -I. $(DYNAMIC_CFLAGS) \
  -mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)
@@ -558,7 +560,7 @@ $(DYNAMIC_DIR)/libc.so: $(DYNAMIC_LIBC_OBJS)
 	$(LD) -m elf_i386 -shared -soname libc.so --hash-style=both -z now \
  -z relro -z separate-code $(USER_STACK_LDFLAGS) $^ -o $@
 
-$(DYNAMIC_DIR)/obj/src/crt/crt1.o: src/crt/crt1-i386.S
+$(DYNAMIC_DIR)/obj/src/libc/crt/crt1.o: src/libc/crt/crt1-i386.S
 	@mkdir -p $(dir $@)
 	$(CC) -m32 -c $< -o $@
 
@@ -684,7 +686,7 @@ $(BUILD)/vmunix: $(BUILD)/stage2.elf platform/pc98/tools/patch-stage2.noct
 
 $(BUILD)/src/hal/%.o: src/hal/%.c
 	@mkdir -p $(dir $@)
-	$(HAL_CC) -MMD -MP -c $< -o $@
+	$(HAL_CC) $(ZEDBSD_KERNEL_LTO_CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD)/src/hal/%.o: src/hal/%.S
 	@mkdir -p $(dir $@)
@@ -697,7 +699,15 @@ hal-pc98-compile: $(HAL_PC98_OBJS)
 
 $(BUILD)/src/kern/entry.o: src/kern/entry.c
 	@mkdir -p $(dir $@)
-	$(ZEDBSD_KERN_CC) -MMD -MP -c $< -o $@
+	$(ZEDBSD_KERN_CC) $(ZEDBSD_KERNEL_LTO_CFLAGS) -MMD -MP -c $< -o $@
+
+# Link-time optimization of vmunix (ws053): the kernel's C objects that the
+# generic rule compiles get ZEDBSD_KERNEL_LTO_CFLAGS (from the top Makefile),
+# as the HAL's and entry.o's do above; the assembly stays native.  Every
+# kernel object is compiled again when the LTO flags change.
+$(filter-out $(BUILD)/$(PC98)/boot-header.o $(BUILD)/src/hal/% $(BUILD)/src/kern/entry.o $(ZEDBSD_COMPILER_RT_OBJECTS),$(STAGE2_OBJS)): \
+	OBJ_CFLAGS += $(ZEDBSD_KERNEL_LTO_CFLAGS)
+$(STAGE2_OBJS): $(ZEDBSD_KERNEL_LTO_STAMP)
 
 kern-compile: $(KERN_OBJS)
 	@echo "zedBSD kernel glue compile check: PASS"

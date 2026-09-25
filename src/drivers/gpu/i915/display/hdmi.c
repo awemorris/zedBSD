@@ -58,11 +58,11 @@
 
 #include "hotplug-internal.h"
 #include "hdmi.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 
 #include <stddef.h>
-#include <string.h>
 
 /* The EDID input byte whose bit 7 marks a digital sink (EDID_INPUT_DIGITAL). */
 #define I915_EDID_INPUT_BYTE 20u
@@ -116,7 +116,7 @@ i915_hpd_drm_edid_read_ddc(
 	rc = drv_i915_drm_edid_read(adapter, slot->buf, I915_HPD_EDID_MAX_BLOCKS, &ext);
 
 	/* Starts the record of this read with what the reader answered. */
-	memset(&world->hpd_edid_last, 0, sizeof(world->hpd_edid_last));
+	kern_memset(&world->hpd_edid_last, 0, sizeof(world->hpd_edid_last));
 	world->hpd_edid_last.rc = rc;
 
 	/* A read with no valid block fails. */
@@ -181,7 +181,7 @@ i915_hpd_drm_edid_connector_update(
 		if (size != slot->stored_size) {
 			changed = 1;
 		} else if (size != 0u) {
-			compared = memcmp(drm_edid->edid, slot->stored, size);
+			compared = kern_memcmp(drm_edid->edid, slot->stored, size);
 			if (compared != 0)
 				changed = 1;
 		}
@@ -196,7 +196,7 @@ i915_hpd_drm_edid_connector_update(
 	/* Stores the new EDID as the property. */
 	slot->stored_size = size;
 	if (size != 0u)
-		memcpy(slot->stored, drm_edid->edid, size);
+		kern_memcpy(slot->stored, drm_edid->edid, size);
 	slot->have_stored = 1;
 }
 
@@ -292,8 +292,8 @@ drv_i915_hpd_edid_forget(
 	struct i915_hpd_world *world)
 {
 	/* Clears the slots, the last record and the counters. */
-	memset(world->hpd_edid, 0, sizeof(world->hpd_edid));
-	memset(&world->hpd_edid_last, 0, sizeof(world->hpd_edid_last));
+	kern_memset(world->hpd_edid, 0, sizeof(world->hpd_edid));
+	kern_memset(&world->hpd_edid_last, 0, sizeof(world->hpd_edid_last));
 	world->hpd_edid_reads = 0u;
 	world->hpd_edid_fails = 0u;
 }

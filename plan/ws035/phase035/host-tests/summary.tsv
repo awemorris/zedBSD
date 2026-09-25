@@ -1,0 +1,2 @@
+test	baseline	current	same	baseline_first_error	current_first_error
+src/drivers/gpu/i915/tests/contracts/run.sh	0	0	yes		

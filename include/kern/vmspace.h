@@ -19,7 +19,7 @@
 #include <kern/lock.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/types.h>
+#include <uapi/types.h>
 
 struct vm_layout {
 	uintptr_t user_minimum;
@@ -79,6 +79,12 @@ struct vm_device_mapping;
 #define VM_REGION_BRK			0x0008U
 #define VM_REGION_SHARED		0x0010U
 #define VM_REGION_ELF_ZERO_TAIL		0x0020U
+/*
+ * A MAP_PRIVATE file region that maps the file's cached pages read-only and
+ * copies one on its first write, as an exec snapshot does; its object is the
+ * file's shared VM object.
+ */
+#define VM_REGION_PRIVATE_OBJECT	0x0040U
 
 enum vm_region_backing {
 	VM_BACKING_ANON = 0,
@@ -120,8 +126,20 @@ struct vm_private_page {
 	unsigned flags;
 	uint32_t swap_slot;
 	struct vm_page *mappings;
+
+	/*
+	 * Which list the backing is on: the reclaim queue while its page is
+	 * resident, the swapped list while it is on swap, or none.  The
+	 * neighbours are kept so a backing leaves its list at once.
+	 */
+	unsigned queue_kind;
 	struct vm_private_page *queue_next;
+	struct vm_private_page *queue_prev;
 };
+
+#define VM_QUEUE_NONE		0U
+#define VM_QUEUE_RECLAIM	1U
+#define VM_QUEUE_SWAPPED	2U
 
 struct vm_page {
 	uintptr_t address;
@@ -133,7 +151,11 @@ struct vm_page {
 	struct vm_page *private_next;
 	struct vm_object_page *object_page;
 	struct vm_page *object_next;
+	/* The link that points at this page in its object page's list, so that it leaves without a walk. */
+	struct vm_page **object_link;
 	struct vm_page *next;
+	/* The next page in the same bucket of its region's page index. */
+	struct vm_page *index_next;
 };
 
 struct vm_region {
@@ -167,6 +189,17 @@ struct vm_region {
 	uintptr_t data_start;
 	size_t data_size;
 	struct vm_page *pages;
+
+	/*
+	 * An index of the pages above by address, so that a fault finds its
+	 * page without walking the list: a power-of-two number of buckets
+	 * chained through index_next, or none while the region has few pages
+	 * or no memory could be had for one (the list is walked then).  The
+	 * VM lock protects it with the list.
+	 */
+	struct vm_page **page_index;
+	size_t page_index_size;
+	size_t page_count;
 	struct vm_region *next;
 };
 

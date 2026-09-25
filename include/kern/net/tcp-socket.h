@@ -56,6 +56,8 @@ struct tcp_socket {
 	uint32_t active_connect_generation;
 	uint64_t connect_wait_deadline;
 	uint16_t peer_window;
+	/* The window last put in a segment; a read that opens it says so. */
+	uint16_t advertised_window;
 	/*
 	 * Segments that have been sent and not yet acknowledged, oldest
 	 * first.  Several may be in flight at once, bounded by the peer's

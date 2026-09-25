@@ -7,7 +7,7 @@
 #define KERN_KERN_FILE_BACKING_H
 
 #include <kern/file.h>
-#include <errno.h>
+#include <uapi/errno.h>
 
 /*
  * Dispatches through the owning filesystem while the caller holds its claim.

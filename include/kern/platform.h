@@ -22,13 +22,13 @@ struct disk;
 
 size_t
 kern_platform_init(
-	const struct boot_handoff *handoff,
-	struct boot_device *devices,
+	const struct kern_boot_handoff *handoff,
+	struct kern_boot_device *devices,
 	size_t capacity);
 
 void
 kern_platform_refresh_devices(
-	const struct boot_device *devices,
+	const struct kern_boot_device *devices,
 	size_t count);
 
 int
@@ -36,7 +36,7 @@ kern_platform_input_init(void);
 
 struct disk *
 kern_platform_block_device(
-	const struct boot_device *device);
+	const struct kern_boot_device *device);
 
 void
 kern_platform_debug_write(

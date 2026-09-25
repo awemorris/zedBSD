@@ -21,8 +21,8 @@ int kern_vfs_root_image_info(struct root_image_info *result);
 
 int
 kern_vfs_init(
-	const struct boot_handoff *handoff,
-	const struct boot_device *devices,
+	const struct kern_boot_handoff *handoff,
+	const struct kern_boot_device *devices,
 	unsigned device_count);
 
 #endif

@@ -39,6 +39,9 @@ arm64_from_el2:
 	orr x1, x1, #3
 	msr cnthctl_el2, x1
 	msr cntvoff_el2, xzr
+	/* EL1 starts with a known SCTLR: MMU and caches off, little-endian. */
+	ldr x1, =0x30d00800
+	msr sctlr_el1, x1
 	mov x1, #0x3c5
 	msr spsr_el2, x1
 	adr x1, arm64_el1_low
@@ -46,6 +49,12 @@ arm64_from_el2:
 	eret
 
 arm64_el1_low:
+	ldr x1, =0x30d00800
+	msr sctlr_el1, x1
+	isb
+	ic iallu
+	dsb nsh
+	isb
 	msr spsel, #1
 	mrs x1, cpacr_el1
 	orr x1, x1, #(3 << 20)
@@ -118,6 +127,15 @@ arm64_el1_low:
 	orr x1, x1, #(1 << 0)
 	orr x1, x1, #(1 << 2)
 	orr x1, x1, #(1 << 12)
+	/*
+	 * EL0 may read CTR_EL0 (UCT), zero with DC ZVA (DZE), maintain caches
+	 * by address (UCI) and run WFI and WFE (nTWI, nTWE), as on Linux.
+	 */
+	orr x1, x1, #(1 << 14)
+	orr x1, x1, #(1 << 15)
+	orr x1, x1, #(1 << 16)
+	orr x1, x1, #(1 << 18)
+	orr x1, x1, #(1 << 26)
 	msr sctlr_el1, x1
 	isb
 	ldr x1, =arm64_high_entry

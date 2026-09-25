@@ -1,0 +1,24 @@
+# HEAD 1625884c (git archive, build/k, config/ci/config-amd64.mk, p034 sysroot) vs build/ws035-p035/amd64
+differs: kern64/src/drivers/pci/pci-xhci.o sections=1 (.text.xhci_urb_unreserve) differing_instructions=1
+differs: kern64/src/drivers/generic/dma.o sections=2 (.text.drv_dma_vector_create .text.drv_dma_vector_free) differing_instructions=2
+differs: kern64/src/kern/buf.o sections=4 (.text.alloc_pmem .text.buf_mark_dirty .text.free_buffer .text.free_metadata) differing_instructions=4
+differs: kern64/src/kern/cache.o sections=7 (.text.cache_memory_cancel .text.cache_memory_commit .text.cache_memory_init .text.cache_memory_release) differing_instructions=13
+differs: kern64/src/kern/disk.o sections=5 (.text.async_unlink_locked .text.bio_async_enable .text.bio_async_release .text.disk_buffer_release) differing_instructions=6
+differs: kern64/src/kern/entry.o sections=3 (.text.kern_free .text.kernel_entry .text.kernel_secondary_entry) differing_instructions=12
+differs: kern64/src/kern/exec.o sections=2 (.text.process_exec_file .text.process_spawn_from) differing_instructions=2
+differs: kern64/src/kern/file.o sections=1 (.text.file_io_end) differing_instructions=2
+differs: kern64/src/kern/inode.o sections=1 (.text.inode_cache_discard_mount_dirty) differing_instructions=2
+differs: kern64/src/kern/io.o sections=5 (.text.allocate_backing .text.io_pool_init .text.io_pool_release .text.io_scratch_alloc) differing_instructions=6
+differs: kern64/src/kern/mount.o sections=1 (.text.unmount_revoked_owned) differing_instructions=1
+differs: kern64/src/kern/process.o sections=7 (.text.process_cred_commit_reserved .text.process_cred_read_leave .text.process_exit_final .text.process_free_mem) differing_instructions=9
+differs: kern64/src/kern/readahead.o sections=3 (.text.prepare_worker .text.readahead_demand_begin .text.readahead_demand_end) differing_instructions=4
+differs: kern64/src/kern/sched.o sections=17 (.text.notify_cpu .text.queue_remove .text.sched_accounting_kernel_enter .text.sched_accounting_kernel_leave) differing_instructions=26
+differs: kern64/src/kern/signal.o sections=2 (.text.kernel_user_return_handler .text.signal_timer_completion_add) differing_instructions=3
+differs: kern64/src/kern/swap.o sections=5 (.text.kern_swap_source_set_abort .text.kern_swap_source_set_activate .text.kern_swap_source_set_runtime_add .text.kern_swap_source_set_runtime_remove_cancelable) differing_instructions=10
+differs: kern64/src/kern/syscall.o sections=1 (.text.kernel_syscall_handler) differing_instructions=2
+differs: kern64/src/kern/user-probe.o sections=1 (.text.kernel_user_fault_handler) differing_instructions=2
+differs: kern64/src/kern/vm.o sections=61 (.text.alloc_object_page .text.alloc_vm_page .text.clear_page_dirty_locked .text.free_object_page) differing_instructions=119
+differs: kern64/src/kern/vmspace.o sections=13 (.text.detach_region_pages_for_unmap .text.private_page_alloc .text.private_page_attach_new .text.vm_page_free_metadata) differing_instructions=34
+differs: kern64/src/kern/writeback.o sections=10 (.text.worker_dispose .text.worker_pause .text.worker_prepare .text.worker_restore) differing_instructions=12
+kernel-object-compare: same=261 differ=21 line_number_only_instructions=272 other=0
+exit=0

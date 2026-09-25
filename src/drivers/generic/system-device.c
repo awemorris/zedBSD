@@ -13,6 +13,7 @@
  * swap controls to the swap layer, and lets init halt or reboot the machine.
  */
 
+#include "kern/vm-object.h"
 #include "kern/system-device.h"
 #include "kern/system-swap-device.h"
 #include "kern/cdev.h"
@@ -35,20 +36,25 @@
 #include "kern/vmspace.h"
 #include "kern/mount.h"
 #include <uapi/system.h>
+#include <uapi/process.h>
+#include <kern/clock.h>
 #include <uapi/mountinfo.h>
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 #include <kern/system-swap-device.h>
 #include <kern/swap-control.h>
 #include <kern/swap.h>
 #include <kern/uaccess.h>
 #include "kern/pmem.h"
+#include <kern/kcrt.h>
 
 static int system_ioctl(struct file *file, unsigned long request, uintptr_t argument);
 static int system_get_info(uintptr_t argument);
 static int system_get_mounts(uintptr_t argument);
 static int system_get_device(uintptr_t argument);
+static int system_get_pci_device(uintptr_t argument);
+static int system_get_usb_device(uintptr_t argument);
 static int system_get_vmstat(uintptr_t argument);
+static void system_drop_caches(void);
 static int system_get_resources(uintptr_t argument);
 static int system_get_process(uintptr_t argument);
 static int system_get_file_usage(uintptr_t argument);
@@ -63,6 +69,15 @@ static int query_valid(const struct system_swap_source_info *query);
 static int map_source_state(uint32_t state, uint32_t *mapped);
 static int control_ioctl(unsigned long request, uintptr_t argument, int superuser);
 static int get_source_ioctl(uintptr_t argument);
+
+/*
+ * The PCI core describes its functions.  A platform without PCI does not
+ * link it, and then there are none to describe.
+ */
+extern int drv_pci_system_describe(uint32_t index, struct system_pci_device_info *info) __attribute__((weak));
+
+/* The USB core describes its devices; without USB there are none. */
+extern int drv_usb_system_describe(uint32_t index, struct system_usb_device_info *info) __attribute__((weak));
 
 /* Operations published by the system control device. */
 static const struct cdev_ops system_ops = {
@@ -146,11 +161,21 @@ system_ioctl(
 	case KERN_SYSTEM_GET_DEVICE:
 		error = system_get_device(argument);
 		break;
+	case KERN_SYSTEM_GET_PCI_DEVICE:
+		error = system_get_pci_device(argument);
+		break;
+	case KERN_SYSTEM_GET_USB_DEVICE:
+		error = system_get_usb_device(argument);
+		break;
 	case KERN_SYSTEM_GET_VMSTAT:
 		error = system_get_vmstat(argument);
 		break;
 	case KERN_SYSTEM_GET_RESOURCES:
 		error = system_get_resources(argument);
+		break;
+	case KERN_SYSTEM_DROP_CACHES:
+		system_drop_caches();
+		error = 0;
 		break;
 	case KERN_SYSTEM_GET_PROCESS:
 		error = system_get_process(argument);
@@ -231,7 +256,7 @@ system_get_mounts(
 		return ENOMEM;
 
 	/* Initializes the result and captures one checked mount-table snapshot. */
-	memset(output, 0, bytes);
+	kern_memset(output, 0, bytes);
 	output->version = header.version;
 	output->struct_size = sizeof(header);
 	output->capacity = header.capacity;
@@ -269,7 +294,7 @@ system_get_info(
 	int error;
 
 	/* Fills the information record. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	info.boot_bios_id = kern_boot_bios_id();
 	info.device_count = kern_boot_device_count();
 	info.partition_count = partition_count();
@@ -290,7 +315,7 @@ static int
 system_get_device(
 	uintptr_t argument)
 {
-	const struct boot_device *device;
+	const struct kern_boot_device *device;
 	struct system_device_info output;
 	uint32_t index;
 	int error;
@@ -307,7 +332,7 @@ system_get_device(
 		return ENOENT;
 
 	/* Describes it. */
-	memset(&output, 0, sizeof(output));
+	kern_memset(&output, 0, sizeof(output));
 	output.index = index;
 	output.device_class = device->device_class;
 	output.flags = device->flags;
@@ -317,6 +342,72 @@ system_get_device(
 	output.sectors = device->sectors;
 
 	/* Copies the description to the caller. */
+
+	/* Reports why the copy failed. */
+	error = copyout(&output, argument, sizeof(output));
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Describes the PCI function at the caller's index. */
+static int
+system_get_pci_device(
+	uintptr_t argument)
+{
+	struct system_pci_device_info output;
+	uint32_t index;
+	int error;
+
+	/* Reads the requested index. */
+	error = copyin(argument, &output, sizeof(output));
+	if (error != 0)
+		return error;
+	index = output.index;
+
+	/* A kernel without PCI has no function at any index. */
+	if (drv_pci_system_describe == NULL)
+		return ENOENT;
+
+	/* Describes the function. */
+	error = drv_pci_system_describe(index, &output);
+	if (error != 0)
+		return error;
+
+	/* Reports why the copy failed. */
+	error = copyout(&output, argument, sizeof(output));
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Describes the USB device at the caller's index. */
+static int
+system_get_usb_device(
+	uintptr_t argument)
+{
+	struct system_usb_device_info output;
+	uint32_t index;
+	int error;
+
+	/* Reads the requested index. */
+	error = copyin(argument, &output, sizeof(output));
+	if (error != 0)
+		return error;
+	index = output.index;
+
+	/* A kernel without USB has no device at any index. */
+	if (drv_usb_system_describe == NULL)
+		return ENOENT;
+
+	/* Describes the device. */
+	error = drv_usb_system_describe(index, &output);
+	if (error != 0)
+		return error;
 
 	/* Reports why the copy failed. */
 	error = copyout(&output, argument, sizeof(output));
@@ -347,7 +438,7 @@ system_get_vmstat(
 	swap_free = 0;
 
 	/* Samples every statistics source. */
-	memset(&output, 0, sizeof(output));
+	kern_memset(&output, 0, sizeof(output));
 	kern_memstat(&hs);
 	kern_memory_get_stats(&ks);
 	vm_reclaim_get_stats(&vs);
@@ -422,6 +513,19 @@ system_get_resources(
 	return 0;
 }
 
+/* Drops every idle cache object, so a resource count taken next has no cache in it. */
+static void
+system_drop_caches(
+	void)
+{
+	unsigned dropped;
+
+	/* Drains in bounded passes until a pass evicts nothing. */
+	do {
+		dropped = vm_object_cache_drain(NULL);
+	} while (dropped != 0);
+}
+
 /* Describes the first process at or after a process identifier. */
 static int
 system_get_process(
@@ -448,7 +552,7 @@ system_get_process(
 	/* Samples the process under its lock; the cleared record reads zero. */
 	caller_credential = cred_process_ref(curthread->proc);
 	target_credential = cred_process_ref(process);
-	memset(&output, 0, sizeof(output));
+	kern_memset(&output, 0, sizeof(output));
 	irq = spin_lock_irqsave(&process->lock);
 
 	output.pid = process->pid;
@@ -464,10 +568,14 @@ system_get_process(
 	output.nice_value = process->nice_value;
 	output.has_controlling_terminal =
 	    process->controlling_tty != NULL;
-	output.cpu_ticks = process->cpu_ticks;
-	output.user_ticks = process->user_ticks;
-	output.system_ticks = process->system_ticks;
-	memcpy(output.command, process->command,
+	/* CPU time leaves in the fixed unit of the ABI, not in kernel ticks. */
+	output.cpu_ticks = kern_ticks_to_rate(process->cpu_ticks,
+	    KERN_PROCESS_TIMES_HZ);
+	output.user_ticks = kern_ticks_to_rate(process->user_ticks,
+	    KERN_PROCESS_TIMES_HZ);
+	output.system_ticks = kern_ticks_to_rate(process->system_ticks,
+	    KERN_PROCESS_TIMES_HZ);
+	kern_memcpy(output.command, process->command,
 	       sizeof(output.command));
 	output.command[sizeof(output.command) - 1U] = '\0';
 
@@ -572,7 +680,7 @@ system_get_file_usage(
 	}
 
 	/* Describes the user found. */
-	memset(output.reserved, 0, sizeof(output.reserved));
+	kern_memset(output.reserved, 0, sizeof(output.reserved));
 	output.reserved0 = 0;
 	output.pid = process->pid;
 	output.cursor_pid = process->pid;
@@ -807,7 +915,7 @@ bounded_string_valid(
 		return 0;
 
 	/* The terminator must lie inside the buffer. */
-	if (memchr(text, '\0', capacity) == NULL)
+	if (kern_memchr(text, '\0', capacity) == NULL)
 		return 0;
 
 	/* Reports a valid string. */
@@ -953,7 +1061,7 @@ get_source_ioctl(
 	source_id = output.source_id;
 
 	/* Snapshots the source. */
-	memset(&snapshot, 0, sizeof(snapshot));
+	kern_memset(&snapshot, 0, sizeof(snapshot));
 	error = kern_swap_control_get(source_id, &snapshot);
 	if (error != 0)
 		return error;
@@ -964,7 +1072,7 @@ get_source_ioctl(
 		return EIO;
 
 	/* Renders the snapshot in the public layout. */
-	memset(&output, 0, sizeof(output));
+	kern_memset(&output, 0, sizeof(output));
 	output.version = KERN_SYSTEM_SWAP_VERSION;
 	output.struct_size = sizeof(output);
 	output.source_id = source_id;
@@ -974,10 +1082,10 @@ get_source_ioctl(
 	output.header_version = snapshot.header_version;
 	output.total_pages = snapshot.total_pages;
 	output.used_pages = snapshot.used_pages;
-	memcpy(output.uuid, snapshot.uuid, sizeof(output.uuid));
-	memcpy(output.label, snapshot.label, sizeof(output.label));
+	kern_memcpy(output.uuid, snapshot.uuid, sizeof(output.uuid));
+	kern_memcpy(output.label, snapshot.label, sizeof(output.label));
 	output.label[sizeof(output.label) - 1U] = '\0';
-	memcpy(output.source, snapshot.source, sizeof(output.source));
+	kern_memcpy(output.source, snapshot.source, sizeof(output.source));
 	output.source[sizeof(output.source) - 1U] = '\0';
 
 	/* Copies the answer out. */

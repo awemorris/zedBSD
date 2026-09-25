@@ -42,6 +42,14 @@ static const struct signal_name signal_names[] = {
     {SIGXFSZ, "XFSZ"},
 };
 
+/*
+ * The signals this process has ever given a handler of its own.  A
+ * posix_spawn child, which runs in this process's memory until it
+ * execs, puts these back to their default first, so that no handler of
+ * the parent runs in it.
+ */
+sigset_t __libc_caught_signals;
+
 static int public_signal_valid(int signo);
 static intptr_t call(uint32_t n, uintptr_t a, uintptr_t b, uintptr_t c);
 static int sigset_signo(int signo);
@@ -81,6 +89,11 @@ sigaction(
 	/* Computes the function result. */
 	function_result = (int)call(KERN_SYS_sigaction, signo, (uintptr_t)action,
 			 (uintptr_t)old_action);
+
+	/* Notes a handler of the process's own. */
+	if (function_result == 0 && action != NULL &&
+	    action->sa_handler != SIG_DFL && action->sa_handler != SIG_IGN)
+		(void)sigaddset(&__libc_caught_signals, signo);
 
 	/* Returns the computed result. */
 	return function_result;

@@ -19,7 +19,7 @@
 
 #include <kern/device-io.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 
 /* The KERNEL bit every forcewake request and acknowledge register uses. */

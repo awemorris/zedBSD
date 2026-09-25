@@ -20,10 +20,10 @@
 #include "kern/signal.h"
 #include "kern/thread.h"
 #include "kern/vmspace.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
-#include <string.h>
 
 volatile struct user_int_probe user_int_probe;
 volatile struct user_fault_probe user_fault_probe;
@@ -159,7 +159,7 @@ kernel_user_fault_handler(
 	}
 
 	/* Describes the fault for the signal handler. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	if (cause == HAL_TRAP_CAUSE_PAGE_FAULT ||
 	    cause == HAL_TRAP_CAUSE_DEBUG_POINT)
 		info.address = address;

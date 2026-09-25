@@ -21,10 +21,10 @@
 #include "memory.h"
 #include "mmio.h"
 #include "workarounds.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 #include "intel/commands.h"
 #include "intel/gt-regs.h"
@@ -257,7 +257,7 @@ drv_i915_request_create(
 		return EINVAL;
 
 	/* Starts the request at the ring's write position. */
-	memset(rq, 0, sizeof(*rq));
+	kern_memset(rq, 0, sizeof(*rq));
 	rq->ce = ce;
 	rq->seqno = seqno;
 	rq->hwsp_ggtt = hwsp_ggtt;

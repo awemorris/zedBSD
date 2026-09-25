@@ -16,8 +16,8 @@
 
 void
 kernel_main(
-	const struct boot_handoff *handoff,
-	const struct boot_device *devices,
+	const struct kern_boot_handoff *handoff,
+	const struct kern_boot_device *devices,
 	unsigned device_count);
 
 /*
@@ -31,7 +31,7 @@ kern_boot_bios_id(void);
 unsigned
 kern_boot_device_count(void);
 
-const struct boot_device *
+const struct kern_boot_device *
 kern_boot_device_at(unsigned index);
 
 #endif

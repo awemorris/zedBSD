@@ -34,7 +34,7 @@
 #ifndef DRIVERS_GPU_I915_RENDER_GFX_H
 #define DRIVERS_GPU_I915_RENDER_GFX_H
 
-#include <vulkan/vulkan_core.h>
+#include <libc/vulkan/vulkan_core.h>
 
 #include <stdint.h>
 

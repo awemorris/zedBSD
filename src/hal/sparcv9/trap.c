@@ -8,7 +8,7 @@
 #include "task.h"
 #include "trap.h"
 #include "irq.h"
-#include <errno.h>
+#include <uapi/errno.h>
 
 extern char sparcv9_trap_table[];
 static int user_fault_active;

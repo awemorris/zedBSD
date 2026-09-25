@@ -17,10 +17,10 @@
  */
 
 #include "dp-fake-hw.h"
+#include <kern/kcrt.h>
 
 #include "../../display/dp-sink.h"
 
-#include <string.h>
 
 /* PPS 0 and the PCH clock gating around it. */
 #define I915_DP_FAKE_PP_STATUS          0xC7200U
@@ -111,23 +111,23 @@ drv_i915_dp_fake_init(
 	unsigned edid_size)
 {
 	/* Starts every register, counter and fault at zero, 5 s after boot. */
-	memset(hw, 0, sizeof(*hw));
+	kern_memset(hw, 0, sizeof(*hw));
 	hw->now_us = 5000000U;
 
 	/* Loads the sink's receiver caps, link configuration and eDP display-control pages. */
 	if (dpcd_000 != NULL)
-		memcpy(hw->dpcd + 0x000U, dpcd_000, 256U);
+		kern_memcpy(hw->dpcd + 0x000U, dpcd_000, 256U);
 	if (dpcd_100 != NULL)
-		memcpy(hw->dpcd + 0x100U, dpcd_100, 256U);
+		kern_memcpy(hw->dpcd + 0x100U, dpcd_100, 256U);
 	if (dpcd_700 != NULL)
-		memcpy(hw->dpcd + 0x700U, dpcd_700, 256U);
+		kern_memcpy(hw->dpcd + 0x700U, dpcd_700, 256U);
 
 	/* Loads the EDID EEPROM, as much as it holds. */
 	if (edid_size > sizeof(hw->edid))
 		edid_size = sizeof(hw->edid);
 
 	if (edid_size != 0U)
-		memcpy(hw->edid, edid, edid_size);
+		kern_memcpy(hw->edid, edid, edid_size);
 
 	hw->edid_size = edid_size;
 }
@@ -175,7 +175,7 @@ drv_i915_dp_fake_bind_env(
 	struct i915_dp_world *world)
 {
 	/* Starts the environment's bookkeeping at zero. */
-	memset(env, 0, sizeof(*env));
+	kern_memset(env, 0, sizeof(*env));
 
 	/* The registers, the clock and the waits. */
 	env->ctx = hw;

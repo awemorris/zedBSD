@@ -14,9 +14,9 @@
 #include "kern/net/packet-buf.h"
 #include "kern/kmem.h"
 #include "kern/poll.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 #include <uapi/netif.h>
 #include <uapi/route.h>
 
@@ -95,11 +95,12 @@ route_socket_notify(
 	    device_generation == 0U ||
 	    (transition != RTM_IFINFO_CARRIER_UP &&
 	     transition != RTM_IFINFO_CARRIER_DOWN &&
-	     transition != RTM_IFINFO_REMOVAL))
+	     transition != RTM_IFINFO_REMOVAL &&
+	     transition != RTM_IFINFO_ARRIVAL))
 		return;
 
 	/* Builds the fixed-width interface event record. */
-	memset(&message, 0, sizeof(message));
+	kern_memset(&message, 0, sizeof(message));
 	message.rtm_version = RTM_VERSION;
 	message.rtm_type = RTM_IFINFO;
 	message.rtm_length = sizeof(message);
@@ -289,7 +290,7 @@ route_recvfrom(
 	/* Limits the copied record to the caller's available buffer. */
 	if (length > packet->length)
 		length = packet->length;
-	memcpy(buffer, packet->data, length);
+	kern_memcpy(buffer, packet->data, length);
 
 	/* Reports the complete record length for a truncating receive. */
 	if ((flags & MSG_TRUNC) != 0)
@@ -484,7 +485,7 @@ route_enqueue(
 
 	/* Copies the immutable event into the selected packet. */
 	output = (struct rtm_ifinfo *)packet->data;
-	memcpy(output, message, sizeof(*output));
+	kern_memcpy(output, message, sizeof(*output));
 
 	/* Reports any event loss on the next retained record. */
 	if (endpoint->overflow_pending != 0U) {

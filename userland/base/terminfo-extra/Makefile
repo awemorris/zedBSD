@@ -11,5 +11,5 @@ ZEDBSD_TERMINFO_EXTRA_INSTALL := $(foreach file,\
 	$(ZEDBSD_TERMINFO_EXTRA_DATA),/lib/terminfo/$(notdir $(file))=$(file))
 
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,terminfo-extra,extra terminal descriptions,\
-	*,n,data,,y,base,base/terminfo-extra,base/terminfo,,data,\
+	*,y,data,,y,base,base/terminfo-extra,base/terminfo,,data,\
 	$(ZEDBSD_TERMINFO_EXTRA_INSTALL)))

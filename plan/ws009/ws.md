@@ -1,51 +1,16 @@
+<!-- awesome-plan project=zedbsd record=ws009 -->
+
 # WS009: documentation
 
 <!-- awesome-plan-current:start -->
-
-## Current state — 2026-09-11 adoption
-
 Status: incomplete
-
-DOC-54はWS014の手動保留に依存。
-以下の旧試行記録は履歴として保持。本項は既存判断の正規化であり実装の再開許可ではない。
-
-[Guardrail](https://github.com/awemorris/zedBSD/issues/363) · [Queue](https://github.com/awemorris/zedBSD/issues/362)
-
+Primary Milestone: MG001
+Related Milestones: MG006, MG008, MG009
+Objectives: O2, O4, O5
+Parent: [Master](../master.md)
+Queue: なし
+Resume point: p001〜p008 cleared。DOC-54 は GPU 文書の保留解除後に Phase 化
 <!-- awesome-plan-current:end -->
-
-
-<!-- traceability:start -->
-
-## Goal traceability
-
-- Primary Milestone: **MG001 — 継続開発できる基盤が揃う**
-- Related Milestones: MG006, MG008, MG009
-- Objectives: O2, O4, O5
-- 貢献する成果: 実装・利用手順・制限を文書化する。研究知見の公開全体を既存の完了で代替しない。
-- 上位定義: [MasterのObjectives / Milestone Goals](https://github.com/awemorris/zedBSD/issues/1)
-
-既存Phaseは本WSを親として上位成果に接続する。Primaryは分類と責任の所在であり、
-各PhaseがRelatedすべてを満たすという意味ではない。成果・検証・限界は各Phaseの
-現行記録を根拠とする。今回の対応付けは状態変更・未定義作業の追加・実行許可ではない。
-
-<!-- traceability:end -->
-
-
-Last updated: 2026-09-09
-
-WSID: `ws009`
-
-Status: p001–p008 completed through q190; current implementation documentation
-is complete. WS remains unfinished only for DOC-54, whose GPU producer WS014
-is on manual hold. No executable documentation Phase remains.
-
-Parent: [master plan](../master.md)
-
-Last verified Phase: `ws009-p008` complete (`q190`)
-
-Resume point: after the user releases WS014 and a real GPU UAPI exists, define
-a finite documentation Phase for DOC-54. Existing documentation explicitly
-records that no current GPU ABI is available. Installer dependencies are closed.
 
 Shared tests: [WS009 test index](tests/README.md)
 

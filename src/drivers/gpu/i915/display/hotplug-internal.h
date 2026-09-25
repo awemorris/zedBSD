@@ -81,7 +81,7 @@
 /* This translation unit is compiled in the hotplug environment. */
 #define I915_DISPLAY_WORLD_HOTPLUG 1
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <kern/clock.h>
 #include <kern/klog.h>
 #include <kern/lock.h>

@@ -217,6 +217,30 @@ void hal_space_switch(hal_space_t h)
 	if(!space_lock_handle(h,&s,&enabled))HAL_FATAL("invalid arm64 space switch");
 	ttbr=(uintptr_t)s->l0_memory;arm64_write_ttbr0(ttbr);arm64_flush_tlb();current_space=h;space_unlock(s,enabled);
 }
+/*
+ * Makes code written through the data side visible to instruction fetch
+ * before a user page becomes executable.  The Cortex-A72's instruction
+ * cache does not snoop its data cache, so a page filled by ordinary stores
+ * (a file read into memory, or code patched before mprotect) must be
+ * cleaned to the point of unification and dropped from the instruction
+ * cache, or the CPU fetches stale bytes.
+ */
+static void
+sync_executable(
+	hal_physaddr_t physical,
+	size_t size,
+	uint32_t attr)
+{
+	/* Only cacheable memory that is to be executed. */
+	if ((attr & HAL_SPACE_EXEC) == 0)
+		return;
+	if ((attr & (HAL_SPACE_DEVICE | HAL_SPACE_NOCACHE)) != 0)
+		return;
+
+	/* Its bytes through the kernel's direct map. */
+	hal_sync_instruction_stream(arm64_phys_to_direct((uintptr_t)physical), size);
+}
+
 static uint64_t leaf_flags(uint32_t attr)
 {
 	uint64_t f=PAGE_FLAGS|PTE_USER|PTE_PXN;
@@ -232,6 +256,8 @@ int hal_space_map(hal_space_t h,void *v,hal_physaddr_t p,size_t n,uint32_t attr)
 	   !(attr&(HAL_SPACE_READ|HAL_SPACE_WRITE|HAL_SPACE_EXEC))||((attr&HAL_SPACE_WRITE)&&(attr&HAL_SPACE_EXEC)))return HAL_ERR_INVALID;
 	if(!space_lock_handle(h,&s,&enabled))return HAL_ERR_STATE;
 	for(o=0;o<n;o+=4096){uint64_t *l=walk_leaf(s,a+o,0);if(l&&(*l&PTE_VALID)){space_unlock(s,enabled);return HAL_ERR_INVALID;}}
+	/* Code in the pages is fetched correctly once they are executable. */
+	sync_executable(p,n,attr);
 	for(o=0;o<n;o+=4096){uint64_t *l=walk_leaf(s,a+o,1);if(!l){struct arm64_table_page *detached;uintptr_t rollback;for(rollback=0;rollback<o;rollback+=4096){l=walk_leaf(s,a+rollback,0);if(l)*l=0;}detached=detach_empty_tables(s);hal_wmb();flush_locked(s);free_detached_tables(detached);space_unlock(s,enabled);return HAL_ERR_NOMEM;}*l=(p+o)|leaf_flags(attr);}
 	flush_locked(s);space_unlock(s,enabled);return HAL_OK;
 }
@@ -251,6 +277,8 @@ int hal_space_prot_query(hal_space_t h,void *v,size_t n,uint32_t attr,uint32_t *
 		if(old&PTE_SW_DIRTY)observed|=HAL_SPACE_PAGE_DIRTY;
 		*l=old&~PTE_VALID;}
 	hal_wmb();flush_locked(s);
+	/* Pages that become executable get their code synchronized first. */
+	for(o=0;o<n;o+=4096){uint64_t *l=walk_leaf(s,a+o,0);sync_executable((hal_physaddr_t)(*l&PTE_ADDR),4096,attr);}
 	for(o=0;o<n;o+=4096){uint64_t *l=walk_leaf(s,a+o,0),old=*l;*l=(old&PTE_ADDR)|leaf_flags(attr)|(old&PTE_SW_DIRTY);}
 	hal_wmb();flush_locked(s);
 	for(o=0;o<n;o+=4096){uint64_t *l=walk_leaf(s,a+o,0),entry=*l;if(entry&PTE_AF)observed|=HAL_SPACE_PAGE_ACCESSED;if(entry&PTE_SW_DIRTY)observed|=HAL_SPACE_PAGE_DIRTY;}

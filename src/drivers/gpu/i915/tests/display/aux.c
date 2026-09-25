@@ -37,12 +37,12 @@
 #include "../../display/state.h"
 #include "dp-fixture-latitude5330.h"
 #include "scenarios.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdint.h>
-#include <string.h>
 
 /* How many transcoder words Linux's register dump holds for transcoder A. */
 #define I915_AUX_TRANSCODER_WORDS 13u
@@ -243,25 +243,25 @@ i915_aux_run(
 	}
 
 	/* Starts with nothing observed. */
-	memset(&obs, 0, sizeof(obs));
+	kern_memset(&obs, 0, sizeof(obs));
 
 	/* The receiver capabilities the bring-up kept, against the capture made through Linux. */
 	if (res->dpcd_ok) {
-		compared = memcmp(res->dpcd, i915_dp_fixture_dpcd_000, sizeof(res->dpcd));
+		compared = kern_memcmp(res->dpcd, i915_dp_fixture_dpcd_000, sizeof(res->dpcd));
 		if (compared == 0)
 			obs.dpcd_match = 1;
 	}
 
 	/* The eDP display control capabilities, against the capture. */
 	if (res->edp_dpcd_ok) {
-		compared = memcmp(res->edp_dpcd, i915_dp_fixture_dpcd_700, sizeof(res->edp_dpcd));
+		compared = kern_memcmp(res->edp_dpcd, i915_dp_fixture_dpcd_700, sizeof(res->edp_dpcd));
 		if (compared == 0)
 			obs.edp_match = 1;
 	}
 
 	/* The one-block EDID, against the capture. */
 	if (res->edid_ok && res->edid_blocks == 1u) {
-		compared = memcmp(res->edid, i915_dp_fixture_edid, 128u);
+		compared = kern_memcmp(res->edid, i915_dp_fixture_edid, 128u);
 		if (compared == 0)
 			obs.edid_match = 1;
 	}

@@ -4,7 +4,7 @@
 
 ## ユーザー決定と所有する成果
 
-ユーザーはvkdemoを純粋な標準Vulkan APIアプリとして実装すること、公開headerを `libc/include/vulkan/`、独立した実装を `userland/base/libvulkan/`、共有libraryを `/lib/libvulkan.so` へ配置することを指定した。その後、Vulkan 1.0全体とdirect-display WSIの実装を明示し、作業継続とGitHub同期を承認した。EGLは今回キャンセルし、将来GLES-on-Vulkanが選択された時の課題とする。Waylandは将来のWSI backendであり今回実装しない。
+ユーザーはvkdemoを純粋な標準Vulkan APIアプリとして実装すること、公開headerを `include/libc/vulkan/`、独立した実装を `userland/base/libvulkan/`、共有libraryを `/lib/libvulkan.so` へ配置することを指定した。その後、Vulkan 1.0全体とdirect-display WSIの実装を明示し、作業継続とGitHub同期を承認した。EGLは今回キャンセルし、将来GLES-on-Vulkanが選択された時の課題とする。Waylandは将来のWSI backendであり今回実装しない。
 
 WS030の単一目標は、標準Vulkan 1.0と採用したdirect-display拡張を使うアプリへ実用の共有libraryを提供すること。WS014は既存のGPU framework/virtio-gpu bring-upを保持し、p005だけを標準API利用へ訂正する。WS014自体の完了や別WS029 native i915を前倒ししない。終了WSを再利用せず、広い標準libraryの独立成果を新WSで管理する。
 
@@ -70,7 +70,7 @@ coherent memoryをCPU copyで代用してその宣言を維持したり、FIFO�
 
 WS030 p001/p002/p003/p004とWS014 p005の標準API訂正をclearedとし、WS030 completed、q308 finished、active Queueなしとする。WS014はincomplete、p001/p004 planning、p004未queue、native i915は別WS029のまま。q307の旧scopeの実測と履歴は保持する。
 
-`libc/include/vulkan/` にVulkan1.0の公開header、`userland/base/libvulkan/` に独立した全137 core＋選択direct-display WSI18の実装を提供し、`/lib/libvulkan.so` に配置した。vkdemoは標準Vulkan/WSIだけを使い、GPU ioctl/Venus codecをアプリへ持ち込まない。ABI、Noct再生成、155実exportとproc-address、全familyの限定意味論試験、U/Kの所有権・権限・失敗回収、適用C規約の独立レビューを実施した。正式CTS認証は主張しない。
+`include/libc/vulkan/` にVulkan1.0の公開header、`userland/base/libvulkan/` に独立した全137 core＋選択direct-display WSI18の実装を提供し、`/lib/libvulkan.so` に配置した。vkdemoは標準Vulkan/WSIだけを使い、GPU ioctl/Venus codecをアプリへ持ち込まない。ABI、Noct再生成、155実exportとproc-address、全familyの限定意味論試験、U/Kの所有権・権限・失敗回収、適用C規約の独立レビューを実施した。正式CTS認証は主張しない。
 
 最終 `q308-lifecycle-003` は実QEMU10.0.11/virglrenderer1.1.0/Intel ANVで6枚の回転直方体を描画し、実VNC/GPU readback/独立ray-texture oracleが一致（評価対象不一致0）。通常終了後6frame再起動、SIGINT後6frame再起動、640×480文字画面への復帰とechoによる画面更新、別processの表示競合拒否とowner35frame/DONEを確認した。42.671秒、QEMU exit0。最終書式変更後のkernel/appは実行済みbinaryと一致する。
 

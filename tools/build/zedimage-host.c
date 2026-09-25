@@ -15,13 +15,21 @@
 #include <unistd.h>
 
 enum { FRAG=1024, BLOCK=8192, FRAGS=8, IPG=256, INODE_SIZE=256,
-       SBLK=64, CBLK=72, IBLK=80, DBLK=144, MAX_GROUPS=64, MAX_INODES=16384,
+       SBLK=64, CBLK=72, IBLK=80, DBLK=144, MAX_GROUPS=512, MAX_INODES=65536,
        DEFAULT_CYLINDER_GROUPS=2 };
+
+/*
+ * The largest UFS image the producer makes.  A cylinder group's fragment
+ * bitmap has to fit its block, which puts a group at about 62 MiB; with
+ * MAX_GROUPS groups that is about 31 GiB, and the whole image is built in
+ * host memory (as a sparse allocation), so 16 GiB is the stated limit.
+ */
+#define UFS_IMAGE_MAX_BYTES (UINT64_C(16) << 30)
 enum { IFDIR=0040000, IFREG=0100000, IFLNK=0120000 };
 struct child { char *name; uint32_t ino; uint8_t type; };
 struct node { struct child *v; size_t n, cap; unsigned mode; };
 struct image {
-    uint8_t *data; size_t size; uint32_t fragments, ncg, fpg, cgsize;
+    uint8_t *data; size_t size; uint32_t fragments, ncg, fpg, cgsize, journal_mib;
     uint32_t cg_next[MAX_GROUPS], next_ino; uint8_t *used_frag[MAX_GROUPS], used_ino[MAX_GROUPS][IPG];
     struct node nodes[MAX_INODES];
 };
@@ -34,7 +42,7 @@ static void p64(uint8_t *p,uint64_t v){p32(p,(uint32_t)v);p32(p+4,(uint32_t)(v>>
 static uint32_t g32(const uint8_t *p){return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
 static uint32_t cg_base(struct image *im,uint32_t cg){return cg*im->fpg;}
 static uint32_t cg_ndblk(struct image *im,uint32_t cg){uint32_t b=cg_base(im,cg);return im->fragments-b<im->fpg?im->fragments-b:im->fpg;}
-static uint8_t *inode_at(struct image *im,uint32_t ino){uint32_t cg=ino/IPG,index=ino%IPG;if(cg>=im->ncg)fail("inode table full");return im->data+(cg_base(im,cg)+IBLK)*FRAG+index*INODE_SIZE;}
+static uint8_t *inode_at(struct image *im,uint32_t ino){uint32_t cg=ino/IPG,index=ino%IPG;if(cg>=im->ncg)fail("inode table full");return im->data+(size_t)(cg_base(im,cg)+IBLK)*FRAG+(size_t)index*INODE_SIZE;}
 static void add_child(struct image *im,uint32_t parent,const char *name,uint32_t ino,uint8_t type){
     struct node *n=&im->nodes[parent]; if(n->n==n->cap){n->cap=n->cap?n->cap*2:8;n->v=realloc(n->v,n->cap*sizeof(*n->v));if(!n->v)die("realloc");}
     n->v[n->n].name=strdup(name);n->v[n->n].ino=ino;n->v[n->n].type=type;n->n++;
@@ -63,6 +71,40 @@ static void add_tree(struct image *im,const char *path,uint32_t parent){
     DIR *d=opendir(path);if(!d)die(path);char **names=NULL;size_t n=0,cap=0;struct dirent *e;while((e=readdir(d)))if(strcmp(e->d_name,".")&&strcmp(e->d_name,"..")){if(n==cap){cap=cap?cap*2:16;names=realloc(names,cap*sizeof(*names));if(!names)die("realloc");}names[n++]=strdup(e->d_name);}closedir(d);qsort(names,n,sizeof(*names),namecmp);
     for(size_t i=0;i<n;i++){size_t z=strlen(path)+strlen(names[i])+2;char *p=malloc(z);snprintf(p,z,"%s/%s",path,names[i]);struct stat st;if(lstat(p,&st))die(p);if(S_ISLNK(st.st_mode)){char target[256];ssize_t m=readlink(p,target,sizeof(target)-1);if(m<0)die(p);target[m]=0;add_symlink(im,parent,names[i],target);}else if(S_ISDIR(st.st_mode)){uint32_t ino=child_dir(im,parent,names[i]);if(!ino)ino=add_dir(im,parent,names[i],st.st_mode&07777);add_tree(im,p,ino);}else if(S_ISREG(st.st_mode)){FILE *f=fopen(p,"rb");if(!f)die(p);uint8_t *buf=malloc(st.st_size?st.st_size:1);if(st.st_size&&fread(buf,1,st.st_size,f)!=(size_t)st.st_size)die(p);fclose(f);add_file_data(im,parent,names[i],buf,st.st_size,st.st_mode&07777);free(buf);}free(p);free(names[i]);}free(names);
 }
+static uint32_t ufs_digest(const uint8_t *bytes, size_t length);
+
+/*
+ * The journal size a volume gets by default: the ext4 (e2fsprogs) table
+ * for the volume's size, capped at 128 MiB.  A caller may ask up to 1 GiB.
+ */
+static uint32_t
+journal_default_mib(uint64_t bytes)
+{
+    if (bytes < (8ULL << 20))
+        return 0;
+    if (bytes < (128ULL << 20))
+        return 4;
+    if (bytes < (1ULL << 30))
+        return 16;
+    if (bytes < (2ULL << 30))
+        return 32;
+    if (bytes < (16ULL << 30))
+        return 64;
+    return 128;
+}
+
+/* Records the journal size in the superblock's spare words ("ZJ3R"). */
+static void
+journal_request(uint8_t *super, uint32_t mib)
+{
+    uint8_t *record = super + 1248;
+
+    memcpy(record, "ZJ3R", 4);
+    p32(record + 4, 1);
+    p32(record + 8, mib);
+    p32(record + 12, ufs_digest(record, 12));
+}
+
 static void
 superblock(struct image *im)
 {
@@ -86,6 +128,7 @@ superblock(struct image *im)
     p64(s + 1328, UINT64_C(0x7fffffffffffffff));
     memcpy(s + 144, "zedBSD\001", 8);
     s[209] = 1;
+    journal_request(s, im->journal_mib);
 }
 static void finish_dirs(struct image *im){
     uint32_t parent[MAX_INODES]={0};parent[2]=2;for(uint32_t ino=2;ino<MAX_INODES;ino++)for(size_t j=0;j<im->nodes[ino].n;j++)if(im->nodes[ino].v[j].type==4)parent[im->nodes[ino].v[j].ino]=ino;
@@ -93,8 +136,8 @@ static void finish_dirs(struct image *im){
         size_t nb=(len+BLOCK-1)/BLOCK;uint32_t *blocks=calloc(nb,sizeof(*blocks));for(size_t j=0;j<nb;j++){size_t z=len-j*BLOCK<BLOCK?len-j*BLOCK:BLOCK;blocks[j]=alloc_block(im,dir+j*BLOCK,z);}unsigned sub=0;for(size_t j=0;j<node->n;j++)if(node->v[j].type==4)sub++;write_inode(im,ino,IFDIR|node->mode,2+sub,len,blocks,nb);free(blocks);free(dir);
     }
 }
-static void finish_cg(struct image *im){uint32_t totals[4]={0};for(uint32_t ci=0;ci<im->ncg;ci++){uint32_t base=cg_base(im,ci),nd=cg_ndblk(im,ci);uint8_t *cg=im->data+(base+CBLK)*FRAG;unsigned ndir=0,nifree=0,nbfree=0,nffree=0;for(unsigned i=0;i<IPG;i++){if(im->used_ino[ci][i]){if(ci*IPG+i<MAX_INODES&&im->nodes[ci*IPG+i].mode)ndir++;cg[168+i/8]|=1U<<(i&7);}else nifree++;}for(uint32_t f=0;f<nd;f++)if(!im->used_frag[ci][f])cg[200+f/8]|=1U<<(f&7);for(uint32_t f=0;f+8<=nd;f+=8){int all=1;for(unsigned j=0;j<8;j++)if(im->used_frag[ci][f+j])all=0;if(all)nbfree++;}unsigned freec=0;for(uint32_t f=0;f<nd;f++)if(!im->used_frag[ci][f])freec++;nffree=freec-nbfree*8;struct{int o;uint32_t v;}v[]={{4,0x090255},{12,ci},{20,nd},{24,ndir},{28,nbfree},{32,nifree},{36,nffree},{92,168},{96,200},{100,im->cgsize},{116,IPG},{120,IPG}};for(size_t i=0;i<sizeof(v)/sizeof(v[0]);i++)p32(cg+v[i].o,v[i].v);totals[0]+=ndir;totals[1]+=nbfree;totals[2]+=nifree;totals[3]+=nffree;}
-    uint8_t *s=im->data+65536;for(int i=0;i<4;i++)p64(s+1008+8*i,totals[i]);for(uint32_t ci=1;ci<im->ncg;ci++)memcpy(im->data+(cg_base(im,ci)+SBLK)*FRAG,s,8192);
+static void finish_cg(struct image *im){uint32_t totals[4]={0};for(uint32_t ci=0;ci<im->ncg;ci++){uint32_t base=cg_base(im,ci),nd=cg_ndblk(im,ci);uint8_t *cg=im->data+(size_t)(base+CBLK)*FRAG;unsigned ndir=0,nifree=0,nbfree=0,nffree=0;for(unsigned i=0;i<IPG;i++){if(im->used_ino[ci][i]){if(ci*IPG+i<MAX_INODES&&im->nodes[ci*IPG+i].mode)ndir++;cg[168+i/8]|=1U<<(i&7);}else nifree++;}for(uint32_t f=0;f<nd;f++)if(!im->used_frag[ci][f])cg[200+f/8]|=1U<<(f&7);for(uint32_t f=0;f+8<=nd;f+=8){int all=1;for(unsigned j=0;j<8;j++)if(im->used_frag[ci][f+j])all=0;if(all)nbfree++;}unsigned freec=0;for(uint32_t f=0;f<nd;f++)if(!im->used_frag[ci][f])freec++;nffree=freec-nbfree*8;struct{int o;uint32_t v;}v[]={{4,0x090255},{12,ci},{20,nd},{24,ndir},{28,nbfree},{32,nifree},{36,nffree},{92,168},{96,200},{100,im->cgsize},{116,IPG},{120,IPG}};for(size_t i=0;i<sizeof(v)/sizeof(v[0]);i++)p32(cg+v[i].o,v[i].v);totals[0]+=ndir;totals[1]+=nbfree;totals[2]+=nifree;totals[3]+=nffree;}
+    uint8_t *s=im->data+65536;for(int i=0;i<4;i++)p64(s+1008+8*i,totals[i]);for(uint32_t ci=1;ci<im->ncg;ci++)memcpy(im->data+(size_t)(cg_base(im,ci)+SBLK)*FRAG,s,8192);
 }
 /* Computes the existing persistence locator digest. */
 static uint32_t
@@ -136,7 +179,8 @@ ufs_tail(struct image *im)
 
 /* Builds one bounded image with the selected explicit persistence profile. */
 static void
-create_ufs(const char *root, const char *out, size_t size, int profile)
+create_ufs(const char *root, const char *out, size_t size, int profile,
+           uint32_t least_inodes, int64_t journal_mib)
 {
     struct image im = {0};
     uint32_t cg, nd, i, etc;
@@ -146,14 +190,29 @@ create_ufs(const char *root, const char *out, size_t size, int profile)
     static const uint8_t marker[] = "zedBSD ufs root v1\n";
 
     /* Reject sizes before narrowing counts or allocating the host image. */
-    if (size < 4U*1024U*1024U || size > UINT64_C(2147482624) || size % FRAG)
+    if (size < 4U*1024U*1024U || size > UFS_IMAGE_MAX_BYTES || size % FRAG)
         fail("bad UFS size");
     im.size = size;
     im.data = calloc(1, size);
     if (!im.data)
         die("calloc image");
     im.fragments = (size - (profile ? 2307U*512U : 0U)) / FRAG;
+    im.journal_mib = journal_mib >= 0 ? (uint32_t)journal_mib :
+        journal_default_mib((uint64_t)im.fragments * FRAG);
     im.ncg = DEFAULT_CYLINDER_GROUPS;
+
+    /*
+     * Inodes come from the cylinder groups, IPG of them each, so a root
+     * holding many small files needs groups the byte size alone would not
+     * ask for.  The caller counts what it is about to write and says so
+     * here; without this a tree of headers fills the table while most of
+     * the image is still empty.
+     */
+    if (least_inodes > im.ncg * IPG) {
+        im.ncg = (least_inodes + IPG - 1U) / IPG;
+        if (im.ncg > MAX_GROUPS)
+            fail("UFS image cannot hold that many inodes");
+    }
 
     /* Expand the group count while keeping each bitmap within one block. */
     for (;;) {
@@ -236,6 +295,11 @@ static void gpt_entry(uint8_t *e,const uint8_t type[16],const uint8_t unique[16]
 static void gpt_header(uint8_t h[512],uint64_t cur,uint64_t backup,uint64_t entries,uint64_t first,uint64_t last,const uint8_t diskid[16],uint32_t ecrc){memset(h,0,512);memcpy(h,"EFI PART",8);p32(h+8,0x10000);p32(h+12,92);p64(h+24,cur);p64(h+32,backup);p64(h+40,first);p64(h+48,last);memcpy(h+56,diskid,16);p64(h+72,entries);p32(h+80,128);p32(h+84,128);p32(h+88,ecrc);p32(h+16,crc32_more(0,h,92));}
 struct diskopt {const char *machine,*stage1,*stage2,*pbr,*bootzbsd,*kernel,*bootx64,*zedbsd_config,*arch,*data,*swap,*ufs_root,*output,*layout;int gpt,force,fragment_kernel,size_mib,fat_mib;};
 static void disk_create_variant(struct diskopt *o);
+static uint64_t parse_size_bytes(const char *text);
+static uint64_t native_copy_sparse(FILE *image, uint64_t offset, const char *path);
+static uint64_t native_input_sectors(const char *path);
+static uint64_t native_align(uint64_t sector);
+static void disk_create_native(struct diskopt *o);
 static void disk_create(struct diskopt *o){
     if(o->layout){disk_create_variant(o);return;}
     if(!o->machine||!o->stage1||!o->stage2||!o->pbr||!o->bootzbsd||!o->kernel||!o->output){fail("incomplete disk arguments");}
@@ -328,6 +392,314 @@ static void disk_create_uefi(struct diskopt *o){
     if(rename(temporary,o->output))die("publish compact UEFI disk image");
     free(kernel);free(bootx64);
 }
+/*
+ * The partition type of the native UFS root and of the raw swap partition.
+ *
+ * They are FreeBSD's UFS and swap types, in the mixed-endian order GPT
+ * stores a GUID in.  The kernel accepts any type; firmware and other
+ * systems' tools name these ones correctly.
+ */
+static const uint8_t native_root_type[16] = {
+	0xb6, 0x7c, 0x6e, 0x51, 0xcf, 0x6e, 0xd6, 0x11,
+	0x8f, 0xf8, 0x00, 0x02, 0x2d, 0x09, 0x71, 0x2b
+};
+static const uint8_t native_swap_type[16] = {
+	0xb5, 0x7c, 0x6e, 0x51, 0xcf, 0x6e, 0xd6, 0x11,
+	0x8f, 0xf8, 0x00, 0x02, 0x2d, 0x09, 0x71, 0x2b
+};
+
+/*
+ * Copies a whole file into the image at a byte offset, leaving holes.
+ *
+ * A root filesystem image is mostly free space, which is zero.  A chunk
+ * that is all zero is skipped rather than written, so the image stays as
+ * sparse as its input and a copy of it costs what its data costs.
+ */
+static uint64_t
+native_copy_sparse(
+	FILE *image,
+	uint64_t offset,
+	const char *path)
+{
+	static uint8_t chunk[1024U * 1024U];
+	FILE *input;
+	uint64_t copied;
+	size_t count;
+	size_t index;
+	int zero;
+	int error;
+
+	/* Opens the input. */
+	input = fopen(path, "rb");
+	if (input == NULL)
+		die(path);
+
+	/* Copies the input a chunk at a time. */
+	copied = 0;
+	for (;;) {
+		count = fread(chunk, 1, sizeof(chunk), input);
+		if (count == 0)
+			break;
+
+		/* Tests whether the chunk holds anything but zeros. */
+		zero = 1;
+		for (index = 0; index < count; index++) {
+			if (chunk[index] != 0) {
+				zero = 0;
+				break;
+			}
+		}
+
+		/* Writes a chunk with data; a zero chunk stays a hole. */
+		if (!zero)
+			seek_write(image, offset + copied, chunk, count);
+		copied += count;
+	}
+
+	/* Rejects a read error. */
+	error = ferror(input);
+	if (error != 0)
+		die(path);
+	error = fclose(input);
+	if (error != 0)
+		die(path);
+
+	/* Reports the bytes the input held. */
+	return copied;
+}
+
+/*
+ * Tests the size of a file, which must be a whole number of 512-byte sectors.
+ */
+static uint64_t
+native_input_sectors(
+	const char *path)
+{
+	struct stat status;
+	int error;
+
+	/* Reads the size. */
+	error = stat(path, &status);
+	if (error != 0)
+		die(path);
+
+	/* Rejects an empty input or one that ends inside a sector. */
+	if (status.st_size <= 0)
+		fail("empty native partition input");
+	if ((status.st_size % 512) != 0)
+		fail("native partition input is not whole sectors");
+
+	/* Reports the sector count. */
+	return (uint64_t)status.st_size / 512U;
+}
+
+/*
+ * Rounds a sector number up to the next 1 MiB boundary.
+ */
+static uint64_t
+native_align(
+	uint64_t sector)
+{
+	/* 2048 sectors of 512 bytes make one MiB. */
+	return (sector + 2047U) & ~(uint64_t)2047U;
+}
+
+/*
+ * Builds the amd64 UEFI native disk: a GPT with the EFI system partition,
+ * the UFS root partition and the swap partition.
+ *
+ * The ESP holds the UEFI loader, the kernel and zedbsd.cfg, which the
+ * loader finds on its own volume first.  The root partition is the given
+ * UFS image, mounted read-write through rootpart=; the swap partition is
+ * the given swap image, header and all, named by swap0=.  The partitions
+ * are labelled so that the configuration can name them with PARTLABEL=.
+ */
+static void
+disk_create_native(
+	struct diskopt *o)
+{
+	static const uint8_t esp_type[16] = {
+		0x28, 0x73, 0x2a, 0xc1, 0x1f, 0xf8, 0xd2, 0x11,
+		0xba, 0x4b, 0x00, 0xa0, 0xc9, 0x3e, 0xc9, 0x3b
+	};
+	uint8_t mbr[512];
+	uint8_t header[512];
+	uint8_t disk_guid[16];
+	uint8_t partition_guids[3][16];
+	uint8_t *entries;
+	char temporary[4096];
+	FILE *file;
+	uint64_t esp_start;
+	uint64_t esp_blocks;
+	uint64_t root_start;
+	uint64_t root_blocks;
+	uint64_t swap_start;
+	uint64_t swap_blocks;
+	uint64_t sectors;
+	uint64_t last;
+	uint32_t entry_crc;
+	uint32_t esp_serial;
+	uint64_t copied;
+	size_t index;
+	int descriptor;
+	int error;
+	int same;
+
+	/* Rejects a request that lacks an input the layout needs. */
+	if (o->machine == NULL)
+		fail("native disk layout requires machine pcat");
+	same = strcmp(o->machine, "pcat");
+	if (same != 0)
+		fail("native disk layout requires machine pcat");
+	if (o->kernel == NULL || o->bootx64 == NULL || o->zedbsd_config == NULL)
+		fail("native disk layout requires the kernel, BOOTX64.EFI and zedbsd.cfg");
+	if (o->ufs_root == NULL || o->swap == NULL || o->output == NULL)
+		fail("native disk layout requires the UFS root, the swap image and an output");
+
+	/* Rejects the overlay layout's inputs, which this layout does not use. */
+	if (o->arch != NULL || o->data != NULL || o->gpt || o->fragment_kernel)
+		fail("native disk layout received an overlay-layout option");
+
+	/* Places the ESP, then the root, then swap, each on a 1 MiB boundary. */
+	esp_start = 2048U;
+	esp_blocks = 64U * 2048U;
+	root_start = native_align(esp_start + esp_blocks);
+	root_blocks = native_input_sectors(o->ufs_root);
+	swap_start = native_align(root_start + root_blocks);
+	swap_blocks = native_input_sectors(o->swap);
+
+	/* Leaves room for the backup GPT after the last partition. */
+	sectors = native_align(swap_start + swap_blocks + 33U);
+	last = sectors - 1U;
+	if (sectors > (uint64_t)INT64_MAX / 512U)
+		fail("native disk image size overflow");
+
+	/* Creates the image file at its final size, all hole. */
+	snprintf(temporary, sizeof(temporary), "%s.tmp", o->output);
+	file = fopen(temporary, "wb+");
+	if (file == NULL)
+		die(temporary);
+	descriptor = fileno(file);
+	error = ftruncate(descriptor, (off_t)(sectors * 512U));
+	if (error != 0)
+		die("truncate native image");
+
+	/* Writes the protective MBR that covers the whole disk. */
+	memset(mbr, 0, sizeof(mbr));
+	mbr[0x1beU + 2U] = 2U;
+	mbr[0x1beU + 4U] = 0xeeU;
+	mbr[0x1beU + 5U] = 0xffU;
+	mbr[0x1beU + 6U] = 0xffU;
+	mbr[0x1beU + 7U] = 0xffU;
+	p32(mbr + 0x1beU + 8U, 1U);
+	if (last > UINT32_MAX)
+		p32(mbr + 0x1beU + 12U, UINT32_MAX);
+	else
+		p32(mbr + 0x1beU + 12U, (uint32_t)last);
+	mbr[510] = 0x55U;
+	mbr[511] = 0xaaU;
+	seek_write(file, 0, mbr, sizeof(mbr));
+
+	/* Chooses distinct GUIDs for the disk and each partition. */
+	random_guid(disk_guid);
+	for (index = 0; index < 3U; index++) {
+		for (;;) {
+			random_guid(partition_guids[index]);
+			same = memcmp(partition_guids[index], disk_guid, 16) == 0;
+			if (!same)
+				same = guid_matches_any(partition_guids[index], partition_guids[0], index);
+			if (!same)
+				break;
+		}
+	}
+
+	/* Describes the three partitions. */
+	entries = calloc(1, 128U * 128U);
+	if (entries == NULL)
+		die("calloc GPT entries");
+	gpt_entry(entries, esp_type, partition_guids[0], esp_start,
+	    esp_start + esp_blocks - 1U, "zedBSD EFI System");
+	gpt_entry(entries + 128U, native_root_type, partition_guids[1], root_start,
+	    root_start + root_blocks - 1U, "zedBSD-root");
+	gpt_entry(entries + 256U, native_swap_type, partition_guids[2], swap_start,
+	    swap_start + swap_blocks - 1U, "zedBSD-swap");
+	entry_crc = crc32_more(0, entries, 128U * 128U);
+
+	/* Writes the primary GPT after the MBR. */
+	gpt_header(header, 1U, last, 2U, 34U, last - 33U, disk_guid, entry_crc);
+	seek_write(file, 512U, header, sizeof(header));
+	seek_write(file, 1024U, entries, 128U * 128U);
+
+	/* Writes the backup GPT at the end of the disk. */
+	seek_write(file, (last - 32U) * 512U, entries, 128U * 128U);
+	gpt_header(header, last, 1U, last - 32U, 34U, last - 33U, disk_guid, entry_crc);
+	seek_write(file, last * 512U, header, sizeof(header));
+	free(entries);
+
+	/* Copies the root filesystem and the swap area into their partitions. */
+	copied = native_copy_sparse(file, root_start * 512U, o->ufs_root);
+	if (copied != root_blocks * 512U)
+		fail("native UFS root changed while it was copied");
+	copied = native_copy_sparse(file, swap_start * 512U, o->swap);
+	if (copied != swap_blocks * 512U)
+		fail("native swap image changed while it was copied");
+	error = fclose(file);
+	if (error != 0)
+		die("close native image before formatting");
+
+	/* Formats the ESP and puts the loader, the kernel and the configuration on it. */
+	esp_serial = random_serial();
+	shell_format_pcat(temporary, esp_start * 512U, esp_start, esp_blocks, 1, "ESP", esp_serial);
+	shell_mkdir(temporary, esp_start * 512U, "/EFI");
+	shell_mkdir(temporary, esp_start * 512U, "/EFI/BOOT");
+	shell_copy(temporary, esp_start * 512U, o->bootx64, "/EFI/BOOT/BOOTX64.EFI");
+	shell_copy(temporary, esp_start * 512U, o->kernel, "/vmunix");
+	shell_copy(temporary, esp_start * 512U, o->zedbsd_config, "/zedbsd.cfg");
+
+	/* Publishes the finished image. */
+	error = rename(temporary, o->output);
+	if (error != 0)
+		die("publish native disk image");
+}
+
+/*
+ * Parses a byte count that may carry an M suffix, meaning MiB.
+ *
+ * The Noct build scripts compute in 32-bit integers, so a size beyond
+ * 2 GiB reaches this program as a count of MiB instead.
+ */
+static uint64_t
+parse_size_bytes(
+	const char *text)
+{
+	char *copy;
+	size_t length;
+	uint64_t value;
+	int mebibytes;
+
+	/* Notes and strips a trailing M. */
+	length = strlen(text);
+	mebibytes = length != 0 && text[length - 1] == 'M';
+	copy = malloc(length + 1);
+	if (copy == NULL)
+		die("malloc");
+	memcpy(copy, text, length + 1);
+	if (mebibytes)
+		copy[length - 1] = '\0';
+
+	/* Parses the count and scales it. */
+	value = parse_u64(copy, "invalid UFS size");
+	free(copy);
+	if (mebibytes) {
+		if (value > UINT64_MAX / (1024U * 1024U))
+			fail("invalid UFS size");
+		value *= 1024U * 1024U;
+	}
+
+	/* Reports the size in bytes. */
+	return value;
+}
+
 static int stage1_loads_lba(const char *path,uint32_t expected){
     const size_t at=0x1a0U;size_t size;uint8_t *data;
     if(!path)return 0;
@@ -342,6 +714,14 @@ static int stage1_loads_lba(const char *path,uint32_t expected){
 }
 static void disk_create_variant(struct diskopt *o){
     const char *layout=o->layout;
+    int native;
+
+    /* The native layout takes its own inputs and checks them itself. */
+    native = strcmp(layout, "native") == 0;
+    if (native) {
+        disk_create_native(o);
+        return;
+    }
     if(!o->machine||strcmp(o->machine,"pcat"))
         fail("selected amd64 disk layout requires machine pcat");
     /* The payload partition holds everything the loader reads at boot, so
@@ -369,16 +749,31 @@ int main(int argc,char **argv)
 {
     uint64_t size;
     int profile;
+    int64_t journal_mib;
     if(argc>=2&&!strcmp(argv[1],"ufs")) {
-        if(argc!=5&&argc!=6)
-            fail("usage: zedimage-host ufs SIZE ROOT OUTPUT [--profile=journal-snapshot]");
-        profile=argc==6;
-        if(profile&&strcmp(argv[5],"--profile=journal-snapshot"))
-            fail("unsupported UFS profile");
-        size=parse_u64(argv[2],"invalid UFS size");
-        if(size>SIZE_MAX||size>UINT64_C(2147482624))
+        uint32_t least_inodes=0;
+        if(argc<5)
+            fail("usage: zedimage-host ufs SIZE ROOT OUTPUT [--profile=journal-snapshot] [--inodes=N] [--journal-size=MIB]");
+        profile=0;
+        journal_mib=-1;
+        for(int i=5;i<argc;i++) {
+            if(!strcmp(argv[i],"--profile=journal-snapshot"))
+                profile=1;
+            else if(!strncmp(argv[i],"--inodes=",9))
+                least_inodes=(uint32_t)parse_u64(argv[i]+9,"invalid UFS inode count");
+            else if(!strncmp(argv[i],"--journal-size=",15)) {
+                journal_mib=(int64_t)parse_u64(argv[i]+15,"invalid journal size");
+                if(journal_mib>1024)
+                    fail("journal size above 1024 MiB");
+            }
+            else
+                fail("unsupported UFS argument");
+        }
+        /* A size ending in M is in MiB: the build scripts' integers are 32-bit. */
+        size=parse_size_bytes(argv[2]);
+        if(size>SIZE_MAX||size>UFS_IMAGE_MAX_BYTES)
             fail("UFS image exceeds producer limit");
-        create_ufs(argv[3],argv[4],(size_t)size,profile);
+        create_ufs(argv[3],argv[4],(size_t)size,profile,least_inodes,journal_mib);
         return 0;
     }
     if(argc>=2&&!strcmp(argv[1],"disk")){parse_disk(argc,argv);return 0;}

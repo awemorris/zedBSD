@@ -1,7 +1,7 @@
 /* MC68030 exception, syscall, and autovector dispatch. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
 #include "exception.h"
 #include "frame-offsets.h"

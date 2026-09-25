@@ -3,15 +3,13 @@
 # WS027: PowerPC移植
 
 <!-- awesome-plan-current:start -->
-
 Status: planned
 Primary Milestone: MG008
 Related Milestones: MG003
 Objectives: O2, O4
-Focused Goal: fg009
-Parent: [Master](https://github.com/awemorris/zedBSD/issues/1)
-Queue: none
-
+Parent: [Master](../master.md)
+Queue: なし
+Resume point: p001〜p007 planned。OF/APM+FAT からの PPC 起動
 <!-- awesome-plan-current:end -->
 
 ## 単一の到達目標

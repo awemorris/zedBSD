@@ -58,11 +58,12 @@
 
 #include "vbt.h"
 #include "vbt-parse.h"
+#include <kern/kcrt.h>
 
 #include "../pci.h"
 #include "../trace.h"
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
 #include <kern/klog.h>
 #include <kern/kmem.h>
@@ -1004,7 +1005,7 @@ drv_i915_opregion_locate_vbt(
 		return EINVAL;
 
 	/* Starts the record empty. */
-	memset(out, 0, sizeof(*out));
+	kern_memset(out, 0, sizeof(*out));
 
 	/* Refuses a copy without the OpRegion signature. */
 	for (i = 0u; i < 16u; i++) {
@@ -1110,7 +1111,7 @@ drv_i915_vbt_zalloc(
 		world->vbt_arena_peak = world->vbt_arena_used;
 
 	/* Clears the piece. */
-	memset(memory, 0, need);
+	kern_memset(memory, 0, need);
 
 	/* Succeeded: the memory lives until the arena is released. */
 	return memory;
@@ -1295,8 +1296,8 @@ drv_i915_vbt_init(
 		return EBUSY;
 
 	/* Starts the result, the parser device and the counters empty. */
-	memset(v, 0, sizeof(*v));
-	memset(&world->vbt_i915, 0, sizeof(world->vbt_i915));
+	kern_memset(v, 0, sizeof(*v));
+	kern_memset(&world->vbt_i915, 0, sizeof(world->vbt_i915));
 	world->vbt_arena_used = 0u;
 	world->vbt_arena_peak = 0u;
 	world->vbt_alloc_failures = 0u;
@@ -1425,14 +1426,14 @@ drv_i915_vbt_init_panel(
 		return EINVAL;
 
 	/* Finds the child on the port. */
-	memset(out, 0, sizeof(*out));
+	kern_memset(out, 0, sizeof(*out));
 	devdata = i915_bios_encoder_data_lookup(&world->vbt_i915, (enum port)port);
 	if (devdata == NULL)
 		return ENODEV;
 
 	/* Starts the panel with its type not known yet (intel_panel_init_alloc()). */
 	panel = &world->i915_vbt_init_panel_panel;
-	memset(panel, 0, sizeof(*panel));
+	kern_memset(panel, 0, sizeof(*panel));
 	panel->vbt.panel_type = -1;
 	drm_edid.edid = (const struct edid *)edid128;
 
@@ -1529,7 +1530,7 @@ drv_i915_bios_is_valid_vbt(
 	}
 
 	/* The VBT header starts with "$VBT". */
-	compared = memcmp(vbt->signature, "$VBT", 4);
+	compared = kern_memcmp(vbt->signature, "$VBT", 4);
 	if (compared != 0) {
 		I915_VBT_DRM_DEBUG_DRIVER("VBT invalid signature\n");
 		return false;
@@ -2590,7 +2591,7 @@ i915_init_bdb_block(
 
 	/* Copies the block with its header. */
 	entry->section_id = section_id;
-	memcpy(entry->data, (const u8 *)block - 3, block_size + 3);
+	kern_memcpy(entry->data, (const u8 *)block - 3, block_size + 3);
 	i915_vbt_kfree(temp_block);
 	I915_VBT_DRM_DBG_KMS(&i915->drm, "Found BDB block %d (size %zu, min size %zu)\n",
 		section_id, block_size, min_size);
@@ -2882,7 +2883,7 @@ i915_pnpid_get_panel_type(
 		vbt_id = i915_get_lvds_pnp_id(data, ptrs, i);
 
 		/* full match? */
-		compared = memcmp(vbt_id, edid_id, sizeof(*vbt_id));
+		compared = kern_memcmp(vbt_id, edid_id, sizeof(*vbt_id));
 		if (compared == 0)
 			return i;
 
@@ -2891,7 +2892,7 @@ i915_pnpid_get_panel_type(
 		 * and the VBT entry does not specify a date.
 		 */
 		if (best < 0) {
-			compared = memcmp(vbt_id, &edid_id_nodate, sizeof(*vbt_id));
+			compared = kern_memcmp(vbt_id, &edid_id_nodate, sizeof(*vbt_id));
 			if (compared == 0)
 				best = i;
 		}
@@ -4513,7 +4514,7 @@ i915_parse_general_definitions(
 		 * data must depend on VBT version.
 		 */
 		devdata->i915 = i915;
-		memcpy(&devdata->child, child,
+		kern_memcpy(&devdata->child, child,
 		       min_t(size_t, defs->child_dev_size, sizeof(*child)));
 		i915_list_add_tail(&devdata->node, &i915->display.vbt.display_devices);
 	}

@@ -16,9 +16,9 @@
  */
 
 #include "kern/quota.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 #define QUOTA_DISK_VERSION 1U
 #define QUOTA_DISK_HEADER_SIZE 32U
@@ -46,7 +46,7 @@ quota_state_init(
 		return;
 
 	/* Starts with no records and quotas disabled. */
-	memset(state, 0, sizeof(*state));
+	kern_memset(state, 0, sizeof(*state));
 	(void)mutex_init(&state->lock, LOCK_RANK_DEVICE, "filesystem quota");
 	state->grace_seconds = QUOTA_DEFAULT_GRACE_SECONDS;
 }
@@ -174,7 +174,7 @@ quota_get(
 	if (record != NULL)
 		*result = *record;
 	else
-		memset(result, 0, sizeof(*result));
+		kern_memset(result, 0, sizeof(*result));
 	result->id = id;
 
 	mutex_unlock(&state->lock);
@@ -259,7 +259,7 @@ quota_reserve(
 	/* Rejects a missing state or charge. */
 	if (state == NULL || charge == NULL)
 		return EINVAL;
-	memset(charge, 0, sizeof(*charge));
+	kern_memset(charge, 0, sizeof(*charge));
 
 	/* Finds or creates both records and checks the enforced limits. */
 	mutex_lock(&state->lock);
@@ -410,7 +410,7 @@ quota_transfer_begin(
 	/* Rejects a missing state or transfer. */
 	if (state == NULL || transfer == NULL)
 		return EINVAL;
-	memset(transfer, 0, sizeof(*transfer));
+	kern_memset(transfer, 0, sizeof(*transfer));
 
 	/* A transfer to the same owner changes nothing. */
 	if (old_uid == new_uid && old_gid == new_gid)
@@ -673,8 +673,8 @@ quota_export_config(
 	}
 
 	/* Writes the header with the enforcement flags and grace period. */
-	memset(bytes, 0, needed);
-	memcpy(bytes, "ZQ01", 4);
+	kern_memset(bytes, 0, needed);
+	kern_memcpy(bytes, "ZQ01", 4);
 	quota_put32(bytes + 4, QUOTA_DISK_VERSION);
 	quota_put32(bytes + 8, (uint32_t)needed);
 	enabled = 0;
@@ -757,7 +757,7 @@ quota_import_config(
 	if (state == NULL ||
 	    buffer == NULL ||
 	    length < QUOTA_DISK_HEADER_SIZE ||
-	    memcmp(bytes, "ZQ01", 4) != 0 ||
+	    kern_memcmp(bytes, "ZQ01", 4) != 0 ||
 	    quota_get32(bytes + 4) != QUOTA_DISK_VERSION ||
 	    quota_get32(bytes + 8) != length ||
 	    quota_get32(bytes + 12) != quota_digest(bytes, length))
@@ -951,7 +951,7 @@ quota_find(
 	/* Creates the record when asked and a slot is free. */
 	if (!create || free_record == NULL)
 		return NULL;
-	memset(free_record, 0, sizeof(*free_record));
+	kern_memset(free_record, 0, sizeof(*free_record));
 	free_record->id = id;
 	free_record->present = 1;
 

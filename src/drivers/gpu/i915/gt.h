@@ -16,8 +16,8 @@
 #ifndef DRIVERS_GPU_I915_GT_H
 #define DRIVERS_GPU_I915_GT_H
 
-#include <drivers/dma.h>
-#include <drivers/pci.h>
+#include <drivers/generic/dma.h>
+#include <drivers/pci/pci.h>
 #include <kern/lock.h>
 #include <stdint.h>
 

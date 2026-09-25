@@ -18,56 +18,61 @@
 #include "kern/clock.h"
 #include "kern/sched.h"
 #include "kern/partition.h"
-#include <drivers/disklabel.h>
-#include "drivers/pcat-ide.h"
-#include "drivers/pci-pcat.h"
-#include "drivers/hid/ps2-8042.h"
+#include <drivers/disklabel/disklabel.h>
+#include "drivers/platform/pcat/pcat-ide.h"
+#include "drivers/pci/pci-pcat.h"
+#include "drivers/platform/pcat/ps2-8042.h"
+#include "drivers/platform/pcat/serial-mirror.h"
 #if CONFIG_DRIVER_PCI_UHCI
-#include "drivers/pci-uhci.h"
+#include "drivers/pci/pci-uhci.h"
 #endif
 #if CONFIG_DRIVER_PCI_EHCI
-#include "drivers/pci-ehci.h"
+#include "drivers/pci/pci-ehci.h"
 #endif
 #if CONFIG_DRIVER_PCI_XHCI
-#include "drivers/pci-xhci.h"
+#include "drivers/pci/pci-xhci.h"
 #endif
 #if CONFIG_DRIVER_PCI_NVME
-#include <drivers/pci-nvme.h>
+#include <drivers/pci/pci-nvme.h>
 #endif
 #if CONFIG_DRIVER_PCI_INTEL_AX211
-#include <drivers/pci-intel-ax211.h>
+#include <drivers/wifi/intel-ax211/pci-intel-ax211.h>
 #endif
 #if CONFIG_DRIVER_PCI_VENUS
-#include <drivers/venus.h>
+#include <drivers/pci/pci-venus.h>
 #endif
 #if CONFIG_DRIVER_PCI_I915
-#include <drivers/i915.h>
+#include <drivers/pci/pci-i915.h>
+#endif
+#if CONFIG_DRIVER_PCI_HDA
+#include <drivers/pci/pci-hda.h>
 #endif
 #if CONFIG_DRIVER_USB_STORAGE
-#include "drivers/usb-storage.h"
-#include <drivers/usb-uas.h>
+#include "drivers/usb/usb-storage.h"
+#include <drivers/usb/usb-uas.h>
 #endif
 #if CONFIG_DRIVER_USB_CDC_NCM
-#include <drivers/usb-cdc-ncm.h>
+#include <drivers/usb/usb-cdc-ncm.h>
 #endif
 #if CONFIG_DRIVER_USB_CDC_ECM
-#include <drivers/usb-cdc-ecm.h>
+#include <drivers/usb/usb-cdc-ecm.h>
 #endif
 #if CONFIG_DRIVER_USB_HID
-#include <drivers/usb-hid.h>
+#include <drivers/usb/usb-hid.h>
+#include <drivers/usb/usb-hub.h>
 #endif
 #if CONFIG_DRIVER_USB_RTL8822BU
-#include <drivers/usb-rtl8822bu.h>
+#include <drivers/usb/usb-rtl8822bu.h>
 #endif
-#include <drivers/pci.h>
-#include <drivers/usb.h>
+#include <drivers/pci/pci.h>
+#include <drivers/usb/usb.h>
 #if CONFIG_DRIVER_NE2000
-#include "drivers/pcat-ne2000.h"
+#include "drivers/isa/pcat-ne2000.h"
 #endif
 #if CONFIG_DRIVER_GRAPHICS_DEVICE
-#include "drivers/graphics/pcat.h"
+#include "drivers/platform/pcat/graphics/pcat.h"
 #endif
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
 #include "kern/klog.h"
 
@@ -88,12 +93,12 @@ void ws004_pci_msi_qemu_raise(void);
  */
 size_t
 kern_platform_init(
-	const struct boot_handoff *handoff,
-	struct boot_device *devices,
+	const struct kern_boot_handoff *handoff,
+	struct kern_boot_device *devices,
 	size_t capacity)
 {
 	struct disk *disk;
-	struct boot_device *device;
+	struct kern_boot_device *device;
 	size_t count;
 	unsigned slot;
 	unsigned i;
@@ -105,6 +110,9 @@ kern_platform_init(
 #endif
 #if CONFIG_DRIVER_PCI_I915
 	int i915_error;
+#endif
+#if CONFIG_DRIVER_PCI_HDA
+	int hda_error;
 #endif
 
 	count = 0;
@@ -157,6 +165,10 @@ kern_platform_init(
 	if (drv_usb_hid_driver_register() != 0)
 		kern_logf("usb: HID input driver registration failed\n");
 #endif
+#if CONFIG_DRIVER_USB_HUB
+	if (drv_usb_hub_driver_register() != 0)
+		kern_logf("usb: hub driver registration failed\n");
+#endif
 
 	/* Registers the PCI drivers: host controllers, NVMe, WLAN, graphics. */
 #if CONFIG_DRIVER_PCI_UHCI
@@ -177,16 +189,23 @@ kern_platform_init(
 #endif
 #if CONFIG_DRIVER_PCI_VENUS
 	/* Binds Venus through the same PCI lifecycle as other devices. */
-	venus_error = drv_venus_pci_driver_register();
+	venus_error = drv_pci_venus_driver_register();
 	if (venus_error != 0)
 		kern_logf("pci: Venus driver registration failed (%d)\n", venus_error);
 
 #endif
 #if CONFIG_DRIVER_PCI_I915
 	/* Binds the native Intel GPU through the same PCI lifecycle. */
-	i915_error = drv_i915_pci_driver_register();
+	i915_error = drv_pci_i915_driver_register();
 	if (i915_error != 0)
 		kern_logf("pci: i915 driver registration failed (%d)\n", i915_error);
+
+#endif
+#if CONFIG_DRIVER_PCI_HDA
+	/* Binds every HD Audio controller as an audio device. */
+	hda_error = drv_pci_hda_driver_register();
+	if (hda_error != 0)
+		kern_logf("pci: HD Audio driver registration failed (%d)\n", hda_error);
 
 #endif
 #if CONFIG_DRIVER_PCI_INTEL_AX211
@@ -259,7 +278,7 @@ kern_platform_init(
  */
 void
 kern_platform_refresh_devices(
-	const struct boot_device *d,
+	const struct kern_boot_device *d,
 	size_t n)
 {
 	uint64_t deadline;
@@ -333,6 +352,13 @@ kern_platform_input_init(
 	if (error != 0)
 		return error;
 
+	/*
+	 * Lets the serial console be typed at, now that the terminal above it
+	 * can take what arrives.  A build without the serial console leaves
+	 * this doing nothing.
+	 */
+	drv_pcat_serial_mirror_start_input();
+
 	/* Succeeded. */
 	return 0;
 }
@@ -342,7 +368,7 @@ kern_platform_input_init(
  */
 struct disk *
 kern_platform_block_device(
-	const struct boot_device *device)
+	const struct kern_boot_device *device)
 {
 	struct disk *disk;
 

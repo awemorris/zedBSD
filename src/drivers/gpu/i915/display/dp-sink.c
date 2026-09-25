@@ -71,7 +71,7 @@
 #include <kern/kmem.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
-#include <errno.h>
+#include <uapi/errno.h>
 #include "../mmio.h"
 #include "../sync.h"
 #include "../workqueue.h"
@@ -79,6 +79,7 @@
 #include "power.h"
 #include "state.h"
 #include "vbt-parse.h"
+#include <kern/kcrt.h>
 
 /* The retry interval of the AUX helpers, in microseconds. */
 #define AUX_RETRY_INTERVAL 500
@@ -662,7 +663,7 @@ drv_i915_edp_begin(
 		return -I915_EDP_EINVAL;
 
 	/* Starts from an empty result. */
-	memset(res, 0, sizeof(*res));
+	kern_memset(res, 0, sizeof(*res));
 
 	/* Only one eDP may be live. */
 	if (world->edp.live)
@@ -678,7 +679,7 @@ drv_i915_edp_begin(
 	 * Makes the eDP live on this environment; from here on the helpers of
 	 * the Linux text reach it, and the messages are counted afresh.
 	 */
-	memset(&world->edp, 0, sizeof(world->edp));
+	kern_memset(&world->edp, 0, sizeof(world->edp));
 	world->edp.live = 1;
 	world->edp.env = env;
 	world->dp_log_level = cfg->log_level;
@@ -723,13 +724,13 @@ drv_i915_edp_begin(
 		return rc;
 	}
 
-	memcpy(res->dpcd, intel_dp->dpcd, sizeof(res->dpcd));
+	kern_memcpy(res->dpcd, intel_dp->dpcd, sizeof(res->dpcd));
 	res->dpcd_ok = 1;
 
 	/* Reads the eDP display control capabilities; they are optional. */
 	n = i915_drm_dp_dpcd_read(&intel_dp->aux, DP_EDP_DPCD_REV, intel_dp->edp_dpcd, sizeof(intel_dp->edp_dpcd));
 	if (n == (long)sizeof(intel_dp->edp_dpcd)) {
-		memcpy(res->edp_dpcd, intel_dp->edp_dpcd, sizeof(res->edp_dpcd));
+		kern_memcpy(res->edp_dpcd, intel_dp->edp_dpcd, sizeof(res->edp_dpcd));
 		res->edp_dpcd_ok = 1;
 	}
 
@@ -1106,7 +1107,7 @@ drv_i915_drm_dp_aux_init(
  *
  * Every sleep the Linux text asks for is an ordinary, sleepable-context
  * sleep and goes to kern_usleep_range(): one absolute deadline computed at
- * entry, the 10 ms tick and a wait queue, the deadline checked again on
+ * entry, the kernel tick and a wait queue, the deadline checked again on
  * every wake, a late wake allowed.  No busy remainder is left: a 500 us
  * retry interval simply waits for the next tick.  The short counter-based
  * delay and the atomic register polls stay in drv_i915_wait_reg()'s fast
@@ -1248,7 +1249,7 @@ drv_i915_dp_kernel_bind(
 	struct i915_dp_env *env)
 {
 	/* Starts from an environment with no hooks and no bookkeeping. */
-	memset(env, 0, sizeof(*env));
+	kern_memset(env, 0, sizeof(*env));
 
 	/* The locks and the delayed work. */
 	drv_i915_dp_kernel_bind_sync(k, env);
@@ -1281,7 +1282,7 @@ drv_i915_edp_device_prepare(
 	struct i915_vbt_state *vbt)
 {
 	/* Starts from a device that has not begun. */
-	memset(dev, 0, sizeof(*dev));
+	kern_memset(dev, 0, sizeof(*dev));
 
 	/* Records what the eDP runs on. */
 	dev->k.mmio = mmio;
@@ -1753,7 +1754,7 @@ i915_drm_dp_dpcd_access(
 	int ret;
 
 	/* Describes the transaction. */
-	memset(&msg, 0, sizeof(msg));
+	kern_memset(&msg, 0, sizeof(msg));
 	msg.address = offset;
 	msg.request = request;
 	msg.buffer = buffer;
@@ -1914,14 +1915,14 @@ i915_drm_dp_read_extended_dpcd_caps(
 	}
 
 	/* Identical capabilities need no replacing. */
-	same = memcmp(dpcd, dpcd_ext, sizeof(dpcd_ext));
+	same = kern_memcmp(dpcd, dpcd_ext, sizeof(dpcd_ext));
 	if (same == 0)
 		return 0;
 
 	I915_DP_DRM_DBG_KMS(aux->drm_dev, "%s: Base DPCD: %*ph\n", aux->name, DP_RECEIVER_CAP_SIZE, dpcd);
 
 	/* Takes the extended capabilities. */
-	memcpy(dpcd, dpcd_ext, sizeof(dpcd_ext));
+	kern_memcpy(dpcd, dpcd_ext, sizeof(dpcd_ext));
 
 	/* Succeeded: dpcd holds the extended capabilities. */
 	return 0;
@@ -2286,7 +2287,7 @@ i915_drm_dp_i2c_xfer(
 	/* Limits the chunk size to what one AUX message carries. */
 	transfer_limit = I915_VBT_CLAMP(I915_DP_AUX_I2C_TRANSFER_SIZE, 1, DP_AUX_MAX_PAYLOAD_BYTES);
 
-	memset(&msg, 0, sizeof(msg));
+	kern_memset(&msg, 0, sizeof(msg));
 
 	/* Transfers every message. */
 	for (i = 0; i < (unsigned int)num; i++) {
@@ -2742,7 +2743,7 @@ i915_edp_cfg_from_panel(
 	int have_panel)
 {
 	/* Starts from an empty configuration. */
-	memset(cfg, 0, sizeof(*cfg));
+	kern_memset(cfg, 0, sizeof(*cfg));
 
 	/* The port and AUX channel the VBT names. */
 	cfg->port = enc->port;

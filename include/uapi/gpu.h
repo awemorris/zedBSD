@@ -15,7 +15,7 @@
 #define KERN_UAPI_GPU_H
 
 #include <stdint.h>
-#include <sys/ioctl.h>
+#include <uapi/ioctl.h>
 
 #define GPU_ABI_VERSION			1U
 #define GPU_CAP_RESOURCE		1U

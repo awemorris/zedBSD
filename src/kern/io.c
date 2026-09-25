@@ -21,12 +21,12 @@
 #include <kern/io-pool.h>
 #include <kern/atomic.h>
 #include <kern/io-stats.h>
-#include <string.h>
 #include "kern/atomic.h"
 #include "kern/io-stats.h"
 #include "kern/klog.h"
+#include <kern/kcrt.h>
 
-#define IO_POOL_MAX_BYTES (4U * 1024U * 1024U)
+#define IO_POOL_MAX_BYTES (64U * 1024U * 1024U)
 
 #define IO_POOL_MAX_LARGE (IO_POOL_MAX_BYTES / KERN_IO_BATCH_MAX)
 
@@ -189,7 +189,7 @@ io_pool_init(void)
 	}
 
 	resident_bytes = metadata.size;
-	hal_memset(metadata.vaddr, 0, metadata.size);
+	kern_memset(metadata.vaddr, 0, metadata.size);
 	large_slots = metadata.vaddr;
 	small_slots = large_slots + wanted_large;
 
@@ -305,7 +305,7 @@ io_pool_get_stats(
 	/* Reports an empty snapshot before the pool exists. */
 	if (stats == NULL)
 		return;
-	hal_memset(stats, 0, sizeof(*stats));
+	kern_memset(stats, 0, sizeof(*stats));
 	if (atomic_raw_load_acquire(&initialized) != 2U)
 		return;
 
@@ -338,7 +338,7 @@ io_scratch_alloc(
 	/* Rejects a missing output and empties it before any allocation. */
 	if (result == NULL)
 		return HAL_ERR_INVALID;
-	memset(result, 0, sizeof(*result));
+	kern_memset(result, 0, sizeof(*result));
 
 	/* Rounds the request up to whole pages, refusing an unusable size. */
 	page = hal_space_get_page_size(1);
@@ -347,7 +347,7 @@ io_scratch_alloc(
 	rounded = (size + page - 1U) / page * page;
 
 	/* Asks for contiguous physical memory of at least the rounded size. */
-	memset(&scratch, 0, sizeof(scratch));
+	kern_memset(&scratch, 0, sizeof(scratch));
 	scratch.physical.size = rounded;
 	error = hal_pmem_alloc(rounded, page, &scratch.physical.paddr);
 	if (error == HAL_OK &&
@@ -390,7 +390,7 @@ io_scratch_free(
 
 	/* Empties the description only once its region is really gone. */
 	if (error == HAL_OK)
-		memset(scratch, 0, sizeof(*scratch));
+		kern_memset(scratch, 0, sizeof(*scratch));
 
 	/* Reports why the release failed. */
 	if (error != 0)

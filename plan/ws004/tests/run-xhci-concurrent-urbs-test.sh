@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025/tests/prepare-driver-fragments.py"
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/tools/driver-fragments/prepare.py"
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 temporary_root=${TMPDIR:-"$root/build/q027-tmp"}
@@ -31,7 +31,7 @@ ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
 # shellcheck disable=SC2086
 $cc $common -fanalyzer -c "$fixture" -o "$work/xhci-concurrent-analyzer.o"
 
-xhci="$root/plan/ws025/temp/p031-driver-fragments/src/drivers/pci-xhci.c"
+xhci="$root/build/driver-fragments/src/drivers/pci-xhci.c"
 ehci="$root/src/drivers/pci/pci-ehci.c"
 uhci="$root/src/drivers/pci/pci-uhci.c"
 storage="$root/src/drivers/usb/usb-storage.c"

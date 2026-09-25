@@ -22,13 +22,13 @@
 #include "memory.h"
 #include "ggtt.h"
 #include "sync.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "intel/commands.h"
 #include "intel/gt-regs.h"
@@ -320,7 +320,7 @@ drv_i915_engine_verify_wa_submit(
 	if (verify->scratch[index] == NULL)
 		return i915_verify_wa_fail(verify, ENOMEM, "__vm_create_scratch_for_read");
 
-	memset(verify->scratch[index]->cpu, 0, I915_VWA_SCRATCH_BYTES);
+	kern_memset(verify->scratch[index]->cpu, 0, I915_VWA_SCRATCH_BYTES);
 
 	/* Binds the scratch page into the GGTT, where the stores address it. */
 	error = drv_i915_gt_ggtt_bind(gt_mem, verify->scratch[index]);
@@ -535,7 +535,7 @@ drv_i915_engines_verify_workarounds(
 		return EINVAL;
 
 	/* Starts from a verification that has reached no engine. */
-	memset(verify, 0, sizeof(*verify));
+	kern_memset(verify, 0, sizeof(*verify));
 
 	/* Verifies the engines one at a time, as intel_engine_verify_workarounds(engine, "load"). */
 	for (index = 0U; index < engines->n && index < (unsigned)I915_WA_ENGINES; index++) {

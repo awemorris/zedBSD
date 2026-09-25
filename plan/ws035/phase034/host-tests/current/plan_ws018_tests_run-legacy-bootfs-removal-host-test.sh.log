@@ -1,0 +1,2 @@
+grep: /home/awe/zedBSD-rpi4/src/kern/system-device.c: No such file or directory
+KA-T110: FAIL: /dev/system does not include the focused kernel metadata owner

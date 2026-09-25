@@ -25,14 +25,14 @@
 #include "kern/signal.h"
 #include "kern/lock.h"
 #include "kern/kmem.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
 
 #if SCHED_WAKE_LATENCY
 #include "kern/clock.h"
 #include "kern/klog.h"
-#include <string.h>
 
 /* Diagnostic: wake-to-run latency buckets (<0.1 ms, <1 ms, <5 ms, <12 ms, more), same CPU and cross CPU. */
 static struct {
@@ -102,10 +102,9 @@ sched_wake_latency_report(void)
 		    (unsigned long long)wake_latency.count[kind][3],
 		    (unsigned long long)wake_latency.count[kind][4]);
 	}
-	memset(&wake_latency, 0, sizeof(wake_latency));
+	kern_memset(&wake_latency, 0, sizeof(wake_latency));
 }
 #endif
-#include <string.h>
 
 #define SCHED_MIGRATING 0x00000001U
 #define SCHED_WAKE_PENDING 0x00000002U
@@ -114,10 +113,20 @@ sched_wake_latency_report(void)
 struct sched_cpu {
 	struct spinlock lock;
 	struct sched_queue run[SCHED_PRIOR_LEVELS];
+	/*
+	 * Threads woken to run before the thread they found running, in the
+	 * order they woke.  Each level is served before the run queue of the
+	 * same priority, so a preempted thread put back at the front of its
+	 * run queue waits behind every thread woken to preempt it.
+	 */
+	struct sched_queue woken[SCHED_PRIOR_LEVELS];
 	struct sched_queue sleep;
 	struct thread *idle;
 	struct thread *retired;
+	struct thread *current;   /* the thread running on this CPU */
 	unsigned need_resched;
+	unsigned preempt;         /* a wakeup asked to run before the current thread */
+	unsigned yield_due;       /* a quantum ended while preemption was held off */
 	unsigned online;
 	unsigned preempt_count;   /* kern_preempt_disable() nesting depth */
 };
@@ -127,6 +136,17 @@ static unsigned scheduler_cpu_count;
 static struct hal_cpu_mask scheduler_online_mask;
 static volatile uint64_t scheduler_ticks;
 static volatile unsigned scheduler_round_robin;
+
+/*
+ * The CPUs halted in their idle loop with nothing queued.
+ *
+ * A CPU sets its bit before it halts and clears it when it leaves the idle
+ * thread.  A CPU whose tick finds more runnable threads than it can run
+ * notifies one of these so that it steals, and a new thread goes to one
+ * when its creator's CPU already has work queued.  Read without a lock:
+ * a stale bit costs one notification that finds nothing to take.
+ */
+static struct hal_cpu_mask scheduler_idle_mask;
 
 static void send_itimer_signal(struct process *process, int signo);
 static struct sched_cpu *sched_cpu_state(hal_cpu_id_t cpu);
@@ -139,6 +159,18 @@ static int cpu_online(hal_cpu_id_t cpu);
 static hal_cpu_id_t choose_cpu(void);
 static void notify_cpu(hal_cpu_id_t cpu);
 static void switch_without_enqueue(void);
+static void queue_prepend(struct sched_queue *queue, struct thread *thread, unsigned kind);
+static void wake_enqueue_locked(struct sched_cpu *cpu, struct thread *thread);
+static int best_priority_locked(struct sched_cpu *cpu);
+static void sched_preempt(void);
+static int cpu_has_backlog(const struct sched_cpu *cpu);
+static hal_cpu_id_t choose_idle_cpu(hal_cpu_id_t except);
+static void idle_mask_set(hal_cpu_id_t cpu);
+static void idle_mask_clear(hal_cpu_id_t cpu);
+static void leave_idle(struct sched_cpu *cpu, const struct thread *current, hal_cpu_id_t id);
+static struct thread *take_stealable_locked(struct sched_cpu *victim);
+static int steal_runnable(hal_cpu_id_t self);
+static void retarget_migrating(struct thread *thread, struct sched_cpu *old_cpu, hal_cpu_id_t target);
 
 /*
  * Marks the current user thread as executing in the kernel for accounting.
@@ -193,27 +225,33 @@ void
 sched_init(
 	void)
 {
+	unsigned count;
 	unsigned cpu;
 
 	/* The scheduler starts on the boot thread. */
 	if (curthread == NULL || curthread != &thread0)
 		HAL_FATAL("scheduler before process0");
 
-	/* Allocates one state per CPU. */
-	scheduler_cpu_count = hal_cpu_count();
-	if (scheduler_cpu_count == 0 || scheduler_cpu_count > HAL_CPU_MAX)
+	/*
+	 * Allocates one state per CPU.  The count is published last: a timer
+	 * tick can already arrive here (sched_clock_cpu), and it must see
+	 * either no CPUs or every CPU's state.
+	 */
+	count = hal_cpu_count();
+	if (count == 0 || count > HAL_CPU_MAX)
 		HAL_FATAL("invalid scheduler CPU count");
-	scheduler_cpus = kern_calloc(scheduler_cpu_count,
-	    sizeof(*scheduler_cpus));
+	scheduler_cpus = kern_calloc(count, sizeof(*scheduler_cpus));
 	if (scheduler_cpus == NULL)
 		HAL_FATAL("scheduler allocation failed");
-	for (cpu = 0; cpu < scheduler_cpu_count; cpu++)
+	for (cpu = 0; cpu < count; cpu++)
 		spin_init(&scheduler_cpus[cpu].lock, LOCK_RANK_SCHEDULER,
 		    "scheduler CPU");
+	atomic_raw_store_release(&scheduler_cpu_count, count);
 
 	/* Brings the boot CPU online with thread0 idling on it. */
 	hal_cpu_mask_zero(&scheduler_online_mask);
 	scheduler_cpus[0].idle = &thread0;
+	scheduler_cpus[0].current = &thread0;
 	atomic_raw_store_release(&scheduler_cpus[0].online, 1U);
 	hal_cpu_mask_set(&scheduler_online_mask, 0);
 	thread0.state = THREAD_RUNNING;
@@ -232,6 +270,7 @@ sched_prepare_thread(
 {
 	hal_cpu_id_t cpu;
 	int error;
+	int usable;
 
 	/* Only a new thread with a task can be prepared. */
 	if (thread == NULL ||
@@ -239,8 +278,22 @@ sched_prepare_thread(
 	    thread->state != THREAD_NEW)
 		return EINVAL;
 
-	/* Picks an online CPU round-robin and transfers the task. */
-	cpu = choose_cpu();
+	/*
+	 * Places the thread where its creator runs when nothing waits there:
+	 * a child its parent waits for then runs on a warm cache without an
+	 * interrupt to another CPU.  With work already queued there an idle
+	 * CPU takes it, and failing that the round-robin choice does.
+	 */
+	cpu = hal_cpu_current();
+	usable = 0;
+	if (cpu < scheduler_cpu_count)
+		usable = cpu_online(cpu);
+	if (usable)
+		usable = !cpu_has_backlog(sched_cpu_state(cpu));
+	if (!usable)
+		cpu = choose_idle_cpu(HAL_CPU_MAX);
+	if (cpu == HAL_CPU_MAX)
+		cpu = choose_cpu();
 	if (cpu == HAL_CPU_MAX)
 		return EAGAIN;
 	error = hal_task_transfer(thread->task, cpu);
@@ -376,10 +429,7 @@ sched_wakeup(
 	thread->sched.woken_at = wake_latency_now();
 	thread->sched.woken_same_cpu = (id == hal_cpu_current());
 #endif
-	thread->sched.quantum = SCHED_QUANTUM_TICKS;
-	queue_append(&cpu->run[thread->sched.priority], thread,
-	    SCHED_QUEUE_RUN);
-	cpu->need_resched = 1;
+	wake_enqueue_locked(cpu, thread);
 
 	spin_unlock_irqrestore(&cpu->lock, irq);
 
@@ -451,14 +501,20 @@ void
 kern_preempt_disable(void)
 {
 	struct sched_cpu *cpu;
-	unsigned long irq;
+	bool enabled;
 
+	/* Names the CPU with interrupts off, so the caller cannot move. */
+	enabled = hal_irq_disable();
 	cpu = sched_cpu_state(hal_cpu_current());
-	if (cpu == NULL)
-		return;
-	irq = spin_lock_irqsave(&cpu->lock);
-	cpu->preempt_count++;
-	spin_unlock_irqrestore(&cpu->lock, irq);
+	if (cpu != NULL) {
+		spin_lock(&cpu->lock);
+		cpu->preempt_count++;
+		spin_unlock(&cpu->lock);
+	}
+
+	/* Restores the caller's interrupt state. */
+	if (enabled)
+		hal_irq_enable();
 }
 
 void
@@ -467,18 +523,36 @@ kern_preempt_enable(void)
 	struct sched_cpu *cpu;
 	unsigned long irq;
 	int yield = 0;
+	bool enabled;
 
+	/* Names the CPU with interrupts off, so the caller cannot move. */
+	enabled = hal_irq_disable();
 	cpu = sched_cpu_state(hal_cpu_current());
-	if (cpu == NULL)
+	if (cpu == NULL) {
+		if (enabled)
+			hal_irq_enable();
 		return;
+	}
+
+	/* Leaves one level, noting a switch that waited for the last one. */
 	irq = spin_lock_irqsave(&cpu->lock);
 	if (cpu->preempt_count > 0u)
 		cpu->preempt_count--;
-	if (cpu->preempt_count == 0u && cpu->need_resched != 0u)
+	if (cpu->preempt_count == 0u && cpu->yield_due != 0u) {
+		cpu->yield_due = 0;
 		yield = 1;
+	} else if (cpu->preempt_count == 0u && cpu->preempt != 0u) {
+		yield = 2;
+	}
 	spin_unlock_irqrestore(&cpu->lock, irq);
-	if (yield)
+	if (enabled)
+		hal_irq_enable();
+
+	/* A quantum that ended goes to the back; a wakeup that asked goes first. */
+	if (yield == 1)
 		sched_yield();
+	else if (yield == 2)
+		sched_preempt();
 }
 
 /* Test-only: read the current CPU's preempt nesting depth. */
@@ -486,15 +560,22 @@ unsigned
 sched_test_preempt_count(void)
 {
 	struct sched_cpu *cpu;
-	unsigned long irq;
 	unsigned n;
+	bool enabled;
 
+	/* Names the CPU with interrupts off, so the caller cannot move. */
+	enabled = hal_irq_disable();
+	n = 0u;
 	cpu = sched_cpu_state(hal_cpu_current());
-	if (cpu == NULL)
-		return 0u;
-	irq = spin_lock_irqsave(&cpu->lock);
-	n = cpu->preempt_count;
-	spin_unlock_irqrestore(&cpu->lock, irq);
+	if (cpu != NULL) {
+		spin_lock(&cpu->lock);
+		n = cpu->preempt_count;
+		spin_unlock(&cpu->lock);
+	}
+
+	/* Restores the caller's interrupt state. */
+	if (enabled)
+		hal_irq_enable();
 	return n;
 }
 
@@ -517,6 +598,9 @@ sched_yield(
 	ignored = spin_lock_irqsave(&cpu->lock);
 
 	(void)ignored;
+
+	/* An idle thread giving up the CPU takes the CPU off the idle mask. */
+	leave_idle(cpu, current, id);
 
 	/* Requeues a running non-idle thread behind its peers. */
 	if (current != NULL &&
@@ -546,16 +630,128 @@ sched_yield(
 	wake_latency_account(next);
 #endif
 	next->sched.last_cpu = id;
-	next->sched.quantum = SCHED_QUANTUM_TICKS;
+	if (next->sched.quantum == 0)
+		next->sched.quantum = SCHED_QUANTUM_TICKS;
+	cpu->current = next;
 	cpu->need_resched = 0;
+	cpu->preempt = 0;
 	spin_unlock(&cpu->lock);
 
 	/* Switches, then retires the thread that exited before us. */
 	if (next != current)
 		hal_task_context_switch(next->task);
-	complete_retired(cpu);
+
+	/*
+	 * Resumed, perhaps on another CPU which stole this thread: the CPU
+	 * state is taken afresh, and it is that CPU's retired thread which is
+	 * completed.
+	 */
+	complete_retired(sched_cpu_state(hal_cpu_current()));
 	if (enabled)
 		hal_irq_enable();
+}
+
+/*
+ * Switches to the thread a wakeup put at the front of the run queue.
+ *
+ * The running thread goes back to the front of its own run queue with
+ * the rest of its quantum, behind the woken queue of its priority, so a
+ * thread that keeps the CPU busy loses only the time the woken ones run
+ * and not its place among its peers.  If nothing of at least its priority
+ * is waiting, nothing changes.  The idle thread, or a thread no longer running, takes the
+ * ordinary yield.
+ */
+static void
+sched_preempt(
+	void)
+{
+	struct thread *current;
+	struct thread *next;
+	struct sched_cpu *cpu;
+	hal_cpu_id_t id;
+	unsigned long ignored;
+	int priority;
+	bool enabled;
+
+	/* Enters this CPU's run queue with interrupts disabled. */
+	enabled = hal_irq_disable();
+	current = curthread;
+	id = hal_cpu_current();
+	cpu = sched_cpu_state(id);
+	ignored = spin_lock_irqsave(&cpu->lock);
+
+	(void)ignored;
+	cpu->preempt = 0;
+
+	/* The idle thread and a thread on its way to sleep yield as usual. */
+	if (current == NULL ||
+	    current->state != THREAD_RUNNING ||
+	    (current->flags & THREAD_FLAG_IDLE) != 0) {
+		spin_unlock(&cpu->lock);
+		if (enabled)
+			hal_irq_enable();
+		sched_yield();
+		return;
+	}
+	if (current->sched.cpu != id)
+		HAL_FATAL("running thread on wrong scheduler CPU");
+
+	/* Keeps the CPU when nothing of at least its priority is waiting. */
+	next = NULL;
+	priority = best_priority_locked(cpu);
+	if (priority >= 0 && priority <= current->sched.priority)
+		next = pick_next_locked(cpu);
+	if (next == NULL) {
+		spin_unlock(&cpu->lock);
+		if (enabled)
+			hal_irq_enable();
+		return;
+	}
+
+	/* Puts the running thread back at the front with the rest of its quantum. */
+	current->state = THREAD_RUNNABLE;
+	queue_prepend(&cpu->run[current->sched.priority], current,
+	    SCHED_QUEUE_RUN);
+
+	next->state = THREAD_RUNNING;
+#if SCHED_WAKE_LATENCY
+	wake_latency_account(next);
+#endif
+	next->sched.last_cpu = id;
+	if (next->sched.quantum == 0)
+		next->sched.quantum = SCHED_QUANTUM_TICKS;
+	cpu->current = next;
+	cpu->need_resched = 0;
+	spin_unlock(&cpu->lock);
+
+	/* Switches, then retires the thread that exited before us. */
+	hal_task_context_switch(next->task);
+
+	/* Resumed, perhaps on another CPU: completes that CPU's retired thread. */
+	complete_retired(sched_cpu_state(hal_cpu_current()));
+	if (enabled)
+		hal_irq_enable();
+}
+
+/*
+ * Acts on a wakeup that asked to run before the current thread.
+ *
+ * The mark is read without the lock: a mark set just after the read is
+ * acted on at the next point or tick, and one read as set is checked
+ * again under the lock.
+ */
+void
+sched_preempt_point(
+	void)
+{
+	struct sched_cpu *cpu;
+
+	cpu = sched_cpu_state(hal_cpu_current());
+	if (cpu == NULL ||
+	    atomic_raw_load_acquire((volatile unsigned *)&cpu->preempt) == 0U ||
+	    cpu->preempt_count != 0u)
+		return;
+	sched_preempt();
 }
 
 /*
@@ -574,11 +770,11 @@ sched_exit_current(
 	hal_cpu_id_t id;
 	unsigned long ignored;
 
+	/* Names the CPU with interrupts off, so the caller cannot move. */
+	(void)hal_irq_disable();
 	current = curthread;
 	id = hal_cpu_current();
 	cpu = sched_cpu_state(id);
-
-	(void)hal_irq_disable();
 
 	/* Only a non-idle thread on its own CPU can exit. */
 	if (current == NULL ||
@@ -611,8 +807,11 @@ sched_exit_current(
 	wake_latency_account(next);
 #endif
 	next->sched.last_cpu = id;
-	next->sched.quantum = SCHED_QUANTUM_TICKS;
+	if (next->sched.quantum == 0)
+		next->sched.quantum = SCHED_QUANTUM_TICKS;
+	cpu->current = next;
 	cpu->need_resched = 0;
+	cpu->preempt = 0;
 	cpu->retired = current;
 	spin_unlock(&cpu->lock);
 
@@ -644,8 +843,12 @@ sched_clock_cpu(
 	uint64_t accounted_ticks;
 	unsigned expired_signals;
 	unsigned long irq;
+	hal_cpu_id_t helper;
 	int preempt;
+	int wanted;
 	int kernel;
+	int backlog;
+	int waiting;
 
 	expired_process = NULL;
 	accounted_process = NULL;
@@ -671,9 +874,7 @@ sched_clock_cpu(
 			queue_remove(&cpu->sleep, thread);
 			thread->state = THREAD_RUNNABLE;
 			thread->sched.wakeup_tick = 0;
-			queue_append(&cpu->run[thread->sched.priority], thread,
-			    SCHED_QUEUE_RUN);
-			cpu->need_resched = 1;
+			wake_enqueue_locked(cpu, thread);
 		}
 
 		thread = next;
@@ -722,10 +923,42 @@ sched_clock_cpu(
 	/* Honour kern_preempt_disable(): defer the switch while preemption is off. */
 	if (preempt && cpu->preempt_count != 0u) {
 		cpu->need_resched = 1;
+		cpu->yield_due = 1;
 		preempt = 0;
 	}
 
+	/*
+	 * A wakeup that asked to run first and was not acted on since (the
+	 * current thread has not been back to user mode) is acted on now.
+	 */
+	wanted = !preempt &&
+	    cpu->preempt != 0u &&
+	    cpu->preempt_count == 0u &&
+	    thread != NULL &&
+	    (thread->flags & THREAD_FLAG_IDLE) == 0;
+
+	/*
+	 * A busy CPU with threads still waiting behind the running one hands
+	 * one of them to an idle CPU, which steals it from the queue.  Once
+	 * a tick is soon enough: a thread placed here for a parent that
+	 * blocks at once is gone before the tick, and only a parent that
+	 * keeps running leaves its child waiting this long.
+	 */
+	backlog = 0;
+	if (thread != NULL && (thread->flags & THREAD_FLAG_IDLE) == 0) {
+		waiting = best_priority_locked(cpu);
+		if (waiting >= 0)
+			backlog = 1;
+	}
+
 	spin_unlock_irqrestore(&cpu->lock, irq);
+
+	/* Wakes one idle CPU to take a waiting thread. */
+	if (backlog) {
+		helper = choose_idle_cpu(id);
+		if (helper != HAL_CPU_MAX)
+			notify_cpu(helper);
+	}
 
 	/* Applies the CPU limit and sends the expired interval timer signals. */
 	if (accounted_process != NULL)
@@ -745,6 +978,8 @@ sched_clock_cpu(
 		process_itimer_real_tick_all();
 	if (preempt)
 		sched_yield();
+	else if (wanted)
+		sched_preempt();
 }
 
 /*
@@ -847,10 +1082,7 @@ sched_notify_task(
 		queue_remove_thread(cpu, thread);
 		thread->state = THREAD_RUNNABLE;
 		thread->sched.wakeup_tick = 0;
-		thread->sched.quantum = SCHED_QUANTUM_TICKS;
-		queue_append(&cpu->run[thread->sched.priority], thread,
-		    SCHED_QUEUE_RUN);
-		cpu->need_resched = 1;
+		wake_enqueue_locked(cpu, thread);
 		runnable = 1;
 	} else if (thread->state == THREAD_RUNNING ||
 	    thread->state == THREAD_RUNNABLE) {
@@ -1105,7 +1337,8 @@ sched_has_runnable(
 
 	for (priority = SCHED_PRIOR_HIGH; priority <= SCHED_PRIOR_LOW;
 	     priority++) {
-		if (cpu->run[priority].head != NULL) {
+		if (cpu->woken[priority].head != NULL ||
+		    cpu->run[priority].head != NULL) {
 			found = 1;
 			break;
 		}
@@ -1126,8 +1359,10 @@ sched_idle(
 {
 	struct thread *idle;
 	hal_cpu_id_t cpu;
+	int stolen;
 
 	idle = curthread;
+	stolen = 0;
 
 	/* Only the CPU's idle thread idles. */
 	cpu = hal_cpu_current();
@@ -1143,7 +1378,18 @@ sched_idle(
 			sched_switch();
 		if (curthread != idle)
 			HAL_FATAL("idle resumed on foreign task");
+
+		/* Takes waiting work from a busier CPU rather than halting. */
+		stolen = steal_runnable(cpu);
+		if (stolen) {
+			sched_switch();
+			continue;
+		}
+
+		/* Halts as a CPU that others may hand work to. */
+		idle_mask_set(cpu);
 		hal_cpu_idle();
+		idle_mask_clear(cpu);
 		sched_switch();
 	}
 }
@@ -1174,6 +1420,7 @@ sched_secondary_init(
 	if (cpu->idle != NULL || cpu->online)
 		HAL_FATAL("secondary scheduler initialized twice");
 	cpu->idle = idle;
+	cpu->current = idle;
 	atomic_raw_store_release(&cpu->online, 1U);
 	(void)atomic_u64_fetch_or_release(
 	    &scheduler_online_mask.bits[id / 64U],
@@ -1257,6 +1504,8 @@ sched_set_cpu(
 	}
 
 	old_kind = thread->sched.queue_kind;
+	if (old_kind == SCHED_QUEUE_WOKEN)
+		old_kind = SCHED_QUEUE_RUN;
 	queue_remove_thread(old_cpu, thread);
 	thread->sched.need_migrate = SCHED_MIGRATING;
 
@@ -1284,12 +1533,14 @@ sched_set_cpu(
 		return EIO;
 	}
 
+	/* Sends later wakers to the new CPU, under the lock they now take. */
+	retarget_migrating(thread, old_cpu, target);
+
 	/* Queues the thread on the new CPU, applying a pending wakeup. */
 	new_cpu = sched_cpu_state(target);
 	irq = spin_lock_irqsave(&new_cpu->lock);
 
 	pending = thread->sched.need_migrate & SCHED_WAKE_PENDING;
-	thread->sched.cpu = target;
 	thread->sched.last_cpu = old;
 	thread->sched.need_migrate = 0;
 	if (pending && thread->state == THREAD_SLEEPING)
@@ -1327,15 +1578,24 @@ sched_cpu_notify(
 	if (id != hal_cpu_current() || !cpu_online(id))
 		return;
 
-	/* Yields when a reschedule was requested. */
+	/*
+	 * A wakeup that asked to run first preempts; otherwise only the idle
+	 * thread gives way to new work.
+	 */
 	cpu = sched_cpu_state(id);
 	irq = spin_lock_irqsave(&cpu->lock);
 
-	runnable = cpu->need_resched != 0;
+	runnable = 0;
+	if (cpu->preempt != 0 && cpu->preempt_count == 0u)
+		runnable = 2;
+	else if (cpu->need_resched != 0 && cpu->current == cpu->idle)
+		runnable = 1;
 
 	spin_unlock_irqrestore(&cpu->lock, irq);
 
-	if (runnable)
+	if (runnable == 2)
+		sched_preempt();
+	else if (runnable == 1)
 		sched_yield();
 }
 
@@ -1380,7 +1640,7 @@ send_itimer_signal(
 	struct signal_info info;
 
 	/* Describes the signal as a timer notification. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	info.code = SI_TIMER;
 	(void)signal_send_process_info(process, signo, &info);
 }
@@ -1413,7 +1673,64 @@ queue_append(
 		queue->head = thread;
 	queue->tail = thread;
 	queue->count++;
+	thread->sched.queued_tick = atomic_u64_load_acquire(&scheduler_ticks);
 	thread->sched.queue_kind = kind;
+}
+
+/* Inserts a thread at the front of a queue. */
+static void
+queue_prepend(
+	struct sched_queue *queue,
+	struct thread *thread,
+	unsigned kind)
+{
+	thread->sched.prev = NULL;
+	thread->sched.next = queue->head;
+	if (queue->head != NULL)
+		queue->head->sched.prev = thread;
+	else
+		queue->tail = thread;
+	queue->head = thread;
+	queue->count++;
+	thread->sched.queued_tick = atomic_u64_load_acquire(&scheduler_ticks);
+	thread->sched.queue_kind = kind;
+}
+
+/*
+ * Queues a thread that a wakeup has just made runnable on its CPU.
+ *
+ * A thread of the same or a higher priority than the one running there
+ * joins the woken queue of its priority, served before its run queue, and
+ * marks the CPU for preemption, so it runs at the next safe point instead
+ * of after the running thread's quantum.  A lower one waits its turn at the back.  The quantum is not
+ * refilled: a thread that wakes and sleeps over and over still uses it up
+ * and then goes to the back behind threads that keep the CPU busy.  The
+ * CPU lock is held.
+ */
+static void
+wake_enqueue_locked(
+	struct sched_cpu *cpu,
+	struct thread *thread)
+{
+	struct thread *running;
+
+	/* A quantum used up while preemption was held off starts afresh. */
+	if (thread->sched.quantum == 0)
+		thread->sched.quantum = SCHED_QUANTUM_TICKS;
+
+	/* Places the thread by its priority against the running one. */
+	running = cpu->current;
+	if (running == NULL ||
+	    (running->flags & THREAD_FLAG_IDLE) != 0 ||
+	    thread->sched.priority <= running->sched.priority) {
+		queue_append(&cpu->woken[thread->sched.priority], thread,
+		    SCHED_QUEUE_WOKEN);
+		cpu->preempt = 1;
+	} else {
+		queue_append(&cpu->run[thread->sched.priority], thread,
+		    SCHED_QUEUE_RUN);
+	}
+	cpu->need_resched = 1;
 }
 
 /* Unlinks a thread from a queue. */
@@ -1447,6 +1764,8 @@ queue_remove_thread(
 {
 	if (thread->sched.queue_kind == SCHED_QUEUE_RUN)
 		queue_remove(&cpu->run[thread->sched.priority], thread);
+	else if (thread->sched.queue_kind == SCHED_QUEUE_WOKEN)
+		queue_remove(&cpu->woken[thread->sched.priority], thread);
 	else if (thread->sched.queue_kind == SCHED_QUEUE_SLEEP)
 		queue_remove(&cpu->sleep, thread);
 }
@@ -1462,6 +1781,11 @@ pick_next_locked(
 	/* Searches the run queues from the highest priority down. */
 	for (priority = SCHED_PRIOR_HIGH; priority <= SCHED_PRIOR_LOW;
 	     priority++) {
+		next = cpu->woken[priority].head;
+		if (next != NULL) {
+			queue_remove(&cpu->woken[priority], next);
+			return next;
+		}
 		next = cpu->run[priority].head;
 		if (next != NULL) {
 			queue_remove(&cpu->run[priority], next);
@@ -1471,6 +1795,24 @@ pick_next_locked(
 
 	/* Reports an empty CPU. */
 	return NULL;
+}
+
+/* Reports the highest priority with a runnable thread on a CPU, or -1. */
+static int
+best_priority_locked(
+	struct sched_cpu *cpu)
+{
+	int priority;
+
+	for (priority = SCHED_PRIOR_HIGH; priority <= SCHED_PRIOR_LOW;
+	     priority++) {
+		if (cpu->woken[priority].head != NULL ||
+		    cpu->run[priority].head != NULL)
+			return priority;
+	}
+
+	/* Nothing is runnable. */
+	return -1;
 }
 
 /* Retires the thread that exited on a CPU before the current one ran. */
@@ -1496,7 +1838,7 @@ cpu_online(
 	hal_cpu_id_t cpu)
 {
 	/* The CPU must exist and have published itself online. */
-	if (cpu >= scheduler_cpu_count)
+	if (cpu >= atomic_raw_load_acquire(&scheduler_cpu_count))
 		return 0;
 	if (atomic_raw_load_acquire(&scheduler_cpus[cpu].online) == 0)
 		return 0;
@@ -1553,7 +1895,10 @@ switch_without_enqueue(
 	struct sched_cpu *cpu;
 	hal_cpu_id_t id;
 	unsigned long irq;
+	bool enabled;
 
+	/* Names the CPU with interrupts off, so the caller cannot move. */
+	enabled = hal_irq_disable();
 	current = curthread;
 	id = hal_cpu_current();
 	cpu = sched_cpu_state(id);
@@ -1564,6 +1909,8 @@ switch_without_enqueue(
 	if (next == NULL) {
 		if (current != NULL && current->state == THREAD_RUNNING) {
 			spin_unlock_irqrestore(&cpu->lock, irq);
+			if (enabled)
+				hal_irq_enable();
 			return;
 		}
 
@@ -1572,18 +1919,276 @@ switch_without_enqueue(
 			HAL_FATAL("scheduler CPU has no idle thread");
 	}
 
+	/* An idle thread giving up the CPU takes the CPU off the idle mask. */
+	leave_idle(cpu, current, id);
+
 	next->state = THREAD_RUNNING;
 #if SCHED_WAKE_LATENCY
 	wake_latency_account(next);
 #endif
 	next->sched.last_cpu = id;
-	next->sched.quantum = SCHED_QUANTUM_TICKS;
+	if (next->sched.quantum == 0)
+		next->sched.quantum = SCHED_QUANTUM_TICKS;
+	cpu->current = next;
 	cpu->need_resched = 0;
+	cpu->preempt = 0;
 
 	spin_unlock_irqrestore(&cpu->lock, irq);
 
 	/* Switches, then retires the thread that exited before us. */
 	if (next != current)
 		hal_task_context_switch(next->task);
-	complete_retired(cpu);
+
+	/* Resumed, perhaps on another CPU: completes that CPU's retired thread. */
+	complete_retired(sched_cpu_state(hal_cpu_current()));
+
+	/* Restores the caller's interrupt state. */
+	if (enabled)
+		hal_irq_enable();
+}
+
+/* Tests, without the lock, whether a CPU has a thread queued to run. */
+static int
+cpu_has_backlog(
+	const struct sched_cpu *cpu)
+{
+	int priority;
+
+	/* Any non-empty run or woken queue is a backlog. */
+	for (priority = SCHED_PRIOR_HIGH; priority <= SCHED_PRIOR_LOW;
+	     priority++) {
+		if (cpu->woken[priority].head != NULL)
+			return 1;
+		if (cpu->run[priority].head != NULL)
+			return 1;
+	}
+
+	/* Nothing waits on the CPU. */
+	return 0;
+}
+
+/* Picks a halted idle CPU other than the given one, or HAL_CPU_MAX. */
+static hal_cpu_id_t
+choose_idle_cpu(
+	hal_cpu_id_t except)
+{
+	uint64_t word;
+	unsigned index;
+	unsigned bit;
+	hal_cpu_id_t cpu;
+
+	/* Takes the first idle CPU in the mask that is not excluded. */
+	for (index = 0; index < HAL_CPU_MASK_WORDS; index++) {
+		word = atomic_u64_load_acquire(&scheduler_idle_mask.bits[index]);
+		while (word != 0) {
+			bit = (unsigned)__builtin_ctzll(word);
+			word &= word - 1U;
+			cpu = (hal_cpu_id_t)(index * 64U + bit);
+			if (cpu == except || cpu >= scheduler_cpu_count)
+				continue;
+			return cpu;
+		}
+	}
+
+	/* No CPU is idle. */
+	return HAL_CPU_MAX;
+}
+
+/* Publishes that a CPU is about to halt with nothing to run. */
+static void
+idle_mask_set(
+	hal_cpu_id_t cpu)
+{
+	(void)atomic_u64_fetch_or_release(
+	    &scheduler_idle_mask.bits[cpu / 64U],
+	    (uint64_t)1U << (cpu % 64U));
+}
+
+/* Withdraws a CPU from the idle mask. */
+static void
+idle_mask_clear(
+	hal_cpu_id_t cpu)
+{
+	(void)__atomic_fetch_and(
+	    &scheduler_idle_mask.bits[cpu / 64U],
+	    ~((uint64_t)1U << (cpu % 64U)),
+	    __ATOMIC_RELEASE);
+}
+
+/*
+ * Withdraws a CPU from the idle mask when its idle thread gives up the CPU.
+ *
+ * A notification that arrives while the idle thread halts may switch away
+ * from inside the interrupt, before sched_idle() clears the bit itself;
+ * clearing it here keeps the mask from naming a CPU that is busy.
+ */
+static void
+leave_idle(
+	struct sched_cpu *cpu,
+	const struct thread *current,
+	hal_cpu_id_t id)
+{
+	/* Only the idle thread's departure changes the mask. */
+	if (current == NULL || current != cpu->idle)
+		return;
+
+	/* The CPU is busy from here on, whatever sched_idle() has not yet cleared. */
+	idle_mask_clear(id);
+}
+
+/*
+ * Takes one queued thread off a CPU for another CPU to run; the caller
+ * holds the victim's lock.
+ *
+ * The thread leaves the queue marked as migrating, as sched_set_cpu()
+ * marks one, so a wakeup or an explicit migration meanwhile sees it in
+ * transit.  The thread that would run next on the victim is taken first.
+ */
+static struct thread *
+take_stealable_locked(
+	struct sched_cpu *victim)
+{
+	struct thread *thread;
+	uint64_t now;
+	int priority;
+
+	/* Searches the queues from the highest priority down. */
+	for (priority = SCHED_PRIOR_HIGH; priority <= SCHED_PRIOR_LOW;
+	     priority++) {
+		thread = victim->woken[priority].head;
+		if (thread == NULL)
+			thread = victim->run[priority].head;
+		if (thread == NULL)
+			continue;
+
+		/* Leaves a thread already in transit or not simply runnable. */
+		if (thread->sched.need_migrate != 0 ||
+		    thread->state != THREAD_RUNNABLE ||
+		    thread->task == NULL ||
+		    (thread->flags & THREAD_FLAG_IDLE) != 0)
+			continue;
+
+		/*
+		 * Leaves a thread queued during this tick where it is.  A child
+		 * placed beside a parent that is about to wait runs there on a
+		 * warm cache within the tick; taking it would move the child
+		 * and leave the parent's CPU to halt and be woken again.  A
+		 * thread still queued at the next tick has waited long enough.
+		 */
+		now = atomic_u64_load_acquire(&scheduler_ticks);
+		if (thread->sched.queued_tick >= now)
+			continue;
+
+		/* Takes the thread out of the queue as a migrating one. */
+		queue_remove_thread(victim, thread);
+		thread->sched.need_migrate = SCHED_MIGRATING;
+		return thread;
+	}
+
+	/* Nothing on the CPU can be taken. */
+	return NULL;
+}
+
+/*
+ * Names a migrating thread's new CPU where its wakers look for it.
+ *
+ * A waker locks the CPU the thread names and marks a migrating thread's
+ * wakeup pending under that lock.  The name changes under the old CPU's
+ * lock, so every waker holding it has finished, and every later one
+ * re-reads the name and takes the new CPU's lock: the migration then ends
+ * under that lock without racing a waker's update of the migration word.
+ */
+static void
+retarget_migrating(
+	struct thread *thread,
+	struct sched_cpu *old_cpu,
+	hal_cpu_id_t target)
+{
+	unsigned long irq;
+
+	/* Publishes the new CPU while no waker holds the old one's lock. */
+	irq = spin_lock_irqsave(&old_cpu->lock);
+	atomic_raw_store_release((volatile unsigned *)&thread->sched.cpu,
+	    (unsigned)target);
+	spin_unlock_irqrestore(&old_cpu->lock, irq);
+}
+
+/*
+ * Moves one runnable thread from a busier CPU to this idle one.
+ *
+ * The HAL refuses a task whose stack is still being left on its old CPU,
+ * so a thread that has only just been descheduled goes back where it was.
+ */
+static int
+steal_runnable(
+	hal_cpu_id_t self)
+{
+	struct sched_cpu *mine;
+	struct sched_cpu *victim;
+	struct thread *thread;
+	unsigned offset;
+	hal_cpu_id_t id;
+	unsigned long irq;
+	int error;
+	int online;
+	int backlog;
+
+	/* Visits the other online CPUs, starting after this one. */
+	mine = sched_cpu_state(self);
+	thread = NULL;
+	victim = NULL;
+	for (offset = 1;
+	     offset < scheduler_cpu_count && thread == NULL;
+	     offset++) {
+		id = (hal_cpu_id_t)((self + offset) % scheduler_cpu_count);
+		online = cpu_online(id);
+		if (!online)
+			continue;
+
+		/* Skips a CPU with nothing queued, without taking its lock. */
+		victim = sched_cpu_state(id);
+		backlog = cpu_has_backlog(victim);
+		if (!backlog)
+			continue;
+
+		/* Takes a queued thread off the victim as a migrating one. */
+		irq = spin_lock_irqsave(&victim->lock);
+		thread = take_stealable_locked(victim);
+		spin_unlock_irqrestore(&victim->lock, irq);
+
+		/* Tries the next CPU when this one had nothing to give. */
+		if (thread == NULL)
+			continue;
+
+		/* Moves the task here; a refusal puts the thread back where it was. */
+		error = hal_task_transfer(thread->task, self);
+		if (error != HAL_OK) {
+			irq = spin_lock_irqsave(&victim->lock);
+			thread->sched.need_migrate = 0;
+			queue_append(&victim->run[thread->sched.priority], thread,
+			    SCHED_QUEUE_RUN);
+			victim->need_resched = 1;
+			spin_unlock_irqrestore(&victim->lock, irq);
+			thread = NULL;
+		}
+	}
+
+	/* Reports that no CPU had a thread to give. */
+	if (thread == NULL)
+		return 0;
+
+	/* Sends later wakers to this CPU, under the lock they now take. */
+	retarget_migrating(thread, victim, self);
+
+	/* Queues the thread on this CPU, ending its migration. */
+	irq = spin_lock_irqsave(&mine->lock);
+	thread->sched.last_cpu = id;
+	thread->sched.need_migrate = 0;
+	queue_append(&mine->run[thread->sched.priority], thread,
+	    SCHED_QUEUE_RUN);
+	mine->need_resched = 1;
+	spin_unlock_irqrestore(&mine->lock, irq);
+
+	/* Succeeded: this CPU has work to run. */
+	return 1;
 }

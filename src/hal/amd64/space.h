@@ -48,6 +48,7 @@ uintptr_t amd64_direct_to_phys(const void *address);
 void *amd64_device_vaddr(hal_physaddr_t physical);
 int amd64_device_map(hal_physaddr_t physical, size_t size, void **vaddr);
 void *amd64_phys_to_direct(uintptr_t address);
+int amd64_direct_covers(uint64_t base, uint64_t end);
 uintptr_t amd64_system_cr3(void);
 void amd64_tlb_interrupt(void);
 

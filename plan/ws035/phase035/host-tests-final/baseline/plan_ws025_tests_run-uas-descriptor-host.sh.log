@@ -1,0 +1,2 @@
+plan/ws025/tests/run-uas-descriptor-host.sh: 4: Bad substitution
+mktemp: failed to create directory via template '//plan/ws025/temp/uas-descriptor.XXXXXX': No such file or directory

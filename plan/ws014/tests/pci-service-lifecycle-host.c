@@ -11,7 +11,7 @@
  * Exercises the production PCI service lifecycle without GPU hardware.
  */
 
-#include <drivers/pci.h>
+#include <drivers/pci/pci.h>
 #include <kern/kmem.h>
 #include <kern/klog.h>
 

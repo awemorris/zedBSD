@@ -10,19 +10,19 @@
  */
 
 #include "internal.h"
+#include <kern/kcrt.h>
 
-#include <drivers/gpu.h>
+#include <drivers/gpu/gpu.h>
 #include <uapi/gpu-allocation.h>
 #include <uapi/gpu-fence.h>
 #include <uapi/gpu-job.h>
-#include <drivers/venus.h>
+#include <drivers/pci/pci-venus.h>
 #include <kern/device-io.h>
 #include <kern/kmem.h>
 #include <kern/klog.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <limits.h>
-#include <string.h>
 
 #define VENUS_CAPABILITIES	(63U | GPU_CAP_DISPLAY | GPU_CAP_MAPPING | GPU_CAP_SHARE | GPU_CAP_NOTIFICATION | GPU_CAP_ALLOCATION_SHARE | GPU_CAP_FENCE | GPU_CAP_DISPLAY_EVENTS | GPU_CAP_JOB | GPU_CAP_JOB_CAPACITY)
 
@@ -92,7 +92,7 @@ drv_venus_resource_request_locked(
  * Registers the Venus PCI backend for modern virtio GPU devices.
  */
 int
-drv_venus_pci_driver_register(void)
+drv_pci_venus_driver_register(void)
 {
 	static const struct drv_pci_id identifiers[] = {
 		{ 0x1af4U, 0x1050U, 0xffffU, 0xffffU, 0U, 0U, 0U }
@@ -143,7 +143,7 @@ drv_venus_storage_create_locked(
 	}
 
 	/* Neither userspace nor the display may observe uninitialized pixels. */
-	memset(resource->backing.address, 0, (size_t)bytes);
+	kern_memset(resource->backing.address, 0, (size_t)bytes);
 	*result = resource;
 
 	/* Succeeded: the caller owns a fully initialized resource. */
@@ -472,11 +472,11 @@ venus_open(
 	controller->next_context++;
 
 	/* Selects the Venus capset explicitly in the context initialization field. */
-	memset(command, 0, sizeof(command));
+	kern_memset(command, 0, sizeof(command));
 	drv_venus_header(command, 0x0200U, session->context);
 	drv_venus_store32(command + 24U, 8U);
 	drv_venus_store32(command + 28U, 4U);
-	memcpy(command + 32U, "zedvenus", 8U);
+	kern_memcpy(command + 32U, "zedvenus", 8U);
 	error = venus_control(controller, command, sizeof(command));
 	if (error != 0) {
 		mutex_unlock(&controller->mutex);
@@ -606,7 +606,7 @@ venus_get_info(
 	/* Limits describe the retained controller rather than the current renderer session. */
 	info->max_resources = UINT32_MAX;
 	info->max_resource_bytes = VENUS_MAX_RESOURCE_BYTES;
-	memcpy(info->driver_name, "venus", sizeof("venus"));
+	kern_memcpy(info->driver_name, "venus", sizeof("venus"));
 
 	/* Succeeded: the caller can select only the completion contract negotiated with this host. */
 	return 0;
@@ -728,7 +728,7 @@ venus_get_capset(
 		return EMSGSIZE;
 
 	/* Encodes the immutable capset identity and version. */
-	memset(command, 0, sizeof(command));
+	kern_memset(command, 0, sizeof(command));
 	drv_venus_header(command, 0x0109U, 0U);
 	drv_venus_store32(command + 24U, request->capset_id);
 	drv_venus_store32(command + 28U, request->capset_version);
@@ -757,7 +757,7 @@ venus_get_capset(
 
 	/* Copies only bytes covered by the caller's capacity and device reply. */
 	request->bytes = controller->transport.capset_size;
-	memcpy(request->data, response + VENUS_HEADER_BYTES, request->bytes);
+	kern_memcpy(request->data, response + VENUS_HEADER_BYTES, request->bytes);
 
 	/* Succeeded: userspace can check renderer protocol compatibility. */
 	return 0;
@@ -978,10 +978,10 @@ venus_command(
 		return ENOMEM;
 
 	/* Selects this session's renderer context and preserves opaque command bytes. */
-	memset(command, 0, 32U);
+	kern_memset(command, 0, 32U);
 	drv_venus_header(command, 0x0207U, session->context);
 	drv_venus_store32(command + 24U, bytes);
-	memcpy(command + 32U, buffer, bytes);
+	kern_memcpy(command + 32U, buffer, bytes);
 
 	/* Serializes the single request slot while allowing timer interrupts. */
 	mutex_lock(&controller->mutex);
@@ -1332,7 +1332,7 @@ venus_recover(
 	drv_venus_display_console_changed_locked(controller);
 
 	/* Fresh queue locks, descriptors and mappings never alias an old externally retained generation. */
-	memset(&controller->transport, 0, sizeof(controller->transport));
+	kern_memset(&controller->transport, 0, sizeof(controller->transport));
 	error = drv_venus_transport_start(&controller->transport, pci);
 	if (error != 0) {
 		drv_venus_transport_fail(&controller->transport, EIO);
@@ -1423,7 +1423,7 @@ venus_resource_map(
 	physical += resource->aperture_offset;
 
 	/* The retained page-rounded extent preserves the kernel alias cache policy. */
-	memset(mapping, 0, sizeof(*mapping));
+	kern_memset(mapping, 0, sizeof(*mapping));
 	mapping->physical = physical;
 	mapping->address = resource->mapping.address;
 	mapping->bytes = resource->aperture_bytes;
@@ -1480,7 +1480,7 @@ venus_resource_request(
 	int error;
 
 	/* Resource commands share one bounded identifier-and-padding payload. */
-	memset(command, 0, sizeof(command));
+	kern_memset(command, 0, sizeof(command));
 	drv_venus_header(command, command_type, context);
 	drv_venus_store32(command + 24U, identifier);
 
@@ -1618,7 +1618,7 @@ venus_resource_retire(
 	}
 
 	/* Blob views borrow the transport mapping and carry no independent unmap lease. */
-	memset(&resource->mapping, 0, sizeof(resource->mapping));
+	kern_memset(&resource->mapping, 0, sizeof(resource->mapping));
 
 	/* Finds the durable ownership record without trusting list position. */
 	link = &controller->resources;
@@ -1742,7 +1742,7 @@ venus_blob_initialize(
 	}
 
 	/* HOST3D blob zero creates reply shared memory; other IDs export Vulkan memory. */
-	memset(command, 0, sizeof(command));
+	kern_memset(command, 0, sizeof(command));
 	drv_venus_header(command, 0x010cU, resource->context);
 	drv_venus_store32(command + 24U, resource->identifier);
 	drv_venus_store32(command + 28U, 2U);
@@ -1769,7 +1769,7 @@ venus_blob_initialize(
 		return 0;
 
 	/* Maps the host allocation into its exclusively reserved aperture extent. */
-	memset(command, 0, 40U);
+	kern_memset(command, 0, 40U);
 	drv_venus_header(command, 0x0208U, resource->context);
 	drv_venus_store32(command + 24U, resource->identifier);
 	drv_venus_store64(command + 32U, resource->aperture_offset);
@@ -1826,7 +1826,7 @@ venus_scanout_disable(
 		return 0;
 
 	/* Resource zero requests a disabled scanout with an empty rectangle. */
-	memset(command, 0, sizeof(command));
+	kern_memset(command, 0, sizeof(command));
 	drv_venus_header(command, 0x0103U, 0U);
 	error = venus_control(controller, command, sizeof(command));
 	if (error != 0)
@@ -1888,7 +1888,7 @@ venus_storage_initialize(
 	}
 
 	/* Creates the host image without exposing unrelated user resource IDs. */
-	memset(command, 0, 40U);
+	kern_memset(command, 0, 40U);
 	drv_venus_header(command, 0x0101U, 0U);
 	drv_venus_store32(command + 24U, resource->identifier);
 	drv_venus_store32(command + 28U, format);
@@ -1905,7 +1905,7 @@ venus_storage_initialize(
 	resource->format = format;
 
 	/* Attaches one bounded guest DMA extent containing the copied pixel storage. */
-	memset(command, 0, sizeof(command));
+	kern_memset(command, 0, sizeof(command));
 	drv_venus_header(command, 0x0106U, 0U);
 	drv_venus_store32(command + 24U, resource->identifier);
 	drv_venus_store32(command + 28U, 1U);
@@ -1984,7 +1984,7 @@ venus_present_image(
 		return error;
 
 	/* Copies the requested guest-backed rectangle into the host image. */
-	memset(command, 0, sizeof(command));
+	kern_memset(command, 0, sizeof(command));
 	drv_venus_header(command, 0x0105U, 0U);
 	drv_venus_store32(command + 32U, request->width);
 	drv_venus_store32(command + 36U, request->height);
@@ -1996,7 +1996,7 @@ venus_present_image(
 		return error;
 
 	/* Selects the transferred visible rectangle on scanout zero. */
-	memset(command, 0, 48U);
+	kern_memset(command, 0, 48U);
 	drv_venus_header(command, 0x0103U, 0U);
 	drv_venus_store32(command + 32U, request->width);
 	drv_venus_store32(command + 36U, request->height);
@@ -2014,7 +2014,7 @@ venus_present_image(
 	drv_venus_display_console_changed_locked(controller);
 
 	/* Requests a display update of the newly selected complete rectangle. */
-	memset(command, 0, 48U);
+	kern_memset(command, 0, 48U);
 	drv_venus_header(command, 0x0104U, 0U);
 	drv_venus_store32(command + 32U, request->width);
 	drv_venus_store32(command + 36U, request->height);

@@ -1,0 +1,16 @@
+== build/p009-img
+cat-cat 2.139
+cat-dd4k 2.079
+dd4k-dd4k 1.238
+dd64k-dd64k 2.104
+cat-file 1.49
+zero-1m 0.024
+== build/p054-img
+cat-cat 1.209
+cat-dd4k 1.088
+dd4k-dd4k 0.268
+dd64k-dd64k 0.183
+cat-file 0.637
+zero-1m 0.079
+
+[exited with code 0]

@@ -1,0 +1,4 @@
+curl 8.22.0 (zedBSD) libcurl/8.22.0 OpenSSL/3.5.8 zlib/1.3.2
+Release-Date: 2026-09-02
+Protocols: dict file ftp ftps gopher gophers http https imap imaps ipfs ipns mqtt mqtts pop3 pop3s rtsp smtp smtps telnet tftp ws wss
+Features: AsynchDNS HSTS HTTPS-proxy IPv6 Largefile SSL UnixSockets alt-svc libz threadsafe

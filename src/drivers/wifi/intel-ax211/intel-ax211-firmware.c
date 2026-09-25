@@ -7,10 +7,10 @@
  */
 
 #include "intel-ax211-firmware.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <fcntl.h>
-#include <string.h>
+#include <uapi/errno.h>
+#include <uapi/fcntl.h>
 
 #include "kern/file.h"
 #include "kern/kmem.h"
@@ -178,8 +178,8 @@ ax211_sha256_init(
 		0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
 		0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U};
 
-	memset(context, 0, sizeof(*context));
-	memcpy(context->state, initial, sizeof(initial));
+	kern_memset(context, 0, sizeof(*context));
+	kern_memcpy(context->state, initial, sizeof(initial));
 }
 
 /* Supports the ax211 sha256 update operation. */
@@ -206,7 +206,7 @@ ax211_sha256_update(
 		available = sizeof(context->block) - context->used;
 		amount = remaining < available ? remaining : available;
 
-		memcpy(context->block + context->used, bytes, amount);
+		kern_memcpy(context->block + context->used, bytes, amount);
 		context->used += amount;
 		bytes += amount;
 		remaining -= amount;
@@ -235,13 +235,13 @@ ax211_sha256_final(
 
 	/* Handles the context condition. */
 	if (context->used > 56U) {
-		memset(context->block + context->used, 0,
+		kern_memset(context->block + context->used, 0,
 		       sizeof(context->block) - context->used);
 		ax211_sha256_transform(context, context->block);
 		context->used = 0U;
 	}
 
-	memset(context->block + context->used, 0, 56U - context->used);
+	kern_memset(context->block + context->used, 0, 56U - context->used);
 	/* Process each remaining element. */
 	for (index = 0; index < 8U; index++) {
 		context->block[63U - index] =
@@ -336,7 +336,7 @@ drv_intel_ax211_firmware_files_release(
 		return;
 	ax211_release_bytes(&files->ucode_bytes, INTEL_AX211_FIRMWARE_SIZE);
 	ax211_release_bytes(&files->pnvm_bytes, INTEL_AX211_PNVM_SIZE);
-	memset(files, 0, sizeof(*files));
+	kern_memset(files, 0, sizeof(*files));
 }
 
 /* Supports the ax211 files state operation. */
@@ -395,7 +395,7 @@ ax211_read_exact_file(
 	/* Handles the path availability. */
 	if (path == NULL || digest == NULL || bytes == NULL)
 		return EINVAL;
-	memset(&lease, 0, sizeof(lease));
+	kern_memset(&lease, 0, sizeof(lease));
 
 	/* Checks the operation status. */
 	error = file_openat(&kern_cwdinfo, path, O_RDONLY | O_NOFOLLOW, 0,
@@ -533,7 +533,7 @@ drv_intel_ax211_firmware_files_load(
 	error = ax211_files_state(files, &owned);
 	if (error != 0)
 		return error;
-	memset(&candidate, 0, sizeof(candidate));
+	kern_memset(&candidate, 0, sizeof(candidate));
 
 	/* Checks the operation status. */
 	error = ax211_read_exact_file(

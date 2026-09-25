@@ -17,10 +17,10 @@
 #include "kern/posix-acl.h"
 #include "kern/cred.h"
 #include "kern/inode.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
-#include <unistd.h>
+#include <uapi/errno.h>
+#include <uapi/unistd.h>
 
 static const struct posix_acl_entry *acl_entry(const struct posix_acl *acl, uint16_t tag);
 static unsigned requested_permissions(int requested);
@@ -226,7 +226,7 @@ posix_acl_load(
 		return EINVAL;
 
 	/* Reads the attribute into the fixed layout. */
-	memset(acl, 0, sizeof(*acl));
+	kern_memset(acl, 0, sizeof(*acl));
 	size = inode_getxattr(inode, name, acl, sizeof(*acl));
 	if (size < 0)
 		return (int)-size;

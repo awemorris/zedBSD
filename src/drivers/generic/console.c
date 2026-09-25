@@ -14,6 +14,7 @@
 #include "kern/kmem.h"
 #include "kern/lock.h"
 #include "kern/poll.h"
+#include <kern/kcrt.h>
 #ifndef KERN_INPUT_OWNERSHIP_TEST
 #include "kern/sched.h"
 #include "kern/thread.h"
@@ -23,10 +24,9 @@
 #include "kern/waitq.h"
 
 #include <uapi/console.h>
-#include <errno.h>
-#include <fcntl.h>
+#include <uapi/errno.h>
+#include <uapi/fcntl.h>
 #include "kern/text-display.h"
-#include <string.h>
 
 #define CONSOLE_WRITE_MAX 512U
 #define CONSOLE_DISPATCH_EVENTS 64U
@@ -235,7 +235,7 @@ console_source_active_key(
 		/* Process each remaining element. */
 		for (index = 0; index < CONSOLE_LOGICAL_KEYS; index++) {
 			/* Selects the matching value. */
-			if (strcmp(source->logical[index].symbol,
+			if (kern_strcmp(source->logical[index].symbol,
 				   item->symbol) == 0) {
 				active = &source->logical[index].key;
 				break;
@@ -249,7 +249,7 @@ console_source_active_key(
 
 		/* Handles the active availability. */
 		if (active == NULL && item->event.value != 0 && empty != NULL) {
-			memcpy(empty->symbol, item->symbol,
+			kern_memcpy(empty->symbol, item->symbol,
 			       sizeof(empty->symbol));
 			active = &empty->key;
 		}
@@ -274,7 +274,7 @@ console_source_active_key(
 			for (index = 0; index < CONSOLE_LOGICAL_KEYS; index++) {
 				/* Handles the source condition. */
 				if (&source->logical[index].key == active) {
-					memset(&source->logical[index], 0,
+					kern_memset(&source->logical[index], 0,
 					       sizeof(source->logical[index]));
 					break;
 				}
@@ -295,7 +295,7 @@ console_dispatch_enqueue(
 {
 	struct console_dispatch_event event;
 
-	memset(&event, 0, sizeof(event));
+	kern_memset(&event, 0, sizeof(event));
 	event.translated = translated;
 	event.device_id = device_id;
 	event.repeat = repeat;
@@ -350,7 +350,7 @@ console_input_subscriber(
 		/* Handles the source availability. */
 		source = console_source_find(report->device, 1);
 		if (source != NULL) {
-			memset(source, 0, sizeof(*source));
+			kern_memset(source, 0, sizeof(*source));
 			source->source = report->device;
 			drv_input_keymap_init(&source->keymap);
 			source->keymap.caps_lock =
@@ -379,9 +379,9 @@ console_input_subscriber(
 				    item_local->event.value != 1 ||
 				    item_local->symbol[0] == '\0')
 					continue;
-				memset(&key_event_local, 0,
+				kern_memset(&key_event_local, 0,
 				       sizeof(key_event_local));
-				memcpy(key_event_local.symbol,
+				kern_memcpy(key_event_local.symbol,
 				       item_local->symbol,
 				       sizeof(key_event_local.symbol));
 				key_event_local.flags = KERN_KEY_EVENT_PRESS;
@@ -430,9 +430,9 @@ console_input_subscriber(
 
 			/* Handles the item local1 condition. */
 			if (item_local1->symbol[0] != '\0') {
-				memset(&key_event_local2, 0,
+				kern_memset(&key_event_local2, 0,
 				       sizeof(key_event_local2));
-				memcpy(key_event_local2.symbol,
+				kern_memcpy(key_event_local2.symbol,
 				       item_local1->symbol,
 				       sizeof(key_event_local2.symbol));
 				key_event_local2.flags = item_local1->key_flags;
@@ -488,7 +488,7 @@ console_input_subscriber(
 
 	/* Handles the source availability. */
 	if ((report->flags & INPUT_REPORT_DETACH) != 0 && source != NULL)
-		memset(source, 0, sizeof(*source));
+		kern_memset(source, 0, sizeof(*source));
 
 	/* Handles the queued condition. */
 	if (queued)
@@ -508,7 +508,7 @@ drv_console_input_ownership_test_reset(
 	spin_init(&input_lock, LOCK_RANK_DEVICE, "console input test");
 	waitq_init(&dispatch_waitq, "console dispatch test");
 	dispatch_head = dispatch_tail = dispatch_used = 0;
-	memset(console_sources, 0, sizeof(console_sources));
+	kern_memset(console_sources, 0, sizeof(console_sources));
 }
 
 /*
@@ -1003,8 +1003,8 @@ drv_console_device_register(
 	spin_init(&input_lock, LOCK_RANK_DEVICE, "console input");
 	waitq_init(&dispatch_waitq, "console input dispatch");
 	dispatch_head = dispatch_tail = dispatch_used = 0;
-	memset(console_sources, 0, sizeof(console_sources));
-	memset(&console_subscription, 0, sizeof(console_subscription));
+	kern_memset(console_sources, 0, sizeof(console_sources));
+	kern_memset(&console_subscription, 0, sizeof(console_subscription));
 
 	/* Checks the operation status. */
 	error = tty_console_init();

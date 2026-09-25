@@ -12,7 +12,7 @@
 #define KERN_UAPI_BLKID_H
 
 #include <stdint.h>
-#include <sys/ioctl.h>
+#include <uapi/ioctl.h>
 
 #define KERN_BLKID_IOC_GROUP	'B'
 #define KERN_BLKID_TEXT_MAX	64U

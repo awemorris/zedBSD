@@ -15,8 +15,8 @@
 #include <kern/kmem.h>
 #include <kern/process.h>
 #include <kern/thread.h>
-#include <fcntl.h>
-#include <errno.h>
+#include <uapi/fcntl.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 
 /*

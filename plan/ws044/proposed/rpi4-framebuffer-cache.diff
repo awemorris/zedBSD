@@ -1,0 +1,59 @@
+diff --git a/src/hal/arm64/bsp-rpi4/framebuffer.c b/src/hal/arm64/bsp-rpi4/framebuffer.c
+index 6e4c8799..f53ba726 100644
+--- a/src/hal/arm64/bsp-rpi4/framebuffer.c
++++ b/src/hal/arm64/bsp-rpi4/framebuffer.c
+@@ -35,6 +35,28 @@ static void put_pixel(unsigned x,unsigned y,uint32_t value)
+ 	*p=value;
+ }
+ 
++/*
++ * Makes rows of pixels reach memory.  The framebuffer is written through
++ * the cacheable direct map, and the display reads memory past the CPU's
++ * caches, so a pixel that stays in the data cache is never shown.
++ */
++static void
++flush_rows(
++	unsigned x,
++	unsigned y,
++	unsigned columns,
++	unsigned rows)
++{
++	uintptr_t start;
++	unsigned line;
++
++	/* Each row's bytes, cleaned from the data cache to memory. */
++	for (line = 0; line < rows; line++) {
++		start = (uintptr_t)(pixels + (size_t)(y + line) * pitch + (size_t)x * 4U);
++		hal_dcache_clean_range(start, (size_t)columns * 4U);
++	}
++}
++
+ /*
+  * Paints one character cell: a glyph of the 8x16 console font in the
+  * attribute's foreground on its background.
+@@ -77,6 +99,9 @@ rpi4_framebuffer_cell(
+ 			put_pixel(x + bit, y + line, value);
+ 		}
+ 	}
++
++	/* The cell, out to the memory the display reads. */
++	flush_rows(x, y, 8U, RPI4_FONT_HEIGHT);
+ }
+ 
+ void rpi4_framebuffer_cursor(unsigned row,unsigned column,int visible)
+@@ -84,6 +109,7 @@ void rpi4_framebuffer_cursor(unsigned row,unsigned column,int visible)
+ 	if(!pixels||!visible||row>=25||column>=80)return;
+ 	for(unsigned y=14;y<16;y++)for(unsigned x=0;x<8;x++)
+ 		put_pixel(x_origin+column*8U+x,y_origin+row*16U+y,colour(15));
++	flush_rows(x_origin+column*8U,y_origin+row*16U+14U,8U,2U);
+ }
+ 
+ int rpi4_framebuffer_init(uintptr_t mailbox_phys)
+@@ -107,6 +133,7 @@ int rpi4_framebuffer_init(uintptr_t mailbox_phys)
+ 	x_origin=(width-640U)/2U;y_origin=(height-400U)/2U;
+ 	rpi4_boot_set_framebuffer(pixels_phys,pixels_size,width,height,pitch,order);
+ 	for(unsigned y=0;y<height;y++)for(unsigned x=0;x<width;x++)put_pixel(x,y,0);
++	hal_dcache_clean_range((uintptr_t)pixels,(size_t)pixels_size);
+ 	return 0;
+ #undef WORD
+ }

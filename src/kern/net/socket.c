@@ -24,10 +24,10 @@
 #include "kern/signal.h"
 #include "kern/syscall.h"
 #include "kern/thread.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <hal/hal.h>
-#include <string.h>
 
 #define SOCKET_FAMILY_MAX 32U
 
@@ -44,7 +44,7 @@ void
 socket_core_init(
 	void)
 {
-	memset(families, 0, sizeof(families));
+	kern_memset(families, 0, sizeof(families));
 	atomic_store_release(&socket_count, 0);
 	spin_init(&socket_registry_lock, LOCK_RANK_SOCKET_REGISTRY,
 	    "socket registry");
@@ -100,7 +100,7 @@ socket_init_object(
 	const struct socket_ops *ops)
 {
 	/* Starts open, referenced once, with the default buffer limits. */
-	memset(socket, 0, sizeof(*socket));
+	kern_memset(socket, 0, sizeof(*socket));
 	socket->family = family;
 	socket->type = type;
 	socket->protocol = protocol;
@@ -207,7 +207,7 @@ socket_setsockopt_common(
 	if (option == SO_REUSEADDR) {
 		if (value == NULL || length != sizeof(enabled))
 			return EINVAL;
-		memcpy(&enabled, value, sizeof(enabled));
+		kern_memcpy(&enabled, value, sizeof(enabled));
 		irq = spin_lock_irqsave(&socket->lock);
 		socket->reuse_address = enabled != 0;
 		spin_unlock_irqrestore(&socket->lock, irq);
@@ -221,7 +221,7 @@ socket_setsockopt_common(
 	if (option == SO_KEEPALIVE) {
 		if (value == NULL || length != sizeof(enabled))
 			return EINVAL;
-		memcpy(&enabled, value, sizeof(enabled));
+		kern_memcpy(&enabled, value, sizeof(enabled));
 		irq = spin_lock_irqsave(&socket->lock);
 		socket->keepalive = enabled != 0;
 		spin_unlock_irqrestore(&socket->lock, irq);
@@ -236,7 +236,7 @@ socket_setsockopt_common(
 	if (option == SO_SNDBUF || option == SO_RCVBUF) {
 		if (value == NULL || length != sizeof(requested))
 			return EINVAL;
-		memcpy(&requested, value, sizeof(requested));
+		kern_memcpy(&requested, value, sizeof(requested));
 		if (requested < (int)SOCKET_BUFFER_MIN ||
 		    requested > (int)SOCKET_BUFFER_MAX)
 			return EINVAL;
@@ -259,7 +259,7 @@ socket_setsockopt_common(
 		return ENOPROTOOPT;
 	if (value == NULL || length != sizeof(timeout))
 		return EINVAL;
-	memcpy(&timeout, value, sizeof(timeout));
+	kern_memcpy(&timeout, value, sizeof(timeout));
 	if (timeout.tv_sec < 0 ||
 	    timeout.tv_usec < 0 ||
 	    timeout.tv_usec >= 1000000)
@@ -315,7 +315,7 @@ socket_getsockopt_common(
 		if (value == NULL || length == NULL || *length < sizeof(error))
 			return EINVAL;
 		error = socket_take_error(socket);
-		memcpy(value, &error, sizeof(error));
+		kern_memcpy(value, &error, sizeof(error));
 		*length = sizeof(error);
 		return 0;
 	}
@@ -339,7 +339,7 @@ socket_getsockopt_common(
 			result = socket->protocol;
 		else
 			result = 0;
-		memcpy(value, &result, sizeof(result));
+		kern_memcpy(value, &result, sizeof(result));
 		*length = sizeof(result);
 		return 0;
 	}
@@ -354,7 +354,7 @@ socket_getsockopt_common(
 		else
 			enabled = socket->keepalive != 0;
 		spin_unlock_irqrestore(&socket->lock, irq);
-		memcpy(value, &enabled, sizeof(enabled));
+		kern_memcpy(value, &enabled, sizeof(enabled));
 		*length = sizeof(enabled);
 		return 0;
 	}
@@ -371,7 +371,7 @@ socket_getsockopt_common(
 		else
 			configured = (int)socket->receive_hiwat_bytes;
 		spin_unlock_irqrestore(&socket->lock, irq);
-		memcpy(value, &configured, sizeof(configured));
+		kern_memcpy(value, &configured, sizeof(configured));
 		*length = sizeof(configured);
 		return 0;
 	}
@@ -393,7 +393,7 @@ socket_getsockopt_common(
 	timeout.tv_sec = (time_t)(ticks / KERN_CLOCK_HZ);
 	timeout.tv_usec = (long)((ticks % KERN_CLOCK_HZ) *
 	    (1000000U / KERN_CLOCK_HZ));
-	memcpy(value, &timeout, sizeof(timeout));
+	kern_memcpy(value, &timeout, sizeof(timeout));
 	*length = sizeof(timeout);
 
 	/* Reports the read timeout. */
@@ -671,6 +671,60 @@ socket_enqueue_packet(
 
 	/* Reports the queued packet. */
 	return 0;
+}
+
+/*
+ * Queues stream data for receive, adding it to the last queued packet when
+ * it fits there.
+ *
+ * A stream has no boundaries to keep, and the packets come from one small
+ * pool the whole stack shares, so small segments are gathered into the room
+ * left at the end of the packet already waiting rather than each holding a
+ * packet of its own.  A packet that does not fit is queued as it is.  The
+ * packet is consumed either way; the result is that of the queueing.
+ */
+int
+socket_enqueue_stream(
+	struct socket *socket,
+	struct packet_buf *packet)
+{
+	struct packet_buf *tail;
+	unsigned long irq;
+	size_t room;
+
+	/* Rejects a missing socket or packet. */
+	if (socket == NULL || packet == NULL) {
+		packet_buf_free(packet);
+		return EINVAL;
+	}
+
+	/* Adds to the tail when it is open, unshared and has the room. */
+	irq = spin_lock_irqsave(&socket->lock);
+
+	tail = socket->receive_tail;
+	if (tail != NULL && socket->lifecycle == SOCKET_OPEN &&
+	    refcount_load(&tail->refcount) == 1U &&
+	    packet->length <= socket->receive_hiwat_bytes &&
+	    socket->receive_bytes <= socket->receive_hiwat_bytes - packet->length) {
+		room = tail->capacity - (size_t)(tail->data - tail->storage) -
+		    tail->length;
+		if (packet->length <= room) {
+			kern_memcpy(tail->data + tail->length, packet->data,
+			    packet->length);
+			tail->length += packet->length;
+			socket->receive_bytes += packet->length;
+			waitq_wake_one(&socket->receive_waitq);
+			spin_unlock_irqrestore(&socket->lock, irq);
+			packet_buf_free(packet);
+			poll_notify();
+			return 0;
+		}
+	}
+
+	spin_unlock_irqrestore(&socket->lock, irq);
+
+	/* Queues it as a packet of its own. */
+	return socket_enqueue_packet(socket, packet);
 }
 
 /*

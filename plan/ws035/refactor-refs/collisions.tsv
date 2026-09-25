@@ -1,0 +1,4 @@
+phase	kind	path	detail
+p023	shadow	include/net/if.h	<net/if.h> also exists as plan/ws033/tests/include/net/if.h (-Iplan/ws033/tests/include); -Iinclude is searched first
+p023	shadow	include/net/route.h	<net/route.h> also exists as plan/ws033/tests/include/net/route.h (-Iplan/ws033/tests/include); -Iinclude is searched first
+p004	name-beside	include/kern/boot/	include/kern/boot.h stays a file beside the new directory (legal; see refactor-map.md)

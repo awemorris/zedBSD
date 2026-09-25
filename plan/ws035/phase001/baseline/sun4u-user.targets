@@ -1,0 +1,10 @@
+build/ws035-p001/sun4u-user/bin/sh
+build/ws035-p001/sun4u-user/bin/sysctl
+build/ws035-p001/sun4u-user/dynamic/ld.so
+build/ws035-p001/sun4u-user/dynamic/libc.so
+build/ws035-p001/sun4u-user/dynamic/tlstest.so
+build/ws035-p001/sun4u-user/dynamic/dyntest
+build/ws035-p001/sun4u-user/dynamic/alt/rpathdep.so
+build/ws035-p001/sun4u-user/dynamic/rpathtest.so
+build/ws035-p001/sun4u-user/dynamic/verstest.so
+build/ws035-p001/sun4u-user/dynamic/versuse.so

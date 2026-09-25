@@ -19,7 +19,7 @@
  * prefix state to carry between interrupts.
  */
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
 

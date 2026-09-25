@@ -22,7 +22,7 @@
 
 #include <kern/device-io.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 
 static int i915_ggtt_encode(i915_dma_addr_t dma, uint64_t length, uint64_t mask, uint64_t flags, uint64_t *pte_out);

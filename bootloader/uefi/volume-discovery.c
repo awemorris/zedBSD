@@ -513,7 +513,7 @@ zbl_uefi_volume_selection_take(
 /* Copies the parsed hard-drive signature before firmware storage expires. */
 int
 zbl_uefi_partition_identity_copy(const struct zbl_uefi_partition_path *path,
-    struct boot_partition_identity *identity)
+    struct kern_boot_partition_identity *identity)
 {
 	size_t i;
 

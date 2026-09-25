@@ -20,12 +20,12 @@
 #include "kern/net/net-device.h"
 #include "kern/net/packet-buf.h"
 #include "kern/net/socket.h"
+#include <kern/kcrt.h>
 
 #include <uapi/route.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdbool.h>
-#include <string.h>
 
 #define NET_DEVICE_ALLOCATED 1U
 #define NET_DEVICE_LIVE      2U
@@ -81,8 +81,8 @@ net_device_registry_init(
 
 	/* Empties the registry and restarts its interface numbering. */
 	enabled = device_lock();
-	memset(devices, 0, sizeof(devices));
-	memset(device_used, 0, sizeof(device_used));
+	kern_memset(devices, 0, sizeof(devices));
+	kern_memset(device_used, 0, sizeof(device_used));
 	device_head = NULL;
 	live_count = 0;
 	next_ifindex = 1;
@@ -112,7 +112,7 @@ net_device_alloc(
 		if (device_used[index])
 			continue;
 		device_used[index] = 1;
-		memset(&devices[index], 0, sizeof(devices[index]));
+		kern_memset(&devices[index], 0, sizeof(devices[index]));
 		devices[index].state = NET_DEVICE_ALLOCATED;
 		refcount_init(&devices[index].refs, 1);
 		device = &devices[index];
@@ -135,6 +135,9 @@ net_device_create(
 	struct net_device **tail;
 	struct net_device *other;
 	bool enabled;
+	unsigned event_ifindex;
+	unsigned event_flags;
+	uint64_t event_generation;
 
 	/* Rejects an incomplete description. */
 	if (device == NULL ||
@@ -157,7 +160,7 @@ net_device_create(
 
 	/* The name must be unique and identifiers must remain. */
 	for (other = device_head; other != NULL; other = other->next) {
-		if (!strcmp(other->name, device->name)) {
+		if (!kern_strcmp(other->name, device->name)) {
 			device_unlock(enabled);
 			return EEXIST;
 		}
@@ -182,7 +185,19 @@ net_device_create(
 		tail = &(*tail)->next;
 	*tail = device;
 	live_count++;
+	event_ifindex = device->ifindex;
+	event_generation = device->generation;
+	event_flags = device->flags;
 	device_unlock(enabled);
+
+	/*
+	 * Announces the device.  Without this a daemon learns of an adapter
+	 * plugged in later only from its carrier, which a USB adapter does
+	 * not report until something has brought it up.
+	 */
+	if (route_socket_notify != NULL)
+		route_socket_notify(event_ifindex, event_generation, event_flags,
+		    RTM_IFINFO_ARRIVAL);
 
 	/* Reports the published device. */
 	return 0;
@@ -418,7 +433,7 @@ net_device_destroy(
 	struct device_finalizer finalizer;
 	bool enabled;
 
-	memset(&finalizer, 0, sizeof(finalizer));
+	kern_memset(&finalizer, 0, sizeof(finalizer));
 
 	/* Ignores a missing device. */
 	if (device == NULL)
@@ -465,7 +480,7 @@ net_device_find_ref(
 	/* Searches the live list under the lock. */
 	enabled = device_lock();
 	for (candidate = device_head; candidate != NULL; candidate = candidate->next) {
-		if (!strcmp(candidate->name, name)) {
+		if (!kern_strcmp(candidate->name, name)) {
 			refcount_get(&candidate->refs);
 			device = candidate;
 			break;
@@ -610,7 +625,7 @@ net_device_release(
 	struct device_finalizer finalizer;
 	bool enabled;
 
-	memset(&finalizer, 0, sizeof(finalizer));
+	kern_memset(&finalizer, 0, sizeof(finalizer));
 
 	/* Ignores a missing device. */
 	if (device == NULL)
@@ -1348,7 +1363,7 @@ device_finalize(
 			continue;
 		if (!device->reclaiming || refcount_load(&device->refs) != 0)
 			__builtin_trap();
-		memset(device, 0, sizeof(*device));
+		kern_memset(device, 0, sizeof(*device));
 		device_used[index] = 0;
 		break;
 	}
@@ -1489,7 +1504,7 @@ device_name_valid(
 		return 0;
 
 	/* The name must be terminated within the field and non-empty. */
-	length = strnlen(name, NET_DEVICE_NAME_MAX);
+	length = kern_strnlen(name, NET_DEVICE_NAME_MAX);
 	if (length == 0)
 		return 0;
 	if (length >= NET_DEVICE_NAME_MAX)

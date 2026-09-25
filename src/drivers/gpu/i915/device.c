@@ -25,10 +25,11 @@
 #include "sync.h"
 #include "worker.h"
 #include "display/display.h"
+#include <kern/kcrt.h>
 
-#include <drivers/dma.h>
-#include <drivers/i915.h>
-#include <drivers/pci.h>
+#include <drivers/generic/dma.h>
+#include <drivers/pci/pci-i915.h>
+#include <drivers/pci/pci.h>
 #include <hal/hal.h>
 #include <kern/clock.h>
 #include <kern/klog.h>
@@ -36,9 +37,8 @@
 #include <kern/sched.h>
 #include <kern/thread.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
 
 #include "intel/gt-regs.h"
 #include "intel/pci-ids.h"
@@ -879,7 +879,7 @@ i915_start_ggtt(
 		return EINVAL;
 
 	/* Zeroes the page and finds its DMA address. */
-	memset(scratch, 0, I915_GT_PAGE_BYTES);
+	kern_memset(scratch, 0, I915_GT_PAGE_BYTES);
 	device->stage = "scratch_segment";
 	error = drv_dma_vector_segment(gt->scratch, 0U, &segment);
 	if (error != 0)
@@ -1101,7 +1101,7 @@ i915_start_gt_awake(
 	gt = &device->gt;
 
 	/* Builds the workaround, whitelist, MOCS, RC6 and RPS tables. */
-	memset(&gt->init, 0, sizeof(gt->init));
+	kern_memset(&gt->init, 0, sizeof(gt->init));
 	drv_i915_gt_init_tables(&gt->init, &gt->info, 12, &gt->sb_lock, &gt->mmio);
 	kern_logf("i915: gt tables: gt_wa=%u mocs(uc_index=%u entries=%u) rps(rp0=%u rp1=%u min=%u eff=%u pcode=%d) rc6_supported=%d\n",
 	    gt->init.gt_wa.count,

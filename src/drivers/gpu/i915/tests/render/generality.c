@@ -43,6 +43,7 @@
  */
 
 #include "scenarios.h"
+#include <kern/kcrt.h>
 
 #include "../../compiler/compiler.h"
 #include "../../i915.h"
@@ -54,19 +55,18 @@
 #include "../../render/object.h"
 #include "../../render/render.h"
 
-#include <drivers/gpu.h>
+#include <drivers/gpu/gpu.h>
 #include <kern/clock.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
 
-#include <vulkan/vulkan_core.h>
+#include <libc/vulkan/vulkan_core.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 /* The side of the square target, in pixels. */
 #define I915_VKE2_SIZE			64U
@@ -334,7 +334,7 @@ i915_vke2_thread(
 
 	/* Opens the session and makes every object the steps use. */
 	x = &i915_vke2_state;
-	memset(x, 0, sizeof(*x));
+	kern_memset(x, 0, sizeof(*x));
 	x->device = device;
 	error = i915_vke2_setup(x);
 	if (error != 0) {
@@ -694,7 +694,7 @@ i915_vke2_pipeline_init(
 	uint32_t index;
 
 	/* The two stages. */
-	memset(pipeline, 0, sizeof(*pipeline));
+	kern_memset(pipeline, 0, sizeof(*pipeline));
 	pipeline->vertex = vertex;
 	pipeline->fragment = fragment;
 
@@ -859,7 +859,7 @@ i915_vke2_data_write(
 
 	/* The quads: the matrix step's corners before its chain, then the plain corners. */
 	words = (uint32_t *)(void *)(x->cpu + I915_VKE2_QUADS_OFFSET);
-	memset(words, 0, I915_VKE2_VERTEX_BYTES);
+	kern_memset(words, 0, I915_VKE2_VERTEX_BYTES);
 	for (corner = 0U; corner < 4U; corner++) {
 		i915_vke2_corner_write(words + (I915_VKE2_MATRIX_VERTEX + corner) * 8U,
 				       corner,
@@ -871,16 +871,16 @@ i915_vke2_data_write(
 
 	/* The seeded quad: the plain corners, then the seed. */
 	words = (uint32_t *)(void *)(x->cpu + I915_VKE2_SEEDED_OFFSET);
-	memset(words, 0, I915_VKE2_VERTEX_BYTES);
+	kern_memset(words, 0, I915_VKE2_VERTEX_BYTES);
 	for (corner = 0U; corner < 4U; corner++) {
 		i915_vke2_corner_write(words + corner * 12U, corner, corner_x[corner], corner_y[corner]);
-		memcpy(&words[corner * 12U + 8U], i915_vke2_seed, sizeof(i915_vke2_seed));
+		kern_memcpy(&words[corner * 12U + 8U], i915_vke2_seed, sizeof(i915_vke2_seed));
 	}
 	drv_i915_gt_clflush(words, I915_VKE2_VERTEX_BYTES);
 
 	/* The wide quad: the plain corners, then the fourteen data attributes. */
 	words = (uint32_t *)(void *)(x->cpu + I915_VKE2_WIDE_OFFSET);
-	memset(words, 0, I915_VKE2_VERTEX_BYTES);
+	kern_memset(words, 0, I915_VKE2_VERTEX_BYTES);
 	for (corner = 0U; corner < 4U; corner++) {
 		i915_vke2_corner_write(words + corner * 64U, corner, corner_x[corner], corner_y[corner]);
 		for (k = 0U; k < 14U * 4U; k++)
@@ -889,14 +889,14 @@ i915_vke2_data_write(
 	drv_i915_gt_clflush(words, I915_VKE2_VERTEX_BYTES);
 
 	/* The indices of one quad. */
-	memcpy(x->cpu + I915_VKE2_INDEX_OFFSET, quad_indices, sizeof(quad_indices));
+	kern_memcpy(x->cpu + I915_VKE2_INDEX_OFFSET, quad_indices, sizeof(quad_indices));
 	drv_i915_gt_clflush(x->cpu + I915_VKE2_INDEX_OFFSET, I915_VKE2_INDEX_BYTES);
 
 	/* The matrix step's two uniform blocks. */
-	memset(x->cpu + I915_VKE2_MATRICES_OFFSET, 0, I915_VKE2_UNIFORM_BYTES);
-	memset(x->cpu + I915_VKE2_PLACEMENT_OFFSET, 0, I915_VKE2_UNIFORM_BYTES);
-	memcpy(x->cpu + I915_VKE2_MATRICES_OFFSET, i915_vke2_matrices, sizeof(i915_vke2_matrices));
-	memcpy(x->cpu + I915_VKE2_PLACEMENT_OFFSET, i915_vke2_placement, sizeof(i915_vke2_placement));
+	kern_memset(x->cpu + I915_VKE2_MATRICES_OFFSET, 0, I915_VKE2_UNIFORM_BYTES);
+	kern_memset(x->cpu + I915_VKE2_PLACEMENT_OFFSET, 0, I915_VKE2_UNIFORM_BYTES);
+	kern_memcpy(x->cpu + I915_VKE2_MATRICES_OFFSET, i915_vke2_matrices, sizeof(i915_vke2_matrices));
+	kern_memcpy(x->cpu + I915_VKE2_PLACEMENT_OFFSET, i915_vke2_placement, sizeof(i915_vke2_placement));
 	drv_i915_gt_clflush(x->cpu + I915_VKE2_MATRICES_OFFSET, I915_VKE2_UNIFORM_BYTES);
 	drv_i915_gt_clflush(x->cpu + I915_VKE2_PLACEMENT_OFFSET, I915_VKE2_UNIFORM_BYTES);
 }
@@ -942,7 +942,7 @@ i915_vke2_put32(
 		return;
 	}
 
-	memcpy(x->wire + x->used, &value, 4U);
+	kern_memcpy(x->wire + x->used, &value, 4U);
 	x->used += 4U;
 }
 
@@ -1008,7 +1008,7 @@ i915_vke2_reply32(
 	if (offset + 4U > x->reply_bytes)
 		return 0U;
 
-	memcpy(&value, x->reply + offset, 4U);
+	kern_memcpy(&value, x->reply + offset, 4U);
 
 	/* Succeeded: the word at the offset. */
 	return value;
@@ -1527,7 +1527,7 @@ i915_vke2_step_draw(
 
 	/* Fills the expected words and compares. */
 	if (generated != NULL) {
-		memcpy(x->expected, generated, sizeof(x->expected));
+		kern_memcpy(x->expected, generated, sizeof(x->expected));
 	} else {
 		i915_vke2_expect_sums(x, twice);
 	}
@@ -1574,7 +1574,7 @@ i915_vke2_step_matrix(
 	/* Runs it and compares every word with the generated ones. */
 	error = i915_vke2_finish(x, "MATRIX");
 	if (error == 0) {
-		memcpy(x->expected, i915_vke2_matrix_expected, sizeof(x->expected));
+		kern_memcpy(x->expected, i915_vke2_matrix_expected, sizeof(x->expected));
 		error = i915_vke2_compare(x, "MATRIX", I915_VKE2_COMPARE_FLOAT);
 	}
 

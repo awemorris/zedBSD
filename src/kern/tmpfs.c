@@ -15,6 +15,7 @@
  * renames.
  */
 
+#include "kern/mount.h"
 #include "kern/tmpfs.h"
 #include "kern/file.h"
 #include "kern/inode.h"
@@ -23,11 +24,11 @@
 #include "kern/page.h"
 #include "kern/pipe.h"
 #include "kern/vm-commit.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stdint.h>
-#include <string.h>
-#include <sys/statvfs.h>
+#include <uapi/statvfs.h>
 
 #define TMPFS_DEFAULT_NODES 1024U
 #define TMPFS_DEFAULT_BYTES (32U * 1024U * 1024U)
@@ -189,7 +190,7 @@ tmpfs_find_xattr(
 	struct tmpfs_xattr **link;
 
 	for (link = &node->xattrs; *link != NULL; link = &(*link)->next) {
-		if (strcmp((*link)->name, name) == 0)
+		if (kern_strcmp((*link)->name, name) == 0)
 			break;
 	}
 
@@ -229,7 +230,7 @@ tmpfs_getxattr(
 	}
 
 	if (value != NULL && length != 0)
-		memcpy(value, attribute->value, length);
+		kern_memcpy(value, attribute->value, length);
 
 	mutex_unlock(&inode->i_lock);
 
@@ -265,7 +266,7 @@ tmpfs_setxattr(
 	size_t name_length;
 
 	node = tmpfs_node(inode);
-	name_length = strlen(name);
+	name_length = kern_strlen(name);
 
 	/* Rejects an inode without a node. */
 	if (node == NULL)
@@ -285,9 +286,9 @@ tmpfs_setxattr(
 		return ENOMEM;
 	}
 
-	memcpy(replacement->name, name, name_length + 1U);
+	kern_memcpy(replacement->name, name, name_length + 1U);
 	if (size != 0)
-		memcpy(replacement->value, value, size);
+		kern_memcpy(replacement->value, value, size);
 	replacement->name_length = name_length;
 	replacement->value_length = size;
 
@@ -354,7 +355,7 @@ tmpfs_listxattr(
 	if (list != NULL) {
 		for (attribute = node->xattrs; attribute != NULL;
 		     attribute = attribute->next) {
-			memcpy(list, attribute->name, attribute->name_length + 1U);
+			kern_memcpy(list, attribute->name, attribute->name_length + 1U);
 			list += attribute->name_length + 1U;
 		}
 	}
@@ -431,7 +432,7 @@ component_equal(
 {
 	if (component->cn_namelen != entry->length)
 		return 0;
-	if (memcmp(component->cn_nameptr, entry->name, entry->length) != 0)
+	if (kern_memcmp(component->cn_nameptr, entry->name, entry->length) != 0)
 		return 0;
 	return 1;
 }
@@ -557,7 +558,7 @@ allocate_entry(
 	/* Stores the name as a terminated copy beside the inode. */
 	entry->inode = inode;
 	entry->length = component->cn_namelen;
-	memcpy(entry->name, component->cn_nameptr, component->cn_namelen);
+	kern_memcpy(entry->name, component->cn_nameptr, component->cn_namelen);
 	entry->name[component->cn_namelen] = '\0';
 
 	/* Reports the new entry. */
@@ -731,14 +732,14 @@ tmpfs_make(
 	/* Stores the symlink target. */
 	node = tmpfs_node(inode);
 	if (request->type == INODE_SYMLINK) {
-		node->symlink_length = strlen(target);
+		node->symlink_length = kern_strlen(target);
 		node->symlink = kern_malloc(node->symlink_length + 1U);
 		if (node->symlink == NULL) {
 			discard_unpublished(inode);
 			return ENOMEM;
 		}
 
-		memcpy(node->symlink, target, node->symlink_length + 1U);
+		kern_memcpy(node->symlink, target, node->symlink_length + 1U);
 		inode->i_size = (off_t)node->symlink_length;
 	}
 
@@ -924,7 +925,7 @@ tmpfs_readlink(
 	else
 		length = capacity;
 	if (length != 0)
-		memcpy(buffer, node->symlink, length);
+		kern_memcpy(buffer, node->symlink, length);
 
 	/* Reports the copied length. */
 	return (ssize_t)length;
@@ -1175,7 +1176,7 @@ tmpfs_rename(
 
 	/* Moves the entry under its new name with a fresh cookie. */
 	entry->length = new_component->cn_namelen;
-	memcpy(entry->name, new_component->cn_nameptr, entry->length);
+	kern_memcpy(entry->name, new_component->cn_nameptr, entry->length);
 	entry->name[entry->length] = '\0';
 	entry->cookie = old_parent->state->next_cookie++;
 	entry->next = new_parent->children;
@@ -1260,9 +1261,9 @@ tmpfs_pread(
 		if (count > length - done)
 			count = length - done;
 		if (*link != NULL && (*link)->index == index)
-			memcpy(out + done, (*link)->data + within, count);
+			kern_memcpy(out + done, (*link)->data + within, count);
 		else
-			memset(out + done, 0, count);
+			kern_memset(out + done, 0, count);
 		done += count;
 	}
 
@@ -1350,7 +1351,7 @@ tmpfs_write_at(
 			page = *link;
 		}
 
-		memcpy(page->data + within, in + done, count);
+		kern_memcpy(page->data + within, in + done, count);
 		done += count;
 		/*
 		 * Publish every completed prefix before a later allocation can fail.
@@ -1464,7 +1465,7 @@ tmpfs_truncate(
 	if (size != 0 && ((uint64_t)size % KERN_PAGE_SIZE) != 0) {
 		tail = find_page_link(node, last_index);
 		if (*tail != NULL && (*tail)->index == last_index)
-			memset((*tail)->data + ((size_t)size % KERN_PAGE_SIZE), 0,
+			kern_memset((*tail)->data + ((size_t)size % KERN_PAGE_SIZE), 0,
 			    KERN_PAGE_SIZE - ((size_t)size % KERN_PAGE_SIZE));
 	}
 
@@ -1494,7 +1495,8 @@ tmpfs_getattr(
 
 	/* Copies the inode's attributes into the caller's record. */
 	node = tmpfs_node(inode);
-	memset(status, 0, sizeof(*status));
+	kern_memset(status, 0, sizeof(*status));
+	status->st_dev = mount_device_number(inode->i_mount);
 	status->st_ino = inode->i_ino;
 	status->st_mode = inode->i_mode;
 	status->st_nlink = inode->i_linkcount;
@@ -1552,11 +1554,11 @@ tmpfs_readdir(
 		return EINVAL;
 
 	/* Cookies zero and one are dot and dot-dot. */
-	memset(entry, 0, sizeof(*entry));
+	kern_memset(entry, 0, sizeof(*entry));
 	if (cookie == 0) {
 		entry->d_ino = file->f_inode->i_ino;
 		entry->d_type = INODE_DIR;
-		strcpy(entry->d_name, ".");
+		kern_strcpy(entry->d_name, ".");
 		file->f_offset = 1;
 		*eof = 0;
 		return 0;
@@ -1568,7 +1570,7 @@ tmpfs_readdir(
 		else
 			entry->d_ino = file->f_inode->i_ino;
 		entry->d_type = INODE_DIR;
-		strcpy(entry->d_name, "..");
+		kern_strcpy(entry->d_name, "..");
 		file->f_offset = 2;
 		*eof = 0;
 		return 0;
@@ -1591,7 +1593,7 @@ tmpfs_readdir(
 
 	entry->d_ino = best->inode->i_ino;
 	entry->d_type = best->inode->i_type;
-	strcpy(entry->d_name, best->name);
+	kern_strcpy(entry->d_name, best->name);
 	file->f_offset = (off_t)best->cookie;
 
 	mutex_unlock(&node->state->namespace_lock);
@@ -1754,7 +1756,7 @@ tmpfs_statvfs(
 	/* Samples the quotas under their lock. */
 	mutex_lock(&state->quota_lock);
 
-	memset(result, 0, sizeof(*result));
+	kern_memset(result, 0, sizeof(*result));
 	result->f_bsize = KERN_PAGE_SIZE;
 	result->f_frsize = KERN_PAGE_SIZE;
 	result->f_blocks = state->max_bytes / KERN_PAGE_SIZE;

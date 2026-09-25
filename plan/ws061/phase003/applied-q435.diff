@@ -1,0 +1,396 @@
+diff --git a/include/kern/vm-object.h b/include/kern/vm-object.h
+index 8d6edf4d..85f0c573 100644
+--- a/include/kern/vm-object.h
++++ b/include/kern/vm-object.h
+@@ -297,6 +297,12 @@ vm_object_page_pin_write(
+ 	const void *buffer,
+ 	size_t length);
+ 
++int
++vm_object_fault_resident(
++	struct vm_object *object,
++	off_t offset,
++	struct vm_object_page **result);
++
+ void
+ vm_object_fault_release(
+ 	struct vm_object_page *page);
+diff --git a/src/hal/amd64/space.c b/src/hal/amd64/space.c
+index aead8c8a..7ce58d32 100644
+--- a/src/hal/amd64/space.c
++++ b/src/hal/amd64/space.c
+@@ -75,6 +75,9 @@ struct amd64_device_mapping {
+ 	void *address;
+ };
+ 
++/* The largest shootdown range invalidated page by page rather than whole. */
++#define AMD64_INVLPG_MAX_PAGES 32U
++
+ struct amd64_shootdown_request {
+ 	volatile unsigned active;
+ 	hal_space_t space;
+@@ -157,6 +160,7 @@ static void table_count_adjust(uint64_t *owner, int delta);
+ static uint64_t *walk_leaf(struct amd64_space *space, uintptr_t address, int create, uint64_t **owner);
+ static int table_is_empty(const struct amd64_table_page *page);
+ static uint64_t *table_owner_of(struct amd64_space *space, uint64_t *table);
++static void flush_request_range(hal_space_t handle, void *vaddr, size_t size);
+ static uint64_t *table_at(uint64_t entry);
+ static struct amd64_table_page *detach_empty_tables(struct amd64_space *space);
+ static void free_detached_tables(struct amd64_table_page *page);
+@@ -1125,8 +1129,12 @@ hal_space_map(
+ 		*leaf = (physical + offset) | leaf_flags(attr);
+ 	}
+ 
+-	/* Invalidates translations on CPUs currently using this space. */
+-	shootdown(space, pointer, size);
++	/*
++	 * Needs no invalidation: every leaf was checked not present above,
++	 * and an x86 processor caches neither a not-present translation nor
++	 * a not-present paging-structure entry, so no CPU can hold a stale
++	 * view of these addresses.
++	 */
+ 
+ 	/* Releases mapping and lifetime serialization. */
+ 	space_lock_leave(space, enabled);
+@@ -2279,7 +2287,7 @@ shootdown(
+ 
+ 	/* Invalidates the sender when it currently uses the affected space. */
+ 	if (handle == HAL_SPACE_SYS || AMD64_CURRENT_SPACE == handle)
+-		asm_flush_tlb();
++		flush_request_range(handle, vaddr, size);
+ 
+ 	/*
+ 	 * Waits for acknowledgements while servicing reciprocal requests.  Page
+@@ -2295,6 +2303,40 @@ shootdown(
+ 	__atomic_store_n(&request->active, 0U, __ATOMIC_RELEASE);
+ }
+ 
++/*
++ * Invalidates this CPU's translations for one shootdown request.
++ *
++ * A small user range is invalidated page by page, which keeps the rest of
++ * the TLB; a request with no range, a large one, or one for the system
++ * space reloads CR3 as before.
++ */
++static void
++flush_request_range(
++	hal_space_t handle,
++	void *vaddr,
++	size_t size)
++{
++	uintptr_t address;
++	uintptr_t end;
++
++	/* Flushes everything for a whole-space, large, or system request. */
++	if (handle == HAL_SPACE_SYS ||
++	    vaddr == NULL ||
++	    size == 0 ||
++	    size > AMD64_INVLPG_MAX_PAGES * PAGE_SIZE) {
++		asm_flush_tlb();
++		return;
++	}
++
++	/* Invalidates each page of the range. */
++	address = (uintptr_t)vaddr & ~(uintptr_t)(PAGE_SIZE - 1U);
++	end = (uintptr_t)vaddr + size;
++	while (address < end) {
++		__asm__ volatile("invlpg (%0)" : : "r"(address) : "memory");
++		address += PAGE_SIZE;
++	}
++}
++
+ /* Services all active shootdown requests targeting one CPU. */
+ static void
+ service_shootdowns(
+@@ -2326,7 +2368,7 @@ service_shootdowns(
+ 			continue;
+ 
+ 		/* Flushes locally before acknowledging the request. */
+-		asm_flush_tlb();
++		flush_request_range(request->space, request->vaddr, request->size);
+ 		(void)__atomic_fetch_and(
+ 		    &request->pending,
+ 		    ~bit,
+diff --git a/src/kern/vm.c b/src/kern/vm.c
+index b081f4ba..3223de12 100644
+--- a/src/kern/vm.c
++++ b/src/kern/vm.c
+@@ -1954,6 +1954,69 @@ vm_object_fault_release(
+ 	spin_unlock_irqrestore(&page->owner->lock, irq);
+ }
+ 
++/*
++ * Holds a page the object already caches, without reading or waiting.
++ *
++ * Fault-around maps the neighbours of a faulting page only when they are
++ * already there: a page that is absent, being read, failed, past the end
++ * of the file, or inside a resize or content transaction is left to its
++ * own fault.  The hold is released as vm_object_fault()'s is.
++ */
++int
++vm_object_fault_resident(
++	struct vm_object *object,
++	off_t offset,
++	struct vm_object_page **result)
++{
++	struct vm_object_page *page;
++	unsigned long irq;
++	int error;
++
++	/* Rejects a missing object or result, or an unaligned offset. */
++	if (object == NULL ||
++	    result == NULL ||
++	    offset < 0 ||
++	    (offset & (PAGE_SIZE - 1U)) != 0)
++		return EINVAL;
++
++	/* Looks the page up under the object lock. */
++	error = 0;
++	page = NULL;
++	irq = spin_lock_irqsave(&object->lock);
++
++	/* Leaves the page to its own fault while a transaction runs. */
++	if ((object->flags & (VM_OBJECT_RESIZING | VM_OBJECT_CONTENT)) != 0)
++		error = EAGAIN;
++
++	/* Leaves a page past the end of the file to its own fault. */
++	if (error == 0 && offset >= object->logical_size)
++		error = ENXIO;
++
++	/* Finds the cached page. */
++	if (error == 0) {
++		page = find_page(object, offset);
++		if (page == NULL)
++			error = ENOENT;
++	}
++
++	/* Skips a page being read or one whose read failed. */
++	if (error == 0 &&
++	    (page->flags & (VM_OBJECT_PAGE_BUSY | VM_OBJECT_PAGE_ERROR)) != 0)
++		error = EAGAIN;
++
++	/* Holds the page for the caller's mapping. */
++	if (error == 0) {
++		page->hold_count++;
++		*result = page;
++	}
++
++	/* Lets the object's other users in. */
++	spin_unlock_irqrestore(&object->lock, irq);
++
++	/* Reports whether the page was held. */
++	return error;
++}
++
+ /*
+  * Converts a fault hold into a reverse mapping.
+  */
+diff --git a/src/kern/vmspace.c b/src/kern/vmspace.c
+index 3e78834a..57342681 100644
+--- a/src/kern/vmspace.c
++++ b/src/kern/vmspace.c
+@@ -38,6 +38,9 @@
+ #define VM_PAGE_MAP_RECLAIM_RETRIES	4U
+ #define VM_PAGE_MAP_RESERVE_PAGES	4U
+ 
++/* The aligned group of pages one file fault maps from what is cached. */
++#define VM_FAULT_AROUND_PAGES		16U
++
+ /* The page count at which a region indexes its pages instead of walking them. */
+ #define VM_REGION_INDEX_MINIMUM		32U
+ 
+@@ -174,6 +177,8 @@ extern void vmspace_object_revoke_checkpoint(struct vmspace *vm, uintptr_t addre
+ 
+ static void (*vmspace_reap_notify)(void *);
+ static int vmspace_device_fault(struct vmspace *vm, struct vm_region *region, struct vm_page *page);
++static void vmspace_fault_around_locked(struct vmspace *vm, struct vm_region *region, uintptr_t address, int copy_on_write);
++static int vmspace_fault_around_page_locked(struct vmspace *vm, struct vm_region *region, uintptr_t address, uint32_t prot, int copy_on_write);
+ static int alloc_vm_page(struct kern_pmem *memory);
+ static int alloc_vm_metadata_page(struct kern_pmem *memory);
+ static struct vm_page * vm_page_slab_take_locked(void);
+@@ -1513,6 +1518,12 @@ retry:
+ 		page->flags &= ~VM_MAPPING_BUSY;
+ 		region->hold_count--;
+ 
++		/* Maps the neighbours the object already holds, for a read. */
++		if (required != HAL_SPACE_WRITE) {
++			vmspace_fault_around_locked(vm, region, page_address,
++			    snapshot_cached);
++		}
++
+ 		vmspace_generation_advance_locked(vm);
+ 		vmspace_fault_wake_locked(vm);
+ 		mutex_unlock(&vm->lock);
+@@ -6660,6 +6671,172 @@ vmspace_exec_cache_fault(
+ 	return 0;
+ }
+ 
++/*
++ * Maps the neighbours of a faulted object page that the object already
++ * caches; the caller holds the VM locks.
++ *
++ * A process that touches one page of a file mapping touches its
++ * neighbours soon after, and each would otherwise take a fault of its own.
++ * The window is the aligned group of VM_FAULT_AROUND_PAGES around the
++ * fault, cut to the region and to what the region maps from its object.
++ * Only pages that are cached and idle are mapped, read-only when the region
++ * copies on write; nothing is read and nothing waits, so a neighbour that is
++ * not ready simply takes its own fault later.
++ *
++ * A shared writable region is left alone: its pages are mapped writable at
++ * their fault, and a read-only neighbour would never be upgraded.
++ */
++static void
++vmspace_fault_around_locked(
++	struct vmspace *vm,
++	struct vm_region *region,
++	uintptr_t address,
++	int copy_on_write)
++{
++	uintptr_t first;
++	uintptr_t last;
++	uintptr_t window;
++	uintptr_t data_end;
++	uintptr_t current;
++	uint32_t prot;
++	int mapped;
++
++	/* Leaves a shared writable region and an inaccessible one alone. */
++	prot = region->prot;
++	if (!copy_on_write && (prot & HAL_SPACE_WRITE) != 0)
++		return;
++	if (copy_on_write)
++		prot &= ~HAL_SPACE_WRITE;
++	if ((prot & (HAL_SPACE_READ | HAL_SPACE_EXEC)) == 0)
++		return;
++
++	/* Takes the aligned window around the fault, cut to the region. */
++	window = (uintptr_t)VM_FAULT_AROUND_PAGES * PAGE_SIZE;
++	first = address & ~(window - 1U);
++	last = first + window;
++	if (first < region->start)
++		first = region->start;
++	if (last > region->start + region->size)
++		last = region->start + region->size;
++
++	/* A private region maps from its object only whole pages of file data. */
++	if ((region->flags & VM_REGION_PRIVATE_OBJECT) != 0) {
++		data_end = region->data_start +
++		    (region->data_size & ~(size_t)(PAGE_SIZE - 1U));
++		if (first < region->data_start)
++			first = region->data_start;
++		if (last > data_end)
++			last = data_end;
++	}
++
++	/* Maps each neighbour until one cannot be mapped. */
++	for (current = first; current < last; current += PAGE_SIZE) {
++		if (current == address)
++			continue;
++		mapped = vmspace_fault_around_page_locked(vm, region, current,
++		    prot, copy_on_write);
++		if (mapped < 0)
++			break;
++	}
++}
++
++/*
++ * Maps one neighbour for fault-around; the caller holds the VM locks.
++ *
++ * Reports 1 for a page mapped, 0 for one skipped, and -1 when metadata
++ * or page-table memory ran out, which ends the window.
++ */
++static int
++vmspace_fault_around_page_locked(
++	struct vmspace *vm,
++	struct vm_region *region,
++	uintptr_t address,
++	uint32_t prot,
++	int copy_on_write)
++{
++	struct vm_object_page *object_page;
++	struct vm_object *object;
++	struct vm_page *page;
++	off_t offset;
++	size_t index;
++	int error;
++
++	/* Skips an address that already has a mapping of its own. */
++	page = find_page(region, address);
++	if (page != NULL)
++		return 0;
++
++	/* Names the object offset of the address. */
++	offset = region->file_offset + (off_t)(address - region->start);
++	if (offset < 0)
++		return 0;
++
++	/* A snapshot maps only the pages it pinned, from its read object. */
++	index = 0;
++	if (region->snapshot != NULL) {
++		if (offset < region->snapshot->offset ||
++		    (uint64_t)(offset - region->snapshot->offset) >=
++		    region->snapshot->length)
++			return 0;
++		index = (size_t)(offset - region->snapshot->offset) / PAGE_SIZE;
++		object = region->snapshot->input.read_object;
++	} else {
++		object = region->object;
++	}
++
++	/* Skips a region with no object to map from. */
++	if (object == NULL)
++		return 0;
++
++	/* Holds the cached page, or leaves the address to its own fault. */
++	object_page = NULL;
++	error = vm_object_fault_resident(object, offset, &object_page);
++	if (error != 0)
++		return 0;
++	if (region->snapshot != NULL &&
++	    object_page != region->snapshot->pages[index]) {
++		vm_object_fault_release(object_page);
++		return 0;
++	}
++
++	/* Builds the mapping descriptor. */
++	page = vm_page_alloc_metadata();
++	if (page == NULL) {
++		vm_object_fault_release(object_page);
++		return -1;
++	}
++
++	/* Names the region, address and object page the descriptor maps. */
++	page->vm = vm;
++	page->region = region;
++	page->address = address;
++	page->object_page = object_page;
++	page->flags = VM_PAGE_RESIDENT;
++	if (copy_on_write)
++		page->flags |= VM_MAPPING_COW;
++
++	/* Installs the translation. */
++	error = hal_space_map(vm->space, (void *)address,
++	    object_page->pmem.paddr, PAGE_SIZE, prot);
++	if (error != HAL_OK) {
++		vm_page_free_metadata(page);
++		vm_object_fault_release(object_page);
++		return -1;
++	}
++
++	/* Records the translation. */
++	page->flags |= VM_MAPPING_MAPPED;
++
++	/* Publishes the mapping in the region and in the page's reverse map. */
++	page->next = region->pages;
++	region->pages = page;
++	region_page_index_insert(region, page);
++	vm_object_mapping_add(object_page, page);
++
++	/* Reports the page mapped. */
++	return 1;
++}
++
+ /* Maps retained device storage while unmap and protection wait on its region hold. */
+ static int
+ vmspace_device_fault(

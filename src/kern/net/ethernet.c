@@ -18,9 +18,9 @@
 #include "kern/net/net-device.h"
 #include "kern/net/packet-buf.h"
 #include "kern/net/socket.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 
 #define ETHERNET_PROTOCOL_MAX 8U
 
@@ -41,7 +41,7 @@ void
 ethernet_init(
 	void)
 {
-	memset(protocols, 0, sizeof(protocols));
+	kern_memset(protocols, 0, sizeof(protocols));
 	protocol_count = 0;
 }
 
@@ -102,7 +102,7 @@ ethernet_input(
 
 	/* Classifies the frame by its destination address. */
 	header = packet->data;
-	if (!memcmp(header, packet->device->hwaddr, 6)) {
+	if (!kern_memcmp(header, packet->device->hwaddr, 6)) {
 		packet_type = L2_PACKET_HOST;
 	} else if (is_broadcast(header)) {
 		packet_type = L2_PACKET_BROADCAST;
@@ -174,8 +174,8 @@ ethernet_output(
 		return ENOBUFS;
 	}
 
-	memcpy(header, destination, 6);
-	memcpy(header + 6, device->hwaddr, 6);
+	kern_memcpy(header, destination, 6);
+	kern_memcpy(header + 6, device->hwaddr, 6);
 	header[12] = (uint8_t)(type >> 8);
 	header[13] = (uint8_t)type;
 	packet->l2_offset = (uint16_t)(packet->data - packet->storage);

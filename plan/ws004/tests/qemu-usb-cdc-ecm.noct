@@ -234,7 +234,7 @@ func productionSourceReady(repo) {
     var command = "test -f " +
         zbShellQuote(repo + "/src/drivers/usb/usb-cdc-ecm.c") +
         " && test -f " +
-        zbShellQuote(repo + "/include/drivers/usb-cdc-ecm.h") +
+        zbShellQuote(repo + "/include/drivers/usb/usb-cdc-ecm.h") +
         " && rg -q 'CONFIG_DRIVER_USB_CDC_ECM' " +
         zbShellQuote(repo + "/Makefile") +
         " && rg -q 'src/drivers/usb-cdc-ecm[.]c' " +
@@ -459,7 +459,7 @@ func main(args) {
     var config = fixture + "/qemu-usb-cdc-ecm-config.mk";
     var makefile = fixture + "/qemu-usb-cdc-ecm.mk";
     runLogged("cc -std=c11 -Wall -Wextra -Werror -I" +
-        zbShellQuote(repo + "/libc/include") + " -I" +
+        zbShellQuote(repo + "/include/libc") + " -I" +
         zbShellQuote(repo + "/include/uapi") + " -fsyntax-only " +
         zbShellQuote(guest), evidence + "/guest-syntax.log",
         "guest probe host syntax gate");

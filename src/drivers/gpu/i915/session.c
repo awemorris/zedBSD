@@ -23,16 +23,16 @@
 #include "worker.h"
 #include "display/display.h"
 #include "render/render.h"
+#include <kern/kcrt.h>
 
-#include <drivers/gpu.h>
+#include <drivers/gpu/gpu.h>
 #include <kern/klog.h>
 #include <kern/kmem.h>
 #include <kern/lock.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "intel/gt-regs.h"
 
@@ -265,8 +265,8 @@ i915_get_info(
 	info->max_resource_bytes = I915_MAX_RESOURCE_BYTES;
 
 	/* Names the driver, with the terminating NUL. */
-	memset(info->driver_name, 0, sizeof(info->driver_name));
-	memcpy(info->driver_name, "i915", 5U);
+	kern_memset(info->driver_name, 0, sizeof(info->driver_name));
+	kern_memcpy(info->driver_name, "i915", 5U);
 
 	/* Succeeded: userspace can identify the native node. */
 	return 0;

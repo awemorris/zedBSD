@@ -15,11 +15,11 @@
  */
 
 #include "kern/test-fault.h"
+#include <kern/kcrt.h>
 
 #ifdef KERN_TEST_FAULTS
-#include <errno.h>
+#include <uapi/errno.h>
 #include <kern/atomic.h>
-#include <string.h>
 
 static struct kern_test_fault_config configured;
 static struct kern_test_fault_log_entry log_entries[KERN_TEST_FAULT_LOG_CAPACITY];
@@ -41,9 +41,9 @@ kern_test_fault_reset(
 {
 	/* Forgets every configured fault and every recorded hit. */
 	fault_lock();
-	memset(&configured, 0, sizeof(configured));
-	memset(point_ordinals, 0, sizeof(point_ordinals));
-	memset(log_entries, 0, sizeof(log_entries));
+	kern_memset(&configured, 0, sizeof(configured));
+	kern_memset(point_ordinals, 0, sizeof(point_ordinals));
+	kern_memset(log_entries, 0, sizeof(log_entries));
 	sequence = 0;
 	log_head = 0;
 	log_count = 0;
@@ -68,7 +68,7 @@ kern_test_fault_configure(
 	/* Installs the configuration with fresh hit counters. */
 	fault_lock();
 	configured = *config;
-	memset(point_ordinals, 0, sizeof(point_ordinals));
+	kern_memset(point_ordinals, 0, sizeof(point_ordinals));
 	fault_unlock();
 
 	/* Reports the installed configuration. */
@@ -112,7 +112,7 @@ kern_test_fault_hit(
 	/* Records the injection and reports its effect. */
 	if (inject) {
 		entry = &log_entries[log_head];
-		memset(entry, 0, sizeof(*entry));
+		kern_memset(entry, 0, sizeof(*entry));
 		entry->sequence = ++sequence;
 		entry->ordinal = ordinal;
 		entry->id = (uint32_t)id;

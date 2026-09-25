@@ -21,6 +21,7 @@
 #include "heap.h"
 #include "internal.h"
 #include "state.h"
+#include <kern/kcrt.h>
 
 #include "../i915.h"
 #include "../memory.h"
@@ -33,10 +34,9 @@
 #include <kern/kmem.h>
 #include <kern/lock.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "../intel/genxml.h"
 
@@ -280,9 +280,9 @@ drv_i915_gfx_window(
 		address = (uint8_t *)work->kernels->address + (uint64_t)work->window_next * I915_GFX_INSTRUCTION_BYTES;
 		drv_i915_gfx_instruction_heap_clear(address);
 		if (vs_code != NULL)
-			memcpy(address + I915_GFX_VS_KERNEL, vs_code, vs_bytes);
+			kern_memcpy(address + I915_GFX_VS_KERNEL, vs_code, vs_bytes);
 		if (ps_code != NULL)
-			memcpy(address + I915_GFX_PS_KERNEL, ps_code, ps_bytes);
+			kern_memcpy(address + I915_GFX_PS_KERNEL, ps_code, ps_bytes);
 
 		/* Remembers where the kernels are, for every later operation that runs them. */
 		*window = work->window_next;
@@ -897,7 +897,7 @@ i915_draw_build_batch(
 	 * Describes the triangle list: an indexed draw reads its vertices at
 	 * random from the first index on, each index moved by the vertex offset.
 	 */
-	memset(&primitive, 0, sizeof(primitive));
+	kern_memset(&primitive, 0, sizeof(primitive));
 	primitive.topology = GEN12_3DPRIM_TRILIST;
 	primitive.random_access = args->indexed;
 	primitive.vertex_count = args->count;

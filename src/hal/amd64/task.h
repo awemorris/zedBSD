@@ -51,6 +51,7 @@ void amd64_kernel_task_entry(void);
 void amd64_user_task_entry(void);
 void amd64_user_frame_entry(void);
 void amd64_task_returned(void) __attribute__((noreturn));
+void amd64_task_finish_switch(void);
 void amd64_task_enter_user_frame(void *frame);
 void amd64_task_leave_user_frame(void);
 struct amd64_task *amd64_task_init_cpu(int run_selftest);

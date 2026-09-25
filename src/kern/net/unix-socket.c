@@ -31,12 +31,12 @@
 #include "kern/syscall.h"
 #include "kern/test-fault.h"
 #include "kern/thread.h"
+#include <kern/kcrt.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
-#include <string.h>
-#include <sys/un.h>
-#include <unistd.h>
+#include <uapi/un.h>
+#include <uapi/unistd.h>
 #include <uapi/poll.h>
 
 #define UNIX_STREAM_CHUNK_SIZE 2048U
@@ -452,7 +452,7 @@ unix_socket_receive_begin(
 	    ((address == NULL) != (address_length == NULL)) ||
 	    file_capacity > KERN_MSG_FD_MAX)
 		return -EINVAL;
-	memset(transaction, 0, sizeof(*transaction));
+	kern_memset(transaction, 0, sizeof(*transaction));
 	datagram = socket->type == SOCK_DGRAM;
 	if (!datagram && length == 0)
 		return 0;
@@ -573,7 +573,7 @@ unix_socket_receive_begin(
 		transaction->data_truncated =
 		    transaction->copied < packet->length;
 		if (transaction->copied != 0)
-			memcpy(buffer, packet->data, transaction->copied);
+			kern_memcpy(buffer, packet->data, transaction->copied);
 	} else {
 		current = chunk;
 		destination = buffer;
@@ -585,7 +585,7 @@ unix_socket_receive_begin(
 			if (copied > available)
 				copied = available;
 			if (copied != 0)
-				memcpy(destination + transaction->copied,
+				kern_memcpy(destination + transaction->copied,
 				       current->data + current->begin, copied);
 			transaction->copied += copied;
 			if (copied < available)
@@ -602,7 +602,7 @@ unix_socket_receive_begin(
 		else
 			address_copied = actual;
 		if (address_copied != 0)
-			memcpy(address, packet->source_address, address_copied);
+			kern_memcpy(address, packet->source_address, address_copied);
 		*address_length = actual;
 	}
 
@@ -969,7 +969,7 @@ unix_socket_bind_path(
 		irq = spin_lock_irqsave(&socket->lock);
 		endpoint->bound_path = committed_path;
 		path_init(&committed_path);
-		strcpy(endpoint->path, path);
+		kern_strcpy(endpoint->path, path);
 		endpoint->bound = 1;
 		spin_unlock_irqrestore(&socket->lock, irq);
 	}
@@ -1249,7 +1249,7 @@ unix_copy_path(
 		used++;
 	if (used == 0 || used == available || used >= UNIX_PATH_MAX)
 		return EINVAL;
-	memcpy(path, local->sun_path, used);
+	kern_memcpy(path, local->sun_path, used);
 	path[used] = '\0';
 	return 0;
 }
@@ -1267,13 +1267,13 @@ unix_store_address(
 	socklen_t copied;
 
 	/* Builds the address, empty for an unbound endpoint. */
-	memset(&local, 0, sizeof(local));
+	kern_memset(&local, 0, sizeof(local));
 	local.sun_family = AF_UNIX;
 	if (endpoint != NULL && endpoint->bound)
-		strncpy(local.sun_path, endpoint->path,
+		kern_strncpy(local.sun_path, endpoint->path,
 			sizeof(local.sun_path) - 1U);
 	needed = (socklen_t)(offsetof(struct sockaddr_un, sun_path) +
-			     strlen(local.sun_path) + 1U);
+			     kern_strlen(local.sun_path) + 1U);
 
 	/* Copies what fits and reports the full length. */
 	capacity = *length;
@@ -1282,7 +1282,7 @@ unix_store_address(
 	else
 		copied = needed;
 	if (copied != 0)
-		memcpy(address, &local, copied);
+		kern_memcpy(address, &local, copied);
 	*length = needed;
 }
 
@@ -1296,16 +1296,16 @@ unix_store_packet_source(
 	size_t length;
 
 	/* Names the sender, leaving an unbound endpoint anonymous. */
-	memset(&source, 0, sizeof(source));
+	kern_memset(&source, 0, sizeof(source));
 	source.sun_family = AF_UNIX;
 	if (endpoint->bound)
-		strncpy(source.sun_path, endpoint->path,
+		kern_strncpy(source.sun_path, endpoint->path,
 			sizeof(source.sun_path) - 1U);
 
 	/* Stores the address with exactly the bytes its path needs. */
 	length = offsetof(struct sockaddr_un, sun_path) +
-		 strlen(source.sun_path) + 1U;
-	memcpy(packet->source_address, &source, length);
+		 kern_strlen(source.sun_path) + 1U;
+	kern_memcpy(packet->source_address, &source, length);
 	packet->source_length = (uint8_t)length;
 }
 
@@ -1373,7 +1373,7 @@ unix_resolve_endpoint(
 
 	/* Reports the endpoint and the text of its path. */
 	if (path_text != NULL)
-		strcpy(path_text, path);
+		kern_strcpy(path_text, path);
 	*result = socket;
 	return 0;
 }
@@ -1677,7 +1677,7 @@ unix_stream_send(
 			break;
 		}
 
-		memcpy(chunk->data, bytes + offset, amount);
+		kern_memcpy(chunk->data, bytes + offset, amount);
 		chunk->end = amount;
 
 		/* Re-checks the space under the peer lock before queuing. */
@@ -1715,7 +1715,7 @@ unix_stream_send(
 				room = UNIX_STREAM_CHUNK_SIZE - tail->end;
 				if (amount > room)
 					amount = room;
-				memcpy(tail->data + tail->end,
+				kern_memcpy(tail->data + tail->end,
 				       chunk->data, amount);
 				tail->end += amount;
 				peer_endpoint->stream_bytes += amount;
@@ -1863,7 +1863,7 @@ have_peer:
 	}
 
 	if (length != 0)
-		memcpy(data, buffer, length);
+		kern_memcpy(data, buffer, length);
 	unix_store_packet_source(unix_endpoint(socket), packet);
 	packet->control = rights;
 	if (rights != NULL)
@@ -2076,7 +2076,7 @@ unix_connect_resolved(
 		irq = spin_lock_irqsave(&socket->lock);
 		old = client->datagram_peer;
 		client->datagram_peer = listener_socket;
-		strcpy(client->peer_path, path);
+		kern_strcpy(client->peer_path, path);
 		client->connected = 1;
 		client->connecting = 0;
 		spin_unlock_irqrestore(&socket->lock, irq);
@@ -2303,9 +2303,9 @@ unix_getpeername(
 			goto connected_pair;
 		if (!endpoint->connected)
 			return ENOTCONN;
-		memset(&temporary, 0, sizeof(temporary));
+		kern_memset(&temporary, 0, sizeof(temporary));
 		temporary.bound = 1;
-		strcpy(temporary.path, endpoint->peer_path);
+		kern_strcpy(temporary.path, endpoint->peer_path);
 		unix_store_address(&temporary, address, length);
 		return 0;
 	}
@@ -2354,7 +2354,7 @@ unix_getsockopt(
 
 	spin_unlock_irqrestore(&socket->lock, irq);
 
-	memcpy(value, &credential, sizeof(credential));
+	kern_memcpy(value, &credential, sizeof(credential));
 	*length = sizeof(credential);
 	return 0;
 }

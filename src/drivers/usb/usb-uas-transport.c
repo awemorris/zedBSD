@@ -11,11 +11,12 @@
  * USB Attached SCSI serialized command and endpoint owner.
  */
 
-#include <drivers/usb.h>
-#include <drivers/usb-uas.h>
+#include <drivers/usb/usb.h>
+#include <drivers/usb/usb-uas.h>
 #include <kern/sched.h>
-#include <errno.h>
-#include <string.h>
+#include <kern/clock.h>
+#include <uapi/errno.h>
+#include <kern/kcrt.h>
 
 static int uas_stream_submit(struct drv_usb_uas_transport *, unsigned, unsigned, void *, size_t);
 static int uas_super_transfer(struct drv_usb_uas_transport *, struct drv_usb_uas_command *, uint8_t *, void *, size_t);
@@ -70,7 +71,7 @@ drv_usb_uas_transport_init(
 	    DRV_USB_HCD_CAP_TRANSFER_RESERVE) != 0;
 	if (!reserved && capacity > DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE)
 		capacity = DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE;
-	memset(transport, 0, sizeof(*transport));
+	kern_memset(transport, 0, sizeof(*transport));
 	transport->stopped = 1;
 	transport->super_speed = super_speed;
 	if (super_speed) {
@@ -132,7 +133,7 @@ drv_usb_uas_transport_execute(
 
 	if (result == NULL)
 		return EINVAL;
-	memset(result, 0, sizeof(*result));
+	kern_memset(result, 0, sizeof(*result));
 	if (transport == NULL || timeout_ms == 0)
 		return EINVAL;
 	if (transport->stopped || transport->next_tag == 0)
@@ -140,14 +141,14 @@ drv_usb_uas_transport_execute(
 	if (length > transport->capacity || (length != 0 && buffer == NULL))
 		return EINVAL;
 
-	memset(&command, 0, sizeof(command));
+	kern_memset(&command, 0, sizeof(command));
 	error = drv_usb_uas_command_begin(&command, (uint16_t)transport->next_tag,
 	    lun, cdb, cdb_length, direction, length, wire);
 	if (error != 0)
 		return error;
 	/* Only a validated terminal status permits wrap/reuse of a depth-one tag. */
 	now = sched_ticks();
-	ticks = ((uint64_t)timeout_ms + 9) / 10;
+	ticks = kern_ms_to_ticks(timeout_ms);
 	transport->deadline = UINT64_MAX - now < ticks ? UINT64_MAX : now + ticks;
 	error = uas_transfer(transport, 0, wire, sizeof(wire), &actual);
 	if (error != 0)
@@ -189,7 +190,7 @@ completed:
 	if (sense_length > sizeof(result->sense))
 		sense_length = sizeof(result->sense);
 	result->sense_length = sense_length;
-	memcpy(result->sense, status + 16, sense_length);
+	kern_memcpy(result->sense, status + 16, sense_length);
 	transport->next_tag = transport->next_tag == (transport->super_speed ? 3U : UINT16_MAX) ? 1 : transport->next_tag + 1;
 	return 0;
 
@@ -239,7 +240,7 @@ drv_usb_uas_transport_recover(struct drv_usb_uas_transport *transport,
 	}
 
 	tag = transport->failed_tag == UINT16_MAX ? 1 : transport->failed_tag + 1;
-	memset(command, 0, sizeof(command));
+	kern_memset(command, 0, sizeof(command));
 	command[0] = 5; /* Task Management IU. */
 	command[2] = (uint8_t)(tag >> 8);
 	command[3] = (uint8_t)tag;
@@ -248,7 +249,7 @@ drv_usb_uas_transport_recover(struct drv_usb_uas_transport *transport,
 	command[7] = (uint8_t)transport->failed_tag;
 	command[9] = transport->failed_lun;
 	now = sched_ticks();
-	ticks = ((uint64_t)timeout_ms + 9) / 10;
+	ticks = kern_ms_to_ticks(timeout_ms);
 	transport->deadline = UINT64_MAX - now < ticks ? UINT64_MAX : now + ticks;
 	error = uas_transfer(transport, 0, command, sizeof(command), &actual);
 	if (error != 0)
@@ -332,8 +333,10 @@ uas_stream_submit(struct drv_usb_uas_transport *transport, unsigned pipe,
 	now = sched_ticks();
 	if (now >= transport->deadline)
 		return ETIMEDOUT;
-	remaining = transport->deadline - now;
-	timeout = remaining > UINT32_MAX / 10 ? UINT32_MAX : (unsigned)remaining * 10;
+	remaining = kern_ticks_to_ms(transport->deadline - now);
+	if (remaining == 0)
+		remaining = 1;
+	timeout = remaining > UINT32_MAX ? UINT32_MAX : (unsigned)remaining;
 	flags = length <= DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE ? DRV_USB_URB_RECLAIM_SAFE : 0;
 	error = drv_usb_urb_setup_stream(transport->urbs[pipe], stream, buffer,
 	    length, flags, timeout, NULL, NULL);
@@ -450,8 +453,10 @@ uas_transfer(struct drv_usb_uas_transport *transport, unsigned pipe,
 	now = sched_ticks();
 	if (now >= transport->deadline)
 		return ETIMEDOUT;
-	remaining = transport->deadline - now;
-	timeout = remaining > UINT32_MAX / 10 ? UINT32_MAX : (unsigned)remaining * 10;
+	remaining = kern_ticks_to_ms(transport->deadline - now);
+	if (remaining == 0)
+		remaining = 1;
+	timeout = remaining > UINT32_MAX ? UINT32_MAX : (unsigned)remaining;
 	flags = length <= DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE ? DRV_USB_URB_RECLAIM_SAFE : 0;
 	error = drv_usb_urb_setup(transport->urbs[pipe], buffer, length, flags,
 	    timeout, NULL, NULL);

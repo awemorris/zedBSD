@@ -14,7 +14,7 @@
 
 #include <stdint.h>
 #include <uapi/gpu.h>
-#include <sys/ioctl.h>
+#include <uapi/ioctl.h>
 
 #define GPU_DEVICE_RENDER		1U
 #define GPU_DEVICE_DISPLAY		2U

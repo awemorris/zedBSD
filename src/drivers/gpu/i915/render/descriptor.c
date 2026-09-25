@@ -20,16 +20,16 @@
 #include "internal.h"
 #include "object.h"
 #include "reply.h"
+#include <kern/kcrt.h>
 
 #include <kern/klog.h>
 #include <kern/kmem.h>
 
-#include <vulkan/vulkan_core.h>
+#include <libc/vulkan/vulkan_core.h>
 
-#include <errno.h>
+#include <uapi/errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "vulkan-codec.inc"
 
@@ -61,7 +61,7 @@ drv_i915_gfx_create_dsl(
 	int error;
 
 	/* Decodes the create info behind the device and its presence marker. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	i915_vkc_dec_VkDescriptorSetLayoutCreateInfo(reader, &session->arena, &info);
@@ -112,7 +112,7 @@ drv_i915_gfx_create_dpool(
 	uint32_t *pool;
 
 	/* Decodes the create info behind the device and its presence marker. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	i915_vkc_dec_VkDescriptorPoolCreateInfo(reader, &session->arena, &info);
@@ -155,7 +155,7 @@ drv_i915_gfx_allocate_dsets(
 	int error;
 
 	/* Decodes the allocate info behind the device and its presence marker. */
-	memset(&info, 0, sizeof(info));
+	kern_memset(&info, 0, sizeof(info));
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	i915_vkc_dec_VkDescriptorSetAllocateInfo(reader, &session->arena, &info);
@@ -345,7 +345,7 @@ i915_gfx_update_write(
 
 	/* Reads every buffer descriptor and applies the first uniform buffer to a known set's binding. */
 	for (item = 0U; item < count; item++) {
-		memset(&buffer_info, 0, sizeof(buffer_info));
+		kern_memset(&buffer_info, 0, sizeof(buffer_info));
 		i915_vkc_dec_VkDescriptorBufferInfo(reader, &session->arena, &buffer_info);
 
 		/* Only the first descriptor of a known set within the set's bindings is applied. */

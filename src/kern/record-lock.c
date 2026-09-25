@@ -23,10 +23,9 @@
 #include "kern/process.h"
 #include "kern/waitq.h"
 
-#include <errno.h>
-#include <fcntl.h>
+#include <uapi/errno.h>
 #include <stdint.h>
-#include <stdio.h>
+#include <uapi/unistd.h>
 #include <uapi/fcntl.h>
 
 #define RECORD_LOCK_INFINITY INT64_MAX

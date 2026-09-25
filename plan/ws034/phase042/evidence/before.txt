@@ -1,0 +1,11 @@
+TCPBULK size=100 received=100 corrupt=0 child=0 OK
+TCPBULK size=1024 received=1024 corrupt=0 child=0 OK
+TCPBULK size=1025 received=1025 corrupt=0 child=0 OK
+TCPBULK size=1600 received=1600 corrupt=0 child=0 OK
+TCPBULK size=4096 received=4096 corrupt=0 child=0 OK
+TCPBULK size=4097 received=4096 corrupt=0 child=0 FAIL
+size 4097 exit=1
+Alarm clock
+size 16384 exit=142
+TCPBULK size=65536 received=4096 corrupt=0 child=0 FAIL
+size 65536 exit=1

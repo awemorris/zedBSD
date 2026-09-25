@@ -15,10 +15,10 @@
  */
 
 #include "codec.h"
+#include <kern/kcrt.h>
 
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 /*
  * Reads one little-endian wire word.
@@ -190,7 +190,7 @@ drv_i915_wire_reply_bytes(
 	}
 
 	/* Copies the run and moves the cursor past it. */
-	memcpy(writer->base + writer->offset, data, bytes);
+	kern_memcpy(writer->base + writer->offset, data, bytes);
 	writer->offset += bytes;
 }
 
@@ -260,7 +260,7 @@ i915_vkc_array(
 
 	/* Takes the run for the current command and clears it. */
 	arena->used = start + bytes;
-	memset(arena->base + start, 0, bytes);
+	kern_memset(arena->base + start, 0, bytes);
 
 	/* Succeeded: the elements live until the command returns. */
 	return arena->base + start;
@@ -333,7 +333,7 @@ i915_vkc_read_bytes(
 
 	/* Copies the bytes; an empty run copies nothing. */
 	if (bytes != 0U)
-		memcpy(destination, reader->base + reader->offset, bytes);
+		kern_memcpy(destination, reader->base + reader->offset, bytes);
 
 	/* Moves the cursor past the bytes and their padding. */
 	reader->offset += padded;
@@ -351,7 +351,7 @@ i915_vkc_read_float(
 
 	/* Reads the bits and stores them unchanged. */
 	bits = drv_i915_wire_read_u32(reader);
-	memcpy(destination, &bits, sizeof(bits));
+	kern_memcpy(destination, &bits, sizeof(bits));
 }
 
 /*
@@ -407,6 +407,6 @@ i915_vkc_reply_float(
 	uint32_t bits;
 
 	/* Takes the bits without a floating-point register and writes them as a word. */
-	memcpy(&bits, source, sizeof(bits));
+	kern_memcpy(&bits, source, sizeof(bits));
 	drv_i915_wire_reply_u32(writer, bits);
 }

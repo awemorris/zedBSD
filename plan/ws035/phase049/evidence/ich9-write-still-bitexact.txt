@@ -1,0 +1,8 @@
+=== ich9-write-still-bitexact
+serial: logged in
+AUDIOTEST PLAY frames=96000 transferred=393264 underruns=0 ms=2006
+guest-status=0
+wav: format=1 channels=2 rate=48000 bits=16 frames=96611
+pattern: 96000 frames bit-exact from frame 0
+pattern: leading non-silent samples=0
+check-status=0

@@ -6,7 +6,7 @@ repo=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 cd "$repo"
 output=${1:-build/q309-wayland-swapchain}
 mkdir -p "$output/include"
-ln -sfn "$repo/libc/include/vulkan" "$output/include/vulkan"
+ln -sfn "$repo/include/libc/vulkan" "$output/include/vulkan"
 ln -sfn "$repo/include/uapi" "$output/include/uapi"
 flags='-std=c11 -D_GNU_SOURCE -Wall -Wextra -Werror -Wno-missing-field-initializers -Wdeclaration-after-statement -pthread -ffunction-sections -fdata-sections -Wl,--gc-sections -Wl,--wrap=pthread_cond_clockwait'
 sources='plan/ws014/tests/wayland-wsi-swapchain.c userland/base/libvulkan/objects.c userland/base/libvulkan/wsi.c userland/base/libvulkan/wsi-swapchain.c userland/base/libvulkan/wsi-image.c'

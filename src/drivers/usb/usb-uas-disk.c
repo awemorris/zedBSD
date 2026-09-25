@@ -11,18 +11,22 @@
  * USB Attached SCSI disk class, independent of Bulk-Only Transport.
  */
 
-#include <drivers/usb.h>
-#include <drivers/usb-uas.h>
-#include <drivers/usb-storage-scsi.h>
+#include <drivers/usb/usb.h>
+#include <drivers/usb/usb-uas.h>
+#include <drivers/usb/usb-storage-scsi.h>
 #include <kern/disk.h>
 #include <kern/partition.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
-#include <errno.h>
-#include <string.h>
+#include <uapi/errno.h>
 #include "kern/klog.h"
 #include "kern/kmem.h"
+#include <kern/kcrt.h>
+#include <kern/clock.h>
+
+#define UAS_CONTROL_POLL_MS 1000U
+#define UAS_CONTROL_STOP_MS 20000U
 
 /* A completed probe description, separate from the published disk state. */
 struct uas_media {
@@ -121,9 +125,9 @@ uas_command(
 	int owned_reset;
 	int error;
 
-	memset(&decoded, 0, sizeof(decoded));
+	kern_memset(&decoded, 0, sizeof(decoded));
 	if (sense != NULL)
-		memset(sense, 0, sizeof(*sense));
+		kern_memset(sense, 0, sizeof(*sense));
 	if (owner->disk != NULL) {
 		error = disk_media_status(owner->disk);
 		if (error != 0)
@@ -178,14 +182,14 @@ uas_probe(
 	unsigned attempt;
 	int error;
 
-	memset(&candidate, 0, sizeof(candidate));
+	kern_memset(&candidate, 0, sizeof(candidate));
 	error = uas_command(owner, inquiry_cdb, sizeof(inquiry_cdb), buffer, 36,
 	    DRV_USB_UAS_READ, &result, &sense);
 	if (error != 0)
 		return error;
 	if (result.transferred < 36 || (buffer[0] & 0x1f) != 0)
 		return ENODEV;
-	memcpy(candidate.inquiry, buffer, sizeof(candidate.inquiry));
+	kern_memcpy(candidate.inquiry, buffer, sizeof(candidate.inquiry));
 	/* Device capability remains available even when no medium is inserted. */
 	owner->removable = (buffer[1] & 0x80) != 0;
 	for (attempt = 0; attempt < 3; attempt++) {
@@ -223,7 +227,7 @@ uas_probe(
 	    candidate.block_size > owner->transport.capacity)
 		return EOVERFLOW;
 	candidate.blocks = last + 1;
-	memset(&cache, 0, sizeof(cache));
+	kern_memset(&cache, 0, sizeof(cache));
 	error = uas_command(owner, mode_cdb, sizeof(mode_cdb), buffer, sizeof(buffer),
 	    DRV_USB_UAS_READ, &result, &sense);
 	if (error == 0)
@@ -272,7 +276,7 @@ uas_reset_recover(struct uas_disk *owner)
 	owner->reset_probe = 0;
 	if (error != 0)
 		goto failed;
-	if (memcmp(media.inquiry, owner->inquiry, sizeof(media.inquiry)) != 0 ||
+	if (kern_memcmp(media.inquiry, owner->inquiry, sizeof(media.inquiry)) != 0 ||
 	    media.blocks != owner->blocks || media.block_size != owner->block_size ||
 	    media.policy != owner->policy || media.write_protected != owner->write_protected) {
 		error = ENODEV;
@@ -304,7 +308,7 @@ uas_submit(struct disk *disk, struct bio *bio)
 
 	owner = disk->d_data;
 	expected = 0;
-	memset(cdb, 0, sizeof(cdb));
+	kern_memset(cdb, 0, sizeof(cdb));
 	mutex_lock(&owner->lock);
 	if (owner->disk != NULL) {
 		error = disk_media_status(owner->disk);
@@ -421,7 +425,7 @@ uas_publish_media(struct uas_disk *owner, const struct uas_media *media)
 	if (error != 0)
 		goto failed;
 
-	memcpy(owner->inquiry, media->inquiry, sizeof(owner->inquiry));
+	kern_memcpy(owner->inquiry, media->inquiry, sizeof(owner->inquiry));
 	owner->blocks = media->blocks;
 	owner->block_size = media->block_size;
 	owner->policy = media->policy;
@@ -548,7 +552,8 @@ uas_control_worker(void *argument)
 			(void)uas_control_step(owner);
 		mutex_unlock(&owner->control_lock);
 		if (!atomic_raw_load_acquire(&owner->control_stopping))
-			sched_sleep(sched_ticks() + 100U);
+			sched_sleep(sched_ticks() +
+			    kern_ms_to_ticks(UAS_CONTROL_POLL_MS));
 	}
 }
 
@@ -565,7 +570,7 @@ uas_control_stop(struct uas_disk *owner)
 		return 0;
 	atomic_raw_store_release(&owner->control_stopping, 1U);
 	kernel_notify_task(worker->task);
-	deadline = sched_ticks() + 2000U;
+	deadline = sched_ticks() + kern_ms_to_ticks(UAS_CONTROL_STOP_MS);
 	while (atomic_raw_load_acquire((volatile unsigned *)&worker->state) != THREAD_ZOMBIE) {
 		if (sched_ticks() >= deadline)
 			return EBUSY;
@@ -606,7 +611,7 @@ uas_attach(struct drv_usb_interface *interface, const struct drv_usb_id *id)
 	    DRV_USB_UAS_SUPER_SPEED : DRV_USB_UAS_HIGH_SPEED, &capabilities);
 	if (error != 0)
 		return error;
-	memset(pipes, 0, sizeof(pipes));
+	kern_memset(pipes, 0, sizeof(pipes));
 	for (i = 0; i < drv_usb_interface_endpoint_count(interface); i++) {
 		endpoint = drv_usb_interface_endpoint(interface, i);
 		for (j = 0; j < 4; j++) {
@@ -617,7 +622,7 @@ uas_attach(struct drv_usb_interface *interface, const struct drv_usb_id *id)
 	owner = kern_malloc(sizeof(*owner));
 	if (owner == NULL)
 		return ENOMEM;
-	memset(owner, 0, sizeof(*owner));
+	kern_memset(owner, 0, sizeof(*owner));
 	owner->device = device;
 	for (i = 0; i < 4; i++)
 		owner->pipes[i] = pipes[i];
