@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q459（ws035-p054。acquire fence。uncleared で終え、ユーザーの判断で cleared）
+Last finished Queue: q460（ws035-p059 cleared。look and feel の疎通確認）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q459（2026-09-26）
+## 最新: q443〜q460（2026-09-26）
+
+[q460](queue-q460.md): ws035-p059 cleared。`zwl --glass`: 本体から離れて浮いたすりガラスのタイトルバー（題名・3 つの button、drag・最大化・閉じる・hover）、角丸と影、上部のバー（ハリボテ）、CPU で描く壁紙と縮小ぼかし（壁紙だけを透かす）、Inter（Google Fonts、git 外）を libtruetype で atlas に。p052〜p054 の回帰 PASS。
 
 [q459](queue-q459.md): ws035-p054 uncleared。`zed_gpu_buffer_v1` version 2 の `set_acquire_fence`（1 commit に 4 つまで）、zwl は fence を poll して終わった commit だけを採る、WSI は fence を付けて先に commit。QEMU で保留の間も他の窓と合成が進み、hold 6000 ms に対し 5991〜6034 ms 待った。`vkQueuePresentKHR` は変更前と同じ 31〜35 ms（元から完了を待たない）で、受け入れ 3 はユーザーの判断で読み替えて cleared（2026-09-26）。libc の `setvbuf(…, NULL, _IOLBF, 0)` を直した（BUG-055）。
 

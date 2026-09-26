@@ -28,7 +28,8 @@
 static VkResult compose_device(struct zwl_compose *compose);
 static VkResult compose_objects(struct zwl_compose *compose);
 static VkResult compose_pass(struct zwl_compose *compose);
-static VkResult compose_pipeline(struct zwl_compose *compose, enum zwl_draw draw, VkShaderModule vertex, VkShaderModule fragment);
+static VkResult compose_pipeline(struct zwl_compose *compose, enum zwl_draw draw, VkShaderModule vertex, VkShaderModule fragment, VkPipelineLayout layout, VkPipeline *pipeline);
+static VkResult compose_panel_pipeline(struct zwl_compose *compose);
 static VkResult compose_targets(struct zwl_compose *compose);
 static void compose_targets_destroy(struct zwl_compose *compose);
 static unsigned compose_windows(struct zwl_server *server, struct zwl_object **windows, unsigned capacity);
@@ -76,6 +77,15 @@ zwl_compose_open(
 	if (error != 0) {
 		printf("ZWL VULKAN_ERROR operation=arrow\n");
 		return EIO;
+	}
+
+	/* The glass look's wallpaper and glyphs; without them the plain look is drawn. */
+	if (server->glass) {
+		error = zwl_glass_open(server);
+		if (error != 0) {
+			printf("ZWL GLASS unavailable errno=%d\n", error);
+			server->glass = 0;
+		}
 	}
 
 	/* Succeeded: window mode can open its output. */
@@ -329,6 +339,7 @@ zwl_compose_close(
 	(void)zwl_compose_complete(server);
 	zwl_compose_output_close(server);
 	zwl_arrow_destroy(server);
+	zwl_glass_close(server);
 
 	/* The device's objects. */
 	if (compose->device != VK_NULL_HANDLE) {
@@ -336,6 +347,12 @@ zwl_compose_close(
 			if (compose->pipelines[index] != VK_NULL_HANDLE)
 				vkDestroyPipeline(compose->device, compose->pipelines[index], NULL);
 		}
+
+		/* The glass look's pipeline, layout and sampler. */
+		if (compose->panel_pipeline != VK_NULL_HANDLE)
+			vkDestroyPipeline(compose->device, compose->panel_pipeline, NULL);
+		vkDestroyPipelineLayout(compose->device, compose->panel_layout, NULL);
+		vkDestroySampler(compose->device, compose->linear_sampler, NULL);
 
 		/* The pass, layouts, sampler, pools and synchronization. */
 		vkDestroyRenderPass(compose->device, compose->pass, NULL);
@@ -503,6 +520,20 @@ compose_objects(
 	if (result != VK_SUCCESS)
 		return result;
 
+	/* Linear sampling for the glass look's blurred wallpaper, which is smaller than the output. */
+	sampler.magFilter = VK_FILTER_LINEAR;
+	sampler.minFilter = VK_FILTER_LINEAR;
+	result = vkCreateSampler(compose->device, &sampler, NULL, &compose->linear_sampler);
+	if (result != VK_SUCCESS)
+		return result;
+
+	/* The glass look's constants (place, image part, box, color, shape, output) reach both stages. */
+	range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	range.size = ZWL_PANEL_CONSTANTS * sizeof(float);
+	result = vkCreatePipelineLayout(compose->device, &layout, NULL, &compose->panel_layout);
+	if (result != VK_SUCCESS)
+		return result;
+
 	/* A descriptor set for each imported buffer, freed with it. */
 	memset(&pool_size, 0, sizeof(pool_size));
 	pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -621,21 +652,61 @@ compose_pass(
 	}
 
 	/* The opaque and the alpha pipelines. */
-	result = compose_pipeline(compose, ZWL_DRAW_OPAQUE, vertex, fragment);
+	result = compose_pipeline(compose, ZWL_DRAW_OPAQUE, vertex, fragment, compose->layout, &compose->pipelines[ZWL_DRAW_OPAQUE]);
 	if (result == VK_SUCCESS)
-		result = compose_pipeline(compose, ZWL_DRAW_ALPHA, vertex, fragment);
+		result = compose_pipeline(compose, ZWL_DRAW_ALPHA, vertex, fragment, compose->layout, &compose->pipelines[ZWL_DRAW_ALPHA]);
+	vkDestroyShaderModule(compose->device, vertex, NULL);
+	vkDestroyShaderModule(compose->device, fragment, NULL);
+	if (result != VK_SUCCESS)
+		return result;
+
+	/* The glass look's pipeline. */
+	result = compose_panel_pipeline(compose);
+	return result;
+}
+
+/* Creates the glass look's pipeline: its shaders, blended with premultiplied alpha. */
+static VkResult
+compose_panel_pipeline(
+	struct zwl_compose *compose)
+{
+	VkShaderModuleCreateInfo module;
+	VkShaderModule vertex;
+	VkShaderModule fragment;
+	VkResult result;
+
+	/* The shaders, needed only while the pipeline is created. */
+	memset(&module, 0, sizeof(module));
+	module.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	module.codeSize = sizeof(zwl_panel_vert);
+	module.pCode = zwl_panel_vert;
+	result = vkCreateShaderModule(compose->device, &module, NULL, &vertex);
+	if (result != VK_SUCCESS)
+		return result;
+	module.codeSize = sizeof(zwl_panel_frag);
+	module.pCode = zwl_panel_frag;
+	result = vkCreateShaderModule(compose->device, &module, NULL, &fragment);
+	if (result != VK_SUCCESS) {
+		vkDestroyShaderModule(compose->device, vertex, NULL);
+		return result;
+	}
+
+	/* Every shape is blended: the shader's output is premultiplied. */
+	result = compose_pipeline(compose, ZWL_DRAW_ALPHA, vertex, fragment, compose->panel_layout, &compose->panel_pipeline);
 	vkDestroyShaderModule(compose->device, vertex, NULL);
 	vkDestroyShaderModule(compose->device, fragment, NULL);
 	return result;
 }
 
-/* Creates the pipeline that draws a quad the given way. */
+/* Creates a pipeline that draws a quad the given way, with the given layout. */
 static VkResult
 compose_pipeline(
 	struct zwl_compose *compose,
 	enum zwl_draw draw,
 	VkShaderModule vertex,
-	VkShaderModule fragment)
+	VkShaderModule fragment,
+	VkPipelineLayout layout,
+	VkPipeline *result)
 {
 	static const VkDynamicState dynamic[] = {
 		VK_DYNAMIC_STATE_VIEWPORT,
@@ -724,9 +795,9 @@ compose_pipeline(
 	pipeline.pMultisampleState = &multisample;
 	pipeline.pColorBlendState = &blend;
 	pipeline.pDynamicState = &dynamic_state;
-	pipeline.layout = compose->layout;
+	pipeline.layout = layout;
 	pipeline.renderPass = compose->pass;
-	return vkCreateGraphicsPipelines(compose->device, VK_NULL_HANDLE, 1U, &pipeline, NULL, &compose->pipelines[draw]);
+	return vkCreateGraphicsPipelines(compose->device, VK_NULL_HANDLE, 1U, &pipeline, NULL, result);
 }
 
 /* Creates a view, a framebuffer and a present semaphore for each swapchain image. */
@@ -869,6 +940,20 @@ surface_image(
 	return surface->current->import;
 }
 
+/*
+ * Returns the image window mode samples for a surface, for the glass look.
+ */
+const struct zwl_import *
+zwl_compose_surface_image(
+	const struct zwl_object *surface)
+{
+	const struct zwl_import *image;
+
+	/* The same image as the plain look's. */
+	image = surface_image(surface);
+	return image;
+}
+
 /* Draws an image as a quad at a place on the output, its own size. */
 static void
 compose_quad(
@@ -957,9 +1042,17 @@ compose_record(
 	scissor.extent.height = compose->output.height;
 	vkCmdSetScissor(compose->command, 0U, 1U, &scissor);
 
-	/* The windows, bottom to top (painter's order), then the cursor over them. */
-	for (index = 0; index < count; index++)
-		compose_quad(server, compose->command, surface_image(windows[index]), windows[index]->x, windows[index]->y);
+	/*
+	 * The windows, bottom to top (painter's order): plainly, or in the glass
+	 * look with the wallpaper, their title bars and the system bar.  Then the
+	 * cursor over them.
+	 */
+	if (server->glass) {
+		zwl_glass_draw(server, compose->command, windows, count);
+	} else {
+		for (index = 0; index < count; index++)
+			compose_quad(server, compose->command, surface_image(windows[index]), windows[index]->x, windows[index]->y);
+	}
 	compose_cursor(server, compose->command);
 	vkCmdEndRenderPass(compose->command);
 

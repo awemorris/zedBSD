@@ -55,6 +55,7 @@ main(
 	server.gpu = -1;
 	server.frame_fd = -1;
 	server.gpu_path = "/dev/gpu0";
+	server.font_path = "/usr/share/fonts/zdesktop.ttf";
 	server.width = 320;
 	server.height = 240;
 	server.timeout_ms = 150000;
@@ -62,7 +63,7 @@ main(
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	error = parse_options(&server, count, arguments);
 	if (error != 0) {
-		fprintf(stderr, "usage: zwl [--socket=/path] [--gpu=/dev/gpu0] [--width=N] [--height=N] [--timeout=seconds] [--max-frames=N] [--log-frames] [--direct]\n");
+		fprintf(stderr, "usage: zwl [--socket=/path] [--gpu=/dev/gpu0] [--width=N] [--height=N] [--timeout=seconds] [--max-frames=N] [--log-frames] [--direct] [--glass] [--font=/path]\n");
 		return 2;
 	}
 
@@ -238,6 +239,23 @@ parse_options(
 		match = strcmp(argument, "--direct");
 		if (match == 0) {
 			server->direct = 1;
+			continue;
+		}
+
+		/* The glass look of window mode (ws035-p059). */
+		match = strcmp(argument, "--glass");
+		if (match == 0) {
+			server->glass = 1;
+			continue;
+		}
+
+		/* The glass look's font. */
+		match = strncmp(argument, "--font=", 7);
+		if (match == 0) {
+			/* An absolute path, kept in argv's storage. */
+			if (argument[7] != '/')
+				return EINVAL;
+			server->font_path = argument + 7;
 			continue;
 		}
 

@@ -316,6 +316,14 @@ zwl_seat_motion(
 {
 	struct zwl_object *object;
 	uint32_t words[3];
+	int taken;
+
+	/* In the glass look a window being moved takes the motion. */
+	if (server->glass && server->windowed) {
+		taken = zwl_glass_motion(server);
+		if (taken)
+			return;
+	}
 
 	/* Nobody hears motion while no surface has focus. */
 	if (server->focus == NULL)
@@ -350,6 +358,14 @@ zwl_seat_button(
 {
 	struct zwl_object *object;
 	uint32_t words[4];
+	int taken;
+
+	/* In the glass look the title bars and the desktop take their buttons. */
+	if (server->glass && server->windowed) {
+		taken = zwl_glass_button(server, button, state);
+		if (taken)
+			return;
+	}
 
 	/* A button without focus reaches nobody. */
 	if (server->focus == NULL)

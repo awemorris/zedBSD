@@ -12,7 +12,8 @@ import subprocess
 import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
-SHADERS = [("quad.vert", "zwl_quad_vert"), ("quad.frag", "zwl_quad_frag")]
+SHADERS = [("quad.vert", "zwl_quad_vert"), ("quad.frag", "zwl_quad_frag"),
+           ("panel.vert", "zwl_panel_vert"), ("panel.frag", "zwl_panel_frag")]
 
 
 def compile_shader(source):

@@ -65,6 +65,19 @@
 /* A window's place when the client chooses its size: cascaded from the centre by this step. */
 #define ZWL_CASCADE_STEP	32
 
+/*
+ * The glass look (glass.c): the system bar's height, a title bar's height,
+ * the gap between a title bar and its body, the margin at the output's edges,
+ * and so the highest a body may be.  BTN_LEFT is the left mouse button.
+ */
+#define ZWL_GLASS_BAR		34
+#define ZWL_GLASS_TITLE		44
+#define ZWL_GLASS_GAP		8
+#define ZWL_GLASS_MARGIN	12
+#define ZWL_GLASS_TOP		(ZWL_GLASS_BAR + ZWL_GLASS_MARGIN + ZWL_GLASS_TITLE + ZWL_GLASS_GAP)
+#define ZWL_BUTTON_LEFT		0x110U
+#define ZWL_TITLE_MAX		64U
+
 struct zwl_server;
 struct zwl_client;
 struct zwl_object;
@@ -209,6 +222,13 @@ struct zwl_object {
 	int32_t window_y;
 	/* A surface whose current image has not been shown yet. */
 	unsigned fresh;
+	/* The glass look: the toplevel's title, and a maximized window's place and size to go back to. */
+	char title[ZWL_TITLE_MAX];
+	unsigned maximized;
+	int32_t restore_x;
+	int32_t restore_y;
+	uint32_t restore_width;
+	uint32_t restore_height;
 	/* A wl_shm buffer's place in its pool (NULL for a GPU buffer), and a pool object's memory. */
 	struct zwl_shm_buffer *shm;
 	struct zwl_pool *pool;
@@ -336,6 +356,13 @@ struct zwl_server {
 	unsigned awaiting;
 	uint64_t frame_done_ms;
 	uint64_t frame_wait_ms;
+	/* The glass look: on, its font, the window being moved and where it was taken, the clock's minute. */
+	unsigned glass;
+	const char *font_path;
+	struct zwl_object *drag;
+	int32_t drag_dx;
+	int32_t drag_dy;
+	int64_t clock_minute;
 	/* The cursor: a client's surface, zdesktop's arrow when there is none, or hidden. */
 	struct zwl_object *cursor_surface;
 	int32_t cursor_hotspot_x;
@@ -388,6 +415,10 @@ void zwl_arrow_destroy(struct zwl_server *server);
 struct zwl_object *zwl_top_window(struct zwl_server *server);
 int zwl_window_send_configure(struct zwl_object *surface);
 int zwl_fence_ready(struct zwl_server *server, struct zwl_object *surface);
+int zwl_glass_button(struct zwl_server *server, uint32_t button, uint32_t state);
+int zwl_glass_motion(struct zwl_server *server);
+void zwl_glass_place(struct zwl_server *server, struct zwl_object *surface, int32_t width, int32_t height, int32_t step);
+void zwl_glass_tick(struct zwl_server *server);
 uint32_t zwl_next_serial(struct zwl_server *server);
 int zwl_seat_bind(struct zwl_object *seat);
 int zwl_seat_request(struct zwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);

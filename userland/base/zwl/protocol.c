@@ -777,12 +777,17 @@ shell_request(
 		break;
 	case 2:
 	case 3:
-		/* Titles and application IDs have canonical strings but no decoration output. */
+		/* Titles and application IDs are canonical strings. */
 		error = string_at(bytes, size, 0, &text, &offset);
 		if (error != 0 || offset != size)
 			return EPROTO;
 
-		/* The selected compositor has no titlebar or task switcher to update. */
+		/* The title is kept for the glass look's title bar (cut to fit); the application ID is not used. */
+		if (opcode == 2U) {
+			strncpy(surface->title, text, sizeof(surface->title) - 1U);
+			surface->title[sizeof(surface->title) - 1U] = '\0';
+			object->client->server->dirty = 1;
+		}
 		break;
 	case 11:
 		/* A fullscreen target is one nullable output identity. */
@@ -976,6 +981,13 @@ zwl_window_send_configure(
 		configure[1] = server->height;
 		configure[2] = 8;
 		configure[3] = 2;
+		configure[4] = 4;
+		size = 5U * sizeof(uint32_t);
+	} else if (surface->maximized) {
+		configure[0] = surface->window_width;
+		configure[1] = surface->window_height;
+		configure[2] = 8;
+		configure[3] = 1;
 		configure[4] = 4;
 		size = 5U * sizeof(uint32_t);
 	} else {

@@ -255,6 +255,10 @@ zwl_object_destroy(
 			server->awaiting--;
 		}
 
+		/* A window being moved is not moved any more. */
+		if (server->drag == object)
+			server->drag = NULL;
+
 		/* Its fences are not waited for any more. */
 		for (index = 0; index < object->acquire_count; index++)
 			close(object->acquire[index].fd);

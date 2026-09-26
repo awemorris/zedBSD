@@ -35,7 +35,7 @@ static int pool_create(struct zwl_object *shm, const unsigned char *bytes, size_
 static int pool_buffer(struct zwl_object *pool, const unsigned char *bytes, size_t size);
 static int pool_resize(struct zwl_object *pool, const unsigned char *bytes, size_t size);
 static int surface_upload(struct zwl_server *server, struct zwl_object *surface);
-static VkResult image_create(struct zwl_compose *compose, uint32_t width, uint32_t height, struct zwl_import *import);
+static VkResult image_create(struct zwl_compose *compose, uint32_t width, uint32_t height, VkSampler sampler, struct zwl_import *import);
 static VkResult image_layout(struct zwl_compose *compose, VkImage image);
 static void image_release(struct zwl_compose *compose, struct zwl_import *import);
 static uint32_t word(const unsigned char *bytes, size_t offset);
@@ -227,7 +227,7 @@ zwl_arrow_create(
 	arrow = calloc(1, sizeof(*arrow));
 	if (arrow == NULL)
 		return ENOMEM;
-	result = image_create(server->compose, ARROW_WIDTH, ARROW_HEIGHT, arrow);
+	result = image_create(server->compose, ARROW_WIDTH, ARROW_HEIGHT, server->compose->sampler, arrow);
 	if (result != VK_SUCCESS) {
 		image_release(server->compose, arrow);
 		free(arrow);
@@ -268,6 +268,37 @@ zwl_arrow_destroy(
 	image_release(server->compose, server->arrow);
 	free(server->arrow);
 	server->arrow = NULL;
+}
+
+/*
+ * Creates a host-written image for zdesktop's own drawing (the glass look),
+ * sampled with the given sampler.
+ */
+VkResult
+zwl_host_image_create(
+	struct zwl_compose *compose,
+	uint32_t width,
+	uint32_t height,
+	VkSampler sampler,
+	struct zwl_import *import)
+{
+	VkResult result;
+
+	/* The same image as a wl_shm copy's. */
+	result = image_create(compose, width, height, sampler, import);
+	return result;
+}
+
+/*
+ * Releases an image zwl_host_image_create made.
+ */
+void
+zwl_host_image_release(
+	struct zwl_compose *compose,
+	struct zwl_import *import)
+{
+	/* Whatever part of it was made. */
+	image_release(compose, import);
 }
 
 /* Maps a client's fd as a new pool (wl_shm.create_pool). */
@@ -454,7 +485,7 @@ surface_upload(
 		image = calloc(1, sizeof(*image));
 		if (image == NULL)
 			return ENOMEM;
-		result = image_create(server->compose, shm->width, shm->height, image);
+		result = image_create(server->compose, shm->width, shm->height, server->compose->sampler, image);
 		if (result != VK_SUCCESS) {
 			printf("ZWL VULKAN_ERROR operation=shm_image result=%d\n", (int)result);
 			image_release(server->compose, image);
@@ -517,6 +548,7 @@ image_create(
 	struct zwl_compose *compose,
 	uint32_t width,
 	uint32_t height,
+	VkSampler sampler,
 	struct zwl_import *import)
 {
 	VkPhysicalDeviceMemoryProperties memory;
@@ -618,7 +650,7 @@ image_create(
 	if (result != VK_SUCCESS)
 		return result;
 	memset(&image_info, 0, sizeof(image_info));
-	image_info.sampler = compose->sampler;
+	image_info.sampler = sampler;
 	image_info.imageView = import->view;
 	image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 	memset(&write, 0, sizeof(write));

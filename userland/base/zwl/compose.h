@@ -30,6 +30,9 @@
 #define ZWL_SWAPCHAIN_MAX	8U
 #define ZWL_FRAME_WINDOWS	64U
 
+/* The glass look's push constants: six vec4 (see shaders/panel.frag). */
+#define ZWL_PANEL_CONSTANTS	24U
+
 /* Bound the buffers that hold a descriptor set at once. */
 #define ZWL_DESCRIPTOR_MAX	256U
 
@@ -61,6 +64,9 @@ struct zwl_import {
 	VkDeviceSize row_pitch;
 };
 
+/* The glass look's images and glyphs (glass.c). */
+struct zwl_glass;
+
 /* The Vulkan device, the display output and the frame in flight. */
 struct zwl_compose {
 	VkInstance instance;
@@ -73,6 +79,11 @@ struct zwl_compose {
 	VkPipelineLayout layout;
 	VkPipeline pipelines[2];
 	VkSampler sampler;
+	/* The glass look's pipeline (shapes, glass, text) and the sampler of its blurred wallpaper. */
+	VkPipelineLayout panel_layout;
+	VkPipeline panel_pipeline;
+	VkSampler linear_sampler;
+	struct zwl_glass *glass;
 	VkDescriptorPool descriptors;
 	VkCommandPool pool;
 	VkCommandBuffer command;
@@ -91,5 +102,17 @@ struct zwl_compose {
 	uint64_t frame_start_cycles;
 	uint64_t frame_start_ms;
 };
+
+/* Host-written images (shm.c), sampled with the given sampler. */
+VkResult zwl_host_image_create(struct zwl_compose *compose, uint32_t width, uint32_t height, VkSampler sampler, struct zwl_import *import);
+void zwl_host_image_release(struct zwl_compose *compose, struct zwl_import *import);
+
+/* The glass look (glass.c). */
+int zwl_glass_open(struct zwl_server *server);
+void zwl_glass_close(struct zwl_server *server);
+void zwl_glass_draw(struct zwl_server *server, VkCommandBuffer command, struct zwl_object **windows, unsigned count);
+
+/* The image window mode samples for a surface (compose.c). */
+const struct zwl_import *zwl_compose_surface_image(const struct zwl_object *surface);
 
 #endif

@@ -363,6 +363,10 @@ zwl_schedule(
 		return;
 	}
 
+	/* The glass look's clock turns over. */
+	if (server->glass)
+		zwl_glass_tick(server);
+
 	/* Every committed surface takes its new image. */
 	for (client = server->clients; client != NULL; client = client->next) {
 		if (client->fatal)
@@ -622,6 +626,14 @@ place_window(
 	/* The cascade step of this window. */
 	step = ZWL_CASCADE_STEP * (int32_t)(server->windows % 8U);
 	server->windows++;
+
+	/* The glass look keeps the space of the system bar and a title bar free. */
+	if (server->glass) {
+		zwl_glass_place(server, surface, width, height, step);
+		return;
+	}
+
+	/* Centred on the output. */
 	surface->x = ((int32_t)server->width - width) / 2 + step;
 	surface->y = ((int32_t)server->height - height) / 2 + step;
 	if (surface->x < 0)
