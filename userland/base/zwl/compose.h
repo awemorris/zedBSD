@@ -34,7 +34,7 @@
 #define ZWL_PANEL_CONSTANTS	24U
 
 /* Bound the buffers that hold a descriptor set at once. */
-#define ZWL_DESCRIPTOR_MAX	256U
+#define ZWL_DESCRIPTOR_MAX	512U
 
 /* The window-mode background, a dark blue-grey (0x20, 0x30, 0x40). */
 #define ZWL_BACKGROUND_RED	(32.0f / 255.0f)
@@ -56,6 +56,8 @@ struct zwl_import {
 	VkDeviceMemory memory;
 	VkImageView view;
 	VkDescriptorSet set;
+	/* The same image sampled linearly, for drawing it smaller (Wiseview). */
+	VkDescriptorSet linear_set;
 	uint32_t width;
 	uint32_t height;
 	enum zwl_draw draw;
@@ -111,6 +113,9 @@ void zwl_host_image_release(struct zwl_compose *compose, struct zwl_import *impo
 int zwl_glass_open(struct zwl_server *server);
 void zwl_glass_close(struct zwl_server *server);
 void zwl_glass_draw(struct zwl_server *server, VkCommandBuffer command, struct zwl_object **windows, unsigned count);
+
+/* Gives an image a second, linearly sampled descriptor set (compose.c). */
+VkResult zwl_compose_linear_set(struct zwl_compose *compose, struct zwl_import *import);
 
 /* The image window mode samples for a surface (compose.c). */
 const struct zwl_import *zwl_compose_surface_image(const struct zwl_object *surface);

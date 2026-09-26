@@ -381,6 +381,20 @@ struct zwl_server {
 	unsigned anim_docking;
 	int32_t anim_from[4];
 	int32_t anim_to[4];
+	/*
+	 * Wiseview (shell.c): how far it is open (0 closed, 1 open) when settled,
+	 * a gesture from the bottom edge and where it started, the animation to
+	 * a settled value (from, to, when it started), and the window that was
+	 * on top when it opened.
+	 */
+	float wiseview;
+	unsigned wiseview_gesture;
+	int32_t wiseview_start_y;
+	unsigned wiseview_moving;
+	float wiseview_from;
+	float wiseview_to;
+	uint64_t wiseview_start_ms;
+	struct zwl_object *wiseview_current;
 	/* The cursor: a client's surface, zdesktop's arrow when there is none, or hidden. */
 	struct zwl_object *cursor_surface;
 	int32_t cursor_hotspot_x;

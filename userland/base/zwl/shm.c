@@ -662,8 +662,9 @@ image_create(
 	write.pImageInfo = &image_info;
 	vkUpdateDescriptorSets(compose->device, 1U, &write, 0U, NULL);
 
-	/* Succeeded. */
-	return VK_SUCCESS;
+	/* And the same image sampled linearly. */
+	result = zwl_compose_linear_set(compose, import);
+	return result;
 }
 
 /* Moves a new host-written image to the general layout, keeping what the host wrote. */
@@ -738,6 +739,8 @@ image_release(
 	/* Each object, in the reverse order of its making. */
 	if (import->set != VK_NULL_HANDLE)
 		(void)vkFreeDescriptorSets(compose->device, compose->descriptors, 1U, &import->set);
+	if (import->linear_set != VK_NULL_HANDLE)
+		(void)vkFreeDescriptorSets(compose->device, compose->descriptors, 1U, &import->linear_set);
 	if (import->view != VK_NULL_HANDLE)
 		vkDestroyImageView(compose->device, import->view, NULL);
 	if (import->image != VK_NULL_HANDLE)

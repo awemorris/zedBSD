@@ -941,6 +941,49 @@ surface_image(
 }
 
 /*
+ * Gives an image a second descriptor set with the linear sampler, for
+ * drawing it smaller than its size (Wiseview).  The set is freed with the
+ * image's own.
+ */
+VkResult
+zwl_compose_linear_set(
+	struct zwl_compose *compose,
+	struct zwl_import *import)
+{
+	VkDescriptorSetAllocateInfo set;
+	VkDescriptorImageInfo image_info;
+	VkWriteDescriptorSet write;
+	VkResult result;
+
+	/* The set. */
+	memset(&set, 0, sizeof(set));
+	set.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	set.descriptorPool = compose->descriptors;
+	set.descriptorSetCount = 1U;
+	set.pSetLayouts = &compose->set_layout;
+	result = vkAllocateDescriptorSets(compose->device, &set, &import->linear_set);
+	if (result != VK_SUCCESS)
+		return result;
+
+	/* The image with the linear sampler. */
+	memset(&image_info, 0, sizeof(image_info));
+	image_info.sampler = compose->linear_sampler;
+	image_info.imageView = import->view;
+	image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	memset(&write, 0, sizeof(write));
+	write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	write.dstSet = import->linear_set;
+	write.dstBinding = 0U;
+	write.descriptorCount = 1U;
+	write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	write.pImageInfo = &image_info;
+	vkUpdateDescriptorSets(compose->device, 1U, &write, 0U, NULL);
+
+	/* Succeeded. */
+	return VK_SUCCESS;
+}
+
+/*
  * Returns the image window mode samples for a surface, for the glass look.
  */
 const struct zwl_import *
@@ -1053,6 +1096,8 @@ compose_record(
 		for (index = 0; index < count; index++)
 			compose_quad(server, compose->command, surface_image(windows[index]), windows[index]->x, windows[index]->y);
 	}
+
+	/* The cursor over everything. */
 	compose_cursor(server, compose->command);
 	vkCmdEndRenderPass(compose->command);
 

@@ -26,6 +26,15 @@
  * docked window; towards the right four virtual desktops; at the right edge
  * the signal, the battery and the clock.  The launcher, the desktops, the
  * status and minimize are drawn only (a mock-up).
+ *
+ * Wiseview (p063, plan/ws035/wiseman-design.md) is the overview of the
+ * windows: dragging up from the bottom edge opens it, following the pointer
+ * (how far it is open is the distance moved over WISEVIEW_DISTANCE); let go
+ * past WISEVIEW_THRESHOLD it opens, otherwise it closes.  Each window moves
+ * from its place to a tile of a grid over the blurred, darkened wallpaper,
+ * the most recently raised first, with a glass label of its title under it.
+ * A click on a tile brings that window to the top, a click elsewhere closes
+ * Wiseview, and a tile's close button closes its window.
  */
 
 #include "glass.h"
@@ -59,6 +68,21 @@
 #define DESKTOP_WIDTH		40
 #define DESKTOP_HEIGHT		20
 #define DESKTOP_GAP		6
+
+/* Wiseview: where the gesture starts, how far it goes, when it opens, and how long it settles. */
+#define WISEVIEW_EDGE		20
+#define WISEVIEW_DISTANCE	240.0f
+#define WISEVIEW_THRESHOLD	0.35f
+#define WISEVIEW_MS		200U
+
+/* Wiseview's grid: side, top (under the header) and bottom margins, the gutter, the label under a tile. */
+#define WISEVIEW_SIDE		56
+#define WISEVIEW_TOP		(ZWL_GLASS_BAR + 56)
+#define WISEVIEW_BOTTOM		72
+#define WISEVIEW_GUTTER		24
+#define WISEVIEW_LABEL		46
+#define WISEVIEW_RADIUS		16.0f
+#define WISEVIEW_WINDOWS	64U
 
 /* Where the pointer is over a window. */
 enum shell_hit {
@@ -119,6 +143,14 @@ static void window_undock(struct zwl_server *server, struct zwl_object *surface,
 static void window_configure(struct zwl_object *surface);
 static unsigned double_click(struct zwl_server *server, struct zwl_object *surface);
 static int bar_press(struct zwl_server *server);
+static float wiseview_progress(struct zwl_server *server);
+static void wiseview_settle(struct zwl_server *server, float from, float to);
+static unsigned wiseview_windows(struct zwl_server *server, struct zwl_object **windows, unsigned capacity);
+static void wiseview_layout(struct zwl_server *server, struct zwl_object **windows, unsigned count, struct shell_rect *tiles);
+static void draw_wiseview(struct zwl_server *server, VkCommandBuffer command, struct zwl_object **stacked, unsigned stacked_count, float progress);
+static void draw_tile(struct zwl_server *server, VkCommandBuffer command, struct zwl_object *surface, const struct shell_rect *tile, float progress, unsigned current, unsigned over);
+static int wiseview_button(struct zwl_server *server, uint32_t button, uint32_t state);
+static void wiseview_log(struct zwl_server *server);
 
 /*
  * Draws the wallpaper, the windows from the bottom with their shadows and
@@ -136,6 +168,7 @@ zwl_glass_draw(
 	struct shell_bar bar;
 	unsigned index;
 	unsigned focused;
+	float progress;
 
 	/* The wallpaper over the whole output. */
 	glass_shape_init(&shape, 0.0f, 0.0f, (float)server->width, (float)server->height);
@@ -146,6 +179,14 @@ zwl_glass_draw(
 
 	/* The system bar's layout, which a docking title bar moves to. */
 	bar_layout(server, &bar);
+
+	/* Wiseview, opening, open or closing, takes the windows' place. */
+	progress = wiseview_progress(server);
+	if (progress > 0.0f) {
+		draw_wiseview(server, command, windows, count, progress);
+		draw_system_bar(server, command, &bar);
+		return;
+	}
 
 	/* The windows; the top one has the focus; where a dragged one would dock shows just under it. */
 	top = zwl_top_window(server);
@@ -183,6 +224,21 @@ zwl_glass_button(
 	enum shell_hit hit;
 	unsigned second;
 	int pressed;
+
+	/* Wiseview, open or being opened, takes every button. */
+	if (server->wiseview_gesture || server->wiseview > 0.0f || server->wiseview_moving) {
+		pressed = wiseview_button(server, button, state);
+		return pressed;
+	}
+
+	/* A left press at the bottom edge starts opening Wiseview. */
+	if (state != 0 && button == ZWL_BUTTON_LEFT && server->pointer_y >= (int32_t)server->height - WISEVIEW_EDGE) {
+		server->wiseview_gesture = 1;
+		server->wiseview_start_y = server->pointer_y;
+		server->wiseview_current = zwl_top_window(server);
+		server->dirty = 1;
+		return 1;
+	}
 
 	/* A release ends a move (docking in the system bar) or a pull. */
 	if (state == 0) {
@@ -282,6 +338,10 @@ zwl_glass_motion(
 	/* The hover of buttons, the dock hint and the moves are redrawn. */
 	server->dirty = 1;
 
+	/* Wiseview follows the gesture, and hears the pointer while it is open. */
+	if (server->wiseview_gesture || server->wiseview > 0.0f || server->wiseview_moving)
+		return 1;
+
 	/* A docked title pulled far enough down comes off under the pointer, and the move goes on. */
 	surface = server->pull;
 	if (surface != NULL) {
@@ -363,6 +423,7 @@ void
 zwl_glass_tick(
 	struct zwl_server *server)
 {
+	uint64_t elapsed;
 	float progress;
 	time_t now;
 
@@ -372,6 +433,20 @@ zwl_glass_tick(
 		server->dirty = 1;
 		if (progress >= 1.0f)
 			server->anim = NULL;
+	}
+
+	/* Wiseview draws every frame while it settles; at the end its value is where it went. */
+	if (server->wiseview_moving) {
+		server->dirty = 1;
+		elapsed = zwl_milliseconds() - server->wiseview_start_ms;
+		if (elapsed >= WISEVIEW_MS) {
+			server->wiseview_moving = 0;
+			server->wiseview = server->wiseview_to;
+			if (server->wiseview > 0.0f)
+				wiseview_log(server);
+			else
+				printf("ZWL WISEVIEW closed\n");
+		}
 	}
 
 	/* The minute of the clock. */
@@ -757,6 +832,8 @@ draw_system_bar(
 	static const float line[4] = { 0.12f, 0.16f, 0.24f, 0.18f };
 	struct glass_shape shape;
 	struct zwl_object *docked;
+	float label[4];
+	float progress;
 	int button;
 	int over;
 
@@ -796,6 +873,15 @@ draw_system_bar(
 			draw_sign(server, command, button, bar->buttons[button], ZWL_GLASS_BAR / 2, 1, over == button, 1.0f, dark);
 	}
 
+	/* Wiseview's name where a docked title would be. */
+	progress = wiseview_progress(server);
+	if (progress > 0.0f) {
+		memcpy(label, dark, sizeof(label));
+		label[3] = progress;
+		glass_draw_solid(server, command, (float)bar->menu_line, 9.0f, 1.0f, 16.0f, 0.0f, line);
+		glass_draw_text(server, command, SIZE_TITLE, bar->title_x, 23, "Wiseview", 200, label);
+	}
+
 	/* The desktops, then the status. */
 	draw_desktops(server, command, bar, line);
 	draw_status(server, command, bar, dark);
@@ -816,6 +902,7 @@ draw_desktops(
 	static const float pill[4] = { 1.0f, 1.0f, 1.0f, 0.45f };
 	static const float current[4] = { 0.25f, 0.52f, 0.98f, 1.0f };
 	struct glass_shape shape;
+	float progress;
 	int32_t x;
 	int desktop;
 
@@ -823,6 +910,22 @@ draw_desktops(
 	glass_draw_solid(server, command, (float)bar->desktops_line, 9.0f, 1.0f, 16.0f, 0.0f, line);
 	glass_draw_solid(server, command, (float)bar->status_line, 9.0f, 1.0f, 16.0f, 0.0f, line);
 	glass_draw_solid(server, command, (float)bar->desktops_x, 4.0f, (float)bar->desktops_width, (float)(ZWL_GLASS_BAR - 8), 10.0f, pill);
+
+	/* Wiseview brings the desktops forward with a blue edge. */
+	progress = wiseview_progress(server);
+	if (progress > 0.0f) {
+		glass_shape_init(&shape, (float)bar->desktops_x, 4.0f, (float)bar->desktops_width, (float)(ZWL_GLASS_BAR - 8));
+		shape.quad[0] -= 1.0f;
+		shape.quad[1] -= 1.0f;
+		shape.quad[2] += 2.0f;
+		shape.quad[3] += 2.0f;
+		shape.mode = MODE_RING;
+		shape.radius = 10.0f;
+		shape.soft = 1.5f;
+		memcpy(shape.color, current, sizeof(shape.color));
+		shape.opacity = progress * 0.6f;
+		glass_shape_draw(server, command, &shape);
+	}
 
 	/* Each desktop's picture; the others are paler. */
 	for (desktop = 0; desktop < DESKTOPS; desktop++) {
@@ -1205,6 +1308,10 @@ docked_window(
 {
 	struct zwl_object *top;
 
+	/* None while Wiseview shows. */
+	if (server->wiseview_gesture || server->wiseview > 0.0f || server->wiseview_moving)
+		return NULL;
+
 	/* The top window. */
 	top = zwl_top_window(server);
 	if (top == NULL || !top->maximized || server->anim == top)
@@ -1423,4 +1530,488 @@ bar_press(
 	/* A single press may become a pull. */
 	server->pull = surface;
 	return 1;
+}
+
+/*
+ * How far Wiseview is open, from 0 to 1: following the gesture, on its way
+ * to where it settles (eased), or settled.
+ */
+static float
+wiseview_progress(
+	struct zwl_server *server)
+{
+	uint64_t elapsed;
+	float t;
+	float value;
+
+	/* The gesture: the distance moved up from where it started. */
+	if (server->wiseview_gesture) {
+		value = (float)(server->wiseview_start_y - server->pointer_y) / WISEVIEW_DISTANCE;
+		if (value < 0.0f)
+			value = 0.0f;
+		if (value > 1.0f)
+			value = 1.0f;
+		return value;
+	}
+
+	/* Settled. */
+	if (!server->wiseview_moving)
+		return server->wiseview;
+
+	/* Settling, eased out. */
+	elapsed = zwl_milliseconds() - server->wiseview_start_ms;
+	t = 1.0f;
+	if (elapsed < WISEVIEW_MS)
+		t = (float)elapsed / (float)WISEVIEW_MS;
+	t = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
+	return server->wiseview_from + (server->wiseview_to - server->wiseview_from) * t;
+}
+
+/* Starts Wiseview settling from one value to another (0 closed, 1 open). */
+static void
+wiseview_settle(
+	struct zwl_server *server,
+	float from,
+	float to)
+{
+	/* The animation, drawn every frame by zwl_glass_tick. */
+	server->wiseview_from = from;
+	server->wiseview_to = to;
+	server->wiseview_start_ms = zwl_milliseconds();
+	server->wiseview_moving = 1;
+	server->wiseview = from;
+	server->dirty = 1;
+}
+
+/*
+ * Collects the windows Wiseview shows, the most recently raised first:
+ * mapped toplevel windows with an image.
+ */
+static unsigned
+wiseview_windows(
+	struct zwl_server *server,
+	struct zwl_object **windows,
+	unsigned capacity)
+{
+	struct zwl_client *client;
+	struct zwl_object *surface;
+	unsigned count;
+	unsigned index;
+	unsigned at;
+
+	/* Every window, by falling map order. */
+	count = 0;
+	for (client = server->clients; client != NULL; client = client->next) {
+		if (client->fatal)
+			continue;
+		for (surface = client->objects; surface != NULL; surface = surface->next) {
+			/* Only a window with an image. */
+			if (surface->kind != ZWL_SURFACE ||
+			    surface->dead ||
+			    !surface->mapped ||
+			    surface->role == NULL ||
+			    surface->cursor_role ||
+			    surface->current == NULL)
+				continue;
+
+			/* Inserted after those raised later. */
+			if (count == capacity)
+				break;
+			at = count;
+			while (at > 0 && windows[at - 1]->map_order < surface->map_order)
+				at--;
+			for (index = count; index > at; index--)
+				windows[index] = windows[index - 1];
+			windows[at] = surface;
+			count++;
+		}
+	}
+
+	/* Succeeded. */
+	return count;
+}
+
+/*
+ * Lays the windows out as Wiseview's grid: 1 column for one window, 2 for up
+ * to 4, 3 for up to 9, 4 beyond; each tile keeps its window's shape, fills
+ * its cell at most (and at most 42 % of the output's width and 36 % of its
+ * height), and sits in the middle of its cell; a short last row is centred.
+ * The window that was on top is 4 % larger.
+ */
+static void
+wiseview_layout(
+	struct zwl_server *server,
+	struct zwl_object **windows,
+	unsigned count,
+	struct shell_rect *tiles)
+{
+	int32_t columns;
+	int32_t rows;
+	int32_t width;
+	int32_t height;
+	int32_t cell_width;
+	int32_t cell_height;
+	int32_t row;
+	int32_t column;
+	int32_t in_row;
+	int32_t row_x;
+	float scale;
+	float limit;
+	unsigned index;
+
+	/* The columns and rows. */
+	if (count == 0)
+		return;
+	columns = 4;
+	if (count <= 9U)
+		columns = 3;
+	if (count <= 4U)
+		columns = 2;
+	if (count == 1U)
+		columns = 1;
+	rows = ((int32_t)count + columns - 1) / columns;
+
+	/* The cells, with room for the label under each tile. */
+	cell_width = ((int32_t)server->width - 2 * WISEVIEW_SIDE - (columns - 1) * WISEVIEW_GUTTER) / columns;
+	cell_height = ((int32_t)server->height - WISEVIEW_TOP - WISEVIEW_BOTTOM - (rows - 1) * WISEVIEW_GUTTER) / rows - WISEVIEW_LABEL;
+
+	/* Each tile. */
+	for (index = 0; index < count; index++) {
+		window_size(windows[index], &width, &height);
+		if (width <= 0 || height <= 0) {
+			width = 1;
+			height = 1;
+		}
+
+		/* The largest scale that fits the cell and the limits. */
+		scale = (float)cell_width / (float)width;
+		limit = (float)cell_height / (float)height;
+		if (limit < scale)
+			scale = limit;
+		limit = 0.42f * (float)server->width / (float)width;
+		if (limit < scale)
+			scale = limit;
+		limit = 0.36f * (float)server->height / (float)height;
+		if (limit < scale)
+			scale = limit;
+		if (windows[index] == server->wiseview_current)
+			scale *= 1.04f;
+
+		/* Its cell; a short last row is centred. */
+		row = (int32_t)index / columns;
+		column = (int32_t)index % columns;
+		in_row = columns;
+		if (row == rows - 1)
+			in_row = (int32_t)count - row * columns;
+		row_x = ((int32_t)server->width - in_row * cell_width - (in_row - 1) * WISEVIEW_GUTTER) / 2;
+
+		/* In the middle of the cell. */
+		tiles[index].width = (int32_t)((float)width * scale);
+		tiles[index].height = (int32_t)((float)height * scale);
+		tiles[index].x = row_x + column * (cell_width + WISEVIEW_GUTTER) + (cell_width - tiles[index].width) / 2;
+		tiles[index].y = WISEVIEW_TOP + row * (cell_height + WISEVIEW_LABEL + WISEVIEW_GUTTER) + (cell_height - tiles[index].height) / 2;
+	}
+}
+
+/*
+ * Draws Wiseview as far as it is open: the wallpaper blurred and darkened,
+ * each window on its way from its place to its tile (the stacking order
+ * kept, so the top window stays in front while they move), the labels, the
+ * header and the footer.
+ */
+static void
+draw_wiseview(
+	struct zwl_server *server,
+	VkCommandBuffer command,
+	struct zwl_object **stacked,
+	unsigned stacked_count,
+	float progress)
+{
+	static const float shade[4] = { 0.0f, 0.02f, 0.06f, 0.08f };
+	static const float dark[4] = { 0.10f, 0.14f, 0.22f, 1.0f };
+	struct zwl_object *windows[WISEVIEW_WINDOWS];
+	struct shell_rect tiles[WISEVIEW_WINDOWS];
+	struct glass_shape shape;
+	struct shell_rect body;
+	struct shell_rect rect;
+	char header[48];
+	float ink[4];
+	unsigned count;
+	unsigned index;
+	unsigned slot;
+	unsigned over;
+	int32_t width;
+
+	/* The blurred wallpaper over the sharp one, and a little darker. */
+	glass_shape_init(&shape, 0.0f, 0.0f, (float)server->width, (float)server->height);
+	shape.mode = MODE_GLASS;
+	shape.opacity = progress;
+	glass_shape_draw(server, command, &shape);
+	glass_draw_solid(server, command, 0.0f, 0.0f, (float)server->width, (float)server->height, 0.0f, shade);
+
+	/* The windows and their tiles. */
+	count = wiseview_windows(server, windows, WISEVIEW_WINDOWS);
+	wiseview_layout(server, windows, count, tiles);
+
+	/* In stacking order, each window between its place and its tile. */
+	for (index = 0; index < stacked_count; index++) {
+		/* Its tile. */
+		for (slot = 0; slot < count; slot++) {
+			if (windows[slot] == stacked[index])
+				break;
+		}
+
+		/* A window without a tile is not shown. */
+		if (slot == count)
+			continue;
+
+		/* On its way. */
+		body_rect(server, stacked[index], &body);
+		lerp_rect(&body, &tiles[slot], progress, &rect);
+		over = 0;
+		if (progress >= 1.0f &&
+		    server->pointer_x >= tiles[slot].x && server->pointer_x < tiles[slot].x + tiles[slot].width &&
+		    server->pointer_y >= tiles[slot].y && server->pointer_y < tiles[slot].y + tiles[slot].height)
+			over = 1;
+		draw_tile(server, command, stacked[index], &rect, progress, stacked[index] == server->wiseview_current, over);
+	}
+
+	/* The header: what is shown, and how many. */
+	memcpy(ink, dark, sizeof(ink));
+	ink[3] = progress;
+	if (count == 1U)
+		(void)snprintf(header, sizeof(header), "Wiseview  -  1 window");
+	else
+		(void)snprintf(header, sizeof(header), "Wiseview  -  %u windows", count);
+	glass_draw_text(server, command, SIZE_TITLE, WISEVIEW_SIDE, ZWL_GLASS_BAR + 34, header, 400, ink);
+
+	/* One window alone: say there are no others. */
+	if (count == 1U)
+		glass_draw_text(server, command, SIZE_BAR, WISEVIEW_SIDE, ZWL_GLASS_BAR + 54, "No other windows", 400, ink);
+
+	/* The footer: a handle and how to go back. */
+	ink[3] = progress * 0.35f;
+	glass_draw_solid(server, command, (float)((int32_t)server->width / 2 - 24), (float)((int32_t)server->height - 44), 48.0f, 5.0f, 2.5f, ink);
+	ink[3] = progress * 0.7f;
+	width = glass_text_width(server, SIZE_BAR, "Swipe down to return to your window");
+	glass_draw_text(server, command, SIZE_BAR, ((int32_t)server->width - width) / 2, (int32_t)server->height - 18, "Swipe down to return to your window", 400, ink);
+
+	/* A frame of the way. */
+	if (server->log_frames)
+		printf("ZWL WISEVIEW frame progress=%.2f windows=%u\n", (double)progress, count);
+}
+
+/*
+ * Draws one window in Wiseview: its shadow, its image with rounded corners
+ * (sampled linearly, as it is smaller), a blue glow for the window that was
+ * on top or the one under the pointer, its floating title bar fading as it
+ * goes, and its label and (under the pointer) close button fading in.
+ */
+static void
+draw_tile(
+	struct zwl_server *server,
+	VkCommandBuffer command,
+	struct zwl_object *surface,
+	const struct shell_rect *tile,
+	float progress,
+	unsigned current,
+	unsigned over)
+{
+	static const float glow[4] = { 0.25f, 0.52f, 0.98f, 0.45f };
+	static const float dark[4] = { 0.12f, 0.16f, 0.24f, 1.0f };
+	static const float button[4] = { 1.0f, 1.0f, 1.0f, 0.92f };
+	const struct zwl_import *image;
+	struct glass_shape shape;
+	struct shell_rect panel;
+	int32_t label_width;
+	int32_t label_x;
+	int32_t label_y;
+	int32_t cx;
+	int32_t cy;
+	float colour[4];
+	float appear;
+
+	/* The shadow, or a blue glow for the window that was on top or is under the pointer. */
+	glass_shape_init(&shape, (float)tile->x, (float)tile->y + 6.0f, (float)tile->width, (float)tile->height);
+	shape.quad[0] -= 48.0f;
+	shape.quad[1] -= 48.0f;
+	shape.quad[2] += 96.0f;
+	shape.quad[3] += 96.0f;
+	shape.mode = MODE_SHADOW;
+	shape.radius = WISEVIEW_RADIUS;
+	shape.soft = 24.0f;
+	shape.color[0] = 0.10f;
+	shape.color[1] = 0.18f;
+	shape.color[2] = 0.35f;
+	shape.color[3] = 0.22f;
+	if (current || over) {
+		memcpy(shape.color, glow, sizeof(shape.color));
+		shape.opacity = progress;
+		if (over)
+			shape.color[3] = 0.70f;
+	}
+
+	/* Drawn under the tile. */
+	glass_shape_draw(server, command, &shape);
+
+	/* The image, sampled linearly. */
+	image = zwl_compose_surface_image(surface);
+	glass_shape_init(&shape, (float)tile->x, (float)tile->y, (float)tile->width, (float)tile->height);
+	shape.mode = MODE_IMAGE;
+	shape.radius = WISEVIEW_RADIUS;
+	shape.set = image->linear_set;
+	if (shape.set == VK_NULL_HANDLE)
+		shape.set = image->set;
+	if (image->draw == ZWL_DRAW_OPAQUE)
+		shape.opaque = 1.0f;
+	glass_shape_draw(server, command, &shape);
+
+	/* A blue edge on the window that was on top, or under the pointer. */
+	if (current || over) {
+		glass_shape_init(&shape, (float)(tile->x - 3), (float)(tile->y - 3), (float)(tile->width + 6), (float)(tile->height + 6));
+		shape.quad[0] -= 1.0f;
+		shape.quad[1] -= 1.0f;
+		shape.quad[2] += 2.0f;
+		shape.quad[3] += 2.0f;
+		shape.mode = MODE_RING;
+		shape.radius = WISEVIEW_RADIUS + 3.0f;
+		shape.soft = 2.0f;
+		memcpy(shape.color, glow, sizeof(shape.color));
+		shape.color[3] = 0.9f;
+		shape.opacity = progress;
+		glass_shape_draw(server, command, &shape);
+	}
+
+	/* A floating title bar fades as the window goes. */
+	if (!surface->maximized && progress < 1.0f) {
+		floating_title(tile, &panel);
+		draw_title_bar(server, command, surface, &panel, 1.0f - progress, 1.0f - progress, 0);
+	}
+
+	/* The label comes in over the last part of the way, when the tile is nearly in place. */
+	appear = (progress - 0.6f) / 0.4f;
+	if (appear <= 0.0f)
+		return;
+
+	/* The label under the tile: a glass pill with the mark and the title. */
+	label_width = glass_text_width(server, SIZE_TITLE, surface->title) + 64;
+	if (label_width > tile->width)
+		label_width = tile->width;
+	if (label_width < 120)
+		label_width = 120;
+	label_x = tile->x + (tile->width - label_width) / 2;
+	label_y = tile->y + tile->height + 10;
+	glass_shape_init(&shape, (float)label_x, (float)label_y, (float)label_width, 32.0f);
+	shape.mode = MODE_GLASS;
+	shape.radius = 16.0f;
+	shape.color[0] = 1.0f;
+	shape.color[1] = 1.0f;
+	shape.color[2] = 1.0f;
+	shape.color[3] = 0.60f;
+	shape.edge = 0.8f;
+	shape.opacity = appear;
+	glass_shape_draw(server, command, &shape);
+	memcpy(colour, dark, sizeof(colour));
+	colour[3] = appear;
+	draw_title(server, command, surface, label_x + 10, label_y + 16, label_width - 50, colour);
+
+	/* Under the pointer, the close button at the top right. */
+	if (!over)
+		return;
+	cx = tile->x + tile->width - 14;
+	cy = tile->y + 14;
+	glass_draw_solid(server, command, (float)(cx - 12), (float)(cy - 12), 24.0f, 24.0f, 12.0f, button);
+	glass_draw_glyph(server, command, SIZE_SIGN, GLASS_CLOSE_GLYPH, cx - glass_glyph_advance(server, SIZE_SIGN, GLASS_CLOSE_GLYPH) / 2, cy + 7, dark);
+}
+
+/*
+ * Handles a button while Wiseview is open or opening: the release of the
+ * gesture opens or closes it; a press on a tile's close button closes that
+ * window, on a tile selects it (to the top, and Wiseview closes), elsewhere
+ * closes Wiseview.  Every button is zdesktop's.
+ */
+static int
+wiseview_button(
+	struct zwl_server *server,
+	uint32_t button,
+	uint32_t state)
+{
+	struct zwl_object *windows[WISEVIEW_WINDOWS];
+	struct shell_rect tiles[WISEVIEW_WINDOWS];
+	struct zwl_object *surface;
+	unsigned count;
+	unsigned index;
+	float progress;
+
+	/* The end of the gesture: past the threshold it opens, otherwise it closes. */
+	if (server->wiseview_gesture) {
+		if (state != 0)
+			return 1;
+		progress = wiseview_progress(server);
+		server->wiseview_gesture = 0;
+		if (progress > WISEVIEW_THRESHOLD) {
+			printf("ZWL WISEVIEW opening from=%.2f\n", (double)progress);
+			wiseview_settle(server, progress, 1.0f);
+		} else {
+			printf("ZWL WISEVIEW cancel from=%.2f\n", (double)progress);
+			wiseview_settle(server, progress, 0.0f);
+		}
+
+		/* The release was zdesktop's. */
+		return 1;
+	}
+
+	/* Only a left press on the settled Wiseview acts. */
+	if (state == 0 || button != ZWL_BUTTON_LEFT || server->wiseview_moving)
+		return 1;
+
+	/* The tile under the pointer. */
+	count = wiseview_windows(server, windows, WISEVIEW_WINDOWS);
+	wiseview_layout(server, windows, count, tiles);
+	surface = NULL;
+	for (index = 0; index < count; index++) {
+		if (server->pointer_x >= tiles[index].x && server->pointer_x < tiles[index].x + tiles[index].width &&
+		    server->pointer_y >= tiles[index].y && server->pointer_y < tiles[index].y + tiles[index].height) {
+			surface = windows[index];
+			break;
+		}
+	}
+
+	/* Elsewhere, Wiseview closes. */
+	if (surface == NULL) {
+		printf("ZWL WISEVIEW close\n");
+		wiseview_settle(server, 1.0f, 0.0f);
+		return 1;
+	}
+
+	/* Its close button closes the window. */
+	if (server->pointer_x >= tiles[index].x + tiles[index].width - 26 && server->pointer_y < tiles[index].y + 26) {
+		(void)zwl_emit(surface->client, surface->role->top->id, 1U, NULL, 0U);
+		printf("ZWL WISEVIEW close-window surface=%u\n", surface->id);
+		return 1;
+	}
+
+	/* Otherwise it comes to the top and Wiseview closes. */
+	window_raise(server, surface);
+	printf("ZWL WISEVIEW select surface=%u\n", surface->id);
+	wiseview_settle(server, 1.0f, 0.0f);
+	return 1;
+}
+
+/* Reports that Wiseview is open, and where each window's tile is. */
+static void
+wiseview_log(
+	struct zwl_server *server)
+{
+	struct zwl_object *windows[WISEVIEW_WINDOWS];
+	struct shell_rect tiles[WISEVIEW_WINDOWS];
+	unsigned count;
+	unsigned index;
+
+	/* The tiles as they are laid out now. */
+	count = wiseview_windows(server, windows, WISEVIEW_WINDOWS);
+	wiseview_layout(server, windows, count, tiles);
+	printf("ZWL WISEVIEW open windows=%u\n", count);
+	for (index = 0; index < count; index++)
+		printf("ZWL WISEVIEW tile client=%llu surface=%u x=%d y=%d width=%d height=%d\n", (unsigned long long)windows[index]->client->number, windows[index]->id, tiles[index].x, tiles[index].y, tiles[index].width, tiles[index].height);
 }

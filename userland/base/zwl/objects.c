@@ -264,6 +264,8 @@ zwl_object_destroy(
 			server->click_surface = NULL;
 		if (server->anim == object)
 			server->anim = NULL;
+		if (server->wiseview_current == object)
+			server->wiseview_current = NULL;
 
 		/* Its fences are not waited for any more. */
 		for (index = 0; index < object->acquire_count; index++)

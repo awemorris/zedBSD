@@ -1,12 +1,12 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue: なし（q463 finished）
+# Queue: なし（q464 finished）
 
 <!-- awesome-plan-current:start -->
 Status: none（2026-09-26）
 Active Queue: なし
-Last finished Queue: [q463](history/queue-q463.md)（ws035-p062 cleared。タイトルバーのドッキング）
+Last finished Queue: [q464](history/queue-q464.md)（ws035-p063 cleared。Wiseview）
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
 
-Upcoming Work Outlook: ws035-p011（窓管理: resize・最小化・複数の docked の窓）、p025（浮いたタイトルバーとドッキングを正式に。設計 D7 の改訂の承認が要る）、p055（damage）、p057（背後の窓のぼかし）、バーの menu（アプリ・窓）。
+Upcoming Work Outlook: ws035-p064（物理的に追従するドッキングの解除）、p065（仮想デスクトップの実体と左右の端のスワイプ、Wiseview の左右移動とタイルの drag）、p025（D7 の改訂の承認が要る）、p057（背後のぼかし）。

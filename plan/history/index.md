@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q463（ws035-p062 cleared。タイトルバーのドッキング）
+Last finished Queue: q464（ws035-p063 cleared。Wiseview）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q463（2026-09-26）
+## 最新: q443〜q464（2026-09-26）
+
+[q464](queue-q464.md): ws035-p063 cleared。Wiseview（ユーザーの設計 [wiseman-design.md](../ws035/wiseman-design.md)、Wiseman = WM、全画面 = ゲームモード、窓 = Wiseman Mode）: 下端からの drag で開き、窓がタイルのグリッドへ、選択・閉じる・背景で閉じる。
 
 [q463](queue-q463.md): ws035-p062 cleared。最大化 = タイトルバーのシステムバーへのドッキング（ダブルクリック・上への drag・button）、解除（バーの題名のダブルクリック・⧉・下への pull で引きずり出す）、220 ms の遷移、仮想デスクトップのハリボテ。shell.c を glass.c から分けた。
 
