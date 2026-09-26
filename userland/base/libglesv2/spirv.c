@@ -52,8 +52,8 @@
 #define OP_ACCESS_CHAIN		65U
 #define OP_DECORATE		71U
 #define OP_MEMBER_DECORATE	72U
+#define OP_COMPOSITE_CONSTRUCT	80U
 #define OP_COMPOSITE_EXTRACT	81U
-#define OP_COMPOSITE_INSERT	82U
 #define OP_FNEGATE		127U
 #define OP_FADD			129U
 #define OP_FMUL			133U
@@ -370,7 +370,7 @@ gles_spirv_position(
 
 		/* A return of the entry point: gl_Position is read, changed and written back first. */
 		if (opcode == OP_RETURN && in_entry) {
-			/* Fresh ids: pointer, value, y, z, w, -y, z+w, (z+w)/2, two inserts. */
+			/* Fresh ids: pointer, value, x, y, z, w, -y, z+w, (z+w)/2, the new vector. */
 			for (member = 0U; member < 10U; member++)
 				ids[member] = next++;
 
@@ -385,48 +385,43 @@ gles_spirv_position(
 				ids[0] = position;
 			}
 
-			/* Its value and its y, z and w. */
+			/* Its value and its four components. */
 			operands[0] = vector_type;
 			operands[1] = ids[1];
 			operands[2] = ids[0];
 			spirv_emit(out, &count, OP_LOAD, 3U, operands);
-			for (member = 0U; member < 3U; member++) {
+			for (member = 0U; member < 4U; member++) {
 				operands[0] = float_type;
 				operands[1] = ids[2U + member];
 				operands[2] = ids[1];
-				operands[3] = member + 1U;
+				operands[3] = member;
 				spirv_emit(out, &count, OP_COMPOSITE_EXTRACT, 4U, operands);
 			}
 
 			/* -y, and (z + w) * 0.5. */
 			operands[0] = float_type;
-			operands[1] = ids[5];
-			operands[2] = ids[2];
-			spirv_emit(out, &count, OP_FNEGATE, 3U, operands);
-			operands[0] = float_type;
 			operands[1] = ids[6];
 			operands[2] = ids[3];
-			operands[3] = ids[4];
-			spirv_emit(out, &count, OP_FADD, 4U, operands);
+			spirv_emit(out, &count, OP_FNEGATE, 3U, operands);
 			operands[0] = float_type;
 			operands[1] = ids[7];
-			operands[2] = ids[6];
+			operands[2] = ids[4];
+			operands[3] = ids[5];
+			spirv_emit(out, &count, OP_FADD, 4U, operands);
+			operands[0] = float_type;
+			operands[1] = ids[8];
+			operands[2] = ids[7];
 			operands[3] = half;
 			spirv_emit(out, &count, OP_FMUL, 4U, operands);
 
-			/* Put back into the vector, and stored. */
-			operands[0] = vector_type;
-			operands[1] = ids[8];
-			operands[2] = ids[5];
-			operands[3] = ids[1];
-			operands[4] = 1U;
-			spirv_emit(out, &count, OP_COMPOSITE_INSERT, 5U, operands);
+			/* The vector made again (x, -y, (z + w) / 2, w; no insert, which some compilers lack), and stored. */
 			operands[0] = vector_type;
 			operands[1] = ids[9];
-			operands[2] = ids[7];
-			operands[3] = ids[8];
-			operands[4] = 2U;
-			spirv_emit(out, &count, OP_COMPOSITE_INSERT, 5U, operands);
+			operands[2] = ids[2];
+			operands[3] = ids[6];
+			operands[4] = ids[8];
+			operands[5] = ids[5];
+			spirv_emit(out, &count, OP_COMPOSITE_CONSTRUCT, 6U, operands);
 			operands[0] = ids[0];
 			operands[1] = ids[9];
 			spirv_emit(out, &count, OP_STORE, 2U, operands);

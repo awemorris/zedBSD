@@ -52,7 +52,7 @@ EGL と OpenGL ES（2.0、次に 3.0）を、zedBSD の libvulkan（Vulkan）と
 | ws068-p003 | GLSL ES の source を SPIR-V に（compiler。変換層は p008 にある） | planning | p008、GLES の方式のユーザーの判断（design.md §4） |
 | ws068-p004 | GLES 2.0 の残りと試験の充実 | planning | p003 |
 | ws068-p005 | GLES 3.0 | planning | p004 |
-| ws068-p006 | i915 実機での確認 | planning | p004、F-022、F-023 |
+| [ws068-p006](phase006/phase.md) | i915 実機での確認（GLX の zgears、App Home の X11、仮想デスクトップ） | in-progress（q484-i01） | p008、p010、ws069-p005、F-023 |
 | ws068-p007 | 規約の全文との照合と回帰（最後） | planning | 全 Phase |
 | [ws068-p008](phase008/phase.md) | GLES 2.0 の描画の核（SPIR-V の shader binary、変換層。compiler の方式に依らない部分） | cleared（q475-i01。Venus で strip・texture・blend・depth・cull、display 直接と窓と resize） | p002 |
 | ws068-p009 | frame を 2〜3 枚重ねる（EGL の frame in flight。Venus で clear だけ 125 ms/frame、WSI 直接は 50 ms） | planned | p008 |

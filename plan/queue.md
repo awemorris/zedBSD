@@ -1,10 +1,10 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue: なし（q483 finished）
+# Queue: q484 active
 
 <!-- awesome-plan-current:start -->
-Status: none（2026-09-26）
-Active Queue: なし
+Status: active（2026-09-26）
+Active Queue: [q484](history/queue-q484.md)（ws068-p006: i915 実機での GL と X11）
 Last finished Queue: [q483](history/queue-q483.md)（ws035-p072 cleared。最小化とデスクトップ間の移動）
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->

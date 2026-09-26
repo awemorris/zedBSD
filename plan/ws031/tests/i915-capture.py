@@ -13,6 +13,7 @@ scenario:
            that comparison, for a viewer run the p013 images do not describe, such as --shading=pixel);
            the six views are also laid out on one sheet, sheet.png
   zdesktop-home WS035 p069: App Home opened by the launcher, then zdesktop-terminal and mview started
+  zdesktop-x11 WS035 p070: Gears (GLX) and the X terminal from App Home, then desktop 2 and back
            from their icons (the run's ZDESKTOP_APP=home leaves the viewer's service idle)
   zdesktop WS035 p066: zwl --glass (Wiseman Mode) at 1920x1080 with three 800x560 wl_shm windows: the
            desktop, the top one docked by a double click on its title bar, Wiseview opened by a
@@ -309,6 +310,8 @@ def run(args):
             zdesktop(args, qmp, capture, report, wait)
         elif args.scenario == 'zdesktop-home':
             zdesktop_home(args, qmp, capture, report)
+        elif args.scenario == 'zdesktop-x11':
+            zdesktop_x11(args, qmp, capture, report)
         else:
             mview(args, qmp, capture, report, wait, settled)
         report['write_count'] = capture.write_count()
@@ -518,10 +521,10 @@ def zdesktop_home(args, qmp, capture, report):
     zdesktop-terminal, and the Model viewer icon starts mview; each view differs from the one before."""
     width, height = 1920, 1080
     time_limit = time.monotonic() + args.timeout
-    # The icons of the built-in list (userland/base/zwl/home.c home_layout at 1920x1080, four
-    # applications in one row): cells of 144 from x = (1920 - 4 * 144) / 2, the row's top 34 + 2/5 of the
-    # space under the bar less the row, the icon 72 high 20 under the cell's top.
-    left = (width - 4 * 144) // 2
+    # The icons of the built-in list (userland/base/zwl/home.c home_layout at 1920x1080, six
+    # applications in one row since WS035 p070): cells of 144 from x = (1920 - 6 * 144) / 2, the row's top
+    # 34 + 2/5 of the space under the bar less the row, the icon 72 high 20 under the cell's top.
+    left = (width - 6 * 144) // 2
     icon_y = 34 + (height - 34 - 152) * 2 // 5 + 20 + 36
     terminal = (left + 72, icon_y)
     viewer = (left + 144 + 72, icon_y)
@@ -581,9 +584,87 @@ def zdesktop_home(args, qmp, capture, report):
     report['sheet'] = str(sheet)
 
 
+def zdesktop_x11(args, qmp, capture, report):
+    """X11 and GLX from App Home (WS035 p070, WS069 p005) on the capture display: Gears (zgears, OpenGL
+    1.x through GLX on Xzed --rootless, which zdesktop-x11 starts) and the X terminal (zterm), then
+    Ctrl+Alt+Right to the empty desktop 2 and Ctrl+Alt+Left back (WS035 p065)."""
+    width, height = 1920, 1080
+    time_limit = time.monotonic() + args.timeout
+    left = (width - 6 * 144) // 2
+    icon_y = 34 + (height - 34 - 152) * 2 // 5 + 20 + 36
+    xterm = (left + 4 * 144 + 72, icon_y)
+    gears = (left + 5 * 144 + 72, icon_y)
+
+    def events(items):
+        qmp.call('input-send-event', {'events': items})
+        time.sleep(0.03)
+
+    def move(x, y):
+        events([{'type': 'abs', 'data': {'axis': 'x', 'value': (int(x) * ABS_MAX + width - 2) // (width - 1)}},
+                {'type': 'abs', 'data': {'axis': 'y', 'value': (int(y) * ABS_MAX + height - 2) // (height - 1)}}])
+
+    def click(x, y):
+        move(x, y)
+        time.sleep(0.3)
+        events([{'type': 'btn', 'data': {'button': 'left', 'down': True}}])
+        time.sleep(0.05)
+        events([{'type': 'btn', 'data': {'button': 'left', 'down': False}}])
+
+    def keys(names):
+        for name in names:
+            events([{'type': 'key', 'data': {'down': True, 'key': {'type': 'qcode', 'data': name}}}])
+        for name in reversed(names):
+            events([{'type': 'key', 'data': {'down': False, 'key': {'type': 'qcode', 'data': name}}}])
+
+    def shot(tag, pause):
+        time.sleep(pause)
+        taken = capture.save(tag)
+        report['images'][tag] = taken
+        return Path(taken['path'])
+
+    # The desktop, once the compositor draws.
+    while capture.write_count() == 0:
+        if time.monotonic() > time_limit:
+            raise TimeoutError('first frame')
+        time.sleep(0.5)
+    move(width - 40, height - 200)
+    desktop = shot('desktop', 25.0)
+    report['checks']['desktop_drawn'] = coloured(desktop) > 0.02
+
+    # Gears from Home: Xzed starts, then zgears draws through GLX.
+    click(23, 17)
+    time.sleep(1.5)
+    click(*gears)
+    move(width - 40, height - 200)
+    gears_shot = shot('gears', 40.0)
+    report['checks']['gears_shows'] = difference(desktop, gears_shot) > 0.02
+    gears_later = shot('gears-later', 5.0)
+    report['checks']['gears_turns'] = difference(gears_shot, gears_later) > 0.001
+
+    # The X terminal on the same Xzed.
+    click(23, 17)
+    time.sleep(1.5)
+    click(*xterm)
+    move(width - 40, height - 200)
+    xterm_shot = shot('xterm', 15.0)
+    report['checks']['xterm_starts'] = difference(gears_later, xterm_shot) > 0.02
+
+    # Desktop 2 (empty) and back.
+    keys(['ctrl', 'alt', 'right'])
+    desk2 = shot('desktop2', 3.0)
+    report['checks']['desktop2_differs'] = difference(xterm_shot, desk2) > 0.05
+    keys(['ctrl', 'alt', 'left'])
+    desk1 = shot('desktop1', 3.0)
+    report['checks']['desktop1_back'] = difference(desk2, desk1) > 0.05
+
+    sheet = Path(args.output) / 'sheet.png'
+    write_sheet([report['images'][tag]['path'] for tag in ('desktop', 'gears', 'xterm', 'desktop2')], sheet, columns=2)
+    report['sheet'] = str(sheet)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('scenario', choices=['vkdemo', 'wayland', 'mview', 'zdesktop', 'zdesktop-home'])
+    parser.add_argument('scenario', choices=['vkdemo', 'wayland', 'mview', 'zdesktop', 'zdesktop-home', 'zdesktop-x11'])
     parser.add_argument('--output', required=True)
     parser.add_argument('--serial', default='/home/awe/bigbang/run-parity-serial.log')
     parser.add_argument('--qmp', default='/home/awe/bigbang/qmp.sock')
