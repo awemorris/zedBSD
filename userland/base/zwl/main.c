@@ -56,6 +56,7 @@ main(
 	server.frame_fd = -1;
 	server.gpu_path = "/dev/gpu0";
 	server.font_path = "/usr/share/fonts/zdesktop.ttf";
+	server.window_opacity = 1.0f;
 	server.width = 320;
 	server.height = 240;
 	server.timeout_ms = 150000;
@@ -63,7 +64,7 @@ main(
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	error = parse_options(&server, count, arguments);
 	if (error != 0) {
-		fprintf(stderr, "usage: zwl [--socket=/path] [--gpu=/dev/gpu0] [--width=N] [--height=N] [--timeout=seconds] [--max-frames=N] [--log-frames] [--direct] [--glass] [--font=/path]\n");
+		fprintf(stderr, "usage: zwl [--socket=/path] [--gpu=/dev/gpu0] [--width=N] [--height=N] [--timeout=seconds] [--max-frames=N] [--log-frames] [--direct] [--glass] [--font=/path] [--wallpaper=/path.ppm] [--window-opacity=1..100]\n");
 		return 2;
 	}
 
@@ -256,6 +257,26 @@ parse_options(
 			if (argument[7] != '/')
 				return EINVAL;
 			server->font_path = argument + 7;
+			continue;
+		}
+
+		/* The glass look's wallpaper, a binary PPM. */
+		match = strncmp(argument, "--wallpaper=", 12);
+		if (match == 0) {
+			/* An absolute path, kept in argv's storage. */
+			if (argument[12] != '/')
+				return EINVAL;
+			server->wallpaper_path = argument + 12;
+			continue;
+		}
+
+		/* How opaque window bodies are over frosted glass, in percent. */
+		match = strncmp(argument, "--window-opacity=", 17);
+		if (match == 0) {
+			error = unsigned_option(argument + 17, 100, &number);
+			if (error != 0)
+				return error;
+			server->window_opacity = (float)number / 100.0f;
 			continue;
 		}
 

@@ -42,7 +42,7 @@
 #define GLASS_SIZES		3U
 #define GLASS_ATLAS_WIDTH	1024U
 #define GLASS_ATLAS_HEIGHT	128U
-#define GLASS_FONT_MAX		(16U * 1024U * 1024U)
+#define GLASS_FILE_MAX		(16U * 1024U * 1024U)
 
 /* The blurred wallpaper is this many times smaller than the output. */
 #define GLASS_BLUR_SCALE	4U
@@ -114,6 +114,7 @@ struct glass_shape {
 	float soft;
 	float opaque;
 	float edge;
+	float opacity;
 	VkDescriptorSet set;
 };
 
@@ -127,7 +128,9 @@ static void blur_pass(float *pixels, float *scratch, uint32_t width, uint32_t he
 static uint32_t pack_pixel(const float *rgb);
 static int atlas_create(struct zwl_server *server, struct zwl_glass *glass);
 static int atlas_fill(struct zwl_glass *glass, struct truetype_face *face);
-static void *font_read(const char *path, size_t *size);
+static void *file_read(const char *path, size_t *size);
+static float *wallpaper_load(const char *path, uint32_t width, uint32_t height);
+static int ppm_number(const unsigned char *data, size_t size, size_t *at, uint32_t *number);
 static void shape_init(struct glass_shape *shape, float x, float y, float width, float height);
 static void shape_draw(struct zwl_server *server, VkCommandBuffer command, const struct glass_shape *shape);
 static void draw_solid(struct zwl_server *server, VkCommandBuffer command, float x, float y, float width, float height, float radius, const float *color);
@@ -405,16 +408,30 @@ wallpaper_create(
 	if (result != VK_SUCCESS)
 		return EIO;
 
-	/* The landscape in floating point, kept for the blur. */
-	pixels = malloc((size_t)width * height * 3U * sizeof(float));
-	if (pixels == NULL)
-		return ENOMEM;
+	/* The picture given, in floating point and kept for the blur. */
+	pixels = NULL;
+	if (server->wallpaper_path != NULL) {
+		pixels = wallpaper_load(server->wallpaper_path, width, height);
+		if (pixels == NULL)
+			printf("ZWL GLASS no wallpaper: path=%s errno=%d\n", server->wallpaper_path, errno);
+	}
+
+	/* Otherwise the landscape drawn here. */
+	if (pixels == NULL) {
+		pixels = malloc((size_t)width * height * 3U * sizeof(float));
+		if (pixels == NULL)
+			return ENOMEM;
+		for (y = 0; y < height; y++) {
+			for (x = 0; x < width; x++)
+				wallpaper_pixel(x, y, width, height, &pixels[((size_t)y * width + x) * 3U]);
+		}
+	}
+
+	/* Into the image. */
 	for (y = 0; y < height; y++) {
 		row = (uint32_t *)((unsigned char *)glass->wallpaper.map + y * glass->wallpaper.row_pitch);
-		for (x = 0; x < width; x++) {
-			wallpaper_pixel(x, y, width, height, &pixels[((size_t)y * width + x) * 3U]);
+		for (x = 0; x < width; x++)
 			row[x] = pack_pixel(&pixels[((size_t)y * width + x) * 3U]);
-		}
 	}
 
 	/* The frosted glass. */
@@ -685,7 +702,7 @@ atlas_create(
 	int error;
 
 	/* The font file. */
-	data = font_read(server->font_path, &size);
+	data = file_read(server->font_path, &size);
 	if (data == NULL)
 		return errno;
 	error = truetype_open(data, size, 0U, &face);
@@ -803,9 +820,9 @@ atlas_fill(
 	return 0;
 }
 
-/* Reads a whole font file; NULL with errno set when it cannot. */
+/* Reads a whole file of up to GLASS_FILE_MAX bytes; NULL with errno set when it cannot. */
 static void *
-font_read(
+file_read(
 	const char *path,
 	size_t *size)
 {
@@ -819,8 +836,8 @@ font_read(
 	if (descriptor < 0)
 		return NULL;
 
-	/* Its bytes, up to GLASS_FONT_MAX. */
-	data = malloc(GLASS_FONT_MAX);
+	/* Its bytes, up to GLASS_FILE_MAX. */
+	data = malloc(GLASS_FILE_MAX);
 	if (data == NULL) {
 		close(descriptor);
 		errno = ENOMEM;
@@ -830,18 +847,18 @@ font_read(
 	/* Read to the end or the bound. */
 	length = 0;
 	for (;;) {
-		count = read(descriptor, data + length, GLASS_FONT_MAX - length);
+		count = read(descriptor, data + length, GLASS_FILE_MAX - length);
 		if (count <= 0)
 			break;
 		length += (size_t)count;
-		if (length == GLASS_FONT_MAX)
+		if (length == GLASS_FILE_MAX)
 			break;
 	}
 
 	/* The file is no longer needed. */
 	close(descriptor);
 
-	/* An empty or unreadable file is no font. */
+	/* An empty or unreadable file has nothing to use. */
 	if (length == 0) {
 		free(data);
 		errno = EINVAL;
@@ -851,6 +868,126 @@ font_read(
 	/* Succeeded. */
 	*size = length;
 	return data;
+}
+
+/*
+ * Reads a binary PPM (P6, maximum 255) as the wallpaper, scaled to the
+ * output by the nearest pixel.  Returns the colors (0..1, three per pixel),
+ * or NULL with errno set.
+ */
+static float *
+wallpaper_load(
+	const char *path,
+	uint32_t width,
+	uint32_t height)
+{
+	const unsigned char *pixel;
+	unsigned char *data;
+	float *pixels;
+	uint32_t source_width;
+	uint32_t source_height;
+	uint32_t maximum;
+	uint32_t x;
+	uint32_t y;
+	size_t size;
+	size_t at;
+	int error;
+
+	/* The file, with the P6 magic. */
+	data = file_read(path, &size);
+	if (data == NULL)
+		return NULL;
+	if (size < 2U || data[0] != 'P' || data[1] != '6') {
+		free(data);
+		errno = EINVAL;
+		return NULL;
+	}
+
+	/* The width, the height and the maximum value. */
+	at = 2U;
+	error = ppm_number(data, size, &at, &source_width);
+	if (error == 0)
+		error = ppm_number(data, size, &at, &source_height);
+	if (error == 0)
+		error = ppm_number(data, size, &at, &maximum);
+	if (error != 0 || maximum != 255U || source_width == 0U || source_height == 0U) {
+		free(data);
+		errno = EINVAL;
+		return NULL;
+	}
+
+	/* One whitespace byte, then three bytes a pixel. */
+	at++;
+	if (at > size || (size - at) / 3U / source_width < source_height) {
+		free(data);
+		errno = EINVAL;
+		return NULL;
+	}
+
+	/* The output's pixels, each from the nearest source pixel. */
+	pixels = malloc((size_t)width * height * 3U * sizeof(float));
+	if (pixels == NULL) {
+		free(data);
+		errno = ENOMEM;
+		return NULL;
+	}
+
+	/* Each output pixel takes the source pixel it falls on. */
+	for (y = 0; y < height; y++) {
+		for (x = 0; x < width; x++) {
+			pixel = data + at + ((size_t)(y * source_height / height) * source_width + (size_t)(x * source_width / width)) * 3U;
+			pixels[((size_t)y * width + x) * 3U] = (float)pixel[0] / 255.0f;
+			pixels[((size_t)y * width + x) * 3U + 1U] = (float)pixel[1] / 255.0f;
+			pixels[((size_t)y * width + x) * 3U + 2U] = (float)pixel[2] / 255.0f;
+		}
+	}
+
+	/* Succeeded. */
+	free(data);
+	return pixels;
+}
+
+/* Reads one decimal number of a PPM header, after whitespace and comments. */
+static int
+ppm_number(
+	const unsigned char *data,
+	size_t size,
+	size_t *at,
+	uint32_t *number)
+{
+	uint32_t value;
+	unsigned digits;
+
+	/* Whitespace, and comments to the end of their line. */
+	while (*at < size) {
+		if (data[*at] == '#') {
+			while (*at < size && data[*at] != '\n')
+				(*at)++;
+			continue;
+		}
+
+		/* The first byte that is not whitespace starts the number. */
+		if (data[*at] != ' ' && data[*at] != '\t' && data[*at] != '\r' && data[*at] != '\n')
+			break;
+		(*at)++;
+	}
+
+	/* The digits, within a bound. */
+	value = 0;
+	digits = 0;
+	while (*at < size && data[*at] >= '0' && data[*at] <= '9' && digits < 6U) {
+		value = value * 10U + (uint32_t)(data[*at] - '0');
+		(*at)++;
+		digits++;
+	}
+
+	/* A number has at least one digit. */
+	if (digits == 0U)
+		return EINVAL;
+
+	/* Succeeded. */
+	*number = value;
+	return 0;
 }
 
 /* Starts a shape over a box: the quad is the box, with no image and no color. */
@@ -873,9 +1010,10 @@ shape_init(
 	shape->box[2] = width;
 	shape->box[3] = height;
 
-	/* The whole image. */
+	/* The whole image, not faded. */
 	shape->uv[2] = 1.0f;
 	shape->uv[3] = 1.0f;
+	shape->opacity = 1.0f;
 }
 
 /* Records one shape: its constants for both shader stages and the strip. */
@@ -913,7 +1051,7 @@ shape_draw(
 	constants[20] = width;
 	constants[21] = height;
 	constants[22] = shape->edge;
-	constants[23] = 0.0f;
+	constants[23] = shape->opacity;
 
 	/* A shape without an image of its own is given the blurred wallpaper (it is not sampled). */
 	set = shape->set;
@@ -1096,8 +1234,22 @@ draw_window(
 	shape.color[3] = 0.20f;
 	shape_draw(server, command, &shape);
 
-	/* The body: the window's image with rounded corners. */
+	/* A see-through window's body lies on frosted glass. */
+	if (server->window_opacity < 1.0f) {
+		shape_init(&shape, (float)surface->x, (float)surface->y, (float)width, (float)height);
+		shape.mode = MODE_GLASS;
+		shape.radius = GLASS_RADIUS;
+		shape.color[0] = 1.0f;
+		shape.color[1] = 1.0f;
+		shape.color[2] = 1.0f;
+		shape.color[3] = 0.30f;
+		shape.edge = 0.75f;
+		shape_draw(server, command, &shape);
+	}
+
+	/* The body: the window's image with rounded corners, as opaque as asked. */
 	shape_init(&shape, (float)surface->x, (float)surface->y, (float)width, (float)height);
+	shape.opacity = server->window_opacity;
 	shape.mode = MODE_IMAGE;
 	shape.radius = GLASS_RADIUS;
 	shape.set = image->set;

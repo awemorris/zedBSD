@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q461（ws035-p060 cleared。mview を glass の窓で）
+Last finished Queue: q462（ws035-p061 cleared。壁紙の画像と透ける窓）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q461（2026-09-26）
+## 最新: q443〜q462（2026-09-26）
+
+[q462](queue-q462.md): ws035-p061 cleared。ユーザーの絵を抽象化した壁紙（`--wallpaper`、PPM、git 外）と、すりガラスで透ける窓（`--window-opacity`）。10 %・60 % の画面。
 
 [q461](queue-q461.md): ws035-p060 cleared。mview に `--windowed`・`--size`。`zwl --glass` の窓で 3D model を Vulkan で描き、drag で回転、最大化で描き直し。spin は窓 8.80 fps・全画面 8.59 fps（Lavapipe 律速）。
 

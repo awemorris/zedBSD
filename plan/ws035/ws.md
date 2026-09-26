@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Related Milestones: MG001, MG005
 Objectives: O1, O2
 Parent: [Master](../master.md)
-Queue: なし（q461 finished）
+Queue: なし（q462 finished）
 Resume point: fg010: p052・p053 cleared（2 つのモードの核、`wl_shm` と cursor）。p054 cleared（acquire fence）。p059 cleared（look and feel の疎通確認: 浮いたタイトルバー、すりガラス、`zwl --glass`）→ p011 → p055 … → p058。元の続き: タスクバー・タイトル描画
 <!-- awesome-plan-current:end -->
 
@@ -250,6 +250,7 @@ p001で確かめる。
 | [ws035-p054](phase054/phase.md) | （2026-09-25 承認）acquire fence の request（`zed_gpu_buffer_v1` の拡張） | cleared（q459-i01、2026-09-26。受け入れ 3 はユーザーの判断で読み替え: present は元から完了を待たず、速くならないことを測って記録） | p052 | 同上、libwayland の WSI |
 | [ws035-p059](phase059/phase.md) | （2026-09-26 ユーザー指示）look and feel の疎通確認: 本体から離れて浮いたタイトルバー（実装）、すりガラスの shader、上部のバー（ハリボテ）、壁紙、角丸と影（`zwl --glass`） | cleared（q460-i01、2026-09-26。drag・最大化・閉じる・hover を QMP で確認。背後の窓のぼかしは p057、最小化とバーの操作は p011・p013） | p052〜p054 | 同上 |
 | [ws035-p060](phase060/phase.md) | （2026-09-26 ユーザー指示）Vulkan で描く client（mview）を glass の窓で: mview に `--windowed`・`--size` | cleared（q461-i01、2026-09-26。model が窓に描かれ、drag で回り、最大化で描き直す。Lavapipe で 8.8 fps） | p059 | `userland/base/mview` |
+| [ws035-p061](phase061/phase.md) | （2026-09-26 ユーザー指示）壁紙の画像（`--wallpaper`、ユーザーの絵を抽象化、git 外）と、すりガラスで透ける窓（`--window-opacity`） | cleared（q462-i01、2026-09-26。絵の壁紙、透ける窓 10 %・60 % の画面。壁紙は git 外） | p059 | `userland/base/zwl` |
 | ws035-p055 | （2026-09-25 承認）damage（buffer age と scissor） | planned（sq001） | p011 | 同上 |
 | ws035-p057 | （2026-09-25 承認）効果: すりガラス（背後のぼかし）と影 | planned（sq001） | p055 | 同上 |
 | ws035-p058 | zdesktop（secondary queue で変えた全 source）の規約の全文との照合と回帰（sq001 の締め） | planned（sq001） | sq001 の他の Phase | sq001 で変えた source |

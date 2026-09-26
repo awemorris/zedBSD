@@ -5,7 +5,7 @@
 // box: the rounded rectangle in output pixels (x, y, width, height).
 // color: a straight color and its opacity.
 // shape: corner radius, mode, softness or thickness, opaque image (1).
-// screen: output width and height, edge highlight, unused.
+// screen: output width and height, edge highlight, the image's opacity.
 layout(push_constant) uniform Panel {
 	vec4 rect;
 	vec4 texture;
@@ -73,7 +73,7 @@ void main()
 
 		if (panel.shape.w > 0.5)
 			texel.a = 1.0;
-		result = texel * cover;
+		result = texel * cover * panel.screen.w;
 		return;
 	}
 
