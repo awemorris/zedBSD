@@ -1,10 +1,10 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue: なし（q481 finished）
+# Queue: q482 active
 
 <!-- awesome-plan-current:start -->
-Status: none（2026-09-26）
-Active Queue: なし
+Status: active（2026-09-26）
+Active Queue: [q482](history/queue-q482.md)（ws035-p064: 追従するドッキングの解除）
 Last finished Queue: [q481](history/queue-q481.md)（ws035-p065 cleared。仮想デスクトップ）
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
