@@ -257,7 +257,7 @@ p001で確かめる。
 | ws035-p065 | （同）仮想デスクトップの実体と左右の端のスワイプ（画面が追従して横へ） | planned | p063 | 同上 |
 | [ws035-p066](phase066/phase.md) | （2026-09-26 ユーザー指示）zdesktop（Wiseman Mode）を Intel GPU（5330 の i915 ネイティブ実行器、VFIO）で疎通 | cleared（q465-i01、2026-09-26。i915 実機の GPU で Wiseman Mode・ドッキング・Wiseview を capture で確認（wl_shm の窓）。GPU の client の窓は F-022、実行器の不足は F-023） | p063、WS031 | `userland/base/zwl`、`plan/ws031/tests` |
 | [ws035-p067](phase067/phase.md) | （2026-09-26 ユーザー指示）zdesktop で mview（Vulkan の client）の窓を i915 で合成（F-022） | cleared（q466-i01、2026-09-26。i915 実機の GPU で mview の窓を合成・ドッキング・Wiseview を capture で確認。実行器の object 表を session ごとに） | p066 | `src/drivers/gpu/i915/render`、`userland/base/zwl`、`plan/ws031/tests` |
-| [ws035-p068](phase068/phase.md) | （2026-09-26 ユーザー指示）zdesktop-terminal: zterm（X11）を Wayland と Vulkan へ | planned | p067 | `userland/base/zdesktop-terminal` |
+| [ws035-p068](phase068/phase.md) | （2026-09-26 ユーザー指示）zdesktop-terminal: zterm（X11）を Wayland と Vulkan へ | in-progress（q468-i01） | p067 | `userland/base/zdesktop-terminal` |
 | [ws035-p069](phase069/phase.md) | （2026-09-26 ユーザー指示）App Home の PoC（[設計](app-home-design.md)）: デスクトップをめくってアプリを起動 | planned | p068 | `userland/base/zwl` |
 | ws035-p055 | （2026-09-25 承認）damage（buffer age と scissor） | planned（sq001） | p011 | 同上 |
 | ws035-p057 | （2026-09-25 承認）効果: すりガラス（背後のぼかし）と影 | planned（sq001） | p055 | 同上 |
