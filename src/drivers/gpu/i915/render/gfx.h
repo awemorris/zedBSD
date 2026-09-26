@@ -221,6 +221,9 @@ struct i915_gfx_dset {
 	/* The layout the set was allocated with. */
 	struct i915_gfx_dsl *layout;
 
+	/* The pool it was allocated from; the pool's destruction frees the set. */
+	void *pool;
+
 	/*
 	 * What each binding, indexed by binding number, was updated to: the
 	 * view and the sampler of a combined image sampler, or the buffer and
@@ -624,7 +627,7 @@ int drv_i915_gfx_rec_dispatch(struct i915_render_session *session, uint32_t opco
  * address space, or 0 when it has no storage (memory.c).
  */
 uint8_t *drv_i915_gfx_memory_cpu(struct i915_gfx_memory *memory, uint64_t offset, uint64_t bytes);
-void drv_i915_gfx_memory_forget(struct i915_render_session *session);
+void drv_i915_gfx_memory_release(struct i915_gfx_memory *memory);
 uint64_t drv_i915_gfx_memory_va(struct i915_gfx_memory *memory, uint64_t offset);
 
 /*
@@ -636,6 +639,9 @@ int drv_i915_gfx_image_level(const struct i915_gfx_image *image, uint32_t level,
 
 /* Releases what the session's draws kept: the state, batch and kernel objects (draw.c). */
 void drv_i915_gfx_session_close(struct i915_render_session *session);
+
+/* Frees every object a closing session did not destroy (objects.c). */
+void drv_i915_gfx_objects_release(struct i915_render_session *session);
 
 /* Prepares and releases a pipeline's kernels (pipeline-prepare.c). */
 int drv_i915_gfx_pipeline_prepare(struct i915_render_session *session, struct i915_gfx_pipeline *pipeline);

@@ -702,15 +702,10 @@ test_dynamic_push_pipeline(void)
 	assert((commands[found + 6] & GEN12_3DSTATE_PS_PUSH_CONSTANT_ENABLE) != 0U);
 	assert((commands[found + 7] >> 16) == kernels.ps_grf_start);
 
-	/* Destroys the pipeline and the modules. */
-	stub_wire_begin(&fixture_wire);
-	fixture_destroy(FIXTURE_DESTROY_PIPELINE, FIXTURE_DYNAMIC_PIPELINE);
-	fixture_destroy(FIXTURE_DESTROY_SHADER_MODULE, FIXTURE_PLACE_VS);
-	fixture_destroy(FIXTURE_DESTROY_SHADER_MODULE, FIXTURE_PUSH_FS);
-	reply_bytes = stub_execute_ok(&fixture_wire);
-	assert(reply_bytes == 3U * 4U);
-
-	/* Closes the session; nothing stays allocated. */
+	/*
+	 * Closes the session with the pipeline (and its kernels) and the
+	 * modules alive: the close frees them and nothing stays allocated.
+	 */
 	stub_session_close();
 	assert(stub_live == 0U);
 	free(vertex);

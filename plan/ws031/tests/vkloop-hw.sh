@@ -166,12 +166,12 @@ fi
 if [ "$ZDESKTOP_RUN" = 1 ]; then
 	# the compositor in Wiseman Mode and three clients; the font and the wallpaper are not in git
 	FILES="--file /etc/service.d/vkwait1=$WAIT1"
-	for n in zwl wlwait wlshm1 mwait wlshm2 mwait2 mview1 vkwait2 poweroff; do
+	for n in zwl wlwait wlshm1 mwait wlshm2 mwait2 wlkill mview1 vkwait2 poweroff; do
 		FILES="$FILES --file /etc/service.d/$n=plan/ws031/tests/zdesktop/$n"
 	done
 	# the compositor's and the viewer's output and the kernel's messages go to /var/log, read afterwards
 	# from the disk image with plan/ws031/tests/ufs-cat.py (not from the serial log)
-	for n in run-zwl.sh run-mview.sh run-poweroff.sh; do
+	for n in run-zwl.sh run-wlkill.sh run-mview.sh run-poweroff.sh; do
 		FILES="$FILES --file /etc/zdesktop/$n=plan/ws031/tests/zdesktop/$n"
 	done
 	FILES="$FILES --file /usr/share/fonts/zdesktop.ttf=build/ws035-fonts/Inter.ttf"
@@ -227,8 +227,10 @@ scp -q $I915_HOST:bigbang/vkloop-last.log /tmp/vkloop-last.log
 if [ "$ZDESKTOP_RUN" = 1 ]; then
 	# the guest's own logs, from its disk
 	scp -q plan/ws031/tests/ufs-cat.py tools/build/check-ufs-image.py $I915_HOST:bigbang/ || exit 1
-	ssh $I915_HOST 'python3 bigbang/ufs-cat.py bigbang/guest-parity.img /var/log/zwl.log /var/log/mview.log /var/log/dmesg.log' > /tmp/zdesktop-guest-logs.txt 2>&1
+	ssh $I915_HOST 'python3 bigbang/ufs-cat.py bigbang/guest-parity.img /var/log/zwl.log /var/log/wlkill.log /var/log/mview.log /var/log/dmesg.log' > /tmp/zdesktop-guest-logs.txt 2>&1
 	echo "--- guest logs: /tmp/zdesktop-guest-logs.txt ($(wc -l < /tmp/zdesktop-guest-logs.txt) lines)"
+	# the viewer's own last word: closed by the capture's click on the bar's close button
+	grep -E '^MVIEW (DONE|FAILED)' /tmp/zdesktop-guest-logs.txt || echo "MVIEW did not end (no DONE or FAILED line)"
 fi
 if [ -n "$SCENARIO" ]; then
 	echo "--- test $SCENARIO"

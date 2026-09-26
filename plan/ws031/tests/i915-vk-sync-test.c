@@ -308,11 +308,7 @@ test_unported(void)
 	assert(error == ENOTSUP);
 	assert(strcmp(stub_log, "i915: vk: XXX unimplemented opcode 47 (sync)\n") == 0);
 
-	/* Destroys the fence and closes the session; nothing stays allocated. */
-	stub_wire_begin(&fixture_wire);
-	fixture_destroy(FIXTURE_DESTROY_FENCE, FIXTURE_FENCE);
-	reply_bytes = stub_execute_ok(&fixture_wire);
-	assert(reply_bytes == 4U);
+	/* Closes the session with the fence alive: the close frees it and nothing stays allocated. */
 	stub_session_close();
 	assert(stub_live == 0U);
 }

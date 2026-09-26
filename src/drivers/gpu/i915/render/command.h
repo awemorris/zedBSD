@@ -26,10 +26,14 @@
 
 #include <stdint.h>
 
+struct i915_gfx_cmdpool;
 struct i915_render_session;
 struct i915_wire_reader;
 struct i915_wire_writer;
 
 int drv_i915_gfx_rec_dispatch(struct i915_render_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);
+
+/* Frees a command pool whose identity is withdrawn, with its buffers. */
+void drv_i915_gfx_command_pool_free(struct i915_render_session *session, struct i915_gfx_cmdpool *pool);
 
 #endif

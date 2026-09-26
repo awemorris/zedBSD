@@ -234,10 +234,54 @@ drv_i915_object_remove(
 }
 
 /*
+ * Takes one object of a kind out of the session's entries and returns it,
+ * or NULL when none is left.
+ *
+ * `match`, when not NULL, picks the objects that may be taken: it is given
+ * the object and `argument` and answers nonzero for one to take.  The caller
+ * owns the taken object from here on.
+ */
+void *
+drv_i915_object_take(
+	struct i915_render_session *session,
+	enum i915_vk_object_kind kind,
+	int (*match)(void *object, void *argument),
+	void *argument)
+{
+	struct i915_object_table *table;
+	void *object;
+	unsigned index;
+	int picked;
+
+	/* Scans the entries for one of the session and the kind that the condition picks. */
+	table = session->vk->objects;
+	for (index = 0U; index < table->count; index++) {
+		if (table->entries[index].owner != session)
+			continue;
+		if (table->entries[index].kind != kind)
+			continue;
+		if (match != NULL) {
+			picked = match(table->entries[index].object, argument);
+			if (picked == 0)
+				continue;
+		}
+
+		/* The last entry takes the freed slot. */
+		object = table->entries[index].object;
+		table->entries[index] = table->entries[table->count - 1U];
+		table->count--;
+		return object;
+	}
+
+	/* The session has no such object left. */
+	return NULL;
+}
+
+/*
  * Drops every identity a closing session recorded.
  *
- * The objects an application did not destroy stay with the parts that
- * created them; only their entries go, so a later session opened at the
+ * The objects themselves were released before (drv_i915_gfx_objects_release);
+ * what is left are tokens, which own nothing.  A later session opened at the
  * same address never finds them.
  */
 void

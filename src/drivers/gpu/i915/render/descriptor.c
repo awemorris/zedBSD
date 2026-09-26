@@ -40,6 +40,7 @@
 #define I915_GFX_MAX_UPDATE_ITEMS	64U
 
 static int i915_gfx_update_write(struct i915_render_session *session, struct i915_wire_reader *reader);
+static int i915_dset_of_pool(void *object, void *argument);
 
 /*
  * Creates a VkDescriptorSetLayout: vkCreateDescriptorSetLayout, a generic
@@ -188,9 +189,10 @@ drv_i915_gfx_allocate_dsets(
 			break;
 		}
 
-		/* Records the layout the set was allocated with. */
+		/* Records the layout the set was allocated with and the pool it came from. */
 		layout_id = (uint64_t)(uintptr_t)info.pSetLayouts[index];
 		dset->layout = drv_i915_object_lookup(session, I915_VK_OBJ_DESCRIPTOR_SET_LAYOUT, layout_id);
+		dset->pool = drv_i915_object_lookup(session, I915_VK_OBJ_DESCRIPTOR_POOL, (uint64_t)(uintptr_t)info.descriptorPool);
 
 		/* Publishes the set; one that cannot be published is freed. */
 		error = drv_i915_object_insert(session, I915_VK_OBJ_DESCRIPTOR_SET, identities[index], dset);
@@ -385,5 +387,76 @@ i915_gfx_update_write(
 		(void)drv_i915_wire_read_u64(reader);
 
 	/* Succeeded: the write is read and its first image or uniform buffer descriptor applied. */
+	return 0;
+}
+
+/* Picks the sets allocated from the pool `argument`. */
+static int
+i915_dset_of_pool(
+	void *object,
+	void *argument)
+{
+	struct i915_gfx_dset *dset;
+
+	/* A set belongs to the pool it records. */
+	dset = object;
+	return dset->pool == argument;
+}
+
+/*
+ * Frees a descriptor pool whose identity is withdrawn, with every set still
+ * allocated from it (their identities are withdrawn here).
+ */
+void
+drv_i915_gfx_dpool_free(
+	struct i915_render_session *session,
+	void *pool)
+{
+	struct i915_gfx_dset *dset;
+
+	/* Takes and frees the pool's sets one by one. */
+	for (;;) {
+		dset = drv_i915_object_take(session, I915_VK_OBJ_DESCRIPTOR_SET, i915_dset_of_pool, pool);
+		if (dset == NULL)
+			break;
+
+		/* Frees the one taken. */
+		kern_free(dset);
+	}
+
+	/* Frees the pool itself. */
+	kern_free(pool);
+}
+
+/*
+ * Destroys a VkDescriptorPool: vkDestroyDescriptorPool.
+ *
+ * The command is [device][identity][pAllocator] and has no reply body.  The
+ * sets allocated from the pool go with it.  An unknown identity is not an
+ * error.
+ */
+int
+drv_i915_gfx_destroy_dpool(
+	struct i915_render_session *session,
+	struct i915_wire_reader *reader)
+{
+	void *pool;
+	uint64_t identity;
+
+	/* Reads the identity between the device and the allocator. */
+	(void)drv_i915_wire_read_u64(reader);
+	identity = drv_i915_wire_read_u64(reader);
+	(void)drv_i915_wire_read_u64(reader);
+	if (reader->error != 0)
+		return EINVAL;
+
+	/* Unpublishes a known pool, then frees it with its sets. */
+	pool = drv_i915_object_lookup(session, I915_VK_OBJ_DESCRIPTOR_POOL, identity);
+	if (pool != NULL) {
+		drv_i915_object_remove(session, I915_VK_OBJ_DESCRIPTOR_POOL, identity);
+		drv_i915_gfx_dpool_free(session, pool);
+	}
+
+	/* Succeeded: the pool and its sets are gone. */
 	return 0;
 }

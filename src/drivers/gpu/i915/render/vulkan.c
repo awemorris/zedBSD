@@ -144,12 +144,12 @@ drv_i915_render_close(
 		return;
 
 	/*
-	 * Releases what the session's draws kept and the allocations it left,
-	 * forgets the identities it recorded, then releases the scratch and the
+	 * Releases what the session's draws kept and the objects it left,
+	 * forgets the tokens it recorded, then releases the scratch and the
 	 * session.
 	 */
 	drv_i915_gfx_session_close(session);
-	drv_i915_gfx_memory_forget(session);
+	drv_i915_gfx_objects_release(session);
 	drv_i915_object_forget(session);
 	kern_free(session->arena.base);
 	kern_free(session);

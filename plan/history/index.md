@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q466（ws035-p067 cleared。zdesktop で mview を i915 で）
+Last finished Queue: q467（ws031-p050 cleared。session の残した object の解放）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q466（2026-09-26）
+## 最新: q443〜q467（2026-09-26）
+
+[q467](queue-q467.md): ws031-p050 cleared。i915 の実行器の session の close で、application が破棄しなかった Vulkan の object（command pool と buffer、descriptor pool と set、pipeline と kernel、fence、allocation、その他）を解放。descriptor pool の破棄でその set も解放。host の fixture に残したまま close する試験。実機の zdesktop の scenario に描画中に殺す Vulkan の窓と、mview を × で閉じる段を足し、mview は `reason=closed` で終わり zwl は合成を続けた。
 
 [q466](queue-q466.md): ws035-p067 cleared。5330 の i915（VFIO）で zdesktop に mview（Vulkan の client）の窓を合成し、ドッキング（1920x1042 で描き直し）と Wiseview を capture で確認。i915 の実行器の object 表と blob の対応を session ごとの key に（wire の id が process の間で衝突していた）、allocation の import、libvulkan は allocation の共有の無い node で画像の import へ。F-022 を promoted。
 

@@ -1,6 +1,6 @@
 type=oneshot
 command=/bin/sh
-arguments=/etc/zdesktop/run-mview.sh
-after=wlkill
+arguments=/etc/zdesktop/run-wlkill.sh
+after=mwait2
 restart=no
 required=NO

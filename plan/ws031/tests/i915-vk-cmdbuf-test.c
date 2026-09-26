@@ -1307,18 +1307,11 @@ test_copy_buffer(void)
 	assert(stub_get32(stub_reply, 20U) == (uint32_t)VK_ERROR_INITIALIZATION_FAILED);
 	assert(stub_rect_calls == 0U);
 
-	/* Destroys the pool and the resources. */
-	stub_wire_begin(&fixture_wire);
-	fixture_destroy(FIXTURE_DESTROY_COMMAND_POOL, FIXTURE_POOL);
-	fixture_destroy(FIXTURE_DESTROY_IMAGE, FIXTURE_IMAGE);
-	fixture_destroy(FIXTURE_DESTROY_BUFFER, FIXTURE_BUFFER);
-	fixture_destroy(FIXTURE_DESTROY_BUFFER, FIXTURE_SRC_BUFFER);
-	fixture_destroy(FIXTURE_DESTROY_BUFFER, FIXTURE_DST_BUFFER);
-	fixture_destroy(FIXTURE_FREE_MEMORY, FIXTURE_MEMORY);
-	reply_bytes = stub_execute_ok(&fixture_wire);
-	assert(reply_bytes == 6U * 4U);
-
-	/* Closes the session; nothing stays allocated. */
+	/*
+	 * Closes the session with the pool, its buffer, the resources and the
+	 * allocation still alive, as an application that exits does: the close
+	 * frees them and nothing stays allocated.
+	 */
 	stub_session_close();
 	assert(stub_live == 0U);
 }

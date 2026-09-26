@@ -390,16 +390,29 @@ i915_command_pool_destroy(
 	if (pool == NULL)
 		return 0;
 
+	/* Withdraws the pool's identity, then frees it with its buffers. */
+	drv_i915_object_remove(session, I915_VK_OBJ_COMMAND_POOL, identity);
+	drv_i915_gfx_command_pool_free(session, pool);
+
+	/* Succeeded: the pool and its buffers are gone. */
+	return 0;
+}
+
+/*
+ * Frees a command pool whose identity is already withdrawn, with every
+ * buffer still allocated from it (their identities are withdrawn here).
+ */
+void
+drv_i915_gfx_command_pool_free(
+	struct i915_render_session *session,
+	struct i915_gfx_cmdpool *pool)
+{
 	/* Frees every buffer still allocated from the pool. */
 	while (pool->buffers != NULL)
 		i915_command_buffer_release(session, pool->buffers);
 
-	/* Withdraws the pool's identity and frees it. */
-	drv_i915_object_remove(session, I915_VK_OBJ_COMMAND_POOL, identity);
+	/* Frees the pool itself. */
 	kern_free(pool);
-
-	/* Succeeded: the pool and its buffers are gone. */
-	return 0;
 }
 
 /* vkResetCommandPool: [device][pool][flags] -> [result]; every buffer of the pool is emptied. */

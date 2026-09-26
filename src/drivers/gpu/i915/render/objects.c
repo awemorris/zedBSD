@@ -18,7 +18,9 @@
 
 #include "gfx.h"
 #include "codec.h"
+#include "command.h"
 #include "descriptor.h"
+#include "fence.h"
 #include "image.h"
 #include "internal.h"
 #include "memory.h"
@@ -172,7 +174,7 @@ drv_i915_gfx_obj_dispatch(
 		error = drv_i915_gfx_create_dpool(session, reader, reply);
 		break;
 	case I915_VK_COMMAND_DESTROY_DESCRIPTOR_POOL:
-		error = i915_gfx_destroy_plain(session, reader, I915_VK_OBJ_DESCRIPTOR_POOL);
+		error = drv_i915_gfx_destroy_dpool(session, reader);
 		break;
 	case I915_VK_COMMAND_ALLOCATE_DESCRIPTOR_SETS:
 		error = drv_i915_gfx_allocate_dsets(session, reader, reply);
@@ -237,4 +239,108 @@ i915_gfx_destroy_plain(
 
 	/* Succeeded: the object is gone. */
 	return 0;
+}
+
+/*
+ * The kinds whose objects are one allocation of their own, freed by a
+ * generic destroy.
+ */
+static const enum i915_vk_object_kind i915_gfx_plain_kinds[] = {
+	I915_VK_OBJ_BUFFER,
+	I915_VK_OBJ_IMAGE_VIEW,
+	I915_VK_OBJ_IMAGE,
+	I915_VK_OBJ_SAMPLER,
+	I915_VK_OBJ_SHADER_MODULE,
+	I915_VK_OBJ_PIPELINE_LAYOUT,
+	I915_VK_OBJ_DESCRIPTOR_SET,
+	I915_VK_OBJ_DESCRIPTOR_SET_LAYOUT,
+	I915_VK_OBJ_FRAMEBUFFER,
+	I915_VK_OBJ_RENDER_PASS,
+	I915_VK_OBJ_SEMAPHORE,
+};
+
+/*
+ * Frees every object a closing session did not destroy.
+ *
+ * An application that exits without destroying its objects leaves them in
+ * the table.  The command pools go first with their buffers, and the
+ * descriptor pools with their sets; the pipelines release their kernels,
+ * the fences and the allocations are freed their own way, and the rest are
+ * plain allocations.  Instances, devices and queues are tokens that own
+ * nothing; drv_i915_object_forget drops them after.  Every submission has
+ * finished by its reply, so the GPU uses none of them any more.
+ */
+void
+drv_i915_gfx_objects_release(
+	struct i915_render_session *session)
+{
+	struct i915_gfx_cmdpool *pool;
+	struct i915_gfx_pipeline *pipeline;
+	struct i915_vk_fence *fence;
+	struct i915_gfx_memory *memory;
+	void *object;
+	size_t index;
+
+	/* The command pools, each with the buffers allocated from it. */
+	for (;;) {
+		pool = drv_i915_object_take(session, I915_VK_OBJ_COMMAND_POOL, NULL, NULL);
+		if (pool == NULL)
+			break;
+
+		/* Frees the one taken. */
+		drv_i915_gfx_command_pool_free(session, pool);
+	}
+
+	/* The descriptor pools, each with the sets allocated from it. */
+	for (;;) {
+		object = drv_i915_object_take(session, I915_VK_OBJ_DESCRIPTOR_POOL, NULL, NULL);
+		if (object == NULL)
+			break;
+
+		/* Frees the one taken. */
+		drv_i915_gfx_dpool_free(session, object);
+	}
+
+	/* The pipelines, with their kernels. */
+	for (;;) {
+		pipeline = drv_i915_object_take(session, I915_VK_OBJ_PIPELINE, NULL, NULL);
+		if (pipeline == NULL)
+			break;
+
+		/* Releases the kernels, then frees the pipeline. */
+		drv_i915_gfx_pipeline_release(pipeline);
+		kern_free(pipeline);
+	}
+
+	/* The fences. */
+	for (;;) {
+		fence = drv_i915_object_take(session, I915_VK_OBJ_FENCE, NULL, NULL);
+		if (fence == NULL)
+			break;
+
+		/* Frees the one taken. */
+		drv_i915_fence_free(fence);
+	}
+
+	/* The allocations, which leave the list the blob attach searches. */
+	for (;;) {
+		memory = drv_i915_object_take(session, I915_VK_OBJ_MEMORY, NULL, NULL);
+		if (memory == NULL)
+			break;
+
+		/* Frees the one taken. */
+		drv_i915_gfx_memory_release(memory);
+	}
+
+	/* Every other object is a plain allocation. */
+	for (index = 0U; index < sizeof(i915_gfx_plain_kinds) / sizeof(i915_gfx_plain_kinds[0]); index++) {
+		for (;;) {
+			object = drv_i915_object_take(session, i915_gfx_plain_kinds[index], NULL, NULL);
+			if (object == NULL)
+				break;
+
+			/* Frees the one taken. */
+			kern_free(object);
+		}
+	}
 }

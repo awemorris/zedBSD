@@ -105,6 +105,7 @@ p015〜p018は大きすぎるため、1 Queueのスロットで終わる大き�
 | ws031-p047 | 性能: scheduler wakeupの遅延（p021で本WSに収まると判断した場合だけ。収まらなければ新WSへ） | planning | p021 | p018 | kern（範囲はp021で決める） |
 | ws031-p048 | 最終確認: 変更したsource全体の全文規約確認・静的確認・統合回帰 | planning | p022〜p047 | 新規 | 全体 |
 | ws031-p049 | 失敗する GPU の host 試験 3 件の原因を調べて直す（2026-09-24 ws034-p049 の一掃で発見。今の source に対して build でき、結果が失敗する）: `plan/ws014/tests/run-venus-edid-test.sh`（`mode.count == 3` の assert）、`plan/ws030/tests/run-libvulkan-job-race-test.sh`（`race_wait` の `status == 0` の assert、112 秒で止まる）、`plan/ws030/tests/run-libvulkan-external-fence-test.sh`（`vulkan_sync_job_reserve` の確保 72 byte が LeakSanitizer で漏れ）。製品の不具合か試験の古さかを切り分け、試験が古いだけなら削除する | planning | — | 新規 | libvulkan、venus |
+| [ws031-p050](phase050/phase.md) | （2026-09-26 ユーザー指示）session の close で残った Vulkan の object を解放、descriptor pool の破棄でその set を解放 | cleared（q467-i01、2026-09-26） | ws035-p067 | 新規 | `render/` |
 
 並行の目安: `render/` 系と `compiler/` 系のPhaseは同じQueueで並行できる。実機（5330）を使う試験は
 `flock /tmp/i915-hw.lock` で1つずつ流れるので、並行しても実機の実行は直列になる。

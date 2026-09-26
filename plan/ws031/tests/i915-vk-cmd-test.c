@@ -125,7 +125,7 @@ drv_i915_gfx_session_close(struct i915_render_session *session)
 }
 
 void
-drv_i915_gfx_memory_forget(struct i915_render_session *session)
+drv_i915_gfx_objects_release(struct i915_render_session *session)
 {
 	(void)session;
 }

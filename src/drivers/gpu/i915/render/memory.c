@@ -182,32 +182,30 @@ drv_i915_render_blob_detach(
 }
 
 /*
- * Frees the allocations a closing session did not free.
+ * Frees an allocation whose identity is already withdrawn.
  *
- * They leave the list the blob attach searches, so a later open never gives
- * them storage.  XXX: the other objects the session left are not freed; only
- * their identities are forgotten (drv_i915_object_forget).
+ * It leaves the list the blob attach searches first, so no blob becomes its
+ * storage afterwards.  XXX: buffers and images bound to it keep a dangling
+ * pointer; the application frees them first.
  */
 void
-drv_i915_gfx_memory_forget(
-	struct i915_render_session *session)
+drv_i915_gfx_memory_release(
+	struct i915_gfx_memory *memory)
 {
-	struct i915_gfx_memory *memory;
 	struct i915_gfx_memory **link;
 
-	/* Unlinks and frees each allocation of the session's open, keeping the rest in order. */
-	link = &i915_gfx_memories;
-	while (*link != NULL) {
-		memory = *link;
-		if (memory->vk != session->vk || memory->gpu != session->gpu) {
-			link = &memory->next;
-			continue;
+	/* Takes the allocation off the list where it is found. */
+	for (link = &i915_gfx_memories;
+	     *link != NULL;
+	     link = &(*link)->next) {
+		if (*link == memory) {
+			*link = memory->next;
+			break;
 		}
-
-		/* The session's allocation leaves the list and is freed. */
-		*link = memory->next;
-		kern_free(memory);
 	}
+
+	/* Frees the record; the storage is the blob's, which its open releases. */
+	kern_free(memory);
 }
 
 /*
@@ -366,7 +364,6 @@ drv_i915_gfx_free_memory(
 	struct i915_wire_reader *reader)
 {
 	struct i915_gfx_memory *memory;
-	struct i915_gfx_memory **link;
 	uint64_t identity;
 
 	/* Reads the identity between the device and the allocator. */
@@ -381,22 +378,9 @@ drv_i915_gfx_free_memory(
 	if (memory == NULL)
 		return 0;
 
-	/* Unpublishes the allocation. */
+	/* Unpublishes the allocation, then frees it. */
 	drv_i915_object_remove(session, I915_VK_OBJ_MEMORY, identity);
-
-	/* Takes the allocation off the list the blob attach searches. */
-	for (link = &i915_gfx_memories;
-	     *link != NULL;
-	     link = &(*link)->next) {
-		/* Unlinks the allocation where it is found. */
-		if (*link == memory) {
-			*link = memory->next;
-			break;
-		}
-	}
-
-	/* XXX: buffers and images bound to it keep a dangling pointer; the application frees them first. */
-	kern_free(memory);
+	drv_i915_gfx_memory_release(memory);
 
 	/* Succeeded: the allocation is gone. */
 	return 0;

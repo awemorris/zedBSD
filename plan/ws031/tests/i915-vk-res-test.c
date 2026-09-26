@@ -89,7 +89,7 @@ static void fixture_create_sampler(uint64_t identity, uint32_t mipmap_mode, uint
 static void test_memory_storage(void);
 static void test_buffer_image(void);
 static void test_mip_images(void);
-static void test_descriptors(void);
+static void test_descriptors(int destroy);
 
 /*
  * Runs the resource checks.
@@ -101,7 +101,8 @@ main(void)
 	test_memory_storage();
 	test_buffer_image();
 	test_mip_images();
-	test_descriptors();
+	test_descriptors(1);
+	test_descriptors(0);
 
 	/* Succeeded: every check held. */
 	printf("i915 vk res host test PASS\n");
@@ -805,9 +806,14 @@ test_mip_images(void)
 /*
  * A layout keeps its bindings, a set keeps its layout, and an update
  * records the view and the sampler a binding samples.
+ *
+ * With `destroy` the objects are destroyed through the wire, and the
+ * pool's destruction frees its set; without, the session closes with all of
+ * them (and an allocation) still alive, and the close frees them.
  */
 static void
-test_descriptors(void)
+test_descriptors(
+	int destroy)
 {
 	struct i915_gfx_dsl *dsl;
 	struct i915_gfx_dset *dset;
@@ -1014,23 +1020,33 @@ test_descriptors(void)
 	assert(error == ENOTSUP);
 	assert(strstr(stub_log, "opcode 78 routed to the res module") != NULL);
 
-	/*
-	 * XXX: no command frees a descriptor set, and neither the pool's
-	 * destruction nor the session's close does; the fixture unpublishes and
-	 * frees the set itself so that the rest of the run starts clean.
-	 */
-	drv_i915_object_remove(stub_session, I915_VK_OBJ_DESCRIPTOR_SET, FIXTURE_SET);
-	kern_free(dset);
+	/* Without destroying anything, the close frees every object and an allocation too. */
+	if (!destroy) {
+		stub_wire_begin(&fixture_wire);
+		fixture_allocate_memory(FIXTURE_MEMORY, 65536U, 0U);
+		reply_bytes = stub_execute_ok(&fixture_wire);
+		assert(reply_bytes == 24U);
+		assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_MEMORY, FIXTURE_MEMORY) != NULL);
+		stub_session_close();
+		assert(stub_live == 0U);
+		return;
+	}
+
+	/* The pool's destruction frees its set. */
+	stub_wire_begin(&fixture_wire);
+	fixture_destroy(FIXTURE_DESTROY_DESCRIPTOR_POOL, FIXTURE_POOL);
+	reply_bytes = stub_execute_ok(&fixture_wire);
+	assert(reply_bytes == 4U);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_DESCRIPTOR_SET, FIXTURE_SET) == NULL);
 
 	/* Every other object is destroyed through the wire and nothing stays allocated. */
 	stub_wire_begin(&fixture_wire);
-	fixture_destroy(FIXTURE_DESTROY_DESCRIPTOR_POOL, FIXTURE_POOL);
 	fixture_destroy(FIXTURE_DESTROY_DSL, FIXTURE_DSL);
 	fixture_destroy(FIXTURE_DESTROY_SAMPLER, FIXTURE_SAMPLER);
 	fixture_destroy(FIXTURE_DESTROY_IMAGE_VIEW, FIXTURE_VIEW);
 	fixture_destroy(FIXTURE_DESTROY_IMAGE, FIXTURE_IMAGE);
 	reply_bytes = stub_execute_ok(&fixture_wire);
-	assert(reply_bytes == 5U * 4U);
+	assert(reply_bytes == 4U * 4U);
 	stub_session_close();
 	assert(stub_live == 0U);
 }

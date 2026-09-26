@@ -14,7 +14,8 @@ scenario:
            the six views are also laid out on one sheet, sheet.png
   zdesktop WS035 p066: zwl --glass (Wiseman Mode) at 1920x1080 with three 800x560 wl_shm windows: the
            desktop, the top one docked by a double click on its title bar, Wiseview opened by a
-           drag up from the bottom edge, and Wiseview closed; each view differs from the one before it (the
+           drag up from the bottom edge, Wiseview closed, and the docked viewer closed with the bar's close
+           button (the desktop is drawn again); each view differs from the one before it (the
            serial log only tells when the viewer started; the checks are on the images); sheet.png
 
 The area layout is the comment at the top of src/drivers/gpu/i915/display/capture.c.
@@ -423,12 +424,13 @@ def zdesktop(args, qmp, capture, report, wait):
     """The glass look on the capture display: the desktop, docking, Wiseview."""
     width, height = 1920, 1080
     time_limit = time.monotonic() + args.timeout
-    # Where zwl places the window on top: all three are 800x560 (plan/ws031/tests/zdesktop/), so the last
-    # mapped is at cascade step 64 whichever client it is:
-    # centred under the system bar and a title bar (userland/base/zwl/shell.c zwl_glass_place).
+    # Where zwl places the window on top: all are 800x560 (plan/ws031/tests/zdesktop/), each mapped one
+    # cascade step of 32 after the one before, centred under the system bar and a title bar
+    # (userland/base/zwl/shell.c zwl_glass_place).  The viewer is the fourth mapped: two wl_shm windows
+    # and the Vulkan window killed while it draws (wlkill) come before it.
     top = 34 + 12 + 44 + 8
-    mview_x = (width - 800) // 2 + 64
-    mview_y = top + (height - top - 12 - 560) // 2 + 64
+    mview_x = (width - 800) // 2 + 32 * 3
+    mview_y = top + (height - top - 12 - 560) // 2 + 32 * 3
     title = (mview_x + 300, mview_y - 8 - 22)
 
     def events(items):
@@ -488,8 +490,22 @@ def zdesktop(args, qmp, capture, report, wait):
     closed = shot('closed', 4.0)
     report['checks']['wiseview_closes'] = difference(wiseview, closed) > 0.05
 
+    # The close button of the window docked in the bar (x of the bar's buttons at 1920 wide, as docked.png
+    # shows them) asks the viewer to close: it ends (MVIEW DONE reason=closed in its log) and the guest
+    # powers off some seconds later (plan/ws031/tests/zdesktop/vkwait2).  The compositor keeps drawing: the
+    # desktop comes back with the windows under it.
+    move(1430, 17)
+    time.sleep(0.5)
+    button(True)
+    time.sleep(0.05)
+    button(False)
+    move(width - 40, height - 200)
+    ended = shot('ended', 3.0)
+    report['checks']['close_ends_viewer'] = difference(closed, ended) > 0.05
+    report['checks']['desktop_after_close'] = coloured(ended) > 0.02
+
     sheet = Path(args.output) / 'sheet.png'
-    write_sheet([report['images'][tag]['path'] for tag in ('desktop', 'docked', 'wiseview', 'closed')], sheet, columns=2)
+    write_sheet([report['images'][tag]['path'] for tag in ('desktop', 'docked', 'wiseview', 'closed', 'ended')], sheet, columns=3)
     report['sheet'] = str(sheet)
 
 
