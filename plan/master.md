@@ -132,6 +132,7 @@ fg005 有線 LAN、fg007 HAL の可読性、fg009 PowerPC）は定義を残す�
 | [WS066](ws066/ws.md) | MG002 | 動的 link の program の起動を速くする（`ld.so` の最適化）（2026-09-26 ユーザー「あとでやるリスト」） | planning | p001（費用の内訳と設計）。優先度は低い |
 | [WS068](ws068/ws.md) | MG006 | EGL と OpenGL ES（と desktop GL 3.0〜4.6）を Vulkan と display 拡張の上に実装する（Wayland とディスプレイ直接の両方）（2026-09-26・27 ユーザー指示） | incomplete | p003（自前の GLSL compiler、2026-09-27 方式 A に決定）→ desktop GL。p002・p008・p010・p006 cleared |
 | [WS069](ws069/ws.md) | MG006 | zdesktop で X11 の app を動かす（単体の `zdesktop-x11server`、rootless、GLX）（2026-09-26・27 ユーザー指示） | incomplete | p008（zdesktop-x11server へ移す）→ p009（Xzed の復元）。p002〜p005 cleared（Xzed の上で。p008 で移す） |
+| [WS070](ws070/ws.md) | MG006 | zdesktop の System Menu: client がメニューの意味を渡し、zdesktop が浮いたタイトルバーとシステムバーに描く（`xdg_toplevel_menu_v1`、libzdesktop で包む）（2026-09-27 ユーザー指示） | planning | p001（設計）。WS069 の後、WS068 の GLSL より前 |
 
 完了した WS の Phase の記録は 2026-09-24 に plan から削除した（git の履歴に残る）。
 
@@ -150,7 +151,7 @@ fg005 有線 LAN、fg007 HAL の可読性、fg009 PowerPC）は定義を残す�
 7. その他（WS001、WS004、WS007、WS009、WS017、WS026〜WS029）。WS037〜WS039 は番号の予約のみ。
 8. **WS066**（`ld.so` の最適化。2026-09-26 ユーザー「あとでやるリスト」）。
 9. **WS068**（EGL と GLES を Vulkan の上に）・**WS069**（X11）: 2026-09-26 ユーザー「デスクトップ関連を優先」で WS035 と並ぶ。
-   2026-09-27 の順: ws035-p073（改名）→ libzdesktop（ws035-p074）→ WS069（zdesktop-x11server、Xzed の復元）→ WS035 の OSC デモの残り → WS068（GLSL compiler、desktop GL）。
+   2026-09-27 の順: ws035-p073（改名）→ libzdesktop（ws035-p074）→ WS069（zdesktop-x11server、Xzed の復元）→ **WS070（System Menu）** → WS068（GLSL compiler、desktop GL）。
 
 ## Upcoming Work Outlook
 
@@ -247,6 +248,7 @@ tick 周期は `include/hal/arch/<arch>.h` の `HAL_TIMER_FREQUENCY`。時間の
 | GLSL の compiler | 方式 A（自前の C）。前処理・字句・構文・型・SPIR-V 出力の共通の核から、GLSL ES 1.00 と GLSL 1.30 → 3.30/ES 3.00 → 4.x | WS068 design.md §4 |
 | desktop GL | ES でない OpenGL 3.0 を実装し、4.6 まで出来る範囲で（API の完全さは求めない）。Vulkan 1.0 の基本以上が要る機能（geometry・tessellation・compute、SSBO 等）は Venus で先に、i915 の実行器の不足は F-023 に記録して後 | WS068 design.md §6 |
 | 作業の順 | 改名 → libzdesktop と header の非公開化 → zdesktop-x11server → Xzed の復元 → **OSC のデモ（fg010）の残りの zdesktop の作業**（ユーザー「X server の後にデモの残り」）→ GLSL compiler → desktop GL 3.0・4.x | WS の優先順位 |
+| System Menu | ユーザー（同日）:「X11サーバの実装が終わったら、OpenGLよりも、これを先に実装してもらえませんか？あとでGTK4やQt6のネイティブメニューバーとしても利用可能にするつもりです。XDG拡張ではあるものの、libzdesktopでラップします。」→ WS070（仕様案は ws070/spec.md）。順: WS069（X11 server）→ **WS070（System Menu）** → WS068（GLSL・desktop GL） | WS070、WS の優先順位 |
 | OSC のデモ | ユーザー（同日、後から）:「私がほしかったWaylandコンポジタが…すでにPoCができており、デモできる状態です。なので、ここから先は具体的なアプリを動かす基盤を整えていき、OSC当日は、すでに完全なデスクトップが動いているデモにできる見込みです。参考まで。」→ 上の「デモの残り」は**アプリを動かす基盤**（GLSL・desktop GL・X11 の app 等）を優先して読む。デモだけのための磨き込みは急がない | fg010、WS の優先順位 |
 | zdesktop-x11server の形 | rootless だけ（rootful は持たない）。「zdesktop本体に組み込む可能性が高いので、再利用できるモジュラリティを保っておくと、あとで組み込みが楽です。」 | WS069 design.md §0 |
 | libvulkan の版 | desktop GL に要る Vulkan 1.1 以降の機能・拡張は libvulkan に足してよい（Venus で。i915 の実行器は後、F-023） | WS068 design.md §6 |
