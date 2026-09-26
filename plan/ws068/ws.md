@@ -8,8 +8,8 @@ Primary Milestone: MG006
 Related Milestones: MG002
 Objectives: O1, O2
 Parent: [Master](../master.md)
-Queue: none
-Resume point: p003（GLES 2.0 の最小）。GLES の方式（design.md §4）のユーザーの判断を待つ
+Queue: q475
+Resume point: p008（GLES の描画の核、SPIR-V で）。p003（GLSL）は GLES の方式（design.md §4）のユーザーの判断を待つ
 <!-- awesome-plan-current:end -->
 
 ## 目標
@@ -54,3 +54,4 @@ EGL と OpenGL ES（2.0、次に 3.0）を、zedBSD の libvulkan（Vulkan）と
 | ws068-p005 | GLES 3.0 | planning | p004 |
 | ws068-p006 | i915 実機での確認 | planning | p004、F-022、F-023 |
 | ws068-p007 | 規約の全文との照合と回帰（最後） | planning | 全 Phase |
+| [ws068-p008](phase008/phase.md) | GLES 2.0 の描画の核（SPIR-V の shader binary、変換層。compiler の方式に依らない部分） | in-progress（q475-i01） | p002 |

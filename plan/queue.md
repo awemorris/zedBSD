@@ -1,10 +1,10 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue: なし（q474 finished）
+# Queue: q475 active
 
 <!-- awesome-plan-current:start -->
-Status: none（2026-09-26）
-Active Queue: なし
+Status: active（2026-09-26）
+Active Queue: [q475](history/queue-q475.md)（ws068-p008: GLES 2.0 の描画の核）
 Last finished Queue: [q474](history/queue-q474.md)（ws069-p003 cleared。Xzed の rootless）
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
