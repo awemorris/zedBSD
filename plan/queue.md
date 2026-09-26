@@ -1,10 +1,10 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue: なし（q471 finished）
+# Queue: q473 active
 
 <!-- awesome-plan-current:start -->
-Status: none（2026-09-26）
-Active Queue: なし
+Status: active（2026-09-26）
+Active Queue: [q473](history/queue-q473.md)（ws069-p002: Xzed の rootful の Wayland backend）
 Last finished Queue: [q471](history/queue-q471.md)（ws068-p002 cleared。EGL の核）
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->

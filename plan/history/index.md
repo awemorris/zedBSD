@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q471（ws068-p002 cleared。EGL の核）
+Last finished Queue: q472（ws069-p001 cleared。X11 の設計）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q471（2026-09-26）
+## 最新: q443〜q472（2026-09-26）
+
+[q472](queue-q472.md): ws069-p001 cleared。zwl で X11 の app を動かす設計（新 WS069）: 既存の Xzed に Wayland backend（rootful → rootless）、GLX は EGL/GLES の上で DRI3/Present に当たる buffer の受け渡し。
 
 [q471](queue-q471.md): ws068-p002 cleared。EGL 1.5 の核（Wayland・display 直接・surfaceless、config、window surface と swapchain、context、swap）、libwayland-egl、clear だけの libGLESv2、Khronos の header と出典、egltest。Venus で zwl の窓と全画面の clear。
 
