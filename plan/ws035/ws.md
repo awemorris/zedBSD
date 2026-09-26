@@ -254,7 +254,7 @@ p001で確かめる。
 | [ws035-p062](phase062/phase.md) | （2026-09-26 ユーザー指示）タイトルバーのドッキング: 最大化で題名が上部のバーへ吸着（ダブルクリック・上への drag）、バーから下への drag で解除、遷移、仮想デスクトップのハリボテ | cleared（q463-i01、2026-09-26。ダブルクリック・上への drag・button でドッキング、バーの題名のダブルクリック・⧉・下への pull で解除、220 ms の遷移） | p059 | `userland/base/zwl` |
 | [ws035-p063](phase063/phase.md) | （2026-09-26 ユーザー設計 [wiseman-design.md](wiseman-design.md)）Wiseview（ウィンドウ一覧）の疎通: 下端からの drag、グリッドのタイル、選択・閉じる | cleared（q464-i01、2026-09-26。下端からの drag で開き、グリッド・札・選択・閉じる。4 窓で確認） | p062 | `userland/base/zwl` |
 | ws035-p064 | （同）物理的に追従するドッキングの解除（引くと縮み、閾値で snap、届かなければバネで戻る） | planned | p062 | 同上 |
-| ws035-p065 | （同）仮想デスクトップの実体と左右の端のスワイプ（画面が追従して横へ） | planned | p063 | 同上 |
+| [ws035-p065](phase065/phase.md) | （同）仮想デスクトップの実体と左右の端のスワイプ（画面が追従して横へ） | in-progress（q481-i01） | p063 | 同上 |
 | [ws035-p066](phase066/phase.md) | （2026-09-26 ユーザー指示）zdesktop（Wiseman Mode）を Intel GPU（5330 の i915 ネイティブ実行器、VFIO）で疎通 | cleared（q465-i01、2026-09-26。i915 実機の GPU で Wiseman Mode・ドッキング・Wiseview を capture で確認（wl_shm の窓）。GPU の client の窓は F-022、実行器の不足は F-023） | p063、WS031 | `userland/base/zwl`、`plan/ws031/tests` |
 | [ws035-p067](phase067/phase.md) | （2026-09-26 ユーザー指示）zdesktop で mview（Vulkan の client）の窓を i915 で合成（F-022） | cleared（q466-i01、2026-09-26。i915 実機の GPU で mview の窓を合成・ドッキング・Wiseview を capture で確認。実行器の object 表を session ごとに） | p066 | `src/drivers/gpu/i915/render`、`userland/base/zwl`、`plan/ws031/tests` |
 | [ws035-p068](phase068/phase.md) | （2026-09-26 ユーザー指示）zdesktop-terminal: zterm（X11）を Wayland と Vulkan へ | cleared（q468-i01、2026-09-26。Venus と i915 実機で shell が動く） | p067 | `userland/base/zdesktop-terminal` |
