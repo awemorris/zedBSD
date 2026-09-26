@@ -1,10 +1,10 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue: none active
+# Queue: q488 active
 
 <!-- awesome-plan-current:start -->
-Status: none active（2026-09-27）
-Active Queue: なし
+Status: active（2026-09-27）
+Active Queue: [q488](history/queue-q488.md)（ws069-p008: zdesktop-x11server）
 Last finished Queue: [q487](history/queue-q487.md)（ws035-p074 cleared。非公開の header と libzdesktop の役割）
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
