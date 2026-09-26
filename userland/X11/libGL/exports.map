@@ -265,6 +265,7 @@
 		glXQueryServerString;
 		glXQueryVersion;
 		glXSwapBuffers;
+		zglx_swap_step;
 		glXWaitGL;
 		glXWaitX;
 	local:

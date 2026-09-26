@@ -19,14 +19,30 @@
 #include <GL/glx.h>
 
 #include <math.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 /* Pi. */
 #define GEARS_PI	3.14159265358979f
+
+/* How many seconds a frame may take before the watchdog says where it is, and how many times it says so. */
+#define GEARS_WATCHDOG_SECONDS	3U
+#define GEARS_WATCHDOG_REPORTS	5
+
+/* The steps of a frame the watchdog names (WS069 p007). */
+#define GEARS_STEP_EVENTS	1
+#define GEARS_STEP_GEOMETRY	2
+#define GEARS_STEP_DRAW		3
+#define GEARS_STEP_SWAP		4
+#define GEARS_STEP_SLEEP	5
+
+/* libGL's own: the step glXSwapBuffers is at. */
+extern volatile int zglx_swap_step;
 
 /*
  * What the command line asked for.
@@ -51,6 +67,8 @@ struct gears_shape {
 };
 
 static int gears_parse(int argc, char **argv, struct gears_options *options);
+static void gears_watchdog(int number);
+static char *gears_decimal(char *cursor, unsigned long value);
 static void gears_setup(GLuint *lists);
 static void gears_make(GLuint list, const struct gears_shape *shape, const GLfloat *colour);
 static void gears_faces(const struct gears_shape *shape, GLfloat z);
@@ -60,6 +78,11 @@ static void gears_draw(const GLuint *lists, unsigned width, unsigned height, GLf
 static int gears_check(unsigned width, unsigned height, const char *token, unsigned frame);
 static double gears_now(void);
 static void gears_sleep(unsigned milliseconds);
+
+/* The frame and its step, for the watchdog, and how many times it has spoken. */
+static volatile sig_atomic_t gears_frame;
+static volatile sig_atomic_t gears_step;
+static volatile sig_atomic_t gears_reports;
 
 /*
  * Runs the gears.
@@ -73,6 +96,7 @@ main(
 		GLX_RGBA, GLX_DOUBLEBUFFER, GLX_DEPTH_SIZE, 16, None
 	};
 	struct gears_options options;
+	struct sigaction watchdog;
 	XVisualInfo *visual;
 	GLXContext context;
 	Display *display;
@@ -157,8 +181,17 @@ main(
 	failures = 0;
 	started = gears_now();
 	begun = started;
+	memset(&watchdog, 0, sizeof(watchdog));
+	watchdog.sa_handler = gears_watchdog;
+	watchdog.sa_flags = SA_RESTART;
+	(void)sigaction(SIGALRM, &watchdog, NULL);
 	for (frame = 1U; frame <= options.frames || options.frames == 0U; frame++) {
+		/* The watchdog, armed again each frame. */
+		gears_frame = (sig_atomic_t)frame;
+		(void)alarm(GEARS_WATCHDOG_SECONDS);
+
 		/* The events waiting (a closed connection ends the program in XPending). */
+		gears_step = GEARS_STEP_EVENTS;
 		pending = XPending(display);
 		while (pending > 0) {
 			(void)XNextEvent(display, &event);
@@ -166,11 +199,13 @@ main(
 		}
 
 		/* The window's size now. */
+		gears_step = GEARS_STEP_GEOMETRY;
 		width = options.width;
 		height = options.height;
 		(void)XGetGeometry(display, window, &root, &x, &y, &width, &height, &border, &depth);
 
 		/* The gears, the first frame read back, and shown (the first ten frames say how long each part took). */
+		gears_step = GEARS_STEP_DRAW;
 		before = gears_now();
 		angle = 2.0;
 		if (frame > 1U)
@@ -181,6 +216,7 @@ main(
 		if (frame == 2U || frame == 50U)
 			(void)gears_check(width, height, options.token, frame);
 		drawn = gears_now();
+		gears_step = GEARS_STEP_SWAP;
 		glXSwapBuffers(display, window);
 		if (frame <= 10U) {
 			printf("ZGEARS FRAME run=%s frame=%u draw_ms=%.1f swap_ms=%.1f\n", options.token, frame,
@@ -197,8 +233,12 @@ main(
 		}
 
 		/* The delay between frames. */
+		gears_step = GEARS_STEP_SLEEP;
 		gears_sleep(options.delay_ms);
 	}
+
+	/* The watchdog is disarmed. */
+	(void)alarm(0U);
 
 	/* Succeeded: the context and window go. */
 	(void)glXMakeCurrent(display, None, NULL);
@@ -615,4 +655,59 @@ gears_sleep(
 	delay.tv_sec = (time_t)(milliseconds / 1000U);
 	delay.tv_nsec = (long)(milliseconds % 1000U) * 1000000L;
 	(void)nanosleep(&delay, NULL);
+}
+
+/*
+ * Says, from SIGALRM, the frame that has taken too long and the step it is
+ * at (with libGL's step inside glXSwapBuffers), with async-signal-safe calls
+ * only; armed again for a few more reports.
+ */
+static void
+gears_watchdog(
+	int number)
+{
+	char line[96];
+	char *cursor;
+	size_t length;
+
+	/* The line: ZGEARS STALL frame=N step=S swap_step=W. */
+	(void)number;
+	memcpy(line, "ZGEARS STALL frame=", 19U);
+	cursor = gears_decimal(line + 19, (unsigned long)gears_frame);
+	memcpy(cursor, " step=", 6U);
+	cursor = gears_decimal(cursor + 6, (unsigned long)gears_step);
+	memcpy(cursor, " swap_step=", 11U);
+	cursor = gears_decimal(cursor + 11, (unsigned long)zglx_swap_step);
+	*cursor++ = '\n';
+	length = (size_t)(cursor - line);
+	(void)write(STDERR_FILENO, line, length);
+
+	/* Again, a few times, while the frame stays stuck. */
+	gears_reports++;
+	if (gears_reports < GEARS_WATCHDOG_REPORTS)
+		(void)alarm(GEARS_WATCHDOG_SECONDS);
+}
+
+/* Writes a number in decimal at cursor and returns the end (async-signal-safe). */
+static char *
+gears_decimal(
+	char *cursor,
+	unsigned long value)
+{
+	char digits[24];
+	unsigned count;
+
+	/* The digits, lowest first. */
+	count = 0U;
+	do {
+		digits[count++] = (char)('0' + value % 10UL);
+		value /= 10UL;
+	} while (value != 0UL);
+
+	/* Highest first. */
+	while (count > 0U)
+		*cursor++ = digits[--count];
+
+	/* The end. */
+	return cursor;
 }

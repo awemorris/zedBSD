@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=master -->
 
 <!-- awesome-plan-current:start -->
-Active Queue: q485（ws069-p007: i915 実機の GLX の間欠の止まりの段）。直近: q484（ws068-p006 cleared: i915 実機で GLX の zgears・X terminal・仮想デスクトップ。間欠の止まりは BUG-057）。直近: q477（ws069-p004 cleared: GLX の核）。直近: q476（ws068-p010 cleared: EGL の pbuffer。GLX の描画先）。直近: q475（ws068-p008 cleared: GLES 2.0 の描画の核。SPIR-V の shader で buffer・texture・blend・depth・cull、Venus で窓と display 直接）。直近: q474（ws069-p003 cleared: Xzed の rootless。X の zterm が Wiseman の窓）。直近: q473（ws069-p002 cleared: Xzed の rootful の Wayland backend。zwl の窓で X の zterm）。直近: q472（ws069-p001 cleared: X11 の設計）。直近: q471（ws068-p002 cleared: EGL の核、libwayland-egl、clear だけの GLES。Venus で Wayland と display 直接）。直近: q470（ws068-p001 cleared: EGL/GLES の設計。**GLES の方式はユーザーの判断待ち**、plan/ws068/design.md §4）。直近: q469（ws035-p069 cleared: App Home の PoC。実機用 demo image `plan/ws035/demo/build-demo-image.sh`）。直近: q468（ws035-p068 cleared: zdesktop-terminal。Venus と i915 実機）。直近: q467（ws031-p050 cleared: session の close で残った Vulkan の object を解放。実機で確認）。直近: q466（ws035-p067 cleared: zdesktop で mview（Vulkan の client）の窓を i915 実機の GPU で合成）。直近: q465（ws035-p066 cleared: Intel GPU（i915）で Wiseman Mode。GPU の client は F-022）。直近: q464（ws035-p063 cleared: Wiseview。WM の名は Wiseman）。直近: q463（ws035-p062 cleared: タイトルバーのドッキング）。直近: q462（ws035-p061 cleared: 絵の壁紙と透ける窓）。直近: q461（ws035-p060 cleared: mview を glass の窓で Vulkan 描画）。直近: q460（ws035-p059 cleared: `zwl --glass` の浮いたタイトルバーとすりガラス）。直近: q459（ws035-p054 cleared: acquire fence。受け入れ 3 はユーザーの判断で読み替え）。直近: q458（ws035-p053 cleared: `wl_shm` と cursor）。直近: q456（ws062-p003 cleared: amd64 の既定を native・2 GiB に、CI は gzip）。直近の終了: q453（ws065-p003 cleared: sh の builtin の bash 拡張）
+Active Queue: q486（ws035-p073: zwl を zdesktop へ改名）。直近: q485（ws069-p007 canceled: X server を zdesktop-x11server として作り直す判断）。直近: q484（ws068-p006 cleared: i915 実機で GLX の zgears・X terminal・仮想デスクトップ。間欠の止まりは BUG-057）。直近: q477（ws069-p004 cleared: GLX の核）。直近: q476（ws068-p010 cleared: EGL の pbuffer。GLX の描画先）。直近: q475（ws068-p008 cleared: GLES 2.0 の描画の核。SPIR-V の shader で buffer・texture・blend・depth・cull、Venus で窓と display 直接）。直近: q474（ws069-p003 cleared: Xzed の rootless。X の zterm が Wiseman の窓）。直近: q473（ws069-p002 cleared: Xzed の rootful の Wayland backend。zwl の窓で X の zterm）。直近: q472（ws069-p001 cleared: X11 の設計）。直近: q471（ws068-p002 cleared: EGL の核、libwayland-egl、clear だけの GLES。Venus で Wayland と display 直接）。直近: q470（ws068-p001 cleared: EGL/GLES の設計。**GLES の方式はユーザーの判断待ち**、plan/ws068/design.md §4）。直近: q469（ws035-p069 cleared: App Home の PoC。実機用 demo image `plan/ws035/demo/build-demo-image.sh`）。直近: q468（ws035-p068 cleared: zdesktop-terminal。Venus と i915 実機）。直近: q467（ws031-p050 cleared: session の close で残った Vulkan の object を解放。実機で確認）。直近: q466（ws035-p067 cleared: zdesktop で mview（Vulkan の client）の窓を i915 実機の GPU で合成）。直近: q465（ws035-p066 cleared: Intel GPU（i915）で Wiseman Mode。GPU の client は F-022）。直近: q464（ws035-p063 cleared: Wiseview。WM の名は Wiseman）。直近: q463（ws035-p062 cleared: タイトルバーのドッキング）。直近: q462（ws035-p061 cleared: 絵の壁紙と透ける窓）。直近: q461（ws035-p060 cleared: mview を glass の窓で Vulkan 描画）。直近: q460（ws035-p059 cleared: `zwl --glass` の浮いたタイトルバーとすりガラス）。直近: q459（ws035-p054 cleared: acquire fence。受け入れ 3 はユーザーの判断で読み替え）。直近: q458（ws035-p053 cleared: `wl_shm` と cursor）。直近: q456（ws062-p003 cleared: amd64 の既定を native・2 GiB に、CI は gzip）。直近の終了: q453（ws065-p003 cleared: sh の builtin の bash 拡張）
 Current Focused Goal: fg010 — Wayland デスクトップ（2026-10-17 の OSC Tokyo Fall のデモ）。fg011（expat の configure と compile を Linux と同等に）は達成して終了（2026-09-26 ユーザー「パフォーマンス問題はいったん終了しましょう」。configure 7.1〜7.5 秒・host 10.7 秒、`make -j1` 9.9〜10.4 秒・host 15.5 秒、`make -j4` 4.0〜4.1 秒・host 5.1 秒、`cc t.c -o t` 75〜85 ms・host 83〜85 ms）。`ld.so` の最適化は WS066（後で）
 Next: 2026-09-26（夜）ユーザー指示「ホーム画面、EGL/GLES、WaylandコンポジタのX11機能など、デスクトップ関連の作業を優先しつつ、幅広く残っている作業を実施してください。…私が止めるまで自走を続けてほしい」。順: ws035-p068（zdesktop-terminal）→ ws035-p069（App Home の PoC）→ WS068（EGL/GLES）→ zwl の X11 対応（新 WS。2026-09-26 ユーザー追加「WaylandコンポジタのX11サーバ機能については、GLX拡張も実装しておいてください」: GLX 拡張も実装する。GLX は desktop OpenGL の文脈を要するので WS068 の GL の土台に依存）→ 他の残り。判断が要る Phase は uncleared にして理由を記録し先へ進む。
 <!-- awesome-plan-current:end -->
@@ -130,8 +130,8 @@ fg005 有線 LAN、fg007 HAL の可読性、fg009 PowerPC）は定義を残す�
 | [WS065](ws065/ws.md) | MG002 | `/bin/sh` に POSIX が未規定とする bash 拡張を足す（2026-09-26 ユーザー指示） | incomplete | p001（構文）・p002（展開）・p003（builtin）cleared。p004（規約）は最後 |
 | [WS067](ws067/ws.md) | MG002 | `/dev/fd` を呼んだ process の descriptor に合わせる（BUG-054、2026-09-26 ユーザー「最優先」） | completed | BUG-054 resolved（QEMU）。p001・p002 cleared |
 | [WS066](ws066/ws.md) | MG002 | 動的 link の program の起動を速くする（`ld.so` の最適化）（2026-09-26 ユーザー「あとでやるリスト」） | planning | p001（費用の内訳と設計）。優先度は低い |
-| [WS068](ws068/ws.md) | MG006 | EGL と OpenGL ES を Vulkan と display 拡張の上に実装する（Wayland とディスプレイ直接の両方）（2026-09-26 ユーザー指示） | incomplete | p003（GLES 2.0）。**GLES の方式はユーザーの判断待ち**（design.md §4）。p002（EGL の核）cleared |
-| [WS069](ws069/ws.md) | MG006 | zwl で X11 の app を動かす（Xzed の Wayland backend: rootful → rootless、GLX）（2026-09-26 ユーザー指示） | incomplete | p004（GLX、WS068 の GLES の後）。p002（rootful）・p003（rootless）cleared |
+| [WS068](ws068/ws.md) | MG006 | EGL と OpenGL ES（と desktop GL 3.0〜4.6）を Vulkan と display 拡張の上に実装する（Wayland とディスプレイ直接の両方）（2026-09-26・27 ユーザー指示） | incomplete | p003（自前の GLSL compiler、2026-09-27 方式 A に決定）→ desktop GL。p002・p008・p010・p006 cleared |
+| [WS069](ws069/ws.md) | MG006 | zdesktop で X11 の app を動かす（単体の `zdesktop-x11server`、rootless、GLX）（2026-09-26・27 ユーザー指示） | incomplete | p008（zdesktop-x11server へ移す）→ p009（Xzed の復元）。p002〜p005 cleared（Xzed の上で。p008 で移す） |
 
 完了した WS の Phase の記録は 2026-09-24 に plan から削除した（git の履歴に残る）。
 
@@ -149,7 +149,8 @@ fg005 有線 LAN、fg007 HAL の可読性、fg009 PowerPC）は定義を残す�
 6. **WS049・WS050・WS051・WS052**（2026-09-24 ユーザー指示で追加: ACPI の AML interpreter、UCSI、DP Alt Mode、S0i3。WS049 が他の 3 つの前提。優先度はユーザーの指示を待つ）。
 7. その他（WS001、WS004、WS007、WS009、WS017、WS026〜WS029）。WS037〜WS039 は番号の予約のみ。
 8. **WS066**（`ld.so` の最適化。2026-09-26 ユーザー「あとでやるリスト」）。
-9. **WS068**（EGL と GLES を Vulkan の上に。2026-09-26 に作成、優先度はユーザーの指示を待つ）。
+9. **WS068**（EGL と GLES を Vulkan の上に）・**WS069**（X11）: 2026-09-26 ユーザー「デスクトップ関連を優先」で WS035 と並ぶ。
+   2026-09-27 の順: ws035-p073（改名）→ libzdesktop（ws035）→ WS069（zdesktop-x11server、Xzed の復元）→ WS068（GLSL compiler、desktop GL）。
 
 ## Upcoming Work Outlook
 
@@ -234,6 +235,18 @@ tick 周期は `include/hal/arch/<arch>.h` の `HAL_TIMER_FREQUENCY`。時間の
 | HDA の実機確認 | ユーザーが後で USB boot のベアメタルで試す | ws035-p008 |
 | 動かない試験 | 書き直さず削除する | ws034-p049 |
 | `/bin/sh` の互換性 | 優先度を上げて徹底的に直す | WS042・WS043（完了） |
+
+### 2026-09-27 のユーザーの判断（有効なもの）
+
+| 項目 | 決定 | 記録先 |
+| --- | --- | --- |
+| zdesktop の X11 server | Wayland 用の X server は単体のプログラム `userland/base/zdesktop-x11server`（後で zdesktop に内蔵するかもしれない）。標準の Wayland と Vulkan を使い、zdesktop の非標準の拡張は libzdesktop 経由。Xzed はレトロコンピュータ用の `/dev/graphics` の簡易実装（デモ）なので、ws069 で足した Wayland・rootless・GLX を外して元に戻す | WS069 design.md §0 |
+| 改名 | `userland/base/zwl` を `userland/base/zdesktop`（`/bin/zdesktop`）に。以後 zdesktop と呼ぶ。C の識別子（`zwl_*`）と log の接頭辞（`ZWL`）は変えない | ws035-p073 |
+| libzdesktop | zdesktop の非標準の Wayland/xdg 拡張（`zed_gpu_buffer_v1` 等）の wrapper と、OS・daemon への道の両方。client は非標準の protocol を直接話さない | WS069 design.md §0、ws035 |
+| 非公開の header | `X11/Xzed.h` と `zed-gpu-buffer-v1-client-protocol.h` は公開しない | WS069 design.md §0 |
+| GLSL の compiler | 方式 A（自前の C）。前処理・字句・構文・型・SPIR-V 出力の共通の核から、GLSL ES 1.00 と GLSL 1.30 → 3.30/ES 3.00 → 4.x | WS068 design.md §4 |
+| desktop GL | ES でない OpenGL 3.0 を実装し、4.6 まで出来る範囲で（API の完全さは求めない）。Vulkan 1.0 の基本以上が要る機能（geometry・tessellation・compute、SSBO 等）は Venus で先に、i915 の実行器の不足は F-023 に記録して後 | WS068 design.md §6 |
+| 作業の順 | 改名 → libzdesktop と header の非公開化 → zdesktop-x11server → Xzed の復元 → GLSL compiler → desktop GL 3.0・4.x | WS の優先順位 |
 
 ### 主な依存関係
 

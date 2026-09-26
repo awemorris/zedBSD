@@ -5,7 +5,7 @@
 Phase ID: `ws035-p011`
 Parent: [WS035](../ws.md)
 Status: **uncleared**（q323-i04、2026-09-23。実行中に前提の欠落が判明したため）
-Phase disposition: normal
+Phase disposition: canceled（2026-09-27。改名はユーザー指示で [ws035-p073](../phase073/phase.md) が行う。基本の窓の管理（focus・移動・リサイズ・z-order・最小化・最大化）は p059・p062〜p072 で実装済み）
 Queue: q323（q323-i04）
 実行: メインセッション
 

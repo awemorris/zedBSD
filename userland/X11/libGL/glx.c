@@ -99,6 +99,14 @@ static struct __GLXFBConfigRec glx_configs[2] = {
 	{ 2, 1 }
 };
 
+/*
+ * The step glXSwapBuffers is at (zedBSD's own, for a watchdog in the
+ * application to say where a swap stopped, WS069 p007): 0 outside, 1 the
+ * readback, 2 the conversion, 3 the image to the server, 4 the EGL swap,
+ * 5 the window's size, 6 a new pbuffer, 7 current again.
+ */
+volatile int zglx_swap_step;
+
 /* The key of each thread's current context, made once. */
 static pthread_key_t glx_current_key;
 static pthread_once_t glx_current_once = PTHREAD_ONCE_INIT;
@@ -489,10 +497,12 @@ glXSwapBuffers(
 		return;
 
 	/* The pixels, from the bottom row up. */
+	zglx_swap_step = 1;
 	glPixelStorei(GL_PACK_ALIGNMENT, 4);
 	glReadPixels(0, 0, (GLsizei)ctx->width, (GLsizei)ctx->height, GL_RGBA, GL_UNSIGNED_BYTE, ctx->pixels);
 
 	/* As RGB rows from the top down. */
+	zglx_swap_step = 2;
 	for (row = 0U; row < ctx->height; row++) {
 		source = ctx->pixels + (size_t)(ctx->height - 1U - row) * ctx->width * 4U;
 		target = ctx->rows + (size_t)row * ctx->width * 3U;
@@ -506,15 +516,22 @@ glXSwapBuffers(
 	}
 
 	/* Into the window, and the frame's resources freed. */
+	zglx_swap_step = 3;
 	(void)XzedPutImageRGB24(dpy, drawable, 0, 0, ctx->width, ctx->height, ctx->rows, ctx->width * 3U);
+	zglx_swap_step = 4;
 	(void)eglSwapBuffers(glx_egl, ctx->pbuffer);
 
 	/* A window of a new size: a new pbuffer, current again. */
+	zglx_swap_step = 5;
 	status = glx_pbuffer(ctx, drawable);
 	if (status == 0) {
+		zglx_swap_step = 7;
 		done = eglMakeCurrent(glx_egl, ctx->pbuffer, ctx->pbuffer, ctx->context);
 		(void)done;
 	}
+
+	/* Done. */
+	zglx_swap_step = 0;
 }
 
 /*
@@ -981,6 +998,7 @@ glx_pbuffer(
 	}
 
 	/* The old pbuffer goes (not current while it goes). */
+	zglx_swap_step = 6;
 	if (ctx->pbuffer != EGL_NO_SURFACE) {
 		(void)eglMakeCurrent(glx_egl, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 		(void)eglDestroySurface(glx_egl, ctx->pbuffer);

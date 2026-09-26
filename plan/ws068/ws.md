@@ -9,7 +9,7 @@ Related Milestones: MG002
 Objectives: O1, O2
 Parent: [Master](../master.md)
 Queue: none
-Resume point: p009（frame を重ねて速く）、p011（FBO）。GLX（ws069-p004）は p010 の pbuffer の上に。p003（GLSL の compiler）は GLES の方式（design.md §4）のユーザーの判断を待つ
+Resume point: 2026-09-27 の順（master）で WS069 の後に p003（自前の GLSL compiler、方式 A）→ p012 → p013・p014（desktop GL 3.0〜4.6）。p009（frame を重ねる）、p011（FBO）も残る
 <!-- awesome-plan-current:end -->
 
 ## 目標
@@ -49,7 +49,10 @@ EGL と OpenGL ES（2.0、次に 3.0）を、zedBSD の libvulkan（Vulkan）と
 | --- | --- | --- | --- |
 | [ws068-p001](phase001/phase.md) | 設計: library の構成（`libEGL.so`・`libGLESv2.so`・`libwayland-egl.so`）、GLES の方式の比較（自前の変換層＋glslang / Zink / ANGLE）、libvulkan に要る機能、試験アプリ、ライセンス（[design.md](design.md)） | cleared（q470-i01。GLES の方式はユーザーの判断待ち） | — |
 | [ws068-p002](phase002/phase.md) | EGL の核と `libwayland-egl`、display 直接の platform（最初は clear だけの GLES で疎通） | cleared（q471-i01、2026-09-26。Venus で Wayland と display 直接の clear） | p001 |
-| ws068-p003 | GLSL ES の source を SPIR-V に（compiler。変換層は p008 にある） | planning | p008、GLES の方式のユーザーの判断（design.md §4） |
+| ws068-p003 | 自前の GLSL compiler（C、2026-09-27 方式 A）の共通の核: 前処理・字句・構文・型検査・SPIR-V の出力。GLSL ES 1.00 と GLSL 1.30、`glShaderSource`・`glCompileShader` へ接続（i915 の受ける形） | planning（大きいので計画の段で分ける） | p008、p006 |
+| ws068-p012 | GLSL 3.30・ES 3.00（in/out、layout、UBO、整数） | planning | p003 |
+| ws068-p013 | desktop GL 3.0 の context（`glXCreateContextAttribsARB`、core と compatibility の profile、VAO、GL 3.0 の API） | planning | p003、ws069-p008 |
+| ws068-p014 | desktop GL 3.3〜4.6 の出来る範囲（Venus 先。geometry・tessellation・compute・SSBO は device の feature で。i915 の不足は F-023） | planning | p012、p013 |
 | ws068-p004 | GLES 2.0 の残りと試験の充実 | planning | p003 |
 | ws068-p005 | GLES 3.0 | planning | p004 |
 | [ws068-p006](phase006/phase.md) | i915 実機での確認（GLX の zgears、App Home の X11、仮想デスクトップ） | cleared（q484-i01。実機で 6 検査 PASS の run あり、回転の間欠の止まりは BUG-057） | p008、p010、ws069-p005、F-023 |

@@ -1629,11 +1629,22 @@ XPending(
 	/* Checks the current descriptor. */
 	if (d->event_count)
 		return (int)d->event_count;
+
+	/*
+	 * Only a whole event is taken: the bytes are looked at first, and a
+	 * part of one stays in the socket for the next read.  Taking a part and
+	 * dropping it would put every later reply out of step, and the next
+	 * one waited for would never come (WS069 p007, BUG-057).
+	 */
 	f = fcntl(d->fd, F_GETFL);
 	fcntl(d->fd, F_SETFL, f | O_NONBLOCK);
-	z = (int)recv(d->fd, b, 32, MSG_DONTWAIT);
+	z = (int)recv(d->fd, b, 32, MSG_DONTWAIT | MSG_PEEK);
 	error = errno;
+	if (z == 32)
+		z = (int)recv(d->fd, b, 32, MSG_DONTWAIT);
 	fcntl(d->fd, F_SETFL, f);
+	if (z > 0 && z < 32)
+		return 0;
 
 	/*
 	 * A connection the server has closed (or broken) ends the client, as

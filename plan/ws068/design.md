@@ -46,7 +46,7 @@
 - **同期**: `EGL_KHR_fence_sync`（`VkFence`）は後。
 - **error**: EGL の error は thread local の `eglGetError`。
 
-## 4. GLES の方式（ユーザーの判断を待つ）
+## 4. GLES の方式（2026-09-27 ユーザー決定: A）
 
 | 方式 | 中身 | 利点 | 欠点 | 規模 |
 | --- | --- | --- | --- | --- |
@@ -60,6 +60,11 @@
 
 判断の要点: 外部の C++ の package を許すか（B・C・D）、GLX（desktop GL）をいつ要るか（C を早めるか）。
 
+**決定（2026-09-27 ユーザー）: A（自前の変換層＋自前の GLSL compiler、C）。** compiler は共通の核（前処理・字句・構文・型検査・
+SPIR-V の出力）を作り、最初に GLSL ES 1.00 と GLSL 1.30（GL 3.0）を通す。次に GLSL 3.30・ES 3.00、その後 4.x（UBO・SSBO・
+layout 等）へ広げる。SPIR-V は i915 のネイティブ compiler の受ける形（F-023: OpSwitch・OpCompositeInsert 等を使わない、
+struct の member 16 まで、Flat 無し等）で出し、その制約は ws068-p006 の host の試験（`plan/ws068/tests/i915-shader-check/`）で確かめる。
+
 ## 5. 試験
 
 - `egltest`（userland/base/egltest）: EGL＋GLES 2.0 の小さな試験 app。p002 は clear だけ（色を周期で変える）、p003 から
@@ -72,6 +77,14 @@
   direct rendering の client 側 `libGL.so` が要る）。
 - 方式: (1) GLES の変換層の上に desktop GL の compatibility の部分集合を足す、(2) Zink（§4 C）で desktop GL と GLX を得る。
   (1) は GLES の方式が A・B のとき、(2) は C のとき。X11 の WS の設計で決める。
+- ws069-p005 で (1) を実装した（固定機能の GL 1.x を libGL の中の層で）。
+- **desktop GL 3.0〜4.6（2026-09-27 ユーザー「ESではないOpenGL 3.0もサポートできると思うので、やっちゃってください。すべての
+  APIを完璧にしなくていいので、OpenGL 4.6もサポートできる範囲でサポートしてみてください。」）**: 変換層を desktop GL の
+  core と compatibility の profile に広げ、GLSL 1.30〜4.60 は §4 の compiler で。`glXCreateContextAttribsARB` で版と profile。
+  GL_VERSION は実装した範囲の版を名乗る。Vulkan 1.0 の基本以上が要る機能（geometry・tessellation・compute shader、SSBO、
+  multi draw indirect 等）は device の feature で出し分け、**Venus（host の GPU）で先に**。i915 の実行器に足りない分は F-023 に
+  記録して後（2026-09-27 ユーザー決定）。libvulkan が Vulkan 1.0 の core だけを出す制約（1.1 以上の機能・拡張）は、要る所で
+  libvulkan の Phase を立てる。
 
 ## 7. libvulkan への要求（洗い出し）
 

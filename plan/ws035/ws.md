@@ -209,10 +209,10 @@ p001で確かめる。
 | [ws035-p020](phase020/phase.md) | 設計: `/dev/graphics` の共通層とGPU scanoutへの引き継ぎ（kernel内部API、通知、戻し） | cleared（q323-i01） | p001 | 文書 |
 | ws035-p005 | `/dev/graphics` の共通層: ファームウェアFB・機種VRAMをbackend化（pcat、pc98を移行） | planning | p004, p020 | graphics、platform |
 | ws035-p024 | `/dev/graphics` のGPU scanoutへの切替えと戻し（i915、補助にvirtio-gpu） | planning | p005 | graphics、gpu core、i915 display |
-| [ws035-p011](phase011/phase.md) | zdesktop: `zwl` を `/bin/zdesktop` へ改名、基本のウィンドウ管理（focus、移動、リサイズ、z-order、最小化・最大化） | **uncleared**（q323-i04。合成の仕組みが無いことが判明。設計Phaseが先に要る） | p004、p051（合成の設計）、**p052〜p054（承認後）** | `userland/base/zwl` |
+| [ws035-p011](phase011/phase.md) | zdesktop: `zwl` を `/bin/zdesktop` へ改名、基本のウィンドウ管理（focus、移動、リサイズ、z-order、最小化・最大化） | uncleared・canceled（2026-09-27: 改名は p073、窓の管理は p059・p062〜p072 で済んだ） | p004、p051（合成の設計）、**p052〜p054（承認後）** | `userland/base/zwl` |
 | ws035-p025 | zdesktop: コンポジタでのタイトル・フレーム描画（`/dev/graphics` のASCII glyph） | planning | p011 | zdesktop |
 | [ws035-p018](phase018/phase.md) | networkdの状態push通知（購読）（WS005-p016から移管） | cleared（q325-i01。q323-i07 は uncleared） | p004 | networkd、net |
-| ws035-p012 | zdesktop: X11サーバ機能（Xzedから移植） | planning | p011 | zdesktop、X11 |
+| ws035-p012 | zdesktop: X11サーバ機能（Xzedから移植） | canceled（2026-09-27 ユーザーの判断: X11 server は単体の zdesktop-x11server、WS069-p008） | p011 | zdesktop、X11 |
 | ws035-p013 | zdesktop: タスクバーとWiFiの表示・操作。**WiFi の状態は libzdesktop 経由で取る**（p042、networkd と直接話さない） | planning | p025, p018, p042 | zdesktop、libzdesktop |
 | ws035-p014 | zdesktop: ウィンドウ一覧のタイル表示（Windows+Tab） | planning | p011 | zdesktop |
 | [ws035-p021](phase021/phase.md) | 設計: audioフレームワークと `/dev/dsp`（OSS互換寄りのAPI、driver ops、DMAリング、録音） | cleared（q323-i05） | p001 | 文書 |
@@ -262,6 +262,8 @@ p001で確かめる。
 | [ws035-p070](phase070/phase.md) | （2026-09-26 自律実行）App Home から X11 の app（zterm、zgears）: Xzed --rootless を必要なときに起動 | cleared（q479-i01、2026-09-26。Venus で App Home から zterm と zgears、Xzed は 1 つ） | p069、WS069 | `userland/base/zwl` |
 | [ws035-p071](phase071/phase.md) | （2026-09-26 自律実行）App Home の続き: ページング、起動の animation、閉じる swipe、Tab とホイール | cleared（q480-i01、2026-09-26。Venus で 2 ページ、drag・ホイール・キー、icon から育つ窓、閉じる drag） | p070 | `userland/base/zwl` |
 | [ws035-p072](phase072/phase.md) | （2026-09-26 自律実行）窓の最小化と、窓をデスクトップ間で移す（Wiseview の drag、キー） | cleared（q483-i01、2026-09-26。Venus で最小化と Wiseview からの復帰、タイルの drag とキーでデスクトップ間の移動） | p065 | `userland/base/zwl` |
+| [ws035-p073](phase073/phase.md) | （2026-09-27 ユーザー指示）`userland/base/zwl` を `userland/base/zdesktop`（`/bin/zdesktop`）へ改名。build・script・試験の起動と process の名・文書。C の識別子と log の接頭辞 `ZWL` は変えない | planned | p072 | zdesktop |
+| ws035-p074 | （2026-09-27 ユーザー指示）libzdesktop が zdesktop の非標準の Wayland 拡張（`zed_gpu_buffer_v1`）を包む。client（mview・wltest・zdesktop-terminal・libEGL 等）は libzdesktop を使い、`zed-gpu-buffer-v1-client-protocol.h` と `X11/Xzed.h` を公開 header から外す | planned | p073 | zdesktop、libzdesktop |
 | ws035-p055 | （2026-09-25 承認）damage（buffer age と scissor） | planned（sq001） | p011 | 同上 |
 | ws035-p057 | （2026-09-25 承認）効果: すりガラス（背後のぼかし）と影 | planned（sq001） | p055 | 同上 |
 | ws035-p058 | zdesktop（secondary queue で変えた全 source）の規約の全文との照合と回帰（sq001 の締め） | planned（sq001） | sq001 の他の Phase | sq001 で変えた source |
