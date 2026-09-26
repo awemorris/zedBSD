@@ -4,7 +4,8 @@
 # runs under zwl; zgears draws three lit gears from display lists (quads and quad strips, flat and smooth
 # shading, one light, the depth test and culling) and reads its first frame back: the red, green and blue
 # gears must each cover part of the window over black (ZGEARS CHECK).
-#  1. gears.png: the gears turning in their Wiseman window (judge the picture; the log is checked).
+#  1. gears.png: the gears turning in their Wiseman window (judge the picture; the log is checked), and
+#     gears-later.png two seconds on, which must differ (WS068 p006: the window's frames reach the screen).
 #  2. The rate (ZGEARS FPS) is logged.
 #
 #   plan/ws069/tests/x11-p005.sh [OUTDIR]
@@ -38,6 +39,14 @@ DISPLAY=:0 /bin/Xzed --rootless > /tmp/xzed.log 2>&1 </dev/null & sleep 6
 DISPLAY=:0 /bin/zgears --frames=300 --token=g > /tmp/gears.log 2>&1 </dev/null & sleep 12; echo started' >/dev/null
 pointer move 1250 780 sleep 400
 check "$out/gears.png" || status=1
+sleep 2
+check "$out/gears-later.png" || status=1
+if python3 -c 'import sys; from PIL import Image, ImageChops; sys.exit(0 if ImageChops.difference(Image.open(sys.argv[1]).convert("RGB"), Image.open(sys.argv[2]).convert("RGB")).getbbox() else 1)' "$out/gears.png" "$out/gears-later.png"; then
+	echo "turn: gears-later.png differs ok"
+else
+	echo "turn: gears-later.png is the same picture"
+	status=1
+fi
 
 # 2. The run to its end, its check and rate.
 guest 'i=0; while ! grep -q ZGEARS.DONE /tmp/gears.log && [ $i -lt 150 ]; do sleep 1; i=$((i+1)); done; cat /tmp/gears.log' > "$out/gears.txt"

@@ -41,6 +41,7 @@
 
 static int i915_gfx_update_write(struct i915_render_session *session, struct i915_wire_reader *reader);
 static int i915_dset_of_pool(void *object, void *argument);
+static void i915_dpool_sets_free(struct i915_render_session *session, void *pool);
 
 /*
  * Creates a VkDescriptorSetLayout: vkCreateDescriptorSetLayout, a generic
@@ -404,11 +405,11 @@ i915_dset_of_pool(
 }
 
 /*
- * Frees a descriptor pool whose identity is withdrawn, with every set still
- * allocated from it (their identities are withdrawn here).
+ * Frees every set still allocated from a descriptor pool (their identities
+ * are withdrawn here), keeping the pool.
  */
-void
-drv_i915_gfx_dpool_free(
+static void
+i915_dpool_sets_free(
 	struct i915_render_session *session,
 	void *pool)
 {
@@ -423,9 +424,53 @@ drv_i915_gfx_dpool_free(
 		/* Frees the one taken. */
 		kern_free(dset);
 	}
+}
 
-	/* Frees the pool itself. */
+/*
+ * Frees a descriptor pool whose identity is withdrawn, with every set still
+ * allocated from it (their identities are withdrawn here).
+ */
+void
+drv_i915_gfx_dpool_free(
+	struct i915_render_session *session,
+	void *pool)
+{
+	/* The sets, then the pool itself. */
+	i915_dpool_sets_free(session, pool);
 	kern_free(pool);
+}
+
+/*
+ * Resets a VkDescriptorPool: vkResetDescriptorPool.
+ *
+ * The command is [device][identity][flags] and the reply [result].  The
+ * sets allocated from the pool are freed; the pool stays.  An unknown
+ * identity is not an error.
+ */
+int
+drv_i915_gfx_reset_dpool(
+	struct i915_render_session *session,
+	struct i915_wire_reader *reader,
+	struct i915_wire_writer *reply)
+{
+	void *pool;
+	uint64_t identity;
+
+	/* Reads the identity between the device and the flags (which have no bits). */
+	(void)drv_i915_wire_read_u64(reader);
+	identity = drv_i915_wire_read_u64(reader);
+	(void)drv_i915_wire_read_u32(reader);
+	if (reader->error != 0)
+		return EINVAL;
+
+	/* Frees a known pool's sets. */
+	pool = drv_i915_object_lookup(session, I915_VK_OBJ_DESCRIPTOR_POOL, identity);
+	if (pool != NULL)
+		i915_dpool_sets_free(session, pool);
+
+	/* Succeeded: the reply carries VK_SUCCESS. */
+	drv_i915_wire_reply_u32(reply, 0U);
+	return 0;
 }
 
 /*

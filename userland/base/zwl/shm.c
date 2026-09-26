@@ -39,6 +39,7 @@ static VkResult image_create(struct zwl_compose *compose, uint32_t width, uint32
 static VkResult image_layout(struct zwl_compose *compose, VkImage image);
 static void image_release(struct zwl_compose *compose, struct zwl_import *import);
 static uint32_t word(const unsigned char *bytes, size_t offset);
+static uint32_t zwl_row_sum(const unsigned char *row, uint32_t width);
 
 /*
  * Tells a new wl_shm binding the two formats it may use.
@@ -463,6 +464,7 @@ surface_upload(
 	const unsigned char *source;
 	unsigned char *target;
 	uint64_t mark;
+	uint32_t sum;
 	int32_t first;
 	int32_t last;
 	int32_t y;
@@ -520,8 +522,14 @@ surface_upload(
 	server->perf.shm_copy_cycles += zwl_cycles() - mark;
 	surface->committed_damaged = 0;
 	server->dirty = 1;
-	if (server->log_frames)
-		printf("ZWL SHM_COPY client=%llu surface=%u buffer=%u rows=%d-%d\n", (unsigned long long)surface->client->number, surface->id, buffer->id, first, last);
+	if (server->log_frames) {
+		/* With the sum of every sixteenth row copied, so that changing pictures can be told from still ones. */
+		sum = 2166136261U;
+		for (y = first; y < last; y += 16)
+			sum = (sum ^ zwl_row_sum(target + (size_t)y * image->row_pitch, shm->width)) * 16777619U;
+		printf("ZWL SHM_COPY client=%llu surface=%u buffer=%u rows=%d-%d sum=%08x\n", (unsigned long long)surface->client->number, surface->id,
+		       buffer->id, first, last, (unsigned)sum);
+	}
 
 	/* The copy is done: the client may reuse the buffer now. */
 	if (buffer->busy) {
@@ -755,4 +763,25 @@ word(
 	/* The wire is in the host's byte order. */
 	memcpy(&value, bytes + offset, sizeof(value));
 	return value;
+}
+
+/* Returns a sum of a row's pixels (for the frame log). */
+static uint32_t
+zwl_row_sum(
+	const unsigned char *row,
+	uint32_t width)
+{
+	uint32_t sum;
+	uint32_t pixel;
+	uint32_t x;
+
+	/* Each pixel into the sum. */
+	sum = 0U;
+	for (x = 0U; x < width; x++) {
+		memcpy(&pixel, row + (size_t)x * 4U, sizeof(pixel));
+		sum = sum * 31U + pixel;
+	}
+
+	/* The sum. */
+	return sum;
 }

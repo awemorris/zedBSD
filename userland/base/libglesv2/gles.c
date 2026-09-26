@@ -19,6 +19,7 @@
 
 #include "gles.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -28,6 +29,9 @@
 
 /* The fixed-function layer, NULL without one (libGL sets it before its first context). */
 const struct gles_fixed_hooks *gles_fixed;
+
+/* The failures already reported (by the text naming them), so each is said once. */
+static const char *gles_reported[16];
 
 static void gles_frame_done(struct zegl_context *context);
 static void gles_release(struct zegl_context *context);
@@ -142,6 +146,34 @@ gles_error(
 	/* Only the first counts. */
 	if (context->gles.error == GL_NO_ERROR)
 		context->gles.error = error;
+}
+
+/*
+ * Says on stderr, once for each kind, that a step of the translation
+ * failed (a Vulkan call's result, or -1): what an application sees is only
+ * GL_OUT_OF_MEMORY, which does not say which step.
+ */
+void
+gles_report(
+	const char *what,
+	int code)
+{
+	unsigned index;
+
+	/* Each kind once. */
+	for (index = 0U; index < sizeof(gles_reported) / sizeof(gles_reported[0]); index++) {
+		if (gles_reported[index] == what)
+			return;
+		if (gles_reported[index] == NULL)
+			break;
+	}
+
+	/* Remembered while there is room. */
+	if (index < sizeof(gles_reported) / sizeof(gles_reported[0]))
+		gles_reported[index] = what;
+
+	/* The line. */
+	fprintf(stderr, "GLES: %s failed (%d)\n", what, code);
 }
 
 /*

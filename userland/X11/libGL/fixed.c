@@ -32,7 +32,7 @@ static unsigned fixed_get(struct zegl_context *context, GLenum pname, GLfloat *v
 static const GLubyte *fixed_string(GLenum name);
 static void fixed_release(struct gles_state *state);
 static struct fixed_state *fixed_new(struct gles_state *state);
-static GLuint fixed_make_program(int flat, struct fixed_uniforms *uniforms);
+static GLuint fixed_make_program(unsigned which, struct fixed_uniforms *uniforms);
 static GLuint fixed_shader(GLenum type, const uint32_t *code, size_t size);
 static void fixed_identity(GLfloat *matrix);
 static void fixed_multiply(GLfloat *result, const GLfloat *a, const GLfloat *b);
@@ -1130,9 +1130,10 @@ fixed_capability(
 }
 
 /*
- * Returns the program for a draw without one: the flat or the smooth one
- * (made at its first use), current, with its uniforms written from the
- * state.  NULL when it cannot be made.
+ * Returns the program for a draw without one, current, with its uniforms
+ * written from the state: the smooth program for as many lights as are on
+ * (1, 2, 4 or 8, the lights on packed first, so small programs fit the i915
+ * compiler's kernels), or the flat one.  NULL when it cannot be made.
  */
 static struct gles_program *
 fixed_program(
@@ -1146,28 +1147,56 @@ fixed_program(
 	struct gles_program *program;
 	GLfloat mvp[16];
 	GLfloat normal[16];
-	GLfloat lights[5][FIXED_LIGHTS * 4U];
-	GLint enabled;
-	GLint color_material;
-	GLint alpha_func;
-	GLint texturing;
+	GLfloat material[5 * 4];
+	GLfloat lights[FIXED_LIGHTS * 5U * 4U];
+	GLfloat flags[4];
+	GLfloat flags2[4];
+	GLfloat params[4];
+	GLfloat *slot;
 	unsigned light;
+	unsigned count;
 	unsigned which;
 	int complete;
 
-	/* The state, and which program. */
+	/* The state. */
 	state = gles_state(context);
 	fixed = fixed_current(&current);
 	if (state == NULL || fixed == NULL)
 		return NULL;
-	which = 0U;
-	if (fixed->shade_model == GL_FLAT)
-		which = 1U;
-	*flat = (int)which;
 
-	/* The program, made the first time, and current so its uniforms can be written. */
+	/* The lights on, packed first (5 vectors each; the last one's w says it is on). */
+	memset(lights, 0, sizeof(lights));
+	count = 0U;
+	for (light = 0U; light < FIXED_LIGHTS; light++) {
+		if (!fixed->light_enabled[light])
+			continue;
+		slot = &lights[count * 20U];
+		memcpy(slot, fixed->lights[light].position, 4U * sizeof(GLfloat));
+		memcpy(slot + 4, fixed->lights[light].ambient, 4U * sizeof(GLfloat));
+		memcpy(slot + 8, fixed->lights[light].diffuse, 4U * sizeof(GLfloat));
+		memcpy(slot + 12, fixed->lights[light].specular, 4U * sizeof(GLfloat));
+		memcpy(slot + 16, fixed->lights[light].attenuation, 3U * sizeof(GLfloat));
+		slot[19] = 1.0f;
+		count++;
+	}
+
+	/* The program: flat, or the smallest smooth one for the lights on. */
+	which = 3U;
+	if (count <= 4U)
+		which = 2U;
+	if (count <= 2U)
+		which = 1U;
+	if (count <= 1U)
+		which = 0U;
+	*flat = 0;
+	if (fixed->shade_model == GL_FLAT) {
+		which = FIXED_PROGRAM_FLAT;
+		*flat = 1;
+	}
+
+	/* Made the first time, and current so its uniforms can be written. */
 	if (fixed->programs[which] == 0U)
-		fixed->programs[which] = fixed_make_program((int)which, &fixed->uniforms[which]);
+		fixed->programs[which] = fixed_make_program(which, &fixed->uniforms[which]);
 	program = gles_names_get(&state->objects, fixed->programs[which]);
 	if (program == NULL || program->kind != GLES_KIND_PROGRAM || !program->linked)
 		return NULL;
@@ -1182,62 +1211,49 @@ fixed_program(
 	glUniformMatrix4fv(uniforms->normal_matrix, 1, GL_FALSE, normal);
 	glUniformMatrix4fv(uniforms->texture_matrix, 1, GL_FALSE, fixed->texture[fixed->texture_top]);
 
-	/* The lighting: on or off, the enabled lights as bits, the lights, the material. */
-	enabled = 0;
-	for (light = 0U; light < FIXED_LIGHTS; light++) {
-		if (fixed->light_enabled[light])
-			enabled |= (GLint)(1U << light);
-		memcpy(&lights[0][light * 4U], fixed->lights[light].position, 4U * sizeof(GLfloat));
-		memcpy(&lights[1][light * 4U], fixed->lights[light].ambient, 4U * sizeof(GLfloat));
-		memcpy(&lights[2][light * 4U], fixed->lights[light].diffuse, 4U * sizeof(GLfloat));
-		memcpy(&lights[3][light * 4U], fixed->lights[light].specular, 4U * sizeof(GLfloat));
-		memcpy(&lights[4][light * 4U], fixed->lights[light].attenuation, 4U * sizeof(GLfloat));
-	}
+	/* The material: the scene's ambient, ambient, diffuse, specular, emission; and the lights. */
+	memcpy(material, fixed->scene_ambient, 4U * sizeof(GLfloat));
+	memcpy(material + 4, fixed->material_ambient, 4U * sizeof(GLfloat));
+	memcpy(material + 8, fixed->material_diffuse, 4U * sizeof(GLfloat));
+	memcpy(material + 12, fixed->material_specular, 4U * sizeof(GLfloat));
+	memcpy(material + 16, fixed->material_emission, 4U * sizeof(GLfloat));
+	glUniform4fv(uniforms->material, 5, material);
+	glUniform4fv(uniforms->lights, (GLsizei)(FIXED_LIGHTS * 5U), lights);
 
-	/* Set. */
-	glUniform1i(uniforms->lighting, fixed->lighting);
-	glUniform1i(uniforms->lights, enabled);
-	glUniform4fv(uniforms->light_position, (GLsizei)FIXED_LIGHTS, lights[0]);
-	glUniform4fv(uniforms->light_ambient, (GLsizei)FIXED_LIGHTS, lights[1]);
-	glUniform4fv(uniforms->light_diffuse, (GLsizei)FIXED_LIGHTS, lights[2]);
-	glUniform4fv(uniforms->light_specular, (GLsizei)FIXED_LIGHTS, lights[3]);
-	glUniform4fv(uniforms->light_attenuation, (GLsizei)FIXED_LIGHTS, lights[4]);
-	glUniform4fv(uniforms->scene_ambient, 1, fixed->scene_ambient);
-	glUniform4fv(uniforms->material_ambient, 1, fixed->material_ambient);
-	glUniform4fv(uniforms->material_diffuse, 1, fixed->material_diffuse);
-	glUniform4fv(uniforms->material_specular, 1, fixed->material_specular);
-	glUniform4fv(uniforms->material_emission, 1, fixed->material_emission);
-	glUniform1f(uniforms->shininess, fixed->shininess);
-	glUniform1i(uniforms->normalize, fixed->normalize || fixed->rescale_normal);
+	/* The flags: lighting, the colour material (for the ambient, for the diffuse), normalizing. */
+	memset(flags, 0, sizeof(flags));
+	if (fixed->lighting)
+		flags[0] = 1.0f;
+	if (fixed->color_material && (fixed->color_material_mode == GL_AMBIENT_AND_DIFFUSE || fixed->color_material_mode == GL_AMBIENT))
+		flags[1] = 1.0f;
+	if (fixed->color_material && (fixed->color_material_mode == GL_AMBIENT_AND_DIFFUSE || fixed->color_material_mode == GL_DIFFUSE))
+		flags[2] = 1.0f;
+	if (fixed->normalize || fixed->rescale_normal)
+		flags[3] = 1.0f;
+	glUniform4fv(uniforms->flags, 1, flags);
 
-	/* The colour material: 1 ambient and diffuse, 2 diffuse, 3 ambient, 0 off. */
-	color_material = 0;
-	if (fixed->color_material && fixed->color_material_mode == GL_AMBIENT_AND_DIFFUSE)
-		color_material = 1;
-	else if (fixed->color_material && fixed->color_material_mode == GL_DIFFUSE)
-		color_material = 2;
-	else if (fixed->color_material && fixed->color_material_mode == GL_AMBIENT)
-		color_material = 3;
-	glUniform1i(uniforms->color_material, color_material);
-
-	/* Texturing when GL_TEXTURE_2D is on and unit 0 has a texture that can be sampled (GL leaves it off otherwise). */
+	/*
+	 * Texturing when GL_TEXTURE_2D is on and unit 0 has a texture that can
+	 * be sampled (GL leaves it off otherwise), whether the texture replaces
+	 * the colour, and the alpha test (GL_NEVER .. GL_ALWAYS as 1 .. 8, 0 off).
+	 */
+	memset(flags2, 0, sizeof(flags2));
 	complete = gles_texture_complete(state->units[0]);
-	texturing = 0;
 	if (fixed->texture_2d && complete)
-		texturing = 1;
-	glUniform1i(uniforms->texturing, texturing);
-	glUniform1i(uniforms->texture_replace, fixed->texture_env_mode == GL_REPLACE || fixed->texture_env_mode == GL_DECAL);
+		flags2[0] = 1.0f;
+	if (fixed->texture_env_mode == GL_REPLACE || fixed->texture_env_mode == GL_DECAL)
+		flags2[1] = 1.0f;
+	if (fixed->alpha_test)
+		flags2[2] = (GLfloat)(fixed->alpha_func - GL_NEVER + 1U);
+	flags2[3] = fixed->alpha_ref;
+	glUniform4fv(uniforms->flags2, 1, flags2);
 	glUniform1i(uniforms->texture, 0);
 
-	/* The alpha test: the comparison as 0 .. 7 (GL_NEVER as 8), 0 when off. */
-	alpha_func = 0;
-	if (fixed->alpha_test)
-		alpha_func = (GLint)(fixed->alpha_func - GL_NEVER);
-	if (fixed->alpha_test && fixed->alpha_func == GL_NEVER)
-		alpha_func = 8;
-	glUniform1i(uniforms->alpha_func, alpha_func);
-	glUniform1f(uniforms->alpha_ref, fixed->alpha_ref);
-	glUniform1f(uniforms->point_size, fixed->point_size);
+	/* The shininess and the point size. */
+	memset(params, 0, sizeof(params));
+	params[0] = fixed->shininess;
+	params[1] = fixed->point_size;
+	glUniform4fv(uniforms->params, 1, params);
 
 	/* Succeeded: the program, current. */
 	return program;
@@ -1429,10 +1445,10 @@ fixed_new(
 	return fixed;
 }
 
-/* Makes the flat or the smooth program and finds its uniforms; returns its name, 0 on failure. */
+/* Makes one of the programs (smooth for 1, 2, 4 or 8 lights, or flat) and finds its uniforms; returns its name, 0 on failure. */
 static GLuint
 fixed_make_program(
-	int flat,
+	unsigned which,
 	struct fixed_uniforms *uniforms)
 {
 	GLuint vertex;
@@ -1440,13 +1456,30 @@ fixed_make_program(
 	GLuint program;
 	GLint linked;
 
-	/* The two shaders. */
-	if (flat) {
+	/* The two shaders of the variant. */
+	switch (which) {
+	case 0U:
+		vertex = fixed_shader(GL_VERTEX_SHADER, fixed_vert_1, sizeof(fixed_vert_1));
+		break;
+	case 1U:
+		vertex = fixed_shader(GL_VERTEX_SHADER, fixed_vert_2, sizeof(fixed_vert_2));
+		break;
+	case 2U:
+		vertex = fixed_shader(GL_VERTEX_SHADER, fixed_vert_4, sizeof(fixed_vert_4));
+		break;
+	case 3U:
+		vertex = fixed_shader(GL_VERTEX_SHADER, fixed_vert_8, sizeof(fixed_vert_8));
+		break;
+	default:
 		vertex = fixed_shader(GL_VERTEX_SHADER, fixed_flat_vert, sizeof(fixed_flat_vert));
+		break;
+	}
+
+	/* The smooth fragment shader, or the flat one. */
+	fragment = fixed_shader(GL_FRAGMENT_SHADER, fixed_frag, sizeof(fixed_frag));
+	if (which == FIXED_PROGRAM_FLAT) {
+		glDeleteShader(fragment);
 		fragment = fixed_shader(GL_FRAGMENT_SHADER, fixed_flat_frag, sizeof(fixed_flat_frag));
-	} else {
-		vertex = fixed_shader(GL_VERTEX_SHADER, fixed_smooth_vert, sizeof(fixed_smooth_vert));
-		fragment = fixed_shader(GL_FRAGMENT_SHADER, fixed_smooth_frag, sizeof(fixed_smooth_frag));
 	}
 
 	/* The program, the attributes where the fixed-function arrays are. */
@@ -1470,26 +1503,11 @@ fixed_make_program(
 	uniforms->modelview = glGetUniformLocation(program, "u_modelview");
 	uniforms->normal_matrix = glGetUniformLocation(program, "u_normal_matrix");
 	uniforms->texture_matrix = glGetUniformLocation(program, "u_texture_matrix");
-	uniforms->scene_ambient = glGetUniformLocation(program, "u_scene_ambient");
-	uniforms->material_ambient = glGetUniformLocation(program, "u_material_ambient");
-	uniforms->material_diffuse = glGetUniformLocation(program, "u_material_diffuse");
-	uniforms->material_specular = glGetUniformLocation(program, "u_material_specular");
-	uniforms->material_emission = glGetUniformLocation(program, "u_material_emission");
-	uniforms->light_position = glGetUniformLocation(program, "u_light_position");
-	uniforms->light_ambient = glGetUniformLocation(program, "u_light_ambient");
-	uniforms->light_diffuse = glGetUniformLocation(program, "u_light_diffuse");
-	uniforms->light_specular = glGetUniformLocation(program, "u_light_specular");
-	uniforms->light_attenuation = glGetUniformLocation(program, "u_light_attenuation");
-	uniforms->shininess = glGetUniformLocation(program, "u_shininess");
-	uniforms->point_size = glGetUniformLocation(program, "u_point_size");
-	uniforms->alpha_ref = glGetUniformLocation(program, "u_alpha_ref");
-	uniforms->lighting = glGetUniformLocation(program, "u_lighting");
+	uniforms->material = glGetUniformLocation(program, "u_material");
 	uniforms->lights = glGetUniformLocation(program, "u_lights");
-	uniforms->color_material = glGetUniformLocation(program, "u_color_material");
-	uniforms->normalize = glGetUniformLocation(program, "u_normalize");
-	uniforms->texturing = glGetUniformLocation(program, "u_texturing");
-	uniforms->alpha_func = glGetUniformLocation(program, "u_alpha_func");
-	uniforms->texture_replace = glGetUniformLocation(program, "u_texture_replace");
+	uniforms->flags = glGetUniformLocation(program, "u_flags");
+	uniforms->flags2 = glGetUniformLocation(program, "u_flags2");
+	uniforms->params = glGetUniformLocation(program, "u_params");
 	uniforms->texture = glGetUniformLocation(program, "u_texture");
 
 	/* Succeeded: the program. */

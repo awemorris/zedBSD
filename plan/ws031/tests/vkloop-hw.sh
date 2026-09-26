@@ -238,7 +238,7 @@ scp -q $I915_HOST:bigbang/vkloop-last.log /tmp/vkloop-last.log
 if [ "$ZDESKTOP_RUN" = 1 ]; then
 	# the guest's own logs, from its disk
 	scp -q plan/ws031/tests/ufs-cat.py tools/build/check-ufs-image.py $I915_HOST:bigbang/ || exit 1
-	ssh $I915_HOST 'python3 bigbang/ufs-cat.py bigbang/guest-parity.img /var/log/zwl.log /var/log/wlkill.log /var/log/mview.log /var/log/dmesg.log /var/log/xzed.log' > /tmp/zdesktop-guest-logs.txt 2>&1
+	ssh $I915_HOST 'python3 bigbang/ufs-cat.py bigbang/guest-parity.img /var/log/zwl.log /var/log/wlkill.log /var/log/mview.log /var/log/dmesg.log /var/log/xzed.log /var/log/vk.log' > /tmp/zdesktop-guest-logs.txt 2>&1
 	echo "--- guest logs: /tmp/zdesktop-guest-logs.txt ($(wc -l < /tmp/zdesktop-guest-logs.txt) lines)"
 	# the viewer's own last word: closed by the capture's click on the bar's close button
 	grep -E '^(MVIEW|ZTERM) (DONE|FAILED)' /tmp/zdesktop-guest-logs.txt || echo "the application did not end (no DONE or FAILED line)"

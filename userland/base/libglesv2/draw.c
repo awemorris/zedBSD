@@ -28,7 +28,6 @@
 
 static void draw_primitives(GLenum mode, GLint first, GLsizei count, GLenum type, const void *indices);
 static int draw_indices(struct zegl_context *context, GLsizei count, GLenum type, const void *indices, uint32_t **out, uint32_t *largest);
-static uint32_t *draw_expand(GLenum mode, const uint32_t *indices, uint32_t first, GLsizei count, int rotate, uint32_t *expanded);
 static void draw_program(GLenum mode, GLint first, GLsizei count, GLenum type, const void *indices, int flat);
 static int draw_topology(GLenum mode, uint32_t *topology, int *strip);
 static int draw_vertices(struct gles_state *state, uint32_t vertices, struct gles_vertex_layout *layout, VkBuffer *buffers, VkDeviceSize *offsets);
@@ -865,7 +864,7 @@ draw_program(
 	list = read;
 	expanded = (uint32_t)count;
 	if (strip || flat) {
-		list = draw_expand(mode, read, (uint32_t)first, count, flat, &expanded);
+		list = gles_expand(mode, read, (uint32_t)first, count, flat, &expanded);
 		free(read);
 		read = NULL;
 		if (list == NULL) {
@@ -899,6 +898,7 @@ draw_program(
 	/* The vertices each attribute reads. */
 	status = draw_vertices(state, largest + 1U, &layout, buffers, offsets);
 	if (status != 0) {
+		gles_report("the vertices", status);
 		gles_error(context, GL_OUT_OF_MEMORY);
 		return;
 	}
@@ -906,6 +906,7 @@ draw_program(
 	/* The frame, open and in a pass. */
 	error = zegl_frame_begin(surface);
 	if (error != EGL_SUCCESS) {
+		gles_report("the frame", error);
 		gles_error(context, GL_OUT_OF_MEMORY);
 		return;
 	}
@@ -924,6 +925,7 @@ draw_program(
 	/* The descriptors. */
 	set = draw_descriptors(state, &dynamic_offset);
 	if (set == VK_NULL_HANDLE) {
+		gles_report("the descriptors", -1);
 		gles_error(context, GL_OUT_OF_MEMORY);
 		return;
 	}
@@ -1038,8 +1040,8 @@ draw_indices(
  * first; the winding is kept.  Returns the list and its length, or NULL
  * when there is no memory.
  */
-static uint32_t *
-draw_expand(
+uint32_t *
+gles_expand(
 	GLenum mode,
 	const uint32_t *indices,
 	uint32_t first,
@@ -1696,6 +1698,7 @@ draw_pipeline(
 	create.renderPass = surface->pass;
 	result = vkCreateGraphicsPipelines(state->device, VK_NULL_HANDLE, 1U, &create, NULL, &entry->pipeline);
 	if (result != VK_SUCCESS) {
+		gles_report("vkCreateGraphicsPipelines", (int)result);
 		free(entry);
 		return VK_NULL_HANDLE;
 	}

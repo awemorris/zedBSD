@@ -31,6 +31,7 @@
 
 #include "zegl.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -48,6 +49,10 @@ static VkFormat vulkan_depth_format(struct zegl_display *display, VkImageAspectF
 static EGLint vulkan_pass(struct zegl_surface *surface, VkFormat format, VkAttachmentLoadOp load, VkRenderPass *pass);
 static EGLint vulkan_submit(struct zegl_surface *surface, int present);
 static uint32_t vulkan_memory_type(struct zegl_display *display, uint32_t bits, VkMemoryPropertyFlags flags);
+static VkResult vulkan_report(const char *what, VkResult result);
+
+/* The Vulkan calls whose failure was reported (each once). */
+static const char *vulkan_reported[16];
 
 /*
  * Makes a display's Vulkan instance and device.  Returns EGL_SUCCESS, or
@@ -343,7 +348,13 @@ zegl_surface_present(
 				return error;
 		}
 
-		/* The frame is closed either way. */
+		/* The frame is closed either way (an empty recording is ended, not left recording). */
+		if (surface->frame_open) {
+			zegl_frame_leave_pass(surface);
+			(void)vulkan_report("vkEndCommandBuffer (empty)", vkEndCommandBuffer(surface->command));
+		}
+
+		/* Closed. */
 		surface->frame_open = 0;
 
 		/* The frame's resources. */
@@ -432,11 +443,11 @@ zegl_frame_begin(
 	}
 
 	/* The command buffer records the frame. */
-	(void)vkResetCommandBuffer(surface->command, 0U);
+	(void)vulkan_report("vkResetCommandBuffer", vkResetCommandBuffer(surface->command, 0U));
 	memset(&begin, 0, sizeof(begin));
 	begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-	result = vkBeginCommandBuffer(surface->command, &begin);
+	result = vulkan_report("vkBeginCommandBuffer", vkBeginCommandBuffer(surface->command, &begin));
 	if (result != VK_SUCCESS)
 		return EGL_BAD_SURFACE;
 
@@ -536,11 +547,11 @@ zegl_frame_flush(
 		return error;
 
 	/* The command buffer records the rest of the frame. */
-	(void)vkResetCommandBuffer(surface->command, 0U);
+	(void)vulkan_report("vkResetCommandBuffer", vkResetCommandBuffer(surface->command, 0U));
 	memset(&begin, 0, sizeof(begin));
 	begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-	result = vkBeginCommandBuffer(surface->command, &begin);
+	result = vulkan_report("vkBeginCommandBuffer (flush)", vkBeginCommandBuffer(surface->command, &begin));
 	if (result != VK_SUCCESS)
 		return EGL_CONTEXT_LOST;
 
@@ -1120,14 +1131,14 @@ vulkan_submit(
 	/* The recording ends outside any pass; nothing is recorded after it yet. */
 	display = surface->display;
 	zegl_frame_leave_pass(surface);
-	result = vkEndCommandBuffer(surface->command);
+	result = vulkan_report("vkEndCommandBuffer", vkEndCommandBuffer(surface->command));
 	surface->frame_open = 0;
 	surface->recorded = 0;
 	if (result != VK_SUCCESS)
 		return EGL_CONTEXT_LOST;
 
 	/* The fence of this submission. */
-	result = vkResetFences(display->device, 1U, &surface->fence);
+	result = vulkan_report("vkResetFences", vkResetFences(display->device, 1U, &surface->fence));
 	if (result != VK_SUCCESS)
 		return EGL_CONTEXT_LOST;
 
@@ -1151,7 +1162,7 @@ vulkan_submit(
 	}
 
 	/* Submitted. */
-	result = vkQueueSubmit(display->queue, 1U, &submit, surface->fence);
+	result = vulkan_report("vkQueueSubmit", vkQueueSubmit(display->queue, 1U, &submit, surface->fence));
 	if (result != VK_SUCCESS)
 		return EGL_CONTEXT_LOST;
 
@@ -1172,7 +1183,7 @@ vulkan_submit(
 	}
 
 	/* The recording is done before the command buffer is recorded again. */
-	result = vkWaitForFences(display->device, 1U, &surface->fence, VK_TRUE, ZEGL_TIMEOUT);
+	result = vulkan_report("vkWaitForFences", vkWaitForFences(display->device, 1U, &surface->fence, VK_TRUE, ZEGL_TIMEOUT));
 	if (result != VK_SUCCESS)
 		return EGL_CONTEXT_LOST;
 
@@ -1279,71 +1290,55 @@ vulkan_pbuffer_image(
 }
 
 /*
- * Records, in a pbuffer's first frame, the change of its new images to the
- * layouts they rest in (so a first pass can load them): the colour image
- * cleared to black, the depth buffer to 1 and 0.
+ * Opens, in a pbuffer's first frame, a pass that clears its new images
+ * (the colour to black, the depth to 1 and the stencil to 0) and leaves
+ * them in the layouts they rest in, so any later pass can load them.  A
+ * pass does it rather than vkCmdClear*Image, which not every executor
+ * has (i915's has no depth one).
  */
 static void
 vulkan_pbuffer_layouts(
 	struct zegl_surface *surface)
 {
-	VkImageMemoryBarrier barriers[2];
-	VkClearColorValue colour;
-	VkClearDepthStencilValue depth;
-	VkImageSubresourceRange range;
-	uint32_t count;
+	VkClearValue clear[2];
 
 	/* Once per pbuffer (recorded into the frame). */
 	if (surface->pbuffer_ready)
 		return;
 	surface->pbuffer_ready = 1;
-	surface->recorded = 1;
 
-	/* Both images, from nothing to being written by a copy (clear). */
-	count = 1U;
-	memset(barriers, 0, sizeof(barriers));
-	barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-	barriers[0].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-	barriers[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	barriers[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-	barriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	barriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	barriers[0].image = surface->pbuffer_image;
-	barriers[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	barriers[0].subresourceRange.levelCount = 1U;
-	barriers[0].subresourceRange.layerCount = 1U;
-	if (surface->depth_image != VK_NULL_HANDLE) {
-		barriers[1] = barriers[0];
-		barriers[1].image = surface->depth_image;
-		barriers[1].subresourceRange.aspectMask = surface->depth_aspects;
-		count = 2U;
+	/* The first pass, which clears; what the frame records next goes on in it. */
+	memset(clear, 0, sizeof(clear));
+	clear[1].depthStencil.depth = 1.0f;
+	zegl_frame_pass(surface, clear);
+}
+
+/*
+ * Writes a failed Vulkan call's result to stderr, once for each call
+ * (what is a string constant).  Returns the result.
+ */
+static VkResult
+vulkan_report(
+	const char *what,
+	VkResult result)
+{
+	unsigned index;
+
+	/* Success says nothing. */
+	if (result == VK_SUCCESS)
+		return result;
+
+	/* Each call once. */
+	for (index = 0U; index < sizeof(vulkan_reported) / sizeof(vulkan_reported[0]); index++) {
+		if (vulkan_reported[index] == what)
+			return result;
+		if (vulkan_reported[index] == NULL)
+			break;
 	}
 
-	/* The change. */
-	vkCmdPipelineBarrier(surface->command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-			     0U, 0U, NULL, 0U, NULL, count, barriers);
-
-	/* Cleared: black, and depth 1 with stencil 0. */
-	memset(&colour, 0, sizeof(colour));
-	range = barriers[0].subresourceRange;
-	vkCmdClearColorImage(surface->command, surface->pbuffer_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &colour, 1U, &range);
-	if (count == 2U) {
-		depth.depth = 1.0f;
-		depth.stencil = 0U;
-		range = barriers[1].subresourceRange;
-		vkCmdClearDepthStencilImage(surface->command, surface->depth_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &depth, 1U, &range);
-	}
-
-	/* Then into the layouts they rest in. */
-	barriers[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-	barriers[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-	barriers[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-	barriers[0].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-	barriers[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-	barriers[1].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-	barriers[1].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-	barriers[1].newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-	vkCmdPipelineBarrier(surface->command, VK_PIPELINE_STAGE_TRANSFER_BIT,
-			     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
-			     0U, 0U, NULL, 0U, NULL, count, barriers);
+	/* Remembered while there is room, and written. */
+	if (index < sizeof(vulkan_reported) / sizeof(vulkan_reported[0]))
+		vulkan_reported[index] = what;
+	fprintf(stderr, "EGL: %s failed (%d)\n", what, (int)result);
+	return result;
 }

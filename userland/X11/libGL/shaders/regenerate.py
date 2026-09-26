@@ -13,8 +13,10 @@ import subprocess
 import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
-SHADERS = [("fixed.vert", "fixed_smooth_vert", []), ("fixed.frag", "fixed_smooth_frag", []),
-           ("fixed.vert", "fixed_flat_vert", ["-DFLAT"]), ("fixed.frag", "fixed_flat_frag", ["-DFLAT"])]
+SHADERS = [("fixed.vert", "fixed_vert_1", ["-DLIGHTS=1"]), ("fixed.vert", "fixed_vert_2", ["-DLIGHTS=2"]),
+           ("fixed.vert", "fixed_vert_4", ["-DLIGHTS=4"]), ("fixed.vert", "fixed_vert_8", ["-DLIGHTS=8"]),
+           ("fixed.frag", "fixed_frag", []),
+           ("fixed.vert", "fixed_flat_vert", ["-DLIGHTS=8", "-DFLAT"]), ("fixed.frag", "fixed_flat_frag", ["-DFLAT"])]
 
 
 def compile_shader(source, defines):

@@ -109,35 +109,25 @@ struct fixed_light {
 };
 
 /*
- * The uniform locations of a fixed-function program.
+ * The uniform locations of a fixed-function program (shaders/fixed.vert
+ * says what each holds).
  */
 struct fixed_uniforms {
 	GLint mvp;
 	GLint modelview;
 	GLint normal_matrix;
 	GLint texture_matrix;
-	GLint scene_ambient;
-	GLint material_ambient;
-	GLint material_diffuse;
-	GLint material_specular;
-	GLint material_emission;
-	GLint light_position;
-	GLint light_ambient;
-	GLint light_diffuse;
-	GLint light_specular;
-	GLint light_attenuation;
-	GLint shininess;
-	GLint point_size;
-	GLint alpha_ref;
-	GLint lighting;
+	GLint material;
 	GLint lights;
-	GLint color_material;
-	GLint normalize;
-	GLint texturing;
-	GLint alpha_func;
-	GLint texture_replace;
+	GLint flags;
+	GLint flags2;
+	GLint params;
 	GLint texture;
 };
+
+/* The fixed-function programs: the smooth ones for up to 1, 2, 4 and 8 lights, and the flat one (8 lights). */
+#define FIXED_PROGRAMS		5U
+#define FIXED_PROGRAM_FLAT	4U
 
 /*
  * A context's fixed-function state.
@@ -201,9 +191,9 @@ struct fixed_state {
 	GLenum compile_mode;
 	unsigned executing;
 
-	/* The two programs (smooth and flat), made at the first draw, and their uniforms. */
-	GLuint programs[2];
-	struct fixed_uniforms uniforms[2];
+	/* The programs, each made at its first draw, and their uniforms. */
+	GLuint programs[FIXED_PROGRAMS];
+	struct fixed_uniforms uniforms[FIXED_PROGRAMS];
 };
 
 /* fixed.c: the calling thread's context and its state (made at the first call), and the hooks. */

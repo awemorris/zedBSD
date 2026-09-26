@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q483（ws035-p072 cleared。最小化とデスクトップ間の移動）
+Last finished Queue: q484（ws068-p006 cleared。i915 実機で GL と X11）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q483（2026-09-26）
+## 最新: q443〜q484（2026-09-26〜27）
+
+[q484](queue-q484.md): ws068-p006 cleared。i915 実機で GLX の zgears（固定機能の GL）が正しく描き約 27 fps、App Home の X terminal、仮想デスクトップ（6 検査 PASS の run あり）。実行器に `vkResetDescriptorPool` と線幅・depth bias・stencil の命令、固定機能の shader を i915 の compiler の制約に、libEGL は pbuffer を最初の pass で clear。zgears の間欠の止まりは BUG-057、zwl の終わり方は BUG-056 に追記。
 
 [q483](queue-q483.md): ws035-p072 cleared。窓の最小化（Wiseview の薄いタイルから戻す）、Wiseview のタイルをバーの絵へ drag・Ctrl+Alt+Shift+←/→ でデスクトップ間の移動。
 

@@ -19,6 +19,7 @@
 #include <GL/glx.h>
 
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -56,7 +57,7 @@ static void gears_faces(const struct gears_shape *shape, GLfloat z);
 static void gears_outside(const struct gears_shape *shape);
 static void gears_inside(const struct gears_shape *shape);
 static void gears_draw(const GLuint *lists, unsigned width, unsigned height, GLfloat angle);
-static int gears_check(unsigned width, unsigned height, const char *token);
+static int gears_check(unsigned width, unsigned height, const char *token, unsigned frame);
 static double gears_now(void);
 static void gears_sleep(unsigned milliseconds);
 
@@ -86,6 +87,10 @@ main(
 	unsigned frame;
 	double started;
 	double now;
+	double before;
+	double drawn;
+	double begun;
+	double angle;
 	int x;
 	int y;
 	int failures;
@@ -143,9 +148,15 @@ main(
 	fflush(stdout);
 	gears_setup(lists);
 
-	/* Each frame at the window's size, the gears a little further round (--frames=0: until the window is closed). */
+	/*
+	 * Each frame at the window's size, the gears turned 70 degrees a second
+	 * (the first frame at 2, for its check; turning by time, not by frame,
+	 * the picture differs at any two moments) (--frames=0: until the window
+	 * is closed).
+	 */
 	failures = 0;
 	started = gears_now();
+	begun = started;
 	for (frame = 1U; frame <= options.frames || options.frames == 0U; frame++) {
 		/* The events waiting (a closed connection ends the program in XPending). */
 		pending = XPending(display);
@@ -159,11 +170,23 @@ main(
 		height = options.height;
 		(void)XGetGeometry(display, window, &root, &x, &y, &width, &height, &border, &depth);
 
-		/* The gears, the first frame read back, and shown. */
-		gears_draw(lists, width, height, (GLfloat)(frame % 3600U) * 2.0f);
+		/* The gears, the first frame read back, and shown (the first ten frames say how long each part took). */
+		before = gears_now();
+		angle = 2.0;
+		if (frame > 1U)
+			angle = fmod(2.0 + (before - begun) * 70.0, 360.0);
+		gears_draw(lists, width, height, (GLfloat)angle);
 		if (frame == 1U)
-			failures = gears_check(width, height, options.token);
+			failures = gears_check(width, height, options.token, frame);
+		if (frame == 2U || frame == 50U)
+			(void)gears_check(width, height, options.token, frame);
+		drawn = gears_now();
 		glXSwapBuffers(display, window);
+		if (frame <= 10U) {
+			printf("ZGEARS FRAME run=%s frame=%u draw_ms=%.1f swap_ms=%.1f\n", options.token, frame,
+			       (drawn - before) * 1000.0, (gears_now() - drawn) * 1000.0);
+			fflush(stdout);
+		}
 
 		/* The rate every 100 frames. */
 		if (frame % 100U == 0U) {
@@ -500,8 +523,10 @@ static int
 gears_check(
 	unsigned width,
 	unsigned height,
-	const char *token)
+	const char *token,
+	unsigned frame)
 {
+	uint32_t sum;
 	unsigned char *pixels;
 	unsigned char *pixel;
 	unsigned long counts[4];
@@ -522,8 +547,10 @@ gears_check(
 
 	/* Each pixel: mostly red, mostly green, mostly blue, or black. */
 	memset(counts, 0, sizeof(counts));
+	sum = 2166136261U;
 	for (index = 0UL; index < total; index++) {
 		pixel = pixels + index * 4UL;
+		sum = (sum ^ ((uint32_t)pixel[0] | (uint32_t)pixel[1] << 8 | (uint32_t)pixel[2] << 16)) * 16777619U;
 		red = pixel[0];
 		green = pixel[1];
 		blue = pixel[2];
@@ -550,8 +577,14 @@ gears_check(
 	/* Enough background. */
 	if (counts[3] * 5UL < total)
 		failures++;
-	printf("ZGEARS CHECK run=%s red=%lu green=%lu blue=%lu black=%lu of=%lu failures=%d glerror=0x%x\n", token,
-	       counts[0], counts[1], counts[2], counts[3], total, failures, (unsigned)glGetError());
+	if (frame == 1U) {
+		printf("ZGEARS CHECK run=%s red=%lu green=%lu blue=%lu black=%lu of=%lu failures=%d glerror=0x%x\n", token,
+		       counts[0], counts[1], counts[2], counts[3], total, failures, (unsigned)glGetError());
+	}
+
+	/* Every frame read back has its sum said, so frames that differ can be told apart. */
+	printf("ZGEARS SUM run=%s frame=%u sum=%08x red=%lu green=%lu blue=%lu\n", token, frame, (unsigned)sum,
+	       counts[0], counts[1], counts[2]);
 	fflush(stdout);
 	return failures;
 }

@@ -352,8 +352,10 @@ zwl_compose_quiesce(
 
 	/* The frame completes; a failure is the compositor's. */
 	error = zwl_compose_complete(server);
-	if (error != 0)
+	if (error != 0) {
+		printf("ZWL FAILED site=compose_poll errno=%d\n", error);
 		server->failed = 1;
+	}
 }
 
 /*

@@ -34,6 +34,7 @@
 static enum i915_vk_object_kind i915_dispatch_route(uint32_t opcode);
 static int i915_dispatch_builtin(struct i915_render_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int i915_dispatch_unported(uint32_t opcode, const char *module, struct i915_wire_reader *reader);
+static void i915_dispatch_refused(uint32_t opcode, int error);
 
 /*
  * Decodes one command header and hands the command to the part that owns
@@ -72,9 +73,11 @@ drv_i915_render_dispatch(
 
 	/* A command the graphics path owned is finished, whatever it reported. */
 	if (handled != 0) {
-		/* Reports why the graphics path refused the command. */
-		if (error != 0)
+		/* Reports why the graphics path refused the command (the first few are logged, WS068 p006). */
+		if (error != 0) {
+			i915_dispatch_refused(opcode, error);
 			return error;
+		}
 
 		/* Succeeded: the graphics path executed the command. */
 		return 0;
@@ -110,11 +113,28 @@ drv_i915_render_dispatch(
 	}
 
 	/* Reports why the command was refused. */
-	if (error != 0)
+	if (error != 0) {
+		i915_dispatch_refused(opcode, error);
 		return error;
+	}
 
 	/* Succeeded: the command was decoded and executed. */
 	return 0;
+}
+
+/* Logs a refused command, the first 32 of them (a refusal fails the whole stream). */
+static void
+i915_dispatch_refused(
+	uint32_t opcode,
+	int error)
+{
+	static unsigned said;
+
+	/* Only the first ones. */
+	if (said >= 32U)
+		return;
+	said++;
+	kern_logf("i915: vk: command refused at opcode %u: error %d\n", opcode, error);
 }
 
 /* Maps an opcode to the object kind that names the module its range belongs to. */

@@ -26,6 +26,7 @@ static void immediate_current(enum fixed_op op, GLuint attribute, GLfloat x, GLf
 static struct fixed_list *immediate_list(struct fixed_state *fixed, GLuint name, int make);
 static void immediate_replay(const struct fixed_command *command);
 static GLuint immediate_array(GLenum array);
+static int immediate_flat(struct fixed_state *fixed, struct gles_state *state);
 
 /*
  * Begins a primitive of vertices.
@@ -76,6 +77,7 @@ glEnd(void)
 	struct gles_attrib saved[4];
 	struct gles_buffer *array_buffer;
 	int recorded;
+	int flat;
 
 	/* The state, and the list being compiled. */
 	fixed = fixed_current(&context);
@@ -110,8 +112,12 @@ glEnd(void)
 	state->attribs[FIXED_NORMAL].enabled = 1;
 	state->attribs[FIXED_TEXCOORD].enabled = 1;
 
-	/* One draw of them all. */
-	glDrawArrays(fixed->begin_mode, 0, (GLsizei)fixed->vertex_count);
+	/* One draw of them all; shaded flat, as primitives of their own, drawn smooth (the i915 compiler has no flat inputs). */
+	flat = 0;
+	if (fixed->shade_model == GL_FLAT && fixed->begin_mode != GL_POINTS)
+		flat = immediate_flat(fixed, state);
+	if (!flat)
+		glDrawArrays(fixed->begin_mode, 0, (GLsizei)fixed->vertex_count);
 
 	/* The arrays as they were. */
 	memcpy(state->attribs, saved, sizeof(saved));
@@ -1036,4 +1042,77 @@ immediate_array(
 
 	/* Not one. */
 	return GLES_ATTRIBS;
+}
+
+/*
+ * Draws glBegin/glEnd's vertices shaded flat without flat inputs: each
+ * primitive gets vertices of its own (the list gles_expand makes, starting
+ * at GL's provoking vertex), all with the provoking vertex's colour and
+ * normal, drawn as a list with the smooth program.  Returns 1 when it drew,
+ * 0 when it could not (the caller draws the ordinary way).
+ */
+static int
+immediate_flat(
+	struct fixed_state *fixed,
+	struct gles_state *state)
+{
+	struct fixed_vertex *vertices;
+	uint32_t *list;
+	uint32_t count;
+	uint32_t index;
+	uint32_t corners;
+	uint32_t provoking;
+	GLenum mode;
+
+	/* The list, each primitive from its provoking vertex. */
+	list = gles_expand(fixed->begin_mode, NULL, 0U, (GLsizei)fixed->vertex_count, 1, &count);
+	if (list == NULL)
+		return 0;
+	if (count == 0U) {
+		free(list);
+		return 1;
+	}
+
+	/* Lines have two corners, the rest three. */
+	corners = 3U;
+	mode = GL_TRIANGLES;
+	if (fixed->begin_mode == GL_LINES || fixed->begin_mode == GL_LINE_STRIP || fixed->begin_mode == GL_LINE_LOOP) {
+		corners = 2U;
+		mode = GL_LINES;
+	}
+
+	/* The vertices of their own, coloured and turned as the provoking one. */
+	vertices = malloc((size_t)count * sizeof(*vertices));
+	if (vertices == NULL) {
+		free(list);
+		return 0;
+	}
+
+	/* Each corner a copy, with the provoking vertex's colour and normal. */
+	for (index = 0U; index < count; index++) {
+		provoking = list[index - index % corners];
+		vertices[index] = fixed->vertices[list[index]];
+		memcpy(vertices[index].color, fixed->vertices[provoking].color, sizeof(vertices[index].color));
+		memcpy(vertices[index].normal, fixed->vertices[provoking].normal, sizeof(vertices[index].normal));
+	}
+
+	/* The list is done with. */
+	free(list);
+
+	/* Drawn smooth from those arrays. */
+	glVertexAttribPointer(FIXED_POSITION, 4, GL_FLOAT, GL_FALSE, (GLsizei)sizeof(struct fixed_vertex), vertices[0].position);
+	glVertexAttribPointer(FIXED_COLOR, 4, GL_FLOAT, GL_FALSE, (GLsizei)sizeof(struct fixed_vertex), vertices[0].color);
+	glVertexAttribPointer(FIXED_NORMAL, 3, GL_FLOAT, GL_FALSE, (GLsizei)sizeof(struct fixed_vertex), vertices[0].normal);
+	glVertexAttribPointer(FIXED_TEXCOORD, 4, GL_FLOAT, GL_FALSE, (GLsizei)sizeof(struct fixed_vertex), vertices[0].texcoord);
+	state->attribs[FIXED_POSITION].enabled = 1;
+	state->attribs[FIXED_COLOR].enabled = 1;
+	state->attribs[FIXED_NORMAL].enabled = 1;
+	state->attribs[FIXED_TEXCOORD].enabled = 1;
+	fixed->shade_model = GL_SMOOTH;
+	glDrawArrays(mode, 0, (GLsizei)count);
+	fixed->shade_model = GL_FLAT;
+
+	/* The copies go (the draw copied what it needed into the stream). */
+	free(vertices);
+	return 1;
 }

@@ -221,6 +221,7 @@ static int choose_mode(int fd, unsigned preferred_width, unsigned preferred_heig
 static uint32_t *window_pixels_alloc(uint16_t width, uint16_t height, uint32_t color);
 static void repaint(struct server *s);
 static void mark_dirty(struct server *s, int x, int y, int w, int h);
+static void rootless_count(struct server *s, const struct window *w, int busy);
 static void present(struct server *s);
 static uint16_t pointer_shape(struct server *s);
 static struct window *find_window(struct server *s, uint32_t id);
@@ -719,6 +720,33 @@ initialize_wayland(
 }
 
 /*
+ * Counts a rootless window's presents, and says every 200th how many were
+ * committed and how many found both buffers held (WS068 p006: a window
+ * whose frames stop reaching the compositor).
+ */
+static void
+rootless_count(
+	struct server *s,
+	const struct window *w,
+	int busy)
+{
+	static unsigned long committed;
+	static unsigned long held;
+
+	/* Counted. */
+	if (busy != 0)
+		held++;
+	else
+		committed++;
+
+	/* Said now and then. */
+	if ((committed + held) % 200UL == 0UL) {
+		fprintf(stderr, "XZED ROOTLESS presents committed=%lu held=%lu window=%dx%d+%d+%d screen=%ux%u\n", committed, held,
+			w->width, w->height, w->x, w->y, (unsigned)s->mode.width, (unsigned)s->mode.height);
+	}
+}
+
+/*
  * Shows the top-level windows a changed rectangle of the screen touches,
  * each in its own Wayland window (rootless), after bringing the windows in
  * step with the X windows: opened when mapped, closed when unmapped,
@@ -780,6 +808,7 @@ present_rootless(
 		/* The part composited, and the window shown with it as damage; a busy window tries again. */
 		rootless_compose(s, w, left, top, right - left, bottom - top);
 		busy = xzed_wayland_window_present(w->surface, w->composite, left - w->x, top - w->y, right - left, bottom - top);
+		rootless_count(s, w, busy);
 		if (busy != 0) {
 			mark_dirty(s, left, top, right - left, bottom - top);
 			continue;

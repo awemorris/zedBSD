@@ -1730,8 +1730,10 @@ program_module(
 	create.codeSize = words * sizeof(uint32_t);
 	create.pCode = code;
 	result = vkCreateShaderModule(state->device, &create, NULL, module);
-	if (result != VK_SUCCESS)
+	if (result != VK_SUCCESS) {
+		gles_report("vkCreateShaderModule", (int)result);
 		return -1;
+	}
 
 	/* Succeeded: the module. */
 	return 0;

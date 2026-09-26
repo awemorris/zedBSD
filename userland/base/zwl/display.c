@@ -441,8 +441,10 @@ zwl_schedule(
 	/* Window mode draws when something changed and no frame is in flight. */
 	if (server->dirty) {
 		error = zwl_compose_draw(server);
-		if (error != 0)
+		if (error != 0) {
+			printf("ZWL FAILED site=compose_draw errno=%d\n", error);
 			server->failed = 1;
+		}
 	}
 }
 
@@ -457,8 +459,10 @@ zwl_frame_done(
 
 	/* The frame's held buffers and callbacks are released. */
 	error = zwl_compose_complete(server);
-	if (error != 0)
+	if (error != 0) {
+		printf("ZWL FAILED site=frame_done errno=%d\n", error);
 		server->failed = 1;
+	}
 }
 
 /*

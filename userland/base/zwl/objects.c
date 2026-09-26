@@ -133,6 +133,7 @@ zwl_buffer_put(
 
 	/* An unbalanced owner is an internal defect rather than a client-controlled refcount. */
 	if (buffer->holds == 0) {
+		printf("ZWL FAILED site=buffer_put client=%llu buffer=%u\n", (unsigned long long)buffer->client->number, buffer->id);
 		buffer->client->server->failed = 1;
 		return;
 	}
@@ -235,8 +236,10 @@ zwl_object_destroy(
 		if (server->front_surface == object) {
 			/* Native release establishes that current storage can retire safely. */
 			error = zwl_unscan(server);
-			if (error != 0)
+			if (error != 0) {
+				printf("ZWL FAILED site=surface_unscan errno=%d\n", error);
 				server->failed = 1;
+			}
 		}
 
 		/* Detach surviving shell objects before this surface storage disappears. */
@@ -266,6 +269,8 @@ zwl_object_destroy(
 			server->anim = NULL;
 		if (server->wiseview_current == object)
 			server->wiseview_current = NULL;
+		if (server->wiseview_press == object)
+			server->wiseview_press = NULL;
 
 		/* Its fences are not waited for any more. */
 		for (index = 0; index < object->acquire_count; index++)

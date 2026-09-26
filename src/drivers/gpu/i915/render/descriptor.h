@@ -26,6 +26,7 @@ int drv_i915_gfx_allocate_dsets(struct i915_render_session *session, struct i915
 /* Destroys a descriptor pool with its sets (vkDestroyDescriptorPool), or frees one whose identity is withdrawn. */
 int drv_i915_gfx_destroy_dpool(struct i915_render_session *session, struct i915_wire_reader *reader);
 void drv_i915_gfx_dpool_free(struct i915_render_session *session, void *pool);
+int drv_i915_gfx_reset_dpool(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 int drv_i915_gfx_update_dsets(struct i915_render_session *session, struct i915_wire_reader *reader);
 
 #endif

@@ -153,6 +153,7 @@ static int i915_record_bind_descriptor_sets(struct i915_render_session *session,
 static int i915_record_dynamic_offsets(struct i915_gfx_op **ops, uint32_t set_count, const uint32_t *offsets, uint32_t offset_count);
 static int i915_record_set_blend_constants(struct i915_gfx_cmdbuf *cmdbuf, struct i915_wire_reader *reader);
 static int i915_record_push_constants(struct i915_gfx_cmdbuf *cmdbuf, struct i915_wire_reader *reader);
+static int i915_record_set_unused(uint32_t opcode, struct i915_wire_reader *reader);
 static int i915_record_bind_index(struct i915_render_session *session, struct i915_gfx_cmdbuf *cmdbuf, struct i915_wire_reader *reader);
 static int i915_record_set_viewport(struct i915_render_session *session, struct i915_gfx_cmdbuf *cmdbuf, struct i915_wire_reader *reader);
 static int i915_record_set_scissor(struct i915_render_session *session, struct i915_gfx_cmdbuf *cmdbuf, struct i915_wire_reader *reader);
@@ -259,6 +260,8 @@ drv_i915_gfx_rec_dispatch(
 	if (error == ENOTSUP) {
 		kern_logf("i915: vk: XXX unimplemented opcode %u (recording)\n", opcode);
 		reader->error = 1;
+	} else if (error != 0) {
+		kern_logf("i915: vk: recording refused at opcode %u: error %d\n", opcode, error);
 	}
 
 	/* Reports why the recording was refused. */
@@ -1389,6 +1392,49 @@ i915_record_set_blend_constants(
 }
 
 /*
+ * vkCmdSetLineWidth: [width]; vkCmdSetDepthBias: [constant][clamp][slope];
+ * vkCmdSetStencilCompareMask, vkCmdSetStencilWriteMask and
+ * vkCmdSetStencilReference: [faces][value].  The values are decoded and
+ * dropped (WS068 p006: OpenGL ES sets them with every pipeline).
+ *
+ * XXX: the draws have no stencil test, no depth bias and only one-pixel
+ * lines; a width other than 1 is said once.
+ */
+static int
+i915_record_set_unused(
+	uint32_t opcode,
+	struct i915_wire_reader *reader)
+{
+	static int wide_said;
+	uint32_t words;
+	uint32_t first;
+	uint32_t index;
+
+	/* The words each command carries (floats as their bits). */
+	words = 2U;
+	if (opcode == 96U)
+		words = 1U;
+	if (opcode == 97U)
+		words = 3U;
+	first = drv_i915_wire_read_u32(reader);
+	for (index = 1U; index < words; index++)
+		(void)drv_i915_wire_read_u32(reader);
+
+	/* Refuses a stream that ended inside the values. */
+	if (reader->error != 0)
+		return EINVAL;
+
+	/* A line width other than 1.0 (0x3f800000) is not drawn as asked. */
+	if (opcode == 96U && first != 0x3f800000U && !wide_said) {
+		kern_logf("i915: vk: XXX unimplemented path: lines of a width other than 1 (drawn one pixel wide)\n");
+		wide_said = 1;
+	}
+
+	/* Succeeded: the values are decoded. */
+	return 0;
+}
+
+/*
  * vkCmdPushConstants: [layout][stages][offset][size][count]{bytes}.
  *
  * XXX: one block is shared by every stage; the stages are not kept.
@@ -1632,6 +1678,14 @@ i915_record_command(
 	case 95U:
 		/* vkCmdSetScissor */
 		error = i915_record_set_scissor(session, cmdbuf, reader);
+		return error;
+	case 96U:
+	case 97U:
+	case 100U:
+	case 101U:
+	case 102U:
+		/* vkCmdSetLineWidth, vkCmdSetDepthBias and the three stencil values, which the draws do not use. */
+		error = i915_record_set_unused(opcode, reader);
 		return error;
 	case 98U:
 		/* vkCmdSetBlendConstants */

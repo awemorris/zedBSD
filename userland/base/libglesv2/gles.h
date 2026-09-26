@@ -564,6 +564,7 @@ extern const struct gles_fixed_hooks *gles_fixed;
 struct zegl_context *gles_context(void);
 struct gles_state *gles_state(struct zegl_context *context);
 void gles_error(struct zegl_context *context, GLenum error);
+void gles_report(const char *what, int code);
 int gles_names_add(struct gles_names *names, GLuint name, void *object);
 GLuint gles_names_free(struct gles_names *names);
 void *gles_names_get(struct gles_names *names, GLuint name);
@@ -597,6 +598,7 @@ void gles_shader_release(struct gles_shader *shader);
 /* draw.c: pipelines, the frame, and readback. */
 void gles_pipelines_forget(struct gles_state *state, uint64_t program);
 int gles_read_rgba(struct zegl_context *context, GLint x, GLint y, GLsizei width, GLsizei height, unsigned char *rows);
+uint32_t *gles_expand(GLenum mode, const uint32_t *indices, uint32_t first, GLsizei count, int rotate, uint32_t *expanded);
 
 /*
  * What the SPIR-V of a shader says about its interface.

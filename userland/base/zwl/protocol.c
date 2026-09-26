@@ -548,6 +548,7 @@ surface_commit(
 	struct zwl_object *previous;
 	struct zwl_server *server;
 	unsigned attached;
+	uint32_t replaced;
 	int error;
 
 	/*
@@ -622,6 +623,15 @@ surface_commit(
 		surface->configured = 0;
 		surface->acknowledged = 0;
 		surface->configure_serial = 0;
+	}
+
+	/* Names the commit when the per-frame lines were asked for (with the image it replaces, 0 for none). */
+	if (server->log_frames && attached && surface->pending != NULL) {
+		replaced = 0U;
+		if (surface->queued != NULL)
+			replaced = surface->queued->id;
+		printf("ZWL COMMIT client=%llu surface=%u buffer=%u queued=%u\n", (unsigned long long)surface->client->number, surface->id,
+		       surface->pending->id, replaced);
 	}
 
 	/* New commits replace only an unpresented queued image; current scanout keeps its hold. */
