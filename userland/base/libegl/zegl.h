@@ -10,10 +10,13 @@
  * libEGL and libGLESv2.
  *
  * An EGL display owns a Vulkan instance and device; a window surface owns
- * a Vulkan surface, its swapchain and one framebuffer per image; a context
+ * a Vulkan surface, its swapchain, a depth buffer when its config has one,
+ * one framebuffer per image, and the frame being recorded; a context
  * holds the GLES state.  libGLESv2 finds the calling thread's context with
- * zegl_current_context() and draws into its surface's frame; libEGL
- * submits and presents the frame in eglSwapBuffers.
+ * zegl_current_context(), opens its draw surface's frame with
+ * zegl_frame_begin() and records into it inside zegl_frame_pass();
+ * eglSwapBuffers submits and presents the frame and then tells libGLESv2
+ * that its per-frame resources are free again.
  */
 
 #ifndef ZEGL_H
@@ -111,8 +114,26 @@ struct zegl_surface {
 	VkExtent2D extent;
 	int stale;
 
-	/* The render pass that starts a frame by clearing it, and each image's view and framebuffer. */
+	/*
+	 * The render pass that starts a frame by clearing it, and the one that
+	 * goes on with what an earlier pass of the frame left (both leave the
+	 * colour image ready to present); pipelines are made with the first,
+	 * which the second is compatible with.
+	 */
 	VkRenderPass pass;
+	VkRenderPass pass_load;
+
+	/* The depth and stencil buffer (VK_FORMAT_UNDEFINED when the config has none), and the aspects its format has. */
+	VkFormat depth_format;
+	VkImageAspectFlags depth_aspects;
+	VkImage depth_image;
+	VkDeviceMemory depth_memory;
+	VkImageView depth_view;
+
+	/* Nonzero when the swapchain's images can be copied from (glReadPixels). */
+	int readable;
+
+	/* Each image's view and framebuffer. */
 	VkImage images[ZEGL_IMAGES];
 	VkImageView views[ZEGL_IMAGES];
 	VkFramebuffer framebuffers[ZEGL_IMAGES];
@@ -125,15 +146,31 @@ struct zegl_surface {
 	VkSemaphore acquired;
 	VkSemaphore rendered;
 
+	/*
+	 * The frame being recorded: whether an image is acquired and the
+	 * command buffer recording, whether a render pass is open, how many
+	 * passes the frame has had, whether a submission already waited for
+	 * the acquire, and the image.
+	 */
+	int frame_open;
+	int in_pass;
+	unsigned passes;
+	int acquire_waited;
+	uint32_t image;
+
 	/* The swap interval (eglSwapInterval), and how many frames were presented. */
 	EGLint interval;
 	uint64_t frames;
 };
 
 /*
- * The GLES state of a context that libGLESv2 keeps (WS068 p002: the clear
- * colour, the viewport and the error).
+ * The GLES state of a context that libEGL also sees: the clear colour,
+ * the viewport and the error.  The rest of the state is libGLESv2's own
+ * (state), which libGLESv2 makes at the context's first GLES call and
+ * which libEGL gives back through the two callbacks.
  */
+struct zegl_context;
+
 struct zegl_gles {
 	/* The colour glClear clears to, and whether a clear was asked for since the last frame. */
 	float clear_color[4];
@@ -145,6 +182,13 @@ struct zegl_gles {
 
 	/* The first error since glGetError last read it (GL_NO_ERROR when none). */
 	unsigned error;
+
+	/* libGLESv2's state, NULL until its first call. */
+	void *state;
+
+	/* Called by eglSwapBuffers once a frame is done, and by eglDestroyContext; NULL until libGLESv2 sets them. */
+	void (*frame_done)(struct zegl_context *context);
+	void (*release)(struct zegl_context *context);
 };
 
 /*
@@ -174,5 +218,11 @@ void zegl_vulkan_close(struct zegl_display *display);
 EGLint zegl_surface_open(struct zegl_surface *surface);
 void zegl_surface_close(struct zegl_surface *surface);
 EGLint zegl_surface_present(struct zegl_surface *surface, struct zegl_context *context);
+
+/* The frame, for libGLESv2 (vulkan.c): opened, a pass entered or left, and the recording submitted and waited for. */
+EGLint zegl_frame_begin(struct zegl_surface *surface);
+void zegl_frame_pass(struct zegl_surface *surface, const VkClearValue *clear);
+void zegl_frame_leave_pass(struct zegl_surface *surface);
+EGLint zegl_frame_flush(struct zegl_surface *surface);
 
 #endif

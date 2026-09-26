@@ -1449,9 +1449,11 @@ window_dock(
 	server->anim_start_ms = zwl_milliseconds();
 	server->dirty = 1;
 
-	/* The client draws the new size; the log gives where the bar's buttons are (close, restore, minimize). */
+	/* The client draws the new size; the log gives where the bar's buttons are (close, restore, minimize) and the docked body. */
 	bar_layout(server, &bar);
-	printf("ZWL GLASS dock surface=%u via=%s buttons=%d,%d,%d title=%d\n", surface->id, via, bar.buttons[BUTTON_CLOSE], bar.buttons[BUTTON_MAXIMIZE], bar.buttons[BUTTON_MINIMIZE], bar.title_x);
+	printf("ZWL GLASS dock surface=%u via=%s buttons=%d,%d,%d title=%d x=%d y=%d w=%d h=%d\n", surface->id, via,
+	       bar.buttons[BUTTON_CLOSE], bar.buttons[BUTTON_MAXIMIZE], bar.buttons[BUTTON_MINIMIZE], bar.title_x,
+	       (int)to.x, (int)to.y, (int)to.width, (int)to.height);
 	window_configure(surface);
 }
 

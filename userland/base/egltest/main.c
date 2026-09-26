@@ -12,7 +12,9 @@
  * WAYLAND_DISPLAY is set) the window is an xdg-shell toplevel through
  * wl_egl_window; with --platform=display the whole screen is drawn
  * directly, without a compositor.  Each frame clears to one colour
- * (--color) or to a colour that changes with the frame, and swaps.
+ * (--color) or to a colour that changes with the frame, and swaps; with
+ * --scene=draw each frame draws scene.c's shapes instead, and the first
+ * frame reads its colours back (EGLTEST PIXEL and EGLTEST CHECK lines).
  *
  * Every outcome is one line: EGLTEST DONE on a clean end, EGLTEST FAILED
  * naming what failed otherwise.
@@ -23,6 +25,8 @@
 #include <GLES2/gl2.h>
 #include <wayland-egl.h>
 #include <xdg-shell-client-protocol.h>
+
+#include "scene.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,6 +46,7 @@ struct egltest_options {
 	unsigned delay_ms;
 	int fixed;
 	float color[3];
+	int scene;
 };
 
 /*
@@ -74,6 +79,7 @@ struct egltest_egl {
 	EGLint major;
 	EGLint minor;
 	const char *operation;
+	int failures;
 };
 
 static int egltest_parse(int argc, char **argv, struct egltest_options *options);
@@ -129,7 +135,7 @@ main(
 	/* The command line. */
 	status = egltest_parse(argc, argv, &options);
 	if (status != 0) {
-		fprintf(stderr, "usage: egltest [--display=NAME] [--platform=wayland|display] [--size=WxH] [--frames=N] [--delay-ms=N] [--color=RRGGBB] [--token=NAME]\n");
+		fprintf(stderr, "usage: egltest [--display=NAME] [--platform=wayland|display] [--size=WxH] [--frames=N] [--delay-ms=N] [--color=RRGGBB] [--scene=draw] [--token=NAME]\n");
 		return 2;
 	}
 
@@ -155,8 +161,8 @@ main(
 	(void)eglTerminate(egl.display);
 	egltest_window_close(&window);
 
-	/* Succeeded: how many frames were presented. */
-	printf("EGLTEST DONE run=%s frames=%u glerror=0x%x\n", options.token, presented, 0U);
+	/* Succeeded: how many frames were presented, and how many of the scene's colours differed. */
+	printf("EGLTEST DONE run=%s frames=%u glerror=0x%x failures=%d\n", options.token, presented, 0U, egl.failures);
 	return 0;
 }
 
@@ -167,12 +173,13 @@ egltest_start(
 	struct egltest_window *window,
 	struct egltest_egl *egl)
 {
-	static const EGLint config_attributes[] = {
+	EGLint config_attributes[] = {
 		EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
 		EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
 		EGL_RED_SIZE, 8,
 		EGL_GREEN_SIZE, 8,
 		EGL_BLUE_SIZE, 8,
+		EGL_DEPTH_SIZE, 0,
 		EGL_NONE
 	};
 	static const EGLint context_attributes[] = {
@@ -207,8 +214,10 @@ egltest_start(
 	if (!done)
 		return -1;
 
-	/* An 8-bit RGB config for windows and OpenGL ES 2. */
+	/* An 8-bit RGB config for windows and OpenGL ES 2, with a depth buffer for the scene. */
 	egl->operation = "eglChooseConfig";
+	if (options->scene)
+		config_attributes[11] = 24;
 	done = eglChooseConfig(egl->display, config_attributes, &egl->config, 1, &count);
 	if (!done || count < 1)
 		return -1;
@@ -245,6 +254,16 @@ egltest_start(
 	       (const char *)glGetString(GL_VENDOR), (const char *)glGetString(GL_RENDERER),
 	       (const char *)glGetString(GL_VERSION), width, height);
 	fflush(stdout);
+
+	/* The scene's program, buffers and texture. */
+	egl->operation = "scene";
+	if (options->scene) {
+		status = egltest_scene_start();
+		if (status != 0)
+			return -1;
+	}
+
+	/* Succeeded: ready for the frames. */
 	return 0;
 }
 
@@ -257,6 +276,8 @@ egltest_frames(
 	unsigned *presented)
 {
 	EGLBoolean done;
+	EGLint width;
+	EGLint height;
 	float color[3];
 	unsigned frame;
 	int status;
@@ -282,18 +303,37 @@ egltest_frames(
 			}
 		}
 
-		/* The frame: cleared to its colour and presented. */
+		/* The scene over the window's size, its colours read back at the first frame. */
+		if (options->scene) {
+			width = window->width;
+			height = window->height;
+			if (options->direct) {
+				(void)eglQuerySurface(egl->display, egl->surface, EGL_WIDTH, &width);
+				(void)eglQuerySurface(egl->display, egl->surface, EGL_HEIGHT, &height);
+			}
+
+			/* The scene. */
+			egltest_scene_draw(width, height);
+			if (frame == 1U)
+				egl->failures = egltest_scene_check(width, height, options->token);
+		}
+
+		/* Without the scene: cleared to the frame's colour. */
 		egltest_frame_color(options, frame, color);
-		glClearColor(color[0], color[1], color[2], 1.0f);
-		glClear(GL_COLOR_BUFFER_BIT);
+		if (!options->scene) {
+			glClearColor(color[0], color[1], color[2], 1.0f);
+			glClear(GL_COLOR_BUFFER_BIT);
+		}
+
+		/* Presented. */
 		egl->operation = "eglSwapBuffers";
 		done = eglSwapBuffers(egl->display, egl->surface);
 		if (!done)
 			return -1;
 
-		/* The first frame is logged. */
+		/* The first frame is logged (the scene logs its own colours). */
 		*presented = frame;
-		if (frame == 1U) {
+		if (frame == 1U && !options->scene) {
 			printf("EGLTEST FRAME run=%s frame=1 color=%02x%02x%02x\n", options->token,
 			       (unsigned)(color[0] * 255.0f + 0.5f), (unsigned)(color[1] * 255.0f + 0.5f), (unsigned)(color[2] * 255.0f + 0.5f));
 			fflush(stdout);
@@ -320,6 +360,7 @@ egltest_parse(
 	int index;
 	int status;
 	int scanned;
+	int differs;
 
 	/* The defaults: Wayland, 640x400, 600 frames about 30 ms apart, changing colours. */
 	memset(options, 0, sizeof(*options));
@@ -387,6 +428,16 @@ egltest_parse(
 			options->color[0] = (float)((number >> 16) & 0xffUL) / 255.0f;
 			options->color[1] = (float)((number >> 8) & 0xffUL) / 255.0f;
 			options->color[2] = (float)(number & 0xffUL) / 255.0f;
+			continue;
+		}
+
+		/* The drawing scene. */
+		value = egltest_value(argv[index], "--scene=");
+		if (value != NULL) {
+			differs = strcmp(value, "draw");
+			if (differs != 0)
+				return -1;
+			options->scene = 1;
 			continue;
 		}
 

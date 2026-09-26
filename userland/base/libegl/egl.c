@@ -736,6 +736,7 @@ eglDestroyContext(
 {
 	struct egl_thread *thread;
 	struct zegl_display *display;
+	struct zegl_context *context;
 
 	/* The calling thread's EGL state. */
 	thread = egl_thread();
@@ -751,8 +752,11 @@ eglDestroyContext(
 	if ((struct zegl_context *)ctx == thread->current)
 		return egl_fail(EGL_BAD_ACCESS);
 
-	/* Succeeded: the context goes. */
-	free(ctx);
+	/* libGLESv2's state goes first, then the context. */
+	context = (struct zegl_context *)ctx;
+	if (context->gles.release != NULL)
+		context->gles.release(context);
+	free(context);
 	return egl_succeed();
 }
 
