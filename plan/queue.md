@@ -1,11 +1,11 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue: q468 active
+# Queue: なし（q468 finished）
 
 <!-- awesome-plan-current:start -->
-Status: active（2026-09-26）
-Active Queue: [q468](history/queue-q468.md)（ws035-p068: zdesktop-terminal）
-Last finished Queue: [q467](history/queue-q467.md)（ws031-p050 cleared。session の残した object の解放）
+Status: none（2026-09-26）
+Active Queue: なし
+Last finished Queue: [q468](history/queue-q468.md)（ws035-p068 cleared。zdesktop-terminal）
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
 

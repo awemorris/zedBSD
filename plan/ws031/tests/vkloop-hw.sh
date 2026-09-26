@@ -174,6 +174,11 @@ if [ "$ZDESKTOP_RUN" = 1 ]; then
 	for n in run-zwl.sh run-wlkill.sh run-mview.sh run-poweroff.sh; do
 		FILES="$FILES --file /etc/zdesktop/$n=plan/ws031/tests/zdesktop/$n"
 	done
+	# ZDESKTOP_APP=terminal runs zdesktop-terminal (WS035 p068) where the model viewer runs, with the same log
+	if [ "${ZDESKTOP_APP:-mview}" = terminal ]; then
+		FILES="$FILES --file /etc/zdesktop/run-mview.sh=plan/ws031/tests/zdesktop/run-terminal.sh"
+		FILES="$FILES --file /usr/share/fonts/zdesktop-mono.ttf=build/ws035-fonts/JetBrainsMono-Regular.ttf"
+	fi
 	FILES="$FILES --file /usr/share/fonts/zdesktop.ttf=build/ws035-fonts/Inter.ttf"
 	FILES="$FILES --file /usr/share/zdesktop/wallpaper.ppm=build/ws035-wallpaper/wallpaper-1080.ppm"
 	RC_CONF=plan/ws031/tests/zdesktop/rc.conf
@@ -230,7 +235,7 @@ if [ "$ZDESKTOP_RUN" = 1 ]; then
 	ssh $I915_HOST 'python3 bigbang/ufs-cat.py bigbang/guest-parity.img /var/log/zwl.log /var/log/wlkill.log /var/log/mview.log /var/log/dmesg.log' > /tmp/zdesktop-guest-logs.txt 2>&1
 	echo "--- guest logs: /tmp/zdesktop-guest-logs.txt ($(wc -l < /tmp/zdesktop-guest-logs.txt) lines)"
 	# the viewer's own last word: closed by the capture's click on the bar's close button
-	grep -E '^MVIEW (DONE|FAILED)' /tmp/zdesktop-guest-logs.txt || echo "MVIEW did not end (no DONE or FAILED line)"
+	grep -E '^(MVIEW|ZTERM) (DONE|FAILED)' /tmp/zdesktop-guest-logs.txt || echo "the application did not end (no DONE or FAILED line)"
 fi
 if [ -n "$SCENARIO" ]; then
 	echo "--- test $SCENARIO"

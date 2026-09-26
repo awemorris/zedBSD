@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q467（ws031-p050 cleared。session の残した object の解放）
+Last finished Queue: q468（ws035-p068 cleared。zdesktop-terminal）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q467（2026-09-26）
+## 最新: q443〜q468（2026-09-26）
+
+[q468](queue-q468.md): ws035-p068 cleared。zdesktop-terminal（zterm の VT100 を移し拡張、libtruetype の等幅 font の atlas、Vulkan の cell 描画、US 配列、key repeat、forkpty、resize）。Venus と i915 実機で shell が動く。Venus の image に git 外の font と壁紙を入れる build script。i915 の 1 回の画面停止は BUG-056（tracking）。
 
 [q467](queue-q467.md): ws031-p050 cleared。i915 の実行器の session の close で、application が破棄しなかった Vulkan の object（command pool と buffer、descriptor pool と set、pipeline と kernel、fence、allocation、その他）を解放。descriptor pool の破棄でその set も解放。host の fixture に残したまま close する試験。実機の zdesktop の scenario に描画中に殺す Vulkan の窓と、mview を × で閉じる段を足し、mview は `reason=closed` で終わり zwl は合成を続けた。
 

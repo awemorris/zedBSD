@@ -7,4 +7,4 @@ CONFIG_GPU_JOB_EXECUTION_MS := 60000
 CONFIG_GPU_JOB_STOP_MS := 10000
 CONFIG_GPU_CONTROL_MS := 10000
 CONFIG_DRIVER_PCI_I915 := y
-ZEDBSD_USER_PROGRAMS += libvulkan libwayland-client libtruetype wltest wlshm mview zwl i915-firmware
+ZEDBSD_USER_PROGRAMS += libvulkan libwayland-client libtruetype wltest wlshm mview zdesktop-terminal zwl i915-firmware

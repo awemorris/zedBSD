@@ -3,7 +3,7 @@
 # Queue q468: zdesktop-terminal（ws035-p068）
 
 <!-- awesome-plan-current:start -->
-Status: active（2026-09-26）
+Status: finished（2026-09-26）
 Active Queue: q468
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
@@ -13,7 +13,7 @@ Approval: 2026-09-26 ユーザー「userland/base/ztermに、X11のターミナ�
 
 | Order | Attempt | Phase | Status |
 | --- | --- | --- | --- |
-| 1 | q468-i01 | [ws035-p068](../ws035/phase068/phase.md) | in-progress |
+| 1 | q468-i01 | [ws035-p068](../ws035/phase068/phase.md) | cleared（Venus と i915 実機で terminal の窓。1 回の失敗は BUG-056） |
 
 依存: ws035-p067（cleared）。
 
