@@ -4,9 +4,9 @@
 
 Phase ID: `ws035-p069`
 Parent: [WS035](../ws.md)
-Status: planned
+Status: in-progress（q469-i01）
 Phase disposition: normal
-Queue: —
+Queue: q469-i01
 承認: 2026-09-26 ユーザー「下記のアプリケーションランチャーも取り組んでほしいです。まずはPoCでよいです。私が実機で起動したときに、mviewやzdesktop-terminalを起動できるようにしたいからです。」
 設計: [app-home-design.md](../app-home-design.md)
 
