@@ -1,10 +1,10 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue: なし（q475 finished）
+# Queue: q476 active
 
 <!-- awesome-plan-current:start -->
-Status: none（2026-09-26）
-Active Queue: なし
+Status: active（2026-09-26）
+Active Queue: [q476](history/queue-q476.md)（ws068-p010: EGL の pbuffer）
 Last finished Queue: [q475](history/queue-q475.md)（ws068-p008 cleared。GLES 2.0 の描画の核）
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
