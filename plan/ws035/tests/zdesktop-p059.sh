@@ -10,8 +10,9 @@
 #  2. hover.png: the pointer over b's close button (red).
 #  3. b's title bar is dragged 300 left and 100 up: zwl logs the move and b's
 #     body is at its new place.
-#  4. a's maximize button: a is configured to the space under the system bar
-#     and fills it; pressed again, a goes back to 420x300 at its place.
+#  4. a's maximize button docks a to the system bar (p062): it is configured
+#     to the space under the bar and fills it; a double click on its title
+#     in the bar brings it back to 420x300 at its place.
 #  5. b's close button: the client gets xdg_toplevel.close and exits.
 #
 #   plan/ws035/tests/zdesktop-guest.sh start     (the guest must be up)
@@ -85,18 +86,21 @@ move 1200 700
 check "$out/moved.png" --expect $((nx + 180)),$((ny + 120)),e8eef8 \
     --expect $((ax + 400)),$((ay + 280)),f4f7fc || status=1
 
-# 4. a maximized (its button, two from the right), then back.
+# 4. a maximized (its button, two from the right): since p062 that docks it
+#    to the system bar (the body fills the output under the bar, told
+#    1280x762); a double click on its title in the bar brings it back.
 click $((ax + 420 - 26 - 34)) $((ay - 8 - 22))
 sleep 3
 move 1200 700
 check "$out/maximized.png" --expect 640,500,f4f7fc --expect 20,120,f4f7fc \
     --expect 1260,780,f4f7fc || status=1
-click $((12 + 1256 - 26 - 34)) $((98 - 8 - 22))
+title_x=$(guest "grep 'GLASS dock surface=6 ' /tmp/zwl.log | tail -1" | sed -n 's/.* title=\([0-9]*\).*/\1/p')
+python3 plan/ws035/tests/qmp-pointer.py "$GUEST_RUNTIME/qmp.sock" move $((title_x + 60)) 17 sleep 400 down sleep 60 up sleep 60 down sleep 60 up
 sleep 3
 move 1200 700
 check "$out/restored.png" --expect $((ax + 20)),$((ay + 150)),f4f7fc || status=1
 guest 'grep -E "CONFIGURE client=1" /tmp/zwl.log; grep RESIZE /tmp/a.log' | tee "$out/maximize.txt"
-grep -q "width=1256 height=690" "$out/maximize.txt" || status=1
+grep -q "width=1280 height=762" "$out/maximize.txt" || status=1
 grep -q "RESIZE run=a width=420 height=300" "$out/maximize.txt" || status=1
 
 # 5. b closed from its close button.

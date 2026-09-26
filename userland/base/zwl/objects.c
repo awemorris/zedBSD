@@ -255,9 +255,15 @@ zwl_object_destroy(
 			server->awaiting--;
 		}
 
-		/* A window being moved is not moved any more. */
+		/* A window being moved, pulled, clicked or animated is not any more. */
 		if (server->drag == object)
 			server->drag = NULL;
+		if (server->pull == object)
+			server->pull = NULL;
+		if (server->click_surface == object)
+			server->click_surface = NULL;
+		if (server->anim == object)
+			server->anim = NULL;
 
 		/* Its fences are not waited for any more. */
 		for (index = 0; index < object->acquire_count; index++)

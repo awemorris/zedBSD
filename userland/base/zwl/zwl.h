@@ -365,6 +365,22 @@ struct zwl_server {
 	int32_t drag_dx;
 	int32_t drag_dy;
 	int64_t clock_minute;
+	/*
+	 * The glass look's shell (shell.c): where a move started, the first press
+	 * of a double click, a docked window whose title is being pulled down,
+	 * and the dock animation (the window, when it started, which way, and the
+	 * body's rectangles at its start and end: x, y, width, height).
+	 */
+	int32_t drag_start_x;
+	int32_t drag_start_y;
+	struct zwl_object *click_surface;
+	uint64_t click_ms;
+	struct zwl_object *pull;
+	struct zwl_object *anim;
+	uint64_t anim_start_ms;
+	unsigned anim_docking;
+	int32_t anim_from[4];
+	int32_t anim_to[4];
 	/* The cursor: a client's surface, zdesktop's arrow when there is none, or hidden. */
 	struct zwl_object *cursor_surface;
 	int32_t cursor_hotspot_x;

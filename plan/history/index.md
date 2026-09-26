@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q462（ws035-p061 cleared。壁紙の画像と透ける窓）
+Last finished Queue: q463（ws035-p062 cleared。タイトルバーのドッキング）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q462（2026-09-26）
+## 最新: q443〜q463（2026-09-26）
+
+[q463](queue-q463.md): ws035-p062 cleared。最大化 = タイトルバーのシステムバーへのドッキング（ダブルクリック・上への drag・button）、解除（バーの題名のダブルクリック・⧉・下への pull で引きずり出す）、220 ms の遷移、仮想デスクトップのハリボテ。shell.c を glass.c から分けた。
 
 [q462](queue-q462.md): ws035-p061 cleared。ユーザーの絵を抽象化した壁紙（`--wallpaper`、PPM、git 外）と、すりガラスで透ける窓（`--window-opacity`）。10 %・60 % の画面。
 

@@ -5,7 +5,7 @@
 // box: the rounded rectangle in output pixels (x, y, width, height).
 // color: a straight color and its opacity.
 // shape: corner radius, mode, softness or thickness, opaque image (1).
-// screen: output width and height, edge highlight, the image's opacity.
+// screen: output width and height, edge highlight, the opacity of the whole shape.
 layout(push_constant) uniform Panel {
 	vec4 rect;
 	vec4 texture;
@@ -54,7 +54,7 @@ void main()
 
 		glass += vec3(0.05) * (1.0 - depth);
 		glass = mix(glass, vec3(1.0), edge * panel.screen.z);
-		result = vec4(glass * cover, cover);
+		result = vec4(glass * cover, cover) * panel.screen.w;
 		return;
 	}
 
@@ -63,7 +63,7 @@ void main()
 		float softness = max(panel.shape.z, 1.0);
 		float alpha = panel.color.a * (1.0 - smoothstep(-softness * 0.5, softness, distance));
 
-		result = vec4(panel.color.rgb * alpha, alpha);
+		result = vec4(panel.color.rgb * alpha, alpha) * panel.screen.w;
 		return;
 	}
 
@@ -86,5 +86,5 @@ void main()
 		cover = texture(image, texcoord).a;
 
 	// A solid color.
-	result = vec4(panel.color.rgb, 1.0) * panel.color.a * cover;
+	result = vec4(panel.color.rgb, 1.0) * panel.color.a * cover * panel.screen.w;
 }
