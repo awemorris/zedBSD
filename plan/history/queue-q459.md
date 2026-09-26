@@ -18,4 +18,6 @@ Approval: 2026-09-26 ユーザー「…ws035を次に優先。…これで進め
 
 結果: acquire fence（`zed_gpu_buffer_v1` version 2、zwl の poll での待ち、WSI の先の commit）を実装。libc の `setvbuf` を直した（BUG-055）。
 
-Upcoming Work Outlook: p054 の判断の後、ws035-p011（窓管理）、p055（damage）、p057（効果）。
+追記（2026-09-26）: ユーザー「p054 clearedでいいです。」により受け入れ 3 を読み替え、ws035-p054 は cleared。上の q459-i01 の結果（uncleared）は当時の記録として残す。
+
+Upcoming Work Outlook: ws035-p011（窓管理）、p055（damage）、p057（効果）。

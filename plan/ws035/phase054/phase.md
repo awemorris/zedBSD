@@ -4,7 +4,7 @@
 
 Phase ID: `ws035-p054`
 Parent: [WS035](../ws.md)
-Status: uncleared（q459-i01、2026-09-26。受け入れ 1・2・4 と 3 の前半は満たした。3 の「present が速くなる」は測って速くならず、判断待ち）
+Status: cleared（2026-09-26、q459-i01 の結果とユーザーの判断による。当初は uncleared で記録）
 Phase disposition: normal
 Queue: q459-i01
 設計: [compositing-design.md](../compositing-design.md)（2026-09-25 承認）の D3（client の描画の完了）
@@ -49,6 +49,6 @@ GPU の画像の client が、描画が終わる前に commit できるように
 - 最初の試験の方法（wltest の描画を host の `vkSetEvent` まで `vkCmdWaitEvents` で止める）は、この Venus の renderer では transport が止まって 10 秒の watchdog で GPU が reset された。試験は kernel の fence を使う方法に変えた（wltest には present の時間の計測 `WLTEST PRESENT` だけを残した）。
 - 試験の client の競合: WSI は別の thread で commit するので、直前の frame の commit の前に試験の fence を送ると前の frame に付いた。`vkQueueWaitIdle`（present の job も片付ける）の後で送る。
 
-## 要る判断
+## 判断（2026-09-26）
 
-受け入れ 3 の「client の present が速くなる」は、present が元から描画の完了を待っていなかったので満たせない。受け入れ 3 を「WSI は完了を待たずに fence を付けて commit する（present の時間は測って記録する）」と読み替えてこの Phase を cleared にするか、ユーザーの判断を待つ。
+受け入れ 3 の「client の present が速くなる」は、present が元から描画の完了を待っていなかったので満たせない。受け入れ 3 を「WSI は完了を待たずに fence を付けて commit する（present の時間は測って記録する）」と読み替えるかを尋ね、ユーザー「p054 clearedでいいです。」。これで全ての受け入れを満たし cleared（q459-i01 の記録は uncleared のまま残し、この追記で cleared にした）。

@@ -2,14 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q459（ws035-p054 uncleared。acquire fence を実装、受け入れ 3 の判断待ち）
+Last finished Queue: q459（ws035-p054。acquire fence。uncleared で終え、ユーザーの判断で cleared）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
 ## 最新: q443〜q459（2026-09-26）
 
-[q459](queue-q459.md): ws035-p054 uncleared。`zed_gpu_buffer_v1` version 2 の `set_acquire_fence`（1 commit に 4 つまで）、zwl は fence を poll して終わった commit だけを採る、WSI は fence を付けて先に commit。QEMU で保留の間も他の窓と合成が進み、hold 6000 ms に対し 5991〜6034 ms 待った。`vkQueuePresentKHR` は変更前と同じ 31〜35 ms（元から完了を待たない）で、受け入れ 3 の読み替えが判断待ち。libc の `setvbuf(…, NULL, _IOLBF, 0)` を直した（BUG-055）。
+[q459](queue-q459.md): ws035-p054 uncleared。`zed_gpu_buffer_v1` version 2 の `set_acquire_fence`（1 commit に 4 つまで）、zwl は fence を poll して終わった commit だけを採る、WSI は fence を付けて先に commit。QEMU で保留の間も他の窓と合成が進み、hold 6000 ms に対し 5991〜6034 ms 待った。`vkQueuePresentKHR` は変更前と同じ 31〜35 ms（元から完了を待たない）で、受け入れ 3 はユーザーの判断で読み替えて cleared（2026-09-26）。libc の `setvbuf(…, NULL, _IOLBF, 0)` を直した（BUG-055）。
 
 [q443](queue-q443.md): ws063-p001 cleared。journal の大きさを mkfs で記録し、mount で `.ufs-journal`（extent）を再利用・再確保・作成する。
 [q444](queue-q444.md): ws061-p008 cleared。libc の同期の system call を減らし、make（直列）12.8〜13.1 秒（host `-j1` 15.2 秒）。
