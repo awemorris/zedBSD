@@ -134,7 +134,7 @@ test_memory(void)
 	assert(stub_get32(stub_reply, 4U) == VK_SUCCESS);
 	assert(stub_get64(stub_reply, 8U) == 1U);
 	assert(stub_get64(stub_reply, 16U) == FIXTURE_SOLO);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_MEMORY, FIXTURE_SOLO) != NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_MEMORY, FIXTURE_SOLO) != NULL);
 
 	/* [22] and nothing else; the identity leaves the table. */
 	stub_wire_begin(&fixture_wire);
@@ -142,7 +142,7 @@ test_memory(void)
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 4U);
 	assert(stub_get32(stub_reply, 0U) == FIXTURE_FREE_MEMORY);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_MEMORY, FIXTURE_SOLO) == NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_MEMORY, FIXTURE_SOLO) == NULL);
 
 	/* A void command that asks for no reply writes none, and still runs. */
 	stub_wire_begin(&fixture_wire);
@@ -150,7 +150,7 @@ test_memory(void)
 	fixture_destroy(FIXTURE_FREE_MEMORY, FIXTURE_SOLO, 0U);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 24U);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_MEMORY, FIXTURE_SOLO) == NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_MEMORY, FIXTURE_SOLO) == NULL);
 
 	/* Closes the session; nothing stays allocated. */
 	stub_session_close();
@@ -198,7 +198,7 @@ test_buffer_image(void)
 	assert(stub_get32(stub_reply, 0U) == FIXTURE_CREATE_BUFFER);
 	assert(stub_get32(stub_reply, 4U) == VK_SUCCESS);
 	assert(stub_get64(stub_reply, 16U) == FIXTURE_BUFFER);
-	buffer = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_BUFFER, FIXTURE_BUFFER);
+	buffer = drv_i915_object_lookup(stub_session, I915_VK_OBJ_BUFFER, FIXTURE_BUFFER);
 	assert(buffer != NULL);
 
 	/* vkBindBufferMemory at offset 0: [28][VK_SUCCESS]. */
@@ -245,7 +245,7 @@ test_buffer_image(void)
 	assert(reply_bytes == 24U);
 	assert(stub_get32(stub_reply, 0U) == FIXTURE_CREATE_IMAGE);
 	assert(stub_get64(stub_reply, 16U) == FIXTURE_IMAGE);
-	image = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_IMAGE, FIXTURE_IMAGE);
+	image = drv_i915_object_lookup(stub_session, I915_VK_OBJ_IMAGE, FIXTURE_IMAGE);
 	assert(image != NULL);
 
 	/* vkBindImageMemory behind the buffer: [29][VK_SUCCESS]. */
@@ -295,9 +295,9 @@ test_buffer_image(void)
 	assert(stub_get32(stub_reply, 0U) == FIXTURE_DESTROY_IMAGE);
 	assert(stub_get32(stub_reply, 4U) == FIXTURE_DESTROY_BUFFER);
 	assert(stub_get32(stub_reply, 8U) == FIXTURE_FREE_MEMORY);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_IMAGE, FIXTURE_IMAGE) == NULL);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_BUFFER, FIXTURE_BUFFER) == NULL);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_MEMORY, FIXTURE_MEMORY) == NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_IMAGE, FIXTURE_IMAGE) == NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_BUFFER, FIXTURE_BUFFER) == NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_MEMORY, FIXTURE_MEMORY) == NULL);
 
 	/* Closes the session; nothing stays allocated. */
 	stub_session_close();
@@ -367,7 +367,7 @@ test_transport(void)
 	assert(stub_get32(stub_reply, 252U) == 0U);
 
 	/* The memory the transaction created is freed like any other. */
-	memory = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_MEMORY, FIXTURE_TRANSACTION);
+	memory = drv_i915_object_lookup(stub_session, I915_VK_OBJ_MEMORY, FIXTURE_TRANSACTION);
 	assert(memory != NULL);
 	stub_wire_begin(&fixture_wire);
 	fixture_destroy(FIXTURE_FREE_MEMORY, FIXTURE_TRANSACTION, 0U);

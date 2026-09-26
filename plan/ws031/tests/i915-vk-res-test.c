@@ -308,7 +308,7 @@ test_memory_storage(void)
 	stub_session_open(&fixture_storage_object);
 
 	/* A blob that names no allocation is refused as unknown. */
-	error = drv_i915_render_blob_attach(stub_vk, FIXTURE_MEMORY, &fixture_storage_object);
+	error = drv_i915_render_blob_attach(stub_vk, &stub_gpu, FIXTURE_MEMORY, &fixture_storage_object);
 	assert(error == ENOENT);
 
 	/* Allocates 64 KiB of memory type 0: [21][VK_SUCCESS][present][identity]. */
@@ -317,7 +317,7 @@ test_memory_storage(void)
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 24U);
 	assert(stub_get32(stub_reply, 4U) == VK_SUCCESS);
-	memory = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_MEMORY, FIXTURE_MEMORY);
+	memory = drv_i915_object_lookup(stub_session, I915_VK_OBJ_MEMORY, FIXTURE_MEMORY);
 	assert(memory != NULL);
 	assert(memory->size == 65536U);
 
@@ -331,13 +331,13 @@ test_memory_storage(void)
 	memset(&small, 0, sizeof(small));
 	small.bytes = 4096U;
 	small.run.paddr = (hal_physaddr_t)(uintptr_t)fixture_storage;
-	error = drv_i915_render_blob_attach(stub_vk, FIXTURE_MEMORY, &small);
+	error = drv_i915_render_blob_attach(stub_vk, &stub_gpu, FIXTURE_MEMORY, &small);
 	assert(error == EINVAL);
 
 	/* The blob libvulkan exports for the allocation becomes its storage, once. */
-	error = drv_i915_render_blob_attach(stub_vk, FIXTURE_MEMORY, &fixture_storage_object);
+	error = drv_i915_render_blob_attach(stub_vk, &stub_gpu, FIXTURE_MEMORY, &fixture_storage_object);
 	assert(error == 0);
-	error = drv_i915_render_blob_attach(stub_vk, FIXTURE_MEMORY, &fixture_storage_object);
+	error = drv_i915_render_blob_attach(stub_vk, &stub_gpu, FIXTURE_MEMORY, &fixture_storage_object);
 	assert(error == EINVAL);
 
 	/* The views are the blob's host pointer and GPU address plus the offset. */
@@ -363,7 +363,7 @@ test_memory_storage(void)
 	assert(reply_bytes == 16U);
 	assert(stub_get32(stub_reply, 4U) == (uint32_t)VK_ERROR_INITIALIZATION_FAILED);
 	assert(stub_get32(stub_reply, 12U) == (uint32_t)VK_ERROR_INITIALIZATION_FAILED);
-	memory = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_MEMORY, FIXTURE_MEMORY + 1U);
+	memory = drv_i915_object_lookup(stub_session, I915_VK_OBJ_MEMORY, FIXTURE_MEMORY + 1U);
 	assert(memory == NULL);
 
 	/* vkFreeMemory releases the allocation; nothing the test made stays allocated. */
@@ -371,7 +371,7 @@ test_memory_storage(void)
 	fixture_destroy(FIXTURE_FREE_MEMORY, FIXTURE_MEMORY);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 4U);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_MEMORY, FIXTURE_MEMORY) == NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_MEMORY, FIXTURE_MEMORY) == NULL);
 	stub_session_close();
 	assert(stub_live == 0U);
 }
@@ -397,7 +397,7 @@ test_buffer_image(void)
 	fixture_allocate_memory(FIXTURE_MEMORY, FIXTURE_STORAGE_BYTES, 0U);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 24U);
-	error = drv_i915_render_blob_attach(stub_vk, FIXTURE_MEMORY, &fixture_storage_object);
+	error = drv_i915_render_blob_attach(stub_vk, &stub_gpu, FIXTURE_MEMORY, &fixture_storage_object);
 	assert(error == 0);
 
 	/* vkCreateBuffer of 4096 vertex-buffer bytes, then its bind at offset 0. */
@@ -421,11 +421,11 @@ test_buffer_image(void)
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 24U + 8U);
 	assert(stub_get32(stub_reply, 28U) == VK_SUCCESS);
-	buffer = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_BUFFER, FIXTURE_BUFFER);
+	buffer = drv_i915_object_lookup(stub_session, I915_VK_OBJ_BUFFER, FIXTURE_BUFFER);
 	assert(buffer != NULL);
 	assert(buffer->size == 4096U);
 	assert(buffer->usage == VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-	assert(buffer->memory == drv_i915_object_lookup(stub_vk, I915_VK_OBJ_MEMORY, FIXTURE_MEMORY));
+	assert(buffer->memory == drv_i915_object_lookup(stub_session, I915_VK_OBJ_MEMORY, FIXTURE_MEMORY));
 
 	/* A bind that would run past the end of the allocation fails and leaves the buffer as it was. */
 	stub_wire_begin(&fixture_wire);
@@ -440,7 +440,7 @@ test_buffer_image(void)
 	fixture_create_image(FIXTURE_IMAGE, VK_FORMAT_R8G8B8A8_UNORM, FIXTURE_WIDTH, FIXTURE_HEIGHT, 1U);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 24U);
-	image = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_IMAGE, FIXTURE_IMAGE);
+	image = drv_i915_object_lookup(stub_session, I915_VK_OBJ_IMAGE, FIXTURE_IMAGE);
 	assert(image != NULL);
 	assert(image->pitch == FIXTURE_PITCH);
 	assert(image->bytes == (uint64_t)FIXTURE_PITCH * FIXTURE_HEIGHT);
@@ -480,7 +480,7 @@ test_buffer_image(void)
 	fixture_create_image(FIXTURE_DEPTH, VK_FORMAT_D32_SFLOAT, 100U, 50U, 1U);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 24U);
-	image = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_IMAGE, FIXTURE_DEPTH);
+	image = drv_i915_object_lookup(stub_session, I915_VK_OBJ_IMAGE, FIXTURE_DEPTH);
 	assert(image != NULL);
 	assert(image->pitch == 512U);
 	assert(image->bytes == 512U * 64U);
@@ -492,7 +492,7 @@ test_buffer_image(void)
 	assert(reply_bytes == 8U);
 	assert(stub_get32(stub_reply, 4U) == (uint32_t)VK_ERROR_FEATURE_NOT_PRESENT);
 	assert(strstr(stub_log, "XXX vkCreateImage refused") != NULL);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_IMAGE, FIXTURE_MIPMAPPED) == NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_IMAGE, FIXTURE_MIPMAPPED) == NULL);
 
 	/* A colour image with more levels than halve 64 down to one texel (7) is refused the same way. */
 	stub_wire_begin(&fixture_wire);
@@ -500,7 +500,7 @@ test_buffer_image(void)
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 8U);
 	assert(stub_get32(stub_reply, 4U) == (uint32_t)VK_ERROR_FEATURE_NOT_PRESENT);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_IMAGE, FIXTURE_MIPMAPPED) == NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_IMAGE, FIXTURE_MIPMAPPED) == NULL);
 
 	/* Binds the colour image behind the buffer and creates the whole-image view. */
 	stub_wire_begin(&fixture_wire);
@@ -530,8 +530,8 @@ test_buffer_image(void)
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 8U + 24U);
 	assert(stub_get32(stub_reply, 4U) == VK_SUCCESS);
-	image = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_IMAGE, FIXTURE_IMAGE);
-	view = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_IMAGE_VIEW, FIXTURE_VIEW);
+	image = drv_i915_object_lookup(stub_session, I915_VK_OBJ_IMAGE, FIXTURE_IMAGE);
+	view = drv_i915_object_lookup(stub_session, I915_VK_OBJ_IMAGE_VIEW, FIXTURE_VIEW);
 	assert(view != NULL);
 	assert(view->image == image);
 	assert(image->offset == 65536U);
@@ -574,7 +574,7 @@ test_buffer_image(void)
 	fixture_destroy(FIXTURE_FREE_MEMORY, FIXTURE_MEMORY);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 5U * 4U);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_IMAGE, FIXTURE_IMAGE) == NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_IMAGE, FIXTURE_IMAGE) == NULL);
 	stub_session_close();
 	assert(stub_live == 0U);
 }
@@ -611,7 +611,7 @@ test_mip_images(void)
 	fixture_allocate_memory(FIXTURE_MEMORY, FIXTURE_STORAGE_BYTES, 0U);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 24U);
-	error = drv_i915_render_blob_attach(stub_vk, FIXTURE_MEMORY, &fixture_storage_object);
+	error = drv_i915_render_blob_attach(stub_vk, &stub_gpu, FIXTURE_MEMORY, &fixture_storage_object);
 	assert(error == 0);
 
 	/*
@@ -623,7 +623,7 @@ test_mip_images(void)
 	fixture_create_image(FIXTURE_MIPMAPPED, VK_FORMAT_R8G8B8A8_UNORM, 64U, 64U, 7U);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 24U);
-	image = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_IMAGE, FIXTURE_MIPMAPPED);
+	image = drv_i915_object_lookup(stub_session, I915_VK_OBJ_IMAGE, FIXTURE_MIPMAPPED);
 	assert(image != NULL);
 	assert(image->levels == 7U);
 	assert(image->pitch == 256U);
@@ -662,7 +662,7 @@ test_mip_images(void)
 	fixture_create_image(FIXTURE_MIPMAPPED + 1U, VK_FORMAT_R8G8B8A8_UNORM, 5U, 3U, 3U);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 24U);
-	odd = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_IMAGE, FIXTURE_MIPMAPPED + 1U);
+	odd = drv_i915_object_lookup(stub_session, I915_VK_OBJ_IMAGE, FIXTURE_MIPMAPPED + 1U);
 	assert(odd != NULL);
 	assert(odd->pitch == 32U);
 	assert(odd->bytes == 32U * 8U);
@@ -674,7 +674,7 @@ test_mip_images(void)
 	fixture_bind(FIXTURE_BIND_IMAGE_MEMORY, FIXTURE_IMAGE, 65536U);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 24U + 8U + 8U);
-	target = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_IMAGE, FIXTURE_IMAGE);
+	target = drv_i915_object_lookup(stub_session, I915_VK_OBJ_IMAGE, FIXTURE_IMAGE);
 	assert(target != NULL);
 
 	/* Level 2 (16x16) is described on its own: row 64, column 32, the image's pitch. */
@@ -699,7 +699,7 @@ test_mip_images(void)
 	fixture_create_view(FIXTURE_VIEW, FIXTURE_MIPMAPPED, 1U, VK_REMAINING_MIP_LEVELS);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 24U);
-	view = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_IMAGE_VIEW, FIXTURE_VIEW);
+	view = drv_i915_object_lookup(stub_session, I915_VK_OBJ_IMAGE_VIEW, FIXTURE_VIEW);
 	assert(view != NULL);
 	assert(view->base_level == 1U);
 	assert(view->level_count == 6U);
@@ -715,14 +715,14 @@ test_mip_images(void)
 	assert(stub_get32(stub_reply, 12U) == (uint32_t)VK_ERROR_INITIALIZATION_FAILED);
 	assert(stub_get32(stub_reply, 20U) == (uint32_t)VK_ERROR_INITIALIZATION_FAILED);
 	assert(strstr(stub_log, "vkCreateImageView refused") != NULL);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_IMAGE_VIEW, FIXTURE_VIEW + 1U) == NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_IMAGE_VIEW, FIXTURE_VIEW + 1U) == NULL);
 
 	/* A trilinear sampler with bias 1.5 and LOD range [0.25, 16] keeps them as float bits. */
 	stub_wire_begin(&fixture_wire);
 	fixture_create_sampler(FIXTURE_SAMPLER, VK_SAMPLER_MIPMAP_MODE_LINEAR, 0x3fc00000U, 0x3e800000U, 0x41800000U);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 24U);
-	sampler = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_SAMPLER, FIXTURE_SAMPLER);
+	sampler = drv_i915_object_lookup(stub_session, I915_VK_OBJ_SAMPLER, FIXTURE_SAMPLER);
 	assert(sampler != NULL);
 	assert(sampler->mipmap_mode == VK_SAMPLER_MIPMAP_MODE_LINEAR);
 	assert(sampler->lod_bias == 0x3fc00000U);
@@ -866,7 +866,7 @@ test_descriptors(void)
 	stub_put64(&fixture_wire, FIXTURE_SAMPLER);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 24U);
-	sampler = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_SAMPLER, FIXTURE_SAMPLER);
+	sampler = drv_i915_object_lookup(stub_session, I915_VK_OBJ_SAMPLER, FIXTURE_SAMPLER);
 	assert(sampler != NULL);
 	assert(sampler->mag_filter == VK_FILTER_LINEAR);
 	assert(sampler->min_filter == VK_FILTER_NEAREST);
@@ -894,7 +894,7 @@ test_descriptors(void)
 	stub_put64(&fixture_wire, FIXTURE_DSL);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 24U);
-	dsl = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_DESCRIPTOR_SET_LAYOUT, FIXTURE_DSL);
+	dsl = drv_i915_object_lookup(stub_session, I915_VK_OBJ_DESCRIPTOR_SET_LAYOUT, FIXTURE_DSL);
 	assert(dsl != NULL);
 	assert(dsl->count == 1U);
 	assert(dsl->bindings[0].binding == 1U);
@@ -961,7 +961,7 @@ test_descriptors(void)
 	assert(stub_get32(stub_reply, 28U) == VK_SUCCESS);
 	assert(stub_get64(stub_reply, 32U) == 1U);
 	assert(stub_get64(stub_reply, 40U) == FIXTURE_SET);
-	dset = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_DESCRIPTOR_SET, FIXTURE_SET);
+	dset = drv_i915_object_lookup(stub_session, I915_VK_OBJ_DESCRIPTOR_SET, FIXTURE_SET);
 	assert(dset != NULL);
 	assert(dset->layout == dsl);
 
@@ -993,7 +993,7 @@ test_descriptors(void)
 	stub_put64(&fixture_wire, 0U);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 4U);
-	view = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_IMAGE_VIEW, FIXTURE_VIEW);
+	view = drv_i915_object_lookup(stub_session, I915_VK_OBJ_IMAGE_VIEW, FIXTURE_VIEW);
 	assert(dset->slots[1].view == view);
 	assert(dset->slots[1].sampler == sampler);
 	assert(dset->slots[0].view == NULL);
@@ -1019,7 +1019,7 @@ test_descriptors(void)
 	 * destruction nor the session's close does; the fixture unpublishes and
 	 * frees the set itself so that the rest of the run starts clean.
 	 */
-	drv_i915_object_remove(stub_vk, I915_VK_OBJ_DESCRIPTOR_SET, FIXTURE_SET);
+	drv_i915_object_remove(stub_session, I915_VK_OBJ_DESCRIPTOR_SET, FIXTURE_SET);
 	kern_free(dset);
 
 	/* Every other object is destroyed through the wire and nothing stays allocated. */

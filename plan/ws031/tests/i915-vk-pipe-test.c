@@ -430,7 +430,7 @@ test_shader_module(void)
 	assert(reply_bytes == 24U);
 	assert(stub_get32(stub_reply, 0U) == FIXTURE_CREATE_SHADER_MODULE);
 	assert(stub_get64(stub_reply, 16U) == FIXTURE_PROBE);
-	shader = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_SHADER_MODULE, FIXTURE_PROBE);
+	shader = drv_i915_object_lookup(stub_session, I915_VK_OBJ_SHADER_MODULE, FIXTURE_PROBE);
 	assert(shader != NULL);
 	assert(shader->word_count == 3U);
 	for (index = 0U; index < 3U; index++)
@@ -441,7 +441,7 @@ test_shader_module(void)
 	fixture_destroy(FIXTURE_DESTROY_SHADER_MODULE, FIXTURE_PROBE);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 4U);
-	shader = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_SHADER_MODULE, FIXTURE_PROBE);
+	shader = drv_i915_object_lookup(stub_session, I915_VK_OBJ_SHADER_MODULE, FIXTURE_PROBE);
 	assert(shader == NULL);
 
 	/* A code size that is not whole words fails the stream. */
@@ -450,7 +450,7 @@ test_shader_module(void)
 	fixture_wire.bytes[STUB_SELECTOR_BYTES + 8U + 8U + 8U + 4U + 8U + 4U] = 11U;
 	error = stub_execute(&fixture_wire, &reply_bytes);
 	assert(error == EINVAL);
-	shader = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_SHADER_MODULE, FIXTURE_PROBE);
+	shader = drv_i915_object_lookup(stub_session, I915_VK_OBJ_SHADER_MODULE, FIXTURE_PROBE);
 	assert(shader == NULL);
 
 	/* Closes the session; nothing stays allocated. */
@@ -522,7 +522,7 @@ test_graphics_pipeline(void)
 	assert(stub_get32(stub_reply, 4U) == (uint32_t)VK_ERROR_FEATURE_NOT_PRESENT);
 	assert(stub_get64(stub_reply, 8U) == 1U);
 	assert(stub_get64(stub_reply, 16U) == 0U);
-	pipeline = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_PIPELINE, FIXTURE_BAD_PIPELINE);
+	pipeline = drv_i915_object_lookup(stub_session, I915_VK_OBJ_PIPELINE, FIXTURE_BAD_PIPELINE);
 	assert(pipeline == NULL);
 
 	/*
@@ -544,10 +544,10 @@ test_graphics_pipeline(void)
 	assert(stub_get64(stub_reply, 16U) == FIXTURE_PIPELINE);
 
 	/* The pipeline holds both modules, its topology and two compiled kernels. */
-	pipeline = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_PIPELINE, FIXTURE_PIPELINE);
+	pipeline = drv_i915_object_lookup(stub_session, I915_VK_OBJ_PIPELINE, FIXTURE_PIPELINE);
 	assert(pipeline != NULL);
-	assert(pipeline->vertex == drv_i915_object_lookup(stub_vk, I915_VK_OBJ_SHADER_MODULE, FIXTURE_VS));
-	assert(pipeline->fragment == drv_i915_object_lookup(stub_vk, I915_VK_OBJ_SHADER_MODULE, FIXTURE_FS));
+	assert(pipeline->vertex == drv_i915_object_lookup(stub_session, I915_VK_OBJ_SHADER_MODULE, FIXTURE_VS));
+	assert(pipeline->fragment == drv_i915_object_lookup(stub_session, I915_VK_OBJ_SHADER_MODULE, FIXTURE_FS));
 	assert(pipeline->topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
 	assert(pipeline->kernels_ready != 0);
 	assert(pipeline->vs_binary != NULL);
@@ -589,7 +589,7 @@ test_graphics_pipeline(void)
 	fixture_destroy(FIXTURE_DESTROY_SHADER_MODULE, FIXTURE_BAD_VS);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 4U * 4U);
-	pipeline = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_PIPELINE, FIXTURE_PIPELINE);
+	pipeline = drv_i915_object_lookup(stub_session, I915_VK_OBJ_PIPELINE, FIXTURE_PIPELINE);
 	assert(pipeline == NULL);
 
 	/* Closes the session; nothing stays allocated. */
@@ -637,7 +637,7 @@ test_dynamic_push_pipeline(void)
 	assert(stub_get64(stub_reply, 48U + 16U) == FIXTURE_DYNAMIC_PIPELINE);
 
 	/* The pipeline takes its viewport and scissor from the command buffer. */
-	pipeline = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_PIPELINE, FIXTURE_DYNAMIC_PIPELINE);
+	pipeline = drv_i915_object_lookup(stub_session, I915_VK_OBJ_PIPELINE, FIXTURE_DYNAMIC_PIPELINE);
 	assert(pipeline != NULL);
 	assert(pipeline->dynamic_viewport != 0);
 	assert(pipeline->dynamic_scissor != 0);

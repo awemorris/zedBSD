@@ -20,11 +20,14 @@
 #include "object.h"
 #include "render.h"
 #include "reply.h"
+#include "../i915.h"
 #include "../memory.h"
+#include "../session.h"
 #include <kern/kcrt.h>
 
 #include <kern/klog.h>
 #include <kern/kmem.h>
+#include <kern/lock.h>
 #include <kern/pmem.h>
 
 #include <libc/vulkan/vulkan_core.h>
@@ -37,12 +40,14 @@
 
 static int i915_gfx_bind_image(struct i915_render_session *session, struct i915_gfx_memory *memory, uint64_t resource, uint64_t offset);
 static int i915_gfx_bind_buffer(struct i915_render_session *session, struct i915_gfx_memory *memory, uint64_t resource, uint64_t offset);
+static struct i915_gem_object *memory_import_object(struct i915_render_session *session, uint32_t resource);
 
 /*
  * Every live VkDeviceMemory, newest first.
  *
  * A blob finds the allocation it is the storage of here, by the executor
- * device and the allocation's identity.  An allocation joins the list once
+ * device, the open of the node and the allocation's identity (every process
+ * numbers its allocations from the same start).  An allocation joins the list once
  * it is published and leaves it on vkFreeMemory.  The list takes no lock of
  * its own; it relies on its callers not running an executor command and a
  * blob attach or detach at once.  XXX: the list is shared by every executor
@@ -120,20 +125,21 @@ drv_i915_gfx_memory_va(
  * blob is the allocation's storage, which the application maps and the GPU
  * addresses.  Returns EINVAL when the allocation already has storage or the
  * blob is smaller than the allocation, and ENOENT when no allocation has that
- * identity.
+ * identity in the open that made the blob.
  */
 int
 drv_i915_render_blob_attach(
 	struct i915_render_device *vk,
+	struct i915_session *gpu,
 	uint64_t blob_id,
 	struct i915_gem_object *object)
 {
 	struct i915_gfx_memory *memory;
 
-	/* Looks for the first allocation of this device that the blob names. */
+	/* Looks for the allocation of this device and open that the blob names. */
 	for (memory = i915_gfx_memories; memory != NULL; memory = memory->next) {
-		/* Stops at an allocation of this device with the blob's identity. */
-		if (memory->vk == vk && memory->identity == blob_id)
+		/* Stops at an allocation of this device and open with the blob's identity. */
+		if (memory->vk == vk && memory->gpu == gpu && memory->identity == blob_id)
 			break;
 	}
 
@@ -176,13 +182,82 @@ drv_i915_render_blob_detach(
 }
 
 /*
+ * Frees the allocations a closing session did not free.
+ *
+ * They leave the list the blob attach searches, so a later open never gives
+ * them storage.  XXX: the other objects the session left are not freed; only
+ * their identities are forgotten (drv_i915_object_forget).
+ */
+void
+drv_i915_gfx_memory_forget(
+	struct i915_render_session *session)
+{
+	struct i915_gfx_memory *memory;
+	struct i915_gfx_memory **link;
+
+	/* Unlinks and frees each allocation of the session's open, keeping the rest in order. */
+	link = &i915_gfx_memories;
+	while (*link != NULL) {
+		memory = *link;
+		if (memory->vk != session->vk || memory->gpu != session->gpu) {
+			link = &memory->next;
+			continue;
+		}
+
+		/* The session's allocation leaves the list and is freed. */
+		*link = memory->next;
+		kern_free(memory);
+	}
+}
+
+/*
+ * The sType libvulkan chains for an import: VkImportMemoryResourceInfoMESA,
+ * whose u32 is the id of a resource the session imported (GPU_RESOURCE_IMPORT).
+ */
+#define I915_VK_IMPORT_MEMORY_RESOURCE	1000384002U
+
+/*
+ * Finds the object of a session with a resource id: the alias an import made
+ * of another open's object (resource.c), bound into this session's address
+ * space.  NULL when the session has no such resource.
+ */
+static struct i915_gem_object *
+memory_import_object(
+	struct i915_render_session *session,
+	uint32_t resource)
+{
+	struct i915_gem_object *object;
+	struct i915_device *device;
+
+	/* The session's objects change under the device mutex. */
+	device = session->vk->i915;
+	mutex_lock(&device->mutex);
+
+	/* The object with that slot. */
+	for (object = session->gpu->objects; object != NULL; object = object->session_next) {
+		if (object->slot == resource)
+			break;
+	}
+
+	/* The list may change again. */
+	mutex_unlock(&device->mutex);
+
+	/* The object, or NULL. */
+	return object;
+}
+
+/*
  * Allocates a VkDeviceMemory: vkAllocateMemory.
  *
  * The command is [device][present][sType][chain present]{[sType]
  * [pNext = 0][u32]}[allocationSize][memoryTypeIndex][pAllocator][present]
  * [identity] and the reply [result][present][identity].  Only memory type 0
- * and a nonzero size are accepted.  The allocation has no storage until its
- * blob arrives.
+ * and a nonzero size are accepted.  An ordinary allocation has no storage
+ * until its blob arrives.  An import (VkImportMemoryResourceInfoMESA) takes
+ * as its storage the session's resource it names: an alias of another open's
+ * object, such as a Wayland client's image the compositor samples
+ * (ws035-p066).  An export declaration needs nothing here: sharing is by the
+ * node's resources.
  */
 int
 drv_i915_gfx_allocate_memory(
@@ -192,9 +267,13 @@ drv_i915_gfx_allocate_memory(
 {
 	struct i915_gfx_memory *memory;
 	struct i915_gfx_memory *published;
+	struct i915_gem_object *imported;
 	uint64_t chain;
 	uint64_t size;
 	uint64_t identity;
+	uint32_t kind;
+	uint32_t value;
+	uint32_t resource;
 	uint32_t type;
 	int error;
 
@@ -206,15 +285,14 @@ drv_i915_gfx_allocate_memory(
 	/* Reads the presence marker of the one extension record libvulkan may chain. */
 	chain = drv_i915_wire_read_u64(reader);
 
-	/*
-	 * XXX: export and import declarations are read and not acted on; there
-	 * is no sharing between contexts.
-	 */
+	/* An import names its resource; an export declaration is only read. */
+	resource = 0U;
 	if (chain != 0U) {
-		(void)drv_i915_wire_read_u32(reader);
+		kind = drv_i915_wire_read_u32(reader);
 		(void)drv_i915_wire_read_u64(reader);
-		(void)drv_i915_wire_read_u32(reader);
-		kern_logf("i915: vk: XXX vkAllocateMemory external-memory declaration ignored\n");
+		value = drv_i915_wire_read_u32(reader);
+		if (kind == I915_VK_IMPORT_MEMORY_RESOURCE)
+			resource = value;
 	}
 
 	/* Reads the size, the memory type and the identity. */
@@ -229,16 +307,31 @@ drv_i915_gfx_allocate_memory(
 	if (size == 0U || type != 0U)
 		error = EINVAL;
 
+	/* An import's storage is its resource, which must hold the whole allocation. */
+	imported = NULL;
+	if (error == 0 && resource != 0U) {
+		imported = memory_import_object(session, resource);
+		if (imported == NULL) {
+			kern_logf("i915: vk: import of resource %u refused: no such resource\n", resource);
+			error = EINVAL;
+		} else if (imported->bytes < size) {
+			kern_logf("i915: vk: import of resource %u refused: smaller than the allocation\n", resource);
+			error = EINVAL;
+		}
+	}
+
 	/* Allocates the allocation's record for an accepted request. */
 	memory = NULL;
 	if (error == 0)
 		memory = kern_calloc(1U, sizeof(*memory));
 
-	/* Initializes the record; its storage arrives later as a blob. */
+	/* Initializes the record; an ordinary allocation's storage arrives later as a blob. */
 	if (memory != NULL) {
 		memory->vk = session->vk;
+		memory->gpu = session->gpu;
 		memory->identity = identity;
 		memory->size = size;
+		memory->object = imported;
 	}
 
 	/* Publishes the allocation and answers; a record that is not published is freed. */
@@ -250,7 +343,7 @@ drv_i915_gfx_allocate_memory(
 	 * the decision and frees what it does not publish.
 	 */
 	if (memory != NULL) {
-		published = drv_i915_object_lookup(session->vk, I915_VK_OBJ_MEMORY, identity);
+		published = drv_i915_object_lookup(session, I915_VK_OBJ_MEMORY, identity);
 		if (published == memory) {
 			memory->next = i915_gfx_memories;
 			i915_gfx_memories = memory;
@@ -284,12 +377,12 @@ drv_i915_gfx_free_memory(
 		return EINVAL;
 
 	/* Resolves the allocation; freeing an unknown one does nothing. */
-	memory = drv_i915_object_lookup(session->vk, I915_VK_OBJ_MEMORY, identity);
+	memory = drv_i915_object_lookup(session, I915_VK_OBJ_MEMORY, identity);
 	if (memory == NULL)
 		return 0;
 
 	/* Unpublishes the allocation. */
-	drv_i915_object_remove(session->vk, I915_VK_OBJ_MEMORY, identity);
+	drv_i915_object_remove(session, I915_VK_OBJ_MEMORY, identity);
 
 	/* Takes the allocation off the list the blob attach searches. */
 	for (link = &i915_gfx_memories;
@@ -341,7 +434,7 @@ drv_i915_gfx_bind(
 
 	/* Resolves the allocation; an unknown one fails the bind. */
 	error = EINVAL;
-	memory = drv_i915_object_lookup(session->vk, I915_VK_OBJ_MEMORY, memory_id);
+	memory = drv_i915_object_lookup(session, I915_VK_OBJ_MEMORY, memory_id);
 
 	/* Binds the image or the buffer the command names. */
 	if (memory != NULL) {
@@ -391,11 +484,11 @@ drv_i915_gfx_requirements(
 	/* Finds how many bytes the image or the buffer occupies. */
 	bytes = 0U;
 	if (image != 0) {
-		image_target = drv_i915_object_lookup(session->vk, I915_VK_OBJ_IMAGE, resource);
+		image_target = drv_i915_object_lookup(session, I915_VK_OBJ_IMAGE, resource);
 		if (image_target != NULL)
 			bytes = image_target->bytes;
 	} else {
-		buffer_target = drv_i915_object_lookup(session->vk, I915_VK_OBJ_BUFFER, resource);
+		buffer_target = drv_i915_object_lookup(session, I915_VK_OBJ_BUFFER, resource);
 		if (buffer_target != NULL)
 			bytes = buffer_target->size;
 	}
@@ -467,7 +560,7 @@ i915_gfx_bind_image(
 	struct i915_gfx_image *image;
 
 	/* Resolves the image; an unknown one fails the bind. */
-	image = drv_i915_object_lookup(session->vk, I915_VK_OBJ_IMAGE, resource);
+	image = drv_i915_object_lookup(session, I915_VK_OBJ_IMAGE, resource);
 	if (image == NULL)
 		return EINVAL;
 
@@ -496,7 +589,7 @@ i915_gfx_bind_buffer(
 	struct i915_gfx_buffer *buffer;
 
 	/* Resolves the buffer; an unknown one fails the bind. */
-	buffer = drv_i915_object_lookup(session->vk, I915_VK_OBJ_BUFFER, resource);
+	buffer = drv_i915_object_lookup(session, I915_VK_OBJ_BUFFER, resource);
 	if (buffer == NULL)
 		return EINVAL;
 

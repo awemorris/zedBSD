@@ -10,7 +10,9 @@
  *
  * The table is a growable flat array scanned linearly; the object counts
  * of the applications it serves are small enough that nothing faster is
- * needed.  It belongs to the executor of one device.
+ * needed.  It belongs to the executor of one device and holds the objects
+ * of all its sessions; each entry is keyed by the session that created it
+ * too, because every process numbers its objects from the same start.
  */
 
 #include "object.h"
@@ -28,6 +30,9 @@
  * to its destruction.
  */
 struct i915_object_entry {
+	/* The session that created the object; a lookup from another session does not find it. */
+	struct i915_render_session *owner;
+
 	/* The kind the object was created as; a lookup of another kind does not find it. */
 	enum i915_vk_object_kind kind;
 
@@ -103,11 +108,12 @@ drv_i915_object_table_destroy(
 /*
  * Records a live object under its identity.
  *
- * An identity already recorded for the same kind is overwritten in place.
+ * An identity the session already recorded for the same kind is
+ * overwritten in place.
  */
 int
 drv_i915_object_insert(
-	struct i915_render_device *vk,
+	struct i915_render_session *session,
 	enum i915_vk_object_kind kind,
 	i915_vk_handle handle,
 	void *object)
@@ -117,9 +123,11 @@ drv_i915_object_insert(
 	unsigned capacity;
 	unsigned index;
 
-	/* Overwrites the entry of a reused identity of the same kind. */
-	table = vk->objects;
+	/* Overwrites the entry of a reused identity of the same session and kind. */
+	table = session->vk->objects;
 	for (index = 0U; index < table->count; index++) {
+		if (table->entries[index].owner != session)
+			continue;
 		if (table->entries[index].kind != kind)
 			continue;
 		if (table->entries[index].handle != handle)
@@ -154,6 +162,7 @@ drv_i915_object_insert(
 	}
 
 	/* Records the new entry in the next free slot. */
+	table->entries[table->count].owner = session;
 	table->entries[table->count].kind = kind;
 	table->entries[table->count].handle = handle;
 	table->entries[table->count].object = object;
@@ -164,20 +173,23 @@ drv_i915_object_insert(
 }
 
 /*
- * Returns the object recorded under an identity of the given kind, or NULL.
+ * Returns the object the session recorded under an identity of the given
+ * kind, or NULL.
  */
 void *
 drv_i915_object_lookup(
-	struct i915_render_device *vk,
+	struct i915_render_session *session,
 	enum i915_vk_object_kind kind,
 	i915_vk_handle handle)
 {
 	struct i915_object_table *table;
 	unsigned index;
 
-	/* Scans the entries for the kind and the identity. */
-	table = vk->objects;
+	/* Scans the entries for the session, the kind and the identity. */
+	table = session->vk->objects;
 	for (index = 0U; index < table->count; index++) {
+		if (table->entries[index].owner != session)
+			continue;
 		if (table->entries[index].kind != kind)
 			continue;
 		if (table->entries[index].handle != handle)
@@ -186,7 +198,7 @@ drv_i915_object_lookup(
 		return table->entries[index].object;
 	}
 
-	/* No object of that kind has the identity. */
+	/* No object of that session and kind has the identity. */
 	return NULL;
 }
 
@@ -198,7 +210,7 @@ drv_i915_object_lookup(
  */
 void
 drv_i915_object_remove(
-	struct i915_render_device *vk,
+	struct i915_render_session *session,
 	enum i915_vk_object_kind kind,
 	i915_vk_handle handle)
 {
@@ -206,8 +218,10 @@ drv_i915_object_remove(
 	unsigned index;
 
 	/* Finds the entry and fills its slot with the last one. */
-	table = vk->objects;
+	table = session->vk->objects;
 	for (index = 0U; index < table->count; index++) {
+		if (table->entries[index].owner != session)
+			continue;
 		if (table->entries[index].kind != kind)
 			continue;
 		if (table->entries[index].handle != handle)
@@ -216,5 +230,34 @@ drv_i915_object_remove(
 		table->entries[index] = table->entries[table->count - 1U];
 		table->count--;
 		return;
+	}
+}
+
+/*
+ * Drops every identity a closing session recorded.
+ *
+ * The objects an application did not destroy stay with the parts that
+ * created them; only their entries go, so a later session opened at the
+ * same address never finds them.
+ */
+void
+drv_i915_object_forget(
+	struct i915_render_session *session)
+{
+	struct i915_object_table *table;
+	unsigned index;
+
+	/* Fills the slot of each of the session's entries with the last one, and looks at the slot again. */
+	table = session->vk->objects;
+	index = 0U;
+	while (index < table->count) {
+		if (table->entries[index].owner != session) {
+			index++;
+			continue;
+		}
+
+		/* The last entry takes the freed slot. */
+		table->entries[index] = table->entries[table->count - 1U];
+		table->count--;
 	}
 }

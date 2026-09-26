@@ -258,6 +258,29 @@ kern_free(
 }
 
 /*
+ * The device mutex (vkAllocateMemory takes it to find an imported resource):
+ * the fixture runs one thread, so taking it does nothing.
+ */
+void
+mutex_lock(
+	struct mutex *mutex)
+{
+	/* Nothing to wait for. */
+	(void)mutex;
+}
+
+/*
+ * Gives the device mutex back.
+ */
+void
+mutex_unlock(
+	struct mutex *mutex)
+{
+	/* Nothing to release. */
+	(void)mutex;
+}
+
+/*
  * Keeps the last kernel log line for the fixture to inspect.
  */
 void

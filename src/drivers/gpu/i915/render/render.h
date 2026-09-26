@@ -40,7 +40,7 @@ int drv_i915_render_get_capset(const struct i915_render_device *vk, struct gpu_c
  * ENOENT when no allocation has that identity.  The memory part of the
  * executor defines both.
  */
-int drv_i915_render_blob_attach(struct i915_render_device *vk, uint64_t blob_id, struct i915_gem_object *object);
+int drv_i915_render_blob_attach(struct i915_render_device *vk, struct i915_session *gpu, uint64_t blob_id, struct i915_gem_object *object);
 void drv_i915_render_blob_detach(struct i915_render_device *vk, struct i915_gem_object *object);
 
 #endif

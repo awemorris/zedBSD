@@ -261,13 +261,9 @@ def run(args):
         raise TimeoutError(description)
 
     try:
-        if args.scenario == 'zdesktop':
-            # Found in guest memory, not in the serial log (WS035 p066 judges by the screen only).
-            qmp = QMP(args.qmp, deadline)
-            base = scan_for_area(qmp, output, deadline)
-        else:
-            base = int(wait(r'i915: capture: base=0x([0-9a-f]+)', 'capture area').group(1), 16)
-            qmp = QMP(args.qmp, deadline)
+        # The area is found in guest memory by its header, not in the serial log (WS035 p066).
+        qmp = QMP(args.qmp, deadline)
+        base = scan_for_area(qmp, output, deadline)
         report['base'] = hex(base)
         capture = Capture(qmp, output, base)
         report['area'] = {'slots': capture.slot_count, 'slot_bytes': capture.slot_bytes}

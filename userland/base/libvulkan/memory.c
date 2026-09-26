@@ -718,9 +718,14 @@ memory_import_fd(
 	int error;
 	int compatible;
 
-	/* Resolve the receiver's actual device/driver before attaching any foreign resource. */
+	/*
+	 * A node with image sharing only (the native i915) has no allocation
+	 * import; the fd can only be an image capability.
+	 */
 	if (!(device->object.context->capabilities & GPU_CAP_ALLOCATION_SHARE))
-		return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+		return memory_import_image_fd(device, info, allocator, fd, memory);
+
+	/* Resolve the receiver's actual device/driver before attaching any foreign resource. */
 
 	/* A failed native identity query must not attach any destination alias. */
 	memset(&identity, 0, sizeof(identity));
@@ -745,9 +750,7 @@ memory_import_fd(
 
 	/*
 	 * An image capability (what the Wayland WSI sends) has no allocation
-	 * envelope; it is imported as the image's whole allocation instead.  A
-	 * node with image sharing only (the native i915) has no allocation
-	 * import at all and takes the same path.
+	 * envelope; it is imported as the image's whole allocation instead.
 	 */
 	if (error == EINVAL || error == EOPNOTSUPP) {
 		status = memory_import_image_fd(device, info, allocator, fd, memory);

@@ -355,7 +355,7 @@ fixture_resources(void)
 	assert(stub_get32(stub_reply, 3U * 24U + 12U) == VK_SUCCESS);
 
 	/* The blob libvulkan exports for the allocation becomes its storage. */
-	error = drv_i915_render_blob_attach(stub_vk, FIXTURE_MEMORY, &fixture_storage_object);
+	error = drv_i915_render_blob_attach(stub_vk, &stub_gpu, FIXTURE_MEMORY, &fixture_storage_object);
 	assert(error == 0);
 }
 
@@ -604,13 +604,13 @@ test_lifecycle(void)
 	fixture_storage_object.va = FIXTURE_STORAGE_VA;
 	stub_session_open(&fixture_storage_object);
 	fixture_resources();
-	buffer = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_BUFFER, FIXTURE_BUFFER);
+	buffer = drv_i915_object_lookup(stub_session, I915_VK_OBJ_BUFFER, FIXTURE_BUFFER);
 	assert(buffer != NULL);
 
 	/* Publishes the stand-in pipeline the recording binds. */
 	memset(&fixture_pipeline, 0, sizeof(fixture_pipeline));
 	fixture_pipeline.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-	error = drv_i915_object_insert(stub_vk, I915_VK_OBJ_PIPELINE, FIXTURE_PIPELINE, &fixture_pipeline);
+	error = drv_i915_object_insert(stub_session, I915_VK_OBJ_PIPELINE, FIXTURE_PIPELINE, &fixture_pipeline);
 	assert(error == 0);
 
 	/* vkCreateCommandPool: [85][VK_SUCCESS][present][identity]. */
@@ -630,7 +630,7 @@ test_lifecycle(void)
 	assert(reply_bytes == 24U);
 	assert(stub_get32(stub_reply, 4U) == VK_SUCCESS);
 	assert(stub_get64(stub_reply, 16U) == FIXTURE_POOL);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_COMMAND_POOL, FIXTURE_POOL) != NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_COMMAND_POOL, FIXTURE_POOL) != NULL);
 
 	/* vkAllocateCommandBuffers of two primary buffers: [88][VK_SUCCESS][count][identities]. */
 	stub_wire_begin(&fixture_wire);
@@ -652,8 +652,8 @@ test_lifecycle(void)
 	assert(stub_get64(stub_reply, 8U) == 2U);
 	assert(stub_get64(stub_reply, 16U) == FIXTURE_CB0);
 	assert(stub_get64(stub_reply, 24U) == FIXTURE_CB1);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_COMMAND_BUFFER, FIXTURE_CB0) != NULL);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_COMMAND_BUFFER, FIXTURE_CB1) != NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_COMMAND_BUFFER, FIXTURE_CB0) != NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_COMMAND_BUFFER, FIXTURE_CB1) != NULL);
 
 	/* vkBeginCommandBuffer of cb0: [90][VK_SUCCESS]. */
 	stub_wire_begin(&fixture_wire);
@@ -842,8 +842,8 @@ test_lifecycle(void)
 	stub_put64(&fixture_wire, FIXTURE_CB1);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 4U);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_COMMAND_BUFFER, FIXTURE_CB0) == NULL);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_COMMAND_BUFFER, FIXTURE_CB1) == NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_COMMAND_BUFFER, FIXTURE_CB0) == NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_COMMAND_BUFFER, FIXTURE_CB1) == NULL);
 
 	/* Destroys the pool, the fence and the resources, and withdraws the pipeline. */
 	stub_wire_begin(&fixture_wire);
@@ -854,8 +854,8 @@ test_lifecycle(void)
 	fixture_destroy(FIXTURE_FREE_MEMORY, FIXTURE_MEMORY);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 5U * 4U);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_COMMAND_POOL, FIXTURE_POOL) == NULL);
-	drv_i915_object_remove(stub_vk, I915_VK_OBJ_PIPELINE, FIXTURE_PIPELINE);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_COMMAND_POOL, FIXTURE_POOL) == NULL);
+	drv_i915_object_remove(stub_session, I915_VK_OBJ_PIPELINE, FIXTURE_PIPELINE);
 
 	/* Closes the session: the draw state is released once and nothing stays allocated. */
 	stub_session_close();
@@ -921,7 +921,7 @@ test_recording_limits(void)
 	assert(reply_bytes == 8U);
 	assert(stub_get32(stub_reply, 4U) == (uint32_t)VK_ERROR_INITIALIZATION_FAILED);
 	assert(strstr(stub_log, "secondary command buffers are not implemented") != NULL);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_COMMAND_BUFFER, FIXTURE_CB1) == NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_COMMAND_BUFFER, FIXTURE_CB1) == NULL);
 
 	/*
 	 * Two hundred draws, more than three times the first list: the list
@@ -985,7 +985,7 @@ test_recording_limits(void)
 	fixture_destroy(FIXTURE_DESTROY_COMMAND_POOL, FIXTURE_POOL);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 4U);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_COMMAND_BUFFER, FIXTURE_CB0) == NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_COMMAND_BUFFER, FIXTURE_CB0) == NULL);
 
 	/* Closes the session; nothing stays allocated. */
 	stub_session_close();
@@ -1014,11 +1014,11 @@ test_indexed_dynamic(void)
 	fixture_storage_object.va = FIXTURE_STORAGE_VA;
 	stub_session_open(&fixture_storage_object);
 	fixture_resources();
-	buffer = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_BUFFER, FIXTURE_BUFFER);
+	buffer = drv_i915_object_lookup(stub_session, I915_VK_OBJ_BUFFER, FIXTURE_BUFFER);
 	assert(buffer != NULL);
 	memset(&fixture_pipeline, 0, sizeof(fixture_pipeline));
 	fixture_pipeline.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-	error = drv_i915_object_insert(stub_vk, I915_VK_OBJ_PIPELINE, FIXTURE_PIPELINE, &fixture_pipeline);
+	error = drv_i915_object_insert(stub_session, I915_VK_OBJ_PIPELINE, FIXTURE_PIPELINE, &fixture_pipeline);
 	assert(error == 0);
 	stub_wire_begin(&fixture_wire);
 	stub_put32(&fixture_wire, FIXTURE_CREATE_COMMAND_POOL);
@@ -1152,7 +1152,7 @@ test_indexed_dynamic(void)
 	fixture_destroy(FIXTURE_FREE_MEMORY, FIXTURE_MEMORY);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 4U * 4U);
-	drv_i915_object_remove(stub_vk, I915_VK_OBJ_PIPELINE, FIXTURE_PIPELINE);
+	drv_i915_object_remove(stub_session, I915_VK_OBJ_PIPELINE, FIXTURE_PIPELINE);
 
 	/* Closes the session; nothing stays allocated. */
 	stub_session_close();
@@ -2023,12 +2023,12 @@ test_uniform_bindings(void)
 	fixture_storage_object.va = FIXTURE_STORAGE_VA;
 	stub_session_open(&fixture_storage_object);
 	fixture_resources();
-	buffer = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_BUFFER, FIXTURE_BUFFER);
+	buffer = drv_i915_object_lookup(stub_session, I915_VK_OBJ_BUFFER, FIXTURE_BUFFER);
 	assert(buffer != NULL);
 	memset(&fixture_pipeline, 0, sizeof(fixture_pipeline));
 	fixture_pipeline.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 	fixture_pipeline.dynamic_blend_constants = 1;
-	error = drv_i915_object_insert(stub_vk, I915_VK_OBJ_PIPELINE, FIXTURE_PIPELINE, &fixture_pipeline);
+	error = drv_i915_object_insert(stub_session, I915_VK_OBJ_PIPELINE, FIXTURE_PIPELINE, &fixture_pipeline);
 	assert(error == 0);
 
 	/* A layout of dynamic buffers at bindings 3 and 0 and a plain one at 1; a pool; one set of it. */
@@ -2064,7 +2064,7 @@ test_uniform_bindings(void)
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 24U + 24U + 24U);
 	assert(stub_get32(stub_reply, 72U - 20U) == VK_SUCCESS);
-	dset = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_DESCRIPTOR_SET, FIXTURE_SET);
+	dset = drv_i915_object_lookup(stub_session, I915_VK_OBJ_DESCRIPTOR_SET, FIXTURE_SET);
 	assert(dset != NULL);
 
 	/* vkUpdateDescriptorSets: the three buffers, each a range of the vertex buffer. */
@@ -2180,7 +2180,7 @@ test_uniform_bindings(void)
 	 * pipeline.  XXX: no command frees a descriptor set (see the res
 	 * fixture); the fixture unpublishes and frees it itself.
 	 */
-	drv_i915_object_remove(stub_vk, I915_VK_OBJ_DESCRIPTOR_SET, FIXTURE_SET);
+	drv_i915_object_remove(stub_session, I915_VK_OBJ_DESCRIPTOR_SET, FIXTURE_SET);
 	kern_free(dset);
 	stub_wire_begin(&fixture_wire);
 	fixture_destroy(FIXTURE_DESTROY_COMMAND_POOL, FIXTURE_POOL);
@@ -2191,7 +2191,7 @@ test_uniform_bindings(void)
 	fixture_destroy(FIXTURE_FREE_MEMORY, FIXTURE_MEMORY);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 6U * 4U);
-	drv_i915_object_remove(stub_vk, I915_VK_OBJ_PIPELINE, FIXTURE_PIPELINE);
+	drv_i915_object_remove(stub_session, I915_VK_OBJ_PIPELINE, FIXTURE_PIPELINE);
 
 	/* Closes the session; nothing stays allocated. */
 	stub_session_close();

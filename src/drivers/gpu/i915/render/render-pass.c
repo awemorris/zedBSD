@@ -163,7 +163,7 @@ drv_i915_gfx_create_framebuffer(
 		for (index = 0U; index < info.attachmentCount; index++) {
 			/* The decoded handles are the wire's 64-bit identities, eight bytes apart. */
 			kern_memcpy(&view_id, (const char *)info.pAttachments + index * 8U, sizeof(view_id));
-			framebuffer->views[index] = drv_i915_object_lookup(session->vk, I915_VK_OBJ_IMAGE_VIEW, view_id);
+			framebuffer->views[index] = drv_i915_object_lookup(session, I915_VK_OBJ_IMAGE_VIEW, view_id);
 		}
 	}
 

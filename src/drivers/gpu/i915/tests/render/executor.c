@@ -692,50 +692,50 @@ static int
 i915_vkx_objects_publish(
 	struct i915_vkx *x)
 {
-	struct i915_render_device *vk;
+	struct i915_render_session *session;
 	int error;
 
 	/* Publishes the buffers, the pass, the framebuffer and the pipelines, stopping at the first refusal. */
-	vk = x->device->vk;
-	error = drv_i915_object_insert(vk, I915_VK_OBJ_BUFFER, I915_VKX_ID_VERTICES, &x->vertices);
+	session = x->render;
+	error = drv_i915_object_insert(session, I915_VK_OBJ_BUFFER, I915_VKX_ID_VERTICES, &x->vertices);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_BUFFER, I915_VKX_ID_INDICES, &x->indices);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_BUFFER, I915_VKX_ID_INDICES, &x->indices);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_BUFFER, I915_VKX_ID_SOURCE, &x->source);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_BUFFER, I915_VKX_ID_SOURCE, &x->source);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_BUFFER, I915_VKX_ID_DESTINATION, &x->destination);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_BUFFER, I915_VKX_ID_DESTINATION, &x->destination);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_RENDER_PASS, I915_VKX_ID_PASS, &x->pass);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_RENDER_PASS, I915_VKX_ID_PASS, &x->pass);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_FRAMEBUFFER, I915_VKX_ID_FRAMEBUFFER, &x->framebuffer);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_FRAMEBUFFER, I915_VKX_ID_FRAMEBUFFER, &x->framebuffer);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_PIPELINE, I915_VKX_ID_COLOR_PIPELINE, &x->color_pipeline);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_PIPELINE, I915_VKX_ID_COLOR_PIPELINE, &x->color_pipeline);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_PIPELINE, I915_VKX_ID_DYNAMIC_PIPELINE, &x->dynamic_pipeline);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_PIPELINE, I915_VKX_ID_DYNAMIC_PIPELINE, &x->dynamic_pipeline);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_PIPELINE, I915_VKX_ID_PUSH_PIPELINE, &x->push_pipeline);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_PIPELINE, I915_VKX_ID_PUSH_PIPELINE, &x->push_pipeline);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_IMAGE, I915_VKX_ID_TEXTURE, &x->texture);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_IMAGE, I915_VKX_ID_TEXTURE, &x->texture);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_IMAGE, I915_VKX_ID_CHAIN, &x->chain);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_IMAGE, I915_VKX_ID_CHAIN, &x->chain);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_PIPELINE, I915_VKX_ID_TEX_PIPELINE, &x->tex_pipeline);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_PIPELINE, I915_VKX_ID_TEX_PIPELINE, &x->tex_pipeline);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_NEAREST, &x->nearest_set);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_NEAREST, &x->nearest_set);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_FORCED, &x->forced_set);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_FORCED, &x->forced_set);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_BIAS, &x->bias_set);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_BIAS, &x->bias_set);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LATER, &x->later_set);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LATER, &x->later_set);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LINEAR, &x->linear_set);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LINEAR, &x->linear_set);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LOD5, &x->lod5_set);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LOD5, &x->lod5_set);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LOD5_HALF, &x->lod5_half_set);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LOD5_HALF, &x->lod5_half_set);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LOD6, &x->lod6_set);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LOD6, &x->lod6_set);
 
 	/* The teardown withdraws whatever was published, all of it or part of it. */
 	x->published = 1;
@@ -753,30 +753,30 @@ static void
 i915_vkx_objects_withdraw(
 	struct i915_vkx *x)
 {
-	struct i915_render_device *vk;
+	struct i915_render_session *session;
 
 	/* Removes each identity from the table. */
-	vk = x->device->vk;
-	drv_i915_object_remove(vk, I915_VK_OBJ_BUFFER, I915_VKX_ID_VERTICES);
-	drv_i915_object_remove(vk, I915_VK_OBJ_BUFFER, I915_VKX_ID_INDICES);
-	drv_i915_object_remove(vk, I915_VK_OBJ_BUFFER, I915_VKX_ID_SOURCE);
-	drv_i915_object_remove(vk, I915_VK_OBJ_BUFFER, I915_VKX_ID_DESTINATION);
-	drv_i915_object_remove(vk, I915_VK_OBJ_RENDER_PASS, I915_VKX_ID_PASS);
-	drv_i915_object_remove(vk, I915_VK_OBJ_FRAMEBUFFER, I915_VKX_ID_FRAMEBUFFER);
-	drv_i915_object_remove(vk, I915_VK_OBJ_PIPELINE, I915_VKX_ID_COLOR_PIPELINE);
-	drv_i915_object_remove(vk, I915_VK_OBJ_PIPELINE, I915_VKX_ID_DYNAMIC_PIPELINE);
-	drv_i915_object_remove(vk, I915_VK_OBJ_PIPELINE, I915_VKX_ID_PUSH_PIPELINE);
-	drv_i915_object_remove(vk, I915_VK_OBJ_IMAGE, I915_VKX_ID_TEXTURE);
-	drv_i915_object_remove(vk, I915_VK_OBJ_IMAGE, I915_VKX_ID_CHAIN);
-	drv_i915_object_remove(vk, I915_VK_OBJ_PIPELINE, I915_VKX_ID_TEX_PIPELINE);
-	drv_i915_object_remove(vk, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_NEAREST);
-	drv_i915_object_remove(vk, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_FORCED);
-	drv_i915_object_remove(vk, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_BIAS);
-	drv_i915_object_remove(vk, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LATER);
-	drv_i915_object_remove(vk, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LINEAR);
-	drv_i915_object_remove(vk, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LOD5);
-	drv_i915_object_remove(vk, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LOD5_HALF);
-	drv_i915_object_remove(vk, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LOD6);
+	session = x->render;
+	drv_i915_object_remove(session, I915_VK_OBJ_BUFFER, I915_VKX_ID_VERTICES);
+	drv_i915_object_remove(session, I915_VK_OBJ_BUFFER, I915_VKX_ID_INDICES);
+	drv_i915_object_remove(session, I915_VK_OBJ_BUFFER, I915_VKX_ID_SOURCE);
+	drv_i915_object_remove(session, I915_VK_OBJ_BUFFER, I915_VKX_ID_DESTINATION);
+	drv_i915_object_remove(session, I915_VK_OBJ_RENDER_PASS, I915_VKX_ID_PASS);
+	drv_i915_object_remove(session, I915_VK_OBJ_FRAMEBUFFER, I915_VKX_ID_FRAMEBUFFER);
+	drv_i915_object_remove(session, I915_VK_OBJ_PIPELINE, I915_VKX_ID_COLOR_PIPELINE);
+	drv_i915_object_remove(session, I915_VK_OBJ_PIPELINE, I915_VKX_ID_DYNAMIC_PIPELINE);
+	drv_i915_object_remove(session, I915_VK_OBJ_PIPELINE, I915_VKX_ID_PUSH_PIPELINE);
+	drv_i915_object_remove(session, I915_VK_OBJ_IMAGE, I915_VKX_ID_TEXTURE);
+	drv_i915_object_remove(session, I915_VK_OBJ_IMAGE, I915_VKX_ID_CHAIN);
+	drv_i915_object_remove(session, I915_VK_OBJ_PIPELINE, I915_VKX_ID_TEX_PIPELINE);
+	drv_i915_object_remove(session, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_NEAREST);
+	drv_i915_object_remove(session, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_FORCED);
+	drv_i915_object_remove(session, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_BIAS);
+	drv_i915_object_remove(session, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LATER);
+	drv_i915_object_remove(session, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LINEAR);
+	drv_i915_object_remove(session, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LOD5);
+	drv_i915_object_remove(session, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LOD5_HALF);
+	drv_i915_object_remove(session, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKX_ID_SET_LOD6);
 	x->published = 0;
 }
 

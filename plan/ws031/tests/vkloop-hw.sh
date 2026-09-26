@@ -33,8 +33,8 @@
 #                                                      usual, so a long scenario ends before the application runs
 #        plan/ws031/tests/vkloop-hw.sh "test <scenario> -DFOO=1"             (flags after the scenario)
 #        CAPTURE=zdesktop plan/ws031/tests/vkloop-hw.sh zdesktop
-#                                                      WS035 p066: zdesktop (zwl --glass at 1920x1080 and three wl_shm
-#                                                      windows; services in plan/ws031/tests/zdesktop/)
+#                                                      WS035 p066: zdesktop (zwl --glass at 1920x1080, two wl_shm windows and mview --windowed
+#                                                      on top; services in plan/ws031/tests/zdesktop/)
 #                                                      built with plan/ws031/tests/config-zdesktop-hw.mk into build/resident-zdesktop;
 #                                                      the font and the wallpaper come from build/ws035-fonts/ and build/ws035-wallpaper/
 #                                                      (not in git); the capture harness docks mview and opens Wiseview
@@ -165,9 +165,14 @@ if [ "$MVIEW_RUN" = 1 ]; then
 fi
 if [ "$ZDESKTOP_RUN" = 1 ]; then
 	# the compositor in Wiseman Mode and three clients; the font and the wallpaper are not in git
-	FILES="--file /etc/service.d/vkwait1=$WAIT1 --file /etc/service.d/poweroff=plan/ws031/tests/poweroff"
-	for n in zwl wlwait wlshm1 mwait wlshm2 mwait2 wlshm3 vkwait2; do
+	FILES="--file /etc/service.d/vkwait1=$WAIT1"
+	for n in zwl wlwait wlshm1 mwait wlshm2 mwait2 mview1 vkwait2 poweroff; do
 		FILES="$FILES --file /etc/service.d/$n=plan/ws031/tests/zdesktop/$n"
+	done
+	# the compositor's and the viewer's output and the kernel's messages go to /var/log, read afterwards
+	# from the disk image with plan/ws031/tests/ufs-cat.py (not from the serial log)
+	for n in run-zwl.sh run-mview.sh run-poweroff.sh; do
+		FILES="$FILES --file /etc/zdesktop/$n=plan/ws031/tests/zdesktop/$n"
 	done
 	FILES="$FILES --file /usr/share/fonts/zdesktop.ttf=build/ws035-fonts/Inter.ttf"
 	FILES="$FILES --file /usr/share/zdesktop/wallpaper.ppm=build/ws035-wallpaper/wallpaper-1080.ppm"
@@ -219,6 +224,12 @@ else
 	ssh $I915_HOST 'cd ~/bigbang && rm -f run-parity-serial.log && ./run-parity-vk.sh >/dev/null 2>&1; cp run-parity-serial.log vkloop-last.log'
 fi
 scp -q $I915_HOST:bigbang/vkloop-last.log /tmp/vkloop-last.log
+if [ "$ZDESKTOP_RUN" = 1 ]; then
+	# the guest's own logs, from its disk
+	scp -q plan/ws031/tests/ufs-cat.py tools/build/check-ufs-image.py $I915_HOST:bigbang/ || exit 1
+	ssh $I915_HOST 'python3 bigbang/ufs-cat.py bigbang/guest-parity.img /var/log/zwl.log /var/log/mview.log /var/log/dmesg.log' > /tmp/zdesktop-guest-logs.txt 2>&1
+	echo "--- guest logs: /tmp/zdesktop-guest-logs.txt ($(wc -l < /tmp/zdesktop-guest-logs.txt) lines)"
+fi
 if [ -n "$SCENARIO" ]; then
 	echo "--- test $SCENARIO"
 	# the runner's line, the suite tally and skips, and every verdict line a scenario logs

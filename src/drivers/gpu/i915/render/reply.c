@@ -101,7 +101,7 @@ drv_i915_gfx_create_reply(
 	 * published, or that was made for a refused command, is not kept.
 	 */
 	if (error == 0) {
-		error = drv_i915_object_insert(session->vk, kind, identity, object);
+		error = drv_i915_object_insert(session, kind, identity, object);
 		if (error != 0)
 			kern_free(object);
 	} else if (object != NULL) {

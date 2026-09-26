@@ -175,7 +175,7 @@ i915_instance_create(
 		return EINVAL;
 
 	/* Remembers that the instance exists. */
-	error = drv_i915_object_insert(session->vk, I915_VK_OBJ_INSTANCE, identity, &i915_instance_token);
+	error = drv_i915_object_insert(session, I915_VK_OBJ_INSTANCE, identity, &i915_instance_token);
 	if (error != 0)
 		return error;
 
@@ -232,7 +232,7 @@ i915_instance_enumerate_physical_devices(
 			return EINVAL;
 
 		/* A failure to remember the identity is not reported; the reply is the same. */
-		(void)drv_i915_object_insert(session->vk, I915_VK_OBJ_PHYSICAL_DEVICE, identity, &i915_instance_token);
+		(void)drv_i915_object_insert(session, I915_VK_OBJ_PHYSICAL_DEVICE, identity, &i915_instance_token);
 		drv_i915_wire_reply_u64(reply, identity);
 	}
 
@@ -735,7 +735,7 @@ i915_instance_create_device(
 		return EINVAL;
 
 	/* Remembers that the device exists. */
-	error = drv_i915_object_insert(session->vk, I915_VK_OBJ_DEVICE, identity, &i915_instance_token);
+	error = drv_i915_object_insert(session, I915_VK_OBJ_DEVICE, identity, &i915_instance_token);
 	if (error != 0)
 		return error;
 
@@ -782,7 +782,7 @@ i915_instance_get_device_queue2(
 		return EINVAL;
 
 	/* Remembers the queue; a failure to remember it is not reported, and the reply is the same. */
-	(void)drv_i915_object_insert(session->vk, I915_VK_OBJ_QUEUE, identity, &i915_instance_token);
+	(void)drv_i915_object_insert(session, I915_VK_OBJ_QUEUE, identity, &i915_instance_token);
 
 	/* Replies the present word and the identity. */
 	drv_i915_wire_reply_u64(reply, 1U);
@@ -808,7 +808,7 @@ i915_instance_destroy(
 		return EINVAL;
 
 	/* Forgets the object; the token it named is not freed. */
-	drv_i915_object_remove(session->vk, kind, identity);
+	drv_i915_object_remove(session, kind, identity);
 
 	/* Succeeded: the identity is forgotten. */
 	return 0;

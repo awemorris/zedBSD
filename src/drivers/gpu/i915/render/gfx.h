@@ -109,6 +109,9 @@ struct i915_gfx_memory {
 	/* The executor device the allocation belongs to. */
 	struct i915_render_device *vk;
 
+	/* The open of the node that made it; only a blob of the same open is its storage. */
+	struct i915_session *gpu;
+
 	/* The wire id; the blob names the allocation by it as its blob_id. */
 	uint64_t identity;
 
@@ -621,6 +624,7 @@ int drv_i915_gfx_rec_dispatch(struct i915_render_session *session, uint32_t opco
  * address space, or 0 when it has no storage (memory.c).
  */
 uint8_t *drv_i915_gfx_memory_cpu(struct i915_gfx_memory *memory, uint64_t offset, uint64_t bytes);
+void drv_i915_gfx_memory_forget(struct i915_render_session *session);
 uint64_t drv_i915_gfx_memory_va(struct i915_gfx_memory *memory, uint64_t offset);
 
 /*

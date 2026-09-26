@@ -1,0 +1,6 @@
+type=oneshot
+command=/bin/sh
+arguments=/etc/zdesktop/run-poweroff.sh
+after=vkwait2
+restart=no
+required=NO

@@ -171,6 +171,11 @@ import_image(
 	    requirements.size > image->allocation_bytes ||
 	    layout.offset != image->offset ||
 	    layout.rowPitch != image->stride) {
+		printf("ZWL VULKAN_IMPORT_LAYOUT types=0x%x type=%u size=%llu bytes=%llu offset=%llu/%llu pitch=%llu/%u\n",
+		    requirements.memoryTypeBits, image->memory_type,
+		    (unsigned long long)requirements.size, (unsigned long long)image->allocation_bytes,
+		    (unsigned long long)layout.offset, (unsigned long long)image->offset,
+		    (unsigned long long)layout.rowPitch, image->stride);
 		close(descriptor);
 		return VK_ERROR_FORMAT_NOT_SUPPORTED;
 	}

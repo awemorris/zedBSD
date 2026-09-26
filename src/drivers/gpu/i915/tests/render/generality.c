@@ -730,33 +730,33 @@ static int
 i915_vke2_objects_publish(
 	struct i915_vke2 *x)
 {
-	struct i915_render_device *vk;
+	struct i915_render_session *session;
 	uint32_t index;
 	int error;
 
 	/* Publishes the buffers, the pass, the framebuffer and the set, stopping at the first refusal. */
-	vk = x->device->vk;
-	error = drv_i915_object_insert(vk, I915_VK_OBJ_BUFFER, I915_VKE2_ID_QUADS, &x->quads);
+	session = x->render;
+	error = drv_i915_object_insert(session, I915_VK_OBJ_BUFFER, I915_VKE2_ID_QUADS, &x->quads);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_BUFFER, I915_VKE2_ID_SEEDED, &x->seeded);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_BUFFER, I915_VKE2_ID_SEEDED, &x->seeded);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_BUFFER, I915_VKE2_ID_WIDE, &x->wide);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_BUFFER, I915_VKE2_ID_WIDE, &x->wide);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_BUFFER, I915_VKE2_ID_INDICES, &x->indices);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_BUFFER, I915_VKE2_ID_INDICES, &x->indices);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_BUFFER, I915_VKE2_ID_MATRICES, &x->matrices);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_BUFFER, I915_VKE2_ID_MATRICES, &x->matrices);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_BUFFER, I915_VKE2_ID_PLACEMENT, &x->placement);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_BUFFER, I915_VKE2_ID_PLACEMENT, &x->placement);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_RENDER_PASS, I915_VKE2_ID_PASS, &x->pass);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_RENDER_PASS, I915_VKE2_ID_PASS, &x->pass);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_FRAMEBUFFER, I915_VKE2_ID_FRAMEBUFFER, &x->framebuffer);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_FRAMEBUFFER, I915_VKE2_ID_FRAMEBUFFER, &x->framebuffer);
 	if (error == 0)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKE2_ID_MATRIX_SET, &x->matrix_set);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKE2_ID_MATRIX_SET, &x->matrix_set);
 
 	/* Publishes the pipelines, one identity each. */
 	for (index = 0U; error == 0 && index < I915_VKE2_PIPELINES; index++)
-		error = drv_i915_object_insert(vk, I915_VK_OBJ_PIPELINE, I915_VKE2_ID_PIPELINE + index, &x->pipelines[index]);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_PIPELINE, I915_VKE2_ID_PIPELINE + index, &x->pipelines[index]);
 
 	/* The teardown withdraws whatever was published, all of it or part of it. */
 	x->published = 1;
@@ -774,22 +774,22 @@ static void
 i915_vke2_objects_withdraw(
 	struct i915_vke2 *x)
 {
-	struct i915_render_device *vk;
+	struct i915_render_session *session;
 	uint32_t index;
 
 	/* Removes each identity from the table. */
-	vk = x->device->vk;
-	drv_i915_object_remove(vk, I915_VK_OBJ_BUFFER, I915_VKE2_ID_QUADS);
-	drv_i915_object_remove(vk, I915_VK_OBJ_BUFFER, I915_VKE2_ID_SEEDED);
-	drv_i915_object_remove(vk, I915_VK_OBJ_BUFFER, I915_VKE2_ID_WIDE);
-	drv_i915_object_remove(vk, I915_VK_OBJ_BUFFER, I915_VKE2_ID_INDICES);
-	drv_i915_object_remove(vk, I915_VK_OBJ_BUFFER, I915_VKE2_ID_MATRICES);
-	drv_i915_object_remove(vk, I915_VK_OBJ_BUFFER, I915_VKE2_ID_PLACEMENT);
-	drv_i915_object_remove(vk, I915_VK_OBJ_RENDER_PASS, I915_VKE2_ID_PASS);
-	drv_i915_object_remove(vk, I915_VK_OBJ_FRAMEBUFFER, I915_VKE2_ID_FRAMEBUFFER);
-	drv_i915_object_remove(vk, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKE2_ID_MATRIX_SET);
+	session = x->render;
+	drv_i915_object_remove(session, I915_VK_OBJ_BUFFER, I915_VKE2_ID_QUADS);
+	drv_i915_object_remove(session, I915_VK_OBJ_BUFFER, I915_VKE2_ID_SEEDED);
+	drv_i915_object_remove(session, I915_VK_OBJ_BUFFER, I915_VKE2_ID_WIDE);
+	drv_i915_object_remove(session, I915_VK_OBJ_BUFFER, I915_VKE2_ID_INDICES);
+	drv_i915_object_remove(session, I915_VK_OBJ_BUFFER, I915_VKE2_ID_MATRICES);
+	drv_i915_object_remove(session, I915_VK_OBJ_BUFFER, I915_VKE2_ID_PLACEMENT);
+	drv_i915_object_remove(session, I915_VK_OBJ_RENDER_PASS, I915_VKE2_ID_PASS);
+	drv_i915_object_remove(session, I915_VK_OBJ_FRAMEBUFFER, I915_VKE2_ID_FRAMEBUFFER);
+	drv_i915_object_remove(session, I915_VK_OBJ_DESCRIPTOR_SET, I915_VKE2_ID_MATRIX_SET);
 	for (index = 0U; index < I915_VKE2_PIPELINES; index++)
-		drv_i915_object_remove(vk, I915_VK_OBJ_PIPELINE, I915_VKE2_ID_PIPELINE + index);
+		drv_i915_object_remove(session, I915_VK_OBJ_PIPELINE, I915_VKE2_ID_PIPELINE + index);
 	x->published = 0;
 }
 

@@ -328,7 +328,7 @@ i915_command_pool_create(
 	if (pool == NULL) {
 		error = ENOMEM;
 	} else {
-		error = drv_i915_object_insert(session->vk, I915_VK_OBJ_COMMAND_POOL, identity, pool);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_COMMAND_POOL, identity, pool);
 		if (error != 0)
 			kern_free(pool);
 	}
@@ -364,7 +364,7 @@ i915_command_buffer_release(
 	}
 
 	/* Withdraws the identity, then frees the operation list and the buffer. */
-	drv_i915_object_remove(session->vk, I915_VK_OBJ_COMMAND_BUFFER, cmdbuf->identity);
+	drv_i915_object_remove(session, I915_VK_OBJ_COMMAND_BUFFER, cmdbuf->identity);
 	kern_free(cmdbuf->ops);
 	kern_free(cmdbuf);
 }
@@ -386,7 +386,7 @@ i915_command_pool_destroy(
 		return EINVAL;
 
 	/* An unknown pool has nothing to destroy. */
-	pool = drv_i915_object_lookup(session->vk, I915_VK_OBJ_COMMAND_POOL, identity);
+	pool = drv_i915_object_lookup(session, I915_VK_OBJ_COMMAND_POOL, identity);
 	if (pool == NULL)
 		return 0;
 
@@ -395,7 +395,7 @@ i915_command_pool_destroy(
 		i915_command_buffer_release(session, pool->buffers);
 
 	/* Withdraws the pool's identity and frees it. */
-	drv_i915_object_remove(session->vk, I915_VK_OBJ_COMMAND_POOL, identity);
+	drv_i915_object_remove(session, I915_VK_OBJ_COMMAND_POOL, identity);
 	kern_free(pool);
 
 	/* Succeeded: the pool and its buffers are gone. */
@@ -422,7 +422,7 @@ i915_command_pool_reset(
 		return EINVAL;
 
 	/* Empties the recording of every buffer of the pool. */
-	pool = drv_i915_object_lookup(session->vk, I915_VK_OBJ_COMMAND_POOL, identity);
+	pool = drv_i915_object_lookup(session, I915_VK_OBJ_COMMAND_POOL, identity);
 	cmdbuf = NULL;
 	if (pool != NULL)
 		cmdbuf = pool->buffers;
@@ -481,7 +481,7 @@ i915_command_buffers_allocate(
 		return EINVAL;
 
 	/* Finds the pool, and refuses secondary command buffers. */
-	pool = drv_i915_object_lookup(session->vk, I915_VK_OBJ_COMMAND_POOL, (uint64_t)(uintptr_t)info.commandPool);
+	pool = drv_i915_object_lookup(session, I915_VK_OBJ_COMMAND_POOL, (uint64_t)(uintptr_t)info.commandPool);
 	error = 0;
 	if (pool == NULL) {
 		error = EINVAL;
@@ -502,7 +502,7 @@ i915_command_buffers_allocate(
 		/* Publishes it under its identity. */
 		cmdbuf->pool = pool;
 		cmdbuf->identity = identities[index];
-		error = drv_i915_object_insert(session->vk, I915_VK_OBJ_COMMAND_BUFFER, identities[index], cmdbuf);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_COMMAND_BUFFER, identities[index], cmdbuf);
 		if (error != 0) {
 			kern_free(cmdbuf);
 			break;
@@ -548,7 +548,7 @@ i915_command_buffers_free(
 	/* Frees every named buffer that exists. */
 	for (index = 0U; index < count; index++) {
 		identity = drv_i915_wire_read_u64(reader);
-		cmdbuf = drv_i915_object_lookup(session->vk, I915_VK_OBJ_COMMAND_BUFFER, identity);
+		cmdbuf = drv_i915_object_lookup(session, I915_VK_OBJ_COMMAND_BUFFER, identity);
 		if (reader->error == 0 && cmdbuf != NULL)
 			i915_command_buffer_release(session, cmdbuf);
 	}
@@ -577,7 +577,7 @@ i915_command_buffer_begin(
 	/* Decodes the buffer and the begin info; the begin info is not acted on. */
 	kern_memset(&info, 0, sizeof(info));
 	identity = drv_i915_wire_read_u64(reader);
-	cmdbuf = drv_i915_object_lookup(session->vk, I915_VK_OBJ_COMMAND_BUFFER, identity);
+	cmdbuf = drv_i915_object_lookup(session, I915_VK_OBJ_COMMAND_BUFFER, identity);
 	present = drv_i915_wire_read_u64(reader);
 	if (present != 0U)
 		i915_vkc_dec_VkCommandBufferBeginInfo(reader, &session->arena, &info);
@@ -614,7 +614,7 @@ i915_command_buffer_reset(
 	/* Decodes the buffer; the flags are not acted on (nothing is held beyond the list). */
 	identity = drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u32(reader);
-	cmdbuf = drv_i915_object_lookup(session->vk, I915_VK_OBJ_COMMAND_BUFFER, identity);
+	cmdbuf = drv_i915_object_lookup(session, I915_VK_OBJ_COMMAND_BUFFER, identity);
 	if (reader->error != 0)
 		return EINVAL;
 
@@ -647,7 +647,7 @@ i915_command_buffer_end(
 
 	/* Decodes the buffer. */
 	identity = drv_i915_wire_read_u64(reader);
-	cmdbuf = drv_i915_object_lookup(session->vk, I915_VK_OBJ_COMMAND_BUFFER, identity);
+	cmdbuf = drv_i915_object_lookup(session, I915_VK_OBJ_COMMAND_BUFFER, identity);
 	if (reader->error != 0)
 		return EINVAL;
 
@@ -785,10 +785,10 @@ i915_record_image_copy(
 
 	/* Decodes the two images and the number of regions, at most sixteen. */
 	identity = drv_i915_wire_read_u64(reader);
-	src = drv_i915_object_lookup(session->vk, I915_VK_OBJ_IMAGE, identity);
+	src = drv_i915_object_lookup(session, I915_VK_OBJ_IMAGE, identity);
 	(void)drv_i915_wire_read_u32(reader);
 	identity = drv_i915_wire_read_u64(reader);
-	dst = drv_i915_object_lookup(session->vk, I915_VK_OBJ_IMAGE, identity);
+	dst = drv_i915_object_lookup(session, I915_VK_OBJ_IMAGE, identity);
 	(void)drv_i915_wire_read_u32(reader);
 	(void)drv_i915_wire_read_u32(reader);
 	count = drv_i915_wire_read_u64(reader);
@@ -855,7 +855,7 @@ i915_record_clear_image(
 
 	/* Decodes the image. */
 	identity = drv_i915_wire_read_u64(reader);
-	image = drv_i915_object_lookup(session->vk, I915_VK_OBJ_IMAGE, identity);
+	image = drv_i915_object_lookup(session, I915_VK_OBJ_IMAGE, identity);
 	(void)drv_i915_wire_read_u32(reader);
 
 	/* Decodes the four words of the clear colour: the union's tag, then an array of four. */
@@ -984,8 +984,8 @@ i915_record_buffer_image_copy(
 		return EINVAL;
 
 	/* Resolves the two objects. */
-	buffer = drv_i915_object_lookup(session->vk, I915_VK_OBJ_BUFFER, buffer_id);
-	image = drv_i915_object_lookup(session->vk, I915_VK_OBJ_IMAGE, image_id);
+	buffer = drv_i915_object_lookup(session, I915_VK_OBJ_BUFFER, buffer_id);
+	image = drv_i915_object_lookup(session, I915_VK_OBJ_IMAGE, image_id);
 
 	/* The direction decides the operation. */
 	kind = I915_GFX_OP_COPY_IMAGE_TO_BUFFER;
@@ -1045,9 +1045,9 @@ i915_record_begin_pass(
 	(void)drv_i915_wire_read_u32(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	identity = drv_i915_wire_read_u64(reader);
-	op->u.begin.pass = drv_i915_object_lookup(session->vk, I915_VK_OBJ_RENDER_PASS, identity);
+	op->u.begin.pass = drv_i915_object_lookup(session, I915_VK_OBJ_RENDER_PASS, identity);
 	identity = drv_i915_wire_read_u64(reader);
-	op->u.begin.framebuffer = drv_i915_object_lookup(session->vk, I915_VK_OBJ_FRAMEBUFFER, identity);
+	op->u.begin.framebuffer = drv_i915_object_lookup(session, I915_VK_OBJ_FRAMEBUFFER, identity);
 	i915_vkc_dec_VkRect2D(reader, &session->arena, &area);
 
 	/* Decodes the number of clear values, at most sixty-four. */
@@ -1199,7 +1199,7 @@ i915_record_bind_vertex(
 		ops[index] = i915_command_op(cmdbuf, I915_GFX_OP_BIND_VERTEX_BUFFER);
 		ops[index]->u.vertex.binding = first + (uint32_t)index;
 		identity = drv_i915_wire_read_u64(reader);
-		ops[index]->u.vertex.buffer = drv_i915_object_lookup(session->vk, I915_VK_OBJ_BUFFER, identity);
+		ops[index]->u.vertex.buffer = drv_i915_object_lookup(session, I915_VK_OBJ_BUFFER, identity);
 	}
 
 	/* Refuses an offset array of another length. */
@@ -1256,7 +1256,7 @@ i915_record_bind_descriptor_sets(
 		op = i915_command_op(cmdbuf, I915_GFX_OP_BIND_DESCRIPTOR_SET);
 		op->u.descriptor.set = first + (uint32_t)index;
 		identity = drv_i915_wire_read_u64(reader);
-		op->u.descriptor.dset = drv_i915_object_lookup(session->vk, I915_VK_OBJ_DESCRIPTOR_SET, identity);
+		op->u.descriptor.dset = drv_i915_object_lookup(session, I915_VK_OBJ_DESCRIPTOR_SET, identity);
 		ops[index] = op;
 	}
 
@@ -1434,7 +1434,7 @@ i915_record_bind_index(
 	/* Records the buffer, the offset and the index type. */
 	op = i915_command_op(cmdbuf, I915_GFX_OP_BIND_INDEX_BUFFER);
 	identity = drv_i915_wire_read_u64(reader);
-	op->u.index.buffer = drv_i915_object_lookup(session->vk, I915_VK_OBJ_BUFFER, identity);
+	op->u.index.buffer = drv_i915_object_lookup(session, I915_VK_OBJ_BUFFER, identity);
 	op->u.index.offset = drv_i915_wire_read_u64(reader);
 	op->u.index.type = drv_i915_wire_read_u32(reader);
 
@@ -1557,9 +1557,9 @@ i915_record_copy_buffer(
 
 	/* Decodes the two buffers and the number of regions, at most as many as a buffer records. */
 	identity = drv_i915_wire_read_u64(reader);
-	src = drv_i915_object_lookup(session->vk, I915_VK_OBJ_BUFFER, identity);
+	src = drv_i915_object_lookup(session, I915_VK_OBJ_BUFFER, identity);
 	identity = drv_i915_wire_read_u64(reader);
-	dst = drv_i915_object_lookup(session->vk, I915_VK_OBJ_BUFFER, identity);
+	dst = drv_i915_object_lookup(session, I915_VK_OBJ_BUFFER, identity);
 	(void)drv_i915_wire_read_u32(reader);
 	count = drv_i915_wire_read_u64(reader);
 	if (reader->error != 0 || count > I915_GFX_MAX_OPS)
@@ -1599,7 +1599,7 @@ i915_record_command(
 
 	/* Decodes the command buffer the recording names. */
 	identity = drv_i915_wire_read_u64(reader);
-	cmdbuf = drv_i915_object_lookup(session->vk, I915_VK_OBJ_COMMAND_BUFFER, identity);
+	cmdbuf = drv_i915_object_lookup(session, I915_VK_OBJ_COMMAND_BUFFER, identity);
 	if (reader->error != 0)
 		return EINVAL;
 
@@ -1610,7 +1610,7 @@ i915_record_command(
 		op = i915_command_op(cmdbuf, I915_GFX_OP_BIND_PIPELINE);
 		(void)drv_i915_wire_read_u32(reader);
 		identity = drv_i915_wire_read_u64(reader);
-		op->u.pipeline = drv_i915_object_lookup(session->vk, I915_VK_OBJ_PIPELINE, identity);
+		op->u.pipeline = drv_i915_object_lookup(session, I915_VK_OBJ_PIPELINE, identity);
 		break;
 	case 94U:
 		/* vkCmdSetViewport */
@@ -2529,7 +2529,7 @@ i915_queue_submit(
 		/* Keeps every known command buffer while there is room. */
 		for (item = 0U; item < count; item++) {
 			identity = drv_i915_wire_read_u64(reader);
-			cmdbuf = drv_i915_object_lookup(session->vk, I915_VK_OBJ_COMMAND_BUFFER, identity);
+			cmdbuf = drv_i915_object_lookup(session, I915_VK_OBJ_COMMAND_BUFFER, identity);
 			if (cmdbuf != NULL && total < I915_GFX_MAX_SUBMITTED) {
 				cmdbufs[total] = cmdbuf;
 				total++;
@@ -2545,7 +2545,7 @@ i915_queue_submit(
 
 	/* Decodes the fence. */
 	identity = drv_i915_wire_read_u64(reader);
-	fence = drv_i915_object_lookup(session->vk, I915_VK_OBJ_FENCE, identity);
+	fence = drv_i915_object_lookup(session, I915_VK_OBJ_FENCE, identity);
 	if (reader->error != 0)
 		return EINVAL;
 

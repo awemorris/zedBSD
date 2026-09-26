@@ -343,7 +343,7 @@ i915_blob_create(
 	 * stands alone and its creation still succeeds.
 	 */
 	if (request->blob_id != 0U && device->vk != NULL) {
-		error = drv_i915_render_blob_attach(device->vk, request->blob_id, object);
+		error = drv_i915_render_blob_attach(device->vk, session, request->blob_id, object);
 		if (error != 0) {
 			kern_logf("i915: vk: XXX blob_id %llu is not the storage of any allocation (error %d); the blob stands alone\n",
 			    (unsigned long long)request->blob_id,

@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q465（ws035-p066 cleared。zdesktop を Intel GPU で）
+Last finished Queue: q466（ws035-p067 cleared。zdesktop で mview を i915 で）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q465（2026-09-26）
+## 最新: q443〜q466（2026-09-26）
+
+[q466](queue-q466.md): ws035-p067 cleared。5330 の i915（VFIO）で zdesktop に mview（Vulkan の client）の窓を合成し、ドッキング（1920x1042 で描き直し）と Wiseview を capture で確認。i915 の実行器の object 表と blob の対応を session ごとの key に（wire の id が process の間で衝突していた）、allocation の import、libvulkan は allocation の共有の無い node で画像の import へ。F-022 を promoted。
 
 [q465](queue-q465.md): ws035-p066 cleared。5330（10.0.30.3）の i915 を VFIO で渡した実機の GPU で Wiseman Mode（壁紙・すりガラス・文字・浮いたタイトルバー・ドッキング・Wiseview）を capture で確認（wl_shm の窓）。zwl の shader を native compiler に合わせ、fence の fd 無し・descriptor set の再利用・triangle list、libvulkan は画像共有だけの node で外部 memory、i915 の GGTT の窓を 64 MiB・1 GiB に。GPU の client の窓は F-022。
 

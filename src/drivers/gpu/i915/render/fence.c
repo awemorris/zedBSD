@@ -178,7 +178,7 @@ i915_fence_create(
 			fence->signaled = 1U;
 
 		/* Publishes the fence under the client's identity. */
-		error = drv_i915_object_insert(session->vk, I915_VK_OBJ_FENCE, handle, fence);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_FENCE, handle, fence);
 		if (error != 0)
 			drv_i915_fence_free(fence);
 	}
@@ -221,9 +221,9 @@ i915_fence_destroy(
 		return EINVAL;
 
 	/* Unpublishes and frees a fence the session knows; an unknown one is ignored. */
-	fence = drv_i915_object_lookup(session->vk, I915_VK_OBJ_FENCE, handle);
+	fence = drv_i915_object_lookup(session, I915_VK_OBJ_FENCE, handle);
 	if (fence != NULL) {
-		drv_i915_object_remove(session->vk, I915_VK_OBJ_FENCE, handle);
+		drv_i915_object_remove(session, I915_VK_OBJ_FENCE, handle);
 		drv_i915_fence_free(fence);
 	}
 
@@ -259,7 +259,7 @@ i915_fence_reset(
 	/* Clears every named fence the session knows. */
 	for (index = 0U; index < count; index++) {
 		handle = drv_i915_wire_read_handle(reader);
-		fence = drv_i915_object_lookup(session->vk, I915_VK_OBJ_FENCE, handle);
+		fence = drv_i915_object_lookup(session, I915_VK_OBJ_FENCE, handle);
 		if (fence != NULL)
 			fence->signaled = 0U;
 	}
@@ -294,7 +294,7 @@ i915_fence_status(
 		return EINVAL;
 
 	/* An unknown fence is reported on the wire. */
-	fence = drv_i915_object_lookup(session->vk, I915_VK_OBJ_FENCE, handle);
+	fence = drv_i915_object_lookup(session, I915_VK_OBJ_FENCE, handle);
 	if (fence == NULL) {
 		drv_i915_wire_reply_u32(reply, I915_FENCE_VK_FAILED);
 		return 0;

@@ -164,7 +164,7 @@ test_fence(void)
 	assert(status == (uint32_t)VK_ERROR_INITIALIZATION_FAILED);
 
 	/* A finished submission signals its fence (render/command.c calls this). */
-	fence = drv_i915_object_lookup(stub_vk, I915_VK_OBJ_FENCE, FIXTURE_FENCE);
+	fence = drv_i915_object_lookup(stub_session, I915_VK_OBJ_FENCE, FIXTURE_FENCE);
 	assert(fence != NULL);
 	drv_i915_fence_signal(fence);
 	status = fixture_fence_status(FIXTURE_FENCE);
@@ -193,7 +193,7 @@ test_fence(void)
 	fixture_create_fence(FIXTURE_UNKNOWN, FIXTURE_FENCE_CREATE_INFO + 1U, 0U);
 	error = stub_execute(&fixture_wire, &reply_bytes);
 	assert(error == EINVAL);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_FENCE, FIXTURE_UNKNOWN) == NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_FENCE, FIXTURE_UNKNOWN) == NULL);
 
 	/* vkDestroyFence forgets both fences; the reply is the echoed opcode alone. */
 	stub_wire_begin(&fixture_wire);
@@ -203,8 +203,8 @@ test_fence(void)
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 12U);
 	assert(stub_get32(stub_reply, 0U) == FIXTURE_DESTROY_FENCE);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_FENCE, FIXTURE_FENCE) == NULL);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_FENCE, FIXTURE_SIGNALED) == NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_FENCE, FIXTURE_FENCE) == NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_FENCE, FIXTURE_SIGNALED) == NULL);
 
 	/* Closes the session; nothing stays allocated. */
 	stub_session_close();
@@ -240,14 +240,14 @@ test_semaphore(void)
 	assert(reply_bytes == 24U);
 	assert(stub_get32(stub_reply, 4U) == VK_SUCCESS);
 	assert(stub_get64(stub_reply, 16U) == FIXTURE_SEMAPHORE);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_SEMAPHORE, FIXTURE_SEMAPHORE) != NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_SEMAPHORE, FIXTURE_SEMAPHORE) != NULL);
 
 	/* vkDestroySemaphore: the echoed opcode alone. */
 	stub_wire_begin(&fixture_wire);
 	fixture_destroy(FIXTURE_DESTROY_SEMAPHORE, FIXTURE_SEMAPHORE);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 4U);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_SEMAPHORE, FIXTURE_SEMAPHORE) == NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_SEMAPHORE, FIXTURE_SEMAPHORE) == NULL);
 
 	/* Closes the session; nothing stays allocated. */
 	stub_session_close();
@@ -287,7 +287,7 @@ test_unported(void)
 	assert(error == ENOTSUP);
 	assert(reply_bytes == STUB_REPLY_BYTES);
 	assert(strcmp(stub_log, "i915: vk: XXX unimplemented opcode 39 (sync)\n") == 0);
-	assert(drv_i915_object_lookup(stub_vk, I915_VK_OBJ_FENCE, FIXTURE_FENCE) != NULL);
+	assert(drv_i915_object_lookup(stub_session, I915_VK_OBJ_FENCE, FIXTURE_FENCE) != NULL);
 
 	/* vkCreateQueryPool is refused the same way. */
 	stub_wire_begin(&fixture_wire);

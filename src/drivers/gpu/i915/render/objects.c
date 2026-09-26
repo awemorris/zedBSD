@@ -229,9 +229,9 @@ i915_gfx_destroy_plain(
 		return EINVAL;
 
 	/* Unpublishes and frees a known object. */
-	object = drv_i915_object_lookup(session->vk, kind, identity);
+	object = drv_i915_object_lookup(session, kind, identity);
 	if (object != NULL) {
-		drv_i915_object_remove(session->vk, kind, identity);
+		drv_i915_object_remove(session, kind, identity);
 		kern_free(object);
 	}
 

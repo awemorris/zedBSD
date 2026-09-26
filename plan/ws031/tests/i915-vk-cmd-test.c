@@ -124,6 +124,12 @@ drv_i915_gfx_session_close(struct i915_render_session *session)
 	gfx_closed++;
 }
 
+void
+drv_i915_gfx_memory_forget(struct i915_render_session *session)
+{
+	(void)session;
+}
+
 /* A little-endian stream builder that mirrors the libvulkan wire writer. */
 struct builder {
 	uint8_t bytes[512];
@@ -236,34 +242,56 @@ static void
 test_object_table(void)
 {
 	struct i915_render_device vk;
+	struct i915_render_session one;
+	struct i915_render_session two;
 	int marker[300];
+	int other;
 	unsigned index;
 	int error;
 
 	memset(&vk, 0, sizeof(vk));
+	memset(&one, 0, sizeof(one));
+	memset(&two, 0, sizeof(two));
+	one.vk = &vk;
+	two.vk = &vk;
 	error = drv_i915_object_table_create(&vk.objects);
 	assert(error == 0);
 
 	/* Insert grows past the initial capacity and every identity resolves. */
 	for (index = 0U; index < 300U; index++) {
-		error = drv_i915_object_insert(&vk, I915_VK_OBJ_BUFFER, index + 1U, &marker[index]);
+		error = drv_i915_object_insert(&one, I915_VK_OBJ_BUFFER, index + 1U, &marker[index]);
 		assert(error == 0);
 	}
 	for (index = 0U; index < 300U; index++)
-		assert(drv_i915_object_lookup(&vk, I915_VK_OBJ_BUFFER, index + 1U) == &marker[index]);
+		assert(drv_i915_object_lookup(&one, I915_VK_OBJ_BUFFER, index + 1U) == &marker[index]);
 
 	/* An identity of another kind does not collide. */
-	assert(drv_i915_object_lookup(&vk, I915_VK_OBJ_IMAGE, 1U) == NULL);
+	assert(drv_i915_object_lookup(&one, I915_VK_OBJ_IMAGE, 1U) == NULL);
+
+	/* The same identity in another session is another object. */
+	assert(drv_i915_object_lookup(&two, I915_VK_OBJ_BUFFER, 1U) == NULL);
+	error = drv_i915_object_insert(&two, I915_VK_OBJ_BUFFER, 1U, &other);
+	assert(error == 0);
+	assert(drv_i915_object_lookup(&two, I915_VK_OBJ_BUFFER, 1U) == &other);
+	assert(drv_i915_object_lookup(&one, I915_VK_OBJ_BUFFER, 1U) == &marker[0]);
 
 	/* Reinserting an identity replaces the object in place. */
-	error = drv_i915_object_insert(&vk, I915_VK_OBJ_BUFFER, 1U, &marker[7]);
+	error = drv_i915_object_insert(&one, I915_VK_OBJ_BUFFER, 1U, &marker[7]);
 	assert(error == 0);
-	assert(drv_i915_object_lookup(&vk, I915_VK_OBJ_BUFFER, 1U) == &marker[7]);
+	assert(drv_i915_object_lookup(&one, I915_VK_OBJ_BUFFER, 1U) == &marker[7]);
+	assert(drv_i915_object_lookup(&two, I915_VK_OBJ_BUFFER, 1U) == &other);
 
 	/* Remove drops exactly one identity and keeps the rest resolvable. */
-	drv_i915_object_remove(&vk, I915_VK_OBJ_BUFFER, 1U);
-	assert(drv_i915_object_lookup(&vk, I915_VK_OBJ_BUFFER, 1U) == NULL);
-	assert(drv_i915_object_lookup(&vk, I915_VK_OBJ_BUFFER, 2U) == &marker[1]);
+	drv_i915_object_remove(&one, I915_VK_OBJ_BUFFER, 1U);
+	assert(drv_i915_object_lookup(&one, I915_VK_OBJ_BUFFER, 1U) == NULL);
+	assert(drv_i915_object_lookup(&one, I915_VK_OBJ_BUFFER, 2U) == &marker[1]);
+	assert(drv_i915_object_lookup(&two, I915_VK_OBJ_BUFFER, 1U) == &other);
+
+	/* Forgetting a session drops all its identities and none of another's. */
+	drv_i915_object_forget(&one);
+	for (index = 1U; index < 300U; index++)
+		assert(drv_i915_object_lookup(&one, I915_VK_OBJ_BUFFER, index + 1U) == NULL);
+	assert(drv_i915_object_lookup(&two, I915_VK_OBJ_BUFFER, 1U) == &other);
 
 	drv_i915_object_table_destroy(vk.objects);
 }
@@ -542,12 +570,12 @@ test_instance(void)
 	/* [0][VK_SUCCESS][present][identity] */
 	assert(get32(reply_blob) == 0U && get32(reply_blob + 4) == 0U);
 	assert(get64(reply_blob + 8) == 1U && get64(reply_blob + 16) == 0x1234U);
-	assert(drv_i915_object_lookup(fixture_vk, I915_VK_OBJ_INSTANCE, 0x1234U) == &i915_instance_token);
+	assert(drv_i915_object_lookup(fixture_session, I915_VK_OBJ_INSTANCE, 0x1234U) == &i915_instance_token);
 
 	/* [2][VK_SUCCESS][present][count 1][array 1][identity] */
 	assert(get32(reply_blob + 24) == 2U && get32(reply_blob + 28) == 0U);
 	assert(get32(reply_blob + 40) == 1U && get64(reply_blob + 44) == 1U && get64(reply_blob + 52) == 0x5678U);
-	assert(drv_i915_object_lookup(fixture_vk, I915_VK_OBJ_PHYSICAL_DEVICE, 0x5678U) != NULL);
+	assert(drv_i915_object_lookup(fixture_session, I915_VK_OBJ_PHYSICAL_DEVICE, 0x5678U) != NULL);
 
 	/* [6][present][apiVersion][driverVersion][vendorID][deviceID]... */
 	assert(get32(reply_blob + 60) == 6U && get64(reply_blob + 64) == 1U);
@@ -563,7 +591,7 @@ test_instance(void)
 	put32(&b, 1U); put32(&b, 0U); put64(&b, 0x1234U); put64(&b, 0U);
 	error = run_stream(&b, &reply_bytes, &reply);
 	assert(error == 0 && reply_bytes == 0U);
-	assert(drv_i915_object_lookup(fixture_vk, I915_VK_OBJ_INSTANCE, 0x1234U) == NULL);
+	assert(drv_i915_object_lookup(fixture_session, I915_VK_OBJ_INSTANCE, 0x1234U) == NULL);
 
 	/* Two physical devices are malformed. */
 	b.size = 0U;

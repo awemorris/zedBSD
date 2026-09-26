@@ -190,10 +190,10 @@ drv_i915_gfx_allocate_dsets(
 
 		/* Records the layout the set was allocated with. */
 		layout_id = (uint64_t)(uintptr_t)info.pSetLayouts[index];
-		dset->layout = drv_i915_object_lookup(session->vk, I915_VK_OBJ_DESCRIPTOR_SET_LAYOUT, layout_id);
+		dset->layout = drv_i915_object_lookup(session, I915_VK_OBJ_DESCRIPTOR_SET_LAYOUT, layout_id);
 
 		/* Publishes the set; one that cannot be published is freed. */
-		error = drv_i915_object_insert(session->vk, I915_VK_OBJ_DESCRIPTOR_SET, identities[index], dset);
+		error = drv_i915_object_insert(session, I915_VK_OBJ_DESCRIPTOR_SET, identities[index], dset);
 		if (error != 0) {
 			kern_free(dset);
 			break;
@@ -304,7 +304,7 @@ i915_gfx_update_write(
 	(void)drv_i915_wire_read_u32(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	dset_id = drv_i915_wire_read_u64(reader);
-	dset = drv_i915_object_lookup(session->vk, I915_VK_OBJ_DESCRIPTOR_SET, dset_id);
+	dset = drv_i915_object_lookup(session, I915_VK_OBJ_DESCRIPTOR_SET, dset_id);
 	binding = drv_i915_wire_read_u32(reader);
 
 	/* Skips dstArrayElement and descriptorCount.  XXX: arrays of descriptors are not laid out. */
@@ -332,8 +332,8 @@ i915_gfx_update_write(
 			continue;
 
 		/* The binding samples this view with this sampler from here on. */
-		dset->slots[binding].sampler = drv_i915_object_lookup(session->vk, I915_VK_OBJ_SAMPLER, sampler);
-		dset->slots[binding].view = drv_i915_object_lookup(session->vk, I915_VK_OBJ_IMAGE_VIEW, view);
+		dset->slots[binding].sampler = drv_i915_object_lookup(session, I915_VK_OBJ_SAMPLER, sampler);
+		dset->slots[binding].view = drv_i915_object_lookup(session, I915_VK_OBJ_IMAGE_VIEW, view);
 	}
 
 	/* Reads how many buffer descriptors follow. */
@@ -363,7 +363,7 @@ i915_gfx_update_write(
 
 		/* The binding reads this range of this buffer from here on. */
 		buffer_id = (uint64_t)(uintptr_t)buffer_info.buffer;
-		dset->slots[binding].buffer = drv_i915_object_lookup(session->vk, I915_VK_OBJ_BUFFER, buffer_id);
+		dset->slots[binding].buffer = drv_i915_object_lookup(session, I915_VK_OBJ_BUFFER, buffer_id);
 		dset->slots[binding].offset = buffer_info.offset;
 		dset->slots[binding].range = buffer_info.range;
 

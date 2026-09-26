@@ -229,7 +229,7 @@ drv_i915_gfx_create_pipelines(
 	/* Publishes each pipeline once all of them are prepared, up to the first failure. */
 	if (error == 0) {
 		for (index = 0U; index < count; index++) {
-			error = drv_i915_object_insert(session->vk, I915_VK_OBJ_PIPELINE, identities[index], pipelines[index]);
+			error = drv_i915_object_insert(session, I915_VK_OBJ_PIPELINE, identities[index], pipelines[index]);
 			if (error != 0)
 				break;
 		}
@@ -282,9 +282,9 @@ drv_i915_gfx_destroy_pipeline(
 		return EINVAL;
 
 	/* Unpublishes a known pipeline, releases its kernels and frees it. */
-	pipeline = drv_i915_object_lookup(session->vk, I915_VK_OBJ_PIPELINE, identity);
+	pipeline = drv_i915_object_lookup(session, I915_VK_OBJ_PIPELINE, identity);
 	if (pipeline != NULL) {
-		drv_i915_object_remove(session->vk, I915_VK_OBJ_PIPELINE, identity);
+		drv_i915_object_remove(session, I915_VK_OBJ_PIPELINE, identity);
 		drv_i915_gfx_pipeline_release(pipeline);
 		kern_free(pipeline);
 	}
@@ -446,7 +446,7 @@ i915_gfx_decode_stages(
 		kern_memset(&stage, 0, sizeof(stage));
 		i915_vkc_dec_VkPipelineShaderStageCreateInfo(reader, &session->arena, &stage);
 		module_id = (uint64_t)(uintptr_t)stage.module;
-		shader = drv_i915_object_lookup(session->vk, I915_VK_OBJ_SHADER_MODULE, module_id);
+		shader = drv_i915_object_lookup(session, I915_VK_OBJ_SHADER_MODULE, module_id);
 
 		/* Only the vertex and the fragment stages are run. */
 		if (stage.stage == VK_SHADER_STAGE_VERTEX_BIT) {

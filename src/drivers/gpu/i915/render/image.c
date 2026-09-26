@@ -156,7 +156,7 @@ drv_i915_gfx_create_image_view(
 	/* Resolves the image the view shows; the view of an unknown image fails. */
 	view = NULL;
 	error = 0;
-	image = drv_i915_object_lookup(session->vk, I915_VK_OBJ_IMAGE, (uint64_t)(uintptr_t)info.image);
+	image = drv_i915_object_lookup(session, I915_VK_OBJ_IMAGE, (uint64_t)(uintptr_t)info.image);
 	if (image == NULL)
 		error = EINVAL;
 
@@ -277,7 +277,7 @@ drv_i915_gfx_subresource_layout(
 	/* Reads the image behind the device and resolves it. */
 	(void)drv_i915_wire_read_u64(reader);
 	image_id = drv_i915_wire_read_u64(reader);
-	image = drv_i915_object_lookup(session->vk, I915_VK_OBJ_IMAGE, image_id);
+	image = drv_i915_object_lookup(session, I915_VK_OBJ_IMAGE, image_id);
 
 	/* Decodes the subresource when it is present; an absent one is level 0. */
 	kern_memset(&subresource, 0, sizeof(subresource));
