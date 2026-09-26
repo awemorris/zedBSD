@@ -214,6 +214,7 @@ struct zwl_object {
 	unsigned mapped;
 	uint64_t map_order;
 	unsigned desktop;
+	unsigned minimized;
 	int32_t x;
 	int32_t y;
 	unsigned fullscreen;
@@ -398,6 +399,11 @@ struct zwl_server {
 	float wiseview_to;
 	uint64_t wiseview_start_ms;
 	struct zwl_object *wiseview_current;
+	/* A press on a Wiseview tile that may become its drag to a desktop (ws035-p072): the window, where it started, whether it moved. */
+	struct zwl_object *wiseview_press;
+	int32_t wiseview_press_x;
+	int32_t wiseview_press_y;
+	unsigned wiseview_dragging;
 	/*
 	 * The desktop layer's place while App Home pushes it aside: every glass
 	 * shape drawn with layer_on is moved to layer_x, layer_y and scaled by

@@ -85,6 +85,10 @@
 #define SHORTCUT_LEFT		105U
 #define SHORTCUT_RIGHT		106U
 #define MODIFIERS_CONTROL_ALT	(4U | 8U)
+#define MODIFIER_SHIFT		1U
+
+/* How far a Wiseview tile moves before it is dragged. */
+#define TILE_DRAG_START		8
 
 /* Wiseview: where the gesture starts, how far it goes, when it opens, and how long it settles. */
 #define WISEVIEW_EDGE		20
@@ -147,6 +151,9 @@ static void body_rect(struct zwl_server *server, const struct zwl_object *surfac
 static void docked_rect(struct zwl_server *server, struct shell_rect *body);
 static void pulled_rect(struct zwl_server *server, const struct zwl_object *surface, struct shell_rect *body);
 static void pull_back(struct zwl_server *server);
+static void window_minimize(struct zwl_server *server, struct zwl_object *surface);
+static void window_to_desktop(struct zwl_server *server, struct zwl_object *surface, unsigned desktop, const char *via);
+static int desktop_picture_at(struct zwl_server *server, int32_t x, int32_t y);
 static void floating_title(const struct shell_rect *body, struct shell_rect *panel);
 static void bar_title_slot(struct zwl_server *server, const struct shell_bar *bar, struct shell_rect *slot);
 static void window_size(const struct zwl_object *surface, int32_t *width, int32_t *height);
@@ -254,7 +261,7 @@ zwl_glass_draw(
 	position = desktop_position(server);
 	for (index = 0; index < count; index++) {
 		shift = ((float)windows[index]->desktop - position) * (float)server->width;
-		if (shift <= -(float)server->width || shift >= (float)server->width)
+		if (shift <= -(float)server->width || shift >= (float)server->width || windows[index]->minimized)
 			continue;
 		if (home > 0.0f && windows[index]->desktop != server->desktop)
 			continue;
@@ -403,9 +410,11 @@ zwl_glass_button(
 		return 1;
 	}
 
-	/* Minimize has no action yet. */
-	if (pressed == BUTTON_MINIMIZE)
+	/* Minimize hides it. */
+	if (pressed == BUTTON_MINIMIZE) {
+		window_minimize(server, surface);
 		return 1;
+	}
 
 	/* A second press on the title bar docks the window. */
 	second = double_click(server, surface);
@@ -443,9 +452,20 @@ zwl_glass_motion(
 	/* The hover of buttons, the dock hint and the moves are redrawn. */
 	server->dirty = 1;
 
-	/* Wiseview follows the gesture, and hears the pointer while it is open. */
-	if (server->wiseview_gesture || server->wiseview > 0.0f || server->wiseview_moving)
+	/* Wiseview follows the gesture, and hears the pointer while it is open; a pressed tile that moves is dragged. */
+	if (server->wiseview_gesture || server->wiseview > 0.0f || server->wiseview_moving) {
+		if (server->wiseview_press != NULL && !server->wiseview_dragging) {
+			x = server->pointer_x - server->wiseview_press_x;
+			y = server->pointer_y - server->wiseview_press_y;
+			if (x * x + y * y >= TILE_DRAG_START * TILE_DRAG_START) {
+				server->wiseview_dragging = 1;
+				printf("ZWL WISEVIEW drag surface=%u\n", server->wiseview_press->id);
+			}
+		}
+
+		/* The motion is Wiseview's. */
 		return 1;
+	}
 
 	/* App Home follows its gesture, and hears the pointer while it shows. */
 	taken = zwl_home_motion(server);
@@ -590,17 +610,30 @@ zwl_glass_key(
 	uint32_t key,
 	uint32_t state)
 {
+	struct zwl_object *surface;
+	int target;
+	int step;
+
 	/* Only with Control and Alt held, and only the two arrows. */
 	if ((server->modifiers & MODIFIERS_CONTROL_ALT) != MODIFIERS_CONTROL_ALT)
 		return 0;
 	if (key != SHORTCUT_LEFT && key != SHORTCUT_RIGHT)
 		return 0;
 
+	/* With Shift, the window on top goes along to the neighbour. */
+	step = 1;
+	if (key == SHORTCUT_LEFT)
+		step = -1;
+	if (state != 0U && (server->modifiers & MODIFIER_SHIFT) != 0U) {
+		surface = zwl_top_window(server);
+		target = (int)server->desktop + step;
+		if (surface != NULL && target >= 0 && target < DESKTOPS)
+			window_to_desktop(server, surface, (unsigned)target, "key");
+	}
+
 	/* A press switches; the release is the shortcut's too. */
-	if (state != 0U && key == SHORTCUT_LEFT)
-		desktop_turn(server, (int)server->desktop - 1, "key");
-	if (state != 0U && key == SHORTCUT_RIGHT)
-		desktop_turn(server, (int)server->desktop + 1, "key");
+	if (state != 0U)
+		desktop_turn(server, (int)server->desktop + step, "key");
 	return 1;
 }
 
@@ -1539,7 +1572,8 @@ window_at(
 			    !surface->mapped ||
 			    surface->role == NULL ||
 			    surface->cursor_role ||
-			    surface->desktop != server->desktop)
+			    surface->desktop != server->desktop ||
+			    surface->minimized)
 				continue;
 
 			/* Above what was found so far. */
@@ -1780,9 +1814,11 @@ bar_press(
 		return 1;
 	}
 
-	/* Minimize has no action yet. */
-	if (pressed == BUTTON_MINIMIZE)
+	/* Minimize hides it. */
+	if (pressed == BUTTON_MINIMIZE) {
+		window_minimize(server, surface);
 		return 1;
+	}
 
 	/* Its title: between the line after "zedBSD" and the buttons. */
 	if (server->pointer_x < bar.menu_line || server->pointer_x >= bar.buttons[BUTTON_MINIMIZE] - BUTTON_WIDTH / 2)
@@ -2005,8 +2041,10 @@ draw_wiseview(
 	struct glass_shape shape;
 	struct shell_rect body;
 	struct shell_rect rect;
+	static const float white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 	char header[48];
 	float ink[4];
+	float wash[4];
 	unsigned count;
 	unsigned index;
 	unsigned slot;
@@ -2036,7 +2074,11 @@ draw_wiseview(
 		if (slot == count)
 			continue;
 
-		/* On its way. */
+		/* The dragged tile is drawn last, over the others. */
+		if (server->wiseview_dragging && stacked[index] == server->wiseview_press)
+			continue;
+
+		/* On its way; a minimized window's tile is washed paler. */
 		body_rect(server, stacked[index], &body);
 		lerp_rect(&body, &tiles[slot], progress, &rect);
 		over = 0;
@@ -2045,6 +2087,21 @@ draw_wiseview(
 		    server->pointer_y >= tiles[slot].y && server->pointer_y < tiles[slot].y + tiles[slot].height)
 			over = 1;
 		draw_tile(server, command, stacked[index], &rect, progress, stacked[index] == server->wiseview_current, over);
+		if (stacked[index]->minimized) {
+			memcpy(wash, white, sizeof(wash));
+			wash[3] = 0.5f * progress;
+			glass_draw_solid(server, command, (float)rect.x, (float)rect.y, (float)rect.width, (float)rect.height, 16.0f, wash);
+		}
+	}
+
+	/* The dragged tile follows the pointer. */
+	for (slot = 0; server->wiseview_dragging && slot < count; slot++) {
+		if (windows[slot] != server->wiseview_press)
+			continue;
+		rect = tiles[slot];
+		rect.x += server->pointer_x - server->wiseview_press_x;
+		rect.y += server->pointer_y - server->wiseview_press_y;
+		draw_tile(server, command, windows[slot], &rect, progress, 0, 1);
 	}
 
 	/* The header: what is shown, and how many. */
@@ -2213,6 +2270,7 @@ wiseview_button(
 	unsigned count;
 	unsigned index;
 	float progress;
+	int target;
 
 	/* The end of the gesture: past the threshold it opens, otherwise it closes. */
 	if (server->wiseview_gesture) {
@@ -2232,6 +2290,29 @@ wiseview_button(
 		return 1;
 	}
 
+	/* The release of a press on a tile: a drag let go on a desktop's picture moves the window there, a click selects it. */
+	if (state == 0 && server->wiseview_press != NULL) {
+		surface = server->wiseview_press;
+		server->wiseview_press = NULL;
+		if (server->wiseview_dragging) {
+			server->wiseview_dragging = 0;
+			server->dirty = 1;
+			target = desktop_picture_at(server, server->pointer_x, server->pointer_y);
+			if (target >= 0 && (unsigned)target != surface->desktop && !surface->dead)
+				window_to_desktop(server, surface, (unsigned)target, "wiseview");
+			return 1;
+		}
+
+		/* A click: a minimized window comes back; it comes to the top and Wiseview closes. */
+		if (surface->dead || !surface->mapped)
+			return 1;
+		surface->minimized = 0;
+		window_raise(server, surface);
+		printf("ZWL WISEVIEW select surface=%u\n", surface->id);
+		wiseview_settle(server, 1.0f, 0.0f);
+		return 1;
+	}
+
 	/* Only a left press on the settled Wiseview acts. */
 	if (state == 0 || button != ZWL_BUTTON_LEFT || server->wiseview_moving)
 		return 1;
@@ -2248,6 +2329,13 @@ wiseview_button(
 		}
 	}
 
+	/* A desktop's picture in the bar switches Wiseview's desktop (the bar stays zdesktop's). */
+	target = desktop_picture_at(server, server->pointer_x, server->pointer_y);
+	if (surface == NULL && target >= 0) {
+		desktop_turn(server, target, "wiseview");
+		return 1;
+	}
+
 	/* Elsewhere, Wiseview closes. */
 	if (surface == NULL) {
 		printf("ZWL WISEVIEW close\n");
@@ -2262,10 +2350,11 @@ wiseview_button(
 		return 1;
 	}
 
-	/* Otherwise it comes to the top and Wiseview closes. */
-	window_raise(server, surface);
-	printf("ZWL WISEVIEW select surface=%u\n", surface->id);
-	wiseview_settle(server, 1.0f, 0.0f);
+	/* Otherwise the press may be a click or the tile's drag: the release decides. */
+	server->wiseview_press = surface;
+	server->wiseview_press_x = server->pointer_x;
+	server->wiseview_press_y = server->pointer_y;
+	server->wiseview_dragging = 0;
 	return 1;
 }
 
@@ -2462,4 +2551,66 @@ pull_back(
 	server->anim_start_ms = zwl_milliseconds();
 	server->dirty = 1;
 	printf("ZWL GLASS pull back surface=%u\n", surface->id);
+}
+
+/* Hides a window (it keeps its place, and comes back from Wiseview); the next window takes the focus. */
+static void
+window_minimize(
+	struct zwl_server *server,
+	struct zwl_object *surface)
+{
+	/* Hidden, not moved or pulled any more. */
+	surface->minimized = 1;
+	if (server->drag == surface)
+		server->drag = NULL;
+	if (server->pull == surface)
+		server->pull = NULL;
+
+	/* The focus goes to the window under it. */
+	server->front_surface = zwl_top_window(server);
+	zwl_seat_focus(server);
+	server->dirty = 1;
+	printf("ZWL GLASS minimize surface=%u\n", surface->id);
+}
+
+/* Moves a window to another desktop (shown when that desktop is), and gives the focus to the top window of the desktop shown. */
+static void
+window_to_desktop(
+	struct zwl_server *server,
+	struct zwl_object *surface,
+	unsigned desktop,
+	const char *via)
+{
+	/* The window's desktop; on top of it there. */
+	surface->desktop = desktop;
+	server->map_order++;
+	surface->map_order = server->map_order;
+
+	/* The focus on the desktop shown. */
+	server->front_surface = zwl_top_window(server);
+	zwl_seat_focus(server);
+	server->dirty = 1;
+	printf("ZWL GLASS move-desktop surface=%u desktop=%u via=%s\n", surface->id, desktop + 1U, via);
+}
+
+/* Returns the desktop whose picture in the system bar is under a point, or -1. */
+static int
+desktop_picture_at(
+	struct zwl_server *server,
+	int32_t x,
+	int32_t y)
+{
+	struct shell_bar bar;
+	int32_t offset;
+
+	/* In the bar, over the pictures. */
+	if (y < 0 || y >= ZWL_GLASS_BAR)
+		return -1;
+	bar_layout(server, &bar);
+	offset = x - (bar.desktops_x + 6);
+	if (offset < 0 || offset >= DESKTOPS * (DESKTOP_WIDTH + DESKTOP_GAP))
+		return -1;
+
+	/* The picture (its gap counts as its own). */
+	return offset / (DESKTOP_WIDTH + DESKTOP_GAP);
 }

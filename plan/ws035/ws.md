@@ -261,7 +261,7 @@ p001で確かめる。
 | [ws035-p069](phase069/phase.md) | （2026-09-26 ユーザー指示）App Home の PoC（[設計](app-home-design.md)）: デスクトップをめくってアプリを起動 | cleared（q469-i01、2026-09-26。Venus と i915 実機。demo image） | p068 | `userland/base/zwl` |
 | [ws035-p070](phase070/phase.md) | （2026-09-26 自律実行）App Home から X11 の app（zterm、zgears）: Xzed --rootless を必要なときに起動 | cleared（q479-i01、2026-09-26。Venus で App Home から zterm と zgears、Xzed は 1 つ） | p069、WS069 | `userland/base/zwl` |
 | [ws035-p071](phase071/phase.md) | （2026-09-26 自律実行）App Home の続き: ページング、起動の animation、閉じる swipe、Tab とホイール | cleared（q480-i01、2026-09-26。Venus で 2 ページ、drag・ホイール・キー、icon から育つ窓、閉じる drag） | p070 | `userland/base/zwl` |
-| [ws035-p072](phase072/phase.md) | （2026-09-26 自律実行）窓の最小化と、窓をデスクトップ間で移す（Wiseview の drag、キー） | in-progress（q483-i01） | p065 | `userland/base/zwl` |
+| [ws035-p072](phase072/phase.md) | （2026-09-26 自律実行）窓の最小化と、窓をデスクトップ間で移す（Wiseview の drag、キー） | cleared（q483-i01、2026-09-26。Venus で最小化と Wiseview からの復帰、タイルの drag とキーでデスクトップ間の移動） | p065 | `userland/base/zwl` |
 | ws035-p055 | （2026-09-25 承認）damage（buffer age と scissor） | planned（sq001） | p011 | 同上 |
 | ws035-p057 | （2026-09-25 承認）効果: すりガラス（背後のぼかし）と影 | planned（sq001） | p055 | 同上 |
 | ws035-p058 | zdesktop（secondary queue で変えた全 source）の規約の全文との照合と回帰（sq001 の締め） | planned（sq001） | sq001 の他の Phase | sq001 で変えた source |

@@ -480,7 +480,7 @@ zwl_top_window(
 		for (surface = client->objects; surface != NULL; surface = surface->next) {
 			if (surface->kind != ZWL_SURFACE || surface->dead || !surface->mapped)
 				continue;
-			if (surface->desktop != server->desktop)
+			if (surface->desktop != server->desktop || surface->minimized)
 				continue;
 			if (top == NULL || surface->map_order > top->map_order)
 				top = surface;

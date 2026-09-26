@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q482（ws035-p064 cleared。追従するドッキングの解除）
+Last finished Queue: q483（ws035-p072 cleared。最小化とデスクトップ間の移動）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q482（2026-09-26）
+## 最新: q443〜q483（2026-09-26）
+
+[q483](queue-q483.md): ws035-p072 cleared。窓の最小化（Wiseview の薄いタイルから戻す）、Wiseview のタイルをバーの絵へ drag・Ctrl+Alt+Shift+←/→ でデスクトップ間の移動。
 
 [q482](queue-q482.md): ws035-p064 cleared。docked の題名を引くと窓が指に追従して縮み、140 px の手前で離すと戻り、越えると元の大きさで外れる。
 
