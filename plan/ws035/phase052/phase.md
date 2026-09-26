@@ -4,7 +4,7 @@
 
 Phase ID: `ws035-p052`
 Parent: [WS035](../ws.md)
-Status: in-progress（q457-i01）
+Status: cleared（q457-i01）
 Phase disposition: normal
 Queue: q457-i01（前の試行 sq001-i01 は uncleared、下の「試行の記録」）
 設計: [compositing-design.md](../compositing-design.md)（2026-09-25 承認）の D0・D1・D2（GPU の画像）・D3（sampling の fence）・D4（1 回目）・D6・D10（枠だけ）
@@ -78,8 +78,39 @@ Venus の host（chaos）の iGPU の切替は、作業者の判断で行わな�
 ## 試行の記録
 
 - sq001-i01（2026-09-25、secondary queue、サブエージェント）: uncleared。試験環境（上の節）と import の回避策の判断（[secondary-deferred.md](../secondary-deferred.md)）を残したが、zwl の実装は commit されていない（`userland/base/zwl` に合成の source は無い、`zdtest` も無い）。secondary queue は後に廃止（2026-09-26 のユーザーの規則: サブエージェントを使わない）。
-- q457-i01（2026-09-26、メインセッション）: 実行中。
+- q457-i01（2026-09-26、メインセッション）: cleared（下の結果）。
 
-## 結果
+## 実装（2026-09-26、q457-i01）
 
-（実行中）
+- `userland/base/zwl/compose.c`・`compose.h`（新）: Vulkan の instance・device（`VK_KHR_display`・swapchain・外部 memory と fence の fd）、render pass（背景 0x203040 で clear）、pipeline 2 本（不透明・alpha、textured quad を push constant で置く）、sampler・descriptor pool・command buffer・書き出せる fence。display の surface と FIFO の swapchain は vkdemo の `display.c`（標準の display plane の選び方）をそのまま link して使う。frame は背景と窓を下から順に 1 本の command buffer で描き、fence を `vkGetFenceFdKHR` で fd にして event loop の poll に入れる（CPU で待たない）。frame は 1 つずつ。完了で、その frame が sampling した buffer の hold を外し（置き換わっていれば `wl_buffer.release`）、表示した surface の frame callback を送る。
+- `userland/base/zwl/import.c`（新）: `wl_buffer` の作成時に 1 回だけ、linear の VkImage・OPAQUE_FD の `vkAllocateMemory`（buffer の fd の複製）・view・descriptor set を作り、GENERAL の layout へ 1 回移す。client の layout（memory type、行の幅、offset）が Vulkan の image と合うことを確かめる。
+- `userland/base/libvulkan/memory.c`: `vkAllocateMemory` の OPAQUE_FD の import が、WSI が送る画像の capability の fd（`GPU_RESOURCE_EXPORT`）も受ける（`GPU_ALLOCATION_IMPORT` が EINVAL なら `GPU_RESOURCE_IMPORT` で、memory type と大きさを照合）。sq001 の回避策（zwl に libvulkan を静的に link し内部関数を呼ぶ）は要らなくなった（[secondary-deferred.md](../secondary-deferred.md) の 1 行目を解決）。
+- `userland/base/zwl/display.c`: 1 pass ごとに commit を current にし（初めての画像で map、null で unmap）、最前面の窓が全画面で画像がそのまま出力にできる（出力と同じ大きさ、linear）なら全画面モード、それ以外はウィンドウモード。全画面へ入るときは frame の完了を待ってから swapchain と surface を破棄し、`GPU_DISPLAY_CLAIM`・`GPU_DISPLAY_PRESENT` で client の画像を直接出す（隠れた窓の frame callback は送る）。出るときは `GPU_DISPLAY_RELEASE` の後に swapchain を作り直す。窓の配置は中央から 32 px の cascade（8 で一巡）。Vulkan が使えないとき、または `--direct` では従来の直接表示。
+- `userland/base/zwl/protocol.c`: 最初の configure は窓なら `0×0`（client が決める）と activated、全画面なら出力の大きさと fullscreen。`set_fullscreen` で位置と大きさを覚えて原点・出力の大きさ、`unset_fullscreen` で元へ（configure を送り直す）。ack_configure は最新以前の serial を受ける。
+- `userland/base/zwl/seat.c`: pointer の座標は窓の位置を引いて送る。`objects.c`: buffer とともに Vulkan の import を解放、client の破棄の前に進行中の frame を終える。`main.c`: fence の fd の poll、`--direct`、`ZWL PERF compose`（frame の数、acquire・submit+present・全体の時間）。
+- shader: `userland/base/zwl/shaders/quad.vert`・`quad.frag` と、SPIR-V を header にする `shaders/regenerate.py`（`glslc`・`spirv-val`）。build は生成済みの `shaders.h` を使う。
+- 試験の client: 設計の `zdtest` の代わりに `wltest` に `--windowed`・`--size=WxH`・`--color=RRGGBB`・`--fullscreen-at=N`・`--unfullscreen-at=N` を足した（既定の動きは変えない。renderer の複製を避けるための技術的な判断）。configure で大きさが変わると swapchain を作り直す。
+- 試験: `plan/ws035/tests/zdesktop-p052.sh`（下の手順を自動で）と `zdesktop-check.py`（画面の画素の照合）。
+- build: `platform/amd64/vmunix.mk` に zwl の link の規則（libvulkan）。
+
+## 検証（2026-09-26、QEMU 8 GiB 4 vCPU NVMe、Venus（host は Lavapipe））
+
+| 受け入れ | 結果 |
+| --- | --- |
+| 1. 窓 2 つを背景の上の別の位置に | `zdesktop-p052.sh`: 赤 400×300 が (440,250)、緑 300×200 が (522,332) に重なって出る。背景・両方の窓・重なり・窓の外の 9 点が一致（`build/ws035-p052/windows.png`） |
+| 2. 全画面モードで直接 scanout、解除で戻る | 緑の client が `set_fullscreen` → 全画面モード（画面の 4 点が緑、`fullscreen.png`）、log の `direct=1` の present 99 回（client の buffer の resource をそのまま）。`unset_fullscreen` → ウィンドウモード、同じ位置と大きさに戻る（`back.png` の 5 点）。既定の全画面の wltest は最初から全画面モードで、模様が一致（`default-fullscreen.png`） |
+| 3. import は buffer ごとに 1 回 | Vulkan の import 12 回（swapchain の 3 枚 × 4 組: 赤、緑、全画面の緑、戻った緑）に対し frame 167。定常の commit に import は無い |
+| 4. fence の fd を poll、完了で release | frame の完了（fence の fd が readable）で hold を外し `ZWL RELEASE` が続く。CPU の wait は client の破棄と終了のときだけ |
+| 5. 窓ごとの描き方の枠（D10） | `enum zwl_draw`（不透明・alpha）を import ごとに持ち、pipeline を選ぶ。効果は無し |
+| 6. 規約・warning | 新しい file（compose.c・import.c・compose.h）と変えた行の style-check 0（libvulkan の lock の区切りの段落は既存と同じ形で、道具の誤検出）。amd64 の build warning 0 |
+| 7. 切替と frame の時間 | 切替: ウィンドウ→全画面 760〜790 ms、全画面→ウィンドウ 343〜389 ms（起動時の出力の作成 545〜581 ms）。ウィンドウモードの 1 frame は約 100 ms（swapchain の acquire 21〜23 ms、submit+present 45〜73 ms、記録ほか約 20 ms）。この環境（Venus を host の Lavapipe で描き、blob の scanout を zink で読む）では vkdemo も 8 fps 程度で、時間は libvulkan と Venus の present の経路にある。全画面モードの present の ioctl は約 24 ms |
+| `--direct` | 従来の直接表示（60 frame、mode の切替なし） |
+| boot test | PASS（`build/boot-test-amd64-ws035p052/login.png`、zdesktop の image） |
+
+未確認: 切替の隙間に文字 console が一瞬出るか（設計 D0）。画面の読み取りの間隔（数百 ms）では捉えていない。実機（i915）は未実施。
+
+## 結果（2026-09-26、cleared）
+
+zdesktop（zwl）が 2 つのモードを持つ: ウィンドウモードは背景と窓を下から順に Vulkan で合成して `VK_KHR_display` の swapchain で出し、最前面の窓が全画面になると swapchain を破棄して client の画像をそのまま scanout する。client の画像は buffer ごとに 1 回 import し、frame の完了は fence の fd で知る。
+
+残り: ウィンドウモードの frame の時間（QEMU で約 100 ms）は libvulkan と Venus の present の経路の費用で、実機か別の Phase で調べる（F-021）。切替の隙間の console の確認は p055 か実機で。

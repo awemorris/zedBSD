@@ -1,19 +1,19 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue q457: zdesktop の合成の核（ws035-p052）
+# Queue q458: `wl_shm` と cursor（ws035-p053）
 
 <!-- awesome-plan-current:start -->
 Status: active（2026-09-26）
-Active Queue: q457
+Active Queue: q458
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
 
-Approval: 2026-09-26 ユーザー「BUG-054の修正を最優先、ディスクイメージをnativeに変更したあと、ws035を次に優先。…これで進めてください。」と「そのあとで次の作業に進んで。」。p052 の範囲は 2026-09-25 のユーザーの承認（[compositing-design.md](ws035/compositing-design.md)）。
+Approval: 2026-09-26 ユーザー「…ws035を次に優先。…これで進めてください。」。p053 の範囲は 2026-09-25 のユーザーの承認（[compositing-design.md](ws035/compositing-design.md) の D2・D8）。
 
 | Order | Attempt | Phase | Status |
 | --- | --- | --- | --- |
-| 1 | q457-i01 | [ws035-p052](ws035/phase052/phase.md) | in-progress |
+| 1 | q458-i01 | [ws035-p053](ws035/phase053/phase.md) | in-progress |
 
-依存: ws035-p051（cleared、設計は承認済み）。前の試行 sq001-i01 は uncleared（実装が残っていない）。
+依存: ws035-p052（cleared）。
 
-Upcoming Work Outlook: ws035-p053（`wl_shm` と cursor）、p054（acquire fence）… p058。
+Upcoming Work Outlook: ws035-p054（acquire fence）、p011（窓管理）、p055（damage）、p057（効果）。

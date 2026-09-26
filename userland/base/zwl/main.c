@@ -53,6 +53,7 @@ main(
 	memset(&server, 0, sizeof(server));
 	server.listener = -1;
 	server.gpu = -1;
+	server.frame_fd = -1;
 	server.gpu_path = "/dev/gpu0";
 	server.width = 320;
 	server.height = 240;
@@ -61,7 +62,7 @@ main(
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	error = parse_options(&server, count, arguments);
 	if (error != 0) {
-		fprintf(stderr, "usage: zwl [--socket=/path] [--gpu=/dev/gpu0] [--width=N] [--height=N] [--timeout=seconds] [--max-frames=N] [--log-frames]\n");
+		fprintf(stderr, "usage: zwl [--socket=/path] [--gpu=/dev/gpu0] [--width=N] [--height=N] [--timeout=seconds] [--max-frames=N] [--log-frames] [--direct]\n");
 		return 2;
 	}
 
@@ -81,6 +82,16 @@ main(
 
 	/* Open an independent GPU context before publishing a usable Wayland endpoint. */
 	error = zwl_gpu_open(&server);
+
+	/* Window mode's Vulkan device; without one (or with --direct) one surface is shown directly. */
+	if (error == 0 && !server.direct) {
+		error = zwl_compose_open(&server);
+		if (error != 0) {
+			printf("ZWL COMPOSE unavailable errno=%d: showing one surface directly\n", error);
+			zwl_compose_close(&server);
+			error = 0;
+		}
+	}
 
 	/* Input devices are found before READY; a seat without devices is still valid. */
 	if (error == 0)
@@ -220,6 +231,13 @@ parse_options(
 		match = strcmp(argument, "--log-frames");
 		if (match == 0) {
 			server->log_frames = 1;
+			continue;
+		}
+
+		/* No window mode: one surface is shown directly (the compositor before WS035). */
+		match = strcmp(argument, "--direct");
+		if (match == 0) {
+			server->direct = 1;
 			continue;
 		}
 
@@ -405,6 +423,8 @@ event_loop(
 	size_t count;
 	size_t index;
 	size_t first_input;
+	size_t last_input;
+	size_t frame_slot;
 	unsigned slot;
 	uint64_t mark;
 	uint32_t presents;
@@ -439,6 +459,7 @@ event_loop(
 		for (client = server->clients; client != NULL; client = client->next)
 			count++;
 
+
 		/* Input devices follow the clients in the same poll snapshot. */
 		first_input = count;
 		for (slot = 0; slot < ZWL_INPUT_MAX; slot++) {
@@ -447,6 +468,16 @@ event_loop(
 				devices[count - first_input] = &server->inputs[slot];
 				count++;
 			}
+		}
+
+		/* The devices end here. */
+		last_input = count;
+
+		/* The fence fd of window mode's frame in flight is polled last. */
+		frame_slot = 0;
+		if (server->frame_fd >= 0) {
+			frame_slot = count;
+			count++;
 		}
 
 		/* Allocation failure leaves all live clients owned by service cleanup. */
@@ -486,9 +517,15 @@ event_loop(
 		}
 
 		/* Every open device is polled for readable events. */
-		for (; index < count; index++) {
+		for (; index < last_input; index++) {
 			descriptors[index].fd = devices[index - first_input]->fd;
 			descriptors[index].events = POLLIN;
+		}
+
+		/* The frame's fence becomes readable when the frame is done. */
+		if (frame_slot != 0) {
+			descriptors[frame_slot].fd = server->frame_fd;
+			descriptors[frame_slot].events = POLLIN;
 		}
 
 		/* Poll sees sockets only; typed image fds are consumed immediately during import. */
@@ -521,8 +558,12 @@ event_loop(
 		if ((descriptors[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
 			error = EIO;
 
+		/* A finished frame releases its buffers and sends its callbacks. */
+		if (frame_slot != 0 && descriptors[frame_slot].revents != 0)
+			zwl_frame_done(server);
+
 		/* Device events are applied before clients are flushed, so they leave in this pass. */
-		for (index = first_input; index < count; index++) {
+		for (index = first_input; index < last_input; index++) {
 			/* A readable, failed or vanished device is read; a read failure closes it. */
 			if (descriptors[index].revents != 0)
 				zwl_input_read(server, devices[index - first_input]);
@@ -625,9 +666,15 @@ service_cleanup(
 	if (error != 0)
 		server->failed = 1;
 
+	/* Window mode's frame in flight finishes before the clients it holds go. */
+	zwl_compose_quiesce(server);
+
 	/* Each client cleanup closes both user-received and still-kernel-queued rights. */
 	while (server->clients != NULL)
 		zwl_client_destroy(server->clients);
+
+	/* The swapchain and the Vulkan device go after every buffer's image. */
+	zwl_compose_close(server);
 
 	/* No client remains to hear from the seat, so its devices close quietly. */
 	zwl_input_cleanup(server);
@@ -687,6 +734,16 @@ zwl_perf_report(
 	    100.0 * (double)perf->work_cycles / (double)cycles,
 	    perf->presents ? (double)perf->present_cycles / per_ms / (double)perf->presents : 0.0,
 	    perf->presents ? (double)perf->present_to_flush_cycles / per_ms / (double)perf->presents : 0.0);
+
+	/* Window mode's frames: how many, the CPU time to record and submit one, and the time until its fence. */
+	if (perf->compose_frames != 0) {
+		printf("ZWL PERF compose frames=%u draw_ms=%.2f (acquire %.2f submit+present %.2f) frame_ms=%.2f\n",
+		    perf->compose_frames,
+		    (double)perf->compose_draw_cycles / per_ms / (double)perf->compose_frames,
+		    (double)perf->compose_acquire_cycles / per_ms / (double)perf->compose_frames,
+		    (double)perf->compose_present_cycles / per_ms / (double)perf->compose_frames,
+		    (double)perf->compose_cycles / per_ms / (double)perf->compose_frames);
+	}
 	fflush(stdout);
 
 	memset(perf, 0, sizeof(*perf));

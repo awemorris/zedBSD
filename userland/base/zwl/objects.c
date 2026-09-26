@@ -226,6 +226,9 @@ zwl_object_destroy(
 				object->role->top->surface = NULL;
 		}
 
+		/* Window mode draws the output again without it. */
+		server->dirty = 1;
+
 		/* Pending state and current surface content own independent image holds. */
 		zwl_buffer_put(object->pending);
 		zwl_buffer_put(object->queued);
@@ -267,8 +270,11 @@ zwl_client_destroy(
 	struct zwl_packet *packet;
 	unsigned index;
 
-	/* Fatal status suppresses events while destructors unwind dependent objects. */
+	/* A frame in flight may hold this client's buffers and callbacks; it finishes first. */
 	server = client->server;
+	zwl_compose_quiesce(server);
+
+	/* Fatal status suppresses events while destructors unwind dependent objects. */
 	client->fatal = 1;
 	printf("ZWL CLEANUP client=%llu objects=%u unread_fds=%u\n", (unsigned long long)client->number, client->object_count, client->right_count);
 
@@ -355,8 +361,11 @@ object_free(
 	struct zwl_client *client;
 	int error;
 
-	/* Imported resource handles belong exclusively to the compositor's GPU open. */
+	/* Window mode's Vulkan image goes with the buffer. */
 	client = object->client;
+	zwl_import_destroy(object);
+
+	/* Imported resource handles belong exclusively to the compositor's GPU open. */
 	if (object->image.handle != 0 && client->server->gpu >= 0) {
 		/* The import handle is local to this compositor open and no longer borrowed. */
 		memset(&request, 0, sizeof(request));

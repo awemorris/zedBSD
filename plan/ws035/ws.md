@@ -8,8 +8,8 @@ Primary Milestone: MG006
 Related Milestones: MG001, MG005
 Objectives: O1, O2
 Parent: [Master](../master.md)
-Queue: q457（ws035-p052）
-Resume point: fg010: p052（2 つのモードの核）→ p053 → p054 … → p058。元の続き: タスクバー・タイトル描画
+Queue: q458（ws035-p053）
+Resume point: fg010: p052 cleared（2 つのモードの核）。p053（`wl_shm` と cursor）→ p054 … → p058。元の続き: タスクバー・タイトル描画
 <!-- awesome-plan-current:end -->
 
 ## 単一目標
@@ -245,8 +245,8 @@ p001で確かめる。
 | [ws035-p050](phase050/phase.md) | 設計: audiod の unix socket interface（共有メモリで受け渡し、streaming の interface は持たない。`shm_open` 直後に `shm_unlink` した匿名の fd を SCM_RIGHTS で渡す。libpulse の `pa_stream_write()` はその buffer に書く。`/dev/dsp` が mmap 対応なら audiod はそれを使い、非対応なら write する） | cleared（q355-i01。[audiod-design.md](audiod-design.md)） | p006 | 文書 |
 | ws035-p056 | `/dev/dspN` の mmap のゼロコピー: DMA の ring そのものを `vm_device` で user に mmap する（p049 のコピーありの後。interface は同じ） | planning | p049 | audio framework |
 | [ws035-p051](phase051/phase.md) | 設計: デスクトップの合成（compositing）。ユーザーが微調整して承認する（2026-09-24 ユーザー指示） | cleared（q354-i01。[compositing-design.md](compositing-design.md) を提出。同日のレビュー 2 回（2 つのモード、swapchain、`wl_shm` は補助として持ち GPU の経路を最適化）を反映、**承認待ち**） | p004 | 文書 |
-| [ws035-p052](phase052/phase.md) | （2026-09-25 承認）2 つのモードの核: 全画面モード（swapchain を破棄してそのまま scanout）とウィンドウモード（背景→窓を下から順に Vulkan で合成、`VK_KHR_display` の swapchain）の切替、quad の pipeline、GPU 画像の OPAQUE_FD import（buffer ごとに 1 回）、sampling の fence と release、効果を載せる枠 | in-progress（q457-i01。前の試行 sq001-i01 は uncleared: 実装が残っていない） | p051 | `userland/base/zwl` |
-| ws035-p053 | （2026-09-25 承認）`wl_shm`（補助の経路、damage の範囲の CPU の copy）と cursor（zdesktop の cursor 画像、ウィンドウモードで合成、`set_cursor` の shm・GPU の surface） | planned（sq001） | p052 | 同上 |
+| [ws035-p052](phase052/phase.md) | （2026-09-25 承認）2 つのモードの核: 全画面モード（swapchain を破棄してそのまま scanout）とウィンドウモード（背景→窓を下から順に Vulkan で合成、`VK_KHR_display` の swapchain）の切替、quad の pipeline、GPU 画像の OPAQUE_FD import（buffer ごとに 1 回）、sampling の fence と release、効果を載せる枠 | cleared（q457-i01。ウィンドウモードの Vulkan の合成と全画面モードの直接 scanout、切替。画面の読み取りで窓 2 つ・全画面・戻りが一致、import は buffer ごとに 1 回。前の試行 sq001-i01 は uncleared） | p051 | `userland/base/zwl` |
+| [ws035-p053](phase053/phase.md) | （2026-09-25 承認）`wl_shm`（補助の経路、damage の範囲の CPU の copy）と cursor（zdesktop の cursor 画像、ウィンドウモードで合成、`set_cursor` の shm・GPU の surface） | in-progress（q458-i01） | p052 | 同上 |
 | ws035-p054 | （2026-09-25 承認）acquire fence の request（`zed_gpu_buffer_v1` の拡張） | planned（sq001） | p052 | 同上、libwayland の WSI |
 | ws035-p055 | （2026-09-25 承認）damage（buffer age と scissor） | planned（sq001） | p011 | 同上 |
 | ws035-p057 | （2026-09-25 承認）効果: すりガラス（背後のぼかし）と影 | planned（sq001） | p055 | 同上 |

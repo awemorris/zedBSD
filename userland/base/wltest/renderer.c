@@ -160,14 +160,22 @@ wltest_renderer_draw(
 	pass.pClearValues = &clear;
 	vkCmdBeginRenderPass(renderer->command, &pass, VK_SUBPASS_CONTENTS_INLINE);
 
-	/* Three fixed color regions and one moving bar define the independent image oracle. */
+	/*
+	 * Three fixed color regions and one moving bar define the independent
+	 * image oracle; a window test fills the whole image with one color the
+	 * screen reader looks for instead.
+	 */
 	width = renderer->extent.width;
 	height = renderer->extent.height;
-	renderer_rect(renderer->command, 0U, 0U, width / 2U, height / 2U, 1.0f, 0.0f, 0.0f);
-	renderer_rect(renderer->command, width / 2U, 0U, width - width / 2U, height / 2U, 0.0f, 1.0f, 0.0f);
-	renderer_rect(renderer->command, 0U, height / 2U, width, height - height / 2U, 0.0f, 0.0f, 1.0f);
-	x = ((frame - 1U) * 29U) % (width - 40U);
-	renderer_rect(renderer->command, x, height / 3U, 40U, height / 3U, 1.0f, 1.0f, 1.0f);
+	if (renderer->solid_set) {
+		renderer_rect(renderer->command, 0U, 0U, width, height, renderer->solid[0], renderer->solid[1], renderer->solid[2]);
+	} else {
+		renderer_rect(renderer->command, 0U, 0U, width / 2U, height / 2U, 1.0f, 0.0f, 0.0f);
+		renderer_rect(renderer->command, width / 2U, 0U, width - width / 2U, height / 2U, 0.0f, 1.0f, 0.0f);
+		renderer_rect(renderer->command, 0U, height / 2U, width, height - height / 2U, 0.0f, 0.0f, 1.0f);
+		x = ((frame - 1U) * 29U) % (width - 40U);
+		renderer_rect(renderer->command, x, height / 3U, 40U, height / 3U, 1.0f, 1.0f, 1.0f);
+	}
 	vkCmdEndRenderPass(renderer->command);
 
 	/* Finishes the render stream before it can be submitted. */

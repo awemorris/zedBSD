@@ -51,6 +51,7 @@ static void memory_native_free(struct VkDevice_T *device, struct vulkan_memory *
 static void memory_lost(struct VkDevice_T *device);
 static VkResult memory_ranges(struct VkDevice_T *device, uint32_t count, const VkMappedMemoryRange *ranges);
 static VkResult memory_import_fd(struct VkDevice_T *device, const VkMemoryAllocateInfo *info, const VkAllocationCallbacks *allocator, int fd, VkDeviceMemory *memory);
+static VkResult memory_import_image_fd(struct VkDevice_T *device, const VkMemoryAllocateInfo *info, const VkAllocationCallbacks *allocator, int fd, VkDeviceMemory *memory);
 static VkResult memory_mapping_token(struct VkDevice_T *device, struct memory_allocation *allocation);
 
 /*
@@ -737,8 +738,19 @@ memory_import_fd(
 	vulkan_context_lock(device->object.context);
 
 	error = ioctl(device->object.context->fd, GPU_ALLOCATION_IMPORT, &request);
+	if (error != 0)
+		error = errno;
 
 	vulkan_context_unlock(device->object.context);
+
+	/*
+	 * An image capability (what the Wayland WSI sends) has no allocation
+	 * envelope; it is imported as the image's whole allocation instead.
+	 */
+	if (error == EINVAL) {
+		status = memory_import_image_fd(device, info, allocator, fd, memory);
+		return status;
+	}
 
 	/* Rejection has not transferred the caller's descriptor ownership. */
 	if (error != 0)
@@ -799,6 +811,98 @@ memory_import_fd(
 	(void)error;
 
 	/* Succeeded: the imported memory owns its reference and the input fd has been consumed. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Imports the allocation of an exported image capability as device memory.
+ * The kernel checks the device and returns the image's description; the
+ * requested memory type must be the image's and the requested size must fit
+ * its allocation.  The caller binds its own image of the described layout.
+ */
+static VkResult
+memory_import_image_fd(
+	struct VkDevice_T *device,
+	const VkMemoryAllocateInfo *info,
+	const VkAllocationCallbacks *allocator,
+	int fd,
+	VkDeviceMemory *memory)
+{
+	struct gpu_resource_import request;
+	struct memory_allocation *allocation;
+	struct vulkan_memory *storage;
+	VkMemoryAllocateInfo native_info;
+	VkResult status;
+	VkResult cleanup;
+	int error;
+
+	/* Image capabilities travel only between contexts that share images. */
+	if (!(device->object.context->capabilities & GPU_CAP_SHARE))
+		return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+
+	/* The fd is the only input; the kernel supplies the image's metadata. */
+	memset(&request, 0, sizeof(request));
+	request.version = GPU_ABI_VERSION;
+	request.size = sizeof(request);
+	request.fd = fd;
+
+	/* Attaches an alias of the image's allocation to this context. */
+	vulkan_context_lock(device->object.context);
+
+	error = ioctl(device->object.context->fd, GPU_RESOURCE_IMPORT, &request);
+
+	vulkan_context_unlock(device->object.context);
+
+	/* Rejection has not transferred the caller's descriptor ownership. */
+	if (error != 0)
+		return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+
+	/* The request must name the image's memory type and fit its allocation. */
+	status = VK_ERROR_INVALID_EXTERNAL_HANDLE;
+	if (request.image.memory_type == info->memoryTypeIndex &&
+	    info->allocationSize != 0U &&
+	    info->allocationSize <= request.image.allocation_bytes &&
+	    request.image.allocation_bytes <= SIZE_MAX &&
+	    request.resource_id != 0U)
+		status = VK_SUCCESS;
+
+	/* The memory references the whole native allocation, as an OPAQUE import does. */
+	if (status == VK_SUCCESS) {
+		native_info = *info;
+		native_info.allocationSize = request.image.allocation_bytes;
+		status = vulkan_memory_import(
+			device,
+			&native_info,
+			allocator,
+			request.resource_id,
+			request.handle,
+			memory);
+	}
+
+	/* A failed import leaves only the unpublished alias to retire. */
+	if (status != VK_SUCCESS) {
+		vulkan_context_lock(device->object.context);
+
+		cleanup = vulkan_resource_destroy(device->object.context, request.handle);
+
+		vulkan_context_unlock(device->object.context);
+
+		if (cleanup != VK_SUCCESS)
+			return VK_ERROR_DEVICE_LOST;
+
+		/* The original descriptor remains caller-owned after import failure. */
+		return status;
+	}
+
+	/* Public bounds are the requested size; mapping uses the whole allocation. */
+	storage = vulkan_memory(*memory);
+	storage->bytes = info->allocationSize;
+	allocation = storage->backing_private;
+	allocation->view_bytes = (size_t)request.image.allocation_bytes;
+	error = close(fd);
+	(void)error;
+
+	/* Succeeded: the imported memory owns its reference and the fd is consumed. */
 	return VK_SUCCESS;
 }
 

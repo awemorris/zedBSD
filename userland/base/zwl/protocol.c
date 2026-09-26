@@ -529,10 +529,9 @@ surface_commit(
 	struct zwl_object *role;
 	struct zwl_object *previous;
 	struct zwl_server *server;
-	uint32_t configure[5];
 	int error;
 
-	/* Only a full-screen toplevel supplies presentable content in this compositor. */
+	/* Only a toplevel supplies presentable content in this compositor. */
 	role = surface->role;
 	server = surface->client->server;
 	if (role == NULL || role->top == NULL)
@@ -544,31 +543,14 @@ surface_commit(
 		if (surface->pending != NULL)
 			return EPROTO;
 
-		/* Toplevel state is fullscreen and activated with the configured single-output extent. */
-		configure[0] = server->width;
-		configure[1] = server->height;
-		configure[2] = 8;
-		configure[3] = 2;
-		configure[4] = 4;
-		error = zwl_emit(surface->client, role->top->id, 0, configure, sizeof(configure));
-		if (error != 0)
-			return error;
-
-		/* Nonzero serials distinguish the acknowledged configure from uninitialized state. */
-		server->serial++;
-		if (server->serial == 0)
-			server->serial++;
-
-		/* The xdg_surface configure commits the preceding toplevel state. */
-		surface->configure_serial = server->serial;
-		error = zwl_emit(surface->client, role->id, 0, &surface->configure_serial, 4);
+		/* A window chooses its size; a fullscreen one gets the output's. */
+		error = zwl_window_send_configure(surface);
 		if (error != 0)
 			return error;
 
 		/* Only ack_configure can authorize a later buffer-bearing commit. */
 		surface->configured = 1;
 		surface->attached = 0;
-		printf("ZWL CONFIGURE client=%llu surface=%u serial=%u width=%u height=%u\n", (unsigned long long)surface->client->number, surface->id, surface->configure_serial, server->width, server->height);
 		return 0;
 	}
 
@@ -715,11 +697,11 @@ shell_request(
 			return 0;
 		}
 
-		/* An acknowledgment must refer to this surface's actual outstanding configure. */
+		/* An acknowledgment names a configure sent to this surface (the latest, or an earlier one). */
 		if (opcode == 4U && size == 4U) {
 			/* An old or foreign serial cannot authorize new buffer-bearing commits. */
 			serial = word_at(bytes, 0);
-			if (!surface->configured || serial != surface->configure_serial)
+			if (!surface->configured || serial == 0 || serial > surface->configure_serial)
 				return EPROTO;
 
 			/* Buffer-bearing commits may now publish this configured surface. */
@@ -764,7 +746,30 @@ shell_request(
 				return EPROTO;
 		}
 
-		/* Every mapped toplevel already uses the single fullscreen plane. */
+		/* The window becomes fullscreen: at the origin, the output's size (design D0, D6). */
+		if (!surface->fullscreen) {
+			surface->fullscreen = 1;
+			surface->window_x = surface->x;
+			surface->window_y = surface->y;
+			surface->window_width = 0;
+			surface->window_height = 0;
+			if (surface->current != NULL) {
+				surface->window_width = surface->current->image.image.width;
+				surface->window_height = surface->current->image.image.height;
+			}
+
+			/* It covers the output from the origin. */
+			surface->x = 0;
+			surface->y = 0;
+			object->client->server->dirty = 1;
+
+			/* A window already configured is told now; otherwise the first configure says it. */
+			if (surface->configured) {
+				error = zwl_window_send_configure(surface);
+				if (error != 0)
+					return error;
+			}
+		}
 		break;
 	case 1:
 		/* This fullscreen policy supports independent toplevels only. */
@@ -792,15 +797,34 @@ shell_request(
 
 		/* The client still receives the compositor's fixed fullscreen configure. */
 		break;
-	case 9:
-	case 10:
 	case 12:
-	case 13:
-		/* Maximize, fullscreen-unset and minimize have no payload or policy effect here. */
+		/* Leaving fullscreen has no payload. */
 		if (size != 0)
 			return EPROTO;
 
-		/* The supported advisory request retains the selected fullscreen presentation policy. */
+		/* The window returns to its place and size before fullscreen. */
+		if (surface->fullscreen) {
+			surface->fullscreen = 0;
+			surface->x = surface->window_x;
+			surface->y = surface->window_y;
+			object->client->server->dirty = 1;
+			if (surface->configured) {
+				error = zwl_window_send_configure(surface);
+				if (error != 0)
+					return error;
+			}
+		}
+
+		/* Succeeded: the window left fullscreen. */
+		break;
+	case 9:
+	case 10:
+	case 13:
+		/* Maximize and minimize have no payload or effect yet (p011). */
+		if (size != 0)
+			return EPROTO;
+
+		/* The request is valid and has no effect. */
 		break;
 	default:
 		/* Interactive moves, resizing and window menus have no implementation in this fullscreen policy. */
@@ -857,6 +881,10 @@ factory_request(
 	/* The consumer imports into its own context and never receives the producer session. */
 	memcpy(&image, bytes + 8U, sizeof(image));
 	error = zwl_gpu_import(buffer, descriptor, &image);
+
+	/* Window mode's Vulkan image, made once for the buffer's lifetime (design D2). */
+	if (error == 0)
+		error = zwl_import_create(buffer, descriptor);
 	close(descriptor);
 	if (error != 0) {
 		printf("ZWL IMPORT_ERROR client=%llu buffer=%u errno=%d\n", (unsigned long long)factory->client->number, buffer->id, error);
@@ -865,6 +893,61 @@ factory_request(
 	}
 
 	/* Succeeded: the wl_buffer owns its independently imported resource. */
+	return 0;
+}
+
+/*
+ * Sends a toplevel's configure: the output's size and the fullscreen and
+ * activated states for a fullscreen window; otherwise its size before
+ * fullscreen, or 0x0 (the client chooses), and activated.  The xdg_surface
+ * configure with a new serial follows.
+ */
+int
+zwl_window_send_configure(
+	struct zwl_object *surface)
+{
+	struct zwl_server *server;
+	struct zwl_object *role;
+	uint32_t configure[5];
+	size_t size;
+	int error;
+
+	/* The size and states. */
+	server = surface->client->server;
+	role = surface->role;
+	if (surface->fullscreen) {
+		configure[0] = server->width;
+		configure[1] = server->height;
+		configure[2] = 8;
+		configure[3] = 2;
+		configure[4] = 4;
+		size = 5U * sizeof(uint32_t);
+	} else {
+		configure[0] = surface->window_width;
+		configure[1] = surface->window_height;
+		configure[2] = 4;
+		configure[3] = 4;
+		size = 4U * sizeof(uint32_t);
+	}
+
+	/* The toplevel configure. */
+	error = zwl_emit(surface->client, role->top->id, 0, configure, size);
+	if (error != 0)
+		return error;
+
+	/* Nonzero serials distinguish an acknowledged configure from none. */
+	server->serial++;
+	if (server->serial == 0)
+		server->serial++;
+
+	/* The xdg_surface configure commits the toplevel state. */
+	surface->configure_serial = server->serial;
+	error = zwl_emit(surface->client, role->id, 0, &surface->configure_serial, 4);
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	printf("ZWL CONFIGURE client=%llu surface=%u serial=%u width=%u height=%u fullscreen=%u\n", (unsigned long long)surface->client->number, surface->id, surface->configure_serial, configure[0], configure[1], surface->fullscreen);
 	return 0;
 }
 

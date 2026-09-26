@@ -29,10 +29,20 @@ struct wltest_options {
 	uint32_t recreate;
 	uint32_t delay;
 	int verify;
+	int windowed;
+	uint32_t width;
+	uint32_t height;
+	int solid;
+	uint32_t color;
+	uint32_t fullscreen_at;
+	uint32_t unfullscreen_at;
 };
 
 static int options_parse(int argc, char **argv, struct wltest_options *options);
 static int option_number(const char *text, uint32_t maximum, uint32_t *number);
+static int option_size(const char *text, uint32_t *width, uint32_t *height);
+static int option_color(const char *text, uint32_t *color);
+static VkResult follow_size(struct wltest_renderer *renderer, struct wltest_window *window, const struct wltest_options *options);
 static int capture_wait(struct wltest_window *window);
 
 /*
@@ -63,7 +73,7 @@ main(
 	/* Argument failure starts no connection or GPU namespace. */
 	status = options_parse(argc, argv, &options);
 	if (status != 0) {
-		fprintf(stderr, "usage: wltest [--display=NAME] [--frames=1..3600] [--mode=fifo|mailbox] [--verify-session] [--recreate-at=N] [--delay-ms=0..1000] [--token=NAME]\n");
+		fprintf(stderr, "usage: wltest [--display=NAME] [--frames=1..3600] [--mode=fifo|mailbox] [--verify-session] [--recreate-at=N] [--delay-ms=0..1000] [--token=NAME] [--windowed] [--size=WxH] [--color=RRGGBB] [--fullscreen-at=N] [--unfullscreen-at=N]\n");
 		return 2;
 	}
 
@@ -75,7 +85,7 @@ main(
 	completed = 0U;
 	result = VK_SUCCESS;
 	operation = "wltest_window_open";
-	status = wltest_window_open(&window, options.display);
+	status = wltest_window_open(&window, options.display, options.width, options.height, !options.windowed);
 	if (status != 0)
 		goto cleanup;
 
@@ -87,6 +97,12 @@ main(
 		goto cleanup;
 	}
 
+	/* A window test draws one solid color. */
+	renderer.solid_set = options.solid;
+	renderer.solid[0] = (float)((options.color >> 16) & 0xffU) / 255.0f;
+	renderer.solid[1] = (float)((options.color >> 8) & 0xffU) / 255.0f;
+	renderer.solid[2] = (float)(options.color & 0xffU) / 255.0f;
+
 	/* The ordinary path animates without CPU readback; capture pauses are explicit test options. */
 	pause.tv_sec = options.delay / 1000U;
 	pause.tv_nsec = (options.delay % 1000U) * 1000000L;
@@ -96,6 +112,26 @@ main(
 		status = wltest_window_dispatch(&window);
 		if (status != 0 || window.closed != 0)
 			break;
+
+		/* Asks for fullscreen, or to leave it, at the selected frames. */
+		if (frame == options.fullscreen_at) {
+			xdg_toplevel_set_fullscreen(window.toplevel, NULL);
+			printf("WLTEST FULLSCREEN run=%s before=%u\n", options.token, frame);
+		}
+
+		/* And leaves it. */
+		if (frame == options.unfullscreen_at) {
+			xdg_toplevel_unset_fullscreen(window.toplevel);
+			printf("WLTEST UNFULLSCREEN run=%s before=%u\n", options.token, frame);
+		}
+
+		/* A size the compositor configured replaces the swapchain. */
+		result = follow_size(&renderer, &window, &options);
+		operation = renderer.operation;
+		if (result != VK_SUCCESS) {
+			status = -1;
+			break;
+		}
 
 		/* Recreate at the selected frame while retaining the configured native surface. */
 		if (frame == options.recreate) {
@@ -194,9 +230,55 @@ options_parse(
 	options->token = "manual";
 	options->mode_name = "fifo";
 	options->mode = VK_PRESENT_MODE_FIFO_KHR;
+	options->width = 320U;
+	options->height = 240U;
 
 	/* Apply each explicit option in command-line order. */
 	for (index = 1; index < argc; index++) {
+		/* A window: no fullscreen request at the start. */
+		match = strcmp(argv[index], "--windowed");
+		if (match == 0) {
+			options->windowed = 1;
+			continue;
+		}
+
+		/* The size the window has when the compositor leaves it to the client. */
+		match = strncmp(argv[index], "--size=", 7U);
+		if (match == 0) {
+			status = option_size(argv[index] + 7U, &options->width, &options->height);
+			if (status != 0)
+				return -1;
+			continue;
+		}
+
+		/* One solid color instead of the test pattern. */
+		match = strncmp(argv[index], "--color=", 8U);
+		if (match == 0) {
+			status = option_color(argv[index] + 8U, &options->color);
+			if (status != 0)
+				return -1;
+			options->solid = 1;
+			continue;
+		}
+
+		/* The frame before which fullscreen is asked for. */
+		match = strncmp(argv[index], "--fullscreen-at=", 16U);
+		if (match == 0) {
+			status = option_number(argv[index] + 16U, 3600U, &options->fullscreen_at);
+			if (status != 0)
+				return -1;
+			continue;
+		}
+
+		/* The frame before which fullscreen is left. */
+		match = strncmp(argv[index], "--unfullscreen-at=", 18U);
+		if (match == 0) {
+			status = option_number(argv[index] + 18U, 3600U, &options->unfullscreen_at);
+			if (status != 0)
+				return -1;
+			continue;
+		}
+
 		/* Verification selects the six frames understood by the capture oracle. */
 		match = strcmp(argv[index], "--verify-session");
 		if (match == 0) {
@@ -409,3 +491,83 @@ capture_wait(
 	/* Succeeded: the harness has finished capturing this displayed frame. */
 	return 0;
 }
+
+/* Parses WIDTHxHEIGHT, each 64..8192. */
+static int
+option_size(
+	const char *text,
+	uint32_t *width,
+	uint32_t *height)
+{
+	char *end;
+	unsigned long number;
+
+	/* The width, then x. */
+	number = strtoul(text, &end, 10);
+	if (end == text || *end != 'x' || number < 64UL || number > 8192UL)
+		return -1;
+	*width = (uint32_t)number;
+
+	/* The height, and nothing after it. */
+	text = end + 1;
+	number = strtoul(text, &end, 10);
+	if (end == text || *end != '\0' || number < 64UL || number > 8192UL)
+		return -1;
+	*height = (uint32_t)number;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Parses a color written as six hexadecimal digits RRGGBB. */
+static int
+option_color(
+	const char *text,
+	uint32_t *color)
+{
+	char *end;
+	unsigned long number;
+	size_t length;
+
+	/* Exactly six hexadecimal digits. */
+	length = strlen(text);
+	if (length != 6U)
+		return -1;
+	number = strtoul(text, &end, 16);
+	if (*end != '\0')
+		return -1;
+
+	/* Succeeded. */
+	*color = (uint32_t)number;
+	return 0;
+}
+
+/*
+ * Replaces the swapchain when the compositor configured a size other than
+ * the one the images have.
+ */
+static VkResult
+follow_size(
+	struct wltest_renderer *renderer,
+	struct wltest_window *window,
+	const struct wltest_options *options)
+{
+	VkResult result;
+
+	/* The same size needs nothing. */
+	if (window->width == renderer->extent.width &&
+	    window->height == renderer->extent.height)
+		return VK_SUCCESS;
+
+	/* A new chain of the configured size. */
+	renderer->extent.width = window->width;
+	renderer->extent.height = window->height;
+	result = wltest_renderer_recreate(renderer);
+	if (result != VK_SUCCESS)
+		return result;
+
+	/* Succeeded: the harness sees the new size. */
+	printf("WLTEST RESIZE run=%s width=%u height=%u\n", options->token, window->width, window->height);
+	return VK_SUCCESS;
+}
+

@@ -6,9 +6,15 @@
  */
 
 /*
- * Shared state for the minimal full-screen Wayland compositor.
+ * Shared state for the Wayland compositor.
  *
- * zwl shows one full-screen surface at a time.  The WS014/WS029 scope had
+ * zwl has two modes (WS035 compositing design, D0).  In window mode it draws
+ * a background and every window, bottom to top, with Vulkan into a
+ * VK_KHR_display swapchain (compose.c); a window's image is imported once
+ * per wl_buffer (import.c).  When the topmost window is fullscreen and its
+ * image can be scanned out as the whole output, it enters fullscreen mode:
+ * the swapchain is destroyed and that image is presented directly with
+ * GPU_DISPLAY_PRESENT (display.c).  The WS014/WS029 scope had
  * no input; WS031 p013 extends it with one seat ("seat0", wl_seat v5):
  *
  * - Every /dev/input/eventN reporting REL_X+REL_Y or ABS_X+ABS_Y is a
@@ -55,9 +61,14 @@
 /* Rescan period for evdev nodes that appear after start-up, in milliseconds. */
 #define ZWL_INPUT_SCAN_MS	2000U
 
+/* A window's place when the client chooses its size: cascaded from the centre by this step. */
+#define ZWL_CASCADE_STEP	32
+
 struct zwl_server;
 struct zwl_client;
 struct zwl_object;
+struct zwl_compose;
+struct zwl_import;
 
 /* Each live protocol identity has one immutable interface and negotiated version. */
 enum zwl_kind {
@@ -147,6 +158,21 @@ struct zwl_object {
 	unsigned acknowledged;
 	uint32_t configure_serial;
 	uint64_t commit_order;
+	/* A buffer's Vulkan image for window mode, and whether it can be the whole output. */
+	struct zwl_import *import;
+	unsigned scanout;
+	/* A surface's window: place, stacking (map order, lowest at the bottom) and fullscreen state. */
+	unsigned mapped;
+	uint64_t map_order;
+	int32_t x;
+	int32_t y;
+	unsigned fullscreen;
+	uint32_t window_width;
+	uint32_t window_height;
+	int32_t window_x;
+	int32_t window_y;
+	/* A surface whose current image has not been shown yet. */
+	unsigned fresh;
 };
 
 /* One stream has independent byte and fd FIFOs, plus its own protocol namespace. */
@@ -180,6 +206,12 @@ struct zwl_perf {
 	uint32_t passes;
 	uint32_t timeouts;
 	uint32_t presents;
+	/* Window mode: frames completed, and their time from the start of drawing to the fence. */
+	uint32_t compose_frames;
+	uint64_t compose_cycles;
+	uint64_t compose_draw_cycles;
+	uint64_t compose_acquire_cycles;
+	uint64_t compose_present_cycles;
 };
 
 uint64_t zwl_cycles(void);
@@ -209,6 +241,8 @@ struct zwl_server {
 	uint64_t max_frames;
 	/* Nonzero with --log-frames: every presentation and buffer release is printed (for the tests that read them). */
 	unsigned log_frames;
+	/* Nonzero with --direct: no window mode; one surface is shown directly, as before WS035. */
+	unsigned direct;
 	unsigned failed;
 	struct zwl_input_device inputs[ZWL_INPUT_MAX];
 	uint64_t input_scan_time;
@@ -220,6 +254,14 @@ struct zwl_server {
 	int32_t pointer_y;
 	unsigned modifier_keys;
 	uint32_t modifiers;
+	/* Window mode: the Vulkan output, whether a frame is due, and the fence fd of the frame in flight. */
+	struct zwl_compose *compose;
+	unsigned windowed;
+	unsigned dirty;
+	int frame_fd;
+	uint64_t map_order;
+	uint32_t windows;
+	uint64_t mode_switch_ms;
 };
 
 uint64_t zwl_milliseconds(void);
@@ -244,6 +286,18 @@ int zwl_gpu_import(struct zwl_object *buffer, int descriptor, const struct gpu_i
 int zwl_present(struct zwl_object *surface);
 int zwl_unscan(struct zwl_server *server);
 void zwl_schedule(struct zwl_server *server);
+void zwl_frame_done(struct zwl_server *server);
+int zwl_compose_open(struct zwl_server *server);
+int zwl_compose_output_open(struct zwl_server *server);
+void zwl_compose_output_close(struct zwl_server *server);
+int zwl_compose_draw(struct zwl_server *server);
+int zwl_compose_complete(struct zwl_server *server);
+void zwl_compose_quiesce(struct zwl_server *server);
+void zwl_compose_close(struct zwl_server *server);
+int zwl_import_create(struct zwl_object *buffer, int descriptor);
+void zwl_import_destroy(struct zwl_object *buffer);
+struct zwl_object *zwl_top_window(struct zwl_server *server);
+int zwl_window_send_configure(struct zwl_object *surface);
 uint32_t zwl_next_serial(struct zwl_server *server);
 int zwl_seat_bind(struct zwl_object *seat);
 int zwl_seat_request(struct zwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);

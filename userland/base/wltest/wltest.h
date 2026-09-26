@@ -61,10 +61,13 @@ struct wltest_renderer {
 	VkFormat format;
 	VkPresentModeKHR mode;
 	const char *operation;
+	/* Nonzero draws the whole image in solid[] instead of the test pattern (window tests). */
+	int solid_set;
+	float solid[3];
 };
 
 /* Window lifetime encloses all renderer use of the borrowed native surface. */
-int wltest_window_open(struct wltest_window *window, const char *display);
+int wltest_window_open(struct wltest_window *window, const char *display, uint32_t width, uint32_t height, int fullscreen);
 int wltest_window_dispatch(struct wltest_window *window);
 void wltest_window_close(struct wltest_window *window);
 

@@ -48,14 +48,17 @@ static const struct xdg_toplevel_listener toplevel_listener = {
 int
 wltest_window_open(
 	struct wltest_window *window,
-	const char *display)
+	const char *display,
+	uint32_t width,
+	uint32_t height,
+	int fullscreen)
 {
 	int status;
 
-	/* The compositor may choose dimensions, otherwise this application chooses 320 by 240. */
+	/* The compositor may choose dimensions, otherwise this application chooses its own. */
 	memset(window, 0, sizeof(*window));
-	window->width = 320U;
-	window->height = 240U;
+	window->width = width;
+	window->height = height;
 
 	/* This window owns the original connection until its renderer and roles have retired. */
 	window->display = wl_display_connect(display);
@@ -108,10 +111,11 @@ wltest_window_open(
 	if (status != 0)
 		return -1;
 
-	/* Publish the application identity and fullscreen preference before the empty commit. */
+	/* Publish the application identity and the fullscreen preference, unless a window was asked for. */
 	xdg_toplevel_set_title(window->toplevel, "Wayland Vulkan test");
 	xdg_toplevel_set_app_id(window->toplevel, "wltest");
-	xdg_toplevel_set_fullscreen(window->toplevel, NULL);
+	if (fullscreen)
+		xdg_toplevel_set_fullscreen(window->toplevel, NULL);
 	wl_surface_commit(window->surface);
 
 	/* No Vulkan buffer can be presented until the initial configure has been acknowledged. */
