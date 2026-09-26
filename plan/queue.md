@@ -1,10 +1,10 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue: なし（q477 finished）
+# Queue: q478 active
 
 <!-- awesome-plan-current:start -->
-Status: none（2026-09-26）
-Active Queue: なし
+Status: active（2026-09-26）
+Active Queue: [q478](history/queue-q478.md)（ws069-p005: 固定機能の GL 1.x と gears）
 Last finished Queue: [q477](history/queue-q477.md)（ws069-p004 cleared。GLX の核）
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
