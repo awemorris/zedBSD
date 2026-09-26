@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q481（ws035-p065 cleared。仮想デスクトップ）
+Last finished Queue: q482（ws035-p064 cleared。追従するドッキングの解除）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q481（2026-09-26）
+## 最新: q443〜q482（2026-09-26）
+
+[q482](queue-q482.md): ws035-p064 cleared。docked の題名を引くと窓が指に追従して縮み、140 px の手前で離すと戻り、越えると元の大きさで外れる。
 
 [q481](queue-q481.md): ws035-p065 cleared。仮想デスクトップ 4 つ（窓はデスクトップごと、バーの絵・Ctrl+Alt+←/→・左右の端の swipe で横に移動）。
 

@@ -377,6 +377,8 @@ struct zwl_server {
 	struct zwl_object *click_surface;
 	uint64_t click_ms;
 	struct zwl_object *pull;
+	int32_t pull_start_y;
+	int32_t pull_distance;
 	struct zwl_object *anim;
 	uint64_t anim_start_ms;
 	unsigned anim_docking;

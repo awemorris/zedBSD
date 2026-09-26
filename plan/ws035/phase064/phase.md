@@ -4,7 +4,7 @@
 
 Phase ID: `ws035-p064`
 Parent: [WS035](../ws.md)
-Status: in-progress（q482-i01）
+Status: cleared（q482-i01、2026-09-26）
 Phase disposition: normal
 Queue: q482-i01
 承認: 2026-09-26 ユーザーの自律実行の指示（デスクトップ関連を優先）。ws.md の planned の Phase。
@@ -24,3 +24,22 @@ Queue: q482-i01
 
 1. Venus で引いた途中の窓が縮んで題名の bar が出ている（画面）、手前で離すと docked に戻る、越えれば元の大きさで指に付いて動く。
 2. p062・p065 の試験が通る。build warning 0、style-check 0。
+
+## 結果（2026-09-26、q482-i01）
+
+cleared。受け入れ 1・2 を満たした（実機は未実施）。
+
+### 実装（`userland/base/zwl/shell.c`、zwl.h）
+
+- バーの題名の press で `pull_start_y`、motion で `pull_distance`（上へ戻せば 0 = docked のまま）。`PULL_DISTANCE` は 16 → 140 px。
+- 引いている間の矩形 `pulled_rect`: docked の矩形から「元の大きさ、題名の同じ所が指の下」の矩形へ、p = d/140 を ease-out
+  （1-(1-p)²）で。body は角丸と影（docked でない描き方）、浮いた題名の bar が p で fade in、バーの題名は隠れる（`docked_window` が NULL）。
+- 140 px を越えたら今までどおり undock して移動が続く（矩形は連続）。
+- 手前で離すと `pull_back`: 今の矩形から docked へ dock の animation（220 ms、題名がバーへ滑る）、`ZWL GLASS pull back`。
+
+### 検証（QEMU・Venus）
+
+- `plan/ws035/tests/zdesktop-p064.sh` PASS（build/ws035-p064.log）: 70 px 引いた途中で窓が縮み角丸と題名の bar（build/ws035-p064/pulling.png、
+  窓の中が赤）、離すと docked に戻る（back.png、画面の端まで赤、`pull back`）、引き切ると `undock via=pull` と `moved`。
+- 回帰: zdesktop-p062（引く距離 243 px で undock）・p065 PASS。build warning 0、shell.c の style-check 0。
+- boot test PASS（build/ws035-p064-boot/login.png）。i915 実機は未実施。

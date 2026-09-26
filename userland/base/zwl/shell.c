@@ -55,13 +55,17 @@
 /* The docked title's buttons in the system bar are further apart. */
 #define BAR_BUTTON_SPACING	46
 
-/* The dock animation, a double click, and how far a docked title is pulled down to come off. */
+/*
+ * The dock animation, a double click, and how far a docked title is pulled
+ * down to come off (ws035-p064: the window follows the pull on the way,
+ * shrinking from the docked space to its own size under the pointer).
+ */
 #define DOCK_MS			220U
 
 /* The kind of the animation that is not a dock or an undock: a launched window growing from its icon (ws035-p071). */
 #define ANIM_LAUNCH		2U
 #define DOUBLE_CLICK_MS		400U
-#define PULL_DISTANCE		16
+#define PULL_DISTANCE		140
 
 /* A docked body starts this far under the top of the output. */
 #define DOCK_TOP		(ZWL_GLASS_BAR + 4)
@@ -141,6 +145,8 @@ static float animation_progress(struct zwl_server *server);
 static void lerp_rect(const struct shell_rect *from, const struct shell_rect *to, float t, struct shell_rect *result);
 static void body_rect(struct zwl_server *server, const struct zwl_object *surface, struct shell_rect *body);
 static void docked_rect(struct zwl_server *server, struct shell_rect *body);
+static void pulled_rect(struct zwl_server *server, const struct zwl_object *surface, struct shell_rect *body);
+static void pull_back(struct zwl_server *server);
 static void floating_title(const struct shell_rect *body, struct shell_rect *panel);
 static void bar_title_slot(struct zwl_server *server, const struct shell_bar *bar, struct shell_rect *slot);
 static void window_size(const struct zwl_object *surface, int32_t *width, int32_t *height);
@@ -340,7 +346,7 @@ zwl_glass_button(
 	/* A release ends a move (docking in the system bar) or a pull. */
 	if (state == 0) {
 		if (server->pull != NULL) {
-			server->pull = NULL;
+			pull_back(server);
 			return 1;
 		}
 
@@ -474,9 +480,13 @@ zwl_glass_motion(
 			return 1;
 		}
 
-		/* Not far enough yet. */
-		if (server->pointer_y < ZWL_GLASS_BAR + PULL_DISTANCE)
+		/* Not far enough yet: the window follows the pull. */
+		server->pull_distance = server->pointer_y - server->pull_start_y;
+		if (server->pull_distance < 0)
+			server->pull_distance = 0;
+		if (server->pull_distance < PULL_DISTANCE)
 			return 1;
+		server->pull_distance = 0;
 
 		/* The same part of the title bar stays under the pointer. */
 		x = server->pointer_x - (int32_t)((int64_t)surface->restore_width * server->pointer_x / (int32_t)server->width);
@@ -741,6 +751,15 @@ draw_window(
 		}
 
 		/* Nothing more is drawn for it. */
+		return;
+	}
+
+	/* A docked window being pulled has round corners and its floating title bar, fading in with the pull. */
+	if (surface->maximized && surface == server->pull && server->pull_distance > 0) {
+		t = (float)server->pull_distance / (float)PULL_DISTANCE;
+		draw_body(server, command, surface, &body, 0, focused);
+		floating_title(&body, &panel);
+		draw_title_bar(server, command, surface, &panel, t, t, focused);
 		return;
 	}
 
@@ -1312,6 +1331,12 @@ body_rect(
 		return;
 	}
 
+	/* Docked and being pulled: on its way from the docked space to its own size under the pointer. */
+	if (surface->maximized && surface == server->pull && server->pull_distance > 0) {
+		pulled_rect(server, surface, body);
+		return;
+	}
+
 	/* Docked. */
 	if (surface->maximized) {
 		docked_rect(server, body);
@@ -1547,6 +1572,8 @@ docked_window(
 	top = zwl_top_window(server);
 	if (top == NULL || !top->maximized || server->anim == top)
 		return NULL;
+	if (server->pull == top && server->pull_distance > 0)
+		return NULL;
 
 	/* Succeeded. */
 	return top;
@@ -1770,6 +1797,8 @@ bar_press(
 
 	/* A single press may become a pull. */
 	server->pull = surface;
+	server->pull_start_y = server->pointer_y;
+	server->pull_distance = 0;
 	return 1;
 }
 
@@ -2365,4 +2394,72 @@ desktop_windows(
 
 	/* The count. */
 	return count;
+}
+
+/*
+ * Where a docked window being pulled is: a fraction of the way (the pull
+ * over PULL_DISTANCE, eased) from the docked space to its own size under
+ * the pointer, where it comes off at PULL_DISTANCE.
+ */
+static void
+pulled_rect(
+	struct zwl_server *server,
+	const struct zwl_object *surface,
+	struct shell_rect *body)
+{
+	struct shell_rect docked;
+	struct shell_rect own;
+	float t;
+
+	/* The docked space. */
+	docked_rect(server, &docked);
+
+	/* Its own size, placed as the pull leaves it (the same part of the title under the pointer). */
+	own.width = (int32_t)surface->restore_width;
+	own.height = (int32_t)surface->restore_height;
+	own.x = server->pointer_x - (int32_t)((int64_t)surface->restore_width * server->pointer_x / (int32_t)server->width);
+	own.y = server->pointer_y + ZWL_GLASS_GAP + ZWL_GLASS_TITLE / 2;
+
+	/* Eased out along the pull. */
+	t = (float)server->pull_distance / (float)PULL_DISTANCE;
+	if (t > 1.0f)
+		t = 1.0f;
+	t = 1.0f - (1.0f - t) * (1.0f - t);
+	lerp_rect(&docked, &own, t, body);
+}
+
+/*
+ * Ends a pull short of coming off: the window springs back from where it
+ * was pulled to the docked space (the dock animation), or, not pulled at
+ * all, stays.
+ */
+static void
+pull_back(
+	struct zwl_server *server)
+{
+	struct zwl_object *surface;
+	struct shell_rect from;
+	struct shell_rect to;
+
+	/* The pull ends. */
+	surface = server->pull;
+	server->pull = NULL;
+	if (surface == NULL || surface->dead || !surface->mapped || server->pull_distance <= 0) {
+		server->pull_distance = 0;
+		return;
+	}
+
+	/* From where it was pulled back to the docked space. */
+	server->pull = surface;
+	body_rect(server, surface, &from);
+	server->pull = NULL;
+	server->pull_distance = 0;
+	docked_rect(server, &to);
+	memcpy(server->anim_from, &from, sizeof(server->anim_from));
+	memcpy(server->anim_to, &to, sizeof(server->anim_to));
+	server->anim = surface;
+	server->anim_docking = 1;
+	server->anim_start_ms = zwl_milliseconds();
+	server->dirty = 1;
+	printf("ZWL GLASS pull back surface=%u\n", surface->id);
 }
