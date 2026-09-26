@@ -13,6 +13,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define WLTEST_GPU_TIMEOUT 10000000000ULL
 
@@ -23,6 +24,7 @@ static VkResult renderer_commands(struct wltest_renderer *renderer);
 static VkResult renderer_targets(struct wltest_renderer *renderer);
 static void renderer_targets_free(struct wltest_renderer *renderer);
 static void renderer_rect(VkCommandBuffer command, uint32_t x, uint32_t y, uint32_t width, uint32_t height, float red, float green, float blue);
+static uint64_t renderer_clock(void);
 
 /*
  * Creates native-independent Vulkan resources after the initial Wayland configure.
@@ -119,6 +121,8 @@ wltest_renderer_draw(
 	VkSubmitInfo submit;
 	VkPresentInfoKHR present;
 	VkPipelineStageFlags stage;
+	uint64_t started;
+	uint64_t spent;
 	uint32_t image;
 	uint32_t x;
 	uint32_t width;
@@ -217,7 +221,12 @@ wltest_renderer_draw(
 	present.pSwapchains = &renderer->swapchain;
 	present.pImageIndices = &image;
 	renderer->operation = "vkQueuePresentKHR";
+	started = renderer_clock();
 	error = vkQueuePresentKHR(renderer->queue, &present);
+	spent = renderer_clock() - started;
+	renderer->present_ns += spent;
+	if (spent > renderer->present_max_ns)
+		renderer->present_max_ns = spent;
 	if (error != VK_SUCCESS && error != VK_SUBOPTIMAL_KHR)
 		return error;
 
@@ -856,4 +865,20 @@ renderer_rect(
 
 	/* Succeeded: the GPU command stream contains the requested opaque rectangle. */
 	return;
+}
+
+/* Reads the monotonic clock in nanoseconds (zero when it cannot be read). */
+static uint64_t
+renderer_clock(void)
+{
+	struct timespec now;
+	int status;
+
+	/* A failed read measures nothing rather than a wrong time. */
+	status = clock_gettime(CLOCK_MONOTONIC, &now);
+	if (status != 0)
+		return 0U;
+
+	/* Succeeded. */
+	return (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec;
 }

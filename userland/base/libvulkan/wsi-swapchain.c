@@ -175,6 +175,7 @@ static void present_copy_shared(VkCommandBuffer command, struct vulkan_swapchain
 static VkResult present_submit(struct wsi_present_job *job, const VkPresentInfoKHR *info);
 static void present_compose(struct wsi_present_job *job, uint32_t index, struct vulkan_wsi_pixels *pixels);
 static VkResult present_native(struct wsi_present_job *job, const VkPresentInfoKHR *info);
+static VkBool32 present_early(const struct wsi_present_job *job);
 static void present_finish(struct wsi_present_job *job, const VkPresentInfoKHR *info, VkResult error);
 static VkResult present_combine(VkResult first, VkResult second);
 static VkResult swapchain_device_lost(struct VkDevice_T *device);
@@ -2605,7 +2606,9 @@ present_worker_main(
 	struct vulkan_allocator allocator;
 	VkResult error;
 	VkResult native_error;
+	VkResult waited;
 	uint32_t index;
+	VkBool32 early;
 
 	/* The logical device joins this worker before any referenced queue can retire. */
 	worker = argument;
@@ -2636,11 +2639,6 @@ present_worker_main(
 
 		pthread_mutex_unlock(&swapchain_mutex);
 
-		/* Neither transport acceptance nor a context-zero display fence proves producer completion. */
-		error = vulkan_fences_wait(job->queue->device, 1U, &job->fence, VK_TRUE, UINT64_MAX);
-		if (error != VK_SUCCESS)
-			error = swapchain_device_lost(job->queue->device);
-
 		/* Terminal native loss suppresses later submissions to the same obsolete surface. */
 		for (index = 0U; index < job->count; index++) {
 			/* A late error from earlier work invalidates this chain before any new native selection. */
@@ -2650,8 +2648,22 @@ present_worker_main(
 				job->results[index] = native_error;
 		}
 
+		/*
+		 * A compositor that takes acquire fences gets the commit now, with the
+		 * fence; the wait below then only retires the job.
+		 */
+		early = present_early(job);
+		error = VK_SUCCESS;
+		if (early)
+			error = present_native(job, &job->info);
+
+		/* Neither transport acceptance nor a context-zero display fence proves producer completion. */
+		waited = vulkan_fences_wait(job->queue->device, 1U, &job->fence, VK_TRUE, UINT64_MAX);
+		if (waited != VK_SUCCESS)
+			error = swapchain_device_lost(job->queue->device);
+
 		/* The unchanged Wayland v1 contract receives commits only after GPU writes and ownership release finish. */
-		if (error == VK_SUCCESS)
+		if (error == VK_SUCCESS && !early)
 			error = present_native(job, &job->info);
 
 		/* Native failures belong to future chain operations, never a returned caller output array. */
@@ -2683,6 +2695,39 @@ present_worker_main(
 
 	/* Succeeded: no job or library object remains borrowed by this native worker. */
 	return NULL;
+}
+
+/*
+ * Reports whether a job's images may be committed before the GPU finishes
+ * them: every target presents a GPU image to a surface whose compositor takes
+ * the job's exported fence with the commit.
+ */
+static VkBool32
+present_early(
+	const struct wsi_present_job *job)
+{
+	struct vulkan_swapchain *chain;
+	uint32_t index;
+	VkBool32 early;
+
+	/* Without an exported fence there is nothing to send. */
+	if (job->fence_fd < 0)
+		return VK_FALSE;
+
+	/* Every target must take it. */
+	for (index = 0U; index < job->count; index++) {
+		chain = job->chains[index];
+		if (chain->gpu_present == VK_FALSE ||
+		    chain->surface->platform->commit_early == NULL ||
+		    chain->surface->platform->present_image_sync == NULL)
+			return VK_FALSE;
+		early = chain->surface->platform->commit_early(chain->lease);
+		if (early == VK_FALSE)
+			return VK_FALSE;
+	}
+
+	/* Succeeded: the commit may precede completion. */
+	return VK_TRUE;
 }
 
 /* Drains accepted native request work without waiting for scanout retention or future frame replacement. */

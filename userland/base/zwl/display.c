@@ -283,6 +283,64 @@ zwl_present(
 }
 
 /*
+ * Reports whether a surface's queued image may be used: each of its acquire
+ * fences is done (a later generation, or the same one signaled or failed).
+ * Done fences are closed.  Nothing is waited for.
+ */
+int
+zwl_fence_ready(
+	struct zwl_server *server,
+	struct zwl_object *surface)
+{
+	struct gpu_fence_state state;
+	unsigned index;
+	unsigned kept;
+	int error;
+
+	/* A commit without fences is ready at once. */
+	if (surface->fence_count == 0)
+		return 1;
+
+	/* Each fence still pending is kept; the others are closed. */
+	kept = 0;
+	for (index = 0; index < surface->fence_count; index++) {
+		/* Generation zero reads the fence's current generation and state. */
+		memset(&state, 0, sizeof(state));
+		state.version = GPU_ABI_VERSION;
+		state.size = sizeof(state);
+		state.fd = surface->fences[index].fd;
+		error = ioctl(server->gpu, GPU_FENCE_QUERY, &state);
+
+		/* Still rendering: the generation, or an earlier one, is pending. */
+		if ((error == 0 && state.generation < surface->fences[index].generation) ||
+		    (error == 0 &&
+		     state.generation == surface->fences[index].generation &&
+		     state.state == GPU_FENCE_PENDING)) {
+			surface->fences[kept] = surface->fences[index];
+			kept++;
+			continue;
+		}
+
+		/* Done, or a fence that can no longer be read, which is not waited for. */
+		close(surface->fences[index].fd);
+	}
+
+	/* The pending fences remain. */
+	surface->fence_count = kept;
+
+	/* Some image is still being drawn. */
+	if (kept != 0) {
+		surface->fence_waited = 1;
+		return 0;
+	}
+
+	/* Succeeded: all done. */
+	if (server->log_frames && surface->fence_waited)
+		printf("ZWL ACQUIRED surface=%u waited_ms=%llu\n", surface->id, (unsigned long long)(zwl_milliseconds() - surface->fence_ms));
+	return 1;
+}
+
+/*
  * Applies the commits of this event-loop pass, chooses the mode from the
  * topmost window, and shows the result: a frame in window mode, or the
  * fullscreen window's image in fullscreen mode.
@@ -296,6 +354,7 @@ zwl_schedule(
 	struct zwl_object *top;
 	unsigned fullscreen;
 	uint64_t now;
+	int ready;
 	int error;
 
 	/* Without a Vulkan device the compositor shows one surface directly, as before. */
@@ -309,7 +368,15 @@ zwl_schedule(
 		if (client->fatal)
 			continue;
 		for (surface = client->objects; surface != NULL; surface = surface->next) {
-			if (surface->kind == ZWL_SURFACE && surface->ready && !surface->dead)
+			/* Only a live surface with a commit. */
+			if (surface->kind != ZWL_SURFACE ||
+			    !surface->ready ||
+			    surface->dead)
+				continue;
+
+			/* A commit whose image is still being drawn waits for a later pass. */
+			ready = zwl_fence_ready(server, surface);
+			if (ready)
 				adopt_commit(server, surface);
 		}
 	}
@@ -426,6 +493,7 @@ schedule_direct(
 	struct zwl_client *client;
 	struct zwl_object *surface;
 	struct zwl_object *chosen;
+	int ready;
 	int error;
 
 	/* A later same-surface commit has already replaced any unpresented mailbox image. */
@@ -441,6 +509,11 @@ schedule_direct(
 			if (surface->kind != ZWL_SURFACE ||
 			    !surface->ready ||
 			    surface->dead)
+				continue;
+
+			/* A commit whose image is still being drawn waits for a later pass. */
+			ready = zwl_fence_ready(server, surface);
+			if (!ready)
 				continue;
 
 			/* A single presentation per event-loop pass bounds scheduling latency. */

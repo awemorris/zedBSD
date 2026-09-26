@@ -38,6 +38,9 @@ extern const struct wl_interface zed_gpu_buffer_v1_interface;
 void zed_gpu_buffer_v1_destroy(struct zed_gpu_buffer_v1 *object);
 #define ZED_GPU_BUFFER_V1_CREATE_BUFFER 1U
 struct wl_buffer *zed_gpu_buffer_v1_create_buffer(struct zed_gpu_buffer_v1 *object, int fd, struct wl_array *metadata);
+#define ZED_GPU_BUFFER_V1_SET_ACQUIRE_FENCE 2U
+#define ZED_GPU_BUFFER_V1_SET_ACQUIRE_FENCE_SINCE_VERSION 2U
+void zed_gpu_buffer_v1_set_acquire_fence(struct zed_gpu_buffer_v1 *object, struct wl_surface *surface, int fd, uint64_t generation);
 void zed_gpu_buffer_v1_set_user_data(struct zed_gpu_buffer_v1 *object, void *data);
 void *zed_gpu_buffer_v1_get_user_data(struct zed_gpu_buffer_v1 *object);
 uint32_t zed_gpu_buffer_v1_get_version(struct zed_gpu_buffer_v1 *object);

@@ -58,6 +58,8 @@ main(
 	struct wltest_options options;
 	struct timespec pause;
 	const char *operation;
+	uint64_t present_ns;
+	uint64_t present_max_ns;
 	uint32_t frame;
 	uint32_t completed;
 	VkResult result;
@@ -185,6 +187,8 @@ main(
 
 cleanup:
 	/* Cleanup never overwrites the operation that explains a failed render or native request. */
+	present_ns = renderer.present_ns;
+	present_max_ns = renderer.present_max_ns;
 	cleanup = wltest_renderer_close(&renderer);
 	wltest_window_close(&window);
 	if (status != 0 ||
@@ -203,6 +207,7 @@ cleanup:
 	}
 
 	/* Report the finite run only after both renderer and native ownership have retired. */
+	printf("WLTEST PRESENT run=%s frames=%u total_us=%llu max_us=%llu\n", options.token, completed, (unsigned long long)(present_ns / 1000U), (unsigned long long)(present_max_ns / 1000U));
 	printf("WLTEST DONE run=%s frames=%u\n", options.token, completed);
 	fflush(stdout);
 

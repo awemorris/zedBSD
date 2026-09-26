@@ -44,6 +44,7 @@ struct wayland_surface {
 	VkBool32 mutex_ready;
 	VkBool32 lost;
 	uint32_t factory_name;
+	uint32_t factory_version;
 };
 
 /* A wl_buffer retains a capability on the server until its own protocol retirement. */
@@ -83,6 +84,9 @@ static VkResult wayland_wait(void *private_lease, uint64_t sequence, uint64_t ti
 static void wayland_destroy(struct vulkan_surface *surface);
 static VkResult wayland_import(void *private_lease, int fd, const struct gpu_image_descriptor *descriptor, void **result);
 static VkResult wayland_present(void *private_lease, void *private_image, VkPresentModeKHR mode, uint64_t *sequence);
+static VkResult wayland_present_sync(void *private_lease, void *private_image, VkPresentModeKHR mode, uint64_t *sequence, int wait_fd, uint64_t wait_generation);
+static VkResult wayland_commit(void *private_lease, void *private_image, VkPresentModeKHR mode, uint64_t *sequence, int wait_fd, uint64_t wait_generation);
+static VkBool32 wayland_commit_early(void *private_lease);
 static VkResult wayland_progress(void *private_lease);
 static VkBool32 wayland_available(void *private_image);
 static void wayland_destroy_image(void *private_image);
@@ -97,7 +101,8 @@ static void wayland_frame_done(void *data, struct wl_callback *callback, uint32_
 static const struct vulkan_wsi_platform_ops wayland_platform = {
 	wayland_capabilities, wayland_formats, wayland_modes,
 	wayland_claim, wayland_release, NULL, wayland_wait, wayland_destroy,
-	wayland_import, wayland_present, wayland_progress, wayland_available, wayland_destroy_image, NULL, NULL, NULL, NULL
+	wayland_import, wayland_present, wayland_progress, wayland_available, wayland_destroy_image, NULL, wayland_present_sync, NULL, NULL,
+	wayland_commit_early
 };
 
 /* Registry discovery and buffer ownership are delivered only on the WSI queue. */
@@ -653,6 +658,65 @@ wayland_present(
 	VkPresentModeKHR mode,
 	uint64_t *sequence)
 {
+	VkResult error;
+
+	/* No fence: the image is complete. */
+	error = wayland_commit(private_lease, private_image, mode, sequence, -1, 0U);
+	return error;
+}
+
+/*
+ * Commits a GPU image with the fence of its rendering when the compositor
+ * takes acquire fences (zed_gpu_buffer_v1 revision two); otherwise the
+ * caller waited for the fence and the image is complete.
+ */
+static VkResult
+wayland_present_sync(
+	void *private_lease,
+	void *private_image,
+	VkPresentModeKHR mode,
+	uint64_t *sequence,
+	int wait_fd,
+	uint64_t wait_generation)
+{
+	struct wayland_lease *lease;
+	VkResult error;
+
+	/* A revision-one compositor gets no fence. */
+	lease = private_lease;
+	if (lease->surface->factory_version < 2U)
+		wait_fd = -1;
+	error = wayland_commit(private_lease, private_image, mode, sequence, wait_fd, wait_generation);
+	return error;
+}
+
+/* Reports whether this surface's compositor takes acquire fences, so a commit may come before completion. */
+static VkBool32
+wayland_commit_early(
+	void *private_lease)
+{
+	struct wayland_lease *lease;
+
+	/* Revision two of the factory. */
+	lease = private_lease;
+	if (lease->surface->factory_version >= 2U)
+		return VK_TRUE;
+	return VK_FALSE;
+}
+
+/*
+ * Commits a GPU image, with its acquire fence when one is given, and
+ * separates frame pacing from allocation reuse.
+ */
+static VkResult
+wayland_commit(
+	void *private_lease,
+	void *private_image,
+	VkPresentModeKHR mode,
+	uint64_t *sequence,
+	int wait_fd,
+	uint64_t wait_generation)
+{
 	struct wayland_lease *lease;
 	struct wayland_surface *surface;
 	struct wayland_image *image;
@@ -716,7 +780,11 @@ wayland_present(
 	frame->next = lease->frames;
 	lease->frames = frame;
 
-	/* Commits the completed GPU image with full-surface damage on the native wrapper. */
+	/* The fence the compositor waits for before it uses this commit. */
+	if (wait_fd >= 0)
+		zed_gpu_buffer_v1_set_acquire_fence(surface->factory, surface->native, wait_fd, wait_generation);
+
+	/* Commits the GPU image with full-surface damage on the native wrapper. */
 	wl_surface_attach(surface->native, image->buffer, 0, 0);
 	wl_surface_damage(surface->native, 0, 0, INT32_MAX, INT32_MAX);
 	wl_surface_commit(surface->native);
@@ -977,14 +1045,19 @@ wayland_global(
 	if (match != 0)
 		return;
 
-	/* Uses only revision one and retains at most one factory for this surface. */
+	/* Retains at most one factory for this surface. */
 	if (version < 1U || surface->factory != NULL)
 		return;
 
+	/* Revision two adds acquire fences; revision one commits completed images only. */
+	if (version > 2U)
+		version = 2U;
+
 	/* Binds the selected interface through the registry's inherited private queue. */
-	surface->factory = wl_registry_bind(registry, name, &zed_gpu_buffer_v1_interface, 1U);
+	surface->factory = wl_registry_bind(registry, name, &zed_gpu_buffer_v1_interface, version);
 	if (surface->factory == NULL)
 		return;
+	surface->factory_version = version;
 
 	/* The global name identifies removal of this specific transport advertisement. */
 	surface->factory_name = name;

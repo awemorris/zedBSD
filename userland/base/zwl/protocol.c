@@ -10,6 +10,7 @@
  */
 
 #include "zwl.h"
+#include <sys/ioctl.h>
 #include <unistd.h>
 #include <errno.h>
 #include <stdio.h>
@@ -27,7 +28,7 @@ struct zwl_global {
 static const struct zwl_global globals[] = {
 	{ 1, "wl_compositor", 4, ZWL_COMPOSITOR },
 	{ 2, "xdg_wm_base", 1, ZWL_WM },
-	{ 3, "zed_gpu_buffer_v1", 1, ZWL_FACTORY },
+	{ 3, "zed_gpu_buffer_v1", 2, ZWL_FACTORY },
 	{ 4, "wl_output", 2, ZWL_OUTPUT },
 	{ 5, "wl_seat", 5, ZWL_SEAT },
 	{ 6, "wl_shm", 1, ZWL_SHM },
@@ -44,6 +45,8 @@ static int shell_request(struct zwl_object *object, uint32_t opcode, const unsig
 static int factory_request(struct zwl_object *factory, uint32_t opcode, const unsigned char *bytes, size_t size);
 static void append_callbacks(struct zwl_object **list, struct zwl_object *callbacks);
 static void add_damage(struct zwl_object *surface, int32_t x, int32_t y, int32_t width, int32_t height);
+static int factory_fence(struct zwl_object *factory, const unsigned char *bytes, size_t size);
+static void commit_fence(struct zwl_object *surface, unsigned attached);
 static void commit_damage(struct zwl_object *surface);
 
 /*
@@ -544,6 +547,7 @@ surface_commit(
 	struct zwl_object *role;
 	struct zwl_object *previous;
 	struct zwl_server *server;
+	unsigned attached;
 	int error;
 
 	/*
@@ -553,6 +557,7 @@ surface_commit(
 	 */
 	role = surface->role;
 	server = surface->client->server;
+	attached = surface->attached;
 	if (surface->cursor_role || role == NULL) {
 		previous = surface->queued;
 		if (surface->attached) {
@@ -563,12 +568,13 @@ surface_commit(
 			zwl_buffer_get(surface->queued);
 		}
 
-		/* The content and its damage are committed. */
+		/* The content, its damage and its acquire fence are committed. */
 		surface->attached = 0;
 		surface->ready = 1;
 		if (surface->queued != NULL)
 			surface->queued->busy = 1;
 		commit_damage(surface);
+		commit_fence(surface, attached);
 		zwl_buffer_put(previous);
 		append_callbacks(&surface->committed_callbacks, surface->callbacks);
 		surface->callbacks = NULL;
@@ -629,8 +635,9 @@ surface_commit(
 	if (surface->queued != NULL)
 		surface->queued->busy = 1;
 
-	/* The damage goes with the commit. */
+	/* The damage goes with the commit, and so does its acquire fence. */
 	commit_damage(surface);
+	commit_fence(surface, attached);
 
 	/* Dropped mailbox images are reusable once no other compositor use remains. */
 	zwl_buffer_put(previous);
@@ -899,6 +906,12 @@ factory_request(
 		return 0;
 	}
 
+	/* Revision two: the acquire fence of a surface's next commit. */
+	if (opcode == 2U) {
+		error = factory_fence(factory, bytes, size);
+		return error;
+	}
+
 	/* The nha signature has new_id and array bytes; h contributes no wire word. */
 	if (opcode != 1U || size != 8U + sizeof(image))
 		return EPROTO;
@@ -1029,6 +1042,35 @@ add_damage(
 }
 
 /*
+ * Moves a commit's acquire fences to the queued image.  A commit that
+ * attached a buffer replaces the queued fences (with none when it gave
+ * none); one that did not keeps the fences of the image it reuses.
+ */
+static void
+commit_fence(
+	struct zwl_object *surface,
+	unsigned attached)
+{
+	unsigned index;
+
+	/* The reused image still waits for its own fences. */
+	if (!attached && surface->acquire_count == 0)
+		return;
+
+	/* The replaced image's fences are no longer waited for. */
+	for (index = 0; index < surface->fence_count; index++)
+		close(surface->fences[index].fd);
+
+	/* The commit's fences are the queued image's. */
+	for (index = 0; index < surface->acquire_count; index++)
+		surface->fences[index] = surface->acquire[index];
+	surface->fence_count = surface->acquire_count;
+	surface->acquire_count = 0;
+	surface->fence_ms = zwl_milliseconds();
+	surface->fence_waited = 0;
+}
+
+/*
  * Moves a commit's damage to the committed damage, joined with any not yet
  * copied (two commits may come before one copy).
  */
@@ -1057,6 +1099,60 @@ commit_damage(
 
 	/* The pending damage starts again. */
 	surface->damaged = 0;
+}
+
+/*
+ * Takes an acquire fence of a surface's next commit (set_acquire_fence of
+ * zed_gpu_buffer_v1 revision two): the fence fd and its payload generation.
+ * A commit waits for all its fences, at most ZWL_FENCE_MAX of them.
+ */
+static int
+factory_fence(
+	struct zwl_object *factory,
+	const unsigned char *bytes,
+	size_t size)
+{
+	struct gpu_fence_state state;
+	struct zwl_object *surface;
+	uint64_t generation;
+	int descriptor;
+	int error;
+
+	/* The surface and the generation in two words; the fd beside them. */
+	if (factory->version < 2U || size != 12U)
+		return EPROTO;
+	descriptor = zwl_take_fd(factory->client);
+	if (descriptor < 0)
+		return EAGAIN;
+
+	/* The surface must be the client's own. */
+	surface = zwl_find(factory->client, word_at(bytes, 0));
+	if (surface == NULL ||
+	    surface->kind != ZWL_SURFACE ||
+	    surface->acquire_count == ZWL_FENCE_MAX) {
+		close(descriptor);
+		return EPROTO;
+	}
+
+	/* The fence must be one of this GPU's, and the generation a real one. */
+	generation = ((uint64_t)word_at(bytes, 4) << 32) | word_at(bytes, 8);
+	memset(&state, 0, sizeof(state));
+	state.version = GPU_ABI_VERSION;
+	state.size = sizeof(state);
+	state.fd = descriptor;
+	error = ioctl(factory->client->server->gpu, GPU_FENCE_QUERY, &state);
+	if (error != 0 || generation == 0) {
+		close(descriptor);
+		return EPROTO;
+	}
+
+	/* The fence joins the others of the next commit. */
+	surface->acquire[surface->acquire_count].fd = descriptor;
+	surface->acquire[surface->acquire_count].generation = generation;
+	surface->acquire_count++;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Preserves callback request order across pending-state commits and mailbox replacement. */

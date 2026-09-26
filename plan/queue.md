@@ -1,19 +1,14 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue q459: acquire fence（ws035-p054）
+# Queue: なし（q459 finished）
 
 <!-- awesome-plan-current:start -->
-Status: active（2026-09-26）
-Active Queue: q459
+Status: none（2026-09-26）
+Active Queue: なし
+Last finished Queue: [q459](history/queue-q459.md)（ws035-p054 uncleared、判断待ち）
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
 
-Approval: 2026-09-26 ユーザー「…ws035を次に優先。…これで進めてください。」。p054 の範囲は 2026-09-25 のユーザーの承認（[compositing-design.md](ws035/compositing-design.md) の D3）。
-
-| Order | Attempt | Phase | Status |
-| --- | --- | --- | --- |
-| 1 | q459-i01 | [ws035-p054](ws035/phase054/phase.md) | in-progress |
-
-依存: ws035-p052（cleared）。
+判断待ち: ws035-p054 の受け入れ 3（「client の present が速くなる」）を「WSI は完了を待たずに fence を付けて commit する（present の時間は測って記録する）」と読み替えて cleared にするか。
 
 Upcoming Work Outlook: ws035-p011（窓管理）、p055（damage）、p057（効果）。

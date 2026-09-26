@@ -6897,12 +6897,16 @@ setvbuf(
 	/* Handles the stream availability. */
 	if (stream == NULL ||
 	    (mode != _IOFBF && mode != _IOLBF && mode != _IONBF) ||
-	    (mode != _IONBF && size == 0)) {
+	    (mode != _IONBF && size == 0 && buffer != NULL)) {
 		errno = EINVAL;
 
 		/* Reports operation failure. */
 		return -1;
 	}
+
+	/* A buffer the library allocates with no size given has the default size, as elsewhere. */
+	if (mode != _IONBF && buffer == NULL && size == 0)
+		size = BUFSIZ;
 	stream_enter(stream, &old);
 
 	/* Handles the stream condition. */

@@ -124,6 +124,8 @@ struct vulkan_wsi_platform_ops {
 	VkResult (*present_image_sync)(void *, void *, VkPresentModeKHR, uint64_t *, int, uint64_t);
 	VkResult (*placement)(void *, struct gpu_placement *);
 	int (*wait_descriptor)(void *);
+	/* Nonzero when a commit may precede the producer's completion (it travels with the fence). */
+	VkBool32 (*commit_early)(void *);
 };
 
 VkResult vulkan_wsi_display_node_query(struct VkPhysicalDevice_T *physical, uint32_t index, uint32_t *count, struct gpu_display_info *request, uint64_t *device_id, char *path);

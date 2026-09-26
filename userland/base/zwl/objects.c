@@ -213,6 +213,7 @@ zwl_object_destroy(
 	struct zwl_object *object)
 {
 	struct zwl_server *server;
+	unsigned index;
 	int error;
 
 	/* Repeated cleanup of an already-dead buffer changes no ownership. */
@@ -253,6 +254,14 @@ zwl_object_destroy(
 			object->awaited = 0;
 			server->awaiting--;
 		}
+
+		/* Its fences are not waited for any more. */
+		for (index = 0; index < object->acquire_count; index++)
+			close(object->acquire[index].fd);
+		for (index = 0; index < object->fence_count; index++)
+			close(object->fences[index].fd);
+		object->acquire_count = 0;
+		object->fence_count = 0;
 
 		/* Its wl_shm image goes; a cursor surface gives the arrow back. */
 		zwl_shm_image_destroy(server, object);

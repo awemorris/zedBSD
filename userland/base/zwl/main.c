@@ -416,6 +416,7 @@ event_loop(
 {
 	struct zwl_client *client;
 	struct zwl_client **clients;
+	struct zwl_object *surface;
 	struct zwl_input_device *devices[ZWL_INPUT_MAX];
 	struct pollfd *descriptors;
 	uint64_t started;
@@ -425,6 +426,8 @@ event_loop(
 	size_t first_input;
 	size_t last_input;
 	size_t frame_slot;
+	size_t first_fence;
+	unsigned fence;
 	unsigned slot;
 	uint64_t mark;
 	uint32_t presents;
@@ -473,11 +476,20 @@ event_loop(
 		/* The devices end here. */
 		last_input = count;
 
-		/* The fence fd of window mode's frame in flight is polled last. */
+		/* The fence fd of window mode's frame in flight is polled next. */
 		frame_slot = 0;
 		if (server->frame_fd >= 0) {
 			frame_slot = count;
 			count++;
+		}
+
+		/* The acquire fences of committed images are polled last. */
+		first_fence = count;
+		for (client = server->clients; client != NULL; client = client->next) {
+			for (surface = client->objects; surface != NULL; surface = surface->next) {
+				if (surface->kind == ZWL_SURFACE && !surface->dead)
+					count += surface->fence_count;
+			}
 		}
 
 		/* Allocation failure leaves all live clients owned by service cleanup. */
@@ -526,6 +538,20 @@ event_loop(
 		if (frame_slot != 0) {
 			descriptors[frame_slot].fd = server->frame_fd;
 			descriptors[frame_slot].events = POLLIN;
+		}
+
+		/* An acquire fence wakes the loop when its image is rendered; the scheduler then takes it. */
+		index = first_fence;
+		for (client = server->clients; client != NULL; client = client->next) {
+			for (surface = client->objects; surface != NULL; surface = surface->next) {
+				if (surface->kind != ZWL_SURFACE || surface->dead)
+					continue;
+				for (fence = 0; fence < surface->fence_count; fence++) {
+					descriptors[index].fd = surface->fences[fence].fd;
+					descriptors[index].events = POLLIN;
+					index++;
+				}
+			}
 		}
 
 		/* Poll sees sockets only; typed image fds are consumed immediately during import. */

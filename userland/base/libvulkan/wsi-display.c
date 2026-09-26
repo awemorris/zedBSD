@@ -113,7 +113,8 @@ const struct vulkan_wsi_platform_ops vulkan_wsi_display_platform = {
 	display_capabilities, display_formats, display_present_modes,
 	display_claim_native, display_release_native, display_present_native,
 	display_wait_native, NULL, display_import_image, display_present_image,
-	display_progress, display_image_available, display_destroy_image, display_prepare_copy, display_present_image_sync, display_placement, display_wait_descriptor
+	display_progress, display_image_available, display_destroy_image, display_prepare_copy, display_present_image_sync, display_placement, display_wait_descriptor,
+	NULL
 };
 
 /*

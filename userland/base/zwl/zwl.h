@@ -42,6 +42,7 @@
 
 #include <uapi/gpu.h>
 #include <uapi/gpu-display.h>
+#include <uapi/gpu-fence.h>
 #include <uapi/input.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -157,6 +158,13 @@ struct zwl_input_device {
 	char path[ZWL_INPUT_PATH_MAX];
 };
 
+/* One acquire fence: a fence fd and the payload generation the image waits for. */
+#define ZWL_FENCE_MAX 4U
+struct zwl_fence {
+	int fd;
+	uint64_t generation;
+};
+
 /*
  * One client-owned protocol object; destroyed buffers remain until all pending,
  * current and scanout holds are gone. Surface state is double-buffered.
@@ -216,6 +224,17 @@ struct zwl_object {
 	unsigned cursor_role;
 	/* A window told its frame is done whose next commit the next frame waits for a moment. */
 	unsigned awaited;
+	/*
+	 * Acquire fences (zed_gpu_buffer_v1 revision two): those for the next
+	 * commit, and the committed ones the queued image waits for.
+	 */
+	struct zwl_fence acquire[ZWL_FENCE_MAX];
+	unsigned acquire_count;
+	struct zwl_fence fences[ZWL_FENCE_MAX];
+	unsigned fence_count;
+	/* When the queued fences were committed, and whether a pass found one still pending. */
+	uint64_t fence_ms;
+	unsigned fence_waited;
 };
 
 /* One stream has independent byte and fd FIFOs, plus its own protocol namespace. */
@@ -368,6 +387,7 @@ int zwl_arrow_create(struct zwl_server *server);
 void zwl_arrow_destroy(struct zwl_server *server);
 struct zwl_object *zwl_top_window(struct zwl_server *server);
 int zwl_window_send_configure(struct zwl_object *surface);
+int zwl_fence_ready(struct zwl_server *server, struct zwl_object *surface);
 uint32_t zwl_next_serial(struct zwl_server *server);
 int zwl_seat_bind(struct zwl_object *seat);
 int zwl_seat_request(struct zwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);

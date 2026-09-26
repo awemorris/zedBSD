@@ -64,6 +64,9 @@ struct wltest_renderer {
 	/* Nonzero draws the whole image in solid[] instead of the test pattern (window tests). */
 	int solid_set;
 	float solid[3];
+	/* The time spent in vkQueuePresentKHR, in total and at most. */
+	uint64_t present_ns;
+	uint64_t present_max_ns;
 };
 
 /* Window lifetime encloses all renderer use of the borrowed native surface. */

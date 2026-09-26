@@ -826,15 +826,24 @@ static const struct wl_interface *zed_gpu_buffer_v1_requests_1_types[] = {
 	NULL,
 };
 
+/* Identifies the surface argument of zed_gpu_buffer_v1.set_acquire_fence (version 2). */
+static const struct wl_interface *zed_gpu_buffer_v1_requests_2_types[] = {
+	&wl_surface_interface,
+	NULL,
+	NULL,
+	NULL,
+};
+
 /* Preserves the wire opcode order for zed_gpu_buffer_v1 requests. */
 static const struct wl_message zed_gpu_buffer_v1_requests[] = {
 	{ "destroy", "", NULL },
 	{ "create_buffer", "nha", zed_gpu_buffer_v1_requests_1_types },
+	{ "set_acquire_fence", "2ohuu", zed_gpu_buffer_v1_requests_2_types },
 };
 
 /* Exposes the immutable selected zed_gpu_buffer_v1 protocol description. */
 const struct wl_interface zed_gpu_buffer_v1_interface = {
-	"zed_gpu_buffer_v1", 1, 2, zed_gpu_buffer_v1_requests,
+	"zed_gpu_buffer_v1", 2, 3, zed_gpu_buffer_v1_requests,
 	0, NULL
 };
 
@@ -3246,6 +3255,28 @@ zed_gpu_buffer_v1_create_buffer(
 
 	/* Succeeded: the caller owns the new protocol proxy. */
 	return (struct wl_buffer *)created;
+}
+
+/*
+ * Sends the zed_gpu_buffer_v1.set_acquire_fence request (version 2): the
+ * surface's next commit is used once the fence's payload generation is done.
+ * The fd stays the caller's.
+ */
+void
+zed_gpu_buffer_v1_set_acquire_fence(
+	struct zed_gpu_buffer_v1 *object,
+	struct wl_surface *surface,
+	int fd,
+	uint64_t generation)
+{
+	union wl_argument arguments[4];
+
+	/* The surface, the fence and its generation in two words (high, then low). */
+	arguments[0].o = (struct wl_object *)surface;
+	arguments[1].h = fd;
+	arguments[2].u = (uint32_t)(generation >> 32);
+	arguments[3].u = (uint32_t)generation;
+	wl_proxy_marshal_array_flags((struct wl_proxy *)object, 2U, NULL, 0, 0, arguments);
 }
 
 /*

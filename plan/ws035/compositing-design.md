@@ -162,6 +162,8 @@ zdesktop は表示の出し方を 2 つ持ち、状態で切り替える（Steam
   （Linux の `linux-explicit-synchronization` 相当を最小限で）。zdesktop はその fd を poll に入れ、
   signal されてから、その commit を「使える状態」にする。**CPU で wait はしない**（event loop が止まる）。
   fence を渡さない client は今までどおり、commit の時点で描画が終わっている前提（今の WSI の動き）。
+  （p054 で実装: version 2 の `set_acquire_fence(surface, fd, generation_hi, generation_lo)`、1 つの commit に 4 つまで。
+  WSI の present は元から worker が完了を待つ形で、`vkQueuePresentKHR` 自体は速くならない。[phase054](phase054/phase.md)）
 - **zdesktop の sampling の完了**: 出力 frame ごとの submit に VkFence を付け、`vkGetFenceFdKHR` で fd にして poll に入れる
   （swapchain の acquire・present の同期は標準の semaphore）。
   signal されたら、その frame が sampling していた client の画像のうち、もう新しい commit で置き換わったものへ
