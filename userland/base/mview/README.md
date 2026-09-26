@@ -27,6 +27,8 @@ It shows a model converted by `tools/fbx2mview.py` (format:
 | `--timeout-s=N` | stop normally after N seconds; `0` (default) means no deadline |
 | `--spin=N` | turn the model for N seconds, drawing every frame, and report the frame rate |
 | `--shading=vertex\|pixel` | lighting per vertex (default, the p013 images) or per pixel (see Rendering) |
+| `--windowed` | a window the compositor places instead of asking for fullscreen |
+| `--size=WxH` | the window's size when the compositor leaves it to the viewer (64–4096 each, default 640x480) |
 
 ## Controls
 

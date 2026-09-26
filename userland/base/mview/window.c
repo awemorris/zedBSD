@@ -87,14 +87,17 @@ int
 mview_window_open(
 	struct mview_window *window,
 	const char *display,
-	struct mview_input *input)
+	struct mview_input *input,
+	uint32_t width,
+	uint32_t height,
+	int fullscreen)
 {
 	int status;
 
-	/* The compositor may choose dimensions, otherwise this application chooses 640 by 480. */
+	/* The compositor may choose dimensions, otherwise this application chooses the given size. */
 	memset(window, 0, sizeof(*window));
-	window->width = 640U;
-	window->height = 480U;
+	window->width = width;
+	window->height = height;
 	window->input = input;
 
 	/* The listener tables must be complete before any object can deliver events. */
@@ -151,10 +154,11 @@ mview_window_open(
 	if (status != 0)
 		return -1;
 
-	/* Publish the application identity and fullscreen preference before the empty commit. */
+	/* Publish the application identity and any fullscreen preference before the empty commit. */
 	xdg_toplevel_set_title(window->toplevel, "Model viewer");
 	xdg_toplevel_set_app_id(window->toplevel, "mview");
-	xdg_toplevel_set_fullscreen(window->toplevel, NULL);
+	if (fullscreen)
+		xdg_toplevel_set_fullscreen(window->toplevel, NULL);
 	wl_surface_commit(window->surface);
 
 	/* No Vulkan buffer can be presented until the initial configure has been acknowledged. */

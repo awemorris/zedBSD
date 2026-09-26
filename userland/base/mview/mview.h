@@ -135,7 +135,7 @@ struct mview_renderer {
 };
 
 /* Window lifetime encloses all renderer use of the borrowed native surface. */
-int mview_window_open(struct mview_window *window, const char *display, struct mview_input *input);
+int mview_window_open(struct mview_window *window, const char *display, struct mview_input *input, uint32_t width, uint32_t height, int fullscreen);
 int mview_window_dispatch(struct mview_window *window, int timeout);
 void mview_window_close(struct mview_window *window);
 

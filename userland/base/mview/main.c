@@ -43,6 +43,11 @@ struct main_options {
 
 	/* Nonzero for per-pixel lighting (--shading=pixel); the default lights per vertex. */
 	int pixel_shading;
+
+	/* Nonzero for a window (--windowed) instead of fullscreen, and the size it asks for (--size). */
+	int windowed;
+	uint32_t width;
+	uint32_t height;
 };
 
 /* The frame-rate measurement of the spin demonstration. */
@@ -72,6 +77,7 @@ struct main_spin {
 static int options_parse(int argc, char **argv, struct main_options *options);
 static int option_number(const char *text, uint32_t maximum, uint32_t *number);
 static int option_token(const char *token);
+static int option_size(const char *text, uint32_t *width, uint32_t *height);
 static int main_expired(const struct timespec *start, uint32_t timeout);
 static void main_frame_log(const char *token, uint32_t frame, const struct mview_camera *camera);
 static double main_seconds(const struct timespec *from, const struct timespec *to);
@@ -115,7 +121,7 @@ main(
 	/* Argument failure starts no connection or GPU namespace. */
 	status = options_parse(argc, argv, &options);
 	if (status != 0) {
-		fprintf(stderr, "usage: mview [--display=NAME] [--model=DIR] [--token=NAME] [--frames=N] [--timeout-s=N] [--spin=SECONDS] [--shading=vertex|pixel]\n");
+		fprintf(stderr, "usage: mview [--display=NAME] [--model=DIR] [--token=NAME] [--frames=N] [--timeout-s=N] [--spin=SECONDS] [--shading=vertex|pixel] [--windowed] [--size=WxH]\n");
 		return 2;
 	}
 
@@ -150,7 +156,7 @@ main(
 
 	/* Creates the configured fullscreen window and binds the seat if there is one. */
 	operation = "mview_window_open";
-	status = mview_window_open(&window, options.display, &input);
+	status = mview_window_open(&window, options.display, &input, options.width, options.height, !options.windowed);
 	if (status != 0)
 		goto cleanup;
 
@@ -363,6 +369,8 @@ options_parse(
 	memset(options, 0, sizeof(*options));
 	options->model = MAIN_DEFAULT_MODEL;
 	options->token = "manual";
+	options->width = 640U;
+	options->height = 480U;
 
 	/* Applies each explicit option in command-line order. */
 	for (index = 1; index < argc; index++) {
@@ -437,6 +445,23 @@ options_parse(
 			continue;
 		}
 
+		/* A window the compositor places, not fullscreen. */
+		match = strcmp(argv[index], "--windowed");
+		if (match == 0) {
+			options->windowed = 1;
+			continue;
+		}
+
+		/* The size the window asks for when the compositor leaves it to the viewer. */
+		match = strncmp(argv[index], "--size=", 7U);
+		if (match == 0) {
+			status = option_size(argv[index] + 7U, &options->width, &options->height);
+			if (status != 0)
+				return -1;
+			continue;
+		}
+
+		/* Zero seconds means no deadline. */
 		match = strncmp(argv[index], "--timeout-s=", 12U);
 		if (match == 0) {
 			status = option_number(argv[index] + 12U, 86400U, &options->timeout);
@@ -452,6 +477,33 @@ options_parse(
 	}
 
 	/* Succeeded: every option has a finite, understood meaning. */
+	return 0;
+}
+
+/* Parses WIDTHxHEIGHT, each from 64 to 4096. */
+static int
+option_size(
+	const char *text,
+	uint32_t *width,
+	uint32_t *height)
+{
+	char *end;
+	unsigned long parsed;
+
+	/* The width, then an x. */
+	parsed = strtoul(text, &end, 10);
+	if (end == text || *end != 'x' || parsed < 64UL || parsed > 4096UL)
+		return -1;
+	*width = (uint32_t)parsed;
+
+	/* The height, then the end. */
+	text = end + 1;
+	parsed = strtoul(text, &end, 10);
+	if (end == text || *end != '\0' || parsed < 64UL || parsed > 4096UL)
+		return -1;
+	*height = (uint32_t)parsed;
+
+	/* Succeeded. */
 	return 0;
 }
 

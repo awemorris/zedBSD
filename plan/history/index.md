@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q460（ws035-p059 cleared。look and feel の疎通確認）
+Last finished Queue: q461（ws035-p060 cleared。mview を glass の窓で）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q460（2026-09-26）
+## 最新: q443〜q461（2026-09-26）
+
+[q461](queue-q461.md): ws035-p060 cleared。mview に `--windowed`・`--size`。`zwl --glass` の窓で 3D model を Vulkan で描き、drag で回転、最大化で描き直し。spin は窓 8.80 fps・全画面 8.59 fps（Lavapipe 律速）。
 
 [q460](queue-q460.md): ws035-p059 cleared。`zwl --glass`: 本体から離れて浮いたすりガラスのタイトルバー（題名・3 つの button、drag・最大化・閉じる・hover）、角丸と影、上部のバー（ハリボテ）、CPU で描く壁紙と縮小ぼかし（壁紙だけを透かす）、Inter（Google Fonts、git 外）を libtruetype で atlas に。p052〜p054 の回帰 PASS。
 
