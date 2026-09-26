@@ -1,10 +1,10 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue: なし（q476 finished）
+# Queue: q477 active
 
 <!-- awesome-plan-current:start -->
-Status: none（2026-09-26）
-Active Queue: なし
+Status: active（2026-09-26）
+Active Queue: [q477](history/queue-q477.md)（ws069-p004: GLX の核）
 Last finished Queue: [q476](history/queue-q476.md)（ws068-p010 cleared。EGL の pbuffer）
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
