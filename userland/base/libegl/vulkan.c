@@ -22,6 +22,11 @@
  * and the present can follow each other in any order.  eglSwapBuffers
  * submits the recording, presents, and waits for the frame before the
  * next one.
+ *
+ * A pbuffer has one colour image and no Vulkan surface: its frame needs
+ * no acquire and its swap no present.  Its image rests as a colour
+ * attachment, and a frame's first pass loads what the frame before drew
+ * unless it is a whole clear.
  */
 
 #include "zegl.h"
@@ -36,6 +41,8 @@ static EGLint vulkan_display_surface(struct zegl_surface *surface);
 static EGLint vulkan_swapchain(struct zegl_surface *surface);
 static void vulkan_swapchain_free(struct zegl_surface *surface, int keep_swapchain);
 static EGLint vulkan_depth(struct zegl_surface *surface);
+static EGLint vulkan_pbuffer_image(struct zegl_surface *surface);
+static void vulkan_pbuffer_layouts(struct zegl_surface *surface);
 static EGLint vulkan_frame_objects(struct zegl_surface *surface);
 static VkFormat vulkan_depth_format(struct zegl_display *display, VkImageAspectFlags *aspects);
 static EGLint vulkan_pass(struct zegl_surface *surface, VkFormat format, VkAttachmentLoadOp load, VkRenderPass *pass);
@@ -175,6 +182,7 @@ zegl_surface_open(
 
 	/* The Vulkan surface: the Wayland window's wl_surface, or the display's plane. */
 	display = surface->display;
+	surface->rest_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	if (display->platform == ZEGL_PLATFORM_WAYLAND) {
 		memset(&wayland, 0, sizeof(wayland));
 		wayland.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
@@ -211,6 +219,65 @@ zegl_surface_open(
 }
 
 /*
+ * Makes a pbuffer's colour image, depth buffer, pass, framebuffer and
+ * frame objects at a size.  Returns EGL_SUCCESS or EGL_BAD_ALLOC.
+ */
+EGLint
+zegl_pbuffer_open(
+	struct zegl_surface *surface,
+	uint32_t width,
+	uint32_t height)
+{
+	VkFramebufferCreateInfo framebuffer;
+	VkImageView attachments[2];
+	struct zegl_display *display;
+	VkResult result;
+	EGLint error;
+
+	/* The size and the layout its image rests in. */
+	display = surface->display;
+	surface->extent.width = width;
+	surface->extent.height = height;
+	surface->format = VK_FORMAT_R8G8B8A8_UNORM;
+	surface->rest_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	surface->readable = 1;
+
+	/* The passes and the frame's objects. */
+	error = vulkan_frame_objects(surface);
+	if (error != EGL_SUCCESS)
+		return error;
+
+	/* The colour image and the depth buffer. */
+	error = vulkan_pbuffer_image(surface);
+	if (error != EGL_SUCCESS)
+		return error;
+	error = vulkan_depth(surface);
+	if (error != EGL_SUCCESS)
+		return error;
+
+	/* The framebuffer over both. */
+	attachments[0] = surface->views[0];
+	attachments[1] = surface->depth_view;
+	memset(&framebuffer, 0, sizeof(framebuffer));
+	framebuffer.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+	framebuffer.renderPass = surface->pass;
+	framebuffer.attachmentCount = 1U;
+	if (surface->depth_format != VK_FORMAT_UNDEFINED)
+		framebuffer.attachmentCount = 2U;
+	framebuffer.pAttachments = attachments;
+	framebuffer.width = width;
+	framebuffer.height = height;
+	framebuffer.layers = 1U;
+	result = vkCreateFramebuffer(display->device, &framebuffer, NULL, &surface->framebuffers[0]);
+	if (result != VK_SUCCESS)
+		return EGL_BAD_ALLOC;
+
+	/* Succeeded: one image to draw into. */
+	surface->image_count = 1U;
+	return EGL_SUCCESS;
+}
+
+/*
  * Releases a window surface's Vulkan objects, children first.
  */
 void
@@ -224,8 +291,12 @@ zegl_surface_close(
 	if (device != VK_NULL_HANDLE)
 		(void)vkDeviceWaitIdle(device);
 
-	/* The swapchain with its framebuffers and views. */
+	/* The swapchain with its framebuffers and views, and a pbuffer's image. */
 	vulkan_swapchain_free(surface, 0);
+	if (surface->pbuffer_image != VK_NULL_HANDLE)
+		vkDestroyImage(device, surface->pbuffer_image, NULL);
+	if (surface->pbuffer_memory != VK_NULL_HANDLE)
+		vkFreeMemory(device, surface->pbuffer_memory, NULL);
 
 	/* The frame's objects and the pass. */
 	if (surface->rendered != VK_NULL_HANDLE)
@@ -259,6 +330,21 @@ zegl_surface_present(
 {
 	VkClearValue clear[2];
 	EGLint error;
+
+	/* A pbuffer shows nothing: what it drew is submitted and waited for, and GLES's per-frame resources are free. */
+	if (surface->kind == EGL_PBUFFER_BIT) {
+		if (surface->frame_open) {
+			error = vulkan_submit(surface, 0);
+			if (error != EGL_SUCCESS)
+				return error;
+		}
+
+		/* The frame's resources. */
+		if (context->gles.frame_done != NULL)
+			context->gles.frame_done(context);
+		surface->frames++;
+		return EGL_SUCCESS;
+	}
 
 	/* The frame, opened now when GLES drew nothing. */
 	error = zegl_frame_begin(surface);
@@ -317,8 +403,9 @@ zegl_frame_begin(
 	if (surface->window != NULL && surface->window->generation != surface->window_generation)
 		surface->stale = 1;
 
-	/* The image to draw into; a swapchain out of date is made again once. */
-	for (tries = 0U; ; tries++) {
+	/* The image to draw into (a pbuffer's one needs no acquire); a swapchain out of date is made again once. */
+	surface->image = 0U;
+	for (tries = 0U; surface->kind != EGL_PBUFFER_BIT; tries++) {
 		/* A stale swapchain is replaced. */
 		if (surface->stale) {
 			error = vulkan_swapchain(surface);
@@ -346,11 +433,17 @@ zegl_frame_begin(
 	if (result != VK_SUCCESS)
 		return EGL_BAD_SURFACE;
 
-	/* Succeeded: the frame is open, with no pass yet. */
+	/* Succeeded: the frame is open, with no pass yet (a pbuffer's has nothing to wait for). */
 	surface->frame_open = 1;
 	surface->in_pass = 0;
 	surface->passes = 0U;
 	surface->acquire_waited = 0;
+	if (surface->kind == EGL_PBUFFER_BIT) {
+		surface->acquire_waited = 1;
+		vulkan_pbuffer_layouts(surface);
+	}
+
+	/* The frame is open. */
 	return EGL_SUCCESS;
 }
 
@@ -366,6 +459,7 @@ zegl_frame_pass(
 {
 	VkRenderPassBeginInfo pass;
 	VkClearValue values[2];
+	int first_clears;
 
 	/* An open pass goes on. */
 	if (surface->in_pass)
@@ -377,11 +471,14 @@ zegl_frame_pass(
 	if (clear != NULL)
 		memcpy(values, clear, sizeof(values));
 
-	/* The first pass clears, a later one loads. */
+	/* The first pass clears, a later one loads (a pbuffer's first one too, unless it is a whole clear). */
 	memset(&pass, 0, sizeof(pass));
 	pass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 	pass.renderPass = surface->pass_load;
-	if (surface->passes == 0U) {
+	first_clears = 0;
+	if (surface->passes == 0U && (surface->kind != EGL_PBUFFER_BIT || clear != NULL))
+		first_clears = 1;
+	if (first_clears) {
 		pass.renderPass = surface->pass;
 		pass.clearValueCount = 2U;
 		pass.pClearValues = values;
@@ -722,13 +819,21 @@ vulkan_frame_objects(
 	VkResult result;
 	EGLint error;
 
-	/* The format the swapchain will have (the pass is made once, before it). */
+	/* The format the swapchain will have (the pass is made once, before it); a pbuffer's is RGBA. */
 	display = surface->display;
-	count = 16U;
-	result = vkGetPhysicalDeviceSurfaceFormatsKHR(display->physical, surface->surface, &count, formats);
+	count = 0U;
+	result = VK_SUCCESS;
+	if (surface->surface != VK_NULL_HANDLE) {
+		count = 16U;
+		result = vkGetPhysicalDeviceSurfaceFormatsKHR(display->physical, surface->surface, &count, formats);
+	}
+
+	/* A surface whose formats cannot be read is not one. */
 	if (result != VK_SUCCESS && result != VK_INCOMPLETE)
 		return EGL_BAD_NATIVE_WINDOW;
 	format = VK_FORMAT_UNDEFINED;
+	if (surface->surface == VK_NULL_HANDLE)
+		format = VK_FORMAT_R8G8B8A8_UNORM;
 	for (index = 0U; index < count; index++) {
 		if (formats[index].format == VK_FORMAT_B8G8R8A8_UNORM || formats[index].format == VK_FORMAT_R8G8B8A8_UNORM) {
 			format = formats[index].format;
@@ -825,7 +930,7 @@ vulkan_depth(
 	image.arrayLayers = 1U;
 	image.samples = VK_SAMPLE_COUNT_1_BIT;
 	image.tiling = VK_IMAGE_TILING_OPTIMAL;
-	image.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	image.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 	image.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	image.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	result = vkCreateImage(display->device, &image, NULL, &surface->depth_image);
@@ -920,7 +1025,7 @@ vulkan_pass(
 	VkRenderPassCreateInfo create;
 	VkResult result;
 
-	/* The colour image: undefined before a clearing pass, ready to present before a loading one and after either. */
+	/* The colour image: undefined before a clearing pass, in its resting layout before a loading one and after either. */
 	memset(attachments, 0, sizeof(attachments));
 	attachments[0].format = format;
 	attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
@@ -928,10 +1033,10 @@ vulkan_pass(
 	attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 	attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-	attachments[0].initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	attachments[0].initialLayout = surface->rest_layout;
 	if (load == VK_ATTACHMENT_LOAD_OP_CLEAR)
 		attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	attachments[0].finalLayout = surface->rest_layout;
 	colour.attachment = 0U;
 	colour.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
@@ -1096,4 +1201,138 @@ vulkan_memory_type(
 
 	/* None has them: the first allowed type. */
 	return first;
+}
+
+/* Makes a pbuffer's colour image, its memory and its view. */
+static EGLint
+vulkan_pbuffer_image(
+	struct zegl_surface *surface)
+{
+	VkImageCreateInfo image;
+	VkMemoryRequirements requirements;
+	VkMemoryAllocateInfo allocate;
+	VkImageViewCreateInfo view;
+	struct zegl_display *display;
+	VkResult result;
+
+	/* The image: drawn into and copied from. */
+	display = surface->display;
+	memset(&image, 0, sizeof(image));
+	image.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	image.imageType = VK_IMAGE_TYPE_2D;
+	image.format = surface->format;
+	image.extent.width = surface->extent.width;
+	image.extent.height = surface->extent.height;
+	image.extent.depth = 1U;
+	image.mipLevels = 1U;
+	image.arrayLayers = 1U;
+	image.samples = VK_SAMPLE_COUNT_1_BIT;
+	image.tiling = VK_IMAGE_TILING_OPTIMAL;
+	image.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	image.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	image.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	result = vkCreateImage(display->device, &image, NULL, &surface->pbuffer_image);
+	if (result != VK_SUCCESS)
+		return EGL_BAD_ALLOC;
+
+	/* Its memory, on the device. */
+	vkGetImageMemoryRequirements(display->device, surface->pbuffer_image, &requirements);
+	memset(&allocate, 0, sizeof(allocate));
+	allocate.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocate.allocationSize = requirements.size;
+	allocate.memoryTypeIndex = vulkan_memory_type(display, requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	result = vkAllocateMemory(display->device, &allocate, NULL, &surface->pbuffer_memory);
+	if (result != VK_SUCCESS)
+		return EGL_BAD_ALLOC;
+
+	/* Bound to the image. */
+	result = vkBindImageMemory(display->device, surface->pbuffer_image, surface->pbuffer_memory, 0U);
+	if (result != VK_SUCCESS)
+		return EGL_BAD_ALLOC;
+
+	/* The view the framebuffer uses, as image 0. */
+	memset(&view, 0, sizeof(view));
+	view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	view.image = surface->pbuffer_image;
+	view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	view.format = surface->format;
+	view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	view.subresourceRange.levelCount = 1U;
+	view.subresourceRange.layerCount = 1U;
+	result = vkCreateImageView(display->device, &view, NULL, &surface->views[0]);
+	if (result != VK_SUCCESS)
+		return EGL_BAD_ALLOC;
+
+	/* Succeeded: the image, as the surface's only one. */
+	surface->images[0] = surface->pbuffer_image;
+	return EGL_SUCCESS;
+}
+
+/*
+ * Records, in a pbuffer's first frame, the change of its new images to the
+ * layouts they rest in (so a first pass can load them): the colour image
+ * cleared to black, the depth buffer to 1 and 0.
+ */
+static void
+vulkan_pbuffer_layouts(
+	struct zegl_surface *surface)
+{
+	VkImageMemoryBarrier barriers[2];
+	VkClearColorValue colour;
+	VkClearDepthStencilValue depth;
+	VkImageSubresourceRange range;
+	uint32_t count;
+
+	/* Once per pbuffer. */
+	if (surface->pbuffer_ready)
+		return;
+	surface->pbuffer_ready = 1;
+
+	/* Both images, from nothing to being written by a copy (clear). */
+	count = 1U;
+	memset(barriers, 0, sizeof(barriers));
+	barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	barriers[0].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	barriers[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	barriers[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	barriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barriers[0].image = surface->pbuffer_image;
+	barriers[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	barriers[0].subresourceRange.levelCount = 1U;
+	barriers[0].subresourceRange.layerCount = 1U;
+	if (surface->depth_image != VK_NULL_HANDLE) {
+		barriers[1] = barriers[0];
+		barriers[1].image = surface->depth_image;
+		barriers[1].subresourceRange.aspectMask = surface->depth_aspects;
+		count = 2U;
+	}
+
+	/* The change. */
+	vkCmdPipelineBarrier(surface->command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+			     0U, 0U, NULL, 0U, NULL, count, barriers);
+
+	/* Cleared: black, and depth 1 with stencil 0. */
+	memset(&colour, 0, sizeof(colour));
+	range = barriers[0].subresourceRange;
+	vkCmdClearColorImage(surface->command, surface->pbuffer_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &colour, 1U, &range);
+	if (count == 2U) {
+		depth.depth = 1.0f;
+		depth.stencil = 0U;
+		range = barriers[1].subresourceRange;
+		vkCmdClearDepthStencilImage(surface->command, surface->depth_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &depth, 1U, &range);
+	}
+
+	/* Then into the layouts they rest in. */
+	barriers[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	barriers[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	barriers[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	barriers[0].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	barriers[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	barriers[1].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+	barriers[1].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	barriers[1].newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+	vkCmdPipelineBarrier(surface->command, VK_PIPELINE_STAGE_TRANSFER_BIT,
+			     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+			     0U, 0U, NULL, 0U, NULL, count, barriers);
 }

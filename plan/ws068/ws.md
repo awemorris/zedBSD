@@ -8,8 +8,8 @@ Primary Milestone: MG006
 Related Milestones: MG002
 Objectives: O1, O2
 Parent: [Master](../master.md)
-Queue: q476
-Resume point: p010（pbuffer）。次に p009（frame を重ねて速く）、p011（FBO）。p003（GLSL の compiler）は GLES の方式（design.md §4）のユーザーの判断を待つ
+Queue: none
+Resume point: p009（frame を重ねて速く）、p011（FBO）。GLX（ws069-p004）は p010 の pbuffer の上に。p003（GLSL の compiler）は GLES の方式（design.md §4）のユーザーの判断を待つ
 <!-- awesome-plan-current:end -->
 
 ## 目標
@@ -56,5 +56,5 @@ EGL と OpenGL ES（2.0、次に 3.0）を、zedBSD の libvulkan（Vulkan）と
 | ws068-p007 | 規約の全文との照合と回帰（最後） | planning | 全 Phase |
 | [ws068-p008](phase008/phase.md) | GLES 2.0 の描画の核（SPIR-V の shader binary、変換層。compiler の方式に依らない部分） | cleared（q475-i01。Venus で strip・texture・blend・depth・cull、display 直接と窓と resize） | p002 |
 | ws068-p009 | frame を 2〜3 枚重ねる（EGL の frame in flight。Venus で clear だけ 125 ms/frame、WSI 直接は 50 ms） | planned | p008 |
-| [ws068-p010](phase010/phase.md) | EGL の pbuffer（offscreen。GLX の描画先） | in-progress（q476-i01） | p008 |
+| [ws068-p010](phase010/phase.md) | EGL の pbuffer（offscreen。GLX の描画先） | cleared（q476-i01。Venus で 600 frame と 2048x1536） | p008 |
 | ws068-p011 | framebuffer object・renderbuffer・cube map（texture への描画） | planned | p008 |

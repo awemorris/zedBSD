@@ -11,6 +11,7 @@
  *
  * An EGL display owns a Vulkan instance and device; a window surface owns
  * a Vulkan surface, its swapchain, a depth buffer when its config has one,
+ * (a pbuffer: one offscreen colour image instead of the swapchain)
  * one framebuffer per image, and the frame being recorded; a context
  * holds the GLES state.  libGLESv2 finds the calling thread's context with
  * zegl_current_context(), opens its draw surface's frame with
@@ -133,6 +134,17 @@ struct zegl_surface {
 	/* Nonzero when the swapchain's images can be copied from (glReadPixels). */
 	int readable;
 
+	/*
+	 * The layout the colour image rests in outside a pass: ready to
+	 * present for a window, a colour attachment for a pbuffer.
+	 */
+	VkImageLayout rest_layout;
+
+	/* A pbuffer's colour image and its memory, and whether its images were given their resting layouts yet. */
+	VkImage pbuffer_image;
+	VkDeviceMemory pbuffer_memory;
+	int pbuffer_ready;
+
 	/* Each image's view and framebuffer. */
 	VkImage images[ZEGL_IMAGES];
 	VkImageView views[ZEGL_IMAGES];
@@ -216,6 +228,7 @@ struct zegl_context *zegl_current_context(void);
 EGLint zegl_vulkan_open(struct zegl_display *display);
 void zegl_vulkan_close(struct zegl_display *display);
 EGLint zegl_surface_open(struct zegl_surface *surface);
+EGLint zegl_pbuffer_open(struct zegl_surface *surface, uint32_t width, uint32_t height);
 void zegl_surface_close(struct zegl_surface *surface);
 EGLint zegl_surface_present(struct zegl_surface *surface, struct zegl_context *context);
 

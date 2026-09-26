@@ -513,7 +513,8 @@ eglCreatePlatformWindowSurfaceEXT(
 }
 
 /*
- * Pbuffers are not there yet (WS068 p003 and later).
+ * Makes a pbuffer: an offscreen colour image (and depth buffer) of
+ * EGL_WIDTH x EGL_HEIGHT (at least 1 x 1).
  */
 EGLSurface EGLAPIENTRY
 eglCreatePbufferSurface(
@@ -521,12 +522,81 @@ eglCreatePbufferSurface(
 	EGLConfig config,
 	const EGLint *attrib_list)
 {
-	/* No configs offer pbuffers. */
-	(void)dpy;
-	(void)config;
-	(void)attrib_list;
-	(void)egl_fail(EGL_BAD_MATCH);
-	return EGL_NO_SURFACE;
+	struct zegl_display *display;
+	struct zegl_config *chosen;
+	struct zegl_surface *surface;
+	EGLint width;
+	EGLint height;
+	EGLint error;
+	unsigned index;
+
+	/* An initialized display and one of its configs that makes pbuffers. */
+	display = egl_display_valid(dpy);
+	if (display == NULL || !display->initialized) {
+		(void)egl_fail(EGL_NOT_INITIALIZED);
+		return EGL_NO_SURFACE;
+	}
+
+	/* One of its configs. */
+	chosen = egl_config_valid(display, config);
+	if (chosen == NULL) {
+		(void)egl_fail(EGL_BAD_CONFIG);
+		return EGL_NO_SURFACE;
+	}
+
+	/* A config that makes pbuffers. */
+	if ((chosen->surface_type & EGL_PBUFFER_BIT) == 0) {
+		(void)egl_fail(EGL_BAD_MATCH);
+		return EGL_NO_SURFACE;
+	}
+
+	/* The size asked for. */
+	width = 0;
+	height = 0;
+	for (index = 0U; attrib_list != NULL && attrib_list[index] != EGL_NONE; index += 2U) {
+		if (attrib_list[index] == EGL_WIDTH)
+			width = attrib_list[index + 1U];
+		if (attrib_list[index] == EGL_HEIGHT)
+			height = attrib_list[index + 1U];
+	}
+
+	/* A negative or too large size is refused. */
+	if (width < 0 || height < 0 || width > 16384 || height > 16384) {
+		(void)egl_fail(EGL_BAD_PARAMETER);
+		return EGL_NO_SURFACE;
+	}
+
+	/* 0 is 1. */
+	if (width == 0)
+		width = 1;
+	if (height == 0)
+		height = 1;
+
+	/* The surface. */
+	surface = calloc(1U, sizeof(*surface));
+	if (surface == NULL) {
+		(void)egl_fail(EGL_BAD_ALLOC);
+		return EGL_NO_SURFACE;
+	}
+
+	/* What it was made with. */
+	surface->display = display;
+	surface->config = chosen;
+	surface->kind = EGL_PBUFFER_BIT;
+	surface->interval = 1;
+
+	/* Its image and frame. */
+	error = zegl_pbuffer_open(surface, (uint32_t)width, (uint32_t)height);
+	if (error != EGL_SUCCESS) {
+		zegl_surface_close(surface);
+		free(surface);
+		(void)egl_fail(error);
+		return EGL_NO_SURFACE;
+	}
+
+	/* Succeeded: the pbuffer. */
+	(void)egl_succeed();
+	return (EGLSurface)surface;
 }
 
 /*
@@ -601,6 +671,8 @@ eglQuerySurface(
 		break;
 	case EGL_SWAP_BEHAVIOR:
 		*value = EGL_BUFFER_DESTROYED;
+		if (queried->kind == EGL_PBUFFER_BIT)
+			*value = EGL_BUFFER_PRESERVED;
 		break;
 	case EGL_MULTISAMPLE_RESOLVE:
 		*value = EGL_MULTISAMPLE_RESOLVE_DEFAULT;
@@ -1222,10 +1294,10 @@ egl_configs(
 			config->stencil = 8;
 		}
 
-		/* Every config draws windows with OpenGL ES 2 and 3; a surfaceless display draws nothing on screen. */
-		config->surface_type = EGL_WINDOW_BIT;
+		/* Every config draws windows and pbuffers with OpenGL ES 2 and 3; a surfaceless display only pbuffers. */
+		config->surface_type = EGL_WINDOW_BIT | EGL_PBUFFER_BIT;
 		if (display->platform == ZEGL_PLATFORM_SURFACELESS)
-			config->surface_type = 0;
+			config->surface_type = EGL_PBUFFER_BIT;
 		config->renderable = EGL_OPENGL_ES2_BIT | EGL_OPENGL_ES3_BIT;
 	}
 }

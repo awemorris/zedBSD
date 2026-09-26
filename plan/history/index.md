@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q475（ws068-p008 cleared。GLES 2.0 の描画の核）
+Last finished Queue: q476（ws068-p010 cleared。EGL の pbuffer）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q475（2026-09-26）
+## 最新: q443〜q476（2026-09-26）
+
+[q476](queue-q476.md): ws068-p010 cleared。EGL の pbuffer（offscreen の color と depth、frame をまたいで中身を保つ、swap で submit と解放）。Venus で 600 frame と 2048x1536 の readback が一致。pbuffer でも 1 frame 約 95 ms（F-021 に追記）。
 
 [q475](queue-q475.md): ws068-p008 cleared。GLES 2.0 の描画の核（SPIR-V の shader binary、gl_Position の書き換え、buffer・texture・blend・depth・stencil・cull・glReadPixels、strip と fan の展開、dynamic uniform）。Venus の display 直接・zwl の窓・docked で画面と glReadPixels が一致。frame を重ねるのは p009。
 

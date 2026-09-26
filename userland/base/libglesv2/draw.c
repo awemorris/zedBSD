@@ -109,7 +109,7 @@ gles_read_rgba(
 	/* A read surface whose images can be copied from. */
 	state = gles_state(context);
 	surface = context->read;
-	if (state == NULL || surface == NULL || surface->kind != EGL_WINDOW_BIT || state->framebuffer != 0U) {
+	if (state == NULL || surface == NULL || state->framebuffer != 0U) {
 		gles_error(context, GL_INVALID_FRAMEBUFFER_OPERATION);
 		return -1;
 	}
@@ -160,7 +160,7 @@ gles_read_rgba(
 	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 	barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-	barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	barrier.oldLayout = surface->rest_layout;
 	barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -183,7 +183,7 @@ gles_read_rgba(
 	barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 	barrier.dstAccessMask = 0U;
 	barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-	barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	barrier.newLayout = surface->rest_layout;
 	vkCmdPipelineBarrier(surface->command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
 			     0U, 0U, NULL, 0U, NULL, 1U, &barrier);
 
@@ -215,6 +215,10 @@ gles_read_rgba(
 			source += 4;
 		}
 	}
+
+	/* Everything recorded before is done: the frame's resources are free again. */
+	state->frame++;
+	gles_collect(state);
 
 	/* Succeeded: the rows. */
 	return 0;
@@ -280,7 +284,7 @@ glClear(
 
 	/* A window surface to clear. */
 	surface = context->draw;
-	if (surface == NULL || surface->kind != EGL_WINDOW_BIT || state->framebuffer != 0U) {
+	if (surface == NULL || state->framebuffer != 0U) {
 		gles_error(context, GL_INVALID_FRAMEBUFFER_OPERATION);
 		return;
 	}
@@ -791,7 +795,7 @@ draw_primitives(
 
 	/* A window surface. */
 	surface = context->draw;
-	if (surface == NULL || surface->kind != EGL_WINDOW_BIT || state->framebuffer != 0U) {
+	if (surface == NULL || state->framebuffer != 0U) {
 		gles_error(context, GL_INVALID_FRAMEBUFFER_OPERATION);
 		return;
 	}

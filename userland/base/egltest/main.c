@@ -11,7 +11,8 @@
  * On Wayland (the default when a compositor's socket is given or
  * WAYLAND_DISPLAY is set) the window is an xdg-shell toplevel through
  * wl_egl_window; with --platform=display the whole screen is drawn
- * directly, without a compositor.  Each frame clears to one colour
+ * directly, without a compositor; with --platform=pbuffer it draws into an
+ * EGL pbuffer that nothing shows.  Each frame clears to one colour
  * (--color) or to a colour that changes with the frame, and swaps; with
  * --scene=draw each frame draws scene.c's shapes instead, and the first
  * frame reads its colours back (EGLTEST PIXEL and EGLTEST CHECK lines).
@@ -40,6 +41,7 @@ struct egltest_options {
 	const char *display;
 	const char *token;
 	int direct;
+	int pbuffer;
 	int width;
 	int height;
 	unsigned frames;
@@ -135,7 +137,7 @@ main(
 	/* The command line. */
 	status = egltest_parse(argc, argv, &options);
 	if (status != 0) {
-		fprintf(stderr, "usage: egltest [--display=NAME] [--platform=wayland|display] [--size=WxH] [--frames=N] [--delay-ms=N] [--color=RRGGBB] [--scene=draw] [--token=NAME]\n");
+		fprintf(stderr, "usage: egltest [--display=NAME] [--platform=wayland|display|pbuffer] [--size=WxH] [--frames=N] [--delay-ms=N] [--color=RRGGBB] [--scene=draw] [--token=NAME]\n");
 		return 2;
 	}
 
@@ -186,6 +188,7 @@ egltest_start(
 		EGL_CONTEXT_CLIENT_VERSION, 2,
 		EGL_NONE
 	};
+	EGLint pbuffer_attributes[5];
 	const char *platform;
 	EGLint count;
 	EGLint width;
@@ -218,13 +221,24 @@ egltest_start(
 	egl->operation = "eglChooseConfig";
 	if (options->scene)
 		config_attributes[11] = 24;
+	if (options->pbuffer)
+		config_attributes[1] = EGL_PBUFFER_BIT;
 	done = eglChooseConfig(egl->display, config_attributes, &egl->config, 1, &count);
 	if (!done || count < 1)
 		return -1;
 
-	/* The window surface: over the Wayland EGL window, or the whole screen. */
+	/* The surface: over the Wayland EGL window, the whole screen, or a pbuffer of the size asked for. */
 	egl->operation = "eglCreateWindowSurface";
-	if (!options->direct) {
+	pbuffer_attributes[0] = EGL_WIDTH;
+	pbuffer_attributes[1] = options->width;
+	pbuffer_attributes[2] = EGL_HEIGHT;
+	pbuffer_attributes[3] = options->height;
+	pbuffer_attributes[4] = EGL_NONE;
+	if (options->pbuffer) {
+		platform = "pbuffer";
+		egl->operation = "eglCreatePbufferSurface";
+		egl->surface = eglCreatePbufferSurface(egl->display, egl->config, pbuffer_attributes);
+	} else if (!options->direct) {
 		egl->surface = eglCreatePlatformWindowSurface(egl->display, egl->config, window->egl_window, NULL);
 	} else {
 		egl->surface = eglCreateWindowSurface(egl->display, egl->config, (EGLNativeWindowType)0, NULL);
@@ -379,12 +393,19 @@ egltest_parse(
 			continue;
 		}
 
-		/* The platform: Wayland or the screen directly. */
+		/* The platform: Wayland, the screen directly, or a pbuffer (on the screen's display). */
 		value = egltest_value(argv[index], "--platform=");
 		if (value != NULL) {
 			options->direct = 0;
+			options->pbuffer = 0;
 			if (value[0] == 'd')
 				options->direct = 1;
+			if (value[0] == 'p') {
+				options->direct = 1;
+				options->pbuffer = 1;
+			}
+
+			/* The next argument. */
 			continue;
 		}
 
