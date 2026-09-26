@@ -4,7 +4,7 @@
 
 Phase ID: `ws035-p074`
 Parent: [WS035](../ws.md)
-Status: in-progress（q487-i01）
+Status: cleared（q487-i01、2026-09-27）
 Phase disposition: normal
 Queue: q487-i01
 承認: 2026-09-27 ユーザー「Xzed.hはパブリックヘッダにする必要がないかも？zed-gpu-buffer-v1-client-protocol.h もパブリックに
@@ -32,3 +32,21 @@ Queue: q487-i01
    sysroot の公開 header の元（`include/libc`）に 2 つの header が無く、木の中に `<X11/Xzed.h>`・`<wayland/zed-gpu-buffer-v1-client-protocol.h>` の
    include が無い。
 2. 意味を変えない変更なので、回帰は build と Venus の egl-p008（Wayland の WSI）・x11-p005（Xzed.h の使い手）と最後の boot test。
+
+## 結果（2026-09-27、q487-i01）
+
+- `zed-gpu-buffer-v1-client-protocol.h` → `userland/base/libwayland/`。include するのは libwayland（`internal.h`）、libvulkan の
+  WSI（`wsi-wayland.c`）、compositor の protocol の試験 `userland/base/tests/acquire-fence`。公開の `wayland-client-protocol.h`・
+  `xdg-shell-client-protocol.h` の `struct zed_gpu_buffer_v1;` を外し、`API-PROVENANCE.md` に非公開と libzdesktop の道を書いた。
+- `X11/Xzed.h` → `userland/X11/libX11/Xzed.h`（libX11・libGL・zterm・zshell・zwm が repo の root からの path で include）。
+- `include/libc/zdesktop.h` の説明を 2 つの役割（非標準の拡張の wrapper、OS・daemon への道）に。API は最初の使い手と一緒に足す。
+- p073 の build の変数の衝突（`DYNAMIC_ZDESKTOP_OBJS`）を直した（p073 に追記）。
+
+## 検証
+
+- build: amd64 の zdesktop の image、自前の code の warning 0（外部の LLVM・OpenSSL・Noct の warning は sysroot の header の変化で
+  再 build されたためで、既存のもの）。libzdesktop.so は `zdesktop_version` を出す。sysroot（`build/amd64/sysroot`）に 2 つの header が無い。
+  木の中に `<X11/Xzed.h>`・`<wayland/zed-gpu-buffer-v1-client-protocol.h>` の include が無い。
+- PC/AT（i386、`plan/ws035/tests/config-pcat-userland.mk`）: Xzed・zterm・zshell・zwm が warning 0 で build。image 全体は kernel の
+  `src/kern/sched.c` の `-Watomic-alignment` で止まる（この変更と無関係の既存の問題。ws034-p039 の記録どおり i386 の既定の build は壊れている）。
+- Venus（QEMU）: egl-p008・x11-p005 PASS。boot test PASS（`build/ws035-p074-boot/login.png`）。i915 実機は未実施（意味の変わらない変更）。

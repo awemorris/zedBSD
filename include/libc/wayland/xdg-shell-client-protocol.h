@@ -31,7 +31,6 @@ struct xdg_positioner;
 struct xdg_surface;
 struct xdg_toplevel;
 struct xdg_popup;
-struct zed_gpu_buffer_v1;
 
 struct xdg_wm_base;
 extern const struct wl_interface xdg_wm_base_interface;

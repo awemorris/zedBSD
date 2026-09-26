@@ -14,7 +14,7 @@
 
 #include <wayland/wayland-client.h>
 #include <wayland/xdg-shell-client-protocol.h>
-#include <wayland/zed-gpu-buffer-v1-client-protocol.h>
+#include "userland/base/libwayland/zed-gpu-buffer-v1-client-protocol.h"
 #include <errno.h>
 #include <limits.h>
 #include <pthread.h>

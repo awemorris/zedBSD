@@ -12,7 +12,7 @@
 #include "wsi-internal.h"
 
 #include <wayland-client.h>
-#include <wayland/zed-gpu-buffer-v1-client-protocol.h>
+#include "userland/base/libwayland/zed-gpu-buffer-v1-client-protocol.h"
 #include <errno.h>
 #include <poll.h>
 #include <string.h>

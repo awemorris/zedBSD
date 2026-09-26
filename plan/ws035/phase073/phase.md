@@ -48,3 +48,9 @@ Queue: q486-i01
 - i915 実機（capture）: zdesktop が起動し desktop・Gears・X terminal・デスクトップ 2 と 1 が PASS
   （`build/ws035-p073-hw/sheet.png`）。gears_turns は FAIL（既知の BUG-057、ws069-p010）。実機の LCD の目視は未実施。
 - boot test PASS（`build/ws035-p073-boot/login.png`）。
+
+## 追記（2026-09-27、ws035-p074 で判明）
+
+build の変数の改名（`DYNAMIC_ZWL_OBJS` → `DYNAMIC_ZDESKTOP_OBJS`）が libzdesktop の既存の変数と同じ名になり、libzdesktop.so の link が
+compositor の object で行われる誤りを入れていた（p073 の build は libzdesktop.so が最新だったので通っていた）。p074 で
+`DYNAMIC_ZDESKTOP_PROGRAM_OBJS` に直した。

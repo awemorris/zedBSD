@@ -52,7 +52,10 @@ and a metadata array. The fd has no in-band placeholder word. Metadata is an
 opaque versioned GPU descriptor verified by the server against the immutable
 kernel resource record; the client transport neither interprets nor trusts it.
 The application uses ordinary Wayland and Vulkan interfaces; only the WSI and
-compositor use this factory. No linux-dmabuf-v1 interface is advertised.
+compositor use this factory. No linux-dmabuf-v1 interface is advertised. Its client header is not public: it lives with libwayland
+(`userland/base/libwayland/zed-gpu-buffer-v1-client-protocol.h`), and only
+libwayland and libvulkan's WSI include it. Other zdesktop clients that need a
+non-standard zdesktop extension use libzdesktop (`<zdesktop.h>`).
 
 ## Protocol description license notices
 

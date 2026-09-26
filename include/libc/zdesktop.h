@@ -6,17 +6,23 @@
  */
 
 /*
- * The desktop's way into the operating system.
+ * The desktop's library, with two jobs.
  *
- * zdesktop does not talk to networkd, audiod or the other daemons itself.
- * Everything it needs from the system, other than drawing through Vulkan and
- * its windows through Wayland, comes through this library.  A daemon's
- * protocol can then change in one place, and moving the desktop to another
- * system means rewriting this library and nothing else.
+ * It wraps zdesktop's non-standard Wayland (xdg) extensions: a client of the
+ * desktop (zdesktop-x11server, an application) uses standard Wayland and
+ * Vulkan, and reaches anything only zdesktop offers through this library,
+ * never through a private protocol of its own.
  *
- * The library is empty for now.  Each feature that needs the system adds its
- * calls here when it arrives; until then only the version is public, so that
- * nothing is promised before it exists.
+ * It is also the desktop's way into the operating system: zdesktop does not
+ * talk to networkd, audiod or the other daemons itself.  Everything it needs
+ * from the system, other than drawing through Vulkan and its windows through
+ * Wayland, comes through this library.  A daemon's protocol or an extension
+ * can then change in one place, and moving the desktop to another system
+ * means rewriting this library and nothing else.
+ *
+ * The library is empty for now.  Each feature adds its calls here when it
+ * arrives with its first user; until then only the version is public, so
+ * that nothing is promised before it exists.
  */
 
 #ifndef ZDESKTOP_H

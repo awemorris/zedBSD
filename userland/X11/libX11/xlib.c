@@ -12,7 +12,7 @@
  */
 
 #include <X11/Xlib.h>
-#include <X11/Xzed.h>
+#include "userland/X11/libX11/Xzed.h"
 #include <X11/keysym.h>
 #include <errno.h>
 #include <fcntl.h>

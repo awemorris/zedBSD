@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q486（ws035-p073 cleared。zwl を zdesktop へ改名）
+Last finished Queue: q487（ws035-p074 cleared。非公開の header と libzdesktop の役割）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q486（2026-09-26〜27）
+## 最新: q443〜q487（2026-09-26〜27）
+
+[q487](queue-q487.md): ws035-p074 cleared。`Xzed.h` と `zed-gpu-buffer-v1-client-protocol.h` を非公開に（libX11・libwayland の下へ）、libzdesktop の役割を 2 つに。p073 の build の変数の衝突を修正。
 
 [q486](queue-q486.md): ws035-p073 cleared。`userland/base/zwl` を `userland/base/zdesktop`（`/bin/zdesktop`）へ改名（C の識別子と log の `ZWL` は据え置き）。
 
