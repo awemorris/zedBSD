@@ -2,7 +2,7 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: q458（ws035-p053）
-Last finished Queue: q456（ws062-p003 cleared。amd64 の既定を native に）
+Last finished Queue: q457（ws035-p052 cleared。zdesktop の 2 つのモードの核）
 <!-- awesome-plan-current:end -->
 
 # Past Log
