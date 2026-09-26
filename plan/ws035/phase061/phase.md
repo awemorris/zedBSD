@@ -33,3 +33,7 @@ Queue: q462-i01
 - 回帰: option 無しの p052 PASS、`--glass` の p059 PASS。build は warning 0、style-check は glass.c と変えた行で 0。
 
 制限: 窓の下のすりガラスが透かすのは壁紙だけで、下の窓は透けない（背後の窓のぼかしは p057）。大きさの違う PPM の拡縮（最近傍）は試していない。
+
+## 追記（2026-09-26）: 壁紙の差し替え
+
+ユーザー「背景画像はこの添付をベースに差し替え、さらに強くぼかして抽象度を上げましょう。」（同じ白樺と山と湖の、ややぼけた版）。1672x941 の中央を 1506x941 で切り、1280x800 にし、3 段（median 7・9・11、Gaussian 6・10・16 px）を比べて中（median 9、Gaussian 10 px、彩度 0.85、contrast 0.85、明るさ 1.05）を採った（`build/ws035-wallpaper/v2-soft-b.png`、比較は `v2-preview.png`、`wallpaper.ppm` を置き換え。git 外のまま）。コードの変更は無い。QEMU の Venus guest で窓と Wiseview の画面を撮った（`build/ws035-p061b/desktop.png`・`wiseview.png`）。
