@@ -34,11 +34,11 @@
 #include <time.h>
 #include <unistd.h>
 
-/* The atlas holds printable ASCII and the multiplication sign (the close button) at three sizes. */
+/* The atlas holds printable ASCII and the multiplication sign (the close button) at five sizes. */
 #define GLASS_GLYPHS		96U
-#define GLASS_SIZES		3U
+#define GLASS_SIZES		5U
 #define GLASS_ATLAS_WIDTH	1024U
-#define GLASS_ATLAS_HEIGHT	128U
+#define GLASS_ATLAS_HEIGHT	512U
 #define GLASS_FILE_MAX		(16U * 1024U * 1024U)
 
 /* The blurred wallpaper is this many times smaller than the output. */
@@ -66,7 +66,7 @@ struct zwl_glass {
 	unsigned text;
 };
 
-static const unsigned glass_pixels[GLASS_SIZES] = { 14U, 15U, 20U };
+static const unsigned glass_pixels[GLASS_SIZES] = { 14U, 15U, 20U, 36U, 24U };
 
 static int wallpaper_create(struct zwl_server *server, struct zwl_glass *glass);
 static void wallpaper_pixel(uint32_t x, uint32_t y, uint32_t width, uint32_t height, float *rgb);
@@ -772,26 +772,48 @@ glass_shape_draw(
 {
 	struct zwl_compose *compose;
 	float constants[ZWL_PANEL_CONSTANTS];
+	float quad[4];
+	float box[4];
+	float radius;
 	float width;
 	float height;
 	VkDescriptorSet set;
 
-	/* The quad in normalized device coordinates. */
+	/*
+	 * The quad and the box, moved and scaled when the desktop layer is
+	 * pushed aside by App Home (home.c): x' = layer x + x * scale.
+	 */
 	compose = server->compose;
 	width = (float)server->width;
 	height = (float)server->height;
-	constants[0] = 2.0f * shape->quad[0] / width - 1.0f;
-	constants[1] = 2.0f * shape->quad[1] / height - 1.0f;
-	constants[2] = 2.0f * (shape->quad[0] + shape->quad[2]) / width - 1.0f;
-	constants[3] = 2.0f * (shape->quad[1] + shape->quad[3]) / height - 1.0f;
+	memcpy(quad, shape->quad, sizeof(quad));
+	memcpy(box, shape->box, sizeof(box));
+	radius = shape->radius;
+	if (server->layer_on) {
+		quad[0] = server->layer_x + quad[0] * server->layer_scale;
+		quad[1] = server->layer_y + quad[1] * server->layer_scale;
+		quad[2] = quad[2] * server->layer_scale;
+		quad[3] = quad[3] * server->layer_scale;
+		box[0] = server->layer_x + box[0] * server->layer_scale;
+		box[1] = server->layer_y + box[1] * server->layer_scale;
+		box[2] = box[2] * server->layer_scale;
+		box[3] = box[3] * server->layer_scale;
+		radius = radius * server->layer_scale;
+	}
+
+	/* The quad in normalized device coordinates. */
+	constants[0] = 2.0f * quad[0] / width - 1.0f;
+	constants[1] = 2.0f * quad[1] / height - 1.0f;
+	constants[2] = 2.0f * (quad[0] + quad[2]) / width - 1.0f;
+	constants[3] = 2.0f * (quad[1] + quad[3]) / height - 1.0f;
 
 	/* The part of the image, the box, the color. */
 	memcpy(&constants[4], shape->uv, sizeof(shape->uv));
-	memcpy(&constants[8], shape->box, sizeof(shape->box));
+	memcpy(&constants[8], box, sizeof(box));
 	memcpy(&constants[12], shape->color, sizeof(shape->color));
 
 	/* The shape and the output. */
-	constants[16] = shape->radius;
+	constants[16] = radius;
 	constants[17] = shape->mode;
 	constants[18] = shape->soft;
 	constants[19] = shape->opaque;

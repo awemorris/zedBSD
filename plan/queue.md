@@ -1,11 +1,11 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue: q469 active
+# Queue: なし（q469 finished）
 
 <!-- awesome-plan-current:start -->
-Status: active（2026-09-26）
-Active Queue: [q469](history/queue-q469.md)（ws035-p069: App Home の PoC）
-Last finished Queue: [q468](history/queue-q468.md)（ws035-p068 cleared。zdesktop-terminal）
+Status: none（2026-09-26）
+Active Queue: なし
+Last finished Queue: [q469](history/queue-q469.md)（ws035-p069 cleared。App Home の PoC）
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
 

@@ -500,6 +500,14 @@ zwl_seat_key(
 {
 	struct zwl_object *object;
 	uint32_t words[4];
+	int taken;
+
+	/* App Home, while it shows, takes every key (home.c). */
+	if (server->glass) {
+		taken = zwl_home_key(server, key, state);
+		if (taken)
+			return;
+	}
 
 	/* A key without focus reaches nobody. */
 	if (server->focus == NULL)

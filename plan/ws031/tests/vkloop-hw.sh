@@ -179,6 +179,12 @@ if [ "$ZDESKTOP_RUN" = 1 ]; then
 		FILES="$FILES --file /etc/zdesktop/run-mview.sh=plan/ws031/tests/zdesktop/run-terminal.sh"
 		FILES="$FILES --file /usr/share/fonts/zdesktop-mono.ttf=build/ws035-fonts/JetBrainsMono-Regular.ttf"
 	fi
+	# ZDESKTOP_APP=home (WS035 p069): nothing is started in the viewer's place; App Home starts the
+	# applications (CAPTURE=zdesktop-home clicks them), and the logs are written out every two seconds
+	if [ "${ZDESKTOP_APP:-mview}" = home ]; then
+		FILES="$FILES --file /etc/zdesktop/run-mview.sh=plan/ws031/tests/zdesktop/run-home.sh"
+		FILES="$FILES --file /usr/share/fonts/zdesktop-mono.ttf=build/ws035-fonts/JetBrainsMono-Regular.ttf"
+	fi
 	FILES="$FILES --file /usr/share/fonts/zdesktop.ttf=build/ws035-fonts/Inter.ttf"
 	FILES="$FILES --file /usr/share/zdesktop/wallpaper.ppm=build/ws035-wallpaper/wallpaper-1080.ppm"
 	RC_CONF=plan/ws031/tests/zdesktop/rc.conf

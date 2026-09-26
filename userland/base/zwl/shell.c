@@ -169,12 +169,39 @@ zwl_glass_draw(
 	unsigned index;
 	unsigned focused;
 	float progress;
+	float home;
 
-	/* The wallpaper over the whole output. */
+	/*
+	 * App Home, opening, open or closing, lies under the desktop layer,
+	 * which slides aside over it with its shadow (home.c).
+	 */
+	home = zwl_home_progress(server);
+	if (home > 0.0f) {
+		zwl_home_draw(server, command, home);
+		zwl_home_layer(server, home, &server->layer_x, &server->layer_y, &server->layer_scale);
+		glass_shape_init(&shape, server->layer_x, server->layer_y, (float)server->width * server->layer_scale, (float)server->height * server->layer_scale);
+		shape.quad[0] -= 80.0f;
+		shape.quad[1] -= 80.0f;
+		shape.quad[2] += 160.0f;
+		shape.quad[3] += 160.0f;
+		shape.mode = MODE_SHADOW;
+		shape.radius = 18.0f;
+		shape.soft = 36.0f;
+		shape.color[0] = 0.08f;
+		shape.color[1] = 0.12f;
+		shape.color[2] = 0.24f;
+		shape.color[3] = 0.40f * home;
+		glass_shape_draw(server, command, &shape);
+		server->layer_on = 1;
+	}
+
+	/* The wallpaper over the whole output (with round corners while it is pushed aside). */
 	glass_shape_init(&shape, 0.0f, 0.0f, (float)server->width, (float)server->height);
 	shape.mode = MODE_IMAGE;
 	shape.opaque = 1.0f;
 	shape.set = glass_wallpaper_set(server);
+	if (home > 0.0f)
+		shape.radius = 18.0f;
 	glass_shape_draw(server, command, &shape);
 
 	/* The system bar's layout, which a docking title bar moves to. */
@@ -184,6 +211,7 @@ zwl_glass_draw(
 	progress = wiseview_progress(server);
 	if (progress > 0.0f) {
 		draw_wiseview(server, command, windows, count, progress);
+		server->layer_on = 0;
 		draw_system_bar(server, command, &bar);
 		return;
 	}
@@ -199,7 +227,8 @@ zwl_glass_draw(
 		draw_window(server, command, windows[index], focused, &bar);
 	}
 
-	/* The system bar over everything but the cursor. */
+	/* The system bar over everything but the cursor, where it always is. */
+	server->layer_on = 0;
 	draw_system_bar(server, command, &bar);
 
 	/* A frame of the animation. */
@@ -230,6 +259,11 @@ zwl_glass_button(
 		pressed = wiseview_button(server, button, state);
 		return pressed;
 	}
+
+	/* App Home takes the launcher, the top-left corner, and every button while it shows. */
+	pressed = zwl_home_button(server, button, state);
+	if (pressed)
+		return 1;
 
 	/* A left press at the bottom edge starts opening Wiseview. */
 	if (state != 0 && button == ZWL_BUTTON_LEFT && server->pointer_y >= (int32_t)server->height - WISEVIEW_EDGE) {
@@ -334,12 +368,18 @@ zwl_glass_motion(
 	int32_t lowest;
 	int32_t x;
 	int32_t y;
+	int taken;
 
 	/* The hover of buttons, the dock hint and the moves are redrawn. */
 	server->dirty = 1;
 
 	/* Wiseview follows the gesture, and hears the pointer while it is open. */
 	if (server->wiseview_gesture || server->wiseview > 0.0f || server->wiseview_moving)
+		return 1;
+
+	/* App Home follows its gesture, and hears the pointer while it shows. */
+	taken = zwl_home_motion(server);
+	if (taken)
 		return 1;
 
 	/* A docked title pulled far enough down comes off under the pointer, and the move goes on. */
@@ -426,6 +466,9 @@ zwl_glass_tick(
 	uint64_t elapsed;
 	float progress;
 	time_t now;
+
+	/* App Home's animation, and the applications it started that have ended. */
+	zwl_home_tick(server);
 
 	/* The animation draws every frame until it is done. */
 	if (server->anim != NULL) {
@@ -834,11 +877,15 @@ draw_system_bar(
 	struct zwl_object *docked;
 	float label[4];
 	float progress;
+	float home;
 	int button;
 	int over;
 
-	/* The docked window, if one is on top and not moving. */
+	/* The docked window, if one is on top and not moving (not while App Home shows). */
 	docked = docked_window(server);
+	home = zwl_home_progress(server);
+	if (home > 0.0f)
+		docked = NULL;
 
 	/* The strip, with a light line under it; whiter while a window is docked, or would dock. */
 	glass_shape_init(&shape, 0.0f, 0.0f, (float)server->width, (float)ZWL_GLASS_BAR);
@@ -860,6 +907,19 @@ draw_system_bar(
 	glass_draw_solid(server, command, 24.0f, 11.0f, 5.0f, 5.0f, 1.5f, white);
 	glass_draw_solid(server, command, 17.0f, 18.0f, 5.0f, 5.0f, 1.5f, white);
 	glass_draw_solid(server, command, 24.0f, 18.0f, 5.0f, 5.0f, 1.5f, white);
+
+	/* In App Home the launcher is marked by a ring. */
+	if (home > 0.0f) {
+		glass_shape_init(&shape, 9.0f, 3.0f, 28.0f, 28.0f);
+		shape.mode = MODE_RING;
+		shape.radius = 8.0f;
+		shape.soft = 2.0f;
+		shape.color[0] = 0.25f;
+		shape.color[1] = 0.52f;
+		shape.color[2] = 0.98f;
+		shape.color[3] = home;
+		glass_shape_draw(server, command, &shape);
+	}
 
 	/* The system menu. */
 	glass_draw_text(server, command, SIZE_BAR, 44, 22, "zedBSD", 200, dark);

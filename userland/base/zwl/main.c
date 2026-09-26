@@ -206,8 +206,8 @@ parse_options(
 		/* Service timeout always remains finite, including unattended test invocations. */
 		match = strncmp(argument, "--timeout=", 10);
 		if (match == 0) {
-			/* A positive finite timeout is mandatory for this service invocation. */
-			error = unsigned_option(argument + 10, 3600, &number);
+			/* A positive finite timeout is mandatory; a day is the longest (an interactive session). */
+			error = unsigned_option(argument + 10, 86400, &number);
 			if (error != 0)
 				return error;
 

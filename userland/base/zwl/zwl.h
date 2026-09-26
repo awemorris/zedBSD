@@ -395,6 +395,35 @@ struct zwl_server {
 	float wiseview_to;
 	uint64_t wiseview_start_ms;
 	struct zwl_object *wiseview_current;
+	/*
+	 * The desktop layer's place while App Home pushes it aside: every glass
+	 * shape drawn with layer_on is moved to layer_x, layer_y and scaled by
+	 * layer_scale (glass.c); shell.c turns it on around the desktop only.
+	 */
+	unsigned layer_on;
+	float layer_x;
+	float layer_y;
+	float layer_scale;
+	/*
+	 * App Home (home.c): how far it is open (0 closed, 1 open) when settled;
+	 * a press in the top-left corner that may become the gesture, where it
+	 * started and whether it has moved far enough to be one, and how far it
+	 * is open by it; the animation to a settled value (from, to, when it
+	 * started); what has been typed, and the selected application.
+	 */
+	float home;
+	unsigned home_press;
+	unsigned home_dragging;
+	int32_t home_start_x;
+	int32_t home_start_y;
+	float home_drag;
+	unsigned home_moving;
+	float home_from;
+	float home_to;
+	uint64_t home_start_ms;
+	char home_query[48];
+	unsigned home_query_length;
+	int home_selected;
 	/* The cursor: a client's surface, zdesktop's arrow when there is none, or hidden. */
 	struct zwl_object *cursor_surface;
 	int32_t cursor_hotspot_x;
@@ -453,6 +482,12 @@ int zwl_glass_button(struct zwl_server *server, uint32_t button, uint32_t state)
 int zwl_glass_motion(struct zwl_server *server);
 void zwl_glass_place(struct zwl_server *server, struct zwl_object *surface, int32_t width, int32_t height, int32_t step);
 void zwl_glass_tick(struct zwl_server *server);
+float zwl_home_progress(struct zwl_server *server);
+void zwl_home_layer(struct zwl_server *server, float progress, float *x, float *y, float *scale);
+int zwl_home_button(struct zwl_server *server, uint32_t button, uint32_t state);
+int zwl_home_motion(struct zwl_server *server);
+int zwl_home_key(struct zwl_server *server, uint32_t key, uint32_t state);
+void zwl_home_tick(struct zwl_server *server);
 uint32_t zwl_next_serial(struct zwl_server *server);
 int zwl_seat_bind(struct zwl_object *seat);
 int zwl_seat_request(struct zwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);

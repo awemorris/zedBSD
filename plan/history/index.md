@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q468（ws035-p068 cleared。zdesktop-terminal）
+Last finished Queue: q469（ws035-p069 cleared。App Home の PoC）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q468（2026-09-26）
+## 最新: q443〜q469（2026-09-26）
+
+[q469](queue-q469.md): ws035-p069 cleared。App Home の PoC（desktop の層が右下へずれて明るい Home が現れる、launcher と左上の角からの drag、6 列の icon、打つと検索、起動、Esc と角で閉じる）。Venus と i915 実機で terminal と mview を起動。実機用の demo image の build script。
 
 [q468](queue-q468.md): ws035-p068 cleared。zdesktop-terminal（zterm の VT100 を移し拡張、libtruetype の等幅 font の atlas、Vulkan の cell 描画、US 配列、key repeat、forkpty、resize）。Venus と i915 実機で shell が動く。Venus の image に git 外の font と壁紙を入れる build script。i915 の 1 回の画面停止は BUG-056（tracking）。
 

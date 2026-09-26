@@ -1,0 +1,5 @@
+type=daemon
+command=/bin/sh
+arguments=/etc/zdesktop/run-zdesktop.sh
+restart=no
+required=NO

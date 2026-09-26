@@ -29,11 +29,13 @@
 /* The corner radius of title bars and bodies. */
 #define GLASS_RADIUS		14.0f
 
-/* The text sizes: the system bar, the titles, the close sign. */
+/* The text sizes: the system bar, the titles, the close sign, App Home's icon letters and its search text. */
 enum glass_size {
 	SIZE_BAR,
 	SIZE_TITLE,
-	SIZE_SIGN
+	SIZE_SIGN,
+	SIZE_ICON,
+	SIZE_SEARCH
 };
 
 /*
@@ -65,5 +67,8 @@ void glass_draw_text(struct zwl_server *server, VkCommandBuffer command, enum gl
 void glass_draw_glyph(struct zwl_server *server, VkCommandBuffer command, enum glass_size size, unsigned index, int32_t x, int32_t baseline, const float *color);
 int32_t glass_glyph_advance(struct zwl_server *server, enum glass_size size, unsigned index);
 VkDescriptorSet glass_wallpaper_set(struct zwl_server *server);
+
+/* App Home under the desktop layer (home.c). */
+void zwl_home_draw(struct zwl_server *server, VkCommandBuffer command, float progress);
 
 #endif
