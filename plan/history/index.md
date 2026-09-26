@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q469（ws035-p069 cleared。App Home の PoC）
+Last finished Queue: q470（ws068-p001 cleared。EGL/GLES の設計）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q469（2026-09-26）
+## 最新: q443〜q470（2026-09-26）
+
+[q470](queue-q470.md): ws068-p001 cleared。EGL/GLES の設計（plan/ws068/design.md）: library の構成、EGL（Wayland・display 直接）、GLES の方式の比較と推奨（B: 自前の変換層＋glslang）。方式の選択はユーザーの判断待ち（p003 の前提）。
 
 [q469](queue-q469.md): ws035-p069 cleared。App Home の PoC（desktop の層が右下へずれて明るい Home が現れる、launcher と左上の角からの drag、6 列の icon、打つと検索、起動、Esc と角で閉じる）。Venus と i915 実機で terminal と mview を起動。実機用の demo image の build script。
 

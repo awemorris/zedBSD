@@ -3,13 +3,13 @@
 # WS068: EGL と OpenGL ES を Vulkan と display 拡張の上に実装する
 
 <!-- awesome-plan-current:start -->
-Status: planning
+Status: incomplete
 Primary Milestone: MG006
 Related Milestones: MG002
 Objectives: O1, O2
 Parent: [Master](../master.md)
-Queue: none
-Resume point: p001（方式の選択と設計）から。優先度はユーザーの指示を待つ（2026-09-26 に WS として作成）
+Queue: q471
+Resume point: p002（EGL の核）。GLES の方式（design.md §4）はユーザーの判断を待つ（p003 の前提）
 <!-- awesome-plan-current:end -->
 
 ## 目標
@@ -47,9 +47,9 @@ EGL と OpenGL ES（2.0、次に 3.0）を、zedBSD の libvulkan（Vulkan）と
 
 | Phase | 内容 | Status | 依存 |
 | --- | --- | --- | --- |
-| ws068-p001 | 設計: library の構成（`libEGL.so`・`libGLESv2.so`・`libwayland-egl.so`）、GLES の方式の比較（自前の変換層＋glslang / Zink / ANGLE）、libvulkan に要る機能、試験アプリ、ライセンス | planning | — |
-| ws068-p002 | EGL の核と `libwayland-egl`、display 直接の platform（最初は clear だけの GLES で疎通） | planning | p001 |
-| ws068-p003 | GLES 2.0 の最小（buffer・shader・draw・texture・blend・depth） | planning | p002 |
+| [ws068-p001](phase001/phase.md) | 設計: library の構成（`libEGL.so`・`libGLESv2.so`・`libwayland-egl.so`）、GLES の方式の比較（自前の変換層＋glslang / Zink / ANGLE）、libvulkan に要る機能、試験アプリ、ライセンス（[design.md](design.md)） | cleared（q470-i01。GLES の方式はユーザーの判断待ち） | — |
+| [ws068-p002](phase002/phase.md) | EGL の核と `libwayland-egl`、display 直接の platform（最初は clear だけの GLES で疎通） | in-progress（q471-i01） | p001 |
+| ws068-p003 | GLES 2.0 の最小（buffer・shader・draw・texture・blend・depth） | planning | p002、GLES の方式のユーザーの判断（design.md §4） |
 | ws068-p004 | GLES 2.0 の残りと試験の充実 | planning | p003 |
 | ws068-p005 | GLES 3.0 | planning | p004 |
 | ws068-p006 | i915 実機での確認 | planning | p004、F-022、F-023 |
