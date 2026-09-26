@@ -28,7 +28,9 @@
 #include <unistd.h>
 #include <uapi/graphics.h>
 
+#include "userland/X11/xzed/glyphs.h"
 #include "userland/X11/xzed/input.h"
+#include "userland/X11/xzed/wayland.h"
 #include "userland/X11/xzed/pointer.h"
 
 #define MAX_CLIENTS 8
@@ -61,6 +63,11 @@
 #define XC_LEFT_PTR 68U
 #define XC_SB_H_DOUBLE_ARROW 108U
 #define XC_SB_V_DOUBLE_ARROW 116U
+
+/* The Wayland backend's screen when no size is given, and the font its text is drawn with (WS069). */
+#define XZED_WAYLAND_WIDTH 1280U
+#define XZED_WAYLAND_HEIGHT 800U
+#define XZED_WAYLAND_FONT "/usr/share/fonts/zdesktop-mono.ttf"
 
 /*
  * Standard X11 left_ptr source and mask bitmaps.  A source bit is black; a
@@ -137,6 +144,8 @@ struct server {
 	int listener;
 	int graphics;
 	struct xzed_input *input;
+	/* The Wayland backend (WS069); NULL when the screen is /dev/graphics. */
+	struct xzed_wayland *wayland;
 	struct graphics_mode mode;
 	struct client clients[MAX_CLIENTS];
 	struct window windows[MAX_WINDOWS];
@@ -179,7 +188,9 @@ static volatile int stopped;
 extern char **environ;
 
 static int parse_size(const char *text, unsigned *width, unsigned *height);
-static int initialize(struct server *s, unsigned preferred_width, unsigned preferred_height, unsigned preferred_depth);
+static int initialize(struct server *s, unsigned preferred_width, unsigned preferred_height, unsigned preferred_depth, int wayland);
+static int initialize_wayland(struct server *s, unsigned width, unsigned height);
+static int initialize_graphics(struct server *s, unsigned preferred_width, unsigned preferred_height, unsigned preferred_depth);
 static int choose_mode(int fd, unsigned preferred_width, unsigned preferred_height, unsigned preferred_depth, struct graphics_mode *chosen);
 static uint32_t *window_pixels_alloc(uint16_t width, uint16_t height, uint32_t color);
 static void repaint(struct server *s);
@@ -250,6 +261,9 @@ main(
 	struct pollfd p[1 + XZED_INPUT_MAX_DEVICES + MAX_CLIENTS];
 	unsigned i, count, input_base, input_count;
 	int arg;
+	int wayland;
+	int match;
+	int failed;
 	unsigned preferred_width, preferred_height, preferred_depth;
 
 	/* Process each remaining command-line operand. */
@@ -257,7 +271,16 @@ main(
 	preferred_width = 0;
 	preferred_height = 0;
 	preferred_depth = 24;
+	wayland = 0;
 	while (arg < argc) {
+		/* --wayland shows the screen as a window of the Wayland compositor (WS069). */
+		match = strcmp(argv[arg], "--wayland");
+		if (match == 0) {
+			wayland = 1;
+			arg++;
+			continue;
+		}
+
 		/* Handles the selected command-line operation. */
 		if (strcmp(argv[arg], ":0") == 0) {
 			arg++;
@@ -290,7 +313,7 @@ main(
 				continue;
 			}
 		}
-		fprintf(stderr, "usage: Xzed [:0] [--size WIDTHxHEIGHT] "
+		fprintf(stderr, "usage: Xzed [:0] [--wayland] [--size WIDTHxHEIGHT] "
 				"[--depth 4|8|24|32] "
 				"[-- command [argument ...]]\n");
 
@@ -302,7 +325,7 @@ main(
 
 	/* Handles the initialize condition. */
 	if (initialize(&s, preferred_width, preferred_height,
-		       preferred_depth)) {
+		       preferred_depth, wayland)) {
 		fprintf(stderr, "Xzed: %s\n", strerror(errno));
 		cleanup(&s);
 
@@ -335,8 +358,17 @@ main(
 		count = 0;
 		p[count++] = (struct pollfd){s.listener, POLLIN, 0};
 		input_base = count;
-		input_count = (unsigned)xzed_input_pollfds(s.input, p + count,
-		    XZED_INPUT_MAX_DEVICES);
+
+		/* The input: the compositor's connection, or the input devices. */
+		if (s.wayland != NULL) {
+			p[count] = (struct pollfd){xzed_wayland_fd(s.wayland), POLLIN, 0};
+			input_count = 1U;
+		} else {
+			input_count = (unsigned)xzed_input_pollfds(s.input, p + count,
+			    XZED_INPUT_MAX_DEVICES);
+		}
+
+		/* The client sockets follow the input's descriptors. */
 		count += input_count;
 
 		/* Process each element required by the operation. */
@@ -392,9 +424,19 @@ main(
 			}
 		}
 
-		/* Handles a failed xzed input dispatch operation. */
-		if (xzed_input_dispatch(s.input, p + input_base, input_count) != 0)
+		/* The compositor's events, or the devices'; a broken connection or a closed window ends Xzed. */
+		if (s.wayland != NULL) {
+			failed = xzed_wayland_dispatch(s.wayland, (p[input_base].revents & POLLIN) != 0);
+			failed |= xzed_wayland_closed(s.wayland);
+		} else {
+			failed = xzed_input_dispatch(s.input, p + input_base, input_count);
+		}
+
+		/* Either ends the server. */
+		if (failed != 0)
 			stopped = 1;
+
+		/* A pointer motion left pending goes out. */
 		finish_pointer_input(&s);
 
 		/* Process each element required by the operation. */
@@ -443,13 +485,14 @@ initialize(
 	struct server *s,
 	unsigned preferred_width,
 	unsigned preferred_height,
-	unsigned preferred_depth)
+	unsigned preferred_depth,
+	int wayland)
 {
 	struct sockaddr_un a;
-	struct graphics_caps caps;
 	const struct xzed_input_handlers input_handlers = {input_key,
 							   input_pointer};
 	unsigned i;
+	int status;
 
 	memset(s, 0, sizeof(*s));
 
@@ -458,36 +501,19 @@ initialize(
 	s->pointer_grab_owner = -1;
 	for (i = 0; i < MAX_CLIENTS; i++)
 		s->clients[i].fd = -1;
-	s->graphics = open("/dev/graphics", O_RDWR | O_CLOEXEC);
 
-	/* Checks the current string state. */
-	if (s->graphics < 0)
-		return -1;
-
-	/* Handles a failed ioctl operation. */
-	if (ioctl(s->graphics, KERN_GRAPHICS_GET_CAPS, &caps))
-		return -1;
-
-	/* Handles the caps condition. */
-	if (!(caps.capabilities & KERN_GRAPHICS_CAP_FLUSH) ||
-	    !(caps.capabilities & KERN_GRAPHICS_CAP_GLYPH) ||
-	    !(caps.capabilities & KERN_GRAPHICS_CAP_BLIT_RGB24)) {
-		errno = ENOTSUP;
-
-		/* Reports operation failure. */
-		return -1;
+	/* The screen: a window of the Wayland compositor (WS069), or /dev/graphics. */
+	if (wayland) {
+		status = initialize_wayland(s, preferred_width, preferred_height);
+	} else {
+		status = initialize_graphics(s, preferred_width, preferred_height, preferred_depth);
 	}
 
-	/* Handles a failed choose mode operation. */
-	if (choose_mode(s->graphics, preferred_width, preferred_height,
-			preferred_depth, &s->mode))
-
-		/* Reports operation failure. */
+	/* Without a screen there is no server. */
+	if (status != 0)
 		return -1;
 
-	/* Handles a failed ioctl operation. */
-	if (ioctl(s->graphics, KERN_GRAPHICS_ENTER, &s->mode))
-		return -1;
+	/* The socket the clients connect to. */
 	(void)mkdir("/tmp/.X11-unix", 0777);
 	(void)unlink("/tmp/.X11-unix/X0");
 	s->listener = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
@@ -518,14 +544,16 @@ initialize(
 	s->pointer_x = (int)s->mode.width / 2;
 	s->pointer_y = (int)s->mode.height / 2;
 
-	/* Handles a failed xzed input open operation. */
-	if (xzed_input_open(&s->input, s->mode.width, s->mode.height,
-	    &input_handlers, s) != 0)
+	/* The input devices (the Wayland backend's input is the compositor's). */
+	if (s->wayland == NULL) {
+		if (xzed_input_open(&s->input, s->mode.width, s->mode.height,
+		    &input_handlers, s) != 0)
+			return -1;
+		s->buttons = xzed_input_buttons(s->input);
+		s->key_state = xzed_input_modifiers(s->input);
+	}
 
-		/* Reports operation failure. */
-		return -1;
-	s->buttons = xzed_input_buttons(s->input);
-	s->key_state = xzed_input_modifiers(s->input);
+	/* The root window's pixels, the composited screen and the transfer buffer. */
 	s->windows[0].pixels =
 	    window_pixels_alloc(s->windows[0].width, s->windows[0].height,
 				s->windows[0].background);
@@ -544,6 +572,92 @@ initialize(
 	present(s);
 
 	/* Reports successful completion. */
+	return 0;
+}
+
+/*
+ * Opens /dev/graphics and enters the mode nearest the one asked for.
+ */
+static int
+initialize_graphics(
+	struct server *s,
+	unsigned preferred_width,
+	unsigned preferred_height,
+	unsigned preferred_depth)
+{
+	struct graphics_caps caps;
+
+	/* The graphics device. */
+	s->graphics = open("/dev/graphics", O_RDWR | O_CLOEXEC);
+
+	/* Checks the current string state. */
+	if (s->graphics < 0)
+		return -1;
+
+	/* Handles a failed ioctl operation. */
+	if (ioctl(s->graphics, KERN_GRAPHICS_GET_CAPS, &caps))
+		return -1;
+
+	/* Handles the caps condition. */
+	if (!(caps.capabilities & KERN_GRAPHICS_CAP_FLUSH) ||
+	    !(caps.capabilities & KERN_GRAPHICS_CAP_GLYPH) ||
+	    !(caps.capabilities & KERN_GRAPHICS_CAP_BLIT_RGB24)) {
+		errno = ENOTSUP;
+
+		/* Reports operation failure. */
+		return -1;
+	}
+
+	/* Handles a failed choose mode operation. */
+	if (choose_mode(s->graphics, preferred_width, preferred_height,
+			preferred_depth, &s->mode))
+
+		/* Reports operation failure. */
+		return -1;
+
+	/* Handles a failed ioctl operation. */
+	if (ioctl(s->graphics, KERN_GRAPHICS_ENTER, &s->mode))
+		return -1;
+
+	/* Succeeded: the screen is the graphics device. */
+	return 0;
+}
+
+/*
+ * Starts the Wayland backend (WS069): the screen's size (the one asked for,
+ * or 1280x800), the TrueType font the text is drawn with, and the window of
+ * the compositor that shows the screen and gives the input.
+ */
+static int
+initialize_wayland(
+	struct server *s,
+	unsigned width,
+	unsigned height)
+{
+	const struct xzed_input_handlers handlers = {input_key, input_pointer};
+	int error;
+
+	/* The screen's size. */
+	if (width == 0U || height == 0U) {
+		width = XZED_WAYLAND_WIDTH;
+		height = XZED_WAYLAND_HEIGHT;
+	}
+
+	/* The screen is that size. */
+	s->mode.width = width;
+	s->mode.height = height;
+
+	/* The font; without one the text is not drawn. */
+	error = xzed_glyphs_open(XZED_WAYLAND_FONT);
+	if (error != 0)
+		fprintf(stderr, "Xzed: %s: %s (no text)\n", XZED_WAYLAND_FONT, strerror(error));
+
+	/* The window, with Xzed's input handlers. */
+	error = xzed_wayland_open(&s->wayland, NULL, width, height, &handlers, s);
+	if (error != 0)
+		return -1;
+
+	/* Succeeded: the screen is the window. */
 	return 0;
 }
 
@@ -746,6 +860,7 @@ present(
 	uint16_t shape;
 	int hot_x;
 	int hot_y;
+	int busy;
 	int x, y, w, h;
 
 	shape = pointer_shape(s);
@@ -761,6 +876,14 @@ present(
 	h = s->dirty_y1 - y;
 	s->dirty = 0;
 	composite_region(s, x, y, w, h);
+
+	/* The Wayland backend shows the screen as it is (the compositor draws the pointer); a busy window tries again. */
+	if (s->wayland != NULL) {
+		busy = xzed_wayland_present(s->wayland, s->screen, x, y, w, h);
+		if (busy != 0)
+			mark_dirty(s, x, y, w, h);
+		return;
+	}
 
 	/*
  * The cursor is transient: overlay it only in the RGB24 transfer
@@ -1131,7 +1254,13 @@ cleanup(
 	if (s->listener >= 0)
 		close(s->listener);
 	(void)unlink("/tmp/.X11-unix/X0");
-	xzed_input_close(s->input);
+
+	/* The input devices, or the Wayland backend and its font. */
+	if (s->input != NULL)
+		xzed_input_close(s->input);
+	xzed_wayland_close(s->wayland);
+	s->wayland = NULL;
+	xzed_glyphs_close();
 
 	/* Checks the current string state. */
 	if (s->graphics >= 0)
@@ -3136,6 +3265,8 @@ draw_text(
 	int wide)
 {
 	struct graphics_glyph q;
+	struct xzed_glyph glyph;
+	int missing;
 	uint32_t cp;
 	int gx, gy, top;
 	uint8_t bitmap[32];
@@ -3153,9 +3284,19 @@ draw_text(
 		q.bitmap = (uapi_ptr_t)(uintptr_t)bitmap;
 		q.bitmap_capacity = sizeof(bitmap);
 
-		/* Handles a failed ioctl operation. */
-		if (ioctl(s->graphics, KERN_GRAPHICS_GET_GLYPH, &q))
+		/* The glyph: the TrueType font's for the Wayland backend (WS069), the console's otherwise. */
+		if (s->wayland != NULL) {
+			missing = xzed_glyph(cp, &glyph);
+			if (missing != 0)
+				continue;
+			q.width = glyph.width;
+			q.height = glyph.height;
+			q.stride = glyph.stride;
+			q.advance = glyph.advance;
+			memcpy(bitmap, glyph.bitmap, sizeof(bitmap));
+		} else if (ioctl(s->graphics, KERN_GRAPHICS_GET_GLYPH, &q)) {
 			continue;
+		}
 
 		/* Process each element required by the operation. */
 		top = y - (int)q.height;

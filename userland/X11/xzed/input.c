@@ -851,78 +851,21 @@ device_modifiers(
 	return result;
 }
 
-/* Supports the x keycode operation. */
+/* Returns the X keycode of an evdev key code in the devices' current shift and caps lock states. */
 static uint8_t
 x_keycode(
 	const struct xzed_input *input,
 	uint16_t code)
 {
-	int use_shift;
-	size_t index;
-	int shifted = (input->modifiers & XZED_INPUT_SHIFT_MASK) != 0;
-	uint8_t symbol;
+	uint8_t keycode;
+	int shifted;
 
-	symbol = 0;
-
-	/* Dispatch the selected operation case. */
-	switch (code) {
-	case KEY_UP:
-		/* Returns the computed result. */
-		return 0xe0U;
-	case KEY_DOWN:
-		/* Returns the computed result. */
-		return 0xe1U;
-	case KEY_LEFT:
-		/* Returns the computed result. */
-		return 0xe2U;
-	case KEY_RIGHT:
-		/* Returns the computed result. */
-		return 0xe3U;
-	case KEY_HOME:
-		/* Returns the computed result. */
-		return 0xe4U;
-	case KEY_END:
-		/* Returns the computed result. */
-		return 0xe5U;
-	case KEY_PAGEUP:
-		/* Returns the computed result. */
-		return 0xe6U;
-	case KEY_PAGEDOWN:
-		/* Returns the computed result. */
-		return 0xe7U;
-	case KEY_INSERT:
-		/* Returns the computed result. */
-		return 0xe8U;
-	case KEY_DELETE:
-		/* Returns the computed result. */
-		return 0xe9U;
-	case KEY_ESC:
-		symbol = 0x1bU; break;
-	case KEY_BACKSPACE:
-		symbol = 0x08U; break;
-	case KEY_TAB:
-		symbol = 0x09U; break;
-	case KEY_ENTER:
-		symbol = 0x0dU; break;
-	default:
-		/* Process each remaining element. */
-		for (index = 0; index < sizeof(key_symbols) /
-		    sizeof(key_symbols[0]); index++) {
-			/* Handles the key symbols condition. */
-			if (key_symbols[index].code == code) {
-				use_shift = key_symbols[index].letter ?
-			    shifted ^ input->caps_lock : shifted;
-				symbol = use_shift ? key_symbols[index].shifted :
-				    key_symbols[index].normal;
-				break;
-			}
-		}
-		break;
-	}
-
-	/* Returns the computed result. */
-	return symbol != 0 && symbol < 248U ? (uint8_t)(symbol + 8U) : 0;
+	/* The shift state the devices report. */
+	shifted = (input->modifiers & XZED_INPUT_SHIFT_MASK) != 0;
+	keycode = xzed_input_keycode(code, shifted, input->caps_lock);
+	return keycode;
 }
+
 
 /* Supports the snapshot buttons operation. */
 static uint16_t
@@ -1522,4 +1465,81 @@ release_device_state(
 	/* Handles the pointer condition. */
 	if (pointer.edge_count != 0)
 		input->handlers.pointer(input->handler_context, &pointer);
+}
+
+/*
+ * Returns the X keycode of an evdev key code with the shift and caps lock
+ * states given, or 0 for a key that has none (Xzed's keycodes are the
+ * character plus 8, and 0xe0 up for the cursor keys).
+ */
+uint8_t
+xzed_input_keycode(
+	uint16_t code,
+	int shifted,
+	int caps_lock)
+{
+	int use_shift;
+	size_t index;
+	uint8_t symbol;
+
+	symbol = 0;
+
+	/* Dispatch the selected operation case. */
+	switch (code) {
+	case KEY_UP:
+		/* Returns the computed result. */
+		return 0xe0U;
+	case KEY_DOWN:
+		/* Returns the computed result. */
+		return 0xe1U;
+	case KEY_LEFT:
+		/* Returns the computed result. */
+		return 0xe2U;
+	case KEY_RIGHT:
+		/* Returns the computed result. */
+		return 0xe3U;
+	case KEY_HOME:
+		/* Returns the computed result. */
+		return 0xe4U;
+	case KEY_END:
+		/* Returns the computed result. */
+		return 0xe5U;
+	case KEY_PAGEUP:
+		/* Returns the computed result. */
+		return 0xe6U;
+	case KEY_PAGEDOWN:
+		/* Returns the computed result. */
+		return 0xe7U;
+	case KEY_INSERT:
+		/* Returns the computed result. */
+		return 0xe8U;
+	case KEY_DELETE:
+		/* Returns the computed result. */
+		return 0xe9U;
+	case KEY_ESC:
+		symbol = 0x1bU; break;
+	case KEY_BACKSPACE:
+		symbol = 0x08U; break;
+	case KEY_TAB:
+		symbol = 0x09U; break;
+	case KEY_ENTER:
+		symbol = 0x0dU; break;
+	default:
+		/* Process each remaining element. */
+		for (index = 0; index < sizeof(key_symbols) /
+		    sizeof(key_symbols[0]); index++) {
+			/* Handles the key symbols condition. */
+			if (key_symbols[index].code == code) {
+				use_shift = key_symbols[index].letter ?
+			    shifted ^ caps_lock : shifted;
+				symbol = use_shift ? key_symbols[index].shifted :
+				    key_symbols[index].normal;
+				break;
+			}
+		}
+		break;
+	}
+
+	/* Returns the computed result. */
+	return symbol != 0 && symbol < 248U ? (uint8_t)(symbol + 8U) : 0;
 }

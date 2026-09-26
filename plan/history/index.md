@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q472（ws069-p001 cleared。X11 の設計）
+Last finished Queue: q473（ws069-p002 cleared。Xzed の rootful の Wayland backend）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q472（2026-09-26）
+## 最新: q443〜q473（2026-09-26）
+
+[q473](queue-q473.md): ws069-p002 cleared。Xzed の Wayland backend（rootful: X の screen を zwl の 1 つの窓に、wl_shm、pointer・keyboard、libtruetype の glyph）。Venus の zwl で X の zterm に打った command の出力が見える。
 
 [q472](queue-q472.md): ws069-p001 cleared。zwl で X11 の app を動かす設計（新 WS069）: 既存の Xzed に Wayland backend（rootful → rootless）、GLX は EGL/GLES の上で DRI3/Present に当たる buffer の受け渡し。
 

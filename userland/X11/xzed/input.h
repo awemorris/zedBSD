@@ -78,5 +78,6 @@ int xzed_input_dispatch(struct xzed_input *, const struct pollfd *, size_t);
 size_t xzed_input_device_count(const struct xzed_input *);
 uint16_t xzed_input_buttons(const struct xzed_input *);
 uint16_t xzed_input_modifiers(const struct xzed_input *);
+uint8_t xzed_input_keycode(uint16_t code, int shifted, int caps_lock);
 
 #endif
