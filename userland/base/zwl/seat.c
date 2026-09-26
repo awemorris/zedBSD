@@ -405,6 +405,12 @@ zwl_seat_axis(
 	struct zwl_object *object;
 	uint32_t words[3];
 	uint32_t word;
+	int taken;
+
+	/* App Home, while it shows, turns its pages with the wheel. */
+	taken = zwl_home_axis(server, vertical, horizontal);
+	if (taken)
+		return;
 
 	/* Scrolling without focus reaches nobody. */
 	if (server->focus == NULL)

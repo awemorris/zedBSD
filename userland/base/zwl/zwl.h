@@ -424,6 +424,32 @@ struct zwl_server {
 	char home_query[48];
 	unsigned home_query_length;
 	int home_selected;
+	/*
+	 * App Home's pages (ws035-p071): the page shown; a press on Home that
+	 * may become a page drag (where it started, the application under it,
+	 * whether it has moved enough) and the drag's offset in pixels; the
+	 * snap to a page (from and to as page positions, when it started).
+	 */
+	unsigned home_page;
+	unsigned home_page_press;
+	unsigned home_page_dragging;
+	int32_t home_page_start_x;
+	int32_t home_page_start_y;
+	int home_page_app;
+	int32_t home_page_offset;
+	unsigned home_page_moving;
+	float home_page_from;
+	float home_page_to;
+	uint64_t home_page_start_ms;
+	/*
+	 * The last launch: the application (its icon grows as Home closes),
+	 * and whether its first window is still to grow from the icon, since
+	 * when, and the icon's rectangle.
+	 */
+	int home_launch_app;
+	unsigned home_launching;
+	uint64_t home_launch_ms;
+	int32_t home_launch_rect[4];
 	/* The cursor: a client's surface, zdesktop's arrow when there is none, or hidden. */
 	struct zwl_object *cursor_surface;
 	int32_t cursor_hotspot_x;
@@ -488,6 +514,9 @@ int zwl_home_button(struct zwl_server *server, uint32_t button, uint32_t state);
 int zwl_home_motion(struct zwl_server *server);
 int zwl_home_key(struct zwl_server *server, uint32_t key, uint32_t state);
 void zwl_home_tick(struct zwl_server *server);
+int zwl_home_axis(struct zwl_server *server, int32_t vertical, int32_t horizontal);
+int zwl_home_launched(struct zwl_server *server, int32_t *rect);
+void zwl_glass_mapped(struct zwl_server *server, struct zwl_object *surface);
 uint32_t zwl_next_serial(struct zwl_server *server);
 int zwl_seat_bind(struct zwl_object *seat);
 int zwl_seat_request(struct zwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);

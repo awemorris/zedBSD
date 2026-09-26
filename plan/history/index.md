@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q479（ws035-p070 cleared。App Home から X11 の app）
+Last finished Queue: q480（ws035-p071 cleared。App Home の続き）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q479（2026-09-26）
+## 最新: q443〜q480（2026-09-26）
+
+[q480](queue-q480.md): ws035-p071 cleared。App Home のページング（drag・ホイール・キー・ドット）、起動した icon から窓が育つ、左上への drag で閉じる、Tab。
 
 [q479](queue-q479.md): ws035-p070 cleared。App Home に X terminal と Gears、`/usr/libexec/zdesktop-x11` が Xzed --rootless を必要なときに 1 つ起動。demo image にも。
 

@@ -57,6 +57,9 @@
 
 /* The dock animation, a double click, and how far a docked title is pulled down to come off. */
 #define DOCK_MS			220U
+
+/* The kind of the animation that is not a dock or an undock: a launched window growing from its icon (ws035-p071). */
+#define ANIM_LAUNCH		2U
 #define DOUBLE_CLICK_MS		400U
 #define PULL_DISTANCE		16
 
@@ -456,6 +459,37 @@ zwl_glass_place(
 }
 
 /*
+ * Starts the growth of a newly mapped window out of App Home's icon, when
+ * it is the window of an application Home just started (ws035-p071).
+ */
+void
+zwl_glass_mapped(
+	struct zwl_server *server,
+	struct zwl_object *surface)
+{
+	struct shell_rect to;
+	int32_t from[4];
+	int launched;
+
+	/* Only the glass look animates, and only the window a launch waits for. */
+	if (!server->glass)
+		return;
+	launched = zwl_home_launched(server, from);
+	if (!launched)
+		return;
+
+	/* From the icon's rectangle to the window's own. */
+	body_rect(server, surface, &to);
+	memcpy(server->anim_from, from, sizeof(server->anim_from));
+	memcpy(server->anim_to, &to, sizeof(server->anim_to));
+	server->anim = surface;
+	server->anim_docking = ANIM_LAUNCH;
+	server->anim_start_ms = zwl_milliseconds();
+	server->dirty = 1;
+	printf("ZWL GLASS launch surface=%u from=%d,%d to=%d,%d\n", surface->id, from[0], from[1], to.x, to.y);
+}
+
+/*
  * Keeps the output being redrawn: every frame while the dock animation runs
  * (ending it after DOCK_MS), and when the clock shows a new minute.
  */
@@ -564,6 +598,15 @@ draw_window(
 
 	/* The body, where it is now. */
 	body_rect(server, surface, &body);
+
+	/* A window a launch from Home started grows out of the icon; its title bar fades in on it. */
+	if (server->anim == surface && server->anim_docking == ANIM_LAUNCH) {
+		t = animation_progress(server);
+		draw_body(server, command, surface, &body, 0, focused);
+		floating_title(&body, &panel);
+		draw_title_bar(server, command, surface, &panel, t, t, focused);
+		return;
+	}
 
 	/* While docking or coming back, the title bar slides between its two places and its glass fades. */
 	if (server->anim == surface) {

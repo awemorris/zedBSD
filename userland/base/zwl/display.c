@@ -582,6 +582,7 @@ adopt_commit(
 		surface->map_order = server->map_order;
 		place_window(server, surface);
 		printf("ZWL MAP client=%llu surface=%u x=%d y=%d\n", (unsigned long long)surface->client->number, surface->id, surface->x, surface->y);
+		zwl_glass_mapped(server, surface);
 	} else if (surface->current == NULL && surface->mapped) {
 		surface->mapped = 0;
 		zwl_callbacks_done(&surface->committed_callbacks);
