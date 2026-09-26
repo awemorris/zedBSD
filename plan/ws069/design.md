@@ -11,6 +11,11 @@ Waylandコンポジタに内蔵するかもしれないです。Zxedはレトロ
 Vulkanを使いつつ、libzdesktopを活用してください。」「Xzed.hはパブリックヘッダにする必要がないかも？
 zed-gpu-buffer-v1-client-protocol.h もパブリックにしなくていいよね。」
 
+- **rootless だけ**（2026-09-27 ユーザー「rootlessのみでOKです。また、zdesktop-x11serverは、zdesktop本体に組み込む可能性が高いので、
+  再利用できるモジュラリティを保っておくと、あとで組み込みが楽です。」）。§2 の rootful は移さない（x11-p002 の試験も移さない）。
+  **組み込める形**: X の protocol の核（client・要求・窓・合成）、Wayland の窓（xdg_toplevel・入力）、Vulkan の表示、GLX を
+  別の file と小さな interface に分け、global な状態を持たず `struct` を渡す。`main.c` は起動と event loop だけ。event loop は
+  「待つ fd の列を出す」「readiness を渡す」の 2 つの関数にし、zdesktop の loop に後で入れられるようにする。
 - **X server は `userland/base/zdesktop-x11server`（`/bin/zdesktop-x11server`）**。§1〜§4 の Xzed の上の実装（p002〜p005、
   Wayland の窓・rootless・libtruetype の glyph・GLX 拡張）はこのプログラムへ移す（p008）。`/dev/graphics` と `/dev/input` の道は
   持たない。後で zdesktop に内蔵できるよう、server の核は `struct server` の上の関数と、event loop へ fd を渡す口にしておく

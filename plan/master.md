@@ -150,7 +150,7 @@ fg005 有線 LAN、fg007 HAL の可読性、fg009 PowerPC）は定義を残す�
 7. その他（WS001、WS004、WS007、WS009、WS017、WS026〜WS029）。WS037〜WS039 は番号の予約のみ。
 8. **WS066**（`ld.so` の最適化。2026-09-26 ユーザー「あとでやるリスト」）。
 9. **WS068**（EGL と GLES を Vulkan の上に）・**WS069**（X11）: 2026-09-26 ユーザー「デスクトップ関連を優先」で WS035 と並ぶ。
-   2026-09-27 の順: ws035-p073（改名）→ libzdesktop（ws035）→ WS069（zdesktop-x11server、Xzed の復元）→ WS068（GLSL compiler、desktop GL）。
+   2026-09-27 の順: ws035-p073（改名）→ libzdesktop（ws035-p074）→ WS069（zdesktop-x11server、Xzed の復元）→ WS035 の OSC デモの残り → WS068（GLSL compiler、desktop GL）。
 
 ## Upcoming Work Outlook
 
@@ -246,7 +246,10 @@ tick 周期は `include/hal/arch/<arch>.h` の `HAL_TIMER_FREQUENCY`。時間の
 | 非公開の header | `X11/Xzed.h` と `zed-gpu-buffer-v1-client-protocol.h` は公開しない | WS069 design.md §0 |
 | GLSL の compiler | 方式 A（自前の C）。前処理・字句・構文・型・SPIR-V 出力の共通の核から、GLSL ES 1.00 と GLSL 1.30 → 3.30/ES 3.00 → 4.x | WS068 design.md §4 |
 | desktop GL | ES でない OpenGL 3.0 を実装し、4.6 まで出来る範囲で（API の完全さは求めない）。Vulkan 1.0 の基本以上が要る機能（geometry・tessellation・compute、SSBO 等）は Venus で先に、i915 の実行器の不足は F-023 に記録して後 | WS068 design.md §6 |
-| 作業の順 | 改名 → libzdesktop と header の非公開化 → zdesktop-x11server → Xzed の復元 → GLSL compiler → desktop GL 3.0・4.x | WS の優先順位 |
+| 作業の順 | 改名 → libzdesktop と header の非公開化 → zdesktop-x11server → Xzed の復元 → **OSC のデモ（fg010）の残りの zdesktop の作業**（ユーザー「X server の後にデモの残り」）→ GLSL compiler → desktop GL 3.0・4.x | WS の優先順位 |
+| zdesktop-x11server の形 | rootless だけ（rootful は持たない）。「zdesktop本体に組み込む可能性が高いので、再利用できるモジュラリティを保っておくと、あとで組み込みが楽です。」 | WS069 design.md §0 |
+| libvulkan の版 | desktop GL に要る Vulkan 1.1 以降の機能・拡張は libvulkan に足してよい（Venus で。i915 の実行器は後、F-023） | WS068 design.md §6 |
+| GL_VERSION | 実装した版を正直に名乗る（必須の機能が揃った所まで）。上の版の機能は GL_ARB_* の拡張で個別に出す | WS068 design.md §6 |
 
 ### 主な依存関係
 

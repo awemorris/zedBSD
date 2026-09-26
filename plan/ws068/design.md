@@ -83,8 +83,9 @@ struct の member 16 まで、Flat 無し等）で出し、その制約は ws068
   core と compatibility の profile に広げ、GLSL 1.30〜4.60 は §4 の compiler で。`glXCreateContextAttribsARB` で版と profile。
   GL_VERSION は実装した範囲の版を名乗る。Vulkan 1.0 の基本以上が要る機能（geometry・tessellation・compute shader、SSBO、
   multi draw indirect 等）は device の feature で出し分け、**Venus（host の GPU）で先に**。i915 の実行器に足りない分は F-023 に
-  記録して後（2026-09-27 ユーザー決定）。libvulkan が Vulkan 1.0 の core だけを出す制約（1.1 以上の機能・拡張）は、要る所で
-  libvulkan の Phase を立てる。
+  記録して後（2026-09-27 ユーザー決定）。libvulkan に Vulkan 1.1 以降の機能・拡張（transform feedback、maintenance1 等）を
+  要る分だけ足してよい（2026-09-27 ユーザー決定。要る所で libvulkan の Phase を立てる）。GL_VERSION は実装した版を正直に
+  名乗り、上の版の機能は GL_ARB_* の拡張で個別に出す（2026-09-27 ユーザー決定）。
 
 ## 7. libvulkan への要求（洗い出し）
 
