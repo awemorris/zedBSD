@@ -13,6 +13,7 @@ extern "C" {
 #endif
 
 #include <X11/Xlib.h>
+#include <stddef.h>
 
 /*
  * Xzed-private string property used by desktop components.  The path
@@ -35,6 +36,13 @@ int XzedSetInputMargins(Display *, Window, unsigned, unsigned, unsigned,
     unsigned);
 int XzedMoveResizeWindowBuffered(Display *, Window, int, int, unsigned,
     unsigned);
+
+/*
+ * Sends an extension's request (GLX's, for libGL) and reads its reply:
+ * the first 32 bytes into reply32, the rest into a malloc'd *extra.
+ */
+int XzedExtensionRequest(Display *, void *, size_t, unsigned char *,
+    unsigned char **, size_t *);
 
 #ifdef __cplusplus
 }

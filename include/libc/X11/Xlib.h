@@ -22,6 +22,7 @@ extern "C" {
 #define ConnectionNumber(d) XConnectionNumber(d)
 
 typedef struct _XDisplay Display;
+typedef struct { void *ext_data; VisualID visualid; int class; unsigned long red_mask,green_mask,blue_mask; int bits_per_rgb,map_entries; } Visual;
 typedef struct _XGC *GC;
 typedef struct { short lbearing,rbearing,width,ascent,descent; unsigned short attributes; } XCharStruct;
 typedef struct { Font fid; unsigned direction,min_char_or_byte2,max_char_or_byte2,min_byte1,max_byte1; Bool all_chars_exist; unsigned default_char; int n_properties; void *properties; XCharStruct min_bounds,max_bounds; void *per_char; int ascent,descent; } XFontStruct;
@@ -82,6 +83,7 @@ int XPending(Display *);
 int XFlush(Display *);
 int XSync(Display *,Bool);
 KeySym XLookupKeysym(XKeyEvent *,int);
+Bool XQueryExtension(Display *,const char *,int *,int *,int *);
 
 #ifdef __cplusplus
 }

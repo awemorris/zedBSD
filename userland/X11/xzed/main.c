@@ -29,6 +29,7 @@
 #include <unistd.h>
 #include <uapi/graphics.h>
 
+#include "userland/X11/xzed/glx.h"
 #include "userland/X11/xzed/glyphs.h"
 #include "userland/X11/xzed/input.h"
 #include "userland/X11/xzed/wayland.h"
@@ -2261,6 +2262,8 @@ request(
 	uint32_t width, height;
 	struct client *c = &s->clients[ci];
 	uint8_t op = q[0];
+	struct xzed_reply_target reply_target;
+	int glx_status;
 	uint32_t id;
 	struct window *w;
 	size_t count, padded;
@@ -3189,6 +3192,26 @@ request(
 		}
 		break;
 	case 127:
+		/* Reports successful completion. */
+		return 0;
+	case 98: /* QueryExtension: GLX is the one extension (glx.c). */
+		reply_target.fd = c->fd;
+		reply_target.sequence = c->sequence;
+		reply_target.msb = c->order;
+		xzed_query_extension(&reply_target, q, n);
+
+		/* Reports successful completion. */
+		return 0;
+	case XZED_GLX_MAJOR: /* GLX: its version and strings (glx.c); rendering is the client's. */
+		reply_target.fd = c->fd;
+		reply_target.sequence = c->sequence;
+		reply_target.msb = c->order;
+		glx_status = xzed_glx_request(&reply_target, q, n);
+
+		/* A request GLX does not answer is refused. */
+		if (glx_status != 0)
+			error_reply(c, (uint8_t)glx_status, 0, op);
+
 		/* Reports successful completion. */
 		return 0;
 	default:

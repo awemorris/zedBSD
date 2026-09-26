@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q476（ws068-p010 cleared。EGL の pbuffer）
+Last finished Queue: q477（ws069-p004 cleared。GLX の核）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q476（2026-09-26）
+## 最新: q443〜q477（2026-09-26）
+
+[q477](queue-q477.md): ws069-p004 cleared。GLX の核（Xzed の QueryExtension と GLX の問い合わせ、libGL.so = GLES の変換層＋GLX＋libX11、pbuffer に描いて XzedPutImageRGB24）。Venus の zwl＋Xzed rootless で glxtest の窓が GL で描かれ、docked でも追従。
 
 [q476](queue-q476.md): ws068-p010 cleared。EGL の pbuffer（offscreen の color と depth、frame をまたいで中身を保つ、swap で submit と解放）。Venus で 600 frame と 2048x1536 の readback が一致。pbuffer でも 1 frame 約 95 ms（F-021 に追記）。
 

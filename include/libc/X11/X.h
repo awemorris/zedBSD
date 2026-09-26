@@ -54,6 +54,7 @@ typedef XID Font;
 typedef XID Pixmap;
 typedef XID Colormap;
 typedef XID Cursor;
+typedef XID VisualID;
 typedef uint32_t Atom;
 typedef uint32_t Time;
 typedef uint32_t KeySym;

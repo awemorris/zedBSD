@@ -26,6 +26,9 @@ struct _XGC {
 	uint32_t xid, foreground;
 };
 #define EVENT_QUEUE_SIZE 32U
+
+/* The largest request, in bytes (its length field counts 65535 words). */
+#define XZED_REQUEST_BYTES (65535U * 4U)
 struct _XDisplay {
 	int fd;
 	uint32_t base, next, root;
@@ -1004,7 +1007,9 @@ XzedGetIconPath(
 }
 
 /*
- * Implements the XzedPutImageRGB24 operation.
+ * Puts RGB24 rows (top down, stride bytes apart) into a drawable at x, y:
+ * as many whole rows per request as a request holds (a row wider than
+ * that goes in tiles), one round trip per request.
  */
 int
 XzedPutImageRGB24(
@@ -1017,69 +1022,197 @@ XzedPutImageRGB24(
 	const unsigned char *pixels,
 	unsigned stride)
 {
-	unsigned row, column;
-	size_t row_bytes;
-	size_t payload, n, z;
-	unsigned tile;
 	uint8_t *q;
+	size_t row_bytes;
+	size_t payload;
+	size_t size;
+	unsigned rows;
+	unsigned band;
+	unsigned row;
+	unsigned column;
+	unsigned tile;
+	unsigned span;
+	unsigned line;
 	int result;
 
-	/* Checks the current descriptor. */
-	if (!d || !pixels || !width || !height || width > 65535U ||
-	    height > 65535U) {
+	/* A display, pixels and a size a request can name. */
+	if (!d || !pixels || !width || !height || width > 65535U || height > 65535U) {
 		errno = EINVAL;
-
-		/* Reports operation failure. */
 		return -1;
 	}
-	row_bytes = (size_t)width * 3U;
 
-	/* Handles the stride condition. */
+	/* Rows no shorter than the width. */
+	row_bytes = (size_t)width * 3U;
 	if (stride < row_bytes) {
 		errno = EINVAL;
-
-		/* Reports operation failure. */
 		return -1;
 	}
 
-	/* Process each element required by the operation. */
-	for (row = 0; row < height; row++) {
-		/* Process each element required by the operation. */
-		for (column = 0; column < width;) {
-			tile = width - column;
+	/* Whole rows per request (a request is at most 65535 words), else tiles of one row. */
+	rows = (unsigned)((XZED_REQUEST_BYTES - 16U) / row_bytes);
+	tile = width;
+	if (rows == 0U) {
+		rows = 1U;
+		tile = 640U;
+	}
 
-			/* Handles the tile condition. */
-			if (tile > 640U)
-				tile = 640U;
-			payload = (size_t)tile * 3U;
-			n = 16U + payload;
-			z = (n + 3U) & ~3U;
-			q = calloc(1, z);
+	/* The request, large enough for one band. */
+	q = malloc(XZED_REQUEST_BYTES);
+	if (!q)
+		return -1;
 
-			/* Handles the q condition. */
-			if (!q)
-				return -1;
+	/* Each band of rows, each tile of it. */
+	for (row = 0U; row < height; row += band) {
+		band = height - row;
+		if (band > rows)
+			band = rows;
+		for (column = 0U; column < width; column += span) {
+			/* The tile's width, its request's size. */
+			span = tile;
+			if (span > width - column)
+				span = width - column;
+			payload = (size_t)span * 3U * band;
+			size = (16U + payload + 3U) & ~(size_t)3U;
+			memset(q, 0, size);
+
+			/* The header: the drawable, where, how large. */
 			q[0] = 128;
 			w32(q + 4, draw);
 			w16(q + 8, (uint16_t)(x + (int)column));
 			w16(q + 10, (uint16_t)(y + (int)row));
-			w16(q + 12, (uint16_t)tile);
-			w16(q + 14, 1);
-			memcpy(q + 16U,
-			       pixels + (size_t)row * stride +
-				   (size_t)column * 3U,
-			       payload);
-			result = req(d, q, z);
-			free(q);
+			w16(q + 12, (uint16_t)span);
+			w16(q + 14, (uint16_t)band);
 
-			/* Checks the operation result. */
-			if (result || XSync(d, False))
+			/* The rows. */
+			for (line = 0U; line < band; line++)
+				memcpy(q + 16U + (size_t)line * span * 3U, pixels + (size_t)(row + line) * stride + (size_t)column * 3U, (size_t)span * 3U);
+
+			/* Sent, and waited for: Xzed holds at most 1 MiB of a client's requests, so one request is in flight at a time. */
+			result = req(d, q, size);
+			if (!result)
+				result = XSync(d, False);
+			if (result) {
+				free(q);
 				return -1;
-			column += tile;
+			}
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded: every band is in the drawable. */
+	free(q);
+	return 0;
+}
+
+/*
+ * Asks the server whether it has an extension, and its major opcode and
+ * first event and error.
+ */
+Bool
+XQueryExtension(
+	Display *d,
+	const char *name,
+	int *major_opcode,
+	int *first_event,
+	int *first_error)
+{
+	uint8_t q[8U + 256U];
+	uint8_t r[32];
+	size_t length;
+	size_t size;
+	int result;
+
+	/* The request: the name's length and the name, padded. */
+	length = strlen(name);
+	if (!d || length > 255U)
+		return False;
+	size = (8U + length + 3U) & ~(size_t)3U;
+	memset(q, 0, sizeof(q));
+	q[0] = 98;
+	w16(q + 4, (uint16_t)length);
+	memcpy(q + 8, name, length);
+
+	/* The reply. */
+	result = req(d, q, size);
+	if (!result)
+		result = reply(d, r);
+	if (result)
+		return False;
+
+	/* Present or not, with its numbers. */
+	if (major_opcode)
+		*major_opcode = r[9];
+	if (first_event)
+		*first_event = r[10];
+	if (first_error)
+		*first_error = r[11];
+	if (!r[8])
+		return False;
+	return True;
+}
+
+/*
+ * Sends a request of an extension (its length field filled in) and, when
+ * reply32 is given, waits for its reply: the first 32 bytes there, and
+ * the bytes after them in a new buffer (*extra, freed by the caller).
+ * Returns 0, or -1 when the connection failed or the server refused it.
+ */
+int
+XzedExtensionRequest(
+	Display *d,
+	void *request,
+	size_t length,
+	unsigned char *reply32,
+	unsigned char **extra,
+	size_t *extra_length)
+{
+	uint8_t *bytes;
+	size_t words;
+	int result;
+
+	/* Whole words. */
+	if (!d || !request || length < 4U || (length & 3U) || length > XZED_REQUEST_BYTES) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	/* Sent; a request without a reply is done. */
+	result = req(d, request, length);
+	if (result)
+		return -1;
+	if (!reply32)
+		return 0;
+
+	/* The reply's first 32 bytes. */
+	result = reply(d, reply32);
+	if (result)
+		return -1;
+
+	/* The rest of it, when there is some. */
+	words = r32(reply32 + 4);
+	if (extra)
+		*extra = NULL;
+	if (extra_length)
+		*extra_length = words * 4U;
+	if (!words)
+		return 0;
+	bytes = malloc(words * 4U + 1U);
+	if (!bytes)
+		return -1;
+	result = rd(d->fd, bytes, words * 4U);
+	if (result) {
+		free(bytes);
+		return -1;
+	}
+
+	/* The bytes go to the caller, or are dropped. */
+	bytes[words * 4U] = 0;
+	if (extra) {
+		*extra = bytes;
+	} else {
+		free(bytes);
+	}
+
+	/* Succeeded: the reply. */
 	return 0;
 }
 
