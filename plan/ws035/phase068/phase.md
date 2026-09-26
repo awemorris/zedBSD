@@ -4,9 +4,9 @@
 
 Phase ID: `ws035-p068`
 Parent: [WS035](../ws.md)
-Status: planned
+Status: in-progress（q468-i01）
 Phase disposition: normal
-Queue: —
+Queue: q468-i01
 承認: 2026-09-26 ユーザー「userland/base/ztermに、X11のターミナルの実装があります。これをWayland+Vulkanに移植して、userland/base/zdesktop-terminalとして実装をお願いします。」
 （zterm の実際の場所は `userland/X11/zterm`）
 
