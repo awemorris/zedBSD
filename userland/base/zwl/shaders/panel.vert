@@ -13,13 +13,20 @@ layout(push_constant) uniform Panel {
 	vec4 screen;
 } panel;
 
+// The quad's corner, from zwl's vertex buffer of two triangles.
+layout(location = 0) in vec2 corner;
+
 layout(location = 0) out vec2 texcoord;
+
+// The fragment's place in output pixels (instead of gl_FragCoord, which
+// i915's native compiler does not take).
+layout(location = 1) out vec2 pixel;
 
 void main()
 {
-	// Vertices 0..3 of a triangle strip: (0,0), (1,0), (0,1), (1,1).
-	vec2 corner = vec2(float(gl_VertexIndex & 1), float(gl_VertexIndex >> 1));
+	vec2 place = mix(panel.rect.xy, panel.rect.zw, corner);
 
-	gl_Position = vec4(mix(panel.rect.xy, panel.rect.zw, corner), 0.0, 1.0);
+	gl_Position = vec4(place, 0.0, 1.0);
 	texcoord = mix(panel.texture.xy, panel.texture.zw, corner);
+	pixel = (place * 0.5 + vec2(0.5)) * panel.screen.xy;
 }

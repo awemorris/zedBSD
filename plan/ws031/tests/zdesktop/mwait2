@@ -1,0 +1,6 @@
+type=oneshot
+command=/bin/sleep
+arguments=3
+after=mwait
+restart=no
+required=NO

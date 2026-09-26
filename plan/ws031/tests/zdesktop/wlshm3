@@ -1,0 +1,6 @@
+type=oneshot
+command=/bin/wlshm
+arguments=--display=/tmp/wayland-0 --size=800x560 --color=ff333333 --frames=100000 --delay-ms=1000 --token=zs3
+after=mwait2
+restart=no
+required=NO

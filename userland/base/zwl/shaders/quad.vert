@@ -9,13 +9,15 @@ layout(push_constant) uniform Quad {
 	vec4 texture;
 } quad;
 
+// The quad's corner, from zwl's vertex buffer of two triangles
+// (a vertex buffer rather than gl_VertexIndex, which i915's native compiler
+// does not take).
+layout(location = 0) in vec2 corner;
+
 layout(location = 0) out vec2 texcoord;
 
 void main()
 {
-	// Vertices 0..3 of a triangle strip: (0,0), (1,0), (0,1), (1,1).
-	vec2 corner = vec2(float(gl_VertexIndex & 1), float(gl_VertexIndex >> 1));
-
 	gl_Position = vec4(mix(quad.rect.xy, quad.rect.zw, corner), 0.0, 1.0);
 	texcoord = mix(quad.texture.xy, quad.texture.zw, corner);
 }

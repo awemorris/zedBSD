@@ -71,6 +71,7 @@ struct window {
 	int frame_done;
 	int closed;
 	const char *token;
+	const char *name;
 };
 
 static int options(int count, char **arguments, struct window *window, uint32_t *frames);
@@ -130,7 +131,7 @@ main(
 	memset(&window, 0, sizeof(window));
 	error = options(count, arguments, &window, &frames);
 	if (error != 0) {
-		fprintf(stderr, "usage: wlshm [--size=WxH] [--color=AARRGGBB] [--xrgb] [--band=AARRGGBB] [--frames=N] [--cursor=AARRGGBB] [--hide-cursor] [--hold] [--delay-ms=N] [--token=NAME]\n");
+		fprintf(stderr, "usage: wlshm [--size=WxH] [--color=AARRGGBB] [--xrgb] [--band=AARRGGBB] [--frames=N] [--cursor=AARRGGBB] [--hide-cursor] [--hold] [--delay-ms=N] [--token=NAME] [--display=NAME]\n");
 		return 2;
 	}
 
@@ -192,7 +193,7 @@ options(
 {
 	static const char *const names[] = {
 		"--size=", "--color=", "--xrgb", "--band=", "--frames=", "--cursor=",
-		"--delay-ms=", "--hold", "--hide-cursor", "--token="
+		"--delay-ms=", "--hold", "--hide-cursor", "--token=", "--display="
 	};
 	const char *argument;
 	const char *value;
@@ -262,6 +263,12 @@ options(
 		case 9:
 			window->token = value;
 			error = 0;
+			break;
+		case 10:
+			window->name = value;
+			error = 0;
+			if (*value == '\0')
+				error = -1;
 			break;
 		default:
 			break;
@@ -335,8 +342,8 @@ connect_window(
 {
 	int status;
 
-	/* The connection. */
-	window->display = wl_display_connect(NULL);
+	/* The connection: the display named with --display, or the standard environment's. */
+	window->display = wl_display_connect(window->name);
 	if (window->display == NULL)
 		return EIO;
 

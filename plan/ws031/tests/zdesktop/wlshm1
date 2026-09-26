@@ -1,0 +1,6 @@
+type=daemon
+command=/bin/wlshm
+arguments=--display=/tmp/wayland-0 --size=800x560 --color=ff2b3444 --frames=100000 --delay-ms=1000 --token=zs1
+after=wlwait
+restart=no
+required=NO

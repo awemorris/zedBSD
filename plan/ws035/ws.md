@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Related Milestones: MG001, MG005
 Objectives: O1, O2
 Parent: [Master](../master.md)
-Queue: なし（q464 finished）
+Queue: なし（q465 finished）
 Resume point: fg010: p052・p053 cleared（2 つのモードの核、`wl_shm` と cursor）。p054 cleared（acquire fence）。p059 cleared（look and feel の疎通確認: 浮いたタイトルバー、すりガラス、`zwl --glass`）→ p011 → p055 … → p058。元の続き: タスクバー・タイトル描画
 <!-- awesome-plan-current:end -->
 
@@ -255,6 +255,7 @@ p001で確かめる。
 | [ws035-p063](phase063/phase.md) | （2026-09-26 ユーザー設計 [wiseman-design.md](wiseman-design.md)）Wiseview（ウィンドウ一覧）の疎通: 下端からの drag、グリッドのタイル、選択・閉じる | cleared（q464-i01、2026-09-26。下端からの drag で開き、グリッド・札・選択・閉じる。4 窓で確認） | p062 | `userland/base/zwl` |
 | ws035-p064 | （同）物理的に追従するドッキングの解除（引くと縮み、閾値で snap、届かなければバネで戻る） | planned | p062 | 同上 |
 | ws035-p065 | （同）仮想デスクトップの実体と左右の端のスワイプ（画面が追従して横へ） | planned | p063 | 同上 |
+| [ws035-p066](phase066/phase.md) | （2026-09-26 ユーザー指示）zdesktop（Wiseman Mode）を Intel GPU（5330 の i915 ネイティブ実行器、VFIO）で疎通 | cleared（q465-i01、2026-09-26。i915 実機の GPU で Wiseman Mode・ドッキング・Wiseview を capture で確認（wl_shm の窓）。GPU の client の窓は F-022、実行器の不足は F-023） | p063、WS031 | `userland/base/zwl`、`plan/ws031/tests` |
 | ws035-p055 | （2026-09-25 承認）damage（buffer age と scissor） | planned（sq001） | p011 | 同上 |
 | ws035-p057 | （2026-09-25 承認）効果: すりガラス（背後のぼかし）と影 | planned（sq001） | p055 | 同上 |
 | ws035-p058 | zdesktop（secondary queue で変えた全 source）の規約の全文との照合と回帰（sq001 の締め） | planned（sq001） | sq001 の他の Phase | sq001 で変えた source |

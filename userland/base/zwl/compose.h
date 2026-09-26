@@ -30,6 +30,9 @@
 #define ZWL_SWAPCHAIN_MAX	8U
 #define ZWL_FRAME_WINDOWS	64U
 
+/* The vertices of a quad: two triangles of a triangle list. */
+#define ZWL_QUAD_VERTICES	6U
+
 /* The glass look's push constants: six vec4 (see shaders/panel.frag). */
 #define ZWL_PANEL_CONSTANTS	24U
 
@@ -81,6 +84,13 @@ struct zwl_compose {
 	VkPipelineLayout layout;
 	VkPipeline pipelines[2];
 	VkSampler sampler;
+	/*
+	 * A quad's two triangles, (0,0) (1,0) (0,1) and (0,1) (1,0) (1,1), as a
+	 * vertex buffer: i915's native compiler does not take gl_VertexIndex,
+	 * and its executor draws triangle lists, not strips.
+	 */
+	VkBuffer corners;
+	VkDeviceMemory corners_memory;
 	/* The glass look's pipeline (shapes, glass, text) and the sampler of its blurred wallpaper. */
 	VkPipelineLayout panel_layout;
 	VkPipeline panel_pipeline;
@@ -101,6 +111,15 @@ struct zwl_compose {
 	struct zwl_object *callbacks;
 	unsigned held_count;
 	unsigned in_flight;
+	/* Descriptor sets images gave back, for the next images (zwl_compose_set_get). */
+	VkDescriptorSet spare_sets[ZWL_DESCRIPTOR_MAX];
+	unsigned spare_count;
+	/*
+	 * Whether the frame's fence is exported as an fd the event loop polls
+	 * (VK_KHR_external_fence_fd); without it the loop asks the fence's
+	 * status each pass (the native i915, which has no kernel fences).
+	 */
+	unsigned fence_fd;
 	uint64_t frame_start_cycles;
 	uint64_t frame_start_ms;
 };
@@ -113,6 +132,10 @@ void zwl_host_image_release(struct zwl_compose *compose, struct zwl_import *impo
 int zwl_glass_open(struct zwl_server *server);
 void zwl_glass_close(struct zwl_server *server);
 void zwl_glass_draw(struct zwl_server *server, VkCommandBuffer command, struct zwl_object **windows, unsigned count);
+
+/* Descriptor sets of the image layout, reused rather than freed (compose.c). */
+VkResult zwl_compose_set_get(struct zwl_compose *compose, VkDescriptorSet *result);
+void zwl_compose_set_put(struct zwl_compose *compose, VkDescriptorSet set);
 
 /* Gives an image a second, linearly sampled descriptor set (compose.c). */
 VkResult zwl_compose_linear_set(struct zwl_compose *compose, struct zwl_import *import);

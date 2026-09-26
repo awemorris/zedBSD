@@ -1060,8 +1060,13 @@ physical_load(
 	/* Local WSI can pair a renderer with a separate display node or a Wayland connection. */
 	physical->supported_extensions = VULKAN_DEVICE_SWAPCHAIN | VULKAN_DEVICE_DISPLAY_SWAPCHAIN;
 
-	/* Per-resource format queries determine the actual external memory profiles. */
-	if (physical->object.context->capabilities & GPU_CAP_ALLOCATION_SHARE)
+	/*
+	 * Per-resource format queries determine the actual external memory
+	 * profiles.  A node with image sharing only (GPU_CAP_SHARE, the native
+	 * i915) imports the images other opens export (the Wayland WSI's
+	 * buffers) and exports nothing (ws035-p066).
+	 */
+	if (physical->object.context->capabilities & (GPU_CAP_ALLOCATION_SHARE | GPU_CAP_SHARE))
 		physical->supported_extensions |= VULKAN_DEVICE_EXTERNAL_MEMORY | VULKAN_DEVICE_EXTERNAL_MEMORY_FD;
 	if (physical->object.context->capabilities & GPU_CAP_FENCE)
 		physical->supported_extensions |= VULKAN_DEVICE_EXTERNAL_FENCE | VULKAN_DEVICE_EXTERNAL_FENCE_FD;

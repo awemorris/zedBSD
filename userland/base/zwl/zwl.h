@@ -447,6 +447,8 @@ void zwl_arrow_destroy(struct zwl_server *server);
 struct zwl_object *zwl_top_window(struct zwl_server *server);
 int zwl_window_send_configure(struct zwl_object *surface);
 int zwl_fence_ready(struct zwl_server *server, struct zwl_object *surface);
+int zwl_compose_waiting(struct zwl_server *server);
+void zwl_compose_poll(struct zwl_server *server);
 int zwl_glass_button(struct zwl_server *server, uint32_t button, uint32_t state);
 int zwl_glass_motion(struct zwl_server *server);
 void zwl_glass_place(struct zwl_server *server, struct zwl_object *surface, int32_t width, int32_t height, int32_t step);

@@ -46,17 +46,22 @@ struct i915_ppgtt;
 
 /*
  * The GT window: GGTT pages at the top of the GGTT for the GT's own
- * objects (1 MiB), and the bitmap words that track it.
+ * objects (64 MiB), and the bitmap words that track it.  A render context
+ * takes about 30 pages (image, ring, timeline); 1 MiB ran out with a
+ * compositor, its display swapchain and three clients (ws035-p066).  The
+ * GGTT is 4 GiB on Gen12 and zedBSD is a client OS: the windows are sized
+ * for many windows and displays, not to save table space.
  */
-#define I915_GT_GGTT_PAGES		256U
+#define I915_GT_GGTT_PAGES		16384U
 #define I915_GT_GGTT_WORDS		(I915_GT_GGTT_PAGES / 32U)
 
 /*
  * The display window: GGTT pages for scanout buffers directly below the GT
- * window (32 MiB: two full-HD XRGB8888 buffers with 256 KiB alignment and
- * guards), and the bitmap words that track it.
+ * window (1 GiB: the compositor's swapchain and the clients' fullscreen
+ * buffers, full HD or 4K, with 256 KiB alignment and guards; it was 32 MiB,
+ * two full-HD buffers, before ws035-p066), and the bitmap words that track it.
  */
-#define I915_GT_DISPLAY_PAGES		8192U
+#define I915_GT_DISPLAY_PAGES		262144U
 #define I915_GT_DISPLAY_WORDS		(I915_GT_DISPLAY_PAGES / 32U)
 
 /*

@@ -745,9 +745,11 @@ memory_import_fd(
 
 	/*
 	 * An image capability (what the Wayland WSI sends) has no allocation
-	 * envelope; it is imported as the image's whole allocation instead.
+	 * envelope; it is imported as the image's whole allocation instead.  A
+	 * node with image sharing only (the native i915) has no allocation
+	 * import at all and takes the same path.
 	 */
-	if (error == EINVAL) {
+	if (error == EINVAL || error == EOPNOTSUPP) {
 		status = memory_import_image_fd(device, info, allocator, fd, memory);
 		return status;
 	}

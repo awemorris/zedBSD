@@ -467,6 +467,7 @@ event_loop(
 	size_t frame_slot;
 	size_t first_fence;
 	unsigned fence;
+	int waiting;
 	unsigned slot;
 	uint64_t mark;
 	uint32_t presents;
@@ -547,6 +548,9 @@ event_loop(
 		descriptors[0].fd = server->listener;
 		descriptors[0].events = POLLIN;
 		timeout = 10;
+		waiting = zwl_compose_waiting(server);
+		if (waiting)
+			timeout = 2;
 		index = 1;
 		for (client = server->clients; client != NULL; client = client->next) {
 			/* Retain the snapshot identity while suppressing new input on fatal connections. */
@@ -623,9 +627,10 @@ event_loop(
 		if ((descriptors[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
 			error = EIO;
 
-		/* A finished frame releases its buffers and sends its callbacks. */
+		/* A finished frame releases its buffers and sends its callbacks; a fence without an fd is asked. */
 		if (frame_slot != 0 && descriptors[frame_slot].revents != 0)
 			zwl_frame_done(server);
+		zwl_compose_poll(server);
 
 		/* Device events are applied before clients are flushed, so they leave in this pass. */
 		for (index = first_input; index < last_input; index++) {

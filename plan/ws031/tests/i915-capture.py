@@ -12,6 +12,10 @@ scenario:
            each view to the Venus images of p013 when a reference directory is given (--no-venus skips
            that comparison, for a viewer run the p013 images do not describe, such as --shading=pixel);
            the six views are also laid out on one sheet, sheet.png
+  zdesktop WS035 p066: zwl --glass (Wiseman Mode) at 1920x1080 with three 800x560 wl_shm windows: the
+           desktop, the top one docked by a double click on its title bar, Wiseview opened by a
+           drag up from the bottom edge, and Wiseview closed; each view differs from the one before it (the
+           serial log only tells when the viewer started; the checks are on the images); sheet.png
 
 The area layout is the comment at the top of src/drivers/gpu/i915/display/capture.c.
 
@@ -257,9 +261,14 @@ def run(args):
         raise TimeoutError(description)
 
     try:
-        base = int(wait(r'i915: capture: base=0x([0-9a-f]+)', 'capture area').group(1), 16)
+        if args.scenario == 'zdesktop':
+            # Found in guest memory, not in the serial log (WS035 p066 judges by the screen only).
+            qmp = QMP(args.qmp, deadline)
+            base = scan_for_area(qmp, output, deadline)
+        else:
+            base = int(wait(r'i915: capture: base=0x([0-9a-f]+)', 'capture area').group(1), 16)
+            qmp = QMP(args.qmp, deadline)
         report['base'] = hex(base)
-        qmp = QMP(args.qmp, deadline)
         capture = Capture(qmp, output, base)
         report['area'] = {'slots': capture.slot_count, 'slot_bytes': capture.slot_bytes}
 
@@ -297,6 +306,8 @@ def run(args):
             report['checks']['frames_captured'] = capture.write_count() > 1
             report['checks']['animation_changes'] = (report['images']['wltest-a']['rgb_sha256'] !=
                                                      report['images']['wltest-b']['rgb_sha256'])
+        elif args.scenario == 'zdesktop':
+            zdesktop(args, qmp, capture, report, wait)
         else:
             mview(args, qmp, capture, report, wait, settled)
         report['write_count'] = capture.write_count()
@@ -391,9 +402,104 @@ def mview(args, qmp, capture, report, wait, settled):
                 report['checks'][f'{tag}_like_venus'] = value >= args.min_psnr
 
 
+def scan_for_area(qmp, output, deadline, low=0x100000000, high=0x180000000, piece=0x4000000):
+    """Finds the capture area by its I915CAP1 header (4 KiB aligned) in guest memory above 4 GiB,
+    reading it in pieces with pmemsave; tries again until the kernel has made it."""
+    scratch = output / 'scan.bin'
+    while time.monotonic() < deadline:
+        for start in range(low, high, piece):
+            try:
+                qmp.call('pmemsave', {'val': start, 'size': piece, 'filename': str(scratch)})
+            except RuntimeError:
+                break
+            data = scratch.read_bytes()
+            at = data.find(b'I915CAP1')
+            while at >= 0:
+                if at % 4096 == 0 and struct.unpack_from('<Q', data, at + 0x30)[0] == start + at:
+                    scratch.unlink()
+                    return start + at
+                at = data.find(b'I915CAP1', at + 1)
+        time.sleep(2.0)
+    raise TimeoutError('capture area (memory scan)')
+
+
+def zdesktop(args, qmp, capture, report, wait):
+    """The glass look on the capture display: the desktop, docking, Wiseview."""
+    width, height = 1920, 1080
+    time_limit = time.monotonic() + args.timeout
+    # Where zwl places the window on top: all three are 800x560 (plan/ws031/tests/zdesktop/), so the last
+    # mapped is at cascade step 64 whichever client it is:
+    # centred under the system bar and a title bar (userland/base/zwl/shell.c zwl_glass_place).
+    top = 34 + 12 + 44 + 8
+    mview_x = (width - 800) // 2 + 64
+    mview_y = top + (height - top - 12 - 560) // 2 + 64
+    title = (mview_x + 300, mview_y - 8 - 22)
+
+    def events(items):
+        qmp.call('input-send-event', {'events': items})
+        time.sleep(0.03)
+
+    def move(x, y):
+        # zwl takes the pixel floor(v * (size - 1) / 32767): v is rounded up.
+        events([{'type': 'abs', 'data': {'axis': 'x', 'value': (int(x) * ABS_MAX + width - 2) // (width - 1)}},
+                {'type': 'abs', 'data': {'axis': 'y', 'value': (int(y) * ABS_MAX + height - 2) // (height - 1)}}])
+
+    def button(down):
+        events([{'type': 'btn', 'data': {'button': 'left', 'down': down}}])
+
+    def shot(tag, pause):
+        # The clients present once a second, so the view is taken a while after the input.
+        time.sleep(pause)
+        taken = capture.save(tag)
+        report['images'][tag] = taken
+        return Path(taken['path'])
+
+    # The clients start some seconds after the compositor's first frame (plan/ws031/tests/zdesktop/).
+    while capture.write_count() == 0:
+        if time.monotonic() > time_limit:
+            raise TimeoutError('first frame')
+        time.sleep(0.5)
+    move(width - 40, height - 200)
+    desktop = shot('desktop', 25.0)
+    report['checks']['desktop_drawn'] = coloured(desktop) > 0.02
+
+    # A double click on the top window's title bar docks it.
+    move(*title)
+    time.sleep(0.3)
+    for _ in range(2):
+        button(True)
+        time.sleep(0.05)
+        button(False)
+        time.sleep(0.05)
+    move(width - 40, height - 200)
+    docked = shot('docked', 4.0)
+    report['checks']['dock_changes_view'] = difference(desktop, docked) > 0.05
+
+    # A drag up from the bottom edge opens Wiseview.
+    move(width // 2, height - 6)
+    button(True)
+    for step in range(1, 13):
+        move(width // 2, height - 6 - step * 30)
+        time.sleep(0.05)
+    button(False)
+    wiseview = shot('wiseview', 4.0)
+    report['checks']['wiseview_changes_view'] = difference(docked, wiseview) > 0.05
+
+    # A click on empty space closes it again.
+    move(20, height // 2)
+    button(True)
+    button(False)
+    closed = shot('closed', 4.0)
+    report['checks']['wiseview_closes'] = difference(wiseview, closed) > 0.05
+
+    sheet = Path(args.output) / 'sheet.png'
+    write_sheet([report['images'][tag]['path'] for tag in ('desktop', 'docked', 'wiseview', 'closed')], sheet, columns=2)
+    report['sheet'] = str(sheet)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('scenario', choices=['vkdemo', 'wayland', 'mview'])
+    parser.add_argument('scenario', choices=['vkdemo', 'wayland', 'mview', 'zdesktop'])
     parser.add_argument('--output', required=True)
     parser.add_argument('--serial', default='/home/awe/bigbang/run-parity-serial.log')
     parser.add_argument('--qmp', default='/home/awe/bigbang/qmp.sock')

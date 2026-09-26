@@ -113,7 +113,6 @@ import_image(
 	VkImportMemoryFdInfoKHR import_info;
 	VkMemoryAllocateInfo allocate;
 	VkImageViewCreateInfo view;
-	VkDescriptorSetAllocateInfo set;
 	VkDescriptorImageInfo image_info;
 	VkWriteDescriptorSet write;
 	VkFormat format;
@@ -215,13 +214,8 @@ import_image(
 	if (result != VK_SUCCESS)
 		return result;
 
-	/* Its descriptor set. */
-	memset(&set, 0, sizeof(set));
-	set.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-	set.descriptorPool = compose->descriptors;
-	set.descriptorSetCount = 1U;
-	set.pSetLayouts = &compose->set_layout;
-	result = vkAllocateDescriptorSets(compose->device, &set, &import->set);
+	/* Its descriptor set (a spare one when there is one). */
+	result = zwl_compose_set_get(compose, &import->set);
 	if (result != VK_SUCCESS)
 		return result;
 	memset(&image_info, 0, sizeof(image_info));
@@ -316,9 +310,9 @@ import_release(
 {
 	/* Each object, in the reverse order of its making. */
 	if (import->set != VK_NULL_HANDLE)
-		(void)vkFreeDescriptorSets(compose->device, compose->descriptors, 1U, &import->set);
+		zwl_compose_set_put(compose, import->set);
 	if (import->linear_set != VK_NULL_HANDLE)
-		(void)vkFreeDescriptorSets(compose->device, compose->descriptors, 1U, &import->linear_set);
+		zwl_compose_set_put(compose, import->linear_set);
 	if (import->view != VK_NULL_HANDLE)
 		vkDestroyImageView(compose->device, import->view, NULL);
 	if (import->image != VK_NULL_HANDLE)

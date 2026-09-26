@@ -30,6 +30,7 @@ static VkResult compose_objects(struct zwl_compose *compose);
 static VkResult compose_pass(struct zwl_compose *compose);
 static VkResult compose_pipeline(struct zwl_compose *compose, enum zwl_draw draw, VkShaderModule vertex, VkShaderModule fragment, VkPipelineLayout layout, VkPipeline *pipeline);
 static VkResult compose_panel_pipeline(struct zwl_compose *compose);
+static VkResult compose_corners(struct zwl_compose *compose);
 static VkResult compose_targets(struct zwl_compose *compose);
 static void compose_targets_destroy(struct zwl_compose *compose);
 static unsigned compose_windows(struct zwl_server *server, struct zwl_object **windows, unsigned capacity);
@@ -299,6 +300,43 @@ zwl_compose_complete(
 }
 
 /*
+ * Tells whether a frame is in flight whose fence has no fd, so the event
+ * loop must ask its status (zwl_compose_poll) rather than poll an fd.
+ */
+int
+zwl_compose_waiting(
+	struct zwl_server *server)
+{
+	/* Only window mode's frame without an exported fence. */
+	if (server->compose == NULL || !server->compose->in_flight || server->compose->fence_fd)
+		return 0;
+
+	/* Succeeded. */
+	return 1;
+}
+
+/*
+ * Ends the frame in flight when its fence (without an fd) has signaled.
+ */
+void
+zwl_compose_poll(
+	struct zwl_server *server)
+{
+	VkResult result;
+	int waiting;
+
+	/* Nothing to ask. */
+	waiting = zwl_compose_waiting(server);
+	if (!waiting)
+		return;
+
+	/* A signaled fence ends the frame; otherwise a later pass asks again. */
+	result = vkGetFenceStatus(server->compose->device, server->compose->fence);
+	if (result == VK_SUCCESS)
+		zwl_frame_done(server);
+}
+
+/*
  * Finishes the frame in flight now, waiting for it: before a client whose
  * buffers and callbacks it may hold is destroyed, and at exit.
  */
@@ -354,6 +392,10 @@ zwl_compose_close(
 		vkDestroyPipelineLayout(compose->device, compose->panel_layout, NULL);
 		vkDestroySampler(compose->device, compose->linear_sampler, NULL);
 
+		/* The corners. */
+		vkDestroyBuffer(compose->device, compose->corners, NULL);
+		vkFreeMemory(compose->device, compose->corners_memory, NULL);
+
 		/* The pass, layouts, sampler, pools and synchronization. */
 		vkDestroyRenderPass(compose->device, compose->pass, NULL);
 		vkDestroyPipelineLayout(compose->device, compose->layout, NULL);
@@ -392,6 +434,9 @@ compose_device(
 		VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME,
 		VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME
 	};
+	VkExtensionProperties available[32];
+	uint32_t found;
+	uint32_t wanted;
 	VkApplicationInfo application;
 	VkInstanceCreateInfo instance;
 	VkQueueFamilyProperties families[16];
@@ -400,6 +445,7 @@ compose_device(
 	float priority;
 	uint32_t count;
 	uint32_t index;
+	int match;
 	VkResult result;
 
 	/* The instance, with the display extensions and those the external fd extensions need (Vulkan 1.0). */
@@ -437,7 +483,27 @@ compose_device(
 	if (compose->family == UINT32_MAX)
 		return VK_ERROR_INITIALIZATION_FAILED;
 
-	/* The device, with one queue and the swapchain and external fd extensions. */
+	/* The external fence extensions only when the device has both (the native i915 has none). */
+	found = 32U;
+	result = vkEnumerateDeviceExtensionProperties(compose->physical, NULL, &found, available);
+	if (result != VK_SUCCESS && result != VK_INCOMPLETE)
+		return result;
+	wanted = 0;
+	for (index = 0; index < found; index++) {
+		match = strcmp(available[index].extensionName, VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME);
+		if (match == 0)
+			wanted++;
+		match = strcmp(available[index].extensionName, VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME);
+		if (match == 0)
+			wanted++;
+	}
+
+	/* Both, or neither. */
+	compose->fence_fd = 0;
+	if (wanted == 2U)
+		compose->fence_fd = 1;
+
+	/* The device, with one queue, the swapchain and the external memory (and fence) fd extensions. */
 	priority = 1.0f;
 	memset(&queue, 0, sizeof(queue));
 	queue.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -448,7 +514,9 @@ compose_device(
 	device.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 	device.queueCreateInfoCount = 1U;
 	device.pQueueCreateInfos = &queue;
-	device.enabledExtensionCount = 5U;
+	device.enabledExtensionCount = 3U;
+	if (compose->fence_fd)
+		device.enabledExtensionCount = 5U;
 	device.ppEnabledExtensionNames = device_extensions;
 	result = vkCreateDevice(compose->physical, &device, NULL, &compose->device);
 	if (result != VK_SUCCESS)
@@ -571,7 +639,8 @@ compose_objects(
 	export.handleTypes = VK_EXTERNAL_FENCE_HANDLE_TYPE_OPAQUE_FD_BIT;
 	memset(&fence, 0, sizeof(fence));
 	fence.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-	fence.pNext = &export;
+	if (compose->fence_fd)
+		fence.pNext = &export;
 	result = vkCreateFence(compose->device, &fence, NULL, &compose->fence);
 	if (result != VK_SUCCESS)
 		return result;
@@ -580,7 +649,77 @@ compose_objects(
 	memset(&semaphore, 0, sizeof(semaphore));
 	semaphore.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 	result = vkCreateSemaphore(compose->device, &semaphore, NULL, &compose->acquired);
+	if (result != VK_SUCCESS)
+		return result;
+
+	/* The quad's corners. */
+	result = compose_corners(compose);
 	return result;
+}
+
+/* Creates the vertex buffer of a quad's two triangles, written once by the CPU. */
+static VkResult
+compose_corners(
+	struct zwl_compose *compose)
+{
+	static const float corners[ZWL_QUAD_VERTICES * 2U] = {
+		0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f,
+		0.0f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f
+	};
+	VkPhysicalDeviceMemoryProperties memory;
+	VkMemoryRequirements requirements;
+	VkMemoryAllocateInfo allocate;
+	VkBufferCreateInfo buffer;
+	VkMemoryPropertyFlags wanted;
+	uint32_t index;
+	VkResult result;
+	void *map;
+
+	/* The buffer. */
+	memset(&buffer, 0, sizeof(buffer));
+	buffer.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	buffer.size = sizeof(corners);
+	buffer.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	buffer.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	result = vkCreateBuffer(compose->device, &buffer, NULL, &compose->corners);
+	if (result != VK_SUCCESS)
+		return result;
+
+	/* Host-visible, coherent memory for it. */
+	vkGetBufferMemoryRequirements(compose->device, compose->corners, &requirements);
+	vkGetPhysicalDeviceMemoryProperties(compose->physical, &memory);
+	wanted = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	for (index = 0; index < memory.memoryTypeCount; index++) {
+		if ((requirements.memoryTypeBits & (1U << index)) != 0U &&
+		    (memory.memoryTypes[index].propertyFlags & wanted) == wanted)
+			break;
+	}
+
+	/* Without such memory the corners cannot be written. */
+	if (index == memory.memoryTypeCount)
+		return VK_ERROR_FORMAT_NOT_SUPPORTED;
+
+	/* The memory, bound. */
+	memset(&allocate, 0, sizeof(allocate));
+	allocate.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocate.allocationSize = requirements.size;
+	allocate.memoryTypeIndex = index;
+	result = vkAllocateMemory(compose->device, &allocate, NULL, &compose->corners_memory);
+	if (result != VK_SUCCESS)
+		return result;
+	result = vkBindBufferMemory(compose->device, compose->corners, compose->corners_memory, 0U);
+	if (result != VK_SUCCESS)
+		return result;
+
+	/* The corners, written once. */
+	result = vkMapMemory(compose->device, compose->corners_memory, 0U, sizeof(corners), 0U, &map);
+	if (result != VK_SUCCESS)
+		return result;
+	memcpy(map, corners, sizeof(corners));
+	vkUnmapMemory(compose->device, compose->corners_memory);
+
+	/* Succeeded. */
+	return VK_SUCCESS;
 }
 
 /* Creates the render pass for the output's format and the two pipelines. */
@@ -713,6 +852,8 @@ compose_pipeline(
 		VK_DYNAMIC_STATE_SCISSOR
 	};
 	VkPipelineShaderStageCreateInfo stages[2];
+	VkVertexInputBindingDescription binding;
+	VkVertexInputAttributeDescription attribute;
 	VkPipelineVertexInputStateCreateInfo input;
 	VkPipelineInputAssemblyStateCreateInfo assembly;
 	VkPipelineViewportStateCreateInfo viewport;
@@ -734,12 +875,25 @@ compose_pipeline(
 	stages[1].module = fragment;
 	stages[1].pName = "main";
 
-	/* No vertex buffers: the shader makes the strip's four corners. */
+	/* One vertex buffer: the corners of the quad's two triangles, a vec2 each. */
+	memset(&binding, 0, sizeof(binding));
+	binding.binding = 0U;
+	binding.stride = 2U * sizeof(float);
+	binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+	memset(&attribute, 0, sizeof(attribute));
+	attribute.location = 0U;
+	attribute.binding = 0U;
+	attribute.format = VK_FORMAT_R32G32_SFLOAT;
+	attribute.offset = 0U;
 	memset(&input, 0, sizeof(input));
 	input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	input.vertexBindingDescriptionCount = 1U;
+	input.pVertexBindingDescriptions = &binding;
+	input.vertexAttributeDescriptionCount = 1U;
+	input.pVertexAttributeDescriptions = &attribute;
 	memset(&assembly, 0, sizeof(assembly));
 	assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-	assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+	assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
 	/* The viewport and scissor are set per frame. */
 	memset(&viewport, 0, sizeof(viewport));
@@ -941,6 +1095,54 @@ surface_image(
 }
 
 /*
+ * Gives out a descriptor set of the image layout: one an image gave back, or
+ * a new one from the pool.
+ */
+VkResult
+zwl_compose_set_get(
+	struct zwl_compose *compose,
+	VkDescriptorSet *result)
+{
+	VkDescriptorSetAllocateInfo set;
+	VkResult status;
+
+	/* A spare set is written again by its new owner. */
+	if (compose->spare_count != 0U) {
+		compose->spare_count--;
+		*result = compose->spare_sets[compose->spare_count];
+		return VK_SUCCESS;
+	}
+
+	/* Otherwise a new one. */
+	memset(&set, 0, sizeof(set));
+	set.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	set.descriptorPool = compose->descriptors;
+	set.descriptorSetCount = 1U;
+	set.pSetLayouts = &compose->set_layout;
+	status = vkAllocateDescriptorSets(compose->device, &set, result);
+	return status;
+}
+
+/*
+ * Takes back a descriptor set an image no longer uses, for the next image:
+ * sets are not freed one by one (the native i915 executor has no
+ * vkFreeDescriptorSets); the pool frees them all at the end.
+ */
+void
+zwl_compose_set_put(
+	struct zwl_compose *compose,
+	VkDescriptorSet set)
+{
+	/* Nothing to keep, or no room (the pool frees it at the end). */
+	if (set == VK_NULL_HANDLE || compose->spare_count == ZWL_DESCRIPTOR_MAX)
+		return;
+
+	/* Kept for the next image. */
+	compose->spare_sets[compose->spare_count] = set;
+	compose->spare_count++;
+}
+
+/*
  * Gives an image a second descriptor set with the linear sampler, for
  * drawing it smaller than its size (Wiseview).  The set is freed with the
  * image's own.
@@ -950,18 +1152,12 @@ zwl_compose_linear_set(
 	struct zwl_compose *compose,
 	struct zwl_import *import)
 {
-	VkDescriptorSetAllocateInfo set;
 	VkDescriptorImageInfo image_info;
 	VkWriteDescriptorSet write;
 	VkResult result;
 
-	/* The set. */
-	memset(&set, 0, sizeof(set));
-	set.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-	set.descriptorPool = compose->descriptors;
-	set.descriptorSetCount = 1U;
-	set.pSetLayouts = &compose->set_layout;
-	result = vkAllocateDescriptorSets(compose->device, &set, &import->linear_set);
+	/* The set (a spare one when there is one). */
+	result = zwl_compose_set_get(compose, &import->linear_set);
 	if (result != VK_SUCCESS)
 		return result;
 
@@ -1026,7 +1222,7 @@ compose_quad(
 	vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, server->compose->pipelines[import->draw]);
 	vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, server->compose->layout, 0U, 1U, &import->set, 0U, NULL);
 	vkCmdPushConstants(command, server->compose->layout, VK_SHADER_STAGE_VERTEX_BIT, 0U, sizeof(constants), constants);
-	vkCmdDraw(command, 4U, 1U, 0U, 0U);
+	vkCmdDraw(command, ZWL_QUAD_VERTICES, 1U, 0U, 0U);
 }
 
 /* Records a frame: the background, then each window from the bottom. */
@@ -1043,6 +1239,7 @@ compose_record(
 	VkClearValue clear;
 	VkViewport viewport;
 	VkRect2D scissor;
+	VkDeviceSize offset;
 	unsigned index;
 	VkResult result;
 
@@ -1084,6 +1281,10 @@ compose_record(
 	scissor.extent.width = compose->output.width;
 	scissor.extent.height = compose->output.height;
 	vkCmdSetScissor(compose->command, 0U, 1U, &scissor);
+
+	/* Every quad's corners. */
+	offset = 0U;
+	vkCmdBindVertexBuffers(compose->command, 0U, 1U, &compose->corners, &offset);
 
 	/*
 	 * The windows, bottom to top (painter's order): plainly, or in the glass
@@ -1181,6 +1382,12 @@ compose_submit(
 	result = vkQueuePresentKHR(compose->queue, &present);
 	if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
 		return result;
+
+	/* Without an exported fence the event loop asks the fence's status each pass. */
+	if (!compose->fence_fd) {
+		compose->in_flight = 1;
+		return VK_SUCCESS;
+	}
 
 	/* The fence as an fd: the event loop learns of completion without waiting (design D3). */
 	memset(&fd_info, 0, sizeof(fd_info));

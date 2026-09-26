@@ -809,7 +809,7 @@ glass_shape_draw(
 	vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, compose->panel_pipeline);
 	vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, compose->panel_layout, 0U, 1U, &set, 0U, NULL);
 	vkCmdPushConstants(command, compose->panel_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0U, sizeof(constants), constants);
-	vkCmdDraw(command, 4U, 1U, 0U, 0U);
+	vkCmdDraw(command, ZWL_QUAD_VERTICES, 1U, 0U, 0U);
 }
 
 /* Draws a rounded rectangle in a solid color. */

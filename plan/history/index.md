@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q464（ws035-p063 cleared。Wiseview）
+Last finished Queue: q465（ws035-p066 cleared。zdesktop を Intel GPU で）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q464（2026-09-26）
+## 最新: q443〜q465（2026-09-26）
+
+[q465](queue-q465.md): ws035-p066 cleared。5330（10.0.30.3）の i915 を VFIO で渡した実機の GPU で Wiseman Mode（壁紙・すりガラス・文字・浮いたタイトルバー・ドッキング・Wiseview）を capture で確認（wl_shm の窓）。zwl の shader を native compiler に合わせ、fence の fd 無し・descriptor set の再利用・triangle list、libvulkan は画像共有だけの node で外部 memory、i915 の GGTT の窓を 64 MiB・1 GiB に。GPU の client の窓は F-022。
 
 [q464](queue-q464.md): ws035-p063 cleared。Wiseview（ユーザーの設計 [wiseman-design.md](../ws035/wiseman-design.md)、Wiseman = WM、全画面 = ゲームモード、窓 = Wiseman Mode）: 下端からの drag で開き、窓がタイルのグリッドへ、選択・閉じる・背景で閉じる。
 

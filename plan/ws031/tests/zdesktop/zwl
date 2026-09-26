@@ -1,0 +1,6 @@
+type=daemon
+command=/bin/zwl
+arguments=--socket=/tmp/wayland-0 --width=1920 --height=1080 --timeout=300 --glass --wallpaper=/usr/share/zdesktop/wallpaper.ppm
+after=vkwait1
+restart=no
+required=NO

@@ -7,9 +7,11 @@
 // fails when an object depends on a file outside the kernel's own tree:
 // include/{kern,hal,drivers,uapi,boot}/, include/libc/vulkan/ (the Vulkan
 // declarations the GPU drivers decode, which are part of the C library by
-// design), src/, bootloader/include/ and plan/ (a test object compiled from
-// its own directory).  The compiler's freestanding headers are system headers
-// and never appear in a -MMD file.
+// design), src/, bootloader/include/, plan/ (a test object compiled from
+// its own directory) and vendor/intel-vbt/ (the captured VBT table that the
+// I915_TEST_VBT=y test build compiles into display/vbt.c: data, not a
+// header).  The compiler's freestanding headers are system headers and never
+// appear in a -MMD file.
 
 require zedbuild;
 
@@ -50,7 +52,7 @@ func allowedPath(path) {
     var prefixes = [
         "include/kern/", "include/hal/", "include/drivers/", "include/uapi/",
         "include/boot/", "include/libc/vulkan/", "src/", "bootloader/include/",
-        "plan/"
+        "plan/", "vendor/intel-vbt/"
     ];
     if (String.charAt(path, 0) == "/") { return false; }
     var relative = normalPath(path);
