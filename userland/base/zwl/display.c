@@ -472,13 +472,15 @@ zwl_top_window(
 	struct zwl_object *surface;
 	struct zwl_object *top;
 
-	/* The highest map order wins. */
+	/* The highest map order on the desktop shown wins. */
 	top = NULL;
 	for (client = server->clients; client != NULL; client = client->next) {
 		if (client->fatal)
 			continue;
 		for (surface = client->objects; surface != NULL; surface = surface->next) {
 			if (surface->kind != ZWL_SURFACE || surface->dead || !surface->mapped)
+				continue;
+			if (surface->desktop != server->desktop)
 				continue;
 			if (top == NULL || surface->map_order > top->map_order)
 				top = surface;
@@ -580,6 +582,7 @@ adopt_commit(
 		surface->mapped = 1;
 		server->map_order++;
 		surface->map_order = server->map_order;
+		surface->desktop = server->desktop;
 		place_window(server, surface);
 		printf("ZWL MAP client=%llu surface=%u x=%d y=%d\n", (unsigned long long)surface->client->number, surface->id, surface->x, surface->y);
 		zwl_glass_mapped(server, surface);

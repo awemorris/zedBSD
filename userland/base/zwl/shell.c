@@ -72,6 +72,16 @@
 #define DESKTOP_HEIGHT		20
 #define DESKTOP_GAP		6
 
+/* The desktops' swipe: how near the edge it starts, how far it moves before it is one, and how long a slide takes. */
+#define DESKTOP_EDGE		16
+#define DESKTOP_START		12
+#define DESKTOP_MS		220U
+
+/* The keys of Ctrl+Alt+Left/Right, and the modifiers' bits (Control and Mod1). */
+#define SHORTCUT_LEFT		105U
+#define SHORTCUT_RIGHT		106U
+#define MODIFIERS_CONTROL_ALT	(4U | 8U)
+
 /* Wiseview: where the gesture starts, how far it goes, when it opens, and how long it settles. */
 #define WISEVIEW_EDGE		20
 #define WISEVIEW_DISTANCE	240.0f
@@ -155,6 +165,13 @@ static void draw_tile(struct zwl_server *server, VkCommandBuffer command, struct
 static int wiseview_button(struct zwl_server *server, uint32_t button, uint32_t state);
 static void wiseview_log(struct zwl_server *server);
 
+/* Whether where the desktops' pictures are has been logged (once, for the tests that click them). */
+static unsigned shell_desktops_logged;
+static float desktop_position(struct zwl_server *server);
+static void desktop_turn(struct zwl_server *server, int target, const char *via);
+static void desktop_release(struct zwl_server *server);
+static unsigned desktop_windows(struct zwl_server *server, unsigned desktop);
+
 /*
  * Draws the wallpaper, the windows from the bottom with their shadows and
  * title bars, and the system bar over them.
@@ -173,6 +190,8 @@ zwl_glass_draw(
 	unsigned focused;
 	float progress;
 	float home;
+	float position;
+	float shift;
 
 	/*
 	 * App Home, opening, open or closing, lies under the desktop layer,
@@ -219,9 +238,32 @@ zwl_glass_draw(
 		return;
 	}
 
-	/* The windows; the top one has the focus; where a dragged one would dock shows just under it. */
+	/*
+	 * The windows; the top one has the focus; where a dragged one would
+	 * dock shows just under it.  The desktop shown's windows, and while
+	 * the desktops slide or are swiped, the neighbour's too, a screen's
+	 * width to the side (Home, when it shows, has the desktop shown only).
+	 */
 	top = zwl_top_window(server);
+	position = desktop_position(server);
 	for (index = 0; index < count; index++) {
+		shift = ((float)windows[index]->desktop - position) * (float)server->width;
+		if (shift <= -(float)server->width || shift >= (float)server->width)
+			continue;
+		if (home > 0.0f && windows[index]->desktop != server->desktop)
+			continue;
+
+		/* Shifted with the layer, when Home does not have it. */
+		if (home <= 0.0f) {
+			server->layer_on = 0;
+			if (shift != 0.0f)
+				server->layer_on = 1;
+			server->layer_x = shift;
+			server->layer_y = 0.0f;
+			server->layer_scale = 1.0f;
+		}
+
+		/* The window. */
 		focused = 0;
 		if (windows[index] == top)
 			focused = 1;
@@ -267,6 +309,24 @@ zwl_glass_button(
 	pressed = zwl_home_button(server, button, state);
 	if (pressed)
 		return 1;
+
+	/* The end of a press at the left or right edge: the swipe switches the desktop, or goes back. */
+	if (state == 0 && server->desktop_press) {
+		desktop_release(server);
+		return 1;
+	}
+
+	/* A left press at the left or right edge (under the system bar) may become the desktops' swipe. */
+	if (state != 0 &&
+	    button == ZWL_BUTTON_LEFT &&
+	    server->pointer_y >= ZWL_GLASS_BAR &&
+	    (server->pointer_x < DESKTOP_EDGE || server->pointer_x >= (int32_t)server->width - DESKTOP_EDGE)) {
+		server->desktop_press = 1;
+		server->desktop_dragging = 0;
+		server->desktop_start_x = server->pointer_x;
+		server->desktop_offset = 0;
+		return 1;
+	}
 
 	/* A left press at the bottom edge starts opening Wiseview. */
 	if (state != 0 && button == ZWL_BUTTON_LEFT && server->pointer_y >= (int32_t)server->height - WISEVIEW_EDGE) {
@@ -371,6 +431,7 @@ zwl_glass_motion(
 	int32_t lowest;
 	int32_t x;
 	int32_t y;
+	int32_t dx;
 	int taken;
 
 	/* The hover of buttons, the dock hint and the moves are redrawn. */
@@ -384,6 +445,26 @@ zwl_glass_motion(
 	taken = zwl_home_motion(server);
 	if (taken)
 		return 1;
+
+	/* The desktops' swipe: past DESKTOP_START the windows follow the pointer (with resistance where there is no neighbour). */
+	if (server->desktop_press) {
+		dx = server->pointer_x - server->desktop_start_x;
+		if (!server->desktop_dragging && (dx >= DESKTOP_START || dx <= -DESKTOP_START)) {
+			server->desktop_dragging = 1;
+			server->desktop_moving = 0;
+			printf("ZWL GLASS desktop swipe\n");
+		}
+
+		/* The offset follows the pointer. */
+		if (server->desktop_dragging) {
+			server->desktop_offset = dx;
+			if ((dx > 0 && server->desktop == 0U) || (dx < 0 && server->desktop + 1U >= (unsigned)DESKTOPS))
+				server->desktop_offset = dx / 4;
+		}
+
+		/* The motion was the swipe's. */
+		return 1;
+	}
 
 	/* A docked title pulled far enough down comes off under the pointer, and the move goes on. */
 	surface = server->pull;
@@ -490,6 +571,30 @@ zwl_glass_mapped(
 }
 
 /*
+ * Handles zdesktop's shortcuts: Ctrl+Alt+Left and Right switch to the
+ * desktop before and after.  Returns 1 when the key is zdesktop's.
+ */
+int
+zwl_glass_key(
+	struct zwl_server *server,
+	uint32_t key,
+	uint32_t state)
+{
+	/* Only with Control and Alt held, and only the two arrows. */
+	if ((server->modifiers & MODIFIERS_CONTROL_ALT) != MODIFIERS_CONTROL_ALT)
+		return 0;
+	if (key != SHORTCUT_LEFT && key != SHORTCUT_RIGHT)
+		return 0;
+
+	/* A press switches; the release is the shortcut's too. */
+	if (state != 0U && key == SHORTCUT_LEFT)
+		desktop_turn(server, (int)server->desktop - 1, "key");
+	if (state != 0U && key == SHORTCUT_RIGHT)
+		desktop_turn(server, (int)server->desktop + 1, "key");
+	return 1;
+}
+
+/*
  * Keeps the output being redrawn: every frame while the dock animation runs
  * (ending it after DOCK_MS), and when the clock shows a new minute.
  */
@@ -503,6 +608,16 @@ zwl_glass_tick(
 
 	/* App Home's animation, and the applications it started that have ended. */
 	zwl_home_tick(server);
+
+	/* The desktops' slide draws every frame until it is done. */
+	if (server->desktop_moving) {
+		server->dirty = 1;
+		elapsed = zwl_milliseconds() - server->desktop_start_ms;
+		if (elapsed >= DESKTOP_MS) {
+			server->desktop_moving = 0;
+			printf("ZWL GLASS desktop settled desktop=%u windows=%u\n", server->desktop + 1U, desktop_windows(server, server->desktop));
+		}
+	}
 
 	/* The animation draws every frame until it is done. */
 	if (server->anim != NULL) {
@@ -991,9 +1106,9 @@ draw_system_bar(
 }
 
 /*
- * Draws the virtual desktops (a mock-up): a light pill with a small picture
- * of the wallpaper for each, the first one marked as the current one, and
- * lines on both sides.
+ * Draws the virtual desktops: a light pill with a small picture of the
+ * wallpaper for each (the others paler, a dot under those with windows),
+ * the one shown outlined, and lines on both sides.
  */
 static void
 draw_desktops(
@@ -1006,6 +1121,7 @@ draw_desktops(
 	static const float current[4] = { 0.25f, 0.52f, 0.98f, 1.0f };
 	struct glass_shape shape;
 	float progress;
+	unsigned windows;
 	int32_t x;
 	int desktop;
 
@@ -1030,6 +1146,12 @@ draw_desktops(
 		glass_shape_draw(server, command, &shape);
 	}
 
+	/* Where the pictures are, once. */
+	if (!shell_desktops_logged) {
+		shell_desktops_logged = 1U;
+		printf("ZWL GLASS desktops x=%d step=%d width=%d\n", bar->desktops_x + 6, DESKTOP_WIDTH + DESKTOP_GAP, DESKTOP_WIDTH);
+	}
+
 	/* Each desktop's picture; the others are paler. */
 	for (desktop = 0; desktop < DESKTOPS; desktop++) {
 		x = bar->desktops_x + 6 + desktop * (DESKTOP_WIDTH + DESKTOP_GAP);
@@ -1038,12 +1160,17 @@ draw_desktops(
 		shape.opaque = 1.0f;
 		shape.radius = 4.0f;
 		shape.set = glass_wallpaper_set(server);
-		if (desktop != 0)
+		if (desktop != (int)server->desktop)
 			shape.opacity = 0.45f;
 		glass_shape_draw(server, command, &shape);
 
+		/* A desktop with windows has a small dot under its picture. */
+		windows = desktop_windows(server, (unsigned)desktop);
+		if (windows != 0U)
+			glass_draw_solid(server, command, (float)(x + DESKTOP_WIDTH / 2 - 2), (float)(ZWL_GLASS_BAR - 5), 4.0f, 3.0f, 1.5f, current);
+
 		/* The current one is outlined in blue. */
-		if (desktop == 0) {
+		if (desktop == (int)server->desktop) {
 			glass_shape_init(&shape, (float)(x - 2), (float)((ZWL_GLASS_BAR - DESKTOP_HEIGHT) / 2 - 2), (float)(DESKTOP_WIDTH + 4), (float)(DESKTOP_HEIGHT + 4));
 			shape.quad[0] -= 1.0f;
 			shape.quad[1] -= 1.0f;
@@ -1381,12 +1508,13 @@ window_at(
 		if (client->fatal)
 			continue;
 		for (surface = client->objects; surface != NULL; surface = surface->next) {
-			/* Only mapped windows. */
+			/* Only mapped windows of the desktop shown. */
 			if (surface->kind != ZWL_SURFACE ||
 			    surface->dead ||
 			    !surface->mapped ||
 			    surface->role == NULL ||
-			    surface->cursor_role)
+			    surface->cursor_role ||
+			    surface->desktop != server->desktop)
 				continue;
 
 			/* Above what was found so far. */
@@ -1595,15 +1723,23 @@ bar_press(
 	struct zwl_object *surface;
 	struct shell_bar bar;
 	unsigned second;
+	int32_t picture;
 	int pressed;
 
-	/* Only a docked window acts. */
+	/* A desktop's picture switches to it. */
+	bar_layout(server, &bar);
+	picture = server->pointer_x - (bar.desktops_x + 6);
+	if (picture >= 0 && picture < DESKTOPS * (DESKTOP_WIDTH + DESKTOP_GAP)) {
+		desktop_turn(server, picture / (DESKTOP_WIDTH + DESKTOP_GAP), "bar");
+		return 1;
+	}
+
+	/* Otherwise only a docked window acts. */
 	surface = docked_window(server);
 	if (surface == NULL)
 		return 1;
 
 	/* Its buttons. */
-	bar_layout(server, &bar);
 	pressed = bar_button_at(&bar, server->pointer_x, server->pointer_y);
 	if (pressed == BUTTON_CLOSE) {
 		(void)zwl_emit(surface->client, surface->role->top->id, 1U, NULL, 0U);
@@ -1710,13 +1846,14 @@ wiseview_windows(
 		if (client->fatal)
 			continue;
 		for (surface = client->objects; surface != NULL; surface = surface->next) {
-			/* Only a window with an image. */
+			/* Only a window with an image, of the desktop shown. */
 			if (surface->kind != ZWL_SURFACE ||
 			    surface->dead ||
 			    !surface->mapped ||
 			    surface->role == NULL ||
 			    surface->cursor_role ||
-			    surface->current == NULL)
+			    surface->current == NULL ||
+			    surface->desktop != server->desktop)
 				continue;
 
 			/* Inserted after those raised later. */
@@ -2119,4 +2256,113 @@ wiseview_log(
 	printf("ZWL WISEVIEW open windows=%u\n", count);
 	for (index = 0; index < count; index++)
 		printf("ZWL WISEVIEW tile client=%llu surface=%u x=%d y=%d width=%d height=%d\n", (unsigned long long)windows[index]->client->number, windows[index]->id, tiles[index].x, tiles[index].y, tiles[index].width, tiles[index].height);
+}
+
+/* Returns where the desktops are, as a desktop number: the one shown, swiped by the pointer, or sliding. */
+static float
+desktop_position(
+	struct zwl_server *server)
+{
+	uint64_t elapsed;
+	float t;
+
+	/* Swiped: the desktop shown, moved by the swipe (a swipe to the left brings the next one). */
+	if (server->desktop_dragging && server->desktop_offset != 0)
+		return (float)server->desktop - (float)server->desktop_offset / (float)server->width;
+
+	/* Settled. */
+	if (!server->desktop_moving)
+		return (float)server->desktop;
+
+	/* Sliding: eased (cubic ease-out) from where the desktops were to the desktop. */
+	elapsed = zwl_milliseconds() - server->desktop_start_ms;
+	t = (float)elapsed / (float)DESKTOP_MS;
+	if (t > 1.0f)
+		t = 1.0f;
+	t = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
+	return server->desktop_from + (server->desktop_to - server->desktop_from) * t;
+}
+
+/* Switches to a desktop (clamped to those there are), sliding from where the desktops are; its top window takes the focus. */
+static void
+desktop_turn(
+	struct zwl_server *server,
+	int target,
+	const char *via)
+{
+	float from;
+
+	/* One of the desktops. */
+	if (target < 0)
+		target = 0;
+	if (target >= DESKTOPS)
+		target = DESKTOPS - 1;
+
+	/* From where they are to it. */
+	from = desktop_position(server);
+	server->desktop = (unsigned)target;
+	server->desktop_from = from;
+	server->desktop_to = (float)target;
+	server->desktop_start_ms = zwl_milliseconds();
+	server->desktop_moving = 1;
+	server->desktop_dragging = 0;
+	server->desktop_offset = 0;
+	server->drag = NULL;
+	server->pull = NULL;
+	server->dirty = 1;
+
+	/* The focus goes to the desktop's top window (or nobody). */
+	server->front_surface = zwl_top_window(server);
+	zwl_seat_focus(server);
+	printf("ZWL GLASS desktop=%u via=%s\n", server->desktop + 1U, via);
+}
+
+/* Ends a press at the edge: a swipe of a quarter of the output switches to the neighbour, a shorter one goes back. */
+static void
+desktop_release(
+	struct zwl_server *server)
+{
+	int32_t dx;
+
+	/* The press is over; without a swipe nothing happens. */
+	server->desktop_press = 0;
+	if (!server->desktop_dragging)
+		return;
+
+	/* Far enough: the neighbour on that side; else back. */
+	dx = server->pointer_x - server->desktop_start_x;
+	if (dx >= (int32_t)server->width / 4) {
+		desktop_turn(server, (int)server->desktop - 1, "swipe");
+	} else if (dx <= -(int32_t)server->width / 4) {
+		desktop_turn(server, (int)server->desktop + 1, "swipe");
+	} else {
+		desktop_turn(server, (int)server->desktop, "swipe");
+	}
+}
+
+/* Counts the mapped windows of a desktop. */
+static unsigned
+desktop_windows(
+	struct zwl_server *server,
+	unsigned desktop)
+{
+	struct zwl_client *client;
+	struct zwl_object *surface;
+	unsigned count;
+
+	/* Every live, mapped window with a role on that desktop. */
+	count = 0U;
+	for (client = server->clients; client != NULL; client = client->next) {
+		if (client->fatal)
+			continue;
+		for (surface = client->objects; surface != NULL; surface = surface->next) {
+			if (surface->kind != ZWL_SURFACE || surface->dead || !surface->mapped || surface->role == NULL || surface->cursor_role)
+				continue;
+			if (surface->desktop == desktop)
+				count++;
+		}
+	}
+
+	/* The count. */
+	return count;
 }

@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q480（ws035-p071 cleared。App Home の続き）
+Last finished Queue: q481（ws035-p065 cleared。仮想デスクトップ）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q480（2026-09-26）
+## 最新: q443〜q481（2026-09-26）
+
+[q481](queue-q481.md): ws035-p065 cleared。仮想デスクトップ 4 つ（窓はデスクトップごと、バーの絵・Ctrl+Alt+←/→・左右の端の swipe で横に移動）。
 
 [q480](queue-q480.md): ws035-p071 cleared。App Home のページング（drag・ホイール・キー・ドット）、起動した icon から窓が育つ、左上への drag で閉じる、Tab。
 

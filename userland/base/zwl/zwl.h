@@ -210,9 +210,10 @@ struct zwl_object {
 	/* A buffer's Vulkan image for window mode, and whether it can be the whole output. */
 	struct zwl_import *import;
 	unsigned scanout;
-	/* A surface's window: place, stacking (map order, lowest at the bottom) and fullscreen state. */
+	/* A surface's window: place, stacking (map order, lowest at the bottom), virtual desktop and fullscreen state. */
 	unsigned mapped;
 	uint64_t map_order;
+	unsigned desktop;
 	int32_t x;
 	int32_t y;
 	unsigned fullscreen;
@@ -425,6 +426,22 @@ struct zwl_server {
 	unsigned home_query_length;
 	int home_selected;
 	/*
+	 * The virtual desktops (ws035-p065): the one shown; a press at the
+	 * left or right edge that may become the swipe (where it started,
+	 * whether it has moved enough) and the swipe's offset in pixels; the
+	 * slide to a desktop (from and to as desktop positions, when it
+	 * started).
+	 */
+	unsigned desktop;
+	unsigned desktop_press;
+	unsigned desktop_dragging;
+	int32_t desktop_start_x;
+	int32_t desktop_offset;
+	unsigned desktop_moving;
+	float desktop_from;
+	float desktop_to;
+	uint64_t desktop_start_ms;
+	/*
 	 * App Home's pages (ws035-p071): the page shown; a press on Home that
 	 * may become a page drag (where it started, the application under it,
 	 * whether it has moved enough) and the drag's offset in pixels; the
@@ -517,6 +534,7 @@ void zwl_home_tick(struct zwl_server *server);
 int zwl_home_axis(struct zwl_server *server, int32_t vertical, int32_t horizontal);
 int zwl_home_launched(struct zwl_server *server, int32_t *rect);
 void zwl_glass_mapped(struct zwl_server *server, struct zwl_object *surface);
+int zwl_glass_key(struct zwl_server *server, uint32_t key, uint32_t state);
 uint32_t zwl_next_serial(struct zwl_server *server);
 int zwl_seat_bind(struct zwl_object *seat);
 int zwl_seat_request(struct zwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
