@@ -6,16 +6,20 @@
  */
 
 /*
- * Xzed's Wayland backend (WS069 p002, plan/ws069/design.md): the X screen
- * as one xdg-shell window of zwl (rootful, as Xephyr), in place of
- * /dev/graphics and /dev/input.
+ * Xzed's Wayland backend (WS069, plan/ws069/design.md): X windows as
+ * xdg-shell windows of zwl, in place of /dev/graphics and /dev/input.
  *
- * The screen Xzed composites is copied into one of two wl_shm buffers, the
- * one the compositor has released, and committed with the changed
- * rectangle as damage.  The window's pointer and keyboard events become
- * Xzed's pointer frames (absolute, in screen coordinates) and key events
- * (the evdev key code through Xzed's own keycode table).  The compositor
- * draws the pointer; X cursors are not shown.
+ * Rootful (p002), one window shows the whole X screen, as Xephyr does;
+ * rootless (p003), each top-level X window has a window of its own, which
+ * the compositor places and decorates, as Xwayland does.  A window's
+ * pixels are copied into one of its two wl_shm buffers, the one the
+ * compositor has released, and committed with the changed rectangle as
+ * damage.
+ *
+ * The pointer's events become Xzed's pointer frames in the X screen's
+ * coordinates (the window's local position plus its origin on the X
+ * screen), and the keyboard's evdev codes become Xzed's keycodes.  The
+ * compositor draws the pointer; X cursors are not shown.
  */
 
 #include "wayland.h"
@@ -34,7 +38,7 @@
 #include <wayland-client.h>
 #include <xdg-shell-client-protocol.h>
 
-/* The evdev codes of the pointer's buttons and the keys that change a keycode. */
+/* The evdev codes of the pointer's buttons and the key that toggles caps lock. */
 #define WAYLAND_BTN_LEFT	0x110U
 #define WAYLAND_BTN_RIGHT	0x111U
 #define WAYLAND_BTN_MIDDLE	0x112U
@@ -47,7 +51,7 @@
 #define WAYLAND_MODIFIERS	(XZED_INPUT_SHIFT_MASK | XZED_INPUT_CONTROL_MASK | XZED_INPUT_ALT_MASK)
 
 /*
- * One wl_shm buffer of the whole screen.
+ * One wl_shm buffer of a window.
  */
 struct wayland_buffer {
 	struct wl_buffer *buffer;
@@ -58,7 +62,37 @@ struct wayland_buffer {
 };
 
 /*
- * The backend: the connection, the window, its two buffers, and the input
+ * One window: an X window's xdg toplevel, its two buffers, and its origin
+ * on the X screen (for the pointer's coordinates).
+ */
+struct xzed_wayland_window {
+	/* The backend it belongs to, and the X window it shows. */
+	struct xzed_wayland *wayland;
+	uint32_t id;
+
+	/* The surface and its roles. */
+	struct wl_surface *surface;
+	struct xdg_surface *role;
+	struct xdg_toplevel *toplevel;
+	int configured;
+
+	/* The size of the buffers, their shared memory, and the buffers. */
+	unsigned width;
+	unsigned height;
+	void *memory;
+	size_t memory_size;
+	struct wayland_buffer buffers[2];
+
+	/* Where the window's top-left corner is on the X screen. */
+	int origin_x;
+	int origin_y;
+
+	/* The next window of the backend. */
+	struct xzed_wayland_window *next;
+};
+
+/*
+ * The backend: the connection, the globals, the windows, and the input
  * state that turns Wayland's events into Xzed's.
  */
 struct xzed_wayland {
@@ -72,28 +106,20 @@ struct xzed_wayland {
 	struct wl_pointer *pointer;
 	struct wl_keyboard *keyboard;
 
-	/* The window. */
-	struct wl_surface *surface;
-	struct xdg_surface *role;
-	struct xdg_toplevel *toplevel;
-	int configured;
-	int closed;
+	/* The windows open. */
+	struct xzed_wayland_window *windows;
 
-	/* The screen's size, the shared memory of the two buffers, and the buffers. */
-	unsigned width;
-	unsigned height;
-	void *memory;
-	size_t memory_size;
-	struct wayland_buffer buffers[2];
-
-	/* Xzed's input handlers. */
-	struct xzed_input_handlers handlers;
+	/* Xzed's callbacks. */
+	struct xzed_wayland_callbacks callbacks;
 	void *context;
 
-	/* The pointer's place, the buttons held (Xzed's bits), and the modifiers and caps lock. */
+	/* The window the pointer is in, where it is on the X screen, and the buttons held (Xzed's bits). */
+	struct xzed_wayland_window *pointer_window;
 	int pointer_x;
 	int pointer_y;
 	uint16_t buttons;
+
+	/* The modifiers held and caps lock. */
 	uint32_t modifiers;
 	int caps_lock;
 
@@ -101,7 +127,9 @@ struct xzed_wayland {
 	uint8_t keycodes[WAYLAND_KEYS];
 };
 
-static int wayland_buffers(struct xzed_wayland *wayland);
+static int wayland_buffers(struct xzed_wayland_window *window);
+static void wayland_buffers_free(struct xzed_wayland_window *window);
+static struct xzed_wayland_window *wayland_window_of(struct xzed_wayland *wayland, struct wl_surface *surface);
 static void wayland_pointer_frame(struct xzed_wayland *wayland, uint32_t time, int button, int pressed, uint16_t bit);
 static void wayland_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version);
 static void wayland_global_remove(void *data, struct wl_registry *registry, uint32_t name);
@@ -133,12 +161,12 @@ static const struct xdg_wm_base_listener wayland_shell_listener = {
 	wayland_ping
 };
 
-/* The window role's configure. */
+/* A window role's configure. */
 static const struct xdg_surface_listener wayland_surface_listener = {
 	wayland_configure
 };
 
-/* The toplevel's size and close request. */
+/* A toplevel's size and close request. */
 static const struct xdg_toplevel_listener wayland_toplevel_listener = {
 	wayland_toplevel_configure, wayland_toplevel_close
 };
@@ -167,33 +195,26 @@ static const struct wl_keyboard_listener wayland_keyboard_listener = {
 };
 
 /*
- * Connects to a Wayland compositor and opens the X screen's window of a
- * size.  Returns 0, or -1 with errno set.
+ * Connects to a Wayland compositor.  Returns 0, or -1 with errno set.
  */
 int
 xzed_wayland_open(
 	struct xzed_wayland **out,
 	const char *display,
-	unsigned width,
-	unsigned height,
-	const struct xzed_input_handlers *handlers,
+	const struct xzed_wayland_callbacks *callbacks,
 	void *context)
 {
 	struct xzed_wayland *wayland;
 	int status;
 
-	/* The backend, with Xzed's handlers. */
+	/* The backend, with Xzed's callbacks. */
 	*out = NULL;
 	wayland = calloc(1U, sizeof(*wayland));
 	if (wayland == NULL)
 		return -1;
 	*out = wayland;
-	wayland->width = width;
-	wayland->height = height;
-	wayland->handlers = *handlers;
+	wayland->callbacks = *callbacks;
 	wayland->context = context;
-	wayland->pointer_x = (int)width / 2;
-	wayland->pointer_y = (int)height / 2;
 
 	/* The pointer's callbacks. */
 	memset(&wayland_pointer_listener, 0, sizeof(wayland_pointer_listener));
@@ -203,12 +224,12 @@ xzed_wayland_open(
 	wayland_pointer_listener.button = wayland_pointer_button;
 	wayland_pointer_listener.axis = wayland_pointer_axis;
 
-	/* The connection and its globals. */
+	/* The connection. */
 	wayland->display = wl_display_connect(display);
 	if (wayland->display == NULL)
 		return -1;
 
-	/* The registry that announces them. */
+	/* The registry that announces the globals. */
 	wayland->registry = wl_display_get_registry(wayland->display);
 	if (wayland->registry == NULL)
 		return -1;
@@ -219,49 +240,13 @@ xzed_wayland_open(
 	if (status < 0)
 		return -1;
 
-	/* A window needs a compositor, shared memory and a shell. */
+	/* Windows need a compositor, shared memory and a shell. */
 	if (wayland->compositor == NULL || wayland->shm == NULL || wayland->shell == NULL) {
 		errno = EOPNOTSUPP;
 		return -1;
 	}
 
-	/* The surface as a toplevel window titled X11. */
-	wayland->surface = wl_compositor_create_surface(wayland->compositor);
-	if (wayland->surface == NULL)
-		return -1;
-
-	/* Its window role. */
-	wayland->role = xdg_wm_base_get_xdg_surface(wayland->shell, wayland->surface);
-	if (wayland->role == NULL)
-		return -1;
-
-	/* The role's configures and the toplevel's events are heard. */
-	(void)xdg_surface_add_listener(wayland->role, &wayland_surface_listener, wayland);
-	wayland->toplevel = xdg_surface_get_toplevel(wayland->role);
-	if (wayland->toplevel == NULL)
-		return -1;
-
-	/* The title, the application's identity, and the first configure. */
-	(void)xdg_toplevel_add_listener(wayland->toplevel, &wayland_toplevel_listener, wayland);
-	xdg_toplevel_set_title(wayland->toplevel, "X11");
-	xdg_toplevel_set_app_id(wayland->toplevel, "Xzed");
-	wl_surface_commit(wayland->surface);
-	status = wl_display_roundtrip(wayland->display);
-	if (status < 0)
-		return -1;
-
-	/* A compositor that did not configure the window takes no buffers. */
-	if (!wayland->configured) {
-		errno = EPROTO;
-		return -1;
-	}
-
-	/* The two buffers of the screen. */
-	status = wayland_buffers(wayland);
-	if (status != 0)
-		return -1;
-
-	/* Succeeded: the window can show the screen. */
+	/* Succeeded: windows can be opened. */
 	return 0;
 }
 
@@ -281,8 +266,8 @@ xzed_wayland_fd(
 
 /*
  * Reads the compositor's events when the descriptor is readable, and runs
- * them (Xzed's input handlers among them).  Returns 0, or -1 when the
- * connection is broken.
+ * them (Xzed's callbacks among them).  Returns 0, or -1 when the connection
+ * is broken.
  */
 int
 xzed_wayland_dispatch(
@@ -309,97 +294,27 @@ xzed_wayland_dispatch(
 }
 
 /*
- * Shows the screen in the window: the whole screen is copied into a free
- * buffer, and the changed rectangle is the damage.  Returns 0 when it was
- * committed, or 1 when both buffers are still the compositor's (the caller
- * tries again later).
- */
-int
-xzed_wayland_present(
-	struct xzed_wayland *wayland,
-	const uint32_t *screen,
-	int x,
-	int y,
-	int width,
-	int height)
-{
-	struct wayland_buffer *free_buffer;
-	unsigned index;
-
-	/* The first buffer the compositor has given back. */
-	free_buffer = NULL;
-	for (index = 0U; index < 2U; index++) {
-		if (!wayland->buffers[index].busy) {
-			free_buffer = &wayland->buffers[index];
-			break;
-		}
-	}
-
-	/* Both are still held: the frame waits. */
-	if (free_buffer == NULL)
-		return 1;
-
-	/* The whole screen, so that the buffer is complete whatever it showed before. */
-	memcpy(free_buffer->pixels, screen, (size_t)wayland->width * wayland->height * 4U);
-	free_buffer->busy = 1;
-
-	/* Attached, with the change as damage, and committed. */
-	wl_surface_attach(wayland->surface, free_buffer->buffer, 0, 0);
-	wl_surface_damage(wayland->surface, x, y, width, height);
-	wl_surface_commit(wayland->surface);
-	(void)wl_display_flush(wayland->display);
-
-	/* Succeeded: the frame is the compositor's. */
-	return 0;
-}
-
-/*
- * Tells whether the compositor asked the window to close.
- */
-int
-xzed_wayland_closed(
-	const struct xzed_wayland *wayland)
-{
-	/* The close event sets it. */
-	return wayland->closed;
-}
-
-/*
- * Destroys the window and disconnects.
+ * Closes every window and disconnects.
  */
 void
 xzed_wayland_close(
 	struct xzed_wayland *wayland)
 {
-	unsigned index;
-
 	/* Nothing was opened. */
 	if (wayland == NULL)
 		return;
 
-	/* The buffers and their memory. */
-	for (index = 0U; index < 2U; index++) {
-		if (wayland->buffers[index].buffer != NULL)
-			wl_buffer_destroy(wayland->buffers[index].buffer);
-	}
+	/* The windows. */
+	while (wayland->windows != NULL)
+		xzed_wayland_window_close(wayland->windows);
 
-	/* The shared memory under them. */
-	if (wayland->memory != NULL)
-		(void)munmap(wayland->memory, wayland->memory_size);
-
-	/* The input devices, the window, the globals, the connection. */
+	/* The input devices, the globals, the connection. */
 	if (wayland->keyboard != NULL)
 		wl_keyboard_destroy(wayland->keyboard);
 	if (wayland->pointer != NULL)
 		wl_pointer_destroy(wayland->pointer);
 	if (wayland->seat != NULL)
 		wl_seat_destroy(wayland->seat);
-	if (wayland->toplevel != NULL)
-		xdg_toplevel_destroy(wayland->toplevel);
-	if (wayland->role != NULL)
-		xdg_surface_destroy(wayland->role);
-	if (wayland->surface != NULL)
-		wl_surface_destroy(wayland->surface);
 	if (wayland->shell != NULL)
 		xdg_wm_base_destroy(wayland->shell);
 	if (wayland->shm != NULL)
@@ -415,10 +330,215 @@ xzed_wayland_close(
 	free(wayland);
 }
 
-/* Makes the two screen-sized XRGB8888 buffers in one shared-memory pool. */
+/*
+ * Opens a window for an X window: an xdg toplevel with a title and two
+ * buffers of a size.  Returns NULL when it cannot be made.
+ */
+struct xzed_wayland_window *
+xzed_wayland_window_open(
+	struct xzed_wayland *wayland,
+	uint32_t id,
+	const char *title,
+	unsigned width,
+	unsigned height)
+{
+	struct xzed_wayland_window *window;
+	int status;
+
+	/* The window, at the head of the backend's list. */
+	window = calloc(1U, sizeof(*window));
+	if (window == NULL)
+		return NULL;
+	window->wayland = wayland;
+	window->id = id;
+	window->width = width;
+	window->height = height;
+	window->next = wayland->windows;
+	wayland->windows = window;
+
+	/* The surface. */
+	window->surface = wl_compositor_create_surface(wayland->compositor);
+	if (window->surface == NULL) {
+		xzed_wayland_window_close(window);
+		return NULL;
+	}
+
+	/* Its window role. */
+	window->role = xdg_wm_base_get_xdg_surface(wayland->shell, window->surface);
+	if (window->role == NULL) {
+		xzed_wayland_window_close(window);
+		return NULL;
+	}
+
+	/* The role's configures and the toplevel's events are heard. */
+	(void)xdg_surface_add_listener(window->role, &wayland_surface_listener, window);
+	window->toplevel = xdg_surface_get_toplevel(window->role);
+	if (window->toplevel == NULL) {
+		xzed_wayland_window_close(window);
+		return NULL;
+	}
+
+	/* The title, the application's identity, and the first configure. */
+	(void)xdg_toplevel_add_listener(window->toplevel, &wayland_toplevel_listener, window);
+	xdg_toplevel_set_title(window->toplevel, title);
+	xdg_toplevel_set_app_id(window->toplevel, "Xzed");
+	wl_surface_commit(window->surface);
+	status = wl_display_roundtrip(wayland->display);
+	if (status < 0 || !window->configured) {
+		xzed_wayland_window_close(window);
+		return NULL;
+	}
+
+	/* The two buffers. */
+	status = wayland_buffers(window);
+	if (status != 0) {
+		xzed_wayland_window_close(window);
+		return NULL;
+	}
+
+	/* Succeeded: the window can show the X window. */
+	return window;
+}
+
+/*
+ * Shows a window's pixels (rows of the window's width): all of them are
+ * copied into a free buffer, and the changed rectangle is the damage.
+ * Returns 0 when it was committed, or 1 when both buffers are still the
+ * compositor's (the caller tries again later).
+ */
+int
+xzed_wayland_window_present(
+	struct xzed_wayland_window *window,
+	const uint32_t *pixels,
+	int x,
+	int y,
+	int width,
+	int height)
+{
+	struct wayland_buffer *free_buffer;
+	unsigned index;
+
+	/* The first buffer the compositor has given back. */
+	free_buffer = NULL;
+	for (index = 0U; index < 2U; index++) {
+		if (!window->buffers[index].busy) {
+			free_buffer = &window->buffers[index];
+			break;
+		}
+	}
+
+	/* Both are still held: the frame waits. */
+	if (free_buffer == NULL)
+		return 1;
+
+	/* All the pixels, so that the buffer is complete whatever it showed before. */
+	memcpy(free_buffer->pixels, pixels, (size_t)window->width * window->height * 4U);
+	free_buffer->busy = 1;
+
+	/* Attached, with the change as damage, and committed. */
+	wl_surface_attach(window->surface, free_buffer->buffer, 0, 0);
+	wl_surface_damage(window->surface, x, y, width, height);
+	wl_surface_commit(window->surface);
+	(void)wl_display_flush(window->wayland->display);
+
+	/* Succeeded: the frame is the compositor's. */
+	return 0;
+}
+
+/*
+ * Makes a window's buffers again at a new size.  Returns 0, or -1.
+ */
+int
+xzed_wayland_window_resize(
+	struct xzed_wayland_window *window,
+	unsigned width,
+	unsigned height)
+{
+	int status;
+
+	/* The same size keeps the buffers. */
+	if (width == window->width && height == window->height)
+		return 0;
+
+	/* The old buffers go, and new ones of the size come. */
+	wayland_buffers_free(window);
+	window->width = width;
+	window->height = height;
+	status = wayland_buffers(window);
+	if (status != 0)
+		return -1;
+
+	/* Succeeded: the next frame is at the new size. */
+	return 0;
+}
+
+/*
+ * Tells a window where its X window's top-left corner is on the X screen.
+ */
+void
+xzed_wayland_window_move(
+	struct xzed_wayland_window *window,
+	int x,
+	int y)
+{
+	/* The pointer's frames add it. */
+	window->origin_x = x;
+	window->origin_y = y;
+}
+
+/*
+ * Gives a window a new title.
+ */
+void
+xzed_wayland_window_title(
+	struct xzed_wayland_window *window,
+	const char *title)
+{
+	/* The compositor shows it on the title bar. */
+	xdg_toplevel_set_title(window->toplevel, title);
+}
+
+/*
+ * Closes a window.
+ */
+void
+xzed_wayland_window_close(
+	struct xzed_wayland_window *window)
+{
+	struct xzed_wayland_window **link;
+	struct xzed_wayland *wayland;
+
+	/* It leaves the backend's list. */
+	wayland = window->wayland;
+	for (link = &wayland->windows; *link != NULL; link = &(*link)->next) {
+		if (*link == window) {
+			*link = window->next;
+			break;
+		}
+	}
+
+	/* The pointer is no longer in it. */
+	if (wayland->pointer_window == window)
+		wayland->pointer_window = NULL;
+
+	/* Its buffers, its roles, its surface. */
+	wayland_buffers_free(window);
+	if (window->toplevel != NULL)
+		xdg_toplevel_destroy(window->toplevel);
+	if (window->role != NULL)
+		xdg_surface_destroy(window->role);
+	if (window->surface != NULL)
+		wl_surface_destroy(window->surface);
+	(void)wl_display_flush(wayland->display);
+
+	/* The window itself. */
+	free(window);
+}
+
+/* Makes a window's two XRGB8888 buffers in one shared-memory pool. */
 static int
 wayland_buffers(
-	struct xzed_wayland *wayland)
+	struct xzed_wayland_window *window)
 {
 	struct wl_shm_pool *pool;
 	char name[64];
@@ -428,49 +548,89 @@ wayland_buffers(
 	int error;
 
 	/* Anonymous shared memory for both buffers. */
-	bytes = (size_t)wayland->width * wayland->height * 4U;
-	wayland->memory_size = bytes * 2U;
-	snprintf(name, sizeof(name), "/xzed-%ld", (long)getpid());
+	bytes = (size_t)window->width * window->height * 4U;
+	window->memory_size = bytes * 2U;
+	snprintf(name, sizeof(name), "/xzed-%ld-%lu", (long)getpid(), (unsigned long)window->id);
 	descriptor = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
 	if (descriptor < 0)
 		return -1;
 	(void)shm_unlink(name);
 
-	/* Its size and mapping. */
-	error = ftruncate(descriptor, (off_t)wayland->memory_size);
+	/* Its size. */
+	error = ftruncate(descriptor, (off_t)window->memory_size);
 	if (error != 0) {
 		close(descriptor);
 		return -1;
 	}
 
 	/* Mapped for Xzed's writes. */
-	wayland->memory = mmap(NULL, wayland->memory_size, PROT_READ | PROT_WRITE, MAP_SHARED, descriptor, 0);
-	if (wayland->memory == MAP_FAILED) {
-		wayland->memory = NULL;
+	window->memory = mmap(NULL, window->memory_size, PROT_READ | PROT_WRITE, MAP_SHARED, descriptor, 0);
+	if (window->memory == MAP_FAILED) {
+		window->memory = NULL;
 		close(descriptor);
 		return -1;
 	}
 
 	/* The pool the compositor maps, and a buffer of each half. */
-	pool = wl_shm_create_pool(wayland->shm, descriptor, (int32_t)wayland->memory_size);
+	pool = wl_shm_create_pool(window->wayland->shm, descriptor, (int32_t)window->memory_size);
 	close(descriptor);
 	if (pool == NULL)
 		return -1;
 	for (index = 0U; index < 2U; index++) {
-		wayland->buffers[index].pixels = (uint32_t *)((unsigned char *)wayland->memory + bytes * index);
-		wayland->buffers[index].buffer = wl_shm_pool_create_buffer(pool, (int32_t)(bytes * index), (int32_t)wayland->width, (int32_t)wayland->height, (int32_t)wayland->width * 4, WL_SHM_FORMAT_XRGB8888);
-		if (wayland->buffers[index].buffer == NULL) {
+		window->buffers[index].pixels = (uint32_t *)((unsigned char *)window->memory + bytes * index);
+		window->buffers[index].busy = 0;
+		window->buffers[index].buffer = wl_shm_pool_create_buffer(pool, (int32_t)(bytes * index), (int32_t)window->width, (int32_t)window->height, (int32_t)window->width * 4, WL_SHM_FORMAT_XRGB8888);
+		if (window->buffers[index].buffer == NULL) {
 			wl_shm_pool_destroy(pool);
 			return -1;
 		}
 
 		/* The release says the compositor is done with it. */
-		(void)wl_buffer_add_listener(wayland->buffers[index].buffer, &wayland_buffer_listener, &wayland->buffers[index]);
+		(void)wl_buffer_add_listener(window->buffers[index].buffer, &wayland_buffer_listener, &window->buffers[index]);
 	}
 
 	/* Succeeded: the pool lives on in its buffers. */
 	wl_shm_pool_destroy(pool);
 	return 0;
+}
+
+/* Releases a window's buffers and their memory. */
+static void
+wayland_buffers_free(
+	struct xzed_wayland_window *window)
+{
+	unsigned index;
+
+	/* Each buffer. */
+	for (index = 0U; index < 2U; index++) {
+		if (window->buffers[index].buffer != NULL)
+			wl_buffer_destroy(window->buffers[index].buffer);
+		window->buffers[index].buffer = NULL;
+		window->buffers[index].busy = 0;
+	}
+
+	/* The shared memory under them. */
+	if (window->memory != NULL)
+		(void)munmap(window->memory, window->memory_size);
+	window->memory = NULL;
+}
+
+/* Returns the window of a surface, or NULL. */
+static struct xzed_wayland_window *
+wayland_window_of(
+	struct xzed_wayland *wayland,
+	struct wl_surface *surface)
+{
+	struct xzed_wayland_window *window;
+
+	/* One of the backend's. */
+	for (window = wayland->windows; window != NULL; window = window->next) {
+		if (window->surface == surface)
+			return window;
+	}
+
+	/* Not one of them. */
+	return NULL;
 }
 
 /* Gives Xzed one pointer frame: the pointer's place, and a button's change when there is one. */
@@ -484,7 +644,7 @@ wayland_pointer_frame(
 {
 	struct xzed_input_pointer_frame frame;
 
-	/* Where the pointer is, in the screen's coordinates. */
+	/* Where the pointer is, in the X screen's coordinates. */
 	memset(&frame, 0, sizeof(frame));
 	frame.absolute = 1;
 	frame.absolute_x = wayland->pointer_x;
@@ -509,7 +669,7 @@ wayland_pointer_frame(
 
 	/* Xzed hears it. */
 	frame.buttons_after = wayland->buttons;
-	wayland->handlers.pointer(wayland->context, &frame);
+	wayland->callbacks.pointer(wayland->context, &frame);
 }
 
 /* Binds the compositor, shared memory, the shell and the seat. */
@@ -551,7 +711,7 @@ wayland_global(
 	}
 }
 
-/* A global going away does not matter to a window that is up. */
+/* A global going away does not matter to windows that are up. */
 static void
 wayland_global_remove(
 	void *data,
@@ -583,15 +743,15 @@ wayland_configure(
 	struct xdg_surface *surface,
 	uint32_t serial)
 {
-	struct xzed_wayland *wayland;
+	struct xzed_wayland_window *window;
 
 	/* The window may take buffers from here on. */
-	wayland = data;
+	window = data;
 	xdg_surface_ack_configure(surface, serial);
-	wayland->configured = 1;
+	window->configured = 1;
 }
 
-/* The X screen keeps its size whatever the compositor asks (rootful). */
+/* Tells Xzed the size the compositor gives a window (zero keeps the window's own). */
 static void
 wayland_toplevel_configure(
 	void *data,
@@ -600,26 +760,33 @@ wayland_toplevel_configure(
 	int32_t height,
 	struct wl_array *states)
 {
-	/* The size stays the screen's. */
-	(void)data;
+	struct xzed_wayland_window *window;
+
+	/* A size that is not given is the window's own. */
 	(void)toplevel;
-	(void)width;
-	(void)height;
 	(void)states;
+	window = data;
+	if (width <= 0 || height <= 0)
+		return;
+
+	/* A size that differs goes to Xzed, which resizes the X window and then this one. */
+	if ((unsigned)width == window->width && (unsigned)height == window->height)
+		return;
+	window->wayland->callbacks.configure(window->wayland->context, window->id, width, height);
 }
 
-/* The compositor asks the window to close: Xzed ends. */
+/* The compositor asks a window to close: Xzed decides what that means. */
 static void
 wayland_toplevel_close(
 	void *data,
 	struct xdg_toplevel *toplevel)
 {
-	struct xzed_wayland *wayland;
+	struct xzed_wayland_window *window;
 
-	/* Xzed's loop sees it. */
+	/* Xzed hears it. */
 	(void)toplevel;
-	wayland = data;
-	wayland->closed = 1;
+	window = data;
+	window->wayland->callbacks.close(window->wayland->context, window->id);
 }
 
 /* The compositor has given a buffer back. */
@@ -674,7 +841,7 @@ wayland_seat_name(
 	(void)name;
 }
 
-/* The pointer comes into the window: Xzed's pointer moves there. */
+/* The pointer comes into a window: Xzed hears which, and the pointer moves there. */
 static void
 wayland_pointer_enter(
 	void *data,
@@ -685,17 +852,26 @@ wayland_pointer_enter(
 	wl_fixed_t y)
 {
 	struct xzed_wayland *wayland;
+	struct xzed_wayland_window *window;
 
 	/* The compositor draws its own pointer over the window. */
-	(void)surface;
 	wayland = data;
 	wl_pointer_set_cursor(pointer, serial, NULL, 0, 0);
-	wayland->pointer_x = wl_fixed_to_int(x);
-	wayland->pointer_y = wl_fixed_to_int(y);
+
+	/* A surface that is not one of the windows is ignored. */
+	window = wayland_window_of(wayland, surface);
+	wayland->pointer_window = window;
+	if (window == NULL)
+		return;
+
+	/* Xzed brings the X window up, and the pointer is on the X screen at the window's place. */
+	wayland->callbacks.enter(wayland->context, window->id, 0);
+	wayland->pointer_x = window->origin_x + wl_fixed_to_int(x);
+	wayland->pointer_y = window->origin_y + wl_fixed_to_int(y);
 	wayland_pointer_frame(wayland, 0U, 0, 0, 0U);
 }
 
-/* The pointer leaves the window: nothing changes in X. */
+/* The pointer leaves a window. */
 static void
 wayland_pointer_leave(
 	void *data,
@@ -703,14 +879,17 @@ wayland_pointer_leave(
 	uint32_t serial,
 	struct wl_surface *surface)
 {
-	/* Nothing to do. */
-	(void)data;
+	struct xzed_wayland *wayland;
+
+	/* The pointer is in none of the windows. */
 	(void)pointer;
 	(void)serial;
 	(void)surface;
+	wayland = data;
+	wayland->pointer_window = NULL;
 }
 
-/* The pointer moves within the window. */
+/* The pointer moves within a window. */
 static void
 wayland_pointer_motion(
 	void *data,
@@ -720,12 +899,18 @@ wayland_pointer_motion(
 	wl_fixed_t y)
 {
 	struct xzed_wayland *wayland;
+	struct xzed_wayland_window *window;
 
-	/* Its place in the screen's coordinates. */
+	/* Only within a window. */
 	(void)pointer;
 	wayland = data;
-	wayland->pointer_x = wl_fixed_to_int(x);
-	wayland->pointer_y = wl_fixed_to_int(y);
+	window = wayland->pointer_window;
+	if (window == NULL)
+		return;
+
+	/* Its place on the X screen. */
+	wayland->pointer_x = window->origin_x + wl_fixed_to_int(x);
+	wayland->pointer_y = window->origin_y + wl_fixed_to_int(y);
 	wayland_pointer_frame(wayland, time, 0, 0, 0U);
 }
 
@@ -799,7 +984,7 @@ wayland_keyboard_keymap(
 		(void)close(fd);
 }
 
-/* Focus comes: nothing is held as far as X is concerned. */
+/* Focus comes to a window: Xzed gives the X window the keyboard. */
 static void
 wayland_keyboard_enter(
 	void *data,
@@ -808,12 +993,19 @@ wayland_keyboard_enter(
 	struct wl_surface *surface,
 	struct wl_array *keys)
 {
+	struct xzed_wayland *wayland;
+	struct xzed_wayland_window *window;
+
 	/* Keys held when focus came are not typed. */
-	(void)data;
 	(void)keyboard;
 	(void)serial;
-	(void)surface;
 	(void)keys;
+	wayland = data;
+
+	/* The X window of the surface gets the focus. */
+	window = wayland_window_of(wayland, surface);
+	if (window != NULL)
+		wayland->callbacks.enter(wayland->context, window->id, 1);
 }
 
 /* Focus leaves: the modifiers are forgotten. */
@@ -867,7 +1059,7 @@ wayland_keyboard_key(
 		keycode = wayland->keycodes[key];
 		wayland->keycodes[key] = 0U;
 		if (keycode != 0U)
-			wayland->handlers.key(wayland->context, keycode, 0, time, (uint16_t)(wayland->modifiers & WAYLAND_MODIFIERS));
+			wayland->callbacks.key(wayland->context, keycode, 0, time, (uint16_t)(wayland->modifiers & WAYLAND_MODIFIERS));
 		return;
 	}
 
@@ -879,7 +1071,7 @@ wayland_keyboard_key(
 
 	/* Succeeded: Xzed hears the press. */
 	wayland->keycodes[key] = keycode;
-	wayland->handlers.key(wayland->context, keycode, 1, time, (uint16_t)(wayland->modifiers & WAYLAND_MODIFIERS));
+	wayland->callbacks.key(wayland->context, keycode, 1, time, (uint16_t)(wayland->modifiers & WAYLAND_MODIFIERS));
 }
 
 /* Keeps the modifiers held (the same bits as Xzed's). */
@@ -915,16 +1107,12 @@ int
 xzed_wayland_open(
 	struct xzed_wayland **out,
 	const char *display,
-	unsigned width,
-	unsigned height,
-	const struct xzed_input_handlers *handlers,
+	const struct xzed_wayland_callbacks *callbacks,
 	void *context)
 {
 	/* Nothing can be opened. */
 	(void)display;
-	(void)width;
-	(void)height;
-	(void)handlers;
+	(void)callbacks;
 	(void)context;
 	*out = NULL;
 	errno = ENOTSUP;
@@ -958,40 +1146,6 @@ xzed_wayland_dispatch(
 }
 
 /*
- * Nothing is shown without the backend.
- */
-int
-xzed_wayland_present(
-	struct xzed_wayland *wayland,
-	const uint32_t *screen,
-	int x,
-	int y,
-	int width,
-	int height)
-{
-	/* Always busy. */
-	(void)wayland;
-	(void)screen;
-	(void)x;
-	(void)y;
-	(void)width;
-	(void)height;
-	return 1;
-}
-
-/*
- * No window is closed without the backend.
- */
-int
-xzed_wayland_closed(
-	const struct xzed_wayland *wayland)
-{
-	/* Never. */
-	(void)wayland;
-	return 0;
-}
-
-/*
  * Nothing is released without the backend.
  */
 void
@@ -1000,6 +1154,103 @@ xzed_wayland_close(
 {
 	/* Nothing to release. */
 	(void)wayland;
+}
+
+/*
+ * No window opens without the backend.
+ */
+struct xzed_wayland_window *
+xzed_wayland_window_open(
+	struct xzed_wayland *wayland,
+	uint32_t id,
+	const char *title,
+	unsigned width,
+	unsigned height)
+{
+	/* None. */
+	(void)wayland;
+	(void)id;
+	(void)title;
+	(void)width;
+	(void)height;
+	return NULL;
+}
+
+/*
+ * Nothing is shown without the backend.
+ */
+int
+xzed_wayland_window_present(
+	struct xzed_wayland_window *window,
+	const uint32_t *pixels,
+	int x,
+	int y,
+	int width,
+	int height)
+{
+	/* Always busy. */
+	(void)window;
+	(void)pixels;
+	(void)x;
+	(void)y;
+	(void)width;
+	(void)height;
+	return 1;
+}
+
+/*
+ * Nothing is resized without the backend.
+ */
+int
+xzed_wayland_window_resize(
+	struct xzed_wayland_window *window,
+	unsigned width,
+	unsigned height)
+{
+	/* Nothing. */
+	(void)window;
+	(void)width;
+	(void)height;
+	return -1;
+}
+
+/*
+ * Nothing is moved without the backend.
+ */
+void
+xzed_wayland_window_move(
+	struct xzed_wayland_window *window,
+	int x,
+	int y)
+{
+	/* Nothing. */
+	(void)window;
+	(void)x;
+	(void)y;
+}
+
+/*
+ * Nothing is titled without the backend.
+ */
+void
+xzed_wayland_window_title(
+	struct xzed_wayland_window *window,
+	const char *title)
+{
+	/* Nothing. */
+	(void)window;
+	(void)title;
+}
+
+/*
+ * Nothing is closed without the backend.
+ */
+void
+xzed_wayland_window_close(
+	struct xzed_wayland_window *window)
+{
+	/* Nothing. */
+	(void)window;
 }
 
 #endif

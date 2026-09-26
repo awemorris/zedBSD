@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q473（ws069-p002 cleared。Xzed の rootful の Wayland backend）
+Last finished Queue: q474（ws069-p003 cleared。Xzed の rootless）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q473（2026-09-26）
+## 最新: q443〜q474（2026-09-26）
+
+[q474](queue-q474.md): ws069-p003 cleared。Xzed の rootless（X の top-level ごとに zwl の窓、top-level ごとの合成、enter で raise と focus、configure で resize、close で client を切る）。libX11 は閉じた接続で exit。Venus で X の zterm が Wiseman の窓になり、ドッキングで resize、× で終了。
 
 [q473](queue-q473.md): ws069-p002 cleared。Xzed の Wayland backend（rootful: X の screen を zwl の 1 つの窓に、wl_shm、pointer・keyboard、libtruetype の glyph）。Venus の zwl で X の zterm に打った command の出力が見える。
 

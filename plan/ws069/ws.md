@@ -8,8 +8,8 @@ Primary Milestone: MG006
 Related Milestones: MG002
 Objectives: O1, O2
 Parent: [Master](../master.md)
-Queue: q474
-Resume point: p003（rootless）
+Queue: none
+Resume point: p004（GLX）。WS068 の GLES（方式はユーザーの判断待ち）の後
 <!-- awesome-plan-current:end -->
 
 ## 目標
@@ -45,6 +45,6 @@ zdesktop（zwl、Wiseman Mode）の上で X11 の app（zterm・zshell 等、外
 | --- | --- | --- | --- |
 | [ws069-p001](phase001/phase.md) | 設計（[design.md](design.md)） | cleared（q472-i01、2026-09-26） | — |
 | [ws069-p002](phase002/phase.md) | rootful の Wayland backend（窓・wl_shm・入力・libtruetype の glyph） | cleared（q473-i01、2026-09-26。Venus の zwl で zterm） | p001 |
-| [ws069-p003](phase003/phase.md) | rootless（X の top-level ごとの Wayland の窓） | in-progress（q474-i01） | p002 |
+| [ws069-p003](phase003/phase.md) | rootless（X の top-level ごとの Wayland の窓） | cleared（q474-i01、2026-09-26。Venus で zterm の窓） | p002 |
 | ws069-p004 | GLX 拡張と libGL（EGL/GLES の上） | planning | p003、WS068-p003 以降 |
 | ws069-p005 | i915 実機、規約の全文との照合と回帰（最後） | planning | 全 Phase |

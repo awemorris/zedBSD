@@ -25,6 +25,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <uapi/graphics.h>
 
@@ -118,6 +119,17 @@ struct window {
 	uint32_t *pixels;
 	char name[64];
 	char icon_path[160];
+	/*
+	 * Rootless (WS069 p003), a mapped top-level window's Wayland window,
+	 * the size and title it was last given, whether it must be drawn
+	 * whole, and the window with its children composited.
+	 */
+	struct xzed_wayland_window *surface;
+	uint16_t surface_width;
+	uint16_t surface_height;
+	int surface_fresh;
+	char surface_title[64];
+	uint32_t *composite;
 };
 
 struct graphics_context {
@@ -146,6 +158,12 @@ struct server {
 	struct xzed_input *input;
 	/* The Wayland backend (WS069); NULL when the screen is /dev/graphics. */
 	struct xzed_wayland *wayland;
+	/* Rootful, the one window of the whole screen; rootless (each top-level its own window), NULL. */
+	struct xzed_wayland_window *screen_window;
+	int rootless;
+	/* Rootless, the top-level windows the compositor asked to close, handled after its events. */
+	uint32_t closing[MAX_WINDOWS];
+	unsigned closing_count;
 	struct graphics_mode mode;
 	struct client clients[MAX_CLIENTS];
 	struct window windows[MAX_WINDOWS];
@@ -188,8 +206,15 @@ static volatile int stopped;
 extern char **environ;
 
 static int parse_size(const char *text, unsigned *width, unsigned *height);
-static int initialize(struct server *s, unsigned preferred_width, unsigned preferred_height, unsigned preferred_depth, int wayland);
-static int initialize_wayland(struct server *s, unsigned width, unsigned height);
+static int initialize(struct server *s, unsigned preferred_width, unsigned preferred_height, unsigned preferred_depth, int wayland, int rootless);
+static int initialize_wayland(struct server *s, unsigned width, unsigned height, int rootless);
+static void present_rootless(struct server *s, int x, int y, int width, int height);
+static void rootless_track(struct server *s, struct window *w);
+static void rootless_compose(struct server *s, struct window *top, int x, int y, int width, int height);
+static void rootless_closing(struct server *s);
+static void wayland_enter(void *context, uint32_t window, int keyboard);
+static void wayland_configure(void *context, uint32_t window, int width, int height);
+static void wayland_close(void *context, uint32_t window);
 static int initialize_graphics(struct server *s, unsigned preferred_width, unsigned preferred_height, unsigned preferred_depth);
 static int choose_mode(int fd, unsigned preferred_width, unsigned preferred_height, unsigned preferred_depth, struct graphics_mode *chosen);
 static uint32_t *window_pixels_alloc(uint16_t width, uint16_t height, uint32_t color);
@@ -262,7 +287,9 @@ main(
 	unsigned i, count, input_base, input_count;
 	int arg;
 	int wayland;
+	int rootless;
 	int match;
+	pid_t reaped;
 	int failed;
 	unsigned preferred_width, preferred_height, preferred_depth;
 
@@ -272,7 +299,17 @@ main(
 	preferred_height = 0;
 	preferred_depth = 24;
 	wayland = 0;
+	rootless = 0;
 	while (arg < argc) {
+		/* --rootless gives each top-level X window a window of the compositor of its own (WS069). */
+		match = strcmp(argv[arg], "--rootless");
+		if (match == 0) {
+			wayland = 1;
+			rootless = 1;
+			arg++;
+			continue;
+		}
+
 		/* --wayland shows the screen as a window of the Wayland compositor (WS069). */
 		match = strcmp(argv[arg], "--wayland");
 		if (match == 0) {
@@ -313,7 +350,7 @@ main(
 				continue;
 			}
 		}
-		fprintf(stderr, "usage: Xzed [:0] [--wayland] [--size WIDTHxHEIGHT] "
+		fprintf(stderr, "usage: Xzed [:0] [--wayland] [--rootless] [--size WIDTHxHEIGHT] "
 				"[--depth 4|8|24|32] "
 				"[-- command [argument ...]]\n");
 
@@ -325,7 +362,7 @@ main(
 
 	/* Handles the initialize condition. */
 	if (initialize(&s, preferred_width, preferred_height,
-		       preferred_depth, wayland)) {
+		       preferred_depth, wayland, rootless)) {
 		fprintf(stderr, "Xzed: %s\n", strerror(errno));
 		cleanup(&s);
 
@@ -427,7 +464,7 @@ main(
 		/* The compositor's events, or the devices'; a broken connection or a closed window ends Xzed. */
 		if (s.wayland != NULL) {
 			failed = xzed_wayland_dispatch(s.wayland, (p[input_base].revents & POLLIN) != 0);
-			failed |= xzed_wayland_closed(s.wayland);
+			rootless_closing(&s);
 		} else {
 			failed = xzed_input_dispatch(s.input, p + input_base, input_count);
 		}
@@ -438,6 +475,11 @@ main(
 
 		/* A pointer motion left pending goes out. */
 		finish_pointer_input(&s);
+
+		/* The command Xzed started, once it has ended, is collected (it is not left a zombie). */
+		do {
+			reaped = waitpid(-1, NULL, WNOHANG);
+		} while (reaped > 0);
 
 		/* Process each element required by the operation. */
 		for (i = 0; i < MAX_CLIENTS; i++) {
@@ -486,7 +528,8 @@ initialize(
 	unsigned preferred_width,
 	unsigned preferred_height,
 	unsigned preferred_depth,
-	int wayland)
+	int wayland,
+	int rootless)
 {
 	struct sockaddr_un a;
 	const struct xzed_input_handlers input_handlers = {input_key,
@@ -504,7 +547,7 @@ initialize(
 
 	/* The screen: a window of the Wayland compositor (WS069), or /dev/graphics. */
 	if (wayland) {
-		status = initialize_wayland(s, preferred_width, preferred_height);
+		status = initialize_wayland(s, preferred_width, preferred_height, rootless);
 	} else {
 		status = initialize_graphics(s, preferred_width, preferred_height, preferred_depth);
 	}
@@ -632,9 +675,12 @@ static int
 initialize_wayland(
 	struct server *s,
 	unsigned width,
-	unsigned height)
+	unsigned height,
+	int rootless)
 {
-	const struct xzed_input_handlers handlers = {input_key, input_pointer};
+	const struct xzed_wayland_callbacks callbacks = {
+		input_key, input_pointer, wayland_enter, wayland_configure, wayland_close
+	};
 	int error;
 
 	/* The screen's size. */
@@ -646,19 +692,294 @@ initialize_wayland(
 	/* The screen is that size. */
 	s->mode.width = width;
 	s->mode.height = height;
+	s->rootless = rootless;
 
 	/* The font; without one the text is not drawn. */
 	error = xzed_glyphs_open(XZED_WAYLAND_FONT);
 	if (error != 0)
 		fprintf(stderr, "Xzed: %s: %s (no text)\n", XZED_WAYLAND_FONT, strerror(error));
 
-	/* The window, with Xzed's input handlers. */
-	error = xzed_wayland_open(&s->wayland, NULL, width, height, &handlers, s);
+	/* The connection, with Xzed's callbacks. */
+	error = xzed_wayland_open(&s->wayland, NULL, &callbacks, s);
 	if (error != 0)
+		return -1;
+
+	/* Rootless, the windows come with the top-level X windows. */
+	if (rootless)
+		return 0;
+
+	/* Rootful, one window shows the whole screen. */
+	s->screen_window = xzed_wayland_window_open(s->wayland, ROOT_XID, "X11", width, height);
+	if (s->screen_window == NULL)
 		return -1;
 
 	/* Succeeded: the screen is the window. */
 	return 0;
+}
+
+/*
+ * Shows the top-level windows a changed rectangle of the screen touches,
+ * each in its own Wayland window (rootless), after bringing the windows in
+ * step with the X windows: opened when mapped, closed when unmapped,
+ * resized, retitled and moved.
+ */
+static void
+present_rootless(
+	struct server *s,
+	int x,
+	int y,
+	int width,
+	int height)
+{
+	struct window *w;
+	unsigned index;
+	int left;
+	int top;
+	int right;
+	int bottom;
+	int busy;
+
+	/* Each top-level window. */
+	for (index = 1U; index < s->window_count; index++) {
+		w = &s->windows[index];
+		if (w->parent != ROOT_XID)
+			continue;
+
+		/* Its Wayland window in step with it; an unmapped one has none. */
+		rootless_track(s, w);
+		if (w->surface == NULL)
+			continue;
+
+		/* The part of the change inside it (all of it when it is new or resized). */
+		left = x;
+		top = y;
+		right = x + width;
+		bottom = y + height;
+		if (w->surface_fresh) {
+			left = w->x;
+			top = w->y;
+			right = w->x + w->width;
+			bottom = w->y + w->height;
+		}
+
+		/* Clipped to the window. */
+		if (left < w->x)
+			left = w->x;
+		if (top < w->y)
+			top = w->y;
+		if (right > w->x + w->width)
+			right = w->x + w->width;
+		if (bottom > w->y + w->height)
+			bottom = w->y + w->height;
+
+		/* A change outside it leaves it as it is. */
+		if (left >= right || top >= bottom)
+			continue;
+
+		/* The part composited, and the window shown with it as damage; a busy window tries again. */
+		rootless_compose(s, w, left, top, right - left, bottom - top);
+		busy = xzed_wayland_window_present(w->surface, w->composite, left - w->x, top - w->y, right - left, bottom - top);
+		if (busy != 0) {
+			mark_dirty(s, left, top, right - left, bottom - top);
+			continue;
+		}
+
+		/* The window shows all of it now. */
+		w->surface_fresh = 0;
+	}
+}
+
+/* Brings a top-level X window's Wayland window in step with it: open, closed, size, title and place. */
+static void
+rootless_track(
+	struct server *s,
+	struct window *w)
+{
+	const char *title;
+	int differs;
+	int status;
+
+	/* An unmapped window has no Wayland window. */
+	if (!w->mapped) {
+		if (w->surface != NULL)
+			xzed_wayland_window_close(w->surface);
+		w->surface = NULL;
+		return;
+	}
+
+	/* The title: the X window's name, or X11 without one. */
+	title = w->name;
+	if (title[0] == '\0')
+		title = "X11";
+
+	/* A newly mapped window gets its Wayland window and its composite. */
+	if (w->surface == NULL) {
+		w->composite = realloc(w->composite, (size_t)w->width * w->height * sizeof(uint32_t));
+		if (w->composite == NULL)
+			return;
+		w->surface = xzed_wayland_window_open(s->wayland, w->id, title, w->width, w->height);
+		if (w->surface == NULL)
+			return;
+		w->surface_width = w->width;
+		w->surface_height = w->height;
+		w->surface_fresh = 1;
+		snprintf(w->surface_title, sizeof(w->surface_title), "%s", title);
+	}
+
+	/* A resized window gets buffers and a composite of its new size. */
+	if (w->surface_width != w->width || w->surface_height != w->height) {
+		w->composite = realloc(w->composite, (size_t)w->width * w->height * sizeof(uint32_t));
+		status = xzed_wayland_window_resize(w->surface, w->width, w->height);
+		if (w->composite == NULL || status != 0) {
+			xzed_wayland_window_close(w->surface);
+			w->surface = NULL;
+			return;
+		}
+
+		/* The window is drawn whole at its new size. */
+		w->surface_width = w->width;
+		w->surface_height = w->height;
+		w->surface_fresh = 1;
+	}
+
+	/* A renamed window gets its new title. */
+	differs = strcmp(title, w->surface_title);
+	if (differs != 0) {
+		xzed_wayland_window_title(w->surface, title);
+		snprintf(w->surface_title, sizeof(w->surface_title), "%s", title);
+	}
+
+	/* The pointer's frames are placed from the window's corner on the screen. */
+	xzed_wayland_window_move(w->surface, w->x, w->y);
+}
+
+/* Composites a part of a top-level window, with its children over it, into the window's composite. */
+static void
+rootless_compose(
+	struct server *s,
+	struct window *top,
+	int x,
+	int y,
+	int width,
+	int height)
+{
+	struct window *w;
+	int row;
+	int column;
+
+	/* Each pixel from the topmost of the window's children there, or the window itself. */
+	for (row = y; row < y + height; row++) {
+		for (column = x; column < x + width; column++) {
+			w = top_at_parent(s, top->id, column, row);
+			if (w == NULL)
+				w = top;
+			top->composite[(size_t)(row - top->y) * top->width + (size_t)(column - top->x)] =
+			    w->pixels[(size_t)(row - w->y) * w->width + (size_t)(column - w->x)];
+		}
+	}
+}
+
+/* Ends the clients whose top-level windows the compositor asked to close (after its events have run). */
+static void
+rootless_closing(
+	struct server *s)
+{
+	struct window *w;
+	unsigned index;
+
+	/* Each window asked about, if it is still there. */
+	for (index = 0U; index < s->closing_count; index++) {
+		w = find_window(s, s->closing[index]);
+		if (w == NULL || w->owner >= MAX_CLIENTS)
+			continue;
+
+		/* Its client goes, and its windows with it. */
+		close_client(s, w->owner);
+	}
+
+	/* None is left to close. */
+	s->closing_count = 0U;
+}
+
+/* The pointer (or the keyboard) came into a window: rootless, its X window comes up (and gets the focus). */
+static void
+wayland_enter(
+	void *context,
+	uint32_t window,
+	int keyboard)
+{
+	struct server *s;
+	struct window *w;
+
+	/* Rootful, the screen's window changes nothing in X. */
+	s = context;
+	if (!s->rootless)
+		return;
+
+	/* The X window is raised, so that the pointer's hits find it. */
+	w = find_window(s, window);
+	if (w == NULL)
+		return;
+	raise_window(s, w);
+
+	/* The keyboard's focus is the X window. */
+	if (keyboard)
+		s->focus = window;
+}
+
+/* The compositor gave a window a size: rootless, its X window is resized and told. */
+static void
+wayland_configure(
+	void *context,
+	uint32_t window,
+	int width,
+	int height)
+{
+	struct server *s;
+	struct window *w;
+	int failed;
+
+	/* Rootful, the screen keeps its size. */
+	s = context;
+	if (!s->rootless)
+		return;
+
+	/* The X window, with pixels of the new size. */
+	w = find_window(s, window);
+	if (w == NULL || width > 16384 || height > 16384)
+		return;
+	failed = window_pixels_resize(w, (uint16_t)width, (uint16_t)height);
+	if (failed)
+		return;
+
+	/* Its new size, told to its client, which draws it again. */
+	w->width = (uint16_t)width;
+	w->height = (uint16_t)height;
+	configure_notify(s, w);
+	expose(s, w);
+	mark_dirty(s, w->x, w->y, w->width, w->height);
+}
+
+/* The compositor asked a window to close: rootful, Xzed ends; rootless, the window's client ends. */
+static void
+wayland_close(
+	void *context,
+	uint32_t window)
+{
+	struct server *s;
+
+	/* Rootful, closing the screen's window ends the server. */
+	s = context;
+	if (!s->rootless) {
+		stopped = 1;
+		return;
+	}
+
+	/* Rootless, the client is ended after the compositor's events (its windows are closed then). */
+	if (s->closing_count < MAX_WINDOWS) {
+		s->closing[s->closing_count] = window;
+		s->closing_count++;
+	}
 }
 
 /* Supports the choose mode operation. */
@@ -877,9 +1198,19 @@ present(
 	s->dirty = 0;
 	composite_region(s, x, y, w, h);
 
-	/* The Wayland backend shows the screen as it is (the compositor draws the pointer); a busy window tries again. */
+	/*
+	 * The Wayland backend shows the screen as it is (the compositor draws
+	 * the pointer); a busy window tries again.  Rootless, each top-level
+	 * window is shown in its own window.
+	 */
+	if (s->wayland != NULL && s->rootless) {
+		present_rootless(s, x, y, w, h);
+		return;
+	}
+
+	/* Rootful, the one window shows the screen. */
 	if (s->wayland != NULL) {
-		busy = xzed_wayland_present(s->wayland, s->screen, x, y, w, h);
+		busy = xzed_wayland_window_present(s->screen_window, s->screen, x, y, w, h);
 		if (busy != 0)
 			mark_dirty(s, x, y, w, h);
 		return;
@@ -1422,6 +1753,13 @@ destroy_window(
 	}
 	free(w->pixels);
 	w->pixels = NULL;
+
+	/* Rootless, its Wayland window and its composite go with it. */
+	if (w->surface != NULL)
+		xzed_wayland_window_close(w->surface);
+	w->surface = NULL;
+	free(w->composite);
+	w->composite = NULL;
 	index = (size_t)(w - s->windows);
 
 	/* Checks the current index. */

@@ -16,6 +16,7 @@
 #include <X11/keysym.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -1489,6 +1490,7 @@ XPending(
 	Display *d)
 {
 	int f, z;
+	int error;
 	uint8_t b[32];
 
 	/* Checks the current descriptor. */
@@ -1497,7 +1499,18 @@ XPending(
 	f = fcntl(d->fd, F_GETFL);
 	fcntl(d->fd, F_SETFL, f | O_NONBLOCK);
 	z = (int)recv(d->fd, b, 32, MSG_DONTWAIT);
+	error = errno;
 	fcntl(d->fd, F_SETFL, f);
+
+	/*
+	 * A connection the server has closed (or broken) ends the client, as
+	 * Xlib's default I/O error handler does (WS069: Xzed rootless ends the
+	 * client of a window the compositor closes).
+	 */
+	if (z == 0 || (z < 0 && error != EAGAIN && error != EWOULDBLOCK && error != EINTR)) {
+		fprintf(stderr, "X connection broken: the server closed it\n");
+		exit(1);
+	}
 
 	/* Handles the z condition. */
 	if (z == 32 && (b[0] & 0x7f) >= 2)
