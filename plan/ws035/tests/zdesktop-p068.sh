@@ -1,7 +1,7 @@
 #!/bin/sh
-# ws035-p068: zdesktop-terminal in zwl --glass on the Venus guest.
+# ws035-p068: zdesktop-terminal in zdesktop --glass on the Venus guest.
 #
-# zwl runs at 1280x800 with the wallpaper; the terminal opens a window with
+# zdesktop runs at 1280x800 with the wallpaper; the terminal opens a window with
 # /bin/sh on a pseudo-terminal.  Keys typed through QMP (qmp-keys.py) run
 # commands whose output must show in the window:
 #  1. prompt.png: the window with the shell's prompt (the window's colour at
@@ -23,7 +23,7 @@ guest() { timeout 90 python3 plan/tools/guest/guest.py run "$1" 2>&1; }
 check() { python3 plan/ws035/tests/zdesktop-check.py "$@" --runtime "$GUEST_RUNTIME"; }
 pointer() { python3 plan/ws035/tests/qmp-pointer.py "$GUEST_RUNTIME/qmp.sock" "$@"; }
 keys() { python3 plan/ws035/tests/qmp-keys.py "$GUEST_RUNTIME/qmp.sock" "$@"; }
-stop_all='for p in $(ps -A -o pid,args | grep -E "[z]wl|[w]lshm|[w]ltest|[m]view|[z]desktop-terminal" | awk "{print \$1}"); do kill $p; done; i=0; while ps -A -o args | grep -qE "[z]wl|[w]lshm|[w]ltest|[m]view|[z]desktop-terminal" && [ $i -lt 50 ]; do sleep 0.2; i=$((i+1)); done'
+stop_all='for p in $(ps -A -o pid,args | grep -E "[z]desktop( |$)|[w]lshm|[w]ltest|[m]view|[z]desktop-terminal" | awk "{print \$1}"); do kill $p; done; i=0; while ps -A -o args | grep -qE "[z]desktop( |$)|[w]lshm|[w]ltest|[m]view|[z]desktop-terminal" && [ $i -lt 50 ]; do sleep 0.2; i=$((i+1)); done'
 status=0
 
 # Fails the run unless a log has a line matching a pattern.
@@ -39,10 +39,10 @@ expect_log() {
 
 guest "$stop_all" >/dev/null
 guest 'export XDG_RUNTIME_DIR=/tmp; rm -f /tmp/wayland-0; picture=; [ -f /usr/share/zdesktop/wallpaper.ppm ] && picture=--wallpaper=/usr/share/zdesktop/wallpaper.ppm
-/bin/zwl --timeout=600 --width=1280 --height=800 --glass $picture --log-frames > /tmp/zwl.log 2>&1 </dev/null & sleep 4
+/bin/zdesktop --timeout=600 --width=1280 --height=800 --glass $picture --log-frames > /tmp/zdesktop.log 2>&1 </dev/null & sleep 4
 /bin/zdesktop-terminal --token=t1 --timeout-s=500 > /tmp/t.log 2>&1 </dev/null & sleep 6; echo started' >/dev/null
 guest 'cat /tmp/t.log' | tee "$out/start.txt"
-set -- $(guest "grep 'ZWL MAP client=1 ' /tmp/zwl.log" | sed -n 's/.* surface=\([0-9]*\) x=\([-0-9]*\) y=\([-0-9]*\).*/\1 \2 \3/p')
+set -- $(guest "grep 'ZWL MAP client=1 ' /tmp/zdesktop.log" | sed -n 's/.* surface=\([0-9]*\) x=\([-0-9]*\) y=\([-0-9]*\).*/\1 \2 \3/p')
 surface=${1:-0}; tx=${2:-0}; ty=${3:-0}
 echo "terminal: surface $surface at $tx,$ty"
 expect_log /tmp/t.log 'ZTERM START run=t1'
@@ -71,7 +71,7 @@ keys 'exit\n'
 sleep 3
 expect_log /tmp/t.log 'ZTERM DONE run=t1 reason=shell-exited'
 
-guest 'grep -E "FAILED|ERROR" /tmp/t.log /tmp/zwl.log' | tee "$out/errors.txt"
+guest 'grep -E "FAILED|ERROR" /tmp/t.log /tmp/zdesktop.log' | tee "$out/errors.txt"
 [ -s "$out/errors.txt" ] && status=1
 guest 'cat /tmp/t.log' > "$out/t.log"
 guest "$stop_all" >/dev/null

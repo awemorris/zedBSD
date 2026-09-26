@@ -1,7 +1,7 @@
 #!/bin/sh
 # Builds the zdesktop guest image for the Venus tests (build/ws035-sq): the guest harness's files
 # (SSH keys, net.conf) and, when they are present, the files kept out of git: the fonts
-# (build/ws035-fonts/: Inter for zwl, JetBrains Mono for zdesktop-terminal, both OFL) and the
+# (build/ws035-fonts/: Inter for zdesktop, JetBrains Mono for zdesktop-terminal, both OFL) and the
 # wallpaper (build/ws035-wallpaper/wallpaper.ppm, the user's picture).
 #
 #   plan/ws035/tests/build-zdesktop-image.sh [BUILD]

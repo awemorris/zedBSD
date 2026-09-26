@@ -14,7 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Linux evdev key codes, which zwl forwards unchanged with no keymap. */
+/* Linux evdev key codes, which zdesktop forwards unchanged with no keymap. */
 #define INPUT_KEY_ESC		1U
 #define INPUT_KEY_MINUS		12U
 #define INPUT_KEY_EQUAL		13U
@@ -37,7 +37,7 @@
 
 /*
  * The scroll distance of one wheel notch when no discrete count is sent.
- * zwl, like libinput, reports fifteen units per notch.
+ * zdesktop, like libinput, reports fifteen units per notch.
  */
 #define INPUT_AXIS_NOTCH	15.0
 

@@ -115,7 +115,7 @@ struct home_app {
 
 /*
  * The applications, read once when Home first opens.  home_app_count is 0
- * until then; the list is not read again while zwl runs.
+ * until then; the list is not read again while zdesktop runs.
  */
 static struct home_app home_apps[HOME_APPS_MAX];
 static unsigned home_app_count;
@@ -1150,7 +1150,7 @@ home_launch(
 		return;
 	}
 
-	/* The child: its own session, none of zwl's descriptors, the socket's place, and the command. */
+	/* The child: its own session, none of zdesktop's descriptors, the socket's place, and the command. */
 	if (child == 0) {
 		(void)setsid();
 		for (descriptor = 3; descriptor < 1024; descriptor++)

@@ -1,6 +1,6 @@
 type=daemon
 command=/bin/sh
-arguments=/etc/zdesktop/run-zwl.sh
+arguments=/etc/zdesktop/run-zdesktop.sh
 after=vkwait1
 restart=no
 required=NO

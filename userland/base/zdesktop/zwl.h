@@ -8,7 +8,7 @@
 /*
  * Shared state for the Wayland compositor.
  *
- * zwl has two modes (WS035 compositing design, D0).  In window mode it draws
+ * zdesktop has two modes (WS035 compositing design, D0).  In window mode it draws
  * a background and every window, bottom to top, with Vulkan into a
  * VK_KHR_display swapchain (compose.c); a window's image is imported once
  * per wl_buffer (import.c).  When the topmost window is fullscreen and its

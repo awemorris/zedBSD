@@ -1,6 +1,6 @@
 #!/bin/sh
 # ws069-p004: GLX on the Venus guest (the zdesktop image, built by plan/ws035/tests/build-zdesktop-image.sh,
-# run by plan/ws035/tests/zdesktop-guest.sh start).  Xzed --rootless runs under zwl; glxtest asks Xzed for
+# run by plan/ws035/tests/zdesktop-guest.sh start).  Xzed --rootless runs under zdesktop; glxtest asks Xzed for
 # GLX (version 1.4 and the server's strings) and draws egltest's scene through GLX into its X window, which
 # is a Wiseman window.
 #  1. glx.png: the scene's colours on the screen, and glxtest's own readback (EGLTEST CHECK).
@@ -17,7 +17,7 @@ mkdir -p "$out"
 guest() { timeout 120 python3 plan/tools/guest/guest.py run "$1" 2>&1; }
 check() { python3 plan/ws035/tests/zdesktop-check.py "$@" --runtime "$GUEST_RUNTIME"; }
 pointer() { python3 plan/ws035/tests/qmp-pointer.py "$GUEST_RUNTIME/qmp.sock" "$@"; }
-stop_all='for p in $(ps -A -o pid,args | grep -E "[z]wl|[X]zed|[g]lxtest|[e]gltest|[z]term" | awk "{print \$1}"); do kill $p; done; i=0; while ps -A -o args | grep -qE "[z]wl|[X]zed|[g]lxtest|[e]gltest|[z]term" && [ $i -lt 50 ]; do sleep 0.2; i=$((i+1)); done'
+stop_all='for p in $(ps -A -o pid,args | grep -E "[z]desktop( |$)|[X]zed|[g]lxtest|[e]gltest|[z]term" | awk "{print \$1}"); do kill $p; done; i=0; while ps -A -o args | grep -qE "[z]desktop( |$)|[X]zed|[g]lxtest|[e]gltest|[z]term" && [ $i -lt 50 ]; do sleep 0.2; i=$((i+1)); done'
 status=0
 
 # Fails the run unless a log has a line matching a pattern.
@@ -46,12 +46,12 @@ scene_expect() {
 	     "--expect $((x + w / 2)),$((y + h / 2)),202020"
 }
 
-# 1. zwl, Xzed rootless, glxtest.
+# 1. zdesktop, Xzed rootless, glxtest.
 guest "$stop_all" >/dev/null
-guest 'export XDG_RUNTIME_DIR=/tmp; rm -f /tmp/wayland-0 /tmp/.X11-unix/X0; /bin/zwl --timeout=600 --width=1280 --height=800 --glass --log-frames > /tmp/zwl.log 2>&1 </dev/null & sleep 4
+guest 'export XDG_RUNTIME_DIR=/tmp; rm -f /tmp/wayland-0 /tmp/.X11-unix/X0; /bin/zdesktop --timeout=600 --width=1280 --height=800 --glass --log-frames > /tmp/zdesktop.log 2>&1 </dev/null & sleep 4
 DISPLAY=:0 /bin/Xzed --rootless > /tmp/xzed.log 2>&1 </dev/null & sleep 6
 DISPLAY=:0 /bin/glxtest --frames=3000 --delay-ms=30 --token=g > /tmp/glx.log 2>&1 </dev/null & sleep 12; echo started' >/dev/null
-set -- $(guest "grep 'ZWL MAP client=1 ' /tmp/zwl.log | tail -1" | sed -n 's/.* x=\([-0-9]*\) y=\([-0-9]*\).*/\1 \2/p')
+set -- $(guest "grep 'ZWL MAP client=1 ' /tmp/zdesktop.log | tail -1" | sed -n 's/.* x=\([-0-9]*\) y=\([-0-9]*\).*/\1 \2/p')
 wx=${1:-0}; wy=${2:-0}
 echo "glxtest window at $wx,$wy"
 pointer move 1250 780 sleep 400
@@ -65,7 +65,7 @@ expect_log /tmp/glx.log 'EGLTEST CHECK run=g failures=0 glerror=0x0'
 # 2. Docked: a new pbuffer at the new size.
 pointer move $((wx + 150)) $((wy - 30)) sleep 400 down sleep 60 up sleep 60 down sleep 60 up sleep 4000
 pointer move 1250 780 sleep 500
-set -- $(guest "grep 'GLASS dock surface=' /tmp/zwl.log | tail -1" | sed -n 's/.* x=\([-0-9]*\) y=\([-0-9]*\) w=\([0-9]*\) h=\([0-9]*\).*/\1 \2 \3 \4/p')
+set -- $(guest "grep 'GLASS dock surface=' /tmp/zdesktop.log | tail -1" | sed -n 's/.* x=\([-0-9]*\) y=\([-0-9]*\) w=\([0-9]*\) h=\([0-9]*\).*/\1 \2 \3 \4/p')
 echo "docked: ${1:-?} ${2:-?} ${3:-?} ${4:-?}"
 if [ $# -eq 4 ]; then
 	check "$out/docked.png" $(scene_expect "$1" "$2" "$3" "$4") || status=1
@@ -75,7 +75,7 @@ else
 fi
 
 # 3. The bar's close button ends glxtest (Xzed keeps running).
-close=$(guest "grep 'GLASS dock surface=' /tmp/zwl.log | tail -1" | sed -n 's/.* buttons=\([0-9]*\),.*/\1/p')
+close=$(guest "grep 'GLASS dock surface=' /tmp/zdesktop.log | tail -1" | sed -n 's/.* buttons=\([0-9]*\),.*/\1/p')
 pointer move ${close:-0} 17 sleep 500 down sleep 60 up sleep 3000
 left=$(guest 'ps -A -o args | grep -c "[g]lxtest"' | tail -1)
 xzed=$(guest 'ps -A -o args | grep -c "[X]zed"' | tail -1)

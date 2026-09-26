@@ -22,4 +22,4 @@ CONFIG_DRIVER_USB_RTL8822BU := n
 # The PC/AT text provider supplies retained console cells after WSI releases scanout.
 CONFIG_DRIVER_GRAPHICS := y
 CONFIG_DRIVER_LGY98 := n
-ZEDBSD_USER_PROGRAMS := wltest mview zwl gpu-share-test gpu-fence-test gpu-admission-test gpu-recovery-test vkdemo venus-frame cat ls dmesg sleep sync kill rm
+ZEDBSD_USER_PROGRAMS := wltest mview zdesktop gpu-share-test gpu-fence-test gpu-admission-test gpu-recovery-test vkdemo venus-frame cat ls dmesg sleep sync kill rm

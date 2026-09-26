@@ -453,7 +453,7 @@ compose_device(
 	/* The instance, with the display extensions and those the external fd extensions need (Vulkan 1.0). */
 	memset(&application, 0, sizeof(application));
 	application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-	application.pApplicationName = "zwl";
+	application.pApplicationName = "zdesktop";
 	application.apiVersion = VK_API_VERSION_1_0;
 	memset(&instance, 0, sizeof(instance));
 	instance.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;

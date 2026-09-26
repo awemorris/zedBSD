@@ -7,7 +7,7 @@ Venus command, zedBSD buffer factory, or kernel handle operation is part of the
 application. The selected Vulkan library owns its WSI transport.
 
 ```
-/bin/zwl --socket=/tmp/wayland-0 --timeout=150 &
+/bin/zdesktop --socket=/tmp/wayland-0 --timeout=150 &
 /bin/wltest --display=/tmp/wayland-0 --mode=fifo --frames=60
 /bin/wltest --display=/tmp/wayland-0 --mode=mailbox --frames=60 --recreate-at=30
 ```

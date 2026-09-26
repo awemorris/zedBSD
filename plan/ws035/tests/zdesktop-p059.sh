@@ -2,13 +2,13 @@
 # ws035-p059: the glass look (floating title bars, frosted glass, system bar),
 # checked on the Venus guest.
 #
-# zwl --glass runs at 1280x800 with the font at /usr/share/fonts/zdesktop.ttf
+# zdesktop --glass runs at 1280x800 with the font at /usr/share/fonts/zdesktop.ttf
 # (build/ws035-fonts/Inter.ttf, not in git: see phase059).  Window a is a
 # pale 420x300 wltest window, window b a pale 360x240 wl_shm window over it.
 # The pointer is driven with QMP (usb-tablet, absolute).
 #  1. desktop.png: both windows with their title bars.
 #  2. hover.png: the pointer over b's close button (red).
-#  3. b's title bar is dragged 300 left and 100 up: zwl logs the move and b's
+#  3. b's title bar is dragged 300 left and 100 up: zdesktop logs the move and b's
 #     body is at its new place.
 #  4. a's maximize button docks a to the system bar (p062): it is configured
 #     to the space under the bar and fills it; a double click on its title
@@ -26,9 +26,9 @@ mkdir -p "$out"
 guest() { timeout 90 python3 plan/tools/guest/guest.py run "$1" 2>&1; }
 check() { python3 plan/ws035/tests/zdesktop-check.py "$@" --runtime "$GUEST_RUNTIME"; }
 qmp() { python3 plan/tools/qmp.py "$GUEST_RUNTIME/qmp.sock" input-send-event "$1" >/dev/null; }
-stop_all='for p in $(ps -A -o pid,args | grep -E "[z]wl|[w]lshm|[w]ltest|[m]view" | awk "{print \$1}"); do kill $p; done; i=0; while ps -A -o args | grep -qE "[z]wl|[w]lshm|[w]ltest|[m]view" && [ $i -lt 50 ]; do sleep 0.2; i=$((i+1)); done'
+stop_all='for p in $(ps -A -o pid,args | grep -E "[z]desktop( |$)|[w]lshm|[w]ltest|[m]view" | awk "{print \$1}"); do kill $p; done; i=0; while ps -A -o args | grep -qE "[z]desktop( |$)|[w]lshm|[w]ltest|[m]view" && [ $i -lt 50 ]; do sleep 0.2; i=$((i+1)); done'
 
-# Moves the pointer to an output pixel (zwl takes floor(v * (size - 1) / 32767)).
+# Moves the pointer to an output pixel (zdesktop takes floor(v * (size - 1) / 32767)).
 move() {
 	qmp "{\"events\":[{\"type\":\"abs\",\"data\":{\"axis\":\"x\",\"value\":$((($1 * 32767 + 1278) / 1279))}},{\"type\":\"abs\",\"data\":{\"axis\":\"y\",\"value\":$((($2 * 32767 + 798) / 799))}}]}"
 	sleep "${3:-0.3}"
@@ -47,17 +47,17 @@ click() {
 	button false
 }
 
-# The place zwl gave a surface of a client (x and y from its MAP line).
+# The place zdesktop gave a surface of a client (x and y from its MAP line).
 place() {
-	guest "grep 'ZWL MAP client=$1 ' /tmp/zwl.log | tail -1" | sed -n 's/.* x=\([-0-9]*\) y=\([-0-9]*\).*/\1 \2/p'
+	guest "grep 'ZWL MAP client=$1 ' /tmp/zdesktop.log | tail -1" | sed -n 's/.* x=\([-0-9]*\) y=\([-0-9]*\).*/\1 \2/p'
 }
 
 status=0
 guest "$stop_all" >/dev/null
-guest 'export XDG_RUNTIME_DIR=/tmp; rm -f /tmp/wayland-0; /bin/zwl --timeout=300 --width=1280 --height=800 --glass --log-frames > /tmp/zwl.log 2>&1 </dev/null & sleep 3
+guest 'export XDG_RUNTIME_DIR=/tmp; rm -f /tmp/wayland-0; /bin/zdesktop --timeout=300 --width=1280 --height=800 --glass --log-frames > /tmp/zdesktop.log 2>&1 </dev/null & sleep 3
 /bin/wltest --windowed --size=420x300 --color=f4f7fc --frames=3600 --delay-ms=50 --token=a > /tmp/a.log 2>&1 </dev/null & sleep 2
 /bin/wlshm --size=360x240 --color=ffe8eef8 --frames=6000 --token=b > /tmp/b.log 2>&1 </dev/null & sleep 3; echo started' >/dev/null
-guest 'grep -E "GLASS|MAP" /tmp/zwl.log' | tee "$out/log-start.txt"
+guest 'grep -E "GLASS|MAP" /tmp/zdesktop.log' | tee "$out/log-start.txt"
 set -- $(place 1); ax=$1; ay=$2
 set -- $(place 2); bx=$1; by=$2
 
@@ -80,7 +80,7 @@ while [ $i -le 10 ]; do
 done
 button false
 nx=$((bx - 300)); ny=$((by - 100))
-guest 'grep "GLASS moved" /tmp/zwl.log' | tee "$out/moved.txt"
+guest 'grep "GLASS moved" /tmp/zdesktop.log' | tee "$out/moved.txt"
 grep -q "x=$nx y=$ny" "$out/moved.txt" || status=1
 move 1200 700
 check "$out/moved.png" --expect $((nx + 180)),$((ny + 120)),e8eef8 \
@@ -94,12 +94,12 @@ sleep 3
 move 1200 700
 check "$out/maximized.png" --expect 640,500,f4f7fc --expect 20,120,f4f7fc \
     --expect 1260,780,f4f7fc || status=1
-title_x=$(guest "grep 'GLASS dock surface=6 ' /tmp/zwl.log | tail -1" | sed -n 's/.* title=\([0-9]*\).*/\1/p')
+title_x=$(guest "grep 'GLASS dock surface=6 ' /tmp/zdesktop.log | tail -1" | sed -n 's/.* title=\([0-9]*\).*/\1/p')
 python3 plan/ws035/tests/qmp-pointer.py "$GUEST_RUNTIME/qmp.sock" move $((title_x + 60)) 17 sleep 400 down sleep 60 up sleep 60 down sleep 60 up
 sleep 3
 move 1200 700
 check "$out/restored.png" --expect $((ax + 20)),$((ay + 150)),f4f7fc || status=1
-guest 'grep -E "CONFIGURE client=1" /tmp/zwl.log; grep RESIZE /tmp/a.log' | tee "$out/maximize.txt"
+guest 'grep -E "CONFIGURE client=1" /tmp/zdesktop.log; grep RESIZE /tmp/a.log' | tee "$out/maximize.txt"
 grep -q "width=1280 height=762" "$out/maximize.txt" || status=1
 grep -q "RESIZE run=a width=420 height=300" "$out/maximize.txt" || status=1
 
@@ -108,9 +108,9 @@ click $((nx + 360 - 26)) $((ny - 8 - 22))
 sleep 2
 move 1200 700
 check "$out/closed.png" >/dev/null || status=1
-guest 'grep "GLASS close" /tmp/zwl.log; tail -2 /tmp/b.log; ps -A -o args | grep -c "[w]lshm"' | tee "$out/closed.txt"
+guest 'grep "GLASS close" /tmp/zdesktop.log; tail -2 /tmp/b.log; ps -A -o args | grep -c "[w]lshm"' | tee "$out/closed.txt"
 [ "$(tail -1 "$out/closed.txt")" = 0 ] || status=1
-guest 'grep -E "ERROR|FAILED" /tmp/zwl.log /tmp/a.log /tmp/b.log' | tee "$out/errors.txt"
+guest 'grep -E "ERROR|FAILED" /tmp/zdesktop.log /tmp/a.log /tmp/b.log' | tee "$out/errors.txt"
 [ -s "$out/errors.txt" ] && status=1
 
 guest "$stop_all" >/dev/null

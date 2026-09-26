@@ -1,6 +1,6 @@
 type=oneshot
 command=/bin/sleep
 arguments=3
-after=zwl
+after=zdesktop
 restart=no
 required=NO

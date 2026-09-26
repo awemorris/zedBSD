@@ -262,7 +262,7 @@ p001で確かめる。
 | [ws035-p070](phase070/phase.md) | （2026-09-26 自律実行）App Home から X11 の app（zterm、zgears）: Xzed --rootless を必要なときに起動 | cleared（q479-i01、2026-09-26。Venus で App Home から zterm と zgears、Xzed は 1 つ） | p069、WS069 | `userland/base/zwl` |
 | [ws035-p071](phase071/phase.md) | （2026-09-26 自律実行）App Home の続き: ページング、起動の animation、閉じる swipe、Tab とホイール | cleared（q480-i01、2026-09-26。Venus で 2 ページ、drag・ホイール・キー、icon から育つ窓、閉じる drag） | p070 | `userland/base/zwl` |
 | [ws035-p072](phase072/phase.md) | （2026-09-26 自律実行）窓の最小化と、窓をデスクトップ間で移す（Wiseview の drag、キー） | cleared（q483-i01、2026-09-26。Venus で最小化と Wiseview からの復帰、タイルの drag とキーでデスクトップ間の移動） | p065 | `userland/base/zwl` |
-| [ws035-p073](phase073/phase.md) | （2026-09-27 ユーザー指示）`userland/base/zwl` を `userland/base/zdesktop`（`/bin/zdesktop`）へ改名。build・script・試験の起動と process の名・文書。C の識別子と log の接頭辞 `ZWL` は変えない | planned | p072 | zdesktop |
+| [ws035-p073](phase073/phase.md) | （2026-09-27 ユーザー指示）`userland/base/zwl` を `userland/base/zdesktop`（`/bin/zdesktop`）へ改名。build・script・試験の起動と process の名・文書。C の識別子と log の接頭辞 `ZWL` は変えない | cleared（q486-i01、2026-09-27。Venus と i915 実機、boot test） | p072 | zdesktop |
 | ws035-p074 | （2026-09-27 ユーザー指示）libzdesktop が zdesktop の非標準の Wayland 拡張（`zed_gpu_buffer_v1`）を包む。client（mview・wltest・zdesktop-terminal・libEGL 等）は libzdesktop を使い、`zed-gpu-buffer-v1-client-protocol.h` と `X11/Xzed.h` を公開 header から外す | planned | p073 | zdesktop、libzdesktop |
 | ws035-p055 | （2026-09-25 承認）damage（buffer age と scissor） | planned（sq001） | p011 | 同上 |
 | ws035-p057 | （2026-09-25 承認）効果: すりガラス（背後のぼかし）と影 | planned（sq001） | p055 | 同上 |

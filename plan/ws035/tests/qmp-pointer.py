@@ -8,10 +8,10 @@ Each step is one word and its numbers, run in order:
     down / up     the left button
     wheel-down / wheel-up   one notch of the wheel
     sleep MS      a pause
-Pixels are output pixels of an output of --width x --height; zwl takes the
+Pixels are output pixels of an output of --width x --height; zdesktop takes the
 tablet value v to pixel floor(v * (size - 1) / 32767), so v is rounded up.
 One connection keeps the steps close together (a double click is two
-presses within zwl's 400 ms).
+presses within zdesktop's 400 ms).
 
     qmp-pointer.py SOCKET [--width 1280 --height 800] move 10 20 down sleep 60 up
 """

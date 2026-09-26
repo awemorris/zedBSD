@@ -11,7 +11,7 @@ It shows a model converted by `tools/fbx2mview.py` (format:
 `qs40` model to `/usr/share/mview/qs40/`, which is the default.
 
 ```
-/bin/zwl --socket=/tmp/wayland-0 --width=640 --height=480 &
+/bin/zdesktop --socket=/tmp/wayland-0 --width=640 --height=480 &
 /bin/mview --display=/tmp/wayland-0
 /bin/mview --display=/tmp/wayland-0 --model=/usr/share/mview/qs40 --token=run1 --timeout-s=300
 ```
@@ -42,7 +42,7 @@ It shows a model converted by `tools/fbx2mview.py` (format:
 | `R` | reset to the initial view |
 | `Q`, `Esc` | quit |
 
-Keys are Linux evdev codes (zwl sends no keymap); keyboard repeat is not
+Keys are Linux evdev codes (zdesktop sends no keymap); keyboard repeat is not
 synthesized. Without a `wl_seat` the viewer still renders, without input.
 
 ## Log

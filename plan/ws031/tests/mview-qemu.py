@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the model viewer on zwl in a finite QEMU/Venus session and check its views (WS031 p013).
+"""Run the model viewer on zdesktop in a finite QEMU/Venus session and check its views (WS031 p013).
 
 The compositor and the viewer are started from the guest shell.  Input reaches the guest as a
 QEMU USB tablet and the PS/2 keyboard through QMP input-send-event; the screen is read back over
@@ -156,7 +156,7 @@ def exercise(args, qmp, output, debug, vnc_path, process, report):
                 {'type': 'key', 'data': {'down': down, 'key': {'type': 'qcode', 'data': name}}}]})
             time.sleep(0.05)
 
-    command(f'/bin/zwl --socket=/tmp/wayland-0 --width={WIDTH} --height={HEIGHT} --timeout={args.timeout} &')
+    command(f'/bin/zdesktop --socket=/tmp/wayland-0 --width={WIDTH} --height={HEIGHT} --timeout={args.timeout} &')
     ready = wait(r'ZWL READY[^\r\n]*', 'compositor startup')
     report['compositor_ready'] = ready.group(0)
     report['compositor_inputs'] = re.findall(r'ZWL INPUT [^\r\n]*', console())

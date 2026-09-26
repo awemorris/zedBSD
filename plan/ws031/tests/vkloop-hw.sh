@@ -13,9 +13,9 @@
 #                                                      (default 2500) held 20 s for the camera; "display live": 12 s of animation
 #        plan/ws031/tests/vkloop-hw.sh "-DFOO=1"       extra CPPFLAGS
 #        plan/ws031/tests/vkloop-hw.sh "oracle -DI915_VK_REFERENCE_KERNELS=1"   (flags after the word)
-#        plan/ws031/tests/vkloop-hw.sh wayland         the zwl compositor and two wltest clients (FIFO 600 frames, then mailbox
+#        plan/ws031/tests/vkloop-hw.sh wayland         the zdesktop compositor and two wltest clients (FIFO 600 frames, then mailbox
 #                                                      with a swapchain recreate) in place of vkdemo; services in plan/ws031/tests/wayland/
-#        plan/ws031/tests/vkloop-hw.sh mview           the model viewer (zwl + mview, services in plan/ws031/tests/mview/) in place of vkdemo;
+#        plan/ws031/tests/vkloop-hw.sh mview           the model viewer (zdesktop + mview, services in plan/ws031/tests/mview/) in place of vkdemo;
 #                                                      MVIEW_ARGS="--spin=30" adds viewer options; MVIEW_MODEL=test shows
 #                                                      userland/base/mview/models/test/ (it has a blend material) in place of qs40
 #                                                      MVIEW_ARGS="--shading=pixel" (or MVIEW_NO_VENUS=1) makes a CAPTURE=mview run skip
@@ -33,7 +33,7 @@
 #                                                      usual, so a long scenario ends before the application runs
 #        plan/ws031/tests/vkloop-hw.sh "test <scenario> -DFOO=1"             (flags after the scenario)
 #        CAPTURE=zdesktop plan/ws031/tests/vkloop-hw.sh zdesktop
-#                                                      WS035 p066: zdesktop (zwl --glass at 1920x1080, two wl_shm windows and mview --windowed
+#                                                      WS035 p066: zdesktop (zdesktop --glass at 1920x1080, two wl_shm windows and mview --windowed
 #                                                      on top; services in plan/ws031/tests/zdesktop/)
 #                                                      built with plan/ws031/tests/config-zdesktop-hw.mk into build/resident-zdesktop;
 #                                                      the font and the wallpaper come from build/ws035-fonts/ and build/ws035-wallpaper/
@@ -135,7 +135,7 @@ RC_CONF=plan/ws031/tests/vkprobe-rc.conf
 if [ "$WAYLAND_RUN" = 1 ]; then
 	# the compositor and its clients take the place of vkdemo: the display lease is exclusive
 	FILES="--file /etc/service.d/vkwait1=$WAIT1 --file /etc/service.d/poweroff=plan/ws031/tests/poweroff"
-	for n in zwl wlwait wltest1 wltest2 vkwait2; do
+	for n in zdesktop wlwait wltest1 wltest2 vkwait2; do
 		FILES="$FILES --file /etc/service.d/$n=plan/ws031/tests/wayland/$n"
 	done
 	RC_CONF=plan/ws031/tests/wayland/rc.conf
@@ -158,7 +158,7 @@ if [ "$MVIEW_RUN" = 1 ]; then
 	cmp -s $MVIEW1.new $MVIEW1 2>/dev/null || mv $MVIEW1.new $MVIEW1
 	rm -f $MVIEW1.new
 	FILES="$FILES --file /etc/service.d/mview1=$MVIEW1"
-	for n in zwl wlwait vkwait2; do
+	for n in zdesktop wlwait vkwait2; do
 		FILES="$FILES --file /etc/service.d/$n=plan/ws031/tests/mview/$n"
 	done
 	RC_CONF=plan/ws031/tests/mview/rc.conf
@@ -166,12 +166,12 @@ fi
 if [ "$ZDESKTOP_RUN" = 1 ]; then
 	# the compositor in Wiseman Mode and three clients; the font and the wallpaper are not in git
 	FILES="--file /etc/service.d/vkwait1=$WAIT1"
-	for n in zwl wlwait wlshm1 mwait wlshm2 mwait2 wlkill mview1 vkwait2 poweroff; do
+	for n in zdesktop wlwait wlshm1 mwait wlshm2 mwait2 wlkill mview1 vkwait2 poweroff; do
 		FILES="$FILES --file /etc/service.d/$n=plan/ws031/tests/zdesktop/$n"
 	done
 	# the compositor's and the viewer's output and the kernel's messages go to /var/log, read afterwards
 	# from the disk image with plan/ws031/tests/ufs-cat.py (not from the serial log)
-	for n in run-zwl.sh run-wlkill.sh run-mview.sh run-poweroff.sh; do
+	for n in run-zdesktop.sh run-wlkill.sh run-mview.sh run-poweroff.sh; do
 		FILES="$FILES --file /etc/zdesktop/$n=plan/ws031/tests/zdesktop/$n"
 	done
 	# ZDESKTOP_APP=terminal runs zdesktop-terminal (WS035 p068) where the model viewer runs, with the same log
@@ -238,7 +238,7 @@ scp -q $I915_HOST:bigbang/vkloop-last.log /tmp/vkloop-last.log
 if [ "$ZDESKTOP_RUN" = 1 ]; then
 	# the guest's own logs, from its disk
 	scp -q plan/ws031/tests/ufs-cat.py tools/build/check-ufs-image.py $I915_HOST:bigbang/ || exit 1
-	ssh $I915_HOST 'python3 bigbang/ufs-cat.py bigbang/guest-parity.img /var/log/zwl.log /var/log/wlkill.log /var/log/mview.log /var/log/dmesg.log /var/log/xzed.log /var/log/vk.log' > /tmp/zdesktop-guest-logs.txt 2>&1
+	ssh $I915_HOST 'python3 bigbang/ufs-cat.py bigbang/guest-parity.img /var/log/zdesktop.log /var/log/wlkill.log /var/log/mview.log /var/log/dmesg.log /var/log/xzed.log /var/log/vk.log' > /tmp/zdesktop-guest-logs.txt 2>&1
 	echo "--- guest logs: /tmp/zdesktop-guest-logs.txt ($(wc -l < /tmp/zdesktop-guest-logs.txt) lines)"
 	# the viewer's own last word: closed by the capture's click on the bar's close button
 	grep -E '^(MVIEW|ZTERM) (DONE|FAILED)' /tmp/zdesktop-guest-logs.txt || echo "the application did not end (no DONE or FAILED line)"
@@ -249,7 +249,7 @@ if [ -n "$SCENARIO" ]; then
 	grep -aE 'i915: (test |ktest|MCR-PROBE summary)|i915: .*(verdict|[A-Z0-9-]+ (PASS|FAIL|HANG|ERROR)[:( ]|[A-Z0-9-]+ cleanup|[A-Z0-9-]+ release:)' /tmp/vkloop-last.log | cut -c1-300 | head -100
 	echo "--- vkdemo"
 fi
-grep -anE 'i915: vk|i915: capture: (base|lease)|gpu: ioctl|VKDEMO|vkdemo:|ZWL|WLTEST|wltest:|zwl:|MVIEW (START|DONE|FAILED)|mview:|resident|panic|fault|init: ' /tmp/vkloop-last.log | grep -v 'parity N0\|parity P\|expected_fault' | cut -c1-200 | head -60
+grep -anE 'i915: vk|i915: capture: (base|lease)|gpu: ioctl|VKDEMO|vkdemo:|ZWL|WLTEST|wltest:|zdesktop:|MVIEW (START|DONE|FAILED)|mview:|resident|panic|fault|init: ' /tmp/vkloop-last.log | grep -v 'parity N0\|parity P\|expected_fault' | cut -c1-200 | head -60
 if [ "$ORACLE" = 1 ]; then
 	python3 plan/ws031/handover/tools/vkdump_verify.py /tmp/vkloop-last.log plan/ws014/tests /tmp/vkframe1.ppm "${TIME_MS:-0}"
 fi

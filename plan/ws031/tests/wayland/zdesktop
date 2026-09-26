@@ -1,5 +1,5 @@
 type=daemon
-command=/bin/zwl
+command=/bin/zdesktop
 arguments=--socket=/tmp/wayland-0 --timeout=150
 after=vkwait1
 restart=no

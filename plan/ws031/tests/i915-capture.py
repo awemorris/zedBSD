@@ -7,15 +7,15 @@ physical base; this harness reads the area with QMP pmemsave, writes PPM images 
 scenario:
 
   vkdemo   the captured frame's RGB SHA-256 equals the one vkdemo reports for the frame it presented
-  wayland  frames of wltest through zwl are captured (saved for inspection)
-  mview    the model viewer through zwl: the p013 input sequence and six checks, and the similarity of
+  wayland  frames of wltest through zdesktop are captured (saved for inspection)
+  mview    the model viewer through zdesktop: the p013 input sequence and six checks, and the similarity of
            each view to the Venus images of p013 when a reference directory is given (--no-venus skips
            that comparison, for a viewer run the p013 images do not describe, such as --shading=pixel);
            the six views are also laid out on one sheet, sheet.png
   zdesktop-home WS035 p069: App Home opened by the launcher, then zdesktop-terminal and mview started
   zdesktop-x11 WS035 p070: Gears (GLX) and the X terminal from App Home, then desktop 2 and back
            from their icons (the run's ZDESKTOP_APP=home leaves the viewer's service idle)
-  zdesktop WS035 p066: zwl --glass (Wiseman Mode) at 1920x1080 with three 800x560 wl_shm windows: the
+  zdesktop WS035 p066: zdesktop --glass (Wiseman Mode) at 1920x1080 with three 800x560 wl_shm windows: the
            desktop, the top one docked by a double click on its title bar, Wiseview opened by a
            drag up from the bottom edge, Wiseview closed, and the docked viewer closed with the bar's close
            button (the desktop is drawn again); each view differs from the one before it (the
@@ -431,9 +431,9 @@ def zdesktop(args, qmp, capture, report, wait):
     """The glass look on the capture display: the desktop, docking, Wiseview."""
     width, height = 1920, 1080
     time_limit = time.monotonic() + args.timeout
-    # Where zwl places the window on top: all are 800x560 (plan/ws031/tests/zdesktop/), each mapped one
+    # Where zdesktop places the window on top: all are 800x560 (plan/ws031/tests/zdesktop/), each mapped one
     # cascade step of 32 after the one before, centred under the system bar and a title bar
-    # (userland/base/zwl/shell.c zwl_glass_place).  The viewer is the fourth mapped: two wl_shm windows
+    # (userland/base/zdesktop/shell.c zwl_glass_place).  The viewer is the fourth mapped: two wl_shm windows
     # and the Vulkan window killed while it draws (wlkill) come before it.
     top = 34 + 12 + 44 + 8
     mview_x = (width - 800) // 2 + 32 * 3
@@ -445,7 +445,7 @@ def zdesktop(args, qmp, capture, report, wait):
         time.sleep(0.03)
 
     def move(x, y):
-        # zwl takes the pixel floor(v * (size - 1) / 32767): v is rounded up.
+        # zdesktop takes the pixel floor(v * (size - 1) / 32767): v is rounded up.
         events([{'type': 'abs', 'data': {'axis': 'x', 'value': (int(x) * ABS_MAX + width - 2) // (width - 1)}},
                 {'type': 'abs', 'data': {'axis': 'y', 'value': (int(y) * ABS_MAX + height - 2) // (height - 1)}}])
 
@@ -521,7 +521,7 @@ def zdesktop_home(args, qmp, capture, report):
     zdesktop-terminal, and the Model viewer icon starts mview; each view differs from the one before."""
     width, height = 1920, 1080
     time_limit = time.monotonic() + args.timeout
-    # The icons of the built-in list (userland/base/zwl/home.c home_layout at 1920x1080, six
+    # The icons of the built-in list (userland/base/zdesktop/home.c home_layout at 1920x1080, six
     # applications in one row since WS035 p070): cells of 144 from x = (1920 - 6 * 144) / 2, the row's top
     # 34 + 2/5 of the space under the bar less the row, the icon 72 high 20 under the cell's top.
     left = (width - 6 * 144) // 2

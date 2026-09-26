@@ -7,7 +7,7 @@
 
 /*
  * Xzed's Wayland backend (WS069, plan/ws069/design.md): X windows as
- * xdg-shell windows of zwl, in place of /dev/graphics and /dev/input.
+ * xdg-shell windows of zdesktop, in place of /dev/graphics and /dev/input.
  *
  * Rootful (p002), one window shows the whole X screen, as Xephyr does;
  * rootless (p003), each top-level X window has a window of its own, which

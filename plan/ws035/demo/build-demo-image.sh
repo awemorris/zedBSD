@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds the zdesktop demo image for a real amd64 machine with an Intel GPU (i915): zwl --glass starts at
+# Builds the zdesktop demo image for a real amd64 machine with an Intel GPU (i915): zdesktop --glass starts at
 # boot on the machine's own display, and App Home (the launcher at the top left, or a drag from the
 # top-left corner) starts the terminal, the model viewer, and the X11 terminal and Gears (Xzed --rootless
 # starts with the first of them).  The fonts and the wallpaper, kept out of

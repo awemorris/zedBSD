@@ -10,7 +10,7 @@
  * seat's keyboard and the repeating of a held key.
  *
  * A key press is turned into bytes at once (keys.c) and kept until the main
- * loop writes them to the shell.  zwl does not repeat keys itself, so a key
+ * loop writes them to the shell.  zdesktop does not repeat keys itself, so a key
  * held past the repeat delay is pressed again on each interval.
  */
 
@@ -593,7 +593,7 @@ window_keyboard_modifiers(
 {
 	struct terminal_window *window;
 
-	/* Only the held modifiers count; zwl latches and locks nothing. */
+	/* Only the held modifiers count; zdesktop latches and locks nothing. */
 	(void)keyboard;
 	(void)serial;
 	(void)latched;

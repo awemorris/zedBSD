@@ -1,5 +1,5 @@
 #!/bin/sh
-# ws035-p065: virtual desktops on the Venus guest (the zdesktop image).  zwl --glass runs; a red wl_shm window
+# ws035-p065: virtual desktops on the Venus guest (the zdesktop image).  zdesktop --glass runs; a red wl_shm window
 # maps on desktop 1 and a blue one on desktop 2.
 #  1. desk1.png: desktop 1 shows the red window only.
 #  2. desk2.png: a click on desktop 2's picture in the bar slides to it: the blue window only.
@@ -19,12 +19,12 @@ guest() { timeout 90 python3 plan/tools/guest/guest.py run "$1" 2>&1; }
 check() { python3 plan/ws035/tests/zdesktop-check.py "$@" --runtime "$GUEST_RUNTIME"; }
 pointer() { python3 plan/ws035/tests/qmp-pointer.py "$GUEST_RUNTIME/qmp.sock" "$@"; }
 keys() { python3 plan/ws035/tests/qmp-keys.py "$GUEST_RUNTIME/qmp.sock" "$@"; }
-stop_all='ps -A -o pid,comm | awk "{ n = \$2; sub(\".*/\", \"\", n) } n == \"zwl\" || n == \"wlshm\" {print \$1}" | while read p; do kill $p; done; sleep 1'
+stop_all='ps -A -o pid,comm | awk "{ n = \$2; sub(\".*/\", \"\", n) } n == \"zdesktop\" || n == \"wlshm\" {print \$1}" | while read p; do kill $p; done; sleep 1'
 status=0
 
-# Fails the run unless zwl's log has a line matching a pattern.
+# Fails the run unless zdesktop's log has a line matching a pattern.
 expect_log() {
-	found=$(guest "grep -cE '$1' /tmp/zwl.log" | tail -1)
+	found=$(guest "grep -cE '$1' /tmp/zdesktop.log" | tail -1)
 	if [ "${found:-0}" -gt 0 ] 2>/dev/null; then
 		echo "log: $1 ok"
 	else
@@ -33,11 +33,11 @@ expect_log() {
 	fi
 }
 
-# zwl and the red window on desktop 1.
+# zdesktop and the red window on desktop 1.
 guest "$stop_all" >/dev/null
-guest 'export XDG_RUNTIME_DIR=/tmp; rm -f /tmp/wayland-0; /bin/zwl --timeout=600 --width=1280 --height=800 --glass --log-frames > /tmp/zwl.log 2>&1 </dev/null & sleep 4
+guest 'export XDG_RUNTIME_DIR=/tmp; rm -f /tmp/wayland-0; /bin/zdesktop --timeout=600 --width=1280 --height=800 --glass --log-frames > /tmp/zdesktop.log 2>&1 </dev/null & sleep 4
 /bin/wlshm --size=520x340 --color=ffd04040 --frames=20000 --token=r > /tmp/r.log 2>&1 </dev/null & sleep 3; echo started' >/dev/null
-set -- $(guest "grep 'ZWL GLASS desktops' /tmp/zwl.log | head -1" | sed -n 's/.* x=\([0-9]*\) step=\([0-9]*\) width=\([0-9]*\).*/\1 \2 \3/p')
+set -- $(guest "grep 'ZWL GLASS desktops' /tmp/zdesktop.log | head -1" | sed -n 's/.* x=\([0-9]*\) step=\([0-9]*\) width=\([0-9]*\).*/\1 \2 \3/p')
 dx=${1:-850}; dstep=${2:-46}; dwidth=${3:-40}
 desk() { echo $((dx + ($1 - 1) * dstep + dwidth / 2)); }
 pointer move 1250 780 sleep 400

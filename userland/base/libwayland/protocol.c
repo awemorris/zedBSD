@@ -2063,7 +2063,7 @@ wl_pointer_add_listener(
 /*
  * Sends the wl_pointer.set_cursor request.
  *
- * zwl accepts the request and draws no cursor; other compositors may.
+ * zdesktop accepts the request and draws no cursor; other compositors may.
  */
 void
 wl_pointer_set_cursor(

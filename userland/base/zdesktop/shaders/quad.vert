@@ -1,4 +1,4 @@
-// zedBSD zwl: one textured quad, placed by push constants.
+// zedBSD zdesktop: one textured quad, placed by push constants.
 // Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 #version 450
 
@@ -9,7 +9,7 @@ layout(push_constant) uniform Quad {
 	vec4 texture;
 } quad;
 
-// The quad's corner, from zwl's vertex buffer of two triangles
+// The quad's corner, from zdesktop's vertex buffer of two triangles
 // (a vertex buffer rather than gl_VertexIndex, which i915's native compiler
 // does not take).
 layout(location = 0) in vec2 corner;

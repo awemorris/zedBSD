@@ -8,7 +8,7 @@
 /*
  * The keys of zdesktop-terminal: evdev key codes to the bytes a shell reads.
  *
- * zwl forwards evdev codes with no keymap (userland/base/zwl/seat.c), so the
+ * zdesktop forwards evdev codes with no keymap (userland/base/zdesktop/seat.c), so the
  * terminal carries its own layout: the US one, as the console's.  The keys
  * that are not characters send the xterm sequences.
  */

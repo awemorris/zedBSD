@@ -1,11 +1,11 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue: q486 active
+# Queue: none active
 
 <!-- awesome-plan-current:start -->
-Status: active（2026-09-27）
-Active Queue: [q486](history/queue-q486.md)（ws035-p073: zwl を zdesktop へ改名）
-Last finished Queue: [q485](history/queue-q485.md)（ws069-p007 uncleared・canceled。2026-09-27 ユーザーの判断で X server を zdesktop-x11server として作り直す）
+Status: none active（2026-09-27）
+Active Queue: なし
+Last finished Queue: [q486](history/queue-q486.md)（ws035-p073 cleared。zwl を zdesktop へ改名）
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
 

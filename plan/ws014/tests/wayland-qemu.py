@@ -477,7 +477,7 @@ def exercise(args, qmp, output, debug, vnc_path, process, report):
 
     def start_compositor():
         old = {int(value) for value in re.findall(r'ZWL READY[^\r\n]*pid=(\d+)', console())}
-        command('/bin/zwl --socket=/tmp/wayland-0 --timeout=150 --log-frames &')
+        command('/bin/zdesktop --socket=/tmp/wayland-0 --timeout=150 --log-frames &')
         while time.monotonic() < deadline:
             for marker in re.finditer(r'ZWL READY[^\r\n]*pid=(\d+)', console()):
                 pid = int(marker.group(1))

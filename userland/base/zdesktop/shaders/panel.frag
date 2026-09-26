@@ -1,4 +1,4 @@
-// zedBSD zwl: the shapes of the glass look, in premultiplied alpha.
+// zedBSD zdesktop: the shapes of the glass look, in premultiplied alpha.
 // Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 #version 450
 

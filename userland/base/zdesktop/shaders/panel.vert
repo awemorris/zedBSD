@@ -1,4 +1,4 @@
-// zedBSD zwl: one quad of the glass look, placed by push constants.
+// zedBSD zdesktop: one quad of the glass look, placed by push constants.
 // Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 #version 450
 
@@ -13,7 +13,7 @@ layout(push_constant) uniform Panel {
 	vec4 screen;
 } panel;
 
-// The quad's corner, from zwl's vertex buffer of two triangles.
+// The quad's corner, from zdesktop's vertex buffer of two triangles.
 layout(location = 0) in vec2 corner;
 
 layout(location = 0) out vec2 texcoord;

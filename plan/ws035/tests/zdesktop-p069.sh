@@ -1,9 +1,9 @@
 #!/bin/sh
 # ws035-p069: App Home (plan/ws035/app-home-design.md) on the Venus guest.
 #
-# zwl --glass runs at 1280x800 with a wl_shm window.  Through QMP:
+# zdesktop --glass runs at 1280x800 with a wl_shm window.  Through QMP:
 #  1. home.png: the launcher opens Home (the desktop slides to the bottom
-#     right); zwl logs where the icons are.
+#     right); zdesktop logs where the icons are.
 #  2. A click on the Terminal icon starts zdesktop-terminal and closes Home;
 #     the terminal's window maps (terminal.png).
 #  3. gesture.png / home-drag.png: a drag from the top-left corner towards
@@ -24,12 +24,12 @@ guest() { timeout 90 python3 plan/tools/guest/guest.py run "$1" 2>&1; }
 check() { python3 plan/ws035/tests/zdesktop-check.py "$@" --runtime "$GUEST_RUNTIME"; }
 pointer() { python3 plan/ws035/tests/qmp-pointer.py "$GUEST_RUNTIME/qmp.sock" "$@"; }
 keys() { python3 plan/ws035/tests/qmp-keys.py "$GUEST_RUNTIME/qmp.sock" "$@"; }
-stop_all='for p in $(ps -A -o pid,args | grep -E "[z]wl|[w]lshm|[w]ltest|[m]view|[z]desktop-terminal" | awk "{print \$1}"); do kill $p; done; i=0; while ps -A -o args | grep -qE "[z]wl|[w]lshm|[w]ltest|[m]view|[z]desktop-terminal" && [ $i -lt 50 ]; do sleep 0.2; i=$((i+1)); done'
+stop_all='for p in $(ps -A -o pid,args | grep -E "[z]desktop( |$)|[w]lshm|[w]ltest|[m]view|[z]desktop-terminal" | awk "{print \$1}"); do kill $p; done; i=0; while ps -A -o args | grep -qE "[z]desktop( |$)|[w]lshm|[w]ltest|[m]view|[z]desktop-terminal" && [ $i -lt 50 ]; do sleep 0.2; i=$((i+1)); done'
 status=0
 
-# Fails the run unless zwl's log has a line matching a pattern.
+# Fails the run unless zdesktop's log has a line matching a pattern.
 expect_log() {
-	found=$(guest "grep -cE '$1' /tmp/zwl.log" | tail -1)
+	found=$(guest "grep -cE '$1' /tmp/zdesktop.log" | tail -1)
 	if [ "${found:-0}" -gt 0 ] 2>/dev/null; then
 		echo "log: $1 ok"
 	else
@@ -38,14 +38,14 @@ expect_log() {
 	fi
 }
 
-# The centre of an icon, from zwl's log.
+# The centre of an icon, from zdesktop's log.
 icon() {
-	guest "grep 'ZWL HOME icon name=\"$1\"' /tmp/zwl.log | tail -1" | sed -n 's/.* x=\([0-9]*\) y=\([0-9]*\).*/\1 \2/p'
+	guest "grep 'ZWL HOME icon name=\"$1\"' /tmp/zdesktop.log | tail -1" | sed -n 's/.* x=\([0-9]*\) y=\([0-9]*\).*/\1 \2/p'
 }
 
 guest "$stop_all" >/dev/null
 guest 'export XDG_RUNTIME_DIR=/tmp; rm -f /tmp/wayland-0; picture=; [ -f /usr/share/zdesktop/wallpaper.ppm ] && picture=--wallpaper=/usr/share/zdesktop/wallpaper.ppm
-/bin/zwl --timeout=600 --width=1280 --height=800 --glass $picture --log-frames > /tmp/zwl.log 2>&1 </dev/null & sleep 4
+/bin/zdesktop --timeout=600 --width=1280 --height=800 --glass $picture --log-frames > /tmp/zdesktop.log 2>&1 </dev/null & sleep 4
 /bin/wlshm --size=520x340 --color=ffe8eef8 --frames=20000 --token=b > /tmp/b.log 2>&1 </dev/null & sleep 3; echo started' >/dev/null
 
 # 1. The launcher opens Home.
@@ -96,9 +96,9 @@ pointer move 1268 788 sleep 500 down sleep 60 up sleep 1200
 check "$out/closed.png" >/dev/null
 expect_log 'ZWL HOME close via=corner'
 
-guest 'grep -E "FAILED|ERROR" /tmp/zwl.log' | tee "$out/errors.txt"
+guest 'grep -E "FAILED|ERROR" /tmp/zdesktop.log' | tee "$out/errors.txt"
 [ -s "$out/errors.txt" ] && status=1
-guest 'grep -E "ZWL (HOME|MAP)" /tmp/zwl.log' > "$out/log.txt"
+guest 'grep -E "ZWL (HOME|MAP)" /tmp/zdesktop.log' > "$out/log.txt"
 guest "$stop_all" >/dev/null
 [ $status -eq 0 ] && echo "p069: PASS" || echo "p069: FAIL"
 exit $status

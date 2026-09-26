@@ -85,7 +85,7 @@ PROFILES = {
                             [f'oracle-{index}.json' for index in range(1, 13)] +
                             ['console-return.ppm', 'console-write.ppm', 'console-killed.ppm',
                              'wayland-observed.log'],
-                'source_directories': ['userland/base/wltest', 'userland/base/zwl',
+                'source_directories': ['userland/base/wltest', 'userland/base/zdesktop',
                                        'userland/base/tests/gpu-share',
                                        'userland/base/tests/gpu-fence',
                                        'userland/base/tests/gpu-admission',
@@ -109,7 +109,7 @@ PROFILES = {
                                  'plan/ws014/tests/run-wayland-remote.py'],
                 'additional_artifacts': {'vulkan_library': 'dynamic/libvulkan.so',
                                          'wayland_library': 'dynamic/libwayland-client.so',
-                                         'compositor': 'bin/zwl',
+                                         'compositor': 'bin/zdesktop',
                                          'sharing_test': 'bin/gpu-share-test',
                                          'fence_test': 'bin/gpu-fence-test',
                                          'recovery_test': 'bin/gpu-recovery-test',
@@ -124,13 +124,13 @@ PROFILES['mview'] = {
     'evidence': [name for name in EVIDENCE_FILES if name != 'frame.ppm'] +
                 ['initial.ppm', 'rotate.ppm', 'pan.ppm', 'zoom.ppm', 'keys.ppm', 'reset.ppm',
                  'mview-observed.log'],
-    'source_directories': ['userland/base/mview', 'userland/base/zwl', 'userland/base/libwayland',
+    'source_directories': ['userland/base/mview', 'userland/base/zdesktop', 'userland/base/libwayland',
                            'include/libc/wayland', 'userland/base/libvulkan', 'include/libc/vulkan'],
     'source_files': ['plan/ws031/tests/mview-qemu.py', 'plan/ws031/tests/run-mview-remote.py',
                      'plan/ws031/tests/config-mview-amd64.mk'],
     'additional_artifacts': {'vulkan_library': 'dynamic/libvulkan.so',
                              'wayland_library': 'dynamic/libwayland-client.so',
-                             'compositor': 'bin/zwl'}}
+                             'compositor': 'bin/zdesktop'}}
 
 # The profiles whose harness runs its own guest commands with a token.
 TOKEN_PROFILES = ('vkdemo', 'wayland', 'mview')

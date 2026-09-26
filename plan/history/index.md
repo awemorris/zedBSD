@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q485（ws069-p007 canceled。X server の作り直しの判断）
+Last finished Queue: q486（ws035-p073 cleared。zwl を zdesktop へ改名）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q485（2026-09-26〜27）
+## 最新: q443〜q486（2026-09-26〜27）
+
+[q486](queue-q486.md): ws035-p073 cleared。`userland/base/zwl` を `userland/base/zdesktop`（`/bin/zdesktop`）へ改名（C の識別子と log の `ZWL` は据え置き）。
 
 [q485](queue-q485.md): ws069-p007 uncleared・canceled。BUG-057 は zgears が libGL の中の XGetGeometry の返事を待って止まる所まで特定。libX11 の `XPending` の断片の読み捨てを修正。2026-09-27 ユーザーの判断で X server を単体の zdesktop-x11server に作り直し、Xzed は元に戻す（master の 2026-09-27 の判断）。
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Compiles zwl's shaders and writes userland/base/zwl/shaders.h.
+"""Compiles zdesktop's shaders and writes userland/base/zdesktop/shaders.h.
 
 The build uses the checked-in header, so no shader compiler is needed to
-build zwl; run this (with glslc and spirv-val on PATH) after changing a
+build zdesktop; run this (with glslc and spirv-val on PATH) after changing a
 shader.
 Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 """

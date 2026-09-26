@@ -42,7 +42,7 @@
 #define TERMINAL_FOREGROUND	0xdcdfe6U
 #define TERMINAL_BACKGROUND	0x1d2230U
 
-/* The modifier bits of wl_keyboard.modifiers, as zwl reports them. */
+/* The modifier bits of wl_keyboard.modifiers, as zdesktop reports them. */
 #define TERMINAL_MODIFIER_SHIFT		0x01U
 #define TERMINAL_MODIFIER_CONTROL	0x04U
 #define TERMINAL_MODIFIER_ALT		0x08U
