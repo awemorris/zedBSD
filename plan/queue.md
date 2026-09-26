@@ -1,10 +1,10 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue: なし（q478 finished）
+# Queue: q479 active
 
 <!-- awesome-plan-current:start -->
-Status: none（2026-09-26）
-Active Queue: なし
+Status: active（2026-09-26）
+Active Queue: [q479](history/queue-q479.md)（ws035-p070: App Home から X11 の app）
 Last finished Queue: [q478](history/queue-q478.md)（ws069-p005 cleared。固定機能の GL 1.x と gears）
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
