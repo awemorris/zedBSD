@@ -1,10 +1,10 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue: なし（q479 finished）
+# Queue: q480 active
 
 <!-- awesome-plan-current:start -->
-Status: none（2026-09-26）
-Active Queue: なし
+Status: active（2026-09-26）
+Active Queue: [q480](history/queue-q480.md)（ws035-p071: App Home の続き）
 Last finished Queue: [q479](history/queue-q479.md)（ws035-p070 cleared。App Home から X11 の app）
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
