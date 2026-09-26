@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q478（ws069-p005 cleared。固定機能の GL 1.x と gears）
+Last finished Queue: q479（ws035-p070 cleared。App Home から X11 の app）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q478（2026-09-26）
+## 最新: q443〜q479（2026-09-26）
+
+[q479](queue-q479.md): ws035-p070 cleared。App Home に X terminal と Gears、`/usr/libexec/zdesktop-x11` が Xzed --rootless を必要なときに 1 つ起動。demo image にも。
 
 [q478](queue-q478.md): ws069-p005 cleared。固定機能の GL 1.x（行列・光源・material・glBegin/glEnd・client 配列・display list、flat の provoking vertex）を libGL の中に。zgears の歯車が Venus の rootless の X の窓で回る（約 4.7 fps）。
 

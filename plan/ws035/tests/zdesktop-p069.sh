@@ -53,7 +53,7 @@ pointer move 23 17 sleep 300 down sleep 60 up sleep 1200
 pointer move 700 500 sleep 400
 check "$out/home.png" >/dev/null
 expect_log 'ZWL HOME open via=launcher'
-expect_log 'ZWL HOME opened apps=4'
+expect_log 'ZWL HOME opened apps=6'
 
 # 2. The Terminal icon starts the terminal and closes Home.
 set -- $(icon Terminal)

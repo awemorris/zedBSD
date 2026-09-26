@@ -96,7 +96,7 @@ main(
 	/* The command line. */
 	status = gears_parse(argc, argv, &options);
 	if (status != 0) {
-		fprintf(stderr, "usage: zgears [--size=WxH] [--frames=N] [--delay-ms=N] [--token=NAME]\n");
+		fprintf(stderr, "usage: zgears [--size=WxH] [--frames=N (0: until closed)] [--delay-ms=N] [--token=NAME]\n");
 		return 2;
 	}
 
@@ -143,10 +143,10 @@ main(
 	fflush(stdout);
 	gears_setup(lists);
 
-	/* Each frame at the window's size, the gears a little further round. */
+	/* Each frame at the window's size, the gears a little further round (--frames=0: until the window is closed). */
 	failures = 0;
 	started = gears_now();
-	for (frame = 1U; frame <= options.frames; frame++) {
+	for (frame = 1U; frame <= options.frames || options.frames == 0U; frame++) {
 		/* The events waiting (a closed connection ends the program in XPending). */
 		pending = XPending(display);
 		while (pending > 0) {
@@ -160,7 +160,7 @@ main(
 		(void)XGetGeometry(display, window, &root, &x, &y, &width, &height, &border, &depth);
 
 		/* The gears, the first frame read back, and shown. */
-		gears_draw(lists, width, height, (GLfloat)frame * 2.0f);
+		gears_draw(lists, width, height, (GLfloat)(frame % 3600U) * 2.0f);
 		if (frame == 1U)
 			failures = gears_check(width, height, options.token);
 		glXSwapBuffers(display, window);

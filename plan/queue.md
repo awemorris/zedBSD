@@ -1,12 +1,12 @@
 <!-- awesome-plan project=zedbsd record=queue -->
 
-# Queue: q479 active
+# Queue: なし（q479 finished）
 
 <!-- awesome-plan-current:start -->
-Status: active（2026-09-26）
-Active Queue: [q479](history/queue-q479.md)（ws035-p070: App Home から X11 の app）
-Last finished Queue: [q478](history/queue-q478.md)（ws069-p005 cleared。固定機能の GL 1.x と gears）
+Status: none（2026-09-26）
+Active Queue: なし
+Last finished Queue: [q479](history/queue-q479.md)（ws035-p070 cleared。App Home から X11 の app）
 Executor: メインセッション（サブエージェントは使わない）
 <!-- awesome-plan-current:end -->
 
-Upcoming Work Outlook: ws068-p009（EGL の frame を重ねる）、ws068-p011（FBO）、App Home の残り（X の app の項目等）、ws035-p064・p065・p057、ws069-p006（i915 実機）（GLX: SPIR-V の GLES の上に desktop GL の部分集合。GLSL は p003 の後）、ws068-p003（GLSL、方式のユーザーの判断の後）、ws035-p064、p065、p057、App Home の残り。
+Upcoming Work Outlook: ws068-p009（EGL の frame を重ねる）、ws068-p011（FBO）、App Home の残り（paging、起動の animation）、ws035-p064・p065・p057、ws069-p006（i915 実機）（GLX: SPIR-V の GLES の上に desktop GL の部分集合。GLSL は p003 の後）、ws068-p003（GLSL、方式のユーザーの判断の後）、ws035-p064、p065、p057、App Home の残り。

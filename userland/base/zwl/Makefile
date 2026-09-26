@@ -8,4 +8,7 @@ ZWL_SOURCES := userland/base/zwl/main.c userland/base/zwl/wire.c \
 	userland/base/zwl/compose.c userland/base/zwl/import.c userland/base/zwl/shm.c \
 	userland/base/zwl/glass.c userland/base/zwl/shell.c userland/base/zwl/home.c \
 	userland/base/vkdemo/display.c
+# App Home starts X11 applications through zdesktop-x11, which starts Xzed --rootless when it is needed.
+ZEDBSD_PACKAGE_INPUTS += userland/base/zwl/zdesktop-x11
+ZEDBSD_PACKAGE_FILES += $(if $(filter zwl,$(ZEDBSD_USER_PROGRAMS)),--file /usr/libexec/zdesktop-x11=userland/base/zwl/zdesktop-x11)
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,zwl,Wayland compositor,amd64,y,basic,$(ZWL_SOURCES),y,base,base/zwl,base/libvulkan base/libtruetype,0755,program,,,bin))

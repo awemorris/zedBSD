@@ -566,6 +566,8 @@ home_read_apps(void)
 		home_add_app("Model viewer", "/bin/mview --windowed --size=960x640", "3d mview model vulkan viewer", 0xe07a5aU);
 		home_add_app("Vulkan test", "/bin/wltest --windowed --size=640x420 --frames=3600 --delay-ms=30", "wltest gpu test", 0x5a8de0U);
 		home_add_app("Shared memory", "/bin/wlshm --size=480x320 --frames=6000", "wlshm shm test", 0x5aa87aU);
+		home_add_app("X terminal", "/bin/sh /usr/libexec/zdesktop-x11 /bin/zterm", "x11 xterm zterm", 0x4a4a78U);
+		home_add_app("Gears", "/bin/sh /usr/libexec/zdesktop-x11 /bin/zgears --frames=0", "gears opengl glx x11 3d", 0xd05a3aU);
 	}
 }
 
