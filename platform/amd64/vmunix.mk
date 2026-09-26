@@ -696,7 +696,7 @@ $(BUILD)/bin/$(1): $(AMD64_APP_INPUTS) $(AMD64_USER_BASIC_COMMON_OBJ) \
  $(call ZEDBSD_USERLAND_OBJECTS,$(AMD64_APP_OBJ),$(1)) $(AMD64_APP_LIBS) -o $$@
 	$(AMD64_APP_CHECK) $$@
 endef
-$(foreach command,$(filter-out vkdemo wltest wlshm mview zwl zdesktop-terminal gpu-share-test gpu-fence-test acquire-fence-test,$(USER_BASIC_COMMANDS)),\
+$(foreach command,$(filter-out vkdemo wltest wlshm mview zwl zdesktop-terminal egltest gpu-share-test gpu-fence-test acquire-fence-test,$(USER_BASIC_COMMANDS)),\
 	$(eval $(call AMD64_USER_BASIC_COMMAND,$(command))))
 # ELF64 runtime linker and shared libc.
 DYNAMIC_DIR := $(BUILD)/dynamic
@@ -818,6 +818,42 @@ $(DYNAMIC_DIR)/libtruetype.so: $(DYNAMIC_TRUETYPE_OBJS) $(DYNAMIC_DIR)/libc.so \
  $(DYNAMIC_TRUETYPE_OBJS) -L$(DYNAMIC_DIR) -l:libc.so -o $@
 	$(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 --role shared-library \
  --needed libc.so --soname libtruetype.so $@
+
+# The Wayland EGL window (WS068 p002); it needs nothing but the C library.
+DYNAMIC_WAYLAND_EGL_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libwayland-egl)
+
+$(DYNAMIC_DIR)/libwayland-egl.so: $(DYNAMIC_WAYLAND_EGL_OBJS) $(DYNAMIC_DIR)/libc.so \
+	userland/base/libwayland-egl/exports.map tools/build/check-dynamic-elf.py
+	$(LD) -m elf_x86_64 -shared -soname libwayland-egl.so --hash-style=both \
+ -z defs -z now -z relro -z separate-code -z stack-size=0x100000 \
+ --version-script=userland/base/libwayland-egl/exports.map \
+ $(DYNAMIC_WAYLAND_EGL_OBJS) -L$(DYNAMIC_DIR) -l:libc.so -o $@
+	$(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 --role shared-library \
+ --needed libc.so --soname libwayland-egl.so $@
+
+# EGL over Vulkan (WS068 p002): Wayland and display-direct windows.
+DYNAMIC_EGL_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libegl)
+
+$(DYNAMIC_DIR)/libEGL.so: $(DYNAMIC_EGL_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libwayland-client.so \
+	$(DYNAMIC_DIR)/libc.so userland/base/libegl/exports.map tools/build/check-dynamic-elf.py
+	$(LD) -m elf_x86_64 -shared -soname libEGL.so --hash-style=both \
+ -z defs -z now -z relro -z separate-code -z stack-size=0x100000 \
+ --version-script=userland/base/libegl/exports.map \
+ $(DYNAMIC_EGL_OBJS) -L$(DYNAMIC_DIR) -l:libvulkan.so -l:libwayland-client.so -l:libc.so -o $@
+	$(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 --role shared-library \
+ --needed libvulkan.so --needed libwayland-client.so --needed libc.so --soname libEGL.so $@
+
+# OpenGL ES over EGL (WS068 p002); it finds its context through libEGL.
+DYNAMIC_GLESV2_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libglesv2)
+
+$(DYNAMIC_DIR)/libGLESv2.so: $(DYNAMIC_GLESV2_OBJS) $(DYNAMIC_DIR)/libEGL.so $(DYNAMIC_DIR)/libc.so \
+	userland/base/libglesv2/exports.map tools/build/check-dynamic-elf.py
+	$(LD) -m elf_x86_64 -shared -soname libGLESv2.so --hash-style=both \
+ -z defs -z now -z relro -z separate-code -z stack-size=0x100000 \
+ --version-script=userland/base/libglesv2/exports.map \
+ $(DYNAMIC_GLESV2_OBJS) -L$(DYNAMIC_DIR) -l:libEGL.so -l:libc.so -o $@
+	$(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 --role shared-library \
+ --needed libEGL.so --needed libc.so --soname libGLESv2.so $@
 
 # The desktop's way into the system; it needs nothing but the C library.
 DYNAMIC_ZDESKTOP_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libzdesktop)
@@ -962,6 +998,21 @@ $(BUILD)/bin/zdesktop-terminal: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  -l:libvulkan.so -l:libwayland-client.so -l:libtruetype.so -l:libc.so -o $@
 	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine amd64 --role application \
  --needed libvulkan.so --needed libwayland-client.so --needed libtruetype.so --needed libc.so $@
+
+# The EGL test application (WS068 p002) imports standard Wayland, EGL and GLES entry points.
+DYNAMIC_EGLTEST_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,egltest)
+
+$(BUILD)/bin/egltest: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
+	$(DYNAMIC_EGLTEST_OBJS) $(DYNAMIC_DIR)/libEGL.so $(DYNAMIC_DIR)/libGLESv2.so $(DYNAMIC_DIR)/libwayland-egl.so \
+	$(DYNAMIC_DIR)/libwayland-client.so $(DYNAMIC_DIR)/libc.so $(DYNAMIC_DIR)/ld.so
+	@mkdir -p $(dir $@)
+	$(CC) -m64 -nostdlib -pie -Wl,--no-relax \
+ -Wl,--hash-style=sysv,-z,now,-z,relro,-z,separate-code \
+ -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
+ -Wl,--dynamic-linker=/lib/ld.so \
+ $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_EGLTEST_OBJS) \
+ -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
+ -l:libEGL.so -l:libGLESv2.so -l:libwayland-egl.so -l:libwayland-client.so -l:libc.so -o $@
 
 # The external-fence test uses only the installed standard Vulkan shared library.
 $(BUILD)/bin/gpu-fence-test: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \

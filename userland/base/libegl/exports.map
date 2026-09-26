@@ -1,0 +1,47 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/* The EGL calls, and the one libGLESv2 finds its context with. */
+{
+	global:
+		eglBindAPI;
+		eglChooseConfig;
+		eglCreateContext;
+		eglCreatePbufferSurface;
+		eglCreatePlatformWindowSurface;
+		eglCreatePlatformWindowSurfaceEXT;
+		eglCreateWindowSurface;
+		eglDestroyContext;
+		eglDestroySurface;
+		eglGetConfigAttrib;
+		eglGetConfigs;
+		eglGetCurrentContext;
+		eglGetCurrentDisplay;
+		eglGetCurrentSurface;
+		eglGetDisplay;
+		eglGetError;
+		eglGetPlatformDisplay;
+		eglGetPlatformDisplayEXT;
+		eglGetProcAddress;
+		eglInitialize;
+		eglMakeCurrent;
+		eglQueryAPI;
+		eglQueryContext;
+		eglQueryString;
+		eglQuerySurface;
+		eglReleaseThread;
+		eglSurfaceAttrib;
+		eglSwapBuffers;
+		eglSwapInterval;
+		eglTerminate;
+		eglWaitClient;
+		eglWaitGL;
+		eglWaitNative;
+		zegl_current_context;
+	local:
+		*;
+};

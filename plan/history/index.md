@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q470（ws068-p001 cleared。EGL/GLES の設計）
+Last finished Queue: q471（ws068-p002 cleared。EGL の核）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q470（2026-09-26）
+## 最新: q443〜q471（2026-09-26）
+
+[q471](queue-q471.md): ws068-p002 cleared。EGL 1.5 の核（Wayland・display 直接・surfaceless、config、window surface と swapchain、context、swap）、libwayland-egl、clear だけの libGLESv2、Khronos の header と出典、egltest。Venus で zwl の窓と全画面の clear。
 
 [q470](queue-q470.md): ws068-p001 cleared。EGL/GLES の設計（plan/ws068/design.md）: library の構成、EGL（Wayland・display 直接）、GLES の方式の比較と推奨（B: 自前の変換層＋glslang）。方式の選択はユーザーの判断待ち（p003 の前提）。
 

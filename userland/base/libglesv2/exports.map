@@ -1,0 +1,21 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/* Only the OpenGL ES calls leave the library. */
+{
+	global:
+		glClear;
+		glClearColor;
+		glFinish;
+		glFlush;
+		glGetError;
+		glGetIntegerv;
+		glGetString;
+		glViewport;
+	local:
+		*;
+};
