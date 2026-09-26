@@ -87,6 +87,34 @@ enum zwl_kind {
 	ZWL_SEAT,
 	ZWL_POINTER,
 	ZWL_KEYBOARD,
+	ZWL_SHM,
+	ZWL_SHM_POOL,
+};
+
+/* The wl_shm formats (ARGB8888 has alpha; XRGB8888's top byte is unused). */
+#define ZWL_SHM_ARGB8888	0U
+#define ZWL_SHM_XRGB8888	1U
+
+/*
+ * A wl_shm_pool's memory: the client's fd, mapped read-only once at
+ * creation and again at resize.  The pool object and each buffer made from
+ * it hold a reference; the mapping goes with the last.
+ */
+struct zwl_pool {
+	int fd;
+	void *map;
+	size_t size;
+	unsigned references;
+};
+
+/* Where a wl_shm buffer's pixels are in its pool. */
+struct zwl_shm_buffer {
+	struct zwl_pool *pool;
+	uint32_t offset;
+	uint32_t width;
+	uint32_t height;
+	uint32_t stride;
+	uint32_t format;
 };
 
 /*
@@ -173,6 +201,21 @@ struct zwl_object {
 	int32_t window_y;
 	/* A surface whose current image has not been shown yet. */
 	unsigned fresh;
+	/* A wl_shm buffer's place in its pool (NULL for a GPU buffer), and a pool object's memory. */
+	struct zwl_shm_buffer *shm;
+	struct zwl_pool *pool;
+	/* A surface's damage in buffer pixels, pending and committed (x0, y0, x1, y1), and whether any was given. */
+	int32_t damage[4];
+	unsigned damaged;
+	int32_t committed_damage[4];
+	unsigned committed_damaged;
+	/* A surface's copy of its wl_shm image that window mode samples, and whether it must be copied again. */
+	struct zwl_import *shm_image;
+	unsigned shm_upload;
+	/* A surface used as the pointer's cursor (wl_pointer.set_cursor). */
+	unsigned cursor_role;
+	/* A window told its frame is done whose next commit the next frame waits for a moment. */
+	unsigned awaited;
 };
 
 /* One stream has independent byte and fd FIFOs, plus its own protocol namespace. */
@@ -212,6 +255,9 @@ struct zwl_perf {
 	uint64_t compose_draw_cycles;
 	uint64_t compose_acquire_cycles;
 	uint64_t compose_present_cycles;
+	/* wl_shm: images copied, and the CPU time of the copies. */
+	uint32_t shm_copies;
+	uint64_t shm_copy_cycles;
 };
 
 uint64_t zwl_cycles(void);
@@ -262,6 +308,21 @@ struct zwl_server {
 	uint64_t map_order;
 	uint32_t windows;
 	uint64_t mode_switch_ms;
+	/*
+	 * Frame pacing: after a frame, the windows it told are waited for, until
+	 * all have committed or half the last frame's time (at most 50 ms) has
+	 * passed, so that a quick client does not start the next frame without
+	 * a slower one.
+	 */
+	unsigned awaiting;
+	uint64_t frame_done_ms;
+	uint64_t frame_wait_ms;
+	/* The cursor: a client's surface, zdesktop's arrow when there is none, or hidden. */
+	struct zwl_object *cursor_surface;
+	int32_t cursor_hotspot_x;
+	int32_t cursor_hotspot_y;
+	unsigned cursor_hidden;
+	struct zwl_import *arrow;
 };
 
 uint64_t zwl_milliseconds(void);
@@ -280,6 +341,7 @@ struct zwl_object *zwl_create(struct zwl_client *client, uint32_t id, enum zwl_k
 void zwl_object_destroy(struct zwl_object *object);
 void zwl_buffer_get(struct zwl_object *buffer);
 void zwl_buffer_put(struct zwl_object *buffer);
+void zwl_buffer_size(const struct zwl_object *buffer, uint32_t *width, uint32_t *height);
 void zwl_callbacks_done(struct zwl_object **callbacks);
 int zwl_gpu_open(struct zwl_server *server);
 int zwl_gpu_import(struct zwl_object *buffer, int descriptor, const struct gpu_image_descriptor *image);
@@ -296,6 +358,14 @@ void zwl_compose_quiesce(struct zwl_server *server);
 void zwl_compose_close(struct zwl_server *server);
 int zwl_import_create(struct zwl_object *buffer, int descriptor);
 void zwl_import_destroy(struct zwl_object *buffer);
+int zwl_shm_upload(struct zwl_server *server);
+void zwl_shm_image_destroy(struct zwl_server *server, struct zwl_object *surface);
+void zwl_pool_put(struct zwl_pool *pool);
+int zwl_shm_request(struct zwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
+int zwl_shm_bind(struct zwl_object *shm);
+void zwl_cursor_default(struct zwl_server *server);
+int zwl_arrow_create(struct zwl_server *server);
+void zwl_arrow_destroy(struct zwl_server *server);
 struct zwl_object *zwl_top_window(struct zwl_server *server);
 int zwl_window_send_configure(struct zwl_object *surface);
 uint32_t zwl_next_serial(struct zwl_server *server);

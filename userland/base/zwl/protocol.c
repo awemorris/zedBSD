@@ -30,6 +30,7 @@ static const struct zwl_global globals[] = {
 	{ 3, "zed_gpu_buffer_v1", 1, ZWL_FACTORY },
 	{ 4, "wl_output", 2, ZWL_OUTPUT },
 	{ 5, "wl_seat", 5, ZWL_SEAT },
+	{ 6, "wl_shm", 1, ZWL_SHM },
 };
 
 static uint32_t word_at(const unsigned char *bytes, size_t offset);
@@ -42,6 +43,8 @@ static int surface_commit(struct zwl_object *surface);
 static int shell_request(struct zwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 static int factory_request(struct zwl_object *factory, uint32_t opcode, const unsigned char *bytes, size_t size);
 static void append_callbacks(struct zwl_object **list, struct zwl_object *callbacks);
+static void add_damage(struct zwl_object *surface, int32_t x, int32_t y, int32_t width, int32_t height);
+static void commit_damage(struct zwl_object *surface);
 
 /*
  * Dispatches one validated frame through its client-local interface identity.
@@ -137,6 +140,10 @@ zwl_dispatch(
 		break;
 	case ZWL_FACTORY:
 		error = factory_request(object, opcode, bytes, size);
+		break;
+	case ZWL_SHM:
+	case ZWL_SHM_POOL:
+		error = zwl_shm_request(object, opcode, bytes, size);
 		break;
 	case ZWL_WM:
 	case ZWL_XDG_SURFACE:
@@ -368,6 +375,13 @@ bind_global(
 				return error;
 		}
 
+		/* wl_shm bindings learn the formats they may use. */
+		if (object->kind == ZWL_SHM) {
+			error = zwl_shm_bind(object);
+			if (error != 0)
+				return error;
+		}
+
 		/* Seat bindings immediately learn the present device classes and the seat name. */
 		if (object->kind == ZWL_SEAT) {
 			/* Publish the newly bound seat's capabilities and name. */
@@ -450,11 +464,12 @@ surface_request(
 		break;
 	case 2:
 	case 9:
-		/* The compositor presents the full buffer, so valid damage does not need storage. */
+		/* Damage is a rectangle (x, y, width, height), in buffer pixels at scale one without transform. */
 		if (size != 16U)
 			return EPROTO;
 
-		/* Succeeded: whole-buffer scanout includes the supplied damage. */
+		/* It joins the pending damage (a wl_shm image copies only those rows). */
+		add_damage(surface, (int32_t)word_at(bytes, 0), (int32_t)word_at(bytes, 4), (int32_t)word_at(bytes, 8), (int32_t)word_at(bytes, 12));
 		break;
 	case 3:
 		/* One frame request allocates one callback in pending state. */
@@ -531,10 +546,37 @@ surface_commit(
 	struct zwl_server *server;
 	int error;
 
-	/* Only a toplevel supplies presentable content in this compositor. */
+	/*
+	 * A cursor surface's content is used directly, with no configure; a
+	 * surface with no role yet keeps its content the same way, unshown
+	 * (a client commits its cursor surface before set_cursor names it).
+	 */
 	role = surface->role;
 	server = surface->client->server;
-	if (role == NULL || role->top == NULL)
+	if (surface->cursor_role || role == NULL) {
+		previous = surface->queued;
+		if (surface->attached) {
+			surface->queued = surface->pending;
+			surface->pending = NULL;
+		} else {
+			surface->queued = surface->current;
+			zwl_buffer_get(surface->queued);
+		}
+
+		/* The content and its damage are committed. */
+		surface->attached = 0;
+		surface->ready = 1;
+		if (surface->queued != NULL)
+			surface->queued->busy = 1;
+		commit_damage(surface);
+		zwl_buffer_put(previous);
+		append_callbacks(&surface->committed_callbacks, surface->callbacks);
+		surface->callbacks = NULL;
+		return 0;
+	}
+
+	/* Otherwise only a toplevel supplies presentable content in this compositor. */
+	if (role->top == NULL)
 		return EPROTO;
 
 	/* The first empty commit requests the compositor's configure state. */
@@ -586,6 +628,9 @@ surface_commit(
 	surface->commit_order = server->commit_order;
 	if (surface->queued != NULL)
 		surface->queued->busy = 1;
+
+	/* The damage goes with the commit. */
+	commit_damage(surface);
 
 	/* Dropped mailbox images are reusable once no other compositor use remains. */
 	zwl_buffer_put(previous);
@@ -753,10 +798,8 @@ shell_request(
 			surface->window_y = surface->y;
 			surface->window_width = 0;
 			surface->window_height = 0;
-			if (surface->current != NULL) {
-				surface->window_width = surface->current->image.image.width;
-				surface->window_height = surface->current->image.image.height;
-			}
+			if (surface->current != NULL)
+				zwl_buffer_size(surface->current, &surface->window_width, &surface->window_height);
 
 			/* It covers the output from the origin. */
 			surface->x = 0;
@@ -949,6 +992,71 @@ zwl_window_send_configure(
 	/* Succeeded. */
 	printf("ZWL CONFIGURE client=%llu surface=%u serial=%u width=%u height=%u fullscreen=%u\n", (unsigned long long)surface->client->number, surface->id, surface->configure_serial, configure[0], configure[1], surface->fullscreen);
 	return 0;
+}
+
+/* Adds a rectangle to a surface's pending damage (their bounding box). */
+static void
+add_damage(
+	struct zwl_object *surface,
+	int32_t x,
+	int32_t y,
+	int32_t width,
+	int32_t height)
+{
+	/* An empty rectangle adds nothing. */
+	if (width <= 0 || height <= 0)
+		return;
+
+	/* The first rectangle, or the box around both. */
+	if (!surface->damaged) {
+		surface->damage[0] = x;
+		surface->damage[1] = y;
+		surface->damage[2] = x + width;
+		surface->damage[3] = y + height;
+		surface->damaged = 1;
+		return;
+	}
+
+	/* The box grows to hold the rectangle. */
+	if (x < surface->damage[0])
+		surface->damage[0] = x;
+	if (y < surface->damage[1])
+		surface->damage[1] = y;
+	if (x + width > surface->damage[2])
+		surface->damage[2] = x + width;
+	if (y + height > surface->damage[3])
+		surface->damage[3] = y + height;
+}
+
+/*
+ * Moves a commit's damage to the committed damage, joined with any not yet
+ * copied (two commits may come before one copy).
+ */
+static void
+commit_damage(
+	struct zwl_object *surface)
+{
+	/* No damage leaves the committed damage as it is. */
+	if (!surface->damaged)
+		return;
+
+	/* The first, or the box around both. */
+	if (!surface->committed_damaged) {
+		memcpy(surface->committed_damage, surface->damage, sizeof(surface->damage));
+		surface->committed_damaged = 1;
+	} else {
+		if (surface->damage[0] < surface->committed_damage[0])
+			surface->committed_damage[0] = surface->damage[0];
+		if (surface->damage[1] < surface->committed_damage[1])
+			surface->committed_damage[1] = surface->damage[1];
+		if (surface->damage[2] > surface->committed_damage[2])
+			surface->committed_damage[2] = surface->damage[2];
+		if (surface->damage[3] > surface->committed_damage[3])
+			surface->committed_damage[3] = surface->damage[3];
+	}
+
+	/* The pending damage starts again. */
+	surface->damaged = 0;
 }
 
 /* Preserves callback request order across pending-state commits and mailbox replacement. */

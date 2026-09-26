@@ -744,6 +744,13 @@ zwl_perf_report(
 		    (double)perf->compose_present_cycles / per_ms / (double)perf->compose_frames,
 		    (double)perf->compose_cycles / per_ms / (double)perf->compose_frames);
 	}
+
+	/* wl_shm's copies: how many, and the CPU time of one. */
+	if (perf->shm_copies != 0) {
+		printf("ZWL PERF shm copies=%u copy_ms=%.3f\n",
+		    perf->shm_copies,
+		    (double)perf->shm_copy_cycles / per_ms / (double)perf->shm_copies);
+	}
 	fflush(stdout);
 
 	memset(perf, 0, sizeof(*perf));

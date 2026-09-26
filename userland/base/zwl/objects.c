@@ -98,6 +98,27 @@ zwl_buffer_get(
 }
 
 /*
+ * Reports a buffer's size: a wl_shm buffer's, or a GPU image's.
+ */
+void
+zwl_buffer_size(
+	const struct zwl_object *buffer,
+	uint32_t *width,
+	uint32_t *height)
+{
+	/* A wl_shm buffer knows its size in its pool. */
+	if (buffer->shm != NULL) {
+		*width = buffer->shm->width;
+		*height = buffer->shm->height;
+		return;
+	}
+
+	/* A GPU buffer's size is its image's. */
+	*width = buffer->image.image.width;
+	*height = buffer->image.image.height;
+}
+
+/*
  * Drops a compositor use and reports release only after every use is finished.
  */
 void
@@ -226,8 +247,17 @@ zwl_object_destroy(
 				object->role->top->surface = NULL;
 		}
 
-		/* Window mode draws the output again without it. */
+		/* Window mode draws the output again without it, and without its wl_shm image or cursor. */
 		server->dirty = 1;
+		if (object->awaited) {
+			object->awaited = 0;
+			server->awaiting--;
+		}
+
+		/* Its wl_shm image goes; a cursor surface gives the arrow back. */
+		zwl_shm_image_destroy(server, object);
+		if (server->cursor_surface == object)
+			zwl_cursor_default(server);
 
 		/* Pending state and current surface content own independent image holds. */
 		zwl_buffer_put(object->pending);
@@ -361,9 +391,20 @@ object_free(
 	struct zwl_client *client;
 	int error;
 
-	/* Window mode's Vulkan image goes with the buffer. */
+	/* Window mode's Vulkan image goes with the buffer; a wl_shm buffer or pool drops its pool's memory. */
 	client = object->client;
 	zwl_import_destroy(object);
+	if (object->shm != NULL) {
+		zwl_pool_put(object->shm->pool);
+		free(object->shm);
+		object->shm = NULL;
+	}
+
+	/* A pool object drops its own reference. */
+	if (object->pool != NULL) {
+		zwl_pool_put(object->pool);
+		object->pool = NULL;
+	}
 
 	/* Imported resource handles belong exclusively to the compositor's GPU open. */
 	if (object->image.handle != 0 && client->server->gpu >= 0) {

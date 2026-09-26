@@ -295,6 +295,7 @@ zwl_schedule(
 	struct zwl_object *surface;
 	struct zwl_object *top;
 	unsigned fullscreen;
+	uint64_t now;
 	int error;
 
 	/* Without a Vulkan device the compositor shows one surface directly, as before. */
@@ -338,8 +339,9 @@ zwl_schedule(
 		return;
 	}
 
-	/* Fullscreen mode shows the window's newest image directly. */
+	/* Fullscreen mode shows the window's newest image directly (hidden wl_shm windows are still copied). */
 	if (!server->windowed) {
+		(void)zwl_shm_upload(server);
 		if (top->fresh || server->front_surface != top) {
 			error = present_current(server, top);
 			if (error != 0) {
@@ -356,6 +358,14 @@ zwl_schedule(
 	/* Input goes to the topmost window. */
 	server->front_surface = top;
 	zwl_seat_focus(server);
+
+	/* wl_shm images are copied, and their buffers released, while no frame is in flight. */
+	(void)zwl_shm_upload(server);
+
+	/* The windows the last frame told get a moment to commit (frame pacing). */
+	now = zwl_milliseconds();
+	if (server->awaiting != 0 && now - server->frame_done_ms < server->frame_wait_ms)
+		return;
 
 	/* Window mode draws when something changed and no frame is in flight. */
 	if (server->dirty) {
@@ -466,13 +476,27 @@ adopt_commit(
 {
 	struct zwl_object *previous;
 
-	/* The queued image becomes current. */
+	/* The queued image becomes current; a wl_shm image is copied before the next frame. */
 	previous = surface->current;
 	surface->current = surface->queued;
 	surface->queued = NULL;
 	surface->ready = 0;
 	surface->fresh = 1;
 	server->dirty = 1;
+	if (surface->current != NULL && surface->current->shm != NULL)
+		surface->shm_upload = 1;
+
+	/* An awaited window has committed. */
+	if (surface->awaited) {
+		surface->awaited = 0;
+		server->awaiting--;
+	}
+
+	/* A cursor, or a surface with no role, is not a window. */
+	if (surface->cursor_role || surface->role == NULL) {
+		zwl_buffer_put(previous);
+		return;
+	}
 
 	/* A first image maps the window on top; a null one unmaps it. */
 	if (surface->current != NULL && !surface->mapped) {
@@ -503,6 +527,8 @@ place_window(
 	int32_t step;
 	int32_t width;
 	int32_t height;
+	uint32_t buffer_width;
+	uint32_t buffer_height;
 
 	/* A fullscreen window covers the output. */
 	if (surface->fullscreen) {
@@ -515,8 +541,9 @@ place_window(
 	width = (int32_t)server->width;
 	height = (int32_t)server->height;
 	if (surface->current != NULL) {
-		width = (int32_t)surface->current->image.image.width;
-		height = (int32_t)surface->current->image.image.height;
+		zwl_buffer_size(surface->current, &buffer_width, &buffer_height);
+		width = (int32_t)buffer_width;
+		height = (int32_t)buffer_height;
 	}
 
 	/* The cascade step of this window. */

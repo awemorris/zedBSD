@@ -5,4 +5,4 @@
 #       BUILD=build/ws035-sq $(plan/tools/guest/guest.sh extra-files) disk-image"
 include plan/ws035/tests/config-amd64-guest.mk
 CONFIG_DRIVER_PCI_VENUS := y
-ZEDBSD_USER_PROGRAMS += libvulkan libwayland-client libtruetype wltest vkdemo mview zwl
+ZEDBSD_USER_PROGRAMS += libvulkan libwayland-client libtruetype wltest wlshm vkdemo mview zwl

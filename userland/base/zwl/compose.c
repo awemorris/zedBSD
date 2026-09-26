@@ -32,7 +32,9 @@ static VkResult compose_pipeline(struct zwl_compose *compose, enum zwl_draw draw
 static VkResult compose_targets(struct zwl_compose *compose);
 static void compose_targets_destroy(struct zwl_compose *compose);
 static unsigned compose_windows(struct zwl_server *server, struct zwl_object **windows, unsigned capacity);
-static void compose_quad(struct zwl_server *server, VkCommandBuffer command, const struct zwl_object *surface);
+static void compose_quad(struct zwl_server *server, VkCommandBuffer command, const struct zwl_import *import, int32_t x, int32_t y);
+static const struct zwl_import *surface_image(const struct zwl_object *surface);
+static void compose_cursor(struct zwl_server *server, VkCommandBuffer command);
 static VkResult compose_record(struct zwl_server *server, uint32_t image, struct zwl_object **windows, unsigned count);
 static VkResult compose_submit(struct zwl_server *server, uint32_t image);
 static void compose_hold(struct zwl_server *server, struct zwl_object **windows, unsigned count);
@@ -47,6 +49,7 @@ zwl_compose_open(
 {
 	struct zwl_compose *compose;
 	VkResult result;
+	int error;
 
 	/* The state lives as long as the compositor. */
 	compose = calloc(1, sizeof(*compose));
@@ -65,6 +68,13 @@ zwl_compose_open(
 	result = compose_objects(compose);
 	if (result != VK_SUCCESS) {
 		printf("ZWL VULKAN_ERROR operation=objects result=%d\n", (int)result);
+		return EIO;
+	}
+
+	/* zdesktop's arrow cursor. */
+	error = zwl_arrow_create(server);
+	if (error != 0) {
+		printf("ZWL VULKAN_ERROR operation=arrow\n");
 		return EIO;
 	}
 
@@ -178,6 +188,7 @@ zwl_compose_draw(
 
 	/* The windows to draw, bottom to top. */
 	compose->frame_start_cycles = zwl_cycles();
+	compose->frame_start_ms = zwl_milliseconds();
 	count = compose_windows(server, windows, ZWL_FRAME_WINDOWS);
 
 	/* The next swapchain image (the wait for it is measured apart). */
@@ -229,6 +240,7 @@ zwl_compose_complete(
 	struct zwl_server *server)
 {
 	struct zwl_compose *compose;
+	uint64_t elapsed;
 	unsigned index;
 	VkResult result;
 
@@ -260,8 +272,17 @@ zwl_compose_complete(
 	compose->in_flight = 0;
 
 	/* The time from the start of the frame to its completion (reported by ZWL PERF). */
+	elapsed = zwl_cycles() - compose->frame_start_cycles;
 	server->perf.compose_frames++;
-	server->perf.compose_cycles += zwl_cycles() - compose->frame_start_cycles;
+	server->perf.compose_cycles += elapsed;
+
+	/* The next frame waits a moment for the windows this one told (half its time, 4 to 50 ms). */
+	server->frame_done_ms = zwl_milliseconds();
+	server->frame_wait_ms = (server->frame_done_ms - compose->frame_start_ms) / 2U;
+	if (server->frame_wait_ms < 4U)
+		server->frame_wait_ms = 4U;
+	if (server->frame_wait_ms > 50U)
+		server->frame_wait_ms = 50U;
 
 	/* Succeeded: the next frame may be drawn. */
 	return 0;
@@ -302,11 +323,12 @@ zwl_compose_close(
 	if (compose == NULL)
 		return;
 
-	/* The frame in flight and the output first. */
+	/* The frame in flight and the output first, then the arrow. */
 	if (compose->device != VK_NULL_HANDLE)
 		(void)vkDeviceWaitIdle(compose->device);
 	(void)zwl_compose_complete(server);
 	zwl_compose_output_close(server);
+	zwl_arrow_destroy(server);
 
 	/* The device's objects. */
 	if (compose->device != VK_NULL_HANDLE) {
@@ -663,13 +685,16 @@ compose_pipeline(
 	multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 	multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-	/* Opaque windows replace what is under them; the alpha pipeline blends by source alpha. */
+	/*
+	 * Opaque windows replace what is under them; the alpha pipeline blends
+	 * premultiplied colors (Wayland's convention for images with alpha).
+	 */
 	memset(&blend_attachment, 0, sizeof(blend_attachment));
 	blend_attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
 	    VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 	if (draw == ZWL_DRAW_ALPHA) {
 		blend_attachment.blendEnable = VK_TRUE;
-		blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+		blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
 		blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 		blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
 		blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
@@ -785,6 +810,7 @@ compose_windows(
 	struct zwl_object **windows,
 	unsigned capacity)
 {
+	const struct zwl_import *image;
 	struct zwl_client *client;
 	struct zwl_object *surface;
 	unsigned count;
@@ -800,8 +826,12 @@ compose_windows(
 			if (surface->kind != ZWL_SURFACE ||
 			    surface->dead ||
 			    !surface->mapped ||
-			    surface->current == NULL ||
-			    surface->current->import == NULL)
+			    surface->current == NULL)
+				continue;
+
+			/* A window whose image is not made yet waits. */
+			image = surface_image(surface);
+			if (image == NULL)
 				continue;
 
 			/* Insertion by map order keeps the list bottom to top. */
@@ -821,26 +851,44 @@ compose_windows(
 	return count;
 }
 
-/* Draws one window as a quad at its place, the size of its image. */
+/*
+ * Returns the image window mode samples for a surface: its GPU buffer's
+ * import, or its copy of a wl_shm image; NULL when there is none yet.
+ */
+static const struct zwl_import *
+surface_image(
+	const struct zwl_object *surface)
+{
+	/* A wl_shm buffer is drawn from the surface's copy. */
+	if (surface->current == NULL)
+		return NULL;
+	if (surface->current->shm != NULL)
+		return surface->shm_image;
+
+	/* A GPU buffer from its own import. */
+	return surface->current->import;
+}
+
+/* Draws an image as a quad at a place on the output, its own size. */
 static void
 compose_quad(
 	struct zwl_server *server,
 	VkCommandBuffer command,
-	const struct zwl_object *surface)
+	const struct zwl_import *import,
+	int32_t x,
+	int32_t y)
 {
-	const struct zwl_import *import;
 	float constants[8];
 	float width;
 	float height;
 
-	/* The window's rectangle in normalized device coordinates, and its whole image. */
-	import = surface->current->import;
+	/* The rectangle in normalized device coordinates, and the whole image. */
 	width = (float)server->width;
 	height = (float)server->height;
-	constants[0] = 2.0f * (float)surface->x / width - 1.0f;
-	constants[1] = 2.0f * (float)surface->y / height - 1.0f;
-	constants[2] = 2.0f * (float)(surface->x + (int32_t)import->width) / width - 1.0f;
-	constants[3] = 2.0f * (float)(surface->y + (int32_t)import->height) / height - 1.0f;
+	constants[0] = 2.0f * (float)x / width - 1.0f;
+	constants[1] = 2.0f * (float)y / height - 1.0f;
+	constants[2] = 2.0f * (float)(x + (int32_t)import->width) / width - 1.0f;
+	constants[3] = 2.0f * (float)(y + (int32_t)import->height) / height - 1.0f;
 	constants[4] = 0.0f;
 	constants[5] = 0.0f;
 	constants[6] = 1.0f;
@@ -909,13 +957,49 @@ compose_record(
 	scissor.extent.height = compose->output.height;
 	vkCmdSetScissor(compose->command, 0U, 1U, &scissor);
 
-	/* The windows, bottom to top (painter's order). */
+	/* The windows, bottom to top (painter's order), then the cursor over them. */
 	for (index = 0; index < count; index++)
-		compose_quad(server, compose->command, windows[index]);
+		compose_quad(server, compose->command, surface_image(windows[index]), windows[index]->x, windows[index]->y);
+	compose_cursor(server, compose->command);
 	vkCmdEndRenderPass(compose->command);
 
 	/* The recording is complete. */
 	return vkEndCommandBuffer(compose->command);
+}
+
+/*
+ * Draws the cursor at the pointer: the client's cursor surface (its hotspot
+ * at the pointer), or zdesktop's arrow (its tip), with alpha; nothing when
+ * hidden (design D8).
+ */
+static void
+compose_cursor(
+	struct zwl_server *server,
+	VkCommandBuffer command)
+{
+	const struct zwl_import *image;
+	struct zwl_object *surface;
+	struct zwl_import alpha;
+
+	/* A hidden cursor is not drawn. */
+	if (server->cursor_hidden)
+		return;
+
+	/* The client's surface, when it has an image. */
+	surface = server->cursor_surface;
+	if (surface != NULL && !surface->dead) {
+		image = surface_image(surface);
+		if (image == NULL)
+			return;
+		alpha = *image;
+		alpha.draw = ZWL_DRAW_ALPHA;
+		compose_quad(server, command, &alpha, server->pointer_x - server->cursor_hotspot_x, server->pointer_y - server->cursor_hotspot_y);
+		return;
+	}
+
+	/* Otherwise the arrow, its tip at the pointer. */
+	if (server->arrow != NULL)
+		compose_quad(server, command, server->arrow, server->pointer_x, server->pointer_y);
 }
 
 /* Submits the frame, presents it, and exports its fence as the fd the event loop polls. */
@@ -987,6 +1071,7 @@ compose_hold(
 	unsigned count)
 {
 	struct zwl_compose *compose;
+	struct zwl_object *surface;
 	struct zwl_object **tail;
 	unsigned index;
 
@@ -997,11 +1082,31 @@ compose_hold(
 		compose->held[compose->held_count++] = windows[index]->current;
 		windows[index]->fresh = 0;
 
+		/* A window with frame callbacks is awaited after the frame (frame pacing). */
+		if (windows[index]->committed_callbacks != NULL && !windows[index]->awaited) {
+			windows[index]->awaited = 1;
+			server->awaiting++;
+		}
+
 		/* Its frame callbacks wait for the frame, in request order. */
 		tail = &compose->callbacks;
 		while (*tail != NULL)
 			tail = &(*tail)->callback_next;
 		*tail = windows[index]->committed_callbacks;
 		windows[index]->committed_callbacks = NULL;
+	}
+
+	/* A client's cursor surface is held and told too. */
+	surface = server->cursor_surface;
+	if (surface != NULL && !surface->dead && surface->current != NULL) {
+		zwl_buffer_get(surface->current);
+		compose->held[compose->held_count++] = surface->current;
+
+		/* Its frame callbacks after the windows'. */
+		tail = &compose->callbacks;
+		while (*tail != NULL)
+			tail = &(*tail)->callback_next;
+		*tail = surface->committed_callbacks;
+		surface->committed_callbacks = NULL;
 	}
 }

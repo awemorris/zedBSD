@@ -1,13 +1,13 @@
 <!-- awesome-plan project=zedbsd record=past-log -->
 
 <!-- awesome-plan-current:start -->
-Active Queue: q458（ws035-p053）
-Last finished Queue: q457（ws035-p052 cleared。zdesktop の 2 つのモードの核）
+Active Queue: q459（ws035-p054）
+Last finished Queue: q458（ws035-p053 cleared。`wl_shm` と cursor）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q457（2026-09-26）
+## 最新: q443〜q458（2026-09-26）
 
 [q443](queue-q443.md): ws063-p001 cleared。journal の大きさを mkfs で記録し、mount で `.ufs-journal`（extent）を再利用・再確保・作成する。
 [q444](queue-q444.md): ws061-p008 cleared。libc の同期の system call を減らし、make（直列）12.8〜13.1 秒（host `-j1` 15.2 秒）。
@@ -24,6 +24,7 @@ Last finished Queue: q457（ws035-p052 cleared。zdesktop の 2 つのモード�
 [q455](queue-q455.md): ws067-p002 cleared（規約）。WS067 completed。
 [q456](queue-q456.md): ws062-p003 cleared。amd64 の既定の image を native（ESP・UFS root・swap partition、各 1 GiB の 2 GiB）に、CI は gzip で公開。CI の失敗（toolchain の smoke の消失）と clang の libc.so の依存の退行を直した。
 [q457](queue-q457.md): ws035-p052 cleared。zdesktop（zwl）の 2 つのモード: Vulkan の合成（ウィンドウモード）と全画面の直接 scanout、切替。libvulkan の OPAQUE_FD の import を画像の fd に対応。
+[q458](queue-q458.md): ws035-p053 cleared。`wl_shm`（libwayland の client にも追加）、cursor（矢印・client・非表示）、frame の予定。
 
 ## 前: q439〜q442（2026-09-26）
 

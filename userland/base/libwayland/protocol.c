@@ -253,6 +253,52 @@ const struct wl_interface wl_buffer_interface = {
 	1, wl_buffer_events
 };
 
+/* Identifies the new pool of wl_shm.create_pool. */
+static const struct wl_interface *wl_shm_requests_0_types[] = {
+	&wl_shm_pool_interface,
+	NULL,
+	NULL,
+};
+
+/* Preserves the wire opcode order for wl_shm requests. */
+static const struct wl_message wl_shm_requests[] = {
+	{ "create_pool", "nhi", wl_shm_requests_0_types },
+};
+
+/* Preserves the wire opcode order for wl_shm events. */
+static const struct wl_message wl_shm_events[] = {
+	{ "format", "u", NULL },
+};
+
+/* Exposes the immutable selected wl_shm protocol description. */
+const struct wl_interface wl_shm_interface = {
+	"wl_shm", 1, 1, wl_shm_requests,
+	1, wl_shm_events
+};
+
+/* Identifies the new buffer of wl_shm_pool.create_buffer. */
+static const struct wl_interface *wl_shm_pool_requests_0_types[] = {
+	&wl_buffer_interface,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+};
+
+/* Preserves the wire opcode order for wl_shm_pool requests. */
+static const struct wl_message wl_shm_pool_requests[] = {
+	{ "create_buffer", "niiiiu", wl_shm_pool_requests_0_types },
+	{ "destroy", "", NULL },
+	{ "resize", "i", NULL },
+};
+
+/* Exposes the immutable selected wl_shm_pool protocol description. */
+const struct wl_interface wl_shm_pool_interface = {
+	"wl_shm_pool", 1, 3, wl_shm_pool_requests,
+	0, NULL
+};
+
 /* Preserves the wire opcode order for wl_output requests. */
 static const struct wl_message wl_output_requests[] = {
 	{ "release", "3", NULL },
@@ -1581,6 +1627,121 @@ wl_buffer_add_listener(
 
 	/* Succeeded: subsequent events use this listener. */
 	return 0;
+}
+
+/*
+ * Associates typed callbacks with a wl_shm proxy.
+ */
+int
+wl_shm_add_listener(
+	struct wl_shm *object,
+	const struct wl_shm_listener *listener,
+	void *data)
+{
+	int error;
+
+	/* Associates typed callbacks with the proxy event stream. */
+	error = wl_proxy_add_listener((struct wl_proxy *)object, (void (**)(void))listener, data);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: subsequent events use this listener. */
+	return 0;
+}
+
+/*
+ * Sends the wl_shm.create_pool request; the fd stays the caller's.
+ */
+struct wl_shm_pool *
+wl_shm_create_pool(
+	struct wl_shm *object,
+	int32_t fd,
+	int32_t size)
+{
+	union wl_argument arguments[3];
+	struct wl_proxy *created;
+
+	/* Preserves argument order and keeps descriptor ownership with the caller. */
+	arguments[0].n = 0;
+	arguments[1].h = fd;
+	arguments[2].i = size;
+
+	/* Queues the wire request atomically with the newly allocated pool. */
+	created = wl_proxy_marshal_array_flags((struct wl_proxy *)object, 0U, &wl_shm_pool_interface, 1U, 0, arguments);
+	if (created == NULL)
+		return NULL;
+
+	/* Succeeded: the caller owns the new protocol proxy. */
+	return (struct wl_shm_pool *)created;
+}
+
+/*
+ * Drops the local wl_shm proxy (wl_shm version 1 has no destroy request).
+ */
+void
+wl_shm_destroy(
+	struct wl_shm *object)
+{
+	/* Suppresses future callbacks while the server keeps the binding. */
+	wl_proxy_destroy((struct wl_proxy *)object);
+}
+
+/*
+ * Sends the wl_shm_pool.create_buffer request.
+ */
+struct wl_buffer *
+wl_shm_pool_create_buffer(
+	struct wl_shm_pool *object,
+	int32_t offset,
+	int32_t width,
+	int32_t height,
+	int32_t stride,
+	uint32_t format)
+{
+	union wl_argument arguments[6];
+	struct wl_proxy *created;
+
+	/* Preserves argument order. */
+	arguments[0].n = 0;
+	arguments[1].i = offset;
+	arguments[2].i = width;
+	arguments[3].i = height;
+	arguments[4].i = stride;
+	arguments[5].u = format;
+
+	/* Queues the wire request atomically with the newly allocated buffer. */
+	created = wl_proxy_marshal_array_flags((struct wl_proxy *)object, 0U, &wl_buffer_interface, 1U, 0, arguments);
+	if (created == NULL)
+		return NULL;
+
+	/* Succeeded: the caller owns the new protocol proxy. */
+	return (struct wl_buffer *)created;
+}
+
+/*
+ * Sends the wl_shm_pool.destroy request.
+ */
+void
+wl_shm_pool_destroy(
+	struct wl_shm_pool *object)
+{
+	/* Queues the wire request and retires the proxy. */
+	wl_proxy_marshal_array_flags((struct wl_proxy *)object, 1U, NULL, 0, WL_MARSHAL_FLAG_DESTROY, NULL);
+}
+
+/*
+ * Sends the wl_shm_pool.resize request.
+ */
+void
+wl_shm_pool_resize(
+	struct wl_shm_pool *object,
+	int32_t size)
+{
+	union wl_argument arguments[1];
+
+	/* The new size of the pool. */
+	arguments[0].i = size;
+	wl_proxy_marshal_array_flags((struct wl_proxy *)object, 2U, NULL, 0, 0, arguments);
 }
 
 /*

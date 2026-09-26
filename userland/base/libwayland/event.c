@@ -75,6 +75,7 @@ wlc_event_dispatch(
 	const struct wl_registry_listener *wl_registry_callbacks;
 	const struct wl_callback_listener *wl_callback_callbacks;
 	const struct wl_buffer_listener *wl_buffer_callbacks;
+	const struct wl_shm_listener *wl_shm_callbacks;
 	const struct wl_surface_listener *wl_surface_callbacks;
 	const struct wl_output_listener *wl_output_callbacks;
 	const struct xdg_wm_base_listener *xdg_wm_base_callbacks;
@@ -171,6 +172,27 @@ wlc_event_dispatch(
 			/* Delivers payload ownership according to this callback contract. */
 			event->delivered = 1;
 			wl_callback_callbacks->done(data, (struct wl_callback *)proxy, arguments[0].u);
+			return 0;
+		default:
+			return EPROTO;
+		}
+	}
+
+	/* Dispatches wl_shm events through the exact published callback types. */
+	same = strcmp(proxy->interface->name, "wl_shm");
+	if (same == 0) {
+		wl_shm_callbacks = listener;
+
+		/* Selects the callback using the stable protocol event opcode. */
+		switch (event->opcode) {
+		case 0:
+			/* An optional listener slot deliberately ignores this event. */
+			if (wl_shm_callbacks->format == NULL)
+				return 0;
+
+			/* Delivers the accepted format. */
+			event->delivered = 1;
+			wl_shm_callbacks->format(data, (struct wl_shm *)proxy, arguments[0].u);
 			return 0;
 		default:
 			return EPROTO;

@@ -656,6 +656,9 @@ apply_frame(
 		server->pointer_x = x;
 		server->pointer_y = y;
 		zwl_seat_motion(server, time);
+
+		/* Window mode draws the cursor at its new place. */
+		server->dirty = 1;
 		pointer_activity = 1;
 	}
 

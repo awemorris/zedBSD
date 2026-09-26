@@ -69,6 +69,7 @@ static void pointer_enter(struct zwl_object *pointer, struct zwl_object *surface
 static void keyboard_enter(struct zwl_object *keyboard, struct zwl_object *surface, uint32_t serial);
 static void keyboard_modifiers(struct zwl_object *keyboard, uint32_t serial);
 static void send_leave(struct zwl_object *surface);
+static void set_cursor(struct zwl_server *server, struct zwl_object *surface, const unsigned char *bytes);
 static void send_enter(struct zwl_object *surface);
 static void report_seat(struct zwl_client *client);
 static int keyboard_keymap(struct zwl_object *keyboard);
@@ -157,15 +158,22 @@ zwl_seat_request(
 	case ZWL_POINTER:
 		/* A pointer names a cursor image or retires its own binding. */
 		if (opcode == 0U && size == 16U) {
-			/* set_cursor is accepted and ignored, but a named surface must be the client's own. */
+			/* set_cursor names a surface of the client's own, or none (hides the cursor). */
 			memcpy(&surface_id, bytes + 4, sizeof(surface_id));
 			error = 0;
+			surface = NULL;
 			if (surface_id != 0) {
-				/* A foreign or non-surface object cannot become a cursor. */
+				/* A foreign object, or a surface with a window role, cannot become a cursor. */
 				surface = zwl_find(object->client, surface_id);
-				if (surface == NULL || surface->kind != ZWL_SURFACE)
+				if (surface == NULL || surface->kind != ZWL_SURFACE || surface->role != NULL)
 					error = EPROTO;
 			}
+
+			/* Only the client the pointer is over sets the cursor (design D8). */
+			if (error == 0 &&
+			    object->client->server->focus != NULL &&
+			    object->client->server->focus->client == object->client)
+				set_cursor(object->client->server, surface, bytes);
 		} else if (opcode == 1U && size == 0 && object->version >= RELEASE_VERSION) {
 			/* release exists from version 3. */
 			zwl_object_destroy(object);
@@ -193,6 +201,22 @@ zwl_seat_request(
 }
 
 /*
+ * Shows zdesktop's arrow again (when the pointer goes to another client, or
+ * the cursor surface goes).
+ */
+void
+zwl_cursor_default(
+	struct zwl_server *server)
+{
+	/* The arrow, shown. */
+	if (server->cursor_surface != NULL)
+		server->cursor_surface->cursor_role = 0;
+	server->cursor_surface = NULL;
+	server->cursor_hidden = 0;
+	server->dirty = 1;
+}
+
+/*
  * Moves input focus to the surface currently on the display.
  */
 void
@@ -213,9 +237,10 @@ zwl_seat_focus(
 	if (target == server->focus)
 		return;
 
-	/* The old surface hears leave before the new one hears enter. */
+	/* The old surface hears leave before the new one hears enter; the arrow comes back. */
 	if (server->focus != NULL)
 		send_leave(server->focus);
+	zwl_cursor_default(server);
 
 	/*
 	 * The focus pointer names the surface whose client's pointer and keyboard
@@ -790,3 +815,37 @@ keyboard_keymap(
 	/* Succeeded: the keyboard knows keys arrive as evdev codes. */
 	return 0;
 }
+
+/*
+ * Makes a surface the cursor, with its hotspot, or hides the cursor when
+ * there is none.
+ */
+static void
+set_cursor(
+	struct zwl_server *server,
+	struct zwl_object *surface,
+	const unsigned char *bytes)
+{
+	int32_t hotspot[2];
+
+	/* The previous cursor surface is an ordinary surface again. */
+	if (server->cursor_surface != NULL && server->cursor_surface != surface)
+		server->cursor_surface->cursor_role = 0;
+
+	/* No surface hides the cursor. */
+	server->dirty = 1;
+	if (surface == NULL) {
+		server->cursor_surface = NULL;
+		server->cursor_hidden = 1;
+		return;
+	}
+
+	/* The surface and the point of it that is the pointer's position. */
+	memcpy(hotspot, bytes + 8, sizeof(hotspot));
+	surface->cursor_role = 1;
+	server->cursor_surface = surface;
+	server->cursor_hotspot_x = hotspot[0];
+	server->cursor_hotspot_y = hotspot[1];
+	server->cursor_hidden = 0;
+}
+

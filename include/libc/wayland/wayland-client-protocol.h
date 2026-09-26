@@ -153,6 +153,31 @@ void wl_buffer_set_user_data(struct wl_buffer *object, void *data);
 void *wl_buffer_get_user_data(struct wl_buffer *object);
 uint32_t wl_buffer_get_version(struct wl_buffer *object);
 
+struct wl_shm;
+struct wl_shm_pool;
+extern const struct wl_interface wl_shm_interface;
+extern const struct wl_interface wl_shm_pool_interface;
+
+/* The pixel formats of wl_shm: 32-bit little-endian words with alpha, or with an unused byte. */
+#define WL_SHM_FORMAT_ARGB8888 0U
+#define WL_SHM_FORMAT_XRGB8888 1U
+
+/* Receives the formats the compositor accepts for shared-memory buffers. */
+struct wl_shm_listener {
+	void (*format)(void *data, struct wl_shm *object, uint32_t format);
+};
+
+int wl_shm_add_listener(struct wl_shm *object, const struct wl_shm_listener *listener, void *data);
+#define WL_SHM_CREATE_POOL 0U
+struct wl_shm_pool *wl_shm_create_pool(struct wl_shm *object, int32_t fd, int32_t size);
+void wl_shm_destroy(struct wl_shm *object);
+#define WL_SHM_POOL_CREATE_BUFFER 0U
+struct wl_buffer *wl_shm_pool_create_buffer(struct wl_shm_pool *object, int32_t offset, int32_t width, int32_t height, int32_t stride, uint32_t format);
+#define WL_SHM_POOL_DESTROY 1U
+void wl_shm_pool_destroy(struct wl_shm_pool *object);
+#define WL_SHM_POOL_RESIZE 2U
+void wl_shm_pool_resize(struct wl_shm_pool *object, int32_t size);
+
 struct wl_output;
 extern const struct wl_interface wl_output_interface;
 

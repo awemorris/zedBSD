@@ -56,6 +56,9 @@ struct zwl_import {
 	uint32_t width;
 	uint32_t height;
 	enum zwl_draw draw;
+	/* A host-written image (wl_shm, the arrow): its mapping and the length of a row in it. */
+	void *map;
+	VkDeviceSize row_pitch;
 };
 
 /* The Vulkan device, the display output and the frame in flight. */
@@ -81,11 +84,12 @@ struct zwl_compose {
 	VkImageView views[ZWL_SWAPCHAIN_MAX];
 	VkFramebuffer framebuffers[ZWL_SWAPCHAIN_MAX];
 	VkSemaphore rendered[ZWL_SWAPCHAIN_MAX];
-	struct zwl_object *held[ZWL_FRAME_WINDOWS];
+	struct zwl_object *held[ZWL_FRAME_WINDOWS + 1U];
 	struct zwl_object *callbacks;
 	unsigned held_count;
 	unsigned in_flight;
 	uint64_t frame_start_cycles;
+	uint64_t frame_start_ms;
 };
 
 #endif
