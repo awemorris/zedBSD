@@ -170,6 +170,9 @@ struct zegl_surface {
 	int acquire_waited;
 	uint32_t image;
 
+	/* Nonzero when commands were recorded since the frame's last submission. */
+	int recorded;
+
 	/* The swap interval (eglSwapInterval), and how many frames were presented. */
 	EGLint interval;
 	uint64_t frames;

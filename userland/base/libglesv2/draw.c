@@ -28,7 +28,8 @@
 
 static void draw_primitives(GLenum mode, GLint first, GLsizei count, GLenum type, const void *indices);
 static int draw_indices(struct zegl_context *context, GLsizei count, GLenum type, const void *indices, uint32_t **out, uint32_t *largest);
-static uint32_t *draw_expand(GLenum mode, const uint32_t *indices, uint32_t first, GLsizei count, uint32_t *expanded);
+static uint32_t *draw_expand(GLenum mode, const uint32_t *indices, uint32_t first, GLsizei count, int rotate, uint32_t *expanded);
+static void draw_program(GLenum mode, GLint first, GLsizei count, GLenum type, const void *indices, int flat);
 static int draw_topology(GLenum mode, uint32_t *topology, int *strip);
 static int draw_vertices(struct gles_state *state, uint32_t vertices, struct gles_vertex_layout *layout, VkBuffer *buffers, VkDeviceSize *offsets);
 static VkFormat draw_format(GLint size, GLenum type, GLboolean normalized, size_t *bytes);
@@ -735,9 +736,8 @@ glGetVertexAttribPointerv(
 }
 
 /*
- * Draws: the indices read and turned into a list when needed, the
- * vertices and uniforms put where the GPU reads them, the pipeline and
- * descriptors bound, and the draw recorded into the frame.
+ * Draws with the current program, or, without one, with the
+ * fixed-function layer's program for this draw (libGL).
  */
 static void
 draw_primitives(
@@ -746,6 +746,54 @@ draw_primitives(
 	GLsizei count,
 	GLenum type,
 	const void *indices)
+{
+	struct zegl_context *context;
+	struct gles_state *state;
+	struct gles_program *program;
+	int flat;
+
+	/* A context with its state. */
+	context = gles_context();
+	state = gles_state(context);
+	if (state == NULL)
+		return;
+
+	/* A program the application made draws as it is (OpenGL ES has nothing else). */
+	if (state->program != NULL || gles_fixed == NULL) {
+		draw_program(mode, first, count, type, indices, 0);
+		return;
+	}
+
+	/* Without one, the fixed-function layer's, current for this draw only. */
+	flat = 0;
+	program = gles_fixed->program(context, &flat);
+	if (program == NULL) {
+		state->program = NULL;
+		gles_error(context, GL_INVALID_OPERATION);
+		return;
+	}
+
+	/* Current for this draw only. */
+	state->program = program;
+	draw_program(mode, first, count, type, indices, flat);
+	state->program = NULL;
+}
+
+/*
+ * Draws with the current program: the indices read and turned into a
+ * list when needed (always, and each primitive turned to start at GL's
+ * provoking vertex, when the shading is flat), the vertices and uniforms
+ * put where the GPU reads them, the pipeline and descriptors bound, and
+ * the draw recorded into the frame.
+ */
+static void
+draw_program(
+	GLenum mode,
+	GLint first,
+	GLsizei count,
+	GLenum type,
+	const void *indices,
+	int flat)
 {
 	struct zegl_context *context;
 	struct gles_state *state;
@@ -813,11 +861,11 @@ draw_primitives(
 			return;
 	}
 
-	/* A strip, loop or fan becomes a list; indices that were read become 32-bit ones. */
+	/* A strip, loop or fan (or any mode, shaded flat) becomes a list; indices that were read become 32-bit ones. */
 	list = read;
 	expanded = (uint32_t)count;
-	if (strip) {
-		list = draw_expand(mode, read, (uint32_t)first, count, &expanded);
+	if (strip || flat) {
+		list = draw_expand(mode, read, (uint32_t)first, count, flat, &expanded);
 		free(read);
 		read = NULL;
 		if (list == NULL) {
@@ -983,8 +1031,11 @@ draw_indices(
 }
 
 /*
- * Turns a strip, loop or fan of count vertices (indices, or first up when
- * there are none) into a list.  Returns the list and its length, or NULL
+ * Turns count vertices of a mode (indices, or first up when there are
+ * none) into a list of triangles, lines or points.  With rotate, each
+ * primitive starts with GL's provoking vertex (the last of a primitive,
+ * the first of a polygon), which Vulkan's flat shading takes from the
+ * first; the winding is kept.  Returns the list and its length, or NULL
  * when there is no memory.
  */
 static uint32_t *
@@ -993,65 +1044,127 @@ draw_expand(
 	const uint32_t *indices,
 	uint32_t first,
 	GLsizei count,
+	int rotate,
 	uint32_t *expanded)
 {
 	uint32_t *list;
-	uint32_t vertices[3];
-	uint32_t index;
-	uint32_t total;
 	uint32_t n;
+	uint32_t total;
+	uint32_t index;
+	uint32_t a;
+	uint32_t b;
+	uint32_t c;
+	uint32_t d;
 
-	/* At most three indices per vertex. */
+	/* At most six indices per vertex (quads). */
 	n = (uint32_t)count;
-	list = malloc(((size_t)n * 3U + 3U) * sizeof(uint32_t));
+	list = malloc(((size_t)n * 6U + 6U) * sizeof(uint32_t));
 	if (list == NULL)
 		return NULL;
 
-	/* Each primitive of the mode. */
+	/* Each primitive of the mode, as vertex numbers from 0. */
 	total = 0U;
 	for (index = 0U; index < n; index++) {
-
-		/* The vertex numbers the primitive uses. */
-		vertices[0] = first + index;
-		vertices[1] = first + index + 1U;
-		vertices[2] = first + index + 2U;
-		if (mode == GL_TRIANGLE_FAN) {
-			vertices[0] = first;
-			vertices[1] = first + index + 1U;
-			vertices[2] = first + index + 2U;
-		}
-
-		/* Every other triangle of a strip turned round, so all keep the first one's winding. */
-		if (mode == GL_TRIANGLE_STRIP && (index & 1U) != 0U) {
-			vertices[0] = first + index + 1U;
-			vertices[1] = first + index;
-		}
-
-		/* Lines: a strip or loop's segment, and a loop's closing one. */
-		if (mode == GL_LINE_STRIP || mode == GL_LINE_LOOP) {
-			if (index + 1U < n) {
-				list[total++] = vertices[0];
-				list[total++] = vertices[1];
-			} else if (mode == GL_LINE_LOOP && n > 1U) {
-				list[total++] = vertices[0];
-				list[total++] = first;
+		switch (mode) {
+		case GL_POINTS:
+			list[total++] = index;
+			break;
+		case GL_LINES:
+		case GL_LINE_STRIP:
+		case GL_LINE_LOOP:
+			/* A segment: every pair of a list, every vertex and the next of a strip, and a loop's closing one. */
+			a = index;
+			b = index + 1U;
+			if (mode == GL_LINES && (index & 1U) != 0U)
+				break;
+			if (b == n && mode == GL_LINE_LOOP && n > 1U)
+				b = 0U;
+			if (b >= n || (b == 0U && mode != GL_LINE_LOOP))
+				break;
+			list[total++] = a;
+			list[total++] = b;
+			if (rotate) {
+				list[total - 2U] = b;
+				list[total - 1U] = a;
 			}
 
-			continue;
-		}
+			/* The segment is in. */
+			break;
+		case GL_TRIANGLES:
+		case GL_TRIANGLE_STRIP:
+		case GL_TRIANGLE_FAN:
+		case GL_POLYGON:
+			/* A triangle: every three of a list, each vertex of a strip (every other one turned round), a fan's or polygon's. */
+			if (index + 2U >= n || (mode == GL_TRIANGLES && index % 3U != 0U))
+				break;
+			a = index;
+			b = index + 1U;
+			c = index + 2U;
+			if (mode == GL_TRIANGLE_STRIP && (index & 1U) != 0U) {
+				a = index + 1U;
+				b = index;
+			}
 
-		/* Triangles: every vertex with two after it. */
-		if (index + 2U < n) {
-			list[total++] = vertices[0];
-			list[total++] = vertices[1];
-			list[total++] = vertices[2];
+			/* A fan or polygon turns about the first vertex. */
+			if (mode == GL_TRIANGLE_FAN || mode == GL_POLYGON)
+				a = 0U;
+
+			/* GL's provoking vertex is the third of a triangle (the first of a polygon's): it goes first, cyclically. */
+			if (rotate && mode != GL_POLYGON) {
+				d = c;
+				c = b;
+				b = a;
+				a = d;
+			}
+
+			/* The triangle. */
+			list[total++] = a;
+			list[total++] = b;
+			list[total++] = c;
+			break;
+		default:
+			/* Quads and quad strips: two triangles each, both starting at the provoking (last) vertex. */
+			if (mode == GL_QUADS && (index % 4U != 0U || index + 3U >= n))
+				break;
+			if (mode == GL_QUAD_STRIP && ((index & 1U) != 0U || index + 3U >= n))
+				break;
+			a = index;
+			b = index + 1U;
+			c = index + 2U;
+			d = index + 3U;
+			if (mode == GL_QUAD_STRIP) {
+				c = index + 3U;
+				d = index + 2U;
+			}
+
+			/* The quad a b c d, from its provoking vertex: d a b and d b c (a quad strip's provoking vertex is c). */
+			if (mode == GL_QUAD_STRIP) {
+				list[total++] = c;
+				list[total++] = d;
+				list[total++] = a;
+				list[total++] = c;
+				list[total++] = a;
+				list[total++] = b;
+				break;
+			}
+
+			/* The quad from its provoking vertex. */
+			list[total++] = d;
+			list[total++] = a;
+			list[total++] = b;
+			list[total++] = d;
+			list[total++] = b;
+			list[total++] = c;
+			break;
 		}
 	}
 
-	/* The vertex numbers become the indices themselves when there were indices. */
-	if (indices != NULL) {
-		for (index = 0U; index < total; index++)
-			list[index] = indices[list[index] - first];
+	/* The vertex numbers become vertices: the indices given, or first up. */
+	for (index = 0U; index < total; index++) {
+		if (indices != NULL)
+			list[index] = indices[list[index]];
+		else
+			list[index] += first;
 	}
 
 	/* Succeeded: the list. */
@@ -1090,6 +1203,13 @@ draw_topology(
 		return 0;
 	default:
 		break;
+	}
+
+	/* Desktop GL's quads, quad strips and polygons, with the fixed-function layer. */
+	if (gles_fixed != NULL && (mode == GL_QUADS || mode == GL_QUAD_STRIP || mode == GL_POLYGON)) {
+		*topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+		*strip = 1;
+		return 0;
 	}
 
 	/* Not a mode. */

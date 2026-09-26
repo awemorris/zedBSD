@@ -2,12 +2,14 @@
 
 <!-- awesome-plan-current:start -->
 Active Queue: なし
-Last finished Queue: q477（ws069-p004 cleared。GLX の核）
+Last finished Queue: q478（ws069-p005 cleared。固定機能の GL 1.x と gears）
 <!-- awesome-plan-current:end -->
 
 # Past Log
 
-## 最新: q443〜q477（2026-09-26）
+## 最新: q443〜q478（2026-09-26）
+
+[q478](queue-q478.md): ws069-p005 cleared。固定機能の GL 1.x（行列・光源・material・glBegin/glEnd・client 配列・display list、flat の provoking vertex）を libGL の中に。zgears の歯車が Venus の rootless の X の窓で回る（約 4.7 fps）。
 
 [q477](queue-q477.md): ws069-p004 cleared。GLX の核（Xzed の QueryExtension と GLX の問い合わせ、libGL.so = GLES の変換層＋GLX＋libX11、pbuffer に描いて XzedPutImageRGB24）。Venus の zwl＋Xzed rootless で glxtest の窓が GL で描かれ、docked でも追従。
 

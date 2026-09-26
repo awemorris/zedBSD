@@ -40,6 +40,13 @@
 #define GL_SHADER_BINARY_FORMAT_SPIR_V	0x9551
 #endif
 
+/* Desktop GL's primitive modes, which only the fixed-function layer's draws take. */
+#ifndef GL_QUADS
+#define GL_QUADS		0x0007
+#define GL_QUAD_STRIP		0x0008
+#define GL_POLYGON		0x0009
+#endif
+
 /* How many vertex attributes, texture units and texture levels a context has. */
 #define GLES_ATTRIBS		16U
 #define GLES_UNITS		16U
@@ -410,7 +417,8 @@ struct gles_names {
  * The state of one context that only libGLESv2 sees.
  */
 struct gles_state {
-	/* The display's device, its memory types and its limits. */
+	/* The context the state is of, the display's device, its memory types and its limits. */
+	struct zegl_context *context;
 	struct zegl_display *display;
 	VkDevice device;
 	VkPhysicalDeviceMemoryProperties memory;
@@ -521,9 +529,36 @@ struct gles_state {
 	GLuint next_framebuffer;
 	GLuint next_renderbuffer;
 
+	/* The fixed-function layer's state (libGL), NULL until it is made. */
+	void *fixed;
+
 	/* The texture sampled where a unit has no complete texture (black), made at its first use. */
 	struct gles_texture *black;
 };
+
+/*
+ * The fixed-function OpenGL 1.x layer of libGL (WS069 p005), which the
+ * translation reaches through these hooks; libGLESv2 has none (NULL).
+ */
+struct gles_fixed_hooks {
+	/* The flag of a capability OpenGL ES does not have; nonzero when it is not one of the layer's either. */
+	int (*capability)(struct zegl_context *context, GLenum cap, int **flag);
+
+	/* The program for a draw without one, its uniforms written, and whether it shades flat; NULL on failure. */
+	struct gles_program *(*program)(struct zegl_context *context, int *flat);
+
+	/* A fixed-function state's values as floats; how many, 0 when the name is not one. */
+	unsigned (*get)(struct zegl_context *context, GLenum pname, GLfloat *values);
+
+	/* A string that is the layer's (GL_VERSION), or NULL. */
+	const GLubyte *(*string)(GLenum name);
+
+	/* Frees a context's fixed-function state. */
+	void (*release)(struct gles_state *state);
+};
+
+/* The fixed-function layer, NULL without one (gles.c; libGL sets it). */
+extern const struct gles_fixed_hooks *gles_fixed;
 
 /* gles.c: the context's state, errors. */
 struct zegl_context *gles_context(void);

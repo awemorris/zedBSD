@@ -26,6 +26,9 @@
 #define GLES_EXTENSIONS \
 	"GL_OES_element_index_uint GL_OES_texture_npot GL_EXT_texture_format_BGRA8888 GL_EXT_blend_minmax"
 
+/* The fixed-function layer, NULL without one (libGL sets it before its first context). */
+const struct gles_fixed_hooks *gles_fixed;
+
 static void gles_frame_done(struct zegl_context *context);
 static void gles_release(struct zegl_context *context);
 static int gles_capability(struct gles_state *state, GLenum cap, int **flag);
@@ -71,6 +74,7 @@ gles_state(
 	}
 
 	/* The display and its device. */
+	state->context = context;
 	state->display = context->display;
 	state->device = context->display->device;
 	vkGetPhysicalDeviceMemoryProperties(context->display->physical, &state->memory);
@@ -928,7 +932,7 @@ glGetIntegerv(
 	if (count != 0U)
 		return;
 
-	/* A float state, rounded. */
+	/* A float state (the fixed-function layer's too), rounded. */
 	count = gles_floats(context, state, pname, floats);
 	for (index = 0U; index < count; index++)
 		data[index] = (GLint)(floats[index] + 0.5f);
@@ -1023,11 +1027,19 @@ glGetString(
 	GLenum name)
 {
 	struct zegl_context *context;
+	const GLubyte *layer;
 
 	/* Without a current context there are no strings. */
 	context = gles_context();
 	if (context == NULL)
 		return NULL;
+
+	/* The fixed-function layer's own (desktop GL's version). */
+	if (gles_fixed != NULL) {
+		layer = gles_fixed->string(name);
+		if (layer != NULL)
+			return layer;
+	}
 
 	/* The string asked for. */
 	switch (name) {
@@ -1128,6 +1140,10 @@ gles_release(
 		return;
 	(void)vkDeviceWaitIdle(state->device);
 
+	/* The fixed-function layer's state (its programs are among the objects freed below). */
+	if (gles_fixed != NULL)
+		gles_fixed->release(state);
+
 	/* The programs, then the shaders left. */
 	state->program = NULL;
 	for (name = 1U; name < state->objects.capacity; name++) {
@@ -1214,6 +1230,8 @@ gles_capability(
 	GLenum cap,
 	int **flag)
 {
+	int status;
+
 	/* The capabilities of OpenGL ES 2. */
 	switch (cap) {
 	case GL_BLEND:
@@ -1247,8 +1265,11 @@ gles_capability(
 		break;
 	}
 
-	/* Not one. */
-	return -1;
+	/* One of the fixed-function layer's, when there is the layer. */
+	if (gles_fixed == NULL)
+		return -1;
+	status = gles_fixed->capability(state->context, cap, flag);
+	return status;
 }
 
 /* Writes an integer state's values; returns how many, 0 when the name is not an integer state. */
@@ -1477,6 +1498,8 @@ gles_floats(
 	GLenum pname,
 	GLfloat *values)
 {
+	unsigned count;
+
 	/* The float states, one by one. */
 	switch (pname) {
 	case GL_COLOR_CLEAR_VALUE:
@@ -1519,6 +1542,9 @@ gles_floats(
 		break;
 	}
 
-	/* Not a float state. */
-	return 0U;
+	/* The fixed-function layer's states (matrices, lights, ...), when there is the layer. */
+	if (gles_fixed == NULL)
+		return 0U;
+	count = gles_fixed->get(context, pname, values);
+	return count;
 }

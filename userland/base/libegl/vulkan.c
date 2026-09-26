@@ -331,13 +331,20 @@ zegl_surface_present(
 	VkClearValue clear[2];
 	EGLint error;
 
-	/* A pbuffer shows nothing: what it drew is submitted and waited for, and GLES's per-frame resources are free. */
+	/*
+	 * A pbuffer shows nothing: what it drew is submitted and waited for
+	 * (an empty recording, after a readback submitted the rest, is
+	 * dropped), and GLES's per-frame resources are free.
+	 */
 	if (surface->kind == EGL_PBUFFER_BIT) {
-		if (surface->frame_open) {
+		if (surface->frame_open && surface->recorded) {
 			error = vulkan_submit(surface, 0);
 			if (error != EGL_SUCCESS)
 				return error;
 		}
+
+		/* The frame is closed either way. */
+		surface->frame_open = 0;
 
 		/* The frame's resources. */
 		if (context->gles.frame_done != NULL)
@@ -438,6 +445,7 @@ zegl_frame_begin(
 	surface->in_pass = 0;
 	surface->passes = 0U;
 	surface->acquire_waited = 0;
+	surface->recorded = 0;
 	if (surface->kind == EGL_PBUFFER_BIT) {
 		surface->acquire_waited = 1;
 		vulkan_pbuffer_layouts(surface);
@@ -490,6 +498,7 @@ zegl_frame_pass(
 	vkCmdBeginRenderPass(surface->command, &pass, VK_SUBPASS_CONTENTS_INLINE);
 	surface->in_pass = 1;
 	surface->passes++;
+	surface->recorded = 1;
 }
 
 /*
@@ -1108,11 +1117,12 @@ vulkan_submit(
 	struct zegl_display *display;
 	VkResult result;
 
-	/* The recording ends outside any pass. */
+	/* The recording ends outside any pass; nothing is recorded after it yet. */
 	display = surface->display;
 	zegl_frame_leave_pass(surface);
 	result = vkEndCommandBuffer(surface->command);
 	surface->frame_open = 0;
+	surface->recorded = 0;
 	if (result != VK_SUCCESS)
 		return EGL_CONTEXT_LOST;
 
@@ -1283,10 +1293,11 @@ vulkan_pbuffer_layouts(
 	VkImageSubresourceRange range;
 	uint32_t count;
 
-	/* Once per pbuffer. */
+	/* Once per pbuffer (recorded into the frame). */
 	if (surface->pbuffer_ready)
 		return;
 	surface->pbuffer_ready = 1;
+	surface->recorded = 1;
 
 	/* Both images, from nothing to being written by a copy (clear). */
 	count = 1U;

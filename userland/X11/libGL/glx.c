@@ -9,7 +9,8 @@
  * zedBSD's GLX (WS069 p004): OpenGL contexts for Xzed's windows.
  *
  * Rendering is direct.  A GLX context is an EGL context (OpenGL ES 2,
- * libGLESv2's translation to Vulkan, built into this library) on a
+ * libGLESv2's translation to Vulkan, built into this library, with the
+ * fixed-function OpenGL 1.x of fixed.c and immediate.c) on a
  * surfaceless EGL display, current on a pbuffer the size of the window.
  * glXSwapBuffers reads the pbuffer back and puts it into the window with
  * XzedPutImageRGB24; a window that changed size gets a new pbuffer.
@@ -20,6 +21,8 @@
  * ones: 0x21 without and 0x22 with a 24-bit depth and 8-bit stencil
  * buffer; the GLX 1.3 configs are the same two.
  */
+
+#include "fixed.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -890,10 +893,11 @@ glx_context(
 	EGLint count;
 	int status;
 
-	/* GLX on the server, and the EGL display. */
+	/* GLX on the server, the fixed-function layer's hooks, and the EGL display. */
 	status = glx_setup(dpy);
 	if (status != 0)
 		return NULL;
+	fixed_install();
 	if (glx_egl == EGL_NO_DISPLAY) {
 		glx_egl = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, NULL);
 		done = eglInitialize(glx_egl, NULL, NULL);
