@@ -9,7 +9,7 @@ Related Milestones: MG002
 Objectives: O1, O2
 Parent: [Master](../master.md)
 Queue: none
-Resume point: p006（i915 実機、規約と回帰）
+Resume point: p007（BUG-057 の段の特定）、次に p006（i915 実機、規約と回帰）
 <!-- awesome-plan-current:end -->
 
 ## 目標
@@ -48,4 +48,5 @@ zdesktop（zwl、Wiseman Mode）の上で X11 の app（zterm・zshell 等、外
 | [ws069-p003](phase003/phase.md) | rootless（X の top-level ごとの Wayland の窓） | cleared（q474-i01、2026-09-26。Venus で zterm の窓） | p002 |
 | [ws069-p004](phase004/phase.md) | GLX の核（Xzed の GLX 拡張、libGL の GLX、pbuffer に描いて X の窓へ） | cleared（q477-i01、2026-09-26。Venus の rootless で glxtest の窓） | p003、WS068-p008・p010 |
 | [ws069-p005](phase005/phase.md) | 固定機能の GL 1.x（glBegin/glEnd、行列、光源、display list）と gears | cleared（q478-i01、2026-09-26。Venus で zgears） | p004 |
-| ws069-p006 | i915 実機、規約の全文との照合と回帰（最後） | planning | 全 Phase |
+| [ws069-p007](phase007/phase.md) | i915 実機での GLX の間欠の止まり（BUG-057）の段の特定 | in-progress（q485-i01） | p005、WS068-p006 |
+| ws069-p006 | i915 実機、規約の全文との照合と回帰（最後） | planning | 全 Phase（p007 を含む） |
