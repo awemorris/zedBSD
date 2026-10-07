@@ -3,7 +3,7 @@
 # ws177-p009: 手書きの頑健さ（案 H）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 P1 q886 の 1: 実装・host PASS・build warning 0。QEMU は不要の見込み、UAT の手書きは 5330）
+Status: cleared（2026-10-08 Q1 判定、host の範囲。実機の UAT は未実施）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q886 の 1（P1、2026-10-08、Q1 の dispatch「Queue（q886、承認済み）」）
@@ -40,3 +40,10 @@ Origin: [backlog-p2](../backlog-p2.md) の 55〜60（WS165 ws165-p002・p003）�
 ## Event
 
 2026-10-08 / q886-i01（P1）: 実装と host・build の確認。途中で T1-407・T1-411 の試験の直しのために区切った（90159c20e）。
+
+## Q1 の判定（2026-10-08）
+
+merge e3d2b08a2。(1) tap を認識しない（Too small to read）は採る。(2) の提案に従い Q1 が plan/ws165/tests/host-hand.c の形が同じ組に I を足した（run-host-hand.sh PASS、top-1 93.6
+## Q1 の判定（2026-10-08）
+
+merge e3d2b08a2。(1) tap を認識しない（Too small to read）は採る。(2) の提案に従い Q1 が plan/ws165/tests/host-hand.c の形が同じ組に I を足した（run-host-hand.sh PASS、top-1 93.6%・同じ形を含め 94.9%・top-4 99.1%）。host の範囲で cleared、実機の touch の UAT は未実施。
