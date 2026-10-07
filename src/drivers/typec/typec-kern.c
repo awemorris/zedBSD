@@ -56,14 +56,24 @@ struct typec_open {
 };
 
 /*
+ * The states of the lock's making: not made, being made by one thread,
+ * made.
+ */
+#define TYPEC_LOCK_UNMADE	0
+#define TYPEC_LOCK_MAKING	1
+#define TYPEC_LOCK_MADE		2
+
+/*
  * The lock of the connector records.
  *
- * Made on first use: the first user is the UCSI driver's attach (or a
- * driver registering a listener), on the boot thread before any other
- * thread uses the layer.  typec_lock_ready says it was made.
+ * Made on first use, by whichever thread uses the layer first (the UCSI
+ * driver's attach, a driver registering a listener, or the display
+ * driver's report, ws177-p003): typec_lock_state goes from UNMADE to
+ * MAKING for exactly one thread, which makes the lock and sets MADE; any
+ * other thread that comes meanwhile waits for MADE.
  */
 static struct mutex typec_lock;
-static bool typec_lock_ready;
+static int typec_lock_state;
 
 /*
  * The signal of the ACPI notification: typec_signalled is raised by the
@@ -95,15 +105,27 @@ static const struct cdev_ops typec_ops = {
 void
 drv_typec_os_lock(void)
 {
+	int expected;
+	int state;
+	bool claimed;
 	int error;
 
-	/* The lock, made the first time. */
-	if (!typec_lock_ready) {
+	/* The lock, made by the first thread that claims its making. */
+	expected = TYPEC_LOCK_UNMADE;
+	claimed = __atomic_compare_exchange_n(&typec_lock_state, &expected, TYPEC_LOCK_MAKING, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+	if (claimed) {
 		error = mutex_init(&typec_lock, LOCK_RANK_DEVICE, "typec");
 		if (error != 0)
 			kern_logf("typec: lock not made (%d)\n", error);
-		typec_lock_ready = true;
+
+		/* MADE publishes the lock to every thread that waits for it. */
+		__atomic_store_n(&typec_lock_state, TYPEC_LOCK_MADE, __ATOMIC_RELEASE);
 	}
+
+	/* Another thread's making, waited for; it is a few instructions. */
+	state = __atomic_load_n(&typec_lock_state, __ATOMIC_ACQUIRE);
+	while (state != TYPEC_LOCK_MADE)
+		state = __atomic_load_n(&typec_lock_state, __ATOMIC_ACQUIRE);
 
 	/* Taken. */
 	mutex_lock(&typec_lock);
@@ -192,6 +214,33 @@ drv_typec_os_map(
 	/* Succeeded: the range is reached through the window, for as long as the kernel runs. */
 	*mapping = (volatile uint8_t *)window + offset;
 	return 0;
+}
+
+/*
+ * Removes a mapping drv_typec_os_map() made of a range of the same size:
+ * the same pages, given back to the HAL's window.
+ */
+void
+drv_typec_os_unmap(
+	volatile uint8_t *mapping,
+	size_t size)
+{
+	uintptr_t address;
+	uintptr_t page;
+	size_t offset;
+	size_t length;
+	int error;
+
+	/* The pages the mapping took. */
+	address = (uintptr_t)mapping;
+	page = address & ~(uintptr_t)(KERN_PAGE_SIZE - 1U);
+	offset = (size_t)(address - page);
+	length = (offset + size + KERN_PAGE_SIZE - 1U) & ~(size_t)(KERN_PAGE_SIZE - 1U);
+
+	/* Given back; a refusal is only logged (the window keeps them). */
+	error = hal_space_unmap_device((void *)page, length);
+	if (error != HAL_OK)
+		kern_logf("typec: the mailbox's mapping was not removed (%d)\n", error);
 }
 
 /*

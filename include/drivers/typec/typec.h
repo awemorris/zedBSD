@@ -336,9 +336,14 @@ struct drv_typec_connector {
 	/* The attached cable's properties. */
 	struct drv_typec_cable cable;
 
-	/* The last operation carried out on the connector (serial 0: none yet) and its errno value. */
+	/*
+	 * The last operation carried out on the connector (serial 0: none
+	 * yet), its errno value, and for one the PPM failed the reason it gave
+	 * (UCSI's GET_ERROR_STATUS Error Information bits; 0: none given).
+	 */
 	uint32_t request_serial;
 	int request_error;
+	uint32_t request_error_information;
 
 	/*
 	 * What UCSI reports of the DisplayPort mode the connector is in
@@ -476,13 +481,36 @@ drv_typec_request_take(
 	struct drv_typec_request *request);
 
 /*
+ * Cancels an operation that waits; its outcome ECANCELED is published.
+ */
+int
+drv_typec_request_cancel(
+	uint32_t serial);
+
+/*
+ * Tells the layer the connector driver stopped: every operation that waits
+ * ends with an errno value, none is taken any more, and the records keep
+ * the last state.
+ */
+unsigned
+drv_typec_driver_stop(
+	int error);
+
+/*
+ * Tells whether the connector driver stopped.
+ */
+bool
+drv_typec_driver_stopped(void);
+
+/*
  * Notes an operation's outcome in its connector's record, which the
  * connector driver publishes next.
  */
 int
 drv_typec_request_finish(
 	const struct drv_typec_request *request,
-	int error);
+	int error,
+	uint32_t information);
 
 /*
  * Records what the display driver reads of DisplayPort on one of its
@@ -492,6 +520,14 @@ int
 drv_typec_display_report(
 	unsigned port,
 	const struct drv_typec_dp_state *state);
+
+/*
+ * Forgets what the display driver reported of one of its Type-C ports
+ * (the display driver stopped).
+ */
+int
+drv_typec_display_forget(
+	unsigned port);
 
 /*
  * Copies what the display driver last reported of one of its Type-C ports.

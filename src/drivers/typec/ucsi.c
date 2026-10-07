@@ -12,9 +12,14 @@
  * layer's connector records.
  *
  * Section and table numbers are those of UCSI 1.2 unless 3.1 is named
- * (the documents are named in ucsi.h).  Only the normal path is here: a
- * command that fails is reported to the caller, which gives up; CANCEL,
- * the recovery by PPM_RESET and GET_ERROR_STATUS come later.
+ * (the documents are named in ucsi.h).
+ *
+ * A command the PPM reports as failed is acknowledged and its reason read
+ * with GET_ERROR_STATUS; one still busy when its time is up is canceled;
+ * a PPM that stops answering is reset and every connector read again, and
+ * one that does not come back after UCSI_RECOVER_MAX resets leaves the
+ * interface failed (ws177-p003).  The first UCSI_RECORD_MAX mailbox
+ * exchanges are written to the log in a form a host test replays.
  */
 
 #include <kern/kcrt.h>
@@ -29,6 +34,7 @@
  * The command codes (Table A-1; the same in 3.1 Table A-1).
  */
 #define UCSI_PPM_RESET 0x01U
+#define UCSI_CANCEL 0x02U
 #define UCSI_CONNECTOR_RESET 0x03U
 #define UCSI_SET_UOR 0x09U
 #define UCSI_SET_PDR 0x0BU
@@ -44,6 +50,7 @@
 #define UCSI_GET_PDOS 0x10U
 #define UCSI_GET_CONNECTOR_STATUS 0x12U
 #define UCSI_GET_CAM_CS 0x18U
+#define UCSI_GET_ERROR_STATUS 0x13U
 
 /*
  * The fields of CCI (Table 3-2): the connector a change occurred on (bits
@@ -54,6 +61,7 @@
 #define UCSI_CCI_LENGTH_SHIFT 8U
 #define UCSI_CCI_LENGTH_MASK 0xFFU
 #define UCSI_CCI_NOT_SUPPORTED (1UL << 25)
+#define UCSI_CCI_CANCEL_COMPLETED (1UL << 26)
 #define UCSI_CCI_RESET_COMPLETED (1UL << 27)
 #define UCSI_CCI_BUSY (1UL << 28)
 #define UCSI_CCI_ACKNOWLEDGED (1UL << 29)
@@ -185,8 +193,51 @@
 #define UCSI_STEP_FIRST_MS 20U
 #define UCSI_STEP_LONGEST_MS 100U
 
+/*
+ * The bits of GET_ERROR_STATUS's Error Information (3.1 Table 6-48; bits
+ * 0 to 12 are the same in 1.2), which the errno value of a failed command
+ * is chosen by.
+ */
+#define UCSI_ERROR_UNRECOGNIZED (1U << 0)
+#define UCSI_ERROR_NO_CONNECTOR (1U << 1)
+#define UCSI_ERROR_INVALID_PARAMETERS (1U << 2)
+#define UCSI_ERROR_INCOMPATIBLE_PARTNER (1U << 3)
+#define UCSI_ERROR_CC_COMMUNICATION (1U << 4)
+#define UCSI_ERROR_DEAD_BATTERY (1U << 5)
+#define UCSI_ERROR_CONTRACT_NEGOTIATION (1U << 6)
+#define UCSI_ERROR_PARTNER_REJECTED_SWAP (1U << 9)
+#define UCSI_ERROR_POLICY_CONFLICT (1U << 11)
+#define UCSI_ERROR_SWAP_REJECTED (1U << 12)
+#define UCSI_ERROR_BITS 15U
+
+/*
+ * How many resets in a row may fail to bring a PPM that stopped answering
+ * back before the interface is left failed, and the pause before the
+ * second (doubled before each later one).
+ */
+#define UCSI_RECOVER_MAX 3U
+#define UCSI_RECOVER_PAUSE_MS 500U
+
+/*
+ * The record of the mailbox (ws177-p003): how many exchanges are written
+ * to the log from the start, and how many MESSAGE IN bytes one line holds
+ * (the kernel's log lines are at most 256 bytes).
+ */
+#define UCSI_RECORD_MAX 256U
+#define UCSI_RECORD_CHUNK 64U
+
+static int ucsi_enumerate(struct drv_ucsi *ucsi, bool again);
+static int ucsi_settle(struct drv_ucsi *ucsi, int error);
+static int ucsi_recover(struct drv_ucsi *ucsi);
 static int ucsi_execute(struct drv_ucsi *ucsi, uint64_t control, uint8_t *message_in, size_t *length);
 static int ucsi_command(struct drv_ucsi *ucsi, uint64_t control);
+static int ucsi_cancel(struct drv_ucsi *ucsi, uint64_t control);
+static int ucsi_error_status(struct drv_ucsi *ucsi, uint64_t control);
+static int ucsi_error_errno(uint32_t information);
+static void ucsi_error_log(uint64_t control, unsigned number, uint32_t information);
+static unsigned ucsi_control_connector(uint64_t control);
+static void ucsi_record_write(struct drv_ucsi *ucsi, uint64_t control);
+static void ucsi_record_read(struct drv_ucsi *ucsi, uint32_t cci, bool refresh, const uint8_t *message_in, size_t size);
 static int ucsi_acknowledge(struct drv_ucsi *ucsi, uint64_t which);
 static int ucsi_acknowledge_change(struct drv_ucsi *ucsi);
 static int ucsi_reset(struct drv_ucsi *ucsi);
@@ -277,8 +328,6 @@ drv_ucsi_start(
 	const struct drv_ucsi_layout *layout,
 	uint16_t version)
 {
-	uint16_t notifications;
-	unsigned number;
 	int error;
 
 	/* Begins with nothing known. */
@@ -287,6 +336,143 @@ drv_ucsi_start(
 	ucsi->layout = layout;
 	ucsi->version = version;
 	drv_typec_os_log("ucsi: version %x.%x.%x, %s mailbox\n", version >> 8, (version >> 4) & 0xFU, version & 0xFU, layout->name);
+
+	/* Resets the PPM and reads every connector. */
+	error = ucsi_enumerate(ucsi, false);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the records are current and changes will be notified. */
+	return 0;
+}
+
+/*
+ * Handles a notification that came while no command was running: reads
+ * CCI as the notification left it and each connector whose change it
+ * indicates, acknowledging each change.  A PPM that stopped answering is
+ * reset and read again.
+ *
+ * Returns 0, ENODEV for an interface that failed, or an errno value.
+ */
+int
+drv_ucsi_service(
+	struct drv_ucsi *ucsi)
+{
+	uint32_t cci;
+	int status;
+	int error;
+
+	/* An interface that failed answers nothing. */
+	if (ucsi->failed)
+		return ENODEV;
+
+	/* Reads CCI as the notification left it, keeping the change it indicates. */
+	status = ucsi->transport->read(ucsi->transport->context, false, &cci, ucsi->message_in, ucsi->layout->message_in_size);
+	if (status < 0) {
+		ucsi->stuck = true;
+		error = ucsi_settle(ucsi, EIO);
+		return error;
+	}
+
+	/* Recorded, and the change it indicates kept. */
+	ucsi_record_read(ucsi, cci, false, ucsi->message_in, ucsi->layout->message_in_size);
+	ucsi_latch(ucsi, cci);
+
+	/* Reads and acknowledges each connector that changed; a PPM that stopped is brought back. */
+	error = ucsi_pending_handle(ucsi);
+	error = ucsi_settle(ucsi, error);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the records of the changed connectors are current. */
+	return 0;
+}
+
+/*
+ * Asks the PPM for CCI although no notification came (a notification
+ * that was lost, or a PPM that never notifies) and handles the connector
+ * change it indicates.  A PPM that stopped answering is reset and read
+ * again.
+ *
+ * Returns 0, ENODEV for an interface that failed, or an errno value.
+ */
+int
+drv_ucsi_poll(
+	struct drv_ucsi *ucsi)
+{
+	uint32_t cci;
+	int status;
+	int error;
+
+	/* An interface that failed answers nothing. */
+	if (ucsi->failed)
+		return ENODEV;
+
+	/* A PPM that stopped answering is brought back first. */
+	if (ucsi->stuck) {
+		error = ucsi_settle(ucsi, ETIMEDOUT);
+		return error;
+	}
+
+	/* Fetches CCI from the PPM, keeping the change it indicates. */
+	status = ucsi->transport->read(ucsi->transport->context, true, &cci, ucsi->message_in, ucsi->layout->message_in_size);
+	if (status < 0) {
+		ucsi->stuck = true;
+		error = ucsi_settle(ucsi, EIO);
+		return error;
+	}
+
+	/* Recorded, and the change it indicates kept. */
+	ucsi_record_read(ucsi, cci, true, ucsi->message_in, ucsi->layout->message_in_size);
+	ucsi_latch(ucsi, cci);
+
+	/* Reads and acknowledges each connector that changed. */
+	error = ucsi_pending_handle(ucsi);
+	error = ucsi_settle(ucsi, error);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: no change waits unseen. */
+	return 0;
+}
+
+/*
+ * Tells whether the PPM's notifications come: true once a command's
+ * completion arrived with a notification since the start.  A PPM whose
+ * completions are all found by asking does not notify, and its changes are
+ * found by polling.
+ */
+bool
+drv_ucsi_notifying(
+	const struct drv_ucsi *ucsi)
+{
+	/* No completion came with a notification. */
+	if (ucsi->notified_completions == 0U)
+		return false;
+
+	/* Succeeded: the notifications come. */
+	return true;
+}
+
+/*
+ * Resets the PPM and reads it whole: the completion notification, the
+ * capability, every connector, then the change notifications the PPM
+ * supports and every connector again, so a change made before the
+ * notifications were on is not lost.  again says it reads a PPM that was
+ * reset to bring it back: the records keep their operations' outcomes,
+ * and they are emptied only when the number of connectors changed.
+ *
+ * Returns 0, or an errno value.
+ */
+static int
+ucsi_enumerate(
+	struct drv_ucsi *ucsi,
+	bool again)
+{
+	uint16_t notifications;
+	unsigned previous_count;
+	unsigned number;
+	int error;
 
 	/* Resets the PPM, which leaves every notification off (section 4.5.1). */
 	error = ucsi_reset(ucsi);
@@ -299,12 +485,19 @@ drv_ucsi_start(
 		return error;
 
 	/* Reads how many connectors there are and what the PPM supports. */
+	previous_count = ucsi->connector_count;
 	error = ucsi_capability(ucsi);
 	if (error != 0)
 		return error;
 
+	/* A first reading, or a PPM whose connectors changed, starts from empty records. */
+	if (!again) {
+		drv_typec_connectors_reset(ucsi->connector_count);
+	} else if (previous_count != ucsi->connector_count) {
+		drv_typec_connectors_reset(ucsi->connector_count);
+	}
+
 	/* Reads what each connector can do and its state now. */
-	drv_typec_connectors_reset(ucsi->connector_count);
 	for (number = 1; number <= ucsi->connector_count; number++) {
 		error = ucsi_connector_start(ucsi, number);
 		if (error != 0)
@@ -345,43 +538,16 @@ drv_ucsi_start(
 }
 
 /*
- * Handles a notification that came while no command was running: reads
- * CCI as the notification left it and each connector whose change it
- * indicates, acknowledging each change.
- *
- * Returns 0, or an errno value.
- */
-int
-drv_ucsi_service(
-	struct drv_ucsi *ucsi)
-{
-	uint32_t cci;
-	int status;
-	int error;
-
-	/* Reads CCI as the notification left it, keeping the change it indicates. */
-	status = ucsi->transport->read(ucsi->transport->context, false, &cci, ucsi->message_in, ucsi->layout->message_in_size);
-	if (status < 0)
-		return EIO;
-	ucsi_latch(ucsi, cci);
-
-	/* Reads and acknowledges each connector that changed. */
-	error = ucsi_pending_handle(ucsi);
-	if (error != 0)
-		return error;
-
-	/* Succeeded: the records of the changed connectors are current. */
-	return 0;
-}
-
-/*
  * Carries out an operation another driver asked of a connector
  * (SET_UOR, SET_PDR, CONNECTOR_RESET or SET_NEW_CAM), notes its outcome
- * in the connector's record, and reads the connector again, which
- * publishes the record and tells the listeners.
+ * (its errno value and, for a command the PPM failed, the Error
+ * Information) in the connector's record, and reads the connector again,
+ * which publishes the record and tells the listeners.  A PPM that stopped
+ * answering is reset and read again after the outcome is published.
  *
  * Returns 0 when the connector was read again (the operation's own errno
- * value is in the record), or the errno value of that read.
+ * value is in the record), ENODEV for an interface that failed, or the
+ * errno value of that read.
  */
 int
 drv_ucsi_request(
@@ -390,26 +556,42 @@ drv_ucsi_request(
 {
 	struct drv_typec_connector *record;
 	uint64_t control;
+	uint32_t information;
 	unsigned number;
 	int request_error;
 	int error;
 	int got;
 
-	/* The command; one the PPM cannot be asked is the operation's outcome. */
+	/* The command; one the PPM cannot be asked, or an interface that failed, is the operation's outcome. */
 	number = request->connector + 1U;
-	request_error = ucsi_request_control(ucsi, request, &control);
+	ucsi->error_information = 0U;
+	request_error = ENODEV;
+	if (!ucsi->failed)
+		request_error = ucsi_request_control(ucsi, request, &control);
 	if (request_error == 0)
 		request_error = ucsi_command(ucsi, control);
-	drv_typec_os_log("ucsi: connector %u request %u kind %u error %d\n", number, (unsigned)request->serial, (unsigned)request->kind, request_error);
+	information = ucsi->error_information;
+	drv_typec_os_log("ucsi: connector %u request %u kind %u error %d information 0x%04x\n", number, (unsigned)request->serial, (unsigned)request->kind, request_error, (unsigned)information);
 
-	/* The outcome in the record, then the connector read again and published. */
-	error = drv_typec_request_finish(request, request_error);
+	/* The outcome in the record. */
+	error = drv_typec_request_finish(request, request_error, information);
 	if (error != 0)
 		return error;
+
+	/* An interface that failed reads nothing more: the outcome is published as the record stands. */
+	if (ucsi->failed) {
+		record = &ucsi->record;
+		got = drv_typec_connector_get(request->connector, record);
+		if (got == 0)
+			(void)drv_typec_connector_publish(request->connector, record);
+		return ENODEV;
+	}
+
+	/* The connector read again and published, and the changes the PPM indicated meanwhile. */
 	error = ucsi_connector_update(ucsi, number);
 	if (error == 0) {
-		/* The changes the PPM indicated meanwhile (the operation may have made one). */
 		error = ucsi_pending_handle(ucsi);
+		error = ucsi_settle(ucsi, error);
 		if (error != 0)
 			return error;
 		return 0;
@@ -420,15 +602,114 @@ drv_ucsi_request(
 	got = drv_typec_connector_get(request->connector, record);
 	if (got == 0)
 		(void)drv_typec_connector_publish(request->connector, record);
-	return error;
+
+	/* A PPM that stopped answering is brought back now that the outcome is out. */
+	error = ucsi_settle(ucsi, error);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the PPM was reset and every connector read again. */
+	return 0;
+}
+
+/*
+ * Brings a PPM that stopped answering back after one of the public steps
+ * ended with `error`: the PPM is reset and every connector read again.
+ * Returns `error` when the PPM answers, 0 when it was brought back (the
+ * records are read anew), or the errno value of a recovery that failed
+ * (ENODEV once the interface failed).
+ */
+static int
+ucsi_settle(
+	struct drv_ucsi *ucsi,
+	int error)
+{
+	int recovered;
+
+	/* A PPM that answers keeps the step's outcome. */
+	if (!ucsi->stuck)
+		return error;
+
+	/* A recovery under way does not start another. */
+	if (ucsi->recovering)
+		return error;
+
+	/* Resets the PPM and reads it again. */
+	recovered = ucsi_recover(ucsi);
+	if (recovered != 0)
+		return recovered;
+
+	/* Succeeded: the PPM answers again and the records are current. */
+	return 0;
+}
+
+/*
+ * Resets a PPM that stopped answering and reads every connector again
+ * (the start's reading; the records keep their operations' outcomes).
+ * Up to UCSI_RECOVER_MAX attempts are made, each after a longer pause; a
+ * reading that fails for any reason counts as a failed attempt (it may
+ * have stopped before the change notifications were on).  When none
+ * succeeds the interface is failed.
+ *
+ * Returns 0, or ENODEV when the interface failed.
+ */
+static int
+ucsi_recover(
+	struct drv_ucsi *ucsi)
+{
+	const struct drv_ucsi_transport *transport;
+	uint32_t pause;
+	unsigned attempt;
+	int error;
+
+	/*
+	 * recovering keeps a failure inside the reading from starting another
+	 * recovery; stuck is cleared before each attempt so its commands are
+	 * sent at all.
+	 */
+	transport = ucsi->transport;
+	ucsi->recovering = true;
+	error = ETIMEDOUT;
+	pause = UCSI_RECOVER_PAUSE_MS;
+	for (attempt = 1U; attempt <= UCSI_RECOVER_MAX; attempt++) {
+		/* A pause before every attempt but the first, longer each time. */
+		if (attempt > 1U) {
+			(void)transport->wait(transport->context, pause);
+			pause *= 2U;
+		}
+
+		/* Resets the PPM and reads it again. */
+		drv_typec_os_log("ucsi: the PPM stopped answering: reset and read again (attempt %u)\n", attempt);
+		ucsi->stuck = false;
+		error = ucsi_enumerate(ucsi, true);
+		ucsi->recoveries = attempt;
+		if (error == 0 && !ucsi->stuck)
+			break;
+		drv_typec_os_log("ucsi: attempt %u did not bring the PPM back (error %d)\n", attempt, error);
+	}
+
+	/* The recovery is over; a later silence may start another. */
+	ucsi->recovering = false;
+
+	/* No attempt succeeded: the interface failed. */
+	if (error != 0 || ucsi->stuck) {
+		ucsi->failed = true;
+		drv_typec_os_log("ucsi: the PPM did not come back after %u resets: the interface failed\n", UCSI_RECOVER_MAX);
+		return ENODEV;
+	}
+
+	/* Succeeded: the PPM answers and every connector was read again. */
+	drv_typec_os_log("ucsi: the PPM answers again\n");
+	return 0;
 }
 
 /*
  * Runs one command: writes CONTROL, waits for the PPM to complete it (or,
- * for ACK_CC_CI, to acknowledge), and keeps MESSAGE IN.  A completion is
- * not acknowledged here.  Returns 0, ENOTSUP when the PPM does not support
- * the command, EIO when it reports an error or the transport fails, or
- * ETIMEDOUT.
+ * for ACK_CC_CI, to acknowledge), and keeps MESSAGE IN and the CCI it
+ * ended with (ucsi->cci, which says whether the command failed or is not
+ * supported).  A completion is not acknowledged here.  Returns 0 once the
+ * PPM answered, EIO when the transport fails, or ETIMEDOUT when no answer
+ * came in time (ucsi->busy says whether the PPM was busy with it).
  */
 static int
 ucsi_execute(
@@ -447,10 +728,15 @@ ucsi_execute(
 	int status;
 	bool refresh;
 
+	/* Nothing is known of the answer yet. */
+	ucsi->cci = 0U;
+	ucsi->busy = false;
+
 	/* Tells the PPM the command. */
 	transport = ucsi->transport;
 	size = ucsi->layout->message_in_size;
 	status = transport->write(transport->context, control, NULL, 0);
+	ucsi_record_write(ucsi, control);
 	if (status < 0)
 		return EIO;
 
@@ -482,11 +768,26 @@ ucsi_execute(
 		status = transport->read(transport->context, refresh, &cci, message_in, size);
 		if (status < 0)
 			return EIO;
+		ucsi_record_read(ucsi, cci, refresh, message_in, size);
 		ucsi_latch(ucsi, cci);
 
-		/* Done unless the PPM is busy or has not answered yet. */
-		if ((cci & UCSI_CCI_BUSY) == 0 && (cci & done) != 0)
+		/* What the PPM said: busy, or the answer. */
+		ucsi->cci = cci;
+		ucsi->busy = false;
+		if ((cci & UCSI_CCI_BUSY) != 0)
+			ucsi->busy = true;
+
+		/* Done unless the PPM is busy or has not answered yet; counted by how the answer was found. */
+		if (!ucsi->busy && (cci & done) != 0) {
+			if (notified != 0) {
+				ucsi->notified_completions++;
+			} else {
+				ucsi->polled_completions++;
+			}
+
+			/* The answer is here. */
 			break;
+		}
 
 		/* Gives up after the timeout. */
 		elapsed += step;
@@ -507,48 +808,372 @@ ucsi_execute(
 	if (*length > size)
 		*length = size;
 
-	/* A command the PPM does not support. */
-	if ((cci & UCSI_CCI_NOT_SUPPORTED) != 0)
-		return ENOTSUP;
-
-	/* A command the PPM could not complete. */
-	if ((cci & UCSI_CCI_ERROR) != 0)
-		return EIO;
-
-	/* Succeeded: MESSAGE IN holds the answer. */
+	/* Succeeded: the PPM answered; ucsi->cci says how. */
 	return 0;
 }
 
 /*
  * Runs a command and acknowledges its completion (section 4.5.4), keeping
- * MESSAGE IN in the instance.  Returns 0, or the command's errno value
- * (the completion of a failed command is acknowledged too).
+ * MESSAGE IN in the instance.  A command the PPM failed is acknowledged
+ * and its reason read (GET_ERROR_STATUS); one still busy at the timeout is
+ * canceled; a PPM that does not answer is marked stuck, and every command
+ * after it fails at once until the PPM is reset.
+ *
+ * Returns 0, ENOTSUP when the PPM does not support the command, the
+ * errno value of the reason the PPM failed it, ETIMEDOUT, or EIO.
  */
 static int
 ucsi_command(
 	struct drv_ucsi *ucsi,
 	uint64_t control)
 {
+	uint32_t cci;
 	int command_error;
 	int error;
+
+	/* A PPM that stopped answering is not asked until it is reset. */
+	if (ucsi->stuck)
+		return ETIMEDOUT;
 
 	/* Runs it. */
 	ucsi->message_length = 0;
 	command_error = ucsi_execute(ucsi, control, ucsi->message_in, &ucsi->message_length);
-	if (command_error == ETIMEDOUT || command_error == EIO)
-		return command_error;
 
-	/* Acknowledges the completion before the next command (section 4). */
+	/*
+	 * No answer in time: canceled when the PPM said it was busy, else the
+	 * PPM stopped.  A command that finished as it was canceled goes on as
+	 * any completion.
+	 */
+	if (command_error == ETIMEDOUT) {
+		error = ucsi_cancel(ucsi, control);
+		if (error == ECANCELED)
+			return ETIMEDOUT;
+		if (error != 0)
+			return error;
+	} else if (command_error != 0) {
+		/* A transport that failed leaves the PPM unreachable. */
+		ucsi->stuck = true;
+		return command_error;
+	}
+
+	/* Acknowledges the completion before the next command (section 4), whatever it says. */
+	cci = ucsi->cci;
 	error = ucsi_acknowledge(ucsi, UCSI_ACK_COMMAND_COMPLETED);
 	if (error != 0)
 		return error;
 
-	/* Reports a command the PPM did not support or could not complete. */
-	if (command_error != 0)
-		return command_error;
+	/* A command the PPM does not support. */
+	if ((cci & UCSI_CCI_NOT_SUPPORTED) != 0)
+		return ENOTSUP;
+
+	/* A command whose failure its caller expects (a partner with nothing to tell) is not asked why. */
+	if ((cci & UCSI_CCI_ERROR) != 0 && ucsi->tolerant)
+		return EIO;
+
+	/* A command the PPM could not complete: its reason, read now. */
+	if ((cci & UCSI_CCI_ERROR) != 0) {
+		error = ucsi_error_status(ucsi, control);
+		return error;
+	}
 
 	/* Succeeded: the answer is in the instance. */
 	return 0;
+}
+
+/*
+ * Cancels a command still busy at its timeout (CANCEL, 3.1 section 6.5.2:
+ * sent only after the PPM answered the command with Busy).  A PPM that
+ * never said it was busy, or that does not answer the CANCEL either, has
+ * stopped and is marked stuck.
+ *
+ * Returns ECANCELED once the PPM canceled the command (its completion is
+ * acknowledged here); 0 when the command finished first, so the PPM
+ * dropped the CANCEL: its completion is in ucsi->cci and its MESSAGE IN in
+ * the instance, not acknowledged yet; else ETIMEDOUT or EIO.
+ */
+static int
+ucsi_cancel(
+	struct drv_ucsi *ucsi,
+	uint64_t control)
+{
+	uint32_t cci;
+	int error;
+
+	/* A command the PPM never said it was busy with cannot be canceled: the PPM is silent. */
+	if (!ucsi->busy) {
+		drv_typec_os_log("ucsi: command 0x%02x got no answer: the PPM stopped\n", (unsigned)(control & 0xFFU));
+		ucsi->stuck = true;
+		return ETIMEDOUT;
+	}
+
+	/* Asks the PPM to drop the command; it answers like any command, into the instance's MESSAGE IN. */
+	ucsi->message_length = 0;
+	error = ucsi_execute(ucsi, UCSI_CANCEL, ucsi->message_in, &ucsi->message_length);
+	if (error != 0) {
+		drv_typec_os_log("ucsi: command 0x%02x could not be canceled (error %d): the PPM stopped\n", (unsigned)(control & 0xFFU), error);
+		ucsi->stuck = true;
+		return error;
+	}
+
+	/* The command finished before the CANCEL came: its own completion stands. */
+	cci = ucsi->cci;
+	if ((cci & UCSI_CCI_CANCEL_COMPLETED) == 0) {
+		drv_typec_os_log("ucsi: command 0x%02x finished as it was canceled (CCI 0x%08x)\n", (unsigned)(control & 0xFFU), (unsigned)cci);
+		return 0;
+	}
+
+	/* Canceled: the CANCEL's completion is acknowledged. */
+	error = ucsi_acknowledge(ucsi, UCSI_ACK_COMMAND_COMPLETED);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the command is over, undone. */
+	drv_typec_os_log("ucsi: command 0x%02x canceled after its timeout\n", (unsigned)(control & 0xFFU));
+	return ECANCELED;
+}
+
+/*
+ * Reads why the PPM failed a command (GET_ERROR_STATUS, 3.1 section
+ * 6.5.18), keeps the Error Information in ucsi->error_information, logs it
+ * and returns the errno value it stands for.
+ *
+ * The failed command's completion was acknowledged first, as Linux's
+ * ucsi_read_error() does on the PPMs it runs on; 3.1 lets a PPM clear the
+ * Error Status after that acknowledgement, so a PPM that does reads as no
+ * reason (EIO).  From 3.0 the command names the failed command's
+ * connector; 1.x and 2.x leave that field reserved (2.x unconfirmed).  The
+ * failure of GET_ERROR_STATUS itself is not read again.
+ */
+static int
+ucsi_error_status(
+	struct drv_ucsi *ucsi,
+	uint64_t control)
+{
+	uint64_t error_control;
+	uint32_t information;
+	unsigned number;
+	int error;
+
+	/* GET_ERROR_STATUS that failed has no reason to read. */
+	if ((control & 0xFFU) == UCSI_GET_ERROR_STATUS)
+		return EIO;
+
+	/* The command, naming the connector from 3.0. */
+	number = ucsi_control_connector(control);
+	error_control = UCSI_GET_ERROR_STATUS;
+	if (ucsi->version >= UCSI_VERSION_3)
+		error_control |= (uint64_t)number << UCSI_CONTROL_SPECIFIC_SHIFT;
+
+	/* Asks; a reason that cannot be read leaves the failure plain. */
+	error = ucsi_command(ucsi, error_control);
+	if (error != 0) {
+		drv_typec_os_log("ucsi: command 0x%02x failed; its reason was not read (error %d)\n", (unsigned)(control & 0xFFU), error);
+		if (error == ETIMEDOUT)
+			return ETIMEDOUT;
+		return EIO;
+	}
+
+	/* The Error Information (bits 0-15 of MESSAGE IN). */
+	information = ucsi_bits(ucsi->message_in, ucsi->message_length, 0, 16);
+	ucsi->error_information = (uint16_t)information;
+	ucsi_error_log(control, number, information);
+
+	/* Succeeded: the errno value the reason stands for. */
+	error = ucsi_error_errno(information);
+	return error;
+}
+
+/*
+ * Chooses the errno value of a failed command's Error Information: the
+ * command, its connector or its parameters are wrong (EINVAL), the
+ * partner cannot do it (EOPNOTSUPP, the same value as ENOTSUP), the talk
+ * with the partner failed (EPROTO), it was refused (EPERM), else EIO.
+ * The values are coarse; the record's request_error_information keeps the
+ * reason itself.
+ */
+static int
+ucsi_error_errno(
+	uint32_t information)
+{
+	/* The connector named is not there. */
+	if ((information & UCSI_ERROR_NO_CONNECTOR) != 0)
+		return EINVAL;
+
+	/* The command, or its parameters, are not ones the PPM takes. */
+	if ((information & UCSI_ERROR_UNRECOGNIZED) != 0)
+		return EINVAL;
+	if ((information & UCSI_ERROR_INVALID_PARAMETERS) != 0)
+		return EINVAL;
+
+	/* The partner cannot do it. */
+	if ((information & UCSI_ERROR_INCOMPATIBLE_PARTNER) != 0)
+		return EOPNOTSUPP;
+
+	/* The talk with the partner failed. */
+	if ((information & UCSI_ERROR_CC_COMMUNICATION) != 0)
+		return EPROTO;
+	if ((information & UCSI_ERROR_CONTRACT_NEGOTIATION) != 0)
+		return EPROTO;
+
+	/* It was refused: by a dead battery, by the partner, or by the PPM's policy. */
+	if ((information & UCSI_ERROR_DEAD_BATTERY) != 0)
+		return EPERM;
+	if ((information & UCSI_ERROR_PARTNER_REJECTED_SWAP) != 0)
+		return EPERM;
+	if ((information & UCSI_ERROR_POLICY_CONFLICT) != 0)
+		return EPERM;
+	if ((information & UCSI_ERROR_SWAP_REJECTED) != 0)
+		return EPERM;
+
+	/* Succeeded: no more particular reason, an I/O error. */
+	return EIO;
+}
+
+/* Logs a failed command's Error Information: the value, then the name of each reason. */
+static void
+ucsi_error_log(
+	uint64_t control,
+	unsigned number,
+	uint32_t information)
+{
+	static const char *const names[UCSI_ERROR_BITS] = {
+		"unrecognized command",
+		"non-existent connector",
+		"invalid command parameters",
+		"incompatible connector partner",
+		"CC communication error",
+		"dead battery",
+		"contract negotiation failure",
+		"overcurrent",
+		"undefined",
+		"port partner rejected swap",
+		"hard reset",
+		"PPM policy conflict",
+		"swap rejected",
+		"reverse current protection",
+		"set sink path rejected"
+	};
+	unsigned bit;
+
+	/* The value; none may mean the PPM cleared it at the failed command's acknowledgement. */
+	drv_typec_os_log("ucsi: command 0x%02x connector %u failed: error information 0x%04x\n", (unsigned)(control & 0xFFU), number, (unsigned)information);
+	if (information == 0U)
+		drv_typec_os_log("ucsi:   no reason given (the PPM may clear it when the failure is acknowledged)\n");
+
+	/* Each reason it names. */
+	for (bit = 0U; bit < UCSI_ERROR_BITS; bit++) {
+		if ((information & (1U << bit)) != 0U)
+			drv_typec_os_log("ucsi:   %s\n", names[bit]);
+	}
+}
+
+/*
+ * Names the connector a command's CONTROL names: GET_ALTERNATE_MODES at
+ * bit 24, the commands of the whole PPM none (0), every other at bit 16.
+ */
+static unsigned
+ucsi_control_connector(
+	uint64_t control)
+{
+	unsigned command;
+
+	/* The command's code. */
+	command = (unsigned)(control & 0xFFU);
+
+	/* The commands that name no connector. */
+	switch (command) {
+	case UCSI_PPM_RESET:
+	case UCSI_CANCEL:
+	case UCSI_ACK_CC_CI:
+	case UCSI_SET_NOTIFICATION_ENABLE:
+	case UCSI_GET_CAPABILITY:
+	case UCSI_GET_ERROR_STATUS:
+		return 0U;
+	case UCSI_GET_ALTERNATE_MODES:
+		/* Its connector follows the recipient (Table 4-24). */
+		return (unsigned)((control >> 24) & UCSI_CCI_CONNECTOR_MASK);
+	default:
+		break;
+	}
+
+	/* Succeeded: the connector at bit 16. */
+	return (unsigned)((control >> UCSI_CONTROL_SPECIFIC_SHIFT) & UCSI_CCI_CONNECTOR_MASK);
+}
+
+/*
+ * Writes a command the core sent to the log as one line of the mailbox's
+ * record (ws177-p003): "ucsi: rec <number> W <CONTROL>", numbered from 1.
+ * Only the first UCSI_RECORD_MAX exchanges are written; the last line of
+ * a full record says so.
+ */
+static void
+ucsi_record_write(
+	struct drv_ucsi *ucsi,
+	uint64_t control)
+{
+	/* The record is full. */
+	if (ucsi->recorded >= UCSI_RECORD_MAX)
+		return;
+	ucsi->recorded++;
+
+	/* The line, numbered so a line lost from the log is seen. */
+	drv_typec_os_log("ucsi: rec %u W %016llx\n", ucsi->recorded, (unsigned long long)control);
+
+	/* The last line a full record takes says so. */
+	if (ucsi->recorded == UCSI_RECORD_MAX)
+		drv_typec_os_log("ucsi: rec %u end (the record is full)\n", ucsi->recorded);
+}
+
+/*
+ * Writes what the core read of the mailbox to the log as lines of its
+ * record: "ucsi: rec <number> R <CCI> <refresh> <length>", then the
+ * MESSAGE IN bytes CCI's length names, UCSI_RECORD_CHUNK a line, under the
+ * same number: "ucsi: rec <number> I <offset> <hex>".  Only the first
+ * UCSI_RECORD_MAX exchanges are written.
+ */
+static void
+ucsi_record_read(
+	struct drv_ucsi *ucsi,
+	uint32_t cci,
+	bool refresh,
+	const uint8_t *message_in,
+	size_t size)
+{
+	static const char digits[] = "0123456789abcdef";
+	char hex[UCSI_RECORD_CHUNK * 2U + 1U];
+	size_t length;
+	size_t offset;
+	size_t index;
+	size_t at;
+
+	/* The record is full. */
+	if (ucsi->recorded >= UCSI_RECORD_MAX)
+		return;
+	ucsi->recorded++;
+
+	/* CCI, whether it was fetched, and how many bytes of MESSAGE IN follow. */
+	length = (cci >> UCSI_CCI_LENGTH_SHIFT) & UCSI_CCI_LENGTH_MASK;
+	if (length > size)
+		length = size;
+	drv_typec_os_log("ucsi: rec %u R %08x %u %u\n", ucsi->recorded, (unsigned)cci, (unsigned)refresh, (unsigned)length);
+
+	/* MESSAGE IN, a chunk a line. */
+	for (offset = 0U; offset < length; offset += UCSI_RECORD_CHUNK) {
+		at = 0U;
+		for (index = offset; index < length && index < offset + UCSI_RECORD_CHUNK; index++) {
+			hex[at] = digits[message_in[index] >> 4];
+			hex[at + 1U] = digits[message_in[index] & 0xFU];
+			at += 2U;
+		}
+
+		/* The chunk's line. */
+		hex[at] = '\0';
+		drv_typec_os_log("ucsi: rec %u I %u %s\n", ucsi->recorded, (unsigned)offset, hex);
+	}
+
+	/* The last line a full record takes says so. */
+	if (ucsi->recorded == UCSI_RECORD_MAX)
+		drv_typec_os_log("ucsi: rec %u end (the record is full)\n", ucsi->recorded);
 }
 
 /*
@@ -565,10 +1190,13 @@ ucsi_acknowledge(
 	size_t length;
 	int error;
 
-	/* Sends it and waits. */
+	/* Sends it and waits; a PPM that does not acknowledge has stopped. */
 	error = ucsi_execute(ucsi, UCSI_ACK_CC_CI | which, discarded, &length);
-	if (error != 0)
+	if (error != 0) {
+		drv_typec_os_log("ucsi: ACK_CC_CI got no acknowledgement (error %d): the PPM stopped\n", error);
+		ucsi->stuck = true;
 		return error;
+	}
 
 	/* Succeeded: the PPM may send its next completion or change. */
 	return 0;
@@ -598,10 +1226,16 @@ ucsi_acknowledge_change(
 	int command_error;
 	int error;
 
-	/* Runs the command whose completion goes with the change; its answer is not kept. */
+	/* A PPM that stopped answering is not asked until it is reset. */
+	if (ucsi->stuck)
+		return ETIMEDOUT;
+
+	/* Runs the command whose completion goes with the change; its answer is not kept, a silence stops the PPM. */
 	command_error = ucsi_execute(ucsi, UCSI_GET_CAPABILITY, discarded, &length);
-	if (command_error == ETIMEDOUT || command_error == EIO)
+	if (command_error != 0) {
+		ucsi->stuck = true;
 		return command_error;
+	}
 
 	/* Acknowledges the change and that completion in one ACK_CC_CI. */
 	error = ucsi_acknowledge(ucsi, UCSI_ACK_CONNECTOR_CHANGE | UCSI_ACK_COMMAND_COMPLETED);
@@ -626,24 +1260,35 @@ ucsi_reset(
 	int status;
 	bool completed;
 
-	/* Tells the PPM. */
+	/* Tells the PPM; nothing it was busy with is waited for after this. */
 	transport = ucsi->transport;
+	ucsi->busy = false;
 	status = transport->write(transport->context, UCSI_PPM_RESET, NULL, 0);
-	if (status < 0)
+	ucsi_record_write(ucsi, UCSI_PPM_RESET);
+	if (status < 0) {
+		ucsi->stuck = true;
 		return EIO;
+	}
 
 	/* Looks at CCI every step until the reset completed or the timeout. */
 	completed = false;
 	for (elapsed = 0; elapsed < UCSI_RESET_TIMEOUT_MS && !completed; elapsed += UCSI_STEP_FIRST_MS) {
 		/* The step. */
 		status = transport->wait(transport->context, UCSI_STEP_FIRST_MS);
-		if (status < 0)
+		if (status < 0) {
+			ucsi->stuck = true;
 			return EIO;
+		}
 
 		/* CCI fetched from the PPM. */
 		status = transport->read(transport->context, true, &cci, ucsi->message_in, ucsi->layout->message_in_size);
-		if (status < 0)
+		if (status < 0) {
+			ucsi->stuck = true;
 			return EIO;
+		}
+
+		/* Recorded. */
+		ucsi_record_read(ucsi, cci, true, ucsi->message_in, ucsi->layout->message_in_size);
 
 		/* The reset completed. */
 		if ((cci & UCSI_CCI_RESET_COMPLETED) != 0)
@@ -653,6 +1298,7 @@ ucsi_reset(
 	/* The PPM did not complete the reset. */
 	if (!completed) {
 		drv_typec_os_log("ucsi: PPM_RESET did not complete\n");
+		ucsi->stuck = true;
 		return ETIMEDOUT;
 	}
 
@@ -714,7 +1360,9 @@ ucsi_capability(
 
 /*
  * Reads what a connector can do (GET_CONNECTOR_CAPABILITY, section 4.5.7)
- * and the Alternate Modes it supports, then its state.
+ * and the Alternate Modes it supports, then its state.  The layer keeps
+ * the outcome of the connector's last operation across the publishing, so
+ * a reset that brings the PPM back reads the same way.
  */
 static int
 ucsi_connector_start(
@@ -794,8 +1442,11 @@ ucsi_connector_update(
 	 * report an error; the list is then empty.
 	 */
 	if ((ucsi->optional_features & UCSI_FEATURE_ALT_MODE_DETAILS) != 0) {
+		/* tolerant: these failures are expected and not asked about (GET_ERROR_STATUS). */
+		ucsi->tolerant = true;
 		(void)ucsi_alt_modes(ucsi, number, UCSI_RECIPIENT_SOP, &record->partner_modes);
 		(void)ucsi_alt_modes(ucsi, number, UCSI_RECIPIENT_SOP_PRIME, &record->cable_modes);
+		ucsi->tolerant = false;
 		error = ucsi_current_modes(ucsi, number, record);
 		if (error != 0)
 			return error;
@@ -805,17 +1456,26 @@ ucsi_connector_update(
 		 * the connector is in, which a 3.x PPM reports; one that cannot
 		 * leaves them unknown.
 		 */
-		if (ucsi->version >= UCSI_VERSION_3)
+		if (ucsi->version >= UCSI_VERSION_3) {
+			ucsi->tolerant = true;
 			(void)ucsi_dp_status(ucsi, number, record);
+			ucsi->tolerant = false;
+		}
 	}
 
-	/* The partner's PDOs, when the PPM reports PDOs and the contract is USB PD. */
-	if ((ucsi->optional_features & UCSI_FEATURE_PDO_DETAILS) != 0 && record->power_operation == DRV_TYPEC_POWER_PD)
+	/* The partner's PDOs, when the PPM reports PDOs and the contract is USB PD (a failure expected). */
+	if ((ucsi->optional_features & UCSI_FEATURE_PDO_DETAILS) != 0 && record->power_operation == DRV_TYPEC_POWER_PD) {
+		ucsi->tolerant = true;
 		(void)ucsi_partner_pdos(ucsi, number, record);
+		ucsi->tolerant = false;
+	}
 
 	/* The cable's properties, when the PPM reports them (a cable that tells nothing leaves them unknown). */
-	if ((ucsi->optional_features & UCSI_FEATURE_CABLE_DETAILS) != 0)
+	if ((ucsi->optional_features & UCSI_FEATURE_CABLE_DETAILS) != 0) {
+		ucsi->tolerant = true;
 		(void)ucsi_cable(ucsi, number, record);
+		ucsi->tolerant = false;
+	}
 
 	/* Publishes the new state. */
 	error = drv_typec_connector_publish(number - 1U, record);
@@ -1182,11 +1842,18 @@ ucsi_pending_handle(
 			continue;
 		}
 
-		/* Reads its state, unless it is not one the layer keeps. */
+		/*
+		 * Reads its state, unless it is not one the layer keeps.  A reading
+		 * that fails while the PPM answers still lets the change be
+		 * acknowledged: the PPM tells of no other change until then.  The
+		 * record keeps what was published before.
+		 */
 		if (number <= ucsi->connector_count) {
 			error = ucsi_connector_update(ucsi, number);
-			if (error != 0)
+			if (error != 0 && ucsi->stuck)
 				return error;
+			if (error != 0)
+				drv_typec_os_log("ucsi: connector %u's change was not read (error %d); acknowledged all the same\n", number, error);
 		}
 
 		/* Acknowledges the change; the PPM may then indicate the next. */

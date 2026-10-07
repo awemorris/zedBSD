@@ -15,8 +15,12 @@
  * sent while a completion is not acknowledged, a change acknowledged that
  * was not indicated).  Scenarios: the start, a plug, an unplug, two
  * changes at once, a busy PPM, the 2.x arrangement with the orientation,
- * and the choice of the arrangement.  Prints "PASS name" or "FAIL name
- * ..." per check and exits with 1 when one failed.
+ * and the choice of the arrangement; the robustness of ws177-p003: a
+ * command the PPM fails and its reason, a command busy past its time and
+ * its CANCEL, a PPM that stops and its reset, one that does not come back,
+ * a PPM whose notifications never come, and the record of the mailbox
+ * replayed.  Prints "PASS name" or "FAIL name ..." per check and exits
+ * with 1 when one failed.
  */
 
 #include <stdarg.h>
@@ -35,6 +39,8 @@
 
 /* The commands the fake PPM answers (UCSI 1.2 Table A-1). */
 #define FAKE_PPM_RESET 0x01U
+#define FAKE_CANCEL 0x02U
+#define FAKE_GET_ERROR_STATUS 0x13U
 #define FAKE_CONNECTOR_RESET 0x03U
 #define FAKE_SET_UOR 0x09U
 #define FAKE_SET_PDR 0x0BU
@@ -52,6 +58,7 @@
 #define FAKE_GET_CAM_CS 0x18U
 
 /* The CCI indicators (Table 3-2). */
+#define FAKE_CCI_CANCELED (1U << 26)
 #define FAKE_CCI_RESET (1U << 27)
 #define FAKE_CCI_BUSY (1U << 28)
 #define FAKE_CCI_ACK (1U << 29)
@@ -65,6 +72,10 @@
 
 /* The mailbox's room (the 2.x arrangement's). */
 #define FAKE_MAILBOX 0x210U
+
+/* The most lines of the mailbox's record a test keeps, and the longest one. */
+#define RECORD_LINES 1024U
+#define RECORD_LINE 512U
 
 /*
  * One connector of the fake PPM: what it can do, what is attached, and
@@ -137,6 +148,29 @@ struct fake_ppm {
 	unsigned cam_cs_asked;
 	unsigned cam_cs_mode;
 
+	/* The command the PPM fails (0: none) and the Error Information it gives for it (ws177-p003). */
+	unsigned fail_command;
+	uint16_t error_information;
+
+	/* The GET_ERROR_STATUS asked: how many, the last CONTROL, and whether a failed command's completion was acknowledged first. */
+	unsigned error_status_asked;
+	uint64_t error_status_control;
+
+	/* A command kept busy until a CANCEL (busy_held: one is), and the CANCELs received. */
+	bool busy_forever;
+	bool busy_held;
+	unsigned cancels;
+
+	/* The held command finishes as the CANCEL comes, so the PPM drops the CANCEL. */
+	bool cancel_late;
+
+	/* No notification ever sent (a platform whose Notify does not come). */
+	bool mute;
+
+	/* PPM_RESET does not complete (a PPM that is gone), and the resets received. */
+	bool dead;
+	unsigned resets;
+
 	/* Commands answered, waits that refreshed, and breaks of the rules. */
 	unsigned commands;
 	unsigned violations;
@@ -151,6 +185,23 @@ static unsigned kicked;
 
 /* The checks that failed. */
 static int test_failures;
+
+/*
+ * The mailbox's record the driver wrote to the log while capturing is
+ * on (ws177-p003), a line each, and how many there are.
+ */
+static bool capturing;
+static char record_lines[RECORD_LINES][RECORD_LINE];
+static unsigned record_count;
+
+/*
+ * The replay of a record: the next line to give, the CONTROLs the driver
+ * wrote that the record did not have, and the reads past its end.
+ */
+static unsigned replay_next;
+static unsigned replay_number;
+static unsigned replay_mismatches;
+static unsigned replay_overruns;
 
 /* The listener's calls, and the last connector and generation it was told. */
 static unsigned listened;
@@ -196,6 +247,17 @@ static void test_kick(void *argument);
 static bool test_take_run(struct drv_ucsi *ucsi, uint32_t serial);
 static void test_display(struct drv_ucsi *ucsi, const struct drv_ucsi_transport *transport);
 static void test_locations(void);
+static void test_failure_reason(struct drv_ucsi *ucsi, const struct drv_ucsi_transport *transport);
+static void test_cancel(struct drv_ucsi *ucsi);
+static void test_recovery(struct drv_ucsi *ucsi);
+static void test_mute(struct drv_ucsi *ucsi, const struct drv_ucsi_transport *transport);
+static void test_record_replay(struct drv_ucsi *ucsi, const struct drv_ucsi_transport *transport);
+static void test_layer_stop(struct drv_ucsi *ucsi, const struct drv_ucsi_transport *transport);
+static void fake_three_connectors(uint16_t version);
+static int replay_write(void *context, uint64_t control, const uint8_t *message_out, size_t length);
+static int replay_read(void *context, bool refresh, uint32_t *cci, uint8_t *message_in, size_t size);
+static int replay_wait(void *context, uint32_t milliseconds);
+static unsigned replay_find(char kind, const char **fields);
 
 /*
  * Runs the scenarios.
@@ -235,6 +297,12 @@ main(
 	test_display(&ucsi, &transport);
 	test_layouts();
 	test_locations();
+	test_failure_reason(&ucsi, &transport);
+	test_cancel(&ucsi);
+	test_recovery(&ucsi);
+	test_mute(&ucsi, &transport);
+	test_record_replay(&ucsi, &transport);
+	test_layer_stop(&ucsi, &transport);
 
 	/* Reports whether every check passed. */
 	if (test_failures != 0)
@@ -288,6 +356,7 @@ drv_typec_os_log(
 {
 	va_list arguments;
 	char line[512];
+	int prefix;
 
 	/* The line. */
 	va_start(arguments, format);
@@ -297,6 +366,13 @@ drv_typec_os_log(
 	/* A disagreement, counted. */
 	if (strstr(line, "DisplayPort disagree") != NULL)
 		logged_disagreements++;
+
+	/* A line of the mailbox's record, kept while capturing. */
+	prefix = strncmp(line, "ucsi: rec ", 10);
+	if (capturing && prefix == 0 && record_count < RECORD_LINES) {
+		(void)snprintf(record_lines[record_count], RECORD_LINE, "%s", line);
+		record_count++;
+	}
 
 	/* Printed with -v. */
 	if (verbose)
@@ -395,6 +471,7 @@ fake_answer(
 	uint32_t length;
 	uint32_t first;
 	uint32_t second;
+	uint32_t cci;
 
 	/* MESSAGE IN, emptied. */
 	message = &fake.mailbox[fake.layout->message_in_offset];
@@ -406,8 +483,25 @@ fake_answer(
 		connector = &fake.connectors[number - 1U];
 	length = 0;
 
+	/* The command the test makes the PPM fail: an error, and its reason kept for GET_ERROR_STATUS. */
+	if (fake.fail_command != 0U && command == fake.fail_command) {
+		cci = FAKE_CCI_DONE | FAKE_CCI_ERROR | (fake.change_indicated << 1);
+		memcpy(&fake.mailbox[fake.layout->cci_offset], &cci, sizeof(cci));
+		fake.completion_pending = true;
+		if ((fake.notifications & 1U) != 0)
+			fake.notify = true;
+		return;
+	}
+
 	/* Each command's answer. */
 	switch (command) {
+	case FAKE_GET_ERROR_STATUS:
+		/* The reason of the last failure (3.1 Table 6-48), and what was asked. */
+		fake.error_status_asked++;
+		fake.error_status_control = control;
+		fake_set(message, 0, 16, fake.error_information);
+		length = 16;
+		break;
 	case FAKE_SET_NOTIFICATION_ENABLE:
 		fake.notifications = (uint16_t)fake_get(control, 16, 16);
 		break;
@@ -677,8 +771,14 @@ fake_write(
 	command = (unsigned)(control & 0xFFU);
 	fake.commands++;
 
-	/* PPM_RESET: everything off, the reset completed (polled, no notification). */
+	/* PPM_RESET: everything off, the reset completed (polled, no notification); a dead PPM does nothing. */
 	if (command == FAKE_PPM_RESET) {
+		fake.resets++;
+		if (fake.dead)
+			return 0;
+		fake.stalled = false;
+		fake.busy_held = false;
+		fake.busy_waits = 0;
 		fake.notifications = 0;
 		fake.completion_pending = false;
 		fake.change_indicated = 0;
@@ -713,6 +813,34 @@ fake_write(
 		return 0;
 	}
 
+	/* CANCEL: only for a command answered busy (3.1 section 6.5.2); it ends that command. */
+	if (command == FAKE_CANCEL) {
+		fake.cancels++;
+		if (!fake.busy_held && fake.busy_waits == 0) {
+			fake_violation("a CANCEL without a busy command");
+			return 0;
+		}
+
+		/* The busy command ends. */
+		fake.busy_held = false;
+		fake.busy_waits = 0;
+
+		/* The command finished first: its answer, and the CANCEL dropped. */
+		if (fake.cancel_late) {
+			fake.cancel_late = false;
+			fake_answer(fake.busy_control);
+			return 0;
+		}
+
+		/* Canceled. */
+		cci = FAKE_CCI_DONE | FAKE_CCI_CANCELED | (fake.change_indicated << 1);
+		memcpy(&fake.mailbox[fake.layout->cci_offset], &cci, sizeof(cci));
+		fake.completion_pending = true;
+		if ((fake.notifications & 1U) != 0)
+			fake.notify = true;
+		return 0;
+	}
+
 	/* Any other command: the previous completion must have been acknowledged. */
 	if (fake.completion_pending)
 		fake_violation("a command sent before the last completion was acknowledged");
@@ -721,6 +849,18 @@ fake_write(
 	if (fake.stalled) {
 		cci = 0;
 		memcpy(&fake.mailbox[fake.layout->cci_offset], &cci, sizeof(cci));
+		return 0;
+	}
+
+	/* A PPM kept busy answers only Busy, until a CANCEL. */
+	if (fake.busy_forever) {
+		fake.busy_forever = false;
+		fake.busy_held = true;
+		fake.busy_control = control;
+		cci = FAKE_CCI_BUSY;
+		memcpy(&fake.mailbox[fake.layout->cci_offset], &cci, sizeof(cci));
+		if ((fake.notifications & 1U) != 0)
+			fake.notify = true;
 		return 0;
 	}
 
@@ -771,6 +911,12 @@ fake_wait(
 		fake.busy_waits--;
 		if (fake.busy_waits == 0)
 			fake_answer(fake.busy_control);
+	}
+
+	/* A platform whose notifications never come. */
+	if (fake.mute) {
+		fake.notify = false;
+		return 0;
 	}
 
 	/* A notification, taken. */
@@ -1261,12 +1407,33 @@ test_display(
 	(void)drv_typec_text(text, sizeof(text));
 	test_check("dp-text", strstr(text, " display-port=1 hpd=1(display) ucsi=1 pin=C(display) ucsi=D lanes=4 disagree") != NULL && strstr(text, "display-port 1: hpd=1 pin=C lanes=4 connector=1 generation=") != NULL, text);
 
+	/* ws177-p003: the display driver reads pin E: the disagreement goes on and is logged again; the same report again is not. */
+	logged = logged_disagreements;
+	report.pin = DRV_TYPEC_DP_PIN_E;
+	error = drv_typec_display_report(0, &report);
+	(void)drv_typec_display_check();
+	(void)drv_typec_display_report(0, &report);
+	(void)drv_typec_display_check();
+	(void)drv_typec_connector_get(0, &record);
+	(void)snprintf(detail, sizeof(detail), "error %d, disagree %d, logged %u", error, record.dp_disagree, logged_disagreements - logged);
+	test_check("dp-disagree-changed", error == 0 && record.dp_disagree && logged_disagreements - logged == 1U, detail);
+
 	/* The display driver now reads pin D: the reports agree and the disagreement ends. */
 	report.pin = DRV_TYPEC_DP_PIN_D;
 	error = drv_typec_display_report(0, &report);
 	wait = drv_typec_display_check();
 	(void)drv_typec_connector_get(0, &record);
 	test_check("dp-agree", error == 0 && wait == 0 && !record.dp_disagree && record.dp.pin == DRV_TYPEC_DP_PIN_D, "the disagreement did not end");
+
+	/* ws177-p003: the display driver stops: its report is forgotten, UCSI's taken, the listeners told. */
+	listened = 0;
+	error = drv_typec_display_forget(0);
+	(void)drv_typec_connector_get(0, &record);
+	(void)drv_typec_display_get(0, &display);
+	(void)snprintf(detail, sizeof(detail), "error %d, told %u, display known %d, source %d", error, listened, record.dp_display.known, (int)record.dp_source);
+	test_check("dp-forget", error == 0 && listened == 1U && !record.dp_display.known && !display.state.known && record.dp_source == DRV_TYPEC_DP_SOURCE_UCSI && !record.dp_disagree, detail);
+	error = drv_typec_display_forget(DRV_TYPEC_DISPLAY_PORT_MAX);
+	test_check("dp-forget-range", error == EINVAL, "a port beyond the room");
 
 	/* A second port is not bound to the same connector; a port and a connector beyond the room are refused. */
 	error = drv_typec_display_bind(1, 0);
@@ -1361,4 +1528,584 @@ test_locations(void)
 	memset(&port, 0, sizeof(port));
 	found = drv_typec_location_match(connectors, 2U, &port);
 	test_check("match-unknown", found == DRV_TYPEC_CONNECTOR_NONE, "an unknown port");
+}
+
+/*
+ * ws177-p003: a fake PPM of UCSI `version` on the 2.x arrangement with
+ * three connectors, the first attached to a UFP partner, the others empty.
+ */
+static void
+fake_three_connectors(
+	uint16_t version)
+{
+	/* The PPM. */
+	fake_reset(&drv_ucsi_layout_2, version);
+	fake.connector_count = 3;
+	fake.optional_features = 0;
+	fake.connectors[0].capability = (1U << 2) | (1U << 5) | (1U << 10) | (1U << 11) | (1U << 12) | (1U << 13);
+	fake.connectors[0].connected = true;
+	fake.connectors[0].power_operation = 1;
+	fake.connectors[0].partner_flags = 0x1U;
+	fake.connectors[0].partner_type = 2;
+	fake.connectors[0].current = 0xFFU;
+	fake.connectors[1].capability = (1U << 2) | (1U << 5);
+	fake.connectors[1].current = 0xFFU;
+	fake.connectors[2].capability = (1U << 2) | (1U << 5);
+	fake.connectors[2].current = 0xFFU;
+}
+
+/*
+ * ws177-p003: a command the PPM fails.  Its completion is acknowledged,
+ * then GET_ERROR_STATUS is asked (naming the connector from 3.0, not on
+ * 1.x), and the operation's outcome is the errno value of the reason with
+ * the reason's bits in the record.
+ */
+static void
+test_failure_reason(
+	struct drv_ucsi *ucsi,
+	const struct drv_ucsi_transport *transport)
+{
+	struct drv_typec_connector record;
+	uint32_t serial;
+	char detail[320];
+	bool ran;
+	int error;
+
+	/* A 3.0 PPM: a power role swap rejected (Swap Rejected, bit 12). */
+	fake_three_connectors(0x0300U);
+	error = drv_ucsi_start(ucsi, transport, &drv_ucsi_layout_2, 0x0300U);
+	test_check("reason-start", error == 0 && fake.violations == 0U, fake.last_violation);
+	drv_typec_operator_set(test_kick, NULL);
+	fake.fail_command = FAKE_SET_PDR;
+	fake.error_information = 1U << 12;
+	error = drv_typec_connector_set_power_role(0, DRV_TYPEC_ROLE_SOURCE, &serial);
+	ran = test_take_run(ucsi, serial);
+	(void)drv_typec_connector_get(0, &record);
+	(void)snprintf(detail, sizeof(detail), "error %d ran %d serial %u/%u outcome %d information 0x%x", error, ran, (unsigned)record.request_serial, (unsigned)serial, record.request_error, (unsigned)record.request_error_information);
+	test_check("reason-swap-rejected", error == 0 && ran && record.request_serial == serial && record.request_error == EPERM && record.request_error_information == (1U << 12), detail);
+	(void)snprintf(detail, sizeof(detail), "asked %u, control 0x%llx", fake.error_status_asked, (unsigned long long)fake.error_status_control);
+	test_check("reason-asked-3.0", fake.error_status_asked == 1U && fake.error_status_control == (FAKE_GET_ERROR_STATUS | (1ULL << 16)), detail);
+	(void)snprintf(detail, sizeof(detail), "%u breaks, the last: %s", fake.violations, fake.last_violation);
+	test_check("reason-acknowledged", fake.violations == 0U && !fake.completion_pending, detail);
+
+	/* The next operation, which the PPM does not fail, has no reason. */
+	fake.fail_command = 0U;
+	error = drv_typec_connector_set_power_role(0, DRV_TYPEC_ROLE_SINK, &serial);
+	ran = test_take_run(ucsi, serial);
+	(void)drv_typec_connector_get(0, &record);
+	test_check("reason-cleared", error == 0 && ran && record.request_error == 0 && record.request_error_information == 0U, "a reason kept from before");
+
+	/* An incompatible partner (bit 3) is EOPNOTSUPP, a non-existent connector (bit 1) EINVAL. */
+	fake.fail_command = FAKE_SET_UOR;
+	fake.error_information = 1U << 3;
+	error = drv_typec_connector_set_data_role(0, DRV_TYPEC_DATA_UFP, &serial);
+	ran = test_take_run(ucsi, serial);
+	(void)drv_typec_connector_get(0, &record);
+	test_check("reason-incompatible", ran && record.request_error == EOPNOTSUPP, "not EOPNOTSUPP");
+	fake.error_information = (1U << 1) | (1U << 3);
+	error = drv_typec_connector_set_data_role(0, DRV_TYPEC_DATA_DFP, &serial);
+	ran = test_take_run(ucsi, serial);
+	(void)drv_typec_connector_get(0, &record);
+	test_check("reason-no-connector", ran && record.request_error == EINVAL && record.request_error_information == ((1U << 1) | (1U << 3)), "not EINVAL with both bits");
+	fake.fail_command = 0U;
+
+	/* A 1.2 PPM: GET_ERROR_STATUS names no connector (the field is reserved there). */
+	fake_three_connectors(0x0120U);
+	fake.layout = &drv_ucsi_layout_1;
+	error = drv_ucsi_start(ucsi, transport, &drv_ucsi_layout_1, 0x0120U);
+	test_check("reason-start-1.2", error == 0, "the 1.2 PPM did not start");
+	fake.fail_command = FAKE_SET_PDR;
+	fake.error_information = 1U << 2;
+	error = drv_typec_connector_set_power_role(0, DRV_TYPEC_ROLE_SOURCE, &serial);
+	ran = test_take_run(ucsi, serial);
+	(void)drv_typec_connector_get(0, &record);
+	(void)snprintf(detail, sizeof(detail), "outcome %d, control 0x%llx", record.request_error, (unsigned long long)fake.error_status_control);
+	test_check("reason-1.2", ran && record.request_error == EINVAL && fake.error_status_control == FAKE_GET_ERROR_STATUS, detail);
+	fake.fail_command = 0U;
+
+	/* A partner without Alternate Modes, whose GET_ALTERNATE_MODES the PPM fails, still reads whole. */
+	fake.optional_features = 1U << 2;
+	ucsi->optional_features = 1U << 2;
+	fake.fail_command = FAKE_GET_ALTERNATE_MODES;
+	fake.error_information = 1U << 3;
+	fake.connectors[0].change = (uint16_t)(1U << 14);
+	fake_event(1);
+	error = drv_ucsi_service(ucsi);
+	(void)drv_typec_connector_get(0, &record);
+	(void)snprintf(detail, sizeof(detail), "error %d, %u breaks (%s)", error, fake.violations, fake.last_violation);
+	test_check("reason-ignored-modes", error == 0 && record.connected && record.partner_modes.count == 0U && fake.violations == 0U, detail);
+	fake.fail_command = 0U;
+	fake.optional_features = 0U;
+	ucsi->optional_features = 0U;
+	drv_typec_operator_set(NULL, NULL);
+}
+
+/*
+ * ws177-p003: a command the PPM keeps busy past its time is canceled; the
+ * operation's outcome is ETIMEDOUT, the PPM is not reset, and the next
+ * commands run.
+ */
+static void
+test_cancel(
+	struct drv_ucsi *ucsi)
+{
+	struct drv_typec_connector record;
+	uint32_t serial;
+	unsigned resets;
+	char detail[320];
+	bool ran;
+	int error;
+
+	/* A data role swap the PPM keeps busy. */
+	drv_typec_operator_set(test_kick, NULL);
+	resets = fake.resets;
+	fake.busy_forever = true;
+	error = drv_typec_connector_set_data_role(0, DRV_TYPEC_DATA_UFP, &serial);
+	ran = test_take_run(ucsi, serial);
+	(void)drv_typec_connector_get(0, &record);
+	(void)snprintf(detail, sizeof(detail), "error %d ran %d outcome %d cancels %u resets %u stuck %d", error, ran, record.request_error, fake.cancels, fake.resets - resets, ucsi->stuck);
+	test_check("cancel-timeout", ran && record.request_serial == serial && record.request_error == ETIMEDOUT && fake.cancels == 1U, detail);
+	test_check("cancel-no-reset", fake.resets == resets && !ucsi->stuck && !ucsi->failed, detail);
+	(void)snprintf(detail, sizeof(detail), "%u breaks, the last: %s", fake.violations, fake.last_violation);
+	test_check("cancel-rules", fake.violations == 0U && !fake.completion_pending, detail);
+
+	/* The command finishes as the CANCEL comes: the PPM drops the CANCEL, and the outcome is the command's. */
+	fake.busy_forever = true;
+	fake.cancel_late = true;
+	error = drv_typec_connector_set_data_role(0, DRV_TYPEC_DATA_DFP, &serial);
+	ran = test_take_run(ucsi, serial);
+	(void)drv_typec_connector_get(0, &record);
+	(void)snprintf(detail, sizeof(detail), "ran %d outcome %d, %u breaks (%s)", ran, record.request_error, fake.violations, fake.last_violation);
+	test_check("cancel-late", ran && record.request_serial == serial && record.request_error == 0 && fake.violations == 0U && !fake.completion_pending, detail);
+	drv_typec_operator_set(NULL, NULL);
+}
+
+/*
+ * ws177-p003: a PPM that stops answering (the stall after a lone change
+ * acknowledgement) is reset and read again; the last operation's outcome
+ * stays in the record.  A PPM that does not come back fails the interface
+ * after three resets, and an operation then ends with ENODEV.
+ */
+static void
+test_recovery(
+	struct drv_ucsi *ucsi)
+{
+	struct drv_typec_connector record;
+	struct drv_typec_request request;
+	uint32_t serial;
+	uint32_t kept_serial;
+	int kept_error;
+	unsigned resets;
+	char detail[320];
+	bool ran;
+	int error;
+
+	/* The PPM stops; a change comes. */
+	(void)drv_typec_connector_get(0, &record);
+	kept_serial = record.request_serial;
+	kept_error = record.request_error;
+	resets = fake.resets;
+	fake.stalled = true;
+	fake.connectors[1].connected = true;
+	fake.connectors[1].power_operation = 1;
+	fake.connectors[1].partner_type = 2;
+	fake.connectors[1].change = (uint16_t)(1U << 14);
+	fake_event(2);
+	error = drv_ucsi_service(ucsi);
+	(void)drv_typec_connector_get(1, &record);
+	(void)snprintf(detail, sizeof(detail), "error %d resets %u connected %d stuck %d", error, fake.resets - resets, record.connected, ucsi->stuck);
+	test_check("recover-reset", error == 0 && fake.resets == resets + 1U && record.connected && !ucsi->stuck && ucsi->recoveries == 1U && !ucsi->failed, detail);
+	(void)drv_typec_connector_get(0, &record);
+	test_check("recover-outcome-kept", kept_serial != 0U && record.request_serial == kept_serial && record.request_error == kept_error, "the last operation's outcome lost");
+	(void)snprintf(detail, sizeof(detail), "%u breaks, the last: %s", fake.violations, fake.last_violation);
+	test_check("recover-rules", fake.violations == 0U, detail);
+
+	/* The PPM goes for good: the recovery resets it three times, then the interface failed. */
+	resets = fake.resets;
+	fake.stalled = true;
+	fake.dead = true;
+	fake.connectors[1].connected = false;
+	fake.connectors[1].change = (uint16_t)(1U << 14);
+	fake_event(2);
+	error = drv_ucsi_service(ucsi);
+	(void)snprintf(detail, sizeof(detail), "error %d recoveries %u failed %d resets %u", error, ucsi->recoveries, ucsi->failed, fake.resets - resets);
+	test_check("dead-failed", error == ENODEV && ucsi->failed && ucsi->recoveries == 3U && fake.resets == resets + 3U, detail);
+	error = drv_ucsi_poll(ucsi);
+	test_check("dead-poll", error == ENODEV, "a poll of a failed interface");
+
+	/* A failed interface asks the PPM nothing; an operation ends with ENODEV in its record. */
+	resets = fake.commands;
+	error = drv_ucsi_service(ucsi);
+	test_check("dead-quiet", error == ENODEV && fake.commands == resets, "the failed interface asked the PPM");
+	drv_typec_operator_set(test_kick, NULL);
+	error = drv_typec_connector_set_data_role(0, DRV_TYPEC_DATA_DFP, &serial);
+	ran = drv_typec_request_take(&request);
+	if (ran)
+		error = drv_ucsi_request(ucsi, &request);
+	(void)drv_typec_connector_get(0, &record);
+	(void)snprintf(detail, sizeof(detail), "ran %d error %d outcome %d", ran, error, record.request_error);
+	test_check("dead-request", ran && error == ENODEV && record.request_serial == serial && record.request_error == ENODEV, detail);
+	drv_typec_operator_set(NULL, NULL);
+	fake.dead = false;
+	fake.stalled = false;
+}
+
+/*
+ * ws177-p003: a platform whose notifications never come.  The start
+ * finds every completion by asking, the core says the PPM does not
+ * notify, and a change is found by polling.
+ */
+static void
+test_mute(
+	struct drv_ucsi *ucsi,
+	const struct drv_ucsi_transport *transport)
+{
+	struct drv_typec_connector record;
+	char detail[320];
+	int error;
+
+	/* The start without a notification. */
+	fake_three_connectors(0x0300U);
+	fake.mute = true;
+	error = drv_ucsi_start(ucsi, transport, &drv_ucsi_layout_2, 0x0300U);
+	(void)snprintf(detail, sizeof(detail), "error %d notified %u polled %u", error, ucsi->notified_completions, ucsi->polled_completions);
+	test_check("mute-start", error == 0 && !drv_ucsi_notifying(ucsi) && ucsi->polled_completions != 0U, detail);
+
+	/* A change no notification tells of, found by the poll. */
+	fake.connectors[2].connected = true;
+	fake.connectors[2].power_operation = 1;
+	fake.connectors[2].partner_type = 2;
+	fake.connectors[2].change = (uint16_t)(1U << 14);
+	fake_event(3);
+	error = drv_ucsi_poll(ucsi);
+	(void)drv_typec_connector_get(2, &record);
+	(void)snprintf(detail, sizeof(detail), "error %d connected %d indicated %u breaks %u (%s)", error, record.connected, fake.change_indicated, fake.violations, fake.last_violation);
+	test_check("mute-poll", error == 0 && record.connected && fake.change_indicated == 0U && fake.violations == 0U, detail);
+
+	/* A PPM that notifies says so. */
+	fake_three_connectors(0x0300U);
+	error = drv_ucsi_start(ucsi, transport, &drv_ucsi_layout_2, 0x0300U);
+	test_check("notifying", error == 0 && drv_ucsi_notifying(ucsi), "the notifications were not seen");
+}
+
+/*
+ * ws177-p003: the record of the mailbox.  A start and a change on the
+ * fake PPM are written to the log; the same start and change replayed
+ * from those lines alone send the same CONTROLs and publish the same
+ * records.
+ */
+static void
+test_record_replay(
+	struct drv_ucsi *ucsi,
+	const struct drv_ucsi_transport *transport)
+{
+	struct drv_typec_connector first[3];
+	struct drv_typec_connector second;
+	struct drv_ucsi_transport replay;
+	unsigned index;
+	unsigned same;
+	char detail[320];
+	int error;
+
+	/* The run recorded: a start, and a change on the second connector. */
+	fake_three_connectors(0x0300U);
+	record_count = 0U;
+	capturing = true;
+	error = drv_ucsi_start(ucsi, transport, &drv_ucsi_layout_2, 0x0300U);
+	fake.connectors[1].connected = true;
+	fake.connectors[1].power_operation = 5;
+	fake.connectors[1].provider = true;
+	fake.connectors[1].partner_type = 2;
+	fake.connectors[1].change = (uint16_t)(1U << 14);
+	fake_event(2);
+	if (error == 0)
+		error = drv_ucsi_service(ucsi);
+	capturing = false;
+	(void)snprintf(detail, sizeof(detail), "error %d, %u lines", error, record_count);
+	test_check("record-run", error == 0 && record_count > 20U && ucsi->recorded <= 256U, detail);
+	for (index = 0U; index < 3U; index++)
+		(void)drv_typec_connector_get(index, &first[index]);
+
+	/* The same steps over the record alone. */
+	fake_three_connectors(0x0300U);
+	fake.connector_count = 0U;
+	replay.write = replay_write;
+	replay.read = replay_read;
+	replay.wait = replay_wait;
+	replay.context = NULL;
+	replay_next = 0U;
+	replay_number = 0U;
+	replay_mismatches = 0U;
+	replay_overruns = 0U;
+	error = drv_ucsi_start(ucsi, &replay, &drv_ucsi_layout_2, 0x0300U);
+	if (error == 0)
+		error = drv_ucsi_service(ucsi);
+	(void)snprintf(detail, sizeof(detail), "error %d, mismatches %u, overruns %u, at line %u of %u", error, replay_mismatches, replay_overruns, replay_next, record_count);
+	test_check("replay-run", error == 0 && replay_mismatches == 0U && replay_overruns == 0U && replay_next == record_count, detail);
+
+	/* The records as the recorded run left them. */
+	same = 0U;
+	for (index = 0U; index < 3U; index++) {
+		(void)drv_typec_connector_get(index, &second);
+		if (second.connected == first[index].connected &&
+		    second.capability == first[index].capability &&
+		    second.power_operation == first[index].power_operation &&
+		    second.power_role == first[index].power_role &&
+		    second.partner_type == first[index].partner_type)
+			same++;
+	}
+
+	/* Every record as the run left it. */
+	test_check("replay-records", same == 3U, "a record differs from the recorded run's");
+}
+
+/*
+ * Finds the next line of the record (from replay_next) if it is of a kind
+ * (W, R or I), and where its fields start; record_count when it is not.
+ * Lines must be numbered without a gap (a line lost from the log), counted
+ * in replay_mismatches.
+ */
+static unsigned
+replay_find(
+	char kind,
+	const char **fields)
+{
+	unsigned number;
+	int consumed;
+	int scanned;
+	char found;
+
+	/* The line at the cursor: its number and its kind. */
+	if (replay_next >= record_count)
+		return record_count;
+	consumed = 0;
+	scanned = sscanf(record_lines[replay_next], "ucsi: rec %u %c %n", &number, &found, &consumed);
+	if (scanned != 2 || found != kind)
+		return record_count;
+
+	/* W and R lines number the exchanges one after another; I lines share their R's. */
+	if (kind != 'I') {
+		if (number != replay_number + 1U)
+			replay_mismatches++;
+		replay_number = number;
+	}
+
+	/* Succeeded: the line and its fields. */
+	*fields = &record_lines[replay_next][consumed];
+	return replay_next;
+}
+
+/* The replay's write: the CONTROL must be the record's next W line. */
+static int
+replay_write(
+	void *context,
+	uint64_t control,
+	const uint8_t *message_out,
+	size_t length)
+{
+	unsigned long long recorded;
+	const char *fields;
+	unsigned line;
+
+	(void)context;
+	(void)message_out;
+	(void)length;
+
+	/* The next line, a W, with the same CONTROL. */
+	line = replay_find('W', &fields);
+	if (line == record_count) {
+		replay_overruns++;
+		return 0;
+	}
+
+	/* Compared, and taken. */
+	recorded = strtoull(fields, NULL, 16);
+	if (recorded != (unsigned long long)control)
+		replay_mismatches++;
+	replay_next++;
+	return 0;
+}
+
+/* The replay's read: CCI and MESSAGE IN from the record's next R line and its I lines. */
+static int
+replay_read(
+	void *context,
+	bool refresh,
+	uint32_t *cci,
+	uint8_t *message_in,
+	size_t size)
+{
+	unsigned value;
+	unsigned recorded_refresh;
+	unsigned length;
+	unsigned offset;
+	unsigned line;
+	unsigned at;
+	const char *fields;
+	const char *hex;
+
+	(void)context;
+
+	/* The next line, an R. */
+	memset(message_in, 0, size);
+	*cci = 0U;
+	line = replay_find('R', &fields);
+	if (line == record_count) {
+		replay_overruns++;
+		return 0;
+	}
+
+	/* CCI as recorded, read the same way (fetched or after a notification). */
+	(void)sscanf(fields, "%x %u %u", &value, &recorded_refresh, &length);
+	*cci = value;
+	if ((recorded_refresh != 0U) != refresh)
+		replay_mismatches++;
+	replay_next++;
+
+	/* Its MESSAGE IN, an I line a chunk. */
+	for (;;) {
+		line = replay_find('I', &fields);
+		if (line == record_count)
+			break;
+		offset = (unsigned)strtoul(fields, NULL, 10);
+		hex = strchr(fields, ' ');
+		at = offset;
+		while (hex != NULL && hex[1] != '\0' && hex[1] != '\n' && hex[2] != '\0' && at < size) {
+			(void)sscanf(&hex[1], "%2x", &value);
+			message_in[at] = (uint8_t)value;
+			at++;
+			hex += 2;
+		}
+
+		/* The chunk taken. */
+		replay_next++;
+	}
+
+	/* Succeeded: the recorded answer. */
+	return 0;
+}
+
+/* The replay's wait: a notification exactly when the recorded read was not a fetch. */
+static int
+replay_wait(
+	void *context,
+	uint32_t milliseconds)
+{
+	unsigned value;
+	unsigned recorded_refresh;
+	unsigned length;
+	unsigned number;
+	const char *fields;
+	int consumed;
+	int scanned;
+	char kind;
+
+	(void)context;
+	(void)milliseconds;
+
+	/* The read that follows, as recorded (looked at, not taken). */
+	if (replay_next >= record_count)
+		return 0;
+	consumed = 0;
+	scanned = sscanf(record_lines[replay_next], "ucsi: rec %u %c %n", &number, &kind, &consumed);
+	if (scanned != 2 || kind != 'R')
+		return 0;
+	fields = &record_lines[replay_next][consumed];
+	(void)sscanf(fields, "%x %u %u", &value, &recorded_refresh, &length);
+	if (recorded_refresh != 0U)
+		return 0;
+
+	/* Succeeded: it followed a notification. */
+	return 1;
+}
+
+/*
+ * ws177-p003: the layer's side.  An operation canceled while it waits
+ * gets ECANCELED, which the connector driver's next publishing keeps; a
+ * change whose reading failed (the PPM answering) is acknowledged all
+ * the same; the connector driver's stop ends what waits with ENODEV,
+ * refuses new operations and publishing, and a new start clears it.
+ */
+static void
+test_layer_stop(
+	struct drv_ucsi *ucsi,
+	const struct drv_ucsi_transport *transport)
+{
+	struct drv_typec_connector record;
+	struct drv_typec_request request;
+	uint32_t first;
+	uint32_t second;
+	unsigned ended;
+	char text[2048];
+	char detail[320];
+	bool taken;
+	int error;
+
+	/* A started PPM; two operations wait. */
+	fake_three_connectors(0x0300U);
+	error = drv_ucsi_start(ucsi, transport, &drv_ucsi_layout_2, 0x0300U);
+	test_check("layer-start", error == 0, "the PPM did not start");
+	drv_typec_operator_set(test_kick, NULL);
+	(void)drv_typec_connector_set_data_role(0, DRV_TYPEC_DATA_UFP, &first);
+	(void)drv_typec_connector_set_power_role(0, DRV_TYPEC_ROLE_SOURCE, &second);
+
+	/* The first canceled: ECANCELED published; again it no longer waits; an unknown serial is not one. */
+	listened = 0;
+	error = drv_typec_request_cancel(first);
+	(void)drv_typec_connector_get(0, &record);
+	(void)snprintf(detail, sizeof(detail), "error %d, told %u, serial %u/%u, outcome %d", error, listened, (unsigned)record.request_serial, (unsigned)first, record.request_error);
+	test_check("cancel-waiting", error == 0 && listened == 1U && record.request_serial == first && record.request_error == ECANCELED, detail);
+	error = drv_typec_request_cancel(first);
+	test_check("cancel-again", error == EBUSY, "a canceled operation canceled again");
+	error = drv_typec_request_cancel(second + 100U);
+	test_check("cancel-unknown", error == ENOENT, "a serial never asked");
+
+	/* The connector driver's publishing keeps the outcome. */
+	fake.connectors[0].change = (uint16_t)(1U << 14);
+	fake_event(1);
+	error = drv_ucsi_service(ucsi);
+	(void)drv_typec_connector_get(0, &record);
+	test_check("cancel-kept", error == 0 && record.request_serial == first && record.request_error == ECANCELED, "the publishing overwrote the outcome");
+
+	/* Only the second is taken; once taken it is not canceled. */
+	taken = drv_typec_request_take(&request);
+	test_check("cancel-left", taken && request.serial == second, "the canceled operation was taken");
+	error = drv_typec_request_cancel(second);
+	test_check("cancel-taken", error == EBUSY, "a taken operation canceled");
+	error = drv_ucsi_request(ucsi, &request);
+	test_check("cancel-run", error == 0, "the second did not run");
+
+	/* A change whose reading the PPM fails is acknowledged all the same. */
+	fake.fail_command = FAKE_GET_CONNECTOR_STATUS;
+	fake.error_information = 1U << 4;
+	fake.connectors[1].change = (uint16_t)(1U << 14);
+	fake_event(2);
+	error = drv_ucsi_service(ucsi);
+	(void)snprintf(detail, sizeof(detail), "error %d, indicated %u, stuck %d, %u breaks (%s)", error, fake.change_indicated, ucsi->stuck, fake.violations, fake.last_violation);
+	test_check("change-failed-acknowledged", error == 0 && fake.change_indicated == 0U && !ucsi->stuck && fake.violations == 0U, detail);
+	fake.fail_command = 0U;
+
+	/* Two operations wait, then the connector driver stops. */
+	(void)drv_typec_connector_set_data_role(1, DRV_TYPEC_DATA_UFP, &first);
+	(void)drv_typec_connector_set_data_role(2, DRV_TYPEC_DATA_UFP, &second);
+	listened = 0;
+	ended = drv_typec_driver_stop(ENODEV);
+	(void)drv_typec_connector_get(1, &record);
+	(void)snprintf(detail, sizeof(detail), "ended %u, told %u, outcome %d", ended, listened, record.request_error);
+	test_check("stop-ended", ended == 2U && listened == 3U && record.request_serial == first && record.request_error == ENODEV && drv_typec_driver_stopped(), detail);
+	(void)drv_typec_connector_get(2, &record);
+	test_check("stop-ended-second", record.request_serial == second && record.request_error == ENODEV, "the second's outcome");
+	taken = drv_typec_request_take(&request);
+	error = drv_typec_connector_set_data_role(0, DRV_TYPEC_DATA_DFP, &first);
+	test_check("stop-refused", !taken && error == ENODEV, "an operation after the stop");
+	error = drv_typec_connector_publish(0, &record);
+	test_check("stop-no-publish", error == ENODEV, "a record published after the stop");
+	(void)drv_typec_text(text, sizeof(text));
+	test_check("stop-text", strstr(text, "the connector driver stopped") != NULL, text);
+
+	/* A new start clears the stop. */
+	fake_three_connectors(0x0300U);
+	error = drv_ucsi_start(ucsi, transport, &drv_ucsi_layout_2, 0x0300U);
+	test_check("stop-restart", error == 0 && !drv_typec_driver_stopped(), "the stop outlived a new start");
+	drv_typec_operator_set(NULL, NULL);
 }
