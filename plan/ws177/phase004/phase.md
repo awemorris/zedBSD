@@ -50,3 +50,7 @@ backlog-p2 12（Notes の 512 byte）: limit は上限を下げる口で、Notes
 desktop-p004.sh PASS（accent の keyboard の focus、Q1 が PNG を目視）。試験の道具の不具合（qmp-pointer に click の step が無く Users > Add を開けない）で kl_field の上限は QEMU で未確認。P1 が試験を直して再依頼する。
 
 2026-10-08 / T1-406（Q1 の判定）: desktop-p004.sh は PASS（accent の 5 本）。ただし `qmp-pointer` に click の step が無く Users > Add が開かず、名前の欄の 32 は未確認（打った文字は Current password の欄へ）。直し（P1）: click を move・down・up に、Add User... は Settings の `ZSETTINGS CONTROL index=21` の行から位置を取る、名前・全名の欄の長さを log（`USERS admin field=N length=L`、password は出さない）、32 で止まり 33 以上が無いことを log で判定。T1 の再試験を依頼。
+
+## T1-407（2026-10-08 Q1）
+
+FAIL（4 回とも同じ）: accent の 5 行は ok、`the Add User... button (control 21) is not on the Users page`（users-layout.txt は controls=4、index 1・2・3・10 だけ）。kl_field の上限は QEMU で未確認のまま。P1 に戻す（試験の利用者が管理者でないか、Add の口の位置の前提の誤り）。

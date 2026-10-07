@@ -3,7 +3,7 @@
 # ws177-p005: 通知とメールの通知の口の堅さ（案 A）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（T1-408）（2026-10-08 P1 q884 の 2: 実装・host PASS・build warning 0、main に統合）
+Status: cleared（2026-10-08 Q1 判定、T1-408 PASS）（旧: test-wait（T1-408）（2026-10-08 P1 q884 の 2: 実装・host PASS・build warning 0、main に統合））
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q884 の 2（P1、2026-10-08）
@@ -36,3 +36,8 @@ Origin: [backlog-p2](../backlog-p2.md) の 32・34・35・36（WS156 通知の�
 ## Event
 
 2026-10-08 / q884-i02（P1）: 実装と host・build。
+
+
+## Q1 の判定（2026-10-08）
+
+T1-408: apps.mailer.sign-in-code の step 1〜8 が seen、`KWL MAIL arrived ... told=1`、`ZBROWSER MAIL code length=4 ... notified=1`、arrived-refused 無し。

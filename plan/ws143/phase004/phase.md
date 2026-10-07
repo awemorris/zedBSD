@@ -370,3 +370,7 @@ i01 で commit した物: `userland/base/bluetoothd/{crypto,acl,l2cap,smp,keys}.
 ## T1-405（2026-10-08 Q1）
 
 FAIL（2 回とも）: p003 `it started twice on the controller (got 3, want 2)`、p004 `the child killed ends the parent (got 2, want 0)`。p002 は PASS。P2 に直しを戻した（i02 の新しい attempt）。uncleared。
+
+## T1-409（2026-10-08 Q1）
+
+PASS: bt-loopback-p002・bt-daemon-p003・bt-pair-p004（i03 の直しで T1-405 の 2 件が解消）。p004 は D5 b2・PIN の legacy・Q4・5330 の実機が残るので uncleared のまま。

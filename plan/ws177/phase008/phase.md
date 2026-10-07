@@ -32,3 +32,7 @@ Origin: [backlog-p2](../backlog-p2.md) の 37・38・39（q824 ws148-p002）、[
 ## Event
 
 2026-10-08 / q884-i05（P1）: 実装と host・build。
+
+## T1-411（2026-10-08 Q1）
+
+FAIL（2 回とも）: `the window's focus reads the changed list again (found 0 of 1)`・`read again 0 times`。Text Editor の起動・KWL FAILED 無し・生存は ok。P1 に戻す（焦点の事象で stamp を見ていない・試験の焦点の付け方、のどちらか）。log は /home/awe/zedBSD-worktrees/t1/build/t1-411/recents-p008*.log。
