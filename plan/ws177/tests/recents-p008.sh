@@ -4,8 +4,11 @@
 #   plan/ws089/tests/settings-guest.sh start build/<W>/hdd-image.img
 #  1. A recent list of two of Text Editor's files; Text Editor starts and reads it (TEXTEDIT READY).
 #  2. The list is emptied as Files' Clear Recents does (a new file renamed over it, in the guest's shell).
-#  3. A click on the desktop, then on Text Editor's window: the window gets the keyboard and reads the list again
-#     (RECENT changed: read again); a second focus with nothing changed reads nothing (still one such line).
+#  3. Settings maps a window on top (the keyboard goes to it) and quits (the keyboard comes back to Text Editor's
+#     window, the top one left): the window gets the keyboard and reads the list again (RECENT changed: read again);
+#     a second focus with nothing changed reads nothing (still one such line).  T1-411 clicked the desktop and then
+#     the window, but this --testing compositor runs no desktop program, so a click on the background never took the
+#     keyboard (no KWL DESKTOP focus) and the window never got it again.
 #  4. No KWL FAILED; Text Editor runs on.
 # Files' question before Clear Recents and its view of a stopped list are the host test's
 # (plan/ws148/tests/run-host-files-recents.sh); the stamp itself is plan/ws177/tests/host-recent-stamp.sh's.
@@ -19,8 +22,7 @@ export GUEST_RUNTIME
 out=${1:-build/ws177-p008}
 mkdir -p "$out"
 guest() { timeout 90 python3 plan/tools/guest/guest.py run "$1" 2>&1 </dev/null; }
-pointer() { python3 plan/ws035/tests/qmp-pointer.py "$GUEST_RUNTIME/qmp.sock" "$@"; }
-stop_all='service stop greeter >/dev/null 2>&1; for p in $(ps -A -o pid,args | grep -E "[w]ayland( |$)|[t]extedit" | awk "{print \$1}"); do kill $p; done; i=0; while ps -A -o args | grep -qE "[w]ayland( |$)|[t]extedit" && [ $i -lt 50 ]; do sleep 0.2; i=$((i+1)); done'
+stop_all='service stop greeter >/dev/null 2>&1; for p in $(ps -A -o pid,args | grep -E "[w]ayland( |$)|[t]extedit|[s]ettings" | awk "{print \$1}"); do kill $p; done; i=0; while ps -A -o args | grep -qE "[w]ayland( |$)|[t]extedit|[s]ettings" && [ $i -lt 50 ]; do sleep 0.2; i=$((i+1)); done'
 start_desktop='export XDG_RUNTIME_DIR=/tmp HOME=/root; rm -f /tmp/wayland-0
 /bin/wayland --testing --timeout=900 --width=1280 --height=800 --glass --wallpaper=/usr/share/keiland/wallpaper.png > /tmp/zdesktop.log 2>&1 </dev/null & sleep 4; echo started'
 list=/root/.local/share/keiland/recent
@@ -47,9 +49,21 @@ expect_count() {
 	return 1
 }
 
-# Clicks a point (move, press, release).
-click() {
-	pointer move $(($1 - 2)) "$2" sleep 150 move "$1" "$2" sleep 200 down sleep 60 up sleep 600
+# Takes the keyboard from Text Editor and gives it back: Settings maps a window on top, then is ended.
+focus_away_and_back() {
+	maps=$(guest "grep -c 'KWL MAP client=' /tmp/zdesktop.log" | tail -1)
+	guest "export XDG_RUNTIME_DIR=/tmp HOME=/root; /bin/settings --timeout-s=60 about > /tmp/s.log 2>&1 </dev/null & echo started" >/dev/null
+	tries=0
+	while [ $tries -lt 15 ]; do
+		now=$(guest "grep -c 'KWL MAP client=' /tmp/zdesktop.log" | tail -1)
+		[ "${now:-0}" -gt "${maps:-0}" ] 2>/dev/null && break
+		tries=$((tries + 1))
+		sleep 1
+	done
+	[ $tries -lt 15 ] && echo "settings: mapped on top" || { echo "FAIL: Settings mapped no window"; status=1; }
+	sleep 1
+	guest 'for p in $(ps -A -o pid,args | grep -E "[s]ettings" | awk "{print \$1}"); do kill $p; done; i=0; while ps -A -o args | grep -qE "[s]ettings" && [ $i -lt 50 ]; do sleep 0.2; i=$((i+1)); done; echo gone' >/dev/null
+	sleep 1
 }
 
 wait_guest
@@ -68,12 +82,10 @@ echo "textedit: window at $wx,$wy"
 # 2. The list emptied as Files does it (a new file renamed over the old one).
 guest ": > $list.new; mv $list.new $list; echo emptied" >/dev/null
 
-# 3. The keyboard away to the desktop and back to the window: the list read again, once.
-click 1200 760
-click $((wx + 300)) $((wy + 200))
+# 3. The keyboard away to another window and back: the list read again, once.
+focus_away_and_back
 expect_count 'RECENT changed: read again' 1 "the window's focus reads the changed list again"
-click 1200 760
-click $((wx + 300)) $((wy + 200))
+focus_away_and_back
 sleep 2
 lines=$(count_log 'RECENT changed: read again')
 [ "${lines:-0}" = 1 ] && echo "ok: an unchanged list is not read again" || { echo "FAIL: read again ${lines:-0} times"; status=1; }
