@@ -4,7 +4,7 @@
 
 Phase ID: `ws143-p002`
 Parent: [WS143](../ws.md)
-Status: test-wait（2026-10-08 P2、q860-i01: 実装・review の反映・build・host 試験まで。T1 の bt-loopback-p002.sh と 5330 の passthrough を待つ）
+Status: test-wait（T1-384）（2026-10-08 P2、q860-i01: 実装・review の反映・build・host 試験まで。T1 の bt-loopback-p002.sh と 5330 の passthrough を待つ）
 Phase disposition: normal
 Queue: q860-i01（P2、2026-10-08。Q1 の投入「p001 の記録を締め、HID の Phase から実装」）
 
