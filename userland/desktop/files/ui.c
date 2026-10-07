@@ -35,6 +35,10 @@
 /* The sidebar's places' ID among libkeiland's widgets (ui-widgets.c). */
 #define UI_WIDGET_PLACE		1001U
 
+/* The log's prefix, and the longest line written (a longer message is cut, the newline kept). */
+#define UI_LOG_PREFIX		"ZFILES "
+#define UI_LOG_LINE		1024U
+
 /* The frame's measurements, in pixels: the tasks' place from the corner. */
 #define UI_MARGIN		12
 
@@ -668,21 +672,49 @@ fm_ui_wait(
 /*
  * Writes one line of the file manager's log on standard error: "ZFILES "
  * and the message.  The tests wait for these lines.
+ *
+ * The line is made whole and written with one write: standard error is
+ * unbuffered, and the desktop's Files and a Files window share the
+ * session's log, so a line written in three pieces was cut by the other
+ * program's line (BUG-262: "ZFILES ZFILES ACCENT index=0APPEARANCE ...").
  */
 void
 fm_log(
 	const char *format,
 	...)
 {
+	char line[UI_LOG_LINE];
 	va_list arguments;
+	size_t prefix;
+	size_t used;
+	ssize_t written;
+	int length;
 
-	/* The prefix, the message and the end of the line, at once. */
-	fputs("ZFILES ", stderr);
+	/* The prefix. */
+	prefix = sizeof(UI_LOG_PREFIX) - 1U;
+	memcpy(line, UI_LOG_PREFIX, prefix);
+
+	/* The message after it, with room kept for the newline. */
 	va_start(arguments, format);
-	vfprintf(stderr, format, arguments);
+	length = vsnprintf(line + prefix, sizeof(line) - prefix - 1U, format, arguments);
 	va_end(arguments);
-	fputc('\n', stderr);
+
+	/* A message that could not be formatted is left out; a long one is cut. */
+	used = prefix;
+	if (length > 0) {
+		used += (size_t)length;
+		if (used > sizeof(line) - 2U)
+			used = sizeof(line) - 2U;
+	}
+
+	/* The end of the line. */
+	line[used] = '\n';
+	used++;
+
+	/* One write, so that another program's line cannot cut it. */
 	fflush(stderr);
+	written = write(STDERR_FILENO, line, used);
+	(void)written;
 }
 
 /*
