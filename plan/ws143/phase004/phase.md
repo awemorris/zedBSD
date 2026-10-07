@@ -4,7 +4,7 @@
 
 Phase ID: `ws143-p004`
 Parent: [WS143](../ws.md)
-Status: in-progress（q883-i02、P2、2026-10-08 朝。i01 は uncleared: P2 の context の都合で、部品と host 試験までで安全な地点に commit して終えた）
+Status: test-wait（T1 の依頼は Q1 経由、q883-i02、P2、2026-10-08 朝。i02 は実装と host 試験まで。QEMU は T1。i01 は uncleared: P2 の context の都合で、部品と host 試験までで安全な地点に commit して終えた）
 Phase disposition: normal
 Queue: q880-i01（P2、Q1 の投入「p004（L2CAP・SMP）。p003 と同じく試験の kernel の loopback で QEMU で確かめられる形に（loopback に要る答えを足してよい）。設計 → design-reviewer → 実装 → host 試験（fuzz を含む）」）、
 q883-i02（P2、Q1 の投入: 再開点の順に、review による設計の改訂 → session の queue と初期化（B1・B3・B5）→ pair.[ch] → main.c の口と `bt` →
@@ -59,25 +59,32 @@ SMP の PDU の値（鍵、nonce、confirm、公開鍵の X・Y）は little-end
 
 ### 4. 特権の分離（D16 の (a)、D17。i02 で review B2・B6 を反映）
 
-- base の `etc/passwd`・`etc/group` に `_bluetooth`（uid・gid 80、home `/var/empty`、shell `/sbin/nologin`）。group `bluetooth` は作らない
-  （D8 の判定は §6 の root・seat の人・wheel で、group を使わない。review S6）。
-- 親（root）: `/run/bluetoothd.sock` を作り（0666）、`/var/db`（無ければ 0755）と `/var/db/bluetooth`（`_bluetooth` の 0700）を作り、子と
+- base の `etc/passwd`・`etc/group`・`etc/shadow` に `_bluetooth`（uid・gid 80、home `/var/empty`、shell `/sbin/nologin`、password は `*`）と、
+  D17 の決定どおり group `bluetooth`（81、空）。D8 の判定は §6 の root・seat の人・wheel で、group `bluetooth` は今は判定に使わない（review S6。
+  i02 の review-2 BL3 で D17 の文言に合わせて作る形に戻した）。
+- 親（root）: `/run/bluetoothd.sock` を作り（0666）、`/var/db`（無ければ 0755）と `/var/db/bluetooth`（`_bluetooth` の 0700。symlink や
+  folder でない物は断る。uid・gid は `getpwnam` の値。review-2 M-i）を作り、子と
   **`socketpair(AF_UNIX, SOCK_DGRAM)`**（zedBSD の kernel に SOCK_SEQPACKET は無い。datagram は 1 送り 1 受けで境界を保ち、SCM_RIGHTS も
   運ぶ。review B2）を作り、fork する。子は `setgroups(0)`・`setgid(80)`・`setuid(80)` の後に `setuid(0)` が失敗すること（戻れない）を
   確かめて、listener と socketpair の片方だけを持って動く。親は他を持たない小さな loop: 子の datagram `OPEN`（最小の番号で開く物）か
   `OPEN /dev/btN`（`/dev/bt` と数字 1〜2 桁だけ）に、`O_RDWR|O_CLOEXEC` で開いて答える: `OK /dev/btN` と SCM_RIGHTS の fd、または
-  `ERR <errno>`。子が終わったら（recv が 0 か、`SIGCHLD`）親も同じ終了の値で終わる（service の `restart=on-failure` が起こし直す）。
+  `ERR <errno>`。親は送った fd の写しを必ず close する（node は同時に 1 つしか開けない）。node の path は親が自分の argv（`-f`）から取り、
+  子からは受けない（review-2 M-i）。
+- 寿命（review-2 BL1）: datagram の recv は相手の close で 0 を返さない（unix-socket.c の datagram の待ち）ので、親は 1 秒ごとの poll の間に
+  `waitpid(WNOHANG)` で子の終わりを見て、子の終了の値で終わる。SIGTERM・SIGINT は SA_RESTART 無しの handler で受け、子に SIGTERM を送り、
+  5 秒待って（来なければ SIGKILL）終わる。子は親の死を liveness の STREAM の socketpair の EOF（親は書かない）で知り、終わる。
 - 子の `/dev/btN` の探し直し（p003 の `btd_open`）は親への `OPEN` に置き換える（`-f` の path も親に渡す）。
 - **account が無い時（Q4、ユーザーの決定待ち、review B6）**: 扱いは 1 つの関数 `btd_privsep_no_account()` に閉じ、案 (a)〜(c) のどれでも
-  そこだけを差し替える形にする。決定までの暫定は「起動を拒む」（log `no _bluetooth account; not starting`、終了の値 78 = EX_CONFIG）。
-  理由: bluetoothd は既定の image にまだ入らず（p003 の P4）、既存の install で動いている物が無いので、暫定が利用者を困らせない。安全の側。
+  そこだけを差し替える形にする。決定までの暫定は「起動を拒む」（log `no _bluetooth account; not starting`、終了の値 0。非 0 は init の
+  `restart=on-failure` が 5 回起こし直すので、review-2 S-j）。理由: bluetoothd は既定の image にまだ入らず（p003 の P4）、既存の install で
+  動いている物が無いので、暫定が利用者を困らせない。安全の側。**i03（5330 の実機）は「新しい image（account 入り）か Q4 の決定」に依存する。**
 
 ### 5. 口の request（p003 の line の形に足す。i02 で review S1・S8 を反映）
 
 | request | 誰 | 答え |
 | --- | --- | --- |
-| `PAIR <address> <bredr|le-public|le-random>` | §6 の許す人 | 接続し、pairing し、鍵を保存し、切断する。途中で agent に `CONFIRM <番号>`（Numeric Comparison）・`PASSKEY <番号>`（表示だけ、相手が打つ）を送る。終わりに `PAIRED address=… type=… authenticated=0|1 secure=0|1 legacy=0|1 key_size=16 stored=0|1` と `DONE`、失敗は `ERROR <理由>` と `DONE`。理由: `timeout`・`rejected`（相手か agent が断った）・`key-size`・`debug-key`・`reflection`・`check`（相手の値が合わない）・`no-p256`・`pin-unsupported`・`key-missing`（保存した鍵を相手が持たない、FORGET してからやり直す）・`key-type`・`bonded`（LE で bond 済み、FORGET してから）・`unreachable`・`busy`（pairing か scan の最中）・`lost`・`not-ready`・`encryption`・`protocol` |
-| `AGENT` | §6 の許す人 | この client を agent にする（同時に 1 つ。後の AGENT が前を置き換える）。答えは `AGENT ok` と `DONE`、その後 client は `CONFIRM <番号>`・`PASSKEY <番号>`・`AGENT-END` の行を受け、CONFIRM に `YES`・`NO` で答える。30 秒で答えが無ければ NO |
+| `PAIR <address> <bredr|le-public|le-random>` | §6 の許す人 | 接続し、pairing し、鍵を保存し、切断する。途中で agent に `CONFIRM <番号>`（Numeric Comparison）・`CONSENT`（Just Works の同意、design §6.5 と D4）・`PASSKEY <番号>`（表示だけ、相手が打つ）を送る。終わりに `PAIRED address=… type=… authenticated=0|1 secure=0|1 legacy=0|1 key_size=16 stored=0|1` と `DONE`、失敗は `ERROR <理由>` と `DONE`。理由: `timeout`・`rejected`（相手か agent が断った）・`key-size`・`debug-key`・`reflection`・`check`（相手の値が合わない）・`no-p256`・`pin-unsupported`・`key-missing`（保存した鍵を相手が持たない、FORGET してからやり直す）・`key-type`・`bonded`（LE で bond 済み、FORGET してから）・`unreachable`・`busy`（pairing か scan の最中）・`lost`・`not-ready`・`encryption`・`protocol` |
+| `AGENT` | §6 の許す人 | この client を agent にする（同時に 1 つ。同じ uid の AGENT は前を置き換え（前には `AGENT-END`）、別の uid の agent が居る間は `ERROR busy`、review-2 M-d）。答えは `AGENT ok` と `DONE`、その後 client は `CONFIRM <番号>`・`CONSENT`・`PASSKEY <番号>`・`AGENT-END` の行を受け、CONFIRM と CONSENT に `YES`・`NO` で答える。25 秒で答えが無ければ NO（SMP の 30 秒より前、review-2 S-k） |
 | `FORGET <address> <型>` | §6 の許す人 | 鍵を消す。`DONE`（無ければ `ERROR not-bonded` と `DONE`） |
 | `BONDS` | 誰でも | `BOND address=… type=… authenticated=… legacy=… name="…"` の行と `DONE`（鍵そのものは出さない） |
 | `SCAN`・`SHOW`・`DEVICES` | p003 のまま（SCAN は §6 の許す人に広げる） | SHOW の CONTROLLER の行の末尾に `ssp=0|1 sc=0|1` |
@@ -154,7 +161,10 @@ controller の側の SSP（LMP の中）を演じる「相手」を loopback に
   （`authenticated=0`）、05 は `ERROR debug-key`、06 は `ERROR key-size`、`CONFIRM` に `n` で `ERROR rejected`、知らない address は
   `ERROR unreachable`、`FORGET` で消える、`bt bonds`、試験の account（wheel でも seat でもない）の `PAIR`・`SCAN` は `ERROR permission`、
   LE の 03 は `ERROR rejected`（loopback に SMP の相手が無い）、LE の知らない address は `ERROR timeout`、`bt-daemon-p003.sh` の回帰。
-- 実機（i03 以降、p008 の UAT）: 本物の相手との pairing。
+- 実機（i03 以降、p008 の UAT）: 本物の相手との pairing。HCI の event の byte の並び（IO Capability Response・User Confirmation Request・
+  Link Key Notification・Read Encryption Key Size の答え・LE Connection Complete）と P-256 の HCI と SMP の byte の順は、偽の controller も
+  loopback も daemon と同じ理解で作っているので、共通の誤りは見つからない（review-2 S-h）。外部の出典（btmon の記録など）との照合は
+  i03 の実機で行う。
 
 ### 10. i02 の改訂（review の Blocking と Should の反映）
 
@@ -222,7 +232,7 @@ p003 §2 の列を次にする（7 以降）:
 | Q4 | **判断待ち**（review B6）。暫定は「account が無ければ起動を拒む」、扱いは `btd_privsep_no_account()` の 1 か所 | 既存の install に account を足す仕組みが base に無い。D17 はユーザーの決定「足す（既存の install の更新を含む）」。選択肢: (a) 既存の install に account を足す仕組みを作る、(b) 分離できない時は起動を拒む、(c) D17 を改める。Q1 経由でユーザーに聞く |
 | Q5 | PAIR は接続・pairing・切断まで（接続を保たない） | 接続を保つのは HID（p005）の仕事 |
 | Q6 | `PASSKEY?`（こちらが打つ）と KeyboardDisplay は p006 へ（review S1） | DisplayYesNo では起こらない。入力のできる agent（Settings の窓）が来た時に足す |
-| Q7 | BR/EDR・LE の Just Works は PAIR の要求そのものを人の同意とする（review S2） | 人が address を名指して PAIR を送った。数字の無い「同意」の問いは MITM を防がない。相手から始まる pairing は断る（§5） |
+| Q7 | **改めた（review-2 BL3）**: Just Works も agent に `CONSENT` で同意を聞く（BR/EDR は User Confirmation Request で、LE は暗号化の前に）。agent が居ない時（今の口では起こらない）は聞かずに進む | design §6.5（「Just Works でも人の同意を取る」）は D4 でユーザーが決めた形。i02 の最初の改訂の「PAIR の要求を同意とする」は決定と食い違っていた |
 | Q8 | LE の bond 済みの相手への PAIR は `bonded`（BR/EDR は保存した鍵で確かめる） | 黙った上書き（review S11）を避ける。LE の LTK での再暗号化は再接続（p005）の仕事 |
 | Q9 | Write Simple Pairing Mode・SC Host Support・LE Host Support は bit を見ずに送り、断りを「無い」と読む | supported commands の bit の位置の取り違え（p003 の review B1 の類）を避ける。結果は SHOW の `ssp`・`sc` |
 
@@ -259,7 +269,55 @@ p003 §2 の列を次にする（7 以降）:
 S1 → §5・Q6、S2 → §10.3・Q7、S4 → §7・§10.3、S5 → §7、S6 → §4・§5・§6、S7 → §9（Q1 の決定: 試験の account）、S8 → §5、S9・S10 → §10.3、
 S11 → §10.3・Q8、S12 → Q3、S13 → §8、M1・M13 → §7 と smp.c に入れた。
 
+## design-reviewer の結果（2026-10-08 朝、i02 の改訂への review-2）と扱い
+
+Blocking 3・Should 11・Minor 13。全てを i02 の実装と上の §に入れた。
+
+| ID | 指摘 | 扱い |
+| --- | --- | --- |
+| BL1 | privsep の親子の寿命（datagram は EOF を返さない、service の停止で子が孤児、親の fd の写し） | §4: 親は waitpid を 1 秒ごと、SIGTERM・SIGINT を子へ、子は liveness の STREAM の EOF、親は送った fd を close。QEMU の試験 6 |
+| BL2 | main loop が queue を取り出さない | main.c: node の revents に関わらず `btd_session_pending` なら取り出す（1 回の loop で 64 packet まで） |
+| BL3 | Q7 が D4（§6.5）と食い違う、group bluetooth | Q7 を改め CONSENT を聞く。group bluetooth を作る（§4） |
+| S-a | Encryption Change の 0x02 | pair.c は 0 でない値を on とする。loopback と偽の controller は SC の鍵で 0x02 を返す |
+| S-b | authenticated・secure は key type から | pair.c は key type から（5・8 が authenticated、7・8 が secure）。loopback は host の IO と相手の IO で type を選ぶ |
+| S-c | User Passkey Notification の枝、BR/EDR に KeyboardDisplay は無い | pair.c は `PASSKEY` を agent に送る。User Passkey Request は Negative Reply。host 試験に KeyboardOnly の相手。BR/EDR の Numeric の判定は DisplayYesNo だけ |
+| S-d | BR/EDR の最初の PB | session.c: features の byte 6 bit 6（Non-flushable Packet Boundary Flag）があれば 0x00、無ければ 0x02。LE は 0x00 |
+| S-e | cancel と成功の競合 | pair.c の CANCELLING: status 0 の Connection Complete は Disconnect して元の理由で終える。client が切れたら接続前は Cancel、後は Disconnect（`btd_pair_stop`） |
+| S-f | close・reset で pair が終わらない | `btd_close` が `btd_pair_lost`（client に `ERROR lost`）。handler の中の ECONNRESET も lost |
+| S-g | RPA の bond、identity の上書き | pair.c: 保存した IRK の `ah` で RPA を解決して `bonded`。pairing の後に identity の file があれば書かずに `bonded` |
+| S-h | 作り手が同じ試験の共通の誤り | §9 に限界として記録。i03 の実機で照合 |
+| S-i | queue の溢れ・reset の notice・Reset の後 | session.c: Number Of Completed Packets と接続の数えは待ちの中で処理（溢れで失わない、record に counted の印）。vendor の待ちの reset は ECONNRESET。HCI Reset の後に queue・links・frames を空に |
+| S-j | 暫定の起動の拒否と restart | 終了の値 0。i03 の依存を §4 に |
+| S-k | agent と SMP が同じ 30 秒 | agent を 25 秒 |
+| M-a〜M-m | 小さい物 | M-b（stored key の 0x05 も key-missing）、M-d（AGENT の置き換え）、M-e（loopback: Reset で mask を戻す、LE の subevent は両方の mask、0x040B などは Status と BD_ADDR、0x1408 は Status・Handle・Key_Size）、M-f（mask に bit 25 Data Buffer Overflow を戻し数える。mask は `BF 80 E0 02 02 C0 2F 24`）、M-i（getpwnam の値、folder の検査、`-f` は親の argv）は実装した。M-a（§3 の O_EXCL の記述）・M-g（Create Connection の parameter: packet type 0xCC18、R1、clock offset 0、role switch 可、Disconnect の reason 0x13）・M-h（LE は `timeout`、BR/EDR は `unreachable` のまま）・M-l（SHOW の `sc` は host の bit の書き込みが通ったことだけ）・M-m（QEMU の LE は 27 byte の分割を通らない、credit と別の pool だけ）は記録。M-c（agent の有無）: 今の口では PAIR の client が常に agent を兼ねるので `agent=1`。答えられない client（backend）は p006 で口を足す。M-j は commit を揃えた。M-k（Appendix D の P-256 の sample で SMP 全体）は残り（p009 か i03） |
+
+## 実装（i02、2026-10-08 朝、P2）
+
+- `userland/base/bluetoothd/session.[ch]`: 待ちの間の packet の queue（32 KiB、record に長さと counted の印）、`btd_session_pending`・
+  `btd_session_command`・`btd_session_send`、handler（`btd_handler_fn`）、初期化（§10.2 と review-2 の mask）、ACL の pool（BR/EDR と LE）と
+  credit（Number Of Completed Packets、接続の数え、送りの queue 16 frame、PB）、Data Buffer Overflow の数え。
+- `pair.[ch]`（新）: §10.3 と review-2 の全て。`smp.[ch]`: why、M1・M13、reflection、自分の debug の鍵。`l2cap.[ch]`: Information Request と
+  その答えの effect。`keys.[ch]`: `btd_keys_list`。`acl.c`: 符号の変換。
+- `privsep.[ch]`（新）、`main.c`（PAIR・AGENT・YES・NO・FORGET・BONDS、D8、queue の取り出し、deadline、client の dead の印）、`Makefile`。
+- `userland/base/bt/main.c`: `bt pair|forget|bonds|agent`、端末で y/n。
+- `userland/base/etc/passwd`・`group`・`shadow`: `_bluetooth`（80）と group `bluetooth`（81）。
+- `src/drivers/generic/bt-hci-loopback.c`: §8 と review-2 M-e（試験の kernel だけ）。
+- 試験: `plan/ws143/tests/bt-link-host-test.c`（新）、`bt-pair-host-test.c`（why と reflection）、`bt-daemon-host-test.sh`、
+  `bt-pair-p004.sh`（新、QEMU）、`build-bt-image.sh`・`passwd`・`group`（新、試験の account btuser、S7）、`bt-daemon-p003.sh`・
+  `bt-loopback-p002.sh`（T1-402 の直し: btuser と dmesg の差分）。
+
 ## 確認
+
+q883-i02（2026-10-08 朝、P2、host と build だけ）:
+
+- `OUT=build/tmp/p2-btd-i02 sh plan/ws143/tests/bt-daemon-host-test.sh`（gcc、ASan・UBSan、-Werror）: `bt-daemon-host-test: PASS (90 checks)`、
+  `bt-pair-host-test: PASS (143 checks)`、`bt-link-host-test: PASS (44 checks)`。
+- `make -j16 ZEDBSD_CONFIG=plan/ws143/tests/config-amd64-bt.mk BUILD=build/p2-bt build/p2-bt/vmunix build/p2-bt/bin/bluetoothd build/p2-bt/bin/bt`:
+  rc 0、warning 0（-Werror）、kernel include check・amd64 vmunix check PASS。
+- `python3 plan/tools/style-check.py`（bluetoothd の全 file、bt、loopback、host 試験）: 0。
+- **未実施**: QEMU（T1 に依頼: bt-loopback-p002.sh・bt-daemon-p003.sh・bt-pair-p004.sh、image は build-bt-image.sh）、実機（i03）。
+
+q880-i01:
 
 q880-i01（2026-10-08、P2、host だけ）:
 
@@ -273,7 +331,13 @@ q880-i01（2026-10-08、P2、host だけ）:
 - `python3 plan/tools/style-check.py`（新しい file と試験）: 指摘 0。
 - **未実施**: bluetoothd の Makefile への追加（新しい部品はまだ daemon に link していない。daemon の build は p003 のまま）、zedBSD の build、QEMU（T1 への依頼は無い）、実機。
 
-## 再開点（次の attempt）
+## 再開点（i02 の後）
+
+- T1 の結果（bt-loopback-p002.sh・bt-daemon-p003.sh・bt-pair-p004.sh）を Q1 が判定する。FAIL は同じ Phase の次の attempt で直す。
+- p004 を clear に残る物: D5 b2（5330 の `p256`・`dhkey` 次第）、D10 の PIN の legacy（Q2、p006 の PIN の入力の後）、Q4（ユーザーの決定）、
+  i03 の 5330 の実機（新しい image）。B4 の残り（Appendix D の P-256 の sample で SMP の流れ全体）。
+
+## 再開点（i01 の後、記録）
 
 i01 で commit した物: `userland/base/bluetoothd/{crypto,acl,l2cap,smp,keys}.[ch]`、`plan/ws143/tests/bt-pair-host-test.c`、
 `plan/ws143/tests/bt-daemon-host-test.sh`（p004 の試験を足した）、この phase.md。daemon（main.c・session.c・Makefile）は変えていない。
