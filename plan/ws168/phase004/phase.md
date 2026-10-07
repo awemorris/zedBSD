@@ -48,3 +48,9 @@ Queue: q834（2026-10-07、P2）
 ## 積み残し
 
 [WS177 backlog-p2](../../ws177/backlog-p2.md) の WS168 の行。
+
+## q875（P1、2026-10-08）: T1-319 の thumbnails の fail（helper の座標）の直し
+
+- 原因（T1-319 の log `t1/build/t1-318/logs/apps.files.thumbnails.log` で確かめた）: helper の `sized()` が窓の大きさを `ZFILES READY width= height=` から取っていた。desktop も Files なので、mark の後に desktop の READY（`width=1280 height=756`、bar の下の画面全体）が先に合い、窓（client 16、実際は 1120x680、`KWL MAP ... x=80`）の close の button を 80+1280−26=1334 に探して画面の外になった。
+- 直し（`plan/tools/aat/scenarios/helpers_preview.py`）: 大きさをその client の buffer の import（`KWL IMPORT client=N buffer=… width= height=`）から取る。close の button は 80+1120−26=1174 で画面の中。
+- 確認: `python3 -m py_compile`。QEMU（T1）: AAT `--only 'apps\.files\.thumbnails'` の再試験（2 度目の cache・Settings の背景の tile・`SANDBOX deny` が増えないことを含む）は未実施。

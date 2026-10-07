@@ -24,14 +24,16 @@ FOLDER = "/home/kei/AATThumbs"
 CACHE = "/home/kei/.cache/keiland/thumbnails"
 
 
-def sized(window, mark, regex):
-	"""A window started outside App Home, its size taken from the program's READY line."""
+def sized(window, mark):
+	"""A window started outside App Home, its size taken from the compositor's import of its client's buffer.  Not
+	from the program's READY line: the desktop is a Files too, and its READY (the whole screen below the bar) can come
+	after the mark first (T1-319: the close button was looked for at 1334,78, off the screen)."""
 	if window is None or window.sized():
 		return window
-	ready = run.wait(regex, mark, 5)
-	if not ready:
+	imported = run.wait(rf"KWL IMPORT client={window.client} buffer=\d+ width=\d+ height=\d+", mark, 5)
+	if not imported:
 		return window
-	width, height = (int(value) for value in re.search(r"width=(\d+) height=(\d+)", ready).groups())
+	width, height = (int(value) for value in re.search(r"width=(\d+) height=(\d+)", imported).groups())
 	return aatlib.Window(window.client, window.surface, window.x, window.y, width, height, window.docked)
 
 
@@ -46,7 +48,7 @@ def thumbnails(item):
 		# Files on the folder: each thumbnail by a child.
 		mark = run.mark()
 		window = run.open_as_user(item, f"/bin/files {FOLDER}", ready=r"ZFILES READY ")
-		window = sized(window, mark, r"ZFILES READY width=\d+ height=\d+")
+		window = sized(window, mark)
 		made = {}
 		for name in ("sample.png", "sample.jpg", "sample.pdf", "broken.png"):
 			made[name] = run.wait(rf"ZFILES THUMB path={re.escape(FOLDER)}/{re.escape(name)} error=\d+ .*", mark, 30)
@@ -61,7 +63,7 @@ def thumbnails(item):
 		# Again: from the cache.
 		mark = run.mark()
 		window = run.open_as_user(item, f"/bin/files {FOLDER}", ready=r"ZFILES READY ")
-		window = sized(window, mark, r"ZFILES READY width=\d+ height=\d+")
+		window = sized(window, mark)
 		cached = run.wait(rf"ZFILES THUMB path={re.escape(FOLDER)}/sample.png error=0 .* cached=1", mark, 15)
 		item.step("opened again", cached or "")
 		item.check(cached, "the thumbnail was not read from the cache")
