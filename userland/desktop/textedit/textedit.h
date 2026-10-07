@@ -477,10 +477,14 @@ struct te_app {
 	 * first (main.c reads them from libkeiland's recent list), whether each
 	 * is still there (one that is not is shown greyed), and the file chosen
 	 * that waits for unsaved changes to be dealt with (TE_AFTER_OPEN_PATH).
+	 * recent_stamp is the list's stamp when it was read (kl_recent_stamp,
+	 * ws177-p008): the window's getting the keyboard reads it again when
+	 * another program changed it.
 	 */
 	char recent[TE_RECENT_MAX][TE_PATH_MAX];
 	int recent_present[TE_RECENT_MAX];
 	size_t recent_count;
+	uint64_t recent_stamp;
 	char open_path[TE_PATH_MAX];
 
 	/* The message shown at the bottom, until when. */

@@ -81,7 +81,9 @@ host_link(
  * Fills the network with a made-up state: "wifi" (on a Wi-Fi network, a
  * wired interface up too), "wired" (wired only, the radio off, a gigabit
  * link), "nocable" (the wired interface up without its cable, BUG-213),
- * "absent" (no radio), "down" (the daemon not running).
+ * "absent" (no radio), "down" (the daemon not running), and for the
+ * Welcome's Network step (ws177-p007) "nonet" (no radio and no cable) and
+ * "joinfail" (on Wi-Fi, the last join refused with a wrong key).
  */
 void
 host_network_fake(
@@ -123,6 +125,16 @@ host_network_fake(
 	network->received_total = 1200000000ULL;
 	network->sent_total = 320000000ULL;
 
+	/* No radio and no cable (ws177-p007). */
+	if (strcmp(scenario, "nonet") == 0) {
+		network->links[1].running = 0;
+		network->links[1].address[0] = '\0';
+		network->state.connected = 0;
+		network->state.kind = KL_NETWORK_NONE;
+		network->state.wifi = KL_WIFI_ABSENT;
+		return;
+	}
+
 	/* The radio. */
 	if (strcmp(scenario, "absent") == 0) {
 		network->state.wifi = KL_WIFI_ABSENT;
@@ -163,6 +175,12 @@ host_network_fake(
 	(void)snprintf(network->saved[0], sizeof(network->saved[0]), "%s", "Kei Lab");
 	(void)snprintf(network->saved[1], sizeof(network->saved[1]), "%s", "Cafe Guest");
 	network->saved_count = 2;
+
+	/* The last join refused (ws177-p007): the Wi-Fi page's message. */
+	if (strcmp(scenario, "joinfail") == 0) {
+		(void)snprintf(network->message, sizeof(network->message), "%s", "Could not join Cafe Guest: the key is wrong.");
+		network->message_bad = 1;
+	}
 }
 
 /* The backend's calls, printed; the made-up daemon answers at once. */

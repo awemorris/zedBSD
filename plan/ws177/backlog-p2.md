@@ -23,26 +23,26 @@
 | WS128 ws128-p004（PDF Viewer の検索と選択） | titlebar の無い compositor（System Menu・titlebar の無い環境） | window の中の検索の欄で探せる（今は titlebar の field だけ。Ctrl+F は何もしない） | `pdfviewer/titlebar.c` の `pv_titlebar_focus_find` | 2026-10-06 |
 | WS128 ws128-p004（PDF Viewer の検索と選択） | 縦書き・回転した文字の選択の塗り | 文字の四隅の向きのまま塗る（今は四隅を囲む軸に沿った箱） | `find.c` の `find_mark` | 2026-10-06 |
 | WS128 ws128-p004（PDF Viewer の検索と選択） | ToUnicode の無い・壊れた font の文字（U+FFFD） | 読めない字を検索・copy で知らせる（今は U+FFFD がそのまま copy される） | libpdf `pdf_font_unicode`、`find.c` の `pv_select_copy` | 2026-10-06 |
-| WS164 ws164-p002（Welcome） | 設定の store が書けない（Keiland の拡張の無い desktop、書き込みの失敗） | Welcome の終わりで印を付けられないことを画面に出し、次の login でまた出ることを知らせる（今は log だけで窓を閉じる） | `settings/welcome.c` の `welcome_finish` | 2026-10-06 |
-| WS164 ws164-p002（Welcome） | Files の起動の失敗 | Today を開けなかったことを知らせる（今は log だけ） | `settings/main.c` の `main_open_files` | 2026-10-06 |
-| WS164 ws164-p002（Welcome） | Welcome の途中で Wi-Fi の鍵の入力・接続の失敗、radio の無い machine で Ethernet も無い | 段の中で失敗と次の手を出す（今は Wi-Fi・Ethernet の頁の表示のまま） | `settings/welcome.c` の Network の段 | 2026-10-06 |
+| WS164 ws164-p002（Welcome） → [ws177-p007](phase007/phase.md) | 設定の store が書けない（Keiland の拡張の無い desktop、書き込みの失敗） | Welcome の終わりで印を付けられないことを画面に出し、次の login でまた出ることを知らせる（今は log だけで窓を閉じる） | `settings/welcome.c` の `welcome_finish` | 2026-10-06 |
+| WS164 ws164-p002（Welcome） → [ws177-p007](phase007/phase.md) | Files の起動の失敗 | Today を開けなかったことを知らせる（今は log だけ） | `settings/main.c` の `main_open_files` | 2026-10-06 |
+| WS164 ws164-p002（Welcome） → [ws177-p007](phase007/phase.md) | Welcome の途中で Wi-Fi の鍵の入力・接続の失敗、radio の無い machine で Ethernet も無い | 段の中で失敗と次の手を出す（今は Wi-Fi・Ethernet の頁の表示のまま） | `settings/welcome.c` の Network の段 | 2026-10-06 |
 | WS164 ws164-p002（Welcome） | 言語と入力の段（WS154 の Languages） | p001 の H3 のとおり Look と Keys の間に足す（今は 5 段のまま） | `settings/welcome.c` | 2026-10-06（済み 2026-10-08 P1 q875 e986a3bdb、host 試験 PASS） |
-| WS164 ws164-p002（Welcome） | Welcome の窓の大きさが小さい・日本語の UI の長い文 | 帯と Skip が重ならないよう詰める・文を折り返す（今は固定の配置） | `settings/welcome.c` の `se_welcome_bar`・`se_welcome_draw` | 2026-10-06 |
-| WS164 ws164-p002（Welcome） | Welcome の key の操作（Enter で Next、Esc で閉じる） | keyboard だけで段を進める（今は pointer と指の click だけ） | `settings/ui.c` の `ui_key`、`welcome.c` | 2026-10-06 |
+| WS164 ws164-p002（Welcome） → [ws177-p007](phase007/phase.md) | Welcome の窓の大きさが小さい・日本語の UI の長い文 | 帯と Skip が重ならないよう詰める・文を折り返す（今は固定の配置） | `settings/welcome.c` の `se_welcome_bar`・`se_welcome_draw` | 2026-10-06 |
+| WS164 ws164-p002（Welcome） → [ws177-p007](phase007/phase.md) | Welcome の key の操作（Enter で Next、Esc で閉じる） | keyboard だけで段を進める（今は pointer と指の click だけ） | `settings/ui.c` の `ui_key`、`welcome.c` | 2026-10-06 |
 | WS156 ws156-p002（通知の口） → [ws177-p005](phase005/phase.md) | 通知を出した client が切れた・notify の object を destroy した | その client の待ち・表示中の通知を ACTION 無しに変える（今は model に残り、closed は誰にも送られない） | `wayland/notify-shell.c` の `notify_tell_closed`、client の破棄の側 | 2026-10-06 |
 | WS156 ws156-p002（通知の口） | app の名前が空の通知 | client の window の app_id を名前にする（今は空のまま保つ。p003 の描画で決める） | `wayland/notify-shell.c` の `notify_post` | 2026-10-06（済み dcc31f8fb・T1-375b、2026-10-08 q881） |
 | WS156 ws156-p002（通知の口） → [ws177-p005](phase005/phase.md) | 不正な UTF-8 の題・本文、制御文字 | 置き換えるか拒む（今は bytes のまま保つ） | `wayland/notify.c` の `kwl_notify_post` | 2026-10-06 |
 | WS156 ws156-p002（通知の口） → [ws177-p005](phase005/phase.md) | 一つの client が短い間に大量に post する | 速さの制限（今は client ごと 32 個の上限だけ） | `wayland/notify-shell.c` の `notify_post` | 2026-10-06 |
 | WS156 ws156-p002（通知の口） → [ws177-p005](phase005/phase.md) | libkeiland の事象の ring（32）が溢れる | 古い事象を捨てたことを app に知らせる（今は黙って捨てる） | `libkeiland/system/system-view.c` の `system_view_notify_event` | 2026-10-06 |
-| q824 ws148-p002（Privacy の頁を無くし、最近の履歴の口） | 「Keep recent items」を off にしている間の Files の Recents | Recents に「最近の項目を残さない設定です」と出し、Settings への道を示す（今は空の一覧だけ） | `files/ui-grid.c` の題、`files/ui-search.c` の Recents の読み | 2026-10-06 |
-| q824 ws148-p002 | Clear Recents の確かめ | 押し間違いに備えて確かめるか、元に戻す（今は押すとすぐ空になる） | `files/actions.c` の `fm_action_clear_recents` | 2026-10-06 |
-| q824 ws148-p002 | 他の app が開いていた「最近の file」の menu | 一覧が空・止められた時に、開いている app の menu も読み直す（今は各 app が次に読む時まで古い） | libkeiland `recent.c`、各 app の open recent | 2026-10-06 |
+| q824 ws148-p002（Privacy の頁を無くし、最近の履歴の口） → [ws177-p008](phase008/phase.md) | 「Keep recent items」を off にしている間の Files の Recents | Recents に「最近の項目を残さない設定です」と出し、Settings への道を示す（今は空の一覧だけ） | `files/ui-grid.c` の題、`files/ui-search.c` の Recents の読み | 2026-10-06 |
+| q824 ws148-p002 → [ws177-p008](phase008/phase.md) | Clear Recents の確かめ | 押し間違いに備えて確かめるか、元に戻す（今は押すとすぐ空になる） | `files/actions.c` の `fm_action_clear_recents` | 2026-10-06 |
+| q824 ws148-p002 → [ws177-p008](phase008/phase.md) | 他の app が開いていた「最近の file」の menu | 一覧が空・止められた時に、開いている app の menu も読み直す（今は各 app が次に読む時まで古い） | libkeiland `recent.c`、各 app の open recent | 2026-10-06 |
 | q824 ws148-p002 | Storage の頁の文と Files の Clear Recents の日本語 | 翻訳の catalog に入れる（今は Storage の頁の本文と Files の題の button は翻訳されない、既存の Trash などと同じ） | `settings/page-storage.c`、`files/ui-grid.c`、`locale/ja/*.tr` | 2026-10-06 |
 | q826 ws128-p004（PDF の検索） | Enter の後に field へ戻した時の選択 | caret を末尾に置き、続けて打つと query に足される（今は compositor が query 全体を選んで戻すので、打つと置き換わる） | `wayland/titlebar-shell.c` の `shell_focus`、`pdfviewer/titlebar.c` の `pv_titlebar_input` | 2026-10-06 |
 | WS161 ws161-p004（libpasskey の os 層と fidoctl） | report に番号の付いた FIDO の鍵、64 byte でない report の鍵 | ID の byte を外して読む・report の大きさに合わせる（今は開かない・EIO） | `libpasskey/os-zedbsd.c` の `pk_os_open`、`os-posix.c` の `os_read` | 2026-10-06 |
 | WS161 ws161-p004 | 鍵が 2 本以上ある時の fidoctl | どれかを選ばせる・Selection（触った鍵）で決める（今は `-d` が無ければ一覧の最初） | `fidoctl/main.c` の `fidoctl_open`、`pk_ctap2_selection` | 2026-10-06 |
 | WS161 ws161-p004 | 使っている途中で鍵が抜かれた | 抜かれたことを言って終わる（今は read の ENODEV・EIO をそのまま出す） | `libpasskey/os-posix.c` の `os_read` | 2026-10-06 |
-| WS161 ws161-p004 | PIN の入力 | 端末では echo を切って読む・PIN の長さの規則（4〜63 byte）を先に確かめる（今は標準入力の 1 行をそのまま） | `fidoctl/main.c` の `fidoctl_read_pin` | 2026-10-06 |
+| WS161 ws161-p004 → [ws177-p006](phase006/phase.md) | PIN の入力 | 端末では echo を切って読む・PIN の長さの規則（4〜63 byte）を先に確かめる（今は標準入力の 1 行をそのまま） | `fidoctl/main.c` の `fidoctl_read_pin` | 2026-10-06 |
 | WS161 ws161-p004 | 鍵の reset、resident の credential の一覧と削除 | `fidoctl reset`・`credentials`（今は無い） | `fidoctl/main.c`、`ctap2.c` | 2026-10-06 |
 | WS172 ws172-p003（passkey-fido2） | 複数の鍵が同じ account の credential を持つ | 触れた鍵を選ぶ（selection 0x0B、2.0 では UP だけの GetAssertion）（今は最初に見つかった鍵） | `passkey-fido2/helper.c` の `helper_assert` | 2026-10-06 |
 | WS172 ws172-p003 | 試行の途中に挿した・かざした鍵 | 途中で現れた鍵にも問う（今は開始の時の鍵だけ） | `passkey-fido2/device.c` の `fido2_devices_open`、`helper.c` | 2026-10-06 |

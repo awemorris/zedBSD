@@ -46,7 +46,7 @@ static void grid_panel(struct fm_app *app, struct kl_canvas *canvas, const struc
 static void grid_title(struct fm_app *app, struct kl_canvas *canvas, const struct kl_rect *area);
 static void grid_items(struct fm_app *app, struct kl_canvas *canvas, const struct kl_rect *inner);
 static void grid_cell(struct fm_app *app, struct kl_canvas *canvas, struct fm_entry *entry, int index, const struct kl_rect *slot);
-static void grid_message(struct fm_app *app, struct kl_canvas *canvas, const struct kl_rect *inner, const char *message);
+static void grid_message(struct fm_app *app, struct kl_canvas *canvas, const struct kl_rect *inner, const char *message, const char *hint);
 static void grid_band(struct fm_app *app, struct kl_canvas *canvas, const struct kl_rect *inner);
 static void grid_status(struct fm_app *app, struct kl_canvas *canvas, const struct kl_rect *area);
 static void grid_trash_buttons(struct fm_app *app, struct kl_canvas *canvas, const struct kl_rect *area);
@@ -100,13 +100,21 @@ fm_grid_draw(
 	/* A folder that could not be read says so. */
 	if (tab->listing.error != 0) {
 		snprintf(message, sizeof(message), "%s", kl_tr("This folder can't be opened."));
-		grid_message(app, canvas, &inner, message);
+		grid_message(app, canvas, &inner, message, NULL);
+		return;
+	}
+
+	/* Empty Recents while the list is stopped says why, and where to start it (ws177-p008). */
+	if (tab->listing.count == 0 &&
+	    tab->history[tab->history_index].location.kind == FM_LOCATION_RECENTS &&
+	    app->recents_off) {
+		grid_message(app, canvas, &inner, kl_tr("Recent items are not kept"), kl_tr("Turn on Keep recent items in Settings > Storage."));
 		return;
 	}
 
 	/* An empty place says so too. */
 	if (tab->listing.count == 0) {
-		grid_message(app, canvas, &inner, kl_tr("Nothing here"));
+		grid_message(app, canvas, &inner, kl_tr("Nothing here"), NULL);
 		return;
 	}
 
@@ -393,7 +401,8 @@ grid_message(
 	struct fm_app *app,
 	struct kl_canvas *canvas,
 	const struct kl_rect *inner,
-	const char *message)
+	const char *message,
+	const char *hint)
 {
 	int width;
 
@@ -403,6 +412,12 @@ grid_message(
 	/* Centred, faint. */
 	width = kl_text_width(app->text, message, strlen(message), 15U, 0);
 	(void)kl_text_draw(app->text, canvas, inner->x + (inner->width - width) / 2, inner->y + inner->height / 2 - 20, message, strlen(message), 15U, 0, FM_COLOR_TEXT_FAINT);
+
+	/* What to do, smaller under it, when there is something (ws177-p008). */
+	if (hint == NULL)
+		return;
+	width = kl_text_width(app->text, hint, strlen(hint), 13U, 0);
+	(void)kl_text_draw(app->text, canvas, inner->x + (inner->width - width) / 2, inner->y + inner->height / 2 + 4, hint, strlen(hint), 13U, 0, FM_COLOR_TEXT_SECONDARY);
 }
 
 /* Draws the rubber band being dragged with libkeiland's (ws090-p024). */
