@@ -22,7 +22,7 @@
 
 <!-- master:merge:start -->
 - main 7e8e20a10 以降（2026-10-08 夜）。今日の統合: ws183-p002・WS187 p001〜p003・ws113-p015・ws090-p015・BUG-258・BUG-259・WS143 p002・BUG-221・BUG-226・BUG-240・BUG-238・BUG-244・BUG-260・BUG-239 の測定、Dawn の既定の壁紙。
-- 実機（5330）の確認待ち: ws183-p002 のタップ、WS187 の touchpad・PIN・Security Key、ws113-p015 の head の bar の押下、BUG-258 の Kioxia と card reader、BUG-259・221・226 の体感、BUG-231、BUG-225 の icon の刻み。
+- 実機（5330）の確認待ち: dmesg の `typec: display port TC1:`・`TC2:`（ws050-p005 の GNVS の値）、BUG-261 の intel-gpio の log、ws083-p007 の VCS0 の reset、ws183-p002 のタップ、WS187 の touchpad・PIN・Security Key、ws113-p015 の head の bar の押下、BUG-258 の Kioxia と card reader、BUG-259・221・226 の体感、BUG-231、BUG-225 の icon の刻み。
 - `codex/fix-bug202-boot-worker`・`codex/merge-bug202` の古い branch の整理（以前からの残り）。
 <!-- master:merge:end -->
 
