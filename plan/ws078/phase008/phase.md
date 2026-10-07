@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws078-p008 -->
 # ws078-p008: make の変数と protocol の header の file 名の旧名（[guide.md](../guide.md) §2.3 の B2・B3）
 
-Status: in-progress（2026-10-08 P1 q879: 改名と build warning 0 まで。boot test・WS099 の C9 は T1）
+Status: cleared（2026-10-08 Q1 判定、T1-401・403）（旧: in-progress（2026-10-08 P1 q879: 改名と build warning 0 まで。boot test・WS099 の C9 は T1））
 Disposition: normal
 Parent: [WS078](../ws.md)
 Queue: q879（P1、2026-10-08 Q1 の承認の 2 番）
@@ -39,3 +39,8 @@ Queue: q879（P1、2026-10-08 Q1 の承認の 2 番）
 ## 経緯の記録
 
 確かめの最初の build で target を名指さずに make を流し、既定の goal（disk-image）が worktree の build/packages で clang・libcxx の package の build を始めた（AGENTS の toolchain の規則に反する）。約 10 分で止めた。共有の toolchain は書き込み不可のまま変わっていない。途中の出力は Q1 が消した。以後は target を名指す（Q1 が protocol に記録）。
+
+
+## Q1 の判定（2026-10-08）
+
+T1-401: 標準の image（AAT・files・criteria）が作れ boot-test PASS、C9 は p072 以外 PASS。p072 は試験 file が 83f5512ce で消されているのに C9 の一覧に残っていた（Q1 が plan/ws099/tests/criteria.sh から外した）。T1-403: boot-test PASS。

@@ -2,7 +2,7 @@
 
 # ws078-p007（提案）: 注釈の `zdesktop` を一度に置き換える
 
-Status: in-progress（2026-10-08 P1 q879: 置き換え・確かめ・build warning 0 まで。boot test は T1。下の「q879」）（旧: planning（2026-10-01 の提案。main が ws.md の Phase の表に入れるまで提案のまま））
+Status: cleared（2026-10-08 Q1 判定、T1-401・403）（旧: in-progress（2026-10-08 P1 q879: 置き換え・確かめ・build warning 0 まで。boot test は T1。下の「q879」）（旧: planning（2026-10-01 の提案。main が ws.md の Phase の表に入れるまで提案のまま）））
 Disposition: normal
 Parent: [WS078](../ws.md)
 Queue: q879（P1、2026-10-08 Q1 の承認の 3 番）
@@ -55,3 +55,8 @@ make の変数（`DYNAMIC_ZDESKTOP_*`・`LIBZDESKTOP_*`、p008 提案）、`zed-
   - `git diff --check` は空。style-check の出力は前後とも 225 行（新しい指摘 0）。
   - build（warning 0、target を名指し）: libkeiland・libvulkan・libwayland-client・wayland・files・settings・terminal・keiland-ime・xserver・browser。keiland-linux の all も rc 0。
 - 未実施: boot test（T1）。
+
+
+## Q1 の判定（2026-10-08）
+
+T1-401: 標準の image（AAT・files・criteria）が作れ boot-test PASS、C9 は p072 以外 PASS。p072 は試験 file が 83f5512ce で消されているのに C9 の一覧に残っていた（Q1 が plan/ws099/tests/criteria.sh から外した）。T1-403: boot-test PASS。

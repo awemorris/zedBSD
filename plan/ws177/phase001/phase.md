@@ -3,7 +3,7 @@
 # ws177-p001: compositor の wl_surface.enter・leave（案 E）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（T1-404）（実装済み・host PASS、main に統合済み）
+Status: cleared（2026-10-08 Q1 判定、T1-404 QEMU PASS）（旧: test-wait（T1-404）（実装済み・host PASS、main に統合済み））
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q882 の 1（P1、2026-10-08、承認は Q1 の dispatch「Queue（q882、承認済み）: WS177 の案 E・F・G の host の分を順に」）
@@ -41,3 +41,8 @@ Purpose / goal: client が自分の surface がどの display（wl_output）に�
 ## Event
 
 2026-10-08 / q882-i01（P1）: 実装と host の確認。T1 の依頼を Q1 へ。
+
+
+## Q1 の判定（2026-10-08）
+
+T1-404: displays-p001 PASS（2 出力の Venus、28 s）。実機（5330 の HDMI）は未実施。

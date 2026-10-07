@@ -22,7 +22,7 @@ export C10_SECONDS=${C10_SECONDS:-3600}
 export C10_MAX_ERRORS=${C10_MAX_ERRORS:-0}
 C1_CYCLES=${C1_CYCLES:-2}
 # The zdesktop regressions of C9: NAME for plan/ws035/tests/zdesktop-NAME.sh, or a path (plan/ws099/tests/...).
-C9_TESTS=${C9_TESTS:-"p052 p053 p072 p076 p126 p128 p134 p137 p138 plan/ws099/tests/cursor-owner.sh"}
+C9_TESTS=${C9_TESTS:-"p052 p053 p076 p126 p128 p134 p137 p138 plan/ws099/tests/cursor-owner.sh"}
 
 image=${1:-build/ws099-criteria.img}
 out=${2:-build/ws099-criteria}
