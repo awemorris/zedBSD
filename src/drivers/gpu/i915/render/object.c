@@ -445,6 +445,38 @@ drv_i915_object_take(
 }
 
 /*
+ * Visits every object of a kind the session recorded.
+ *
+ * `visit` is given each object and `argument` under the table's lock: it
+ * may change the object (BUG-244: a buffer or an image let go of an
+ * allocation being freed), but not the table, and takes no lock of its own.
+ */
+void
+drv_i915_object_each(
+	struct i915_render_session *session,
+	enum i915_vk_object_kind kind,
+	void (*visit)(void *object, void *argument),
+	void *argument)
+{
+	struct i915_object_table *table;
+	unsigned index;
+
+	/* Each entry of the session and the kind, under the lock. */
+	table = session->vk->objects;
+	mutex_lock(&table->lock);
+
+	for (index = 0U; index < table->count; index++) {
+		if (table->entries[index].owner != session)
+			continue;
+		if (table->entries[index].kind != kind)
+			continue;
+		visit(table->entries[index].object, argument);
+	}
+
+	mutex_unlock(&table->lock);
+}
+
+/*
  * Drops every identity a closing session recorded.
  *
  * The objects themselves were released before (drv_i915_gfx_objects_release);
