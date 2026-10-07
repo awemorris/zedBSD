@@ -27,6 +27,13 @@
  * The notification handler runs inside the interpreter: it only raises the
  * signal the driver's thread waits on (typec-os.h).  The thread runs every
  * command; it never holds the Type-C layer's lock while it evaluates AML.
+ *
+ * ws177-p003: the thread starts the PPM again after a pause when it does
+ * not start at once, asks the PPM for CCI when it has been quiet for a
+ * while (a lost notification, or a platform that never notifies), and
+ * when the PPM cannot be started or brought back it stops the driver:
+ * the Type-C layer ends what waits and keeps the last state, the
+ * notification handler is removed and the mailbox unmapped.
  */
 
 #include <stdbool.h>
@@ -88,8 +95,19 @@
 /* How many times a read looks for a CCI that held still across MESSAGE IN. */
 #define UCSI_ACPI_READ_TRIES 3U
 
-/* How long the thread waits for a notification before it waits again. */
+/*
+ * How long the PPM may be quiet before the thread asks it for CCI: a PPM
+ * whose notifications come is asked after a minute (a lost notification
+ * leaves a change unacknowledged, and the PPM tells of no other until
+ * then); one that never notifies after a few seconds, which still lets a
+ * system sleep between the looks.
+ */
 #define UCSI_ACPI_IDLE_MS 60000U
+#define UCSI_ACPI_QUIET_MS 5000U
+
+/* How many times the thread starts the PPM, and the pause before the second (doubled before each later one). */
+#define UCSI_ACPI_START_TRIES 3U
+#define UCSI_ACPI_START_PAUSE_MS 1000U
 
 /*
  * The UCSI device the driver attached to: where its mailbox is, the
@@ -99,12 +117,19 @@
  * thread uses it, but for notified: the notification handler raises it
  * (atomically, inside the interpreter) and the thread lowers it, so the
  * thread tells a notification from a wake-up for an operation.
+ * mapped is the size of the mailbox's mapping (0: none); handler says the
+ * notification handler is installed; last_exchange_ms is when the thread
+ * last talked to the PPM; stopped says the driver stopped (ws177-p003).
  */
 struct ucsi_acpi {
 	struct drv_acpi_node *device;
 	uint64_t base;
 	size_t length;
 	volatile uint8_t *mailbox;
+	size_t mapped;
+	bool handler;
+	bool stopped;
+	uint64_t last_exchange_ms;
 	const struct drv_ucsi_layout *layout;
 	uint16_t version;
 	bool firmware_mutex;
@@ -170,6 +195,7 @@ static const uint8_t ucsi_acpi_uuid[UCSI_ACPI_DSM_UUID_LENGTH] = {
 };
 
 static int ucsi_acpi_find(struct drv_acpi_node *node, unsigned depth, void *argument);
+static void ucsi_acpi_other(struct drv_acpi_node *node);
 static bool ucsi_acpi_identifies(struct drv_acpi_node *node, const char *method);
 static bool ucsi_acpi_names(const struct drv_acpi_object *identifier);
 static int ucsi_acpi_probe(struct ucsi_acpi *driver);
@@ -187,6 +213,9 @@ static int ucsi_acpi_write_work(void *argument);
 static int ucsi_acpi_read_work(void *argument);
 static uint32_t ucsi_acpi_cci(struct ucsi_acpi *driver);
 static void ucsi_acpi_map_displays(struct ucsi_acpi *driver);
+static void ucsi_acpi_release(struct ucsi_acpi *driver);
+static int ucsi_acpi_start_tries(struct ucsi_acpi *driver);
+static uint32_t ucsi_acpi_quiet_ms(struct ucsi_acpi *driver);
 static int ucsi_acpi_connector_location(struct drv_acpi_node *node, unsigned depth, void *argument);
 static int ucsi_acpi_location(struct drv_acpi_node *node, struct drv_typec_location *location);
 
@@ -214,6 +243,7 @@ drv_ucsi_acpi_attach(void)
 	/* Its presence, its mailbox, its version and its _DSM functions; an unusable device is not kept. */
 	error = ucsi_acpi_probe(driver);
 	if (error != 0) {
+		ucsi_acpi_release(driver);
 		driver->device = NULL;
 		return error;
 	}
@@ -232,8 +262,13 @@ drv_ucsi_acpi_attach(void)
 	error = drv_acpi_notify_install(driver->device, ucsi_acpi_notify, driver);
 	if (error != 0) {
 		drv_typec_os_log("ucsi: the notifications were not taken (error %d)\n", error);
+		ucsi_acpi_release(driver);
+		driver->device = NULL;
 		return error;
 	}
+
+	/* handler is what the stop removes. */
+	driver->handler = true;
 
 	/* The operations other drivers ask wake the thread. */
 	drv_typec_operator_set(ucsi_acpi_kick, driver);
@@ -247,6 +282,7 @@ drv_ucsi_acpi_attach(void)
 	error = drv_typec_os_thread_start(ucsi_acpi_thread, driver);
 	if (error != 0) {
 		drv_typec_os_log("ucsi: the thread did not start (error %d)\n", error);
+		drv_ucsi_acpi_stop("the thread did not start");
 		return error;
 	}
 
@@ -287,9 +323,12 @@ drv_ucsi_acpi_start(void)
  * Waits at most some milliseconds for a notification or an operation;
  * then reads and acknowledges the connector changes a notification tells
  * of, and carries out the operations other drivers asked, oldest first.
+ * When nothing came and the PPM has been quiet for long enough
+ * (ucsi_acpi_quiet_ms()), asks it for CCI instead.
  *
  * Returns 1 when something was done, 0 when nothing came, or a negative
- * errno value when the PPM could not be read.
+ * errno value when the PPM could not be read (-ENODEV once the interface
+ * failed, which stops the driver).
  */
 int
 drv_ucsi_acpi_step(
@@ -297,15 +336,23 @@ drv_ucsi_acpi_step(
 {
 	struct drv_typec_request request;
 	struct ucsi_acpi *driver;
+	uint64_t now;
+	uint32_t quiet;
 	bool requested;
 	int notified;
 	int done;
+	int failure;
 	int error;
 
-	/* A notification or an operation, or the time. */
+	/* A stopped driver does nothing. */
 	driver = &ucsi_acpi;
+	if (driver->stopped)
+		return -ENODEV;
+
+	/* A notification or an operation, or the time. */
 	(void)drv_typec_os_wait(milliseconds);
 	done = 0;
+	failure = 0;
 
 	/* The changes a notification tells of (a wake-up for an operation reads nothing). */
 	notified = __atomic_exchange_n(&driver->notified, 0, __ATOMIC_ACQ_REL);
@@ -314,12 +361,14 @@ drv_ucsi_acpi_step(
 		error = drv_ucsi_service(&driver->ucsi);
 		if (error != 0) {
 			drv_typec_os_log("ucsi: a notification was not handled (error %d)\n", error);
-			return -error;
+			failure = error;
 		}
 	}
 
-	/* Each operation waiting. */
+	/* Each operation waiting; one whose connector was not read does not hold back the next. */
 	for (;;) {
+		if (driver->ucsi.failed)
+			break;
 		requested = drv_typec_request_take(&request);
 		if (!requested)
 			break;
@@ -329,12 +378,72 @@ drv_ucsi_acpi_step(
 		error = drv_ucsi_request(&driver->ucsi, &request);
 		if (error != 0) {
 			drv_typec_os_log("ucsi: an operation's connector was not read (error %d)\n", error);
-			return -error;
+			failure = error;
 		}
 	}
 
+	/* Nothing came: a PPM quiet for long enough is asked whether a change waits unseen. */
+	now = drv_typec_os_now_ms();
+	quiet = ucsi_acpi_quiet_ms(driver);
+	if (done == 0 &&
+	    !driver->ucsi.failed &&
+	    now - driver->last_exchange_ms >= quiet) {
+		error = drv_ucsi_poll(&driver->ucsi);
+		if (error != 0) {
+			drv_typec_os_log("ucsi: the PPM was not asked (error %d)\n", error);
+			failure = error;
+		}
+	}
+
+	/* An interface that failed stops the driver. */
+	if (driver->ucsi.failed)
+		return -ENODEV;
+
+	/* Reports a step whose reading failed. */
+	if (failure != 0)
+		return -failure;
+
 	/* Succeeded: 1 when a notification or an operation was handled. */
 	return done;
+}
+
+/*
+ * Stops the driver (ws177-p003): the Type-C layer ends every operation
+ * that waits with ENODEV and keeps the last state, the notification
+ * handler is removed and the mailbox unmapped.  Runs on the driver's
+ * thread (or on the attach's, before the thread runs), so no exchange is
+ * under way; a notification that still comes finds the driver stopped.
+ */
+void
+drv_ucsi_acpi_stop(
+	const char *why)
+{
+	struct ucsi_acpi *driver;
+	unsigned ended;
+	int error;
+
+	/* A driver stops once. */
+	driver = &ucsi_acpi;
+	if (driver->stopped)
+		return;
+	driver->stopped = true;
+
+	/* The layer: nothing more is asked of the driver. */
+	ended = drv_typec_driver_stop(ENODEV);
+
+	/* The notifications. */
+	if (driver->handler) {
+		error = drv_acpi_notify_remove(driver->device, ucsi_acpi_notify, driver);
+		if (error != 0)
+			drv_typec_os_log("ucsi: the notification handler was not removed (error %d)\n", error);
+		driver->handler = false;
+	}
+
+	/* The mailbox. */
+	ucsi_acpi_release(driver);
+
+	/* Succeeded: stopped. */
+	drv_typec_os_log("ucsi: stopped (%s); %u operations ended\n", why, ended);
 }
 
 /* Takes the first present device the namespace names as a UCSI interface. */
@@ -364,9 +473,35 @@ ucsi_acpi_find(
 	if (!identified)
 		return 0;
 
-	/* Succeeded: the device is found, and the walk stops. */
+	/*
+	 * The first is the interface; another is logged and not used, as the
+	 * Type-C layer has one connector driver (ws177-p003).
+	 */
+	if (driver->device != NULL) {
+		ucsi_acpi_other(node);
+		return 0;
+	}
+
+	/* Succeeded: the device is found; the walk goes on to tell of others. */
 	driver->device = node;
-	return -1;
+	return 0;
+}
+
+/* Logs a UCSI device past the first, which the driver does not use. */
+static void
+ucsi_acpi_other(
+	struct drv_acpi_node *node)
+{
+	char path[64];
+	int error;
+
+	/* Its path, for the log. */
+	error = drv_acpi_node_path(node, path, sizeof(path));
+	if (error != 0)
+		(void)kern_snprintf(path, sizeof(path), "(device)");
+
+	/* Succeeded: told. */
+	drv_typec_os_log("ucsi: %s is another UCSI device: not used (one interface is driven)\n", path);
 }
 
 /* Tells whether an identifier object of a device (_HID or _CID) names UCSI. */
@@ -510,6 +645,9 @@ ucsi_acpi_probe(
 		drv_typec_os_log("ucsi: %s's mailbox at 0x%llx was not mapped (error %d)\n", path, (unsigned long long)driver->base, error);
 		return ENODEV;
 	}
+
+	/* mapped is what the release gives back, on any failure below too. */
+	driver->mapped = mapped;
 
 	/* VERSION (BCD: major, minor, sub-minor), which names the arrangement. */
 	driver->version = (uint16_t)(drv_typec_os_read8(driver->mailbox) | ((unsigned)drv_typec_os_read8(driver->mailbox + 1) << 8));
@@ -671,8 +809,10 @@ ucsi_acpi_notify(
 	(void)node;
 	(void)argument;
 
-	/* Only the mailbox's notification. */
+	/* Only the mailbox's notification, of a driver that runs. */
 	if (value != UCSI_ACPI_NOTIFY)
+		return;
+	if (ucsi_acpi.stopped)
 		return;
 
 	/* The thread reads the mailbox. */
@@ -698,26 +838,107 @@ ucsi_acpi_thread(
 	void *argument)
 {
 	uint32_t milliseconds;
+	uint32_t quiet;
+	int step;
 	int error;
 
 	/* No argument: the driver is the attached one. */
 	(void)argument;
 
-	/* The core's start; a PPM that does not start leaves the driver off. */
-	error = drv_ucsi_acpi_start();
-	if (error != 0)
+	/* The core's start, tried again after a pause; a PPM that never starts stops the driver. */
+	error = ucsi_acpi_start_tries(&ucsi_acpi);
+	if (error != 0) {
+		drv_ucsi_acpi_stop("the PPM did not start");
 		return;
+	}
 
 	/*
 	 * Each notification, waiting no longer than the Type-C layer's next
-	 * comparison of the display driver's DisplayPort report with UCSI's.
+	 * comparison of the display driver's DisplayPort report with UCSI's,
+	 * nor than the PPM may stay quiet.  An interface that failed stops the
+	 * driver, and the thread ends.
 	 */
 	for (;;) {
+		quiet = ucsi_acpi_quiet_ms(&ucsi_acpi);
 		milliseconds = drv_typec_display_check();
-		if (milliseconds == 0)
-			milliseconds = UCSI_ACPI_IDLE_MS;
-		(void)drv_ucsi_acpi_step(milliseconds);
+		if (milliseconds == 0 || milliseconds > quiet)
+			milliseconds = quiet;
+		step = drv_ucsi_acpi_step(milliseconds);
+		if (step == -ENODEV)
+			break;
 	}
+
+	/* Succeeded: the PPM is gone, and the driver stops. */
+	drv_ucsi_acpi_stop("the PPM did not come back");
+}
+
+/*
+ * Starts the core, trying UCSI_ACPI_START_TRIES times with a longer pause
+ * before each later try (a PPM may not be ready right after the boot).
+ * Returns 0, or the last try's errno value.
+ */
+static int
+ucsi_acpi_start_tries(
+	struct ucsi_acpi *driver)
+{
+	uint32_t pause;
+	unsigned attempt;
+	int error;
+
+	/* Each try, after its pause. */
+	(void)driver;
+	error = ENODEV;
+	pause = UCSI_ACPI_START_PAUSE_MS;
+	for (attempt = 1U; attempt <= UCSI_ACPI_START_TRIES; attempt++) {
+		if (attempt > 1U) {
+			(void)drv_typec_os_wait(pause);
+			pause *= 2U;
+		}
+
+		/* The start; done once it succeeds. */
+		error = drv_ucsi_acpi_start();
+		if (error == 0)
+			break;
+		drv_typec_os_log("ucsi: start %u of %u failed (error %d)\n", attempt, UCSI_ACPI_START_TRIES, error);
+	}
+
+	/* Reports the last failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the PPM started. */
+	return 0;
+}
+
+/* Tells how long the PPM may be quiet before it is asked for CCI: longer when its notifications come. */
+static uint32_t
+ucsi_acpi_quiet_ms(
+	struct ucsi_acpi *driver)
+{
+	bool notifying;
+
+	/* A PPM that notifies tells of its changes itself. */
+	notifying = drv_ucsi_notifying(&driver->ucsi);
+	if (notifying)
+		return UCSI_ACPI_IDLE_MS;
+
+	/* Succeeded: one that does not is asked more often. */
+	return UCSI_ACPI_QUIET_MS;
+}
+
+/* Gives the mailbox's mapping back, when there is one. */
+static void
+ucsi_acpi_release(
+	struct ucsi_acpi *driver)
+{
+	/* Nothing mapped. */
+	if (driver->mapped == 0U)
+		return;
+
+	/* Unmapped, and not reached again. */
+	drv_typec_os_unmap(driver->mailbox, driver->mapped);
+	driver->mailbox = NULL;
+	driver->mapped = 0U;
 }
 
 /* Writes CONTROL and MESSAGE OUT and tells the PPM (_DSM function 1). */
@@ -787,17 +1008,20 @@ ucsi_acpi_wait(
 
 	/* The signal, or the time. */
 	driver = context;
-	notified = drv_typec_os_wait(milliseconds);
+	(void)drv_typec_os_wait(milliseconds);
 
 	/*
 	 * A command's wait takes the notifications that came with it: the
 	 * core reads CCI next and keeps any connector change it shows, which
-	 * it handles before its operation ends.
+	 * it handles before its operation ends.  A wake-up for an operation is
+	 * not a notification (ws177-p003): only the handler's flag counts.
 	 */
-	__atomic_store_n(&driver->notified, 0, __ATOMIC_RELEASE);
+	notified = __atomic_exchange_n(&driver->notified, 0, __ATOMIC_ACQ_REL);
+	if (notified == 0)
+		return 0;
 
-	/* Succeeded: 1 for a notification, 0 for none. */
-	return notified;
+	/* Succeeded: a notification came. */
+	return 1;
 }
 
 /* Runs a write or a read under \ECMU when firmware has it, else as it is. */
@@ -819,6 +1043,9 @@ ucsi_acpi_exchange(
 	} else {
 		error = work(exchange);
 	}
+
+	/* When the PPM was last talked to, which the quiet poll waits from. */
+	exchange->driver->last_exchange_ms = drv_typec_os_now_ms();
 
 	/* Reports a failed exchange. */
 	if (error != 0)

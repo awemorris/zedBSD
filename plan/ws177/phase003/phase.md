@@ -3,7 +3,7 @@
 # ws177-p003: UCSI の堅牢化の host の分（案 G）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 P1 q882 の 3、設計）
+Status: in-progress（2026-10-08 P1 q882 の 3: host の分を実装・host PASS・kernel build。実機の確認は 5330 の後）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q882 の 3（P1、2026-10-08、承認は Q1 の dispatch「G の host の分（backlog-p2 148〜150・155）: UCSI の堅牢化の、5330 なしで作れる所。記録の再生の host 試験と停止の道。実機の確認は 5330 の後（BUG-256 にも注意、触らない）」）
@@ -49,3 +49,55 @@ Origin: [backlog-p2](../backlog-p2.md) の 148（ws050-p002 核）・149（p003 
 - `plan/ws050/tests/ucsi-host.c`（master の Tools に無い WS050 の試験。WS050 は未完了なので WS の試験として直して足す）に: ERROR → GET_ERROR_STATUS の順と errno・record の bit、BUSY の timeout → CANCEL → ETIMEDOUT、無応答 → PPM_RESET と列挙のやり直し・3 回で failed、通知の無い PPM の poll、記録の書式を fake の run から作って再生する transport で同じ record になる、取り消し・列の満杯、SET_CCOM の版の分岐、食い違いの log、display の forget。
 - `plan/ws050/tests/ucsi-acpi-host.c`（5330 の table）: start の失敗の再試行と停止の道（handler の除去・写像の解除・request の終わり）、2 台目の device の log。
 - kernel の build（warning 0）。
+
+## 設計レビュー（2026-10-08 design-reviewer）と反映
+
+敵対的レビュー（H1〜H4・M1〜M7・L1〜L9）を受けて、上の設計を次のとおり改めた（上の本文は最初の案、ここが採った形）。
+
+| 指摘 | 採った形 |
+| --- | --- |
+| H1 変化の読みが失敗すると ACK されず、PPM は次の変化を通知しない | `ucsi_pending_handle`: PPM が答えている（stuck でない）失敗なら log して change を ACK する（record は前の物のまま） |
+| H2 回復の再試行が次の入口（60 s）まで起きず、enumerate の失敗を「回復済み」と数える | `ucsi_recover` の中で最大 3 回、500 ms・1 s の pause を置いて試す。enumerate がどの理由で失敗してもその試行は失敗。3 回とも失敗で `failed`（ENODEV） |
+| H3 停止が原子的でない、thread が停止を見ない | layer に `drv_typec_driver_stop(error)`: 1 回の lock で stopped・kick を外す・待つ request を全て error で record に・全 connector の generation を上げ、lock の外で listener に知らせる。以後 put は ENODEV、publish は ENODEV。record は最後の状態のまま残す（count は 0 にしない、`/dev/typec` に「stopped」の行）。新しい start（connectors_reset に connector がある）で解除。thread は step の -ENODEV で止める |
+| H4 cancel の publish が driver の publish に消される | request の結果の欄（serial・error・information）は layer の持ち物: `drv_typec_connector_publish` は driver の写しの値を使わず、layer の値を保つ。cancel は lock の下で欄と generation を書き、listener に知らせる |
+| M1 errno の衝突 | 存在しない connector は EINVAL。EOPNOTSUPP は ENOTSUP と同じ値のまま、詳細は `request_error_information` で見る（決め） |
+| M2 予期された失敗にも GET_ERROR_STATUS | `ucsi->tolerant` の間（SOP・SOP' の alt modes、CAM_CS、PDOs、cable）は理由を聞かない |
+| M3 poll の起点・kick を通知と数える・S0ix | poll は PPM と最後に交換した時刻から: 通知が来る PPM 60 s、来ない PPM 5 s（1 s をやめた）。`ucsi_acpi_wait` は handler の flag だけを通知と返す |
+| M4 SET_CCOM | **今回は入れない**（範囲の外へ）。入れる時の条件: bmOptionalFeatures bit 0、1 bit だけで capability の部分集合、PPM_RESET で DRP に戻る、command が起こした変化は通知されないので遅らせて読み直す |
+| M5 失敗した request の後の request が待たされる | step は失敗を log して残りの request を続ける |
+| M6 fake の mailbox が常に最新、記録の再生が自分の出力を読む循環 | 残す（限界として記録）。再生の試験は書式と決定性の確認まで、5330 の実の記録で意味を持つ |
+| M7 forget の weak・generation・watch | i915 の tc-kern から weak extern で呼ぶ。forget は generation を上げ、dp_watch を消し、listener に知らせる |
+| L1 Error Information 0 | 「理由なし（ACK で消された可能性）」の行を出す |
+| L2 CANCEL が捨てられた時 | 元の command の完了をそのまま評価する（ETIMEDOUT にしない） |
+| L3 記録の番号と終わり | 行に通し番号（W・R、I は R と同じ番号）、満杯で `rec N end` の行。再生は番号の飛びを数える |
+| L4 lock の初期化 | atomic な 0/1/2 のまま（platform の init に置く案は採らない）。失敗の log は残す（無害） |
+| L5・L6 unmap・attach の失敗 | `drv_typec_os_unmap`（`hal_space_unmap_device`、HAL の API は不変）、解除で mailbox を NULL。probe・notify の install の失敗は写像を返し、thread の start の失敗は停止の道 |
+| L7 範囲の差 | 下の「範囲の外」に足した |
+| L8 i915 の tc-kern を触る | `drv_i915_tc_kern_stop` に forget の呼び出しだけ（ws177-p002 の自分の関数）。AUX・dp-ext は触らない（BUG-256） |
+| L9 BUSY の時間 | 5 s は BUSY を含む合計のまま（仕様は BUSY で timer をやり直してよい）。5330 での CANCEL の挙動は未確認 |
+
+範囲の外（追加、L7）: driver の再起動（停止の後に attach し直す口は無い）、WS052 の resume の入口（`ucsi_recover` を公開して呼ぶ形が候補）、GET_CAM_CS の 2.x と index の意味、connector の変化の通知に付いた ERROR の GET_ERROR_STATUS、同じ connector への複数の request の結果の上書き（record は最後の 1 つ）、SET_CCOM・SET_CAM_PRIORITY。backlog 155 の「bind を呼ぶ物が無く」は古い（ucsi-acpi.c の map_displays が bind を呼ぶ）。
+
+## 変更（2026-10-08 P1）
+
+- 核 `src/drivers/typec/ucsi.c`・`ucsi.h`: `ucsi_execute`（完了を返し CCI を `ucsi->cci` に、記録の行、通知か poll かの数え）、`ucsi_command`（stuck の短絡、CANCEL、ERROR の ACK と GET_ERROR_STATUS、tolerant）、`ucsi_cancel`・`ucsi_error_status`・`ucsi_error_errno`・`ucsi_error_log`・`ucsi_control_connector`・`ucsi_settle`・`ucsi_recover`・`ucsi_enumerate`（start の列挙を分けた）・`ucsi_record_write`・`ucsi_record_read`、公開の `drv_ucsi_poll`・`drv_ucsi_notifying`、`ucsi_pending_handle`（H1）。旧の不具合も直った: PPM の ERROR で完了した command を ACK せずに次を送っていた。
+- layer `typec.c`・`include/drivers/typec/typec.h`: record の `request_error_information`、`drv_typec_request_finish` の引数、`drv_typec_request_cancel`、`drv_typec_driver_stop`・`drv_typec_driver_stopped`、`drv_typec_display_forget`、publish が結果の欄を保つ、食い違いの中身が変わったら log し直す、text の stopped の行・information。
+- OS `typec-kern.c`・`typec-os.h`: lock の atomic な 1 回の初期化、`drv_typec_os_unmap`。
+- ACPI `ucsi-acpi.c`・`include/drivers/typec/ucsi-acpi.h`: start の 3 回の試し、停止の道 `drv_ucsi_acpi_stop`（公開）、quiet の poll、step の続行と -ENODEV、wait の通知の判定、2 台目の device の log、probe・install の失敗の解放。
+- i915 `src/drivers/gpu/i915/display/tc-kern.c`: 停止で各 port の report を forget（weak）。
+- 試験: `plan/ws050/tests/ucsi-host.c`（失敗の理由・3.0 と 1.2 の GET_ERROR_STATUS・errno、予期された失敗、CANCEL と遅い完了、回復と 3 回で failed、通知の無い PPM の poll、記録と再生（番号）、取り消し・結果の保持・失敗した変化の ACK・driver の停止と再開、食い違いの log し直し、forget）、`ucsi-acpi-host.c`（5330 の table: 停止で request が ENODEV・unmap 1 回・Notify が届かない・step と request の拒否、PPM が始まらない時の 3 回の start と停止）。
+
+## 確認（host・build、2026-10-08）
+
+- `make -C plan/ws050/tests OUT=build/p1-ucsi all` → ucsi-host PASS 124・FAIL 0、ucsi-acpi-host PASS 43・FAIL 0（ASan/UBSan）。`kernel-check` warning 0。
+- kernel（warning 0、-Werror）: `make -j16 BUILD=build/p1-k ZEDBSD_CONFIG=config/current-uat.mk build/p1-k/vmunix`。`sh plan/ws051/tests/host-tc.sh` 112/0・34/0（i915 側の回帰）。
+- style-check: `ucsi.c`・`typec.c`・`typec-kern.c`・`ucsi.h`・`typec.h`・`tc-kern.c` 0、`ucsi-acpi.c` 3 → 3（既存）。`git diff --check` 0。
+
+## 未実施・残り
+
+- 実機（5330）: 起動の dmesg の `ucsi: rec` の行（記録）を取り、fixture（`plan/ws177/tests/ucsi-record-5330.txt` の予定）にして再生する。CANCEL・GET_ERROR_STATUS の実機の挙動、idle の `_DSM` 2 の負荷、Notify の有無。QEMU には UCSI が無いので T1 の依頼は無し。
+- 上の「範囲の外」。
+
+## Event
+
+2026-10-08 / q882-i03（P1）: 設計 → design-reviewer → 反映して実装、host・build の確認。merge 依頼を Q1 へ。

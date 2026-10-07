@@ -38,4 +38,14 @@ int
 drv_ucsi_acpi_step(
 	uint32_t milliseconds);
 
+/*
+ * Stops the driver: the operations that wait end with ENODEV, the
+ * notification handler is removed and the mailbox unmapped (ws177-p003).
+ * The driver's thread calls it when the PPM cannot be started or brought
+ * back (the host test calls it in the thread's place).
+ */
+void
+drv_ucsi_acpi_stop(
+	const char *why);
+
 #endif
