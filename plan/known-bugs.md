@@ -106,7 +106,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-236](bugs/BUG-236.md) | App Home の見た目: 暗い背景の stage に icon、各 icon に spotlight、光沢の床に icon が反射する effect（montage を作る） | reproduced（実機） / tracking | UAT 2026-10-06 | WS099（App Home） |
 | [BUG-237](bugs/BUG-237.md) | app の icon の白抜き（記号）の部分が透過になっていないように見える | reproduced（実機） / tracking | UAT 2026-10-06 | WS128 p012（icon） |
 | [BUG-238](bugs/BUG-238.md) | base の emacs（REmacs）が `-nw` を受けない（GNU Emacs の利用者は端末で `emacs -nw` と打つ） | reproduced（QEMU、AAT） / scheduled（q799） | q788 の AAT の切り分け 2026-10-06 | 2026-10-08 修正、T1-387 PASS |
-| [BUG-239](bugs/BUG-239.md) | compositor が死んだ client を手放すのに QEMU で 1 個あたり約 1 秒（20 個で 23 秒、その間 key も遅れる） | reproduced（QEMU、AAT） / tracking | q788-i02 の AAT の切り分け 2026-10-06 | WS099（compositor） |
+| [BUG-239](bugs/BUG-239.md) | compositor が死んだ client を手放すのに QEMU で 1 個あたり約 1 秒（20 個で 23 秒、その間 key も遅れる） | reproduced（QEMU、AAT） / tracking | q788-i02 の AAT の切り分け 2026-10-06 | WS099（compositor）。P2 q870 で後始末から解放を外し（T1-392 PASS）、q878 で解放を compositor の暇な時に（T1 の frame_ms の再測定待ち）。kernel の非同期の解放は別 Phase の案（ticket） |
 | [BUG-240](bugs/BUG-240.md) | Browser の URL の欄の `/usr/...` が今の https の頁の相対の URL になる | reproduced（QEMU） / resolved | T1-219 2026-10-06 | 2026-10-08 修正、T1-386 PASS |
 | [BUG-241](bugs/BUG-241.md) | Browser で example.com の一部の言語の行が □ | reproduced（QEMU） / tracking | T1-219 2026-10-06 | WS074（font の fallback） |
 | [BUG-242](bugs/BUG-242.md) | Emacs の M-x shell で `ls /` の layout が崩れる | unknown / tracking（ベータ2、低い優先度） | 2026-10-07 ユーザーの UAT | REmacs・ls（WS001 p041） |
