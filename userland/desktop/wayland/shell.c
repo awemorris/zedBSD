@@ -142,6 +142,9 @@ static uint32_t fullscreen_leave_eaten;
 /* The arrow whose press moved a window to another display (ws113-p007); its release is eaten too. */
 static uint32_t display_move_eaten;
 
+/* The arrow whose press turned the desktop with Alt+Shift (ws181-p010); its release is eaten too. */
+static uint32_t desktop_key_eaten;
+
 /* How much narrower than its parent's body a sheet is at least asked to be on each side, and the narrowest it is asked to be. */
 #define SHEET_MARGIN		24
 #define SHEET_NARROWEST		320
@@ -248,6 +251,9 @@ static uint32_t display_move_eaten;
 #define SHORTCUT_RIGHT		106U
 #define MODIFIERS_CONTROL_ALT	(4U | 8U)
 #define MODIFIER_SHIFT		1U
+
+/* Alt+Shift with Left or Right turns the desktop too (ws181-p010, the 2026-10-08 user decision). */
+#define MODIFIERS_ALT_SHIFT	(8U | 1U)
 
 /* The Super (Windows) key's bit, for Super+Tab (Wiseview). */
 #define MODIFIER_SUPER		0x40U
@@ -487,6 +493,7 @@ static const char *gesture_phase_name(uint32_t phase);
 static int wiseview_showing(struct kwl_server *server);
 static int fullscreen_leave_key(struct kwl_server *server, uint32_t key, uint32_t state);
 static int display_move_key(struct kwl_server *server, uint32_t key, uint32_t state);
+static int desktop_alt_shift_key(struct kwl_server *server, uint32_t key, uint32_t state);
 static void wiseview_open_key(struct kwl_server *server);
 static void wiseview_key(struct kwl_server *server, uint32_t key, uint32_t state);
 static void wiseview_close_key(struct kwl_server *server);
@@ -2903,9 +2910,10 @@ kwl_glass_committed(
 }
 
 /*
- * Handles zdesktop's shortcuts: Ctrl+Alt+Left and Right switch to the
- * desktop before and after, Super+Tab opens Wiseview (and while it is open
- * every key is Wiseview's).  Returns 1 when the key is zdesktop's.
+ * Handles zdesktop's shortcuts: Ctrl+Alt+Left and Right, and Alt+Shift+Left
+ * and Right, switch to the desktop before and after, Super+Tab opens
+ * Wiseview (and while it is open every key is Wiseview's).  Returns 1 when
+ * the key is zdesktop's.
  */
 int
 kwl_glass_key(
@@ -2970,6 +2978,11 @@ kwl_glass_key(
 
 	/* Super+Shift with an arrow: the focused window to the display beside (ws113-p007). */
 	taken = display_move_key(server, key, state);
+	if (taken)
+		return 1;
+
+	/* Alt+Shift with an arrow: the desktop before and after (ws181-p010). */
+	taken = desktop_alt_shift_key(server, key, state);
 	if (taken)
 		return 1;
 
@@ -9462,5 +9475,52 @@ display_move_key(
 
 	/* Succeeded: carried there. */
 	kwl_window_to_output(server, surface, (unsigned)target, "key");
+	return 1;
+}
+
+/*
+ * Switches to the desktop before or after with Alt+Shift and Left or Right
+ * (ws181-p010, the 2026-10-08 user decision: Ctrl+Shift is the applications'
+ * word selection).  Only Alt and Shift are held; Ctrl+Alt+Shift stays the
+ * key that takes the window on top along.  At the first or last desktop the
+ * key is still taken and nothing turns.  Returns 1 when the key was taken,
+ * its release with it.
+ */
+static int
+desktop_alt_shift_key(
+	struct kwl_server *server,
+	uint32_t key,
+	uint32_t state)
+{
+	int target;
+
+	/* The release of the press taken goes no further. */
+	if (state == 0U) {
+		if (desktop_key_eaten == 0U || key != desktop_key_eaten)
+			return 0;
+		desktop_key_eaten = 0U;
+		return 1;
+	}
+
+	/* Left or Right with Alt and Shift, and nothing else. */
+	if (key != SHORTCUT_LEFT && key != SHORTCUT_RIGHT)
+		return 0;
+	if ((server->modifiers & MODIFIERS_ANY) != MODIFIERS_ALT_SHIFT)
+		return 0;
+	desktop_key_eaten = key;
+
+	/* The neighbour that way. */
+	target = (int)server->desktop + 1;
+	if (key == SHORTCUT_LEFT)
+		target = (int)server->desktop - 1;
+
+	/* None beyond the first or the last desktop. */
+	if (target < 0 || target >= DESKTOPS) {
+		printf("KWL GLASS desktop stays=%u via=alt-shift\n", server->desktop + 1U);
+		return 1;
+	}
+
+	/* Succeeded: the desktop turns. */
+	desktop_turn(server, target, "alt-shift");
 	return 1;
 }

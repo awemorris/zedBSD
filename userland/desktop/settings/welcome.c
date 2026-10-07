@@ -61,7 +61,7 @@ static const char *const welcome_keys[][2] = {
 	{ "Super+Tab", "Wiseview: every window at a glance" },
 	{ "Alt+Tab", "Switch between windows" },
 	{ "Super+L", "Lock the screen" },
-	{ "Ctrl+Alt+Left / Right", "Move between desktops" },
+	{ "Alt+Shift+Left / Right", "Move between desktops" },
 	{ "Alt+Space", "Switch the input language" }
 };
 
