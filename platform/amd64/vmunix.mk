@@ -1111,16 +1111,16 @@ $(DYNAMIC_DIR)/libGLESv2.so: $(DYNAMIC_GLESV2_OBJS) $(DYNAMIC_DIR)/libEGL.so $(D
 # The desktop's way into the system and zdesktop's Wayland extensions (the
 # System Menu, WS070): the C library and the Wayland client; the file
 # chooser (ws092-p003) draws its text with libtruetype.
-DYNAMIC_ZDESKTOP_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libkeiland)
+DYNAMIC_LIBKEILAND_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libkeiland)
 
-$(DYNAMIC_DIR)/libkeiland.so: $(DYNAMIC_ZDESKTOP_OBJS) $(DYNAMIC_DIR)/libwayland-client.so $(DYNAMIC_DIR)/libtruetype.so \
+$(DYNAMIC_DIR)/libkeiland.so: $(DYNAMIC_LIBKEILAND_OBJS) $(DYNAMIC_DIR)/libwayland-client.so $(DYNAMIC_DIR)/libtruetype.so \
 	$(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libpng-compat.so $(DYNAMIC_DIR)/libz-compat.so \
 	$(DYNAMIC_DIR)/libc.so userland/desktop/libkeiland/exports.map tools/build/check-dynamic-elf.py
 	$(PYTHON) userland/desktop/libkeiland/exports.py --check
 	$(LD) -m elf_x86_64 -shared -soname libkeiland.so --hash-style=both -Bsymbolic-functions \
  -z defs -z now -z relro -z separate-code -z stack-size=0x100000 \
  --version-script=userland/desktop/libkeiland/exports.map \
- $(DYNAMIC_ZDESKTOP_OBJS) -L$(DYNAMIC_DIR) -l:libwayland-client.so -l:libtruetype.so -l:libvulkan.so \
+ $(DYNAMIC_LIBKEILAND_OBJS) -L$(DYNAMIC_DIR) -l:libwayland-client.so -l:libtruetype.so -l:libvulkan.so \
  -l:libpng-compat.so -l:libz-compat.so -l:libc.so -o $@
 	$(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 --role shared-library \
  --needed libwayland-client.so --needed libtruetype.so --needed libvulkan.so --needed libpng-compat.so \
@@ -1192,10 +1192,10 @@ $(BUILD)/bin/display-events: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
 
 # The compositor draws window mode with standard Vulkan (WS035 p052), and
 # reaches the system (the network, ws035-p013) through libkeiland.
-DYNAMIC_ZDESKTOP_PROGRAM_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,wayland)
+DYNAMIC_WAYLAND_PROGRAM_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,wayland)
 
 $(BUILD)/bin/wayland: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
-	$(DYNAMIC_ZDESKTOP_PROGRAM_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libtruetype.so \
+	$(DYNAMIC_WAYLAND_PROGRAM_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libtruetype.so \
 	$(DYNAMIC_DIR)/libkeiland.so $(DYNAMIC_DIR)/libpng-compat.so $(DYNAMIC_DIR)/libjpeg-compat.so $(DYNAMIC_DIR)/libz-compat.so \
 	$(DYNAMIC_DIR)/libc.so $(DYNAMIC_DIR)/ld.so $(DYNAMIC_VULKAN_CHECK)
 	@mkdir -p $(dir $@)
@@ -1203,7 +1203,7 @@ $(BUILD)/bin/wayland: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  -Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
  -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
  -Wl,--dynamic-linker=/lib/ld.so \
- $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_ZDESKTOP_PROGRAM_OBJS) \
+ $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_WAYLAND_PROGRAM_OBJS) \
  -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
  -l:libvulkan.so -l:libtruetype.so -l:libkeiland.so -l:libpng-compat.so -l:libjpeg-compat.so -l:libz-compat.so -l:libc.so -o $@
 	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine amd64 --role application \
@@ -1582,17 +1582,17 @@ $(BUILD)/bin/mview: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
 
 # The terminal imports standard Wayland, Vulkan, TrueType and C library entry
 # points (WS035 p068), and zdesktop's System Menu through libkeiland (WS070).
-DYNAMIC_ZDESKTOP_TERMINAL_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,terminal)
+DYNAMIC_TERMINAL_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,terminal)
 
 $(BUILD)/bin/terminal: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
-	$(DYNAMIC_ZDESKTOP_TERMINAL_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libwayland-client.so \
+	$(DYNAMIC_TERMINAL_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libwayland-client.so \
 	$(DYNAMIC_DIR)/libkeiland.so $(DYNAMIC_DIR)/libtruetype.so $(DYNAMIC_DIR)/libc.so $(DYNAMIC_DIR)/ld.so $(DYNAMIC_VULKAN_CHECK)
 	@mkdir -p $(dir $@)
 	$(CC) -m64 -nostdlib -pie -Wl,--no-relax \
  -Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
  -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
  -Wl,--dynamic-linker=/lib/ld.so \
- $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_ZDESKTOP_TERMINAL_OBJS) \
+ $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_TERMINAL_OBJS) \
  -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
  -l:libvulkan.so -l:libwayland-client.so -l:libkeiland.so -l:libtruetype.so -l:libc.so -o $@
 	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine amd64 --role application \
@@ -1601,10 +1601,10 @@ $(BUILD)/bin/terminal: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
 # The file manager (WS071) imports standard Wayland, Vulkan, TrueType and C
 # library entry points, and zdesktop's own extensions through libkeiland.
 # ws168-p004: no decoder (keiland-preview makes its pictures in a sandbox).
-DYNAMIC_ZDESKTOP_FILES_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,files)
+DYNAMIC_FILES_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,files)
 
 $(BUILD)/bin/files: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
-	$(DYNAMIC_ZDESKTOP_FILES_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libwayland-client.so \
+	$(DYNAMIC_FILES_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libwayland-client.so \
 	$(DYNAMIC_DIR)/libkeiland.so $(DYNAMIC_DIR)/libtruetype.so \
 	$(DYNAMIC_DIR)/libc.so $(DYNAMIC_DIR)/ld.so $(DYNAMIC_VULKAN_CHECK)
 	@mkdir -p $(dir $@)
@@ -1612,7 +1612,7 @@ $(BUILD)/bin/files: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  -Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
  -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
  -Wl,--dynamic-linker=/lib/ld.so \
- $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_ZDESKTOP_FILES_OBJS) \
+ $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_FILES_OBJS) \
  -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
  -l:libvulkan.so -l:libwayland-client.so -l:libkeiland.so -l:libtruetype.so -l:libc.so -o $@
 	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine amd64 --role application \
@@ -1621,10 +1621,10 @@ $(BUILD)/bin/files: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
 # Settings (WS089) imports standard Wayland, Vulkan, TrueType and C library entry points, and
 # zdesktop's own extensions through libkeiland.  It compiles the file manager's canvas, text and
 # icons (the same objects as files: the pattern rule builds them once).
-DYNAMIC_ZDESKTOP_SETTINGS_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,settings)
+DYNAMIC_SETTINGS_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,settings)
 
 $(BUILD)/bin/settings: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
-	$(DYNAMIC_ZDESKTOP_SETTINGS_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libwayland-client.so \
+	$(DYNAMIC_SETTINGS_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libwayland-client.so \
 	$(DYNAMIC_DIR)/libkeiland.so $(DYNAMIC_DIR)/libtruetype.so \
 	$(DYNAMIC_DIR)/libc.so $(DYNAMIC_DIR)/ld.so $(DYNAMIC_VULKAN_CHECK)
 	@mkdir -p $(dir $@)
@@ -1632,7 +1632,7 @@ $(BUILD)/bin/settings: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  -Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
  -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
  -Wl,--dynamic-linker=/lib/ld.so \
- $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_ZDESKTOP_SETTINGS_OBJS) \
+ $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_SETTINGS_OBJS) \
  -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
  -l:libvulkan.so -l:libwayland-client.so -l:libkeiland.so -l:libtruetype.so -l:libc.so -o $@
 	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine amd64 --role application \
@@ -1640,10 +1640,10 @@ $(BUILD)/bin/settings: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
 
 # The System Monitor (ws134-p002) imports standard Wayland, Vulkan, TrueType and C library entry points,
 # and the titlebar, and the window and text (libkeiland/ui), through libkeiland.
-DYNAMIC_ZDESKTOP_MONITOR_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,monitor)
+DYNAMIC_MONITOR_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,monitor)
 
 $(BUILD)/bin/monitor: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
-	$(DYNAMIC_ZDESKTOP_MONITOR_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libwayland-client.so \
+	$(DYNAMIC_MONITOR_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libwayland-client.so \
 	$(DYNAMIC_DIR)/libkeiland.so $(DYNAMIC_DIR)/libtruetype.so \
 	$(DYNAMIC_DIR)/libc.so $(DYNAMIC_DIR)/ld.so $(DYNAMIC_VULKAN_CHECK)
 	@mkdir -p $(dir $@)
@@ -1651,7 +1651,7 @@ $(BUILD)/bin/monitor: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  -Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
  -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
  -Wl,--dynamic-linker=/lib/ld.so \
- $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_ZDESKTOP_MONITOR_OBJS) \
+ $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_MONITOR_OBJS) \
  -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
  -l:libvulkan.so -l:libwayland-client.so -l:libkeiland.so -l:libtruetype.so -l:libc.so -o $@
 	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine amd64 --role application \
@@ -1662,10 +1662,10 @@ $(BUILD)/bin/monitor: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
 # zdesktop's System Menu and the recent files through libkeiland, and libpdf for its PDF; ws175-p007: libz-compat
 # for the images it keeps compressed; ws175-p008: libpng-compat, libjpeg-compat and libgif-compat for the image files
 # it puts on a page (picture.c).
-DYNAMIC_ZDESKTOP_NOTES_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,notes)
+DYNAMIC_NOTES_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,notes)
 
 $(BUILD)/bin/notes: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
-	$(DYNAMIC_ZDESKTOP_NOTES_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libwayland-client.so \
+	$(DYNAMIC_NOTES_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libwayland-client.so \
 	$(DYNAMIC_DIR)/libkeiland.so $(DYNAMIC_DIR)/libtruetype.so $(DYNAMIC_DIR)/libpng-compat.so $(DYNAMIC_DIR)/libjpeg-compat.so \
 	$(DYNAMIC_DIR)/libgif-compat.so $(DYNAMIC_DIR)/libz-compat.so $(DYNAMIC_DIR)/libpdf.so \
 	$(DYNAMIC_DIR)/libc.so $(DYNAMIC_DIR)/ld.so $(DYNAMIC_VULKAN_CHECK)
@@ -1674,7 +1674,7 @@ $(BUILD)/bin/notes: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  -Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
  -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
  -Wl,--dynamic-linker=/lib/ld.so \
- $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_ZDESKTOP_NOTES_OBJS) \
+ $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_NOTES_OBJS) \
  -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
  -l:libvulkan.so -l:libwayland-client.so -l:libkeiland.so -l:libtruetype.so -l:libpng-compat.so -l:libjpeg-compat.so \
  -l:libgif-compat.so -l:libz-compat.so -l:libpdf.so -l:libc.so -o $@
@@ -1932,11 +1932,11 @@ $(DYNAMIC_DIR)/libbrowser.so: $(DYNAMIC_BROWSER_LIBRARY_OBJS) $(DYNAMIC_DIR)/lib
 # /bin/browser is the shell over libbrowser (ws074-p057): its command line and headless modes (main.c)
 # and its window (shell/), which import the engine through <browser.h>, standard Wayland and Vulkan
 # for the window and its swapchain (ws074-p014), and zdesktop's titlebar through libkeiland (ws074-p045).
-DYNAMIC_ZDESKTOP_BROWSER_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,browser)
-$(DYNAMIC_ZDESKTOP_BROWSER_OBJS): DYNAMIC_CPPFLAGS += -Iuserland/desktop/browser
+DYNAMIC_BROWSER_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,browser)
+$(DYNAMIC_BROWSER_OBJS): DYNAMIC_CPPFLAGS += -Iuserland/desktop/browser
 
 $(BUILD)/bin/browser: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
-	$(DYNAMIC_ZDESKTOP_BROWSER_OBJS) $(DYNAMIC_DIR)/libbrowser.so $(DYNAMIC_DIR)/libvulkan.so \
+	$(DYNAMIC_BROWSER_OBJS) $(DYNAMIC_DIR)/libbrowser.so $(DYNAMIC_DIR)/libvulkan.so \
 	$(DYNAMIC_DIR)/libwayland-client.so $(DYNAMIC_DIR)/libkeiland.so $(DYNAMIC_DIR)/libc.so $(DYNAMIC_DIR)/ld.so \
 	$(DYNAMIC_VULKAN_CHECK)
 	@mkdir -p $(dir $@)
@@ -1944,7 +1944,7 @@ $(BUILD)/bin/browser: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  -Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
  -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
  -Wl,--dynamic-linker=/lib/ld.so \
- $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_ZDESKTOP_BROWSER_OBJS) \
+ $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_BROWSER_OBJS) \
  -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
  -l:libbrowser.so -l:libvulkan.so -l:libwayland-client.so -l:libkeiland.so -l:libc.so -o $@
 	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine amd64 --role application \
@@ -2050,17 +2050,17 @@ $(BUILD)/bin/glescompute: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  -l:libEGL.so -l:libGLESv2.so -l:libc.so -o $@
 
 # zdesktop's X11 server imports standard Wayland, Vulkan, TrueType and C library entry points (WS069 p008, p011).
-DYNAMIC_ZDESKTOP_X11SERVER_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,xserver)
+DYNAMIC_X11SERVER_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,xserver)
 
 $(BUILD)/bin/xserver: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
-	$(DYNAMIC_ZDESKTOP_X11SERVER_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libwayland-client.so \
+	$(DYNAMIC_X11SERVER_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libwayland-client.so \
 	$(DYNAMIC_DIR)/libkeiland.so $(DYNAMIC_DIR)/libtruetype.so $(DYNAMIC_DIR)/libc.so $(DYNAMIC_DIR)/ld.so $(DYNAMIC_VULKAN_CHECK)
 	@mkdir -p $(dir $@)
 	$(CC) -m64 -nostdlib -pie -Wl,--no-relax \
  -Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
  -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
  -Wl,--dynamic-linker=/lib/ld.so \
- $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_ZDESKTOP_X11SERVER_OBJS) \
+ $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_X11SERVER_OBJS) \
  -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
  -l:libvulkan.so -l:libwayland-client.so -l:libkeiland.so -l:libtruetype.so -l:libc.so -o $@
 	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine amd64 --role application \

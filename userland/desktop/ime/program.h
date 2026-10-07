@@ -21,7 +21,7 @@
 #include <wayland/wayland-client.h>
 #include <wayland/input-method-unstable-v2-client-protocol.h>
 #include <wayland/virtual-keyboard-unstable-v1-client-protocol.h>
-#include "userland/desktop/libwayland/zed-ime-status-v1-client-protocol.h"
+#include "userland/desktop/libwayland/keiland-ime-status-v1-client-protocol.h"
 
 /* The most languages the program keeps, and the evdev codes whose presses it remembers. */
 #define PROGRAM_ENGINES_MAX	4U

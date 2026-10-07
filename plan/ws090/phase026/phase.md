@@ -33,6 +33,39 @@ Q1（q879）:「libkeiland の present を、変わった所（damage）だけ�
    - Files: desktop の部分の再描画（変わった cell と band の新旧の矩形 ＋ margin）と窓の部分の再描画（`app->damage`）の外接の箱を `fm_app.frame_part` に集め、`fm_present_frame(..., part)` に渡す。部分で描いて何も変わらなかった frame は 1 pixel。
    - Mail・Calendar・Phone: hover の部分の再描画（`kl_ui_take_damage` の part）をそのまま渡す。
 
+## 層 3 の設計（compositor、2026-10-08 P1、design-reviewer の review に出す版）
+
+### 今の形（読んだ所）
+
+- `wayland/damage.c` の `kwl_damage_commit` は image が adopt される時に呼ばれる。
+  - toplevel の窓（mapped、fullscreen でない、同じ大きさの image）で、glass の look なら `kwl_glass_body_damage`（look が still で、その窓より上の窓が body の DAMAGE_REACH = 96 px 以内に無い）が真の時に body の矩形だけを damage にする。plain の look は窓の矩形。
+  - 他の全て（desktop の surface を含む）は `server->dirty`（出力の全体）。
+- `compose.c` は damage を swapchain の image の buffer age で広げ、その中だけを描く。その矩形の中では全ての層（壁紙・desktop・窓・popup・bar・menu・OSK・通知など）を clip して描くので、重なる物は正しく描き直される。
+- 矩形の外の見た目を変えうるのは、矩形の中の画素を読む効果だけ。
+  - 窓の glass は既定で blur した壁紙（静的）を読む。`set_blur` の窓と docked の空間の中央の窓は backdrop（下の scene を 1/8 に縮めて blur した物）を読む。
+  - 整列の menu も backdrop を読む（`kwl_arrange_showing`）。
+  - bar・popup・通知・volume などは blur した壁紙の glass。
+- client の damage は `protocol.c` の `add_damage`・`commit_damage` が `surface->committed_damage`（buffer の pixel、wl_shm の行の写し用）に集めている。GPU の image では消されずに積もる。
+
+### 変更の案
+
+1. `kwl_object` に `adopt_damage[4]`・`adopt_damaged` を足す。`commit_damage` が committed と同じく合わせ、`kwl_damage_commit` が使って消す。commit が adopt の前に重なっても（mailbox の置き換え）合わさる。
+2. toplevel: 今の「alone」の条件のまま、body の矩形を `body ∩ (body の原点 + adopt_damage)` に絞る。条件: body の大きさが image の大きさと同じ（拡大・縮小・animation でない。`body_rect` が `surface->x,y` と image の大きさの時だけ）。違えば今の body の全体。
+3. desktop の surface（`kwl_desktop_surface` が返す物、今は全体）: R = desktop の位置 ＋ adopt_damage（image に clip）。次が全て真の時だけ R を damage にし、どれかが偽なら今までどおり全体にする:
+   - (a) `server->glass` で `kwl_glass_still` が真。
+   - (b) image の大きさが前と同じ。
+   - (c) 今の desktop の mapped で最小化されていない窓のうち、backdrop を読む物（`kwl_panels_blur` が真、または docked の空間の中央の窓）の body ＋ title bar が R ＋ DAMAGE_REACH にかからない。
+   - (d) 整列の menu が出ていない。
+   - (e) fullscreen の窓が出力を覆っていない（覆う時は desktop は描かれず、damage は要らない。全体にしてよい）。
+   - plain の look（`!server->glass`）は R だけ（blur が無い）。
+4. adopt_damage が無い commit（client が damage を送らない、または全体）は今までどおり。
+
+### 危ない所（review で見てほしい点）
+
+- client の damage が実際の変化を覆わない client（damage を小さく送る誤り）は描き残しになる。今の libkeiland と libvulkan の WSI は覆う（層 1・2 の host 試験）。古い client と wl_shm の client は全体か正しい damage を送る（wl_shm は既に damage の行だけを写している）。
+- buffer age・head（mirror の写し）・capture は compose の既存の仕組みに乗る。
+- 影: 窓の影は窓と一緒に clip の中で描かれる。desktop の変化は影の形を変えない。
+- cursor・drag の icon・OSK・通知・corner は still でない時に全体になる（`kwl_glass_still`）。
 ## 確かめ（2026-10-08、層 1・2・4）
 
 - host:

@@ -36,7 +36,7 @@
 #include <xdg-shell-client-protocol.h>
 #include <keiland/keiland.h>
 
-#include "userland/desktop/libwayland/zed-titlebar-v1-client-protocol.h"
+#include "userland/desktop/libwayland/keiland-titlebar-v1-client-protocol.h"
 
 #include <errno.h>
 #include <fcntl.h>

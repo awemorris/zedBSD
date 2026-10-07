@@ -68,7 +68,7 @@ opaque versioned GPU descriptor verified by the server against the immutable
 kernel resource record; the client transport neither interprets nor trusts it.
 The application uses ordinary Wayland and Vulkan interfaces; only the WSI and
 compositor use this factory. No linux-dmabuf-v1 interface is advertised. Its client header is not public: it lives with libwayland
-(`userland/desktop/libwayland/zed-gpu-buffer-v1-client-protocol.h`), and only
+(`userland/desktop/libwayland/keiland-gpu-buffer-v1-client-protocol.h`), and only
 libwayland and libvulkan's WSI include it. Other clients of the desktop's compositor that need
 the compositor's own extension use libkeiland (`<keiland.h>`).
 

@@ -16,8 +16,8 @@
  * this header is private to the tree.
  */
 
-#ifndef ZED_IME_STATUS_V1_CLIENT_PROTOCOL_H
-#define ZED_IME_STATUS_V1_CLIENT_PROTOCOL_H
+#ifndef KEILAND_IME_STATUS_V1_CLIENT_PROTOCOL_H
+#define KEILAND_IME_STATUS_V1_CLIENT_PROTOCOL_H
 
 #include <wayland/wayland-client-core.h>
 #include <wayland/wayland-client-protocol.h>

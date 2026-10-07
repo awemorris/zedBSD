@@ -20,7 +20,7 @@
 #include "ui/internal.h"
 
 #include <wayland-client.h>
-#include "userland/desktop/libwayland/zed-glass-v1-client-protocol.h"
+#include "userland/desktop/libwayland/keiland-glass-v1-client-protocol.h"
 
 #include <errno.h>
 #include <stdlib.h>
