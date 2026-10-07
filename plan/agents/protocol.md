@@ -86,3 +86,7 @@ user「テストはメインエージェントが集約してサブエージェ�
 - ユーザー（2026-10-07、T1 が host で `rm -f /dev/null` を誤って打ち、続く script が auto-mode で拒否された件の後）:「T1は再起動します。削除コマンドの実行は禁止として、メインエージェントにaskして実行してもらうパイプラインを作って対策します。削除自体はメインエージェントの仕事にします。」
 - 全ての担当（P1〜P8・T1・B1）は削除の command（rm・rmdir・unlink・find -delete・shutil.rmtree・os.remove など、script の中も）を一切実行しない。消す必要がある物は SendMessage で Q1 に path と理由を送り（「削除の依頼」）、Q1 が中身を確かめて自分の pipeline で消し、結果を返す。
 - 担当は削除を待たずに続けてよい（新しい出力先は fresh_out か build/tmp の新しい directory）。
+
+## 試験の image は依頼の tree で作り直す（2026-10-08 Q1）
+
+T1-314 の FAIL（apps.photos.browse）は、使い回しの AAT の image（build/aat-t1202）の photos が依頼の tree より古かったため（`--import` を知らない使い方の行）。q872 の P2 の調べ（ws157-p005）。→ T1 は image を依頼の tree（main の SHA）で build し直して作り、使い回す時は全ての package が依頼の tree で作り直されたことを確かめる。結果には image の tree の SHA を書く。app の新しい option を試す依頼では、guest で使い方の行（例 `/bin/photos --help`）を確かめてから流す。Q1 は FAIL を直す Queue にする前に、同じ試験の後の T1 の行（再試験の PASS）を確かめる。
