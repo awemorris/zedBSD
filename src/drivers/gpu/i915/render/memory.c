@@ -44,6 +44,19 @@ static int i915_gfx_bind_buffer(struct i915_render_session *session, struct i915
 static struct i915_gem_object *memory_import_object(struct i915_render_session *session, uint32_t resource);
 static int i915_gfx_memory_attach(struct i915_gfx_memory *memory, struct i915_gem_object *object);
 static void i915_gfx_memory_publish(struct i915_render_device *vk, struct i915_gfx_memory *memory);
+static void memory_unbind_buffer(void *object, void *argument);
+static void memory_unbind_image(void *object, void *argument);
+
+/*
+ * An allocation being freed and how many buffers and images still bound
+ * to it were let go of (BUG-244), for the visits of the session's objects
+ * that vkFreeMemory makes.  It lives on the stack of the free.
+ */
+struct memory_unbind {
+	struct i915_gfx_memory *memory;
+	unsigned buffers;
+	unsigned images;
+};
 
 /*
  * The executor device keeps every live VkDeviceMemory of its sessions on a
@@ -210,8 +223,9 @@ drv_i915_render_blob_detach(
  * Frees an allocation whose identity is already withdrawn.
  *
  * It leaves the list the blob attach searches first, so no blob becomes its
- * storage afterwards.  XXX: buffers and images bound to it keep a dangling
- * pointer; the application frees them first.
+ * storage afterwards.  Nothing may name it any more: vkFreeMemory lets the
+ * session's buffers and images go of it first (BUG-244), and a closing
+ * session frees its buffers and images without reading their allocation.
  */
 void
 drv_i915_gfx_memory_release(
@@ -393,6 +407,7 @@ drv_i915_gfx_free_memory(
 	struct i915_wire_reader *reader)
 {
 	struct i915_gfx_memory *memory;
+	struct memory_unbind unbind;
 	uint64_t identity;
 
 	/* Reads the identity between the device and the allocator. */
@@ -407,8 +422,24 @@ drv_i915_gfx_free_memory(
 	if (memory == NULL)
 		return 0;
 
-	/* Unpublishes the allocation, then frees it. */
+	/* Unpublishes the allocation, so that no command resolves it again. */
 	drv_i915_object_remove(session, I915_VK_OBJ_MEMORY, identity);
+
+	/*
+	 * The buffers and images still bound to it let go of it (BUG-244): an
+	 * application that frees an allocation before what is bound to it
+	 * (against the Vulkan rules) leaves them without storage, whose
+	 * address is 0, instead of naming freed kernel memory.
+	 */
+	unbind.memory = memory;
+	unbind.buffers = 0U;
+	unbind.images = 0U;
+	drv_i915_object_each(session, I915_VK_OBJ_BUFFER, memory_unbind_buffer, &unbind);
+	drv_i915_object_each(session, I915_VK_OBJ_IMAGE, memory_unbind_image, &unbind);
+	if (unbind.buffers != 0U || unbind.images != 0U)
+		kern_logf("i915: vk: vkFreeMemory of an allocation still bound to %u buffers and %u images; they have no storage now\n", unbind.buffers, unbind.images);
+
+	/* Frees it. */
 	drv_i915_gfx_memory_release(memory);
 
 	/* Succeeded: the allocation is gone. */
@@ -688,6 +719,48 @@ i915_gfx_bind_buffer(
 	buffer->memory = memory;
 	buffer->offset = offset;
 	return 0;
+}
+
+/* Lets a buffer bound to the allocation being freed go of it (a visit of drv_i915_object_each, BUG-244). */
+static void
+memory_unbind_buffer(
+	void *object,
+	void *argument)
+{
+	struct i915_gfx_buffer *buffer;
+	struct memory_unbind *unbind;
+
+	/* Only a buffer bound to that allocation. */
+	buffer = object;
+	unbind = argument;
+	if (buffer->memory != unbind->memory)
+		return;
+
+	/* No storage from here on. */
+	buffer->memory = NULL;
+	buffer->offset = 0U;
+	unbind->buffers++;
+}
+
+/* Lets an image bound to the allocation being freed go of it (a visit of drv_i915_object_each, BUG-244). */
+static void
+memory_unbind_image(
+	void *object,
+	void *argument)
+{
+	struct i915_gfx_image *image;
+	struct memory_unbind *unbind;
+
+	/* Only an image bound to that allocation. */
+	image = object;
+	unbind = argument;
+	if (image->memory != unbind->memory)
+		return;
+
+	/* No storage from here on. */
+	image->memory = NULL;
+	image->offset = 0U;
+	unbind->images++;
 }
 
 /* Puts a published allocation at the head of its device's list, where blob attach finds it. */
