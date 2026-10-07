@@ -39,8 +39,10 @@
  * the user's password since it started and turns it off after five wrong
  * ones.
  *
- * The screen is the blurred wallpaper with the time and the date at the
- * top, a frosted card in the middle with the users (the accounts with a uid
+ * The screen is the blurred wallpaper with the time, large, and the date
+ * above the middle (ws187-p001, lock-clock.c: sized by the output's
+ * shorter side, clear of the card, on a portrait output too), a frosted
+ * card in the middle with the users (the accounts with a uid
  * of 1000 or more and a login shell, or root when there are none), the
  * selected user's password field and the Log In button, and Restart and
  * Shut Down at the bottom right.  The password is shown as dots, sent to
@@ -53,6 +55,7 @@
 
 #include "language.h"
 #include "glass.h"
+#include "lock-clock.h"
 
 #include "userland/desktop/libkeiland-backend/keiland-backend.h"
 
@@ -104,6 +107,16 @@
 /* The dots of the power screen's spinner, and the time one turn takes. */
 #define GREETER_SPINNER_DOTS	8U
 #define GREETER_SPINNER_MS	1200U
+
+/*
+ * The pale glow behind the clock: how far it reaches past the wider line
+ * across and past the two lines down, how far its soft edge spreads, and
+ * its corner (pixels).
+ */
+#define GREETER_GLOW_ACROSS	32
+#define GREETER_GLOW_DOWN	16
+#define GREETER_GLOW_SPREAD	70
+#define GREETER_GLOW_RADIUS	52.0f
 
 /* The Kei mark's square at the bottom left, in pixels. */
 #define GREETER_BRAND_MARK	48
@@ -232,7 +245,7 @@ static int greeter_inside(const int32_t *rect, int32_t x, int32_t y);
 static void greeter_draw_card(struct kwl_server *server, VkCommandBuffer command, const struct greeter_layout *layout);
 static void greeter_draw_field(struct kwl_server *server, VkCommandBuffer command, const struct greeter_layout *layout);
 static void greeter_draw_button(struct kwl_server *server, VkCommandBuffer command, const int32_t *rect, const char *label, int strong);
-static void greeter_draw_clock(struct kwl_server *server, VkCommandBuffer command);
+static void greeter_draw_clock(struct kwl_server *server, VkCommandBuffer command, const struct greeter_layout *layout);
 static void greeter_draw_brand(struct kwl_server *server, VkCommandBuffer command);
 static void greeter_draw_centered(struct kwl_server *server, VkCommandBuffer command, enum glass_size size, int32_t middle, int32_t baseline, const char *text, int32_t limit, const float *color);
 static void greeter_select(struct kwl_server *server, unsigned user);
@@ -435,8 +448,8 @@ kwl_greeter_draw(
 	shape.opaque = 1.0f;
 	glass_shape_draw(server, command, &shape);
 
-	/* The time and the date. */
-	greeter_draw_clock(server, command);
+	/* The time and the date, above the card. */
+	greeter_draw_clock(server, command, &layout);
 
 	/* The Kei mark and word at the bottom left (ws035-p108). */
 	greeter_draw_brand(server, command);
@@ -1100,40 +1113,70 @@ greeter_draw_brand(
 	glass_draw_text(server, command, SIZE_ICON, x + GREETER_BRAND_MARK + 8, y + GREETER_BRAND_MARK - 12, "Kei", 200, slate);
 }
 
-/* Draws the time, large, and the date under it, at the top of the output. */
+/*
+ * Draws the time, large, and the date under it, above the middle of the
+ * output and clear of the card (ws187-p001, lock-clock.c).
+ */
 static void
 greeter_draw_clock(
 	struct kwl_server *server,
-	VkCommandBuffer command)
+	VkCommandBuffer command,
+	const struct greeter_layout *layout)
 {
 	static const float slate[4] = { 0.15f, 0.21f, 0.29f, 1.0f };
 	static const float soft[4] = { 0.20f, 0.27f, 0.36f, 0.88f };
+	struct kwl_lock_clock clock;
 	struct glass_shape shape;
 	char text[64];
+	char date[64];
 	struct tm local;
 	time_t now;
 	int32_t middle;
-	int32_t top;
+	int32_t time_width;
+	int32_t date_width;
+	int32_t glow_width;
+	int large_error;
 
-	/* The time now. */
+	/* The time and the date now. */
 	now = time(NULL);
 	memset(&local, 0, sizeof(local));
 	(void)localtime_r(&now, &local);
+	(void)strftime(text, sizeof(text), "%H:%M", &local);
+	kwl_language_date(&local, KWL_LANGUAGE_DATE_LONG, date, sizeof(date));
+
+	/* Where the two lines go and how large the time is, for this output and this card. */
 	middle = (int32_t)server->width / 2;
-	top = (int32_t)server->height / 7;
+	kwl_lock_clock_layout((int32_t)server->width, (int32_t)server->height, layout->card[1], &clock);
+
+	/* The time's digits at that size, or the atlas's clock size when they cannot be made. */
+	large_error = glass_large_prepare(server, (unsigned)clock.pixels);
+	time_width = glass_text_width(server, SIZE_CLOCK, text);
+	if (large_error == 0)
+		time_width = glass_large_text_width(server, text);
+	date_width = glass_text_width(server, SIZE_SEARCH, date);
+
+	/* The glow is as wide as the wider line. */
+	glow_width = time_width;
+	if (date_width > glow_width)
+		glow_width = date_width;
 
 	/*
 	 * A soft pale glow behind the time and the date: a local scrim that
 	 * keeps the slate words readable on a bright or busy wallpaper without
 	 * darkening the screen (ws035-p109).
 	 */
-	glass_shape_init(&shape, (float)(middle - 190), (float)top - 10.0f, 380.0f, 104.0f);
-	shape.quad[0] -= 70.0f;
-	shape.quad[1] -= 70.0f;
-	shape.quad[2] += 140.0f;
-	shape.quad[3] += 140.0f;
+	glass_shape_init(
+		&shape,
+		(float)(middle - glow_width / 2 - GREETER_GLOW_ACROSS),
+		(float)(clock.top - GREETER_GLOW_DOWN),
+		(float)(glow_width + 2 * GREETER_GLOW_ACROSS),
+		(float)(clock.bottom - clock.top + 2 * GREETER_GLOW_DOWN));
+	shape.quad[0] -= (float)GREETER_GLOW_SPREAD;
+	shape.quad[1] -= (float)GREETER_GLOW_SPREAD;
+	shape.quad[2] += (float)(2 * GREETER_GLOW_SPREAD);
+	shape.quad[3] += (float)(2 * GREETER_GLOW_SPREAD);
 	shape.mode = MODE_SHADOW;
-	shape.radius = 52.0f;
+	shape.radius = GREETER_GLOW_RADIUS;
 	shape.soft = 60.0f;
 	shape.color[0] = 0.97f;
 	shape.color[1] = 0.99f;
@@ -1141,13 +1184,15 @@ greeter_draw_clock(
 	shape.color[3] = 0.42f;
 	glass_shape_draw(server, command, &shape);
 
-	/* The time. */
-	(void)strftime(text, sizeof(text), "%H:%M", &local);
-	greeter_draw_centered(server, command, SIZE_ICON, middle, top + 36, text, (int32_t)server->width, slate);
+	/* The time, centred on its baseline. */
+	if (large_error == 0) {
+		glass_draw_large_text(server, command, middle - time_width / 2, clock.time_baseline, text, slate);
+	} else {
+		greeter_draw_centered(server, command, SIZE_CLOCK, middle, clock.time_baseline, text, (int32_t)server->width, slate);
+	}
 
-	/* The date. */
-	kwl_language_date(&local, KWL_LANGUAGE_DATE_LONG, text, sizeof(text));
-	greeter_draw_centered(server, command, SIZE_SEARCH, middle, top + 76, text, (int32_t)server->width, soft);
+	/* The date under it. */
+	greeter_draw_centered(server, command, SIZE_SEARCH, middle, clock.date_baseline, date, (int32_t)server->width, soft);
 }
 
 /* Draws a line of text centred on a point of its baseline, no wider than limit. */

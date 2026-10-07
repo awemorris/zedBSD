@@ -98,6 +98,19 @@
 /* The bands an application tile's reflection on App Home's floor fades out in (ws099-p035b). */
 #define GLASS_REFLECTION_SLICES	8U
 
+/*
+ * The large digits of the lock screen's clock (ws187-p001), in an image of
+ * their own at the one size the clock asks for: the image's size, its
+ * glyphs (the ten digits, then the colon), and the largest size and glyph
+ * box (pixels) they are drawn at.
+ */
+#define GLASS_LARGE_WIDTH	2048U
+#define GLASS_LARGE_HEIGHT	256U
+#define GLASS_LARGE_GLYPHS	11U
+#define GLASS_LARGE_COLON	10U
+#define GLASS_LARGE_PIXELS_MOST	240U
+#define GLASS_LARGE_SIDE	256U
+
 /* A cached glyph's cell in the atlas, in pixels a side, and the most cells there are. */
 #define GLASS_CELL		48U
 #define GLASS_CELLS		512U
@@ -199,7 +212,10 @@ struct glass_cached {
  * other characters; the fonts stay open (with their files' bytes) to
  * render the cache's glyphs.  cache_top is the atlas row the cache starts
  * at, cache_count the cells that fit under it, clock the count of cached
- * glyphs drawn (the cells' use is ordered by it).
+ * glyphs drawn (the cells' use is ordered by it).  The large digits of the
+ * lock screen's clock (ws187-p001) have their image, made when the clock
+ * first asks, and are drawn again only when it asks for another size
+ * (large_pixels, 0 while none is drawn).
  */
 struct kwl_glass {
 	struct kwl_import wallpaper;
@@ -224,6 +240,9 @@ struct kwl_glass {
 	uint32_t cache_top;
 	unsigned cache_count;
 	uint64_t clock;
+	struct kwl_import large;
+	struct glass_glyph large_glyphs[GLASS_LARGE_GLYPHS];
+	unsigned large_pixels;
 };
 
 static const unsigned glass_pixels[GLASS_SIZES] = { 14U, 15U, 20U, 36U, 24U, 64U };
@@ -252,6 +271,8 @@ static int atlas_fill(struct kwl_glass *glass, struct truetype_face *face);
 static int atlas_icons(struct kwl_glass *glass, uint32_t *pen_y);
 static int atlas_mark(struct kwl_glass *glass, uint32_t *pen_y);
 static int tiles_create(struct kwl_server *server, struct kwl_glass *glass);
+static int large_fill(struct kwl_glass *glass, struct truetype_face *face, unsigned pixels);
+static const struct glass_glyph *large_glyph_of(struct kwl_glass *glass, uint32_t character);
 static void atlas_put(struct kwl_glass *glass, const uint8_t *bitmap, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 static int glass_open_face(struct kwl_glass *glass, const char *path);
 static const struct glass_glyph *glass_glyph_of(struct kwl_glass *glass, enum glass_size size, uint32_t codepoint);
@@ -386,6 +407,7 @@ kwl_glass_close(
 	kwl_host_image_release(server->compose, &glass->blurred);
 	kwl_host_image_release(server->compose, &glass->atlas);
 	kwl_host_image_release(server->compose, &glass->tiles);
+	kwl_host_image_release(server->compose, &glass->large);
 	free(glass);
 	server->compose->glass = NULL;
 }
@@ -1997,6 +2019,130 @@ glass_glyph_advance(
 }
 
 /*
+ * Makes the large digits (the digits and the colon of the lock screen's
+ * clock, ws187-p001) at a size in pixels, unless they are at that size
+ * already.  Returns 0, or an errno value: ENODEV without the look's text,
+ * EINVAL for a size past GLASS_LARGE_PIXELS_MOST (the caller then draws an
+ * atlas size instead).
+ */
+int
+glass_large_prepare(
+	struct kwl_server *server,
+	unsigned pixels)
+{
+	struct kwl_glass *glass;
+	VkResult result;
+	int error;
+
+	/* Nothing without the look's text. */
+	glass = server->compose->glass;
+	if (glass == NULL || !glass->text)
+		return ENODEV;
+
+	/* A size the image has no room for is refused. */
+	if (pixels == 0U || pixels > GLASS_LARGE_PIXELS_MOST)
+		return EINVAL;
+
+	/* The digits are at that size already (the usual frame). */
+	if (glass->large_pixels == pixels)
+		return 0;
+
+	/* The image the first time; later the frames in flight that read it end before it is drawn again. */
+	if (glass->large.image == VK_NULL_HANDLE) {
+		result = kwl_host_image_create(server->compose, GLASS_LARGE_WIDTH, GLASS_LARGE_HEIGHT, server->compose->sampler, &glass->large);
+		if (result != VK_SUCCESS)
+			return EIO;
+	} else {
+		(void)vkDeviceWaitIdle(server->compose->device);
+	}
+
+	/* The digits drawn at the size; none is usable until they all are. */
+	glass->large_pixels = 0U;
+	error = large_fill(glass, glass->faces[0], pixels);
+	if (error != 0) {
+		printf("KWL GLASS large pixels=%u errno=%d\n", pixels, error);
+		return error;
+	}
+
+	/* Succeeded: the digits are at the size. */
+	glass->large_pixels = pixels;
+	printf("KWL GLASS large pixels=%u\n", pixels);
+	return 0;
+}
+
+/* The width in pixels of a line of the large digits (0 while none are made; other characters count nothing). */
+int32_t
+glass_large_text_width(
+	struct kwl_server *server,
+	const char *text)
+{
+	const struct glass_glyph *glyph;
+	struct kwl_glass *glass;
+	int32_t width;
+
+	/* Nothing while the digits are not made. */
+	glass = server->compose->glass;
+	width = 0;
+	if (glass == NULL || glass->large_pixels == 0U)
+		return 0;
+
+	/* The sum of the advances of the characters there are large glyphs for. */
+	while (*text != '\0') {
+		glyph = large_glyph_of(glass, (uint32_t)(unsigned char)*text);
+		text++;
+		if (glyph != NULL)
+			width += glyph->advance;
+	}
+
+	/* Succeeded. */
+	return width;
+}
+
+/* Draws a line of the large digits from x on a baseline (other characters are passed over). */
+void
+glass_draw_large_text(
+	struct kwl_server *server,
+	VkCommandBuffer command,
+	int32_t x,
+	int32_t baseline,
+	const char *text,
+	const float *color)
+{
+	const struct glass_glyph *glyph;
+	struct glass_shape shape;
+	struct kwl_glass *glass;
+
+	/* Nothing while the digits are not made. */
+	glass = server->compose->glass;
+	if (glass == NULL || glass->large_pixels == 0U)
+		return;
+
+	/* Each character there is a large glyph for, the pen moving past it. */
+	while (*text != '\0') {
+		glyph = large_glyph_of(glass, (uint32_t)(unsigned char)*text);
+		text++;
+		if (glyph == NULL)
+			continue;
+
+		/* Its coverage in the colour, one to one with the image. */
+		if (glyph->width != 0U && glyph->height != 0U) {
+			glass_shape_init(&shape, (float)(x + glyph->left), (float)(baseline - glyph->top), (float)glyph->width, (float)glyph->height);
+			shape.mode = MODE_TEXT;
+			shape.uv[0] = (float)glyph->x / (float)GLASS_LARGE_WIDTH;
+			shape.uv[1] = (float)glyph->y / (float)GLASS_LARGE_HEIGHT;
+			shape.uv[2] = (float)(glyph->x + glyph->width) / (float)GLASS_LARGE_WIDTH;
+			shape.uv[3] = (float)(glyph->y + glyph->height) / (float)GLASS_LARGE_HEIGHT;
+			memcpy(shape.color, color, sizeof(shape.color));
+			shape.set = glass->large.set;
+			glass_shape_draw(server, command, &shape);
+		}
+
+		/* The pen after it. */
+		x += glyph->advance;
+	}
+}
+
+/*
  * Draws a titlebar icon (GLASS_ICON_* before GLASS_ICON_FIRST_APP) in a
  * square of a size in pixels at (x, y), from the atlas's icon of that size
  * or of the nearest one scaled.  The applications' pictures are drawn on
@@ -2459,6 +2605,109 @@ tiles_create(
 	/* Succeeded: the tiles are drawn. */
 	glass->tiles_ready = 1U;
 	return 0;
+}
+
+/*
+ * Draws the large digits and the colon at a size into their image, side by
+ * side along its top, a column apart so that sampling keeps to one glyph;
+ * returns 0, ENOSPC when a glyph does not fit, or the font's errno value.
+ */
+static int
+large_fill(
+	struct kwl_glass *glass,
+	struct truetype_face *face,
+	unsigned pixels)
+{
+	static uint8_t bitmap[GLASS_LARGE_SIDE * GLASS_LARGE_SIDE];
+	struct truetype_glyph metrics;
+	struct glass_glyph *glyph;
+	uint32_t *row;
+	uint32_t codepoint;
+	uint32_t pen_x;
+	uint32_t x;
+	uint32_t y;
+	uint32_t value;
+	unsigned index;
+	unsigned id;
+	int error;
+
+	/* The image transparent, no glyph known, and the face at the size (the cache sets its own size again). */
+	memset(glass->large.map, 0, glass->large.row_pitch * GLASS_LARGE_HEIGHT);
+	memset(glass->large_glyphs, 0, sizeof(glass->large_glyphs));
+	error = truetype_set_pixel_size(face, pixels);
+	if (error != 0)
+		return EINVAL;
+
+	/* Each glyph from the left. */
+	pen_x = 0;
+	for (index = 0; index < GLASS_LARGE_GLYPHS; index++) {
+		/* Its character: a digit, or the colon last. */
+		codepoint = (uint32_t)'0' + index;
+		if (index == GLASS_LARGE_COLON)
+			codepoint = ':';
+		id = truetype_glyph_index(face, codepoint);
+
+		/* Its box. */
+		error = truetype_glyph_metrics(face, id, &metrics);
+		if (error != 0)
+			return error;
+
+		/* The bitmap must hold it. */
+		if (metrics.width > GLASS_LARGE_SIDE || metrics.height > GLASS_LARGE_SIDE)
+			return ENOSPC;
+
+		/* The image must hold it. */
+		if (metrics.height > GLASS_LARGE_HEIGHT || pen_x + metrics.width > GLASS_LARGE_WIDTH)
+			return ENOSPC;
+
+		/* Its place and metrics. */
+		glyph = &glass->large_glyphs[index];
+		glyph->x = pen_x;
+		glyph->y = 0;
+		glyph->width = metrics.width;
+		glyph->height = metrics.height;
+		glyph->left = metrics.left;
+		glyph->top = metrics.top;
+		glyph->advance = metrics.advance;
+
+		/* Its coverage as premultiplied white. */
+		if (metrics.width != 0U && metrics.height != 0U) {
+			error = truetype_render_glyph(face, id, &metrics, bitmap, metrics.width, sizeof(bitmap));
+			if (error != 0)
+				return error;
+			for (y = 0; y < metrics.height; y++) {
+				row = (uint32_t *)((unsigned char *)glass->large.map + (size_t)y * glass->large.row_pitch);
+				for (x = 0; x < metrics.width; x++) {
+					value = bitmap[y * metrics.width + x];
+					row[pen_x + x] = (value << 24) | (value << 16) | (value << 8) | value;
+				}
+			}
+		}
+
+		/* The pen moves past it and a clear column. */
+		pen_x += metrics.width + 1U;
+	}
+
+	/* Succeeded: every glyph is drawn. */
+	return 0;
+}
+
+/* Gives the large glyph of a character: a digit or the colon (NULL for any other). */
+static const struct glass_glyph *
+large_glyph_of(
+	struct kwl_glass *glass,
+	uint32_t character)
+{
+	/* The colon, after the digits. */
+	if (character == ':')
+		return &glass->large_glyphs[GLASS_LARGE_COLON];
+
+	/* Anything but a digit has none. */
+	if (character < '0' || character > '9')
+		return NULL;
+
+	/* Succeeded: the digit's glyph. */
+	return &glass->large_glyphs[character - '0'];
 }
 
 /*
