@@ -113,8 +113,11 @@ struct usb_bt_pipe {
 /*
  * One controller.
  *
- * lock guards work, stopping, paused, quiesced, bootloader and the pipes'
- * armed and dead.  stopping tells the worker to leave (the detach);
+ * lock guards work, stopping, paused, quiesced, bootloader, submitting and
+ * the pipes' armed and dead.  stopping tells the worker to leave (the
+ * detach) and admits no more submissions; submitting counts the
+ * submissions admitted before it and still under way, which the detach
+ * waits out before it cancels the transfers;
  * paused keeps the transfers from being submitted while the reset runs,
  * and quiesced is the worker's answer that none is submitted and nothing
  * is held.  bootloader is the path the class last set; the worker reads
@@ -132,6 +135,7 @@ struct usb_bt {
 	unsigned paused;
 	unsigned quiesced;
 	unsigned bootloader;
+	unsigned submitting;
 	struct thread *worker;
 	uint8_t *out;
 	char name[BT_TEXT_MAX];
@@ -502,15 +506,30 @@ usb_bt_stop_transfers(
 {
 	enum drv_usb_urb_status status;
 	unsigned long irq;
+	unsigned submitting;
 	unsigned index;
 	int error;
 
-	/* stopping tells the worker to leave and keeps it from submitting again. */
+	/* stopping tells the worker to leave and admits no more submissions. */
 	irq = spin_lock_irqsave(&bt->lock);
 
 	bt->stopping = 1U;
 
 	spin_unlock_irqrestore(&bt->lock, irq);
+
+	/* A submission admitted just before is waited out, so its transfer is the one cancelled below. */
+	for (;;) {
+		irq = spin_lock_irqsave(&bt->lock);
+
+		submitting = bt->submitting;
+
+		spin_unlock_irqrestore(&bt->lock, irq);
+
+		/* None under way: every transfer that will ever be submitted is. */
+		if (submitting == 0U)
+			break;
+		sched_yield();
+	}
 
 	/* Each pipe's transfer is cancelled while submitted, then drained. */
 	for (index = 0U; index < USB_BT_PIPES; index++) {
@@ -807,12 +826,17 @@ usb_bt_arm(
 	int admitted;
 	int error;
 
-	/* armed is taken here, so that the reset sees a transfer about to be submitted. */
+	/*
+	 * armed is taken here, so that the reset sees a transfer about to be
+	 * submitted; submitting, so that the detach waits for the submission
+	 * before it cancels.
+	 */
 	admitted = 0;
 	irq = spin_lock_irqsave(&bt->lock);
 
 	if (!bt->stopping && !bt->paused && !pipe->armed && !pipe->dead) {
 		pipe->armed = 1U;
+		bt->submitting++;
 		admitted = 1;
 	}
 
@@ -827,6 +851,13 @@ usb_bt_arm(
 	    usb_bt_completion, bt);
 	if (error == 0)
 		error = drv_usb_urb_submit(pipe->urb);
+
+	/* The submission is over, submitted or not. */
+	irq = spin_lock_irqsave(&bt->lock);
+
+	bt->submitting--;
+
+	spin_unlock_irqrestore(&bt->lock, irq);
 
 	/* A transfer that could not be submitted gives the pipe up. */
 	if (error != 0) {
