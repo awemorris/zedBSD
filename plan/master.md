@@ -37,6 +37,7 @@
 ### ユーザーの未決の判断
 
 <!-- master:open-decisions:start -->
+- **BUG-224**（touchpad の上端から 2 本指で下 swipe で最大化 → 窓）: 2026-10-07 にその gesture を App Home を開く操作に変えたので、superseded で閉じるか（P2 の案）、別の gesture を立てるか。
 - **WS084 の 10 回の reboot（素の起動）**: ユーザーが zedBSD で起動する時。
 - WS153 U2〜U15 はユーザーが検討中（聞かない）。
 - （解決 2026-10-08）WS005（ネットワークと WiFi）: ユーザー「記録のミス、とっくに完了」→ completed。
