@@ -40,7 +40,7 @@ HID の経路は p002〜p005、利用者に見える形は p006。
 | [ws143-p001](phase001/phase.md) | 調査と設計（device・firmware・HCI・profile の範囲・desktop の経路・試験の方法） | in-progress（cleared の提案、q860） | — |
 | [ws143-p002](phase002/phase.md) | 5330 の descriptor と版を T1 で取る。kernel の `bt-usb`（普通と bootloader の経路、寿命、境界、backpressure）と `/dev/btN`（`include/uapi/bluetooth.h`、D2）。resume は `/dev/system` の POWER の `sleep.end` を使い、UAPI は足さない（詳細設計 §1）。試験の道具 `bt-probe`、試験の kernel の loopback の controller。host の試験（組み直しと境界、悪い device、取り外し） | test-wait（q860、P2 2026-10-08: review の反映まで済み。T1 の bt-loopback-p002.sh と、5330 の passthrough（T1-378 と一緒）を待つ） | p001 |
 | [ws143-p003](phase003/phase.md) | firmware の package `intelbt`、bluetoothd の transport・firmware の load（§3）・HCI core・scan、CLI `bt show`・`bt scan`、Read Local Supported Commands の記録。T1 の passthrough で load と scan | in-progress（q878-i01 P2: intelbt 以外を実装・host 試験済み、QEMU は T1。i02 は intelbt と 5330（D13）） | p002 |
-| ws143-p004 | L2CAP、SSP の event、LE の SMP（D10）、暗号（D5 b1、無ければ b2）、鍵の保存、特権の分離（D16 a）、`_bluetooth` の account（D17）、socket の口の権限（D8） | planned | p003 |
+| [ws143-p004](phase004/phase.md) | L2CAP、SSP の event、LE の SMP（D10）、暗号（D5 b1、無ければ b2）、鍵の保存、特権の分離（D16 a）、`_bluetooth` の account（D17）、socket の口の権限（D8） | uncleared（q880-i01: 暗号・ACL・L2CAP・SMP・鍵の部品と host 試験まで。design-reviewer の Blocking 6 を次の attempt で。Q4 は判断待ち） | p003 |
 | ws143-p005 | usb-hid の glue の共有の module への refactor と USB の回帰、`/dev/hid-host`（D3）、hid-report.c の fuzz、SDP・GATT client、HID host（BR/EDR と HOGP）、再接続、切断で key を離す | planned | p004 |
 | ws143-p006 | desktop: backend の口、zedBSD の backend、API と protocol の版、Settings の頁、system bar、pairing の確認の窓 | planned | p005 |
 | ws143-p007 | Linux の backend（D-Bus の拡張、BlueZ）、FreeBSD の未対応の表示 | planned | p006 |
