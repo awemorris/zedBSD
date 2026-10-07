@@ -851,6 +851,10 @@ event_loop(
 		waiting = kwl_compose_waiting(server);
 		if (waiting)
 			timeout = 2;
+
+		/* Gone clients' buffers waiting to be released: the input is looked at, then one more is released (BUG-239). */
+		if (server->retiring != NULL)
+			timeout = 0;
 		index = 1;
 		for (client = server->clients; client != NULL; client = client->next) {
 			/* Retain the snapshot identity while suppressing new input on fatal connections. */
@@ -1022,6 +1026,9 @@ event_loop(
 		/* The scheduler takes the committed images and draws a frame when one is due. */
 		kwl_schedule(server);
 
+		/* One gone client's buffer released after the frame, so that the input waits for one release at most (BUG-239). */
+		(void)kwl_retire_tick(server);
+
 		/*
 		 * The presentation queued frame callbacks and buffer releases; they
 		 * leave now, not after the next poll, which would otherwise hold a
@@ -1070,6 +1077,9 @@ service_cleanup(
 	/* Each client cleanup closes both user-received and still-kernel-queued rights. */
 	while (server->clients != NULL)
 		kwl_client_destroy(server->clients);
+
+	/* The gone clients' buffers still waiting are released before the device (BUG-239). */
+	kwl_retire_flush(server);
 
 	/* The swapchain and the Vulkan device go after every buffer's image. */
 	kwl_compose_close(server);

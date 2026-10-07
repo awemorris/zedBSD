@@ -116,17 +116,31 @@ kwl_import_destroy(
 	if (buffer->import == NULL)
 		return;
 
-	/* The Vulkan objects, then the record. */
+	/* The Vulkan objects of the client's server, then the record. */
 	compose = buffer->client->server->compose;
+	kwl_import_destroy_with(compose, buffer);
+}
+
+/*
+ * Releases a buffer's import through a compositor given (a gone client's
+ * buffer, whose client record is no longer there, BUG-239).
+ */
+void
+kwl_import_destroy_with(
+	struct kwl_compose *compose,
+	struct kwl_object *buffer)
+{
+	/* A buffer without an import has nothing to release. */
+	if (buffer->import == NULL)
+		return;
+
+	/* The Vulkan objects, then the record. */
 	if (compose != NULL)
 		import_release(compose, buffer->import);
 
 	/* Retires the buffer-owned record after its Vulkan objects are released. */
 	free(buffer->import);
 	buffer->import = NULL;
-
-	/* Succeeded: the buffer owns no imported Vulkan object. */
-	return;
 }
 
 /*
