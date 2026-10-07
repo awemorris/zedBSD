@@ -37,7 +37,7 @@ refuse() {
 
 # The stick: FAT without partitions, a text and a script.
 stick="$out/stick.img"
-rm -f "$stick"
+: > "$stick"   # emptied, not removed (deleting is Q1's step, 2026-10-07)
 truncate -s 16M "$stick"
 mformat -i "$stick" -T 32768 -h 2 -s 32 -v USBSTICK ::
 printf 'hi\n' > "$out/hello.txt"
