@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws187-p002 -->
 # ws187-p002: lock の画面の解除の操作（下部からの上へのスワイプ・wheel の上）と猶予
 
-Status: test-wait（T1 への依頼を 2026-10-08 Q1 へ。番号は Q1 が付ける）。in-progress（q864 の続き、P2、2026-10-08: 実装・build・host 試験まで。猶予の既定（案 5 分）はユーザーに確認中。QEMU は p003 の後にまとめて T1）
+Status: test-wait（T1 への依頼を 2026-10-08 Q1 へ。番号は Q1 が付ける）。実装・build・host 試験まで（q864 の続き、P2、2026-10-08）。猶予は 5 分、利用者の Sleep は手動（2026-10-08 ユーザーの決定、反映済み）
 Disposition: normal
 Parent: [WS187](../ws.md)
 Queue: q864（Q1 2026-10-08「p001（大きな時計）はそのまま続け、続けて p002・p003 も q864 の続きとして承認済み」）
@@ -32,10 +32,14 @@ Queue: q864（Q1 2026-10-08「p001（大きな時計）はそのまま続け、�
 
 ### 猶予
 
-- 自動の lock（reason が `lid`・`sleep`・`idle`）から `LOCK_GRACE_SECONDS` 秒の内は、スワイプだけで認証なしに解除する。
-- 手動の lock（`key` の Super+L、`home` の Lock Screen）と、上の一覧に無い reason は、常に認証する（知らない reason は安全側に倒す）。
+- 自動の lock（reason が `lid`・`idle`・`sleep-lid`・`sleep-idle`・`sleep-rest`）から `LOCK_GRACE_SECONDS` 秒の内は、スワイプだけで認証なしに解除する。
+- 手動の lock（`key` の Super+L、`home` の Lock Screen、利用者が選んだ Sleep の `sleep-sleep-button`・`sleep-app`）と、上の一覧に無い reason は、常に認証する（知らない reason は安全側に倒す）。
 - 時間は wall clock（`time()`）で測る。monotonic clock は sleep の間に進まないことがあり、長く sleep した後に猶予の内と誤ることを防ぐ。時計が戻った時（now < locked_at）は猶予の外とする。
-- **既定の時間の案: 5 分（300 秒）**。ユーザーに確認中（Q1、2026-10-08）。Settings で変える形は WS148。
+- **既定の時間: 5 分（300 秒）**（2026-10-08 ユーザーの決定、Q1 経由。Settings で変える形は WS148）。
+- **利用者が選んだ Sleep は手動の lock と同じ**（2026-10-08 ユーザーの決定「手動で Sleep を選んだ時は猶予なし」）。sleep.c の lock の reason は `sleep-<via>` にした。
+  - 自動（猶予あり）: `lid`・`idle`・`sleep-lid`・`sleep-idle`・`sleep-rest`（利用者のでない起床の後の休み）。
+  - 手動（常に認証）: `key`・`home`・`sleep-sleep-button`（sleep の key）・`sleep-app`（App Home や電源のメニューなど、kl_system_power の SUSPEND）、それに知らない reason。
+  - commit は下の「決定の反映」。
 
 ## 実装（2026-10-08、P2）
 
@@ -68,3 +72,11 @@ Queue: q864（Q1 2026-10-08「p001（大きな時計）はそのまま続け、�
 - build: zedBSD の compositor・keiland-linux、warning 0。
 - QEMU（T1、p003 の後にまとめて）: 縦長・横長の lock の PNG（時計と案内だけ → swipe の後の card）、mouse の wheel での解除、touchscreen の注入のスワイプ（`plan/tools/` の注入の道具がある時）。
 - 実機（ユーザー）: touchpad の 2 本指・押し込みのドラッグ、蓋を閉じて開けた後の猶予。
+
+## 決定の反映（2026-10-08、P2）
+
+- `userland/desktop/wayland/sleep.c`: sleep の前の lock の reason を `sleep-<via>`（`kwl_sleep_via_name`）にした。
+- `userland/desktop/wayland/lock-swipe.c`: 自動の reason を `lid`・`idle`・`sleep-lid`・`sleep-idle`・`sleep-rest` にした（`sleep` を外した）。
+- `plan/ws187/tests/host-lock-swipe.c`: sleep の key・app の sleep は手動、lid・idle・rest の sleep は自動、の検査を足した。ok（45 checks）。
+- `KWL LOCK locked reason=sleep` を待つ試験は無い（`grep -rn` で確かめた。`reason=idle`・`reason=home` だけ）。
+

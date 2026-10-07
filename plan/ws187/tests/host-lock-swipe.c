@@ -140,9 +140,14 @@ main(void)
 	check(kwl_lock_reason_manual("home"), "App Home's Lock Screen is manual");
 	check(kwl_lock_reason_manual("unknown"), "an unknown reason is manual");
 	check(kwl_lock_reason_manual(NULL), "no reason is manual");
+	check(kwl_lock_reason_manual("sleep-sleep-button"), "the sleep button is manual");
+	check(kwl_lock_reason_manual("sleep-app"), "a Sleep chosen in App Home or an application is manual");
+	check(kwl_lock_reason_manual("sleep"), "a sleep of no known cause is manual");
 	check(!kwl_lock_reason_manual("lid"), "the lid is not");
-	check(!kwl_lock_reason_manual("sleep"), "sleep is not");
 	check(!kwl_lock_reason_manual("idle"), "idleness is not");
+	check(!kwl_lock_reason_manual("sleep-lid"), "the lid's sleep is not");
+	check(!kwl_lock_reason_manual("sleep-idle"), "an idle sleep is not");
+	check(!kwl_lock_reason_manual("sleep-rest"), "the rest after a wake is not");
 
 	/* 9. The grace: none for a manual lock, five minutes for the session's, none when the clock went back. */
 	check(!kwl_lock_grace(1U, 1000, 1001, GRACE), "a manual lock has no grace");
