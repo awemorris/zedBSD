@@ -6,3 +6,4 @@ _passkey:x:79:
 _bluetooth:x:80:
 bluetooth:x:81:
 kei:x:1000:
+btuser:x:1001:

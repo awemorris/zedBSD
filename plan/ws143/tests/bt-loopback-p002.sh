@@ -8,7 +8,7 @@
 #     in a full queue at its place, the controller withdrawn under a waiting read (ENODEV, POLLHUP, GET_INFO still
 #     given) and published again as bt0 ("BT LOOPBACK PASS").
 #  3. bt-probe (the plain probe) answers on the loopback controller ("BT PASS").
-#  4. A user that is not root (kei, else nobody) cannot open it.
+#  4. A user that is not root (the test account btuser of build-bt-image.sh, else kei) cannot open it.
 # PASS: every "ok" line and the last line bt-loopback-p002: PASS.
 #
 #   (a guest up through plan/tools/guest/guest.py, e.g. plan/tools/files/files-guest.sh start IMAGE)
@@ -25,19 +25,23 @@ expect() {
 # 1. The node, and no other.
 expect "/dev/bt0 is a character device" "$(guest 'test -c /dev/bt0 && echo yes' | tail -1)" yes
 expect "it is root's alone" "$(guest 'ls -l /dev/bt0' | tail -1 | cut -c1-10)" "crw-------"
-expect "the kernel published the loopback controller" "$(guest 'dmesg | grep -c "bt-hci: /dev/bt0: Loopback Bluetooth controller"' | tail -1)" 1
+# (counts of the kernel's log are taken as differences from a mark, so an earlier test's lines do not count, T1-402)
+published=$(guest 'dmesg | grep -c "bt-hci: /dev/bt0: Loopback Bluetooth controller"' | tail -1)
+expect "the kernel published the loopback controller" "$([ "${published:-0}" -ge 1 ] && echo yes)" yes
 expect "no other controller's node" "$(guest 'test -e /dev/bt1 && echo yes || echo no' | tail -1)" no
 expect "no USB controller attached" "$(guest 'dmesg | grep -c "usb-bt: "' | tail -1)" 0
 
 # 2. The class's test.
+mark=$(guest 'dmesg | grep -c "bt-loopback: test controller published again"' | tail -1)
 guest '/bin/bt-probe -L' | tee /dev/stderr | grep -q '^BT LOOPBACK PASS$' && echo "ok: bt-probe -L" || { echo "FAIL: bt-probe -L"; status=1; }
-expect "the withdrawal and the return were logged" "$(guest 'dmesg | grep -c "bt-loopback: test controller published again"' | tail -1)" 1
+after=$(guest 'dmesg | grep -c "bt-loopback: test controller published again"' | tail -1)
+expect "the withdrawal and the return were logged" "$((${after:-0} - ${mark:-0}))" 1
 
 # 3. The plain probe.
 guest '/bin/bt-probe -f /dev/bt0' | tee /dev/stderr | grep -q '^BT PASS$' && echo "ok: bt-probe" || { echo "FAIL: bt-probe"; status=1; }
 
 # 4. Not for another user.
-user=$(guest 'grep -q "^kei:" /etc/passwd && echo kei || echo nobody' | tail -1)
+user=$(guest 'grep -q "^btuser:" /etc/passwd && echo btuser || echo kei' | tail -1)
 guest "runas $user /bin/bt-probe -f /dev/bt0 2>&1; true" | grep -q 'FAIL step=open' && echo "ok: $user cannot open it" || { echo "FAIL: $user could open it (or runas is missing)"; status=1; }
 
 [ $status = 0 ] && echo "bt-loopback-p002: PASS" || echo "bt-loopback-p002: FAIL"
