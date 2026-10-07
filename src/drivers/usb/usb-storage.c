@@ -1735,9 +1735,10 @@ storage_publish_disk(
  *
  * The boot scan of the disks publishes them for a disk that was there when the
  * kernel booted.  The pool is read without its reload exclusion: only this
- * disk's own records are compared, and only this storage's control worker
- * replaces or retires them, so a concurrent change elsewhere in the pool
- * cannot make the answer wrong for this disk.
+ * disk's own records are compared, and they change only by a reload or a
+ * retirement of this disk, which leaves the disk with a table or without its
+ * records, so a concurrent change elsewhere in the pool cannot make the
+ * answer wrong for this disk.
  */
 static int
 storage_partitions_published(
