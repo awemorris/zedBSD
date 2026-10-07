@@ -16,6 +16,7 @@
 
 #include "pipeline.h"
 #include "codec.h"
+#include "forget.h"
 #include "gfx.h"
 #include "internal.h"
 #include "object.h"
@@ -413,10 +414,11 @@ drv_i915_gfx_destroy_pipeline(
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* Unpublishes a known pipeline, releases its kernels and frees it. */
+	/* Unpublishes a known pipeline, lets the command buffers that bound it go of it (BUG-260), releases its kernels and frees it. */
 	pipeline = drv_i915_object_lookup(session, I915_VK_OBJ_PIPELINE, identity);
 	if (pipeline != NULL) {
 		drv_i915_object_remove(session, I915_VK_OBJ_PIPELINE, identity);
+		drv_i915_gfx_forget(session, I915_VK_OBJ_PIPELINE, pipeline);
 		drv_i915_gfx_pipeline_release(pipeline);
 		kern_free(pipeline);
 	}

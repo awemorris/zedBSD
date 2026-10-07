@@ -336,8 +336,13 @@ struct i915_gfx_buffer_view {
  * One VkDescriptorSet: what each binding of its layout was updated to.
  */
 struct i915_gfx_dset {
-	/* The layout the set was allocated with. */
+	/*
+	 * The layout the set was allocated with: a copy the set keeps
+	 * (layout_copy), since the application may destroy the layout while
+	 * the set is used (BUG-260); NULL for an unknown layout.
+	 */
 	struct i915_gfx_dsl *layout;
+	struct i915_gfx_dsl layout_copy;
 
 	/* The pool it was allocated from; the pool's destruction frees the set. */
 	void *pool;
