@@ -7,7 +7,7 @@
 #             (ZFILES DESKTOP place/ready), a picture (desktop.png)
 #   watch     a file added to ~/Desktop appears within a few seconds (items=6, added.png), and goes when it is removed
 #   input     click, arrow, Enter (the started program has no token), a double click on a folder (a new window), a
-#             rubber band (selected.png, folder.png, band.png)
+#             rubber band (selected.png, folder.png, band.png) and its frames' times (BUG-221)
 #   window    a Files window opens over the icons (window.png)
 #   saved     (ws094-p004) the layout file placed before the desktop starts puts notes.txt at column 2 row 3 (its saved
 #             place), the other items in the free cells (saved.png)
@@ -185,6 +185,9 @@ i=0; while ! grep -aq 'ZFILES READY' /tmp/zdesktop.log && [ \$i -lt 60 ]; do sle
 		pointer up sleep 500
 		expect_log /tmp/zdesktop.log 'ZFILES DESKTOP band start x=1100 y=16'
 		expect_log /tmp/zdesktop.log 'ZFILES DESKTOP band end first=0'
+		# BUG-221: the band's frames and their times (the band's frames draw only where it changed).
+		expect_log /tmp/zdesktop.log 'ZFILES DESKTOP band frames=[0-9]+ mean_ms=[0-9]+ longest_ms=[0-9]+ draw_ms=[0-9]+ present_ms=[0-9]+'
+		guest "grep 'DESKTOP band frames=' /tmp/zdesktop.log | tail -1"
 		keys '<esc>'
 		;;
 	window)
