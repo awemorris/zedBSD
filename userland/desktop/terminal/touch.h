@@ -8,14 +8,14 @@
 /*
  * The touch screen of the terminal (ws081-p011, plan/ws081/design.md
  * section 5): one finger (or two) scrolls the scrollback smoothly, a pixel
- * at a time, and a flick glides on (libkeiland's scroller; past the live
- * screen or the oldest line kept it stretches and springs back); a touch
- * catches it.  A tap is a click of the left button, a double tap selects a
- * word, and a long press holds the button there (TERMINAL_TOUCH_HOLD: the
- * main loop selects the word under the finger, or, on the selection, holds
- * a press that drags the selected text out, ws081-p014); the finger's drag
- * after it moves the pointer (the pointer's selection, fed with the presses
- * and motions made here).
+ * at a time, and a flick glides on (libkeiland's kl_scroll, ws090-p015;
+ * past the live screen or the oldest line kept it stretches and springs
+ * back); a touch catches it.  A tap is a click of the left button, a
+ * double tap selects a word, and a long press holds the button there
+ * (TERMINAL_TOUCH_HOLD: the main loop selects the word under the finger,
+ * or, on the selection, holds a press that drags the selected text out,
+ * ws081-p014); the finger's drag after it moves the pointer (the pointer's
+ * selection, fed with the presses and motions made here).
  *
  * Nothing here speaks Wayland or Vulkan: the window queues the wl_touch
  * events, the main loop hands them here with the screen's state each
@@ -37,8 +37,8 @@
 
 /*
  * A touch pad's two fingers (ws090-p019): a move of the scroll (x, y as a
- * wheel scrolls, surface pixels) and their lift, which libkeiland's
- * scroller turns into the same flight as a finger's on the screen.
+ * wheel scrolls, surface pixels) and their lift, which the scroll turns
+ * into the same flight as a finger's on the screen.
  */
 #define TERMINAL_TOUCH_PAD	4U
 #define TERMINAL_TOUCH_PAD_STOP	5U
@@ -93,25 +93,25 @@ struct terminal_touch_pointer {
  * token: another tab is another screen), a line's height, how many lines
  * the scrollback keeps, the grid's height and the view as the screen has
  * it (lines back from the live screen, and a pixel offset within a line,
- * content moved down by it).  The scroller holds the view's position, in
- * pixels back from the live screen, as its negative (a finger moving down
- * shows older lines).  view and offset are the view the fingers last set
+ * content moved down by it).  The scroll holds the view's position, in
+ * pixels back from the live screen, as its negative y (a finger moving
+ * down shows older lines).  view and offset are the view the fingers last set
  * (changed says the main loop has not taken it yet); a view set elsewhere
  * (a key, the wheel, new output keeping the view on its text, another tab)
  * is taken over and stops a glide.
  *
- * pressed says the scroller holds the fingers' touch, moving that it owns
+ * pressed says the scroll holds the fingers' touch, moving that it owns
  * the view (from a touch until the view rests), dragging that the drag
  * scrolls, selecting that a long press made the pointer's selection and the
  * first finger's motions go to it, and caught that the touch caught a
  * gliding view (it taps nothing); first_id is the first finger, last_* its
  * last place (a lift has none), serial its down's serial, base_* the drag's
- * offset when the scroller was last pressed, and repress that the view was
- * taken over under a finger and the next tick presses the scroller again.
+ * offset when the scroll was last pressed, and repress that the view was
+ * taken over under a finger and the next tick presses the scroll again.
  */
 struct terminal_touch {
 	struct kl_gesture *gesture;
-	struct kl_scroller *scroller;
+	struct kl_scroll scroll;
 	unsigned followed;
 	int pressed;
 	int moving;
@@ -137,7 +137,7 @@ struct terminal_touch {
 	int offset;
 	int changed;
 
-	/* The scroller's bounds as last set. */
+	/* The scroll's ends as last set. */
 	double bounds_top;
 	double bounds_height;
 

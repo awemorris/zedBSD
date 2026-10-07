@@ -7,8 +7,9 @@
 
 /*
  * The touch screen of Notes (ws081-p013): the fingers scroll and zoom the
- * page with libkeiland's gestures and scroller, the toolbar takes their
- * taps, and a palm is told from a finger by the pen (touch.h).
+ * page with libkeiland's gestures and scroll (kl_scroll, ws090-p015), the
+ * toolbar takes their taps, and a palm is told from a finger by the pen
+ * (touch.h).
  *
  * The page's place is a function of the zoom and the scroll: on an axis
  * where the zoomed page (with its margin) fits the room it is centred as
@@ -65,7 +66,7 @@ static int touch_write_young(const struct notes_touch *touch, uint64_t now);
 static void touch_write_handover(struct notes_touch *touch, uint64_t now);
 
 /*
- * Makes the gestures and the scroller, at the whole page.
+ * Makes the gestures and the scroll, at the whole page.
  *
  * Returns 0, or ENOMEM.
  */
@@ -73,6 +74,8 @@ int
 notes_touch_open(
 	struct notes_touch *touch)
 {
+	int error;
+
 	/* Nothing held yet, the whole page. */
 	memset(touch, 0, sizeof(*touch));
 	touch->zoom = 1.0f;
@@ -82,9 +85,10 @@ notes_touch_open(
 	if (touch->gesture == NULL)
 		return ENOMEM;
 
-	/* The scroller of the page. */
-	touch->scroller = kl_scroller_create();
-	if (touch->scroller == NULL) {
+	/* The scroll of the page, across and down. */
+	error = kl_scroll_init(&touch->scroll, KL_SCROLL_X | KL_SCROLL_Y);
+	if (error != 0) {
+		kl_scroll_release(&touch->scroll);
 		kl_gesture_destroy(touch->gesture);
 		touch->gesture = NULL;
 		return ENOMEM;
@@ -95,15 +99,14 @@ notes_touch_open(
 }
 
 /*
- * Frees the gestures and the scroller.
+ * Frees the gestures and the scroll.
  */
 void
 notes_touch_close(
 	struct notes_touch *touch)
 {
-	/* Both, when they were made. */
-	if (touch->scroller != NULL)
-		kl_scroller_destroy(touch->scroller);
+	/* Both, when they were made (a scroll never made holds nothing). */
+	kl_scroll_release(&touch->scroll);
 	if (touch->gesture != NULL)
 		kl_gesture_destroy(touch->gesture);
 	memset(touch, 0, sizeof(*touch));
@@ -146,7 +149,7 @@ notes_touch_layout(
 	if (touch->zoom < 1.0f)
 		touch->zoom = 1.0f;
 
-	/* The scroller's bounds; a page at rest stays within them. */
+	/* The scroll's ends; a page at rest stays within them. */
 	touch_bounds(touch);
 	if (!touch->moving) {
 		touch_extent(touch, &largest_x, &largest_y);
@@ -158,8 +161,8 @@ notes_touch_layout(
 			touch->scroll_y = largest_y;
 		if (touch->scroll_y < 0.0)
 			touch->scroll_y = 0.0;
-		if (touch->scroller != NULL)
-			kl_scroller_set_position(touch->scroller, touch->scroll_x, touch->scroll_y);
+		if (touch->gesture != NULL)
+			kl_scroll_move_to(&touch->scroll, touch->scroll_x, touch->scroll_y, 0, notes_touch_clock());
 	}
 
 	/* Where the page is drawn. */
@@ -169,7 +172,7 @@ notes_touch_layout(
 /*
  * Takes one touch input of the window: a new finger is taken for a palm
  * near the pen, or followed by the gestures (the first presses the
- * scroller, unless it touched the toolbar); a followed finger's motion and
+ * scroll, unless it touched the toolbar); a followed finger's motion and
  * lift go to the gestures.
  */
 void
@@ -302,8 +305,8 @@ notes_touch_pen(
 
 /*
  * Moves time on for the fingers: finds a long press, zooms by two fingers,
- * moves the scroller with a drag, and places the page where the scroller
- * is at the frame's time.
+ * moves the scroll with a drag, and places the page where the scroll is at
+ * the frame's time.
  *
  * Returns how many milliseconds until the page should be placed again (-1
  * when it rests and no finger is followed).
@@ -313,8 +316,6 @@ notes_touch_tick(
 	struct notes_touch *touch,
 	uint64_t now)
 {
-	double x;
-	double y;
 	double dx;
 	double dy;
 	int animating;
@@ -341,19 +342,19 @@ notes_touch_tick(
 		return TOUCH_TICK_MS;
 	}
 
-	/* A drag moves the scroller with the fingers, resampled for the frame. */
+	/* A drag moves the scroll with the fingers, resampled for the frame. */
 	if (touch->dragging &&
 	    touch->pressed) {
 		error = kl_gesture_drag_offset(touch->gesture, now, &dx, &dy);
 		if (error == 0)
-			kl_scroller_drag(touch->scroller, dx - touch->base_x, dy - touch->base_y);
+			kl_scroll_drag(&touch->scroll, dx - touch->base_x, dy - touch->base_y);
 	}
 
-	/* The page where the scroller is at the frame's time. */
-	animating = kl_scroller_step(touch->scroller, now, &x, &y);
+	/* The page where the scroll is at the frame's time. */
+	animating = kl_scroll_step(&touch->scroll, now);
 	if (touch->moving) {
-		touch->scroll_x = x;
-		touch->scroll_y = y;
+		touch->scroll_x = touch->scroll.x;
+		touch->scroll_y = touch->scroll.y;
 		touch_place(touch);
 	}
 
@@ -483,11 +484,11 @@ void
 notes_touch_top(
 	struct notes_touch *touch)
 {
-	/* The top, at rest. */
+	/* The top, at rest (a glide or a flight stops). */
 	touch->scroll_y = 0.0;
 	touch->moving = 0;
-	if (touch->scroller != NULL)
-		kl_scroller_set_position(touch->scroller, touch->scroll_x, touch->scroll_y);
+	if (touch->gesture != NULL)
+		kl_scroll_move_to(&touch->scroll, touch->scroll_x, touch->scroll_y, 0, notes_touch_clock());
 	touch_place(touch);
 }
 
@@ -568,7 +569,7 @@ touch_palm(
 	return 0;
 }
 
-/* A finger touches: taken for a palm and left alone, or followed (the first presses the scroller). */
+/* A finger touches: taken for a palm and left alone, or followed (the first presses the scroll). */
 static void
 touch_down(
 	struct notes_touch *touch,
@@ -629,7 +630,7 @@ touch_down(
 		return;
 	}
 
-	/* The first finger followed: on the toolbar it only taps; on the page it presses the scroller. */
+	/* The first finger followed: on the toolbar it only taps; on the page it presses the scroll. */
 	if (touch->followed == 0U) {
 		touch->toolbar = 0;
 		if (event->y < touch->top)
@@ -648,8 +649,8 @@ touch_down(
 }
 
 /*
- * Presses the scroller where the page is: it takes the page over (from
- * where the page is, when it did not own it), and a press on a gliding page
+ * Presses the scroll where the page is: it takes the page over (from where
+ * the page is, when it did not own it), and a press on a gliding page
  * catches it.
  */
 static void
@@ -662,13 +663,13 @@ touch_press(
 	int caught;
 	int error;
 
-	/* The page's bounds, and its place unless the scroller already owns it. */
+	/* The page's ends, and its place unless the scroll already owns it. */
 	touch_bounds(touch);
 	if (!touch->moving)
-		kl_scroller_set_position(touch->scroller, touch->scroll_x, touch->scroll_y);
+		kl_scroll_move_to(&touch->scroll, touch->scroll_x, touch->scroll_y, 0, now);
 
 	/* The press; the first press on a gliding page catches it. */
-	caught = kl_scroller_press(touch->scroller, now);
+	caught = kl_scroll_press(&touch->scroll, now);
 	if (!touch->pressed) {
 		touch->caught = caught;
 		if (caught) {
@@ -677,7 +678,7 @@ touch_press(
 		}
 	}
 
-	/* The scroller owns the page from here. */
+	/* The scroll owns the page from here. */
 	touch->pressed = 1;
 	touch->moving = 1;
 
@@ -738,7 +739,7 @@ touch_gestures(
 		case KL_GESTURE_DRAG_END:
 			/* The page glides on at the finger's velocity. */
 			if (touch->dragging) {
-				kl_scroller_release(touch->scroller, now, gesture.vx, gesture.vy);
+				(void)kl_scroll_fling(&touch->scroll, gesture.vx, gesture.vy, now);
 				printf("NOTES TOUCH release vx=%.0f vy=%.0f x=%.1f y=%.1f\n", gesture.vx, gesture.vy, touch->scroll_x, touch->scroll_y);
 				fflush(stdout);
 				touch->pressed = 0;
@@ -755,10 +756,10 @@ touch_gestures(
 		}
 	}
 
-	/* The last finger lifted without a drag: the scroller is let go still (a page past an edge springs back). */
+	/* The last finger lifted without a drag: the scroll is let go still (a page past an edge springs back). */
 	if (touch->followed == 0U &&
 	    touch->pressed) {
-		kl_scroller_release(touch->scroller, now, 0.0, 0.0);
+		(void)kl_scroll_fling(&touch->scroll, 0.0, 0.0, now);
 		touch->pressed = 0;
 		touch->dragging = 0;
 	}
@@ -774,9 +775,9 @@ touch_cancel(
 	if (touch->pinching)
 		touch_pinch_end(touch, now);
 
-	/* The scroller lets go (a page past an edge springs back). */
+	/* The scroll lets go (a page past an edge springs back). */
 	if (touch->pressed)
-		kl_scroller_cancel(touch->scroller, now);
+		kl_scroll_cancel(&touch->scroll, now);
 	touch->pressed = 0;
 	touch->dragging = 0;
 	touch->toolbar = 0;
@@ -941,7 +942,7 @@ touch_extent(
 		*largest_y = 0.0;
 }
 
-/* Gives the scroller the page's bounds and the room's size (only when they changed). */
+/* Gives the scroll the page's ends and the room's size for the rubber band (only when they changed). */
 static void
 touch_bounds(
 	struct notes_touch *touch)
@@ -951,8 +952,8 @@ touch_bounds(
 	double width;
 	double height;
 
-	/* Nothing without the scroller. */
-	if (touch->scroller == NULL)
+	/* Nothing before the scroll was made. */
+	if (touch->gesture == NULL)
 		return;
 
 	/* The bounds, and the room (at least a pixel). */
@@ -964,15 +965,15 @@ touch_bounds(
 	if (height < 1.0)
 		height = 1.0;
 
-	/* Unchanged bounds leave the scroller alone. */
+	/* Unchanged ends leave the scroll alone. */
 	if (largest_x == touch->bounds_x &&
 	    largest_y == touch->bounds_y &&
 	    width == touch->bounds_width &&
 	    height == touch->bounds_height)
 		return;
 
-	/* The new bounds. */
-	(void)kl_scroller_set_bounds(touch->scroller, 0.0, largest_x, 0.0, largest_y, width, height);
+	/* The new ends. */
+	(void)kl_scroll_set_bounds(&touch->scroll, 0.0, largest_x, 0.0, largest_y, width, height);
 	touch->bounds_x = largest_x;
 	touch->bounds_y = largest_y;
 	touch->bounds_width = width;
@@ -1020,8 +1021,8 @@ touch_zoom_about(
 	if (touch->scroll_y < 0.0)
 		touch->scroll_y = 0.0;
 
-	/* The scroller takes the page there, and the page is placed. */
-	kl_scroller_set_position(touch->scroller, touch->scroll_x, touch->scroll_y);
+	/* The scroll takes the page there at once (a finger down presses it again from there), and the page is placed. */
+	kl_scroll_move_to(&touch->scroll, touch->scroll_x, touch->scroll_y, 0, notes_touch_clock());
 	touch_place(touch);
 }
 
@@ -1070,10 +1071,11 @@ touch_stop(
 	if (touch->pressed)
 		return;
 
-	/* The scroller holds the page where it was last placed. */
-	kl_scroller_set_position(touch->scroller, touch->scroll_x, touch->scroll_y);
+	/* The scroll holds the page where it was last placed, within its edges. */
+	kl_scroll_move_to(&touch->scroll, touch->scroll_x, touch->scroll_y, 0, now);
 	touch->moving = 0;
-	(void)kl_scroller_step(touch->scroller, now, &touch->scroll_x, &touch->scroll_y);
+	touch->scroll_x = touch->scroll.x;
+	touch->scroll_y = touch->scroll.y;
 	touch_place(touch);
 
 	/* The tests' line. */
@@ -1198,7 +1200,7 @@ touch_write_handover(
 	printf("NOTES TOUCH write abort reason=fingers\n");
 	fflush(stdout);
 
-	/* The finger presses the scroller, as the first finger on the page does. */
+	/* The finger presses the scroll, as the first finger on the page does. */
 	touch->toolbar = 0;
 	touch_press(touch, now);
 
