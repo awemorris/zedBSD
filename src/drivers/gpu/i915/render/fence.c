@@ -19,6 +19,7 @@
 #include "batch.h"
 #include "codec.h"
 #include "draw.h"
+#include "forget.h"
 #include "gfx.h"
 #include "internal.h"
 #include "object.h"
@@ -467,10 +468,11 @@ i915_query_pool_destroy(
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* Unpublishes and frees a pool the session knows; an unknown one is ignored. */
+	/* Unpublishes a pool the session knows, lets the command buffers that recorded it go of it (BUG-260) and frees it; an unknown one is ignored. */
 	pool = drv_i915_object_lookup(session, I915_VK_OBJ_QUERY_POOL, handle);
 	if (pool != NULL) {
 		drv_i915_object_remove(session, I915_VK_OBJ_QUERY_POOL, handle);
+		drv_i915_gfx_forget(session, I915_VK_OBJ_QUERY_POOL, pool);
 		drv_i915_gfx_query_pool_free(session, pool);
 	}
 
