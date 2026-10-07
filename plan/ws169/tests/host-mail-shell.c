@@ -15,6 +15,12 @@
  *    skipped, and a malformed request ends the client (EPROTO).
  * 2. libkeiland's view (system-view.c): the ring of arrivals keeps the
  *    newest eight and tells KL_SYSTEM_CHANGED_MAIL.
+ * 3. ws177-p005: an arrival from a client without the mail program's
+ *    window is refused; a reader on a version 20 object is told allowed
+ *    after its listen and when its setting changes (only then); a listen
+ *    with every row taken frees the rows of readers that went; the view
+ *    keeps the reader's permission, and a full ring of notification events
+ *    tells how many it lost first.
  *
  * Prints "PASS name" or "FAIL name ..." for each check; exits with 1 when
  * one failed.
@@ -176,6 +182,10 @@ main(void)
 	struct kwl_object manager;
 	struct kwl_object *mail_object;
 	struct kwl_object *read_object;
+	struct kwl_object *window;
+	struct kwl_object *rows[16];
+	struct kwl_object *late_object;
+	struct kl_notify_event notify;
 	unsigned char bytes[64];
 	const char *from;
 	const char *subject;
@@ -196,6 +206,12 @@ main(void)
 	reader.fd = -1;
 	mailer.next = &reader;
 	server.clients = &mailer;
+
+	/* The mail program's window (ws177-p005: only it is heard telling of arrivals). */
+	window = kwl_create(&mailer, 5U, KWL_SURFACE, 6U);
+	if (window == NULL)
+		return 1;
+	(void)snprintf(window->app_id, sizeof(window->app_id), "mailer");
 
 	/* The mail program's mail object, made by get_mail of its manager. */
 	memset(&manager, 0, sizeof(manager));
@@ -304,6 +320,94 @@ main(void)
 	system_view_mail_event(&view, "x", "y", "12345678901234567890");
 	got = system_view_take_mail_event(&view, &taken);
 	test_check("ring-cut", got == 1 && strlen(taken.code) == KL_MAIL_CODE_MAX - 1U, taken.code);
+
+	/* ws177-p005: an arrival from the reader, which has no mail program's window, is refused and told to nobody. */
+	manager.client = &reader;
+	(void)test_put_word(bytes, 0U, 30U);
+	error = kwl_mail_create(&manager, bytes, 4U);
+	read_object = kwl_find(&reader, 30U);
+	test_check("create-reader-again", error == 0 && read_object != NULL, "");
+	if (read_object == NULL)
+		return 1;
+	test_codes_browser = 1;
+	test_event_count = 0U;
+	error = test_arrived(read_object, 9U, "a", "b", "123456");
+	test_check("arrived-not-mailer", error == 0 && test_event_count == 1U &&
+	    test_events[0].object == 30U &&
+	    test_events[0].opcode == KL_SYSTEM_MAIL_EVENT_RESULT &&
+	    test_get_word(&test_events[0], 4U) == KL_SYSTEM_RESULT_INVALID, "");
+
+	/* A reader on a version 20 object: listen answered, then allowed(1). */
+	manager.version = KL_SYSTEM_SINCE_MAIL_ALLOWED;
+	(void)test_put_word(bytes, 0U, 40U);
+	error = kwl_mail_create(&manager, bytes, 4U);
+	late_object = kwl_find(&reader, 40U);
+	test_check("create-reader-20", error == 0 && late_object != NULL, "");
+	if (late_object == NULL)
+		return 1;
+	test_event_count = 0U;
+	error = test_listen(late_object, 10U, "browser");
+	test_check("allowed-after-listen", error == 0 && test_event_count == 2U &&
+	    test_events[0].opcode == KL_SYSTEM_MAIL_EVENT_RESULT &&
+	    test_events[1].opcode == KL_SYSTEM_MAIL_EVENT_ALLOWED &&
+	    test_get_word(&test_events[1], 0U) == 1U, "");
+
+	/* The setting turned off: allowed(0); the same again: nothing; the old reader (version 15) hears nothing. */
+	test_codes_browser = 0;
+	test_event_count = 0U;
+	kwl_mail_settings_changed(&server);
+	test_check("allowed-changed", test_event_count == 1U &&
+	    test_events[0].object == 40U &&
+	    test_events[0].opcode == KL_SYSTEM_MAIL_EVENT_ALLOWED &&
+	    test_get_word(&test_events[0], 0U) == 0U, "");
+	test_event_count = 0U;
+	kwl_mail_settings_changed(&server);
+	test_check("allowed-unchanged", test_event_count == 0U, "");
+
+	/* Every row taken by readers that are there: busy. */
+	manager.version = KL_SYSTEM_SINCE_MAIL;
+	for (index = 0U; index < 16U; index++) {
+		(void)test_put_word(bytes, 0U, 100U + index);
+		(void)kwl_mail_create(&manager, bytes, 4U);
+		rows[index] = kwl_find(&reader, 100U + index);
+		if (rows[index] != NULL)
+			(void)test_listen(rows[index], 20U + index, "browser");
+	}
+	(void)test_put_word(bytes, 0U, 200U);
+	(void)kwl_mail_create(&manager, bytes, 4U);
+	test_event_count = 0U;
+	error = test_listen(kwl_find(&reader, 200U), 50U, "browser");
+	test_check("listen-busy", error == 0 && test_event_count == 1U &&
+	    test_get_word(&test_events[0], 4U) == KL_SYSTEM_RESULT_BUSY, "");
+
+	/* Readers that went free their rows when a listen finds none free. */
+	for (index = 0U; index < 16U; index++) {
+		if (rows[index] != NULL)
+			kwl_object_destroy(rows[index]);
+	}
+	test_event_count = 0U;
+	error = test_listen(kwl_find(&reader, 200U), 51U, "browser");
+	test_check("listen-swept", error == 0 && test_event_count == 1U &&
+	    test_get_word(&test_events[0], 4U) == KL_SYSTEM_RESULT_OK, "");
+
+	/* The view keeps the reader's permission. */
+	memset(&view, 0, sizeof(view));
+	system_view_mail_allowed(&view, 1U);
+	changed = system_view_take_changed(&view);
+	test_check("view-allowed", view.mail_allowed == 2U && (changed & KL_SYSTEM_CHANGED_MAIL) != 0U, "");
+
+	/* A full ring of notification events: the next take tells how many were lost, then the oldest kept. */
+	memset(&view, 0, sizeof(view));
+	memset(&notify, 0, sizeof(notify));
+	for (index = 0U; index < SYSTEM_VIEW_NOTIFY_EVENTS + 3U; index++) {
+		notify.kind = KL_NOTIFY_POSTED;
+		notify.id = index + 1U;
+		system_view_notify_event(&view, &notify);
+	}
+	got = system_view_take_notify_event(&view, &notify);
+	test_check("notify-lost", got == 1 && notify.kind == KL_NOTIFY_LOST && notify.id == 3U, "");
+	got = system_view_take_notify_event(&view, &notify);
+	test_check("notify-after-lost", got == 1 && notify.kind == KL_NOTIFY_POSTED && notify.id == 4U, "");
 
 	/* The outcome. */
 	if (test_failures != 0) {

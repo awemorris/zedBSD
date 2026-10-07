@@ -42,6 +42,16 @@
 #define KWL_NOTIFY_QUEUE	8U
 #define KWL_NOTIFY_LOG		100U
 
+/*
+ * How fast one client may post (ws177-p005): at most KWL_NOTIFY_RATE_POSTS
+ * new notifications or replacements in KWL_NOTIFY_RATE_MS; more in the
+ * same span are refused as busy.  The rate is kept for the
+ * KWL_NOTIFY_RATE_CLIENTS clients that posted last.
+ */
+#define KWL_NOTIFY_RATE_POSTS	10U
+#define KWL_NOTIFY_RATE_MS	1000U
+#define KWL_NOTIFY_RATE_CLIENTS	16U
+
 /* Where a notification is. */
 #define KWL_NOTIFY_WAITING	1U
 #define KWL_NOTIFY_SHOWN	2U
@@ -84,8 +94,20 @@ struct kwl_notify_closed {
 };
 
 /*
+ * The posts of one client in the current span of the rate (ws177-p005):
+ * the client (0: a free row), when its span began, and how many it posted
+ * in it.
+ */
+struct kwl_notify_rate {
+	uint64_t client;
+	uint64_t start_ms;
+	unsigned posts;
+};
+
+/*
  * The notifications: a table of every one kept (waiting, shown, logged),
- * the next number, and the serial their order is taken from.
+ * the next number, the serial their order is taken from, and the rate of
+ * the clients that posted last.
  */
 struct kwl_notify_model {
 	struct kwl_notification *items;
@@ -93,6 +115,8 @@ struct kwl_notify_model {
 	size_t capacity;
 	uint32_t next_id;
 	uint64_t serial;
+	/* The rate of the clients that posted last (kwl_notify_rate_take). */
+	struct kwl_notify_rate rates[KWL_NOTIFY_RATE_CLIENTS];
 };
 
 void kwl_notify_model_init(struct kwl_notify_model *model);
@@ -108,5 +132,8 @@ const struct kwl_notification *kwl_notify_shown(const struct kwl_notify_model *m
 size_t kwl_notify_log(const struct kwl_notify_model *model, const struct kwl_notification **log, size_t capacity);
 size_t kwl_notify_waiting(const struct kwl_notify_model *model);
 const struct kwl_notification *kwl_notify_find(const struct kwl_notify_model *model, uint32_t id);
+size_t kwl_notify_orphan(struct kwl_notify_model *model, uint64_t client, uint32_t object);
+int kwl_notify_rate_take(struct kwl_notify_model *model, uint64_t client, uint64_t now_ms);
+size_t kwl_notify_clean(char *out, size_t room, const char *text, int lines);
 
 #endif

@@ -515,6 +515,14 @@ settings_apply(
 	int32_t language;
 	int differs;
 
+	/* A mail reader's permission: each reader whose permission changed is told (mail-shell.c, ws177-p005). */
+	differs = strncmp(name, KL_SYSTEM_MAIL_SETTING_PREFIX, sizeof(KL_SYSTEM_MAIL_SETTING_PREFIX) - 1U);
+	if (differs == 0) {
+		if (!starting)
+			kwl_mail_settings_changed(server);
+		return;
+	}
+
 	/* Shows the wallpaper. */
 	differs = strcmp(name, "wallpaper");
 	if (differs == 0) {

@@ -3,7 +3,7 @@
 # ws177-p004: desktop の UI の小物（案 D）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 P1 q884 の 1: 実装・host PASS・build warning 0。T1 の QEMU の試験と UAT の絵の確認が残り）
+Status: test-wait（T1-406）（2026-10-08 P1 q884 の 1: 実装・host PASS・build warning 0、main に統合。UAT の絵の確認も残り）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q884 の 1（P1、2026-10-08、承認は Q1 の dispatch「次の Queue（q884、承認済み、plan/ws177/phasing-20261008.md の案）」）
@@ -48,3 +48,5 @@ backlog-p2 12（Notes の 512 byte）: limit は上限を下げる口で、Notes
 ## T1-406（2026-10-08 Q1）
 
 desktop-p004.sh PASS（accent の keyboard の focus、Q1 が PNG を目視）。試験の道具の不具合（qmp-pointer に click の step が無く Users > Add を開けない）で kl_field の上限は QEMU で未確認。P1 が試験を直して再依頼する。
+
+2026-10-08 / T1-406（Q1 の判定）: desktop-p004.sh は PASS（accent の 5 本）。ただし `qmp-pointer` に click の step が無く Users > Add が開かず、名前の欄の 32 は未確認（打った文字は Current password の欄へ）。直し（P1）: click を move・down・up に、Add User... は Settings の `ZSETTINGS CONTROL index=21` の行から位置を取る、名前・全名の欄の長さを log（`USERS admin field=N length=L`、password は出さない）、32 で止まり 33 以上が無いことを log で判定。T1 の再試験を依頼。

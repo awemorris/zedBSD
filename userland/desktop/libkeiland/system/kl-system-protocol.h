@@ -259,7 +259,7 @@
 
 /* The interfaces' names and versions. */
 #define KL_SYSTEM_MANAGER_NAME			"kl_system_manager_v1"
-#define KL_SYSTEM_MANAGER_VERSION		19U
+#define KL_SYSTEM_MANAGER_VERSION		20U
 #define KL_SYSTEM_SETTINGS_NAME			"kl_system_settings_v1"
 
 /* kl_system_manager_v1's requests and event. */
@@ -324,6 +324,9 @@
 
 /* Since when the displays have set_shown (ws113-p014). */
 #define KL_SYSTEM_SINCE_SHOWN			19U
+
+/* Since when the mail object tells a reader whether it is allowed (ws177-p005). */
+#define KL_SYSTEM_SINCE_MAIL_ALLOWED		20U
 
 /* The interfaces' names (WS131 p010). */
 #define KL_SYSTEM_NETWORK_NAME			"kl_system_network_v1"
@@ -393,7 +396,9 @@
  *   request 0 destroy
  *   request 1 arrived(uint request, string account, string from, string subject, string code)
  *       the mail program tells of a new message (no body; code is a
- *       sign-in code found in it, or empty)
+ *       sign-in code found in it, or empty); since ws177-p005 only a
+ *       client with a window of the mail program (app_id "mailer") is
+ *       heard, any other is answered INVALID
  *   request 2 listen(uint request, string app)
  *       a reader asks for the messages' arrivals under its name; only a
  *       name the settings know (mail.codes.<app>) is taken
@@ -401,12 +406,17 @@
  *       a message arrived, told to each listener whose mail.codes.<app>
  *       setting is on when it arrives
  *   event   1 result(uint request, uint applied, uint saved)
+ *   event   2 allowed(uint on)  (since 20, ws177-p005)
+ *       whether the user lets the reader hear the arrivals now: told once
+ *       its listen is taken, and again whenever its mail.codes.<app>
+ *       setting changes
  */
 #define KL_SYSTEM_MAIL_DESTROY			0U
 #define KL_SYSTEM_MAIL_ARRIVED			1U
 #define KL_SYSTEM_MAIL_LISTEN			2U
 #define KL_SYSTEM_MAIL_EVENT_MAIL		0U
 #define KL_SYSTEM_MAIL_EVENT_RESULT		1U
+#define KL_SYSTEM_MAIL_EVENT_ALLOWED		2U
 
 /* The setting that lets a reader hear the arrivals, before the reader's name (mail.codes.browser). */
 #define KL_SYSTEM_MAIL_SETTING_PREFIX		"mail.codes."

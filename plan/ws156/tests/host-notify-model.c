@@ -10,7 +10,9 @@
  * (userland/desktop/wayland/notify.c) alone on the host: numbers, the
  * replacement, the words' bounds, a client's limit, the queue's size, the
  * show and the log (newest first, its size, expired), the dismissal not
- * logged, the withdrawal, the clearing.
+ * logged, the withdrawal, the clearing; and (ws177-p005) a client's or an
+ * object's notifications left without action when they go, the rate of
+ * posts, and the words mended into whole UTF-8 without control characters.
  */
 
 #include "userland/desktop/wayland/notify.h"
@@ -38,6 +40,8 @@ main(void)
 	uint32_t second;
 	uint32_t id;
 	unsigned index;
+	char mended[16];
+	size_t length;
 	int error;
 
 	/* A post and its replacement. */
@@ -108,6 +112,53 @@ main(void)
 	count = kwl_notify_clear(&model, closed, KWL_NOTIFY_LOG);
 	check(count == KWL_NOTIFY_LOG && closed[0].reason == KWL_NOTIFY_CLEARED && kwl_notify_log(&model, log, KWL_NOTIFY_LOG) == 0U && kwl_notify_waiting(&model) == KWL_NOTIFY_QUEUE,
 	      "cleared: the log empty, the queue kept");
+
+	/* ws177-p005: a client's notifications of one object, then all of them, lose their action and their object. */
+	kwl_notify_model_free(&model);
+	kwl_notify_model_init(&model);
+	(void)kwl_notify_post(&model, 8U, 3U, 0U, "App", "A", "", KWL_NOTIFY_ACTION, &first, closed, &closed_count);
+	(void)kwl_notify_post(&model, 8U, 4U, 0U, "App", "B", "", KWL_NOTIFY_ACTION, &second, closed, &closed_count);
+	count = kwl_notify_orphan(&model, 8U, 3U);
+	check(count == 1U && (kwl_notify_find(&model, first)->flags & KWL_NOTIFY_ACTION) == 0U && kwl_notify_find(&model, first)->object == 0U &&
+	      (kwl_notify_find(&model, second)->flags & KWL_NOTIFY_ACTION) != 0U, "an object gone: its notifications lose their action");
+	count = kwl_notify_orphan(&model, 8U, 0U);
+	check(count == 2U && (kwl_notify_find(&model, second)->flags & KWL_NOTIFY_ACTION) == 0U, "a client gone: all of its notifications");
+	count = kwl_notify_orphan(&model, 0U, 0U);
+	check(count == 0U, "the compositor's own are never left");
+
+	/* The rate: ten posts in a second, the eleventh refused, the next second open again; the compositor has none. */
+	for (index = 0; index < KWL_NOTIFY_RATE_POSTS; index++) {
+		error = kwl_notify_rate_take(&model, 9U, 1000U + index);
+		if (error != 0)
+			break;
+	}
+	check(error == 0, "ten posts in a second");
+	error = kwl_notify_rate_take(&model, 9U, 1500U);
+	check(error == EBUSY, "the eleventh in the second is busy");
+	error = kwl_notify_rate_take(&model, 9U, 2000U);
+	check(error == 0, "the next second is open");
+	for (index = 0; index < 50U; index++)
+		error = kwl_notify_rate_take(&model, 0U, 2000U);
+	check(error == 0, "the compositor has no rate");
+	for (index = 0; index < KWL_NOTIFY_RATE_CLIENTS + 2U; index++)
+		error = kwl_notify_rate_take(&model, 100U + index, 3000U + index);
+	check(error == 0, "more clients than rows take the oldest row");
+
+	/* The words mended: an invalid byte is U+FFFD, a control a space, a line end kept in a body only, C1 a space, an overlong form invalid. */
+	length = kwl_notify_clean(mended, sizeof(mended), "a\xff" "b", 0);
+	check(length == 5U && memcmp(mended, "a\xef\xbf\xbd" "b", 6U) == 0, "an invalid byte is U+FFFD");
+	length = kwl_notify_clean(mended, sizeof(mended), "a\tb\nc", 0);
+	check(strcmp(mended, "a b c") == 0, "controls are spaces in a title");
+	length = kwl_notify_clean(mended, sizeof(mended), "a\nb", 1);
+	check(strcmp(mended, "a\nb") == 0, "a body keeps its line ends");
+	length = kwl_notify_clean(mended, sizeof(mended), "a\xc2\x85" "b", 0);
+	check(strcmp(mended, "a b") == 0, "a C1 control is a space");
+	length = kwl_notify_clean(mended, sizeof(mended), "\xc0\xaf", 0);
+	check(length == 6U, "an overlong form is two U+FFFD");
+	length = kwl_notify_clean(mended, sizeof(mended), "\xe3\x81\x82\xe3\x81\x82\xe3\x81\x82\xe3\x81\x82\xe3\x81\x82", 0);
+	check(length == 15U, "a character that does not fit is left out whole");
+	error = kwl_notify_post(&model, 10U, 1U, 0U, "App", "T\x01", "B\xfe", 0U, &id, closed, &closed_count);
+	check(error == 0 && strcmp(kwl_notify_find(&model, id)->title, "T ") == 0 && strcmp(kwl_notify_find(&model, id)->body, "B\xef\xbf\xbd") == 0, "a post's words are mended");
 
 	/* Done. */
 	kwl_notify_model_free(&model);

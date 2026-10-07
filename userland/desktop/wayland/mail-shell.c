@@ -22,6 +22,15 @@
  * name; one whose client or object went is skipped and its row reused.
  * The words of a message are never logged, only their lengths, since a
  * sign-in code is a secret.
+ *
+ * ws177-p005: arrived is heard only from a client that has a window of
+ * the mail program (app_id MAIL_SENDER_APP); a listen with every row taken
+ * first frees the rows whose client or object went; a reader on a mail
+ * object of version 20 or later is told allowed(on) once its listen is
+ * taken and whenever its setting changes (kwl_mail_settings_changed).
+ * The window's app_id is the client's own word, so the check keeps other
+ * programs from posing as the mail program by mistake, not a program of
+ * the same user that means to.
  */
 
 #include "kwl.h"
@@ -43,6 +52,9 @@
 /* The longest reader's name, with its NUL (the setting's name must fit KL_SETTINGS_KEY_MAX). */
 #define MAIL_APP_MAX		32U
 
+/* The application ID of the mail program's windows, the one client heard telling of arrivals. */
+#define MAIL_SENDER_APP		"mailer"
+
 /* The longest event: three strings of MAIL_WIRE_TEXT_MAX with their lengths. */
 #define MAIL_EVENT_MAX		(3U * (4U + MAIL_WIRE_TEXT_MAX))
 
@@ -56,6 +68,8 @@ struct mail_listener {
 	uint64_t client;
 	uint32_t object;
 	char app[MAIL_APP_MAX];
+	/* What the reader was told last by allowed (-1: nothing yet, 0 off, 1 on; ws177-p005). */
+	int told;
 };
 
 /*
@@ -68,6 +82,10 @@ static struct mail_listener mail_listeners[MAIL_LISTENERS_MAX];
 static int mail_arrived(struct kwl_object *object, const unsigned char *bytes, size_t size);
 static int mail_listen(struct kwl_object *object, const unsigned char *bytes, size_t size);
 static int mail_tell(struct kwl_server *server, const struct mail_listener *listener, const unsigned char *payload, size_t size);
+static struct kwl_object *mail_listener_object(struct kwl_server *server, const struct mail_listener *listener);
+static void mail_sweep(struct kwl_server *server);
+static void mail_tell_allowed(struct kwl_server *server, struct mail_listener *listener);
+static int mail_from_sender(struct kwl_client *client);
 static int mail_allowed(struct kwl_server *server, const char *app);
 static void mail_result(struct kwl_object *object, uint32_t request, uint32_t applied);
 static int mail_string(const unsigned char *bytes, size_t size, size_t offset, const char **text, size_t *next);
@@ -169,6 +187,14 @@ mail_arrived(
 	if (size < 4U)
 		return EPROTO;
 	request = mail_word(bytes, 0U);
+
+	/* Only the mail program tells of arrivals (ws177-p005). */
+	allowed = mail_from_sender(object->client);
+	if (!allowed) {
+		printf("KWL MAIL arrived-refused client=%llu\n", (unsigned long long)object->client->number);
+		mail_result(object, request, KL_SYSTEM_RESULT_INVALID);
+		return 0;
+	}
 
 	/* The account. */
 	error = mail_string(bytes, size, 4U, &account, &offset);
@@ -300,21 +326,53 @@ mail_listen(
 			free_row = index;
 	}
 
-	/* No room. */
+	/* No room: the rows of readers that went are freed first (ws177-p005), and the first of them taken. */
+	if (free_row == MAIL_LISTENERS_MAX) {
+		mail_sweep(object->client->server);
+		for (index = 0U; index < MAIL_LISTENERS_MAX; index++) {
+			if (mail_listeners[index].client == 0U) {
+				free_row = index;
+				break;
+			}
+		}
+	}
+
+	/* Still no room: every row's reader is there. */
 	if (free_row == MAIL_LISTENERS_MAX) {
 		mail_result(object, request, KL_SYSTEM_RESULT_BUSY);
 		return 0;
 	}
 
-	/* The row: the client, the object and the name. */
+	/* The row: the client, the object and the name; nothing told yet. */
 	mail_listeners[free_row].client = object->client->number;
 	mail_listeners[free_row].object = object->id;
 	memcpy(mail_listeners[free_row].app, app, length + 1U);
+	mail_listeners[free_row].told = -1;
 
-	/* Answered, and logged for the tests. */
+	/* Answered, and logged for the tests; then told whether it is allowed now. */
 	printf("KWL MAIL listen client=%llu app=%s\n", (unsigned long long)object->client->number, app);
 	mail_result(object, request, KL_SYSTEM_RESULT_OK);
+	mail_tell_allowed(object->client->server, &mail_listeners[free_row]);
 	return 0;
+}
+
+/*
+ * Tells each reader whose permission changed (a mail.codes.<app> setting
+ * was set, settings.c, ws177-p005) that it is allowed or not now; a
+ * reader that went frees its row.
+ */
+void
+kwl_mail_settings_changed(
+	struct kwl_server *server)
+{
+	unsigned index;
+
+	/* Each row in use. */
+	for (index = 0U; index < MAIL_LISTENERS_MAX; index++) {
+		if (mail_listeners[index].client == 0U)
+			continue;
+		mail_tell_allowed(server, &mail_listeners[index]);
+	}
 }
 
 /* Sends mail(...) to a listener; ENOENT when its client or its object went. */
@@ -325,11 +383,33 @@ mail_tell(
 	const unsigned char *payload,
 	size_t size)
 {
-	struct kwl_client *client;
 	struct kwl_object *object;
 	int error;
 
-	/* The listener's client, still connected. */
+	/* The listener's mail object, of a client still connected. */
+	object = mail_listener_object(server, listener);
+	if (object == NULL)
+		return ENOENT;
+
+	/* The event. */
+	error = kwl_emit(object->client, object->id, KL_SYSTEM_MAIL_EVENT_MAIL, payload, size);
+	if (error != 0)
+		return ENOENT;
+
+	/* Succeeded: the listener heard it. */
+	return 0;
+}
+
+/* Finds a listener's mail object, alive, of a client still connected; NULL when either went. */
+static struct kwl_object *
+mail_listener_object(
+	struct kwl_server *server,
+	const struct mail_listener *listener)
+{
+	struct kwl_client *client;
+	struct kwl_object *object;
+
+	/* The listener's client. */
 	for (client = server->clients; client != NULL; client = client->next) {
 		/* Another client. */
 		if (client->number != listener->client)
@@ -337,26 +417,104 @@ mail_tell(
 
 		/* A client being ended hears nothing more. */
 		if (client->fatal)
-			return ENOENT;
+			return NULL;
 
 		/* Its mail object, still alive. */
 		object = kwl_find(client, listener->object);
-		if (object == NULL ||
-		    object->dead ||
-		    object->kind != KWL_SYSTEM_MAIL)
-			return ENOENT;
+		if (object == NULL)
+			return NULL;
+		if (object->dead)
+			return NULL;
+		if (object->kind != KWL_SYSTEM_MAIL)
+			return NULL;
 
-		/* The event. */
-		error = kwl_emit(client, object->id, KL_SYSTEM_MAIL_EVENT_MAIL, payload, size);
-		if (error != 0)
-			return ENOENT;
-
-		/* Succeeded: the listener heard it. */
-		return 0;
+		/* Succeeded: the object. */
+		return object;
 	}
 
 	/* The client went. */
-	return ENOENT;
+	return NULL;
+}
+
+/* Frees the rows of the readers whose client or mail object went (ws177-p005). */
+static void
+mail_sweep(
+	struct kwl_server *server)
+{
+	struct kwl_object *object;
+	unsigned index;
+
+	/* Each row in use, freed when its reader is not there. */
+	for (index = 0U; index < MAIL_LISTENERS_MAX; index++) {
+		if (mail_listeners[index].client == 0U)
+			continue;
+		object = mail_listener_object(server, &mail_listeners[index]);
+		if (object == NULL)
+			memset(&mail_listeners[index], 0, sizeof(mail_listeners[index]));
+	}
+}
+
+/*
+ * Tells a reader allowed(on) when it differs from what it was told last
+ * (ws177-p005); a mail object older than version 20 is told nothing, and
+ * a reader that went frees its row.
+ */
+static void
+mail_tell_allowed(
+	struct kwl_server *server,
+	struct mail_listener *listener)
+{
+	struct kwl_object *object;
+	uint32_t word;
+	int allowed;
+	int error;
+
+	/* The reader's object; one that went frees its row. */
+	object = mail_listener_object(server, listener);
+	if (object == NULL) {
+		memset(listener, 0, sizeof(*listener));
+		return;
+	}
+
+	/* An object that does not have the event hears nothing. */
+	if (object->version < KL_SYSTEM_SINCE_MAIL_ALLOWED)
+		return;
+
+	/* Nothing changed since it was told. */
+	allowed = mail_allowed(server, listener->app);
+	if (allowed == listener->told)
+		return;
+
+	/* Told, and logged for the tests. */
+	word = (uint32_t)allowed;
+	error = kwl_emit(object->client, object->id, KL_SYSTEM_MAIL_EVENT_ALLOWED, &word, sizeof(word));
+	if (error != 0)
+		return;
+	listener->told = allowed;
+	printf("KWL MAIL allowed client=%llu app=%s on=%d\n", (unsigned long long)listener->client, listener->app, allowed);
+}
+
+/* Tells whether a client is the mail program: one of its surfaces has the mail program's application ID (ws177-p005). */
+static int
+mail_from_sender(
+	struct kwl_client *client)
+{
+	struct kwl_object *object;
+	int differs;
+
+	/* Each live surface of the client. */
+	for (object = client->objects; object != NULL; object = object->next) {
+		if (object->kind != KWL_SURFACE || object->dead)
+			continue;
+
+		/* The mail program's window. */
+		differs = strcmp(object->app_id, MAIL_SENDER_APP);
+		if (differs == 0)
+			return 1;
+	}
+
+	/* Succeeded: not the mail program. */
+	return 0;
 }
 
 /* Reports whether the user lets a reader hear the arrivals (its mail.codes.<app> setting on). */
