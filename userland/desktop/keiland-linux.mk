@@ -137,17 +137,18 @@ $(KEILAND_LINUX_BUILD)/bin/keiland-desktop: userland/desktop/wayland/keiland-des
 KEILAND_LINUX_ALL += $(KEILAND_LINUX_BUILD)/bin/keiland-desktop
 KEILAND_LINUX_INSTALL += bin/keiland-desktop
 
-# Bundled gradients are generated outside git (PNG, ws138-p002); the default picture is the tree's Birch-Lake.png (U3).
+# Bundled gradients are generated outside git (PNG, ws138-p002); the default picture is the generated Dawn (2026-10-08 user), the tree's Birch-Lake.png (U3's default) is in the catalogue.
 KEILAND_LINUX_WALLPAPER_NAMES := Aurora Dawn Lagoon Meadow Twilight
 KEILAND_LINUX_WALLPAPERS := $(addprefix $(KEILAND_LINUX_BUILD)/share/keiland/wallpapers/,$(addsuffix .png,$(KEILAND_LINUX_WALLPAPER_NAMES)))
 $(KEILAND_LINUX_WALLPAPERS) &: userland/desktop/wallpapers/generate.py
 	python3 $< $(KEILAND_LINUX_BUILD)/share/keiland/wallpapers
-KEILAND_LINUX_WALLPAPER ?= userland/desktop/wallpapers/Birch-Lake.png
+KEILAND_LINUX_WALLPAPER ?= $(KEILAND_LINUX_BUILD)/share/keiland/wallpapers/Dawn.png
 $(eval $(call KEILAND_LINUX_DATA,share/keiland/wallpaper.png,$(KEILAND_LINUX_WALLPAPER)))
+$(eval $(call KEILAND_LINUX_DATA,share/keiland/wallpapers/Birch-Lake.png,userland/desktop/wallpapers/Birch-Lake.png))
 # The compositor's own landscape is offered in the catalogue too (ws099-p019, 2026-10-05 user).
 $(eval $(call KEILAND_LINUX_DATA,share/keiland/wallpapers/Lakeside.png,userland/desktop/wallpapers/Lakeside.png))
 KEILAND_LINUX_ALL += $(KEILAND_LINUX_WALLPAPERS)
-KEILAND_LINUX_INSTALL += $(addprefix share/keiland/wallpapers/,$(addsuffix .png,$(KEILAND_LINUX_WALLPAPER_NAMES)))
+KEILAND_LINUX_INSTALL += $(addprefix share/keiland/wallpapers/,$(addsuffix .png,$(filter-out Dawn,$(KEILAND_LINUX_WALLPAPER_NAMES))))
 
 # The Japanese dictionary is in the tree (userland/desktop/ime/dict/SKK-JISYO.ja, one file of the supplement and
 # REmacs's dictionary since ws095-p017); the copyright holder's WS095 D1 relicensing places it under the project license.

@@ -147,12 +147,15 @@ struct arrange_desktop {
 };
 
 /*
- * The menu: whether it is open, where, the item a press is on (its release
- * acts on it), the item the keyboard selected, and whether a press on the
- * pill waits for its release to open the menu.  Its drawing (ws181-p007):
- * the pill's middle and width it grows from, when it opened (kwl_milliseconds'
- * clock), whether its growing is over, when it closed (0 once its fade is
- * over or before it ever closed), and how far it had grown then.
+ * The menu: whether it is open, on which output (the one whose bar's
+ * desktops' pill opened it, the system bar's or a head's, ws113-p015) and
+ * where, the item a press is on (its release acts on it), the item the
+ * keyboard selected, and whether a press on a pill waits for its release
+ * to open the menu, and on which output's pill.  Its drawing (ws181-p007):
+ * the pill's middle, its bar's top and its width it grows from, when it
+ * opened (kwl_milliseconds' clock), whether its growing is over, when it
+ * closed (0 once its fade is over or before it ever closed), and how far
+ * it had grown then.
  */
 struct arrange_menu {
 	unsigned open;
@@ -163,8 +166,10 @@ struct arrange_menu {
 	int pressed;
 	int selected;
 	unsigned pill_pressed;
+	unsigned pill_output;
 	unsigned swallow;
 	int32_t pill_middle;
+	int32_t pill_top;
 	int32_t pill_width;
 	uint64_t opened_ms;
 	unsigned settled;
@@ -232,7 +237,7 @@ static struct arrange_swap arrange_swap;
  */
 static struct arrange_join arrange_join;
 
-static void arrange_menu_open(struct kwl_server *server);
+static void arrange_menu_open(struct kwl_server *server, unsigned slot);
 static void arrange_menu_close(struct kwl_server *server, const char *via);
 static int arrange_menu_item_at(struct kwl_server *server, int32_t x, int32_t y);
 static void arrange_menu_item_rect(int item, int32_t *x, int32_t *y, int32_t *width, int32_t *height);
@@ -253,7 +258,8 @@ static int arrange_moving(void);
 
 /*
  * Handles a pointer button for the arrangement menu: a release of a press
- * on the desktops' pill opens or closes it (the menu opens on the release,
+ * on a desktops' pill (the system bar's or a head's, ws113-p015) opens the
+ * menu for that pill's output or closes it (the menu opens on the release,
  * as from the top band's tap); while it is open, a release on the item the
  * press was on acts on it, and a press outside closes it.  Returns 1 when
  * the button is the menu's.
@@ -265,25 +271,27 @@ kwl_arrange_button(
 	uint32_t state)
 {
 	int32_t pill_x;
+	int32_t pill_top;
 	int32_t pill_width;
 	int on_pill;
 	int item;
 
-	/* Whether the pointer is on the desktops' pill (shell.c). */
-	kwl_glass_desktops_pill(server, &pill_x, &pill_width);
+	/* Whether the pointer is on the desktops' pill of the output it is on (shell.c). */
+	kwl_glass_desktops_pill(server, server->pointer_output, &pill_x, &pill_top, &pill_width);
 	on_pill = 0;
-	if (server->pointer_y < KWL_GLASS_BAR &&
+	if (server->pointer_y >= pill_top &&
+	    server->pointer_y < pill_top + KWL_GLASS_BAR &&
 	    server->pointer_x >= pill_x &&
 	    server->pointer_x < pill_x + pill_width)
 		on_pill = 1;
 
-	/* The release of a press on the pill toggles the menu. */
+	/* The release of a press on a pill toggles the menu, opened for that pill's output. */
 	if (state == 0 && arrange_menu.pill_pressed) {
 		arrange_menu.pill_pressed = 0;
 		if (arrange_menu.open) {
 			arrange_menu_close(server, "pill");
 		} else {
-			arrange_menu_open(server);
+			arrange_menu_open(server, arrange_menu.pill_output);
 		}
 		return 1;
 	}
@@ -301,6 +309,7 @@ kwl_arrange_button(
 		    !on_pill)
 			return 0;
 		arrange_menu.pill_pressed = 1;
+		arrange_menu.pill_output = server->pointer_output;
 		return 1;
 	}
 
@@ -313,9 +322,10 @@ kwl_arrange_button(
 		return 1;
 	}
 
-	/* A press on the pill closes it at its release. */
+	/* A press on a pill closes it at its release. */
 	if (on_pill) {
 		arrange_menu.pill_pressed = 1;
+		arrange_menu.pill_output = server->pointer_output;
 		return 1;
 	}
 
@@ -409,7 +419,9 @@ int
 kwl_arrange_motion(
 	struct kwl_server *server)
 {
+	struct kwl_plane_rect output;
 	struct kwl_object *surface;
+	int32_t lowest;
 	int over;
 
 	/*
@@ -435,11 +447,13 @@ kwl_arrange_motion(
 	if (surface == NULL)
 		return 0;
 
-	/* The window follows the pointer, its title below the system bar. */
+	/* The window follows the pointer, its title below its output's bar. */
+	(void)kwl_output_rect(server, arrange_swap.output, &output);
+	lowest = output.y + kwl_output_top(server, arrange_swap.output);
 	surface->x = server->pointer_x - arrange_swap.dx;
 	surface->y = server->pointer_y - arrange_swap.dy;
-	if (surface->y < KWL_GLASS_BAR + KWL_GLASS_GAP + KWL_GLASS_TITLE)
-		surface->y = KWL_GLASS_BAR + KWL_GLASS_GAP + KWL_GLASS_TITLE;
+	if (surface->y < lowest)
+		surface->y = lowest;
 	server->dirty = 1;
 
 	/* Succeeded: the motion is the swap's. */
@@ -872,13 +886,19 @@ kwl_arrange_moved(
 }
 
 /*
- * Whether the arrangement menu shows: open, or fading out after it closed
- * (ws181-p007).  shell.c draws the scene under it blurred for its glass
- * while it does.
+ * Tells whether the arrangement menu shows on the output the pass draws:
+ * open, or fading out after it closed (ws181-p007), on the output it
+ * opened for (ws113-p015).  shell.c draws the scene under it blurred for
+ * its glass while it does.
  */
 int
-kwl_arrange_showing(void)
+kwl_arrange_showing(
+	struct kwl_server *server)
 {
+	/* Only on the output it opened for. */
+	if (arrange_menu.output != server->view_output)
+		return 0;
+
 	/* An open menu shows. */
 	if (arrange_menu.open)
 		return 1;
@@ -924,7 +944,9 @@ kwl_arrange_draw(
 	float left;
 	float top;
 
-	/* Only a menu that shows, where and how this frame draws it. */
+	/* Only a menu that shows, on the output it opened for, where and how this frame draws it. */
+	if (arrange_menu.output != server->view_output)
+		return;
 	shows = arrange_menu_view(server, &view);
 	if (!shows)
 		return;
@@ -1000,12 +1022,19 @@ kwl_arrange_draw(
 	}
 }
 
-/* Opens the menu under the desktops' pill, the keyboard's selection on the first layout; the log names each item's middle (the tests click them). */
+/*
+ * Opens the menu for an output under its bar's desktops' pill, the
+ * keyboard's selection on the first layout; the log names each item's
+ * middle (the tests click them).
+ */
 static void
 arrange_menu_open(
-	struct kwl_server *server)
+	struct kwl_server *server,
+	unsigned slot)
 {
+	struct kwl_plane_rect output;
 	int32_t pill_x;
+	int32_t pill_top;
 	int32_t pill_width;
 	int32_t x;
 	int32_t y;
@@ -1014,29 +1043,37 @@ arrange_menu_open(
 	unsigned item;
 
 	/* Under the pill's middle, inside the output. */
-	kwl_glass_desktops_pill(server, &pill_x, &pill_width);
+	(void)kwl_output_rect(server, slot, &output);
+	kwl_glass_desktops_pill(server, slot, &pill_x, &pill_top, &pill_width);
 	arrange_menu.x = pill_x + pill_width / 2 - ARRANGE_MENU_WIDTH / 2;
-	if (arrange_menu.x < 8)
-		arrange_menu.x = 8;
-	if (arrange_menu.x + ARRANGE_MENU_WIDTH > (int32_t)server->width - 8)
-		arrange_menu.x = (int32_t)server->width - 8 - ARRANGE_MENU_WIDTH;
-	arrange_menu.y = KWL_GLASS_BAR + ARRANGE_MENU_GAP;
+	if (arrange_menu.x < output.x + 8)
+		arrange_menu.x = output.x + 8;
+	if (arrange_menu.x + ARRANGE_MENU_WIDTH > output.x + (int32_t)output.width - 8)
+		arrange_menu.x = output.x + (int32_t)output.width - 8 - ARRANGE_MENU_WIDTH;
+	arrange_menu.y = pill_top + KWL_GLASS_BAR + ARRANGE_MENU_GAP;
 	arrange_menu.height = ARRANGE_MENU_HEIGHT;
 	arrange_menu.open = 1;
-	arrange_menu.output = KWL_PLANE_ANCHOR;
+	arrange_menu.output = slot;
 	arrange_menu.pressed = ARRANGE_ITEM_NONE;
 	arrange_menu.selected = 0;
 	server->dirty = 1;
 
 	/* It grows from the pill from now (ws181-p007); a fade of its last closing is over. */
 	arrange_menu.pill_middle = pill_x + pill_width / 2;
+	arrange_menu.pill_top = pill_top;
 	arrange_menu.pill_width = pill_width;
 	arrange_menu.opened_ms = kwl_milliseconds();
 	arrange_menu.settled = 0U;
 	arrange_menu.closed_ms = 0U;
 
-	/* The log: the menu, then each layout's middle. */
-	printf("KWL ARRANGE menu open x=%d y=%d width=%d height=%d\n", arrange_menu.x, arrange_menu.y, ARRANGE_MENU_WIDTH, arrange_menu.height);
+	/* The log: the menu (a head's with its output), then each layout's middle. */
+	if (slot == KWL_PLANE_ANCHOR) {
+		printf("KWL ARRANGE menu open x=%d y=%d width=%d height=%d\n", arrange_menu.x, arrange_menu.y, ARRANGE_MENU_WIDTH, arrange_menu.height);
+	} else {
+		printf("KWL ARRANGE menu open x=%d y=%d width=%d height=%d output=%u\n", arrange_menu.x, arrange_menu.y, ARRANGE_MENU_WIDTH, arrange_menu.height, slot);
+	}
+
+	/* Each layout's middle. */
 	for (item = 0U; item < ARRANGE_ITEMS; item++) {
 		arrange_menu_item_rect((int)item, &x, &y, &width, &height);
 		printf("KWL ARRANGE menu item=%s x=%d y=%d\n", kwl_arrange_name(item), x + width / 2, y + height / 2);
@@ -1161,14 +1198,14 @@ arrange_menu_grow(
 	float first_x;
 	float first_y;
 
-	/* Where it grows from: the pill's width, its middle, the bar's middle. */
+	/* Where it grows from: the pill's width, its middle, its bar's middle. */
 	first_scale = (float)arrange_menu.pill_width / (float)ARRANGE_MENU_WIDTH;
 	if (first_scale < ARRANGE_MENU_LEAST_SCALE)
 		first_scale = ARRANGE_MENU_LEAST_SCALE;
 	if (first_scale > 1.0f)
 		first_scale = 1.0f;
 	first_x = (float)arrange_menu.pill_middle - (float)ARRANGE_MENU_WIDTH * first_scale * 0.5f;
-	first_y = (float)KWL_GLASS_BAR * 0.5f - (float)arrange_menu.height * first_scale * 0.5f;
+	first_y = (float)arrange_menu.pill_top + (float)KWL_GLASS_BAR * 0.5f - (float)arrange_menu.height * first_scale * 0.5f;
 
 	/* As far as it has grown towards its own place, size, glass and opacity. */
 	view->scale = first_scale + (1.0f - first_scale) * grown;

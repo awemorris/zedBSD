@@ -137,17 +137,18 @@ $(KEILAND_FREEBSD_BUILD)/bin/keiland-desktop: userland/desktop/wayland/keiland-d
 KEILAND_FREEBSD_ALL += $(KEILAND_FREEBSD_BUILD)/bin/keiland-desktop
 KEILAND_FREEBSD_INSTALL += bin/keiland-desktop
 
-# Bundled gradients are generated outside git (PNG, ws138-p002); the default picture is the tree's Birch-Lake.png (U3).
+# Bundled gradients are generated outside git (PNG, ws138-p002); the default picture is the generated Dawn (2026-10-08 user), the tree's Birch-Lake.png (U3's default) is in the catalogue.
 KEILAND_FREEBSD_WALLPAPER_NAMES := Aurora Dawn Lagoon Meadow Twilight
 KEILAND_FREEBSD_WALLPAPERS := $(addprefix $(KEILAND_FREEBSD_BUILD)/share/keiland/wallpapers/,$(addsuffix .png,$(KEILAND_FREEBSD_WALLPAPER_NAMES)))
 $(KEILAND_FREEBSD_WALLPAPERS) &: userland/desktop/wallpapers/generate.py
 	$(KEILAND_FREEBSD_PYTHON) $< $(KEILAND_FREEBSD_BUILD)/share/keiland/wallpapers
-KEILAND_FREEBSD_WALLPAPER ?= userland/desktop/wallpapers/Birch-Lake.png
+KEILAND_FREEBSD_WALLPAPER ?= $(KEILAND_FREEBSD_BUILD)/share/keiland/wallpapers/Dawn.png
 $(eval $(call KEILAND_FREEBSD_DATA,share/keiland/wallpaper.png,$(KEILAND_FREEBSD_WALLPAPER)))
+$(eval $(call KEILAND_FREEBSD_DATA,share/keiland/wallpapers/Birch-Lake.png,userland/desktop/wallpapers/Birch-Lake.png))
 # The compositor's own landscape is offered in the catalogue too (ws099-p019, 2026-10-05 user).
 $(eval $(call KEILAND_FREEBSD_DATA,share/keiland/wallpapers/Lakeside.png,userland/desktop/wallpapers/Lakeside.png))
 KEILAND_FREEBSD_ALL += $(KEILAND_FREEBSD_WALLPAPERS)
-KEILAND_FREEBSD_INSTALL += $(addprefix share/keiland/wallpapers/,$(addsuffix .png,$(KEILAND_FREEBSD_WALLPAPER_NAMES)))
+KEILAND_FREEBSD_INSTALL += $(addprefix share/keiland/wallpapers/,$(addsuffix .png,$(filter-out Dawn,$(KEILAND_FREEBSD_WALLPAPER_NAMES))))
 
 # The Japanese dictionary is in the tree (userland/desktop/ime/dict/SKK-JISYO.ja, one file of the supplement and
 # REmacs's dictionary since ws095-p017); the copyright holder's WS095 D1 relicensing places it under the project license.

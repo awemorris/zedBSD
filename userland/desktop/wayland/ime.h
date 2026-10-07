@@ -104,6 +104,12 @@ struct kwl_ime_app {
  * its language.  An application's entry goes when its last connection
  * ends.
  *
+ * The language's chip in the bars: indicator_shown while it shows,
+ * indicator_x where it was last drawn in the system bar (logged when it
+ * moves), and indicators where it was drawn on each output's bar (the
+ * system bar's and each head's, ws113-p015), which a click is looked up
+ * in.
+ *
  * It is made by kwl_ime_start when the program exists, and lives for the
  * compositor's lifetime; the connection and the objects come and go with
  * the process, which is started again after a crash a few times.
@@ -125,6 +131,7 @@ struct kwl_ime {
 	char label[16];
 	int32_t indicator_x;
 	unsigned indicator_shown;
+	struct kwl_plane_places indicators;
 	unsigned composing;
 	struct kwl_text_input *active;
 	unsigned activated;
@@ -185,7 +192,7 @@ void kwl_ime_text_input_gone(struct kwl_server *server, struct kwl_text_input *i
 void kwl_ime_surface_commit(struct kwl_object *surface);
 void kwl_ime_popup_draw(struct kwl_server *server, VkCommandBuffer command);
 int32_t kwl_ime_indicator_width(struct kwl_server *server);
-void kwl_ime_indicator_draw(struct kwl_server *server, VkCommandBuffer command, int32_t x, const float *ink);
+void kwl_ime_indicator_draw(struct kwl_server *server, VkCommandBuffer command, int32_t x, int32_t top, const float *ink);
 int kwl_ime_indicator_button(struct kwl_server *server, uint32_t button, uint32_t state);
 
 #endif

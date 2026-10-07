@@ -2,10 +2,10 @@
 
 # ws090-p015: Terminal・Notes の scroll を `kui_scroll` へ
 
-Status: planning（2026-09-30 Q1 の案、ws.md の表）
+Status: test-wait（T1 の番号は Q1 が返す。q862-i01、P1、2026-10-08: kl_scroll の追加、Terminal・Notes の切り替え、host 試験まで済み。残りは QEMU の guest 試験と boot test（T1））
 Disposition: normal
 Parent: [WS090](../ws.md)
-Queue: なし
+Queue: q862 / q862-i01（P1）
 依存: p011（cleared）
 
 この file は 2026-10-01 に手引き（[../guide.md](../guide.md)）と一緒に作った。範囲は ws.md の表の行（Q1 の案）のとおりで、下の手順と完了の条件は
@@ -82,3 +82,41 @@ Queue: なし
 - `-Wconversion` の下で `scroll.c` が通るか（手順 6）: 2026-10-01 の scroll.c は通る（`clang -std=gnu11 -O2 -Wall -Wextra -Werror -Wconversion -Wno-sign-conversion -Ibuild/ws090/inc -c userland/desktop/libkeiui/scroll.c -o /dev/null` が exit 0。`build/ws090/inc` は `sh plan/ws090/tests/host-input.sh` が作る）。足した関数の後にもう一度確かめる。
 - Terminal の view は「行」の単位（`touch_position()` が行と pixel の offset から位置を作る）で、`kui_scroll` の bars（`kui_scroll_draw_bars`）は使わない。
   bars を使わないことで `kui_scroll` の `moved_us` の扱いに差が出ないか（見るのは `kui_scroll_step` の戻り値だけにする）。
+
+## q862-i01（P1、2026-10-08、途中）
+
+名前は今の tree に読み替える: `kui_scroll` → libkeiland の `kl_scroll`（`userland/desktop/libkeiland/ui/scroll.c`）、`keiland_scroller` → `kl_scroller`。
+Q1 の承認（2026-10-08）: 範囲 1〜4、WS081 の `run-termtouch.sh`・`run-notestouch.sh` の compile の列に `ui/scroll.c` を足す 1 行ずつはこの Phase の所有に加える。
+
+済み（commit は下の報告）:
+- 変更前の基準: `run-termtouch.sh` 20 checks ok、`run-notestouch.sh` 52 checks ok（`build/p1-ws090-p015/*-before`）。
+- `kl_scroll`（KL_VERSION 61）: `kl_scroll_set_bounds`（最小・最大と rubber band の大きさ、`kl_scroll_set_size` で元の端に戻る）、`kl_scroll_fling` が飛ぶかを返す、
+  `kl_scroll_axis_at`・`kl_scroll_axis_stop_at`（event の時刻と速度、既存の `axis`・`axis_stop` はこれを now で呼ぶ）、`kl_scroll_axis_holding`、
+  指が保持中に `kl_scroll_move_to` で位置が引き継がれた後の axis の取り直し、Home は最小の端へ。host（`-Wconversion`）と zedBSD の build で warning 0、
+  style-check 0。位置の引き継ぎは `kl_scroll_move_to(glide=0)` で足りる（新しい関数は作らない）。
+- host 試験の link: `ui/scroll.c` は `kl_canvas_round`・`kl_scroll_bar_*` を引くので、試験は `ui/scroll-bar.c`・`ui/canvas.c`（libc と libm だけ）も compile する（source の移動はしない）。
+
+残り（2026-10-08 の中断の時点）: Terminal・Notes の `touch.c`・`touch.h` を `struct kl_scroll` に、試験の compile の列（WS081 の 2 本、`plan/ws090/tests/host-pad.sh`）、`host-input.c` の case、Linux の build、T1 への依頼。
+
+### q862-i01 の続き（P1、2026-10-08、ws113-p015 の後）
+
+- Terminal（`terminal/touch.c`・`touch.h`）: `struct kl_scroller *scroller` → `struct kl_scroll scroll`（`KL_SCROLL_Y`）。ends は `kl_scroll_set_bounds(0, 0, top, 0, 1, grid の高さ)`、
+  画面が別の手段で動かした view の引き継ぎ・押す前の位置・touch pad の最初の move は `kl_scroll_move_to(glide=0)`、drag・step（位置は `scroll.y`）・fling（飛んだかを返す）・
+  cancel・`kl_scroll_axis_at`・`kl_scroll_axis_stop_at`・`kl_scroll_axis_holding`。open の失敗の判定は gesture の有無で（scroll の pointer を見ない）。
+- Notes（`notes/touch.c`・`touch.h`）: 同じく `struct kl_scroll scroll`（`KL_SCROLL_X | KL_SCROLL_Y`）、ends は `kl_scroll_set_bounds(0, 最大 x, 0, 最大 y, 幅, 部屋の高さ)`。
+  layout・頁の先頭・拡大（double tap・pinch）・pen の時の停止の位置は `kl_scroll_move_to(glide=0)`（停止は ends の中に収めて `scroll.x`・`scroll.y` を取る）。
+  pinch の間の拡大の位置の引き継ぎで指は scroll から離れ、pinch の終わりの再の press がそこから続ける（前と同じ流れ）。
+- 違い（読んで分かった物）: 位置の引き継ぎの後で同じ指の DRAG_END が再の press より先に来ると（例: 2 本の指が同じ間に離れた pinch の直後）、`kl_scroll_fling` は scroll が指を持たないので何もしない
+  （前は scroller が投げた）。その場合の page は拡大の置いた位置で止まる。
+- 試験: `run-termtouch.sh`・`run-notestouch.sh`・`plan/ws090/tests/host-pad.sh` は `ui/scroll.c`・`ui/scroll-bar.c`・`ui/canvas.c` も compile する（`-Wconversion` で通る）。
+  `host-input.c` に `test_scroll_bounds`（負の最小、rubber band と戻りが bare の scroller と frame ごとに同じ、不正な ends、fling の答え、指と touch pad の位置の引き継ぎ、
+  Home・End、`set_size` で元の端）。
+
+### 確認（host・build、2026-10-08）
+
+- `run-termtouch.sh` 20 checks ok・`run-notestouch.sh` 52 checks ok（手順 1 と同じ件数）。log は変更前（`build/p1-ws090-p015/*-before`）と全く同じ（diff 0）。
+  `host-pad.sh` 7 checks ok、変更前の touch.c で同じ試験を作った log と diff 0。
+- `host-input.sh` 96/96、`host-widgets.sh` 94/94、`plan/tools/textedit/host-core.sh` 58/58、`plan/tools/keiui/host-chooser.sh` 85/85、`run-notes-host.sh` ok。
+- build: zedBSD の `build/p1-wl/bin/{terminal,notes}`（config-amd64-p005.mk）warning 0、keiland-linux.mk の gcc・clang warning 0。
+- 完了の条件 1: `grep -c kl_scroller_ terminal/touch.c notes/touch.c` が 0・0。style-check: touch.c 2 本・ui/scroll.c 0、host-input.c は前からの 1 件だけ。`git diff --check` 0。
+- 未実施（T1 へ）: 手順 8 の guest（S8・S9 の `demo-s8-s9.sh`、WS081 の p011・p013・p014・p015 の guest、Terminal の回帰 p079・p093・p100・p114・p086・p088）と boot test。

@@ -9,7 +9,7 @@
  * The touch screen of Notes (ws081-p013, plan/ws081/design.md section 5):
  * the pen (and the pointer) writes, the fingers move the page.  One finger
  * scrolls a page zoomed past the window, gliding on after a flick and
- * stretching past its edges (libkeiland's scroller); two fingers zoom
+ * stretching past its edges (libkeiland's kl_scroll); two fingers zoom
  * about the place between them; a double tap zooms in twice about the
  * tapped place, or back to the whole page; a tap on the toolbar presses its
  * button.
@@ -119,23 +119,24 @@ struct notes_touch_finger {
  *
  * The layout (notes_touch_layout) gives the window's size, the toolbar's
  * band, the margin, the page's size in points and the scale at which the
- * whole page fits; zoom multiplies that scale, and the scroller holds the
- * page's scroll (pixels, from its top left edge less the margin) on the
- * axes where the zoomed page is larger than the room (scroll_* as it last
- * gave it).  view_* is where the page is drawn (its top left in pixels, and
+ * whole page fits; zoom multiplies that scale, and the scroll (kl_scroll,
+ * ws090-p015, its ends and rubber band set for the zoomed page and the
+ * room) holds the page's scroll (pixels, from its top left edge less the
+ * margin) on the axes where the zoomed page is larger than the room
+ * (scroll_* as it last gave it).  view_* is where the page is drawn (its top left in pixels, and
  * pixels per point).
  *
  * pen_near says the pen is over the window, pen_left_us when it last left.
- * pressed says the scroller holds the fingers' touch, moving that it owns
+ * pressed says the scroll holds the fingers' touch, moving that it owns
  * the page's place (from a touch until the page rests), dragging that the
  * fingers' drag scrolls, and caught that the touch caught a gliding page;
  * toolbar that the first finger touched the toolbar (it only taps), base_*
- * the drag's offset when the scroller was last pressed.  While two fingers
+ * the drag's offset when the scroll was last pressed.  While two fingers
  * zoom (pinching), anchor_* is the page's point, in points, that stays
  * between them, pinch_zoom the zoom and pinch_ratio their distance's ratio
  * when the zoom began; zooming is what the frame asks (the page's picture
- * may be stretched rather than drawn again).  bounds_* are the scroller's
- * bounds as last set.
+ * may be stretched rather than drawn again).  bounds_* are the scroll's
+ * ends and room as last set.
  *
  * write_mode says one finger writes (the toolbar's Finger); writing that a
  * finger writes now: writer_id is that finger, writer_down_us when it
@@ -145,7 +146,7 @@ struct notes_touch_finger {
  */
 struct notes_touch {
 	struct kl_gesture *gesture;
-	struct kl_scroller *scroller;
+	struct kl_scroll scroll;
 	struct notes_touch_finger fingers[NOTES_TOUCH_FINGERS];
 	unsigned followed;
 
@@ -197,14 +198,14 @@ struct notes_touch {
 	float page_height;
 	float fit_scale;
 
-	/* The page's scroll as the scroller last gave it, and where the page is drawn. */
+	/* The page's scroll as the scroll last gave it, and where the page is drawn. */
 	double scroll_x;
 	double scroll_y;
 	float view_x;
 	float view_y;
 	float view_scale;
 
-	/* The scroller's bounds as last set. */
+	/* The scroll's ends and room as last set. */
 	double bounds_x;
 	double bounds_y;
 	double bounds_width;

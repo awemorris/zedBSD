@@ -242,6 +242,7 @@
 		kl_scroll_init;
 		kl_scroll_release;
 		kl_scroll_set_size;
+		kl_scroll_set_bounds;
 		kl_scroll_wheel;
 		kl_scroll_move_to;
 		kl_scroll_reveal;
@@ -252,6 +253,9 @@
 		kl_scroll_cancel;
 		kl_scroll_axis;
 		kl_scroll_axis_stop;
+		kl_scroll_axis_at;
+		kl_scroll_axis_stop_at;
+		kl_scroll_axis_holding;
 		kl_scroll_step;
 		kl_scroll_limit_x;
 		kl_scroll_limit_y;

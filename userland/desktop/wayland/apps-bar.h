@@ -46,8 +46,17 @@ struct apps_rect {
 	int32_t height;
 };
 
-/* The desktop's applications this moment, and (with room in the bar) where their icons go. */
+/*
+ * The desktop's applications this moment on an output's bar, and (with
+ * room in the bar) where their icons go: the output (the system bar's
+ * anchor, whose bar and switcher have the desktop's every window, or a
+ * head, whose bar has the windows on it, ws113-p015), its rectangle and
+ * its bar's top in the plane.
+ */
 struct apps_view {
+	unsigned output;
+	struct kwl_plane_rect area;
+	int32_t top;
 	struct kwl_apps apps;
 	struct kwl_apps_window described[VIEW_WINDOWS];
 	struct kwl_object *surfaces[VIEW_WINDOWS];
@@ -69,6 +78,7 @@ struct apps_panel {
 };
 
 int kwl_apps_view_build(struct kwl_server *server, struct apps_view *view);
+int kwl_apps_view_build_on(struct kwl_server *server, unsigned slot, struct apps_view *view);
 int kwl_apps_view_collect(struct kwl_server *server, struct apps_view *view);
 void kwl_apps_tiles_layout(struct kwl_server *server, const struct apps_view *view, unsigned found, struct apps_panel *panel);
 int kwl_apps_tile_at(const struct apps_rect *tiles, unsigned count, int32_t x, int32_t y);

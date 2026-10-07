@@ -343,12 +343,13 @@ struct shell_rect {
 };
 
 /*
- * Where the system bar's parts are (ws099-p034): the clock's pill and text at
- * the right, the status pill left of it with each icon's left edge, the
+ * Where a bar's parts are (ws099-p034): the clock's pill and text at the
+ * right, the status pill left of it with each icon's left edge, the
  * desktops' pill left of that (ws181-p009; desktops_line: where the room
  * left of it ends), the docked window's buttons at the right end, and on
  * the left the launcher's line and the docked title (or the applications'
- * pill).
+ * pill).  Every place is in the plane: the system bar's on the anchor, a
+ * head's bar on its output (ws113-p015), whose slot and top it keeps.
  */
 struct shell_bar {
 	char clock[64];
@@ -371,9 +372,11 @@ struct shell_bar {
 	int32_t menu_line;
 	int32_t title_x;
 	int32_t top;
+	unsigned output;
 };
 
 static void bar_layout(struct kwl_server *server, struct shell_bar *bar);
+static void bar_layout_on(struct kwl_server *server, unsigned slot, struct shell_bar *bar);
 static void draw_window(struct kwl_server *server, VkCommandBuffer command, struct kwl_object *surface, unsigned focused, const struct shell_bar *bar);
 static int window_shown(struct kwl_server *server, struct kwl_object *surface, float home, float position);
 static void window_layer(struct kwl_server *server, struct kwl_object *surface, float home, float position);
@@ -399,7 +402,6 @@ static void draw_bar_strip(struct kwl_server *server, VkCommandBuffer command, c
 static void draw_bar_buttons(struct kwl_server *server, VkCommandBuffer command, const struct shell_bar *bar, struct kwl_object *docked, const struct glass_bar_colours *colours);
 static void draw_bar_group_faded(struct kwl_server *server, VkCommandBuffer command, int32_t x, int32_t width, int32_t height, float opacity);
 static void draw_bar_group_at(struct kwl_server *server, VkCommandBuffer command, int32_t x, int32_t bar_top, int32_t width, int32_t height, float opacity);
-static void head_bar_layout(struct kwl_server *server, unsigned slot, struct shell_bar *bar);
 static void draw_head_bar(struct kwl_server *server, VkCommandBuffer command, unsigned slot);
 static int head_bar_press(struct kwl_server *server, unsigned slot);
 static void bar_dock_follow(struct kwl_server *server);
@@ -408,14 +410,13 @@ static void draw_desktops(struct kwl_server *server, VkCommandBuffer command, co
 static void draw_status(struct kwl_server *server, VkCommandBuffer command, const struct shell_bar *bar, const float *ink);
 static void draw_home_status(struct kwl_server *server, VkCommandBuffer command, const struct shell_bar *bar);
 static int home_bar_passes(struct kwl_server *server, uint32_t state);
-static void draw_battery(struct kwl_server *server, VkCommandBuffer command, int32_t x, int percent, unsigned charging, const float *ink);
+static void draw_battery(struct kwl_server *server, VkCommandBuffer command, int32_t x, int32_t middle, int percent, unsigned charging, const float *ink);
 static void draw_dock_hint(struct kwl_server *server, VkCommandBuffer command);
 static float animation_progress(struct kwl_server *server);
 static void lerp_rect(const struct shell_rect *from, const struct shell_rect *to, float t, struct shell_rect *result);
 static void body_rect(struct kwl_server *server, const struct kwl_object *surface, struct shell_rect *body);
 static void docked_rect(struct kwl_server *server, unsigned slot, struct shell_rect *body);
 static unsigned window_slot(const struct kwl_object *surface);
-static int output_rect(struct kwl_server *server, unsigned slot, struct kwl_plane_rect *rect);
 static void glass_fit_on(struct kwl_server *server, unsigned slot, int32_t width, int32_t height, int32_t *x, int32_t *y);
 static void pulled_rect(struct kwl_server *server, const struct kwl_object *surface, struct shell_rect *body);
 static void pull_back(struct kwl_server *server);
@@ -502,6 +503,14 @@ static void band_replay(struct kwl_server *server, int release);
 
 /* Whether where the desktops' pictures are has been logged (once, for the tests that click them). */
 static unsigned shell_desktops_logged;
+
+/*
+ * Where each head's bar was last logged (ws113-p015): its desktops' pill's
+ * left and its top, for the session.  A head's bar is logged when it is
+ * first drawn and when it moves (the tests and the hardware's checks find
+ * its parts by it); no bit set is never logged.
+ */
+static struct kwl_plane_places shell_head_bars_logged;
 
 /*
  * The bottom edge's swipe over a fullscreen window: whether a contact that
@@ -724,7 +733,7 @@ kwl_glass_draw(
 	 * under it blurred as the windows' frosted panels (ws181-p007); solid
 	 * panels need no blur.
 	 */
-	menu = kwl_arrange_showing();
+	menu = kwl_arrange_showing(server);
 	if (menu &&
 	    home <= 0.0f &&
 	    server->panels_opaque == 0U)
@@ -761,11 +770,12 @@ kwl_glass_draw(
 /*
  * Draws a head's windows in the glass look (heads.c's pass, ws113-p007):
  * each window of the desktop shown with its title bar, bottom to top, then
- * their popups.  The system bar, App Home, Wiseview and the other screens
- * are the anchor's; a window's glass shows the blurred wallpaper (no
- * blurred scene under it on a head).  Its own bar is over them, with a
- * window docked on the head (ws113-p015).  While App Home shows on the
- * anchor, a head shows its background alone.
+ * their popups.  App Home, Wiseview and the other screens are the
+ * anchor's; a window's glass shows the blurred wallpaper (no blurred scene
+ * under it on a head).  Its own bar is over them (ws113-p015, the
+ * 2026-10-08 user decision: its docked window or its applications' icons,
+ * the desktops, the status and the clock), and what that bar opened.
+ * While App Home shows on the anchor, a head shows its background alone.
  */
 void
 kwl_glass_draw_head(
@@ -797,7 +807,7 @@ kwl_glass_draw_head(
 	layer = server->layer_on;
 	server->layer_on = 0;
 	top = kwl_top_window(server);
-	head_bar_layout(server, server->view_output, &bar);
+	bar_layout_on(server, server->view_output, &bar);
 
 	/* Each window of the desktop shown. */
 	for (index = 0U; index < count; index++) {
@@ -814,10 +824,21 @@ kwl_glass_draw_head(
 		draw_window(server, command, windows[index], focused, &bar);
 	}
 
-	/* The head's bar over them (ws113-p015), their popups over it (popup.c draws those of the output drawn), and the shell's menus opened on the head. */
+	/* The head's bar over them (ws113-p015), their popups over it (popup.c draws those of the output drawn). */
 	draw_head_bar(server, command, server->view_output);
 	kwl_popup_draw(server, command);
+
+	/*
+	 * What the head's bar opened, each drawn on the output it opened on:
+	 * an application's previews (apps-bar.c), the shell's menus
+	 * (menu-shell.c), the network's menu, the arrangement menu (on the
+	 * blurred wallpaper, as a head's other glass) and the volume's popup.
+	 */
+	kwl_apps_bar_draw_popup(server, command);
 	kwl_menu_draw_popups(server, command);
+	kwl_network_draw_menu(server, command);
+	kwl_arrange_draw(server, command);
+	kwl_volume_draw_popup(server, command);
 	server->layer_on = layer;
 }
 
@@ -882,8 +903,10 @@ kwl_glass_button(
 
 	/*
 	 * A press with the pointer on a head (ws113-p007) is for the head's
-	 * windows alone: the corners, the edges, the system bar and its
-	 * widgets are the anchor's (their releases still come here).
+	 * windows and its bar's widgets (ws113-p015) alone: the corners, the
+	 * edges and App Home are the anchor's (their releases still come
+	 * here).  A fullscreen window keeping the system bar away (cover)
+	 * keeps no head's bar away.
 	 */
 	remote = 0;
 	if (server->pointer_output != KWL_PLANE_ANCHOR && state != 0)
@@ -964,37 +987,37 @@ kwl_glass_button(
 		return 1;
 
 	/* The removable media's icon takes a press on it: Files on its devices (media.c). */
-	if (cover == NULL && !remote) {
+	if (cover == NULL || remote) {
 		pressed = kwl_media_button(server, button, state);
 		if (pressed)
 			return 1;
 	}
 
-	/* The input method's indicator takes a press on it: the next language (input-method.c). */
-	if (cover == NULL && !remote) {
+	/* The input method's indicator takes a press on it, on any output's bar: the next language (input-method.c). */
+	if (cover == NULL || remote) {
 		pressed = kwl_ime_indicator_button(server, button, state);
 		if (pressed)
 			return 1;
 	}
 
-	/* The volume takes a press on its icon, and every button while its popup is open (volume.c). */
+	/* The volume takes a press on its icon on any output's bar, and every button while its popup is open (volume.c). */
 	open = kwl_volume_is_open();
-	if ((cover == NULL && !remote) || open) {
+	if (cover == NULL || remote || open) {
 		pressed = kwl_volume_button(server, button, state);
 		if (pressed)
 			return 1;
 	}
 
-	/* The network takes a press on its icon, and every button while its menu is open (network.c). */
+	/* The network takes a press on its icon on any output's bar, and every button while its menu is open (network.c). */
 	open = kwl_network_is_open();
-	if ((cover == NULL && !remote) || open) {
+	if (cover == NULL || remote || open) {
 		pressed = kwl_network_button(server, button, state);
 		if (pressed)
 			return 1;
 	}
 
-	/* The arrangement menu takes a press on the desktops' pill, and every button while it is open (arrange-shell.c, WS181). */
-	if (cover == NULL && !remote) {
+	/* The arrangement menu takes a press on any output's desktops' pill, and every button while it is open (arrange-shell.c, WS181). */
+	if (cover == NULL || remote) {
 		pressed = kwl_arrange_button(server, button, state);
 		if (pressed)
 			return 1;
@@ -1005,9 +1028,8 @@ kwl_glass_button(
 	if (pressed)
 		return 1;
 
-	/* The bar's applications take a press on an icon or a preview, and its release (apps-bar.c). */
-	if (!remote)
-		pressed = kwl_apps_bar_button(server, button, state);
+	/* The bars' applications take a press on an icon or a preview, and its release (apps-bar.c). */
+	pressed = kwl_apps_bar_button(server, button, state);
 	if (pressed)
 		return 1;
 
@@ -1072,7 +1094,7 @@ kwl_glass_button(
 
 	/* A head's bar is too (ws113-p015). */
 	if (remote) {
-		(void)output_rect(server, server->pointer_output, &output);
+		(void)kwl_output_rect(server, server->pointer_output, &output);
 		if (server->pointer_y < output.y + KWL_GLASS_BAR) {
 			pressed = head_bar_press(server, server->pointer_output);
 			return pressed;
@@ -2129,7 +2151,7 @@ kwl_glass_toplevel_move_end(
 
 	/* Retires the moving identity before docking or emitting diagnostics. */
 	server->drag = NULL;
-	(void)output_rect(server, server->pointer_output, &output);
+	(void)kwl_output_rect(server, server->pointer_output, &output);
 	if (server->pointer_y < output.y + KWL_GLASS_BAR &&
 	    server->drag_left_bar &&
 	    server->pointer_output == surface->output) {
@@ -2629,18 +2651,25 @@ kwl_glass_forget(
 	kwl_arrange_forget(server, surface);
 }
 
-/* Gives where the system bar's desktops' pill is across, and its width (for the arrangement menu, arrange-shell.c). */
+/*
+ * Gives where an output's desktops' pill is: its left, its bar's top and
+ * its width in the plane (the system bar's on the anchor, a head's bar's,
+ * ws113-p015; for the arrangement menu, arrange-shell.c).
+ */
 void
 kwl_glass_desktops_pill(
 	struct kwl_server *server,
+	unsigned slot,
 	int32_t *x,
+	int32_t *top,
 	int32_t *width)
 {
 	struct shell_bar bar;
 
 	/* The bar's layout now. */
-	bar_layout(server, &bar);
+	bar_layout_on(server, slot, &bar);
 	*x = bar.desktops_x;
+	*top = bar.top;
 	*width = bar.desktops_width;
 }
 
@@ -2700,7 +2729,7 @@ kwl_glass_work_area(
 
 	/* A head's: under its bar (ws113-p015; no keyboard nor bottom strip there). */
 	if (slot != KWL_PLANE_ANCHOR) {
-		(void)output_rect(server, slot, &output);
+		(void)kwl_output_rect(server, slot, &output);
 		area->x = output.x;
 		area->y = output.y + KWL_GLASS_BAR;
 		area->width = (int32_t)output.width;
@@ -3090,27 +3119,51 @@ kwl_glass_tick(
 	server->dirty = 1;
 }
 
-/*
- * Lays out the system bar (ws099-p034): from the right the clock's pill and
- * the status pill (the input method's language, the removable media, the
- * network, the volume and the battery, each in a slot); the desktops' pill
- * left of the status pill (ws181-p009) and the docked window's buttons at
- * the right end; from the left the launcher, a line and the docked title.
- */
+/* Lays out the system bar on the anchor (bar_layout_on). */
 static void
 bar_layout(
 	struct kwl_server *server,
 	struct shell_bar *bar)
 {
+	/* The anchor's. */
+	bar_layout_on(server, KWL_PLANE_ANCHOR, bar);
+}
+
+/*
+ * Lays out an output's bar (ws099-p034; a head's, ws113-p015, the
+ * 2026-10-08 user decision): from the right the clock's pill and the
+ * status pill (the input method's language, the removable media, the
+ * network, the volume and the battery, each in a slot); the desktops' pill
+ * left of the status pill (ws181-p009) and the docked window's buttons at
+ * the right end; from the left the launcher, a line and the docked title.
+ * The system bar makes room for the buttons as its docked layout comes in
+ * (animated); a head's bar at once while a window is docked on the head.
+ */
+static void
+bar_layout_on(
+	struct kwl_server *server,
+	unsigned slot,
+	struct shell_bar *bar)
+{
+	struct kwl_plane_rect output;
+	struct kwl_object *docked;
 	struct tm local;
 	time_t now;
-	int32_t slot;
+	int32_t place;
+	int32_t right;
+	float dock;
 	int32_t battery_slot;
 	int32_t slots;
 	int32_t shift;
 	int ime_width;
 	int media_width;
 	int button;
+
+	/* The output's rectangle, the bar along its top. */
+	(void)kwl_output_rect(server, slot, &output);
+	right = output.x + (int32_t)output.width;
+	bar->output = slot;
+	bar->top = output.y;
 
 	/* The date and time in a pill at the right edge. */
 	now = time(NULL);
@@ -3119,7 +3172,7 @@ bar_layout(
 	bar->clock[0] = '\0';
 	kwl_language_date(&local, KWL_LANGUAGE_DATE_SHORT, bar->clock, sizeof(bar->clock));
 	bar->clock_pill_width = glass_text_width(server, SIZE_BAR, bar->clock) + 2 * BAR_CLOCK_PAD;
-	bar->clock_pill_x = (int32_t)server->width - BAR_EDGE - bar->clock_pill_width;
+	bar->clock_pill_x = right - BAR_EDGE - bar->clock_pill_width;
 	bar->clock_x = bar->clock_pill_x + BAR_CLOCK_PAD;
 
 	/*
@@ -3128,10 +3181,21 @@ bar_layout(
 	 * it as the docked layout comes in (bar_dock, animated).
 	 */
 	bar->buttons_width = BUTTON_COUNT * BAR_BUTTON_SPACING + 6;
-	bar->buttons_x = (int32_t)server->width - BAR_EDGE - bar->buttons_width;
+	bar->buttons_x = right - BAR_EDGE - bar->buttons_width;
 	for (button = 0; button < BUTTON_COUNT; button++)
 		bar->buttons[button] = bar->buttons_x + 3 + BAR_BUTTON_SPACING / 2 + (BUTTON_COUNT - 1 - button) * BAR_BUTTON_SPACING;
-	shift = (int32_t)(server->bar_dock * (float)(bar->buttons_width + BAR_PILL_GAP) + 0.5f);
+
+	/* How far the docked layout has come in: the system bar's animation, a head's at once. */
+	dock = server->bar_dock;
+	if (slot != KWL_PLANE_ANCHOR) {
+		docked = docked_window(server, slot);
+		dock = 0.0f;
+		if (docked != NULL)
+			dock = 1.0f;
+	}
+
+	/* The status and the clock make that much room. */
+	shift = (int32_t)(dock * (float)(bar->buttons_width + BAR_PILL_GAP) + 0.5f);
 	bar->clock_pill_x -= shift;
 	bar->clock_x -= shift;
 
@@ -3161,18 +3225,18 @@ bar_layout(
 	bar->status_x = bar->clock_pill_x - BAR_PILL_GAP - bar->status_width;
 
 	/* Each icon centred in its slot, from the left: the language, the media, the network, the volume, the battery. */
-	slot = bar->status_x + BAR_STATUS_PAD;
-	bar->ime_x = slot + (BAR_SLOT - 26) / 2;
+	place = bar->status_x + BAR_STATUS_PAD;
+	bar->ime_x = place + (BAR_SLOT - 26) / 2;
 	if (ime_width > 0)
-		slot += BAR_SLOT;
-	bar->media_x = slot + (BAR_SLOT - 20) / 2;
+		place += BAR_SLOT;
+	bar->media_x = place + (BAR_SLOT - 20) / 2;
 	if (media_width > 0)
-		slot += BAR_SLOT;
-	bar->signal_x = slot + (BAR_SLOT - 20) / 2;
-	slot += BAR_SLOT;
-	bar->volume_x = slot + (BAR_SLOT - 20) / 2;
-	slot += BAR_SLOT;
-	bar->battery_x = slot + (BAR_SLOT - 26) / 2;
+		place += BAR_SLOT;
+	bar->signal_x = place + (BAR_SLOT - 20) / 2;
+	place += BAR_SLOT;
+	bar->volume_x = place + (BAR_SLOT - 20) / 2;
+	place += BAR_SLOT;
+	bar->battery_x = place + (BAR_SLOT - 26) / 2;
 
 	/*
 	 * The desktops' pill just left of the status pill (ws181-p009, the
@@ -3185,11 +3249,8 @@ bar_layout(
 	bar->desktops_line = bar->desktops_x - 12;
 
 	/* On the left, after the launcher, a line and the docked title (ws035-p117: no word after the mark). */
-	bar->menu_line = BAR_LAUNCHER_X + BAR_LAUNCHER_SIZE + 10;
+	bar->menu_line = output.x + BAR_LAUNCHER_X + BAR_LAUNCHER_SIZE + 10;
 	bar->title_x = bar->menu_line + 14;
-
-	/* The system bar is at the anchor's top. */
-	bar->top = 0;
 }
 
 /*
@@ -4104,7 +4165,7 @@ draw_system_bar(
 
 	/* Without a docked title, the applications' pill in its place (apps-bar.c, ws142-p004). */
 	if (docked == NULL && progress <= 0.0f)
-		(void)kwl_apps_bar_draw(server, command);
+		(void)kwl_apps_bar_draw(server, command, KWL_PLANE_ANCHOR);
 
 	/* The desktops, then the status in its pills. */
 	draw_desktops(server, command, bar, &colours);
@@ -4117,41 +4178,12 @@ draw_system_bar(
 }
 
 /*
- * Lays out a head's bar (ws113-p015, the 2026-10-08 UAT): across the
- * head's top, a docked window's title from its left end (no launcher) and
- * its buttons at its right end.  The clock, the status, the desktops and
- * App Home are the system bar's.
- */
-static void
-head_bar_layout(
-	struct kwl_server *server,
-	unsigned slot,
-	struct shell_bar *bar)
-{
-	struct kwl_plane_rect output;
-	int button;
-
-	/* The head's rectangle of the plane. */
-	memset(bar, 0, sizeof(*bar));
-	(void)output_rect(server, slot, &output);
-	bar->top = output.y;
-
-	/* The docked window's buttons in a pill at the right end. */
-	bar->buttons_width = BUTTON_COUNT * BAR_BUTTON_SPACING + 6;
-	bar->buttons_x = output.x + (int32_t)output.width - BAR_EDGE - bar->buttons_width;
-	for (button = 0; button < BUTTON_COUNT; button++)
-		bar->buttons[button] = bar->buttons_x + 3 + BAR_BUTTON_SPACING / 2 + (BUTTON_COUNT - 1 - button) * BAR_BUTTON_SPACING;
-
-	/* Its title from the left end, its room ending a gap before the buttons (desktops_line stands for that end). */
-	bar->menu_line = output.x + BAR_EDGE;
-	bar->title_x = bar->menu_line + 14;
-	bar->desktops_line = bar->buttons_x - BAR_PILL_GAP;
-}
-
-/*
- * Draws a head's bar (heads.c's pass, ws113-p015): its strip, and for a
+ * Draws a head's bar (heads.c's pass, ws113-p015, the 2026-10-08 user
+ * decision): as the system bar, its strip, the launcher and a line; for a
  * docked window in front on the head its mark and title in a pill, its
- * menu or controls after it, and its buttons at the right end.
+ * menu or controls after it and its buttons at the right end, otherwise
+ * the icons of the applications whose windows are on the head; the
+ * desktops' pill, the status pill and the clock's pill at the right.
  */
 static void
 draw_head_bar(
@@ -4168,20 +4200,36 @@ draw_head_bar(
 	int32_t limit;
 	int32_t end;
 	int32_t middle;
+	int32_t logged_x;
+	int32_t logged_top;
+	int logged;
 	int button;
 	int over;
 
 	/* The bar's colours and its strip. */
-	(void)output_rect(server, slot, &output);
-	head_bar_layout(server, slot, &bar);
+	(void)kwl_output_rect(server, slot, &output);
+	bar_layout_on(server, slot, &bar);
 	kwl_glass_bar_colours(server, &colours);
 	server->keep_colours = 1U;
 	draw_bar_strip(server, command, &colours, output.x, output.y, (int32_t)output.width);
 
+	/* Where its parts are, logged when it is new or has moved. */
+	logged = kwl_plane_placed(&shell_head_bars_logged, slot, &logged_x, &logged_top);
+	if (!logged ||
+	    logged_x != bar.desktops_x ||
+	    logged_top != bar.top) {
+		kwl_plane_place(&shell_head_bars_logged, slot, bar.desktops_x, bar.top);
+		printf("KWL GLASS head bar output=%u top=%d launcher=%d desktops=%d status=%d clock=%d\n", slot, bar.top, output.x + BAR_LAUNCHER_X, bar.desktops_x, bar.status_x, bar.clock_pill_x);
+	}
+
+	/* The launcher, which opens App Home on the anchor, and the line after it. */
+	glass_draw_mark(server, command, output.x + BAR_LAUNCHER_X, output.y + BAR_LAUNCHER_Y, BAR_LAUNCHER_SIZE, GLASS_MARK_BAR, 1.0f);
+	glass_draw_solid(server, command, (float)bar.menu_line, (float)(output.y + BAR_LINE_TOP), 1.0f, (float)BAR_LINE_LENGTH, 0.0f, colours.line);
+
 	/* The docked window in front on the head, if any. */
 	docked = docked_window(server, slot);
 	if (docked != NULL) {
-		/* Its mark and title, sharing the room with its menu. */
+		/* Its mark and title, sharing the room before the desktops with its menu. */
 		middle = output.y + KWL_GLASS_BAR / 2;
 		available = bar.desktops_line - 12 - bar.title_x - 30;
 		limit = kwl_titlebar_title_limit(server, docked, available);
@@ -4206,28 +4254,59 @@ draw_head_bar(
 			draw_sign(server, command, button, bar.buttons[button], middle, 1, over == button, 1.0f, colours.ink);
 	}
 
+	/* Without a docked title, the icons of the applications on the head in its place (apps-bar.c). */
+	if (docked == NULL)
+		(void)kwl_apps_bar_draw(server, command, slot);
+
+	/* The desktops, then the status and the clock in their pills. */
+	draw_desktops(server, command, &bar, &colours);
+	draw_bar_group_at(server, command, bar.status_x, output.y, bar.status_width, BAR_GROUP_HEIGHT, 1.0f);
+	draw_bar_group_at(server, command, bar.clock_pill_x, output.y, bar.clock_pill_width, BAR_GROUP_HEIGHT, 1.0f);
+	draw_status(server, command, &bar, colours.ink);
+
 	/* The rest is drawn in the appearance's colours again. */
 	server->keep_colours = 0U;
 }
 
 /*
- * Handles a press on a head's bar (ws113-p015): a docked window's buttons
- * (close, restore, minimize), and on its title a double click restores it
- * and a single press may become a pull out of the bar, as on the system
- * bar.  Every press on the bar is taken.  Returns 1.
+ * Handles a press on a head's bar (ws113-p015): the launcher opens App
+ * Home (on the anchor), the clock Calendar, as on the system bar; a docked
+ * window's buttons (close, restore, minimize), and on its title a double
+ * click restores it and a single press may become a pull out of the bar.
+ * The desktops' pill, the status and the applications' icons have taken
+ * theirs before (arrange-shell.c, volume.c, network.c, input-method.c,
+ * apps-bar.c).  Every press on the bar is taken.  Returns 1.
  */
 static int
 head_bar_press(
 	struct kwl_server *server,
 	unsigned slot)
 {
+	struct kwl_plane_rect output;
 	struct kwl_object *surface;
 	struct shell_bar bar;
 	unsigned second;
 	int pressed;
+	int running;
+	int error;
 
-	/* Only a docked window acts. */
-	head_bar_layout(server, slot, &bar);
+	/* The launcher, as wide as the system bar's: App Home opens on the anchor, or closes. */
+	(void)kwl_output_rect(server, slot, &output);
+	bar_layout_on(server, slot, &bar);
+	if (server->pointer_x < output.x + KWL_EDGE_LAUNCHER_WIDTH) {
+		kwl_home_toggle(server, "head-launcher");
+		return 1;
+	}
+
+	/* The clock opens Calendar (ws155-p004), joining the anchor's arrangement as from the system bar's clock. */
+	if (server->pointer_x >= bar.clock_pill_x && server->pointer_x < bar.clock_pill_x + bar.clock_pill_width) {
+		kwl_arrange_join_prepare(server);
+		error = kwl_home_open_app(server, "Calendar", "clock", &running);
+		kwl_arrange_join_opened(server, error, running);
+		return 1;
+	}
+
+	/* Otherwise only a docked window acts. */
 	surface = docked_window(server, slot);
 	if (surface == NULL)
 		return 1;
@@ -4465,9 +4544,9 @@ draw_bar_buttons(
 }
 
 /*
- * Draws the virtual desktops in the middle of the bar: a pill with a dot
- * for each desktop, the shown one a larger outlined pill; Wiseview brings
- * the pill forward with a blue edge.
+ * Draws the virtual desktops in a bar: a pill with each desktop's
+ * silhouette, the shown one in the accent; on the system bar Wiseview
+ * brings the pill forward with a blue edge.
  */
 static void
 draw_desktops(
@@ -4487,10 +4566,12 @@ draw_desktops(
 	kwl_accent_colour(server, server->dark, KWL_ACCENT_FILL, 1.0f, current);
 
 	/* The pill. */
-	draw_bar_group(server, command, bar->desktops_x, bar->desktops_width, BAR_PILL_HEIGHT);
+	draw_bar_group_at(server, command, bar->desktops_x, bar->top, bar->desktops_width, BAR_PILL_HEIGHT, 1.0f);
 
-	/* Wiseview brings the desktops forward with a blue edge. */
-	progress = wiseview_progress(server);
+	/* Wiseview (the anchor's) brings the system bar's desktops forward with a blue edge. */
+	progress = 0.0f;
+	if (bar->output == KWL_PLANE_ANCHOR)
+		progress = wiseview_progress(server);
 	if (progress > 0.0f) {
 		glass_shape_init(&shape, (float)bar->desktops_x, (float)BAR_PILL_TOP, (float)bar->desktops_width, (float)BAR_PILL_HEIGHT);
 		shape.quad[0] -= 1.0f;
@@ -4506,8 +4587,8 @@ draw_desktops(
 		glass_shape_draw(server, command, &shape);
 	}
 
-	/* Where the slots are, once (the tests click a desktop's slot). */
-	if (!shell_desktops_logged) {
+	/* Where the system bar's slots are, once (the tests click a desktop's slot). */
+	if (!shell_desktops_logged && bar->output == KWL_PLANE_ANCHOR) {
 		shell_desktops_logged = 1U;
 		printf("KWL GLASS desktops x=%d step=%d width=%d\n", bar->desktops_x + DESKTOPS_PAD, DESKTOP_WIDTH + DESKTOP_GAP, DESKTOP_WIDTH);
 	}
@@ -4518,14 +4599,14 @@ draw_desktops(
 		ink = colours->faint;
 		if (desktop == (int)server->desktop)
 			ink = current;
-		glass_draw_icon(server, command, (unsigned)GLASS_ICON_DESKTOP_CAT + (unsigned)desktop, x, KWL_GLASS_BAR_MIDDLE - (int32_t)DESKTOP_ICON / 2, DESKTOP_ICON, ink);
+		glass_draw_icon(server, command, (unsigned)GLASS_ICON_DESKTOP_CAT + (unsigned)desktop, x, bar->top + KWL_GLASS_BAR_MIDDLE - (int32_t)DESKTOP_ICON / 2, DESKTOP_ICON, ink);
 	}
 }
 
 /*
- * Draws the status at the right in an ink: the input method's language,
- * the removable media, the network, the volume and the battery when the
- * machine has one, and the clock (their pills are the caller's).
+ * Draws a bar's status at the right in an ink: the input method's
+ * language, the removable media, the network, the volume and the battery
+ * when the machine has one, and the clock (their pills are the caller's).
  */
 static void
 draw_status(
@@ -4535,23 +4616,23 @@ draw_status(
 	const float *ink)
 {
 	/* The date and time. */
-	glass_draw_text(server, command, SIZE_BAR, bar->clock_x, BAR_BASELINE, bar->clock, 400, ink);
+	glass_draw_text(server, command, SIZE_BAR, bar->clock_x, bar->top + BAR_BASELINE, bar->clock, 400, ink);
 
 	/* The battery, when the machine has one (ws132-p003). */
 	if (server->power.percent >= 0)
-		draw_battery(server, command, bar->battery_x, server->power.percent, server->power.charging, ink);
+		draw_battery(server, command, bar->battery_x, bar->top + KWL_GLASS_BAR_MIDDLE, server->power.percent, server->power.charging, ink);
 
 	/* The network: Wi-Fi's fan or the wired tree, which opens its menu (network.c). */
-	kwl_network_draw_icon(server, command, bar->signal_x, ink);
+	kwl_network_draw_icon(server, command, bar->signal_x, bar->top, ink);
 
 	/* The volume's speaker, which opens its popup (volume.c, ws100-p004). */
-	kwl_volume_draw_icon(server, command, bar->volume_x, ink);
+	kwl_volume_draw_icon(server, command, bar->volume_x, bar->top, ink);
 
 	/* The removable media's stick, which starts Files (media.c). */
 	kwl_media_draw_icon(server, command, bar->media_x, ink);
 
 	/* The input method's language (A, あ), which a click changes (input-method.c). */
-	kwl_ime_indicator_draw(server, command, bar->ime_x, ink);
+	kwl_ime_indicator_draw(server, command, bar->ime_x, bar->top, ink);
 }
 
 /*
@@ -4624,15 +4705,16 @@ home_bar_passes(
 }
 
 /*
- * Draws the bar's battery at x: an outline, its charge (the inside filled
- * in proportion to percent, at least a sliver while above zero), its
- * terminal, and a "+" right of it while it charges.
+ * Draws a bar's battery at x about the bar's middle: an outline, its charge
+ * (the inside filled in proportion to percent, at least a sliver while
+ * above zero), its terminal, and a "+" right of it while it charges.
  */
 static void
 draw_battery(
 	struct kwl_server *server,
 	VkCommandBuffer command,
 	int32_t x,
+	int32_t middle,
 	int percent,
 	unsigned charging,
 	const float *ink)
@@ -4641,7 +4723,7 @@ draw_battery(
 	float fill;
 
 	/* The outline. */
-	glass_shape_init(&shape, (float)x, (float)(KWL_GLASS_BAR_MIDDLE - 6), 22.0f, 12.0f);
+	glass_shape_init(&shape, (float)x, (float)(middle - 6), 22.0f, 12.0f);
 	shape.quad[0] -= 1.0f;
 	shape.quad[1] -= 1.0f;
 	shape.quad[2] += 2.0f;
@@ -4659,15 +4741,15 @@ draw_battery(
 	if (percent > 0 && fill < 2.0f)
 		fill = 2.0f;
 	if (fill > 0.0f)
-		glass_draw_solid(server, command, (float)(x + 3), (float)(KWL_GLASS_BAR_MIDDLE - 3), fill, 6.0f, 1.5f, ink);
+		glass_draw_solid(server, command, (float)(x + 3), (float)(middle - 3), fill, 6.0f, 1.5f, ink);
 
 	/* The terminal. */
-	glass_draw_solid(server, command, (float)(x + 23), (float)(KWL_GLASS_BAR_MIDDLE - 2), 2.0f, 4.0f, 1.0f, ink);
+	glass_draw_solid(server, command, (float)(x + 23), (float)(middle - 2), 2.0f, 4.0f, 1.0f, ink);
 
 	/* Charging: a "+" between the terminal and the clock. */
 	if (charging != 0U) {
-		glass_draw_solid(server, command, (float)(x + 29), (float)KWL_GLASS_BAR_MIDDLE - 0.75f, 7.0f, 1.5f, 0.5f, ink);
-		glass_draw_solid(server, command, (float)(x + 31.75f), (float)(KWL_GLASS_BAR_MIDDLE - 3) - 0.5f, 1.5f, 7.0f, 0.5f, ink);
+		glass_draw_solid(server, command, (float)(x + 29), (float)middle - 0.75f, 7.0f, 1.5f, 0.5f, ink);
+		glass_draw_solid(server, command, (float)(x + 31.75f), (float)(middle - 3) - 0.5f, 1.5f, 7.0f, 0.5f, ink);
 	}
 }
 
@@ -4857,7 +4939,7 @@ docked_rect(
 
 	/* A head: under its bar, KWL_GLASS_DOCK_PAD in from every side (no on-screen keyboard there). */
 	if (slot != KWL_PLANE_ANCHOR) {
-		(void)output_rect(server, slot, &output);
+		(void)kwl_output_rect(server, slot, &output);
 		body->x = output.x + KWL_GLASS_DOCK_PAD;
 		body->y = output.y + DOCK_TOP;
 		body->width = (int32_t)output.width - 2 * KWL_GLASS_DOCK_PAD;
@@ -4884,30 +4966,6 @@ window_slot(
 	if (surface->output >= KWL_PLANE_SLOTS)
 		return KWL_PLANE_ANCHOR;
 	return surface->output;
-}
-
-/* Gives an output's rectangle of the plane (the anchor's for one not shown); returns 1 when the output is shown. */
-static int
-output_rect(
-	struct kwl_server *server,
-	unsigned slot,
-	struct kwl_plane_rect *rect)
-{
-	struct kwl_plane_rect outputs[KWL_PLANE_SLOTS];
-	unsigned count;
-	int shown;
-
-	/* The outputs shown now; one not shown is the anchor. */
-	count = kwl_outputs(server, outputs);
-	shown = 1;
-	if (slot >= count || outputs[slot].width == 0U) {
-		slot = KWL_PLANE_ANCHOR;
-		shown = 0;
-	}
-
-	/* Succeeded: its rectangle. */
-	*rect = outputs[slot];
-	return shown;
 }
 
 /*
@@ -4939,7 +4997,7 @@ glass_fit_on(
 	}
 
 	/* A head going away keeps the place (heads.c carries it to the anchor). */
-	shown = output_rect(server, slot, &output);
+	shown = kwl_output_rect(server, slot, &output);
 	if (!shown)
 		return;
 
@@ -8003,22 +8061,27 @@ desktop_turn(
 }
 
 /*
- * Tells whether the system bar has room for the applications' icons
- * (apps-bar.c, ws142-p004), and where: the glass look's windows, no login
- * or lock screen, no fullscreen window over the bar, no docked window's
- * title in it (D6), neither App Home nor Wiseview.  The room is from after
- * the launcher's line to before the desktops' line.
+ * Tells whether an output's bar has room for the applications' icons
+ * (apps-bar.c, ws142-p004; a head's bar, ws113-p015), and where: the glass
+ * look's windows, no login or lock screen, no docked window's title in it
+ * (D6), not App Home; on the system bar also no fullscreen window over it
+ * and not Wiseview (the anchor's).  The room is from after the launcher's
+ * line to before the desktops' line, along the bar's top in the plane.
  */
 int
 kwl_glass_apps_room(
 	struct kwl_server *server,
+	unsigned slot,
 	int32_t *left,
-	int32_t *right)
+	int32_t *right,
+	int32_t *top)
 {
+	struct kwl_plane_rect output;
 	struct shell_bar bar;
 	struct kwl_object *cover;
 	struct kwl_object *docked;
 	float home;
+	int shown;
 
 	/* Only the glass look's window mode has the bar, and not over the login or lock screen. */
 	if (!server->glass ||
@@ -8027,25 +8090,37 @@ kwl_glass_apps_room(
 	    server->locked)
 		return 0;
 
-	/* A fullscreen window, or a docked window's title. */
-	cover = bar_cover(server);
-	docked = docked_window(server, KWL_PLANE_ANCHOR);
-	if (cover != NULL || docked != NULL)
+	/* A head not shown now (unplugged, or the mirror mode) has no bar. */
+	shown = kwl_output_rect(server, slot, &output);
+	if (!shown && slot != KWL_PLANE_ANCHOR)
 		return 0;
 
-	/* App Home, or Wiseview (open, opening or closing). */
+	/* A docked window's title. */
+	docked = docked_window(server, slot);
+	if (docked != NULL)
+		return 0;
+
+	/* App Home (open, opening or closing), over which no bar shows its icons. */
 	home = kwl_home_progress(server);
 	if (home > 0.0f || server->home_to > 0.0f)
 		return 0;
-	if (server->wiseview_gesture ||
-	    server->wiseview > 0.0f ||
-	    server->wiseview_moving)
-		return 0;
+
+	/* On the system bar, a fullscreen window over it, or Wiseview (open, opening or closing). */
+	if (slot == KWL_PLANE_ANCHOR) {
+		cover = bar_cover(server);
+		if (cover != NULL)
+			return 0;
+		if (server->wiseview_gesture ||
+		    server->wiseview > 0.0f ||
+		    server->wiseview_moving)
+			return 0;
+	}
 
 	/* The span: the applications' pill starts just after the launcher's line, and ends a gap before the desktops. */
-	bar_layout(server, &bar);
+	bar_layout_on(server, slot, &bar);
 	*left = bar.title_x - 2;
 	*right = bar.desktops_line - 16;
+	*top = bar.top;
 
 	/* Succeeded: there is room. */
 	return 1;
@@ -8973,7 +9048,7 @@ pulled_rect(
 
 	/* The docked space of its output. */
 	docked_rect(server, window_slot(surface), &docked);
-	(void)output_rect(server, window_slot(surface), &output);
+	(void)kwl_output_rect(server, window_slot(surface), &output);
 
 	/* Its own size, placed as the pull leaves it (the same part of the title under the pointer, across its output). */
 	own.width = (int32_t)surface->restore_width;
@@ -9233,7 +9308,7 @@ glass_motion_take(
 		 * there), not from the docked space (BUG-180), so the pull's
 		 * distance is forgotten only after.
 		 */
-		(void)output_rect(server, window_slot(surface), &output);
+		(void)kwl_output_rect(server, window_slot(surface), &output);
 		x = server->pointer_x - (int32_t)((int64_t)surface->restore_width * (server->pointer_x - output.x) / (int32_t)output.width);
 		y = server->pointer_y + KWL_GLASS_GAP + KWL_GLASS_TITLE / 2;
 		layout_leave(server, window_slot(surface), surface, x, y, "pull");

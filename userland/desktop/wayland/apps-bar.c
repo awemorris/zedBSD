@@ -12,9 +12,14 @@
  *
  * While no window is docked (D6: a docked window's title has the bar; a
  * fullscreen window hides the bar), the bar shows an icon for each
- * application on the desktop shown (apps.c), from after the launcher's
- * line to before the desktops' line, in the desktop's own order: the order
- * the applications were opened in, which dragging an icon changes (the
+ * application with a window on that bar's display, on the desktop shown
+ * (apps.c; ws113-p015, the 2026-10-08 user decision: each display's bar,
+ * the system bar's and each head's, has its own windows' applications, an
+ * application with windows on two displays is in both bars, and its
+ * previews are of the windows on that display; the switcher has every
+ * window).  The icons go from after the launcher's line to before the
+ * desktops' line, in the desktop's own order (one for all the bars): the
+ * order the applications were opened in, which dragging an icon changes (the
  * 2026-10-05 request; each desktop keeps its order).  The application of
  * the window on top has a short line under its icon (all the icons sit in
  * one pill, ws099-p034); one whose windows are all
@@ -25,7 +30,8 @@
  * windows as previews (at most a quarter of the output's width and height
  * each, D4) in a glass panel under the bar; moving to another icon shows
  * its windows at once; leaving the icon and the panel for LEAVE_MS hides
- * them.  A click on the icon of an application with one window brings that
+ * them.  The previews show under the bar of the icon (on its output).
+ * A click on the icon of an application with one window brings that
  * window to the top (back from minimized); with more it shows the previews
  * at once, and a second click hides them.  A click on a preview brings its
  * window; on its close button closes it.  Esc, and a press elsewhere, hide
@@ -42,6 +48,9 @@
 
 #include <stdio.h>
 #include <string.h>
+
+/* Marks a parameter a function keeps for its callers but does not use. */
+#define UNUSED_PARAMETER(name)	((void)(name))
 
 /* The pointer's rest on an icon before the previews show, and its absence before they go (milliseconds; D8). */
 #define HOVER_MS		400U
@@ -61,16 +70,20 @@ static int slot_at(const struct apps_view *view, int32_t x, int32_t y);
 static void slot_rect(const struct apps_view *view, unsigned slot, struct apps_rect *rect);
 static int panel_build(struct kwl_server *server, const struct apps_view *view, const char *key, struct apps_panel *panel);
 static void log_bar(struct kwl_server *server, const struct apps_view *view);
+static int view_collect_on(struct kwl_server *server, unsigned slot, int every, struct apps_view *view);
 static void draw_more(struct kwl_server *server, VkCommandBuffer command, const struct apps_rect *rect, unsigned hidden, float light);
 static void draw_light(struct kwl_server *server, VkCommandBuffer command, const struct apps_rect *rect, float strength);
 
 /*
- * Draws the applications' icons in the system bar (draw_system_bar, when no window is docked).  Returns 1 when it drew any.
+ * Draws the applications' icons in an output's bar (draw_system_bar, or a
+ * head's draw_head_bar, when no window is docked there).  Returns 1 when
+ * it drew any.
  */
 int
 kwl_apps_bar_draw(
 	struct kwl_server *server,
-	VkCommandBuffer command)
+	VkCommandBuffer command,
+	unsigned output)
 {
 	struct glass_bar_colours colours;
 	struct glass_shape shape;
@@ -82,18 +95,26 @@ kwl_apps_bar_draw(
 	unsigned slot;
 	unsigned slots;
 	int32_t x;
+	int32_t middle;
 	int32_t pill_x;
 	int32_t pill_width;
 	float alpha;
 	float light;
+	int mine;
 	int same;
 	int built;
 
 	/* No icons where the bar has no room for them. */
 	state = &server->apps_bar;
-	built = kwl_apps_view_build(server, &view);
+	built = kwl_apps_view_build_on(server, output, &view);
 	if (!built)
 		return 0;
+
+	/* The bar's middle, and whether the wait, the previews or a press are about this bar's icons. */
+	middle = view.top + KWL_GLASS_BAR / 2;
+	mine = 0;
+	if (state->output == output)
+		mine = 1;
 
 	/* The bar as it is now, in the log when it changed. */
 	log_bar(server, &view);
@@ -107,8 +128,8 @@ kwl_apps_bar_draw(
 		slots++;
 	pill_x = view.left + (ICON_WIDTH - ICON_MARK) / 2 - ICON_PILL_PAD;
 	pill_width = (int32_t)slots * ICON_WIDTH - (ICON_WIDTH - ICON_MARK) + 2 * ICON_PILL_PAD;
-	glass_draw_solid(server, command, (float)pill_x, (float)(KWL_GLASS_BAR / 2 - 17), (float)pill_width, 34.0f, 17.0f, colours.fill);
-	glass_shape_init(&shape, (float)pill_x, (float)(KWL_GLASS_BAR / 2 - 17), (float)pill_width, 34.0f);
+	glass_draw_solid(server, command, (float)pill_x, (float)(middle - 17), (float)pill_width, 34.0f, 17.0f, colours.fill);
+	glass_shape_init(&shape, (float)pill_x, (float)(middle - 17), (float)pill_width, 34.0f);
 	shape.mode = MODE_RING;
 	shape.radius = 17.0f;
 	shape.soft = 1.0f;
@@ -123,15 +144,15 @@ kwl_apps_bar_draw(
 		/* Lit while the pointer rests on it or its previews show. */
 		light = 0.0f;
 		same = strcmp(app->key, state->key);
-		if (same == 0 && state->state == KWL_APPS_SHOWN)
+		if (mine && same == 0 && state->state == KWL_APPS_SHOWN)
 			light = 1.0f;
-		if (same == 0 && state->state == KWL_APPS_ARMED)
+		if (mine && same == 0 && state->state == KWL_APPS_ARMED)
 			light = 0.6f;
 
 		/* The icon being dragged follows the pointer. */
 		same = strcmp(app->key, state->press_key);
 		x = rect.x;
-		if (state->dragging && same == 0) {
+		if (mine && state->dragging && same == 0) {
 			x = server->pointer_x - ICON_WIDTH / 2;
 			light = 1.0f;
 		}
@@ -146,11 +167,11 @@ kwl_apps_bar_draw(
 		alpha = 1.0f;
 		if (app->minimized)
 			alpha = 0.45f;
-		kwl_glass_draw_app_mark(server, command, surface, x + (ICON_WIDTH - ICON_MARK) / 2, KWL_GLASS_BAR / 2, ICON_MARK, alpha);
+		kwl_glass_draw_app_mark(server, command, surface, x + (ICON_WIDTH - ICON_MARK) / 2, middle, ICON_MARK, alpha);
 
 		/* A short line under the application of the window on top (ws099-p034). */
 		if ((int)slot == view.current)
-			glass_draw_solid(server, command, (float)(x + ICON_WIDTH / 2 - 4), (float)(KWL_GLASS_BAR / 2 + 14), 8.0f, 2.5f, 1.25f, colours.ink);
+			glass_draw_solid(server, command, (float)(x + ICON_WIDTH / 2 - 4), (float)(middle + 14), 8.0f, 2.5f, 1.25f, colours.ink);
 	}
 
 	/* The "+N" place for the applications without room. */
@@ -158,7 +179,7 @@ kwl_apps_bar_draw(
 		slot_rect(&view, view.shown, &rect);
 		light = 0.0f;
 		same = strcmp(state->press_key, MORE_KEY);
-		if (state->pressed && same == 0)
+		if (mine && state->pressed && same == 0)
 			light = 1.0f;
 		draw_more(server, command, &rect, view.hidden, light);
 	}
@@ -168,7 +189,8 @@ kwl_apps_bar_draw(
 }
 
 /*
- * Draws the panel of previews, when it shows (over the windows, under the menus).
+ * Draws the panel of previews, when it shows (over the windows, under the
+ * menus), in the pass of the output whose bar it shows under.
  */
 void
 kwl_apps_bar_draw_popup(
@@ -184,11 +206,13 @@ kwl_apps_bar_draw_popup(
 	int over;
 	int built;
 
-	/* Only while the previews show, and the bar still has its icons. */
+	/* Only while the previews show, on their output, and the bar still has its icons. */
 	state = &server->apps_bar;
 	if (state->state != KWL_APPS_SHOWN)
 		return;
-	built = kwl_apps_view_build(server, &view);
+	if (state->output != server->view_output)
+		return;
+	built = kwl_apps_view_build_on(server, state->output, &view);
 	if (built)
 		built = panel_build(server, &view, state->key, &panel);
 	if (!built)
@@ -241,6 +265,7 @@ kwl_apps_bar_motion(
 	struct kwl_apps_order *order;
 	struct apps_view view;
 	struct apps_panel panel;
+	unsigned output;
 	int32_t dx;
 	int target;
 	int from;
@@ -249,9 +274,18 @@ kwl_apps_bar_motion(
 	int built;
 	int in_panel;
 
-	/* Without the icons, nothing shows or waits. */
+	/*
+	 * The bar followed: the one whose wait, previews or press there is, or
+	 * with none the one the pointer is on (the system bar's or a head's,
+	 * ws113-p015).
+	 */
 	state = &server->apps_bar;
-	built = kwl_apps_view_build(server, &view);
+	output = state->output;
+	if (state->state == KWL_APPS_IDLE && !state->pressed)
+		output = server->pointer_output;
+
+	/* Without its icons, nothing shows or waits. */
+	built = kwl_apps_view_build_on(server, output, &view);
 	if (!built) {
 		if (state->state != KWL_APPS_IDLE)
 			kwl_apps_bar_hide(server, "away");
@@ -328,9 +362,10 @@ kwl_apps_bar_motion(
 			in_panel = kwl_apps_inside(&panel.rect, server->pointer_x, server->pointer_y);
 	}
 
-	/* Resting on nothing yet: an application's icon starts the wait. */
+	/* Resting on nothing yet: an application's icon starts the wait, on its bar. */
 	if (state->state == KWL_APPS_IDLE) {
 		if (slot >= 0) {
+			state->output = output;
 			state->state = KWL_APPS_ARMED;
 			(void)snprintf(state->key, sizeof(state->key), "%s", view.apps.apps[slot].key);
 			state->since_ms = kwl_milliseconds();
@@ -402,23 +437,25 @@ kwl_apps_bar_button(
 {
 	struct kwl_apps_bar *state;
 	struct apps_view view;
+	struct apps_view shown;
 	struct apps_panel panel;
 	struct kwl_object *surface;
 	const struct kwl_app *app;
 	int found;
 	int built;
+	int shown_built;
 	int slot;
 	int tile;
 	int same;
 	int in_panel;
 
-	/* The release of a press on an icon: the drag's end, or the click. */
+	/* The release of a press on an icon (of the bar it was pressed on): the drag's end, or the click. */
 	state = &server->apps_bar;
 	if (state_value == 0) {
 		if (!state->pressed || button != KWL_BUTTON_LEFT)
 			return 0;
 		state->pressed = 0;
-		built = kwl_apps_view_build(server, &view);
+		built = kwl_apps_view_build_on(server, state->output, &view);
 
 		/* A drag ends where it is. */
 		if (state->dragging) {
@@ -468,19 +505,24 @@ kwl_apps_bar_button(
 		return 1;
 	}
 
-	/* Without the icons the bar takes nothing. */
-	built = kwl_apps_view_build(server, &view);
-	if (!built) {
+	/* The icons of the bar the pointer is on, and of the bar whose previews show (the same bar, or a head's, ws113-p015). */
+	built = kwl_apps_view_build_on(server, server->pointer_output, &view);
+	shown_built = 0;
+	if (state->state == KWL_APPS_SHOWN)
+		shown_built = kwl_apps_view_build_on(server, state->output, &shown);
+
+	/* Without the icons the bars take nothing. */
+	if (!built && !shown_built) {
 		if (state->state != KWL_APPS_IDLE)
 			kwl_apps_bar_hide(server, "away");
 		return 0;
 	}
 
 	/* The previews take a press on themselves: a preview's close button closes its window, the preview brings it. */
-	if (state->state == KWL_APPS_SHOWN) {
-		built = panel_build(server, &view, state->key, &panel);
+	if (shown_built) {
 		in_panel = 0;
-		if (built)
+		shown_built = panel_build(server, &shown, state->key, &panel);
+		if (shown_built)
 			in_panel = kwl_apps_inside(&panel.rect, server->pointer_x, server->pointer_y);
 		if (in_panel) {
 			tile = kwl_apps_tile_at(panel.tiles, panel.count, server->pointer_x, server->pointer_y);
@@ -502,9 +544,12 @@ kwl_apps_bar_button(
 		}
 	}
 
-	/* A left press on an icon or the "+N" place waits for its release. */
-	slot = slot_at(&view, server->pointer_x, server->pointer_y);
+	/* A left press on an icon or the "+N" place of the bar the pointer is on waits for its release. */
+	slot = SLOT_NONE;
+	if (built)
+		slot = slot_at(&view, server->pointer_x, server->pointer_y);
 	if (slot != SLOT_NONE && button == KWL_BUTTON_LEFT) {
+		state->output = view.output;
 		state->pressed = 1;
 		state->dragging = 0;
 		state->press_x = server->pointer_x;
@@ -563,8 +608,8 @@ kwl_apps_bar_tick(
 	if (state->state == KWL_APPS_IDLE)
 		return;
 
-	/* The icons gone (a window docked, Home, Wiseview, a fullscreen window): nothing shows. */
-	built = kwl_apps_view_build(server, &view);
+	/* The icons of its bar gone (a window docked, Home, Wiseview, a fullscreen window, the head): nothing shows. */
+	built = kwl_apps_view_build_on(server, state->output, &view);
 	if (!built) {
 		kwl_apps_bar_hide(server, "away");
 		return;
@@ -586,27 +631,52 @@ kwl_apps_bar_tick(
 }
 
 /*
- * Gathers the bar's applications and their icons' places.  Returns 0 when
- * the bar has no room for icons now, or no application.
+ * Gathers the system bar's applications and their icons' places
+ * (kwl_apps_view_build_on, the anchor's).  Returns 0 when the bar has no
+ * room for icons now, or no application.
  */
 int
 kwl_apps_view_build(
 	struct kwl_server *server,
 	struct apps_view *view)
 {
+	int built;
+
+	/* The anchor's bar. */
+	built = kwl_apps_view_build_on(server, KWL_PLANE_ANCHOR, view);
+	if (!built)
+		return 0;
+
+	/* Succeeded: there are icons. */
+	return 1;
+}
+
+/*
+ * Gathers an output's bar's applications and their icons' places (the
+ * system bar's, or a head's, ws113-p015).  Returns 0 when the bar has no
+ * room for icons now, or no application.
+ */
+int
+kwl_apps_view_build_on(
+	struct kwl_server *server,
+	unsigned slot,
+	struct apps_view *view)
+{
 	unsigned slots;
+	int32_t top;
 	int room;
 	int collected;
 
 	/* Room in the bar. */
-	room = kwl_glass_apps_room(server, &view->left, &view->right);
+	room = kwl_glass_apps_room(server, slot, &view->left, &view->right, &top);
 	if (!room)
 		return 0;
 
 	/* The applications. */
-	collected = kwl_apps_view_collect(server, view);
+	collected = view_collect_on(server, slot, 0, view);
 	if (!collected)
 		return 0;
+	view->top = top;
 
 	/* As many icons as there is room for; the last place says how many more when they do not fit. */
 	slots = 0;
@@ -631,13 +701,38 @@ kwl_apps_view_build(
 
 /*
  * Gathers the applications of the desktop shown (in its bar order) and the
- * application of the window on top, without the icons' places (the
- * switcher in the middle of the output needs no room in the bar).  Returns
- * 0 when there is none.
+ * application of the window on top, without the icons' places, for the
+ * switcher in the middle of the anchor: every window of the desktop, on
+ * every display.  Returns 0 when there is none.
  */
 int
 kwl_apps_view_collect(
 	struct kwl_server *server,
+	struct apps_view *view)
+{
+	int collected;
+
+	/* The anchor's. */
+	collected = view_collect_on(server, KWL_PLANE_ANCHOR, 1, view);
+	if (!collected)
+		return 0;
+
+	/* Succeeded: there are applications. */
+	return 1;
+}
+
+/*
+ * Gathers the applications of the desktop shown for an output: of the
+ * windows on it for its bar (ws113-p015), or of every window (every, the
+ * switcher's); the application of the window on top (the output's, or the
+ * desktop's for every window); the output's rectangle (the previews' room)
+ * and its bar's top.  Returns 0 when there is none.
+ */
+static int
+view_collect_on(
+	struct kwl_server *server,
+	unsigned slot,
+	int every,
 	struct apps_view *view)
 {
 	struct kwl_client *client;
@@ -648,6 +743,11 @@ kwl_apps_view_collect(
 	unsigned index;
 	unsigned app;
 	int desktop_surface;
+
+	/* The output and its bar's top. */
+	(void)kwl_output_rect(server, slot, &view->area);
+	view->output = slot;
+	view->top = view->area.y;
 
 	/* A desktop that keeps an order. */
 	view->shown = 0;
@@ -677,6 +777,10 @@ kwl_apps_view_collect(
 			if (parent != NULL || view->window_count >= VIEW_WINDOWS)
 				continue;
 
+			/* A bar has the windows on its display alone. */
+			if (!every && surface->output != slot)
+				continue;
+
 			/* The desktop's icons are no application (desktop.c). */
 			desktop_surface = kwl_desktop_is(surface);
 			if (desktop_surface)
@@ -699,8 +803,10 @@ kwl_apps_view_collect(
 	if (view->apps.count == 0U)
 		return 0;
 
-	/* The application of the window on top. */
+	/* The application of the window on top: of the desktop for every window, of the display for its bar. */
 	top = kwl_top_window(server);
+	if (!every)
+		top = kwl_output_top_window(server, slot);
 	parent = kwl_sheet_parent(top);
 	if (parent != NULL)
 		top = parent;
@@ -725,8 +831,8 @@ slot_at(
 	int32_t slot;
 
 	/* Only in the bar, in the icons' span. */
-	if (y < 0 ||
-	    y >= KWL_GLASS_BAR ||
+	if (y < view->top ||
+	    y >= view->top + KWL_GLASS_BAR ||
 	    x < view->left)
 		return SLOT_NONE;
 	slot = (x - view->left) / ICON_WIDTH;
@@ -750,7 +856,7 @@ slot_rect(
 {
 	/* One after the other from the left of the span, the bar's height. */
 	rect->x = view->left + (int32_t)slot * ICON_WIDTH;
-	rect->y = 0;
+	rect->y = view->top;
 	rect->width = ICON_WIDTH;
 	rect->height = KWL_GLASS_BAR;
 }
@@ -801,11 +907,11 @@ panel_build(
 	panel->rect.width += 2 * PANEL_PAD;
 	panel->rect.height += PANEL_PAD;
 	panel->rect.x = center - panel->rect.width / 2;
-	if (panel->rect.x + panel->rect.width > (int32_t)server->width - 16)
-		panel->rect.x = (int32_t)server->width - 16 - panel->rect.width;
-	if (panel->rect.x < 16)
-		panel->rect.x = 16;
-	panel->rect.y = KWL_GLASS_BAR + PANEL_DROP;
+	if (panel->rect.x + panel->rect.width > view->area.x + (int32_t)view->area.width - 16)
+		panel->rect.x = view->area.x + (int32_t)view->area.width - 16 - panel->rect.width;
+	if (panel->rect.x < view->area.x + 16)
+		panel->rect.x = view->area.x + 16;
+	panel->rect.y = view->top + KWL_GLASS_BAR + PANEL_DROP;
 
 	/* The previews moved into the panel. */
 	for (index = 0; index < panel->count; index++) {
@@ -819,7 +925,7 @@ panel_build(
 
 /*
  * Lays out an application's windows as previews from 0, 0: each at most a
- * quarter of the output's width and height (D4), keeping its shape; all
+ * quarter of the view's output's width and height (D4), keeping its shape; all
  * of them smaller together (to half) when one row is wider than the
  * output, then in more rows; under each row the room for the previews'
  * labels.  The panel's rectangle gets the size they take (no padding, no
@@ -846,6 +952,8 @@ kwl_apps_tiles_layout(
 	float shrink;
 	unsigned index;
 
+	UNUSED_PARAMETER(server);
+
 	/* The application and its windows. */
 	app = &view->apps.apps[found];
 	panel->app = (int)found;
@@ -862,9 +970,9 @@ kwl_apps_tiles_layout(
 		}
 
 		/* The quarter's scale, never larger than the window. */
-		scale = (float)server->width / 4.0f / (float)width;
-		if ((float)server->height / 4.0f / (float)height < scale)
-			scale = (float)server->height / 4.0f / (float)height;
+		scale = (float)view->area.width / 4.0f / (float)width;
+		if ((float)view->area.height / 4.0f / (float)height < scale)
+			scale = (float)view->area.height / 4.0f / (float)height;
 		if (scale > 1.0f)
 			scale = 1.0f;
 		sizes[index][0] = (int32_t)((float)width * scale);
@@ -873,7 +981,7 @@ kwl_apps_tiles_layout(
 	}
 
 	/* All smaller together when one row is wider than the room, to half at most. */
-	available = (int32_t)server->width - 32 - 2 * PANEL_PAD;
+	available = (int32_t)view->area.width - 32 - 2 * PANEL_PAD;
 	total -= PREVIEW_GAP;
 	if (total > available) {
 		shrink = (float)available / (float)total;
@@ -981,7 +1089,8 @@ kwl_apps_bar_show(
 		return;
 	}
 
-	/* Shown. */
+	/* Shown, under the bar of the view's output. */
+	state->output = view->output;
 	state->state = KWL_APPS_SHOWN;
 	state->via = via;
 	state->left = 0;
@@ -1029,7 +1138,7 @@ log_bar(
 {
 	struct kwl_apps_bar *state;
 	struct apps_rect rect;
-	char line[sizeof(server->apps_bar.logged)];
+	char line[sizeof(server->apps_bar.logged[0])];
 	const char *separator;
 	size_t used;
 	unsigned index;
@@ -1051,17 +1160,27 @@ log_bar(
 			used += (size_t)length;
 	}
 
-	/* Unchanged: nothing to say. */
-	same = strcmp(line, state->logged);
+	/* Unchanged on this bar: nothing to say. */
+	same = strcmp(line, state->logged[view->output]);
 	if (same == 0)
 		return;
-	(void)snprintf(state->logged, sizeof(state->logged), "%s", line);
+	(void)snprintf(state->logged[view->output], sizeof(state->logged[view->output]), "%s", line);
 
-	/* The bar, then each icon. */
-	printf("KWL APPS bar %s\n", line);
+	/* The bar, then each icon; a head's lines name its output. */
+	if (view->output == KWL_PLANE_ANCHOR) {
+		printf("KWL APPS bar %s\n", line);
+	} else {
+		printf("KWL APPS bar %s output=%u\n", line, view->output);
+	}
+
+	/* Each icon's place. */
 	for (index = 0; index < view->shown; index++) {
 		slot_rect(view, index, &rect);
-		printf("KWL APPS icon app=%s x=%d y=%d width=%d height=%d windows=%u\n", view->apps.apps[index].key, rect.x, rect.y, rect.width, rect.height, view->apps.apps[index].window_count);
+		if (view->output == KWL_PLANE_ANCHOR) {
+			printf("KWL APPS icon app=%s x=%d y=%d width=%d height=%d windows=%u\n", view->apps.apps[index].key, rect.x, rect.y, rect.width, rect.height, view->apps.apps[index].window_count);
+		} else {
+			printf("KWL APPS icon app=%s x=%d y=%d width=%d height=%d windows=%u output=%u\n", view->apps.apps[index].key, rect.x, rect.y, rect.width, rect.height, view->apps.apps[index].window_count, view->output);
+		}
 	}
 }
 
@@ -1082,12 +1201,12 @@ draw_more(
 	kwl_glass_bar_colours(server, &colours);
 	if (light > 0.0f)
 		draw_light(server, command, rect, light);
-	glass_draw_solid(server, command, (float)(rect->x + (ICON_WIDTH - ICON_MARK) / 2), (float)(KWL_GLASS_BAR / 2 - ICON_MARK / 2), (float)ICON_MARK, (float)ICON_MARK, (float)ICON_MARK * GLASS_ICON_TILE_RADIUS, colours.lit);
+	glass_draw_solid(server, command, (float)(rect->x + (ICON_WIDTH - ICON_MARK) / 2), (float)(rect->y + KWL_GLASS_BAR / 2 - ICON_MARK / 2), (float)ICON_MARK, (float)ICON_MARK, (float)ICON_MARK * GLASS_ICON_TILE_RADIUS, colours.lit);
 
 	/* The count in its middle. */
 	(void)snprintf(text, sizeof(text), "+%u", hidden);
 	width = glass_text_width(server, SIZE_BAR, text);
-	glass_draw_text(server, command, SIZE_BAR, rect->x + ICON_WIDTH / 2 - width / 2, KWL_GLASS_BAR / 2 + 5, text, ICON_WIDTH, colours.ink);
+	glass_draw_text(server, command, SIZE_BAR, rect->x + ICON_WIDTH / 2 - width / 2, rect->y + KWL_GLASS_BAR / 2 + 5, text, ICON_WIDTH, colours.ink);
 }
 
 /* Draws the light behind an icon the pointer rests on, or whose previews show. */
@@ -1105,5 +1224,5 @@ draw_light(
 	kwl_glass_bar_colours(server, &colours);
 	memcpy(colour, colours.lit, sizeof(colour));
 	colour[3] = colours.lit[3] * strength;
-	glass_draw_solid(server, command, (float)(rect->x + 2), (float)(KWL_GLASS_BAR / 2 - ICON_WIDTH / 2 + 2), (float)(ICON_WIDTH - 4), (float)(ICON_WIDTH - 4), (float)(ICON_WIDTH - 4) * GLASS_ICON_TILE_RADIUS, colour);
+	glass_draw_solid(server, command, (float)(rect->x + 2), (float)(rect->y + KWL_GLASS_BAR / 2 - ICON_WIDTH / 2 + 2), (float)(ICON_WIDTH - 4), (float)(ICON_WIDTH - 4), (float)(ICON_WIDTH - 4) * GLASS_ICON_TILE_RADIUS, colour);
 }

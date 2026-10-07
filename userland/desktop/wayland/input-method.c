@@ -951,14 +951,17 @@ kwl_ime_indicator_width(
 }
 
 /*
- * Draws the indicator of the language chosen ("A", "あ") in the system bar at
- * x: bright while a text input is served, pale otherwise.
+ * Draws the indicator of the language chosen ("A", "あ") at x in a bar
+ * whose top is at top: bright while a text input is served, pale
+ * otherwise.  The bar is the system bar, or a head's on the output the
+ * pass draws (ws113-p015).
  */
 void
 kwl_ime_indicator_draw(
 	struct kwl_server *server,
 	VkCommandBuffer command,
 	int32_t x,
+	int32_t top,
 	const float *ink)
 {
 	struct kwl_ime *ime;
@@ -978,10 +981,15 @@ kwl_ime_indicator_draw(
 		return;
 	}
 
-	/* Where a click chooses the next language (a test reads where it is when it moves). */
-	if (!ime->indicator_shown || ime->indicator_x != x)
-		printf("KWL IME indicator x=%d label=%s\n", (int)x, ime->label);
-	ime->indicator_x = x;
+	/* Where a click on this output's bar chooses the next language; the system bar's is logged when it moves (a test reads it). */
+	kwl_plane_place(&ime->indicators, server->view_output, x, top);
+	if (server->view_output == KWL_PLANE_ANCHOR) {
+		if (!ime->indicator_shown || ime->indicator_x != x)
+			printf("KWL IME indicator x=%d label=%s\n", (int)x, ime->label);
+		ime->indicator_x = x;
+	}
+
+	/* It shows, and a click can find it. */
 	ime->indicator_shown = 1;
 
 	/* The ink, pale while no text input is served. */
@@ -992,11 +1000,11 @@ kwl_ime_indicator_draw(
 	/* A round chip behind the label (ws099-p034). */
 	memcpy(back, ink, sizeof(back));
 	back[3] = 0.16f;
-	glass_draw_solid(server, command, (float)x, (float)IME_INDICATOR_TOP, (float)IME_INDICATOR_WIDTH, (float)IME_INDICATOR_HEIGHT, (float)IME_INDICATOR_HEIGHT * 0.5f, back);
+	glass_draw_solid(server, command, (float)x, (float)(top + IME_INDICATOR_TOP), (float)IME_INDICATOR_WIDTH, (float)IME_INDICATOR_HEIGHT, (float)IME_INDICATOR_HEIGHT * 0.5f, back);
 
 	/* The label, centred. */
 	width = glass_text_width(server, SIZE_BAR, ime->label);
-	glass_draw_text(server, command, SIZE_BAR, x + (IME_INDICATOR_WIDTH - width) / 2, IME_INDICATOR_BASELINE, ime->label, IME_INDICATOR_WIDTH,
+	glass_draw_text(server, command, SIZE_BAR, x + (IME_INDICATOR_WIDTH - width) / 2, top + IME_INDICATOR_BASELINE, ime->label, IME_INDICATOR_WIDTH,
 			color);
 }
 
@@ -1015,6 +1023,9 @@ kwl_ime_indicator_button(
 	struct kwl_ime *ime;
 	int32_t x;
 	int32_t y;
+	int32_t left;
+	int32_t top;
+	int placed;
 
 	/* Only the left button on a shown indicator of an input method that hears its status. */
 	ime = server->ime;
@@ -1027,14 +1038,19 @@ kwl_ime_indicator_button(
 	if (button != KWL_BUTTON_LEFT)
 		return 0;
 
+	/* The chip as drawn on the bar of the output the pointer is on (the system bar's or a head's, ws113-p015). */
+	placed = kwl_plane_placed(&ime->indicators, server->pointer_output, &left, &top);
+	if (!placed)
+		return 0;
+
 	/* The pointer must be on the chip (a little larger than the drawing), in the bar. */
 	x = server->pointer_x;
 	y = server->pointer_y;
-	if (x < ime->indicator_x - IME_INDICATOR_SLOP)
+	if (x < left - IME_INDICATOR_SLOP)
 		return 0;
-	if (x >= ime->indicator_x + IME_INDICATOR_WIDTH + IME_INDICATOR_SLOP)
+	if (x >= left + IME_INDICATOR_WIDTH + IME_INDICATOR_SLOP)
 		return 0;
-	if (y < 0 || y >= KWL_GLASS_BAR)
+	if (y < top || y >= top + KWL_GLASS_BAR)
 		return 0;
 
 	/* A press asks for the next language. */
