@@ -3,7 +3,7 @@
 # ws177-p008: Files の Recents の仕上げ（案 C）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 P1 q884 の 5: 実装・host PASS・build warning 0。T1 の QEMU が残り）
+Status: test-wait（T1-411）（2026-10-08 P1 q884 の 5: 実装・host PASS・build warning 0、main に統合）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q884 の 5（P1、2026-10-08）
@@ -36,3 +36,8 @@ Origin: [backlog-p2](../backlog-p2.md) の 37・38・39（q824 ws148-p002）、[
 ## T1-411（2026-10-08 Q1）
 
 FAIL（2 回とも）: `the window's focus reads the changed list again (found 0 of 1)`・`read again 0 times`。Text Editor の起動・KWL FAILED 無し・生存は ok。P1 に戻す（焦点の事象で stamp を見ていない・試験の焦点の付け方、のどちらか）。log は /home/awe/zedBSD-worktrees/t1/build/t1-411/recents-p008*.log。
+
+## T1-411（2026-10-08、2 回とも一部 FAIL）と試験の直し（P1）
+
+`the window's focus reads the changed list again (found 0 of 1)`・`read again 0 times`。Text Editor の起動・生存は ok。切り分け: zdesktop.log に `KWL DESKTOP focus` が無い。この試験の compositor（`--testing`、root）は desktop の program（files --desktop）を走らせないので、背景の click は keyboard を取らない（`kwl_desktop_press` は desktop の surface の上だけ）。描くたびに `display.c` が front を一番上の窓にするので、Text Editor は焦点を持ったままで、窓の click も新しい enter を起こさない。Text Editor の側（`KL_WINDOW_FOCUS` の pressed で `main_recent_follow` が stamp を比べる）は正しい。
+直し: `recents-p008.sh` の 3 を、Settings の窓を上に出して（keyboard が移る）終わらせる（一番上に残る Text Editor に keyboard が戻り enter が届く）形に（`focus_away_and_back`、2 回）。code は変えない。T1 に再試験を依頼する。

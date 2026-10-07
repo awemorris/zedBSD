@@ -187,6 +187,7 @@ int kwl_hand_add(struct kwl_hand_ink *ink, int32_t x, int32_t y);
 unsigned kwl_hand_points(const struct kwl_hand_ink *ink);
 void kwl_hand_bounds(const struct kwl_hand_ink *ink, int32_t *rect);
 int kwl_hand_load(const char *path);
+void kwl_hand_preload(struct kwl_hand_result *result);
 void kwl_hand_recognize(const struct kwl_hand_ink *ink, int32_t area, struct kwl_hand_result *result);
 void kwl_hand_recognize_on(const struct kwl_hand_ink *ink, int32_t top, int32_t height, struct kwl_hand_result *result);
 unsigned kwl_emoji_count(unsigned category);

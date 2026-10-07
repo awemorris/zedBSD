@@ -16,12 +16,29 @@ the code point, the Hershey number, then the strokes, each a run of points (Hers
 y down, relative to the glyph's centre), separated by " / ".  A Hershey record is its number in columns 1-5, its
 count of pairs in columns 6-8, then the pairs: the first is the left and right side, each other is a point or " R"
 (the pen lifted), every coordinate a character less 'R'.  A record goes on over the next lines until it has its pairs.
+
+The occidental (hersh.oc1-4) and the oriental (hersh.or1-4) files number their glyphs apart, and a few numbers are in
+both (509, 511, 617, 619, 622, 703 and 715: the simplex I, K, q, s, v, 3 and ? in the occidental files, kanji in the
+oriental ones).  The mapping's Roman glyphs are the occidental ones and its kana (6000 on) only the oriental files
+have, so a number in both is taken from the occidental files.
+
+The oriental glyphs are drawn bold: some strokes are drawn again a unit beside a longer one (ほ has three of them, at
+the top right where a dakuten goes, and the recognizer took them for one).  A stroke all of whose length lies within
+OVERSTRIKE units of a longer stroke of the same glyph is such a second line and is left out (backlog-p2 line 57,
+ws177-p009); a dakuten's two strokes are about three units apart and stay.
 """
 
+import math
 import re
 import sys
 
 BEGIN = re.compile(r"^cat << \\SHAR_EOF > '(hersh\.o[cr][1-4])'$")
+
+# How near a stroke must lie to a longer one, all along, to be its second line (Hershey's units; a glyph is about 22).
+OVERSTRIKE = 1.5
+
+# How far apart the points looked at along a stroke are, for the overstrike test.
+OVERSTRIKE_STEP = 0.5
 
 
 def shar_files(text):
@@ -79,6 +96,60 @@ def glyphs(text):
     return found
 
 
+def segment_distance(point, start, end):
+    """Gives how far a point is from a segment."""
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    squared = dx * dx + dy * dy
+    along = 0.0
+    if squared > 0:
+        along = ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / squared
+        along = max(0.0, min(1.0, along))
+    return math.hypot(point[0] - start[0] - along * dx, point[1] - start[1] - along * dy)
+
+
+def stroke_distance(point, stroke):
+    """Gives how far a point is from a stroke (a lone point's stroke: from that point)."""
+    if len(stroke) == 1:
+        return math.hypot(point[0] - stroke[0][0], point[1] - stroke[0][1])
+    return min(segment_distance(point, stroke[index], stroke[index + 1]) for index in range(len(stroke) - 1))
+
+
+def stroke_length(stroke):
+    """Gives the length of a stroke."""
+    return sum(math.hypot(stroke[index + 1][0] - stroke[index][0], stroke[index + 1][1] - stroke[index][1])
+               for index in range(len(stroke) - 1))
+
+
+def stroke_along(stroke):
+    """Gives the points along a stroke, OVERSTRIKE_STEP apart or nearer, its own points among them."""
+    points = [stroke[0]]
+    for index in range(len(stroke) - 1):
+        start = stroke[index]
+        end = stroke[index + 1]
+        steps = max(1, int(math.ceil(math.hypot(end[0] - start[0], end[1] - start[1]) / OVERSTRIKE_STEP)))
+        for step in range(1, steps + 1):
+            points.append((start[0] + (end[0] - start[0]) * step / steps, start[1] + (end[1] - start[1]) * step / steps))
+    return points
+
+
+def without_overstrikes(strokes):
+    """Gives a glyph's strokes without the second lines drawn beside longer ones (the module's note)."""
+    dropped = set()
+    for index, stroke in enumerate(strokes):
+        along = stroke_along(stroke)
+        for other_index, other in enumerate(strokes):
+            # A stroke is weighed only against a longer one still kept (equal lengths: the later one is longer).
+            if other_index == index or other_index in dropped:
+                continue
+            if (stroke_length(other), other_index) <= (stroke_length(stroke), index):
+                continue
+            if all(stroke_distance(point, other) <= OVERSTRIKE for point in along):
+                dropped.add(index)
+                break
+    return [stroke for index, stroke in enumerate(strokes) if index not in dropped]
+
+
 def main(arguments):
     """Writes the templates; the exit status says whether every glyph named was found."""
     if len(arguments) < 4:
@@ -96,8 +167,9 @@ def main(arguments):
     for path in arguments[3:]:
         with open(path, encoding='latin-1') as source:
             texts.update(shar_files(source.read()))
+    # The oriental files first, so that a number in both sets is the occidental glyph (the module's note).
     found = {}
-    for name in sorted(texts):
+    for name in sorted(texts, key=lambda name: (not name.startswith('hersh.or'), name)):
         found.update(glyphs(texts[name]))
     out = ['# The handwriting templates of Kei (ws165-p002), converted from the Hershey fonts by convert.py.',
            '# The Hershey Fonts were originally created by Dr. A. V. Hershey while working at the U. S. National',
@@ -111,6 +183,7 @@ def main(arguments):
             sys.stderr.write('convert.py: no glyph %d\n' % number)
             missing += 1
             continue
+        strokes = without_overstrikes(strokes)
         parts = [' '.join('%d,%d' % point for point in stroke) for stroke in strokes]
         out.append('U+%04X %d %s' % (code, number, ' / '.join(parts)))
     with open(arguments[2], 'w', encoding='ascii') as target:
