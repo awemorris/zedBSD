@@ -42,7 +42,7 @@ sources_for() {
 	rpm)
 		echo "$here/rpm_contract_test.c $here/mock_rpm.c $driver/runtime-pm.c $driver/pci.c $driver/trace.c" ;;
 	pte)
-		echo "$here/pte_contract_test.c $driver/ggtt.c $driver/ppgtt.c" ;;
+		echo "$here/pte_contract_test.c $here/host_kernel.c $here/host_thread.c $driver/ggtt.c $driver/ppgtt.c" ;;
 	sync)
 		echo "$here/sync_contract_test.c $here/host_kernel.c $here/host_thread.c $driver/sync.c $driver/workqueue.c $driver/mmio.c $driver/trace.c" ;;
 	rps)
