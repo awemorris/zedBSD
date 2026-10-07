@@ -14,6 +14,7 @@
   - **BUG-258**（5330 の USB メモリ）: bug-analyzer は結果無しで停止。BUG-258.md の「次」からやり直す。
   - **T1**: 未実行の依頼は無し（T1-378 は 5330 が Linux の時だけ、保留）。
   - 体制は N=2（P1・P2、phase-runner high）＋T1（test-runner）。担当は rm をしない（Q1 が消す）。Beta 2 の優先順は memory beta2-priority-order と decisions-log。
+- **2026-10-08 再開**（ユーザー「起動して作業開始してください」）: P1 新世代 = ws113-p015（2 番目以降の display の dock bar）→ q862 ws090-p015。P2 新世代 = q863 ws183-p002（タップの遅れ）→ q864 ws187-p001（lock の大きな時計）→ q860 WS143 p002（WIP は git stash に退避）。bug-analyzer = BUG-258 の解析のやり直し。T1 は依頼が来たら起動。
 <!-- master:agents:end -->
 
 ### 統合と試験の待ち
