@@ -5,14 +5,12 @@
 #  1. The accent's swatches by the keyboard (Appearance): Tab gives the keyboard to the chosen swatch (ACCENT focus=0),
 #     Right twice moves it (ACCENT focus=2), Enter chooses it (ACCENT index=2), Esc takes the keyboard back
 #     (ACCENT focus=-1); accent-focus.png shows the keyboard's ring.  Left at the first swatch stays (focus=0).
-#  2. The administration's fields are limited (Users, Add User...: the button is Settings' control 21, found by its
-#     ZSETTINGS CONTROL line): 40 letters typed into the name field (the form's first) stop at 32
-#     (USERS admin field=0 length=32 and never 33; users-admin-name.png shows the name).  The card is an
-#     administrator's: Settings runs as kei (a member of wheel), not as root, which is not a person's account and
-#     has no row of its own in the list (T1-407: controls 1-3 and 10 only, the password card); the root compositor's
-#     socket is opened to kei for it, and its log is /tmp/s-kei.log.
+#  2. (moved) The administration's name field stopping at 32 is checked in a real session as kei, an administrator: the
+#     AAT scenario apps.settings.manage-users, its step 2 (tests/scenarios/apps/settings/manage-users.md).  Here the
+#     compositor runs as root, which is not a person's account (no Manage users card, T1-407), and a Settings started
+#     as kei on it cannot open its window (T1-412: ZSETTINGS FAILED operation=window error=5).
 #  3. No ERROR line in zdesktop's log; Settings runs on.
-# The pictures are for review (Q1/user): accent-focus.png (the ring), users-admin-name.png (the name cut at 32).
+# The picture is for review (Q1/user): accent-focus.png (the ring).
 # The IME candidates' accent, the network row lit in the dark appearance and the File Manager Help card's wrapped
 # lines are checked on pictures in the UAT (they need the input method's candidates, the network popup and the
 # menu bar's Help, which this script does not drive).
@@ -97,34 +95,9 @@ guest "$stop_all" >/dev/null
 guest "$start_desktop" >/dev/null
 wait_desktop
 
-# 2. The administration's name field is limited to 32 bytes; Settings runs as kei, an administrator.
-slog=/tmp/s-kei.log
-guest "chmod 666 /tmp/wayland-0; rm -f $slog" >/dev/null
-guest "su kei -c 'export XDG_RUNTIME_DIR=/tmp HOME=/home/kei; /bin/settings --timeout-s=800 users > $slog 2>&1 </dev/null &'; sleep 5; echo started" >/dev/null
-find_window
-echo "settings (kei): window at $wx,$wy"
-sleep 2
-set -- $(guest "grep -a 'ZSETTINGS CONTROL index=21 ' $slog | tail -1" | sed -n 's/.* x=\([-0-9]*\) y=\([-0-9]*\) width=\([0-9]*\) height=\([0-9]*\).*/\1 \2 \3 \4/p') 0 0 0 0
-if [ "$3" = 0 ]; then
-	echo "FAIL: the Add User... button (control 21) is not on the Users page"
-	guest "grep -a 'ZSETTINGS CONTROL\|LAYOUT\|USERS' $slog | tail -40" > "$out/users-layout.txt"
-	status=1
-else
-	cx=$((wx + $1 + $3 / 2)); cy=$((wy + $2 + $4 / 2))
-	echo "Add User... at $cx,$cy"
-	pointer move $((cx - 2)) "$cy" sleep 150 move "$cx" "$cy" sleep 300 down sleep 60 up sleep 1000
-	expect_count 'USERS admin start mode=1' 1 "Add User... opens the form"
-	keys abcdefghijklmnopqrstuvwxyzabcdefghijklmn
-	expect_count 'USERS admin field=0 length=32$' 1 "the name field reaches 32"
-	over=$(count_log 'USERS admin field=0 length=3[3-9]$|USERS admin field=0 length=40$')
-	[ "${over:-0}" = 0 ] && echo "ok: the name field never passes 32" || { echo "FAIL: the name field passed 32"; status=1; }
-	shot users-admin-name.png
-fi
-
 # 3. Nothing failed.
 guest 'cat /tmp/zdesktop.log' > "$out/zdesktop.log"
 guest 'cat /tmp/s.log' > "$out/settings.log"
-guest "cat $slog" > "$out/settings-kei.log"
 if grep -qE 'KWL FAILED|ERROR' "$out/zdesktop.log"; then echo "FAIL: the compositor logged a failure"; status=1; else echo "ok: no failure in zdesktop's log"; fi
 alive=$(guest 'ps -A -o args | grep -cE "^/bin/settings( |$)"' | tail -1)
 if [ "${alive:-0}" -gt 0 ] 2>/dev/null; then echo "ok: Settings runs on"; else echo "FAIL: Settings is gone"; status=1; fi

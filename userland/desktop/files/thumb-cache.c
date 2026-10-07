@@ -17,6 +17,11 @@
  * file's modification time and size.  A file that changed has a stale
  * record, which is made again; the folder is the user's alone (0700).
  *
+ * A file that could not be made into a thumbnail leaves a failure's record
+ * instead (ws177-p010): the line "KF" in place of the PPM's kind, then the
+ * same comment line, and nothing more.  It stands for the file as it was,
+ * so a changed file is tried again.
+ *
  * The cache is kept small (ws127-p004): when a new record leaves more than
  * FM_THUMB_RECORDS_MAX records, the oldest written are removed until
  * FM_THUMB_RECORDS_KEEP are left.  A record is named by the SHA-256 of a
@@ -43,6 +48,9 @@
 #define CACHE_FOLDER		"keiland/thumbnails"
 #define CACHE_MARK		"# keiland-thumbnail"
 
+/* The first line of a failure's record, in place of the PPM's kind. */
+#define CACHE_FAILED		"KF\n"
+
 /*
  * One record of the cache as a trim sees it: its name in the cache's
  * folder and when it was written.
@@ -57,7 +65,8 @@ static int cache_trim_list(const char *folder, struct cache_entry **entries, siz
 static int cache_compare_written(const void *left, const void *right);
 static int cache_record_path(const char *path, char *record, size_t size);
 static int cache_folder(char *folder, size_t size);
-static int cache_header(FILE *file, long long *modified, unsigned long long *size, int *width, int *height);
+static int cache_header(FILE *file, long long *modified, unsigned long long *size, int *width, int *height, int *failed);
+static int cache_stamp(FILE *file, long long *modified, unsigned long long *size);
 
 /*
  * Tells whether an item is drawn with a thumbnail: a picture, or a PDF
@@ -87,7 +96,8 @@ fm_thumb_kind(
 
 /*
  * Reads the kept thumbnail of a file, when the cache has one recorded for
- * the file as it is now (its modification time and size).  Returns 0, or
+ * the file as it is now (its modification time and size).  Returns 0,
+ * EINVAL when a failure is kept for the file as it is now (ws177-p010), or
  * ENOENT when there is none (or a stale or damaged one).
  */
 int
@@ -104,6 +114,7 @@ fm_thumb_cache_read(
 	size_t got;
 	int width;
 	int height;
+	int failed;
 	int error;
 	int x;
 	int y;
@@ -121,11 +132,22 @@ fm_thumb_cache_read(
 	file = fopen(record, "rb");
 	if (file == NULL)
 		return ENOENT;
-	error = cache_header(file, &modified, &size, &width, &height);
+	error = cache_header(file, &modified, &size, &width, &height, &failed);
 	if (error != 0 ||
 	    modified != (long long)status.st_mtime ||
-	    size != (unsigned long long)status.st_size ||
-	    width < 1 || width > CACHE_SIDE_MAX ||
+	    size != (unsigned long long)status.st_size) {
+		fclose(file);
+		return ENOENT;
+	}
+
+	/* Reports a failure kept for the file as it is now. */
+	if (failed) {
+		fclose(file);
+		return EINVAL;
+	}
+
+	/* Refuses a size no thumbnail has. */
+	if (width < 1 || width > CACHE_SIDE_MAX ||
 	    height < 1 || height > CACHE_SIDE_MAX) {
 		fclose(file);
 		return ENOENT;
@@ -235,6 +257,56 @@ fm_thumb_cache_trim(
 	return removed;
 }
 
+/*
+ * Keeps a failure's record for a file as it is now, so that it is not
+ * tried again until it changes (ws177-p010).  The record is written
+ * beside its place and renamed into it.  Returns 0 or an errno value.
+ */
+int
+fm_thumb_cache_fail(
+	const char *path)
+{
+	char record[FM_PATH_MAX];
+	char temporary[FM_PATH_MAX + 32];
+	char stamp[160];
+	FILE *file;
+	int written;
+	int closed;
+	int error;
+
+	/* Finds the record's place and the stamp of the file as it is now. */
+	error = fm_thumb_cache_target(path, record, sizeof(record), stamp, sizeof(stamp));
+	if (error != 0)
+		return error;
+
+	/* Writes the failure beside the record. */
+	(void)snprintf(temporary, sizeof(temporary), "%s.%ld.failed", record, (long)getpid());
+	file = fopen(temporary, "wb");
+	if (file == NULL) {
+		error = errno;
+		return error;
+	}
+	written = fprintf(file, "%s# %s\n", CACHE_FAILED, stamp);
+	closed = fclose(file);
+
+	/* Removes a failure that could not be written whole. */
+	if (written < 0 || closed != 0) {
+		(void)unlink(temporary);
+		return EIO;
+	}
+
+	/* Puts it in the record's place. */
+	error = rename(temporary, record);
+	if (error != 0) {
+		error = errno;
+		(void)unlink(temporary);
+		return error;
+	}
+
+	/* Succeeded: the failure is kept. */
+	return 0;
+}
+
 /* Writes the place of a file's record in the cache (the cache's folder made); returns 0 or an errno value. */
 static int
 cache_record_path(
@@ -316,45 +388,47 @@ cache_folder(
 	return 0;
 }
 
-/* Reads a record's header up to its pixels; returns 0, or EINVAL for one that is not a record. */
+/*
+ * Reads a record's header: a PPM's kind, the mark with the file's time
+ * and size, the size and the depth; or a failure's record (*failed set),
+ * which ends after the mark.  Returns 0, or EINVAL for anything else.
+ */
 static int
 cache_header(
 	FILE *file,
 	long long *modified,
 	unsigned long long *size,
 	int *width,
-	int *height)
+	int *height,
+	int *failed)
 {
 	char line[160];
 	char *text;
 	char *end;
 	long value;
 	int differs;
+	int error;
 
-	/* The PPM's kind. */
+	/* Reads the record's kind: a PPM, or a failure. */
+	*failed = 0;
 	text = fgets(line, sizeof(line), file);
 	if (text == NULL)
 		return EINVAL;
+	differs = strcmp(line, CACHE_FAILED);
+	if (differs == 0)
+		*failed = 1;
 	differs = strcmp(line, "P6\n");
-	if (differs != 0)
+	if (differs != 0 && !*failed)
 		return EINVAL;
 
-	/* The mark, then the file's modification time and size. */
-	text = fgets(line, sizeof(line), file);
-	if (text == NULL)
-		return EINVAL;
-	differs = strncmp(line, CACHE_MARK " mtime=", sizeof(CACHE_MARK " mtime=") - 1U);
-	if (differs != 0)
-		return EINVAL;
-	text = line + sizeof(CACHE_MARK " mtime=") - 1U;
-	*modified = strtoll(text, &end, 10);
-	differs = strncmp(end, " size=", 6);
-	if (end == text || differs != 0)
-		return EINVAL;
-	text = end + 6;
-	*size = strtoull(text, &end, 10);
-	if (end == text || *end != '\n')
-		return EINVAL;
+	/* Reads the mark with the file's modification time and size. */
+	error = cache_stamp(file, modified, size);
+	if (error != 0)
+		return error;
+
+	/* A failure's record has nothing more. */
+	if (*failed)
+		return 0;
 
 	/* The width and the height. */
 	text = fgets(line, sizeof(line), file);
@@ -385,6 +459,43 @@ cache_header(
 		return EINVAL;
 
 	/* Succeeded: the pixels follow. */
+	return 0;
+}
+
+/* Reads a record's mark line, with the file's modification time and size; returns 0 or EINVAL. */
+static int
+cache_stamp(
+	FILE *file,
+	long long *modified,
+	unsigned long long *size)
+{
+	char line[160];
+	char *text;
+	char *end;
+	int differs;
+
+	/* The mark. */
+	text = fgets(line, sizeof(line), file);
+	if (text == NULL)
+		return EINVAL;
+	differs = strncmp(line, CACHE_MARK " mtime=", sizeof(CACHE_MARK " mtime=") - 1U);
+	if (differs != 0)
+		return EINVAL;
+
+	/* The modification time. */
+	text = line + sizeof(CACHE_MARK " mtime=") - 1U;
+	*modified = strtoll(text, &end, 10);
+	differs = strncmp(end, " size=", 6);
+	if (end == text || differs != 0)
+		return EINVAL;
+
+	/* The size, which ends the line. */
+	text = end + 6;
+	*size = strtoull(text, &end, 10);
+	if (end == text || *end != '\n')
+		return EINVAL;
+
+	/* Succeeded: the stamp. */
 	return 0;
 }
 

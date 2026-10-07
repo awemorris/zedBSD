@@ -17,7 +17,9 @@
  *
  * preview_start starts one and preview_poll follows it without waiting
  * (one too slow is ended); preview_picture makes one, waits for it and
- * reads the picture back.  What a child writes is not trusted: the reader
+ * reads the picture back; preview_picture_begin and preview_picture_follow
+ * do the same without waiting, for a window that must keep answering
+ * (ws177-p010).  What a child writes is not trusted: the reader
  * takes only a binary PPM of a sane size.
  */
 
@@ -52,6 +54,16 @@ struct preview_job {
 	int status;
 };
 
+/*
+ * A picture being made without waiting (preview_picture_begin): the job
+ * and the output it writes, a temporary file already removed from its
+ * folder and open here only (-1 when none is being made).
+ */
+struct preview_pending {
+	struct preview_job job;
+	int output;
+};
+
 /* A picture read back: opaque 0xffRRGGBB pixels, width by height (allocated). */
 struct preview_picture {
 	uint32_t *pixels;
@@ -64,6 +76,10 @@ int preview_start(const char *input, int output, const struct preview_request *r
 int preview_poll(struct preview_job *job);
 int preview_wait(struct preview_job *job);
 int preview_picture(const char *input, const struct preview_request *request, struct preview_picture *picture);
+int preview_picture_begin(const char *input, const struct preview_request *request, struct preview_pending *pending);
+int preview_picture_follow(struct preview_pending *pending, struct preview_picture *picture, int *error);
+void preview_picture_cancel(struct preview_pending *pending);
+int preview_status_error(int status);
 int preview_read(int fd, struct preview_picture *picture);
 void preview_picture_release(struct preview_picture *picture);
 

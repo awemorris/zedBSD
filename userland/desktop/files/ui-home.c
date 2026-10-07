@@ -55,6 +55,10 @@
 /* The first card index of the removable devices (the folders' cards are 0.., the recent folders' 100..). */
 #define HOME_DEVICE_CARD	200
 
+/* The size the hero's picture is made within (as large as the Today page's card is drawn). */
+#define HOME_HERO_SOURCE_WIDTH	1920
+#define HOME_HERO_SOURCE_HEIGHT	1200
+
 /* The mark's size on the hero card. */
 #define HOME_HERO_MARK		56
 
@@ -88,6 +92,7 @@ static struct kl_recent_item home_recent_items[FM_HOME_RECENTS * 4];
 
 static void home_hero(struct fm_app *app, struct kl_canvas *canvas, int x, int y, int width);
 static void home_hero_art(struct kl_image *image);
+static void home_hero_fallback(struct fm_app *app);
 static void home_hero_brand(struct fm_app *app, struct kl_canvas *canvas, int x, int y, int width);
 static int home_section(struct fm_app *app, struct kl_canvas *canvas, int x, int y, int width, const char *title, int link);
 static int home_cards(struct fm_app *app, struct kl_canvas *canvas, int x, int y, int width);
@@ -415,15 +420,18 @@ home_hero(
 	int crop_height;
 	int error;
 
-	/* The picture, read the first time (the drawn landscape when there is no wallpaper). */
+	/*
+	 * Asks for the picture the first time, without waiting for it
+	 * (ws177-p010): fm_home_tick takes it; the card is a gradient
+	 * meanwhile.
+	 */
 	if (app->hero_source.pixels == NULL && app->hero_tried == 0) {
 		app->hero_tried = 1;
-		error = fm_image_load(app->wallpaper, &app->hero_source);
-		if (error != 0) {
-			error = kl_image_create(&app->hero_source, 960, 360);
-			if (error == 0)
-				home_hero_art(&app->hero_source);
-		}
+		error = fm_picture_begin(FM_PICTURE_HERO, app->wallpaper, HOME_HERO_SOURCE_WIDTH, HOME_HERO_SOURCE_HEIGHT);
+		if (error == 0)
+			app->hero_pending = 1;
+		else
+			home_hero_fallback(app);
 	}
 
 	/* Scaled once for the card's size: the lower part of the picture, where the lake is, at the card's shape. */
@@ -464,6 +472,49 @@ home_hero(
 
 	/* The Kei mark and word at the upper right. */
 	home_hero_brand(app, canvas, x, y, width);
+}
+
+/*
+ * Takes the hero's picture when its child is done (the drawn landscape
+ * when there is no picture).  Returns nonzero when it is, so that the
+ * window is drawn again.
+ */
+int
+fm_home_tick(
+	struct fm_app *app)
+{
+	int finished;
+	int error;
+
+	/* No picture is being made. */
+	if (app->hero_pending == 0)
+		return 0;
+
+	/* The picture, while it is made. */
+	finished = fm_picture_follow(FM_PICTURE_HERO, &app->hero_source, &error);
+	if (!finished)
+		return 0;
+	app->hero_pending = 0;
+
+	/* A wallpaper that cannot be read gives the drawn landscape. */
+	if (error != 0)
+		home_hero_fallback(app);
+
+	/* Succeeded: the picture is there, to be scaled for the card. */
+	return 1;
+}
+
+/* Puts the drawn landscape in place of a wallpaper that cannot be read. */
+static void
+home_hero_fallback(
+	struct fm_app *app)
+{
+	int error;
+
+	/* The landscape, drawn once. */
+	error = kl_image_create(&app->hero_source, 960, 360);
+	if (error == 0)
+		home_hero_art(&app->hero_source);
 }
 
 /* Draws the Kei mark and the word Kei (three letters, never a lone K) at the hero card's upper right. */

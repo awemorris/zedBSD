@@ -156,9 +156,8 @@ preview_wait(
 /*
  * Makes a preview of a file, waits for it and reads the picture back (the
  * output is a temporary file, removed after).  Returns 0 with the picture
- * (the caller's), the child's status as an errno value of its own kind
- * (EINVAL unknown or damaged, EFBIG too large, ENOMEM, EIO otherwise), or
- * an errno value.
+ * (the caller's), the child's status as an errno value
+ * (preview_status_error), or an errno value.
  */
 int
 preview_picture(
@@ -166,45 +165,163 @@ preview_picture(
 	const struct preview_request *request,
 	struct preview_picture *picture)
 {
-	struct preview_job job;
-	char path[256];
-	int status;
+	struct preview_pending pending;
+	struct timespec step;
+	int finished;
 	int error;
-	int fd;
 
-	/* The output, a new file only this process knows. */
-	memset(picture, 0, sizeof(*picture));
-	fd = client_temporary(path, sizeof(path));
-	if (fd < 0)
-		return errno;
+	/* Starts the preview. */
+	error = preview_picture_begin(input, request, &pending);
+	if (error != 0)
+		return error;
+
+	/* Waits for its end, a look every few milliseconds. */
+	for (;;) {
+		finished = preview_picture_follow(&pending, picture, &error);
+		if (finished)
+			break;
+		step.tv_sec = 0;
+		step.tv_nsec = CLIENT_STEP_MS * 1000000L;
+		(void)nanosleep(&step, NULL);
+	}
+
+	/* Reports why there is no picture. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the picture is the caller's. */
+	return 0;
+}
+
+/*
+ * Starts a preview of a file without waiting for it (ws177-p010): its
+ * output is a new temporary file only this process knows.  Returns 0 with
+ * the pending picture, which preview_picture_follow follows, or an errno
+ * value (nothing is then pending).
+ */
+int
+preview_picture_begin(
+	const char *input,
+	const struct preview_request *request,
+	struct preview_pending *pending)
+{
+	char path[256];
+	int error;
+
+	/* Makes the output, a file removed from its folder at once. */
+	memset(pending, 0, sizeof(*pending));
+	pending->output = client_temporary(path, sizeof(path));
+	if (pending->output < 0) {
+		error = errno;
+		return error;
+	}
 	(void)unlink(path);
 
-	/* The preview, waited for. */
-	error = preview_start(input, fd, request, &job);
+	/* Starts the child writing it. */
+	error = preview_start(input, pending->output, request, &pending->job);
 	if (error != 0) {
-		(void)close(fd);
+		(void)close(pending->output);
+		pending->output = -1;
 		return error;
 	}
 
-	/* Its end. */
-	status = preview_wait(&job);
+	/* Succeeded: the picture is being made. */
+	return 0;
+}
 
-	/* Its picture, when it made one. */
-	error = EIO;
+/*
+ * Looks at a pending picture without waiting.  Returns 0 while it is
+ * being made; 1 when it is done, with the picture (the caller's) and
+ * *error 0, or *error the reason there is none (preview_status_error, or
+ * the reading's errno value).  The output is closed when it is done.
+ */
+int
+preview_picture_follow(
+	struct preview_pending *pending,
+	struct preview_picture *picture,
+	int *error)
+{
+	int finished;
+	int status;
+
+	/* Nothing yet. */
+	memset(picture, 0, sizeof(*picture));
+	*error = 0;
+
+	/* A child still at work. */
+	finished = preview_poll(&pending->job);
+	if (!finished)
+		return 0;
+
+	/* Reads the picture it made, or tells why it made none. */
+	status = pending->job.status;
+	*error = preview_status_error(status);
 	if (status == PREVIEW_OK) {
-		(void)lseek(fd, 0, SEEK_SET);
-		error = preview_read(fd, picture);
-	} else if (status == PREVIEW_UNKNOWN || status == PREVIEW_DAMAGED) {
-		error = EINVAL;
-	} else if (status == PREVIEW_TOO_LARGE) {
-		error = EFBIG;
-	} else if (status == PREVIEW_NO_MEMORY) {
-		error = ENOMEM;
+		(void)lseek(pending->output, 0, SEEK_SET);
+		*error = preview_read(pending->output, picture);
 	}
 
-	/* The output goes (it was removed already). */
-	(void)close(fd);
-	return error;
+	/* The output goes (it was removed from its folder already). */
+	(void)close(pending->output);
+	pending->output = -1;
+
+	/* Succeeded: the picture is done, made or not. */
+	return 1;
+}
+
+/*
+ * Gives up a pending picture: the child, still running, is ended and
+ * collected, and the output goes.
+ */
+void
+preview_picture_cancel(
+	struct preview_pending *pending)
+{
+	/* A time of nothing ends a running child at the next look. */
+	pending->job.limit_ms = 0U;
+	pending->job.started_ms = 0U;
+	(void)preview_poll(&pending->job);
+
+	/* The output goes. */
+	if (pending->output >= 0)
+		(void)close(pending->output);
+	pending->output = -1;
+}
+
+/*
+ * Gives a child's exit status as an errno value: 0 for a preview made,
+ * EINVAL for an input of an unknown kind or damaged, EFBIG for one too
+ * large, ENOMEM for one the child had no memory for, ETIMEDOUT for a child
+ * ended (its time was up, or a signal), EIO otherwise.
+ */
+int
+preview_status_error(
+	int status)
+{
+	/* A preview made. */
+	if (status == PREVIEW_OK)
+		return 0;
+
+	/* An input the program cannot read. */
+	if (status == PREVIEW_UNKNOWN)
+		return EINVAL;
+	if (status == PREVIEW_DAMAGED)
+		return EINVAL;
+
+	/* An input over the limits. */
+	if (status == PREVIEW_TOO_LARGE)
+		return EFBIG;
+
+	/* A child without memory. */
+	if (status == PREVIEW_NO_MEMORY)
+		return ENOMEM;
+
+	/* A child ended by a signal, its time's or the kernel's. */
+	if (status >= PREVIEW_KILLED)
+		return ETIMEDOUT;
+
+	/* Anything else: the output could not be written, or the child could not run. */
+	return EIO;
 }
 
 /*

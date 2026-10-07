@@ -63,3 +63,8 @@ accent の 5 行は ok。`FAIL: the Add User... button (control 21) is not on th
 ## T1-412（2026-10-08 Q1）
 
 FAIL（2 回とも）: kei で起動した Settings が `ZSETTINGS INSTANCE alone errno=21`・`ZSETTINGS FAILED operation=window error=5` で窓を作れずに終わった（settings-kei.log）。試験の起動の仕方（kei の環境・XDG_RUNTIME_DIR・socket の権限）を P1 が直す。
+
+## T1-412（2026-10-08、desktop-p004 は FAIL）と移し替え（P1）
+
+kei で起動した Settings は `ZSETTINGS INSTANCE alone errno=21`（EOPNOTSUPP。runtime の folder の /tmp が kei の物でないので、ひとつだけの起動の socket を作らない。害は無い）を出した後、`ZSETTINGS FAILED operation=window error=5`（EIO）で窓を作れずに終わった。root で走る `--testing` の compositor に別の uid の client を繋ぐ形は、この試験の道具の外になる（窓の資源の権限）。
+直し: 名前の欄の 32 の確認を、kei の本物の session で走る AAT に移した。`tests/scenarios/apps/settings/manage-users.md` の 2（新しい段）と `plan/tools/aat/scenarios/helpers_apps.py` の `apps.settings.manage-users`: Add User を開き、英字を 40 字打って `USERS admin field=0 length=32` が出て 33 以上が無いことを見て撮り、Esc で閉じてから元の段に進む。`check-scenarios.py` は PASS。`desktop-p004.sh` からは 2 を除いた（accent の 5 本と失敗の検査が残る）。code は変えない。
