@@ -131,6 +131,13 @@ struct vulkan_wsi_platform_ops {
 	 * backend advertised; NULL when only opaque images are presented.
 	 */
 	VkResult (*composite_alpha)(void *, VkCompositeAlphaFlagBitsKHR);
+	/*
+	 * Names the part of the next presented image that changed since the
+	 * last (VK_KHR_incremental_present, BUG-221): x, y, width, height in
+	 * image pixels; the next present alone uses it.  NULL when the backend
+	 * damages every present whole.
+	 */
+	void (*damage)(void *, int32_t, int32_t, int32_t, int32_t);
 };
 
 VkResult vulkan_wsi_display_node_query(struct VkPhysicalDevice_T *physical, uint32_t index, uint32_t *count, struct gpu_display_info *request, uint64_t *device_id, char *path);

@@ -121,6 +121,8 @@ struct wsi_present_job {
 	void **composed;
 	VkDisplayPresentInfoKHR display;
 	VkBool32 has_display;
+	/* Each target's changed part (x, y, width, height), from the application's present regions; NULL when none were named. */
+	struct wsi_present_damage *damage;
 	VkCommandPool pool;
 	VkCommandBuffer command;
 	VkFence fence;
@@ -129,6 +131,15 @@ struct wsi_present_job {
 	uint32_t count;
 	VkBool32 submitted;
 	VkBool32 reserved;
+};
+
+/* The part of one target's image that changed (VK_KHR_incremental_present): known, and the box around its rectangles. */
+struct wsi_present_damage {
+	VkBool32 known;
+	int32_t x;
+	int32_t y;
+	int32_t width;
+	int32_t height;
 };
 
 /* One logical queue owns an ordered worker whose waits never retain queue or WSI locks. */
@@ -175,6 +186,7 @@ static VkResult swapchain_poll(struct vulkan_swapchain *chain, struct vulkan_wak
 static void swapchain_notify_locked(void);
 static VkResult present_prepare(struct wsi_present_job *job, struct VkQueue_T *queue, const VkPresentInfoKHR *info);
 static VkResult present_reserve(struct wsi_present_job *job, const VkPresentInfoKHR *info);
+static VkResult present_regions(struct wsi_present_job *job, const VkPresentInfoKHR *info);
 static VkResult present_fence_prepare(struct wsi_present_job *job);
 static VkResult present_record(struct wsi_present_job *job, const VkPresentInfoKHR *info);
 static void present_copy(VkCommandBuffer command, struct vulkan_swapchain *chain, uint32_t index, uint32_t family, const VkDisplayPresentInfoKHR *display);
@@ -1751,6 +1763,11 @@ present_prepare(
 		pthread_mutex_unlock(&swapchain_mutex);
 	}
 
+	/* The changed parts the application named, if it enabled the extension. */
+	error = present_regions(job, info);
+	if (error != VK_SUCCESS)
+		return error;
+
 	/* Reserve all readback slots together so concurrent queue presents cannot overwrite them. */
 	error = present_reserve(job, info);
 	if (error != VK_SUCCESS)
@@ -2295,6 +2312,11 @@ present_native(
 			} else if (chain->gpu_present != VK_FALSE) {
 				/* Names this GPU image commit without creating a CPU pixel staging view. */
 				chain->frame++;
+
+				/* The part that changed, when the application named it and the backend damages parts. */
+				if (job->damage != NULL && job->damage[index].known && chain->surface->platform->damage != NULL)
+					chain->surface->platform->damage(chain->lease, job->damage[index].x, job->damage[index].y, job->damage[index].width, job->damage[index].height);
+
 				if (job->fence_fd >= 0 && chain->surface->platform->present_image_sync != NULL) {
 					/* Native K repeats the exact producer dependency check before hardware access. */
 					error = chain->surface->platform->present_image_sync(
@@ -2417,6 +2439,7 @@ present_finish(
 	}
 
 	vulkan_free(&job->allocator, job->composed);
+	vulkan_free(&job->allocator, job->damage);
 	vulkan_free(&job->allocator, job->stages);
 	vulkan_free(&job->allocator, job->results);
 	vulkan_free(&job->allocator, job->chains);
@@ -3202,4 +3225,108 @@ swapchain_notify_locked(
 
 	/* Succeeded: no waiter consumes another waiter's independently retained event. */
 	return;
+}
+
+/*
+ * Takes the changed parts of the present's targets from the application's
+ * VkPresentRegionsKHR (VK_KHR_incremental_present, BUG-221): for each
+ * target the box around its rectangles of layer 0, clipped to the image.
+ * A target with no rectangles, or a present without the record (or on a
+ * device that did not enable the extension), names none: the whole image
+ * changed.  Returns VK_SUCCESS, or VK_ERROR_OUT_OF_HOST_MEMORY.
+ */
+static VkResult
+present_regions(
+	struct wsi_present_job *job,
+	const VkPresentInfoKHR *info)
+{
+	const VkBaseInStructure *extension;
+	const VkPresentRegionsKHR *regions;
+	const VkPresentRegionKHR *region;
+	const VkRectLayerKHR *rect;
+	struct wsi_present_damage *damage;
+	int64_t left;
+	int64_t top;
+	int64_t right;
+	int64_t bottom;
+	size_t bytes;
+	uint32_t index;
+	uint32_t at;
+
+	/* Only a device that enabled the extension names regions. */
+	if ((job->queue->device->enabled_extensions & VULKAN_DEVICE_INCREMENTAL_PRESENT) == 0U)
+		return VK_SUCCESS;
+
+	/* The record in the application's chain, if there is one. */
+	regions = NULL;
+	for (extension = info->pNext; extension != NULL; extension = extension->pNext) {
+		if (extension->sType == VK_STRUCTURE_TYPE_PRESENT_REGIONS_KHR) {
+			regions = (const VkPresentRegionsKHR *)(const void *)extension;
+			break;
+		}
+	}
+
+	/* None, or one for other targets: every image changed whole. */
+	if (regions == NULL || regions->pRegions == NULL || regions->swapchainCount != job->count)
+		return VK_SUCCESS;
+
+	/* One part a target. */
+	bytes = (size_t)job->count * sizeof(*job->damage);
+	job->damage = vulkan_allocate(&job->allocator, bytes, sizeof(void *), VK_SYSTEM_ALLOCATION_SCOPE_COMMAND);
+	if (job->damage == NULL)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+	memset(job->damage, 0, bytes);
+
+	/* Each target's rectangles of layer 0, their box clipped to the image. */
+	for (index = 0U; index < job->count; index++) {
+		/* No rectangles: the whole image. */
+		region = &regions->pRegions[index];
+		if (region->rectangleCount == 0U || region->pRectangles == NULL || job->chains[index] == NULL)
+			continue;
+
+		/* The box around them. */
+		left = INT64_MAX;
+		top = INT64_MAX;
+		right = INT64_MIN;
+		bottom = INT64_MIN;
+		for (at = 0U; at < region->rectangleCount; at++) {
+			/* Another layer, or nothing. */
+			rect = &region->pRectangles[at];
+			if (rect->layer != 0U || rect->extent.width == 0U || rect->extent.height == 0U)
+				continue;
+
+			/* The box grows to hold it. */
+			if (rect->offset.x < left)
+				left = rect->offset.x;
+			if (rect->offset.y < top)
+				top = rect->offset.y;
+			if ((int64_t)rect->offset.x + rect->extent.width > right)
+				right = (int64_t)rect->offset.x + rect->extent.width;
+			if ((int64_t)rect->offset.y + rect->extent.height > bottom)
+				bottom = (int64_t)rect->offset.y + rect->extent.height;
+		}
+
+		/* Clipped to the image; an empty box names nothing. */
+		if (left < 0)
+			left = 0;
+		if (top < 0)
+			top = 0;
+		if (right > (int64_t)job->chains[index]->extent.width)
+			right = (int64_t)job->chains[index]->extent.width;
+		if (bottom > (int64_t)job->chains[index]->extent.height)
+			bottom = (int64_t)job->chains[index]->extent.height;
+		if (right <= left || bottom <= top)
+			continue;
+
+		/* The target's part. */
+		damage = &job->damage[index];
+		damage->known = VK_TRUE;
+		damage->x = (int32_t)left;
+		damage->y = (int32_t)top;
+		damage->width = (int32_t)(right - left);
+		damage->height = (int32_t)(bottom - top);
+	}
+
+	/* Succeeded: the parts are the job's. */
+	return VK_SUCCESS;
 }
