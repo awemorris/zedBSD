@@ -64,6 +64,11 @@ done
 object="$out/obj/shared-host-kl-system.o"
 "$cc" -O2 -g -Wall -Werror -D_GNU_SOURCE -I$out/include -c plan/ws089/tests/host-kl-system.c -o "$object"
 objects="$objects $object"
+# The preview client's preview_picture for the wallpapers' tiles (WS168), in the process instead of the confined
+# child (plan/ws089/tests/host-preview.c, q875).
+object="$out/obj/shared-host-preview.o"
+"$cc" -O2 -g -Wall -Werror -D_GNU_SOURCE -I$out/include -I. -c plan/ws089/tests/host-preview.c -o "$object"
+objects="$objects $object"
 # The wallpaper decoding look.c uses (ws138-p001): the shared decoder and libz-, libpng- and libjpeg-compat.
 for file in userland/base/libz-compat/inflate.c userland/base/libz-compat/checksum.c userland/base/libpng-compat/read.c \
     userland/base/libjpeg-compat/decompress.c userland/base/libjpeg-compat/error.c userland/base/libjpeg-compat/huffman.c \

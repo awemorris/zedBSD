@@ -31,13 +31,14 @@
 #include <string.h>
 #include <unistd.h>
 
-/* The steps. */
+/* The steps (Languages between Look and Keys, ws164 H3). */
 #define WELCOME_STEP_WELCOME	0
 #define WELCOME_STEP_NETWORK	1
 #define WELCOME_STEP_LOOK	2
-#define WELCOME_STEP_KEYS	3
-#define WELCOME_STEP_DONE	4
-#define WELCOME_STEPS		5
+#define WELCOME_STEP_LANGUAGES	3
+#define WELCOME_STEP_KEYS	4
+#define WELCOME_STEP_DONE	5
+#define WELCOME_STEPS		6
 
 /* The bar at the foot of the pane: its height, the dots' size and gap, the buttons' inset from its edges. */
 #define WELCOME_BAR		64
@@ -53,7 +54,7 @@
 #define WELCOME_TEXT_BIG	28U
 
 /* The steps' words for the log and the tests. */
-static const char *const welcome_words[WELCOME_STEPS] = { "welcome", "network", "look", "keys", "done" };
+static const char *const welcome_words[WELCOME_STEPS] = { "welcome", "network", "look", "languages", "keys", "done" };
 
 /* The Keys step: Kei's main keys and what they do. */
 static const char *const welcome_keys[][2] = {
@@ -136,6 +137,10 @@ se_welcome_draw(
 		y = welcome_header(app, canvas, x, top, width - skip_width - 16, "Choose your look", "A picture for the desktop, and how clear the windows are.");
 		y = se_wallpaper_draw(app, canvas, x, y + WELCOME_CARD_GAP, width);
 		return se_appearance_draw(app, canvas, x, y + WELCOME_CARD_GAP, width);
+	case WELCOME_STEP_LANGUAGES:
+		/* Settings' Languages page: the input method and the display language. */
+		y = welcome_header(app, canvas, x, top, width - skip_width - 16, "Languages and input", "How you type, and the language of the desktop's words.");
+		return se_languages_draw(app, canvas, x, y + WELCOME_CARD_GAP, width);
 	case WELCOME_STEP_KEYS:
 		y = welcome_header(app, canvas, x, top, width - skip_width - 16, "Keys to know", "Kei is quick to use from the keyboard.");
 		return welcome_keys_card(app, canvas, x, y + WELCOME_CARD_GAP, width);
@@ -248,7 +253,7 @@ se_welcome_press(
 	return 1;
 }
 
-/* Gives the page whose controls a step's are: Wi-Fi or Ethernet, Appearance (with Wallpaper), else Home (none). */
+/* Gives the page whose controls a step's are: Wi-Fi or Ethernet, Appearance (with Wallpaper), Languages, else Home (none). */
 static int
 welcome_page(
 	const struct se_app *app,
@@ -264,6 +269,10 @@ welcome_page(
 	/* The look: Appearance's and Wallpaper's controls are look.c's alike. */
 	if (step == WELCOME_STEP_LOOK)
 		return SE_PAGE_APPEARANCE;
+
+	/* Languages: the Languages page's controls. */
+	if (step == WELCOME_STEP_LANGUAGES)
+		return SE_PAGE_LANGUAGES;
 
 	/* No page's controls. */
 	return SE_PAGE_HOME;

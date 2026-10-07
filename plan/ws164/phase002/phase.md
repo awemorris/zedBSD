@@ -49,3 +49,16 @@ Queue: q821（P2 の第 1 段の列、2026-10-06 Q1）
 
 - QEMU（T1）: 新しい account の最初の login で出ること（compositor の起動の後）、段の操作、Files の Today、2 回目の login で出ないこと。未実施。
 - 準正常系・異常系の未実装は [WS177 の P2 の一覧](../../ws177/backlog-p2.md)。
+
+## q875（P1、2026-10-08）: 言語と入力の段（p001 の H3）
+
+ws177 の backlog-p2 の 29 行「言語と入力の段（WS154 の Languages）」を実装した。WS154 の Languages の頁ができたので、p001 の H3 のとおり Look と Keys の間に入れた。
+
+- `settings/welcome.c`: 段を 6 つに（Welcome・Network・Look・**Languages**・Keys・Done、log の名前は `languages`）。Languages の段は header「Languages and input」の下に `se_languages_draw`（入力の方式と表示の言語、管理者には login の画面の言語）を描き、その段の controls は Languages の頁の物（`welcome_page` が `SE_PAGE_LANGUAGES` を返す）。
+- Keys の段の desktop の移動を「Alt+Shift+Left / Right」に（ws181-p010 の key、同じ q875 の 1 番の commit）。
+- 翻訳: `locale/settings.keys` に段の header 2 つ、`locale/ja/settings.tr` を `tools/i18n/tr.py update` で更新して日本語を入れた（`tr.py check`: 140 entries、140 translated、0 problems）。
+- host の試験 `plan/ws164/tests/run-host-welcome.sh` を 6 段に。Languages の段で control 5（日本語）→ 4（英語）を押し、`LANGUAGES ui language=ja`・`=en` が出ること（その段の switch が Languages の頁の物）を足した。結果: PASS（11 項目 ok、PNG は `build/ws164-welcome.run.v8NJhF/4-languages.png`・`5-keys.png`）。
+- 試験の道具の直し（同じ commit）: Settings の host の renderer（`plan/ws089/tests/host-build.sh`）が link できなくなっていた（printers・displays・power の `kl_system_*` と WS168 の `preview_picture` が無い）。`plan/ws089/tests/host-kl-system.c` に compositor が無い時の答えの stand-in を足し、`plan/ws089/tests/host-preview.c`（新規、壁紙の tile を process の中で共有の decoder で読む）を build に入れた。
+- build（warning 0）: `make -j16 BUILD=build/ws164-p002 ZEDBSD_CONFIG=plan/ws035/tests/config-amd64-zdesktop.mk build/ws164-p002/bin/settings`（rc 0）。
+- QEMU: 未実施（T1 で Welcome を流すなら、T1-269 (2) の手順で Next を 1 回多く押す）。
+- 既知: host の renderer は fallback の font が無く「日本語」が □ で出る（host だけ、guest は font がある）。

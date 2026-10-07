@@ -266,3 +266,119 @@ kl_system_monitor_close(struct kl_system_monitor *monitor)
 {
 	(void)monitor;
 }
+
+/*
+ * ws164 (q875): the calls Settings gained since (the printers, KL_VERSION
+ * 56; the displays, 58 and 59; the power state), answered as a compositor
+ * without them would: none listed, nothing done.
+ */
+size_t
+kl_system_printers_get(const struct kl_system *system, struct kl_printer *printers, size_t capacity)
+{
+	(void)system;
+	(void)printers;
+	(void)capacity;
+	return 0;
+}
+
+size_t
+kl_system_print_jobs_get(const struct kl_system *system, struct kl_print_job *jobs, size_t capacity)
+{
+	(void)system;
+	(void)jobs;
+	(void)capacity;
+	return 0;
+}
+
+int
+kl_system_printers_add(struct kl_system *system, unsigned protocol, const char *host, unsigned port, const char *path, uint32_t *request)
+{
+	(void)system;
+	(void)protocol;
+	(void)host;
+	(void)port;
+	(void)path;
+	(void)request;
+	return ENOTSUP;
+}
+
+int
+kl_system_printers_remove(struct kl_system *system, uint32_t printer, uint32_t *request)
+{
+	(void)system;
+	(void)printer;
+	(void)request;
+	return ENOTSUP;
+}
+
+int
+kl_system_printers_set_default(struct kl_system *system, uint32_t printer, uint32_t *request)
+{
+	(void)system;
+	(void)printer;
+	(void)request;
+	return ENOTSUP;
+}
+
+int
+kl_system_print_cancel(struct kl_system *system, uint32_t job, uint32_t *request)
+{
+	(void)system;
+	(void)job;
+	(void)request;
+	return ENOTSUP;
+}
+
+size_t
+kl_system_displays_get(const struct kl_system *system, struct kl_display *displays, size_t capacity)
+{
+	(void)system;
+	(void)displays;
+	(void)capacity;
+	return 0;
+}
+
+unsigned
+kl_system_displays_mode(const struct kl_system *system)
+{
+	(void)system;
+	return 0;
+}
+
+int
+kl_system_displays_apply(struct kl_system *system, unsigned mode, const struct kl_display_place *places, size_t count, uint32_t *request)
+{
+	(void)system;
+	(void)mode;
+	(void)places;
+	(void)count;
+	(void)request;
+	return ENOTSUP;
+}
+
+int
+kl_system_displays_set_brightness(struct kl_system *system, const char *key, unsigned percent, uint32_t *request)
+{
+	(void)system;
+	(void)key;
+	(void)percent;
+	(void)request;
+	return ENOTSUP;
+}
+
+int
+kl_system_displays_set_shown(struct kl_system *system, const char *key, unsigned shown, uint32_t *request)
+{
+	(void)system;
+	(void)key;
+	(void)shown;
+	(void)request;
+	return ENOTSUP;
+}
+
+void
+kl_system_power_get_state(const struct kl_system *system, struct kl_power_state *state)
+{
+	(void)system;
+	memset(state, 0, sizeof(*state));
+}
