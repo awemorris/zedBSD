@@ -51,3 +51,4 @@ Next（予約）: BUG-052（優先、まず再現の確認）→ BUG-120 → BUG
 Next（予約、2026-10-03 user）: q635 BUG-149（kernel の poll の SHUT_WR の POLLERR）。開始条件: q631 の ws005-p020・p024 が cleared。
 
 2026-10-03 / P1 の後: user「P1でBUG-149をクリアした後、ほかに関連バグが見つかっていなければ、いったんラップアップして、P3をN=1のシリアル区間で実行しましょう」→ q635 が cleared かつ関連の新しい bug が無ければ P1 を通常のラップアップで終了、以後 N=1（P3 だけ）。関連の bug が見つかったら Q1 が user に報告して判断を仰ぐ。
+| P1-merge ws113-p015 | — | 43d35865a（kl_scroll）・9d04591db・583caebf8 | wayland/{apps-bar,arrange-shell,heads,plane,shell,...}・libkeiland scroll・plan/ws113 | integrated 79b9b1b83（2026-10-08、T1-380 待ち） |

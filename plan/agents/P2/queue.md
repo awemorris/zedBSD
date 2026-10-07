@@ -21,3 +21,8 @@ Next（予約）: debug を続ける（BUG-147 の後: 優先度の高い bug。
 | P2-006 | q622 | 5ca38bb84・71f726edc・af3b29c53（前回 f0ee0d951） | wayland/{display,menu,desktop}・files/{thumb,ui-context}・imageview/image.c・plan/ws094 | integrated 0f6480f77 |
 
 2026-10-03 / N=3: user「BUG-150は今実行してOKです。FreeBSDホストを空けたので使ってください。Emacsは入ってます。」→ P2 generation4 を q636（ws128-p010、BUG-150）で起動。5320（FreeBSD）は P2 が使い、P3 は FreeBSD の確認を済ませた。
+| P2-merge q863 | q863-i01 | c98a659ec・52a2e4007（base 777137731） | wayland/touchpad.{c,h}・plan/ws159/tests/host-touchpad.c・plan/ws183 | integrated b776026ca（2026-10-08、実機の確認待ち） |
+| P2-merge q864 p001 | q864-i01 | 77fe44dc8（merge 0f16839ac、base b776026ca） | wayland/{lock-clock.{c,h},glass.{c,h},greeter.c,Makefile*}・plan/ws187 | integrated 07096625d（2026-10-08、QEMU の PNG は p003 の後） |
+| P2-merge q864 p002 | q864-i01 | dfeea795f（base 0f16839ac） | wayland/{lock-swipe.{c,h},greeter.c,seat.c,input.c,kwl.h,Makefile*}・locale/ja/wayland.tr・plan/ws187 | integrated dd562b688（2026-10-08、猶予 300 秒は案） |
+| P2-merge q864 p003 | q864-i01 | da62a2f0d・337b7d4e2・6a1cf2b6c（base dfeea795f） | wayland/greeter.c・locale/ja/wayland.tr・plan/tools/aat/scenarios/helpers_desktop.py・tests/scenarios/desktop/lock/・plan/ws187 | integrated ef0ff8a66（2026-10-08、T1 の試験待ち） |
+| P2-merge q864 sleep | q864-i01 | 880ce4cbf | wayland/{sleep.c,lock-swipe.c}・plan/ws187 | integrated（2026-10-08 7bbfb70c8 の前の merge） |

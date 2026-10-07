@@ -505,6 +505,7 @@ sleep_pending(
 {
 	struct kwl_sleep *sleep;
 	enum kwl_sleep_step step;
+	char reason[32];
 	int locked;
 	int error;
 	int sent;
@@ -517,9 +518,17 @@ sleep_pending(
 		return;
 	}
 
-	/* A session sleeps only behind its lock screen (section 0.1); a session that cannot lock does not sleep. */
+	/*
+	 * A session sleeps only behind its lock screen (section 0.1); a session
+	 * that cannot lock does not sleep.  The lock's reason names what began
+	 * the sleep: one the user chose (the sleep button, App Home's or an
+	 * application's Sleep) always asks for the secret, one of the lid, of
+	 * idleness or of the rest after a wake opens on a swipe for a while
+	 * (ws187-p002, the 2026-10-08 user decision).
+	 */
 	if (!server->greeter && !server->locked) {
-		locked = kwl_lock(server, "sleep");
+		snprintf(reason, sizeof(reason), "sleep-%s", kwl_sleep_via_name(sleep->via));
+		locked = kwl_lock(server, reason);
 		if (!locked) {
 			sleep_fail(server, "not-locked", now_ms);
 			return;

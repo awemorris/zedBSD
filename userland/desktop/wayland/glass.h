@@ -116,6 +116,9 @@ void glass_draw_text(struct kwl_server *server, VkCommandBuffer command, enum gl
 void glass_draw_text_middle(struct kwl_server *server, VkCommandBuffer command, enum glass_size size, int32_t x, int32_t baseline, const char *text, int32_t limit, const float *color);
 void glass_draw_glyph(struct kwl_server *server, VkCommandBuffer command, enum glass_size size, unsigned index, int32_t x, int32_t baseline, const float *color);
 int32_t glass_glyph_advance(struct kwl_server *server, enum glass_size size, unsigned index);
+int glass_large_prepare(struct kwl_server *server, unsigned pixels);
+int32_t glass_large_text_width(struct kwl_server *server, const char *text);
+void glass_draw_large_text(struct kwl_server *server, VkCommandBuffer command, int32_t x, int32_t baseline, const char *text, const float *color);
 void glass_draw_icon(struct kwl_server *server, VkCommandBuffer command, unsigned icon, int32_t x, int32_t y, unsigned pixels, const float *color);
 void glass_draw_app_tile(struct kwl_server *server, VkCommandBuffer command, unsigned icon, float x, float y, float pixels, float opacity, float lighten, enum glass_hole hole);
 void glass_draw_app_tile_reflection(struct kwl_server *server, VkCommandBuffer command, unsigned icon, float x, float y, float pixels, float height, float opacity);

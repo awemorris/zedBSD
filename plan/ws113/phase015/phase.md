@@ -112,3 +112,8 @@ docked の窓があればその title・menu・ボタン（前と同じ）、右
 - QEMU（T1 へ依頼）: `displays-p015.sh` に head の bar の確認を足した（`KWL GLASS head bar output=1` の launcher・desktops・status・clock が head 1 の中に左から並ぶ、
   `KWL APPS bar count=1 ... apps=p015.a output=1`、head1-bar.png）。他の行は前と同じ。
 - 未実施: head の bar の press（launcher・時計・icon・previews・desktops の pill の整列・volume・network・IME）は QEMU の tablet が anchor だけなので 5330 の実機（ユーザー）。
+
+## 決定 2026-10-08（ユーザー、2 回目）: 画面ごとの dock の window
+
+「各番目の画面のdock barには、その画面のウィンドウのみを出してください。app単位ではなくwindow単位にします。でも、画面ごとのapp iconsは、ウィンドウがあればその画面のdockに表示され、プレビューはその画面のウィンドウだけにします。」→ 1 番目（anchor）を含む全ての画面で、bar の app icon はその画面に window を持つ app だけ、icon の previews はその画面の window だけ。switcher は全ての window のまま。P1 に送った（q862 の前に入れる）。
+「切り替えのつまみ」（上の決定の文）はユーザーにも意味が分からなかった（前のセッションの Q1 の書いた選択肢の文の見込み）。P1 は desktops の pill と読んで実装した。ユーザーの答え待ち。

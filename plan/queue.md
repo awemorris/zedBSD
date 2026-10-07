@@ -93,7 +93,7 @@ Last reconciled Queue: [q779](history/queue-q779.md)（2026-10-06、BUG-202の�
 | q847 / q847-i01 | P1（2026-10-07 ユーザー「シェーダコンパイラより優先」「P1 を移す」） | [ws051-p003](ws051/ws.md) DKL PHY・TC PLL・DDI の TC の clock 等（正解値は q848）→ p004a・p004b、並べて WS050 の実機（5320 の `ucsi: command 0x12 timed out`・PPM 不起動の解析を含む） | q848（p003 の照合） | — | in-progress（2026-10-07 P1 新世代、main 4ca3a0e06） |
 | q861 / q861-i01 | P1（優先順の残り、ベータ2） | [WS182](ws182/ws.md) p001・p002（main d66cd3ef7、T1-377 待ち） → [WS005](ws005/ws.md) p023 の手順書だけ（2026-10-08 Q1: p022 は規約の Phase の扱いのユーザーの決定待ちで保留、p021 の canceled はユーザーに確認） | — | — | in-progress |
 | q864 / q864-i01 | P2（2026-10-08 ユーザーの要望、q863 の後） | [ws187-p001](ws187/phase001/phase.md) lock の画面の大きな時計（縦長でも中央より上） | — | — | pending |
-| q863 / q863-i01 | P2（touchpad、優先順の 6 番） | [ws183-p002](ws183/ws.md) 1 本指のタップのクリックの遅れ | — | — | pending |
+| q863 / q863-i01 | P2（touchpad、優先順の 6 番） | [ws183-p002](ws183/ws.md) 1 本指のタップのクリックの遅れ | — | — | test-wait（実機、ユーザーの手。main b776026ca に統合 2026-10-08） |
 | q862 / q862-i01 | P1（widget、優先順の 4 番） | [ws090-p015](ws090/ws.md) Terminal・Notes の scroll を `kui_scroll` へ（rubber band の境界と位置の引き継ぎを含む、WS081 の host 試験 2 本の更新） | p011（cleared） | — | pending |
 | q860 / q860-i01 | P2（優先順の 10 番、写真・カレンダーのベータ2 の分は試験待ちだけ） | [WS143](ws143/ws.md) p001 の記録を締め、HID の Phase から実装 | — | — | in-progress |
 | q859 / q859-i01 | P2（優先順の 5 番 通知、BUG-256 の 5330 の log の待ちの間） | [WS156](ws156/ws.md) p003（popup）→ p004（log） | ws156-p002 | — | finished（2026-10-08: 実装、T1-375 待ち） |

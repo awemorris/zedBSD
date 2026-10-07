@@ -370,7 +370,7 @@ se_look_scan(
 	look->scanned = 1;
 
 	/* The default picture, when the image has one (tile 0; else tile 0 is the drawn landscape). */
-	look_add_picture(app, LOOK_DEFAULT_PICTURE, "Kei");
+	look_add_picture(app, LOOK_DEFAULT_PICTURE, "Dawn");
 	look->has_default = 1;
 
 	/*
@@ -473,7 +473,7 @@ se_look_wallpaper_name(
 
 	/* No key: the default. */
 	if (app->look.wallpaper[0] == '\0')
-		return "Kei (default)";
+		return "Dawn (default)";
 
 	/* A picture the page found has its name. */
 	for (index = 0; index < app->look.wallpaper_count; index++) {

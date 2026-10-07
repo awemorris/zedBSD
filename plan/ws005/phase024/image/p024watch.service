@@ -1,6 +1,0 @@
-type=daemon
-command=/bin/sh
-arguments=/etc/p024-watch.sh
-after=networking
-restart=on-failure
-required=NO

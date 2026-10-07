@@ -125,10 +125,11 @@ struct kwl_touchpad_finger {
 };
 
 /*
- * The states of the tap: none; a tap's press given, its release waiting
- * for the time a drag may start; a finger down within that time (a drag or
- * a second tap); and a tap drag, whose button is held until the finger
- * lifts.
+ * The states of the tap: none; a tap's click given at its lift, the time a
+ * drag may start not yet over (no button held); a finger down within that
+ * time, not yet a drag or a second tap (no button held, its motion held
+ * back); and a tap drag, whose button is held until the finger lifts
+ * (ws183-p002).
  */
 enum kwl_touchpad_tap {
 	KWL_TOUCHPAD_TAP_NONE,
@@ -163,6 +164,9 @@ struct kwl_touchpad {
 	uint32_t press_quiet;
 	enum kwl_touchpad_tap tap;
 	uint64_t tap_deadline_ms;
+	/* The pointer's motion (pixels) of a touch after a tap, held back until it is a drag (ws183-p002). */
+	int64_t tap_held_x;
+	int64_t tap_held_y;
 	uint64_t touch_start_ms;
 	uint32_t touch_fingers;
 	uint32_t touch_clicked;

@@ -733,6 +733,55 @@ def lock_unlock(item):
 	item.passed()
 
 
+@run.define("desktop.lock.swipe-card")
+def lock_swipe_card(item):
+	# ws187-p001..p003: the clock and the hint alone, a swipe up from the lower part brings the card (a manual lock: no grace).
+	width, height = run.screen()
+	mark = run.mark()
+	run.key("super+l")
+	locked = run.wait(r"KWL LOCK locked reason=key .*manual=1", mark, 10)
+	time.sleep(1.0)
+	item.step("Super+L", locked)
+	run.shot(item, "clock")
+	item.check(locked, "the screen did not lock as a manual lock")
+	run.drag(width // 2, height * 85 // 100, width // 2, height * 40 // 100, steps=20)
+	swiped = run.wait(r"KWL LOCK swipe via=pointer grace=0 manual=1", mark, 10)
+	time.sleep(1.0)
+	item.step("dragged up from the lower part", swiped)
+	run.shot(item, "card")
+	item.check(swiped, "the swipe was not taken")
+	run.type(aatlib.PASSWORD)
+	run.key("enter")
+	unlocked = run.wait(r"KWL LOCK unlocked", mark, 15)
+	item.step("typed the password and Enter", unlocked)
+	item.check(unlocked, "the screen did not unlock")
+	item.person("clock.png: the large clock above the middle, the hint at the foot, no card; card.png: the card under the clock, not touching it")
+
+
+@run.define("desktop.lock.wheel-card")
+def lock_wheel_card(item):
+	# ws187-p002: the wheel turned up two notches is a swipe (machines without a touch pad or a touch screen).
+	width, height = run.screen()
+	mark = run.mark()
+	run.key("super+l")
+	locked = run.wait(r"KWL LOCK locked reason=key", mark, 10)
+	time.sleep(1.0)
+	item.step("Super+L", locked)
+	item.check(locked, "the screen did not lock")
+	run.aat("wheel", str(width // 2), str(height // 2), "2")
+	swiped = run.wait(r"KWL LOCK swipe via=wheel grace=0 manual=1", mark, 10)
+	time.sleep(1.0)
+	item.step("turned the wheel up two notches", swiped)
+	run.shot(item, "card")
+	item.check(swiped, "the wheel was not taken")
+	run.type(aatlib.PASSWORD)
+	run.key("enter")
+	unlocked = run.wait(r"KWL LOCK unlocked", mark, 15)
+	item.step("typed the password and Enter", unlocked)
+	item.check(unlocked, "the screen did not unlock")
+	item.passed()
+
+
 @run.define("desktop.language.lock-japanese")
 def lock_japanese(item):
 	# The lock screen in Japanese (ws158-p003, q809: a zdesktop of a session sessiond started, which can unlock it).

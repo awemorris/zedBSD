@@ -1,5 +1,5 @@
 <!-- awesome-plan project=zedbsd record=ws172-p007 -->
-# ws172-p007: greeter・lock の画面で認証の方式を選ぶ
+# ws172-p007: greeter（login の画面）で認証の方式を選ぶ
 
 Status: planned
 Disposition: normal
@@ -9,6 +9,8 @@ Queue: なし（p002 の T1 の結果の後に投入）
 ## 由来（2026-10-08 ユーザー）
 
 「PINログインの仕組みができたら、PIN, Password, Hardware Keyから選べるようにしてほしいです。」
+
+2026-10-08 ユーザー（続き）: lock の画面の分は [WS187](../../ws187/ws.md) p003 へ移した。この Phase は greeter の分だけで、WS172 とともにベータ3。
 
 ## 範囲
 
