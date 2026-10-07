@@ -21,10 +21,24 @@
  *                      bytes, N the two parameter bytes (little-endian),
  *                      each carrying its index: more than the events' queue
  *                      holds (the backpressure and the notices' reserve)
- *   a command 0xFC03   Command Complete; LOOPBACK_WITHDRAW_MS later the
+ *   a command 0xFC03   Command Complete; LOOPBACK_WITHDRAW_MS (or the
+ *                      milliseconds of its two parameter bytes, at most
+ *                      LOOPBACK_DELAY_MOST, ws143-p003) later the
  *                      controller is withdrawn and released (a detach), and
  *                      LOOPBACK_RETURN_MS after that it is registered again
  *   0x1001, 0x1009     Read Local Version Information, Read BD_ADDR
+ *   0x1002, 0x1003     Read Local Supported Commands (Inquiry, LE's
+ *                      event mask and scan, P-256 and DHKey), Read Local
+ *                      Supported Features (LE), ws143-p003
+ *   0x1005             Read Buffer Size (ACL 1021 bytes, 8 packets)
+ *   0x0401             Inquiry: Command Status, then an Extended Inquiry
+ *                      Result ("Loopback Keyboard", class 0x002540), an
+ *                      Inquiry Result with RSSI (class 0x002580) and
+ *                      Inquiry Complete (ws143-p003)
+ *   0x200C on          LE Set Scan Enable: Command Complete, then two
+ *                      advertising reports: a public address with
+ *                      "Loopback Mouse" and appearance 0x03C2, a random one
+ *                      without a name (ws143-p003)
  *   any other command  Command Complete with status 0
  *   an ACL packet      the same packet back
  *
@@ -54,12 +68,28 @@
 #define LOOPBACK_OP_WITHDRAW		0xfc03U
 
 /* The standard commands it answers with their own return parameters. */
+#define LOOPBACK_OP_INQUIRY		0x0401U
 #define LOOPBACK_OP_LOCAL_VERSION	0x1001U
+#define LOOPBACK_OP_COMMANDS		0x1002U
+#define LOOPBACK_OP_FEATURES		0x1003U
+#define LOOPBACK_OP_BUFFER_SIZE		0x1005U
 #define LOOPBACK_OP_BD_ADDR		0x1009U
+#define LOOPBACK_OP_LE_SCAN_ENABLE	0x200cU
 
-/* The events it sends: Command Complete and a vendor event. */
+/* The events it sends: Inquiry Complete, Command Complete and Status, the inquiry results, LE meta, and a vendor event. */
+#define LOOPBACK_EVENT_INQUIRY_COMPLETE	0x01U
 #define LOOPBACK_EVENT_COMPLETE		0x0eU
+#define LOOPBACK_EVENT_STATUS		0x0fU
+#define LOOPBACK_EVENT_INQUIRY_RSSI	0x22U
+#define LOOPBACK_EVENT_EXTENDED_INQUIRY	0x2fU
+#define LOOPBACK_EVENT_LE_META		0x3eU
 #define LOOPBACK_EVENT_VENDOR		0xffU
+
+/* The most return parameters a Command Complete carries (its length byte holds 3 more). */
+#define LOOPBACK_RETURN_MOST		252U
+
+/* The longest delay 0xFC03 may ask for. */
+#define LOOPBACK_DELAY_MOST		10000U
 
 /* A flood's events' parameters, and the most a flood may ask for. */
 #define LOOPBACK_FLOOD_PARAMETERS	255U
@@ -71,6 +101,9 @@
 /* How long after 0xFC03 the controller goes, and how long after that it comes back. */
 #define LOOPBACK_WITHDRAW_MS		300U
 #define LOOPBACK_RETURN_MS		500U
+
+/* How often the worker looks at a withdrawal that is not due yet, delivering meanwhile. */
+#define LOOPBACK_POLL_MS		10U
 
 /*
  * The loopback controller's state, one for the kernel's life.
@@ -91,6 +124,7 @@ struct loopback_controller {
 	unsigned flood_next;
 	unsigned work;
 	unsigned withdraw;
+	uint64_t withdraw_due;
 	unsigned stall_counted;
 	struct drv_bt_hci *hci;
 	struct thread *worker;
@@ -113,6 +147,9 @@ static int loopback_set_bootloader(void *context, int on);
 static int loopback_reset(void *context);
 static void loopback_room(void *context);
 static void loopback_sleep_ms(unsigned milliseconds);
+static int loopback_status(uint16_t opcode);
+static int loopback_inquiry(uint16_t opcode);
+static int loopback_advertise(uint16_t opcode);
 
 /* What the loopback controller does for the HCI class. */
 static const struct drv_bt_hci_ops loopback_ops = {
@@ -197,6 +234,8 @@ loopback_worker(
 {
 	unsigned long irq;
 	unsigned withdraw;
+	unsigned due;
+	uint64_t now;
 	int delivered;
 
 	UNUSED_PARAMETER(argument);
@@ -214,17 +253,30 @@ loopback_worker(
 		while (delivered)
 			delivered = loopback_deliver_next();
 
-		/* A withdrawal asked for. */
+		/* A withdrawal asked for, and whether it is due. */
 		irq = spin_lock_irqsave(&loopback.lock);
 
 		withdraw = loopback.withdraw;
-		loopback.withdraw = 0U;
+		due = 0U;
+		if (withdraw) {
+			now = sched_ticks();
+			if (now >= loopback.withdraw_due) {
+				due = 1U;
+				loopback.withdraw = 0U;
+			}
+		}
 
 		spin_unlock_irqrestore(&loopback.lock, irq);
 
-		/* The test's detach. */
-		if (withdraw) {
+		/* The test's detach once it is due. */
+		if (due) {
 			loopback_withdraw_and_return();
+			continue;
+		}
+
+		/* Not due yet: the packets keep going meanwhile, looked at every LOOPBACK_POLL_MS. */
+		if (withdraw) {
+			loopback_sleep_ms(LOOPBACK_POLL_MS);
 			continue;
 		}
 
@@ -333,9 +385,6 @@ loopback_withdraw_and_return(
 	unsigned long irq;
 	int error;
 
-	/* A moment for the test to block in a read or a poll. */
-	loopback_sleep_ms(LOOPBACK_WITHDRAW_MS);
-
 	/* The controller the class has, which no delivery uses from now on. */
 	irq = spin_lock_irqsave(&loopback.lock);
 
@@ -429,11 +478,11 @@ loopback_complete(
 	const uint8_t *parameters,
 	size_t count)
 {
-	uint8_t event[2U + 3U + 32U];
+	uint8_t event[2U + 3U + LOOPBACK_RETURN_MOST];
 	int error;
 
 	/* The event: its code, its length, one credit, the opcode and the return parameters. */
-	if (count > 32U)
+	if (count > LOOPBACK_RETURN_MOST)
 		return EINVAL;
 	event[0] = LOOPBACK_EVENT_COMPLETE;
 	event[1] = (uint8_t)(3U + count);
@@ -514,9 +563,13 @@ loopback_send(
 	static const uint8_t status_ok[1] = { 0x00U };
 	static const uint8_t local_version[9] = { 0x00U, 0x0cU, 0x00U, 0x01U, 0x0cU, 0xffU, 0xffU, 0x01U, 0x00U };
 	static const uint8_t bd_addr[7] = { 0x00U, 0x55U, 0x44U, 0x33U, 0x22U, 0x11U, 0x00U };
+	static const uint8_t features[9] = { 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x40U, 0x00U, 0x00U, 0x00U };
+	static const uint8_t buffer_size[8] = { 0x00U, 0xfdU, 0x03U, 0x00U, 0x08U, 0x00U, 0x00U, 0x00U };
+	uint8_t commands[1U + 64U];
 	unsigned long irq;
 	uint16_t opcode;
 	unsigned count;
+	unsigned delay;
 	int error;
 
 	UNUSED_PARAMETER(context);
@@ -560,13 +613,21 @@ loopback_send(
 		/* The flood is under way, or the answer did not fit. */
 		break;
 	case LOOPBACK_OP_WITHDRAW:
-		/* The answer, then the withdrawal a moment later (by the worker, which may take the operations' lock). */
+		/* The delay: the two parameter bytes when given, else LOOPBACK_WITHDRAW_MS. */
+		delay = LOOPBACK_WITHDRAW_MS;
+		if (length >= 6U)
+			delay = (unsigned)(packet[4] | (packet[5] << 8));
+		if (delay > LOOPBACK_DELAY_MOST)
+			return EINVAL;
+
+		/* The answer, then the withdrawal after the delay (by the worker, which may take the operations' lock). */
 		error = loopback_complete(opcode, status_ok, sizeof(status_ok));
 		if (error == 0) {
 			/* Asked of the worker. */
 			irq = spin_lock_irqsave(&loopback.lock);
 
 			loopback.withdraw = 1U;
+			loopback.withdraw_due = sched_ticks() + kern_ms_to_ticks(delay);
 
 			spin_unlock_irqrestore(&loopback.lock, irq);
 		}
@@ -580,6 +641,36 @@ loopback_send(
 	case LOOPBACK_OP_BD_ADDR:
 		/* 00:11:22:33:44:55. */
 		error = loopback_complete(opcode, bd_addr, sizeof(bd_addr));
+		break;
+	case LOOPBACK_OP_COMMANDS:
+		/* Inquiry (octet 0), LE Set Event Mask (25), LE Set Scan Parameters and Enable (26), P-256 and DHKey (34). */
+		kern_memset(commands, 0, sizeof(commands));
+		commands[1U + 0U] = 0x03U;
+		commands[1U + 25U] = 0x01U;
+		commands[1U + 26U] = 0x0cU;
+		commands[1U + 34U] = 0x06U;
+		error = loopback_complete(opcode, commands, sizeof(commands));
+		break;
+	case LOOPBACK_OP_FEATURES:
+		/* LE Supported (Controller): byte 4, bit 6. */
+		error = loopback_complete(opcode, features, sizeof(features));
+		break;
+	case LOOPBACK_OP_BUFFER_SIZE:
+		/* ACL 1021 bytes, no SCO, 8 ACL packets. */
+		error = loopback_complete(opcode, buffer_size, sizeof(buffer_size));
+		break;
+	case LOOPBACK_OP_INQUIRY:
+		/* Command Status, the two results and the inquiry's end. */
+		error = loopback_inquiry(opcode);
+		break;
+	case LOOPBACK_OP_LE_SCAN_ENABLE:
+		/* On: the answer and two reports; off: the answer alone. */
+		if (length >= 5U && packet[4] == 1U) {
+			error = loopback_advertise(opcode);
+		} else {
+			error = loopback_complete(opcode, status_ok, sizeof(status_ok));
+		}
+
 		break;
 	default:
 		/* Done, nothing to say. */
@@ -653,6 +744,191 @@ loopback_room(
 
 	/* The worker tries the waiting packet again. */
 	loopback_wake();
+}
+
+/* Queues a Command Status event with status 0 for an opcode (a command whose work goes on). */
+static int
+loopback_status(
+	uint16_t opcode)
+{
+	uint8_t event[6];
+	int error;
+
+	/* The event: its code, its length 4, the status, one credit and the opcode. */
+	event[0] = LOOPBACK_EVENT_STATUS;
+	event[1] = 4U;
+	event[2] = 0x00U;
+	event[3] = 1U;
+	event[4] = (uint8_t)(opcode & 0xffU);
+	event[5] = (uint8_t)(opcode >> 8);
+
+	/* Queued. */
+	error = loopback_queue(BT_PACKET_EVENT, event, sizeof(event));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the status waits to be delivered. */
+	return 0;
+}
+
+/*
+ * Queues an inquiry's answer and results: Command Status, an Extended
+ * Inquiry Result (address 0A:0B:0C:0D:0E:01, class 0x002540, RSSI -40,
+ * the complete name "Loopback Keyboard"), an Inquiry Result with RSSI
+ * (0A:0B:0C:0D:0E:02, class 0x002580, RSSI -60) and Inquiry Complete.
+ */
+static int
+loopback_inquiry(
+	uint16_t opcode)
+{
+	static const char name[] = "Loopback Keyboard";
+	uint8_t extended[2U + 255U];
+	uint8_t plain[2U + 15U];
+	uint8_t complete[3];
+	size_t name_length;
+	int error;
+
+	/* The command goes on. */
+	error = loopback_status(opcode);
+	if (error != 0)
+		return error;
+
+	/* The extended result: one response and 240 bytes of data, the name first. */
+	kern_memset(extended, 0, sizeof(extended));
+	name_length = sizeof(name) - 1U;
+	extended[0] = LOOPBACK_EVENT_EXTENDED_INQUIRY;
+	extended[1] = 255U;
+	extended[2] = 1U;
+	extended[3] = 0x01U;
+	extended[4] = 0x0eU;
+	extended[5] = 0x0dU;
+	extended[6] = 0x0cU;
+	extended[7] = 0x0bU;
+	extended[8] = 0x0aU;
+	extended[11] = 0x40U;
+	extended[12] = 0x25U;
+	extended[13] = 0x00U;
+	extended[16] = (uint8_t)(int8_t)-40;
+	extended[17] = (uint8_t)(1U + name_length);
+	extended[18] = 0x09U;
+	kern_memcpy(extended + 19, name, name_length);
+	error = loopback_queue(BT_PACKET_EVENT, extended, sizeof(extended));
+	if (error != 0)
+		return error;
+
+	/* The result with RSSI: one response of 14 bytes. */
+	kern_memset(plain, 0, sizeof(plain));
+	plain[0] = LOOPBACK_EVENT_INQUIRY_RSSI;
+	plain[1] = 15U;
+	plain[2] = 1U;
+	plain[3] = 0x02U;
+	plain[4] = 0x0eU;
+	plain[5] = 0x0dU;
+	plain[6] = 0x0cU;
+	plain[7] = 0x0bU;
+	plain[8] = 0x0aU;
+	plain[11] = 0x80U;
+	plain[12] = 0x25U;
+	plain[13] = 0x00U;
+	plain[16] = (uint8_t)(int8_t)-60;
+	error = loopback_queue(BT_PACKET_EVENT, plain, sizeof(plain));
+	if (error != 0)
+		return error;
+
+	/* The inquiry's end. */
+	complete[0] = LOOPBACK_EVENT_INQUIRY_COMPLETE;
+	complete[1] = 1U;
+	complete[2] = 0x00U;
+	error = loopback_queue(BT_PACKET_EVENT, complete, sizeof(complete));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the inquiry's packets wait. */
+	return 0;
+}
+
+/*
+ * Queues LE Set Scan Enable's answer and two advertising reports: a
+ * public address 0A:0B:0C:0D:0E:03 with the flags, the complete name
+ * "Loopback Mouse" and appearance 0x03C2 (RSSI -50), and a random address
+ * 4A:0B:0C:0D:0E:04 with the flags alone (RSSI -70).
+ */
+static int
+loopback_advertise(
+	uint16_t opcode)
+{
+	static const uint8_t status_ok[1] = { 0x00U };
+	static const char name[] = "Loopback Mouse";
+	uint8_t first[2U + 3U + 9U + 31U + 1U];
+	uint8_t second[2U + 3U + 9U + 3U + 1U];
+	size_t name_length;
+	size_t data;
+	size_t at;
+	int error;
+
+	/* The answer. */
+	error = loopback_complete(opcode, status_ok, sizeof(status_ok));
+	if (error != 0)
+		return error;
+
+	/* The first report's data: the flags, the name, the appearance. */
+	name_length = sizeof(name) - 1U;
+	data = 3U + (2U + name_length) + 4U;
+	at = 0U;
+	first[at++] = LOOPBACK_EVENT_LE_META;
+	first[at++] = (uint8_t)(2U + 9U + data + 1U);
+	first[at++] = 0x02U;
+	first[at++] = 1U;
+	first[at++] = 0x00U;
+	first[at++] = 0x00U;
+	first[at++] = 0x03U;
+	first[at++] = 0x0eU;
+	first[at++] = 0x0dU;
+	first[at++] = 0x0cU;
+	first[at++] = 0x0bU;
+	first[at++] = 0x0aU;
+	first[at++] = (uint8_t)data;
+	first[at++] = 2U;
+	first[at++] = 0x01U;
+	first[at++] = 0x06U;
+	first[at++] = (uint8_t)(1U + name_length);
+	first[at++] = 0x09U;
+	kern_memcpy(first + at, name, name_length);
+	at += name_length;
+	first[at++] = 3U;
+	first[at++] = 0x19U;
+	first[at++] = 0xc2U;
+	first[at++] = 0x03U;
+	first[at++] = (uint8_t)(int8_t)-50;
+	error = loopback_queue(BT_PACKET_EVENT, first, at);
+	if (error != 0)
+		return error;
+
+	/* The second report: a random address, the flags alone. */
+	at = 0U;
+	second[at++] = LOOPBACK_EVENT_LE_META;
+	second[at++] = (uint8_t)(2U + 9U + 3U + 1U);
+	second[at++] = 0x02U;
+	second[at++] = 1U;
+	second[at++] = 0x00U;
+	second[at++] = 0x01U;
+	second[at++] = 0x04U;
+	second[at++] = 0x0eU;
+	second[at++] = 0x0dU;
+	second[at++] = 0x0cU;
+	second[at++] = 0x0bU;
+	second[at++] = 0x4aU;
+	second[at++] = 3U;
+	second[at++] = 2U;
+	second[at++] = 0x01U;
+	second[at++] = 0x06U;
+	second[at++] = (uint8_t)(int8_t)-70;
+	error = loopback_queue(BT_PACKET_EVENT, second, at);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the reports wait. */
+	return 0;
 }
 
 /* Sleeps the calling thread for about the milliseconds given. */

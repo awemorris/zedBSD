@@ -6,4 +6,4 @@
 #   FILES_CONFIG=plan/ws143/tests/config-amd64-bt.mk plan/tools/files/build-files-image.sh BUILD
 include plan/tools/files/config-amd64-files.mk
 CONFIG_BT_TEST_LOOPBACK := y
-ZEDBSD_USER_PROGRAMS += bt-probe runas
+ZEDBSD_USER_PROGRAMS += bt-probe runas bluetoothd bt
