@@ -340,6 +340,13 @@ AMD64_KERNEL_SOURCES += src/drivers/generic/input-inject.c
 endif
 # The test kernel's loopback security key and card (ws161-p002, p003), on the raw HID and the smart card classes
 # (built with usb-hid and usb-ccid, or here without them).
+# The test kernel's loopback Bluetooth controller (ws143-p002), on the HCI class (built with usb-bt, or here without it).
+ifeq ($(CONFIG_BT_TEST_LOOPBACK),y)
+AMD64_KERNEL_SOURCES += src/drivers/generic/bt-hci-loopback.c
+ifneq ($(CONFIG_DRIVER_USB_BT),y)
+AMD64_KERNEL_SOURCES += src/drivers/generic/bt-hci.c src/drivers/generic/bt-hci-proto.c
+endif
+endif
 ifeq ($(CONFIG_SECURITY_KEY_TEST_LOOPBACK),y)
 AMD64_KERNEL_SOURCES += src/drivers/generic/hidraw-loopback.c src/drivers/generic/smartcard-loopback.c
 ifneq ($(CONFIG_DRIVER_USB_HID),y)

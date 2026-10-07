@@ -127,6 +127,7 @@ int drv_bt_hci_register(const struct drv_bt_hci_description *description, const 
 int drv_bt_hci_input(struct drv_bt_hci *hci, uint8_t type, const uint8_t *packet, size_t length);
 void drv_bt_hci_count(struct drv_bt_hci *hci, const struct drv_bt_hci_counts *counts);
 void drv_bt_hci_notice(struct drv_bt_hci *hci, uint8_t type);
+int drv_bt_hci_loopback_register(void);
 void drv_bt_hci_withdraw(struct drv_bt_hci *hci);
 void drv_bt_hci_release(struct drv_bt_hci *hci);
 
