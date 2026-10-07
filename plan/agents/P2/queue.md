@@ -21,3 +21,4 @@ Next（予約）: debug を続ける（BUG-147 の後: 優先度の高い bug。
 | P2-006 | q622 | 5ca38bb84・71f726edc・af3b29c53（前回 f0ee0d951） | wayland/{display,menu,desktop}・files/{thumb,ui-context}・imageview/image.c・plan/ws094 | integrated 0f6480f77 |
 
 2026-10-03 / N=3: user「BUG-150は今実行してOKです。FreeBSDホストを空けたので使ってください。Emacsは入ってます。」→ P2 generation4 を q636（ws128-p010、BUG-150）で起動。5320（FreeBSD）は P2 が使い、P3 は FreeBSD の確認を済ませた。
+| P2-merge q863 | q863-i01 | c98a659ec・52a2e4007（base 777137731） | wayland/touchpad.{c,h}・plan/ws159/tests/host-touchpad.c・plan/ws183 | integrated b776026ca（2026-10-08、実機の確認待ち） |
