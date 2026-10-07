@@ -12,9 +12,10 @@
  * Scripted multitouch reports of a pad with the Latitude 5330's resolution
  * (12 units a millimetre) check the rules of BUG-166 and the design's D8:
  * one finger moves the pointer (and faster when it moves faster); a short
- * touch is a tap whose left press comes at the lift and whose release
- * comes TAP_DRAG_MS later; a touch within that time that moves drags until
- * it lifts; a quick second tap makes a double click; a tap of two fingers
+ * touch is a tap whose left click, press and release, comes at the lift
+ * (ws183-p002); a touch within TAP_DRAG_MS that moves drags until it
+ * lifts, pressed before it moves the pointer; a quick second tap makes a
+ * double click, a long still one adds no click; a tap of two fingers
  * clicks the right button; the pad pressed and moved drags, without the
  * press's first millimetre moving the pointer; two fingers scroll by
  * notches the natural way; a long touch is no tap.
@@ -63,6 +64,7 @@ static void button(int32_t pressed);
 static void start_case(void);
 static unsigned button_count(uint32_t code, uint32_t pressed);
 static int button_at(unsigned index, uint32_t code, uint32_t pressed);
+static int motion_before_button(void);
 static int64_t motion_x(void);
 static int32_t scroll_vertical(void);
 
@@ -223,6 +225,24 @@ button_at(
 	return 1;
 }
 
+/* Tells whether a motion comes before the first button action of the case. */
+static int
+motion_before_button(void)
+{
+	unsigned index;
+
+	/* The actions in order until the first button. */
+	for (index = 0; index < seen_count; index++) {
+		if (seen[index].kind == KWL_TOUCHPAD_BUTTON)
+			return 0;
+		if (seen[index].kind == KWL_TOUCHPAD_MOTION)
+			return 1;
+	}
+
+	/* No motion before a button. */
+	return 0;
+}
+
 /* Adds up the pointer's motion across. */
 static int64_t
 motion_x(void)
@@ -263,6 +283,7 @@ scroll_vertical(void)
 int
 main(void)
 {
+	struct kwl_touchpad_actions released;
 	int64_t slow;
 	int64_t fast;
 	int step;
@@ -296,18 +317,16 @@ main(void)
 	finger_up(0);
 	frame();
 
-	/* 2. A tap: the left press at the lift, the release TAP_DRAG_MS later. */
+	/* 2. A tap: the left press and release at the lift (ws183-p002), nothing later. */
 	start_case();
 	finger_down(0, 500, 300);
 	frame();
 	finger_up(0);
 	frame();
-	check(button_count(KWL_TOUCHPAD_BUTTON_LEFT, 1U) == 1U, "a tap presses the left button at the lift");
-	check(button_count(KWL_TOUCHPAD_BUTTON_LEFT, 0U) == 0U, "the tap's release waits");
-	tick(250U);
-	check(button_count(KWL_TOUCHPAD_BUTTON_LEFT, 0U) == 0U, "still held 250 ms after the lift");
-	tick(60U);
-	check(button_count(KWL_TOUCHPAD_BUTTON_LEFT, 0U) == 1U, "released after 300 ms");
+	check(seen_count == 2U, "a tap gives two button actions at the lift");
+	check(button_at(0, KWL_TOUCHPAD_BUTTON_LEFT, 1U) && button_at(1, KWL_TOUCHPAD_BUTTON_LEFT, 0U), "the tap's click completes at the lift");
+	tick(400U);
+	check(seen_count == 2U, "nothing more after the drag time");
 
 	/* 3. A tap and a touch within 300 ms that moves: a drag with the button held until the lift. */
 	start_case();
@@ -325,11 +344,14 @@ main(void)
 
 	/* The finger stays down a while. */
 	tick(500U);
-	check(button_count(KWL_TOUCHPAD_BUTTON_LEFT, 0U) == 0U, "the drag holds the button while the finger is down");
+	check(button_at(0, KWL_TOUCHPAD_BUTTON_LEFT, 1U) && button_at(1, KWL_TOUCHPAD_BUTTON_LEFT, 0U), "the tap's click first");
+	check(button_at(2, KWL_TOUCHPAD_BUTTON_LEFT, 1U), "the drag presses before any motion");
+	check(button_count(KWL_TOUCHPAD_BUTTON_LEFT, 0U) == 1U, "the drag holds the button while the finger is down");
 	check(motion_x() > 0, "the drag moves the pointer");
 	finger_up(0);
 	frame();
-	check(button_count(KWL_TOUCHPAD_BUTTON_LEFT, 1U) == 1U && button_count(KWL_TOUCHPAD_BUTTON_LEFT, 0U) == 1U, "the lift ends the drag: one press, one release");
+	check(button_count(KWL_TOUCHPAD_BUTTON_LEFT, 1U) == 2U && button_count(KWL_TOUCHPAD_BUTTON_LEFT, 0U) == 2U, "the lift ends the drag: the tap's click and the drag's press and release");
+	check(!motion_before_button(), "no motion before the tap's click");
 
 	/* 4. Two quick taps: a double click (press, release, press, release). */
 	start_case();
@@ -421,6 +443,55 @@ main(void)
 	button(0);
 	frame();
 	check(button_count(KWL_TOUCHPAD_BUTTON_RIGHT, 1U) == 1U && button_count(KWL_TOUCHPAD_BUTTON_RIGHT, 0U) == 1U, "a two-finger press is the right button");
+
+	/* 10. A tap, then a touch within the drag time held still and long: no second click. */
+	start_case();
+	finger_down(0, 500, 300);
+	frame();
+	finger_up(0);
+	frame();
+	tick(100U);
+	finger_down(0, 501, 300);
+	frame();
+	tick(400U);
+	finger_up(0);
+	frame();
+	tick(400U);
+	check(button_count(KWL_TOUCHPAD_BUTTON_LEFT, 1U) == 1U && button_count(KWL_TOUCHPAD_BUTTON_LEFT, 0U) == 1U, "a long still touch after a tap adds no click");
+	check(motion_x() == 0, "nor moves the pointer");
+
+	/* 11. A touch after a tap going with the device: no button moves (the tap's click was complete). */
+	start_case();
+	finger_down(0, 500, 300);
+	frame();
+	finger_up(0);
+	frame();
+	tick(50U);
+	finger_down(0, 500, 300);
+	frame();
+	kwl_touchpad_release_all(&pad, &released);
+	gather(&released);
+	check(seen_count == 2U, "release_all after a tap releases nothing more");
+
+	/* 12. A touch after the drag time is a touch of its own: it moves the pointer and presses nothing. */
+	start_case();
+	finger_down(0, 500, 300);
+	frame();
+	finger_up(0);
+	frame();
+	tick(320U);
+	finger_down(0, 500, 300);
+	frame();
+	for (step = 1; step <= 10; step++) {
+		finger_move(0, 500 + step * 12, 300);
+		frame();
+	}
+
+	/* The finger lifts after its stroke. */
+	finger_up(0);
+	frame();
+	check(button_count(KWL_TOUCHPAD_BUTTON_LEFT, 1U) == 1U, "a touch after the drag time is no drag");
+	check(motion_x() > 0, "and moves the pointer");
 
 	/* The verdict. */
 	if (failures != 0) {
