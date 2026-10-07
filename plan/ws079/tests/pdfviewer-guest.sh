@@ -11,6 +11,10 @@
 #                  that it is missing (annotate.png)
 #   files          Files opens notes.pdf with PDF Viewer (files-open.png)
 #   ops            the operator document's three pages in the page mode (ops-*.png)
+#   resize         BUG-259: notes.pdf in a 900x600 window whose bottom right corner is dragged in by 300x180 over
+#                  about a second, held still, then let go: the pages are drawn (PDFVIEWER RASTER index=0) at most 4
+#                  times in all (once at the start, once when the size settles; before the fix once a step), and
+#                  PDFVIEWER RESIZE settled is logged (resize-held.png while held, resize.png after)
 #   real           a PDF Notes saved (/tmp/real-notes.pdf, made by hand in the annotate step's Notes) in PDF Viewer,
 #                  then Annotate: Notes opens it with its strokes (real*.png)
 # Every step's pictures go to OUTDIR, and to PREFIX* when a prefix is given.  The steps read the program's
@@ -178,6 +182,37 @@ cp /tmp/notes.pdf /tmp/pvdir/notes.pdf && { [ ! -f /tmp/notes-program ] || { cp 
 		sleep 4
 		expect_log /tmp/pv.log 'NOTES START .* strokes=3 path=/tmp/real-notes.pdf'
 		shot real-annotate.png
+		;;
+	resize)
+		guest "$stop_viewer" >/dev/null
+		guest "export XDG_RUNTIME_DIR=/tmp; /bin/pdfviewer --width=900 --height=600 /tmp/notes.pdf > /tmp/pv.log 2>&1 </dev/null & sleep 6; echo started" >/dev/null
+		expect_log /tmp/pv.log 'PDFVIEWER READY'
+		# The window's body from the compositor's last map, and its bottom right corner on the frame just outside it.
+		line=$(guest "grep 'KWL MAP client=' /tmp/zdesktop.log | tail -1" | tail -1)
+		body_x=$(printf '%s\n' "$line" | sed -n 's/.* x=\([-0-9]*\) y=.*/\1/p')
+		body_y=$(printf '%s\n' "$line" | sed -n 's/.* y=\([-0-9]*\).*/\1/p')
+		corner_x=$((${body_x:-0} + 900 + 3))
+		corner_y=$((${body_y:-0} + 600 + 3))
+		echo "resize: corner $corner_x,$corner_y"
+		moves=
+		index=1
+		while [ $index -le 30 ]; do
+			moves="$moves move $((corner_x - 10 * index)) $((corner_y - 6 * index)) sleep 30"
+			index=$((index + 1))
+		done
+		pointer move $corner_x $corner_y sleep 300 down sleep 80 $moves sleep 700
+		shot resize-held.png
+		pointer up sleep 800
+		expect_log /tmp/zdesktop.log 'KWL RESIZE start'
+		expect_log /tmp/pv.log 'PDFVIEWER RESIZE settled'
+		rasters=$(guest "grep -c 'PDFVIEWER RASTER index=0 ' /tmp/pv.log" | tail -1)
+		if [ "${rasters:-99}" -le 4 ] 2>/dev/null; then
+			echo "resize: page 1 drawn $rasters times ok"
+		else
+			echo "resize: page 1 drawn ${rasters:-?} times FAILED (at most 4)"
+			status=1
+		fi
+		shot resize.png
 		;;
 	stop)
 		guest "$stop_viewer" >/dev/null

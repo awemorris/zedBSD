@@ -77,6 +77,7 @@ static uint32_t draw_accent_ink = 0xffffffffU;
 
 static uint32_t draw_choose(uint32_t light, uint32_t dark);
 static void draw_page(struct pv_app *app, struct pv_canvas *canvas, size_t index, int x, int y);
+static void draw_around(struct pv_canvas *canvas, int outer_x, int outer_y, int outer_width, int outer_height, int x, int y, int width, int height, uint32_t color);
 static void draw_scroll(struct pv_app *app, struct pv_canvas *canvas);
 static void draw_single(struct pv_app *app, struct pv_canvas *canvas);
 static void draw_empty(struct pv_app *app, struct pv_canvas *canvas);
@@ -149,6 +150,7 @@ draw_page(
 	int y)
 {
 	const struct pv_page *page;
+	double difference;
 	double scale;
 	int width;
 	int height;
@@ -166,13 +168,33 @@ draw_page(
 	    y + height <= 0)
 		return;
 
-	/* A soft shadow and a thin edge around it. */
-	pv_canvas_blend(canvas, x - 1, y + 2, width + 2, height + 2, DRAW_SHADOW);
-	pv_canvas_blend(canvas, x - 1, y - 1, width + 2, height + 2, DRAW_EDGE);
+	/*
+	 * A soft shadow and a thin edge around it, blended only where the page
+	 * leaves them showing (BUG-259: blending them under the whole page,
+	 * which then covers them, cost most of a frame).
+	 */
+	draw_around(canvas, x - 1, y + 2, width + 2, height + 2, x, y, width, height, DRAW_SHADOW);
+	draw_around(canvas, x - 1, y - 1, width + 2, height + 2, x, y, width, height, DRAW_EDGE);
 
 	/* While two fingers zoom, a raster at another scale is stretched rather than drawn again (ws081-p012). */
 	page = &app->document.pages[index];
 	if (app->zooming && page->raster != NULL) {
+		if (page->list != NULL)
+			app->shown_flags |= page->list->flags;
+		pv_canvas_stretch(canvas, x, y, width, height, page->raster, page->raster_width, page->raster_height);
+		return;
+	}
+
+	/*
+	 * While the window is resized, a raster at another scale is stretched
+	 * too (BUG-259): the page is drawn again once the size settles.
+	 */
+	difference = 0.0;
+	if (page->raster != NULL)
+		difference = page->raster_scale - scale;
+	if (app->resizing &&
+	    page->raster != NULL &&
+	    (difference > 1e-6 || difference < -1e-6)) {
 		if (page->list != NULL)
 			app->shown_flags |= page->list->flags;
 		pv_canvas_stretch(canvas, x, y, width, height, page->raster, page->raster_width, page->raster_height);
@@ -188,9 +210,73 @@ draw_page(
 		return;
 	}
 
+	/*
+	 * A raster smaller than the page (one kept within the largest side)
+	 * leaves part of it showing what is under: the shadow and the edge,
+	 * as they were blended under the whole page.
+	 */
+	if (page->raster_width < width || page->raster_height < height) {
+		pv_canvas_blend(canvas, x, y, width, height, DRAW_SHADOW);
+		pv_canvas_blend(canvas, x, y, width, height, DRAW_EDGE);
+	}
+
 	/* The page's raster, and the places found and the selection over it (ws128-p004). */
 	pv_canvas_copy(canvas, x, y, page->raster, page->raster_width, page->raster_height);
 	pv_find_draw(app, canvas, index, x, y, page->raster_scale);
+}
+
+/*
+ * Blends a colour over a rectangle (outer_*) less the part a page's
+ * rectangle (x, y, width, height) covers: the bands above and below the
+ * page, and the columns left and right of it between them.
+ */
+static void
+draw_around(
+	struct pv_canvas *canvas,
+	int outer_x,
+	int outer_y,
+	int outer_width,
+	int outer_height,
+	int x,
+	int y,
+	int width,
+	int height,
+	uint32_t color)
+{
+	int outer_bottom;
+	int outer_right;
+	int middle_top;
+	int middle_bottom;
+
+	/* The outer rectangle's far edges. */
+	outer_right = outer_x + outer_width;
+	outer_bottom = outer_y + outer_height;
+
+	/* The band above the page. */
+	if (y > outer_y)
+		pv_canvas_blend(canvas, outer_x, outer_y, outer_width, y - outer_y, color);
+
+	/* The band below it. */
+	if (outer_bottom > y + height)
+		pv_canvas_blend(canvas, outer_x, y + height, outer_width, outer_bottom - (y + height), color);
+
+	/* The rows beside the page, within the outer rectangle. */
+	middle_top = y;
+	if (middle_top < outer_y)
+		middle_top = outer_y;
+	middle_bottom = y + height;
+	if (middle_bottom > outer_bottom)
+		middle_bottom = outer_bottom;
+	if (middle_bottom <= middle_top)
+		return;
+
+	/* The column left of the page. */
+	if (x > outer_x)
+		pv_canvas_blend(canvas, outer_x, middle_top, x - outer_x, middle_bottom - middle_top, color);
+
+	/* The column right of it. */
+	if (outer_right > x + width)
+		pv_canvas_blend(canvas, x + width, middle_top, outer_right - (x + width), middle_bottom - middle_top, color);
 }
 
 /* Draws the scroll mode's column: every page that meets the frame. */

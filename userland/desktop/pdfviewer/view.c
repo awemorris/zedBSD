@@ -66,6 +66,13 @@
 #define VIEW_TURN_MS		220U
 #define VIEW_INDICATOR_MS	1400U
 
+/*
+ * How long the window's size must stay still before the pages are drawn
+ * again at their new scale, in milliseconds (BUG-259, the 2026-10-08 UAT:
+ * while the window is resized the pages' rasters are stretched).
+ */
+#define VIEW_RESIZE_SETTLE_MS	200U
+
 /* The wheel's travel that turns a page in the page mode, in pixels. */
 #define VIEW_WHEEL_TURN		90.0
 
@@ -221,7 +228,10 @@ pv_app_close_document(
 }
 
 /*
- * Takes a new window size, keeping the page in view.
+ * Takes a new window size, keeping the page in view.  The pages are not
+ * drawn again for it at once: until the size has stayed still for
+ * VIEW_RESIZE_SETTLE_MS (pv_app_tick), the frame shows their rasters
+ * stretched to the new scale (BUG-259).
  */
 void
 pv_app_resize(
@@ -243,6 +253,10 @@ pv_app_resize(
 	clamp_view(app);
 	clamp_sidebar(app);
 	app->dirty = 1;
+
+	/* The resize goes on from now: the rasters wait until it settles. */
+	app->resizing = 1;
+	app->resized_at = app->now;
 }
 
 /*
@@ -486,6 +500,19 @@ pv_app_tick(
 		app->dirty = 1;
 	}
 
+	/* A resize settled (BUG-259): the pages are drawn again at their new scale. */
+	if (app->resizing && now >= app->resized_at + VIEW_RESIZE_SETTLE_MS) {
+		app->resizing = 0;
+		app->dirty = 1;
+		pv_log("RESIZE settled width=%d height=%d", app->window_width, app->height);
+	}
+
+	/* Until then, its settling is due. */
+	if (app->resizing) {
+		if (due < 0 || (int)(app->resized_at + VIEW_RESIZE_SETTLE_MS - now) < due)
+			due = (int)(app->resized_at + VIEW_RESIZE_SETTLE_MS - now);
+	}
+
 	/* The indicator goes when its time is up. */
 	if (app->indicator_until != 0 && now >= app->indicator_until) {
 		app->indicator_until = 0;
@@ -551,12 +578,13 @@ pv_app_prefetch(
 	int sidebar;
 	int error;
 
-	/* Nothing while there is no document, or while the view moves (by the pointer or by touch). */
+	/* Nothing while there is no document, or while the view moves (by the pointer or by touch) or the window is resized. */
 	if (!app->has_document ||
 	    app->turning ||
 	    app->pressed ||
 	    app->touching ||
-	    app->zooming)
+	    app->zooming ||
+	    app->resizing)
 		return 0;
 
 	/* The sidebar's thumbnails in view and just past it, one at a time. */
