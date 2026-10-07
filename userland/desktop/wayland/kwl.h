@@ -404,6 +404,13 @@ struct kwl_object {
 	int32_t y;
 	/* The output a window is shown on in the extended mode (plane.h's slot, 0 the anchor; ws113-p007); its place is in the plane. */
 	unsigned output;
+	/*
+	 * A surface's outputs its client was told of by wl_surface.enter and
+	 * not yet by leave: a bit for each plane.h slot (surface-outputs.c,
+	 * ws177-p001).  Brought in line with its window's output at every
+	 * event-loop pass; 0 while it shows nothing.
+	 */
+	unsigned outputs_entered;
 	unsigned fullscreen;
 	/*
 	 * A window that was docked when it went fullscreen (BUG-208): while it
@@ -1784,6 +1791,11 @@ void kwl_window_to_output(struct kwl_server *server, struct kwl_object *window, 
 void kwl_window_set_output(struct kwl_server *server, struct kwl_object *window, unsigned slot, const char *why);
 void kwl_pointer_relative(struct kwl_server *server, int32_t dx, int32_t dy, int32_t *x, int32_t *y);
 void kwl_pointer_absolute(struct kwl_server *server);
+
+/* The outputs each surface's client was told it is on, wl_surface.enter and leave (surface-outputs.c, ws177-p001). */
+void kwl_surface_outputs_sync(struct kwl_server *server);
+void kwl_surface_outputs_bound(struct kwl_object *output);
+void kwl_surface_outputs_gone(struct kwl_server *server, uint32_t head);
 uint32_t kwl_notify_post_system(struct kwl_server *server, const char *title, const char *body, unsigned flags);
 struct kwl_notify_model *kwl_notify_model(void);
 /* The notifications' popup (notify-popup.c) and what it does to them (notify-shell.c), ws156-p003. */

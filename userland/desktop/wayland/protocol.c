@@ -462,6 +462,10 @@ kwl_output_global_remove(
 	/* The head the global names, while it is still open. */
 	head = kwl_output_head_of_global(server, name);
 
+	/* Its surfaces leave it while its bindings still name it (ws177-p001). */
+	if (head != 0U)
+		kwl_surface_outputs_gone(server, head);
+
 	/* Each object of every live client. */
 	for (client = server->clients; client != NULL; client = client->next) {
 		if (client->fatal)
@@ -817,6 +821,9 @@ bind_global(
 			error = output_events(object);
 			if (error != 0)
 				return error;
+
+			/* Its client's surfaces already on the display name it too (ws177-p001). */
+			kwl_surface_outputs_bound(object);
 		}
 
 		/* A system manager tells what it offers. */
@@ -1952,6 +1959,9 @@ bind_head_output(
 	error = output_events(object);
 	if (error != 0)
 		return error;
+
+	/* Its client's surfaces already on the display name it too (ws177-p001). */
+	kwl_surface_outputs_bound(object);
 
 	/* Succeeded: the binding exists. */
 	return 0;
