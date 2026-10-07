@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws183-p002 -->
 # ws183-p002: 1 本指のタップのクリックの遅れ
 
-Status: in-progress（q863、P2、2026-10-08: 実装・build・host 試験まで。実機（5320・5330）の確認の依頼を Q1 へ）
+Status: test-wait（実機 5320・5330 の確認を 2026-10-08 Q1 へ依頼、T1 の番号は Q1 が付ける。実装・build・host 試験まで済み）
 Disposition: normal
 Parent: [WS183](../ws.md)
 Queue: q863（ユーザー 2026-10-08「起動して作業開始してください」、P2）
