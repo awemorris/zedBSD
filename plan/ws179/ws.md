@@ -24,4 +24,4 @@ Primary Milestone: MG006
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 設計（[design.md](design.md)、色の表、accent を使う所の一覧、伝え方、KL の API）と実装: libkeiland・compositor の UI・Settings（Appearance の選択）・Files、host の試験と T1 の撮影 | in-progress（P1、実装と host 試験済み、T1-335 待ち） | — |
 | [p002](phase002/phase.md) | Calendar・PDF Viewer・Phone・Mailer・Notes・Image Viewer の独自の accent を theme に従わせる（2026-10-07 Q1: p001 の直後、ベータ2 の中） | in-progress（P1、実装と host 試験済み、T1 待ち） | p001 |
-| p003 | 規約の全文の見直し（WS の変えた C の全部）、AAT のシナリオ（`tests/scenarios/desktop/appearance/`）に accent | planned | p001、p002 |
+| [p003](phase003/phase.md) | 規約の全文の見直し（WS の変えた C の全部、ベータ3）、AAT のシナリオ（`tests/scenarios/desktop/appearance/`）に accent | in-progress（2026-10-08 P1 q875: AAT のシナリオと helper、QEMU は T1。規約はベータ3） | p001、p002 |
