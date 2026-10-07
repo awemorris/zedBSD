@@ -37,6 +37,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* The longest location typed into the URL's field that is opened (a longer one is cut). */
+#define SHELL_LOCATION_MAX	4096U
+
 /* The evdev codes of the keys of the shell's own shortcuts. */
 #define SHELL_KEY_Q		16U
 #define SHELL_KEY_W		17U
@@ -77,6 +80,7 @@ static int shell_shortcut(struct shell_state *state, const struct shell_event *e
 static void shell_titlebar_input(struct shell_state *state, const struct shell_titlebar_event *event);
 static void shell_go(struct shell_state *state, int steps);
 static void shell_follow(struct shell_state *state, const char *target);
+static void shell_follow_typed(struct shell_state *state, const char *typed);
 static int shell_frame(struct shell_state *state);
 static void shell_release(struct shell_state *state);
 static int shell_resize_view(struct shell_state *state);
@@ -533,7 +537,7 @@ shell_titlebar_input(
 			return;
 		if (event->detail != KL_TEXT_SUBMITTED)
 			return;
-		shell_follow(state, event->text);
+		shell_follow_typed(state, event->text);
 		return;
 	}
 
@@ -588,6 +592,30 @@ shell_follow(
 		printf("ZBROWSER ERROR follow target=%s error=%s\n", target, strerror(error));
 		fflush(stdout);
 	}
+}
+
+/*
+ * Opens what was typed into the URL's field (BUG-240): a path from the
+ * root ("/usr/...") is a local file whatever page is shown, so it opens as
+ * file://; anything else is resolved against the page as before.
+ */
+static void
+shell_follow_typed(
+	struct shell_state *state,
+	const char *typed)
+{
+	static char location[sizeof("file://") + SHELL_LOCATION_MAX];
+
+	/* Anything but an absolute path: as typed. */
+	if (typed[0] != '/') {
+		shell_follow(state, typed);
+		return;
+	}
+
+	/* An absolute path: a local file, not a path of the page's site. */
+	snprintf(location, sizeof(location), "file://%s", typed);
+	printf("ZBROWSER location typed=path url=%s\n", location);
+	shell_follow(state, location);
 }
 
 /* Draws the view into the window; a swapchain out of date is replaced and the frame drawn again. Nonzero on failure. */
