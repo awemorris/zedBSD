@@ -201,13 +201,24 @@ loopback_worker(
 
 	UNUSED_PARAMETER(argument);
 
-	/* Each round: a withdrawal asked for, else the packets, else a sleep until a request. */
+	/* Each round: the packets, then a withdrawal asked for (after its command's answer), else a sleep until a request. */
 	for (;;) {
+		irq = spin_lock_irqsave(&loopback.lock);
+
+		loopback.work = 0U;
+
+		spin_unlock_irqrestore(&loopback.lock, irq);
+
+		/* Every packet the class takes now. */
+		delivered = loopback_deliver_next();
+		while (delivered)
+			delivered = loopback_deliver_next();
+
+		/* A withdrawal asked for. */
 		irq = spin_lock_irqsave(&loopback.lock);
 
 		withdraw = loopback.withdraw;
 		loopback.withdraw = 0U;
-		loopback.work = 0U;
 
 		spin_unlock_irqrestore(&loopback.lock, irq);
 
@@ -216,11 +227,6 @@ loopback_worker(
 			loopback_withdraw_and_return();
 			continue;
 		}
-
-		/* Every packet the class takes now. */
-		delivered = loopback_deliver_next();
-		while (delivered)
-			delivered = loopback_deliver_next();
 
 		/* Nothing more until a request (a send, the room call, a withdrawal; one made just before is kept). */
 		kern_thread_block();
