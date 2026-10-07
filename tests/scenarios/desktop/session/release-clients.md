@@ -18,7 +18,7 @@ desktop。
 ## 操作と確認
 1. 操作: Terminal を 20 個起動し、全部の `ZTERM START` を待つ。
    確認事項: 20 個が開く。正解: `ZTERM START` が 20 行。確認方法: log。
-2. 操作: `pkill -x terminal`（root）。
+2. 操作: `ps` で `/bin/terminal` の pid を集めて `kill`（root。zedBSD に pkill は無い）。
    確認事項: compositor が全部を手放す時間と、その内訳。正解: `KWL CLEANUP done client=… ms=… quiesce=… surfaces=… shell=… objects=…` が 20 行、全部が 10 秒以内。確認方法: log（各行と合計を記録に残す）。
 
 ## 合格

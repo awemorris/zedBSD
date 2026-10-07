@@ -747,7 +747,11 @@ def release_clients(item):
 	item.check(opened == 20, f"only {opened} Terminals started")
 	time.sleep(2.0)
 	killed = run.mark()
-	run.sh("pkill -x terminal; true")
+	# zedBSD has no pkill (T1-388: the Terminals lived on): each /bin/terminal's pid from ps, then kill.
+	_, listed = run.sh("ps -A -o pid,args | grep '[/]bin/terminal' | awk '{print $1}'")
+	pids = listed.split()
+	item.step("Terminals to kill", f"{len(pids)}")
+	run.sh("kill " + " ".join(pids) + "; true")
 	began = time.time()
 	while len(run.lines(r"KWL CLEANUP done ", killed)) < 20 and time.time() - began < 60.0:
 		time.sleep(0.5)
@@ -755,6 +759,8 @@ def release_clients(item):
 	done = run.lines(r"KWL CLEANUP done ", killed)
 	for line in done:
 		item.step("released", line)
+	for line in run.lines(r"KWL PERF ", killed):
+		item.step("perf", line)
 	item.step("all released", f"{len(done)} in {elapsed:.1f} s")
 	item.check(len(done) == 20, f"only {len(done)} clients were released in 60 s")
 	item.check(elapsed <= 10.0, f"the release took {elapsed:.1f} s (target 10 s)")
