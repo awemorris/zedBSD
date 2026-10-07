@@ -6,7 +6,8 @@
 #  2. bt scan 3 finds exactly the loopback's four devices with their fields: the extended result's
 #     "Loopback Keyboard" (class 0x002540), the RSSI result (0A:0B:0C:0D:0E:02, class 0x002580, RSSI -60), the public
 #     report's "Loopback Mouse" (appearance 0x03c2) and the random report (4A:0B:0C:0D:0E:04).
-#  3. A user that is not root (kei, else nobody) is refused the scan (ERROR permission) but may show.
+#  3. The test account btuser (build-bt-image.sh: neither root nor wheel nor the seat's user, review S7 of ws143-p004) is
+#     refused the scan (ERROR permission) but may show.
 #  4. The node going under the daemon: with the daemon stopped, bt-probe -W 3000 asks the loopback controller to
 #     withdraw itself in 3 s; the daemon started at once is ready, sees the node go (closed, lost) and is ready again
 #     on the controller's return.
@@ -24,7 +25,7 @@ expect() {
 	if [ "$2" = "$3" ]; then echo "ok: $1"; else echo "FAIL: $1 (got '$2', want '$3')"; status=1; fi
 }
 has() {
-	if printf '%s\n' "$2" | grep -qF -- "$3"; then echo "ok: $1"; else echo "FAIL: $1 (no '$3')"; status=1; fi
+	if printf '%s\n' "$2" | grep -qF -- "$3"; then echo "ok: $1"; else echo "FAIL: $1 (no '$3' in: $(printf '%s' "$2" | tr '\n' '|'))"; status=1; fi
 }
 stop_daemon() {
 	guest 'for p in $(ps -A -o pid,args | grep "[/]sbin/bluetoothd" | awk "{print \$1}"); do kill $p; done; sleep 1; true' >/dev/null
@@ -50,8 +51,9 @@ has "the mouse" "$scan" 'address=0A:0B:0C:0D:0E:03 type=le-public rssi=-50 appea
 has "the random report" "$scan" 'address=4A:0B:0C:0D:0E:04 type=le-random rssi=-70 name=""'
 
 # 3. Not for another user.
-user=$(guest 'grep -q "^kei:" /etc/passwd && echo kei || echo nobody' | tail -1)
-has "$user is refused the scan" "$(guest "runas $user /bin/bt scan 1; true")" "ERROR permission"
+expect "the test account is there" "$(guest 'grep -c "^btuser:" /etc/passwd' | tail -1)" 1
+user=btuser
+has "$user is refused the scan" "$(guest "runas $user /bin/bt scan 1 2>&1; echo rc=\$?")" "ERROR permission"
 has "$user may show" "$(guest "runas $user /bin/bt show; true")" "BT SHOW state=ready"
 
 # 4. The node going under the daemon, and coming back.

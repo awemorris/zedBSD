@@ -59,6 +59,7 @@ struct btd_bond {
 int btd_keys_path(const char *folder, const uint8_t *controller, const uint8_t *address, unsigned type, char *path, size_t size);
 int btd_keys_write(const char *folder, const uint8_t *controller, const struct btd_bond *bond);
 int btd_keys_read(const char *folder, const uint8_t *controller, const uint8_t *address, unsigned type, struct btd_bond *bond);
+int btd_keys_list(const char *folder, const uint8_t *controller, struct btd_bond *bonds, unsigned max, unsigned *count);
 int btd_keys_forget(const char *folder, const uint8_t *controller, const uint8_t *address, unsigned type);
 int btd_keys_format(const struct btd_bond *bond, char *text, size_t size);
 int btd_keys_parse(const char *text, size_t length, struct btd_bond *bond);

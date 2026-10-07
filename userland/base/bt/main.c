@@ -6,15 +6,27 @@
  */
 
 /*
- * The Bluetooth command (ws143-p003): asks bluetoothd on its socket.
+ * The Bluetooth command (ws143-p003 and p004): asks bluetoothd on its
+ * socket.
  *
- *   bt show            the state and the controller
- *   bt scan [SECONDS]  a scan (root only in this Phase; 8 seconds unless
- *                      given), and the devices found
- *   bt devices         the devices of the last scan
+ *   bt show                     the state and the controller
+ *   bt scan [SECONDS]           a scan (8 seconds unless given), and the
+ *                               devices found
+ *   bt devices                  the devices of the last scan
+ *   bt pair ADDRESS [TYPE]      pairs a device (TYPE bredr, the default,
+ *                               le-public or le-random); the daemon's
+ *                               questions are asked on the terminal
+ *   bt forget ADDRESS [TYPE]    forgets a bond
+ *   bt bonds                    the bonds
+ *   bt agent                    answers the pairings' questions on the
+ *                               terminal until it is ended
  *
- * It prints the daemon's lines as they are, then one line the tests read:
- * "BT SHOW state=WORD" or "BT SCAN devices=N".  It exits with 0, 1 when
+ * Changing things (scan, pair, forget, agent) is for root, the seat's user
+ * and wheel.  It prints the daemon's lines as they are, then one line the
+ * tests read: "BT SHOW state=WORD", "BT SCAN devices=N", "BT PAIR
+ * result=paired|error", "BT FORGET result=ok|error" or "BT BONDS bonds=N".
+ * A question ("CONFIRM NUMBER", "CONSENT") is answered from standard input
+ * (y for yes, anything else or its end for no).  It exits with 0, 1 when
  * the daemon answered ERROR, or 2 when there is no daemon.
  */
 
@@ -39,6 +51,8 @@
 
 static int bt_connect(void);
 static int bt_ask(const char *request, const char *summary);
+static void bt_question(int descriptor, const char *line);
+static int bt_device_request(const char *verb, int argc, char **argv, char *request, size_t size);
 static void bt_usage(void);
 
 /*
@@ -49,7 +63,7 @@ main(
 	int argc,
 	char **argv)
 {
-	char request[64];
+	char request[96];
 	unsigned long seconds;
 	char *end;
 	int status;
@@ -94,9 +108,113 @@ main(
 		return status;
 	}
 
+	/* bt bonds. */
+	same = strcmp(argv[1], "bonds");
+	if (same == 0 && argc == 2) {
+		status = bt_ask("BONDS", "BONDS");
+		return status;
+	}
+
+	/* bt agent: answers until it is ended. */
+	same = strcmp(argv[1], "agent");
+	if (same == 0 && argc == 2) {
+		status = bt_ask("AGENT", "AGENT");
+		return status;
+	}
+
+	/* bt pair ADDRESS [TYPE]. */
+	same = strcmp(argv[1], "pair");
+	if (same == 0) {
+		status = bt_device_request("PAIR", argc, argv, request, sizeof(request));
+		if (status != 0) {
+			bt_usage();
+			return BT_EXIT_USAGE;
+		}
+
+		/* The pairing, its questions asked here. */
+		status = bt_ask(request, "PAIR");
+		return status;
+	}
+
+	/* bt forget ADDRESS [TYPE]. */
+	same = strcmp(argv[1], "forget");
+	if (same == 0) {
+		status = bt_device_request("FORGET", argc, argv, request, sizeof(request));
+		if (status != 0) {
+			bt_usage();
+			return BT_EXIT_USAGE;
+		}
+
+		/* The bond's removal. */
+		status = bt_ask(request, "FORGET");
+		return status;
+	}
+
 	/* Anything else. */
 	bt_usage();
 	return BT_EXIT_USAGE;
+}
+
+/* Writes "VERB ADDRESS TYPE" for bt pair and bt forget (TYPE bredr unless given); returns 0, or -1 for a misuse. */
+static int
+bt_device_request(
+	const char *verb,
+	int argc,
+	char **argv,
+	char *request,
+	size_t size)
+{
+	const char *type;
+	size_t length;
+
+	/* An address, and maybe a type. */
+	if (argc != 3 && argc != 4)
+		return -1;
+	length = strlen(argv[2]);
+	if (length != 17U)
+		return -1;
+	type = "bredr";
+	if (argc == 4)
+		type = argv[3];
+
+	/* The request (the daemon checks the address and the type). */
+	(void)snprintf(request, size, "%s %s %s", verb, argv[2], type);
+	return 0;
+}
+
+/*
+ * Asks the user a pairing's question on the terminal and sends the answer:
+ * y is YES, anything else (or no input) NO.
+ */
+static void
+bt_question(
+	int descriptor,
+	const char *line)
+{
+	char answer[32];
+	const char *reply;
+	ssize_t written;
+	char *got;
+	int same;
+
+	/* The question in words. */
+	same = strncmp(line, "CONSENT", 7U);
+	if (same == 0)
+		(void)printf("Pair with the device (it shows no number)? [y/N] ");
+	else
+		(void)printf("Does the device show %s? [y/N] ", line + 8);
+	(void)fflush(stdout);
+
+	/* The answer from standard input. */
+	reply = "NO\n";
+	got = fgets(answer, (int)sizeof(answer), stdin);
+	if (got != NULL && (answer[0] == 'y' || answer[0] == 'Y'))
+		reply = "YES\n";
+	(void)printf("\n");
+
+	/* Sent (a daemon that went is seen on the next read). */
+	written = write(descriptor, reply, strlen(reply));
+	(void)written;
 }
 
 /* Connects to bluetoothd's socket; returns the descriptor or -1. */
@@ -142,8 +260,10 @@ bt_ask(
 	ssize_t written;
 	char *got;
 	unsigned devices;
+	unsigned bonds;
 	size_t length;
 	int descriptor;
+	int paired;
 	int failed;
 	int done;
 	int same;
@@ -176,6 +296,8 @@ bt_ask(
 	/* Each line up to DONE: printed, the state and the devices counted. */
 	(void)snprintf(state, sizeof(state), "%s", "unknown");
 	devices = 0U;
+	bonds = 0U;
+	paired = 0;
 	failed = 0;
 	done = 0;
 	for (;;) {
@@ -194,6 +316,38 @@ bt_ask(
 		/* Any other line is the answer's, printed as it is. */
 		(void)fputs(line, stdout);
 
+		/* A question is asked on the terminal. */
+		same = strncmp(line, "CONFIRM ", 8U);
+		if (same == 0) {
+			bt_question(descriptor, line);
+			continue;
+		}
+
+		/* An agreement, likewise. */
+		same = strncmp(line, "CONSENT", 7U);
+		if (same == 0) {
+			bt_question(descriptor, line);
+			continue;
+		}
+
+		/* A passkey to type on the device. */
+		same = strncmp(line, "PASSKEY ", 8U);
+		if (same == 0) {
+			(void)printf("Type %.6s on the device, then Enter there.\n", line + 8);
+			(void)fflush(stdout);
+			continue;
+		}
+
+		/* A PAIRED line ends the pairing well. */
+		same = strncmp(line, "PAIRED ", 7U);
+		if (same == 0)
+			paired = 1;
+
+		/* A BOND line counts. */
+		same = strncmp(line, "BOND ", 5U);
+		if (same == 0)
+			bonds++;
+
 		/* A STATE line names the state. */
 		same = strncmp(line, "STATE ", 6U);
 		if (same == 0)
@@ -210,6 +364,26 @@ bt_ask(
 			failed = 1;
 	}
 
+	/* The agent goes on after its DONE: it answers every question until the daemon or the user ends it. */
+	same = strcmp(summary, "AGENT");
+	if (same == 0 && done && !failed) {
+		(void)fflush(stdout);
+		for (;;) {
+			/* The next question. */
+			got = fgets(line, (int)sizeof(line), answer);
+			if (got == NULL)
+				break;
+			(void)fputs(line, stdout);
+			same = strncmp(line, "CONFIRM ", 8U);
+			if (same == 0)
+				bt_question(descriptor, line);
+			same = strncmp(line, "CONSENT", 7U);
+			if (same == 0)
+				bt_question(descriptor, line);
+			(void)fflush(stdout);
+		}
+	}
+
 	/* The answer is read. */
 	(void)fclose(answer);
 
@@ -219,12 +393,26 @@ bt_ask(
 		return BT_EXIT_NO_DAEMON;
 	}
 
-	/* The summary line the tests read. */
+	/* The summary line the tests read, for each request. */
 	same = strcmp(summary, "SHOW");
 	if (same == 0)
 		(void)printf("BT SHOW state=%s\n", state);
-	else
+	same = strcmp(summary, "SCAN");
+	if (same == 0)
 		(void)printf("BT SCAN devices=%u\n", devices);
+	same = strcmp(summary, "PAIR");
+	if (same == 0 && paired)
+		(void)printf("BT PAIR result=paired\n");
+	if (same == 0 && !paired)
+		(void)printf("BT PAIR result=error\n");
+	same = strcmp(summary, "FORGET");
+	if (same == 0 && !failed)
+		(void)printf("BT FORGET result=ok\n");
+	if (same == 0 && failed)
+		(void)printf("BT FORGET result=error\n");
+	same = strcmp(summary, "BONDS");
+	if (same == 0)
+		(void)printf("BT BONDS bonds=%u\n", bonds);
 
 	/* An ERROR answer. */
 	if (failed)
@@ -239,6 +427,8 @@ static void
 bt_usage(
 	void)
 {
-	/* The three commands. */
-	(void)fprintf(stderr, "usage: bt show | bt scan [SECONDS] | bt devices\n");
+	/* The commands. */
+	(void)fprintf(stderr,
+		      "usage: bt show | bt scan [SECONDS] | bt devices | bt pair ADDRESS [bredr|le-public|le-random] |\n"
+		      "       bt forget ADDRESS [TYPE] | bt bonds | bt agent\n");
 }

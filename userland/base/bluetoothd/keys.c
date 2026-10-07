@@ -18,6 +18,7 @@
 
 #include "userland/base/bluetoothd/keys.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -215,6 +216,82 @@ btd_keys_forget(
 		return errno;
 
 	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Reads the bonds of a controller, at most max of them, in the order the
+ * folder gives (a file whose name or fields are not a bond's is passed
+ * over).  Returns 0 with the count (none when the folder is not there), or
+ * an errno value.
+ */
+int
+btd_keys_list(
+	const char *folder,
+	const uint8_t *controller,
+	struct btd_bond *bonds,
+	unsigned max,
+	unsigned *count)
+{
+	struct dirent *entry;
+	char own[24];
+	char path[BTD_KEYS_PATH_MAX];
+	char address_text[18];
+	uint8_t address[BTD_ADDRESS_BYTES];
+	const char *dash;
+	unsigned type;
+	DIR *directory;
+	int written;
+	int error;
+
+	/* The controller's folder; none is no bond. */
+	*count = 0U;
+	btd_format_address(controller, own, sizeof(own));
+	written = snprintf(path, sizeof(path), "%s/%s", folder, own);
+	if (written < 0 || (size_t)written >= sizeof(path))
+		return ENAMETOOLONG;
+	directory = opendir(path);
+	if (directory == NULL) {
+		error = errno;
+		if (error == ENOENT)
+			return 0;
+		return error;
+	}
+
+	/* Each file named ADDRESS-TYPE (temporary files start with a dot and are not). */
+	for (;;) {
+		entry = readdir(directory);
+		if (entry == NULL)
+			break;
+		if (*count >= max)
+			break;
+
+		/* The address, 17 characters before the dash. */
+		dash = strchr(entry->d_name, '-');
+		if (entry->d_name[0] == '.' || dash == NULL || dash - entry->d_name != 17)
+			continue;
+		memcpy(address_text, entry->d_name, 17U);
+		address_text[17] = '\0';
+		error = btd_address_parse(address_text, address);
+		if (error != 0)
+			continue;
+
+		/* The type after it. */
+		error = btd_address_type_parse(dash + 1, &type);
+		if (error != 0)
+			continue;
+
+		/* The bond, read and checked like any other. */
+		error = btd_keys_read(folder, controller, address, type, &bonds[*count]);
+		if (error != 0)
+			continue;
+		*count += 1U;
+	}
+
+	/* The folder is read. */
+	(void)closedir(directory);
+
+	/* Succeeded: the bonds found. */
 	return 0;
 }
 

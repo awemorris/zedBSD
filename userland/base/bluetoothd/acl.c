@@ -43,7 +43,7 @@ btd_acl_parse(
 		return EBADMSG;
 
 	/* Succeeded: the handle, the boundary flag and the data. */
-	acl->handle = (uint16_t)((packet[1] | (packet[2] << 8)) & ACL_HANDLE_MASK);
+	acl->handle = (uint16_t)(((unsigned)packet[1] | ((unsigned)packet[2] << 8)) & ACL_HANDLE_MASK);
 	acl->boundary = (uint8_t)((packet[2] >> 4) & 0x03U);
 	acl->data = packet + 1U + BTD_ACL_HEADER;
 	acl->length = data_length;
