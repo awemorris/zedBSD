@@ -38,6 +38,7 @@
 ### ユーザーの未決の判断
 
 <!-- master:open-decisions:start -->
+- **WS143 B6**（Bluetooth の bluetoothd の権限の分離の account `_bluetooth`）: ユーザーの決定 D17「account を足す、既存の install の更新を含む」に対し、既存の install に account が無い時にどうするか。(a) 既存の install に account を足す仕組みを作る、(b) 分離できない時は起動を拒む、(c) D17 を変える。P2 の設計の Q4 は決定待ち。
 - **BUG-225**（App Home の表示の遅れ）: 0.7 秒の待ちは ws099-p035c で解消済み（5330 の log で最初の frame 15 ms）。残って見えうるのは icon が 30 ms ずつ遅れて浮かぶ演出で、1 頁 12 個が揃うのに約 510 ms。実機でまだ遅く感じれば刻みを 10 ms（約 290 ms）か同時に。
 - **BUG-241**（Browser で Arabic などが □）: 載せている font に Arabic・Hebrew・Thai・Hangul・Devanagari が無く、libbrowser・libtruetype に bidi と joining が無い。P2 の案: WS074 の新しい Phase（段 1 Hebrew・Thai・Hangul の Noto（OFL、数 MB）と簡約の bidi、段 2 Arabic の joining、段 3 Indic）。font を tree に足すか、段の順、ベータ2 の後か。
 - **WS084 の 10 回の reboot（素の起動）**: ユーザーが zedBSD で起動する時。
