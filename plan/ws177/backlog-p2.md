@@ -34,9 +34,9 @@
 | WS156 ws156-p002（通知の口） → [ws177-p005](phase005/phase.md) | 不正な UTF-8 の題・本文、制御文字 | 置き換えるか拒む（今は bytes のまま保つ） | `wayland/notify.c` の `kwl_notify_post` | 2026-10-06 |
 | WS156 ws156-p002（通知の口） → [ws177-p005](phase005/phase.md) | 一つの client が短い間に大量に post する | 速さの制限（今は client ごと 32 個の上限だけ） | `wayland/notify-shell.c` の `notify_post` | 2026-10-06 |
 | WS156 ws156-p002（通知の口） → [ws177-p005](phase005/phase.md) | libkeiland の事象の ring（32）が溢れる | 古い事象を捨てたことを app に知らせる（今は黙って捨てる） | `libkeiland/system/system-view.c` の `system_view_notify_event` | 2026-10-06 |
-| q824 ws148-p002（Privacy の頁を無くし、最近の履歴の口） | 「Keep recent items」を off にしている間の Files の Recents | Recents に「最近の項目を残さない設定です」と出し、Settings への道を示す（今は空の一覧だけ） | `files/ui-grid.c` の題、`files/ui-search.c` の Recents の読み | 2026-10-06 |
-| q824 ws148-p002 | Clear Recents の確かめ | 押し間違いに備えて確かめるか、元に戻す（今は押すとすぐ空になる） | `files/actions.c` の `fm_action_clear_recents` | 2026-10-06 |
-| q824 ws148-p002 | 他の app が開いていた「最近の file」の menu | 一覧が空・止められた時に、開いている app の menu も読み直す（今は各 app が次に読む時まで古い） | libkeiland `recent.c`、各 app の open recent | 2026-10-06 |
+| q824 ws148-p002（Privacy の頁を無くし、最近の履歴の口） → [ws177-p008](phase008/phase.md) | 「Keep recent items」を off にしている間の Files の Recents | Recents に「最近の項目を残さない設定です」と出し、Settings への道を示す（今は空の一覧だけ） | `files/ui-grid.c` の題、`files/ui-search.c` の Recents の読み | 2026-10-06 |
+| q824 ws148-p002 → [ws177-p008](phase008/phase.md) | Clear Recents の確かめ | 押し間違いに備えて確かめるか、元に戻す（今は押すとすぐ空になる） | `files/actions.c` の `fm_action_clear_recents` | 2026-10-06 |
+| q824 ws148-p002 → [ws177-p008](phase008/phase.md) | 他の app が開いていた「最近の file」の menu | 一覧が空・止められた時に、開いている app の menu も読み直す（今は各 app が次に読む時まで古い） | libkeiland `recent.c`、各 app の open recent | 2026-10-06 |
 | q824 ws148-p002 | Storage の頁の文と Files の Clear Recents の日本語 | 翻訳の catalog に入れる（今は Storage の頁の本文と Files の題の button は翻訳されない、既存の Trash などと同じ） | `settings/page-storage.c`、`files/ui-grid.c`、`locale/ja/*.tr` | 2026-10-06 |
 | q826 ws128-p004（PDF の検索） | Enter の後に field へ戻した時の選択 | caret を末尾に置き、続けて打つと query に足される（今は compositor が query 全体を選んで戻すので、打つと置き換わる） | `wayland/titlebar-shell.c` の `shell_focus`、`pdfviewer/titlebar.c` の `pv_titlebar_input` | 2026-10-06 |
 | WS161 ws161-p004（libpasskey の os 層と fidoctl） | report に番号の付いた FIDO の鍵、64 byte でない report の鍵 | ID の byte を外して読む・report の大きさに合わせる（今は開かない・EIO） | `libpasskey/os-zedbsd.c` の `pk_os_open`、`os-posix.c` の `os_read` | 2026-10-06 |

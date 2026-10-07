@@ -1353,6 +1353,13 @@ struct fm_app {
 	int rename_shown;
 	char rename_path[FM_PATH_MAX];
 
+	/*
+	 * Whether the recent list was stopped when Recents was read last
+	 * (Settings' "Keep recent items" off, ws177-p008): its empty view then
+	 * says so and where to turn it on.
+	 */
+	int recents_off;
+
 	/* A question being asked (FM_DIALOG_*), and the paths it is about. */
 	unsigned dialog;
 	char **dialog_paths;
@@ -1462,7 +1469,8 @@ enum fm_dialog {
 	FM_DIALOG_DELETE,
 	FM_DIALOG_EMPTY_TRASH,
 	FM_DIALOG_COLLISION,
-	FM_DIALOG_MOUNT
+	FM_DIALOG_MOUNT,
+	FM_DIALOG_CLEAR_RECENTS
 };
 
 /* The indexes of the buttons (FM_HIT_BUTTON) the frame records. */

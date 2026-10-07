@@ -224,6 +224,7 @@ static void main_title_refresh(void);
 static void main_edit_state(const struct te_state *state);
 static void main_opened(void);
 static void main_recent_refresh(void);
+static void main_recent_follow(void);
 static void main_replace_panel(uint64_t now_us, const struct kl_style *style, const struct kl_rect *area);
 static void main_find_panel(uint64_t now_us, const struct kl_style *style, const struct kl_rect *area);
 static void main_panel_find_text(char *text, size_t size);
@@ -988,6 +989,31 @@ main_opened(void)
 }
 
 /*
+ * Reads File > Open Recent again when another program changed the recent
+ * list since it was read (ws177-p008: emptied by Files, stopped by
+ * Settings), as the window gets the keyboard.
+ */
+static void
+main_recent_follow(void)
+{
+	uint64_t stamp;
+	int error;
+
+	/* The list's stamp now; one that cannot be read changes nothing. */
+	error = kl_recent_stamp(&stamp);
+	if (error != 0)
+		return;
+
+	/* The same list: the menu is current. */
+	if (stamp == main_app.recent_stamp)
+		return;
+
+	/* Read again (logged for the tests). */
+	te_log("RECENT changed: read again");
+	main_recent_refresh();
+}
+
+/*
  * Reads the files Text Editor used from libkeiland's recent list, newest
  * first and at most TE_RECENT_MAX (ws128-p003), notes which are still
  * there, and shows them in File > Open Recent.
@@ -1003,7 +1029,8 @@ main_recent_refresh(void)
 	int error;
 	int status;
 
-	/* The list (an unreadable one shows no file). */
+	/* The list's stamp, then the list (an unreadable one shows no file). */
+	(void)kl_recent_stamp(&main_app.recent_stamp);
 	count = 0;
 	error = kl_recent_list(items, sizeof(items) / sizeof(items[0]), &count);
 	if (error != 0) {
@@ -1548,9 +1575,13 @@ main_window_event(
 		main_app.dirty = 1;
 		break;
 	case KL_WINDOW_FOCUS:
-		/* The keyboard came (READY waits for the first time) or went. */
-		if (event->pressed)
+		/* The keyboard came (READY waits for the first time) or went; Open Recent follows another program's change of the list. */
+		if (event->pressed) {
 			main_focus_came = 1;
+			main_recent_follow();
+		}
+
+		/* The window hears it too. */
 		input = te_window_push(&main_window, TE_EVENT_FOCUS);
 		if (input != NULL)
 			input->pressed = event->pressed;

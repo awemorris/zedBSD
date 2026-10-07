@@ -3,7 +3,7 @@
 # ws177-p007: Welcome の準正常系（案 B）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 P1 q884 の 4: 実装・host PASS・build warning 0。T1 の QEMU が残り）
+Status: test-wait（T1-410）（2026-10-08 P1 q884 の 4: 実装・host PASS・build warning 0、main に統合）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q884 の 4（P1、2026-10-08）

@@ -26,6 +26,11 @@
  * Storage, "Keep recent items"): a file recent.off beside the list says
  * so, the list is emptied, and kl_recent_add adds nothing until the file
  * is gone.  Files' Recents empties the list with kl_recent_clear.
+ *
+ * kl_recent_stamp (ws177-p008) lets a program that shows the list learn
+ * that another changed it: each change writes a new file renamed over
+ * the old one, so the list's inode, size and time, with whether it is
+ * stopped, change with every change.
  */
 
 #include <keiland/keiland.h>
@@ -374,6 +379,54 @@ kl_recent_keep(
 		return errno;
 
 	/* Succeeded: the list is kept. */
+	return 0;
+}
+
+/*
+ * Gives a stamp of the recent list that changes with every change of it:
+ * its file's inode, size and time, and whether the list is stopped.  A
+ * list not written yet stamps as empty.
+ *
+ * Returns 0, or an errno value.
+ */
+int
+kl_recent_stamp(
+	uint64_t *stamp)
+{
+	char list[KL_RECENT_PATH_MAX];
+	char off[KL_RECENT_PATH_MAX];
+	struct stat status;
+	uint64_t value;
+	int got;
+	int error;
+
+	/* The list's file and the one that stops it. */
+	error = recent_file(list, sizeof(list));
+	if (error != 0)
+		return error;
+	error = recent_off_file(off, sizeof(off));
+	if (error != 0)
+		return error;
+
+	/* The list's file: a new one at each change (renamed over the old); none yet stamps as empty. */
+	value = 0U;
+	got = stat(list, &status);
+	if (got == 0) {
+		value = (uint64_t)status.st_ino;
+		value = value * 1000003U + (uint64_t)status.st_size;
+		value = value * 1000003U + (uint64_t)status.st_mtime;
+	} else if (errno != ENOENT) {
+		return errno;
+	}
+
+	/* Whether it is stopped, in the lowest bit. */
+	value <<= 1;
+	got = stat(off, &status);
+	if (got == 0)
+		value |= 1U;
+
+	/* Succeeded: the stamp. */
+	*stamp = value;
 	return 0;
 }
 
