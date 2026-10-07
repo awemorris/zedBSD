@@ -39,3 +39,7 @@ Queue: q877（P1、2026-10-08 Q1 の承認の 2 番、「host で進められる
 
 - 範囲 2（上の案、ユーザーか Q1 の決定の後）。S0ix の口（WS052、ベータ3）。
 - 2 つ目の出力（ws113-p011 の head）が外部 DP の時の retrain（今は resident の出力だけ）。
+
+## Q1 の判断（2026-10-08）
+
+範囲 2（scanout 中の抜け）: 案 (b)（止めた後に firmware の出力を「無し」にし、Keiland の claim を待つ。present は ENXIO）を採る。ユーザーの決定 3（driver は切り替えず事象を Keiland へ）に沿う技術の判断。present の失敗の道に触れるので、5330 で抜き差しを試せる時に実装する。
