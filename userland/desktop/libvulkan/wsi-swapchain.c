@@ -2353,6 +2353,10 @@ present_native(
 			}
 		}
 
+		/* A present that failed takes back the part it named, so the next one does not commit it. */
+		if (error != VK_SUCCESS && job->damage != NULL && job->damage[index].known && chain->surface->platform->damage != NULL)
+			chain->surface->platform->damage(chain->lease, 0, 0, 0, 0);
+
 		/* Consumed waits cannot be rolled back by allocation failure in either backend. */
 		if (error == VK_ERROR_OUT_OF_HOST_MEMORY || error == VK_ERROR_OUT_OF_DEVICE_MEMORY)
 			error = swapchain_device_lost(chain->device);

@@ -1286,11 +1286,13 @@ wayland_damage(
 {
 	struct wayland_lease *lease;
 
-	/* The part, for the next commit. */
+	/* The part, for the next commit; an empty one names none (a present that failed takes its part back). */
 	lease = private_lease;
 	lease->damage[0] = x;
 	lease->damage[1] = y;
 	lease->damage[2] = width;
 	lease->damage[3] = height;
-	lease->damaged = VK_TRUE;
+	lease->damaged = VK_FALSE;
+	if (width > 0 && height > 0)
+		lease->damaged = VK_TRUE;
 }

@@ -66,6 +66,26 @@ Q1（q879）:「libkeiland の present を、変わった所（damage）だけ�
 - buffer age・head（mirror の写し）・capture は compose の既存の仕組みに乗る。
 - 影: 窓の影は窓と一緒に clip の中で描かれる。desktop の変化は影の形を変えない。
 - cursor・drag の icon・OSK・通知・corner は still でない時に全体になる（`kwl_glass_still`）。
+## design-reviewer の review（2026-10-08、層 3 の設計）
+
+高の 4 件:
+- **H1**: glass の look では、desktop の上の pointer の移動が calm にならない（`window_at` は role の無い desktop の surface を除く）。範囲選択の最中は、毎回出力の全体が描き直される。
+- **H2**: docked の空間の中央の窓の cover は、出力の全体で backdrop を読む。
+- **H3**: 絞った damage が空になると frame が出ず、frame callback が返らないので FIFO の client が止まる。adopt は必ず frame を生む、を不変条件にする。
+- **H4**: 描き残しを見つける試験（絞った frame と全体の frame の pixel の比較、絞りを切る switch）が無い。
+
+中:
+- **M1**: overflow と上下が逆の矩形。int64 にし、先に buffer に clip する。
+- **M2**: viewport の付いた surface は全体にする。
+- **M3**: attach だけで damage の無い commit は不明として全体にする。adopt_damage は adopt のたびに必ず消す。
+- **M4**: apps bar の preview・switcher・整列の menu を still の条件に足す。
+- **M5**: compositor の時間が支配的かを先に測る。
+
+低: 書き方（docked の原点）、形式の変化、DAMAGE_REACH の根拠の comment、client 側の古い flag（L4）、既存の import 待ちと拡張の head の性能。
+
+- 判断: L4 は層 1 の不具合なので直した。present が失敗した時は、名指した part を空の part で取り消す（`wayland_damage` は空の part で `damaged` を消す）。
+- 層 3 は H1〜H4 を含めて作り直しが要る。案: 先に M5（compositor の KWL LAT・PERF の測定）を T1 で行い、層 3 の範囲を Q1 と決める。
+
 ## 確かめ（2026-10-08、層 1・2・4）
 
 - host:
