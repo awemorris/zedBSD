@@ -18,9 +18,10 @@
  * The wheel turned up two notches in a row is one: a single notch, a
  * mouse merely knocked, does not open a recently locked session.
  *
- * A lock its user chose (Super+L, App Home's Lock Screen) always asks for
- * the secret; one the session made itself (the lid, sleep, idleness) opens
- * on a swipe alone for a while after it locked.  The while is measured on
+ * A lock its user chose (Super+L, App Home's Lock Screen, a Sleep the user
+ * chose) always asks for the secret; one the session made itself (the
+ * lid, idleness, a sleep of either) opens on a swipe alone for a while
+ * after it locked.  The while is measured on
  * the wall clock, which goes on while the machine sleeps; a clock that
  * went back gives no grace.
  */
@@ -46,13 +47,18 @@
 
 /*
  * The reasons of the locks the session makes itself (backend-host.c's lid,
- * sleep.c's sleep, an idle lock): every other reason is a lock the user
- * chose, or one not known here, and asks for the secret.
+ * an idle lock, and sleep.c's sleeps of the lid, of idleness and of the
+ * rest after a wake that was not the user's): every other reason is a lock
+ * the user chose (Super+L, App Home's Lock Screen, a Sleep the user chose:
+ * sleep-sleep-button, sleep-app, the 2026-10-08 user decision), or one not
+ * known here, and asks for the secret.
  */
 static const char *const lock_automatic[] = {
 	"lid",
-	"sleep",
-	"idle"
+	"idle",
+	"sleep-lid",
+	"sleep-idle",
+	"sleep-rest"
 };
 
 /* Forgets every move followed (the lock begins, or a move has unlocked). */
