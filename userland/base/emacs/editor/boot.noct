@@ -8,19 +8,63 @@ func remacsVersion() {
     return "0.0.1";
 }
 
+// Reads the command line's words (BUG-238): -nw and --no-window-system
+// change nothing (the terminal is the only display; GNU Emacs users type
+// -nw), --help and --version print and end the program, an unknown option
+// is refused, and the first other word is the file to visit.  Returns
+// {quit, status, file}: quit 1 ends the program with status.
+func remacsParseArgs(words) {
+    var result = { quit: 0, status: 0, file: "" };
+    var n = Array.size(words);
+    for (i in 0..n) {
+        var word = words[i];
+        if (word == "-nw" || word == "--no-window-system") {
+            // Accepted and ignored.
+        } else if (word == "--version") {
+            print("remacs " + remacsVersion());
+            result.quit = 1;
+            return result;
+        } else if (word == "--help") {
+            remacsPrintUsage();
+            result.quit = 1;
+            return result;
+        } else if (String.charCount(word) > 0 && String.charAt(word, 0) == "-") {
+            print("remacs: unknown option " + word);
+            remacsPrintUsage();
+            result.quit = 1;
+            result.status = 1;
+            return result;
+        } else if (result.file == "") {
+            result.file = word;
+        }
+    }
+    return result;
+}
+
+// Prints the options /bin/emacs takes.
+func remacsPrintUsage() {
+    print("usage: emacs [-nw] [FILE]");
+    print("  -nw, --no-window-system  accepted; the terminal is the only display");
+    print("  --help                   this text");
+    print("  --version                the version");
+}
+
 func main(arg) {
     // Build the Editor namespace; under the remacs launcher this ran
     // already, and running it again on a fresh VM is harmless.
     remacsInitCore();
     // Under the remacs launcher the argument is the file name string;
-    // under a plain noct run it is the argument array.
+    // under a plain noct run (/bin/emacs) it is the argument array, whose
+    // options are read here (BUG-238).
     var file = "";
     if (Type.of(arg) == "string") {
         file = arg;
     } else if (Type.of(arg) == "array") {
-        if (Array.size(arg) > 0) {
-            file = arg[0];
+        var options = remacsParseArgs(arg);
+        if (options.quit == 1) {
+            return options.status;
         }
+        file = options.file;
     }
     if (Term.isTTY() == 0) {
         // Not a terminal: report and exit. The test harness uses
