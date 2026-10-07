@@ -14,7 +14,9 @@
  * the Work account, the search, a new message written and sent, a reply,
  * Get Mail, a narrow window's list and message, and the panes on glass.
  * The "MAIL" lines the view logs are checked: sending and getting mail
- * report that there is no backend.
+ * report that there is no backend.  BUG-226: a frame drawn within the part
+ * a change of the lit widget needs (kl_ui_take_damage) is the whole
+ * frame's picture.
  *
  *     host-mailer FONT FALLBACK PREFIX
  *
@@ -63,6 +65,7 @@ static void test_frame(struct ml_view *view, struct kl_ui *ui, const struct kl_s
 static void test_click(struct ml_view *view, struct kl_ui *ui, const struct kl_style *style, int width, int height, int x, int y);
 static void test_type(struct ml_view *view, struct kl_ui *ui, const struct kl_style *style, int width, int height, const uint32_t *keys, size_t count);
 static void test_check(const char *name, const char *expected);
+static void test_hover_part(struct ml_view *view, struct kl_ui *ui, const struct kl_style *style, struct kl_canvas *canvas, int glass);
 static int test_save(const struct kl_canvas *canvas, const char *prefix, const char *name);
 static int test_save_glass(struct ml_view *view, const struct kl_canvas *canvas, const char *prefix, const char *name);
 
@@ -236,6 +239,10 @@ main(
 		test_failures++;
 	}
 
+	/* BUG-226: the lit part drawn alone, opaque and on glass. */
+	test_hover_part(&view, ui, &style, &canvas, 0);
+	test_hover_part(&view, ui, &style, &canvas, 1);
+
 	/* Everything goes. */
 	ml_view_release(&view);
 	kl_ui_destroy(ui);
@@ -251,6 +258,82 @@ main(
 
 	/* Succeeded: every check passed. */
 	return 0;
+}
+
+/*
+ * BUG-226: moves the pointer over the window in steps; each step that lights
+ * another widget is drawn within the part kl_ui_take_damage gives, and is
+ * then drawn whole at the same time: the two pictures are the same.
+ */
+static void
+test_hover_part(
+	struct ml_view *view,
+	struct kl_ui *ui,
+	const struct kl_style *style,
+	struct kl_canvas *canvas,
+	int glass)
+{
+	struct kl_style lit;
+	struct kl_rect part;
+	uint32_t *kept;
+	size_t size;
+	int step;
+	int redraw;
+	int placed;
+	int parts;
+	int differs;
+	int same;
+
+	/* A copy of the frame, and the style opaque or on glass, drawn whole once. */
+	size = (size_t)canvas->stride * (size_t)canvas->height * sizeof(uint32_t);
+	kept = malloc(size);
+	if (kept == NULL) {
+		printf("FAIL hover-part memory\n");
+		test_failures++;
+		return;
+	}
+
+	/* The style asked for, and a whole frame to start from. */
+	lit = *style;
+	lit.glass = glass;
+	test_frame(view, ui, &lit, canvas->width, canvas->height);
+
+	/* Each step that lights another widget: its part, then the whole frame at the same time. */
+	parts = 0;
+	differs = 0;
+	for (step = 0; step < 60; step++) {
+		redraw = kl_ui_pointer_motion(ui, 40.0 + (double)((step * 37) % (canvas->width - 80)), 60.0 + (double)((step * 53) % (canvas->height - 120)));
+		if (!redraw)
+			continue;
+		placed = kl_ui_take_damage(ui, &part);
+		if (!placed)
+			continue;
+		parts++;
+
+		/* The part alone. */
+		kl_canvas_clip_push(canvas, &part);
+		test_frame(view, ui, &lit, canvas->width, canvas->height);
+		kl_canvas_clip_pop(canvas);
+		memcpy(kept, canvas->pixels, size);
+
+		/* The whole frame, at the same time. */
+		test_now -= 16000U;
+		test_frame(view, ui, &lit, canvas->width, canvas->height);
+		same = memcmp(kept, canvas->pixels, size);
+		if (same != 0)
+			differs++;
+	}
+
+	/* Some parts drawn, all of them the whole frame's picture. */
+	if (parts > 0 && differs == 0) {
+		printf("PASS hover-part glass=%d parts=%d\n", glass, parts);
+	} else {
+		printf("FAIL hover-part glass=%d parts=%d differs=%d\n", glass, parts, differs);
+		test_failures++;
+	}
+
+	/* The copy goes. */
+	free(kept);
 }
 
 /*

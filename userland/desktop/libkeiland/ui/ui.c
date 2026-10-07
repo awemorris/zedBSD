@@ -46,6 +46,12 @@
 /* The evdev code of Tab, which moves the focus. */
 #define UI_KEY_TAB		15U
 
+/*
+ * How far round a widget's region a change of the lit widget may draw
+ * (pixels: a lit row's ground, a ring, a shadow; BUG-226).
+ */
+#define UI_DAMAGE_MARGIN	8
+
 /* What a record is. */
 enum ui_kind {
 	UI_KIND_HIT,
@@ -189,6 +195,17 @@ struct kl_ui {
 	struct kl_rect text_drawing_caret;
 	int text_shown;
 	struct kl_rect text_shown_caret;
+
+	/*
+	 * The part of the window a change of the lit widget alone needs drawn
+	 * again (BUG-226): the regions of the widget lit before and of the one
+	 * lit now in the frame shown, with UI_DAMAGE_MARGIN round them.
+	 * damage_pending until kl_ui_take_damage takes it or a frame begins;
+	 * damage_whole when a change could not be placed (the whole window).
+	 */
+	int damage_pending;
+	int damage_whole;
+	struct kl_rect damage;
 };
 
 /*
@@ -211,6 +228,7 @@ static struct {
 } ui_inset;
 
 static const struct ui_record *ui_find(const struct kl_ui *ui, double x, double y, int regions);
+static void ui_damage_key(struct kl_ui *ui, const struct ui_key *key);
 static int ui_scroll_shown(const struct kl_ui *ui, const struct kl_scroll *scroll);
 static int ui_inside(const struct kl_rect *rect, double x, double y);
 static int ui_same(const struct ui_key *key, uint32_t id, uint32_t index);
@@ -324,8 +342,10 @@ kl_ui_pointer_motion(
 	if (same)
 		return 0;
 
-	/* Succeeded: another widget is lit. */
+	/* Succeeded: another widget is lit; the two widgets' regions are drawn again. */
+	ui_damage_key(ui, &ui->hot);
 	ui->hot = hot;
+	ui_damage_key(ui, &ui->hot);
 	return 1;
 }
 
@@ -341,8 +361,41 @@ kl_ui_pointer_leave(
 	if (!ui->hot.valid)
 		return 0;
 
-	/* Succeeded: the lit widget goes dark. */
+	/* Succeeded: the lit widget goes dark, its region drawn again. */
+	ui_damage_key(ui, &ui->hot);
 	ui->hot.valid = 0;
+	return 1;
+}
+
+/*
+ * Takes the part of the window that the changes of the lit widget since
+ * the last frame (kl_ui_pointer_motion, kl_ui_pointer_leave) need drawn
+ * again, when that is all that changed (KL_VERSION 62, BUG-226): the
+ * application may draw its next frame within it alone (kl_canvas_clip_push
+ * round the whole drawing; the rest of the frame keeps its pixels).
+ * Returns 1 with the part, 0 when there is none, or when the whole window
+ * is to be drawn again.
+ */
+int
+kl_ui_take_damage(
+	struct kl_ui *ui,
+	struct kl_rect *rect)
+{
+	int pending;
+	int whole;
+
+	/* What there is, taken. */
+	pending = ui->damage_pending;
+	whole = ui->damage_whole;
+	ui->damage_pending = 0;
+	ui->damage_whole = 0;
+
+	/* Nothing, or no part that can be told. */
+	if (!pending || whole)
+		return 0;
+
+	/* Succeeded: the part. */
+	*rect = ui->damage;
 	return 1;
 }
 
@@ -639,6 +692,10 @@ kl_ui_begin(
 	/* The frame being drawn records its parts from none, and no widget of it takes text yet. */
 	ui->drawing_count = 0;
 	ui->text_drawing = 0;
+
+	/* A frame drawn covers the changes of the lit widget so far. */
+	ui->damage_pending = 0;
+	ui->damage_whole = 0;
 }
 
 /*
@@ -1371,6 +1428,82 @@ ui_find(
 
 	/* Nothing there. */
 	return NULL;
+}
+
+/*
+ * Adds the region of a widget of the frame shown, with UI_DAMAGE_MARGIN
+ * round it, to the part a change of the lit widget needs drawn again
+ * (BUG-226); a widget the frame shown has no region for asks for the whole
+ * window.  No widget adds nothing.
+ */
+static void
+ui_damage_key(
+	struct kl_ui *ui,
+	const struct ui_key *key)
+{
+	const struct ui_record *record;
+	struct kl_rect grown;
+	size_t index;
+	int first;
+	int same;
+	int right;
+	int bottom;
+
+	/* No widget. */
+	if (!key->valid)
+		return;
+
+	/* Its region in the frame shown. */
+	record = NULL;
+	for (index = 0; index < ui->shown_count; index++) {
+		if (ui->shown[index].kind != UI_KIND_HIT)
+			continue;
+		same = ui_same(key, ui->shown[index].id, ui->shown[index].index);
+		if (same) {
+			record = &ui->shown[index];
+			break;
+		}
+	}
+
+	/* Something to draw again from now; a widget without a region is the whole window. */
+	first = 0;
+	if (!ui->damage_pending)
+		first = 1;
+	ui->damage_pending = 1;
+	if (record == NULL) {
+		ui->damage_whole = 1;
+		return;
+	}
+
+	/* The whole window already: nothing to add. */
+	if (ui->damage_whole)
+		return;
+
+	/* The region and its margin. */
+	grown.x = record->rect.x - UI_DAMAGE_MARGIN;
+	grown.y = record->rect.y - UI_DAMAGE_MARGIN;
+	grown.width = record->rect.width + 2 * UI_DAMAGE_MARGIN;
+	grown.height = record->rect.height + 2 * UI_DAMAGE_MARGIN;
+
+	/* The first region is the part. */
+	if (first) {
+		ui->damage = grown;
+		return;
+	}
+
+	/* Another widens it to hold both. */
+	right = ui->damage.x + ui->damage.width;
+	if (grown.x + grown.width > right)
+		right = grown.x + grown.width;
+	bottom = ui->damage.y + ui->damage.height;
+	if (grown.y + grown.height > bottom)
+		bottom = grown.y + grown.height;
+	if (grown.x < ui->damage.x)
+		ui->damage.x = grown.x;
+	if (grown.y < ui->damage.y)
+		ui->damage.y = grown.y;
+	ui->damage.width = right - ui->damage.x;
+	ui->damage.height = bottom - ui->damage.y;
 }
 
 /* Tells whether a point is in a rectangle. */

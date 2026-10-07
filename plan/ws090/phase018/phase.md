@@ -66,5 +66,5 @@ Lakeside を含めた 6 枚を順に選び、最後の tile を `index=106` で�
 ## 残り
 
 - Files の host での画素の一致の確かめ（q801）はユーザーの判断で取りやめ（2026-10-06、canceled）。T1-233 (b) の Files の試験は PASS。
-- Mail・Calendar・Phone の hover も部分の再描画にする（kl_ui に hot の矩形を出す口が要る）。desktop の範囲選択（Files の desktop の mode）は q866 で部分の再描画にした（[BUG-221](../../bugs/BUG-221.md) の q866）。
+- Mail・Calendar の hover は q866 で部分の再描画にした（`kl_ui_take_damage`、KL_VERSION 62、[BUG-226](../../bugs/BUG-226.md) の q866）。Phone は未（同じ口で直せる）。desktop の範囲選択（Files の desktop の mode）は q866 で部分の再描画にした（[BUG-221](../../bugs/BUG-221.md) の q866）。
 - frame の callback での集約（設計の 2）は、描画が軽くなったので未実施。測った遅れ（注入から再描画の log まで）は未測定。
