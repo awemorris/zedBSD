@@ -112,40 +112,44 @@ msg	Choose your look	見た目を選ぶ
 # userland/desktop/locale/settings.keys:61
 msg	A picture for the desktop, and how clear the windows are.	デスクトップの画像と、ウインドウの透け具合。
 # userland/desktop/locale/settings.keys:62
-msg	Keys to know	覚えておきたいキー
+msg	Languages and input	言語と入力
 # userland/desktop/locale/settings.keys:63
-msg	Kei is quick to use from the keyboard.	Kei はキーボードからすばやく使えます。
+msg	How you type, and the language of the desktop's words.	入力のしかたと、デスクトップの言葉の言語。
 # userland/desktop/locale/settings.keys:64
-msg	You are all set	準備ができました
+msg	Keys to know	覚えておきたいキー
 # userland/desktop/locale/settings.keys:65
-msg	Start using Kei opens Files at Today. The Welcome is in Settings > About whenever you want it again.	「Kei を使い始める」でファイルの「今日」を開きます。ようこそは、設定 > 情報 からいつでももう一度見られます。
+msg	Kei is quick to use from the keyboard.	Kei はキーボードからすばやく使えます。
 # userland/desktop/locale/settings.keys:66
-msg	Open App Home (tap the key)	App Home を開く（キーを軽く押す）
+msg	You are all set	準備ができました
 # userland/desktop/locale/settings.keys:67
-msg	Wiseview: every window at a glance	Wiseview: すべてのウインドウを一覧
+msg	Start using Kei opens Files at Today. The Welcome is in Settings > About whenever you want it again.	「Kei を使い始める」でファイルの「今日」を開きます。ようこそは、設定 > 情報 からいつでももう一度見られます。
 # userland/desktop/locale/settings.keys:68
-msg	Switch between windows	ウインドウを切り替える
+msg	Open App Home (tap the key)	App Home を開く（キーを軽く押す）
 # userland/desktop/locale/settings.keys:69
-msg	Lock the screen	画面をロック
+msg	Wiseview: every window at a glance	Wiseview: すべてのウインドウを一覧
 # userland/desktop/locale/settings.keys:70
-msg	Move between desktops	デスクトップを移る
+msg	Switch between windows	ウインドウを切り替える
 # userland/desktop/locale/settings.keys:71
-msg	Switch the input language	入力の言語を切り替える
+msg	Lock the screen	画面をロック
+# userland/desktop/locale/settings.keys:72
+msg	Move between desktops	デスクトップを移る
 # userland/desktop/locale/settings.keys:73
-msg	Blue	青
-# userland/desktop/locale/settings.keys:74
-msg	Purple	紫
+msg	Switch the input language	入力の言語を切り替える
 # userland/desktop/locale/settings.keys:75
-msg	Pink	ピンク
+msg	Blue	青
 # userland/desktop/locale/settings.keys:76
-msg	Red	赤
+msg	Purple	紫
 # userland/desktop/locale/settings.keys:77
-msg	Orange	オレンジ
+msg	Pink	ピンク
 # userland/desktop/locale/settings.keys:78
-msg	Yellow	黄
+msg	Red	赤
 # userland/desktop/locale/settings.keys:79
-msg	Green	緑
+msg	Orange	オレンジ
 # userland/desktop/locale/settings.keys:80
+msg	Yellow	黄
+# userland/desktop/locale/settings.keys:81
+msg	Green	緑
+# userland/desktop/locale/settings.keys:82
 msg	Graphite	グラファイト
 # userland/desktop/settings/page-about.c:113
 msg	Show Welcome again	ようこそをもう一度見る
@@ -263,20 +267,15 @@ msg	Coming in a later version	今後のバージョンで対応予定
 msg	Search settings	設定を検索
 # userland/desktop/settings/ui.c:521
 msg	Search	検索
-# userland/desktop/settings/welcome.c:114, userland/desktop/settings/welcome.c:115
+# userland/desktop/settings/welcome.c:115, userland/desktop/settings/welcome.c:116
 msg	Skip	スキップ
-# userland/desktop/settings/welcome.c:191
-msg	Back	戻る
-# userland/desktop/settings/welcome.c:194
-msg	Next	次へ
 # userland/desktop/settings/welcome.c:196
+msg	Back	戻る
+# userland/desktop/settings/welcome.c:199
+msg	Next	次へ
+# userland/desktop/settings/welcome.c:201
 msg	Start using Kei	Kei を使い始める
-# userland/desktop/settings/welcome.c:292
+# userland/desktop/settings/welcome.c:301
 msg	Welcome to Kei, {1}	Kei へようこそ、{1} さん
-# userland/desktop/settings/welcome.c:300
+# userland/desktop/settings/welcome.c:309
 msg	Let's set up a few things. You can change each of them later in Settings.	いくつか設定しましょう。どれもあとで設定から変えられます。
-
-# Not asked for by the source any more (kept for a text that comes back):
-# msg	Battery	バッテリー
-# msg	Charge and power saving.	充電と省電力。
-# msg	Resolution and the screens.	解像度と画面。
