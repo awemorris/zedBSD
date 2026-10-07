@@ -34,6 +34,10 @@
 #             by Shift on the digits and by the symbols face) tapped into Text Editor within 6 s (5 characters a second,
 #             qwerty-plan.py), saved by Ctrl+S: the file is the text; Shift twice locks it (ABC typed as capitals);
 #             an arrow key moves the caret (qwerty.png, qwerty-symbols.png)
+#   qwerty-ime (BUG-231, p025; the input method's image, plan/ws095/tests/build-ime-image.sh: keiland-ime and its
+#             dictionary) Japanese on (Alt+Space) with ime-probe focused, the QWERTY panel's keys go to the input method:
+#             "a" is the preedit あ ("KWL OSK send via=ime code=30", the probe's preedit=あ), space converts (code=57,
+#             qwerty-ime.png shows the candidates), Enter commits (code=28): the probe's text is not "a" nor empty
 #   hand      (p008) the QWERTY panel's band button (1144,472 84x28) opens the handwriting face (writing area 962x288 at
 #             6,506): two strokes of the pointer and one of a finger are drawn (hand.png), the recognizer (ws165-p003,
 #             the hand-hershey templates) gives 1 to 4 candidates 600 ms after the last, without a note; every frame that
@@ -471,6 +475,44 @@ hold 800'
 		sleep 2
 		saved=$(read_file /root/q.txt)
 		[ "$saved" = "${text}ABC" ] && echo "qwerty: Shift locked: ABC ok" || { echo "qwerty: ($saved) MISSING"; status=1; }
+		;;
+	qwerty-ime)
+		compositor
+		expect_log 'KWL IME started pid='
+		guest 'for p in $(ps -A -o pid,args | grep "[i]me-probe" | awk "{print \$1}"); do kill $p; done; rm -f /tmp/ime-probe.log' >/dev/null
+		guest "export XDG_RUNTIME_DIR=/tmp HOME=/root; /bin/ime-probe --app-id=osk-ime --log=/tmp/ime-probe.log --seconds=300 > /dev/null 2>&1 </dev/null & sleep 4; echo started" >/dev/null
+		expect_log 'KWL MAP client='
+		# Japanese for the probe, then the QWERTY panel.
+		python3 plan/ws035/tests/qmp-keys.py "$GUEST_RUNTIME/qmp.sock" '<alt-spc>' >/dev/null
+		sleep 1
+		expect_log 'KWL IME language=ja'
+		swipe 6 792 150 650
+		expect_log 'KWL OSK open kind=qwerty'
+		# a: the preedit あ.
+		qkey_refresh
+		qkey_tap 'a'
+		expect_log 'KWL OSK send via=ime code=30'
+		sleep 1
+		guest 'cat /tmp/ime-probe.log' > "$out/ime-probe-qwerty.log"
+		grep -qF 'preedit=あ' "$out/ime-probe-qwerty.log" && echo "qwerty-ime: a is the preedit あ ok" || { echo "qwerty-ime: preedit あ MISSING"; status=1; }
+		# space converts; the candidates for the eye.
+		qkey_tap 'space'
+		expect_log 'KWL OSK send via=ime code=57'
+		sleep 1
+		pointer move 700 200 sleep 300
+		shot qwerty-ime.png
+		# Enter commits: a text, not the letter typed.
+		qkey_tap 'Enter'
+		expect_log 'KWL OSK send via=ime code=28'
+		sleep 1
+		guest 'cat /tmp/ime-probe.log' > "$out/ime-probe-qwerty.log"
+		committed=$(grep -a 'PROBE TEXT text=' "$out/ime-probe-qwerty.log" | tail -1 | sed 's/.*PROBE TEXT text=//')
+		if [ -n "$committed" ] && [ "$committed" != a ]; then
+			echo "qwerty-ime: committed \"$committed\" ok"
+		else
+			echo "qwerty-ime: commit (\"$committed\") MISSING"
+			status=1
+		fi
 		;;
 	hand)
 		compositor
