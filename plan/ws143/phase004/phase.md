@@ -4,9 +4,11 @@
 
 Phase ID: `ws143-p004`
 Parent: [WS143](../ws.md)
-Status: uncleared（q880-i01 は P2 の context の都合で、部品と host 試験までで安全な地点に commit して終えた。再開点は「再開点」節）
+Status: in-progress（q883-i02、P2、2026-10-08 朝。i01 は uncleared: P2 の context の都合で、部品と host 試験までで安全な地点に commit して終えた）
 Phase disposition: normal
-Queue: q880-i01（P2、Q1 の投入「p004（L2CAP・SMP）。p003 と同じく試験の kernel の loopback で QEMU で確かめられる形に（loopback に要る答えを足してよい）。設計 → design-reviewer → 実装 → host 試験（fuzz を含む）」）
+Queue: q880-i01（P2、Q1 の投入「p004（L2CAP・SMP）。p003 と同じく試験の kernel の loopback で QEMU で確かめられる形に（loopback に要る答えを足してよい）。設計 → design-reviewer → 実装 → host 試験（fuzz を含む）」）、
+q883-i02（P2、Q1 の投入: 再開点の順に、review による設計の改訂 → session の queue と初期化（B1・B3・B5）→ pair.[ch] → main.c の口と `bt` →
+loopback・QEMU の試験・T1 の依頼。B6 はユーザーの決定待ち（どの案にも差し替えられる形）、S7 は Q1 の決定（試験の account））
 
 ## 範囲
 
@@ -55,85 +57,174 @@ SMP の PDU の値（鍵、nonce、confirm、公開鍵の X・Y）は little-end
 - 書き方: 同じ folder に `.<名前>.tmp` を `O_CREAT|O_EXCL`、write、`fsync`、`rename`、folder の `fsync`。
 - 忘れる（FORGET）: file を unlink（`_bluetooth` の folder の中だけ。名前は address と型から作り、`/`・`..` を含まない）。
 
-### 4. 特権の分離（D16 の (a)、D17）
+### 4. 特権の分離（D16 の (a)、D17。i02 で review B2・B6 を反映）
 
-- base の `etc/passwd`・`etc/group` に `_bluetooth`（uid・gid 80、home `/var/empty`、shell `/sbin/nologin`）。group `bluetooth`（81、D8 の
-  許す人の group。今は空。wheel の人は §6 で別に許す）。
-- 親（root）: `/run/bluetoothd.sock` を作り（0666）、`/var/db/bluetooth` を `_bluetooth` の 0700 で作り、子と socketpair（SOCK_SEQPACKET）を作り、
-  fork する。子は `setgroups(0)`・`setgid(80)`・`setuid(80)` の後に `getuid() == 80` を確かめ（戻せたら終わる）、listener と socketpair の片方
-  だけを持って動く。親は他を持たない小さな loop: 子の 1 行 `OPEN` か `OPEN /dev/btN` に、`/dev/bt` と数字 1〜2 桁だけの path を `O_RDWR` で
-  開いて SCM_RIGHTS で渡す（失敗は errno の行）。子が終わったら親も終わる（service の `restart=on-failure` が起こし直す）。
-- 子の `/dev/btN` の探し直し（p003 の `btd_open`）は親への `OPEN` に置き換える。`-f` も親に渡す。
-- account が無い（古い install）時: 親は log に「`_bluetooth` が無いので分離しない」と出し、自分で動く（p003 と同じ形）。既存の install に
-  account を足す仕組みは base に無い（新しい image で入る）。
+- base の `etc/passwd`・`etc/group` に `_bluetooth`（uid・gid 80、home `/var/empty`、shell `/sbin/nologin`）。group `bluetooth` は作らない
+  （D8 の判定は §6 の root・seat の人・wheel で、group を使わない。review S6）。
+- 親（root）: `/run/bluetoothd.sock` を作り（0666）、`/var/db`（無ければ 0755）と `/var/db/bluetooth`（`_bluetooth` の 0700）を作り、子と
+  **`socketpair(AF_UNIX, SOCK_DGRAM)`**（zedBSD の kernel に SOCK_SEQPACKET は無い。datagram は 1 送り 1 受けで境界を保ち、SCM_RIGHTS も
+  運ぶ。review B2）を作り、fork する。子は `setgroups(0)`・`setgid(80)`・`setuid(80)` の後に `setuid(0)` が失敗すること（戻れない）を
+  確かめて、listener と socketpair の片方だけを持って動く。親は他を持たない小さな loop: 子の datagram `OPEN`（最小の番号で開く物）か
+  `OPEN /dev/btN`（`/dev/bt` と数字 1〜2 桁だけ）に、`O_RDWR|O_CLOEXEC` で開いて答える: `OK /dev/btN` と SCM_RIGHTS の fd、または
+  `ERR <errno>`。子が終わったら（recv が 0 か、`SIGCHLD`）親も同じ終了の値で終わる（service の `restart=on-failure` が起こし直す）。
+- 子の `/dev/btN` の探し直し（p003 の `btd_open`）は親への `OPEN` に置き換える（`-f` の path も親に渡す）。
+- **account が無い時（Q4、ユーザーの決定待ち、review B6）**: 扱いは 1 つの関数 `btd_privsep_no_account()` に閉じ、案 (a)〜(c) のどれでも
+  そこだけを差し替える形にする。決定までの暫定は「起動を拒む」（log `no _bluetooth account; not starting`、終了の値 78 = EX_CONFIG）。
+  理由: bluetoothd は既定の image にまだ入らず（p003 の P4）、既存の install で動いている物が無いので、暫定が利用者を困らせない。安全の側。
 
-### 5. 口の request（p003 の line の形に足す）
+### 5. 口の request（p003 の line の形に足す。i02 で review S1・S8 を反映）
 
 | request | 誰 | 答え |
 | --- | --- | --- |
-| `PAIR <address> <bredr|le-public|le-random>` | §6 の許す人 | 接続し、pairing し、鍵を保存し、切断する。途中で `CONFIRM <番号>`・`PASSKEY?`・`PASSKEY <番号>`（表示）を agent に送る。終わりに `PAIRED legacy=0|1 key_size=16` と `DONE`、失敗は `ERROR <理由>`（`timeout`・`rejected`・`key-size`・`debug-key`・`no-p256`・`pin-unsupported`・`busy`・`lost`）と `DONE` |
-| `AGENT` | §6 の許す人 | この client を agent にする（同時に 1 つ。`PAIR` を送った client が agent が無い時はその client が agent）。agent は `CONFIRM`・`PASSKEY?` の行を受け、`YES`・`NO`・`PASSKEY <6 桁>` で答える。30 秒で答えが無ければ NO |
-| `FORGET <address> <型>` | §6 の許す人 | 鍵を消す。`DONE` |
-| `BONDS` | 誰でも | `BOND address=… type=… name="…" legacy=…` の行と `DONE` |
-| `SCAN`・`SHOW`・`DEVICES` | p003 のまま（SCAN は §6 の許す人に広げる） | |
+| `PAIR <address> <bredr|le-public|le-random>` | §6 の許す人 | 接続し、pairing し、鍵を保存し、切断する。途中で agent に `CONFIRM <番号>`（Numeric Comparison）・`PASSKEY <番号>`（表示だけ、相手が打つ）を送る。終わりに `PAIRED address=… type=… authenticated=0|1 secure=0|1 legacy=0|1 key_size=16 stored=0|1` と `DONE`、失敗は `ERROR <理由>` と `DONE`。理由: `timeout`・`rejected`（相手か agent が断った）・`key-size`・`debug-key`・`reflection`・`check`（相手の値が合わない）・`no-p256`・`pin-unsupported`・`key-missing`（保存した鍵を相手が持たない、FORGET してからやり直す）・`key-type`・`bonded`（LE で bond 済み、FORGET してから）・`unreachable`・`busy`（pairing か scan の最中）・`lost`・`not-ready`・`encryption`・`protocol` |
+| `AGENT` | §6 の許す人 | この client を agent にする（同時に 1 つ。後の AGENT が前を置き換える）。答えは `AGENT ok` と `DONE`、その後 client は `CONFIRM <番号>`・`PASSKEY <番号>`・`AGENT-END` の行を受け、CONFIRM に `YES`・`NO` で答える。30 秒で答えが無ければ NO |
+| `FORGET <address> <型>` | §6 の許す人 | 鍵を消す。`DONE`（無ければ `ERROR not-bonded` と `DONE`） |
+| `BONDS` | 誰でも | `BOND address=… type=… authenticated=… legacy=… name="…"` の行と `DONE`（鍵そのものは出さない） |
+| `SCAN`・`SHOW`・`DEVICES` | p003 のまま（SCAN は §6 の許す人に広げる） | SHOW の CONTROLLER の行の末尾に `ssp=0|1 sc=0|1` |
 
-相手から始まる pairing（Connection Request・IO Capability Request で、こちらの `PAIR` の無い物）は断る（Reject Connection Request、IO
-Capability Request Negative Reply、design §6.5）。
+- agent が居ない時は PAIR を送った client が agent を兼ねる（`CONFIRM` の行を PAIR の答えの途中に受け、`YES`・`NO` を書く）。agent が居れば
+  そちらへ送る。agent は PAIR を送った人と同じ uid か seat の人だけ（review S6）。違えば PAIR の client が agent を兼ねる。
+- PAIR の client が切れたら pairing をやめる（相手を切断する。review S8）。agent が切れたら答えは NO。
+- **`PASSKEY?`（こちらが passkey を打つ形）は i02 では無い**（review S1）: bluetoothd は DisplayYesNo（agent が居る）か NoInputNoOutput を名乗るので、
+  相手が passkey を表示する組（BR/EDR の User Passkey Request、LE の initiator が打つ側）は起こらない。キーボードの入力ができる agent（Settings の
+  窓、p006）が来た時に KeyboardDisplay と `PASSKEY?` を足す（判断 Q6）。
+- 相手から始まる pairing（Connection Request・IO Capability Request・Link Key Request・User Confirmation Request で、こちらの `PAIR` の
+  無い物）は断る（Reject Connection Request 0x0F、IO Capability Request Negative Reply 0x18、Link Key Request Negative Reply、User Confirmation
+  Request Negative Reply。design §6.5）。
+- client の poll の timeout（review S8）: main の loop は session の queue に packet が残る時は 0、pairing の deadline・agent の 30 秒・scan の
+  終わりの最も早い物まで待つ。
 
-### 6. 権限（D8）
+### 6. 権限（D8。i02 で review S6 を反映）
 
-`getpeereid` の uid が、root、または seat の人（`/dev/gpu0` の持ち主で `_greeter` でない人、volumed と同じ）、または group `wheel` の人。
-`_greeter` は断る（login の画面で pairing を許さない）。他は `ERROR permission`。CLI の `bt pair` は agent が居なければ自分が agent になる
-（端末で `y/n` と passkey を聞く）。
+`getpeereid` の uid が、root、または seat の人（`/dev/gpu0` の持ち主で `_greeter` でない人、volumed と同じ）、または group `wheel` の人
+（`getpwuid` と `getgrouplist` で確かめる。networkd の先例）。`_greeter` は断る（login の画面で pairing を許さない）。他は `ERROR permission`。
+CLI の `bt pair` は agent が居なければ自分が agent になる（端末で `y/n` を聞く）。
 
 ### 7. 暗号（D5 b1、D10、KNOB）
 
 - 相手の鍵の長さは BR/EDR は HCI_Read_Encryption_Key_Size、LE は Pairing Response の Maximum Encryption Key Size。どちらも 16 未満は断る。
-- 仕様の debug の公開鍵（Core Vol 3 Part H §2.3.5.6.1 の X・Y）を相手が送れば断る（0x0B）。BR/EDR は Link Key Notification の key type 3。
-- legacy（LE の SC 無し、BR/EDR の SSP 無しの PIN は i01 で断る）は保存の `legacy=1` と `PAIRED legacy=1` で知らせる（Settings の警告は p006）。
+- 仕様の debug の公開鍵（Core Vol 3 Part H §2.3.5.6.1 の X・Y）を相手が送れば断る（Pairing Failed 0x08 Unspecified Reason、review M1）。
+  controller が返した自分の鍵が debug の鍵（controller が debug mode）の時も断る。相手の鍵の X が自分の鍵の X と同じ（reflection）も断る
+  （review S4）。invalid curve（CVE-2018-5383）は controller の LE Generate DHKey の検査に頼る（残る危険として記録）。
+- BR/EDR は Link Key Notification の key type: 3（debug）は断って切断、0・1・2（legacy の combination・unit）は断る（PIN は i02 も断る）、
+  4・5（P-192）・7・8（P-256）は受け、6（changed combination）は前の type を保つ（前が無ければ断る）。保存は暗号化と鍵の長さの検査の後
+  （review S5）。
+- legacy（LE の SC 無し）は保存の `legacy=1` と `PAIRED legacy=1` で知らせる（Settings の警告は p006）。
 
-### 8. loopback の controller の追加（試験の kernel だけ、QEMU で確かめるため）
+### 8. loopback の controller の追加（試験の kernel だけ、QEMU で確かめるため。i02 で review S13 を反映）
 
 controller の側の SSP（LMP の中）を演じる「相手」を loopback に足す。p002 の ACL の echo は handle 0x001 のまま残す。
 
-- 0x0405 Create Connection（相手 0A:0B:0C:0D:0E:01）: Command Status、Connection Complete（handle 0x0040、encryption off）。
-- 0x0411 Authentication Requested: Command Status、Link Key Request。Link Key Request Negative Reply なら IO Capability Request、
-  Reply（host の IO capability）の後に IO Capability Response（相手は DisplayYesNo）、User Confirmation Request（番号 123456）、Reply なら
-  Simple Pairing Complete（0）・Link Key Notification（固定の鍵、type 5 = authenticated P-192。鍵の type 3 を返す別の address 0A:0B:0C:0D:0E:05 も持つ）・
-  Authentication Complete。Negative Reply なら Simple Pairing Complete（0x05）・Authentication Complete（0x05）。Link Key Request Reply なら
-  Authentication Complete（0）。
-- 0x0413 Set Connection Encryption: Command Status、Encryption Change（on）。0x1408 Read Encryption Key Size: 16（0A:0B:0C:0D:0E:06 だけ 7）。
-- 0x0406 Disconnect: Command Status、Disconnection Complete。
-- ACL（handle 0x0040）: L2CAP の相手（Information Request に Response、Connection Request（PSM 1）に success、Configuration の往復、
-  Disconnection Request に Response）。
-- 0x200D LE Create Connection: Command Status、LE Connection Complete（handle 0x0041、相手 0A:0B:0C:0D:0E:03 public）。LE の SMP の相手は
-  i01 では作らない（kernel に AES-CMAC と固定の P-256 の鍵の組が要る。下の残り）。LE の Pairing Request には Pairing Failed（0x05 Pairing Not
-  Supported）を返し、daemon の失敗の経路を通す。
-- 0x2025 LE Read Local P-256 Public Key・0x2026 LE Generate DHKey: Command Status と固定の値（host の試験は偽の controller で同じ形を
-  演じる。loopback の値は daemon の経路の確かめだけ）。
+- **mask と mode を覚える**: Set Event Mask（0x0C01）・LE Set Event Mask（0x2001）・Write Simple Pairing Mode（0x0C56）を覚え、既定は仕様の
+  既定（mask `FF FF FF FF FF 1F 00 00`、LE `1F 00 …`、SSP off）。mask で落ちる event は出さない（Command Complete・Status、Number Of Completed
+  Packets、vendor は落ちない）。SSP が off なら Link Key Request Negative Reply の後に IO Capability Request ではなく PIN Code Request を出す。
+- 0x0405 Create Connection: Command Status。相手が 0A:0B:0C:0D:0E:01・05・06・07 なら Connection Complete（handle 0x0040、encryption off）、
+  他は Connection Complete（status 0x04 Page Timeout）。
+- 相手の役: 01 は DisplayYesNo（Numeric Comparison、番号 123456、鍵の type 8）、05 は鍵の type 3（debug）、06 は鍵の長さ 7、07 は
+  NoInputNoOutput（Just Works、番号 0、鍵の type 7）。鍵は address から決まる固定の 16 byte。
+- 0x0411 Authentication Requested: Command Status、Link Key Request。Link Key Request Reply（0x040B）は Command Complete の後、鍵が相手の
+  固定の鍵と同じなら Authentication Complete（0）、違えば（0x06 PIN or Key Missing）。Negative Reply（0x040C）は Command Complete の後、
+  SSP on なら IO Capability Request、off なら PIN Code Request。IO Capability Request Reply（0x042B）は Command Complete、IO Capability
+  Response、User Confirmation Request。User Confirmation Request Reply（0x042C）は Command Complete、Simple Pairing Complete（0）、
+  Link Key Notification、Authentication Complete（0）。Negative Reply（0x042D）は Command Complete、Simple Pairing Complete（0x05）、
+  Authentication Complete（0x05）。PIN Code Request Negative Reply（0x040E）は Command Complete、Authentication Complete（0x06）。
+- 0x0413 Set Connection Encryption: Command Status、Encryption Change（on）。0x1408 Read Encryption Key Size: 16（06 だけ 7）。
+- 0x0406 Disconnect: Command Status、Disconnection Complete（reason 0x16）。
+- ACL（handle 0x0040・0x0041）: 受けた packet ごとに Number Of Completed Packets（1）。0x0040 の L2CAP の signalling の Information Request
+  （feature mask）に Information Response（fixed channels の bit）。0x0041 の SMP の Pairing Request に Pairing Failed（0x05 Pairing Not Supported）。
+- 0x200D LE Create Connection: Command Status。相手が 0A:0B:0C:0D:0E:03（public）なら LE Connection Complete（handle 0x0041）、他は
+  答えない（daemon の 10 秒の timeout と LE Create Connection Cancel（0x200E: Command Complete と LE Connection Complete status 0x02）の経路）。
+- 0x2002 LE Read Buffer Size: 長さ 27・数 4（BR/EDR と別の pool、review B5 を QEMU で通す）。
+- 0x2025・0x2026（P-256・DHKey）は loopback では作らない（相手が Pairing Request で断るので呼ばれない。判断 Q3）。
 
 ### 9. 試験
 
 - host（`plan/ws143/tests/bt-daemon-host-test.sh` に足す）: crypto（RFC 4493・FIPS-197・python の値）、acl・l2cap の組み直しと signalling、smp の
   initiator を台本の相手（host の試験の中で crypto.c を使って相手の値を作る。python の値で crypto 自体は別に確かめる）で SC の Just Works・
-  Numeric Comparison・Passkey、legacy の Just Works、鍵の長さ 7 の拒否、debug の鍵の拒否、DHKey の失敗、timeout。pair の BR/EDR の台本
-  （SSP の全部の経路、key type 3、鍵の長さ 7、Link Key Request の保存した鍵）。keys の書き読み・壊れた file・忘れる。fuzz（ACL・L2CAP・SMP・
-  HCI の接続の event、固定の seed）。
-- QEMU（T1）: `plan/ws143/tests/bt-pair-p004.sh`: `_bluetooth` で子が動く（ps）、`bt pair 0A:0B:0C:0D:0E:01 bredr` が agent の `CONFIRM 123456` に
-  `y` で `PAIRED`、`/var/db/bluetooth/...` に 0600 の鍵、2 度目の pair は保存した鍵で（Link Key Request Reply）、debug の鍵の相手は `ERROR debug-key`、
-  鍵の長さ 7 の相手は `ERROR key-size`、`FORGET` で消える、root でない・seat でない人の `PAIR` は `ERROR permission`、LE の pair は
-  `ERROR rejected`（loopback に SMP の相手が無い）、`bt-daemon-p003.sh` の回帰。
-- 実機（i02 以降、p008 の UAT）: 本物の相手との pairing。
+  Numeric Comparison・Passkey、legacy の Just Works、鍵の長さ 7 の拒否、debug の鍵の拒否、reflection、DHKey の失敗、timeout。keys の書き読み・
+  壊れた file・忘れる。fuzz（ACL・L2CAP・SMP・HCI の接続の event、固定の seed）。
+- host（新、`bt-link-host-test.c`）: session の queue（command の待ちの間の event・ACL を積み、後で順に出す。上限の溢れ。review B3 の
+  「Reply の間に次の event」）、初期化の列（mask の値、SSP・SC・LE Host の command、LE Read Buffer Size の 0 と非 0）、ACL の credit（BR/EDR と
+  LE の pool、Number Of Completed Packets、credit が無い間は積む、LE の 27 byte の分割）。pair を偽の controller（BR/EDR の SSP の相手と、
+  LE の SC Just Works の相手を crypto.c で演じる）で: Numeric Comparison の yes・no、Just Works、保存した鍵（Reply と key missing）、key type 3、
+  鍵の長さ 7、PIN Code Request、unreachable、LE の SC Just Works で鍵（LTK・IRK・identity）の保存、LE の timeout と Cancel、相手から始まる
+  pairing の拒否、途中の切断（lost）。
+- QEMU（T1）: `plan/ws143/tests/bt-pair-p004.sh`: `_bluetooth` で子が動く（ps）、`bt pair 0A:0B:0C:0D:0E:01 bredr` が `CONFIRM 123456` に
+  `y` で `PAIRED … authenticated=1`、`/var/db/bluetooth/...` に 0600 の鍵、2 度目の pair は保存した鍵（`stored=1`）、07 は Just Works
+  （`authenticated=0`）、05 は `ERROR debug-key`、06 は `ERROR key-size`、`CONFIRM` に `n` で `ERROR rejected`、知らない address は
+  `ERROR unreachable`、`FORGET` で消える、`bt bonds`、試験の account（wheel でも seat でもない）の `PAIR`・`SCAN` は `ERROR permission`、
+  LE の 03 は `ERROR rejected`（loopback に SMP の相手が無い）、LE の知らない address は `ERROR timeout`、`bt-daemon-p003.sh` の回帰。
+- 実機（i03 以降、p008 の UAT）: 本物の相手との pairing。
+
+### 10. i02 の改訂（review の Blocking と Should の反映）
+
+#### 10.1 session の packet の queue（review B3）
+
+- `session_command`・`session_wait_vendor` は、待ちの間に来た答え以外の packet（event・ACL・kernel の notice の外）を session の中の queue
+  （32 KiB の byte の環、各 packet の前に長さ 2 byte）に積み、その場では処理しない。reset の notice は今までどおり command を ECONNRESET で
+  終える。queue が溢れたら新しい物を捨てて数え（`queue_dropped`、SHOW に出す）、log に出す。
+- `btd_session_input` は queue を先に 1 つ取り出し、空なら node を読む。main の loop は `btd_session_pending()` が真の間 poll の timeout を 0 にする。
+- pair（と scan）への配りは `session_dispatch` だけが行い、それは main の loop の `btd_session_input` からだけ呼ばれる。pair の handler は
+  `session_command` を呼んでよい（待ちの間の packet は queue に積まれ、handler は入れ子に呼ばれない）。
+- p003 の scan の結果も待ちの間は queue に積まれ、後で表に入る（振る舞いは同じ）。
+
+#### 10.2 初期化（review B1・B5・S14）
+
+p003 §2 の列を次にする（7 以降）:
+
+7. Set Event Mask = `BF 80 E0 00 02 C0 2F 24`。bit n は event の code n+1（Core Vol 4 Part E §7.3.1）: Inquiry Complete・Inquiry Result・
+   Connection Complete・Connection Request・Disconnection Complete・Authentication Complete・Encryption Change（bit 0〜5・7）、Hardware Error（15）、
+   PIN Code Request・Link Key Request・Link Key Notification（21〜23）、Inquiry Result with RSSI（33）、Extended Inquiry Result・Encryption Key
+   Refresh Complete（46・47）、IO Capability Request・Response・User Confirmation Request・User Passkey Request・Simple Pairing Complete（48〜51・53）、
+   User Passkey Notification（58）、LE Meta（61）。失敗は `error`。
+8. LE があれば LE Read Buffer Size（0x2002）: 長さと数。長さ 0 は BR/EDR と共有の pool。LE Set Event Mask = `87 01 00 00 00 00 00 00`（bit n は
+   subevent n+1、Core §7.8.1: LE Connection Complete・Advertising Report・Connection Update Complete・Read Local P-256 Public Key Complete・
+   Generate DHKey Complete）。失敗なら `le=0`。
+9. Write Simple Pairing Mode（0x0C56）= 1。失敗は `ssp=0`（BR/EDR の pairing は PIN になり、断られる）を記録して続ける。
+10. Write Secure Connections Host Support（0x0C7A）= 1。失敗は `sc=0` を記録して続ける。
+11. LE があれば Write LE Host Support（0x0C6D）= `01 00`。失敗は記録だけ。
+12. Write Inquiry Mode = 2。
+- 9〜11 は supported commands の bit を見ずに送り、controller の Unknown HCI Command（0x01）などの断りを「無い」と読む（判断 Q9。bit の位置の
+  取り違えを避ける。5330 の実の値は SHOW の記録で i03 に照合）。
+- ACL の pool（review B5）: BR/EDR は Read Buffer Size の長さと数、LE は LE Read Buffer Size（0 なら BR/EDR の pool を共有）。session は送った
+  packet を handle ごとに数え、Number Of Completed Packets（0x13、handle と数の組の並び）で返す。credit が無い時は送らずに session の送りの
+  queue（16 frame）に積み、credit が戻った時に出す。分割は handle の種類の長さ（LE は 27 など）で、最初の packet の PB は BR/EDR が 0x00
+  （non-flushable）、LE も 0x00、続きは 0x01。
+
+#### 10.3 pair.[ch]（接続と pairing の状態機械）
+
+- 同時に 1 つの pairing（`busy`）。scan の最中も `busy`（review S9）。session の handler として connection・pairing の event と ACL を受け、
+  main.c へは callback（agent への問い、終わりの答え）で返す。deadline: 接続 10 秒（BR/EDR は Create Connection Cancel 0x0408、LE は LE Create
+  Connection Cancel 0x200E を送り、Connection Complete を待つ）、pairing 全体 60 秒、SMP の 30 秒（仕様。過ぎたら Pairing Failed を送らずに切断）、
+  agent 30 秒。
+- BR/EDR: 保存した鍵があれば Link Key Request に Reply（`stored=1`）、Authentication Complete が 0x06 なら `key-missing`（鍵は消さない。
+  上書きの攻撃を避け、人が FORGET する。review S11）。無ければ Negative Reply → IO Capability Request Reply（agent が居れば DisplayYesNo・
+  Authentication Requirements 0x03 = MITM と dedicated bonding、居なければ NoInputNoOutput・0x02）→ IO Capability Response で相手の IO を
+  覚える → User Confirmation Request: 両方が DisplayYesNo か KeyboardDisplay なら Numeric Comparison で agent に CONFIRM、他は Just Works で
+  PAIR の要求を同意として受ける（判断 Q7。review S2）→ Link Key Notification を覚える（§7 の key type の規則）→ Authentication Complete →
+  Set Connection Encryption → Encryption Change → Read Encryption Key Size が 16 → 鍵を保存 → L2CAP の Information Request（feature mask、
+  2 秒、答えは log と `l2cap=` だけで失敗にしない。QEMU の L2CAP の引き金。review S10）→ Disconnect → `PAIRED`。
+- LE: bond 済みなら `bonded`（判断 Q8）。controller に P-256・DHKey が無ければ `no-p256`。LE Create Connection（scan 0x60・0x30、interval
+  0x18〜0x28、latency 0、supervision 5 秒、自分は public）→ LE Connection Complete → smp（自分は public の BD_ADDR、相手は address と型、
+  乱数は `arc4random_buf`。review S4）→ smp の action を HCI・ACL へ（SEND は CID 6、READ_KEY は 0x2025 と LE meta 0x08、DHKEY は 0x2026 と
+  0x09、CONFIRM は agent、SHOW は agent の PASSKEY、ENCRYPT は LE Enable Encryption 0x2019 と Encryption Change）→ DONE で鍵を保存（相手が
+  identity address を配れば file の名前はそれ。review S11）→ Disconnect → `PAIRED`。CID 5 の Connection Parameter Update Request は
+  l2cap.c の Accept の後に LE Connection Update（0x2013）を送る（review S9）。
+- 相手からの切断（Disconnection Complete）は途中なら `lost`。
 
 ## 判断の記録
 
 | ID | 判断 | 理由 |
 | --- | --- | --- |
-| Q1 | i01 は b1 だけ。b2 は AX211 が b1 を持たない時に | 自前の P-256 は危険が大きい（design §6.6）。要るかは i02 で分かる |
-| Q2 | BR/EDR の PIN の legacy は i01 で断る | agent の PIN の入力を足す前に、SSP の経路を固める。D10 の「受けて警告」は i02 以降で足す（記録） |
-| Q3 | QEMU の LE の SMP は失敗の経路だけ | loopback に LE の SMP の相手を作るには kernel に AES-CMAC と固定の P-256 の鍵の組が要る。LE の SMP は host の試験（python で照合した crypto と台本の相手）で確かめる |
-| Q4 | **判断待ち**（review B6）。案は「`_bluetooth` が無い install では分離しない（log と `bt show`）」 | 既存の install に account を足す仕組みが base に無い。ただし D17 はユーザーの決定「足す（既存の install の更新を含む）」なので、phase が変えられない。選択肢: (a) 既存の install に account を足す仕組みを作る、(b) 分離できない時は起動を拒む、(c) D17 を改める。Q1 経由でユーザーに聞く |
+| Q1 | i01・i02 は b1 だけ。b2 は AX211 が b1 を持たない時に | 自前の P-256 は危険が大きい（design §6.6）。要るかは 5330 の SHOW（i03）で分かる |
+| Q2 | BR/EDR の PIN の legacy は i02 も断る | agent の PIN の入力（p006 の窓）を足す前に、SSP の経路を固める。D10 の「受けて警告」は p006 以降で足す（記録） |
+| Q3 | QEMU の LE の SMP は失敗の経路だけ（i02 で見直して保つ、review S12） | reviewer の指摘どおり loopback は DHKey を固定で返せ、kernel に AES もある。ただし SC の相手（f4・f5・f6 と鍵の配り）を試験の kernel に書くのは大きく、同じ確かめを host の `bt-link-host-test`（crypto.c で演じる LE の相手と pair.c・session.c の全体）で行う。QEMU の LE の相手は GATT の要る p005 で考える |
+| Q4 | **判断待ち**（review B6）。暫定は「account が無ければ起動を拒む」、扱いは `btd_privsep_no_account()` の 1 か所 | 既存の install に account を足す仕組みが base に無い。D17 はユーザーの決定「足す（既存の install の更新を含む）」。選択肢: (a) 既存の install に account を足す仕組みを作る、(b) 分離できない時は起動を拒む、(c) D17 を改める。Q1 経由でユーザーに聞く |
 | Q5 | PAIR は接続・pairing・切断まで（接続を保たない） | 接続を保つのは HID（p005）の仕事 |
+| Q6 | `PASSKEY?`（こちらが打つ）と KeyboardDisplay は p006 へ（review S1） | DisplayYesNo では起こらない。入力のできる agent（Settings の窓）が来た時に足す |
+| Q7 | BR/EDR・LE の Just Works は PAIR の要求そのものを人の同意とする（review S2） | 人が address を名指して PAIR を送った。数字の無い「同意」の問いは MITM を防がない。相手から始まる pairing は断る（§5） |
+| Q8 | LE の bond 済みの相手への PAIR は `bonded`（BR/EDR は保存した鍵で確かめる） | 黙った上書き（review S11）を避ける。LE の LTK での再暗号化は再接続（p005）の仕事 |
+| Q9 | Write Simple Pairing Mode・SC Host Support・LE Host Support は bit を見ずに送り、断りを「無い」と読む | supported commands の bit の位置の取り違え（p003 の review B1 の類）を避ける。結果は SHOW の `ssp`・`sc` |
 
 ## design-reviewer の結果（2026-10-08、q880-i01）と扱い
 
@@ -163,6 +254,10 @@ controller の側の SSP（LMP の中）を演じる「相手」を loopback に
 | S13 | loopback の再現度 | 次の attempt（§8 に足す） |
 | S14 | 範囲と依存（p003 の i02 待ち、Q1・Q2 で i01 は clear しない） | 記録: p004 は D5 b2・D10 の PIN が残るので i01 では clear しない。p003 の申し送り（resume の load、Write LE Host Support、LE Read Buffer Size、active scan）は B1・B5 と次の attempt で扱う |
 | M1〜M15 | 小さい物 | M1（debug の鍵の拒否の理由: i01 は 0x0B DHKey Check Failed）は次の attempt で 0x08 Unspecified に。M13（鍵の長さ 7〜16 の外は Invalid Parameters）: smp.c は 16 以外を全部 Encryption Key Size（0x06）で断る。7〜16 の外を Invalid Parameters（0x0A）にするのは次。M14（向き）は host 試験の debug の鍵で確かめた。他は次の attempt の設計の改訂で決める |
+
+**i02 の扱い（2026-10-08 朝、q883）**: 設計の改訂として B1・B5・S14 → §10.2、B2・B6 → §4（B6 は Q4 のまま決定待ち）、B3 → §10.1、
+S1 → §5・Q6、S2 → §10.3・Q7、S4 → §7・§10.3、S5 → §7、S6 → §4・§5・§6、S7 → §9（Q1 の決定: 試験の account）、S8 → §5、S9・S10 → §10.3、
+S11 → §10.3・Q8、S12 → Q3、S13 → §8、M1・M13 → §7 と smp.c に入れた。
 
 ## 確認
 
