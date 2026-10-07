@@ -35,6 +35,8 @@
  * pointer setting of before (pointer.*) is only read, to be moved to the
  * mouse's (settings.c).  Files keeps the width of each list column the
  * user dragged (BUG-220), in pixels, 0 for the column's own width.
+ * notes.clean-copy-told (ws177-p011) is 1 once Notes told, after a clean
+ * copy, that the notebook itself keeps what was removed in its history.
  * power.sleep.ac and power.sleep.battery (ws052-p012) are the minutes
  * without input before the machine sleeps, on the power adapter and on
  * battery (0 never); the screen goes out at half that time.
@@ -75,7 +77,8 @@ static const struct kl_settings_key settings_keys[] = {
 	{ "files.column-width.owner", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_INT, 0, 2000, 0, 0U },
 	{ "files.column-width.location", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_INT, 0, 2000, 0, 0U },
 	{ "files.column-width.deleted", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_INT, 0, 2000, 0, 0U },
-	{ "files.open-with.", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_OPENER, 0, 0, 0, KL_SETTINGS_KEY_PREFIX }
+	{ "files.open-with.", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_OPENER, 0, 0, 0, KL_SETTINGS_KEY_PREFIX },
+	{ "notes.clean-copy-told", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_BOOL, 0, 1, 0, 0U }
 };
 
 static int keys_parse(const char *value, long *parsed);
