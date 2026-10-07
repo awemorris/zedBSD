@@ -41,6 +41,8 @@ msg	Restart	再起動
 msg	Shut Down	シャットダウン
 # ../wayland/greeter.c (ws187-p002)
 msg	Swipe up to unlock	上にスワイプしてロックを解除
+# ../wayland/greeter.c (ws187-p003)
+msg	Security Key	セキュリティキー
 # ../wayland/greeter.c:961
 msg	Starting session...	セッションを開始しています...
 # ../wayland/greeter.c:963
