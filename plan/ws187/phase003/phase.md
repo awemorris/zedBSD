@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws187-p003 -->
 # ws187-p003: lock の画面の認証の方式の選択（Password・PIN・Security Key）
 
-Status: in-progress（q864 の続き、P2、2026-10-08: 実装・build まで。QEMU は T1 へ依頼）
+Status: test-wait（T1 への依頼を 2026-10-08 Q1 へ。番号は Q1 が付ける）。in-progress（q864 の続き、P2、2026-10-08: 実装・build まで。QEMU は T1 へ依頼）
 Disposition: normal
 Parent: [WS187](../ws.md)
 Queue: q864（Q1 2026-10-08「続けて p002・p003 も q864 の続きとして承認済み」）

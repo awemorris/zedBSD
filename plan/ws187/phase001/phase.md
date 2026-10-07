@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws187-p001 -->
 # ws187-p001: lock の画面の大きな時計
 
-Status: in-progress（q864、P2、2026-10-08: 実装・build・host 試験まで。QEMU の PNG（縦長・横長）は T1、WS187 の p003 の後にまとめて依頼）
+Status: test-wait（T1 への依頼を 2026-10-08 Q1 へ。番号は Q1 が付ける）。in-progress（q864、P2、2026-10-08: 実装・build・host 試験まで。QEMU の PNG（縦長・横長）は T1、WS187 の p003 の後にまとめて依頼）
 Disposition: normal
 Parent: [WS187](../ws.md)
 Queue: q864（ユーザー 2026-10-08「起動して作業開始してください」、P2）
