@@ -27,6 +27,7 @@ Queue: q877（P1、2026-10-08 Q1 の承認の 2 番、「host で進められる
 - 2 秒後もまだ partner が居ない時（`i915_hpd_tc_link_reset_work`、今は log だけ）、その port の外部 DP が resident の出力として点いていれば、window を出て出力を止める。案: `window.retrain` と同じ形の `window.unplugged` を立て、worker が次の frame で relight なしに window を出る（hold の終わりと同じ停止の道。PHY は出力の disable で link が 0 になり返る）。ただし、その後の present は firmware の出力（その TC）を点け直そうとして失敗し、「presentation fails from here on」になる（present.c の XXX）。Keiland が別の display を claim するまで画面が無い。
   - 選択肢: (a) 上の形で止めるだけ（driver は出力先を変えない、ユーザーの決定 2・3 のとおり）。(b) 止めた後に gop_output を「無し」にし、Keiland の claim を待つ（present は ENXIO）。
   - 推奨は (b)。決定 3（driver は切り替えず、事象を Keiland へ）に沿い、失敗の連鎖を避けられる。実装は present の失敗の道に触れるので、5330 で抜き差しを試せる時に。今回は実装しない。
+  - **決定（2026-10-08 Q1）**: 案 (b) を採用。5330 で抜き差しを試せる時に実装する。
 
 ## 確認
 
