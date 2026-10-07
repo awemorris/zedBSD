@@ -13,11 +13,13 @@
 #include <drivers/usb/usb-storage-bot.h>
 #include <drivers/usb/usb-storage-scsi.h>
 #include <drivers/usb/usb-storage-removal.h>
+#include <drivers/usb/usb-storage-media.h>
 #include <drivers/usb/usb.h>
 #include <uapi/errno.h>
 #include <kern/disk.h>
 #include <uapi/sysctl.h>
 #include <kern/partition.h>
+#include <kern/mount.h>
 #include <kern/io-stats.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
@@ -32,6 +34,9 @@
 #define USB_MASS_STORAGE_BULK_ONLY	0x50U
 #define USB_MASS_STORAGE_RESET		0xffU
 #define USB_MASS_STORAGE_GET_MAX_LUN	0xfeU
+
+/* The highest LUN a Bulk-Only device may report (a 4-bit field of the CBW). */
+#define USB_MASS_STORAGE_LUN_MAX	15U
 
 #define BOT_CBW_SIGNATURE		0x43425355U
 #define BOT_CSW_SIGNATURE		0x53425355U
@@ -105,6 +110,12 @@ struct usb_storage {
 	size_t transfer_size;
 	uint64_t block_count;
 	uint8_t lun;
+	/*
+	 * The highest LUN the device reported at attach (GET MAX LUN), or 0.
+	 * Every probe pass tries LUN 0 up to it and keeps the first with a
+	 * medium in lun; it does not change after attach.
+	 */
+	uint8_t maximum_lun;
 	uint8_t write_protected;
 	uint8_t cache_known;
 	uint8_t write_cache_enabled;
@@ -114,6 +125,10 @@ struct usb_storage {
 	enum storage_media_state media_state;
 	struct drv_usb_scsi_sense last_sense;
 	unsigned media_retired;
+	/*
+	 * Set when a disk is published and its partition table has not been
+	 * read yet; the control worker reads it and clears this (BUG-258).
+	 */
 	unsigned partitions_pending;
 	uint64_t command_deadline;
 	enum drv_usb_scsi_flush_policy flush_policy;
@@ -150,9 +165,11 @@ static int bot_command(struct usb_storage *storage, const void *cdb, size_t cdb_
 static const char *flush_policy_name(enum drv_usb_scsi_flush_policy policy);
 static void scsi_configure_flush_policy(struct usb_storage *storage);
 static int scsi_probe(struct usb_storage *storage, int *medium_absent);
+static int storage_probe_luns(struct usb_storage *storage, int *medium_absent);
 static int storage_submit(struct disk *disk, struct bio *bio);
 static int storage_ioctl(struct disk *disk, unsigned long request, void *argument);
 static int storage_publish_disk(struct usb_storage *storage);
+static int storage_partitions_published(struct usb_storage *storage);
 static int storage_refresh_partitions(struct usb_storage *storage);
 static int storage_control_step(struct usb_storage *storage);
 static void storage_control_worker(void *argument);
@@ -1414,6 +1431,61 @@ scsi_probe(
 	return 0;
 }
 
+/*
+ * Probes the device's LUNs from 0 and keeps the first that holds a medium.
+ *
+ * A card reader puts each slot on its own LUN, so the card is found whatever
+ * slot it is in (BUG-258).  The geometry the probe of that LUN read stays in
+ * the storage, and later commands go to that LUN.
+ */
+static int
+storage_probe_luns(
+	struct usb_storage *storage,
+	int *medium_absent)
+{
+	struct storage_lun_scan scan;
+	unsigned lun;
+	int absent;
+	int error;
+	int stop;
+
+	/* Starts a pass that has seen no LUN yet. */
+	storage_lun_scan_init(&scan);
+
+	/* Probes each LUN in turn, stopping at the first with a medium. */
+	for (lun = 0; lun <= storage->maximum_lun; lun++) {
+		/* Points the probe's commands at this LUN. */
+		storage->lun = (uint8_t)lun;
+
+		/* Reads this LUN's identity, readiness and geometry. */
+		absent = 0;
+		error = scsi_probe(storage, &absent);
+
+		/* Records what the probe found, and whether the pass stops here. */
+		stop = storage_lun_scan_record(&scan, error, absent);
+		if (stop)
+			break;
+	}
+
+	/* Decides between the LUN found, an empty reader and a failure. */
+	error = storage_lun_scan_finish(&scan, medium_absent);
+	if (error != 0) {
+		/* No LUN is in use; the next pass starts from LUN 0 again. */
+		storage->lun = 0;
+		return error;
+	}
+
+	/* Names the LUN in use when the device has more than one. */
+	if (storage->maximum_lun != 0) {
+		kern_logf("usb-storage: LUN %u of %u has a medium\n",
+			   (unsigned)storage->lun,
+			   (unsigned)storage->maximum_lun + 1U);
+	}
+
+	/* Succeeded: storage->lun is the LUN with the medium. */
+	return 0;
+}
+
 /* Serves one block request against this device. */
 static int
 storage_submit(
@@ -1658,12 +1730,77 @@ storage_publish_disk(
 	return 0;
 }
 
+/*
+ * Tells whether partitions of this storage's disk are already published.
+ *
+ * The boot scan of the disks publishes them for a disk that was there when the
+ * kernel booted.  The pool is read without its reload exclusion: only this
+ * disk's own records are compared, and only this storage's control worker
+ * replaces or retires them, so a concurrent change elsewhere in the pool
+ * cannot make the answer wrong for this disk.
+ */
+static int
+storage_partitions_published(
+	struct usb_storage *storage)
+{
+	const struct partition *partition;
+	unsigned index;
+
+	/* Looks for a published record whose parent is this disk. */
+	for (index = 0;; index++) {
+		/* Reads the next published record, if any. */
+		partition = partition_at(index);
+		if (partition == NULL)
+			break;
+
+		/* A child of this disk is already published. */
+		if (partition->p_parent == storage->disk)
+			return 1;
+	}
+
+	/* Succeeded at looking: no partition of this disk is published. */
+	return 0;
+}
+
 /* Publishes replacement partitions outside the recursive command mutex. */
 static int
 storage_refresh_partitions(
 	struct usb_storage *storage)
 {
+	enum storage_partition_step step;
+	struct mount *root;
+	int root_mounted;
+	int published;
 	int error;
+
+	/*
+	 * Asks whether the root is mounted.  The kernel mounts it only after the
+	 * boot scan of the disks, so until then that scan may still read this
+	 * disk and must not be raced (BUG-258).
+	 */
+	root = mount_root_get_ref();
+	root_mounted = 0;
+	if (root != NULL) {
+		root_mounted = 1;
+		mount_release(root);
+	}
+
+	/* Asks whether the boot scan already published this disk's partitions. */
+	published = storage_partitions_published(storage);
+
+	/* Decides between waiting, keeping the published table and reading it. */
+	step = storage_partition_decide(root_mounted, published);
+	if (step == STORAGE_PARTITIONS_WAIT)
+		return 0;
+
+	/*
+	 * A table the boot scan read is in use (the root may be mounted from it):
+	 * nothing is left pending for this disk.
+	 */
+	if (step == STORAGE_PARTITIONS_KEEP) {
+		storage->partitions_pending = 0;
+		return 0;
+	}
 
 	/*
 	 * Retries temporary ownership/allocation failures on a later control
@@ -1779,8 +1916,9 @@ storage_control_step(
 	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+	/* Finds a LUN with a medium again, whatever slot it is now in. */
 	absent = 0;
-	error = scsi_probe(storage, &absent);
+	error = storage_probe_luns(storage, &absent);
 	mutex_lock(&storage->lock);
 	if (error != 0) {
 		storage->media_state =
@@ -1945,20 +2083,45 @@ storage_attach(
 		return error;
 	}
 
-	/* Checks the storage control result. */
-	if (storage_control(storage,
-			    DRV_USB_DIR_IN | DRV_USB_REQUEST_CLASS |
-				    DRV_USB_RECIP_INTERFACE,
-			    USB_MASS_STORAGE_GET_MAX_LUN, 0,
-			    drv_usb_interface_number(interface), &maximum_lun,
-			    1, 1000U, &actual) == 0 &&
-	    actual == 1 && maximum_lun != 0) {
-		kern_logf("usb-storage: only LUN 0 of %u is supported\n",
+	/*
+	 * Asks for the highest LUN.  A card reader has one per slot; a device
+	 * that does not answer (many single-LUN sticks stall the request) has
+	 * only LUN 0.
+	 */
+	error = storage_control(storage,
+				DRV_USB_DIR_IN | DRV_USB_REQUEST_CLASS |
+					DRV_USB_RECIP_INTERFACE,
+				USB_MASS_STORAGE_GET_MAX_LUN,
+				0,
+				drv_usb_interface_number(interface),
+				&maximum_lun,
+				1,
+				1000U,
+				&actual);
+
+	/* Keeps only an answer that a Bulk-Only device can give. */
+	if (error != 0) {
+		/* The request failed: the device has only LUN 0. */
+		maximum_lun = 0;
+	} else if (actual != 1) {
+		/* The answer is not the one byte asked for. */
+		maximum_lun = 0;
+	} else if (maximum_lun > USB_MASS_STORAGE_LUN_MAX) {
+		/* The LUN does not fit the CBW's 4-bit field. */
+		maximum_lun = 0;
+	}
+
+	/* Every probe pass tries LUN 0 up to this one (BUG-258). */
+	storage->maximum_lun = maximum_lun;
+
+	/* Says that the medium is looked for on every LUN. */
+	if (maximum_lun != 0) {
+		kern_logf("usb-storage: %u LUNs; probing each for a medium\n",
 			   (unsigned)maximum_lun + 1U);
 	}
 
-	/* Checks the operation status. */
-	error = scsi_probe(storage, &medium_absent);
+	/* Finds the first LUN with a medium, or learns that every slot is empty. */
+	error = storage_probe_luns(storage, &medium_absent);
 	if (error != 0 && !medium_absent)
 		goto fail;
 
@@ -1977,17 +2140,28 @@ storage_attach(
 		error = storage_publish_disk(storage);
 		if (error != 0)
 			goto fail;
+
+		/*
+		 * The control worker reads the partition table of the disk
+		 * published here, without the command lock held, once the boot
+		 * scan of the disks is over (BUG-258).  Until this, a hot-plugged
+		 * stick with a table never got its partitions.
+		 */
+		storage->partitions_pending = 1;
 	}
 
 	(void)drv_usb_interface_set_driver_data(interface, storage);
 	atomic_raw_store_release(&storage->control_ready, 1U);
 	kernel_notify_task(storage->control_worker->task);
 
-	/* Handles the medium absent condition. */
-	if (medium_absent) {
-		kern_logf("usb-storage: LUN %u has no medium; reader attached "
-			   "without a disk\n",
-			   storage->lun);
+	/* Says that the reader waits for a medium in any of its LUNs. */
+	if (medium_absent && maximum_lun == 0) {
+		kern_logf("usb-storage: LUN 0 has no medium; reader attached "
+			   "without a disk\n");
+	} else if (medium_absent) {
+		kern_logf("usb-storage: LUNs 0-%u have no medium; reader "
+			   "attached without a disk\n",
+			   (unsigned)maximum_lun);
 	}
 
 	/* Succeeded. */
