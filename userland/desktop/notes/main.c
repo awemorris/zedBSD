@@ -361,6 +361,8 @@ struct notes_app {
 	float box_x;
 	float box_y;
 	float box_width;
+	double box_quad[8];
+	int box_height;
 	unsigned box_font;
 	unsigned box_initial_font;
 	float box_size;
@@ -511,6 +513,8 @@ static void app_box_edit(struct notes_app *app, size_t index);
 static void app_box_new(struct notes_app *app, float x, float y, float width);
 static void app_box_start(struct notes_app *app, unsigned shape, const struct kl_rect *rect, const char *text);
 static void app_box_place(struct notes_app *app, const double quad[8], int width, int height, struct kl_rect *rect);
+static void app_box_rect(struct notes_app *app, struct kl_rect *rect);
+static int app_box_follow(struct notes_app *app);
 static void app_box_frame(struct notes_app *app);
 static int app_box_commit(struct notes_app *app);
 static int app_box_try(struct notes_app *app, const struct notes_edit *state, unsigned *result);
@@ -1862,16 +1866,26 @@ app_touch(
 	float x;
 	float y;
 	float scale;
+	int toolbar;
 	int taken;
 
 	/* A writing finger's line. */
 	app_finger(app);
 
-	/* Each tap on the toolbar presses the button under it. */
+	/* Each tap on the toolbar presses the button under it; one on the page outside an open text box closes it, keeping its words (ws177-p012). */
 	for (;;) {
-		taken = notes_touch_take_tap(&app->touch, &x, &y);
+		taken = notes_touch_take_tap(&app->touch, &x, &y, &toolbar);
 		if (!taken)
 			break;
+
+		/* A tap on the page: the box's own taps never come here. */
+		if (!toolbar) {
+			if (app->box.open)
+				(void)app_box_commit(app);
+			continue;
+		}
+
+		/* The toolbar's button. */
 		action = notes_ui_hit(&app->ui, x, y);
 		if (action != NOTES_ACTION_NONE)
 			app_action(app, action);
@@ -2226,6 +2240,7 @@ app_draw(
 	float stretch;
 	int stretched;
 	int page_clear;
+	int moved;
 	int error;
 
 	/* When the frame starts, for the frame times. */
@@ -2355,6 +2370,11 @@ app_draw(
 	/* The chosen object's frame and handles (ws175-p008), then the pen's mark on the page. */
 	app_selection_draw(app, &view);
 	app_mark(app, &view, 0);
+
+	/* The text box moved with the page shown (ws177-p012): its frame drawn again where it is now. */
+	moved = app_box_follow(app);
+	if (moved)
+		app_box_frame(app);
 
 	/* The text box over the page (ws175-p008), on the overlay of the size it was drawn at. */
 	if (app->box.open && app->renderer.overlay != VK_NULL_HANDLE) {
@@ -4131,8 +4151,9 @@ app_box_edit(
 	struct pdf_edit_object object;
 	struct notes_edit state;
 	struct kl_rect rect;
-	double right;
-	int width;
+	const char *text;
+	unsigned shape;
+	size_t length;
 	int error;
 
 	/* The object and its state. */
@@ -4163,29 +4184,38 @@ app_box_edit(
 	app->box_initial_font = app->box_font;
 	app->box_size = 0.0f;
 
-	/* Its width: the object's across, at least the box's least. */
-	right = fmax(fmax(object.quad[0], object.quad[2]), fmax(object.quad[4], object.quad[6]));
-	width = (int)((right - fmin(fmin(object.quad[0], object.quad[2]), fmin(object.quad[4], object.quad[6]))) * (double)app->view.scale) + 24;
-	if (width < MAIN_BOX_WIDTH_MIN)
-		width = MAIN_BOX_WIDTH_MIN;
+	/* Its place, kept in page points: the box follows the object as the page moves. */
+	memcpy(app->box_quad, object.quad, sizeof(app->box_quad));
 
 	/* An inserted text: its words, size and colour, in a box of several lines. */
 	if ((state.flags & NOTES_EDIT_INSERTED) != 0U) {
 		app->box_kind = MAIN_BOX_INSERTED;
 		app->box_size = state.text_size;
 		app->color = app_color_index(state.color);
-		app_box_place(app, object.quad, width, MAIN_BOX_AREA_HEIGHT, &rect);
+		app->box_height = MAIN_BOX_AREA_HEIGHT;
+		app_box_rect(app, &rect);
 		app_box_start(app, NOTES_BOX_AREA, &rect, state.text);
 		return;
 	}
 
 	/* A line of the page's own: its words as the page has them now, in one line. */
 	app->box_kind = MAIN_BOX_LINE;
-	app_box_place(app, object.quad, width, MAIN_BOX_LINE_HEIGHT, &rect);
-	if (object.text == NULL)
-		app_box_start(app, NOTES_BOX_LINE, &rect, "");
-	else
-		app_box_start(app, NOTES_BOX_LINE, &rect, object.text);
+	app->box_height = MAIN_BOX_LINE_HEIGHT;
+	shape = NOTES_BOX_LINE;
+	text = "";
+	if (object.text != NULL)
+		text = object.text;
+
+	/* A line longer than a field holds is edited in a box of several lines, its line ends made spaces when kept (ws177-p012). */
+	length = strlen(text);
+	if (length + 1U >= KL_FIELD_MAX) {
+		app->box_height = MAIN_BOX_AREA_HEIGHT;
+		shape = NOTES_BOX_AREA;
+	}
+
+	/* Opened under the line. */
+	app_box_rect(app, &rect);
+	app_box_start(app, shape, &rect, text);
 }
 
 /*
@@ -4202,7 +4232,6 @@ app_box_new(
 	float width)
 {
 	struct kl_rect rect;
-	int pixels;
 
 	/* What the box edits: new words there. */
 	app->box_kind = MAIN_BOX_NEW;
@@ -4215,22 +4244,9 @@ app_box_new(
 	app->box_initial_font = app->box_font;
 	app->box_size = app->text_size;
 
-	/* The box from the point, as wide as the words wrap (at least the box's least), inside the window. */
-	pixels = (int)(width * app->view.scale);
-	if (pixels < MAIN_BOX_WIDTH_MIN)
-		pixels = MAIN_BOX_WIDTH_MIN;
-	rect.x = (int)(app->view.x + x * app->view.scale);
-	rect.y = (int)(app->view.y + y * app->view.scale);
-	rect.width = pixels;
-	rect.height = MAIN_BOX_AREA_HEIGHT;
-	if (rect.x + rect.width > (int)app->renderer.extent.width - MAIN_BOX_GAP)
-		rect.x = (int)app->renderer.extent.width - MAIN_BOX_GAP - rect.width;
-	if (rect.y + rect.height > (int)app->renderer.extent.height - MAIN_BOX_GAP)
-		rect.y = (int)app->renderer.extent.height - MAIN_BOX_GAP - rect.height;
-	if (rect.x < MAIN_BOX_GAP)
-		rect.x = MAIN_BOX_GAP;
-	if (rect.y < (int)NOTES_TOOLBAR_HEIGHT + MAIN_BOX_GAP)
-		rect.y = (int)NOTES_TOOLBAR_HEIGHT + MAIN_BOX_GAP;
+	/* The box from the point, as wide as the words wrap, inside the window. */
+	app->box_height = MAIN_BOX_AREA_HEIGHT;
+	app_box_rect(app, &rect);
 
 	/* Opened empty. */
 	app_box_start(app, NOTES_BOX_AREA, &rect, "");
@@ -4287,6 +4303,87 @@ app_box_place(
 }
 
 /*
+ * Works out the box's rectangle in the window as the page is shown now:
+ * under (or above) the object edited, as wide as it is across (at least
+ * the box's least), or for new words from their place, as wide as they
+ * wrap; inside the window and below the toolbar.
+ */
+static void
+app_box_rect(
+	struct notes_app *app,
+	struct kl_rect *rect)
+{
+	double left;
+	double right;
+	int pixels;
+
+	/* An object's box: its width the object's across, in the window's pixels now. */
+	if (app->box_kind != MAIN_BOX_NEW) {
+		left = fmin(fmin(app->box_quad[0], app->box_quad[2]), fmin(app->box_quad[4], app->box_quad[6]));
+		right = fmax(fmax(app->box_quad[0], app->box_quad[2]), fmax(app->box_quad[4], app->box_quad[6]));
+		pixels = (int)((right - left) * (double)app->view.scale) + 24;
+		if (pixels < MAIN_BOX_WIDTH_MIN)
+			pixels = MAIN_BOX_WIDTH_MIN;
+		app_box_place(app, app->box_quad, pixels, app->box_height, rect);
+		return;
+	}
+
+	/* New words: from their place, as wide as they wrap. */
+	pixels = (int)(app->box_width * app->view.scale);
+	if (pixels < MAIN_BOX_WIDTH_MIN)
+		pixels = MAIN_BOX_WIDTH_MIN;
+	rect->x = (int)(app->view.x + app->box_x * app->view.scale);
+	rect->y = (int)(app->view.y + app->box_y * app->view.scale);
+	rect->width = pixels;
+	rect->height = app->box_height;
+
+	/* Inside the window, below the toolbar. */
+	if (rect->x + rect->width > (int)app->renderer.extent.width - MAIN_BOX_GAP)
+		rect->x = (int)app->renderer.extent.width - MAIN_BOX_GAP - rect->width;
+	if (rect->y + rect->height > (int)app->renderer.extent.height - MAIN_BOX_GAP)
+		rect->y = (int)app->renderer.extent.height - MAIN_BOX_GAP - rect->height;
+	if (rect->x < MAIN_BOX_GAP)
+		rect->x = MAIN_BOX_GAP;
+	if (rect->y < (int)NOTES_TOOLBAR_HEIGHT + MAIN_BOX_GAP)
+		rect->y = (int)NOTES_TOOLBAR_HEIGHT + MAIN_BOX_GAP;
+}
+
+/*
+ * Moves the open box to where the page shown now puts it (ws177-p012: the
+ * page zoomed or scrolled, by a finger or the keys, or the window sized).
+ * Returns 1 when it moved (its frame is then drawn again), 0 otherwise.
+ */
+static int
+app_box_follow(
+	struct notes_app *app)
+{
+	struct kl_rect rect;
+
+	/* Only an open box. */
+	if (!app->box.open)
+		return 0;
+
+	/* Its place now; the same place is no move. */
+	app_box_rect(app, &rect);
+	if (rect.x == app->box.rect.x &&
+	    rect.y == app->box.rect.y &&
+	    rect.width == app->box.rect.width &&
+	    rect.height == app->box.rect.height)
+		return 0;
+
+	/* The box and the window's fingers take the new place. */
+	app->box.rect = rect;
+	notes_window_box_rect(&app->window, &rect);
+
+	/* The tests' line. */
+	printf("NOTES TEXT box moved rect=%d,%d,%d,%d\n", rect.x, rect.y, rect.width, rect.height);
+	fflush(stdout);
+
+	/* Succeeded: moved. */
+	return 1;
+}
+
+/*
  * Opens the box of a shape in a rectangle with words in it: the window's
  * keys and an input method's text go to it, and it is drawn (logged for
  * the tests).
@@ -4310,8 +4407,9 @@ app_box_start(
 		return;
 	}
 
-	/* The window's input goes to it; the page shows nothing typed yet. */
+	/* The window's input goes to it (a finger down on its rectangle too); the page shows nothing typed yet. */
 	notes_window_box(&app->window, 1);
+	notes_window_box_rect(&app->window, rect);
 	app->box_previewing = 0;
 	app->box_changed = 0;
 	app->box_previewed_at = 0;
@@ -4338,6 +4436,9 @@ app_box_frame(
 {
 	unsigned reported;
 	int error;
+
+	/* The box where the page shown puts it now. */
+	(void)app_box_follow(app);
 
 	/* The frame. */
 	error = notes_box_draw(&app->box, &app->renderer, app->window.kui, app_microseconds());
@@ -4387,6 +4488,7 @@ app_box_commit(
 	uint32_t color;
 	unsigned result;
 	size_t object;
+	size_t index;
 	int unchanged;
 	int same;
 	int error;
@@ -4395,6 +4497,16 @@ app_box_commit(
 	if (!app->box.open)
 		return 1;
 	(void)snprintf(text, sizeof(text), "%s", notes_box_text(&app->box));
+
+	/* A line's words are one line: the line ends a long line's box of several lines took are spaces (ws177-p012). */
+	if (app->box_kind == MAIN_BOX_LINE) {
+		for (index = 0; text[index] != '\0'; index++) {
+			if (text[index] == '\n' || text[index] == '\r')
+				text[index] = ' ';
+		}
+	}
+
+	/* Whether they are the words the box opened with. */
 	same = strcmp(text, notes_box_initial(&app->box));
 	state = app->box_edit;
 	state.text = text;

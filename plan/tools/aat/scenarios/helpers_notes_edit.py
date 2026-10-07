@@ -381,6 +381,53 @@ def pdf_edit_text(item):
 	item.person(f"{kept}; {replaced}; the screenshots: the box under the line, the words on the page as typed, the fonts")
 
 
+@run.define("apps.notes.text-box-follow")
+def text_box_follow(item):
+	folder = prepare(item)
+	notes = Notes(item, folder)
+	notes.press(SELECT, r"NOTES TOOL 16 name=select", "Select")
+
+	# The first line's box.
+	point = notes.at_pdf(LEFT + 60, line_y(0))
+	mark = run.mark()
+	run.click(*point, "--count", "2")
+	opened = run.wait(r"NOTES TEXT box open kind=line page=0 object=\d+ font=original", mark, 10)
+	item.step("double-clicked the first line", opened or "")
+	run.shot(item, "box")
+	item.check(opened, "the first line's box did not open")
+	first = aatlib.number(opened, "object")
+
+	# Full screen: the box moves with the line (ws177-p012).
+	mark = run.mark()
+	run.key("f11")
+	moved = run.wait(r"NOTES TEXT box moved rect=", mark, 10)
+	closed = run.lines(r"NOTES TEXT box close", mark)
+	item.step("F11", f"{moved}; {len(closed)} closes")
+	time.sleep(0.8)
+	run.shot(item, "fullscreen")
+	item.check(moved and not closed, "the box did not move with the line, or it closed")
+
+	# Typed, then Ctrl+S with the box open: the words kept and saved.
+	run.key("end")
+	run.type(" again")
+	time.sleep(0.4)
+	mark = run.mark()
+	run.key("ctrl+s")
+	kept = run.wait(rf"NOTES EDIT text page=0 object={first} kind=line .*font=original", mark, 10)
+	saved = run.wait(r"NOTES SAVE reason=request ", mark, 10)
+	item.step("typed again, Ctrl+S", f"{kept}; {saved}")
+	item.check(kept and saved, "Ctrl+S with the box open did not keep and save the words")
+
+	# Back, closed, and read on the host.
+	run.key("f11")
+	time.sleep(0.8)
+	notes.close()
+	path = fetch(item, notes, "saved.pdf")
+	text = host(item, "pdftotext", "-f", "1", "-l", "1", str(path), "-")
+	item.check("again" in text, "pdftotext does not read the words typed before Ctrl+S")
+	item.person("the screenshots: the box under the first line, before and after full screen")
+
+
 @run.define("apps.notes.pdf-insert-text-font")
 def pdf_insert_text_font(item):
 	folder = prepare(item)

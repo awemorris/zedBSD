@@ -39,6 +39,10 @@
 /* The evdev code of the left button. */
 #define WINDOW_BUTTON_LEFT	0x110U
 
+/* The evdev codes of S and W, the keys of Ctrl+S and Ctrl+W (ws177-p012). */
+#define WINDOW_KEY_S		31U
+#define WINDOW_KEY_W		17U
+
 static void window_take(struct notes_window *window);
 static void window_event(struct notes_window *window, const struct kl_window_event *event);
 static void window_button(struct notes_window *window, const struct kl_window_event *event);
@@ -46,6 +50,8 @@ static void window_key(struct notes_window *window, const struct kl_window_event
 static void window_pointer_event(struct notes_window *window, unsigned kind, const struct kl_window_event *event);
 static void window_touch_push(struct notes_window *window, unsigned type, const struct kl_window_event *event);
 static void window_box_push(struct notes_window *window, const struct kl_window_event *event);
+static int window_box_shortcut(const struct kl_window_event *event);
+static int window_box_touch(struct notes_window *window, const struct kl_window_event *event);
 static uint32_t window_modifiers(unsigned modifiers);
 
 /*
@@ -219,14 +225,25 @@ notes_window_box(
 	if (window->box_open == open)
 		return;
 
-	/* The keys repeat for the box's typing only; the box's queue starts empty. */
+	/* The keys repeat for the box's typing only; the box's queue starts empty, with no finger of its own. */
 	window->box_open = open;
 	window->box_count = 0;
+	window->box_touching = 0;
 	(void)kl_window_set_repeat(window->kui, open);
 
 	/* A closed box takes no input method's text. */
 	if (!open)
 		kl_window_text_input(window->kui, 0);
+}
+
+/* Tells the window where the text box is, for the fingers that go down on it (ws177-p012). */
+void
+notes_window_box_rect(
+	struct notes_window *window,
+	const struct kl_rect *rect)
+{
+	/* The rectangle in the window. */
+	window->box_rect = *rect;
 }
 
 /*
@@ -274,13 +291,25 @@ window_event(
 	struct notes_window *window,
 	const struct kl_window_event *event)
 {
+	int shortcut;
+	int owned;
+
 	/* Every input carries the modifiers held. */
 	window->modifiers = window_modifiers(event->modifiers);
 
-	/* The text box's inputs while it is open: the keys and the text are only its own (ws175-p008). */
+	/*
+	 * The text box's inputs while it is open: the keys and the text are
+	 * only its own (ws175-p008), but Ctrl+S and Ctrl+W, which save and
+	 * close (they arrive only when no System Menu runs them, ws177-p012).
+	 */
 	if (window->box_open) {
+		shortcut = window_box_shortcut(event);
 		switch (event->kind) {
 		case KL_WINDOW_KEY:
+			if (shortcut)
+				break;
+			window_box_push(window, event);
+			return;
 		case KL_WINDOW_TEXT_COMMIT:
 		case KL_WINDOW_TEXT_PREEDIT:
 		case KL_WINDOW_TEXT_DELETE:
@@ -294,6 +323,15 @@ window_event(
 			break;
 		case KL_WINDOW_LEAVE:
 			window_box_push(window, event);
+			break;
+		case KL_WINDOW_TOUCH_DOWN:
+		case KL_WINDOW_TOUCH_MOTION:
+		case KL_WINDOW_TOUCH_UP:
+		case KL_WINDOW_TOUCH_CANCEL:
+			/* A finger on the box is the box's alone (ws177-p012). */
+			owned = window_box_touch(window, event);
+			if (owned)
+				return;
 			break;
 		default:
 			break;
@@ -436,6 +474,81 @@ window_touch_push(
 	kept->y = (float)event->y;
 	kept->time = (uint32_t)(event->time_us / 1000U);
 	kept->arrival = event->arrival_us;
+}
+
+/*
+ * Tells whether a key is one of Notes' shortcuts that pass the open text
+ * box: Ctrl+S (with Shift too) and Ctrl+W, pressed or released.
+ */
+static int
+window_box_shortcut(
+	const struct kl_window_event *event)
+{
+	/* Only keys with Control and without Alt or Super. */
+	if (event->kind != KL_WINDOW_KEY)
+		return 0;
+	if ((event->modifiers & KL_MOD_CTRL) == 0U)
+		return 0;
+	if ((event->modifiers & (KL_MOD_ALT | KL_MOD_SUPER)) != 0U)
+		return 0;
+
+	/* S saves (Shift: as), W closes. */
+	if (event->code == WINDOW_KEY_S)
+		return 1;
+	if (event->code == WINDOW_KEY_W)
+		return 1;
+
+	/* Any other key is the box's. */
+	return 0;
+}
+
+/*
+ * Gives a finger's input to the text box when the finger went down on it
+ * (the finger's later inputs follow it there); a cancel goes to the box
+ * and to the page both.  Returns 1 when the input is the box's alone.
+ */
+static int
+window_box_touch(
+	struct notes_window *window,
+	const struct kl_window_event *event)
+{
+	int inside;
+
+	/* A finger down on the box's rectangle is the box's from now on. */
+	if (event->kind == KL_WINDOW_TOUCH_DOWN) {
+		inside = 0;
+		if (event->x >= (double)window->box_rect.x &&
+		    event->y >= (double)window->box_rect.y &&
+		    event->x < (double)(window->box_rect.x + window->box_rect.width) &&
+		    event->y < (double)(window->box_rect.y + window->box_rect.height))
+			inside = 1;
+		if (!inside || window->box_touching)
+			return 0;
+		window->box_touching = 1;
+		window->box_touch_id = event->id;
+		window_box_push(window, event);
+		return 1;
+	}
+
+	/* A cancel ends the box's finger, and the page's fingers too. */
+	if (event->kind == KL_WINDOW_TOUCH_CANCEL) {
+		if (window->box_touching)
+			window_box_push(window, event);
+		window->box_touching = 0;
+		return 0;
+	}
+
+	/* Another finger's input is the page's. */
+	if (!window->box_touching || event->id != window->box_touch_id)
+		return 0;
+
+	/* The box's finger: lifted, it is no longer followed. */
+	window_box_push(window, event);
+	if (event->kind == KL_WINDOW_TOUCH_UP)
+		window->box_touching = 0;
+
+	/* Succeeded: the box's alone. */
+	return 1;
 }
 
 /* Queues an input for the text box; a full queue drops it. */
