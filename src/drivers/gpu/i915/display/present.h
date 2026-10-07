@@ -55,6 +55,7 @@ int drv_i915_present_display_release(void *device, void *session, const struct g
 
 /* Leaves the window to light the resident output again for two pipes, for a second output's first frame (the worker, IRQ lock held). */
 int drv_i915_present_relight_begin(struct i915_device *device);
+void drv_i915_present_retrain_request(struct i915_display *display);
 
 /* Prepares the display lease once (its mutex and numbering). */
 void drv_i915_present_lease_init(struct i915_display *display);

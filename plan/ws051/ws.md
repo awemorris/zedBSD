@@ -62,7 +62,7 @@ Keiland が決める）。i915 は GOP の出力先以外に自分の判断で s
 | [ws051-p004b](phase004b/phase.md) | display の UAPI での出力（claim・mode・present での link training（fallback、M3）・modeset・scanout、TC PLL・TBT PLL を pool へ、TC の encoder を N1 の registry へ） | planning（2026-10-07 P1: 設計だけ。code は ws113-p011a の merge の後、Q1） | p004a、ws113-p011a（付け替えの口、R1〜R4） | 同上 |
 | [ws051-p004c](phase004c/phase.md) | GOP が USB-C の時の引き継ぎ（M5: 判定を引き継ぐに、host-gop.c の期待値） | in-progress（2026-10-08 P1 q877: 実装・host・build、実機は BUG-256 の後） | p004b | 同上 |
 | [ws051-p005a](phase005a/phase.md) | 抜き差しの検出と事象: HPD の長い pulse → detect（外部 DP の probe）→ `GPU_DISPLAY_EVENT_CHANGE`、2 秒の猶予と 5 回の retry（M4 の前半） | in-progress（2026-10-07 P1: 実装、host PASS、build warning 0。実機は T1 への依頼） | p004a（2026-10-07 Q1 の判断: p004b の依存を外し p005 を a・b に分けた） | hotplug.c・dp-ext |
-| ws051-p005b | scanout 中の抜けの停止、IRQ_HPD の retrain（M4 の後半）、S0ix の口（M10） | planned | p004b、p005a | 同上 |
+| [ws051-p005b](phase005b/phase.md) | scanout 中の抜けの停止、IRQ_HPD の retrain（M4 の後半）、S0ix の口（M10） | in-progress（2026-10-08 P1 q877: retrain を実装・host・build。抜けの停止は案（判断待ち）、S0ix はベータ3） | p004b、p005a | 同上 |
 | ws051-p006 | 規約の全文の確認と最終の確認 | planned | p002、p002b、p003、p004a、p004b、p004c、p005a、p005b | WS の全 source |
 
 ## 2026-10-04 予定（Q1）

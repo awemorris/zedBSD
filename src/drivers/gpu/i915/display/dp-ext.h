@@ -231,6 +231,7 @@ struct i915_dp_ext_sink {
 void drv_i915_dp_ext_forget(struct i915_dp_ext_sink *sink);
 void drv_i915_dp_ext_detect(const struct i915_dp_ext_env *env, const struct i915_dp_ext_source *source, struct i915_dp_ext_sink *sink);
 int drv_i915_dp_ext_short_pulse(const struct i915_dp_ext_env *env, const struct i915_dp_ext_sink *sink);
+int drv_i915_dp_ext_link_needs_retrain(const struct i915_dp_ext_env *env, int lane_count);
 int drv_i915_dp_ext_configure_converter(const struct i915_dp_ext_env *env, const struct i915_dp_ext_sink *sink);
 enum i915_dp_ext_mode_status drv_i915_dp_ext_mode_valid(const struct i915_dp_ext_sink *sink, int clock_khz);
 int drv_i915_dp_ext_fallback_values(const struct i915_dp_ext_sink *sink, int rate, int lanes, int *max_rate, int *max_lanes);

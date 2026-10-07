@@ -866,6 +866,30 @@ drv_i915_present_hold_prepare(
 }
 
 /*
+ * Asks for the resident output to be lit again because its external DP
+ * link must be trained again (ws051-p005b, the Linux
+ * intel_dp_retrain_link()): the worker leaves the window at the next frame
+ * and the window's end lights the output again, its link trained afresh,
+ * its buffers and picture kept.  Runs from the hotplug path.
+ */
+void
+drv_i915_present_retrain_request(
+	struct i915_display *display)
+{
+	struct i915_device *device;
+	unsigned long irq;
+
+	device = display->device;
+
+	/* The request, taken by the worker under the same lock. */
+	irq = spin_lock_irqsave(&device->irq_lock);
+
+	display->window.retrain = 1;
+
+	spin_unlock_irqrestore(&device->irq_lock, irq);
+}
+
+/*
  * Asks for the window to be left and the resident output lit again for
  * two pipes, when a frame of the second output finds the resident output
  * lit for one (ws113-p011, the 2026-10-07 user decision: the first output
@@ -882,6 +906,15 @@ drv_i915_present_relight_begin(
 	int needs;
 
 	display = device->display;
+
+	/* A link that must be trained again (ws051-p005b): the output is lit again, its buffers kept. */
+	if (display->window.retrain) {
+		display->window.retrain = 0;
+		display->window.relight = 1;
+		display->window.keep_buffers = 1;
+		kern_logf("i915: resident display: the window is left to train the link again\n");
+		return 1;
+	}
 
 	/* Only a second output that the run left no room for. */
 	needs = drv_i915_head_needs_relight(device);

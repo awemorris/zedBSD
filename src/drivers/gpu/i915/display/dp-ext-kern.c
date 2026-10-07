@@ -219,6 +219,7 @@ drv_i915_dp_ext_pulse(
 	struct i915_dp_ext_port *p;
 	unsigned tc_port;
 	int handled;
+	int retrain;
 	int index;
 
 	/* Without bound external ports the pulse goes to a detection. */
@@ -258,8 +259,80 @@ drv_i915_dp_ext_pulse(
 	if (!handled)
 		return 0;
 
+	/* A lit link that lost its lock goes to the detection, whose link check trains it again (ws051-p005b). */
+	retrain = drv_i915_dp_ext_link_check(display, port);
+	if (retrain)
+		return 0;
+
 	/* Succeeded: the pulse is handled. */
 	return 1;
+}
+
+/*
+ * Tells whether the resident output's trained link on an external DP port
+ * must be trained again (the Linux intel_dp_needs_link_retrain() for a
+ * link that is trained, ws051-p005b).
+ *
+ * Only the port whose DisplayPort display is the resident output, lit
+ * now, has a trained link; its sink's link status is read with the port
+ * held for the messages (the output's own link keeps the PHY).  Returns 1
+ * when it must be trained again, 0 otherwise.
+ */
+int
+drv_i915_dp_ext_link_check(
+	struct i915_display *display,
+	int port)
+{
+	struct i915_dp_world *world;
+	struct i915_dp_ext_world *ext;
+	struct i915_dp_ext_port *p;
+	int lanes;
+	int needs;
+	int index;
+
+	/* Only the lit resident output's port has a trained link. */
+	if (display->output.none || display->output.kind != I915_OUTPUT_KIND_DP_EXT)
+		return 0;
+	if (display->output.port != port || !display->window.display_up)
+		return 0;
+	lanes = display->output.state.link.lanes;
+
+	/* Without bound external ports the sink cannot be asked. */
+	world = display->dp_world;
+	if (world == NULL)
+		return 0;
+	ext = &world->ext;
+	if (!ext->live)
+		return 0;
+
+	/* Only a declared Type-C port. */
+	index = drv_i915_tc_kern_port_of(port);
+	if (index < 0)
+		return 0;
+	p = &ext->port[index];
+	if (!p->declared)
+		return 0;
+
+	/* Reads the link status with the port held, unless the ports stopped meanwhile. */
+	mutex_lock(&p->lock);
+
+	if (!ext->live) {
+		mutex_unlock(&p->lock);
+		return 0;
+	}
+
+	drv_i915_tc_get_link(ext->tc, (unsigned)index, lanes);
+	needs = drv_i915_dp_ext_link_needs_retrain(&p->env, lanes);
+	drv_i915_tc_put_link(ext->tc, (unsigned)index);
+
+	mutex_unlock(&p->lock);
+
+	/* Logs a link that lost its lock. */
+	if (needs)
+		kern_logf("i915: DP-ext %s: the lit link (x%d) lost its alignment or a lane's lock: it is trained again\n", p->name, lanes);
+
+	/* Succeeded: the answer. */
+	return needs;
 }
 
 /*

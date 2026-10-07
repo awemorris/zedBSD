@@ -46,6 +46,14 @@ int drv_i915_dp_ext_link_fallback(struct i915_display *display, int port, int ra
 void drv_i915_dp_ext_link_reset(struct i915_display *display, int port);
 
 /*
+ * Tells whether the resident output's trained link on an external DP port
+ * must be trained again (ws051-p005b): 1 when the port's DisplayPort
+ * display is the lit resident output and its sink's link status lost
+ * alignment or a lane's lock, 0 otherwise.
+ */
+int drv_i915_dp_ext_link_check(struct i915_display *display, int port);
+
+/*
  * Gives the DPCD access of an external DP port's sink (the Type-C port of
  * a DDI port) for a modeset object of that sink: NULL when the external
  * ports are not bound or the port is not a declared Type-C port.  It

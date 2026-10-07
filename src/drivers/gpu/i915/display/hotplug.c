@@ -107,6 +107,7 @@
 #include "power.h"
 #include "tc-kern.h"
 #include "dp-ext-kern.h"
+#include "present.h"
 #include "../mmio.h"
 #include <kern/kcrt.h>
 
@@ -2032,19 +2033,43 @@ i915_hpd_intel_dp_phy_test(
 }
 
 /*
- * Records the unported DP link retraining; answers success.
+ * Trains a DP link again when it lost its lock (the Linux
+ * intel_dp_retrain_link(), ws051-p005b): the resident output's link on an
+ * external DP port is checked (dp-ext-kern.c), and one that lost its
+ * alignment or a lane's lock is trained again by lighting the output
+ * again from the window (present.c).  Other DP links are not retrained
+ * here (recorded).  Answers success: a link that cannot be checked is left
+ * as it is, as Linux leaves a status it could not read.
  */
 int
 i915_hpd_intel_dp_retrain_link(
 	struct intel_encoder *encoder,
 	struct drm_modeset_acquire_ctx *ctx)
 {
+	struct drm_i915_private *i915;
+	struct i915_hpd_world *world;
+	int tc_port;
+	int needs;
+
 	UNUSED_PARAMETER(ctx);
 
-	/* Names the step. */
-	kern_logf("i915: hpd step intel_dp_retrain_link (unported): %s -> 0\n", encoder->base.name);
+	/* Finds the world and the port's Type-C number. */
+	i915 = i915_hpd_to_i915(encoder->base.dev);
+	world = i915_hpd_world_of(i915);
+	tc_port = drv_i915_tc_kern_port_of((int)encoder->port);
 
-	/* Succeeded: nothing needed retraining. */
+	/* A link off the external DP ports is not retrained here. */
+	if (world->dp_display == NULL || tc_port < 0) {
+		kern_logf("i915: hpd step intel_dp_retrain_link (not an external DP port): %s -> 0\n", encoder->base.name);
+		return 0;
+	}
+
+	/* The lit link's status; one that lost its lock is trained again at the next frame. */
+	needs = drv_i915_dp_ext_link_check(world->dp_display, (int)encoder->port);
+	if (needs)
+		drv_i915_present_retrain_request(world->dp_display);
+
+	/* Succeeded: the link is checked, and trained again when it must be. */
 	return 0;
 }
 
