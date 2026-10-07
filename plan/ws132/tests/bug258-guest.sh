@@ -3,8 +3,9 @@
 # disks and volumes.  Runs on the Venus guest of plan/ws132/tests/config-amd64-p004.mk (started with
 #   plan/tools/files/files-guest.sh start IMAGE), like p004-guest.sh.  No compositor: volumectl speaks to volumed.
 #  1. The host plugs in a 64 MiB stick with an MBR and one FAT32 partition (label PARTSTICK, HELLO.TXT) through
-#     usb-storage: the partition appears as /dev/sdX1 (the control worker read the table after the boot), volumed
-#     lists "VOLUME id=sdX1 ... fs=fat ... label=PARTSTICK", kei mounts it and HELLO.TXT reads "hi".  Pulled out.
+#     usb-storage: the partition appears as /dev/sdX1 (the control worker read the table after the boot), the
+#     reload posts its ADD so volumed logs "VOLUMED ADD id=sdX1" and lists "VOLUME id=sdX1 ... fs=fat ...
+#     label=PARTSTICK", kei mounts it and HELLO.TXT reads "hi".  Pulled out.
 #  2. The host plugs in a usb-bot "card reader" whose LUN 0 is an empty CD drive (not a disk) and whose LUN 1 holds
 #     a FAT card without partitions (label CARDLUN1): the kernel logs "2 LUNs; probing each for a medium" and
 #     "LUN 1 of 2 has a medium", and volumed lists the volume CARDLUN1.  Pulled out.
@@ -58,6 +59,8 @@ expect "the partition is a disk" '^sd[a-z]1$' "$out/list1.txt"
 expect "the partition is a volume" '^VOLUME id=sd[a-z]1 state=available fs=fat .*label=PARTSTICK path=- new=1$' "$out/list1.txt"
 id=$(sed -n 's/^VOLUME id=\([a-z0-9]*\) .*label=PARTSTICK.*/\1/p' "$out/list1.txt" | head -1)
 id=${id:-sdb1}
+guest 'grep VOLUMED /var/log/messages 2>/dev/null | tail -20' > "$out/volumed-log1.txt"
+expect "volumed added the partition (the reload posted its ADD)" '^.*VOLUMED ADD id=sd[a-z]1 fs=fat label=PARTSTICK' "$out/volumed-log1.txt"
 guest "chown kei /dev/gpu0; su kei -c '/bin/volumectl mount $id'; cat /media/PARTSTICK/HELLO.TXT; su kei -c '/bin/volumectl eject $id'; chown root /dev/gpu0" > "$out/mount1.txt"
 expect "kei mounts the partition" '^RESULT 1 0$' "$out/mount1.txt"
 expect "HELLO.TXT reads hi" '^hi$' "$out/mount1.txt"

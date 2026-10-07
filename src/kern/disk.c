@@ -45,6 +45,13 @@
 
 /* The most disks (a device and its partitions) whose going one removal posts (disk_media_gone). */
 #define DISK_GONE_POST_MAX	32U
+
+/*
+ * The most old and the most new partitions whose going and coming one
+ * partition reload posts (disk_reload_replace); any one event makes a
+ * listener look at every disk again, so a longer table loses nothing.
+ */
+#define DISK_RELOAD_POST_MAX	32U
 #define ASYNC_ENDPOINTS		4U
 #define ASYNC_SLOTS		4U
 #define ASYNC_QUEUE_LIMIT	2U
@@ -420,6 +427,11 @@ disk_reload_end(
 
 /*
  * Replaces an idle disk's complete child namespace in one checked commit.
+ *
+ * The system's events hear the old partitions go and the new ones come, so
+ * that a volume daemon sees a table that was read after the disk itself was
+ * published (BUG-258: a hot-plugged stick's partitions, read by its driver's
+ * control worker, otherwise reached no listener).
  */
 int
 disk_reload_replace(
@@ -427,19 +439,81 @@ disk_reload_replace(
 	struct disk **new_disks,
 	unsigned count)
 {
+	struct disk *old_disks[DISK_RELOAD_POST_MAX];
+	struct disk *added_disks[DISK_RELOAD_POST_MAX];
+	struct disk *child;
+	unsigned old_count;
+	unsigned added_count;
+	unsigned index;
 	bool enabled;
 	int error;
 
 	/* Keeps validation and publication under one registry transaction. */
 	enabled = disk_lock();
+
+	/*
+	 * Notes the current partitions before the commit unlinks them.  They are
+	 * not pinned yet: the commit requires each to hold only its own reference.
+	 */
+	old_count = 0;
+	for (child = disk_head;
+	     child != NULL;
+	     child = child->d_next) {
+		/* Only this disk's partitions are replaced. */
+		if (parent == NULL || child->d_parent != parent)
+			continue;
+
+		/* The rest of a longer table is not posted one by one. */
+		if (old_count == DISK_RELOAD_POST_MAX)
+			break;
+
+		old_disks[old_count] = child;
+		old_count++;
+	}
+
+	/* Commits the new partitions. */
 	error = disk_reload_replace_locked(parent, new_disks, count);
+	if (error != 0) {
+		disk_unlock(enabled);
+		return error;
+	}
+
+	/*
+	 * Pins the old and the new partitions until their events are posted.
+	 * The registry lock is still held, so none of them has been destroyed;
+	 * the pins go before this function returns, while the reload still
+	 * owns the disk, so the old ones can then be destroyed.
+	 */
+	for (index = 0; index < old_count; index++)
+		refcount_get(&old_disks[index]->d_refs);
+
+	/* The new partitions, as many as are posted. */
+	added_count = 0;
+	for (index = 0; index < count; index++) {
+		/* The rest of a longer table is not posted one by one. */
+		if (added_count == DISK_RELOAD_POST_MAX)
+			break;
+
+		refcount_get(&new_disks[index]->d_refs);
+		added_disks[added_count] = new_disks[index];
+		added_count++;
+	}
+
 	disk_unlock(enabled);
 
-	/* Reports the unchanged namespace or the completed replacement. */
-	if (error != 0)
-		return error;
+	/* Posts the old partitions' going, outside the registry lock. */
+	for (index = 0; index < old_count; index++) {
+		disk_post_event(old_disks[index], KERN_SYSTEM_EVENT_REMOVE);
+		disk_release(old_disks[index]);
+	}
 
-	/* Succeeded. */
+	/* Posts the new partitions' coming. */
+	for (index = 0; index < added_count; index++) {
+		disk_post_event(added_disks[index], KERN_SYSTEM_EVENT_ADD);
+		disk_release(added_disks[index]);
+	}
+
+	/* Succeeded: the namespace is replaced and its listeners told. */
 	return 0;
 }
 
