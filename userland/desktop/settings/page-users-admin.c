@@ -42,6 +42,15 @@
 #define ADMIN_APPLY		41
 #define ADMIN_CANCEL		42
 
+/*
+ * The most bytes account-admin takes of a name (ADMIN_NAME_MAX), a full
+ * name (admin_display_valid) and a password (ACCOUNT_PASSWORD_MAX), which
+ * the fields are limited to (ws177-p004).
+ */
+#define ADMIN_NAME_LIMIT	32U
+#define ADMIN_FULL_NAME_LIMIT	64U
+#define ADMIN_PASSWORD_LIMIT	256U
+
 /* A field's row, the field's left edge in it, the buttons' row, and the line under them. */
 #define ADMIN_ROW		52
 #define ADMIN_FIELD_X		210
@@ -405,6 +414,16 @@ se_users_admin_wipe(
 	/* Each field (se_field_clear overwrites its text). */
 	for (index = 0; index < SE_ADMIN_FIELDS; index++)
 		se_field_clear(&users->admin_fields[index]);
+
+	/*
+	 * Each field takes no more than account-admin does (ws177-p004): a
+	 * name of 32 bytes, a full name of 64 and passwords of 256, so a text
+	 * it would refuse cannot be typed.
+	 */
+	kl_field_set_limit(&users->admin_fields[SE_ADMIN_NAME], ADMIN_NAME_LIMIT);
+	kl_field_set_limit(&users->admin_fields[SE_ADMIN_FULL_NAME], ADMIN_FULL_NAME_LIMIT);
+	kl_field_set_limit(&users->admin_fields[SE_ADMIN_PASSWORD], ADMIN_PASSWORD_LIMIT);
+	kl_field_set_limit(&users->admin_fields[SE_ADMIN_YOURS], ADMIN_PASSWORD_LIMIT);
 }
 
 /*

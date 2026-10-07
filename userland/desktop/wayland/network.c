@@ -290,7 +290,8 @@ static void network_draw_bars(struct kwl_server *server, VkCommandBuffer command
 static void network_draw_fan(struct kwl_server *server, VkCommandBuffer command, int32_t x, int32_t middle, unsigned lit, const float *ink, float faint);
 static void network_draw_wired(struct kwl_server *server, VkCommandBuffer command, int32_t x, int32_t middle, const float *ink);
 static void network_draw_row(struct kwl_server *server, VkCommandBuffer command, const struct network_row *row, int32_t top, unsigned over);
-static void network_draw_row_in(struct kwl_server *server, VkCommandBuffer command, const struct network_row *row, int32_t top, unsigned over, unsigned *kept);
+static void network_draw_row_in(struct kwl_server *server, VkCommandBuffer command, const struct network_row *row, int32_t top, unsigned over);
+static unsigned network_ink_as_is(struct kwl_server *server, unsigned over);
 static void network_draw_check(struct kwl_server *server, VkCommandBuffer command, int32_t left, int32_t middle, int32_t baseline, const float *ink);
 static void network_draw_disconnect(struct kwl_server *server, VkCommandBuffer command, const struct network_row *row, int32_t top, int on_button);
 static void network_draw_switch(struct kwl_server *server, VkCommandBuffer command, int32_t right, int32_t middle, unsigned on);
@@ -1492,9 +1493,10 @@ network_draw_wired(
 
 /*
  * Draws one row at top: its band when lit, and what the row shows.  A lit
- * row is drawn in the accent's colours as they are (ws179-p001): the dark
- * appearance's mapping is left out from its band on, and comes back after
- * the row.
+ * row's band and the parts in its ink are drawn in the accent's colours as
+ * they are (ws179-p001); since ws177-p004 each of those parts leaves the
+ * dark appearance's mapping on its own, and the other parts of the row
+ * (the switch when off, the key's field) keep it.
  */
 static void
 network_draw_row(
@@ -1504,23 +1506,18 @@ network_draw_row(
 	int32_t top,
 	unsigned over)
 {
-	unsigned kept;
-
-	/* The row, which may draw its band and ink as they are, then the mapping as it was. */
-	kept = server->keep_colours;
-	network_draw_row_in(server, command, row, top, over, &kept);
-	kwl_accent_done(server, kept);
+	/* The row, whose band and ink parts are drawn as they are, each on its own (ws177-p004). */
+	network_draw_row_in(server, command, row, top, over);
 }
 
-/* Draws one row's band and content for network_draw_row (kept is the mapping to come back to). */
+/* Draws one row's band and content for network_draw_row: the band and the parts in its ink as they are while it is lit, the rest mapped. */
 static void
 network_draw_row_in(
 	struct kwl_server *server,
 	VkCommandBuffer command,
 	const struct network_row *row,
 	int32_t top,
-	unsigned over,
-	unsigned *kept)
+	unsigned over)
 {
 	static const float dark[4] = { 0.12f, 0.16f, 0.24f, 1.0f };
 	static const float soft[4] = { 0.40f, 0.46f, 0.56f, 1.0f };
@@ -1543,6 +1540,8 @@ network_draw_row_in(
 	int current;
 	int on_button;
 	unsigned framed;
+	unsigned inked;
+	unsigned banded;
 
 	/* The row's edges, its middle and the text's baseline. */
 	left = network_view.menu_x;
@@ -1570,14 +1569,16 @@ network_draw_row_in(
 	if (over) {
 		kwl_accent_colour(server, server->dark, KWL_ACCENT_FILL, 1.0f, blue);
 		kwl_accent_colour(server, server->dark, KWL_ACCENT_INK, 1.0f, ink);
-		*kept = kwl_accent_as_is(server);
+		banded = kwl_accent_as_is(server);
 		glass_draw_solid(server, command, (float)(left + 5), (float)(top + 1), (float)(NETWORK_MENU_WIDTH - 10), (float)(row->height - 2), 6.0f, blue);
+		kwl_accent_done(server, banded);
 	}
 
-	/* The switch's row: its label, then the switch at the right in the popup's colours. */
+	/* The switch's row: its label (in the lit row's ink as it is), then the switch at the right in the popup's colours. */
 	if (row->kind == NETWORK_ROW_SWITCH) {
+		inked = network_ink_as_is(server, over);
 		glass_draw_text(server, command, SIZE_TITLE, left + 14, baseline + 1, row->text, 160, ink);
-		kwl_accent_done(server, *kept);
+		kwl_accent_done(server, inked);
 		network_draw_switch(server, command, right, middle, network_switch_on());
 		return;
 	}
@@ -1621,20 +1622,26 @@ network_draw_row_in(
 		if (joining) {
 			connecting = kl_tr("Connecting...");
 			width = glass_text_width(server, SIZE_BAR, connecting);
+			inked = network_ink_as_is(server, over);
 			glass_draw_text(server, command, SIZE_BAR, left + 32, baseline, row->text, NETWORK_MENU_WIDTH - 32 - 24 - width, ink);
+			kwl_accent_done(server, inked);
 			if (over) {
+				inked = network_ink_as_is(server, over);
 				glass_draw_text(server, command, SIZE_BAR, right - width, baseline, connecting, width + 2, ink);
+				kwl_accent_done(server, inked);
 			} else {
 				glass_draw_text(server, command, SIZE_BAR, right - width, baseline, connecting, width + 2, soft);
 			}
 			return;
 		}
 
-		/* The SSID, the padlock of a network that asks for a key, and the signal. */
+		/* The SSID, the padlock of a network that asks for a key, and the signal, all in the row's ink. */
+		inked = network_ink_as_is(server, over);
 		glass_draw_text(server, command, SIZE_BAR, left + 32, baseline, row->text, NETWORK_MENU_WIDTH - 32 - 64, ink);
 		if (ap->secured)
 			network_draw_lock(server, command, right - 42, middle, ink);
 		network_draw_bars(server, command, right - 18, middle + 7, network_strength(ap->rssi), ink, 0.25f);
+		kwl_accent_done(server, inked);
 		return;
 	}
 
@@ -1655,8 +1662,32 @@ network_draw_row_in(
 		return;
 	}
 
-	/* The wired line and disconnect are plain text. */
+	/* The wired line and disconnect are plain text, in the row's ink. */
+	inked = network_ink_as_is(server, over);
 	glass_draw_text(server, command, SIZE_BAR, left + 14, baseline, row->text, NETWORK_MENU_WIDTH - 28, ink);
+	kwl_accent_done(server, inked);
+}
+
+/*
+ * Starts drawing a part of a row in the row's ink: as it is while the row
+ * is lit (the accent's ink on its band, ws179-p001), else in the
+ * appearance's mapping as every other part.  Returns what kwl_accent_done
+ * restores.
+ */
+static unsigned
+network_ink_as_is(
+	struct kwl_server *server,
+	unsigned over)
+{
+	unsigned kept;
+
+	/* An unlit row keeps the mapping. */
+	if (!over)
+		return server->keep_colours;
+
+	/* Succeeded: the lit row's ink as it is. */
+	kept = kwl_accent_as_is(server);
+	return kept;
 }
 
 /* Draws the Wi-Fi's switch ending at right: a pill, blue when on, with its knob. */

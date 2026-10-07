@@ -59,6 +59,9 @@
 #define LOOK_SWATCH		26
 #define LOOK_SWATCH_GAP		14
 
+/* How far out of a swatch the keyboard's ring is (the chosen ring is 4 out; LOOK_SWATCH_GAP leaves room). */
+#define LOOK_FOCUS_RING		7.0f
+
 /* The frosted glass's row in the card of the windows (BUG-214). */
 #define LOOK_FROSTED_HEIGHT	80
 #define LOOK_SWITCH_WIDTH	44
@@ -282,6 +285,78 @@ se_look_press(
 	/* A picture's tile. */
 	if (index >= LOOK_PICTURE_FIRST)
 		se_look_set_wallpaper(app, index - LOOK_PICTURE_FIRST);
+}
+
+/*
+ * Takes a key on the Appearance page (ws177-p004): Tab gives the keyboard
+ * to the accent's swatches (the chosen one first) and takes it back, Left
+ * and Right move it along them, Space and Enter choose the one that has
+ * it, Esc takes it back.  Returns 1 when the key was the page's.
+ */
+int
+se_look_key(
+	struct se_app *app,
+	const struct se_event *event)
+{
+	int focus;
+
+	/* Settings that cannot be changed have no swatch to choose. */
+	if (!app->look.writable)
+		return 0;
+
+	/* Tab: into the swatches at the chosen one, or out of them. */
+	if (event->key == SE_KEY_TAB) {
+		if (app->look.accent_focus == 0) {
+			focus = app->look.accent;
+			if (focus < 0 || focus >= (int)KL_ACCENTS)
+				focus = 0;
+			app->look.accent_focus = focus + 1;
+		} else {
+			app->look.accent_focus = 0;
+		}
+
+		/* Logged for the tests (-1: none has it). */
+		se_log("ACCENT focus=%d", app->look.accent_focus - 1);
+		return 1;
+	}
+
+	/* The other keys are the swatches' only while one has the keyboard. */
+	if (app->look.accent_focus == 0)
+		return 0;
+	focus = app->look.accent_focus - 1;
+
+	/* Each key the swatches take. */
+	switch (event->key) {
+	case SE_KEY_LEFT:
+		/* The one before, the first staying. */
+		if (focus > 0)
+			focus--;
+		app->look.accent_focus = focus + 1;
+		se_log("ACCENT focus=%d", focus);
+		return 1;
+	case SE_KEY_RIGHT:
+		/* The one after, the last staying. */
+		if (focus + 1 < (int)KL_ACCENTS)
+			focus++;
+		app->look.accent_focus = focus + 1;
+		se_log("ACCENT focus=%d", focus);
+		return 1;
+	case SE_KEY_SPACE:
+	case SE_KEY_ENTER:
+		/* Chosen, as a click chooses it. */
+		se_look_press(app, LOOK_ACCENT_FIRST + focus);
+		return 1;
+	case SE_KEY_ESC:
+		/* The keyboard back to the page. */
+		app->look.accent_focus = 0;
+		se_log("ACCENT focus=-1");
+		return 1;
+	default:
+		break;
+	}
+
+	/* Succeeded: another key is not the swatches'. */
+	return 0;
 }
 
 /*
@@ -526,12 +601,22 @@ look_accents(
 	if (app->look.dark)
 		appearance = KL_APPEARANCE_DARK;
 
-	/* Each swatch on one row under the title: its disc, a ring and its ink's dot when chosen, and its click. */
+	/*
+	 * Each swatch on one row under the title: the keyboard's ring in the
+	 * accent round the one that has it (ws177-p004), its disc, a ring and
+	 * its ink's dot when chosen, and its click.
+	 */
 	radius = (float)LOOK_SWATCH * 0.5f;
 	cy = (float)(y + 32) + radius;
 	for (index = 0; index < KL_ACCENTS; index++) {
 		cx = (float)(x + LOOK_PAD + 2) + radius + (float)(index * (LOOK_SWATCH + LOOK_SWATCH_GAP));
 		kl_accent_values(index, appearance, &values);
+		if ((int)index + 1 == app->look.accent_focus) {
+			kl_canvas_circle(canvas, cx, cy, radius + LOOK_FOCUS_RING, SE_COLOR_ACCENT);
+			kl_canvas_circle(canvas, cx, cy, radius + LOOK_FOCUS_RING - 2.0f, SE_COLOR_CARD);
+		}
+
+		/* The chosen one's ring. */
 		if ((int)index == chosen) {
 			kl_canvas_circle(canvas, cx, cy, radius + 4.0f, SE_COLOR_TEXT_SECONDARY);
 			kl_canvas_circle(canvas, cx, cy, radius + 2.0f, SE_COLOR_CARD);
