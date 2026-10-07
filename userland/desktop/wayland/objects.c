@@ -32,6 +32,17 @@
 #include <string.h>
 
 /*
+ * When a gone client's buffer may be released (BUG-239, T1-392): one
+ * release (a Venus round trip, up to a second in QEMU) holds the event
+ * loop, so it waits until the user has not touched anything for
+ * RETIRE_INPUT_QUIET_MS and nothing is to be drawn; a list that waited
+ * RETIRE_STARVE_MS since its last release goes on anyway, so a screen that
+ * never stops drawing still drains it.
+ */
+#define RETIRE_INPUT_QUIET_MS	200U
+#define RETIRE_STARVE_MS	1000U
+
+/*
  * Where a client's teardown spends its time among its objects (BUG-239):
  * the microseconds in the Vulkan release of the imports and in the
  * backend's release of the buffers' descriptors, and how many imports
@@ -633,6 +644,8 @@ kwl_retire_tick(
 	struct kwl_server *server)
 {
 	struct kwl_object *object;
+	uint64_t started;
+	uint64_t ended;
 
 	/* Nothing waits. */
 	object = server->retiring;
@@ -648,8 +661,16 @@ kwl_retire_tick(
 	/* Its release, timed. */
 	cleanup_import_us = 0U;
 	cleanup_backend_us = 0U;
+	started = kwl_milliseconds();
 	object_release(server, object);
+	ended = kwl_milliseconds();
 	server->retire_released++;
+
+	/* The next release leaves as long as this one took to the frames and the input. */
+	server->retire_last_ms = ended;
+	server->retire_next_ms = ended + (ended - started);
+
+	/* A slow one is logged with where its time went. */
 	if (cleanup_import_us + cleanup_backend_us >= 100000U)
 		printf("KWL RETIRE slow import_us=%llu backend_us=%llu\n", (unsigned long long)cleanup_import_us, (unsigned long long)cleanup_backend_us);
 
@@ -661,6 +682,52 @@ kwl_retire_tick(
 	printf("KWL RETIRE drained released=%u ms=%llu\n", server->retire_released, (unsigned long long)(kwl_milliseconds() - server->retire_started_ms));
 	server->retire_started_ms = 0U;
 	return 0;
+}
+
+/*
+ * Tells whether a gone client's buffer may be released in this pass of the
+ * event loop (BUG-239, T1-392): one waits, no frame is in flight (a
+ * release then would delay its completion, and under Venus wait behind
+ * it), the last release's own time has passed, and either the user has
+ * been still for RETIRE_INPUT_QUIET_MS with nothing to draw, or the list
+ * has waited RETIRE_STARVE_MS since its last release.
+ */
+int
+kwl_retire_ready(
+	struct kwl_server *server,
+	uint64_t now)
+{
+	uint64_t since;
+
+	/* Nothing waits. */
+	if (server->retiring == NULL)
+		return 0;
+
+	/* A frame in flight finishes first. */
+	if (server->compose != NULL && server->compose->in_flight)
+		return 0;
+
+	/* The last release's time goes to the frames and the input. */
+	if (now < server->retire_next_ms)
+		return 0;
+
+	/* A list kept waiting too long goes on, whatever the input and the drawing. */
+	since = server->retire_last_ms;
+	if (since == 0U)
+		since = server->retire_started_ms;
+	if (now >= since + RETIRE_STARVE_MS)
+		return 1;
+
+	/* The user touched something a moment ago: the input comes first. */
+	if (now < server->lock_input_ms + RETIRE_INPUT_QUIET_MS)
+		return 0;
+
+	/* Something is to be drawn: the frame comes first. */
+	if (server->dirty != 0U)
+		return 0;
+
+	/* Succeeded: the compositor is idle. */
+	return 1;
 }
 
 /* Releases every buffer still waiting in the retiring list (before the Vulkan device goes). */
@@ -773,6 +840,8 @@ object_retire(
 		server->retiring = object;
 		server->retire_started_ms = kwl_milliseconds();
 		server->retire_released = 0U;
+		server->retire_last_ms = 0U;
+		server->retire_next_ms = 0U;
 	}
 
 	/* The new end, counted. */

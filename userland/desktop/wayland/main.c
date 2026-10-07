@@ -734,6 +734,7 @@ event_loop(
 	size_t os_count;
 	unsigned fence;
 	int waiting;
+	int retire_ready;
 	unsigned slot;
 	uint64_t mark;
 	int timeout;
@@ -852,8 +853,9 @@ event_loop(
 		if (waiting)
 			timeout = 2;
 
-		/* Gone clients' buffers waiting to be released: the input is looked at, then one more is released (BUG-239). */
-		if (server->retiring != NULL)
+		/* A gone client's buffer that may be released now: the input is looked at, then it is released (BUG-239). */
+		retire_ready = kwl_retire_ready(server, kwl_milliseconds());
+		if (retire_ready)
 			timeout = 0;
 		index = 1;
 		for (client = server->clients; client != NULL; client = client->next) {
@@ -1026,8 +1028,14 @@ event_loop(
 		/* The scheduler takes the committed images and draws a frame when one is due. */
 		kwl_schedule(server);
 
-		/* One gone client's buffer released after the frame, so that the input waits for one release at most (BUG-239). */
-		(void)kwl_retire_tick(server);
+		/*
+		 * One gone client's buffer released after the frame, only while the
+		 * compositor is idle, so that neither a frame nor the input waits
+		 * for a release (BUG-239, T1-392).
+		 */
+		retire_ready = kwl_retire_ready(server, kwl_milliseconds());
+		if (retire_ready)
+			(void)kwl_retire_tick(server);
 
 		/*
 		 * The presentation queued frame callbacks and buffer releases; they

@@ -784,12 +784,19 @@ def release_clients(item):
 	drain_elapsed = time.time() - began
 	for line in run.lines(r"KWL RETIRE slow ", killed):
 		item.step("slow release", line)
+	frame_ms = []
 	for line in run.lines(r"KWL PERF ", killed):
 		item.step("perf", line)
-	item.step("all released", f"{len(done)} in {elapsed:.1f} s; buffers: {drained} after {drain_elapsed:.1f} s")
+		found = re.search(r"frame_ms=([0-9.]+)", line)
+		if found:
+			frame_ms.append(float(found.group(1)))
+	# The releases wait for an idle compositor (BUG-239, T1-392 saw 510 to 604 ms frames while they ran).
+	worst = max(frame_ms) if frame_ms else 0.0
+	item.step("all released", f"{len(done)} in {elapsed:.1f} s; buffers: {drained} after {drain_elapsed:.1f} s; frame_ms at most {worst:.1f} over {len(frame_ms)} PERF windows")
 	item.check(len(done) == 20, f"only {len(done)} clients were released in 60 s")
 	item.check(elapsed <= 10.0, f"the release took {elapsed:.1f} s (target 10 s)")
 	item.check(drained, "the gone clients' buffers were not all released in 120 s")
+	item.check(worst <= 100.0, f"a frame took {worst:.1f} ms on average in a PERF window while the buffers were released (target 100 ms)")
 	item.passed()
 
 

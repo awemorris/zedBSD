@@ -1509,6 +1509,14 @@ struct kwl_server {
 	unsigned retiring_count;
 	uint64_t retire_started_ms;
 	unsigned retire_released;
+
+	/*
+	 * When the last release ended (0: none since the list began), and the
+	 * earliest time the next may start: a release that took C ms leaves
+	 * the next C ms to the frames and the input (BUG-239, T1-392).
+	 */
+	uint64_t retire_last_ms;
+	uint64_t retire_next_ms;
 };
 
 uint64_t kwl_milliseconds(void);
@@ -1631,6 +1639,7 @@ VkResult kwl_import_adopt(struct kwl_object *buffer, VkImage image, VkDeviceMemo
 void kwl_import_destroy(struct kwl_object *buffer);
 void kwl_import_destroy_with(struct kwl_compose *compose, struct kwl_object *buffer);
 int kwl_retire_tick(struct kwl_server *server);
+int kwl_retire_ready(struct kwl_server *server, uint64_t now);
 void kwl_retire_flush(struct kwl_server *server);
 void kwl_import_set_alpha(struct kwl_object *buffer, uint32_t alpha);
 int kwl_shm_upload(struct kwl_server *server);
