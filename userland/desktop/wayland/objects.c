@@ -42,7 +42,16 @@ static uint64_t cleanup_import_us;
 static uint64_t cleanup_backend_us;
 static unsigned cleanup_imports;
 
+/*
+ * The server whose gone client kwl_client_destroy is taking apart, NULL
+ * otherwise: while it is set, object_free queues a buffer with an import
+ * on the server's retiring list instead of releasing it at once (BUG-239).
+ */
+static struct kwl_server *cleanup_retire_server;
+
 static void object_free(struct kwl_object *object);
+static void object_release(struct kwl_server *server, struct kwl_object *object);
+static void object_retire(struct kwl_server *server, struct kwl_object *object);
 
 /*
  * Finds a live identity only within its originating client namespace.
@@ -501,6 +510,7 @@ kwl_client_destroy(
 	cleanup_import_us = 0U;
 	cleanup_backend_us = 0U;
 	cleanup_imports = 0U;
+	cleanup_retire_server = server;
 	kwl_compose_quiesce(server);
 	quiesced = kwl_milliseconds();
 
@@ -568,9 +578,10 @@ kwl_client_destroy(
 			kwl_object_destroy(object);
 	}
 
-	/* Every object is gone. */
+	/* Every object is gone (its imported buffers wait in the retiring list). */
 	objects_done = kwl_milliseconds();
 	number = (unsigned long long)client->number;
+	cleanup_retire_server = NULL;
 
 	/* Rights never consumed by a valid request still belong to this connection. */
 	for (index = 0; index < client->right_count; index++)
@@ -597,7 +608,7 @@ kwl_client_destroy(
 	free(client);
 
 	/* Where the time went (BUG-239: 20 clients took 23 s to release in QEMU). */
-	printf("KWL CLEANUP done client=%llu ms=%llu quiesce=%llu surfaces=%llu shell=%llu objects=%llu imports=%u import_us=%llu backend_us=%llu\n",
+	printf("KWL CLEANUP done client=%llu ms=%llu quiesce=%llu surfaces=%llu shell=%llu objects=%llu queued=%u import_us=%llu backend_us=%llu\n",
 	       number,
 	       (unsigned long long)(kwl_milliseconds() - started),
 	       (unsigned long long)(quiesced - started),
@@ -612,22 +623,112 @@ kwl_client_destroy(
 	return;
 }
 
-/* Releases an unborrowed object and its Vulkan import, then withdraws list ownership. */
+/*
+ * Releases the oldest gone client's buffer waiting in the retiring list
+ * (one each pass of the event loop, after its frame, BUG-239).  Returns
+ * nonzero while more wait.
+ */
+int
+kwl_retire_tick(
+	struct kwl_server *server)
+{
+	struct kwl_object *object;
+
+	/* Nothing waits. */
+	object = server->retiring;
+	if (object == NULL)
+		return 0;
+
+	/* The oldest leaves the list. */
+	server->retiring = object->retire_next;
+	if (server->retiring == NULL)
+		server->retiring_tail = NULL;
+	server->retiring_count--;
+
+	/* Its release, timed. */
+	cleanup_import_us = 0U;
+	cleanup_backend_us = 0U;
+	object_release(server, object);
+	server->retire_released++;
+	if (cleanup_import_us + cleanup_backend_us >= 100000U)
+		printf("KWL RETIRE slow import_us=%llu backend_us=%llu\n", (unsigned long long)cleanup_import_us, (unsigned long long)cleanup_backend_us);
+
+	/* More wait. */
+	if (server->retiring != NULL)
+		return 1;
+
+	/* The list emptied: how many and how long since the first was queued. */
+	printf("KWL RETIRE drained released=%u ms=%llu\n", server->retire_released, (unsigned long long)(kwl_milliseconds() - server->retire_started_ms));
+	server->retire_started_ms = 0U;
+	return 0;
+}
+
+/* Releases every buffer still waiting in the retiring list (before the Vulkan device goes). */
+void
+kwl_retire_flush(
+	struct kwl_server *server)
+{
+	int more;
+
+	/* Each in turn until the list is empty. */
+	more = kwl_retire_tick(server);
+	while (more)
+		more = kwl_retire_tick(server);
+}
+
+/*
+ * Withdraws an unborrowed object from its client's list and releases it
+ * with its Vulkan import; a gone client's buffer with an import waits in
+ * the server's retiring list instead (BUG-239).
+ */
 static void
 object_free(
 	struct kwl_object *object)
 {
 	struct kwl_object **link;
 	struct kwl_client *client;
+	struct kwl_server *server;
+
+	/* Retired IDs can coexist with a newly created object of the same numeric ID. */
+	client = object->client;
+	server = client->server;
+	link = &client->objects;
+	while (*link != NULL && *link != object)
+		link = &(*link)->next;
+
+	/* Every object contributes to the connection's resource bound until it leaves the list. */
+	if (*link == object) {
+		*link = object->next;
+		client->object_count--;
+	}
+
+	/* A gone client's imported buffer is released later, a little at a time. */
+	if (cleanup_retire_server != NULL && object->import != NULL) {
+		cleanup_imports++;
+		object_retire(server, object);
+		return;
+	}
+
+	/* Succeeded: released now. */
+	object_release(server, object);
+}
+
+/*
+ * Releases an object out of every list: its Vulkan import, then its OS
+ * buffer descriptors, then its share of a pool, then the wrapper (timed
+ * for the cleanup's log, BUG-239).
+ */
+static void
+object_release(
+	struct kwl_server *server,
+	struct kwl_object *object)
+{
 	uint64_t before;
 	uint64_t between;
 
-	/* Window mode's Vulkan image goes with the buffer; a wl_shm buffer or pool drops its pool's memory (timed, BUG-239). */
-	client = object->client;
+	/* Window mode's Vulkan image goes with the buffer. */
 	before = kwl_microseconds();
-	if (object->import != NULL)
-		cleanup_imports++;
-	kwl_import_destroy(object);
+	kwl_import_destroy_with(server->compose, object);
 	between = kwl_microseconds();
 	cleanup_import_us += between - before;
 
@@ -648,20 +749,34 @@ object_free(
 		object->pool = NULL;
 	}
 
-	/* Retired IDs can coexist with a newly created object of the same numeric ID. */
-	link = &client->objects;
-	while (*link != NULL && *link != object)
-		link = &(*link)->next;
-
-	/* Every object contributes to the connection's resource bound until final free. */
-	if (*link == object) {
-		*link = object->next;
-		client->object_count--;
-	}
-
 	/* No remaining owner may refer to this wrapper. */
 	free(object);
-
-	/* Succeeded: the wrapper and its independent import ownership are retired. */
-	return;
 }
+
+/*
+ * Queues a gone client's buffer at the end of the server's retiring list;
+ * it no longer belongs to the client, whose record goes now.
+ */
+static void
+object_retire(
+	struct kwl_server *server,
+	struct kwl_object *object)
+{
+	/* No client: the release goes through the server. */
+	object->client = NULL;
+	object->retire_next = NULL;
+
+	/* At the end, oldest first. */
+	if (server->retiring_tail != NULL) {
+		server->retiring_tail->retire_next = object;
+	} else {
+		server->retiring = object;
+		server->retire_started_ms = kwl_milliseconds();
+		server->retire_released = 0U;
+	}
+
+	/* The new end, counted. */
+	server->retiring_tail = object;
+	server->retiring_count++;
+}
+

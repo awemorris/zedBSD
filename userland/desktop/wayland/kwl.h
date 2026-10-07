@@ -391,6 +391,8 @@ struct kwl_object {
 	struct kwl_import *import;
 	/* The OS module retains buffer descriptors or protocol params until final object retirement. */
 	void *gpu_private;
+	/* A gone client's buffer waiting in the server's retiring list (objects.c, BUG-239): the next one. */
+	struct kwl_object *retire_next;
 	/* A surface's window: place, stacking (map order, lowest at the bottom), virtual desktop and fullscreen state. */
 	unsigned mapped;
 	uint64_t map_order;
@@ -1492,6 +1494,21 @@ struct kwl_server {
 	 * kwl_ime_start makes it.
 	 */
 	struct kwl_ime *ime;
+
+	/*
+	 * The buffers of clients that are gone, waiting to release their
+	 * Vulkan images and their OS descriptors (objects.c, BUG-239): a list
+	 * through retire_next, oldest first, one released each pass of the
+	 * event loop after its frame, so that the releases (each a round trip
+	 * to the GPU's host under Venus) do not hold the input up.  When the
+	 * first one was queued (0: none waits) and how many have been released
+	 * since, for the log when the list empties.
+	 */
+	struct kwl_object *retiring;
+	struct kwl_object *retiring_tail;
+	unsigned retiring_count;
+	uint64_t retire_started_ms;
+	unsigned retire_released;
 };
 
 uint64_t kwl_milliseconds(void);
@@ -1612,6 +1629,9 @@ void kwl_compose_quiesce(struct kwl_server *server);
 void kwl_compose_close(struct kwl_server *server);
 VkResult kwl_import_adopt(struct kwl_object *buffer, VkImage image, VkDeviceMemory memory, uint32_t width, uint32_t height, VkFormat format);
 void kwl_import_destroy(struct kwl_object *buffer);
+void kwl_import_destroy_with(struct kwl_compose *compose, struct kwl_object *buffer);
+int kwl_retire_tick(struct kwl_server *server);
+void kwl_retire_flush(struct kwl_server *server);
 void kwl_import_set_alpha(struct kwl_object *buffer, uint32_t alpha);
 int kwl_shm_upload(struct kwl_server *server);
 void kwl_shm_image_destroy(struct kwl_server *server, struct kwl_object *surface);

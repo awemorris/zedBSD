@@ -759,11 +759,17 @@ def release_clients(item):
 	done = run.lines(r"KWL CLEANUP done ", killed)
 	for line in done:
 		item.step("released", line)
+	# The gone clients' buffers are released one a pass after the frames; the list empties later (BUG-239).
+	drained = run.wait(r"KWL RETIRE drained ", killed, 120)
+	drain_elapsed = time.time() - began
+	for line in run.lines(r"KWL RETIRE slow ", killed):
+		item.step("slow release", line)
 	for line in run.lines(r"KWL PERF ", killed):
 		item.step("perf", line)
-	item.step("all released", f"{len(done)} in {elapsed:.1f} s")
+	item.step("all released", f"{len(done)} in {elapsed:.1f} s; buffers: {drained} after {drain_elapsed:.1f} s")
 	item.check(len(done) == 20, f"only {len(done)} clients were released in 60 s")
 	item.check(elapsed <= 10.0, f"the release took {elapsed:.1f} s (target 10 s)")
+	item.check(drained, "the gone clients' buffers were not all released in 120 s")
 	item.passed()
 
 
