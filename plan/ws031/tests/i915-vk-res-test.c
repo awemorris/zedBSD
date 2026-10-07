@@ -970,7 +970,9 @@ test_descriptors(
 	assert(stub_get64(stub_reply, 40U) == FIXTURE_SET);
 	dset = drv_i915_object_lookup(stub_session, I915_VK_OBJ_DESCRIPTOR_SET, FIXTURE_SET);
 	assert(dset != NULL);
-	assert(dset->layout == dsl);
+	/* The set keeps its own copy of the layout (BUG-260), equal to the layout's. */
+	assert(dset->layout == &dset->layout_copy);
+	assert(dset->layout->count == dsl->count);
 
 	/*
 	 * vkUpdateDescriptorSets: one write of binding 1 with the view and the

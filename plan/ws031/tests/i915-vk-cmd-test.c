@@ -222,6 +222,15 @@ drv_i915_gfx_texel_buffer_format(uint32_t format, uint32_t *surface_format, uint
 	return ENOTSUP;
 }
 
+/* The holders' release stand-in (forget.c, BUG-260, is not in this fixture): nothing here names a query pool. */
+void
+drv_i915_gfx_forget(struct i915_render_session *session, enum i915_vk_object_kind kind, void *object)
+{
+	(void)session;
+	(void)kind;
+	(void)object;
+}
+
 /* The graphics path stand-ins: each claims one opcode and records that it did. */
 static uint32_t gfx_obj_opcode = UINT32_MAX;
 static uint32_t gfx_rec_opcode = UINT32_MAX;

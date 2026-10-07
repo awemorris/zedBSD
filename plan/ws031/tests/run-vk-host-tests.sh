@@ -23,7 +23,7 @@ base="-std=gnu11 -Wall -Wextra -Werror -Wdeclaration-after-statement -DKERN_USER
 driver=$repo/src/drivers/gpu/i915
 executor=""
 for part in codec object dispatch transport instance vulkan fence objects reply \
-    memory image descriptor pipeline pipeline-prepare render-pass sync command \
+    memory image descriptor forget pipeline pipeline-prepare render-pass sync command \
     state batch math video video-mfx video-h264-tables; do
     executor="$executor $driver/render/$part.c"
 done
