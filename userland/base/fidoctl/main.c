@@ -42,6 +42,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <termios.h>
 #include <unistd.h>
 
 /* How long a command may wait (a touch included), and how long the channel's opening may take. */
@@ -112,7 +113,8 @@ static int fidoctl_register(struct fidoctl_key *key, int use_pin, const char *rp
 static int fidoctl_assert(struct fidoctl_key *key, int use_pin, const char *rp_id, const char *credential);
 static int fidoctl_verify(char **arguments);
 static int fidoctl_token(struct fidoctl_key *key, unsigned permissions, const char *rp_id, uint8_t *token, size_t *token_size);
-static int fidoctl_read_pin(char *pin, size_t size);
+static int fidoctl_read_pin(const char *prompt, char *pin, size_t size);
+static int fidoctl_pin_valid(const char *pin);
 static int fidoctl_hex_read(const char *text, uint8_t *bytes, size_t capacity, size_t *size);
 static int fidoctl_hex_digit(char digit, unsigned *value);
 static void fidoctl_hex_print(const char *name, const uint8_t *bytes, size_t size);
@@ -452,7 +454,7 @@ fidoctl_set_pin(
 	int error;
 
 	/* The new PIN. */
-	error = fidoctl_read_pin(pin, sizeof(pin));
+	error = fidoctl_read_pin("New PIN: ", pin, sizeof(pin));
 	if (error != 0)
 		return fidoctl_fail("the PIN", error, NULL);
 
@@ -477,9 +479,9 @@ fidoctl_change_pin(
 	int error;
 
 	/* The current PIN and the new one. */
-	error = fidoctl_read_pin(current, sizeof(current));
+	error = fidoctl_read_pin("Current PIN: ", current, sizeof(current));
 	if (error == 0)
-		error = fidoctl_read_pin(pin, sizeof(pin));
+		error = fidoctl_read_pin("New PIN: ", pin, sizeof(pin));
 	if (error != 0) {
 		pk_crypto_wipe(current, sizeof(current));
 		return fidoctl_fail("the PINs", error, NULL);
@@ -697,7 +699,7 @@ fidoctl_token(
 	int error;
 
 	/* The PIN. */
-	error = fidoctl_read_pin(pin, sizeof(pin));
+	error = fidoctl_read_pin("PIN: ", pin, sizeof(pin));
 	if (error != 0) {
 		(void)fidoctl_fail("the PIN", error, NULL);
 		return error;
@@ -717,30 +719,114 @@ fidoctl_token(
 }
 
 /*
- * Reads one line of standard input as a PIN, without its line end.  Returns
- * 0, or EINVAL for no line or an empty one.
+ * Reads one line of standard input as a PIN, without its line end.  On a
+ * terminal the prompt is shown and the PIN is typed without echo
+ * (ws177-p006).  The PIN must keep CTAP2's rule, checked before the key is
+ * asked: at least 4 characters and at most 63 bytes.  Returns 0, or EINVAL
+ * for no line, a line longer than the buffer (its rest is read and
+ * dropped) or a PIN that breaks the rule (said on standard error).
  */
 static int
 fidoctl_read_pin(
+	const char *prompt,
 	char *pin,
 	size_t size)
 {
+	struct termios saved;
+	struct termios quiet;
 	char *line;
 	size_t length;
+	int terminal;
+	int hidden;
+	int got;
+	int character;
+	int valid;
 
-	/* The line. */
+	/* A terminal is asked with the prompt, its echo turned off for the line. */
+	terminal = isatty(STDIN_FILENO);
+	hidden = 0;
+	if (terminal) {
+		fputs(prompt, stderr);
+		got = tcgetattr(STDIN_FILENO, &saved);
+		if (got == 0) {
+			quiet = saved;
+			quiet.c_lflag &= ~(tcflag_t)ECHO;
+			got = tcsetattr(STDIN_FILENO, TCSAFLUSH, &quiet);
+			if (got == 0)
+				hidden = 1;
+		}
+	}
+
+	/* The line, and the echo back as it was. */
 	line = fgets(pin, (int)size, stdin);
+	if (hidden) {
+		(void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &saved);
+		fputc('\n', stderr);
+	}
+
+	/* No line at all. */
 	if (line == NULL)
 		return EINVAL;
 
-	/* Without its line end; an empty PIN is not one. */
+	/* A line longer than the buffer: its rest is dropped, and it is not a PIN. */
 	length = strcspn(pin, "\r\n");
-	pin[length] = '\0';
-	if (length == 0U)
+	if (pin[length] == '\0' && length + 1U == size) {
+		character = getchar();
+		while (character != EOF && character != '\n')
+			character = getchar();
+		pk_crypto_wipe(pin, size);
+		fprintf(stderr, "fidoctl: a PIN is at most 63 bytes\n");
 		return EINVAL;
+	}
+
+	/* Without its line end. */
+	pin[length] = '\0';
+
+	/* CTAP2's rule. */
+	valid = fidoctl_pin_valid(pin);
+	if (!valid) {
+		pk_crypto_wipe(pin, size);
+		fprintf(stderr, "fidoctl: a PIN is 4 to 63 bytes, at least 4 characters\n");
+		return EINVAL;
+	}
 
 	/* Succeeded. */
 	return 0;
+}
+
+/*
+ * Tells whether a PIN keeps CTAP2's rule (authenticatorClientPIN): at most
+ * 63 bytes of UTF-8 and at least 4 characters (code points).  Returns 1 or
+ * 0.
+ */
+static int
+fidoctl_pin_valid(
+	const char *pin)
+{
+	size_t length;
+	size_t index;
+	size_t characters;
+	unsigned char byte;
+
+	/* At most 63 bytes. */
+	length = strlen(pin);
+	if (length > 63U)
+		return 0;
+
+	/* The characters: each byte that is not a UTF-8 continuation starts one. */
+	characters = 0U;
+	for (index = 0U; index < length; index++) {
+		byte = (unsigned char)pin[index];
+		if ((byte & 0xc0U) != 0x80U)
+			characters++;
+	}
+
+	/* At least 4. */
+	if (characters < 4U)
+		return 0;
+
+	/* Succeeded: it keeps the rule. */
+	return 1;
 }
 
 /*

@@ -3,7 +3,7 @@
 # ws177-p004: desktop の UI の小物（案 D）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（T1-406）（2026-10-08 P1 q884 の 1: 実装・host PASS・build warning 0、main に統合。UAT の絵の確認も残り）
+Status: test-wait（T1-407 再試験、T1-406 は一部）（2026-10-08 P1 q884 の 1: 実装・host PASS・build warning 0、main に統合。UAT の絵の確認も残り）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q884 の 1（P1、2026-10-08、承認は Q1 の dispatch「次の Queue（q884、承認済み、plan/ws177/phasing-20261008.md の案）」）

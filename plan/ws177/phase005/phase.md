@@ -3,7 +3,7 @@
 # ws177-p005: 通知とメールの通知の口の堅さ（案 A）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 P1 q884 の 2: 実装・host PASS・build warning 0。T1 の AAT の再確認が残り）
+Status: test-wait（T1-408）（2026-10-08 P1 q884 の 2: 実装・host PASS・build warning 0、main に統合）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q884 の 2（P1、2026-10-08）
