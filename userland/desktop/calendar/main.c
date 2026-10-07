@@ -67,6 +67,13 @@ struct cal_window {
 	struct cal_view view;
 	int dirty;
 
+	/*
+	 * Only the lit widget changed since the last frame (BUG-226): the next
+	 * frame is drawn within the part kl_ui_take_damage gives, when nothing
+	 * else changed (dirty draws the whole window).
+	 */
+	int lit_changed;
+
 	/* The pointer's buttons held now: while one is, every motion is drawn (a drag); otherwise only one that lights another widget (BUG-226). */
 	unsigned buttons_held;
 	int resized;
@@ -413,9 +420,12 @@ cal_input(
 	/* Each kind of input. */
 	switch (event->kind) {
 	case KL_WINDOW_MOTION:
+		/* A drag draws the whole window; another lit widget only its part (BUG-226). */
 		redraw = kl_ui_pointer_motion(calendar->ui, event->x, event->y);
-		if (redraw || calendar->buttons_held != 0U)
+		if (calendar->buttons_held != 0U)
 			calendar->dirty = 1;
+		else if (redraw)
+			calendar->lit_changed = 1;
 		break;
 	case KL_WINDOW_LEAVE:
 		(void)kl_ui_pointer_leave(calendar->ui);
@@ -543,21 +553,28 @@ cal_draw(
 	struct kl_glass_panel panels[CAL_PANELS_MAX];
 	struct kl_event event;
 	struct kl_rect caret;
+	struct kl_rect part;
 	size_t count;
 	int desk_only;
+	int animating_before;
+	int partial;
 	int status;
 	int error;
 	int taken;
 	int wanted;
 
 	/* Nothing changed and nothing moves: no frame. */
-	if (!calendar->dirty && !calendar->moving && !calendar->animating)
+	if (!calendar->dirty &&
+	    !calendar->moving &&
+	    !calendar->animating &&
+	    !calendar->lit_changed)
 		return;
 
-	/* Only the desk calendar moving (no input, no widget moving): its frame alone, cheaper than the whole view. */
+	/* Only the desk calendar moving (no input, no widget moving, no widget lit): its frame alone, cheaper than the whole view. */
 	desk_only = 0;
-	if (!calendar->dirty && !calendar->moving)
+	if (!calendar->dirty && !calendar->moving && !calendar->lit_changed)
 		desk_only = cal_view_desk_only(&calendar->view);
+	animating_before = calendar->animating;
 	calendar->animating = 0;
 	if (desk_only) {
 		cal_view_draw_desk(&calendar->view, &calendar->style, now_us);
@@ -567,11 +584,28 @@ cal_draw(
 		return;
 	}
 
-	/* The view. */
+	/*
+	 * Only another widget lit: the frame is drawn within the two widgets'
+	 * part alone, the rest keeping its pixels (BUG-226; the whole window
+	 * when the part cannot be told, or while the desk calendar moves too).
+	 */
+	partial = 0;
+	if (!calendar->dirty &&
+	    !calendar->moving &&
+	    !animating_before &&
+	    calendar->lit_changed)
+		partial = kl_ui_take_damage(calendar->ui, &part);
+	calendar->lit_changed = 0;
+
+	/* The view, within the part when there is one. */
 	calendar->dirty = 0;
+	if (partial)
+		kl_canvas_clip_push(&calendar->canvas, &part);
 	kl_ui_begin(calendar->ui, now_us);
 	cal_view_draw(&calendar->view, calendar->ui, &calendar->style, (int)calendar->width, (int)calendar->height, now_us);
 	calendar->moving = kl_ui_end(calendar->ui, now_us);
+	if (partial)
+		kl_canvas_clip_pop(&calendar->canvas);
 
 	/*
 	 * The text input is asked for while a field has the keyboard, and told
@@ -627,7 +661,7 @@ cal_wait(
 	int wait;
 
 	/* A frame due now. */
-	if (calendar->dirty)
+	if (calendar->dirty || calendar->lit_changed)
 		return 0;
 
 	/* Something moving. */
