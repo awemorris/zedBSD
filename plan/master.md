@@ -193,7 +193,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | [WS049](ws049/ws.md) | ベータ1 | MG003 | 0.3 | 実機の UAT（p007・p008・p016） |
 | [WS050](ws050/ws.md) | ベータ2 | MG003 | 3 | UCSI（1.x・2.x、role の切替・Alt Mode の選択を含む） |
 | [WS051](ws051/ws.md) | ベータ2 | MG006 | 4 | USB-C の DP Alt Mode（i915 の Type-C） |
-| [WS052](ws052/ws.md) | ベータ2 | MG003 | 6 | 電源管理（S0i3） |
+| [WS052](ws052/ws.md) | ベータ3（2026-10-07 ユーザー） | MG003 | 6 | 電源管理（S0i3） |
 | [WS061](ws061/ws.md) | 完了 | MG002 | 1 | expat の configure・compile |
 | [WS066](ws066/ws.md) | ベータ2 | MG002 | 1 | 動的 link の起動の高速化 |
 | [WS068](ws068/ws.md) | ベータ3（2026-10-06 ユーザー: いったん先送り） | MG006 | 4 | EGL・OpenGL ES |
