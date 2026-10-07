@@ -37,7 +37,10 @@
  * pad, or the wheel turned up opens a lock the session made itself (the
  * lid, sleep) within LOCK_GRACE_SECONDS of locking, and otherwise brings
  * the card; so does a key, which goes into the field.  The card goes
- * again after GREETER_CARD_IDLE_MS with nothing typed.
+ * again after GREETER_CARD_IDLE_MS with nothing typed.  On the lock screen
+ * the card offers its styles side by side under the field (ws187-p003):
+ * Password, PIN and Security Key, each only when sessiond says the user
+ * has it now; a press, or Tab, chooses one.
  *
  * The PIN (ws172-p002, docs/architecture/security.md "Login
  * authentication"): sessiond says which styles the user may use now
@@ -88,6 +91,9 @@
 /* The first uid of a person's account, and the first of the system's high ones. */
 #define GREETER_UID_FIRST	1000U
 #define GREETER_UID_LAST	59999U
+
+/* The styles the lock screen's card may offer side by side (ws187-p003): the password, the PIN and a security key. */
+#define GREETER_STYLES		3U
 
 /* The card: its width, its corner, a user row's height, and the password field's height. */
 #define GREETER_CARD_WIDTH	380
@@ -176,7 +182,8 @@
 
 /*
  * What a press on the screen hit: nothing, a user's row, the password
- * field, the Log In button, the PIN-or-password link, Restart or Shut Down.
+ * field, the Log In button, the PIN-or-password link, one of the lock
+ * screen's styles, Restart or Shut Down.
  */
 enum greeter_hit {
 	GREETER_HIT_NONE,
@@ -184,6 +191,7 @@ enum greeter_hit {
 	GREETER_HIT_FIELD,
 	GREETER_HIT_LOGIN,
 	GREETER_HIT_SWITCH,
+	GREETER_HIT_STYLE,
 	GREETER_HIT_RESTART,
 	GREETER_HIT_POWEROFF
 };
@@ -198,7 +206,9 @@ struct greeter_user {
 
 /*
  * Where the parts of the screen are this frame, in output pixels
- * (x, y, width, height), laid out again on every frame and press.
+ * (x, y, width, height), laid out again on every frame and press; on the
+ * lock screen the styles offered side by side in the link's line, with
+ * their KL_BACKEND_STYLE_* and how many (none while only the password is).
  */
 struct greeter_layout {
 	int32_t card[4];
@@ -207,6 +217,9 @@ struct greeter_layout {
 	int32_t field[4];
 	int32_t login[4];
 	int32_t link[4];
+	int32_t styles[GREETER_STYLES][4];
+	unsigned style_bits[GREETER_STYLES];
+	unsigned style_count;
 	int32_t restart[4];
 	int32_t poweroff[4];
 };
@@ -296,6 +309,9 @@ static void greeter_draw_clock(struct kwl_server *server, VkCommandBuffer comman
 static void greeter_draw_brand(struct kwl_server *server, VkCommandBuffer command);
 static void greeter_draw_hint(struct kwl_server *server, VkCommandBuffer command);
 static void greeter_lock_swiped(struct kwl_server *server, const char *via);
+static void greeter_layout_styles(struct kwl_server *server, struct greeter_layout *layout);
+static void greeter_draw_styles(struct kwl_server *server, VkCommandBuffer command, const struct greeter_layout *layout);
+static void greeter_style_choose(struct kwl_server *server, unsigned style);
 static int greeter_key_modifies(uint32_t key);
 static void greeter_draw_centered(struct kwl_server *server, VkCommandBuffer command, enum glass_size size, int32_t middle, int32_t baseline, const char *text, int32_t limit, const float *color);
 static void greeter_select(struct kwl_server *server, unsigned user);
@@ -590,6 +606,9 @@ kwl_greeter_button(
 	case GREETER_HIT_SWITCH:
 		greeter_style_switch(server);
 		break;
+	case GREETER_HIT_STYLE:
+		greeter_style_choose(server, layout.style_bits[user]);
+		break;
 	case GREETER_HIT_RESTART:
 		if (!server->locked)
 			greeter_power(server, "reboot");
@@ -679,8 +698,17 @@ kwl_greeter_key(
 		if (greeter_selected > 0U)
 			greeter_select(server, greeter_selected - 1U);
 		return 1;
-	case GREETER_KEY_DOWN:
 	case GREETER_KEY_TAB:
+		/* On the lock screen (one user) Tab moves to the next style offered (ws187-p003). */
+		if (server->locked) {
+			greeter_style_switch(server);
+			return 1;
+		}
+
+		/* On the login screen the user below, from the last back to the first. */
+		greeter_select(server, (greeter_selected + 1U) % greeter_user_count);
+		return 1;
+	case GREETER_KEY_DOWN:
 		/* The user below, from the last back to the first. */
 		greeter_select(server, (greeter_selected + 1U) % greeter_user_count);
 		return 1;
@@ -1026,6 +1054,9 @@ greeter_layout(
 	layout->link[2] = GREETER_CARD_WIDTH - 48;
 	layout->link[3] = GREETER_LINK;
 
+	/* The lock screen's styles in the link's line. */
+	greeter_layout_styles(server, layout);
+
 	/* Restart and Shut Down at the bottom right. */
 	layout->poweroff[0] = width - GREETER_MARGIN - GREETER_BUTTON_WIDTH;
 	layout->poweroff[1] = height - GREETER_MARGIN - GREETER_BUTTON_HEIGHT;
@@ -1063,6 +1094,21 @@ greeter_hit(
 	inside = greeter_inside(layout->login, server->pointer_x, server->pointer_y);
 	if (inside)
 		return GREETER_HIT_LOGIN;
+
+	/* One of the lock screen's styles, where the login screen has its link (ws187-p003). */
+	for (index = 0U; index < layout->style_count; index++) {
+		inside = greeter_inside(layout->styles[index], server->pointer_x, server->pointer_y);
+		if (inside) {
+			*user = index;
+			return GREETER_HIT_STYLE;
+		}
+	}
+
+	/* A lock screen that offers its styles has no link, and no power buttons. */
+	if (layout->style_count != 0U)
+		return GREETER_HIT_NONE;
+
+	/* The login screen's link, and the power buttons. */
 	inside = greeter_inside(layout->link, server->pointer_x, server->pointer_y);
 	if (inside && (greeter_styles & (KL_BACKEND_STYLE_PIN | KL_BACKEND_STYLE_KEY)) != 0U)
 		return GREETER_HIT_SWITCH;
@@ -1189,6 +1235,12 @@ greeter_draw_card(
 		greeter_draw_centered(server, command, SIZE_TITLE, middle, baseline, kl_tr("Checking..."), GREETER_CARD_WIDTH - 32, faint);
 	} else if (greeter_message[0] != '\0') {
 		greeter_draw_centered(server, command, SIZE_TITLE, middle, baseline, greeter_message, GREETER_CARD_WIDTH - 32, warning);
+	}
+
+	/* The lock screen offers its styles side by side instead of the link (ws187-p003). */
+	if (layout->style_count != 0U) {
+		greeter_draw_styles(server, command, layout);
+		return;
 	}
 
 	/* The link to the next style, while there is another than the password. */
@@ -1914,6 +1966,7 @@ greeter_styles_take(
 {
 	struct greeter_layout layout;
 	unsigned styles;
+	unsigned index;
 
 	/* The styles, the password always among them. */
 	styles = kl_backend_session_styles_get(server->backend);
@@ -1924,6 +1977,10 @@ greeter_styles_take(
 	/* Where the link to the next style is, for the tests' pointer (ws172-p003). */
 	greeter_layout(server, &layout);
 	printf("KWL GREETER link x=%d y=%d width=%d height=%d\n", layout.link[0], layout.link[1], layout.link[2], layout.link[3]);
+
+	/* Where the lock screen's styles are, for the tests' pointer too (ws187-p003). */
+	for (index = 0U; index < layout.style_count; index++)
+		printf("KWL GREETER style-at style=%u x=%d y=%d width=%d height=%d\n", layout.style_bits[index], layout.styles[index][0], layout.styles[index][1], layout.styles[index][2], layout.styles[index][3]);
 
 	/* A style no longer offered gives way to the password, and what was typed for it goes. */
 	if (greeter_style != KL_BACKEND_STYLE_PASSWORD && (greeter_styles & greeter_style) == 0U) {
@@ -1958,6 +2015,123 @@ greeter_style_switch(
 	greeter_message[0] = '\0';
 	server->dirty = 1;
 	printf("KWL GREETER style=%u\n", greeter_style);
+}
+
+/*
+ * Lays out the lock screen's styles side by side in the link's line
+ * (ws187-p003): those sessiond offers now, in the order password, PIN,
+ * security key, each an equal part of the line; none on the login screen
+ * or while only the password is offered.
+ */
+static void
+greeter_layout_styles(
+	struct kwl_server *server,
+	struct greeter_layout *layout)
+{
+	static const unsigned order[GREETER_STYLES] = {
+		KL_BACKEND_STYLE_PASSWORD,
+		KL_BACKEND_STYLE_PIN,
+		KL_BACKEND_STYLE_KEY
+	};
+	int32_t part;
+	unsigned index;
+	unsigned count;
+
+	/* None until a lock screen offers more than the password. */
+	layout->style_count = 0U;
+	if (!server->locked)
+		return;
+	if ((greeter_styles & (KL_BACKEND_STYLE_PIN | KL_BACKEND_STYLE_KEY)) == 0U)
+		return;
+
+	/* The styles offered, in their order. */
+	count = 0U;
+	for (index = 0U; index < GREETER_STYLES; index++) {
+		if ((greeter_styles & order[index]) != 0U) {
+			layout->style_bits[count] = order[index];
+			count++;
+		}
+	}
+
+	/* Each an equal part of the link's line, a small gap between them. */
+	part = layout->link[2] / (int32_t)count;
+	for (index = 0U; index < count; index++) {
+		layout->styles[index][0] = layout->link[0] + (int32_t)index * part + 2;
+		layout->styles[index][1] = layout->link[1];
+		layout->styles[index][2] = part - 4;
+		layout->styles[index][3] = layout->link[3];
+	}
+
+	/* Succeeded: the styles are laid out. */
+	layout->style_count = count;
+}
+
+/*
+ * Draws the lock screen's styles side by side (ws187-p003): the field's
+ * style lit, the one under the pointer lighter, the others' names faint.
+ */
+static void
+greeter_draw_styles(
+	struct kwl_server *server,
+	VkCommandBuffer command,
+	const struct greeter_layout *layout)
+{
+	static const float ink[4] = { 0.10f, 0.14f, 0.22f, 1.0f };
+	static const float faint[4] = { 0.10f, 0.14f, 0.22f, 0.62f };
+	static const float chosen[4] = { 1.0f, 1.0f, 1.0f, 0.70f };
+	static const float hover[4] = { 1.0f, 1.0f, 1.0f, 0.32f };
+	const int32_t *rect;
+	const float *color;
+	const char *label;
+	unsigned index;
+	int inside;
+
+	/* Each style offered. */
+	for (index = 0U; index < layout->style_count; index++) {
+		/* Its pill: lit when the field takes it, lighter under the pointer. */
+		rect = layout->styles[index];
+		inside = greeter_inside(rect, server->pointer_x, server->pointer_y);
+		color = faint;
+		if (layout->style_bits[index] == greeter_style) {
+			glass_draw_solid(server, command, (float)rect[0], (float)rect[1], (float)rect[2], (float)rect[3], (float)rect[3] / 2.0f, chosen);
+			color = ink;
+		} else if (inside) {
+			glass_draw_solid(server, command, (float)rect[0], (float)rect[1], (float)rect[2], (float)rect[3], (float)rect[3] / 2.0f, hover);
+			color = ink;
+		}
+
+		/* Its name. */
+		label = kl_tr("Password");
+		if (layout->style_bits[index] == KL_BACKEND_STYLE_PIN)
+			label = kl_tr("PIN");
+		if (layout->style_bits[index] == KL_BACKEND_STYLE_KEY)
+			label = kl_tr("Security Key");
+		greeter_draw_centered(server, command, SIZE_BAR, rect[0] + rect[2] / 2, rect[1] + 19, label, rect[2] - 8, color);
+	}
+}
+
+/*
+ * Makes the field take a style the lock screen offers, chosen by a press
+ * (ws187-p003); nothing typed for the other stays.
+ */
+static void
+greeter_style_choose(
+	struct kwl_server *server,
+	unsigned style)
+{
+	/* Not while an answer is awaited, nor for the style the field takes already. */
+	if (greeter_waiting)
+		return;
+	if (style == greeter_style)
+		return;
+
+	/* The style, chosen by the user, with nothing typed. */
+	greeter_style = style;
+	greeter_style_chosen = 1U;
+	greeter_erase();
+	greeter_message[0] = '\0';
+	server->dirty = 1;
+	printf("KWL GREETER style=%u via=choice\n", greeter_style);
 }
 
 /* Erases what has been typed. */

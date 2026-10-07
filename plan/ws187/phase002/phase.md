@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws187-p002 -->
 # ws187-p002: lock の画面の解除の操作（下部からの上へのスワイプ・wheel の上）と猶予
 
-Status: in-progress（q864 の続き、P2、2026-10-08: 実装・build・host 試験まで。猶予の既定（案 5 分）はユーザーに確認中。QEMU は p003 の後にまとめて T1）
+Status: test-wait（T1 への依頼を 2026-10-08 Q1 へ。番号は Q1 が付ける）。in-progress（q864 の続き、P2、2026-10-08: 実装・build・host 試験まで。猶予の既定（案 5 分）はユーザーに確認中。QEMU は p003 の後にまとめて T1）
 Disposition: normal
 Parent: [WS187](../ws.md)
 Queue: q864（Q1 2026-10-08「p001（大きな時計）はそのまま続け、続けて p002・p003 も q864 の続きとして承認済み」）
