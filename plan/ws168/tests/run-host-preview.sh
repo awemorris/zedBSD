@@ -15,7 +15,7 @@ cp include/libc/pdf.h include/libc/md5.h include/libc/sha1.h include/libc/sha2.h
 ln -sfn "$(pwd)/include/libc/compat" "$dir/inc/compat"
 P=userland/desktop/preview
 B=userland/base
-sources="$P/main.c $P/make.c $P/decode.c $P/scale.c $P/linux/confine.c userland/desktop/picture/picture.c $B/libpdf/*.c
+sources="$P/main.c $P/make.c $P/decode.c $P/scale.c $P/fonts.c $P/linux/confine.c userland/desktop/picture/picture.c $B/libpdf/*.c
 	userland/desktop/libtruetype/*.c $B/libz-compat/*.c $B/libpng-compat/*.c $B/libjpeg-compat/*.c $B/libgif-compat/*.c"
 flags="-std=gnu11 -D_GNU_SOURCE -O2 -g -Wall -Wextra -I. -I$dir/inc -DPDF_FONT_FILES=0"
 cc $flags -w -c src/libc/openbsd-sha2.c -o "$dir/sha2.o"

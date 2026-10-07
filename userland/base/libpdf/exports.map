@@ -35,6 +35,7 @@
 		pdf_outline_free;
 		pdf_document_open;
 		pdf_document_open_memory;
+		pdf_font_memory_add;
 		pdf_document_open_password;
 		pdf_document_open_memory_password;
 		pdf_document_close;

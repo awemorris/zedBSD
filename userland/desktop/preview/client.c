@@ -215,6 +215,8 @@ preview_picture_begin(
 		error = errno;
 		return error;
 	}
+
+	/* Removes its name: only this process knows the file from here. */
 	(void)unlink(path);
 
 	/* Starts the child writing it. */

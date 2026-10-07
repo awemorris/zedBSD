@@ -72,6 +72,9 @@
  */
 #define PDF_FONT_COMPANION "keiland-fallback-mono.ttf"
 
+/* The most substitute fonts a program gives the library in memory (pdf_font_memory_add). */
+#define FONT_MEMORY_MAX 8
+
 /* The most fonts one document keeps, and the largest font file read. */
 #define FONT_COUNT_MAX 4096
 #define FONT_FILE_MAX ((size_t)64 * 1024 * 1024)
@@ -126,15 +129,28 @@ enum font_kind {
  * document that asks for it.
  *
  * data is the file's bytes and face reads them; both live until the
- * document is closed.  A file that could not be read is kept with a NULL
- * face, so that it is not tried again.
+ * document is closed.  A substitute the program gave in memory
+ * (pdf_font_memory_add) is read from memory instead, which stays the
+ * program's (data is then NULL).  A file that could not be read is kept
+ * with a NULL face, so that it is not tried again.
  */
 struct font_file {
 	struct font_file *next;
 	char name[32];
 	unsigned char *data;
+	const unsigned char *memory;
 	size_t size;
 	struct truetype_face *face;
+};
+
+/*
+ * A substitute font a program holds in memory, under the name of the file
+ * it stands for (ws177-p010).
+ */
+struct font_memory {
+	char name[32];
+	const unsigned char *data;
+	size_t size;
 };
 
 /*
@@ -223,6 +239,16 @@ struct pdf_font_cache {
 	size_t fonts_count;
 	struct font_file *files;
 };
+
+/*
+ * The substitute fonts the program gave in memory, in the order given,
+ * and how many.  The program fills the table once, before it opens a
+ * document (keiland-preview, which opens no file, ws177-p010); the
+ * documents only read it.  The bytes are the program's and outlive every
+ * document.
+ */
+static struct font_memory font_memory[FONT_MEMORY_MAX];
+static size_t font_memory_count;
 
 static int load_font(struct pdf_document *document, struct pdf_font_cache *cache, struct pdf_object *dictionary, struct pdf_font *font);
 static int load_simple(struct pdf_document *document, struct pdf_font_cache *cache, struct pdf_object *dictionary, struct pdf_font *font);
@@ -374,6 +400,51 @@ pdf_font_cache_free(
 
 	/* The cache itself. */
 	free(cache);
+}
+
+/*
+ * Gives the library a substitute font held in memory, under the name of
+ * the file it stands for ("keiland.ttf", "keiland-bold.ttf",
+ * "keiland-mono.ttf"): a font a document does not embed is drawn with it
+ * before any file of that name is looked for.  For a program that opens
+ * no file (keiland-preview, ws177-p010).  It is called before a document
+ * is opened, from one thread; the bytes stay the caller's and must live
+ * while documents are open.
+ *
+ * Returns 0, EINVAL for an empty or too long name or no bytes, or ENOSPC
+ * when FONT_MEMORY_MAX fonts were given already.
+ */
+int
+pdf_font_memory_add(
+	const char *name,
+	const void *data,
+	size_t size)
+{
+	struct font_memory *entry;
+	size_t length;
+
+	/* Refuses a font without a name or bytes. */
+	if (name == NULL || data == NULL || size == 0)
+		return EINVAL;
+
+	/* Refuses a name longer than a substitute's. */
+	length = strlen(name);
+	if (length == 0 || length >= sizeof(font_memory[0].name))
+		return EINVAL;
+
+	/* Refuses one more than the table holds. */
+	if (font_memory_count == FONT_MEMORY_MAX)
+		return ENOSPC;
+
+	/* Keeps the font under its name. */
+	entry = &font_memory[font_memory_count];
+	memcpy(entry->name, name, length + 1);
+	entry->data = data;
+	entry->size = size;
+	font_memory_count++;
+
+	/* Succeeded: the documents opened from now on draw with it. */
+	return 0;
 }
 
 /*
@@ -1552,8 +1623,9 @@ load_substitute(
 
 /*
  * Opens a substitute font file by its name in the font directory, once
- * per document.  ENOENT means the system has no such file (or one that
- * cannot be read as a TrueType font).
+ * per document; a font the program gave in memory under that name comes
+ * first.  ENOENT means the system has no such file (or one that cannot be
+ * read as a TrueType font).
  */
 static int
 open_substitute(
@@ -1563,6 +1635,7 @@ open_substitute(
 {
 	struct font_file *file;
 	char path[256];
+	size_t index;
 	int difference;
 	int error;
 
@@ -1585,19 +1658,38 @@ open_substitute(
 	file->next = cache->files;
 	cache->files = file;
 
-	/* Reads it; a missing or unreadable file is no substitute. */
-	snprintf(path, sizeof(path), "%s/%s", PDF_FONT_DIRECTORY, name);
-	error = read_font_file(path, &file->data, &file->size);
-	if (error == ENOMEM)
-		return ENOMEM;
-	if (error != 0)
-		return ENOENT;
+	/* Takes a font the program gave in memory under the name (ws177-p010). */
+	for (index = 0; index < font_memory_count; index++) {
+		difference = strcmp(font_memory[index].name, name);
+		if (difference != 0)
+			continue;
+		file->memory = font_memory[index].data;
+		file->size = font_memory[index].size;
+		break;
+	}
+
+	/* Else reads the file; a missing or unreadable file is no substitute. */
+	if (file->memory == NULL) {
+		snprintf(path, sizeof(path), "%s/%s", PDF_FONT_DIRECTORY, name);
+		error = read_font_file(path, &file->data, &file->size);
+		if (error == ENOMEM)
+			return ENOMEM;
+		if (error != 0)
+			return ENOENT;
+		file->memory = file->data;
+	}
 
 	/* Opens its face, which must map Unicode. */
-	error = truetype_open(file->data, file->size, 0, &file->face);
+	error = truetype_open(file->memory, file->size, 0, &file->face);
 	if (error != 0) {
 		file->face = NULL;
 		return ENOENT;
+	}
+
+	/* A font in memory is a program's that opens no file: it has no companion file. */
+	if (file->data == NULL) {
+		*face = file->face;
+		return 0;
 	}
 
 	/* Its companion, the system's monospaced fallback, for the letters and signs it lacks (ws090-p020: Mahora is ASCII). */

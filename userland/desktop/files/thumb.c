@@ -522,6 +522,11 @@ thumb_start(
 	making->running = 1;
 	making->thumb = thumb;
 	thumb->pending = 1;
+
+	/* The log line the tests read: the child's start (two run at once, ws177-p010). */
+	fm_log("THUMB start path=%s pid=%ld", thumb->path, (long)making->job.pid);
+
+	/* Succeeded: the child makes it. */
 	return 0;
 }
 
