@@ -95,7 +95,11 @@
 #define I915_TC_SDEISR			0xc4000u
 #define I915_TC_SDE_LEGACY_SHIFT	24u
 
-/* How long a legacy port's PHY is waited for at a readout, and how often it is polled. */
+/*
+ * How long a legacy port's PHY is waited for at a readout, and how long the
+ * wait sleeps between two reads (the Linux tc_phy_wait_for_ready()'s 500 ms;
+ * the sleep lasts at least to the scheduler's next tick).
+ */
 #define I915_TC_READY_TIMEOUT_US	500000u
 #define I915_TC_READY_POLL_US		1000u
 
@@ -228,6 +232,58 @@ drv_i915_tc_readout(
 		/* Logs what the readout found and left. */
 		drv_i915_tc_log_state(tc, index, "readout");
 	}
+}
+
+/*
+ * Gives every Type-C port back to the Type-C subsystem when the driver
+ * stops: each port's links are dropped (the outputs were stopped before),
+ * its TC cold block and its PHY ownership are given back, and it is
+ * retired, so a step already on its way takes nothing.  The display is
+ * not live afterwards.  Each port's state is logged.
+ */
+void
+drv_i915_tc_stop(
+	struct i915_tc *tc)
+{
+	struct i915_tc_port *p;
+	unsigned index;
+
+	/* A display without Type-C ports, or one already stopped, has nothing to give back. */
+	if (!tc->live)
+		return;
+
+	/* Gives each declared port back. */
+	for (index = 0u; index < I915_TC_PORTS; index++) {
+		/* Skips a port the VBT does not declare. */
+		p = &tc->port[index];
+		if (!p->present)
+			continue;
+
+		/* Gives the PHY back and retires the port under its lock. */
+		tc->env.lock(tc->env.ctx, index);
+
+		/* An output that did not put its link back no longer drives the port. */
+		if (p->links != 0u)
+			tc->env.log(tc->env.ctx, "i915: TC%u: stop: %u link(s) still held: given back\n", index + 1u, p->links);
+		p->links = 0u;
+
+		/* The PHY and the TC cold block go back to the Type-C subsystem. */
+		tc_disconnect(tc, p);
+
+		/*
+		 * Retired: present is what every step checks under this lock, so one
+		 * that already found the port takes nothing more.
+		 */
+		p->present = 0;
+
+		tc->env.unlock(tc->env.ctx, index);
+
+		/* Logs what the port was left in. */
+		tc->env.log(tc->env.ctx, "i915: TC%u: stop: PHY given back (mode %s, cold %d, connects %u, disconnects %u)\n", index + 1u, drv_i915_tc_mode_name(p->mode), p->cold_held, p->connects, p->disconnects);
+	}
+
+	/* No port is answered for from here on. */
+	tc->live = 0;
 }
 
 /*
@@ -1088,36 +1144,51 @@ tc_fix_legacy(
 /*
  * Waits for a legacy port's PHY to become ready: the Type-C subsystem's
  * firmware brings it up at boot and resume whether or not a connector is
- * plugged in.  A PHY that does not come is logged.
+ * plugged in.  The wait sleeps between the reads, so the CPU serves other
+ * threads for the up to half a second it may last; the time is measured on
+ * the clock, as a sleep may last longer than asked.  A PHY that does not
+ * come is logged.
  */
 static void
 tc_wait_ready(
 	struct i915_tc *tc,
 	const struct i915_tc_port *p)
 {
-	unsigned waited_us;
+	uint64_t start_us;
+	uint64_t now_us;
 	int ready;
-	int delay_error;
+	int clock_error;
+	int sleep_error;
 
-	/* Polls the ready bit until it comes or the time is up. */
-	waited_us = 0u;
+	/* The time the wait starts at; without a clock the ready bit is read once. */
+	clock_error = tc->env.now_us(tc->env.ctx, &start_us);
+	if (clock_error != 0) {
+		ready = tc_is_ready(tc, p);
+		if (!ready)
+			tc->env.log(tc->env.ctx, "i915: TC%u: the legacy port's PHY is not ready and the clock failed (error %d)\n", p->index + 1u, clock_error);
+		return;
+	}
+
+	/* Polls the ready bit, sleeping between the reads, until it comes or the time is up. */
 	for (;;) {
 		/* Reads the ready bit; the wait is over once it is set. */
 		ready = tc_is_ready(tc, p);
 		if (ready)
 			return;
 
+		/* Reads the clock; a failed time base ends the wait. */
+		clock_error = tc->env.now_us(tc->env.ctx, &now_us);
+		if (clock_error != 0)
+			break;
+
 		/* The time is up: the PHY did not come. */
-		if (waited_us >= I915_TC_READY_TIMEOUT_US)
+		if (now_us - start_us >= I915_TC_READY_TIMEOUT_US)
 			break;
 
-		/* Waits before the next read; a failed time base ends the wait. */
-		delay_error = tc->env.delay_us(tc->env.ctx, I915_TC_READY_POLL_US);
-		if (delay_error != 0)
+		/* Sleeps before the next read; a failed time base ends the wait. */
+		sleep_error = tc->env.sleep_us(tc->env.ctx, I915_TC_READY_POLL_US);
+		if (sleep_error != 0)
 			break;
-
-		/* The time waited so far. */
-		waited_us += I915_TC_READY_POLL_US;
 	}
 
 	/* Reports a legacy PHY that never became ready. */

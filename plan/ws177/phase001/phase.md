@@ -3,7 +3,7 @@
 # ws177-p001: compositor の wl_surface.enter・leave（案 E）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（実装済み・host PASS。T1 の QEMU の試験待ち、依頼は Q1 経由）
+Status: test-wait（T1-404）（実装済み・host PASS、main に統合済み）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q882 の 1（P1、2026-10-08、承認は Q1 の dispatch「Queue（q882、承認済み）: WS177 の案 E・F・G の host の分を順に」）

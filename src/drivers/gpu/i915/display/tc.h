@@ -83,8 +83,12 @@ enum i915_tc_power {
  * The device binds one for the display's lifetime.  power_get returns 0
  * once the power is on, or an error; every successful get is matched by
  * one put.  lock and unlock serialize the steps of one port; the power
- * domains' lock is taken inside it.  delay_us busy-waits and returns 0, or
- * nonzero when the time base failed.
+ * domains' lock is taken inside it, and the port's lock is one a thread may
+ * sleep under.  now_us reads a monotonic clock in microseconds and returns
+ * 0, or nonzero when the time base failed.  sleep_us waits at least the
+ * time asked for, giving the CPU to other threads (it may wait longer, to
+ * the scheduler's next tick), and returns 0, or nonzero when the time base
+ * failed; the core calls it only from a step that may sleep.
  */
 struct i915_tc_env {
 	/* What every callback is given. */
@@ -102,8 +106,9 @@ struct i915_tc_env {
 	void (*lock)(void *ctx, unsigned port);
 	void (*unlock)(void *ctx, unsigned port);
 
-	/* A short busy wait. */
-	int (*delay_us)(void *ctx, unsigned us);
+	/* The time now, and a wait that sleeps. */
+	int (*now_us)(void *ctx, uint64_t *now);
+	int (*sleep_us)(void *ctx, unsigned us);
 
 	/* A line of the driver's log. */
 	void (*log)(void *ctx, const char *format, ...) __attribute__((format(printf, 2, 3)));
@@ -121,7 +126,12 @@ struct i915_tc_port {
 	/* The port's number from 0 (TC1). */
 	unsigned index;
 
-	/* Nonzero when the VBT declares the port; an undeclared port is never touched. */
+	/*
+	 * Nonzero when the VBT declares the port; an undeclared port is never
+	 * touched.  drv_i915_tc_stop() clears it under the port's lock once the
+	 * PHY is given back, so a step that was already on its way finds the
+	 * port retired and takes nothing.
+	 */
 	int present;
 
 	/*
@@ -154,7 +164,8 @@ struct i915_tc_port {
  * The Type-C ports of one display.
  *
  * It lives in the display for the device's lifetime.  live is zero until
- * drv_i915_tc_init() binds the environment; a display that is not live has
+ * drv_i915_tc_init() binds the environment, and again once
+ * drv_i915_tc_stop() gave every port back; a display that is not live has
  * no Type-C port and answers every question with "nothing".
  */
 struct i915_tc {
@@ -187,6 +198,7 @@ struct i915_tc_dp_sample {
 void drv_i915_tc_init(struct i915_tc *tc, const struct i915_tc_env *env, unsigned display_ver);
 void drv_i915_tc_declare(struct i915_tc *tc, unsigned port, int legacy);
 void drv_i915_tc_readout(struct i915_tc *tc);
+void drv_i915_tc_stop(struct i915_tc *tc);
 uint32_t drv_i915_tc_live_status(struct i915_tc *tc, unsigned port);
 int drv_i915_tc_connected(struct i915_tc *tc, unsigned port);
 int drv_i915_tc_connected_locked(struct i915_tc *tc, unsigned port);

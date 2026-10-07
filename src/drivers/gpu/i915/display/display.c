@@ -776,6 +776,9 @@ drv_i915_display_stop_early(
 		display->hpd_started = 0;
 	}
 
+	/* The Type-C ports' PHYs and TC cold blocks go back to the Type-C subsystem (ws177-p002). */
+	drv_i915_tc_kern_stop(display);
+
 	/*
 	 * i915_driver_remove() -> i915_driver_unregister(): runtime PM back to
 	 * the core, the INIT power reference taken again (DC states off, wells

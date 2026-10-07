@@ -9,11 +9,12 @@
  * What binds the display's Type-C ports to the device (see tc-kern.h).
  *
  * The Type-C core (tc.c) asks for registers, power, a lock per port, a
- * delay and the log through struct i915_tc_env; this file answers with the
- * display's MMIO, its power domains, one mutex per port, the driver's busy
- * delay and the kernel log.  The start declares the Type-C ports the
- * display probe made encoders for, with the VBT's legacy flag and AUX
- * channel, and reads how the firmware left them.
+ * clock, a sleep and the log through struct i915_tc_env; this file answers
+ * with the display's MMIO, its power domains, one mutex per port, the
+ * kernel's monotonic counter, its sleep to the next tick and the kernel
+ * log.  The start declares the Type-C ports the display probe made encoders
+ * for, with the VBT's legacy flag and AUX channel, and reads how the
+ * firmware left them; the stop gives every port back.
  */
 
 #include "tc-kern.h"
@@ -23,9 +24,12 @@
 #include "../mmio.h"
 #include "../sync.h"
 
+#include <kern/clock.h>
 #include <kern/kcrt.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
+
+#include <uapi/errno.h>
 
 #include <drivers/typec/typec.h>
 
@@ -36,6 +40,9 @@
 
 /* The longest line the core logs. */
 #define I915_TC_KERN_LOG_LINE		256u
+
+/* Microseconds in a second, for the counter's conversion. */
+#define I915_TC_KERN_US_PER_SECOND	1000000u
 
 /*
  * The USB Type-C connector layer, which the ports' DisplayPort state is
@@ -54,7 +61,8 @@ static int tc_kern_power_get(void *ctx, enum i915_tc_power power, unsigned port)
 static void tc_kern_power_put(void *ctx, enum i915_tc_power power, unsigned port);
 static void tc_kern_lock(void *ctx, unsigned port);
 static void tc_kern_unlock(void *ctx, unsigned port);
-static int tc_kern_delay_us(void *ctx, unsigned us);
+static int tc_kern_now_us(void *ctx, uint64_t *now);
+static int tc_kern_sleep_us(void *ctx, unsigned us);
 static void tc_kern_log(void *ctx, const char *format, ...) __attribute__((format(printf, 2, 3)));
 static void tc_kern_declare_ports(struct i915_display *display, struct i915_tc_kern *k);
 static struct i915_tc *tc_kern_lcd_ports(struct i915_lcd_kernel *kernel, int tc_port, const char *what);
@@ -106,7 +114,8 @@ drv_i915_tc_kern_start(
 	env.power_put = tc_kern_power_put;
 	env.lock = tc_kern_lock;
 	env.unlock = tc_kern_unlock;
-	env.delay_us = tc_kern_delay_us;
+	env.now_us = tc_kern_now_us;
+	env.sleep_us = tc_kern_sleep_us;
 	env.log = tc_kern_log;
 	drv_i915_tc_init(&k->tc, &env, display_ver);
 
@@ -122,6 +131,29 @@ drv_i915_tc_kern_start(
 		if (k->tc.port[port].present)
 			drv_i915_tc_kern_report(&k->tc, port);
 	}
+}
+
+/*
+ * Gives the display's Type-C ports back to the Type-C subsystem when the
+ * driver stops (intel_tc_port_cleanup()): every PHY the display owns and
+ * every TC cold block it holds.
+ *
+ * Runs after the outputs were stopped and the hotplug path closed, while
+ * the power domains still work; any later step on a port finds none.
+ */
+void
+drv_i915_tc_kern_stop(
+	struct i915_display *display)
+{
+	struct i915_tc_kern *k;
+
+	/* A display whose ports were never bound has nothing to give back. */
+	k = &display->tck;
+	if (!k->live)
+		return;
+
+	/* Gives every port back; the core logs each one. */
+	drv_i915_tc_stop(&k->tc);
 }
 
 /*
@@ -522,22 +554,56 @@ tc_kern_unlock(
 	mutex_unlock(&k->locks[port]);
 }
 
-/* Busy-waits for the core: 0, or EIO when the time base failed. */
+/* Reads the monotonic counter in microseconds for the core: 0, or EIO when there is no counter. */
 static int
-tc_kern_delay_us(
+tc_kern_now_us(
 	void *ctx,
-	unsigned us)
+	uint64_t *now)
 {
-	int delay_error;
+	uint64_t counter;
+	uint64_t frequency;
+	uint64_t seconds;
+	uint64_t remainder;
+	bool read;
 
 	UNUSED_PARAMETER(ctx);
 
-	/* Waits with the driver's delay. */
-	delay_error = drv_i915_udelay(us);
-	if (delay_error != 0)
-		return delay_error;
+	/* The counter and its rate; without them there is no time. */
+	read = kern_rtc_read_counter(&counter, &frequency);
+	if (!read)
+		return EIO;
+	if (frequency == 0u)
+		return EIO;
 
-	/* Succeeded: the time has passed. */
+	/*
+	 * The whole seconds and the rest apart, so the conversion cannot
+	 * overflow however long the counter has run.
+	 */
+	seconds = counter / frequency;
+	remainder = counter % frequency;
+	*now = seconds * I915_TC_KERN_US_PER_SECOND;
+	*now += remainder * I915_TC_KERN_US_PER_SECOND / frequency;
+
+	/* Succeeded: the time now. */
+	return 0;
+}
+
+/*
+ * Sleeps for the core, at least the time asked for, giving the CPU to other
+ * threads (the kernel's sleep lasts to a scheduler tick): 0.  A failed time
+ * base ends the sleep early; the core's clock then reports it.
+ */
+static int
+tc_kern_sleep_us(
+	void *ctx,
+	unsigned us)
+{
+	UNUSED_PARAMETER(ctx);
+
+	/* Sleeps, with no upper bound to keep. */
+	kern_usleep_range(us, us + us);
+
+	/* Succeeded: the time has passed, or the clock will say why not. */
 	return 0;
 }
 
