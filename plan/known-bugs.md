@@ -113,7 +113,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-243](bugs/BUG-243.md) | full の OSK で窓が縮むと app の表示が縦に圧縮される（resize が app に届かない疑い） | reproduced（ユーザーの UAT） / resolved（T1-332、2026-10-07） | 2026-10-07 ユーザーの ad-hoc UAT | WS102（P2、q841） |
 | [BUG-244](bugs/BUG-244.md) | i915 の render で vkFreeMemory の後に bind した buffer・image が解放済みの memory の record を使う（use-after-free） | unreproduced（code の読み） / tracking | 2026-10-07 WS083 の design-reviewer | WS031 |
 | [BUG-245](bugs/BUG-245.md) | docked の X の窓で bar の × を押しても閉じない（press を先の handler が取る疑い） | reproduced（QEMU） / resolved（T1-344、2026-10-07） | 2026-10-07 T1-340・341・343 | compositor の bar（P2） |
-| [BUG-246](bugs/BUG-246.md) | 整列の popup と入れ替えの animation が pointer の事象が無いと進まない、最初の click まで移動ごとにちらつく（5320 実機） | reproduced（実機） / scheduled（直しの実装済み、実機の確認待ち） | 2026-10-07 ユーザーの UAT | P2（UAT 優先） |
+| [BUG-246](bugs/BUG-246.md) | 整列の popup と入れ替えの animation が pointer の事象が無いと進まない、最初の click まで移動ごとにちらつく（5320 実機） | reproduced（実機） / scheduled（直しの実装済み、実機の確認待ち） | 2026-10-07 ユーザーの UAT | 修正 cfdb21813、実機で確認済み（2026-10-08 P2 の q869 の確認で resolved に） |
 | [BUG-247](bugs/BUG-247.md) | docked の窓の bar を touchpad で 2 回 tap しても解けず 3 回要る（5320 実機） | reproduced（実機） / scheduled（直しの実装済み、実機の確認待ち） | 2026-10-07 ユーザーの UAT | P2（BUG-246 の後） |
 | [BUG-248](bugs/BUG-248.md) | Text Editor のメニューが独自の形、他の app と同じ下線の付いた共通のメニューに | reproduced（UAT） / scheduled | 2026-10-07 ユーザーの UAT | q851 P2: 修正済み（title bar の controls を外して menu bar、Find は panel）、build・host まで。T1 の QEMU と 5320 の UAT 待ち |
 | [BUG-249](bugs/BUG-249.md) | 5320 で Restart が終わらない（popup のまま）、Power Off は可 | reproduced（実機） / scheduled（8936e05e7 で直した、QEMU T1-364 PASS、5320 の実機待ち） | 2026-10-07 ユーザー | P2 が fallback を実装（ACPI の reset register → 0xcf9 → keyboard、5330 の FADT は 0xB2←0x73）、実機の確認待ち |
@@ -294,3 +294,6 @@ the boot BOT disk `sdb`. This is a boot-media wait/order observation; a shared
 root cause with the original enumeration error is unproven. With boot BOT on
 xHCI port 1 and UAS on port 2, `q199-super3` boots and passes UAS lifecycle I/O.
 Preserve both topologies when investigating; the passing order is no general fix.
+
+
+2026-10-08 q869（P2）: BUG-200〜257 の tracking・scheduled の 51 件を確かめ、各 ticket に「2026-10-08 P2 の確認」の節。A（実装済み、QEMU・host の証拠、残りは実機の UAT）33 件: 203–209・211・213–220・222・223・225・226・228–230・232–237・248・249・254。B（実装済み、証拠無し）4 件: 231・247・251・252。C（未実装・一部）: 212・221（q866 で desktop を直した）・238・239・240・241・242・244・256。D（判断）: 200・201・224・227・255。各行の古い記載は ticket の節が正。
