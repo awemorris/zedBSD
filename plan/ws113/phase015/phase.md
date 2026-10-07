@@ -93,9 +93,14 @@ docked の窓があればその title・menu・ボタン（前と同じ）、右
   launcher と時計は `head_bar_press`。
 - heads.c: `heads_shows` に 8（bar）。glass の session（login・lock・画面 off でない）では head を毎 frame 描く（時計・状態・icon の変化のため）。
 
-人の判断を Q1 に送った点（推測で決めず、今の実装の扱い）:
-1. 「切り替えのつまみ」は desktops の pill（desktop の切り替え・整列の menu）と読んだ。
-2. system bar（anchor）の icon は今までどおり desktop の全ての窓（head の窓も含む）。「その画面に置いた window」に揃えて anchor も anchor の窓だけにするかは未決。
+人の判断を Q1 に送った点:
+1. 「切り替えのつまみ」は desktops の pill（desktop の切り替え・整列の menu）と読んだ。ユーザーにも意味が分からず、答え待ち（2026-10-08 Q1）。今は desktops の pill のまま。
+2. （決定 2026-10-08 ユーザー）「各番目の画面のdock barには、その画面のウィンドウのみを出してください。app単位ではなくwindow単位にします。でも、画面ごとのapp iconsは、ウィンドウがあればその画面のdockに表示され、プレビューはその画面のウィンドウだけにします。」
+   Q1 の読み: anchor を含む全ての画面で、bar の app icon は「その画面に window を持つ app」だけ（window 単位: app の window のどれかがその画面にあれば出る）、previews もその画面の window だけ、
+   同じ app が 2 つの画面に window を持てば両方の bar に出る、switcher は全ての window のまま。
+   実装（P1）: apps-bar.c の `view_collect_on(server, slot, every, view)`: bar（`kwl_apps_view_build_on`）は全ての出力でその出力の窓だけ、上の窓もその出力の top、
+   switcher（`kwl_apps_view_collect`）は every で全ての窓と desktop の top。`displays-p015.sh` に「the system bar has b's icon alone (a is head 1's)」を足した。
+   1 つの display だけの時は今までと同じ（全ての窓が anchor）。
 
 ### 確認（host・build）
 
