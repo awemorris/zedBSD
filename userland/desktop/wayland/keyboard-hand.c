@@ -21,6 +21,12 @@
  * the ink's size and place on it count with its shape (hand-cloud.c's
  * hand_recognize_framed).  It also measures the ink (its strokes, points
  * and bounds) for the log.
+ *
+ * The templates are read on a thread of their own, started when the
+ * handwriting face is first shown (kwl_hand_preload), so that the first
+ * recognition does not wait for the file on the event loop; ink too
+ * little to have a shape, and missing or broken templates, are said in
+ * the note (ws177-p009).
  */
 
 #include "keyboard.h"
@@ -29,16 +35,21 @@
 #include "userland/desktop/paths.h"
 
 #include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* Marks a parameter a function takes but does not use. */
+#define UNUSED_PARAMETER(name)	((void)(name))
 
 /* The templates' file (the package hand-hershey), and the largest one read. */
 #define HAND_TEMPLATES_PATH	KEILAND_DATADIR "/keiland/hand/hershey.txt"
 #define HAND_TEMPLATES_MAX	(1024U * 1024U)
 
-/* The note when no template could be read. */
+/* The note when no template could be read, and the note for ink too little to read (a tap). */
 #define HAND_NO_DATA_NOTE	"No handwriting data"
+#define HAND_SCANT_NOTE		"Too small to read"
 
 /* The share of the writing area's height under which ink is small, and the most candidates looked at. */
 #define HAND_SMALL_SHARE	0.40f
@@ -60,15 +71,29 @@ static const uint32_t hand_sizes[][2] = {
 };
 
 /*
- * The templates, read the first time a recognition needs them (hand_state:
- * 0 not tried, 1 read, -1 failed); the event loop's alone.
+ * The templates, read once (hand_state: 0 not read yet, 1 read, -1 the
+ * read failed).  The reader thread writes both while hand_loader_running
+ * is set; the event loop touches them only when no reader runs, after
+ * joining it (hand_join), which makes the thread's writes visible.
  */
 static struct hand_templates hand_templates;
 static int hand_state;
 
+/*
+ * The thread reading the templates (kwl_hand_preload) and whether it was
+ * started and not joined yet.  Only the event loop starts and joins it,
+ * so the flag needs no lock.
+ */
+static pthread_t hand_loader;
+static int hand_loader_running;
+
 static void hand_recognize_ink(const struct kwl_hand_ink *ink, const struct hand_frame *frame, int32_t area, size_t first_pair, struct kwl_hand_result *result);
 static void hand_sized(uint32_t *codes, size_t *count, int small, size_t first_pair);
 static void hand_utf8(uint32_t code, char *text, size_t size);
+static int hand_load(const char *path);
+static void *hand_loader_run(void *argument);
+static void hand_join(void);
+static void hand_ink_input(const struct kwl_hand_ink *ink, struct hand_cloud_input *input, float *xs, float *ys, unsigned char *starts);
 
 /*
  * Clears the ink: no strokes.
@@ -226,49 +251,61 @@ kwl_hand_bounds(
 }
 
 /*
- * Reads the templates from a file (the package hand-hershey's).  Returns 0,
- * or an errno value (the recognition then answers no candidates).
+ * Reads the templates from a file (the package hand-hershey's), after
+ * any read under way on the reader thread.  Returns 0, or an errno value
+ * (the recognition then answers no candidates but the note).
  */
 int
 kwl_hand_load(
 	const char *path)
 {
-	FILE *file;
-	char *text;
-	size_t length;
 	int error;
 
-	/* The file, whole. */
-	hand_templates_free(&hand_templates);
-	hand_state = -1;
-	file = fopen(path, "r");
-	if (file == NULL) {
-		error = errno;
-		printf("KWL OSK hand templates path=%s error=%d\n", path, error);
-		return error;
-	}
+	/* Waits for a read the reader thread may still be doing. */
+	hand_join();
 
-	/* Room for its text. */
-	text = malloc(HAND_TEMPLATES_MAX);
-	if (text == NULL) {
-		fclose(file);
-		return ENOMEM;
-	}
-
-	/* Its text. */
-	length = fread(text, 1U, HAND_TEMPLATES_MAX, file);
-	fclose(file);
-
-	/* The templates of it. */
-	error = hand_templates_parse(&hand_templates, text, length);
-	free(text);
-	printf("KWL OSK hand templates path=%s count=%lu error=%d\n", path, (unsigned long)hand_templates.count, error);
+	/* Reads the file here. */
+	error = hand_load(path);
 	if (error != 0)
 		return error;
 
 	/* Succeeded: read. */
-	hand_state = 1;
 	return 0;
+}
+
+/*
+ * Starts reading the templates on a thread of their own, the first time
+ * the handwriting face is shown, so that the first recognition finds them
+ * read (backlog-p2 line 59).  When an earlier read failed, puts the note
+ * that there is no data in result at once.
+ */
+void
+kwl_hand_preload(
+	struct kwl_hand_result *result)
+{
+	int error;
+
+	/* A read under way, or done, needs nothing more. */
+	if (hand_loader_running)
+		return;
+	if (hand_state == 1)
+		return;
+
+	/* A read that failed: says so before anything is written. */
+	if (hand_state == -1) {
+		(void)snprintf(result->note, sizeof(result->note), "%s", HAND_NO_DATA_NOTE);
+		return;
+	}
+
+	/* Starts the reader; without a thread the first recognition reads the file itself. */
+	error = pthread_create(&hand_loader, NULL, hand_loader_run, NULL);
+	if (error != 0) {
+		printf("KWL OSK hand templates thread error=%d\n", error);
+		return;
+	}
+
+	/* The reader runs until hand_join joins it. */
+	hand_loader_running = 1;
 }
 
 /*
@@ -330,9 +367,9 @@ hand_recognize_ink(
 	float distances[HAND_LOOKED];
 	int32_t bounds[4];
 	size_t count;
-	unsigned stroke;
 	unsigned point;
 	int small;
+	int scant;
 
 	/* Nothing yet. */
 	memset(result, 0, sizeof(*result));
@@ -341,29 +378,26 @@ hand_recognize_ink(
 	if (ink->count == 0U)
 		return;
 
-	/* The templates, read the first time. */
+	/* Takes the templates the reader thread read, or reads them here when no thread did. */
+	hand_join();
 	if (hand_state == 0)
-		(void)kwl_hand_load(HAND_TEMPLATES_PATH);
+		(void)hand_load(HAND_TEMPLATES_PATH);
+
+	/* Without templates, says so instead of answering. */
 	if (hand_state != 1) {
 		(void)snprintf(result->note, sizeof(result->note), "%s", HAND_NO_DATA_NOTE);
 		return;
 	}
 
-	/* The ink's points, each stroke's first marked. */
-	input.count = 0U;
-	for (stroke = 0U; stroke < ink->count; stroke++) {
-		for (point = 0U; point < ink->strokes[stroke].count && input.count < HAND_CLOUD_INPUT_MAX; point++) {
-			xs[input.count] = (float)ink->strokes[stroke].points[point].x;
-			ys[input.count] = (float)ink->strokes[stroke].points[point].y;
-			starts[input.count] = (unsigned char)(point == 0U);
-			input.count++;
-		}
-	}
+	/* Gives the recognizer the ink's points, all its strokes (backlog-p2 line 60). */
+	hand_ink_input(ink, &input, xs, ys, starts);
 
-	/* The points as the recognizer takes them. */
-	input.x = xs;
-	input.y = ys;
-	input.starts = starts;
+	/* Ink too little to have a shape (a tap) is not read; says so (backlog-p2 line 55). */
+	scant = hand_ink_scant(&input, frame);
+	if (scant) {
+		(void)snprintf(result->note, sizeof(result->note), "%s", HAND_SCANT_NOTE);
+		return;
+	}
 
 	/* The nearest characters (on the area when there is one), put in the order the ink's size says. */
 	count = hand_recognize_framed(&hand_templates, &input, frame, codes, distances, HAND_LOOKED);
@@ -464,4 +498,167 @@ hand_utf8(
 
 	/* As text. */
 	(void)snprintf(text, size, "%s", (const char *)bytes);
+}
+
+/*
+ * Reads the templates from a file into hand_templates and hand_state.
+ * Returns 0, or an errno value: the file is missing or unreadable, larger
+ * than HAND_TEMPLATES_MAX (its end would be cut), or has no template that
+ * reads (backlog-p2 line 56).
+ */
+static int
+hand_load(
+	const char *path)
+{
+	FILE *file;
+	char *text;
+	size_t length;
+	int failed;
+	int error;
+
+	/* Forgets the templates read before; until the read succeeds there are none. */
+	hand_templates_free(&hand_templates);
+	hand_state = -1;
+
+	/* Opens the file. */
+	file = fopen(path, "r");
+	if (file == NULL) {
+		error = errno;
+		printf("KWL OSK hand templates path=%s error=%d\n", path, error);
+		return error;
+	}
+
+	/* Makes room for its text and one byte more, which tells a file too large. */
+	text = malloc(HAND_TEMPLATES_MAX + 1U);
+	if (text == NULL) {
+		fclose(file);
+		return ENOMEM;
+	}
+
+	/* Reads its text. */
+	length = fread(text, 1U, HAND_TEMPLATES_MAX + 1U, file);
+	failed = ferror(file);
+	fclose(file);
+
+	/* Refuses a file that could not be read whole. */
+	if (failed) {
+		free(text);
+		printf("KWL OSK hand templates path=%s error=%d\n", path, EIO);
+		return EIO;
+	}
+
+	/* Refuses a file too large, rather than reading the templates its cut end would garble. */
+	if (length > HAND_TEMPLATES_MAX) {
+		free(text);
+		printf("KWL OSK hand templates path=%s error=%d\n", path, EFBIG);
+		return EFBIG;
+	}
+
+	/* Reads the templates of it: a broken line or no template at all fails the read. */
+	error = hand_templates_parse(&hand_templates, text, length);
+	free(text);
+	printf("KWL OSK hand templates path=%s count=%lu error=%d\n", path, (unsigned long)hand_templates.count, error);
+	if (error != 0)
+		return error;
+
+	/* hand_state 1 tells the recognitions that the templates are there. */
+	hand_state = 1;
+
+	/* Succeeded: read. */
+	return 0;
+}
+
+/* Reads the templates on the reader thread (kwl_hand_preload). */
+static void *
+hand_loader_run(
+	void *argument)
+{
+	UNUSED_PARAMETER(argument);
+
+	/* Reads the file; the outcome is left in hand_state for the event loop. */
+	(void)hand_load(HAND_TEMPLATES_PATH);
+
+	/* The thread's work is done. */
+	return NULL;
+}
+
+/* Waits for the reader thread, if one runs, so that its templates can be used. */
+static void
+hand_join(void)
+{
+	/* No reader runs. */
+	if (!hand_loader_running)
+		return;
+
+	/* Waits for it; its writes are the event loop's from here. */
+	(void)pthread_join(hand_loader, NULL);
+	hand_loader_running = 0;
+}
+
+/*
+ * Puts the ink's points in the recognizer's form (xs, ys and starts, of
+ * HAND_CLOUD_INPUT_MAX each): all of them, or for ink of more points than
+ * that (KWL_HAND_STROKES strokes of KWL_HAND_POINTS) every step-th point
+ * of each stroke with its first and its last, so that every stroke still
+ * counts (backlog-p2 line 60).
+ */
+static void
+hand_ink_input(
+	const struct kwl_hand_ink *ink,
+	struct hand_cloud_input *input,
+	float *xs,
+	float *ys,
+	unsigned char *starts)
+{
+	const struct kwl_hand_stroke *stroke;
+	unsigned total;
+	unsigned step;
+	unsigned room;
+	unsigned index;
+	unsigned point;
+	int kept;
+
+	/*
+	 * Works out the step: a stroke keeps at most one point in step and its
+	 * last, so the room for the points is what is left after a last point
+	 * of every stroke and a first point that may not fall on the step.
+	 */
+	total = kwl_hand_points(ink);
+	room = HAND_CLOUD_INPUT_MAX - 2U * KWL_HAND_STROKES;
+	step = 1U;
+	if (total > HAND_CLOUD_INPUT_MAX)
+		step = (total + room - 1U) / room;
+
+	/* Copies each stroke's kept points, its first marked as the stroke's start. */
+	input->count = 0U;
+	for (index = 0U; index < ink->count; index++) {
+		stroke = &ink->strokes[index];
+		for (point = 0U; point < stroke->count; point++) {
+			/* The first point, every step-th one and the last one are kept. */
+			kept = 0;
+			if (point % step == 0U)
+				kept = 1;
+			else if (point + 1U == stroke->count)
+				kept = 1;
+
+			/* A point between the steps is left out. */
+			if (!kept)
+				continue;
+
+			/* The bound holds by the step; it is checked all the same. */
+			if (input->count >= HAND_CLOUD_INPUT_MAX)
+				break;
+			xs[input->count] = (float)stroke->points[point].x;
+			ys[input->count] = (float)stroke->points[point].y;
+			starts[input->count] = 0U;
+			if (point == 0U)
+				starts[input->count] = 1U;
+			input->count++;
+		}
+	}
+
+	/* Points the input at its tables. */
+	input->x = xs;
+	input->y = ys;
+	input->starts = starts;
 }

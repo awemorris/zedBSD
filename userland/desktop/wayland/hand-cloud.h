@@ -28,7 +28,10 @@
  * the dakuten's two short strokes or the handakuten's small ring at the
  * top right are few points of a cloud and weigh too little in it, so they
  * are taken away, the rest is recognized, and the mark is put on the
- * candidates that take it (か + ゛ is が).
+ * candidates that take it (か + ゛ is が).  A mark written elsewhere (in
+ * the body, at the top left) is taken when the rest reads better without
+ * it (ws177-p009).  Ink too little to have a shape (a tap) has no
+ * candidates: hand_ink_scant tells it, for the caller to say so.
  *
  * A written character's size and place on the writing area tell apart the
  * characters of one shape (c and C, o and the degree sign, . and the
@@ -100,6 +103,7 @@ struct hand_cloud_input {
 };
 
 int hand_cloud_make(const struct hand_cloud_input *input, struct hand_cloud *cloud);
+int hand_ink_scant(const struct hand_cloud_input *input, const struct hand_frame *frame);
 float hand_cloud_distance(const struct hand_cloud *written, const struct hand_cloud *template_cloud);
 int hand_templates_parse(struct hand_templates *templates, const char *text, size_t length);
 void hand_templates_free(struct hand_templates *templates);

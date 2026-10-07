@@ -3100,8 +3100,9 @@ keyboard_hand_toggle(
 	memset(&keyboard.result, 0, sizeof(keyboard.result));
 	server->dirty = 1;
 
-	/* The log line the tests read, with the writing area's place. */
+	/* The log line the tests read, with the writing area's place; the templates are read ahead meanwhile. */
 	if (keyboard.hand) {
+		kwl_hand_preload(&keyboard.result);
 		keyboard_hand_area(area);
 		printf("KWL OSK hand on area=%d,%d,%d,%d\n", area[0], area[1], area[2], area[3]);
 		return;
