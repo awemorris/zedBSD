@@ -164,19 +164,41 @@ kl_canvas_clip_pop(
 }
 
 /*
- * Makes the whole canvas clear: every pixel transparent, whatever the clip.
+ * Makes the canvas clear within the clip: every pixel transparent (the
+ * whole canvas when no clip is pushed; a frame drawn again only in a part,
+ * BUG-226, clears that part).
  */
 void
 kl_canvas_clear(
 	struct kl_canvas *canvas)
 {
 	uint32_t *row;
+	int left;
+	int top;
+	int right;
+	int bottom;
 	int y;
 
-	/* Each row, all its pixels zero (transparent black, premultiplied). */
-	for (y = 0; y < canvas->height; y++) {
-		row = canvas->pixels + (size_t)y * canvas->stride;
-		memset(row, 0, sizeof(row[0]) * (size_t)canvas->width);
+	/* The clip, kept inside the canvas. */
+	left = canvas->clip.x;
+	if (left < 0)
+		left = 0;
+	top = canvas->clip.y;
+	if (top < 0)
+		top = 0;
+	right = canvas->clip.x + canvas->clip.width;
+	if (right > canvas->width)
+		right = canvas->width;
+	bottom = canvas->clip.y + canvas->clip.height;
+	if (bottom > canvas->height)
+		bottom = canvas->height;
+	if (right <= left || bottom <= top)
+		return;
+
+	/* Each row of it, its pixels zero (transparent black, premultiplied). */
+	for (y = top; y < bottom; y++) {
+		row = canvas->pixels + (size_t)y * canvas->stride + (size_t)left;
+		memset(row, 0, sizeof(row[0]) * (size_t)(right - left));
 	}
 }
 
@@ -190,6 +212,11 @@ kl_canvas_fill(
 	kl_color color)
 {
 	uint32_t *row;
+	uint32_t source;
+	unsigned alpha;
+	unsigned red;
+	unsigned green;
+	unsigned blue;
 	int inside;
 	int left;
 	int top;
@@ -203,11 +230,37 @@ kl_canvas_fill(
 	if (inside == 0)
 		return;
 
-	/* Every pixel, blended with the color. */
+	/* A transparent color leaves every pixel as it is. */
+	alpha = (color >> 24) & 0xffU;
+	if (alpha == 0U)
+		return;
+
+	/* An opaque color replaces every pixel (as canvas_blend does pixel by pixel). */
+	if (alpha >= 255U) {
+		source = 0xff000000U | (color & 0xffffffU);
+		for (y = top; y < bottom; y++) {
+			row = canvas->pixels + (size_t)y * canvas->stride;
+			for (x = left; x < right; x++)
+				row[x] = source;
+		}
+
+		/* Every pixel replaced. */
+		return;
+	}
+
+	/*
+	 * Otherwise the color is premultiplied once and laid over every pixel,
+	 * as canvas_blend does at full coverage (BUG-226: the panels' fills were
+	 * most of a frame, the color worked out again for each pixel).
+	 */
+	red = ((color >> 16) & 0xffU) * alpha / 255U;
+	green = ((color >> 8) & 0xffU) * alpha / 255U;
+	blue = (color & 0xffU) * alpha / 255U;
+	source = (alpha << 24) | (red << 16) | (green << 8) | blue;
 	for (y = top; y < bottom; y++) {
 		row = canvas->pixels + (size_t)y * canvas->stride;
 		for (x = left; x < right; x++)
-			canvas_blend(&row[x], color, 1.0f);
+			canvas_blend_premultiplied(&row[x], source);
 	}
 }
 

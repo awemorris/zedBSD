@@ -284,6 +284,7 @@
 		kl_ui_destroy;
 		kl_ui_pointer_motion;
 		kl_ui_pointer_leave;
+		kl_ui_take_damage;
 		kl_ui_pointer_button;
 		kl_ui_wheel;
 		kl_ui_axis;
