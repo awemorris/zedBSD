@@ -3,7 +3,7 @@
 # ws177-p010: keiland-preview の仕上げ（案 J）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（2026-10-08 P1 q886 の 2: 実装・host PASS・zedBSD と Linux の build warning 0。QEMU は T1 の AAT `apps.files.thumbnails`）
+Status: cleared（2026-10-08 Q1 判定、T1-414 と host の試験）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q886 の 2（P1、2026-10-08）
@@ -37,3 +37,7 @@ Origin: [backlog-p2](../backlog-p2.md) の 131・133・142（WS168 ws168-p003・
 ## Event
 
 2026-10-08 / q886-i02（P1）: 実装と host・build の確認。途中で T1-412 の p004 の直しのために区切った（692f9e0f7）。
+
+## T1-414 の判定（2026-10-08 Q1）
+
+AAT apps.files.thumbnails は fail でない: sample.png・jpg・pdf が error=0、2 度目に cached=1、broken.png は `failed=1` の印、Wallpaper 7 of 7、SANDBOX deny 0→0。Q1 が PNG（build/review/t1-414/apps.files.thumbnails-files.png）で sample.pdf の縮小画像の左上に文字の行が描かれているのを目視（前は白い頁、埋め込まれていない font が sandbox の中で描かれた）。子が 2 つ同時かは log に時刻が無く QEMU では判定できない（host-model の check による）。cleared。
