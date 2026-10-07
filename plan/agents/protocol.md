@@ -90,3 +90,7 @@ user「テストはメインエージェントが集約してサブエージェ�
 ## 試験の image は依頼の tree で作り直す（2026-10-08 Q1）
 
 T1-314 の FAIL（apps.photos.browse）は、使い回しの AAT の image（build/aat-t1202）の photos が依頼の tree より古かったため（`--import` を知らない使い方の行）。q872 の P2 の調べ（ws157-p005）。→ T1 は image を依頼の tree（main の SHA）で build し直して作り、使い回す時は全ての package が依頼の tree で作り直されたことを確かめる。結果には image の tree の SHA を書く。app の新しい option を試す依頼では、guest で使い方の行（例 `/bin/photos --help`）を確かめてから流す。Q1 は FAIL を直す Queue にする前に、同じ試験の後の T1 の行（再試験の PASS）を確かめる。
+
+## 担当の build は target を名指す（2026-10-08 Q1）
+
+P1 が worktree で target 無しの make（既定の goal は disk-image）を流し、target の clang・libcxx・openssh・openssl の package の build を始めた（約 10 分で自分で止めた）。共有の toolchain は lock のまま（Q1 が `toolchain-lock.sh status` で確かめた）、worktree の中の途中の出力は Q1 が消した。→ 実装の担当（P）は個別の target（`$(BUILD)/vmunix`・`$(BUILD)/bin/<app>`・`$(BUILD)/dynamic/<lib>.so` など）を名指して make し、target 無しの make・disk-image を流さない（image を作るのは T1 か Q1）。
