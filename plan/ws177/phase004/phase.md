@@ -50,3 +50,8 @@ backlog-p2 12（Notes の 512 byte）: limit は上限を下げる口で、Notes
 desktop-p004.sh PASS（accent の keyboard の focus、Q1 が PNG を目視）。試験の道具の不具合（qmp-pointer に click の step が無く Users > Add を開けない）で kl_field の上限は QEMU で未確認。P1 が試験を直して再依頼する。
 
 2026-10-08 / T1-406（Q1 の判定）: desktop-p004.sh は PASS（accent の 5 本）。ただし `qmp-pointer` に click の step が無く Users > Add が開かず、名前の欄の 32 は未確認（打った文字は Current password の欄へ）。直し（P1）: click を move・down・up に、Add User... は Settings の `ZSETTINGS CONTROL index=21` の行から位置を取る、名前・全名の欄の長さを log（`USERS admin field=N length=L`、password は出さない）、32 で止まり 33 以上が無いことを log で判定。T1 の再試験を依頼。
+
+## T1-407（2026-10-08、4 回とも一部 FAIL）と試験の直し（P1）
+
+accent の 5 行は ok。`FAIL: the Add User... button (control 21) is not on the Users page`（users-layout.txt は controls=4: index 1・2・3・10 の password の card だけ）。原因は試験の前提: Settings を root で起動していた（log `USERS account name=root`、`list count=1`）。root は人の account ではないので一覧に自分の行が無く、`admin_available` が自分の行の admin（wheel）を見つけられず管理の card を出さない（code の動きは設計どおり、実の session は kei）。compositor の側は `kl_backend_account_can_administer` で ADMINISTER を出している。
+直し: `desktop-p004.sh` の 2 を、Settings を kei（wheel の人）で起動する形に（root の compositor の socket `/tmp/wayland-0` を chmod 666、`su kei -c`、log は `/tmp/s-kei.log`、出力 `settings-kei.log`、FAIL の時の users-layout.txt に USERS の行も）。code は変えない。T1 に再試験を依頼する（T1-407 の再）。
