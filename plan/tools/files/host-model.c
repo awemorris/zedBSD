@@ -648,13 +648,66 @@ main(
 		check(width == 200 && height == 50, "fit: a wide picture fills the box's width");
 
 		thumb = fm_thumb_get(&pictures, path, 7);
-		check(thumb == NULL && strcmp(pictures.thumb_wanted, path) == 0, "thumbs: a new file is asked for");
+		check(thumb == NULL && strcmp(pictures.thumb_wanted[0], path) == 0, "thumbs: a new file is asked for");
 		made = fm_thumb_tick(&pictures);
 		thumb = fm_thumb_get(&pictures, path, 7);
-		check(made == 1 && thumb != NULL && thumb->width == 256 && pictures.thumb_wanted[0] == '\0', "thumbs: made in a round, then kept");
+		check(made == 1 && thumb != NULL && thumb->width == 256 && pictures.thumb_wanted[0][0] == '\0', "thumbs: made in a round, then kept");
 		thumb = fm_thumb_get(&pictures, path, 8);
-		check(thumb == NULL && pictures.thumb_wanted[0] != '\0', "thumbs: a changed file is asked for again");
+		check(thumb == NULL && pictures.thumb_wanted[0][0] != '\0', "thumbs: a changed file is asked for again");
 		fm_thumb_release(&pictures);
+
+		/* ws177-p010: two files asked for at once, a third waits; a damaged picture's failure is kept on disk. */
+		{
+			char damaged[FM_PATH_MAX + 32];
+			char third[FM_PATH_MAX + 32];
+			int error;
+
+			snprintf(damaged, sizeof(damaged), "%s/damaged.png", root);
+			make_file(damaged, "\x89PNG\r\n\x1a\n not a picture");
+			snprintf(third, sizeof(third), "%s/third.ppm", root);
+			make_file(third, "P6\n1 1\n255\nabc");
+			(void)fm_thumb_get(&pictures, path, 8);
+			(void)fm_thumb_get(&pictures, damaged, 1);
+			(void)fm_thumb_get(&pictures, third, 1);
+			check(strcmp(pictures.thumb_wanted[0], path) == 0 && strcmp(pictures.thumb_wanted[1], damaged) == 0, "thumbs: two files asked for at once, the third not");
+			(void)fm_thumb_tick(&pictures);
+			check(pictures.thumb_wanted[0][0] == '\0', "thumbs: both made in a round");
+			check(fm_thumb_get(&pictures, damaged, 1) == NULL && fm_thumb_get(&pictures, damaged, 1) == NULL && pictures.thumb_wanted[0][0] == '\0',
+			    "thumbs: a damaged picture is not asked for again");
+			memset(&image, 0, sizeof(image));
+			error = fm_thumb_cache_read(damaged, &image);
+			check(error == EINVAL, "thumb cache: a damaged picture's failure is kept");
+			fm_thumb_release(&pictures);
+			(void)fm_thumb_get(&pictures, damaged, 1);
+			made = fm_thumb_tick(&pictures);
+			check(made == 1 && fm_thumb_get(&pictures, damaged, 1) == NULL && pictures.thumb_wanted[0][0] == '\0', "thumbs: the kept failure is read in a new session");
+			fm_thumb_release(&pictures);
+			{
+				FILE *file = fopen(damaged, "ab");
+				fputc(0, file);
+				fclose(file);
+			}
+			check(fm_thumb_cache_read(damaged, &image) == ENOENT, "thumb cache: a changed damaged file is tried again");
+
+			/* A picture made without waiting (Quick Look's, the hero's). */
+			error = fm_picture_begin(FM_PICTURE_PEEK, path, 64, 64);
+			made = 0;
+			for (width = 0; width < 500 && made == 0; width++) {
+				made = fm_picture_follow(FM_PICTURE_PEEK, &image, &error);
+				if (made == 0)
+					usleep(10000);
+			}
+			check(made == 1 && error == 0 && image.width == 64 && image.height == 43 && fm_picture_busy() == 0, "picture: made without waiting, 64x43");
+			kl_image_release(&image);
+			error = fm_picture_begin(FM_PICTURE_HERO, damaged, 64, 64);
+			made = 0;
+			for (width = 0; width < 500 && made == 0; width++) {
+				made = fm_picture_follow(FM_PICTURE_HERO, &image, &error);
+				if (made == 0)
+					usleep(10000);
+			}
+			check(made == 1 && error == EINVAL && image.pixels == NULL, "picture: a damaged one made without waiting says EINVAL");
+		}
 
 		/* The thumbnail kept on disk (ws127-p002, F-035): written by the round above, read back alike; stale once the file changes. */
 		memset(&image, 0, sizeof(image));

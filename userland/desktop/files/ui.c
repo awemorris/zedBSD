@@ -189,6 +189,9 @@ fm_app_release(
 	/* The operations, stopped and let go, the widgets' input, the hero's pictures, the thumbnails and what the preview read. */
 	fm_actions_release(app);
 	fm_widgets_release(app);
+	if (app->hero_pending != 0)
+		fm_picture_cancel(FM_PICTURE_HERO);
+	app->hero_pending = 0;
 	kl_image_release(&app->hero_source);
 	kl_image_release(&app->hero);
 	fm_thumb_release(app);
@@ -298,8 +301,16 @@ fm_ui_tick(
 	/* The path's field suggests folders once its typing rests (ws127-p010). */
 	fm_location_tick(app);
 
-	/* The thumbnail asked for is made, and shown in a new frame. */
+	/* The thumbnails asked for are made, and shown in a new frame. */
 	made = fm_thumb_tick(app);
+	if (made != 0)
+		app->dirty = 1;
+
+	/* Quick Look's picture and the hero's, made without waiting, are shown when they are done (ws177-p010). */
+	made = fm_peek_tick(&app->peek);
+	if (made != 0)
+		app->dirty = 1;
+	made = fm_home_tick(app);
 	if (made != 0)
 		app->dirty = 1;
 
@@ -674,11 +685,14 @@ fm_ui_wait(
 	int busy;
 
 	/* A thumbnail asked for, an operation, a search walking or a checksum: no sleep. */
-	if (app->thumb_wanted[0] != '\0')
+	if (app->thumb_wanted[0][0] != '\0')
 		return 0;
 
-	/* A thumbnail's child running (ws168-p004): looked at again soon. */
+	/* A thumbnail's child running (ws168-p004), or a picture's (ws177-p010): looked at again soon. */
 	busy = fm_thumb_busy();
+	if (busy != 0)
+		return 20;
+	busy = fm_picture_busy();
 	if (busy != 0)
 		return 20;
 	if (app->task_count > 0)

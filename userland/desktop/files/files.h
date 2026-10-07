@@ -734,6 +734,17 @@ struct fm_dashboard {
 #define FM_THUMBS		64
 #define FM_THUMB_SIDE		256
 
+/* How many thumbnails are made at once, each by a child of its own (ws177-p010, plan/ws168/phase001/phase.md section 5.2). */
+#define FM_THUMB_MAKERS		2
+
+/*
+ * The pictures made without waiting besides the thumbnails (ws177-p010):
+ * Quick Look's and the preview pane's, and the Today page's hero.
+ */
+#define FM_PICTURE_PEEK		0U
+#define FM_PICTURE_HERO		1U
+#define FM_PICTURES		2U
+
 /* How many records the cache on disk holds before it is trimmed, and how many the trim leaves (ws127-p004). */
 #define FM_THUMB_RECORDS_MAX	2000U
 #define FM_THUMB_RECORDS_KEEP	1800U
@@ -746,7 +757,8 @@ struct fm_dashboard {
  * failed marks a file that could not be read as a picture, so that it is
  * not read again every frame; a file changed since is another file;
  * pending marks the one a child is making (ws168-p004).  An empty path is
- * a free slot.
+ * a free slot.  A failure is kept in the cache on disk too (ws177-p010),
+ * so the file is not tried again in the next session either.
  */
 struct fm_thumb {
 	char path[FM_PATH_MAX];
@@ -779,6 +791,7 @@ struct fm_peek {
 	int line_count;
 	struct kl_image picture;
 	int picture_tried;
+	int picture_pending;
 };
 
 /* The longest name and command of a way to open files, and how many ways a file is offered. */
@@ -1409,18 +1422,27 @@ struct fm_app {
 	/* How far the sidebar is scrolled (when its places do not fit). */
 	int sidebar_scroll;
 
-	/* The dashboard: what it shows, the hero's picture as read and as scaled for the card, and whether it was read. */
+	/*
+	 * The dashboard: what it shows, the hero's picture as read and as
+	 * scaled for the card, whether it was asked for, and whether its child
+	 * is still making it (ws177-p010: the window does not wait for it).
+	 */
 	struct fm_dashboard dashboard;
 	struct kl_image hero_source;
 	struct kl_image hero;
 	int hero_tried;
+	int hero_pending;
 	char wallpaper[FM_PATH_MAX];
 
-	/* The thumbnails: the kept ones, the clock their use is ordered by, and the file asked for next (empty when none). */
+	/*
+	 * The thumbnails: the kept ones, the clock their use is ordered by, and
+	 * the files asked for next, as many as are made at once, the first
+	 * first (an empty path ends the list).
+	 */
 	struct fm_thumb thumbs[FM_THUMBS];
 	uint64_t thumb_clock;
-	char thumb_wanted[FM_PATH_MAX];
-	time_t thumb_wanted_modified;
+	char thumb_wanted[FM_THUMB_MAKERS][FM_PATH_MAX];
+	time_t thumb_wanted_modified[FM_THUMB_MAKERS];
 
 	/* What was read of the file the preview and Quick Look show, and whether Quick Look is open. */
 	struct fm_peek peek;
@@ -1636,6 +1658,7 @@ void fm_search_stop(struct fm_search *search);
 void fm_home_gather(struct fm_app *app);
 void fm_home_folder_opened(const char *folder);
 void fm_home_draw(struct fm_app *app, struct kl_canvas *canvas, const struct kl_rect *inner);
+int fm_home_tick(struct fm_app *app);
 void fm_mark_draw(struct kl_canvas *canvas, int x, int y, unsigned pixels, float opacity);
 void fm_home_click(struct fm_app *app, unsigned kind, int index, int double_click);
 
@@ -1715,11 +1738,16 @@ const struct kl_image *fm_thumb_get(struct fm_app *app, const char *path, time_t
 int fm_thumb_tick(struct fm_app *app);
 int fm_thumb_busy(void);
 void fm_thumb_release(struct fm_app *app);
+int fm_picture_begin(unsigned which, const char *path, int width, int height);
+int fm_picture_follow(unsigned which, struct kl_image *image, int *error);
+void fm_picture_cancel(unsigned which);
+int fm_picture_busy(void);
 void fm_image_fit(int width, int height, int box_width, int box_height, int *fit_width, int *fit_height);
 
 /* What is read of a file to show it (peek.c). */
 void fm_peek_read(struct fm_peek *peek, const struct fm_entry *entry);
 void fm_peek_picture(struct fm_peek *peek, int side);
+int fm_peek_tick(struct fm_peek *peek);
 void fm_peek_release(struct fm_peek *peek);
 
 /* The preview pane and Quick Look (ui-preview.c). */
@@ -1774,6 +1802,7 @@ int fm_thumb_kind(const struct fm_entry *entry);
 int fm_thumb_cache_read(const char *path, struct kl_image *image);
 int fm_thumb_cache_target(const char *path, char *record, size_t record_size, char *stamp, size_t stamp_size);
 int fm_thumb_cache_trim(unsigned maximum, unsigned keep);
+int fm_thumb_cache_fail(const char *path);
 int fm_drop_accepts(const struct fm_app *app);
 void fm_drop_perform(struct fm_app *app, char *const *paths, size_t count);
 

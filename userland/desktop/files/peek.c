@@ -91,8 +91,10 @@ fm_peek_read(
 }
 
 /*
- * Reads the picture of the file read, shrunk to fit a square of a side,
- * once; a file that is not a picture, or cannot be read as one, has none.
+ * Asks for the picture of the file read, shrunk to fit a square of a
+ * side, once; a file that is not a picture, or cannot be read as one, has
+ * none.  The picture is made without waiting (ws177-p010): the window
+ * draws on, and fm_peek_tick takes it when it is done.
  */
 void
 fm_peek_picture(
@@ -101,7 +103,7 @@ fm_peek_picture(
 {
 	int error;
 
-	/* The picture is read once. */
+	/* The picture is asked for once. */
 	if (peek->picture_tried != 0)
 		return;
 	peek->picture_tried = 1;
@@ -110,9 +112,43 @@ fm_peek_picture(
 	if (peek->mime == NULL || peek->mime->category != FM_CATEGORY_IMAGE)
 		return;
 
-	/* The picture, no larger than the square. */
-	error = fm_image_thumbnail(peek->path, side, &peek->picture);
+	/* Starts making it, no larger than the square. */
+	error = fm_picture_begin(FM_PICTURE_PEEK, peek->path, side, side);
+	if (error != 0) {
+		fm_log("PEEK picture path=%s error=%d width=0 height=0", peek->path, error);
+		return;
+	}
+
+	/* fm_peek_tick follows it from now on. */
+	peek->picture_pending = 1;
+}
+
+/*
+ * Takes the picture asked for when it is done.  Returns nonzero when it
+ * is (made or not), so that the window is drawn again.
+ */
+int
+fm_peek_tick(
+	struct fm_peek *peek)
+{
+	int finished;
+	int error;
+
+	/* No picture is being made. */
+	if (peek->picture_pending == 0)
+		return 0;
+
+	/* The picture, while it is made. */
+	finished = fm_picture_follow(FM_PICTURE_PEEK, &peek->picture, &error);
+	if (!finished)
+		return 0;
+	peek->picture_pending = 0;
+
+	/* The log line the tests wait for. */
 	fm_log("PEEK picture path=%s error=%d width=%d height=%d", peek->path, error, peek->picture.width, peek->picture.height);
+
+	/* Succeeded: the picture is done. */
+	return 1;
 }
 
 /*
@@ -122,6 +158,10 @@ void
 fm_peek_release(
 	struct fm_peek *peek)
 {
+	/* Gives up a picture still being made. */
+	if (peek->picture_pending != 0)
+		fm_picture_cancel(FM_PICTURE_PEEK);
+
 	/* The lines and the picture. */
 	free(peek->text);
 	kl_image_release(&peek->picture);
