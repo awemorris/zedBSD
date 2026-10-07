@@ -106,6 +106,7 @@ static int touchpad_node(const struct kl_backend_input_caps *capabilities);
 static int attach_touchpad(struct kwl_server *server, int descriptor, const char *path);
 static void apply_touchpad(struct kwl_server *server, struct kwl_input_device *device, uint32_t time);
 static void apply_touchpad_actions(struct kwl_server *server, const struct kwl_touchpad *pad, const struct kwl_touchpad_actions *actions, uint32_t time);
+static void lock_pad_gesture(struct kwl_server *server, const struct kwl_touchpad_action *action);
 static int pointer_move(struct kwl_server *server, int64_t delta_x, int64_t delta_y, uint32_t time);
 static ssize_t input_read(struct kwl_server *server, struct kwl_input_device *device, struct input_event *events, size_t capacity);
 
@@ -867,6 +868,37 @@ apply_touchpad(
 	return;
 }
 
+/*
+ * Passes the end of a touch pad's touch on the lock screen to it (ws187-p002):
+ * with the travel of a gesture up that ended (two fingers from the bottom
+ * edge, three fingers up), or 0 for any other end.
+ */
+static void
+lock_pad_gesture(
+	struct kwl_server *server,
+	const struct kwl_touchpad_action *action)
+{
+	int64_t gesture_up_um;
+
+	/* A beginning or a step is no end. */
+	if (action->phase == KWL_TOUCHPAD_PHASE_BEGIN)
+		return;
+	if (action->phase == KWL_TOUCHPAD_PHASE_UPDATE)
+		return;
+
+	/* The travel of a gesture up that ended rather than was given up. */
+	gesture_up_um = 0;
+	if (action->phase == KWL_TOUCHPAD_PHASE_END) {
+		if (action->gesture == KWL_TOUCHPAD_GESTURE_BOTTOM2)
+			gesture_up_um = action->travel_um;
+		if (action->gesture == KWL_TOUCHPAD_GESTURE_UP3)
+			gesture_up_um = action->travel_um;
+	}
+
+	/* The lock screen counts it, and the next touch starts afresh. */
+	kwl_greeter_pad_end(server, gesture_up_um);
+}
+
 /* Carries out the actions of the touch pad layer on the seat, as a mouse's report would. */
 static void
 apply_touchpad_actions(
@@ -876,6 +908,7 @@ apply_touchpad_actions(
 	uint32_t time)
 {
 	const struct kwl_touchpad_action *action;
+	int64_t down_um;
 	unsigned activity;
 	unsigned index;
 	int moved;
@@ -900,6 +933,15 @@ apply_touchpad_actions(
 			activity = 1;
 			break;
 		case KWL_TOUCHPAD_SCROLL:
+			/* On the lock screen two fingers up may open it: their own way, the scrolling's direction turned back (ws187-p002). */
+			if (server->locked) {
+				down_um = (int64_t)action->vertical * KWL_TOUCHPAD_NOTCH_UM;
+				if (pad->natural_scroll)
+					down_um = -down_um;
+				kwl_greeter_pad_scroll(server, down_um);
+				break;
+			}
+
 			/* The switcher or Wiseview, while it shows, takes the two fingers' swipe (shell.c, ws142-p009). */
 			taken = kwl_glass_pad_scroll(server, action->vertical, action->horizontal, pad->natural_scroll);
 			if (taken)
@@ -910,6 +952,10 @@ apply_touchpad_actions(
 			activity = 1;
 			break;
 		case KWL_TOUCHPAD_GESTURE:
+			/* On the lock screen a touch's end may be a gesture up far enough to open it (ws187-p002). */
+			if (server->locked)
+				lock_pad_gesture(server, action);
+
 			/* A gesture is the shell's (ws142-p003); the end of two fingers' scroll also ends the client's scrolling (BUG-211). */
 			kwl_glass_gesture(server, action->gesture, action->phase, action->travel_um, action->speed);
 			if (action->gesture == KWL_TOUCHPAD_GESTURE_SWIPE2 && action->phase == KWL_TOUCHPAD_PHASE_END)

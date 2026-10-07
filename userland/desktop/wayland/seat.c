@@ -517,9 +517,10 @@ kwl_seat_motion_shell(
 	    server->dnd_active)
 		kwl_cursor_frame(server, 0U);
 
-	/* The lock screen has the pointer: only its buttons light up (ws035-p102). */
+	/* The lock screen has the pointer: only its buttons light up (ws035-p102), and a press may be a swipe up (ws187-p002). */
 	server->lock_input_ms = kwl_milliseconds();
 	if (server->locked) {
+		kwl_greeter_motion(server);
 		server->dirty = 1;
 		return 1;
 	}
@@ -876,9 +877,16 @@ seat_axis(
 	/* The wheel while the Windows key is down: no tap of its own (ws142-p002). */
 	kwl_super_tap_cancel(&server->super_tap);
 
-	/* The wheel does nothing during a drag and drop, nor on the lock screen. */
+	/* The wheel turned up on the lock screen may open it (ws187-p002); a touch pad's fingers are counted by input.c. */
 	server->lock_input_ms = kwl_milliseconds();
-	if (server->dnd_active || server->locked)
+	if (server->locked) {
+		if (source == AXIS_SOURCE_WHEEL)
+			kwl_greeter_wheel(server, vertical);
+		return;
+	}
+
+	/* The wheel does nothing during a drag and drop. */
+	if (server->dnd_active)
 		return;
 
 	/* App Home, while it shows, turns its pages with the wheel. */
