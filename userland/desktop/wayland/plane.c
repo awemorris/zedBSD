@@ -208,6 +208,47 @@ kwl_plane_carry(
 	*carried_y = plane_span(place_y, lowest, highest);
 }
 
+/* Records where a widget is drawn on an output's bar: its left and its bar's top in the plane. */
+void
+kwl_plane_place(
+	struct kwl_plane_places *places,
+	unsigned slot,
+	int32_t x,
+	int32_t top)
+{
+	/* No such output. */
+	if (slot >= KWL_PLANE_SLOTS)
+		return;
+
+	/* Its place, which the bit says is there. */
+	places->x[slot] = x;
+	places->top[slot] = top;
+	places->placed |= 1U << slot;
+}
+
+/*
+ * Gives where a widget was last drawn on an output's bar.  Returns 1 when
+ * it was drawn there, 0 (and nothing given) when it never was.
+ */
+int
+kwl_plane_placed(
+	const struct kwl_plane_places *places,
+	unsigned slot,
+	int32_t *x,
+	int32_t *top)
+{
+	/* No such output, or never drawn on it. */
+	if (slot >= KWL_PLANE_SLOTS)
+		return 0;
+	if ((places->placed & (1U << slot)) == 0U)
+		return 0;
+
+	/* Succeeded: its place. */
+	*x = places->x[slot];
+	*top = places->top[slot];
+	return 1;
+}
+
 /* Tells whether a shown output's rectangle (half-open) holds a point. */
 static int
 plane_inside(

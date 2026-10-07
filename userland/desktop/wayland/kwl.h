@@ -813,14 +813,17 @@ uint64_t kwl_cycles(void);
 #define KWL_APPS_VIA_SWITCH	2U
 
 /*
- * The bar's applications (apps-bar.c): each desktop's bar order; the
- * previews' state, the application it is about, when the wait began (or
- * when the pointer left), and whether it has left the icons and the panel;
- * a press on an icon (its application, where it began, whether it became
- * the icon's drag); and the bar as last logged.
+ * The bars' applications (apps-bar.c): each desktop's bar order (one for
+ * every output's bar); the output whose bar the previews' state is about
+ * (the system bar's or a head's, ws113-p015), that state, the application
+ * it is about, when the wait began (or when the pointer left), and whether
+ * it has left the icons and the panel; a press on an icon (its
+ * application, where it began, whether it became the icon's drag); and
+ * each output's bar as last logged.
  */
 struct kwl_apps_bar {
 	struct kwl_apps_order orders[KWL_APPS_DESKTOPS];
+	unsigned output;
 	unsigned state;
 	unsigned via;
 	char key[KWL_APPS_KEY];
@@ -830,7 +833,7 @@ struct kwl_apps_bar {
 	char press_key[KWL_APPS_KEY];
 	int32_t press_x;
 	unsigned dragging;
-	char logged[512];
+	char logged[KWL_PLANE_SLOTS][512];
 };
 
 struct kwl_server {
@@ -1637,7 +1640,7 @@ void kwl_compose_poll(struct kwl_server *server);
 int kwl_glass_button(struct kwl_server *server, uint32_t button, uint32_t state);
 int kwl_glass_motion(struct kwl_server *server);
 void kwl_glass_gesture(struct kwl_server *server, uint32_t gesture, uint32_t phase, int32_t travel_um, int32_t speed);
-int kwl_glass_apps_room(struct kwl_server *server, int32_t *left, int32_t *right);
+int kwl_glass_apps_room(struct kwl_server *server, unsigned slot, int32_t *left, int32_t *right, int32_t *top);
 void kwl_glass_switch_to(struct kwl_server *server, struct kwl_object *surface, const char *via);
 int kwl_glass_unfullscreen_docks(struct kwl_server *server, struct kwl_object *surface);
 void kwl_glass_activate(struct kwl_server *server, struct kwl_object *surface, const char *via);
@@ -1744,6 +1747,7 @@ void kwl_displays_tick(struct kwl_server *server);
 
 /* The outputs of the plane, the windows and the pointer on them (heads.c, ws113-p007). */
 unsigned kwl_outputs(struct kwl_server *server, struct kwl_plane_rect *outputs);
+int kwl_output_rect(struct kwl_server *server, unsigned slot, struct kwl_plane_rect *rect);
 unsigned kwl_output_at(struct kwl_server *server, int32_t x, int32_t y);
 int32_t kwl_output_top(struct kwl_server *server, unsigned slot);
 unsigned kwl_window_output(struct kwl_object *surface);
@@ -1847,7 +1851,7 @@ void kwl_glass_lower(struct kwl_server *server, struct kwl_object *surface, cons
 void kwl_glass_mapped(struct kwl_server *server, struct kwl_object *surface);
 void kwl_glass_forget(struct kwl_server *server, struct kwl_object *surface);
 struct kwl_arrange_rect;
-void kwl_glass_desktops_pill(struct kwl_server *server, int32_t *x, int32_t *width);
+void kwl_glass_desktops_pill(struct kwl_server *server, unsigned slot, int32_t *x, int32_t *top, int32_t *width);
 int kwl_glass_bar_control_at(struct kwl_server *server, int32_t x, int32_t y);
 void kwl_glass_work_area(struct kwl_server *server, unsigned slot, struct kwl_arrange_rect *area);
 void kwl_glass_leave_quiet(struct kwl_server *server, unsigned slot, const char *via);

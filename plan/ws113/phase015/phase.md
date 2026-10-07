@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws113-p015 -->
 # ws113-p015: 2 つ目以降の display の窓の状態（dock・floating・整列）、bar、リサイズ、App Home の背景
 
-Status: uncleared（2026-10-08 Q1: T1-376 (a) `displays-p015.sh` PASS（QEMU、全行 ok、PNG は D-Bus GL で no surface）。残り: head の dock bar をユーザーの決定どおりに（下の「決定 2026-10-08」、P1）、head の上の press（リサイズ・bar・dock）の 5330 実機の確認）
+Status: test-wait（T1 の番号は Q1 が返す。2026-10-08 P1: head の dock bar をユーザーの決定どおりに実装、下の「head の dock bar（決定 2026-10-08）の実装」。前の T1-376 (a) `displays-p015.sh` PASS。残り: この QEMU 試験、head の上の press（リサイズ・bar・dock・bar の widget）の 5330 実機の確認）
 Disposition: normal
 Parent: [WS113](../ws.md)
 
@@ -70,6 +70,43 @@ FAIL 2 行（retry も同じ）: `the anchor's count has b docked and nothing hi
 ## 決定 2026-10-08（ユーザー）: 2 番目以降の display の dock bar
 
 「2番目以降のディスプレイのdock barには、その画面に置いた window の window icon を出し、時計・状態・App Home・切り替えのつまみも表示する。」（P1 の案「title bar だけ、時計等は anchor だけ」は不採用。）P1 が ws090-p015 より先に実装する（q862 の前）。
+
+## head の dock bar（決定 2026-10-08）の実装（2026-10-08、P1、q862 の前）
+
+head の bar を system bar と同じ並びにした（`draw_head_bar`、shell.c）: 帯、左に launcher（Kei の mark）と線、docked の窓が無ければその head に置いた窓の application の icon（apps-bar.c）、
+docked の窓があればその title・menu・ボタン（前と同じ）、右に desktops の pill（切り替えのつまみ）・状態の pill（IME・media・network・volume・battery）・時計の pill。
+
+- layout: `bar_layout` を `bar_layout_on(server, slot, bar)` に一般化（出力の矩形の上端・右端から。`shell_bar` に `output`）。system bar は `bar_dock` の動き、head は docked の窓がある間すぐにボタンの分を空ける。
+  shell.c の static の `output_rect` は heads.c の公開の `kwl_output_rect` に移した（同じ意味）。`draw_desktops`・`draw_status`・`draw_battery` は bar の top を使う
+  （Wiseview の青い縁と `KWL GLASS desktops` の log は anchor だけ）。
+- head の bar の log（新しい行、試験と実機の確認用）: `KWL GLASS head bar output=N top=Y launcher=X desktops=X status=X clock=X`（最初と位置が変わった時）。
+- window icon: `struct apps_view` に出力（`output`・`area`・`top`）、`kwl_apps_view_build_on(server, slot, view)`。head の bar はその head の窓だけ、
+  system bar と switcher は今までどおり desktop の全ての窓。待ち・previews・press は `server->apps_bar.output` の bar のもの（previews はその出力の中、その出力の pass で描く）。
+  `KWL APPS bar ...`・`KWL APPS icon ...` の行は head では末尾に ` output=N`（anchor の行は前と同じ）。`kwl_glass_apps_room(server, slot, ...)`: head は Wiseview・fullscreen の cover を見ない。
+- 状態の widget（volume.c・network.c・input-method.c）: icon の場所を出力ごとに持つ（plane.c の新しい `struct kwl_plane_places`、`kwl_plane_place`・`kwl_plane_placed`）。
+  press はその出力の icon で見て、volume の popup・network の menu（と Alt の詳細）はその icon の下、その出力の中に開き、その出力の pass だけが描く。
+  draw の関数は bar の top を取る（`kwl_volume_draw_icon`・`kwl_network_draw_icon`・`kwl_ime_indicator_draw`）。`KWL VOLUME icon`・`KWL NETWORK icon`・`KWL IME indicator` の log は anchor だけ（前と同じ）。
+- 切り替えのつまみ（desktops の pill）: `kwl_glass_desktops_pill(server, slot, ...)`。head の pill の press で整列の menu がその head 用に開く（`arrange_menu.output`、
+  head の中に置き、その pass で描く。log は ` output=N` 付き）。p015 の「head の整列は始める口が無い」の制限はこれで無くなる。swap の drag の上限は出力の bar の下（`kwl_output_top`）。
+- App Home: head の launcher の press で `kwl_home_toggle`（App Home は anchor に開き、head は今までどおり stage だけ）。時計の press は Calendar（system bar と同じ）。
+- press の経路（`kwl_glass_button`）: media・IME・volume・network・整列・apps の `!remote` の除外を外し（head では anchor の fullscreen の cover を見ない）、各 widget が出力ごとの場所で判定する。
+  launcher と時計は `head_bar_press`。
+- heads.c: `heads_shows` に 8（bar）。glass の session（login・lock・画面 off でない）では head を毎 frame 描く（時計・状態・icon の変化のため）。
+
+人の判断を Q1 に送った点（推測で決めず、今の実装の扱い）:
+1. 「切り替えのつまみ」は desktops の pill（desktop の切り替え・整列の menu）と読んだ。
+2. system bar（anchor）の icon は今までどおり desktop の全ての窓（head の窓も含む）。「その画面に置いた window」に揃えて anchor も anchor の窓だけにするかは未決。
+
+### 確認（host・build）
+
+- build: `make -j16 BUILD=build/p1-wl ZEDBSD_CONFIG=plan/ws113/tests/config-amd64-p005.mk build/p1-wl/bin/wayland` exit 0、warning 0。
+  Linux: `make -f userland/desktop/keiland-linux.mk KEILAND_LINUX_BUILD=build/p1-linux-{gcc,clang} CC={gcc,clang} all` とも exit 0、warning 0。
+  agent/p1 の ws090-p015 の途中（kl_scroll、KL_VERSION 61）の利用者: `build/p1-wl/bin/{phone,mailer,photos,music,calendar,textedit}` exit 0、warning 0。
+- host: `host-plane.sh`（`test_places` を足した）・`host-arrange.sh`・`host-output-switch.sh` PASS（plain、ASan/UBSan）。
+- style-check: 変えた C の file で HEAD と同じ数（新しい指摘 0）。
+- QEMU（T1 へ依頼）: `displays-p015.sh` に head の bar の確認を足した（`KWL GLASS head bar output=1` の launcher・desktops・status・clock が head 1 の中に左から並ぶ、
+  `KWL APPS bar count=1 ... apps=p015.a output=1`、head1-bar.png）。他の行は前と同じ。
+- 未実施: head の bar の press（launcher・時計・icon・previews・desktops の pill の整列・volume・network・IME）は QEMU の tablet が anchor だけなので 5330 の実機（ユーザー）。
 
 ## 決定 2026-10-08（ユーザー、2 回目）: 画面ごとの dock の window
 

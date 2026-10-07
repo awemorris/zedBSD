@@ -1313,8 +1313,9 @@ heads_record_extended(
 
 /*
  * Tells what a head shows besides its wallpaper: its windows (the frame's
- * list) and the pointer within a cursor's reach of it, and App Home's
- * background, as a mask (1 the windows, 2 the pointer, 4 App Home).
+ * list) and the pointer within a cursor's reach of it, App Home's
+ * background, and its bar, as a mask (1 the windows, 2 the pointer, 4 App
+ * Home, 8 the bar).
  */
 static unsigned
 heads_shows(
@@ -1352,6 +1353,19 @@ heads_shows(
 		home = kwl_home_progress(server);
 	if (home > 0.0f)
 		shows |= 4U;
+
+	/*
+	 * Its bar (ws113-p015, the 2026-10-08 user decision): the clock, the
+	 * status and the applications' icons, which change with the anchor's
+	 * frames, in the session's glass look (not over the login or the lock
+	 * screen, nor with the screen off).
+	 */
+	if (server->glass &&
+	    server->windowed &&
+	    !server->greeter &&
+	    !server->locked &&
+	    !server->screen_off)
+		shows |= 8U;
 
 	/* Succeeded: the mask. */
 	return shows;
@@ -1603,6 +1617,33 @@ kwl_outputs(
 
 	/* Succeeded: every slot. */
 	return KWL_PLANE_SLOTS;
+}
+
+/*
+ * Gives an output's rectangle of the plane: the anchor's for one not shown.
+ * Returns 1 when the output is shown, 0 when the anchor's was given.
+ */
+int
+kwl_output_rect(
+	struct kwl_server *server,
+	unsigned slot,
+	struct kwl_plane_rect *rect)
+{
+	struct kwl_plane_rect outputs[KWL_PLANE_SLOTS];
+	unsigned count;
+
+	/* The outputs shown now. */
+	count = kwl_outputs(server, outputs);
+
+	/* One not shown is the anchor. */
+	if (slot >= count || outputs[slot].width == 0U) {
+		*rect = outputs[KWL_PLANE_ANCHOR];
+		return 0;
+	}
+
+	/* Succeeded: its rectangle. */
+	*rect = outputs[slot];
+	return 1;
 }
 
 /* Gives the output that holds a point of the plane: its slot, the anchor where none does. */

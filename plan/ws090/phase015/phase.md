@@ -2,10 +2,10 @@
 
 # ws090-p015: Terminal・Notes の scroll を `kui_scroll` へ
 
-Status: planning（2026-09-30 Q1 の案、ws.md の表）
+Status: in-progress（q862-i01、P1、2026-10-08。下の「q862-i01」: libkeiland の kl_scroll の追加まで。Terminal・Notes の切り替えは WS113 の dock bar の後に再開）
 Disposition: normal
 Parent: [WS090](../ws.md)
-Queue: なし
+Queue: q862 / q862-i01（P1）
 依存: p011（cleared）
 
 この file は 2026-10-01 に手引き（[../guide.md](../guide.md)）と一緒に作った。範囲は ws.md の表の行（Q1 の案）のとおりで、下の手順と完了の条件は
@@ -82,3 +82,18 @@ Queue: なし
 - `-Wconversion` の下で `scroll.c` が通るか（手順 6）: 2026-10-01 の scroll.c は通る（`clang -std=gnu11 -O2 -Wall -Wextra -Werror -Wconversion -Wno-sign-conversion -Ibuild/ws090/inc -c userland/desktop/libkeiui/scroll.c -o /dev/null` が exit 0。`build/ws090/inc` は `sh plan/ws090/tests/host-input.sh` が作る）。足した関数の後にもう一度確かめる。
 - Terminal の view は「行」の単位（`touch_position()` が行と pixel の offset から位置を作る）で、`kui_scroll` の bars（`kui_scroll_draw_bars`）は使わない。
   bars を使わないことで `kui_scroll` の `moved_us` の扱いに差が出ないか（見るのは `kui_scroll_step` の戻り値だけにする）。
+
+## q862-i01（P1、2026-10-08、途中）
+
+名前は今の tree に読み替える: `kui_scroll` → libkeiland の `kl_scroll`（`userland/desktop/libkeiland/ui/scroll.c`）、`keiland_scroller` → `kl_scroller`。
+Q1 の承認（2026-10-08）: 範囲 1〜4、WS081 の `run-termtouch.sh`・`run-notestouch.sh` の compile の列に `ui/scroll.c` を足す 1 行ずつはこの Phase の所有に加える。
+
+済み（commit は下の報告）:
+- 変更前の基準: `run-termtouch.sh` 20 checks ok、`run-notestouch.sh` 52 checks ok（`build/p1-ws090-p015/*-before`）。
+- `kl_scroll`（KL_VERSION 61）: `kl_scroll_set_bounds`（最小・最大と rubber band の大きさ、`kl_scroll_set_size` で元の端に戻る）、`kl_scroll_fling` が飛ぶかを返す、
+  `kl_scroll_axis_at`・`kl_scroll_axis_stop_at`（event の時刻と速度、既存の `axis`・`axis_stop` はこれを now で呼ぶ）、`kl_scroll_axis_holding`、
+  指が保持中に `kl_scroll_move_to` で位置が引き継がれた後の axis の取り直し、Home は最小の端へ。host（`-Wconversion`）と zedBSD の build で warning 0、
+  style-check 0。位置の引き継ぎは `kl_scroll_move_to(glide=0)` で足りる（新しい関数は作らない）。
+- host 試験の link: `ui/scroll.c` は `kl_canvas_round`・`kl_scroll_bar_*` を引くので、試験は `ui/scroll-bar.c`・`ui/canvas.c`（libc と libm だけ）も compile する（source の移動はしない）。
+
+残り: Terminal・Notes の `touch.c`・`touch.h` を `struct kl_scroll` に、試験の compile の列（WS081 の 2 本、`plan/ws090/tests/host-pad.sh`）、`host-input.c` の case、Linux の build、T1 への依頼。

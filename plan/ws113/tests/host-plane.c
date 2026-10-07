@@ -9,7 +9,8 @@
  * The host test of the plane of the displays (ws113-p007,
  * userland/desktop/wayland/plane.c): which output holds a point, the
  * pointer's relative moves across shared edges and its stop at the others,
- * the display beside one, and a window carried to another output.
+ * the display beside one, a window carried to another output, and where a
+ * bar's widget is drawn on each output (ws113-p015).
  */
 
 #include "plane.h"
@@ -24,6 +25,7 @@ static void test_at(void);
 static void test_move(void);
 static void test_neighbour(void);
 static void test_carry(void);
+static void test_places(void);
 
 int
 main(void)
@@ -33,6 +35,7 @@ main(void)
 	test_move();
 	test_neighbour();
 	test_carry();
+	test_places();
 	if (failures != 0U) {
 		fprintf(stderr, "%u failures\n", failures);
 		return 1;
@@ -193,4 +196,40 @@ test_carry(void)
 	/* Back to the anchor under its bar. */
 	kwl_plane_carry(&outputs[1], &outputs[0], 1280 + 512, 0, 600U, 400U, 96, &x, &y);
 	check(x == 640 && y == 96, "carry back");
+}
+
+/* A widget's places on the bars: none at first, each output's own, the last one drawn kept, no slot past the last. */
+static void
+test_places(void)
+{
+	static struct kwl_plane_places places;
+	int32_t x;
+	int32_t top;
+	int placed;
+
+	/* Nothing placed at first (a static owner's zero). */
+	placed = kwl_plane_placed(&places, 0U, &x, &top);
+	check(placed == 0, "places none at first");
+
+	/* The anchor's and a head's, each its own. */
+	kwl_plane_place(&places, 0U, 900, 0);
+	kwl_plane_place(&places, 1U, 1280 + 700, 120);
+	placed = kwl_plane_placed(&places, 0U, &x, &top);
+	check(placed == 1 && x == 900 && top == 0, "places anchor");
+	placed = kwl_plane_placed(&places, 1U, &x, &top);
+	check(placed == 1 && x == 1280 + 700 && top == 120, "places head");
+
+	/* Another output never drawn on has none. */
+	placed = kwl_plane_placed(&places, 2U, &x, &top);
+	check(placed == 0, "places other head none");
+
+	/* Drawn again elsewhere: the last place. */
+	kwl_plane_place(&places, 1U, 1280 + 650, 120);
+	placed = kwl_plane_placed(&places, 1U, &x, &top);
+	check(placed == 1 && x == 1280 + 650, "places moved");
+
+	/* No slot past the last: nothing kept, nothing given. */
+	kwl_plane_place(&places, KWL_PLANE_SLOTS, 1, 1);
+	placed = kwl_plane_placed(&places, KWL_PLANE_SLOTS, &x, &top);
+	check(placed == 0, "places out of range");
 }

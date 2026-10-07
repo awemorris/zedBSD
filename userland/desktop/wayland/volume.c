@@ -83,9 +83,10 @@
  * The volume's side of the system bar: audiod's link in libkeiland (made
  * on the desktop's first tick), what it last reported, the volume shown
  * (while a drag or a wheel leads, ahead of audiod's report), whether the
- * popup is open and where, where the icon was drawn, whether the slider
- * is dragged, the time of the last send, and whether a volume is waiting
- * to be sent.
+ * popup is open, where and on which output's bar it opened, where the icon
+ * was drawn on each output's bar (the system bar's and each head's,
+ * ws113-p015) and its size, whether the slider is dragged, the time of the
+ * last send, and whether a volume is waiting to be sent.
  *
  * restored is set once the preferences' volume has been applied (on the
  * first connection to audiod); an audiod reached again later gets the
@@ -103,8 +104,8 @@ struct volume_view {
 	int32_t popup_x;
 	int32_t popup_y;
 	int32_t popup_height;
-	int32_t icon_x;
-	int32_t icon_y;
+	unsigned output;
+	struct kwl_plane_places icons;
 	int32_t icon_width;
 	int32_t icon_height;
 	unsigned icon_logged;
@@ -124,13 +125,13 @@ struct volume_view {
  */
 static struct volume_view volume_view;
 
-static void volume_open_popup(struct kwl_server *server);
+static void volume_open_popup(struct kwl_server *server, unsigned slot);
 static void volume_close_popup(struct kwl_server *server, const char *via);
 static void volume_set(struct kwl_server *server, unsigned value, unsigned muted, const char *via, unsigned final);
 static void volume_send(struct kwl_server *server);
 static void volume_restore(struct kwl_server *server);
 static int volume_sound(void);
-static int volume_in_icon(int32_t x, int32_t y);
+static int volume_in_icon(unsigned slot, int32_t x, int32_t y);
 static int volume_in_popup(int32_t x, int32_t y);
 static unsigned volume_slider_value(int32_t x);
 static int32_t volume_slider_top(void);
@@ -152,7 +153,6 @@ kwl_volume_tick(
 	if (!volume_view.opened) {
 		volume_view.opened = 1U;
 		volume_view.audio = kl_backend_audio_open();
-		volume_view.icon_x = -1;
 		volume_view.value = 100U;
 	}
 
@@ -384,14 +384,16 @@ kwl_volume_audio_state(
 }
 
 /*
- * Draws the volume's icon in the system bar at x (its left edge), in the
- * bar's ink.
+ * Draws the volume's icon at x (its left edge) in a bar whose top is at
+ * top, in the bar's ink: the system bar's, or a head's on the output the
+ * pass draws (ws113-p015).
  */
 void
 kwl_volume_draw_icon(
 	struct kwl_server *server,
 	VkCommandBuffer command,
 	int32_t x,
+	int32_t top,
 	const float *ink)
 {
 	float blue[4];
@@ -399,20 +401,19 @@ kwl_volume_draw_icon(
 	unsigned icon;
 	int sound;
 
-	/* Where a click opens the popup (a little larger than the drawing). */
-	volume_view.icon_x = x - 5;
-	volume_view.icon_y = 3;
+	/* Where a click on this output's bar opens the popup (a little larger than the drawing). */
+	kwl_plane_place(&volume_view.icons, server->view_output, x - 5, top);
 	volume_view.icon_width = 30;
 	volume_view.icon_height = KWL_GLASS_BAR - 6;
-	if (!volume_view.icon_logged) {
+	if (!volume_view.icon_logged && server->view_output == KWL_PLANE_ANCHOR) {
 		volume_view.icon_logged = 1U;
-		printf("KWL VOLUME icon x=%d y=%d width=%d height=%d\n", volume_view.icon_x, volume_view.icon_y, volume_view.icon_width, volume_view.icon_height);
+		printf("KWL VOLUME icon x=%d y=%d width=%d height=%d\n", x - 5, top + 3, volume_view.icon_width, volume_view.icon_height);
 	}
 
-	/* While the popup is open its icon has a pale back of the accent the user chose, on the bar's middle (the bar keeps its colours). */
-	if (volume_view.open) {
+	/* While the popup is open its icon on the bar it opened from has a pale back of the accent the user chose (the bar keeps its colours). */
+	if (volume_view.open && volume_view.output == server->view_output) {
 		kwl_accent_colour(server, server->dark, KWL_ACCENT_FILL, 0.28f, blue);
-		glass_draw_solid(server, command, (float)volume_view.icon_x, (float)(KWL_GLASS_BAR_MIDDLE - 14), (float)volume_view.icon_width, 28.0f, 7.0f, blue);
+		glass_draw_solid(server, command, (float)(x - 5), (float)(top + KWL_GLASS_BAR_MIDDLE - 14), (float)volume_view.icon_width, 28.0f, 7.0f, blue);
 	}
 
 	/* No sound: a pale speaker, struck through. */
@@ -420,8 +421,8 @@ kwl_volume_draw_icon(
 	if (!sound) {
 		memcpy(faint, ink, sizeof(faint));
 		faint[3] *= 0.35f;
-		glass_draw_icon(server, command, GLASS_ICON_VOLUME_0, x, KWL_GLASS_BAR_MIDDLE - 10, 20U, faint);
-		glass_draw_solid(server, command, (float)(x + 1), (float)(KWL_GLASS_BAR_MIDDLE - 1), 18.0f, 2.0f, 1.0f, ink);
+		glass_draw_icon(server, command, GLASS_ICON_VOLUME_0, x, top + KWL_GLASS_BAR_MIDDLE - 10, 20U, faint);
+		glass_draw_solid(server, command, (float)(x + 1), (float)(top + KWL_GLASS_BAR_MIDDLE - 1), 18.0f, 2.0f, 1.0f, ink);
 		return;
 	}
 
@@ -438,13 +439,13 @@ kwl_volume_draw_icon(
 	}
 
 	/* The icon. */
-	glass_draw_icon(server, command, icon, x, KWL_GLASS_BAR_MIDDLE - 10, 20U, ink);
+	glass_draw_icon(server, command, icon, x, top + KWL_GLASS_BAR_MIDDLE - 10, 20U, ink);
 }
 
 /*
  * Draws the open popup under the icon: its shadow, its glass, the title
  * with the volume, the slider and the mute switch, or the reason there is
- * no sound.
+ * no sound.  It is drawn by the pass of the output whose bar opened it.
  */
 void
 kwl_volume_draw_popup(
@@ -467,8 +468,10 @@ kwl_volume_draw_popup(
 	int32_t knob;
 	int sound;
 
-	/* Only an open popup. */
+	/* Only an open popup, on its output. */
 	if (!volume_view.open)
+		return;
+	if (volume_view.output != server->view_output)
 		return;
 
 	/* The shadow. */
@@ -566,13 +569,13 @@ kwl_volume_button(
 		if (state == 0U || button != KWL_BUTTON_LEFT)
 			return 0;
 
-		/* A press off the icon goes on. */
-		inside = volume_in_icon(server->pointer_x, server->pointer_y);
+		/* A press off the icon on the bar the pointer is on goes on. */
+		inside = volume_in_icon(server->pointer_output, server->pointer_x, server->pointer_y);
 		if (!inside)
 			return 0;
 
-		/* The popup opens. */
-		volume_open_popup(server);
+		/* The popup opens under that icon. */
+		volume_open_popup(server, server->pointer_output);
 		return 1;
 	}
 
@@ -587,8 +590,8 @@ kwl_volume_button(
 		return 1;
 	}
 
-	/* A press on the icon closes it. */
-	inside = volume_in_icon(server->pointer_x, server->pointer_y);
+	/* A press on the icon, on any output's bar, closes it. */
+	inside = volume_in_icon(server->pointer_output, server->pointer_x, server->pointer_y);
 	if (inside) {
 		volume_close_popup(server, "icon");
 		return 1;
@@ -689,7 +692,7 @@ kwl_volume_axis(
 	UNUSED_PARAMETER(horizontal);
 
 	/* Only over the icon, or the open popup. */
-	over = volume_in_icon(server->pointer_x, server->pointer_y);
+	over = volume_in_icon(server->pointer_output, server->pointer_x, server->pointer_y);
 	if (!over && volume_view.open)
 		over = volume_in_popup(server->pointer_x, server->pointer_y);
 	if (!over)
@@ -726,20 +729,32 @@ kwl_volume_is_open(
 	return (int)volume_view.open;
 }
 
-/* Opens the popup under the icon, kept on the output. */
+/* Opens the popup under the icon of an output's bar, kept on that output. */
 static void
 volume_open_popup(
-	struct kwl_server *server)
+	struct kwl_server *server,
+	unsigned slot)
 {
+	struct kwl_plane_rect output;
+	int32_t icon_x;
+	int32_t top;
+	int placed;
 	int sound;
 
+	/* The output and the icon's place on its bar. */
+	(void)kwl_output_rect(server, slot, &output);
+	placed = kwl_plane_placed(&volume_view.icons, slot, &icon_x, &top);
+	if (!placed)
+		return;
+	volume_view.output = slot;
+
 	/* Its place: under the icon, its right edge not past the output's. */
-	volume_view.popup_x = volume_view.icon_x + volume_view.icon_width / 2 - VOLUME_POPUP_WIDTH / 2;
-	if (volume_view.popup_x + VOLUME_POPUP_WIDTH > (int32_t)server->width - 8)
-		volume_view.popup_x = (int32_t)server->width - 8 - VOLUME_POPUP_WIDTH;
-	if (volume_view.popup_x < 8)
-		volume_view.popup_x = 8;
-	volume_view.popup_y = KWL_GLASS_BAR + 6;
+	volume_view.popup_x = icon_x + volume_view.icon_width / 2 - VOLUME_POPUP_WIDTH / 2;
+	if (volume_view.popup_x + VOLUME_POPUP_WIDTH > output.x + (int32_t)output.width - 8)
+		volume_view.popup_x = output.x + (int32_t)output.width - 8 - VOLUME_POPUP_WIDTH;
+	if (volume_view.popup_x < output.x + 8)
+		volume_view.popup_x = output.x + 8;
+	volume_view.popup_y = top + KWL_GLASS_BAR + 6;
 
 	/* Its height: the title, the slider, the mute row, and a note without sound. */
 	volume_view.popup_height = VOLUME_PADDING + VOLUME_TITLE_HEIGHT + VOLUME_SLIDER_HEIGHT + VOLUME_ROW_HEIGHT;
@@ -898,20 +913,26 @@ volume_sound(
 	return 1;
 }
 
-/* Tells whether a point is on the icon's area. */
+/* Tells whether a point is on the icon's area in an output's bar. */
 static int
 volume_in_icon(
+	unsigned slot,
 	int32_t x,
 	int32_t y)
 {
-	/* Not drawn yet. */
-	if (volume_view.icon_x < 0)
+	int32_t icon_x;
+	int32_t top;
+	int placed;
+
+	/* Not drawn on that output's bar yet. */
+	placed = kwl_plane_placed(&volume_view.icons, slot, &icon_x, &top);
+	if (!placed)
 		return 0;
 
-	/* Within its rectangle. */
-	if (x < volume_view.icon_x || x >= volume_view.icon_x + volume_view.icon_width)
+	/* Within its rectangle, a little in from the bar's top and bottom. */
+	if (x < icon_x || x >= icon_x + volume_view.icon_width)
 		return 0;
-	if (y < volume_view.icon_y || y >= volume_view.icon_y + volume_view.icon_height)
+	if (y < top + 3 || y >= top + 3 + volume_view.icon_height)
 		return 0;
 
 	/* Succeeded: on the icon. */

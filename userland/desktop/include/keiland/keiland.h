@@ -45,8 +45,8 @@
 extern "C" {
 #endif
 
-/* The interface version this header describes (2: the System Menu; 3: the recent files; 4: the titlebar; 5: the glass panels; 6: context menus; 7: drop targets in the titlebar; 8: the network; 9: the touch motion; 10: the scroller and the gestures; 11: the network's links, DNS and saved keys; 12: the file chooser (moved to the widgets with 16); 13: the desktop's preferences; 14: the desktop surface; 15: the sound output's volume; 16: the file chooser removed, now the widgets' kl_file_chooser; 17: kl_glass_set_blur; 18: the keyboard inset; 19: the editing operations; 20: the titlebar's sheet mode; 21: whether a sound service runs; 22: the network and the sound moved to kl_system_*, the old network and sound calls removed; 23: the machine's monitor, kl_system_monitor_*; 24: kl_system_network_set_scanning; 25: kl_titlebar_set_suggestions; 26: the application, kl_app_*, and the declarative menus, controls and glass of a window; 27: kl_system_account_set_password; 28: the removable volumes, kl_system_devices_mount; 29: the wired interfaces' configuration, kl_system_network_configure_wired; 30: Remote Login, kl_system_sharing_*; 31: the administration of the accounts, kl_system_account_administer; 32: one copy of a program and the activation, kl_instance_* and kl_activation_*; 33: a removable device's file system and size, kl_system_devices_info; 34: the lock screen's PIN, kl_system_account_set_pin; 35: the desktop's appearance, light or dark, kl_appearance_*; 36: what the user has enrolled, kl_system_account_enrolled; 37: the translations, kl_tr_*; 38: an input method's text for the focused widget, kl_ui_text and kl_ui_text_wanted; 39: a network link's speed, kl_network_link's link_mbps; 40: a touch pad's scrolling that flies on, kl_window_event's axis_source and KL_WINDOW_AXIS_STOP, kl_ui_axis, kl_scroll_axis and kl_axis_track; 41: the one inertia of every program, a touch pad's fingers on kl_scroller, kl_scroller_axis, _axis_stop and _axis_holding, kl_scroller_release's answer; 42: what a window shows, kl_window_set_content_type; 43: KL_WINDOW_AXIS_STOP is 18, apart from KL_WINDOW_ACTION; 44: a window's tabs, its selections' changes, drag and drop, kl_window_set_tabs and the others; 45: a window maximized, minimized, its screen's mode, its device, its frame's times and a breadcrumb's parts; 46: the desktop surface's role, drag and drop's actions and data, a drag over the titlebar's controls; 47: a window's input for its widgets and the text input of their fields, kl_ui_window_input and kl_ui_window_text, and the text area; 48: kl_slider_flags, kl_sidebar_place, kl_text_companions; 49: notifications, kl_system_notify, kl_system_notify_withdraw, kl_system_take_notify_event and kl_app_notify; 50: the recent list emptied and stopped, kl_recent_clear, kl_recent_set_keep and kl_recent_keep; 51: an application watches up to 64 descriptors, KL_APP_FDS_MAX; 52: the user's security keys, kl_system_account_add_key, kl_system_account_remove_key, kl_system_account_keys and kl_system_account_touched; 53: the views of many items, kl_list_header, kl_list_item, kl_list_cell, kl_grid_layout, kl_grid_cell, kl_grid_icon, kl_grid_item and kl_band; 54: the arrivals of mail, kl_system_mail_arrived, kl_system_mail_listen and kl_system_take_mail_event; 55: the phone, kl_system_phone_send, kl_system_phone_call and kl_system_take_phone_event; 56: the printers, kl_system_printers_* and kl_system_print_*; 57: the accent the user chose, kl_accent_get and kl_accent_values, the theme's accent_ink and accent_text; 58: the displays, kl_system_displays_*; 59: a display turned off, kl_system_displays_set_shown and KL_DISPLAY_OFF; 60: a button that is a picture alone, kl_icon_button, KL_ICON_DISCONNECT and KL_ICON_EJECT, and a button or a sidebar's place drawn without a kl_ui). */
-#define KL_VERSION	60U
+/* The interface version this header describes (2: the System Menu; 3: the recent files; 4: the titlebar; 5: the glass panels; 6: context menus; 7: drop targets in the titlebar; 8: the network; 9: the touch motion; 10: the scroller and the gestures; 11: the network's links, DNS and saved keys; 12: the file chooser (moved to the widgets with 16); 13: the desktop's preferences; 14: the desktop surface; 15: the sound output's volume; 16: the file chooser removed, now the widgets' kl_file_chooser; 17: kl_glass_set_blur; 18: the keyboard inset; 19: the editing operations; 20: the titlebar's sheet mode; 21: whether a sound service runs; 22: the network and the sound moved to kl_system_*, the old network and sound calls removed; 23: the machine's monitor, kl_system_monitor_*; 24: kl_system_network_set_scanning; 25: kl_titlebar_set_suggestions; 26: the application, kl_app_*, and the declarative menus, controls and glass of a window; 27: kl_system_account_set_password; 28: the removable volumes, kl_system_devices_mount; 29: the wired interfaces' configuration, kl_system_network_configure_wired; 30: Remote Login, kl_system_sharing_*; 31: the administration of the accounts, kl_system_account_administer; 32: one copy of a program and the activation, kl_instance_* and kl_activation_*; 33: a removable device's file system and size, kl_system_devices_info; 34: the lock screen's PIN, kl_system_account_set_pin; 35: the desktop's appearance, light or dark, kl_appearance_*; 36: what the user has enrolled, kl_system_account_enrolled; 37: the translations, kl_tr_*; 38: an input method's text for the focused widget, kl_ui_text and kl_ui_text_wanted; 39: a network link's speed, kl_network_link's link_mbps; 40: a touch pad's scrolling that flies on, kl_window_event's axis_source and KL_WINDOW_AXIS_STOP, kl_ui_axis, kl_scroll_axis and kl_axis_track; 41: the one inertia of every program, a touch pad's fingers on kl_scroller, kl_scroller_axis, _axis_stop and _axis_holding, kl_scroller_release's answer; 42: what a window shows, kl_window_set_content_type; 43: KL_WINDOW_AXIS_STOP is 18, apart from KL_WINDOW_ACTION; 44: a window's tabs, its selections' changes, drag and drop, kl_window_set_tabs and the others; 45: a window maximized, minimized, its screen's mode, its device, its frame's times and a breadcrumb's parts; 46: the desktop surface's role, drag and drop's actions and data, a drag over the titlebar's controls; 47: a window's input for its widgets and the text input of their fields, kl_ui_window_input and kl_ui_window_text, and the text area; 48: kl_slider_flags, kl_sidebar_place, kl_text_companions; 49: notifications, kl_system_notify, kl_system_notify_withdraw, kl_system_take_notify_event and kl_app_notify; 50: the recent list emptied and stopped, kl_recent_clear, kl_recent_set_keep and kl_recent_keep; 51: an application watches up to 64 descriptors, KL_APP_FDS_MAX; 52: the user's security keys, kl_system_account_add_key, kl_system_account_remove_key, kl_system_account_keys and kl_system_account_touched; 53: the views of many items, kl_list_header, kl_list_item, kl_list_cell, kl_grid_layout, kl_grid_cell, kl_grid_icon, kl_grid_item and kl_band; 54: the arrivals of mail, kl_system_mail_arrived, kl_system_mail_listen and kl_system_take_mail_event; 55: the phone, kl_system_phone_send, kl_system_phone_call and kl_system_take_phone_event; 56: the printers, kl_system_printers_* and kl_system_print_*; 57: the accent the user chose, kl_accent_get and kl_accent_values, the theme's accent_ink and accent_text; 58: the displays, kl_system_displays_*; 59: a display turned off, kl_system_displays_set_shown and KL_DISPLAY_OFF; 60: a button that is a picture alone, kl_icon_button, KL_ICON_DISCONNECT and KL_ICON_EJECT, and a button or a sidebar's place drawn without a kl_ui; 61: a scroll's own ends and rubber band, kl_scroll_set_bounds, the touch pad's times and velocity, kl_scroll_axis_at, kl_scroll_axis_stop_at and kl_scroll_axis_holding, and kl_scroll_fling's answer). */
+#define KL_VERSION	61U
 
 /*
  * Reports the interface version of the library that was loaded.
@@ -2667,6 +2667,13 @@ void kl_icon_tag(struct kl_canvas *canvas, float cx, float cy, float radius, kl_
  * scrolls.  The scroll bars show while the content moves and fade out
  * over KL_SCROLL_FADE_US after it stops.
  *
+ * A program whose ends are not 0..content-viewport (Terminal's scrollback
+ * runs to a negative position, KL_VERSION 61) gives them and the rubber
+ * band's size with kl_scroll_set_bounds; kl_scroll_set_size goes back to
+ * the ends of the sizes.  A program that moves its view by other means
+ * (keys, new output) hands the place over with kl_scroll_move_to without a
+ * glide, and the next finger drags on from there.
+ *
  * The fields are read by the application (x and y above all); they are
  * written only through the calls.  Nothing here draws but
  * kl_scroll_draw_bars, so a program that draws its own content with
@@ -2732,21 +2739,38 @@ struct kl_scroll {
 
 	/* When the content last moved (for the bars), 0 before it ever moved. */
 	uint64_t moved_us;
+
+	/*
+	 * The ends kl_scroll_set_bounds gave (bounded is 1 from then until
+	 * kl_scroll_set_size), in place of 0..content-viewport, and the size
+	 * the rubber band past them is measured against (KL_VERSION 61).
+	 */
+	int bounded;
+	double minimum_x;
+	double maximum_x;
+	double minimum_y;
+	double maximum_y;
+	double band_width;
+	double band_height;
 };
 
 int kl_scroll_init(struct kl_scroll *scroll, unsigned axes);
 void kl_scroll_release(struct kl_scroll *scroll);
 void kl_scroll_set_size(struct kl_scroll *scroll, double content_width, double content_height, double viewport_width, double viewport_height);
+int kl_scroll_set_bounds(struct kl_scroll *scroll, double minimum_x, double maximum_x, double minimum_y, double maximum_y, double band_width, double band_height);
 void kl_scroll_wheel(struct kl_scroll *scroll, double dx, double dy, uint64_t now_us);
 void kl_scroll_move_to(struct kl_scroll *scroll, double x, double y, int glide, uint64_t now_us);
 void kl_scroll_reveal(struct kl_scroll *scroll, const struct kl_rect *rect, uint64_t now_us);
 int kl_scroll_key(struct kl_scroll *scroll, uint32_t key, unsigned modifiers, double line, uint64_t now_us);
 int kl_scroll_press(struct kl_scroll *scroll, uint64_t now_us);
 void kl_scroll_drag(struct kl_scroll *scroll, double dx, double dy);
-void kl_scroll_fling(struct kl_scroll *scroll, double vx, double vy, uint64_t now_us);
+int kl_scroll_fling(struct kl_scroll *scroll, double vx, double vy, uint64_t now_us);
 void kl_scroll_cancel(struct kl_scroll *scroll, uint64_t now_us);
 void kl_scroll_axis(struct kl_scroll *scroll, double dx, double dy, unsigned source, uint64_t now_us);
 int kl_scroll_axis_stop(struct kl_scroll *scroll, uint64_t now_us);
+int kl_scroll_axis_at(struct kl_scroll *scroll, double dx, double dy, unsigned source, uint64_t event_us, uint64_t now_us);
+int kl_scroll_axis_stop_at(struct kl_scroll *scroll, uint64_t event_us, uint64_t now_us, double *vx, double *vy);
+int kl_scroll_axis_holding(const struct kl_scroll *scroll);
 int kl_scroll_step(struct kl_scroll *scroll, uint64_t now_us);
 double kl_scroll_limit_x(const struct kl_scroll *scroll);
 double kl_scroll_limit_y(const struct kl_scroll *scroll);
