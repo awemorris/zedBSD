@@ -59,3 +59,7 @@ FAIL（4 回とも同じ）: accent の 5 行は ok、`the Add User... button (c
 
 accent の 5 行は ok。`FAIL: the Add User... button (control 21) is not on the Users page`（users-layout.txt は controls=4: index 1・2・3・10 の password の card だけ）。原因は試験の前提: Settings を root で起動していた（log `USERS account name=root`、`list count=1`）。root は人の account ではないので一覧に自分の行が無く、`admin_available` が自分の行の admin（wheel）を見つけられず管理の card を出さない（code の動きは設計どおり、実の session は kei）。compositor の側は `kl_backend_account_can_administer` で ADMINISTER を出している。
 直し: `desktop-p004.sh` の 2 を、Settings を kei（wheel の人）で起動する形に（root の compositor の socket `/tmp/wayland-0` を chmod 666、`su kei -c`、log は `/tmp/s-kei.log`、出力 `settings-kei.log`、FAIL の時の users-layout.txt に USERS の行も）。code は変えない。T1 に再試験を依頼する（T1-407 の再）。
+
+## T1-412（2026-10-08 Q1）
+
+FAIL（2 回とも）: kei で起動した Settings が `ZSETTINGS INSTANCE alone errno=21`・`ZSETTINGS FAILED operation=window error=5` で窓を作れずに終わった（settings-kei.log）。試験の起動の仕方（kei の環境・XDG_RUNTIME_DIR・socket の権限）を P1 が直す。

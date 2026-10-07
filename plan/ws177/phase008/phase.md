@@ -3,7 +3,7 @@
 # ws177-p008: Files の Recents の仕上げ（案 C）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（T1-411）（2026-10-08 P1 q884 の 5: 実装・host PASS・build warning 0、main に統合）
+Status: cleared（2026-10-08 Q1 判定、T1-412 recents-p008 PASS）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q884 の 5（P1、2026-10-08）
@@ -41,3 +41,7 @@ FAIL（2 回とも）: `the window's focus reads the changed list again (found 0
 
 `the window's focus reads the changed list again (found 0 of 1)`・`read again 0 times`。Text Editor の起動・生存は ok。切り分け: zdesktop.log に `KWL DESKTOP focus` が無い。この試験の compositor（`--testing`、root）は desktop の program（files --desktop）を走らせないので、背景の click は keyboard を取らない（`kwl_desktop_press` は desktop の surface の上だけ）。描くたびに `display.c` が front を一番上の窓にするので、Text Editor は焦点を持ったままで、窓の click も新しい enter を起こさない。Text Editor の側（`KL_WINDOW_FOCUS` の pressed で `main_recent_follow` が stamp を比べる）は正しい。
 直し: `recents-p008.sh` の 3 を、Settings の窓を上に出して（keyboard が移る）終わらせる（一番上に残る Text Editor に keyboard が戻り enter が届く）形に（`focus_away_and_back`、2 回）。code は変えない。T1 に再試験を依頼する。
+
+## T1-412（2026-10-08 Q1）
+
+recents-p008 PASS（焦点で変わった一覧を読み直す・変わらない一覧は読み直さない、を含む全 ok）。cleared。
