@@ -88,6 +88,7 @@ static void test_rates(void);
 static void test_converter(void);
 static void test_short_pulse(void);
 static void test_fallback(void);
+static void test_link_retrain(void);
 
 /*
  * Runs every case; the monitor's EDID comes from the capture named on the
@@ -125,6 +126,7 @@ main(
 	test_converter();
 	test_short_pulse();
 	test_fallback();
+	test_link_retrain();
 
 	/* The verdict. */
 	printf("host-dpext: %d checks, %d failures\n", checks, failures);
@@ -901,4 +903,63 @@ test_fallback(void)
 	/* A rate the sink does not share halves the lanes at the highest rate. */
 	lowered = drv_i915_dp_ext_fallback_values(&sink, 810000, 4, &max_rate, &max_lanes);
 	check(lowered && max_rate == 540000 && max_lanes == 2, "fallback: an unshared rate halves the lanes at HBR2");
+}
+
+/*
+ * ws051-p005b: whether a trained link must be trained again, from the
+ * sink's link status (DPCD 0x202 onwards): all lanes done and aligned, a
+ * lane of the link that lost its lock, a lane past the link's count that
+ * did, lost alignment, a status that cannot be read, and lane counts out
+ * of range.
+ */
+static void
+test_link_retrain(void)
+{
+	struct i915_dp_ext_env env;
+	int needs;
+
+	/* Four lanes with clock recovery, equalisation and symbol lock, aligned: nothing to do. */
+	fake_reset();
+	env_init(&env);
+	fake.dpcd[0x202] = 0x77;
+	fake.dpcd[0x203] = 0x77;
+	fake.dpcd[0x204] = 0x01;
+	needs = drv_i915_dp_ext_link_needs_retrain(&env, 4);
+	check(needs == 0, "retrain: a trained four-lane link needs nothing");
+	check(fake.reads == 1 && fake.read_offset[0] == 0x202 && fake.read_size[0] == 6, "retrain: the status is one read of 6 bytes at 0x202");
+
+	/* Lane 3 lost its symbol lock: a four-lane link needs it, a two-lane link does not. */
+	fake.dpcd[0x203] = 0x37;
+	needs = drv_i915_dp_ext_link_needs_retrain(&env, 4);
+	check(needs == 1, "retrain: lane 3 without symbol lock on four lanes");
+	needs = drv_i915_dp_ext_link_needs_retrain(&env, 2);
+	check(needs == 0, "retrain: lane 3 is not one of two lanes");
+
+	/* Lane 1 lost clock recovery: a two-lane link needs it, a one-lane link does not. */
+	fake.dpcd[0x202] = 0x67;
+	needs = drv_i915_dp_ext_link_needs_retrain(&env, 2);
+	check(needs == 1, "retrain: lane 1 without clock recovery on two lanes");
+	needs = drv_i915_dp_ext_link_needs_retrain(&env, 1);
+	check(needs == 0, "retrain: lane 1 is not the one lane");
+
+	/* The lanes lost their alignment. */
+	fake.dpcd[0x202] = 0x77;
+	fake.dpcd[0x203] = 0x77;
+	fake.dpcd[0x204] = 0x00;
+	needs = drv_i915_dp_ext_link_needs_retrain(&env, 1);
+	check(needs == 1, "retrain: lost inter-lane alignment");
+
+	/* A status that cannot be read asks for nothing. */
+	fake.fail_all = 1;
+	needs = drv_i915_dp_ext_link_needs_retrain(&env, 4);
+	check(needs == 0, "retrain: an unreadable status asks for nothing");
+	fake.fail_all = 0;
+
+	/* Lane counts out of 1 to 4 ask for nothing and read nothing. */
+	fake.reads = 0;
+	needs = drv_i915_dp_ext_link_needs_retrain(&env, 0);
+	check(needs == 0, "retrain: lane count 0");
+	needs = drv_i915_dp_ext_link_needs_retrain(&env, 5);
+	check(needs == 0, "retrain: lane count 5");
+	check(fake.reads == 0, "retrain: no read for a bad lane count");
 }

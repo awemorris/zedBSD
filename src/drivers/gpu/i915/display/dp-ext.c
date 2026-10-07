@@ -67,6 +67,20 @@
 #define I915_DP_EXT_DEVICE_SERVICE_IRQ_VECTOR	0x201u
 #define I915_DP_EXT_LINK_SERVICE_IRQ_VECTOR_ESI0	0x2005u
 
+/*
+ * The DPRX's link status (DP_LANE0_1_STATUS onwards, 6 bytes): a 4-bit
+ * field per lane, two lanes a byte (lane 0 in the low bits), whose clock
+ * recovery, channel equalisation and symbol lock must all be done, and
+ * the inter-lane alignment bit of DP_LANE_ALIGN_STATUS_UPDATED.
+ */
+#define I915_DP_EXT_LANE0_1_STATUS		0x202u
+#define I915_DP_EXT_LINK_STATUS_SIZE		6u
+#define I915_DP_EXT_LANE_ALIGN_INDEX		2u
+#define I915_DP_EXT_INTERLANE_ALIGN_DONE	0x01u
+#define I915_DP_EXT_LANE_EQ_BITS		0x07u
+#define I915_DP_EXT_LANE_STATUS_BITS		4u
+#define I915_DP_EXT_LANES_MAX			4
+
 /* The protocol converter controls of a DPCD 1.3 branch (DPCD 0x3050 to 0x3052). */
 #define I915_DP_EXT_CONVERTER_CONTROL_0		0x3050u
 #define I915_DP_EXT_CONVERTER_CONTROL_1		0x3051u
@@ -295,6 +309,49 @@ drv_i915_dp_ext_short_pulse(
 
 	/* Succeeded: the sink is as the probe found it. */
 	return 1;
+}
+
+/*
+ * Tells whether a trained link must be trained again (the Linux
+ * intel_dp_needs_link_retrain() with drm_dp_channel_eq_ok(), ws051-p005b):
+ * the sink's link status is read, and the link needs it when the lanes
+ * lost their alignment or a lane of the link's lane_count lost clock
+ * recovery, equalisation or symbol lock.  A status that cannot be read, or
+ * a lane count out of 1 to 4, does not ask for it (as Linux, which
+ * retrains only on a status it read).  Returns 1 or 0.
+ */
+int
+drv_i915_dp_ext_link_needs_retrain(
+	const struct i915_dp_ext_env *env,
+	int lane_count)
+{
+	uint8_t status[I915_DP_EXT_LINK_STATUS_SIZE];
+	unsigned lane_bits;
+	long read;
+	int lane;
+
+	/* Only a link of one to four lanes. */
+	if (lane_count < 1 || lane_count > I915_DP_EXT_LANES_MAX)
+		return 0;
+
+	/* The status; one that cannot be read asks for nothing. */
+	read = env->dpcd_read(env->ctx, I915_DP_EXT_LANE0_1_STATUS, status, sizeof(status));
+	if (read != (long)sizeof(status))
+		return 0;
+
+	/* Lanes that lost their alignment. */
+	if ((status[I915_DP_EXT_LANE_ALIGN_INDEX] & I915_DP_EXT_INTERLANE_ALIGN_DONE) == 0u)
+		return 1;
+
+	/* Each lane of the link: clock recovery, equalisation and symbol lock, all done. */
+	for (lane = 0; lane < lane_count; lane++) {
+		lane_bits = ((unsigned)status[lane / 2] >> ((unsigned)(lane % 2) * I915_DP_EXT_LANE_STATUS_BITS)) & I915_DP_EXT_LANE_EQ_BITS;
+		if (lane_bits != I915_DP_EXT_LANE_EQ_BITS)
+			return 1;
+	}
+
+	/* The link is as it was trained. */
+	return 0;
 }
 
 /*

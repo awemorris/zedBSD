@@ -3433,6 +3433,15 @@ struct i915_present_window {
 	 */
 	int relight;
 	int keep_buffers;
+
+	/*
+	 * Nonzero asks for the same, for the resident output alone, because
+	 * its external DP link lost its lock and must be trained again
+	 * (ws051-p005b): the hotplug path sets it, the worker takes it at the
+	 * next frame and lights the output again.  Both hold the device IRQ
+	 * lock for it.
+	 */
+	int retrain;
 };
 
 /*
