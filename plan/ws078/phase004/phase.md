@@ -2,7 +2,7 @@
 
 # ws078-p004: 見える文字列（boot の logo・greeter・lock・banner 等）
 
-Status: test-wait（2026-10-08 P1 q875: 残りの 4 か所を直した、QEMU は T1。下の「q875」）（旧: incomplete（ws.md の Phase の表のとおり。この file は 2026-10-01 に手順のために作った。それまでの記録は ws.md の表の p004 の行が正））
+Status: cleared（2026-10-08 Q1 判定、T1-397 PASS）（旧: test-wait（2026-10-08 P1 q875: 残りの 4 か所を直した、QEMU は T1。下の「q875」）（旧: incomplete（ws.md の Phase の表のとおり。この file は 2026-10-01 に手順のために作った。それまでの記録は ws.md の表の p）
 Disposition: normal
 Parent: [WS078](../ws.md)
 Queue: q875（P1、2026-10-08 Q1 の承認の 7 番）
@@ -68,3 +68,8 @@ Queue: q875（P1、2026-10-08 Q1 の承認の 7 番）
 ## Q1 の判断（2026-10-08）
 
 完了の条件の `git grep -iE 'zedbsd|zdesktop'` が 0 行は、残すと決めた名前（zedbsd.cfg など）があるので満たせない。条件を「browser/data と API-PROVENANCE は 0 行、kernel-boot-parameters.md は残すと決めた名前（zedbsd.cfg・zedbsd の OS の名前）だけ」に改める。
+
+
+## Q1 の判定（2026-10-08）
+
+T1-397: browser-start PASS（title・見出しが Browser、zedBSD・zdesktop の表記なし）、About は「Kei / powered by zedBSD」、boot-test PASS。

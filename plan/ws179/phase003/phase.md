@@ -2,7 +2,7 @@
 # ws179-p003: 規約の全文の見直しと accent の AAT のシナリオ
 
 Parent: [WS179](../ws.md)
-Status: in-progress（2026-10-08 P1 q875: AAT のシナリオと helper を足した、QEMU は T1。規約の全文の見直しはユーザーの決定でベータ3）
+Status: cleared（2026-10-08 Q1 判定、T1-396。BUG-262 は別）（旧: in-progress（2026-10-08 P1 q875: AAT のシナリオと helper を足した、QEMU は T1。規約の全文の見直しはユーザーの決定でベータ3））
 Disposition: normal
 Queue: q875（P1、2026-10-08 Q1 の承認「5330 なしで進められる小さい物を順に」の 6 番。規約の部分は除く）
 依存: p001・p002
@@ -22,3 +22,8 @@ Queue: q875（P1、2026-10-08 Q1 の承認「5330 なしで進められる小さ
 ## 積み残し
 
 - 準正常系 3 件は WS177 の backlog（p001 の記録のとおり）。
+
+
+## Q1 の判定（2026-10-08）
+
+T1-396: purple・blue とも Settings・system bar の色が変わる（Q1 が PNG を目視）。blue に戻した時に desktop の Files の ACCENT の行が無い件は [BUG-262](../../bugs/BUG-262.md) として別に追う。

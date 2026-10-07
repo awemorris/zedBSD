@@ -2,7 +2,7 @@
 # ws102-p025: 設計 — 画面 keyboard の残り（App Home で消える・引き出しの形・full keyboard の IME）
 
 Parent: [WS102](../ws.md)
-Status: test-wait（T1 依頼中。q789-i02、P1、2026-10-06: 試験を足した。下の「q789-i02」）
+Status: cleared（2026-10-08 Q1 判定、T1-394 QEMU PASS）（旧: test-wait（T1 依頼中。q789-i02、P1、2026-10-06: 試験を足した。下の「q789-i02」））
 Disposition: normal
 Related: [BUG-229](../../bugs/BUG-229.md)・[BUG-230](../../bugs/BUG-230.md)・[BUG-231](../../bugs/BUG-231.md)
 
@@ -69,3 +69,8 @@ T1-226（証拠 `/home/awe/zedBSD-worktrees/t1/build/t1-226/`）で osk-guest �
 - 流し方（T1）: `GUEST_RUNTIME=... BIN=<build> plan/ws102/tests/osk-guest.sh OUTDIR install qwerty-ime`。合格は最後の行 `osk-guest: PASS`。
 - 確認: `sh -n`。QEMU は未実施。
 - 残り（変わらず）: 候補を OSK の候補の列に出す（今は IME の popup）、AAT の `desktop.osk.full-ime`。
+
+
+## Q1 の判定（2026-10-08）
+
+T1-394: qwerty-ime PASS（KWL IME language=ja、OSK send via=ime code=30、preedit あ、変換 code=57、確定 code=28 で committed "亜"）。BUG-231 は QEMU で確認済み、実機の UAT は未実施。

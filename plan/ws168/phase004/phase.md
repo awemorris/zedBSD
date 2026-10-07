@@ -3,7 +3,7 @@
 
 Phase ID: `ws168-p004`
 Parent: [WS168](../ws.md)
-Status: in-progress（2026-10-07 q834 P2: 実装、host（Linux）の試験 PASS、zedBSD・Linux の build warning 0。QEMU は T1 に依頼、判定は Q1）
+Status: cleared（2026-10-08 Q1 判定、T1-395）（旧: in-progress（2026-10-07 q834 P2: 実装、host（Linux）の試験 PASS、zedBSD・Linux の build warning 0。QEMU は T1 に依頼、判定は Q1））
 Queue: q834（2026-10-07、P2）
 設計: [p001](../phase001/phase.md) §5・§7
 
@@ -54,3 +54,8 @@ Queue: q834（2026-10-07、P2）
 - 原因（T1-319 の log `t1/build/t1-318/logs/apps.files.thumbnails.log` で確かめた）: helper の `sized()` が窓の大きさを `ZFILES READY width= height=` から取っていた。desktop も Files なので、mark の後に desktop の READY（`width=1280 height=756`、bar の下の画面全体）が先に合い、窓（client 16、実際は 1120x680、`KWL MAP ... x=80`）の close の button を 80+1280−26=1334 に探して画面の外になった。
 - 直し（`plan/tools/aat/scenarios/helpers_preview.py`）: 大きさをその client の buffer の import（`KWL IMPORT client=N buffer=… width= height=`）から取る。close の button は 80+1120−26=1174 で画面の中。
 - 確認: `python3 -m py_compile`。QEMU（T1）: AAT `--only 'apps\.files\.thumbnails'` の再試験（2 度目の cache・Settings の背景の tile・`SANDBOX deny` が増えないことを含む）は未実施。
+
+
+## Q1 の判定（2026-10-08）
+
+T1-395: apps.files.thumbnails は fail でない（sample.png・jpg・pdf が status=0、broken.png は拒否、cached=1、Wallpaper 7 of 7、SANDBOX deny 0）。PNG を Q1 が目視（build/review/t1-39x/apps.files.thumbnails-files.png、3 枚の縮小画像と broken.png の汎用の icon）。
