@@ -43,4 +43,4 @@
 | keiland の OS の境界の検査（keiland-os-boundary/check.sh） | B3 の 2 件で FAIL: userland/desktop/sessiond/Makefile:16・printd/Makefile:3（前から、P1 2026-10-08） | 境界の規則に合わせて Makefile を直す | userland/desktop/sessiond/Makefile・printd/Makefile | 2026-10-08 |
 | WS090（Files の Help のカード） | T1-373: File Manager Help のカードの本文に省略の `…` が出る（本文の幅が足りない、p023 の icon ボタンと別） | 本文の折り返し・カードの高さを見直す | `userland/desktop/files/` の Help | 2026-10-08 |
 
-- 2026-10-08 ユーザーの UAT（5330）: PDF viewer の窓のリサイズのドラッグが重い。resize の event ごとに内部の buffer の作り直しと software の再描画をしている疑い。案: 描画の矩形だけ変え、内部の resize は 200 ms ごとか drag の終わりに、不要な重い処理は省く。詳細は plan/agents/wrapup-20261008.md。
+- 2026-10-08 ユーザーの UAT（5330）: PDF viewer の窓のリサイズのドラッグが重い。resize の event ごとに内部の buffer の作り直しと software の再描画をしている疑い。案: 描画の矩形だけ変え、内部の resize は 200 ms ごとか drag の終わりに、不要な重い処理は省く。詳細は [BUG-259](../bugs/BUG-259.md)。

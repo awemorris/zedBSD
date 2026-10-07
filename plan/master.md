@@ -30,7 +30,7 @@
 1. plan/agents/wrapup-20261008.md を読み、P1・P2 を新しい世代で起動（再開の順は上の agents）。P2 の WIP は worktree の差分のまま、無ければ plan/ws143/wip-20261008/ から戻す。
 2. **5330**（zedBSD 単独起動中、ユーザー「いつでも再起動OK、アップデートもOK」）: 入れ替えは未実施。5330 の /tmp に vmunix.q1（main fc5cad676、BUG-256 の診断入り）・wayland.q1・settings.q1・libkeiland.q1 があり、ESP は /tmp/esp に mount したまま（/esp は無い）。新しい main で build し直して入れ替え（vmunix.prev を残す）、再起動はユーザーに頼む（reboot command は 5330 で効かない）。その後ユーザーに TC2 へ DP の monitor を挿してもらい `i915: aux`・`TCn AUX failed` の行を P2 へ（BUG-256）。BUG-258 の再現の dmesg もこの時に。
 3. merge は `source plan/tools/merge_one.sh && merge_one SHA`、`&&` で繋ぐ。
-4. PDF viewer のリサイズの重さ（2026-10-08 UAT）は backlog-p1 に記録、未割当。
+4. PDF viewer のリサイズの重さ（2026-10-08 UAT）は [BUG-259](bugs/BUG-259.md)、未割当。
 <!-- master:next:end -->
 
 ### ユーザーの未決の判断
@@ -513,7 +513,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 ユーザーの決定と Q1 の技術の決定の記録。決まった判断は先頭の open-decisions からここへ移す。各 WS の phase.md・ws.md が正本で、ここは索引。
 
 <!-- master:decisions-log:start -->
-- 2026-10-08 ユーザー: (1)「2番目以降のディスプレイのdock barには、その画面に置いた window の window icon を出し、時計・状態・App Home・切り替えのつまみも表示する。」（ws113-p015）(2)「5330はいつでも再起動OKです。アップデートもOKです。」(3) UAT: タップの判定の遅れ → ws183-p002（q863）、USB メモリ → BUG-258、PDF viewer のリサイズの重さ → backlog-p1。(4) 緊急のラップアップの後、週間の使用量 99% で別のセッションへ引き継ぎ（plan/agents/wrapup-20261008.md）。
+- 2026-10-08 ユーザー: (1)「2番目以降のディスプレイのdock barには、その画面に置いた window の window icon を出し、時計・状態・App Home・切り替えのつまみも表示する。」（ws113-p015）(2)「5330はいつでも再起動OKです。アップデートもOKです。」(3) UAT: タップの判定の遅れ → ws183-p002（q863）、USB メモリ → BUG-258、PDF viewer のリサイズの重さ → BUG-259。(4) 緊急のラップアップの後、週間の使用量 99% で別のセッションへ引き継ぎ（plan/agents/wrapup-20261008.md）。
 - 2026-10-08 ユーザー「ベータ3にします：WS009・026・106 文書・試験の整理・試験アプリの集約、WS139 デスクトップの速さ」 → 4 つの WS の Target をベータ3 に。
 - 2026-10-08 ユーザー:「『そのほか』は見積もりが甘いです。releaseの作業は明らかに10/13以降です。Linux/FreeBSDも10/13以降です。翻訳はベータ3に回します。」→ WS129（release）と Linux・FreeBSD の作業（WS112、WS131 の 3 OS の回帰ほか）は 10/13 以降、WS158（翻訳）はベータ3。
 - 2026-10-08 ユーザーの UAT（5330、HDMI）: p007 の mouse の跨ぎと窓の移動は OK → ws113-p007 cleared。2 つ目の display のリサイズ不可、display ごとの dock の bar・docked/floating/整列の状態、App Home の時は他の display を背景だけに → [ws113-p015](ws113/phase015/phase.md)（P1、WS113 は優先順の 1 番なので WS090 の今の単位の後すぐ）。「次はUSB-C DPにしてみます。」
