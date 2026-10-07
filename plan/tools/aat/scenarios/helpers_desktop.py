@@ -407,6 +407,25 @@ def dark_mode(item):
 	item.person("the desktop, Settings and Files are dark in the first screenshot, light in the second")
 
 
+@run.define("desktop.appearance.accent")
+def accent(item):
+	files = run.launch(item, "Files")
+	window, since = run.settings(item, "appearance")
+	controls = run.controls(since, "appearance")
+	item.check(90 in controls and 91 in controls, "no accent swatches (controls 90 and 91)")
+	for index, name in ((1, "purple"), (0, "blue")):
+		mark = run.mark()
+		run.click_control(item, window, controls, 90 + index, f"the {name} accent swatch")
+		settings = run.wait(rf"ZSETTINGS ACCENT index={index}\b", mark, 10)
+		theme = run.wait(rf"KWL THEME appearance=\d+ accent={index}\b", mark, 10)
+		files_line = run.wait(rf"ZFILES ACCENT index={index}\b", mark, 3)
+		time.sleep(1.0)
+		item.step(f"clicked the {name} accent swatch", f"{settings}; {theme}; Files: {files_line or 'no line in the log'}")
+		run.shot(item, name)
+		item.check(settings and theme, f"accent {index} did not reach Settings and the compositor")
+	item.person("Settings' and Files' highlights are purple in the first screenshot, blue in the second")
+
+
 @run.define("desktop.appearance.window-opacity")
 def window_opacity(item):
 	window, since = run.settings(item, "appearance")
