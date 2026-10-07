@@ -67,6 +67,12 @@ struct program_popup {
 	unsigned text_open;
 	unsigned ready;
 	unsigned shown;
+	/*
+	 * The watch of the desktop's appearance and accent (ws177-p004), which
+	 * the chosen candidate's ground and ink follow; NULL on a compositor
+	 * without it (the accent stays blue).
+	 */
+	struct kl_appearance *appearance;
 };
 
 /*

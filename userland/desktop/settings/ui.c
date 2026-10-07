@@ -323,6 +323,9 @@ se_ui_go(
 	app->logged_count = -1;
 	app->dirty = 1;
 
+	/* No swatch keeps the keyboard across pages (ws177-p004). */
+	app->look.accent_focus = 0;
+
 	/* The page shown stays, without a new step (said again for whoever asked it). */
 	if (page == app->page) {
 		se_log("PAGE %s", se_pages[page].word);

@@ -393,6 +393,7 @@
 		kl_slider;
 		kl_slider_flags;
 		kl_field_set;
+		kl_field_set_limit;
 		kl_field;
 		kl_text_area_set;
 		kl_text_area;
