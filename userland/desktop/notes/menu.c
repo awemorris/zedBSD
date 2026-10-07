@@ -44,6 +44,7 @@
 #define MENU_CLOSE		14U
 #define MENU_SAVE_AS		15U
 #define MENU_SAVE_CLEAN		16U
+#define MENU_OPEN_CLEAN		17U
 
 /* Edit (ws175-p008: the images of the PDF). */
 #define MENU_UNDO		20U
@@ -82,6 +83,7 @@ static const struct kl_menu_entry menu_items[] = {
 	{ MENU_SAVE, MENU_FILE, KL_MENU_ITEM_NORMAL, "Save", NOTES_ACTION_SAVE, KL_MENU_ROLE_SAVE, KL_MENU_CTRL, 's' },
 	{ MENU_SAVE_AS, MENU_FILE, KL_MENU_ITEM_NORMAL, "Save As...", NOTES_ACTION_SAVE_AS, KL_MENU_ROLE_NONE, KL_MENU_CTRL | KL_MENU_SHIFT, 's' },
 	{ MENU_SAVE_CLEAN, MENU_FILE, KL_MENU_ITEM_NORMAL, "Save Clean Copy...", NOTES_ACTION_SAVE_CLEAN, KL_MENU_ROLE_NONE, 0U, 0U },
+	{ MENU_OPEN_CLEAN, MENU_FILE, KL_MENU_ITEM_NORMAL, "Open Clean Copy", NOTES_ACTION_OPEN_CLEAN, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_FILE_LINE, MENU_FILE, KL_MENU_ITEM_SEPARATOR, "", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_CLOSE, MENU_FILE, KL_MENU_ITEM_NORMAL, "Close", NOTES_ACTION_CLOSE, KL_MENU_ROLE_CLOSE, KL_MENU_CTRL, 'w' },
 	{ MENU_EDIT, KL_MENU_ROOT, KL_MENU_ITEM_SUBMENU, "Edit", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
@@ -155,6 +157,7 @@ notes_menu_refresh(
 	menu_action_state(window, NOTES_ACTION_DELETE_OBJECT, state->selected, 0);
 	menu_action_state(window, NOTES_ACTION_RESET_OBJECT, state->can_reset, 0);
 	menu_action_state(window, NOTES_ACTION_EDIT_TEXT, state->can_edit_text, 0);
+	menu_action_state(window, NOTES_ACTION_OPEN_CLEAN, state->can_open_clean, 0);
 
 	/* The page before and the page after, when there are such pages. */
 	earlier = 0;

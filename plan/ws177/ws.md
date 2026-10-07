@@ -39,3 +39,4 @@ Primary Milestone: MG006（関係: MG002・MG003・MG005）
 | [ws177-p008](phase008/phase.md) | 案 C: Files の Recents の仕上げ（止めた一覧の表示、Clear Recents の問い、一覧の stamp と Text Editor の読み直し、KL_VERSION 66） | test-wait（T1-411）（2026-10-08 P1 q884 実装・host PASS・build） | — |
 | [ws177-p009](phase009/phase.md) | 案 H: 手書きの頑健さ（tap の note、templates の壊れ・空・大きすぎ、Hershey の重ね線と番号の衝突、印の位置、templates を thread で、8,192 点を越える ink） | in-progress（2026-10-08 P1 q886 実装・host PASS・build） | — |
 | [ws177-p010](phase010/phase.md) | 案 J: keiland-preview の仕上げ（libpdf の memory の font と Mahora の埋め込み、爆弾・fuzz の試験、縮小画像の子を 2 つ同時、失敗の印の cache、Quick Look・Today を待たずに） | test-wait（2026-10-08 P1 q886 実装・host PASS・build） | — |
+| [ws177-p011](phase011/phase.md) | 案 K3: Notes の Save Clean Copy の仕上げ（form・Type 3・pattern の resource の刈り込み、name tree の /Limits と直接の filespec、名の木の根を頁の木と取り違える不具合、copy を開く menu と一度だけの注意） | in-progress（2026-10-08 P1 q887 実装・host PASS・build、画面は UAT） | — |

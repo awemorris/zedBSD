@@ -118,6 +118,9 @@
 /* ws175-p009: a clean copy of the notebook saved as another file (File > Save Clean Copy). */
 #define NOTES_ACTION_SAVE_CLEAN	46U
 
+/* ws177-p011: the clean copy saved last opened in place of the notebook (File > Open Clean Copy). */
+#define NOTES_ACTION_OPEN_CLEAN	47U
+
 /* The pipelines a draw uses (render.c). */
 #define NOTES_PIPE_STENCIL	0U
 #define NOTES_PIPE_FRINGE	1U
@@ -264,6 +267,9 @@ struct notes_ui_state {
 	int can_edit_text;
 	const char *font_label;
 	float text_size;
+
+	/* ws177-p011: whether a clean copy was saved this session, which File > Open Clean Copy opens. */
+	int can_open_clean;
 };
 
 /*

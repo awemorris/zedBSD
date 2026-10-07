@@ -20,9 +20,12 @@
  * (XObject, Font, ExtGState, Pattern, Shading, ColorSpace, Properties),
  * only the entries its content names: an image the editor deleted, or a
  * font the page no longer uses, is then reached by nothing and left out
- * with its stream.  A page whose content cannot be read, or that draws a
- * form, Type 3 font or tiling pattern which takes the page's resources for
- * want of its own, keeps all of them.
+ * with its stream.  A form, Type 3 font or tiling pattern the content
+ * names that takes the page's resources for want of its own adds the
+ * names its own content uses; one with resources of its own has them
+ * kept the same way, by the names its content (a Type 3 font's glyph
+ * procedures) uses (ws177-p011).  Resources whose content cannot be read
+ * are kept whole.
  *
  * Objects are written as the reader read them: references as the new
  * numbers, strings in hexadecimal, streams with their own encoded bytes
@@ -31,7 +34,9 @@
  * are reached by nothing and go.  One attached file may be left out by
  * name: its file specification is dropped from the EmbeddedFiles name tree
  * and the catalog's /AF (Notes leaves out its edit data, so the copy opens
- * as another program's PDF, its edits part of its pages).
+ * as another program's PDF, its edits part of its pages), whether it is an
+ * object of its own or written in the tree or the list; the name tree's
+ * /Limits are written again from the names it keeps (ws177-p011).
  */
 
 #include <errno.h>
@@ -58,6 +63,24 @@
 /* The categories of a page's resources whose entries its content names. */
 #define CLEAN_CATEGORIES 7
 
+/* The categories whose entries draw with resources: XObject, Font and Pattern (their places in the names). */
+#define CLEAN_XOBJECT 0
+#define CLEAN_FONT 1
+#define CLEAN_PATTERN 3
+
+/* A category entry's mark: not named, named by the content, named and its own content followed. */
+#define CLEAN_UNUSED 0
+#define CLEAN_NAMED 1
+#define CLEAN_FOLLOWED 2
+
+/* What holds the content a resource dictionary is named in (clean_source.kind). */
+#define CLEAN_SOURCE_PAGE 0
+#define CLEAN_SOURCE_STREAM 1
+#define CLEAN_SOURCE_TYPE3 2
+
+/* The most direct objects of the document the copy leaves out (file specifications written in place). */
+#define CLEAN_DIRECT_MAX 64
+
 /*
  * The state of one clean copy.
  *
@@ -65,7 +88,10 @@
  * number in the copy (0: none yet), and kinds tells what the copy does
  * with it (CLEAN_KIND_*).  queue holds the references of the objects
  * numbered but not yet written, in the order of their numbers; offsets
- * holds where each of the copy's objects begins in the file.
+ * holds where each of the copy's objects begins in the file.  direct
+ * holds the objects written in place (not referenced) that the copy
+ * leaves out, and names_dropped tells that a name tree lost entries, so
+ * its /Limits are written again.
  */
 struct clean_state {
 	struct pdf_document *document;
@@ -79,11 +105,26 @@ struct clean_state {
 	size_t *offsets;
 	unsigned long next;
 	size_t dropped;
+	const struct pdf_object *direct[CLEAN_DIRECT_MAX];
+	size_t direct_count;
+	int names_dropped;
+};
+
+/*
+ * Where the content a resource dictionary serves is: a page's content
+ * streams (page is its place), a form's or tiling pattern's own stream,
+ * or a Type 3 font's glyph procedures (holder is the stream or the font).
+ */
+struct clean_source {
+	int kind;
+	size_t page;
+	struct pdf_object *holder;
 };
 
 /*
  * One category of a page's resources: its dictionary (NULL: the page has
- * none) and, for each of its entries, whether the page's content names it.
+ * none) and, for each of its entries, whether the page's content names it
+ * (CLEAN_UNUSED, CLEAN_NAMED, CLEAN_FOLLOWED).
  */
 struct clean_category {
 	const char *name;
@@ -99,13 +140,20 @@ static int clean_string_is(const struct pdf_object *object, const char *text);
 static void clean_write_catalog(struct clean_state *state, struct pdf_object *catalog);
 static void clean_write_tree(struct clean_state *state, size_t pages);
 static void clean_write_page(struct clean_state *state, size_t index);
-static void clean_write_resources(struct clean_state *state, size_t index, struct pdf_object *resources);
-static int clean_find_used(struct clean_state *state, size_t index, struct clean_category *categories);
+static void clean_write_resources(struct clean_state *state, const struct clean_source *source, struct pdf_object *resources);
+static int clean_find_used(struct clean_state *state, const struct clean_source *source, struct clean_category *categories);
+static int clean_find_page(struct clean_state *state, size_t index, struct clean_category *categories);
+static int clean_mark_glyphs(struct clean_state *state, struct pdf_object *font, struct clean_category *categories);
+static int clean_own_resources(struct clean_state *state, struct pdf_object *object, struct clean_source *source, struct pdf_object **resources);
+static int clean_drop_direct(struct clean_state *state, const struct pdf_object *object);
+static void clean_write_limits(struct clean_state *state, const struct pdf_object *node, const struct pdf_object *limits, int depth);
+static int clean_tree_bounds(struct clean_state *state, const struct pdf_object *node, const struct pdf_object **low, const struct pdf_object **high, int depth);
+static int clean_string_before(const struct pdf_object *left, const struct pdf_object *right);
 static int clean_mark_stream(struct clean_state *state, struct pdf_object *stream, struct clean_category *categories);
 static int clean_skip_inline(struct pdf_lexer *lexer);
 static int clean_is_space(unsigned char byte);
 static void clean_mark_name(struct clean_category *categories, const struct pdf_token *token);
-static int clean_borrows_resources(struct clean_state *state, struct clean_category *categories);
+static int clean_follow_borrowed(struct clean_state *state, struct clean_category *categories);
 static void clean_write_queued(struct clean_state *state, struct pdf_object *reference);
 static void clean_write_trailer(struct clean_state *state, struct pdf_object *trailer, size_t xref);
 static void clean_write_value(struct clean_state *state, const struct pdf_object *object, int pairs, int depth);
@@ -342,7 +390,7 @@ clean_drop_names(
 	if (depth > PDF_READER_DEPTH_MAX)
 		return PDF_EFORMAT;
 
-	/* A leaf's pairs: the value of a key that is the name is dropped (a reference; a direct one stays). */
+	/* A leaf's pairs: the value of a key that is the name is dropped. */
 	error = pdf_reader_resolve_key(state->document, node, "Names", &names);
 	if (error != 0)
 		return error;
@@ -353,11 +401,20 @@ clean_drop_names(
 			if (error != 0)
 				return error;
 			matches = clean_string_is(key, attachment);
-			value = names->values[index + 1];
-			if (!matches || value->type != PDF_OBJECT_REFERENCE)
+			if (!matches)
 				continue;
 
-			/* The specification is left out. */
+			/* The specification is left out, an object of its own or one written in the tree (ws177-p011). */
+			value = names->values[index + 1];
+			state->names_dropped = 1;
+			if (value->type != PDF_OBJECT_REFERENCE) {
+				error = clean_drop_direct(state, value);
+				if (error != 0)
+					return error;
+				continue;
+			}
+
+			/* An object of its own. */
 			if (value->number < state->count)
 				state->kinds[value->number] = CLEAN_KIND_DROPPED;
 		}
@@ -407,15 +464,17 @@ clean_drop_associated(
 	if (associated->type != PDF_OBJECT_ARRAY)
 		return 0;
 
-	/* Each item that is a reference to a specification of the name. */
+	/* Each item that is a specification of the name, an object of its own or written in the list (ws177-p011). */
 	for (index = 0; index < associated->count; index++) {
-		/* Only references can be left out. */
+		/* A reference past the document's objects names nothing. */
 		item = associated->values[index];
-		if (item->type != PDF_OBJECT_REFERENCE || item->number >= state->count)
+		if (item->type == PDF_OBJECT_REFERENCE && item->number >= state->count)
 			continue;
 		error = pdf_reader_resolve(state->document, item, &specification);
 		if (error != 0)
 			return error;
+		if (specification->type != PDF_OBJECT_DICTIONARY)
+			continue;
 
 		/* The specification's Unicode name, or its plain one. */
 		error = pdf_reader_resolve_key(state->document, specification, "UF", &name);
@@ -427,10 +486,21 @@ clean_drop_associated(
 				return error;
 		}
 
-		/* The specification is left out when it names the file. */
+		/* A specification that names another file stays. */
 		matches = clean_string_is(name, attachment);
-		if (matches)
-			state->kinds[item->number] = CLEAN_KIND_DROPPED;
+		if (!matches)
+			continue;
+
+		/* The specification is left out: one written in the list by itself, else its object. */
+		if (item->type != PDF_OBJECT_REFERENCE) {
+			error = clean_drop_direct(state, item);
+			if (error != 0)
+				return error;
+			continue;
+		}
+
+		/* An object of its own. */
+		state->kinds[item->number] = CLEAN_KIND_DROPPED;
 	}
 
 	/* Succeeded: the list's specifications of the name are marked. */
@@ -507,6 +577,7 @@ clean_write_page(
 	size_t index)
 {
 	static const char *const skipped[] = { "Parent", "MediaBox", "CropBox", "Rotate", "Resources" };
+	struct clean_source source;
 	struct pdf_object *page;
 	struct pdf_object *resources;
 	struct pdf_object *media_box;
@@ -550,23 +621,29 @@ clean_write_page(
 	}
 
 	/* The resources, but those the content does not name. */
-	if (resources->type == PDF_OBJECT_DICTIONARY)
-		clean_write_resources(state, index, resources);
+	if (resources->type == PDF_OBJECT_DICTIONARY) {
+		source.kind = CLEAN_SOURCE_PAGE;
+		source.page = index;
+		source.holder = page;
+		clean_write_resources(state, &source, resources);
+	}
 
 	/* The end of the object. */
 	pdf_buffer_printf(state->file, " >>\nendobj\n");
 }
 
 /*
- * Writes a page's resources as a direct dictionary: each category whose
- * entries the content names keeps only the entries named (design.md
- * [M11]); the other entries are written as they are.  A page whose
- * content cannot be read, or that lends its resources, keeps them all.
+ * Writes the resources of a page, a form, a tiling pattern or a Type 3
+ * font (source) as a direct dictionary: each category whose entries the
+ * content names keeps only the entries named (design.md [M11]), those a
+ * resource that borrows them names too (ws177-p011); the other entries are
+ * written as they are.  Resources whose content cannot be read keep them
+ * all.
  */
 static void
 clean_write_resources(
 	struct clean_state *state,
-	size_t index,
+	const struct clean_source *source,
 	struct pdf_object *resources)
 {
 	static const char *const names[CLEAN_CATEGORIES] = { "XObject", "Font", "ExtGState", "Pattern", "Shading", "ColorSpace", "Properties" };
@@ -576,7 +653,6 @@ clean_write_resources(
 	size_t entry;
 	size_t which;
 	int is_category;
-	int borrows;
 	int pruned;
 	int error;
 
@@ -607,20 +683,22 @@ clean_write_resources(
 		}
 	}
 
-	/* The names the page's content uses; a content that cannot be read keeps everything. */
+	/* The names the content uses; a content that cannot be read keeps everything. */
 	pruned = 0;
-	error = clean_find_used(state, index, categories);
+	error = clean_find_used(state, source, categories);
+	if (error == 0)
+		error = clean_follow_borrowed(state, categories);
+
+	/* Memory running out fails the copy. */
 	if (error == ENOMEM) {
 		pdf_buffer_fail(state->file, error);
 		clean_free(NULL, categories);
 		return;
 	}
 
-	/* A content read prunes, unless a resource it names borrows the page's. */
-	if (error == 0) {
-		borrows = clean_borrows_resources(state, categories);
-		pruned = !borrows;
-	}
+	/* A content read, with what borrows the resources, prunes them. */
+	if (error == 0)
+		pruned = 1;
 
 	/* The dictionary: each key, a pruned category with only its entries named. */
 	pdf_buffer_printf(state->file, " /Resources <<");
@@ -670,15 +748,46 @@ clean_write_resources(
 }
 
 /*
- * Marks the resource entries a page's content names: every name token of
- * its content streams (a name in an operand, a marked content's
- * properties or an inline image's dictionary counts), which keeps a
- * resource whenever the content could use it.  Returns 0, or an errno
- * value when a stream cannot be read (PDF_EFORMAT, ENOTSUP) or memory runs
- * out (ENOMEM).
+ * Marks the resource entries a content names: every name token of its
+ * streams (a name in an operand, a marked content's properties or an
+ * inline image's dictionary counts), which keeps a resource whenever the
+ * content could use it.  The content is a page's streams, a form's or
+ * pattern's stream, or a Type 3 font's glyph procedures.  Returns 0, or an
+ * errno value when a stream cannot be read (PDF_EFORMAT, ENOTSUP) or
+ * memory runs out (ENOMEM).
  */
 static int
 clean_find_used(
+	struct clean_state *state,
+	const struct clean_source *source,
+	struct clean_category *categories)
+{
+	int error;
+
+	/* The streams of each kind of holder. */
+	switch (source->kind) {
+	case CLEAN_SOURCE_PAGE:
+		error = clean_find_page(state, source->page, categories);
+		break;
+	case CLEAN_SOURCE_STREAM:
+		error = clean_mark_stream(state, source->holder, categories);
+		break;
+	default:
+		error = clean_mark_glyphs(state, source->holder, categories);
+		break;
+	}
+
+	/* Reports a content that could not be read. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the names the content uses are marked. */
+	return 0;
+}
+
+/* Marks the resource entries a page's content streams name (clean_find_used). */
+static int
+clean_find_page(
 	struct clean_state *state,
 	size_t index,
 	struct clean_category *categories)
@@ -724,6 +833,44 @@ clean_find_used(
 	if (contents->type == PDF_OBJECT_NULL)
 		return 0;
 	return PDF_EFORMAT;
+}
+
+/* Marks the resource entries a Type 3 font's glyph procedures (/CharProcs) name. */
+static int
+clean_mark_glyphs(
+	struct clean_state *state,
+	struct pdf_object *font,
+	struct clean_category *categories)
+{
+	struct pdf_object *procedures;
+	struct pdf_object *stream;
+	size_t item;
+	int error;
+
+	/* The procedures; a font without them names nothing. */
+	error = pdf_reader_resolve_key(state->document, font, "CharProcs", &procedures);
+	if (error != 0)
+		return error;
+	if (procedures->type == PDF_OBJECT_NULL)
+		return 0;
+	if (procedures->type != PDF_OBJECT_DICTIONARY)
+		return PDF_EFORMAT;
+
+	/* Each glyph's stream. */
+	for (item = 0; item < procedures->count; item++) {
+		/* Each value must be a stream. */
+		error = pdf_reader_resolve(state->document, procedures->values[item], &stream);
+		if (error != 0)
+			return error;
+		if (stream->type != PDF_OBJECT_STREAM)
+			return PDF_EFORMAT;
+		error = clean_mark_stream(state, stream, categories);
+		if (error != 0)
+			return error;
+	}
+
+	/* Succeeded: every glyph's names are marked. */
+	return 0;
 }
 
 /* Marks the resource entries one content stream names. */
@@ -864,20 +1011,22 @@ clean_mark_name(
 			if (key->length != token->length)
 				continue;
 			difference = memcmp(key->bytes, token->bytes, token->length);
-			if (difference == 0)
-				categories[which].used[entry] = 1;
+			if (difference == 0 && categories[which].used[entry] == CLEAN_UNUSED)
+				categories[which].used[entry] = CLEAN_NAMED;
 		}
 	}
 }
 
 /*
- * Tells whether a resource the content names draws with the page's
- * resources for want of its own: a form XObject, a Type 3 font or a tiling
- * pattern without /Resources.  The page's resources are then kept whole,
- * since what that resource names is not in the page's content.
+ * Follows the resources the content names that draw with the resources
+ * written for want of their own (ws177-p011): a form XObject, a Type 3
+ * font or a tiling pattern without /Resources.  Their content's names are
+ * marked too, and the resources they name in turn, until no named entry
+ * is left to follow.  Returns 0, or an errno value when one's content
+ * cannot be read (the resources are then kept whole).
  */
 static int
-clean_borrows_resources(
+clean_follow_borrowed(
 	struct clean_state *state,
 	struct clean_category *categories)
 {
@@ -887,47 +1036,113 @@ clean_borrows_resources(
 	struct pdf_object *pattern;
 	size_t which;
 	size_t entry;
+	int followed;
 	int is_form;
 	int is_type3;
 	int error;
 
-	/* The named entries of the XObject, Font and Pattern categories (0, 1 and 3). */
-	for (which = 0; which < CLEAN_CATEGORIES; which++) {
-		/* The categories whose entries can draw. */
-		if (which != 0 && which != 1 && which != 3)
-			continue;
-		if (categories[which].dictionary == NULL)
-			continue;
-
-		/* Each named entry's own resources. */
-		for (entry = 0; entry < categories[which].dictionary->count; entry++) {
-			/* An entry the content names, which must be readable. */
-			if (!categories[which].used[entry])
+	/* Each round follows the entries named since the last; a round that follows none ends it. */
+	do {
+		followed = 0;
+		for (which = 0; which < CLEAN_CATEGORIES; which++) {
+			/* The categories whose entries can draw. */
+			if (which != CLEAN_XOBJECT && which != CLEAN_FONT && which != CLEAN_PATTERN)
 				continue;
-			error = pdf_reader_resolve(state->document, categories[which].dictionary->values[entry], &value);
-			if (error != 0)
-				return 1;
-			if (value->type != PDF_OBJECT_DICTIONARY && value->type != PDF_OBJECT_STREAM)
+			if (categories[which].dictionary == NULL)
 				continue;
 
-			/* One that has resources of its own uses them. */
-			own = pdf_object_get(value, "Resources");
-			if (own != NULL)
-				continue;
+			/* Each entry named and not followed yet. */
+			for (entry = 0; entry < categories[which].dictionary->count; entry++) {
+				/* An entry not named, or followed already. */
+				if (categories[which].used[entry] != CLEAN_NAMED)
+					continue;
+				categories[which].used[entry] = CLEAN_FOLLOWED;
+				followed = 1;
 
-			/* A form, a Type 3 font or a tiling pattern without them borrows the page's. */
-			subtype = pdf_object_get(value, "Subtype");
-			is_form = pdf_object_is_name(subtype, "Form");
-			is_type3 = pdf_object_is_name(subtype, "Type3");
-			pattern = pdf_object_get(value, "PatternType");
-			if (is_form || is_type3)
-				return 1;
-			if (value->type == PDF_OBJECT_STREAM && pattern != NULL)
-				return 1;
+				/* The entry, which must be readable. */
+				error = pdf_reader_resolve(state->document, categories[which].dictionary->values[entry], &value);
+				if (error != 0)
+					return error;
+				if (value->type != PDF_OBJECT_DICTIONARY && value->type != PDF_OBJECT_STREAM)
+					continue;
+
+				/* One that has resources of its own uses them, and they are kept by its own content. */
+				own = pdf_object_get(value, "Resources");
+				if (own != NULL)
+					continue;
+
+				/* A form, a Type 3 font or a tiling pattern without them names entries of these. */
+				subtype = pdf_object_get(value, "Subtype");
+				is_form = pdf_object_is_name(subtype, "Form");
+				is_type3 = pdf_object_is_name(subtype, "Type3");
+				pattern = pdf_object_get(value, "PatternType");
+				error = 0;
+				if (is_type3) {
+					error = clean_mark_glyphs(state, value, categories);
+				} else if (value->type == PDF_OBJECT_STREAM && (is_form || pattern != NULL)) {
+					error = clean_mark_stream(state, value, categories);
+				}
+
+				/* Reports a content that could not be read. */
+				if (error != 0)
+					return error;
+			}
 		}
+	} while (followed);
+
+	/* Succeeded: every named entry is followed. */
+	return 0;
+}
+
+/*
+ * Tells whether an object the copy writes has resources of its own to
+ * keep by its content's names: a form or a tiling pattern (its stream),
+ * or a Type 3 font (its glyph procedures), with a /Resources dictionary.
+ * Returns 1 with the source and the resources, or 0.
+ */
+static int
+clean_own_resources(
+	struct clean_state *state,
+	struct pdf_object *object,
+	struct clean_source *source,
+	struct pdf_object **resources)
+{
+	struct pdf_object *subtype;
+	struct pdf_object *pattern;
+	int is_form;
+	int is_type3;
+	int error;
+
+	/* Its resources, which must be a dictionary. */
+	if (object->type != PDF_OBJECT_DICTIONARY && object->type != PDF_OBJECT_STREAM)
+		return 0;
+	error = pdf_reader_resolve_key(state->document, object, "Resources", resources);
+	if (error != 0)
+		return 0;
+	if ((*resources)->type != PDF_OBJECT_DICTIONARY)
+		return 0;
+
+	/* What it is. */
+	subtype = pdf_object_get(object, "Subtype");
+	is_form = pdf_object_is_name(subtype, "Form");
+	is_type3 = pdf_object_is_name(subtype, "Type3");
+	pattern = pdf_object_get(object, "PatternType");
+	source->page = 0;
+	source->holder = object;
+
+	/* A form's or a tiling pattern's stream. */
+	if (object->type == PDF_OBJECT_STREAM && (is_form || pattern != NULL)) {
+		source->kind = CLEAN_SOURCE_STREAM;
+		return 1;
 	}
 
-	/* No named resource borrows the page's. */
+	/* A Type 3 font's glyph procedures. */
+	if (object->type == PDF_OBJECT_DICTIONARY && is_type3) {
+		source->kind = CLEAN_SOURCE_TYPE3;
+		return 1;
+	}
+
+	/* Anything else keeps its resources as they are. */
 	return 0;
 }
 
@@ -938,9 +1153,13 @@ clean_write_queued(
 	struct pdf_object *reference)
 {
 	static const char *const skipped[] = { "Length" };
+	static const char *const own_skipped[] = { "Resources", "Length" };
 	const unsigned char *bytes;
+	struct clean_source source;
 	struct pdf_object *object;
+	struct pdf_object *resources;
 	unsigned long number;
+	int own;
 	int error;
 
 	/* The object, which clean_number() read before. */
@@ -955,16 +1174,35 @@ clean_write_queued(
 	state->offsets[number] = state->file->length;
 	pdf_buffer_printf(state->file, "%lu 0 obj\n", number);
 
-	/* Anything but a stream is written as its value. */
+	/* A form, a tiling pattern or a Type 3 font keeps its own resources by its content's names (ws177-p011). */
+	own = clean_own_resources(state, object, &source, &resources);
+
+	/* A Type 3 font: its entries, its resources kept so. */
+	if (own && object->type == PDF_OBJECT_DICTIONARY) {
+		pdf_buffer_append(state->file, "<<", 2);
+		clean_write_entries(state, object, own_skipped, 1, 0);
+		clean_write_resources(state, &source, resources);
+		pdf_buffer_printf(state->file, " >>\nendobj\n");
+		return;
+	}
+
+	/* Anything else but a stream is written as its value. */
 	if (object->type != PDF_OBJECT_STREAM) {
 		clean_write_value(state, object, 0, 0);
 		pdf_buffer_printf(state->file, "\nendobj\n");
 		return;
 	}
 
-	/* A stream: its dictionary with a direct length, then its bytes as the file has them. */
+	/* A stream: its dictionary (a form's or pattern's resources kept so) with a direct length, then its bytes as the file has them. */
 	pdf_buffer_append(state->file, "<<", 2);
-	clean_write_entries(state, object, skipped, sizeof(skipped) / sizeof(skipped[0]), 0);
+	if (own) {
+		clean_write_entries(state, object, own_skipped, sizeof(own_skipped) / sizeof(own_skipped[0]), 0);
+		clean_write_resources(state, &source, resources);
+	} else {
+		clean_write_entries(state, object, skipped, sizeof(skipped) / sizeof(skipped[0]), 0);
+	}
+
+	/* The direct length, then the bytes. */
 	pdf_buffer_printf(state->file, " /Length %lu >>\nstream\n", (unsigned long)object->data_length);
 	bytes = pdf_reader_bytes(state->document);
 	pdf_buffer_append(state->file, bytes + object->data_offset, object->data_length);
@@ -1137,6 +1375,7 @@ clean_write_entries(
 	size_t which;
 	int skip;
 	int pairs;
+	int limits;
 
 	/* Each entry the caller does not write itself. */
 	for (index = 0; index < dictionary->count; index++) {
@@ -1153,6 +1392,13 @@ clean_write_entries(
 		skip = clean_is_dropped(state, value);
 		if (skip)
 			continue;
+
+		/* A name tree's /Limits, once the tree lost a name, from the names it keeps (ws177-p011). */
+		limits = clean_key_is(key, "Limits");
+		if (limits && state->names_dropped) {
+			clean_write_limits(state, dictionary, value, depth);
+			continue;
+		}
 
 		/* A name tree's leaf (/Names, an array) drops its pairs whole. */
 		pairs = 0;
@@ -1225,8 +1471,18 @@ clean_is_dropped(
 	const struct clean_state *state,
 	const struct pdf_object *object)
 {
+	size_t index;
+
+	/* An object written in place that the copy leaves out (ws177-p011). */
+	if (object == NULL)
+		return 0;
+	for (index = 0; index < state->direct_count; index++) {
+		if (state->direct[index] == object)
+			return 1;
+	}
+
 	/* A reference to a number marked left out. */
-	if (object == NULL || object->type != PDF_OBJECT_REFERENCE)
+	if (object->type != PDF_OBJECT_REFERENCE)
 		return 0;
 	if (object->number >= state->count)
 		return 0;
@@ -1237,13 +1493,197 @@ clean_is_dropped(
 	return 1;
 }
 
-/* Tells whether an object is a node of a page tree: /Type /Pages, or no type and /Kids. */
+/*
+ * Leaves out an object written in place (a file specification in a name
+ * tree's leaf or in /AF).  Returns 0, or E2BIG when CLEAN_DIRECT_MAX are
+ * left out already.
+ */
+static int
+clean_drop_direct(
+	struct clean_state *state,
+	const struct pdf_object *object)
+{
+	/* Refuses one more than the list holds. */
+	if (state->direct_count == CLEAN_DIRECT_MAX)
+		return E2BIG;
+
+	/* Remembers it; clean_is_dropped finds it. */
+	state->direct[state->direct_count] = object;
+	state->direct_count++;
+
+	/* Succeeded: the object is left out. */
+	return 0;
+}
+
+/*
+ * Writes a name tree node's /Limits from the least and greatest names its
+ * leaves keep; a node that keeps none has no /Limits, and a node of
+ * another kind of tree (a number tree's) keeps its own as they are.
+ */
+static void
+clean_write_limits(
+	struct clean_state *state,
+	const struct pdf_object *node,
+	const struct pdf_object *limits,
+	int depth)
+{
+	const struct pdf_object *low;
+	const struct pdf_object *high;
+	int found;
+
+	/* The names kept under the node. */
+	low = NULL;
+	high = NULL;
+	found = clean_tree_bounds(state, node, &low, &high, 0);
+
+	/* A node of another tree, or one that cannot be read, keeps its limits. */
+	if (found < 0) {
+		pdf_buffer_printf(state->file, " /Limits ");
+		clean_write_value(state, limits, 0, depth + 1);
+		return;
+	}
+
+	/* A node that keeps no name has none. */
+	if (low == NULL)
+		return;
+
+	/* The least and the greatest. */
+	pdf_buffer_printf(state->file, " /Limits [");
+	pdf_buffer_append_hex_string(state->file, low->bytes, low->length);
+	pdf_buffer_append(state->file, " ", 1);
+	pdf_buffer_append_hex_string(state->file, high->bytes, high->length);
+	pdf_buffer_append(state->file, "]", 1);
+}
+
+/*
+ * Finds the least and the greatest names a name tree node keeps, in its
+ * own pairs (/Names) and its kids'.  Returns 0 (low and high NULL when
+ * none is kept), or -1 for a node that is not a name tree's or cannot be
+ * read.
+ */
+static int
+clean_tree_bounds(
+	struct clean_state *state,
+	const struct pdf_object *node,
+	const struct pdf_object **low,
+	const struct pdf_object **high,
+	int depth)
+{
+	struct pdf_object *names;
+	struct pdf_object *kids;
+	struct pdf_object *kid;
+	struct pdf_object *key;
+	size_t index;
+	int dropped;
+	int before;
+	int found;
+	int error;
+
+	/* Refuses a tree deeper than the reader reads. */
+	if (depth > PDF_READER_DEPTH_MAX)
+		return -1;
+
+	/* The node's own pairs and its kids. */
+	error = pdf_reader_resolve_key(state->document, node, "Names", &names);
+	if (error != 0)
+		return -1;
+	error = pdf_reader_resolve_key(state->document, node, "Kids", &kids);
+	if (error != 0)
+		return -1;
+
+	/* A node with neither is not a name tree's (a number tree's has /Nums). */
+	if (names->type != PDF_OBJECT_ARRAY && kids->type != PDF_OBJECT_ARRAY)
+		return -1;
+
+	/* Each pair kept: its name widens the bounds. */
+	if (names->type == PDF_OBJECT_ARRAY) {
+		for (index = 0; index + 1 < names->count; index += 2) {
+			/* A pair whose value is left out. */
+			dropped = clean_is_dropped(state, names->values[index + 1]);
+			if (dropped)
+				continue;
+
+			/* Its name, which must be a string. */
+			error = pdf_reader_resolve(state->document, names->values[index], &key);
+			if (error != 0)
+				return -1;
+			if (key->type != PDF_OBJECT_STRING)
+				return -1;
+
+			/* The least so far. */
+			before = 0;
+			if (*low != NULL)
+				before = clean_string_before(key, *low);
+			if (*low == NULL || before)
+				*low = key;
+
+			/* The greatest so far. */
+			before = 0;
+			if (*high != NULL)
+				before = clean_string_before(*high, key);
+			if (*high == NULL || before)
+				*high = key;
+		}
+	}
+
+	/* Each kid's names. */
+	if (kids->type == PDF_OBJECT_ARRAY) {
+		for (index = 0; index < kids->count; index++) {
+			/* The kid, which must be a node. */
+			error = pdf_reader_resolve(state->document, kids->values[index], &kid);
+			if (error != 0)
+				return -1;
+			if (kid->type != PDF_OBJECT_DICTIONARY)
+				return -1;
+			found = clean_tree_bounds(state, kid, low, high, depth + 1);
+			if (found != 0)
+				return -1;
+		}
+	}
+
+	/* Succeeded: the bounds of the names kept. */
+	return 0;
+}
+
+/* Tells whether a string comes before another in byte order (a prefix first). */
+static int
+clean_string_before(
+	const struct pdf_object *left,
+	const struct pdf_object *right)
+{
+	size_t shorter;
+	int difference;
+
+	/* The bytes both have. */
+	shorter = left->length;
+	if (right->length < shorter)
+		shorter = right->length;
+	difference = memcmp(left->bytes, right->bytes, shorter);
+	if (difference < 0)
+		return 1;
+	if (difference > 0)
+		return 0;
+
+	/* The same start: the shorter first. */
+	if (left->length < right->length)
+		return 1;
+
+	/* Not before. */
+	return 0;
+}
+
+/*
+ * Tells whether an object is a node of a page tree: /Type /Pages, or no
+ * type, /Kids and /Count (a name tree's node has /Kids but no /Count; it
+ * was taken for a page tree's before ws177-p011).
+ */
 static int
 clean_is_tree_node(
 	const struct pdf_object *object)
 {
 	struct pdf_object *type;
 	struct pdf_object *kids;
+	struct pdf_object *count;
 
 	/* Only a dictionary. */
 	if (object->type != PDF_OBJECT_DICTIONARY)
@@ -1254,7 +1694,8 @@ clean_is_tree_node(
 	if (type != NULL)
 		return pdf_object_is_name(type, "Pages");
 	kids = pdf_object_get(object, "Kids");
-	if (kids != NULL)
+	count = pdf_object_get(object, "Count");
+	if (kids != NULL && count != NULL)
 		return 1;
 
 	/* Not a node. */

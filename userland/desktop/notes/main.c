@@ -107,6 +107,10 @@
 /* How long a status stays on the toolbar, in milliseconds. */
 #define MAIN_STATUS_MS		4000U
 
+/* Notes' own settings (ws177-p011), and the key that remembers the clean copy's notice was given. */
+#define MAIN_SETTINGS_APP	"notes"
+#define MAIN_CLEAN_TOLD_KEY	"notes.clean-copy-told"
+
 /* How long what Notes found when it opened a PDF (written on, refused) stays, in milliseconds. */
 #define MAIN_NOTICE_MS		10000U
 
@@ -380,6 +384,9 @@ struct notes_app {
 	char path[MAIN_PATH_MAX];
 	const char *name;
 
+	/* The clean copy saved last this session (empty: none), which File > Open Clean Copy opens (ws177-p011). */
+	char clean_path[MAIN_PATH_MAX];
+
 	/*
 	 * The page shown, the tool (its NOTES_ACTION_*), the colour's and the
 	 * width's index, and whether the eraser (the tool, and a pen's eraser
@@ -476,6 +483,7 @@ static void app_chosen(struct notes_app *app);
 static void app_open_file(struct notes_app *app, const char *path);
 static void app_save_as(struct notes_app *app, const char *path);
 static void app_save_clean(struct notes_app *app, const char *path);
+static int app_clean_told(void);
 static void app_place_page(struct notes_app *app);
 static void app_appearance_changed(void *data, unsigned appearance);
 static const char *app_tool_name(unsigned tool);
@@ -1269,6 +1277,10 @@ app_state(
 			state->can_reset = 1;
 	}
 
+	/* A clean copy saved this session can be opened. */
+	if (app->clean_path[0] != '\0')
+		state->can_open_clean = 1;
+
 	/* A line of text chosen: its words in the box unless they cannot change, its font and size. */
 	if (app->selected != MAIN_NONE && app->selected_kind == PDF_EDIT_TEXT) {
 		state->text_selected = 1;
@@ -1497,6 +1509,11 @@ app_action(
 	case NOTES_ACTION_SAVE_CLEAN:
 		/* A clean copy as another file, chosen in the file chooser (ws175-p009). */
 		app_choose(app, KL_FILE_CHOOSER_SAVE, MAIN_CHOOSE_CLEAN);
+		break;
+	case NOTES_ACTION_OPEN_CLEAN:
+		/* The clean copy saved last, in place of the notebook (ws177-p011). */
+		if (app->clean_path[0] != '\0')
+			app_open_file(app, app->clean_path);
 		break;
 	case NOTES_ACTION_CLOSE:
 		/* The main loop saves and ends. */
@@ -3090,6 +3107,7 @@ app_save_clean(
 	size_t dropped;
 	int same;
 	int found;
+	int told;
 	int error;
 
 	/* The notebook's own file cannot be its copy. */
@@ -3118,11 +3136,49 @@ app_save_clean(
 		return;
 	}
 
-	/* The copy is among the recent files; the tests' line and the status. */
+	/* The copy is among the recent files, and File > Open Clean Copy opens it (ws177-p011). */
 	(void)kl_recent_add(path, MAIN_APPLICATION);
-	printf("NOTES CLEAN-COPY bytes=%lu objects=%lu dropped=%lu path=%s\n", (unsigned long)bytes, (unsigned long)objects, (unsigned long)dropped, path);
+	(void)snprintf(app->clean_path, sizeof(app->clean_path), "%s", path);
+
+	/* The first clean copy ever tells, once, that the notebook itself still keeps what was removed (design.md D1). */
+	told = app_clean_told();
+	if (!told) {
+		app_status(app, "Clean copy saved. This notebook keeps removed items in its history");
+		app->status_until = notes_clock() + 2U * MAIN_STATUS_MS;
+	} else {
+		app_status(app, "Saved a clean copy. File > Open Clean Copy opens it");
+	}
+
+	/* The tests' line. */
+	printf("NOTES CLEAN-COPY bytes=%lu objects=%lu dropped=%lu told=%d path=%s\n", (unsigned long)bytes, (unsigned long)objects, (unsigned long)dropped, told, path);
 	fflush(stdout);
-	app_status(app, "Saved a clean copy");
+}
+
+/*
+ * Tells whether Notes told already, after an earlier clean copy, that the
+ * notebook keeps removed items in its history; the first time it says no
+ * and remembers that it told (notes.clean-copy-told in Notes' own
+ * settings).  Without the settings it tells every time.
+ */
+static int
+app_clean_told(void)
+{
+	struct kl_settings *settings;
+	int told;
+
+	/* Notes' own settings, which need no display. */
+	settings = kl_settings_open(NULL, MAIN_SETTINGS_APP);
+	if (settings == NULL)
+		return 0;
+
+	/* Told before, or told now and remembered. */
+	told = kl_settings_get_int(settings, MAIN_CLEAN_TOLD_KEY, 0);
+	if (!told)
+		(void)kl_settings_set_int(settings, MAIN_CLEAN_TOLD_KEY, 1, NULL);
+	kl_settings_close(settings);
+
+	/* Succeeded: whether it was told before this time. */
+	return told;
 }
 
 /* Places the notebook's first page in the window, for the pointer and the fingers (at the start, and after Open). */
