@@ -37,6 +37,7 @@
 ### ユーザーの未決の判断
 
 <!-- master:open-decisions:start -->
+- **BUG-241**（Browser で Arabic などが □）: 載せている font に Arabic・Hebrew・Thai・Hangul・Devanagari が無く、libbrowser・libtruetype に bidi と joining が無い。P2 の案: WS074 の新しい Phase（段 1 Hebrew・Thai・Hangul の Noto（OFL、数 MB）と簡約の bidi、段 2 Arabic の joining、段 3 Indic）。font を tree に足すか、段の順、ベータ2 の後か。
 - **WS084 の 10 回の reboot（素の起動）**: ユーザーが zedBSD で起動する時。
 - WS153 U2〜U15 はユーザーが検討中（聞かない）。
 - （解決 2026-10-08）WS005（ネットワークと WiFi）: ユーザー「記録のミス、とっくに完了」→ completed。
