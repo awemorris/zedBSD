@@ -11,7 +11,7 @@
  * selection, the places found and the cursor, the scroll bar, the status
  * chip and the message, and over them a dialog.
  *
- * Only the rows in view are drawn.  The window is glass when zdesktop has
+ * Only the rows in view are drawn.  The window is glass when the compositor has
  * glass: the frame is then clear around the card, whose white lets the
  * frosted desktop show a little.
  */
@@ -79,7 +79,7 @@ te_draw(
 	struct te_rect text;
 	uint32_t fill;
 
-	/* The ground: clear for glass (zdesktop draws the frosted desktop), a pale slate otherwise. */
+	/* The ground: clear for glass (the compositor draws the frosted desktop), a pale slate otherwise. */
 	te_canvas_unclip(canvas);
 	fill = DRAW_GROUND;
 	if (app->glass)

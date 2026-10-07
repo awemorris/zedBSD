@@ -77,7 +77,7 @@ kl_panel(
 {
 	const struct kl_theme *theme;
 
-	/* On glass: the veil (zdesktop draws the glass under it). */
+	/* On glass: the veil (the compositor draws the glass under it). */
 	theme = style->theme;
 	if (style->glass) {
 		if (sidebar)

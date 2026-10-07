@@ -6,7 +6,7 @@
  */
 
 /*
- * Tests what zdesktop tells a toolkit about the keyboard and the output
+ * Tests what the compositor tells a toolkit about the keyboard and the output
  * (WS035 p078): the XKB keymap (its format, its size, and that the mapped
  * file holds a keymap's text), the key repeat, the modifier masks (held and
  * locked), and wl_output version 4 (name, description, mode, scale).  A

@@ -8,7 +8,7 @@
 /*
  * The terminal's menus: Shell, Edit, View, Session and Help.
  *
- * zdesktop draws them (in the window's title bar, or in the system bar
+ * The compositor draws them (in the window's title bar, or in the system bar
  * while the window is docked) from the table given to libkeiland's window
  * (kl_window_set_menu, WS131 p018).  A choice arrives among the window's
  * inputs as a KL_WINDOW_ACTION input (window.c), queued for the main loop,
@@ -131,7 +131,7 @@ static void menu_action_state(struct terminal_window *window, uint32_t action, i
 static int menu_same(unsigned value, unsigned named);
 
 /*
- * Gives zdesktop the window's menus, showing a state.
+ * Gives the compositor the window's menus, showing a state.
  *
  * Returns 0, also when the compositor has no System Menu (the terminal then
  * has no menus), or -1 with errno set when the menus could not be made.
@@ -162,7 +162,7 @@ terminal_menu_open(
 		return -1;
 	}
 
-	/* Succeeded: the menus are zdesktop's to show. */
+	/* Succeeded: the menus are the compositor's to show. */
 	printf("ZTERM MENU ready items=%u\n", (unsigned)(sizeof(menu_items) / sizeof(menu_items[0])));
 	return 0;
 }
@@ -239,7 +239,7 @@ terminal_menu_chosen(
 }
 
 /*
- * Takes the menus away from zdesktop (before the window goes).
+ * Takes the menus away from the compositor (before the window goes).
  */
 void
 terminal_menu_close(

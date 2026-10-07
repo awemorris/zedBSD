@@ -10,10 +10,10 @@
  * the cursor it wants (text, a pointing hand, a resize arrow, ...) instead
  * of drawing one on a surface of its own.
  *
- * zdesktop draws the shapes itself: each image is a white figure with a
+ * The compositor draws the shapes itself: each image is a white figure with a
  * black edge, the figure made from a few rectangles and triangles and the
  * edge found around it, so no picture is kept in the source.  Shapes with
- * no image of their own are drawn as zdesktop's arrow.  A shape is taken
+ * no image of their own are drawn as the compositor's arrow.  A shape is taken
  * only from the client the pointer is on; the pointer going to another
  * client, or a cursor surface, brings the arrow back.
  */
@@ -67,7 +67,7 @@
 #define SHAPE_ALL_SCROLL		32U
 #define SHAPE_LAST			34U
 
-/* The images zdesktop draws, by index into server->cursor_images. */
+/* The images the compositor draws, by index into server->cursor_images. */
 #define IMAGE_TEXT			0U
 #define IMAGE_HAND			1U
 #define IMAGE_CROSSHAIR			2U
@@ -213,7 +213,7 @@ kwl_cursor_images_destroy(
 
 /*
  * Finds the image of the shape the cursor has now, and its hotspot; NULL
- * when the cursor is zdesktop's arrow.
+ * when the cursor is the compositor's arrow.
  */
 const struct kwl_import *
 kwl_cursor_image(
@@ -283,9 +283,9 @@ kwl_cursor_frame(
  * Tells whether the cursor a client chose (hidden, its surface or its shape)
  * is shown now: only while the pointer is over that client's window body,
  * or while its popup holds the pointer; elsewhere (the desktop, the system
- * bar, a title bar, another client's window) zdesktop's arrow is shown
+ * bar, a title bar, another client's window) the compositor's arrow is shown
  * (BUG-118: an X terminal that hid the cursor hid it on the whole screen).
- * zdesktop's own cursor, and the plain look, are always shown.
+ * The compositor's own cursor, and the plain look, are always shown.
  */
 int
 kwl_cursor_client_shown(
@@ -294,7 +294,7 @@ kwl_cursor_client_shown(
 	struct kwl_object *window;
 	unsigned shown;
 
-	/* zdesktop's own cursor, or the plain look (one window at its place): as it is. */
+	/* The compositor's own cursor, or the plain look (one window at its place): as it is. */
 	if (server->cursor_client == NULL || !server->glass)
 		return 1;
 
@@ -378,7 +378,7 @@ device_set_shape(
 
 	/*
 	 * The shape's image is made the first time it is asked for (making all
-	 * of them at start-up would delay zdesktop's READY); without it the
+	 * of them at start-up would delay the compositor's READY); without it the
 	 * shape is drawn as the arrow.
 	 */
 	index = shape_image(shape);

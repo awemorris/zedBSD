@@ -107,7 +107,7 @@ kwl_toplevel_request(
 		error = toplevel_set_parent(toplevel, bytes, size);
 		break;
 	case TOPLEVEL_SHOW_WINDOW_MENU:
-		/* The window menu at a point (seat, serial, x, y): zdesktop has none, so it is only checked. */
+		/* The window menu at a point (seat, serial, x, y): the compositor has none, so it is only checked. */
 		error = 0;
 		if (size != 16U)
 			error = EPROTO;

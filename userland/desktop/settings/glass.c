@@ -6,13 +6,13 @@
  */
 
 /*
- * The window's glass in zdesktop (the file manager's, ws071-p015): the list
- * of pages and the page float as cards on zdesktop's frosted glass, and the
- * desktop shows between them.  zdesktop draws the glass, its rim
+ * The window's glass in the compositor (the file manager's, ws071-p015): the list
+ * of pages and the page float as cards on the compositor's frosted glass, and the
+ * desktop shows between them.  The compositor draws the glass, its rim
  * and the cards' shadows (through libkeiland's window, kl_window_set_glass,
  * WS131 p019); the frame leaves its ground clear and only tints the cards.
  *
- * The window is glass when its swapchain is see-through and zdesktop has
+ * The window is glass when its swapchain is see-through and the compositor has
  * glass; otherwise it keeps its own opaque ground.  The panels are worked
  * out from each frame's layout and sent before the frame is shown, only
  * when they changed, so that they take effect with that frame.
@@ -42,14 +42,14 @@ se_glass_open(
 	memset(glass, 0, sizeof(*glass));
 	glass->window = window;
 
-	/* A frame that zdesktop does not blend cannot let the desktop through. */
+	/* A frame that compositor does not blend cannot let the desktop through. */
 	if (present->premultiplied == 0) {
 		se_log("GLASS off reason=opaque");
 		return 0;
 	}
 
 	/*
-	 * zdesktop's glass for the window, which shows the windows under it
+	 * The compositor's glass for the window, which shows the windows under it
 	 * blurred (Settings is not open all the time, the user's choice of
 	 * 2026-09-30, ws075-p029); a compositor whose glass has no such choice
 	 * shows the blurred wallpaper.
@@ -87,13 +87,13 @@ se_glass_refresh(
 	if (!glass->on)
 		return;
 
-	/* The frame's panels, unless they are the ones zdesktop has. */
+	/* The frame's panels, unless they are the ones the compositor has. */
 	count = se_ui_panels(app, panels, SE_PANELS);
 	same = glass_same(glass, panels, count);
 	if (same != 0)
 		return;
 
-	/* Each panel in zdesktop's terms. */
+	/* Each panel in the compositor's terms. */
 	memset(sent, 0, sizeof(sent));
 	for (index = 0; index < count; index++) {
 		sent[index].x = panels[index].rect.x;

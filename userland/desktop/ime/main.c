@@ -9,10 +9,10 @@
  * The system's input method, /usr/libexec/keiland-ime (ws095-p004,
  * plan/ws095/design.md section 5).
  *
- * zdesktop starts it on a socket pair named by WAYLAND_SOCKET and starts it
+ * The compositor starts it on a socket pair named by WAYLAND_SOCKET and starts it
  * again if it dies.  It binds the seat and the three globals only it is
  * shown (the input method manager, the virtual keyboard manager and
- * zdesktop's status), makes its languages (direct input first, then
+ * the compositor's status), makes its languages (direct input first, then
  * Japanese), and serves the keyboard until the connection ends or it is
  * told to stop by a signal.  The languages save what they learned once no
  * key has come for a while, and when the program ends.
@@ -45,7 +45,7 @@
 #define MAIN_METHOD_JA			1
 #define MAIN_METHOD_SKK			2
 
-/* The version of zdesktop's status with the on-screen keyboard's predictions (ws166-p002). */
+/* The version of the compositor's status with the on-screen keyboard's predictions (ws166-p002). */
 #define MAIN_STATUS_VERSION		2U
 
 /*
@@ -123,7 +123,7 @@ main(
 		return 1;
 	}
 
-	/* The connection zdesktop gave (WAYLAND_SOCKET). */
+	/* The connection the compositor gave (WAYLAND_SOCKET). */
 	program.display = wl_display_connect(NULL);
 	if (program.display == NULL) {
 		printf("KEI-IME FAILED step=connect errno=%d\n", errno);
@@ -156,7 +156,7 @@ main(
 		return 1;
 	}
 
-	/* The languages of the input method chosen (zdesktop's --method, the Languages page's choice). */
+	/* The languages of the input method chosen (the compositor's --method, the Languages page's choice). */
 	method = main_method(count, arguments);
 	status = main_engines(&program, method);
 	if (status != 0) {
@@ -239,7 +239,7 @@ main_global(
 		return;
 	}
 
-	/* zdesktop's status: version 2 for the on-screen keyboard's predictions (ws166-p002) when zdesktop has it. */
+	/* The compositor's status: version 2 for the on-screen keyboard's predictions (ws166-p002) when the compositor has it. */
 	order = strcmp(interface, "kl_ime_status_manager_v1");
 	if (order == 0) {
 		wanted = 1U;
@@ -263,7 +263,7 @@ main_global(
 }
 
 /*
- * Ignores a global that goes; zdesktop's globals do not.
+ * Ignores a global that goes; the compositor's globals do not.
  */
 static void
 main_global_remove(
@@ -278,7 +278,7 @@ main_global_remove(
 
 /*
  * Reads the input method chosen from the command line (--method=none, ja
- * or skk, as zdesktop passes the Languages page's choice); Japanese when
+ * or skk, as the compositor passes the Languages page's choice); Japanese when
  * none is given or the word is unknown.
  */
 static int
@@ -463,7 +463,7 @@ main_serve(
 	/* What the program sends, sent now. */
 	(void)wl_display_flush(program->display);
 
-	/* Waits for zdesktop, or until the held key repeats or the languages are due to save. */
+	/* Waits for the compositor, or until the held key repeats or the languages are due to save. */
 	repeat_timeout = program_repeat_timeout(program, program_clock_ms());
 	save_timeout = program_save_timeout(program, program_clock_ms());
 	timeout = main_earlier(repeat_timeout, save_timeout);
@@ -477,14 +477,14 @@ main_serve(
 	if (status < 0 && errno != EINTR)
 		return -1;
 
-	/* A stop asked by a signal: the loop ends at its test, without waiting for zdesktop. */
+	/* A stop asked by a signal: the loop ends at its test, without waiting for the compositor. */
 	if (main_stopping) {
 		if (main_wake[0] >= 0)
 			(void)read(main_wake[0], drained, sizeof(drained));
 		return 0;
 	}
 
-	/* zdesktop's events, read and handled. */
+	/* The compositor's events, read and handled. */
 	if (status > 0 && (descriptors[0].revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL)) != 0) {
 		status = wl_display_dispatch(program->display);
 		if (status < 0)

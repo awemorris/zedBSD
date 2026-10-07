@@ -119,7 +119,7 @@ struct se_titlebar {
 /*
  * The frames shown in the window (present.c, libkeiland's presenter): the
  * window, the size frames are drawn at, the call that failed last, the
- * device's name (About shows it), whether zdesktop blends the frame by its
+ * device's name (About shows it), whether the compositor blends the frame by its
  * premultiplied alpha, and the last frame's copy, acquire, present and wait
  * times (milliseconds).
  */
@@ -163,7 +163,7 @@ int se_menu_open(struct se_menu *menu, struct se_window *window, const struct se
 void se_menu_refresh(struct se_menu *menu, const struct se_menu_state *state);
 void se_menu_close(struct se_menu *menu);
 
-/* The window's titlebar in zdesktop (titlebar.c). */
+/* The window's titlebar in the compositor (titlebar.c). */
 int se_titlebar_open(struct se_titlebar *titlebar, struct se_window *window, const struct se_titlebar_state *state);
 void se_titlebar_refresh(struct se_titlebar *titlebar, const struct se_titlebar_state *state);
 void se_titlebar_input(struct se_titlebar *titlebar, const struct kl_window_event *event);

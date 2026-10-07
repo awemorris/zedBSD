@@ -1,5 +1,5 @@
 #!/bin/sh
-# zdesktop-x11: starts an X11 application on zdesktop (WS035 p070), the way Xwayland is started when it is
+# keiland-x11: starts an X11 application on the compositor (WS035 p070), the way Xwayland is started when it is
 # needed: xserver (rootless, each X top-level a Wiseman window; WS069 p008) is started once, by the
 # first X application, and every X application runs with DISPLAY=:0.  App Home runs it as: sh /usr/libexec/keiland-x11 COMMAND...
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib

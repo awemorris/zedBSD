@@ -6,7 +6,7 @@
  */
 
 /*
- * Tests zdesktop's clipboard between clients (WS035 p079): wl_data_device,
+ * Tests the compositor's clipboard between clients (WS035 p079): wl_data_device,
  * wl_data_source and wl_data_offer.
  *
  * The probe shows a window (its colour from --color) and takes the

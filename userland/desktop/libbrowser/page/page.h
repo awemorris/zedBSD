@@ -11,7 +11,7 @@
  *
  * The headless modes and the window both load pages through here, so a
  * page looks the same whether it is drawn on the host for a test or in a
- * zdesktop window.
+ * the compositor window.
  */
 
 #ifndef KEILAND_BROWSER_PAGE_H

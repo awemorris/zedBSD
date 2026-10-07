@@ -7,7 +7,7 @@
 
 /*
  * The glass panels (ws035-p083, plan/ws035/glass-design.md): the wrapper
- * of zdesktop's kl_glass_v1 protocol.
+ * of the compositor's kl_glass_v1 protocol.
  *
  * A list of panels is checked here against the compositor's bounds before
  * it is sent, so that a list the compositor would refuse -- with a
@@ -57,7 +57,7 @@ kl_glass_create(
 	struct kl_glass *glass;
 	uint32_t version;
 
-	/* zdesktop's manager, bound for this surface. */
+	/* The compositor's manager, bound for this surface. */
 	manager = glass_bind(display, &version);
 	if (manager == NULL)
 		return NULL;
@@ -168,7 +168,7 @@ kl_glass_destroy(
 	free(glass);
 }
 
-/* Binds zdesktop's glass manager at the version both speak: from an application's registry, or found by a search of the library's own. */
+/* Binds the compositor's glass manager at the version both speak: from an application's registry, or found by a search of the library's own. */
 static struct kl_glass_manager_v1 *
 glass_bind(
 	struct wl_display *display,

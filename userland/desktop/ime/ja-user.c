@@ -23,7 +23,7 @@
  * it closes.  That save goes by a thread of its own (ja_user_save_later):
  * the file's text is made at once, and the write, its sync and the rename
  * happen away from the keys, which on a slow disk took long enough that
- * zdesktop passed the input method by.  Only the newest text waits to be
+ * the compositor passed the input method by.  Only the newest text waits to be
  * written; freeing the dictionary waits for the last write.
  */
 

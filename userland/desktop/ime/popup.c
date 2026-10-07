@@ -10,12 +10,12 @@
  *
  * The input method draws the candidates of the segment being converted
  * into a wl_shm buffer and attaches it to its input popup surface;
- * zdesktop places that surface below the text input's cursor rectangle and
+ * the compositor places that surface below the text input's cursor rectangle and
  * composes it over the windows.  A page holds nine candidates, numbered as
  * the digit keys choose them, the one chosen on the accent's tint.  An
  * empty surface (no buffer) hides the window.  The shared memory is made
  * once for two windows of the largest size; each change gets a wl_buffer
- * of the window's own size over one of them, so that zdesktop takes the
+ * of the window's own size over one of them, so that compositor takes the
  * window's size (and its shadow) from the buffer.
  */
 

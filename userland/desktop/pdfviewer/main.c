@@ -187,7 +187,7 @@ main(
 		pv_log("FONT missing path=%s error=%d", options.font, error);
 	main_font = options.font;
 
-	/* The application: the connection to zdesktop. */
+	/* The application: the connection to the compositor. */
 	memset(&app_options, 0, sizeof(app_options));
 	app_options.display = options.display;
 	app_options.application = MAIN_APPLICATION;

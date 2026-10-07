@@ -1,4 +1,4 @@
-// zedBSD zdesktop: samples a window's image.
+// Keiland compositor: samples a window's image.
 // Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 #version 450
 

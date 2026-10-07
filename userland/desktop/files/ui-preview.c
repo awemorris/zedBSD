@@ -301,14 +301,14 @@ fm_preview_item(
 	return -1;
 }
 
-/* Draws the pane's white panel with its shadow and edge, or its tint on zdesktop's glass. */
+/* Draws the pane's white panel with its shadow and edge, or its tint on the compositor's glass. */
 static void
 preview_panel(
 	struct fm_app *app,
 	struct kl_canvas *canvas,
 	const struct kl_rect *area)
 {
-	/* On glass, zdesktop draws the card: only the content's white tint. */
+	/* On glass, the compositor draws the card: only the content's white tint. */
 	if (app->glass != 0) {
 		kl_canvas_round(canvas, (float)area->x, (float)area->y, (float)area->width, (float)area->height, PREVIEW_RADIUS, FM_COLOR_GLASS_CONTENT);
 		return;

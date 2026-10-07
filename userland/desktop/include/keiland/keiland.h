@@ -8,9 +8,9 @@
 /*
  * The desktop's library, with two jobs.
  *
- * It wraps zdesktop's non-standard Wayland (xdg) extensions: a client of the
+ * It wraps the compositor's non-standard Wayland (xdg) extensions: a client of the
  * desktop (xserver, an application) uses standard Wayland and
- * Vulkan, and reaches anything only zdesktop offers through this library,
+ * Vulkan, and reaches anything only the compositor offers through this library,
  * never through a private protocol of its own.
  *
  * It is also an application's way to the desktop's system: the network, the
@@ -22,15 +22,15 @@
  *
  * Each feature adds its calls here when it arrives with its first user, so
  * that nothing is promised before it exists.  The first is the System Menu
- * (WS070): an application gives zdesktop the meaning of its menus -- a tree
+ * (WS070): an application gives the compositor the meaning of its menus -- a tree
  * of numbered items with labels, states, actions and shortcuts -- and
- * zdesktop draws them in the window's title bar, or in the system bar while
+ * the compositor draws them in the window's title bar, or in the system bar while
  * the window is docked, and tells the application what the user chose.
  *
  * It also holds what every program that follows a finger shares, so that
  * a finger feels the same everywhere: where a touch contact is at the time
  * a frame is drawn, and how fast it moved when it lifted (the touch motion,
- * WS081; its first user is zdesktop itself), and what content a finger
+ * WS081; its first user is the compositor itself), and what content a finger
  * scrolls does after the finger lets go, and what the fingers mean (the
  * scroller and the gestures, WS081 p005).
  */
@@ -59,7 +59,7 @@ unsigned kl_version(void);
 /*
  * The System Menu.
  *
- * A service is one connection's way to zdesktop's menus; a menu is one tree
+ * A service is one connection's way to the compositor's menus; a menu is one tree
  * of items; a window menu shows a menu on one xdg_toplevel.  One menu may be
  * shown on several windows (an application menu shared by its windows); the
  * choice comes back through the window menu it was made on.
@@ -68,12 +68,12 @@ unsigned kl_version(void);
  * their menu).  KL_MENU_ROOT is the parent of the top-level items (in
  * a terminal: Shell, Edit, View, Session, Help); a submenu item is the
  * parent of the items under it.  Every change is made between
- * kl_menu_begin and kl_menu_commit, and zdesktop shows the
+ * kl_menu_begin and kl_menu_commit, and the compositor shows the
  * changes of one commit together.
  *
- * zdesktop owns the looks and the input.  A checkbox or radio item is not
- * checked by zdesktop when it is chosen; the application sets its state in
- * the next transaction.  A shortcut is shown in the menu and zdesktop
+ * The compositor owns the looks and the input.  A checkbox or radio item is not
+ * checked by the compositor when it is chosen; the application sets its state in
+ * the next transaction.  A shortcut is shown in the menu and the compositor
  * chooses the item when its keys are pressed in the focused window.
  *
  * Every call returns 0 or an errno value, and a refused call sends nothing:
@@ -101,7 +101,7 @@ struct kl_window_menu;
 #define KL_MENU_ITEM_RADIO	3U
 #define KL_MENU_ITEM_SUBMENU	4U
 
-/* What an item means to the system (zdesktop may give it an icon or a place of its own). */
+/* What an item means to the system (the compositor may give it an icon or a place of its own). */
 #define KL_MENU_ROLE_NONE		0U
 #define KL_MENU_ROLE_ABOUT	1U
 #define KL_MENU_ROLE_PREFERENCES	2U
@@ -135,7 +135,7 @@ struct kl_window_menu;
  * activated: the user chose an item (its ID and action), by the seat's
  * input of the serial.  opened, closed: the popup of a submenu (a top-level
  * item included) opened or closed; an application may update the menu in
- * answer, and zdesktop redraws the open popup.
+ * answer, and the compositor redraws the open popup.
  */
 struct kl_window_menu_listener {
 	void (*activated)(void *data, struct kl_window_menu *window_menu, uint32_t item, uint32_t action, struct wl_seat *seat, uint32_t serial);
@@ -172,7 +172,7 @@ void kl_menu_destroy(struct kl_menu *menu);
 int kl_menu_begin(struct kl_menu *menu);
 
 /*
- * Ends a transaction, and zdesktop shows its changes at once.
+ * Ends a transaction, and the compositor shows its changes at once.
  */
 int kl_menu_commit(struct kl_menu *menu);
 
@@ -250,7 +250,7 @@ void kl_window_menu_destroy(struct kl_window_menu *window_menu);
 /*
  * Context menus (ws071-p009): a menu's top-level items shown once as a
  * popup at a point of a surface, in answer to a press (its seat and
- * serial; zdesktop opens only for the latest press).  zdesktop owns the
+ * serial; the compositor opens only for the latest press).  The compositor owns the
  * looks and the input as for the menubar.  activated: the user chose an
  * item (its ID and action); done: the context menu closed, after a choice
  * or without one -- told once, last; the application destroys it then.
@@ -280,13 +280,13 @@ void kl_context_menu_destroy(struct kl_context_menu *context_menu);
 /*
  * The Titlebar Presentation (WS070 p008, plan/ws070/titlebar-design.md).
  *
- * zdesktop draws a window's titlebar: its mark and title, a presentation,
+ * The compositor draws a window's titlebar: its mark and title, a presentation,
  * and the window's buttons, in the floating titlebar or, while the window
  * is maximized, in the system bar.  The presentation is one of three
  * models the application gives: the menu (the System Menu above, the
  * default), controls (back, forward, a breadcrumb, a search field, a view
  * selector...), or tabs.  The application gives only what they mean;
- * zdesktop decides how they look and where they go, and tells the
+ * the compositor decides how they look and where they go, and tells the
  * application what the user does with them.  Changes are made in
  * transactions, like a menu's.  Every call that returns an int returns 0
  * or an errno value.
@@ -305,7 +305,7 @@ struct kl_titlebar;
 #define KL_TITLEBAR_TABS		2U
 #define KL_TITLEBAR_SHEET		3U
 
-/* The controls' roles, which decide how zdesktop draws them. */
+/* The controls' roles, which decide how the compositor draws them. */
 #define KL_CONTROL_BACK		1U
 #define KL_CONTROL_FORWARD	2U
 #define KL_CONTROL_HOME		3U
@@ -345,19 +345,19 @@ struct kl_titlebar;
 #define KL_TEXT_LEFT		2U
 
 /*
- * What zdesktop tells the application about its titlebar: a control chosen
+ * What the compositor tells the application about its titlebar: a control chosen
  * (detail is a breadcrumb's part, 0 otherwise), a text control's text as
  * it is typed and when its editing ends, a tab chosen or closed, the
  * new-tab button, and the overflow popup opening.  Any may be NULL.
  *
- * zdesktop gives tabs the keyboard too, when the window's menu has no
+ * The compositor gives tabs the keyboard too, when the window's menu has no
  * shortcut for the key: Ctrl+Tab and Ctrl+PageDown activate the next tab,
  * Ctrl+Shift+Tab and Ctrl+PageUp the one before (tab_activated).  Closing
  * a tab and a new tab are the application's keys (its menu's shortcuts),
  * since a terminal's shell needs Ctrl+W and Ctrl+T.
  *
  * drop_target (KL_VERSION 7): while a drag and drop (wl_data_device)
- * is over a part of a breadcrumb in the titlebar, zdesktop makes the
+ * is over a part of a breadcrumb in the titlebar, the compositor makes the
  * window's surface the drag's target (its data device hears enter, motion
  * and drop at the pointer's place, above the surface) and tells the part
  * here first (id and detail as for control_activated); id 0 says the drag
@@ -392,7 +392,7 @@ void kl_titlebar_destroy(struct kl_titlebar *titlebar);
 int kl_titlebar_begin(struct kl_titlebar *titlebar);
 
 /*
- * Ends a transaction; zdesktop shows its changes at once.
+ * Ends a transaction; the compositor shows its changes at once.
  */
 int kl_titlebar_commit(struct kl_titlebar *titlebar);
 
@@ -542,7 +542,7 @@ int kl_recent_keep(int *keep);
  * A window whose Vulkan swapchain is see-through
  * (VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR) names the parts of itself
  * that stand on the system's frosted glass: cards floating in the window.
- * zdesktop draws the glass under them -- the desktop behind, blurred and
+ * The compositor draws the glass under them -- the desktop behind, blurred and
  * lightened, a bright rim, the card's shadow --
  * and the window's image over it by its alpha; between the panels the
  * desktop shows as it is.  The window says what its parts are, not how
@@ -612,14 +612,14 @@ void kl_glass_destroy(struct kl_glass *glass);
  * advances smoothly with the frames and is never extrapolated far past the
  * last report.
  *
- * A device (one touch screen in zdesktop, one seat's touch in a client)
+ * A device (one touch screen in the compositor, one seat's touch in a client)
  * keeps what is learned across strokes: the report period, how late
  * reports arrive, the noise, and the mapping of the panel's Scan Time
  * (evdev MSC_TIMESTAMP) onto the host clock.  A motion is one contact's
  * stroke from touch-down to lift.  Neither is shared between threads.
  *
  * Times are CLOCK_MONOTONIC microseconds; positions are logical pixels.
- * zdesktop's wl_touch times are the same clock's milliseconds (the low 32
+ * The compositor's wl_touch times are the same clock's milliseconds (the low 32
  * bits), from the time the panel scanned the report when it has a Scan
  * Time, so a client can compare them with its own clock.  Calls that can
  * fail return 0 or an errno value.
@@ -938,7 +938,7 @@ int kl_gesture_pinch(struct kl_gesture *gesture, uint64_t now_us, double *scale,
 /*
  * The desktop surface (KL_VERSION 14, ws094-p003).
  *
- * zdesktop starts the program that shows the icons of ~/Desktop with a
+ * The compositor starts the program that shows the icons of ~/Desktop with a
  * token in its environment (KEILAND_DESKTOP_TOKEN); with the token, the
  * program's surface lies over the wallpaper and under every window, on
  * every virtual desktop, has no window of its own and hears the pointer,
@@ -2842,7 +2842,7 @@ int kl_scroll_bar_busy(const struct kl_scroll_bar *bar, uint64_t now_us);
 int kl_scroll_bar_draw(const struct kl_scroll_bar *bar, struct kl_canvas *canvas, const struct kl_rect *viewport, double content, double offset, uint64_t now_us);
 
 /*
- * The keys (input.c, libkeiui's version 2).  zdesktop forwards evdev key codes
+ * The keys (input.c, libkeiui's version 2).  The compositor forwards evdev key codes
  * with no keymap; the library carries the US layout, as the desktop's
  * programs do, until an input method arrives (WS095).
  */
@@ -3062,7 +3062,7 @@ int kl_ui_drag_offset(struct kl_ui *ui, uint64_t now_us, double *dx, double *dy)
  * A frame is ordinary memory of premultiplied 0xAARRGGBB words the size
  * kl_window_present_resize reported.  KL_PRESENT_VULKAN shows it through
  * a Vulkan swapchain (see-through when the compositor offers it, the way
- * zdesktop's glass needs), KL_PRESENT_SHM through wl_shm buffers (for a
+ * the compositor's glass needs), KL_PRESENT_SHM through wl_shm buffers (for a
  * small window of a library, or where Vulkan is missing), and
  * KL_PRESENT_NONE leaves the surface to the application's own Vulkan.
  * The menus, the titlebar's controls and the glass panels stay the
@@ -3095,7 +3095,7 @@ struct xdg_toplevel;
 #define KL_WINDOW_POST		13U
 
 /*
- * libkeiui's version 6: the text an input method or zdesktop's on-screen keyboard
+ * libkeiui's version 6: the text an input method or the compositor's on-screen keyboard
  * sends through the text input (text-input-unstable-v3), while the window
  * asks for it (kl_window_text_input): text to insert at the caret in place
  * of the selection (text), the text being composed to show at the caret
@@ -3230,7 +3230,7 @@ void kl_window_select(struct kl_window *window, const char *text, size_t length)
 
 /*
  * libkeiui's version 7 (ws102-p015, plan/ws102/design.md section 2.8): the
- * on-screen keyboard's inset.  zdesktop tells a window how much of it the
+ * on-screen keyboard's inset.  The compositor tells a window how much of it the
  * keyboard covers, in the window's pixels from its right edge (the flick
  * panel's column) and from its bottom edge (the QWERTY row), when the
  * keyboard opens, closes or changes the window (before that configure);
@@ -3254,7 +3254,7 @@ void kl_window_keyboard_inset(const struct kl_window *window, int *right, int *b
 /*
  * libkeiui's version 8 (ws102-p017, plan/ws102/design.md section 2.10): the
  * editing operations the on-screen keyboard's buttons ask for.  A window
- * tells zdesktop it carries all of them out and its state, and hears them.
+ * tells the compositor it carries all of them out and its state, and hears them.
  * By default each becomes the keys it stands for, queued as the window's
  * own key inputs (copy Ctrl+C, cut Ctrl+X, paste Ctrl+V, undo Ctrl+Z, redo
  * Ctrl+Shift+Z, select all Ctrl+A), and select_begin and select_end start
@@ -3471,7 +3471,7 @@ struct kl_control_entry {
 	uint32_t action;
 };
 
-/* The window's menu in zdesktop's System Menu (count 0 takes it away). */
+/* The window's menu in the compositor's System Menu (count 0 takes it away). */
 int kl_window_set_menu(struct kl_window *window, const struct kl_menu_entry *entries, size_t count);
 
 /* The window's titlebar controls (count 0 gives the titlebar back to the menu). */
@@ -3949,7 +3949,7 @@ struct kl_file_filter {
  *
  * mode: KL_FILE_CHOOSER_OPEN or _SAVE.  title: the window's title ("Open"
  * or "Save As" when NULL).  application: the app_id the window gets, so
- * that zdesktop shows it as the application's.  folder: where it starts
+ * that compositor shows it as the application's.  folder: where it starts
  * (the home folder when NULL or not a folder).  name: the name Save starts
  * with, selected up to its extension.  filters, filter_count and filter:
  * the filters offered (at most KL_FILE_CHOOSER_FILTERS_MAX) and the one

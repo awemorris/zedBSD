@@ -7,7 +7,7 @@
 
 /*
  * The desktop's look as Settings keeps it (ws089-p004): the desktop's
- * settings (libkeiland's kl_settings_*, which zdesktop holds and puts into
+ * settings (libkeiland's kl_settings_*, which the compositor holds and puts into
  * effect at once; WS135), the pictures the Wallpaper page offers with their
  * small copies, and the file systems the Storage page shows.
  *
@@ -46,7 +46,7 @@
 #define LOOK_OPACITY_MIN	85
 #define LOOK_OPACITY_MAX	100
 
-/* The input's keys: their ranges and defaults, as zdesktop takes them (userland/desktop/wayland/preferences.c). */
+/* The input's keys: their ranges and defaults, as the compositor takes them (userland/desktop/wayland/preferences.c). */
 #define LOOK_SPEED_MIN		25
 #define LOOK_SPEED_MAX		300
 #define LOOK_MOUSE_SPEED	150
@@ -258,7 +258,7 @@ se_look_close(
 }
 
 /*
- * Sets the windows' opacity (85 to 100 percent), which zdesktop puts into
+ * Sets the windows' opacity (85 to 100 percent), which the compositor puts into
  * effect at once.
  */
 void
@@ -288,7 +288,7 @@ se_look_set_opacity(
 }
 
 /*
- * Sets a whole number under a key, which zdesktop puts into effect at once
+ * Sets a whole number under a key, which the compositor puts into effect at once
  * (always set: fallback is only the page's own idea of the default).
  */
 void
@@ -641,7 +641,7 @@ look_write(
 	/* Draws the page with the message cleared. */
 	app->dirty = 1;
 
-	/* Succeeded: zdesktop puts it into effect, and the watch hears it back. */
+	/* Succeeded: the compositor puts it into effect, and the watch hears it back. */
 	return 0;
 }
 

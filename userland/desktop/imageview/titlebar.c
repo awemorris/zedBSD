@@ -6,13 +6,13 @@
  */
 
 /*
- * The titlebar of Image Viewer in zdesktop (WS070's CONTROLS
+ * The titlebar of Image Viewer in the compositor (WS070's CONTROLS
  * presentation): the previous and the next image, where the image is in
  * its folder ("3 / 12"), the zoom, the fit, a turn and the full screen.
  *
  * The controls are a table given to libkeiland (WS131 p017:
  * kl_window_set_controls), the image's place its label; their state is
- * their actions' (menu.c).  zdesktop draws the controls and makes them give
+ * their actions' (menu.c).  The compositor draws the controls and makes them give
  * way when the room runs short (into its "..." popup, which also holds the
  * menus); a control chosen comes back as a KL_WINDOW_ACTION input among
  * the window's.  A compositor without the titlebar leaves the viewer with
@@ -36,7 +36,7 @@
 #define CONTROL_FULLSCREEN	8U
 
 /*
- * The controls, in their order.  zdesktop draws a generic control outside a
+ * The controls, in their order.  The compositor draws a generic control outside a
  * segmented group as a pill with its label.  The place's control is the
  * one whose label changes (titlebar_send).
  */
@@ -57,7 +57,7 @@ static const struct kl_control_entry titlebar_controls[] = {
 static int titlebar_send(struct iv_titlebar *titlebar, const char *place);
 
 /*
- * Gives zdesktop the window's titlebar controls, showing a state.
+ * Gives the compositor the window's titlebar controls, showing a state.
  *
  * Returns 0, also when the compositor has no titlebar presentation, or an
  * errno value when the controls could not be made.
@@ -90,7 +90,7 @@ iv_titlebar_open(
 	/* Logs the controls for the tests. */
 	iv_log("TITLEBAR ready controls=%u", (unsigned)(sizeof(titlebar_controls) / sizeof(titlebar_controls[0])));
 
-	/* Succeeded: the titlebar is zdesktop's to show. */
+	/* Succeeded: the titlebar is the compositor's to show. */
 	return 0;
 }
 
@@ -124,7 +124,7 @@ iv_titlebar_refresh(
 }
 
 /*
- * Takes the titlebar away from zdesktop (before the window goes).
+ * Takes the titlebar away from the compositor (before the window goes).
  */
 void
 iv_titlebar_close(

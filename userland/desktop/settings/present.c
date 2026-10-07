@@ -44,7 +44,7 @@ se_present_open(
 	if (result != VK_SUCCESS)
 		return result;
 
-	/* The device's name, and whether zdesktop blends the frame by its alpha. */
+	/* The device's name, and whether the compositor blends the frame by its alpha. */
 	name = kl_window_device_name(window->kui);
 	(void)snprintf(present->device_name, sizeof(present->device_name), "%s", name);
 	present->premultiplied = kl_window_see_through(window->kui);

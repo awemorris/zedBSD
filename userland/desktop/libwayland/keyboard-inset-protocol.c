@@ -6,7 +6,7 @@
  */
 
 /*
- * Describes and marshals zdesktop's keyboard inset protocol
+ * Describes and marshals the compositor's keyboard inset protocol
  * (kl_keyboard_inset_manager_v1 and kl_keyboard_inset_v1,
  * version 1; ws102-p015, plan/ws102/design.md section 2.8).  A window's
  * inset hears how much of it the on-screen keyboard covers.

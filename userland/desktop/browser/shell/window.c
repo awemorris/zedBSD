@@ -31,7 +31,7 @@
 
 /*
  * How the wheel's distance is scaled: libkeiland gives 4 pixels for each
- * of zdesktop's scroll units, the browser scrolls 3 (15 units a notch,
+ * of the compositor's scroll units, the browser scrolls 3 (15 units a notch,
  * 45 pixels).
  */
 #define WINDOW_SCROLL_UNIT	4.0
@@ -73,7 +73,7 @@ shell_window_open(
 	/* Nothing held yet. */
 	memset(window, 0, sizeof(*window));
 
-	/* The application: the connection to zdesktop. */
+	/* The application: the connection to the compositor. */
 	memset(&app_options, 0, sizeof(app_options));
 	app_options.display = display;
 	app_options.application = "browser";

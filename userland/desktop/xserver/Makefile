@@ -1,6 +1,6 @@
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
-# zdesktop's X11 server: rootless, each top-level X window a window of the desktop (WS069 p008).
+# The compositor's X11 server: rootless, each top-level X window a window of the desktop (WS069 p008).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 KEILAND_X11SERVER_SOURCES := userland/desktop/xserver/main.c \
 	userland/desktop/xserver/server.c userland/desktop/xserver/protocol.c \

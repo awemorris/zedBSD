@@ -6,17 +6,17 @@
  */
 
 /*
- * Drag and drop with other windows through zdesktop (ws035-p084): the
+ * Drag and drop with other windows through the compositor (ws035-p084): the
  * compositor's side of ui-drag.c, through libkeiland's window (WS131
  * p020).
  *
  * Items dragged out of the window offer their file names as
  * "text/uri-list" (file:// URIs, one per line) and as text (a path a line)
- * with the move and copy actions, and zdesktop carries the drag (answering
+ * with the move and copy actions, and the compositor carries the drag (answering
  * the press that started it); its end (dropped or not) comes among the
  * window's inputs (window.c).  A drag of file names coming over the window
  * comes as the drop events: the interface finds its target and the main
- * loop answers zdesktop (the names taken or not, move preferred); at the
+ * loop answers the compositor (the names taken or not, move preferred); at the
  * drop the names are read (the window's own drag's directly) and the drop
  * is finished with the action carried out, or given up.
  */
@@ -82,14 +82,14 @@ fm_dnd_start(
 	if (error != 0)
 		return error;
 
-	/* Succeeded: zdesktop carries it from the window's surface, with its own badge. */
+	/* Succeeded: the compositor carries it from the window's surface, with its own badge. */
 	window->dragging = 1;
 	fm_log("DND start items=%lu bytes=%lu serial=%u", (unsigned long)count, (unsigned long)uris_length, window->button_serial);
 	return 0;
 }
 
 /*
- * Answers zdesktop for the drag over the window: its file names are taken
+ * Answers the compositor for the drag over the window: its file names are taken
  * (with move preferred, or copy) or not.
  */
 void
@@ -148,7 +148,7 @@ fm_dnd_receive(
 }
 
 /*
- * Tells zdesktop that the drop is done with an action (the one chosen
+ * Tells the compositor that the drop is done with an action (the one chosen
  * after "ask" is said first), and lets its offer go.
  */
 void
@@ -162,7 +162,7 @@ fm_dnd_finish(
 
 /*
  * Gives up a dropped drag (its "ask" was cancelled): the offer goes without
- * its finish, and zdesktop cancels the drag's source.
+ * its finish, and the compositor cancels the drag's source.
  */
 void
 fm_dnd_abort(

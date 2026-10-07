@@ -2,10 +2,10 @@
 
 # ws078-p007（提案）: 注釈の `zdesktop` を一度に置き換える
 
-Status: planning（2026-10-01 の提案。main が ws.md の Phase の表に入れるまで提案のまま）
+Status: in-progress（2026-10-08 P1 q879: 置き換え・確かめ・build warning 0 まで。boot test は T1。下の「q879」）（旧: planning（2026-10-01 の提案。main が ws.md の Phase の表に入れるまで提案のまま））
 Disposition: normal
 Parent: [WS078](../ws.md)
-Queue: なし
+Queue: q879（P1、2026-10-08 Q1 の承認の 3 番）
 依存: **WS104 の p001〜p007 が main に入った後**（WS104 の patch は `zdesktop` を含む文脈の行を持つ）。`userland/desktop` と `platform/amd64/vmunix.mk` を変える
 worktree が無い静かな時点（ws.md「改名は … 静かな時点で main か 1 つの agent が一度に」、main の判断「WS074・WS081 の作業が落ち着いた後、1 つの agent で一斉に」）。
 
@@ -38,3 +38,20 @@ make の変数（`DYNAMIC_ZDESKTOP_*`・`LIBZDESKTOP_*`、p008 提案）、`zed-
 
 - `git grep -I -c -i 'zdesktop' -- ':!plan' ':!.internal' ':!userland/desktop/ime'` の数が、make の変数（p008 の分）と header の file 名の参照（p008 の分）だけ。
 - 前後の object が byte で同じ（`object-diff.txt` が 0 行）、build の warning 0、style の新しい違反 0、`boot-test: PASS`（PNG をユーザーに見せる）。
+
+## q879（P1、2026-10-08）
+
+- 前提: WS104 は completed、p008（make の変数・header の file 名）は 3a61b1139 で main に入った。IME（`userland/desktop/ime/`）は人間の作業から戻っているので、今回は含めた（9 file）。
+- 数え直し: plan と `*.md` の外で 661 行・192 file（C 141・h 29・shader 4・Makefile ほか）。
+- 置き換え（1 行を 1 行、`scratchpad` の script で機械的に。語は手順 4 のとおり）:
+  - 「zdesktop's」→「the compositor's」、「zdesktop」→「the compositor」。文頭（前の行が終わった comment の最初、または「.」の後）は「The …」。冠詞・所有の後（the・a・its など）は「compositor」だけ。
+  - 「zedBSD zdesktop:」（shader の先頭）→「Keiland compositor:」。「zdesktop-x11」→「keiland-x11」。
+  - file 名の一部（`config-amd64-zdesktop.mk` など）は残した。
+  - 結果: 660 行・191 file。残る 1 行は `userland/tests/kuidemo/Makefile` の `plan/ws035/tests/config-amd64-zdesktop.mk`（本当の file 名）。
+  - `tests/scenarios` の md 2 file と `userland/tests/mview/README.md` は文書なので、この Phase では変えていない。
+- 確かめ:
+  - 変えた C・h・shader の 174 file で、`gcc -fpreprocessed -dD -E -P`（注釈を除いた中身）が前後で同じ（違い 0）。行の数も同じなので、object（`__LINE__` を含む）は変わらない。
+  - Makefile・sh・py・conf の変更も、注釈と regenerate.py の docstring だけ。
+  - `git diff --check` は空。style-check の出力は前後とも 225 行（新しい指摘 0）。
+  - build（warning 0、target を名指し）: libkeiland・libvulkan・libwayland-client・wayland・files・settings・terminal・keiland-ime・xserver・browser。keiland-linux の all も rc 0。
+- 未実施: boot test（T1）。

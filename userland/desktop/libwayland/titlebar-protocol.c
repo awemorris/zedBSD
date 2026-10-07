@@ -6,13 +6,13 @@
  */
 
 /*
- * Describes and marshals zdesktop's Titlebar Presentation protocol (WS070
+ * Describes and marshals the compositor's Titlebar Presentation protocol (WS070
  * p008).
  *
  * kl_titlebar_manager_v1 gives a window (xdg_toplevel) its titlebar's
  * presentation (kl_titlebar_v1): a mode and the model of controls or tabs
- * that zdesktop draws in the window's floating titlebar or, docked, in the
- * system bar.  The protocol is zdesktop's own; its header is private and
+ * that compositor draws in the window's floating titlebar or, docked, in the
+ * system bar.  The protocol is the compositor's own; its header is private and
  * applications use it through libkeiland.  plan/ws070/titlebar-design.md
  * defines every request and event.
  */

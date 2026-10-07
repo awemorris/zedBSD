@@ -6,7 +6,7 @@
  */
 
 /*
- * The parts of Text Editor that speak to zdesktop through libkeiland's
+ * The parts of Text Editor that speak to the compositor through libkeiland's
  * window (the window, its presenter, the clipboard and the primary
  * selection, WS090) and libkeiland's extensions: the editor's queue of
  * inputs (queue.c), the menus (shown in the titlebar's menu bar) and the

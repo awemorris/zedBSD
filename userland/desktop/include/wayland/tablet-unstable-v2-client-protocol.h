@@ -114,7 +114,7 @@ int zwp_tablet_v2_add_listener(struct zwp_tablet_v2 *zwp_tablet_v2, const struct
 #define ZWP_TABLET_V2_DESTROY 0U
 void zwp_tablet_v2_destroy(struct zwp_tablet_v2 *zwp_tablet_v2);
 
-/* zwp_tablet_pad_v2: a tablet's buttons and rings (never announced by zdesktop). */
+/* zwp_tablet_pad_v2: a tablet's buttons and rings (never announced by the compositor). */
 #define ZWP_TABLET_PAD_V2_SET_FEEDBACK 0U
 #define ZWP_TABLET_PAD_V2_DESTROY 1U
 void zwp_tablet_pad_v2_destroy(struct zwp_tablet_pad_v2 *zwp_tablet_pad_v2);

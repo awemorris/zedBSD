@@ -1,7 +1,7 @@
 LIBKEILAND_MAKEFILE_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 include $(LIBKEILAND_MAKEFILE_DIR)../package.mk
 
-# The wrapper of zdesktop's own Wayland extensions (the System Menu, WS070),
+# The wrapper of the compositor's own Wayland extensions (the System Menu, WS070),
 # and an application's way to the desktop's system and settings through
 # Keiland's system extension (kl_system_*, kl_settings_*; WS131 p011: the
 # library reaches no daemon and no system file itself).  The file chooser of

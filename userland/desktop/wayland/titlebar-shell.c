@@ -6,7 +6,7 @@
  */
 
 /*
- * The Titlebar Presentation as zdesktop draws and operates it (WS070 p010,
+ * The Titlebar Presentation as the compositor draws and operates it (WS070 p010,
  * plan/ws070/titlebar-design.md sections 6, 7, 9 and 10).
  *
  * A window's titlebar shows, after its mark and title, the presentation its
@@ -38,7 +38,7 @@
  * field's release where it was pressed gives it the keyboard with the
  * cursor there.  On the field that has the keyboard a press puts the
  * cursor and a drag selects.  The search field, and the breadcrumb when the client asks for
- * the path to be edited, are text fields zdesktop owns: while one has the
+ * the path to be edited, are text fields the compositor owns: while one has the
  * keyboard, the keys edit it, and the client hears the text as it changes
  * and how the editing ended.  Hits are tested against the places the
  * controls were last drawn at, so the pointer finds what the user sees.
@@ -132,7 +132,7 @@
 #define TAB_KEY_PAGEUP		104U
 #define TAB_KEY_PAGEDOWN	109U
 
-/* The modifier bits of zdesktop's wl_keyboard.modifiers. */
+/* The modifier bits of the compositor's wl_keyboard.modifiers. */
 #define SEAT_SHIFT		0x01U
 #define SEAT_CTRL		0x04U
 #define SEAT_ALT		0x08U
@@ -227,7 +227,7 @@ struct shell_strip {
 };
 
 /*
- * A text field zdesktop owns: the window and the control (NULL when none
+ * A text field the compositor owns: the window and the control (NULL when none
  * has the keyboard), whether it edits a breadcrumb's path, and the text
  * with its cursor and the other end of its selection (byte offsets on
  * character boundaries).  box is where the field was last drawn (on the
@@ -305,7 +305,7 @@ struct shell_titlebar {
 };
 
 /*
- * The one compositor's titlebar presentation.  zdesktop runs one server per
+ * The one compositor's titlebar presentation.  The compositor runs one server per
  * process; the zero value is "nothing drawn, nothing pressed, no field".
  */
 static struct shell_titlebar shell_titlebar;
@@ -628,7 +628,7 @@ kwl_titlebar_motion(
  * Handles a key for a field with the keyboard: the keys edit it, Enter,
  * Esc and Tab end it, and Down without suggestions ends it and goes on to
  * the window.  Keys with Alt or Super, and Ctrl keys other than the
- * editing ones, go on (to zdesktop's shortcuts and the menus).  Returns 1
+ * editing ones, go on (to the compositor's shortcuts and the menus).  Returns 1
  * when the key was the field's.
  */
 int

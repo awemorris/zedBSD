@@ -70,7 +70,7 @@
 
 /*
  * A key of the menus that the other key handlers do not know, and the
- * action it asks for.  zdesktop takes these keys for the menus while their
+ * action it asks for.  The compositor takes these keys for the menus while their
  * items are enabled; without the System Menu they arrive here.
  */
 struct input_shortcut {
@@ -558,7 +558,7 @@ fm_input_enclosing(
 /*
  * Turns the path in the titlebar into a field to type a folder in (Ctrl+L),
  * starting from the folder shown (the home folder for another place):
- * zdesktop is asked to give its path the keyboard (fm_titlebar_state).
+ * The compositor is asked to give its path the keyboard (fm_titlebar_state).
  */
 void
 fm_input_location(
@@ -574,7 +574,7 @@ fm_input_location(
 	if (location->kind != FM_LOCATION_FOLDER)
 		fm_field_set(&app->location, app->home);
 
-	/* Typing goes to the field, which zdesktop is asked for. */
+	/* Typing goes to the field, which the compositor is asked for. */
 	app->focus = FM_FOCUS_LOCATION;
 	app->control_focus = FM_CONTROL_PATH;
 	app->control_focus_serial++;

@@ -1,4 +1,4 @@
-// zedBSD zdesktop: the shapes of the glass look, in premultiplied alpha.
+// Keiland compositor: the shapes of the glass look, in premultiplied alpha.
 // Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 #version 450
 

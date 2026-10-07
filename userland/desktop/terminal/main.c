@@ -18,9 +18,9 @@
  * shell, and every shell is read so none of them waits.  A tab whose shell
  * exits closes; the last one ends the terminal.
  *
- * Its menus (menu.c) are drawn by zdesktop; what they choose is carried out
+ * Its menus (menu.c) are drawn by the compositor; what they choose is carried out
  * here: a new window (another terminal), closing, the selection and the
- * clipboard (zdesktop's, shared with other clients, clipboard.c), the
+ * clipboard (the compositor's, shared with other clients, clipboard.c), the
  * font's size, fullscreen, keys for the shell, clearing and
  * resetting the screen, and a line about the terminal.
  *
@@ -564,7 +564,7 @@ main_start(
 	main_window.theme = run->theme;
 	main_grid(main_renderer.extent.width, main_renderer.extent.height, &run->columns, &run->rows);
 
-	/* The menus, which zdesktop draws (none from a compositor without the System Menu). */
+	/* The menus, which the compositor draws (none from a compositor without the System Menu). */
 	main_menu_state(run, &state);
 	run->operation = "terminal_menu_open";
 	status = terminal_menu_open(&main_window, &state);

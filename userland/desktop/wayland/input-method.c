@@ -7,24 +7,24 @@
 
 /*
  * The system's input method (ws095-p004, plan/ws095/design.md sections 2
- * to 4): zdesktop starts it, serves its protocols, and decides where each
+ * to 4): the compositor starts it, serves its protocols, and decides where each
  * key goes.
  *
- * The input method is one program, /usr/libexec/keiland-ime.  zdesktop
+ * The input method is one program, /usr/libexec/keiland-ime.  The compositor
  * starts it itself on a socket pair (the WAYLAND_SOCKET way), so its
  * connection is known without trusting a process ID, and only that
  * connection sees and binds the input method's globals: the input method
  * manager (input-method-unstable-v2), the virtual keyboard manager
- * (virtual-keyboard-unstable-v1) and zdesktop's own status
+ * (virtual-keyboard-unstable-v1) and the compositor's own status
  * (kl_ime_status_v1).  When it dies it is started again after a
  * second, three times a minute at most.
  *
  * Keys: Alt+Space asks the input method for its next language (and the
  * Japanese keyboard's 変換, 無変換, カタカナ/ひらがな, かな and 英数
- * choose one); zdesktop takes these before anything else.  While a text
+ * choose one); the compositor takes these before anything else.  While a text
  * input is served, the language is not direct input and the input method
  * answers, a key goes to its keyboard grab instead of the application:
- * right after zdesktop's own shortcuts, or before the window's menu and tab
+ * right after the compositor's own shortcuts, or before the window's menu and tab
  * keys while text is being composed.  The keys the input method does not
  * use come back on its virtual keyboard and go to the application.  A
  * release goes where its press went.  An input method that leaves a key
@@ -34,7 +34,7 @@
  * modifiers and keymap are taken and not used.
  *
  * The language belongs to the application with the keyboard (ws095-p016):
- * zdesktop remembers each application's (by its windows' application ID,
+ * The compositor remembers each application's (by its windows' application ID,
  * else its connection) and the desktop's, chooses an application's again
  * when the keyboard comes back to it, and starts an application seen for
  * the first time with the desktop's.  A window, field or caret that moves
@@ -165,19 +165,19 @@
 #define IME_MODIFIER_META		0x40U
 
 /*
- * The text input that stands for zdesktop's own text field with the
+ * The text input that stands for the compositor's own text field with the
  * keyboard (a title bar's search or path field, titlebar-shell.c;
  * BUG-177).  It has no object; its surface is the window and its state is
  * the field's, read again (into ime_field_text) each time the input method
  * is to be told it.  The input method serves it as any application's, and
  * what it makes goes to the field instead of a client.  It lives as long as
- * zdesktop; its zero value is "no field".
+ * the compositor; its zero value is "no field".
  */
 static struct kwl_text_input ime_field;
 static char ime_field_text[KWL_TITLEBAR_TEXT_MAX + 1U];
 
 /*
- * Which of zdesktop's own fields ime_field stands for: a title bar's
+ * Which of the compositor's own fields ime_field stands for: a title bar's
  * (its window's surface), or App Home's search (ws090-p022: no surface,
  * its rectangle the output's).
  */
@@ -482,7 +482,7 @@ kwl_ime_client_gone(
 
 /*
  * Tells whether a global is shown to a connection: the input method's
- * globals only to the input method zdesktop started.
+ * globals only to the input method the compositor started.
  */
 int
 kwl_ime_global_visible(
@@ -560,7 +560,7 @@ kwl_ime_method_changed(
 }
 
 /*
- * Takes the keys that belong to the input method before zdesktop's own:
+ * Takes the keys that belong to the input method before the compositor's own:
  * the release of a key whose press went to the input method or was taken
  * here, and the keys that change the language.
  *
@@ -762,7 +762,7 @@ kwl_ime_update(
 	if (ime == NULL || ime->method == NULL)
 		return;
 
-	/* The text input to serve now: zdesktop's own field with the keyboard, else an application's. */
+	/* The text input to serve now: the compositor's own field with the keyboard, else an application's. */
 	current = ime_current(server);
 
 	/* Another text input (or none): the old one is given up, and the new one taken. */
@@ -799,7 +799,7 @@ kwl_ime_text_input_gone(
 }
 
 /*
- * Follows zdesktop's own text field (titlebar-shell.c, BUG-177): its
+ * Follows the compositor's own text field (titlebar-shell.c, BUG-177): its
  * editing began or ended, or its text or cursor changed.  The input
  * method is activated for it, told its new state, or deactivated.
  */
@@ -816,7 +816,7 @@ kwl_ime_field_changed(
 }
 
 /*
- * Gives a key press to the input method before zdesktop's own text field
+ * Gives a key press to the input method before the compositor's own text field
  * takes it, while the field is the text input served (the place of
  * kwl_ime_key_grab for an application's).  Returns nonzero when taken.
  */
@@ -860,7 +860,7 @@ kwl_ime_home_key(
 	if (ime_field_kind != IME_FIELD_HOME)
 		return 0;
 
-	/* As zdesktop's other own field. */
+	/* As the compositor's other own field. */
 	taken = kwl_ime_field_key(server, time, key, state);
 	return taken;
 }
@@ -1091,7 +1091,7 @@ ime_spawn(
 	else if (server->ime_method == 2)
 		method = "--method=skk";
 
-	/* The pair: zdesktop keeps one end, the input method gets the other. */
+	/* The pair: the compositor keeps one end, the input method gets the other. */
 	error = socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair);
 	if (error != 0) {
 		printf("KWL IME spawn-failed step=socketpair errno=%d\n", errno);
@@ -1447,7 +1447,7 @@ ime_keyboard_request(
 	/* Each request of the virtual keyboard. */
 	switch (opcode) {
 	case KEYBOARD_KEYMAP:
-		/* The keymap is taken and not used: the applications keep zdesktop's (keymap.c). */
+		/* The keymap is taken and not used: the applications keep the compositor's (keymap.c). */
 		if (size != 8U)
 			return EPROTO;
 		descriptor = kwl_take_fd(keyboard->client);
@@ -1599,7 +1599,7 @@ ime_grab_keyboard(
 
 	server->ime->grab = grab;
 
-	/* The keymap the keys are in: zdesktop's (keymap.c), or none. */
+	/* The keymap the keys are in: the compositor's (keymap.c), or none. */
 	words[0] = IME_KEYMAP_XKB_V1;
 	descriptor = kwl_keymap_descriptor(&size);
 	words[1] = size;
@@ -1729,7 +1729,7 @@ ime_activate(
 	ime_rectangles(server);
 	server->dirty = 1;
 
-	/* Logged: zdesktop's own field has no object of its own (Home's search no window either). */
+	/* Logged: the compositor's own field has no object of its own (Home's search no window either). */
 	if (input == &ime_field && ime_field_kind == IME_FIELD_HOME) {
 		printf("KWL IME activate field home\n");
 		return;
@@ -1974,7 +1974,7 @@ ime_keyboard_key(
 			return;
 	}
 
-	/* zdesktop's own field served: its keys are the field's (titlebar-shell.c), the rest the application's. */
+	/* The compositor's own field served: its keys are the field's (titlebar-shell.c), the rest the application's. */
 	if (ime->active == &ime_field) {
 		taken = kwl_titlebar_key(server, key, state);
 		if (taken)
@@ -2562,7 +2562,7 @@ ime_app_forget(
 }
 
 /*
- * Gives the text input to serve: zdesktop's own text field with the
+ * Gives the text input to serve: the compositor's own text field with the
  * keyboard (its state read again), else the application's
  * (text-input.c).
  */
@@ -2587,7 +2587,7 @@ ime_current(
 		return &ime_field;
 	}
 
-	/* zdesktop's own field, when one has the keyboard. */
+	/* The compositor's own field, when one has the keyboard. */
 	surface = kwl_titlebar_field_surface(server);
 	if (surface != NULL) {
 		known = kwl_titlebar_field_state(server, ime_field_text, sizeof(ime_field_text), &ime_field.cursor, &ime_field.anchor, ime_field.rectangle);
@@ -2611,7 +2611,7 @@ ime_current(
 }
 
 /*
- * Delivers what the input method made: to zdesktop's own field
+ * Delivers what the input method made: to the compositor's own field
  * (titlebar-shell.c), or to an application's text input (text-input.c).
  */
 static void
@@ -2631,7 +2631,7 @@ ime_deliver(
 		return;
 	}
 
-	/* zdesktop's own field. */
+	/* The compositor's own field. */
 	if (input == &ime_field) {
 		kwl_titlebar_field_input(server, preedit, commit, before, after);
 		return;

@@ -26,12 +26,12 @@
  * ws100-p012; 2026-10-03 user: no I/O for each change, keep it at the end
  * of the session).  The user's preferences (sound.volume, sound.muted) are
  * read once, when audiod is first reached, and applied; the volume is
- * written back once, when the session ends (Log Out, or zdesktop told to
+ * written back once, when the session ends (Log Out, or the compositor told to
  * stop), and only when it differs from what the file holds.  A volume
  * changed after a power cut or a crash is lost, which the user accepted.
  *
  * All of it goes through libkeiland-backend (kl_backend_audio_*, ws131-p004):
- * zdesktop never speaks audiod's protocol, and nothing here waits for it.
+ * The compositor never speaks audiod's protocol, and nothing here waits for it.
  * The kept volume is the compositor's settings store's (settings.c, WS135):
  * the store gives the volume the file held, takes audiod's volume as the
  * session's, and writes it at the session's end.  A client's set of the
@@ -91,7 +91,7 @@
  * restored is set once the preferences' volume has been applied (on the
  * first connection to audiod); an audiod reached again later gets the
  * session's volume instead.  kept, kept_value and kept_muted are what the
- * file holds as far as zdesktop knows (read at the start, written at the
+ * file holds as far as the compositor knows (read at the start, written at the
  * end), so that the end writes only a volume that changed.
  */
 struct volume_view {
@@ -194,7 +194,7 @@ kwl_volume_tick(
 
 /*
  * Writes the session's volume to the preferences, once, when the session
- * ends (Log Out, or zdesktop told to stop; BUG-161).  Nothing is written
+ * ends (Log Out, or the compositor told to stop; BUG-161).  Nothing is written
  * when the file already holds it, or without preferences (the login
  * screen) or before the volume was known.
  */

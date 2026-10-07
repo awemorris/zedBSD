@@ -9,7 +9,7 @@
  * The shared-memory presenter of the library's windows (ws090-p004, the
  * buffers of libkeiland's file chooser): a frame drawn on the CPU is
  * copied into a wl_shm buffer of ARGB8888 (premultiplied, blended by its
- * alpha as zdesktop's glass needs) and attached to the window's surface.
+ * alpha as the compositor's glass needs) and attached to the window's surface.
  * Two buffers alternate; a frame waits for one the compositor has given
  * back.  It serves small windows of a library, and windows where Vulkan
  * is missing (ws035's compositing design keeps wl_shm as the auxiliary

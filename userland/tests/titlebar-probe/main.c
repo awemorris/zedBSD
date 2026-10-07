@@ -6,12 +6,12 @@
  */
 
 /*
- * Tests zdesktop's Titlebar Presentation protocol (WS070 p008) and
+ * Tests the compositor's Titlebar Presentation protocol (WS070 p008) and
  * libkeiland's checks.
  *
  * Each server case opens its own connection, makes a toplevel and its
  * kl_titlebar_v1 through the private protocol header, sends a few
- * requests, and checks the protocol error zdesktop answers with (its
+ * requests, and checks the protocol error the compositor answers with (its
  * interface and code), or that there is none.  The library case checks
  * that libkeiland refuses the same mistakes itself and sends nothing that
  * would end the connection.  Every case prints TITLEBARPROBE case=NAME ok
@@ -24,7 +24,7 @@
  * --show instead shows a plain window with a title (the tests give it
  * Japanese to see the glyph cache) for some seconds, with a titlebar model
  * of the mode given (a file manager's controls, or three tabs), and prints
- * TITLEBARPROBE event lines for what zdesktop tells it.  Its tabs behave
+ * TITLEBARPROBE event lines for what the compositor tells it.  Its tabs behave
  * like an editor's (WS070 p011): a chosen tab becomes the active one, a
  * closed one goes (its neighbour becomes active), "+" adds "Untitled N".
  * --tabs gives more tabs ("Document N" after the first three); --switch
@@ -159,7 +159,7 @@ static const struct xdg_surface_listener probe_role_listener = {
 	probe_configure
 };
 
-/* What zdesktop tells the shown window's titlebar, printed. */
+/* What the compositor tells the shown window's titlebar, printed. */
 static const struct kl_titlebar_listener probe_titlebar_listener = {
 	probe_activated,
 	probe_text_changed,
@@ -759,7 +759,7 @@ probe_library_calls(
 
 /*
  * Shows a window with a title and a titlebar model of a mode for some
- * seconds, printing what zdesktop tells its titlebar.  Returns 0, or 1 when
+ * seconds, printing what the compositor tells its titlebar.  Returns 0, or 1 when
  * the window could not be shown.
  */
 static int

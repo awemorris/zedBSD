@@ -127,7 +127,7 @@ struct ime_output {
  *
  * key interprets a key and fills the output; reset ends whatever is being
  * composed, either committing it into the output (on switching languages)
- * or dropping it (on deactivation, when zdesktop has already committed the
+ * or dropping it (on deactivation, when the compositor has already committed the
  * preedit itself); surrounding tells the engine the text around the
  * cursor; content_type tells it what the field holds (the hints and the
  * purpose of text-input-v3); save writes what the engine has learned to

@@ -6,7 +6,7 @@
  */
 
 /*
- * The parts of PDF Viewer that speak Wayland and zdesktop's extensions:
+ * The parts of PDF Viewer that speak Wayland and the compositor's extensions:
  * the window (libkeiland's kl_window since ws090-p008: the toplevel, the
  * seat's input and the frames shown with Vulkan), the menus (menu.c) and
  * the titlebar's controls (titlebar.c).  The host tests build the rest of
@@ -64,7 +64,7 @@ struct pv_menu {
 };
 
 /*
- * The window's titlebar in zdesktop (titlebar.c, WS131 p017): the window,
+ * The window's titlebar in the compositor (titlebar.c, WS131 p017): the window,
  * and whether its controls are shown (not without the compositor's
  * titlebar).  The controls' state is their actions' (menu.c).
  */

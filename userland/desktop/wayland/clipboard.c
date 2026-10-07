@@ -10,7 +10,7 @@
  * the text of the last KWL_CLIPBOARD_HISTORY selections, newest first, in
  * memory only.
  *
- * When a client sets a selection with a text type, zdesktop reads the text
+ * When a client sets a selection with a text type, the compositor reads the text
  * from it as any client would (wl_data_source.send into a pipe, read
  * without waiting in each pass of the event loop) and puts it first in the
  * history; the same text already there moves up instead.  Nothing is kept
@@ -20,7 +20,7 @@
  * KWL_CLIPBOARD_TEXT_MAX.  The lock screen and Log Out empty the history
  * (the texts are wiped before they are freed).
  *
- * kwl_clipboard_history_paste makes an item the selection -- zdesktop's
+ * kwl_clipboard_history_paste makes an item the selection -- the compositor's
  * own, offered as text (data.c) -- and sends the focused window the paste
  * operation (edit.c).  The on-screen keyboard's history tab (ws102-p016)
  * lists the items with kwl_clipboard_history_count and _get; until it
@@ -67,7 +67,7 @@ static struct clipboard_item clipboard_history[KWL_CLIPBOARD_HISTORY];
 static unsigned clipboard_count;
 
 /*
- * The read under way: the pipe's end zdesktop reads (-1 for none), the
+ * The read under way: the pipe's end the compositor reads (-1 for none), the
  * text so far, its length, and when the read began.
  */
 static struct {
@@ -78,7 +78,7 @@ static struct {
 } clipboard_read = { -1, NULL, 0U, 0U };
 
 /*
- * The text zdesktop offers while one of its history's items is the
+ * The text the compositor offers while one of its history's items is the
  * selection (a copy: the history may change meanwhile), and its length.
  */
 static char *clipboard_offered;
@@ -261,7 +261,7 @@ kwl_clipboard_history_get(
 
 /*
  * Pastes an item of the history into the focused window: it becomes the
- * selection (zdesktop's own, first in the history again) and the window
+ * selection (the compositor's own, first in the history again) and the window
  * is sent the paste operation.  Returns 0, ENOENT for no such item,
  * ENOMEM, or the paste's error (edit.c).
  */
@@ -279,7 +279,7 @@ kwl_clipboard_history_paste(
 	if (index >= clipboard_count)
 		return ENOENT;
 
-	/* The text zdesktop will offer, a copy of its own. */
+	/* The text the compositor will offer, a copy of its own. */
 	item = clipboard_history[index];
 	copy = malloc(item.length + 1U);
 	if (copy == NULL)
@@ -307,8 +307,8 @@ kwl_clipboard_history_paste(
 }
 
 /*
- * Writes the text zdesktop offers into a descriptor a client reads (data.c,
- * a receive of zdesktop's selection), and closes it.  A reader that does
+ * Writes the text the compositor offers into a descriptor a client reads (data.c,
+ * a receive of the compositor's selection), and closes it.  A reader that does
  * not take it all within a moment gets what fitted.
  */
 void
@@ -367,7 +367,7 @@ kwl_clipboard_history_clear(
 	}
 	clipboard_count = 0U;
 
-	/* The text zdesktop offers, too. */
+	/* The text the compositor offers, too. */
 	if (clipboard_offered != NULL) {
 		clipboard_wipe(clipboard_offered, clipboard_offered_length);
 		clipboard_offered = NULL;

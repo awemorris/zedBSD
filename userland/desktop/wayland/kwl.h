@@ -8,7 +8,7 @@
 /*
  * Shared state for the Wayland compositor.
  *
- * zdesktop draws in window mode (WS035 compositing design, D0): a background
+ * The compositor draws in window mode (WS035 compositing design, D0): a background
  * and every window, bottom to top, fullscreen ones too, with Vulkan into a
  * VK_KHR_display swapchain (compose.c); a window's image is imported once
  * per wl_buffer (import.c).  The direct scanout of a fullscreen window's
@@ -66,7 +66,7 @@
 /* The first ID of the range the compositor gives the objects it makes for a client. */
 #define KWL_SERVER_ID_FIRST	0xff000000U
 
-/* How many cursor images zdesktop draws for the shapes clients ask for (cursor.c). */
+/* How many cursor images the compositor draws for the shapes clients ask for (cursor.c). */
 #define KWL_CURSOR_IMAGES	10U
 
 /* Bound the evdev nodes the seat reads and the events one report may carry. */
@@ -586,7 +586,7 @@ struct kwl_object {
 	char **mime_types;
 	unsigned mime_count;
 	struct kwl_object *data_source;
-	/* An offer of zdesktop's own selection, an item of the clipboard's history (clipboard.c). */
+	/* An offer of the compositor's own selection, an item of the clipboard's history (clipboard.c). */
 	unsigned data_offered;
 	/*
 	 * Drag and drop (data.c, ws035-p084): a source's actions (set_actions),
@@ -735,7 +735,7 @@ struct kwl_client {
 	uint32_t server_id_next;
 	/*
 	 * Nonzero for the connection of the system's input method, which
-	 * zdesktop made itself (input-method.c, ws095-p004): only it sees and
+	 * the compositor made itself (input-method.c, ws095-p004): only it sees and
 	 * binds the input method's globals.
 	 */
 	unsigned ime;
@@ -873,7 +873,7 @@ struct kwl_server {
 	/* Nonzero with --log-frames: every presentation and buffer release is printed (for the tests that read them). */
 	unsigned log_frames;
 	/*
-	 * The graphical login (ws035-p095): with --greeter zdesktop draws the
+	 * The graphical login (ws035-p095): with --greeter the compositor draws the
 	 * login screen (greeter.c), opens no socket and asks sessiond on
 	 * auth_fd; session: it is a login session (the default role, or
 	 * --session, which says the same), which has no deadline and ends with
@@ -1333,11 +1333,11 @@ struct kwl_server {
 	unsigned home_launching;
 	uint64_t home_launch_ms;
 	int32_t home_launch_rect[4];
-	/* The cursor: a client's surface, zdesktop's arrow when there is none, or hidden. */
+	/* The cursor: a client's surface, the compositor's arrow when there is none, or hidden. */
 	struct kwl_object *cursor_surface;
 	/*
 	 * The client whose request (a cursor surface, none to hide it, or a
-	 * shape) the cursor state is; NULL for zdesktop's own.  Its state is
+	 * shape) the cursor state is; NULL for the compositor's own.  Its state is
 	 * shown only while the pointer is over that client's window (BUG-118);
 	 * cleared when the state goes back to the arrow or the client goes.
 	 */
@@ -1424,7 +1424,7 @@ struct kwl_server {
 	 */
 	struct kwl_object *selection;
 	uint64_t selection_client;
-	/* Whether the selection is zdesktop's own, an item of the clipboard's history (clipboard.c, ws102-p018; selection is NULL then). */
+	/* Whether the selection is the compositor's own, an item of the clipboard's history (clipboard.c, ws102-p018; selection is NULL then). */
 	unsigned selection_offered;
 	/*
 	 * The primary selection (primary.c, ws035-p100): the source set as it
@@ -1443,7 +1443,7 @@ struct kwl_server {
 	/*
 	 * Drag and drop (data.c, ws035-p084), while dnd_active: the drag's
 	 * wl_data_source (NULL for a drag inside its own client), the surface
-	 * it started from, its icon surface (NULL for zdesktop's badge), the
+	 * it started from, its icon surface (NULL for the compositor's badge), the
 	 * surface under the pointer that heard enter and the data device it
 	 * heard it on, the offer made for it, and the titlebar told the part
 	 * of a breadcrumb the drag is over (NULL for none) with that part.
@@ -1470,8 +1470,8 @@ struct kwl_server {
 	uint32_t dnd_drop_serial;
 	/*
 	 * The cursor shape the pointer's client asked for (wp_cursor_shape_v1,
-	 * cursor.c, ws035-p080; 0 for zdesktop's arrow), and the images of the
-	 * shapes zdesktop draws, by the index cursor.c gives them (NULL until
+	 * cursor.c, ws035-p080; 0 for the compositor's arrow), and the images of the
+	 * shapes the compositor draws, by the index cursor.c gives them (NULL until
 	 * made).
 	 */
 	uint32_t cursor_shape;

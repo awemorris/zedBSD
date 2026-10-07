@@ -11,7 +11,7 @@
  * The interface (ui*.c) draws the window's frame on a CPU canvas and reads
  * the window's input as fm_event values; it knows nothing of Wayland or
  * Vulkan.  window.c turns the Wayland window's input into those events,
- * present.c shows each drawn frame through Vulkan, menu.c gives zdesktop
+ * present.c shows each drawn frame through Vulkan, menu.c gives the compositor
  * the menus through libkeiland, and main.c ties them together.  The model
  * (dir.c, nav.c, mime.c, places.c and the files after them) keeps what the
  * interface shows: the listed places, the history, the selection, the file
@@ -157,11 +157,11 @@ const struct fm_palette *fm_palette_of(unsigned appearance);
 
 /*
  * The kinds of input the window gives the interface.  The drop events are
- * a drag and drop from zdesktop (ws035-p084): one comes over the window
+ * a drag and drop from the compositor (ws035-p084): one comes over the window
  * (pressed: it is this window's own drag; focused: it carries file names),
  * moves, leaves, or is dropped; the part of the titlebar's path it is over
  * (action: the control, button: the part; action 0 for none); the action
- * zdesktop chose (action); and the end of this window's own drag that left
+ * the compositor chose (action); and the end of this window's own drag that left
  * it (pressed: dropped somewhere).
  */
 enum fm_event_type {
@@ -187,7 +187,7 @@ enum fm_event_type {
 /* The longest text an input method sends at once, with its NUL (KL_WINDOW_TEXT_MAX). */
 #define FM_TEXT_INPUT_MAX	256U
 
-/* The drag and drop actions zdesktop chooses between (wl_data_device_manager's dnd_action). */
+/* The drag and drop actions the compositor chooses between (wl_data_device_manager's dnd_action). */
 #define FM_DND_COPY		1U
 #define FM_DND_MOVE		2U
 #define FM_DND_ASK		4U
@@ -366,7 +366,7 @@ struct fm_desktop_painted {
  *
  * The drag of items (ws094-p006): a left press held on an item (pressing,
  * the item and where; press_alone when a plain click on a selected item
- * selects it alone at the release instead of at the press), which becomes zdesktop's drag and drop once it
+ * selects it alone at the release instead of at the press), which becomes the compositor's drag and drop once it
  * moves (dragging, until the drag's end); a drop over the desktop has its
  * target in drop_item (a folder item, or -1 for the desktop itself) and
  * drop_column and drop_row (the cell under it, -1 for none); drop_place
@@ -618,10 +618,10 @@ struct fm_hit {
 #define FM_PANEL_CARD		0U
 
 /*
- * One part of the window that stands on zdesktop's frosted glass: its
+ * One part of the window that stands on the compositor's frosted glass: its
  * rectangle in the window, its corners' radius and its kind.  The frame's
  * panels are worked out from its layout (fm_ui_panels) and handed to
- * zdesktop with the frame.
+ * the compositor with the frame.
  */
 struct fm_panel {
 	struct kl_rect rect;
@@ -994,7 +994,7 @@ struct fm_context_row {
 
 /*
  * A context menu worked out for a right press (fm_ui_context): its rows,
- * in order.  menu.c hands it to zdesktop, which shows it at the press.
+ * in order.  menu.c hands it to the compositor, which shows it at the press.
  */
 struct fm_context {
 	unsigned count;
@@ -1004,7 +1004,7 @@ struct fm_context {
 /*
  * What the menus show of the window's state: which items do something now,
  * which are checked, and the names of the variable items (the ways to open
- * the selection).  menu.c sends it to zdesktop when it differs
+ * the selection).  menu.c sends it to the compositor when it differs
  * from what the menus show.
  */
 struct fm_menu_state {
@@ -1032,7 +1032,7 @@ struct fm_menu_state {
 
 /*
  * The controls of the window's titlebar (WS070's CONTROLS presentation,
- * drawn by zdesktop): their IDs in the model titlebar.c gives zdesktop.
+ * drawn by the compositor): their IDs in the model titlebar.c gives the compositor.
  */
 enum fm_control {
 	FM_CONTROL_NONE,
@@ -1047,7 +1047,7 @@ enum fm_control {
 	FM_CONTROL_PROGRESS
 };
 
-/* The bytes of a titlebar's text with its NUL (zdesktop takes 1023), and of a path's part. */
+/* The bytes of a titlebar's text with its NUL (the compositor takes 1023), and of a path's part. */
 #define FM_TITLEBAR_TEXT	1024
 #define FM_TITLEBAR_PART	65
 
@@ -1068,7 +1068,7 @@ enum fm_control {
  * FM_CONTROL_PATH) with the count of such requests, and the folders the
  * path's field suggests (ws127-p010: each a label and the text it puts in
  * the field) with the count of the lists made.  titlebar.c sends it to
- * zdesktop when it differs from what the titlebar shows.
+ * the compositor when it differs from what the titlebar shows.
  */
 struct fm_titlebar_state {
 	int can_back;
@@ -1155,16 +1155,16 @@ struct fm_app {
 	struct kl_rect frame_part;
 
 	/*
-	 * Whether the window is glass: zdesktop draws frosted glass under the
+	 * Whether the window is glass: the compositor draws frosted glass under the
 	 * panels and shows the desktop between them, so the frame leaves its
 	 * ground clear and tints the panels only lightly.  Set once, before the
-	 * first frame, when zdesktop can show the window see-through.
+	 * first frame, when the compositor can show the window see-through.
 	 */
 	int glass;
 
 	/*
 	 * The desktop mode (files --desktop, ws094-p003): the icons of the tab's
-	 * folder (~/Desktop) on zdesktop's desktop surface instead of the
+	 * folder (~/Desktop) on the compositor's desktop surface instead of the
 	 * window, and their places, the saved places and the pointer's state
 	 * (ui-desktop.c, desktop-layout.c).
 	 */
@@ -1298,11 +1298,11 @@ struct fm_app {
 
 	/*
 	 * Drag and drop with other windows (ws035-p084): whether the dragged
-	 * items left the window (zdesktop carries them from then on).  A drop
+	 * items left the window (the compositor carries them from then on).  A drop
 	 * coming in: whether one is over the window, whether it is this
 	 * window's own drag, whether it carries file names, where it is, the
 	 * part of the titlebar's path it is over (-1 for none), the action
-	 * zdesktop chose (FM_DND_*), whether the Wayland side must answer a
+	 * the compositor chose (FM_DND_*), whether the Wayland side must answer a
 	 * changed target, and the folder and operation (FM_TASK_*) of a drop
 	 * made (FM_REQUEST_DROP).  Its target is drag_target and drag_folder.
 	 */

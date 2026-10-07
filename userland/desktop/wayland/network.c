@@ -46,7 +46,7 @@
  * in one slot and is sent when that one is answered, rather than being
  * refused with "busy".
  *
- * All of it comes through libkeiland-backend (kl_backend_network_*): zdesktop never
+ * All of it comes through libkeiland-backend (kl_backend_network_*): the compositor never
  * speaks networkd's protocol.  Nothing here waits for the daemon; each tick
  * reads what has arrived.
  *
@@ -198,7 +198,7 @@ struct network_row {
  * sample of the last reading for the rates (info_sample).  They take the
  * menu's place (menu_x, menu_y).
  *
- * It lives as long as zdesktop; the menu's rows are laid out again each
+ * It lives as long as the compositor; the menu's rows are laid out again each
  * time the menu is drawn, so they always show the state last read.
  */
 struct network_view {

@@ -15,7 +15,7 @@
  * or, in the third pane, a new message being written (To, Cc, Subject and
  * the words).  A window narrower than ML_VIEW_NARROW leaves out the
  * folders and shows the list or the message, with a back button.  On
- * zdesktop's glass the panes are cards with the desktop between.
+ * the compositor's glass the panes are cards with the desktop between.
  *
  * Sending, getting mail, archiving, deleting and opening an unread
  * message are queued as requests for the window (ml_view_take_request),
@@ -402,7 +402,7 @@ ml_view_draw(
 }
 
 /*
- * Lists the parts of the view that stand on zdesktop's glass (its panes'
+ * Lists the parts of the view that stand on the compositor's glass (its panes'
  * cards) for a window of a size, into up to capacity panels; returns how
  * many there are.
  */

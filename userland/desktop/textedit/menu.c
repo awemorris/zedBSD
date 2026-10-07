@@ -6,12 +6,12 @@
  */
 
 /*
- * The menus of Text Editor in zdesktop's System Menu (plan/ws092/design.md
+ * The menus of Text Editor in the compositor's System Menu (plan/ws092/design.md
  * section 13): File, Edit, View and Help, and the context menu of the text
  * (Undo, Redo, Cut, Copy, Paste, Select All), given to libkeiland as tables
  * (WS131 p016: kl_window_set_menu, kl_window_popup_menu); the editor's
  * state is the actions' state (kl_window_set_action_state), which every
- * item of an action shows.  zdesktop draws them as the menu bar in the
+ * item of an action shows.  The compositor draws them as the menu bar in the
  * window's titlebar, its items underlined as every application's (BUG-248:
  * the window gives no titlebar controls, which would take the menu bar's
  * place), and chooses an item for its shortcut; the choice comes back as a
@@ -142,7 +142,7 @@ static int menu_send(struct te_menu *menu);
 static void menu_action_state(struct te_menu *menu, uint32_t action, int enabled, int checked);
 
 /*
- * Gives zdesktop the window's menus, showing a state.
+ * Gives the compositor the window's menus, showing a state.
  *
  * Returns 0, also when the compositor has no System Menu (the editor then
  * has no menus), or an errno value when the menus could not be made.
@@ -172,7 +172,7 @@ te_menu_open(
 	/* The state they show. */
 	te_menu_refresh(menu, state);
 
-	/* Succeeded: the menus are zdesktop's to show. */
+	/* Succeeded: the menus are the compositor's to show. */
 	te_log("MENU ready items=%u", (unsigned)(sizeof(menu_items) / sizeof(menu_items[0])));
 	return 0;
 }
@@ -293,7 +293,7 @@ te_menu_popup(
 }
 
 /*
- * Takes the menus away from zdesktop (before the window goes).
+ * Takes the menus away from the compositor (before the window goes).
  */
 void
 te_menu_close(

@@ -6,11 +6,11 @@
  */
 
 /*
- * Tests zdesktop's System Menu protocol (WS070) and libkeiland's checks.
+ * Tests the compositor's System Menu protocol (WS070) and libkeiland's checks.
  *
  * Each server case opens its own connection, sends a few requests of
  * xdg_menu_manager_v1 and xdg_menu_v1 through the private protocol header,
- * and checks the protocol error zdesktop answers with (its interface and
+ * and checks the protocol error the compositor answers with (its interface and
  * code), or that there is none.  The library case checks that libkeiland
  * refuses the same mistakes itself and sends nothing that would end the
  * connection.  Every case prints MENUPROBE case=NAME ok or FAIL, and the

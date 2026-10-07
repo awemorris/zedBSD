@@ -17,7 +17,7 @@
  *   Display     the screen's mode, read only (changing it comes later);
  *   Storage     each file system's use.
  *
- * What is chosen goes into the desktop's settings (look.c), which zdesktop
+ * What is chosen goes into the desktop's settings (look.c), which the compositor
  * puts into effect at once.
  */
 
@@ -262,7 +262,7 @@ se_look_press(
 		return;
 	}
 
-	/* The frosted glass's switch turns, and is saved; zdesktop makes the panels solid or frosted (BUG-214). */
+	/* The frosted glass's switch turns, and is saved; the compositor makes the panels solid or frosted (BUG-214). */
 	if (index == LOOK_FROSTED) {
 		app->look.frosted = !app->look.frosted;
 		se_look_set_number(app, "window.frosted", app->look.frosted, 1);
@@ -313,7 +313,7 @@ se_look_drag(
 	if (phase != SE_DRAG_END)
 		return;
 
-	/* Let go: saved, and zdesktop follows. */
+	/* Let go: saved, and the compositor follows. */
 	app->look.dragging = 0;
 	se_look_set_opacity(app, percent);
 }

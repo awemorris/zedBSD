@@ -6,16 +6,16 @@
  */
 
 /*
- * The window's titlebar in zdesktop (WS070's CONTROLS presentation): back,
+ * The window's titlebar in the compositor (WS070's CONTROLS presentation): back,
  * forward, reload, and the location of the page (the parts of its path,
- * which zdesktop turns into a field for the whole URL when it is edited).
+ * which the compositor turns into a field for the whole URL when it is edited).
  *
- * zdesktop draws the controls and edits the field; this file declares them
- * on the window (libkeiland's controls, WS131 p025; zdesktop's titlebar
+ * The compositor draws the controls and edits the field; this file declares them
+ * on the window (libkeiland's controls, WS131 p025; the compositor's titlebar
  * object in transactions before) with the browser's state, and queues what
  * the window hears from them (a control's KL_WINDOW_ACTION, the field's
  * KL_WINDOW_CONTROL_DONE) for the main loop.  A compositor without the
- * titlebar leaves the window with zdesktop's plain titlebar and the
+ * titlebar leaves the window with the compositor's plain titlebar and the
  * keyboard's shortcuts.
  *
  * WS169 p005: while a sign-in code that came by mail is offered, a fifth
@@ -74,7 +74,7 @@ shell_titlebar_open(
 	if (error != 0)
 		return error;
 
-	/* Succeeded: the titlebar is zdesktop's to show, and the window's inputs from it come here. */
+	/* Succeeded: the titlebar is the compositor's to show, and the window's inputs from it come here. */
 	titlebar->kui = window->kui;
 	window->titlebar = titlebar;
 	return 0;

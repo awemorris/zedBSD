@@ -44,7 +44,7 @@
 /* How far below the fit two fingers or the wheel may zoom out before it springs back (a share of the fit). */
 #define VIEW_SCALE_UNDER	0.5
 
-/* How many pixels of the wheel make one step of the zoom (zdesktop sends 60 a notch). */
+/* How many pixels of the wheel make one step of the zoom (the compositor sends 60 a notch). */
 #define VIEW_WHEEL_STEP		60.0
 
 /* How far an arrow key moves a zoomed image, in pixels. */

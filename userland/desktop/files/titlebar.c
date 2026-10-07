@@ -6,21 +6,21 @@
  */
 
 /*
- * The window's titlebar in zdesktop (WS070's CONTROLS presentation,
+ * The window's titlebar in the compositor (WS070's CONTROLS presentation,
  * plan/ws070/titlebar-design.md §11): back, forward, home, the path, the
  * search field, the view (icons or list), the preview and, while
  * operations run, their progress.
  *
- * zdesktop draws the controls in the window's floating titlebar (in the
+ * The compositor draws the controls in the window's floating titlebar (in the
  * system bar while the window is maximized), makes them give way when the
  * room runs short (into its "..." popup, which also holds the menus), and
  * edits the text fields.  This file gives libkeiland's window the table of
  * the controls (kl_window_set_controls, WS131 p020; the progress in it
  * while operations run) and the window's state (made by
  * fm_ui_titlebar_state), sending the state only when it changed, and
- * queues what zdesktop tells the window (a control chosen and a field's
+ * queues what the compositor tells the window (a control chosen and a field's
  * text, among the window's inputs, window.c) for the main loop
- * (fm_ui_titlebar).  The file manager needs zdesktop's titlebar: without
+ * (fm_ui_titlebar).  The file manager needs the compositor's titlebar: without
  * it the window does not start.
  */
 
@@ -58,7 +58,7 @@ static void titlebar_suggest(struct fm_titlebar *titlebar, const struct fm_title
 static int titlebar_same(unsigned value, unsigned named);
 
 /*
- * Gives zdesktop the window's titlebar, showing a state; the window's
+ * Gives the compositor the window's titlebar, showing a state; the window's
  * controls' inputs come here from then on.
  *
  * Returns 0, or an errno value (ENOTSUP for a compositor without the
@@ -88,7 +88,7 @@ fm_titlebar_open(
 	if (error != 0)
 		return error;
 
-	/* Succeeded: the titlebar is zdesktop's to show. */
+	/* Succeeded: the titlebar is the compositor's to show. */
 	fm_log("TITLEBAR ready controls=%u", (unsigned)(sizeof(titlebar_controls) / sizeof(titlebar_controls[0])));
 	return 0;
 }
@@ -167,7 +167,7 @@ fm_titlebar_take(
 }
 
 /*
- * Takes the titlebar away from zdesktop (before the window goes).
+ * Takes the titlebar away from the compositor (before the window goes).
  */
 void
 fm_titlebar_close(

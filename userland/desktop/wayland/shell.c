@@ -760,7 +760,7 @@ kwl_glass_draw(
 
 	/*
 	 * The on-screen keyboard over everything (keyboard.c, ws102).  Its glass
-	 * shows the scene under it blurred when zdesktop was started so
+	 * shows the scene under it blurred when the compositor was started so
 	 * (--keyboard-blur, ws075-p029), else the blurred wallpaper.
 	 */
 	showing = kwl_keyboard_showing();
@@ -855,7 +855,7 @@ kwl_glass_draw_head(
  * (twice) docks it or (three times) sends it to the back; on the system bar
  * it acts on the docked window.  A
  * release ends a move, docking the window when it ends in the system bar.
- * Returns 1 when the button is zdesktop's, 0 when it goes to the client.
+ * Returns 1 when the button is the compositor's, 0 when it goes to the client.
  */
 int
 kwl_glass_button(
@@ -1093,7 +1093,7 @@ kwl_glass_button(
 		return 1;
 	}
 
-	/* The system bar is zdesktop's, where it is drawn (on the anchor). */
+	/* The system bar is the compositor's, where it is drawn (on the anchor). */
 	if (server->pointer_y < KWL_GLASS_BAR && cover == NULL && !remote) {
 		pressed = bar_press(server);
 		return pressed;
@@ -1141,11 +1141,11 @@ kwl_glass_button(
 		return 1;
 	}
 
-	/* Another button is the client's on a body, zdesktop's elsewhere. */
+	/* Another button is the client's on a body, the compositor's elsewhere. */
 	if (button != KWL_BUTTON_LEFT)
 		return hit != HIT_BODY;
 
-	/* A press on the desktop is zdesktop's. */
+	/* A press on the desktop is the compositor's. */
 	if (surface == NULL)
 		return 1;
 
@@ -1222,14 +1222,14 @@ kwl_glass_button(
 	server->drag_start_x = surface->x;
 	server->drag_start_y = surface->y;
 
-	/* Succeeded: the press was zdesktop's. */
+	/* Succeeded: the press was the compositor's. */
 	return 1;
 }
 
 /*
  * Moves the window being moved, or pulls a docked window out of the system
  * bar, and shows a window frame's resize arrow where the pointer is on one.
- * Returns 1 when the motion is zdesktop's.
+ * Returns 1 when the motion is the compositor's.
  */
 int
 kwl_glass_motion(
@@ -1247,7 +1247,7 @@ kwl_glass_motion(
 		edges = frame_under_pointer(server);
 	kwl_cursor_frame(server, edges);
 
-	/* Succeeded: whether the motion was zdesktop's. */
+	/* Succeeded: whether the motion was the compositor's. */
 	return taken;
 }
 
@@ -1256,7 +1256,7 @@ kwl_glass_motion(
  * which the rest of the glass look does not see: only the edges' gestures
  * (the top-left corner's App Home, the top-right corner's Notes, the bottom
  * corners' keyboard, the bottom edge's swipe back to a window) and what
- * they opened.  Returns 1 when the button is zdesktop's, 0 when it goes to
+ * they opened.  Returns 1 when the button is the compositor's, 0 when it goes to
  * the fullscreen window.
  */
 int
@@ -1334,7 +1334,7 @@ kwl_glass_edge_button(
 
 /*
  * Follows the edges' gestures over a fullscreen window.  Returns 1 when the
- * motion is zdesktop's, 0 when it goes to the fullscreen window.
+ * motion is the compositor's, 0 when it goes to the fullscreen window.
  */
 int
 kwl_glass_edge_motion(
@@ -1383,7 +1383,7 @@ kwl_glass_edge_motion(
 
 /*
  * Tells whether the pointer and the fingers go to the fullscreen window
- * with only the edges' gestures for zdesktop (kwl_glass_edge_button): the
+ * with only the edges' gestures for the compositor (kwl_glass_edge_button): the
  * top window is fullscreen and nothing shows over it, or the bottom edge's
  * swipe holds its contact.  seat.c chooses by it (until ws099-p015 it
  * chose by fullscreen mode, the direct scanout, which is gone).
@@ -1858,7 +1858,7 @@ kwl_glass_lower(
 }
 
 /*
- * Draws zdesktop's badge of a drag and drop without an icon of its own
+ * Draws the compositor's badge of a drag and drop without an icon of its own
  * (data.c): a small white page below and right of the pointer, with an
  * outline and two lines of text, so the user sees something being carried.
  */
@@ -2009,7 +2009,7 @@ kwl_glass_body_damage(
 
 /*
  * Tells whether the pointer at a point is over a window's body (its
- * client's own area) in a still look, where zdesktop draws nothing that
+ * client's own area) in a still look, where the compositor draws nothing that
  * follows the pointer but the cursor (ws035-p055).
  */
 int
@@ -2910,10 +2910,10 @@ kwl_glass_committed(
 }
 
 /*
- * Handles zdesktop's shortcuts: Ctrl+Alt+Left and Right, and Alt+Shift+Left
+ * Handles the compositor's shortcuts: Ctrl+Alt+Left and Right, and Alt+Shift+Left
  * and Right, switch to the desktop before and after, Super+Tab opens
  * Wiseview (and while it is open every key is Wiseview's).  Returns 1 when
- * the key is zdesktop's.
+ * the key is the compositor's.
  */
 int
 kwl_glass_key(
@@ -6898,7 +6898,7 @@ window_lower(
  * Handles a press in the system bar: on the docked window's buttons their
  * action, on its title a double click (back) or the start of a pull.  The
  * clock opens Calendar (ws155-p004), not over App Home (ws181-p009).  The
- * launcher and the status do nothing yet.  The press is always zdesktop's.
+ * launcher and the status do nothing yet.  The press is always the compositor's.
  */
 static int
 bar_press(
@@ -7882,7 +7882,7 @@ draw_tile(
  * Handles a button while Wiseview is open or opening: the release of the
  * gesture opens or closes it; a press on a tile's close button closes that
  * window, on a tile selects it (to the top, and Wiseview closes), elsewhere
- * closes Wiseview.  Every button is zdesktop's.
+ * closes Wiseview.  Every button is the compositor's.
  */
 static int
 wiseview_button(
@@ -7913,7 +7913,7 @@ wiseview_button(
 			wiseview_settle(server, progress, 0.0f);
 		}
 
-		/* The release was zdesktop's. */
+		/* The release was the compositor's. */
 		return 1;
 	}
 
@@ -7967,7 +7967,7 @@ wiseview_button(
 		}
 	}
 
-	/* A desktop's picture in the bar switches Wiseview's desktop (the bar stays zdesktop's). */
+	/* A desktop's picture in the bar switches Wiseview's desktop (the bar stays the compositor's). */
 	target = desktop_picture_at(server, server->pointer_x, server->pointer_y);
 	if (surface == NULL && target >= 0) {
 		desktop_turn(server, target, "wiseview");
@@ -9368,7 +9368,7 @@ glass_motion_take(
 	if (surface->y < lowest)
 		surface->y = lowest;
 
-	/* Succeeded: the motion was zdesktop's. */
+	/* Succeeded: the motion was the compositor's. */
 	return 1;
 }
 

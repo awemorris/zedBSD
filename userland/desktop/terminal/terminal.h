@@ -16,7 +16,7 @@
  * font.c draws the glyphs of a monospaced TrueType font into an atlas;
  * render.c draws the grid from that atlas; window.c holds the Wayland
  * window (libkeiland's application and window, WS131 p018) and turns its
- * input into the terminal's; menu.c gives zdesktop the window's menus
+ * input into the terminal's; menu.c gives the compositor the window's menus
  * (Shell, Edit, View, Session, Help) through libkeiland; tabs.c gives it
  * the window's tabs (the titlebar's TABS mode, ws035-p086); clipboard.c
  * and primary.c paste, drop and drag through libkeiland's window; main.c
@@ -204,7 +204,7 @@ struct terminal_settings {
 	unsigned theme;
 };
 
-/* The modifier bits of wl_keyboard.modifiers, as zdesktop reports them. */
+/* The modifier bits of wl_keyboard.modifiers, as the compositor reports them. */
 #define TERMINAL_MODIFIER_SHIFT		0x01U
 #define TERMINAL_MODIFIER_CONTROL	0x04U
 #define TERMINAL_MODIFIER_ALT		0x08U

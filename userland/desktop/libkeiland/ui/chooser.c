@@ -11,12 +11,12 @@
  *
  * The chooser is a toplevel window of its own on the application's
  * connection (a kl_window made by keiui_window_open_shared), drawn with
- * the widgets on the CPU into wl_shm buffers.  Where zdesktop has glass
+ * the widgets on the CPU into wl_shm buffers.  Where the compositor has glass
  * the window is glass (ws090-p016): one frosted panel under the whole
  * window, the desktop's wallpaper showing blurred through it, and the
  * sidebar's and the content's cards on it as in Files, both light veils;
  * elsewhere it keeps Files' opaque pale ground and white content card
- * (ws090-p014).  A sheet's panel reaches above its top, so that zdesktop,
+ * (ws090-p014).  A sheet's panel reaches above its top, so that compositor,
  * which cuts it at the parent's title bar, leaves its upper corners
  * square.  Its objects live on the
  * application's default queue, so the chooser's input, configures and
@@ -40,7 +40,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The corner radius of the window's panel (zdesktop's windows') and of the two cards on it. */
+/* The corner radius of the window's panel (the compositor's windows') and of the two cards on it. */
 #define CHOOSER_GLASS_RADIUS	14
 #define CHOOSER_CARD_RADIUS	16
 
@@ -68,7 +68,7 @@ struct kl_file_chooser {
 	struct kl_ui *ui;
 	/* Its titlebar in the sheet mode, hung under the parent's title bar (ws090-p014; NULL for a window of its own). */
 	struct kl_titlebar *sheet;
-	/* zdesktop's glass under the window (ws090-p016; NULL when opaque), and the panels it was last given. */
+	/* the compositor's glass under the window (ws090-p016; NULL when opaque), and the panels it was last given. */
 	struct kl_glass *glass;
 	struct kl_glass_panel panels[CHOOSER_PANELS];
 	size_t panel_count;
@@ -197,11 +197,11 @@ kl_file_chooser_open(
 	/* It wakes the chooser for its input. */
 	keiui_window_set_notify(chooser->window, chooser_woken, chooser);
 
-	/* Over a parent it is a sheet under the parent's title bar, where zdesktop has sheets; otherwise a window of its own (ws090-p014). */
+	/* Over a parent it is a sheet under the parent's title bar, where the compositor has sheets; otherwise a window of its own (ws090-p014). */
 	if (parent != NULL)
 		chooser_sheet(chooser);
 
-	/* The style: on glass where zdesktop has it (ws090-p016), else opaque, the theme's pale ground and white card (ws090-p014). */
+	/* The style: on glass where the compositor has it (ws090-p016), else opaque, the theme's pale ground and white card (ws090-p014). */
 	chooser->style.text = &chooser->text;
 	chooser->style.theme = kl_theme_default();
 	chooser_glass(chooser);
@@ -410,7 +410,7 @@ chooser_window_gone(
 	chooser->glass = NULL;
 	chooser->panel_count = 0;
 
-	/* The window, with its own shell (zdesktop lets a binding go alone, BUG-112). */
+	/* The window, with its own shell (the compositor lets a binding go alone, BUG-112). */
 	kl_window_close(chooser->window);
 	chooser->window = NULL;
 }
@@ -455,7 +455,7 @@ chooser_tell_done(
 }
 
 /*
- * Asks zdesktop to hang the chooser under its parent's title bar: its
+ * Asks the compositor to hang the chooser under its parent's title bar: its
  * titlebar in the sheet mode (KL_VERSION 20).  A compositor without
  * sheets leaves it a window of its own.
  */
@@ -485,7 +485,7 @@ chooser_sheet(
 }
 
 /*
- * Gives the window zdesktop's glass when it can have it (a see-through
+ * Gives the window the compositor's glass when it can have it (a see-through
  * frame and a compositor with glass): the style draws on glass then;
  * otherwise the window stays opaque.
  */
@@ -498,7 +498,7 @@ chooser_glass(
 	/* Opaque unless the glass is made. */
 	chooser->style.glass = 0;
 
-	/* A frame zdesktop does not blend cannot show the glass. */
+	/* A frame the compositor does not blend cannot show the glass. */
 	see_through = kl_window_see_through(chooser->window);
 	if (!see_through)
 		return;
@@ -555,7 +555,7 @@ chooser_glass_panels(
 		panels[index].kind = KL_GLASS_CARD;
 	}
 
-	/* Nothing to send when zdesktop has these. */
+	/* Nothing to send when the compositor has these. */
 	if (count == chooser->panel_count) {
 		same = memcmp(panels, chooser->panels, sizeof(panels[0]) * count);
 		if (same == 0)

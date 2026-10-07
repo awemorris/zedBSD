@@ -197,7 +197,7 @@ fm_grid_entry_icon(
 	kl_icon_file(canvas, app->text, x, y, size, fm_mime_color(entry->mime->category), label);
 }
 
-/* Draws the content's card: the white panel with its shadow and edge, or its tint on zdesktop's glass. */
+/* Draws the content's card: the white panel with its shadow and edge, or its tint on the compositor's glass. */
 static void
 grid_panel(
 	struct fm_app *app,
@@ -207,7 +207,7 @@ grid_panel(
 	/* The whole card, the row of tabs included (the content is under the row). */
 	area = &app->layout.card;
 
-	/* On glass, zdesktop draws the card, its rim and its shadow: only a light white tint for reading. */
+	/* On glass, the compositor draws the card, its rim and its shadow: only a light white tint for reading. */
 	if (app->glass != 0) {
 		kl_canvas_round(canvas, (float)area->x, (float)area->y, (float)area->width, (float)area->height, GRID_RADIUS, FM_COLOR_GLASS_CONTENT);
 		return;

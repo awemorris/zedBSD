@@ -6,13 +6,13 @@
  */
 
 /*
- * The menus of Image Viewer in zdesktop's System Menu: File (Open, Close,
+ * The menus of Image Viewer in the compositor's System Menu: File (Open, Close,
  * Quit), View (the fit, 100 %, the zoom, the turns, the full screen), Go
  * (the images of the folder) and Help; and the context menu of a right
  * press or a long press on the image, given to libkeiland as tables (WS131
  * p017: kl_window_set_menu, kl_window_popup_menu).  The viewer's state is
  * the actions' state (kl_window_set_action_state), which every item and
- * titlebar control of an action shows.  zdesktop draws them and chooses an
+ * titlebar control of an action shows.  The compositor draws them and chooses an
  * item for its shortcut; the choice comes back as a KL_WINDOW_ACTION input
  * among the window's.  A compositor without the System Menu leaves the
  * viewer without menus, and the keys work as they do with them.
@@ -140,7 +140,7 @@ static int menu_send(struct iv_menu *menu);
 static void menu_action_state(struct iv_menu *menu, uint32_t action, int enabled, int checked);
 
 /*
- * Gives zdesktop the window's menus, showing a state.
+ * Gives the compositor the window's menus, showing a state.
  *
  * Returns 0, also when the compositor has no System Menu (the viewer then
  * has no menus), or an errno value when the menus could not be made.
@@ -175,7 +175,7 @@ iv_menu_open(
 	/* Logs the menus for the tests. */
 	iv_log("MENU ready items=%u", (unsigned)(sizeof(menu_items) / sizeof(menu_items[0])));
 
-	/* Succeeded: the menus are zdesktop's to show. */
+	/* Succeeded: the menus are the compositor's to show. */
 	return 0;
 }
 
@@ -254,7 +254,7 @@ iv_menu_context(
 	if (!state->has_image)
 		return;
 
-	/* zdesktop shows it at the press (one still open is replaced); without the System Menu nothing opens. */
+	/* The compositor shows it at the press (one still open is replaced); without the System Menu nothing opens. */
 	error = kl_window_popup_menu(menu->window->kui, context_items, sizeof(context_items) / sizeof(context_items[0]), x, y);
 	if (error != 0) {
 		iv_log("CONTEXT-MENU none errno=%d", error);
@@ -325,7 +325,7 @@ iv_menu_openers(
 }
 
 /*
- * Takes the menus away from zdesktop (before the window goes).
+ * Takes the menus away from the compositor (before the window goes).
  */
 void
 iv_menu_close(

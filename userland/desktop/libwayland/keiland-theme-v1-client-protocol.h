@@ -6,7 +6,7 @@
  */
 
 /*
- * Declares zdesktop's appearance protocol (kl_theme_v1, version 2;
+ * Declares the compositor's appearance protocol (kl_theme_v1, version 2;
  * ws089-p017, ws179-p001): the desktop's appearance, light or dark, and
  * (version 2) the accent the user chose, told when the global is bound and
  * whenever they change.

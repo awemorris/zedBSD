@@ -8,7 +8,7 @@
 /*
  * The keys of terminal: evdev key codes to the bytes a shell reads.
  *
- * zdesktop forwards evdev codes with no keymap (userland/desktop/wayland/seat.c), so the
+ * The compositor forwards evdev codes with no keymap (userland/desktop/wayland/seat.c), so the
  * terminal carries its own layout: the US one, as the console's.  The keys
  * that are not characters send the xterm sequences.
  */

@@ -7,7 +7,7 @@
 
 /*
  * The keyboard inset (ws102-p015, plan/ws102/design.md section 2.8): the
- * wrapper of zdesktop's kl_keyboard_inset_v1 protocol.  A window hears
+ * wrapper of the compositor's kl_keyboard_inset_v1 protocol.  A window hears
  * how much of it the on-screen keyboard covers, from its right and bottom
  * edges, when the keyboard opens, closes or changes the window.  With a
  * compositor that does not have the protocol nothing is made (ENOTSUP) and
@@ -68,7 +68,7 @@ kl_keyboard_inset_create(
 		return NULL;
 	}
 
-	/* zdesktop's manager, bound for this window. */
+	/* The compositor's manager, bound for this window. */
 	manager = inset_bind(display);
 	if (manager == NULL)
 		return NULL;
@@ -140,7 +140,7 @@ inset_event(
 	inset->callback(inset->data, right, bottom, reason);
 }
 
-/* Binds zdesktop's inset manager: from an application's registry, or found by a search of the library's own. */
+/* Binds the compositor's inset manager: from an application's registry, or found by a search of the library's own. */
 static struct kl_keyboard_inset_manager_v1 *
 inset_bind(
 	struct wl_display *display)

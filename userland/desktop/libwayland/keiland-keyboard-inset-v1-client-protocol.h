@@ -6,7 +6,7 @@
  */
 
 /*
- * Declares zdesktop's keyboard inset protocol (kl_keyboard_inset_v1,
+ * Declares the compositor's keyboard inset protocol (kl_keyboard_inset_v1,
  * ws102-p015, plan/ws102/design.md section 2.8).
  *
  * The header is private: it is not installed, and applications reach the

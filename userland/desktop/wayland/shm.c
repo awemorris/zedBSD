@@ -7,7 +7,7 @@
 
 /*
  * wl_shm, the secondary path for client images (WS035 compositing design,
- * D2), and zdesktop's own cursor image (D8).
+ * D2), and the compositor's own cursor image (D8).
  *
  * A pool is the client's anonymous shared memory, mapped read-only once at
  * creation and again at resize.  A surface showing a wl_shm buffer has a
@@ -28,7 +28,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-/* zdesktop's arrow: its size and hotspot. */
+/* The compositor's arrow: its size and hotspot. */
 #define ARROW_WIDTH	12U
 #define ARROW_HEIGHT	19U
 
@@ -192,7 +192,7 @@ kwl_shm_image_destroy(
 }
 
 /*
- * Makes zdesktop's arrow cursor: white with a black edge, its tip the
+ * Makes the compositor's arrow cursor: white with a black edge, its tip the
  * hotspot at (0, 0).
  */
 int
@@ -277,7 +277,7 @@ kwl_arrow_destroy(
 }
 
 /*
- * Creates a host-written image for zdesktop's own drawing (the glass look),
+ * Creates a host-written image for the compositor's own drawing (the glass look),
  * sampled with the given sampler.
  */
 VkResult

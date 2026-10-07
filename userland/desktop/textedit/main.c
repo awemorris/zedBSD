@@ -83,7 +83,7 @@
 
 /*
  * How long READY waits for the keyboard after the first frame
- * (q807-i02): a key typed before zdesktop gives the window the keyboard
+ * (q807-i02): a key typed before the compositor gives the window the keyboard
  * goes nowhere, so READY says the window takes keys, or that this passed.
  */
 #define MAIN_READY_WAIT_MS	2000U
@@ -162,7 +162,7 @@ static struct te_text main_ui;
  */
 static struct te_menu main_menu;
 
-/* The window's glass, when zdesktop has glass and the swapchain is see-through. */
+/* The window's glass, when the compositor has glass and the swapchain is see-through. */
 static struct te_glass main_glass;
 
 /*
@@ -281,7 +281,7 @@ main(
 	/* The chooser draws with the interface's font. */
 	main_ui_font = options.ui_font;
 
-	/* The application: the connection to zdesktop. */
+	/* The application: the connection to the compositor. */
 	memset(&app_options, 0, sizeof(app_options));
 	app_options.display = options.display;
 	app_options.application = MAIN_APPLICATION;
@@ -335,7 +335,7 @@ main(
 
 	/*
 	 * The menus, shown in the titlebar's menu bar (BUG-248: the window
-	 * gives no titlebar controls, so zdesktop shows its menu); a window
+	 * gives no titlebar controls, so the compositor shows its menu); a window
 	 * without them goes on with its keys.
 	 */
 	main_state(&state);
@@ -1722,7 +1722,7 @@ main_appearance_changed(void)
 }
 
 /*
- * Carries out an item of the menus: Select All (zdesktop takes Ctrl+A for
+ * Carries out an item of the menus: Select All (the compositor takes Ctrl+A for
  * the menu) selects the focused field of the Find or Replace panel; any
  * other action is the editor's.
  */

@@ -6,13 +6,13 @@
  */
 
 /*
- * Declares zdesktop's input method status protocol (kl_ime_status_v1,
+ * Declares the compositor's input method status protocol (kl_ime_status_v1,
  * version 2; ws095-p004, plan/ws095/design.md section 8): the input method
- * tells zdesktop its language and whether text is being composed, and
- * zdesktop tells it to change language.  Version 2 (ws166-p002): zdesktop
+ * tells the compositor its language and whether text is being composed, and
+ * the compositor tells it to change language.  Version 2 (ws166-p002): the compositor
  * asks for the words a reading of the on-screen keyboard starts (predict),
  * the input method answers (predictions: "WORD\tREADING" lines), and the
- * word chosen is learned (learn).  The protocol is zdesktop's own and
+ * word chosen is learned (learn).  The protocol is the compositor's own and
  * this header is private to the tree.
  */
 

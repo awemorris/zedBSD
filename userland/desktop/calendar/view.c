@@ -8,7 +8,7 @@
 /*
  * Calendar's view (WS155 p000; calendar.h).
  *
- * Three panes in Files' style: on zdesktop's glass they are cards apart,
+ * Three panes in Files' style: on the compositor's glass they are cards apart,
  * reaching the window's edges, with no ground between (the desktop shows
  * through); on an opaque window, white cards on a quiet blue ground.  At
  * the left the sidebar -- the places (Month View, Today, Search,
@@ -520,7 +520,7 @@ cal_view_draw(
 }
 
 /*
- * Lists the parts of the view that stand on zdesktop's glass (its cards)
+ * Lists the parts of the view that stand on the compositor's glass (its cards)
  * for a window of a size, into up to capacity panels; returns how many.
  */
 size_t
@@ -700,7 +700,7 @@ view_layout(
 }
 
 /*
- * Draws a card's ground: on glass a light veil (zdesktop's glass is under
+ * Draws a card's ground: on glass a light veil (the compositor's glass is under
  * it, as under Files' panels), else nearly white with a soft shadow and an
  * edge.
  */

@@ -25,11 +25,11 @@
  * is told the part first (kl_titlebar_v1 version 2) -- hears enter with a
  * new offer of the source's types and actions, then motion, and leave when
  * the pointer goes elsewhere.  The target accepts a type and says the
- * actions it takes; zdesktop chooses one (Ctrl prefers copy, Alt asks) and tells the
+ * actions it takes; the compositor chooses one (Ctrl prefers copy, Alt asks) and tells the
  * offer and the source.  The release drops on a target that accepted a
  * type with an action (the source hears dnd_drop_performed, and
  * dnd_finished when the target finishes); otherwise the target hears leave
- * and the source is cancelled.  Esc cancels too.  zdesktop draws the
+ * and the source is cancelled.  Esc cancels too.  The compositor draws the
  * drag's icon surface at the pointer, or a badge of its own when it has
  * none.  ws081-p014: a finger the client hears by wl_touch starts a drag
  * as a button does (start_drag with its wl_touch.down's serial); the
@@ -633,7 +633,7 @@ offer_request(
 	if (descriptor < 0)
 		return EAGAIN;
 
-	/* An offer of zdesktop's own selection: zdesktop writes the text (clipboard.c). */
+	/* An offer of the compositor's own selection: the compositor writes the text (clipboard.c). */
 	if (offer->data_offered) {
 		printf("KWL DATA receive client=%llu mime=%s source=history\n", (unsigned long long)offer->client->number, text);
 		kwl_clipboard_offer_write(descriptor);
@@ -676,7 +676,7 @@ kwl_data_send(
 }
 
 /*
- * Makes zdesktop's own text (an item of the clipboard's history,
+ * Makes the compositor's own text (an item of the clipboard's history,
  * clipboard.c) the selection: the source it replaces is cancelled, and the
  * client with the keyboard hears it.
  */
@@ -691,7 +691,7 @@ kwl_data_select_offered(
 	if (previous != NULL && !previous->dead)
 		(void)kwl_emit(previous->client, previous->id, SOURCE_CANCELLED, NULL, 0U);
 
-	/* zdesktop's selection, told to the client with the keyboard. */
+	/* The compositor's selection, told to the client with the keyboard. */
 	server->selection = NULL;
 	server->selection_offered = 1;
 	printf("KWL DATA selection history\n");
@@ -794,7 +794,7 @@ send_device_selection(
 	uint32_t word;
 	unsigned index;
 
-	/* zdesktop's own selection, an item of the clipboard's history, is offered as text. */
+	/* The compositor's own selection, an item of the clipboard's history, is offered as text. */
 	source = server->selection;
 	word = 0;
 	if (source == NULL && server->selection_offered) {

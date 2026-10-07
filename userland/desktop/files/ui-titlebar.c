@@ -10,12 +10,12 @@
  * plan/ws070/titlebar-design.md §11): what it shows of the window's state,
  * and what the window does when it is used.
  *
- * zdesktop draws the controls (back, forward, home, the path, the search
+ * The compositor draws the controls (back, forward, home, the path, the search
  * field, the view, the preview and the operations' progress) in the
  * window's floating titlebar, or in the system bar while the window is
  * maximized.  titlebar.c gives it the state made here and queues what it
  * tells the window, which the main loop hands to fm_ui_titlebar.  The text
- * fields are zdesktop's: the window hears their text as it is typed and
+ * fields are the compositor's: the window hears their text as it is typed and
  * when their editing ends.
  */
 

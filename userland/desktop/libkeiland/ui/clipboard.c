@@ -6,7 +6,7 @@
  */
 
 /*
- * The window's clipboard through zdesktop's (ws090-p004, Text Editor's
+ * The window's clipboard through the compositor's (ws090-p004, Text Editor's
  * clipboard.c moved here, itself Terminal's; its drag and drop since WS131
  * p018): kl_window_copy makes the application's text the selection (a
  * wl_data_source offering UTF-8 and plain text), and kl_window_paste

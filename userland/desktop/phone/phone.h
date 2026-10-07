@@ -131,7 +131,7 @@ struct ph_request {
  * written, the scrolls of the contacts and of the timeline, the contact
  * shown (-1 for none), whether a narrow window shows the timeline instead
  * of the contacts (and whether the last frame was narrow), whether the
- * view stands on zdesktop's glass (cards with the desktop between), whether the
+ * view stands on the compositor's glass (cards with the desktop between), whether the
  * timeline goes to its end at the next frame, the contacts whose messages
  * were read (a bit each of the first 32), the notice shown at the bottom
  * until a time, and whether the program is to end.

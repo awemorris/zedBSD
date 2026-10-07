@@ -11,7 +11,7 @@
  *
  * A field keeps UTF-8 text, a cursor and the other end of a selection,
  * both byte offsets on character boundaries.  Keys arrive as evdev codes
- * and are read with the US layout, as zdesktop sends no keymap; there is
+ * and are read with the US layout, as the compositor sends no keymap; there is
  * no input method, so only what the keyboard types directly can be typed.
  */
 

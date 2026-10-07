@@ -6,7 +6,7 @@
  */
 
 /*
- * Declares zdesktop's editing operations protocol (kl_edit_v1,
+ * Declares the compositor's editing operations protocol (kl_edit_v1,
  * ws102-p017, plan/ws102/design.md section 2.10).
  *
  * The header is private: it is not installed, and applications reach the

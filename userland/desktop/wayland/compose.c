@@ -2264,7 +2264,7 @@ compose_cursor(
 	if (server->pointer_unmoved)
 		return;
 
-	/* A client's cursor only over its own window (BUG-118): elsewhere the frame's arrow or zdesktop's. */
+	/* A client's cursor only over its own window (BUG-118): elsewhere the frame's arrow or the compositor's. */
 	shown = kwl_cursor_client_shown(server);
 	if (!shown) {
 		if (server->frame_edges != 0U) {

@@ -6,13 +6,13 @@
  */
 
 /*
- * Describes and marshals zdesktop's System Menu protocol (WS070).
+ * Describes and marshals the compositor's System Menu protocol (WS070).
  *
  * xdg_menu_manager_v1 makes menu models (xdg_menu_v1), the places on
  * windows that show them (xdg_toplevel_menu_v1) and, from version 2, the
  * one-time context menus opened at a point of a surface
  * (xdg_context_menu_v1, ws071-p009).  The protocol is
- * zdesktop's own; its header is private and applications use it through
+ * the compositor's own; its header is private and applications use it through
  * libkeiland.  plan/ws070/design.md defines every request and event.
  */
 

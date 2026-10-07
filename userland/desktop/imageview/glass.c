@@ -6,14 +6,14 @@
  */
 
 /*
- * The window's glass in zdesktop (ws091, after the file manager's
+ * The window's glass in the compositor (ws091, after the file manager's
  * glass.c): the images float on one frosted card inside the window, and
  * the chip, while it is shown, on a small card of its own; the desktop
- * shows around the card.  zdesktop draws the glass, its rim and the
+ * shows around the card.  The compositor draws the glass, its rim and the
  * cards' shadows (kl_glass_v1 through libkeiland); the frame leaves
  * its ground clear.
  *
- * The window is glass when its swapchain is see-through and zdesktop has
+ * The window is glass when its swapchain is see-through and the compositor has
  * glass; otherwise it keeps an opaque ground.  A fullscreen window has no
  * glass (its ground is black).  The panels are worked out from each
  * frame's layout and given to libkeiland before the frame is shown, which
@@ -47,13 +47,13 @@ iv_glass_open(
 	memset(glass, 0, sizeof(*glass));
 	glass->window = window;
 
-	/* A frame that zdesktop does not blend cannot let the desktop through. */
+	/* A frame that compositor does not blend cannot let the desktop through. */
 	if (present->premultiplied == 0) {
 		iv_log("GLASS off reason=opaque");
 		return 0;
 	}
 
-	/* zdesktop's glass for the window, with the first panels; a compositor without glass refuses them. */
+	/* The compositor's glass for the window, with the first panels; a compositor without glass refuses them. */
 	error = glass_send(glass, app);
 	if (error != 0) {
 		iv_log("GLASS off reason=compositor errno=%d", error);

@@ -18,9 +18,9 @@
  *         [--frames=N] [--cursor=AARRGGBB] [--hide-cursor] [--hold]
  *         [--delay-ms=N] [--token=NAME] [--display=NAME] [--csd]
  *
- * The window asks for zdesktop's titlebar (kl_titlebar, an explicit
+ * The window asks for the compositor's titlebar (kl_titlebar, an explicit
  * server-side decoration) before its first commit, as the native
- * applications do; without it zdesktop leaves the decoration to the client
+ * applications do; without it the compositor leaves the decoration to the client
  * (ws114-p007).  --csd leaves it out (ws099-p023).
  */
 
@@ -380,7 +380,7 @@ connect_window(
 	xdg_toplevel_add_listener(window->toplevel, &toplevel_listener, window);
 	xdg_toplevel_set_title(window->toplevel, "wl_shm test");
 
-	/* zdesktop's titlebar, asked for before the first commit so that the first configure carries it. */
+	/* The compositor's titlebar, asked for before the first commit so that the first configure carries it. */
 	if (!window->csd) {
 		window->titlebar = kl_titlebar_create(window->display, window->toplevel, &titlebar_listener, window);
 		if (window->titlebar == NULL)

@@ -6,7 +6,7 @@
  */
 
 /*
- * The text input and input method protocols in zdesktop (ws095-p004,
+ * The text input and input method protocols in the compositor (ws095-p004,
  * plan/ws095/design.md sections 2 to 4).
  *
  * text-input.c keeps each application's zwp_text_input_v3 and follows the

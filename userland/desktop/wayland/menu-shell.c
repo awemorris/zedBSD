@@ -6,12 +6,12 @@
  */
 
 /*
- * The System Menu as zdesktop draws and operates it (WS070,
+ * The System Menu as the compositor draws and operates it (WS070,
  * plan/ws070/design.md section 6).
  *
  * A window's top-level items are drawn after its title: in its floating
  * title bar, or in the system bar while it is docked.  Pressing one opens
- * its popup; while a popup is open ("menu mode") zdesktop takes the pointer
+ * its popup; while a popup is open ("menu mode") the compositor takes the pointer
  * and the keyboard: the pointer moves between the top-level items and the
  * rows, a submenu opens beside its row, a release or a click on a row
  * chooses it, and a press anywhere else closes the menu.  The keys move the
@@ -78,7 +78,7 @@
 /* The keypad's Enter, which <uapi/input.h> does not name. */
 #define SHELL_KEY_KPENTER	96U
 
-/* The modifier bits of zdesktop's wl_keyboard.modifiers. */
+/* The modifier bits of the compositor's wl_keyboard.modifiers. */
 #define SEAT_SHIFT		0x01U
 #define SEAT_CTRL		0x04U
 #define SEAT_ALT		0x08U
@@ -150,7 +150,7 @@ struct shell_logged {
  * whether it opened from the system bar, and popups[0..depth-1] the open
  * popups from the top-level one down.  pressing says the press that opened
  * or entered the menu is still down, so that its release on a row chooses
- * it.  eaten_key is a key whose press zdesktop took, so that its release is
+ * it.  eaten_key is a key whose press the compositor took, so that its release is
  * taken too.  The hits are rebuilt every frame (kwl_menu_frame).
  *
  * A titlebar's "..." (titlebar-shell.c) records the rows of its hidden
@@ -194,7 +194,7 @@ struct shell_menu {
 };
 
 /*
- * The one compositor's menus.  zdesktop runs one server per process, and
+ * The one compositor's menus.  The compositor runs one server per process, and
  * the menus live as long as it; the zero value is "no menu open, nothing
  * drawn yet".
  */
@@ -213,7 +213,7 @@ static const struct kwl_menu_item shell_extra_line = {
 
 /*
  * The XKB keysyms of the US layout's keys by evdev code, plain and with
- * Shift (zdesktop has no keymap; clients are sent evdev codes).  0 is a key
+ * Shift (the compositor has no keymap; clients are sent evdev codes).  0 is a key
  * with no keysym here.
  */
 static const uint32_t shell_plain_keysyms[SHELL_KEY_LAST + 1U] = {
@@ -754,7 +754,7 @@ kwl_menu_grab_key(
 
 /*
  * Opens the focused window's first menu with F10, and chooses the item
- * whose shortcut a key press is.  Called after zdesktop's own shortcuts and
+ * whose shortcut a key press is.  Called after the compositor's own shortcuts and
  * before the client.  Returns 1 when the key was the menus'.
  */
 int
@@ -1289,7 +1289,7 @@ shell_close_from(
 		shell_menu.depth--;
 		parent = shell_menu.popups[shell_menu.depth].parent;
 
-		/* The client hears that its submenu closed (the overflow is zdesktop's own). */
+		/* The client hears that its submenu closed (the overflow is the compositor's own). */
 		if (notify &&
 		    place != NULL &&
 		    parent != SHELL_OVERFLOW)

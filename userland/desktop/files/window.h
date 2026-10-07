@@ -133,7 +133,7 @@ struct fm_titlebar {
 
 /*
  * The frames shown in the window (present.c, libkeiland's presenter): the
- * window, the size frames are drawn at, whether zdesktop blends the frame
+ * window, the size frames are drawn at, whether the compositor blends the frame
  * by its premultiplied alpha, the call that failed last, and the last
  * frame's copy, acquire, record and submit, present and wait times
  * (milliseconds).
@@ -176,7 +176,7 @@ void fm_menu_close(struct fm_menu *menu);
 void fm_menu_context(struct fm_menu *menu, const struct fm_context *context, int x, int y, uint32_t context_serial);
 void fm_menu_chosen(struct fm_menu *menu, const struct kl_window_event *event);
 
-/* The window's titlebar in zdesktop (titlebar.c). */
+/* The window's titlebar in the compositor (titlebar.c). */
 int fm_titlebar_open(struct fm_titlebar *titlebar, struct fm_window *window, const struct fm_titlebar_state *state);
 void fm_titlebar_refresh(struct fm_titlebar *titlebar, const struct fm_titlebar_state *state);
 void fm_titlebar_input(struct fm_titlebar *titlebar, const struct kl_window_event *event);

@@ -1108,7 +1108,7 @@ $(DYNAMIC_DIR)/libGLESv2.so: $(DYNAMIC_GLESV2_OBJS) $(DYNAMIC_DIR)/libEGL.so $(D
 	$(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 --role shared-library \
  --needed libEGL.so --needed libvulkan.so --needed libc.so --soname libGLESv2.so $@
 
-# The desktop's way into the system and zdesktop's Wayland extensions (the
+# The desktop's way into the system and the compositor's Wayland extensions (the
 # System Menu, WS070): the C library and the Wayland client; the file
 # chooser (ws092-p003) draws its text with libtruetype.
 DYNAMIC_LIBKEILAND_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libkeiland)
@@ -1581,7 +1581,7 @@ $(BUILD)/bin/mview: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  --needed libvulkan.so --needed libwayland-client.so --needed libc.so $@
 
 # The terminal imports standard Wayland, Vulkan, TrueType and C library entry
-# points (WS035 p068), and zdesktop's System Menu through libkeiland (WS070).
+# points (WS035 p068), and the compositor's System Menu through libkeiland (WS070).
 DYNAMIC_TERMINAL_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,terminal)
 
 $(BUILD)/bin/terminal: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
@@ -1599,7 +1599,7 @@ $(BUILD)/bin/terminal: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  --needed libvulkan.so --needed libwayland-client.so --needed libkeiland.so --needed libtruetype.so --needed libc.so $@
 
 # The file manager (WS071) imports standard Wayland, Vulkan, TrueType and C
-# library entry points, and zdesktop's own extensions through libkeiland.
+# library entry points, and the compositor's own extensions through libkeiland.
 # ws168-p004: no decoder (keiland-preview makes its pictures in a sandbox).
 DYNAMIC_FILES_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,files)
 
@@ -1619,7 +1619,7 @@ $(BUILD)/bin/files: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  --needed libvulkan.so --needed libwayland-client.so --needed libkeiland.so --needed libtruetype.so --needed libc.so $@
 
 # Settings (WS089) imports standard Wayland, Vulkan, TrueType and C library entry points, and
-# zdesktop's own extensions through libkeiland.  It compiles the file manager's canvas, text and
+# the compositor's own extensions through libkeiland.  It compiles the file manager's canvas, text and
 # icons (the same objects as files: the pattern rule builds them once).
 DYNAMIC_SETTINGS_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,settings)
 
@@ -1659,7 +1659,7 @@ $(BUILD)/bin/monitor: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  --needed libc.so $@
 
 # Notes (ws079-p005) imports standard Wayland, Vulkan, TrueType and C library entry points,
-# zdesktop's System Menu and the recent files through libkeiland, and libpdf for its PDF; ws175-p007: libz-compat
+# the compositor's System Menu and the recent files through libkeiland, and libpdf for its PDF; ws175-p007: libz-compat
 # for the images it keeps compressed; ws175-p008: libpng-compat, libjpeg-compat and libgif-compat for the image files
 # it puts on a page (picture.c).
 DYNAMIC_NOTES_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,notes)
@@ -1684,7 +1684,7 @@ $(BUILD)/bin/notes: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  --needed libc.so $@
 
 # PDF Viewer (ws079-p006) imports standard Wayland, Vulkan, TrueType and C library entry points,
-# zdesktop's menus and titlebar through libkeiland, and libpdf (which brings libz-compat and
+# the compositor's menus and titlebar through libkeiland, and libpdf (which brings libz-compat and
 # libjpeg-compat).
 DYNAMIC_PDFVIEWER_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,pdfviewer)
 
@@ -1705,7 +1705,7 @@ $(BUILD)/bin/pdfviewer: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  --needed libpdf.so --needed libc.so $@
 
 # Image Viewer (ws091) imports standard Wayland, Vulkan, TrueType and C library entry points,
-# zdesktop's menus, titlebar and glass through libkeiland, and libpng-compat (with libz-compat),
+# the compositor's menus, titlebar and glass through libkeiland, and libpng-compat (with libz-compat),
 # libjpeg-compat and libgif-compat for its images.
 DYNAMIC_IMAGEVIEW_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,imageview)
 
@@ -1855,7 +1855,7 @@ $(BUILD)/bin/mailer: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  --needed libc.so $@
 
 # Text Editor (WS092) imports standard Wayland, Vulkan, TrueType and C library entry points, and
-# zdesktop's menus, titlebar, glass and recent files through libkeiland.
+# the compositor's menus, titlebar, glass and recent files through libkeiland.
 DYNAMIC_TEXTEDIT_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,textedit)
 
 $(BUILD)/bin/textedit: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
@@ -1876,7 +1876,7 @@ $(BUILD)/bin/textedit: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  --needed libpng-compat.so --needed libz-compat.so --needed libc.so $@
 
 # The widgets' sampler (WS090 ws090-p005, the test image only) imports standard Wayland, Vulkan, TrueType
-# and C library entry points, and the widgets, the window and zdesktop's glass through libkeiland.
+# and C library entry points, and the widgets, the window and the compositor's glass through libkeiland.
 DYNAMIC_KUIDEMO_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,kuidemo)
 
 $(BUILD)/bin/kuidemo: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
@@ -1931,7 +1931,7 @@ $(DYNAMIC_DIR)/libbrowser.so: $(DYNAMIC_BROWSER_LIBRARY_OBJS) $(DYNAMIC_DIR)/lib
 
 # /bin/browser is the shell over libbrowser (ws074-p057): its command line and headless modes (main.c)
 # and its window (shell/), which import the engine through <browser.h>, standard Wayland and Vulkan
-# for the window and its swapchain (ws074-p014), and zdesktop's titlebar through libkeiland (ws074-p045).
+# for the window and its swapchain (ws074-p014), and the compositor's titlebar through libkeiland (ws074-p045).
 DYNAMIC_BROWSER_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,browser)
 $(DYNAMIC_BROWSER_OBJS): DYNAMIC_CPPFLAGS += -Iuserland/desktop/browser
 
@@ -2049,7 +2049,7 @@ $(BUILD)/bin/glescompute: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
  -l:libEGL.so -l:libGLESv2.so -l:libc.so -o $@
 
-# zdesktop's X11 server imports standard Wayland, Vulkan, TrueType and C library entry points (WS069 p008, p011).
+# The compositor's X11 server imports standard Wayland, Vulkan, TrueType and C library entry points (WS069 p008, p011).
 DYNAMIC_X11SERVER_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,xserver)
 
 $(BUILD)/bin/xserver: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \

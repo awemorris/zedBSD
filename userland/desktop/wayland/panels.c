@@ -8,7 +8,7 @@
 /*
  * kl_glass_v1 (ws035-p083, plan/ws035/glass-design.md): a surface names
  * the parts of itself that stand on the system's frosted glass -- cards
- * floating in the window -- and zdesktop draws the glass under them: the
+ * floating in the window -- and the compositor draws the glass under them: the
  * desktop behind, blurred and lightened, with a bright rim, and the card's
  * shadow.  The surface's own image, with
  * its alpha, goes over the glass; what it leaves clear between the panels

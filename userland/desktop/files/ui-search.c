@@ -46,7 +46,7 @@ static void search_home_text(struct fm_app *app, const char *folder, char *text,
 
 /*
  * Gives the keyboard to the search field (Ctrl+F), with the query shown
- * now selected: zdesktop is asked to give the titlebar's search field the
+ * now selected: the compositor is asked to give the titlebar's search field the
  * keyboard (fm_titlebar_state).
  */
 void

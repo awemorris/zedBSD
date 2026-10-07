@@ -6,12 +6,12 @@
  */
 
 /*
- * The window's glass in zdesktop (Files' glass.c): the editor's card floats
- * on zdesktop's frosted glass, and the desktop shows around it.  zdesktop
+ * The window's glass in the compositor (Files' glass.c): the editor's card floats
+ * on the compositor's frosted glass, and the desktop shows around it.  The compositor
  * draws the glass, its rim and the card's shadow (kl_glass_v1 through
  * libkeiland); the frame leaves its ground clear around the card.
  *
- * The window is glass when its swapchain is see-through and zdesktop has
+ * The window is glass when its swapchain is see-through and the compositor has
  * glass; otherwise it keeps its own opaque ground.  The card is sent
  * before the frame is shown; libkeiland sends it only when it changed (WS131
  * p016: kl_window_set_glass).
@@ -42,13 +42,13 @@ te_glass_open(
 	memset(glass, 0, sizeof(*glass));
 	glass->window = window;
 
-	/* A frame that zdesktop does not blend cannot let the desktop through. */
+	/* A frame that compositor does not blend cannot let the desktop through. */
 	if (!see_through) {
 		te_log("GLASS off reason=opaque");
 		return 0;
 	}
 
-	/* zdesktop's glass for the window, with the first card; a compositor without glass refuses it. */
+	/* The compositor's glass for the window, with the first card; a compositor without glass refuses it. */
 	error = glass_send(glass, app);
 	if (error != 0) {
 		te_log("GLASS off reason=compositor errno=%d", error);
@@ -106,7 +106,7 @@ glass_send(
 	int same;
 	int error;
 
-	/* The frame's card in zdesktop's terms. */
+	/* The frame's card in the compositor's terms. */
 	te_app_card(app, &card);
 	memset(&panel, 0, sizeof(panel));
 	panel.x = card.x;

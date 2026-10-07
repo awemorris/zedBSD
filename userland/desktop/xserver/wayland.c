@@ -92,7 +92,7 @@ struct x11_wayland_window {
 	int configured;
 
 	/*
-	 * zdesktop's titlebar for the X window: an X client draws no
+	 * The compositor's titlebar for the X window: an X client draws no
 	 * decoration of its own, so the desktop window asks for the
 	 * compositor's (NULL from a compositor without it; ws099-p023,
 	 * BUG-136).
@@ -815,7 +815,7 @@ x11_wayland_window_open(
 		app_id = WAYLAND_APP_ID;
 	xdg_toplevel_set_app_id(window->toplevel, app_id);
 
-	/* zdesktop's titlebar, asked for before the first commit so that the first configure carries it. */
+	/* The compositor's titlebar, asked for before the first commit so that the first configure carries it. */
 	window->titlebar = kl_titlebar_create(wayland->display, window->toplevel, &wayland_titlebar_listener, window);
 	if (window->titlebar == NULL)
 		fprintf(stderr, "X11SERVER TITLEBAR none errno=%d\n", errno);

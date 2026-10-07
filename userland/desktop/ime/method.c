@@ -8,16 +8,16 @@
 /*
  * The input method's protocol side (ws095-p004, plan/ws095/design.md
  * sections 4 to 6): the input method object, its keyboard grab, the
- * virtual keyboard it gives unused keys back on, and zdesktop's status.
+ * virtual keyboard it gives unused keys back on, and the compositor's status.
  *
  * Each key press the grab hears goes to the language chosen; what the
  * engine makes becomes set_preedit_string, commit_string and a commit,
- * which is sent for every press so that zdesktop hears an answer.  A key
+ * which is sent for every press so that compositor hears an answer.  A key
  * the engine does not use goes back on the virtual keyboard, and so does
- * its release.  Alt+Space (zdesktop's next) commits what is composed and
- * chooses the next language; zdesktop hears the language and whether text
+ * its release.  Alt+Space (the compositor's next) commits what is composed and
+ * chooses the next language; the compositor hears the language and whether text
  * is being composed on the status.  A deactivation drops what is composed:
- * zdesktop has already committed the preedit to the application.  Nothing
+ * The compositor has already committed the preedit to the application.  Nothing
  * typed is written to the log.
  */
 
@@ -94,7 +94,7 @@ static const struct zwp_input_method_keyboard_grab_v2_listener grab_listener = {
 };
 
 /*
- * zdesktop's status events.
+ * The compositor's status events.
  */
 static const struct kl_ime_status_v1_listener status_listener = {
 	status_next,
@@ -105,7 +105,7 @@ static const struct kl_ime_status_v1_listener status_listener = {
 
 /*
  * Makes the input method, its keyboard grab, the virtual keyboard and the
- * status, and tells zdesktop the language.
+ * status, and tells the compositor the language.
  *
  * Returns 0, or -1 when an object cannot be made.
  */
@@ -124,7 +124,7 @@ program_method_start(
 	if (status != 0)
 		return -1;
 
-	/* The keyboard, whose keys zdesktop sends while a text input is served. */
+	/* The keyboard, whose keys the compositor sends while a text input is served. */
 	program->grab = zwp_input_method_v2_grab_keyboard(program->method);
 	if (program->grab == NULL)
 		return -1;
@@ -138,7 +138,7 @@ program_method_start(
 	if (program->keyboard == NULL)
 		return -1;
 
-	/* zdesktop's status. */
+	/* The compositor's status. */
 	program->status = kl_ime_status_manager_v1_get_status(program->status_manager);
 	if (program->status == NULL)
 		return -1;
@@ -147,13 +147,13 @@ program_method_start(
 	if (status != 0)
 		return -1;
 
-	/* Succeeded: zdesktop hears the language chosen. */
+	/* Succeeded: the compositor hears the language chosen. */
 	program_announce_language(program);
 	return 0;
 }
 
 /*
- * Tells zdesktop the language chosen and its label.
+ * Tells the compositor the language chosen and its label.
  */
 void
 program_announce_language(
@@ -172,7 +172,7 @@ program_announce_language(
 	if (ops->mode != NULL)
 		id = ops->mode(engine, &label);
 
-	/* Told to zdesktop, and kept so that a change of mode is told too. */
+	/* Told to the compositor, and kept so that a change of mode is told too. */
 	kl_ime_status_v1_language(program->status, id, label);
 	snprintf(program->announced, sizeof(program->announced), "%s", id);
 	printf("KEI-IME LANGUAGE id=%s\n", id);
@@ -203,7 +203,7 @@ program_repeat_timeout(
 }
 
 /*
- * Presses the held key again when its next press is due, as zdesktop would
+ * Presses the held key again when its next press is due, as the compositor would
  * repeat a key for an application.
  */
 void
@@ -387,7 +387,7 @@ method_content_type(
 }
 
 /*
- * Applies the state zdesktop sent: an activation or a deactivation starts
+ * Applies the state the compositor sent: an activation or a deactivation starts
  * the engines from nothing, and the content type tells them whether to
  * learn.
  */
@@ -533,7 +533,7 @@ grab_modifiers(
 }
 
 /*
- * Keeps the repeat zdesktop tells: presses per second (none when zero) and
+ * Keeps the repeat the compositor tells: presses per second (none when zero) and
  * the wait before the first.
  */
 static void
@@ -615,7 +615,7 @@ status_select(
 
 /*
  * Sends what the engine made: the text to commit, the preedit and its
- * cursor, and the commit that applies them; zdesktop hears whether text is
+ * cursor, and the commit that applies them; the compositor hears whether text is
  * being composed.
  */
 static void
@@ -635,7 +635,7 @@ method_send(
 	zwp_input_method_v2_set_preedit_string(program->method, out->preedit, out->cursor_begin, out->cursor_end);
 	zwp_input_method_v2_commit(program->method, program->done_count);
 
-	/* Whether text is being composed decides where zdesktop puts the menu keys. */
+	/* Whether text is being composed decides where the compositor puts the menu keys. */
 	composing = 0;
 	if (out->composing)
 		composing = 1;
@@ -649,7 +649,7 @@ method_send(
 }
 
 /*
- * Tells zdesktop the language again when the engine chosen has changed its
+ * Tells the compositor the language again when the engine chosen has changed its
  * mode since it was last told (WS154).
  */
 static void
@@ -693,7 +693,7 @@ method_choose(
 	if (program->active)
 		method_send(program);
 
-	/* The new language, told to zdesktop. */
+	/* The new language, told to the compositor. */
 	program->current = index;
 	program_announce_language(program);
 }
@@ -731,10 +731,10 @@ method_press(
 		program->out->pass_key = true;
 	}
 
-	/* What it made (always sent, so that zdesktop hears an answer). */
+	/* What it made (always sent, so that compositor hears an answer). */
 	method_send(program);
 
-	/* A key that changed the engine's mode (SKK's q, l, C-j) tells zdesktop the new language. */
+	/* A key that changed the engine's mode (SKK's q, l, C-j) tells the compositor the new language. */
 	method_follow_mode(program);
 
 	/* A key the language does not use goes back to the application, which repeats it itself. */
@@ -796,7 +796,7 @@ method_repeats(
 }
 
 /*
- * Answers zdesktop's request for the on-screen keyboard's words for a
+ * Answers the compositor's request for the on-screen keyboard's words for a
  * reading (ws166-p002): the first engine that predicts gives them, or none
  * when no engine does (SKK, or no input method chosen).
  */

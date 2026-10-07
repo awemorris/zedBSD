@@ -15,7 +15,7 @@
  * finger is taken as the pointer: it moves the pointer where it lands,
  * presses the left button, and lets it go where it lifts (a tap is a
  * click; scrolling by finger comes later, ws089-p006).  The wheel scrolls
- * three pixels a unit (zdesktop sends fifteen units a notch); a touch
+ * three pixels a unit (the compositor sends fifteen units a notch); a touch
  * pad's fingers say where they come from and when they lift (BUG-211).
  * The menus' choices join the queue as SE_EVENT_ACTION; the titlebar's
  * controls and fields go to its queue (titlebar.c).

@@ -6,11 +6,11 @@
  */
 
 /*
- * Describes and marshals zdesktop's input method status protocol
+ * Describes and marshals the compositor's input method status protocol
  * (kl_ime_status_manager_v1 and kl_ime_status_v1, version 2;
  * ws095-p004, plan/ws095/design.md section 8).  Only the input method
- * zdesktop starts may bind the manager.  Version 2 (ws166-p002) adds the
- * on-screen keyboard's predictions: zdesktop asks for the words a reading
+ * the compositor starts may bind the manager.  Version 2 (ws166-p002) adds the
+ * on-screen keyboard's predictions: the compositor asks for the words a reading
  * starts (predict), the input method answers them (predictions), and the
  * word chosen is learned (learn).
  */

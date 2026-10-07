@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Compiles zdesktop's shaders and writes userland/desktop/wayland/shaders.h.
+"""Compiles the compositor's shaders and writes userland/desktop/wayland/shaders.h.
 
 The build uses the checked-in header, so no shader compiler is needed to
-build zdesktop; run this (with glslc and spirv-val on PATH) after changing a
+build the compositor; run this (with glslc and spirv-val on PATH) after changing a
 shader.
 Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 """

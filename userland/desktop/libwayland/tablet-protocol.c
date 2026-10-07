@@ -14,7 +14,7 @@
  * Their events reach listeners through the generic dispatch (event.c);
  * zwp_tablet_seat_v2.tablet_added and tool_added create server-made objects.
  * zwp_tablet_pad_v2 is described only so that pad_added names an interface:
- * its group event's pad group is not described, and zdesktop never
+ * its group event's pad group is not described, and the compositor never
  * announces a pad.  The descriptions follow the pinned wayland-protocols
  * description (userland/desktop/libwayland/API-PROVENANCE.md), whose notice is kept
  * there.

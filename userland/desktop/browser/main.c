@@ -17,7 +17,7 @@
  *   browser --render|--render-gpu --output=OUT.ppm [--width=N] [--height=N] [--font=PATH] FILE
  *   browser --version | --help
  *
- * Without a headless mode it opens a zdesktop window on URL, or on the
+ * Without a headless mode it opens a compositor window on URL, or on the
  * start page the package installs (MAIN_START_PAGE).  The headless
  * modes (added with the engine, one per phase) draw or dump a page, or run
  * a script, without a window; the tests use them on the host and in the

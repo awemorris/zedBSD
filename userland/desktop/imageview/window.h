@@ -6,7 +6,7 @@
  */
 
 /*
- * The parts of Image Viewer that speak Wayland, Vulkan and zdesktop's
+ * The parts of Image Viewer that speak Wayland, Vulkan and the compositor's
  * extensions: the window (libkeiland's kl_window since ws090-p008: the
  * toplevel and the seat's input; its surface is left to the presenter),
  * the presenter of the image and the drawn canvas (present.c), the menus
@@ -89,7 +89,7 @@ struct iv_present {
 	/* The swapchain, its format and extent, and one target per image. */
 	VkSwapchainKHR swapchain;
 	VkFormat format;
-	/* Whether the swapchain is see-through: zdesktop blends the frame by its premultiplied alpha. */
+	/* Whether the swapchain is see-through: the compositor blends the frame by its premultiplied alpha. */
 	int premultiplied;
 	VkExtent2D extent;
 	struct iv_present_target *targets;
@@ -159,7 +159,7 @@ struct iv_state {
 };
 
 /*
- * The window's glass in zdesktop (glass.c, WS131 p017): the window, and
+ * The window's glass in the compositor (glass.c, WS131 p017): the window, and
  * whether it is glass (libkeiland sends the panels only when they change).
  */
 struct iv_glass {
@@ -192,7 +192,7 @@ struct iv_menu {
 };
 
 /*
- * The window's titlebar in zdesktop (titlebar.c, WS131 p017): the window,
+ * The window's titlebar in the compositor (titlebar.c, WS131 p017): the window,
  * and whether its controls are shown (not without the compositor's
  * titlebar).  The controls' state is their actions' (menu.c).
  */
