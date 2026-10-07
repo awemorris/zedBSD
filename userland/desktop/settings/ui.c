@@ -1513,6 +1513,15 @@ ui_key(
 		}
 	}
 
+	/* The Welcome's keys: Enter, Esc, Alt with the arrows (ws177-p007). */
+	if (app->welcome != 0) {
+		used = se_welcome_key(app, event);
+		if (used != 0) {
+			app->dirty = 1;
+			return;
+		}
+	}
+
 	/* Alt with the arrows walks the history. */
 	if ((event->modifiers & SE_MOD_ALT) != 0U) {
 		if (event->key == SE_KEY_LEFT)

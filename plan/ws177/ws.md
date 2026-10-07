@@ -34,4 +34,5 @@ Primary Milestone: MG006（関係: MG002・MG003・MG005）
 | [ws177-p003](phase003/phase.md) | 案 G の host の分: UCSI の誤りの理由・CANCEL・PPM_RESET の回復・通知の無い時の poll・記録と再生・停止の道・取り消し・forget（backlog-p2 148〜150・155 の一部） | in-progress（2026-10-08 P1 q882 実装・host PASS・build、実機は 5330 の後） | ws050-p002〜p005 |
 | [ws177-p004](phase004/phase.md) | 案 D: desktop の UI の小物（kl_field の limit・KL_VERSION 64、accent の keyboard、network の行の as_is、IME の popup の accent、Files の Help の折り返し） | test-wait（T1-407）（2026-10-08 P1 q884 実装・host PASS・build） | — |
 | [ws177-p005](phase005/phase.md) | 案 A: 通知とメールの通知の口の堅さ（client の去り・UTF-8・速さ・ring の溢れ・listen の掃除・allowed の event・arrived の門、KL_VERSION 65・manager 20） | test-wait（T1-408）（2026-10-08 P1 q884 実装・host PASS・build） | — |
-| [ws177-p006](phase006/phase.md) | 案 I の 45 行: fidoctl の PIN の入力（端末で echo を切る、CTAP2 の長さの規則を先に） | in-progress（2026-10-08 P1 q884 実装・host PASS・build、端末は UAT） | — |
+| [ws177-p006](phase006/phase.md) | 案 I の 45 行: fidoctl の PIN の入力（端末で echo を切る、CTAP2 の長さの規則を先に） | in-progress（2026-10-08 P1 q884 実装・host PASS・build、main に統合、端末は UAT） | — |
+| [ws177-p007](phase007/phase.md) | 案 B: Welcome の準正常系（印の失敗・Files の失敗・Network の段の言葉・折り返し・keyboard） | in-progress（2026-10-08 P1 q884 実装・host PASS・build） | — |

@@ -127,7 +127,7 @@ static void main_text_input(void);
 static int main_canvas_make(void);
 static int main_timeout(uint64_t now);
 static void main_request(void);
-static void main_open_files(void);
+static int main_open_files(void);
 static void main_state_update(void);
 static void main_about_window(void);
 static void main_handed_over(void);
@@ -689,8 +689,8 @@ main_timeout(
 	return limit;
 }
 
-/* Starts Files, which opens at Today (the Welcome's end, ws164-p002); a failure is logged. */
-static void
+/* Starts Files, which opens at Today (the Welcome's end, ws164-p002); returns 0, or the error of a start that failed (logged). */
+static int
 main_open_files(void)
 {
 	char *arguments[2];
@@ -702,6 +702,11 @@ main_open_files(void)
 	arguments[1] = NULL;
 	error = posix_spawn(&child, MAIN_FILES, NULL, NULL, arguments, environ);
 	se_log("WELCOME files error=%d", error);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: Files runs. */
+	return 0;
 }
 
 /* Carries out what the window was asked to do by an action, once. */
@@ -709,6 +714,7 @@ static void
 main_request(void)
 {
 	unsigned request;
+	int error;
 
 	/* The request, taken. */
 	request = main_app.request;
@@ -723,10 +729,18 @@ main_request(void)
 		se_window_zoom(&main_window);
 		break;
 	case SE_REQUEST_CLOSE:
-		/* The Welcome's last step opens Files (its Today) as the window goes (ws164-p002). */
+		/*
+		 * The Welcome's last step opens Files (its Today) as the window goes
+		 * (ws164-p002); one that cannot be started keeps the window, which
+		 * says so (ws177-p007).
+		 */
 		if (main_app.request_files) {
 			main_app.request_files = 0;
-			main_open_files();
+			error = main_open_files();
+			if (error != 0) {
+				se_welcome_files_failed(&main_app, error);
+				break;
+			}
 		}
 
 		/* The window goes. */

@@ -23,12 +23,12 @@
 | WS128 ws128-p004（PDF Viewer の検索と選択） | titlebar の無い compositor（System Menu・titlebar の無い環境） | window の中の検索の欄で探せる（今は titlebar の field だけ。Ctrl+F は何もしない） | `pdfviewer/titlebar.c` の `pv_titlebar_focus_find` | 2026-10-06 |
 | WS128 ws128-p004（PDF Viewer の検索と選択） | 縦書き・回転した文字の選択の塗り | 文字の四隅の向きのまま塗る（今は四隅を囲む軸に沿った箱） | `find.c` の `find_mark` | 2026-10-06 |
 | WS128 ws128-p004（PDF Viewer の検索と選択） | ToUnicode の無い・壊れた font の文字（U+FFFD） | 読めない字を検索・copy で知らせる（今は U+FFFD がそのまま copy される） | libpdf `pdf_font_unicode`、`find.c` の `pv_select_copy` | 2026-10-06 |
-| WS164 ws164-p002（Welcome） | 設定の store が書けない（Keiland の拡張の無い desktop、書き込みの失敗） | Welcome の終わりで印を付けられないことを画面に出し、次の login でまた出ることを知らせる（今は log だけで窓を閉じる） | `settings/welcome.c` の `welcome_finish` | 2026-10-06 |
-| WS164 ws164-p002（Welcome） | Files の起動の失敗 | Today を開けなかったことを知らせる（今は log だけ） | `settings/main.c` の `main_open_files` | 2026-10-06 |
-| WS164 ws164-p002（Welcome） | Welcome の途中で Wi-Fi の鍵の入力・接続の失敗、radio の無い machine で Ethernet も無い | 段の中で失敗と次の手を出す（今は Wi-Fi・Ethernet の頁の表示のまま） | `settings/welcome.c` の Network の段 | 2026-10-06 |
+| WS164 ws164-p002（Welcome） → [ws177-p007](phase007/phase.md) | 設定の store が書けない（Keiland の拡張の無い desktop、書き込みの失敗） | Welcome の終わりで印を付けられないことを画面に出し、次の login でまた出ることを知らせる（今は log だけで窓を閉じる） | `settings/welcome.c` の `welcome_finish` | 2026-10-06 |
+| WS164 ws164-p002（Welcome） → [ws177-p007](phase007/phase.md) | Files の起動の失敗 | Today を開けなかったことを知らせる（今は log だけ） | `settings/main.c` の `main_open_files` | 2026-10-06 |
+| WS164 ws164-p002（Welcome） → [ws177-p007](phase007/phase.md) | Welcome の途中で Wi-Fi の鍵の入力・接続の失敗、radio の無い machine で Ethernet も無い | 段の中で失敗と次の手を出す（今は Wi-Fi・Ethernet の頁の表示のまま） | `settings/welcome.c` の Network の段 | 2026-10-06 |
 | WS164 ws164-p002（Welcome） | 言語と入力の段（WS154 の Languages） | p001 の H3 のとおり Look と Keys の間に足す（今は 5 段のまま） | `settings/welcome.c` | 2026-10-06（済み 2026-10-08 P1 q875 e986a3bdb、host 試験 PASS） |
-| WS164 ws164-p002（Welcome） | Welcome の窓の大きさが小さい・日本語の UI の長い文 | 帯と Skip が重ならないよう詰める・文を折り返す（今は固定の配置） | `settings/welcome.c` の `se_welcome_bar`・`se_welcome_draw` | 2026-10-06 |
-| WS164 ws164-p002（Welcome） | Welcome の key の操作（Enter で Next、Esc で閉じる） | keyboard だけで段を進める（今は pointer と指の click だけ） | `settings/ui.c` の `ui_key`、`welcome.c` | 2026-10-06 |
+| WS164 ws164-p002（Welcome） → [ws177-p007](phase007/phase.md) | Welcome の窓の大きさが小さい・日本語の UI の長い文 | 帯と Skip が重ならないよう詰める・文を折り返す（今は固定の配置） | `settings/welcome.c` の `se_welcome_bar`・`se_welcome_draw` | 2026-10-06 |
+| WS164 ws164-p002（Welcome） → [ws177-p007](phase007/phase.md) | Welcome の key の操作（Enter で Next、Esc で閉じる） | keyboard だけで段を進める（今は pointer と指の click だけ） | `settings/ui.c` の `ui_key`、`welcome.c` | 2026-10-06 |
 | WS156 ws156-p002（通知の口） → [ws177-p005](phase005/phase.md) | 通知を出した client が切れた・notify の object を destroy した | その client の待ち・表示中の通知を ACTION 無しに変える（今は model に残り、closed は誰にも送られない） | `wayland/notify-shell.c` の `notify_tell_closed`、client の破棄の側 | 2026-10-06 |
 | WS156 ws156-p002（通知の口） | app の名前が空の通知 | client の window の app_id を名前にする（今は空のまま保つ。p003 の描画で決める） | `wayland/notify-shell.c` の `notify_post` | 2026-10-06（済み dcc31f8fb・T1-375b、2026-10-08 q881） |
 | WS156 ws156-p002（通知の口） → [ws177-p005](phase005/phase.md) | 不正な UTF-8 の題・本文、制御文字 | 置き換えるか拒む（今は bytes のまま保つ） | `wayland/notify.c` の `kwl_notify_post` | 2026-10-06 |
