@@ -733,6 +733,34 @@ def lock_unlock(item):
 	item.passed()
 
 
+@run.define("desktop.session.release-clients")
+def release_clients(item):
+	# BUG-239: 20 clients killed at once took the compositor 23 s to release in QEMU; each release logs its parts.
+	mark = run.mark()
+	for _ in range(20):
+		run.as_user("/bin/terminal")
+	started = time.time()
+	while len(run.lines(r"ZTERM START ", mark)) < 20 and time.time() - started < 60.0:
+		time.sleep(1.0)
+	opened = len(run.lines(r"ZTERM START ", mark))
+	item.step("started 20 Terminals", f"{opened} started")
+	item.check(opened == 20, f"only {opened} Terminals started")
+	time.sleep(2.0)
+	killed = run.mark()
+	run.sh("pkill -x terminal; true")
+	began = time.time()
+	while len(run.lines(r"KWL CLEANUP done ", killed)) < 20 and time.time() - began < 60.0:
+		time.sleep(0.5)
+	elapsed = time.time() - began
+	done = run.lines(r"KWL CLEANUP done ", killed)
+	for line in done:
+		item.step("released", line)
+	item.step("all released", f"{len(done)} in {elapsed:.1f} s")
+	item.check(len(done) == 20, f"only {len(done)} clients were released in 60 s")
+	item.check(elapsed <= 10.0, f"the release took {elapsed:.1f} s (target 10 s)")
+	item.passed()
+
+
 @run.define("desktop.lock.swipe-card")
 def lock_swipe_card(item):
 	# ws187-p001..p003: the clock and the hint alone, a swipe up from the lower part brings the card (a manual lock: no grace).

@@ -54,6 +54,12 @@
 #define DESKTOP_PILL_COLOR	FM_COLOR_ACCENT
 #define DESKTOP_PILL_TEXT	FM_COLOR_ACCENT_INK
 
+/*
+ * How far round the rubber band its frame is drawn again when it moves
+ * (pixels: its edge's smoothing reaches past its rectangle, BUG-221).
+ */
+#define DESKTOP_BAND_MARGIN	2
+
 /* A selected icon's ground, and the rubber band's fill and edge. */
 #define DESKTOP_GROUND_COLOR	KL_RGBA(0xffffff, 110)
 #define DESKTOP_BAND_FILL	KL_RGBA(FM_COLOR_ACCENT, 40)
@@ -88,7 +94,11 @@
 #define DESKTOP_FILES		KEILAND_BINDIR "/files"
 
 static void desktop_layout(struct fm_app *app, int width, int height);
-static int desktop_over(const struct fm_app *app);
+static int desktop_over_band(const struct fm_app *app);
+static void desktop_band_draw(struct fm_app *app, struct kl_canvas *canvas);
+static void desktop_band_partial(struct fm_app *app, struct kl_canvas *canvas);
+static void desktop_band_region(struct fm_app *app, struct kl_canvas *canvas, const struct kl_rect *outer, const struct kl_rect *inner);
+static void desktop_redraw_rect(struct fm_app *app, struct kl_canvas *canvas, const struct kl_rect *rect);
 static int desktop_partial(struct fm_app *app, struct kl_canvas *canvas);
 static void desktop_painted_record(struct fm_app *app, const struct fm_entry *entry, size_t index, struct fm_desktop_painted *painted);
 static void desktop_painted_keep(struct fm_app *app, struct kl_canvas *canvas);
@@ -126,7 +136,6 @@ fm_desktop_draw(
 {
 	struct fm_desktop *desk;
 	struct kl_rect cell;
-	struct kl_rect band;
 	struct fm_tab *tab;
 	size_t index;
 	size_t hidden;
@@ -184,11 +193,7 @@ fm_desktop_draw(
 	}
 
 	/* The rubber band over the items. */
-	if (desk->band) {
-		desktop_band_rect(desk, &band);
-		kl_canvas_fill(canvas, &band, DESKTOP_BAND_FILL);
-		kl_canvas_round_border(canvas, (float)band.x, (float)band.y, (float)band.width, (float)band.height, 0.0f, 1.0f, DESKTOP_BAND_EDGE);
-	}
+	desktop_band_draw(app, canvas);
 
 	/* The target of a drop over the desktop. */
 	fm_desktop_drop_draw(app, canvas);
@@ -417,17 +422,17 @@ fm_desktop_item_at(
 }
 
 /*
- * Tells whether something is drawn over the items or across cells: the
- * rubber band, a drag or a drop, a message or an operation's progress, a
- * question, or a name's field.
+ * Tells whether something other than the rubber band is drawn over the
+ * items or across cells (a kept frame with the band alone is drawn again
+ * only where the band and the cells changed, BUG-221): a drag or a drop,
+ * a message or an operation's progress, a question, or a name's field.
  */
 static int
-desktop_over(
+desktop_over_band(
 	const struct fm_app *app)
 {
-	/* The band, the desktop's own drag, a drop over it. */
-	if (app->desk.band ||
-	    app->desk.dragging ||
+	/* The desktop's own drag, a drop over it. */
+	if (app->desk.dragging ||
 	    app->drop_active)
 		return 1;
 
@@ -466,10 +471,10 @@ desktop_partial(
 	int over;
 	int differs;
 
-	/* The kept frame, of this size and listing, with nothing over it now. */
+	/* The kept frame, of this size and listing, with nothing but the rubber band over it now. */
 	desk = &app->desk;
 	tab = fm_ui_tab(app);
-	over = desktop_over(app);
+	over = desktop_over_band(app);
 	if (!desk->painted || over)
 		return 0;
 	if (desk->painted_width != canvas->width || desk->painted_height != canvas->height)
@@ -500,15 +505,203 @@ desktop_partial(
 		if (!placed)
 			continue;
 
-		/* The cell again. */
+		/* The cell again, under the band where it crosses it. */
 		desktop_clear_rect(canvas, &cell);
 		kl_canvas_clip_push(canvas, &cell);
 		desktop_item(app, canvas, &tab->listing.entries[index], &cell);
+		desktop_band_draw(app, canvas);
 		kl_canvas_clip_pop(canvas);
 	}
 
+	/* The rubber band where it moved, came or went (BUG-221). */
+	desktop_band_partial(app, canvas);
+
 	/* Succeeded: the frame is the kept one with its changed cells. */
 	return 1;
+}
+
+/* Draws the rubber band, while one is dragged, over what is drawn (within the clip). */
+static void
+desktop_band_draw(
+	struct fm_app *app,
+	struct kl_canvas *canvas)
+{
+	struct kl_rect band;
+
+	/* No band. */
+	if (!app->desk.band)
+		return;
+
+	/* Its fill and its edge. */
+	desktop_band_rect(&app->desk, &band);
+	kl_canvas_fill(canvas, &band, DESKTOP_BAND_FILL);
+	kl_canvas_round_border(canvas, (float)band.x, (float)band.y, (float)band.width, (float)band.height, 0.0f, 1.0f, DESKTOP_BAND_EDGE);
+}
+
+/*
+ * Draws the kept frame's rubber band again where it changed (BUG-221):
+ * where the kept band was and where it is now, less the part inside both,
+ * whose pixels stay; the frame then has the band as it is now.
+ */
+static void
+desktop_band_partial(
+	struct fm_app *app,
+	struct kl_canvas *canvas)
+{
+	struct fm_desktop *desk;
+	struct kl_rect inner;
+	struct kl_rect before;
+	struct kl_rect now;
+	int right;
+	int bottom;
+
+	/* Neither the kept frame nor this one has a band. */
+	desk = &app->desk;
+	if (!desk->painted_band && !desk->band)
+		return;
+
+	/* The band now, none without one. */
+	memset(&now, 0, sizeof(now));
+	if (desk->band)
+		desktop_band_rect(desk, &now);
+
+	/* The part inside both bands, less the margin round their edges, which keeps its pixels (none unless both are there). */
+	memset(&inner, 0, sizeof(inner));
+	before = desk->painted_band_rect;
+	if (desk->painted_band && desk->band) {
+		inner.x = before.x;
+		if (now.x > inner.x)
+			inner.x = now.x;
+		inner.y = before.y;
+		if (now.y > inner.y)
+			inner.y = now.y;
+		right = before.x + before.width;
+		if (now.x + now.width < right)
+			right = now.x + now.width;
+		bottom = before.y + before.height;
+		if (now.y + now.height < bottom)
+			bottom = now.y + now.height;
+		inner.x += DESKTOP_BAND_MARGIN;
+		inner.y += DESKTOP_BAND_MARGIN;
+		inner.width = right - DESKTOP_BAND_MARGIN - inner.x;
+		inner.height = bottom - DESKTOP_BAND_MARGIN - inner.y;
+	}
+
+	/* Where the kept band was, and where the band is now, less that part. */
+	if (desk->painted_band)
+		desktop_band_region(app, canvas, &before, &inner);
+	if (desk->band)
+		desktop_band_region(app, canvas, &now, &inner);
+
+	/* The frame has the band as it is now. */
+	desk->painted_band = desk->band;
+	desk->painted_band_rect = now;
+}
+
+/*
+ * Draws again a band's rectangle, with the margin round it, less an inner
+ * rectangle (none when it has no size): the rows above and below the
+ * inner one, and the columns beside it between them.
+ */
+static void
+desktop_band_region(
+	struct fm_app *app,
+	struct kl_canvas *canvas,
+	const struct kl_rect *outer,
+	const struct kl_rect *inner)
+{
+	struct kl_rect grown;
+	struct kl_rect part;
+	int top;
+	int bottom;
+
+	/* The rectangle with its margin. */
+	grown.x = outer->x - DESKTOP_BAND_MARGIN;
+	grown.y = outer->y - DESKTOP_BAND_MARGIN;
+	grown.width = outer->width + 2 * DESKTOP_BAND_MARGIN;
+	grown.height = outer->height + 2 * DESKTOP_BAND_MARGIN;
+
+	/* Without an inner part, all of it. */
+	if (inner->width <= 0 || inner->height <= 0) {
+		desktop_redraw_rect(app, canvas, &grown);
+		return;
+	}
+
+	/* The rows above the inner part. */
+	top = inner->y;
+	if (top < grown.y)
+		top = grown.y;
+	if (top > grown.y + grown.height)
+		top = grown.y + grown.height;
+	part.x = grown.x;
+	part.y = grown.y;
+	part.width = grown.width;
+	part.height = top - grown.y;
+	desktop_redraw_rect(app, canvas, &part);
+
+	/* The rows below it. */
+	bottom = inner->y + inner->height;
+	if (bottom < top)
+		bottom = top;
+	if (bottom > grown.y + grown.height)
+		bottom = grown.y + grown.height;
+	part.y = bottom;
+	part.height = grown.y + grown.height - bottom;
+	desktop_redraw_rect(app, canvas, &part);
+
+	/* The columns left and right of it, between them. */
+	part.y = top;
+	part.height = bottom - top;
+	part.x = grown.x;
+	part.width = inner->x - grown.x;
+	desktop_redraw_rect(app, canvas, &part);
+	part.x = inner->x + inner->width;
+	part.width = grown.x + grown.width - part.x;
+	desktop_redraw_rect(app, canvas, &part);
+}
+
+/*
+ * Draws a rectangle of the desktop again (nothing for one without a size):
+ * cleared, the items whose cells meet it and the rubber band over them,
+ * within it.
+ */
+static void
+desktop_redraw_rect(
+	struct fm_app *app,
+	struct kl_canvas *canvas,
+	const struct kl_rect *rect)
+{
+	struct fm_desktop *desk;
+	struct kl_rect cell;
+	struct fm_tab *tab;
+	size_t index;
+	int placed;
+	int meets;
+
+	/* Nothing to draw. */
+	if (rect->width <= 0 || rect->height <= 0)
+		return;
+
+	/* Cleared, and drawn within it. */
+	desk = &app->desk;
+	tab = fm_ui_tab(app);
+	desktop_clear_rect(canvas, rect);
+	kl_canvas_clip_push(canvas, rect);
+
+	/* Each item whose cell meets it. */
+	for (index = 0; index < tab->listing.count && index < desk->place_count; index++) {
+		placed = fm_desktop_cell_rect(desk->places[index].column, desk->places[index].row, canvas->width, canvas->height, &cell);
+		if (!placed)
+			continue;
+		meets = desktop_rects_meet(rect, &cell);
+		if (!meets)
+			continue;
+		desktop_item(app, canvas, &tab->listing.entries[index], &cell);
+	}
+
+	/* The band over them, and the clip ends. */
+	desktop_band_draw(app, canvas);
+	kl_canvas_clip_pop(canvas);
 }
 
 /* Records what an item's cell is drawn with now. */
@@ -558,8 +751,8 @@ desktop_painted_keep(
 	tab = fm_ui_tab(app);
 	desk->painted = 0;
 
-	/* A frame with something over the items, or items without places, is not kept. */
-	over = desktop_over(app);
+	/* A frame with something but the rubber band over the items, or items without places, is not kept. */
+	over = desktop_over_band(app);
 	if (over || desk->place_count != tab->listing.count)
 		return;
 
@@ -580,6 +773,11 @@ desktop_painted_keep(
 	desk->painted_count = tab->listing.count;
 	desk->painted_modified = desk->laid_modified;
 	desk->painted_names = desk->laid_names;
+
+	/* The band the frame has, when it has one. */
+	desk->painted_band = desk->band;
+	if (desk->band)
+		desktop_band_rect(desk, &desk->painted_band_rect);
 
 	/* Succeeded: the records describe the retained canvas. */
 	return;
