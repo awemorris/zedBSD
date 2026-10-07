@@ -58,6 +58,15 @@ drv_typec_os_map(
 	volatile uint8_t **mapping);
 
 /*
+ * Removes a mapping drv_typec_os_map() made, of the same size (the driver
+ * stopped, ws177-p003).
+ */
+void
+drv_typec_os_unmap(
+	volatile uint8_t *mapping,
+	size_t size);
+
+/*
  * Reads a byte of a mapped device range.
  */
 uint8_t

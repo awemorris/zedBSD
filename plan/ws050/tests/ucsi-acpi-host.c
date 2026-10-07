@@ -127,6 +127,9 @@ struct ppm {
 	unsigned resets;
 	unsigned writes;
 	unsigned changes_acknowledged;
+	/* A PPM that answers nothing (ws177-p003), and the PPM_RESETs it was sent. */
+	bool dead;
+	unsigned ppm_resets;
 };
 
 /*
@@ -163,6 +166,9 @@ static unsigned notifications;
 static void (*thread_body)(void *argument);
 static unsigned devices;
 
+/* The mailbox mappings given back (ws177-p003). */
+static unsigned unmaps;
+
 /* The number of failed checks, and whether to print the logs. */
 static int test_failures;
 static bool verbose;
@@ -174,6 +180,8 @@ static void test_plug(void);
 static void test_text(void);
 static void test_ram(void);
 static void test_displays(void);
+static void test_stop(void);
+static void test_dead(void);
 static int dsm_call(unsigned function, struct drv_acpi_object **result);
 static int crs_visitor(const struct drv_acpi_resource *resource, void *argument);
 static int load_tables(const char *directory);
@@ -270,6 +278,8 @@ main(
 	test_displays();
 	test_plug();
 	test_text();
+	test_stop();
+	test_dead();
 	test_ram();
 
 	/* Reports whether every check passed. */
@@ -728,7 +738,16 @@ ppm_command(void)
 	ppm.last_command = command;
 	if (command == 0x03U)
 		ppm.resets++;
+	if (command == PPM_RESET)
+		ppm.ppm_resets++;
 	memset(message, 0, sizeof(message));
+
+	/* A dead PPM leaves CCI empty and raises nothing. */
+	if (ppm.dead) {
+		for (index = 0; index < 4U; index++)
+			ec_ram[EC_CCI + index] = 0;
+		return;
+	}
 
 	/* Each command the core sends. */
 	switch (command) {
@@ -1017,6 +1036,17 @@ drv_typec_os_map(
 	return 0;
 }
 
+void
+drv_typec_os_unmap(
+	volatile uint8_t *mapping,
+	size_t size)
+{
+	/* Counted: the stop gives the mailbox back. */
+	(void)mapping;
+	(void)size;
+	unmaps++;
+}
+
 uint8_t
 drv_typec_os_read8(
 	const volatile uint8_t *address)
@@ -1132,4 +1162,70 @@ test_displays(void)
 	test_check("display-pld", error == 0 && location.visible && location.group_token == 0U && location.group_position == 3U, "CR01's _PLD: visible, group 0, position 3");
 	drv_acpi_object_release(result);
 	memory_put(GNVS_BASE + GNVS_TP1P, 1, 1);
+}
+
+/*
+ * ws177-p003: the driver stops.  An operation that waits ends with
+ * ENODEV, the mailbox is unmapped once, the notification handler is gone
+ * (a Notify reaches nothing), new operations are refused, and a step
+ * does nothing.
+ */
+static void
+test_stop(void)
+{
+	struct drv_typec_connector connector;
+	uint32_t serial;
+	uint32_t later;
+	unsigned before;
+	int error;
+
+	/* An operation waits; the driver stops. */
+	error = drv_typec_connector_reset(0, DRV_TYPEC_RESET_HARD, &serial);
+	test_check("stop-asked", error == 0, "an operation queued before the stop");
+	drv_ucsi_acpi_stop("the host test");
+	memset(&connector, 0, sizeof(connector));
+	(void)drv_typec_connector_get(0, &connector);
+	test_check("stop-ended", connector.request_serial == serial && connector.request_error == ENODEV && drv_typec_driver_stopped(), "the waiting operation ended with ENODEV");
+	test_check("stop-unmapped", unmaps == 1U, "the mailbox was unmapped once");
+
+	/* Nothing more: no operation, no step, no second unmap. */
+	error = drv_typec_connector_reset(0, DRV_TYPEC_RESET_HARD, &later);
+	test_check("stop-refused", error == ENODEV, "an operation after the stop is refused");
+	error = drv_ucsi_acpi_step(10);
+	test_check("stop-step", error == -ENODEV, "a step of a stopped driver");
+	drv_ucsi_acpi_stop("again");
+	test_check("stop-once", unmaps == 1U, "a second stop unmapped again");
+
+	/* A Notify after the stop reaches no handler. */
+	before = notifications;
+	ppm_plug(1);
+	(void)drv_typec_os_wait(0);
+	test_check("stop-notify", notifications == before, "the handler was not removed");
+}
+
+/*
+ * ws177-p003: a PPM that never starts.  The thread starts it three times
+ * with pauses, then stops the driver and ends.
+ */
+static void
+test_dead(void)
+{
+	unsigned resets;
+	unsigned before;
+	int error;
+
+	/* Attached again over a PPM that answers nothing. */
+	ppm.dead = true;
+	resets = ppm.ppm_resets;
+	before = unmaps;
+	thread_body = NULL;
+	error = drv_ucsi_acpi_attach();
+	test_check("dead-attach", error == 0 && thread_body != NULL, "attached again");
+
+	/* The thread's body: three starts, then the stop, then it returns. */
+	if (thread_body != NULL)
+		thread_body(NULL);
+	test_check("dead-tries", ppm.ppm_resets - resets == 3U, "three starts, each a PPM_RESET");
+	test_check("dead-stopped", unmaps == before + 1U && drv_typec_driver_stopped(), "the driver stopped and unmapped");
+	ppm.dead = false;
 }

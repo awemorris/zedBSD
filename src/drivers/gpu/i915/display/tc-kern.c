@@ -46,13 +46,14 @@
 
 /*
  * The USB Type-C connector layer, which the ports' DisplayPort state is
- * reported to.
+ * reported to, and which forgets it when the display stops.
  *
  * It is linked only with CONFIG_DRIVER_ACPI and CONFIG_DRIVER_TYPEC (the
- * UCSI driver); without it the symbol is weak and NULL, and a report is
- * not made.
+ * UCSI driver); without it the symbols are weak and NULL, and nothing is
+ * told.
  */
 extern int drv_typec_display_report(unsigned port, const struct drv_typec_dp_state *state) __attribute__((weak));
+extern int drv_typec_display_forget(unsigned port) __attribute__((weak));
 
 static uint32_t tc_kern_read32(void *ctx, uint32_t reg);
 static void tc_kern_write32(void *ctx, uint32_t reg, uint32_t value);
@@ -146,6 +147,7 @@ drv_i915_tc_kern_stop(
 	struct i915_display *display)
 {
 	struct i915_tc_kern *k;
+	unsigned port;
 
 	/* A display whose ports were never bound has nothing to give back. */
 	k = &display->tck;
@@ -154,6 +156,12 @@ drv_i915_tc_kern_stop(
 
 	/* Gives every port back; the core logs each one. */
 	drv_i915_tc_stop(&k->tc);
+
+	/* The Type-C layer forgets what the display reported of each port (ws177-p003); a kernel without it has none. */
+	if (drv_typec_display_forget == NULL)
+		return;
+	for (port = 0u; port < I915_TC_PORTS; port++)
+		(void)drv_typec_display_forget(port);
 }
 
 /*

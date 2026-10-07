@@ -129,6 +129,43 @@ struct drv_ucsi {
 
 	/* The record being built for one connector (kept here, not on the stack). */
 	struct drv_typec_connector record;
+
+	/*
+	 * The CCI the last command ended with, and whether its wait last saw
+	 * the PPM busy (a command still busy at the timeout is canceled).
+	 */
+	uint32_t cci;
+	bool busy;
+
+	/*
+	 * The PPM's health (ws177-p003).  stuck: a command got no answer (or
+	 * the transport failed); every later command fails at once until the
+	 * PPM is reset and the connectors are read again.  recovering: that
+	 * reset runs, so a failure inside it does not start another.
+	 * recoveries: the attempts the last recovery took; when its last
+	 * attempt failed too, failed is set, and the transport answers it by
+	 * stopping the driver.  tolerant: the command running is one whose
+	 * failure its caller expects, so its reason is not asked.
+	 */
+	bool stuck;
+	bool recovering;
+	bool failed;
+	bool tolerant;
+	unsigned recoveries;
+
+	/* The Error Information GET_ERROR_STATUS gave for the last command that failed (0: none). */
+	uint16_t error_information;
+
+	/*
+	 * The completions the core found after a notification and the ones it
+	 * found only by asking the PPM: a PPM whose notifications never come
+	 * is polled by the transport (drv_ucsi_notifying()).
+	 */
+	unsigned notified_completions;
+	unsigned polled_completions;
+
+	/* The mailbox exchanges written to the log so far (the record of a start, at most UCSI_RECORD_MAX). */
+	unsigned recorded;
 };
 
 /*
@@ -165,5 +202,21 @@ drv_ucsi_request(
 int
 drv_ucsi_service(
 	struct drv_ucsi *ucsi);
+
+/*
+ * Asks the PPM for CCI without a notification and handles the connector
+ * change it indicates (a notification that never came).
+ */
+int
+drv_ucsi_poll(
+	struct drv_ucsi *ucsi);
+
+/*
+ * Tells whether the PPM's notifications come: true once a command's
+ * completion arrived with one.
+ */
+bool
+drv_ucsi_notifying(
+	const struct drv_ucsi *ucsi);
 
 #endif

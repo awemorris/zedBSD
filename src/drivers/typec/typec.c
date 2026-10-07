@@ -62,6 +62,9 @@ struct typec_dp_watch {
 	bool differing;
 	uint64_t since_ms;
 	bool disagree;
+	/* The two reports as the disagreement was last logged, which is logged again when either changes (ws177-p003). */
+	struct drv_typec_dp_state logged_display;
+	struct drv_typec_dp_state logged_ucsi;
 };
 
 /*
@@ -142,6 +145,15 @@ static void (*typec_kick)(void *argument);
 static void *typec_kick_argument;
 
 /*
+ * Set when the connector driver stopped (drv_typec_driver_stop(),
+ * ws177-p003): the records keep the last state it published, no
+ * operation is taken any more, and nothing is published.  A start of the
+ * connector driver (drv_typec_connectors_reset() with connectors) clears
+ * it.  Under the layer's lock.
+ */
+static bool typec_stopped;
+
+/*
  * What the display driver reported of its Type-C ports, and their bindings.
  *
  * Written by drv_typec_display_report() and drv_typec_display_bind(),
@@ -161,6 +173,7 @@ static struct typec_display_entry typec_displays[DRV_TYPEC_DISPLAY_PORT_MAX];
 static struct typec_dp_watch typec_dp_watches[DRV_TYPEC_CONNECTOR_MAX];
 
 static int typec_request_put(struct drv_typec_request *request, uint32_t *serial);
+static void typec_publish_outcome(const struct drv_typec_request *request, int error);
 static unsigned typec_display_port_of(unsigned connector);
 static unsigned typec_location_bits(const uint8_t *buffer, unsigned first, unsigned count);
 static bool typec_dp_same(const struct drv_typec_dp_state *left, const struct drv_typec_dp_state *right);
@@ -287,12 +300,14 @@ drv_typec_connectors_reset(
 		count = DRV_TYPEC_CONNECTOR_MAX;
 	}
 
-	/* Empties the records and sets the count. */
+	/* Empties the records and sets the count; a driver that starts is not stopped. */
 	drv_typec_os_lock();
 
 	kern_memset(typec_connectors, 0, sizeof(typec_connectors));
 	kern_memset(typec_dp_watches, 0, sizeof(typec_dp_watches));
 	typec_count = count;
+	if (count != 0U)
+		typec_stopped = false;
 
 	drv_typec_os_unlock();
 }
@@ -310,10 +325,13 @@ drv_typec_connector_publish(
 {
 	struct drv_typec_dp_state display;
 	struct drv_typec_dp_state ucsi;
+	uint32_t request_serial;
+	uint32_t request_information;
 	uint32_t remaining;
 	uint64_t generation;
 	uint64_t now;
 	unsigned port;
+	int request_error;
 	bool began;
 
 	/* The time the two DisplayPort reports are compared at. */
@@ -331,11 +349,27 @@ drv_typec_connector_publish(
 		return ENOENT;
 	}
 
-	/* The record under its generation. */
+	/* A stopped connector driver publishes nothing more. */
+	if (typec_stopped) {
+		drv_typec_os_unlock();
+		return ENODEV;
+	}
+
+	/*
+	 * The record under its generation.  The operation's outcome is the
+	 * layer's (drv_typec_request_finish(), a cancel): it is kept, not
+	 * taken from the copy the driver read before (ws177-p003).
+	 */
+	request_serial = typec_connectors[index].request_serial;
+	request_error = typec_connectors[index].request_error;
+	request_information = typec_connectors[index].request_error_information;
 	typec_generation++;
 	generation = typec_generation;
 	kern_memcpy(&typec_connectors[index], connector, sizeof(typec_connectors[index]));
 	typec_connectors[index].generation = generation;
+	typec_connectors[index].request_serial = request_serial;
+	typec_connectors[index].request_error = request_error;
+	typec_connectors[index].request_error_information = request_information;
 
 	/* The comparison with the bound port, and what a disagreement that began is logged with. */
 	began = typec_dp_compare(index, now, &remaining);
@@ -347,7 +381,7 @@ drv_typec_connector_publish(
 
 	drv_typec_os_unlock();
 
-	/* A disagreement this record began is logged once. */
+	/* A disagreement this record began, or one whose reports changed, is logged. */
 	if (began)
 		typec_dp_log(index, generation, &display, &ucsi);
 
@@ -567,7 +601,195 @@ drv_typec_request_take(
 }
 
 /*
- * Notes an operation's outcome (its serial and errno value) in its
+ * Cancels an operation that waits (ws177-p003): it leaves the queue, and
+ * its connector's record is published with the outcome ECANCELED.
+ *
+ * Returns 0, EBUSY when the connector driver already took it (it runs or
+ * ran; its outcome comes as usual), or ENOENT for a serial no operation
+ * was asked under.
+ */
+int
+drv_typec_request_cancel(
+	uint32_t serial)
+{
+	struct drv_typec_request canceled;
+	unsigned position;
+	unsigned slot;
+	unsigned next;
+	bool found;
+	bool asked;
+
+	/* Finds it in the queue, under the lock. */
+	drv_typec_os_lock();
+
+	found = false;
+	for (position = 0U; position < typec_request_count; position++) {
+		slot = (typec_request_first + position) % DRV_TYPEC_REQUEST_MAX;
+		if (typec_requests[slot].serial == serial) {
+			canceled = typec_requests[slot];
+			found = true;
+			break;
+		}
+	}
+
+	/* An operation no longer waiting: one asked and taken, or none asked under that serial. */
+	if (!found) {
+		asked = false;
+		if (serial != 0U && serial <= typec_request_serial)
+			asked = true;
+		drv_typec_os_unlock();
+		if (asked)
+			return EBUSY;
+		return ENOENT;
+	}
+
+	/* Closes its gap: each later operation one place forward, the order kept. */
+	while (position + 1U < typec_request_count) {
+		slot = (typec_request_first + position) % DRV_TYPEC_REQUEST_MAX;
+		next = (typec_request_first + position + 1U) % DRV_TYPEC_REQUEST_MAX;
+		typec_requests[slot] = typec_requests[next];
+		position++;
+	}
+
+	/* One fewer waits. */
+	typec_request_count--;
+
+	drv_typec_os_unlock();
+
+	/* The outcome, published so its owner learns it. */
+	typec_publish_outcome(&canceled, ECANCELED);
+
+	/* Succeeded: the operation will not be carried out. */
+	return 0;
+}
+
+/*
+ * Tells the layer the connector driver stopped (ws177-p003), in one step
+ * under the lock: no operation is taken or queued any more (asking gives
+ * ENODEV), every operation that waits ends with `error` in its
+ * connector's record, the records keep the last state published, and
+ * nothing is published after.  The listeners are told of each connector,
+ * so they read it again and see drv_typec_driver_stopped().  Returns how
+ * many operations were ended.
+ */
+unsigned
+drv_typec_driver_stop(
+	int error)
+{
+	struct drv_typec_request *request;
+	uint64_t generations[DRV_TYPEC_CONNECTOR_MAX];
+	unsigned connectors;
+	unsigned ended;
+	unsigned index;
+
+	/* Stops, ends what waits, and stamps every connector, under the lock. */
+	drv_typec_os_lock();
+
+	typec_stopped = true;
+	typec_kick = NULL;
+	typec_kick_argument = NULL;
+	ended = 0U;
+	while (typec_request_count != 0U) {
+		/* Its outcome in its connector's record, when the connector is there. */
+		request = &typec_requests[typec_request_first];
+		if (request->connector < typec_count) {
+			typec_connectors[request->connector].request_serial = request->serial;
+			typec_connectors[request->connector].request_error = error;
+			typec_connectors[request->connector].request_error_information = 0U;
+		}
+
+		/* Out of the ring. */
+		typec_request_first = (typec_request_first + 1U) % DRV_TYPEC_REQUEST_MAX;
+		typec_request_count--;
+		ended++;
+	}
+
+	/* Every connector under a new generation, for its listeners. */
+	connectors = typec_count;
+	for (index = 0U; index < connectors; index++) {
+		typec_generation++;
+		typec_connectors[index].generation = typec_generation;
+		generations[index] = typec_generation;
+	}
+
+	drv_typec_os_unlock();
+
+	/* Each connector's listeners learn of it. */
+	for (index = 0U; index < connectors; index++)
+		typec_listeners_tell(index, generations[index]);
+
+	/* Succeeded: the layer serves the last state only. */
+	return ended;
+}
+
+/*
+ * Tells whether the connector driver stopped: the records are its last
+ * state, and no operation is carried out.
+ */
+bool
+drv_typec_driver_stopped(void)
+{
+	bool stopped;
+
+	/* Read under the lock. */
+	drv_typec_os_lock();
+
+	stopped = typec_stopped;
+
+	drv_typec_os_unlock();
+
+	/* Succeeded: whether it stopped. */
+	return stopped;
+}
+
+/*
+ * Forgets what the display driver reported of one of its Type-C ports
+ * (the display driver stopped, ws177-p003): the port's report is unknown
+ * again, a bound connector's comparison ends, and its listeners are told.
+ *
+ * Returns 0, or EINVAL for a port beyond DRV_TYPEC_DISPLAY_PORT_MAX.
+ */
+int
+drv_typec_display_forget(
+	unsigned port)
+{
+	struct typec_display_entry *entry;
+	uint64_t generation;
+	unsigned connector;
+
+	/* Refuses a port the layer has no room for. */
+	if (port >= DRV_TYPEC_DISPLAY_PORT_MAX)
+		return EINVAL;
+
+	/* The report unknown under a new generation, and the bound connector's comparison over. */
+	drv_typec_os_lock();
+
+	entry = &typec_displays[port];
+	typec_generation++;
+	generation = typec_generation;
+	entry->generation = generation;
+	kern_memset(&entry->state, 0, sizeof(entry->state));
+	connector = DRV_TYPEC_CONNECTOR_NONE;
+	if (entry->bound != 0U && entry->bound - 1U < typec_count) {
+		connector = entry->bound - 1U;
+		typec_connectors[connector].generation = generation;
+		kern_memset(&typec_dp_watches[connector], 0, sizeof(typec_dp_watches[connector]));
+	}
+
+	drv_typec_os_unlock();
+
+	/* An unbound port's report is only dropped. */
+	if (connector == DRV_TYPEC_CONNECTOR_NONE)
+		return 0;
+
+	/* Succeeded: the bound connector's listeners learn the display's state is unknown. */
+	typec_listeners_tell(connector, generation);
+	return 0;
+}
+
+/*
+ * Notes an operation's outcome (its serial, its errno value and the reason
+ * the connector driver was given for a failure, 0 for none) in its
  * connector's record without a new generation: the connector driver reads
  * the connector again and publishes it, which tells the listeners.
  *
@@ -576,7 +798,8 @@ drv_typec_request_take(
 int
 drv_typec_request_finish(
 	const struct drv_typec_request *request,
-	int error)
+	int error,
+	uint32_t information)
 {
 	/* The outcome in the record. */
 	drv_typec_os_lock();
@@ -589,6 +812,7 @@ drv_typec_request_finish(
 	/* Its serial and outcome. */
 	typec_connectors[request->connector].request_serial = request->serial;
 	typec_connectors[request->connector].request_error = error;
+	typec_connectors[request->connector].request_error_information = information;
 
 	drv_typec_os_unlock();
 
@@ -686,7 +910,7 @@ drv_typec_display_report(
 	if (connector == DRV_TYPEC_CONNECTOR_NONE)
 		return 0;
 
-	/* A disagreement this report began is logged once. */
+	/* A disagreement this report began, or one whose reports changed, is logged. */
 	if (began)
 		typec_dp_log(connector, generation, &display, &ucsi);
 
@@ -946,7 +1170,7 @@ drv_typec_display_check(void)
 		if (!present)
 			break;
 
-		/* A disagreement that began now is logged once. */
+		/* A disagreement that began now, or whose reports changed, is logged. */
 		if (began)
 			typec_dp_log(index, generation, &display, &ucsi);
 
@@ -980,6 +1204,7 @@ drv_typec_text(
 	unsigned count;
 	unsigned index;
 	unsigned port;
+	bool stopped;
 	int error;
 
 	/* An empty text in the caller's buffer. */
@@ -988,6 +1213,11 @@ drv_typec_text(
 	text.length = 0;
 	if (size != 0)
 		buffer[0] = '\0';
+
+	/* A stopped connector driver: the lines below are its last state (ws177-p003). */
+	stopped = drv_typec_driver_stopped();
+	if (stopped)
+		typec_text_append(&text, "the connector driver stopped; the last state follows\n");
 
 	/* One line for each connector, from a copy of its record. */
 	count = drv_typec_connector_count();
@@ -1040,6 +1270,12 @@ typec_request_put(
 		return ENOENT;
 	}
 
+	/* A stopped connector driver carries nothing out. */
+	if (typec_stopped) {
+		drv_typec_os_unlock();
+		return ENODEV;
+	}
+
 	/* A full ring takes no more. */
 	if (typec_request_count == DRV_TYPEC_REQUEST_MAX) {
 		drv_typec_os_unlock();
@@ -1065,6 +1301,43 @@ typec_request_put(
 	if (serial != NULL)
 		*serial = request->serial;
 	return 0;
+}
+
+/*
+ * Publishes an operation's outcome that no connector driver carries (a
+ * cancel, a stopped driver): the serial and the errno value in the
+ * connector's record under a new generation, in one step under the lock
+ * so a record the connector driver publishes meanwhile is not undone, and
+ * the listeners told.  A connector that is not there any more is passed
+ * over.
+ */
+static void
+typec_publish_outcome(
+	const struct drv_typec_request *request,
+	int error)
+{
+	uint64_t generation;
+
+	/* The outcome under a new generation. */
+	drv_typec_os_lock();
+
+	if (request->connector >= typec_count) {
+		drv_typec_os_unlock();
+		return;
+	}
+
+	/* The serial and the errno value, stamped with the new generation. */
+	typec_generation++;
+	generation = typec_generation;
+	typec_connectors[request->connector].generation = generation;
+	typec_connectors[request->connector].request_serial = request->serial;
+	typec_connectors[request->connector].request_error = error;
+	typec_connectors[request->connector].request_error_information = 0U;
+
+	drv_typec_os_unlock();
+
+	/* Succeeded: the listeners learn it. */
+	typec_listeners_tell(request->connector, generation);
 }
 
 /*
@@ -1164,6 +1437,8 @@ typec_dp_compare(
 	uint64_t elapsed;
 	unsigned port;
 	bool differ;
+	bool same_display;
+	bool same_ucsi;
 
 	/* The connector's two reports; an unbound connector has only UCSI's. */
 	watch = &typec_dp_watches[connector];
@@ -1188,9 +1463,16 @@ typec_dp_compare(
 		return false;
 	}
 
-	/* A disagreement already begun is not logged again. */
-	if (watch->disagree)
-		return false;
+	/* A disagreement already begun is logged again only when what it is between changed. */
+	if (watch->disagree) {
+		same_display = typec_dp_same(&watch->logged_display, &typec_displays[port].state);
+		same_ucsi = typec_dp_same(&watch->logged_ucsi, &typec_connectors[connector].dp_ucsi);
+		if (same_display && same_ucsi)
+			return false;
+		watch->logged_display = typec_displays[port].state;
+		watch->logged_ucsi = typec_connectors[connector].dp_ucsi;
+		return true;
+	}
 
 	/* A difference not old enough waits the rest of the time. */
 	elapsed = now - watch->since_ms;
@@ -1204,6 +1486,8 @@ typec_dp_compare(
 	 * the reports agree again.
 	 */
 	watch->disagree = true;
+	watch->logged_display = typec_displays[port].state;
+	watch->logged_ucsi = typec_connectors[connector].dp_ucsi;
 
 	/* Succeeded: a disagreement begins. */
 	return true;
@@ -1367,7 +1651,7 @@ typec_text_line(
 
 	/* The last operation carried out, and its outcome. */
 	if (connector->request_serial != 0)
-		typec_text_append(text, " request=%u error=%d", (unsigned)connector->request_serial, connector->request_error);
+		typec_text_append(text, " request=%u error=%d information=0x%04x", (unsigned)connector->request_serial, connector->request_error, (unsigned)connector->request_error_information);
 
 	/* The generation the record was published at, which ends the line. */
 	typec_text_append(text, " generation=%llu\n", (unsigned long long)connector->generation);
