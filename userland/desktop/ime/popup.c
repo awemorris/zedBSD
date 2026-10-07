@@ -51,12 +51,14 @@
 /* wl_shm's ARGB8888, premultiplied. */
 #define POPUP_FORMAT		0U
 
-/* The colours: the ground, the text, the numbers, the chosen row and the page line. */
+/*
+ * The colours: the ground, the text, the numbers and the page line.  The
+ * chosen row is the accent the user chose with its ink, in the light
+ * appearance the window is drawn in (ws177-p004).
+ */
 #define POPUP_GROUND		KL_RGB(0xffffff)
 #define POPUP_TEXT		KL_RGB(0x1e293b)
 #define POPUP_NUMBER		KL_RGB(0x94a3b8)
-#define POPUP_CHOSEN		KL_RGB(0x2563eb)
-#define POPUP_CHOSEN_TEXT	KL_RGB(0xffffff)
 #define POPUP_EDGE		KL_RGBA(0x334155, 0x30)
 
 static void popup_buffer_release(void *data, struct wl_buffer *buffer);
@@ -98,6 +100,15 @@ program_popup_start(
 		return error;
 
 	popup->text_open = 1;
+
+	/*
+	 * The accent the chosen candidate is drawn in, followed from now on; a
+	 * compositor without the appearance leaves it blue, and the window is
+	 * shown all the same.
+	 */
+	error = kl_appearance_open(program->display, NULL, NULL, &popup->appearance);
+	if (error != 0)
+		popup->appearance = NULL;
 
 	/* The surface, given the input popup role. */
 	popup->surface = wl_compositor_create_surface(program->compositor);
@@ -300,6 +311,8 @@ popup_draw(
 {
 	struct kl_canvas canvas;
 	struct kl_rect clip;
+	struct kl_accent accent;
+	unsigned chosen;
 	char number[8];
 	char page[32];
 	size_t first;
@@ -310,6 +323,10 @@ popup_draw(
 	int top;
 	int status;
 	int page_width;
+
+	/* The accent the user chose last, in the light appearance the window is drawn in. */
+	chosen = kl_accent_get();
+	kl_accent_values(chosen, KL_APPEARANCE_LIGHT, &accent);
 
 	/* A canvas over the buffer's top left, the size of the window, cleared to transparent. */
 	status = kl_canvas_init(&canvas, buffer->pixels, POPUP_MAX_WIDTH, POPUP_MAX_WIDTH, POPUP_MAX_HEIGHT);
@@ -334,12 +351,12 @@ popup_draw(
 		if (index >= out->candidate_count)
 			break;
 
-		/* The chosen one on the accent. */
+		/* The chosen one on the accent, in its ink. */
 		top = POPUP_PADDING + POPUP_ROW * (int)row;
 		color = POPUP_TEXT;
 		if (index == out->candidate_selected) {
-			kl_canvas_round(&canvas, 4.0f, (float)top + 1.0f, (float)width - 8.0f, (float)POPUP_ROW - 2.0f, 6.0f, POPUP_CHOSEN);
-			color = POPUP_CHOSEN_TEXT;
+			kl_canvas_round(&canvas, 4.0f, (float)top + 1.0f, (float)width - 8.0f, (float)POPUP_ROW - 2.0f, 6.0f, accent.accent);
+			color = accent.ink;
 		}
 
 		/* The digit, then the candidate. */

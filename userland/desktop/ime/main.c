@@ -195,6 +195,7 @@ main(
 
 	printf("KEI-IME DONE\n");
 	free(program.out);
+	kl_appearance_close(program.popup.appearance);
 	wl_display_disconnect(program.display);
 
 	/* Succeeded: the program ends with its connection. */

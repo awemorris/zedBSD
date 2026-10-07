@@ -1022,6 +1022,11 @@ struct se_look {
 	int ui_language;
 	int dark;
 	int accent;
+	/*
+	 * The accent swatch that has the keyboard, plus one (ws177-p004): 0
+	 * while none has it, as the page starts; Tab gives it the chosen one's.
+	 */
+	int accent_focus;
 	int frosted;
 	/* The minutes without input before a sleep, on the adapter and on battery (0 never; ws052-p013). */
 	int sleep_ac;
@@ -1377,6 +1382,7 @@ int se_appearance_draw(struct se_app *app, struct kl_canvas *canvas, int x, int 
 int se_wallpaper_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
 int se_storage_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
 void se_look_press(struct se_app *app, int index);
+int se_look_key(struct se_app *app, const struct se_event *event);
 void se_look_drag(struct se_app *app, int index, int x, unsigned phase);
 
 /* The input and sound pages (page-input.c). */

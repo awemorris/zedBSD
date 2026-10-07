@@ -29,6 +29,7 @@ Primary Milestone: MG006（関係: MG002・MG003・MG005）
 
 | Phase | 内容 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [ws177-p001](phase001/phase.md) | 案 E: compositor の wl_surface.enter・leave（backlog-p1 42） | test-wait（T1-404）（2026-10-08 P1 q882 実装・host PASS） | ws113-p007・p015 の出力の所属 |
+| [ws177-p001](phase001/phase.md) | 案 E: compositor の wl_surface.enter・leave（backlog-p1 42） | cleared（2026-10-08 T1-404 PASS） | ws113-p007・p015 の出力の所属 |
 | [ws177-p002](phase002/phase.md) | 案 F: i915 の TC の legacy の PHY の待ちを sleep に、停止で PHY を返す（backlog-p2 153 の一部） | in-progress（2026-10-08 P1 q882 実装・host PASS・build、実機は 5330 の後） | ws051-p002b |
 | [ws177-p003](phase003/phase.md) | 案 G の host の分: UCSI の誤りの理由・CANCEL・PPM_RESET の回復・通知の無い時の poll・記録と再生・停止の道・取り消し・forget（backlog-p2 148〜150・155 の一部） | in-progress（2026-10-08 P1 q882 実装・host PASS・build、実機は 5330 の後） | ws050-p002〜p005 |
+| [ws177-p004](phase004/phase.md) | 案 D: desktop の UI の小物（kl_field の limit・KL_VERSION 64、accent の keyboard、network の行の as_is、IME の popup の accent、Files の Help の折り返し） | in-progress（2026-10-08 P1 q884 実装・host PASS・build） | — |

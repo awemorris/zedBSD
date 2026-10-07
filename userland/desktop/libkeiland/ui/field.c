@@ -20,7 +20,9 @@
  * place of the selection, the bytes around the caret are deleted, and the
  * text being composed shows underlined at the caret until it is committed.
  * A plain field (KL_VERSION 47: an address, a key shown as typed) shows
- * its characters but takes no input method, as a secret one.
+ * its characters but takes no input method, as a secret one.  A field's
+ * limit (KL_VERSION 64, ws177-p004) is the most bytes its text holds: a
+ * key or a commit past it puts in nothing more, or what fits.
  */
 
 #include "internal.h"
@@ -44,6 +46,8 @@ static size_t field_at(const struct kl_style *style, const struct kl_field *fiel
 static unsigned field_input(struct kl_field *field, const struct keiui_input *input);
 static void field_insert(struct kl_field *field, const char *text);
 static void field_delete_around(struct kl_field *field, size_t before, size_t after);
+static size_t field_room(const struct kl_field *field);
+static size_t field_boundary(const char *text, size_t at);
 
 /*
  * Sets a field's text, with the caret at its end and nothing selected.
@@ -53,12 +57,49 @@ kl_field_set(
 	struct kl_field *field,
 	const char *text)
 {
-	/* The text, cut to the field. */
-	strncpy(field->text, text, sizeof(field->text) - 1U);
-	field->text[sizeof(field->text) - 1U] = '\0';
-	field->length = strlen(field->text);
+	size_t room;
+	size_t length;
+
+	/* The text, cut to the field's limit at a character's start. */
+	room = field_room(field);
+	length = strlen(text);
+	if (length > room)
+		length = field_boundary(text, room);
+	memcpy(field->text, text, length);
+	field->text[length] = '\0';
+	field->length = length;
 
 	/* The caret at the end. */
+	field->caret = field->length;
+	field->anchor = field->length;
+	field->scroll = 0;
+}
+
+/*
+ * Sets the most bytes a field's text may hold (0: the field's room); a
+ * text longer than that now is cut at a character's start, with the caret
+ * at its end.
+ */
+void
+kl_field_set_limit(
+	struct kl_field *field,
+	size_t limit)
+{
+	size_t room;
+
+	/* The limit, no more than the field's room. */
+	if (limit > sizeof(field->text) - 1U)
+		limit = sizeof(field->text) - 1U;
+	field->limit = limit;
+
+	/* A text that fits stays as it is. */
+	room = field_room(field);
+	if (field->length <= room)
+		return;
+
+	/* A longer one is cut, and the caret goes to its end. */
+	field->length = field_boundary(field->text, room);
+	field->text[field->length] = '\0';
 	field->caret = field->length;
 	field->anchor = field->length;
 	field->scroll = 0;
@@ -290,6 +331,7 @@ field_key(
 {
 	uint32_t character;
 	unsigned shift;
+	size_t room;
 	size_t at;
 
 	/* Shift keeps the other end of the selection where it is. */
@@ -349,12 +391,13 @@ field_key(
 		return 0;
 	}
 
-	/* A character replaces the selection (a full field takes no more). */
+	/* A character replaces the selection (a field at its limit takes no more). */
 	character = kl_key_character(code, modifiers);
 	if (character == 0U)
 		return 0;
 	field_erase(field);
-	if (field->length + 1U >= sizeof(field->text))
+	room = field_room(field);
+	if (field->length + 1U > room)
 		return KL_FIELD_CHANGED;
 	memmove(field->text + field->caret + 1U, field->text + field->caret, field->length - field->caret + 1U);
 	field->text[field->caret] = (char)character;
@@ -564,13 +607,10 @@ field_insert(
 	/* The selection goes first. */
 	field_erase(field);
 
-	/* As much of the text as there is room for, cut at a character's start. */
-	room = sizeof(field->text) - 1U - field->length;
-	if (length > room) {
-		length = room;
-		while (length > 0U && ((unsigned char)clean[length] & 0xc0U) == 0x80U)
-			length--;
-	}
+	/* As much of the text as the limit has room for, cut at a character's start. */
+	room = field_room(field) - field->length;
+	if (length > room)
+		length = field_boundary(clean, room);
 
 	/* The bytes after the caret move on, and the text goes in before them; the caret follows it. */
 	memmove(field->text + field->caret + length, field->text + field->caret, field->length - field->caret + 1U);
@@ -623,4 +663,33 @@ field_delete_around(
 	/* The selection moves back by what went before it. */
 	field->caret -= start - low;
 	field->anchor -= start - low;
+}
+
+/* Gives the most bytes a field's text may hold: its limit, or its room when it has none. */
+static size_t
+field_room(
+	const struct kl_field *field)
+{
+	/* No limit, or one past the room: the room. */
+	if (field->limit == 0U)
+		return sizeof(field->text) - 1U;
+	if (field->limit > sizeof(field->text) - 1U)
+		return sizeof(field->text) - 1U;
+
+	/* Succeeded: the limit. */
+	return field->limit;
+}
+
+/* Gives the start of the character at or before a byte offset of a text: where it may be cut. */
+static size_t
+field_boundary(
+	const char *text,
+	size_t at)
+{
+	/* Back over the continuation bytes. */
+	while (at > 0U && ((unsigned char)text[at] & 0xc0U) == 0x80U)
+		at--;
+
+	/* Succeeded: a character's start. */
+	return at;
 }

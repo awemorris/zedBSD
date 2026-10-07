@@ -86,6 +86,8 @@ static const struct help_line help_about[] = {
 };
 
 static void help_lines(unsigned help, const struct help_line **lines, int *count, const char **title);
+static int help_rows(struct fm_app *app, const struct help_line *line, int card_width);
+static int help_text_width(const struct help_line *line, int card_width);
 
 /*
  * Opens a Help card (FM_HELP_*), in place of any other card.
@@ -132,13 +134,19 @@ fm_help_draw(
 {
 	const struct help_line *lines;
 	const char *title;
+	const char *text;
 	struct kl_rect whole;
 	struct kl_rect card;
 	struct kl_rect close;
+	size_t done;
+	size_t length;
 	int count;
 	int index;
+	int rows;
+	int row;
 	int baseline;
 	int text_x;
+	int width;
 
 	/* Closed, nothing is drawn. */
 	if (app->help == FM_HELP_NONE)
@@ -152,12 +160,15 @@ fm_help_draw(
 	kl_canvas_fill(canvas, &whole, KL_RGBA(0x1b2233, 90));
 	fm_ui_hit(app, &whole, FM_HIT_OVERLAY, FM_OVERLAY_HELP_GROUND);
 
-	/* The card's lines, and its size. */
+	/* The card's lines, its width, and its height from the rows the lines take once broken at its width (ws177-p004). */
 	help_lines(app->help, &lines, &count, &title);
 	card.width = HELP_WIDTH;
 	if (card.width > app->width - 40)
 		card.width = app->width - 40;
-	card.height = HELP_HEADER + count * HELP_LINE + HELP_PADDING;
+	rows = 0;
+	for (index = 0; index < count; index++)
+		rows += help_rows(app, &lines[index], card.width);
+	card.height = HELP_HEADER + rows * HELP_LINE + HELP_PADDING;
 	card.x = (app->width - card.width) / 2;
 	card.y = (app->height - card.height) / 2;
 	if (card.y < 10)
@@ -177,18 +188,97 @@ fm_help_draw(
 	fm_icon_button(app, canvas, FM_WIDGET_ICON, FM_BUTTON_HELP_CLOSE, &close, KL_ICON_CLOSE, 16, KL_BUTTON_ROUND);
 	fm_ui_hit(app, &close, FM_HIT_BUTTON, FM_BUTTON_HELP_CLOSE);
 
-	/* Each line: a key in its column when it has one, then its text. */
+	/* Each line: a key in its column when it has one, then its text broken into rows at the card's edge. */
+	row = 0;
 	for (index = 0; index < count; index++) {
-		baseline = card.y + HELP_HEADER + index * HELP_LINE + 14;
+		baseline = card.y + HELP_HEADER + row * HELP_LINE + 14;
 		text_x = card.x + HELP_PADDING;
 		if (lines[index].key != NULL) {
 			(void)kl_text_draw(app->text, canvas, text_x, baseline, lines[index].key, strlen(lines[index].key), HELP_TEXT_BODY, 1, FM_COLOR_TEXT);
 			text_x += HELP_KEY_WIDTH;
 		}
 
-		/* The text, cut at the card's edge. */
-		(void)kl_text_draw_fit(app->text, canvas, text_x, baseline, lines[index].text, HELP_TEXT_BODY, 0, card.x + card.width - HELP_PADDING - text_x, FM_COLOR_TEXT_SECONDARY);
+		/* The text's rows; a gap line takes one empty row. */
+		text = lines[index].text;
+		width = help_text_width(&lines[index], card.width);
+		done = 0U;
+		if (text[0] == '\0')
+			row++;
+		while (text[done] != '\0') {
+			/* One row, as much as fits, broken after a space where it can be. */
+			length = kl_text_break(app->text, text + done, HELP_TEXT_BODY, 0, width);
+			if (length == 0U)
+				break;
+			baseline = card.y + HELP_HEADER + row * HELP_LINE + 14;
+			(void)kl_text_draw(app->text, canvas, text_x, baseline, text + done, length, HELP_TEXT_BODY, 0, FM_COLOR_TEXT_SECONDARY);
+			row++;
+
+			/* The next row starts after the spaces the break left. */
+			done += length;
+			while (text[done] == ' ')
+				done++;
+		}
 	}
+}
+
+/*
+ * Counts the rows a line takes in a card of a width: its text broken at
+ * the card's edge (as fm_help_draw draws it), one for a gap.
+ */
+static int
+help_rows(
+	struct fm_app *app,
+	const struct help_line *line,
+	int card_width)
+{
+	size_t done;
+	size_t length;
+	int width;
+	int rows;
+
+	/* A gap is one empty row. */
+	if (line->text[0] == '\0')
+		return 1;
+
+	/* Each row the text is broken into. */
+	width = help_text_width(line, card_width);
+	rows = 0;
+	done = 0U;
+	while (line->text[done] != '\0') {
+		length = kl_text_break(app->text, line->text + done, HELP_TEXT_BODY, 0, width);
+		if (length == 0U)
+			break;
+		rows++;
+		done += length;
+		while (line->text[done] == ' ')
+			done++;
+	}
+
+	/* A text that breaks nowhere still takes its row. */
+	if (rows == 0)
+		return 1;
+
+	/* Succeeded: the rows. */
+	return rows;
+}
+
+/* Gives the width a line's text has in a card: inside the padding, after the key's column when it has a key. */
+static int
+help_text_width(
+	const struct help_line *line,
+	int card_width)
+{
+	int width;
+
+	/* Inside the padding. */
+	width = card_width - 2 * HELP_PADDING;
+
+	/* A key's column comes first. */
+	if (line->key != NULL)
+		width -= HELP_KEY_WIDTH;
+
+	/* Succeeded: the text's width. */
+	return width;
 }
 
 /* Chooses a card's lines and title. */
