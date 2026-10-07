@@ -92,21 +92,24 @@ HID の report が daemon を通る分は数十 µs で、Bluetooth の遅れは
 ### 5.1 `bt-usb`（`src/drivers/usb/usb-bt.c`、新規）と `/dev/btN`（D2）
 
 - match: interface class E0/01/01。Intel 8087:0033 は「firmware が要る」印を device の情報に持つ。firmware の要らない標準の controller
-  （CSR8510 や多くの Broadcom の dongle）はそのまま使う。vendor の firmware が要るのに bluetoothd が知らない物（Realtek・MediaTek）は、
+  （CSR8510 など）はそのまま使う。class FF/01/01（vendor 固有）で出る Broadcom の dongle は E0/01/01 の match に入らない（p002 では
+  取らない。要れば vid・pid の表を足す）。vendor の firmware が要るのに bluetoothd が知らない物（Realtek・MediaTek）は、
   HCI_Reset が通らない・版で分かる時に「この controller は未対応」と示す [F20, N13]。
 - 普通の経路: HCI command は endpoint 0 の class の control（bmRequestType 0x20）、ACL は bulk OUT。受け: interrupt IN の event、bulk IN の ACL。
 - **bootloader の経路**（ioctl `BT_IOC_SET_BOOTLOADER` で入り、同じ ioctl で出る。daemon が Read Version の答えで決める）: 型 0x01 の packet の
   うち opcode 0xFC09 は bulk OUT へ、bulk IN の受けは型 0x04 の event として渡す。他の command は普通の経路 [F1]。
 - packet の形: 1 回の write は H4 の形の 1 packet（先頭 1 byte が型: 0x01 command、0x02 ACL）。1 回の read は 1 packet（0x04 event、0x02 ACL）。
   0x03（SCO）・0x05（ISO）は予約（今は EINVAL）。kernel だけの通知は型 0x80 以上（0xFF は HCI の vendor event の code なので使わない）:
-  0x80「controller が reset された」（`BT_IOC_RESET` が終わった時。resume は `/dev/system` の class で知る、§5.3）[F20, N11]。
-- 境界: command は header 3 byte と parameter 255 byte まで、event は 2+255 byte まで、ACL は controller の ACL の大きさ
-  （HCI_Read_Buffer_Size を daemon が ioctl で教える、教わる前は 1021 byte）まで。組み直しは header の長さで行い、長さが合わない USB の
+  0x80「controller が reset された」（`BT_IOC_RESET` が終わった時。resume は `/dev/system` の POWER の class の `sleep.end` で知る、§5.3）[F20, N11]。
+- 境界: command は header 3 byte と parameter 255 byte まで、event は 2+255 byte まで、送る ACL は controller の ACL の大きさ
+  （HCI_Read_Buffer_Size を daemon が ioctl で教える、教わる前は 1021 byte）まで、受ける ACL は 4096 byte（`BT_ACL_DATA_MAX`）まで
+  （Read_Buffer_Size は host→controller の上限なので受けには使わない。p002 の review）。組み直しは header の長さで行い、長さが合わない USB の
   受けは捨てて数える（悪い device が kernel の buffer を越えさせない）。read の buffer が 1 packet より短いと EMSGSIZE（切らない）[F5, F20]。
 - 流れの制御: event と ACL は別の queue と上限を持つ（相手が ACL を溢れさせても HCI の event が飢えない）。queue が満ちたらその
   endpoint の IN の URB を出し直さない（controller の側に NAK で留まる、backpressure）。packet は捨てない（L2CAP の basic mode は再送しない
   ので、ACL を捨てると HID・ATT の data が壊れる）。bulk IN の組み直しが壊れた時（ACL の header の長さと受けの境が合わない）は、その
-  transfer の残りを捨てて数え、次の USB の transfer の頭から組み直す。userland への copy は lock の外で行う [F15, N12]。
+  transfer の残りを捨てて数え、次の USB の transfer の頭から組み直す。read は spin lock の中で 1 packet を syscall の kernel の bounce に写し、
+  userland への copy は syscall の層が lock の外で行う [F15, N12]。
 - 開ける: 同時に 1 つ（bluetoothd）。誰が開けられるかは D16 の答えで決める（§6.5: 特権の分離の形）。
 - 寿命と並行: driver の状態は参照数付き。取り外し（detach）は新しい操作を断り、URB を取り消して完了を待ち、read・poll で寝ている者を
   ENODEV で起こし、最後の close で解放する。取り外しの後の write・ioctl は ENODEV。URB の完了の文脈と read・write・poll は 1 つの spin lock
@@ -153,9 +156,9 @@ re-enumerate で device が detach・attach し直すか（6087〜6125 行）。
   OVERFLOW（queue は 64）の時に `/dev/bt*` を少し待って数回 scan し直す。新しい controller として firmware を load し直し、bond 済みの
   device の再接続を始める [N11]。
 - resume の印: 状態が戻る時、bt-usb は何もしない（USB の core は driver の resume を呼ばず、xhci_resume が ring を戻して残りの URB が
-  そのまま続く）ので、bt-usb からは resume を知らせられない。`/dev/system` に resume の class（`KERN_SYSTEM_EVENT_RESUME`、
-  `include/uapi/system.h` の 300〜309 行の class に 1 bit を足す小さな UAPI の追加、system の sleep の終わりで出す）を足し（p002、D2 の中で
-  承認を求める）、bluetoothd はそれで Read Version をやり直し（S0ix で CNVi の Bluetooth の電源が落ちて bootloader に戻っていれば load し直す。
+  そのまま続く）ので、bt-usb からは resume を知らせられない。**改訂（p002 の詳細設計 §1）**: 2026-10-05 の ws052-p006 で
+  `KERN_SYSTEM_EVENT_POWER` の `sleep.end` が入ったので、resume の class の UAPI は足さない（D2 で承認された bit は使わない）。
+  （第 3 版の案: `/dev/system` に resume の class を足す。）bluetoothd はそれで Read Version をやり直し（S0ix で CNVi の Bluetooth の電源が落ちて bootloader に戻っていれば load し直す。
   未確認）、resume の前に受けて渡していない HID の report を捨てる [N11]。
 - 架空の suspend の hook（第 1 版の「URB を止めて reset の event を返す」）は作らない。USB の core に suspend の通知を足すのは別の仕事。
 
