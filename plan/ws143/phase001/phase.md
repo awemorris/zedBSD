@@ -4,9 +4,9 @@
 
 Phase ID: `ws143-p001`
 Parent: [WS143](../ws.md)
-Status: in-progress（2026-10-05 P1 generation18、q752）
+Status: cleared（2026-10-08 Q1 の判定: design.md の §9 の D1〜D18 はユーザーが全部推奨どおりに決定（2026-10-05）、HID が先、A2DP・PAN は F-082 へ）
 Phase disposition: normal
-Queue: q752（P1、2026-10-05。Q1「Go ahead with p001 (survey and design) under q752」）
+Queue: q752（P1、2026-10-05。Q1「Go ahead with p001 (survey and design) under q752」）、q860-i01（P2、2026-10-08、記録の締め）
 
 ## 範囲
 
@@ -47,3 +47,13 @@ N1〜N17）。第 3 版で全て反映（§3 の手順と失敗の経路、§5.1
 第 3 版の部分の再確認（同じ agent）: N1〜N17 のうち 16 が解決、N11（resume の印）が残り、`/dev/system` に resume の class を足す案（a）で
 直した（D2 の中で承認を求める）。D5・D18・情報のお願いの文の小さな直しも反映。reviewer の判断「§5.3 を直せば §9 をユーザーに送ってよい、
 次の review は要らない」。
+
+### 2026-10-08 q860-i01: 記録の締め（cleared の提案）
+
+- ユーザーの判断: 2026-10-05 夕「WS143 Bluetooth: §9 の D1〜D18 は全部推奨どおり（音と PAN は後回し、HID が先）」と、同日の
+  「HIDが先で、オーディオとPANもほしいですが、ほかの開発項目より後回しでいいです。」（[master](../../master.md) の decisions-log）。
+  design.md の §9 に決定の欄を足し、§1 の受け入れを確定にした。
+- 完了の条件の照合: (1) design.md の §1〜§10 と出典（第 3 版）、(2) review-1 の F1〜F25 と review-2 の N1〜N17 を全て反映（reviewer の判断
+  「次の review は要らない」）、(3) §9 の質問を Q1 に送り答えを得た（上）。3 つとも満たすので cleared を提案する（判定は Q1）。
+- 次: [ws.md](../ws.md) の Phase の表に p002〜p009 を置いた（HID の経路は p002〜p005、desktop は p006）。A2DP と PAN は D1 のとおり別の WS
+  （Future Work への登録を Q1 に依頼）。

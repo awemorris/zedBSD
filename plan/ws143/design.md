@@ -4,6 +4,8 @@
 
 版: 2026-10-05 第 3 版（P1 generation18、q752）。第 1 版への design-reviewer の指摘 F1〜F25（[phase001/review-1.md](phase001/review-1.md)）と
 第 2 版への指摘 N1〜N17（[phase001/review-2.md](phase001/review-2.md)）を反映した。各節の `[Fn]`・`[Nn]` は、その節が答える指摘。
+§9 の D1〜D18 は 2026-10-05 夕にユーザーが**全部推奨どおり**に決めた（「HIDが先で、オーディオとPANもほしいですが、ほかの開発項目より
+後回しでいいです。」、master の decisions-log）。以下の「推奨」は決定として読む。
 
 目標は [ws.md](ws.md) の単一目標: Settings の Bluetooth の頁を実体にし、5330 の AX211 の Bluetooth（USB 8087:0033）で device を見つけ、
 pairing・接続・切断ができる。
@@ -13,7 +15,7 @@ iwmbt_hw.c・iwmbt_fw.c、freebsd-src の commit `84488787f42bc62b428da37793ac45
 file の sha256 は main.c `ebee5557…`・iwmbt_hw.c `12d4ef01…`・iwmbt_fw.c `a9ec00b8…`）は手順と定数を確かめる参照で、code は写さない
 （新規に書く）[N17]。
 
-## 1. 受け入れ（案。§9 の答えで確定）
+## 1. 受け入れ（2026-10-05 の §9 の決定で確定）
 
 1. 5330 で起動の後、Bluetooth の controller が使える（firmware を load し、BD_ADDR を読める）。firmware の package が無い時は
    Settings が理由（「firmware が要る」）を出す。
@@ -268,6 +270,8 @@ D1 で尋ねる。LE Audio、OBEX、PAN は範囲の外。
 
 ## 9. ユーザーの判断が要る点 [F18, N9]
 
+**決定（2026-10-05 夕 ユーザー）: D1〜D18 は全て下の表の「推奨」のとおり。** A2DP と PAN は要るが他の開発の後（D1 の A: 別の WS）。
+
 最初に構成（D15）を尋ね、その答えで D2〜D4 の形が決まる。
 
 | # | 判断 | 選択肢と結果 | 推奨 |
@@ -298,7 +302,7 @@ D1 で尋ねる。LE Audio、OBEX、PAN は範囲の外。
 
 ## 10. Phase と試験
 
-### 10.1 Phase（案。§9 の答えの後に確定し、各 Phase は着手の前に詳細設計と design-reviewer）[F19]
+### 10.1 Phase（§9 の決定の後の形。各 Phase は着手の前に詳細設計と design-reviewer）[F19]
 
 | Phase | 内容 | 依存 |
 | --- | --- | --- |

@@ -15,8 +15,9 @@
 #     an --urgent one is ("show ... urgent=1").
 #  7. The log: Super+N opens it on the newest ("log open count=7", log.png), Right steps to the older ("log at
 #     place=2"), Left twice reaches the clearing board ("log at place=0 clear", log-clear.png), Enter clears ("log
-#     clear count=6"), the board says "No notifications" (log-empty.png), Esc closes ("log close reason=esc").
+#     clear count=7"), the board says "No notifications" (log-empty.png), Esc closes ("log close reason=esc").
 #  8. The compositor stays up, with no ERROR in its log.
+# The ids are not assumed: notify() reads each one from the client's "KEILAND-NOTIFY posted ... id=N" (posts.txt).
 #   plan/ws156/tests/p005-guest.sh BUILD [OUTDIR]
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -36,13 +37,24 @@ tap() { key "$1" true; sleep 0.12; key "$1" false; sleep 0.6; }
 count() { guest "grep -c -- '$1' /tmp/zdesktop.log" | tail -1; }
 wait_for() { i=0; while [ "$(count "$1")" -lt "$2" ] 2>/dev/null && [ $i -lt "$3" ]; do sleep 0.5; i=$((i+1)); done; }
 env='export XDG_RUNTIME_DIR=/tmp WAYLAND_DISPLAY=wayland-0;'
-notify() { guest "$env /bin/keiland-notify $* >> /tmp/notify-client.log 2>&1 </dev/null & echo posted" >/dev/null; }
+# Quotes one word for the guest's shell (a ' inside becomes '\'').
+quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+# Posts one notification and waits for the client's "posted ... id=N"; the compositor's id goes to $id (0 if none came).
+notify() {
+	words=''; for w in "$@"; do words="$words $(quote "$w")"; done
+	before=$(guest "grep -c 'KEILAND-NOTIFY posted' /tmp/notify-client.log 2>/dev/null || true" | tail -1)
+	guest "$env /bin/keiland-notify$words >> /tmp/notify-client.log 2>&1 </dev/null & echo posted" >/dev/null
+	i=0; while [ "$(guest "grep -c 'KEILAND-NOTIFY posted' /tmp/notify-client.log 2>/dev/null || true" | tail -1)" -le "${before:-0}" ] 2>/dev/null && [ $i -lt 20 ]; do sleep 0.3; i=$((i+1)); done
+	id=$(guest "grep 'KEILAND-NOTIFY posted' /tmp/notify-client.log | tail -1 | sed 's/.*id=//'" | tail -1)
+	case "$id" in ''|*[!0-9]*) id=0 ;; esac
+	echo "posted id=$id: $*" >> "$out/posts.txt"
+}
 stop_all='for p in $(ps -A -o pid,args | grep -E "[w]ayland( |$)|[w]ltest|[k]eiland-notify" | awk "{print \$1}"); do kill $p; done; i=0; while ps -A -o args | grep -qE "[w]ayland( |$)|[w]ltest" && [ $i -lt 50 ]; do sleep 0.2; i=$((i+1)); done'
 status=0
 pass() { echo "$1: ok"; }
 fail() { echo "$1: FAILED"; status=1; }
 expect_count() { n=$(count "$2"); if [ "${n:-0}" -eq "$3" ] 2>/dev/null; then pass "$1"; else fail "$1 ($2: ${n:-?}, expected $3)"; fi; }
-: > "$out/qmp.txt"
+: > "$out/qmp.txt"; : > "$out/posts.txt"
 
 # The compositor under test.
 guest "$stop_all" >/dev/null
@@ -53,64 +65,73 @@ pointer move 100 100 sleep 300
 
 # 1. One notification enters, stays, leaves, and is logged.
 notify --app=Test --wait-ms=200 Hello "The first notification's body, long enough to wrap onto its second line on the board"
-wait_for 'KWL NOTIFY show id=1' 1 10
+one=$id
+wait_for "KWL NOTIFY show id=$one " 1 10
 sleep 1.2
 shot popup-stay
-wait_for 'KWL NOTIFY gone id=1' 1 12
-expect_count one-shown 'KWL NOTIFY show id=1 ' 1
-expect_count one-logged 'KWL NOTIFY hide id=1' 1
-expect_count one-gone 'KWL NOTIFY gone id=1' 1
+wait_for "KWL NOTIFY gone id=$one\$" 1 12
+expect_count one-shown "KWL NOTIFY show id=$one " 1
+expect_count one-logged "KWL NOTIFY hide id=$one\$" 1
+expect_count one-gone "KWL NOTIFY gone id=$one\$" 1
 
 # 2. Three at once: one after the other, in order.
 notify --wait-ms=200 One
+first=$id
 notify --wait-ms=200 Two
+second=$id
 notify --wait-ms=200 Three
-wait_for 'KWL NOTIFY gone id=4' 1 24
+third=$id
+wait_for "KWL NOTIFY gone id=$third\$" 1 24
 guest "grep -o 'KWL NOTIFY show id=[0-9]*' /tmp/zdesktop.log | tr '\n' ' '" > "$out/order.txt"
-grep -q 'show id=2 KWL NOTIFY show id=3 KWL NOTIFY show id=4' "$out/order.txt" && pass three-in-order || fail "three-in-order ($(cat "$out/order.txt"))"
-expect_count three-gone 'KWL NOTIFY gone id=4' 1
+grep -q "show id=$first KWL NOTIFY show id=$second KWL NOTIFY show id=$third" "$out/order.txt" && pass three-in-order || fail "three-in-order ($first $second $third: $(cat "$out/order.txt"))"
+expect_count three-gone "KWL NOTIFY gone id=$third\$" 1
 
 # 3. The close sign dismisses: not logged.
 notify --wait-ms=8000 Close-me
-wait_for 'KWL NOTIFY show id=5' 1 10
+close=$id
+wait_for "KWL NOTIFY show id=$close " 1 10
 sleep 0.6
 pointer move 785 690 sleep 200 down sleep 80 up sleep 600
-expect_count close-dismissed 'KWL NOTIFY dismiss id=5' 1
-expect_count close-told 'KWL NOTIFY closed client=[0-9]* id=5 reason=1' 1
+expect_count close-dismissed "KWL NOTIFY dismiss id=$close\$" 1
+expect_count close-told "KWL NOTIFY closed client=[0-9]* id=$close reason=1" 1
 pointer move 100 100 sleep 200
 
 # 4. An ACTION notification's body is activated.
 notify --action --wait-ms=8000 Act "Click the body"
-wait_for 'KWL NOTIFY show id=6' 1 10
+act=$id
+wait_for "KWL NOTIFY show id=$act " 1 10
 sleep 0.6
 pointer move 560 725 sleep 200 down sleep 80 up sleep 800
-expect_count action-activated 'KWL NOTIFY activate id=6' 1
+expect_count action-activated "KWL NOTIFY activate id=$act\$" 1
 n=$(guest "grep -c 'KEILAND-NOTIFY activated' /tmp/notify-client.log" | tail -1)
 [ "${n:-0}" -ge 1 ] 2>/dev/null && pass action-client-told || fail "action-client-told (${n:-?})"
 pointer move 100 100 sleep 200
 
 # 5. The pointer on the board holds it.
 notify --wait-ms=200 Hold
-wait_for 'KWL NOTIFY show id=7' 1 10
+hold=$id
+wait_for "KWL NOTIFY show id=$hold " 1 10
 pointer move 600 710 sleep 5000
-expect_count hover-holds 'KWL NOTIFY hide id=7' 0
+expect_count hover-holds "KWL NOTIFY hide id=$hold\$" 0
 pointer move 100 100 sleep 200
-wait_for 'KWL NOTIFY gone id=7' 1 12
-expect_count hover-then-leaves 'KWL NOTIFY gone id=7' 1
+wait_for "KWL NOTIFY gone id=$hold\$" 1 12
+expect_count hover-then-leaves "KWL NOTIFY gone id=$hold\$" 1
 
 # 6. Under a fullscreen window: skipped, but an urgent one shows.
 guest "$env /bin/wltest --windowed --fullscreen-at=1 --frames=3600 --delay-ms=250 > /tmp/wltest-fs.log 2>&1 </dev/null & sleep 4; echo started" >/dev/null
 notify --wait-ms=200 Quiet
-wait_for 'KWL NOTIFY skip id=8 reason=fullscreen' 1 10
-expect_count fullscreen-skipped 'KWL NOTIFY skip id=8 reason=fullscreen' 1
+quiet=$id
+wait_for "KWL NOTIFY skip id=$quiet reason=fullscreen" 1 10
+expect_count fullscreen-skipped "KWL NOTIFY skip id=$quiet reason=fullscreen" 1
 notify --urgent --wait-ms=200 Urgent
-wait_for 'KWL NOTIFY show id=9 client=[0-9]* urgent=1' 1 10
-expect_count fullscreen-urgent-shown 'KWL NOTIFY show id=9 client=[0-9]* urgent=1' 1
+urgent=$id
+wait_for "KWL NOTIFY show id=$urgent client=[0-9]* urgent=1" 1 10
+expect_count fullscreen-urgent-shown "KWL NOTIFY show id=$urgent client=[0-9]* urgent=1" 1
 sleep 1
 shot urgent-over-fullscreen
 pointer move 600 710 sleep 400
 pointer move 100 100 sleep 200
-wait_for 'KWL NOTIFY gone id=9' 1 14
+wait_for "KWL NOTIFY gone id=$urgent\$" 1 14
 guest "for p in \$(ps -A -o pid,args | grep '[w]ltest' | awk '{print \$1}'); do kill \$p; done; sleep 1; echo stopped" >/dev/null
 
 # 7. The log: open, step, the clearing board, clear, empty, close.
@@ -118,7 +139,7 @@ key meta_l true; tap n; key meta_l false; sleep 0.5
 expect_count log-open 'KWL NOTIFY log open count=7' 1
 shot log
 tap right
-expect_count log-older 'KWL NOTIFY log at place=2 id=' 1
+expect_count log-older "KWL NOTIFY log at place=2 id=$quiet\$" 1
 tap left
 tap left
 expect_count log-clearing-board 'KWL NOTIFY log at place=0 clear' 1

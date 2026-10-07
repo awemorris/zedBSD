@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Related Milestones: —
 Parent: [Master](../master.md)
 Queue: なし（担当と時期は未定）
-Resume point: 2026-10-08 P2: p003（popup・system の通知）と p004（log）を実装、host 試験 PASS。次は p005（T1 の QEMU、全文の規約）。以前: p002 cleared（T1-269）。
+Resume point: 2026-10-08 Q1: p003・p004 cleared（T1-375b PASS）。残りは p005 の全文の規約と実機の UAT。以前: p002 cleared（T1-269）。
 <!-- awesome-plan-current:end -->
 
 ## 単一目標
@@ -40,7 +40,7 @@ app から通知を出せる仕組みを作り、画面の下の中央を headli
 | --- | --- | --- | --- |
 | [ws156-p001](phase001/phase.md) | 設計（通知の口・内容・popup の動き・log と hotkey・保存・試験の方法） | planning（設計の第 1 版、2026-10-05 P1。判断 H1〜H7 待ち） | — |
 | [ws156-p002](phase002/phase.md) | 通知の口（protocol・libkeiland）と compositor の受け取り | in-progress（2026-10-06 P2。host 試験 PASS、QEMU は T1） | p001 |
-| [ws156-p003](phase003/phase.md) | popup の描画と動き（右から中央、3 秒、左へ fade-out）、× で消す、全画面・lock、system の通知 | in-progress（2026-10-08 P2。実装と host 試験済み、QEMU は p005 で T1） | p002 |
-| [ws156-p004](phase004/phase.md) | log（hotkey、ring の左右、すべて消去、個別に消した物は残さない） | in-progress（2026-10-08 P2。実装と build 済み、QEMU は p005 で T1） | p003 |
-| ws156-p005 | 全文の規約と QEMU の回帰（T1）、実機の UAT | planning | p002〜p004 |
+| [ws156-p003](phase003/phase.md) | popup の描画と動き（右から中央、3 秒、左へ fade-out）、× で消す、全画面・lock、system の通知 | cleared（2026-10-08 Q1、T1-375b PASS 20 項目） | p002 |
+| [ws156-p004](phase004/phase.md) | log（hotkey、ring の左右、すべて消去、個別に消した物は残さない） | cleared（2026-10-08 Q1、T1-375b PASS） | p003 |
+| ws156-p005 | 全文の規約と QEMU の回帰（T1）、実機の UAT | uncleared（2026-10-08 QEMU の回帰 T1-375b PASS、20 項目 ok、PNG 5 枚。残り: 全文の規約の見直し、実機の UAT） | p002〜p004 |
 | ws156-p006 | Linux: libkeiland-backend の D-Bus の `org.freedesktop.Notifications`（設計 p001 §11、2026-10-05 ユーザー「実装はあと回し」） | planning（後回し） | p002 |

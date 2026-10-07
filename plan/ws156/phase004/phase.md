@@ -4,7 +4,7 @@
 
 Phase ID: `ws156-p004`
 Parent: [WS156](../ws.md)
-Status: in-progress（q859、P2、2026-10-08。実装と build 済み、QEMU は p005 で T1）
+Status: cleared（2026-10-08 Q1: T1-375b QEMU PASS、20 項目 ok、成果物は T1 の worktree build/t1-375b/OUT/）
 Phase disposition: normal
 
 ## 範囲
