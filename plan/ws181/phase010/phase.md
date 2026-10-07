@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws181-p010 -->
 # ws181-p010: Alt+Shift+左右で仮想 desktop を移る
 
-Status: test-wait（T1-391。2026-10-08 P1 q875: 実装・build warning 0 まで。QEMU は `plan/ws181/tests/p010-guest.sh`）
+Status: cleared（2026-10-08 Q1 判定、T1-391 QEMU PASS）（旧: test-wait（T1-391。2026-10-08 P1 q875: 実装・build warning 0 まで。QEMU は `plan/ws181/tests/p010-guest.sh`））
 Disposition: normal
 Parent: [WS181](../ws.md)
 Queue: q875（P1、2026-10-08 Q1 の承認「5330 なしで進められる小さい物を順に」の 1 番）
@@ -38,3 +38,8 @@ Queue: q875（P1、2026-10-08 Q1 の承認「5330 なしで進められる小さ
 ## 積み残し
 
 - 無し（端で wrap しないのは Ctrl+Alt と同じ）。
+
+
+## Q1 の判定（2026-10-08）
+
+T1-391: p010-guest.sh PASS（31 s）。PNG（build/review/ws181/p010-right.png）で pill の 3 つ目の desktop が選ばれている。実機の UAT は未実施。
