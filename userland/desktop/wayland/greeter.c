@@ -31,6 +31,14 @@
  * session's descriptor (--control-fd) as UNLOCK style; OK unlocks, FAIL
  * (after sessiond's delay) asks again.
  *
+ * The lock screen shows the clock and "Swipe up to unlock" first, without
+ * the card (ws187-p002, lock-swipe.c): a swipe up from the lower part of
+ * the output (a finger, or the pointer dragged), two fingers up on a touch
+ * pad, or the wheel turned up opens a lock the session made itself (the
+ * lid, sleep) within LOCK_GRACE_SECONDS of locking, and otherwise brings
+ * the card; so does a key, which goes into the field.  The card goes
+ * again after GREETER_CARD_IDLE_MS with nothing typed.
+ *
  * The PIN (ws172-p002, docs/architecture/security.md "Login
  * authentication"): sessiond says which styles the user may use now
  * (STYLES); when the PIN is one the field takes the PIN first, and a link
@@ -56,6 +64,7 @@
 #include "language.h"
 #include "glass.h"
 #include "lock-clock.h"
+#include "lock-swipe.h"
 
 #include "userland/desktop/libkeiland-backend/keiland-backend.h"
 
@@ -117,6 +126,31 @@
 #define GREETER_GLOW_DOWN	16
 #define GREETER_GLOW_SPREAD	70
 #define GREETER_GLOW_RADIUS	52.0f
+
+/*
+ * How long after a lock the session made itself a swipe alone opens it
+ * (ws187-p002; the default proposed to the user on 2026-10-08, five
+ * minutes, on the wall clock).
+ */
+#define LOCK_GRACE_SECONDS	300
+
+/* How long the lock screen's card stays with nothing typed and no input before only the clock shows again. */
+#define GREETER_CARD_IDLE_MS	30000U
+
+/* The lock screen's "Swipe up to unlock": its baseline above the output's foot, and its opacity at rest (pixels). */
+#define GREETER_HINT_FOOT	64
+#define GREETER_HINT_OPACITY	0.80f
+
+/* The modifiers' evdev codes: a key that only modifies brings no card (left and right Ctrl, Shift, Alt, Super, Caps Lock). */
+#define GREETER_KEY_LEFTCTRL	29U
+#define GREETER_KEY_LEFTSHIFT	42U
+#define GREETER_KEY_RIGHTSHIFT	54U
+#define GREETER_KEY_LEFTALT	56U
+#define GREETER_KEY_CAPSLOCK	58U
+#define GREETER_KEY_RIGHTCTRL	97U
+#define GREETER_KEY_RIGHTALT	100U
+#define GREETER_KEY_LEFTMETA	125U
+#define GREETER_KEY_RIGHTMETA	126U
 
 /* The Kei mark's square at the bottom left, in pixels. */
 #define GREETER_BRAND_MARK	48
@@ -223,6 +257,19 @@ static unsigned greeter_submit_pending;
 /* A security key waits to be touched for the attempt under way (sessiond's TOUCH, ws172-p003). */
 static unsigned greeter_touch;
 
+/*
+ * The lock screen's moves and grace (ws187-p002): whether the lock was the
+ * user's choice (it always asks for the secret, kwl_lock_reason_manual),
+ * when it locked on the wall clock, whether the card with the field shows
+ * (a swipe outside the grace, or a key, brought it; 0 shows the clock and
+ * the hint only), and the moves being followed.  Set by kwl_lock, cleared
+ * by kwl_lock_release.
+ */
+static unsigned greeter_lock_manual;
+static int64_t greeter_lock_at;
+static unsigned greeter_lock_card;
+static struct kwl_lock_swipe greeter_swipe;
+
 /* The characters each key types, without and with Shift (US layout); 0 for none. */
 static const char greeter_plain[GREETER_KEYS] = {
 	0, 0, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 0, 0,
@@ -247,6 +294,9 @@ static void greeter_draw_field(struct kwl_server *server, VkCommandBuffer comman
 static void greeter_draw_button(struct kwl_server *server, VkCommandBuffer command, const int32_t *rect, const char *label, int strong);
 static void greeter_draw_clock(struct kwl_server *server, VkCommandBuffer command, const struct greeter_layout *layout);
 static void greeter_draw_brand(struct kwl_server *server, VkCommandBuffer command);
+static void greeter_draw_hint(struct kwl_server *server, VkCommandBuffer command);
+static void greeter_lock_swiped(struct kwl_server *server, const char *via);
+static int greeter_key_modifies(uint32_t key);
 static void greeter_draw_centered(struct kwl_server *server, VkCommandBuffer command, enum glass_size size, int32_t middle, int32_t baseline, const char *text, int32_t limit, const float *color);
 static void greeter_select(struct kwl_server *server, unsigned user);
 static void greeter_type(struct kwl_server *server, uint32_t key);
@@ -339,13 +389,19 @@ kwl_lock(
 	/* Whether the user's PIN can unlock it: sessiond is asked. */
 	greeter_styles_reset();
 
+	/* Whether the user chose the lock, and when it locked: the grace a swipe alone has (ws187-p002); only the clock shows. */
+	greeter_lock_manual = (unsigned)kwl_lock_reason_manual(reason);
+	greeter_lock_at = (int64_t)time(NULL);
+	greeter_lock_card = 0U;
+	kwl_lock_swipe_reset(&greeter_swipe);
+
 	/* The clipboard's history goes (clipboard.c). */
 	kwl_clipboard_history_clear(server, "lock");
 
 	/* Succeeded: the lock screen shows. */
 	server->locked = 1U;
 	server->dirty = 1;
-	printf("KWL LOCK locked reason=%s user=%s\n", reason, greeter_users[0].name);
+	printf("KWL LOCK locked reason=%s user=%s manual=%u\n", reason, greeter_users[0].name, greeter_lock_manual);
 	return 1;
 }
 
@@ -367,6 +423,10 @@ kwl_lock_release(
 	greeter_message[0] = '\0';
 	greeter_waiting = 0U;
 	greeter_submit_pending = 0U;
+
+	/* The next lock starts with the clock alone and no move followed. */
+	greeter_lock_card = 0U;
+	kwl_lock_swipe_reset(&greeter_swipe);
 
 	/* Succeeded: the desktop shows; the idle time starts again. */
 	server->locked = 0U;
@@ -460,6 +520,12 @@ kwl_greeter_draw(
 		return;
 	}
 
+	/* A lock screen before a swipe or a key: the hint instead of the card (ws187-p002). */
+	if (server->locked && !greeter_lock_card) {
+		greeter_draw_hint(server, command);
+		return;
+	}
+
 	/* The card with the users, the password and Log In. */
 	greeter_draw_card(server, command, &layout);
 
@@ -482,6 +548,27 @@ kwl_greeter_button(
 	struct greeter_layout layout;
 	enum greeter_hit hit;
 	unsigned user;
+	int swiped;
+
+	/* A lock screen before its card: the left button's press and release may be a swipe up (ws187-p002). */
+	if (server->locked && !greeter_lock_card) {
+		if (button != GREETER_BUTTON_LEFT)
+			return 1;
+
+		/* A press is followed when it is in the lower part. */
+		if (state != 0U) {
+			(void)kwl_lock_swipe_press(&greeter_swipe, server->pointer_x, server->pointer_y, (int32_t)server->height);
+			server->dirty = 1;
+			return 1;
+		}
+
+		/* The release says whether it swiped. */
+		swiped = kwl_lock_swipe_release(&greeter_swipe, (int32_t)server->height);
+		server->dirty = 1;
+		if (swiped)
+			greeter_lock_swiped(server, "pointer");
+		return 1;
+	}
 
 	/* Only the left button's press does anything, and nothing once the session is starting or the machine ending. */
 	if (button != GREETER_BUTTON_LEFT || state == 0U || greeter_starting || greeter_powering[0] != '\0')
@@ -532,6 +619,8 @@ kwl_greeter_key(
 	int error;
 	int held;
 
+	int modifies;
+
 	/* Releases do nothing, and nothing does once the session is starting or the machine ending. */
 	if (state == 0U || greeter_starting || greeter_powering[0] != '\0')
 		return 1;
@@ -541,6 +630,20 @@ kwl_greeter_key(
 	if (held) {
 		printf("KWL SLEEP ignore key\n");
 		return 1;
+	}
+
+	/*
+	 * A lock screen before its card: a key that does more than modify
+	 * brings the card and goes on into it, so a keyboard alone can start
+	 * typing (ws187-p002); a key never opens the lock without the secret.
+	 */
+	if (server->locked && !greeter_lock_card) {
+		modifies = greeter_key_modifies(key);
+		if (modifies)
+			return 1;
+		greeter_lock_card = 1U;
+		kwl_lock_swipe_reset(&greeter_swipe);
+		printf("KWL LOCK card via=key\n");
 	}
 
 	/* Routes the key by its code. */
@@ -588,6 +691,98 @@ kwl_greeter_key(
 	/* Any other key may type a character. */
 	greeter_type(server, key);
 	return 1;
+}
+
+/*
+ * Follows the pointer pressed on a lock screen before its card: how far a
+ * swipe has gone up (ws187-p002; the hint follows it).
+ */
+void
+kwl_greeter_motion(
+	struct kwl_server *server)
+{
+	/* Only a lock screen before its card follows a press. */
+	if (!server->locked || greeter_lock_card)
+		return;
+
+	/* Nothing pressed in the lower part. */
+	if (!greeter_swipe.pressing)
+		return;
+
+	/* The swipe so far, drawn at the next frame. */
+	kwl_lock_swipe_motion(&greeter_swipe, server->pointer_x, server->pointer_y);
+	server->dirty = 1;
+}
+
+/*
+ * Takes the wheel's notches (positive down) on a lock screen before its
+ * card: turned up two notches in a row, it is a swipe (ws187-p002).
+ */
+void
+kwl_greeter_wheel(
+	struct kwl_server *server,
+	int32_t vertical)
+{
+	int swiped;
+
+	/* Only a lock screen before its card. */
+	if (!server->locked || greeter_lock_card)
+		return;
+
+	/* The notches, counted. */
+	swiped = kwl_lock_swipe_wheel(&greeter_swipe, vertical, kwl_milliseconds());
+	if (swiped)
+		greeter_lock_swiped(server, "wheel");
+}
+
+/*
+ * Takes two fingers' travel on a touch pad (micrometres, positive down,
+ * the fingers' own way) on a lock screen before its card: far enough up,
+ * it is a swipe (ws187-p002).
+ */
+void
+kwl_greeter_pad_scroll(
+	struct kwl_server *server,
+	int64_t down_um)
+{
+	int swiped;
+
+	/* Only a lock screen before its card. */
+	if (!server->locked || greeter_lock_card)
+		return;
+
+	/* The travel, counted. */
+	swiped = kwl_lock_swipe_pad(&greeter_swipe, down_um);
+	if (swiped)
+		greeter_lock_swiped(server, "pad");
+}
+
+/*
+ * Takes the end of a touch on a touch pad on the lock screen: a gesture up
+ * (two fingers from the bottom edge, three fingers up) with its travel
+ * along its way, or 0 for any other end; far enough, it is a swipe
+ * (ws187-p002).  The next touch counts afresh.
+ */
+void
+kwl_greeter_pad_end(
+	struct kwl_server *server,
+	int64_t gesture_up_um)
+{
+	int swiped;
+
+	/* Only a lock screen. */
+	if (!server->locked)
+		return;
+
+	/* A gesture up far enough, before the card, is a swipe. */
+	swiped = 0;
+	if (!greeter_lock_card && gesture_up_um > 0)
+		swiped = kwl_lock_swipe_pad_gesture(&greeter_swipe, gesture_up_um);
+
+	/* The touch has ended either way. */
+	kwl_lock_swipe_pad_end(&greeter_swipe);
+	if (swiped)
+		greeter_lock_swiped(server, "pad");
 }
 
 /*
@@ -640,6 +835,7 @@ void
 kwl_greeter_tick(
 	struct kwl_server *server)
 {
+	uint64_t now_ms;
 	int64_t minute;
 
 	/* The clock shows a new minute. */
@@ -661,6 +857,19 @@ kwl_greeter_tick(
 	/* A secret held back while another request was answered goes now. */
 	if (greeter_submit_pending && !greeter_styles_asked && !greeter_styles_wanted)
 		greeter_submit(server);
+
+	/* The lock screen's card left alone with nothing typed goes, and the clock shows alone again (ws187-p002). */
+	if (server->locked &&
+	    greeter_lock_card &&
+	    greeter_password_length == 0U &&
+	    !greeter_waiting) {
+		now_ms = kwl_milliseconds();
+		if (now_ms - server->lock_input_ms >= GREETER_CARD_IDLE_MS) {
+			greeter_lock_card = 0U;
+			server->dirty = 1;
+			printf("KWL LOCK card hidden\n");
+		}
+	}
 
 	/* The lock screen has only its clock and its styles. */
 	if (!server->greeter)
@@ -1193,6 +1402,90 @@ greeter_draw_clock(
 
 	/* The date under it. */
 	greeter_draw_centered(server, command, SIZE_SEARCH, middle, clock.date_baseline, date, (int32_t)server->width, soft);
+}
+
+/*
+ * Draws the lock screen's "Swipe up to unlock" at the foot of the output
+ * (ws187-p002): a press being swiped carries it up with the pointer, fading
+ * as it nears the swipe's distance.
+ */
+static void
+greeter_draw_hint(
+	struct kwl_server *server,
+	VkCommandBuffer command)
+{
+	float color[4] = { 0.15f, 0.21f, 0.29f, GREETER_HINT_OPACITY };
+	int32_t distance;
+	int32_t rise;
+	int32_t baseline;
+
+	/* How far a press being swiped has gone up, at most the swipe's distance. */
+	distance = kwl_lock_swipe_distance((int32_t)server->height);
+	rise = 0;
+	if (greeter_swipe.pressing && greeter_swipe.up > 0) {
+		rise = greeter_swipe.up;
+		if (rise > distance)
+			rise = distance;
+	}
+
+	/* Carried up by the rise, and fading to a third of its opacity at the distance. */
+	baseline = (int32_t)server->height - GREETER_HINT_FOOT - rise;
+	color[3] = GREETER_HINT_OPACITY * (1.0f - 0.67f * (float)rise / (float)distance);
+
+	/* The words, centred. */
+	greeter_draw_centered(server, command, SIZE_SEARCH, (int32_t)server->width / 2, baseline, kl_tr("Swipe up to unlock"), (int32_t)server->width, color);
+}
+
+/*
+ * Acts on a swipe on the lock screen (ws187-p002): a lock the session made
+ * itself opens within its grace; otherwise the card asks for the secret.
+ */
+static void
+greeter_lock_swiped(
+	struct kwl_server *server,
+	const char *via)
+{
+	int grace;
+
+	/* Whether the lock is in its grace now. */
+	grace = kwl_lock_grace(greeter_lock_manual, greeter_lock_at, (int64_t)time(NULL), LOCK_GRACE_SECONDS);
+	printf("KWL LOCK swipe via=%s grace=%d manual=%u\n", via, grace, greeter_lock_manual);
+
+	/* In its grace: open, without the secret. */
+	if (grace) {
+		kwl_lock_release(server, "swipe");
+		return;
+	}
+
+	/* Otherwise the card, with the field taking the keys. */
+	greeter_lock_card = 1U;
+	kwl_lock_swipe_reset(&greeter_swipe);
+	server->dirty = 1;
+}
+
+/* Tells whether a key only modifies the others (Ctrl, Shift, Alt, Super, Caps Lock). */
+static int
+greeter_key_modifies(
+	uint32_t key)
+{
+	/* Each modifier's code. */
+	switch (key) {
+	case GREETER_KEY_LEFTCTRL:
+	case GREETER_KEY_RIGHTCTRL:
+	case GREETER_KEY_LEFTSHIFT:
+	case GREETER_KEY_RIGHTSHIFT:
+	case GREETER_KEY_LEFTALT:
+	case GREETER_KEY_RIGHTALT:
+	case GREETER_KEY_LEFTMETA:
+	case GREETER_KEY_RIGHTMETA:
+	case GREETER_KEY_CAPSLOCK:
+		return 1;
+	default:
+		break;
+	}
+
+	/* Succeeded: a key that does more. */
+	return 0;
 }
 
 /* Draws a line of text centred on a point of its baseline, no wider than limit. */
