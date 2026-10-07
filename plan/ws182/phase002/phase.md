@@ -2,7 +2,7 @@
 # ws182-p002: 実装 — 電源ボタンでメニュー、押下と解放
 
 Parent: [WS182](../ws.md)
-Status: in-progress（2026-10-08 P1 / q861-i01。実装・build warning 0・host 試験まで。QEMU は T1 の試験待ち、実機（5320・5330）は人の手）
+Status: uncleared（2026-10-08 Q1: T1-377 QEMU PASS（1〜5 の行、電源は切れない、PNG に card、T1 の worktree build/t1-377-out/p/）。残り: 実機（5320・5330）の短押し・1.5 s 長押しの gap_ms で押下/解放の推定と 2 s の窓を確定、D1 のユーザーの確認）
 Disposition: normal
 Queue: q861 / q861-i01
 依存: [p001](../phase001/phase.md)（設計。D1 はユーザーの確認待ち、推奨のまま実装）

@@ -26,3 +26,4 @@ Resume point: p001 test-wait（2026-10-08 P1: 実装・build・host 試験まで
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | i2c-hid の Extended Interrupt の経路と TGL の GPIO の group、5320 の実機で確認 | test-wait（2026-10-08 P1） | — |
+| p002 | 1 本指のタップのクリックの遅れ（2026-10-08 ユーザーの UAT「タップ判定が150msくらいかかってる気がします。これは調整可能なんですか？」）: 今は指を離した時に左を押し、離すのは TAP_DRAG_MS（300 ms）の後（`touchpad.c` touch_end）。離した時に押す・離すを続けて送り、TAP_DRAG_MS の内の次の touch で押し直してドラッグにする。ダブルクリック・タップのドラッグは保つ。host 試験 | planned（q863、P2） | — |

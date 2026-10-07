@@ -26,4 +26,4 @@ Resume point: p001 の設計を書いた（D1: greeter・lock でメニューを
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 設計: 電源ボタンの事象 → メニュー（App Home の Power Off の dialog の再利用）、greeter・lock の時、WS052 p012 との関係、2 行の事象（押下と解放の 2 つの Notify） | 設計済み（D1 はユーザーの確認待ち） | — |
-| [p002](phase002/phase.md) | 実装と QEMU・実機（5320・5330）の確認 | in-progress（test-wait: T1 の依頼は Q1 へ） | p001 |
+| [p002](phase002/phase.md) | 実装と QEMU・実機（5320・5330）の確認 | uncleared（2026-10-08 T1-377 QEMU PASS。残り: 実機の gap_ms、D1 の確認） | p001 |
