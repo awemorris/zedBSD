@@ -64,6 +64,7 @@ static void test_field(const char *name, const struct kl_field *field, const cha
 static void test_check(const char *name, const char *expected);
 static int test_save(const struct kl_canvas *canvas, const char *prefix, const char *name);
 static int test_save_glass(struct ph_view *view, const struct kl_canvas *canvas, const char *prefix, const char *name);
+static void test_hover_part(struct ph_view *view, struct kl_ui *ui, const struct kl_style *style, struct kl_canvas *canvas, int glass);
 
 /*
  * Draws and drives the view and checks what it logged.
@@ -262,6 +263,10 @@ main(
 	(void)test_save_glass(&view, &canvas, argv[3], "glass-ben");
 	test_check("glass-ben", "SELECT contact=1");
 
+	/* BUG-226 (ws090-p018): the lit part drawn alone, opaque and on glass. */
+	test_hover_part(&view, ui, &style, &canvas, 0);
+	test_hover_part(&view, ui, &style, &canvas, 1);
+
 	/* "+": the form of a new contact; Save with a number asks the window. */
 	test_now += 5000000U;
 	test_click(&view, ui, &style, TEST_WIDTH, TEST_HEIGHT, 301, 30);
@@ -329,6 +334,82 @@ ph_log(
 	test_log[test_log_length] = '\n';
 	test_log_length++;
 	test_log[test_log_length] = '\0';
+}
+
+/*
+ * BUG-226: moves the pointer over the window in steps; each step that lights
+ * another widget is drawn within the part kl_ui_take_damage gives, and is
+ * then drawn whole at the same time: the two pictures are the same.
+ */
+static void
+test_hover_part(
+	struct ph_view *view,
+	struct kl_ui *ui,
+	const struct kl_style *style,
+	struct kl_canvas *canvas,
+	int glass)
+{
+	struct kl_style lit;
+	struct kl_rect part;
+	uint32_t *kept;
+	size_t size;
+	int step;
+	int redraw;
+	int placed;
+	int parts;
+	int differs;
+	int same;
+
+	/* A copy of the frame. */
+	size = (size_t)canvas->stride * (size_t)canvas->height * sizeof(uint32_t);
+	kept = malloc(size);
+	if (kept == NULL) {
+		printf("FAIL hover-part memory\n");
+		test_failures++;
+		return;
+	}
+
+	/* The style asked for, and a whole frame to start from. */
+	lit = *style;
+	lit.glass = glass;
+	test_frame(view, ui, &lit, canvas->width, canvas->height);
+
+	/* Each step that lights another widget: its part, then the whole frame at the same time. */
+	parts = 0;
+	differs = 0;
+	for (step = 0; step < 60; step++) {
+		redraw = kl_ui_pointer_motion(ui, 40.0 + (double)((step * 37) % (canvas->width - 80)), 60.0 + (double)((step * 53) % (canvas->height - 120)));
+		if (!redraw)
+			continue;
+		placed = kl_ui_take_damage(ui, &part);
+		if (!placed)
+			continue;
+		parts++;
+
+		/* The part alone. */
+		kl_canvas_clip_push(canvas, &part);
+		test_frame(view, ui, &lit, canvas->width, canvas->height);
+		kl_canvas_clip_pop(canvas);
+		memcpy(kept, canvas->pixels, size);
+
+		/* The whole frame, at the same time. */
+		test_now -= 16000U;
+		test_frame(view, ui, &lit, canvas->width, canvas->height);
+		same = memcmp(kept, canvas->pixels, size);
+		if (same != 0)
+			differs++;
+	}
+
+	/* Some parts drawn, all of them the whole frame's picture. */
+	if (parts > 0 && differs == 0) {
+		printf("PASS hover-part glass=%d parts=%d\n", glass, parts);
+	} else {
+		printf("FAIL hover-part glass=%d parts=%d differs=%d\n", glass, parts, differs);
+		test_failures++;
+	}
+
+	/* The copy goes. */
+	free(kept);
 }
 
 /*

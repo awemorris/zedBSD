@@ -66,5 +66,13 @@ Lakeside を含めた 6 枚を順に選び、最後の tile を `index=106` で�
 ## 残り
 
 - Files の host での画素の一致の確かめ（q801）はユーザーの判断で取りやめ（2026-10-06、canceled）。T1-233 (b) の Files の試験は PASS。
-- Mail・Calendar の hover は q866 で部分の再描画にした（`kl_ui_take_damage`、KL_VERSION 62、[BUG-226](../../bugs/BUG-226.md) の q866）。Phone は未（同じ口で直せる）。desktop の範囲選択（Files の desktop の mode）は q866 で部分の再描画にした（[BUG-221](../../bugs/BUG-221.md) の q866）。
+- Mail・Calendar の hover は q866 で部分の再描画にした（`kl_ui_take_damage`、KL_VERSION 62、[BUG-226](../../bugs/BUG-226.md) の q866）。Phone は未（同じ口で直せる）→ q875 で部分の再描画にした（下）。desktop の範囲選択（Files の desktop の mode）は q866 で部分の再描画にした（[BUG-221](../../bugs/BUG-221.md) の q866）。
 - frame の callback での集約（設計の 2）は、描画が軽くなったので未実施。測った遅れ（注入から再描画の log まで）は未測定。
+
+## q875（P1、2026-10-08）: Phone の hover の部分の再描画
+
+- 直し（`userland/desktop/phone/main.c`）: Mail・Calendar（q866）と同じ形。hover だけが変わった frame（`lit_changed`、drag・動き・他の変化が無い時）は `kl_ui_take_damage` の part を clip にして描く。drag の間（button を押している）は全体。`ph_wait` は `lit_changed` でも 0 を返す。
+- host 試験: `plan/ws170/tests/host-phone.c` に `hover-part`（60 回の移動、opaque と glass、部分の frame と全体の frame が画素で同じ）を足した。`sh plan/ws170/tests/run-host-phone.sh build/ws090-p018/host-phone`: PASS 19、FAIL 0（`hover-part glass=0 parts=22`・`glass=1 parts=22`）。
+- build（warning 0）: `make -j16 BUILD=build/ws090-p018 ZEDBSD_CONFIG=plan/ws170/tests/config-amd64-phone.mk build/ws090-p018/bin/phone`、`make -f userland/desktop/keiland-linux.mk KEILAND_LINUX_BUILD=build/ws090-p018-linux all`（rc 0）。
+- QEMU（T1、任意）: T1-389 と同じ形で Phone の左の一覧の行の上を pointer で動かし、行の光りが付いてくること・跡が残らないこと（PNG）。未実施。
+- 残り: frame の callback での集約（設計の 2）と遅れの測定は未実施のまま（任意）。Music・Photos は対象外（同じ口で直せる）。
