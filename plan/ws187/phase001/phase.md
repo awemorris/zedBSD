@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws187-p001 -->
 # ws187-p001: lock の画面の大きな時計
 
-Status: test-wait（T1 への依頼を 2026-10-08 Q1 へ。番号は Q1 が付ける）。in-progress（q864、P2、2026-10-08: 実装・build・host 試験まで。QEMU の PNG（縦長・横長）は T1、WS187 の p003 の後にまとめて依頼）
+Status: cleared（2026-10-08 Q1 判定、T1-379 QEMU PASS。実機の UAT は未実施）（旧: test-wait（T1 への依頼を 2026-10-08 Q1 へ。番号は Q1 が付ける）。in-progress（q864、P2、2026-10-08: 実装・build・host 試験まで。QEMU の PNG（縦長・横長）は T1、WS187 の p003 の後にまとめて依頼））
 Disposition: normal
 Parent: [WS187](../ws.md)
 Queue: q864（ユーザー 2026-10-08「起動して作業開始してください」、P2）
@@ -38,3 +38,8 @@ Queue: q864（ユーザー 2026-10-08「起動して作業開始してくださ�
 - `python3 plan/tools/style-check.py`（変えた 5 file と試験）: 0。`git diff --check`: 0。
 - 未実施: QEMU の PNG（縦長・横長、T1）。大きな数字の glyph の見た目（Mahora の字形、glow の大きさ）は PNG で確かめる。FreeBSD の build は未実施（Makefile.freebsd に 1 file を足しただけ）。
 
+
+
+## Q1 の判定（2026-10-08）
+
+T1-379 PASS（QEMU、AAT: swipe-card・wheel-card・lock-unlock・lock-japanese、縦長 1080x1920 も）。PNG を Q1 が目視: 縦長・横長とも時計が中央より上、下に案内、card は時計と重ならない（build/review/ws187/）。猶予の内の解除は host 試験、touchpad の 2 本指・Security Key・PIN の pill は実機の UAT（未実施）。

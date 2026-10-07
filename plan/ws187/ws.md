@@ -3,7 +3,7 @@
 # WS187: ロック画面（大きな時計、スワイプ・ホイールでの解除、認証の方式の選択）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（p001〜p003 cleared 2026-10-08。WS の完了は実機の UAT の後）
 Primary Milestone: MG006
 Objectives: O2
 Parent: [Master](../master.md)
@@ -31,6 +31,6 @@ Resume point: p001〜p003 は実装・build・host 試験まで（2026-10-08 P2�
 
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | lock の画面の時計の配置と描画（縦長・横長）、host 試験、T1 の PNG | test-wait（T1、2026-10-08 Q1 へ依頼） | — |
-| [p002](phase002/phase.md) | 解除の操作（下部から上へのスワイプ・wheel の上）と猶予（自動の lock の後の一定時間は認証なし、手動の lock は常に認証） | test-wait（T1、2026-10-08 Q1 へ依頼。猶予の既定はユーザーの確認待ち） | p001 |
-| [p003](phase003/phase.md) | 認証の入力の画面: Password・PIN・Hardware Key の選択（登録の無い方式は出さない、Hardware Key は sessiond が返した時だけ） | test-wait（T1、2026-10-08 Q1 へ依頼） | p002、PIN は ws172-p002 |
+| [p001](phase001/phase.md) | lock の画面の時計の配置と描画（縦長・横長）、host 試験、T1 の PNG | cleared（T1-379 QEMU、実機の UAT は未実施） | — |
+| [p002](phase002/phase.md) | 解除の操作（下部から上へのスワイプ・wheel の上）と猶予（自動の lock の後の一定時間は認証なし、手動の lock は常に認証） | cleared（T1-379 QEMU、実機の UAT は未実施） | p001 |
+| [p003](phase003/phase.md) | 認証の入力の画面: Password・PIN・Hardware Key の選択（登録の無い方式は出さない、Hardware Key は sessiond が返した時だけ） | cleared（T1-379 QEMU、実機の UAT は未実施） | p002、PIN は ws172-p002 |

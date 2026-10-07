@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws187-p003 -->
 # ws187-p003: lock の画面の認証の方式の選択（Password・PIN・Security Key）
 
-Status: test-wait（T1 への依頼を 2026-10-08 Q1 へ。番号は Q1 が付ける）。in-progress（q864 の続き、P2、2026-10-08: 実装・build まで。QEMU は T1 へ依頼）
+Status: cleared（2026-10-08 Q1 判定、T1-379 QEMU PASS。実機の UAT は未実施）（旧: test-wait（T1 への依頼を 2026-10-08 Q1 へ。番号は Q1 が付ける）。in-progress（q864 の続き、P2、2026-10-08: 実装・build まで。QEMU は T1 へ依頼））
 Disposition: normal
 Parent: [WS187](../ws.md)
 Queue: q864（Q1 2026-10-08「続けて p002・p003 も q864 の続きとして承認済み」）
@@ -36,3 +36,8 @@ Queue: q864（Q1 2026-10-08「続けて p002・p003 も q864 の続きとして�
 - 方式の選択の配置は server に依存するので、host 試験は作っていない。QEMU の PNG で確かめる。
 - 未実施（T1 へ依頼）: AAT の `desktop.lock.swipe-card`・`desktop.lock.wheel-card`・`desktop.lock.lock-unlock`、縦長と横長の PNG。PIN の登録がある利用者の選択の表示（ws172 の `passkey-p002-guest.sh` の PIN の登録の手順を使う）。
 - 未実施（実機）: Security Key（FIDO2 の key が要る）。
+
+
+## Q1 の判定（2026-10-08）
+
+T1-379 PASS（QEMU、AAT: swipe-card・wheel-card・lock-unlock・lock-japanese、縦長 1080x1920 も）。PNG を Q1 が目視: 縦長・横長とも時計が中央より上、下に案内、card は時計と重ならない（build/review/ws187/）。猶予の内の解除は host 試験、touchpad の 2 本指・Security Key・PIN の pill は実機の UAT（未実施）。

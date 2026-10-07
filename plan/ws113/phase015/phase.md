@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws113-p015 -->
 # ws113-p015: 2 つ目以降の display の窓の状態（dock・floating・整列）、bar、リサイズ、App Home の背景
 
-Status: test-wait（T1 の番号は Q1 が返す。2026-10-08 P1: head の dock bar をユーザーの決定どおりに実装、下の「head の dock bar（決定 2026-10-08）の実装」。前の T1-376 (a) `displays-p015.sh` PASS。残り: この QEMU 試験、head の上の press（リサイズ・bar・dock・bar の widget）の 5330 実機の確認）
+Status: cleared（2026-10-08 Q1 判定、T1-380 QEMU PASS。head の bar の押下は 5330 の実機の UAT、未実施）（旧: test-wait（T1 の番号は Q1 が返す。2026-10-08 P1: head の dock bar をユーザーの決定どおりに実装、下の「head の dock bar（決定 2026-10-08）の実装」。前の T1-376 (a) `displays-p015.sh` PASS。残り: この QEMU 試験、head の上の press（リサイズ・bar・dock・bar の widget）の 5330 実機の確認））
 Disposition: normal
 Parent: [WS113](../ws.md)
 
@@ -117,3 +117,8 @@ docked の窓があればその title・menu・ボタン（前と同じ）、右
 
 「各番目の画面のdock barには、その画面のウィンドウのみを出してください。app単位ではなくwindow単位にします。でも、画面ごとのapp iconsは、ウィンドウがあればその画面のdockに表示され、プレビューはその画面のウィンドウだけにします。」→ 1 番目（anchor）を含む全ての画面で、bar の app icon はその画面に window を持つ app だけ、icon の previews はその画面の window だけ。switcher は全ての window のまま。P1 に送った（q862 の前に入れる）。
 「切り替えのつまみ」（上の決定の文）はユーザーにも意味が分からなかった（前のセッションの Q1 の書いた選択肢の文の見込み）。P1 は desktops の pill と読んで実装した。ユーザーの答え待ち。
+
+
+## Q1 の判定（2026-10-08）
+
+T1-380 PASS（QEMU、Venus 2 出力）: displays-p015 全 ok（新しい 4 行を含む）、displays-p007・p014・ws181 p009・ws142 p010・boot-test PASS。PNG は no surface（以前と同じ）。head の bar の押下は QEMU の tablet が anchor だけなので実機。「切り替えのつまみ」はユーザーの答え待ち（desktops の pill のまま）。
