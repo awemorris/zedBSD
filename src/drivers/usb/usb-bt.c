@@ -68,6 +68,9 @@
 /* The bulk IN transfer's size (a multiple of every bulk endpoint's packet size). */
 #define USB_BT_BULK_BUFFER		4096U
 
+/* The packet size's bits of wMaxPacketSize (bits 11 and 12 count a high-speed endpoint's extra transactions). */
+#define USB_BT_PACKET_SIZE_MASK		0x07ffU
+
 /* Failed transfers in a row before a pipe is given up. */
 #define USB_BT_ERRORS_MAX		8U
 
@@ -149,7 +152,7 @@ static int usb_bt_pipe_prepare(struct usb_bt *bt, struct usb_bt_pipe *pipe, stru
 static void usb_bt_pipe_free(struct usb_bt_pipe *pipe);
 static void usb_bt_free(struct usb_bt *bt);
 static void usb_bt_identity(struct usb_bt *bt);
-static void usb_bt_stop_transfers(struct usb_bt *bt);
+static int usb_bt_stop_transfers(struct usb_bt *bt);
 static int usb_bt_join_worker(struct usb_bt *bt);
 static void usb_bt_completion(struct drv_usb_urb *urb, void *argument);
 static void usb_bt_request(struct usb_bt *bt, unsigned work);
@@ -167,6 +170,7 @@ static int usb_bt_reset(void *context);
 static void usb_bt_room(void *context);
 static int usb_bt_quiesce(struct usb_bt *bt);
 static void usb_bt_sleep_ms(unsigned milliseconds);
+static void usb_bt_pipe_restart(struct usb_bt_pipe *pipe);
 
 /* The interfaces the driver takes: a Bluetooth controller's HCI, E0/01/01. */
 static const struct drv_usb_id usb_bt_ids[] = {
@@ -273,13 +277,15 @@ usb_bt_attach(
 	event_in = drv_usb_interface_find_endpoint(interface, DRV_USB_TRANSFER_INTERRUPT, DRV_USB_DIR_IN, NULL);
 	data_in = drv_usb_interface_find_endpoint(interface, DRV_USB_TRANSFER_BULK, DRV_USB_DIR_IN, NULL);
 	bt->bulk_out = drv_usb_interface_find_endpoint(interface, DRV_USB_TRANSFER_BULK, DRV_USB_DIR_OUT, NULL);
-	if (event_in == NULL || data_in == NULL || bt->bulk_out == NULL) {
+	if (event_in == NULL ||
+	    data_in == NULL ||
+	    bt->bulk_out == NULL) {
 		kern_free(bt);
 		return ENODEV;
 	}
 
 	/* The events' pipe reads one USB packet a transfer, so an event's end is never waited past. */
-	packet_size = drv_usb_endpoint_max_packet_size(event_in);
+	packet_size = drv_usb_endpoint_max_packet_size(event_in) & USB_BT_PACKET_SIZE_MASK;
 	if (packet_size == 0U) {
 		kern_free(bt);
 		return ENODEV;
@@ -367,7 +373,8 @@ usb_bt_detach(
 	unsigned flags)
 {
 	struct usb_bt *bt;
-	int error;
+	int drain_error;
+	int join_error;
 
 	UNUSED_PARAMETER(flags);
 
@@ -376,14 +383,24 @@ usb_bt_detach(
 	if (bt == NULL)
 		return 0;
 
-	/* No operation of the class runs from now on. */
+	/* No operation of the class runs from now on (again harmlessly when the core retries the detach). */
 	drv_bt_hci_withdraw(bt->hci);
 
 	/* The transfers stop and the worker leaves. */
-	usb_bt_stop_transfers(bt);
-	error = usb_bt_join_worker(bt);
-	if (error != 0)
-		return error;
+	drain_error = usb_bt_stop_transfers(bt);
+	join_error = usb_bt_join_worker(bt);
+
+	/*
+	 * A transfer that did not retire may still be the host controller's:
+	 * nothing is freed, and the core tries the detach again later
+	 * (DETACH_PENDING), as usb-hid does.
+	 */
+	if (drain_error != 0)
+		return drain_error;
+
+	/* A worker that did not end is waited for at the next try too. */
+	if (join_error != 0)
+		return join_error;
 
 	/* The node goes, then the record. */
 	drv_bt_hci_release(bt->hci);
@@ -426,7 +443,7 @@ usb_bt_pipe_prepare(
 	pipe->assembly = kern_malloc(capacity);
 	if (pipe->assembly == NULL)
 		return ENOMEM;
-	bt_hci_assembler_init(&pipe->assembler, pipe->assembly, capacity, mode, BT_ACL_DATA_DEFAULT);
+	bt_hci_assembler_init(&pipe->assembler, pipe->assembly, capacity, mode, BT_ACL_DATA_MAX);
 
 	/* Succeeded: the pipe is ready to be submitted. */
 	return 0;
@@ -498,9 +515,10 @@ usb_bt_identity(
 
 /*
  * Stops the transfers for good (the detach): the worker submits no more,
- * a submitted one is cancelled, and each is drained.
+ * a submitted one is cancelled, and each is drained.  Returns 0, or the
+ * error of a transfer that did not retire (the first one).
  */
-static void
+static int
 usb_bt_stop_transfers(
 	struct usb_bt *bt)
 {
@@ -508,6 +526,7 @@ usb_bt_stop_transfers(
 	unsigned long irq;
 	unsigned submitting;
 	unsigned index;
+	int first_error;
 	int error;
 
 	/* stopping tells the worker to leave and admits no more submissions. */
@@ -532,16 +551,27 @@ usb_bt_stop_transfers(
 	}
 
 	/* Each pipe's transfer is cancelled while submitted, then drained. */
+	first_error = 0;
 	for (index = 0U; index < USB_BT_PIPES; index++) {
 		status = drv_usb_urb_status(bt->pipes[index].urb);
 		if (status == DRV_USB_URB_PENDING)
 			(void)drv_usb_urb_cancel(bt->pipes[index].urb);
 
-		/* The transfer retires; one that does not is logged (the URB is then not freed early by the core). */
+		/* The transfer retires; one that does not is logged and keeps the record alive. */
 		error = drv_usb_urb_drain(bt->pipes[index].urb, USB_BT_DRAIN_MS);
-		if (error != 0)
+		if (error != 0) {
 			kern_logf("usb-bt: %s: the %s transfer did not retire (%d)\n", bt->name, bt->pipes[index].name, error);
+			if (first_error == 0)
+				first_error = error;
+		}
 	}
+
+	/* Reports a transfer that is still the host controller's. */
+	if (first_error != 0)
+		return first_error;
+
+	/* Succeeded: no transfer is submitted. */
+	return 0;
 }
 
 /* Wakes the worker to leave and waits for it to end. */
@@ -564,6 +594,8 @@ usb_bt_join_worker(
 
 	/* Wakes it; it sees stopping and leaves. */
 	kern_thread_wakeup(worker);
+
+	/* Yields until it has ended (a zombie waits for thread_wait). */
 	for (;;) {
 		state = atomic_raw_load_acquire((volatile unsigned *)&worker->state);
 		if (state == THREAD_ZOMBIE)
@@ -736,6 +768,13 @@ usb_bt_finish(
 		/* The bytes are held. */
 		break;
 	case DRV_USB_URB_STALL:
+		/* A stall counts as a failure, so that an endpoint that stalls every time is given up. */
+		pipe->errors++;
+		if (pipe->errors >= USB_BT_ERRORS_MAX) {
+			usb_bt_give_up(bt, pipe, "stall", (int)status);
+			break;
+		}
+
 		/* A stalled endpoint is cleared and submitted again. */
 		error = drv_usb_endpoint_clear_halt(pipe->endpoint);
 		if (error != 0)
@@ -755,6 +794,14 @@ usb_bt_finish(
 			usb_bt_give_up(bt, pipe, "transfer", (int)status);
 		break;
 	}
+
+	/*
+	 * Bytes lost to a transfer that did not complete leave a packet half
+	 * gathered that no later byte belongs to: the pipe starts its next
+	 * packet afresh.
+	 */
+	if (status != DRV_USB_URB_COMPLETE)
+		usb_bt_pipe_restart(pipe);
 }
 
 /*
@@ -771,10 +818,6 @@ usb_bt_flush(
 	size_t remaining;
 	size_t consumed;
 	int error;
-
-	/* The ACL limit the program has set bounds the ACL packets from now on. */
-	if (pipe->assembler.mode == BT_HCI_ASSEMBLE_ACL)
-		pipe->assembler.acl_data_max = drv_bt_hci_acl_data_max(bt->hci);
 
 	/* The bytes not yet taken, and a whole packet the class refused before. */
 	remaining = pipe->held_length - pipe->held_offset;
@@ -834,7 +877,10 @@ usb_bt_arm(
 	admitted = 0;
 	irq = spin_lock_irqsave(&bt->lock);
 
-	if (!bt->stopping && !bt->paused && !pipe->armed && !pipe->dead) {
+	if (!bt->stopping &&
+	    !bt->paused &&
+	    !pipe->armed &&
+	    !pipe->dead) {
 		pipe->armed = 1U;
 		bt->submitting++;
 		admitted = 1;
@@ -846,11 +892,19 @@ usb_bt_arm(
 	if (!admitted)
 		return;
 
-	/* The transfer, filling the whole buffer or ending at a short packet. */
-	error = drv_usb_urb_setup(pipe->urb, pipe->buffer, pipe->buffer_size, DRV_USB_URB_SHORT_OK, 0U,
-	    usb_bt_completion, bt);
-	if (error == 0)
+	/* The transfer, filling the whole buffer or ending at a short packet, and its submission. */
+	error = drv_usb_urb_setup(
+		pipe->urb,
+		pipe->buffer,
+		pipe->buffer_size,
+		DRV_USB_URB_SHORT_OK,
+		0U,
+		usb_bt_completion,
+		bt);
+	if (error == 0) {
+		/* Set up: submitted. */
 		error = drv_usb_urb_submit(pipe->urb);
+	}
 
 	/* The submission is over, submitted or not. */
 	irq = spin_lock_irqsave(&bt->lock);
@@ -866,6 +920,8 @@ usb_bt_arm(
 		pipe->armed = 0U;
 
 		spin_unlock_irqrestore(&bt->lock, irq);
+
+		/* Logged and stopped until the reset. */
 		usb_bt_give_up(bt, pipe, "submit", error);
 	}
 }
@@ -923,12 +979,9 @@ usb_bt_set_aside(
 
 	/* Nothing from before the reset is handed on. */
 	for (index = 0U; index < USB_BT_PIPES; index++) {
-		bt->pipes[index].held_offset = 0U;
-		bt->pipes[index].held_length = 0U;
+		usb_bt_pipe_restart(&bt->pipes[index]);
 		bt->pipes[index].stalled = 0U;
 		bt->pipes[index].errors = 0U;
-		bt_hci_assembler_restart(&bt->pipes[index].assembler, bt->pipes[index].assembler.mode,
-		    bt->pipes[index].assembler.acl_data_max);
 	}
 
 	/* quiesced tells the waiting reset that the device may be reset. */
@@ -967,7 +1020,7 @@ usb_bt_change_mode(
 		mode = BT_HCI_ASSEMBLE_EVENT;
 	pipe->held_offset = 0U;
 	pipe->held_length = 0U;
-	bt_hci_assembler_restart(&pipe->assembler, mode, drv_bt_hci_acl_data_max(bt->hci));
+	bt_hci_assembler_restart(&pipe->assembler, mode, BT_ACL_DATA_MAX);
 }
 
 /* Hands one packet the assembler put together to the class (ENOSPC when its queue is full). */
@@ -1112,6 +1165,14 @@ usb_bt_reset(
 		}
 	}
 
+	/*
+	 * The program reads that the controller was reset after everything
+	 * from before and before anything from after: the notice is queued
+	 * while the transfers are still set aside.
+	 */
+	if (error == 0)
+		drv_bt_hci_notice(bt->hci, BT_PACKET_NOTICE_RESET);
+
 	/* The pipes start again (a pipe given up before is tried anew) and the worker submits them. */
 	irq = spin_lock_irqsave(&bt->lock);
 
@@ -1121,14 +1182,13 @@ usb_bt_reset(
 		bt->pipes[index].dead = 0U;
 
 	spin_unlock_irqrestore(&bt->lock, irq);
+
+	/* The worker submits the transfers. */
 	usb_bt_request(bt, USB_BT_WORK_ARM);
 
 	/* Reports why the controller was not reset. */
 	if (error != 0)
 		return error;
-
-	/* The program reads that the controller was reset after everything from before. */
-	drv_bt_hci_notice(bt->hci, BT_PACKET_NOTICE_RESET);
 
 	/* Succeeded: the controller was reset. */
 	return 0;
@@ -1165,6 +1225,8 @@ usb_bt_quiesce(
 	bt->quiesced = 0U;
 
 	spin_unlock_irqrestore(&bt->lock, irq);
+
+	/* The worker sets the transfers aside. */
 	usb_bt_request(bt, USB_BT_WORK_QUIESCE);
 
 	/*
@@ -1210,4 +1272,15 @@ usb_bt_sleep_ms(
 
 	/* Until the tick count passes the deadline. */
 	sched_sleep(sched_ticks() + ticks);
+}
+
+/* Drops what a pipe holds and the packet it half gathered: its next packet starts afresh, in its mode. */
+static void
+usb_bt_pipe_restart(
+	struct usb_bt_pipe *pipe)
+{
+	/* No bytes held, and the assembler empty, at the receiving limit. */
+	pipe->held_offset = 0U;
+	pipe->held_length = 0U;
+	bt_hci_assembler_restart(&pipe->assembler, pipe->assembler.mode, BT_ACL_DATA_MAX);
 }

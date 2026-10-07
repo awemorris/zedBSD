@@ -41,8 +41,12 @@
 #include <uapi/fcntl.h>
 #include <uapi/poll.h>
 
-/* The device numbers of the class: one major, the minor is N. */
-#define BT_HCI_DEVICE_BASE	0x00110000U
+/*
+ * The device numbers of the class: one major, the minor is N.  devfs keeps
+ * a node's owner and mode by its number, so the major is one no other node
+ * has (0x0011 is /dev/typec's; 0x0012 is free of every cdev_register).
+ */
+#define BT_HCI_DEVICE_BASE	0x00120000U
 
 /* The rings' sizes: the events' (with a share for the notices) and the ACL packets'. */
 #define BT_HCI_EVENT_RING	(16U * 1024U)
@@ -296,25 +300,6 @@ drv_bt_hci_input(
 	return 0;
 }
 
-/* Reports the ACL data length limit the program has set (or the default). */
-size_t
-drv_bt_hci_acl_data_max(
-	struct drv_bt_hci *hci)
-{
-	unsigned long irq;
-	size_t limit;
-
-	/* The limit under the lock. */
-	irq = spin_lock_irqsave(&hci->lock);
-
-	limit = hci->info.acl_data_max;
-
-	spin_unlock_irqrestore(&hci->lock, irq);
-
-	/* Succeeded: the limit. */
-	return limit;
-}
-
 /* Adds the transport's counts of malformed receptions and stalls to the controller's. */
 void
 drv_bt_hci_count(
@@ -334,9 +319,9 @@ drv_bt_hci_count(
 
 /*
  * Queues one of the kernel's notices (BT_PACKET_NOTICE_RESET) on the
- * events' ring, in the share kept for the notices.  A notice for a ring
- * full even of notices is dropped (the program has not read seven of
- * them).
+ * events' ring, in the share kept for the notices (BT_HCI_EVENT_RESERVE:
+ * four notices' records).  A notice for a ring full even of notices is
+ * dropped (the program has not read four of them).
  */
 void
 drv_bt_hci_notice(
@@ -384,6 +369,8 @@ drv_bt_hci_withdraw(
 	hci->registered = 0U;
 
 	spin_unlock_irqrestore(&hci->lock, irq);
+
+	/* The reader and the pollers see it now. */
 	waitq_wake_all(&hci->waitq);
 	poll_notify();
 
@@ -425,16 +412,14 @@ drv_bt_hci_release(
 	if (hci == NULL)
 		return;
 
-	/* The number may be given again. */
-	bt_hci_slot_release(hci);
-
-	/*
-	 * Unpublishes the node and gives back the registration's reference;
-	 * the record may be freed by then (the node's last reference), so it
-	 * is not touched after this.
-	 */
+	/* The node goes first, so that a controller given the number next can publish bt<N> again. */
 	node = hci->node;
 	(void)cdev_unregister(node);
+
+	/* The number may be given again; the registration's reference still keeps the record. */
+	bt_hci_slot_release(hci);
+
+	/* The registration's reference: the record may be freed now (the node's last reference), and is not touched after this. */
 	cdev_release(node);
 }
 
@@ -534,6 +519,10 @@ bt_hci_read(
 	hci = bt_hci_file_device(file);
 	if (hci == NULL || file->f_data == NULL)
 		return -ENODEV;
+
+	/* A read of nothing reads nothing (no packet is taken). */
+	if (size == 0U)
+		return 0;
 
 	/* Waits until a packet is there, the controller goes, or a signal comes. */
 	irq = spin_lock_irqsave(&hci->lock);
@@ -646,7 +635,12 @@ bt_hci_write(
 	return (ssize_t)size;
 }
 
-/* Answers the requests: the information, the counts, the bootloader's path, the reset and the ACL limit. */
+/*
+ * Answers the requests: the information, the counts, the bootloader's
+ * path, the reset and the ACL limit.  The information and the counts are
+ * given after the controller's withdrawal too (as they were last); the
+ * requests that act on it answer ENODEV then.
+ */
 static int
 bt_hci_ioctl(
 	struct file *file,
@@ -675,6 +669,8 @@ bt_hci_ioctl(
 		info = hci->info;
 
 		spin_unlock_irqrestore(&hci->lock, irq);
+
+		/* To the caller. */
 		error = copyout(&info, argument, sizeof(info));
 		break;
 	case BT_IOC_GET_STATS:
@@ -684,14 +680,20 @@ bt_hci_ioctl(
 		stats = hci->stats;
 
 		spin_unlock_irqrestore(&hci->lock, irq);
+
+		/* To the caller. */
 		error = copyout(&stats, argument, sizeof(stats));
 		break;
 	case BT_IOC_SET_BOOTLOADER:
 	case BT_IOC_SET_ACL_MAX:
 		/* A value, then the transport's or the class's part. */
 		error = copyin(argument, &value, sizeof(value));
-		if (error == 0)
+		if (error == 0) {
+			/* The value came: the request acts. */
 			error = bt_hci_operate(hci, request, value);
+		}
+
+		/* The value's request is done or refused. */
 		break;
 	case BT_IOC_RESET:
 		/* The controller reset in place. */
@@ -757,7 +759,11 @@ bt_hci_file_device(
 	const struct cdev *node;
 
 	/* A file of a device node carries the device's generation. */
-	if (file == NULL || file->f_inode == NULL || file->f_inode->i_data == NULL)
+	if (file == NULL)
+		return NULL;
+	if (file->f_inode == NULL)
+		return NULL;
+	if (file->f_inode->i_data == NULL)
 		return NULL;
 	node = file->f_inode->i_data;
 
