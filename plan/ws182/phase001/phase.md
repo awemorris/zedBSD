@@ -36,7 +36,7 @@ Queue: q861 / q861-i01
    4. greeter（`reason=greeter`）・lock（`reason=locked`）はメニューを出さない。
    5. dialog が開いていれば何もしない（`reason=showing`）。閉じかけなら開き直す。
    6. `kwl_power_dialog_open(server, "button")`（`KWL POWER dialog open source=button ...`）。選択・取り消しは App Home からと同じ。
-3. **D1（ユーザーの確認待ち、推奨のまま実装）**: greeter と lock ではメニューを出さない。理由: lock 画面は ws035-p102 で電源の button を持たない（未認証の電源 off・log out を避ける）、greeter は Restart・Shut Down が画面にある。代案: greeter でも dialog（Log Out を除く）を出す（greeter の描画・入力の経路に dialog を足す変更が要る）。
+3. **D1（2026-10-08 ユーザー「現状ではオーケーです」で確定）**: greeter と lock ではメニューを出さない。理由: lock 画面は ws035-p102 で電源の button を持たない（未認証の電源 off・log out を避ける）、greeter は Restart・Shut Down が画面にある。代案: greeter でも dialog（Log Out を除く）を出す（greeter の描画・入力の経路に dialog を足す変更が要る）。
 4. Sleep は出さない（WS052、ベータ3）。長押し（4 s 程度）の強制の電源断は firmware のまま。
 
 ## 確認（p002）

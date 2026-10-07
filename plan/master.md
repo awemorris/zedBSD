@@ -36,12 +36,12 @@
 ### ユーザーの未決の判断
 
 <!-- master:open-decisions:start -->
-- **電源ボタン（WS182 D1）**: lock・greeter でメニューを出さない案のまま実装（T1-377 PASS）。ユーザーの確認待ち。
 - **WS005 p021**（AX211 の passthrough の試験）を canceled にし p023 の実機の受け入れに置き換えるか。p019 の clearance も同時に。
 - **規約の全文の見直しの Phase（約 8〜10 LW）をベータ2 の後に回すか**。決まるまで WS005 p022 などの規約の Phase は保留。
 - **WS172 p004 の survey**（plan/ws172/phase004/survey.md、S1〜S13）のユーザーの review。5330 の TPM2 の ACPI の表は 5330 が Linux の時に Q1 が読む（T1-378 の Bluetooth の採取と一緒に）。
 - **WS084 の 10 回の reboot（素の起動）**: ユーザーが zedBSD で起動する時。
 - WS153 U2〜U15 はユーザーが検討中（聞かない）。
+- （解決 2026-10-08）電源ボタンのメニュー（WS182 D1）: 「現状ではオーケーです」。追加の要望 → WS187（lock の大きな時計）・ws172-p007（PIN・Password・Hardware Key の選択）。
 - （解決 2026-10-08）2 番目以降の display の dock bar: 「その画面に置いた window の window icon を出し、時計・状態・App Home・切り替えのつまみも表示する」（ws113-p015）。
 <!-- master:open-decisions:end -->
 
@@ -485,6 +485,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | [WS184](ws184/ws.md) | MG006 | 左手デバイスの OSK（クリエイターモード: ダイヤル・ホイール・ボタン 2×5、左上の swipe で出す、ベータ2） | planning | p001 設計 |
 | [WS185](ws185/ws.md) | MG006 | ゲームパッドの OSK とゲームコンソールモード（両上隅の同時 swipe、Xbox の pad を模す、段 1 は mview、ベータ2） | planning | p001 設計 |
 | [WS186](ws186/ws.md) | MG003 | Realtek RTL8822CE（5320 の PCIe の WiFi、ベータ3、ベータ2 が早く終われば前倒し） | planning | p001 調査と設計 |
+| [WS187](ws187/ws.md) | MG006 | ロック画面の大きな時計（縦長の display でもきれいに、2026-10-08 ユーザー） | planned | p001（q864、P2） |
 
 完了した WS の Phase の記録は 2026-09-24 に plan から削除した（git の履歴に残る）。
 
