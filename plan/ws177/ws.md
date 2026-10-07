@@ -29,4 +29,4 @@ Primary Milestone: MG006（関係: MG002・MG003・MG005）
 
 | Phase | 内容 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| （未作成） | 第 1〜3 段の後に Q1 が集める | — | 第 1〜3 段 |
+| [ws177-p001](phase001/phase.md) | 案 E: compositor の wl_surface.enter・leave（backlog-p1 42） | in-progress（2026-10-08 P1 q882 実装・host PASS、T1 の QEMU 待ち） | ws113-p007・p015 の出力の所属 |

@@ -151,6 +151,9 @@ kwl_schedule(
 		}
 	}
 
+	/* Each client hears which outputs its surfaces came onto and left (surface-outputs.c, ws177-p001). */
+	kwl_surface_outputs_sync(server);
+
 	/*
 	 * While a sleep's request waits for its answer no frame is presented:
 	 * the GPU driver parks the display, and a presentation in progress
