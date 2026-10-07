@@ -59,7 +59,7 @@ wx=${1:-0}; wy=${2:-0}
 echo "browser: window at $wx,$wy"
 
 # 1. The start page.
-expect_navigate "path=$pages/start.html title=zedBSD Browser"
+expect_navigate "path=$pages/start.html title=Browser"
 shot start.png
 
 # 2. The link to the about page, and back.
