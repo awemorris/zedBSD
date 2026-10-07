@@ -1,6 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws172 -->
 # WS172: passkey の認証の枠組み（/sbin/passkey と /etc/passkey、sessiond は外部の program で認証）
 
+Target: **ベータ3**（2026-10-08 ユーザー「WS172はベータ3に回します。」。p002 の PIN の実装は main に入ったまま、T1 の結果を受けて判定する）
 Status: incomplete（2026-10-05 追加、ベータ2。p001 設計 cleared、p002 PIN の login は cleared（T1-210、2026-10-05 夜）、p003 FIDO2 は段 A（passkey-fido2）を実装、2026-10-06。WS162・WS163 を吸収）
 Master: [master](../master.md)
 Primary Milestone: MG006
@@ -41,4 +42,4 @@ Related: [WS161](../ws161/ws.md)（hidraw・smartcard・libpasskey）、[WS162](
 | p004b | `/dev/securityN` の UAPI の設計（p004 の結論から）と、TPM 2.0（5330 の PTT、QEMU の swtpm）の driver の設計、passkey の chip の方式 | planning | p004、ユーザーの review |
 | p005 | OpenSSL を独自の暗号に置き換える（リリースの前） | planning | p003 |
 | p006 | 全文規約の見直し（WS の終わり） | planning | p005 まで |
-| [p007](phase007/phase.md) | greeter・lock の画面で認証の方式を選ぶ UI（PIN・Password・Hardware Key、2026-10-08 ユーザー） | planned | p002（PIN）cleared、Hardware Key は p003 |
+| [p007](phase007/phase.md) | greeter で認証の方式を選ぶ UI（PIN・Password・Hardware Key、2026-10-08 ユーザー。lock の分は WS187 p003） | planned（ベータ3） | p002（PIN）cleared、Hardware Key は p003 |

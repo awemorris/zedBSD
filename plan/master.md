@@ -37,11 +37,11 @@
 ### ユーザーの未決の判断
 
 <!-- master:open-decisions:start -->
-- **WS005 p021**（AX211 の passthrough の試験）を canceled にし p023 の実機の受け入れに置き換えるか。p019 の clearance も同時に。
-- **規約の全文の見直しの Phase（約 8〜10 LW）をベータ2 の後に回すか**。決まるまで WS005 p022 などの規約の Phase は保留。
-- **WS172 p004 の survey**（plan/ws172/phase004/survey.md、S1〜S13）のユーザーの review。5330 の TPM2 の ACPI の表は 5330 が Linux の時に Q1 が読む（T1-378 の Bluetooth の採取と一緒に）。
 - **WS084 の 10 回の reboot（素の起動）**: ユーザーが zedBSD で起動する時。
 - WS153 U2〜U15 はユーザーが検討中（聞かない）。
+- （解決 2026-10-08）WS005（ネットワークと WiFi）: ユーザー「記録のミス、とっくに完了」→ completed。
+- （解決 2026-10-08）規約の全文の見直しの Phase: ユーザー「コーディング規約による整形はベータ3でやります。」→ 各 WS の規約の Phase はベータ3 へ（ベータ2 の WS の完了の条件から外す）。
+- （解決 2026-10-08）WS172（passkey の認証の枠組み、PIN・FIDO2・TPM）: ユーザー「ベータ3に回します。」→ p004 の survey の review もベータ3 で。lock の画面の方式の選択は WS187 p003 でベータ2。
 - （解決 2026-10-08）電源ボタンのメニュー（WS182 D1）: 「現状ではオーケーです」。追加の要望 → WS187（lock の大きな時計）・ws172-p007（PIN・Password・Hardware Key の選択）。
 - （解決 2026-10-08）2 番目以降の display の dock bar: 「その画面に置いた window の window icon を出し、時計・状態・App Home・切り替えのつまみも表示する」（ws113-p015）。
 <!-- master:open-decisions:end -->
@@ -49,7 +49,7 @@
 ### Focus
 
 <!-- master:focus:start -->
-- **fg019 ベータ2 の公開（10/17、RC 10/13）**。優先順（2026-10-07 ユーザー）: Settings Display（WS113）→ USB-C/DP Alt（WS051・WS050、BUG-256）→ Vulkan Video（WS083）→ widget（WS090）→ 通知（WS156）→ touchpad の割り込み・タップ（WS183）→ YubiKey/passkey（WS161・WS172）→ 写真（WS157）→ カレンダー（WS155）→ Bluetooth（WS143）→ 残り。空き時間だけ: IME（WS095）・RTL8822C（WS186）・Vulkan executor（WS031）・i915 の高度化（WS075、shader の compiler を含む）。ベータ3 と 10/13 以降の物は decisions-log。
+- **fg019 ベータ2 の公開（10/17、RC 10/13）**。優先順（2026-10-07 ユーザー）: Settings Display（WS113）→ USB-C/DP Alt（WS051・WS050、BUG-256）→ Vulkan Video（WS083）→ widget（WS090）→ 通知（WS156）→ touchpad の割り込み・タップ（WS183）→ YubiKey（WS161）→ 写真（WS157）→ カレンダー（WS155）→ Bluetooth（WS143）→ 残り。空き時間だけ: IME（WS095）・RTL8822C（WS186）・Vulkan executor（WS031）・i915 の高度化（WS075、shader の compiler を含む）。ベータ3 と 10/13 以降の物は decisions-log。
 <!-- master:focus:end -->
 
 ### 止まっている物
@@ -165,7 +165,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | --- | --- | --- | --- | --- |
 | [WS001](ws001/ws.md) | ベータ2（2026-10-05 移動） | MG002 | 3 | POSIX 台帳の残り（p040 以降の utility） |
 | [WS004](ws004/ws.md) | ベータ2 | MG003 | 2 | NVMe の実機・転送・driver の共通化 |
-| [WS005](ws005/ws.md) | ベータ1 | MG005 | 2 | WiFi の UI の Bug（BUG-183〜189）・p031・後挿し |
+| [WS005](ws005/ws.md) | 完了（2026-10-08） | MG005 | 0 | 完了（ユーザーの判断）。WiFi の UI の Bug は Bug Board |
 | [WS007](ws007/ws.md) | キャンセル | MG006 | 0.5 | p004 の再現条件と amd64 の残件 |
 | [WS009](ws009/ws.md) | ベータ2 | MG001 | 2 | GPU の文書ほか |
 | [WS013](ws013/ws.md) | 保留（Future Work） | MG007 | 4 | CPAR（Future Work に保留中） |
@@ -309,7 +309,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | [WS002](ws002/ws.md) | MG005 | システムサービス | completed | — |
 | [WS003](ws003/ws.md) | MG003 | 旧実機 bring-up（終了・再利用禁止） | completed（ユーザー判断で終了） | 未完了は WS027・WS028・F-004 へ |
 | [WS004](ws004/ws.md) | MG003 | ハードウェア拡張 | incomplete | NVMe 実機・転送・driver 共通化 |
-| [WS005](ws005/ws.md) | MG005 | ネットワーク・WLAN | incomplete | p019（network group の WiFi の制御・system bar の鍵の入力・有線優先）と p024（起動時・login・logout の自動再接続）は実装済み。p020（RTL8822BU の USB passthrough）で DHCP の EIO の原因（ブロードキャストが有線の gateway へ）を直し、2.4GHz で lease を確認、残りを P1 が確認中（q627） |
+| [WS005](ws005/ws.md) | MG005 | ネットワーク・WLAN | completed | 2026-10-08 ユーザーの判断（記録のミス、完了済み） |
 | [WS006](ws006/ws.md) | MG006 | 入力と evdev | completed | — |
 | [WS007](ws007/ws.md) | MG006 | グラフィックス・デスクトップ（旧） | canceled（2026-10-05） | p004 の再現条件、amd64 の残件 |
 | [WS008](ws008/ws.md) | MG006 | Noct と BeUI | completed | — |
@@ -486,7 +486,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | [WS184](ws184/ws.md) | MG006 | 左手デバイスの OSK（クリエイターモード: ダイヤル・ホイール・ボタン 2×5、左上の swipe で出す、ベータ2） | planning | p001 設計 |
 | [WS185](ws185/ws.md) | MG006 | ゲームパッドの OSK とゲームコンソールモード（両上隅の同時 swipe、Xbox の pad を模す、段 1 は mview、ベータ2） | planning | p001 設計 |
 | [WS186](ws186/ws.md) | MG003 | Realtek RTL8822CE（5320 の PCIe の WiFi、ベータ3、ベータ2 が早く終われば前倒し） | planning | p001 調査と設計 |
-| [WS187](ws187/ws.md) | MG006 | ロック画面の大きな時計（縦長の display でもきれいに、2026-10-08 ユーザー） | planned | p001（q864、P2） |
+| [WS187](ws187/ws.md) | MG006 | ロック画面（大きな時計、下部から上へのスワイプ・wheel での解除、自動の lock の猶予、Password・PIN・Hardware Key の選択、2026-10-08 ユーザー） | incomplete | p001（q864、P2）→ p002 → p003 |
 
 完了した WS の Phase の記録は 2026-09-24 に plan から削除した（git の履歴に残る）。
 
@@ -515,6 +515,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 ユーザーの決定と Q1 の技術の決定の記録。決まった判断は先頭の open-decisions からここへ移す。各 WS の phase.md・ws.md が正本で、ここは索引。
 
 <!-- master:decisions-log:start -->
+- 2026-10-08 ユーザー: WS005 completed（記録のミス）。規約の整形（各 WS の全文規約の Phase）はベータ3。WS172 はベータ3。WS187 にロック画面の解除（下部から上のスワイプ・wheel の上、自動の lock の後の一定時間は認証なし、手動の lock は常に認証、Password・PIN・Hardware Key の選択）を追加。
 - 2026-10-08 ユーザー: (1)「2番目以降のディスプレイのdock barには、その画面に置いた window の window icon を出し、時計・状態・App Home・切り替えのつまみも表示する。」（ws113-p015）(2)「5330はいつでも再起動OKです。アップデートもOKです。」(3) UAT: タップの判定の遅れ → ws183-p002（q863）、USB メモリ → BUG-258、PDF viewer のリサイズの重さ → BUG-259。(4) 緊急のラップアップの後、週間の使用量 99% で別のセッションへ引き継ぎ（plan/agents/wrapup-20261008.md）。
 - 2026-10-08 ユーザー「ベータ3にします：WS009・026・106 文書・試験の整理・試験アプリの集約、WS139 デスクトップの速さ」 → 4 つの WS の Target をベータ3 に。
 - 2026-10-08 ユーザー:「『そのほか』は見積もりが甘いです。releaseの作業は明らかに10/13以降です。Linux/FreeBSDも10/13以降です。翻訳はベータ3に回します。」→ WS129（release）と Linux・FreeBSD の作業（WS112、WS131 の 3 OS の回帰ほか）は 10/13 以降、WS158（翻訳）はベータ3。
