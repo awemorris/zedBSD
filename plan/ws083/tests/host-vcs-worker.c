@@ -11,7 +11,10 @@
  * that a session's VCS0 context is a record until it is attached, that the
  * attach makes one hardware context on VCS0 and only one, that a request
  * of the video context is submitted to VCS0, and that a video request that
- * hung stops the video engine and keeps its context.
+ * hung keeps its context and has the video engine reset (ws083-p007): the
+ * kept context is freed once a reset recovered its hang, a reset that
+ * fails or a hang past the limit stops video, and the reset of the video
+ * engine record lifts the stop.
  */
 
 #include "../../../src/drivers/gpu/i915/worker.c"
@@ -34,6 +37,8 @@ struct fixture_record {
 	const struct i915_gt_engine *last_lrc_engine;
 	const struct i915_gt_engine *last_submit_engine;
 	const struct i915_execlists *last_submit_lists;
+	unsigned engine_resets;
+	unsigned last_reset_index;
 };
 
 /* The fixture's device, its engines' descriptions and what the stand-ins saw; the one test thread owns them. */
@@ -41,12 +46,18 @@ static struct i915_device fixture_device;
 static struct i915_engine_info fixture_infos[3];
 static struct fixture_record fixture_seen;
 
+/* What the engine reset's stand-in reports: 0, or the error of a reset that failed. */
+static int fixture_reset_error;
+
 static void fixture_device_make(int with_video);
 static void fixture_device_free(void);
 static void fixture_context_make(struct i915_context *context, unsigned engine, struct i915_ppgtt *vm);
 static void fixture_render_and_video(void);
 static void fixture_hang(void);
 static void fixture_no_video(void);
+static void fixture_hang_recovered(void);
+static void fixture_hang_limit(void);
+static void fixture_record_reset(void);
 
 /*
  * Runs the fixture's cases.
@@ -58,6 +69,9 @@ main(void)
 	fixture_render_and_video();
 	fixture_hang();
 	fixture_no_video();
+	fixture_hang_recovered();
+	fixture_hang_limit();
+	fixture_record_reset();
 
 	/* Succeeded: every case held. */
 	printf("ws083 vcs worker host test PASS\n");
@@ -72,9 +86,10 @@ fixture_device_make(
 	unsigned index;
 	int error;
 
-	/* A clean device and record of what the stand-ins saw. */
+	/* A clean device and record of what the stand-ins saw; engine resets succeed. */
 	memset(&fixture_device, 0, sizeof(fixture_device));
 	memset(&fixture_seen, 0, sizeof(fixture_seen));
+	fixture_reset_error = 0;
 
 	/* The GT's engines: rcs0, bcs0 and vcs0 (or a second copy engine without VCS0). */
 	fixture_infos[0].class = I915_RENDER_CLASS;
@@ -221,7 +236,7 @@ fixture_render_and_video(void)
 	fixture_device_free();
 }
 
-/* A video request that hung stops the video engine, keeps the context, and no later attach, request or destroy touches it. */
+/* A video request that hung and whose engine reset failed stops the video engine, keeps the context, and no later attach, request or destroy touches it. */
 static void
 fixture_hang(void)
 {
@@ -243,10 +258,15 @@ fixture_hang(void)
 	record = i915_worker_find(worker, &video);
 	assert(record != NULL);
 
-	/* Its request hangs. */
+	/* Its request hangs, and the engine reset fails. */
+	fixture_reset_error = ETIMEDOUT;
 	i915_worker_video_hung(worker, record, ETIMEDOUT);
+	assert(fixture_seen.engine_resets == 1U);
+	assert(fixture_seen.last_reset_index == FIXTURE_GT_VIDEO);
 	assert(worker->video_dead == 1);
-	assert(record->retained == 1);
+	assert(worker->video_hangs == 1U);
+	assert(worker->video_recovered == 0U);
+	assert(record->retained == 1U);
 	assert(record->owner == NULL);
 
 	/* The session context no longer finds it, and its destroy releases nothing. */
@@ -282,6 +302,163 @@ fixture_no_video(void)
 	fixture_context_make(&video, I915_ENGINE_VCS0, &vm);
 	error = drv_i915_worker_context_attach(&fixture_device, &video);
 	assert(error == ENODEV);
+	fixture_device_free();
+}
+
+/* A hang whose engine reset succeeds keeps the context until a reclaim, and the engine takes the next context and request. */
+static void
+fixture_hang_recovered(void)
+{
+	struct i915_ppgtt vm;
+	struct i915_context video;
+	struct i915_context later;
+	struct i915_worker *worker;
+	struct i915_worker_context *record;
+	int error;
+
+	fixture_device_make(1);
+	worker = fixture_device.worker;
+	memset(&vm, 0, sizeof(vm));
+
+	/* An attached video context whose request hangs; the reset succeeds. */
+	fixture_context_make(&video, I915_ENGINE_VCS0, &vm);
+	error = drv_i915_worker_context_attach(&fixture_device, &video);
+	assert(error == 0);
+	record = i915_worker_find(worker, &video);
+	assert(record == &worker->video_contexts[0]);
+	i915_worker_video_hung(worker, record, EIO);
+
+	/* The engine was reset, video goes on, and the record is kept but recovered. */
+	assert(fixture_seen.engine_resets == 1U);
+	assert(fixture_seen.last_reset_index == FIXTURE_GT_VIDEO);
+	assert(worker->video_dead == 0);
+	assert(worker->video_hangs == 1U);
+	assert(worker->video_recovered == 1U);
+	assert(record->retained == 1U);
+	assert(record->owner == NULL);
+	error = drv_i915_worker_video_state(&fixture_device);
+	assert(error == 0);
+
+	/* Destroying the session context frees the recovered record under the device mutex. */
+	assert(fixture_seen.lrc_releases == 0U);
+	drv_i915_worker_context_destroy(&fixture_device, &video);
+	assert(fixture_seen.lrc_releases == 1U);
+	assert(record->retained == 0U);
+	assert(record->tl_page == NULL);
+	assert(worker->live_contexts == 0U);
+
+	/* A later video context takes the freed record, and its request goes to VCS0. */
+	fixture_context_make(&later, I915_ENGINE_VCS0, &vm);
+	error = drv_i915_worker_context_attach(&fixture_device, &later);
+	assert(error == 0);
+	assert(i915_worker_find(worker, &later) == &worker->video_contexts[0]);
+	error = i915_worker_run(worker, &later, 0x1000U, 1, 4U);
+	assert(error == EIO);
+	assert(fixture_seen.last_submit_engine == &fixture_device.gt.engines.ge[FIXTURE_GT_VIDEO]);
+	drv_i915_worker_context_destroy(&fixture_device, &later);
+	assert(worker->live_contexts == 0U);
+	fixture_device_free();
+}
+
+/* Hangs up to the limit are reset; the next one stops video without a reset, and a reclaim frees only the recovered records. */
+static void
+fixture_hang_limit(void)
+{
+	struct i915_ppgtt vm;
+	struct i915_context contexts[I915_WORKER_VIDEO_HANG_LIMIT + 1U];
+	struct i915_worker *worker;
+	struct i915_worker_context *record;
+	unsigned hang;
+	int error;
+
+	fixture_device_make(1);
+	worker = fixture_device.worker;
+	memset(&vm, 0, sizeof(vm));
+
+	/* Each hang retains its own record; the ones up to the limit are reset. */
+	for (hang = 0U; hang <= I915_WORKER_VIDEO_HANG_LIMIT; hang++) {
+		fixture_context_make(&contexts[hang], I915_ENGINE_VCS0, &vm);
+		error = drv_i915_worker_context_attach(&fixture_device, &contexts[hang]);
+		assert(error == 0);
+		record = i915_worker_find(worker, &contexts[hang]);
+		assert(record != NULL);
+		i915_worker_video_hung(worker, record, ETIMEDOUT);
+		assert(record->retained == hang + 1U);
+	}
+
+	/* The last hang was past the limit: no reset was made for it, and video stopped. */
+	assert(fixture_seen.engine_resets == I915_WORKER_VIDEO_HANG_LIMIT);
+	assert(worker->video_hangs == I915_WORKER_VIDEO_HANG_LIMIT + 1U);
+	assert(worker->video_recovered == I915_WORKER_VIDEO_HANG_LIMIT);
+	assert(worker->video_dead == 1);
+	error = drv_i915_worker_video_state(&fixture_device);
+	assert(error == EIO);
+
+	/*
+	 * The attaches freed the records recovered before them, so only the
+	 * last recovered record and the one past the limit are still kept; a
+	 * reclaim frees the recovered one and keeps the other.
+	 */
+	drv_i915_worker_video_reclaim(&fixture_device);
+	for (hang = 0U; hang < I915_WORKER_VIDEO_CONTEXTS; hang++) {
+		record = &worker->video_contexts[hang];
+		assert(record->retained == 0U || record->retained == I915_WORKER_VIDEO_HANG_LIMIT + 1U);
+	}
+	assert(worker->live_contexts == 1U);
+	fixture_device_free();
+}
+
+/* The reset of the video engine record recovers every hang and lifts the stop; the other records still have none. */
+static void
+fixture_record_reset(void)
+{
+	struct i915_ppgtt vm;
+	struct i915_context video;
+	struct i915_context later;
+	struct i915_worker *worker;
+	struct i915_worker_context *record;
+	int error;
+
+	fixture_device_make(1);
+	worker = fixture_device.worker;
+	memset(&vm, 0, sizeof(vm));
+
+	/* A hang whose engine reset fails stops video. */
+	fixture_context_make(&video, I915_ENGINE_VCS0, &vm);
+	error = drv_i915_worker_context_attach(&fixture_device, &video);
+	assert(error == 0);
+	record = i915_worker_find(worker, &video);
+	fixture_reset_error = EIO;
+	i915_worker_video_hung(worker, record, ETIMEDOUT);
+	assert(worker->video_dead == 1);
+
+	/* A reset of the video record that fails leaves the stop. */
+	error = drv_i915_worker_engine_reset(&fixture_device.engines[I915_ENGINE_VCS0]);
+	assert(error == EIO);
+	assert(worker->video_dead == 1);
+	assert(worker->video_recovered == 0U);
+
+	/* One that succeeds recovers the hang and lifts the stop; the reclaim then frees the record. */
+	fixture_reset_error = 0;
+	error = drv_i915_worker_engine_reset(&fixture_device.engines[I915_ENGINE_VCS0]);
+	assert(error == 0);
+	assert(worker->video_dead == 0);
+	assert(worker->video_recovered == 1U);
+	drv_i915_worker_video_reclaim(&fixture_device);
+	assert(record->retained == 0U);
+	assert(worker->live_contexts == 0U);
+
+	/* Video takes a new context again. */
+	fixture_context_make(&later, I915_ENGINE_VCS0, &vm);
+	error = drv_i915_worker_context_attach(&fixture_device, &later);
+	assert(error == 0);
+	drv_i915_worker_context_destroy(&fixture_device, &later);
+
+	/* The render and copy records are not reset here yet. */
+	error = drv_i915_worker_engine_reset(&fixture_device.engines[I915_ENGINE_RCS0]);
+	assert(error == ENOTSUP);
+	error = drv_i915_worker_engine_reset(&fixture_device.engines[I915_ENGINE_BCS0]);
+	assert(error == ENOTSUP);
 	fixture_device_free();
 }
 
@@ -471,6 +648,26 @@ drv_i915_execlists_submit(
 	fixture_seen.last_submit_engine = ge;
 	fixture_seen.last_submit_lists = el;
 	return EIO;
+}
+
+/* Records the engine a reset was asked of and reports what the case set. */
+int
+drv_i915_engine_reset(
+	struct i915_gt_engines *es,
+	struct i915_gt_init *gi,
+	const struct i915_gt_info *gt,
+	unsigned index,
+	struct i915_mmio *mmio,
+	struct spinlock *uncore_lock)
+{
+	(void)es;
+	(void)gi;
+	(void)gt;
+	(void)mmio;
+	(void)uncore_lock;
+	fixture_seen.engine_resets++;
+	fixture_seen.last_reset_index = index;
+	return fixture_reset_error;
 }
 
 /* Takes no lock on the host: the fixture is one thread. */

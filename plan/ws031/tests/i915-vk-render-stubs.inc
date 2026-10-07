@@ -506,6 +506,23 @@ drv_i915_worker_context_attach(struct i915_device *device, struct i915_context *
 	return 0;
 }
 
+/*
+ * The release of a session object a quarantined video session's batch goes
+ * through (ws083-p007): the host keeps no registry, so a retained object is
+ * counted and, like any other, freed at once.
+ */
+unsigned stub_gem_retained;
+
+void
+drv_i915_gem_destroy(struct i915_gem_registry *registry, struct i915_gem_object *object)
+{
+	(void)registry;
+	if (object->quarantined != 0U)
+		stub_gem_retained++;
+	kern_free(object->address);
+	kern_free(object);
+}
+
 /* The IRQ lock a video hang quarantines a session under: one host thread needs no lock. */
 unsigned long
 spin_lock_irqsave(struct spinlock *lock)
@@ -537,14 +554,23 @@ unsigned stub_batch_runs;
 unsigned stub_batch_engine;
 static uint64_t stub_object_next_va = 0x7000000000ULL;
 
+/* Nonzero makes the next run end with that error, as a hang would (ws083-p007); it applies once. */
+int stub_batch_run_error;
+
 /* A batch run on an engine (draw.c): the host runs nothing, and keeps the dwords when objects are on. */
 int
 drv_i915_gfx_batch_run(struct i915_render_session *session, struct i915_gfx_batch *batch, uint64_t batch_va, unsigned engine)
 {
 	unsigned index;
+	int error;
 
 	(void)session;
 	(void)batch_va;
+	if (stub_batch_run_error != 0) {
+		error = stub_batch_run_error;
+		stub_batch_run_error = 0;
+		return error;
+	}
 	if (!stub_objects_on)
 		return 0;
 	for (index = 0U; index < batch->count && stub_batch_count < STUB_BATCH_WORDS; index++) {

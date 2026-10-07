@@ -5,7 +5,7 @@
 # ASan/UBSan.  Each test links the production sources it checks with a mock
 # behind their operations table; see README.md.
 #
-# Usage: run.sh [test ...]   (default: mmio dma pci rpm pte sync rps memory forget)
+# Usage: run.sh [test ...]   (default: mmio dma pci rpm pte sync rps memory forget reset)
 set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -15,7 +15,7 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/i915-contracts.XXXXXX")
 trap 'rm -rf -- "$work"' EXIT HUP INT TERM
 
 compiler=${CC:-cc}
-tests=${*:-"mmio dma pci rpm pte sync rps memory forget"}
+tests=${*:-"mmio dma pci rpm pte sync rps memory forget reset"}
 
 warnings="-std=gnu11 -Wall -Wextra -Werror -Wdeclaration-after-statement"
 ordinary="-O2"
@@ -51,6 +51,8 @@ sources_for() {
 		echo "$here/memory_contract_test.c $here/host_render.c $driver/render/memory.c $driver/render/object.c $driver/render/codec.c $driver/render/reply.c" ;;
 	forget)
 		echo "$here/forget_contract_test.c $here/host_render.c $driver/render/forget.c $driver/render/object.c $driver/render/descriptor.c $driver/render/codec.c $driver/render/reply.c" ;;
+	reset)
+		echo "$here/reset_contract_test.c $here/mock_mmio.c $driver/reset.c $driver/mmio.c $driver/trace.c" ;;
 	*)
 		echo "unknown contract test: $1" >&2
 		return 1 ;;
@@ -69,7 +71,8 @@ build() {
 	objects=
 	# The render executor's tests (memory BUG-244, forget BUG-260) have the host's heap, locks and log (host_render.c), not the unreached stand-ins.
 	unreached=$here/host_unreached.c
-	if [ "$name" = memory ] || [ "$name" = forget ]; then
+	# The engine reset test (ws083-p007) frees the quarantine it releases, so it brings its own stand-ins as well.
+	if [ "$name" = memory ] || [ "$name" = forget ] || [ "$name" = reset ]; then
 		unreached=
 	fi
 	for source in $sources "$here/contract.c" $unreached; do

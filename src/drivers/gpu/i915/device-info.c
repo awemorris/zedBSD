@@ -86,12 +86,17 @@
 #define I915_MAX_VCS					8U
 #define I915_MAX_VECS					4U
 
-/* The per-engine reset domains (GEN11_GRDOM_*). */
+/*
+ * The per-engine reset domains (GEN11_GRDOM_*, intel_gt_regs.h).  VCS2 is
+ * the third video decode instance, so its domain is MEDIA3, not MEDIA2.
+ * (ws083-p007: the media and enhancement bits were the Gen6 layout's, which
+ * named the GuC domain for VCS0.)
+ */
 #define I915_GRDOM_RENDER				(1U << 1)
 #define I915_GRDOM_BLT					(1U << 2)
-#define I915_GRDOM_MEDIA				(1U << 3)
-#define I915_GRDOM_MEDIA2				(1U << 5)
-#define I915_GRDOM_VECS					(1U << 7)
+#define I915_GRDOM_MEDIA				(1U << 5)
+#define I915_GRDOM_MEDIA3				(1U << 7)
+#define I915_GRDOM_VECS					(1U << 13)
 
 /* The user-visible engine capabilities (I915_VIDEO_CLASS_CAPABILITY_*). */
 #define I915_CAPABILITY_HEVC				(1U << 0)
@@ -513,7 +518,6 @@ i915_engine_mask_apply_media_fuses(
 	uint32_t engine_bit;
 	uint16_t vdbox_mask;
 	uint16_t vebox_mask;
-	unsigned logical_vdbox;
 	unsigned instance;
 
 	/* Reads the media fuse and inverts it into an enable mask. */
@@ -528,7 +532,6 @@ i915_engine_mask_apply_media_fuses(
 	gt->sfc_mask = ~0U;
 
 	/* Drops the fused-off video decode engines and assigns the shared converters. */
-	logical_vdbox = 0U;
 	for (instance = 0U; instance < I915_MAX_VCS; instance++) {
 		engine_bit = 1U << (I915_VCS0 + instance);
 
@@ -546,14 +549,17 @@ i915_engine_mask_apply_media_fuses(
 		}
 
 		/*
-		 * On Gen11 an even video decode engine shares its converter with
-		 * the next odd one, so only even logical instances get it
-		 * (gen11_vdbox_has_sfc()).
+		 * On media 12 an even physical video decode engine always reaches
+		 * its converter, and an odd one only when the even engine before
+		 * it is fused off (gen11_vdbox_has_sfc(), MEDIA_VER >= 12).  The
+		 * Gen11 rule counted logical instances, which left VCS2 of Alder
+		 * Lake-P without one (ws083-p007).
 		 */
-		if ((logical_vdbox % 2U) == 0U)
+		if ((instance % 2U) == 0U) {
 			gt->vdbox_sfc_access |= 1U << instance;
-
-		logical_vdbox++;
+		} else if ((vdbox_mask & (1U << (instance - 1U))) == 0U) {
+			gt->vdbox_sfc_access |= 1U << instance;
+		}
 	}
 
 	/* Drops the fused-off video enhancement engines. */
@@ -591,7 +597,7 @@ i915_engine_reset_domain(
 	case I915_VCS0:
 		return I915_GRDOM_MEDIA;
 	case I915_VCS2:
-		return I915_GRDOM_MEDIA2;
+		return I915_GRDOM_MEDIA3;
 	case I915_VECS0:
 		return I915_GRDOM_VECS;
 	default:

@@ -234,6 +234,59 @@ drv_i915_execlists_reset_prepare(
 }
 
 /*
+ * Drops the requests an engine reset ended and starts the CSB over
+ * (execlists_reset_rewind()).
+ *
+ * The engine runs one request at a time and the worker abandons the one
+ * that hung, so nothing is unwound into a ring: each request in a port gives
+ * its context id back, the ports are emptied, the CSB errors of the run that
+ * hung are forgotten, and the CSB pointers are reset, which also unpauses
+ * the engine.  Unlike the reference, the CSB is not processed first: what
+ * it says about the abandoned request no longer matters.
+ */
+void
+drv_i915_execlists_reset_rewind(
+	struct i915_gt_engine *ge,
+	struct i915_execlists *el,
+	struct i915_mmio *mmio)
+{
+	unsigned port;
+
+	/* Nothing to rewind without the state. */
+	if (ge == NULL || el == NULL || mmio == NULL)
+		return;
+
+	/* Gives back the context ids of the requests the engine had acknowledged. */
+	for (port = 0U; port < 2U; port++) {
+		if (el->inflight[port] != NULL)
+			i915_schedule_out(el, el->inflight[port]);
+	}
+
+	/* Gives back those of the requests still waiting for their acknowledge, each once. */
+	for (port = 0U; port < 2U; port++) {
+		if (el->pending[port] == NULL)
+			continue;
+		if (el->pending[port] == el->inflight[0] || el->pending[port] == el->inflight[1])
+			continue;
+
+		i915_schedule_out(el, el->pending[port]);
+	}
+
+	/* Empties the ports: the engine holds nothing from now on. */
+	el->pending[0] = NULL;
+	el->pending[1] = NULL;
+	el->inflight[0] = NULL;
+	el->inflight[1] = NULL;
+	el->have_active = 0;
+
+	/* A CSB error fails every later request (BUG-077); those of the run that hung end with it. */
+	el->csb_errors = 0U;
+
+	/* Starts the CSB over and unpauses the engine. */
+	drv_i915_execlists_reset_csb_pointers(ge, mmio);
+}
+
+/*
  * Submits one request to an idle engine: schedule-in, the context update and
  * the ELSQ write.
  *
