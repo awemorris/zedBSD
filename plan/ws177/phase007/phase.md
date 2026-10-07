@@ -3,7 +3,7 @@
 # ws177-p007: Welcome の準正常系（案 B）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（T1-410）（2026-10-08 P1 q884 の 4: 実装・host PASS・build warning 0、main に統合）
+Status: cleared（2026-10-08 Q1 判定、T1-410 PASS）（旧: test-wait（T1-410）（2026-10-08 P1 q884 の 4: 実装・host PASS・build warning 0、main に統合））
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q884 の 4（P1、2026-10-08）
@@ -33,3 +33,8 @@ Origin: [backlog-p2](../backlog-p2.md) の 26・27・28・30・31（WS164 ws164-
 ## Event
 
 2026-10-08 / q884-i04（P1）: 実装と host・build。
+
+
+## Q1 の判定（2026-10-08）
+
+T1-410: welcome-p007 PASS（2 回とも）。

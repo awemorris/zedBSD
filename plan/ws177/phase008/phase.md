@@ -33,6 +33,10 @@ Origin: [backlog-p2](../backlog-p2.md) の 37・38・39（q824 ws148-p002）、[
 
 2026-10-08 / q884-i05（P1）: 実装と host・build。
 
+## T1-411（2026-10-08 Q1）
+
+FAIL（2 回とも）: `the window's focus reads the changed list again (found 0 of 1)`・`read again 0 times`。Text Editor の起動・KWL FAILED 無し・生存は ok。P1 に戻す（焦点の事象で stamp を見ていない・試験の焦点の付け方、のどちらか）。log は /home/awe/zedBSD-worktrees/t1/build/t1-411/recents-p008*.log。
+
 ## T1-411（2026-10-08、2 回とも一部 FAIL）と試験の直し（P1）
 
 `the window's focus reads the changed list again (found 0 of 1)`・`read again 0 times`。Text Editor の起動・生存は ok。切り分け: zdesktop.log に `KWL DESKTOP focus` が無い。この試験の compositor（`--testing`、root）は desktop の program（files --desktop）を走らせないので、背景の click は keyboard を取らない（`kwl_desktop_press` は desktop の surface の上だけ）。描くたびに `display.c` が front を一番上の窓にするので、Text Editor は焦点を持ったままで、窓の click も新しい enter を起こさない。Text Editor の側（`KL_WINDOW_FOCUS` の pressed で `main_recent_follow` が stamp を比べる）は正しい。
