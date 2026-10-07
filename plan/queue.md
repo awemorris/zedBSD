@@ -98,7 +98,7 @@ Last reconciled Queue: [q779](history/queue-q779.md)（2026-10-06、BUG-202の�
 | q873 / q873-i01 | P1（BUG-225 の後、BUG-244 と同じ形） | [BUG-260](bugs/BUG-260.md) i915 の view・descriptor・framebuffer の dangling pointer | — | — | pending |
 | q871 / q871-i01 | P1（2026-10-08 ユーザー「BUG-244: はい、優先度を上げてください。」、q866 の今の Bug の後） | [BUG-244](bugs/BUG-244.md) i915 の use-after-free（memory.c の XXX） | — | — | finished / cleared（dc5bc7597、contract 試験 PASS） |
 | q870 / q870-i01 | P2（未実装の Bug、2026-10-08） | [BUG-240](bugs/BUG-240.md) URL の欄の / → [BUG-238](bugs/BUG-238.md) emacs の -nw → [BUG-239](bugs/BUG-239.md) client の後始末 → [BUG-241](bugs/BUG-241.md) fallback の font | — | — | pending |
-| q866 / q866-i01 | P1（UAT の Bug、2026-10-08） | 描画の遅れの UAT の Bug: [BUG-221](bugs/BUG-221.md) drag の範囲選択の追従の遅れ → [BUG-226](bugs/BUG-226.md) 左の pane の hover の遅れ → [BUG-225](bugs/BUG-225.md) App Home の表示の 0.7 秒の遅れ | — | — | pending |
+| q866 / q866-i01 | P1（UAT の Bug、2026-10-08） | 描画の遅れの UAT の Bug: [BUG-221](bugs/BUG-221.md) drag の範囲選択の追従の遅れ → [BUG-226](bugs/BUG-226.md) 左の pane の hover の遅れ → [BUG-225](bugs/BUG-225.md) App Home の表示の 0.7 秒の遅れ | — | — | finished（BUG-221 T1-385・BUG-226 T1-389 待ち、BUG-225 は記録だけ: 実装済み、icon の刻みはユーザーの判断） |
 | q865 / q865-i01 | P1（UAT の Bug、2026-10-08） | [BUG-259](bugs/BUG-259.md) PDF viewer の窓のリサイズが重い | — | — | test-wait（T1-383、main 2f384818a に統合） |
 | q864 / q864-i01 | P2（2026-10-08 ユーザーの要望、q863 の後） | [ws187-p001](ws187/phase001/phase.md) lock の画面の大きな時計（縦長でも中央より上） | — | — | finished / cleared（T1-379 QEMU PASS、2026-10-08） |
 | q863 / q863-i01 | P2（touchpad、優先順の 6 番） | [ws183-p002](ws183/ws.md) 1 本指のタップのクリックの遅れ | — | — | test-wait（実機、ユーザーの手。main b776026ca に統合 2026-10-08） |
