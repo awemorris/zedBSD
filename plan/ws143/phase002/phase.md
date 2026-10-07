@@ -156,4 +156,14 @@ write の検査 `bt_hci_check_write(packet, size, acl_data_max)` と、bootloade
 
 ## 確認
 
-（実施の記録）
+### 2026-10-08（P2、q860-i01 の再開）
+
+- 前の世代の未 commit の作業は、2026-10-08 の緊急のラップアップで stash に退避していた（写しは main の plan/ws143/wip-20261008/）。q863・q864 の後に stash pop で戻した（競合なし）。checkpoint の commit は cfd196e70。
+- kernel: `make -j16 ZEDBSD_CONFIG=config/ci/config-amd64.mk vmunix`（worktree の build/amd64）は rc 0、warning 0。kernel include check PASS、amd64 vmunix check PASS。
+- host: `OUT=<dir> sh plan/ws143/tests/bt-hci-proto-host-test.sh`（ASan・UBSan）は all checks passed。
+- style: `python3 plan/tools/style-check.py` の新しい file の指摘（閉じ括弧の後の空行、段落の注記、split の呼び出し、試験の前方宣言）を直し、bt-hci.c・bt-hci-proto.c・usb-bt.c・試験・bt-probe は 0。devfs.c・pcat.c の残りの指摘は既存の部分のもの。
+- `userland/tests/bt-probe`（commit 04ffcb8da）:
+  - 動き: `/dev/btN` の info を出す。Intel の controller には Read Version（TLV、0xFC05 0xFF）を送る。続けて HCI_Reset・Read Local Version・Read BD_ADDR を送り、Command Complete を待つ。`-r` では `BT_IOC_RESET` の後に notice を待つ。最後に stats を出す。結果は `BT PASS` か `BT FAIL steps=N`。
+  - build: `make ZEDBSD_CONFIG=plan/ws143/tests/config-amd64-bt.mk BUILD=build/amd64 build/amd64/bin/bt-probe` は rc 0、warning 0。
+- 試験の image: `plan/ws143/tests/config-amd64-bt.mk`（CI の config に bt-probe を足した物）。
+- design-reviewer の review: 2026-10-08 に実施中（§10.1。前の世代の記録に review が無かったため）。
