@@ -8,20 +8,21 @@
   Q1 の操作盤。先頭（awesome-plan-current）は「今」だけを書き、各 block は「master:<名前>:start」〜「master:<名前>:end」で丸ごと置き換えてよい。
   block: updated・agents・merge・next・open-decisions・focus・blocked（先頭）、priority・outlook（本体）、decisions-log・history-log（末尾の付録、新しい物を block の先頭に足す）。
   置き換え: sed -i '/master:agents:start/,/master:agents:end/{//!d}' plan/master.md の後に sed -i '/master:agents:start/r new.md' plan/master.md。
-- **2026-10-08 02:30 セッションの引き継ぎ**（ユーザー: 週間の使用量 99%、別のセッションへ）。直前に緊急のラップアップ。全担当は停止済み（P1・P2・bug-analyzer はユーザーが停止、T1 は終了）。詳細と再開の表は **[plan/agents/wrapup-20261008.md](agents/wrapup-20261008.md)**（最初に読む）。
-  - **P1**（q862）: agent/p1 43d35865a（main に未 merge、ws090-p015 の kl_scroll の拡張の途中）。再開は **ws113-p015 の 2 番目以降の display の dock bar（ユーザーの決定）が先** → ws090-p015 の続き。
-  - **P2**（q860・q863）: agent/p2 の worktree に WS143 p002（usb-bt・bt-hci）の未 commit の差分。写しは plan/ws143/wip-20261008/（tracked.patch・untracked.tar.gz）。再開は **q863 ws183-p002（タップのクリックの遅れ）が先** → WS143 p002 の続き。
-  - **BUG-258**（5330 の USB メモリ）: bug-analyzer は結果無しで停止。BUG-258.md の「次」からやり直す。
-  - **T1**: 未実行の依頼は無し（T1-378 は 5330 が Linux の時だけ、保留）。
-  - 体制は N=2（P1・P2、phase-runner high）＋T1（test-runner）。担当は rm をしない（Q1 が消す）。Beta 2 の優先順は memory beta2-priority-order と decisions-log。
-- **2026-10-08 再開**（ユーザー「起動して作業開始してください」）: P1 新世代 = ws113-p015（2 番目以降の display の dock bar）→ q862 ws090-p015。P2 新世代 = q863 ws183-p002（タップの遅れ）→ q864 ws187-p001（lock の大きな時計）→ q860 WS143 p002（WIP は git stash に退避）。bug-analyzer = BUG-258 の解析のやり直し。T1 は依頼が来たら起動。
+-->
+<!-- master:agents:start -->
+- **2026-10-08 夜（ユーザー就寝中、自走）**: N=2（P1・P2）＋T1。
+  - **P1**（新しい世代、q875）: 小さい物の束（ws181-p010 Alt+Shift+左右 → ws090-p018 Phone の hover → WS164 H3 → ws102-p025 → ws168-p004 → ws179-p003 → ws078-p004）。前の世代は q862・q865・q866・q871・q873 を終えて終了。
+  - **P2**（q870 の BUG-239）: T1-390 の内訳（import_us が主）で Vulkan の解放を frame の後へ。終えたらラップアップ、次は新しい世代。
+  - **T1**: 台帳の未実行は無し（T1-379〜390 済み）。
+  - **5330**: 応答なし（No route to host、スリープか電源オフ）。1 分ごとの ping で見張り、戻ったら SSH 鍵・入れ替え（build/q1-uat2 に main 2554b2d72 の vmunix・wayland・settings・libkeiland・files・pdfviewer・libpdf・terminal・notes・browser・Dawn）・再起動（ユーザーの許可 2026-10-08 夜）。
+  - ベータ2 の Phase の洗い出し: plan/agents/sweep-20261008.md（P1 q874）。
 <!-- master:agents:end -->
 
 ### 統合と試験の待ち
 
 <!-- master:merge:start -->
-- main fbfd91361 以降（2026-10-08）。P1・P2 の返却の SHA は無い（上の agents の表）。
-- 2026-10-08 の T1 の結果: T1-375b（ws156 p003・p004 cleared、p005 は規約と実機の UAT が残り）、T1-376（ws113-p015 QEMU PASS、BUG-257 resolved）、T1-377（ws182-p002 QEMU PASS、実機の gap_ms が残り）。
+- main 7e8e20a10 以降（2026-10-08 夜）。今日の統合: ws183-p002・WS187 p001〜p003・ws113-p015・ws090-p015・BUG-258・BUG-259・WS143 p002・BUG-221・BUG-226・BUG-240・BUG-238・BUG-244・BUG-260・BUG-239 の測定、Dawn の既定の壁紙。
+- 実機（5330）の確認待ち: ws183-p002 のタップ、WS187 の touchpad・PIN・Security Key、ws113-p015 の head の bar の押下、BUG-258 の Kioxia と card reader、BUG-259・221・226 の体感、BUG-231、BUG-225 の icon の刻み。
 - `codex/fix-bug202-boot-worker`・`codex/merge-bug202` の古い branch の整理（以前からの残り）。
 <!-- master:merge:end -->
 
