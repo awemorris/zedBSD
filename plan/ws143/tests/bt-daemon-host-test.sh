@@ -20,3 +20,9 @@ cc $flags -o "$OUT/bt-pair-host-test" plan/ws143/tests/bt-pair-host-test.c userl
 	userland/base/bluetoothd/acl.c userland/base/bluetoothd/l2cap.c userland/base/bluetoothd/smp.c \
 	userland/base/bluetoothd/keys.c userland/base/bluetoothd/hci.c
 timeout 120 "$OUT/bt-pair-host-test" "$bonds"
+links=$(mktemp -d "$OUT/links.XXXXXX")
+cc $flags -o "$OUT/bt-link-host-test" plan/ws143/tests/bt-link-host-test.c userland/base/bluetoothd/session.c \
+	userland/base/bluetoothd/pair.c userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c \
+	userland/base/bluetoothd/acl.c userland/base/bluetoothd/l2cap.c userland/base/bluetoothd/smp.c \
+	userland/base/bluetoothd/crypto.c userland/base/bluetoothd/keys.c -lpthread
+timeout 120 "$OUT/bt-link-host-test" "$links"

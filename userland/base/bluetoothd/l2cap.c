@@ -76,6 +76,7 @@ static struct btd_channel *signal_find(struct btd_l2cap *l2cap, uint16_t local_c
 static uint16_t signal_le16(const uint8_t *bytes);
 static void signal_put16(uint8_t *bytes, uint16_t value);
 static uint8_t signal_identifier(struct btd_l2cap *l2cap);
+static void signal_information_answer(struct btd_l2cap *l2cap, uint8_t identifier, const uint8_t *data, size_t length, struct btd_signal_effect *effect);
 
 /*
  * Empties the table of channels.
@@ -212,6 +213,46 @@ btd_l2cap_connect(
 	/* Succeeded: the request and the channel. */
 	*request_length = out.used;
 	*local_cid = channel->local_cid;
+	return 0;
+}
+
+/*
+ * Builds an Information Request for the extended features on BR/EDR's
+ * signalling channel (the payload of a frame on CID 1) and remembers its
+ * identifier, so that the answer comes back as the effect's information.
+ * Returns 0, or ENOBUFS when the request does not fit.
+ */
+int
+btd_l2cap_information(
+	struct btd_l2cap *l2cap,
+	uint8_t *request,
+	size_t size,
+	size_t *request_length)
+{
+	uint8_t type[2];
+	struct signal_out out;
+	uint8_t identifier;
+	int error;
+
+	/* The request's place. */
+	out.bytes = request;
+	out.size = size;
+	out.used = 0U;
+	*request_length = 0U;
+
+	/* The extended features, under a new identifier. */
+	identifier = signal_identifier(l2cap);
+	signal_put16(type, SIGNAL_INFO_FEATURES);
+	error = signal_put(&out, SIGNAL_INFORMATION_REQUEST, identifier, type, sizeof(type));
+	if (error != 0)
+		return error;
+
+	/* The answer is awaited under that identifier. */
+	l2cap->information_pending = 1;
+	l2cap->information_identifier = identifier;
+
+	/* Succeeded: the request. */
+	*request_length = out.used;
 	return 0;
 }
 
@@ -425,9 +466,12 @@ signal_command(
 	case SIGNAL_INFORMATION_REQUEST:
 		error = signal_information(identifier, data, length, out);
 		break;
-	case SIGNAL_ECHO_RESPONSE:
 	case SIGNAL_INFORMATION_RESPONSE:
-		/* Answers to requests bluetoothd does not send. */
+		/* The answer to bluetoothd's own request, if it is that one. */
+		signal_information_answer(l2cap, identifier, data, length, effect);
+		break;
+	case SIGNAL_ECHO_RESPONSE:
+		/* An answer to a request bluetoothd does not send. */
 		break;
 	default:
 		/* Not understood. */
@@ -753,4 +797,38 @@ signal_identifier(
 
 	/* Succeeded. */
 	return identifier;
+}
+
+/*
+ * Takes an Information Response: the answer to bluetoothd's request when
+ * its identifier is the one awaited (the result, and the features when
+ * they were given); any other is passed over.
+ */
+static void
+signal_information_answer(
+	struct btd_l2cap *l2cap,
+	uint8_t identifier,
+	const uint8_t *data,
+	size_t length,
+	struct btd_signal_effect *effect)
+{
+	/* Only the answer awaited, with its type and result. */
+	if (!l2cap->information_pending || identifier != l2cap->information_identifier)
+		return;
+	if (length < 4U)
+		return;
+
+	/* Answered: no other answer under that identifier is taken. */
+	l2cap->information_pending = 0;
+	effect->information = 1;
+	effect->information_result = signal_le16(data + 2);
+	effect->features = 0U;
+
+	/* The features' mask, when it is there. */
+	if (effect->information_result == 0U && length >= 8U) {
+		effect->features = (uint32_t)data[4] |
+				   ((uint32_t)data[5] << 8) |
+				   ((uint32_t)data[6] << 16) |
+				   ((uint32_t)data[7] << 24);
+	}
 }

@@ -138,6 +138,7 @@ static struct btd_pool *session_pool(struct btd_session *session, const struct b
 static int session_flush(struct btd_session *session);
 static void session_core_buffers(struct btd_session *session);
 static int session_scan_event(const struct btd_event *event);
+static uint16_t session_handle(const uint8_t *bytes);
 
 /*
  * Prepares a session on an open node (or the tests' socket): its ioctls
@@ -1599,7 +1600,7 @@ session_counted_event(
 			return -1;
 
 		/* A connection made, of ACL data. */
-		handle = (uint16_t)((event->parameters[1] | (event->parameters[2] << 8)) & SESSION_HANDLE_MASK);
+		handle = session_handle(event->parameters + 1);
 		if (event->parameters[0] == 0U && event->parameters[9] == SESSION_LINK_ACL)
 			session_link_add(session, handle, 0);
 		return 1;
@@ -1611,7 +1612,7 @@ session_counted_event(
 			return -1;
 
 		/* A connection made. */
-		handle = (uint16_t)((event->parameters[2] | (event->parameters[3] << 8)) & SESSION_HANDLE_MASK);
+		handle = session_handle(event->parameters + 2);
 		if (event->parameters[1] == 0U)
 			session_link_add(session, handle, 1);
 		return 1;
@@ -1623,7 +1624,7 @@ session_counted_event(
 			return -1;
 
 		/* A connection ended. */
-		handle = (uint16_t)((event->parameters[1] | (event->parameters[2] << 8)) & SESSION_HANDLE_MASK);
+		handle = session_handle(event->parameters + 1);
 		if (event->parameters[0] == 0U)
 			session_link_remove(session, handle);
 		return 1;
@@ -1665,7 +1666,7 @@ session_completed(
 	/* Each handle's packets back to its pool, no more than were sent. */
 	for (index = 0U; index < handles; index++) {
 		entry = event->parameters + 1U + 4U * index;
-		handle = (uint16_t)((entry[0] | (entry[1] << 8)) & SESSION_HANDLE_MASK);
+		handle = session_handle(entry);
 		count = (unsigned)(entry[2] | (entry[3] << 8));
 		link = session_link(session, handle);
 		if (link == NULL)
@@ -1915,4 +1916,19 @@ session_scan_event(
 
 	/* Anything else. */
 	return 0;
+}
+
+/* Reads a connection handle (two bytes, least significant first, without the flags above its 12 bits). */
+static uint16_t
+session_handle(
+	const uint8_t *bytes)
+{
+	unsigned value;
+
+	/* The two bytes, then the handle's bits alone. */
+	value = (unsigned)bytes[0] | ((unsigned)bytes[1] << 8);
+	value &= SESSION_HANDLE_MASK;
+
+	/* Succeeded: the handle. */
+	return (uint16_t)value;
 }

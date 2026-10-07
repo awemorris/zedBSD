@@ -67,6 +67,8 @@ struct btd_channel {
 struct btd_l2cap {
 	struct btd_channel channels[BTD_CHANNELS_MAX];
 	uint8_t next_identifier;
+	int information_pending;
+	uint8_t information_identifier;
 	unsigned rejected;
 	unsigned malformed;
 };
@@ -74,7 +76,8 @@ struct btd_l2cap {
 /*
  * What a signalling PDU asked of the daemon besides its answers: a
  * connection parameter update to carry out (LE), the interval's bounds,
- * the latency and the timeout as the request gave them.
+ * the latency and the timeout as the request gave them; and the answer to
+ * bluetoothd's own Information Request (its result and the features).
  */
 struct btd_signal_effect {
 	int update;
@@ -82,11 +85,15 @@ struct btd_signal_effect {
 	uint16_t interval_max;
 	uint16_t latency;
 	uint16_t timeout;
+	int information;
+	uint16_t information_result;
+	uint32_t features;
 };
 
 void btd_l2cap_init(struct btd_l2cap *l2cap);
 int btd_l2cap_signal(struct btd_l2cap *l2cap, uint16_t handle, int le, const uint8_t *payload, size_t length, uint8_t *answer, size_t size, size_t *answer_length, struct btd_signal_effect *effect);
 int btd_l2cap_connect(struct btd_l2cap *l2cap, uint16_t handle, uint16_t psm, uint8_t *request, size_t size, size_t *request_length, uint16_t *local_cid);
+int btd_l2cap_information(struct btd_l2cap *l2cap, uint8_t *request, size_t size, size_t *request_length);
 int btd_l2cap_disconnect(struct btd_l2cap *l2cap, uint16_t local_cid, uint8_t *request, size_t size, size_t *request_length);
 struct btd_channel *btd_l2cap_channel(struct btd_l2cap *l2cap, uint16_t local_cid);
 void btd_l2cap_drop(struct btd_l2cap *l2cap, uint16_t handle);
