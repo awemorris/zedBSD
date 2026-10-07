@@ -5,4 +5,5 @@ CONFIG_DRIVER_USB_CDC_ECM|bool|USB CDC ECM Ethernet|i386,amd64|y|
 CONFIG_DRIVER_USB_HID|bool|USB HID input|i386,amd64|y|
 CONFIG_DRIVER_USB_HUB|bool|USB 2.0 hubs|i386,amd64|y|
 CONFIG_DRIVER_USB_CCID|bool|USB smart card readers (CCID, NFC readers)|i386,amd64|y|
+CONFIG_DRIVER_USB_BT|bool|USB Bluetooth controllers (HCI, /dev/btN)|i386,amd64|y|
 CONFIG_DRIVER_USB_RTL8822BU|bool|Realtek RTL8822BU WLAN|i386,amd64|n|

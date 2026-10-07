@@ -14,6 +14,11 @@
  *   remacs FILE            run the editor and visit FILE
  *   remacs --script FILE   run a Noct script with the remacs APIs
  *                          registered (used by the test harness)
+ *   remacs -nw FILE        the same as remacs FILE: the terminal is the
+ *                          only display, and GNU Emacs users type -nw
+ *                          (also --no-window-system; BUG-238)
+ *   remacs --help          the options
+ *   remacs --version       the version
  */
 
 #include <noct/noct.h>
@@ -22,6 +27,9 @@
 #include <string.h>
 
 #include "remacs.h"
+
+/* What the options ask for: run the editor (or the script), or exit at once with a status. */
+#define OPTIONS_RUN		(-1)
 
 /* VM configuration (REMACS_OPT_LEVEL selects the optimization level). */
 static NoctConfig vm_config;
@@ -37,6 +45,9 @@ static NoctConfig vm_config;
 #ifndef REMACS_VERSION
 #define REMACS_VERSION "0.0.1"
 #endif
+
+static int parse_options(int argc, char *argv[], const char **script, const char **visit);
+static void print_usage(FILE *stream);
 
 /*
  * Editor sources.
@@ -172,23 +183,13 @@ main(
 	const char *script;
 	const char *visit;
 	uint32_t arg_count;
-	int i;
+	int status;
 
 	script = NULL;
 	visit = NULL;
-	for (i = 1; i < argc; i++) {
-		if (strcmp(argv[i], "--script") == 0 && i + 1 < argc) {
-			script = argv[++i];
-		} else if (strcmp(argv[i], "--version") == 0) {
-			printf("remacs %s\n", REMACS_VERSION);
-			return 0;
-		} else if (argv[i][0] != '-') {
-			visit = argv[i];
-		} else {
-			fprintf(stderr, "remacs: unknown option %s\n", argv[i]);
-			return 1;
-		}
-	}
+	status = parse_options(argc, argv, &script, &visit);
+	if (status != OPTIONS_RUN)
+		return status;
 
 	{
 		const char *opt_env;
@@ -307,4 +308,83 @@ main(
 		return 1;
 
 	return 0;
+}
+
+/*
+ * Reads the options: the script or the file to visit.  Returns
+ * OPTIONS_RUN to go on, or the exit status when an option ends the
+ * program (--help, --version, an unknown option).
+ */
+static int
+parse_options(
+	int argc,
+	char *argv[],
+	const char **script,
+	const char **visit)
+{
+	const char *option;
+	int differs;
+	int index;
+
+	/* Each word in turn. */
+	for (index = 1; index < argc; index++) {
+		option = argv[index];
+
+		/* A word that is no option is the file to visit. */
+		if (option[0] != '-') {
+			*visit = option;
+			continue;
+		}
+
+		/* --script FILE: the test harness's script. */
+		differs = strcmp(option, "--script");
+		if (differs == 0 && index + 1 < argc) {
+			index++;
+			*script = argv[index];
+			continue;
+		}
+
+		/* -nw and --no-window-system: the terminal is the only display, so they change nothing (BUG-238). */
+		differs = strcmp(option, "-nw");
+		if (differs == 0)
+			continue;
+		differs = strcmp(option, "--no-window-system");
+		if (differs == 0)
+			continue;
+
+		/* --version: the version, and nothing else. */
+		differs = strcmp(option, "--version");
+		if (differs == 0) {
+			printf("remacs %s\n", REMACS_VERSION);
+			return 0;
+		}
+
+		/* --help: the options, and nothing else. */
+		differs = strcmp(option, "--help");
+		if (differs == 0) {
+			print_usage(stdout);
+			return 0;
+		}
+
+		/* Anything else is refused, with the options to use. */
+		fprintf(stderr, "remacs: unknown option %s\n", option);
+		print_usage(stderr);
+		return 1;
+	}
+
+	/* Succeeded: the editor (or the script) runs. */
+	return OPTIONS_RUN;
+}
+
+/* Prints the options remacs takes. */
+static void
+print_usage(
+	FILE *stream)
+{
+	/* One line an option. */
+	fprintf(stream, "usage: emacs [-nw] [FILE]\n");
+	fprintf(stream, "  -nw, --no-window-system  accepted; the terminal is the only display\n");
+	fprintf(stream, "  --script FILE            run a Noct script with the remacs APIs (tests)\n");
+	fprintf(stream, "  --help                   this text\n");
+	fprintf(stream, "  --version                the version\n");
 }

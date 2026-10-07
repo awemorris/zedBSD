@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws187-p002 -->
 # ws187-p002: lock の画面の解除の操作（下部からの上へのスワイプ・wheel の上）と猶予
 
-Status: test-wait（T1 への依頼を 2026-10-08 Q1 へ。番号は Q1 が付ける）。実装・build・host 試験まで（q864 の続き、P2、2026-10-08）。猶予は 5 分、利用者の Sleep は手動（2026-10-08 ユーザーの決定、反映済み）
+Status: cleared（2026-10-08 Q1 判定、T1-379 QEMU PASS。実機の UAT は未実施）（旧: test-wait（T1 への依頼を 2026-10-08 Q1 へ。番号は Q1 が付ける）。実装・build・host 試験まで（q864 の続き、P2、2026-10-08）。猶予は 5 分、利用者の Sleep は手動（2026-10-08 ユーザーの決定、反映済み））
 Disposition: normal
 Parent: [WS187](../ws.md)
 Queue: q864（Q1 2026-10-08「p001（大きな時計）はそのまま続け、続けて p002・p003 も q864 の続きとして承認済み」）
@@ -80,3 +80,8 @@ Queue: q864（Q1 2026-10-08「p001（大きな時計）はそのまま続け、�
 - `plan/ws187/tests/host-lock-swipe.c`: sleep の key・app の sleep は手動、lid・idle・rest の sleep は自動、の検査を足した。ok（45 checks）。
 - `KWL LOCK locked reason=sleep` を待つ試験は無い（`grep -rn` で確かめた。`reason=idle`・`reason=home` だけ）。
 
+
+
+## Q1 の判定（2026-10-08）
+
+T1-379 PASS（QEMU、AAT: swipe-card・wheel-card・lock-unlock・lock-japanese、縦長 1080x1920 も）。PNG を Q1 が目視: 縦長・横長とも時計が中央より上、下に案内、card は時計と重ならない（build/review/ws187/）。猶予の内の解除は host 試験、touchpad の 2 本指・Security Key・PIN の pill は実機の UAT（未実施）。

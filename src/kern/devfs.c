@@ -133,6 +133,7 @@ static DEVFS_HIGH int component_copy(const struct componentname *component, char
 static DEVFS_HIGH int event_name(const char *name);
 static DEVFS_HIGH int hidraw_name(const char *name);
 static DEVFS_HIGH int smartcard_name(const char *name);
+static DEVFS_HIGH int bluetooth_name(const char *name);
 static DEVFS_HIGH int backlight_name(const char *name);
 static DEVFS_HIGH ino_t cdev_directory(const char *name);
 static DEVFS_HIGH int devfs_cdev_inode(struct inode *directory, struct cdev *device, struct inode **result);
@@ -419,6 +420,26 @@ smartcard_name(
 	return 1;
 }
 
+/* Identifies the Bluetooth controllers' HCI nodes, /dev/bt<n> (ws143-p002). */
+static DEVFS_HIGH int
+bluetooth_name(
+	const char *name)
+{
+	int comparison;
+
+	/* Bluetooth nodes are named bt<n>. */
+	comparison = kern_strncmp(name, "bt", 2);
+	if (comparison != 0)
+		return 0;
+
+	/* The number follows at once (no other node's name is bt and a digit). */
+	if (name[2] < '0' || name[2] > '9')
+		return 0;
+
+	/* Succeeded: the name is a Bluetooth controller's. */
+	return 1;
+}
+
 /* Identifies names owned by the /dev/backlight namespace (ws113-p013). */
 static DEVFS_HIGH int
 backlight_name(
@@ -474,6 +495,7 @@ devfs_cdev_inode(
 	int backlight;
 	int raw;
 	int smartcard;
+	int bluetooth;
 
 	/* Creates a generation-unique inode and gives it one cdev reference. */
 	number = cdev_generation(device);
@@ -488,16 +510,18 @@ devfs_cdev_inode(
 	 * anyone and changed by its owner (the seat's user, given by sessiond).
 	 * A security key's raw HID node and a smart card slot are root's alone
 	 * until sessiond gives them to the seat's user (ws161: whoever opens
-	 * them can ask the key to sign).
+	 * them can ask the key to sign).  A Bluetooth controller is root's
+	 * alone: the daemon's privileged part opens it (ws143, D16).
 	 */
 	backlight = backlight_name(device->name);
 	raw = hidraw_name(device->name);
 	smartcard = smartcard_name(device->name);
+	bluetooth = bluetooth_name(device->name);
 	if (event_name(device->name))
 		mode = 0640U;
 	else if (backlight)
 		mode = 0644U;
-	else if (raw || smartcard)
+	else if (raw || smartcard || bluetooth)
 		mode = 0600U;
 	else if (kern_strcmp(device->name, "input-inject") == 0)
 		mode = 0600U;

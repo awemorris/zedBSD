@@ -165,8 +165,8 @@ def terminal_history(item):
 @run.define("apps.emacs.edit-save")
 def emacs(item):
 	terminal(item)
-	# REmacs (userland/base/emacs) has no -nw: it is a terminal editor, and would open a buffer named -nw (T1-202c).
-	run.type(f"emacs {aatlib.WORK}/emacs.txt")
+	# -nw as GNU Emacs users type it: REmacs is a terminal editor and accepts it, changing nothing (BUG-238).
+	run.type(f"emacs -nw {aatlib.WORK}/emacs.txt")
 	run.key("enter")
 	time.sleep(4.0)
 	run.shot(item, "emacs")

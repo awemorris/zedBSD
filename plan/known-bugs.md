@@ -67,8 +67,8 @@ remain as traceable history and are not new implementation work.
 | [BUG-197](bugs/BUG-197.md) | 実機 5330 で shutdown しても電源が落ちない（DSDT の `\_S5` が引けない見込み） | reproduced（実機） / **resolved**（2026-10-06 ユーザー「電源オフは動作成功しました。」） | UAT 2026-10-05 午後 | WS049（P1、BUG-195 と同じ根） |
 | [BUG-198](bugs/BUG-198.md) | amd64 の kernel が上限 16 MiB の手前（余り約 440 KiB、.bss が 13.7 MiB） | reproduced（link） / resolved（2026-10-05、T1-192） | P1 2026-10-05 | overlay の inode の表を起動時の確保へ（P1 q764、余り 3.2 MiB 以上）、T1 の UEFI・BIOS の boot 待ち |
 | [BUG-199](bugs/BUG-199.md) | ws001 の overlay の host 試験が link できない（古い試験） | reproduced（host） / tracking | P1 2026-10-05 | WS001 の試験 |
-| [BUG-200](bugs/BUG-200.md) | plan/ws081/tests/run-pdftouch.sh が壊れている（古い試験） | reproduced（host） / tracking | P2 2026-10-05 | WS081 の試験 |
-| [BUG-201](bugs/BUG-201.md) | Windows の QEMU（Venus）で desktop がフリーズする | reproduced（ユーザー、1 回） / tracking | ユーザー 2026-10-05 夜 | WS085 |
+| [BUG-200](bugs/BUG-200.md) | plan/ws081/tests/run-pdftouch.sh が壊れている（古い試験） | reproduced（host） / resolved | P2 2026-10-05 | ws131-p023 で直した、2026-10-08 ユーザー「解決でOK」 |
+| [BUG-201](bugs/BUG-201.md) | Windows の QEMU（Venus）で desktop がフリーズする | reproduced（ユーザー、1 回） / tracking | ユーザー 2026-10-05 夜 | 2026-10-08 ユーザー「保留」 |
 | [BUG-202](bugs/BUG-202.md) | 5330 の起動中の scheduler queue underflow / idle thread sleeps | reproduced（実機） / **resolved**（2026-10-06 実機の UAT で起動・使用でき fatal 無し） | ユーザー 2026-10-05〜06 | ws073-p055 / q779: LPSSのD0復帰10ms待ちをidleが実行。device discoveryを通常boot_workerへ移動（e093bebe）、main統合済み、amd64 warning/error 0。userのUAT待ち |
 | [BUG-203](bugs/BUG-203.md) | Phone の app で日本語を入力できない（IME に対応していない見込み） | reproduced（ユーザー、QEMU） / tracking・2026-10-06 T1-217 PASS（QEMU の Phone、Mailer・Calendar は未実施、実機は UAT） | UAT 2026-10-05 夜 | WS170（Phone）・WS095（IME）。2026-10-06 P1 修正済み（libkeiland の kl_field に text-input）、T1 の確認待ち |
 | [BUG-204](bugs/BUG-204.md) | Phone の app で画面 keyboard の日本語のフリック入力が無視される | reproduced（ユーザー、QEMU） / tracking・2026-10-06 T1-217 PASS（QEMU の Phone、Mailer・Calendar は未実施、実機は UAT） | UAT 2026-10-05 夜 | WS170・WS102（画面 keyboard）。BUG-203 と同じ修正、T1 の確認待ち |
@@ -91,7 +91,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-221](bugs/BUG-221.md) | Files と desktop の drag の範囲選択が pointer に遅れて追従する（再描画を一定の frame rate（15〜30 fps）に丸める） | reproduced（実機） / scheduled（q791: Files の band の drag を部分の再描画に（host の一致は未確認）、desktop は未着手、test-wait） | UAT 2026-10-06 | WS127・WS099 |
 | [BUG-222](bugs/BUG-222.md) | ue0 の SCP が約 950 KB/s（約 10 Mbps）。link の速度を Settings に出し、RTL8822BU（実は USB の LAN の device）が 10 Mbps の mode になっていないか確かめる | reproduced（実機） / scheduled（q780: Settings に link の速度 ab0699b6、test-wait。律速は TCP の受信 window 8 KB の見込み → q786） | UAT 2026-10-06 | WS033（USB LAN）・WS089（Settings の Network） |
 | [BUG-223](bugs/BUG-223.md) | 動画の player で F11・Alt+Enter で全画面（composition を通さない直接の scanout、game mode）にしたい | reproduced（実機） / tracking | UAT 2026-10-06 | WS122（動画の player）・WS099（compositor の direct scanout） |
-| [BUG-224](bugs/BUG-224.md) | touchpad の上端から 2 本指で下に swipe すると、最大化の app を窓の mode にしたい | reproduced（実機） / tracking | UAT 2026-10-06 | WS142・WS099 |
+| [BUG-224](bugs/BUG-224.md) | touchpad の上端から 2 本指で下に swipe すると、最大化の app を窓の mode にしたい | reproduced（実機） / closed（superseded） | UAT 2026-10-06 | 2026-10-08 ユーザー「いったん閉じてください」（TOP2 は 2026-10-07 に App Home へ） |
 | [BUG-225](bugs/BUG-225.md) | App Home の表示が約 0.7 秒遅れる。すぐ描ける texture で覆う animation を先に始め、裏で準備して icon を後から浮かび上がらせる 2 層の animation に | reproduced（実機） / tracking | UAT 2026-10-06 | WS099（App Home） |
 | [BUG-226](bugs/BUG-226.md) | 左の pane（Files・Mail・Calendar・Settings）で pointer の hover の描画が遅れる。CPU の合成の疑い、無ければ FPS の安定化 | reproduced（実機） / scheduled（q791: 原因は CPU の半透明の合成で全体を描き直す。合成の高速化・Settings と Files の部分の再描画・kl_ui の app は移動ごとに描かない、test-wait） | UAT 2026-10-06 | WS090（libkeiland の UI）・WS127・WS169・WS155・WS089 |
 | [BUG-227](bugs/BUG-227.md) | Browser で https://www.amazon.co.jp を開くと白い画面のまま（libbrowser か browser の shell か） | reproduced（実機） / tracking（q782: 原因は Chrome の UA への AWS WAF の challenge（202・空の本文）。UA の方針の判断待ち）・2026-10-06: Accept の header を直し challenge の page は届く。JS の機能（typed array など）はベータ2 の後（ユーザー） | UAT 2026-10-06 | WS074（browser） |
@@ -111,9 +111,9 @@ remain as traceable history and are not new implementation work.
 | [BUG-241](bugs/BUG-241.md) | Browser で example.com の一部の言語の行が □ | reproduced（QEMU） / tracking | T1-219 2026-10-06 | WS074（font の fallback） |
 | [BUG-242](bugs/BUG-242.md) | Emacs の M-x shell で `ls /` の layout が崩れる | unknown / tracking（ベータ2、低い優先度） | 2026-10-07 ユーザーの UAT | REmacs・ls（WS001 p041） |
 | [BUG-243](bugs/BUG-243.md) | full の OSK で窓が縮むと app の表示が縦に圧縮される（resize が app に届かない疑い） | reproduced（ユーザーの UAT） / resolved（T1-332、2026-10-07） | 2026-10-07 ユーザーの ad-hoc UAT | WS102（P2、q841） |
-| [BUG-244](bugs/BUG-244.md) | i915 の render で vkFreeMemory の後に bind した buffer・image が解放済みの memory の record を使う（use-after-free） | unreproduced（code の読み） / tracking | 2026-10-07 WS083 の design-reviewer | WS031 |
+| [BUG-244](bugs/BUG-244.md) | i915 の render で vkFreeMemory の後に bind した buffer・image が解放済みの memory の record を使う（use-after-free） | unreproduced（code の読み） / tracking | 2026-10-07 WS083 の design-reviewer | 2026-10-08 ユーザー「優先度を上げてください」→ 次の担当に割り当て |
 | [BUG-245](bugs/BUG-245.md) | docked の X の窓で bar の × を押しても閉じない（press を先の handler が取る疑い） | reproduced（QEMU） / resolved（T1-344、2026-10-07） | 2026-10-07 T1-340・341・343 | compositor の bar（P2） |
-| [BUG-246](bugs/BUG-246.md) | 整列の popup と入れ替えの animation が pointer の事象が無いと進まない、最初の click まで移動ごとにちらつく（5320 実機） | reproduced（実機） / scheduled（直しの実装済み、実機の確認待ち） | 2026-10-07 ユーザーの UAT | P2（UAT 優先） |
+| [BUG-246](bugs/BUG-246.md) | 整列の popup と入れ替えの animation が pointer の事象が無いと進まない、最初の click まで移動ごとにちらつく（5320 実機） | reproduced（実機） / scheduled（直しの実装済み、実機の確認待ち） | 2026-10-07 ユーザーの UAT | 修正 cfdb21813、実機で確認済み（2026-10-08 P2 の q869 の確認で resolved に） |
 | [BUG-247](bugs/BUG-247.md) | docked の窓の bar を touchpad で 2 回 tap しても解けず 3 回要る（5320 実機） | reproduced（実機） / scheduled（直しの実装済み、実機の確認待ち） | 2026-10-07 ユーザーの UAT | P2（BUG-246 の後） |
 | [BUG-248](bugs/BUG-248.md) | Text Editor のメニューが独自の形、他の app と同じ下線の付いた共通のメニューに | reproduced（UAT） / scheduled | 2026-10-07 ユーザーの UAT | q851 P2: 修正済み（title bar の controls を外して menu bar、Find は panel）、build・host まで。T1 の QEMU と 5320 の UAT 待ち |
 | [BUG-249](bugs/BUG-249.md) | 5320 で Restart が終わらない（popup のまま）、Power Off は可 | reproduced（実機） / scheduled（8936e05e7 で直した、QEMU T1-364 PASS、5320 の実機待ち） | 2026-10-07 ユーザー | P2 が fallback を実装（ACPI の reset register → 0xcf9 → keyboard、5330 の FADT は 0xB2←0x73）、実機の確認待ち |
@@ -294,3 +294,6 @@ the boot BOT disk `sdb`. This is a boot-media wait/order observation; a shared
 root cause with the original enumeration error is unproven. With boot BOT on
 xHCI port 1 and UAS on port 2, `q199-super3` boots and passes UAS lifecycle I/O.
 Preserve both topologies when investigating; the passing order is no general fix.
+
+
+2026-10-08 q869（P2）: BUG-200〜257 の tracking・scheduled の 51 件を確かめ、各 ticket に「2026-10-08 P2 の確認」の節。A（実装済み、QEMU・host の証拠、残りは実機の UAT）33 件: 203–209・211・213–220・222・223・225・226・228–230・232–237・248・249・254。B（実装済み、証拠無し）4 件: 231・247・251・252。C（未実装・一部）: 212・221（q866 で desktop を直した）・238・239・240・241・242・244・256。D（判断）: 200・201・224・227・255。各行の古い記載は ticket の節が正。
