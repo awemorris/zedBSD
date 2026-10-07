@@ -84,9 +84,12 @@ fm_overlay_draw(
 		return;
 	}
 
-	/* The question's words: what is deleted, and that it cannot be undone. */
+	/* The question's words: what is deleted, and that it cannot be undone (or that the files stay, for Recents). */
 	fm_dir_items_text((long)app->dialog_count, items, sizeof(items));
-	if (app->dialog == FM_DIALOG_EMPTY_TRASH) {
+	if (app->dialog == FM_DIALOG_CLEAR_RECENTS) {
+		snprintf(title, sizeof(title), "Clear Recents?");
+		snprintf(detail, sizeof(detail), "The %s leave the recent list; the files stay.", items);
+	} else if (app->dialog == FM_DIALOG_EMPTY_TRASH) {
 		snprintf(title, sizeof(title), "Empty the Trash?");
 		snprintf(detail, sizeof(detail), "The %s in the Trash will be deleted for good.", items);
 	} else if (app->dialog_count == 1U) {
@@ -115,6 +118,8 @@ fm_overlay_draw(
 	action = "Delete";
 	if (app->dialog == FM_DIALOG_EMPTY_TRASH)
 		action = "Empty";
+	if (app->dialog == FM_DIALOG_CLEAR_RECENTS)
+		action = "Clear";
 	overlay_button(app, canvas, x + OVERLAY_DIALOG_WIDTH - 24 - 2 * OVERLAY_BUTTON_WIDTH - 10, y + OVERLAY_DIALOG_HEIGHT - 24 - OVERLAY_BUTTON_HEIGHT, "Cancel", FM_BUTTON_CANCEL, 0);
 	overlay_button(app, canvas, x + OVERLAY_DIALOG_WIDTH - 24 - OVERLAY_BUTTON_WIDTH, y + OVERLAY_DIALOG_HEIGHT - 24 - OVERLAY_BUTTON_HEIGHT, action, FM_BUTTON_CONFIRM, 1);
 }

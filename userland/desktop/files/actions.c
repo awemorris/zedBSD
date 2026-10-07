@@ -46,6 +46,7 @@ static void actions_finish(struct fm_app *app, struct fm_task *task);
 static void actions_record(struct fm_app *app, struct fm_task *task);
 static void actions_select_after(struct fm_app *app, char *const *paths, size_t count);
 static void actions_ask(struct fm_app *app, unsigned dialog, char **paths, size_t count);
+static void actions_clear_recents_now(struct fm_app *app);
 static void actions_undo_item(struct fm_app *app, struct fm_undo_item *item, int redo);
 static void actions_undo_replaced(struct fm_app *app, const struct fm_undo_item *item, int redo, const char *trash);
 static int actions_undo_possible(const struct fm_undo_item *item, int redo);
@@ -277,27 +278,19 @@ fm_action_empty_trash(
 }
 
 /*
- * Empties the desktop's recent list (q824; the files stay where they are)
- * and shows Recents again.
+ * Asks whether to empty the desktop's recent list (Clear Recents, q824;
+ * ws177-p008: a press by mistake is caught by the question): the answer
+ * comes to fm_action_confirm.
  */
 void
 fm_action_clear_recents(
 	struct fm_app *app)
 {
-	int error;
+	struct fm_tab *tab;
 
-	/* The list emptied (the log the tests read). */
-	error = kl_recent_clear();
-	printf("ZFILES RECENTS clear error=%d\n", error);
-	fflush(stdout);
-	if (error != 0) {
-		fm_ui_message(app, "The recent list could not be cleared");
-		return;
-	}
-
-	/* Recents shown again, now empty. */
-	fm_ui_reload(app, fm_ui_tab(app));
-	fm_ui_message(app, "Recents cleared");
+	/* The question, about as many items as Recents shows (no paths). */
+	tab = fm_ui_tab(app);
+	actions_ask(app, FM_DIALOG_CLEAR_RECENTS, NULL, tab->listing.count);
 }
 
 /*
@@ -329,6 +322,17 @@ fm_action_confirm(
 	/* A question whether to mount a device: Enter mounts, Esc does not (ws132-p009). */
 	if (app->dialog == FM_DIALOG_MOUNT) {
 		fm_devices_mount_answer(app, confirmed);
+		return;
+	}
+
+	/* A question whether to clear Recents: the list emptied only when it is answered yes (ws177-p008). */
+	if (app->dialog == FM_DIALOG_CLEAR_RECENTS) {
+		app->dialog = FM_DIALOG_NONE;
+		app->dialog_count = 0;
+		app->dirty = 1;
+		fm_log("DIALOG answer=%d", confirmed);
+		if (confirmed != 0)
+			actions_clear_recents_now(app);
 		return;
 	}
 
@@ -1605,4 +1609,28 @@ actions_redo_pairs(
 		if (same != 0)
 			(void)fm_task_set_folder(task, index, parent);
 	}
+}
+
+/*
+ * Empties the desktop's recent list (the files stay where they are) and
+ * shows Recents again, once the question was answered yes.
+ */
+static void
+actions_clear_recents_now(
+	struct fm_app *app)
+{
+	int error;
+
+	/* The list emptied (the log the tests read). */
+	error = kl_recent_clear();
+	printf("ZFILES RECENTS clear error=%d\n", error);
+	fflush(stdout);
+	if (error != 0) {
+		fm_ui_message(app, "The recent list could not be cleared");
+		return;
+	}
+
+	/* Recents shown again, now empty. */
+	fm_ui_reload(app, fm_ui_tab(app));
+	fm_ui_message(app, "Recents cleared");
 }

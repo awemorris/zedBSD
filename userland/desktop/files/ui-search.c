@@ -214,6 +214,7 @@ fm_search_load(
 	size_t count;
 	size_t index;
 	int folder_entry;
+	int keep;
 	int error;
 
 	/* The place. */
@@ -233,8 +234,14 @@ fm_search_load(
 		return;
 	}
 
-	/* The recent files, newest first (folders and files that are gone are left out). */
+	/* The recent files, newest first (folders and files that are gone are left out); whether the list is stopped too (ws177-p008). */
 	if (location->kind == FM_LOCATION_RECENTS) {
+		keep = 1;
+		error = kl_recent_keep(&keep);
+		app->recents_off = 0;
+		if (error == 0 && keep == 0)
+			app->recents_off = 1;
+		fm_log("RECENTS kept=%d", keep);
 		error = kl_recent_list(search_recents, SEARCH_RECENTS, &count);
 		for (index = 0; error == 0 && index < count; index++) {
 			error = stat(search_recents[index].path, &status);
