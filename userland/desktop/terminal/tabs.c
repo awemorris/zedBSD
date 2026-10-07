@@ -6,17 +6,17 @@
  */
 
 /*
- * The terminal's tabs in zdesktop's titlebar (the Titlebar Presentation's
+ * The terminal's tabs in the compositor's titlebar (the Titlebar Presentation's
  * TABS mode, plan/ws070/titlebar-design.md, ws035-p086).
  *
  * Each tab is a shell of its own (main.c).  With one tab the titlebar
  * shows the menus (MENU mode); with two or more it shows the tabs, with
  * "+" for a new one and the menus under "..." (TABS mode), given to
  * libkeiland's window as a table (kl_window_set_tabs, WS131 p018).
- * zdesktop draws them and tells the terminal a tab chosen, a tab's close
+ * The compositor draws them and tells the terminal a tab chosen, a tab's close
  * button and "+" as the window's KL_WINDOW_TAB inputs; those are queued
  * here for the main loop.  The tabs are sent only when they changed.
- * Without zdesktop's titlebar the terminal still has its tabs, switched
+ * Without the compositor's titlebar the terminal still has its tabs, switched
  * from the Shell menu's keys.
  */
 
@@ -70,7 +70,7 @@ terminal_tabs_show(
 			entries[index].flags |= KL_TAB_ACTIVE;
 	}
 
-	/* To libkeiland's window, with "+"; without zdesktop's titlebar nothing is shown. */
+	/* To libkeiland's window, with "+"; without the compositor's titlebar nothing is shown. */
 	error = kl_window_set_tabs(window->kui, entries, shown, KL_TABS_NEW_BUTTON);
 	if (error != 0 && error != ENOTSUP)
 		printf("ZTERM TABS failed errno=%d\n", error);

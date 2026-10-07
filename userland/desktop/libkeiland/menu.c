@@ -7,7 +7,7 @@
 
 /*
  * The System Menu (WS070, plan/ws070/design.md section 4): the wrapper of
- * zdesktop's xdg_toplevel_menu_v1 protocol.
+ * the compositor's xdg_toplevel_menu_v1 protocol.
  *
  * A menu keeps a mirror of its items' IDs, parents and types as the
  * requests sent so far leave them, so that a call the compositor would
@@ -107,7 +107,7 @@ static const struct xdg_context_menu_v1_listener menu_context_listener = {
 };
 
 /*
- * Opens the connection's menu service: zdesktop's xdg_menu_manager_v1,
+ * Opens the connection's menu service: the compositor's xdg_menu_manager_v1,
  * bound from an application's registry or found by a search of the
  * library's own (on a queue of its own, so no event of the application's
  * is dispatched by it).
@@ -246,7 +246,7 @@ kl_menu_begin(
 }
 
 /*
- * Ends a transaction; zdesktop shows its changes at once.
+ * Ends a transaction; the compositor shows its changes at once.
  */
 int
 kl_menu_commit(
@@ -655,7 +655,7 @@ kl_window_menu_create(
 	window_menu->listener = listener;
 	window_menu->data = data;
 
-	/* The protocol object (zdesktop allows one per window). */
+	/* The protocol object (the compositor allows one per window). */
 	window_menu->proxy = xdg_menu_manager_v1_get_toplevel_menu(service->manager, toplevel);
 	if (window_menu->proxy == NULL) {
 		free(window_menu);

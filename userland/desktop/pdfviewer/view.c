@@ -87,7 +87,7 @@
 
 /*
  * The character each key types without shift, by evdev code; 0 for a key
- * that types none.  The US layout, as zdesktop sends no keymap.
+ * that types none.  The US layout, as the compositor sends no keymap.
  */
 static const char view_plain_keys[VIEW_KEY_TABLE_SIZE] = {
 	0, 0, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 0, 0,
@@ -1469,7 +1469,7 @@ handle_key(
 	int fits_across;
 	int fits_down;
 
-	/* The shortcuts with Control (the menus choose them first when zdesktop has menus). */
+	/* The shortcuts with Control (the menus choose them first when the compositor has menus). */
 	if ((event->modifiers & PV_MOD_CTRL) != 0) {
 		switch (event->key) {
 		case PV_KEY_O:

@@ -82,7 +82,7 @@
 #include <string.h>
 #include <time.h>
 
-/* The touch screens zdesktop reads at once, and the fingers (protocol B slots) of each. */
+/* The touch screens the compositor reads at once, and the fingers (protocol B slots) of each. */
 #define TOUCH_SCREENS		2U
 #define TOUCH_SLOTS		16U
 
@@ -218,7 +218,7 @@ struct touch_report {
 };
 
 /*
- * The touch screens zdesktop reads.
+ * The touch screens the compositor reads.
  *
  * A slot's input pointer says whether it is in use; the table lives as long
  * as the process, and the event loop is its only user.

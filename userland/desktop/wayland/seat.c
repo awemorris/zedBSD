@@ -238,7 +238,7 @@ kwl_seat_request(
 }
 
 /*
- * Shows zdesktop's arrow again (when the pointer goes to another client, or
+ * Shows the compositor's arrow again (when the pointer goes to another client, or
  * the cursor surface goes).
  */
 void
@@ -476,10 +476,10 @@ kwl_seat_motion(
 {
 	int taken;
 
-	/* zdesktop's own grabs and screens take the motion first. */
+	/* The compositor's own grabs and screens take the motion first. */
 	taken = kwl_seat_motion_shell(server, time);
 	if (taken) {
-		/* The client loses the pointer to zdesktop's own screens and menus (BUG-141). */
+		/* The client loses the pointer to the compositor's own screens and menus (BUG-141). */
 		motion_taken_leave(server);
 		return;
 	}
@@ -489,7 +489,7 @@ kwl_seat_motion(
 }
 
 /*
- * Gives the pointer's motion to zdesktop's own grabs and screens (the lock
+ * Gives the pointer's motion to the compositor's own grabs and screens (the lock
  * screen, a drag and drop, a resize, the glass look's moves and screens);
  * reports whether one of them took it.  A pen moving as the pointer passes
  * here first too (tablet.c).
@@ -540,7 +540,7 @@ kwl_seat_motion_shell(
 	if (server->glass && server->windowed && server->popup_grab == NULL) {
 		fullscreen = kwl_glass_fullscreen_input(server);
 		if (fullscreen) {
-			/* Over a fullscreen window only the edges' gestures are zdesktop's, and no frame shows its arrow (shell.c). */
+			/* Over a fullscreen window only the edges' gestures are the compositor's, and no frame shows its arrow (shell.c). */
 			kwl_cursor_frame(server, 0U);
 			taken = kwl_glass_edge_motion(server);
 		} else {
@@ -553,7 +553,7 @@ kwl_seat_motion_shell(
 			return 1;
 	}
 
-	/* Succeeded: nothing of zdesktop's took the motion. */
+	/* Succeeded: nothing of the compositor's took the motion. */
 	return 0;
 }
 
@@ -608,7 +608,7 @@ kwl_seat_button(
 	if (state != 0U)
 		kwl_super_tap_cancel(&server->super_tap);
 
-	/* zdesktop's own grabs, screens and title bars take the button first. */
+	/* The compositor's own grabs, screens and title bars take the button first. */
 	taken = kwl_seat_button_shell(server, time, button, state);
 	if (taken)
 		return;
@@ -618,7 +618,7 @@ kwl_seat_button(
 }
 
 /*
- * Records a pointer button and gives it to zdesktop's own grabs, screens
+ * Records a pointer button and gives it to the compositor's own grabs, screens
  * and title bars; reports whether one of them took it.  A pen's touch
  * passes here first as BTN_LEFT (tablet.c).
  */
@@ -729,7 +729,7 @@ kwl_seat_button_shell(
 			return 1;
 	}
 
-	/* Succeeded: nothing of zdesktop's took the button. */
+	/* Succeeded: nothing of the compositor's took the button. */
 	return 0;
 }
 
@@ -1008,12 +1008,12 @@ kwl_seat_key(
 	/*
 	 * App Home, while it shows, takes every key (home.c), and so does an
 	 * open menu (menu-shell.c), then a titlebar's text field with the
-	 * keyboard (titlebar-shell.c); zdesktop's shortcuts come next
+	 * keyboard (titlebar-shell.c); the compositor's shortcuts come next
 	 * (shell.c), then the focused window's menu: F10 and its shortcuts,
 	 * then the keys of its tabs (titlebar-shell.c).  Esc gives up a drag
 	 * and drop first (data.c).  The input method (input-method.c) takes
 	 * Alt+Space before all of these, and the keys of a text input it
-	 * serves after zdesktop's shortcuts (before the menu's while text is
+	 * serves after the compositor's shortcuts (before the menu's while text is
 	 * being composed).
 	 */
 	if (server->dnd_active && key == SEAT_KEY_ESC && state != 0U) {
@@ -1266,7 +1266,7 @@ create_device(
 
 		/*
 		 * Version 4 keyboards are told how to repeat a held key themselves
-		 * (zdesktop does not): 25 keys a second after 400 ms (ws035-p078),
+		 * (the compositor does not): 25 keys a second after 400 ms (ws035-p078),
 		 * or the user's preferences (ws089-p007, main.c and preferences.c).
 		 */
 		if (device->version >= KEYBOARD_REPEAT_VERSION) {
@@ -1403,7 +1403,7 @@ keyboard_modifiers(
 
 /*
  * Tells the surface the pointer was on that it left, when a motion was
- * zdesktop's: its menus, App Home, Wiseview, the lock screen, the corners'
+ * the compositor's: its menus, App Home, Wiseview, the lock screen, the corners'
  * and the edges' gestures.  The client would otherwise keep the last place
  * it heard, and the item it lit there (BUG-141).  A window being moved,
  * resized, pulled or swiped, and a drag and drop, keep the pointer as before

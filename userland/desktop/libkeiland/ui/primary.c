@@ -6,7 +6,7 @@
  */
 
 /*
- * The window's primary selection through zdesktop's (ws090-p004, Text
+ * The window's primary selection through the compositor's (ws090-p004, Text
  * Editor's primary.c moved here, itself Terminal's): kl_window_select
  * makes the text selected the primary selection (a source offering UTF-8
  * and plain text), and kl_window_paste_primary receives it (a middle

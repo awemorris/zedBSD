@@ -13,7 +13,7 @@
  * items' menu without what needs a window (a new tab, the information card)
  * and with Show in Files, and a menu of its own for the empty desktop.
  *
- * zdesktop draws the menu at the press (menu.c); this part works out its
+ * The compositor draws the menu at the press (menu.c); this part works out its
  * rows from the window's state and knows nothing of Wayland, so the host's
  * tests read the rows directly.
  */

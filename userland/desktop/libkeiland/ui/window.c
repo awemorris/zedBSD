@@ -14,7 +14,7 @@
  * (clipboard.c, primary.c), whose managers are bound here, and for the
  * context menus.
  *
- * zdesktop does not repeat keys, so a key held past the repeat delay is
+ * The compositor does not repeat keys, so a key held past the repeat delay is
  * pressed again on each interval -- only by kl_window_repeat, which the
  * application calls after a dispatch, so that a release read in the same
  * dispatch stops it first (BUG-111).
@@ -41,13 +41,13 @@
 #define WINDOW_REPEAT_DELAY	400U
 #define WINDOW_REPEAT_INTERVAL	40U
 
-/* How many pixels one unit of scrolling moves (zdesktop sends 15 units a wheel notch). */
+/* How many pixels one unit of scrolling moves (the compositor sends 15 units a wheel notch). */
 #define WINDOW_SCROLL_SCALE	4.0
 
 /* The oldest a compositor's input time may be and still be taken (older is another clock), in milliseconds. */
 #define WINDOW_TOUCH_BEHIND	2000U
 
-/* The modifier bits of wl_keyboard.modifiers as zdesktop reports them. */
+/* The modifier bits of wl_keyboard.modifiers as the compositor reports them. */
 #define WINDOW_WAYLAND_SHIFT	0x01U
 #define WINDOW_WAYLAND_CTRL	0x04U
 #define WINDOW_WAYLAND_ALT	0x08U
@@ -672,7 +672,7 @@ kl_window_present_part(
 
 /*
  * Tells whether the frames are blended by their alpha (a see-through
- * swapchain, or shared memory), which zdesktop's glass needs.
+ * swapchain, or shared memory), which the compositor's glass needs.
  */
 int
 kl_window_see_through(
@@ -1273,7 +1273,7 @@ window_setup_shared(
 	if (status == 0)
 		(void)wl_display_roundtrip_queue(window->display, queue);
 
-	/* The compositor, shared memory and a shell of the window's own (zdesktop lets it go alone, BUG-112). */
+	/* The compositor, shared memory and a shell of the window's own (the compositor lets it go alone, BUG-112). */
 	if (found.compositor != 0U && found.shm != 0U && found.shell != 0U) {
 		window->compositor = wl_registry_bind(registry, found.compositor, &wl_compositor_interface, found.compositor_version);
 		window->shm = wl_registry_bind(registry, found.shm, &wl_shm_interface, 1U);
@@ -2260,7 +2260,7 @@ window_keyboard_modifiers(
 {
 	struct kl_window *window;
 
-	/* Only the held modifiers count; zdesktop latches and locks nothing. */
+	/* Only the held modifiers count; the compositor latches and locks nothing. */
 	(void)keyboard;
 	(void)serial;
 	(void)latched;

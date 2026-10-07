@@ -565,7 +565,7 @@ kl_window_popup_menu(
 		window->popup = NULL;
 	}
 
-	/* zdesktop shows it at the press. */
+	/* The compositor shows it at the press. */
 	window->popup = kl_menu_popup(service, window->popup_menu, window->surface, x, y, window->seat, window->press_serial, &declare_popup_listener, window);
 	if (window->popup == NULL)
 		return errno;
@@ -961,7 +961,7 @@ declare_tab(
 	event->id = (int32_t)id;
 }
 
-/* A tab was chosen (or zdesktop's tab keys moved to it). */
+/* A tab was chosen (or the compositor's tab keys moved to it). */
 static void
 declare_tab_activated(
 	void *data,

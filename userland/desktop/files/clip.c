@@ -8,7 +8,7 @@
 /*
  * The clipboard of files (Cut, Copy, Paste).
  *
- * zdesktop has no clipboard between clients yet (no wl_data_device), and
+ * The compositor has no clipboard between clients yet (no wl_data_device), and
  * each window of the file manager is a process of its own, so the
  * clipboard is a file: $XDG_RUNTIME_DIR/files.clipboard (or
  * /tmp/files-UID.clipboard), whose first line is "copy" or "cut"

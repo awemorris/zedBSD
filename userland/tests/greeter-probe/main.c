@@ -8,7 +8,7 @@
 /*
  * A greeter without a picture, for sessiond's tests (ws035-p094).
  *
- * sessiond starts it in place of zdesktop --greeter, as _greeter, with the
+ * sessiond starts it in place of the compositor --greeter, as _greeter, with the
  * socket on descriptor 3.  It reads its steps from /tmp/greeter-probe, one a
  * line, and logs each with the answer (the password is not logged):
  *

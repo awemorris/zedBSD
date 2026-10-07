@@ -11,7 +11,7 @@
  *
  * init starts it as the service "greeter" in place of the console's getty.
  * It is small and runs as root: it gives the display and the input devices
- * to the seat's user, starts the greeter (zdesktop --greeter) as the
+ * to the seat's user, starts the greeter (the compositor --greeter) as the
  * unprivileged _greeter account, checks the passwords the greeter sends it,
  * starts the user's session (/etc/keiland/session) as the user, and starts
  * the greeter again when the session ends.  It draws nothing and reads no

@@ -10,11 +10,11 @@
  * same volume the system bar's popup sets (userland/desktop/wayland/
  * volume.c), through the same ways.
  *
- *   - audiod holds the volume during the session.  zdesktop is asked for it
+ *   - audiod holds the volume during the session.  The compositor is asked for it
  *     and follows audiod's reports for every client (libkeiland's
  *     kl_system_audio_*, WS131 p011, which also plays the feedback sound);
- *     the page shows what zdesktop tells.  Nothing is written to a file
- *     while the user changes it (BUG-161): zdesktop keeps the volume at the
+ *     the page shows what the compositor tells.  Nothing is written to a file
+ *     while the user changes it (BUG-161): the compositor keeps the volume at the
  *     session's end and gives it to audiod at the next login.  On a desktop
  *     without Keiland's system extension the page says the sound is not
  *     available.
@@ -39,7 +39,7 @@ static void sound_send(struct se_app *app);
 static void sound_feedback(struct se_app *app);
 
 /*
- * Starts following the sound, when the desktop offers it: what zdesktop
+ * Starts following the sound, when the desktop offers it: what the compositor
  * told of audiod when the system opened.
  */
 void
@@ -66,7 +66,7 @@ se_sound_open(
 	/* The sound is followed from now on. */
 	sound->live = 1;
 
-	/* What zdesktop told; the volume shown is audiod's once it is reached. */
+	/* What the compositor told; the volume shown is audiod's once it is reached. */
 	kl_system_audio_get_state(app->system, &sound->state);
 	if (sound->state.reachable) {
 		sound->value = (int)sound->state.left;
@@ -79,7 +79,7 @@ se_sound_open(
 }
 
 /*
- * Follows what zdesktop told of audiod, and sends a volume a drag held
+ * Follows what the compositor told of audiod, and sends a volume a drag held
  * back.
  */
 void
@@ -165,7 +165,7 @@ se_sound_available(
 }
 
 /*
- * Tells whether the sound service runs (zdesktop reaches audiod), with a
+ * Tells whether the sound service runs (the compositor reaches audiod), with a
  * device or without.
  */
 int
@@ -273,7 +273,7 @@ sound_set(
 	sound_feedback(app);
 }
 
-/* Sends the volume shown to zdesktop, which asks audiod for it. */
+/* Sends the volume shown to the compositor, which asks audiod for it. */
 static void
 sound_send(
 	struct se_app *app)
@@ -301,7 +301,7 @@ sound_feedback(
 {
 	int error;
 
-	/* Asks zdesktop to have audiod play it. */
+	/* Asks the compositor to have audiod play it. */
 	error = kl_system_audio_feedback(app->system, NULL);
 	se_log("SOUND feedback error=%d", error);
 }

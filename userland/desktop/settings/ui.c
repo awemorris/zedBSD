@@ -8,7 +8,7 @@
 /*
  * The interface of Settings (plan/ws089/design.md section 3): the list of
  * pages on the left and the page on the right, each a card floating on
- * zdesktop's frosted glass; the history of pages that the titlebar's Back,
+ * the compositor's frosted glass; the history of pages that the titlebar's Back,
  * Forward, Home and breadcrumb walk; the pointer, the wheel, the keys, and a
  * finger's drag on the touch screen, which scrolls the pane it holds.
  *
@@ -28,7 +28,7 @@
 /*
  * The panes reach the window's edges, so that their outer edges line up
  * with the floating titlebar's and the titlebar's gap above them is
- * zdesktop's alone (ws090-p021); on glass they stand apart by zdesktop's
+ * the compositor's alone (ws090-p021); on glass they stand apart by the compositor's
  * gap between the titlebar and the window (the file manager's
  * measurements, ws071-p017).
  */
@@ -412,7 +412,7 @@ se_ui_draw(
 }
 
 /*
- * Lists the parts of the last frame that stand on zdesktop's glass: the
+ * Lists the parts of the last frame that stand on the compositor's glass: the
  * list of pages and the page, into up to capacity panels.  Returns how
  * many there are.
  */
@@ -580,7 +580,7 @@ se_ui_titlebar(
 			se_ui_go(app, SE_PAGE_HOME);
 		break;
 	case SE_CONTROL_SEARCH:
-		/* zdesktop gives the field the keyboard itself; the typing arrives as text. */
+		/* The compositor gives the field the keyboard itself; the typing arrives as text. */
 		break;
 	case SE_CONTROL_SIDEBAR:
 		se_ui_action(app, SE_ACTION_SHOW_SIDEBAR);
@@ -707,7 +707,7 @@ ui_draw_sidebar(
 	int limit;
 	int y;
 
-	/* The pane: a light veil over zdesktop's glass, or a whiter card with a bright edge over the window's ground. */
+	/* The pane: a light veil over the compositor's glass, or a whiter card with a bright edge over the window's ground. */
 	panel = &app->layout.sidebar;
 	if (app->glass != 0) {
 		kl_canvas_round(canvas, (float)panel->x, (float)panel->y, (float)panel->width, (float)panel->height, UI_PANEL_RADIUS, SE_COLOR_GLASS_SIDEBAR);
@@ -835,7 +835,7 @@ ui_draw_page(
 	int x;
 	int width;
 
-	/* The pane: a light veil over zdesktop's glass, or a whiter card with a bright edge over the window's ground. */
+	/* The pane: a light veil over the compositor's glass, or a whiter card with a bright edge over the window's ground. */
 	panel = &app->layout.page;
 	if (app->glass != 0) {
 		kl_canvas_round(canvas, (float)panel->x, (float)panel->y, (float)panel->width, (float)panel->height, UI_PANEL_RADIUS, SE_COLOR_GLASS_PAGE);
@@ -1467,7 +1467,7 @@ ui_key(
 	if (event->pressed == 0)
 		return;
 
-	/* Ctrl+F gives the keyboard to the titlebar's search (when zdesktop's menus did not take it). */
+	/* Ctrl+F gives the keyboard to the titlebar's search (when the compositor's menus did not take it). */
 	if ((event->modifiers & SE_MOD_CTRL) != 0U && event->key == SE_KEY_F) {
 		se_search_focus(app);
 		return;
@@ -1519,7 +1519,7 @@ ui_key(
 		return;
 	}
 
-	/* Ctrl+W and Ctrl+Q close the window (when zdesktop's menus did not take them). */
+	/* Ctrl+W and Ctrl+Q close the window (when the compositor's menus did not take them). */
 	if ((event->modifiers & SE_MOD_CTRL) != 0U) {
 		if (event->key == SE_KEY_W || event->key == SE_KEY_Q)
 			app->request = SE_REQUEST_CLOSE;

@@ -7,7 +7,7 @@
 
 /*
  * The characters of the keys (ws090-p003): evdev key codes to the
- * characters they type.  zdesktop forwards evdev codes with no keymap, so
+ * characters they type.  The compositor forwards evdev codes with no keymap, so
  * the library carries the US layout, the one Files, Text Editor,
  * Terminal, PDF Viewer and the file chooser each carried a copy of.
  */

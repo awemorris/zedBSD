@@ -6,7 +6,7 @@
  */
 
 /*
- * Describes and marshals zdesktop's editing operations protocol
+ * Describes and marshals the compositor's editing operations protocol
  * (kl_edit_manager_v1 and kl_edit_v1, version 1; ws102-p017,
  * plan/ws102/design.md section 2.10).  A window says which editing
  * operations it carries out and its state, and hears the operations the

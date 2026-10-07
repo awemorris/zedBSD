@@ -26,13 +26,13 @@
  * The telling runs "net wifi session open|close UID" in the background, so a
  * slow or absent networkd never holds up a login or a logout.
  *
- * The session ends when the script ends (zdesktop's Log Out).  Whatever of
+ * The session ends when the script ends (the compositor's Log Out).  Whatever of
  * it is left is ended too: its process group, and every process of the
  * user (not for root, whose processes are the system's).
  *
  * The hand-over of the display (ws035-p101): the script is given one end of
- * a socket pair as descriptor 3 and the option --control-fd=3 for zdesktop.
- * The greeter stays on the screen while the session starts; zdesktop says
+ * a socket pair as descriptor 3 and the option --control-fd=3 for the compositor.
+ * The greeter stays on the screen while the session starts; the compositor says
  * READY when it is about to take the display, sessiond then has the
  * greeter give it back and answers GO.  A session that never says READY
  * (another script) has the greeter ended after SESSION_READY_SECONDS.  The
@@ -612,7 +612,7 @@ session_child(
 	 * the user).  The log starts empty for each session and is written at
 	 * its end: a program of the session before that still writes after the
 	 * truncation adds to the end instead of leaving a hole of NUL bytes
-	 * (ws099-p028, as zdesktop's own log).
+	 * (ws099-p028, as the compositor's own log).
 	 */
 	descriptor = open("/dev/null", O_RDONLY);
 	if (descriptor >= 0)

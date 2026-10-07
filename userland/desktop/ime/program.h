@@ -7,8 +7,8 @@
 
 /*
  * The input method program's Wayland side (ws095-p004, plan/ws095/design.md
- * section 5): the connection zdesktop gave it, the input method, its
- * keyboard grab and virtual keyboard, zdesktop's status, and the language
+ * section 5): the connection the compositor gave it, the input method, its
+ * keyboard grab and virtual keyboard, the compositor's status, and the language
  * engines (engine.h) it drives.
  */
 
@@ -70,7 +70,7 @@ struct program_popup {
 };
 
 /*
- * The key the input method repeats while it is held (zdesktop gives the
+ * The key the input method repeats while it is held (the compositor gives the
  * grab no repeated presses, only the rate and the delay to make them by).
  *
  * The key is zero when none is held; next_ms is when the next press is due.

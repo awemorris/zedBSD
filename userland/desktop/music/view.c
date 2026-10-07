@@ -341,7 +341,7 @@ mu_view_draw(
 }
 
 /*
- * Lists the parts of the view that stand on zdesktop's glass (the three
+ * Lists the parts of the view that stand on the compositor's glass (the three
  * cards) for a window of a size, into up to capacity panels; returns how
  * many there are.
  */

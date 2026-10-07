@@ -6,7 +6,7 @@
  */
 
 /*
- * Tests zdesktop's xdg_popup, xdg_positioner and xdg_toplevel requests
+ * Tests the compositor's xdg_popup, xdg_positioner and xdg_toplevel requests
  * (WS035 p076) the way a toolkit's menus and its own title bar use them.
  *
  * The window (dark, drawn with wl_shm) opens a menu popup (blue) where it
@@ -18,9 +18,9 @@
  * a right press asks for the window menu.  The window is drawn at the size
  * each configure gives, within its limits (200x150 to 800x600).
  *
- * The window asks for zdesktop's titlebar (kl_titlebar, an explicit
+ * The window asks for the compositor's titlebar (kl_titlebar, an explicit
  * server-side decoration) before its first commit, as the native
- * applications do; without it zdesktop leaves the decoration to the client
+ * applications do; without it the compositor leaves the decoration to the client
  * (ws114-p007) and the tests that use the titlebar's buttons and corners
  * have none.  --csd leaves it out (ws099-p023).
  *
@@ -466,7 +466,7 @@ probe_connect(
 	xdg_toplevel_set_min_size(probe->window.toplevel, PROBE_MIN_WIDTH, PROBE_MIN_HEIGHT);
 	xdg_toplevel_set_max_size(probe->window.toplevel, PROBE_MAX_WIDTH, PROBE_MAX_HEIGHT);
 
-	/* zdesktop's titlebar, asked for before the first commit so that the first configure carries it. */
+	/* The compositor's titlebar, asked for before the first commit so that the first configure carries it. */
 	if (!probe->csd && !probe->wm_probe) {
 		probe->titlebar = kl_titlebar_create(probe->display, probe->window.toplevel, &titlebar_listener, probe);
 		if (probe->titlebar == NULL)

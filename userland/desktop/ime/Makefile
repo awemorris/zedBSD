@@ -1,6 +1,6 @@
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
-# The system's input method, /usr/libexec/keiland-ime (WS095, plan/ws095/design.md): zdesktop starts it and it
+# The system's input method, /usr/libexec/keiland-ime (WS095, plan/ws095/design.md): the compositor starts it and it
 # serves the input method protocols; the language engines (engine-direct.c, ja-*.c) know no Wayland and are
 # tested on the host (plan/ws095/tests/host-engine.sh).  The Japanese dictionaries are the package ime-dict-ja.
 # Not chosen by default yet (ws095-p004): an image that chooses it also fetches the dictionaries.

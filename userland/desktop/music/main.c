@@ -693,7 +693,7 @@ mu_resize(
 		return -1;
 	}
 
-	/* zdesktop's glass, when the frames are blended by their alpha (decided at the first size). */
+	/* The compositor's glass, when the frames are blended by their alpha (decided at the first size). */
 	if (!music->glass_decided) {
 		music->glass_decided = 1;
 		see_through = kl_window_see_through(music->window);

@@ -6,11 +6,11 @@
  */
 
 /*
- * The window mode of browser: a view (<browser/browser.h>) shown in a zdesktop
+ * The window mode of browser: a view (<browser/browser.h>) shown in a compositor
  * window, recording its drawing into the frames of the window's swapchain
  * on the shell's Vulkan device.  The view holds the page, its history, its
  * scroll, its timers, the network and the renderer; the shell holds the
- * window, zdesktop's titlebar (back, forward, reload and the location,
+ * window, the compositor's titlebar (back, forward, reload and the location,
  * whose URL can be edited) and the presenter (the swapchain), and
  * turns the window's input into the view's input (ws074-p056): the
  * pointer's moves, buttons, wheel and leaving, the keys with the DOM's
@@ -95,7 +95,7 @@ static void shell_touch_round(struct shell_state *state);
 static void shell_touch_pointer(struct shell_state *state, const struct shell_touch_pointer *made);
 
 /*
- * Runs the browser in a zdesktop window until it is closed.
+ * Runs the browser in a compositor window until it is closed.
  *
  * Returns the program's exit status.
  */
@@ -172,7 +172,7 @@ shell_run(
 		return 1;
 	}
 
-	/* zdesktop's titlebar with the browser's controls (a compositor without it leaves the plain titlebar). */
+	/* The compositor's titlebar with the browser's controls (a compositor without it leaves the plain titlebar). */
 	error = shell_titlebar_open(&state.titlebar, &state.window);
 	if (error != 0) {
 		printf("ZBROWSER ERROR titlebar error=%d\n", error);

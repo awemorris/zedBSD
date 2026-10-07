@@ -285,7 +285,7 @@ static const char *const layout_voice_cycles[] = {
 };
 
 /*
- * The keys of the US layout (zdesktop's keymap, keymap.c) by evdev code,
+ * The keys of the US layout (the compositor's keymap, keymap.c) by evdev code,
  * as the characters they type without and with Shift: the code of a
  * character is its place in one of the two strings, 0 where a code types
  * none.  The codes run from 0 to 57 (the space bar).

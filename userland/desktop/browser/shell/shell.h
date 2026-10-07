@@ -6,7 +6,7 @@
  */
 
 /*
- * The shell of browser: the zdesktop window, its titlebar and
+ * The shell of browser: the compositor window, its titlebar and
  * toolbar, the tabs and the input.
  *
  * main.c hands the window mode here.  The host tests build the engine

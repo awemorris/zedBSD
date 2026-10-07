@@ -9,7 +9,7 @@
  * The interface of files: the frame of the window (the sidebar,
  * the content panel, the preview) and what the pointer does on it.  The
  * navigation (back, forward, home, the path, the search field, the view
- * and the preview buttons) is in the window's titlebar, which zdesktop
+ * and the preview buttons) is in the window's titlebar, which the compositor
  * draws (ui-titlebar.c, titlebar.c).
  *
  * Each frame is drawn from the app's state, and while it is drawn every
@@ -49,7 +49,7 @@
 /*
  * The panels reach the window's edges, so that their outer edges line up
  * with the floating titlebar's and the titlebar's gap above them is
- * zdesktop's alone (ws090-p021); on glass they stand apart by zdesktop's
+ * the compositor's alone (ws090-p021); on glass they stand apart by the compositor's
  * gap between the titlebar and the window (ws071-p017).
  */
 #define UI_GLASS_GAP		8
@@ -258,7 +258,7 @@ fm_ui_event(
 	case FM_EVENT_DROP_PART:
 	case FM_EVENT_DROP_ACTION:
 	case FM_EVENT_DRAG_DONE:
-		/* A drag and drop from zdesktop (ui-drag.c). */
+		/* A drag and drop from the compositor (ui-drag.c). */
 		fm_drop_event(app, event);
 		break;
 	case FM_EVENT_TEXT:
@@ -527,7 +527,7 @@ fm_ui_hit_rect(
 }
 
 /*
- * Lists the parts of the last frame that stand on zdesktop's glass: the
+ * Lists the parts of the last frame that stand on the compositor's glass: the
  * sidebar, the content's card (with its tabs) and the preview, into up to
  * capacity panels.  Returns how many there are.
  */
@@ -1055,7 +1055,7 @@ ui_layout(
 	if (app->glass != 0)
 		gap = UI_GLASS_GAP;
 
-	/* The panels start at the top margin (the titlebar is zdesktop's, above the window). */
+	/* The panels start at the top margin (the titlebar is the compositor's, above the window). */
 	layout = &app->layout;
 	top = margin;
 	left = margin;

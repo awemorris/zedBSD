@@ -27,7 +27,7 @@ KEILAND_SOURCES := userland/desktop/wayland/main.c userland/desktop/wayland/wire
 	userland/desktop/wayland/desktop.c userland/desktop/wayland/inset.c userland/desktop/wayland/edit.c userland/desktop/wayland/clipboard.c \
 	userland/tests/vkdemo/display.c userland/desktop/artwork/mark.c userland/desktop/picture/color-glyph.c \
 	userland/desktop/picture/wallpaper.c
-# App Home starts X11 applications through zdesktop-x11, which starts xserver when it is needed.
+# App Home starts X11 applications through keiland-x11, which starts xserver when it is needed.
 ZEDBSD_PACKAGE_INPUTS += userland/desktop/wayland/keiland-x11
 ZEDBSD_PACKAGE_FILES += $(if $(filter wayland,$(ZEDBSD_USER_PROGRAMS)),--file /usr/libexec/keiland-x11=userland/desktop/wayland/keiland-x11)
 # App Home's default list (ws129-p010), unless the image brings its own (a test's or the demonstration's extra files,

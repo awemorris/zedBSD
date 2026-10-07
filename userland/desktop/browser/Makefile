@@ -2,7 +2,7 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
 # The Web browser app is the shell over libbrowser.so (desktop/libbrowser owns the engine).
 # This package is /bin/browser: main.c (the command line and the headless modes) and
-# shell/ (the zdesktop window, its titlebar and the input), which use the engine through <browser/browser.h>.
+# shell/ (the compositor window, its titlebar and the input), which use the engine through <browser/browser.h>.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 KEILAND_BROWSER_DIR := userland/desktop/browser
 

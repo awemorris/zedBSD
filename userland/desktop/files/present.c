@@ -56,7 +56,7 @@ fm_present_open(
 	if (result != VK_SUCCESS)
 		return result;
 
-	/* Whether zdesktop blends the frame by its alpha. */
+	/* Whether the compositor blends the frame by its alpha. */
 	present->premultiplied = kl_window_see_through(window->kui);
 
 	/* Succeeded: frames can be shown. */
@@ -85,7 +85,7 @@ fm_present_resize(
 /*
  * Shows a frame of the presenter's size, of which only part changed when
  * part is not NULL (BUG-221: only that part is copied and told to
- * zdesktop).  Returns VK_SUCCESS, VK_ERROR_OUT_OF_DATE_KHR when the frames
+ * the compositor).  Returns VK_SUCCESS, VK_ERROR_OUT_OF_DATE_KHR when the frames
  * need the window's new size, or another error with the call that failed.
  */
 VkResult

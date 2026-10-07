@@ -388,7 +388,7 @@ ph_view_draw(
 }
 
 /*
- * Lists the parts of the view that stand on zdesktop's glass (the cards
+ * Lists the parts of the view that stand on the compositor's glass (the cards
  * of the contacts and of the timeline) for a window of a size, into up to
  * capacity panels; returns how many there are.
  */

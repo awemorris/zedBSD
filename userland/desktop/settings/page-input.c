@@ -15,7 +15,7 @@
  *             whether the sound service runs.
  *
  * The sliders are saved when let go, the switch when clicked, into the
- * user's preferences (look.c), which zdesktop follows within a second.
+ * user's preferences (look.c), which the compositor follows within a second.
  */
 
 #include "settings.h"
@@ -33,7 +33,7 @@
 #define INPUT_PAD_ACCEL		8
 #define INPUT_PAD_NATURAL	9
 
-/* The ranges, defaults and steps of the keys, as zdesktop takes them (settings-keys.c). */
+/* The ranges, defaults and steps of the keys, as the compositor takes them (settings-keys.c). */
 #define INPUT_SPEED_MIN		25
 #define INPUT_SPEED_MAX		300
 #define INPUT_SPEED_MOUSE	150
@@ -332,7 +332,7 @@ se_input_drag(
 	if (phase != SE_DRAG_END)
 		return;
 
-	/* Let go: saved, and zdesktop follows. */
+	/* Let go: saved, and the compositor follows. */
 	app->look.dragging = 0;
 	se_look_set_number(app, slider->key, number, slider->fallback);
 }

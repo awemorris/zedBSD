@@ -7,7 +7,7 @@
 
 /*
  * The terminal's primary selection through libkeiland's window (WS131
- * p018; zdesktop's since ws035-p100): the text selected with the pointer
+ * p018; the compositor's since ws035-p100): the text selected with the pointer
  * becomes the primary selection, and a middle click pastes the primary
  * selection into the shell.  While the terminal's own text is it, a paste
  * takes it directly (the window does).  Without the compositor's primary

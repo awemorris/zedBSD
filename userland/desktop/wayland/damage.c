@@ -9,7 +9,7 @@
  * The damage of window mode (ws035-p055, compositing design D4): the part
  * of the output a change needs drawn again.
  *
- * Every change zdesktop does not know the extent of marks the whole
+ * Every change the compositor does not know the extent of marks the whole
  * output (server->dirty, as before).  Two frequent changes are measured
  * instead: the pointer moving over the windows' own areas (the cursor's
  * old and new places) and a window's new image when nothing near it is
@@ -21,7 +21,7 @@
 #include "kwl.h"
 #include "popup.h"
 
-/* How far around the pointer a cursor may draw (zdesktop's shapes and arrow are smaller). */
+/* How far around the pointer a cursor may draw (the compositor's shapes and arrow are smaller). */
 #define DAMAGE_CURSOR		64
 
 static void damage_add(struct kwl_server *server, int32_t left, int32_t top, int32_t right, int32_t bottom);
@@ -29,7 +29,7 @@ static int cursor_unseen(struct kwl_server *server, int32_t x, int32_t y);
 
 /*
  * Marks the damage of the pointer's move from an old place: the cursor's
- * old and new places, when nothing zdesktop draws follows the pointer
+ * old and new places, when nothing the compositor draws follows the pointer
  * there; otherwise the whole output.
  */
 void

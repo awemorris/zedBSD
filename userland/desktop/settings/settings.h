@@ -367,7 +367,7 @@ struct se_hit {
 
 /*
  * The panes of the last frame: the list of pages and the page, each a
- * card standing on zdesktop's frosted glass.  A hidden list has no size.
+ * card standing on the compositor's frosted glass.  A hidden list has no size.
  */
 struct se_layout {
 	struct kl_rect sidebar;
@@ -378,7 +378,7 @@ struct se_layout {
 #define SE_PANEL_CARD		0U
 
 /*
- * One part of the window that stands on zdesktop's frosted glass: its
+ * One part of the window that stands on the compositor's frosted glass: its
  * rectangle in the window, its corners' radius and its kind.
  */
 struct se_panel {
@@ -818,7 +818,7 @@ enum se_request {
 
 /*
  * The controls of the window's titlebar (WS070's CONTROLS presentation,
- * drawn by zdesktop): their IDs in the model titlebar.c gives zdesktop.
+ * drawn by the compositor): their IDs in the model titlebar.c gives the compositor.
  */
 enum se_control {
 	SE_CONTROL_NONE,
@@ -836,7 +836,7 @@ enum se_control {
  * and whether the list of pages is shown.  focus_serial moves each time
  * the window asks for the search field to have the keyboard (Ctrl+F);
  * titlebar.c gives it the keyboard when the serial differs from the one
- * it last sent.  titlebar.c sends the state to zdesktop when it differs
+ * it last sent.  titlebar.c sends the state to the compositor when it differs
  * from what the titlebar shows.
  */
 struct se_titlebar_state {
@@ -1108,7 +1108,7 @@ struct se_app {
 	uint64_t now;
 	int dirty;
 
-	/* Whether the window is glass (its ground clear, the panes on zdesktop's glass), and has the focus. */
+	/* Whether the window is glass (its ground clear, the panes on the compositor's glass), and has the focus. */
 	int glass;
 	int focused;
 

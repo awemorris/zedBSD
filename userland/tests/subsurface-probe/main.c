@@ -6,7 +6,7 @@
  */
 
 /*
- * Tests zdesktop's wl_subcompositor and wl_subsurface (WS035 p077).
+ * Tests the compositor's wl_subcompositor and wl_subsurface (WS035 p077).
  *
  * The window (dark, 400x300, wl_shm) has three sub-surfaces: a (red,
  * 100x80) above it at (20,20), c (yellow, 40x40) a child of a at (70,50),

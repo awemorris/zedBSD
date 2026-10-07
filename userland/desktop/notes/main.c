@@ -95,7 +95,7 @@
 /* The longest path Notes keeps. */
 #define MAIN_PATH_MAX		4096U
 
-/* The app_id the file chooser's window gets, so that zdesktop shows it as Notes'. */
+/* The app_id the file chooser's window gets, so that compositor shows it as Notes'. */
 #define MAIN_APPLICATION	"notes"
 
 /* The eraser's radius, in points. */

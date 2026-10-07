@@ -100,7 +100,7 @@ struct main_band_frames {
 };
 
 /*
- * The desktop mode (files --desktop, ws094-p003): the token zdesktop gave
+ * The desktop mode (files --desktop, ws094-p003): the token the compositor gave
  * the program, copied before it leaves the environment (unsetenv frees the
  * environment's string), and the folder shown (~/Desktop).  Empty outside
  * the desktop mode.
@@ -149,19 +149,19 @@ static unsigned main_device_kind;
 static char main_device_id[64];
 
 /*
- * The window's menus in zdesktop, opened with the window and closed before
+ * The window's menus in the compositor, opened with the window and closed before
  * it; its service is NULL when the compositor has no System Menu.
  */
 static struct fm_menu main_menu;
 
 /*
- * The window's titlebar in zdesktop (its controls), opened with the window
+ * The window's titlebar in the compositor (its controls), opened with the window
  * and closed before it; the file manager does not run without it.
  */
 static struct fm_titlebar main_titlebar;
 
 /*
- * The window's glass in zdesktop (its panels on the frosted glass), opened
+ * The window's glass in the compositor (its panels on the frosted glass), opened
  * with the presenter and closed before the window; without it the window
  * keeps its opaque ground.
  */
@@ -260,7 +260,7 @@ main(
 	main_startup.fonts = fm_clock();
 
 	/*
-	 * The desktop's Vulkan instance first: zdesktop, which started it, is
+	 * The desktop's Vulkan instance first: the compositor, which started it, is
 	 * still opening its output and answers the surface's requests only
 	 * after that (ws094-p009).  A failure is tried again with the window.
 	 */
@@ -326,11 +326,11 @@ main(
 	 * The desktop has no glass, window menus or titlebar: its icons are
 	 * drawn on the clear surface (ui-desktop.c), and its context menus open
 	 * after the first frame (main_loop; the service's search waits for
-	 * zdesktop, which is importing the surface's images then, ws094-p009).
+	 * the compositor, which is importing the surface's images then, ws094-p009).
 	 */
 	main_app.desktop = options.desktop;
 	if (!options.desktop) {
-		/* A window's glass, menus and titlebar; without zdesktop's titlebar the file manager does not start. */
+		/* A window's glass, menus and titlebar; without the compositor's titlebar the file manager does not start. */
 		status = main_open_decorations();
 		if (status != 0) {
 			fm_app_release(&main_app);
@@ -481,7 +481,7 @@ main_parse(
 			continue;
 		}
 
-		/* The desktop mode: the icons of ~/Desktop on zdesktop's desktop surface (ws094-p003). */
+		/* The desktop mode: the icons of ~/Desktop on the compositor's desktop surface (ws094-p003). */
 		status = strcmp(argv[index], "--desktop");
 		if (status == 0) {
 			options->desktop = 1;
@@ -972,7 +972,7 @@ main_request(
 		fm_dnd_abort(&main_window);
 		break;
 	case FM_REQUEST_DRAG_OUT:
-		/* The dragged items left the window: zdesktop carries them (dnd.c). */
+		/* The dragged items left the window: the compositor carries them (dnd.c). */
 		main_drag_out();
 		break;
 	case FM_REQUEST_DROP:
@@ -985,7 +985,7 @@ main_request(
 }
 
 /*
- * Hands the selection dragged out of the window to zdesktop's drag and
+ * Hands the selection dragged out of the window to the compositor's drag and
  * drop; when it cannot be, the window's drag ends as cancelled.
  */
 static void
@@ -1006,7 +1006,7 @@ main_drag_out(void)
 		error = ENOENT;
 	fm_paths_free(paths, count);
 
-	/* Succeeded: zdesktop has it (its end comes as FM_EVENT_DRAG_DONE). */
+	/* Succeeded: the compositor has it (its end comes as FM_EVENT_DRAG_DONE). */
 	if (error == 0)
 		return;
 
@@ -1020,8 +1020,8 @@ main_drag_out(void)
 
 /*
  * Carries out a drop on the window: the paths (the window's own selection
- * for its own drag, else read from zdesktop), the task into the drop's
- * folder, and the finish zdesktop tells the drag's source.
+ * for its own drag, else read from the compositor), the task into the drop's
+ * folder, and the finish the compositor tells the drag's source.
  */
 static void
 main_drop(void)
@@ -1302,7 +1302,7 @@ main_touch_area(
 /*
  * Hands one pointer event the fingers made to the file manager: a press
  * carries the touch's serial (a context menu or a drag and drop names it,
- * ws081-p014); a release while zdesktop carries a drag and drop the finger
+ * ws081-p014); a release while the compositor carries a drag and drop the finger
  * started is not the file manager's.
  */
 static void
@@ -1311,7 +1311,7 @@ main_touch_pointer(
 {
 	struct fm_event event;
 
-	/* A release after the finger went to zdesktop's drag is dropped (the drag's end comes as FM_EVENT_DRAG_DONE). */
+	/* A release after the finger went to the compositor's drag is dropped (the drag's end comes as FM_EVENT_DRAG_DONE). */
 	if (made->kind == FM_TOUCH_POINTER_RELEASE && main_window.dragging)
 		return;
 
@@ -1346,7 +1346,7 @@ main_touch_pointer(
 }
 
 /*
- * Prepares the desktop mode: the token zdesktop gave (KEILAND_DESKTOP_TOKEN)
+ * Prepares the desktop mode: the token the compositor gave (KEILAND_DESKTOP_TOKEN)
  * is copied and taken out of the environment, so that no program the
  * desktop starts can take the role, and the folder shown is ~/Desktop
  * (made when it is not there).  Returns 0 or an errno value.
@@ -1393,7 +1393,7 @@ main_desktop_prepare(
 
 /*
  * Opens a window's glass, menus and titlebar.  A window whose menus cannot
- * be made goes on without them; without zdesktop's titlebar the file
+ * be made goes on without them; without the compositor's titlebar the file
  * manager does not start.  Returns 0, or -1 with the three closed.
  */
 static int
@@ -1402,7 +1402,7 @@ main_open_decorations(void)
 	struct fm_menu_state state;
 	int error;
 
-	/* Glass when zdesktop can show the window see-through (the frame's ground is then left clear). */
+	/* Glass when the compositor can show the window see-through (the frame's ground is then left clear). */
 	main_app.glass = fm_glass_open(&main_glass, &main_window, &main_present);
 
 	/* The menus. */

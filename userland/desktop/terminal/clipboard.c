@@ -7,7 +7,7 @@
 
 /*
  * The terminal's clipboard, drops and drags through libkeiland's window
- * (WS131 p018; zdesktop's clipboard since WS035 p079): Edit > Copy makes
+ * (WS131 p018; the compositor's clipboard since WS035 p079): Edit > Copy makes
  * the terminal's text the selection, Edit > Paste receives the
  * selection's text (the terminal's own directly).  A drag of text or of
  * file names dropped on the window (ws035-p088) is pasted into the shell

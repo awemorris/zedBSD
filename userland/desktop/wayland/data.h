@@ -25,11 +25,11 @@ void kwl_data_drag_cancel(struct kwl_server *server);
 int kwl_data_emit_string(struct kwl_client *client, uint32_t id, uint32_t opcode, const char *text, int descriptor);
 int kwl_data_read_string(const unsigned char *bytes, size_t size, size_t offset, const char **text, size_t *next);
 
-/* The clipboard's history (clipboard.c, ws102-p018): a source asked for a type, and zdesktop's own offered text made the selection (data.c). */
+/* The clipboard's history (clipboard.c, ws102-p018): a source asked for a type, and the compositor's own offered text made the selection (data.c). */
 int kwl_data_send(struct kwl_object *source, const char *type, int descriptor);
 void kwl_data_select_offered(struct kwl_server *server);
 
-/* The history (clipboard.c): a new selection heard, the reading of its pipe, zdesktop's text written to a reader, the list logged. */
+/* The history (clipboard.c): a new selection heard, the reading of its pipe, the compositor's text written to a reader, the list logged. */
 void kwl_clipboard_selected(struct kwl_server *server, struct kwl_object *source);
 void kwl_clipboard_poll(struct kwl_server *server);
 void kwl_clipboard_offer_write(int descriptor);

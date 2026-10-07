@@ -6,7 +6,7 @@
  */
 
 /*
- * Tests zdesktop's xdg-decoration, cursor-shape and viewporter (WS035 p080)
+ * Tests the compositor's xdg-decoration, cursor-shape and viewporter (WS035 p080)
  * the way a toolkit uses them: with protocol code of its own (the
  * interface descriptions here, as wayland-scanner would make them) over
  * libwayland's generic marshalling and dispatch.
@@ -780,7 +780,7 @@ toplevel_close(
 	probe->closed = 1;
 }
 
-/* Logs the decoration mode zdesktop answers. */
+/* Logs the decoration mode the compositor answers. */
 static void
 decoration_configure(
 	void *data,

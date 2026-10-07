@@ -815,18 +815,18 @@ positioner_request(
 		rules->offset_y = (int32_t)popup_word(bytes, 4U);
 		break;
 	case POSITIONER_SET_REACTIVE:
-		/* Version 3: the popup would follow a moving parent (zdesktop places popups relative to the parent anyway). */
+		/* Version 3: the popup would follow a moving parent (the compositor places popups relative to the parent anyway). */
 		if (size != 0U)
 			return EPROTO;
 		rules->reactive = 1;
 		break;
 	case POSITIONER_SET_PARENT_SIZE:
-		/* Version 3: the parent's size while it is being resized (a width and a height), which zdesktop does not use. */
+		/* Version 3: the parent's size while it is being resized (a width and a height), which the compositor does not use. */
 		if (size != 8U)
 			return EPROTO;
 		break;
 	case POSITIONER_SET_PARENT_CONFIGURE:
-		/* Version 3: the parent's configure serial the rules belong to, which zdesktop does not use. */
+		/* Version 3: the parent's configure serial the rules belong to, which the compositor does not use. */
 		if (size != 4U)
 			return EPROTO;
 		break;
@@ -1385,7 +1385,7 @@ chain_surface_at(
 	if (image == NULL)
 		return NULL;
 
-	/* The point inside the body at its size (not its title bar, which is zdesktop's). */
+	/* The point inside the body at its size (not its title bar, which is the compositor's). */
 	kwl_surface_size(toplevel, &width, &height);
 	if (x >= left &&
 	    x < left + (int32_t)width &&

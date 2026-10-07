@@ -10,8 +10,8 @@
  * --desktop, ws094-p006, plan/ws094/design.md §4).
  *
  * A left press held on an item that moves a few pixels drags the
- * selection as zdesktop's drag and drop (dnd.c), from the start: the
- * desktop is under every window, so only zdesktop knows whether the
+ * selection as the compositor's drag and drop (dnd.c), from the start: the
+ * desktop is under every window, so only the compositor knows whether the
  * pointer is over the desktop or a window.  Over a Files window the drop
  * is that window's (its folder takes the items); over the desktop it comes
  * back here as a drop of the desktop's own items: on a folder item they
@@ -20,7 +20,7 @@
  * the places are saved.  A drop of another window's items moves (or
  * copies) them into ~/Desktop or a folder item, the new items placed from
  * the cell of the drop.  The target is lit while a drop is over the
- * desktop; zdesktop draws what is carried.
+ * desktop; the compositor draws what is carried.
  */
 
 #include "files.h"
@@ -68,7 +68,7 @@ fm_desktop_drag_press(
 
 /*
  * Follows the pointer while a press on an item is held: far enough from
- * the press, the selection goes to zdesktop's drag and drop.  Returns 1
+ * the press, the selection goes to the compositor's drag and drop.  Returns 1
  * while the press is the drag's.
  */
 int
@@ -82,7 +82,7 @@ fm_desktop_drag_motion(
 	int dx;
 	int dy;
 
-	/* No press held, or the drag is zdesktop's already. */
+	/* No press held, or the drag is the compositor's already. */
 	desk = &app->desk;
 	if (!desk->pressing)
 		return 0;
@@ -107,7 +107,7 @@ fm_desktop_drag_motion(
 		fm_select_only(tab, desk->press_index);
 
 	/*
-	 * zdesktop carries the selection from here (main.c starts it):
+	 * The compositor carries the selection from here (main.c starts it):
 	 * drag_outside says the drag is the desktop's own, so that its drop
 	 * back on the desktop is known as such, until the drag's end.
 	 */
@@ -130,7 +130,7 @@ fm_desktop_drag_release(
 	struct fm_desktop *desk;
 	struct fm_tab *tab;
 
-	/* A drag goes on until zdesktop ends it. */
+	/* A drag goes on until the compositor ends it. */
 	desk = &app->desk;
 	if (desk->dragging)
 		return;
@@ -154,7 +154,7 @@ fm_desktop_drag_release(
 
 /*
  * Follows a drag and drop over the desktop: its enter, motion, leave and
- * drop, the action zdesktop chose, and the end of the desktop's own drag.
+ * drop, the action the compositor chose, and the end of the desktop's own drag.
  */
 void
 fm_desktop_drop_event(
@@ -186,7 +186,7 @@ fm_desktop_drop_event(
 		drop_find(app, event->x, event->y);
 		break;
 	case FM_EVENT_DROP_ACTION:
-		/* zdesktop's choice of move or copy. */
+		/* The compositor's choice of move or copy. */
 		app->drop_action = event->action;
 		break;
 	case FM_EVENT_DROP_LEAVE:
@@ -205,7 +205,7 @@ fm_desktop_drop_event(
 			break;
 		}
 
-		/* The folder and the operation (a copy when zdesktop chose one). */
+		/* The folder and the operation (a copy when the compositor chose one). */
 		snprintf(app->drop_folder, sizeof(app->drop_folder), "%s", app->drag_folder);
 		app->drop_operation = FM_TASK_MOVE;
 		if (app->drop_action == FM_DND_COPY)
@@ -428,7 +428,7 @@ fm_desktop_dropped(
  * Finds the target under a drop over the desktop: a folder item (not one
  * being dragged), else the desktop's folder at the cell under it.  A drag
  * of another window without file names has no target.  A changed target
- * is answered to zdesktop.
+ * is answered to the compositor.
  */
 static void
 drop_find(

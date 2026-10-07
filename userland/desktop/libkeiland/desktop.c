@@ -7,12 +7,12 @@
 
 /*
  * The desktop surface (ws094-p003, plan/ws094/design.md §3): the wrapper
- * of zdesktop's kl_desktop_v1 protocol, which gives the program the
+ * of the compositor's kl_desktop_v1 protocol, which gives the program the
  * compositor started for the desktop's icons the surface over the
  * wallpaper and under every window.
  *
  * The protocol's interfaces are described here, as wayland-scanner would
- * make them, over libwayland's marshalling (the protocol is zdesktop's
+ * make them, over libwayland's marshalling (the protocol is the compositor's
  * alone and has no generated code in libwayland).
  */
 
@@ -156,7 +156,7 @@ kl_desktop_create(
 		return NULL;
 	}
 
-	/* zdesktop's manager, bound for this surface. */
+	/* The compositor's manager, bound for this surface. */
 	manager = desktop_bind(display);
 	if (manager == NULL)
 		return NULL;
@@ -236,7 +236,7 @@ kl_desktop_destroy(
 	return;
 }
 
-/* Binds zdesktop's desktop manager through a registry of the library's own (as glass.c does). */
+/* Binds the compositor's desktop manager through a registry of the library's own (as glass.c does). */
 static struct wl_proxy *
 desktop_bind(
 	struct wl_display *display)

@@ -9,7 +9,7 @@
  * The direct-input engine: every key goes back to the application as it
  * was pressed (plan/ws095/design.md section 5).
  *
- * zdesktop does not send keys to the input method while this language is
+ * The compositor does not send keys to the input method while this language is
  * chosen, so the engine is seldom asked; it exists so that the direct
  * language is a language like any other.
  */

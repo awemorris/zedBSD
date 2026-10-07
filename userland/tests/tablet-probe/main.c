@@ -6,7 +6,7 @@
  */
 
 /*
- * Tests what zdesktop tells a client about a pen (WS079 p003): with the
+ * Tests what the compositor tells a client about a pen (WS079 p003): with the
  * tablet protocol (zwp_tablet_manager_v2) the tablets and tools announced,
  * the proximity, touch, place, pressure, tilt, buttons and frames; with
  * --pointer the probe does not bind the tablet and logs the pointer's
@@ -851,7 +851,7 @@ tablet_seat_tool(
 	zwp_tablet_tool_v2_add_listener(tool, &tool_listener, data);
 }
 
-/* A pad is not expected (zdesktop offers none). */
+/* A pad is not expected (the compositor offers none). */
 static void
 tablet_seat_pad(
 	void *data,

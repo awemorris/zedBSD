@@ -586,7 +586,7 @@ present_swapchain(
 	present->extent.height = height;
 
 	/*
-	 * See-through when the surface takes premultiplied alpha (zdesktop that
+	 * See-through when the surface takes premultiplied alpha (the compositor that
 	 * can draw glass under the window), else opaque.
 	 */
 	present->premultiplied = 0;

@@ -6,7 +6,7 @@
  */
 
 /*
- * Declares zdesktop's glass protocol (kl_glass_v1, ws035-p083).
+ * Declares the compositor's glass protocol (kl_glass_v1, ws035-p083).
  *
  * The header is private: it is not installed, and applications reach the
  * protocol through libkeiland (<keiland/keiland.h>) only.  libkeiland includes

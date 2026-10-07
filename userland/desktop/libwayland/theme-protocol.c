@@ -6,7 +6,7 @@
  */
 
 /*
- * Describes and marshals zdesktop's appearance protocol (kl_theme_v1,
+ * Describes and marshals the compositor's appearance protocol (kl_theme_v1,
  * version 1; ws089-p017): the desktop's appearance, light or dark.
  */
 

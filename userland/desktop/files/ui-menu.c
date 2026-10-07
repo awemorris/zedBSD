@@ -11,10 +11,10 @@
  * (which items do something now, which are checked, the names of the ways
  * to open the selection).
  *
- * zdesktop draws the menus and sends the actions (menu.c); this part knows
+ * The compositor draws the menus and sends the actions (menu.c); this part knows
  * nothing of Wayland, so the host's tests drive it directly.  The keys
  * that the menus' shortcuts name are also handled by ui-input.c, for a
- * compositor without menus: zdesktop takes such a key for the menu only
+ * compositor without menus: the compositor takes such a key for the menu only
  * while its item is enabled.
  */
 

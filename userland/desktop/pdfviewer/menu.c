@@ -6,13 +6,13 @@
  */
 
 /*
- * The menus of PDF Viewer in zdesktop's System Menu: File (Open, Annotate
+ * The menus of PDF Viewer in the compositor's System Menu: File (Open, Annotate
  * in Notes, Print (ws145-p007), Close, Quit), Edit (ws128-p004: Copy, Find, Find Next and
  * Previous), View (the sidebar of page thumbnails, the two
  * modes, the two fits, the zoom) and Go (the pages), given to libkeiland
  * as a table (WS131 p017: kl_window_set_menu).  The viewer's state is the
  * actions' state (kl_window_set_action_state), which every item and
- * titlebar control of an action shows.  zdesktop draws them and chooses an
+ * titlebar control of an action shows.  The compositor draws them and chooses an
  * item for its shortcut; the choice comes back as a KL_WINDOW_ACTION input
  * among the window's.  A compositor without the System Menu leaves the
  * viewer without menus, and the keys work as they do with them.
@@ -110,7 +110,7 @@ static const struct kl_menu_entry menu_items[] = {
 static void menu_action_state(struct pv_menu *menu, uint32_t action, int enabled, int checked);
 
 /*
- * Gives zdesktop the window's menus, showing a state.
+ * Gives the compositor the window's menus, showing a state.
  *
  * Returns 0, also when the compositor has no System Menu (the viewer then
  * has no menus), or an errno value when the menus could not be made.
@@ -141,7 +141,7 @@ pv_menu_open(
 	/* The state it shows. */
 	pv_menu_refresh(menu, state);
 
-	/* Succeeded: the menus are zdesktop's to show. */
+	/* Succeeded: the menus are the compositor's to show. */
 	pv_log("MENU ready items=%u", (unsigned)(sizeof(menu_items) / sizeof(menu_items[0])));
 	return 0;
 }
@@ -218,7 +218,7 @@ pv_menu_refresh(
 }
 
 /*
- * Takes the menus away from zdesktop (before the window goes).
+ * Takes the menus away from the compositor (before the window goes).
  */
 void
 pv_menu_close(

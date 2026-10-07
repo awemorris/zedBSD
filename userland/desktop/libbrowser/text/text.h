@@ -9,7 +9,7 @@
  * Text (plan/ws074/design.md §7): the fonts, the glyphs of a code point at
  * a size, their advances and coverage bitmaps, and where a line may break.
  *
- * The first pass uses the fonts of the zdesktop image through libtruetype
+ * The first pass uses the fonts of the compositor image through libtruetype
  * at whole pixel sizes: a sans font (Inter), a monospace font (JetBrains
  * Mono) and a fallback for the characters the others lack (Droid Sans
  * Fallback, for Japanese).  Serif maps to the sans font until the image has
@@ -35,7 +35,7 @@
 #define TEXT_WEB_FACES		24
 #define TEXT_FACES		(TEXT_FACE_WEB + TEXT_WEB_FACES)
 
-/* The fonts the zdesktop image installs. */
+/* The fonts the compositor image installs. */
 #define TEXT_DEFAULT_SANS	KEILAND_DATADIR "/fonts/keiland.ttf"
 #define TEXT_DEFAULT_MONO	KEILAND_DATADIR "/fonts/keiland-mono.ttf"
 #define TEXT_DEFAULT_FALLBACK	KEILAND_DATADIR "/fonts/keiland-fallback.ttf"

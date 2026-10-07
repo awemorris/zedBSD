@@ -6,11 +6,11 @@
  */
 
 /*
- * Describes and marshals zdesktop's glass protocol (ws035-p083).
+ * Describes and marshals the compositor's glass protocol (ws035-p083).
  *
  * kl_glass_manager_v1 gives a surface its glass (kl_glass_v1): the list
  * of the surface's panels -- cards floating in the window -- under which
- * zdesktop draws the system's frosted glass.  The protocol is zdesktop's own; its header is private and
+ * the compositor draws the system's frosted glass.  The protocol is the compositor's own; its header is private and
  * applications use it through libkeiland.  plan/ws035/glass-design.md
  * defines every request.  Version 2 adds kl_glass_v1.set_blur (ws075-p029).
  */

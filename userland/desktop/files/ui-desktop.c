@@ -7,7 +7,7 @@
 
 /*
  * The desktop's icons (files --desktop, ws094-p003 to p005,
- * plan/ws094/design.md §4): the items of ~/Desktop drawn on zdesktop's
+ * plan/ws094/design.md §4): the items of ~/Desktop drawn on the compositor's
  * desktop surface, over the wallpaper, in the cells desktop-layout.c gives
  * them, and what the pointer and the keys do to them.
  *

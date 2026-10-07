@@ -9,7 +9,7 @@
  * The menus of files: File, Edit, View, Go, Window and Help
  * (spec §36, §37).
  *
- * zdesktop draws them (in the window's floating title bar, or in the
+ * The compositor draws them (in the window's floating title bar, or in the
  * system bar while the window is docked) from the table given to
  * libkeiland's window (kl_window_set_menu, WS131 p020; the System Menu,
  * WS070).  A choice arrives among the window's inputs as a
@@ -22,7 +22,7 @@
  * press (kl_window_popup_menu), its rows' actions moved past the menus'
  * (FM_CONTEXT_ACTION) so that their states are their own.
  *
- * Only shortcuts with Ctrl or Alt are given to zdesktop, which takes such a
+ * Only shortcuts with Ctrl or Alt are given to the compositor, which takes such a
  * key for the menu while its item is enabled; F2, Delete, Space, Enter
  * and the arrows stay the window's own, so a text field keeps them.
  */
@@ -189,7 +189,7 @@ static void menu_action_hidden(struct fm_menu *menu, uint32_t action, int shown)
 static int menu_same(unsigned value, unsigned named);
 
 /*
- * Gives zdesktop the window's menus, showing a state.
+ * Gives the compositor the window's menus, showing a state.
  *
  * Returns 0, also when the compositor has no System Menu (the window then
  * has no menus), or an errno value when the menus could not be made.  The
@@ -230,7 +230,7 @@ fm_menu_open(
 	/* The state it shows. */
 	menu_state(menu, state);
 
-	/* Succeeded: the menus are zdesktop's to show. */
+	/* Succeeded: the menus are the compositor's to show. */
 	fm_log("MENU ready items=%u", (unsigned)(sizeof(menu_items) / sizeof(menu_items[0])));
 	return 0;
 }
@@ -282,7 +282,7 @@ fm_menu_context(
 		entries[index].action = action;
 	}
 
-	/* zdesktop shows it at the press (or, for a drop's choice, at the drop). */
+	/* The compositor shows it at the press (or, for a drop's choice, at the drop). */
 	menu->context_done = 0;
 	error = kl_window_popup_menu(menu->window->kui, entries, index, x, y);
 	if (error != 0) {
@@ -334,7 +334,7 @@ fm_menu_refresh(
 	int same;
 	int error;
 
-	/* A context menu zdesktop closed is over now. */
+	/* A context menu the compositor closed is over now. */
 	menu->context_done = 0;
 
 	/* Without menus nothing is sent; nor when the state is the one the menus show. */
@@ -355,7 +355,7 @@ fm_menu_refresh(
 }
 
 /*
- * Takes the menus away from zdesktop (before the window goes).
+ * Takes the menus away from the compositor (before the window goes).
  */
 void
 fm_menu_close(

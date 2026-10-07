@@ -8,7 +8,7 @@
 /*
  * The login screen (ws035-p095, plan/ws035/login-manager-design.md).
  *
- * zdesktop --greeter draws it in place of the desktop and opens no Wayland
+ * The compositor --greeter draws it in place of the desktop and opens no Wayland
  * socket.  sessiond starts it as the unprivileged _greeter account, with
  * the display and the input devices given to that account, and answers on
  * the descriptor --auth-fd names:
@@ -20,7 +20,7 @@
  *
  * After OK the screen says "Starting session..." and takes no input until
  * sessiond closes the descriptor, once the session is ready to take the
- * display (ws035-p101); zdesktop then ends.  libkeiland-backend speaks
+ * display (ws035-p101); the compositor then ends.  libkeiland-backend speaks
  * these lines (ws131-p006): this screen asks through
  * kl_backend_session_authenticate, kl_backend_session_unlock and
  * kl_backend_power_action, and the answers come back through handoff.c as
@@ -227,7 +227,7 @@ struct greeter_layout {
 /*
  * The users read once at the start, the one selected, what has been typed
  * (erased as soon as it is sent), the line under the field (in the
- * language of when it was set, WS158), whether an answer is awaited.  zdesktop runs one
+ * language of when it was set, WS158), whether an answer is awaited.  The compositor runs one
  * greeter, so these live for the process.
  */
 static struct greeter_user greeter_users[GREETER_USERS];
@@ -355,7 +355,7 @@ kwl_greeter_open(
 		return EBADF;
 	}
 
-	/* The descriptor does not wait, and does not go to the programs zdesktop starts. */
+	/* The descriptor does not wait, and does not go to the programs the compositor starts. */
 	error = fcntl(server->auth_fd, F_SETFL, flags | O_NONBLOCK);
 	if (error != 0)
 		return errno;
@@ -369,7 +369,7 @@ kwl_greeter_open(
 /*
  * Locks a session (ws035-p102): the lock screen covers the desktop and
  * takes every key and button until the user's password unlocks it.
- * Returns 1 when locked, 0 when this zdesktop cannot be unlocked (no
+ * Returns 1 when locked, 0 when this compositor cannot be unlocked (no
  * sessiond to check the password) and so is not locked.
  */
 int

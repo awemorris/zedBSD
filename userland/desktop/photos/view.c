@@ -613,7 +613,7 @@ ph_view_draw(
 }
 
 /*
- * Lists the parts of the view that stand on zdesktop's glass (the two
+ * Lists the parts of the view that stand on the compositor's glass (the two
  * cards; none while a photo is shown whole) into up to capacity panels;
  * returns how many there are.
  */

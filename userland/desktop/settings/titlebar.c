@@ -6,10 +6,10 @@
  */
 
 /*
- * The window's titlebar in zdesktop (WS070's CONTROLS presentation, the
+ * The window's titlebar in the compositor (WS070's CONTROLS presentation, the
  * file manager's way, ws071-p014): Back, Forward and Home, the breadcrumb
  * (Settings and the page), the search field (ws089-p008) and the list of
- * pages' switch, drawn by zdesktop in the floating titlebar, or in the
+ * pages' switch, drawn by the compositor in the floating titlebar, or in the
  * system bar while the window is docked, from the table given to
  * libkeiland's window (kl_window_set_controls, WS131 p019).  A control
  * chosen and a field's text come among the window's inputs (window.c) and
@@ -37,7 +37,7 @@ static int titlebar_state(struct se_titlebar *titlebar, const struct se_titlebar
 static void titlebar_action_state(struct se_titlebar *titlebar, uint32_t control, int enabled, int checked);
 
 /*
- * Gives zdesktop the window's titlebar, showing a state; the window's
+ * Gives the compositor the window's titlebar, showing a state; the window's
  * controls' inputs come here from then on.
  *
  * Returns 0, or an errno value (ENOTSUP for a compositor without the
@@ -67,7 +67,7 @@ se_titlebar_open(
 	if (error != 0)
 		return error;
 
-	/* Succeeded: the titlebar is zdesktop's to show. */
+	/* Succeeded: the titlebar is the compositor's to show. */
 	se_log("TITLEBAR ready controls=%u", (unsigned)(sizeof(titlebar_controls) / sizeof(titlebar_controls[0])));
 	return 0;
 }
@@ -149,7 +149,7 @@ se_titlebar_take(
 }
 
 /*
- * Takes the titlebar away from zdesktop (before the window goes).
+ * Takes the titlebar away from the compositor (before the window goes).
  */
 void
 se_titlebar_close(

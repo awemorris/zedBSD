@@ -7,7 +7,7 @@
 
 /*
  * The window's text input (ws090-p013, libkeiui's version 6; WS102's D1): the
- * client's side of text-input-unstable-v3, through which zdesktop sends
+ * client's side of text-input-unstable-v3, through which the compositor sends
  * the text an input method composes and commits, and the kana of the
  * on-screen keyboard.  Only the public client header is used; the
  * compositor's and the input method's sides are not this library's.

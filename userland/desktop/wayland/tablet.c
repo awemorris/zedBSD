@@ -16,7 +16,7 @@
  * No pad is offered.
  *
  * The pen always moves the pointer: the whole tablet maps onto the whole
- * output.  zdesktop's own grabs, screens and title bars see the pen first,
+ * output.  The compositor's own grabs, screens and title bars see the pen first,
  * exactly as they see the pointer (seat.c's _shell functions); only what they
  * leave goes to a client.  A client with the tool gets the tablet protocol:
  * proximity_in and proximity_out as the pen enters and leaves its surface,
@@ -35,7 +35,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/* The pen tablets zdesktop reads at once. */
+/* The pen tablets the compositor reads at once. */
 #define TABLET_MAX		4U
 
 /* The tools of one tablet: the pen tip and the eraser end. */
@@ -171,7 +171,7 @@ struct tablet_change {
 };
 
 /*
- * The tablets zdesktop reads.
+ * The tablets the compositor reads.
  *
  * A slot's input pointer says whether it is in use; the table lives as long
  * as the process, and the event loop is its only user.
@@ -757,7 +757,7 @@ apply_report(
 }
 
 /*
- * Starts a touch: zdesktop's own UI takes it first as BTN_LEFT; otherwise a
+ * Starts a touch: the compositor's own UI takes it first as BTN_LEFT; otherwise a
  * client with the tool hears down, and any other client the left button.
  */
 static void
@@ -772,7 +772,7 @@ touch_press(
 	uint32_t serial;
 	int taken;
 
-	/* zdesktop's grabs, screens and title bars see the press first. */
+	/* The compositor's grabs, screens and title bars see the press first. */
 	taken = kwl_seat_button_shell(server, time, KWL_BUTTON_LEFT, 1U);
 	if (taken) {
 		focus_set(server, device, NULL);
@@ -828,7 +828,7 @@ touch_end(
 		return;
 	}
 
-	/* A touch as the pointer releases its left button, through zdesktop first. */
+	/* A touch as the pointer releases its left button, through the compositor first. */
 	if (device->route == ROUTE_POINTER) {
 		kwl_seat_button(server, time, KWL_BUTTON_LEFT, 0U);
 		device->route = ROUTE_NONE;
@@ -837,7 +837,7 @@ touch_end(
 }
 
 /*
- * Delivers a hovering pen's place: to zdesktop's grabs and screens first,
+ * Delivers a hovering pen's place: to the compositor's grabs and screens first,
  * then to the surface under it by the tablet protocol, or as the pointer's
  * motion to a client without the tool.
  */
@@ -854,7 +854,7 @@ hover(
 	int taken;
 	int bound;
 
-	/* zdesktop's grabs and screens take the motion first; the tool leaves any surface. */
+	/* The compositor's grabs and screens take the motion first; the tool leaves any surface. */
 	taken = kwl_seat_motion_shell(server, time);
 	if (taken) {
 		focus_set(server, device, NULL);

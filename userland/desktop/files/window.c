@@ -13,7 +13,7 @@
  *
  * The application repeats a held key (its repeats come as presses).  The
  * pointer's buttons carry their serial, which a context menu is opened
- * with.  The wheel scrolls three pixels a unit (zdesktop sends fifteen
+ * with.  The wheel scrolls three pixels a unit (the compositor sends fifteen
  * units a notch); a touch pad's fingers scroll as fingers do (ws090-p019):
  * their moves and their lift join the touch inputs, which queue for
  * touch.c with the touch screen's (ws081-p010).  The menus' choices join
@@ -523,7 +523,7 @@ window_drop(
 		(void)fm_window_push(window, FM_EVENT_DROP);
 		break;
 	case KL_WINDOW_DROP_ACTION:
-		/* zdesktop's choice of action for the drag over the window. */
+		/* The compositor's choice of action for the drag over the window. */
 		input = fm_window_push(window, FM_EVENT_DROP_ACTION);
 		if (input != NULL)
 			input->action = event->code;

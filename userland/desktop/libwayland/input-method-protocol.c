@@ -10,7 +10,7 @@
  * version 1; ws095-p004): zwp_input_method_manager_v2, zwp_input_method_v2,
  * zwp_input_popup_surface_v2 and zwp_input_method_keyboard_grab_v2.
  *
- * Only the input method zdesktop starts may bind the manager.  The events reach
+ * Only the input method the compositor starts may bind the manager.  The events reach
  * listeners through the generic dispatch (event.c); the keyboard grab's
  * keymap carries a descriptor.  The descriptions follow the pinned wlroots
  * description (userland/desktop/libwayland/API-PROVENANCE.md).

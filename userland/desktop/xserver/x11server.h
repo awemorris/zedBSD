@@ -6,12 +6,12 @@
  */
 
 /*
- * xserver: an X11 server for zdesktop, rootless (each top-level
+ * xserver: an X11 server for the compositor, rootless (each top-level
  * X window a window of the desktop, as Xwayland does).
  *
  * The server is a value with an event loop of its caller's: the caller
  * asks which descriptors to wait for, waits, and hands the result back.
- * main.c does that with poll(2); zdesktop can do it inside its own loop
+ * main.c does that with poll(2); the compositor can do it inside its own loop
  * later, with no global state to share.
  */
 

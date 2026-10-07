@@ -57,7 +57,7 @@
 
 /*
  * The titlebar's controls: the time ranges, as text pills (a segmented
- * group's faces are icons in zdesktop, and a text control in one shows as
+ * group's faces are icons in the compositor, and a text control in one shows as
  * "...").
  */
 #define MAIN_CONTROL_RANGE	1U

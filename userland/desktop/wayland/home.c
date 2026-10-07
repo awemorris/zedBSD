@@ -25,7 +25,7 @@
  * Typing while it is open searches: the text shows at the top and only the
  * applications whose name, command or keywords contain it stay, centred.
  * The search takes an input method's text too (ws090-p022): while Home is
- * open the input method serves it as zdesktop's own field (input-method.c,
+ * open the input method serves it as the compositor's own field (input-method.c,
  * kwl_home_field_state and kwl_home_field_input), its composed text shown
  * underlined after the search.
  * Enter starts the selected (at first the first) one; the arrow keys and
@@ -1003,7 +1003,7 @@ kwl_home_key(
 /*
  * Reports the search as the input method's text field while Home is open
  * or opening (ws090-p022): its text, the caret at its end, and the
- * rectangle after it on the screen (zdesktop's own field has no window, so
+ * rectangle after it on the screen (the compositor's own field has no window, so
  * the rectangle is the output's).  Returns 1 with the state, 0 while Home
  * is not to be open.
  */

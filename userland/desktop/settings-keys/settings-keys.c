@@ -19,7 +19,7 @@
 /*
  * Every setting the desktop knows, in the order the compositor reports
  * them.  The compositor's keys come first; the ranges are the ones
- * zdesktop and Settings used before (ws089-p007).  appearance.accent
+ * the compositor and Settings used before (ws089-p007).  appearance.accent
  * (ws179-p001) is the accent the user chose, 0 blue to 7 graphite
  * (artwork/accent.h).  The pointer is set for
  * a mouse and for the touch pads apart (ws089-p024): the speed in percent,

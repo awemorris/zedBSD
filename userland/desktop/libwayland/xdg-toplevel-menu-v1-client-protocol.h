@@ -6,7 +6,7 @@
  */
 
 /*
- * Declares zdesktop's System Menu protocol (xdg_toplevel_menu_v1, WS070).
+ * Declares the compositor's System Menu protocol (xdg_toplevel_menu_v1, WS070).
  *
  * The header is private: it is not installed, and applications reach the
  * protocol through libkeiland (<keiland/keiland.h>) only.  libkeiland and the

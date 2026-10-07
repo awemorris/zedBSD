@@ -7,7 +7,7 @@
 
 /*
  * The Titlebar Presentation (WS070 p008, plan/ws070/titlebar-design.md
- * section 4): the wrapper of zdesktop's kl_titlebar_v1 protocol.
+ * section 4): the wrapper of the compositor's kl_titlebar_v1 protocol.
  *
  * A titlebar keeps a mirror of its controls' IDs and roles and of its tabs'
  * IDs as the requests sent so far leave them, so that a call the
@@ -115,7 +115,7 @@ kl_titlebar_create(
 	struct wl_event_queue *queue;
 	int status;
 
-	/* zdesktop's manager, bound for this window. */
+	/* The compositor's manager, bound for this window. */
 	manager = titlebar_bind(display);
 	if (manager == NULL)
 		return NULL;
@@ -195,7 +195,7 @@ kl_titlebar_begin(
 }
 
 /*
- * Ends a transaction; zdesktop shows its changes at once.
+ * Ends a transaction; the compositor shows its changes at once.
  */
 int
 kl_titlebar_commit(
@@ -233,7 +233,7 @@ kl_titlebar_set_mode(
 	if (titlebar->updating == 0U || mode > TITLEBAR_MODE_LAST)
 		return EINVAL;
 
-	/* The sheet only where zdesktop knows it (ws090-p014). */
+	/* The sheet only where the compositor knows it (ws090-p014). */
 	version = wl_proxy_get_version((struct wl_proxy *)titlebar->proxy);
 	if (mode == KL_TITLEBAR_SHEET && version < TITLEBAR_VERSION_SHEET)
 		return ENOTSUP;
@@ -722,7 +722,7 @@ kl_titlebar_set_suggestions(
 }
 
 /*
- * Binds zdesktop's kl_titlebar_manager_v1 at the newest version both
+ * Binds the compositor's kl_titlebar_manager_v1 at the newest version both
  * sides speak: from an application's registry, or found by a search of the
  * library's own (on a queue of its own, so that no event of the
  * application's is dispatched by it); the binding is on the display's

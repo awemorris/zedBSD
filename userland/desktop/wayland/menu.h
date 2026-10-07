@@ -7,7 +7,7 @@
 
 /*
  * The System Menu (WS070, plan/ws070/design.md): the menu models clients
- * give with xdg_menu_v1 (menu.c), and the menus zdesktop draws and operates
+ * give with xdg_menu_v1 (menu.c), and the menus the compositor draws and operates
  * in the title bars and the system bar (menu-shell.c).
  */
 
@@ -101,7 +101,7 @@ void kwl_menu_send_context_done(struct kwl_object *context);
 int kwl_menu_open_context(struct kwl_server *server, struct kwl_object *context, struct kwl_object *surface, int32_t x, int32_t y);
 int kwl_menu_is_open(void);
 
-/* The menus zdesktop draws and operates (menu-shell.c). */
+/* The menus the compositor draws and operates (menu-shell.c). */
 void kwl_menu_frame(struct kwl_server *server);
 int32_t kwl_menu_title_limit(struct kwl_server *server, struct kwl_object *surface, int32_t available);
 void kwl_menu_draw_bar(struct kwl_server *server, VkCommandBuffer command, struct kwl_object *surface, unsigned docked, const struct kwl_menu_area *area, const float *ink, float fade);

@@ -54,7 +54,7 @@
 #define WINDOW_BUTTON_MIDDLE	0x112U
 
 /*
- * How far the window's wheel moves for one notch of zdesktop's (its step of
+ * How far the window's wheel moves for one notch of the compositor's (its step of
  * 15 surface units, which libkeiland scales by 4): the terminal scrolls by
  * notches.
  */
@@ -96,7 +96,7 @@ terminal_window_open(
 	/* Nothing held yet. */
 	memset(window, 0, sizeof(*window));
 
-	/* The application: the connection to zdesktop. */
+	/* The application: the connection to the compositor. */
 	memset(&app_options, 0, sizeof(app_options));
 	app_options.display = display;
 	app_options.application = "terminal";
@@ -114,7 +114,7 @@ terminal_window_open(
 	if (window->kui == NULL)
 		return -1;
 
-	/* The keyboard's editing buttons come as zdesktop's keys for a terminal (Ctrl+Shift+C and V), not as Ctrl+C. */
+	/* The keyboard's editing buttons come as the compositor's keys for a terminal (Ctrl+Shift+C and V), not as Ctrl+C. */
 	kl_window_edit_by_keys(window->kui);
 
 	/* The window's size and full screen as the first configure left them. */

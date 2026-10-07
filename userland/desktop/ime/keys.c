@@ -8,7 +8,7 @@
 /*
  * The keys the input method hears: evdev codes to the characters of the US
  * layout, and the seat's modifier bits to the engines' (plan/ws095/design.md
- * section 5).  The table is Terminal's (terminal/keys.c), as zdesktop's
+ * section 5).  The table is Terminal's (terminal/keys.c), as the compositor's
  * keymap is the US one.
  */
 
@@ -17,7 +17,7 @@
 /* How many codes the character tables cover (up to the space bar). */
 #define KEYS_TABLE_SIZE		58U
 
-/* The seat's modifier bits (zdesktop's input.c: shift, control, alt, meta). */
+/* The seat's modifier bits (the compositor's input.c: shift, control, alt, meta). */
 #define KEYS_SEAT_SHIFT		0x01U
 #define KEYS_SEAT_CONTROL	0x04U
 #define KEYS_SEAT_ALT		0x08U

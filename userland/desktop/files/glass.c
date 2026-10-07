@@ -6,13 +6,13 @@
  */
 
 /*
- * The window's glass in zdesktop (ws071-p015): the sidebar, the content
- * (with its tabs) and the preview float as cards on zdesktop's frosted glass,
- * and the desktop shows between them.  zdesktop draws the glass, its rim
+ * The window's glass in the compositor (ws071-p015): the sidebar, the content
+ * (with its tabs) and the preview float as cards on the compositor's frosted glass,
+ * and the desktop shows between them.  The compositor draws the glass, its rim
  * and the cards' shadows (through libkeiland's window, WS131 p020); the frame
  * leaves its ground clear and only tints the cards.
  *
- * The window is glass when its swapchain is see-through and zdesktop has
+ * The window is glass when its swapchain is see-through and the compositor has
  * glass; otherwise it keeps its own opaque ground.  The panels are worked
  * out from each frame's layout and sent before the frame is shown, only
  * when they changed, so that they take effect with that frame.
@@ -42,13 +42,13 @@ fm_glass_open(
 	memset(glass, 0, sizeof(*glass));
 	glass->window = window;
 
-	/* A frame that zdesktop does not blend cannot let the desktop through. */
+	/* A frame that compositor does not blend cannot let the desktop through. */
 	if (present->premultiplied == 0) {
 		fm_log("GLASS off reason=opaque");
 		return 0;
 	}
 
-	/* zdesktop's glass for the window's surface, over the wallpaper. */
+	/* The compositor's glass for the window's surface, over the wallpaper. */
 	error = kl_window_set_glass_blur(window->kui, 0);
 	if (error == ENODEV) {
 		fm_log("GLASS off reason=compositor errno=%d", error);
@@ -81,13 +81,13 @@ fm_glass_refresh(
 	if (!glass->on)
 		return;
 
-	/* The frame's panels, unless they are the ones zdesktop has. */
+	/* The frame's panels, unless they are the ones the compositor has. */
 	count = fm_ui_panels(app, panels, FM_PANELS);
 	same = glass_same(glass, panels, count);
 	if (same != 0)
 		return;
 
-	/* Each panel in zdesktop's terms. */
+	/* Each panel in the compositor's terms. */
 	memset(sent, 0, sizeof(sent));
 	for (index = 0; index < count; index++) {
 		sent[index].x = panels[index].rect.x;

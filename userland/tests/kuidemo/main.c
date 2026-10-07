@@ -271,7 +271,7 @@ main(
 	error = kl_window_set_controls(demo.window, demo_controls, sizeof(demo_controls) / sizeof(demo_controls[0]));
 	demo_log("CONTROLS error=%d", error);
 
-	/* The widgets' first values: on glass when the frames are see-through (the first panels say whether zdesktop has it). */
+	/* The widgets' first values: on glass when the frames are see-through (the first panels say whether the compositor has it). */
 	demo.style.text = &demo.text;
 	demo.style.theme = kl_theme_default();
 	demo.style.glass = kl_window_see_through(demo.window);

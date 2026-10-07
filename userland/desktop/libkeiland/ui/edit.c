@@ -139,7 +139,7 @@ void
 kl_window_edit_by_keys(
 	struct kl_window *window)
 {
-	/* No edit object: zdesktop falls back to the keys. */
+	/* No edit object: the compositor falls back to the keys. */
 	keiui_edit_close(window);
 }
 

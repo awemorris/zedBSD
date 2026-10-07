@@ -7,7 +7,7 @@
 
 /*
  * The editing operations (ws102-p017, plan/ws102/design.md section 2.10):
- * the wrapper of zdesktop's kl_edit_v1 protocol.  A window says which
+ * the wrapper of the compositor's kl_edit_v1 protocol.  A window says which
  * editing operations it carries out and its state, and hears the
  * operations the on-screen keyboard's buttons ask for.  With a compositor
  * that does not have the protocol nothing is made (ENOTSUP) and the
@@ -73,7 +73,7 @@ kl_edit_create(
 		return NULL;
 	}
 
-	/* zdesktop's manager, bound for this window. */
+	/* The compositor's manager, bound for this window. */
 	manager = edit_bind(display);
 	if (manager == NULL)
 		return NULL;
@@ -167,7 +167,7 @@ edit_event(
 	edit->callback(edit->data, action);
 }
 
-/* Binds zdesktop's edit manager: from an application's registry, or found by a search of the library's own. */
+/* Binds the compositor's edit manager: from an application's registry, or found by a search of the library's own. */
 static struct kl_edit_manager_v1 *
 edit_bind(
 	struct wl_display *display)

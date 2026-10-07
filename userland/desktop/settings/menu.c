@@ -9,7 +9,7 @@
  * The menus of Settings: File, Edit (Find), View, Go (the history and every page, by
  * group), Window and Help.
  *
- * zdesktop draws them (in the window's floating title bar, or in the
+ * The compositor draws them (in the window's floating title bar, or in the
  * system bar while the window is docked) from the table given to
  * libkeiland's window (kl_window_set_menu, WS131 p019; the System Menu,
  * WS070).  A choice arrives among the window's inputs as a
@@ -86,7 +86,7 @@ static void menu_action_state(struct se_menu *menu, uint32_t action, int enabled
 static int menu_same(unsigned value, unsigned named);
 
 /*
- * Gives zdesktop the window's menus, showing a state.
+ * Gives the compositor the window's menus, showing a state.
  *
  * Returns 0, also when the compositor has no System Menu (the window then
  * has no menus), or an errno value when the menus could not be made.
@@ -119,7 +119,7 @@ se_menu_open(
 	/* The state it shows. */
 	se_menu_refresh(menu, state);
 
-	/* Succeeded: the menus are zdesktop's to show. */
+	/* Succeeded: the menus are the compositor's to show. */
 	se_log("MENU ready items=%u", (unsigned)(sizeof(menu_items) / sizeof(menu_items[0])));
 	return 0;
 }
@@ -160,7 +160,7 @@ se_menu_refresh(
 }
 
 /*
- * Takes the menus away from zdesktop (before the window goes).
+ * Takes the menus away from the compositor (before the window goes).
  */
 void
 se_menu_close(

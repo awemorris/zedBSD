@@ -90,19 +90,19 @@ static struct kl_instance *main_instance;
 static struct kl_appearance *main_appearance;
 
 /*
- * The window's menus in zdesktop, opened with the window and closed before
+ * The window's menus in the compositor, opened with the window and closed before
  * it; its service is NULL when the compositor has no System Menu.
  */
 static struct se_menu main_menu;
 
 /*
- * The window's titlebar in zdesktop (its controls), opened with the window
+ * The window's titlebar in the compositor (its controls), opened with the window
  * and closed before it; Settings does not run without it.
  */
 static struct se_titlebar main_titlebar;
 
 /*
- * The window's glass in zdesktop (its panes on the frosted glass), opened
+ * The window's glass in the compositor (its panes on the frosted glass), opened
  * with the presenter and closed before the window; without it the window
  * keeps its opaque ground.
  */
@@ -220,7 +220,7 @@ main(
 	se_palette_set(kl_appearance_get(main_appearance));
 	se_log("APPEARANCE appearance=%u", kl_appearance_get(main_appearance));
 
-	/* Glass when zdesktop can show the window see-through (the frame's ground is then left clear). */
+	/* Glass when the compositor can show the window see-through (the frame's ground is then left clear). */
 	main_app.glass = se_glass_open(&main_glass, &main_window, &main_present);
 
 	/* The menus; a window whose menus cannot be made goes on without them. */
@@ -231,7 +231,7 @@ main(
 		se_menu_close(&main_menu);
 	}
 
-	/* The titlebar's controls; without zdesktop's titlebar Settings does not start. */
+	/* The titlebar's controls; without the compositor's titlebar Settings does not start. */
 	se_ui_titlebar_state(&main_app, &titlebar_state);
 	error = se_titlebar_open(&main_titlebar, &main_window, &titlebar_state);
 	if (error != 0) {

@@ -422,7 +422,7 @@ present_swapchain(
 	/* The first of those formats that is 8-bit UNORM (not sRGB: the renderers blend the stored values). */
 	format = VK_FORMAT_UNDEFINED;
 	for (index = 0U; index < count; index++) {
-		/* Blue first, as zdesktop offers. */
+		/* Blue first, as the compositor offers. */
 		if (formats[index].format == VK_FORMAT_B8G8R8A8_UNORM) {
 			format = formats[index].format;
 			break;

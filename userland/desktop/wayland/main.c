@@ -215,7 +215,7 @@ main(
 
 	/*
 	 * Window mode's Vulkan device, which also gives the display's size and
-	 * refresh.  Without it nothing can be shown, so zdesktop does not start.
+	 * refresh.  Without it nothing can be shown, so the compositor does not start.
 	 */
 	if (error == 0) {
 		error = kwl_compose_open(&server);
@@ -1226,7 +1226,7 @@ startup_step(
 
 /*
  * Makes every write to a log descriptor go to the end of its file
- * (O_APPEND on the open file, which the programs zdesktop starts share).
+ * (O_APPEND on the open file, which the programs the compositor starts share).
  * A log the shell opened with ">" may be truncated by the next run while
  * this one (or a program it started) still writes; at the old offset that
  * write left a hole of NUL bytes, and grep then read the log as binary.  A

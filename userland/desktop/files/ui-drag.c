@@ -15,13 +15,13 @@
  * title adds the dragged folders to the Favorites.  A favorite folder
  * dragged onto another one moves to its place in the list.  Esc gives up.
  *
- * Items dragged out of the window go on as a drag and drop of zdesktop
+ * Items dragged out of the window go on as a drag and drop of the compositor
  * (ws035-p084, dnd.c): their file names travel to another window (of this
  * program or another) or back to this one, where the drop comes in as the
  * drop events.  A drop coming in has a folder as its target: a folder among
  * the items, a folder of the sidebar, another tab's folder, a part of the
  * titlebar's path, or else the folder shown; its action (move or copy) is
- * zdesktop's choice, made a copy across devices.
+ * the compositor's choice, made a copy across devices.
  */
 
 #include "files.h"
@@ -104,11 +104,11 @@ fm_drag_motion(
 	int dx;
 	int dy;
 
-	/* A drag carried by zdesktop is not the window's to follow. */
+	/* A drag carried by the compositor is not the window's to follow. */
 	if (app->drag != 0 && app->drag_outside != 0)
 		return 1;
 
-	/* Items dragged out of the window go on as zdesktop's drag and drop. */
+	/* Items dragged out of the window go on as the compositor's drag and drop. */
 	if (app->drag != 0 && app->drag_place < 0 && (x < 0 || y < 0 || x >= app->width || y >= app->height)) {
 		drag_go_out(app);
 		return 1;
@@ -221,7 +221,7 @@ fm_drag_draw(
 	float x;
 	float y;
 
-	/* A drop coming in lights its target alone (zdesktop draws what is carried). */
+	/* A drop coming in lights its target alone (the compositor draws what is carried). */
 	if (app->drop_active != 0) {
 		drag_draw_target(app, canvas);
 		return;
@@ -259,9 +259,9 @@ fm_drag_draw(
 }
 
 /*
- * Follows a drag and drop from zdesktop: it comes over the window, moves,
+ * Follows a drag and drop from the compositor: it comes over the window, moves,
  * is over a part of the titlebar's path, leaves, or is dropped; the action
- * zdesktop chose; the end of the window's own drag that left it.
+ * the compositor chose; the end of the window's own drag that left it.
  */
 void
 fm_drop_event(
@@ -300,7 +300,7 @@ fm_drop_event(
 			drop_find(app);
 		break;
 	case FM_EVENT_DROP_ACTION:
-		/* zdesktop's choice of move or copy. */
+		/* The compositor's choice of move or copy. */
 		app->drop_action = event->action;
 		break;
 	case FM_EVENT_DROP_LEAVE:
@@ -1056,7 +1056,7 @@ drag_draw_place(
 }
 
 /*
- * Hands the dragged items to zdesktop when the pointer leaves the window:
+ * Hands the dragged items to the compositor when the pointer leaves the window:
  * the window's own target goes, and the Wayland side starts the drag and
  * drop (FM_REQUEST_DRAG_OUT).
  */
@@ -1069,7 +1069,7 @@ drag_go_out(
 	app->drag_hit_kind = FM_HIT_NONE;
 	app->drag_hit_index = -1;
 
-	/* zdesktop carries the items from here on. */
+	/* The compositor carries the items from here on. */
 	app->drag_outside = 1;
 	app->request = FM_REQUEST_DRAG_OUT;
 	app->dirty = 1;
@@ -1080,7 +1080,7 @@ drag_go_out(
  * Finds the target of a drop coming in, where it is now: the part of the
  * titlebar's path it is over, or a folder under it (as for a drag within
  * the window), or else the folder shown (for another window's items).
- * Only folders are targets; a changed target is answered to zdesktop.
+ * Only folders are targets; a changed target is answered to the compositor.
  */
 static void
 drop_find(
@@ -1289,7 +1289,7 @@ drag_pointer(
 	int *x,
 	int *y)
 {
-	/* A drop coming in is where zdesktop last said. */
+	/* A drop coming in is where the compositor last said. */
 	if (app->drop_active != 0) {
 		*x = app->drop_x;
 		*y = app->drop_y;

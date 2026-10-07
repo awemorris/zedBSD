@@ -6,7 +6,7 @@
  */
 
 /*
- * Declares zdesktop's Titlebar Presentation protocol (kl_titlebar_v1,
+ * Declares the compositor's Titlebar Presentation protocol (kl_titlebar_v1,
  * WS070 p008).
  *
  * The header is private: it is not installed, and applications reach the
