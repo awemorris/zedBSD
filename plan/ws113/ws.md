@@ -65,7 +65,7 @@ zedBSD i915で外部ディスプレイの接続/切断をVulkan Display拡張か
 | [ws113-p012](phase012/phase.md) | native の power と refresh の境界 | `GPU_DISPLAY_POWER`・`GPU_DISPLAY_REFRESH`（i915・Venus）、EXT display_control の下層（C2 の許可） | planned（3h） | p002、C2 |
 | [ws113-p013](phase013/phase.md) | 内蔵の panel の明るさの下層 | kernel の backlight の device（FreeBSD の backlight(9) と同じ形）、i915 の provider、backend の口（C2 の許可） | planned（2〜3h） | C2 |
 | [ws113-p014](phase014/phase.md) | 拡張の時に個々の display を off（Settings、2026-10-08 ユーザーの UAT、D-MODES の出力ごとの off を置き換え） | planned（P1、p007 の後） | p006、p007 |
-| [ws113-p015](phase015/phase.md) | 2 つ目以降の display の窓: リサイズ、display ごとの bar と dock、docked・floating・整列の状態、App Home の時は背景だけ（2026-10-08 ユーザーの UAT） | uncleared（2026-10-08 T1-376 (a) displays-p015.sh PASS（QEMU、PNG は no surface）。残り: head の帯の中身のユーザーの答え、head の上の press（リサイズ・bar・dock）の 5330 実機） | p007 |
+| [ws113-p015](phase015/phase.md) | 2 つ目以降の display の窓: リサイズ、display ごとの bar と dock、docked・floating・整列の状態、App Home の時は背景だけ（2026-10-08 ユーザーの UAT） | uncleared（2026-10-08 T1-376 (a) displays-p015.sh PASS（QEMU、PNG は no surface）。残り: head の dock bar（2026-10-08 ユーザーの決定: window icon・時計・状態・App Home・切り替えのつまみ、P1）、head の上の press（リサイズ・bar・dock）の 5330 実機） | p007 |
 | ws113-p010 | Linux・FreeBSD の KMS での互換の実装（libkeiland-backend-linux・-freebsd の出力の列挙・hotplug・出力の変更を zedBSD と同じ compositor の契約に） | 2026-10-04 ユーザー「KMSでのLinux・FreeBSD用互換実装は、あとまわしにしてよいです（別Phaseにする）」 | planning（後回し） | p004〜p006（zedBSD の経路） |
 
 Dependency graph（2026-10-05）: p001 → p002 → {p011, p012} → p003 → p004 → {p005 → p006, p007} → p008 → p009。C2 → p012・p013、p013 → p005。p010 は p004〜p006 の後。

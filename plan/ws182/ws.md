@@ -10,7 +10,7 @@ Objectives: O1
 Parent: [Master](../master.md)
 Queue: q861 / q861-i01（P1）
 Target: **ベータ2 の最後**（2026-10-07 ユーザー）
-Resume point: p001 の設計を書いた（D1: greeter・lock でメニューを出さない、ユーザーの確認待ち）。p002 を実装し build warning 0・host 試験 PASS、QEMU は T1 の試験待ち、実機は人の手（2026-10-08 P1）。
+Resume point: p001 の設計を書いた（D1: greeter・lock でメニューを出さない → **2026-10-08 ユーザー「現状ではオーケーです」で確定**）。p002 を実装し build warning 0・host 試験 PASS、QEMU は T1 の試験待ち、実機は人の手（2026-10-08 P1）。
 <!-- awesome-plan-current:end -->
 
 ## 目標（2026-10-07 ユーザー）
@@ -27,3 +27,7 @@ Resume point: p001 の設計を書いた（D1: greeter・lock でメニューを
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 設計: 電源ボタンの事象 → メニュー（App Home の Power Off の dialog の再利用）、greeter・lock の時、WS052 p012 との関係、2 行の事象（押下と解放の 2 つの Notify） | 設計済み（D1 はユーザーの確認待ち） | — |
 | [p002](phase002/phase.md) | 実装と QEMU・実機（5320・5330）の確認 | uncleared（2026-10-08 T1-377 QEMU PASS。残り: 実機の gap_ms、D1 の確認） | p001 |
+
+## 決定 2026-10-08（ユーザー）
+
+D1（greeter・lock では電源ボタンのメニューを出さない）:「現状ではオーケーです。」同じ返事の追加の要望は別の WS へ: lock の画面の大きな時計 → [WS187](../ws187/ws.md)、PIN・Password・Hardware Key の選択 → [ws172-p007](../ws172/phase007/phase.md)。

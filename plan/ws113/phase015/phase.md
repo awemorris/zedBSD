@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws113-p015 -->
 # ws113-p015: 2 つ目以降の display の窓の状態（dock・floating・整列）、bar、リサイズ、App Home の背景
 
-Status: uncleared（2026-10-08 Q1: T1-376 (a) `displays-p015.sh` PASS（QEMU、全行 ok、PNG は D-Bus GL で no surface）。残り: head の帯の中身のユーザーの答え、head の上の press（リサイズ・bar・dock）の 5330 実機の確認）
+Status: uncleared（2026-10-08 Q1: T1-376 (a) `displays-p015.sh` PASS（QEMU、全行 ok、PNG は D-Bus GL で no surface）。残り: head の dock bar をユーザーの決定どおりに（下の「決定 2026-10-08」、P1）、head の上の press（リサイズ・bar・dock）の 5330 実機の確認）
 Disposition: normal
 Parent: [WS113](../ws.md)
 
@@ -65,3 +65,8 @@ Q1 の ACK: 範囲 1〜5、1 → 4 → 2・3 の順。2 の head の帯に出す
 ## T1-372 の判定（2026-10-08 Q1）
 
 FAIL 2 行（retry も同じ）: `the anchor's count has b docked and nothing hidden (a is head 1's)`、`Side by Side arranges the anchor's b alone (found 0 of 1)`。他（head 1 の bar の下、anchor の docked mode、head 1 の render list、App Home、unplug の retreat、KWL FAILED 無し）は ok。PNG は D-Bus で `no surface`。回帰の displays-p007・p014・ws181 p009・ws142 p010・boot-test は PASS。log: /home/awe/zedBSD-worktrees/t1/build/t1-372-p015/・t1-372-p015b/。
+
+
+## 決定 2026-10-08（ユーザー）: 2 番目以降の display の dock bar
+
+「2番目以降のディスプレイのdock barには、その画面に置いた window の window icon を出し、時計・状態・App Home・切り替えのつまみも表示する。」（P1 の案「title bar だけ、時計等は anchor だけ」は不採用。）P1 が ws090-p015 より先に実装する（q862 の前）。

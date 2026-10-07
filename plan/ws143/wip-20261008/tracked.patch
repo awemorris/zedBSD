@@ -1,0 +1,164 @@
+diff --git a/Makefile b/Makefile
+index b32e8d9ce..0b3b6154f 100644
+--- a/Makefile
++++ b/Makefile
+@@ -228,6 +228,7 @@ CONFIG_DRIVER_USB_CDC_ECM ?= y
+ CONFIG_DRIVER_USB_HID ?= y
+ CONFIG_DRIVER_USB_HUB ?= y
+ CONFIG_DRIVER_USB_CCID ?= y
++CONFIG_DRIVER_USB_BT ?= y
+ CONFIG_DRIVER_USB_RTL8822BU ?= n
+ CONFIG_KERNEL_TEST_CHECKPOINTS ?= n
+ CONFIG_PCAT_SERIAL_MIRROR ?= n
+@@ -577,6 +578,7 @@ ZEDBSD_CONFIG_CPPFLAGS := \
+ 	-DCONFIG_DRIVER_USB_HID=$(if $(filter y,$(CONFIG_DRIVER_USB_HID)),1,0) \
+ 	-DCONFIG_DRIVER_USB_HUB=$(if $(filter y,$(CONFIG_DRIVER_USB_HUB)),1,0) \
+ 	-DCONFIG_DRIVER_USB_CCID=$(if $(filter y,$(CONFIG_DRIVER_USB_CCID)),1,0) \
++	-DCONFIG_DRIVER_USB_BT=$(if $(filter y,$(CONFIG_DRIVER_USB_BT)),1,0) \
+ 	-DCONFIG_DRIVER_USB_RTL8822BU=$(if $(filter y,$(CONFIG_DRIVER_USB_RTL8822BU)),1,0) \
+ 	-DCONFIG_KERNEL_USB_HID_CHECKPOINT=$(if $(filter y,$(CONFIG_KERNEL_USB_HID_CHECKPOINT)),1,0) \
+ 	-DCONFIG_BUF_CACHE_KIB=$(CONFIG_BUF_CACHE_KIB) \
+diff --git a/config/ci/config-amd64.mk b/config/ci/config-amd64.mk
+index c66a09fe5..a4775062d 100644
+--- a/config/ci/config-amd64.mk
++++ b/config/ci/config-amd64.mk
+@@ -34,6 +34,7 @@ CONFIG_DRIVER_USB_CDC_ECM := y
+ CONFIG_DRIVER_USB_HID := y
+ CONFIG_DRIVER_USB_HUB := y
+ CONFIG_DRIVER_USB_CCID := y
++CONFIG_DRIVER_USB_BT := y
+ CONFIG_DRIVER_USB_RTL8822BU := y
+ CONFIG_DRIVER_GRAPHICS := y
+ CONFIG_DRIVER_ACPI := y
+diff --git a/config/drivers/usb.drivers b/config/drivers/usb.drivers
+index 832139981..957c5956c 100644
+--- a/config/drivers/usb.drivers
++++ b/config/drivers/usb.drivers
+@@ -5,4 +5,5 @@ CONFIG_DRIVER_USB_CDC_ECM|bool|USB CDC ECM Ethernet|i386,amd64|y|
+ CONFIG_DRIVER_USB_HID|bool|USB HID input|i386,amd64|y|
+ CONFIG_DRIVER_USB_HUB|bool|USB 2.0 hubs|i386,amd64|y|
+ CONFIG_DRIVER_USB_CCID|bool|USB smart card readers (CCID, NFC readers)|i386,amd64|y|
++CONFIG_DRIVER_USB_BT|bool|USB Bluetooth controllers (HCI, /dev/btN)|i386,amd64|y|
+ CONFIG_DRIVER_USB_RTL8822BU|bool|Realtek RTL8822BU WLAN|i386,amd64|n|
+diff --git a/platform/amd64/vmunix.mk b/platform/amd64/vmunix.mk
+index 412f4d314..89c8a0411 100644
+--- a/platform/amd64/vmunix.mk
++++ b/platform/amd64/vmunix.mk
+@@ -273,6 +273,10 @@ endif
+ ifeq ($(CONFIG_DRIVER_USB_CCID),y)
+ AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-ccid.c src/drivers/usb/usb-ccid-proto.c src/drivers/generic/smartcard.c
+ endif
++# The USB Bluetooth controllers and the HCI class, /dev/btN (ws143-p002).
++ifeq ($(CONFIG_DRIVER_USB_BT),y)
++AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-bt.c src/drivers/generic/bt-hci.c src/drivers/generic/bt-hci-proto.c
++endif
+ ifeq ($(CONFIG_DRIVER_USB_HUB),y)
+ AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-hub.c
+ endif
+diff --git a/platform/pcat/vmunix.mk b/platform/pcat/vmunix.mk
+index e9f83fabd..bb9c0e913 100644
+--- a/platform/pcat/vmunix.mk
++++ b/platform/pcat/vmunix.mk
+@@ -116,6 +116,9 @@ endif
+ ifeq ($(CONFIG_DRIVER_USB_CCID),y)
+ PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb/usb-ccid.o $(BUILD)/drivers/usb/usb-ccid-proto.o $(BUILD)/drivers/generic/smartcard.o
+ endif
++ifeq ($(CONFIG_DRIVER_USB_BT),y)
++PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb/usb-bt.o $(BUILD)/drivers/generic/bt-hci.o $(BUILD)/drivers/generic/bt-hci-proto.o
++endif
+ ifeq ($(CONFIG_DRIVER_USB_HUB),y)
+ PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb/usb-hub.o
+ endif
+diff --git a/src/kern/devfs.c b/src/kern/devfs.c
+index f1fb83ccd..a4bbb919a 100644
+--- a/src/kern/devfs.c
++++ b/src/kern/devfs.c
+@@ -133,6 +133,7 @@ static DEVFS_HIGH int component_copy(const struct componentname *component, char
+ static DEVFS_HIGH int event_name(const char *name);
+ static DEVFS_HIGH int hidraw_name(const char *name);
+ static DEVFS_HIGH int smartcard_name(const char *name);
++static DEVFS_HIGH int bluetooth_name(const char *name);
+ static DEVFS_HIGH int backlight_name(const char *name);
+ static DEVFS_HIGH ino_t cdev_directory(const char *name);
+ static DEVFS_HIGH int devfs_cdev_inode(struct inode *directory, struct cdev *device, struct inode **result);
+@@ -419,6 +420,26 @@ smartcard_name(
+ 	return 1;
+ }
+ 
++/* Identifies the Bluetooth controllers' HCI nodes, /dev/bt<n> (ws143-p002). */
++static DEVFS_HIGH int
++bluetooth_name(
++	const char *name)
++{
++	int comparison;
++
++	/* Bluetooth nodes are named bt<n>. */
++	comparison = kern_strncmp(name, "bt", 2);
++	if (comparison != 0)
++		return 0;
++
++	/* The number follows at once (no other node's name is bt and a digit). */
++	if (name[2] < '0' || name[2] > '9')
++		return 0;
++
++	/* Succeeded: the name is a Bluetooth controller's. */
++	return 1;
++}
++
+ /* Identifies names owned by the /dev/backlight namespace (ws113-p013). */
+ static DEVFS_HIGH int
+ backlight_name(
+@@ -474,6 +495,7 @@ devfs_cdev_inode(
+ 	int backlight;
+ 	int raw;
+ 	int smartcard;
++	int bluetooth;
+ 
+ 	/* Creates a generation-unique inode and gives it one cdev reference. */
+ 	number = cdev_generation(device);
+@@ -488,16 +510,18 @@ devfs_cdev_inode(
+ 	 * anyone and changed by its owner (the seat's user, given by sessiond).
+ 	 * A security key's raw HID node and a smart card slot are root's alone
+ 	 * until sessiond gives them to the seat's user (ws161: whoever opens
+-	 * them can ask the key to sign).
++	 * them can ask the key to sign).  A Bluetooth controller is root's
++	 * alone: the daemon's privileged part opens it (ws143, D16).
+ 	 */
+ 	backlight = backlight_name(device->name);
+ 	raw = hidraw_name(device->name);
+ 	smartcard = smartcard_name(device->name);
++	bluetooth = bluetooth_name(device->name);
+ 	if (event_name(device->name))
+ 		mode = 0640U;
+ 	else if (backlight)
+ 		mode = 0644U;
+-	else if (raw || smartcard)
++	else if (raw || smartcard || bluetooth)
+ 		mode = 0600U;
+ 	else if (kern_strcmp(device->name, "input-inject") == 0)
+ 		mode = 0600U;
+diff --git a/src/kern/platform/pcat.c b/src/kern/platform/pcat.c
+index 536ca53e1..a56fcdf93 100644
+--- a/src/kern/platform/pcat.c
++++ b/src/kern/platform/pcat.c
+@@ -73,6 +73,9 @@
+ #if CONFIG_DRIVER_USB_CCID
+ #include <drivers/usb/usb-ccid.h>
+ #endif
++#if CONFIG_DRIVER_USB_BT
++#include <drivers/usb/usb-bt.h>
++#endif
+ #include <drivers/pci/pci.h>
+ #if CONFIG_DRIVER_ACPI
+ #include <drivers/acpi/acpi.h>
+@@ -231,6 +234,10 @@ kern_platform_init(
+ 	if (drv_usb_ccid_driver_register() != 0)
+ 		kern_logf("usb: CCID smart card driver registration failed\n");
+ #endif
++#if CONFIG_DRIVER_USB_BT
++	if (drv_usb_bt_driver_register() != 0)
++		kern_logf("usb: Bluetooth driver registration failed\n");
++#endif
+ 
+ 	/* Registers the PCI drivers: host controllers, NVMe, WLAN, graphics. */
+ #if CONFIG_DRIVER_PCI_UHCI

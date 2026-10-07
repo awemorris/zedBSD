@@ -8,59 +8,56 @@
   Q1 の操作盤。先頭（awesome-plan-current）は「今」だけを書き、各 block は「master:<名前>:start」〜「master:<名前>:end」で丸ごと置き換えてよい。
   block: updated・agents・merge・next・open-decisions・focus・blocked（先頭）、priority・outlook（本体）、decisions-log・history-log（末尾の付録、新しい物を block の先頭に足す）。
   置き換え: sed -i '/master:agents:start/,/master:agents:end/{//!d}' plan/master.md の後に sed -i '/master:agents:start/r new.md' plan/master.md。
-<!-- master:agents:start -->
-- 2026-10-07 20 時: P1（前の世代）が ws051-p003（DKL PLL ほか、q848 の正解値と一致、host 試験 PASS、test-wait T1-354）と WS050 の 5320 の UCSI の timeout の直し（Dell の PPM: change だけの ACK で止まる → GET_CAPABILITY の completion と 1 回の ACK）を返した（12d420022 merge）。新しい世代の P1 は T1-354 の待ちの間 ws075-p007a a4、PASS の後 ws051-p004a。T1 は T1-353 → T1-354。P2 は ws052-p011 の backend。
-- 2026-10-07 18 時半: **P1** は ws075-p007a a3 で止め（8e17f0e2c merge、a4 から再開）、新しい世代で q847（WS051 p003 → p004a・p004b、WS050 の 5320 の UCSI の PPM 不起動の解析）。T1 は返却済み（次は T1-351、M-3 の採取の後）。
-- 2026-10-07 18 時: **P3**（phase-runner high、worktree p3）を追加 → q846 [ws118-p006](ws118/phase006/phase.md)（5320 の TGL の DPLL・takeover・fallback、実機 10.0.30.5）。
-- 2026-10-07 夜（利用の上限の前のラップアップ、ユーザーの指示）。体制は N=2（P1・P2、phase-runner high）＋T1（test-runner、Sonnet 5.5 medium）。全担当は削除の command を実行しない（Q1 が消す、plan/agents/protocol.md 末尾）。
-  - **P1**（q833・q836・q839）: 75d7e4b84 まで merge 済み。WS179 p001・p002（T1-335・337 待ち、Files の desktop の pill が青のまま → 直す）、ws090-p025 の User name は kl_field の scroll の直し（66dcf6edd、T1-338 待ち）。WS083 p001 設計の第 1 版と design-reviewer の結果（blocking 4、§13 に未反映、人の判断 H1〜H5・HD1〜HD6 は第 2 版の後にユーザーへ）→ WS178 libGL を GL だけ・libGLX.so を xserver に「完全に分ける」→ WS075 → WS052。ws090-p025 の Settings の User name の IME（T1-336 で key は欄に届くのに画面は n だけ、描画か ja の keysym を疑う）。
-  - **P2**（q842 → q834）: WS181（窓の状態・App Home の独立のモード・gesture・整列、UAT 優先）p001 設計の途中 → p002〜p004 → ws051-p002b（TC の核）→ WS050 p005 → WS084（p003 は実機）。
-  - **T1**: T1-335・337 は途中（台帳 b31012b2a）。T1-335: 各色で Settings・Files・検索・OSK・bar と主の button の文字は期待どおり、**Files の desktop の icon の pill が青のまま（`ZFILES ACCENT` の行が無い）→ P1 へ**、App Home・greeter の確認と dark の purple・pink・red は未実施。T1-337: purple だけ撮影（PNG は未判定）、music.play は HDA 無しで fail（HDA 付きで再撮影）、yellow は未実施。T1-334 は 5330 待ち、T1-216・202b・227 は保留。
-  - 再開: 各担当の返却の報告（SHA・再開の情報）を Q1 が merge し、同じ列で新しく起動する（context が大きいので新しい世代で）。
+- **2026-10-08 02:30 セッションの引き継ぎ**（ユーザー: 週間の使用量 99%、別のセッションへ）。直前に緊急のラップアップ。全担当は停止済み（P1・P2・bug-analyzer はユーザーが停止、T1 は終了）。詳細と再開の表は **[plan/agents/wrapup-20261008.md](agents/wrapup-20261008.md)**（最初に読む）。
+  - **P1**（q862）: agent/p1 43d35865a（main に未 merge、ws090-p015 の kl_scroll の拡張の途中）。再開は **ws113-p015 の 2 番目以降の display の dock bar（ユーザーの決定）が先** → ws090-p015 の続き。
+  - **P2**（q860・q863）: agent/p2 の worktree に WS143 p002（usb-bt・bt-hci）の未 commit の差分。写しは plan/ws143/wip-20261008/（tracked.patch・untracked.tar.gz）。再開は **q863 ws183-p002（タップのクリックの遅れ）が先** → WS143 p002 の続き。
+  - **BUG-258**（5330 の USB メモリ）: bug-analyzer は結果無しで停止。BUG-258.md の「次」からやり直す。
+  - **T1**: 未実行の依頼は無し（T1-378 は 5330 が Linux の時だけ、保留）。
+  - 体制は N=2（P1・P2、phase-runner high）＋T1（test-runner）。担当は rm をしない（Q1 が消す）。Beta 2 の優先順は memory beta2-priority-order と decisions-log。
+- **2026-10-08 再開**（ユーザー「起動して作業開始してください」）: P1 新世代 = ws113-p015（2 番目以降の display の dock bar）→ q862 ws090-p015。P2 新世代 = q863 ws183-p002（タップの遅れ）→ q864 ws187-p001（lock の大きな時計）→ q860 WS143 p002（WIP は git stash に退避）。bug-analyzer = BUG-258 の解析のやり直し。T1 は依頼が来たら起動。
 <!-- master:agents:end -->
 
 ### 統合と試験の待ち
 
 <!-- master:merge:start -->
-- main の履歴は 2026-10-06 に `e42ef860` の後を 1 つに squash した（ユーザーの指示: 著作権の参考の画像の削除）。**残り**: `codex/fix-bug202-boot-worker`・`codex/merge-bug202` の branch（別の session の物）が古い履歴を参照しているので、その session の終わりの後に新しい履歴へ移すか消し、`git reflog expire --expire=now --all && git gc --prune=now` で画像の object を消す。
-- 上部の bar（ws099-p034）は当て直して main に merge 済み（e7a56460、montage-4 の icon・暗い bar の穴、build の warning 0、QEMU・実機は未）。montage は `plan/ws099/phase034/images/bar-montage-4.png`（P2 の worktree）。BUG-236 の App Home の stage の montage は未着手。
-- **main に入ったが QEMU・実機で未確認**: BUG-203〜209（Phone の IME・太字・browser の 2 件・dock の F11・Alt+Tab）、ws099-p019 の壁紙、BUG-237 の icon の穴、WS174 p003 の key（間欠の不検出 1/12）、WS158 p002〜p004、AAT の runner（T1-202b は smoke 5 pass・3 fail で full は中断）。
-- 実機で確認済み（2026-10-06 UAT、`config/current-uat.mk` の image）: BUG-202（起動の fatal）・197（電源オフ）・210（I2C の touchpad）・I2C-HID の 2 本指の scroll・mp4 の再生・OSK の変換・app の icon の形。
+- main fbfd91361 以降（2026-10-08）。P1・P2 の返却の SHA は無い（上の agents の表）。
+- 2026-10-08 の T1 の結果: T1-375b（ws156 p003・p004 cleared、p005 は規約と実機の UAT が残り）、T1-376（ws113-p015 QEMU PASS、BUG-257 resolved）、T1-377（ws182-p002 QEMU PASS、実機の gap_ms が残り）。
+- `codex/fix-bug202-boot-worker`・`codex/merge-bug202` の古い branch の整理（以前からの残り）。
 <!-- master:merge:end -->
 
 ### Q1 の次の手順
 
 <!-- master:next:start -->
-1. 担当の返却の SHA を merge（`source plan/tools/merge_one.sh && merge_one SHA`（Q1 の道具、T1 の台帳の衝突は自動で解く。cherry-pick は plan/tools/pick.sh）。`&&` で繋ぎ、commit -a と同じ command にしない）。
-2. P1・P2・T1 を新しい世代で起動（上の agents の列、phase.md の「再開の情報」から）。
-3. T1 の結果を判定（PNG は build/review/ に写してユーザーに見せる）。
-4. M-3 は 2026-10-07 ユーザーが「5330 で採取する」と決定（T1 の 5330 の試験の後、monitor の挿し込みはユーザー）。
+1. plan/agents/wrapup-20261008.md を読み、P1・P2 を新しい世代で起動（再開の順は上の agents）。P2 の WIP は worktree の差分のまま、無ければ plan/ws143/wip-20261008/ から戻す。
+2. **5330**（zedBSD 単独起動中、ユーザー「いつでも再起動OK、アップデートもOK」）: 入れ替えは未実施。5330 の /tmp に vmunix.q1（main fc5cad676、BUG-256 の診断入り）・wayland.q1・settings.q1・libkeiland.q1 があり、ESP は /tmp/esp に mount したまま（/esp は無い）。新しい main で build し直して入れ替え（vmunix.prev を残す）、再起動はユーザーに頼む（reboot command は 5330 で効かない）。その後ユーザーに TC2 へ DP の monitor を挿してもらい `i915: aux`・`TCn AUX failed` の行を P2 へ（BUG-256）。BUG-258 の再現の dmesg もこの時に。
+3. merge は `source plan/tools/merge_one.sh && merge_one SHA`、`&&` で繋ぐ。
+4. PDF viewer のリサイズの重さ（2026-10-08 UAT）は [BUG-259](bugs/BUG-259.md)、未割当。
 <!-- master:next:end -->
 
 ### ユーザーの未決の判断
 
 <!-- master:open-decisions:start -->
-- **WS084 の 10 回の reboot（素の起動）**: ユーザー（2026-10-07）「あとで私が zedBSD で起動する」→ 準備ができたら plan/ws084/tests/reboot-loop.sh を今の main で 10 回、次に d1・d3 の patch を当てた main で 10 回。それまで d1・d3 は当てずに置く。
-- （解決 2026-10-07、decisions-log）WS181 の設計の判断: D1 10-07 の UAT が 10-06 の「閉じたら次も最大化」を置き換える（知らせ）。D2 docked の窓の最小化は閉じると同じ扱いか（review: Ctrl+Alt+Shift+矢印の移動は docked のまま運ぶ）。D3 touchpad も 2 本指の下端 = Home、上端 = Wiseview にするか。D4 Home の上で下からの swipe は何もしない、Home は下への drag で閉じる。D5 整列のメニューは今の desktop の絵からだけか、pill のどこからでもか。D6 全画面では上端で Wiseview。D7 整列の上限を超える窓はその場に。追加: mouse にも上端の帯を効かせ全画面の窓から 10 px を取るか（S8）、整列モードの印と窓が閉じた時の詰め直し（S6）、Home の上に bar を残すか（S9）。ws142 の試験・記録の変更の許可（S10、Q1 で可）。
-- **M-3（WS051）**: 5330 の iGPU を一時的に host の i915 に付け替えて USB-C の DP の正解の register を採るか（2026-10-07 ユーザーが質問を閉じた、5330 が戻った時に改めて聞く）。
-- **WS153 U2〜U15**: ユーザーが検討中（聞かない）。
-- WS180（Emacs の graphical な editor）・WS117（Qt6）はベータ3 以降（決定済み）。
+- **WS005 p021**（AX211 の passthrough の試験）を canceled にし p023 の実機の受け入れに置き換えるか。p019 の clearance も同時に。
+- **規約の全文の見直しの Phase（約 8〜10 LW）をベータ2 の後に回すか**。決まるまで WS005 p022 などの規約の Phase は保留。
+- **WS172 p004 の survey**（plan/ws172/phase004/survey.md、S1〜S13）のユーザーの review。5330 の TPM2 の ACPI の表は 5330 が Linux の時に Q1 が読む（T1-378 の Bluetooth の採取と一緒に）。
+- **WS084 の 10 回の reboot（素の起動）**: ユーザーが zedBSD で起動する時。
+- WS153 U2〜U15 はユーザーが検討中（聞かない）。
+- （解決 2026-10-08）電源ボタンのメニュー（WS182 D1）: 「現状ではオーケーです」。追加の要望 → WS187（lock の大きな時計）・ws172-p007（PIN・Password・Hardware Key の選択）。
+- （解決 2026-10-08）2 番目以降の display の dock bar: 「その画面に置いた window の window icon を出し、時計・状態・App Home・切り替えのつまみも表示する」（ws113-p015）。
 <!-- master:open-decisions:end -->
 
 ### Focus
 
 <!-- master:focus:start -->
-- **fg019 ベータ2 の公開（10/17、2026-10-06 夜 ユーザーがベータ1 から変更）**（RC の commit 10/13）。2026-10-06 の UAT で起動・touchpad・電源オフが実機で動いた。残りは UAT の所見 BUG-211〜237 と、見積もりの表の残り。
-- **AAT**（WS173）: runner は動く（smoke 5/8）、helper の直しが要る。full は 1 日 1 回。
-- **見た目の刷新**: icon（montage-4、merge 済み）、上部の bar（ws099-p034）、App Home の stage（BUG-236）。
+- **fg019 ベータ2 の公開（10/17、RC 10/13）**。優先順（2026-10-07 ユーザー）: Settings Display（WS113）→ USB-C/DP Alt（WS051・WS050、BUG-256）→ Vulkan Video（WS083）→ widget（WS090）→ 通知（WS156）→ touchpad の割り込み・タップ（WS183）→ YubiKey/passkey（WS161・WS172）→ 写真（WS157）→ カレンダー（WS155）→ Bluetooth（WS143）→ 残り。空き時間だけ: IME（WS095）・RTL8822C（WS186）・Vulkan executor（WS031）・i915 の高度化（WS075、shader の compiler を含む）。ベータ3 と 10/13 以降の物は decisions-log。
 <!-- master:focus:end -->
 
 ### 止まっている物
 
 <!-- master:blocked:start -->
-- 5330 は 2026-10-07 夕に戻った（Debian 13、chaos）。素の起動（zedBSD を実機で起動する WS084 の 10 回の reboot・WS173 p005）はユーザーの手が要る。
-- WS074 のレンダリングの改善: ユーザーの指示まで止める（B1 は起動しない）。
-- WS153: U2〜U15 のユーザーの判断まで止める。
+- 5330 は zedBSD の単独起動中（Linux の作業 T1-378・TPM2 の表は Linux に戻した時）。5320 は電源オフ（WS183 p001・BUG-249・BUG-247 の実機の確認待ち）。
+- BUG-256（USB-C の AUX）: 診断の kernel の入れ替えと monitor の挿し込み待ち。
+- WS074 のレンダリングの改善: ユーザーの指示まで止める。WS153: U2〜U15 のユーザーの判断まで止める。
 - GitHub への記録の公開は保留（.sync が無い）。push はユーザーの指示の時だけ。
 <!-- master:blocked:end -->
 
@@ -489,6 +486,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | [WS184](ws184/ws.md) | MG006 | 左手デバイスの OSK（クリエイターモード: ダイヤル・ホイール・ボタン 2×5、左上の swipe で出す、ベータ2） | planning | p001 設計 |
 | [WS185](ws185/ws.md) | MG006 | ゲームパッドの OSK とゲームコンソールモード（両上隅の同時 swipe、Xbox の pad を模す、段 1 は mview、ベータ2） | planning | p001 設計 |
 | [WS186](ws186/ws.md) | MG003 | Realtek RTL8822CE（5320 の PCIe の WiFi、ベータ3、ベータ2 が早く終われば前倒し） | planning | p001 調査と設計 |
+| [WS187](ws187/ws.md) | MG006 | ロック画面の大きな時計（縦長の display でもきれいに、2026-10-08 ユーザー） | planned | p001（q864、P2） |
 
 完了した WS の Phase の記録は 2026-09-24 に plan から削除した（git の履歴に残る）。
 
@@ -517,6 +515,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 ユーザーの決定と Q1 の技術の決定の記録。決まった判断は先頭の open-decisions からここへ移す。各 WS の phase.md・ws.md が正本で、ここは索引。
 
 <!-- master:decisions-log:start -->
+- 2026-10-08 ユーザー: (1)「2番目以降のディスプレイのdock barには、その画面に置いた window の window icon を出し、時計・状態・App Home・切り替えのつまみも表示する。」（ws113-p015）(2)「5330はいつでも再起動OKです。アップデートもOKです。」(3) UAT: タップの判定の遅れ → ws183-p002（q863）、USB メモリ → BUG-258、PDF viewer のリサイズの重さ → BUG-259。(4) 緊急のラップアップの後、週間の使用量 99% で別のセッションへ引き継ぎ（plan/agents/wrapup-20261008.md）。
 - 2026-10-08 ユーザー「ベータ3にします：WS009・026・106 文書・試験の整理・試験アプリの集約、WS139 デスクトップの速さ」 → 4 つの WS の Target をベータ3 に。
 - 2026-10-08 ユーザー:「『そのほか』は見積もりが甘いです。releaseの作業は明らかに10/13以降です。Linux/FreeBSDも10/13以降です。翻訳はベータ3に回します。」→ WS129（release）と Linux・FreeBSD の作業（WS112、WS131 の 3 OS の回帰ほか）は 10/13 以降、WS158（翻訳）はベータ3。
 - 2026-10-08 ユーザーの UAT（5330、HDMI）: p007 の mouse の跨ぎと窓の移動は OK → ws113-p007 cleared。2 つ目の display のリサイズ不可、display ごとの dock の bar・docked/floating/整列の状態、App Home の時は他の display を背景だけに → [ws113-p015](ws113/phase015/phase.md)（P1、WS113 は優先順の 1 番なので WS090 の今の単位の後すぐ）。「次はUSB-C DPにしてみます。」
