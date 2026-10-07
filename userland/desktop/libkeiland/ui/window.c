@@ -622,6 +622,28 @@ kl_window_present(
 	const uint32_t *pixels,
 	size_t stride)
 {
+	int error;
+
+	/* The whole frame changed. */
+	error = kl_window_present_part(window, pixels, stride, NULL);
+	return error;
+}
+
+/*
+ * Shows a frame of which only a part changed since the last one
+ * (KL_VERSION 63, BUG-221): as kl_window_present, but only the part's
+ * rows are copied and the compositor is told that part alone, so it
+ * draws that much again.  The pixels outside the part must be the last
+ * frame's.  A NULL part, a new swapchain or shared memory take the whole
+ * frame.  Returns as kl_window_present.
+ */
+int
+kl_window_present_part(
+	struct kl_window *window,
+	const uint32_t *pixels,
+	size_t stride,
+	const struct kl_rect *part)
+{
 	VkResult result;
 	int error;
 
@@ -638,7 +660,7 @@ kl_window_present(
 		return EINVAL;
 
 	/* Vulkan: out of date asks for a resize and another frame. */
-	result = keiui_present_frame(&window->vulkan, pixels, stride);
+	result = keiui_present_frame(&window->vulkan, pixels, stride, part);
 	if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
 		return EAGAIN;
 	if (result != VK_SUCCESS)

@@ -372,6 +372,13 @@ device_validate(
 			continue;
 		}
 
+		/* Selects the changed rectangles a present may name (the Wayland commit's damage, BUG-221). */
+		match = strcmp(info->ppEnabledExtensionNames[index], VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME);
+		if (match == 0) {
+			bits |= VULKAN_DEVICE_INCREMENTAL_PRESENT;
+			continue;
+		}
+
 		/* Selects display power, hotplug and refresh events. */
 		match = strcmp(info->ppEnabledExtensionNames[index], VK_EXT_DISPLAY_CONTROL_EXTENSION_NAME);
 		if (match == 0) {
@@ -395,6 +402,10 @@ device_validate(
 	if ((bits & VULKAN_DEVICE_DISPLAY_SWAPCHAIN) &&
 	    (!(bits & VULKAN_DEVICE_SWAPCHAIN) ||
 	     !(physical->instance->enabled_extensions & VULKAN_INSTANCE_DISPLAY)))
+		return VK_ERROR_EXTENSION_NOT_PRESENT;
+
+	/* Present regions describe swapchain presents only. */
+	if ((bits & VULKAN_DEVICE_INCREMENTAL_PRESENT) && !(bits & VULKAN_DEVICE_SWAPCHAIN))
 		return VK_ERROR_EXTENSION_NOT_PRESENT;
 
 	/* Display control depends on the swapchain and on the instance's surface counters. */

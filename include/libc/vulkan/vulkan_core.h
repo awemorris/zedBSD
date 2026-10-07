@@ -5675,6 +5675,30 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSharedSwapchainsKHR(
 #endif
 
 
+#define VK_KHR_incremental_present 1
+#define VK_KHR_INCREMENTAL_PRESENT_SPEC_VERSION 2
+#define VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME "VK_KHR_incremental_present"
+
+/* The registry ABI of the present regions: the rectangles of a presented image that changed. */
+typedef struct VkRectLayerKHR {
+	VkOffset2D offset;
+	VkExtent2D extent;
+	uint32_t layer;
+} VkRectLayerKHR;
+
+typedef struct VkPresentRegionKHR {
+	uint32_t rectangleCount;
+	const VkRectLayerKHR* pRectangles;
+} VkPresentRegionKHR;
+
+typedef struct VkPresentRegionsKHR {
+	VkStructureType sType;
+	const void* pNext;
+	uint32_t swapchainCount;
+	const VkPresentRegionKHR* pRegions;
+} VkPresentRegionsKHR;
+
+
 
 #include "vulkan_external.h"
 

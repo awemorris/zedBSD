@@ -204,7 +204,7 @@ void fm_glass_close(struct fm_glass *glass);
 VkResult fm_present_instance(struct fm_present *present);
 VkResult fm_present_open(struct fm_present *present, struct fm_window *window);
 VkResult fm_present_resize(struct fm_present *present, uint32_t width, uint32_t height);
-VkResult fm_present_frame(struct fm_present *present, const uint32_t *pixels, size_t stride);
+VkResult fm_present_frame(struct fm_present *present, const uint32_t *pixels, size_t stride, const struct kl_rect *part);
 void fm_present_close(struct fm_present *present);
 
 #endif

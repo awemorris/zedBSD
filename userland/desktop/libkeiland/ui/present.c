@@ -21,6 +21,7 @@
 
 #include "window.h"
 #include "shaders.h"
+#include "present-copy.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,6 +50,7 @@ static VkResult present_vertices(struct keiui_present *present);
 static VkResult present_pipeline(struct keiui_present *present);
 static VkResult present_module(struct keiui_present *present, const uint32_t *code, size_t size, VkShaderModule *module);
 static void present_record(struct keiui_present *present, uint32_t image);
+static int present_has_extension(VkPhysicalDevice physical, const char *name);
 
 /*
  * Makes the Vulkan objects of the window: the device, the swapchain, the
@@ -190,6 +192,11 @@ keiui_present_resize(
  * Shows a frame (pixels of the swapchain's size, stride words a row) and
  * waits for it to finish.
  *
+ * part, when not NULL, is the only part of the frame that changed since
+ * the last one (BUG-221): only its rows are copied into the canvas, which
+ * keeps the rest, and the window system is told that part alone
+ * (VK_KHR_incremental_present).  A new canvas takes the whole frame.
+ *
  * Returns VK_ERROR_OUT_OF_DATE_KHR when the swapchain no longer matches
  * the window; the caller resizes and draws again.
  */
@@ -197,20 +204,36 @@ VkResult
 keiui_present_frame(
 	struct keiui_present *present,
 	const uint32_t *pixels,
-	size_t stride)
+	size_t stride,
+	const struct kl_rect *part)
 {
 	VkSubmitInfo submit;
 	VkPresentInfoKHR info;
+	VkPresentRegionsKHR regions;
+	VkPresentRegionKHR region;
+	VkRectLayerKHR rect;
 	VkPipelineStageFlags stage;
+	struct kl_rect area;
 	uint64_t started;
 	uint32_t image;
-	uint32_t row;
+	int partial;
 	VkResult error;
 
-	/* The frame's rows into the canvas image. */
+	/* The part to copy and tell: the whole frame for a new canvas, or without a part. */
+	partial = 0;
+	if (part != NULL && present->canvas_whole)
+		partial = keiui_present_part_clip(present->extent.width, present->extent.height, part, &area);
+	if (!partial) {
+		area.x = 0;
+		area.y = 0;
+		area.width = (int)present->extent.width;
+		area.height = (int)present->extent.height;
+	}
+
+	/* The part's rows into the canvas image; the canvas keeps the rest of the last frame. */
 	started = keiui_clock_ms();
-	for (row = 0; row < present->extent.height; row++)
-		memcpy(present->canvas_map + (size_t)row * present->canvas_pitch, pixels + (size_t)row * stride, (size_t)present->extent.width * 4U);
+	keiui_present_copy(present->canvas_map, present->canvas_pitch, pixels, stride, &area);
+	present->canvas_whole = 1;
 	present->copy_ms = (unsigned)(keiui_clock_ms() - started);
 
 	/* The image to draw into, once the compositor has given one back. */
@@ -264,6 +287,22 @@ keiui_present_frame(
 	info.swapchainCount = 1U;
 	info.pSwapchains = &present->swapchain;
 	info.pImageIndices = &image;
+
+	/* The changed part, for the window system to take alone. */
+	if (partial && present->incremental) {
+		memset(&rect, 0, sizeof(rect));
+		rect.offset.x = area.x;
+		rect.offset.y = area.y;
+		rect.extent.width = (uint32_t)area.width;
+		rect.extent.height = (uint32_t)area.height;
+		region.rectangleCount = 1U;
+		region.pRectangles = &rect;
+		memset(&regions, 0, sizeof(regions));
+		regions.sType = VK_STRUCTURE_TYPE_PRESENT_REGIONS_KHR;
+		regions.swapchainCount = 1U;
+		regions.pRegions = &region;
+		info.pNext = &regions;
+	}
 	started = keiui_clock_ms();
 	present->operation = "vkQueuePresentKHR";
 	error = vkQueuePresentKHR(present->queue, &info);
@@ -350,7 +389,7 @@ present_device(
 	VkPhysicalDeviceProperties properties;
 	VkDeviceQueueCreateInfo queue;
 	VkDeviceCreateInfo create;
-	const char *extension;
+	const char *extensions[2];
 	float priority;
 	uint32_t count;
 	uint32_t family_count;
@@ -403,13 +442,20 @@ present_device(
 	queue.queueFamilyIndex = present->family;
 	queue.queueCount = 1U;
 	queue.pQueuePriorities = &priority;
-	extension = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+	extensions[0] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
 	memset(&create, 0, sizeof(create));
 	create.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 	create.queueCreateInfoCount = 1U;
 	create.pQueueCreateInfos = &queue;
 	create.enabledExtensionCount = 1U;
-	create.ppEnabledExtensionNames = &extension;
+	create.ppEnabledExtensionNames = extensions;
+
+	/* The changed part of each frame told to the window system, when the device can (BUG-221). */
+	present->incremental = present_has_extension(present->physical, VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME);
+	if (present->incremental) {
+		extensions[1] = VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME;
+		create.enabledExtensionCount = 2U;
+	}
 	present->operation = "vkCreateDevice";
 	error = vkCreateDevice(present->physical, &create, NULL, &present->device);
 	if (error != VK_SUCCESS)
@@ -871,6 +917,7 @@ present_canvas(
 	present->canvas_map = (unsigned char *)map + layout.offset;
 	present->canvas_pitch = (size_t)layout.rowPitch;
 	present->canvas_ready = 0;
+	present->canvas_whole = 0;
 
 	/* The view the shader samples. */
 	memset(&view, 0, sizeof(view));
@@ -923,6 +970,7 @@ present_canvas_free(
 	present->canvas_memory = VK_NULL_HANDLE;
 	present->canvas_map = NULL;
 	present->canvas_ready = 0;
+	present->canvas_whole = 0;
 }
 
 /* Makes the vertex buffer of the quad: the unit square, which the push constant stretches over the window. */
@@ -1216,4 +1264,33 @@ present_record(
 
 	/* The pass ends with the image ready to present. */
 	vkCmdEndRenderPass(present->command);
+}
+
+/* Tells whether a physical device offers a device extension (1) or not (0). */
+static int
+present_has_extension(
+	VkPhysicalDevice physical,
+	const char *name)
+{
+	VkExtensionProperties properties[64];
+	uint32_t count;
+	uint32_t index;
+	VkResult error;
+	int same;
+
+	/* The device's extensions (the first 64 are enough). */
+	count = (uint32_t)(sizeof(properties) / sizeof(properties[0]));
+	error = vkEnumerateDeviceExtensionProperties(physical, NULL, &count, properties);
+	if (error != VK_SUCCESS && error != VK_INCOMPLETE)
+		return 0;
+
+	/* The one named. */
+	for (index = 0U; index < count; index++) {
+		same = strcmp(properties[index].extensionName, name);
+		if (same == 0)
+			return 1;
+	}
+
+	/* Not offered. */
+	return 0;
 }

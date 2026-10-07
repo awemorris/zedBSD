@@ -553,6 +553,7 @@ cal_draw(
 	struct kl_glass_panel panels[CAL_PANELS_MAX];
 	struct kl_event event;
 	struct kl_rect caret;
+	const struct kl_rect *present_part;
 	struct kl_rect part;
 	size_t count;
 	int desk_only;
@@ -629,8 +630,11 @@ cal_draw(
 		}
 	}
 
-	/* The frame shown. */
-	status = kl_window_present(calendar->window, calendar->pixels, (size_t)calendar->width);
+	/* The frame shown, by the part alone when it was drawn so (BUG-221). */
+	present_part = NULL;
+	if (partial)
+		present_part = &part;
+	status = kl_window_present_part(calendar->window, calendar->pixels, (size_t)calendar->width, present_part);
 	if (status == EAGAIN)
 		calendar->resized = 1;
 

@@ -472,7 +472,7 @@ vkEnumerateDeviceExtensionProperties(
 	VkExtensionProperties *pProperties)
 {
 	struct VkPhysicalDevice_T *physical;
-	VkExtensionProperties available[13];
+	VkExtensionProperties available[14];
 	uint32_t count;
 	VkResult status;
 
@@ -487,6 +487,13 @@ vkEnumerateDeviceExtensionProperties(
 	if (physical->supported_extensions & VULKAN_DEVICE_SWAPCHAIN) {
 		strcpy(available[count].extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME);
 		available[count].specVersion = VK_KHR_SWAPCHAIN_SPEC_VERSION;
+		count++;
+	}
+
+	/* The changed rectangles of a present, with the swapchain (BUG-221). */
+	if (physical->supported_extensions & VULKAN_DEVICE_INCREMENTAL_PRESENT) {
+		strcpy(available[count].extensionName, VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME);
+		available[count].specVersion = VK_KHR_INCREMENTAL_PRESENT_SPEC_VERSION;
 		count++;
 	}
 
@@ -1130,6 +1137,9 @@ physical_load(
 
 	/* Local WSI can pair a renderer with a separate display node or a Wayland connection. */
 	physical->supported_extensions = VULKAN_DEVICE_SWAPCHAIN | VULKAN_DEVICE_DISPLAY_SWAPCHAIN;
+
+	/* A present may name its changed rectangles; the Wayland commit damages only them (BUG-221). */
+	physical->supported_extensions |= VULKAN_DEVICE_INCREMENTAL_PRESENT;
 
 	/*
 	 * The memory requirement queries of VK_KHR_get_memory_requirements2 and

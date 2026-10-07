@@ -73,6 +73,10 @@ struct wayland_lease {
 	uint64_t completed;
 	/* Whether the swapchain's images carry premultiplied alpha the compositor blends by. */
 	VkBool32 premultiplied;
+
+	/* The part of the next commit's image that changed (x, y, width, height), when one was named (BUG-221). */
+	VkBool32 damaged;
+	int32_t damage[4];
 };
 
 /* Callback names must be declared before the immutable listener and operation initializers below. */
@@ -91,6 +95,7 @@ static VkResult wayland_commit(void *private_lease, void *private_image, VkPrese
 static VkBool32 wayland_commit_early(void *private_lease);
 static VkResult wayland_composite_alpha(void *private_lease, VkCompositeAlphaFlagBitsKHR alpha);
 static VkResult wayland_progress(void *private_lease);
+static void wayland_damage(void *private_lease, int32_t x, int32_t y, int32_t width, int32_t height);
 static VkBool32 wayland_available(void *private_image);
 static void wayland_destroy_image(void *private_image);
 static VkResult wayland_dispatch(struct wayland_surface *surface);
@@ -105,7 +110,7 @@ static const struct vulkan_wsi_platform_ops wayland_platform = {
 	wayland_capabilities, wayland_formats, wayland_modes,
 	wayland_claim, wayland_release, NULL, wayland_wait, wayland_destroy,
 	wayland_import, wayland_present, wayland_progress, wayland_available, wayland_destroy_image, NULL, wayland_present_sync, NULL, NULL,
-	wayland_commit_early, wayland_composite_alpha
+	wayland_commit_early, wayland_composite_alpha, wayland_damage
 };
 
 /* Registry discovery and buffer ownership are delivered only on the WSI queue. */
@@ -758,6 +763,7 @@ wayland_commit(
 	struct wayland_image *image;
 	struct wayland_frame *frame;
 	VkResult error;
+	uint32_t surface_version;
 	int status;
 	int socket_error;
 
@@ -820,9 +826,22 @@ wayland_commit(
 	if (wait_fd >= 0)
 		kl_gpu_buffer_v1_set_acquire_fence(surface->factory, surface->native, wait_fd, wait_generation);
 
-	/* Commits the GPU image with full-surface damage on the native wrapper. */
+	/*
+	 * Commits the GPU image with the part that changed as its damage, when
+	 * the application named it (BUG-221), else the whole surface; the
+	 * named part serves this commit alone.
+	 */
 	wl_surface_attach(surface->native, image->buffer, 0, 0);
-	wl_surface_damage(surface->native, 0, 0, INT32_MAX, INT32_MAX);
+	surface_version = wl_proxy_get_version((struct wl_proxy *)surface->native);
+	if (lease->damaged && surface_version >= WL_SURFACE_DAMAGE_BUFFER_SINCE_VERSION) {
+		wl_surface_damage_buffer(surface->native, lease->damage[0], lease->damage[1], lease->damage[2], lease->damage[3]);
+	} else if (lease->damaged) {
+		/* An older surface: the same part in surface coordinates (the images are of scale one). */
+		wl_surface_damage(surface->native, lease->damage[0], lease->damage[1], lease->damage[2], lease->damage[3]);
+	} else {
+		wl_surface_damage(surface->native, 0, 0, INT32_MAX, INT32_MAX);
+	}
+	lease->damaged = VK_FALSE;
 	wl_surface_commit(surface->native);
 	surface->active = lease;
 	*sequence = lease->submitted;
@@ -1250,4 +1269,28 @@ cleanup:
 
 	/* Succeeded: the connection advertises the required shared-image factory. */
 	return VK_TRUE;
+}
+
+/*
+ * Names the part of the next commit's image that changed (BUG-221): the
+ * commit damages that part of the buffer alone.  Runs on the present
+ * worker before the commit, as the commit does.
+ */
+static void
+wayland_damage(
+	void *private_lease,
+	int32_t x,
+	int32_t y,
+	int32_t width,
+	int32_t height)
+{
+	struct wayland_lease *lease;
+
+	/* The part, for the next commit. */
+	lease = private_lease;
+	lease->damage[0] = x;
+	lease->damage[1] = y;
+	lease->damage[2] = width;
+	lease->damage[3] = height;
+	lease->damaged = VK_TRUE;
 }

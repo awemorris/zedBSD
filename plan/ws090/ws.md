@@ -52,6 +52,7 @@ Resume point: 2026-10-08 q858（P1）: p007・p009・p010・p021・p023 は実�
 | [ws090-p023](phase023/phase.md) | Files・Settings の残りの自前の UI 部品を libkeiland の部品へ | test-wait（q818 で実装 → main、T1-266 の regress PASS。q858 で icon だけのボタンを `kl_icon_button`（KL 60）に。前後の撮影は未） | — |
 | [ws090-p024](phase024/phase.md) | libkeiland に複数選択の list と icon の grid の部品を足し、Files の list・grid の view を置き換える | cleared（詳細は phase.md） | — |
 | [ws090-p025](phase025/phase.md) | Browser の web の form の欄で IME を受け付ける（p022 の項目 6 を分けた） | cleared（2026-10-07 Q1、T1-328・T1-338） | — |
+| [ws090-p026](phase026/phase.md) | 変わった所だけを present する（VK_KHR_incremental_present、kl_window_present_part、compositor の client の damage、BUG-221 の残り） | present の時間を damage の大きさに比例させる | in-progress（2026-10-08 P1 q879: 層 1・2・4、層 3 は design-review の後） | p018 |
 
 p007〜p011 は app ごとに独立で、デモ（10/17）の前は 10/10 までに移し終えたものだけ残す（design.md J5）。
 
