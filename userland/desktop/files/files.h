@@ -1146,6 +1146,15 @@ struct fm_app {
 	struct kl_rect damage;
 
 	/*
+	 * What the last frame drawn changed (BUG-221): frame_partial when it
+	 * was drawn by parts, which frame_part holds all of (empty when no
+	 * part changed); the frame is then shown by that part alone
+	 * (kl_window_present_part).  0 for a frame drawn whole.
+	 */
+	int frame_partial;
+	struct kl_rect frame_part;
+
+	/*
 	 * Whether the window is glass: zdesktop draws frosted glass under the
 	 * panels and shows the desktop between them, so the frame leaves its
 	 * ground clear and tints the panels only lightly.  Set once, before the
@@ -1489,6 +1498,7 @@ void fm_ui_event(struct fm_app *app, const struct fm_event *event);
 void fm_ui_tick(struct fm_app *app, uint64_t now);
 void fm_ui_draw(struct fm_app *app, struct kl_canvas *canvas);
 void fm_ui_damage(struct fm_app *app, const struct kl_rect *rect);
+void fm_ui_frame_part(struct fm_app *app, const struct kl_rect *rect, int margin);
 int fm_ui_hit_rect(const struct fm_app *app, unsigned kind, int index, struct kl_rect *rect);
 
 /* The desktop's icons and their input (ui-desktop.c, ws094-p003, p004). */

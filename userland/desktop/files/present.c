@@ -83,22 +83,24 @@ fm_present_resize(
 }
 
 /*
- * Shows a frame of the presenter's size.  Returns VK_SUCCESS,
- * VK_ERROR_OUT_OF_DATE_KHR when the frames need the window's new size, or
- * another error with the call that failed.
+ * Shows a frame of the presenter's size, of which only part changed when
+ * part is not NULL (BUG-221: only that part is copied and told to
+ * zdesktop).  Returns VK_SUCCESS, VK_ERROR_OUT_OF_DATE_KHR when the frames
+ * need the window's new size, or another error with the call that failed.
  */
 VkResult
 fm_present_frame(
 	struct fm_present *present,
 	const uint32_t *pixels,
-	size_t stride)
+	size_t stride,
+	const struct kl_rect *part)
 {
 	struct kl_present_times times;
 	int error;
 
 	/* The frame, and its times. */
-	present->operation = "kl_window_present";
-	error = kl_window_present(present->window->kui, pixels, stride);
+	present->operation = "kl_window_present_part";
+	error = kl_window_present_part(present->window->kui, pixels, stride, part);
 	kl_window_present_times(present->window->kui, &times);
 	present->copy_ms = times.copy_ms;
 	present->acquire_ms = times.acquire_ms;

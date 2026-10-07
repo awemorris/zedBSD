@@ -570,6 +570,7 @@ ml_draw(
 	struct kl_glass_panel panels[ML_PANELS_MAX];
 	struct kl_event event;
 	struct kl_rect caret;
+	const struct kl_rect *present_part;
 	struct kl_rect part;
 	size_t count;
 	int status;
@@ -624,8 +625,11 @@ ml_draw(
 		}
 	}
 
-	/* The frame shown. */
-	status = kl_window_present(mailer->window, mailer->pixels, (size_t)mailer->width);
+	/* The frame shown, by the part alone when it was drawn so (BUG-221). */
+	present_part = NULL;
+	if (partial)
+		present_part = &part;
+	status = kl_window_present_part(mailer->window, mailer->pixels, (size_t)mailer->width, present_part);
 	if (status == EAGAIN)
 		mailer->resized = 1;
 

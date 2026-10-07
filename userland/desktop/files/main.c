@@ -734,6 +734,8 @@ main_loop(
 static int
 main_frame(void)
 {
+	const struct kl_rect *part;
+	struct kl_rect shown_part;
 	VkResult result;
 	uint64_t started;
 	uint64_t drawn;
@@ -763,8 +765,19 @@ main_frame(void)
 		if (!main_app.desktop)
 			fm_glass_refresh(&main_glass, &main_app);
 
-		/* Shown in the window. */
-		result = fm_present_frame(&main_present, main_pixels, (size_t)main_present.extent.width);
+		/* Shown in the window, by what it changed when it was drawn by parts (BUG-221; nothing changed: one pixel). */
+		part = NULL;
+		if (main_app.frame_partial) {
+			shown_part = main_app.frame_part;
+			if (shown_part.width <= 0 || shown_part.height <= 0) {
+				shown_part.x = 0;
+				shown_part.y = 0;
+				shown_part.width = 1;
+				shown_part.height = 1;
+			}
+			part = &shown_part;
+		}
+		result = fm_present_frame(&main_present, main_pixels, (size_t)main_present.extent.width, part);
 		shown = fm_clock();
 
 		/* The desktop's selection shown: the time from the press that selected (ws094-p008). */

@@ -728,24 +728,54 @@ partial_same(
 	const char *text)
 {
 	uint32_t *corner;
+	uint32_t *before;
 	size_t size;
+	size_t at;
 	int kept;
 	int same;
 	int differs;
+	int outside;
+	int x;
+	int y;
 
 	/* The mark, in the bottom-left corner. */
 	corner = canvas->pixels + (size_t)765 * canvas->stride;
 	corner[0] = 0x12345678U;
+
+	/* The frame before, to find what the drawing changed (BUG-221's shown part). */
+	size = (size_t)canvas->height * canvas->stride * sizeof(uint32_t);
+	before = malloc(size);
+	if (before == NULL) {
+		check(0, "memory for the frame before");
+		return 0;
+	}
+	memcpy(before, canvas->pixels, size);
 
 	/* The changed cells only: the mark stays. */
 	fm_desktop_draw(app, canvas);
 	kept = 0;
 	if (corner[0] == 0x12345678U)
 		kept = 1;
+
+	/* Every pixel the drawing changed lies in the part the frame is shown by (BUG-221, kl_window_present_part). */
+	outside = 0;
+	if (app->frame_partial) {
+		for (y = 0; y < canvas->height; y++) {
+			for (x = 0; x < canvas->width; x++) {
+				at = (size_t)y * canvas->stride + (size_t)x;
+				if (before[at] == canvas->pixels[at])
+					continue;
+				if (x < app->frame_part.x || x >= app->frame_part.x + app->frame_part.width ||
+				    y < app->frame_part.y || y >= app->frame_part.y + app->frame_part.height)
+					outside++;
+			}
+		}
+	}
+	free(before);
+	check(outside == 0, "the frame's shown part holds every pixel it changed");
 	corner[0] = 0U;
 
 	/* The same state drawn whole, for the comparison. */
-	size = (size_t)canvas->height * canvas->stride * sizeof(uint32_t);
 	memcpy(whole, canvas->pixels, size);
 	fm_desktop_repaint(&app->desk);
 	fm_desktop_draw(app, canvas);

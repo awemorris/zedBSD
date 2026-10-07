@@ -554,6 +554,7 @@ ph_draw(
 	struct kl_glass_panel panels[PH_PANELS_MAX];
 	struct kl_event event;
 	struct kl_rect caret;
+	const struct kl_rect *present_part;
 	struct kl_rect part;
 	size_t count;
 	int status;
@@ -608,8 +609,11 @@ ph_draw(
 		}
 	}
 
-	/* The frame shown. */
-	status = kl_window_present(phone->window, phone->pixels, (size_t)phone->width);
+	/* The frame shown, by the part alone when it was drawn so (BUG-221). */
+	present_part = NULL;
+	if (partial)
+		present_part = &part;
+	status = kl_window_present_part(phone->window, phone->pixels, (size_t)phone->width, present_part);
 	if (status == EAGAIN)
 		phone->resized = 1;
 

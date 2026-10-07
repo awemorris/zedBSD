@@ -353,6 +353,12 @@ fm_ui_draw(
 		partial = 1;
 	app->damage_pending = 0;
 
+	/* What the frame changes, for its showing (BUG-221): the damage, or all of it. */
+	app->frame_partial = partial;
+	memset(&app->frame_part, 0, sizeof(app->frame_part));
+	if (partial != 0)
+		app->frame_part = app->damage;
+
 	/* The panels' places at this size, and no clickable region yet. */
 	app->width = canvas->width;
 	app->height = canvas->height;
@@ -446,6 +452,49 @@ fm_ui_damage(
 		app->damage.y = grown.y;
 	app->damage.width = right - app->damage.x;
 	app->damage.height = bottom - app->damage.y;
+}
+
+/*
+ * Adds a rectangle, with a margin round it, to what a frame drawn by parts
+ * changed (BUG-221): the box around them all.
+ */
+void
+fm_ui_frame_part(
+	struct fm_app *app,
+	const struct kl_rect *rect,
+	int margin)
+{
+	struct kl_rect grown;
+	int right;
+	int bottom;
+
+	/* The rectangle and its margin; an empty one adds nothing. */
+	if (rect->width <= 0 || rect->height <= 0)
+		return;
+	grown.x = rect->x - margin;
+	grown.y = rect->y - margin;
+	grown.width = rect->width + 2 * margin;
+	grown.height = rect->height + 2 * margin;
+
+	/* The first one is the part. */
+	if (app->frame_part.width <= 0 || app->frame_part.height <= 0) {
+		app->frame_part = grown;
+		return;
+	}
+
+	/* Another widens it to hold both. */
+	right = app->frame_part.x + app->frame_part.width;
+	if (grown.x + grown.width > right)
+		right = grown.x + grown.width;
+	bottom = app->frame_part.y + app->frame_part.height;
+	if (grown.y + grown.height > bottom)
+		bottom = grown.y + grown.height;
+	if (grown.x < app->frame_part.x)
+		app->frame_part.x = grown.x;
+	if (grown.y < app->frame_part.y)
+		app->frame_part.y = grown.y;
+	app->frame_part.width = right - app->frame_part.x;
+	app->frame_part.height = bottom - app->frame_part.y;
 }
 
 /*

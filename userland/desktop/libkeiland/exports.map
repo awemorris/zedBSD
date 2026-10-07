@@ -310,6 +310,7 @@
 		kl_window_size;
 		kl_window_present_resize;
 		kl_window_present;
+		kl_window_present_part;
 		kl_window_see_through;
 		kl_window_display;
 		kl_window_surface;

@@ -193,6 +193,15 @@ struct keiui_present {
 	size_t canvas_pitch;
 	int canvas_ready;
 
+	/*
+	 * Whether the canvas holds the last frame whole, so that a frame may
+	 * be copied into it by its changed part alone (0 for a new canvas),
+	 * and whether the device names that part to the window system
+	 * (VK_KHR_incremental_present; BUG-221).
+	 */
+	int canvas_whole;
+	int incremental;
+
 	/* The quad's vertices, in host-visible memory. */
 	VkBuffer vertices;
 	VkDeviceMemory vertex_memory;
@@ -512,7 +521,7 @@ uint64_t keiui_clock_ms(void);
 /* The Vulkan presenter (present.c). */
 VkResult keiui_present_open(struct keiui_present *present, struct kl_window *window);
 VkResult keiui_present_resize(struct keiui_present *present, uint32_t width, uint32_t height);
-VkResult keiui_present_frame(struct keiui_present *present, const uint32_t *pixels, size_t stride);
+VkResult keiui_present_frame(struct keiui_present *present, const uint32_t *pixels, size_t stride, const struct kl_rect *part);
 void keiui_present_close(struct keiui_present *present);
 
 /* The shared-memory presenter (present-shm.c). */

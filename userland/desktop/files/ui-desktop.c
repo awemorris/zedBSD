@@ -162,6 +162,10 @@ fm_desktop_draw(
 	if (desk->logged != (int)tab->listing.count + 1)
 		logging = 1;
 
+	/* A frame drawn whole until the kept frame allows parts (BUG-221). */
+	app->frame_partial = 0;
+	memset(&app->frame_part, 0, sizeof(app->frame_part));
+
 	/* Only the changed cells, when the kept frame allows. */
 	if (!logging) {
 		partial = desktop_partial(app, canvas);
@@ -505,7 +509,8 @@ desktop_partial(
 		if (!placed)
 			continue;
 
-		/* The cell again, under the band where it crosses it. */
+		/* The cell again, under the band where it crosses it; the frame changes there. */
+		fm_ui_frame_part(app, &cell, 0);
 		desktop_clear_rect(canvas, &cell);
 		kl_canvas_clip_push(canvas, &cell);
 		desktop_item(app, canvas, &tab->listing.entries[index], &cell);
@@ -516,7 +521,8 @@ desktop_partial(
 	/* The rubber band where it moved, came or went (BUG-221). */
 	desktop_band_partial(app, canvas);
 
-	/* Succeeded: the frame is the kept one with its changed cells. */
+	/* Succeeded: the frame is the kept one with its changed cells, shown by them (BUG-221). */
+	app->frame_partial = 1;
 	return 1;
 }
 
@@ -587,11 +593,15 @@ desktop_band_partial(
 		inner.height = bottom - DESKTOP_BAND_MARGIN - inner.y;
 	}
 
-	/* Where the kept band was, and where the band is now, less that part. */
-	if (desk->painted_band)
+	/* Where the kept band was, and where the band is now, less that part; the frame changes there (BUG-221). */
+	if (desk->painted_band) {
 		desktop_band_region(app, canvas, &before, &inner);
-	if (desk->band)
+		fm_ui_frame_part(app, &before, DESKTOP_BAND_MARGIN);
+	}
+	if (desk->band) {
 		desktop_band_region(app, canvas, &now, &inner);
+		fm_ui_frame_part(app, &now, DESKTOP_BAND_MARGIN);
+	}
 
 	/* The frame has the band as it is now. */
 	desk->painted_band = desk->band;
