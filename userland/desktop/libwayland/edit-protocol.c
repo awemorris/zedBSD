@@ -15,7 +15,7 @@
 
 #include "internal.h"
 
-#include "userland/desktop/libwayland/zed-edit-v1-client-protocol.h"
+#include "userland/desktop/libwayland/keiland-edit-v1-client-protocol.h"
 
 /* The argument types of every message whose arguments name no interface (at most 2). */
 static const struct wl_interface *edit_plain_types[] = {

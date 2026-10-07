@@ -14,10 +14,10 @@
 
 #include <wayland/wayland-client.h>
 #include <wayland/xdg-shell-client-protocol.h>
-#include "userland/desktop/libwayland/zed-gpu-buffer-v1-client-protocol.h"
+#include "userland/desktop/libwayland/keiland-gpu-buffer-v1-client-protocol.h"
 #include "userland/desktop/libwayland/xdg-toplevel-menu-v1-client-protocol.h"
-#include "userland/desktop/libwayland/zed-titlebar-v1-client-protocol.h"
-#include "userland/desktop/libwayland/zed-glass-v1-client-protocol.h"
+#include "userland/desktop/libwayland/keiland-titlebar-v1-client-protocol.h"
+#include "userland/desktop/libwayland/keiland-glass-v1-client-protocol.h"
 #include <errno.h>
 #include <limits.h>
 #include <pthread.h>

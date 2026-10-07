@@ -28,7 +28,7 @@
 #include "ui/internal.h"
 
 #include <wayland-client.h>
-#include "userland/desktop/libwayland/zed-theme-v1-client-protocol.h"
+#include "userland/desktop/libwayland/keiland-theme-v1-client-protocol.h"
 
 #include <errno.h>
 #include <stdlib.h>

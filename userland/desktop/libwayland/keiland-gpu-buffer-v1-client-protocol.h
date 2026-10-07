@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: Zlib
  */
 
-/* Declares the selected zed protocol objects and typed requests. */
+/* Declares the selected Keiland protocol objects and typed requests. */
 
 #ifndef KERN_KEILAND_GPU_BUFFER_V1_CLIENT_PROTOCOL_H
 #define KERN_KEILAND_GPU_BUFFER_V1_CLIENT_PROTOCOL_H

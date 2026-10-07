@@ -12,7 +12,7 @@
 
 #include "internal.h"
 
-#include "userland/desktop/libwayland/zed-theme-v1-client-protocol.h"
+#include "userland/desktop/libwayland/keiland-theme-v1-client-protocol.h"
 
 /* The argument types of the protocol's messages (none names an interface). */
 static const struct wl_interface *theme_plain_types[] = {

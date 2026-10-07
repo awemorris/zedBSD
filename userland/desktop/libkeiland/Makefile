@@ -59,9 +59,9 @@ LIBKEILAND_SOURCES += \
 	userland/desktop/libkeiland/ui/chooser-view.c \
 	userland/desktop/picture/color-glyph.c
 
-LIBZDESKTOP_IMAGE_DATA := $(if $(ZEDBSD_TOPLEVEL_BUILD),/lib/libkeiland.so=$(BUILD)/dynamic/libkeiland.so)
+LIBKEILAND_IMAGE_DATA := $(if $(ZEDBSD_TOPLEVEL_BUILD),/lib/libkeiland.so=$(BUILD)/dynamic/libkeiland.so)
 # The catalogs of the desktop's translations (WS158, kl_tr_*): userland/desktop/locale/LANGUAGE/DOMAIN.tr, installed
 # where the library reads them.
 LIBKEILAND_CATALOGS := $(sort $(wildcard userland/desktop/locale/*/*.tr))
-LIBZDESKTOP_IMAGE_DATA += $(foreach catalog,$(LIBKEILAND_CATALOGS),/usr/share/keiland/locale/$(patsubst userland/desktop/locale/%,%,$(catalog))=$(catalog))
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,libkeiland,Desktop system library,amd64,y,library,$(LIBKEILAND_SOURCES),y,desktop,desktop/libkeiland,desktop/libwayland desktop/libtruetype desktop/libvulkan base/libpng-compat base/libz-compat,,shared-library,$(LIBZDESKTOP_IMAGE_DATA),,lib))
+LIBKEILAND_IMAGE_DATA += $(foreach catalog,$(LIBKEILAND_CATALOGS),/usr/share/keiland/locale/$(patsubst userland/desktop/locale/%,%,$(catalog))=$(catalog))
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,libkeiland,Desktop system library,amd64,y,library,$(LIBKEILAND_SOURCES),y,desktop,desktop/libkeiland,desktop/libwayland desktop/libtruetype desktop/libvulkan base/libpng-compat base/libz-compat,,shared-library,$(LIBKEILAND_IMAGE_DATA),,lib))

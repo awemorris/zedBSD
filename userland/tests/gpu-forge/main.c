@@ -24,7 +24,7 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_external.h>
 #include <wayland-client.h>
-#include "userland/desktop/libwayland/zed-gpu-buffer-v1-client-protocol.h"
+#include "userland/desktop/libwayland/keiland-gpu-buffer-v1-client-protocol.h"
 #include <uapi/gpu.h>
 #include <errno.h>
 #include <stdio.h>

@@ -14,7 +14,7 @@
 
 #include "internal.h"
 
-#include "userland/desktop/libwayland/zed-keyboard-inset-v1-client-protocol.h"
+#include "userland/desktop/libwayland/keiland-keyboard-inset-v1-client-protocol.h"
 
 /* The argument types of every message whose arguments name no interface (at most 3). */
 static const struct wl_interface *inset_plain_types[] = {

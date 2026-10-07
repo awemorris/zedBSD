@@ -17,7 +17,7 @@
 
 #include "internal.h"
 
-#include "userland/desktop/libwayland/zed-ime-status-v1-client-protocol.h"
+#include "userland/desktop/libwayland/keiland-ime-status-v1-client-protocol.h"
 
 /* The argument types of every message whose arguments name no interface (at most 2). */
 static const struct wl_interface *ime_status_plain_types[] = {

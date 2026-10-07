@@ -17,7 +17,7 @@
 
 #include "../wltest/wltest.h"
 
-#include "userland/desktop/libwayland/zed-gpu-buffer-v1-client-protocol.h"
+#include "userland/desktop/libwayland/keiland-gpu-buffer-v1-client-protocol.h"
 #include <uapi/gpu-fence.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
