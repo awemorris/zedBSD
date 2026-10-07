@@ -13,7 +13,8 @@ firmware=$(mktemp -d "$OUT/firmware.XXXXXX")
 bonds=$(mktemp -d "$OUT/bonds.XXXXXX")
 flags="-std=gnu11 -D_GNU_SOURCE -Wall -Wextra -Werror -Wdeclaration-after-statement -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -Iinclude -I."
 cc $flags -o "$OUT/bt-daemon-host-test" plan/ws143/tests/bt-daemon-host-test.c \
-	userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/session.c -lpthread
+	userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/session.c \
+	userland/base/bluetoothd/acl.c -lpthread
 timeout 120 "$OUT/bt-daemon-host-test" "$firmware"
 cc $flags -o "$OUT/bt-pair-host-test" plan/ws143/tests/bt-pair-host-test.c userland/base/bluetoothd/crypto.c \
 	userland/base/bluetoothd/acl.c userland/base/bluetoothd/l2cap.c userland/base/bluetoothd/smp.c \

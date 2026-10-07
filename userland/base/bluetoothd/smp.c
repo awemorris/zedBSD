@@ -72,8 +72,9 @@
 #define SMP_STATE_DONE			8U
 #define SMP_STATE_FAILED		9U
 
-/* Passkey Entry's rounds, the largest key size, and the number of digits shown. */
+/* Passkey Entry's rounds, the least and the largest key size the Core allows, and the number of digits shown. */
 #define SMP_PASSKEY_ROUNDS		20U
+#define SMP_KEY_SIZE_MIN		7U
 #define SMP_KEY_SIZE_MAX		16U
 #define SMP_DIGITS			1000000U
 
@@ -104,6 +105,7 @@ static unsigned smp_legacy_confirm(struct btd_smp *smp);
 static void smp_f4(const struct btd_smp *smp, int local_first, const uint8_t *nonce, uint8_t z, uint8_t *confirm);
 static void smp_c1(const struct btd_smp *smp, const uint8_t *nonce, uint8_t *confirm);
 static unsigned smp_done_or_keys(struct btd_smp *smp);
+static unsigned smp_refuse(struct btd_smp *smp, uint8_t reason, unsigned why);
 
 /*
  * Prepares a pairing: bluetoothd's IO capability (DisplayYesNo with an
@@ -184,7 +186,7 @@ btd_smp_input(
 
 	/* An empty PDU is not one. */
 	if (length == 0U) {
-		actions = btd_smp_fail(smp, BTD_SMP_INVALID);
+		actions = smp_refuse(smp, BTD_SMP_INVALID, BTD_SMP_WHY_PROTOCOL);
 		return actions;
 	}
 
@@ -194,6 +196,7 @@ btd_smp_input(
 		if (length >= 2U)
 			smp->failure = pdu[1];
 		smp->failure_sent = 1;
+		smp->why = BTD_SMP_WHY_REJECTED;
 		smp->state = SMP_STATE_FAILED;
 		return BTD_SMP_FAILED;
 	}
@@ -226,7 +229,7 @@ btd_smp_input(
 		/* The pairing runs already. */
 		break;
 	default:
-		actions = btd_smp_fail(smp, BTD_SMP_NOT_SUPPORTED);
+		actions = smp_refuse(smp, BTD_SMP_NOT_SUPPORTED, BTD_SMP_WHY_PROTOCOL);
 		break;
 	}
 
@@ -244,7 +247,9 @@ btd_smp_local_key(
 	uint8_t status,
 	const uint8_t *key)
 {
+	uint8_t x_msb[32];
 	unsigned actions;
+	int same;
 
 	/* Only while the keys are exchanged. */
 	if (smp->state != SMP_STATE_PUBLIC_KEYS || smp->have_local_key)
@@ -252,7 +257,15 @@ btd_smp_local_key(
 
 	/* A controller that failed ends the pairing. */
 	if (status != 0U) {
-		actions = btd_smp_fail(smp, BTD_SMP_UNSPECIFIED);
+		actions = smp_refuse(smp, BTD_SMP_UNSPECIFIED, BTD_SMP_WHY_CONTROLLER);
+		return actions;
+	}
+
+	/* A controller in its debug mode gives the Core's debug key: anyone could read the link (design section 6.2). */
+	smp_reverse(x_msb, key, 32U);
+	same = memcmp(x_msb, smp_debug_x_msb, sizeof(x_msb));
+	if (same == 0) {
+		actions = smp_refuse(smp, BTD_SMP_UNSPECIFIED, BTD_SMP_WHY_DEBUG_KEY);
 		return actions;
 	}
 
@@ -282,7 +295,7 @@ btd_smp_dhkey(
 
 	/* A failure (the responder's key is not on the curve, among others). */
 	if (status != 0U) {
-		actions = btd_smp_fail(smp, BTD_SMP_DHKEY_FAILED);
+		actions = smp_refuse(smp, BTD_SMP_DHKEY_FAILED, BTD_SMP_WHY_DHKEY);
 		return actions;
 	}
 
@@ -312,7 +325,7 @@ btd_smp_agent(
 	smp->agent_answered = 1;
 	smp->agent_accepted = accepted;
 	if (!accepted) {
-		actions = btd_smp_fail(smp, BTD_SMP_NUMERIC_FAILED);
+		actions = smp_refuse(smp, BTD_SMP_NUMERIC_FAILED, BTD_SMP_WHY_REJECTED);
 		return actions;
 	}
 
@@ -340,6 +353,7 @@ btd_smp_encrypted(
 	/* Not encrypted. */
 	if (status != 0U || !on) {
 		smp->failure = BTD_SMP_UNSPECIFIED;
+		smp->why = BTD_SMP_WHY_ENCRYPTION;
 		smp->state = SMP_STATE_FAILED;
 		return BTD_SMP_FAILED;
 	}
@@ -364,7 +378,9 @@ btd_smp_fail(
 	if (smp->state == SMP_STATE_DONE || smp->state == SMP_STATE_FAILED)
 		return 0U;
 
-	/* Pairing Failed with the reason. */
+	/* Pairing Failed with the reason (the caller's own, unless a check named why). */
+	if (smp->why == BTD_SMP_WHY_NONE)
+		smp->why = BTD_SMP_WHY_CALLER;
 	smp->failure = reason;
 	smp->state = SMP_STATE_FAILED;
 	value[0] = reason;
@@ -468,23 +484,29 @@ smp_response(
 
 	/* Only after our request, and of its size. */
 	if (smp->state != SMP_STATE_RESPONSE || length != 7U) {
-		actions = btd_smp_fail(smp, BTD_SMP_INVALID);
+		actions = smp_refuse(smp, BTD_SMP_INVALID, BTD_SMP_WHY_PROTOCOL);
 		return actions;
 	}
 
 	/* The response kept for c1 and the IO capability. */
 	memcpy(smp->response, pdu, 7U);
 
+	/* A key size the Core does not allow breaks the protocol. */
+	if (pdu[4] < SMP_KEY_SIZE_MIN || pdu[4] > SMP_KEY_SIZE_MAX) {
+		actions = smp_refuse(smp, BTD_SMP_INVALID, BTD_SMP_WHY_PROTOCOL);
+		return actions;
+	}
+
 	/* A key shorter than 16 bytes is refused (KNOB, design section 6.2). */
 	if (pdu[4] != SMP_KEY_SIZE_MAX) {
-		actions = btd_smp_fail(smp, BTD_SMP_KEY_SIZE);
+		actions = smp_refuse(smp, BTD_SMP_KEY_SIZE, BTD_SMP_WHY_KEY_SIZE);
 		return actions;
 	}
 
 	/* An IO capability the Core does not have. */
 	peer_io = pdu[1];
 	if (peer_io > SMP_IO_KEYBOARD_DISPLAY) {
-		actions = btd_smp_fail(smp, BTD_SMP_INVALID);
+		actions = smp_refuse(smp, BTD_SMP_INVALID, BTD_SMP_WHY_PROTOCOL);
 		return actions;
 	}
 
@@ -493,7 +515,7 @@ smp_response(
 	if ((pdu[3] & SMP_AUTH_SC) != 0U && (smp->request[3] & SMP_AUTH_SC) != 0U)
 		smp->secure = 1;
 	if ((pdu[6] & (uint8_t)~smp->request[6]) != 0U || pdu[5] != 0U) {
-		actions = btd_smp_fail(smp, BTD_SMP_INVALID);
+		actions = smp_refuse(smp, BTD_SMP_INVALID, BTD_SMP_WHY_PROTOCOL);
 		return actions;
 	}
 
@@ -579,7 +601,7 @@ smp_public_key(
 
 	/* Only once bluetoothd sent its own, and of its size. */
 	if (smp->state != SMP_STATE_PUBLIC_KEYS || !smp->have_local_key || smp->have_remote_key || length != 65U) {
-		actions = btd_smp_fail(smp, BTD_SMP_INVALID);
+		actions = smp_refuse(smp, BTD_SMP_INVALID, BTD_SMP_WHY_PROTOCOL);
 		return actions;
 	}
 
@@ -587,7 +609,14 @@ smp_public_key(
 	smp_reverse(x_msb, pdu + 1, 32U);
 	same = memcmp(x_msb, smp_debug_x_msb, sizeof(x_msb));
 	if (same == 0) {
-		actions = btd_smp_fail(smp, BTD_SMP_DHKEY_FAILED);
+		actions = smp_refuse(smp, BTD_SMP_UNSPECIFIED, BTD_SMP_WHY_DEBUG_KEY);
+		return actions;
+	}
+
+	/* A responder that sends bluetoothd's own key back is reflecting it (the DHKey would be one it can guess). */
+	same = memcmp(pdu + 1, smp->local_key, 32U);
+	if (same == 0) {
+		actions = smp_refuse(smp, BTD_SMP_UNSPECIFIED, BTD_SMP_WHY_REFLECTION);
 		return actions;
 	}
 
@@ -641,7 +670,7 @@ smp_confirm(
 
 	/* Only while a confirm is awaited, and of its size. */
 	if (smp->state != SMP_STATE_CONFIRM || length != 17U) {
-		actions = btd_smp_fail(smp, BTD_SMP_INVALID);
+		actions = smp_refuse(smp, BTD_SMP_INVALID, BTD_SMP_WHY_PROTOCOL);
 		return actions;
 	}
 
@@ -683,7 +712,7 @@ smp_random(
 
 	/* Only after our nonce, and of its size. */
 	if (smp->state != SMP_STATE_RANDOM || length != 17U) {
-		actions = btd_smp_fail(smp, BTD_SMP_INVALID);
+		actions = smp_refuse(smp, BTD_SMP_INVALID, BTD_SMP_WHY_PROTOCOL);
 		return actions;
 	}
 
@@ -705,7 +734,7 @@ smp_random(
 	/* The confirm must match. */
 	same = memcmp(expected, received, sizeof(expected));
 	if (same != 0) {
-		actions = btd_smp_fail(smp, BTD_SMP_CONFIRM_FAILED);
+		actions = smp_refuse(smp, BTD_SMP_CONFIRM_FAILED, BTD_SMP_WHY_CHECK);
 		return actions;
 	}
 
@@ -823,7 +852,7 @@ smp_check(
 
 	/* Only after ours, and of its size. */
 	if (smp->state != SMP_STATE_CHECK || !smp->sent_check || length != 17U) {
-		actions = btd_smp_fail(smp, BTD_SMP_INVALID);
+		actions = smp_refuse(smp, BTD_SMP_INVALID, BTD_SMP_WHY_PROTOCOL);
 		return actions;
 	}
 
@@ -842,7 +871,7 @@ smp_check(
 	smp_reverse(received, pdu + 1, 16U);
 	same = memcmp(expected, received, sizeof(expected));
 	if (same != 0) {
-		actions = btd_smp_fail(smp, BTD_SMP_DHKEY_FAILED);
+		actions = smp_refuse(smp, BTD_SMP_DHKEY_FAILED, BTD_SMP_WHY_CHECK);
 		return actions;
 	}
 
@@ -877,7 +906,7 @@ smp_key(
 
 	/* A key not awaited, or of the wrong size. */
 	if (smp->state != SMP_STATE_KEYS || awaited == 0U || (smp->keys_awaited & awaited) == 0U) {
-		actions = btd_smp_fail(smp, BTD_SMP_INVALID);
+		actions = smp_refuse(smp, BTD_SMP_INVALID, BTD_SMP_WHY_PROTOCOL);
 		return actions;
 	}
 
@@ -983,4 +1012,23 @@ smp_c1(
 
 	/* c1. */
 	btd_smp_c1(smp->tk, nonce, pres, preq, smp->responder_type, smp->initiator_type, ia, ra, confirm);
+}
+
+/* Ends the pairing for a check of this file's, naming why for the daemon. */
+static unsigned
+smp_refuse(
+	struct btd_smp *smp,
+	uint8_t reason,
+	unsigned why)
+{
+	unsigned actions;
+
+	/* A pairing that ended keeps the reason it ended with. */
+	if (smp->state == SMP_STATE_DONE || smp->state == SMP_STATE_FAILED)
+		return 0U;
+
+	/* Why first, then Pairing Failed with the reason. */
+	smp->why = why;
+	actions = btd_smp_fail(smp, reason);
+	return actions;
 }

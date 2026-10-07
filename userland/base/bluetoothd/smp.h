@@ -47,6 +47,26 @@
 #define BTD_SMP_DHKEY_FAILED		0x0bU
 #define BTD_SMP_NUMERIC_FAILED		0x0cU
 
+/*
+ * Why a pairing failed, for the daemon's answer (the reason sent to the
+ * responder is coarser): the protocol broken, a short key, the Core's
+ * debug key, the responder reflecting bluetoothd's own key, the
+ * controller's DHKey refused, the responder's confirm or check wrong, the
+ * responder or the agent saying no, the encryption failing, the
+ * controller's public key failing, or the caller's (a timeout).
+ */
+#define BTD_SMP_WHY_NONE		0U
+#define BTD_SMP_WHY_PROTOCOL		1U
+#define BTD_SMP_WHY_KEY_SIZE		2U
+#define BTD_SMP_WHY_DEBUG_KEY		3U
+#define BTD_SMP_WHY_REFLECTION		4U
+#define BTD_SMP_WHY_DHKEY		5U
+#define BTD_SMP_WHY_CHECK		6U
+#define BTD_SMP_WHY_REJECTED		7U
+#define BTD_SMP_WHY_ENCRYPTION		8U
+#define BTD_SMP_WHY_CONTROLLER		9U
+#define BTD_SMP_WHY_CALLER		10U
+
 /* The longest PDU bluetoothd sends (a public key: code, X, Y). */
 #define BTD_SMP_PDU_MAX		65U
 
@@ -127,6 +147,7 @@ struct btd_smp {
 	uint8_t encrypt_rand[8];
 	uint8_t failure;
 	int failure_sent;
+	unsigned why;
 
 	/* The random source. */
 	btd_random_fn random;

@@ -23,7 +23,8 @@
  *   smp      a scripted responder (its values from crypto.c, which the
  *            vectors check): Secure Connections' Just Works, Numeric
  *            Comparison (yes and no) and Passkey Entry's twenty rounds,
- *            legacy Just Works with its keys, a short key, the debug key,
+ *            legacy Just Works with its keys, a short key, the debug key
+ *            (the responder's and the controller's own), a reflected key,
  *            a wrong confirm, a failed DHKey
  *   keys     a bond written, read and forgotten in a new folder, broken
  *            files
@@ -757,7 +758,16 @@ test_smp_failures(void)
 	peer.key_size = 7U;
 	(void)btd_smp_start(&smp);
 	peer_response(&peer, &smp, &actions);
-	expect((actions & BTD_SMP_FAILED) != 0U && smp.failure == 0x06U && smp.out[0] == 0x05U && smp.out[1] == 0x06U, "failures: a key of 7 bytes");
+	expect((actions & BTD_SMP_FAILED) != 0U && smp.failure == 0x06U && smp.out[0] == 0x05U && smp.out[1] == 0x06U &&
+	       smp.why == BTD_SMP_WHY_KEY_SIZE,
+	       "failures: a key of 7 bytes");
+
+	/* A key of 6 bytes is not one the Core allows: Invalid Parameters (review M13). */
+	btd_smp_init(&smp, BTD_SMP_DISPLAY_YES_NO, 0U, address_a, 0U, address_b, test_random, NULL);
+	peer.key_size = 6U;
+	(void)btd_smp_start(&smp);
+	peer_response(&peer, &smp, &actions);
+	expect((actions & BTD_SMP_FAILED) != 0U && smp.failure == 0x0aU && smp.why == BTD_SMP_WHY_PROTOCOL, "failures: a key of 6 bytes");
 
 	/* The debug key. */
 	btd_smp_init(&smp, BTD_SMP_DISPLAY_YES_NO, 0U, address_a, 0U, address_b, test_random, NULL);
@@ -773,7 +783,33 @@ test_smp_failures(void)
 	reverse(pdu + 1, key, 32U);
 	reverse(pdu + 33, key + 32, 32U);
 	actions = btd_smp_input(&smp, pdu, 65U);
-	expect((actions & BTD_SMP_FAILED) != 0U && (actions & BTD_SMP_DHKEY) == 0U, "failures: the debug key is refused");
+	expect((actions & BTD_SMP_FAILED) != 0U && (actions & BTD_SMP_DHKEY) == 0U && smp.failure == 0x08U &&
+	       smp.why == BTD_SMP_WHY_DEBUG_KEY,
+	       "failures: the debug key is refused (Unspecified Reason, review M1)");
+
+	/* The controller's own key is the debug key (a controller in its debug mode). */
+	btd_smp_init(&smp, BTD_SMP_DISPLAY_YES_NO, 0U, address_a, 0U, address_b, test_random, NULL);
+	(void)btd_smp_start(&smp);
+	peer_response(&peer, &smp, &actions);
+	hex(debug_x, key);
+	hex(debug_y, key + 32);
+	reverse(pdu, key, 32U);
+	reverse(pdu + 32, key + 32, 32U);
+	actions = btd_smp_local_key(&smp, 0U, pdu);
+	expect((actions & BTD_SMP_FAILED) != 0U && smp.why == BTD_SMP_WHY_DEBUG_KEY, "failures: the controller's own debug key");
+
+	/* A responder that reflects bluetoothd's own key. */
+	btd_smp_init(&smp, BTD_SMP_DISPLAY_YES_NO, 0U, address_a, 0U, address_b, test_random, NULL);
+	(void)btd_smp_start(&smp);
+	peer_response(&peer, &smp, &actions);
+	hex(key_a_x, key);
+	hex(key_a_y, key + 32);
+	(void)btd_smp_local_key(&smp, 0U, key);
+	pdu[0] = 0x0cU;
+	memcpy(pdu + 1, key, 64U);
+	actions = btd_smp_input(&smp, pdu, 65U);
+	expect((actions & BTD_SMP_FAILED) != 0U && (actions & BTD_SMP_DHKEY) == 0U && smp.why == BTD_SMP_WHY_REFLECTION,
+	       "failures: a reflected key is refused (review S4)");
 
 	/* A failed DHKey (an invalid point), and a wrong confirm. */
 	btd_smp_init(&smp, BTD_SMP_DISPLAY_YES_NO, 0U, address_a, 0U, address_b, test_random, NULL);
@@ -790,7 +826,7 @@ test_smp_failures(void)
 	(void)btd_smp_input(&smp, pdu, 17U);
 	pdu[0] = 0x04U;
 	actions = btd_smp_input(&smp, pdu, 17U);
-	expect((actions & BTD_SMP_FAILED) != 0U && smp.failure == 0x04U, "failures: a wrong confirm");
+	expect((actions & BTD_SMP_FAILED) != 0U && smp.failure == 0x04U && smp.why == BTD_SMP_WHY_CHECK, "failures: a wrong confirm");
 	btd_smp_init(&smp, BTD_SMP_DISPLAY_YES_NO, 0U, address_a, 0U, address_b, test_random, NULL);
 	(void)btd_smp_start(&smp);
 	peer_response(&peer, &smp, &actions);
@@ -804,13 +840,13 @@ test_smp_failures(void)
 	pdu[0] = 0x0cU;
 	(void)btd_smp_input(&smp, pdu, 65U);
 	actions = btd_smp_dhkey(&smp, 0x12U, key);
-	expect((actions & BTD_SMP_FAILED) != 0U && smp.failure == 0x0bU, "failures: a failed DHKey");
+	expect((actions & BTD_SMP_FAILED) != 0U && smp.failure == 0x0bU && smp.why == BTD_SMP_WHY_DHKEY, "failures: a failed DHKey");
 
 	/* The responder gives up. */
 	btd_smp_init(&smp, BTD_SMP_DISPLAY_YES_NO, 0U, address_a, 0U, address_b, test_random, NULL);
 	(void)btd_smp_start(&smp);
 	actions = btd_smp_input(&smp, (const uint8_t *)"\x05\x03", 2U);
-	expect(actions == BTD_SMP_FAILED && smp.failure == 0x03U, "failures: Pairing Failed from the responder");
+	expect(actions == BTD_SMP_FAILED && smp.failure == 0x03U && smp.why == BTD_SMP_WHY_REJECTED, "failures: Pairing Failed from the responder");
 }
 
 /* A bond written, read and forgotten; broken files. */
