@@ -59,3 +59,8 @@ FAIL（4 回とも同じ）: accent の 5 行は ok、`the Add User... button (c
 
 accent の 5 行は ok。`FAIL: the Add User... button (control 21) is not on the Users page`（users-layout.txt は controls=4: index 1・2・3・10 の password の card だけ）。原因は試験の前提: Settings を root で起動していた（log `USERS account name=root`、`list count=1`）。root は人の account ではないので一覧に自分の行が無く、`admin_available` が自分の行の admin（wheel）を見つけられず管理の card を出さない（code の動きは設計どおり、実の session は kei）。compositor の側は `kl_backend_account_can_administer` で ADMINISTER を出している。
 直し: `desktop-p004.sh` の 2 を、Settings を kei（wheel の人）で起動する形に（root の compositor の socket `/tmp/wayland-0` を chmod 666、`su kei -c`、log は `/tmp/s-kei.log`、出力 `settings-kei.log`、FAIL の時の users-layout.txt に USERS の行も）。code は変えない。T1 に再試験を依頼する（T1-407 の再）。
+
+## T1-412（2026-10-08、desktop-p004 は FAIL）と移し替え（P1）
+
+kei で起動した Settings は `ZSETTINGS INSTANCE alone errno=21`（EOPNOTSUPP。runtime の folder の /tmp が kei の物でないので、ひとつだけの起動の socket を作らない。害は無い）を出した後、`ZSETTINGS FAILED operation=window error=5`（EIO）で窓を作れずに終わった。root で走る `--testing` の compositor に別の uid の client を繋ぐ形は、この試験の道具の外になる（窓の資源の権限）。
+直し: 名前の欄の 32 の確認を、kei の本物の session で走る AAT に移した。`tests/scenarios/apps/settings/manage-users.md` の 2（新しい段）と `plan/tools/aat/scenarios/helpers_apps.py` の `apps.settings.manage-users`: Add User を開き、英字を 40 字打って `USERS admin field=0 length=32` が出て 33 以上が無いことを見て撮り、Esc で閉じてから元の段に進む。`check-scenarios.py` は PASS。`desktop-p004.sh` からは 2 を除いた（accent の 5 本と失敗の検査が残る）。code は変えない。
