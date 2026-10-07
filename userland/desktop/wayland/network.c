@@ -153,9 +153,11 @@ struct network_row {
 /*
  * The network's side of the system bar: the watch libkeiland-backend keeps (NULL
  * until the first tick of the desktop, and while it cannot be made), the
- * state and scan last read from it, whether the menu is open and where,
- * its rows, where the icon was last drawn, the network last asked to be
- * joined, and the text of the last failed request.
+ * state and scan last read from it, whether the menu is open, where and
+ * on which output's bar it opened, its rows, where the icon was last drawn
+ * on each output's bar (the system bar's and each head's, ws113-p015) and
+ * its size, the network last asked to be joined, and the text of the last
+ * failed request.
  *
  * The key field: key_open while it is shown, for key_ssid, with the
  * characters typed so far in key (key_length of them, never more than
@@ -215,8 +217,8 @@ struct network_view {
 	struct network_row rows[NETWORK_ROWS_MAX];
 	unsigned row_count;
 	uint64_t logged_layout;
-	int32_t icon_x;
-	int32_t icon_y;
+	unsigned output;
+	struct kwl_plane_places icons;
 	int32_t icon_width;
 	int32_t icon_height;
 	unsigned icon_logged;
@@ -267,6 +269,7 @@ static const char network_shifted[NETWORK_KEYS] = {
 };
 
 static void network_open_menu(struct kwl_server *server);
+static void network_place_menu(struct kwl_server *server);
 static void network_close_menu(struct kwl_server *server, const char *via);
 static void network_layout(struct kwl_server *server);
 static unsigned network_layout_rows(struct kwl_server *server, unsigned limit);
@@ -278,14 +281,14 @@ static void network_state_text(const struct kl_backend_network_state *state, cha
 static void network_act(struct kwl_server *server, const struct network_row *row);
 static void network_request(struct kwl_server *server, unsigned request, const char *ssid);
 static const struct network_row *network_row_at(int32_t x, int32_t y, int32_t *top);
-static int network_in_icon(int32_t x, int32_t y);
+static int network_in_icon(unsigned slot, int32_t x, int32_t y);
 static void network_log_state(void);
 static unsigned network_switch_on(void);
 static void network_switch_settle(struct kwl_server *server);
 static void network_log_layout(void);
 static void network_draw_bars(struct kwl_server *server, VkCommandBuffer command, int32_t x, int32_t bottom, unsigned lit, const float *ink, float faint);
-static void network_draw_fan(struct kwl_server *server, VkCommandBuffer command, int32_t x, unsigned lit, const float *ink, float faint);
-static void network_draw_wired(struct kwl_server *server, VkCommandBuffer command, int32_t x, const float *ink);
+static void network_draw_fan(struct kwl_server *server, VkCommandBuffer command, int32_t x, int32_t middle, unsigned lit, const float *ink, float faint);
+static void network_draw_wired(struct kwl_server *server, VkCommandBuffer command, int32_t x, int32_t middle, const float *ink);
 static void network_draw_row(struct kwl_server *server, VkCommandBuffer command, const struct network_row *row, int32_t top, unsigned over);
 static void network_draw_row_in(struct kwl_server *server, VkCommandBuffer command, const struct network_row *row, int32_t top, unsigned over, unsigned *kept);
 static void network_draw_check(struct kwl_server *server, VkCommandBuffer command, int32_t left, int32_t middle, int32_t baseline, const float *ink);
@@ -331,7 +334,6 @@ kwl_network_tick(
 		network_view.opened = 1;
 		network_view.opened_ms = kwl_milliseconds();
 		network_view.watch = kl_backend_network_open();
-		network_view.icon_x = -1;
 		if (network_view.watch != NULL && network_view.scan_holders != 0U)
 			(void)kl_backend_network_set_scanning(network_view.watch, 1U);
 	}
@@ -409,42 +411,45 @@ kwl_network_tick(
 }
 
 /*
- * Draws the network's icon in the system bar at x (its left edge), in the
- * bar's ink: Wi-Fi bars or the wired tree.
+ * Draws the network's icon at x (its left edge) in a bar whose top is at
+ * top, in the bar's ink: Wi-Fi bars or the wired tree.  The bar is the
+ * system bar, or a head's on the output the pass draws (ws113-p015).
  */
 void
 kwl_network_draw_icon(
 	struct kwl_server *server,
 	VkCommandBuffer command,
 	int32_t x,
+	int32_t top,
 	const float *ink)
 {
 	float blue[4];
 	const struct kl_backend_network_state *state;
 	unsigned lit;
 	unsigned index;
+	int32_t middle;
 	int differs;
 
-	/* Where a click opens the menu (a little larger than the drawing). */
-	network_view.icon_x = x - 5;
-	network_view.icon_y = 3;
+	/* Where a click on this output's bar opens the menu (a little larger than the drawing). */
+	kwl_plane_place(&network_view.icons, server->view_output, x - 5, top);
 	network_view.icon_width = 30;
 	network_view.icon_height = KWL_GLASS_BAR - 6;
-	if (!network_view.icon_logged) {
+	if (!network_view.icon_logged && server->view_output == KWL_PLANE_ANCHOR) {
 		network_view.icon_logged = 1;
-		printf("KWL NETWORK icon x=%d y=%d width=%d height=%d\n", network_view.icon_x, network_view.icon_y, network_view.icon_width, network_view.icon_height);
+		printf("KWL NETWORK icon x=%d y=%d width=%d height=%d\n", x - 5, top + 3, network_view.icon_width, network_view.icon_height);
 	}
 
-	/* While the menu is open its icon has a pale back of the accent the user chose, on the bar's middle (the bar keeps its colours). */
-	if (network_view.open) {
+	/* While the menu is open, the icon on the bar it opened from has a pale back of the accent the user chose (the bar keeps its colours). */
+	middle = top + KWL_GLASS_BAR_MIDDLE;
+	if (network_view.open && network_view.output == server->view_output) {
 		kwl_accent_colour(server, server->dark, KWL_ACCENT_FILL, 0.28f, blue);
-		glass_draw_solid(server, command, (float)network_view.icon_x, (float)(KWL_GLASS_BAR_MIDDLE - 14), (float)network_view.icon_width, 28.0f, 7.0f, blue);
+		glass_draw_solid(server, command, (float)(x - 5), (float)(middle - 14), (float)network_view.icon_width, 28.0f, 7.0f, blue);
 	}
 
 	/* A wired connection is the tree. */
 	state = &network_view.state;
 	if (state->connected && state->kind == KL_BACKEND_NETWORK_WIRED) {
-		network_draw_wired(server, command, x, ink);
+		network_draw_wired(server, command, x, middle, ink);
 		return;
 	}
 
@@ -458,14 +463,14 @@ kwl_network_draw_icon(
 		}
 
 		/* The fan. */
-		network_draw_fan(server, command, x, lit, ink, 0.30f);
+		network_draw_fan(server, command, x, middle, lit, ink, 0.30f);
 		return;
 	}
 
 	/* Anything else is a pale fan; Wi-Fi that is off is struck through. */
-	network_draw_fan(server, command, x, 0, ink, 0.30f);
+	network_draw_fan(server, command, x, middle, 0, ink, 0.30f);
 	if (state->reachable && state->wifi == KL_BACKEND_WIFI_OFF)
-		glass_draw_solid(server, command, (float)(x - 1), (float)(KWL_GLASS_BAR_MIDDLE - 1), 22.0f, 2.0f, 1.0f, ink);
+		glass_draw_solid(server, command, (float)(x - 1), (float)(middle - 1), 22.0f, 2.0f, 1.0f, ink);
 }
 
 /*
@@ -481,6 +486,10 @@ kwl_network_draw_menu(
 	const struct network_row *over;
 	unsigned index;
 	int32_t top;
+
+	/* Only on the output whose bar opened the menu or the details. */
+	if (network_view.output != server->view_output)
+		return;
 
 	/* The details, when they show instead. */
 	if (network_view.info_open) {
@@ -559,10 +568,11 @@ kwl_network_button(
 		if (state == 0 || button != KWL_BUTTON_LEFT)
 			return 0;
 
-		/* A press off the icon goes on. */
-		inside = network_in_icon(server->pointer_x, server->pointer_y);
+		/* A press off the icon on the bar the pointer is on goes on; on it, what opens opens under it. */
+		inside = network_in_icon(server->pointer_output, server->pointer_x, server->pointer_y);
 		if (!inside)
 			return 0;
+		network_view.output = server->pointer_output;
 
 		/* With Alt held, the details open (ws099-p032); otherwise the menu. */
 		alt = kwl_input_alt_held(server);
@@ -580,8 +590,8 @@ kwl_network_button(
 	if (state == 0)
 		return 1;
 
-	/* A press on the icon closes it. */
-	inside = network_in_icon(server->pointer_x, server->pointer_y);
+	/* A press on the icon, on any output's bar, closes it. */
+	inside = network_in_icon(server->pointer_output, server->pointer_x, server->pointer_y);
 	if (inside) {
 		network_close_menu(server, "icon");
 		return 1;
@@ -878,6 +888,7 @@ static void
 network_layout(
 	struct kwl_server *server)
 {
+	struct kwl_plane_rect output;
 	unsigned limit;
 	unsigned listed;
 	int32_t room;
@@ -886,20 +897,16 @@ network_layout(
 	limit = KL_BACKEND_NETWORK_SCAN_MAX;
 	listed = network_layout_rows(server, limit);
 
-	/* The menu's place: under the icon, its right edge a little in from the output's. */
-	network_view.menu_x = network_view.icon_x + network_view.icon_width - NETWORK_MENU_WIDTH + 60;
-	if (network_view.menu_x + NETWORK_MENU_WIDTH > (int32_t)server->width - 8)
-		network_view.menu_x = (int32_t)server->width - 8 - NETWORK_MENU_WIDTH;
-	if (network_view.menu_x < 8)
-		network_view.menu_x = 8;
-	network_view.menu_y = KWL_GLASS_BAR + 6;
+	/* The menu's place: under the icon it opened from, on its output. */
+	network_place_menu(server);
+	(void)kwl_output_rect(server, network_view.output, &output);
 
 	/*
 	 * A menu taller than the screen under it lists fewer networks: as many
 	 * rows fewer as it overflows, and one more for the note that names the
 	 * rest.
 	 */
-	room = (int32_t)server->height - network_view.menu_y - 8;
+	room = output.y + (int32_t)output.height - network_view.menu_y - 8;
 	if (network_view.menu_height > room && listed > 0U) {
 		limit = listed;
 		while (limit > 0U && network_view.menu_height > room) {
@@ -910,6 +917,37 @@ network_layout(
 
 	/* A new layout is logged for the tests that click the rows. */
 	network_log_layout();
+}
+
+/*
+ * Places the menu (or the details, which take its place) under the icon
+ * of the output's bar it opened from, its right edge a little in from that
+ * output's.
+ */
+static void
+network_place_menu(
+	struct kwl_server *server)
+{
+	struct kwl_plane_rect output;
+	int32_t icon_x;
+	int32_t top;
+	int placed;
+
+	/* The output, and the icon's place on its bar (the output's top left for one never drawn there). */
+	(void)kwl_output_rect(server, network_view.output, &output);
+	placed = kwl_plane_placed(&network_view.icons, network_view.output, &icon_x, &top);
+	if (!placed) {
+		icon_x = output.x;
+		top = output.y;
+	}
+
+	/* Under the icon, inside the output. */
+	network_view.menu_x = icon_x + network_view.icon_width - NETWORK_MENU_WIDTH + 60;
+	if (network_view.menu_x + NETWORK_MENU_WIDTH > output.x + (int32_t)output.width - 8)
+		network_view.menu_x = output.x + (int32_t)output.width - 8 - NETWORK_MENU_WIDTH;
+	if (network_view.menu_x < output.x + 8)
+		network_view.menu_x = output.x + 8;
+	network_view.menu_y = top + KWL_GLASS_BAR + 6;
 }
 
 /*
@@ -1276,20 +1314,26 @@ network_row_at(
 	return NULL;
 }
 
-/* Tells whether a point is on the icon as last drawn. */
+/* Tells whether a point is on the icon as last drawn on an output's bar. */
 static int
 network_in_icon(
+	unsigned slot,
 	int32_t x,
 	int32_t y)
 {
-	/* An icon never drawn has no place. */
-	if (network_view.icon_x < 0)
+	int32_t icon_x;
+	int32_t top;
+	int placed;
+
+	/* An icon never drawn on that output's bar has no place there. */
+	placed = kwl_plane_placed(&network_view.icons, slot, &icon_x, &top);
+	if (!placed)
 		return 0;
 
-	/* Its rectangle. */
-	if (x < network_view.icon_x || x >= network_view.icon_x + network_view.icon_width)
+	/* Its rectangle, a little in from the bar's top and bottom. */
+	if (x < icon_x || x >= icon_x + network_view.icon_width)
 		return 0;
-	if (y < network_view.icon_y || y >= network_view.icon_y + network_view.icon_height)
+	if (y < top + 3 || y >= top + 3 + network_view.icon_height)
 		return 0;
 
 	/* On it. */
@@ -1376,6 +1420,7 @@ network_draw_fan(
 	struct kwl_server *server,
 	VkCommandBuffer command,
 	int32_t x,
+	int32_t middle,
 	unsigned lit,
 	const float *ink,
 	float faint)
@@ -1385,7 +1430,7 @@ network_draw_fan(
 	/* The whole fan, faint. */
 	memcpy(color, ink, sizeof(color));
 	color[3] = ink[3] * faint;
-	glass_draw_icon(server, command, GLASS_ICON_WIFI_4, x, KWL_GLASS_BAR_MIDDLE - 10, 20U, color);
+	glass_draw_icon(server, command, GLASS_ICON_WIFI_4, x, middle - 10, 20U, color);
 
 	/* Nothing lit. */
 	if (lit == 0U)
@@ -1394,7 +1439,7 @@ network_draw_fan(
 	/* The lit parts over it. */
 	if (lit > 4U)
 		lit = 4U;
-	glass_draw_icon(server, command, GLASS_ICON_WIFI_1 + lit - 1U, x, KWL_GLASS_BAR_MIDDLE - 10, 20U, ink);
+	glass_draw_icon(server, command, GLASS_ICON_WIFI_1 + lit - 1U, x, middle - 10, 20U, ink);
 }
 
 /* Draws four rising bars from x, the first lit ones in the ink and the rest faint. */
@@ -1428,20 +1473,21 @@ network_draw_wired(
 	struct kwl_server *server,
 	VkCommandBuffer command,
 	int32_t x,
+	int32_t middle,
 	const float *ink)
 {
 	/* The upper box, and the stem from it. */
-	glass_draw_solid(server, command, (float)(x + 5), (float)(KWL_GLASS_BAR_MIDDLE - 9), 8.0f, 6.0f, 1.5f, ink);
-	glass_draw_solid(server, command, (float)(x + 8), (float)(KWL_GLASS_BAR_MIDDLE - 3), 2.0f, 3.0f, 0.0f, ink);
+	glass_draw_solid(server, command, (float)(x + 5), (float)(middle - 9), 8.0f, 6.0f, 1.5f, ink);
+	glass_draw_solid(server, command, (float)(x + 8), (float)(middle - 3), 2.0f, 3.0f, 0.0f, ink);
 
 	/* The bar across, and the legs down. */
-	glass_draw_solid(server, command, (float)(x + 2), (float)KWL_GLASS_BAR_MIDDLE, 14.0f, 2.0f, 0.0f, ink);
-	glass_draw_solid(server, command, (float)(x + 2), (float)KWL_GLASS_BAR_MIDDLE, 2.0f, 3.0f, 0.0f, ink);
-	glass_draw_solid(server, command, (float)(x + 14), (float)KWL_GLASS_BAR_MIDDLE, 2.0f, 3.0f, 0.0f, ink);
+	glass_draw_solid(server, command, (float)(x + 2), (float)middle, 14.0f, 2.0f, 0.0f, ink);
+	glass_draw_solid(server, command, (float)(x + 2), (float)middle, 2.0f, 3.0f, 0.0f, ink);
+	glass_draw_solid(server, command, (float)(x + 14), (float)middle, 2.0f, 3.0f, 0.0f, ink);
 
 	/* The two lower boxes. */
-	glass_draw_solid(server, command, (float)(x - 1), (float)(KWL_GLASS_BAR_MIDDLE + 3), 8.0f, 6.0f, 1.5f, ink);
-	glass_draw_solid(server, command, (float)(x + 11), (float)(KWL_GLASS_BAR_MIDDLE + 3), 8.0f, 6.0f, 1.5f, ink);
+	glass_draw_solid(server, command, (float)(x - 1), (float)(middle + 3), 8.0f, 6.0f, 1.5f, ink);
+	glass_draw_solid(server, command, (float)(x + 11), (float)(middle + 3), 8.0f, 6.0f, 1.5f, ink);
 }
 
 /*
@@ -2295,13 +2341,8 @@ static void
 network_info_place(
 	struct kwl_server *server)
 {
-	/* Under the icon, its right edge a little in from the output's (the menu's place). */
-	network_view.menu_x = network_view.icon_x + network_view.icon_width - NETWORK_MENU_WIDTH + 60;
-	if (network_view.menu_x + NETWORK_MENU_WIDTH > (int32_t)server->width - 8)
-		network_view.menu_x = (int32_t)server->width - 8 - NETWORK_MENU_WIDTH;
-	if (network_view.menu_x < 8)
-		network_view.menu_x = 8;
-	network_view.menu_y = KWL_GLASS_BAR + 6;
+	/* Under the icon, where the menu goes. */
+	network_place_menu(server);
 
 	/* The title, then the rows. */
 	network_view.info_height = NETWORK_MENU_PADDING + NETWORK_INFO_TITLE + NETWORK_MENU_PADDING;

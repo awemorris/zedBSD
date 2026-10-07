@@ -142,7 +142,7 @@ struct glass_bar_colours {
 void kwl_glass_bar_colours(struct kwl_server *server, struct glass_bar_colours *colours);
 
 /* The applications' icons in the system bar and their previews (apps-bar.c), drawn with the shell's marks and Wiseview's tiles (shell.c). */
-int kwl_apps_bar_draw(struct kwl_server *server, VkCommandBuffer command);
+int kwl_apps_bar_draw(struct kwl_server *server, VkCommandBuffer command, unsigned slot);
 void kwl_apps_bar_draw_popup(struct kwl_server *server, VkCommandBuffer command);
 void kwl_glass_draw_app_mark(struct kwl_server *server, VkCommandBuffer command, struct kwl_object *surface, int32_t x, int32_t middle, int32_t size, float alpha);
 void kwl_switch_draw(struct kwl_server *server, VkCommandBuffer command);
@@ -155,11 +155,11 @@ void kwl_glass_draw_preview(struct kwl_server *server, VkCommandBuffer command, 
 void kwl_greeter_draw(struct kwl_server *server, VkCommandBuffer command);
 
 /* The network's icon in the system bar and its menu (network.c). */
-void kwl_network_draw_icon(struct kwl_server *server, VkCommandBuffer command, int32_t x, const float *ink);
+void kwl_network_draw_icon(struct kwl_server *server, VkCommandBuffer command, int32_t x, int32_t top, const float *ink);
 void kwl_network_draw_menu(struct kwl_server *server, VkCommandBuffer command);
 void kwl_arrange_draw(struct kwl_server *server, VkCommandBuffer command);
-int kwl_arrange_showing(void);
-void kwl_volume_draw_icon(struct kwl_server *server, VkCommandBuffer command, int32_t x, const float *ink);
+int kwl_arrange_showing(struct kwl_server *server);
+void kwl_volume_draw_icon(struct kwl_server *server, VkCommandBuffer command, int32_t x, int32_t top, const float *ink);
 void kwl_volume_draw_popup(struct kwl_server *server, VkCommandBuffer command);
 
 /* App Home under the desktop layer (home.c). */
