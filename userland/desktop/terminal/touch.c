@@ -7,7 +7,8 @@
 
 /*
  * The touch screen of the terminal (ws081-p011): the fingers scroll the
- * scrollback with libkeiland's gestures and scroller, and play the
+ * scrollback with libkeiland's gestures and scroll (kl_scroll, ws090-p015:
+ * its own ends below 0 and the rubber band against the grid), and play the
  * pointer's left button for taps and a long press (touch.h).
  *
  * The view's position is kept in pixels back from the live screen; the
@@ -42,7 +43,7 @@ static void touch_pad(struct terminal_touch *touch, double dy, uint64_t time, ui
 static void touch_pad_stop(struct terminal_touch *touch, uint64_t time, uint64_t now);
 
 /*
- * Makes the gestures and the scroller.
+ * Makes the gestures and the scroll.
  *
  * Returns 0, or ENOMEM.
  */
@@ -50,6 +51,8 @@ int
 terminal_touch_open(
 	struct terminal_touch *touch)
 {
+	int error;
+
 	/* Nothing held yet. */
 	memset(touch, 0, sizeof(*touch));
 
@@ -58,9 +61,10 @@ terminal_touch_open(
 	if (touch->gesture == NULL)
 		return ENOMEM;
 
-	/* The scroller of the view. */
-	touch->scroller = kl_scroller_create();
-	if (touch->scroller == NULL) {
+	/* The scroll of the view, down only. */
+	error = kl_scroll_init(&touch->scroll, KL_SCROLL_Y);
+	if (error != 0) {
+		kl_scroll_release(&touch->scroll);
 		kl_gesture_destroy(touch->gesture);
 		touch->gesture = NULL;
 		return ENOMEM;
@@ -71,15 +75,14 @@ terminal_touch_open(
 }
 
 /*
- * Frees the gestures and the scroller.
+ * Frees the gestures and the scroll.
  */
 void
 terminal_touch_close(
 	struct terminal_touch *touch)
 {
-	/* Both, when they were made. */
-	if (touch->scroller != NULL)
-		kl_scroller_destroy(touch->scroller);
+	/* Both, when they were made (a scroll never made holds nothing). */
+	kl_scroll_release(&touch->scroll);
 	if (touch->gesture != NULL)
 		kl_gesture_destroy(touch->gesture);
 	memset(touch, 0, sizeof(*touch));
@@ -105,11 +108,11 @@ terminal_touch_layout(
 	double position;
 	int elsewhere;
 
-	/* Nothing without the scroller. */
-	if (touch->scroller == NULL)
+	/* Nothing before the scroll was made. */
+	if (touch->gesture == NULL)
 		return;
 
-	/* The layout, and the scroller's bounds for it. */
+	/* The layout, and the scroll's ends for it. */
 	touch->cell_height = cell_height;
 	if (touch->cell_height == 0U)
 		touch->cell_height = 1U;
@@ -129,9 +132,9 @@ terminal_touch_layout(
 	if (!elsewhere)
 		return;
 
-	/* The scroller holds that view; a finger down drags on from it. */
+	/* The scroll holds that view at once (a glide stops); a finger down drags on from it. */
 	position = touch_position(touch, view, offset);
-	kl_scroller_set_position(touch->scroller, 0.0, -position);
+	kl_scroll_move_to(&touch->scroll, 0.0, -position, 0, terminal_touch_clock());
 	touch->changed = 0;
 	if (touch->moving && !touch->pressed) {
 		touch->moving = 0;
@@ -146,7 +149,7 @@ terminal_touch_layout(
 
 /*
  * Takes one touch input of the window: the first finger presses the
- * scroller; a finger after a long press moves the pointer's selection.
+ * scroll; a finger after a long press moves the pointer's selection.
  */
 void
 terminal_touch_event(
@@ -166,7 +169,7 @@ terminal_touch_event(
 	/* Follows the finger by the kind of touch. */
 	switch (event->type) {
 	case TERMINAL_TOUCH_DOWN:
-		/* The first finger presses the scroller, and its serial goes with the pointer's presses. */
+		/* The first finger presses the scroll, and its serial goes with the pointer's presses. */
 		if (touch->followed == 0U) {
 			touch->first_id = event->id;
 			touch->serial = event->serial;
@@ -233,8 +236,8 @@ terminal_touch_event(
 }
 
 /*
- * Moves time on for the fingers: finds a long press, moves the scroller
- * with a drag, and sets the view where the scroller is at the frame's time.
+ * Moves time on for the fingers: finds a long press, moves the scroll with
+ * a drag, and sets the view where the scroll is at the frame's time.
  *
  * Returns how many milliseconds until the view should be set again (-1
  * when it rests and no finger is down).
@@ -244,8 +247,6 @@ terminal_touch_tick(
 	struct terminal_touch *touch,
 	uint64_t now)
 {
-	double x;
-	double y;
 	double dx;
 	double dy;
 	unsigned view;
@@ -274,18 +275,18 @@ terminal_touch_tick(
 	    touch->followed == 0U)
 		return -1;
 
-	/* A drag moves the scroller with the fingers, resampled for the frame. */
+	/* A drag moves the scroll with the fingers, resampled for the frame. */
 	if (touch->dragging &&
 	    touch->pressed) {
 		error = kl_gesture_drag_offset(touch->gesture, now, &dx, &dy);
 		if (error == 0)
-			kl_scroller_drag(touch->scroller, dx - touch->base_x, dy - touch->base_y);
+			kl_scroll_drag(&touch->scroll, dx - touch->base_x, dy - touch->base_y);
 	}
 
-	/* The view where the scroller is at the frame's time. */
-	animating = kl_scroller_step(touch->scroller, now, &x, &y);
+	/* The view where the scroll is at the frame's time. */
+	animating = kl_scroll_step(&touch->scroll, now);
 	if (touch->moving) {
-		touch_split(touch, -y, &view, &offset);
+		touch_split(touch, -touch->scroll.y, &view, &offset);
 		if (view != touch->view || offset != touch->offset) {
 			touch->view = view;
 			touch->offset = offset;
@@ -294,7 +295,7 @@ terminal_touch_tick(
 	}
 
 	/* The view rests once it stops with no finger on it, on the screen or on a touch pad. */
-	holding = kl_scroller_axis_holding(touch->scroller);
+	holding = kl_scroll_axis_holding(&touch->scroll);
 	if (!animating &&
 	    !touch->pressed &&
 	    touch->followed == 0U &&
@@ -446,7 +447,7 @@ touch_split(
 	*offset = (int)lround(position - lines * (double)touch->cell_height);
 }
 
-/* Gives the scroller the scrollback's bounds and the grid's height (only when they changed). */
+/* Gives the scroll the scrollback's ends and the grid's height for the rubber band (only when they changed). */
 static void
 touch_bounds(
 	struct terminal_touch *touch)
@@ -460,21 +461,21 @@ touch_bounds(
 	if (height < 1.0)
 		height = 1.0;
 
-	/* Unchanged bounds leave the scroller alone. */
+	/* Unchanged ends leave the scroll alone. */
 	if (top == touch->bounds_top &&
 	    height == touch->bounds_height)
 		return;
 
-	/* The new bounds; only down scrolls. */
-	(void)kl_scroller_set_bounds(touch->scroller, 0.0, 0.0, top, 0.0, 1.0, height);
+	/* The new ends; only down scrolls. */
+	(void)kl_scroll_set_bounds(&touch->scroll, 0.0, 0.0, top, 0.0, 1.0, height);
 	touch->bounds_top = top;
 	touch->bounds_height = height;
 }
 
 /*
- * Presses the scroller where the view is: it takes the view over (from
- * where the screen has it, when it did not own it), and a press on a
- * gliding view catches it.
+ * Presses the scroll where the view is: it takes the view over (from where
+ * the screen has it, when it did not own it), and a press on a gliding
+ * view catches it.
  */
 static void
 touch_press(
@@ -487,14 +488,14 @@ touch_press(
 	int caught;
 	int error;
 
-	/* The view's place, unless the scroller already owns it. */
+	/* The view's place, unless the scroll already owns it. */
 	if (!touch->moving) {
 		position = touch_position(touch, touch->view, touch->offset);
-		kl_scroller_set_position(touch->scroller, 0.0, -position);
+		kl_scroll_move_to(&touch->scroll, 0.0, -position, 0, now);
 	}
 
 	/* The press; the first press on a gliding view catches it. */
-	caught = kl_scroller_press(touch->scroller, now);
+	caught = kl_scroll_press(&touch->scroll, now);
 	if (!touch->pressed) {
 		touch->caught = caught;
 		if (caught) {
@@ -503,7 +504,7 @@ touch_press(
 		}
 	}
 
-	/* The scroller owns the view from here. */
+	/* The scroll owns the view from here. */
 	touch->pressed = 1;
 	touch->moving = 1;
 
@@ -570,7 +571,7 @@ touch_gestures(
 		case KL_GESTURE_DRAG_END:
 			/* The view glides on at the finger's velocity. */
 			if (touch->dragging) {
-				flung = kl_scroller_release(touch->scroller, now, gesture.vx, gesture.vy);
+				flung = kl_scroll_fling(&touch->scroll, gesture.vx, gesture.vy, now);
 				printf("ZTERM TOUCH release vy=%.0f view=%u offset=%d\n", gesture.vy, touch->view, touch->offset);
 				if (flung)
 					printf("ZTERM KINETIC fling source=touch vy=%.0f\n", gesture.vy);
@@ -584,7 +585,7 @@ touch_gestures(
 		case KL_GESTURE_CANCEL:
 			/* No glide. */
 			if (touch->pressed)
-				kl_scroller_cancel(touch->scroller, now);
+				kl_scroll_cancel(&touch->scroll, now);
 			touch->pressed = 0;
 			touch->dragging = 0;
 			break;
@@ -593,10 +594,10 @@ touch_gestures(
 		}
 	}
 
-	/* The last finger lifted without a drag: the scroller is let go still (a view past an end springs back). */
+	/* The last finger lifted without a drag: the scroll is let go still (a view past an end springs back). */
 	if (touch->followed == 0U &&
 	    touch->pressed) {
-		kl_scroller_release(touch->scroller, now, 0.0, 0.0);
+		(void)kl_scroll_fling(&touch->scroll, 0.0, 0.0, now);
 		touch->pressed = 0;
 		touch->dragging = 0;
 	}
@@ -630,9 +631,9 @@ touch_pointer(
 /*
  * A touch pad's two fingers move the view by dy (pixels, as a wheel
  * scrolls: down toward the live screen) at the compositor's time
- * (ws090-p019): libkeiland's scroller takes the view at their first move
- * (from where the screen has it, unless it already owns it; a glide is
- * caught) and follows them.  Fingers on the screen keep it from them.
+ * (ws090-p019): the scroll takes the view at their first move (from where
+ * the screen has it, unless it already owns it; a glide is caught) and
+ * follows them.  Fingers on the screen keep it from them.
  */
 static void
 touch_pad(
@@ -645,19 +646,19 @@ touch_pad(
 	int holding;
 	int caught;
 
-	/* Fingers on the screen hold the view. */
-	if (touch->followed > 0U || touch->scroller == NULL)
+	/* Fingers on the screen hold the view, and nothing moves before the scroll was made. */
+	if (touch->followed > 0U || touch->gesture == NULL)
 		return;
 
-	/* The first move: the scroller from the view the screen shows, unless it owns it already. */
-	holding = kl_scroller_axis_holding(touch->scroller);
+	/* The first move: the scroll from the view the screen shows, unless it owns it already. */
+	holding = kl_scroll_axis_holding(&touch->scroll);
 	if (!holding && !touch->moving) {
 		position = touch_position(touch, touch->view, touch->offset);
-		kl_scroller_set_position(touch->scroller, 0.0, -position);
+		kl_scroll_move_to(&touch->scroll, 0.0, -position, 0, now);
 	}
 
-	/* The scroller follows the fingers and owns the view until it rests. */
-	caught = kl_scroller_axis(touch->scroller, 0.0, dy, time, now);
+	/* The scroll follows the fingers and owns the view until it rests. */
+	caught = kl_scroll_axis_at(&touch->scroll, 0.0, dy, KL_AXIS_SOURCE_FINGER, time, now);
 	touch->moving = 1;
 	if (caught) {
 		printf("ZTERM TOUCH caught source=finger view=%u offset=%d\n", touch->view, touch->offset);
@@ -665,7 +666,7 @@ touch_pad(
 	}
 }
 
-/* The touch pad's fingers lift: the view flies on at their velocity, as libkeiland's scroller throws it (ws090-p019). */
+/* The touch pad's fingers lift: the view flies on at their velocity, as the scroll throws it (ws090-p019). */
 static void
 touch_pad_stop(
 	struct terminal_touch *touch,
@@ -676,8 +677,8 @@ touch_pad_stop(
 	double vy;
 	int flung;
 
-	/* The scroller throws the view the fingers held. */
-	flung = kl_scroller_axis_stop(touch->scroller, time, now, &vx, &vy);
+	/* The scroll throws the view the fingers held. */
+	flung = kl_scroll_axis_stop_at(&touch->scroll, time, now, &vx, &vy);
 	if (flung) {
 		printf("ZTERM KINETIC fling source=finger vy=%.0f\n", vy);
 		fflush(stdout);

@@ -43,6 +43,7 @@ static void view_word_at(void *data, size_t position, size_t *start, size_t *end
 static void test_scroll(void);
 static void test_scroll_touch(void);
 static void test_scroll_axis(void);
+static void test_scroll_bounds(void);
 unsigned kl_appearance_get(const struct kl_appearance *appearance);
 static void test_pointer(void);
 static void test_touch(void);
@@ -69,6 +70,7 @@ main(void)
 	test_scroll();
 	test_scroll_touch();
 	test_scroll_axis();
+	test_scroll_bounds();
 	test_pointer();
 	test_touch();
 	test_text();
@@ -459,6 +461,130 @@ test_scroll_axis(void)
 	check(taken == KL_UI_AXIS_FLUNG && moving && scroll.y > 200.0, "ui axis: the end lets the content fly");
 	kl_scroll_release(&scroll);
 	kl_ui_destroy(ui);
+	test_now += 10U * SECOND;
+}
+
+/*
+ * The scroll's own ends (kl_scroll_set_bounds, KL_VERSION 61, ws090-p015):
+ * a view whose position runs below 0 (Terminal's scrollback), its rubber
+ * band against a size of its own frame by frame as a bare scroller's, the
+ * place handed over under a finger and under a touch pad's fingers, the
+ * keys' ends, and the sizes' ends again.
+ */
+static void
+test_scroll_bounds(void)
+{
+	struct kl_scroller *reference;
+	struct kl_scroll scroll;
+	double x;
+	double y;
+	int moving;
+	int flung;
+	int error;
+	int same;
+	int step;
+
+	/* Ends from -2000 to 0 down, none across, the band the size of a 300-pixel grid. */
+	(void)kl_scroll_init(&scroll, KL_SCROLL_Y);
+	error = kl_scroll_set_bounds(&scroll, 0.0, 0.0, -2000.0, 0.0, 1.0, 300.0);
+	check(error == 0 && kl_scroll_limit_y(&scroll) == 0.0, "bounds: the ends hold");
+	error = kl_scroll_set_bounds(&scroll, 0.0, 0.0, 10.0, 0.0, 1.0, 300.0);
+	check(error != 0, "bounds: a maximum below its minimum is refused");
+	error = kl_scroll_set_bounds(&scroll, 0.0, 0.0, -2000.0, 0.0, 1.0, 0.0);
+	check(error != 0, "bounds: a band without a size is refused");
+	kl_scroll_move_to(&scroll, 0.0, -500.0, 0, test_now);
+	check(scroll.y == -500.0, "bounds: a place below 0 is kept");
+	kl_scroll_move_to(&scroll, 0.0, -5000.0, 0, test_now);
+	check(scroll.y == -2000.0, "bounds: a place past the minimum stops at it");
+
+	/* A bare scroller with the same ends, both at -500. */
+	kl_scroll_move_to(&scroll, 0.0, -500.0, 0, test_now);
+	reference = kl_scroller_create();
+	(void)kl_scroller_set_bounds(reference, 0.0, 0.0, -2000.0, 0.0, 1.0, 300.0);
+	kl_scroller_set_position(reference, 0.0, -500.0);
+
+	/* A finger drags 800 the way that passes the maximum, and lets go slowly: the band and its spring back are the scroller's. */
+	(void)kl_scroll_press(&scroll, test_now);
+	(void)kl_scroller_press(reference, test_now);
+	kl_scroll_drag(&scroll, 0.0, -800.0);
+	kl_scroller_drag(reference, 0.0, -800.0);
+	(void)kl_scroll_step(&scroll, test_now + 50000U);
+	(void)kl_scroller_step(reference, test_now + 50000U, &x, &y);
+	check(scroll.y > 0.0 && scroll.y < 300.0 && scroll.y == y, "bounds: past the maximum the band stretches as the scroller's");
+	flung = kl_scroll_fling(&scroll, 0.0, 0.0, test_now + 60000U);
+	(void)kl_scroller_release(reference, test_now + 60000U, 0.0, 0.0);
+	same = 1;
+	moving = 1;
+	for (step = 1; step < 400 && moving; step++) {
+		moving = kl_scroll_step(&scroll, test_now + 60000U + (uint64_t)step * 16667U);
+		(void)kl_scroller_step(reference, test_now + 60000U + (uint64_t)step * 16667U, &x, &y);
+		if (scroll.y != y)
+			same = 0;
+	}
+
+	/* No flight, the same all the way, and at rest at the maximum. */
+	check(!flung && same && scroll.y == 0.0 && !moving && !scroll.touched, "bounds: it springs back to the maximum, frame by frame as the scroller");
+	kl_scroller_destroy(reference);
+	test_now += 10U * SECOND;
+
+	/* A fling from the middle flies and says so. */
+	kl_scroll_move_to(&scroll, 0.0, -1000.0, 0, test_now);
+	(void)kl_scroll_press(&scroll, test_now);
+	kl_scroll_drag(&scroll, 0.0, -100.0);
+	(void)kl_scroll_step(&scroll, test_now + 50000U);
+	flung = kl_scroll_fling(&scroll, 0.0, -1500.0, test_now + 60000U);
+	moving = kl_scroll_step(&scroll, test_now + 200000U);
+	check(flung && moving && scroll.y > -900.0, "bounds: a fling flies and says so");
+	for (step = 1; step < 400 && moving; step++)
+		moving = kl_scroll_step(&scroll, test_now + 200000U + (uint64_t)step * 16667U);
+	check(!moving && scroll.y <= 0.0 && !scroll.touched, "bounds: the flight rests within the ends");
+	test_now += 10U * SECOND;
+
+	/* A place handed over under a finger (the program moved its view): pressed again, the drag goes on from there. */
+	kl_scroll_move_to(&scroll, 0.0, -1000.0, 0, test_now);
+	(void)kl_scroll_press(&scroll, test_now);
+	kl_scroll_drag(&scroll, 0.0, -50.0);
+	(void)kl_scroll_step(&scroll, test_now + 20000U);
+	check(scroll.y == -950.0, "hand-over: the finger drags");
+	kl_scroll_move_to(&scroll, 0.0, -1500.0, 0, test_now + 30000U);
+	check(scroll.y == -1500.0 && !scroll.touched, "hand-over: the new place, the finger let go");
+	(void)kl_scroll_press(&scroll, test_now + 40000U);
+	kl_scroll_drag(&scroll, 0.0, -100.0);
+	(void)kl_scroll_step(&scroll, test_now + 50000U);
+	check(scroll.y == -1400.0, "hand-over: the next press drags on from the new place");
+	(void)kl_scroll_fling(&scroll, 0.0, 0.0, test_now + 60000U);
+	for (step = 1; step < 400; step++)
+		(void)kl_scroll_step(&scroll, test_now + 60000U + (uint64_t)step * 16667U);
+	test_now += 10U * SECOND;
+
+	/* A touch pad's fingers holding the content take a place handed over at their next move. */
+	kl_scroll_move_to(&scroll, 0.0, -1000.0, 0, test_now);
+	(void)kl_scroll_axis_at(&scroll, 0.0, 30.0, KL_AXIS_SOURCE_FINGER, test_now, test_now);
+	(void)kl_scroll_step(&scroll, test_now + 10000U);
+	check(scroll.y == -970.0 && kl_scroll_axis_holding(&scroll), "hand-over: the touch pad's fingers move it");
+	kl_scroll_move_to(&scroll, 0.0, -1800.0, 0, test_now + 20000U);
+	(void)kl_scroll_axis_at(&scroll, 0.0, 30.0, KL_AXIS_SOURCE_FINGER, test_now + 30000U, test_now + 30000U);
+	(void)kl_scroll_step(&scroll, test_now + 40000U);
+	check(scroll.y == -1770.0, "hand-over: their next move goes on from the new place");
+	(void)kl_scroll_axis_stop_at(&scroll, test_now + 400000U, test_now + 400000U, NULL, NULL);
+	for (step = 1; step < 400; step++)
+		(void)kl_scroll_step(&scroll, test_now + 400000U + (uint64_t)step * 16667U);
+	check(!kl_scroll_axis_holding(&scroll) && !scroll.touched, "hand-over: they lift");
+	test_now += 10U * SECOND;
+
+	/* Home glides to the minimum, End to the maximum. */
+	(void)kl_scroll_key(&scroll, KL_KEY_HOME, KL_MOD_CTRL, 20.0, test_now);
+	(void)kl_scroll_step(&scroll, test_now + SECOND);
+	check(scroll.y == -2000.0, "bounds: Home goes to the minimum");
+	(void)kl_scroll_key(&scroll, KL_KEY_END, KL_MOD_CTRL, 20.0, test_now + SECOND);
+	(void)kl_scroll_step(&scroll, test_now + 2U * SECOND);
+	check(scroll.y == 0.0, "bounds: End goes to the maximum");
+
+	/* The sizes' ends again: 0 to the content less the viewport. */
+	kl_scroll_set_size(&scroll, 400.0, 1000.0, 400.0, 300.0);
+	kl_scroll_move_to(&scroll, 0.0, -100.0, 0, test_now + 3U * SECOND);
+	check(scroll.y == 0.0 && kl_scroll_limit_y(&scroll) == 700.0, "bounds: the sizes' ends come back");
+	kl_scroll_release(&scroll);
 	test_now += 10U * SECOND;
 }
 
