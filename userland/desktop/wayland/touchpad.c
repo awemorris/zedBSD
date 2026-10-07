@@ -18,8 +18,9 @@
  *   - a short touch that hardly moves is a tap: one finger the left
  *     button, two the right one, three the middle one;
  *   - a finger that touches again within TAP_DRAG_MS of a tap and moves
- *     drags with the left button held until it lifts; one that lifts again
- *     at once makes the second click of a double click;
+ *     drags with the left button held until it lifts, the press made where
+ *     the tap was; one that lifts again at once makes the second click of
+ *     a double click;
  *   - the pad pressed is the left button (the right one with two fingers on
  *     the pad), and moving while it is pressed drags; the finger's first
  *     millimetre after the press is not motion, so the press itself does
@@ -57,10 +58,13 @@
  * pad's size (kwl_touchpad_set_size) is needed for the edges; without it
  * only UP3 and TAP3 are made.
  *
- * A tap's press is given when the finger lifts (only then is it a tap), and
- * its release when TAP_DRAG_MS have passed without another touch
- * (kwl_touchpad_tick): a press-to-act control reacts at the lift, a click
- * completes then.  The file knows nothing of the seat; input.c applies the
+ * A tap's click, its press and its release, is given when the finger lifts
+ * (only then is it a tap), so the click completes at once (ws183-p002, the
+ * 2026-10-08 UAT: the release used to wait TAP_DRAG_MS for a drag that
+ * seldom comes).  A touch within TAP_DRAG_MS after it holds no button and
+ * moves no pointer until it is a drag (it moved DRAG_START_UM: the press
+ * comes then, before the motion held back) or a second tap (the second
+ * click).  The file knows nothing of the seat; input.c applies the
  * actions.  The evdev codes are written here as numbers: they are the same
  * on every operating system.
  */
@@ -139,12 +143,13 @@ static const int64_t gain_fast[ACCELERATION_LEVELS] = { 8 * 256, 11 * 256, 15 * 
 
 static unsigned active_fingers(const struct kwl_touchpad *pad);
 static void take_button(struct kwl_touchpad *pad, unsigned fingers, struct kwl_touchpad_actions *actions);
-static void touch_begin(struct kwl_touchpad *pad, uint64_t now_ms, unsigned fingers, struct kwl_touchpad_actions *actions);
+static void touch_begin(struct kwl_touchpad *pad, uint64_t now_ms, unsigned fingers);
 static void take_motion(struct kwl_touchpad *pad, uint64_t now_ms, unsigned fingers, struct kwl_touchpad_actions *actions);
 static void touch_end(struct kwl_touchpad *pad, uint64_t now_ms, struct kwl_touchpad_actions *actions);
 static void pointer_motion(struct kwl_touchpad *pad, uint64_t now_ms, int64_t dx_um, int64_t dy_um, struct kwl_touchpad_actions *actions);
 static void scroll(struct kwl_touchpad *pad, int64_t dx_um, int64_t dy_um, struct kwl_touchpad_actions *actions);
-static void tap_finish(struct kwl_touchpad *pad, struct kwl_touchpad_actions *actions);
+static void tap_finish(struct kwl_touchpad *pad);
+static void tap_drag_begin(struct kwl_touchpad *pad, struct kwl_touchpad_actions *actions);
 static void swipe_finish(struct kwl_touchpad *pad, struct kwl_touchpad_actions *actions);
 static void fingers_changed(struct kwl_touchpad *pad, uint64_t now_ms, unsigned fingers, struct kwl_touchpad_actions *actions);
 static uint32_t edges_of_fingers(const struct kwl_touchpad *pad);
@@ -350,7 +355,7 @@ kwl_touchpad_frame(
 
 	/* A touch begins when the first finger comes. */
 	if (pad->fingers_before == 0U && fingers != 0U)
-		touch_begin(pad, now_ms, fingers, actions);
+		touch_begin(pad, now_ms, fingers);
 
 	/* The most fingers the touch had. */
 	if (fingers > pad->touch_fingers)
@@ -383,8 +388,8 @@ kwl_touchpad_frame(
 }
 
 /*
- * Lets time pass: a tap whose drag did not come in time completes its
- * click.
+ * Lets time pass: a tap whose drag did not come in time stops waiting for
+ * it (its click was given at its lift, so no button moves).
  */
 void
 kwl_touchpad_tick(
@@ -395,9 +400,9 @@ kwl_touchpad_tick(
 	/* Nothing to do yet. */
 	actions->count = 0;
 
-	/* A tap waiting for a drag that did not come releases its button. */
+	/* A tap waiting for a drag that did not come waits no more. */
 	if (pad->tap == KWL_TOUCHPAD_TAP_PENDING && now_ms >= pad->tap_deadline_ms)
-		tap_finish(pad, actions);
+		tap_finish(pad);
 }
 
 /*
@@ -412,10 +417,12 @@ kwl_touchpad_release_all(
 	/* Nothing to do yet. */
 	actions->count = 0;
 
-	/* A tap's or a tap drag's left button. */
-	if (pad->tap != KWL_TOUCHPAD_TAP_NONE)
+	/* A tap drag's left button; a tap's click is complete and holds none. */
+	if (pad->tap == KWL_TOUCHPAD_TAP_DRAG)
 		push_button(actions, KWL_TOUCHPAD_BUTTON_LEFT, 0U);
 	pad->tap = KWL_TOUCHPAD_TAP_NONE;
+	pad->tap_held_x = 0;
+	pad->tap_held_y = 0;
 
 	/* The pad's own press. */
 	if (pad->button_sent != 0U)
@@ -467,9 +474,16 @@ take_button(
 	/* The change is taken. */
 	pad->button_changed = 0;
 
-	/* A press: a tap waiting for its drag is done first. */
+	/* A press: a tap waiting for its drag waits no more. */
 	if (pad->button_down && pad->button_sent == 0U) {
-		tap_finish(pad, actions);
+		tap_finish(pad);
+
+		/* A touch after a tap that presses the pad is a press, not the tap's drag or second click; its held motion goes. */
+		if (pad->tap == KWL_TOUCHPAD_TAP_SECOND) {
+			pad->tap = KWL_TOUCHPAD_TAP_NONE;
+			pad->tap_held_x = 0;
+			pad->tap_held_y = 0;
+		}
 
 		/* A gesture under way is given up, and the touch makes no other. */
 		if (pad->gesture != KWL_TOUCHPAD_GESTURE_NONE) {
@@ -510,19 +524,20 @@ static void
 touch_begin(
 	struct kwl_touchpad *pad,
 	uint64_t now_ms,
-	unsigned fingers,
-	struct kwl_touchpad_actions *actions)
+	unsigned fingers)
 {
-	/* A tap whose time ran out completes before this touch counts. */
+	/* A tap whose time ran out waits no more before this touch counts. */
 	if (pad->tap == KWL_TOUCHPAD_TAP_PENDING && now_ms >= pad->tap_deadline_ms)
-		tap_finish(pad, actions);
+		tap_finish(pad);
 
-	/* One finger within the time: the tap's button stays held for a drag or a second tap. */
+	/* One finger within the time may be the tap's drag or second tap: its motion is held back until it shows which. */
 	if (pad->tap == KWL_TOUCHPAD_TAP_PENDING) {
 		if (fingers == 1U) {
 			pad->tap = KWL_TOUCHPAD_TAP_SECOND;
+			pad->tap_held_x = 0;
+			pad->tap_held_y = 0;
 		} else {
-			tap_finish(pad, actions);
+			tap_finish(pad);
 		}
 	}
 
@@ -613,9 +628,9 @@ take_motion(
 	if (pad->decided == DECIDED_SPENT)
 		return;
 
-	/* A touch after a tap that moves far enough is a drag. */
+	/* A touch after a tap that moves far enough is a drag: the press, where the tap was, then the motion held back. */
 	if (pad->tap == KWL_TOUCHPAD_TAP_SECOND && pad->touch_travel_um >= DRAG_START_UM)
-		pad->tap = KWL_TOUCHPAD_TAP_DRAG;
+		tap_drag_begin(pad, actions);
 
 	/* Two or three fingers with nothing pressed: a gesture, a scroll (two), or nothing (three). */
 	if (fingers >= 2U &&
@@ -638,9 +653,9 @@ take_motion(
 
 /*
  * Ends a touch: a tap drag lets its button go; a second quick tap makes
- * the second click of a double click; a tap of one finger presses the left
- * button until its drag time is over; a tap of two or three fingers clicks
- * the right or the middle button.
+ * the second click of a double click; a tap of one finger clicks the left
+ * button and waits the drag time for a drag; a tap of two fingers clicks
+ * the right button, of three it is TAP3.
  */
 static void
 touch_end(
@@ -677,12 +692,17 @@ touch_end(
 		return;
 	}
 
-	/* A touch after a tap: the first click ends; a quick one is the second click. */
+	/*
+	 * A touch after a tap that never became a drag: the first click was
+	 * complete already, and the motion held back goes (the pointer stays
+	 * where the clicks were).
+	 */
 	if (pad->tap == KWL_TOUCHPAD_TAP_SECOND) {
-		push_button(actions, KWL_TOUCHPAD_BUTTON_LEFT, 0U);
 		pad->tap = KWL_TOUCHPAD_TAP_NONE;
+		pad->tap_held_x = 0;
+		pad->tap_held_y = 0;
 
-		/* A quick second touch is the second click. */
+		/* A quick second touch is the second click of a double click; a long still one adds nothing. */
 		if (tapped) {
 			push_button(actions, KWL_TOUCHPAD_BUTTON_LEFT, 1U);
 			push_button(actions, KWL_TOUCHPAD_BUTTON_LEFT, 0U);
@@ -696,9 +716,10 @@ touch_end(
 	if (!tapped)
 		return;
 
-	/* A tap of one finger: the left button, held for the drag time. */
+	/* A tap of one finger: the left click at once, and a drag or a second tap may follow within the drag time. */
 	if (pad->touch_fingers == 1U) {
 		push_button(actions, KWL_TOUCHPAD_BUTTON_LEFT, 1U);
+		push_button(actions, KWL_TOUCHPAD_BUTTON_LEFT, 0U);
 		pad->tap = KWL_TOUCHPAD_TAP_PENDING;
 		pad->tap_deadline_ms = now_ms + TAP_DRAG_MS;
 		return;
@@ -763,6 +784,15 @@ pointer_motion(
 	pad->motion_remainder_y = y % 256;
 	x /= 256;
 	y /= 256;
+
+	/* A touch after a tap holds its motion back until it is a drag, so the drag's press is where the tap was. */
+	if (pad->tap == KWL_TOUCHPAD_TAP_SECOND) {
+		pad->tap_held_x += x;
+		pad->tap_held_y += y;
+		return;
+	}
+
+	/* The motion, when there is any. */
 	if (x != 0 || y != 0)
 		push_motion(actions, (int32_t)x, (int32_t)y);
 }
@@ -1179,19 +1209,37 @@ gesture_along(
 	}
 }
 
-/* Completes a tap's click: its left button goes. */
+/* Ends a tap's wait for its drag (its click is complete already, so no button moves). */
 static void
 tap_finish(
-	struct kwl_touchpad *pad,
-	struct kwl_touchpad_actions *actions)
+	struct kwl_touchpad *pad)
 {
-	/* Only a tap waiting for its drag holds the button here. */
+	/* Only a tap waiting for its drag is ended here. */
 	if (pad->tap != KWL_TOUCHPAD_TAP_PENDING)
 		return;
 
-	/* The click completes. */
-	push_button(actions, KWL_TOUCHPAD_BUTTON_LEFT, 0U);
+	/* No drag may follow the tap any more. */
 	pad->tap = KWL_TOUCHPAD_TAP_NONE;
+}
+
+/*
+ * Begins a tap drag: the left button pressed where the tap was, then the
+ * motion the touch made before it was a drag.
+ */
+static void
+tap_drag_begin(
+	struct kwl_touchpad *pad,
+	struct kwl_touchpad_actions *actions)
+{
+	/* The press, held until the finger lifts (touch_end). */
+	push_button(actions, KWL_TOUCHPAD_BUTTON_LEFT, 1U);
+	pad->tap = KWL_TOUCHPAD_TAP_DRAG;
+
+	/* The motion held back, now the drag's. */
+	if (pad->tap_held_x != 0 || pad->tap_held_y != 0)
+		push_motion(actions, (int32_t)pad->tap_held_x, (int32_t)pad->tap_held_y);
+	pad->tap_held_x = 0;
+	pad->tap_held_y = 0;
 }
 
 /* Adds a button's press or release to the actions (a full list keeps the first ones). */
