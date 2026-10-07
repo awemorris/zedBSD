@@ -2,7 +2,7 @@
 
 # ws090-p015: Terminal・Notes の scroll を `kui_scroll` へ
 
-Status: test-wait（T1 の番号は Q1 が返す。q862-i01、P1、2026-10-08: kl_scroll の追加、Terminal・Notes の切り替え、host 試験まで済み。残りは QEMU の guest 試験と boot test（T1））
+Status: cleared（2026-10-08 Q1 判定、T1-382 の 1・2 PASS）（旧: test-wait（T1 の番号は Q1 が返す。q862-i01、P1、2026-10-08: kl_scroll の追加、Terminal・Notes の切り替え、host 試験まで済み。残りは QEMU の guest 試験と boot test（T1）））
 Disposition: normal
 Parent: [WS090](../ws.md)
 Queue: q862 / q862-i01（P1）
@@ -120,3 +120,8 @@ Q1 の承認（2026-10-08）: 範囲 1〜4、WS081 の `run-termtouch.sh`・`run
 - build: zedBSD の `build/p1-wl/bin/{terminal,notes}`（config-amd64-p005.mk）warning 0、keiland-linux.mk の gcc・clang warning 0。
 - 完了の条件 1: `grep -c kl_scroller_ terminal/touch.c notes/touch.c` が 0・0。style-check: touch.c 2 本・ui/scroll.c 0、host-input.c は前からの 1 件だけ。`git diff --check` 0。
 - 未実施（T1 へ）: 手順 8 の guest（S8・S9 の `demo-s8-s9.sh`、WS081 の p011・p013・p014・p015 の guest、Terminal の回帰 p079・p093・p100・p114・p086・p088）と boot test。
+
+
+## Q1 の判定（2026-10-08）
+
+T1-382: demo-s8-s9 PASS（scroll_turn_ms=115・page_frame_ms=123・page_turn_ms=422）、pen の image で WS081 p011・p013・p014・p015 PASS（tree e5b60f9b7）。3（Terminal の回帰の loop）・4（boot-test）は未実施（最低限は 1・2 と依頼どおり）。J5（2026-10-10 まで）の内に結果が出たので merge のまま。

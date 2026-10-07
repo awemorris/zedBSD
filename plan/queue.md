@@ -103,7 +103,7 @@ Last reconciled Queue: [q779](history/queue-q779.md)（2026-10-06、BUG-202の�
 | q864 / q864-i01 | P2（2026-10-08 ユーザーの要望、q863 の後） | [ws187-p001](ws187/phase001/phase.md) lock の画面の大きな時計（縦長でも中央より上） | — | — | finished / cleared（T1-379 QEMU PASS、2026-10-08） |
 | q863 / q863-i01 | P2（touchpad、優先順の 6 番） | [ws183-p002](ws183/ws.md) 1 本指のタップのクリックの遅れ | — | — | test-wait（実機、ユーザーの手。main b776026ca に統合 2026-10-08） |
 | q862 / q862-i01 | P1（widget、優先順の 4 番） | [ws090-p015](ws090/ws.md) Terminal・Notes の scroll を `kui_scroll` へ（rubber band の境界と位置の引き継ぎを含む、WS081 の host 試験 2 本の更新） | p011（cleared） | — | pending |
-| q860 / q860-i01 | P2（優先順の 10 番、写真・カレンダーのベータ2 の分は試験待ちだけ） | [WS143](ws143/ws.md) p001 の記録を締め、HID の Phase から実装 | — | — | test-wait（T1-384、main c82362e6d に統合、design-reviewer の指摘を反映） |
+| q860 / q860-i01 | P2（優先順の 10 番、写真・カレンダーのベータ2 の分は試験待ちだけ） | [WS143](ws143/ws.md) p001 の記録を締め、HID の Phase から実装 | — | — | finished / cleared（T1-384 PASS） |
 | q859 / q859-i01 | P2（優先順の 5 番 通知、BUG-256 の 5330 の log の待ちの間） | [WS156](ws156/ws.md) p003（popup）→ p004（log） | ws156-p002 | — | finished（2026-10-08: 実装、T1-375 待ち） |
 | q858 / q858-i01 | P1（2026-10-07 ユーザーの優先順の 4 番 widget） | [WS090](ws090/ws.md) p009 → p007 → p010 → p023 → p021 → p025 | — | — | in-progress |
 | q857 / q857-i01 | P2（2026-10-07 ユーザーの優先順: Settings Display → USB-C・DP Alt → Vulkan Video） | [WS083](ws083/ws.md) p004（MFX AVC の I frame の builder・NV12 Tile Y・genxml の decoder・試験の stream・vkvideo-probe）→ p006（P・B・DPB）、p005 は 5330 の実機 | — | — | in-progress |

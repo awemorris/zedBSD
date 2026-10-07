@@ -105,9 +105,9 @@ remain as traceable history and are not new implementation work.
 | [BUG-235](bugs/BUG-235.md) | Log Out の icon で確認なしに session が終わる（desktop を暗くする演出で、終了するか選ばせる） | reproduced（実機） / tracking | UAT 2026-10-06・2026-10-06 ws099-p037・ws131-p027 cleared（QEMU） | WS099・WS131 |
 | [BUG-236](bugs/BUG-236.md) | App Home の見た目: 暗い背景の stage に icon、各 icon に spotlight、光沢の床に icon が反射する effect（montage を作る） | reproduced（実機） / tracking | UAT 2026-10-06 | WS099（App Home） |
 | [BUG-237](bugs/BUG-237.md) | app の icon の白抜き（記号）の部分が透過になっていないように見える | reproduced（実機） / tracking | UAT 2026-10-06 | WS128 p012（icon） |
-| [BUG-238](bugs/BUG-238.md) | base の emacs（REmacs）が `-nw` を受けない（GNU Emacs の利用者は端末で `emacs -nw` と打つ） | reproduced（QEMU、AAT） / scheduled（q799） | q788 の AAT の切り分け 2026-10-06 | userland/base/emacs |
+| [BUG-238](bugs/BUG-238.md) | base の emacs（REmacs）が `-nw` を受けない（GNU Emacs の利用者は端末で `emacs -nw` と打つ） | reproduced（QEMU、AAT） / scheduled（q799） | q788 の AAT の切り分け 2026-10-06 | 2026-10-08 修正、T1-387 PASS |
 | [BUG-239](bugs/BUG-239.md) | compositor が死んだ client を手放すのに QEMU で 1 個あたり約 1 秒（20 個で 23 秒、その間 key も遅れる） | reproduced（QEMU、AAT） / tracking | q788-i02 の AAT の切り分け 2026-10-06 | WS099（compositor） |
-| [BUG-240](bugs/BUG-240.md) | Browser の URL の欄の `/usr/...` が今の https の頁の相対の URL になる | reproduced（QEMU） / tracking | T1-219 2026-10-06 | WS074 |
+| [BUG-240](bugs/BUG-240.md) | Browser の URL の欄の `/usr/...` が今の https の頁の相対の URL になる | reproduced（QEMU） / resolved | T1-219 2026-10-06 | 2026-10-08 修正、T1-386 PASS |
 | [BUG-241](bugs/BUG-241.md) | Browser で example.com の一部の言語の行が □ | reproduced（QEMU） / tracking | T1-219 2026-10-06 | WS074（font の fallback） |
 | [BUG-242](bugs/BUG-242.md) | Emacs の M-x shell で `ls /` の layout が崩れる | unknown / tracking（ベータ2、低い優先度） | 2026-10-07 ユーザーの UAT | REmacs・ls（WS001 p041） |
 | [BUG-243](bugs/BUG-243.md) | full の OSK で窓が縮むと app の表示が縦に圧縮される（resize が app に届かない疑い） | reproduced（ユーザーの UAT） / resolved（T1-332、2026-10-07） | 2026-10-07 ユーザーの ad-hoc UAT | WS102（P2、q841） |
