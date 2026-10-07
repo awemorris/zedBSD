@@ -2,10 +2,10 @@
 
 # ws078-p004: 見える文字列（boot の logo・greeter・lock・banner 等）
 
-Status: incomplete（ws.md の Phase の表のとおり。この file は 2026-10-01 に手順のために作った。それまでの記録は ws.md の表の p004 の行が正）
+Status: test-wait（2026-10-08 P1 q875: 残りの 4 か所を直した、QEMU は T1。下の「q875」）（旧: incomplete（ws.md の Phase の表のとおり。この file は 2026-10-01 に手順のために作った。それまでの記録は ws.md の表の p004 の行が正））
 Disposition: normal
 Parent: [WS078](../ws.md)
-Queue: なし
+Queue: q875（P1、2026-10-08 Q1 の承認の 7 番）
 依存: p001（planning のまま。棚卸しは ws.md と [guide.md](../guide.md) §2.3 で代わった）
 
 ## これまで（ws.md の表の p004 の行の要約。2026-09-28）
@@ -52,3 +52,15 @@ Queue: なし
 - `browser-start: PASS`、`start.png`・`session.png`・`about.png` に「zedBSD」「zdesktop」「Keiland」が無い（About の副題「powered by zedBSD」は残す決定）。PNG をユーザーに見せる。
 - `boot-test: PASS`（`OUTPUT=build/ws078-p004/boot plan/tools/boot-test.sh build/ws078-p004-criteria/hdd-image.img`）。
 - 実機の H1〜H5 はユーザーの確かめ。未実施でも p004 は QEMU の分で cleared にしてよいかは main が決める（実機の分を残りとして書く）。
+
+## q875（P1、2026-10-08）: 残りの 4 か所
+
+手順 1〜5 を行った（文言は手順 2 の既定のまま）。
+
+- 手順 1: どの worktree の branch も `start.html`・`browser-start.sh` を main の先で変えていない（`git log main..agent/pN -- …` が全て 0）。WS074 の B1 は停止中。
+- `userland/desktop/browser/data/start.html`: 5・26 行「Browser」、27 行「The Web browser of Kei, with an engine of its own.」、33〜34 行「…written for Kei,」「…in a window of the desktop.」、59 行「Kei &middot; browser」（行の数は同じ）。
+- `plan/ws074/tests/browser-start.sh:62`: `title=Browser`（Q1 の q875 の依頼の範囲）。他に「zedBSD Browser」を待つ試験は無い（`git grep` で plan の history と WS078 の記録、ws099 の古い evidence の log だけ）。
+- `docs/reference/kernel-boot-parameters.md:325`: `login=graphical  the greeter (/bin/wayland --greeter) on the display`。
+- `userland/desktop/libwayland/API-PROVENANCE.md` 72〜73 行: 「Other clients of the desktop's compositor that need the compositor's own extension use libkeiland」（71 行の file 名 `zed-gpu-buffer-v1-client-protocol.h` は p008）。
+- 確かめ: `git grep -n -iE 'zedbsd browser|zdesktop' -- userland/desktop/browser/data docs/reference/kernel-boot-parameters.md userland/desktop/libwayland/API-PROVENANCE.md` が 0 行（`kernel-boot-parameters.md` の `zedbsd.cfg` などの「zedBSD」は残す決定の物: disk・loader の名前）。`sh -n browser-start.sh`。
+- 未実施: 手順 6 の QEMU（`browser-start.sh` と `start.png`・`session.png`・`about.png`、boot test）は T1。手順 7 の実機はユーザー。

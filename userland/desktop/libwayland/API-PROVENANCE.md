@@ -69,8 +69,8 @@ kernel resource record; the client transport neither interprets nor trusts it.
 The application uses ordinary Wayland and Vulkan interfaces; only the WSI and
 compositor use this factory. No linux-dmabuf-v1 interface is advertised. Its client header is not public: it lives with libwayland
 (`userland/desktop/libwayland/zed-gpu-buffer-v1-client-protocol.h`), and only
-libwayland and libvulkan's WSI include it. Other zdesktop clients that need a
-non-standard zdesktop extension use libkeiland (`<keiland.h>`).
+libwayland and libvulkan's WSI include it. Other clients of the desktop's compositor that need
+the compositor's own extension use libkeiland (`<keiland.h>`).
 
 xdg-shell version 3 (added for WS035 p076) was checked against the same pinned
 wayland-protocols 1.36 description: xdg_positioner requests set_reactive (7,
