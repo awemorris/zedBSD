@@ -64,3 +64,7 @@ Queue: q875（P1、2026-10-08 Q1 の承認の 7 番）
 - `userland/desktop/libwayland/API-PROVENANCE.md` 72〜73 行: 「Other clients of the desktop's compositor that need the compositor's own extension use libkeiland」（71 行の file 名 `zed-gpu-buffer-v1-client-protocol.h` は p008）。
 - 確かめ: `git grep -n -iE 'zedbsd browser|zdesktop' -- userland/desktop/browser/data docs/reference/kernel-boot-parameters.md userland/desktop/libwayland/API-PROVENANCE.md` が 0 行（`kernel-boot-parameters.md` の `zedbsd.cfg` などの「zedBSD」は残す決定の物: disk・loader の名前）。`sh -n browser-start.sh`。
 - 未実施: 手順 6 の QEMU（`browser-start.sh` と `start.png`・`session.png`・`about.png`、boot test）は T1。手順 7 の実機はユーザー。
+
+## Q1 の判断（2026-10-08）
+
+完了の条件の `git grep -iE 'zedbsd|zdesktop'` が 0 行は、残すと決めた名前（zedbsd.cfg など）があるので満たせない。条件を「browser/data と API-PROVENANCE は 0 行、kernel-boot-parameters.md は残すと決めた名前（zedbsd.cfg・zedbsd の OS の名前）だけ」に改める。
