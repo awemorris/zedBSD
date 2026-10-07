@@ -17,7 +17,7 @@ open(p,'w').write('\n'.join(L))
 EOF
 
             git add plan/agents/T1/requests.md;
-        elif [ -z "$(printf '%s\n' $u | grep -v '^plan/bugs/BUG-[0-9]*\.md$')" ]; then
+        elif [ -z "$(printf '%s\n' $u | grep -v -e '^plan/bugs/BUG-[0-9]*\.md$' -e '^plan/ws[0-9]*/phase[0-9a-z]*/phase\.md$')" ]; then
             # Bug tickets: two agents append their own sections; keep both (main's first). 2026-10-08 Q1.
             for f in $u; do
                 python3 - "$f" <<'EOF'
