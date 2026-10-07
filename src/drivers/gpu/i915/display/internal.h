@@ -1911,6 +1911,7 @@ struct i915_native_pipe {
 #define I915_GOP_EDP		1U	/* DDI A in DP SST mode: the built-in panel */
 #define I915_GOP_HDMI		2U	/* DDI B in HDMI or DVI mode: the driver's HDMI path */
 #define I915_GOP_OTHER		3U	/* an interface this driver cannot light yet */
+#define I915_GOP_DP_TC		4U	/* a Type-C port's DDI in DP SST mode (DP-alt): the external DP path (ws051-p004c) */
 
 struct i915_gop_output {
 	unsigned kind;
