@@ -72,6 +72,13 @@ struct ml_window {
 	struct ml_view view;
 	int dirty;
 
+	/*
+	 * Only the lit widget changed since the last frame (BUG-226): the next
+	 * frame is drawn within the part kl_ui_take_damage gives, when nothing
+	 * else changed (dirty draws the whole window).
+	 */
+	int lit_changed;
+
 	/* The pointer's buttons held now: while one is, every motion is drawn (a drag); otherwise only one that lights another widget (BUG-226). */
 	unsigned buttons_held;
 	int resized;
@@ -430,9 +437,12 @@ ml_input(
 	/* Each kind of input. */
 	switch (event->kind) {
 	case KL_WINDOW_MOTION:
+		/* A drag draws the whole window; another lit widget only its part (BUG-226). */
 		redraw = kl_ui_pointer_motion(mailer->ui, event->x, event->y);
-		if (redraw || mailer->buttons_held != 0U)
+		if (mailer->buttons_held != 0U)
 			mailer->dirty = 1;
+		else if (redraw)
+			mailer->lit_changed = 1;
 		break;
 	case KL_WINDOW_LEAVE:
 		(void)kl_ui_pointer_leave(mailer->ui);
@@ -560,21 +570,37 @@ ml_draw(
 	struct kl_glass_panel panels[ML_PANELS_MAX];
 	struct kl_event event;
 	struct kl_rect caret;
+	struct kl_rect part;
 	size_t count;
 	int status;
 	int error;
 	int taken;
 	int wanted;
+	int partial;
 
 	/* Nothing changed and nothing moves: no frame. */
-	if (!mailer->dirty && !mailer->moving)
+	if (!mailer->dirty && !mailer->moving && !mailer->lit_changed)
 		return;
 
-	/* The view. */
+	/*
+	 * Only another widget lit: the frame is drawn within the two widgets'
+	 * part alone, the rest keeping its pixels (BUG-226; the whole window
+	 * when the part cannot be told).
+	 */
+	partial = 0;
+	if (!mailer->dirty && !mailer->moving && mailer->lit_changed)
+		partial = kl_ui_take_damage(mailer->ui, &part);
+	mailer->lit_changed = 0;
+
+	/* The view, within the part when there is one. */
 	mailer->dirty = 0;
+	if (partial)
+		kl_canvas_clip_push(&mailer->canvas, &part);
 	kl_ui_begin(mailer->ui, now_us);
 	ml_view_draw(&mailer->view, mailer->ui, &mailer->style, (int)mailer->width, (int)mailer->height, now_us);
 	mailer->moving = kl_ui_end(mailer->ui, now_us);
+	if (partial)
+		kl_canvas_clip_pop(&mailer->canvas);
 
 	/*
 	 * The text input is asked for while a field has the keyboard, and told
@@ -629,8 +655,8 @@ ml_wait(
 {
 	int wait;
 
-	/* A frame due now, or requests to carry out. */
-	if (mailer->dirty)
+	/* A frame due now (or its lit part), or requests to carry out. */
+	if (mailer->dirty || mailer->lit_changed)
 		return 0;
 	if (mailer->view.request_count != 0U)
 		return 0;

@@ -5,7 +5,7 @@
 # ASan/UBSan.  Each test links the production sources it checks with a mock
 # behind their operations table; see README.md.
 #
-# Usage: run.sh [test ...]   (default: mmio dma pci rpm pte sync rps)
+# Usage: run.sh [test ...]   (default: mmio dma pci rpm pte sync rps memory forget)
 set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -15,7 +15,7 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/i915-contracts.XXXXXX")
 trap 'rm -rf -- "$work"' EXIT HUP INT TERM
 
 compiler=${CC:-cc}
-tests=${*:-"mmio dma pci rpm pte sync rps"}
+tests=${*:-"mmio dma pci rpm pte sync rps memory forget"}
 
 warnings="-std=gnu11 -Wall -Wextra -Werror -Wdeclaration-after-statement"
 ordinary="-O2"
@@ -42,11 +42,15 @@ sources_for() {
 	rpm)
 		echo "$here/rpm_contract_test.c $here/mock_rpm.c $driver/runtime-pm.c $driver/pci.c $driver/trace.c" ;;
 	pte)
-		echo "$here/pte_contract_test.c $driver/ggtt.c $driver/ppgtt.c" ;;
+		echo "$here/pte_contract_test.c $here/host_kernel.c $here/host_thread.c $driver/ggtt.c $driver/ppgtt.c" ;;
 	sync)
 		echo "$here/sync_contract_test.c $here/host_kernel.c $here/host_thread.c $driver/sync.c $driver/workqueue.c $driver/mmio.c $driver/trace.c" ;;
 	rps)
 		echo "$here/rps_contract_test.c $here/mock_mmio.c $here/host_kernel.c $here/host_thread.c $driver/gt-power.c $driver/workqueue.c $driver/mmio.c $driver/trace.c" ;;
+	memory)
+		echo "$here/memory_contract_test.c $here/host_render.c $driver/render/memory.c $driver/render/object.c $driver/render/codec.c $driver/render/reply.c" ;;
+	forget)
+		echo "$here/forget_contract_test.c $here/host_render.c $driver/render/forget.c $driver/render/object.c $driver/render/descriptor.c $driver/render/codec.c $driver/render/reply.c" ;;
 	*)
 		echo "unknown contract test: $1" >&2
 		return 1 ;;
@@ -63,7 +67,12 @@ build() {
 
 	sources=$(sources_for "$name")
 	objects=
-	for source in $sources "$here/contract.c" "$here/host_unreached.c"; do
+	# The render executor's tests (memory BUG-244, forget BUG-260) have the host's heap, locks and log (host_render.c), not the unreached stand-ins.
+	unreached=$here/host_unreached.c
+	if [ "$name" = memory ] || [ "$name" = forget ]; then
+		unreached=
+	fi
+	for source in $sources "$here/contract.c" $unreached; do
 		base=$(basename "$source" .c)
 		case $base in
 		workqueue|host_thread)

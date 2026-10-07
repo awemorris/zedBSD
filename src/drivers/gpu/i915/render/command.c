@@ -19,6 +19,7 @@
 #include "codec.h"
 #include "compute.h"
 #include "fence.h"
+#include "forget.h"
 #include "gfx.h"
 #include "instance.h"
 #include "internal.h"
@@ -119,6 +120,13 @@ struct i915_gfx_cmdbuf {
 	 */
 	int overflow;
 
+	/*
+	 * Nonzero once an object an operation named was destroyed before the
+	 * buffer (BUG-260): the operations are gone, and a submission does not
+	 * run the buffer.  A begin or a reset clears it.
+	 */
+	int stale;
+
 	/* The recorded operations, in recording order; NULL until the first operation. */
 	struct i915_gfx_op *ops;
 };
@@ -158,6 +166,17 @@ static struct i915_gfx_op *i915_command_op(struct i915_gfx_cmdbuf *cmdbuf, enum 
 static void i915_command_ops_clear(struct i915_gfx_cmdbuf *cmdbuf);
 static int i915_record_video(struct i915_render_session *session, struct i915_gfx_cmdbuf *cmdbuf, uint32_t opcode, struct i915_wire_reader *reader);
 static uint32_t i915_command_op_mark(const struct i915_gfx_cmdbuf *cmdbuf);
+static void i915_command_forget_one(void *object, void *argument);
+
+/*
+ * An object being destroyed and how many command buffers lost their
+ * operations for it (BUG-260), for one walk of the session's command
+ * buffers.  It lives on the stack of the destroy.
+ */
+struct i915_command_forget {
+	const void *object;
+	unsigned count;
+};
 static struct i915_gfx_op *i915_command_op_at(struct i915_gfx_cmdbuf *cmdbuf, uint32_t place);
 static int i915_command_grow(struct i915_gfx_cmdbuf *cmdbuf);
 static int i915_record_image_copy(struct i915_render_session *session, struct i915_gfx_cmdbuf *cmdbuf, struct i915_wire_reader *reader, enum i915_gfx_op_kind kind);
@@ -446,6 +465,28 @@ i915_command_pool_destroy(
 }
 
 /*
+ * Empties every command buffer of the session that recorded an object
+ * being destroyed and marks it stale, so that none of its operations
+ * names the freed object and a submission does not run it (BUG-260).
+ * Reports how many buffers were emptied.
+ */
+unsigned
+drv_i915_gfx_command_forget(
+	struct i915_render_session *session,
+	const void *object)
+{
+	struct i915_command_forget forget;
+
+	/* Each buffer of the session, under the table's lock. */
+	forget.object = object;
+	forget.count = 0U;
+	drv_i915_object_each(session, I915_VK_OBJ_COMMAND_BUFFER, i915_command_forget_one, &forget);
+
+	/* Succeeded: how many buffers lost their operations. */
+	return forget.count;
+}
+
+/*
  * Frees a command pool whose identity is already withdrawn, with every
  * buffer still allocated from it (their identities are withdrawn here).
  */
@@ -491,6 +532,7 @@ i915_command_pool_reset(
 	     cmdbuf = cmdbuf->next) {
 		i915_command_ops_clear(cmdbuf);
 		cmdbuf->overflow = 0;
+		cmdbuf->stale = 0;
 	}
 
 	/* Replies success for a known pool and failure for an unknown one. */
@@ -648,6 +690,7 @@ i915_command_buffer_begin(
 	if (cmdbuf != NULL) {
 		i915_command_ops_clear(cmdbuf);
 		cmdbuf->overflow = 0;
+		cmdbuf->stale = 0;
 	}
 
 	/* Replies success for a known buffer and failure for an unknown one. */
@@ -682,6 +725,7 @@ i915_command_buffer_reset(
 	if (cmdbuf != NULL) {
 		i915_command_ops_clear(cmdbuf);
 		cmdbuf->overflow = 0;
+		cmdbuf->stale = 0;
 	}
 
 	/* Replies success for a known buffer and failure for an unknown one. */
@@ -796,6 +840,32 @@ i915_command_ops_clear(
 
 	/* The list is empty. */
 	cmdbuf->op_count = 0U;
+}
+
+/* Empties a command buffer one of whose operations names the object being destroyed (a visit of drv_i915_object_each, BUG-260). */
+static void
+i915_command_forget_one(
+	void *object,
+	void *argument)
+{
+	struct i915_gfx_cmdbuf *cmdbuf;
+	struct i915_command_forget *forget;
+	uint32_t index;
+	int names;
+
+	/* Whether one of its operations names it. */
+	cmdbuf = object;
+	forget = argument;
+	names = 0;
+	for (index = 0U; index < cmdbuf->op_count && !names; index++)
+		names = drv_i915_gfx_op_names(&cmdbuf->ops[index], forget->object);
+	if (!names)
+		return;
+
+	/* Its operations go, and it does not run until it is recorded again. */
+	i915_command_ops_clear(cmdbuf);
+	cmdbuf->stale = 1;
+	forget->count++;
 }
 
 /*
@@ -3623,6 +3693,14 @@ i915_queue_submit(
 		for (item = 0U; item < count; item++) {
 			identity = drv_i915_wire_read_u64(reader);
 			cmdbuf = drv_i915_object_lookup(session, I915_VK_OBJ_COMMAND_BUFFER, identity);
+
+			/* A buffer whose objects were destroyed (BUG-260) does not run. */
+			if (cmdbuf != NULL && cmdbuf->stale) {
+				kern_logf("i915: vk: vkQueueSubmit: a command buffer whose objects were destroyed is not run\n");
+				cmdbuf = NULL;
+			}
+
+			/* A known one is kept while there is room. */
 			if (cmdbuf != NULL && total < I915_GFX_MAX_SUBMITTED) {
 				cmdbufs[total] = cmdbuf;
 				total++;

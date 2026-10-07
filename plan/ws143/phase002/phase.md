@@ -4,7 +4,7 @@
 
 Phase ID: `ws143-p002`
 Parent: [WS143](../ws.md)
-Status: test-wait（T1-384）（2026-10-08 P2、q860-i01: 実装・review の反映・build・host 試験まで。T1 の bt-loopback-p002.sh と 5330 の passthrough を待つ）
+Status: cleared（2026-10-08 Q1 判定、T1-384 QEMU PASS。5330 の passthrough は未実施）（旧: test-wait（T1-384）（2026-10-08 P2、q860-i01: 実装・review の反映・build・host 試験まで。T1 の bt-loopback-p002.sh と 5330 の passthrough を待つ））
 Phase disposition: normal
 Queue: q860-i01（P2、2026-10-08。Q1 の投入「p001 の記録を締め、HID の Phase から実装」）
 
@@ -233,3 +233,8 @@ review は cfd196e70 を見た物。detach の submit の競合は、25798861f �
   2026-10-02 ユーザー「i386 は当面 build も試験もしない」）。
 - 未実施（T1）: `bt-loopback-p002.sh`。未実施（実機）: 5330 の passthrough の `bt-probe -r`（T1-378 と一緒）。
 - HAL の変更は無い（Q1 の判定）。
+
+
+## Q1 の判定（2026-10-08）
+
+T1-384: bt-loopback-p002 PASS（ok 8 行）。5330 の Bluetooth の passthrough の bt-probe -r は T1-378 と一緒に未実施。

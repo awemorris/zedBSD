@@ -16,6 +16,7 @@
 
 #include "descriptor.h"
 #include "codec.h"
+#include "forget.h"
 #include "gfx.h"
 #include "internal.h"
 #include "object.h"
@@ -156,6 +157,7 @@ drv_i915_gfx_allocate_dsets(
 {
 	VkDescriptorSetAllocateInfo info;
 	uint64_t identities[I915_GFX_MAX_ALLOCATED_SETS];
+	const struct i915_gfx_dsl *layout;
 	struct i915_gfx_dset *dset;
 	uint64_t count;
 	uint64_t index;
@@ -197,9 +199,20 @@ drv_i915_gfx_allocate_dsets(
 			break;
 		}
 
-		/* Records the layout the set was allocated with and the pool it came from. */
+		/*
+		 * Records a copy of the layout the set was allocated with (the
+		 * application may destroy the layout while the set is used,
+		 * BUG-260).
+		 */
 		layout_id = (uint64_t)(uintptr_t)info.pSetLayouts[index];
-		dset->layout = drv_i915_object_lookup(session, I915_VK_OBJ_DESCRIPTOR_SET_LAYOUT, layout_id);
+		layout = drv_i915_object_lookup(session, I915_VK_OBJ_DESCRIPTOR_SET_LAYOUT, layout_id);
+		dset->layout = NULL;
+		if (layout != NULL) {
+			kern_memcpy(&dset->layout_copy, layout, sizeof(dset->layout_copy));
+			dset->layout = &dset->layout_copy;
+		}
+
+		/* The pool it came from. */
 		dset->pool = drv_i915_object_lookup(session, I915_VK_OBJ_DESCRIPTOR_POOL, (uint64_t)(uintptr_t)info.descriptorPool);
 
 		/* Publishes the set; one that cannot be published is freed. */
@@ -397,7 +410,7 @@ i915_gfx_update_write(
 
 		/* The binding samples this view with this sampler from here on, and no texel buffer. */
 		dset->slots[binding].sampler = drv_i915_object_lookup(session, I915_VK_OBJ_SAMPLER, sampler);
-		dset->slots[binding].view = drv_i915_object_lookup(session, I915_VK_OBJ_IMAGE_VIEW, view);
+		dset->slots[binding].view = drv_i915_gfx_view_lookup(session, view);
 		dset->slots[binding].texel = NULL;
 
 		/* Says so when a handle names no object of the session (BUG-117): the draws that sample the binding are refused. */
@@ -512,7 +525,8 @@ i915_dpool_sets_free(
 		if (dset == NULL)
 			break;
 
-		/* Frees the one taken. */
+		/* Command buffers that bound it let go of it (BUG-260), then it is freed. */
+		drv_i915_gfx_forget(session, I915_VK_OBJ_DESCRIPTOR_SET, dset);
 		kern_free(dset);
 	}
 }
