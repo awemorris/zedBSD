@@ -21,6 +21,7 @@
 #include "command.h"
 #include "descriptor.h"
 #include "fence.h"
+#include "forget.h"
 #include "image.h"
 #include "internal.h"
 #include "memory.h"
@@ -247,10 +248,11 @@ i915_gfx_destroy_plain(
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* Unpublishes and frees a known object. */
+	/* Unpublishes a known object; what names it lets go of it (BUG-260), then it is freed. */
 	object = drv_i915_object_lookup(session, kind, identity);
 	if (object != NULL) {
 		drv_i915_object_remove(session, kind, identity);
+		drv_i915_gfx_forget(session, kind, object);
 		kern_free(object);
 	}
 

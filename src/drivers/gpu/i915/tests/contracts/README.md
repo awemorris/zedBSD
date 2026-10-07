@@ -6,7 +6,7 @@ and checks the contract the source promises (return conventions, ownership,
 ordering), not the hardware.
 
 ```
-src/drivers/gpu/i915/tests/contracts/run.sh          # all: mmio dma pci rpm pte sync rps memory
+src/drivers/gpu/i915/tests/contracts/run.sh          # all: mmio dma pci rpm pte sync rps memory forget
 src/drivers/gpu/i915/tests/contracts/run.sh mmio pte # a subset
 ```
 
@@ -26,6 +26,7 @@ variant held.
 | `mock_rpm.[ch]` | resume/suspend counter behind `struct i915_rpm_ops` |
 | `host_kernel.[ch]` | single-threaded stand-in for spinlocks, wait queues, ticks and `kern_logf` (sync test only) |
 | `host_thread.c` | `kthread_create`/`thread_start` that never run the thread (sync test only) |
+| `host_render.[ch]` | the host's heap, counting mutexes and log for the render executor's tests (memory, forget) |
 | `host_unreached.c` | the real-device calls the linked sources contain; each aborts with its name if reached |
 | `*_contract_test.c` | one program per contract |
 
@@ -39,6 +40,7 @@ variant held.
 | `sync` | `sync.c` (completion only), `workqueue.c`, `mmio.c`, `trace.c` |
 | `rps` | `gt-power.c` (RPS: enable, start, interrupt, work, boost, stop; ws075-p020), `workqueue.c`, `mmio.c`, `trace.c` |
 | `memory` | `render/memory.c` (vkFreeMemory before what is bound to it, BUG-244), `render/object.c`, `render/codec.c`, `render/reply.c` |
+| `forget` | `render/forget.c` (an object destroyed before the views, sets, framebuffers and command buffers that name it, BUG-260), `render/object.c`, `render/descriptor.c`, `render/codec.c`, `render/reply.c` |
 
 ## Host build notes
 

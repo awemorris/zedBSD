@@ -17,10 +17,11 @@
  * freed record; one bound to another allocation keeps its own; the freed
  * allocation leaves the device's list and the session's table.  Under
  * ASan any read of the freed record fails the run.  The kernel's heap,
- * locks and log are the host's (this file), single-threaded.
+ * locks and log are the host's (host_render.c), single-threaded.
  */
 
 #include "contract.h"
+#include "host_render.h"
 
 #include "../../i915.h"
 #include "../../memory.h"
@@ -30,15 +31,10 @@
 #include "../../render/object.h"
 #include "../../render/state.h"
 
-#include <kern/klog.h>
-#include <kern/kmem.h>
 #include <kern/lock.h>
-#include <kern/pmem.h>
 
 #include <errno.h>
-#include <stdarg.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -49,10 +45,6 @@
 #define BUFFER_SECOND		22U
 #define BUFFER_OTHER		23U
 #define IMAGE_FIRST		31U
-
-/* How many log lines the code under test wrote, and how deep the mutexes are held now. */
-static unsigned memory_log_lines;
-static int memory_lock_depth;
 
 static void memory_check_free_bound(void);
 static void memory_check_free_unknown(void);
@@ -148,7 +140,7 @@ memory_check_free_bound(void)
 		       "a bound buffer has its allocation's GPU address");
 
 	/* The first allocation is freed while they are bound to it. */
-	memory_log_lines = 0U;
+	host_render_log_lines = 0U;
 	memory_free(&session, MEMORY_FIRST);
 
 	/* What was bound to it has no storage; nothing reads the freed record. */
@@ -163,7 +155,7 @@ memory_check_free_bound(void)
 	/* The freed allocation is gone from the table and the list; the binding was logged once. */
 	contract_check(drv_i915_object_lookup(&session, I915_VK_OBJ_MEMORY, MEMORY_FIRST) == NULL, "the freed allocation leaves the table");
 	contract_check(memory_listed(&vk, second) && vk.memories == second && second->next == NULL, "the freed allocation leaves the device's list");
-	contract_check(memory_log_lines == 1U, "the free of a bound allocation is logged once");
+	contract_check(host_render_log_lines == 1U, "the free of a bound allocation is logged once");
 
 	/* A bind to the freed allocation fails now. */
 	error = memory_bind(&session, BUFFER_FIRST, MEMORY_FIRST, 0U, 0);
@@ -172,7 +164,7 @@ memory_check_free_bound(void)
 	/* The rest goes: the second allocation, the objects and the table. */
 	memory_free(&session, MEMORY_SECOND);
 	contract_check(buffer_other->memory == NULL && vk.memories == NULL, "the second allocation goes too");
-	contract_check(memory_lock_depth == 0, "every lock taken is let go");
+	contract_check(host_render_lock_depth == 0, "every lock taken is let go");
 	drv_i915_object_forget(&session);
 	free(buffer_first);
 	free(buffer_second);
@@ -206,9 +198,9 @@ memory_check_free_unknown(void)
 	session.vk = &vk;
 
 	/* The free does nothing. */
-	memory_log_lines = 0U;
+	host_render_log_lines = 0U;
 	memory_free(&session, 99U);
-	contract_check(memory_log_lines == 0U && vk.memories == NULL, "an unknown allocation's free does nothing");
+	contract_check(host_render_log_lines == 0U && vk.memories == NULL, "an unknown allocation's free does nothing");
 
 	/* The table goes. */
 	drv_i915_object_table_destroy(vk.objects);
@@ -354,121 +346,4 @@ memory_listed(
 
 	/* Not on it. */
 	return 0;
-}
-
-/*
- * Stands in for the kernel heap's zeroed allocation: the host's.
- */
-void *
-kern_calloc(
-	size_t count,
-	size_t size)
-{
-	void *pointer;
-
-	/* The host's allocation. */
-	pointer = calloc(count, size);
-
-	/* Reports it (NULL when the host had none). */
-	return pointer;
-}
-
-/*
- * Stands in for the kernel heap's release: the host's.
- */
-void
-kern_free(
-	void *pointer)
-{
-	/* The host's release. */
-	free(pointer);
-}
-
-/*
- * Stands in for the kernel log: counts the lines and shows them.
- */
-void
-kern_logf(
-	const char *format,
-	...)
-{
-	va_list arguments;
-
-	/* One more line, shown. */
-	memory_log_lines++;
-	va_start(arguments, format);
-	(void)vprintf(format, arguments);
-	va_end(arguments);
-}
-
-/*
- * Stands in for a mutex's setup: nothing to do on one thread.
- */
-int
-mutex_init(
-	struct mutex *mutex,
-	enum lock_rank rank,
-	const char *name)
-{
-	UNUSED_PARAMETER(mutex);
-	UNUSED_PARAMETER(rank);
-	UNUSED_PARAMETER(name);
-
-	/* Succeeded: ready. */
-	return 0;
-}
-
-/*
- * Stands in for taking a mutex: counts how deeply mutexes are held.
- */
-void
-mutex_lock(
-	struct mutex *mutex)
-{
-	UNUSED_PARAMETER(mutex);
-
-	/* One more held. */
-	memory_lock_depth++;
-}
-
-/*
- * Stands in for letting a mutex go.
- */
-void
-mutex_unlock(
-	struct mutex *mutex)
-{
-	UNUSED_PARAMETER(mutex);
-
-	/* One fewer held. */
-	memory_lock_depth--;
-}
-
-/*
- * Stands in for the direct map of physical RAM: the address itself (the
- * test's storage has no pages, and no check reads through the view).
- */
-void *
-kern_pmem_to_kernel(
-	hal_physaddr_t address)
-{
-	/* The address as a pointer. */
-	return (void *)(uintptr_t)address;
-}
-
-/*
- * Stands in for the texel buffer formats of state.c, which no check uses.
- */
-int
-drv_i915_gfx_texel_buffer_format(
-	uint32_t format,
-	uint32_t *surface_format,
-	uint32_t *bytes)
-{
-	UNUSED_PARAMETER(format);
-	UNUSED_PARAMETER(surface_format);
-	UNUSED_PARAMETER(bytes);
-
-	/* No format in this test. */
-	return EINVAL;
 }
