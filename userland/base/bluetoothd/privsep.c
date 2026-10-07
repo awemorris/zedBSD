@@ -385,8 +385,12 @@ privsep_answer(
 	int same;
 	int error;
 
-	/* The request. */
-	length = recv(channel, request, sizeof(request) - 1U, 0);
+	/*
+	 * The request, without waiting: a datagram socket whose peer closed
+	 * is readable to poll while recv would wait for ever (it gives no end
+	 * of file), so the loop must get back to waitpid (T1-405).
+	 */
+	length = recv(channel, request, sizeof(request) - 1U, MSG_DONTWAIT);
 	if (length <= 0)
 		return;
 	request[length] = '\0';

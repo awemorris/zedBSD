@@ -88,6 +88,8 @@ has "still ready" "$(guest '/bin/bt show')" "BT SHOW state=ready"
 
 # 6. The separation's life.
 guest 'kill $(ps -A -o user,pid,args | grep "^_bluetooth.*[/]sbin/bluetoothd" | awk "{print \$2}"); sleep 3; true' >/dev/null
+left=$(guest 'ps -A -o user,pid,stat,args | grep "[/]sbin/bluetoothd"; true')
+[ -n "$left" ] && printf 'left after the kill:\n%s\n' "$left"
 expect "the child killed ends the parent" "$(guest 'ps -A -o args | grep -c "[/]sbin/bluetoothd"' | tail -1)" 0
 guest '/sbin/bluetoothd >/tmp/btd5.log 2>&1 & sleep 3; true' >/dev/null
 guest 'kill $(ps -A -o user,pid,args | grep "^root.*[/]sbin/bluetoothd" | awk "{print \$2}"); sleep 3; true' >/dev/null
