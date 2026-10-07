@@ -209,6 +209,11 @@ pv_canvas_stretch(
 	const uint32_t *source;
 	long source_x;
 	long source_y;
+	long first_source_x;
+	long first_left;
+	long left;
+	long step;
+	long span;
 	int first_x;
 	int first_y;
 	int shown_width;
@@ -230,14 +235,34 @@ pv_canvas_stretch(
 	shown_height = height;
 	clip_span(canvas, &first_x, &first_y, &shown_width, &shown_height);
 
+	/*
+	 * The source column under the first pixel's centre, (2c + 1) * source
+	 * width / (2 * width), and what is left over of that division; each
+	 * next pixel adds 2 * source width to it, so the columns follow without
+	 * a division a pixel (BUG-259: a frame while the window is resized
+	 * stretches every page).
+	 */
+	span = 2L * (long)width;
+	step = 2L * (long)source_width;
+	first_source_x = ((long)(first_x - x) * 2L + 1L) * (long)source_width / span;
+	first_left = ((long)(first_x - x) * 2L + 1L) * (long)source_width % span;
+
 	/* Each pixel of that part takes the source pixel under its centre. */
 	for (line = 0; line < shown_height; line++) {
 		source_y = ((long)(first_y + line - y) * 2L + 1L) * (long)source_height / (2L * (long)height);
 		row = canvas->pixels + (size_t)(first_y + line) * canvas->stride + (size_t)first_x;
 		source = pixels + (size_t)source_y * (size_t)source_width;
+		source_x = first_source_x;
+		left = first_left;
 		for (column = 0; column < shown_width; column++) {
-			source_x = ((long)(first_x + column - x) * 2L + 1L) * (long)source_width / (2L * (long)width);
 			row[column] = source[source_x];
+
+			/* The next pixel's centre, as many source columns on as it passes. */
+			left += step;
+			while (left >= span) {
+				left -= span;
+				source_x++;
+			}
 		}
 	}
 }

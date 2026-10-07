@@ -24,7 +24,9 @@
  * a narrow window has none), and with PASSWORD.pdf (DOCUMENT.pdf encrypted
  * with the user password "secret" and the owner password "owner") the
  * password card: a wrong password, the user password typed and Enter,
- * Escape, and the owner password with a click on Open.
+ * Escape, and the owner password with a click on Open.  BUG-259: while
+ * the window is resized the pages' rasters are stretched, and drawn again
+ * at the new scale once the size has been still for a moment.
  */
 
 #include "../../../userland/desktop/pdfviewer/viewer.h"
@@ -45,6 +47,7 @@ static int failures;
 static uint64_t now;
 
 static void frame(const char *name);
+static void draw_sized(int width);
 static void key(uint32_t code, uint32_t modifiers);
 static void wheel(int amount, uint32_t modifiers);
 static void drag(int from_x, int from_y, int to_x, int to_y, int steps, int milliseconds);
@@ -60,6 +63,8 @@ main(
 	char **argv)
 {
 	double before;
+	double raster_scale;
+	int step;
 	int card_x;
 	int card_y;
 	int card_width;
@@ -228,6 +233,34 @@ main(
 	key(PV_KEY_F9, 0);
 	check(app.thumbnails == 0 && app.width == TEST_WIDTH, "F9 hides the sidebar");
 
+	/* BUG-259: a resize drag stretches the rasters the pages have, and they are drawn again once it settles. */
+	now += 250;
+	app.now = now;
+	pv_app_tick(&app, now);
+	draw_sized(TEST_WIDTH);
+	raster_scale = app.document.pages[0].raster_scale;
+	for (step = 1; step <= 10; step++) {
+		now += 16;
+		app.now = now;
+		pv_app_resize(&app, TEST_WIDTH - 20 * step, TEST_HEIGHT);
+		pv_app_tick(&app, now);
+		draw_sized(TEST_WIDTH - 20 * step);
+	}
+
+	/* The rasters are those before the drag, at the larger scale. */
+	check(app.resizing && app.document.pages[0].raster_scale == raster_scale && pv_app_scale(&app, 0) < raster_scale,
+	      "a resize drag stretches the pages it has, without drawing them again");
+	now += 250;
+	app.now = now;
+	pv_app_tick(&app, now);
+	check(!app.resizing && app.dirty, "the resize settles once the size is still");
+	draw_sized(TEST_WIDTH - 200);
+	check(app.document.pages[0].raster_scale == pv_app_scale(&app, 0), "the pages are drawn again at the new scale");
+	pv_app_resize(&app, TEST_WIDTH, TEST_HEIGHT);
+	now += 250;
+	app.now = now;
+	pv_app_tick(&app, now);
+
 	/* ws079-p007: a document drawn whole has no notice; one with content left out has it. */
 	check(!app.notice_shown, "a document drawn whole has no notice");
 	if (argc >= 5) {
@@ -324,6 +357,21 @@ frame(
 		fwrite(rgb, 1, 3, file);
 	}
 	fclose(file);
+}
+
+/* Draws a frame of a width (narrower than the test's window) without writing it. */
+static void
+draw_sized(
+	int width)
+{
+	struct pv_canvas canvas;
+
+	/* The window's pixels, as narrow as asked. */
+	canvas.pixels = pixels;
+	canvas.stride = TEST_WIDTH;
+	canvas.width = width;
+	canvas.height = TEST_HEIGHT;
+	pv_draw(&app, &canvas);
 }
 
 /* Presses a key. */

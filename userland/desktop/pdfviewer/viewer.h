@@ -255,6 +255,11 @@ struct pv_document {
  * while zooming, the frame shows the pages' rasters stretched to the new
  * scale instead of drawing them again, until the fingers stop.
  *
+ * BUG-259: resizing says the window's size changed at resized_at (the
+ * view's clock) and has not stayed still long enough since; the frame
+ * shows the pages' rasters stretched to the new scale, as while zooming,
+ * and pv_app_tick draws them again once it settles.
+ *
  * ws090-p008: choosing says the viewer waits for the answer of libkeiland's
  * file chooser, which the window shows starting at chooser_folder
  * (pv_app_chosen takes the answer).  keyboard_right and keyboard_bottom are how much of the
@@ -327,6 +332,8 @@ struct pv_app {
 	struct pv_text *text;
 	int touching;
 	int zooming;
+	int resizing;
+	uint64_t resized_at;
 	int keyboard_right;
 	int keyboard_bottom;
 	char find_query[256];
