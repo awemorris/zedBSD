@@ -49,5 +49,6 @@ Resume point: 2026-10-07 夕 P1（q833）: p001 の設計の第 2 版（[design.
 | ws083-p005 | 実機: VCS の bring-up と I frame の hash（`i915.debug=video`）、HuC 不要の確認 | planning | p004、5330 |
 | [ws083-p006a](phase006a/phase.md) | P・B と DPB、scaling list の fall-back、複数 slice の host の試験（vkvideo-probe の DPB と表示順） | in-progress（P2、host の範囲は済み） | p004 |
 | ws083-p006b | P・B と DPB の実機の hash | planning | p005、p006a |
-| ws083-p007 | 性能、`i915.debug=video` の門の既定化、利用者への案内、SAMPLED・TRANSFER_SRC（HD5） | planning | p006 |
+| [ws083-p007](phase007/phase.md) | `GRDOM_MEDIA` の engine 単位の reset と VCS の hang の回復（design §9 の p007、HD2 (a) の前提） | in-progress（q876、P2。host の範囲は実装と host 試験済み、実機の人工の hang は 5330 の後） | p005 |
+| ws083-p008 | 性能、`i915.debug=video` の門の既定化（p007 の後）、利用者への案内、SAMPLED・TRANSFER_SRC（HD5）、result status query | planning | p006b、p007 |
 | ws083-p009 | 全文規約確認と回帰（必須の最終確認） | planning | 全 Phase |

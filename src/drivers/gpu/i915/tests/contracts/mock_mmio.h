@@ -36,6 +36,16 @@ struct mock_mmio_register {
 	int used;
 };
 
+struct mock_mmio;
+
+/*
+ * A test's model of what the hardware does on a write.
+ *
+ * It is called after the written value is stored and may change any
+ * register, for example clear a request bit the hardware acknowledges.
+ */
+typedef void (*mock_mmio_write_hook_fn)(struct mock_mmio *mock, uint32_t offset, uint32_t value, void *context);
+
 /*
  * The register file and forcewake state of one mock device.
  *
@@ -57,6 +67,10 @@ struct mock_mmio {
 	/* How many bus reads and writes reached the register file. */
 	int read_calls;
 	int write_calls;
+
+	/* The test's model of the hardware's answer to a write, and its context; NULL only stores (ws083-p007). */
+	mock_mmio_write_hook_fn write_hook;
+	void *write_hook_context;
 };
 
 const struct i915_mmio_ops *mock_mmio_ops(void);

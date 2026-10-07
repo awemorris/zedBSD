@@ -20,9 +20,13 @@
  * the render engine: a logical ring context over the session's own address
  * space, with a timeline page in the GGTT for its breadcrumbs.
  *
+ * A request on the video decode engine that hangs or fails has that engine
+ * reset and resumed by the worker, up to a bound of hangs (ws083-p007).
+ *
  * XXX: the copy engine is a record only, requests on it fail; the ring never
  * wraps and is rewound when an idle context's ring is nearly full; a request
- * that does not complete is failed with no reset and no recovery.
+ * on the render engine that does not complete is failed with no reset and
+ * no recovery.
  */
 
 #ifndef DRIVERS_GPU_I915_WORKER_H
@@ -96,6 +100,7 @@ int drv_i915_worker_context_create(struct i915_device *device, struct i915_engin
 void drv_i915_worker_context_destroy(struct i915_device *device, struct i915_context *context);
 int drv_i915_worker_context_attach(struct i915_device *device, struct i915_context *context);
 int drv_i915_worker_video_state(struct i915_device *device);
+void drv_i915_worker_video_reclaim(struct i915_device *device);
 void drv_i915_worker_kick(struct i915_engine *engine);
 int drv_i915_worker_run_sync(struct i915_device *device, struct i915_context *context, uint64_t batch_va);
 

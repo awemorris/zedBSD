@@ -6,7 +6,7 @@ and checks the contract the source promises (return conventions, ownership,
 ordering), not the hardware.
 
 ```
-src/drivers/gpu/i915/tests/contracts/run.sh          # all: mmio dma pci rpm pte sync rps memory forget
+src/drivers/gpu/i915/tests/contracts/run.sh          # all: mmio dma pci rpm pte sync rps memory forget reset
 src/drivers/gpu/i915/tests/contracts/run.sh mmio pte # a subset
 ```
 
@@ -20,7 +20,7 @@ variant held.
 | File | Role |
 | --- | --- |
 | `contract.[ch]` | the check recorder every test uses |
-| `mock_mmio.[ch]` | register file + forcewake handshake behind `struct i915_mmio_ops` |
+| `mock_mmio.[ch]` | register file + forcewake handshake behind `struct i915_mmio_ops`; an optional write hook lets a test model the hardware's answer to a write |
 | `mock_dma.[ch]` | non-identity, non-linear address producer behind `struct i915_dma_ops` |
 | `mock_pci.[ch]` | 256-byte config space + MSI vector allocator behind `struct i915_pci_ops` |
 | `mock_rpm.[ch]` | resume/suspend counter behind `struct i915_rpm_ops` |
@@ -41,6 +41,7 @@ variant held.
 | `rps` | `gt-power.c` (RPS: enable, start, interrupt, work, boost, stop; ws075-p020), `workqueue.c`, `mmio.c`, `trace.c` |
 | `memory` | `render/memory.c` (vkFreeMemory before what is bound to it, BUG-244), `render/object.c`, `render/codec.c`, `render/reply.c` |
 | `forget` | `render/forget.c` (an object destroyed before the views, sets, framebuffers and command buffers that name it, BUG-260), `render/object.c`, `render/descriptor.c`, `render/codec.c`, `render/reply.c` |
+| `reset` | `reset.c` (the reset of one engine: VCS0 through GEN11_GRDOM_MEDIA with the ready handshake and the converter lock; the checked reset's quarantine release with the retained video records, ws083-p007), `mmio.c`, `trace.c` |
 
 ## Host build notes
 

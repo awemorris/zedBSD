@@ -142,6 +142,10 @@ struct i915_gt_engines {
 
 	/* How many L3CC writes the render engine's resume made. */
 	unsigned l3cc_writes_rcs;
+
+	/* How many single-engine resets were made after a hang, and how many of them failed (ws083-p007). */
+	unsigned engine_resets;
+	unsigned engine_reset_failures;
 };
 
 int drv_i915_engine_setup_common(struct i915_gt_engine *ge, struct i915_engine_info *info, struct i915_gt_mem *gm, const struct i915_sseu *sseu);
@@ -153,5 +157,6 @@ void drv_i915_engine_dump(struct i915_gt_engine *ge, struct i915_execlists *el, 
 int drv_i915_engines_init(struct i915_gt_engines *es, struct i915_gt_info *gt, struct i915_gt_mem *gm, struct i915_gt_ppgtt *pp);
 void drv_i915_engines_release(struct i915_gt_engines *es, struct i915_gt_mem *gm);
 int drv_i915_gt_resume(struct i915_gt_engines *es, struct i915_gt_init *gi, const struct i915_gt_info *gt, struct i915_mmio *mmio, struct spinlock *uncore_lock);
+int drv_i915_engine_reset(struct i915_gt_engines *es, struct i915_gt_init *gi, const struct i915_gt_info *gt, unsigned index, struct i915_mmio *mmio, struct spinlock *uncore_lock);
 
 #endif

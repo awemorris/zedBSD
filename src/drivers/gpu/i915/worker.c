@@ -22,6 +22,7 @@
 
 #include "context.h"
 #include "device-info.h"
+#include "reset.h"
 #include "display/backlight.h"
 #include "display/head.h"
 #include "display/present.h"
@@ -102,6 +103,16 @@
 #define I915_WORKER_TIMELINE_BYTES	4096U
 
 /*
+ * How many hangs of the video decode engine are recovered by an engine
+ * reset; the next one stops video until the device goes (ws083-p007).
+ *
+ * Each hang holds the one worker, and with it the render engine's work, for
+ * the whole request timeout, so a stream that hangs the engine again and
+ * again is not given the engine forever.
+ */
+#define I915_WORKER_VIDEO_HANG_LIMIT	3U
+
+/*
  * Why a pass of the worker loop returned: a stop was asked for, a
  * presentation waits outside the display window (the caller lights the
  * panel), or the window is to be left: a release that cannot hold the last
@@ -123,8 +134,9 @@
  * not retained.  Context create (render) and context attach (video) fill it
  * under the device mutex and context destroy empties it; the worker uses it
  * only while running a request of that context.  A video record whose
- * request hung is retained: cut from its owner and never freed or reused,
- * as the stopped engine may still read its image and ring.
+ * request hung is retained: cut from its owner and not freed or reused
+ * while the stopped engine may still read its image and ring, that is,
+ * until an engine reset recovered its hang (ws083-p007).
  */
 struct i915_worker_context {
 	/* The session context this record stands behind; NULL for a free record. */
@@ -163,8 +175,13 @@ struct i915_worker_context {
 	/* The one request of the context; the worker runs them one at a time. */
 	struct i915_gt_request rq;
 
-	/* Nonzero once a request of the record hung on the video engine: kept, without an owner, until the device goes. */
-	int retained;
+	/*
+	 * Zero, or the number of the video engine hang that retained the
+	 * record (counted from one): it is kept, without an owner, until the
+	 * worker's video_recovered reaches that number, and is then freed
+	 * under the device mutex (drv_i915_worker_video_reclaim()).
+	 */
+	unsigned retained;
 };
 
 /*
@@ -218,11 +235,23 @@ struct i915_worker {
 	int video_index;
 
 	/*
-	 * Nonzero once a request on the video engine hung or failed: no video
-	 * context is attached and no video request runs from then on, until
-	 * the device goes (there is no engine reset yet, ws083-p007).
+	 * Nonzero once the video engine is stopped for good: its engine reset
+	 * failed, or it hung more than I915_WORKER_VIDEO_HANG_LIMIT times.  No
+	 * video context is attached and no video request runs from then on,
+	 * until a checked reset of the device.  It is written under the IRQ
+	 * lock.
 	 */
 	int video_dead;
+
+	/*
+	 * How many times a request on the video engine hung or failed, and up
+	 * to which of those hangs an engine reset has ended the engine's access
+	 * to the retained records (ws083-p007).  Both only grow, are written by
+	 * the worker under the IRQ lock, and a retained record whose number is
+	 * at most video_recovered may be freed.
+	 */
+	unsigned video_hangs;
+	unsigned video_recovered;
 
 	/* The hardware contexts behind the session contexts of the render engine. */
 	struct i915_worker_context contexts[I915_WORKER_CONTEXTS];
@@ -281,6 +310,8 @@ static int i915_worker_wait(struct i915_worker *worker, int gt_index, struct i91
 static struct i915_worker_context *i915_worker_find(struct i915_worker *worker, const struct i915_context *context);
 static int i915_worker_context_fill(struct i915_device *device, struct i915_worker_context *record, int gt_index, uint32_t sw_id, struct i915_context *context);
 static void i915_worker_video_hung(struct i915_worker *worker, struct i915_worker_context *record, int error);
+static int i915_worker_video_reset(struct i915_worker *worker);
+static void i915_worker_context_release(struct i915_device *device, struct i915_worker_context *record);
 
 /*
  * Creates the request worker of a device.
@@ -655,7 +686,7 @@ drv_i915_worker_context_create(
 	/* Finds a free context record; a retained one is not free. */
 	record = NULL;
 	for (index = 0U; index < I915_WORKER_CONTEXTS; index++) {
-		if (worker->contexts[index].owner == NULL && worker->contexts[index].retained == 0) {
+		if (worker->contexts[index].owner == NULL && worker->contexts[index].retained == 0U) {
 			record = &worker->contexts[index];
 			break;
 		}
@@ -679,10 +710,13 @@ drv_i915_worker_context_create(
 /*
  * Reports whether the video decode engine can take work.
  *
- * Returns 0 when the GT has VCS0 and it has not hung, ENODEV when there is
- * no worker or no VCS0, and EIO once a request on it hung or failed.
- * video_dead only ever goes from zero to one, so the answer read without
- * the device mutex is at worst one hang late, which the submit then sees.
+ * Returns 0 when the GT has VCS0 and it is not stopped for good, ENODEV
+ * when there is no worker or no VCS0, and EIO once it is (its engine reset
+ * failed, or it hung too often).  An engine being reset after a hang still
+ * takes work: the worker runs the next request after the reset.
+ * video_dead goes back to zero only in a checked reset of the device, so the
+ * answer read without the device mutex is at worst one hang late, which the
+ * submit then sees.
  */
 int
 drv_i915_worker_video_state(
@@ -697,7 +731,7 @@ drv_i915_worker_video_state(
 	if (worker->video_index < 0)
 		return ENODEV;
 
-	/* A video engine that hung takes nothing more. */
+	/* A video engine stopped for good takes nothing more. */
 	if (worker->video_dead != 0)
 		return EIO;
 
@@ -713,8 +747,8 @@ drv_i915_worker_video_state(
  * The caller holds the device mutex, so two attaches of one session make
  * one.  Returns 0 when the context has one already or got one, EINVAL for
  * a context of another engine, ENODEV when the worker is not serving or
- * the GT has no VCS0, EIO once the video engine hung, and ENOMEM when every
- * video record is in use.
+ * the GT has no VCS0, EIO once the video engine is stopped for good, and
+ * ENOMEM when every video record is in use.
  */
 int
 drv_i915_worker_context_attach(
@@ -737,9 +771,12 @@ drv_i915_worker_context_attach(
 	if (worker->video_index < 0)
 		return ENODEV;
 
-	/* A video engine that hung takes no new context. */
+	/* A video engine stopped for good takes no new context. */
 	if (worker->video_dead != 0)
 		return EIO;
+
+	/* Frees the records whose hang an engine reset has recovered, so they can be filled again. */
+	drv_i915_worker_video_reclaim(device);
 
 	/* A context attached before has its record already. */
 	record = i915_worker_find(worker, context);
@@ -748,7 +785,7 @@ drv_i915_worker_context_attach(
 
 	/* Finds a free video record; a retained one is not free. */
 	for (index = 0U; index < I915_WORKER_VIDEO_CONTEXTS; index++) {
-		if (worker->video_contexts[index].owner == NULL && worker->video_contexts[index].retained == 0) {
+		if (worker->video_contexts[index].owner == NULL && worker->video_contexts[index].retained == 0U) {
 			record = &worker->video_contexts[index];
 			break;
 		}
@@ -795,21 +832,59 @@ drv_i915_worker_context_destroy(
 	 * XXX: happy path only -- the context is idle here because every
 	 * request ran to its end.
 	 */
-	if (record != NULL && worker->serving != 0) {
-		/* Frees the timeline page. */
-		if (record->tl_page != NULL)
-			drv_i915_gt_object_destroy(&device->gt.mem, record->tl_page);
+	if (record != NULL && worker->serving != 0)
+		i915_worker_context_release(device, record);
 
-		/* Frees the image and the ring. */
-		drv_i915_lrc_release(&record->ce, &device->gt.mem);
-
-		/* NULL frees the record; the live count no longer keeps the worker. */
-		record->owner = NULL;
-		if (worker->live_contexts != 0U)
-			worker->live_contexts--;
-	}
+	/* A video context's end also frees the records whose hang an engine reset has recovered. */
+	if (worker != NULL && context->engine != NULL && context->engine->index == I915_ENGINE_VCS0)
+		drv_i915_worker_video_reclaim(device);
 
 	context->created = 0U;
+}
+
+/*
+ * Frees the video records a hang retained once an engine reset has ended the
+ * engine's access to them (ws083-p007).
+ *
+ * The caller holds the device mutex, under which the tables are filled and
+ * emptied.  A record retained by a hang that no reset has recovered yet
+ * stays: the stopped engine may still read its image and ring.
+ */
+void
+drv_i915_worker_video_reclaim(
+	struct i915_device *device)
+{
+	struct i915_worker *worker;
+	struct i915_worker_context *record;
+	unsigned recovered;
+	unsigned long irq;
+	unsigned index;
+
+	/* A device without a worker retains nothing. */
+	worker = device->worker;
+	if (worker == NULL)
+		return;
+
+	/* Samples how far the engine resets have come, which the worker moves under the IRQ lock. */
+	irq = spin_lock_irqsave(&device->irq_lock);
+
+	recovered = worker->video_recovered;
+
+	spin_unlock_irqrestore(&device->irq_lock, irq);
+
+	/* Frees each retained record whose hang was recovered. */
+	for (index = 0U; index < I915_WORKER_VIDEO_CONTEXTS; index++) {
+		record = &worker->video_contexts[index];
+
+		/* A record no hang retained, or one retained after the last reset, stays as it is. */
+		if (record->retained == 0U || record->retained > recovered)
+			continue;
+
+		kern_logf("i915: video: context sw_id=%u retained by hang %u freed after the engine reset\n",
+		    record->ce.sw_id,
+		    record->retained);
+		i915_worker_context_release(device, record);
+	}
 }
 
 /*
@@ -1002,18 +1077,54 @@ drv_i915_worker_run_batch(
 /*
  * Resets one engine record's engine.
  *
- * XXX: unimplemented path.  Linux: intel_engine_reset() -> execlists
- * reset_prepare/rewind/finish.  Logs and returns ENOTSUP.
+ * The video record's engine VCS0 is reset and resumed, which ends the
+ * engine's access to every record a hang retained and lifts a stop for
+ * good (ws083-p007).  The checked reset of the device calls it with no
+ * request running and the forcewake domains held.  Returns 0, ENODEV when
+ * there is no worker or no VCS0, or the engine reset's error.
+ *
+ * XXX: unimplemented path for the render and copy records.  Linux:
+ * intel_engine_reset() -> execlists reset_prepare/rewind/finish.  Logs and
+ * returns ENOTSUP.
  */
 int
 drv_i915_worker_engine_reset(
 	struct i915_engine *engine)
 {
-	/* Names the missing path in the log. */
-	kern_logf("i915: resident shim: XXX unimplemented path: engine_reset(engine %u)\n", engine->index);
+	struct i915_device *device;
+	struct i915_worker *worker;
+	unsigned long irq;
+	int error;
 
-	/* The reset is not implemented. */
-	return ENOTSUP;
+	/* Only the video record's engine is reset here. */
+	if (engine->index != I915_ENGINE_VCS0) {
+		kern_logf("i915: resident shim: XXX unimplemented path: engine_reset(engine %u)\n", engine->index);
+		return ENOTSUP;
+	}
+
+	/* A device without a worker, or a GT without VCS0, has no video engine to reset. */
+	device = engine->device;
+	worker = device->worker;
+	if (worker == NULL)
+		return ENODEV;
+	if (worker->video_index < 0)
+		return ENODEV;
+
+	/* Resets and resumes VCS0. */
+	error = i915_worker_video_reset(worker);
+	if (error != 0)
+		return error;
+
+	/* Every hang so far is recovered, and the engine is no longer stopped for good. */
+	irq = spin_lock_irqsave(&device->irq_lock);
+
+	worker->video_recovered = worker->video_hangs;
+	worker->video_dead = 0;
+
+	spin_unlock_irqrestore(&device->irq_lock, irq);
+
+	/* Succeeded: the video engine takes work again. */
+	return 0;
 }
 
 /*
@@ -1524,7 +1635,7 @@ i915_worker_run(
 		return ENOTSUP;
 	}
 
-	/* The video engine runs nothing once it hung, nor on a GT without it. */
+	/* The video engine runs nothing once it is stopped for good, nor on a GT without it. */
 	if (context->engine->index == I915_ENGINE_VCS0) {
 		if (gt_index < 0)
 			return ENODEV;
@@ -1596,7 +1707,7 @@ i915_worker_run(
 	/* The engine is done with it, whichever way it ended. */
 	drv_i915_rps_busy_end(&device->gt.init.rps);
 
-	/* A video request that hung or failed stops the video engine and keeps its context (ws083-p003a). */
+	/* A video request that hung or failed retains its context and has the video engine reset (ws083-p007). */
 	if (error != 0 && context->engine->index == I915_ENGINE_VCS0)
 		i915_worker_video_hung(worker, record, error);
 
@@ -1916,12 +2027,17 @@ i915_worker_context_fill(
 }
 
 /*
- * Stops the video engine after a request on it hung or failed: no video
- * context is attached and no video request runs from now on, and the
- * record is cut from its session context and retained, never freed or
- * reused, as the stopped engine may still read its image, ring and batch.
- * The live count keeps the worker; there is no engine reset yet
- * (ws083-p007), so this lasts until the device goes.
+ * Recovers the video engine after a request on it hung or failed
+ * (ws083-p007).
+ *
+ * The record is cut from its session context and retained, as the engine
+ * may still read its image, ring and batch.  The engine is then reset and
+ * resumed, after which the record may be freed and the engine takes the
+ * next request.  A reset that fails, or a hang past
+ * I915_WORKER_VIDEO_HANG_LIMIT, stops video for good instead: no video
+ * context is attached and no video request runs until a checked reset, and
+ * the retained records stay until then.  The live count keeps the worker
+ * while a record is retained.
  */
 static void
 i915_worker_video_hung(
@@ -1929,7 +2045,13 @@ i915_worker_video_hung(
 	struct i915_worker_context *record,
 	int error)
 {
+	struct i915_device *device;
+	unsigned long irq;
+	unsigned hang;
 	uint32_t sw_id;
+	int reset_error;
+
+	device = worker->device;
 
 	/* The context's id, for the log. */
 	sw_id = 0U;
@@ -1937,16 +2059,110 @@ i915_worker_video_hung(
 		sw_id = record->owner->sw_id;
 
 	/*
-	 * video_dead stops every later video attach and request; retained
-	 * keeps the record out of the free search and of context destroy, and
-	 * the session context no longer finds it.
+	 * Numbers the hang and retains the record with it: the free search,
+	 * context destroy and the reclaim leave the record alone until a reset
+	 * recovers this hang, and the session context no longer finds it.
 	 */
-	worker->video_dead = 1;
-	record->retained = 1;
+	irq = spin_lock_irqsave(&device->irq_lock);
+
+	worker->video_hangs++;
+	hang = worker->video_hangs;
+	record->retained = hang;
 	record->owner = NULL;
 
+	spin_unlock_irqrestore(&device->irq_lock, irq);
+
 	/* The log the tests and the reader of a hang look for. */
-	kern_logf("i915: video: request failed (error %d); video engine stopped, context sw_id=%u retained (no engine reset)\n",
+	kern_logf("i915: video: request failed (error %d); hang %u, context sw_id=%u retained\n",
 	    error,
+	    hang,
 	    sw_id);
+
+	/* A stream that hangs the engine again and again stops video for good. */
+	if (hang > I915_WORKER_VIDEO_HANG_LIMIT) {
+		irq = spin_lock_irqsave(&device->irq_lock);
+
+		worker->video_dead = 1;
+
+		spin_unlock_irqrestore(&device->irq_lock, irq);
+
+		kern_logf("i915: video: %u hangs; video engine stopped until a checked reset\n", hang);
+		return;
+	}
+
+	/* Resets and resumes the engine. */
+	reset_error = i915_worker_video_reset(worker);
+
+	/* A reset that failed leaves the engine stopped, and video with it. */
+	if (reset_error != 0) {
+		irq = spin_lock_irqsave(&device->irq_lock);
+
+		worker->video_dead = 1;
+
+		spin_unlock_irqrestore(&device->irq_lock, irq);
+
+		kern_logf("i915: video: engine reset failed (rc=%d); video engine stopped until a checked reset\n", reset_error);
+		return;
+	}
+
+	/* The reset ended the engine's access to the records of this hang and of every earlier one. */
+	irq = spin_lock_irqsave(&device->irq_lock);
+
+	worker->video_recovered = hang;
+
+	spin_unlock_irqrestore(&device->irq_lock, irq);
+
+	kern_logf("i915: video: engine reset after hang %u; video takes work again\n", hang);
+}
+
+/* Resets and resumes the video decode engine VCS0 with nothing running on it. */
+static int
+i915_worker_video_reset(
+	struct i915_worker *worker)
+{
+	struct i915_device *device;
+	int error;
+
+	/* Resets the engine alone, drops what it held and resumes it. */
+	device = worker->device;
+	error = drv_i915_engine_reset(
+		&device->gt.engines,
+		&device->gt.init,
+		&device->gt.info,
+		(unsigned)worker->video_index,
+		&device->gt.mmio,
+		&device->gt.uncore_lock);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: VCS0 takes work again. */
+	return 0;
+}
+
+/*
+ * Frees a record's hardware context: its timeline page, its image and its
+ * ring.  The caller holds the device mutex; the record becomes free.
+ */
+static void
+i915_worker_context_release(
+	struct i915_device *device,
+	struct i915_worker_context *record)
+{
+	struct i915_worker *worker;
+
+	worker = device->worker;
+
+	/* Frees the timeline page. */
+	if (record->tl_page != NULL)
+		drv_i915_gt_object_destroy(&device->gt.mem, record->tl_page);
+	record->tl_page = NULL;
+
+	/* Frees the image and the ring. */
+	drv_i915_lrc_release(&record->ce, &device->gt.mem);
+
+	/* NULL and no retention free the record; the live count no longer keeps the worker. */
+	record->owner = NULL;
+	record->retained = 0U;
+	if (worker->live_contexts != 0U)
+		worker->live_contexts--;
 }

@@ -30,8 +30,9 @@
 
 #include "intel/gt-regs.h"
 
-/* A masked register word that sets the named bits. */
+/* A masked register word that sets, or clears, the named bits. */
 #define I915_MASKED_ENABLE(bits)	((((uint32_t)(bits)) << 16) | ((uint32_t)(bits)))
+#define I915_MASKED_DISABLE(bits)	(((uint32_t)(bits)) << 16)
 
 /* How long the command streamer may take to go idle: the fast poll and the default stop timeout. */
 #define I915_STOP_CS_FAST_US		1000U
@@ -566,6 +567,82 @@ drv_i915_gt_resume(
 	drv_i915_gen11_rc6_enable(&gi->rc6, mmio, gt);
 
 	/* Succeeded: the GT is resumed. */
+	return 0;
+}
+
+/*
+ * Resets one engine after a hang and makes it take work again
+ * (__intel_engine_reset_bh()).
+ *
+ * The engine is paused and its command streamer stopped, the engine alone
+ * is reset through GDRST, the request it was running is dropped with its
+ * context id and the CSB starts over, and the engine is resumed: its
+ * workarounds, the render engine's L3CC table, and execlists with the status
+ * page.  Its kernel context's image was not touched, so it is not reset.
+ * Only the request worker calls it, which owns the execlists state, holds
+ * every forcewake domain while it serves, and has nothing else on the
+ * engine.  Returns 0, EINVAL, or why the engine reset failed; an engine
+ * that failed is left stopped.
+ */
+int
+drv_i915_engine_reset(
+	struct i915_gt_engines *es,
+	struct i915_gt_init *gi,
+	const struct i915_gt_info *gt,
+	unsigned index,
+	struct i915_mmio *mmio,
+	struct spinlock *uncore_lock)
+{
+	struct i915_gt_engine *ge;
+	uint32_t base;
+	int error;
+
+	/* Refuses an engine that was never set up. */
+	if (es == NULL ||
+	    es->inited == 0 ||
+	    index >= es->n)
+		return EINVAL;
+
+	/* Stops the engine: pauses it, stops its streamer, drains its forcewakes (reset_prepare_engine()). */
+	ge = &es->ge[index];
+	base = ge->info->mmio_base;
+	drv_i915_execlists_reset_prepare(ge, mmio);
+	if (ge->stop_cs_rc != 0)
+		es->stop_cs_timeouts++;
+
+	/* Resets the engine alone (intel_gt_reset_engine()). */
+	es->engine_resets++;
+	error = drv_i915_gt_reset_engine(uncore_lock, mmio, gt, ge->info, I915_GT_RESET_ACK_US);
+	if (error != 0) {
+		es->engine_reset_failures++;
+		drv_i915_write32(mmio, RING_MI_MODE(base), I915_MASKED_DISABLE(STOP_RING));
+		kern_logf("i915: %s: engine reset failed rc=%d; the engine stays stopped\n",
+		    ge->info->name,
+		    error);
+		return error;
+	}
+
+	/* Drops the request the engine was running and starts the CSB over (execlists_reset_rewind()). */
+	drv_i915_execlists_reset_rewind(ge, &es->el[index], mmio);
+
+	/* The engine's current context was lost, so the next park must switch to the kernel context again. */
+	es->el[index].serial++;
+
+	/* Applies the engine workarounds and the whitelist the reset cleared (intel_engine_resume()). */
+	drv_i915_engine_apply_resume_wa(gi, gt, index, mmio);
+
+	/* The render engine's L3CC table is programmed again, as execlists_resume() does. */
+	if (ge->info->class == I915_RENDER_CLASS)
+		drv_i915_init_l3cc_table(&gi->mocs, mmio, &es->l3cc_writes_rcs);
+
+	/* Enables execlists with the status page again. */
+	drv_i915_execlists_enable(ge, mmio);
+
+	/* Lets the streamer run again (intel_engine_cancel_stop_cs()). */
+	drv_i915_write32(mmio, RING_MI_MODE(base), I915_MASKED_DISABLE(STOP_RING));
+	kern_logf("i915: %s: engine reset; the engine takes work again\n", ge->info->name);
+
+	/* Succeeded: the engine is reset and resumed. */
 	return 0;
 }
 

@@ -195,8 +195,8 @@ struct i915_video_bind {
  * It is published from its creation to its destruction or its session's
  * close.  Its DPB slots move only when a submission runs (their simulation
  * runs on a copy).  The batch is made on the first decode that writes MFX
- * commands; a batch the video engine may still read when it hung is kept,
- * not freed (design §6.1).  The slice bounds are the scratch of the decode
+ * commands; the batch of a session a video engine hang quarantined is
+ * retained with the session's quarantine, not freed (design §6.1).  The slice bounds are the scratch of the decode
  * being written (submissions of a session run one at a time).
  */
 struct i915_video_session {
@@ -2162,24 +2162,34 @@ i915_video_parameters_free(
 }
 
 /*
- * Frees a video session.  Its batch, when it has one, is destroyed unless
- * the video engine hung: then the engine may still read it, and it stays
- * until the device goes (design §6.1; the engine reset of p007 frees it).
+ * Frees a video session.  Its batch, when it has one, is destroyed, unless
+ * a video engine hang quarantined the session: then the batch joins the
+ * session's quarantine and the checked reset frees it (design §6.1,
+ * ws083-p007).  The engine runs one request at a time and the one that
+ * hung was the quarantined session's, so the batch of any other session
+ * never ran on a hung engine and goes at once, whatever the engine's state.
  */
 static void
 i915_video_session_free(
 	struct i915_render_session *session,
 	struct i915_video_session *video)
 {
-	int state;
+	struct i915_device *device;
 
-	/* Destroys the batch only while the video engine is alive. */
-	if (video->batch != NULL) {
-		state = drv_i915_worker_video_state(session->vk->i915);
-		if (state == EIO)
-			kern_logf("i915: video: batch of a destroyed video session kept: the video engine hung\n");
-		else
-			drv_i915_gfx_object_destroy(session, video->batch);
+	/* Retains a quarantined session's batch on the registry, as the session's other objects are. */
+	if (video->batch != NULL && session->gpu->quarantined != 0U) {
+		device = session->vk->i915;
+		mutex_lock(&device->mutex);
+
+		video->batch->quarantined = 1U;
+		drv_i915_gem_destroy(&device->gem, video->batch);
+
+		mutex_unlock(&device->mutex);
+
+		kern_logf("i915: video: batch of a quarantined session retained for the checked reset\n");
+	} else if (video->batch != NULL) {
+		/* Any other batch is unbound and freed. */
+		drv_i915_gfx_object_destroy(session, video->batch);
 	}
 
 	/* The session. */
@@ -2917,10 +2927,11 @@ i915_video_mbs(
  * Runs what a video session's batch holds on the video decode engine: the
  * decode just written, or nothing after a skipped one.
  *
- * A run that hung or failed has already stopped video for the device (the
- * worker keeps the hardware context); here the session is quarantined, so
- * its address space and objects stay for the checked reset, and the batch
- * is kept with the session (design §6.1).
+ * A run that hung or failed has already been handled by the worker, which
+ * retained the hardware context and reset the video engine (or stopped
+ * video for good when the reset failed, ws083-p007); here the session is
+ * quarantined, so its address space, objects and batch stay for the
+ * checked reset (design §6.1).
  */
 static int
 i915_video_run(
@@ -2940,7 +2951,7 @@ i915_video_run(
 	video->cursor.count = 0U;
 	video->cursor.overflow = 0;
 
-	/* A decode that hung or failed quarantines the session; the device's video is stopped. */
+	/* A decode that hung or failed quarantines the session; the device's video was reset or stopped. */
 	if (error == ETIMEDOUT || error == EIO) {
 		device = session->vk->i915;
 		irq = spin_lock_irqsave(&device->irq_lock);
@@ -2949,7 +2960,7 @@ i915_video_run(
 
 		spin_unlock_irqrestore(&device->irq_lock, irq);
 
-		kern_logf("i915: video: decode failed on VCS0 (error %d): session quarantined, video stopped\n", error);
+		kern_logf("i915: video: decode failed on VCS0 (error %d): session quarantined\n", error);
 		return EIO;
 	}
 

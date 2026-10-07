@@ -553,9 +553,18 @@ test_submissions(void)
 	result = fixture_submit(FIXTURE_VIDEO_QUEUE);
 	assert(result == VK_SUCCESS);
 
-	/* destroy_parameters and destroy_session withdraw both. */
+	/* A decode that hangs loses the device and quarantines the session (ws083-p007). */
+	stub_batch_run_error = ETIMEDOUT;
+	result = fixture_submit(FIXTURE_VIDEO_QUEUE);
+	assert(result == (uint32_t)VK_ERROR_DEVICE_LOST);
+	assert(stub_gpu.quarantined == 1U);
+	assert(strstr(stub_log, "session quarantined") != NULL);
+
+	/* destroy_parameters and destroy_session withdraw both; the quarantined session's batch is retained. */
 	(void)fixture_run("destroy_parameters");
+	assert(stub_gem_retained == 0U);
 	(void)fixture_run("destroy_session");
+	assert(stub_gem_retained == 1U);
 }
 
 /* Writes a field check of the two decodes' batch for genxml-decode.py. */

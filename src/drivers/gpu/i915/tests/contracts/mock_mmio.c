@@ -11,6 +11,8 @@
 
 #include "mock_mmio.h"
 
+#include <stddef.h>
+
 /*
  * The register-to-domain map the mock device uses.
  *
@@ -90,6 +92,10 @@ mock_mmio_reset(
 	/* Starts the bus counters. */
 	mock->read_calls = 0;
 	mock->write_calls = 0;
+
+	/* A write only stores its value. */
+	mock->write_hook = NULL;
+	mock->write_hook_context = NULL;
 }
 
 /*
@@ -225,6 +231,10 @@ mock_mmio_write32(
 		return;
 
 	mock->registers[slot].value = value;
+
+	/* Lets the test's model of the hardware answer the write. */
+	if (mock->write_hook != NULL)
+		mock->write_hook(mock, offset, value, mock->write_hook_context);
 }
 
 /* Records a wake or sleep request of a domain. */

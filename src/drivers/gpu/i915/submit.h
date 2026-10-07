@@ -108,6 +108,7 @@ void drv_i915_execlists_submission_setup(struct i915_gt_engine *ge);
 void drv_i915_execlists_enable(struct i915_gt_engine *ge, struct i915_mmio *mmio);
 void drv_i915_execlists_reset_csb_pointers(struct i915_gt_engine *ge, struct i915_mmio *mmio);
 void drv_i915_execlists_reset_prepare(struct i915_gt_engine *ge, struct i915_mmio *mmio);
+void drv_i915_execlists_reset_rewind(struct i915_gt_engine *ge, struct i915_execlists *el, struct i915_mmio *mmio);
 int drv_i915_execlists_submit(struct i915_gt_engine *ge, struct i915_execlists *el, struct i915_mmio *mmio, struct i915_gt_request *rq);
 struct i915_gt_request *drv_i915_execlists_process_csb(struct i915_gt_engine *ge, struct i915_execlists *el, struct i915_mmio *mmio);
 
