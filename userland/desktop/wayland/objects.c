@@ -476,11 +476,19 @@ kwl_client_destroy(
 	struct kwl_object *object;
 	struct kwl_object *surface;
 	struct kwl_packet *packet;
+	uint64_t started;
+	uint64_t quiesced;
+	uint64_t surfaces_done;
+	uint64_t shell_done;
+	uint64_t objects_done;
+	unsigned long long number;
 	unsigned index;
 
-	/* A frame in flight may hold this client's buffers and callbacks; it finishes first. */
+	/* A frame in flight may hold this client's buffers and callbacks; it finishes first (each step is timed, BUG-239). */
 	server = client->server;
+	started = kwl_milliseconds();
 	kwl_compose_quiesce(server);
+	quiesced = kwl_milliseconds();
 
 	/* The input method's connection lets go of what it held (input-method.c). */
 	kwl_ime_client_gone(client);
@@ -513,6 +521,9 @@ kwl_client_destroy(
 		kwl_object_destroy(surface);
 	}
 
+	/* The surfaces are gone. */
+	surfaces_done = kwl_milliseconds();
+
 	/* Toplevel and popup backreferences must retire before their xdg_surface storage. */
 	while (1) {
 		/* Find the next child before allowing any shell parent to retire. */
@@ -530,6 +541,9 @@ kwl_client_destroy(
 		kwl_object_destroy(object);
 	}
 
+	/* The shell's children are gone. */
+	shell_done = kwl_milliseconds();
+
 	/* Unused imports and protocol globals have no remaining dependent owners. */
 	while (client->objects != NULL) {
 		/* A dead wrapper needs final free; a live identity needs protocol retirement first. */
@@ -539,6 +553,10 @@ kwl_client_destroy(
 		else
 			kwl_object_destroy(object);
 	}
+
+	/* Every object is gone. */
+	objects_done = kwl_milliseconds();
+	number = (unsigned long long)client->number;
 
 	/* Rights never consumed by a valid request still belong to this connection. */
 	for (index = 0; index < client->right_count; index++)
@@ -563,6 +581,15 @@ kwl_client_destroy(
 	/* The socket close also releases rights still unread in the kernel receive queue. */
 	close(client->fd);
 	free(client);
+
+	/* Where the time went (BUG-239: 20 clients took 23 s to release in QEMU). */
+	printf("KWL CLEANUP done client=%llu ms=%llu quiesce=%llu surfaces=%llu shell=%llu objects=%llu\n",
+	       number,
+	       (unsigned long long)(kwl_milliseconds() - started),
+	       (unsigned long long)(quiesced - started),
+	       (unsigned long long)(surfaces_done - quiesced),
+	       (unsigned long long)(shell_done - surfaces_done),
+	       (unsigned long long)(objects_done - shell_done));
 
 	/* Succeeded: the connection namespace, events and received descriptors are retired. */
 	return;
