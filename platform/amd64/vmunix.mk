@@ -273,6 +273,10 @@ endif
 ifeq ($(CONFIG_DRIVER_USB_CCID),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-ccid.c src/drivers/usb/usb-ccid-proto.c src/drivers/generic/smartcard.c
 endif
+# The USB Bluetooth controllers and the HCI class, /dev/btN (ws143-p002).
+ifeq ($(CONFIG_DRIVER_USB_BT),y)
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-bt.c src/drivers/generic/bt-hci.c src/drivers/generic/bt-hci-proto.c
+endif
 ifeq ($(CONFIG_DRIVER_USB_HUB),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-hub.c
 endif
