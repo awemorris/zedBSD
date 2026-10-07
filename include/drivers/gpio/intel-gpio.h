@@ -30,7 +30,8 @@ int drv_intel_gpio_pad_level(const struct drv_intel_gpio_pad *pad);
  * an errno when the pad cannot interrupt (another controller family, a pad
  * the firmware keeps, a controller interrupt the HAL cannot configure);
  * the user then watches the pad's level instead.  drv_intel_gpio_pad_irq_alive
- * says 0 once the controller's line was given up (it fired for no pad).
+ * says 0 once the controller's line was given up (it kept firing for no
+ * pad, BUG-261).
  */
 typedef void (*drv_intel_gpio_handler_t)(void *argument);
 

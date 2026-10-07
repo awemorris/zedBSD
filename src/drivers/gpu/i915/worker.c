@@ -839,6 +839,7 @@ drv_i915_worker_context_destroy(
 	if (worker != NULL && context->engine != NULL && context->engine->index == I915_ENGINE_VCS0)
 		drv_i915_worker_video_reclaim(device);
 
+	/* The session context has no hardware context any more. */
 	context->created = 0U;
 }
 
@@ -880,6 +881,7 @@ drv_i915_worker_video_reclaim(
 		if (record->retained == 0U || record->retained > recovered)
 			continue;
 
+		/* Says which record goes, then frees it. */
 		kern_logf("i915: video: context sw_id=%u retained by hang %u freed after the engine reset\n",
 		    record->ce.sw_id,
 		    record->retained);
@@ -2051,6 +2053,7 @@ i915_worker_video_hung(
 	uint32_t sw_id;
 	int reset_error;
 
+	/* The device whose IRQ lock guards the hang's numbers. */
 	device = worker->device;
 
 	/* The context's id, for the log. */
@@ -2086,6 +2089,7 @@ i915_worker_video_hung(
 
 		spin_unlock_irqrestore(&device->irq_lock, irq);
 
+		/* Tells the reader of the log why video stopped. */
 		kern_logf("i915: video: %u hangs; video engine stopped until a checked reset\n", hang);
 		return;
 	}
@@ -2101,6 +2105,7 @@ i915_worker_video_hung(
 
 		spin_unlock_irqrestore(&device->irq_lock, irq);
 
+		/* Tells the reader of the log why video stopped. */
 		kern_logf("i915: video: engine reset failed (rc=%d); video engine stopped until a checked reset\n", reset_error);
 		return;
 	}
@@ -2112,6 +2117,7 @@ i915_worker_video_hung(
 
 	spin_unlock_irqrestore(&device->irq_lock, irq);
 
+	/* Tells the reader of the log that video goes on. */
 	kern_logf("i915: video: engine reset after hang %u; video takes work again\n", hang);
 }
 
@@ -2150,6 +2156,7 @@ i915_worker_context_release(
 {
 	struct i915_worker *worker;
 
+	/* The worker whose live count the record is part of. */
 	worker = device->worker;
 
 	/* Frees the timeline page. */

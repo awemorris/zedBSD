@@ -590,6 +590,7 @@ i915_sfc_lock(
 		if (target == NULL)
 			return 0;
 
+		/* The partner's converter registers stand in for the engine's. */
 		i915_sfc_lock_data(target, &lock);
 		lock_to_other = 1;
 	}

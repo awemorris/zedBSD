@@ -41,12 +41,22 @@
  *
  * The handler of the controller's line looks at each pad that asked: one
  * whose bit is set in GPI_IS and GPI_IE has its GPI_IE bit cleared and its
- * GPI_IS bit cleared (written as a one), and its user's handler called;
- * the user turns the interrupt on again when it has read the device
+ * GPI_IS bit cleared (written as a one), read back so the controller's
+ * line has fallen before the EOI, and its user's handler called; the user
+ * turns the interrupt on again when it has read the device
  * (drv_intel_gpio_pad_irq_arm), so a level that stays asserted meanwhile
- * does not fire again and again.  A firing that no pad of the driver's
- * explains masks the controller's line for good (a pad the firmware left
- * enabled would otherwise fire without end), and the users go back to
+ * does not fire again and again.
+ *
+ * When the line is taken, the GPI interrupts of every group of the
+ * controller (the groups of \_SB.GPCL whose registers lie in the
+ * controller's memory) are turned off and their status cleared, as Linux's
+ * intel_gpio_irq_init() does: a pad the firmware left enabled would
+ * otherwise assert the line with no pad of the driver's to explain it
+ * (BUG-261).  A firing no pad of the driver's explains is looked into: a
+ * pad of another group, or another pad of a pad's group, whose bit is set
+ * in GPI_IS and GPI_IE has its interrupt turned off and is logged.  A
+ * firing nothing explains is counted; only IRQ_UNEXPLAINED_MAX of them in
+ * a row mask the controller's line for good, and the users go back to
  * watching their pads (drv_intel_gpio_pad_irq_alive).
  */
 
@@ -102,6 +112,19 @@
 #define IRQ_PADS_MAX		4U
 #define GROUP_PADS_MAX		32U
 
+/* The most groups of the controller whose interrupts the driver turns off and looks into, and the most community pages it maps for them. */
+#define IRQ_GROUPS_MAX		32U
+#define IRQ_PAGES_MAX		8U
+
+/*
+ * How many firings in a row that nothing explains give the controller's
+ * line up (BUG-261).  A level line can fire once more right after a pad
+ * was turned off, before the controller lowered it; a line that keeps
+ * firing with no pad asking is another matter, and is given up, as the
+ * I2C-HID's own Interrupt line is after 200.
+ */
+#define IRQ_UNEXPLAINED_MAX	200U
+
 /* The controllers whose registers are the Tiger Lake LP family's. */
 static const char *const irq_families[] = { "INTC1055", "INT34C5" };
 
@@ -128,6 +151,29 @@ struct drv_intel_gpio_pad {
 	volatile uint32_t *enable;
 	drv_intel_gpio_handler_t handler;
 	void *argument;
+	/* The physical address of its group's GPI_IS, by which the controller's groups tell the pad's bit as the driver's. */
+	uint64_t status_address;
+};
+
+/*
+ * One group of the controller whose GPI interrupts the driver turns off
+ * when it takes the line and looks into when the line fires for no pad of
+ * its own (BUG-261): its GPIO numbers, for the log, and its registers in
+ * the community's mapped page.  Filled when the line is taken; it lives
+ * for the kernel's life.
+ */
+struct irq_group {
+	/* Its first GPIO number and its pad count. */
+	uint32_t first;
+	uint32_t pads;
+
+	/* The physical address of its GPI_IS, compared with a pad's. */
+	uint64_t status_address;
+
+	/* HOSTSW_OWN, GPI_IS and GPI_IE of the group, mapped. */
+	volatile uint32_t *hostsw;
+	volatile uint32_t *status;
+	volatile uint32_t *enable;
 };
 
 /*
@@ -145,6 +191,21 @@ struct irq_controller {
 	struct drv_intel_gpio_pad *pads[IRQ_PADS_MAX];
 	unsigned pad_count;
 	struct spinlock lock;
+
+	/* The controller's groups (BUG-261), and the community pages mapped for them. */
+	struct irq_group groups[IRQ_GROUPS_MAX];
+	unsigned group_count;
+	uint64_t page_addresses[IRQ_PAGES_MAX];
+	void *page_mappings[IRQ_PAGES_MAX];
+	unsigned page_count;
+
+	/*
+	 * How many firings in a row nothing explained (reset by any firing a
+	 * pad explains), and how many pads not the driver's had their
+	 * interrupt turned off; both are changed by the handler under the lock.
+	 */
+	unsigned unexplained;
+	unsigned strays;
 };
 
 /* What the walk of the controller's _CRS found of its interrupt: its number, trigger mode and polarity. */
@@ -167,6 +228,13 @@ struct range_search {
 static struct irq_controller irq_controller;
 
 static int group_field(const struct drv_acpi_object *group, unsigned index, uint64_t *value);
+static int group_first(const struct drv_acpi_object *group, unsigned index, uint64_t *first);
+static void irq_groups_load(struct drv_acpi_node *node);
+static int irq_group_add(struct drv_acpi_node *node, uint64_t sideband, const struct drv_acpi_object *group, unsigned index);
+static int irq_page_map(uint64_t page, void **mapped);
+static void irq_groups_quiet(void);
+static bool irq_strays_off(struct irq_controller *controller, int irq);
+static uint32_t irq_pads_mask(const struct irq_controller *controller, uint64_t status_address);
 static int range_visitor(const struct drv_acpi_resource *resource, void *argument);
 static int irq_visitor(const struct drv_acpi_resource *resource, void *argument);
 static bool irq_family(struct drv_acpi_node *node);
@@ -196,7 +264,6 @@ drv_intel_gpio_pad_find(
 	uint64_t hostsw;
 	uint64_t first;
 	uint64_t page;
-	unsigned fields;
 	unsigned count;
 	unsigned index;
 	bool found;
@@ -245,10 +312,7 @@ drv_intel_gpio_pad_find(
 			continue;
 
 		/* Its first GPIO number: Alder Lake's last field, or Tiger Lake's place in the table. */
-		fields = drv_acpi_object_package_count(group);
-		first = (uint64_t)index * GROUP_NUMBER_STEP;
-		if (fields >= GROUP_FIELDS)
-			error = group_field(group, GROUP_FIRST_NUMBER, &first);
+		error = group_first(group, index, &first);
 		if (error != 0)
 			continue;
 
@@ -371,6 +435,7 @@ drv_intel_gpio_pad_irq_enable(
 	pad->hostsw = (volatile uint32_t *)((uint8_t *)pad->community_page + (pad->community - page) + pad->hostsw_offset);
 	pad->status = (volatile uint32_t *)((uint8_t *)pad->community_page + (pad->community - page) + COMMUNITY_GPI_IS + 4U * group);
 	pad->enable = (volatile uint32_t *)((uint8_t *)pad->community_page + (pad->community - page) + COMMUNITY_GPI_IE + 4U * group);
+	pad->status_address = pad->community + COMMUNITY_GPI_IS + 4U * group;
 
 	/* The pad must be the OS's (HOSTSW_OWN set): one the firmware keeps interrupts through ACPI. */
 	owned = kern_mmio_read32(pad->hostsw);
@@ -517,6 +582,10 @@ irq_take(
 	irq_controller.taken = true;
 	irq_controller.dead = true;
 
+	/* Every group's GPI interrupts off and their status cleared, while the line is still masked (BUG-261). */
+	irq_groups_load(node);
+	irq_groups_quiet();
+
 	/* The handler, while the line is still masked. */
 	error = kern_irq_register(search.irq, irq_interrupt, &irq_controller);
 	if (error != 0) {
@@ -570,7 +639,9 @@ irq_visitor(
 /*
  * The controller's line fired: each pad of the driver's that fired has its
  * interrupt turned off and acknowledged, and its handler called.  A firing
- * that no pad explains gives the line up.
+ * no pad of the driver's explains turns off the pads not the driver's that
+ * asked; a run of IRQ_UNEXPLAINED_MAX firings that nothing explains gives
+ * the line up (BUG-261).
  */
 static void
 irq_interrupt(
@@ -584,15 +655,17 @@ irq_interrupt(
 	uint32_t enable;
 	uint32_t bit;
 	unsigned index;
+	unsigned unexplained;
 	bool explained;
+	bool give_up;
 
-	/* Each pad that asked. */
+	/* Looks at each pad that asked, under the lock of the groups' registers. */
 	controller = argument;
 	explained = false;
 	spin_lock(&controller->lock);
 
 	for (index = 0; index < controller->pad_count; index++) {
-		/* Fired: set in both GPI_IS and GPI_IE. */
+		/* A pad fired when its bit is set in both GPI_IS and GPI_IE. */
 		pad = controller->pads[index];
 		bit = 1U << pad->bit;
 		status = kern_mmio_read32(pad->status);
@@ -600,24 +673,344 @@ irq_interrupt(
 		if ((status & enable & bit) == 0U)
 			continue;
 
-		/* Off until its user arms it, and acknowledged; then the user hears it. */
+		/* Turns it off until its user arms it, acknowledges it, and reads the enable back so the line falls before the EOI. */
 		kern_mmio_write32(pad->enable, enable & ~bit);
 		kern_mmio_write32(pad->status, bit);
+		(void)kern_mmio_read32(pad->enable);
+
+		/* Then its user hears it. */
 		pad->handler(pad->argument);
 		explained = true;
 	}
 
+	/* A firing no pad of the driver's explains: a pad not the driver's may have asked. */
+	if (!explained)
+		explained = irq_strays_off(controller, irq);
+
+	/* Counts a run of firings nothing explains; one that is explained ends the run. */
+	give_up = false;
+	if (explained) {
+		controller->unexplained = 0U;
+	} else {
+		controller->unexplained++;
+		if (controller->unexplained >= IRQ_UNEXPLAINED_MAX)
+			give_up = true;
+	}
+
+	/* The run's length, for the log outside the lock. */
+	unexplained = controller->unexplained;
+
 	spin_unlock(&controller->lock);
 
-	/* A firing no pad explains: the line goes for good, and the users watch their pads. */
-	if (!explained) {
+	/* The first firing of a run that nothing explains is logged. */
+	if (unexplained == 1U)
+		kern_logf("intel-gpio: irq %d fired for no pad; the line stays taken\n", irq);
+
+	/* A line that keeps firing for no pad goes for good, and the users watch their pads. */
+	if (give_up) {
 		controller->dead = true;
 		kern_irq_mask(irq);
-		kern_logf("intel-gpio: irq %d fired for no pad; given up\n", irq);
+		kern_logf("intel-gpio: irq %d fired for no pad %u times in a row; given up\n", irq, unexplained);
 	}
 
 	/* The interrupt is over (the level is quiet: every pad that fired is off). */
 	kern_irq_send_eoi(acknowledge);
+}
+
+/*
+ * Turns off the GPI interrupt of every pad not the driver's that asked on
+ * the controller's line, and acknowledges it; the caller holds the lock
+ * (BUG-261).  Reports whether one was found.
+ */
+static bool
+irq_strays_off(
+	struct irq_controller *controller,
+	int irq)
+{
+	struct irq_group *group;
+	uint32_t status;
+	uint32_t enable;
+	uint32_t ours;
+	uint32_t strays;
+	unsigned index;
+	unsigned pad;
+	bool found;
+
+	/* Looks at every group the driver keeps an eye on. */
+	found = false;
+	for (index = 0; index < controller->group_count; index++) {
+		group = &controller->groups[index];
+
+		/* The pads that asked: set in both GPI_IS and GPI_IE, other than the driver's own. */
+		status = kern_mmio_read32(group->status);
+		enable = kern_mmio_read32(group->enable);
+		ours = irq_pads_mask(controller, group->status_address);
+		strays = status & enable & ~ours;
+		if (strays == 0U)
+			continue;
+
+		/* Turns them off and acknowledges them, reading the enable back so the line falls before the EOI. */
+		kern_mmio_write32(group->enable, enable & ~strays);
+		kern_mmio_write32(group->status, strays);
+		(void)kern_mmio_read32(group->enable);
+		found = true;
+
+		/* Names each of them in the log. */
+		for (pad = 0; pad < GROUP_PADS_MAX; pad++) {
+			if ((strays & (1U << pad)) == 0U)
+				continue;
+
+			/* Counts and names the stray pad. */
+			controller->strays++;
+			kern_logf("intel-gpio: irq %d: pin %u (GPI_IS 0x%llx bit %u), not a driver's pad, fired; its interrupt turned off\n",
+			    irq,
+			    group->first + pad,
+			    (unsigned long long)group->status_address,
+			    pad);
+		}
+	}
+
+	/* Reports whether a pad not the driver's explained the firing. */
+	return found;
+}
+
+/* Gives the bits of the driver's own pads in the group whose GPI_IS is at an address; the caller holds the lock. */
+static uint32_t
+irq_pads_mask(
+	const struct irq_controller *controller,
+	uint64_t status_address)
+{
+	uint32_t mask;
+	unsigned index;
+
+	/* Collects the bit of each pad of that group. */
+	mask = 0U;
+	for (index = 0; index < controller->pad_count; index++) {
+		if (controller->pads[index]->status_address == status_address)
+			mask |= 1U << controller->pads[index]->bit;
+	}
+
+	/* Succeeded: the driver's pads of the group. */
+	return mask;
+}
+
+/*
+ * Finds the controller's groups whose GPI interrupt registers lie in its
+ * memory, from \_SB.GPCL and \SBRG, and maps their community pages
+ * (BUG-261).  A table that cannot be read leaves no group: the driver then
+ * only knows its own pads, as before.
+ */
+static void
+irq_groups_load(
+	struct drv_acpi_node *node)
+{
+	struct drv_acpi_object *table;
+	struct drv_acpi_object *group;
+	enum drv_acpi_type type;
+	uint64_t sideband;
+	unsigned count;
+	unsigned index;
+	int error;
+
+	/* The sideband space's base. */
+	error = drv_acpi_evaluate_integer(NULL, GPIO_SIDEBAND_BASE, &sideband);
+	if (error != 0) {
+		kern_logf("intel-gpio: %s cannot be read (%d); only the driver's pads are watched\n", GPIO_SIDEBAND_BASE, error);
+		return;
+	}
+
+	/* The pad groups' table. */
+	table = NULL;
+	error = drv_acpi_evaluate(NULL, GPIO_GROUP_TABLE, NULL, 0U, &table);
+	if (error != 0) {
+		kern_logf("intel-gpio: %s cannot be read (%d); only the driver's pads are watched\n", GPIO_GROUP_TABLE, error);
+		return;
+	}
+
+	/* A table that is no package names no group. */
+	type = drv_acpi_object_type(table);
+	if (type != DRV_ACPI_TYPE_PACKAGE) {
+		drv_acpi_object_release(table);
+		return;
+	}
+
+	/* Adds each group whose registers the driver can reach. */
+	count = drv_acpi_object_package_count(table);
+	for (index = 0; index < count; index++) {
+		/* The table may hold more groups than the driver keeps. */
+		if (irq_controller.group_count >= IRQ_GROUPS_MAX)
+			break;
+
+		/* A group that cannot be added is left out. */
+		group = drv_acpi_object_package_element(table, index);
+		error = irq_group_add(node, sideband, group, index);
+		(void)error;
+	}
+
+	/* The table is no longer needed. */
+	drv_acpi_object_release(table);
+}
+
+/*
+ * Adds one group of \_SB.GPCL to the controller's: its interrupt
+ * registers must be the Tiger Lake LP family's of a group of at most 32
+ * pads and lie in the controller's memory.  Returns 0, or why it was left
+ * out.
+ */
+static int
+irq_group_add(
+	struct drv_acpi_node *node,
+	uint64_t sideband,
+	const struct drv_acpi_object *group,
+	unsigned index)
+{
+	struct irq_group *entry;
+	struct range_search search;
+	uint64_t community;
+	uint64_t pads;
+	uint64_t hostsw;
+	uint64_t first;
+	uint64_t page;
+	uint64_t base;
+	void *mapped;
+	uint32_t register_index;
+	int error;
+
+	/* The community's offset. */
+	error = group_field(group, GROUP_COMMUNITY, &community);
+	if (error != 0)
+		return error;
+
+	/* The pad count. */
+	error = group_field(group, GROUP_PADS, &pads);
+	if (error != 0)
+		return error;
+
+	/* HOSTSW_OWN's offset, which says which of the community's registers are the group's. */
+	error = group_field(group, GROUP_HOSTSW_OWN, &hostsw);
+	if (error != 0)
+		return error;
+
+	/* The first GPIO number. */
+	error = group_first(group, index, &first);
+	if (error != 0)
+		return error;
+
+	/* A group of more than 32 pads, or a HOSTSW_OWN outside the family's registers, has no interrupt register of its own. */
+	if (pads > GROUP_PADS_MAX)
+		return ENOTSUP;
+	if (hostsw < COMMUNITY_HOSTSW_OWN || (hostsw & 3U) != 0U)
+		return ENOTSUP;
+	register_index = (uint32_t)((hostsw - COMMUNITY_HOSTSW_OWN) / 4U);
+	if (register_index >= COMMUNITY_GROUPS_MAX)
+		return ENOTSUP;
+
+	/* The group's GPI_IE, the last of its registers, must lie in the controller's memory. */
+	base = sideband + community;
+	search.address = base + COMMUNITY_GPI_IE + 4U * register_index;
+	search.inside = false;
+	error = drv_acpi_resources_walk(node, NULL, range_visitor, &search);
+	if (error != 0)
+		return error;
+	if (!search.inside)
+		return ENODEV;
+
+	/* The community's first page, which holds the registers. */
+	page = base & ~(uint64_t)(PAD_PAGE_SIZE - 1U);
+	error = irq_page_map(page, &mapped);
+	if (error != 0)
+		return error;
+
+	/* The group's registers in the page. */
+	entry = &irq_controller.groups[irq_controller.group_count];
+	entry->first = (uint32_t)first;
+	entry->pads = (uint32_t)pads;
+	entry->status_address = base + COMMUNITY_GPI_IS + 4U * register_index;
+	entry->hostsw = (volatile uint32_t *)((uint8_t *)mapped + (base - page) + (uint32_t)hostsw);
+	entry->status = (volatile uint32_t *)((uint8_t *)mapped + (base - page) + COMMUNITY_GPI_IS + 4U * register_index);
+	entry->enable = (volatile uint32_t *)((uint8_t *)mapped + (base - page) + COMMUNITY_GPI_IE + 4U * register_index);
+	irq_controller.group_count++;
+
+	/* Succeeded: the group is watched. */
+	return 0;
+}
+
+/* Maps a community page for the controller's groups once, or gives the mapping made before. */
+static int
+irq_page_map(
+	uint64_t page,
+	void **mapped)
+{
+	unsigned index;
+	int error;
+
+	/* A page mapped before. */
+	for (index = 0; index < irq_controller.page_count; index++) {
+		if (irq_controller.page_addresses[index] == page) {
+			*mapped = irq_controller.page_mappings[index];
+			return 0;
+		}
+	}
+
+	/* No room for another page. */
+	if (irq_controller.page_count >= IRQ_PAGES_MAX)
+		return ENOSPC;
+
+	/* Maps the page, uncached. */
+	error = kern_device_map(page, PAD_PAGE_SIZE, KERN_DEVICE_UNCACHED, mapped);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the page is kept for the other groups of its community. */
+	irq_controller.page_addresses[irq_controller.page_count] = page;
+	irq_controller.page_mappings[irq_controller.page_count] = *mapped;
+	irq_controller.page_count++;
+	return 0;
+}
+
+/*
+ * Turns off the GPI interrupts of every group of the controller and clears
+ * their status (intel_gpio_irq_init()), logging what the firmware left
+ * there; the line is still masked (BUG-261).
+ */
+static void
+irq_groups_quiet(void)
+{
+	struct irq_group *group;
+	uint32_t owned;
+	uint32_t status;
+	uint32_t enable;
+	uint32_t all;
+	unsigned index;
+
+	/* Each group, in the table's order. */
+	for (index = 0; index < irq_controller.group_count; index++) {
+		group = &irq_controller.groups[index];
+
+		/* What the firmware left: who owns the pads, which asked, which may ask. */
+		owned = kern_mmio_read32(group->hostsw);
+		status = kern_mmio_read32(group->status);
+		enable = kern_mmio_read32(group->enable);
+		kern_logf("intel-gpio: GPI_IS 0x%llx (pins %u-%u): HOSTSW_OWN %08x GPI_IS %08x GPI_IE %08x\n",
+		    (unsigned long long)group->status_address,
+		    group->first,
+		    group->first + group->pads - 1U,
+		    owned,
+		    status,
+		    enable);
+
+		/* The bits of the group's pads. */
+		all = 0xffffffffU;
+		if (group->pads < GROUP_PADS_MAX)
+			all = (1U << group->pads) - 1U;
+
+		/* Off, and the status of every pad cleared. */
+		kern_mmio_write32(group->enable, 0U);
+		kern_mmio_write32(group->status, all);
+	}
+
+	/* How many groups the line watches. */
+	kern_logf("intel-gpio: %u groups' interrupts turned off before the line is taken\n", irq_controller.group_count);
 }
 
 /* Reads one integer field of a group's package. */
@@ -651,6 +1044,35 @@ group_field(
 
 	/* Succeeded: the field's value. */
 	*value = drv_acpi_object_integer(field);
+	return 0;
+}
+
+/*
+ * Gives a group's first GPIO number: Alder Lake's last field, or, for
+ * Tiger Lake's seven fields, its place in the table GROUP_NUMBER_STEP
+ * apart (ws183-p001).
+ */
+static int
+group_first(
+	const struct drv_acpi_object *group,
+	unsigned index,
+	uint64_t *first)
+{
+	unsigned fields;
+	int error;
+
+	/* Tiger Lake's number, unless the package has Alder Lake's field. */
+	*first = (uint64_t)index * GROUP_NUMBER_STEP;
+	fields = drv_acpi_object_package_count(group);
+	if (fields < GROUP_FIELDS)
+		return 0;
+
+	/* Alder Lake's last field. */
+	error = group_field(group, GROUP_FIRST_NUMBER, first);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the group's first number. */
 	return 0;
 }
 
