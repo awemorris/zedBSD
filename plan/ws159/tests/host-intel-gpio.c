@@ -25,8 +25,14 @@
  * group's register at 0x12c set, GPI_IS 0x10c cleared); a firing with the
  * pad's GPI_IS bit set calls the user's handler once, turns GPI_IE's bit
  * off, clears GPI_IS's and sends the EOI; arming turns it on again; a
- * firing for no pad masks IRQ 14 and the pad's interrupt is no longer
- * alive.  With the argument "nomode" the HAL cannot set the mode: the
+ * firing for no pad does not mask IRQ 14 (BUG-261).  Taking the line
+ * turns off the GPI interrupts of the controller's fifteen groups whose
+ * registers lie in its memory and clears their status (a pad the firmware
+ * left enabled); a firing of a pad not the driver's, in another group or in
+ * the pad's own, has that pad's interrupt turned off and does not reach the
+ * user; 200 firings in a row that nothing explains mask IRQ 14 and the
+ * pad's interrupt is no longer alive, and a firing the pad explains ends
+ * such a run.  With the argument "nomode" the HAL cannot set the mode: the
  * enable fails and the interrupt is not alive.
  *
  *   plan/ws159/tests/run-host-intel-gpio.sh
@@ -97,10 +103,27 @@ static int tgl;
 static const uint64_t ranges[4] = { 0xfd6e0000ULL, 0xfd6d0000ULL, 0xfd6a0000ULL, 0xfd690000ULL };
 static int narrow;
 
-/* The page the driver mapped, and the DW0 value the stand-in hardware gives. */
+/*
+ * The pages the driver mapped (each address its own memory, BUG-261), the
+ * last address mapped, and the DW0 value the stand-in hardware gives.
+ * page_memory is the touchpad's community page, 0xfd6a0000.
+ */
+#define PAGES			8U
+#define TOUCHPAD_PAGE		0xfd6a0000ULL
 static uint64_t mapped_page;
-static uint8_t page_memory[4096];
+static uint64_t page_addresses[PAGES];
+static uint8_t pages[PAGES][4096];
+static unsigned page_count;
+static uint8_t *page_memory;
 static uint32_t dw0_value;
+
+/* The GPI_IS and GPI_IE of the community's first group, at 0x100 and 0x120 of a page, and how many groups take the line. */
+#define REG_FIRST_STATUS	0x100U
+#define REG_FIRST_ENABLE	0x120U
+#define WATCHED_GROUPS		15U
+
+/* How many firings in a row that nothing explains give the line up (intel-gpio.c's IRQ_UNEXPLAINED_MAX). */
+#define UNEXPLAINED_MAX		200
 
 /* The group's interrupt registers in the community's page: HOSTSW_OWN, GPI_IS, GPI_IE (group 14 is the community's fourth). */
 #define REG_HOSTSW		0xbcU
@@ -144,8 +167,13 @@ void spin_unlock(void *lock);
 unsigned long spin_lock_irqsave(void *lock);
 void spin_unlock_irqrestore(void *lock, unsigned long state);
 static void user_handler(void *argument);
+static uint8_t *page_of(uint64_t address);
+static uint8_t *page_holding(const volatile void *address);
 static uint32_t reg(unsigned offset);
 static void set_reg(unsigned offset, uint32_t value);
+static uint32_t page_reg(uint64_t page, unsigned offset);
+static void set_page_reg(uint64_t page, unsigned offset, uint32_t value);
+static void fire(void);
 static void check(int condition, const char *what);
 static struct drv_acpi_object *integer_object(uint64_t value);
 static struct drv_acpi_object *gpcl_object(void);
@@ -186,7 +214,7 @@ kern_logf(
 	va_end(arguments);
 }
 
-/* Maps a device page: the stand-in page memory, its address recorded. */
+/* Maps a device page: the stand-in memory of its address, its address recorded. */
 int
 kern_device_map(
 	uint64_t address,
@@ -198,49 +226,58 @@ kern_device_map(
 	check(size == 4096U, "one page is mapped");
 	check(attributes == 0U, "uncached");
 	mapped_page = address;
-	*mapped = page_memory;
+	*mapped = page_of(address);
 	return 0;
 }
 
-/* Reads the stand-in DW0, or a register of the community's page. */
+/* Reads the stand-in DW0, or a register of a mapped page. */
 uint32_t
 kern_mmio_read32(
 	const volatile void *address)
 {
+	uint8_t *page;
 	uint32_t value;
 
 	/* The pad's DW0. */
 	if ((const uint8_t *)address == page_memory + (PAD_DW0 & 0xfffU))
 		return dw0_value;
 
-	/* A register of the page (the same page: the community starts at 0xfd6a0000). */
-	check((const uint8_t *)address >= page_memory && (const uint8_t *)address < page_memory + sizeof(page_memory), "the read is of the mapped page");
+	/* A register of a mapped page. */
+	page = page_holding(address);
+	check(page != NULL, "the read is of a mapped page");
+	if (page == NULL)
+		return 0U;
 	memcpy(&value, (const uint8_t *)address, sizeof(value));
 	return value;
 }
 
-/* Writes a register of the community's page; GPI_IS clears the bits written as ones. */
+/* Writes a register of a mapped page; GPI_IS (0x100 to 0x11c) clears the bits written as ones. */
 void
 kern_mmio_write32(
 	volatile void *address,
 	uint32_t value)
 {
+	uint8_t *page;
 	unsigned offset;
 	uint32_t old;
 
-	/* Within the page. */
-	offset = (unsigned)((uint8_t *)address - page_memory);
-	check(offset < sizeof(page_memory), "the write is of the mapped page");
+	/* Within a mapped page. */
+	page = page_holding(address);
+	check(page != NULL, "the write is of a mapped page");
+	if (page == NULL)
+		return;
+	offset = (unsigned)((uint8_t *)address - page);
 
 	/* GPI_IS: write one to clear. */
-	if (offset == REG_STATUS) {
-		old = reg(REG_STATUS);
-		set_reg(REG_STATUS, old & ~value);
+	if (offset >= REG_FIRST_STATUS && offset < REG_FIRST_ENABLE) {
+		memcpy(&old, page + offset, sizeof(old));
+		old &= ~value;
+		memcpy(page + offset, &old, sizeof(old));
 		return;
 	}
 
 	/* Any other register keeps what is written. */
-	set_reg(offset, value);
+	memcpy(page + offset, &value, sizeof(value));
 }
 
 /* Compares two strings. */
@@ -383,26 +420,95 @@ user_handler(
 	user_calls++;
 }
 
-/* Reads a register of the stand-in page. */
+/* Gives the stand-in memory of a page's address, making it the first time. */
+static uint8_t *
+page_of(
+	uint64_t address)
+{
+	unsigned index;
+
+	/* A page met before. */
+	for (index = 0; index < page_count; index++) {
+		if (page_addresses[index] == address)
+			return pages[index];
+	}
+
+	/* A new page (the test never needs more than PAGES). */
+	if (page_count >= PAGES) {
+		printf("FAIL: more than %u pages mapped\n", PAGES);
+		exit(1);
+	}
+	page_addresses[page_count] = address;
+	page_count++;
+	return pages[page_count - 1U];
+}
+
+/* Gives the stand-in page an address points into, or NULL. */
+static uint8_t *
+page_holding(
+	const volatile void *address)
+{
+	unsigned index;
+
+	/* Looks through the pages made. */
+	for (index = 0; index < page_count; index++) {
+		if ((const uint8_t *)address >= pages[index] && (const uint8_t *)address < pages[index] + sizeof(pages[index]))
+			return pages[index];
+	}
+
+	/* Not a mapped page. */
+	return NULL;
+}
+
+/* Reads a register of the touchpad's community page. */
 static uint32_t
 reg(
 	unsigned offset)
 {
-	uint32_t value;
-
-	/* Little-endian, as the host. */
-	memcpy(&value, page_memory + offset, sizeof(value));
-	return value;
+	/* The page at 0xfd6a0000. */
+	return page_reg(TOUCHPAD_PAGE, offset);
 }
 
-/* Writes a register of the stand-in page. */
+/* Writes a register of the touchpad's community page. */
 static void
 set_reg(
 	unsigned offset,
 	uint32_t value)
 {
+	/* The page at 0xfd6a0000. */
+	set_page_reg(TOUCHPAD_PAGE, offset, value);
+}
+
+/* Reads a register of a page. */
+static uint32_t
+page_reg(
+	uint64_t page,
+	unsigned offset)
+{
+	uint32_t value;
+
 	/* Little-endian, as the host. */
-	memcpy(page_memory + offset, &value, sizeof(value));
+	memcpy(&value, page_of(page) + offset, sizeof(value));
+	return value;
+}
+
+/* Writes a register of a page. */
+static void
+set_page_reg(
+	uint64_t page,
+	unsigned offset,
+	uint32_t value)
+{
+	/* Little-endian, as the host. */
+	memcpy(page_of(page) + offset, &value, sizeof(value));
+}
+
+/* Fires the controller's line once. */
+static void
+fire(void)
+{
+	/* The token the EOI must carry. */
+	irq_handler(14, 0x1234U, irq_argument);
 }
 
 /* Finds the controller. */
@@ -643,10 +749,14 @@ main(
 {
 	struct drv_intel_gpio_pad *pad;
 	struct drv_intel_gpio_pad *irq_pad;
+	int index;
 	int nomode;
 	int error;
 	int level;
 	int alive;
+
+	/* The touchpad's community page is the first the test makes. */
+	page_memory = page_of(TOUCHPAD_PAGE);
 
 	/* The run: the HAL sets the mode, or ("nomode") it cannot. */
 	nomode = 0;
@@ -725,9 +835,17 @@ main(
 
 	/* 7. The enable: IRQ 14 registered, level and low, unmasked; GPI_IE's bit 7 set. */
 	if (irq_pad != NULL && !nomode) {
+		/* Pads the firmware left enabled and asking: in the touchpad's first group, and in another community (BUG-261). */
+		set_reg(REG_FIRST_STATUS, 0x8U);
+		set_reg(REG_FIRST_ENABLE, 0x8U);
+		set_page_reg(0xfd6d0000ULL, 0x10cU, 0x80U);
+		set_page_reg(0xfd6d0000ULL, 0x12cU, 0x80U);
 		set_reg(REG_STATUS, PAD_BIT);
 		error = drv_intel_gpio_pad_irq_enable(irq_pad, user_handler, &user_calls);
 		check(error == 0, "the pad's interrupt is enabled");
+		check(reg(REG_FIRST_ENABLE) == 0U && reg(REG_FIRST_STATUS) == 0U, "a pad the firmware left enabled in the pad's community is turned off and cleared");
+		check(page_reg(0xfd6d0000ULL, 0x12cU) == 0U && page_reg(0xfd6d0000ULL, 0x10cU) == 0U, "and one in another community too");
+		check(page_reg(0xfd6e0000ULL, 0x100U) == 0U && page_reg(0xfd690000ULL, 0x100U) == 0U, "the other communities in the controller's memory are quieted");
 		check(irq_registered == 1 && irq_trigger == 1U && irq_polarity == 1U && irq_unmasked == 1, "IRQ 14 taken level, active low, unmasked");
 		check((reg(REG_ENABLE) & PAD_BIT) != 0U, "GPI_IE's bit 7 is set");
 		check((reg(REG_STATUS) & PAD_BIT) == 0U, "GPI_IS's bit 7 was cleared first");
@@ -746,11 +864,46 @@ main(
 		drv_intel_gpio_pad_irq_arm(irq_pad);
 		check((reg(REG_ENABLE) & PAD_BIT) != 0U, "arming sets GPI_IE's bit 7 again");
 
-		/* 10. A firing for no pad: IRQ 14 masked, the interrupt no longer alive. */
-		set_reg(REG_STATUS, 0x1U);
-		irq_handler(14, 0x1234U, irq_argument);
+		/* 10. A pad not the driver's in another community fires: its interrupt is turned off, the user does not hear it, the line stays. */
+		set_page_reg(0xfd6d0000ULL, 0x104U, 0x4U);
+		set_page_reg(0xfd6d0000ULL, 0x124U, 0x4U);
+		fire();
 		alive = drv_intel_gpio_pad_irq_alive(irq_pad);
-		check(user_calls == 1 && irq_masked == 1 && eoi_count == 2, "a firing for no pad masks IRQ 14");
+		check(page_reg(0xfd6d0000ULL, 0x124U) == 0U && page_reg(0xfd6d0000ULL, 0x104U) == 0U, "a stray pad of another community is turned off and acknowledged");
+		check(user_calls == 1 && irq_masked == 0 && eoi_count == 2 && alive == 1, "the user does not hear it, and IRQ 14 stays");
+
+		/* 11. One in the pad's own group, while the pad's own status is set but not enabled: only the stray bit goes. */
+		set_reg(REG_ENABLE, 0x2U);
+		set_reg(REG_STATUS, PAD_BIT | 0x2U);
+		fire();
+		check(reg(REG_ENABLE) == 0U, "the stray pad of the pad's group is turned off");
+		check(reg(REG_STATUS) == PAD_BIT, "the pad's own status is left for its user");
+		check(user_calls == 1 && irq_masked == 0 && eoi_count == 3, "the user does not hear it, and IRQ 14 stays");
+		set_reg(REG_STATUS, 0U);
+		drv_intel_gpio_pad_irq_arm(irq_pad);
+
+		/* 12. A firing nothing explains does not give the line up. */
+		set_reg(REG_STATUS, 0x1U);
+		fire();
+		alive = drv_intel_gpio_pad_irq_alive(irq_pad);
+		check(irq_masked == 0 && alive == 1 && eoi_count == 4, "a firing for no pad keeps IRQ 14");
+
+		/* 13. A run of them broken by the pad's own firing does not either. */
+		for (index = 1; index < UNEXPLAINED_MAX - 1; index++)
+			fire();
+		set_reg(REG_STATUS, PAD_BIT);
+		fire();
+		check(user_calls == 2, "the pad's firing in the run reaches its user");
+		drv_intel_gpio_pad_irq_arm(irq_pad);
+		for (index = 0; index < UNEXPLAINED_MAX - 1; index++)
+			fire();
+		alive = drv_intel_gpio_pad_irq_alive(irq_pad);
+		check(irq_masked == 0 && alive == 1, "199 in a row after it keep IRQ 14");
+
+		/* 14. The 200th in a row: IRQ 14 masked, the interrupt no longer alive. */
+		fire();
+		alive = drv_intel_gpio_pad_irq_alive(irq_pad);
+		check(irq_masked == 1, "200 firings in a row for no pad mask IRQ 14");
 		check(alive == 0, "and the interrupt is given up");
 	}
 
