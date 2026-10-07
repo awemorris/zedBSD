@@ -12,6 +12,10 @@
  *   bt-probe [-f DEVICE] [-r]
  *   bt-probe -L [-f DEVICE]      the class's test against the test kernel's
  *                                loopback controller (ws143-p002)
+ *   bt-probe -W MS [-f DEVICE]   asks the loopback controller to withdraw
+ *                                itself MS milliseconds from now and exits
+ *                                at once (ws143-p003: bluetoothd, opening the
+ *                                node meanwhile, sees it go)
  *
  * Without -f it takes the first /dev/btN that opens.  It prints the node's
  * information, then sends Intel's Read Version (an Intel controller only,
@@ -41,6 +45,7 @@
 #include <time.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -87,6 +92,7 @@ static int probe_read(int descriptor, uint8_t *packet, size_t capacity, size_t *
 static void probe_hex(const char *what, const uint8_t *bytes, size_t length);
 static void probe_fail(const char *step, int error, unsigned *failures);
 static int probe_loopback(const char *path);
+static int probe_withdraw_later(const char *path, unsigned milliseconds);
 static void loopback_order(int descriptor, unsigned *failures);
 static void loopback_short_buffer(int descriptor, unsigned *failures);
 static void loopback_acl(int descriptor, unsigned *failures);
@@ -117,6 +123,7 @@ main(
 	int descriptor;
 	int reset_too;
 	int loopback_test;
+	long withdraw_ms;
 	int option;
 	int error;
 	int noticed;
@@ -125,7 +132,8 @@ main(
 	named = NULL;
 	reset_too = 0;
 	loopback_test = 0;
-	option = getopt(argc, argv, "f:rL");
+	withdraw_ms = -1;
+	option = getopt(argc, argv, "f:rLW:");
 	while (option != -1) {
 		if (option == 'f') {
 			named = optarg;
@@ -133,13 +141,23 @@ main(
 			reset_too = 1;
 		} else if (option == 'L') {
 			loopback_test = 1;
+		} else if (option == 'W') {
+			withdraw_ms = strtol(optarg, NULL, 10);
 		} else {
-			fprintf(stderr, "usage: bt-probe [-f DEVICE] [-r] | bt-probe -L [-f DEVICE]\n");
+			fprintf(stderr, "usage: bt-probe [-f DEVICE] [-r] | bt-probe -L [-f DEVICE] | bt-probe -W MS [-f DEVICE]\n");
 			return 2;
 		}
 
 		/* The next option. */
-		option = getopt(argc, argv, "f:rL");
+		option = getopt(argc, argv, "f:rLW:");
+	}
+
+	/* The delayed withdrawal of the loopback controller. */
+	if (withdraw_ms >= 0) {
+		if (named == NULL)
+			named = "/dev/bt0";
+		error = probe_withdraw_later(named, (unsigned)withdraw_ms);
+		return error;
 	}
 
 	/* The class's test against the loopback controller. */
@@ -1007,3 +1025,40 @@ probe_pause_ms(
 	(void)nanosleep(&pause, NULL);
 }
 
+/*
+ * Asks the loopback controller to withdraw itself after some milliseconds
+ * (0xFC03 with the delay), reads the answer and closes the node, so that
+ * another program can open it before the withdrawal.  Returns 0 or 1.
+ */
+static int
+probe_withdraw_later(
+	const char *path,
+	unsigned milliseconds)
+{
+	uint8_t parameters[2];
+	uint8_t answer[BT_EVENT_PACKET_MAX];
+	size_t length;
+	int descriptor;
+	int error;
+
+	/* The node. */
+	descriptor = open(path, O_RDWR | O_CLOEXEC);
+	if (descriptor < 0) {
+		printf("BT FAIL step=open error=%d\n", errno);
+		return 1;
+	}
+
+	/* The command with the delay, and its answer. */
+	parameters[0] = (uint8_t)(milliseconds & 0xffU);
+	parameters[1] = (uint8_t)(milliseconds >> 8);
+	error = probe_command(descriptor, LOOPBACK_OP_WITHDRAW, parameters, sizeof(parameters), answer, sizeof(answer), &length);
+	(void)close(descriptor);
+	if (error != 0) {
+		printf("BT FAIL step=withdraw error=%d\n", error);
+		return 1;
+	}
+
+	/* Succeeded: the withdrawal is due. */
+	printf("BT WITHDRAW delay_ms=%u\n", milliseconds);
+	return 0;
+}
