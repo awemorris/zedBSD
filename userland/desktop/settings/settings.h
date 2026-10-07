@@ -1227,11 +1227,18 @@ struct se_app {
 	/*
 	 * The Welcome (welcome.c, ws164-p002): whether the window shows it, the
 	 * step shown, and whether Files is to be opened as the window closes
-	 * (its last step), which the main loop carries out.
+	 * (its last step), which the main loop carries out.  ws177-p007: what
+	 * went wrong at its end, said over its bar (empty: nothing), whether
+	 * welcome.done could not be set (the next Start or Skip closes all the
+	 * same), and whether Files could not be opened (Start then only
+	 * closes).
 	 */
 	int welcome;
 	int welcome_step;
 	int request_files;
+	char welcome_message[SE_MESSAGE];
+	int welcome_unsaved;
+	int welcome_files_failed;
 };
 
 /*
@@ -1432,6 +1439,8 @@ int se_welcome_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top
 void se_welcome_bar(struct se_app *app, struct kl_canvas *canvas, const struct kl_rect *panel);
 int se_welcome_bar_height(void);
 int se_welcome_press(struct se_app *app, int index);
+int se_welcome_key(struct se_app *app, const struct se_event *event);
+void se_welcome_files_failed(struct se_app *app, int error);
 int se_soon_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
 
 /* The Users page (page-users.c, ws160-p002). */

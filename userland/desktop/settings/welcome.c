@@ -21,10 +21,20 @@
  * window; Start using Kei also opens Files, which shows Today.  Closing the
  * window sets nothing, so the Welcome comes again at the next login.  The
  * About page shows it again ("Show Welcome again").
+ *
+ * ws177-p007: a welcome.done that cannot be set, and a Files that cannot
+ * be started, are said over the bar (the window stays until the next press);
+ * the Network step says when joining failed or no network was found, and
+ * what to do next; the headers and the greeting are broken into lines when
+ * a narrow window or a long translation needs it, and the bar leaves out
+ * its dots where they would run into the buttons; Enter goes Next, Esc
+ * closes the window (the Welcome comes again at the next login), Alt+Left
+ * and Alt+Right go Back and Next.
  */
 
 #include "settings.h"
 
+#include <errno.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,6 +63,19 @@
 #define WELCOME_TEXT		14U
 #define WELCOME_TEXT_BIG	28U
 
+/* A header's title and summary sizes (libkeiland's kl_header's), the lines a summary takes at most, and the room under a line. */
+#define WELCOME_TEXT_TITLE	30U
+#define WELCOME_TEXT_SUMMARY	15U
+#define WELCOME_SUMMARY_LINES	4
+#define WELCOME_LINE_GAP	4
+
+/* The bar's message: its size and the lines it takes at most. */
+#define WELCOME_TEXT_MESSAGE	13U
+#define WELCOME_MESSAGE_LINES	2
+
+/* The room kept between the bar's dots or message and its buttons. */
+#define WELCOME_BAR_GAP		12
+
 /* The steps' words for the log and the tests. */
 static const char *const welcome_words[WELCOME_STEPS] = { "welcome", "network", "look", "languages", "keys", "done" };
 
@@ -73,6 +96,9 @@ static int welcome_done(struct se_app *app, struct kl_canvas *canvas, int x, int
 static int welcome_header(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width, const char *title, const char *summary);
 static void welcome_finish(struct se_app *app, int skipped);
 static void welcome_name(char *name, size_t size);
+static int welcome_lines(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width, const char *text, unsigned pixels, int bold, kl_color color, int most);
+static int welcome_network_note(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
+static int welcome_no_network(const struct se_app *app);
 
 /*
  * Starts the Welcome at its first step: the list of pages goes, the
@@ -129,8 +155,9 @@ se_welcome_draw(
 			summary = "The wired connection and its address.";
 		}
 
-		/* The header, then the page. */
+		/* The header, what went wrong and what to do next (ws177-p007), then the page. */
 		y = welcome_header(app, canvas, x, top, width - skip_width - 16, title, summary);
+		y = welcome_network_note(app, canvas, x, y, width);
 		return page->draw(app, canvas, x, y + WELCOME_CARD_GAP, width);
 	case WELCOME_STEP_LOOK:
 		/* The wallpaper, then the windows' look. */
@@ -168,7 +195,11 @@ se_welcome_bar(
 	kl_color color;
 	int button_y;
 	int dots_x;
+	int dots_width;
 	int next_width;
+	int back_width;
+	int left;
+	int right;
 	int step;
 	int y;
 
@@ -180,8 +211,36 @@ se_welcome_bar(
 	line.height = 1;
 	kl_canvas_fill(canvas, &line, SE_COLOR_PANEL_EDGE);
 
-	/* The dots, in the middle. */
-	dots_x = panel->x + (panel->width - (WELCOME_STEPS * WELCOME_DOT + (WELCOME_STEPS - 1) * WELCOME_DOT_GAP)) / 2;
+	/* Back, at the left, but on the first step; the room left of the middle starts after it. */
+	button_y = y + (WELCOME_BAR - 32) / 2;
+	left = panel->x + WELCOME_INSET;
+	if (app->welcome_step > WELCOME_STEP_WELCOME) {
+		back_width = se_button_width(app, kl_tr("Back"));
+		(void)se_button_draw(app, canvas, left, button_y, kl_tr("Back"), 0, 1, SE_WELCOME_BACK);
+		left += back_width + WELCOME_BAR_GAP;
+	}
+
+	/* Next, or Start using Kei (Close once Files could not be started), at the right; the middle ends before it. */
+	label = kl_tr("Next");
+	if (app->welcome_step == WELCOME_STEP_DONE)
+		label = kl_tr("Start using Kei");
+	if (app->welcome_step == WELCOME_STEP_DONE && app->welcome_files_failed)
+		label = kl_tr("Close");
+	next_width = se_button_width(app, label);
+	(void)se_button_draw(app, canvas, panel->x + panel->width - WELCOME_INSET - next_width, button_y, label, 1, 1, SE_WELCOME_NEXT);
+	right = panel->x + panel->width - WELCOME_INSET - next_width - WELCOME_BAR_GAP;
+
+	/* What went wrong, in the middle in place of the dots (ws177-p007). */
+	if (app->welcome_message[0] != '\0') {
+		(void)welcome_lines(app, canvas, left, y + 10, right - left, app->welcome_message, WELCOME_TEXT_MESSAGE, 0, SE_COLOR_BAD, WELCOME_MESSAGE_LINES);
+		return;
+	}
+
+	/* The dots, in the middle, when they fit between the buttons. */
+	dots_width = WELCOME_STEPS * WELCOME_DOT + (WELCOME_STEPS - 1) * WELCOME_DOT_GAP;
+	dots_x = panel->x + (panel->width - dots_width) / 2;
+	if (dots_x < left || dots_x + dots_width > right)
+		return;
 	for (step = 0; step < WELCOME_STEPS; step++) {
 		color = SE_COLOR_TEXT_SECONDARY;
 		if (step == app->welcome_step)
@@ -189,18 +248,6 @@ se_welcome_bar(
 		kl_canvas_circle(canvas, (float)(dots_x + step * (WELCOME_DOT + WELCOME_DOT_GAP) + WELCOME_DOT / 2), (float)(y + WELCOME_BAR / 2),
 				 (float)WELCOME_DOT / 2.0f, color);
 	}
-
-	/* Back, at the left, but on the first step. */
-	button_y = y + (WELCOME_BAR - 32) / 2;
-	if (app->welcome_step > WELCOME_STEP_WELCOME)
-		(void)se_button_draw(app, canvas, panel->x + WELCOME_INSET, button_y, kl_tr("Back"), 0, 1, SE_WELCOME_BACK);
-
-	/* Next, or Start using Kei, at the right. */
-	label = kl_tr("Next");
-	if (app->welcome_step == WELCOME_STEP_DONE)
-		label = kl_tr("Start using Kei");
-	next_width = se_button_width(app, label);
-	(void)se_button_draw(app, canvas, panel->x + panel->width - WELCOME_INSET - next_width, button_y, label, 1, 1, SE_WELCOME_NEXT);
 }
 
 /* Reports the height of the bar at the foot of the pane, which the step's content stays above. */
@@ -253,6 +300,67 @@ se_welcome_press(
 	return 1;
 }
 
+/*
+ * Takes a key the step's page did not (ws177-p007): Enter goes Next (or
+ * starts Kei on the last step), Esc closes the window without the Welcome
+ * done (it comes again at the next login), Alt+Left and Alt+Right go Back
+ * and Next.  Returns 1 when the key was the Welcome's.
+ */
+int
+se_welcome_key(
+	struct se_app *app,
+	const struct se_event *event)
+{
+	/* Alt with the arrows walks the steps. */
+	if ((event->modifiers & SE_MOD_ALT) != 0U) {
+		if (event->key == SE_KEY_LEFT && app->welcome_step > WELCOME_STEP_WELCOME)
+			return se_welcome_press(app, SE_WELCOME_BACK);
+		if (event->key == SE_KEY_RIGHT)
+			return se_welcome_press(app, SE_WELCOME_NEXT);
+		return 0;
+	}
+
+	/* Enter: Next. */
+	if (event->key == SE_KEY_ENTER)
+		return se_welcome_press(app, SE_WELCOME_NEXT);
+
+	/* Esc: the window closes, nothing set. */
+	if (event->key == SE_KEY_ESC) {
+		se_log("WELCOME closed step=%d", app->welcome_step);
+		app->welcome = 0;
+		app->request = SE_REQUEST_CLOSE;
+		return 1;
+	}
+
+	/* Succeeded: another key is not the Welcome's. */
+	return 0;
+}
+
+/*
+ * Brings the Welcome back at its last step when Files could not be
+ * started as it ended (ws177-p007): the window stays, says so, and its
+ * button only closes it.
+ */
+void
+se_welcome_files_failed(
+	struct se_app *app,
+	int error)
+{
+	/* The last step again, without the list. */
+	app->welcome = 1;
+	app->welcome_step = WELCOME_STEP_DONE;
+	app->show_sidebar = 0;
+	app->page = (unsigned)welcome_page(app, WELCOME_STEP_DONE);
+	app->page_scroll = 0;
+	app->logged_count = -1;
+	app->dirty = 1;
+
+	/* What went wrong and what to do; Start becomes Close. */
+	app->welcome_files_failed = 1;
+	(void)snprintf(app->welcome_message, sizeof(app->welcome_message), "%s (%s)", kl_tr("Files could not be opened. Open it from App Home."), strerror(error));
+	se_log("WELCOME files-failed error=%d", error);
+}
+
 /* Gives the page whose controls a step's are: Wi-Fi or Ethernet, Appearance (with Wallpaper), Languages, else Home (none). */
 static int
 welcome_page(
@@ -292,6 +400,7 @@ welcome_intro(
 	char name[64];
 	char words[128];
 	int baseline;
+	int bottom;
 
 	/* The mark. */
 	se_mark_draw(canvas, x, top, WELCOME_MARK, 1.0f);
@@ -303,14 +412,13 @@ welcome_intro(
 	baseline = top + (int)WELCOME_MARK + 28 + title.ascent;
 	(void)kl_text_draw_fit(app->text, canvas, x, baseline, words, WELCOME_TEXT_BIG, 1, width, SE_COLOR_TITLE);
 
-	/* A line on what follows. */
+	/* A line on what follows, broken into lines when it is longer than the column (ws177-p007). */
 	kl_text_metrics(app->text, WELCOME_TEXT, &line);
-	baseline += title.descent + 14 + line.ascent;
-	(void)kl_text_draw_fit(app->text, canvas, x, baseline, kl_tr("Let's set up a few things. You can change each of them later in Settings."),
-			       WELCOME_TEXT, 0, width, SE_COLOR_TEXT_SECONDARY);
+	bottom = welcome_lines(app, canvas, x, baseline + title.descent + 14, width, kl_tr("Let's set up a few things. You can change each of them later in Settings."),
+			       WELCOME_TEXT, 0, SE_COLOR_TEXT_SECONDARY, WELCOME_SUMMARY_LINES);
 
 	/* The edge below. */
-	return baseline + line.descent;
+	return bottom;
 }
 
 /* Draws the Keys step's card: a row a key; returns the edge below it. */
@@ -361,13 +469,140 @@ welcome_header(
 	const char *title,
 	const char *summary)
 {
-	struct se_page page;
+	struct kl_text_line line;
+	int bottom;
 
-	/* A page's header, of the step's words. */
-	memset(&page, 0, sizeof(page));
-	page.name = title;
-	page.summary = summary;
-	return se_page_header(app, canvas, &page, x, top, width);
+	/* The title, bold, in the size of a page's header. */
+	kl_text_metrics(app->text, WELCOME_TEXT_TITLE, &line);
+	(void)kl_text_draw_fit(app->text, canvas, x, top + line.ascent, kl_tr(title), WELCOME_TEXT_TITLE, 1, width, SE_COLOR_TEXT);
+
+	/* The summary under it, broken into lines when it is longer than the column (ws177-p007). */
+	bottom = welcome_lines(app, canvas, x, top + line.height + 2, width, kl_tr(summary), WELCOME_TEXT_SUMMARY, 0, SE_COLOR_TEXT_SECONDARY, WELCOME_SUMMARY_LINES);
+
+	/* Succeeded: the edge below the summary. */
+	return bottom;
+}
+
+/*
+ * Draws a text from a top edge in a column, broken into lines at its
+ * width (after a space where it can be), at most a number of lines (the
+ * last cut short).  Returns the edge below the last line.
+ */
+static int
+welcome_lines(
+	struct se_app *app,
+	struct kl_canvas *canvas,
+	int x,
+	int top,
+	int width,
+	const char *text,
+	unsigned pixels,
+	int bold,
+	kl_color color,
+	int most)
+{
+	struct kl_text_line line;
+	size_t done;
+	size_t length;
+	int rows;
+	int baseline;
+
+	/* Each line, as much as fits. */
+	kl_text_metrics(app->text, pixels, &line);
+	done = 0U;
+	rows = 0;
+	baseline = top + line.ascent;
+	while (text[done] != '\0' && rows < most) {
+		/* The last line allowed takes the rest, cut short. */
+		if (rows + 1 == most) {
+			(void)kl_text_draw_fit(app->text, canvas, x, baseline, text + done, pixels, bold, width, color);
+			rows++;
+			break;
+		}
+
+		/* One line, broken where it fits. */
+		length = kl_text_break(app->text, text + done, pixels, bold, width);
+		if (length == 0U)
+			break;
+		(void)kl_text_draw(app->text, canvas, x, baseline, text + done, length, pixels, bold, color);
+		rows++;
+		baseline += line.height + WELCOME_LINE_GAP;
+
+		/* The next line starts after the spaces the break left. */
+		done += length;
+		while (text[done] == ' ')
+			done++;
+	}
+
+	/* No line: the edge is the top. */
+	if (rows == 0)
+		return top;
+
+	/* Succeeded: the edge below the last line. */
+	return top + rows * (line.height + WELCOME_LINE_GAP) - WELCOME_LINE_GAP;
+}
+
+/*
+ * Draws, under the Network step's header, what went wrong and what to do
+ * next (ws177-p007): a join that failed (the Wi-Fi page's message), or a
+ * machine with no Wi-Fi and no wired connection.  Returns the edge below
+ * (the top when there is nothing to say).
+ */
+static int
+welcome_network_note(
+	struct se_app *app,
+	struct kl_canvas *canvas,
+	int x,
+	int top,
+	int width)
+{
+	char words[SE_MESSAGE + 96];
+	int none;
+	int bottom;
+
+	/* A join that failed: its reason, and the next step. */
+	if (app->network.message_bad && app->network.message[0] != '\0') {
+		(void)snprintf(words, sizeof(words), "%s %s", app->network.message, kl_tr("Try the key again, or press Next and connect later in Settings."));
+		bottom = welcome_lines(app, canvas, x, top + WELCOME_CARD_GAP, width, words, WELCOME_TEXT, 0, SE_COLOR_BAD, WELCOME_SUMMARY_LINES);
+		return bottom;
+	}
+
+	/* No network at all: Next goes on without one. */
+	none = welcome_no_network(app);
+	if (none) {
+		bottom = welcome_lines(app, canvas, x, top + WELCOME_CARD_GAP, width,
+				       kl_tr("No Wi-Fi and no wired connection were found. Press Next to go on; Settings > Ethernet or Wi-Fi connects later."),
+				       WELCOME_TEXT, 0, SE_COLOR_TEXT_SECONDARY, WELCOME_SUMMARY_LINES);
+		return bottom;
+	}
+
+	/* Succeeded: nothing to say. */
+	return top;
+}
+
+/* Tells whether the machine has no network to join now: no Wi-Fi radio and no wired interface with its cable in. */
+static int
+welcome_no_network(
+	const struct se_app *app)
+{
+	const struct kl_network_link *link;
+	size_t index;
+
+	/* A Wi-Fi radio is a network to join. */
+	if (app->network.state.wifi != KL_WIFI_ABSENT)
+		return 0;
+
+	/* A running interface but the loopback is a wired connection. */
+	for (index = 0U; index < app->network.link_count; index++) {
+		link = &app->network.links[index];
+		if (link->loopback)
+			continue;
+		if (link->running)
+			return 0;
+	}
+
+	/* Succeeded: none. */
+	return 1;
 }
 
 /*
@@ -382,15 +617,28 @@ welcome_finish(
 	const char *how;
 	int error;
 
-	/* The setting (a failure is logged; the window closes all the same). */
+	/* The setting; a failure is logged. */
 	error = se_look_set(app, "welcome.done", "1");
 	how = "done";
 	if (skipped)
 		how = "skip";
 	se_log("WELCOME %s error=%d", how, error);
 
-	/* Files at Today, then the window goes. */
-	if (!skipped)
+	/*
+	 * A setting that could not be kept is said first, and the window stays
+	 * (ws177-p007): the Welcome will come again at the next login.  The
+	 * next press goes on as before.
+	 */
+	if (error != 0 && !app->welcome_unsaved) {
+		app->welcome_unsaved = 1;
+		(void)snprintf(app->welcome_message, sizeof(app->welcome_message), "%s (%s)",
+			       kl_tr("The Welcome could not be marked as done; it will show again at the next login. Press again to go on."), strerror(error));
+		app->dirty = 1;
+		return;
+	}
+
+	/* Files at Today (not when it could not be started before), then the window goes. */
+	if (!skipped && !app->welcome_files_failed)
 		app->request_files = 1;
 	app->welcome = 0;
 	app->request = SE_REQUEST_CLOSE;
