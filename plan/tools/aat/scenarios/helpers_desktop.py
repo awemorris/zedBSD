@@ -423,6 +423,7 @@ def accent(item):
 		item.step(f"clicked the {name} accent swatch", f"{settings}; {theme}; Files: {files_line or 'no line in the log'}")
 		run.shot(item, name)
 		item.check(settings and theme, f"accent {index} did not reach Settings and the compositor")
+		item.check(files_line, f"accent {index} did not reach the desktop's Files (ZFILES ACCENT index={index}, BUG-262)")
 	item.person("Settings' and Files' highlights are purple in the first screenshot, blue in the second")
 
 

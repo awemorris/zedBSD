@@ -17,12 +17,12 @@ App Home から Files を開き、Settings を Appearance の頁で開く（`set
 
 ## 操作と確認
 1. 操作: Accent colour の 2 番目の丸（Purple、control 91）を click。
-   確認事項: 外観。正解: Settings の switch・選択と Files の選択の強調が紫になる。確認方法: log `ZSETTINGS ACCENT index=1`、`KWL THEME appearance=N accent=1`、撮影（人が見る）。
+   確認事項: 外観。正解: Settings の switch・選択と Files の選択の強調が紫になる。確認方法: log `ZSETTINGS ACCENT index=1`、`KWL THEME appearance=N accent=1`、`ZFILES ACCENT index=1`（desktop の Files）、撮影（人が見る）。
 2. 操作: 1 番目の丸（Blue、control 90）を click。
-   確認事項: 外観。正解: 青（既定）に戻る。確認方法: log `ZSETTINGS ACCENT index=0`、`KWL THEME appearance=N accent=0`、撮影。
+   確認事項: 外観。正解: 青（既定）に戻る。確認方法: log `ZSETTINGS ACCENT index=0`、`KWL THEME appearance=N accent=0`、`ZFILES ACCENT index=0`（desktop の Files）、撮影。
 
 ## 合格
-2 回とも Settings と compositor の log の行。見えは needs-person。
+2 回とも Settings・compositor・desktop の Files の log の行（BUG-262 から Files の行も必須）。見えは needs-person。
 
 ## 注記
-丸は Settings の control 90〜97（`ZSETTINGS CONTROL index=90 x y width height`、窓の中の座標）。Files の `ZFILES ACCENT index=N` は記録だけ（app の log が session の log に入る時）。最後は青に戻すので、後の scenario の撮影の色は変わらない。
+丸は Settings の control 90〜97（`ZSETTINGS CONTROL index=90 x y width height`、窓の中の座標）。desktop の Files の `ZFILES ACCENT index=N` は必須（BUG-262: Files の窓の log の行と混ざって切れていた。fm_log を 1 回の write に直した）。最後は青に戻すので、後の scenario の撮影の色は変わらない。
