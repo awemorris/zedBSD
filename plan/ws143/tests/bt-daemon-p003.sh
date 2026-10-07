@@ -65,7 +65,7 @@ log=$(guest 'cat /tmp/btd2.log')
 printf '%s\n' "$log"
 has "the daemon saw the node go" "$log" "closed (lost"
 has "and is ready again" "$(guest '/bin/bt show')" "BT SHOW state=ready"
-expect "it started twice on the controller" "$(printf '%s\n' "$log" | grep -c 'state=ready ')" 2
+expect "it started twice on the controller" "$(printf '%s\n' "$log" | grep -c ': /dev/bt[0-9]* state=ready ')" 2
 
 # 5. p002's class test, the daemon stopped.
 stop_daemon

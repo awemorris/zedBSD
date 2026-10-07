@@ -4,7 +4,7 @@
 
 Phase ID: `ws143-p004`
 Parent: [WS143](../ws.md)
-Status: test-wait（T1 の依頼は Q1 経由、q883-i02、P2、2026-10-08 朝。i02 は実装と host 試験まで。QEMU は T1。i01 は uncleared: P2 の context の都合で、部品と host 試験までで安全な地点に commit して終えた）
+Status: test-wait（i03 の直しを T1 に再依頼、Q1 経由。i02 は T1-405 で FAIL → uncleared（下の「T1-405 と i03」）。i01 は uncleared: P2 の context の都合で部品と host 試験まで）
 Phase disposition: normal
 Queue: q880-i01（P2、Q1 の投入「p004（L2CAP・SMP）。p003 と同じく試験の kernel の loopback で QEMU で確かめられる形に（loopback に要る答えを足してよい）。設計 → design-reviewer → 実装 → host 試験（fuzz を含む）」）、
 q883-i02（P2、Q1 の投入: 再開点の順に、review による設計の改訂 → session の queue と初期化（B1・B3・B5）→ pair.[ch] → main.c の口と `bt` →
@@ -330,6 +330,21 @@ q880-i01（2026-10-08、P2、host だけ）:
 - `clang -Wall -Wextra -Wshadow -Wconversion -Werror` で crypto・acl・l2cap・smp・keys を単独に compile して warning 0。
 - `python3 plan/tools/style-check.py`（新しい file と試験）: 指摘 0。
 - **未実施**: bluetoothd の Makefile への追加（新しい部品はまだ daemon に link していない。daemon の build は p003 のまま）、zedBSD の build、QEMU（T1 への依頼は無い）、実機。
+
+## T1-405 と i03（2026-10-08、P2、Q1 の投入「p004 の新しい attempt、test-wait を外して uncleared の記録」）
+
+T1-405（tree ecda54bc2、build-bt-image.sh、p002 → p003 → p004、新しい guest で 2 回とも同じ）: bt-loopback-p002 PASS。bt-daemon-p003 FAIL
+（`it started twice on the controller (got '3', want '2')`）。bt-pair-p004 FAIL（`the child killed ends the parent (got '2', want '0')`、
+他の約 40 行は ok、`the parent told to end ends the child` は ok）。q883-i02 はこれで **uncleared**。
+
+i03 の直し:
+- p003 の数え方: 子の起動の log `BLUETOOTHD READY state=ready uid=80` も `state=ready ` に当たって 3 になった（試験の前提のずれ）。数えるのを
+  `: /dev/btN state=ready ` の行（start の結果の行）に限った（T1-405 の log では 2）。
+- privsep の親: 子が死ぬと親の datagram の socket は poll で読める（相手の close で read_shutdown）のに、datagram の recv は EOF を返さずに
+  待ち続ける（unix-socket.c、review-2 BL1 の指摘の続き）。親が `privsep_answer` の recv で止まり、waitpid に戻らなかった（子は zombie で残り
+  数が 2）。recv を `MSG_DONTWAIT` にした（読める物が無ければすぐ戻り、次の round の waitpid が子の終わりを見る）。試験に kill の後の
+  `ps` の表示を足した。
+- 確認: bluetoothd の build（rc 0、warning 0）、style-check 0。QEMU は T1 に再依頼。
 
 ## 再開点（i02 の後）
 
