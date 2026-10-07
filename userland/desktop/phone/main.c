@@ -74,6 +74,13 @@ struct ph_window {
 	struct ph_view view;
 	int dirty;
 
+	/*
+	 * Only the lit widget changed since the last frame (BUG-226): the next
+	 * frame is drawn within the part kl_ui_take_damage gives, when nothing
+	 * else changed (dirty draws the whole window).
+	 */
+	int lit_changed;
+
 	/* The pointer's buttons held now: while one is, every motion is drawn (a drag); otherwise only one that lights another widget (BUG-226). */
 	unsigned buttons_held;
 	int resized;
@@ -414,9 +421,12 @@ ph_input(
 	/* Each kind of input. */
 	switch (event->kind) {
 	case KL_WINDOW_MOTION:
+		/* A drag draws the whole window; another lit widget only its part (BUG-226). */
 		redraw = kl_ui_pointer_motion(phone->ui, event->x, event->y);
-		if (redraw || phone->buttons_held != 0U)
+		if (phone->buttons_held != 0U)
 			phone->dirty = 1;
+		else if (redraw)
+			phone->lit_changed = 1;
 		break;
 	case KL_WINDOW_LEAVE:
 		(void)kl_ui_pointer_leave(phone->ui);
@@ -544,21 +554,37 @@ ph_draw(
 	struct kl_glass_panel panels[PH_PANELS_MAX];
 	struct kl_event event;
 	struct kl_rect caret;
+	struct kl_rect part;
 	size_t count;
 	int status;
 	int error;
 	int taken;
 	int wanted;
+	int partial;
 
 	/* Nothing changed and nothing moves: no frame. */
-	if (!phone->dirty && !phone->moving)
+	if (!phone->dirty && !phone->moving && !phone->lit_changed)
 		return;
 
-	/* The view. */
+	/*
+	 * Only another widget lit: the frame is drawn within the two widgets'
+	 * part alone, the rest keeping its pixels (BUG-226; the whole window
+	 * when the part cannot be told).
+	 */
+	partial = 0;
+	if (!phone->dirty && !phone->moving && phone->lit_changed)
+		partial = kl_ui_take_damage(phone->ui, &part);
+	phone->lit_changed = 0;
+
+	/* The view, within the part when there is one. */
 	phone->dirty = 0;
+	if (partial)
+		kl_canvas_clip_push(&phone->canvas, &part);
 	kl_ui_begin(phone->ui, now_us);
 	ph_view_draw(&phone->view, phone->ui, &phone->style, (int)phone->width, (int)phone->height, now_us);
 	phone->moving = kl_ui_end(phone->ui, now_us);
+	if (partial)
+		kl_canvas_clip_pop(&phone->canvas);
 
 	/*
 	 * The text input is asked for while a field has the keyboard, and told
@@ -613,8 +639,8 @@ ph_wait(
 {
 	int wait;
 
-	/* A frame due now, or requests to carry out. */
-	if (phone->dirty)
+	/* A frame due now (or its lit part), or requests to carry out. */
+	if (phone->dirty || phone->lit_changed)
 		return 0;
 	if (phone->view.request_count != 0U)
 		return 0;

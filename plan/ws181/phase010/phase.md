@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws181-p010 -->
 # ws181-p010: Alt+Shift+左右で仮想 desktop を移る
 
-Status: test-wait（T1 の依頼は Q1 経由。2026-10-08 P1 q875: 実装・build warning 0 まで。QEMU は `plan/ws181/tests/p010-guest.sh`）
+Status: test-wait（T1-391。2026-10-08 P1 q875: 実装・build warning 0 まで。QEMU は `plan/ws181/tests/p010-guest.sh`）
 Disposition: normal
 Parent: [WS181](../ws.md)
 Queue: q875（P1、2026-10-08 Q1 の承認「5330 なしで進められる小さい物を順に」の 1 番）
