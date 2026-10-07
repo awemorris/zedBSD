@@ -22,6 +22,12 @@
  * glide, BUG-218), and when they lift (axis_stop) it flies on at their
  * velocity.  The scroller does both (kl_scroller_axis, KL_VERSION 41), with
  * the same inertia and rubber band as a finger's.
+ *
+ * The ends are 0..content-viewport on each axis that scrolls, and the
+ * rubber band is measured against the viewport; kl_scroll_set_bounds
+ * (KL_VERSION 61, ws090-p015) gives other ends and another size instead,
+ * for a view whose position runs below 0 (Terminal's scrollback) or whose
+ * content is laid out by the program (Notes' zoomed page).
  */
 
 #include <keiland/keiland.h>
@@ -42,7 +48,9 @@
 static void scroll_bounds(struct kl_scroll *scroll);
 static void scroll_clamp(struct kl_scroll *scroll);
 static void scroll_place(struct kl_scroll *scroll, double x, double y, uint64_t now_us);
-static double scroll_within(double value, double limit);
+static double scroll_minimum_x(const struct kl_scroll *scroll);
+static double scroll_minimum_y(const struct kl_scroll *scroll);
+static double scroll_within(double value, double minimum, double maximum);
 
 /*
  * Makes a scroll along some axes (KL_SCROLL_X, KL_SCROLL_Y), at 0, 0
@@ -97,11 +105,12 @@ kl_scroll_set_size(
 	double viewport_width,
 	double viewport_height)
 {
-	/* The sizes. */
+	/* The sizes, whose ends replace any kl_scroll_set_bounds gave. */
 	scroll->content_width = content_width;
 	scroll->content_height = content_height;
 	scroll->viewport_width = viewport_width;
 	scroll->viewport_height = viewport_height;
+	scroll->bounded = 0;
 
 	/* The scroller's bounds, and the position within them. */
 	scroll_bounds(scroll);
@@ -109,8 +118,62 @@ kl_scroll_set_size(
 		scroll_clamp(scroll);
 
 	/* A glide's target within the new ends too. */
-	scroll->to_x = scroll_within(scroll->to_x, kl_scroll_limit_x(scroll));
-	scroll->to_y = scroll_within(scroll->to_y, kl_scroll_limit_y(scroll));
+	scroll->to_x = scroll_within(scroll->to_x, scroll_minimum_x(scroll), kl_scroll_limit_x(scroll));
+	scroll->to_y = scroll_within(scroll->to_y, scroll_minimum_y(scroll), kl_scroll_limit_y(scroll));
+}
+
+/*
+ * Sets the ends of the position on each axis and the size the rubber band
+ * past them is measured against, in place of the ends of the sizes
+ * (KL_VERSION 61); a position past the new ends moves back within them
+ * (unless a finger holds the content).  An axis the scroll does not move
+ * along keeps 0.
+ *
+ * Returns 0, or EINVAL for a maximum below its minimum or a band not above
+ * zero.
+ */
+int
+kl_scroll_set_bounds(
+	struct kl_scroll *scroll,
+	double minimum_x,
+	double maximum_x,
+	double minimum_y,
+	double maximum_y,
+	double band_width,
+	double band_height)
+{
+	/* Ends in order. */
+	if (maximum_x < minimum_x)
+		return EINVAL;
+	if (maximum_y < minimum_y)
+		return EINVAL;
+
+	/* A rubber band with a size. */
+	if (band_width <= 0.0)
+		return EINVAL;
+	if (band_height <= 0.0)
+		return EINVAL;
+
+	/* The ends and the band, which the limits and the scroller follow from now. */
+	scroll->bounded = 1;
+	scroll->minimum_x = minimum_x;
+	scroll->maximum_x = maximum_x;
+	scroll->minimum_y = minimum_y;
+	scroll->maximum_y = maximum_y;
+	scroll->band_width = band_width;
+	scroll->band_height = band_height;
+
+	/* The scroller's bounds, and the position within them. */
+	scroll_bounds(scroll);
+	if (!scroll->touched)
+		scroll_clamp(scroll);
+
+	/* A glide's target within the new ends too. */
+	scroll->to_x = scroll_within(scroll->to_x, scroll_minimum_x(scroll), kl_scroll_limit_x(scroll));
+	scroll->to_y = scroll_within(scroll->to_y, scroll_minimum_y(scroll), kl_scroll_limit_y(scroll));
+
+	/* Succeeded: the ends hold. */
+	return 0;
 }
 
 /*
@@ -158,8 +221,8 @@ kl_scroll_move_to(
 	uint64_t now_us)
 {
 	/* The place within the ends. */
-	x = scroll_within(x, kl_scroll_limit_x(scroll));
-	y = scroll_within(y, kl_scroll_limit_y(scroll));
+	x = scroll_within(x, scroll_minimum_x(scroll), kl_scroll_limit_x(scroll));
+	y = scroll_within(y, scroll_minimum_y(scroll), kl_scroll_limit_y(scroll));
 
 	/* The finger no longer owns the content. */
 	scroll->touched = 0;
@@ -282,9 +345,9 @@ kl_scroll_key(
 		break;
 	case KL_KEY_HOME:
 		/* Home goes to the start (with or without Control). */
-		y = 0.0;
+		y = scroll_minimum_y(scroll);
 		if ((modifiers & KL_MOD_CTRL) == 0U)
-			x = 0.0;
+			x = scroll_minimum_x(scroll);
 		break;
 	case KL_KEY_END:
 		y = kl_scroll_limit_y(scroll);
@@ -347,22 +410,30 @@ kl_scroll_drag(
 
 /*
  * The finger lifts with a velocity (pixels a second, as the finger moved):
- * the content flies on, or settles within its ends.
+ * the content flies on, or settles within its ends.  Returns 1 when it
+ * flies (KL_VERSION 61), 0 when it settles or no finger held it.
  */
-void
+int
 kl_scroll_fling(
 	struct kl_scroll *scroll,
 	double vx,
 	double vy,
 	uint64_t now_us)
 {
+	int flung;
+
 	/* Only a held content flies. */
 	if (!scroll->touched)
-		return;
+		return 0;
 
 	/* The scroller takes the velocity; the content is the scroller's until it rests. */
-	kl_scroller_release(scroll->scroller, now_us, vx, vy);
+	flung = kl_scroller_release(scroll->scroller, now_us, vx, vy);
 	scroll->released = 1;
+	if (flung == 0)
+		return 0;
+
+	/* Succeeded: the content flies. */
+	return 1;
 }
 
 /*
@@ -387,7 +458,8 @@ kl_scroll_cancel(
  * Scrolls by an axis event of a window: a wheel's glides as kl_scroll_wheel
  * does; a touch pad's fingers (KL_AXIS_SOURCE_FINGER) hold the content and
  * move it at once by dx, dy (as a wheel scrolls: down and right positive),
- * the first move catching content that flies.
+ * the first move catching content that flies.  The event's time is taken
+ * as now (kl_scroll_axis_at keeps them apart).
  */
 void
 kl_scroll_axis(
@@ -397,35 +469,8 @@ kl_scroll_axis(
 	unsigned source,
 	uint64_t now_us)
 {
-	int holding;
-
-	/* A wheel, or anything that is not fingers, glides. */
-	if (source != KL_AXIS_SOURCE_FINGER) {
-		kl_scroll_wheel(scroll, dx, dy, now_us);
-		return;
-	}
-
-	/* The fingers' first move takes the content: the scroller from where it is (a glide stops there). */
-	holding = kl_scroller_axis_holding(scroll->scroller);
-	if (!holding) {
-		if (!scroll->touched) {
-			scroll_bounds(scroll);
-			kl_scroller_set_position(scroll->scroller, scroll->x, scroll->y);
-		}
-		scroll->gliding = 0;
-		scroll->touched = 1;
-		scroll->released = 0;
-	}
-
-	/* Only the axes the scroll moves along. */
-	if ((scroll->axes & KL_SCROLL_X) == 0U)
-		dx = 0.0;
-	if ((scroll->axes & KL_SCROLL_Y) == 0U)
-		dy = 0.0;
-
-	/* The scroller holds the content and moves it with the fingers (catching a flight at the first move). */
-	(void)kl_scroller_axis(scroll->scroller, dx, dy, now_us, now_us);
-	scroll->moved_us = now_us;
+	/* The same, at the event's time. */
+	(void)kl_scroll_axis_at(scroll, dx, dy, source, now_us, now_us);
 }
 
 /*
@@ -438,8 +483,99 @@ kl_scroll_axis_stop(
 	struct kl_scroll *scroll,
 	uint64_t now_us)
 {
+	int flung;
+
+	/* The same, at the event's time, without the velocity. */
+	flung = kl_scroll_axis_stop_at(scroll, now_us, now_us, NULL, NULL);
+	if (flung == 0)
+		return 0;
+
+	/* Succeeded: the content flies. */
+	return 1;
+}
+
+/*
+ * Scrolls by an axis event as kl_scroll_axis does, with the event's own
+ * time (event_us, which the fingers' velocity is worked out from) apart
+ * from the time the steps use (now_us).  A touch pad's first move takes
+ * the content from where the scroll has it, also while the fingers hold
+ * it after kl_scroll_move_to handed a new place over.  Returns 1 when the
+ * fingers' first move caught content that flew (KL_VERSION 61), 0
+ * otherwise.
+ */
+int
+kl_scroll_axis_at(
+	struct kl_scroll *scroll,
+	double dx,
+	double dy,
+	unsigned source,
+	uint64_t event_us,
+	uint64_t now_us)
+{
+	int holding;
+	int caught;
+
+	/* A wheel, or anything that is not fingers, glides. */
+	if (source != KL_AXIS_SOURCE_FINGER) {
+		kl_scroll_wheel(scroll, dx, dy, now_us);
+		return 0;
+	}
+
+	/* The fingers' first move takes the content: the scroller from where it is (a glide stops there). */
+	holding = kl_scroller_axis_holding(scroll->scroller);
+	if (!holding || !scroll->touched) {
+		if (!scroll->touched) {
+			scroll_bounds(scroll);
+			kl_scroller_set_position(scroll->scroller, scroll->x, scroll->y);
+		}
+
+		/* The fingers own the content from here: no glide, and they have not lifted. */
+		scroll->gliding = 0;
+		scroll->touched = 1;
+		scroll->released = 0;
+	}
+
+	/* Only the axes the scroll moves along. */
+	if ((scroll->axes & KL_SCROLL_X) == 0U)
+		dx = 0.0;
+	if ((scroll->axes & KL_SCROLL_Y) == 0U)
+		dy = 0.0;
+
+	/* The scroller holds the content and moves it with the fingers (catching a flight at the first move). */
+	caught = kl_scroller_axis(scroll->scroller, dx, dy, event_us, now_us);
+	scroll->moved_us = now_us;
+	if (scroll->moved_us == 0U)
+		scroll->moved_us = 1U;
+	if (caught == 0)
+		return 0;
+
+	/* Succeeded: a flight was caught. */
+	return 1;
+}
+
+/*
+ * The touch pad's fingers have lifted at event_us: the content flies on
+ * from now_us at their velocity, as kl_scroll_axis_stop does, and the
+ * velocity is given (pixels a second, a wheel's way; either may be NULL;
+ * 0 when the fingers held nothing).  Returns 1 when it flies (KL_VERSION
+ * 61), 0 otherwise.
+ */
+int
+kl_scroll_axis_stop_at(
+	struct kl_scroll *scroll,
+	uint64_t event_us,
+	uint64_t now_us,
+	double *vx,
+	double *vy)
+{
 	int holding;
 	int flung;
+
+	/* No velocity until the scroller gives one. */
+	if (vx != NULL)
+		*vx = 0.0;
+	if (vy != NULL)
+		*vy = 0.0;
 
 	/* Only content the fingers hold. */
 	holding = kl_scroller_axis_holding(scroll->scroller);
@@ -447,12 +583,31 @@ kl_scroll_axis_stop(
 		return 0;
 
 	/* The scroller throws it; the content is the scroller's until it rests. */
-	flung = kl_scroller_axis_stop(scroll->scroller, now_us, now_us, NULL, NULL);
+	flung = kl_scroller_axis_stop(scroll->scroller, event_us, now_us, vx, vy);
 	scroll->released = 1;
 	if (flung == 0)
 		return 0;
 
 	/* Succeeded: the content flies. */
+	return 1;
+}
+
+/*
+ * Tells whether a touch pad's fingers hold the content (from their first
+ * move until they lift, KL_VERSION 61).
+ */
+int
+kl_scroll_axis_holding(
+	const struct kl_scroll *scroll)
+{
+	int holding;
+
+	/* The scroller follows the fingers. */
+	holding = kl_scroller_axis_holding(scroll->scroller);
+	if (holding == 0)
+		return 0;
+
+	/* Succeeded: the fingers hold it. */
 	return 1;
 }
 
@@ -528,6 +683,10 @@ kl_scroll_limit_x(
 	if ((scroll->axes & KL_SCROLL_X) == 0U)
 		return 0.0;
 
+	/* The end kl_scroll_set_bounds gave. */
+	if (scroll->bounded)
+		return scroll->maximum_x;
+
 	/* Content that fits. */
 	if (scroll->content_width <= scroll->viewport_width)
 		return 0.0;
@@ -547,6 +706,10 @@ kl_scroll_limit_y(
 	/* An axis the scroll does not move along. */
 	if ((scroll->axes & KL_SCROLL_Y) == 0U)
 		return 0.0;
+
+	/* The end kl_scroll_set_bounds gave. */
+	if (scroll->bounded)
+		return scroll->maximum_y;
 
 	/* Content that fits. */
 	if (scroll->content_height <= scroll->viewport_height)
@@ -595,7 +758,7 @@ kl_scroll_draw_bars(
 		length = (double)viewport->height * scroll->viewport_height / scroll->content_height;
 		if (length < (double)SCROLL_BAR_MIN)
 			length = (double)SCROLL_BAR_MIN;
-		place = scroll_within(scroll->y, limit) / limit * ((double)viewport->height - length - 2.0 * SCROLL_BAR_GAP);
+		place = scroll_within(scroll->y, 0.0, limit) / limit * ((double)viewport->height - length - 2.0 * SCROLL_BAR_GAP);
 		kl_canvas_round(canvas, (float)(viewport->x + viewport->width - SCROLL_BAR_WIDTH - SCROLL_BAR_GAP),
 				 (float)((double)viewport->y + SCROLL_BAR_GAP + place),
 				 (float)SCROLL_BAR_WIDTH,
@@ -610,7 +773,7 @@ kl_scroll_draw_bars(
 		length = (double)viewport->width * scroll->viewport_width / scroll->content_width;
 		if (length < (double)SCROLL_BAR_MIN)
 			length = (double)SCROLL_BAR_MIN;
-		place = scroll_within(scroll->x, limit) / limit * ((double)viewport->width - length - 2.0 * SCROLL_BAR_GAP);
+		place = scroll_within(scroll->x, 0.0, limit) / limit * ((double)viewport->width - length - 2.0 * SCROLL_BAR_GAP);
 		kl_canvas_round(canvas, (float)((double)viewport->x + SCROLL_BAR_GAP + place),
 				 (float)(viewport->y + viewport->height - SCROLL_BAR_WIDTH - SCROLL_BAR_GAP),
 				 (float)length,
@@ -623,24 +786,34 @@ kl_scroll_draw_bars(
 	return 1;
 }
 
-/* Gives the scroller the ends and the viewport (it needs a viewport above zero). */
+/* Gives the scroller the ends and the rubber band's size (the viewport's unless set; it needs one above zero). */
 static void
 scroll_bounds(
 	struct kl_scroll *scroll)
 {
+	double minimum_x;
+	double minimum_y;
 	double width;
 	double height;
 
-	/* A viewport of at least a pixel. */
+	/* The band: the viewport, or the size kl_scroll_set_bounds gave. */
 	width = scroll->viewport_width;
+	height = scroll->viewport_height;
+	if (scroll->bounded) {
+		width = scroll->band_width;
+		height = scroll->band_height;
+	}
+
+	/* At least a pixel each way. */
 	if (width < 1.0)
 		width = 1.0;
-	height = scroll->viewport_height;
 	if (height < 1.0)
 		height = 1.0;
 
 	/* The ends of each axis (an axis that does not move has none). */
-	(void)kl_scroller_set_bounds(scroll->scroller, 0.0, kl_scroll_limit_x(scroll), 0.0, kl_scroll_limit_y(scroll), width, height);
+	minimum_x = scroll_minimum_x(scroll);
+	minimum_y = scroll_minimum_y(scroll);
+	(void)kl_scroller_set_bounds(scroll->scroller, minimum_x, kl_scroll_limit_x(scroll), minimum_y, kl_scroll_limit_y(scroll), width, height);
 }
 
 /* Keeps the position within the ends. */
@@ -648,9 +821,9 @@ static void
 scroll_clamp(
 	struct kl_scroll *scroll)
 {
-	/* Each axis within its end. */
-	scroll->x = scroll_within(scroll->x, kl_scroll_limit_x(scroll));
-	scroll->y = scroll_within(scroll->y, kl_scroll_limit_y(scroll));
+	/* Each axis within its ends. */
+	scroll->x = scroll_within(scroll->x, scroll_minimum_x(scroll), kl_scroll_limit_x(scroll));
+	scroll->y = scroll_within(scroll->y, scroll_minimum_y(scroll), kl_scroll_limit_y(scroll));
 }
 
 /* Puts the content at a place, noting when it moved. */
@@ -673,19 +846,54 @@ scroll_place(
 		scroll->moved_us = 1U;
 }
 
-/* Reports a value within 0..limit. */
+/* Reports where the position may go back to across: kl_scroll_set_bounds' minimum, or 0. */
+static double
+scroll_minimum_x(
+	const struct kl_scroll *scroll)
+{
+	/* An axis the scroll does not move along stays at 0. */
+	if ((scroll->axes & KL_SCROLL_X) == 0U)
+		return 0.0;
+
+	/* The ends of the sizes start at 0. */
+	if (!scroll->bounded)
+		return 0.0;
+
+	/* Reports the minimum given. */
+	return scroll->minimum_x;
+}
+
+/* Reports where the position may go back to down: kl_scroll_set_bounds' minimum, or 0. */
+static double
+scroll_minimum_y(
+	const struct kl_scroll *scroll)
+{
+	/* An axis the scroll does not move along stays at 0. */
+	if ((scroll->axes & KL_SCROLL_Y) == 0U)
+		return 0.0;
+
+	/* The ends of the sizes start at 0. */
+	if (!scroll->bounded)
+		return 0.0;
+
+	/* Reports the minimum given. */
+	return scroll->minimum_y;
+}
+
+/* Reports a value within minimum..maximum (the minimum wins when they cross). */
 static double
 scroll_within(
 	double value,
-	double limit)
+	double minimum,
+	double maximum)
 {
-	/* Below the start. */
-	if (value < 0.0)
-		return 0.0;
-
 	/* Past the end. */
-	if (value > limit)
-		return limit;
+	if (value > maximum)
+		value = maximum;
+
+	/* Below the start. */
+	if (value < minimum)
+		return minimum;
 
 	/* Within. */
 	return value;
