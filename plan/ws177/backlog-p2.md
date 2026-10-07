@@ -42,7 +42,7 @@
 | WS161 ws161-p004（libpasskey の os 層と fidoctl） | report に番号の付いた FIDO の鍵、64 byte でない report の鍵 | ID の byte を外して読む・report の大きさに合わせる（今は開かない・EIO） | `libpasskey/os-zedbsd.c` の `pk_os_open`、`os-posix.c` の `os_read` | 2026-10-06 |
 | WS161 ws161-p004 | 鍵が 2 本以上ある時の fidoctl | どれかを選ばせる・Selection（触った鍵）で決める（今は `-d` が無ければ一覧の最初） | `fidoctl/main.c` の `fidoctl_open`、`pk_ctap2_selection` | 2026-10-06 |
 | WS161 ws161-p004 | 使っている途中で鍵が抜かれた | 抜かれたことを言って終わる（今は read の ENODEV・EIO をそのまま出す） | `libpasskey/os-posix.c` の `os_read` | 2026-10-06 |
-| WS161 ws161-p004 | PIN の入力 | 端末では echo を切って読む・PIN の長さの規則（4〜63 byte）を先に確かめる（今は標準入力の 1 行をそのまま） | `fidoctl/main.c` の `fidoctl_read_pin` | 2026-10-06 |
+| WS161 ws161-p004 → [ws177-p006](phase006/phase.md) | PIN の入力 | 端末では echo を切って読む・PIN の長さの規則（4〜63 byte）を先に確かめる（今は標準入力の 1 行をそのまま） | `fidoctl/main.c` の `fidoctl_read_pin` | 2026-10-06 |
 | WS161 ws161-p004 | 鍵の reset、resident の credential の一覧と削除 | `fidoctl reset`・`credentials`（今は無い） | `fidoctl/main.c`、`ctap2.c` | 2026-10-06 |
 | WS172 ws172-p003（passkey-fido2） | 複数の鍵が同じ account の credential を持つ | 触れた鍵を選ぶ（selection 0x0B、2.0 では UP だけの GetAssertion）（今は最初に見つかった鍵） | `passkey-fido2/helper.c` の `helper_assert` | 2026-10-06 |
 | WS172 ws172-p003 | 試行の途中に挿した・かざした鍵 | 途中で現れた鍵にも問う（今は開始の時の鍵だけ） | `passkey-fido2/device.c` の `fido2_devices_open`、`helper.c` | 2026-10-06 |
