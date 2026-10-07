@@ -58,7 +58,7 @@
 /* The largest page picture the zoom may ask for, in pixels on its longer side. */
 #define NOTES_TOUCH_PICTURE_MAX	4096.0f
 
-/* How many toolbar taps wait for the main loop at most. */
+/* How many taps wait for the main loop at most. */
 #define NOTES_TOUCH_TAPS	4U
 
 /* The kinds of a writing finger's events: it touches, moves, lifts, or its line is taken back. */
@@ -172,9 +172,10 @@ struct notes_touch {
 	float pinch_zoom;
 	double pinch_ratio;
 
-	/* The toolbar taps not yet taken, oldest first. */
+	/* The taps not yet taken, oldest first, and whether each was on the toolbar (ws177-p012: the page's too). */
 	float tap_x[NOTES_TOUCH_TAPS];
 	float tap_y[NOTES_TOUCH_TAPS];
+	unsigned char tap_toolbar[NOTES_TOUCH_TAPS];
 	unsigned tap_count;
 
 	/* Writing with a finger. */
@@ -220,7 +221,7 @@ void notes_touch_event(struct notes_touch *touch, const struct notes_touch_event
 void notes_touch_pen(struct notes_touch *touch, int near, uint64_t now);
 int notes_touch_tick(struct notes_touch *touch, uint64_t now);
 void notes_touch_view(const struct notes_touch *touch, float *x, float *y, float *scale);
-int notes_touch_take_tap(struct notes_touch *touch, float *x, float *y);
+int notes_touch_take_tap(struct notes_touch *touch, float *x, float *y, int *toolbar);
 void notes_touch_write_mode(struct notes_touch *touch, int on, uint64_t now);
 int notes_touch_take_write(struct notes_touch *touch, struct notes_touch_write *write);
 void notes_touch_top(struct notes_touch *touch);

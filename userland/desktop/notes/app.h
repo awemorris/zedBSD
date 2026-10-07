@@ -217,6 +217,15 @@ struct notes_window {
 	int box_open;
 	struct kl_window_event box_events[NOTES_BOX_EVENTS];
 	unsigned box_count;
+
+	/*
+	 * ws177-p012: the box's rectangle in the window, and the finger that
+	 * went down on it (box_touching): its touches are the box's alone, so
+	 * that a finger moves the caret and selects instead of moving the page.
+	 */
+	struct kl_rect box_rect;
+	int box_touching;
+	int32_t box_touch_id;
 };
 
 /*
@@ -508,6 +517,7 @@ void notes_window_input(struct notes_window *window, const struct notes_input *i
 void notes_window_set_title(struct notes_window *window, const char *title);
 void notes_window_set_fullscreen(struct notes_window *window, int fullscreen);
 void notes_window_box(struct notes_window *window, int open);
+void notes_window_box_rect(struct notes_window *window, const struct kl_rect *rect);
 uint64_t notes_clock(void);
 
 /* The pen through the tablet protocol (tablet.c). */

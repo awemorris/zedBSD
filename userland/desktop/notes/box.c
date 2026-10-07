@@ -39,6 +39,10 @@
 #define BOX_FONT		KEILAND_DATADIR "/fonts/keiland.ttf"
 #define BOX_FALLBACK_FONT	KEILAND_DATADIR "/fonts/keiland-fallback.ttf"
 
+/* The fonts tried in turn when the desktop's is missing (ws177-p012): the monospaced, then the fallbacks. */
+#define BOX_SECOND_FONT		KEILAND_DATADIR "/fonts/keiland-mono.ttf"
+#define BOX_THIRD_FONT		KEILAND_DATADIR "/fonts/keiland-fallback-mono.ttf"
+
 /* The widget's id among the box's. */
 #define BOX_WIDGET		1U
 
@@ -50,6 +54,7 @@
 /* The shadow's colour: a slate, translucent. */
 #define BOX_SHADOW_COLOR	KL_RGBA(0x1f3a66U, 64U)
 
+static int box_font(struct notes_box *box);
 static int box_canvas(struct notes_box *box, struct notes_renderer *renderer);
 static void box_clear(struct notes_box *box, const struct kl_rect *rect);
 static void box_straight(struct notes_box *box, const struct kl_rect *rect);
@@ -76,9 +81,13 @@ notes_box_open(
 			return ENOMEM;
 	}
 
-	/* The font, opened once (a failure is told again each time). */
+	/*
+	 * The font, opened once: the desktop's, else the next font the system
+	 * has (ws177-p012: a missing keiland.ttf does not keep the box shut);
+	 * without any the failure is told again each time.
+	 */
 	if (!box->font_ready) {
-		error = kl_text_open(&box->text, BOX_FONT, BOX_FALLBACK_FONT);
+		error = box_font(box);
 		if (error != 0)
 			return error;
 		box->font_ready = 1;
@@ -285,6 +294,43 @@ notes_box_free(
 		kl_canvas_release(&box->canvas);
 	box->canvas_ready = 0;
 	box->open = 0;
+}
+
+/*
+ * Opens the box's font: the desktop's with the CJK fallback, else the
+ * first of the others the system has (the CJK font itself last).
+ * Returns 0, or the desktop font's failure when none opens.
+ */
+static int
+box_font(
+	struct notes_box *box)
+{
+	static const char *const others[] = { BOX_SECOND_FONT, BOX_THIRD_FONT, BOX_FALLBACK_FONT };
+	size_t index;
+	int first;
+	int error;
+
+	/* The desktop's font, with the CJK one for an input method's words. */
+	first = kl_text_open(&box->text, BOX_FONT, BOX_FALLBACK_FONT);
+	if (first == 0)
+		return 0;
+
+	/* Each other font in turn, with the CJK one too. */
+	for (index = 0; index < sizeof(others) / sizeof(others[0]); index++) {
+		error = kl_text_open(&box->text, others[index], BOX_FALLBACK_FONT);
+		if (error != 0)
+			continue;
+
+		/* The tests' line: which font stands in. */
+		printf("NOTES TEXT box font=%s error=%d\n", others[index], first);
+		fflush(stdout);
+
+		/* Succeeded: the box draws in that font. */
+		return 0;
+	}
+
+	/* No font: the desktop font's failure. */
+	return first;
 }
 
 /*

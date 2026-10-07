@@ -395,14 +395,16 @@ notes_touch_view(
 }
 
 /*
- * Takes the oldest toolbar tap not yet taken: where it was, in surface
- * pixels.  Returns 1 with a tap, 0 when there is none.
+ * Takes the oldest tap not yet taken: where it was, in surface pixels, and
+ * whether it was on the toolbar.  Returns 1 with a tap, 0 when there is
+ * none.
  */
 int
 notes_touch_take_tap(
 	struct notes_touch *touch,
 	float *x,
-	float *y)
+	float *y,
+	int *toolbar)
 {
 	unsigned index;
 
@@ -413,9 +415,11 @@ notes_touch_take_tap(
 	/* The oldest, and the rest move up. */
 	*x = touch->tap_x[0];
 	*y = touch->tap_y[0];
+	*toolbar = touch->tap_toolbar[0];
 	for (index = 1; index < touch->tap_count; index++) {
 		touch->tap_x[index - 1U] = touch->tap_x[index];
 		touch->tap_y[index - 1U] = touch->tap_y[index];
+		touch->tap_toolbar[index - 1U] = touch->tap_toolbar[index];
 	}
 
 	/* One fewer waits. */
@@ -710,12 +714,16 @@ touch_gestures(
 		/* Does what the gesture means. */
 		switch (gesture.kind) {
 		case KL_GESTURE_TAP:
-			/* A tap on the toolbar waits for the main loop to press its button. */
-			if (touch->toolbar &&
-			    gesture.y < (double)touch->top &&
-			    touch->tap_count < NOTES_TOUCH_TAPS) {
+			/*
+			 * A tap waits for the main loop: on the toolbar it presses its
+			 * button, on the page it ends an open text box (ws177-p012).
+			 */
+			if (touch->tap_count < NOTES_TOUCH_TAPS) {
 				touch->tap_x[touch->tap_count] = (float)gesture.x;
 				touch->tap_y[touch->tap_count] = (float)gesture.y;
+				touch->tap_toolbar[touch->tap_count] = 0U;
+				if (touch->toolbar && gesture.y < (double)touch->top)
+					touch->tap_toolbar[touch->tap_count] = 1U;
 				touch->tap_count++;
 			}
 
