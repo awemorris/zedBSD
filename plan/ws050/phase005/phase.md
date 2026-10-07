@@ -77,3 +77,34 @@ Queue: q834 の続き（P2、Q1 の ACK 2026-10-07「範囲 1〜5 で ACK、weak
 ## 再開の情報
 
 - p005 の範囲は実装済み。残りは backlog（対応の出所、IRQ_HPD、2.x の版の下限、index の意味）と ws050-p006 の実機の確認。
+
+## q877（P1、2026-10-08）: TC の port と connector の対応の出所（`_PLD`）と起動時の bind
+
+ws051 の監査（q874）で残りと分かった「対応の出所が無く、kernel から `drv_typec_display_bind` を呼ぶ所が無い」を実装した（ws177/backlog-p2.md:155 の行）。
+
+### 5330 の table で分かったこと（plan/ws049/tests/latitude5330、iasl -d、読み取りだけ）
+
+- UCSI の connector は `\_SB.UBTC.CR01`〜`CR0A`（ssdt8 `UsbCTabl`）。GNVS の `TTUP`・`TPnU`・`TPnD` の条件で作られ、`_PLD` は `TPLD(1, FPMN(n))`（visible、group position は GNVS の `TPnP` か `TPnT`、runtime の値）。
+- i915（GFX0）の出力の device には `_PLD` が無い（ssdt6）。なので Linux の port-mapper のように display の connector の `_PLD` と直接は合わせられない。
+- Type-C subsystem の xHCI の USB 3 の port `\_SB.PC00.TXHC.RHUB.SS01`〜`SS04` に Dell の table（ssdt12）が `_PLD` を付けている: SS01 = PLCA（visible、position 1）、SS02 = PLCB（position 2）、SS03・SS04 = PLDU（見えない）。TCSS の port n は display の TCn と同じ lane（FIA、ADL-P）。
+- 注: SS0n の `_PLD` は Buffer を裸で返す（ACPI の決まりは Buffer の Package）。両方を受ける。
+
+### 実装
+
+- typec の層（`include/drivers/typec/typec.h`・`src/drivers/typec/typec.c`）: `struct drv_typec_location`、`drv_typec_location_decode`（`_PLD` の revision・visible bit 64・group token bit 86:79・group position bit 94:87）、`drv_typec_location_match`（visible で token と position が同じ connector がちょうど 1 つの時だけ。0 か 2 以上は NONE）。
+- `ucsi-acpi.c` の `drv_ucsi_acpi_attach`: probe の後に `ucsi_acpi_map_displays`。
+  - UCSI の device の直下の device を namespace の順に connector 0、1、… とする（Linux の `ucsi_find_fwnode` と同じ取り方。UCSI の connector の番号と CR0n の対応、design の A9 は推定のまま）。
+  - TCn は `TXHC.RHUB.SS0n` の `_PLD` と同じ場所の connector に `drv_typec_display_bind(n−1, connector)`。
+  - 合わない port は bind しない（i915 の値は connector に入らない、今までどおり）。
+  - log は 1 port に 1 行: `typec: display port TCn: connector C (group G position P), bound` か `... not bound`。
+
+### 確かめ
+
+- host: `make -C plan/ws050/tests OUT=build/ws050-p005/host run` → ucsi-host 79 PASS（`pld-*` 7、`match-*` 6 を追加）。`... acpi` → ucsi-acpi-host 33 PASS。5330 の table に GNVS を `TTUP 2`・`TP1U`・`TP2U 1`・`TP1P 1`・`TP2P 2` と置き、attach で TC1 → connector 0（CR01）、TC2 → connector 1（CR02）、TC3・TC4 は bind なし。CR01 の `_PLD` は GNVS を読むたびに従う（`TP1P 3` で position 3）。`kernel-check` は警告なし、kernel（config/ci/config-amd64.mk）の build は rc 0、warning 0。
+- QEMU: 意味が無い（UCSI・Type-C が無い）。T1 には頼まない。
+
+### 要る採取（Q1 へ）
+
+- 5330 の実際の GNVS の `TPnP`・`TPnT`・`TPnD`（CR0n の group position）は table に無い。新しい kernel を 5330 で起動した時の dmesg の `typec: display port TC1: ...`・`TC2: ...` の 2 行で分かる（Linux も GNVS も要らない）。
+- 物理の確かめ: TC1・TC2 に順に USB-C の機器を挿し、`/dev/typec` で `display-port=N` の付いた connector が挿した connector になることを見る（ws050-p006 の実機）。
+- 合わなかった時の案: 5330 の値で bind が外れたら、VBT の child の `dp_usb_type_c`・`usb_type_c` の番号を第 2 の出所にする（今は実装しない）。

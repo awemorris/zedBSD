@@ -511,6 +511,42 @@ drv_typec_display_bind(
 	unsigned connector);
 
 /*
+ * A device's physical location as ACPI's _PLD buffer gives it (ACPI 6.5
+ * section 6.1.8): whether it was read, whether it is visible to the user,
+ * and its group token and group position, which name one physical
+ * connector across the devices that sit on it (the USB-C connector, the
+ * USB ports of its lanes).  The board's way to tell which display port
+ * drives which connector (ws050-p005).
+ */
+struct drv_typec_location {
+	bool known;
+	bool visible;
+	unsigned group_token;
+	unsigned group_position;
+};
+
+/*
+ * Reads a _PLD buffer into a location: 0, or EINVAL for a buffer too
+ * short or of revision 0.
+ */
+int
+drv_typec_location_decode(
+	const uint8_t *buffer,
+	size_t length,
+	struct drv_typec_location *location);
+
+/*
+ * Finds the connector (0-based) at a display port's location: the one
+ * visible connector of the same group token and position, or
+ * DRV_TYPEC_CONNECTOR_NONE when none or more than one is.
+ */
+unsigned
+drv_typec_location_match(
+	const struct drv_typec_location *connectors,
+	unsigned count,
+	const struct drv_typec_location *port);
+
+/*
  * Compares the display driver's and UCSI's DisplayPort state of every
  * bound connector, and reports how many milliseconds until a difference
  * seen now is old enough to be a disagreement (0: none waits).

@@ -130,6 +130,28 @@ struct ucsi_acpi_exchange {
 };
 
 /*
+ * The connectors' locations the display mapping reads (ws050-p005): one
+ * per device under the UCSI device, in the namespace's order.
+ */
+struct ucsi_acpi_locations {
+	struct drv_typec_location connector[DRV_TYPEC_CONNECTOR_MAX];
+	unsigned count;
+};
+
+/*
+ * The USB 3 ports of the Type-C subsystem's xHCI that share the display's
+ * Type-C ports TC1 to TC4 (Intel's TCSS: port n of the subsystem is the
+ * display's TCn, on the same lanes), whose _PLD names the USB-C connector
+ * they sit on.
+ */
+static const char *const ucsi_acpi_display_ports[DRV_TYPEC_DISPLAY_PORT_MAX] = {
+	"\\_SB.PC00.TXHC.RHUB.SS01",
+	"\\_SB.PC00.TXHC.RHUB.SS02",
+	"\\_SB.PC00.TXHC.RHUB.SS03",
+	"\\_SB.PC00.TXHC.RHUB.SS04"
+};
+
+/*
  * The attached device.
  *
  * The kernel has at most one UCSI interface; device is NULL until
@@ -164,6 +186,9 @@ static int ucsi_acpi_exchange(struct ucsi_acpi_exchange *exchange);
 static int ucsi_acpi_write_work(void *argument);
 static int ucsi_acpi_read_work(void *argument);
 static uint32_t ucsi_acpi_cci(struct ucsi_acpi *driver);
+static void ucsi_acpi_map_displays(struct ucsi_acpi *driver);
+static int ucsi_acpi_connector_location(struct drv_acpi_node *node, unsigned depth, void *argument);
+static int ucsi_acpi_location(struct drv_acpi_node *node, struct drv_typec_location *location);
 
 /*
  * Finds the platform's UCSI device in the ACPI namespace, maps its mailbox,
@@ -192,6 +217,9 @@ drv_ucsi_acpi_attach(void)
 		driver->device = NULL;
 		return error;
 	}
+
+	/* Which display port drives which connector, where the firmware's locations tell it. */
+	ucsi_acpi_map_displays(driver);
 
 	/* The core's operations over this device. */
 	driver->transport.write = ucsi_acpi_write;
@@ -918,4 +946,144 @@ ucsi_acpi_cci(
 
 	/* Succeeded: the CCI the mailbox holds. */
 	return cci;
+}
+
+/*
+ * Binds each of the display's Type-C ports to the USB-C connector it is
+ * wired to (ws050-p005), where the firmware tells it: the connectors are
+ * the devices under the UCSI device in the namespace's order (connector n
+ * is the n-th, as Linux's ucsi_find_fwnode() takes them), and a display
+ * port is the connector whose _PLD has the group token and position of
+ * the _PLD of the subsystem's USB 3 port on the same lanes.  A port
+ * without a location, or without exactly one connector at it, stays
+ * unbound: its reports reach no connector.  Each port is logged.
+ */
+static void
+ucsi_acpi_map_displays(
+	struct ucsi_acpi *driver)
+{
+	struct ucsi_acpi_locations locations;
+	struct drv_typec_location port;
+	struct drv_acpi_node *node;
+	unsigned connector;
+	unsigned index;
+	int error;
+
+	/* The connectors' locations, in order. */
+	kern_memset(&locations, 0, sizeof(locations));
+	(void)drv_acpi_walk(driver->device, ucsi_acpi_connector_location, &locations);
+
+	/* Each display port's location, and the connector at it. */
+	for (index = 0U; index < DRV_TYPEC_DISPLAY_PORT_MAX; index++) {
+		/* A port the firmware does not name has no location. */
+		error = drv_acpi_lookup(NULL, ucsi_acpi_display_ports[index], &node);
+		if (error != 0)
+			continue;
+
+		/* Its location; one that cannot be read binds nothing. */
+		error = ucsi_acpi_location(node, &port);
+		if (error != 0) {
+			drv_typec_os_log("typec: display port TC%u: no location (error %d), not bound\n", index + 1U, error);
+			continue;
+		}
+
+		/* The connector at the place, if exactly one is there. */
+		connector = drv_typec_location_match(locations.connector, locations.count, &port);
+		if (connector == DRV_TYPEC_CONNECTOR_NONE) {
+			drv_typec_os_log("typec: display port TC%u: no single connector at group %u position %u (visible %d), not bound\n",
+					 index + 1U,
+					 port.group_token,
+					 port.group_position,
+					 port.visible ? 1 : 0);
+			continue;
+		}
+
+		/* Bound: its reports go into that connector's record. */
+		error = drv_typec_display_bind(index, connector);
+		drv_typec_os_log("typec: display port TC%u: connector %u (group %u position %u), bound (error %d)\n",
+				 index + 1U,
+				 connector,
+				 port.group_token,
+				 port.group_position,
+				 error);
+	}
+}
+
+/* Takes the location of each device directly under the UCSI device, in order: the connectors. */
+static int
+ucsi_acpi_connector_location(
+	struct drv_acpi_node *node,
+	unsigned depth,
+	void *argument)
+{
+	struct ucsi_acpi_locations *locations;
+	enum drv_acpi_type type;
+
+	locations = argument;
+
+	/* Only the devices right under the UCSI device. */
+	type = drv_acpi_node_type(node);
+	if (depth != 0U || type != DRV_ACPI_TYPE_DEVICE)
+		return 0;
+
+	/* No room for more connectors: the walk stops. */
+	if (locations->count >= DRV_TYPEC_CONNECTOR_MAX)
+		return -1;
+
+	/* Its location, unknown when it has none. */
+	(void)ucsi_acpi_location(node, &locations->connector[locations->count]);
+	locations->count++;
+	return 0;
+}
+
+/*
+ * Reads a device's _PLD into a location: 0, ENOENT without one, EINVAL
+ * for an answer that is not a buffer of the format (in a package, or
+ * bare), or the evaluation's errno value.
+ */
+static int
+ucsi_acpi_location(
+	struct drv_acpi_node *node,
+	struct drv_typec_location *location)
+{
+	struct drv_acpi_object *result;
+	struct drv_acpi_object *element;
+	const uint8_t *bytes;
+	enum drv_acpi_type type;
+	size_t length;
+	int error;
+
+	/* Nothing is known until the _PLD is read. */
+	kern_memset(location, 0, sizeof(*location));
+
+	/* The device's _PLD. */
+	result = NULL;
+	error = drv_acpi_evaluate(node, "_PLD", NULL, 0U, &result);
+	if (error != 0)
+		return error;
+	if (result == NULL)
+		return ENOENT;
+
+	/*
+	 * The buffer in the package's first element (no reference of its own);
+	 * a buffer returned bare is taken as well (the 5330's xHCI ports
+	 * return their _PLD so, against ACPI's package of buffers).
+	 */
+	error = EINVAL;
+	element = result;
+	type = drv_acpi_object_type(result);
+	if (type == DRV_ACPI_TYPE_PACKAGE) {
+		element = drv_acpi_object_package_element(result, 0U);
+		type = DRV_ACPI_TYPE_UNINITIALIZED;
+		if (element != NULL)
+			type = drv_acpi_object_type(element);
+	}
+	if (type == DRV_ACPI_TYPE_BUFFER) {
+		bytes = drv_acpi_object_buffer(element, &length);
+		error = drv_typec_location_decode(bytes, length, location);
+	}
+
+	/* The answer goes. */
+	drv_acpi_object_release(result);
+	return error;
 }

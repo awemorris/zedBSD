@@ -53,6 +53,19 @@
 #define GNVS_UBCB 0x855U
 #define GNVS_USTC 0x910U
 
+/*
+ * The GNVS fields of the 5330's USB-C connectors (ssdt8's CR01 and CR02 and
+ * their _PLD, ws050-p005): how many there are, each one's use and type,
+ * and the group position its _PLD takes (TPnP when TPnD's type bits are 0).
+ */
+#define GNVS_TTUP 0x971U
+#define GNVS_TP1P 0x973U
+#define GNVS_TP1D 0x974U
+#define GNVS_TP2P 0x976U
+#define GNVS_TP2D 0x977U
+#define GNVS_TP1U 0xBBCU
+#define GNVS_TP2U 0xBBDU
+
 /* What GNVS says: Windows 2015 or later, the UCSI device enabled, and the mailbox. */
 #define TEST_OSYS 0x07DFU
 #define TEST_MAILBOX 0x6F000000ULL
@@ -160,6 +173,7 @@ static void test_driver(void);
 static void test_plug(void);
 static void test_text(void);
 static void test_ram(void);
+static void test_displays(void);
 static int dsm_call(unsigned function, struct drv_acpi_object **result);
 static int crs_visitor(const struct drv_acpi_resource *resource, void *argument);
 static int load_tables(const char *directory);
@@ -221,6 +235,20 @@ main(
 	memory_put(GNVS_BASE + GNVS_OSYS, TEST_OSYS, 2);
 	memory_put(GNVS_BASE + GNVS_UBCB, TEST_MAILBOX, 4);
 	memory_put(GNVS_BASE + GNVS_USTC, 1, 1);
+
+	/*
+	 * Two USB-C connectors, CR01 and CR02, at group positions 1 and 2:
+	 * those of the Type-C subsystem's USB 3 ports SS01 and SS02 (ssdt12's
+	 * PLCA and PLCB), the display's TC1 and TC2 (assumed: the 5330's own
+	 * values are to be read from its boot log).
+	 */
+	memory_put(GNVS_BASE + GNVS_TTUP, 2, 1);
+	memory_put(GNVS_BASE + GNVS_TP1U, 1, 1);
+	memory_put(GNVS_BASE + GNVS_TP2U, 1, 1);
+	memory_put(GNVS_BASE + GNVS_TP1D, 0, 1);
+	memory_put(GNVS_BASE + GNVS_TP2D, 0, 1);
+	memory_put(GNVS_BASE + GNVS_TP1P, 1, 1);
+	memory_put(GNVS_BASE + GNVS_TP2P, 2, 1);
 	ec_ram[EC_VERSION] = 0x20;
 	ec_ram[EC_VERSION + 1U] = 0x01;
 
@@ -239,6 +267,7 @@ main(
 	/* The checks. */
 	test_firmware();
 	test_driver();
+	test_displays();
 	test_plug();
 	test_text();
 	test_ram();
@@ -1060,4 +1089,47 @@ drv_typec_os_device_register(void)
 {
 	devices++;
 	return 0;
+}
+
+
+/*
+ * ws050-p005: the attach bound the display's Type-C ports to the USB-C
+ * connectors their _PLD names: TC1 to connector 0 (CR01), TC2 to
+ * connector 1 (CR02), TC3 and TC4 (whose SS03 and SS04 are not visible)
+ * to none.  A connector's _PLD follows GNVS when it is read.
+ */
+static void
+test_displays(void)
+{
+	struct drv_typec_location location;
+	struct drv_typec_display display;
+	struct drv_acpi_object *result;
+	struct drv_acpi_object *element;
+	const uint8_t *bytes;
+	size_t length;
+	int error;
+
+	/* TC1 and TC2 bound, TC3 and TC4 not. */
+	error = drv_typec_display_get(0U, &display);
+	test_check("display-tc1", error == 0 && display.connector == 0U, "TC1 is bound to connector 0");
+	error = drv_typec_display_get(1U, &display);
+	test_check("display-tc2", error == 0 && display.connector == 1U, "TC2 is bound to connector 1");
+	error = drv_typec_display_get(2U, &display);
+	test_check("display-tc3", error == 0 && display.connector == DRV_TYPEC_CONNECTOR_NONE, "TC3 is not bound");
+	error = drv_typec_display_get(3U, &display);
+	test_check("display-tc4", error == 0 && display.connector == DRV_TYPEC_CONNECTOR_NONE, "TC4 is not bound");
+
+	/* CR01's location read now follows GNVS: position 3. */
+	memory_put(GNVS_BASE + GNVS_TP1P, 3, 1);
+	result = NULL;
+	error = drv_acpi_evaluate(NULL, "\\_SB.UBTC.CR01._PLD", NULL, 0U, &result);
+	element = drv_acpi_object_package_element(result, 0U);
+	bytes = NULL;
+	length = 0U;
+	if (element != NULL)
+		bytes = drv_acpi_object_buffer(element, &length);
+	error = drv_typec_location_decode(bytes, length, &location);
+	test_check("display-pld", error == 0 && location.visible && location.group_token == 0U && location.group_position == 3U, "CR01's _PLD: visible, group 0, position 3");
+	drv_acpi_object_release(result);
+	memory_put(GNVS_BASE + GNVS_TP1P, 1, 1);
 }

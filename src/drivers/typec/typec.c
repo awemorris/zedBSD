@@ -22,6 +22,19 @@
 #include "typec-os.h"
 
 /*
+ * A _PLD buffer (ACPI 6.5 section 6.1.8): the size of revision 1, the
+ * revision's bits, the user visible bit, and the first bits of the group
+ * token and the group position, 8 bits each.
+ */
+#define TYPEC_PLD_SIZE		16U
+#define TYPEC_PLD_REVISION_BIT	0U
+#define TYPEC_PLD_REVISION_BITS	7U
+#define TYPEC_PLD_VISIBLE_BIT	64U
+#define TYPEC_PLD_TOKEN_BIT	79U
+#define TYPEC_PLD_POSITION_BIT	87U
+#define TYPEC_PLD_GROUP_BITS	8U
+
+/*
  * One registered listener and its argument.
  */
 struct typec_listener_entry {
@@ -149,6 +162,7 @@ static struct typec_dp_watch typec_dp_watches[DRV_TYPEC_CONNECTOR_MAX];
 
 static int typec_request_put(struct drv_typec_request *request, uint32_t *serial);
 static unsigned typec_display_port_of(unsigned connector);
+static unsigned typec_location_bits(const uint8_t *buffer, unsigned first, unsigned count);
 static bool typec_dp_same(const struct drv_typec_dp_state *left, const struct drv_typec_dp_state *right);
 static bool typec_dp_differ(const struct drv_typec_dp_state *display, const struct drv_typec_dp_state *ucsi);
 static bool typec_dp_compare(unsigned connector, uint64_t now, uint32_t *remaining);
@@ -802,6 +816,80 @@ drv_typec_display_bind(
 
 	/* Succeeded: the port's reports go to the connector from now on. */
 	return 0;
+}
+
+/*
+ * Reads a _PLD buffer into a location (ACPI 6.5 section 6.1.8): the
+ * revision in bits 6:0, the user visible bit 64, the group token in bits
+ * 86:79 and the group position in bits 94:87.  Returns 0, or EINVAL for a
+ * buffer shorter than the 16 bytes of revision 1 or of revision 0.
+ */
+int
+drv_typec_location_decode(
+	const uint8_t *buffer,
+	size_t length,
+	struct drv_typec_location *location)
+{
+	unsigned revision;
+
+	/* Nothing is known until the buffer is read. */
+	kern_memset(location, 0, sizeof(*location));
+
+	/* A buffer of revision 1 or later is 16 bytes at least. */
+	if (buffer == NULL || length < TYPEC_PLD_SIZE)
+		return EINVAL;
+	revision = typec_location_bits(buffer, TYPEC_PLD_REVISION_BIT, TYPEC_PLD_REVISION_BITS);
+	if (revision == 0U)
+		return EINVAL;
+
+	/* The fields a connector is matched by. */
+	location->visible = typec_location_bits(buffer, TYPEC_PLD_VISIBLE_BIT, 1U) != 0U;
+	location->group_token = typec_location_bits(buffer, TYPEC_PLD_TOKEN_BIT, TYPEC_PLD_GROUP_BITS);
+	location->group_position = typec_location_bits(buffer, TYPEC_PLD_POSITION_BIT, TYPEC_PLD_GROUP_BITS);
+
+	/* Succeeded: the location is known. */
+	location->known = true;
+	return 0;
+}
+
+/*
+ * Finds the connector at a display port's location: the one visible
+ * connector whose group token and position are the port's.  A port whose
+ * location is unknown or not visible, no such connector, or two of them
+ * give DRV_TYPEC_CONNECTOR_NONE: a binding is taken only from where it is
+ * certain.
+ */
+unsigned
+drv_typec_location_match(
+	const struct drv_typec_location *connectors,
+	unsigned count,
+	const struct drv_typec_location *port)
+{
+	unsigned found;
+	unsigned index;
+
+	/* A port without a visible location matches nothing. */
+	if (!port->known || !port->visible)
+		return DRV_TYPEC_CONNECTOR_NONE;
+
+	/* The connectors at the same place; a second one makes it uncertain. */
+	found = DRV_TYPEC_CONNECTOR_NONE;
+	for (index = 0U; index < count; index++) {
+		/* A connector elsewhere, unknown or hidden. */
+		if (!connectors[index].known || !connectors[index].visible)
+			continue;
+		if (connectors[index].group_token != port->group_token ||
+		    connectors[index].group_position != port->group_position)
+			continue;
+
+		/* A second connector at the place. */
+		if (found != DRV_TYPEC_CONNECTOR_NONE)
+			return DRV_TYPEC_CONNECTOR_NONE;
+		found = index;
+	}
+
+	/* The connector, or none. */
+	return found;
 }
 
 /*
@@ -1485,4 +1573,27 @@ typec_text_append(
 	} else {
 		text->length += (size_t)length;
 	}
+}
+
+/* Reads count bits of a little-endian bit string from bit first (bit 0 is byte 0's lowest). */
+static unsigned
+typec_location_bits(
+	const uint8_t *buffer,
+	unsigned first,
+	unsigned count)
+{
+	unsigned value;
+	unsigned bit;
+	unsigned at;
+
+	/* Each bit, lowest first. */
+	value = 0U;
+	for (bit = 0U; bit < count; bit++) {
+		at = first + bit;
+		if ((buffer[at / 8U] & (1U << (at % 8U))) != 0U)
+			value |= 1U << bit;
+	}
+
+	/* The field. */
+	return value;
 }

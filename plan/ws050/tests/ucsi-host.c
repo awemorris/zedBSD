@@ -195,6 +195,7 @@ static void test_requests_2(struct drv_ucsi *ucsi);
 static void test_kick(void *argument);
 static bool test_take_run(struct drv_ucsi *ucsi, uint32_t serial);
 static void test_display(struct drv_ucsi *ucsi, const struct drv_ucsi_transport *transport);
+static void test_locations(void);
 
 /*
  * Runs the scenarios.
@@ -233,6 +234,7 @@ main(
 	test_requests_2(&ucsi);
 	test_display(&ucsi, &transport);
 	test_layouts();
+	test_locations();
 
 	/* Reports whether every check passed. */
 	if (test_failures != 0)
@@ -1290,4 +1292,73 @@ test_display(
 	/* No rule broken. */
 	(void)snprintf(detail, sizeof(detail), "%u breaks, the last: %s", fake.violations, fake.last_violation);
 	test_check("dp-rules", fake.violations == 0, detail);
+}
+
+/*
+ * ws050-p005: a _PLD buffer read into a location (the 5330's: ssdt8's TPLD
+ * of revision 2 and ssdt12's PLCA of revision 1), and a display port
+ * matched to the one visible connector at its place.
+ */
+static void
+test_locations(void)
+{
+	/* ssdt8's TPLD (One, 2): revision 2, visible, group position 2, round, 8 by 3. */
+	static const uint8_t tpld[16] = { 0x82, 0x00, 0x00, 0x00, 0x08, 0x00, 0x03, 0x00, 0x11, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00 };
+	/* ssdt12's PLCA: revision 1, visible, group position 1. */
+	static const uint8_t plca[16] = { 0x81, 0x00, 0x00, 0x00, 0x08, 0x00, 0x03, 0x00, 0x71, 0x04, 0x80, 0x00, 0x03, 0x00, 0x00, 0x00 };
+	/* ssdt12's PLDU: revision 1, not visible. */
+	static const uint8_t pldu[16] = { 0x81, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x1C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+	/* Group token 0x55, position 0xAA: bits 86:79 and 94:87. */
+	static const uint8_t token[16] = { 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x80, 0x2A, 0x55, 0x00, 0x00, 0x00, 0x00 };
+	struct drv_typec_location connectors[3];
+	struct drv_typec_location port;
+	unsigned found;
+	int error;
+
+	/* The firmware's buffers. */
+	error = drv_typec_location_decode(tpld, sizeof(tpld), &port);
+	test_check("pld-tpld", error == 0 && port.known && port.visible && port.group_token == 0U && port.group_position == 2U, "visible, group 0, position 2");
+	error = drv_typec_location_decode(plca, sizeof(plca), &port);
+	test_check("pld-plca", error == 0 && port.visible && port.group_position == 1U, "visible, position 1");
+	error = drv_typec_location_decode(pldu, sizeof(pldu), &port);
+	test_check("pld-pldu", error == 0 && !port.visible && port.group_position == 0U, "not visible");
+	error = drv_typec_location_decode(token, sizeof(token), &port);
+	test_check("pld-fields", error == 0 && port.visible && port.group_token == 0x55U && port.group_position == 0xAAU, "token 0x55, position 0xaa");
+
+	/* Too short, revision 0, none. */
+	error = drv_typec_location_decode(plca, 15U, &port);
+	test_check("pld-short", error == EINVAL && !port.known, "15 bytes refused");
+	error = drv_typec_location_decode(pldu + 1, 15U, &port);
+	test_check("pld-short-2", error == EINVAL, "refused");
+	error = drv_typec_location_decode(NULL, 16U, &port);
+	test_check("pld-null", error == EINVAL, "refused");
+
+	/* Connectors at positions 2 and 1 (CR01 2, CR02 1), and a hidden one at 1. */
+	(void)drv_typec_location_decode(tpld, sizeof(tpld), &connectors[0]);
+	(void)drv_typec_location_decode(plca, sizeof(plca), &connectors[1]);
+	connectors[2] = connectors[1];
+	connectors[2].visible = false;
+	(void)drv_typec_location_decode(plca, sizeof(plca), &port);
+	found = drv_typec_location_match(connectors, 3U, &port);
+	test_check("match-1", found == 1U, "position 1 is connector 1 (the hidden one does not count)");
+	port.group_position = 2U;
+	found = drv_typec_location_match(connectors, 3U, &port);
+	test_check("match-2", found == 0U, "position 2 is connector 0");
+	port.group_position = 5U;
+	found = drv_typec_location_match(connectors, 3U, &port);
+	test_check("match-none", found == DRV_TYPEC_CONNECTOR_NONE, "no connector at position 5");
+
+	/* Two visible connectors at one place: uncertain, none. */
+	connectors[2].visible = true;
+	port.group_position = 1U;
+	found = drv_typec_location_match(connectors, 3U, &port);
+	test_check("match-two", found == DRV_TYPEC_CONNECTOR_NONE, "two connectors at position 1");
+
+	/* A port that is not visible, or whose location is unknown, matches nothing. */
+	(void)drv_typec_location_decode(pldu, sizeof(pldu), &port);
+	found = drv_typec_location_match(connectors, 2U, &port);
+	test_check("match-hidden", found == DRV_TYPEC_CONNECTOR_NONE, "a hidden port");
+	memset(&port, 0, sizeof(port));
+	found = drv_typec_location_match(connectors, 2U, &port);
+	test_check("match-unknown", found == DRV_TYPEC_CONNECTOR_NONE, "an unknown port");
 }
