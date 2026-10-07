@@ -51,6 +51,9 @@
 #include <drivers/generic/hidraw.h>
 #include <drivers/generic/smartcard.h>
 #endif
+#ifdef BT_TEST_LOOPBACK
+#include <drivers/generic/bt-hci.h>
+#endif
 
 #include <uapi/errno.h>
 #include <uapi/fcntl.h>
@@ -394,6 +397,15 @@ kern_vfs_init(
 	error = drv_smartcard_loopback_register();
 	if (error != 0) {
 		error = vfs_fail("register smartcard-loopback", error);
+		return error;
+	}
+#endif
+
+#ifdef BT_TEST_LOOPBACK
+	/* Publishes the test-only loopback Bluetooth controller of test builds (ws143-p002). */
+	error = drv_bt_hci_loopback_register();
+	if (error != 0) {
+		error = vfs_fail("register bt-loopback", error);
 		return error;
 	}
 #endif

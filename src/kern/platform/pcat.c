@@ -73,6 +73,9 @@
 #if CONFIG_DRIVER_USB_CCID
 #include <drivers/usb/usb-ccid.h>
 #endif
+#if CONFIG_DRIVER_USB_BT
+#include <drivers/usb/usb-bt.h>
+#endif
 #include <drivers/pci/pci.h>
 #if CONFIG_DRIVER_ACPI
 #include <drivers/acpi/acpi.h>
@@ -230,6 +233,10 @@ kern_platform_init(
 #if CONFIG_DRIVER_USB_CCID
 	if (drv_usb_ccid_driver_register() != 0)
 		kern_logf("usb: CCID smart card driver registration failed\n");
+#endif
+#if CONFIG_DRIVER_USB_BT
+	if (drv_usb_bt_driver_register() != 0)
+		kern_logf("usb: Bluetooth driver registration failed\n");
 #endif
 
 	/* Registers the PCI drivers: host controllers, NVMe, WLAN, graphics. */

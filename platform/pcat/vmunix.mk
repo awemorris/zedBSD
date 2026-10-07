@@ -116,6 +116,9 @@ endif
 ifeq ($(CONFIG_DRIVER_USB_CCID),y)
 PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb/usb-ccid.o $(BUILD)/drivers/usb/usb-ccid-proto.o $(BUILD)/drivers/generic/smartcard.o
 endif
+ifeq ($(CONFIG_DRIVER_USB_BT),y)
+PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb/usb-bt.o $(BUILD)/drivers/generic/bt-hci.o $(BUILD)/drivers/generic/bt-hci-proto.o
+endif
 ifeq ($(CONFIG_DRIVER_USB_HUB),y)
 PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb/usb-hub.o
 endif
