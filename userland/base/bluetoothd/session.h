@@ -175,6 +175,7 @@ struct btd_session {
 	int dhkey;
 	int ssp;
 	int secure_connections;
+	int no_flush;
 	uint16_t acl_length;
 	int intel;
 	struct btd_intel_version intel_version;
@@ -192,6 +193,7 @@ struct btd_session {
 	unsigned malformed;
 	unsigned resets;
 	unsigned hardware_errors;
+	unsigned buffer_overflows;
 
 	/* The handler of the connections' packets (NULL: they are dropped), and its context. */
 	btd_handler_fn handler;
@@ -199,8 +201,8 @@ struct btd_session {
 
 	/*
 	 * The packets that came while a command waited, each a 2-byte length
-	 * (least significant first) and the packet, oldest at queue_head; and
-	 * the packets dropped because the queue was full.
+	 * (least significant first), a byte of flags and the packet, oldest
+	 * at queue_head; and the packets dropped because the queue was full.
 	 */
 	size_t queue_head;
 	size_t queue_used;
@@ -225,6 +227,7 @@ struct btd_session {
 	 * written.
 	 */
 	size_t packet_length;
+	int packet_counted;
 	uint8_t packet[BT_ACL_PACKET_MAX];
 	uint8_t status;
 	size_t returned_length;

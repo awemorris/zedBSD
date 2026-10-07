@@ -19,6 +19,7 @@
  */
 
 #include "userland/base/bluetoothd/pair.h"
+#include "userland/base/bluetoothd/crypto.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -87,7 +88,6 @@
 /* The IO capabilities and authentication requirements of Secure Simple Pairing (Core Vol 4 Part E §7.1.29). */
 #define PAIR_IO_DISPLAY_YES_NO		0x01U
 #define PAIR_IO_NONE			0x03U
-#define PAIR_IO_KEYBOARD_DISPLAY	0x04U
 #define PAIR_AUTH_DEDICATED		0x02U
 #define PAIR_AUTH_DEDICATED_MITM	0x03U
 
@@ -107,8 +107,14 @@
 /* The status of an authentication whose key the other side did not have (PIN or Key Missing). */
 #define PAIR_STATUS_KEY_MISSING		0x06U
 
+/* The status of an authentication whose key the other side has another of (Authentication Failure). */
+#define PAIR_STATUS_AUTH_FAILURE	0x05U
+
 /* The only key size taken (KNOB, design section 6.2). */
 #define PAIR_KEY_SIZE			16U
+
+/* How many bonds are looked through to resolve a private address. */
+#define PAIR_BONDS_MAX			32U
 
 static void pair_event(struct btd_pair *pair, const uint8_t *parameters, size_t length, uint8_t code);
 static void pair_acl(struct btd_pair *pair, const uint8_t *packet, size_t length);
@@ -141,6 +147,10 @@ static int pair_le(const struct btd_pair *pair);
 static void pair_name(const struct btd_pair *pair, const uint8_t *address, unsigned type, char *name, size_t size);
 static const char *pair_smp_why(const struct btd_pair *pair);
 static void pair_put16(uint8_t *bytes, uint16_t value);
+static void pair_ask(struct btd_pair *pair, unsigned kind, uint32_t number);
+static void pair_le_encrypt(struct btd_pair *pair);
+static int pair_resolved_bond(const struct btd_pair *pair);
+static void pair_reverse(uint8_t *to, const uint8_t *from, size_t length);
 static uint16_t pair_handle(const uint8_t *bytes);
 
 /*
@@ -201,6 +211,8 @@ btd_pair_start(
 	pair->connected = 0;
 	pair->pending_error = NULL;
 	pair->asked = 0;
+	pair->asked_kind = 0U;
+	pair->encrypt_held = 0;
 	pair->agent_deadline = 0U;
 	pair->smp_deadline = 0U;
 	pair->have_stored = 0;
@@ -227,6 +239,8 @@ btd_pair_start(
 
 	/* LE: a bond is not paired over silently (it is forgotten first), and the controller must do P-256. */
 	if (pair_le(pair)) {
+		if (!pair->have_stored)
+			pair->have_stored = pair_resolved_bond(pair);
 		if (pair->have_stored) {
 			pair_fail(pair, "bonded");
 			return 0;
@@ -324,7 +338,21 @@ btd_pair_answer(
 	pair->asked = 0;
 	pair->agent_deadline = 0U;
 
-	/* LE: the Security Manager takes it. */
+	/* LE's agreement to Just Works: the encryption held goes on, or the pairing is refused. */
+	if (pair_le(pair) && pair->asked_kind == BTD_PAIR_ASK_CONSENT) {
+		if (accepted) {
+			pair_le_encrypt(pair);
+			return;
+		}
+
+		/* Refused by the user. */
+		pair->smp.why = BTD_SMP_WHY_REJECTED;
+		actions = btd_smp_fail(&pair->smp, BTD_SMP_UNSPECIFIED);
+		pair_smp_actions(pair, actions);
+		return;
+	}
+
+	/* LE's number: the Security Manager takes it. */
 	if (pair_le(pair)) {
 		actions = btd_smp_agent(&pair->smp, accepted);
 		pair_smp_actions(pair, actions);
@@ -863,8 +891,8 @@ pair_authenticated(
 		return;
 	}
 
-	/* The stored key the device no longer has: it is forgotten by the user, not here (plan section 10.3). */
-	if (parameters[0] == PAIR_STATUS_KEY_MISSING && pair->used_stored) {
+	/* The stored key the device no longer has (or has another one): it is forgotten by the user, not here (plan section 10.3). */
+	if (pair->used_stored && (parameters[0] == PAIR_STATUS_KEY_MISSING || parameters[0] == PAIR_STATUS_AUTH_FAILURE)) {
 		pair_fail(pair, "key-missing");
 		return;
 	}
@@ -1063,26 +1091,27 @@ pair_confirm(
 		return;
 	}
 
-	/* Numeric Comparison when an agent is there and the other side can show and confirm too. */
+	/* Numeric Comparison when the other side can show and confirm too (BR/EDR has no KeyboardDisplay). */
 	numeric = 0;
-	if (pair->agent && pair->have_peer_io) {
-		if (pair->peer_io == PAIR_IO_DISPLAY_YES_NO || pair->peer_io == PAIR_IO_KEYBOARD_DISPLAY)
-			numeric = 1;
-	}
+	if (pair->have_peer_io && pair->peer_io == PAIR_IO_DISPLAY_YES_NO)
+		numeric = 1;
 
-	/* Just Works: agreed. */
-	if (!numeric) {
+	/* Without an agent nobody can be asked: Just Works goes on. */
+	if (!pair->agent) {
 		pair->confirmed = 1;
 		pair_reply(pair, PAIR_CONFIRM_REPLY, parameters, NULL, 0U);
 		return;
 	}
 
-	/* The number, asked of the agent for BTD_PAIR_AGENT_MS at most. */
+	/* Just Works asks the agent to agree; Numeric Comparison asks it to confirm the number (design section 6.5). */
 	number = (uint32_t)parameters[6] | ((uint32_t)parameters[7] << 8) | ((uint32_t)parameters[8] << 16) | ((uint32_t)parameters[9] << 24);
-	pair->asked = 1;
-	pair->agent_deadline = btd_now_ms() + BTD_PAIR_AGENT_MS;
-	if (pair->ask != NULL)
-		pair->ask(pair->context, BTD_PAIR_ASK_CONFIRM, number);
+	if (!numeric) {
+		pair_ask(pair, BTD_PAIR_ASK_CONSENT, 0U);
+		return;
+	}
+
+	/* The number. */
+	pair_ask(pair, BTD_PAIR_ASK_CONFIRM, number);
 }
 
 /* Reads the encryption key's size (KNOB): only 16 bytes are taken, then the key is stored. */
@@ -1181,6 +1210,14 @@ pair_store_le(
 		bond.type = BTD_ADDRESS_LE_PUBLIC;
 		if (keys->identity_type != 0U)
 			bond.type = BTD_ADDRESS_LE_RANDOM;
+	}
+
+	/* A bond under that identity is not written over (it is forgotten first, review S11). */
+	error = btd_keys_read(pair->keys_folder, pair->session->address, bond.address, bond.type, &pair->stored);
+	memset(&pair->stored, 0, sizeof(pair->stored));
+	if (error != ENOENT) {
+		pair_fail(pair, "bonded");
+		return;
 	}
 
 	/* The name the last scan saw, and the keys. */
@@ -1304,7 +1341,6 @@ pair_smp_actions(
 	struct btd_pair *pair,
 	unsigned actions)
 {
-	uint8_t encrypt[28];
 	int error;
 
 	/* A PDU to the device (Pairing Failed among them); the Security Manager's 30 seconds start again. */
@@ -1341,24 +1377,21 @@ pair_smp_actions(
 	if ((actions & BTD_SMP_SHOW) != 0U && pair->ask != NULL)
 		pair->ask(pair->context, BTD_PAIR_ASK_PASSKEY, pair->smp.number);
 
-	/* A number the user confirms, for BTD_PAIR_AGENT_MS at most. */
-	if ((actions & BTD_SMP_CONFIRM) != 0U) {
-		pair->asked = 1;
-		pair->agent_deadline = btd_now_ms() + BTD_PAIR_AGENT_MS;
-		if (pair->ask != NULL)
-			pair->ask(pair->context, BTD_PAIR_ASK_CONFIRM, pair->smp.number);
-	}
+	/* A number the user confirms. */
+	if ((actions & BTD_SMP_CONFIRM) != 0U)
+		pair_ask(pair, BTD_PAIR_ASK_CONFIRM, pair->smp.number);
 
-	/* LE Enable Encryption: handle, Rand, EDIV, the key. */
+	/* The encryption: Just Works waits for the agent to agree first (design section 6.5). */
 	if ((actions & BTD_SMP_ENCRYPT) != 0U) {
-		pair_put16(encrypt, pair->handle);
-		memcpy(encrypt + 2, pair->smp.encrypt_rand, 8U);
-		pair_put16(encrypt + 10, pair->smp.encrypt_ediv);
-		memcpy(encrypt + 12, pair->smp.encrypt_key, 16U);
-		error = pair_command(pair, PAIR_LE_ENCRYPT, encrypt, sizeof(encrypt), "encryption");
-		memset(encrypt, 0, sizeof(encrypt));
-		if (error != 0)
+		if (!pair->smp.keys.authenticated && pair->agent) {
+			pair->encrypt_held = 1;
+			pair_ask(pair, BTD_PAIR_ASK_CONSENT, 0U);
 			return;
+		}
+
+		/* Encrypted now. */
+		pair_le_encrypt(pair);
+		return;
 	}
 
 	/* The end: the keys stored, then the link ended. */
@@ -1554,8 +1587,8 @@ pair_command(
 	if (error == 0)
 		return 0;
 
-	/* The node went: nothing more can be sent. */
-	if (error == ENODEV) {
+	/* The node went, or the controller was reset: nothing more can be sent. */
+	if (error == ENODEV || error == ECONNRESET) {
 		btd_pair_lost(pair);
 		return error;
 	}
@@ -1728,4 +1761,110 @@ pair_handle(
 
 	/* Succeeded: the handle. */
 	return (uint16_t)value;
+}
+
+/* Asks the agent (a number to confirm, or an agreement), answered within BTD_PAIR_AGENT_MS. */
+static void
+pair_ask(
+	struct btd_pair *pair,
+	unsigned kind,
+	uint32_t number)
+{
+	/* The question waits for btd_pair_answer, or the deadline's no. */
+	pair->asked = 1;
+	pair->asked_kind = kind;
+	pair->agent_deadline = btd_now_ms() + BTD_PAIR_AGENT_MS;
+
+	/* Asked. */
+	if (pair->ask != NULL)
+		pair->ask(pair->context, kind, number);
+}
+
+/* Starts LE's encryption with the key the Security Manager gave (LE Enable Encryption: handle, Rand, EDIV, the key). */
+static void
+pair_le_encrypt(
+	struct btd_pair *pair)
+{
+	uint8_t encrypt[28];
+
+	/* Nothing held any more. */
+	pair->encrypt_held = 0;
+
+	/* The command; Encryption Change answers it. */
+	pair_put16(encrypt, pair->handle);
+	memcpy(encrypt + 2, pair->smp.encrypt_rand, 8U);
+	pair_put16(encrypt + 10, pair->smp.encrypt_ediv);
+	memcpy(encrypt + 12, pair->smp.encrypt_key, 16U);
+	(void)pair_command(pair, PAIR_LE_ENCRYPT, encrypt, sizeof(encrypt), "encryption");
+	memset(encrypt, 0, sizeof(encrypt));
+}
+
+/*
+ * Tells whether the pairing's LE address is a resolvable private address
+ * of a bonded device: its hash is ah of a stored IRK and its random part
+ * (Core Vol 6 Part B §1.3.2.3).
+ */
+static int
+pair_resolved_bond(
+	const struct btd_pair *pair)
+{
+	struct btd_bond bonds[PAIR_BONDS_MAX];
+	uint8_t irk[16];
+	uint8_t prand[3];
+	uint8_t hash[3];
+	uint8_t expected[3];
+	unsigned count;
+	unsigned index;
+	int same;
+	int error;
+
+	/* Only a random address whose top two bits are 01 is resolvable. */
+	if (pair->type != BTD_ADDRESS_LE_RANDOM || (pair->address[5] & 0xc0U) != 0x40U)
+		return 0;
+
+	/* The bonds of the controller. */
+	error = btd_keys_list(pair->keys_folder, pair->session->address, bonds, PAIR_BONDS_MAX, &count);
+	if (error != 0)
+		return 0;
+
+	/* prand (the top three bytes) and the hash (the bottom three), most significant first. */
+	prand[0] = pair->address[5];
+	prand[1] = pair->address[4];
+	prand[2] = pair->address[3];
+	expected[0] = pair->address[2];
+	expected[1] = pair->address[1];
+	expected[2] = pair->address[0];
+
+	/* Each bond's IRK (stored least significant first, as the PDU gave it). */
+	for (index = 0U; index < count; index++) {
+		if (!bonds[index].have_irk)
+			continue;
+		pair_reverse(irk, bonds[index].irk, sizeof(irk));
+		btd_smp_ah(irk, prand, hash);
+		same = memcmp(hash, expected, sizeof(hash));
+		if (same == 0) {
+			memset(bonds, 0, sizeof(bonds));
+			memset(irk, 0, sizeof(irk));
+			return 1;
+		}
+	}
+
+	/* No bond's: the keys read are not kept. */
+	memset(bonds, 0, sizeof(bonds));
+	memset(irk, 0, sizeof(irk));
+	return 0;
+}
+
+/* Copies bytes in the other order. */
+static void
+pair_reverse(
+	uint8_t *to,
+	const uint8_t *from,
+	size_t length)
+{
+	size_t index;
+
+	/* The last first. */
+	for (index = 0U; index < length; index++)
+		to[index] = from[length - 1U - index];
 }

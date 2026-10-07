@@ -63,6 +63,7 @@
 #define DEVICE_AWAY		0x09U
 #define DEVICE_LE_AWAY		0x0aU
 #define DEVICE_GOES		0x0bU
+#define DEVICE_KEYBOARD		0x0cU
 
 /* The handles of the BR/EDR and the LE connection. */
 #define HANDLE_BREDR		0x0040U
@@ -112,6 +113,7 @@ struct fake {
 	uint8_t device[6];
 	int connected;
 	int confirmed;
+	uint8_t host_io;
 
 	/* The LE device's Security Manager: the Pairing Request and Response, the nonces, the keys of f5. */
 	uint8_t preq[7];
@@ -314,7 +316,7 @@ hook_done(
 static void
 test_start(void)
 {
-	static const uint8_t mask[8] = { 0xbfU, 0x80U, 0xe0U, 0x00U, 0x02U, 0xc0U, 0x2fU, 0x24U };
+	static const uint8_t mask[8] = { 0xbfU, 0x80U, 0xe0U, 0x02U, 0x02U, 0xc0U, 0x2fU, 0x24U };
 	static const uint8_t le_mask[8] = { 0x87U, 0x01U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U };
 	struct btd_session *session;
 	struct btd_pair pair;
@@ -462,12 +464,26 @@ test_bredr(void)
 	hooks.silent = 0;
 	expect(strcmp(hooks.end, "ERROR rejected") == 0, "bredr: the agent's silence is no (%s)", hooks.end);
 
-	/* Just Works: agreed by the request, not authenticated. */
+	/* Just Works: the agent agrees (design section 6.5), not authenticated. */
 	hooks.answer = 1;
-	hooks.asked_count = 0U;
 	run_pair(session, &pair, &hooks, DEVICE_JUST_WORKS, BTD_ADDRESS_BREDR);
-	expect(strstr(hooks.end, "PAIRED") != NULL && strstr(hooks.end, "authenticated=0 secure=1") != NULL && hooks.asked_count == 0U,
-	       "bredr: Just Works (%s)", hooks.end);
+	expect(strstr(hooks.end, "PAIRED") != NULL && strstr(hooks.end, "authenticated=0 secure=1") != NULL &&
+	       hooks.asked_kind == BTD_PAIR_ASK_CONSENT,
+	       "bredr: Just Works with the agent's agreement (%s)", hooks.end);
+
+	/* Just Works refused by the agent. */
+	hooks.answer = 0;
+	device_address(DEVICE_JUST_WORKS, address);
+	(void)btd_keys_forget(keys_folder, session->address, address, BTD_ADDRESS_BREDR);
+	run_pair(session, &pair, &hooks, DEVICE_JUST_WORKS, BTD_ADDRESS_BREDR);
+	expect(strcmp(hooks.end, "ERROR rejected") == 0, "bredr: Just Works refused (%s)", hooks.end);
+	hooks.answer = 1;
+
+	/* A keyboard: the passkey shown for it to type (Passkey Entry, review S-c). */
+	run_pair(session, &pair, &hooks, DEVICE_KEYBOARD, BTD_ADDRESS_BREDR);
+	expect(strstr(hooks.end, "PAIRED") != NULL && strstr(hooks.end, "authenticated=1") != NULL &&
+	       hooks.asked_kind == BTD_PAIR_ASK_PASSKEY && hooks.asked_number == 654321U,
+	       "bredr: the passkey 654321 shown (%s)", hooks.end);
 
 	/* The debug key, a key of 7 bytes. */
 	run_pair(session, &pair, &hooks, DEVICE_DEBUG, BTD_ADDRESS_BREDR);
@@ -554,6 +570,10 @@ test_le(void)
 	struct btd_bond bond;
 	struct hooks hooks;
 	struct fake fake;
+	uint8_t irk[16];
+	uint8_t prand[3];
+	uint8_t hash[3];
+	uint8_t rpa[6];
 	pthread_t thread;
 	int error;
 
@@ -579,10 +599,39 @@ test_le(void)
 	       "le: the keys are stored under the identity (%d)", error);
 	expect(fake.le_packets >= 6U && fake.credit_breaches == 0U, "le: %u LE packets, none past the buffers (review B5)", fake.le_packets);
 
+	expect(hooks.asked_kind == BTD_PAIR_ASK_CONSENT, "le: Just Works asked the agent to agree");
+
 	/* The identity is bonded: not paired over (forgotten first). */
-	pair.session = session;
+	hooks.done = 0;
 	error = btd_pair_start(&pair, identity_address, BTD_ADDRESS_LE_RANDOM, 1);
 	expect(error == 0 && hooks.done && strcmp(hooks.end, "ERROR bonded") == 0, "le: a bonded device (%s)", hooks.end);
+
+	/* A private address the bond's IRK resolves (the IRK 0x11..., prand 0x4a 0x01 0x02): bonded too (review S-g). */
+	memset(irk, 0x11U, sizeof(irk));
+	rpa[5] = 0x4aU;
+	rpa[4] = 0x01U;
+	rpa[3] = 0x02U;
+	prand[0] = rpa[5];
+	prand[1] = rpa[4];
+	prand[2] = rpa[3];
+	btd_smp_ah(irk, prand, hash);
+	rpa[2] = hash[0];
+	rpa[1] = hash[1];
+	rpa[0] = hash[2];
+	hooks.done = 0;
+	error = btd_pair_start(&pair, rpa, BTD_ADDRESS_LE_RANDOM, 1);
+	expect(error == 0 && hooks.done && strcmp(hooks.end, "ERROR bonded") == 0, "le: a private address of a bond (%s)", hooks.end);
+
+	/* The same device paired again under its public address: its identity is bonded, nothing written over. */
+	run_pair(session, &pair, &hooks, DEVICE_MOUSE_LE, BTD_ADDRESS_LE_PUBLIC);
+	expect(strcmp(hooks.end, "ERROR bonded") == 0, "le: the identity is not written over (%s)", hooks.end);
+
+	/* Just Works refused by the agent. */
+	(void)btd_keys_forget(keys_folder, session->address, identity_address, BTD_ADDRESS_LE_RANDOM);
+	hooks.answer = 0;
+	run_pair(session, &pair, &hooks, DEVICE_MOUSE_LE, BTD_ADDRESS_LE_PUBLIC);
+	hooks.answer = 1;
+	expect(strcmp(hooks.end, "ERROR rejected") == 0, "le: Just Works refused (%s)", hooks.end);
 
 	/* A device that does not connect: cancelled after 10 seconds. */
 	run_pair(session, &pair, &hooks, DEVICE_LE_AWAY, BTD_ADDRESS_LE_PUBLIC);
@@ -885,15 +934,25 @@ fake_command(
 	case 0x042bU:
 		/* IO Capability Request Reply: the device's IO, then the number (a device that goes leaves here). */
 		fake_complete(fake, opcode, (const uint8_t *)"\x00\x00\x00\x00\x00\x00\x00", 7U);
+		fake->host_io = body[6];
 		parameters[0] = 0x01U;
 		if (last == DEVICE_JUST_WORKS)
 			parameters[0] = 0x03U;
+		if (last == DEVICE_KEYBOARD)
+			parameters[0] = 0x02U;
 		parameters[1] = 0x00U;
 		parameters[2] = 0x03U;
 		fake_address_event(fake, 0x32U, fake->device, parameters, 3U);
 		if (last == DEVICE_GOES) {
 			fake->connected = 0;
 			fake_event(fake, 0x05U, (const uint8_t *)"\x00\x40\x00\x08", 4U);
+			break;
+		}
+
+		/* A keyboard types the passkey bluetoothd shows: Passkey Entry, then paired as the confirmation's reply goes on. */
+		if (last == DEVICE_KEYBOARD) {
+			fake_address_event(fake, 0x3bU, fake->device, (const uint8_t *)"\xf1\xfb\x09\x00", 4U);
+			fake_command(fake, (const uint8_t *)"\x01\x2c\x04\x06\x0c\x0e\x0d\x0c\x0b\x0a", 10U);
 			break;
 		}
 		fake_address_event(fake, 0x33U, fake->device, (const uint8_t *)"\x40\xe2\x01\x00", 4U);
@@ -909,7 +968,7 @@ fake_command(
 		fake_event(fake, 0x36U, parameters, 7U);
 		memset(key, last, 16U);
 		key_type = 0x08U;
-		if (last == DEVICE_JUST_WORKS)
+		if (last == DEVICE_JUST_WORKS || fake->host_io == 0x03U)
 			key_type = 0x07U;
 		if (last == DEVICE_DEBUG)
 			key_type = 0x03U;
@@ -928,9 +987,9 @@ fake_command(
 		fake_event(fake, 0x06U, (const uint8_t *)"\x05\x40\x00", 3U);
 		break;
 	case 0x0413U:
-		/* Set Connection Encryption: on. */
+		/* Set Connection Encryption: on, with AES-CCM as a Secure Connections link has it (0x02, review S-a). */
 		fake_status(fake, opcode, 0x00U);
-		fake_event(fake, 0x08U, (const uint8_t *)"\x00\x40\x00\x01", 4U);
+		fake_event(fake, 0x08U, (const uint8_t *)"\x00\x40\x00\x02", 4U);
 		break;
 	case 0x1408U:
 		/* Read Encryption Key Size: 16, or 7 for the short one. */

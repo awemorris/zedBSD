@@ -30,9 +30,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* What the agent is asked: to confirm a number (yes or no), or to show a passkey the other device types. */
+/*
+ * What the agent is asked: to confirm a number (yes or no), to show a
+ * passkey the other device types, or to agree to a pairing without a
+ * number (Just Works, yes or no; design section 6.5).
+ */
 #define BTD_PAIR_ASK_CONFIRM	1U
 #define BTD_PAIR_ASK_PASSKEY	2U
+#define BTD_PAIR_ASK_CONSENT	3U
 
 /* The longest answer line of a pairing. */
 #define BTD_PAIR_ANSWER_MAX	192U
@@ -41,11 +46,11 @@
 #define BTD_PAIR_CONNECT_MS	10000U
 #define BTD_PAIR_TOTAL_MS	60000U
 #define BTD_PAIR_SMP_MS		30000U
-#define BTD_PAIR_AGENT_MS	30000U
+#define BTD_PAIR_AGENT_MS	25000U
 #define BTD_PAIR_PROBE_MS	2000U
 #define BTD_PAIR_CLOSE_MS	3000U
 
-/* Asks the agent (kind BTD_PAIR_ASK_*, the number); a confirmation is answered with btd_pair_answer. */
+/* Asks the agent (kind BTD_PAIR_ASK_*, the number); a confirmation or a consent is answered with btd_pair_answer. */
 typedef void (*btd_pair_ask_fn)(void *context, unsigned kind, uint32_t number);
 
 /* Tells the pairing's end: "PAIRED ..." or "ERROR WHY". */
@@ -83,6 +88,7 @@ struct btd_pair {
 	uint64_t smp_deadline;
 	uint64_t agent_deadline;
 	int asked;
+	unsigned asked_kind;
 
 	/* BR/EDR: the bond stored before, whether its key was used, the other side's IO, and the key the controller gave. */
 	int have_stored;
@@ -98,8 +104,9 @@ struct btd_pair {
 	int probed;
 	unsigned key_size;
 
-	/* LE: the Security Manager. */
+	/* LE: the Security Manager, and an encryption held until the agent agrees to Just Works. */
 	struct btd_smp smp;
+	int encrypt_held;
 
 	/* The connection's frames being put together, and its signalling. */
 	struct btd_reassembly reassembly;
