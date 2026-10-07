@@ -37,3 +37,4 @@ Primary Milestone: MG006（関係: MG002・MG003・MG005）
 | [ws177-p006](phase006/phase.md) | 案 I の 45 行: fidoctl の PIN の入力（端末で echo を切る、CTAP2 の長さの規則を先に） | in-progress（2026-10-08 P1 q884 実装・host PASS・build、main に統合、端末は UAT） | — |
 | [ws177-p007](phase007/phase.md) | 案 B: Welcome の準正常系（印の失敗・Files の失敗・Network の段の言葉・折り返し・keyboard） | test-wait（T1-410）（2026-10-08 P1 q884 実装・host PASS・build） | — |
 | [ws177-p008](phase008/phase.md) | 案 C: Files の Recents の仕上げ（止めた一覧の表示、Clear Recents の問い、一覧の stamp と Text Editor の読み直し、KL_VERSION 66） | test-wait（T1-411）（2026-10-08 P1 q884 実装・host PASS・build） | — |
+| [ws177-p009](phase009/phase.md) | 案 H: 手書きの頑健さ（tap の note、templates の壊れ・空・大きすぎ、Hershey の重ね線と番号の衝突、印の位置、templates を thread で、8,192 点を越える ink） | in-progress（2026-10-08 P1 q886 実装・host PASS・build） | — |
