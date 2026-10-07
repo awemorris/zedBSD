@@ -133,6 +133,7 @@ main(void)
 	unsigned range_count;
 	int status;
 
+	/* Names the program in the report. */
 	contract_begin("engine reset contract tests (mock, GPU-free, ws083-p007)");
 
 	/* Binds the register access to the mock register file and its model. */
@@ -168,8 +169,16 @@ reset_model_write(
 {
 	struct reset_model *state;
 	uint32_t status;
+	uint32_t ctl;
+	uint32_t lock;
+	uint32_t lock_status;
+	int asked;
 
+	/* The model the hook was given, and the registers of VCS0 it answers. */
 	state = context;
+	ctl = RESET_CTL(RESET_VCS0_BASE);
+	lock = RESET_SFC_LOCK(RESET_VCS0_BASE);
+	lock_status = RESET_SFC_STATUS(RESET_VCS0_BASE);
 
 	/* Logs the write. */
 	if (state->count < RESET_LOG_MAX) {
@@ -179,13 +188,21 @@ reset_model_write(
 	}
 
 	/* RESET_CTL takes masked words: a request becomes ready, a catastrophic error clears, a withdrawal clears. */
-	if (offset == RESET_CTL(RESET_VCS0_BASE)) {
+	if (offset == ctl) {
+		/* A request is a masked word that enables the request bit. */
+		asked = 0;
+		if ((value & (RESET_CTL_REQUEST << 16)) != 0U && (value & RESET_CTL_REQUEST) != 0U)
+			asked = 1;
+
+		/* The engine answers it with the ready bit unless the case says it never is ready. */
 		status = 0U;
-		if ((value & (RESET_CTL_REQUEST << 16)) != 0U && (value & RESET_CTL_REQUEST) != 0U) {
+		if (asked) {
 			status = RESET_CTL_REQUEST;
 			if (state->never_ready == 0)
 				status |= RESET_CTL_READY;
 		}
+
+		/* The register reads back the answer. */
 		mock_mmio_preset(file, offset, status);
 		return;
 	}
@@ -198,14 +215,17 @@ reset_model_write(
 	}
 
 	/* The converter's forced lock is acknowledged while it is asked for. */
-	if (offset == RESET_SFC_LOCK(RESET_VCS0_BASE)) {
-		status = mock_mmio_peek(file, RESET_SFC_STATUS(RESET_VCS0_BASE));
+	if (offset == lock) {
+		/* The status says the lock is held while the lock bit is written. */
+		status = mock_mmio_peek(file, lock_status);
 		if ((value & 1U) != 0U) {
 			status |= RESET_SFC_ACK;
 		} else {
 			status &= ~RESET_SFC_ACK;
 		}
-		mock_mmio_preset(file, RESET_SFC_STATUS(RESET_VCS0_BASE), status);
+
+		/* The status reads back the answer. */
+		mock_mmio_preset(file, lock_status, status);
 	}
 }
 
@@ -278,6 +298,7 @@ reset_check_domain(void)
 	struct i915_engine_info engine;
 	int error;
 
+	/* Starts the section. */
 	contract_section("engine without a reset domain");
 	reset_model_clear();
 
@@ -301,6 +322,7 @@ reset_check_plain(void)
 	int withdrawn;
 	int error;
 
+	/* Starts the section. */
 	contract_section("VCS0 reset, converter free");
 	reset_model_clear();
 
@@ -332,6 +354,7 @@ reset_check_converter(void)
 	int unlocked;
 	int error;
 
+	/* Starts the section. */
 	contract_section("VCS0 reset, converter in use");
 	reset_model_clear();
 	mock_mmio_preset(&mock, RESET_SFC_STATUS(RESET_VCS0_BASE), RESET_SFC_USAGE);
@@ -356,6 +379,7 @@ reset_check_not_ready(void)
 	int withdrawn;
 	int error;
 
+	/* Starts the section. */
 	contract_section("VCS0 never ready");
 	reset_model_clear();
 	model.never_ready = 1;
@@ -376,6 +400,7 @@ reset_check_catastrophic(void)
 	int cleared;
 	int error;
 
+	/* Starts the section. */
 	contract_section("VCS0 with a catastrophic error");
 	reset_model_clear();
 	mock_mmio_preset(&mock, RESET_CTL(RESET_VCS0_BASE), RESET_CTL_CAT);
@@ -397,6 +422,7 @@ reset_check_stuck(void)
 	int first;
 	int error;
 
+	/* Starts the section. */
 	contract_section("GDRST never acknowledged");
 	reset_model_clear();
 	model.gdrst_stuck = 1;
@@ -419,6 +445,7 @@ reset_check_release(void)
 	struct i915_ppgtt *vm;
 	int error;
 
+	/* Starts the section. */
 	contract_section("checked reset releases the quarantine");
 
 	/* A device that faulted, with one quarantined object and one quarantined address space. */
@@ -431,6 +458,8 @@ reset_check_release(void)
 		free(vm);
 		return;
 	}
+
+	/* The object and the address space are retained, and the device faulted. */
 	object->quarantined = 1U;
 	device.gem.objects = object;
 	device.gem.quarantined_objects = 1U;
@@ -544,6 +573,7 @@ kern_logf(
 {
 	va_list arguments;
 
+	/* The log goes to the test's output. */
 	va_start(arguments, format);
 	vprintf(format, arguments);
 	va_end(arguments);
