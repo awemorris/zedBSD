@@ -18,6 +18,7 @@
 #include "internal.h"
 
 void drv_i915_tc_kern_start(struct i915_display *display, struct i915_mmio *mmio, unsigned display_ver);
+void drv_i915_tc_kern_stop(struct i915_display *display);
 struct i915_tc *drv_i915_tc_kern_ports(struct i915_display *display);
 int drv_i915_tc_kern_port_of(int port);
 void drv_i915_lcd_tc_put_link(void *ctx, int tc_port);

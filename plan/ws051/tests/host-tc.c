@@ -10,7 +10,8 @@
  * over fake registers: the live status, the readout of how the firmware left
  * a port, the connect's order and its unwinding, the FIA's lanes and slots,
  * the legacy flag's correction, the connected answer, and the balance of the
- * power the ports take.
+ * power the ports take; the legacy PHY's sleeping wait measured on the clock
+ * and the driver's stop that gives every port back (ws177-p002).
  *
  *   sh plan/ws051/tests/host-tc.sh
  */
@@ -20,6 +21,9 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+
+/* The longest log line the fake looks into. */
+#define FAKE_LOG_LINE	256
 
 /* How many registers and writes the fake keeps. */
 #define FAKE_REGS	64
@@ -57,6 +61,20 @@ struct fake {
 	int locked[I915_TC_PORTS];
 	int lock_errors;
 	int fail_cold;
+	/*
+	 * The clock: the time now, how long one sleep lasts at least (the
+	 * kernel's tick; 0 for exactly the time asked), the sleeps taken, a
+	 * clock that fails, and the sleep after which a port's PHY becomes
+	 * ready (0: never).
+	 */
+	uint64_t now_us;
+	unsigned tick_us;
+	unsigned sleeps;
+	int clock_fails;
+	unsigned ready_after;
+	unsigned ready_port;
+	/* The log lines that said a wait timed out. */
+	unsigned timeouts;
 };
 
 /* The fake every test uses, reset by fake_reset. */
@@ -76,7 +94,8 @@ static int env_power_get(void *ctx, enum i915_tc_power power, unsigned port);
 static void env_power_put(void *ctx, enum i915_tc_power power, unsigned port);
 static void env_lock(void *ctx, unsigned port);
 static void env_unlock(void *ctx, unsigned port);
-static int env_delay_us(void *ctx, unsigned us);
+static int env_now_us(void *ctx, uint64_t *now);
+static int env_sleep_us(void *ctx, unsigned us);
 static void env_log(void *ctx, const char *format, ...) __attribute__((format(printf, 2, 3)));
 static void bind(struct i915_tc *tc);
 static int power_balanced(void);
@@ -89,6 +108,8 @@ static void test_lanes_and_slots(void);
 static void test_legacy_and_connected(void);
 static void test_dp_sample(void);
 static void test_fia_lane_count(void);
+static void test_wait_ready(void);
+static void test_stop(void);
 
 /*
  * Runs every test and reports the count.
@@ -105,6 +126,8 @@ main(void)
 	test_legacy_and_connected();
 	test_dp_sample();
 	test_fia_lane_count();
+	test_wait_ready();
+	test_stop();
 
 	/* The summary the script reads. */
 	printf("ws051-p002b host-tc checks=%u failures=%u\n", checks, failures);
@@ -277,16 +300,46 @@ env_unlock(
 	fake.locked[port] = 0;
 }
 
-/* The environment's delay: none on the host. */
+/* The environment's clock: the fake's time, or a failure when the test asks. */
 static int
-env_delay_us(
+env_now_us(
+	void *ctx,
+	uint64_t *now)
+{
+	(void)ctx;
+
+	/* A failed time base. */
+	if (fake.clock_fails)
+		return 5;
+
+	/* Succeeded: the time now. */
+	*now = fake.now_us;
+	return 0;
+}
+
+/*
+ * The environment's sleep: the clock moves on by the time asked, or by a
+ * whole tick when that is longer, and the port the test names becomes
+ * ready after its sleep.
+ */
+static int
+env_sleep_us(
 	void *ctx,
 	unsigned us)
 {
 	(void)ctx;
-	(void)us;
 
-	/* Succeeded: no time passes. */
+	/* The time passes, at least a tick. */
+	fake.now_us += us;
+	if (fake.tick_us > us)
+		fake.now_us += fake.tick_us - us;
+	fake.sleeps++;
+
+	/* The PHY the test waits for comes. */
+	if (fake.ready_after != 0u && fake.sleeps == fake.ready_after)
+		fake_set(REG_TCSS(fake.ready_port), TCSS_READY);
+
+	/* Succeeded: slept. */
 	return 0;
 }
 
@@ -298,15 +351,23 @@ env_log(
 	...)
 {
 	va_list arguments;
+	char line[FAKE_LOG_LINE];
+	const char *timeout;
 
 	(void)ctx;
 
-	/* The log, only in the verbose build. */
+	/* The line, counted when it tells of a wait that timed out. */
 	va_start(arguments, format);
-#ifdef HOST_TC_VERBOSE
-	vprintf(format, arguments);
-#endif
+	(void)vsnprintf(line, sizeof(line), format, arguments);
 	va_end(arguments);
+	timeout = strstr(line, "timeout");
+	if (timeout != NULL)
+		fake.timeouts++;
+
+	/* The log, only in the verbose build. */
+#ifdef HOST_TC_VERBOSE
+	fputs(line, stdout);
+#endif
 }
 
 /* Binds the core to the fake. */
@@ -324,7 +385,8 @@ bind(
 	env.power_put = env_power_put;
 	env.lock = env_lock;
 	env.unlock = env_unlock;
-	env.delay_us = env_delay_us;
+	env.now_us = env_now_us;
+	env.sleep_us = env_sleep_us;
 	env.log = env_log;
 	drv_i915_tc_init(tc, &env, 13u);
 }
@@ -763,4 +825,115 @@ test_fia_lane_count(void)
 	/* The 5330's TC2 pin assignment: FIA1's DFLEXPA1 0x30 is pin C. */
 	fake_set(REG_FIA1_PA1, 0x30u);
 	check(drv_i915_tc_pin_assignment(&tc, 1u) == 3u, "pins: the 5330's TC2 DFLEXPA1 0x30 is pin C");
+}
+
+/*
+ * The legacy port's wait for its PHY (ws177-p002): it sleeps between the
+ * reads and measures the half second on the clock, so a sleep that lasts a
+ * whole tick ends it after the same time with fewer reads; a PHY that comes
+ * ends it at once; a failed clock reads the bit once; a USB-C port does not
+ * wait.
+ */
+static void
+test_wait_ready(void)
+{
+	struct i915_tc tc;
+
+	/* TC4 legacy (SDE bit 27), the PHY never ready, a sleep of a 10 ms tick: 50 sleeps, half a second. */
+	fake_reset();
+	fake.tick_us = 10000u;
+	bind(&tc);
+	drv_i915_tc_declare(&tc, 3u, 1);
+	fake_set(REG_SDEISR, 1u << 27);
+	drv_i915_tc_readout(&tc);
+	check(fake.sleeps == 50u, "wait: a 10 ms tick sleeps 50 times");
+	check(fake.now_us >= 500000u && fake.now_us < 510000u, "wait: half a second on the clock");
+	check(fake.timeouts == 1u, "wait: the timeout is logged once");
+	check(tc.port[3].mode == I915_TC_MODE_NONE, "wait: a PHY that never came is not held");
+	check(power_balanced() && fake.lock_errors == 0, "wait: power and locks balanced");
+
+	/* The same with sleeps of exactly the time asked (1 ms): 500 sleeps, half a second. */
+	fake_reset();
+	bind(&tc);
+	drv_i915_tc_declare(&tc, 3u, 1);
+	fake_set(REG_SDEISR, 1u << 27);
+	drv_i915_tc_readout(&tc);
+	check(fake.sleeps == 500u, "wait: a 1 ms sleep sleeps 500 times");
+	check(fake.now_us == 500000u, "wait: exactly half a second");
+
+	/* The PHY comes after the third sleep: the wait ends there, no timeout. */
+	fake_reset();
+	fake.tick_us = 10000u;
+	fake.ready_after = 3u;
+	fake.ready_port = 3u;
+	bind(&tc);
+	drv_i915_tc_declare(&tc, 3u, 1);
+	fake_set(REG_SDEISR, 1u << 27);
+	drv_i915_tc_readout(&tc);
+	check(fake.sleeps == 3u, "wait: ends at the read after the PHY came");
+	check(fake.timeouts == 0u, "wait: no timeout when the PHY came");
+
+	/* A failed clock: the bit is read once, no sleep, no endless wait. */
+	fake_reset();
+	fake.clock_fails = 1;
+	bind(&tc);
+	drv_i915_tc_declare(&tc, 3u, 1);
+	fake_set(REG_SDEISR, 1u << 27);
+	drv_i915_tc_readout(&tc);
+	check(fake.sleeps == 0u, "wait: a failed clock does not sleep");
+	check(power_balanced() && fake.lock_errors == 0, "wait: a failed clock leaves power and locks balanced");
+
+	/* A USB-C port (not legacy) does not wait. */
+	fake_reset();
+	fake.tick_us = 10000u;
+	bind(&tc);
+	drv_i915_tc_declare(&tc, 0u, 0);
+	drv_i915_tc_readout(&tc);
+	check(fake.sleeps == 0u, "wait: a USB-C port does not wait");
+}
+
+/*
+ * The driver's stop (ws177-p002): a port the firmware's output holds with a
+ * link gives its PHY and its TC cold block back, every port is retired, the
+ * display answers for none afterwards, and a second stop does nothing.
+ */
+static void
+test_stop(void)
+{
+	struct i915_tc tc;
+	enum i915_tc_mode mode;
+	unsigned writes;
+	unsigned gets;
+
+	/* TC1 driven by the firmware in DP-alt (one link, TC cold blocked), TC3 declared and empty. */
+	fake_reset();
+	bind(&tc);
+	drv_i915_tc_declare(&tc, 0u, 0);
+	drv_i915_tc_declare(&tc, 2u, 0);
+	fake_set(REG_DE_HPD_ISR, 1u << 16);
+	fake_set(REG_TCSS(0u), TCSS_READY);
+	fake_set(REG_DDI_BUF_CTL(0u), BUF_ENABLE | BUF_OWNED);
+	drv_i915_tc_readout(&tc);
+	check(tc.port[0].links == 1u && tc.port[0].cold_held, "stop: TC1 held with a link before the stop");
+
+	/* The stop gives TC1 back although its link was not put back. */
+	drv_i915_tc_stop(&tc);
+	check(tc.port[0].mode == I915_TC_MODE_NONE && tc.port[0].links == 0u, "stop: TC1 holds nothing");
+	check((fake_get(REG_DDI_BUF_CTL(0u)) & BUF_OWNED) == 0u, "stop: TC1's ownership given back");
+	check(fake.power[I915_TC_POWER_COLD][0] == 0 && !tc.port[0].cold_held, "stop: TC1's TC cold unblocked");
+	check(!tc.port[0].present && !tc.port[2].present, "stop: every port retired");
+	check(!tc.live, "stop: the display answers for no port");
+	check(power_balanced() && fake.lock_errors == 0, "stop: power and locks balanced");
+
+	/* Nothing after the stop takes a port again, writes or takes power. */
+	writes = fake.writes;
+	gets = fake.power_gets;
+	drv_i915_tc_get_link(&tc, 0u, 4);
+	mode = drv_i915_tc_lock(&tc, 0u, 4);
+	drv_i915_tc_unlock(&tc, 0u);
+	drv_i915_tc_put_link(&tc, 0u);
+	drv_i915_tc_stop(&tc);
+	check(mode == I915_TC_MODE_NONE, "stop: a lock after the stop holds no mode");
+	check(fake.writes == writes && fake.power_gets == gets, "stop: nothing written or powered after the stop");
+	check(fake.lock_errors == 0, "stop: no lock taken after the stop");
 }
