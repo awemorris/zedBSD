@@ -6,7 +6,7 @@
  */
 
 /*
- * ws113-p002: the host test of the firmware's output (the GPU scanout rule):
+ * ws113-p002: the host test of the firmware's output (the GPU scanout rule; ws051-p004c: DP SST on a Type-C port):
  * drv_i915_gop_output_read() and drv_i915_gop_output_name(), taken out of
  * src/drivers/gpu/i915/display/output.c by host-gop.sh, on N0 reports made
  * here.
@@ -39,6 +39,7 @@ struct i915_native_report {
 #define I915_GOP_EDP		1U
 #define I915_GOP_HDMI		2U
 #define I915_GOP_OTHER		3U
+#define I915_GOP_DP_TC		4U
 
 struct i915_gop_output {
 	unsigned kind;
@@ -127,16 +128,36 @@ main(void)
 	light(&report, 1U, 1, 1U);
 	expect("DVI", &report, I915_GOP_HDMI, 2U, "DVI on DDI B, pipe B");
 
-	/* An interface the driver cannot light: DP on a Type-C port, DP on DDI B, HDMI on a Type-C port. */
+	/* DP SST on a Type-C port (DP-alt): the external DP path (ws051-p004c), TC1 to TC4. */
 	blank(&report);
 	light(&report, 0U, 3, 2U);
-	expect("DP TC1", &report, I915_GOP_OTHER, 1U, "DP SST on DDI TC1, pipe A");
+	expect("DP TC1", &report, I915_GOP_DP_TC, 1U, "DP SST on DDI TC1, pipe A");
+	blank(&report);
+	light(&report, 1U, 4, 2U);
+	expect("DP TC2", &report, I915_GOP_DP_TC, 2U, "DP SST on DDI TC2, pipe B");
+	blank(&report);
+	light(&report, 3U, 6, 2U);
+	expect("DP TC4", &report, I915_GOP_DP_TC, 8U, "DP SST on DDI TC4, pipe D");
+
+	/* The panel and a Type-C DP display cloned: the panel (the lowest pipe), both pipes recorded. */
+	blank(&report);
+	light(&report, 0U, 0, 2U);
+	light(&report, 1U, 3, 2U);
+	expect("clone TC1", &report, I915_GOP_EDP, 3U, "DP SST on DDI A, pipe A");
+
+	/* An interface the driver cannot light: DP MST on a Type-C port, DP on DDI B, HDMI on a Type-C port, a port past TC4. */
+	blank(&report);
+	light(&report, 0U, 3, 3U);
+	expect("DP MST TC1", &report, I915_GOP_OTHER, 1U, "DP MST on DDI TC1, pipe A");
 	blank(&report);
 	light(&report, 2U, 1, 2U);
 	expect("DP B", &report, I915_GOP_OTHER, 4U, "DP SST on DDI B, pipe C");
 	blank(&report);
 	light(&report, 1U, 4, 0U);
 	expect("HDMI TC2", &report, I915_GOP_OTHER, 2U, "HDMI on DDI TC2, pipe B");
+	blank(&report);
+	light(&report, 0U, 7, 2U);
+	expect("DP past TC4", &report, I915_GOP_OTHER, 1U, "DP SST on DDI TC5, pipe A");
 
 	/* A lit plane without an enabled transcoder drives no port; the next pipe that does is the output. */
 	blank(&report);

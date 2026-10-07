@@ -61,10 +61,11 @@
 #define I915_OUTPUT_MODE_DP_SST		2U
 #define I915_OUTPUT_MODE_DP_MST		3U
 
-/* The ports: A (the panel's DDI), B (the HDMI path's), and the first Type-C port (enum port). */
+/* The ports: A (the panel's DDI), B (the HDMI path's), the first Type-C port (enum port), and how many Type-C ports. */
 #define I915_OUTPUT_PORT_A		0
 #define I915_OUTPUT_PORT_B		1
 #define I915_OUTPUT_PORT_TC1		3
+#define I915_OUTPUT_PORT_TC_COUNT	4
 
 /* The pipes N0 reads. */
 #define I915_OUTPUT_PIPES		4U
@@ -189,6 +190,7 @@ static int i915_output_hdmi_mode(struct i915_display *display, unsigned connecto
 static void i915_output_panel_connector(struct i915_display *display, struct i915_display_output *output);
 static int i915_output_dp_ext(struct i915_display *display, unsigned connector, int port, struct i915_display_output *output, const char **reason);
 static void i915_output_hdmi_wait(struct i915_display *display, const char *name);
+static void i915_output_dp_tc_wait(struct i915_display *display, const char *name);
 static void i915_output_choose(struct i915_display *display);
 static void i915_output_inventory(struct i915_display *display);
 static int i915_output_wanted_mode(uint32_t *width, uint32_t *height, uint32_t *refresh_hz);
@@ -250,6 +252,12 @@ drv_i915_gop_output_read(
 			gop->kind = I915_GOP_EDP;
 		if (gop->port == I915_OUTPUT_PORT_B && (gop->mode == I915_OUTPUT_MODE_HDMI || gop->mode == I915_OUTPUT_MODE_DVI))
 			gop->kind = I915_GOP_HDMI;
+
+		/* A Type-C port's DDI in DP SST mode is the external DP path (ws051-p004c); its HDMI and DP MST are not. */
+		if (gop->port >= I915_OUTPUT_PORT_TC1 &&
+		    gop->port < I915_OUTPUT_PORT_TC1 + I915_OUTPUT_PORT_TC_COUNT &&
+		    gop->mode == I915_OUTPUT_MODE_DP_SST)
+			gop->kind = I915_GOP_DP_TC;
 	}
 }
 
@@ -330,6 +338,17 @@ i915_output_choose(
 	/* The firmware's panel. */
 	if (display->gop.kind == I915_GOP_EDP) {
 		kern_logf("i915: display output: eDP panel, the firmware's output (%s, lit pipes 0x%x)\n", name, display->gop.pipes);
+		return;
+	}
+
+	/*
+	 * The firmware's DisplayPort display on a Type-C port (ws051-p004c):
+	 * its sink is asked over the port's AUX channel before anything of the
+	 * firmware's display is stopped; when it cannot be driven the node has
+	 * no output and the firmware's picture stays (the GPU scanout rule).
+	 */
+	if (display->gop.kind == I915_GOP_DP_TC) {
+		i915_output_dp_tc_wait(display, name);
 		return;
 	}
 
@@ -1026,6 +1045,86 @@ i915_output_hdmi_wait(
 
 	/* Succeeded: the HDMI display is the output (i915_output_hdmi_mode made it so). */
 	return;
+}
+
+/*
+ * Makes the firmware's DisplayPort display on a Type-C port the output
+ * (ws051-p004c): the DP connector of the firmware's port is found, and its
+ * sink is prepared as a claim prepares it (i915_output_dp_ext: probed over
+ * the port's AUX channel, its mode and link computed, nothing written).  A
+ * sink not answering yet is asked again for a while, as the HDMI one is.
+ * The Type-C readout counted a link for the port the firmware drives, so
+ * the probes do not give its PHY back.  When it cannot be driven the node
+ * has no output: the firmware's picture is kept and the panel does not
+ * take its place.
+ */
+static void
+i915_output_dp_tc_wait(
+	struct i915_display *display,
+	const char *name)
+{
+	struct i915_hpd_output found;
+	const char *reason;
+	unsigned waited_ms;
+	unsigned count;
+	unsigned index;
+	int connector;
+	int error;
+
+	/* The firmware's port's DP connector, which the hotplug path made. */
+	connector = -1;
+	count = 0U;
+	if (display->hpd_started)
+		count = drv_i915_hpd_output_count(display);
+	for (index = 0U; index < count; index++) {
+		/* A connector of another kind or port. */
+		error = drv_i915_hpd_output(display, index, &found);
+		if (error != 0)
+			continue;
+		if (found.kind != I915_HPD_OUTPUT_DP || found.port != display->gop.port)
+			continue;
+
+		/* The port's connector. */
+		connector = (int)index;
+		break;
+	}
+
+	/* Without the connector there is nothing to prepare. */
+	if (connector < 0) {
+		kern_memset(&display->output, 0, sizeof(display->output));
+		display->output.none = 1;
+		kern_logf("i915: display output: none: the firmware's DisplayPort output (%s) has no DP connector; the firmware's picture is kept\n", name);
+		return;
+	}
+
+	/* The first answer. */
+	reason = NULL;
+	kern_memset(&display->output, 0, sizeof(display->output));
+	error = i915_output_dp_ext(display, (unsigned)connector, display->gop.port, &display->output, &reason);
+
+	/* A sink not answering yet is asked again. */
+	waited_ms = 0U;
+	while (error == ENXIO && waited_ms < I915_OUTPUT_HDMI_WAIT_MS) {
+		kern_usleep_range(I915_OUTPUT_HDMI_RETRY_MS * 1000U, I915_OUTPUT_HDMI_RETRY_MS * 1000U);
+		waited_ms += I915_OUTPUT_HDMI_RETRY_MS;
+		kern_memset(&display->output, 0, sizeof(display->output));
+		error = i915_output_dp_ext(display, (unsigned)connector, display->gop.port, &display->output, &reason);
+	}
+
+	/* How long it waited, when it did. */
+	if (waited_ms != 0U)
+		kern_logf("i915: display output: waited %u ms for the DisplayPort sink (rc=%d)\n", waited_ms, error);
+
+	/* Not drivable: no output, and the firmware's picture stays. */
+	if (error != 0) {
+		kern_memset(&display->output, 0, sizeof(display->output));
+		display->output.none = 1;
+		kern_logf("i915: display output: none: the firmware's DisplayPort output (%s) cannot be driven (%s: rc=%d); the firmware's picture is kept\n", name, reason, error);
+		return;
+	}
+
+	/* Succeeded: the Type-C port's DisplayPort display is the output (i915_output_dp_ext made it so). */
+	kern_logf("i915: display output: DP on the Type-C port, the firmware's output (%s)\n", name);
 }
 
 /*
