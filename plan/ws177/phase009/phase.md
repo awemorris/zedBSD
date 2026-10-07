@@ -43,7 +43,4 @@ Origin: [backlog-p2](../backlog-p2.md) の 55〜60（WS165 ws165-p002・p003）�
 
 ## Q1 の判定（2026-10-08）
 
-merge e3d2b08a2。(1) tap を認識しない（Too small to read）は採る。(2) の提案に従い Q1 が plan/ws165/tests/host-hand.c の形が同じ組に I を足した（run-host-hand.sh PASS、top-1 93.6
-## Q1 の判定（2026-10-08）
-
 merge e3d2b08a2。(1) tap を認識しない（Too small to read）は採る。(2) の提案に従い Q1 が plan/ws165/tests/host-hand.c の形が同じ組に I を足した（run-host-hand.sh PASS、top-1 93.6%・同じ形を含め 94.9%・top-4 99.1%）。host の範囲で cleared、実機の touch の UAT は未実施。
