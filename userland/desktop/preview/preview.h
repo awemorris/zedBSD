@@ -94,6 +94,9 @@ void preview_image_release(struct preview_image *image);
 int preview_make(int input, int output, const struct preview_request *request);
 int preview_write_ppm(int fd, const struct preview_image *image, const char *stamp);
 
+/* The substitute fonts carried in the program (fonts.c, ws177-p010). */
+int preview_fonts_register(void);
+
 /* The system's confinement (each system's confine.c). */
 int preview_confine(void);
 

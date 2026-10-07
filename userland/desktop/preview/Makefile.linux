@@ -1,12 +1,13 @@
 # zedBSD; Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 # The independent Linux build of keiland-preview (ws168-p004): Files and Settings start it (libexec) with the input as
 # fd 0 and the output as fd 1; it confines itself with seccomp (linux/confine.c) before it reads a byte.  The shared
-# libpdf looks for substitute font files, which the confinement refuses (EACCES): a font a document does not embed is
-# not drawn.
+# libpdf looks for substitute font files, which the confinement refuses (EACCES); fonts.c gives it the desktop's Mahora
+# in memory instead (ws177-p010), which draws a font a document does not embed.
 KEILAND_LINUX_PREVIEW_SOURCES := userland/desktop/preview/main.c \
 	userland/desktop/preview/make.c \
 	userland/desktop/preview/decode.c \
 	userland/desktop/preview/scale.c \
+	userland/desktop/preview/fonts.c \
 	userland/desktop/preview/linux/confine.c \
 	userland/desktop/picture/picture.c
 $(eval $(call KEILAND_LINUX_PROGRAM,keiland-preview,libexec,$(KEILAND_LINUX_PREVIEW_SOURCES),libpdf.so libtruetype.so libpng-compat.so libjpeg-compat.so libgif-compat.so libz-compat.so libkeiland-compat.a,-lm))

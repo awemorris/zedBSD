@@ -286,6 +286,8 @@ fm_thumb_cache_fail(
 		error = errno;
 		return error;
 	}
+
+	/* Writes the failure's two lines. */
 	written = fprintf(file, "%s# %s\n", CACHE_FAILED, stamp);
 	closed = fclose(file);
 

@@ -261,6 +261,14 @@ int pdf_writer_begin_page_over(struct pdf_writer *writer, size_t index, enum pdf
 int pdf_outline_stroke(const struct pdf_stroke_point *points, size_t count, double width, struct pdf_point **outline, size_t *outline_count);
 void pdf_outline_free(struct pdf_point *outline);
 
+/*
+ * A substitute font held in memory, under the name of the file it stands
+ * for ("keiland.ttf"), for a program that opens no file (keiland-preview,
+ * ws177-p010): given before a document is opened, from one thread; the
+ * bytes stay the caller's.
+ */
+int pdf_font_memory_add(const char *name, const void *data, size_t size);
+
 /* The reader: a document opened from a file or memory, its pages, its attached file and what its trailer says. */
 int pdf_document_open(const char *path, struct pdf_document **document);
 int pdf_document_open_memory(const void *data, size_t size, struct pdf_document **document);

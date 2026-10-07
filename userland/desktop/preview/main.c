@@ -56,6 +56,9 @@ main(
 	if (error != 0)
 		return PREVIEW_NO_SANDBOX;
 
+	/* Gives libpdf the fonts carried in the program; without one a document's text is not drawn, as before. */
+	(void)preview_fonts_register();
+
 	/* The preview. */
 	return preview_make(0, 1, &request);
 }

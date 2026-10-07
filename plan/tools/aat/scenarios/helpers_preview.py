@@ -59,14 +59,22 @@ def thumbnails(item):
 			item.check(" error=0 " in line and " status=0 " in line and not line.endswith(" pid=0"),
 				f"{name}: no thumbnail from a child ({line})")
 		item.check(made["broken.png"] and " error=0 " not in made["broken.png"], "the damaged PNG was not refused")
+		# ws177-p010: two children at once (two starts before the first end).
+		order = run.lines(rf"ZFILES THUMB (start )?path={re.escape(FOLDER)}/", mark)
+		first_end = next((index for index, line in enumerate(order) if " start " not in line), len(order))
+		starts = sum(1 for line in order[:first_end] if "THUMB start " in line)
+		item.step("children at once", f"{starts} started before the first ended")
+		item.check(starts >= 2, f"the thumbnails were not made two at once ({starts} before the first end)")
 		run.close(item, window)
 		# Again: from the cache.
 		mark = run.mark()
 		window = run.open_as_user(item, f"/bin/files {FOLDER}", ready=r"ZFILES READY ")
 		window = sized(window, mark)
 		cached = run.wait(rf"ZFILES THUMB path={re.escape(FOLDER)}/sample.png error=0 .* cached=1", mark, 15)
-		item.step("opened again", cached or "")
+		kept = run.wait(rf"ZFILES THUMB path={re.escape(FOLDER)}/broken.png error=\d+ .* cached=1 failed=1", mark, 15)
+		item.step("opened again", f"{cached}; {kept}")
 		item.check(cached, "the thumbnail was not read from the cache")
+		item.check(kept, "the damaged PNG's failure was not kept in the cache (ws177-p010)")
 		run.close(item, window)
 		# Settings' Wallpaper page: its tiles by children.
 		window, since = run.settings(item, "wallpaper")
@@ -81,7 +89,8 @@ def thumbnails(item):
 		_, denied_after = run.sh("dmesg 2>/dev/null | grep -c 'SANDBOX deny'")
 		item.step("the kernel's log", f"SANDBOX deny lines {denied_before.strip()} before, {denied_after.strip()} after")
 		item.check(denied_before.strip() == denied_after.strip(), "a child made a call its sandbox refuses")
-		item.person("the folder's icons are the pictures (the PDF its first page), the damaged PNG its kind's icon; the wallpaper tiles")
+		item.person("the folder's icons are the pictures (the PDF its first page, its words drawn in the font the program carries), "
+			"the damaged PNG its kind's icon; the wallpaper tiles")
 	finally:
 		run.sh(f"rm -rf {FOLDER}")
 
