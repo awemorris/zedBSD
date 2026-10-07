@@ -12,7 +12,9 @@
 #     ("KWL GLASS head bar output=1 top=T launcher=X desktops=X status=X clock=X", left to right inside head 1) and
 #     it has a's icon alone ("KWL APPS bar count=1 hidden=0 desktop=D apps=p015.a output=1"); head1-bar.png shows
 #     across head 1's top the launcher, a's icon, the desktops' pill, the status and the clock, and a under it.
-#  2. Window b opens on the anchor; a double click on its title docks it there ("KWL GLASS dock surface=b
+#  2. Window b opens on the anchor, and the system bar has b's icon alone ("KWL APPS bar count=1 hidden=0 desktop=D
+#     apps=p015.b": each display's bar has its own windows, the 2026-10-08 user decision); a double click on its title
+#     docks it there ("KWL GLASS dock surface=b
 #     via=double-click"): the anchor's docked mode ("KWL LAYOUT mode=docked reason=double-click at_ms=", no output=),
 #     whose window count is the anchor's alone ("KWL LAYOUT windows ... docked=1 dock_hidden=0" without output=: a on
 #     head 1 is not hidden by it), and a stays in head 1's render list (head1-anchor-docked.png shows a floating there).
@@ -143,6 +145,7 @@ head_shot 1 head1-bar
 open_window p015.b d0f4d0 400x280
 b=$msurface
 echo "b: surface ${b:-none} at $mx,$my"
+expect_count 'KWL APPS bar count=1 hidden=0 desktop=[0-9]+ apps=p015.b$' 1 "the system bar has b's icon alone (a is head 1's)"
 pointer move $((mx + 150)) $((my - 30)) sleep 400 down sleep 60 up sleep 60 down sleep 60 up sleep 800
 expect_count "KWL GLASS dock surface=$b via=double-click" 1 "a double click docks b on the anchor"
 expect_count 'KWL LAYOUT mode=docked reason=double-click at_ms=' 1 "the anchor's mode is docked (its own line)"

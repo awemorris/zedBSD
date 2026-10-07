@@ -12,12 +12,14 @@
  *
  * While no window is docked (D6: a docked window's title has the bar; a
  * fullscreen window hides the bar), the bar shows an icon for each
- * application on the desktop shown (apps.c); a head's bar (ws113-p015,
- * the 2026-10-08 user decision) shows those of the windows on that head,
- * the system bar those of every window as before.  The icons go from after
- * the launcher's line to before the desktops' line, in the desktop's own
- * order (one for all the bars): the order
- * the applications were opened in, which dragging an icon changes (the
+ * application with a window on that bar's display, on the desktop shown
+ * (apps.c; ws113-p015, the 2026-10-08 user decision: each display's bar,
+ * the system bar's and each head's, has its own windows' applications, an
+ * application with windows on two displays is in both bars, and its
+ * previews are of the windows on that display; the switcher has every
+ * window).  The icons go from after the launcher's line to before the
+ * desktops' line, in the desktop's own order (one for all the bars): the
+ * order the applications were opened in, which dragging an icon changes (the
  * 2026-10-05 request; each desktop keeps its order).  The application of
  * the window on top has a short line under its icon (all the icons sit in
  * one pill, ws099-p034); one whose windows are all
@@ -68,7 +70,7 @@ static int slot_at(const struct apps_view *view, int32_t x, int32_t y);
 static void slot_rect(const struct apps_view *view, unsigned slot, struct apps_rect *rect);
 static int panel_build(struct kwl_server *server, const struct apps_view *view, const char *key, struct apps_panel *panel);
 static void log_bar(struct kwl_server *server, const struct apps_view *view);
-static int view_collect_on(struct kwl_server *server, unsigned slot, struct apps_view *view);
+static int view_collect_on(struct kwl_server *server, unsigned slot, int every, struct apps_view *view);
 static void draw_more(struct kwl_server *server, VkCommandBuffer command, const struct apps_rect *rect, unsigned hidden, float light);
 static void draw_light(struct kwl_server *server, VkCommandBuffer command, const struct apps_rect *rect, float strength);
 
@@ -671,7 +673,7 @@ kwl_apps_view_build_on(
 		return 0;
 
 	/* The applications. */
-	collected = view_collect_on(server, slot, view);
+	collected = view_collect_on(server, slot, 0, view);
 	if (!collected)
 		return 0;
 	view->top = top;
@@ -699,9 +701,9 @@ kwl_apps_view_build_on(
 
 /*
  * Gathers the applications of the desktop shown (in its bar order) and the
- * application of the window on top, without the icons' places (the
- * switcher in the middle of the output needs no room in the bar), for the
- * system bar: every window of the desktop.  Returns 0 when there is none.
+ * application of the window on top, without the icons' places, for the
+ * switcher in the middle of the anchor: every window of the desktop, on
+ * every display.  Returns 0 when there is none.
  */
 int
 kwl_apps_view_collect(
@@ -711,7 +713,7 @@ kwl_apps_view_collect(
 	int collected;
 
 	/* The anchor's. */
-	collected = view_collect_on(server, KWL_PLANE_ANCHOR, view);
+	collected = view_collect_on(server, KWL_PLANE_ANCHOR, 1, view);
 	if (!collected)
 		return 0;
 
@@ -720,16 +722,17 @@ kwl_apps_view_collect(
 }
 
 /*
- * Gathers the applications of the desktop shown for an output's bar: on
- * the anchor every window of the desktop, on a head the windows on it
- * (ws113-p015); the application of the output's window on top; the
- * output's rectangle (the previews' room) and its bar's top.  Returns 0
- * when there is none.
+ * Gathers the applications of the desktop shown for an output: of the
+ * windows on it for its bar (ws113-p015), or of every window (every, the
+ * switcher's); the application of the window on top (the output's, or the
+ * desktop's for every window); the output's rectangle (the previews' room)
+ * and its bar's top.  Returns 0 when there is none.
  */
 static int
 view_collect_on(
 	struct kwl_server *server,
 	unsigned slot,
+	int every,
 	struct apps_view *view)
 {
 	struct kwl_client *client;
@@ -774,8 +777,8 @@ view_collect_on(
 			if (parent != NULL || view->window_count >= VIEW_WINDOWS)
 				continue;
 
-			/* A head's bar has the windows on that head alone. */
-			if (slot != KWL_PLANE_ANCHOR && surface->output != slot)
+			/* A bar has the windows on its display alone. */
+			if (!every && surface->output != slot)
 				continue;
 
 			/* The desktop's icons are no application (desktop.c). */
@@ -800,9 +803,9 @@ view_collect_on(
 	if (view->apps.count == 0U)
 		return 0;
 
-	/* The application of the window on top: of the desktop for the system bar, of the head for a head's. */
+	/* The application of the window on top: of the desktop for every window, of the display for its bar. */
 	top = kwl_top_window(server);
-	if (slot != KWL_PLANE_ANCHOR)
+	if (!every)
 		top = kwl_output_top_window(server, slot);
 	parent = kwl_sheet_parent(top);
 	if (parent != NULL)
