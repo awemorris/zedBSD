@@ -322,7 +322,7 @@ only validates it and reports it as `sysctl kern.boot.login`; the graphical
 login's `sessiond` (the rc.conf service `greeter`) reads it.
 
 ```text
-login=graphical  the greeter (zdesktop --greeter) on the display
+login=graphical  the greeter (/bin/wayland --greeter) on the display
 login=console    the console's getty (also what no login= means)
 ```
 
