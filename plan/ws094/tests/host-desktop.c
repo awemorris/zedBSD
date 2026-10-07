@@ -25,7 +25,8 @@
  *
  * ws094-p009: a click's frame draws only the cells that changed; the
  * picture is the same as a whole frame's (and the rest of the canvas is
- * not drawn again).
+ * not drawn again).  BUG-221: so does a rubber band's drag, drawn again
+ * only where the band and the cells it selects changed, and its end.
  *
  *   host-desktop TEMPORARY-FOLDER
  */
@@ -49,6 +50,7 @@ static int context_has(const struct fm_context *context, const char *label);
 static void check_drag(const char *temporary);
 static void check_partial(const char *temporary);
 static int partial_same(struct fm_app *app, struct kl_canvas *canvas, uint32_t *whole, const char *text);
+static void band_input(struct fm_app *app, unsigned type, int x, int y, int pressed);
 static int saved_at(const struct fm_desktop *desk, const char *name, int column, int row);
 static void check_label(void);
 static void check_resize(void);
@@ -583,6 +585,8 @@ check_partial(
 	int index;
 	int error;
 	int differs;
+	int selected;
+	int first;
 
 	/* Nine items: files, folders and a name longer than a cell. */
 	snprintf(folder, sizeof(folder), "%s/partial", temporary);
@@ -669,6 +673,36 @@ check_partial(
 	fm_select_none(tab);
 	partial_same(&app, &canvas, whole, "partial: none selected");
 
+	/*
+	 * BUG-221: a rubber band from the empty middle across the items' column
+	 * at the right, and back: each frame draws only where the band and the
+	 * selection changed, and is the whole frame's picture.
+	 */
+	band_input(&app, FM_EVENT_MOTION, 800, 600, 0);
+	band_input(&app, FM_EVENT_BUTTON, 800, 600, 1);
+	partial_same(&app, &canvas, whole, "band: it starts");
+	selected = 0;
+	for (index = 1; index <= 8; index++) {
+		band_input(&app, FM_EVENT_MOTION, 800 + 60 * index, 600 - 70 * index, 0);
+		partial_same(&app, &canvas, whole, "band: it grows across the items");
+		first = fm_select_first(tab);
+		if (first >= 0)
+			selected = 1;
+	}
+
+	/* Some of the items it crossed were selected. */
+	check(selected, "band: it selects the items it crosses");
+
+	/* Back towards where it started, past the items. */
+	for (index = 1; index <= 4; index++) {
+		band_input(&app, FM_EVENT_MOTION, 1280 - 110 * index, 40 + 90 * index, 0);
+		partial_same(&app, &canvas, whole, "band: it shrinks");
+	}
+
+	/* The button's release ends it. */
+	band_input(&app, FM_EVENT_BUTTON, 840, 400, 0);
+	partial_same(&app, &canvas, whole, "band: it ends");
+
 	/* The model and the canvas are done with. */
 	fm_desktop_release(&app.desk);
 	fm_app_release(&app);
@@ -727,6 +761,29 @@ partial_same(
 
 	/* Succeeded: the changed cells match the complete frame. */
 	return 1;
+}
+
+/* Gives the desktop one pointer input at a point, the left button's for a button (BUG-221's band). */
+static void
+band_input(
+	struct fm_app *app,
+	unsigned type,
+	int x,
+	int y,
+	int pressed)
+{
+	struct fm_event event;
+
+	/* The input, a little later than the last. */
+	memset(&event, 0, sizeof(event));
+	event.type = type;
+	event.x = x;
+	event.y = y;
+	event.button = FM_BUTTON_LEFT;
+	event.pressed = pressed;
+	app->now += 16U;
+	event.time = app->now;
+	fm_desktop_event(app, &event);
 }
 
 /*

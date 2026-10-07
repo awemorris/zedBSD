@@ -358,7 +358,9 @@ struct fm_desktop_painted {
  * only in memory), the size laid out
  * for, the listing laid out (its count, time and a hash of its names in
  * order, which a rename changes), the rubber band being
- * dragged (band, from its start to the pointer), the last left click (for
+ * dragged (band, from its start to the pointer; painted_band says the kept
+ * frame has the band drawn at painted_band_rect, which the next frame
+ * draws again only where it changed, BUG-221), the last left click (for
  * a double click: its item and time), and the number of items the last
  * logged layout had plus one (0 before the first).
  *
@@ -413,6 +415,8 @@ struct fm_desktop {
 	int drop_row;
 	int drop_place;
 	int painted;
+	int painted_band;
+	struct kl_rect painted_band_rect;
 	int painted_width;
 	int painted_height;
 	size_t painted_count;

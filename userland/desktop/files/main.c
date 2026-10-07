@@ -85,6 +85,21 @@ struct main_startup {
 };
 
 /*
+ * The frames shown while the desktop's rubber band is dragged (BUG-221):
+ * how many, their total and longest time from the start of the drawing to
+ * the frame shown, and the longest drawing and presenting, in fm_clock()'s
+ * milliseconds; logged once when the band ends (the hardware's check of
+ * where a frame's time goes).
+ */
+struct main_band_frames {
+	unsigned count;
+	uint64_t total;
+	uint64_t longest;
+	uint64_t draw;
+	uint64_t present;
+};
+
+/*
  * The desktop mode (files --desktop, ws094-p003): the token zdesktop gave
  * the program, copied before it leaves the environment (unsetenv frees the
  * environment's string), and the folder shown (~/Desktop).  Empty outside
@@ -169,11 +184,15 @@ static struct kl_canvas main_canvas;
 /* The current run's startup samples; zero means a step has not been recorded yet. */
 static struct main_startup main_startup;
 
+/* The frames of the desktop's band being dragged; zero count until the first, emptied when it is logged. */
+static struct main_band_frames main_band_frames;
+
 static int main_parse(int argc, char **argv, struct main_options *options);
 static const char *main_value(const char *argument, const char *name);
 static int main_number(const char *text, unsigned maximum, unsigned *value);
 static int main_loop(const struct main_options *options);
 static int main_frame(void);
+static void main_band_frame(uint64_t started, uint64_t drawn, uint64_t shown);
 static int main_canvas_make(void);
 static int main_timeout(uint64_t now);
 static void main_request(const struct main_options *options);
@@ -764,6 +783,10 @@ main_frame(void)
 			main_app.desk.select_ms = 0U;
 		}
 
+		/* The desktop's band's frames, summed and logged at its end (BUG-221). */
+		if (main_app.desktop && result == VK_SUCCESS)
+			main_band_frame(started, drawn, shown);
+
 		/* A slow frame is logged (a diagnostic: where the time of a frame goes). */
 		if (shown - started > MAIN_SLOW_FRAME_MS)
 			fm_log("SLOW-FRAME draw=%lu present=%lu copy=%u acquire=%u queue=%u wait=%u", (unsigned long)(drawn - started), (unsigned long)(shown - drawn), main_present.copy_ms, main_present.acquire_ms, main_present.present_ms, main_present.wait_ms);
@@ -794,6 +817,49 @@ main_frame(void)
 	/* The swapchain stayed out of date. */
 	fprintf(stderr, "ZFILES FAILED operation=stale-swapchain\n");
 	return -1;
+}
+
+/*
+ * Counts a frame shown while the desktop's rubber band is dragged, and
+ * logs the frames once the band has ended (BUG-221): how many, their mean
+ * and longest time, and the longest drawing and presenting.
+ */
+static void
+main_band_frame(
+	uint64_t started,
+	uint64_t drawn,
+	uint64_t shown)
+{
+	struct main_band_frames *frames;
+	uint64_t took;
+
+	/* A frame of the band: counted, with its times. */
+	frames = &main_band_frames;
+	if (main_app.desk.band) {
+		took = shown - started;
+		frames->count++;
+		frames->total += took;
+		if (took > frames->longest)
+			frames->longest = took;
+		if (drawn - started > frames->draw)
+			frames->draw = drawn - started;
+		if (shown - drawn > frames->present)
+			frames->present = shown - drawn;
+		return;
+	}
+
+	/* No band, and none was counted. */
+	if (frames->count == 0U)
+		return;
+
+	/* The band ended: its frames, once. */
+	fm_log("DESKTOP band frames=%u mean_ms=%llu longest_ms=%llu draw_ms=%llu present_ms=%llu",
+	       frames->count,
+	       (unsigned long long)(frames->total / frames->count),
+	       (unsigned long long)frames->longest,
+	       (unsigned long long)frames->draw,
+	       (unsigned long long)frames->present);
+	memset(frames, 0, sizeof(*frames));
 }
 
 /* Makes the frame's memory and canvas at the swapchain's size; nonzero when memory runs out. */
