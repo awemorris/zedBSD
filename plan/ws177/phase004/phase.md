@@ -3,7 +3,7 @@
 # ws177-p004: desktop の UI の小物（案 D）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（T1-407 再試験、T1-406 は一部）（2026-10-08 P1 q884 の 1: 実装・host PASS・build warning 0、main に統合。UAT の絵の確認も残り）
+Status: cleared（2026-10-08 Q1 判定、T1-406 の accent と T1-413 の名前の欄の 32）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q884 の 1（P1、2026-10-08、承認は Q1 の dispatch「次の Queue（q884、承認済み、plan/ws177/phasing-20261008.md の案）」）
@@ -68,3 +68,7 @@ FAIL（2 回とも）: kei で起動した Settings が `ZSETTINGS INSTANCE alon
 
 kei で起動した Settings は `ZSETTINGS INSTANCE alone errno=21`（EOPNOTSUPP。runtime の folder の /tmp が kei の物でないので、ひとつだけの起動の socket を作らない。害は無い）を出した後、`ZSETTINGS FAILED operation=window error=5`（EIO）で窓を作れずに終わった。root で走る `--testing` の compositor に別の uid の client を繋ぐ形は、この試験の道具の外になる（窓の資源の権限）。
 直し: 名前の欄の 32 の確認を、kei の本物の session で走る AAT に移した。`tests/scenarios/apps/settings/manage-users.md` の 2（新しい段）と `plan/tools/aat/scenarios/helpers_apps.py` の `apps.settings.manage-users`: Add User を開き、英字を 40 字打って `USERS admin field=0 length=32` が出て 33 以上が無いことを見て撮り、Esc で閉じてから元の段に進む。`check-scenarios.py` は PASS。`desktop-p004.sh` からは 2 を除いた（accent の 5 本と失敗の検査が残る）。code は変えない。
+
+## T1-413 の判定（2026-10-08 Q1）
+
+PASS: AAT apps.settings.manage-users の段 5 で 40 字を打つと `USERS admin field=0 length=32` で止まり 33 以上の行が無い。Q1 が PNG（build/review/t1-413/apps.settings.manage-users-name-32.png）で名前の欄が 32 字（abcdefghijklmnopqrstuvwxyzabcdef）で止まるのを目視。accent は T1-406。IME の候補の accent・dark の network の行・Files の Help の折り返しは実機の UAT の絵。cleared。
