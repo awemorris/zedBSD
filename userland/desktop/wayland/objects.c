@@ -31,6 +31,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * Where a client's teardown spends its time among its objects (BUG-239):
+ * the microseconds in the Vulkan release of the imports and in the
+ * backend's release of the buffers' descriptors, and how many imports
+ * were released.  Zeroed by kwl_client_destroy and added to by
+ * object_free; the compositor's one thread uses them.
+ */
+static uint64_t cleanup_import_us;
+static uint64_t cleanup_backend_us;
+static unsigned cleanup_imports;
+
 static void object_free(struct kwl_object *object);
 
 /*
@@ -487,6 +498,9 @@ kwl_client_destroy(
 	/* A frame in flight may hold this client's buffers and callbacks; it finishes first (each step is timed, BUG-239). */
 	server = client->server;
 	started = kwl_milliseconds();
+	cleanup_import_us = 0U;
+	cleanup_backend_us = 0U;
+	cleanup_imports = 0U;
 	kwl_compose_quiesce(server);
 	quiesced = kwl_milliseconds();
 
@@ -583,13 +597,16 @@ kwl_client_destroy(
 	free(client);
 
 	/* Where the time went (BUG-239: 20 clients took 23 s to release in QEMU). */
-	printf("KWL CLEANUP done client=%llu ms=%llu quiesce=%llu surfaces=%llu shell=%llu objects=%llu\n",
+	printf("KWL CLEANUP done client=%llu ms=%llu quiesce=%llu surfaces=%llu shell=%llu objects=%llu imports=%u import_us=%llu backend_us=%llu\n",
 	       number,
 	       (unsigned long long)(kwl_milliseconds() - started),
 	       (unsigned long long)(quiesced - started),
 	       (unsigned long long)(surfaces_done - quiesced),
 	       (unsigned long long)(shell_done - surfaces_done),
-	       (unsigned long long)(objects_done - shell_done));
+	       (unsigned long long)(objects_done - shell_done),
+	       cleanup_imports,
+	       (unsigned long long)cleanup_import_us,
+	       (unsigned long long)cleanup_backend_us);
 
 	/* Succeeded: the connection namespace, events and received descriptors are retired. */
 	return;
@@ -602,13 +619,21 @@ object_free(
 {
 	struct kwl_object **link;
 	struct kwl_client *client;
+	uint64_t before;
+	uint64_t between;
 
-	/* Window mode's Vulkan image goes with the buffer; a wl_shm buffer or pool drops its pool's memory. */
+	/* Window mode's Vulkan image goes with the buffer; a wl_shm buffer or pool drops its pool's memory (timed, BUG-239). */
 	client = object->client;
+	before = kwl_microseconds();
+	if (object->import != NULL)
+		cleanup_imports++;
 	kwl_import_destroy(object);
+	between = kwl_microseconds();
+	cleanup_import_us += between - before;
 
 	/* OS buffer descriptors (libkeiland-backend's) remain alive until the final Vulkan image use has retired. */
 	kl_backend_gpu_resource_free(kwl_gpu_host(), kwl_gpu_resource(object));
+	cleanup_backend_us += kwl_microseconds() - between;
 
 	/* Shared-memory buffer storage returns its separate pool reference. */
 	if (object->shm != NULL) {
