@@ -56,3 +56,16 @@ T1-226（証拠 `/home/awe/zedBSD-worktrees/t1/build/t1-226/`）で osk-guest �
 - 新しい step `hint`: 右下の角から押したまま、40 px（円だけ、`hint-short.png`）、80 px（文字が fade in、`hint-label.png`）、
   130 px（文字と青い縁、`hint-ready.png`）、離すと `open kind=flick`。
 確認: `sh -n`。QEMU は T1 に依頼する。
+
+## q875（P1、2026-10-08）: BUG-231 を QEMU で確かめる段
+
+2026-10-08 P2 の確認（q868、BUG-231）で、T1-226 の image は IME が direct input のままで「a → あ」と変換を見ていないと分かった。案 (b) として osk-guest.sh に `qwerty-ime` の step を足した（source の変更は無い）。
+
+- 前提の image: IME 入りの image（`plan/ws095/tests/build-ime-image.sh`。keiland-ime と辞書が入る）に、今の BIN を `install` の step で入れる。
+- 手順: compositor を起こし（`KWL IME started pid=`）、ime-probe（`--app-id=osk-ime`）を focus にして Alt+Space で日本語（`KWL IME language=ja`）。左下の角の swipe で QWERTY の panel を開く。
+  - `a` を押す → `KWL OSK send via=ime code=30`、probe の log に `preedit=あ`。
+  - `space` を押す → `code=57`（変換、候補は `qwerty-ime.png`）。
+  - `Enter` を押す → `code=28`、probe の `PROBE TEXT text=` が空でも `a` でもない。
+- 流し方（T1）: `GUEST_RUNTIME=... BIN=<build> plan/ws102/tests/osk-guest.sh OUTDIR install qwerty-ime`。合格は最後の行 `osk-guest: PASS`。
+- 確認: `sh -n`。QEMU は未実施。
+- 残り（変わらず）: 候補を OSK の候補の列に出す（今は IME の popup）、AAT の `desktop.osk.full-ime`。
