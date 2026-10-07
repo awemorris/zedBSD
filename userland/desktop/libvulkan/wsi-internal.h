@@ -134,8 +134,8 @@ struct vulkan_wsi_platform_ops {
 	/*
 	 * Names the part of the next presented image that changed since the
 	 * last (VK_KHR_incremental_present, BUG-221): x, y, width, height in
-	 * image pixels; the next present alone uses it.  NULL when the backend
-	 * damages every present whole.
+	 * image pixels; the next present alone uses it, and an empty part takes
+	 * it back.  NULL when the backend damages every present whole.
 	 */
 	void (*damage)(void *, int32_t, int32_t, int32_t, int32_t);
 };
