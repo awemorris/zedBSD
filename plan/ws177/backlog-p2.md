@@ -26,7 +26,7 @@
 | WS164 ws164-p002（Welcome） | 設定の store が書けない（Keiland の拡張の無い desktop、書き込みの失敗） | Welcome の終わりで印を付けられないことを画面に出し、次の login でまた出ることを知らせる（今は log だけで窓を閉じる） | `settings/welcome.c` の `welcome_finish` | 2026-10-06 |
 | WS164 ws164-p002（Welcome） | Files の起動の失敗 | Today を開けなかったことを知らせる（今は log だけ） | `settings/main.c` の `main_open_files` | 2026-10-06 |
 | WS164 ws164-p002（Welcome） | Welcome の途中で Wi-Fi の鍵の入力・接続の失敗、radio の無い machine で Ethernet も無い | 段の中で失敗と次の手を出す（今は Wi-Fi・Ethernet の頁の表示のまま） | `settings/welcome.c` の Network の段 | 2026-10-06 |
-| WS164 ws164-p002（Welcome） | 言語と入力の段（WS154 の Languages） | p001 の H3 のとおり Look と Keys の間に足す（今は 5 段のまま） | `settings/welcome.c` | 2026-10-06 |
+| WS164 ws164-p002（Welcome） | 言語と入力の段（WS154 の Languages） | p001 の H3 のとおり Look と Keys の間に足す（今は 5 段のまま） | `settings/welcome.c` | 2026-10-06（済み 2026-10-08 P1 q875 e986a3bdb、host 試験 PASS） |
 | WS164 ws164-p002（Welcome） | Welcome の窓の大きさが小さい・日本語の UI の長い文 | 帯と Skip が重ならないよう詰める・文を折り返す（今は固定の配置） | `settings/welcome.c` の `se_welcome_bar`・`se_welcome_draw` | 2026-10-06 |
 | WS164 ws164-p002（Welcome） | Welcome の key の操作（Enter で Next、Esc で閉じる） | keyboard だけで段を進める（今は pointer と指の click だけ） | `settings/ui.c` の `ui_key`、`welcome.c` | 2026-10-06 |
 | WS156 ws156-p002（通知の口） | 通知を出した client が切れた・notify の object を destroy した | その client の待ち・表示中の通知を ACTION 無しに変える（今は model に残り、closed は誰にも送られない） | `wayland/notify-shell.c` の `notify_tell_closed`、client の破棄の側 | 2026-10-06 |
