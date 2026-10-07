@@ -70,3 +70,8 @@ FAIL 2 行（retry も同じ）: `the anchor's count has b docked and nothing hi
 ## 決定 2026-10-08（ユーザー）: 2 番目以降の display の dock bar
 
 「2番目以降のディスプレイのdock barには、その画面に置いた window の window icon を出し、時計・状態・App Home・切り替えのつまみも表示する。」（P1 の案「title bar だけ、時計等は anchor だけ」は不採用。）P1 が ws090-p015 より先に実装する（q862 の前）。
+
+## 決定 2026-10-08（ユーザー、2 回目）: 画面ごとの dock の window
+
+「各番目の画面のdock barには、その画面のウィンドウのみを出してください。app単位ではなくwindow単位にします。でも、画面ごとのapp iconsは、ウィンドウがあればその画面のdockに表示され、プレビューはその画面のウィンドウだけにします。」→ 1 番目（anchor）を含む全ての画面で、bar の app icon はその画面に window を持つ app だけ、icon の previews はその画面の window だけ。switcher は全ての window のまま。P1 に送った（q862 の前に入れる）。
+「切り替えのつまみ」（上の決定の文）はユーザーにも意味が分からなかった（前のセッションの Q1 の書いた選択肢の文の見込み）。P1 は desktops の pill と読んで実装した。ユーザーの答え待ち。
