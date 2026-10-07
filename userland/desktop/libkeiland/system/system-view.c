@@ -506,10 +506,11 @@ system_view_notify_event(
 {
 	unsigned slot;
 
-	/* A full ring drops its oldest. */
+	/* A full ring drops its oldest, counted for the KL_NOTIFY_LOST the next take gives first (ws177-p005). */
 	if (view->notify_count == SYSTEM_VIEW_NOTIFY_EVENTS) {
 		view->notify_head = (view->notify_head + 1U) % SYSTEM_VIEW_NOTIFY_EVENTS;
 		view->notify_count--;
+		view->notify_lost++;
 	}
 
 	/* The event after the newest. */
@@ -521,12 +522,24 @@ system_view_notify_event(
 
 /*
  * Takes the oldest notification event: 1 with it, 0 when none waits.
+ * Events a full ring dropped are told first, as one KL_NOTIFY_LOST whose
+ * id is how many (ws177-p005).
  */
 int
 system_view_take_notify_event(
 	struct system_view *view,
 	struct kl_notify_event *event)
 {
+	/* The events lost come before the oldest kept. */
+	if (view->notify_lost != 0U) {
+		event->kind = KL_NOTIFY_LOST;
+		event->request = 0U;
+		event->id = view->notify_lost;
+		event->reason = 0U;
+		view->notify_lost = 0U;
+		return 1;
+	}
+
 	/* None waits. */
 	if (view->notify_count == 0U)
 		return 0;
@@ -538,6 +551,22 @@ system_view_take_notify_event(
 
 	/* Succeeded: one event taken. */
 	return 1;
+}
+
+/*
+ * Keeps whether this reader is allowed to hear the arrivals now, as the
+ * compositor told it (ws177-p005), a change of the mail for the program.
+ */
+void
+system_view_mail_allowed(
+	struct system_view *view,
+	unsigned on)
+{
+	/* 2 allowed, 1 not. */
+	view->mail_allowed = 1U;
+	if (on != 0U)
+		view->mail_allowed = 2U;
+	view->changed |= KL_SYSTEM_CHANGED_MAIL;
 }
 
 /*

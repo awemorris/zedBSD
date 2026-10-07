@@ -29,11 +29,11 @@
 | WS164 ws164-p002（Welcome） | 言語と入力の段（WS154 の Languages） | p001 の H3 のとおり Look と Keys の間に足す（今は 5 段のまま） | `settings/welcome.c` | 2026-10-06（済み 2026-10-08 P1 q875 e986a3bdb、host 試験 PASS） |
 | WS164 ws164-p002（Welcome） | Welcome の窓の大きさが小さい・日本語の UI の長い文 | 帯と Skip が重ならないよう詰める・文を折り返す（今は固定の配置） | `settings/welcome.c` の `se_welcome_bar`・`se_welcome_draw` | 2026-10-06 |
 | WS164 ws164-p002（Welcome） | Welcome の key の操作（Enter で Next、Esc で閉じる） | keyboard だけで段を進める（今は pointer と指の click だけ） | `settings/ui.c` の `ui_key`、`welcome.c` | 2026-10-06 |
-| WS156 ws156-p002（通知の口） | 通知を出した client が切れた・notify の object を destroy した | その client の待ち・表示中の通知を ACTION 無しに変える（今は model に残り、closed は誰にも送られない） | `wayland/notify-shell.c` の `notify_tell_closed`、client の破棄の側 | 2026-10-06 |
+| WS156 ws156-p002（通知の口） → [ws177-p005](phase005/phase.md) | 通知を出した client が切れた・notify の object を destroy した | その client の待ち・表示中の通知を ACTION 無しに変える（今は model に残り、closed は誰にも送られない） | `wayland/notify-shell.c` の `notify_tell_closed`、client の破棄の側 | 2026-10-06 |
 | WS156 ws156-p002（通知の口） | app の名前が空の通知 | client の window の app_id を名前にする（今は空のまま保つ。p003 の描画で決める） | `wayland/notify-shell.c` の `notify_post` | 2026-10-06（済み dcc31f8fb・T1-375b、2026-10-08 q881） |
-| WS156 ws156-p002（通知の口） | 不正な UTF-8 の題・本文、制御文字 | 置き換えるか拒む（今は bytes のまま保つ） | `wayland/notify.c` の `kwl_notify_post` | 2026-10-06 |
-| WS156 ws156-p002（通知の口） | 一つの client が短い間に大量に post する | 速さの制限（今は client ごと 32 個の上限だけ） | `wayland/notify-shell.c` の `notify_post` | 2026-10-06 |
-| WS156 ws156-p002（通知の口） | libkeiland の事象の ring（32）が溢れる | 古い事象を捨てたことを app に知らせる（今は黙って捨てる） | `libkeiland/system/system-view.c` の `system_view_notify_event` | 2026-10-06 |
+| WS156 ws156-p002（通知の口） → [ws177-p005](phase005/phase.md) | 不正な UTF-8 の題・本文、制御文字 | 置き換えるか拒む（今は bytes のまま保つ） | `wayland/notify.c` の `kwl_notify_post` | 2026-10-06 |
+| WS156 ws156-p002（通知の口） → [ws177-p005](phase005/phase.md) | 一つの client が短い間に大量に post する | 速さの制限（今は client ごと 32 個の上限だけ） | `wayland/notify-shell.c` の `notify_post` | 2026-10-06 |
+| WS156 ws156-p002（通知の口） → [ws177-p005](phase005/phase.md) | libkeiland の事象の ring（32）が溢れる | 古い事象を捨てたことを app に知らせる（今は黙って捨てる） | `libkeiland/system/system-view.c` の `system_view_notify_event` | 2026-10-06 |
 | q824 ws148-p002（Privacy の頁を無くし、最近の履歴の口） | 「Keep recent items」を off にしている間の Files の Recents | Recents に「最近の項目を残さない設定です」と出し、Settings への道を示す（今は空の一覧だけ） | `files/ui-grid.c` の題、`files/ui-search.c` の Recents の読み | 2026-10-06 |
 | q824 ws148-p002 | Clear Recents の確かめ | 押し間違いに備えて確かめるか、元に戻す（今は押すとすぐ空になる） | `files/actions.c` の `fm_action_clear_recents` | 2026-10-06 |
 | q824 ws148-p002 | 他の app が開いていた「最近の file」の menu | 一覧が空・止められた時に、開いている app の menu も読み直す（今は各 app が次に読む時まで古い） | libkeiland `recent.c`、各 app の open recent | 2026-10-06 |
@@ -62,10 +62,10 @@
 | WS175 ws175-p009（Save Clean Copy） | 刈り込みは page の resource だけ | form XObject・Type 3 font・tiling pattern の中の /Resources も使う名で刈り込む | `libpdf/clean.c` の `clean_write_resources` | 2026-10-06 |
 | WS175 ws175-p009 | attachment を落とした name tree の /Limits が古いまま、直接の file specification は落ちない | 葉の /Limits を書き直す・直接の filespec の対も落とす | `libpdf/clean.c` の `clean_drop_names`・`clean_write_value` | 2026-10-06 |
 | WS175 ws175-p009 | Save Clean Copy の後の案内が無い | copy を開くかの提案、増分の更新で消した物が残る旨の一度だけの注意（D1 (a)） | `notes/main.c` の `app_save_clean` | 2026-10-06 |
-| WS169 ws169-p002（compositor のメールの口） | 17 個目の読み手の listen | 古い・死んだ行を先に掃除して受け入れる（今は 16 行が埋まると BUSY、死んだ行は次の arrived で空く） | `wayland/mail-shell.c` の `mail_listen` | 2026-10-06 |
-| WS169 ws169-p002 | 読み手の許可の変化 | 許可が on・off に変わったことを読み手に知らせる（今は何も送らず、arrived の時に設定を読むだけ） | `wayland/mail-shell.c`、`kl-system-protocol.h` | 2026-10-06 |
+| WS169 ws169-p002（compositor のメールの口） → [ws177-p005](phase005/phase.md) | 17 個目の読み手の listen | 古い・死んだ行を先に掃除して受け入れる（今は 16 行が埋まると BUSY、死んだ行は次の arrived で空く） | `wayland/mail-shell.c` の `mail_listen` | 2026-10-06 |
+| WS169 ws169-p002 → [ws177-p005](phase005/phase.md) | 読み手の許可の変化 | 許可が on・off に変わったことを読み手に知らせる（今は何も送らず、arrived の時に設定を読むだけ） | `wayland/mail-shell.c`、`kl-system-protocol.h` | 2026-10-06 |
 | WS169 ws169-p002 | 許可の UI の置き場 | Settings の Notifications の頁（今は「later」）ができたら mail.codes.* の switch をそちらにも出す（今は Mail の app の中だけ） | `settings/pages.c`、`mailer/` | 2026-10-06 |
-| WS169 ws169-p002 | mail を出せるのは同じ uid の誰でも | arrived を送れる client を Mail に限る（今は system manager の見える client なら誰でも arrived を送れる） | `wayland/mail-shell.c` の `mail_arrived` | 2026-10-06 |
+| WS169 ws169-p002 → [ws177-p005](phase005/phase.md) | mail を出せるのは同じ uid の誰でも | arrived を送れる client を Mail に限る（今は system manager の見える client なら誰でも arrived を送れる） | `wayland/mail-shell.c` の `mail_arrived` | 2026-10-06 |
 | WS169 ws169-p003（IMAP・SMTP の backend） | ISO-2022-JP・Shift_JIS・EUC-JP の本文と件名 | UTF-8 に変換して出す（今は bytes のまま、文字化けする） | `mailer/mime.c` の `mime_to_utf8` | 2026-10-07 |
 | WS169 ws169-p003 | 1 MiB を超えるメール | 本文の部分だけを取る（BODYSTRUCTURE と BODY.PEEK[1]）、添付の大きさを正しく（今は先頭 1 MiB を取り、添付の大きさは encode の大きさからの見積もり） | `mailer/imap.c` の `ml_imap_fetch`、`mime.c` | 2026-10-07 |
 | WS169 ws169-p003 | 証明書の検証の失敗・TLS の無い server・接続の timeout・server の BYE | 理由を画面に出し、自己署名を許すかを聞く（今は error の文だけ） | `mailer/tls.c`・`conn.c` | 2026-10-07 |

@@ -1767,6 +1767,7 @@ int kwl_notify_create(struct kwl_object *manager, const unsigned char *bytes, si
 int kwl_notify_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 int kwl_mail_create(struct kwl_object *manager, const unsigned char *bytes, size_t size);
 int kwl_mail_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
+void kwl_mail_settings_changed(struct kwl_server *server);
 int kwl_phone_create(struct kwl_object *manager, const unsigned char *bytes, size_t size);
 int kwl_phone_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 int kwl_printers_available(void);
@@ -1800,6 +1801,7 @@ uint32_t kwl_notify_post_system(struct kwl_server *server, const char *title, co
 struct kwl_notify_model *kwl_notify_model(void);
 /* The notifications' popup (notify-popup.c) and what it does to them (notify-shell.c), ws156-p003. */
 void kwl_notify_hide_shown(struct kwl_server *server);
+void kwl_notify_client_gone(struct kwl_client *client);
 size_t kwl_notify_clear_log(struct kwl_server *server);
 int kwl_notify_log_key(struct kwl_server *server, uint32_t key, uint32_t state);
 int kwl_notify_dismiss_id(struct kwl_server *server, uint32_t id);

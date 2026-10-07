@@ -105,7 +105,7 @@ static const struct wl_message system_manager_events[] = {
 	{ "capabilities", "u", system_plain_types },
 };
 
-/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: fourteen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19) and one event.  It lives for the program. */
+/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: fourteen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19; the mail's allowed since 20) and one event.  It lives for the program. */
 const struct wl_interface kl_system_manager_v1_interface = {
 	KL_SYSTEM_MANAGER_NAME,
 	KL_SYSTEM_MANAGER_VERSION,
@@ -366,15 +366,16 @@ static const struct wl_message system_mail_requests[] = {
 static const struct wl_message system_mail_events[] = {
 	{ "mail", "sss", system_plain_types },
 	{ "result", "uuu", system_plain_types },
+	{ "allowed", "20u", system_plain_types },
 };
 
-/* kl_system_mail_v1, made at the manager's version (15): three requests and two events.  It lives for the program. */
+/* kl_system_mail_v1, made at the manager's version (15; allowed since 20, ws177-p005): three requests and three events.  It lives for the program. */
 const struct wl_interface kl_system_mail_v1_interface = {
 	KL_SYSTEM_MAIL_NAME,
-	KL_SYSTEM_SINCE_MAIL,
+	KL_SYSTEM_SINCE_MAIL_ALLOWED,
 	3,
 	system_mail_requests,
-	2,
+	3,
 	system_mail_events
 };
 

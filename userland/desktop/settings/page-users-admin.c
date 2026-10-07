@@ -335,6 +335,10 @@ se_users_admin_key(
 	if (!users->admin_asked)
 		users->admin_message[0] = '\0';
 
+	/* The names' lengths for the tests (ws177-p004: the limits); a password's is not told. */
+	if (users->admin_focus == SE_ADMIN_NAME || users->admin_focus == SE_ADMIN_FULL_NAME)
+		se_log("USERS admin field=%d length=%lu", users->admin_focus, (unsigned long)users->admin_fields[users->admin_focus].length);
+
 	/* Succeeded: the field took the key. */
 	return 1;
 }

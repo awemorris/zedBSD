@@ -528,6 +528,9 @@ kwl_client_destroy(
 	/* The input method's connection lets go of what it held (input-method.c). */
 	kwl_ime_client_gone(client);
 
+	/* Its notifications stay, with nobody to tell (notify-shell.c, ws177-p005). */
+	kwl_notify_client_gone(client);
+
 	/* The cursor this client chose goes back to the arrow (BUG-118). */
 	if (server->cursor_client == client)
 		kwl_cursor_default(server);

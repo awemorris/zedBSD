@@ -127,9 +127,13 @@ struct system_view {
 	struct kl_notify_event notify_events[SYSTEM_VIEW_NOTIFY_EVENTS];
 	unsigned notify_head;
 	unsigned notify_count;
+	/* The notification events a full ring dropped since the last take (told as one KL_NOTIFY_LOST, ws177-p005). */
+	unsigned notify_lost;
 	struct kl_mail_event mail_events[SYSTEM_VIEW_MAIL_EVENTS];
 	unsigned mail_head;
 	unsigned mail_count;
+	/* Whether this reader is allowed to hear the arrivals (0 not told, 1 not allowed, 2 allowed; ws177-p005). */
+	unsigned mail_allowed;
 	struct kl_phone_event phone_events[SYSTEM_VIEW_PHONE_EVENTS];
 	unsigned phone_head;
 	unsigned phone_count;
@@ -259,6 +263,7 @@ void system_view_notify_event(struct system_view *view, const struct kl_notify_e
 int system_view_take_notify_event(struct system_view *view, struct kl_notify_event *event);
 void system_view_mail_event(struct system_view *view, const char *from, const char *subject, const char *code);
 int system_view_take_mail_event(struct system_view *view, struct kl_mail_event *event);
+void system_view_mail_allowed(struct system_view *view, unsigned on);
 void system_view_phone_event(struct system_view *view, const struct kl_phone_event *event);
 int system_view_take_phone_event(struct system_view *view, struct kl_phone_event *event);
 void system_view_printer(struct system_view *view, const struct kl_printer *printer);

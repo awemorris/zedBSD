@@ -44,6 +44,7 @@ static struct kwl_notify_model notify_model;
 static int notify_ready;
 
 static void notify_open(void);
+static void notify_left(uint64_t client, uint32_t object);
 static int notify_post(struct kwl_object *object, const unsigned char *bytes, size_t size);
 static int notify_withdraw(struct kwl_object *object, const unsigned char *bytes, size_t size);
 static void notify_tell_closed(struct kwl_server *server, const struct kwl_notify_closed *closed);
@@ -91,10 +92,11 @@ kwl_notify_request(
 	const unsigned char *bytes,
 	size_t size)
 {
-	/* The object goes (its notifications stay). */
+	/* The object goes; its notifications stay, with no action and nobody to tell (ws177-p005). */
 	if (opcode == KL_SYSTEM_NOTIFY_DESTROY) {
 		if (size != 0U)
 			return EPROTO;
+		notify_left(object->client->number, object->id);
 		kwl_object_destroy(object);
 		return 0;
 	}
@@ -109,6 +111,22 @@ kwl_notify_request(
 
 	/* No other request. */
 	return EPROTO;
+}
+
+/*
+ * Leaves a client's notifications with nobody to tell when the client
+ * goes (ws177-p005): they stay shown and logged, without their action.
+ */
+void
+kwl_notify_client_gone(
+	struct kwl_client *client)
+{
+	/* No notification was ever made: nothing to leave. */
+	if (!notify_ready)
+		return;
+
+	/* Every one of the client's. */
+	notify_left(client->number, 0U);
 }
 
 /*
@@ -284,6 +302,23 @@ notify_open(void)
 	notify_ready = 1;
 }
 
+/* Leaves a client's notifications (of one object, or 0 for all) with nobody to tell; logged when there were some. */
+static void
+notify_left(
+	uint64_t client,
+	uint32_t object)
+{
+	size_t count;
+
+	/* The model's. */
+	notify_open();
+	count = kwl_notify_orphan(&notify_model, client, object);
+
+	/* The log the tests read. */
+	if (count != 0U)
+		printf("KWL NOTIFY left client=%llu object=%u count=%lu\n", (unsigned long long)client, object, (unsigned long)count);
+}
+
 /* Carries out post(request, replaces, app, title, body, flags). */
 static int
 notify_post(
@@ -317,6 +352,14 @@ notify_post(
 	if (error != 0 || offset + 4U != size)
 		return EPROTO;
 	flags = notify_word(bytes, offset);
+
+	/* A client posting faster than the rate is refused as busy (ws177-p005). */
+	error = kwl_notify_rate_take(&notify_model, object->client->number, kwl_milliseconds());
+	if (error != 0) {
+		printf("KWL NOTIFY refused client=%llu request=%u error=%d rate=1\n", (unsigned long long)object->client->number, request, error);
+		notify_result(object, request, KL_SYSTEM_RESULT_BUSY);
+		return 0;
+	}
 
 	/* Kept, or refused: words too long, a number not the client's, too many. */
 	error = kwl_notify_post(&notify_model, object->client->number, object->id, replaces, app, title, body, flags, &id, closed, &closed_count);

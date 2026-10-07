@@ -134,6 +134,7 @@ struct system_notify_listener {
 struct system_mail_listener {
 	void (*mail)(void *data, struct wl_proxy *proxy, const char *from, const char *subject, const char *code);
 	void (*result)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t applied, uint32_t saved);
+	void (*allowed)(void *data, struct wl_proxy *proxy, uint32_t on);
 };
 
 /* The listener of kl_system_phone_v1's events (ws170-p004), in their order. */
@@ -174,6 +175,7 @@ static void system_notify_activated(void *data, struct wl_proxy *proxy, uint32_t
 static void system_notify_closed(void *data, struct wl_proxy *proxy, uint32_t id, uint32_t reason);
 static void system_mail(void *data, struct wl_proxy *proxy, const char *from, const char *subject, const char *code);
 static void system_mail_cut(char *to, size_t size, const char *from);
+static void system_mail_allowed(void *data, struct wl_proxy *proxy, uint32_t on);
 static void system_phone_received(void *data, struct wl_proxy *proxy, uint32_t channel, const char *from, const char *text, uint32_t time_high, uint32_t time_low);
 static void system_phone_status(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t state);
 static void system_printer(void *data, struct wl_proxy *proxy, uint32_t id, uint32_t protocol, const char *host, uint32_t port, const char *path, const char *name, uint32_t flags);
@@ -283,7 +285,8 @@ static const struct system_notify_listener system_notify_listener = {
 /* The mail object's callbacks (ws169-p002). */
 static const struct system_mail_listener system_mail_listener = {
 	system_mail,
-	system_result
+	system_result,
+	system_mail_allowed
 };
 
 /* The phone object's callbacks (ws170-p004). */
@@ -873,6 +876,28 @@ kl_system_take_mail_event(
 		return 0;
 
 	/* Succeeded: one arrival taken. */
+	return 1;
+}
+
+/*
+ * Tells whether the user lets this reader hear the arrivals of mail, as
+ * the compositor told it after kl_system_mail_listen and whenever it
+ * changed (ws177-p005): 1 allowed, 0 not, -1 not told (no listen yet, or
+ * a compositor older than the event).
+ */
+int
+kl_system_mail_allowed(
+	const struct kl_system *system)
+{
+	/* Not told. */
+	if (system->view.mail_allowed == 0U)
+		return -1;
+
+	/* Not allowed. */
+	if (system->view.mail_allowed == 1U)
+		return 0;
+
+	/* Succeeded: allowed. */
 	return 1;
 }
 
@@ -2783,6 +2808,22 @@ system_mail(
 	/* For kl_system_take_mail_event. */
 	system = data;
 	system_view_mail_event(&system->view, from, subject, code);
+}
+
+/* The reader is allowed to hear the arrivals, or not, now (ws177-p005). */
+static void
+system_mail_allowed(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t on)
+{
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* For kl_system_mail_allowed. */
+	system = data;
+	system_view_mail_allowed(&system->view, on);
 }
 
 /* Copies a string of a message into a room, cut before a whole UTF-8 character that does not fit; NULL is empty. */
