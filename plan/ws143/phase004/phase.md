@@ -351,3 +351,7 @@ i01 で commit した物: `userland/base/bluetoothd/{crypto,acl,l2cap,smp,keys}.
 4. privsep（親が `/dev/btN` を開いて SCM_RIGHTS、子は `_bluetooth`、SOCK_DGRAM）、`userland/base/etc/passwd`・`group` に `_bluetooth`（uid 80）。
 5. main.c の口: PAIR・AGENT・FORGET・BONDS、D8 の判定、poll の timeout。`bt pair/forget/bonds/agent`。Makefile の BLUETOOTHD_SOURCES に新しい file。
 6. loopback（§8 と S13）、`plan/ws143/tests/bt-pair-p004.sh`、build（`plan/ws143/tests/config-amd64-bt.mk`）、T1 への依頼。
+
+## T1-405（2026-10-08 Q1）
+
+FAIL（2 回とも）: p003 `it started twice on the controller (got 3, want 2)`、p004 `the child killed ends the parent (got 2, want 0)`。p002 は PASS。P2 に直しを戻した（i02 の新しい attempt）。uncleared。

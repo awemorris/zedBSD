@@ -44,3 +44,7 @@ backlog-p2 12（Notes の 512 byte）: limit は上限を下げる口で、Notes
 ## Event
 
 2026-10-08 / q884-i01（P1）: 実装と host・build の確認（利用制限での中断の後に再開、worktree の変更は保たれていた）。
+
+## T1-406（2026-10-08 Q1）
+
+desktop-p004.sh PASS（accent の keyboard の focus、Q1 が PNG を目視）。試験の道具の不具合（qmp-pointer に click の step が無く Users > Add を開けない）で kl_field の上限は QEMU で未確認。P1 が試験を直して再依頼する。
