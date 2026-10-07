@@ -71,10 +71,11 @@ struct btd_pair {
 	btd_random_fn random;
 	void *random_context;
 
-	/* Where the pairing is (0: none), the device, and whether an agent can answer. */
+	/* Where the pairing is (0: none), the device (and whether it is LE), and whether an agent can answer. */
 	unsigned state;
 	uint8_t address[BTD_ADDRESS_BYTES];
 	unsigned type;
+	int le;
 	int agent;
 
 	/* The connection: its handle, whether it is up, and the error a cancelled connection ends with. */

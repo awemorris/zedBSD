@@ -6,33 +6,44 @@
  */
 
 /*
- * The Bluetooth daemon (ws143-p003, plan/ws143/phase003/phase.md).
+ * The Bluetooth daemon (ws143-p003 and ws143-p004, plan/ws143/phase003/
+ * phase.md and plan/ws143/phase004/phase.md).
  *
- * It opens the first Bluetooth controller's node (/dev/bt0 to /dev/bt15),
- * starts it (Intel's firmware when it needs it, then the HCI core), and
- * answers on /run/bluetoothd.sock: the state and the controller, and a
- * scan of the devices around.  A node that goes (the controller was pulled
- * out, or re-enumerated after its firmware's boot) is closed, and the
- * nodes are looked for again every BTD_RETRY_MS; so is a controller whose
- * start failed in a way a new start may mend, BTD_FAILURES_MAX times in a
- * row at most.
+ * It listens on /run/bluetoothd.sock as root, then separates (privsep.c):
+ * a parent stays root to open the controller's node, and the child runs
+ * the rest as the account _bluetooth.  The child opens the first
+ * Bluetooth controller's node through the parent, starts it (Intel's
+ * firmware when it needs it, then the HCI core), and answers on the
+ * socket: the state and the controller, a scan, a pairing and its agent,
+ * the bonds and their removal.  A node that goes (the controller was
+ * pulled out, or re-enumerated after its firmware's boot) is closed, and
+ * the nodes are looked for again every BTD_RETRY_MS; so is a controller
+ * whose start failed in a way a new start may mend, BTD_FAILURES_MAX times
+ * in a row at most.
  *
  * Intel's firmware is loaded once for a controller (by its USB vendor,
  * product and port): one that comes back in its bootloader after a load
  * is not loaded again until the daemon starts again, and one that does
  * not come back within BTD_REAPPEAR_MS of its boot is a failed load.
  *
- *   bluetoothd [-f /dev/btN]   (a node of its own; else the lowest that opens)
+ * Who may change things (D8, plan section 6): root, the seat's user (the
+ * display's owner, not the greeter), and the members of wheel.  Anyone
+ * may read the state, the devices and the bonds.
  *
- * It runs as root in this Phase; the privilege separation is p004's.
+ *   bluetoothd [-f /dev/btN]   (a node of its own; else the lowest that opens)
  */
 
+#include "userland/base/bluetoothd/keys.h"
+#include "userland/base/bluetoothd/pair.h"
+#include "userland/base/bluetoothd/privsep.h"
 #include "userland/base/bluetoothd/protocol.h"
 #include "userland/base/bluetoothd/session.h"
 
 #include <errno.h>
 #include <fcntl.h>
+#include <grp.h>
 #include <poll.h>
+#include <pwd.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -45,9 +56,8 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-/* How often the nodes are looked for while there is no controller, and how many nodes there can be. */
+/* How often the nodes are looked for while there is no controller. */
 #define BTD_RETRY_MS		2000U
-#define BTD_NODES		16U
 
 /* How many starts in a row may fail before the daemon stops trying, and how long a booted controller may take to come back. */
 #define BTD_FAILURES_MAX	3U
@@ -61,31 +71,71 @@
 #define BTD_CLIENTS_MAX		8U
 #define BTD_CLIENT_WRITE_MS	1000
 
-/* One client of the socket: its descriptor, the bytes of a line not ended yet, and whether it waits for a scan's end. */
+/* How many packets one round of the loop handles at most (the clients are not starved). */
+#define BTD_PACKETS_A_ROUND	64U
+
+/* Marks a parameter a function takes for its signature's sake. */
+#ifndef UNUSED_PARAMETER
+#define UNUSED_PARAMETER(parameter) ((void)(parameter))
+#endif
+
+/* How many bonds BONDS lists. */
+#define BTD_BONDS_MAX		64U
+
+/* The display whose owner is the seat's user, the greeter's account, and the group whose members may change things. */
+#define BTD_SEAT_NODE		"/dev/gpu0"
+#define BTD_GREETER		"_greeter"
+#define BTD_ADMIN_GROUP		"wheel"
+#define BTD_GROUPS_MAX		64
+
+/* No client (an index of btd_clients). */
+#define BTD_NO_CLIENT		(-1)
+
+/*
+ * One client of the socket: its descriptor, its uid, whether it stopped
+ * reading (it is closed at the end of the loop's round, where nothing
+ * else uses it), the bytes of a line not ended yet, and what it waits for
+ * (a scan's end, a pairing's end).
+ */
 struct btd_client {
 	int descriptor;
+	uid_t uid;
+	int dead;
 	char input[BTD_LINE_MAX];
 	size_t used;
 	int waits_scan;
+	int waits_pair;
 };
 
 static void btd_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
 static int btd_node_control(void *context, unsigned long request, void *argument);
+static void btd_random(void *context, uint8_t *bytes, size_t length);
 static void btd_key(const struct bt_info *info, char *key, size_t size);
 static int btd_loaded(const char *key);
 static void btd_remember_load(const char *key);
 static int btd_listen(void);
 static void btd_open(void);
 static void btd_close(void);
+static void btd_packets(void);
+static int btd_timeout(void);
 static void btd_accept(int listener);
-static void btd_read(struct btd_client *client);
-static void btd_line(struct btd_client *client, char *line);
+static void btd_read(int index);
+static void btd_line(int index, char *line);
 static void btd_show(struct btd_client *client);
 static void btd_devices(struct btd_client *client);
 static void btd_scan(struct btd_client *client, const char *argument);
 static void btd_scan_end(void);
+static void btd_pair(int index, const char *argument);
+static void btd_agent(int index);
+static void btd_answer(int index, int accepted);
+static void btd_forget(struct btd_client *client, const char *argument);
+static void btd_bonds(struct btd_client *client);
+static void btd_ask(void *context, unsigned kind, uint32_t number);
+static void btd_paired(void *context, const char *answer);
+static int btd_permitted(uid_t uid);
+static int btd_parse_device(const char *text, uint8_t *address, unsigned *type);
 static void btd_write(struct btd_client *client, const char *format, ...) __attribute__((format(printf, 2, 3)));
-static void btd_client_close(struct btd_client *client);
+static void btd_client_close(int index);
 
 /* The clients; a free slot has descriptor -1.  The daemon's one thread uses them. */
 static struct btd_client btd_clients[BTD_CLIENTS_MAX];
@@ -97,6 +147,25 @@ static struct btd_client btd_clients[BTD_CLIENTS_MAX];
 static struct btd_session btd_session;
 static int btd_session_open;
 static uint64_t btd_looked_ms;
+
+/*
+ * The pairing of the controller, the session's handler while the node is
+ * open.  It lives as long as the daemon; a closed node ends a pairing.
+ */
+static struct btd_pair btd_pairing;
+
+/*
+ * The clients of a pairing: the one that asked for it, the agent that
+ * named itself (it answers for pairings of its uid, or of anyone when it
+ * is the seat's user), and the one asked the question now
+ * (BTD_NO_CLIENT: none).
+ */
+static int btd_pair_client = BTD_NO_CLIENT;
+static int btd_agent_client = BTD_NO_CLIENT;
+static int btd_asked_client = BTD_NO_CLIENT;
+
+/* The child's ends of the privilege separation. */
+static struct btd_privsep btd_separation;
 
 /* The node given with -f, or NULL for the lowest that opens. */
 static const char *btd_node;
@@ -127,7 +196,7 @@ main(
 	int argc,
 	char **argv)
 {
-	struct pollfd descriptors[2U + BTD_CLIENTS_MAX];
+	struct pollfd descriptors[3U + BTD_CLIENTS_MAX];
 	unsigned count;
 	unsigned index;
 	uint64_t now;
@@ -158,20 +227,30 @@ main(
 	for (index = 0U; index < BTD_CLIENTS_MAX; index++)
 		btd_clients[index].descriptor = -1;
 
-	/* The socket. */
+	/* The socket, made as root. */
 	listener = btd_listen();
 	if (listener < 0) {
 		btd_log("bluetoothd: %s: %s\n", BTD_SOCKET, strerror(errno));
 		return 1;
 	}
 
+	/* The separation: from here on this is the child, running as the daemon's account. */
+	error = btd_privsep_start(btd_node, BTD_KEYS_FOLDER, listener, &btd_separation);
+	if (error != 0) {
+		btd_log("bluetoothd: privilege separation: %s\n", strerror(error));
+		return 1;
+	}
+
+	/* The pairing, handed the session's connection packets from each start on. */
+	btd_pair_init(&btd_pairing, &btd_session, BTD_KEYS_FOLDER, btd_ask, btd_paired, NULL, btd_random, NULL);
+
 	/* The controller there is now. */
 	btd_open();
-	btd_log("BLUETOOTHD READY state=%s\n", btd_state_name(btd_session.state));
+	btd_log("BLUETOOTHD READY state=%s uid=%u\n", btd_state_name(btd_session.state), (unsigned)getuid());
 
-	/* Clients, the controller's events, the scan's end and the look for nodes. */
+	/* Clients, the controller's packets, the deadlines and the look for nodes. */
 	for (;;) {
-		/* The listener, the controller's node and every client. */
+		/* The listener, the controller's node, the parent's liveness and every client. */
 		count = 0U;
 		descriptors[count].fd = listener;
 		descriptors[count].events = POLLIN;
@@ -181,6 +260,9 @@ main(
 		if (btd_session_open)
 			descriptors[count].fd = btd_session.descriptor;
 		count++;
+		descriptors[count].fd = btd_separation.liveness;
+		descriptors[count].events = POLLIN;
+		count++;
 
 		/* Each client's descriptor. */
 		for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
@@ -189,35 +271,38 @@ main(
 			count++;
 		}
 
-		/* Waits for something, the scan's end, or the next look for nodes. */
-		now = btd_now_ms();
-		timeout = -1;
-		if (btd_session_open && btd_session.scanning) {
-			timeout = 0;
-			if (btd_session.scan_end_ms > now)
-				timeout = (int)(btd_session.scan_end_ms - now);
-		} else if (!btd_session_open && !btd_stopped) {
-			timeout = 0;
-			if (btd_looked_ms + BTD_RETRY_MS > now)
-				timeout = (int)(btd_looked_ms + BTD_RETRY_MS - now);
-		}
-
-		/* The wait. */
+		/* The wait, as long as the earliest deadline allows. */
+		timeout = btd_timeout();
 		for (index = 0U; index < count; index++)
 			descriptors[index].revents = 0;
 		ready = poll(descriptors, count, timeout);
 		if (ready < 0 && errno != EINTR)
 			return 1;
 
-		/* The controller's packets; a node that went is closed. */
-		if (btd_session_open && (descriptors[1].revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
-			error = btd_session_input(&btd_session);
-			if (error != 0 && error != EAGAIN)
-				btd_close();
+		/* The parent went: nothing can be opened any more. */
+		if ((descriptors[2].revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
+			btd_log("bluetoothd: the privileged parent went; ending\n");
+			return 0;
 		}
 
-		/* A scan that is over answers the client that asked. */
+		/* The controller's packets: those the node has, and those queued while a command waited (review BL2). */
+		if (btd_session_open) {
+			if ((descriptors[1].revents & (POLLIN | POLLHUP | POLLERR)) != 0)
+				btd_packets();
+		}
+
+		/* Packets queued while a command waited, even when the node has nothing new. */
+		if (btd_session_open) {
+			ready = btd_session_pending(&btd_session);
+			if (ready)
+				btd_packets();
+		}
+
+		/* The pairing's deadlines. */
 		now = btd_now_ms();
+		btd_pair_tick(&btd_pairing, now);
+
+		/* A scan that is over answers the client that asked. */
 		if (btd_session_open && btd_session.scanning && now >= btd_session.scan_end_ms)
 			btd_scan_end();
 
@@ -241,11 +326,17 @@ main(
 		if ((descriptors[0].revents & POLLIN) != 0)
 			btd_accept(listener);
 		for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
-			if (btd_clients[index].descriptor < 0)
+			if (btd_clients[index].descriptor < 0 || btd_clients[index].dead)
 				continue;
-			if ((descriptors[2U + index].revents & (POLLIN | POLLHUP | POLLERR)) == 0)
+			if ((descriptors[3U + index].revents & (POLLIN | POLLHUP | POLLERR)) == 0)
 				continue;
-			btd_read(&btd_clients[index]);
+			btd_read((int)index);
+		}
+
+		/* The clients that stopped reading are closed now. */
+		for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
+			if (btd_clients[index].descriptor >= 0 && btd_clients[index].dead)
+				btd_client_close((int)index);
 		}
 	}
 }
@@ -306,10 +397,10 @@ btd_listen(
 }
 
 /*
- * Opens the controller's node (the one given, or the lowest that opens)
- * and starts it.  A start that failed with the node still there keeps it
- * open (its state says why); a node that went during the start is closed,
- * and so is one whose start a new start may mend.
+ * Opens the controller's node through the parent and starts it.  A start
+ * that failed with the node still there keeps it open (its state says
+ * why); a node that went during the start is closed, and so is one whose
+ * start a new start may mend.
  */
 static void
 btd_open(
@@ -318,7 +409,6 @@ btd_open(
 	char key[BTD_KEY_MAX];
 	char path[BTD_PATH_MAX];
 	const char *trace_label;
-	unsigned index;
 	int descriptor;
 	int loaded;
 	int error;
@@ -326,36 +416,26 @@ btd_open(
 	/* Looked for now. */
 	btd_looked_ms = btd_now_ms();
 
-	/* The node given, or the first that opens. */
-	descriptor = -1;
-	error = ENOENT;
-	for (index = 0U; index < BTD_NODES; index++) {
-		if (btd_node != NULL)
-			(void)snprintf(path, sizeof(path), "%s", btd_node);
-		else
-			(void)snprintf(path, sizeof(path), "/dev/bt%u", index);
-		descriptor = open(path, O_RDWR | O_CLOEXEC);
-		if (descriptor >= 0)
-			break;
-		if (errno == EBUSY)
-			error = EBUSY;
-		if (btd_node != NULL)
-			break;
-	}
+	/* The node, from the parent. */
+	error = btd_privsep_open(&btd_separation, path, sizeof(path), &descriptor);
 
 	/* No controller (a busy node, another program's, is logged once). */
-	if (descriptor < 0) {
+	if (error != 0) {
 		if (error == EBUSY && !btd_busy_logged)
 			btd_log("bluetoothd: the controller's node is open in another program\n");
 		btd_busy_logged = (error == EBUSY);
+		if (error != EBUSY && error != ENOENT)
+			btd_log("bluetoothd: the parent could not open a node: %s\n", strerror(error));
 		return;
 	}
 
 	/* A node that opened ends the busy note. */
 	btd_busy_logged = 0;
 
-	/* Its session; a controller loaded before must not be loaded again. */
+	/* Its session, its packets handed to the pairing; a controller loaded before must not be loaded again. */
 	btd_session_init(&btd_session, descriptor, btd_node_control, &btd_session, path, BTD_FIRMWARE_FOLDER);
+	btd_session.handler = btd_pair_handle;
+	btd_session.handler_context = &btd_pairing;
 	btd_session_open = 1;
 	btd_reappear_ms = 0U;
 	error = ioctl(descriptor, BT_IOC_GET_INFO, &btd_session.info);
@@ -373,13 +453,15 @@ btd_open(
 	trace_label = "";
 	if (btd_session.trace[0] != '\0')
 		trace_label = ", secure send answers ";
-	btd_log("bluetoothd: %s state=%s %s (error %d, stray %u, malformed %u%s%s)\n",
+	btd_log("bluetoothd: %s state=%s %s (error %d, stray %u, malformed %u, ssp %d, sc %d%s%s)\n",
 		path,
 		btd_state_name(btd_session.state),
 		btd_session.reason,
 		error,
 		btd_session.stray_answers,
 		btd_session.malformed,
+		btd_session.ssp,
+		btd_session.secure_connections,
 		trace_label,
 		btd_session.trace);
 
@@ -405,7 +487,7 @@ btd_open(
 		btd_close();
 }
 
-/* Closes the controller's node; a scan's waiting client hears that it ended. */
+/* Closes the controller's node; a scan's waiting client hears that it ended, and a pairing ends as lost. */
 static void
 btd_close(
 	void)
@@ -415,6 +497,9 @@ btd_close(
 	/* Nothing open. */
 	if (!btd_session_open)
 		return;
+
+	/* A pairing cannot go on without the controller (review S-f). */
+	btd_pair_lost(&btd_pairing);
 
 	/* A client waiting for a scan is answered. */
 	for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
@@ -433,13 +518,96 @@ btd_close(
 	btd_looked_ms = btd_now_ms();
 }
 
-/* Takes a new client, when there is a free slot. */
+/*
+ * Handles the controller's packets, queued ones first, BTD_PACKETS_A_ROUND
+ * at most; a node that went is closed.
+ */
+static void
+btd_packets(
+	void)
+{
+	unsigned handled;
+	int error;
+
+	/* Packet by packet until none is left or the round is full. */
+	for (handled = 0U; handled < BTD_PACKETS_A_ROUND; handled++) {
+		error = btd_session_input(&btd_session);
+		if (error == EAGAIN)
+			return;
+
+		/* The node went. */
+		if (error != 0) {
+			btd_close();
+			return;
+		}
+
+		/* A handler that met a reset leaves the session in error (the loop closes it). */
+		if (!btd_session_open)
+			return;
+	}
+}
+
+/*
+ * Gives the poll's timeout: 0 while packets are queued, else the earliest
+ * of the scan's end, the pairing's deadline, the next look for nodes and a
+ * booted controller's return (-1: none).
+ */
+static int
+btd_timeout(
+	void)
+{
+	uint64_t now;
+	uint64_t earliest;
+	uint64_t deadline;
+	int pending;
+
+	/* Queued packets are handled at once. */
+	if (btd_session_open) {
+		pending = btd_session_pending(&btd_session);
+		if (pending)
+			return 0;
+	}
+
+	/* The earliest deadline. */
+	now = btd_now_ms();
+	earliest = 0U;
+	if (btd_session_open && btd_session.scanning)
+		earliest = btd_session.scan_end_ms;
+	deadline = btd_pair_deadline(&btd_pairing);
+	if (deadline != 0U && (earliest == 0U || deadline < earliest))
+		earliest = deadline;
+	if (!btd_session_open && !btd_stopped) {
+		deadline = btd_looked_ms + BTD_RETRY_MS;
+		if (earliest == 0U || deadline < earliest)
+			earliest = deadline;
+	}
+
+	/* A booted controller's return. */
+	if (btd_reappear_ms != 0U && (earliest == 0U || btd_reappear_ms < earliest))
+		earliest = btd_reappear_ms;
+
+	/* None: wait for a descriptor. */
+	if (earliest == 0U)
+		return -1;
+
+	/* Due already. */
+	if (earliest <= now)
+		return 0;
+
+	/* Succeeded: the milliseconds to the earliest. */
+	return (int)(earliest - now);
+}
+
+/* Takes a new client with its uid, when there is a free slot. */
 static void
 btd_accept(
 	int listener)
 {
 	unsigned index;
+	uid_t uid;
+	gid_t gid;
 	int descriptor;
+	int status;
 
 	/* The connection; its reads never block. */
 	descriptor = accept(listener, NULL, NULL);
@@ -448,13 +616,23 @@ btd_accept(
 	(void)fcntl(descriptor, F_SETFL, O_NONBLOCK);
 	(void)fcntl(descriptor, F_SETFD, FD_CLOEXEC);
 
+	/* Who it is; a client that cannot be told is nobody's. */
+	status = getpeereid(descriptor, &uid, &gid);
+	if (status != 0) {
+		(void)close(descriptor);
+		return;
+	}
+
 	/* A free slot. */
 	for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
 		if (btd_clients[index].descriptor >= 0)
 			continue;
 		btd_clients[index].descriptor = descriptor;
+		btd_clients[index].uid = uid;
+		btd_clients[index].dead = 0;
 		btd_clients[index].used = 0U;
 		btd_clients[index].waits_scan = 0;
+		btd_clients[index].waits_pair = 0;
 		return;
 	}
 
@@ -465,14 +643,16 @@ btd_accept(
 /* Reads a client's bytes and carries out each whole line; a line too long closes the client. */
 static void
 btd_read(
-	struct btd_client *client)
+	int index)
 {
+	struct btd_client *client;
 	ssize_t count;
 	size_t length;
 	char *end;
 	int error;
 
 	/* What came, without waiting. */
+	client = &btd_clients[index];
 	count = recv(client->descriptor, client->input + client->used, sizeof(client->input) - 1U - client->used, 0);
 	if (count < 0) {
 		error = errno;
@@ -482,7 +662,7 @@ btd_read(
 
 	/* A client that went (or failed). */
 	if (count <= 0) {
-		btd_client_close(client);
+		btd_client_close(index);
 		return;
 	}
 
@@ -496,7 +676,7 @@ btd_read(
 		if (end == NULL)
 			break;
 		*end = '\0';
-		btd_line(client, client->input);
+		btd_line(index, client->input);
 		if (client->descriptor < 0)
 			return;
 		length = (size_t)(end + 1 - client->input);
@@ -506,19 +686,35 @@ btd_read(
 
 	/* A line that fills the buffer without ending is not one. */
 	if (client->used + 1U >= sizeof(client->input))
-		btd_client_close(client);
+		btd_client_close(index);
 }
 
-/* Carries out one request line. */
+/* Carries out one request line, or takes an answer to the question asked. */
 static void
 btd_line(
-	struct btd_client *client,
+	int index,
 	char *line)
 {
+	struct btd_client *client;
 	int same;
 
-	/* A client waiting for its scan asks nothing more until it is answered. */
-	if (client->waits_scan)
+	/* An answer to the agent's question: YES or NO, from the client asked. */
+	client = &btd_clients[index];
+	same = strcmp(line, "YES");
+	if (same == 0) {
+		btd_answer(index, 1);
+		return;
+	}
+
+	/* NO, likewise. */
+	same = strcmp(line, "NO");
+	if (same == 0) {
+		btd_answer(index, 0);
+		return;
+	}
+
+	/* A client waiting for its scan or its pairing asks nothing more until it is answered. */
+	if (client->waits_scan || client->waits_pair)
 		return;
 
 	/* SHOW. */
@@ -535,10 +731,38 @@ btd_line(
 		return;
 	}
 
+	/* BONDS. */
+	same = strcmp(line, "BONDS");
+	if (same == 0) {
+		btd_bonds(client);
+		return;
+	}
+
+	/* AGENT. */
+	same = strcmp(line, "AGENT");
+	if (same == 0) {
+		btd_agent(index);
+		return;
+	}
+
 	/* SCAN SECONDS. */
 	same = strncmp(line, "SCAN ", 5U);
 	if (same == 0) {
 		btd_scan(client, line + 5);
+		return;
+	}
+
+	/* PAIR ADDRESS TYPE. */
+	same = strncmp(line, "PAIR ", 5U);
+	if (same == 0) {
+		btd_pair(index, line + 5);
+		return;
+	}
+
+	/* FORGET ADDRESS TYPE. */
+	same = strncmp(line, "FORGET ", 7U);
+	if (same == 0) {
+		btd_forget(client, line + 7);
 		return;
 	}
 
@@ -554,6 +778,7 @@ btd_show(
 	char address[24];
 	char name[4U * BT_TEXT_MAX];
 	const char *firmware;
+	int pairing;
 	int error;
 
 	/* The state, and why. */
@@ -566,6 +791,7 @@ btd_show(
 	firmware = "-";
 	if (btd_session.firmware_loaded)
 		firmware = "loaded";
+	pairing = btd_pair_active(&btd_pairing);
 	if (btd_session_open) {
 		btd_format_address(btd_session.address, address, sizeof(address));
 		if (!btd_session.have_address)
@@ -574,7 +800,7 @@ btd_show(
 		if (error != 0)
 			name[0] = '\0';
 		btd_write(client,
-			  "CONTROLLER node=%s vendor=%04x product=%04x name=\"%s\" address=%s hci=%u manufacturer=%u le=%d p256=%d dhkey=%d firmware=%s\n",
+			  "CONTROLLER node=%s vendor=%04x product=%04x name=\"%s\" address=%s hci=%u manufacturer=%u le=%d p256=%d dhkey=%d firmware=%s ssp=%d sc=%d pairing=%d\n",
 			  btd_session.path,
 			  (unsigned)btd_session.info.vendor,
 			  (unsigned)btd_session.info.product,
@@ -585,7 +811,10 @@ btd_show(
 			  btd_session.le,
 			  btd_session.p256,
 			  btd_session.dhkey,
-			  firmware);
+			  firmware,
+			  btd_session.ssp,
+			  btd_session.secure_connections,
+			  pairing);
 	}
 
 	/* The end. */
@@ -635,7 +864,7 @@ btd_devices(
 	btd_write(client, "DONE\n");
 }
 
-/* Starts a scan for root; the client hears the devices when it ends. */
+/* Starts a scan for one who may change things; the client hears the devices when it ends. */
 static void
 btd_scan(
 	struct btd_client *client,
@@ -643,14 +872,13 @@ btd_scan(
 {
 	unsigned long seconds;
 	char *end;
-	uid_t uid;
-	gid_t gid;
-	int status;
+	int permitted;
+	int pairing;
 	int error;
 
-	/* Only root changes the controller's state in this Phase. */
-	status = getpeereid(client->descriptor, &uid, &gid);
-	if (status != 0 || uid != 0) {
+	/* Only those D8 permits (plan section 6). */
+	permitted = btd_permitted(client->uid);
+	if (!permitted) {
 		btd_write(client, "ERROR permission\nDONE\n");
 		return;
 	}
@@ -663,14 +891,15 @@ btd_scan(
 		return;
 	}
 
-	/* A ready controller, and no scan running. */
+	/* A controller. */
 	if (!btd_session_open) {
 		btd_write(client, "ERROR no-controller\nDONE\n");
 		return;
 	}
 
-	/* One scan at a time. */
-	if (btd_session.scanning) {
+	/* One scan at a time, and none while a pairing runs. */
+	pairing = btd_pair_active(&btd_pairing);
+	if (btd_session.scanning || pairing) {
 		btd_write(client, "ERROR busy\nDONE\n");
 		return;
 	}
@@ -724,6 +953,372 @@ btd_scan_end(
 		btd_close();
 }
 
+/*
+ * Starts a pairing for one who may change things (PAIR ADDRESS TYPE): the
+ * client hears the questions when no agent answers for it, and the end.
+ */
+static void
+btd_pair(
+	int index,
+	const char *argument)
+{
+	struct btd_client *client;
+	uint8_t address[BTD_ADDRESS_BYTES];
+	unsigned type;
+	int permitted;
+	int error;
+
+	/* Only those D8 permits. */
+	client = &btd_clients[index];
+	permitted = btd_permitted(client->uid);
+	if (!permitted) {
+		btd_write(client, "ERROR permission\nDONE\n");
+		return;
+	}
+
+	/* The device. */
+	error = btd_parse_device(argument, address, &type);
+	if (error != 0) {
+		btd_write(client, "ERROR address\nDONE\n");
+		return;
+	}
+
+	/* A ready controller. */
+	if (!btd_session_open || btd_session.state != BTD_STATE_READY) {
+		btd_write(client, "ERROR not-ready\nDONE\n");
+		return;
+	}
+
+	/* One pairing at a time. */
+	if (btd_pair_client != BTD_NO_CLIENT) {
+		btd_write(client, "ERROR busy\nDONE\n");
+		return;
+	}
+
+	/* The client waits for the end (which may come at once). */
+	btd_pair_client = index;
+	client->waits_pair = 1;
+	btd_log("bluetoothd: pairing %s asked by uid %u\n", argument, (unsigned)client->uid);
+	error = btd_pair_start(&btd_pairing, address, type, 1);
+	if (error == EBUSY) {
+		btd_pair_client = BTD_NO_CLIENT;
+		client->waits_pair = 0;
+		btd_write(client, "ERROR busy\nDONE\n");
+	}
+}
+
+/*
+ * Makes the client the agent (AGENT): it is asked the questions of
+ * pairings of its own uid, or of anyone when it is the seat's user.  An
+ * agent of another uid is not displaced while it is there.
+ */
+static void
+btd_agent(
+	int index)
+{
+	struct btd_client *client;
+	struct btd_client *agent;
+	int permitted;
+
+	/* Only those D8 permits. */
+	client = &btd_clients[index];
+	permitted = btd_permitted(client->uid);
+	if (!permitted) {
+		btd_write(client, "ERROR permission\nDONE\n");
+		return;
+	}
+
+	/* Another uid's agent stays (review M-d); the same uid's is replaced. */
+	if (btd_agent_client != BTD_NO_CLIENT && btd_agent_client != index) {
+		agent = &btd_clients[btd_agent_client];
+		if (agent->uid != client->uid) {
+			btd_write(client, "ERROR busy\nDONE\n");
+			return;
+		}
+
+		/* The old one hears that it is no longer the agent. */
+		btd_write(agent, "AGENT-END\n");
+	}
+
+	/* The agent from now on. */
+	btd_agent_client = index;
+	btd_write(client, "AGENT ok\nDONE\n");
+}
+
+/* Takes YES or NO from the client asked; from anyone else it is passed over. */
+static void
+btd_answer(
+	int index,
+	int accepted)
+{
+	/* Only the client asked. */
+	if (btd_asked_client != index)
+		return;
+
+	/* Answered. */
+	btd_asked_client = BTD_NO_CLIENT;
+	btd_pair_answer(&btd_pairing, accepted);
+}
+
+/* Forgets a bond (FORGET ADDRESS TYPE) for one who may change things. */
+static void
+btd_forget(
+	struct btd_client *client,
+	const char *argument)
+{
+	uint8_t address[BTD_ADDRESS_BYTES];
+	unsigned type;
+	int permitted;
+	int error;
+
+	/* Only those D8 permits. */
+	permitted = btd_permitted(client->uid);
+	if (!permitted) {
+		btd_write(client, "ERROR permission\nDONE\n");
+		return;
+	}
+
+	/* The device. */
+	error = btd_parse_device(argument, address, &type);
+	if (error != 0) {
+		btd_write(client, "ERROR address\nDONE\n");
+		return;
+	}
+
+	/* The bonds are the controller's: one must be open. */
+	if (!btd_session_open || !btd_session.have_address) {
+		btd_write(client, "ERROR no-controller\nDONE\n");
+		return;
+	}
+
+	/* The bond's file, gone. */
+	error = btd_keys_forget(BTD_KEYS_FOLDER, btd_session.address, address, type);
+	if (error == ENOENT) {
+		btd_write(client, "ERROR not-bonded\nDONE\n");
+		return;
+	}
+
+	/* Any other failure, named. */
+	if (error != 0) {
+		btd_write(client, "ERROR %s\nDONE\n", strerror(error));
+		return;
+	}
+
+	/* Succeeded: forgotten. */
+	btd_log("bluetoothd: forgot %s\n", argument);
+	btd_write(client, "DONE\n");
+}
+
+/* Answers BONDS: the controller's bonds, without their keys. */
+static void
+btd_bonds(
+	struct btd_client *client)
+{
+	static struct btd_bond bonds[BTD_BONDS_MAX];
+	char address[24];
+	char name[4U * BTD_NAME_MAX];
+	unsigned count;
+	unsigned index;
+	int error;
+
+	/* The controller's bonds. */
+	count = 0U;
+	error = 0;
+	if (btd_session_open && btd_session.have_address)
+		error = btd_keys_list(BTD_KEYS_FOLDER, btd_session.address, bonds, BTD_BONDS_MAX, &count);
+	if (error != 0) {
+		btd_write(client, "ERROR %s\nDONE\n", strerror(error));
+		return;
+	}
+
+	/* Each bond as one line. */
+	for (index = 0U; index < count; index++) {
+		btd_format_address(bonds[index].address, address, sizeof(address));
+		error = btd_escape(bonds[index].name, name, sizeof(name));
+		if (error != 0)
+			name[0] = '\0';
+		btd_write(client,
+			  "BOND address=%s type=%s authenticated=%d secure=%d legacy=%d name=\"%s\"\n",
+			  address,
+			  btd_address_type_name(bonds[index].type),
+			  bonds[index].authenticated,
+			  bonds[index].secure,
+			  bonds[index].legacy,
+			  name);
+	}
+
+	/* The keys read are not kept. */
+	memset(bonds, 0, sizeof(bonds));
+
+	/* The end. */
+	btd_write(client, "DONE\n");
+}
+
+/*
+ * Asks the agent for the pairing (the pairing's hook): the agent when it
+ * answers for the pairing's client, else the pairing's client itself.  A
+ * question nobody can be asked is answered no.
+ */
+static void
+btd_ask(
+	void *context,
+	unsigned kind,
+	uint32_t number)
+{
+	struct btd_client *pairer;
+	struct btd_client *agent;
+	struct stat status;
+	uid_t seat;
+	int asked;
+	int error;
+
+	UNUSED_PARAMETER(context);
+
+	/* The pairing's client, which may be asked itself. */
+	asked = btd_pair_client;
+	if (asked == BTD_NO_CLIENT) {
+		btd_pair_answer(&btd_pairing, 0);
+		return;
+	}
+
+	/* Its client record. */
+	pairer = &btd_clients[asked];
+
+	/* The agent answers for its own uid, or for anyone when it is the seat's user. */
+	if (btd_agent_client != BTD_NO_CLIENT) {
+		agent = &btd_clients[btd_agent_client];
+		seat = 0;
+		error = stat(BTD_SEAT_NODE, &status);
+		if (error == 0)
+			seat = status.st_uid;
+		if (agent->uid == pairer->uid || (seat != 0 && agent->uid == seat))
+			asked = btd_agent_client;
+	}
+
+	/* The question: a number to confirm, an agreement, or a passkey to show (no answer). */
+	if (kind == BTD_PAIR_ASK_PASSKEY) {
+		btd_write(&btd_clients[asked], "PASSKEY %06u\n", (unsigned)number);
+		return;
+	}
+
+	/* A question that waits for YES or NO from the client asked. */
+	btd_asked_client = asked;
+	if (kind == BTD_PAIR_ASK_CONSENT)
+		btd_write(&btd_clients[asked], "CONSENT\n");
+	else
+		btd_write(&btd_clients[asked], "CONFIRM %06u\n", (unsigned)number);
+}
+
+/* Tells the pairing's client the end (the pairing's hook) and logs it. */
+static void
+btd_paired(
+	void *context,
+	const char *answer)
+{
+	int index;
+
+	UNUSED_PARAMETER(context);
+
+	/* Logged. */
+	btd_log("bluetoothd: pairing: %s\n", answer);
+
+	/* No question waits any more; the client that asked hears the end. */
+	btd_asked_client = BTD_NO_CLIENT;
+	index = btd_pair_client;
+	btd_pair_client = BTD_NO_CLIENT;
+	if (index == BTD_NO_CLIENT)
+		return;
+	btd_clients[index].waits_pair = 0;
+	btd_write(&btd_clients[index], "%s\nDONE\n", answer);
+}
+
+/*
+ * Tells whether a uid may change things (D8): root, the seat's user (the
+ * display's owner, not the greeter), or a member of wheel; the greeter
+ * never.
+ */
+static int
+btd_permitted(
+	uid_t uid)
+{
+	struct passwd *account;
+	struct group *admin;
+	struct stat status;
+	gid_t groups[BTD_GROUPS_MAX];
+	gid_t admin_gid;
+	int group_count;
+	int index;
+	int same;
+	int error;
+
+	/* Root. */
+	if (uid == 0)
+		return 1;
+
+	/* An account the system knows, and not the greeter's. */
+	account = getpwuid(uid);
+	if (account == NULL)
+		return 0;
+	same = strcmp(account->pw_name, BTD_GREETER);
+	if (same == 0)
+		return 0;
+
+	/* The seat's user. */
+	error = stat(BTD_SEAT_NODE, &status);
+	if (error == 0 && status.st_uid == uid)
+		return 1;
+
+	/* wheel's gid; without the group nobody is a member. */
+	admin = getgrnam(BTD_ADMIN_GROUP);
+	if (admin == NULL)
+		return 0;
+	admin_gid = admin->gr_gid;
+
+	/* The account's groups (its own and the supplementary ones). */
+	memset(groups, 0, sizeof(groups));
+	group_count = BTD_GROUPS_MAX;
+	(void)getgrouplist(account->pw_name, account->pw_gid, groups, &group_count);
+	if (group_count > BTD_GROUPS_MAX)
+		group_count = BTD_GROUPS_MAX;
+
+	/* A member of wheel. */
+	for (index = 0; index < group_count; index++) {
+		if (groups[index] == admin_gid)
+			return 1;
+	}
+
+	/* Anyone else. */
+	return 0;
+}
+
+/* Reads "ADDRESS TYPE" (TYPE bredr, le-public or le-random). Returns 0 or EINVAL. */
+static int
+btd_parse_device(
+	const char *text,
+	uint8_t *address,
+	unsigned *type)
+{
+	char address_text[18];
+	const char *space;
+	int error;
+
+	/* The address, then one space, then the type. */
+	space = strchr(text, ' ');
+	if (space == NULL || space - text != 17)
+		return EINVAL;
+	memcpy(address_text, text, 17U);
+	address_text[17] = '\0';
+	error = btd_address_parse(address_text, address);
+	if (error != 0)
+		return EINVAL;
+	error = btd_address_type_parse(space + 1, type);
+	if (error != 0)
+		return EINVAL;
+
+	/* Succeeded: the device. */
+	return 0;
+}
+
 /* Writes a formatted text to a client, waiting a little for room; a client that cannot take it is closed. */
 static void
 btd_write(
@@ -740,8 +1335,8 @@ btd_write(
 	int ready;
 	int written;
 
-	/* A client already closed. */
-	if (client->descriptor < 0)
+	/* A client already closed, or that stopped reading. */
+	if (client->descriptor < 0 || client->dead)
 		return;
 
 	/* The text. */
@@ -776,22 +1371,45 @@ btd_write(
 				continue;
 		}
 
-		/* A client that does not read is closed. */
-		btd_client_close(client);
+		/* A client that does not read is closed at the end of the round. */
+		client->dead = 1;
 		return;
 	}
 }
 
-/* Closes a client and frees its slot. */
+/*
+ * Closes a client and frees its slot: a pairing it asked for stops, an
+ * agent's question is answered no.
+ */
 static void
 btd_client_close(
-	struct btd_client *client)
+	int index)
 {
+	struct btd_client *client;
+
 	/* The descriptor, and the slot. */
-	(void)close(client->descriptor);
+	client = &btd_clients[index];
+	if (client->descriptor >= 0)
+		(void)close(client->descriptor);
 	client->descriptor = -1;
+	client->dead = 0;
 	client->used = 0U;
 	client->waits_scan = 0;
+	client->waits_pair = 0;
+
+	/* The agent is gone; a question it was asked is no. */
+	if (btd_agent_client == index)
+		btd_agent_client = BTD_NO_CLIENT;
+	if (btd_asked_client == index) {
+		btd_asked_client = BTD_NO_CLIENT;
+		btd_pair_answer(&btd_pairing, 0);
+	}
+
+	/* The client that asked for a pairing is gone: the pairing stops (its end has nobody to tell). */
+	if (btd_pair_client == index) {
+		btd_pair_client = BTD_NO_CLIENT;
+		btd_pair_stop(&btd_pairing, "cancelled");
+	}
 }
 
 /* Calls an ioctl of the controller's node (the session's control). */
@@ -812,6 +1430,19 @@ btd_node_control(
 
 	/* Succeeded. */
 	return 0;
+}
+
+/* Fills bytes with the system's random ones (the Security Manager's nonces and passkeys). */
+static void
+btd_random(
+	void *context,
+	uint8_t *bytes,
+	size_t length)
+{
+	UNUSED_PARAMETER(context);
+
+	/* The kernel's random source. */
+	arc4random_buf(bytes, length);
 }
 
 /*

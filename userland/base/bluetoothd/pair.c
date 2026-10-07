@@ -143,7 +143,6 @@ static int pair_command(struct btd_pair *pair, uint16_t opcode, const uint8_t *p
 static void pair_reply(struct btd_pair *pair, uint16_t opcode, const uint8_t *address, const uint8_t *more, size_t more_length);
 static void pair_disconnect_other(struct btd_pair *pair, uint16_t handle);
 static int pair_ours(const struct btd_pair *pair, const uint8_t *address);
-static int pair_le(const struct btd_pair *pair);
 static void pair_name(const struct btd_pair *pair, const uint8_t *address, unsigned type, char *name, size_t size);
 static const char *pair_smp_why(const struct btd_pair *pair);
 static void pair_put16(uint8_t *bytes, uint16_t value);
@@ -207,6 +206,9 @@ btd_pair_start(
 	/* The device and a clean slate. */
 	memcpy(pair->address, address, BTD_ADDRESS_BYTES);
 	pair->type = type;
+	pair->le = 0;
+	if (type == BTD_ADDRESS_LE_PUBLIC || type == BTD_ADDRESS_LE_RANDOM)
+		pair->le = 1;
 	pair->agent = agent;
 	pair->connected = 0;
 	pair->pending_error = NULL;
@@ -238,7 +240,7 @@ btd_pair_start(
 		pair->have_stored = 1;
 
 	/* LE: a bond is not paired over silently (it is forgotten first), and the controller must do P-256. */
-	if (pair_le(pair)) {
+	if (pair->le) {
 		if (!pair->have_stored)
 			pair->have_stored = pair_resolved_bond(pair);
 		if (pair->have_stored) {
@@ -339,7 +341,7 @@ btd_pair_answer(
 	pair->agent_deadline = 0U;
 
 	/* LE's agreement to Just Works: the encryption held goes on, or the pairing is refused. */
-	if (pair_le(pair) && pair->asked_kind == BTD_PAIR_ASK_CONSENT) {
+	if (pair->le && pair->asked_kind == BTD_PAIR_ASK_CONSENT) {
 		if (accepted) {
 			pair_le_encrypt(pair);
 			return;
@@ -353,7 +355,7 @@ btd_pair_answer(
 	}
 
 	/* LE's number: the Security Manager takes it. */
-	if (pair_le(pair)) {
+	if (pair->le) {
 		actions = btd_smp_agent(&pair->smp, accepted);
 		pair_smp_actions(pair, actions);
 		return;
@@ -393,11 +395,12 @@ btd_pair_tick(
 
 	/* A disconnection that did not come: the end is told all the same. */
 	if (pair->state == PAIR_DISCONNECTING) {
-		if (now >= pair->state_deadline) {
-			pair->connected = 0;
-			pair_deliver(pair);
-		}
+		if (now < pair->state_deadline)
+			return;
 
+		/* Not connected any more as far as bluetoothd knows. */
+		pair->connected = 0;
+		pair_deliver(pair);
 		return;
 	}
 
@@ -656,11 +659,11 @@ pair_acl(
 	cid = (uint16_t)(pair->reassembly.frame[2] | (pair->reassembly.frame[3] << 8));
 
 	/* Each fixed channel of the pairing; anything else is not read in this Phase. */
-	if (cid == BTD_CID_SIGNALLING && !pair_le(pair)) {
+	if (cid == BTD_CID_SIGNALLING && !pair->le) {
 		pair_signal(pair, 0, pair->reassembly.frame + BTD_L2CAP_HEADER, payload);
-	} else if (cid == BTD_CID_LE_SIGNALLING && pair_le(pair)) {
+	} else if (cid == BTD_CID_LE_SIGNALLING && pair->le) {
 		pair_signal(pair, 1, pair->reassembly.frame + BTD_L2CAP_HEADER, payload);
-	} else if (cid == BTD_CID_SMP && pair_le(pair) && pair->state == PAIR_SECURING) {
+	} else if (cid == BTD_CID_SMP && pair->le && pair->state == PAIR_SECURING) {
 		/* A Security Manager PDU: its 30 seconds start again, and what it asks for is done. */
 		pair->smp_deadline = btd_now_ms() + BTD_PAIR_SMP_MS;
 		actions = btd_smp_input(&pair->smp, pair->reassembly.frame + BTD_L2CAP_HEADER, payload);
@@ -688,7 +691,7 @@ pair_connected(
 
 	/* Whether it is the connection the pairing waits for. */
 	awaited = 0;
-	if (!pair_le(pair) && (pair->state == PAIR_CONNECTING || pair->state == PAIR_CANCELLING))
+	if (!pair->le && (pair->state == PAIR_CONNECTING || pair->state == PAIR_CANCELLING))
 		awaited = pair_ours(pair, parameters + 3);
 
 	/* Not that one: a connection made all the same is ended. */
@@ -745,14 +748,14 @@ pair_le_meta(
 		break;
 	case PAIR_LE_P256_DONE:
 		/* The controller's public key (status, X, Y). */
-		if (length < 66U || !pair_le(pair) || pair->state != PAIR_SECURING)
+		if (length < 66U || !pair->le || pair->state != PAIR_SECURING)
 			break;
 		actions = btd_smp_local_key(&pair->smp, parameters[1], parameters + 2);
 		pair_smp_actions(pair, actions);
 		break;
 	case PAIR_LE_DHKEY_DONE:
 		/* The DHKey (status, the key). */
-		if (length < 34U || !pair_le(pair) || pair->state != PAIR_SECURING)
+		if (length < 34U || !pair->le || pair->state != PAIR_SECURING)
 			break;
 		actions = btd_smp_dhkey(&pair->smp, parameters[1], parameters + 2);
 		pair_smp_actions(pair, actions);
@@ -787,7 +790,7 @@ pair_le_connected(
 
 	/* Not the connection the pairing waits for: one made all the same is ended. */
 	same = 0;
-	if (pair_le(pair) && (pair->state == PAIR_CONNECTING || pair->state == PAIR_CANCELLING))
+	if (pair->le && (pair->state == PAIR_CONNECTING || pair->state == PAIR_CANCELLING))
 		same = pair_ours(pair, parameters + 6);
 	if (!same && parameters[1] == 0U) {
 		pair_disconnect_other(pair, connection);
@@ -938,7 +941,7 @@ pair_encryption(
 		on = 1;
 
 	/* LE: the Security Manager takes it (the keys come next). */
-	if (pair_le(pair)) {
+	if (pair->le) {
 		if (pair->state != PAIR_SECURING)
 			return;
 		actions = btd_smp_encrypted(&pair->smp, parameters[0], on);
@@ -1061,6 +1064,8 @@ pair_io_request(
 		reply[0] = PAIR_IO_DISPLAY_YES_NO;
 		reply[2] = PAIR_AUTH_DEDICATED_MITM;
 	}
+
+	/* The reply. */
 	pair_reply(pair, PAIR_IO_REPLY, address, reply, sizeof(reply));
 }
 
@@ -1131,6 +1136,8 @@ pair_key_size(
 		pair_fail(pair, "key-size");
 		return;
 	}
+
+	/* The size (after the handle). */
 	pair->key_size = pair->session->returned[2];
 
 	/* A shorter key is refused. */
@@ -1350,6 +1357,8 @@ pair_smp_actions(
 			btd_pair_lost(pair);
 			return;
 		}
+
+		/* Sent: the Security Manager's time starts again. */
 		pair->smp_deadline = btd_now_ms() + BTD_PAIR_SMP_MS;
 	}
 
@@ -1420,7 +1429,7 @@ pair_succeed(
 	secure = 0;
 	legacy = 0;
 	key_size = pair->key_size;
-	if (pair_le(pair)) {
+	if (pair->le) {
 		authenticated = pair->smp.keys.authenticated;
 		secure = pair->smp.keys.secure;
 		if (!secure)
@@ -1551,7 +1560,7 @@ pair_cancel(
 	pair->state = PAIR_CANCELLING;
 	pair->state_deadline = btd_now_ms() + BTD_PAIR_CLOSE_MS;
 	(void)snprintf(pair->answer, sizeof(pair->answer), "ERROR %s", why);
-	if (pair_le(pair)) {
+	if (pair->le) {
 		opcode = PAIR_LE_CREATE_CANCEL;
 		error = btd_session_command(pair->session, opcode, NULL, 0U);
 	} else {
@@ -1660,19 +1669,6 @@ pair_ours(
 		return 1;
 
 	/* Another device. */
-	return 0;
-}
-
-/* Tells whether the pairing is LE's. */
-static int
-pair_le(
-	const struct btd_pair *pair)
-{
-	/* LE's two kinds of address. */
-	if (pair->type == BTD_ADDRESS_LE_PUBLIC || pair->type == BTD_ADDRESS_LE_RANDOM)
-		return 1;
-
-	/* BR/EDR. */
 	return 0;
 }
 

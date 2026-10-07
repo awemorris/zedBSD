@@ -695,12 +695,13 @@ session_dispatch(
 	/* A scan's result goes in the table while a scan runs (a malformed one is counted); a late one is passed over. */
 	scan_event = session_scan_event(&event);
 	if (scan_event) {
-		if (session->scanning) {
-			taken = btd_devices_take(&session->devices, &event);
-			if (taken < 0)
-				session->malformed++;
-		}
+		if (!session->scanning)
+			return;
 
+		/* Kept in the table. */
+		taken = btd_devices_take(&session->devices, &event);
+		if (taken < 0)
+			session->malformed++;
 		return;
 	}
 
@@ -1571,6 +1572,8 @@ session_enqueue(
 		session_completed(session, &event);
 		return;
 	}
+
+	/* A connection made or ended is counted now and marked so. */
 	if (error == 0) {
 		counted = session_counted_event(session, &event);
 		if (counted > 0)
@@ -1729,6 +1732,8 @@ session_completed(
 		session->malformed++;
 		return;
 	}
+
+	/* The handles and their counts must fill the event. */
 	handles = event->parameters[0];
 	if (event->length != 1U + 4U * (size_t)handles) {
 		session->malformed++;
@@ -1904,6 +1909,7 @@ session_flush(
 				boundary = BTD_ACL_FIRST;
 		}
 
+		/* The packet, written. */
 		length = btd_acl_build(session->outgoing, sizeof(session->outgoing), frame->handle, boundary, frame->bytes + frame->sent, chunk);
 		error = session_write(session, session->outgoing, length);
 		if (error != 0)

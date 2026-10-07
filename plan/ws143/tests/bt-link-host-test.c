@@ -525,6 +525,8 @@ test_bredr(void)
 		if (error != 0)
 			break;
 	}
+
+	/* The controller's answers to the refusals. */
 	(void)usleep(50000U);
 	expect(fake_saw(&fake, 0x040aU) && fake_saw(&fake, 0x0434U) && fake_saw(&fake, 0x042dU) && pair.refused >= 3U,
 	       "bredr: pairings from the other side are refused");
@@ -599,6 +601,7 @@ test_le(void)
 	       "le: the keys are stored under the identity (%d)", error);
 	expect(fake.le_packets >= 6U && fake.credit_breaches == 0U, "le: %u LE packets, none past the buffers (review B5)", fake.le_packets);
 
+	/* Just Works asked the agent (design section 6.5). */
 	expect(hooks.asked_kind == BTD_PAIR_ASK_CONSENT, "le: Just Works asked the agent to agree");
 
 	/* The identity is bonded: not paired over (forgotten first). */
@@ -689,6 +692,8 @@ run_pair(
 			idle = 0U;
 			continue;
 		}
+
+		/* Nothing now: a short wait for the controller (any other error ends the run). */
 		if (error != EAGAIN)
 			break;
 		descriptor.fd = session->descriptor;
@@ -704,6 +709,8 @@ run_pair(
 			clock = btd_pair_deadline(pair);
 			idle = 0U;
 		}
+
+		/* The deadlines at that clock. */
 		btd_pair_tick(pair, clock);
 	}
 
@@ -807,13 +814,16 @@ fake_command(
 	unsigned index;
 	uint8_t last;
 	uint8_t key_type;
+	int differs;
 
 	/* The command, recorded. */
 	opcode = (uint16_t)(packet[1] | (packet[2] << 8));
 	body = packet + 4;
 	if (fake->opcode_count < 512U)
 		fake->opcodes[fake->opcode_count++] = opcode;
-	last = fake->device[5] == 0x0aU ? fake->device[0] : 0U;
+	last = 0U;
+	if (fake->device[5] == 0x0aU)
+		last = fake->device[0];
 
 	/* Each command's answer. */
 	switch (opcode) {
@@ -883,6 +893,8 @@ fake_command(
 			memset(vendor, 0x5a, sizeof(vendor));
 			fake_event(fake, 0xffU, vendor, 255U);
 		}
+
+		/* The answer after them. */
 		fake_complete(fake, opcode, ok, sizeof(ok));
 		break;
 	case 0x0405U:
@@ -901,6 +913,8 @@ fake_command(
 			fake->connected = 1;
 			fake->confirmed = 0;
 		}
+
+		/* The connection's end of the page. */
 		fake_event(fake, 0x03U, parameters, 11U);
 		break;
 	case 0x0411U:
@@ -955,6 +969,8 @@ fake_command(
 			fake_command(fake, (const uint8_t *)"\x01\x2c\x04\x06\x0c\x0e\x0d\x0c\x0b\x0a", 10U);
 			break;
 		}
+
+		/* Numeric Comparison or Just Works: the number 123456. */
 		fake_address_event(fake, 0x33U, fake->device, (const uint8_t *)"\x40\xe2\x01\x00", 4U);
 		break;
 	case 0x042cU:
@@ -1015,6 +1031,8 @@ fake_command(
 			fake->le_connected = 0;
 			fake->le_outstanding = 0U;
 		}
+
+		/* The disconnection's end. */
 		fake_event(fake, 0x05U, parameters, 4U);
 		break;
 	case 0x200dU:
@@ -1059,7 +1077,8 @@ fake_command(
 		fake_status(fake, opcode, 0x00U);
 		hex(key_b_x, returned);
 		reverse(key, returned, 32U);
-		if (memcmp(key, body, 32U) != 0)
+		differs = memcmp(key, body, 32U);
+		if (differs != 0)
 			fake->smp_errors++;
 		hex(key_dh, returned);
 		parameters[0] = 0x09U;
@@ -1071,7 +1090,8 @@ fake_command(
 		/* LE Enable Encryption: the LTK must be f5's; then on, and the device's identity. */
 		fake_status(fake, opcode, 0x00U);
 		reverse(key, fake->ltk, 16U);
-		if (memcmp(key, body + 12, 16U) != 0)
+		differs = memcmp(key, body + 12, 16U);
+		if (differs != 0)
 			fake->smp_errors++;
 		fake_event(fake, 0x08U, (const uint8_t *)"\x00\x41\x00\x01", 4U);
 		memset(parameters, 0x11U, 17U);
@@ -1091,6 +1111,7 @@ fake_command(
 		break;
 	}
 
+	/* The packet's length was checked by the reader. */
 	(void)length;
 }
 
@@ -1147,6 +1168,8 @@ fake_acl(
 		fake_completed(fake, acl.handle, *outstanding);
 		*outstanding = 0U;
 	}
+
+	/* Only a whole frame is read. */
 	if (whole <= 0)
 		return;
 
@@ -1190,6 +1213,7 @@ fake_smp(
 	uint8_t value[16];
 	uint8_t expected[16];
 	uint8_t out[65];
+	int differs;
 
 	/* Each PDU of the initiator. */
 	switch (pdu[0]) {
@@ -1199,6 +1223,8 @@ fake_smp(
 			fake->smp_errors++;
 			return;
 		}
+
+		/* The request kept, the response sent. */
 		memcpy(fake->preq, pdu, 7U);
 		fake->pres[0] = 0x02U;
 		fake->pres[1] = 0x03U;
@@ -1214,7 +1240,8 @@ fake_smp(
 		/* The initiator's public key must be A; then B, and Cb = f4(PKbx, PKax, Nb, 0). */
 		hex(key_a_x, a_x);
 		reverse(value, pdu + 1, 16U);
-		if (length != 65U || memcmp(a_x + 16, value, 16U) != 0)
+		differs = memcmp(a_x + 16, value, 16U);
+		if (length != 65U || differs != 0)
 			fake->smp_errors++;
 		hex(key_b_x, b_x);
 		hex(key_b_y, b_y);
@@ -1257,7 +1284,8 @@ fake_smp(
 		io[2] = fake->preq[1];
 		btd_smp_f6(fake->mac_key, na_msb, nb_msb, r, io, a, b, expected);
 		reverse(value, pdu + 1, 16U);
-		if (length != 17U || memcmp(expected, value, 16U) != 0)
+		differs = memcmp(expected, value, 16U);
+		if (length != 17U || differs != 0)
 			fake->smp_errors++;
 		io[0] = fake->pres[3];
 		io[1] = fake->pres[2];
