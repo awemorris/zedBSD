@@ -167,3 +167,7 @@ write の検査 `bt_hci_check_write(packet, size, acl_data_max)` と、bootloade
   - build: `make ZEDBSD_CONFIG=plan/ws143/tests/config-amd64-bt.mk BUILD=build/amd64 build/amd64/bin/bt-probe` は rc 0、warning 0。
 - 試験の image: `plan/ws143/tests/config-amd64-bt.mk`（CI の config に bt-probe を足した物）。
 - design-reviewer の review: 2026-10-08 に実施中（§10.1。前の世代の記録に review が無かったため）。
+- 自分の読みで見つけた競合（commit 25798861f）:
+  - 問題: detach の `usb_bt_stop_transfers` が stopping を立てる直前に、worker が `usb_bt_arm` で armed を取った（admit した）場合、その submit は cancel の後に入りうる。その URB が pending のまま free される。
+  - 直し: `submitting`（admit 済みで submit 中の数、lock の下）を足し、stop は stopping を立てた後でそれが 0 になるのを待ってから cancel・drain する（usb-hid の close_admission と同じ形）。
+  - kernel の build は warning 0。
