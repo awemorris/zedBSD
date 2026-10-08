@@ -36,14 +36,30 @@
 #define SIGNAL_HEADER			4U
 
 /* The results bluetoothd answers with. */
-#define SIGNAL_PSM_NOT_SUPPORTED	0x0002U
 #define SIGNAL_CONFIG_UNACCEPTABLE	0x0001U
 #define SIGNAL_CONFIG_UNKNOWN		0x0003U
 #define SIGNAL_INFO_NOT_SUPPORTED	0x0001U
 
-/* The configuration option bluetoothd reads, and the hint bit of an option's type. */
+/*
+ * The configuration options bluetoothd reads (Core 5.4 Vol 3 Part A §5):
+ * the MTU, the Flush Timeout, the QoS, the retransmission and flow
+ * control (its mode byte first; 0 is the basic mode), the FCS; their
+ * lengths; and the hint bit of an option's type.
+ */
 #define SIGNAL_OPTION_MTU		0x01U
+#define SIGNAL_OPTION_FLUSH		0x02U
+#define SIGNAL_OPTION_QOS		0x03U
+#define SIGNAL_OPTION_RFC		0x04U
+#define SIGNAL_OPTION_FCS		0x05U
 #define SIGNAL_OPTION_HINT		0x80U
+#define SIGNAL_FLUSH_LENGTH		2U
+#define SIGNAL_QOS_LENGTH		22U
+#define SIGNAL_RFC_LENGTH		9U
+#define SIGNAL_FCS_LENGTH		1U
+#define SIGNAL_RFC_BASIC		0x00U
+
+/* The room of a Configure Response: the header's 6 bytes and the options it sends back (review M11). */
+#define SIGNAL_CONFIGURE_ANSWER		48U
 
 /* The information types: the extended features (fixed channels supported) and the fixed channels (signalling). */
 #define SIGNAL_INFO_FEATURES		0x0002U
@@ -67,8 +83,13 @@ struct signal_out {
 
 static int signal_put(struct signal_out *out, uint8_t code, uint8_t identifier, const uint8_t *data, size_t length);
 static int signal_command(struct btd_l2cap *l2cap, uint16_t handle, int le, uint8_t code, uint8_t identifier, const uint8_t *data, size_t length, struct signal_out *out, struct btd_signal_effect *effect);
-static int signal_connection_response(struct btd_l2cap *l2cap, const uint8_t *data, size_t length, struct signal_out *out);
-static int signal_configure_request(struct btd_l2cap *l2cap, uint8_t identifier, const uint8_t *data, size_t length, struct signal_out *out);
+static int signal_connection_request(struct btd_l2cap *l2cap, uint16_t handle, uint8_t identifier, const uint8_t *data, size_t length, struct signal_out *out);
+static int signal_connection_response(struct btd_l2cap *l2cap, const uint8_t *data, size_t length, struct signal_out *out, struct btd_signal_effect *effect);
+static int signal_configure_request(struct btd_l2cap *l2cap, uint16_t handle, uint8_t identifier, const uint8_t *data, size_t length, struct signal_out *out, struct btd_signal_effect *effect);
+static int signal_configure_send(struct btd_l2cap *l2cap, struct btd_channel *channel, struct signal_out *out);
+static struct btd_channel *signal_free_slot(struct btd_l2cap *l2cap, unsigned *index);
+static void signal_opened(struct btd_signal_effect *effect, const struct btd_channel *channel);
+static void signal_closed(struct btd_signal_effect *effect, struct btd_channel *channel, unsigned reason);
 static int signal_parameters(uint8_t identifier, const uint8_t *data, size_t length, struct signal_out *out, struct btd_signal_effect *effect);
 static int signal_information(uint8_t identifier, const uint8_t *data, size_t length, struct signal_out *out);
 static int signal_reject(uint8_t identifier, struct signal_out *out);
@@ -324,6 +345,132 @@ btd_l2cap_drop(
 	}
 }
 
+/*
+ * Gives a table the owner's answer to the channels the other side asks
+ * for (NULL: every one is refused as PSM not supported).  btd_l2cap_init
+ * clears it.
+ */
+void
+btd_l2cap_set_accept(
+	struct btd_l2cap *l2cap,
+	btd_l2cap_accept_fn accept,
+	void *context)
+{
+	/* The hook and its context. */
+	l2cap->accept = accept;
+	l2cap->accept_context = context;
+}
+
+/*
+ * Gives the final answer to every channel of a connection that the other
+ * side asked for and that was answered Pending (phase005 section 9.8):
+ * success configures it (our Configure Request follows), anything else
+ * refuses it and frees its slot.  The commands go in answer (nothing when
+ * no channel was pending).  Returns 0, or EMSGSIZE when they do not fit
+ * (the channels not answered stay pending).
+ */
+int
+btd_l2cap_answer_pending(
+	struct btd_l2cap *l2cap,
+	uint16_t handle,
+	uint16_t result,
+	uint8_t *answer,
+	size_t size,
+	size_t *answer_length)
+{
+	struct btd_channel *channel;
+	struct signal_out out;
+	uint8_t response[8];
+	unsigned index;
+	int error;
+
+	/* Nothing written yet. */
+	out.bytes = answer;
+	out.size = size;
+	out.used = 0U;
+	*answer_length = 0U;
+
+	/* Each pending channel of the connection. */
+	for (index = 0U; index < BTD_CHANNELS_MAX; index++) {
+		channel = &l2cap->channels[index];
+		if (channel->state != BTD_CHANNEL_PENDING || channel->handle != handle)
+			continue;
+
+		/* The final response, under their request's identifier: our CID only when accepted. */
+		if (result == BTD_L2CAP_SUCCESS) {
+			signal_put16(response, channel->local_cid);
+		} else {
+			signal_put16(response, 0U);
+		}
+
+		/* Their CID, the result, no further information. */
+		signal_put16(response + 2, channel->remote_cid);
+		signal_put16(response + 4, result);
+		signal_put16(response + 6, 0U);
+		error = signal_put(&out, SIGNAL_CONNECTION_RESPONSE, channel->identifier, response, sizeof(response));
+		if (error != 0) {
+			*answer_length = out.used;
+			return EMSGSIZE;
+		}
+
+		/* A refusal frees the slot. */
+		if (result != BTD_L2CAP_SUCCESS) {
+			l2cap->rejected++;
+			channel->state = BTD_CHANNEL_FREE;
+			continue;
+		}
+
+		/* Accepted: our Configure Request follows. */
+		error = signal_configure_send(l2cap, channel, &out);
+		if (error != 0) {
+			*answer_length = out.used;
+			return EMSGSIZE;
+		}
+	}
+
+	/* Succeeded: the answers. */
+	*answer_length = out.used;
+	return 0;
+}
+
+/*
+ * Builds an Echo Request (without data) on BR/EDR's signalling channel and
+ * remembers its identifier, so that its answer comes back as the effect's
+ * echo (a resumed link is alive, phase005 section 4.9).  Returns 0, or
+ * ENOBUFS when the request does not fit.
+ */
+int
+btd_l2cap_echo(
+	struct btd_l2cap *l2cap,
+	uint8_t *request,
+	size_t size,
+	size_t *request_length)
+{
+	struct signal_out out;
+	uint8_t identifier;
+	int error;
+
+	/* The request's place. */
+	out.bytes = request;
+	out.size = size;
+	out.used = 0U;
+	*request_length = 0U;
+
+	/* The request, under a new identifier. */
+	identifier = signal_identifier(l2cap);
+	error = signal_put(&out, SIGNAL_ECHO_REQUEST, identifier, NULL, 0U);
+	if (error != 0)
+		return ENOBUFS;
+
+	/* Its answer is awaited under that identifier. */
+	l2cap->echo_pending = 1;
+	l2cap->echo_identifier = identifier;
+
+	/* Succeeded: the request. */
+	*request_length = out.used;
+	return 0;
+}
+
 /* Appends one command to an answer; returns -1 when it does not fit. */
 static int
 signal_put(
@@ -363,13 +510,9 @@ signal_command(
 	struct btd_signal_effect *effect)
 {
 	struct btd_channel *channel;
-	uint8_t response[8];
 	uint16_t result;
 	unsigned index;
 	int error;
-
-	/* The connection is the channel table's business only for the requests bluetoothd makes. */
-	(void)handle;
 
 	/* LE's channel has the parameter update and the reject; anything else is rejected. */
 	if (le) {
@@ -389,34 +532,25 @@ signal_command(
 	error = 0;
 	switch (code) {
 	case SIGNAL_COMMAND_REJECT:
-		/* A request of ours refused: its channel goes. */
+		/* A request of ours refused: its channel goes (a pending channel of theirs holds their identifier, not ours). */
 		for (index = 0U; index < BTD_CHANNELS_MAX; index++) {
 			channel = &l2cap->channels[index];
-			if (channel->state != BTD_CHANNEL_FREE && channel->identifier == identifier)
-				channel->state = BTD_CHANNEL_FREE;
+			if (channel->state == BTD_CHANNEL_FREE || channel->state == BTD_CHANNEL_PENDING)
+				continue;
+			if (channel->handle != handle || channel->identifier != identifier)
+				continue;
+			signal_closed(effect, channel, BTD_L2CAP_CLOSED_REFUSED);
 		}
 
 		break;
 	case SIGNAL_CONNECTION_REQUEST:
-		/* A channel the other side asks for is refused in this Phase (PSM not supported). */
-		if (length < 4U) {
-			error = signal_reject(identifier, out);
-			break;
-		}
-
-		/* A request for a channel: refused, no PSM is served. */
-		l2cap->rejected++;
-		signal_put16(response, 0U);
-		signal_put16(response + 2, signal_le16(data + 2));
-		signal_put16(response + 4, SIGNAL_PSM_NOT_SUPPORTED);
-		signal_put16(response + 6, 0U);
-		error = signal_put(out, SIGNAL_CONNECTION_RESPONSE, identifier, response, sizeof(response));
+		error = signal_connection_request(l2cap, handle, identifier, data, length, out);
 		break;
 	case SIGNAL_CONNECTION_RESPONSE:
-		error = signal_connection_response(l2cap, data, length, out);
+		error = signal_connection_response(l2cap, data, length, out, effect);
 		break;
 	case SIGNAL_CONFIGURE_REQUEST:
-		error = signal_configure_request(l2cap, identifier, data, length, out);
+		error = signal_configure_request(l2cap, handle, identifier, data, length, out, effect);
 		break;
 	case SIGNAL_CONFIGURE_RESPONSE:
 		/* Our configuration accepted (or not: the channel closes). */
@@ -427,14 +561,17 @@ signal_command(
 			break;
 		result = signal_le16(data + 4);
 		if (result != 0U) {
-			channel->state = BTD_CHANNEL_FREE;
+			signal_closed(effect, channel, BTD_L2CAP_CLOSED_REFUSED);
 			break;
 		}
 
-		/* Our configuration accepted. */
+		/* Our configuration accepted; with theirs done too, the channel is open. */
 		channel->local_done = 1;
-		if (channel->remote_done)
+		if (channel->remote_done) {
 			channel->state = BTD_CHANNEL_OPEN;
+			signal_opened(effect, channel);
+		}
+
 		break;
 	case SIGNAL_DISCONNECTION_REQUEST:
 		/* The other side closes a channel: answered with the same two CIDs, and freed. */
@@ -443,10 +580,10 @@ signal_command(
 			break;
 		}
 
-		/* The other side closed the channel: it is free. */
+		/* The other side closed the channel of this connection: it is free. */
 		channel = signal_find(l2cap, signal_le16(data));
-		if (channel != NULL)
-			channel->state = BTD_CHANNEL_FREE;
+		if (channel != NULL && channel->handle == handle)
+			signal_closed(effect, channel, BTD_L2CAP_CLOSED_REMOTE);
 		error = signal_put(out, SIGNAL_DISCONNECTION_RESPONSE, identifier, data, 4U);
 		break;
 	case SIGNAL_DISCONNECTION_RESPONSE:
@@ -454,8 +591,8 @@ signal_command(
 		if (length < 4U)
 			break;
 		channel = signal_find(l2cap, signal_le16(data + 2));
-		if (channel != NULL)
-			channel->state = BTD_CHANNEL_FREE;
+		if (channel != NULL && channel->handle == handle)
+			signal_closed(effect, channel, BTD_L2CAP_CLOSED_LOCAL);
 		break;
 	case SIGNAL_ECHO_REQUEST:
 		/* Echoed (the data, as much as fits). */
@@ -471,7 +608,12 @@ signal_command(
 		signal_information_answer(l2cap, identifier, data, length, effect);
 		break;
 	case SIGNAL_ECHO_RESPONSE:
-		/* An answer to a request bluetoothd does not send. */
+		/* The answer to our Echo Request (the link is alive), if it is that one. */
+		if (l2cap->echo_pending && identifier == l2cap->echo_identifier) {
+			l2cap->echo_pending = 0;
+			effect->echo = 1;
+		}
+
 		break;
 	default:
 		/* Not understood. */
@@ -483,16 +625,129 @@ signal_command(
 	return error;
 }
 
+/*
+ * Answers the other side's Connection Request: the owner's accept hook
+ * says success, pending or a refusal (without a hook: PSM not supported).
+ * A channel accepted or pending takes a slot (none free: no resources);
+ * an accepted one is configured at once (our Configure Request follows
+ * the response).  Returns -1 when the answer does not fit.
+ */
+static int
+signal_connection_request(
+	struct btd_l2cap *l2cap,
+	uint16_t handle,
+	uint8_t identifier,
+	const uint8_t *data,
+	size_t length,
+	struct signal_out *out)
+{
+	struct btd_channel *channel;
+	uint8_t response[8];
+	uint16_t psm;
+	uint16_t source;
+	uint16_t result;
+	uint16_t status;
+	unsigned index;
+	int answered;
+	int error;
+
+	/* A request too short for its PSM and source CID is not understood. */
+	if (length < 4U) {
+		error = signal_reject(identifier, out);
+		return error;
+	}
+
+	/* The PSM and their source CID. */
+	psm = signal_le16(data);
+	source = signal_le16(data + 2);
+
+	/* The owner's answer, or PSM not supported without one. */
+	result = BTD_L2CAP_PSM_NOT_SUPPORTED;
+	status = 0U;
+	if (l2cap->accept != NULL) {
+		answered = l2cap->accept(l2cap->accept_context, handle, psm, &result, &status);
+		if (answered != 0) {
+			result = BTD_L2CAP_PSM_NOT_SUPPORTED;
+			status = 0U;
+		}
+	}
+
+	/* Their source must be a dynamic CID (Core 5.4 Vol 3 Part A §2.1). */
+	if (result <= BTD_L2CAP_PENDING && source < BTD_CID_DYNAMIC)
+		result = BTD_L2CAP_INVALID_SOURCE;
+
+	/* One of their CIDs names one channel on a connection. */
+	if (result <= BTD_L2CAP_PENDING) {
+		for (index = 0U; index < BTD_CHANNELS_MAX; index++) {
+			channel = &l2cap->channels[index];
+			if (channel->state == BTD_CHANNEL_FREE || channel->handle != handle)
+				continue;
+			if (channel->remote_cid == source)
+				result = BTD_L2CAP_SOURCE_TAKEN;
+		}
+	}
+
+	/* A channel accepted or pending needs a slot. */
+	channel = NULL;
+	if (result <= BTD_L2CAP_PENDING) {
+		channel = signal_free_slot(l2cap, &index);
+		if (channel == NULL)
+			result = BTD_L2CAP_NO_RESOURCES;
+	}
+
+	/* A refusal: no channel, and only their CID in the answer. */
+	if (channel == NULL) {
+		l2cap->rejected++;
+		signal_put16(response, 0U);
+		signal_put16(response + 2, source);
+		signal_put16(response + 4, result);
+		signal_put16(response + 6, 0U);
+		error = signal_put(out, SIGNAL_CONNECTION_RESPONSE, identifier, response, sizeof(response));
+		return error;
+	}
+
+	/* The channel: theirs, configuring or waiting for its final answer (which goes under their identifier). */
+	memset(channel, 0, sizeof(*channel));
+	channel->handle = handle;
+	channel->local_cid = (uint16_t)(BTD_CID_DYNAMIC + index);
+	channel->remote_cid = source;
+	channel->psm = psm;
+	channel->inbound = 1;
+	channel->identifier = identifier;
+	channel->state = BTD_CHANNEL_CONFIGURING;
+	if (result == BTD_L2CAP_PENDING)
+		channel->state = BTD_CHANNEL_PENDING;
+
+	/* The response: our CID, theirs, the result and the status. */
+	signal_put16(response, channel->local_cid);
+	signal_put16(response + 2, source);
+	signal_put16(response + 4, result);
+	signal_put16(response + 6, status);
+	error = signal_put(out, SIGNAL_CONNECTION_RESPONSE, identifier, response, sizeof(response));
+	if (error != 0) {
+		channel->state = BTD_CHANNEL_FREE;
+		return error;
+	}
+
+	/* A pending channel waits for its final answer (btd_l2cap_answer_pending). */
+	if (result == BTD_L2CAP_PENDING)
+		return 0;
+
+	/* Succeeded: an accepted channel is configured, our request first. */
+	error = signal_configure_send(l2cap, channel, out);
+	return error;
+}
+
 /* Takes a Connection Response to a request of ours: on success the channel is configured (our Configure Request goes). */
 static int
 signal_connection_response(
 	struct btd_l2cap *l2cap,
 	const uint8_t *data,
 	size_t length,
-	struct signal_out *out)
+	struct signal_out *out,
+	struct btd_signal_effect *effect)
 {
 	struct btd_channel *channel;
-	uint8_t request[8];
 	uint16_t result;
 	int error;
 
@@ -505,25 +760,18 @@ signal_connection_response(
 	result = signal_le16(data + 4);
 
 	/* Pending: the final answer comes later. */
-	if (result == 0x0001U)
+	if (result == BTD_L2CAP_PENDING)
 		return 0;
 
 	/* Refused: the channel goes. */
-	if (result != 0U) {
-		channel->state = BTD_CHANNEL_FREE;
+	if (result != BTD_L2CAP_SUCCESS) {
+		signal_closed(effect, channel, BTD_L2CAP_CLOSED_REFUSED);
 		return 0;
 	}
 
 	/* Connected: our configuration, the MTU we take. */
 	channel->remote_cid = signal_le16(data);
-	channel->state = BTD_CHANNEL_CONFIGURING;
-	channel->identifier = signal_identifier(l2cap);
-	signal_put16(request, channel->remote_cid);
-	signal_put16(request + 2, 0U);
-	request[4] = SIGNAL_OPTION_MTU;
-	request[5] = 2U;
-	signal_put16(request + 6, BTD_L2CAP_MTU);
-	error = signal_put(out, SIGNAL_CONFIGURE_REQUEST, channel->identifier, request, sizeof(request));
+	error = signal_configure_send(l2cap, channel, out);
 
 	/* Succeeded, or the request did not fit. */
 	return error;
@@ -531,19 +779,24 @@ signal_connection_response(
 
 /*
  * Answers the other side's Configure Request: the MTU is taken when it is
- * at least BTD_L2CAP_MTU_MIN, an unknown option that is not a hint is
- * refused with its type.
+ * at least BTD_L2CAP_MTU_MIN; the Flush Timeout and the QoS are kept and
+ * taken (bluetoothd carries out neither, phase005 Q10), the basic mode of
+ * retransmission and the FCS are taken, another mode is unacceptable (the
+ * basic mode is offered); an unknown option that is not a hint is refused
+ * with its type.
  */
 static int
 signal_configure_request(
 	struct btd_l2cap *l2cap,
+	uint16_t handle,
 	uint8_t identifier,
 	const uint8_t *data,
 	size_t length,
-	struct signal_out *out)
+	struct signal_out *out,
+	struct btd_signal_effect *effect)
 {
 	struct btd_channel *channel;
-	uint8_t response[16];
+	uint8_t response[SIGNAL_CONFIGURE_ANSWER];
 	uint16_t result;
 	uint16_t flags;
 	uint16_t mtu;
@@ -559,14 +812,16 @@ signal_configure_request(
 		return error;
 	}
 
-	/* The channel being configured. */
+	/* The channel of this connection being configured. */
 	channel = signal_find(l2cap, signal_le16(data));
-	if (channel == NULL || channel->state != BTD_CHANNEL_CONFIGURING) {
+	if (channel == NULL ||
+	    channel->handle != handle ||
+	    channel->state != BTD_CHANNEL_CONFIGURING) {
 		error = signal_reject(identifier, out);
 		return error;
 	}
 
-	/* The options: [type][length][value]; the MTU is read, a hint is passed over, another is refused. */
+	/* The options, each [type][length][value], read in turn. */
 	result = 0U;
 	mtu = BTD_L2CAP_MTU;
 	answered = 6U;
@@ -574,10 +829,31 @@ signal_configure_request(
 	while (offset + 2U <= length) {
 		type = data[offset];
 		size = data[offset + 1U];
+
+		/* An option that runs past the request ends the reading. */
 		if (offset + 2U + size > length)
 			break;
+
+		/* Each option bluetoothd knows, at its own length; anything else that is not a hint is refused with its type. */
 		if (type == SIGNAL_OPTION_MTU && size == 2U) {
 			mtu = signal_le16(data + offset + 2U);
+		} else if (type == SIGNAL_OPTION_FLUSH && size == SIGNAL_FLUSH_LENGTH) {
+			channel->have_flush_timeout = 1;
+			channel->flush_timeout = signal_le16(data + offset + 2U);
+		} else if (type == SIGNAL_OPTION_QOS && size == SIGNAL_QOS_LENGTH) {
+			channel->have_qos = 1;
+		} else if (type == SIGNAL_OPTION_RFC && size == SIGNAL_RFC_LENGTH) {
+			/* Only the basic mode: another is answered with the basic mode's option. */
+			if (data[offset + 2U] != SIGNAL_RFC_BASIC && result == 0U) {
+				result = SIGNAL_CONFIG_UNACCEPTABLE;
+				memset(response + answered, 0, 2U + SIGNAL_RFC_LENGTH);
+				response[answered] = SIGNAL_OPTION_RFC;
+				response[answered + 1U] = SIGNAL_RFC_LENGTH;
+				response[answered + 2U] = SIGNAL_RFC_BASIC;
+				answered += 2U + SIGNAL_RFC_LENGTH;
+			}
+		} else if (type == SIGNAL_OPTION_FCS && size == SIGNAL_FCS_LENGTH) {
+			/* The FCS means nothing in the basic mode: taken. */
 		} else if ((type & SIGNAL_OPTION_HINT) == 0U && result == 0U) {
 			result = SIGNAL_CONFIG_UNKNOWN;
 			response[answered] = type;
@@ -607,15 +883,100 @@ signal_configure_request(
 
 	/* Their side is configured when accepted (a request with the continuation flag waits for its rest). */
 	flags = signal_le16(data + 2);
-	if (result == 0U && (flags & 0x0001U) == 0U) {
-		channel->remote_mtu = mtu;
-		channel->remote_done = 1;
-		if (channel->local_done)
-			channel->state = BTD_CHANNEL_OPEN;
+	if (result != 0U || (flags & 0x0001U) != 0U)
+		return 0;
+	channel->remote_mtu = mtu;
+	channel->remote_done = 1;
+
+	/* With ours done too, the channel is open. */
+	if (channel->local_done) {
+		channel->state = BTD_CHANNEL_OPEN;
+		signal_opened(effect, channel);
 	}
 
 	/* Succeeded: answered. */
 	return 0;
+}
+
+/* Sends our Configure Request for a channel that is now connected (the MTU we take); the channel is configuring. */
+static int
+signal_configure_send(
+	struct btd_l2cap *l2cap,
+	struct btd_channel *channel,
+	struct signal_out *out)
+{
+	uint8_t request[8];
+	int error;
+
+	/* Configuring, under a new identifier. */
+	channel->state = BTD_CHANNEL_CONFIGURING;
+	channel->identifier = signal_identifier(l2cap);
+
+	/* Their CID, no flags, the MTU option. */
+	signal_put16(request, channel->remote_cid);
+	signal_put16(request + 2, 0U);
+	request[4] = SIGNAL_OPTION_MTU;
+	request[5] = 2U;
+	signal_put16(request + 6, BTD_L2CAP_MTU);
+	error = signal_put(out, SIGNAL_CONFIGURE_REQUEST, channel->identifier, request, sizeof(request));
+
+	/* Succeeded, or the request did not fit. */
+	return error;
+}
+
+/* Finds a free slot of the table and its index, or NULL when the table is full. */
+static struct btd_channel *
+signal_free_slot(
+	struct btd_l2cap *l2cap,
+	unsigned *index)
+{
+	unsigned slot;
+
+	/* The first free slot. */
+	for (slot = 0U; slot < BTD_CHANNELS_MAX; slot++) {
+		if (l2cap->channels[slot].state == BTD_CHANNEL_FREE) {
+			*index = slot;
+			return &l2cap->channels[slot];
+		}
+	}
+
+	/* The table is full. */
+	return NULL;
+}
+
+/* Tells the frame's caller that a channel opened (as many as the effect holds). */
+static void
+signal_opened(
+	struct btd_signal_effect *effect,
+	const struct btd_channel *channel)
+{
+	/* Kept while there is room. */
+	if (effect->opened_count >= BTD_SIGNAL_CHANGES_MAX)
+		return;
+
+	/* Succeeded: its local CID. */
+	effect->opened[effect->opened_count] = channel->local_cid;
+	effect->opened_count++;
+}
+
+/* Frees a channel that closed and tells the frame's caller why (as many as the effect holds). */
+static void
+signal_closed(
+	struct btd_signal_effect *effect,
+	struct btd_channel *channel,
+	unsigned reason)
+{
+	/* The slot is free. */
+	channel->state = BTD_CHANNEL_FREE;
+
+	/* Kept while there is room. */
+	if (effect->closed_count >= BTD_SIGNAL_CHANGES_MAX)
+		return;
+
+	/* Succeeded: its local CID and why. */
+	effect->closed[effect->closed_count] = channel->local_cid;
+	effect->closed_reason[effect->closed_count] = reason;
+	effect->closed_count++;
 }
 
 /*

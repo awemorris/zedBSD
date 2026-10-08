@@ -10,12 +10,14 @@
  * one pairing at a time, BR/EDR's Secure Simple Pairing (the controller
  * does the cryptography; bluetoothd answers its events) and LE's Security
  * Manager (smp.c) carried over HCI and ACL, the keys checked and stored,
- * then the connection ended.  It is the session's handler: it gets the
- * connections' events and ACL packets from btd_session_input, and refuses
- * every pairing it did not start.
+ * then the connection ended.  It gets the connections' events and ACL
+ * packets of its device from the router (router.c, ws143-p005), which
+ * refuses every pairing it did not start.
  *
  * The daemon gives it two hooks: one to ask the agent (a number to confirm
- * or to show), one to hear the pairing's end (a PAIRED or ERROR line).
+ * or to show), one to hear the pairing's end (a PAIRED or ERROR line); and
+ * may give a third (ws143-p005, phase005 section 9.2) that takes over the
+ * connection of a pairing that succeeded instead of ending it.
  */
 
 #ifndef BLUETOOTHD_PAIR_H
@@ -55,6 +57,16 @@ typedef void (*btd_pair_ask_fn)(void *context, unsigned kind, uint32_t number);
 
 /* Tells the pairing's end: "PAIRED ..." or "ERROR WHY". */
 typedef void (*btd_pair_done_fn)(void *context, const char *answer);
+
+/*
+ * Takes over the connection of a pairing that succeeded (the HID host,
+ * phase005 section 9.2): the device's address and type as the connection
+ * knows them, the connection's handle, and the bond just stored (under the
+ * identity address for LE).  Returns 1 when it took the connection (the
+ * pairing forgets it and does not end it), 0 when the pairing ends it as
+ * before.
+ */
+typedef int (*btd_pair_handoff_fn)(void *context, const uint8_t *address, unsigned type, uint16_t handle, const struct btd_bond *bond);
 
 /*
  * The pairing of one device, and the hooks of the daemon.  It lives in the
@@ -117,6 +129,11 @@ struct btd_pair {
 	char answer[BTD_PAIR_ANSWER_MAX];
 	unsigned refused;
 	unsigned ignored;
+
+	/* The hook that may take over a paired connection (NULL: none), its context, and how many it took. */
+	btd_pair_handoff_fn handoff;
+	void *handoff_context;
+	unsigned handed;
 };
 
 void btd_pair_init(struct btd_pair *pair, struct btd_session *session, const char *keys_folder, btd_pair_ask_fn ask, btd_pair_done_fn done, void *context, btd_random_fn random, void *random_context);
@@ -128,5 +145,7 @@ uint64_t btd_pair_deadline(const struct btd_pair *pair);
 void btd_pair_stop(struct btd_pair *pair, const char *why);
 void btd_pair_lost(struct btd_pair *pair);
 int btd_pair_active(const struct btd_pair *pair);
+int btd_pair_owns(const struct btd_pair *pair, const uint8_t *address);
+void btd_pair_set_handoff(struct btd_pair *pair, btd_pair_handoff_fn handoff, void *context);
 
 #endif
