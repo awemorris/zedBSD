@@ -2867,6 +2867,90 @@ test_geometry_spill(void)
 	drv_i915_shader_binary_free(binary);
 }
 
+/*
+ * ws031-p024 increment 3: spilling mixed with a texture sample in a loop and
+ * a discard (plan/ws031/tests/p024/gen-spill.py).  Each shader keeps count
+ * values of the pixel live over a loop whose trip count differs from channel
+ * to channel and samples a texture in it, discards the channels that looped
+ * twice while the values are still live, then sums t[k] * t[(7k + 5) % count].
+ * spillbig needs more than 4 KiB of scratch a thread.
+ */
+#define P024_SHADERS "plan/ws031/tests/p024"
+
+static void
+test_p024_spill_mix(void)
+{
+	static const struct {
+		const char *file;
+		unsigned count;
+	} shaders[] = { { "spilltex.frag.spv", 96U }, { "spillbig.frag.spv", 224U } };
+	struct i915_shader_binary *binary;
+	struct eu_model *m;
+	float u[8], v[8], t[224], rgba[4], a, b, sum, want[4];
+	unsigned which, c, k, i, n, killed, scratch[2];
+
+	m = malloc(sizeof(*m));
+	assert(m != NULL);
+	for (which = 0U; which < 2U; which++) {
+		binary = compile_file(P024_SHADERS, shaders[which].file, I915_STAGE_FRAGMENT);
+		assert(binary->uses_kill == 1U && binary->sampler_count == 1U && binary->scratch_bytes != 0U);
+		scratch[which] = binary->scratch_bytes;
+
+		/* The pixel (x, y) of channel c: the input's two components are the barycentrics as given. */
+		for (c = 0U; c < 8U; c++) {
+			u[c] = 0.1f + 0.1f * (float)c;
+			v[c] = 0.9f - 0.05f * (float)c;
+		}
+		eu_model_init(m);
+		eu_model_fs_payload(m, binary, 0xFFU, u, v);
+		eu_model_fs_plane(m, binary, 0U, 0U, 1.0f, 0.0f, 0.0f);
+		eu_model_fs_plane(m, binary, 0U, 1U, 0.0f, 1.0f, 0.0f);
+		eu_model_scratch_writes = 0U;
+		eu_model_scratch_reads = 0U;
+		eu_model_run(m, binary);
+		assert(eu_model_scratch_writes > 0U && eu_model_scratch_reads > 0U);
+
+		/* Each channel against the shader evaluated here, in its order. */
+		killed = 0U;
+		for (c = 0U; c < 8U; c++) {
+			for (k = 0U; k < shaders[which].count; k++)
+				t[k] = u[c] * (float)(k + 1U) + v[c];
+			a = t[7];
+			b = t[50];
+			n = (unsigned)(u[c] * 8.0f) % 5U;
+			for (i = 0U; i < n; i++) {
+				eu_model_texture(0U, a * 0.125f, b * 0.0625f, rgba);
+				a = a * 0.5f + rgba[0];
+				b = b + rgba[3] - rgba[2] * 0.25f;
+			}
+			if (n == 2U) {
+				killed |= 1U << c;
+				continue;
+			}
+			sum = 0.0f;
+			for (k = 0U; k < shaders[which].count; k++)
+				sum += t[k] * t[(7U * k + 5U) % shaders[which].count];
+			want[0] = sum + a;
+			want[1] = a;
+			want[2] = b;
+			want[3] = (float)n;
+			for (k = 0U; k < 4U; k++) {
+				if (m->grf[COMPILE_MAX_GRF - 3U + k][c] != float_bits(want[k]))
+					fprintf(stderr, "%s channel %u component %u: got %.9g want %.9g\n", shaders[which].file, c, k,
+						(double)mget(m, COMPILE_MAX_GRF - 3U + k, c), (double)want[k]);
+				assert(m->grf[COMPILE_MAX_GRF - 3U + k][c] == float_bits(want[k]));
+			}
+		}
+		assert(killed == 0x04U);              /* x = 0.3 loops twice */
+		assert(m->written == (0xFFU & ~killed));
+		drv_i915_shader_binary_free(binary);
+	}
+	assert(scratch[1] > 4096U);
+	free(m);
+	printf("  ws031-p024 spill mix: a texture sampled in a divergent loop and a discard among spilled values, %u and %u bytes of scratch a thread\n",
+		scratch[0], scratch[1]);
+}
+
 int
 main(void)
 {
@@ -2891,6 +2975,7 @@ main(void)
 	test_geometry_reads();
 	test_geometry_emits();
 	test_geometry_spill();
+	test_p024_spill_mix();
 	assert(fixture_live == 0U);
 	printf("  scoreboard: %u kernels checked (ws075-p022)\n", eu_model_scoreboard_checks);
 	printf("  skippable regions and guards (ws075-p023): %u IFs run, %u jumped over\n", eu_model_ifs, eu_model_ifs_jumped);

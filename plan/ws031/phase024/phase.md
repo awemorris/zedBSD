@@ -4,7 +4,7 @@
 
 Phase ID: `ws031-p024`
 Parent: [WS031](../ws.md)
-Status: in-progress（2026-10-05 P1 generation18、q751。同日ユーザーの優先の変更「i915のSPIR-V lowringは、ほかに作業がないときに合間に取り組む優先度にしてください。」で増分 1 の途中で区切った。合間の仕事として再開する）
+Status: blocked（UAT 待ち）（2026-10-09 P1: 増分 1〜3 の host の分と T1-190b の実機の vke2（EDGE・KILLOOP・NOINPUT・UNDEF）は済み。残りは spill の組み合わせの vke2 の step で、実機の i915 が要る。下の「2026-10-09」）
 Phase disposition: normal
 Queue: q751（P1、2026-10-05。Q1 の承認「Plan approved under q751. Start with p024」）
 承認の元: 2026-10-05 ユーザー「GPU computeは言語側が完成しておらず、進められないんです。i915のSPIR-V lowringだけ進められますか？」（Q1 の中継）
@@ -116,3 +116,11 @@ draw.c は host の試験に入っていない（GPU に出すため）ので、
 ## T1-190b の結果（2026-10-05 Q1）
 
 5330 の passthrough（main fc2f8d9a）: `vke2: verdict PASS (21 of 21 steps passed)`（EDGE・KILLOOP・NOINPUT・UNDEF を含む）、GPU の hang 無し。UNDEF の実機の値（4 回の繰り返しで同じ）: operation 0 → 0x80000000、1 → 0x80000000、2 → 0xffffffff、3 → 0xffffffff、4 → 0x7fffffff、5 → 0x00000000、6 → 0xa99b44c0、7 → 0x02d53368（各 operation の意味は vke2 の UNDEF の表）。証拠 /tmp/claude-1000/t1-190b/。注: step と UNDEF の行は vkloop-hw.sh が 5330 から持ってくる serial を写した log にだけ出る（AGENTS.md の「serial の log で判定しない」との関係は Q1 がユーザーに確かめる）。
+
+## 2026-10-09 P1（合間の仕事、ベータ3）: 増分 3 の host の分
+
+- `plan/ws031/tests/p024/gen-spill.py` が spilltex.frag（96 の値）と spillbig.frag（224 の値）を作る（GLSL と glslc の .spv を tree に置く）。どちらも、値を生かしたまま channel ごとに回数の違う loop の中で texture を sample し（reply が spill の中に着く）、生きている間に discard し、最後に t[k] * t[(7k + 5) % N] を足す。
+- `i915-vk-compile-test.c` の `test_p024_spill_mix`: EU の model（fake の sampler・scratch）で 8 channel を動かし、C で同じ順に計算した値と bit で一致を見る。discard された channel は書かれない（x = 0.3 の channel）。spillbig は 1 thread 4 KiB を超える（16384 byte）。spilltex は 2048 byte。
+- VS と PS が同時に spill する pipeline（vio16.vert と spill.frag の scratch の欄）は pipe の host 試験に既にある。scratch の作成の失敗は 2026-10-05 の読みのとおり（draw.c は host 試験に入らない）。
+- 確認: `sh plan/ws031/tests/run-vk-host-tests.sh`（全部、ordinary と ASan・UBSan）PASS、`sh plan/ws031/tests/p024/run.sh` PASS。
+- 残り（blocked、UAT 待ち）: spill の組み合わせを実機の vke2 の step にすること（SPILLMIX など）。vke2 の組の kernel の余裕（2026-10-05 は 16300 KiB、上限 16384）と、実機の i915（QEMU に無い）が要る。ユーザーの規則（2026-10-08 夜）で blocked（UAT 待ち）にして先へ進む。
