@@ -7,7 +7,7 @@
 
 /*
  * One controller's session in bluetoothd (ws143-p003, ws143-p004): the H4
- * packets read and written on its node (/dev/btN, or a socket pair in the
+ * packets read and written on its node (/dev/bluetoothN, or a socket pair in the
  * host tests), one command at a time, the start (Intel's firmware load,
  * then the HCI core's set-up), the scan, and the ACL data path with the
  * controller's buffers counted (the BR/EDR pool and LE's).

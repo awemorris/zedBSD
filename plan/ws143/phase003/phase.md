@@ -18,7 +18,7 @@ Commands の記録（D5 の b1 が使えるか）。
 - 実機の load と scan（T1 の 5330 の passthrough、T1-378 と一緒）。失敗の後の USB の reset の振る舞いの確認（design §3 の最後）も実機。
 - 特権の分離（D16 a）・`_bluetooth` の account（D17）・socket の口の権限の細かい形（D8）は p004。p003 の bluetoothd は root で動き、
   変える操作（scan・電源）は root だけに許す（p004 で D8 の形にする）。
-- `/dev/system` の POWER（`sleep.end`）・USB の event による load のやり直し（design §5.3）は p004 以降。p003 は `/dev/btN` の ENODEV で
+- `/dev/system` の POWER（`sleep.end`）・USB の event による load のやり直し（design §5.3）は p004 以降。p003 は `/dev/bluetoothN` の ENODEV で
   閉じ、2 秒ごとに `/dev/bt*` を探し直す。
 
 ## 詳細設計
@@ -29,7 +29,7 @@ Commands の記録（D5 の b1 が使えるか）。
 | --- | --- | --- |
 | `hci.h`・`hci.c` | 純粋: HCI の command の組み立て、event の分解（Command Complete・Command Status・Inquiry Result・Inquiry Result with RSSI・Extended Inquiry Result・Inquiry Complete・LE Meta の Advertising Report）、EIR・AD の名前と種類（Flags・名前・Class of Device・Appearance）、Read Local Supported Commands の bit、device の表（address と型で 1 つ、名前は長い方・完全の方を残す、RSSI は最後の値） | する |
 | `intel.h`・`intel.c` | 純粋: Intel Read Version（0xFC05 0xFF）の TLV の分解、image の型（bootloader・operational）、firmware の file の名前 `ibt-%04x-%04x.sfi`・`.ddc`、.sfi の header の検査と Secure Send の断片の計画（design §3 の 3〜5）、boot の parameter、DDC の record の分割 | する |
-| `session.h`・`session.c` | controller の session: 1 つの fd（`/dev/btN`、試験では SOCK_SEQPACKET の socketpair）に H4 の packet を読み書きし、command を 1 つずつ（答えまで 2 秒）送る。初期化の列、Intel の load、scan の状態機械。system call は read・write・poll・ioctl だけ（ioctl は fd が `/dev/btN` の時だけ。試験では無い物として飛ばす） | する（偽の controller） |
+| `session.h`・`session.c` | controller の session: 1 つの fd（`/dev/bluetoothN`、試験では SOCK_SEQPACKET の socketpair）に H4 の packet を読み書きし、command を 1 つずつ（答えまで 2 秒）送る。初期化の列、Intel の load、scan の状態機械。system call は read・write・poll・ioctl だけ（ioctl は fd が `/dev/bluetoothN` の時だけ。試験では無い物として飛ばす） | する（偽の controller） |
 | `main.c` | daemon: `/dev/bt*` の発見と開け直し、socket `/run/bluetoothd.sock`、client の line の request、log（syslog と stderr） | しない（QEMU） |
 | `protocol.h` | socket の line の形（下の §4） | — |
 | `bluetoothd.service` | `type=daemon`、`command=/sbin/bluetoothd`、`after=syslogd`、`restart=on-failure`、`required=NO` | — |
@@ -122,7 +122,7 @@ command の窓が閉じている）の後は、次の command を Command Comple
 - answer:
   - `STATE <state> [reason]`（state: `none`（controller が無い）、`starting`、`ready`、`scanning`、`firmware-needed <file>`、`firmware-failed <理由>`、
     `unsupported <理由>`、`error <段>`）。
-  - `CONTROLLER node=/dev/bt0 vendor=1209 product=b7e5 name="…" address=00:11:22:33:44:55 hci=12 manufacturer=65535 le=1 p256=1 dhkey=1`。
+  - `CONTROLLER node=/dev/bluetooth0 vendor=1209 product=b7e5 name="…" address=00:11:22:33:44:55 hci=12 manufacturer=65535 le=1 p256=1 dhkey=1`。
   - `DEVICE address=… type=bredr|le-public|le-random rssi=-40 class=0x002540 appearance=0x03c1 name="…"`。名前と USB の product の文字列は、
     printable ASCII と正しい UTF-8（U+00A0 以上、overlong・surrogate・U+10FFFF 超を除く）以外の全ての byte（制御、DEL、C1、壊れた列、
     `"`、`\`）を `\xNN` にする（review S6。端末への escape の差し込みを防ぐ）。`bt` は escape の形のまま出す。
@@ -143,8 +143,8 @@ command の窓が閉じている）の後は、次の command を Command Comple
 `bt show`・`bt scan [SECONDS]`（既定 8）・`bt devices`。daemon の行をそのまま出し、最後に試験の行 `BT SHOW state=…`・`BT SCAN devices=N`。
 終了の値: 成功 0、`ERROR` 1、daemon が無い 2、使い方の誤り 64。
 
-daemon の node の選び方（review S10）: `bluetoothd -f /dev/btN` で指定、無ければ最小の番号で開けられる物。loopback 入りの image で
-5330 の実機（i02）を試す時は `-f /dev/bt1`。`bt show` に node を出す。別の process が開けている（EBUSY）時は log を 1 度だけ出す。
+daemon の node の選び方（review S10）: `bluetoothd -f /dev/bluetoothN` で指定、無ければ最小の番号で開けられる物。loopback 入りの image で
+5330 の実機（i02）を試す時は `-f /dev/bluetooth1`。`bt show` に node を出す。別の process が開けている（EBUSY）時は log を 1 度だけ出す。
 
 ### 6. loopback の controller の追加（`src/drivers/generic/bt-hci-loopback.c`、試験の kernel だけ）
 

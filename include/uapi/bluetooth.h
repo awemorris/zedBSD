@@ -8,7 +8,7 @@
  */
 
 /*
- * The Bluetooth controllers' HCI: /dev/btN (ws143-p002, the user's
+ * The Bluetooth controllers' HCI: /dev/bluetoothN (ws143-p002, the user's
  * approval D2 of 2026-10-05).
  *
  * The kernel only carries the HCI packets between the controller and one

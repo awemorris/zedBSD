@@ -54,8 +54,8 @@
 #ifdef BT_TEST_LOOPBACK
 #include <drivers/generic/bt-hci.h>
 #endif
-#ifdef CONFIG_HID_HOST
-#include <drivers/generic/hid-host.h>
+#ifdef CONFIG_INPUT_BRIDGE
+#include <drivers/generic/input-bridge.h>
 #endif
 
 #include <uapi/errno.h>
@@ -379,11 +379,11 @@ kern_vfs_init(
 
 	drv_input_core_init();
 
-#ifdef CONFIG_HID_HOST
-	/* Publishes /dev/hid-host, where the Bluetooth daemon makes its HID devices (ws143-p005). */
-	error = drv_hid_host_register();
+#ifdef CONFIG_INPUT_BRIDGE
+	/* Publishes /dev/input/bridge, where the Bluetooth daemon makes its HID devices (ws143-p005). */
+	error = drv_input_bridge_register();
 	if (error != 0) {
-		error = vfs_fail("register hid-host", error);
+		error = vfs_fail("register input bridge", error);
 		return error;
 	}
 #endif

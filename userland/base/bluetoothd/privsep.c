@@ -418,7 +418,7 @@ privsep_answer(
 
 /*
  * Opens the controller's node: the one given at the start, or the lowest of
- * /dev/bt0 to /dev/bt15 that opens.  Returns 0 with the path and the
+ * /dev/bluetooth0 to /dev/bluetooth15 that opens.  Returns 0 with the path and the
  * descriptor, EBUSY when a node is another program's, or ENOENT.
  */
 static int
@@ -443,7 +443,7 @@ privsep_open_node(
 	/* The lowest that opens; a busy one is remembered. */
 	error = ENOENT;
 	for (index = 0U; index < PRIVSEP_NODES; index++) {
-		(void)snprintf(path, size, "/dev/bt%u", index);
+		(void)snprintf(path, size, "/dev/bluetooth%u", index);
 		*descriptor = open(path, O_RDWR | O_CLOEXEC);
 		if (*descriptor >= 0)
 			return 0;

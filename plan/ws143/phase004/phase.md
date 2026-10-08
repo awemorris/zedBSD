@@ -67,13 +67,13 @@ SMP の PDU の値（鍵、nonce、confirm、公開鍵の X・Y）は little-end
   **`socketpair(AF_UNIX, SOCK_DGRAM)`**（zedBSD の kernel に SOCK_SEQPACKET は無い。datagram は 1 送り 1 受けで境界を保ち、SCM_RIGHTS も
   運ぶ。review B2）を作り、fork する。子は `setgroups(0)`・`setgid(80)`・`setuid(80)` の後に `setuid(0)` が失敗すること（戻れない）を
   確かめて、listener と socketpair の片方だけを持って動く。親は他を持たない小さな loop: 子の datagram `OPEN`（最小の番号で開く物）か
-  `OPEN /dev/btN`（`/dev/bt` と数字 1〜2 桁だけ）に、`O_RDWR|O_CLOEXEC` で開いて答える: `OK /dev/btN` と SCM_RIGHTS の fd、または
+  `OPEN /dev/bluetoothN`（`/dev/bluetooth` と数字 1〜2 桁だけ）に、`O_RDWR|O_CLOEXEC` で開いて答える: `OK /dev/bluetoothN` と SCM_RIGHTS の fd、または
   `ERR <errno>`。親は送った fd の写しを必ず close する（node は同時に 1 つしか開けない）。node の path は親が自分の argv（`-f`）から取り、
   子からは受けない（review-2 M-i）。
 - 寿命（review-2 BL1）: datagram の recv は相手の close で 0 を返さない（unix-socket.c の datagram の待ち）ので、親は 1 秒ごとの poll の間に
   `waitpid(WNOHANG)` で子の終わりを見て、子の終了の値で終わる。SIGTERM・SIGINT は SA_RESTART 無しの handler で受け、子に SIGTERM を送り、
   5 秒待って（来なければ SIGKILL）終わる。子は親の死を liveness の STREAM の socketpair の EOF（親は書かない）で知り、終わる。
-- 子の `/dev/btN` の探し直し（p003 の `btd_open`）は親への `OPEN` に置き換える（`-f` の path も親に渡す）。
+- 子の `/dev/bluetoothN` の探し直し（p003 の `btd_open`）は親への `OPEN` に置き換える（`-f` の path も親に渡す）。
 - **account が無い時（Q4、ユーザーの決定待ち、review B6）**: 扱いは 1 つの関数 `btd_privsep_no_account()` に閉じ、案 (a)〜(c) のどれでも
   そこだけを差し替える形にする。決定までの暫定は「起動を拒む」（log `no _bluetooth account; not starting`、終了の値 0。非 0 は init の
   `restart=on-failure` が 5 回起こし直すので、review-2 S-j）。理由: bluetoothd は既定の image にまだ入らず（p003 の P4）、既存の install で
@@ -339,7 +339,7 @@ T1-405（tree ecda54bc2、build-bt-image.sh、p002 → p003 → p004、新しい
 
 i03 の直し:
 - p003 の数え方: 子の起動の log `BLUETOOTHD READY state=ready uid=80` も `state=ready ` に当たって 3 になった（試験の前提のずれ）。数えるのを
-  `: /dev/btN state=ready ` の行（start の結果の行）に限った（T1-405 の log では 2）。
+  `: /dev/bluetoothN state=ready ` の行（start の結果の行）に限った（T1-405 の log では 2）。
 - privsep の親: 子が死ぬと親の datagram の socket は poll で読める（相手の close で read_shutdown）のに、datagram の recv は EOF を返さずに
   待ち続ける（unix-socket.c、review-2 BL1 の指摘の続き）。親が `privsep_answer` の recv で止まり、waitpid に戻らなかった（子は zombie で残り
   数が 2）。recv を `MSG_DONTWAIT` にした（読める物が無ければすぐ戻り、次の round の waitpid が子の終わりを見る）。試験に kill の後の
@@ -363,7 +363,7 @@ i01 で commit した物: `userland/base/bluetoothd/{crypto,acl,l2cap,smp,keys}.
 2. session の packet の queue（B3）と初期化（B1・B5）、その host の試験。
 3. `pair.[ch]`: HCI の接続（BR/EDR・LE）、BR/EDR の SSP（IO Capability・User Confirmation・Link Key Request/Notification・Authentication Complete・
    暗号化・鍵の長さの検査の後の保存）、LE の SMP の orchestration（smp.c の action を HCI・ACL へ）、ACL の送りの分割と credit（B5）。
-4. privsep（親が `/dev/btN` を開いて SCM_RIGHTS、子は `_bluetooth`、SOCK_DGRAM）、`userland/base/etc/passwd`・`group` に `_bluetooth`（uid 80）。
+4. privsep（親が `/dev/bluetoothN` を開いて SCM_RIGHTS、子は `_bluetooth`、SOCK_DGRAM）、`userland/base/etc/passwd`・`group` に `_bluetooth`（uid 80）。
 5. main.c の口: PAIR・AGENT・FORGET・BONDS、D8 の判定、poll の timeout。`bt pair/forget/bonds/agent`。Makefile の BLUETOOTHD_SOURCES に新しい file。
 6. loopback（§8 と S13）、`plan/ws143/tests/bt-pair-p004.sh`、build（`plan/ws143/tests/config-amd64-bt.mk`）、T1 への依頼。
 

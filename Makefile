@@ -235,8 +235,8 @@ CONFIG_PCAT_SERIAL_MIRROR ?= n
 CONFIG_INPUT_TEST_INJECT ?= n
 CONFIG_SECURITY_KEY_TEST_LOOPBACK ?= n
 CONFIG_BT_TEST_LOOPBACK ?= n
-# /dev/hid-host, the Bluetooth daemon's HID input devices (ws143-p005): amd64 only; pcat and arm64 do not build it.
-CONFIG_HID_HOST ?= $(if $(filter amd64,$(ZEDBSD_PLATFORM)),y,n)
+# /dev/input/bridge, the Bluetooth daemon's HID input devices (ws143-p005): amd64 only; pcat and arm64 do not build it.
+CONFIG_INPUT_BRIDGE ?= $(if $(filter amd64,$(ZEDBSD_PLATFORM)),y,n)
 CONFIG_KERNEL_USB_HID_CHECKPOINT ?= n
 CONFIG_BUF_CACHE_KIB ?= 0
 CONFIG_GPU_JOB_RESERVATION_MS ?= 10000
@@ -604,8 +604,8 @@ endif
 ifeq ($(CONFIG_BT_TEST_LOOPBACK),y)
 ZEDBSD_CONFIG_CPPFLAGS += -DBT_TEST_LOOPBACK
 endif
-ifeq ($(CONFIG_HID_HOST),y)
-ZEDBSD_CONFIG_CPPFLAGS += -DCONFIG_HID_HOST
+ifeq ($(CONFIG_INPUT_BRIDGE),y)
+ZEDBSD_CONFIG_CPPFLAGS += -DCONFIG_INPUT_BRIDGE
 endif
 # Private test builds may add compile-time fault injection without replacing
 # the configured feature macros above. Keep these flags last so a disposable

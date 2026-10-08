@@ -6,28 +6,28 @@
  */
 
 /*
- * The hid-host probe (ws143-p005): tries /dev/hid-host without the
+ * The input bridge probe (ws143-p005): tries /dev/input/bridge without the
  * Bluetooth daemon.
  *
- *   hid-host-probe type [-w MS] [-h MS]
+ *   input-bridge-probe type [-w MS] [-h MS]
  *       makes a keyboard (a boot keyboard's descriptor, the Bluetooth bus,
- *       "Probe Keyboard"), prints "HIDHOST device event=N touch=M
+ *       "Probe Keyboard"), prints "BRIDGE device event=N touch=M
  *       flags=F report_max=R", waits -w MS (2000) for a reader, presses and
  *       releases "a", presses "b", waits -h MS (1000) and closes the file
  *       with "b" still held: the input layer releases it.
- *   hid-host-probe misuse
+ *   input-bridge-probe misuse
  *       tries the refusals: a report before the setup, a malformed setup
  *       and a declaration after it on the same open, a descriptor of 4097
  *       bytes, a FIDO descriptor (ENXIO), a report shorter than declared,
  *       a longer one (taken), one of 513 bytes, a read (EAGAIN), poll
- *       (writable only), HID_HOST_GET_DEVICE before and after the setup,
- *       and HID_HOST_OPENS_MAX keyboards at once with one more open
+ *       (writable only), INPUT_BRIDGE_GET_DEVICE before and after the setup,
+ *       and INPUT_BRIDGE_OPENS_MAX keyboards at once with one more open
  *       refused (EBUSY).
- *   hid-host-probe open
+ *   input-bridge-probe open
  *       only opens the node (for a user that must be refused).
  *
- * Each line is "HIDHOST ..."; the last is "HIDHOST PASS" (status 0) or
- * "HIDHOST FAIL step=<what> error=<errno>" (status 1).
+ * Each line is "BRIDGE ..."; the last is "BRIDGE PASS" (status 0) or
+ * "BRIDGE FAIL step=<what> error=<errno>" (status 1).
  */
 
 #include <errno.h>
@@ -39,11 +39,11 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
-#include <uapi/hid-host.h>
+#include <uapi/input-bridge.h>
 #include <uapi/input.h>
 
 /* The node. */
-#define PROBE_NODE		"/dev/hid-host"
+#define PROBE_NODE		"/dev/input/bridge"
 
 /* A boot keyboard's report: modifiers, a reserved byte, six key slots. */
 #define PROBE_REPORT_SIZE	8U
@@ -72,10 +72,10 @@ static const uint8_t probe_fido[] = {
 static int probe_type(int argc, char **argv);
 static int probe_misuse(void);
 static int probe_only_open(void);
-static void probe_setup(struct hid_host_setup *setup, const uint8_t *descriptor, size_t size, unsigned number);
+static void probe_setup(struct input_bridge_setup *setup, const uint8_t *descriptor, size_t size, unsigned number);
 static int probe_declare(int descriptor, unsigned number);
 static int probe_key(int descriptor, uint8_t usage);
-static int probe_device(int descriptor, struct hid_host_device *device);
+static int probe_device(int descriptor, struct input_bridge_device *device);
 static int probe_expect_write(int descriptor, const void *bytes, size_t size, int wanted, const char *step);
 static int probe_fail(const char *step, int error);
 
@@ -95,7 +95,7 @@ main(
 
 	/* The mode. */
 	if (argc < 2) {
-		fprintf(stderr, "usage: hid-host-probe type [-w MS] [-h MS] | misuse | open\n");
+		fprintf(stderr, "usage: input-bridge-probe type [-w MS] [-h MS] | misuse | open\n");
 		return 2;
 	}
 
@@ -121,7 +121,7 @@ main(
 	}
 
 	/* Neither. */
-	fprintf(stderr, "hid-host-probe: unknown mode %s\n", argv[1]);
+	fprintf(stderr, "input-bridge-probe: unknown mode %s\n", argv[1]);
 	return 2;
 }
 
@@ -131,7 +131,7 @@ probe_type(
 	int argc,
 	char **argv)
 {
-	struct hid_host_device device;
+	struct input_bridge_device device;
 	long wait_ms;
 	long hold_ms;
 	int descriptor;
@@ -171,7 +171,7 @@ probe_type(
 	error = probe_device(descriptor, &device);
 	if (error != 0)
 		return probe_fail("get-device", error);
-	printf("HIDHOST device event=%d touch=%d flags=%u report_max=%u malformed=%u\n",
+	printf("BRIDGE device event=%d touch=%d flags=%u report_max=%u malformed=%u\n",
 	       (int)device.event,
 	       (int)device.touch_event,
 	       (unsigned)device.flags,
@@ -191,26 +191,26 @@ probe_type(
 	error = probe_key(descriptor, PROBE_USAGE_B);
 	if (error != 0)
 		return probe_fail("b-down", error);
-	printf("HIDHOST typed a, holding b\n");
+	printf("BRIDGE typed a, holding b\n");
 
 	/* "b" still held when the file closes. */
 	usleep((useconds_t)hold_ms * 1000U);
 	(void)close(descriptor);
-	printf("HIDHOST closed\n");
-	printf("HIDHOST PASS\n");
+	printf("BRIDGE closed\n");
+	printf("BRIDGE PASS\n");
 	return 0;
 }
 
-/* Tries every refusal of the node; each must answer as <uapi/hid-host.h> says. */
+/* Tries every refusal of the node; each must answer as <uapi/input-bridge.h> says. */
 static int
 probe_misuse(
 	void)
 {
-	static struct hid_host_setup setup;
-	static uint8_t report[HID_HOST_REPORT_MAX + 1U];
-	struct hid_host_device device;
+	static struct input_bridge_setup setup;
+	static uint8_t report[INPUT_BRIDGE_REPORT_MAX + 1U];
+	struct input_bridge_device device;
 	struct pollfd entry;
-	int descriptors[HID_HOST_OPENS_MAX];
+	int descriptors[INPUT_BRIDGE_OPENS_MAX];
 	unsigned index;
 	ssize_t count;
 	int descriptor;
@@ -238,7 +238,7 @@ probe_misuse(
 	if (error != 0)
 		return 1;
 	probe_setup(&setup, probe_keyboard, sizeof(probe_keyboard), 0U);
-	setup.descriptor_size = HID_HOST_DESCRIPTOR_MAX + 1U;
+	setup.descriptor_size = INPUT_BRIDGE_DESCRIPTOR_MAX + 1U;
 	error = probe_expect_write(descriptor, &setup, sizeof(setup), EINVAL, "descriptor-4097");
 	if (error != 0)
 		return 1;
@@ -257,7 +257,7 @@ probe_misuse(
 	error = probe_device(descriptor, &device);
 	if (error != 0 || device.event < 0 || device.report_max != PROBE_REPORT_SIZE || device.flags != 0U)
 		return probe_fail("get-device-after", error);
-	printf("HIDHOST ok declared event=%d report_max=%u\n", (int)device.event, (unsigned)device.report_max);
+	printf("BRIDGE ok declared event=%d report_max=%u\n", (int)device.event, (unsigned)device.report_max);
 
 	/* Reports: short refused, long taken, too long refused. */
 	error = probe_expect_write(descriptor, report, PROBE_REPORT_SIZE - 1U, EINVAL, "report-short");
@@ -266,7 +266,7 @@ probe_misuse(
 	error = probe_expect_write(descriptor, report, PROBE_REPORT_SIZE + 1U, 0, "report-long");
 	if (error != 0)
 		return 1;
-	error = probe_expect_write(descriptor, report, HID_HOST_REPORT_MAX + 1U, EINVAL, "report-513");
+	error = probe_expect_write(descriptor, report, INPUT_BRIDGE_REPORT_MAX + 1U, EINVAL, "report-513");
 	if (error != 0)
 		return 1;
 
@@ -274,18 +274,18 @@ probe_misuse(
 	count = read(descriptor, report, sizeof(report));
 	if (count >= 0 || errno != EAGAIN)
 		return probe_fail("read", errno);
-	printf("HIDHOST ok read EAGAIN\n");
+	printf("BRIDGE ok read EAGAIN\n");
 	entry.fd = descriptor;
 	entry.events = POLLIN | POLLOUT;
 	entry.revents = 0;
 	error = poll(&entry, 1, 0);
 	if (error != 1 || entry.revents != POLLOUT)
 		return probe_fail("poll", errno);
-	printf("HIDHOST ok poll POLLOUT\n");
+	printf("BRIDGE ok poll POLLOUT\n");
 	(void)close(descriptor);
 
-	/* HID_HOST_OPENS_MAX keyboards at once, and one open more refused. */
-	for (index = 0; index < HID_HOST_OPENS_MAX; index++) {
+	/* INPUT_BRIDGE_OPENS_MAX keyboards at once, and one open more refused. */
+	for (index = 0; index < INPUT_BRIDGE_OPENS_MAX; index++) {
 		descriptors[index] = open(PROBE_NODE, O_RDWR);
 		if (descriptors[index] < 0)
 			return probe_fail("open-many", errno);
@@ -295,16 +295,16 @@ probe_misuse(
 	}
 
 	/* All made; one open more is refused. */
-	printf("HIDHOST ok %u keyboards\n", HID_HOST_OPENS_MAX);
+	printf("BRIDGE ok %u keyboards\n", INPUT_BRIDGE_OPENS_MAX);
 	extra = open(PROBE_NODE, O_RDWR);
 	if (extra >= 0 || errno != EBUSY)
 		return probe_fail("open-one-more", errno);
-	printf("HIDHOST ok one more open EBUSY\n");
-	for (index = 0; index < HID_HOST_OPENS_MAX; index++)
+	printf("BRIDGE ok one more open EBUSY\n");
+	for (index = 0; index < INPUT_BRIDGE_OPENS_MAX; index++)
 		(void)close(descriptors[index]);
 
 	/* Succeeded: every refusal answered as it should. */
-	printf("HIDHOST PASS\n");
+	printf("BRIDGE PASS\n");
 	return 0;
 }
 
@@ -322,22 +322,22 @@ probe_only_open(
 	(void)close(descriptor);
 
 	/* Succeeded: the node was opened. */
-	printf("HIDHOST PASS\n");
+	printf("BRIDGE PASS\n");
 	return 0;
 }
 
 /* Fills a setup: the Bluetooth bus, a probe's names (numbered when number is not 0), and a descriptor. */
 static void
 probe_setup(
-	struct hid_host_setup *setup,
+	struct input_bridge_setup *setup,
 	const uint8_t *descriptor,
 	size_t size,
 	unsigned number)
 {
 	/* The form, the bus and the vendor's numbers. */
 	memset(setup, 0, sizeof(*setup));
-	setup->magic = HID_HOST_MAGIC;
-	setup->version = HID_HOST_VERSION;
+	setup->magic = INPUT_BRIDGE_MAGIC;
+	setup->version = INPUT_BRIDGE_VERSION;
 	setup->bus = BUS_BLUETOOTH;
 	setup->vendor = 0x1234;
 	setup->product = 0x5678;
@@ -362,7 +362,7 @@ probe_declare(
 	int descriptor,
 	unsigned number)
 {
-	static struct hid_host_setup setup;
+	static struct input_bridge_setup setup;
 	ssize_t written;
 
 	/* The setup, in one write. */
@@ -403,13 +403,13 @@ probe_key(
 static int
 probe_device(
 	int descriptor,
-	struct hid_host_device *device)
+	struct input_bridge_device *device)
 {
 	int error;
 
-	/* HID_HOST_GET_DEVICE. */
+	/* INPUT_BRIDGE_GET_DEVICE. */
 	memset(device, 0, sizeof(*device));
-	error = ioctl(descriptor, HID_HOST_GET_DEVICE, device);
+	error = ioctl(descriptor, INPUT_BRIDGE_GET_DEVICE, device);
 	if (error != 0)
 		return errno;
 
@@ -447,7 +447,7 @@ probe_expect_write(
 		}
 
 		/* Taken whole. */
-		printf("HIDHOST ok %s taken\n", step);
+		printf("BRIDGE ok %s taken\n", step);
 		return 0;
 	}
 
@@ -458,7 +458,7 @@ probe_expect_write(
 	}
 
 	/* Succeeded: refused as it should be. */
-	printf("HIDHOST ok %s errno=%d\n", step, error);
+	printf("BRIDGE ok %s errno=%d\n", step, error);
 	return 0;
 }
 
@@ -469,6 +469,6 @@ probe_fail(
 	int error)
 {
 	/* The last line. */
-	printf("HIDHOST FAIL step=%s error=%d\n", step, error);
+	printf("BRIDGE FAIL step=%s error=%d\n", step, error);
 	return 1;
 }

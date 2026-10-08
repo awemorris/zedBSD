@@ -28,7 +28,7 @@ device（5330 の AX211 の Bluetooth、USB 8087:0033）、firmware、HCI の tr
 ### 2026-10-05 q752-i01: design.md 第 1 版と design-reviewer（中断）
 
 design.md 第 1 版を書き、design-reviewer（agent afdfd376fe101aed5）の review を受けた: blocker 3（F1: Intel の bootloader は
-Secure Send を bulk OUT で送り返事が bulk IN に来るので `/dev/btN` の型の固定の形では load できない、F2: BR/EDR の SSP の暗号は
+Secure Send を bulk OUT で送り返事が bulk IN に来るので `/dev/bluetoothN` の型の固定の形では load できない、F2: BR/EDR の SSP の暗号は
 controller が行い host は要らない・LE の P-256 は controller の HCI_LE_Generate_DHKey で可・既存の wlan-crypto の AES・D5 の OpenSSL は
 master-design-policy §2.1 の例外、F3: pairing の許可の模型と鍵の注入の防御が無い）、major 10、minor 15、加えて §9 に無い判断 D8〜D16。
 全文は agent の報告（Q1 にも要約を送る）。2026-10-05 Q1 の URGENT（BUG-195）で中断。

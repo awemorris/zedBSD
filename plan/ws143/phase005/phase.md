@@ -1,6 +1,6 @@
 <!-- awesome-plan project=zedbsd record=ws143p005 -->
 
-# ws143-p005: HID host（`/dev/hid-host`・共有の HID glue・SDP・HIDP・GATT/HOGP・再接続）
+# ws143-p005: HID host（`/dev/input/bridge`・共有の HID glue・SDP・HIDP・GATT/HOGP・再接続）
 
 Phase ID: `ws143-p005`
 Parent: [WS143](../ws.md)
@@ -10,15 +10,15 @@ Queue: 設計（P2、2026-10-08）→ q888（P2、2026-10-08、承認済み）: 
 
 ## 範囲
 
-[design.md](../design.md) §5.2（`/dev/hid-host`、D3「形を承認し struct は p005 で review」）、§6.1 の SDP・GATT・HID host、§6.3 の「忘れる」の Virtual Cable Unplug、§6.4（再接続と切断）、§10.1 の p005 の行（usb-hid の glue の共有の module への refactor と USB の回帰、`/dev/hid-host`、hid-report.c の fuzz、SDP・GATT client、HID host（BR/EDR と HOGP）、再接続、切断で key を離す）。p004 の bluetoothd（session・pair・l2cap・smp・keys・privsep・口）の上に足す。
+[design.md](../design.md) §5.2（`/dev/input/bridge`、D3「形を承認し struct は p005 で review」）、§6.1 の SDP・GATT・HID host、§6.3 の「忘れる」の Virtual Cable Unplug、§6.4（再接続と切断）、§10.1 の p005 の行（usb-hid の glue の共有の module への refactor と USB の回帰、`/dev/input/bridge`、hid-report.c の fuzz、SDP・GATT client、HID host（BR/EDR と HOGP）、再接続、切断で key を離す）。p004 の bluetoothd（session・pair・l2cap・smp・keys・privsep・口）の上に足す。
 
 Q1 の条件（2026-10-08）: 「HID は既存の usb-hid・hidraw・evdev の経路（WS161 の hidraw）と矛盾しない形で、入力は compositor の evdev に届くこと」。この設計は、Bluetooth の HID の入力を **既存の kernel の HID の層（hid-report.c の parser、hid-touch.c・hid-digitizer.c の状態機械、input.c の evdev）に流し、`/dev/input/eventN` として compositor が USB の device と同じ道で見つける**形にする（§「事実」の 7〜9 行）。**p005 で確かめられるのは kernel の evdev の node まで**（root の `evdev-probe`）: login の後に現れた node を seat の人（compositor）に渡す sessiond の仕事は未実装で、USB の hotplug も同じ（事実 33、review S13、§Q23）。
 
 ## 範囲の外（理由と行き先）
 
-- **出力の report（キーボードの LED、HOGP の Output Report・Boot Output）**: kernel に出力の経路が無い（`include/kern/input-device.h` 64〜84 行の `input_device_info` に出力の callback は無く、hid-report.h に encoder も無い。design §5.2 [F6, N16]）。`/dev/hid-host` の read は EAGAIN、poll は POLLIN を言わない。evdev の EV_LED から作る経路は後の Phase（Future Work に登録を Q1 に依頼）。
-- **i2c-hid の共有 glue への乗せ替え**: §「判断の記録」Q1。i2c-hid は touch の device しか出さず（`src/drivers/i2c/i2c-hid.c` 1019〜1030 行: touch が無ければ ENODEV、1330〜1370 行: touch の report だけ translate）、key の集約や pen を使わない。乗せ替えは 5330 の touchpad（実機だけで確かめられる）の回帰の危険があり、Bluetooth には益が無いので p005 ではしない。**design.md §5.2 の「USB・I2C・hid-host が共有する module」の文言と違う**ので、ユーザーの確認を求める（Q1）。
-- **hidraw への Bluetooth の HID の公開**: §Q3。`/dev/input/hidrawN` は input でない raw の interface（FIDO）のための口で（`include/uapi/hidraw.h` 92〜95 行、`usb-hid.c` 689〜703 行は top の usage が FIDO の時だけ raw）、Bluetooth のキーボード・マウスは evdev へ流す。top の usage が FIDO の descriptor を `/dev/hid-host` に書いたら ENXIO で断る（review M2 で EOPNOTSUPP から変えた。Bluetooth の FIDO は WS161 の範囲でも無い）。
+- **出力の report（キーボードの LED、HOGP の Output Report・Boot Output）**: kernel に出力の経路が無い（`include/kern/input-device.h` 64〜84 行の `input_device_info` に出力の callback は無く、hid-report.h に encoder も無い。design §5.2 [F6, N16]）。`/dev/input/bridge` の read は EAGAIN、poll は POLLIN を言わない。evdev の EV_LED から作る経路は後の Phase（Future Work に登録を Q1 に依頼）。
+- **i2c-hid の共有 glue への乗せ替え**: §「判断の記録」Q1。i2c-hid は touch の device しか出さず（`src/drivers/i2c/i2c-hid.c` 1019〜1030 行: touch が無ければ ENODEV、1330〜1370 行: touch の report だけ translate）、key の集約や pen を使わない。乗せ替えは 5330 の touchpad（実機だけで確かめられる）の回帰の危険があり、Bluetooth には益が無いので p005 ではしない。**design.md §5.2 の「USB・I2C・input bridge が共有する module」の文言と違う**ので、ユーザーの確認を求める（Q1）。
+- **hidraw への Bluetooth の HID の公開**: §Q3。`/dev/input/hidrawN` は input でない raw の interface（FIDO）のための口で（`include/uapi/hidraw.h` 92〜95 行、`usb-hid.c` 689〜703 行は top の usage が FIDO の時だけ raw）、Bluetooth のキーボード・マウスは evdev へ流す。top の usage が FIDO の descriptor を `/dev/input/bridge` に書いたら ENXIO で断る（review M2 で EOPNOTSUPP から変えた。Bluetooth の FIDO は WS161 の範囲でも無い）。
 - **A2DP・PAN・SCO、LE Audio**: design §7（別の WS、D1）。
 - **desktop（Settings・system bar・pairing の窓・backend の口の `SUBSCRIBE` の event）**: p006。この Phase は socket の request（CONNECT・DISCONNECT・STATUS）と CLI `bt` まで。p006 が要る状態の変化の通知（接続・切断・電池）は、口の行の形をここで決めておき（§5）、SUBSCRIBE の配りは p006 で足す。
 - **PIN の legacy pairing、`PASSKEY?`（こちらが打つ）、KeyboardDisplay の agent**: p004 の Q2・Q6 のまま（p006 の窓の後）。
@@ -49,7 +49,7 @@ Q1 の条件（2026-10-08）: 「HID は既存の usb-hid・hidraw・evdev の�
 | 14 | pair.c は **相手からの Connection Request を全部 Reject**（0x040A、理由 0x0F）、ACL は自分の handle 以外を `ignored`、Link Key Request は自分の address の時だけ答える。接続は `btd_pair_start`（LE Create Connection の parameter 254〜272 行、Create Connection 274〜286 行）。PAIR は接続・pairing・切断で終わる（Q5） | `userland/base/bluetoothd/pair.c` 538〜545、627〜676、191〜298、1487〜1519 行、[phase004](../phase004/phase.md) 判断 Q5 |
 | 15 | l2cap.c は **相手からの Connection Request を PSM not supported で断り**、Configure Request の **hint でない知らない option（Flush Timeout 0x02・QoS 0x03・RFC 0x04 を含む）を Unknown option で断る**。channel の表は 16（`BTD_CHANNELS_MAX`）、MTU は 672、最小 48。表 `struct btd_l2cap` は持ち主ごとで、channel ごとに handle を持ち、`btd_l2cap_drop(handle)` で link の channel を捨てる。**pair は自分の `btd_l2cap` と `btd_reassembly` を持ち、pairing ごとに init し直す**。`struct btd_signal_effect` は今 `update`（LE の parameter）と `information` だけ | `userland/base/bluetoothd/l2cap.c` 400〜411、569〜583 行、`l2cap.h` 32〜36、51〜74、82〜91 行、`pair.h` 113〜114 行、`pair.c` 181・230 行 |
 | 16 | 口: client は 8（`BTD_CLIENTS_MAX`）、request は 1 行（`BTD_LINE_MAX` 512）、`YES`/`NO`・SHOW・DEVICES・BONDS・AGENT・SCAN・PAIR・FORGET。D8 の判定は `btd_permitted`。PAIR の終わりは `btd_paired`（pair.c の callback）が client に `PAIRED …` と `DONE` を書く。**bluetoothd は今 `/dev/system` を開いていない**（`sleep.end` の購読は p003 が「p004 以降」とし、p004 もしていない） | `userland/base/bluetoothd/main.c` 71、694〜773、1214〜1232、1241〜1294 行、`protocol.h` 35〜36 行、`userland/base/bt/main.c` 8〜30 行、[phase003](../phase003/phase.md) 21 行 |
-| 17 | privsep: 親（root）は datagram の `OPEN`／`OPEN /dev/btN` に fd（SCM_RIGHTS）で答え、`OPEN` 以外は知らない。子は `_bluetooth`（80）。bond の file は `/var/db/bluetooth/<controller>/<address>-<型>` の `key=value`（type・name・link_key・link_key_type・ltk・ediv・rand・key_size・authenticated・secure・legacy・irk・identity・identity_type。知らない key は読み飛ばす）。`struct btd_bond` は `name[BTD_NAME_MAX]`（249）・`key_size`・`legacy`・`irk` を持つ | `privsep.c` 374〜399 行、`privsep.h` 23 行、`keys.c` 11〜13、318〜364、383、590〜591 行、`keys.h` 37〜65 行、`hci.h` 29 行、[phase004](../phase004/phase.md) §3・§4 |
+| 17 | privsep: 親（root）は datagram の `OPEN`／`OPEN /dev/bluetoothN` に fd（SCM_RIGHTS）で答え、`OPEN` 以外は知らない。子は `_bluetooth`（80）。bond の file は `/var/db/bluetooth/<controller>/<address>-<型>` の `key=value`（type・name・link_key・link_key_type・ltk・ediv・rand・key_size・authenticated・secure・legacy・irk・identity・identity_type。知らない key は読み飛ばす）。`struct btd_bond` は `name[BTD_NAME_MAX]`（249）・`key_size`・`legacy`・`irk` を持つ | `privsep.c` 374〜399 行、`privsep.h` 23 行、`keys.c` 11〜13、318〜364、383、590〜591 行、`keys.h` 37〜65 行、`hci.h` 29 行、[phase004](../phase004/phase.md) §3・§4 |
 | 18 | loopback の controller: BR/EDR の相手 0A:0B:0C:0D:0E:01（DisplayYesNo、Inquiry の「Loopback Keyboard」class 0x002540）・05・06・07（Just Works）は handle 0x0040、LE の 03 は 0x0041（pairing を断る）。Inquiry Result with RSSI の 02 は class 0x002580（マウス）。ACL は handle ごとに Number Of Completed Packets、L2CAP の Information Request と SMP の Pairing Request にだけ答える。**`loopback_frame` の payload は 16 byte まで**（`body[4+4+16]`、超えたら EINVAL）。LE Create Connection（0x200D）は address が 03（`LOOPBACK_DEVICE_MOUSE`、LE の広告の名前は「Loopback Mouse」appearance 0x03C2）の public の時だけ LE Connection Complete（19 byte、interval 0x0018、timeout 0x01F4）を返し、他の address は繋がない。LE Create Connection Cancel は status 0x02 の LE Connection Complete。HCI Disconnect は理由 0x16 の Disconnection Complete | `src/drivers/generic/bt-hci-loopback.c` 8〜60、120〜160、889、964〜972、1120〜1404（1340〜1389）、1480〜1566（1535〜1546）行 |
 | 19 | 試験の道具: `bt-probe`（node は daemon と同時に開けない: EBUSY）、`hidraw-probe`、`peninject -d`（inject の evdev の node を待って event を出す）、`systemevents`（`/dev/system` の event を行で出す）。guest の QEMU は `-device usb-kbd,bus=xhci.0,port=3` を既に持ち、`--qemu-extra` で足せる。QMP は `-qmp unix:<runtime>/qmp.sock,server,nowait` で開いている（`boot-test.sh` が screendump に使う同じ socket）が、guest.py に汎用の QMP の command を送る関数は無い。`aat-input`・`touchinject`・`peninject` は inject の口の書き手で、任意の `/dev/input/eventN` を bus・名前で選んで読む道具は無い（`evdev-probe` を新しく作る理由） | `userland/tests/bt-probe/main.c` 8〜40、`hidraw-probe/main.c`、`peninject/main.c` 8〜33、`systemevents/main.c` 8〜33、`aat-input/main.c` 8〜20 行、`plan/tools/guest/guest.py` 159・190・209・211・222・368 行、`plan/tools/boot-test.sh` 15 行 |
 | 20 | host 試験の形: bluetoothd の部品は host の cc で ASan・UBSan（`plan/ws143/tests/bt-daemon-host-test.sh`）、kernel の HID の file は freestanding（`-ffreestanding -nostdlibinc -fno-builtin -D__ZEDBSD__ -DKERN_USER_ABI_LP64`）で compile して host の試験と link（`plan/ws079/tests/run-hid-pen.sh`、`plan/ws159/tests/run-host-i2c-hid.sh`）。5330 の touchpad の descriptor は `plan/ws159/tests/latitude5330-linux/synaptics-06cb-ce65-rdesc.bin` | 各 file |
@@ -78,34 +78,34 @@ Q1 の条件（2026-10-08）: 「HID は既存の usb-hid・hidraw・evdev の�
 
 | file | 新規／変更 | 中身 | host の試験 |
 | --- | --- | --- | --- |
-| `include/drivers/generic/hid-input.h`、`src/drivers/generic/hid-input.c` | 新規 | **共有の HID glue**（§2）: report descriptor から layout・capability・axis・pen・touch の記述を作り、input device を登録し、report を decode して evdev に出す。transport（USB・hid-host）を知らない | する（freestanding、input の層の stand-in） |
+| `include/drivers/generic/hid-input.h`、`src/drivers/generic/hid-input.c` | 新規 | **共有の HID glue**（§2）: report descriptor から layout・capability・axis・pen・touch の記述を作り、input device を登録し、report を decode して evdev に出す。transport（USB・input bridge）を知らない | する（freestanding、input の層の stand-in） |
 | `src/drivers/usb/usb-hid.c` | 変更 | glue を呼ぶ。transport（descriptor の取得、SET_PROTOCOL、URB、worker、raw の hidraw）と名前の決めは残す。動かす code は規約の全文に合わせる（design §5.2 [N16]） | USB の回帰は build と QEMU（§7） |
-| `include/uapi/hid-host.h` | 新規 | `/dev/hid-host` の UAPI（§3。D3 の形、struct はこの Phase の review） | — |
-| `include/drivers/generic/hid-host.h`、`src/drivers/generic/hid-host.c` | 新規 | `/dev/hid-host` の cdev（§3） | する（setup の検査の純粋な部分だけ） |
-| `src/kern/devfs.c` | 変更 | `hid-host` を 0600 に（`input-inject` と同じ行に足す） | — |
+| `include/uapi/input-bridge.h` | 新規 | `/dev/input/bridge` の UAPI（§3。D3 の形、struct はこの Phase の review） | — |
+| `include/drivers/generic/input-bridge.h`、`src/drivers/generic/input-bridge.c` | 新規 | `/dev/input/bridge` の cdev（§3） | する（setup の検査の純粋な部分だけ） |
+| `src/kern/devfs.c` | 変更 | `bridge` を 0600 に（`input-inject` と同じ行に足す） | — |
 | `src/drivers/generic/input.c`、`include/kern/input-device.h` | 変更 | `INPUT_DEVICE_MAX` 8 → 32（§9.1、B1）、`drv_input_device_number()`（事実 24） | 既存の host 試験が無い: review と QEMU |
-| `src/kern/vfs.c`、`Makefile`、`platform/amd64/vmunix.mk`、`platform/pcat/vmunix.mk` | 変更 | `CONFIG_HID_HOST`（Makefile の既定 y、amd64 だけが見る。§9.10 S10(e)）で hid-host の登録と `hidraw-describe.c`、hid-input.c を amd64 の HID の source と pcat の USB の object に足す | build（amd64・pcat・arm64・試験の config） |
+| `src/kern/vfs.c`、`Makefile`、`platform/amd64/vmunix.mk`、`platform/pcat/vmunix.mk` | 変更 | `CONFIG_INPUT_BRIDGE`（Makefile の既定 y、amd64 だけが見る。§9.10 S10(e)）で input bridge の登録と `hidraw-describe.c`、hid-input.c を amd64 の HID の source と pcat の USB の object に足す | build（amd64・pcat・arm64・試験の config） |
 | `userland/base/bluetoothd/session.[ch]` | 変更 | LE event mask に subevent 0x0A、`session_counted_event` が LE Enhanced Connection Complete も数える（§9.4 S4） | する（既存の試験の更新） |
 | `userland/base/bluetoothd/hidcache.[ch]` | 新規 | HID の device の記録（descriptor の cache・flags・PnP・名前・`candidate`/`confirmed`）を bond と**別の file** `<address>-<型>.hid` に読み書き（§9.3 B4） | する |
 | `userland/base/bluetoothd/snoop.[ch]` | 新規 | btsnoop の記録（純粋: header と record の形。`-s PATH` で全 HCI の packet を書く。§9.11 S11） | する（file の形） |
 | `plan/ws143/tests/hid-input-host-test.{sh,c}` | 新規 | glue の host 試験（§7） | — |
 | `plan/ws143/tests/hid-report-fuzz.{sh,c}` | 新規 | hid-report.c・hid-touch.c・hid-digitizer.c・hid-input.c の fuzz（§7） | — |
 | `userland/tests/evdev-probe/` | 新規 | guest で `/dev/input/eventN` を bus・名前で待ち、event を行で出す（§7） | — |
-| `userland/tests/hid-host-probe/` | 新規 | root で `/dev/hid-host` にキーボードを作り report を書く（kernel だけの QEMU の確かめと、口の誤用の確かめ） | — |
+| `userland/tests/input-bridge-probe/` | 新規 | root で `/dev/input/bridge` にキーボードを作り report を書く（kernel だけの QEMU の確かめと、口の誤用の確かめ） | — |
 | `userland/base/bluetoothd/router.[ch]` | 新規 | session の handler。接続の event と ACL を pair か HID の link に配る（§4.1） | する |
 | `userland/base/bluetoothd/l2cap.[ch]` | 変更 | 相手からの Connection Request を policy で受ける、inbound の channel の表、Flush Timeout・QoS・RFC の option（§4.2） | する |
 | `userland/base/bluetoothd/sdp.[ch]` | 新規 | 純粋: SDP client の PDU（ServiceSearchAttributeRequest の組み立て、Response の continuation と data element の解析、HID の record の属性）（§4.3） | する（台本と fuzz） |
 | `userland/base/bluetoothd/hidp.[ch]` | 新規 | 純粋: HIDP の header（§4.4） | する |
 | `userland/base/bluetoothd/att.[ch]` | 新規 | 純粋: ATT の PDU の組み立てと解析（§4.5） | する（台本と fuzz） |
 | `userland/base/bluetoothd/hog.[ch]` | 新規 | HOGP の発見の状態機械（ATT の上。system call 無し、呼び手が送る）（§4.6） | する（台本の ATT server） |
-| `userland/base/bluetoothd/hid.[ch]` | 新規 | HID host の核: device の表、BR/EDR と LE の接続の流れ、security の検査、`/dev/hid-host` への橋、再接続の policy と timer（§4.7〜4.9） | する（偽の controller、偽の hid-host の fd） |
-| `userland/base/bluetoothd/privsep.[ch]` | 変更 | 子の `OPEN-HID` に親が `/dev/hid-host` を開けて fd で答える（§4.10） | しない（QEMU） |
+| `userland/base/bluetoothd/hid.[ch]` | 新規 | HID host の核: device の表、BR/EDR と LE の接続の流れ、security の検査、`/dev/input/bridge` への橋、再接続の policy と timer（§4.7〜4.9） | する（偽の controller、偽の input bridge の fd） |
+| `userland/base/bluetoothd/privsep.[ch]` | 変更 | 子の `OPEN-HID` に親が `/dev/input/bridge` を開けて fd で答える（§4.10） | しない（QEMU） |
 | `userland/base/bluetoothd/keys.[ch]` | 変更**しない**（改めた） | B4: bond の file は 2048 byte 未満、`btd_keys_write` は struct の field だけ。HID の記録は `hidcache.[ch]` の別 file。FORGET が `.hid` も消す呼びは main.c | — |
 | `userland/base/bluetoothd/pair.[ch]` | 変更 | Connection Request の Reject と他 address の Negative Reply を router に移す。**PAIRED の時に link を hid に引き継ぐ callback `handoff`**（切らずに同じ link で HID を始める。§9.2 B2） | する（既存の試験の更新） |
 | `userland/base/bluetoothd/main.c`、`protocol.h` | 変更 | CONNECT・DISCONNECT・STATUS、SHOW の `hid=`、`/dev/system` の POWER の購読、timer（§5） | しない（QEMU） |
 | `userland/base/bt/main.c` | 変更 | `bt connect`・`bt disconnect`・`bt status` | しない（QEMU） |
 | `src/drivers/generic/bt-hci-loopback.c` | 変更（**大きい**: link ごとの状態への作り直し、§9.7 B7・§6） | HID の相手: 01 の SDP・HIDP のキーボード、02 の HIDP のマウス（相手から再接続、page scan の bit を見る、host の page は断る）、04 の LE の HOGP のマウス（ATT server、Exchange MTU Request を自分から、LTK の照合）。link ごとの `struct loopback_link`（address・handle・暗号化・L2CAP の channel・timer）。frame の payload の上限を広げる。時刻で動く送りと command の経路の排他（§6） | — |
-| `plan/ws143/tests/bt-hid-host-test.{sh,c}`、`bt-hid-p005.sh`、`hid-usb-p005.sh`、`hid-host-p005.sh`、`config-amd64-bt.mk`・`build-bt-image.sh` | 新規／変更 | §7 | — |
+| `plan/ws143/tests/bt-input bridge-test.{sh,c}`、`bt-hid-p005.sh`、`hid-usb-p005.sh`、`input-bridge-p005.sh`、`config-amd64-bt.mk`・`build-bt-image.sh` | 新規／変更 | §7 | — |
 
 ### 2. kernel: 共有の HID glue `hid-input.c`（refactor の範囲と USB の回帰の危険）
 
@@ -128,7 +128,7 @@ struct hid_input_identity {
 
 /* 何の device か（名前の fallback のため）: HID_INPUT_KIND_KEYBOARD・MOUSE・TABLET・PEN・TOUCH_ONLY。 */
 int drv_hid_input_prepare(const void *descriptor, size_t size, struct hid_input **result);   /* parse と記述。失敗は parser の errno（EINVAL・E2BIG・ENOMEM）か EINVAL（report が 0・上限超え）。register はしない */
-size_t drv_hid_input_report_max(const struct hid_input *);   /* 最も長い input report（byte。ID の byte を含む）。usb-hid の buffer の大きさ、hid-host の write の検査 */
+size_t drv_hid_input_report_max(const struct hid_input *);   /* 最も長い input report（byte。ID の byte を含む）。usb-hid の buffer の大きさ、input bridge の write の検査 */
 unsigned drv_hid_input_kind(const struct hid_input *);
 int drv_hid_input_publish(struct hid_input *, const struct hid_input_identity *);   /* input device（と touch の device）を登録。何も作れなければ ENODEV */
 void drv_hid_input_report(struct hid_input *, const uint8_t *report, size_t length, uint64_t milliseconds);   /* decode して evdev へ。壊れた report は数えて捨てる（kern_logf は最初の 16 回） */
@@ -138,72 +138,72 @@ void drv_hid_input_unpublish(struct hid_input *);   /* unregister（input.c が�
 void drv_hid_input_destroy(struct hid_input *);     /* layout と記憶を解放（unpublish の後） */
 ```
 
-- `prepare` と `publish` を分けるのは、usb-hid が attach で parse し（buffer の大きさが要る）、input の層の準備の後（`drv_usb_hid_input_ready`）に登録するから。hid-host は setup の write で両方を続けて呼ぶ。
+- `prepare` と `publish` を分けるのは、usb-hid が attach で parse し（buffer の大きさが要る）、input の層の準備の後（`drv_usb_hid_input_ready`）に登録するから。input bridge は setup の write で両方を続けて呼ぶ。
 - **振る舞いは変えない**（規約「Style-only changes must preserve evaluation order, ownership, lifetime, error reporting, and observable behavior」）: report ID ごとの held と全 report の集約、`keyboard_error` の時は前の key の状態を保つ、EV_REL の 0 を出さない、EV_KEY 以外の値はそのまま、出した時だけ SYN_REPORT、touch と pen の振り分けの順（touch → pen → 普通）、「capability が SYN だけなら device を作らない」「何も作れなければ ENODEV」。これらを host の試験（§7.1）で、新旧の出力の一致として確かめる。
-- 時刻: `drv_hid_input_report` は呼び手の時刻（usb-hid は URB の完了の時刻 `completed_milliseconds`、hid-host は write の時刻 `clock_milliseconds`）を取る（`drv_input_device_emit_at`、`input-device.h` 101〜107 行の約束）。
+- 時刻: `drv_hid_input_report` は呼び手の時刻（usb-hid は URB の完了の時刻 `completed_milliseconds`、input bridge は write の時刻 `clock_milliseconds`）を取る（`drv_input_device_emit_at`、`input-device.h` 101〜107 行の約束）。
 - 作業領域（review S8）: decode の出力 `struct hid_report_input`（約 2 KiB）、touch の状態機械の出力、report ID ごとの held と集約の bit map、identity の文字列の写しは **`struct hid_input` の中に持ち、stack に置かない**（syscall の stack 16 KiB、事実 36。input-inject と同じ形）。usb-hid の worker の stack に今ある `decoded` も glue の中へ移る。
 - 新旧の比較（review S10(d)）: §7.1 の host 試験は emit の列だけでなく、**register に渡す `input_device_info`（capability の列、axis、properties、名前・path・unique_id、flags）**も新旧で byte 単位に比べる。
-- lock: glue は自分の lock を持たない。呼び手が report と unpublish を直列にする（usb-hid は worker の thread 1 本、detach は worker の join の後に unpublish（438〜483 行）。hid-host は open ごとの mutex の下で write、close は最後の write の後（§3））。
-- 配置（review S10(e) で改めた）: `src/drivers/generic/hid-input.c` を amd64 の `AMD64_HID_SOURCES`（`vmunix.mk` 268〜271 行）、pcat の `PCAT_USB_CLASS_OBJS`（`platform/pcat/vmunix.mk` 114 行、usb-hid.o と同じ条件）、arm64 の `ARM64_USB_SOURCES`（95 行）に足す（usb-hid が呼ぶ所は全部）。hid-host は **新しい `CONFIG_HID_HOST`**（Makefile の既定 y、`-DCONFIG_HID_HOST`）で、`platform/amd64/vmunix.mk` だけが見る: `CONFIG_HID_HOST=y` なら `hid-host.c` と `hidraw-describe.c`（USB_HID が n の時も）と HID の source を入れ、`vfs.c` の `#ifdef CONFIG_HID_HOST` で登録。pcat・arm64 は参照しないので link は崩れない（`CONFIG_DRIVER_USB_BT` を条件にしない: pcat でも既定 y で、pcat には hid-host を入れない。§Q24）。rpi4 の Bluetooth（UART）は範囲の外。
+- lock: glue は自分の lock を持たない。呼び手が report と unpublish を直列にする（usb-hid は worker の thread 1 本、detach は worker の join の後に unpublish（438〜483 行）。input bridge は open ごとの mutex の下で write、close は最後の write の後（§3））。
+- 配置（review S10(e) で改めた）: `src/drivers/generic/hid-input.c` を amd64 の `AMD64_HID_SOURCES`（`vmunix.mk` 268〜271 行）、pcat の `PCAT_USB_CLASS_OBJS`（`platform/pcat/vmunix.mk` 114 行、usb-hid.o と同じ条件）、arm64 の `ARM64_USB_SOURCES`（95 行）に足す（usb-hid が呼ぶ所は全部）。input bridge は **新しい `CONFIG_INPUT_BRIDGE`**（Makefile の既定 y、`-DCONFIG_INPUT_BRIDGE`）で、`platform/amd64/vmunix.mk` だけが見る: `CONFIG_INPUT_BRIDGE=y` なら `input-bridge.c` と `hidraw-describe.c`（USB_HID が n の時も）と HID の source を入れ、`vfs.c` の `#ifdef CONFIG_INPUT_BRIDGE` で登録。pcat・arm64 は参照しないので link は崩れない（`CONFIG_DRIVER_USB_BT` を条件にしない: pcat でも既定 y で、pcat には input bridge を入れない。§Q24）。rpi4 の Bluetooth（UART）は範囲の外。
 - FIDO の raw の分岐（review S10(a)）: usb-hid.c の raw の経路（`fetch_layout` 689〜703、`activate` 1476〜1480、`unpublish` 1203〜1205、`publish_report` 1053〜1057 行）は**書き換えない**（規約への合わせもしない。diff でその行が変わっていないことを review で確かめる）。確かめは §9.10。
 - **USB の回帰の危険と確かめ方**: 危険は (a) key の集約の意味が変わる、(b) touch・pen の経路が変わる、(c) attach・detach の順（register が input ready の前に起きる、unpublish が 2 回呼ばれる）、(d) 名前の fallback が変わる。確かめ: (a)(b)(d) は §7.1 の host 試験で新旧の出力の byte 単位の一致（旧の usb_hid_publish_report を試験に写して並べて走らせる。写しは試験の中だけ）、(c) は code の review と QEMU（`hid-usb-p005.sh`: guest の usb-kbd に QMP の `send-key`、usb-tablet か usb-mouse を `--qemu-extra` で足して `input-send-event`。`evdev-probe -b usb` で event を読む。bus=3 の node が USB の数だけある）。実機（5330 に USB のキーボードを挿す）は p008 か T1 の空き（任意）。QEMU の規約「回帰試験では GPU を使わず framebuffer で login prompt だけ」は boot test の話で、この試験は guest の中の evdev の読みで判定する（console log は読まない）。
 
-### 3. kernel: `/dev/hid-host`（D3 の形、struct の配置）
+### 3. kernel: `/dev/input/bridge`（D3 の形、struct の配置）
 
-**UAPI `include/uapi/hid-host.h`**（D3 で承認した形: 最初の write が作成、続く write が input report、read が output report、close で消す。**形への追加は `HID_HOST_GET_DEVICE` の ioctl 1 つ**（§Q2、ユーザーの判断））:
+**UAPI `include/uapi/input-bridge.h`**（D3 で承認した形: 最初の write が作成、続く write が input report、read が output report、close で消す。**形への追加は `INPUT_BRIDGE_GET_DEVICE` の ioctl 1 つ**（§Q2、ユーザーの判断））:
 
 ```c
-#define KERN_HID_HOST_IOC_GROUP	'h'          /* 未使用（事実 23: 'H' hidraw、'b' bluetooth、'E' evdev、's' system、'S' ccid …） */
-#define HID_HOST_MAGIC		0x74686968U  /* "hiht" */
-#define HID_HOST_VERSION	1U
-#define HID_HOST_DESCRIPTOR_MAX	4096U        /* hid-report.h の HID_REPORT_DESCRIPTOR_SIZE_MAX */
-#define HID_HOST_REPORT_MAX	512U         /* 1 回の write の上限 = syscall の bounce の chunk（SYSCALL_IO_CHUNK）。review S9: 分割が起きない長さに（§9.9、Q22）。ID の byte を含む */
-#define HID_HOST_TEXT_MAX	64U          /* input.c の INPUT_TEXT_MAX */
-#define HID_HOST_OPENS_MAX	6U           /* 同時の device の数 = bluetoothd の BTD_HID_MAX。touch を持つ device は input の slot を 2 つ使うので最大 12 slot（INPUT_DEVICE_MAX 32 の中。review B1、§9.1） */
+#define KERN_INPUT_BRIDGE_IOC_GROUP	'h'          /* 未使用（事実 23: 'H' hidraw、'b' bluetooth、'E' evdev、's' system、'S' ccid …） */
+#define INPUT_BRIDGE_MAGIC		0x74686968U  /* "hiht" */
+#define INPUT_BRIDGE_VERSION	1U
+#define INPUT_BRIDGE_DESCRIPTOR_MAX	4096U        /* hid-report.h の HID_REPORT_DESCRIPTOR_SIZE_MAX */
+#define INPUT_BRIDGE_REPORT_MAX	512U         /* 1 回の write の上限 = syscall の bounce の chunk（SYSCALL_IO_CHUNK）。review S9: 分割が起きない長さに（§9.9、Q22）。ID の byte を含む */
+#define INPUT_BRIDGE_TEXT_MAX	64U          /* input.c の INPUT_TEXT_MAX */
+#define INPUT_BRIDGE_OPENS_MAX	6U           /* 同時の device の数 = bluetoothd の BTD_HID_MAX。touch を持つ device は input の slot を 2 つ使うので最大 12 slot（INPUT_DEVICE_MAX 32 の中。review B1、§9.1） */
 
-/* 最初の write: device の宣言。write の長さは sizeof ちょうど（4324 byte: 36 + 3×64 + 4096。field は自然に並び padding は無い。hid-host.c と host 試験に _Static_assert(sizeof(struct hid_host_setup) == 4324U) を置く）。 */
-struct hid_host_setup {
+/* 最初の write: device の宣言。write の長さは sizeof ちょうど（4324 byte: 36 + 3×64 + 4096。field は自然に並び padding は無い。input-bridge.c と host 試験に _Static_assert(sizeof(struct input_bridge_setup) == 4324U) を置く）。 */
+struct input_bridge_setup {
 	uint32_t magic;
-	uint32_t version;		/* HID_HOST_VERSION */
+	uint32_t version;		/* INPUT_BRIDGE_VERSION */
 	uint16_t bus;			/* BUS_BLUETOOTH か BUS_VIRTUAL だけ（他は EINVAL。USB を名乗れない） */
 	uint16_t vendor;
 	uint16_t product;
 	uint16_t release;		/* input_id.version */
-	uint32_t descriptor_size;	/* 1..HID_HOST_DESCRIPTOR_MAX */
+	uint32_t descriptor_size;	/* 1..INPUT_BRIDGE_DESCRIPTOR_MAX */
 	uint32_t reserved[4];		/* 0 */
-	char name[HID_HOST_TEXT_MAX];		/* NUL で終わる。空なら kernel が種類から付ける（"Bluetooth HID keyboard" など） */
-	char physical_path[HID_HOST_TEXT_MAX];	/* 例 "bluetooth/00:11:22:33:44:55/0A:0B:0C:0D:0E:01" */
-	char unique_id[HID_HOST_TEXT_MAX];	/* 相手の address（再接続でも同じ、design §5.2） */
-	uint8_t descriptor[HID_HOST_DESCRIPTOR_MAX];
+	char name[INPUT_BRIDGE_TEXT_MAX];		/* NUL で終わる。空なら kernel が種類から付ける（"Bluetooth HID keyboard" など） */
+	char physical_path[INPUT_BRIDGE_TEXT_MAX];	/* 例 "bluetooth/00:11:22:33:44:55/0A:0B:0C:0D:0E:01" */
+	char unique_id[INPUT_BRIDGE_TEXT_MAX];	/* 相手の address（再接続でも同じ、design §5.2） */
+	uint8_t descriptor[INPUT_BRIDGE_DESCRIPTOR_MAX];
 };
 
-/* HID_HOST_GET_DEVICE: 作った device の番号（/dev/input/eventN の N、-1 は無い）、layout が断った report の数、layout の性質（review M8: daemon が Q12 の推定を kernel と照合する）。open の mutex の下で読む。 */
-struct hid_host_device {
+/* INPUT_BRIDGE_GET_DEVICE: 作った device の番号（/dev/input/eventN の N、-1 は無い）、layout が断った report の数、layout の性質（review M8: daemon が Q12 の推定を kernel と照合する）。open の mutex の下で読む。 */
+struct input_bridge_device {
 	int32_t event;
 	int32_t touch_event;
 	uint32_t malformed;
-	uint32_t flags;			/* HID_HOST_FLAG_REPORT_IDS: layout が report ID を使う */
+	uint32_t flags;			/* INPUT_BRIDGE_FLAG_REPORT_IDS: layout が report ID を使う */
 	uint32_t report_max;		/* 最も長い input report（ID の byte を含む） */
 	uint32_t reserved[3];
 };
-#define HID_HOST_FLAG_REPORT_IDS	0x1U
-#define HID_HOST_GET_DEVICE	_IOR(KERN_HID_HOST_IOC_GROUP, 0, struct hid_host_device)
+#define INPUT_BRIDGE_FLAG_REPORT_IDS	0x1U
+#define INPUT_BRIDGE_GET_DEVICE	_IOR(KERN_INPUT_BRIDGE_IOC_GROUP, 0, struct input_bridge_device)
 ```
 
-**file の操作**（`src/drivers/generic/hid-host.c`、cdev 名 `hid-host`、rdev は **`0x00130000`**（事実 22 の表の次の空き。第 1 版の `0x00100000` は smartcard と衝突していた）、`cdev_register("hid-host", …)` は `input-inject` と同じ形）:
+**file の操作**（`src/drivers/generic/input-bridge.c`、cdev 名 `bridge`、rdev は **`0x00130000`**（事実 22 の表の次の空き。第 1 版の `0x00100000` は smartcard と衝突していた）、`cdev_register("input bridge", …)` は `input-inject` と同じ形）:
 
-- open: **root だけ**（`cred_is_superuser`。devfs の 0600 とは別に、chmod で広げられないため。input-inject と同じ）。同時に `HID_HOST_OPENS_MAX` まで、1 open = 1 device。open の状態は `struct hid_host_open { struct mutex lock; struct hid_input *input; unsigned declared; uint64_t reports; }`。超えたら EBUSY。
-- write（最初）: 長さが `sizeof(struct hid_host_setup)` でなければ EINVAL。magic・version・bus・descriptor_size・reserved・文字列の NUL（`strnlen < 64`）を検査（純粋な `hid_host_setup_valid()`、host で試験）。top の usage が FIDO（`drv_hidraw_describe` で見る）なら **ENXIO**（§Q3。review M2: parser の EOPNOTSUPP と分ける）。`drv_hid_input_prepare` → `drv_hid_input_publish`（identity: setup の文字列、`id.bustype = bus`）。失敗はその errno（parser の EINVAL・E2BIG・ENOMEM・**EOPNOTSUPP**（対応しない item、事実 32）、何も作れない ENODEV、**input の slot が無い ENOSPC**（B1、§9.1））。publish が失敗したら prepare した layout を destroy し、open は宣言の前の状態に戻る（やり直せる。review M9）。成功は size。**2 度目の setup は無い**（宣言の後の write は全部 report）。touch の device の名前は glue が `"<name> Touchscreen"` を 63 byte に切る（usb-hid と同じ snprintf）。切れ目で UTF-8 が割れないよう **daemon は名前を 51 byte（63 − 12）の UTF-8 の境で切る**（review M3、§Q16）。
-- write（続き）: 1 回の write は 1 つの input report（layout が report ID を使うなら先頭の byte が ID。hidraw の read と同じ約束）。長さ 0 か `HID_HOST_REPORT_MAX`（512）超は EINVAL。**その report ID の宣言の長さより短い物は EINVAL**（分割の断片を decode しない、review S9）、**長い物は余りを読まずに受ける**（padding を付ける device、review M7。decode は最小の長さ以上を受ける、事実 31）。decode に失敗した report（知らない ID、壊れた値）は捨てて数える（`malformed`。write は size を返す。壊れた report で daemon を止めない）。宣言の前の report は EINVAL。
+- open: **root だけ**（`cred_is_superuser`。devfs の 0600 とは別に、chmod で広げられないため。input-inject と同じ）。同時に `INPUT_BRIDGE_OPENS_MAX` まで、1 open = 1 device。open の状態は `struct input_bridge_open { struct mutex lock; struct hid_input *input; unsigned declared; uint64_t reports; }`。超えたら EBUSY。
+- write（最初）: 長さが `sizeof(struct input_bridge_setup)` でなければ EINVAL。magic・version・bus・descriptor_size・reserved・文字列の NUL（`strnlen < 64`）を検査（純粋な `input_bridge_setup_valid()`、host で試験）。top の usage が FIDO（`drv_hidraw_describe` で見る）なら **ENXIO**（§Q3。review M2: parser の EOPNOTSUPP と分ける）。`drv_hid_input_prepare` → `drv_hid_input_publish`（identity: setup の文字列、`id.bustype = bus`）。失敗はその errno（parser の EINVAL・E2BIG・ENOMEM・**EOPNOTSUPP**（対応しない item、事実 32）、何も作れない ENODEV、**input の slot が無い ENOSPC**（B1、§9.1））。publish が失敗したら prepare した layout を destroy し、open は宣言の前の状態に戻る（やり直せる。review M9）。成功は size。**2 度目の setup は無い**（宣言の後の write は全部 report）。touch の device の名前は glue が `"<name> Touchscreen"` を 63 byte に切る（usb-hid と同じ snprintf）。切れ目で UTF-8 が割れないよう **daemon は名前を 51 byte（63 − 12）の UTF-8 の境で切る**（review M3、§Q16）。
+- write（続き）: 1 回の write は 1 つの input report（layout が report ID を使うなら先頭の byte が ID。hidraw の read と同じ約束）。長さ 0 か `INPUT_BRIDGE_REPORT_MAX`（512）超は EINVAL。**その report ID の宣言の長さより短い物は EINVAL**（分割の断片を decode しない、review S9）、**長い物は余りを読まずに受ける**（padding を付ける device、review M7。decode は最小の長さ以上を受ける、事実 31）。decode に失敗した report（知らない ID、壊れた値）は捨てて数える（`malformed`。write は size を返す。壊れた report で daemon を止めない）。宣言の前の report は EINVAL。
 - read: 出力の report の経路が無いので EAGAIN（O_NONBLOCK の有無に関わらず。寝ない。範囲の外）。将来 LED を足す時は「read は 1 つの output report（ID の byte が先頭）」の形で、poll の POLLIN を足す。
 - poll: POLLOUT 常に（宣言の後も前も write できる）、POLLIN は言わない、POLLHUP は無い（device を消すのは自分の close だけ）。
-- ioctl: `HID_HOST_GET_DEVICE`（宣言の前は event = -1）。他は ENOTTY。
+- ioctl: `INPUT_BRIDGE_GET_DEVICE`（宣言の前は event = -1）。他は ENOTTY。
 - close: `drv_hid_input_unpublish`（input.c が押されている key を全部離す、事実 4）→ `destroy` → open の枚数を返す。**切断で key が残らない**（design の受け入れ 3）は、daemon が切断で fd を close することで満たす（§4.7）。
 - 境界と寿命: setup は open の中で 1 回、device は open と同じ寿命（daemon が落ちれば kernel が fd を close して device が消え、key が離れる）。write は open の mutex で直列、close は file の最後の参照で呼ばれるので write と重ならない。report の decode は write の process の文脈で走る（sleep しない、spin lock は input.c の中だけ）。
-- 権限と privsep（D16 (a)）: node は root の 0600（devfs の規則に `hid-host` を足す）。bluetoothd の **特権の親が開けて SCM_RIGHTS で子に渡す**（§4.10）。子（`_bluetooth`）は open しない。乗っ取られた子が任意のキーボードを作れる危険は design §5.2 [N9] のまま（防ぐのは電波の相手の解析の上限と、bond 済み・暗号化・鍵の長さ 16 の link だけを受けること。§4.8）。
+- 権限と privsep（D16 (a)）: node は root の 0600（devfs の規則に `bridge` を足す）。bluetoothd の **特権の親が開けて SCM_RIGHTS で子に渡す**（§4.10）。子（`_bluetooth`）は open しない。乗っ取られた子が任意のキーボードを作れる危険は design §5.2 [N9] のまま（防ぐのは電波の相手の解析の上限と、bond 済み・暗号化・鍵の長さ 16 の link だけを受けること。§4.8）。
 - 名前: Bluetooth の名前（248 byte まで、`BTD_NAME_MAX 249`）は **daemon が UTF-8 の境で 51 byte に切る**（touch の device の `"<name> Touchscreen"` が 63 に収まる長さ。review M3。kernel は 64 以上を EINVAL で断るだけ。切る規則を kernel に持たせない）。
-- syscall の bounce（p002 §2 の注）: 512 byte を超える write は heap の buffer を使い、取れなければ 512 byte の stack に落ちて write が分割される（`src/kern/syscall.c` 85 行 `SYSCALL_IO_CHUNK 512`。chunk の write が error なら残りは書かれない、事実 31）。**report の write は 512 以下なので分割されない**（`HID_HOST_REPORT_MAX`、Q22）。setup（4324 byte）は分割され得る: 先頭の 512 byte は `sizeof` でないので EINVAL、残りは書かれない（黙って 2 つに decode される経路は無い、review S9）。daemon は setup の EINVAL を timer で 100 ms おきに 3 回やり直す（§4.7、review M10）。
-- 試験の口 `/dev/input-inject` との違い: inject は固定の形の device だけ、hid-host は descriptor から作る。inject は試験の kernel だけ、hid-host は製品。
+- syscall の bounce（p002 §2 の注）: 512 byte を超える write は heap の buffer を使い、取れなければ 512 byte の stack に落ちて write が分割される（`src/kern/syscall.c` 85 行 `SYSCALL_IO_CHUNK 512`。chunk の write が error なら残りは書かれない、事実 31）。**report の write は 512 以下なので分割されない**（`INPUT_BRIDGE_REPORT_MAX`、Q22）。setup（4324 byte）は分割され得る: 先頭の 512 byte は `sizeof` でないので EINVAL、残りは書かれない（黙って 2 つに decode される経路は無い、review S9）。daemon は setup の EINVAL を timer で 100 ms おきに 3 回やり直す（§4.7、review M10）。
+- 試験の口 `/dev/input-inject` との違い: inject は固定の形の device だけ、input bridge は descriptor から作る。inject は試験の kernel だけ、input bridge は製品。
 
 ### 4. bluetoothd
 
@@ -237,8 +237,8 @@ struct hid_host_device {
 
 - header 1 byte: 上位 4 bit が message type、下位 4 bit が parameter。type: HANDSHAKE 0x0、HID_CONTROL 0x1、GET_REPORT 0x4、SET_REPORT 0x5、GET_PROTOCOL 0x6、SET_PROTOCOL 0x7、DATA 0xA。HID_CONTROL の parameter: SUSPEND 0x3、EXIT_SUSPEND 0x4、VIRTUAL_CABLE_UNPLUG 0x5。DATA の parameter（report type）: OTHER 0、INPUT 1、OUTPUT 2、FEATURE 3。SET_PROTOCOL の parameter: Boot 0、Report 1。HANDSHAKE の result: SUCCESSFUL 0、NOT_READY 1、ERR_INVALID_REPORT_ID 2、ERR_UNSUPPORTED_REQUEST 3、ERR_INVALID_PARAMETER 4、ERR_UNKNOWN 0xE、ERR_FATAL 0xF。**未確認**: 値（HID 1.1.1 §7.3・§7.4 と照合）。
 - control channel: SET_PROTOCOL（Report）は **HIDBootDevice が true の device にだけ**送り（HID 1.1.1 は boot protocol を持つ device だけに SET_PROTOCOL を許す。**未確認**）、HANDSHAKE を 2 秒待つ。ERR_UNSUPPORTED_REQUEST は無視して進む。相手からの HID_CONTROL VIRTUAL_CABLE_UNPLUG は「相手が unpair を求めた」: link を切り、bond を消す（design §6.3 の逆向き。§Q9）。SUSPEND・EXIT_SUSPEND は記録だけ。相手からの GET_REPORT・SET_REPORT・GET_PROTOCOL（host への要求）は HANDSHAKE ERR_UNSUPPORTED_REQUEST。
-- interrupt channel: 相手からの DATA（INPUT）の header を外して `/dev/hid-host` へ write（layout が report ID を使うなら相手の report の先頭に ID があるまま。HIDP は ID を report の中に持つ）。DATA（OTHER・OUTPUT・FEATURE）は無視して数える。host から interrupt channel に送る物は無い（出力は範囲の外）。
-- 長さ: 1 frame は HIDP の header 1 byte + report ≤ 512（`HID_HOST_REPORT_MAX`、ID の byte を含む）。自分の MTU 672 と `BTD_L2CAP_MAX` 1024 の中に収まる（review M4: 1 + 1024 は組み直しで捨てられる長さだった）。超えた report は捨てて数える（`oversize`）。
+- interrupt channel: 相手からの DATA（INPUT）の header を外して `/dev/input/bridge` へ write（layout が report ID を使うなら相手の report の先頭に ID があるまま。HIDP は ID を report の中に持つ）。DATA（OTHER・OUTPUT・FEATURE）は無視して数える。host から interrupt channel に送る物は無い（出力は範囲の外）。
+- 長さ: 1 frame は HIDP の header 1 byte + report ≤ 512（`INPUT_BRIDGE_REPORT_MAX`、ID の byte を含む）。自分の MTU 672 と `BTD_L2CAP_MAX` 1024 の中に収まる（review M4: 1 + 1024 は組み直しで捨てられる長さだった）。超えた report は捨てて数える（`oversize`）。
 
 #### 4.5 ATT client（`att.[ch]`、純粋）
 
@@ -253,15 +253,15 @@ struct hid_host_device {
 状態の順（HOGP 1.0 §4・GATT の手順。**未確認**: 版と節、UUID の値は Bluetooth SIG Assigned Numbers と照合）:
 
 1. Exchange MTU。
-2. primary service の発見: Read By Group Type（UUID 0x2800）を 0x0001 から末尾の handle まで繰り返す（Attribute Not Found で終わり）。要る service: HID 0x1812（**複数あり得る: 最大 2 つを使い、service ごとに `/dev/hid-host` の device を 1 つ作る**（unique_id は 2 つ目から `<address>#1`、名前に ` (2)`。consumer control の key などを別の service に置くキーボードのため。review S3、§9.12）。3 つ目以降は記録して無視）、Battery 0x180F、Device Information 0x180A。HID が無ければ `no-hid`。
+2. primary service の発見: Read By Group Type（UUID 0x2800）を 0x0001 から末尾の handle まで繰り返す（Attribute Not Found で終わり）。要る service: HID 0x1812（**複数あり得る: 最大 2 つを使い、service ごとに `/dev/input/bridge` の device を 1 つ作る**（unique_id は 2 つ目から `<address>#1`、名前に ` (2)`。consumer control の key などを別の service に置くキーボードのため。review S3、§9.12）。3 つ目以降は記録して無視）、Battery 0x180F、Device Information 0x180A。HID が無ければ `no-hid`。
 3. HID service の characteristic: Read By Type（UUID 0x2803）を service の範囲で繰り返す。要る物: Report Map 0x2A4B、Report 0x2A4D（複数）、Protocol Mode 0x2A4E、HID Information 0x2A4A、HID Control Point 0x2A4C。Boot Keyboard Input Report 0x2A22・Boot Mouse Input Report 0x2A33 は無視（report protocol だけ）。characteristic は service ごとに **64** まで、Report は 32 まで（超えた分は記録して無視し、切らない。review S3）。
 4. 各 Report の descriptor: Find Information を value handle + 1 から次の characteristic の宣言 − 1 まで。Report Reference 0x2908（value 2 byte: report ID、report type 1 = Input・2 = Output・3 = Feature）、Client Characteristic Configuration 0x2902。Report Reference を Read。
 5. Report Map を Read、応答が MTU − 1 ちょうどなら Read Blob を offset で繰り返す（4096 まで。超えたら `descriptor`）。**終わりの印は 3 つのどれでも**: 応答が MTU − 1 より短い、空の応答、Error Response の Invalid Offset（0x07）か Attribute Not Long（0x0B）（長さが MTU − 1 の倍数の Map のため。review S3）。External Report Reference 0x2907（他の service の characteristic を report として使う形）は非対応（記録して無視）。
 6. Device Information の PnP ID 0x2A50（Vendor ID Source 1 byte、Vendor ID 2、Product ID 2、Product Version 2）を Read（無ければ vendor・product は 0）。
 7. Protocol Mode があれば Write Command で 0x01（Report Protocol Mode）。
-8. `/dev/hid-host` に setup を書く（§4.7。descriptor は Report Map）。
+8. `/dev/input/bridge` に setup を書く（§4.7。descriptor は Report Map）。
 9. 各 Input Report の CCC に Write Request で 0x0001（notification）。Battery Level 0x2A19 を Read し CCC があれば notification。
-10. OPEN。Handle Value Notification（handle → Report Reference の ID と type）: **Report Map が report ID を使うか**は、Report Reference の ID が 1 つでも 0 でなければ「使う」と見て、notification の値の先頭に ID を付けて write する（HOGP では notification に ID が無い。design §5.2 [F7]、§Q12）。全部 0 なら付けない。setup の後に `HID_HOST_GET_DEVICE` の `flags` と照合し、違えば log して kernel の判定に合わせる（review M8）。知らない handle の notification は数える。Battery Level の notification は STATUS の `battery=` に出す。
+10. OPEN。Handle Value Notification（handle → Report Reference の ID と type）: **Report Map が report ID を使うか**は、Report Reference の ID が 1 つでも 0 でなければ「使う」と見て、notification の値の先頭に ID を付けて write する（HOGP では notification に ID が無い。design §5.2 [F7]、§Q12）。全部 0 なら付けない。setup の後に `INPUT_BRIDGE_GET_DEVICE` の `flags` と照合し、違えば log して kernel の判定に合わせる（review M8）。知らない handle の notification は数える。Battery Level の notification は STATUS の `battery=` に出す。
 11. **発見の前・途中に来た notification**（bond 済みの client の CCC は接続をまたいで保たれ、再接続の直後の key や click が発見の前に来る。review S2、§9.12）: (handle, 値) を **32 まで待ち行列**に入れ、setup の後に Report Reference の表で ID を付けて順に write する。溢れた分は捨てて数える。
 - security: 暗号化（LE Enable Encryption、§4.7）の **後**に 1 から始める。それでも Insufficient Authentication（0x05）・Insufficient Encryption（0x0F）・Insufficient Encryption Key Size（0x0C）が返れば `security` で切る（bond が相手の要求（authenticated）に足りない: Settings が「もう一度 pairing」と出す材料。p006）。
 - Service Changed（GATT 0x2A05 の indication）: Confirmation を返し、link を切って再接続（発見をやり直す）。
@@ -269,14 +269,14 @@ struct hid_host_device {
 
 #### 4.7 HID host の核（`hid.[ch]`）: device の表と接続の流れ
 
-- 表: `struct btd_hid_device hid[BTD_HID_MAX]`（6。session の link の数 8 のうち pairing 1 と余り 1 を残す）。field: address・type、transport（`BTD_HID_BREDR`／`BTD_HID_LE`）、state（IDLE・CONNECTING・AUTHENTICATING・ENCRYPTING・SDP・CHANNELS・SETUP・OPEN・CLOSING）、handle、`connected`、`encrypted`、`key_size`、`btd_reassembly`・`btd_l2cap`（BR/EDR）、channel の local CID（sdp・control・interrupt）、`btd_sdp`・`btd_hog`・`btd_att` の状態、`/dev/hid-host` の fd（-1）、`struct btd_hid_record`（descriptor 4096・flags・vid・pid・version・名前）、report の待ち行列（setup の前に来た DATA を 32 まで、§4.8）、`wanted`（再接続する）、`reconnect_due`・`retry_ms`、counters（reports・malformed・dropped）、`battery`（-1）、`since_ms`、`last_error`。
+- 表: `struct btd_hid_device hid[BTD_HID_MAX]`（6。session の link の数 8 のうち pairing 1 と余り 1 を残す）。field: address・type、transport（`BTD_HID_BREDR`／`BTD_HID_LE`）、state（IDLE・CONNECTING・AUTHENTICATING・ENCRYPTING・SDP・CHANNELS・SETUP・OPEN・CLOSING）、handle、`connected`、`encrypted`、`key_size`、`btd_reassembly`・`btd_l2cap`（BR/EDR）、channel の local CID（sdp・control・interrupt）、`btd_sdp`・`btd_hog`・`btd_att` の状態、`/dev/input/bridge` の fd（-1）、`struct btd_hid_record`（descriptor 4096・flags・vid・pid・version・名前）、report の待ち行列（setup の前に来た DATA を 32 まで、§4.8）、`wanted`（再接続する）、`reconnect_due`・`retry_ms`、counters（reports・malformed・dropped）、`battery`（-1）、`since_ms`、`last_error`。
 - **PAIRED からの引き継ぎ（BR/EDR・LE。review B2、§9.2）**: pair が鍵を保存した後、相手が HID らしければ（§9.2 の判定）pair は切らずに link を hid に渡す（`handoff`）。hid は `AUTHENTICATED`（pair が暗号化と鍵 16 を済ませている）から始め、BR/EDR は下の CONNECT の「L2CAP connect PSM 0x0001」から、LE は「ATT/HOGP」から同じ流れを進む。`.hid` の記録を `candidate` で書く（page scan と相手からの接続の受けがこの時点から効く）。
-- **CONNECT（host から）BR/EDR**: bond を読む（無ければ `not-bonded`。`.hid` の記録は無くてもよい: 最初の CONNECT が SDP で HID を確かめ、記録を作る）→ Create Connection（pair.c と同じ parameter。packet type 0xCC18、R1、clock offset 0、role switch 可）→ Connection Complete → Authentication Requested → Link Key Request に保存した鍵で Reply → Authentication Complete（0x06 なら `key-missing`、他の失敗は `security`）→ Set Connection Encryption（on）→ Encryption Change（0 でない値を on）→ Read Encryption Key Size（16 でなければ `key-size` で切る、KNOB）→ L2CAP connect PSM 0x0001 → SDP（§4.3。HID の record が無ければ `no-hid`）→ L2CAP disconnect（SDP）→ L2CAP connect PSM 0x0011 → PSM 0x0013（両方 OPEN）→ SET_PROTOCOL（HIDBootDevice の時）→ **setup を `/dev/hid-host` へ**（fd は親から §4.10、名前は bond の `name`、無ければ SDP の ServiceName（**未確認**: 属性 0x0100 + language base）、無ければ空で kernel の種類の名前。UTF-8 の境で 51 byte に切る（M3）。`physical_path` は `bluetooth/<controller>/<address>`、`unique_id` は address の文字列、bus `BUS_BLUETOOTH`）→ `HID_HOST_GET_DEVICE` で eventN（Q2 の ioctl は daemon では `btd_hidhost_numbers()` の 1 か所に閉じ、断られた時は `/dev/system` の INPUT の event の照合に差し替える）→ `.hid` の記録を `confirmed` で書く（§9.3）→ OPEN、`CONNECTED` の答え。
+- **CONNECT（host から）BR/EDR**: bond を読む（無ければ `not-bonded`。`.hid` の記録は無くてもよい: 最初の CONNECT が SDP で HID を確かめ、記録を作る）→ Create Connection（pair.c と同じ parameter。packet type 0xCC18、R1、clock offset 0、role switch 可）→ Connection Complete → Authentication Requested → Link Key Request に保存した鍵で Reply → Authentication Complete（0x06 なら `key-missing`、他の失敗は `security`）→ Set Connection Encryption（on）→ Encryption Change（0 でない値を on）→ Read Encryption Key Size（16 でなければ `key-size` で切る、KNOB）→ L2CAP connect PSM 0x0001 → SDP（§4.3。HID の record が無ければ `no-hid`）→ L2CAP disconnect（SDP）→ L2CAP connect PSM 0x0011 → PSM 0x0013（両方 OPEN）→ SET_PROTOCOL（HIDBootDevice の時）→ **setup を `/dev/input/bridge` へ**（fd は親から §4.10、名前は bond の `name`、無ければ SDP の ServiceName（**未確認**: 属性 0x0100 + language base）、無ければ空で kernel の種類の名前。UTF-8 の境で 51 byte に切る（M3）。`physical_path` は `bluetooth/<controller>/<address>`、`unique_id` は address の文字列、bus `BUS_BLUETOOTH`）→ `INPUT_BRIDGE_GET_DEVICE` で eventN（Q2 の ioctl は daemon では `btd_bridge_numbers()` の 1 か所に閉じ、断られた時は `/dev/system` の INPUT の event の照合に差し替える）→ `.hid` の記録を `confirmed` で書く（§9.3）→ OPEN、`CONNECTED` の答え。
 - **CONNECT LE**: bond（LTK。無ければ `not-bonded`）。auto-connect（§4.9）が出ていれば LE Create Connection Cancel で止めてから、LE Create Connection（pair.c の parameter と同じ、相手の address・型は bond の identity）→ LE Connection Complete → LE Enable Encryption（0x2019: handle、rand 8、ediv 2、LTK 16。SC の bond は rand・ediv 0）→ Encryption Change（status 0x06 PIN or Key Missing は `key-missing`、他の失敗は `security`。bond の key_size が 16 でなければ始めから `key-size`）→ ATT/HOGP（§4.6）→ setup → OPEN。接続の parameter: 相手の Connection Parameter Update Request は l2cap.c の Accept（p004）に LE Connection Update を送る。
 - **相手から（BR/EDR、HIDReconnectInitiate な device）**: Connection Request（address、class、link type ACL）→ router が `.hid` の記録（`candidate` か `confirmed`）があり `wanted` の device だけ受ける（Accept Connection Request 0x0409、**role 0x00 = master になる**（review S6、§Q17。2 台以上が繋ぐ時の scatternet を避ける。**未確認**: HID 1.1.1 の推奨。Role Change が失敗しても続ける））→ Connection Complete → **相手が認証を始めれば** Link Key Request → Reply（鍵が無ければ Negative、相手が切る）→ Encryption Change（on）→ Read Encryption Key Size（16 でなければ切る）。**相手が認証せずに L2CAP の Connection Request を出せば** §4.2 の Pending の流れで自分から Authentication Requested・Set Connection Encryption（§9.8）→ 両方 OPEN → setup（`.hid` の cache の descriptor。`candidate` で descriptor が無ければ SDP を先にし、その間の DATA は 32 まで待ち行列、超えたら捨てて数える）→ OPEN。`CONNECTED` の行は STATUS（と p006 の event）で見える。
 - **LE の相手から**: LE の peripheral の役（相手が central になる）は範囲の外（HOGP の device は peripheral）。再接続は §4.9 の auto-connect。HID の LE の link に来る **SMP の PDU**（review B6）: Pairing Request → Pairing Failed（0x05 Pairing Not Supported）、Security Request（0x0B）→ まだ暗号化していなければ bond の LTK で LE Enable Encryption（既に暗号化済みなら無視）、他は無視して数える。
-- **controller が消えた・reset された時（review B5、§9.5）**: `btd_hid_lost()`（`btd_close` から。session の ERROR も `btd_close` に来る、事実 28）が全ての device の `/dev/hid-host` の fd を close（kernel が key を離す）、l2cap・reassembly・sdp・att・hog の状態と待ち行列を捨て、state を IDLE に、router の表を空にする。`wanted` は保つ。新しい controller が READY になれば `btd_hid_refresh()`（§4.9）が再接続を始める。
-- **切断**: Disconnection Complete（理由を記録: 0x08 supervision timeout、0x13 remote user、0x16 local、0x05 authentication failure …）→ `/dev/hid-host` の fd を close（kernel が key を離す）→ channel の表・ATT の状態を捨てる → `wanted` なら再接続の予定（§4.9）。**DISCONNECT（人から）**: BR/EDR は HID_CONTROL は送らず（VCU は unpair の意味）L2CAP の Disconnect（interrupt → control）→ HCI Disconnect（0x13）。LE は HCI Disconnect。`wanted = 0`（§Q5）。
+- **controller が消えた・reset された時（review B5、§9.5）**: `btd_hid_lost()`（`btd_close` から。session の ERROR も `btd_close` に来る、事実 28）が全ての device の `/dev/input/bridge` の fd を close（kernel が key を離す）、l2cap・reassembly・sdp・att・hog の状態と待ち行列を捨て、state を IDLE に、router の表を空にする。`wanted` は保つ。新しい controller が READY になれば `btd_hid_refresh()`（§4.9）が再接続を始める。
+- **切断**: Disconnection Complete（理由を記録: 0x08 supervision timeout、0x13 remote user、0x16 local、0x05 authentication failure …）→ `/dev/input/bridge` の fd を close（kernel が key を離す）→ channel の表・ATT の状態を捨てる → `wanted` なら再接続の予定（§4.9）。**DISCONNECT（人から）**: BR/EDR は HID_CONTROL は送らず（VCU は unpair の意味）L2CAP の Disconnect（interrupt → control）→ HCI Disconnect（0x13）。LE は HCI Disconnect。`wanted = 0`（§Q5）。
 - **FORGET の時に接続中**: BR/EDR は control channel に HID_CONTROL VIRTUAL_CABLE_UNPLUG を送ってから切る（design §6.3）。LE は切るだけ。filter accept list・resolving list から消す。
 - setup の write が EINVAL（bounce の落ち、§3）なら **main の loop の timer**（`btd_hid_tick`）で 100 ms おきに 3 回（sleep で loop を止めない、review M10）。ENOSPC は `input-full`（§9.1）、ENXIO・E2BIG・ENODEV・EOPNOTSUPP は `descriptor` で切る。kernel が断る descriptor（電波から来る）で daemon は止まらない。report の write の EINVAL（宣言より短い、知らない長さ）は数えて捨てる（`malformed`、link は保つ。review M7）。512 byte を超える report は write せず捨てて数える（`oversize`、Q22）。
 - timeout: 接続 10 秒（Create Connection Cancel／LE Create Connection Cancel）、認証・暗号化 10 秒、SDP 10 秒、channel 10 秒、HOGP の発見 30 秒（ATT の transaction 30 秒とは別）、全体 60 秒。過ぎたら `timeout` で切る。
@@ -295,14 +295,14 @@ HID の channel（BR/EDR）と HOGP の発見（LE）を始める前に、全て
   - auto-connect の LE Create Connection の scan の parameter は pair の 60 ms/30 ms（50% の duty）を使わず、**interval 0x0800（1.28 秒）・window 0x0012（11.25 ms）**（約 0.9% の duty。bond 済みの device の再接続の広告は密なので間に合う見込み。電力と Wi-Fi の共存のため。review S4。**未確認**: 実機での繋がるまでの時間。i03 の後に 5330 で測って決め直す）。
   - LE Enhanced Connection Complete（subevent 0x0A、31 byte）を受けるため、session の LE event mask を `{0x87, 0x03}` にし、`session_counted_event` が 0x0A も数える（事実 30、review S4。p004 の host 試験の mask の期待値を更新する）。
 - supervision timeout・相手の切断（0x08・0x13・0x16 以外）→ `wanted` のまま → BR/EDR は上の page の規則、LE は auto-connect を出し直す。
-- resume: main.c が `/dev/system` を開いて `KERN_SYSTEM_EVENT_POWER` を購読し（bluetoothd は今 `/dev/system` を開いていない、事実 16。design §5.3 が `sleep.end` に求める **Read Version のやり直しと firmware の load し直し（S0ix で bootloader に戻る時）と、受けて渡していない report の捨て**のうち、この Phase は HID の分（report の捨て = 切断で fd を close、再接続）だけを作り、Read Version のやり直しは p003 の transport の残件として Q1 に行き先を聞く（§Q19）。購読の口は 1 つにし、`btd_hid_resume()` と後の `btd_session_resume()` を同じ event から呼ぶ形にする）、`sleep.end` で `btd_hid_resume()`: OPEN の BR/EDR の link に **L2CAP の Echo Request（signalling CID 1、code 0x08）** を送り、3 秒で Echo Response が無ければ HCI Disconnect して page に戻す（review S5 で改めた: 「5 秒 report が無ければ切る」は打鍵の無いキーボードを resume のたびに切る。S0ix で controller の link の状態だけ残り相手が居ない時のため。**未確認**: AX211 の S0ix の後の link の状態）。Echo Response が来れば何もしない。LE は auto-connect を出し直す（waiting の device）。page の回数の上限（S5）を数え直す。re-enumerate（新しい `/dev/btN`）は p003 の「新しい controller」の経路（`btd_close` → `btd_hid_lost` → READY で `btd_hid_refresh()`）。
+- resume: main.c が `/dev/system` を開いて `KERN_SYSTEM_EVENT_POWER` を購読し（bluetoothd は今 `/dev/system` を開いていない、事実 16。design §5.3 が `sleep.end` に求める **Read Version のやり直しと firmware の load し直し（S0ix で bootloader に戻る時）と、受けて渡していない report の捨て**のうち、この Phase は HID の分（report の捨て = 切断で fd を close、再接続）だけを作り、Read Version のやり直しは p003 の transport の残件として Q1 に行き先を聞く（§Q19）。購読の口は 1 つにし、`btd_hid_resume()` と後の `btd_session_resume()` を同じ event から呼ぶ形にする）、`sleep.end` で `btd_hid_resume()`: OPEN の BR/EDR の link に **L2CAP の Echo Request（signalling CID 1、code 0x08）** を送り、3 秒で Echo Response が無ければ HCI Disconnect して page に戻す（review S5 で改めた: 「5 秒 report が無ければ切る」は打鍵の無いキーボードを resume のたびに切る。S0ix で controller の link の状態だけ残り相手が居ない時のため。**未確認**: AX211 の S0ix の後の link の状態）。Echo Response が来れば何もしない。LE は auto-connect を出し直す（waiting の device）。page の回数の上限（S5）を数え直す。re-enumerate（新しい `/dev/bluetoothN`）は p003 の「新しい controller」の経路（`btd_close` → `btd_hid_lost` → READY で `btd_hid_refresh()`）。
 - DISCONNECT の後（`wanted = 0`）: 相手からの Connection Request は Reject（§Q5）。CONNECT で `wanted = 1` に戻る。daemon の再起動で `wanted` は 1 に戻る（記憶しない）。
 - 鍵の離し: 切断の経路で fd を close するだけ（kernel が離す、事実 4）。daemon が落ちた時も kernel が fd を閉じるので残らない。
 
 #### 4.10 privsep の拡張
 
-- 子 → 親の datagram に `OPEN-HID` を足す。親は `/dev/hid-host` を `O_RDWR|O_CLOEXEC` で開けて `OK /dev/hid-host` と SCM_RIGHTS で答え、自分の写しを close する。失敗は `ERR <errno>`（EBUSY: 6 枚、EPERM）。親は枚数を数えない（上限は kernel の `HID_HOST_OPENS_MAX`。子が閉じたかを親は知れないので、親の側の数えは誤る）。送られる途中の fd（子が受け取る前に死んだ時）は、子の死で親も終わり socketpair が閉じられて kernel が捨てる（open の枠を占め続けない。review M9）。
-- 親の変更はこの 1 verb だけ。親の `OPEN` の path の検査（`/dev/bt` と 1〜2 桁）は変えない。
+- 子 → 親の datagram に `OPEN-HID` を足す。親は `/dev/input/bridge` を `O_RDWR|O_CLOEXEC` で開けて `OK /dev/input/bridge` と SCM_RIGHTS で答え、自分の写しを close する。失敗は `ERR <errno>`（EBUSY: 6 枚、EPERM）。親は枚数を数えない（上限は kernel の `INPUT_BRIDGE_OPENS_MAX`。子が閉じたかを親は知れないので、親の側の数えは誤る）。送られる途中の fd（子が受け取る前に死んだ時）は、子の死で親も終わり socketpair が閉じられて kernel が捨てる（open の枠を占め続けない。review M9）。
+- 親の変更はこの 1 verb だけ。親の `OPEN` の path の検査（`/dev/bluetooth` と 1〜2 桁）は変えない。
 
 #### 4.11 HID の device の記録（`hidcache.[ch]`。第 1 版の「bond の file に HID の field」は review B4 で改めた → §9.3）
 
@@ -346,13 +346,13 @@ freestanding で `hid-report.c`・`hid-digitizer.c`・`hid-touch.c`・`hid-input
 
 #### 7.2 host: hid-report.c の fuzz（`plan/ws143/tests/hid-report-fuzz.sh`、`.c`、design §5.2 [F6]）
 
-ASan・UBSan（freestanding の file を `-fsanitize=address,undefined` で compile できるかは**未確認**: `-ffreestanding` と sanitizer の組み合わせは clang で通る見込み。通らなければ試験の側の stand-in の `kern_malloc` に赤帯を付ける）。固定の seed、1 回 60 秒まで。(a) ランダムな descriptor（item の形を守るランダム: short item の tag・type・size、long item、collection の深さと ID の数を上限の周りで振る）→ `drv_hid_input_prepare` は 0・EINVAL・E2BIG・ENOMEM・**EOPNOTSUPP**（review M2）だけを返し、成功なら `report_max ≤ 1025`（parser の上限。hid-host の write の上限 512 とは別）、capability の数と axis の数は上限の中。(b) 本物の descriptor（boot keyboard・boot mouse・5330 touchpad・pen・multitouch）の変異（byte の置換・挿入・削除・切り詰め）。(c) parse の成功した layout にランダムと変異の report（長さ 0〜1025）を `drv_hid_input_report` → 落ちない、emit の type・code が capability の中、EV_KEY の code ≤ KEY_MAX。回数と見つけた物を出力。回帰に使うので Q1 に master の Tools への登録を依頼する。
+ASan・UBSan（freestanding の file を `-fsanitize=address,undefined` で compile できるかは**未確認**: `-ffreestanding` と sanitizer の組み合わせは clang で通る見込み。通らなければ試験の側の stand-in の `kern_malloc` に赤帯を付ける）。固定の seed、1 回 60 秒まで。(a) ランダムな descriptor（item の形を守るランダム: short item の tag・type・size、long item、collection の深さと ID の数を上限の周りで振る）→ `drv_hid_input_prepare` は 0・EINVAL・E2BIG・ENOMEM・**EOPNOTSUPP**（review M2）だけを返し、成功なら `report_max ≤ 1025`（parser の上限。input bridge の write の上限 512 とは別）、capability の数と axis の数は上限の中。(b) 本物の descriptor（boot keyboard・boot mouse・5330 touchpad・pen・multitouch）の変異（byte の置換・挿入・削除・切り詰め）。(c) parse の成功した layout にランダムと変異の report（長さ 0〜1025）を `drv_hid_input_report` → 落ちない、emit の type・code が capability の中、EV_KEY の code ≤ KEY_MAX。回数と見つけた物を出力。回帰に使うので Q1 に master の Tools への登録を依頼する。
 
-#### 7.3 host: `/dev/hid-host` の純粋な検査
+#### 7.3 host: `/dev/input/bridge` の純粋な検査
 
-`hid_host_setup_valid()`（magic・version・bus・descriptor_size・reserved・NUL）と report の長さの検査を `hid-host.c` から切り出した純粋な関数として、hid-input-host-test に足す（cdev・file・cred の stand-in は作らない。cdev の経路は QEMU）。
+`input_bridge_setup_valid()`（magic・version・bus・descriptor_size・reserved・NUL）と report の長さの検査を `input-bridge.c` から切り出した純粋な関数として、hid-input-host-test に足す（cdev・file・cred の stand-in は作らない。cdev の経路は QEMU）。
 
-#### 7.4 host: bluetoothd（`bt-daemon-host-test.sh` に足す、新しい `bt-hid-host-test.c`）
+#### 7.4 host: bluetoothd（`bt-daemon-host-test.sh` に足す、新しい `bt-input bridge-test.c`）
 
 - sdp: request の組み立ての byte、応答の解析（§6 の固定の record、continuation 2 回、同じ continuation を返し続ける相手、入れ子 9 段、長さが残りを超える要素、uint の size の違い、HIDDescriptorList が無い、4097 byte の descriptor）、fuzz。
 - hidp: header の組み立てと解析、HANDSHAKE の値、DATA の type、1025 byte の DATA。
@@ -361,13 +361,13 @@ ASan・UBSan（freestanding の file を `-fsanitize=address,undefined` で comp
 - l2cap: inbound の Connection Request（policy の accept・**Pending → 暗号化 → 成功、Pending → 失敗 → Security Block**・PSM not supported・No resources）、Configure Request の Flush Timeout・QoS（best effort・guaranteed を共に受ける）・RFC（basic・ERTM）・FCS、`opened`・`closed` の effect、`response[48]` に収まること、Echo Request/Response。
 - att の server: Exchange MTU Request への Response、各 request への Error Response の opcode・handle・code、command が捨てられること。
 - router: handle・address の配り、知らない相手の Connection Request の Reject、`.hid` のある（wanted）相手の Accept（role 0x00）、wanted=0 の Reject、Disconnection Complete と同じ handle の再利用、**bond 済みの HID の address から来る IO Capability Request・User Confirmation Request・PIN Code Request・Link Key Notification が Negative・無視になり鍵が変わらないこと（B6）**、HID の LE の link の SMP Pairing Request に Pairing Failed、Security Request で LE Enable Encryption。pair.c の既存の試験（bt-link-host-test）の「相手から始まる pairing の拒否」を router に移す。
-- hid（偽の controller の台本 + 偽の `/dev/hid-host` = socketpair の片方を読む）: **PAIRED からの引き継ぎ（同じ handle で SDP → channel → setup、pair は切らない。HID らしくない class では pair が切る。B2）**、BR/EDR の CONNECT の全段（setup の byte、report の write、close）、key-missing、key-size 7、no-hid、descriptor 4097、ENOSPC → `input-full`、setup の EINVAL 3 回のやり直し（tick）、DATA の待ち行列 32 と溢れ、513 byte の report の捨て（`oversize`）、相手からの接続（Connection Request → 認証 → channel → setup、と、認証の前の L2CAP request → Pending の流れ）、VCU（bond と `.hid` が消える）、DISCONNECT（wanted=0 → 次の Connection Request は Reject）、再接続の backoff の時刻と 10 回の上限と再開のきっかけ（tick）、**`btd_hid_lost()`（fd が全部 close され wanted が残る。B5）**、**PAIR と CONNECT の排他（CONNECT 中の PAIR は busy、OPEN の address への PAIR は先に切る。B7）**、LE の CONNECT（LE Enable Encryption の parameter、Encryption Change 0x06 → key-missing、HOGP → setup → notification → write、**発見の前の notification の待ち行列と流し直し（S2）**、HID service 2 つ → device 2 つ、characteristic 65 個）、auto-connect の hold/release（SCAN・PAIRED・FORGET の前の Cancel と後の出し直し、resolving list の変更の前の Address Resolution Enable 0）、LE Enhanced Connection Complete の受け、resume（Echo Request → Response 無しで切る、Response ありで保つ）。
+- hid（偽の controller の台本 + 偽の `/dev/input/bridge` = socketpair の片方を読む）: **PAIRED からの引き継ぎ（同じ handle で SDP → channel → setup、pair は切らない。HID らしくない class では pair が切る。B2）**、BR/EDR の CONNECT の全段（setup の byte、report の write、close）、key-missing、key-size 7、no-hid、descriptor 4097、ENOSPC → `input-full`、setup の EINVAL 3 回のやり直し（tick）、DATA の待ち行列 32 と溢れ、513 byte の report の捨て（`oversize`）、相手からの接続（Connection Request → 認証 → channel → setup、と、認証の前の L2CAP request → Pending の流れ）、VCU（bond と `.hid` が消える）、DISCONNECT（wanted=0 → 次の Connection Request は Reject）、再接続の backoff の時刻と 10 回の上限と再開のきっかけ（tick）、**`btd_hid_lost()`（fd が全部 close され wanted が残る。B5）**、**PAIR と CONNECT の排他（CONNECT 中の PAIR は busy、OPEN の address への PAIR は先に切る。B7）**、LE の CONNECT（LE Enable Encryption の parameter、Encryption Change 0x06 → key-missing、HOGP → setup → notification → write、**発見の前の notification の待ち行列と流し直し（S2）**、HID service 2 つ → device 2 つ、characteristic 65 個）、auto-connect の hold/release（SCAN・PAIRED・FORGET の前の Cancel と後の出し直し、resolving list の変更の前の Address Resolution Enable 0）、LE Enhanced Connection Complete の受け、resume（Echo Request → Response 無しで切る、Response ありで保つ）。
 - hidcache: `.hid` の file の書き読み（descriptor 4096 の 32 行、欠けた行・重複した行・size と合わない時の捨て方）、`candidate` → `confirmed`、bond の無い `.hid` の削除、`btd_keys_list` が `.hid` を飛ばすこと（p004 の試験の形で確かめる）。
 - snoop: btsnoop の header と record の byte（固定の packet の列 → 期待の file と一致）。
 
-#### 7.5 QEMU（T1。image は `build-bt-image.sh`。`config-amd64-bt.mk` に `evdev-probe hid-host-probe` を足す）
+#### 7.5 QEMU（T1。image は `build-bt-image.sh`。`config-amd64-bt.mk` に `evdev-probe input-bridge-probe` を足す）
 
-- `hid-host-p005.sh`（kernel だけ、i01b）: `hid-host-probe` が root で `/dev/hid-host` にキーボード（boot の descriptor、bus 5、名前「Probe Keyboard」）を作り、`evdev-probe -b bluetooth -t 5000` が `/dev/input/eventN` を見つけ（EVIOCGID の bustype 5、EVIOCGNAME）、probe が 'a' の press・release、'b' の press を書き、evdev が KEY_A 1/0・KEY_B 1 を読む。probe が close → evdev は KEY_B 0・SYN と、その後の read の ENODEV（node が消えた）。誤用: setup の前の report（EINVAL）、壊れた magic（EINVAL）、descriptor_size 4097（EINVAL）、FIDO の descriptor（ENXIO）、宣言より短い report（EINVAL）と長い report（受ける）、513 byte の report（EINVAL）、**7 枚目の open（EBUSY）**、6 枚の hid-host と `peninject`・`touchinject` の inject の device が PS/2・usb-kbd と同時に全部 register できる（B1: INPUT_DEVICE_MAX 32）、`runas btuser` の open（EACCES か EPERM）、read（EAGAIN）、`HID_HOST_GET_DEVICE` の番号・`flags`・`report_max` と `evdev-probe` の node が同じ。`systemevents -c input -n 2` が ADD と REMOVE（subject eventN、detail `bus=5`）を出す。**node の持ち主を `ls -ln` で記録する**（root の 0640 のまま、事実 33。S13 の証拠として「kernel の node まで」を明示する）。
+- `input-bridge-p005.sh`（kernel だけ、i01b）: `input-bridge-probe` が root で `/dev/input/bridge` にキーボード（boot の descriptor、bus 5、名前「Probe Keyboard」）を作り、`evdev-probe -b bluetooth -t 5000` が `/dev/input/eventN` を見つけ（EVIOCGID の bustype 5、EVIOCGNAME）、probe が 'a' の press・release、'b' の press を書き、evdev が KEY_A 1/0・KEY_B 1 を読む。probe が close → evdev は KEY_B 0・SYN と、その後の read の ENODEV（node が消えた）。誤用: setup の前の report（EINVAL）、壊れた magic（EINVAL）、descriptor_size 4097（EINVAL）、FIDO の descriptor（ENXIO）、宣言より短い report（EINVAL）と長い report（受ける）、513 byte の report（EINVAL）、**7 枚目の open（EBUSY）**、6 枚の input bridge と `peninject`・`touchinject` の inject の device が PS/2・usb-kbd と同時に全部 register できる（B1: INPUT_DEVICE_MAX 32）、`runas btuser` の open（EACCES か EPERM）、read（EAGAIN）、`INPUT_BRIDGE_GET_DEVICE` の番号・`flags`・`report_max` と `evdev-probe` の node が同じ。`systemevents -c input -n 2` が ADD と REMOVE（subject eventN、detail `bus=5`）を出す。**node の持ち主を `ls -ln` で記録する**（root の 0640 のまま、事実 33。S13 の証拠として「kernel の node まで」を明示する）。
 - `hid-usb-p005.sh`（USB の回帰、i01a）: guest の `-device usb-kbd`（既存、id 無し）に加えて `--qemu-extra "-device usb-kbd,bus=xhci.0,port=5,id=hidkbd -device usb-tablet,bus=xhci.0,port=6,id=hidtab -device usb-mouse,bus=xhci.0,port=7,id=hidmouse"`。`evdev-probe -b usb` が 4 つの node（bus 3）を数え、T1 の QMP で **`input-send-event` に `device` を付けて**（`send-key` は送り先を選べず PS/2 に行き得る、review S10(b)）hidkbd に KEY_A の押し・離し、hidtab に abs の x・y、hidmouse に rel の x +5 を送り、evdev が各 node で KEY_A 1/0、ABS_X/ABS_Y、REL_X 5 を読む。**抜き差し（S10(c)）**: QMP の `device_add usb-kbd,bus=xhci.0,port=8,id=hotkbd` → node が増える（ADD の event）、hotkbd に KEY_B の押しだけを送る → `device_del hotkbd` → evdev が **KEY_B 0 と SYN を読んでから ENODEV**（detach → unpublish → input.c が離す、§2 の危険 (c)）、REMOVE の event。QMP の socket は guest.py が `-qmp unix:<runtime>/qmp.sock,server,nowait` で開いている（事実 19。`boot-test.sh` の screendump と同じ socket）が、guest.py に汎用の command の口は無いので、T1 の script が `qmp_capabilities` → command の 2 行を socket に書く小さな手順（python の `socket` と `json`）を持つ。guest の usb-kbd の node を `evdev-probe` が開いている間、compositor の読みは要らない（この image は Files の image で desktop は無い）。
 - `bt-hid-p005.sh`（i02 以降。bt-pair-p004.sh の形。daemon は `-s /tmp/btd.snoop` で起こす）: (1) `bt pair 01`（CONFIRM に y、p004 のまま。PAIRED の行は `l2cap=1` のまま）→ **切らずに引き継ぎ**（§9.2）→ `bt status` が `state=open input=/dev/input/eventN transport=hid`、`evdev-probe -b bluetooth` が KEY_A 1/0、KEY_B 1 を読む、`bt disconnect 01` → evdev が KEY_B 0 と ENODEV、`bt status` が `reconnect=off`。`bt connect 01` → open。(2) `bt pair 02`（CONSENT に y）→ 引き継ぎ → open、evdev が REL_X 5 → 4 秒後に loopback が切る → `state=waiting` → 1 秒後に相手から再接続（認証の前の L2CAP request → Pending の流れ）→ open、REL_X が続く（`bt status` の `since` が新しい）。`bt connect 02` は `ERROR unreachable`（NormallyConnectable=false の相手は host の page に答えない）。`bt disconnect 02` の後に loopback の Connection Request は Reject（loopback は 1 回しか再接続しないので、この確かめは host 試験）。(3) 試験が root で `/var/db/bluetooth/00:11:22:33:44:55/0A:0B:0C:0D:0E:04-le-public` を書く（`type=le-public ltk=… ediv=0 rand=0000000000000000 key_size=16 authenticated=0 secure=1 legacy=0`、0600、owner 80）→ `bt connect 0A:0B:0C:0D:0E:04 le-public` → `transport=hog input=…`、evdev が REL_X 5 を 1 秒ごと、`bt status` に `battery=80`。`bt disconnect 04`。(4) 権限: `runas btuser bt connect …` は `ERROR permission`、`runas btuser bt status` は通る。(5) daemon の再起動（kill → `/sbin/bluetoothd &`）: 01（host から）が自動で open、04（auto-connect の filter accept list、loopback が LE Connection Complete）が open、02 は `waiting`（相手から来るまで）。(6) `bt forget 01`（接続中: VCU → 切断 → bond と `.hid` の file が消える）。(7) 回帰: `bt-pair-p004.sh`・`bt-daemon-p003.sh`・`bt-loopback-p002.sh` が **変更なしで PASS**（01・02 の pairing の振る舞いは変えない。p003 の Inquiry の名前・class はそのまま。04 は広告に出さない。p004 の「01 の再 pairing」は OPEN の address への PAIR として hid が先に切る（§9.7）。事実 34）。(8) `hid-usb-p005.sh` と同じ guest で USB の node が残っていること（bus 3 の node の数）。(9) **controller が消えた時（B5）**: 試験が daemon を止め、`bt-probe -W 15000` を打ってから daemon を起こす（p003 の形、事実 34）→ 01 が open（KEY_B 押したまま）→ 15 秒で loopback が withdraw → evdev が KEY_B 0 と ENODEV、`bt show` が `closed (lost` → 再登録の後 ready → 01 が自動で open に戻る。(10) `/tmp/btd.snoop` が btsnoop の header で始まり、host に写して（guest.sh の複写）記録を残す（tshark が host に無いので照合は手で、または入れてから。§9.11）。(11) PAIR と CONNECT の排他: `bt connect 01` の直後（connecting の間）の `bt pair 07` が `ERROR busy`。
 - 合否: 各 `ok` と最後の `bt-hid-p005: PASS`。1 回の試験は 3 分以内を目標（loopback の待ち時間は秒の単位）。
@@ -392,9 +392,9 @@ review-1（[review-1.md](review-1.md)）の Blocking・Should への設計の答
 #### 9.1 B1: input device の slot（`INPUT_DEVICE_MAX`）
 
 - 事実 26: system 全体で 8。5330 は PS/2 2 + i2c-hid 1 + USB の receiver（interface ごと）+ Bluetooth で超え、乗っ取られた子が全部取れる。
-- 形: `INPUT_DEVICE_MAX` を **32** に（`input_device_reserved[32]`、rdev `0x00030000+N` と `eventN` の名前は 32 でも足る。`input_device_release` の `number < INPUT_DEVICE_MAX` の検査はそのまま）。hid-host は **`HID_HOST_OPENS_MAX` 6**（1 open = 1 device + touch なら 2 slot → 最大 12）で全部は取れない。ENOSPC は daemon が `ERROR input-full`（§5）。
-- compositor の `KWL_INPUT_MAX 16`（事実 26）: kernel の node が 16 を超えると compositor が 17 個目以降を開かない。この Phase の QEMU（PS/2 2 + usb 4 + hid-host 6 + inject 2 = 14）は超えない。**16 → 32 への追従は p006（desktop）の仕事として記録**（§Q23 と一緒に Q1 へ）。
-- 試験: §7.5 の `hid-host-p005.sh` で 6 枚の hid-host と inject の device と USB・PS/2 が全部 register できること、7 枚目は EBUSY。ENOSPC の経路は QEMU で 32 個を作る道具が無いので host 試験（glue の stand-in が ENOSPC を返す、§7.1）と code の review。
+- 形: `INPUT_DEVICE_MAX` を **32** に（`input_device_reserved[32]`、rdev `0x00030000+N` と `eventN` の名前は 32 でも足る。`input_device_release` の `number < INPUT_DEVICE_MAX` の検査はそのまま）。input bridge は **`INPUT_BRIDGE_OPENS_MAX` 6**（1 open = 1 device + touch なら 2 slot → 最大 12）で全部は取れない。ENOSPC は daemon が `ERROR input-full`（§5）。
+- compositor の `KWL_INPUT_MAX 16`（事実 26）: kernel の node が 16 を超えると compositor が 17 個目以降を開かない。この Phase の QEMU（PS/2 2 + usb 4 + input bridge 6 + inject 2 = 14）は超えない。**16 → 32 への追従は p006（desktop）の仕事として記録**（§Q23 と一緒に Q1 へ）。
+- 試験: §7.5 の `input-bridge-p005.sh` で 6 枚の input bridge と inject の device と USB・PS/2 が全部 register できること、7 枚目は EBUSY。ENOSPC の経路は QEMU で 32 個を作る道具が無いので host 試験（glue の stand-in が ENOSPC を返す、§7.1）と code の review。
 
 #### 9.2 B2: PAIRED の後は切らずに同じ link で HID を始める（引き継ぎ）
 
@@ -442,14 +442,14 @@ review-1（[review-1.md](review-1.md)）の Blocking・Should への設計の答
 
 #### 9.9 S9・M7・Q22: report の write の長さ
 
-- 事実 31: 分割は chunk の error で止まる。`HID_HOST_REPORT_MAX` を **512**（= `SYSCALL_IO_CHUNK`、ID の byte を含む）にして report の write が分割されない長さにし、kernel は「宣言より短い → EINVAL、長い → 余りを読まずに受ける」。setup の分割は先頭の chunk の EINVAL で止まり、黙って 2 つの report に decode される経路は無い。daemon は 512 を超える report を捨てて数える（`oversize`。BR/EDR の HID の report は MTU 672 − 1 まで来得るが、キーボード・マウスの report は十数 byte）。
+- 事実 31: 分割は chunk の error で止まる。`INPUT_BRIDGE_REPORT_MAX` を **512**（= `SYSCALL_IO_CHUNK`、ID の byte を含む）にして report の write が分割されない長さにし、kernel は「宣言より短い → EINVAL、長い → 余りを読まずに受ける」。setup の分割は先頭の chunk の EINVAL で止まり、黙って 2 つの report に decode される経路は無い。daemon は 512 を超える report を捨てて数える（`oversize`。BR/EDR の HID の report は MTU 672 − 1 まで来得るが、キーボード・マウスの report は十数 byte）。
 
 #### 9.10 S10: USB の回帰の確かめ方
 
 - (a) raw（FIDO）の分岐は書き換えない（§2）。確かめ: diff で該当の行が変わっていないこと、ws161 の QEMU の試験（`plan/ws161/tests/fidoctl-p004.sh`・`fidoctl-p005.sh`・hidraw の loopback の試験）を i01a の T1 の依頼に入れる（loopback の鍵は usb-hid を通らないが、hidraw の class が壊れていないことは見える）、本物の鍵（YubiKey）は i04 で 5330 の USB に挿して `hidraw-probe`（任意）。QEMU の `u2f-emulated` は**未確認**（T1 が試せれば足す）。
 - (b)(c) は §7.5 の `hid-usb-p005.sh` に反映（`input-send-event` の `device`、`device_add`/`device_del` で抜き差しと key の離し）。
 - (d) は §7.1 に反映（register の情報の新旧一致）。
-- (e) は §2 の配置に反映（pcat に hid-input.o、`CONFIG_HID_HOST`、`hidraw-describe.c`）。build の受け入れに pcat（`config/ci/config-pcat.mk`）と arm64 を含める。
+- (e) は §2 の配置に反映（pcat に hid-input.o、`CONFIG_INPUT_BRIDGE`、`hidraw-describe.c`）。build の受け入れに pcat（`config/ci/config-pcat.mk`）と arm64 を含める。
 
 #### 9.11 S11: 外部の判定と loopback の追加
 
@@ -460,7 +460,7 @@ review-1（[review-1.md](review-1.md)）の Blocking・Should への設計の答
 #### 9.12 S2・S3: HOGP の再接続の直後の notification と上限
 
 - S2: bond 済みの client の CCC は接続をまたいで保たれる（GATT の規定、節は**未確認**）ので、再接続の直後の notification が発見の前に来る。待ち行列（32）に (handle, 値) を入れ、setup の後に流し直す（§4.6 の 11）。Q6 の「LE は CCC を書くまで来ない」は誤りだったので改めた。handle と Report Map の cache は作らない（firmware の更新で狂う。待ち行列で足りる: 遅れは発見の時間（1 秒前後）だけ）。
-- S3: characteristic 64・Report 32、HID service 2 つまで（device を 2 つ作る）、Read Blob の終わりの 3 条件（§4.6）。`HID_HOST_OPENS_MAX` 6 は device の数なので、HID service が 2 つの device は 2 枚使う（`limit` の計算に入れる）。
+- S3: characteristic 64・Report 32、HID service 2 つまで（device を 2 つ作る）、Read Blob の終わりの 3 条件（§4.6）。`INPUT_BRIDGE_OPENS_MAX` 6 は device の数なので、HID service が 2 つの device は 2 枚使う（`limit` の計算に入れる）。
 
 #### 9.13 S5・S6: 再接続の policy と role
 
@@ -477,14 +477,14 @@ M1 → 事実 23。M2 → §3（FIDO は ENXIO、parser の EOPNOTSUPP を errno
 
 #### 9.16 S12・S13: 依存と attempt、「compositor に届く」の証拠
 
-- S12: i02 の依存は「**p004 の cleared（最後の attempt が main に統合されている）**」に直した（p004 は test-wait で i03 を再依頼中、同じ file を触る）。i04 の「p004 の i03」は 5330 の実機の attempt を指す（ws.md の「i03 は 5330」）。Q2 の ioctl は i01b の前にユーザーの決定が来なければ推しで作り、daemon・試験・kernel の 3 か所の 1 関数ずつに閉じる（Q1 の指示）。実機の gate を i04 として置く（§Q20、推奨: p006 の前に必須）。i01 は **i01a（glue の refactor と USB の回帰）と i01b（`/dev/hid-host` と UAPI）に分ける**（§Q21: 危険の大きい refactor の T1 の証拠を UAPI の議論と分け、i01a の diff を小さく保つ）。
+- S12: i02 の依存は「**p004 の cleared（最後の attempt が main に統合されている）**」に直した（p004 は test-wait で i03 を再依頼中、同じ file を触る）。i04 の「p004 の i03」は 5330 の実機の attempt を指す（ws.md の「i03 は 5330」）。Q2 の ioctl は i01b の前にユーザーの決定が来なければ推しで作り、daemon・試験・kernel の 3 か所の 1 関数ずつに閉じる（Q1 の指示）。実機の gate を i04 として置く（§Q20、推奨: p006 の前に必須）。i01 は **i01a（glue の refactor と USB の回帰）と i01b（`/dev/input/bridge` と UAPI）に分ける**（§Q21: 危険の大きい refactor の T1 の証拠を UAPI の議論と分け、i01a の diff を小さく保つ）。
 - S13: 事実 33 のとおり、p005 の証拠は root の `evdev-probe` で読む kernel の node まで。login の後に現れた node を seat の人に渡すのは sessiond の仕事で未実装（USB の hotplug も同じ）。Q1 の条件「compositor の evdev に届く」は p005 では「kernel の evdev の node まで」と明示し、残りは §Q23。
 
 | ID | 判断 | 理由 |
 | --- | --- | --- |
-| Q1 | **判断待ち（ユーザー）**: i2c-hid は共有 glue に乗せない（USB と hid-host だけ）。design.md §5.2 の「USB・I2C・hid-host が共有する module」の文言からの縮小 | i2c-hid は touch の device だけを出し、key の集約・pen・名前の規則を使わない（事実の表の i2c-hid の行）。乗せ替えは 5330 の touchpad（実機だけ）の回帰の危険に見合う益が無い。選ばなかった案: (b) 乗せる（touch だけの経路を glue に通す。回帰は p008 の実機で）→ Bluetooth の Phase に無関係の危険を足す。Future Work に「i2c-hid を hid-input に乗せる」を登録（Q1 に依頼） |
-| Q2 | **判断待ち（ユーザー）**: `HID_HOST_GET_DEVICE`（eventN の番号と malformed の数）の ioctl を D3 の形に足す | 無いと daemon が自分の作った node を知れず、`CONNECTED input=…`・STATUS・試験が `/dev/system` の INPUT の event と `bus=5 name=` の照合に頼る（競合し、同じ名前の device が 2 つあると見分けられない）。選ばなかった案: (b) ioctl 無し、daemon が `/dev/system` の event を見る → 上の弱さ。(c) write の返り値に番号を乗せる → write の約束（size を返す）を壊す |
-| Q3 | Bluetooth の HID は hidraw に出さない。FIDO の descriptor は hid-host が ENXIO（review M2: parser の EOPNOTSUPP と分ける） | hidraw は「input でない raw の interface」の口（ws161 U1）。キーボードを hidraw にも出すと、grab していない読み手に打鍵が見える口が増える。Bluetooth の FIDO は WS161 の範囲でも無い。将来要れば `hid_host_setup` に flag を足して hidraw に出す（reserved を使う） |
+| Q1 | **判断待ち（ユーザー）**: i2c-hid は共有 glue に乗せない（USB と input bridge だけ）。design.md §5.2 の「USB・I2C・input bridge が共有する module」の文言からの縮小 | i2c-hid は touch の device だけを出し、key の集約・pen・名前の規則を使わない（事実の表の i2c-hid の行）。乗せ替えは 5330 の touchpad（実機だけ）の回帰の危険に見合う益が無い。選ばなかった案: (b) 乗せる（touch だけの経路を glue に通す。回帰は p008 の実機で）→ Bluetooth の Phase に無関係の危険を足す。Future Work に「i2c-hid を hid-input に乗せる」を登録（Q1 に依頼） |
+| Q2 | **判断待ち（ユーザー）**: `INPUT_BRIDGE_GET_DEVICE`（eventN の番号と malformed の数）の ioctl を D3 の形に足す | 無いと daemon が自分の作った node を知れず、`CONNECTED input=…`・STATUS・試験が `/dev/system` の INPUT の event と `bus=5 name=` の照合に頼る（競合し、同じ名前の device が 2 つあると見分けられない）。選ばなかった案: (b) ioctl 無し、daemon が `/dev/system` の event を見る → 上の弱さ。(c) write の返り値に番号を乗せる → write の約束（size を返す）を壊す |
+| Q3 | Bluetooth の HID は hidraw に出さない。FIDO の descriptor は input bridge が ENXIO（review M2: parser の EOPNOTSUPP と分ける） | hidraw は「input でない raw の interface」の口（ws161 U1）。キーボードを hidraw にも出すと、grab していない読み手に打鍵が見える口が増える。Bluetooth の FIDO は WS161 の範囲でも無い。将来要れば `input_bridge_setup` に flag を足して hidraw に出す（reserved を使う） |
 | Q4 | **判断待ち（ユーザー、製品の振る舞い。review B2 で問いを直した）**: 「pairing の後、HID らしい device（class が Peripheral／appearance が HID）は**切らずに同じ link で接続を続け**、すぐ使える状態にする」（推し）／「pairing の後は切り、人が `bt connect`（Settings の「接続」）で繋ぐ」。推しで作り、`btd_hid_policy_after_pair()` の 1 関数で切り替える（§9.2） | 利用者は pairing の後にすぐ使えることを期待する。第 1 版の「切ってから CONNECT し直す」は HIDNormallyConnectable=false の device が二度と繋がらない（review B2）ので案から外した。「切る」を選んでも `.hid` の `candidate` で page scan と相手からの接続は受ける（device が自分で繋ぎ直す物は使える）。p004 の Q5「接続を保つのは HID の仕事」と整合 |
 | Q5 | **判断待ち（ユーザー、製品の振る舞い）**: 人が DISCONNECT した device は、CONNECT・再 pairing・daemon の再起動まで、相手からの再接続を Reject する（`wanted=0`）。推しで作り、`btd_hid_policy_after_disconnect()` の 1 関数で「常に受ける」に切り替えられる形 | 「切断」の直後に device が自分で繋ぎ直すのは人の意図に反する。選ばなかった案: 相手からの接続は常に受ける（bond 済みなので）→ 切断がすぐ戻る。記憶しない（再起動で戻る）のは、電源の入れ直しで使えなくなる事故を避けるため |
 | Q6 | **改めた（review B4・S2）**: BR/EDR は SDP の結果（descriptor・flags・PnP）を **別の file `.hid`** に cache し、相手からの再接続で使う。LE は毎回 GATT の発見で、発見の前に来た notification は待ち行列（32）に入れて流し直す | 相手からの BR/EDR の再接続は channel が開いた直後に DATA が来る。bond の file は 2048 byte の上限（事実 27）。LE は bond 済みの client の CCC が保たれ再接続の直後に notification が来るので待ち行列が要る（第 1 版の「CCC を書くまで来ない」は誤り）。handle の cache は firmware の更新で狂うので作らない |
@@ -494,7 +494,7 @@ M1 → 事実 23。M2 → §3（FIDO は ENXIO、parser の EOPNOTSUPP を errno
 | Q10 | **改めた（review S7）**: L2CAP の Flush Timeout と QoS（Guaranteed を含む）は受けて記録だけ、RFC は basic だけ | HID の device は interrupt channel に Flush Timeout を求める物があり、今の「Unknown option」の断りでは繋がらない（事実 15）。controller の flush timeout を書く（Write Automatic Flush Timeout）のは相手の送りの話ではなく、自分の送りは無いので意味が無い。QoS を Unacceptable で返すと接続をあきらめる device の恐れ（推測）があり、こちらは QoS を実施しないので受ける方が安全 |
 | Q11 | LE の再接続は controller の filter accept list + resolving list の auto-connect。無い controller では背景の passive scan。自分の RPA（D11c）は i03 の後に判断 | 電波と電力の面で auto-connect が普通の形。自分の RPA は相手に自分の IRK を配る鍵の配りの変更が要り、p004 の smp.c の「initiator は鍵を配らない」を変える。D11c の「使う」は保つが、この Phase では相手の RPA の解決まで |
 | Q12 | HOGP の notification に付ける report ID は Report Reference から。1 つでも ID が 0 でなければ付ける、全部 0 なら付けない | Report Map が ID を使うか daemon は parse せずに知れない（kernel の parser に任せる）。HOGP の Report Reference は Map の ID をそのまま持つ（ID を使わない Map では 0）。**未確認**: HOGP 1.0 §4.x の文言 |
-| Q13 | kernel の `/dev/hid-host` の open は root だけ（devfs 0600 に加えて） | chmod で広げられない。bluetoothd の子は open せず親から fd を受ける（D16 (a)）ので、子の uid で開ける必要が無い。input-inject と同じ |
+| Q13 | kernel の `/dev/input/bridge` の open は root だけ（devfs 0600 に加えて） | chmod で広げられない。bluetoothd の子は open せず親から fd を受ける（D16 (a)）ので、子の uid で開ける必要が無い。input-inject と同じ |
 | Q14 | BTD_HID_MAX は 6 | session の数える link は 8（`BTD_LINKS_MAX`）。pairing 1 と、相手から来て断る前の接続 1 を残す |
 | Q15 | SET_PROTOCOL（Report）は HIDBootDevice の device にだけ送る | HID 1.1.1 は boot protocol を持たない device に SET_PROTOCOL を送ることを許していない（**未確認**）。Report が既定なので送らなくても動く |
 | Q16 | 名前は daemon が UTF-8 の境で 51 byte に切る（review M3 で 63 から）。kernel は 64 以上を EINVAL | 文字の規則を kernel に持たせない。design §5.2 [N16]。51 = 63 − `" Touchscreen"` の 12 |
@@ -502,10 +502,10 @@ M1 → 事実 23。M2 → §3（FIDO は ENXIO、parser の EOPNOTSUPP を errno
 | Q18 | L2CAP の channel の表は HID の device ごと（pair と同じ形） | 事実 15: pair は自分の `btd_l2cap`・`btd_reassembly` を持つ。共有の 1 表は 18 > 16 で上限の変更と identifier・Information の状態の混在が要る（§4.2） |
 | Q19 | **決定（Q1、2026-10-08）**: `sleep.end` の Read Version のやり直し・firmware の load し直し（design §5.3）は **p003 の残件に分ける**（Sleep はベータ3）。p005 は `sleep.end` を hid.c に渡す口だけ | bluetoothd は `/dev/system` を今開いていない（事実 16）。transport（p003）の仕事で HID の受け入れとは別。p005 で両方作ると transport の firmware の経路（5330 だけで確かめられる）に依存する |
 | Q20 | **判断待ち（Q1・ユーザー）**: i04（5330 で BR/EDR 1 台と LE 1 台の実物）を p006 の前の **必須の gate** にする（推奨）／任意のまま | review S12: B2（引き継ぎ）・B3（ATT server）・S1（Pending の流れ）・S2（再接続の直後の notification）は loopback では作り手が同じで見えず、実機でしか分からない。任意のままだと p006 の desktop の後の p008 で初めて分かる。要る物: ユーザーの device（design §9 の「情報のお願い」） |
-| Q21 | i01 を **i01a（glue の refactor と USB の回帰）と i01b（`/dev/hid-host` と UAPI）に分ける** | 危険の大きい refactor（全 USB の入力）の T1 の証拠を、新しい UAPI（Q2 の判断を含む）と分けて先に取る。i01a の diff は usb-hid.c と hid-input.[ch] と build の規則だけで review しやすい。選ばなかった案: 1 つのまま → T1 の FAIL がどちらの物か分かりにくく、Q2 の判断が refactor を止める |
-| Q22 | `HID_HOST_REPORT_MAX` は 512（= `SYSCALL_IO_CHUNK`、ID の byte を含む） | review S9: 513 以上の write は記憶の圧迫で 512 と残りに分割され、断片が report として decode され得る。512 以下なら分割は起きない（事実 31）。キーボード・マウスの report は十数 byte。大きい report（BR/EDR の最大 671）は daemon が捨てて数える。選ばなかった案: kernel が report ID ごとの厳密な長さで断片を断る → 長さ違いの padding の device を使えなくし、残りの断片が別の ID に化ける経路が残る |
+| Q21 | i01 を **i01a（glue の refactor と USB の回帰）と i01b（`/dev/input/bridge` と UAPI）に分ける** | 危険の大きい refactor（全 USB の入力）の T1 の証拠を、新しい UAPI（Q2 の判断を含む）と分けて先に取る。i01a の diff は usb-hid.c と hid-input.[ch] と build の規則だけで review しやすい。選ばなかった案: 1 つのまま → T1 の FAIL がどちらの物か分かりにくく、Q2 の判断が refactor を止める |
+| Q22 | `INPUT_BRIDGE_REPORT_MAX` は 512（= `SYSCALL_IO_CHUNK`、ID の byte を含む） | review S9: 513 以上の write は記憶の圧迫で 512 と残りに分割され、断片が report として decode され得る。512 以下なら分割は起きない（事実 31）。キーボード・マウスの report は十数 byte。大きい report（BR/EDR の最大 671）は daemon が捨てて数える。選ばなかった案: kernel が report ID ごとの厳密な長さで断片を断る → 長さ違いの padding の device を使えなくし、残りの断片が別の ID に化ける経路が残る |
 | Q23 | **判断待ち（Q1）**: login の後に現れた `/dev/input/eventN` を seat の人に渡す（sessiond が `/dev/system` の INPUT の ADD を聞いて chown）と、compositor の `KWL_INPUT_MAX 16` の 32 への追従の行き先 | 事実 26・33。p005 の HID の入力は root の `evdev-probe` で kernel の node までを確かめる。compositor（user）が開けるかは sessiond の hotplug の仕事で、USB の hotplug も同じ既存の穴（bug の ticket の候補）。推奨: p006（desktop）の最初の作業、または sessiond の小さな Phase |
-| Q24 | hid-host の build の knob は新しい `CONFIG_HID_HOST`（Makefile の既定 y、amd64 の vmunix.mk だけが見る） | review S10(e): `CONFIG_DRIVER_USB_BT` は pcat でも既定 y で、それを条件にすると pcat の link が崩れる。pcat・arm64 には hid-host を入れない |
+| Q24 | input bridge の build の knob は新しい `CONFIG_INPUT_BRIDGE`（Makefile の既定 y、amd64 の vmunix.mk だけが見る） | review S10(e): `CONFIG_DRIVER_USB_BT` は pcat でも既定 y で、それを条件にすると pcat の link が崩れる。pcat・arm64 には input bridge を入れない |
 | Q25 | loopback は link ごとの状態に作り直す（i02 の仕事として見積もる） | review B7・S11: 今は 1 組の address と handle（事実 29）。p004 の試験は 01 の HID の link を開いたまま 07・05・06 を pairing するので、BR/EDR の link が 2 つ要る。選ばなかった案: p004 の試験を直す → 回帰の価値を減らす |
 | Q26 | class・appearance が分からない device は pairing の後に HID を試さない（pair が切る） | review B7。試すには SDP の失敗の経路を loopback の 05〜07 に足すことになり、p004 の試験の時間と形が変わる。人が `bt connect` すれば SDP が確かめる |
 
@@ -528,8 +528,8 @@ M1 → 事実 23。M2 → §3（FIDO は ENXIO、parser の EOPNOTSUPP を errno
 | R13 | `/dev/input/eventN` の持ち主と mode（0640、sessiond）: compositor が Bluetooth の node を開けられるか | **改訂 2 で事実 33 を確かめた**: sessiond は login の時の node だけ chown し、hotplug は聞かない → login の後に現れた node は compositor（user）が開けない（USB も同じ既存の穴）。p005 は kernel の node まで（root の `evdev-probe`）。行き先は Q23 |
 | R14 | `bt-pair-p004.sh` の期待（01 の pairing の後に `l2cap=1`、07 の Just Works）が §6 の変更で変わる | 01・02・07 の pairing の流れは変えず、HID は暗号化の後の L2CAP の追加だけ。p004 の試験を回帰に入れる（§7.5 (7)） |
 | R15 | daemon が落ちた時の key | kernel が fd を閉じ、input.c の unregister が離す（事実 4）。daemon に依らない |
-| R16 | 2 つの bluetoothd の instance（再起動の重なり）が `/dev/hid-host` を 6 枚使い切る | 親の `OPEN-HID` は kernel の上限で EBUSY。`/dev/btN` は 1 open なので 2 つ目の daemon は controller を持てない |
-| R17 | UAPI の struct の大きさと rdev の取り違え（第 1 版は sizeof を 4320 と書き（正しくは 4324）、rdev を smartcard の `0x00100000` と重ねていた。2 回目の照合で見つけた） | `_Static_assert(sizeof(struct hid_host_setup) == 4324U)` を hid-host.c と host 試験に置く。rdev は事実 22 の表で `0x00130000` に。実装の attempt で `grep -rn 'DEVICE_BASE\|DEVICE_NUMBER' src` をやり直して表を更新する |
+| R16 | 2 つの bluetoothd の instance（再起動の重なり）が `/dev/input/bridge` を 6 枚使い切る | 親の `OPEN-HID` は kernel の上限で EBUSY。`/dev/bluetoothN` は 1 open なので 2 つ目の daemon は controller を持てない |
+| R17 | UAPI の struct の大きさと rdev の取り違え（第 1 版は sizeof を 4320 と書き（正しくは 4324）、rdev を smartcard の `0x00100000` と重ねていた。2 回目の照合で見つけた） | `_Static_assert(sizeof(struct input_bridge_setup) == 4324U)` を input-bridge.c と host 試験に置く。rdev は事実 22 の表で `0x00130000` に。実装の attempt で `grep -rn 'DEVICE_BASE\|DEVICE_NUMBER' src` をやり直して表を更新する |
 | R18 | 相手からの BR/EDR の接続（HIDReconnectInitiate）が page scan を立てた瞬間から来るが、hid.c の表（`wanted`）がまだ bond の読みの途中 | `btd_hid_refresh()` は bond を全部表に入れてから Write Scan Enable を送る順にする。router は表に無い address の Connection Request を Reject（相手は再試行する） |
 
 ## design-reviewer の結果（review-1、2026-10-08、529cbeb7c）と扱い
@@ -538,7 +538,7 @@ M1 → 事実 23。M2 → §3（FIDO は ENXIO、parser の EOPNOTSUPP を errno
 
 | ID | 指摘 | 扱い |
 | --- | --- | --- |
-| B1 | input device は system で 8 まで（`INPUT_DEVICE_MAX`）。hid-host が全部取れる、ENOSPC の扱いが無い | **§9.1 に反映**: 32 に上げる、`HID_HOST_OPENS_MAX` 6、`ERROR input-full`、試験。compositor の 16 は Q23 |
+| B1 | input device は system で 8 まで（`INPUT_DEVICE_MAX`）。input bridge が全部取れる、ENOSPC の扱いが無い | **§9.1 に反映**: 32 に上げる、`INPUT_BRIDGE_OPENS_MAX` 6、`ERROR input-full`、試験。compositor の 16 は Q23 |
 | B2 | PAIRED の後に切って繋ぎ直す形と `hid=1` の条件で、NormallyConnectable=false の device が二度と繋がらない | **§9.2 に反映**: pair の `handoff` で切らずに同じ link で HID を始める、`.hid` の `candidate` で page scan と相手からの接続を受ける。Q4 の問いと推しを直した |
 | B3 | 相手からの ATT の request に答えない | **§4.5・§9.14 に反映**: 最小の ATT server（Exchange MTU Response、Attribute Not Found、Request Not Supported）。loopback の 04 が Exchange MTU Request を送る |
 | B4 | bond の file に descriptor を入れると 2048 byte の上限で bond が読めなくなる、再 pairing で消える | **§9.3 に反映**: 別の file `.hid`（`hidcache.[ch]`）。keys.c は変えない。再 pairing で `.hid` を消す |
@@ -553,8 +553,8 @@ M1 → 事実 23。M2 → §3（FIDO は ENXIO、parser の EOPNOTSUPP を errno
 | S6 | Accept の role | **Q17 を改めた**: 0x00（master）。**未確認**のまま |
 | S7 | QoS Guaranteed の Unacceptable | **§4.2・Q10 を改めた**: 記録して受ける |
 | S8 | write の文脈の kernel の stack | **§2 に反映**: 作業領域は `struct hid_input` に |
-| S9 | bounce の分割で report が黙って 2 つになる | **§3・§9.9 に反映**: `HID_HOST_REPORT_MAX` 512（Q22）、短い report は EINVAL |
-| S10 | USB の回帰の穴（raw、send-key の送り先、抜き差し、register の情報、pcat・`CONFIG_DRIVER_USB_BT`・hidraw-describe） | **§2・§7.1・§7.5・§9.10 に反映**: raw の分岐は書き換えず ws161 の試験を回帰に、`input-send-event` の `device`、`device_add`/`device_del`、register の情報の比較、`CONFIG_HID_HOST`（Q24） |
+| S9 | bounce の分割で report が黙って 2 つになる | **§3・§9.9 に反映**: `INPUT_BRIDGE_REPORT_MAX` 512（Q22）、短い report は EINVAL |
+| S10 | USB の回帰の穴（raw、send-key の送り先、抜き差し、register の情報、pcat・`CONFIG_DRIVER_USB_BT`・hidraw-describe） | **§2・§7.1・§7.5・§9.10 に反映**: raw の分岐は書き換えず ws161 の試験を回帰に、`input-send-event` の `device`、`device_add`/`device_del`、register の情報の比較、`CONFIG_INPUT_BRIDGE`（Q24） |
 | S11 | 試験の作り手が同じ。btsnoop と tshark、loopback の振る舞いの追加 | **§6・§7.6・§9.11 に反映**: `-s PATH` の btsnoop（`snoop.[ch]`）、tshark は host に無い（事実 37。入れるかは Q1・T1）、loopback の 5 つの追加。CSR の dongle は**未確認** |
 | S12 | 依存（p004 の i02 の PASS は成り立たない）、i04 の曖昧さ、Q2 の時期、実機の gate、i01 の分割 | **§9.16・attempt の表に反映**: 依存は p004 の cleared、i04 は 5330 の実機の gate（Q20、推奨: 必須）、Q2 は 1 か所に閉じて推しで作る（Q1 の指示）、i01 を i01a・i01b に分ける（Q21） |
 | S13 | 「compositor の evdev に届く」の証拠 | **範囲の外・§9.16・Q23 に反映**: p005 は kernel の node まで（root の `evdev-probe`、`ls -ln` で持ち主を記録）。sessiond の hotplug は未実装（事実 33）で Q23 |
@@ -565,7 +565,7 @@ M1 → 事実 23。M2 → §3（FIDO は ENXIO、parser の EOPNOTSUPP を errno
 | M5 | appearance は上位 10 bit | §9.2 |
 | M6 | boot keyboard の descriptor は Appendix E.6 | §6 |
 | M7 | report の write の EINVAL の扱い、長い report | §3・§4.7: 長い物は受ける、EINVAL は数えて捨てる |
-| M8 | `hid_host_device` に flags と report_max | §3 |
+| M8 | `input_bridge_device` に flags と report_max | §3 |
 | M9 | publish の失敗の後の destroy、送られる途中の fd | §3・§4.10 |
 | M10 | setup のやり直しは timer で | §4.7 |
 | M11 | `response[16]` が足りない | §4.2: 48 |
@@ -576,7 +576,7 @@ M1 → 事実 23。M2 → §3（FIDO は ENXIO、parser の EOPNOTSUPP を errno
 | attempt | 範囲 | 受け入れ（Q1 が判定） | 依存 |
 | --- | --- | --- | --- |
 | **i01a: kernel の glue の refactor と USB の回帰** | `hid-input.[ch]`（§2）、usb-hid.c の乗せ替えと規約の全文への合わせ（raw の分岐は触らない）、`input.c` の `INPUT_DEVICE_MAX` 32 と `drv_input_device_number()`、build の規則（amd64・pcat・arm64 に hid-input）、`evdev-probe`、host 試験 §7.1（新旧一致: emit と register の情報）、hid-report の fuzz §7.2、QEMU の `hid-usb-p005.sh`（§7.5: 4 つの USB の device、`input-send-event` の `device`、`device_add`/`device_del` の抜き差しと key の離し）と ws161 の hidraw の試験の回帰 | build warning 0（amd64 の製品の kernel `config/ci/config-amd64.mk`、試験の config `plan/ws143/tests/config-amd64-bt.mk`、`config/ci/config-pcat.mk`、arm64 の `config/ci/config-rpi4.mk`）、`python3 plan/tools/style-check.py` 0、host 試験 PASS（新旧一致、fuzz 60 秒で 0 件）、T1: `hid-usb-p005.sh` PASS と `plan/ws161/tests/fidoctl-p004.sh`（または hidraw の loopback の試験）PASS、`boot-test.sh` の login prompt | D3、Q1（決定前は i2c-hid に触らない） |
-| **i01b: `/dev/hid-host`** | `include/uapi/hid-host.h`・`hid-host.c`・devfs・vfs・`CONFIG_HID_HOST`（§3）、`hid-host-probe`、host 試験 §7.3、QEMU の `hid-host-p005.sh`（§7.5） | build warning 0（同上）、style 0、host 試験 PASS、T1: `hid-host-p005.sh` PASS（6 枚と 7 枚目の EBUSY、ENXIO、key の離し、ADD/REMOVE、`ls -ln` の記録）。Q2 の決定が無い間は `HID_HOST_GET_DEVICE` を入れ、kernel の `hid_host_ioctl`・daemon の `btd_hidhost_numbers()`・試験の 1 関数ずつに閉じる | i01a（T1 の PASS）、Q2（無ければ推し） |
+| **i01b: `/dev/input/bridge`** | `include/uapi/input-bridge.h`・`input-bridge.c`・devfs・vfs・`CONFIG_INPUT_BRIDGE`（§3）、`input-bridge-probe`、host 試験 §7.3、QEMU の `input-bridge-p005.sh`（§7.5） | build warning 0（同上）、style 0、host 試験 PASS、T1: `input-bridge-p005.sh` PASS（6 枚と 7 枚目の EBUSY、ENXIO、key の離し、ADD/REMOVE、`ls -ln` の記録）。Q2 の決定が無い間は `INPUT_BRIDGE_GET_DEVICE` を入れ、kernel の `input_bridge_ioctl`・daemon の `btd_bridge_numbers()`・試験の 1 関数ずつに閉じる | i01a（T1 の PASS）、Q2（無ければ推し） |
 | **i02: bluetoothd の BR/EDR** | router（§4.1・§9.6）、l2cap の inbound・Pending・option・Echo（§4.2・§9.8）、sdp・hidp（§4.3・4.4）、att の server（§4.5 の最小の server は LE の link でだけ使うが純粋な部品はここで）、hid.c の BR/EDR の流れ・引き継ぎ・security・再接続・lost・排他（§4.7〜4.9、§9.2・9.5・9.7）、hidcache（§9.3）、privsep の `OPEN-HID`、pair.c の `handoff` と Reject の移動、`/dev/system` の購読、snoop、口と `bt`（§5）、loopback の link ごとの作り直しと 01・02（§6、Q25）、host 試験 §7.4 の BR/EDR の分、QEMU の `bt-hid-p005.sh` の (1)(2)(4)(6)(7)(8)(9)(10)(11) と (5) の 01・02 | build warning 0、style 0、host 試験 PASS、T1: `bt-hid-p005.sh` PASS と **`bt-loopback-p002.sh`・`bt-daemon-p003.sh`・`bt-pair-p004.sh` が変更なしで PASS**。Q4・Q5 の決定が無い間は推しで作り `btd_hid_policy_after_pair()`・`btd_hid_policy_after_disconnect()` で切り替えられる形 | i01b（T1 の PASS）、**p004 の cleared（最後の attempt が main に統合されている）** |
 | **i03: LE の HOGP と再接続の残り** | hog（§4.6・§9.12）、hid.c の LE の流れ・SMP の答え、filter accept list・resolving list・auto-connect・hold/release・Address Resolution の off/on、session の LE mask と counted event（§9.4）、背景の scan の fallback、resume（`sleep.end` → Echo Request）、loopback の 04（Exchange MTU Request、LTK の照合）、host 試験 §7.4 の LE・resume の分、QEMU の (3) と (5) の 04 | 同上（p002〜p004 の回帰を含む）。resolving list の無い controller の fallback は host 試験だけ（loopback は持つ） | i02 |
 | **i04: 5330 の実機の gate（Q20、推奨: 必須）** | ユーザーの BR/EDR の device 1 台と LE の device 1 台で `bt pair` → 引き継ぎ → `evdev-probe`、`bt disconnect`・`bt connect`、device の電源の切り入れでの再接続、btsnoop の記録。T1 の lock の下、account 入りの image（p004 の i03 と同じ条件）。USB の鍵があれば `hidraw-probe`（S10(a)、任意） | 接続と入力・再接続の観察を記録（実機の証拠として分けて書く）。btsnoop を host の tshark で読んで SDP・ATT・HIDP の解釈を照合（tshark を入れられれば） | i03、p004 の 5330 の attempt（i03）、device の有無 |
@@ -594,7 +594,7 @@ p005 を cleared にする条件: i01a〜i03 の T1 の PASS、仕様の値の�
 ## i01a の記録（2026-10-08、P2、q888）
 
 **作った物**:
-- `include/drivers/generic/hid-input.h`・`src/drivers/generic/hid-input.c`（共有の HID glue、§2）。口は §2 のとおり。設計からの違い: `drv_hid_input_numbers()` は void（番号は -1 か N）。`drv_hid_input_report_ids()` を足した（i01b の `HID_HOST_FLAG_REPORT_IDS` に使う）。identity の `touch_name` は呼び手が必ず渡す（usb-hid は名前の無い製品で「USB HID touchscreen」、有れば「<name> Touchscreen」と今のまま。NULL の既定は作らない）。`identity` の文字列は input.c が写すので glue は写しを持たない（log の行のための `physical_path` だけ持つ）。作業領域（decode の出力・pen と touch の出力・key の bit map）は `struct hid_input` の中（S8）。log の行は `hid-input: malformed input <physical_path> length= error=`（旧: `usb-hid: malformed input usbN device= interface=`。physical_path が usbN/portP/deviceD/interfaceI を含む）、pen・touch の drop は `hid-input: pen|touch report dropped`。最初の 16 回は今のまま（malformed と pen・touch の drop で共有の数え）。
+- `include/drivers/generic/hid-input.h`・`src/drivers/generic/hid-input.c`（共有の HID glue、§2）。口は §2 のとおり。設計からの違い: `drv_hid_input_numbers()` は void（番号は -1 か N）。`drv_hid_input_report_ids()` を足した（i01b の `INPUT_BRIDGE_FLAG_REPORT_IDS` に使う）。identity の `touch_name` は呼び手が必ず渡す（usb-hid は名前の無い製品で「USB HID touchscreen」、有れば「<name> Touchscreen」と今のまま。NULL の既定は作らない）。`identity` の文字列は input.c が写すので glue は写しを持たない（log の行のための `physical_path` だけ持つ）。作業領域（decode の出力・pen と touch の出力・key の bit map）は `struct hid_input` の中（S8）。log の行は `hid-input: malformed input <physical_path> length= error=`（旧: `usb-hid: malformed input usbN device= interface=`。physical_path が usbN/portP/deviceD/interfaceI を含む）、pen・touch の drop は `hid-input: pen|touch report dropped`。最初の 16 回は今のまま（malformed と pen・touch の drop で共有の数え）。
 - `src/drivers/usb/usb-hid.c`: glue を呼ぶ形に。`usb_hid_fetch_layout`・`usb_hid_identity`・`usb_hid_publish_report`・`usb_hid_unpublish`・`usb_hid_activate`（`usb_hid_activate_start`・`usb_hid_activate_undo` に分けて goto を無くした）・`usb_hid_free` を規約の全文に合わせた。**FIDO の raw の分岐の行（fetch_layout・publish_report・unpublish・activate）は変えていない**（`git diff -U0` に raw の行の変更が無いことを確かめた。identity の raw の名前の行だけは if の形を直した: 範囲の 4 か所の外）。触っていない関数（match・attach・detach・descriptor_length・endpoint_capacity・worker ほか）は規約に合わせていない（file 先頭の「XXX: Need coding style fitting.」を残す）。
 - `src/drivers/generic/input.c`・`include/kern/input-device.h`: `INPUT_DEVICE_MAX` 8 → 32、`drv_input_device_number()`。
 - build の規則: `platform/amd64/vmunix.mk` の `AMD64_HID_SOURCES`、`platform/pcat/vmunix.mk` の `PCAT_USB_CLASS_OBJS`、`platform/arm64/vmunix.mk` の `ARM64_USB_SOURCES` に hid-input。
@@ -614,19 +614,19 @@ p005 を cleared にする条件: i01a〜i03 の T1 の PASS、仕様の値の�
 
 ## i01b の記録（2026-10-08、P2、q888）
 
-ユーザーの決定（Q1 経由、2026-10-08 朝）: Q2 `HID_HOST_GET_DEVICE` を足す（推しのとおり）。kernel では `hid_host_ioctl()` の 1 か所が答える。
+ユーザーの決定（Q1 経由、2026-10-08 朝）: Q2 `INPUT_BRIDGE_GET_DEVICE` を足す（推しのとおり）。kernel では `input_bridge_ioctl()` の 1 か所が答える。
 
 **作った物**:
-- `include/uapi/hid-host.h`（§3 の形。`struct hid_host_setup` 4324 byte の `_Static_assert`、`struct hid_host_device`、`HID_HOST_GET_DEVICE`、group 'h'）。
-- `src/drivers/generic/hid-host.c`（cdev `hid-host`、rdev `0x00130000`、root だけ、6 open、最初の write が setup、FIDO の page は ENXIO、続く write が report（0 か 512 超は EINVAL、宣言より短い物は EINVAL、長い物は受ける、decode の失敗は数えて size を返す）、read は EAGAIN、poll は POLLOUT だけ、close で unpublish と destroy）。名前が空なら `Bluetooth HID keyboard` などを kernel が付ける（bus が virtual なら `Virtual HID …`）。touch の device は `<name> Touchscreen`・`<path>/touch` を 64 byte に切る。
-- `src/drivers/generic/hid-host-setup.c`: setup の純粋な検査 `drv_hid_host_setup_valid()`（host 試験のため node から分けた。設計の「hid-host.c から切り出した純粋な関数」）。`include/drivers/generic/hid-host.h`。
+- `include/uapi/input-bridge.h`（§3 の形。`struct input_bridge_setup` 4324 byte の `_Static_assert`、`struct input_bridge_device`、`INPUT_BRIDGE_GET_DEVICE`、group 'h'）。
+- `src/drivers/generic/input-bridge.c`（cdev `bridge`、rdev `0x00130000`、root だけ、6 open、最初の write が setup、FIDO の page は ENXIO、続く write が report（0 か 512 超は EINVAL、宣言より短い物は EINVAL、長い物は受ける、decode の失敗は数えて size を返す）、read は EAGAIN、poll は POLLOUT だけ、close で unpublish と destroy）。名前が空なら `Bluetooth HID keyboard` などを kernel が付ける（bus が virtual なら `Virtual HID …`）。touch の device は `<name> Touchscreen`・`<path>/touch` を 64 byte に切る。
+- `src/drivers/generic/input-bridge-setup.c`: setup の純粋な検査 `drv_input_bridge_setup_valid()`（host 試験のため node から分けた。設計の「input-bridge.c から切り出した純粋な関数」）。`include/drivers/generic/input-bridge.h`。
 - glue に `drv_hid_input_report_short()`（report ID ごとの宣言の長さ。report の状態に `minimum_size` を持つ）。
-- build: `Makefile` に `CONFIG_HID_HOST ?= $(if $(filter amd64,$(ZEDBSD_PLATFORM)),y,n)` と `-DCONFIG_HID_HOST`（設計の「既定 y、amd64 だけが見る」を、platform で既定を決める形にした: pcat・arm64 は n で flag も付かず、vfs.c の登録も入らない）。`platform/amd64/vmunix.mk` に hid-host.c・hid-host-setup.c と、USB_HID が n の時の hidraw-describe.c。HID の source の条件に `CONFIG_HID_HOST`。`src/kern/vfs.c` の `#ifdef CONFIG_HID_HOST` で登録、`src/kern/devfs.c` で 0600（既存の input-inject の行と同じ形の if の鎖に足した。鎖の既存の call-in-condition はそのまま）。
-- `userland/tests/hid-host-probe/`（`type`・`misuse`・`open`）。`config-amd64-bt.mk` に hid-host-probe と systemevents。
+- build: `Makefile` に `CONFIG_INPUT_BRIDGE ?= $(if $(filter amd64,$(ZEDBSD_PLATFORM)),y,n)` と `-DCONFIG_INPUT_BRIDGE`（設計の「既定 y、amd64 だけが見る」を、platform で既定を決める形にした: pcat・arm64 は n で flag も付かず、vfs.c の登録も入らない）。`platform/amd64/vmunix.mk` に input-bridge.c・input-bridge-setup.c と、USB_HID が n の時の hidraw-describe.c。HID の source の条件に `CONFIG_INPUT_BRIDGE`。`src/kern/vfs.c` の `#ifdef CONFIG_INPUT_BRIDGE` で登録、`src/kern/devfs.c` で 0600（既存の input-inject の行と同じ形の if の鎖に足した。鎖の既存の call-in-condition はそのまま）。
+- `userland/tests/input-bridge-probe/`（`type`・`misuse`・`open`）。`config-amd64-bt.mk` に input-bridge-probe と systemevents。
 - host 試験 §7.3: `hid-input-host-test.c` に setup の検査（正しい物、virtual、magic・version・USB の bus・descriptor 0 と 4097（4096 は可）・reserved・3 つの text の NUL 無し、63 byte の名前）と短い report の判定。
-- T1 の試験 `plan/ws143/tests/hid-host-p005.sh`（§7.5。6 枚の keyboard と PS/2・USB の device が同時に register できることは、旧の 8 を超えるので B1 の確かめになる。inject の device はこの image に無いので使わない）。
+- T1 の試験 `plan/ws143/tests/input-bridge-p005.sh`（§7.5。6 枚の keyboard と PS/2・USB の device が同時に register できることは、旧の 8 を超えるので B1 の確かめになる。inject の device はこの image に無いので使わない）。
 
-**確かめ（P2、host）**: `config/ci/config-amd64.mk`・`config-amd64-bt.mk`（vmunix、hid-host-probe）・`config-rpi4.mk` は exit 0、warning 0。pcat は compile の error・warning 0、link は既知の sandbox の未定義で失敗（Q1 の既知）。style-check: hid-host.c・hid-host-setup.c・hid-host.h（uapi・driver）・hid-host-probe・試験の C は 0 件。`hid-input-host-test.sh` PASS（setup と短い report の検査を含む）、`hid-report-fuzz.sh` PASS。**未実施**: QEMU（T1: `hid-host-p005.sh`）。
+**確かめ（P2、host）**: `config/ci/config-amd64.mk`・`config-amd64-bt.mk`（vmunix、input-bridge-probe）・`config-rpi4.mk` は exit 0、warning 0。pcat は compile の error・warning 0、link は既知の sandbox の未定義で失敗（Q1 の既知）。style-check: input-bridge.c・input-bridge-setup.c・input-bridge.h（uapi・driver）・input-bridge-probe・試験の C は 0 件。`hid-input-host-test.sh` PASS（setup と短い report の検査を含む）、`hid-report-fuzz.sh` PASS。**未実施**: QEMU（T1: `input-bridge-p005.sh`）。
 
 ## i01c（予定、Q1 の決定 2026-10-08: 「i2c-hid も共有の glue に乗せる」）
 
@@ -651,7 +651,7 @@ p005 を cleared にする条件: i01a〜i03 の T1 の PASS、仕様の値の�
 
 ### i01b 以降
 
-- i01b: §3 と §7.3・§7.5 の `hid-host-p005.sh`。Q2 の決定が無ければ `HID_HOST_GET_DEVICE` を入れ、kernel・daemon・試験の 1 関数ずつに閉じる。`CONFIG_HID_HOST`（§2 の配置、Q24）。
+- i01b: §3 と §7.3・§7.5 の `input-bridge-p005.sh`。Q2 の決定が無ければ `INPUT_BRIDGE_GET_DEVICE` を入れ、kernel・daemon・試験の 1 関数ずつに閉じる。`CONFIG_INPUT_BRIDGE`（§2 の配置、Q24）。
 - i02（BR/EDR。p004 の cleared の後）→ i03（LE）→ i04（実機の gate、Q20）。
 - Q1（調整役）へ: Q20・Q23 の判断、tshark を host に入れるか、Future Work（LED の出力、i2c-hid の乗せ替え、sessiond の hotplug の chown と `KWL_INPUT_MAX`）の登録。
 
@@ -665,7 +665,7 @@ p005 を cleared にする条件: i01a〜i03 の T1 の PASS、仕様の値の�
 ## ユーザーの決定（2026-10-08 朝、クリックの回答）
 
 - Q1: i2c-hid も共有の glue（hid-input）に乗せる（推しと逆）。touchpad の経路の作り替えなので実機の回帰が要る。F-084 は実施へ。
-- Q2: HID_HOST_GET_DEVICE を足す。
+- Q2: INPUT_BRIDGE_GET_DEVICE を足す。
 - Q4: ペアリングの後に自動で接続する。
 - Q5: 人が切断した機器からの再接続は断る。
 - B6（p004 の Q4）: account が無ければ bluetoothd は起動しない（暫定のまま確定）。
@@ -677,3 +677,6 @@ i01a: hid-usb-p005 PASS、boot-test PASS、fidoctl-p004 PASS（USB の HID の�
 ## ユーザーの決定（2026-10-08 朝）: 名前の変更
 
 `/dev/hid-host` → `/dev/input/bridge`、UAPI も揃える（include/uapi/hid-host.h → input-bridge.h、HID_HOST_* → INPUT_BRIDGE_*、struct hid_host_* → input_bridge_*、cdev・driver の file の名前も合わせる）。`/dev/btN` → `/dev/bluetoothN`（node の名前だけ。bluetooth.h・BT_IOC_* はそのまま）。i01c の前に行い、試験・文書・bluetoothd・bt-probe・hid-host-probe（→ 名前を合わせる）を追従させる。
+
+**行った（P2、q888、2026-10-08）**: `include/uapi/hid-host.h` → `include/uapi/input-bridge.h`（`INPUT_BRIDGE_*`・`struct input_bridge_setup`・`struct input_bridge_device`・`INPUT_BRIDGE_GET_DEVICE`・group は 'h' のまま）、`include/drivers/generic/input-bridge.h`、`src/drivers/generic/input-bridge.c`・`input-bridge-setup.c`（cdev 名 `bridge`、rdev `0x00130000`）、`CONFIG_INPUT_BRIDGE`、devfs の `bridge_name()`（`/dev/input` に置き、0600。root からの `/dev/bridge` は見えない）、`userland/tests/input-bridge-probe`（行の頭は `BRIDGE`）、`plan/ws143/tests/input-bridge-p005.sh`。Bluetooth の node は cdev 名 `bluetoothN`（`bt-hci.c`）、devfs の `bluetooth_name()` は `bluetooth` と数字、bluetoothd の privsep の発見・`bt-probe` の既定（`/dev/bluetooth0`）・usage の文、試験の script（bt-loopback-p002・bt-daemon-p003・bt-pair-p004）、`config-amd64-bt.mk` の注記。文書: phase001〜005・ws.md・design.md の記述を追従した（この節と review の file は履歴として元のまま）。daemon の関数の名前は `btd_bridge_numbers()`（未実装、i02）。
+確かめ: `config-amd64-bt.mk` の vmunix と input-bridge-probe・bt-probe・bluetoothd・bt・evdev-probe、`config/ci/config-amd64.mk` の vmunix は exit 0、warning 0。`hid-input-host-test.sh`・`hid-report-fuzz.sh`・`bt-daemon-host-test.sh`（daemon・pair・link）PASS。style-check 0（devfs.c の既存の指摘は除く）。QEMU は T1（`input-bridge-p005.sh` と bt-loopback-p002・bt-daemon-p003・bt-pair-p004 の回帰）。

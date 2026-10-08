@@ -1,6 +1,6 @@
 #!/bin/sh
 # ws143-p004: bluetoothd's pairing on a running zedBSD guest of plan/ws143/tests/build-bt-image.sh (the test kernel's
-# loopback controller /dev/bt0 plays the devices of plan/ws143/phase004/phase.md section 8; QEMU has no Bluetooth).
+# loopback controller /dev/bluetooth0 plays the devices of plan/ws143/phase004/phase.md section 8; QEMU has no Bluetooth).
 #  1. The privilege separation: a root parent and a child as _bluetooth; bt show is ready with ssp=1 sc=1.
 #  2. BR/EDR Numeric Comparison (0A:0B:0C:0D:0E:01): CONFIRM 123456 answered y, PAIRED authenticated=1 secure=1 and
 #     the L2CAP probe; the bond's file is _bluetooth's, 0600, in a 0700 folder.  Again: the stored key (stored=1).

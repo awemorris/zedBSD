@@ -14,13 +14,13 @@ extra=${EXTRA_CFLAGS:-}
 kflags="-std=gnu11 -O1 -g -Wall -Wextra -Werror -ffreestanding -nostdlibinc -fno-builtin -ffunction-sections \
 	-fdata-sections -D__ZEDBSD__ -DKERN_USER_ABI_LP64 -Iinclude -Isrc"
 hflags="-std=gnu11 -O1 -g -Wall -Wextra -Werror -Wdeclaration-after-statement -Iinclude"
-for file in hid-report hid-digitizer hid-touch hid-input hid-host-setup; do
+for file in hid-report hid-digitizer hid-touch hid-input input-bridge-setup; do
 	$cc $kflags $extra -c src/drivers/generic/$file.c -o "$OUT/$file.o"
 done
 $cc $kflags $extra -c plan/ws143/tests/hid-input-old.c -o "$OUT/hid-input-old.o"
 $cc $hflags $extra -c plan/ws143/tests/hid-input-host-test.c -o "$OUT/hid-input-host-test.o"
 $cc $extra -Wl,--gc-sections "$OUT/hid-input-host-test.o" "$OUT/hid-input-old.o" "$OUT/hid-report.o" \
-	"$OUT/hid-digitizer.o" "$OUT/hid-touch.o" "$OUT/hid-input.o" "$OUT/hid-host-setup.o" -o "$OUT/hid-input-host-test"
+	"$OUT/hid-digitizer.o" "$OUT/hid-touch.o" "$OUT/hid-input.o" "$OUT/input-bridge-setup.o" -o "$OUT/hid-input-host-test"
 timeout 300 "$OUT/hid-input-host-test" check \
 	plan/ws159/tests/latitude5330-linux/synaptics-06cb-ce65-rdesc.bin \
 	plan/bugs/bug105/logi-bolt-c548-if0.rdesc plan/bugs/bug105/logi-bolt-c548-if1.rdesc \

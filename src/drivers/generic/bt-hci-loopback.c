@@ -7,7 +7,7 @@
 
 /*
  * The test kernel's loopback Bluetooth controller (ws143-p002): an HCI
- * class controller with no hardware, so that /dev/btN can be tried in QEMU,
+ * class controller with no hardware, so that /dev/bluetoothN can be tried in QEMU,
  * which has no Bluetooth controller.  Test builds only
  * (CONFIG_BT_TEST_LOOPBACK, as the loopback security key and card of
  * ws161 are).
@@ -299,7 +299,7 @@ loopback_publish(
 	description.name = "Loopback Bluetooth controller (test)";
 	description.physical_path = "loopback0";
 
-	/* The class publishes btN. */
+	/* The class publishes bluetoothN. */
 	error = drv_bt_hci_register(&description, &loopback_ops, &loopback, &hci);
 	if (error != 0)
 		return error;

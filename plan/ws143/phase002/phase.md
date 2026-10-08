@@ -1,6 +1,6 @@
 <!-- awesome-plan project=zedbsd record=ws143p002 -->
 
-# ws143-p002: `bt-usb` と `/dev/btN`（HCI の packet の char device）
+# ws143-p002: `bt-usb` と `/dev/bluetoothN`（HCI の packet の char device）
 
 Phase ID: `ws143-p002`
 Parent: [WS143](../ws.md)
@@ -10,19 +10,19 @@ Queue: q860-i01（P2、2026-10-08。Q1 の投入「p001 の記録を締め、HID
 
 ## 範囲
 
-[design.md](../design.md) §5.1・§5.3 の kernel の部分と、D2（UAPI `/dev/btN` の形、2026-10-05 ユーザー承認）。
+[design.md](../design.md) §5.1・§5.3 の kernel の部分と、D2（UAPI `/dev/bluetoothN` の形、2026-10-05 ユーザー承認）。
 
 - `include/uapi/bluetooth.h`（packet の型、境界、ioctl、struct）。
-- class `src/drivers/generic/bt-hci.c`（`/dev/btN` の node、queue、read・write・poll・ioctl、寿命）と純粋な部分
+- class `src/drivers/generic/bt-hci.c`（`/dev/bluetoothN` の node、queue、read・write・poll・ioctl、寿命）と純粋な部分
   `src/drivers/generic/bt-hci-proto.c`（H4 の packet の検査、stream の組み直し、queue の ring。host の試験が compile する）。
 - USB の transport `src/drivers/usb/usb-bt.c`（interface E0/01/01、普通の経路と Intel の bootloader の経路、URB と worker、reset、取り外し）。
 - build の登録（`Makefile` の `CONFIG_DRIVER_USB_BT`、`platform/amd64/vmunix.mk`・`platform/pcat/vmunix.mk`、`src/kern/platform/pcat.c`）、
   devfs の node の mode（`src/kern/devfs.c`、`bt<n>` は root の 0600）。
-- 試験の道具 `userland/tests/bt-probe`（`/dev/btN` で HCI_Reset・Read Local Version・Read BD_ADDR・Intel Read Version を送って答えを表示）。
+- 試験の道具 `userland/tests/bt-probe`（`/dev/bluetoothN` で HCI_Reset・Read Local Version・Read BD_ADDR・Intel Read Version を送って答えを表示）。
 - host の試験（`plan/ws143/tests/bt-hci-proto-host-test.{c,sh}`）。
 - 5330 の descriptor と版の採取は T1 への依頼（Q1 経由、lock の下）。
 
-範囲の外: firmware の load と HCI の初期化（p003 の bluetoothd）、`/dev/hid-host`（p005）。
+範囲の外: firmware の load と HCI の初期化（p003 の bluetoothd）、`/dev/input/bridge`（p005）。
 
 ## 詳細設計
 
@@ -173,19 +173,19 @@ write の検査 `bt_hci_check_write(packet, size, acl_data_max)` と、bootloade
   空き、notice の予約、満ち）。
 - build: amd64 の kernel（warning 0）と bt-probe。
 - loopback の controller（2026-10-08 review S7、ws161 の hidraw-loopback・smartcard-loopback と同じ形）: 試験の kernel だけの
-  `src/drivers/generic/bt-hci-loopback.c`（`CONFIG_BT_TEST_LOOPBACK`、`/dev/bt0`、vendor 1209・product B7E5）。
+  `src/drivers/generic/bt-hci-loopback.c`（`CONFIG_BT_TEST_LOOPBACK`、`/dev/bluetooth0`、vendor 1209・product B7E5）。
   - 0xFC01: event・ACL・event・ACL の順に出してから Command Complete を返す。
   - 0xFC02 N: Command Complete の後に、index の付いた 255 byte の vendor event を N 個出す（queue より多い）。
   - 0xFC03: Command Complete の 300 ms 後に withdraw・release し（detach）、さらに 500 ms 後に登録し直す。
   - 0x1001・0x1009: 決まった値で答える。他の command は status 0 で答える。ACL は同じ packet で返す。
   - 渡すのは worker の thread。ENOSPC なら持って、room の callback を待つ。reset は渡しの mutex の下で待っている物を捨て、notice を積む。
 - QEMU（T1）: `plan/ws143/tests/bt-loopback-p002.sh`（image は `plan/ws143/tests/config-amd64-bt.mk`）。
-  - node: `/dev/bt0` が 0600 root で、log に loopback の名前がある。USB の controller が無い時は `/dev/bt1` も `usb-bt:` の log も無い。
+  - node: `/dev/bluetooth0` が 0600 root で、log に loopback の名前がある。USB の controller が無い時は `/dev/bluetooth1` も `usb-bt:` の log も無い。
   - `bt-probe -L`（class の試験）: 1 open・EBUSY、read の 0、2 つの queue の順、EMSGSIZE、ACL の往復、SCO の拒否、flood の backpressure
     （stalls、落とさない、順）、満ちた queue への reset の notice の位置、read の block 中の withdraw（ENODEV・POLLHUP・GET_INFO）と
     同じ名前での再登録。
   - ほかに `bt-probe` の普通の probe と、root 以外が開けないこと。
-- 実機: 5330 の AX211 の Bluetooth の passthrough で `bt-probe -r -f /dev/bt1`（loopback の無い image なら `/dev/bt0`）。保留の T1-378 と一緒に流す。
+- 実機: 5330 の AX211 の Bluetooth の passthrough で `bt-probe -r -f /dev/bluetooth1`（loopback の無い image なら `/dev/bluetooth0`）。保留の T1-378 と一緒に流す。
 
 ## 確認
 
@@ -196,7 +196,7 @@ write の検査 `bt_hci_check_write(packet, size, acl_data_max)` と、bootloade
 - host: `OUT=<dir> sh plan/ws143/tests/bt-hci-proto-host-test.sh`（ASan・UBSan）は all checks passed。
 - style: `python3 plan/tools/style-check.py` の新しい file の指摘（閉じ括弧の後の空行、段落の注記、split の呼び出し、試験の前方宣言）を直し、bt-hci.c・bt-hci-proto.c・usb-bt.c・試験・bt-probe は 0。devfs.c・pcat.c の残りの指摘は既存の部分のもの。
 - `userland/tests/bt-probe`（commit 04ffcb8da）:
-  - 動き: `/dev/btN` の info を出す。Intel の controller には Read Version（TLV、0xFC05 0xFF）を送る。続けて HCI_Reset・Read Local Version・Read BD_ADDR を送り、Command Complete を待つ。`-r` では `BT_IOC_RESET` の後に notice を待つ。最後に stats を出す。結果は `BT PASS` か `BT FAIL steps=N`。
+  - 動き: `/dev/bluetoothN` の info を出す。Intel の controller には Read Version（TLV、0xFC05 0xFF）を送る。続けて HCI_Reset・Read Local Version・Read BD_ADDR を送り、Command Complete を待つ。`-r` では `BT_IOC_RESET` の後に notice を待つ。最後に stats を出す。結果は `BT PASS` か `BT FAIL steps=N`。
   - build: `make ZEDBSD_CONFIG=plan/ws143/tests/config-amd64-bt.mk BUILD=build/amd64 build/amd64/bin/bt-probe` は rc 0、warning 0。
 - 試験の image: `plan/ws143/tests/config-amd64-bt.mk`（CI の config に bt-probe を足した物）。
 - design-reviewer の review: 2026-10-08 に実施中（§10.1。前の世代の記録に review が無かったため）。
