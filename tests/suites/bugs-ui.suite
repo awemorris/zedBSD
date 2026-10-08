@@ -1,0 +1,14 @@
+# q911 (2026-10-08): the open UI bugs' reproduction sweep, one AAT run on one QEMU of the image
+# plan/tools/aat/config-amd64-aat-bugs.mk (plan/agents/bug-ui-sweep-20261008.md: which bug each scenario tries and
+# how to read its verdict).  The existing scenarios first, then the bugs' own (tests/scenarios/bugs/).
+desktop.bar.volume-slider          # BUG-170 (the system bar)
+apps.settings.sound-page           # BUG-170 (Settings)
+apps.terminal.japanese-history     # BUG-173
+desktop.windows.maximize-double-click   # BUG-179
+desktop.windows.unmaximize-drag    # BUG-180
+apps.files.open-from-home          # BUG-219 (the menu's underline in open.png)
+apps.phone.open-from-home          # BUG-219
+desktop.home.switch-running        # BUG-232
+desktop.home.power-off-dialog      # BUG-235
+bugs.*
+desktop.session.logout-login       # BUG-235 (last: it logs out and in again)

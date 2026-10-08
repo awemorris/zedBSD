@@ -3,7 +3,7 @@ id: apps.music.play
 title: Music で ~/Music の m4a を再生し、次の曲・一時停止・曲の終わりを確かめる
 status: active
 areas: [music, audio]
-paths: [userland/desktop/music/, userland/desktop/videoplayer/codec.c, userland/desktop/videoplayer/audio.c, userland/desktop/mediafile/]
+paths: [userland/desktop/music/, userland/desktop/libmedia/avcodec.c, userland/desktop/videoplayer/audio.c, userland/desktop/mediafile/]
 machine: either
 human: look
 since: ws120
