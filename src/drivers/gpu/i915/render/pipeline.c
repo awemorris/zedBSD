@@ -52,6 +52,7 @@ static void i915_gfx_decode_dynamic(struct i915_render_session *session, struct 
 static void i915_gfx_stencil_face(struct i915_gfx_pipeline *pipeline, uint32_t face, const VkStencilOpState *op);
 static void i915_gfx_float_bits(uint32_t *destination, const float *source);
 static void i915_gfx_free_pipelines(struct i915_gfx_pipeline **pipelines, uint64_t count);
+static void i915_gfx_undo_pipelines(struct i915_render_session *session, struct i915_gfx_pipeline **pipelines, const uint64_t *identities, uint64_t count, uint64_t published);
 static int i915_gfx_decode_compute(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_gfx_pipeline *pipeline);
 
 /*
@@ -169,6 +170,7 @@ drv_i915_gfx_create_pipelines(
 	uint64_t identity_count;
 	uint64_t index;
 	uint64_t answered;
+	uint64_t published;
 	uint32_t result;
 	int error;
 
@@ -230,21 +232,21 @@ drv_i915_gfx_create_pipelines(
 	}
 
 	/* Publishes each pipeline once all of them are prepared, up to the first failure. */
+	published = 0U;
 	if (error == 0) {
 		for (index = 0U; index < count; index++) {
 			error = drv_i915_object_insert(session, I915_VK_OBJ_PIPELINE, identities[index], pipelines[index]);
 			if (error != 0)
 				break;
+			published++;
 		}
 	}
 
-	/*
-	 * XXX: pipelines already published by this batch stay published, and
-	 * the ones that are not are neither released nor freed (happy path
-	 * only).
-	 */
-	if (error != 0)
+	/* A create that failed leaves no pipeline: the published ones are unpublished, and all are released and freed. */
+	if (error != 0) {
 		kern_logf("i915: vk: vkCreateGraphicsPipelines failed: %d\n", error);
+		i915_gfx_undo_pipelines(session, pipelines, identities, count, published);
+	}
 
 	/* Writes the result and the count of the create. */
 	result = drv_i915_gfx_result(error);
@@ -357,23 +359,10 @@ drv_i915_gfx_create_compute_pipelines(
 		}
 	}
 
-	/*
-	 * A create that failed before anything was published releases and
-	 * frees every pipeline.  XXX: as for graphics pipelines, a failure while
-	 * publishing leaves the pipelines published so far published (happy
-	 * path only).
-	 */
+	/* A create that failed leaves no pipeline: the published ones are unpublished, and all are released and freed. */
 	if (error != 0) {
 		kern_logf("i915: vk: vkCreateComputePipelines failed: %d\n", error);
-		if (published == 0U) {
-			for (index = 0U; index < count; index++) {
-				if (pipelines[index] != NULL)
-					drv_i915_gfx_pipeline_release(pipelines[index]);
-			}
-
-			/* Frees the array of the pipelines just released. */
-			i915_gfx_free_pipelines(pipelines, count);
-		}
+		i915_gfx_undo_pipelines(session, pipelines, identities, count, published);
 	}
 
 	/* Writes the result and the count of the create. */
@@ -865,6 +854,36 @@ i915_gfx_free_pipelines(
 	/* Frees every slot; a slot that was never allocated is NULL. */
 	for (index = 0U; index < count; index++)
 		kern_free(pipelines[index]);
+}
+
+/*
+ * Undoes a create that failed after its pipelines were decoded (ws031-p026):
+ * the first `published` of them were published by it and are unpublished;
+ * every one releases what its preparation compiled and is freed.  Nothing
+ * else has seen them: the create runs as one command.
+ */
+static void
+i915_gfx_undo_pipelines(
+	struct i915_render_session *session,
+	struct i915_gfx_pipeline **pipelines,
+	const uint64_t *identities,
+	uint64_t count,
+	uint64_t published)
+{
+	uint64_t index;
+
+	/* Unpublishes the ones this create published. */
+	for (index = 0U; index < published; index++)
+		drv_i915_object_remove(session, I915_VK_OBJ_PIPELINE, identities[index]);
+
+	/* Releases each pipeline's kernels; a pipeline never prepared has none. */
+	for (index = 0U; index < count; index++) {
+		if (pipelines[index] != NULL)
+			drv_i915_gfx_pipeline_release(pipelines[index]);
+	}
+
+	/* Frees them all. */
+	i915_gfx_free_pipelines(pipelines, count);
 }
 
 /*

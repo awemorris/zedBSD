@@ -1235,8 +1235,11 @@ drv_i915_gfx_emit_index_buffer(
 		return EINVAL;
 	}
 
-	/* Picks the index format and size of the index type. */
-	if (state->index.type == VK_INDEX_TYPE_UINT16) {
+	/* Picks the index format and size of the index type (one byte: VK_EXT_index_type_uint8). */
+	if (state->index.type == VK_INDEX_TYPE_UINT8_EXT) {
+		format = GEN12_INDEX_BYTE;
+		index_bytes = 1U;
+	} else if (state->index.type == VK_INDEX_TYPE_UINT16) {
 		format = GEN12_INDEX_WORD;
 		index_bytes = 2U;
 	} else if (state->index.type == VK_INDEX_TYPE_UINT32) {
@@ -2827,6 +2830,9 @@ i915_state_viewport_source(
  * Writes the viewports and the scissor of a draw.
  *
  * The viewport is x, y, width, height, minDepth and maxDepth as float bits.
+ * A negative height (VK_KHR_maintenance1) flips y: the transform takes it
+ * as it is, and the viewport's rectangle runs from y + height to y, as anv
+ * writes it (genX_cmd_buffer.c, the viewport's y_min and y_max).
  * XXX: the guardband is the viewport itself ([-1, 1] in NDC): correct, and
  * every primitive that leaves the viewport is clipped rather than trivially
  * accepted.
@@ -2845,6 +2851,7 @@ i915_state_write_viewport(
 	uint32_t half_width;
 	uint32_t half_height;
 	uint32_t right_edge;
+	uint32_t top_edge;
 	uint32_t bottom_edge;
 
 	/* Gives CC_VIEWPORT the depth range. */
@@ -2862,8 +2869,15 @@ i915_state_write_viewport(
 	/* Finds the far edges of the viewport, one pixel short of x + width and y + height. */
 	right_edge = drv_i915_float_add(x, width);
 	right_edge = drv_i915_float_sub(right_edge, I915_FLOAT_ONE);
+	top_edge = y;
 	bottom_edge = drv_i915_float_add(y, height);
 	bottom_edge = drv_i915_float_sub(bottom_edge, I915_FLOAT_ONE);
+
+	/* A negative height (its sign bit) runs up from y: the rectangle is y + height to one pixel short of y. */
+	if ((height & I915_FLOAT_SIGN) != 0U) {
+		top_edge = drv_i915_float_add(y, height);
+		bottom_edge = drv_i915_float_sub(y, I915_FLOAT_ONE);
+	}
 
 	/*
 	 * Fills SF_CLIP_VIEWPORT: the transform m00 m11 m22 m30 m31 m32, two
@@ -2882,7 +2896,7 @@ i915_state_write_viewport(
 	words[11] = I915_FLOAT_ONE;
 	words[12] = x;
 	words[13] = right_edge;
-	words[14] = y;
+	words[14] = top_edge;
 	words[15] = bottom_edge;
 
 	/* Fills SCISSOR_RECT with the inclusive corners of the scissor. */

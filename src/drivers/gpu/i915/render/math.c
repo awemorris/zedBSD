@@ -17,9 +17,6 @@
 
 #include <stdint.h>
 
-/* The sign bit of a single-precision value. */
-#define I915_FLOAT_SIGN		0x80000000U
-
 /* Everything but the sign: the magnitude, comparable as an integer. */
 #define I915_FLOAT_MAGNITUDE	0x7fffffffU
 

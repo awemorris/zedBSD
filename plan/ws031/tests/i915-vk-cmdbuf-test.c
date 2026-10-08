@@ -152,6 +152,7 @@ static void test_recording_limits(void);
 static void fixture_state_image(struct i915_gfx_image *image, struct i915_gfx_memory *memory, uint32_t side, uint64_t offset);
 static void test_view_format_swizzle(void);
 static void test_logic_op(void);
+static void test_viewport_flip(void);
 static void test_blend_state(void);
 static void fixture_dsl(uint64_t identity, const uint32_t *numbers, const uint32_t *types, uint32_t count);
 static void fixture_buffer_write(uint64_t set, uint32_t binding, uint32_t type, uint64_t offset, uint64_t range);
@@ -174,6 +175,7 @@ main(void)
 	test_blend_state();
 	test_view_format_swizzle();
 	test_logic_op();
+	test_viewport_flip();
 	test_uniform_bindings();
 
 	/* Succeeded: every check held. */
@@ -577,10 +579,19 @@ test_emission(void)
 	error = drv_i915_gfx_emit_index_buffer(&batch, &state, 0x6U);
 	assert(error == EINVAL);
 
-	/* An 8-bit index type is not implemented and says so. */
+	/* An 8-bit index type (ws031-p026) names the byte format, at any offset. */
 	state.index.buffer = &buffer;
-	state.index.offset = 0U;
+	state.index.offset = 3U;
 	state.index.type = VK_INDEX_TYPE_UINT8_EXT;
+	batch.count = 0U;
+	error = drv_i915_gfx_emit_index_buffer(&batch, &state, 0x6U);
+	assert(error == 0);
+	assert(commands[1] == (0x6U | (GEN12_INDEX_BYTE << 8) | (1U << 11)));
+	assert(commands[2] == 0x70001003U);
+	assert(commands[4] == 253U);
+
+	/* Another index type is not implemented and says so. */
+	state.index.type = VK_INDEX_TYPE_NONE_KHR;
 	error = drv_i915_gfx_emit_index_buffer(&batch, &state, 0x6U);
 	assert(error == ENOTSUP);
 	assert(strstr(stub_log, "index type") != NULL);
@@ -1169,7 +1180,8 @@ test_indexed_dynamic(void)
  * A buffer copy runs as copies between linear surfaces of four-byte texels
  * over the two buffers: a short region as one short row; a long one as full
  * rows of 4096 texels and then its rest.  A region that is not whole
- * four-byte texels, or that runs past a buffer, fails the submission.
+ * four-byte texels goes as two- or one-byte texels; one that runs past a
+ * buffer fails the submission.
  */
 static void
 test_copy_buffer(void)
@@ -1271,7 +1283,11 @@ test_copy_buffer(void)
 	assert(stub_rects[2].src.width == 5U);
 	assert(stub_rects[2].src.height == 1U);
 
-	/* A region of six bytes is not whole texels: the submission fails and says why. */
+	/*
+	 * Regions that are not whole four-byte texels (ws031-p026): six bytes
+	 * from 2 to 10 go as three two-byte texels, seven bytes from 1 to 3 as
+	 * seven one-byte texels.
+	 */
 	stub_rect_calls = 0U;
 	stub_wire_begin(&fixture_wire);
 	fixture_begin(FIXTURE_CB0);
@@ -1280,20 +1296,31 @@ test_copy_buffer(void)
 	stub_put64(&fixture_wire, FIXTURE_CB0);
 	stub_put64(&fixture_wire, FIXTURE_SRC_BUFFER);
 	stub_put64(&fixture_wire, FIXTURE_DST_BUFFER);
-	stub_put32(&fixture_wire, 1U);
-	stub_put64(&fixture_wire, 1U);
-	stub_put64(&fixture_wire, 0U);
-	stub_put64(&fixture_wire, 0U);
+	stub_put32(&fixture_wire, 2U);
+	stub_put64(&fixture_wire, 2U);
+	stub_put64(&fixture_wire, 2U);
+	stub_put64(&fixture_wire, 10U);
 	stub_put64(&fixture_wire, 6U);
+	stub_put64(&fixture_wire, 1U);
+	stub_put64(&fixture_wire, 3U);
+	stub_put64(&fixture_wire, 7U);
 	fixture_command_buffer(FIXTURE_END_COMMAND_BUFFER, FIXTURE_CB0);
 	fixture_submit(FIXTURE_CB0, 0U);
 	reply_bytes = stub_execute_ok(&fixture_wire);
 	assert(reply_bytes == 24U);
-	assert(stub_get32(stub_reply, 20U) == (uint32_t)VK_ERROR_INITIALIZATION_FAILED);
-	assert(stub_rect_calls == 0U);
-	assert(strstr(stub_log, "command buffer stopped at operation 1 of 1") != NULL);
+	assert(stub_get32(stub_reply, 20U) == VK_SUCCESS);
+	assert(stub_rect_calls == 2U);
+	assert(stub_rects[0].src.va == FIXTURE_STORAGE_VA + FIXTURE_SRC_OFFSET + 2U);
+	assert(stub_rects[0].dst.va == FIXTURE_STORAGE_VA + FIXTURE_DST_OFFSET + 10U);
+	assert(stub_rects[0].src.width == 3U && stub_rects[0].src.pitch == 6U);
+	assert(stub_rects[0].src.format == VK_FORMAT_R8G8_UNORM && stub_rects[0].dst.format == VK_FORMAT_R8G8_UNORM);
+	assert(stub_rects[1].src.va == FIXTURE_STORAGE_VA + FIXTURE_SRC_OFFSET + 1U);
+	assert(stub_rects[1].dst.va == FIXTURE_STORAGE_VA + FIXTURE_DST_OFFSET + 3U);
+	assert(stub_rects[1].src.width == 7U && stub_rects[1].src.pitch == 7U && stub_rects[1].dst_rect.w == 7U);
+	assert(stub_rects[1].src.format == VK_FORMAT_R8_UNORM && stub_rects[1].dst.format == VK_FORMAT_R8_UNORM);
 
 	/* A region that runs past the destination fails the submission before any copy. */
+	stub_rect_calls = 0U;
 	stub_wire_begin(&fixture_wire);
 	fixture_begin(FIXTURE_CB0);
 	stub_put32(&fixture_wire, FIXTURE_CMD_COPY_BUFFER);
@@ -1639,6 +1666,64 @@ fixture_blend_state(
 	error = drv_i915_gfx_write_state(page, &state, &kernels, target, 0x6U);
 	assert(error == 0);
 	return (const uint32_t *)(const void *)(page + I915_GFX_DYNAMIC_HEAP);
+}
+
+/*
+ * The viewport (ws031-p026): SF_CLIP_VIEWPORT's transform and rectangle of a
+ * 16x16 viewport at (0, 0), and of the same one flipped with a negative
+ * height (VK_KHR_maintenance1: y 16, height -16): m11 and m31 take the
+ * height as it is, the rectangle still runs from row 0 to row 15.
+ */
+static void
+test_viewport_flip(void)
+{
+	static uint8_t page[I915_GFX_SLOT_BYTES];
+	static struct i915_gfx_draw_state state;
+	static struct i915_gfx_kernels kernels;
+	struct i915_gem_object object;
+	struct i915_gfx_memory memory;
+	struct i915_gfx_image target;
+	struct i915_gfx_pipeline pipeline;
+	const uint32_t *words;
+	int error;
+
+	/* The 16x16 RGBA8 UNORM target at 0x7000_0000. */
+	memset(&object, 0, sizeof(object));
+	object.bytes = sizeof(fixture_storage);
+	object.va = 0x70000000ULL;
+	object.run.paddr = (hal_physaddr_t)(uintptr_t)fixture_storage;
+	memset(&memory, 0, sizeof(memory));
+	memory.object = &object;
+	memory.size = sizeof(fixture_storage);
+	fixture_state_image(&target, &memory, 16U, 0U);
+
+	/* Upright: (0, 0, 16, 16) in depth [0, 1]; m11 8, m31 8, rows 0 to 15. */
+	memset(&pipeline, 0, sizeof(pipeline));
+	pipeline.viewport[2] = 0x41800000U;
+	pipeline.viewport[3] = 0x41800000U;
+	pipeline.viewport[5] = 0x3f800000U;
+	pipeline.scissor.extent.width = 16U;
+	pipeline.scissor.extent.height = 16U;
+	memset(&state, 0, sizeof(state));
+	state.pipeline = &pipeline;
+	memset(&kernels, 0, sizeof(kernels));
+	error = drv_i915_gfx_write_state(page, &state, &kernels, &target, 0x6U);
+	assert(error == 0);
+	words = (const uint32_t *)(const void *)(page + I915_GFX_DYNAMIC_HEAP + I915_GFX_DYN_SF_CLIP_VIEWPORT);
+	assert(words[0] == 0x41000000U && words[1] == 0x41000000U);
+	assert(words[3] == 0x41000000U && words[4] == 0x41000000U);
+	assert(words[12] == 0U && words[13] == 0x41700000U);
+	assert(words[14] == 0U && words[15] == 0x41700000U);
+
+	/* Flipped: y 16, height -16; m11 -8, m31 8, and the rows are 0 to 15 all the same. */
+	pipeline.viewport[1] = 0x41800000U;
+	pipeline.viewport[3] = 0xc1800000U;
+	error = drv_i915_gfx_write_state(page, &state, &kernels, &target, 0x6U);
+	assert(error == 0);
+	assert(words[0] == 0x41000000U && words[1] == 0xc1000000U);
+	assert(words[3] == 0x41000000U && words[4] == 0x41000000U);
+	assert(words[12] == 0U && words[13] == 0x41700000U);
+	assert(words[14] == 0U && words[15] == 0x41700000U);
 }
 
 /*

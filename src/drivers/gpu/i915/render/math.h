@@ -21,9 +21,10 @@
 
 #include <stdint.h>
 
-/* The bit patterns of 1.0 and -1.0. */
+/* The bit patterns of 1.0 and -1.0, and the sign bit. */
 #define I915_FLOAT_ONE		0x3f800000U
 #define I915_FLOAT_MINUS_ONE	0xbf800000U
+#define I915_FLOAT_SIGN		0x80000000U
 
 uint32_t drv_i915_float_half(uint32_t value);
 uint32_t drv_i915_float_add(uint32_t augend, uint32_t addend);
