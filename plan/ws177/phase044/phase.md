@@ -3,7 +3,7 @@
 # ws177-p044: IPv6 の libc と道具（案 R2）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（T1-476、2026-10-08 夜 Q1）
+Status: cleared（2026-10-09 Q1: T1-476 の 1〜3 PASS、4 は guest に DNS の server が無いための失敗で試験の環境）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q909-i01（P1、承認: Q1 の投入「WS177 案 R・R2: IPv6 の networkd・dhcpc と libc・道具（backlog-p1 14〜28）。p1 18 の IPV6_RECVHOPLIMIT の UAPI 追加は Q1 が可とする（HAL ではない）」）

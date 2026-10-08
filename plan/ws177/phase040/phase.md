@@ -3,7 +3,7 @@
 # ws177-p040: libpdf の頁の文字に form XObject の中の文字を入れる（案 L の 1）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（T1-474、2026-10-08 夜 Q1）
+Status: cleared（2026-10-09 Q1: T1-474 PASS、確認の項目が全部出た）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q907-i01（P1、承認: Q1 の投入「WS177 案 L: PDF Viewer の検索と選択（plan/ws177/phasing-20261008.md の L、backlog-p2 17〜25・41、約 14.5 LW）」）

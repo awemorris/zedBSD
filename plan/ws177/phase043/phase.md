@@ -3,7 +3,7 @@
 # ws177-p043: titlebar の無い時の窓の中の検索の欄、Enter の後の caret（案 L の 4）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（T1-474、2026-10-08 夜 Q1）
+Status: cleared（2026-10-09 Q1: T1-474 PASS、確認の項目が全部出た）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q907-i01（P1、承認は p040 と同じ）

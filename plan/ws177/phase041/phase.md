@@ -3,7 +3,7 @@
 # ws177-p041: PDF Viewer の検索の一致の規則・数・速さ・読めない字（案 L の 2）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（T1-474、2026-10-08 夜 Q1）
+Status: cleared（2026-10-09 Q1: T1-474 PASS、確認の項目が全部出た）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q907-i01（P1、承認は p040 と同じ）
