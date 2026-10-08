@@ -767,3 +767,7 @@ Bluetooth の off は今は daemon の flag だけ。p005 の自動の再接続�
 - QEMU の試験 `plan/ws143/tests/bt-hid-p005.sh`（§7.5 の (1)(2)(4)(5)(6)(9)(10)(11) と USB の node。(3) LE と (5) の 04 は i03）。
 - 確かめ（P1、host）: `config-amd64-bt.mk` の `build/p1-bt/vmunix` と `bin/bluetoothd` は exit 0・warning 0。`bt-daemon-host-test.sh` → daemon 90・pair 161・link 56・hid 75・hidhost 75 PASS（hidhost に handoff の page scan、release、trace の hook を足した）。style-check（loopback・hid・main・session・試験）0。`sh -n bt-hid-p005.sh` OK。**未実施**: QEMU（T1: `bt-hid-p005.sh` と p002〜p004 の回帰）、tshark の照合（host に無い）、実機（i04）。
 - 残り: `.hid` の bond の無い記録の refresh での削除、page の timeout の Create Connection Cancel。i03（LE の HOGP、loopback の 04）は Q1 の指示を待つ。
+
+## Q1 の判定（2026-10-08 夜）
+
+- i02（BR/EDR の HID host）は T1-464 で p002〜p005 の 4 本とも PASS（bt-hid-p005 1 m 17 s）→ i02 は cleared。Phase は i03（LE の HOGP）・i04（実機）まで in-progress。

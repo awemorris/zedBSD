@@ -3,7 +3,7 @@
 # ws177-p025: 印刷の堅牢化の 4 — Settings で printer の名前・path・queue を変える（案 Q）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（T1-459、2026-10-08 夜 Q1）
+Status: cleared（2026-10-08 夜 Q1: T1-465 PASS、edit の後の list が `path=raw2 default=0 name=Basement`、Printers の頁に Edit）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q905（P2、2026-10-08 夜、承認済み）
