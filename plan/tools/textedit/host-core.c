@@ -49,6 +49,7 @@ static void test_find(void);
 static void test_edit(void);
 static void test_replace(void);
 static void test_recent(void);
+static void test_touch_bar(void);
 static void set_text(struct te_app *app, const char *text, const char *find);
 static int text_is(struct te_app *app, const char *text);
 static void write_file(const char *name, const char *bytes, size_t length);
@@ -92,6 +93,7 @@ main(
 	test_edit();
 	test_replace();
 	test_recent();
+	test_touch_bar();
 	printf("host-core: %d/%d\n", test_passed, test_passed + test_failed);
 	return test_failed == 0 ? 0 : 1;
 }
@@ -591,4 +593,38 @@ kl_appearance_get(
 
 	/* The light appearance. */
 	return KL_APPEARANCE_LIGHT;
+}
+
+/* ws190-p003: the fingers' selection's bar in the text (libkeiland's kl_text_touch): a double tap's word with the bar, which a key takes away, also at a caret. */
+static void
+test_touch_bar(void)
+{
+	struct te_app app;
+	struct te_event event;
+	struct kl_rect place;
+
+	te_app_init(&app, &test_font, &test_font, 900, 680);
+	(void)te_edit_insert_text(&app, "hello world", 11, TE_MERGE_NONE);
+
+	/* A double tap in "world": the word, its handles and the bar, the editor's selection. */
+	app.touch.view->caret_rect(app.touch.data, 8, &place);
+	kl_text_touch_tap(&app.touch, (double)place.x, (double)place.y + 2.0, 1);
+	te_app_touch(&app);
+	check(app.anchor == 6 && app.cursor == 11 && app.touch.bar == 1 && app.touch.handles == 1, "touch: a double tap selects the word with the bar");
+
+	/* A key takes the handles and the bar away. */
+	memset(&event, 0, sizeof(event));
+	event.type = TE_EVENT_KEY;
+	event.pressed = 1;
+	event.key = TE_KEY_RIGHT;
+	te_app_event(&app, &event);
+	check(app.touch.bar == 0 && app.touch.handles == 0, "touch: a key takes the bar away");
+
+	/* The bar at a caret (no handles, as after a double tap off the words), which a key takes away too. */
+	kl_text_touch_select(&app.touch, 5, 5);
+	te_app_touch(&app);
+	check(app.touch.bar == 1 && app.touch.handles == 0 && app.cursor == 5, "touch: the bar at a caret");
+	te_app_event(&app, &event);
+	check(app.touch.bar == 0, "touch: a key takes the caret's bar away");
+	te_app_release(&app);
 }
