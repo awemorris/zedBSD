@@ -31,7 +31,7 @@ root で `/sbin/bluetoothd >/tmp/btd.log 2>&1 &` を起動し 3 秒待つ（こ�
    `ZSETTINGS BLUETOOTH result kind=pair errno=0`、頁の下に「The device is paired.」、01 が My Devices に移る。確認方法: log、撮影。
 4. 操作: 0A:0B:0C:0D:0E:07 の Pair を click。窓が出たら撮り、Esc。
    確認事項: 同意と断り。正解: `KWL BT ask kind=consent … own=1`（daemon が同意を問わない Just Works ならこの行は無く、そのまま paired。どちらだったかを記録）、Esc で
-   `KWL BT answer no via=escape`、`ZSETTINGS BLUETOOTH result kind=pair errno=13`（EACCES）と「The pairing was refused.」。確認方法: log、撮影。
+   `KWL BT answer no via=escape`、`ZSETTINGS BLUETOOTH result kind=pair errno=<EACCES>`（EACCES の値: zedBSD は 25、Linux は 13）と「The pairing was refused.」。確認方法: log、撮影。
 5. 操作: root で `echo y | bt pair 0A:0B:0C:0D:0E:07 &`。窓が出たら撮り、Cancel を click。
    確認事項: 他の人の pairing。正解: `KWL BT ask kind=… own=0`、窓に「Asked by root」、Cancel で `KWL BT answer no via=press`、bt の出力が `ERROR rejected`。確認方法: log、撮影。
 6. 操作: Super+L で lock し、root で `echo y | bt pair 0A:0B:0C:0D:0E:07`、終わったら kei で解除。
