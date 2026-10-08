@@ -97,6 +97,7 @@ Future Work は実行を許可しない。
 | F-088 | Notes の文字の box の中に編集の bar を置く | ws190-p001 review 1 M5 | Notes の box の touch の UAT |
 | F-089 | 編集の bar の文字の翻訳（共有の domain `keiland` を library が読む口） | ws190-p001 review 1 minor 6 | 日本語の UI の UAT |
 | F-090 | bluetoothd: legacy の PIN・こちらが打つ passkey（KeyboardDisplay）、client の枠の desktop への予約、BONDS に class・appearance | ws143-p006 の design review（2026-10-08） | 古い機器・keyboard の pairing の要望、再起動の後の icon |
+| F-091 | DNS の server を 1 つの表で持ち networkd だけが resolv.conf を書く（今は dhcpc の書き直しの後に networkd が RDNSS を足し戻す、非同期の dhcpc -6 と重なると DHCPv6 の server が次の実行まで消え得る） | ws177-p045（2026-10-08 Q1） | DNS の取り違えの報告、dhcpc と networkd の役割の見直し |
 
 | fw-docs-ids | docs/ の本文に残る Plan の ID（WS・BUG・q の番号、2026-10-05 で 58 箇所、docs/agent は対象外）を消し、必要なら中身を言葉で書く | docs は目標の設計で plan に依らない規則 | 2026-10-05 ユーザー「消します。ただし後回しでいいです。」 | 決定済み・後回し | 空いた枠、または ws129-p005（RC）の文書の見直し | — |
 | fw-audiod-client | video player（ws122-p002）に内蔵した audiod の client（48 kHz S16 stereo）を共有の library に移し、音楽の app（WS120）や通知の音でも使う | 同じ client の重複を避ける | 2026-10-05 ws122-p002（P2） | 後回し | WS120 の着手、または 2 つ目の audiod の client が要る時 | ws122-p002 の phase.md（git の履歴、2026-10-08 の WS の完了で削除） |
