@@ -9,5 +9,5 @@ KEILAND_LINUX_PDFVIEWER_SOURCES := userland/desktop/pdfviewer/main.c \
 	userland/desktop/pdfviewer/document.c \
 	userland/desktop/pdfviewer/canvas.c \
 	userland/desktop/pdfviewer/text.c \
-	userland/desktop/pdfviewer/touch.c
-$(eval $(call KEILAND_LINUX_PROGRAM,pdfviewer,bin,$(KEILAND_LINUX_PDFVIEWER_SOURCES),libkeiland.so libtruetype.so libpdf.so libwayland-client.so libvulkan.so.1,-lm))
+	userland/desktop/pdfviewer/touch.c userland/desktop/picture/png-write.c
+$(eval $(call KEILAND_LINUX_PROGRAM,pdfviewer,bin,$(KEILAND_LINUX_PDFVIEWER_SOURCES),libkeiland.so libtruetype.so libpdf.so libz-compat.so libwayland-client.so libvulkan.so.1,-lm))

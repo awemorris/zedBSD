@@ -114,6 +114,7 @@ static void keep_anchor(struct pv_app *app, size_t page, double fraction);
 static void handle_key(struct pv_app *app, const struct pv_event *event);
 static void handle_button(struct pv_app *app, const struct pv_event *event);
 static void handle_motion(struct pv_app *app, const struct pv_event *event);
+static int image_at(struct pv_app *app, int x, int y);
 static void handle_axis(struct pv_app *app, const struct pv_event *event);
 static void open_chooser(struct pv_app *app);
 static const char *reason_of(int error);
@@ -1619,6 +1620,7 @@ handle_button(
 		app->last_x = event->x;
 		app->last_y = event->y;
 		app->last_time = event->time;
+		app->press_time = event->time;
 		app->velocity_x = 0.0;
 		app->press_scroll_x = app->scroll_x;
 		app->press_scroll_y = app->scroll_y;
@@ -1650,6 +1652,7 @@ handle_motion(
 	int moved_y;
 	int distance_x;
 	int distance_y;
+	int found;
 	uint64_t elapsed;
 
 	/* Only a press drags. */
@@ -1668,6 +1671,18 @@ handle_motion(
 	if (app->dragging == 0) {
 		if (distance_x < VIEW_DRAG_START && distance_y < VIEW_DRAG_START)
 			return;
+
+		/* A press held still on an image first drags the image out of the window, not the view (ws189-p003). */
+		if (event->time - app->press_time >= PV_DRAG_HOLD_MS) {
+			found = image_at(app, app->press_x, app->press_y);
+			if (found) {
+				app->pressed = 0;
+				app->drag_request = PV_DRAG_IMAGE;
+				return;
+			}
+		}
+
+		/* The view's drag. */
 		app->dragging = 2;
 		if (app->mode == PV_MODE_PAGE && distance_x >= distance_y)
 			app->dragging = 1;
@@ -2299,4 +2314,49 @@ page_mode_top(
 
 	/* Reports the top. */
 	return top;
+}
+
+/*
+ * Finds the image of the page under a point of the pages' view (ws189-p003):
+ * 1 with its page and corners kept for the drag (app->drag_page and
+ * drag_quad, page points from the top left), 0 when no image is there.
+ */
+static int
+image_at(
+	struct pv_app *app,
+	int x,
+	int y)
+{
+	struct pdf_page_editor *editor;
+	struct pdf_edit_object object;
+	struct pv_place place;
+	size_t index;
+	int error;
+
+	/* The page and its point. */
+	pv_app_place_at(app, (double)x, (double)y, &place);
+	if (place.page >= app->document.count)
+		return 0;
+
+	/* The page's objects, and the one at the point. */
+	error = pdf_page_editor_open(app->document.document, place.page, &editor);
+	if (error != 0)
+		return 0;
+	error = pdf_page_editor_hit(editor, place.x, place.y, &index);
+	if (error == 0) {
+		memset(&object, 0, sizeof(object));
+		object.size = sizeof(object);
+		error = pdf_page_editor_object(editor, index, &object);
+	}
+
+	/* The editor is done with; only an image is dragged. */
+	pdf_page_editor_close(editor);
+	if (error != 0 || object.kind != PDF_EDIT_IMAGE)
+		return 0;
+
+	/* Succeeded: the image's page and corners. */
+	app->drag_page = place.page;
+	memcpy(app->drag_quad, object.quad, sizeof(app->drag_quad));
+	pv_log("DND image page=%lu object=%lu", (unsigned long)place.page, (unsigned long)index);
+	return 1;
 }

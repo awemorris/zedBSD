@@ -20,11 +20,11 @@ desktop。Text Editor を 2 つ（別の process、kei で `textedit` を 2 回�
 1. 操作: 1 つ目の Text Editor で `hello drag` を全部選ぶ（Ctrl+A）。`aat mark start`。
    確認事項: 選択。正解: 選択が見える。確認方法: 撮影。
 2. 操作: 選択の中で左を押し（`aat down`）、20 px 動かす。
-   確認事項: drag の始まり。正解: `KWL DATA drag start` の行（types=2 actions=1）、`KWL DATA drag state=neutral`（元の窓の上）。確認方法: `aat wait-log 'KWL DATA drag start' --since start`。
+   確認事項: drag の始まり。正解: `TEXTEDIT DND drag start bytes=10`、`KWL DATA drag start` の行（types=2 actions=1）、`KWL DATA drag state=neutral`（元の窓の上）。確認方法: `aat wait-log 'KWL DATA drag start' --since start`。
 3. 操作: pointer を 2 つ目の Text Editor の本文の中ほどへ動かし（数段で）、止めて撮る。
    確認事項: 印と挿入点。正解: `KWL DATA drag state=copy`。撮影で pointer の右下に緑の丸と白い +、2 つ目の窓の本文に点滅しない accent の縦線（挿入点）。確認方法: log、撮影（人が見る）。
 4. 操作: 離す（`aat up`）。
-   確認事項: drop。正解: `KWL DATA drag drop`、`KWL DATA receive ... source=`（2 つ目の窓の client）、2 つ目の窓に `hello drag`。確認方法: log、撮影。
+   確認事項: drop。正解: `KWL DATA drag drop`、`KWL DATA receive ... source=`（2 つ目の窓の client）、2 つ目の窓に `hello drag`（`TEXTEDIT DND drop bytes=10`）。確認方法: log、撮影。
 5. 操作: 同じく選んで drag し、Terminal の上で離す。
    確認事項: Terminal。正解: `ZTERM DROP enter ... text=1`、Terminal の行に `hello drag`。確認方法: log、撮影。
 6. 操作: 同じく選んで drag し、1 つ目の Text Editor（元）の本文の上に戻して止め、離す。

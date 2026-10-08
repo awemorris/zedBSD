@@ -391,6 +391,25 @@ int browser_view_record(struct browser_view *view, const struct browser_target *
 void browser_view_gpu_failure(const struct browser_view *view, struct browser_gpu_failure *failure);
 
 /*
+ * An image of the page shown (ws189-p003, a picture dragged out of the
+ * browser): its pixels, premultiplied 0xAARRGGBB words, width by height
+ * without padding, and the absolute URL of its source (empty when its
+ * element has none).  browser_view_image_at copies the image at a place
+ * of the view (0, ENOENT when none is there, or ENOMEM), and
+ * browser_view_image_release frees what it gave.  The view's options and
+ * BROWSER_API_VERSION are unchanged (a call added).
+ */
+struct browser_image {
+	uint32_t *pixels;
+	int width;
+	int height;
+	char *url;
+};
+
+int browser_view_image_at(struct browser_view *view, float x, float y, struct browser_image *image);
+void browser_view_image_release(struct browser_image *image);
+
+/*
  * An offscreen image of the engine's own, for a program without a window:
  * a device of its own with one image of a size, the GPU and the target to
  * give a view, and the image read back into 0xAARRGGBB pixels (rows stride

@@ -3,12 +3,12 @@
 # WS191: 再生の音を libkeiland の audio stream の口へ（compositor・backend、3 OS）
 
 <!-- awesome-plan-current:start -->
-Status: planning
+Status: planned
 Primary Milestone: MG006
 Related Milestones: MG007
 Objectives: O2
 Parent: [Master](../master.md)
-Queue: なし
+Queue: q895（P2、q893 の後）
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-08 昼 ユーザー、クリックの回答）

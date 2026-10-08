@@ -1714,6 +1714,97 @@ browser_view_record(
 	return 0;
 }
 
+/*
+ * Finds the image shown at a place of the view (ws189-p003: a picture
+ * dragged out of the browser): a copy of its pixels, premultiplied
+ * 0xAARRGGBB words (the decoder's are straight), and the absolute URL of
+ * its source.  browser_view_image_release frees them.  Returns 0, ENOENT
+ * when no image is there, or ENOMEM.
+ */
+int
+browser_view_image_at(
+	struct browser_view *view,
+	float x,
+	float y,
+	struct browser_image *image)
+{
+	const struct img_bitmap *bitmap;
+	struct page_pointer pointer;
+	struct wb_buffer source;
+	const char *url;
+	uint32_t pixel;
+	uint32_t alpha;
+	size_t count;
+	size_t index;
+	int error;
+
+	/* Nothing yet, and a page. */
+	memset(image, 0, sizeof(*image));
+	if (view->page == NULL)
+		return ENOENT;
+
+	/* The image at the place in the document, and its source. */
+	view_pointer_at(view, x, y, BROWSER_BUTTON_PRIMARY, 0U, &pointer);
+	wb_buffer_init(&source);
+	error = page_image_at(view->page, pointer.x, pointer.y, &bitmap, &source);
+	if (error != 0 || bitmap == NULL || bitmap->pixels == NULL) {
+		wb_buffer_release(&source);
+		if (error != 0)
+			return error;
+		return ENOENT;
+	}
+
+	/* The pixels, copied and multiplied by their alpha. */
+	count = (size_t)bitmap->width * (size_t)bitmap->height;
+	image->pixels = malloc(count * sizeof(*image->pixels));
+	if (image->pixels == NULL) {
+		wb_buffer_release(&source);
+		return ENOMEM;
+	}
+
+	/* Each pixel's colours times its alpha. */
+	for (index = 0; index < count; index++) {
+		pixel = bitmap->pixels[index];
+		alpha = pixel >> 24;
+		image->pixels[index] = (alpha << 24) |
+				       ((((pixel >> 16) & 0xffU) * alpha + 127U) / 255U) << 16 |
+				       ((((pixel >> 8) & 0xffU) * alpha + 127U) / 255U) << 8 |
+				       (((pixel & 0xffU) * alpha + 127U) / 255U);
+	}
+
+	/* Its size. */
+	image->width = bitmap->width;
+	image->height = bitmap->height;
+
+	/* The source's URL, copied (empty when the element has none). */
+	url = wb_buffer_string(&source);
+	if (url == NULL)
+		url = "";
+	image->url = strdup(url);
+	wb_buffer_release(&source);
+	if (image->url == NULL) {
+		free(image->pixels);
+		image->pixels = NULL;
+		return ENOMEM;
+	}
+
+	/* Succeeded: the image. */
+	return 0;
+}
+
+/*
+ * Frees what browser_view_image_at gave.
+ */
+void
+browser_view_image_release(
+	struct browser_image *image)
+{
+	/* The pixels and the URL. */
+	free(image->pixels);
+	free(image->url);
+	memset(image, 0, sizeof(*image));
+}
+
 /* Tells which Vulkan call (or step) failed last in a drawing, and what it returned. */
 void
 browser_view_gpu_failure(

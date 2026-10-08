@@ -520,6 +520,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 ユーザーの決定と Q1 の技術の決定の記録。決まった判断は先頭の open-decisions からここへ移す。各 WS の phase.md・ws.md が正本で、ここは索引。
 
 <!-- master:decisions-log:start -->
+- 2026-10-08 午後 ユーザー（クリック）: WS189 の DnD で、drop の前の wl_data_offer.receive を compositor が空にする（データは落とした窓にだけ渡す。drop の前に中身を読む GTK4 などは空を読む）→「これでよい」。ws189-p001 は Q1 の判定で cleared。
 - 2026-10-08 朝 ユーザー:「/dev/hid-hostは、/dev/input/bridgeに変更し、/dev/bt0は、/dev/bluetooth0に変更できますか？」→ クリックの回答「揃える」: node を `/dev/input/bridge`・`/dev/bluetoothN` に。UAPI も揃える（include/uapi/hid-host.h → input-bridge.h、HID_HOST_* → INPUT_BRIDGE_*、struct も input_bridge_*）。bluetooth.h と BT_IOC_* は元から Bluetooth の名前なのでそのまま。P2 が i01c の前に行う。
 - 2026-10-08 昼 ユーザー（クリック）: WS189 の DnD は専用の受け渡し・同じ app の中は app で・画像（PNG）から・見た目は compositor と app で分担・dock の spring-loaded・desktop に file・画面をまたぐ。WS190 の popup はコピー・切り取り・貼り付け・すべて選択。Files の mount の表は kl_system へ、再生の音は libkeiland の audio stream の口へ（WS191）。
 - 2026-10-08 朝 ユーザー（クリックの回答）: USB メモリは最新 main で UAT の image を作る（Q1 が build、書き込みはユーザー）。WS143 B6: account が無い install では bluetoothd は起動しない（今の暫定のまま）。ws143-p005 Q4: ペアリングの後に自動で接続する。Q5: 人が切断した機器からの再接続は断る。Q2: `/dev/hid-host` に HID_HOST_GET_DEVICE を足す。Q1: i2c-hid も共有の HID の glue（hid-input）に乗せる（推しと逆、F-084 を実施に）。libbrowser に要素を探して focus する口を足してよい（描画の改善は止めたまま）。BUG-241 はベータ3。BUG-225 は実機の UAT で見てから。Music のプレイリストなど（backlog-p2 111）は範囲外（後で）。

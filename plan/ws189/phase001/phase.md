@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws189-p001 -->
 # ws189-p001: 設計 — app の間の drag and drop（画像・受け入れの見た目・dock・desktop・画面をまたぐ）
 
-Status: in-progress（q892、P1、2026-10-08: 設計と design-reviewer の反映まで済み。clearance は Q1 の判定）
+Status: cleared（2026-10-08 Q1 の判定。設計と design-reviewer の反映）
 Disposition: normal
 Parent: [WS189](../ws.md)
 Queue: q892（P1 の新しい世代、2026-10-08 Q1 の依頼）
@@ -47,6 +47,7 @@ p002（libkeiland と compositor）と p003（app）の受け入れの条件を�
 - X11 の app との橋渡し（XDND）は入れない。
 - **Wayland からの意図した逸脱**（review I4）: Wayland は enter の後ならいつでも `receive` を許すが、この compositor は drop の後の offer にだけ data を回す
   （ユーザーの原則「データは落とした窓にだけ渡す」）。drop の前に中身を読む client（例: GTK4 の DropTarget の preload）は空を読む。zedBSD の app は drop の後にだけ読む。
+  **ユーザーの決定（2026-10-08、Q1 経由）: この逸脱は「これでよい」。**
 - 規約は plan/coding-style.md の全文。compositor は libvulkan だけ・OS の操作は backend（Guardrail）。この WS は OS の操作を足さない。
 
 ## 2. libkeiland の口（KL_VERSION 70、仮。merge の時に Q1 が main の次の空きを確かめる）
