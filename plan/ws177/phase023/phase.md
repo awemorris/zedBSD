@@ -3,7 +3,7 @@
 # ws177-p023: 印刷の堅牢化の 2 — backend の printd の寿命の表（案 Q）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 夜 P2 q905）
+Status: test-wait（T1-457、2026-10-08 夜 Q1）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q905（P2、2026-10-08 夜、承認済み）
