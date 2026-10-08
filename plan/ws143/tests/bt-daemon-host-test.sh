@@ -31,3 +31,11 @@ cc $flags -o "$OUT/bt-hid-host-test" plan/ws143/tests/bt-hid-host-test.c userlan
 	userland/base/bluetoothd/hidp.c userland/base/bluetoothd/att.c userland/base/bluetoothd/hidcache.c \
 	userland/base/bluetoothd/snoop.c userland/base/bluetoothd/keys.c userland/base/bluetoothd/hci.c
 timeout 120 "$OUT/bt-hid-host-test" "$hid"
+hidhost=$(mktemp -d "$OUT/hidhost.XXXXXX")
+cc $flags -o "$OUT/bt-hidhost-host-test" plan/ws143/tests/bt-hidhost-host-test.c userland/base/bluetoothd/hid.c \
+	userland/base/bluetoothd/session.c userland/base/bluetoothd/pair.c userland/base/bluetoothd/router.c \
+	userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/acl.c \
+	userland/base/bluetoothd/l2cap.c userland/base/bluetoothd/smp.c userland/base/bluetoothd/crypto.c \
+	userland/base/bluetoothd/keys.c userland/base/bluetoothd/sdp.c userland/base/bluetoothd/hidp.c \
+	userland/base/bluetoothd/hidcache.c -lpthread
+timeout 300 "$OUT/bt-hidhost-host-test" "$hidhost"

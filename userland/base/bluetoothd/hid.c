@@ -32,6 +32,7 @@
 #define HID_CREATE_CONNECTION		0x0405U
 #define HID_DISCONNECT			0x0406U
 #define HID_ACCEPT_CONNECTION		0x0409U
+#define HID_REJECT_CONNECTION		0x040aU
 #define HID_LINK_KEY_REPLY		0x040bU
 #define HID_LINK_KEY_NEGATIVE		0x040cU
 #define HID_AUTHENTICATION		0x0411U
@@ -51,8 +52,9 @@
 /* The status of an authentication whose key the device does not have (PIN or Key Missing). */
 #define HID_STATUS_KEY_MISSING		0x06U
 
-/* The reason of a disconnection by the user, and the role taken when a device connects (central, review S6). */
+/* The reason of a disconnection by the user, of a connection refused (unacceptable address, as the router's), and the role taken when a device connects (central, review S6). */
 #define HID_REASON_USER			0x13U
+#define HID_REASON_REFUSED		0x0fU
 #define HID_ROLE_CENTRAL		0x00U
 
 /* Write Scan Enable's value: page scan only (inquiry scan is the pairing's mode's, D11b). */
@@ -90,6 +92,7 @@ static void hid_sdp_send(struct btd_hid *hid, struct btd_hid_device *device);
 static void hid_sdp_input(struct btd_hid *hid, struct btd_hid_device *device, const uint8_t *pdu, size_t length);
 static void hid_sdp_done(struct btd_hid *hid, struct btd_hid_device *device);
 static void hid_open_channel(struct btd_hid *hid, struct btd_hid_device *device, uint16_t psm);
+static uint16_t hid_asked_control(struct btd_hid_device *device);
 static void hid_channels_open(struct btd_hid *hid, struct btd_hid_device *device);
 static void hid_control(struct btd_hid *hid, struct btd_hid_device *device, const uint8_t *frame, size_t length);
 static void hid_interrupt(struct btd_hid_device *device, const uint8_t *frame, size_t length);
@@ -100,6 +103,7 @@ static void hid_numbers(struct btd_hid_device *device);
 static void hid_fail(struct btd_hid *hid, struct btd_hid_device *device, const char *why);
 static void hid_ended(struct btd_hid *hid, struct btd_hid_device *device, const char *why);
 static void hid_close_bridge(struct btd_hid_device *device);
+static void hid_drop(struct btd_hid *hid, struct btd_hid_device *device, int unplug);
 static void hid_page(struct btd_hid *hid, struct btd_hid_device *device);
 static void hid_retry_later(struct btd_hid_device *device, uint64_t now);
 static void hid_answer(struct btd_hid *hid, struct btd_hid_device *device, const char *line);
@@ -244,6 +248,10 @@ btd_hid_connect(
 		return 1;
 	}
 
+	/* Named after its bond (the name the user saw when pairing), else after its HID record. */
+	if (bond.name[0] != '\0')
+		(void)snprintf(device->record.name, sizeof(device->record.name), "%s", bond.name);
+
 	/* Wanted back from now on, and its pages start again (review S5). */
 	device->wanted = 1;
 	device->paused = 0;
@@ -333,8 +341,6 @@ btd_hid_forget(
 	const uint8_t *address)
 {
 	struct btd_hid_device *device;
-	uint8_t disconnect[3];
-	uint8_t unplug[1];
 
 	/* The record goes in any case. */
 	(void)btd_hidcache_forget(hid->keys_folder, hid->session->address, address, BTD_ADDRESS_BREDR);
@@ -344,25 +350,8 @@ btd_hid_forget(
 	if (device == NULL)
 		return;
 
-	/* A connected device hears the unplug, and the link is ended. */
-	if (device->connected) {
-		if (device->control_cid != 0U) {
-			unplug[0] = btd_hidp_header(BTD_HIDP_CONTROL, BTD_HIDP_VIRTUAL_CABLE_UNPLUG);
-			hid_send(hid, device, device->control_cid, unplug, sizeof(unplug));
-		}
-
-		/* The link: the user ended it. */
-		hid_put16(disconnect, device->handle);
-		disconnect[2] = HID_REASON_USER;
-		(void)hid_command(hid, HID_DISCONNECT, disconnect, sizeof(disconnect));
-	}
-
-	/* Succeeded: the input device goes, and the slot is free (a Disconnection Complete finds no device). */
-	if (device->asked)
-		hid_answer(hid, device, "ERROR forgotten");
-	hid_close_bridge(device);
-	memset(device, 0, sizeof(*device));
-	device->bridge = -1;
+	/* Succeeded: a connected device hears the unplug, and the device goes. */
+	hid_drop(hid, device, 1);
 }
 
 /*
@@ -510,9 +499,10 @@ btd_hid_tick(
 		if (!device->used)
 			continue;
 
-		/* A handshake that did not come: the input device is made all the same. */
-		if (device->state == BTD_HID_HANDSHAKE && device->state_deadline != 0U && now >= device->state_deadline) {
-			hid_setup(hid, device);
+		/* A handshake that did not come, or a setup to write again: the input device is made now. */
+		if (device->state == BTD_HID_HANDSHAKE || device->state == BTD_HID_SETUP) {
+			if (device->state_deadline != 0U && now >= device->state_deadline)
+				hid_setup(hid, device);
 			continue;
 		}
 
@@ -861,6 +851,8 @@ hid_slot(
 		memset(device, 0, sizeof(*device));
 		device->used = 1;
 		memcpy(device->address, address, BTD_ADDRESS_BYTES);
+		memcpy(device->record.address, address, BTD_ADDRESS_BYTES);
+		device->record.type = BTD_ADDRESS_BREDR;
 		device->bridge = -1;
 		device->event = -1;
 		device->touch_event = -1;
@@ -923,13 +915,19 @@ hid_request(
 {
 	struct btd_hid_device *device;
 	uint8_t accept[BTD_ADDRESS_BYTES + 1U];
+	uint8_t reject[BTD_ADDRESS_BYTES + 1U];
 	int error;
 
-	/* A whole event of a device in the table, not connecting. */
+	/* A whole event of a device in the table. */
 	if (length < 10U)
 		return;
 	device = hid_find(hid, parameters);
+
+	/* A device whose connection is under way already (its page crossed this) is refused, as the router refuses strangers. */
 	if (device == NULL || device->state != BTD_HID_IDLE) {
+		memcpy(reject, parameters, BTD_ADDRESS_BYTES);
+		reject[BTD_ADDRESS_BYTES] = HID_REASON_REFUSED;
+		(void)hid_command(hid, HID_REJECT_CONNECTION, reject, sizeof(reject));
 		hid->refused++;
 		return;
 	}
@@ -1088,6 +1086,10 @@ hid_encryption(
 		hid_fail(hid, device, "security");
 		return;
 	}
+
+	/* A link encrypted already (a key refreshed, the pairing's link handed over) needs nothing more. */
+	if (device->state != BTD_HID_AUTHENTICATING && device->state != BTD_HID_ENCRYPTING)
+		return;
 
 	/* Succeeded: the key's size. */
 	hid_key_size(hid, device);
@@ -1428,6 +1430,7 @@ hid_sdp_done(
 	struct btd_hid_record record;
 	uint8_t request[16];
 	size_t length;
+	uint16_t cid;
 	int error;
 
 	/* The HID record: none is no HID device (its record goes); a descriptor past 4096 bytes is refused. */
@@ -1486,6 +1489,13 @@ hid_sdp_done(
 	if (error == 0)
 		hid_send(hid, device, BTD_CID_SIGNALLING, request, length);
 
+	/* A device that connected by itself asked for its channels meanwhile: they are taken as they open. */
+	cid = hid_asked_control(device);
+	if (cid != 0U) {
+		hid_channel_opened(hid, device, cid);
+		return;
+	}
+
 	/* Succeeded: the control channel first. */
 	hid_open_channel(hid, device, BTD_SDP_PSM_CONTROL);
 }
@@ -1515,6 +1525,25 @@ hid_open_channel(
 	if (psm == BTD_SDP_PSM_INTERRUPT)
 		device->interrupt_cid = cid;
 	hid_send(hid, device, BTD_CID_SIGNALLING, request, length);
+}
+
+/* Finds the control channel the device asked for itself (any state but free), or 0. */
+static uint16_t
+hid_asked_control(
+	struct btd_hid_device *device)
+{
+	const struct btd_channel *channel;
+	unsigned index;
+
+	/* Each channel of the table. */
+	for (index = 0U; index < BTD_CHANNELS_MAX; index++) {
+		channel = &device->l2cap.channels[index];
+		if (channel->state != BTD_CHANNEL_FREE && channel->inbound && channel->psm == BTD_SDP_PSM_CONTROL)
+			return channel->local_cid;
+	}
+
+	/* None. */
+	return 0U;
 }
 
 /*
@@ -1580,7 +1609,8 @@ hid_control(
 			break;
 		memcpy(address, device->address, BTD_ADDRESS_BYTES);
 		(void)btd_keys_forget(hid->keys_folder, hid->session->address, address, BTD_ADDRESS_BREDR);
-		btd_hid_forget(hid, address);
+		(void)btd_hidcache_forget(hid->keys_folder, hid->session->address, address, BTD_ADDRESS_BREDR);
+		hid_drop(hid, device, 0);
 		break;
 	case BTD_HIDP_GET_REPORT:
 	case BTD_HIDP_SET_REPORT:
@@ -1605,10 +1635,16 @@ hid_interrupt(
 	struct btd_hidp message;
 	int error;
 
-	/* Only DATA of an input report. */
+	/* The message; one too long for the bridge is dropped and counted (phase005 Q22). */
 	error = btd_hidp_parse(frame, length, &message);
-	if (error != 0)
+	if (error == E2BIG) {
+		device->oversize++;
 		return;
+	} else if (error != 0) {
+		return;
+	}
+
+	/* Only DATA of an input report goes on. */
 	if (message.type != BTD_HIDP_DATA || message.parameter != BTD_HIDP_REPORT_INPUT)
 		return;
 
@@ -1683,7 +1719,13 @@ hid_setup(
 
 	/* The setup; the kernel's refusal names why. */
 	error = hid_setup_write(hid, device);
-	if (error == ENOSPC || error == EBUSY) {
+	if (error == EINVAL && device->setup_tries < BTD_HID_SETUP_TRIES) {
+		/* The kernel could not copy it (section 3): written again a little later, from the tick. */
+		device->setup_tries++;
+		device->state = BTD_HID_SETUP;
+		device->state_deadline = btd_now_ms() + BTD_HID_SETUP_MS;
+		return;
+	} else if (error == ENOSPC || error == EBUSY) {
 		hid_fail(hid, device, "input-full");
 		return;
 	}
@@ -1883,6 +1925,44 @@ hid_ended(
 		hid_retry_later(device, now);
 }
 
+/*
+ * Drops a device whose bond went (FORGET, or the device's own unplug): a
+ * connected one hears VIRTUAL_CABLE_UNPLUG first when unplug is set
+ * (design section 6.3), its link is ended, its input device goes and its
+ * slot is freed (its Disconnection Complete then finds no device).
+ */
+static void
+hid_drop(
+	struct btd_hid *hid,
+	struct btd_hid_device *device,
+	int unplug)
+{
+	uint8_t disconnect[3];
+	uint8_t message[1];
+
+	/* The device hears the unplug on its control channel. */
+	if (device->connected && unplug && device->control_cid != 0U) {
+		message[0] = btd_hidp_header(BTD_HIDP_CONTROL, BTD_HIDP_VIRTUAL_CABLE_UNPLUG);
+		hid_send(hid, device, device->control_cid, message, sizeof(message));
+	}
+
+	/* The link: the user (or the device) ended the bond. */
+	if (device->connected) {
+		hid_put16(disconnect, device->handle);
+		disconnect[2] = HID_REASON_USER;
+		(void)hid_command(hid, HID_DISCONNECT, disconnect, sizeof(disconnect));
+	}
+
+	/* A client waiting hears the end. */
+	if (device->asked)
+		hid_answer(hid, device, "ERROR forgotten");
+
+	/* Succeeded: the input device goes, and the slot is free. */
+	hid_close_bridge(device);
+	memset(device, 0, sizeof(*device));
+	device->bridge = -1;
+}
+
 /* Closes the input device (the kernel removes it and releases its keys). */
 static void
 hid_close_bridge(
@@ -2036,7 +2116,12 @@ hid_command(
 	return 0;
 }
 
-/* Sends an L2CAP frame on a device's connection (a failure is the connection's end to show). */
+/*
+ * Sends an L2CAP frame on a device's connection: on the signalling
+ * channel, or on one of the device's channels named by its local CID (the
+ * frame goes to the device's end of it, its remote CID).  A failure is the
+ * connection's end to show.
+ */
 static void
 hid_send(
 	struct btd_hid *hid,
@@ -2045,8 +2130,20 @@ hid_send(
 	const uint8_t *payload,
 	size_t length)
 {
+	struct btd_channel *channel;
+	uint16_t destination;
+
+	/* The signalling channel is fixed; a dynamic channel goes to the device's CID, and only once known. */
+	destination = cid;
+	if (cid != BTD_CID_SIGNALLING) {
+		channel = btd_l2cap_channel(&device->l2cap, cid);
+		if (channel == NULL || channel->remote_cid == 0U)
+			return;
+		destination = channel->remote_cid;
+	}
+
 	/* Succeeded: queued for the controller's buffers. */
-	(void)btd_session_send(hid->session, device->handle, cid, payload, length);
+	(void)btd_session_send(hid->session, device->handle, destination, payload, length);
 }
 
 /*
@@ -2102,6 +2199,7 @@ hid_reset_link(
 	device->interrupt_cid = 0U;
 	device->pnp_asked = 0;
 	device->queued = 0U;
+	device->setup_tries = 0U;
 	memset(&device->reassembly, 0, sizeof(device->reassembly));
 	btd_l2cap_init(&device->l2cap);
 	btd_l2cap_set_accept(&device->l2cap, hid_accept, device);

@@ -59,6 +59,10 @@
 #define BTD_HID_HANDSHAKE_MS	2000U
 #define BTD_HID_CLOSE_MS	3000U
 
+/* A setup the kernel refused with EINVAL (its copy failed, section 3) is written again so often, this far apart (review M10). */
+#define BTD_HID_SETUP_TRIES	3U
+#define BTD_HID_SETUP_MS	100U
+
 /* The pages again of a wanted device that went: the first wait, the longest, and how many before it is paused (review S5). */
 #define BTD_HID_RETRY_FIRST_MS	5000U
 #define BTD_HID_RETRY_LAST_MS	60000U
@@ -67,7 +71,8 @@
 /*
  * Where a device's connection is: none, paging (or accepting its own
  * connection), authenticating, encrypting, the SDP channel and records,
- * the HID channels, the handshake of SET_PROTOCOL, open, closing.
+ * the HID channels, the handshake of SET_PROTOCOL, open, closing, and the
+ * setup to be written again.
  */
 #define BTD_HID_IDLE		0U
 #define BTD_HID_PAGING		1U
@@ -78,6 +83,7 @@
 #define BTD_HID_HANDSHAKE	6U
 #define BTD_HID_OPEN		7U
 #define BTD_HID_CLOSING		8U
+#define BTD_HID_SETUP		9U
 
 /* One report that came before the input device was made. */
 struct btd_hid_report {
@@ -115,10 +121,11 @@ struct btd_hid_device {
 	struct btd_sdp sdp;
 	int pnp_asked;
 
-	/* The input device: the bridge's descriptor (-1: none) and its nodes. */
+	/* The input device: the bridge's descriptor (-1: none), its nodes, and the setup's writes refused so far. */
 	int bridge;
 	int32_t event;
 	int32_t touch_event;
+	unsigned setup_tries;
 
 	/* The reports that came before the input device. */
 	unsigned queued;
