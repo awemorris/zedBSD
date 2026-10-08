@@ -327,16 +327,16 @@ kwl_settings_global_visible(
 	if (kind != KWL_SYSTEM_MANAGER && kind != KWL_AUDIO)
 		return 1;
 
+	/* The login screen has no settings (nor sound streams). */
+	if (client->server->settings == NULL)
+		return 0;
+
 	/* The sound's streams are shown only while the backend makes them (audio-stream.c, WS191). */
 	if (kind == KWL_AUDIO) {
 		offered = kwl_audio_offered();
 		if (!offered)
 			return 0;
 	}
-
-	/* The login screen has no settings. */
-	if (client->server->settings == NULL)
-		return 0;
 
 	/* Looks at the peer's user once, at the first registry. */
 	if (!client->peer_checked) {

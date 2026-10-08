@@ -137,6 +137,20 @@ main(void)
 	error = kl_audio_stream_open(&format, &stream);
 	CHECK(error == ENODEV, "no device: %d", error);
 
+	/* 3b. The compositor going before ready: EPIPE, not a fault. */
+	pthread_mutex_lock(&host_audio.lock);
+	host_audio.close_on_create = 1U;
+	pthread_mutex_unlock(&host_audio.lock);
+	error = kl_audio_stream_open(&format, &stream);
+	CHECK(error == EPIPE, "the compositor gone before ready: %d", error);
+
+	/* 3c. A ring of another version: EPROTO. */
+	pthread_mutex_lock(&host_audio.lock);
+	host_audio.bad_version = 1U;
+	pthread_mutex_unlock(&host_audio.lock);
+	error = kl_audio_stream_open(&format, &stream);
+	CHECK(error == EPROTO, "a ring of another version: %d", error);
+
 	/* 4. Opened: the ring as asked, nothing written. */
 	error = kl_audio_stream_open(&format, &stream);
 	CHECK(error == 0, "open: %d", error);
@@ -201,6 +215,17 @@ main(void)
 	command(0U, 0U, 1U, 0U);
 	events = gather(stream, 50U);
 	CHECK((events & KL_AUDIO_EVENT_DRAINED) != 0U, "drained is told");
+
+	/* 10b. A drain stopped before it ends: no drained. */
+	error = kl_audio_stream_start(stream);
+	CHECK(error == 0, "start before the drain: %d", error);
+	error = kl_audio_stream_drain(stream);
+	CHECK(error == 0, "drain again: %d", error);
+	error = kl_audio_stream_stop(stream);
+	CHECK(error == 0, "stop in the drain: %d", error);
+	command(0U, 0U, 1U, 0U);
+	events = gather(stream, 50U);
+	CHECK((events & KL_AUDIO_EVENT_DRAINED) == 0U, "a stopped drain tells no drained");
 
 	/* 11. A control the backend cannot take now: EAGAIN. */
 	pthread_mutex_lock(&host_audio.lock);

@@ -135,6 +135,7 @@ static unsigned audio_check(uint32_t format, uint32_t channels, uint32_t rate, u
 static unsigned audio_count(pid_t pid, unsigned *all);
 static void audio_take(struct audio_stream *stream, const struct kl_backend_audio_stream_report *report);
 static void audio_answered(struct audio_stream *stream, uint32_t request, unsigned error);
+static int audio_awaited(const struct audio_stream *stream, uint32_t request);
 static void audio_end(struct audio_stream *stream, enum audio_state state, uint32_t opcode, unsigned error);
 static void audio_close_backend(struct audio_stream *stream);
 static void audio_event(struct audio_stream *stream, uint32_t opcode, const uint32_t *words, size_t count);
@@ -574,6 +575,7 @@ audio_take(
 {
 	struct kwl_client *client;
 	uint32_t words[3];
+	int awaited;
 	int error;
 
 	/* Which thing. */
@@ -605,7 +607,10 @@ audio_take(
 		audio_end(stream, AUDIO_FAILED, KL_AUDIO_STREAM_EVENT_FAILED, report->error);
 		break;
 	case KL_BACKEND_AUDIO_RESULT:
-		/* A control's answer. */
+		/* A control's answer; one to no control awaited (a request number the client used twice) is passed over. */
+		awaited = audio_awaited(stream, report->request);
+		if (!awaited)
+			break;
 		audio_answered(stream, report->request, report->error);
 		break;
 	case KL_BACKEND_AUDIO_DRAINED:
@@ -633,6 +638,24 @@ audio_take(
 	default:
 		break;
 	}
+}
+
+/* Tells whether a control of the request number is awaited. */
+static int
+audio_awaited(
+	const struct audio_stream *stream,
+	uint32_t request)
+{
+	unsigned slot;
+
+	/* The slots that wait. */
+	for (slot = 0U; slot < AUDIO_WAITING; slot++) {
+		if (stream->waiting[slot].used && stream->waiting[slot].request == request)
+			return 1;
+	}
+
+	/* None. */
+	return 0;
 }
 
 /* Sends a control's result and moves the stream when it succeeded. */
@@ -728,6 +751,10 @@ audio_end(
 	if (state == AUDIO_LOST)
 		what = "lost";
 	printf("KWL AUDIO stream client=%llu id=%u %s error=%u\n", (unsigned long long)stream->object->client->number, stream->object->id, what, error);
+
+	/* A failed stream lets its slot go at once (its object answers its controls STATE without one). */
+	if (state == AUDIO_FAILED)
+		memset(stream, 0, sizeof(*stream));
 }
 
 /* Closes a stream's backend side, once. */
