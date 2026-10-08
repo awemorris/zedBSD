@@ -51,7 +51,7 @@ Resume point: [p001](phase001/phase.md)（USB の LAN の後挿し・抜去・ca
 
 | Phase | 目的 | Status | 依存 | 目安 |
 | --- | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | USB の LAN の後挿し・抜去・carrier の変化と `networking.wait` を QEMU で通す（L1〜L3）。見つかった不具合を直す | uncleared（q598-i01、2026-10-02 優先の変更で中断。phase.md に合わせた（2026-10-08 q910 P2 の照合）。旧: planned） | なし（ws005-p019 と `userland/base/networkd/`・`net/` が重なるので同時に走らせない） | 2〜3h |
+| [p001](phase001/phase.md) | USB の LAN の後挿し・抜去・carrier の変化と `networking.wait` を QEMU で通す（L1〜L3）。見つかった不具合を直す | in-progress（q912 P1 2026-10-08: L1 の fetch と L3 の試験を作り T1 へ。L1・抜去は T1-145・T1-221 で PASS、L2 は QEMU で carrier が動かず p002 へ） | なし（ws005-p019 と `userland/base/networkd/`・`net/` が重なるので同時に走らせない） | 2〜3h |
 | [p003](phase003/phase.md) | WS033 で書いた source（`managed-lan.c`、`net lan`・`net startup`、init の setting の表）の全文規約の確認 | planned | p001 の修正の後（独立に先に走らせてもよいが、p001 の修正を含めて 1 回にする） | 2h |
 | [p002](phase002/phase.md) | 実機の確認 L4（ユーザーと一緒に、ws005-p023 と同じ日にまとめる） | planning | p001、ユーザーの時期 | 1h（立会い） |
 
