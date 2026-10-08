@@ -1819,6 +1819,8 @@ usb_hid_set_device_mode(
 		report[0] = feature.report_id;
 		length = 1;
 	}
+
+	/* The data after the ID, with the mode in its field. */
 	data = report + length;
 	usb_hid_put_bits(data, feature.bit_offset, feature.bit_size, mode);
 	length += feature.data_size;
