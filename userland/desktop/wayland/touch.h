@@ -21,5 +21,6 @@ void kwl_touch_frame(struct kwl_server *server, struct kwl_input_device *device,
 void kwl_touch_tick(struct kwl_server *server);
 void kwl_touch_object_gone(struct kwl_object *object);
 int kwl_touch_drag_start(struct kwl_server *server, struct kwl_client *client, uint32_t serial);
+int kwl_touch_shell_handback(struct kwl_server *server, int32_t x, int32_t y, uint32_t time, int lifted);
 
 #endif

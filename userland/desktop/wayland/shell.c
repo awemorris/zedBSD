@@ -513,6 +513,10 @@ static int band_button(struct kwl_server *server, uint32_t button, uint32_t stat
 static int band_motion(struct kwl_server *server, int replays);
 static int32_t band_depth(struct kwl_server *server);
 static void band_replay(struct kwl_server *server, int release);
+static void band_tick(struct kwl_server *server);
+static void band_handback(struct kwl_server *server, int lifted);
+static void draw_desktop_layer(struct kwl_server *server, VkCommandBuffer command, struct kwl_object **windows, unsigned count, float home, const struct shell_bar *bar);
+static void home_layer_log(unsigned hidden);
 
 /*
  * Whether where the desktops' pictures are has been logged, and where (for
@@ -529,6 +533,13 @@ static int32_t shell_desktops_logged_x;
  * its parts by it); no bit set is never logged.
  */
 static struct kwl_plane_places shell_head_bars_logged;
+
+/*
+ * Whether the last frame left out the desktop layer under App Home (its
+ * opacity 0 with Home open, ws177-p033): the log says when that changes,
+ * once each way.  0 at the start, when the layer is drawn.
+ */
+static unsigned shell_home_layer_hidden;
 
 /*
  * The bottom edge's swipe over a fullscreen window: whether a contact that
@@ -566,14 +577,9 @@ kwl_glass_draw(
 	struct kwl_object *top;
 	struct kwl_object *cover;
 	struct shell_bar bar;
-	unsigned index;
-	unsigned focused;
-	unsigned drawn;
-	int shown;
+	unsigned hidden;
 	int whole;
 	float progress;
-	unsigned blur;
-	int centred;
 	int showing;
 	int menu;
 	float home;
@@ -605,9 +611,24 @@ kwl_glass_draw(
 	 * (home.c, ws181-p008).
 	 */
 	home = kwl_home_progress(server);
+	hidden = 0U;
 	if (home > 0.0f) {
 		kwl_home_draw(server, command, home);
 		kwl_home_layer(server, home, &server->layer_x, &server->layer_y, &server->layer_scale, &server->layer_opacity);
+
+		/*
+		 * Faded out (Home open past the layer's fade, ws177-p033): nothing
+		 * of the layer would show, so none of it is drawn.
+		 */
+		if (server->layer_opacity <= 0.0f)
+			hidden = 1U;
+	}
+
+	/* The log says when the layer is left out or drawn again. */
+	home_layer_log(hidden);
+
+	/* The layer's shadow over Home, while the layer shows. */
+	if (home > 0.0f && !hidden) {
 		glass_shape_init(&shape, server->layer_x, server->layer_y, (float)server->width * server->layer_scale, (float)server->height * server->layer_scale);
 		shape.quad[0] -= 80.0f;
 		shape.quad[1] -= 80.0f;
@@ -621,8 +642,11 @@ kwl_glass_draw(
 		shape.color[2] = 0.24f;
 		shape.color[3] = 0.40f * home * server->layer_opacity;
 		glass_shape_draw(server, command, &shape);
-		server->layer_on = 1;
 	}
+
+	/* The layer's place over Home is where the wallpaper and the windows are drawn. */
+	if (home > 0.0f)
+		server->layer_on = 1;
 
 	/*
 	 * A fullscreen window on top that covers the output with an opaque
@@ -642,14 +666,16 @@ kwl_glass_draw(
 		return;
 	}
 
-	/* The wallpaper over the whole output (with round corners while it is pushed aside). */
-	glass_shape_init(&shape, 0.0f, 0.0f, (float)server->width, (float)server->height);
-	shape.mode = MODE_IMAGE;
-	shape.opaque = 1.0f;
-	shape.set = glass_wallpaper_set(server);
-	if (home > 0.0f)
-		shape.radius = 18.0f;
-	glass_shape_draw(server, command, &shape);
+	/* The wallpaper over the whole output (with round corners while it is pushed aside), unless Home hides the layer. */
+	if (!hidden) {
+		glass_shape_init(&shape, 0.0f, 0.0f, (float)server->width, (float)server->height);
+		shape.mode = MODE_IMAGE;
+		shape.opaque = 1.0f;
+		shape.set = glass_wallpaper_set(server);
+		if (home > 0.0f)
+			shape.radius = 18.0f;
+		glass_shape_draw(server, command, &shape);
+	}
 
 	/* The system bar's layout, which a docking title bar moves to. */
 	bar_layout(server, &bar);
@@ -663,60 +689,10 @@ kwl_glass_draw(
 		return;
 	}
 
-	/* The desktop's icons over the wallpaper, with the layer (desktop.c). */
-	kwl_desktop_draw(server, command);
-
-	/*
-	 * The windows; the top one has the focus; where a dragged one would
-	 * dock shows just under it.  The desktop shown's windows, and while
-	 * the desktops slide or are swiped, the neighbour's too, a screen's
-	 * width to the side (Home, when it shows, has the desktop shown only).
-	 */
-	top = kwl_top_window(server);
+	/* The desktop's icons and the windows, unless Home hides the layer. */
 	position = desktop_position(server);
-	drawn = 0;
-	for (index = 0; index < count; index++) {
-		shown = window_shown(server, windows[index], home, position);
-		if (!shown)
-			continue;
-
-		/*
-		 * The glass of a window over others that asked for it (set_blur,
-		 * ws075-p029) shows them blurred (backdrop.c), not while Home has the
-		 * layer; any other window's glass shows the blurred wallpaper alone,
-		 * which costs nothing more (the default).
-		 */
-		blur = kwl_panels_blur(windows[index]);
-		centred = window_centred_over(server, windows[index]);
-		if (centred && home <= 0.0f) {
-			/*
-			 * A window in the middle of the docked space (ws142-p008b, the
-			 * 2026-10-06 user decision) stands on the scene under it blurred
-			 * as one layer: the wallpaper, its application's other windows,
-			 * its docked parent.
-			 */
-			draw_backdrop(server, command, windows, index, position);
-			draw_centred_cover(server, command);
-		} else if (drawn > 0U && home <= 0.0f && blur) {
-			draw_backdrop(server, command, windows, index, position);
-		} else {
-			kwl_backdrop_reset(server);
-		}
-
-		/* One more window drawn. */
-		drawn++;
-
-		/* Shifted with the layer, when Home does not have it. */
-		window_layer(server, windows[index], home, position);
-
-		/* The window. */
-		focused = 0;
-		if (windows[index] == top)
-			focused = 1;
-		if (windows[index] == server->drag)
-			draw_dock_hint(server, command);
-		draw_window(server, command, windows[index], focused, &bar);
-	}
+	if (!hidden)
+		draw_desktop_layer(server, command, windows, count, home, &bar);
 
 	/* The windows' popups over all the windows (popup.c); the glass from here is on the blurred wallpaper. */
 	server->layer_on = 0;
@@ -3165,6 +3141,9 @@ kwl_glass_tick(
 
 	/* The arrangements: a window gone, minimized, resized or fullscreen ends its desktop's (WS181). */
 	kwl_arrange_tick(server);
+
+	/* A press held in the top edge's band that rests becomes a long press (ws177-p033). */
+	band_tick(server);
 
 	/* The previews of the bar's applications show and hide in time (apps-bar.c), and the switcher goes when it may not show. */
 	kwl_apps_bar_tick(server);
@@ -7332,11 +7311,16 @@ band_button(
 	if (server->band_replay)
 		return 0;
 
-	/* The release of a held press: a tap of what is under it, or nothing over a fullscreen window. */
+	/* The release of a held press: a tap of what is under it, or of the fullscreen window's client. */
 	if (state == 0 && server->band_press) {
 		server->band_press = 0;
-		if (replays)
+		if (replays) {
 			band_replay(server, 1);
+		} else {
+			band_handback(server, 1);
+		}
+
+		/* The release was the band's. */
 		return 1;
 	}
 
@@ -7354,10 +7338,18 @@ band_button(
 	if (edge != KWL_EDGE_TOP_BAND)
 		return 0;
 
-	/* Held, where it was. */
+	/*
+	 * Held, where and when it was, and over what: the bar, or a fullscreen
+	 * window (replays 0), whose client is given a press that is no swipe.
+	 */
 	server->band_press = 1;
 	server->band_start_x = server->pointer_x;
 	server->band_start_y = server->pointer_y;
+	server->band_since_ms = kwl_milliseconds();
+	server->band_time = server->input_time;
+	server->band_fullscreen = 0U;
+	if (!replays)
+		server->band_fullscreen = 1U;
 	printf("KWL EDGE band press x=%d y=%d\n", server->pointer_x, server->pointer_y);
 
 	/* Succeeded: the press is the band's for now. */
@@ -7427,13 +7419,75 @@ band_motion(
 		return 1;
 	}
 
-	/* Over a fullscreen window the press is lost. */
-	if (!replays)
+	/* Over a fullscreen window the press goes to its client, and the finger with it (this motion too). */
+	if (!replays) {
+		band_handback(server, 0);
 		return 1;
+	}
 
 	/* Not the swipe: the press is given to what is under it, and this motion goes on to it. */
 	band_replay(server, 0);
 	return 0;
+}
+
+/*
+ * Follows a press held in the top edge's band without a motion
+ * (ws177-p033): resting KWL_EDGE_BAND_HOLD_MS where it touched, it is a
+ * long press of what is under it, given again there as a press that is
+ * still down (the bar's applications show their previews); over a
+ * fullscreen window its client has the finger from then.
+ */
+static void
+band_tick(
+	struct kwl_server *server)
+{
+	uint64_t held_ms;
+	int held;
+
+	/* Only a held press. */
+	if (!server->band_press)
+		return;
+
+	/* Not yet long enough. */
+	held_ms = kwl_milliseconds() - server->band_since_ms;
+	held = kwl_edge_band_held(held_ms);
+	if (!held)
+		return;
+	server->band_press = 0;
+	printf("KWL EDGE band hold ms=%llu fullscreen=%u\n", (unsigned long long)held_ms, server->band_fullscreen);
+
+	/* Over a fullscreen window the finger is its client's. */
+	if (server->band_fullscreen) {
+		band_handback(server, 0);
+		return;
+	}
+
+	/* Over the bar the press is given again as a long one (band_held while it is). */
+	server->band_held = 1U;
+	band_replay(server, 0);
+	server->band_held = 0U;
+}
+
+/*
+ * Gives a press held in the top edge's band over a fullscreen window to
+ * that window's client (ws177-p034), at the point it touched and with the
+ * time it touched: the finger is the client's from then (touch.c), and
+ * lifted already (a tap) the client hears it lift too.
+ */
+static void
+band_handback(
+	struct kwl_server *server,
+	int lifted)
+{
+	uint32_t time;
+	int given;
+
+	/* The events' time now, counted on from the press's (a long press is given without an event). */
+	time = server->band_time + (uint32_t)(kwl_milliseconds() - server->band_since_ms);
+
+	/* The finger, given to the window under where it touched. */
+	given = kwl_touch_shell_handback(server, server->band_start_x, server->band_start_y, time, lifted);
+	printf("KWL EDGE band handback lifted=%d given=%d\n", lifted, given);
 }
 
 /*
@@ -9743,4 +9797,100 @@ desktop_alt_shift_key(
 	/* Succeeded: the desktop turns. */
 	desktop_turn(server, target, "alt-shift");
 	return 1;
+}
+
+/*
+ * Draws the desktop layer's content over its wallpaper: the desktop's
+ * icons, then the windows bottom to top (kwl_glass_draw), the one on top
+ * focused.
+ */
+static void
+draw_desktop_layer(
+	struct kwl_server *server,
+	VkCommandBuffer command,
+	struct kwl_object **windows,
+	unsigned count,
+	float home,
+	const struct shell_bar *bar)
+{
+	struct kwl_object *top;
+	unsigned index;
+	unsigned focused;
+	unsigned drawn;
+	unsigned blur;
+	int shown;
+	int centred;
+	float position;
+
+	/* The desktop's icons over the wallpaper, with the layer (desktop.c). */
+	kwl_desktop_draw(server, command);
+
+	/*
+	 * The windows; the top one has the focus; where a dragged one would
+	 * dock shows just under it.  The desktop shown's windows, and while
+	 * the desktops slide or are swiped, the neighbour's too, a screen's
+	 * width to the side (Home, when it shows, has the desktop shown only).
+	 */
+	top = kwl_top_window(server);
+	position = desktop_position(server);
+	drawn = 0;
+	for (index = 0; index < count; index++) {
+		shown = window_shown(server, windows[index], home, position);
+		if (!shown)
+			continue;
+
+		/*
+		 * The glass of a window over others that asked for it (set_blur,
+		 * ws075-p029) shows them blurred (backdrop.c), not while Home has the
+		 * layer; any other window's glass shows the blurred wallpaper alone,
+		 * which costs nothing more (the default).
+		 */
+		blur = kwl_panels_blur(windows[index]);
+		centred = window_centred_over(server, windows[index]);
+		if (centred && home <= 0.0f) {
+			/*
+			 * A window in the middle of the docked space (ws142-p008b, the
+			 * 2026-10-06 user decision) stands on the scene under it blurred
+			 * as one layer: the wallpaper, its application's other windows,
+			 * its docked parent.
+			 */
+			draw_backdrop(server, command, windows, index, position);
+			draw_centred_cover(server, command);
+		} else if (drawn > 0U && home <= 0.0f && blur) {
+			draw_backdrop(server, command, windows, index, position);
+		} else {
+			kwl_backdrop_reset(server);
+		}
+
+		/* One more window drawn. */
+		drawn++;
+
+		/* Shifted with the layer, when Home does not have it. */
+		window_layer(server, windows[index], home, position);
+
+		/* The window. */
+		focused = 0;
+		if (windows[index] == top)
+			focused = 1;
+		if (windows[index] == server->drag)
+			draw_dock_hint(server, command);
+		draw_window(server, command, windows[index], focused, bar);
+	}
+
+	/* Succeeded: the layer is drawn. */
+	return;
+}
+
+/* Logs the desktop layer left out under App Home, or drawn again (ws177-p033), when that changes. */
+static void
+home_layer_log(
+	unsigned hidden)
+{
+	/* Only a change. */
+	if (hidden == shell_home_layer_hidden)
+		return;
+
+	/* The new state, logged once. */
+	shell_home_layer_hidden = hidden;
+	printf("KWL HOME layer hidden=%u\n", hidden);
 }

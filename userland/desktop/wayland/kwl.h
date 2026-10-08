@@ -885,6 +885,7 @@ uint64_t kwl_cycles(void);
 #define KWL_APPS_VIA_CLICK	1U
 #define KWL_APPS_VIA_SWITCH	2U
 #define KWL_APPS_VIA_SPRING	3U
+#define KWL_APPS_VIA_HOLD	4U
 
 /*
  * The bars' applications (apps-bar.c): each desktop's bar order (one for
@@ -907,6 +908,11 @@ struct kwl_apps_bar {
 	char press_key[KWL_APPS_KEY];
 	int32_t press_x;
 	unsigned dragging;
+	/*
+	 * The press on the icon is a finger's long press (ws177-p033, the top
+	 * band's hold): it showed the previews, and its release clicks nothing.
+	 */
+	unsigned press_held;
 	char logged[KWL_PLANE_SLOTS][512];
 	/*
 	 * Spring-loading during a drag and drop (ws189-p002): the application
@@ -1256,6 +1262,23 @@ struct kwl_server {
 	unsigned band_replay;
 	int32_t band_start_x;
 	int32_t band_start_y;
+	/*
+	 * When the held press began (kwl_milliseconds), and whether the press
+	 * being given again is a long press (held KWL_EDGE_BAND_HOLD_MS without
+	 * moving, ws177-p033: what is under it takes it as one, the bar's
+	 * applications by showing their previews); band_held is set only while
+	 * that press is given.
+	 */
+	uint64_t band_since_ms;
+	unsigned band_held;
+	/*
+	 * Whether the held press is over a fullscreen window (ws177-p034): one
+	 * that is no swipe goes to that window's client (touch.c's handback),
+	 * not to the bar; and the press's event time, which the handback's
+	 * events count on from.
+	 */
+	unsigned band_fullscreen;
+	uint32_t band_time;
 	/* Whether the gesture is the touch pad's (ws142-p003), and how far it has opened Wiseview by the fingers' travel. */
 	unsigned wiseview_pad;
 	float wiseview_pad_progress;

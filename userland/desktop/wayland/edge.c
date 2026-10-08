@@ -112,6 +112,23 @@ kwl_edge_band_motion(
 }
 
 /*
+ * Tells whether a press held in the top band that has not moved far enough
+ * to be anything (kwl_edge_band_motion still waits) has rested long enough
+ * to be a long press of what is under it.
+ */
+int
+kwl_edge_band_held(
+	uint64_t held_ms)
+{
+	/* Not yet: it still waits. */
+	if (held_ms < KWL_EDGE_BAND_HOLD_MS)
+		return 0;
+
+	/* Succeeded: a long press. */
+	return 1;
+}
+
+/*
  * Tells what a drag on Home that went (dx, dy) is: sideways at least as
  * far as up or down, the pages; more down, closing Home; more up, nothing.
  */
