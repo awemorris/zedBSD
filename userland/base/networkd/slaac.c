@@ -8,8 +8,9 @@
 /*
  * The pure parts of networkd's IPv6 stateless address autoconfiguration
  * (ws130-p006): reading a Router Advertisement, the stable interface
- * identifier of RFC 7217, an address from a prefix, and a temporary
- * address's lifetimes (RFC 8981).
+ * identifier of RFC 7217, an address from a prefix, a temporary
+ * address's lifetimes and when the next one is made (RFC 8981), and the
+ * router chosen for the default route (ws177-p045).
  */
 
 #include "userland/base/networkd/slaac.h"
@@ -156,6 +157,114 @@ slaac_temporary_lifetimes(
 		*temporary_preferred = longest;
 }
 
+/*
+ * Gives a temporary address's lifetimes at an age (seconds since it was
+ * made; RFC 8981 section 3.4): as for a new one, and no longer than two
+ * days valid and a day less the desynchronization preferred from when it
+ * was made, so that advertisements do not keep it past them.
+ */
+void
+slaac_temporary_aged(
+	uint32_t valid,
+	uint32_t preferred,
+	uint32_t desync,
+	uint64_t age,
+	uint32_t *temporary_valid,
+	uint32_t *temporary_preferred)
+{
+	uint64_t longest;
+	uint64_t left;
+
+	/* The lifetimes of a new one. */
+	slaac_temporary_lifetimes(valid, preferred, desync, temporary_valid, temporary_preferred);
+
+	/* Valid: what is left of two days. */
+	left = 0;
+	if (age < SLAAC_TEMPORARY_VALID)
+		left = SLAAC_TEMPORARY_VALID - age;
+	if (*temporary_valid > left)
+		*temporary_valid = (uint32_t)left;
+
+	/* Preferred: what is left of a day less the desynchronization, and no longer than valid. */
+	longest = SLAAC_TEMPORARY_PREFERRED;
+	if (desync < longest)
+		longest -= desync;
+	left = 0;
+	if (age < longest)
+		left = longest - age;
+	if (*temporary_preferred > left)
+		*temporary_preferred = (uint32_t)left;
+	if (*temporary_preferred > *temporary_valid)
+		*temporary_preferred = *temporary_valid;
+}
+
+/* Gives a temporary address's desynchronization (DESYNC_FACTOR, RFC 8981 section 3.8) from a random number. */
+uint32_t
+slaac_temporary_desync(
+	uint32_t random)
+{
+	/* Between 0 and MAX_DESYNC_FACTOR. */
+	return random % (SLAAC_TEMPORARY_DESYNC_MAX + 1U);
+}
+
+/*
+ * Gives the seconds after a temporary address was made at which the next
+ * one is made: REGEN_ADVANCE before its longest preferred lifetime runs
+ * out (RFC 8981 section 3.4, step 6).
+ */
+uint64_t
+slaac_temporary_regenerate(
+	uint32_t desync)
+{
+	uint64_t longest;
+
+	/* A day less the desynchronization. */
+	longest = SLAAC_TEMPORARY_PREFERRED;
+	if (desync < longest)
+		longest -= desync;
+
+	/* Succeeded: less the advance. */
+	if (longest <= SLAAC_TEMPORARY_REGEN_ADVANCE)
+		return 0;
+	return longest - SLAAC_TEMPORARY_REGEN_ADVANCE;
+}
+
+/*
+ * Chooses the router of the default route: one whose lifetime has not run
+ * out, of the interface with the lowest rank; between equals the current
+ * one (no change for nothing), else the first.  Returns its index, or -1
+ * when there is none.
+ */
+int
+slaac_router_choose(
+	const struct slaac_router *routers,
+	unsigned count,
+	uint64_t now,
+	int current)
+{
+	unsigned index;
+	int best;
+
+	/* Each router alive. */
+	best = -1;
+	for (index = 0; index < count; index++) {
+		if (!routers[index].used || routers[index].expires <= now)
+			continue;
+
+		/* The first, a better rank, or the current one among equals. */
+		if (best < 0) {
+			best = (int)index;
+		} else if (routers[index].rank < routers[best].rank) {
+			best = (int)index;
+		} else if (routers[index].rank == routers[best].rank && (int)index == current) {
+			best = (int)index;
+		}
+	}
+
+	/* The choice. */
+	return best;
+}
+
 /* Reads a 16-bit number in network order. */
 static uint16_t
 slaac_read16(
@@ -225,7 +334,8 @@ slaac_dnssl(
 	size_t used;
 	unsigned label;
 
-	/* The names in DNS's label form after the first eight bytes; a zero label ends each. */
+	/* The lifetime, then the names in DNS's label form after the first eight bytes; a zero label ends each. */
+	ra->search_lifetime = slaac_read32(option + 4);
 	used = strlen(ra->search);
 	offset = 8U;
 	while (offset < length) {

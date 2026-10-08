@@ -816,7 +816,9 @@ backend_opcode(
 		{ "IPV6", NETWORKD_OP_IPV6 },
 		{ "STATIC6", NETWORKD_OP_STATIC6 },
 		{ "ROUTE6", NETWORKD_OP_ROUTE6 },
-		{ "ROUTE6_CLEAR", NETWORKD_OP_ROUTE6_CLEAR }
+		{ "ROUTE6_CLEAR", NETWORKD_OP_ROUTE6_CLEAR },
+		{ "STATIC6_REMOVE", NETWORKD_OP_STATIC6_REMOVE },
+		{ "ROUTE6_REMOVE", NETWORKD_OP_ROUTE6_REMOVE }
 	};
 	size_t index;
 
@@ -876,8 +878,10 @@ backend_payload(
 	    (opcode == NETWORKD_OP_STATIC && count != 5U) ||
 	    (opcode == NETWORKD_OP_DEFAULT_ROUTE && count != 1U) ||
 	    (opcode == NETWORKD_OP_DNS && (count == 0U || count > NET_DNS_LIMIT)) ||
-	    ((opcode == NETWORKD_OP_IPV6 || opcode == NETWORKD_OP_STATIC6) && count != 2U) ||
+	    ((opcode == NETWORKD_OP_IPV6 || opcode == NETWORKD_OP_STATIC6 ||
+	    opcode == NETWORKD_OP_STATIC6_REMOVE) && count != 2U) ||
 	    (opcode == NETWORKD_OP_ROUTE6 && count != 2U && count != 3U) ||
+	    (opcode == NETWORKD_OP_ROUTE6_REMOVE && count != 1U) ||
 	    ((opcode == NETWORKD_OP_RELOAD ||
 	    opcode == NETWORKD_OP_ROUTE6_CLEAR ||
 	    opcode == NETWORKD_OP_DEFAULT_ROUTE_CLEAR ||
@@ -917,8 +921,8 @@ backend_payload(
 		if (networkd_field_write(&writer, NETWORKD_FIELD_GATEWAY,
 		    item[0], strlen(item[0])) != 0)
 			return -1;
-	} else if (opcode == NETWORKD_OP_IPV6 || opcode == NETWORKD_OP_STATIC6) {
-		/* IPv6 (ws130-p005): the interface, and "on"/"off" or the address with its length. */
+	} else if (opcode == NETWORKD_OP_IPV6 || opcode == NETWORKD_OP_STATIC6 || opcode == NETWORKD_OP_STATIC6_REMOVE) {
+		/* IPv6 (ws130-p005): the interface, and "on"/"off" or the address with its length (added or taken away). */
 		if (networkd_field_write(&writer, NETWORKD_FIELD_INTERFACE, item[0], strlen(item[0])) != 0 ||
 		    networkd_field_write(&writer, NETWORKD_FIELD_ADDRESS, item[1], strlen(item[1])) != 0)
 			return -1;
@@ -928,6 +932,10 @@ backend_payload(
 		    networkd_field_write(&writer, NETWORKD_FIELD_GATEWAY, item[1], strlen(item[1])) != 0)
 			return -1;
 		if (count == 3U && networkd_field_write(&writer, NETWORKD_FIELD_INTERFACE, item[2], strlen(item[2])) != 0)
+			return -1;
+	} else if (opcode == NETWORKD_OP_ROUTE6_REMOVE) {
+		/* An IPv6 route taken away: its destination (ws177-p045). */
+		if (networkd_field_write(&writer, NETWORKD_FIELD_ADDRESS, item[0], strlen(item[0])) != 0)
 			return -1;
 	} else if (opcode == NETWORKD_OP_DNS) {
 		field = NETWORKD_FIELD_DNS;
