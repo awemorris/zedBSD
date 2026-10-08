@@ -8,7 +8,7 @@
 /*
  * The media file reader's common part (WS122 p003): it opens the file,
  * tells its format from the first bytes, hands the work to that format's
- * reader (mp4.c, mkv.c, ts.c, ogg.c) and gives the helpers both use.
+ * reader (mp4.c, mkv.c, ts.c, ogg.c, avi.c) and gives the helpers both use.
  */
 
 #include "mediafile-private.h"
@@ -426,8 +426,8 @@ mf_be64(
 
 /*
  * Tells a file's format from its first bytes: Matroska's EBML header, an
- * MP4 box whose type is one an MP4 starts with, an Ogg page that begins a
- * stream, or a transport stream's packets.  NULL for none of them.
+ * MP4 box whose type is one an MP4 starts with, an AVI file's RIFF header,
+ * an Ogg page that begins a stream, or a transport stream's packets.  NULL for none of them.
  */
 static const struct mf_format *
 format_of(
@@ -436,6 +436,7 @@ format_of(
 {
 	int transport;
 	int ogg;
+	int avi;
 	int compared;
 
 	/* Too short for either header. */
@@ -460,6 +461,11 @@ format_of(
 	compared = memcmp(head + 4, "mdat", 4);
 	if (compared == 0)
 		return &mf_mp4_format;
+
+	/* An AVI file: RIFF and 'AVI ' (ws177-p030). */
+	avi = mf_avi_detect(head, length);
+	if (avi)
+		return &mf_avi_format;
 
 	/* An Ogg file: its first page begins a stream (ws177-p029). */
 	ogg = mf_ogg_detect(head, length);

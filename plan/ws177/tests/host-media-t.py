@@ -469,6 +469,70 @@ def group_ogg():
     report("ogg-cut", prefix("ogg-cut", run(path, (0, 1000000)), streams))
 
 
+def riff_chunks(data):
+    """The top-level chunks of the first RIFF and inside its lists: (id, offset of the header, size)."""
+    found = []
+
+    def walk(start, end):
+        position = start
+        while position + 8 <= end:
+            kind = data[position:position + 4]
+            size = struct.unpack("<I", data[position + 4:position + 8])[0]
+            found.append((kind, position, size))
+            if kind == b"LIST":
+                walk(position + 12, min(position + 8 + size, end))
+            position += 8 + size + (size & 1)
+    walk(12, len(data))
+    return found
+
+
+def group_avi():
+    """ws177-p030: AVI."""
+    seeks = (0, 1000000, 1550000, 2900000, 10000000)
+    cases = (("avi-mpeg4-mp3", VIDEO_IN + ["-f", "lavfi", "-i", "sine=sample_rate=48000", "-t", "3", "-c:v", "mpeg4",
+                                           "-g", "10", "-c:a", "libmp3lame", "-b:a", "64k"]),
+             ("avi-h264-pcm", VIDEO_IN + ["-f", "lavfi", "-i", "sine=sample_rate=8000", "-t", "3"] + H264[:4] +
+              ["-bf", "0", "-c:a", "pcm_s16le"]),
+             ("avi-mjpeg", VIDEO_IN + ["-t", "3", "-c:v", "mjpeg"]))
+    made = {}
+    for name, args in cases:
+        made[name] = ffmpeg(name + ".avi", args)
+        streams = probe(made[name])
+        report(name, compare(name, run(made[name], seeks), streams, fmt="avi", seeks=seeks))
+
+    # Without idx1 (renamed JUNK): the movi list's chunks are read, the same packets (key frames from the bytes).
+    source = made["avi-mpeg4-mp3"]
+    streams = probe(source)
+    path = mutate(source, "avi-no-idx1.avi", lambda d: d.__setitem__(slice(d.find(b"idx1"), d.find(b"idx1") + 4), b"JUNK"))
+    report("avi-no-idx1", compare("avi-no-idx1", run(path, seeks), streams, seeks=seeks))
+
+    # An idx1 entry pointing past the end of the file: that packet is left out and counted.
+    data = open(source, "rb").read()
+    index = data.find(b"idx1") + 8
+    entry = index + 16 * 10
+    track = int(data[entry:entry + 2])
+
+    def move_entry(d):
+        d[entry + 8:entry + 12] = struct.pack("<I", 0x7ffffff0)
+    path = mutate(source, "avi-bad-entry.avi", move_entry)
+    got = run(path)
+    problems = []
+    if got["open"] != 0:
+        problems.append("open error %d" % got["open"])
+    else:
+        lost = [len(stream["packets"]) - len(got["packets"][i]) for i, stream in enumerate(streams)]
+        dropped = [int(t["dropped"]) for t in got["tracks"]]
+        want = [1 if i == track else 0 for i in range(len(streams))]
+        if lost != want or dropped != want:
+            problems.append("lost %s, dropped %s, expected %s" % (lost, dropped, want))
+    report("avi-bad-entry", problems)
+
+    # Cut short (the index lost with the end): the chunks are read, each track's packets ffprobe's first ones.
+    length = len(data) * 6 // 10 + 5
+    path = mutate(source, "avi-cut.avi", lambda d: d.__delitem__(slice(length, None)))
+    report("avi-cut", prefix("avi-cut", run(path, (0, 1000000)), streams))
+
+
 def main():
     """Runs the groups asked for."""
     os.makedirs(OUT, exist_ok=True)
