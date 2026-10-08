@@ -3,7 +3,7 @@
 # ws177-p044: IPv6 の libc と道具（案 R2）
 
 Parent: [WS177](../ws.md)
-Status: test-wait 予定（2026-10-08 夜 P1 q909: 実装・host PASS・build warning 0。T1 の依頼を Q1 へ（p045・p046 とまとめて））
+Status: test-wait（T1-476、2026-10-08 夜 Q1）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q909-i01（P1、承認: Q1 の投入「WS177 案 R・R2: IPv6 の networkd・dhcpc と libc・道具（backlog-p1 14〜28）。p1 18 の IPV6_RECVHOPLIMIT の UAPI 追加は Q1 が可とする（HAL ではない）」）
