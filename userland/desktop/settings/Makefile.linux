@@ -15,7 +15,7 @@ KEILAND_LINUX_SETTINGS_SOURCES := userland/desktop/settings/main.c \
 	userland/desktop/settings/page-about.c \
 	userland/desktop/settings/welcome.c \
 	userland/desktop/settings/page-users.c userland/desktop/settings/page-users-admin.c userland/desktop/settings/page-users-pin.c userland/desktop/settings/page-users-keys.c \
-	userland/desktop/settings/page-soon.c userland/desktop/settings/page-power.c \
+	userland/desktop/settings/page-soon.c userland/desktop/settings/page-power.c userland/desktop/settings/page-notifications.c \
 	userland/desktop/settings/page-network.c \
 	userland/desktop/settings/page-wired.c \
 	userland/desktop/settings/wired.c \

@@ -1,5 +1,5 @@
 # Settings' texts in Japanese (domain settings, WS158 p004). tools/i18n/tr.py update keeps the translations.
-# userland/desktop/locale/settings.keys:3, userland/desktop/settings/ui.c:518
+# userland/desktop/locale/settings.keys:3, userland/desktop/settings/ui.c:521
 msg	Settings	設定
 # userland/desktop/locale/settings.keys:4
 msg	Change how Kei looks and works.	Kei の見た目と動きを変えます。
@@ -151,6 +151,14 @@ msg	Yellow	黄
 msg	Green	緑
 # userland/desktop/locale/settings.keys:82
 msg	Graphite	グラファイト
+# userland/desktop/locale/settings.keys:84
+msg	Mail	メール
+# userland/desktop/locale/settings.keys:85
+msg	Calendar	カレンダー
+# userland/desktop/locale/settings.keys:86
+msg	Phone	電話
+# userland/desktop/locale/settings.keys:87, userland/desktop/settings/page-notifications.c:96
+msg	Browser	ブラウザー
 # userland/desktop/settings/page-about.c:113
 msg	Show Welcome again	ようこそをもう一度見る
 # userland/desktop/settings/page-display.c:108
@@ -163,7 +171,7 @@ msg	Extend	拡張
 msg	Mirror	ミラー
 # userland/desktop/settings/page-display.c:119
 msg	With one display both show the same.	ディスプレイが1つの時はどちらも同じです。
-# userland/desktop/settings/page-display.c:131, userland/desktop/settings/page-display.c:132, userland/desktop/settings/page-languages.c:206
+# userland/desktop/settings/page-display.c:131, userland/desktop/settings/page-display.c:132, userland/desktop/settings/page-languages.c:199
 msg	Apply	適用
 # userland/desktop/settings/page-display.c:133, userland/desktop/settings/page-display.c:134
 msg	Revert	元に戻す
@@ -209,42 +217,54 @@ msg	Personalization	パーソナライズ
 msg	Devices	デバイス
 # userland/desktop/settings/page-home.c:63
 msg	System	システム
-# userland/desktop/settings/page-languages.c:113
+# userland/desktop/settings/page-languages.c:107
 msg	Input method	入力方式
-# userland/desktop/settings/page-languages.c:113
+# userland/desktop/settings/page-languages.c:107
 msg	What the keyboard types through. The change applies at once.	キーボードの入力に使うもの。変更はすぐに反映されます。
-# userland/desktop/settings/page-languages.c:127
+# userland/desktop/settings/page-languages.c:121
 msg	Display language	表示の言語
-# userland/desktop/settings/page-languages.c:127
+# userland/desktop/settings/page-languages.c:121
 msg	The language of the desktop's words. The change applies at once.	デスクトップの文字の言語。変更はすぐに反映されます。
-# userland/desktop/settings/page-languages.c:183
+# userland/desktop/settings/page-languages.c:176
 msg	Login screen	ログイン画面
-# userland/desktop/settings/page-languages.c:183
+# userland/desktop/settings/page-languages.c:176
 msg	The language of the login screen, for everyone on this computer.	このコンピューターの全員のログイン画面の言語。
-# userland/desktop/settings/page-languages.c:184
+# userland/desktop/settings/page-languages.c:177
 msg	Not set (English)	未設定（英語）
-# userland/desktop/settings/page-languages.c:187
+# userland/desktop/settings/page-languages.c:180
 msg	Now	現在
-# userland/desktop/settings/page-languages.c:236
+# userland/desktop/settings/page-languages.c:229
 msg	Your password	あなたのパスワード
-# userland/desktop/settings/page-languages.c:246
+# userland/desktop/settings/page-languages.c:239
 msg	Needed for the change	変更に必要です
-# userland/desktop/settings/page-languages.c:403
+# userland/desktop/settings/page-languages.c:399
 msg	Changed. The login screen uses it from the next time it shows.	変更しました。次にログイン画面が出る時から使われます。
-# userland/desktop/settings/page-languages.c:412, userland/desktop/settings/page-languages.c:552
+# userland/desktop/settings/page-languages.c:411, userland/desktop/settings/page-languages.c:569
 msg	The change could not be made.	変更できませんでした。
-# userland/desktop/settings/page-languages.c:519
+# userland/desktop/settings/page-languages.c:536
 msg	The change could not be asked.	変更を依頼できませんでした。
-# userland/desktop/settings/page-languages.c:528
+# userland/desktop/settings/page-languages.c:545
 msg	Changing...	変更しています...
-# userland/desktop/settings/page-languages.c:543
+# userland/desktop/settings/page-languages.c:560
 msg	Only an administrator can change the login screen's language.	ログイン画面の言語は管理者だけが変更できます。
-# userland/desktop/settings/page-languages.c:546
+# userland/desktop/settings/page-languages.c:563
 msg	Your password is wrong.	パスワードが違います。
-# userland/desktop/settings/page-languages.c:549
+# userland/desktop/settings/page-languages.c:566
 msg	Another change is under way. Try again in a moment.	ほかの変更が進行中です。少し待ってからやり直してください。
-# userland/desktop/settings/page-look.c:519
+# userland/desktop/settings/page-look.c:605
 msg	Accent color	アクセントカラー
+# userland/desktop/settings/page-notifications.c:84
+msg	Applications	アプリケーション
+# userland/desktop/settings/page-notifications.c:84
+msg	Turn off an application to hide its notifications.	アプリケーションを切ると、その通知を表示しません。
+# userland/desktop/settings/page-notifications.c:87
+msg	Show its notifications	通知を表示する
+# userland/desktop/settings/page-notifications.c:94
+msg	Sign-in Codes	サインインのコード
+# userland/desktop/settings/page-notifications.c:94
+msg	A code that comes by mail can be filled in for you.	メールで届いたコードを代わりに入力できます。
+# userland/desktop/settings/page-notifications.c:96
+msg	May read the sign-in codes in new mail	新しいメールのサインインのコードを読んでよい
 # userland/desktop/settings/page-power.c:67
 msg	The screen turns off after half that time.	画面はその半分の時間で消えます。
 # userland/desktop/settings/page-power.c:69
@@ -265,17 +285,27 @@ plural	{1} minute	{1} minutes	{1} 分
 msg	Coming in a later version	今後のバージョンで対応予定
 # userland/desktop/settings/titlebar.c:227
 msg	Search settings	設定を検索
-# userland/desktop/settings/ui.c:521
+# userland/desktop/settings/ui.c:524
 msg	Search	検索
-# userland/desktop/settings/welcome.c:115, userland/desktop/settings/welcome.c:116
+# userland/desktop/settings/welcome.c:139, userland/desktop/settings/welcome.c:140
 msg	Skip	スキップ
-# userland/desktop/settings/welcome.c:196
+# userland/desktop/settings/welcome.c:216, userland/desktop/settings/welcome.c:217
 msg	Back	戻る
-# userland/desktop/settings/welcome.c:199
+# userland/desktop/settings/welcome.c:222
 msg	Next	次へ
-# userland/desktop/settings/welcome.c:201
+# userland/desktop/settings/welcome.c:224
 msg	Start using Kei	Kei を使い始める
-# userland/desktop/settings/welcome.c:301
+# userland/desktop/settings/welcome.c:226
+msg	Close	
+# userland/desktop/settings/welcome.c:358
+msg	Files could not be opened. Open it from App Home.	
+# userland/desktop/settings/welcome.c:408
 msg	Welcome to Kei, {1}	Kei へようこそ、{1} さん
-# userland/desktop/settings/welcome.c:309
+# userland/desktop/settings/welcome.c:415
 msg	Let's set up a few things. You can change each of them later in Settings.	いくつか設定しましょう。どれもあとで設定から変えられます。
+# userland/desktop/settings/welcome.c:563
+msg	Try the key again, or press Next and connect later in Settings.	
+# userland/desktop/settings/welcome.c:572
+msg	No Wi-Fi and no wired connection were found. Press Next to go on; Settings > Ethernet or Wi-Fi connects later.	
+# userland/desktop/settings/welcome.c:633
+msg	The Welcome could not be marked as done; it will show again at the next login. Press again to go on.	

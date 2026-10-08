@@ -1953,6 +1953,8 @@ void kwl_surface_outputs_sync(struct kwl_server *server);
 void kwl_surface_outputs_bound(struct kwl_object *output);
 void kwl_surface_outputs_gone(struct kwl_server *server, uint32_t head);
 uint32_t kwl_notify_post_system(struct kwl_server *server, const char *title, const char *body, unsigned flags);
+/* The application ID of a client's mapped window ("" when it has none; notify-shell.c, ws177-p026). */
+const char *kwl_notify_app_id(const struct kwl_server *server, uint64_t client_number);
 struct kwl_notify_model *kwl_notify_model(void);
 /* The notifications' popup (notify-popup.c) and what it does to them (notify-shell.c), ws156-p003. */
 void kwl_notify_hide_shown(struct kwl_server *server);
