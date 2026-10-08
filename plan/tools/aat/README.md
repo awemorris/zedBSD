@@ -44,6 +44,7 @@ plan/tools/aat/aat stop
 - 鍵: `aat` は自分の checkout の `plan/tmp/guest/id_ed25519`（guest の harness の鍵、`guest.py keys` が作る、git に入らない）を使う。image は**同じ checkout** で作る（`build-image.sh` がその公開鍵を `/root/.ssh/authorized_keys` に入れる）。別の鍵は `--identity`。
 - 接続は 1 本を使い回す（ssh の ControlMaster）。2 回目からの命令は速い。control の socket は短い `/tmp/aat-<uid>/ssh-%C`（Unix の socket の path の上限、T1-200）、mark と画面の大きさは `build/aat/<target>/`（`AAT_STATE`）。
 - 座標は画面の pixel（左上が 0,0）。`move`・`click`・`drag`・`wheel` は `aat-input` の絶対の pointer（`move-to`）。`rel` は相対の mouse の量（compositor の加速がかかる）。`drag` は左 button だけ（`aat-input` の drag）。他の button で引くなら `move`・`down`・`move`・`up`。
+- touch screen（ws190-p002）: `tap X Y [--count 2]`（2 で double tap、間 120 ms）・`touch-drag X1 Y1 X2 Y2 [--steps N]`（1 本指、離して終わる）・`touch-down ID X Y`・`touch-move ID X Y`・`touch-up ID`（指 0〜9 を持ったまま。long press は `touch-down`・待ち・`touch-up`）。`aat-input` が 4 つ目の device（`INPUT_INJECT_KIND_TOUCH`、画面の pixel）を持つので、inject の口（`INPUT_INJECT_OPENS_MAX` 4）は aat-input の間 `touchinject`・`peninject` に空かない。
 - `key` の名前は evdev の名前の小文字（`enter`・`leftctrl`・`f5`、`ctrl`・`alt`・`shift`・`super` は左）。`type` は ASCII を US の配列で打つ（改行は `key enter`）。日本語は IME（`key` で切り替えて仮名を打つ）か貼り付けで。
 - log の既定は `/run/user/1000/session.log`（`AAT_LOG`、`--log`）。`mark NAME` で今の長さを覚え、`--since NAME` でその後だけを見る。UTF-8 は host で解く（guest の shell を通さない）。
 - `windows`・`where` は `ZWL MAP`・`ZWL UNMAP`・`ZWL WINDOW centred`・`ZWL RESIZE settled`・`ZWL RESIZE end`・`ZWL GLASS press move` の行から、surface ごとの最後の位置と大きさ。app の名前・題名・titlebar の部品の位置は今の log に無い（下の「P1 への依頼」）。
@@ -53,7 +54,7 @@ plan/tools/aat/aat stop
 
 ## target の側の口（P1、ws173-p001・p002）
 
-- 入力: `aat-input`（`userland/tests/aat-input`、root）。`aat-input start --width W --height H` が `/dev/input-inject` に相対の mouse・絶対の pointer（W×H の画素、既定 1920×1200）・keyboard を宣言して背景の server になり（`/run/aat-input.sock`）、`AAT-INPUT ready` を出す。`aat-input COMMAND ...` は 1 つの命令を送り `ok` か `error WHY`。命令は `move-to X Y`・`move DX DY`・`click [BUTTON] [X Y]`・`double-click`・`down`・`up`・`drag X1 Y1 X2 Y2 [STEPS]`・`wheel N`・`hwheel N`・`key NAME[+NAME...]`・`key-down`・`key-up`・`type TEXT`・`sleep MS`・`stop`。`aat` の各命令は 1 つか少数の `aat-input` の命令に対応する（SSH の 1 回ずつ、ControlMaster で速い）。
+- 入力: `aat-input`（`userland/tests/aat-input`、root）。`aat-input start --width W --height H` が `/dev/input-inject` に相対の mouse・絶対の pointer（W×H の画素、既定 1920×1200）・keyboard・touch screen（同じ画素、ws190-p002）を宣言して背景の server になり（`/run/aat-input.sock`）、`AAT-INPUT ready` を出す。`aat-input COMMAND ...` は 1 つの命令を送り `ok` か `error WHY`。命令は `move-to X Y`・`move DX DY`・`click [BUTTON] [X Y]`・`double-click`・`down`・`up`・`drag X1 Y1 X2 Y2 [STEPS]`・`wheel N`・`hwheel N`・`key NAME[+NAME...]`・`key-down`・`key-up`・`type TEXT`・`sleep MS`・`tap X Y`・`double-tap X Y`・`touch-drag X1 Y1 X2 Y2 [STEPS]`・`touch-down ID X Y`・`touch-move ID X Y`・`touch-up ID`・`stop`。`aat` の各命令は 1 つか少数の `aat-input` の命令に対応する（SSH の 1 回ずつ、ControlMaster で速い）。
 - 撮影: `keiland-shot OUT.png`（compositor が合成した画面、root）。aat は書かれた PNG の大きさを画面の大きさとして `aat-input start` に渡す。撮影に失敗した時は、その出力・終了の状態・user・`ls -l` を言う（T1-200 の「not found」の手がかり）。
 - `aat-input start` の server は起こされた時の descriptor を持ったまま背景に残るので、aat は出力を file（`AAT_RUN_DIR/input-start.txt`）に向けて起こし、起こした側が返った後にその file を読む（SSH の出力に向けると session が終わらない、T1-200）。
 - `check` の status は注入・`aat-input`・撮影の 3 つで決まる。session の log は有無を言うだけ（session がまだ無い image でも 0）。

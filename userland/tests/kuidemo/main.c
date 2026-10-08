@@ -22,6 +22,11 @@
  * press, and its glass panels, all given as tables.  An action chosen is
  * logged as "KUIDEMO ACTION action= id=".
  *
+ * ws190-p002: the controls' page has a text area of notes too, the window's
+ * clipboard is tied to the widgets (kl_ui_window_text), and each text
+ * widget's selection is logged as it changes ("KUIDEMO SELECT id=name|
+ * password|notes anchor= caret="), for the fingers' selection's tests.
+ *
  *   kuidemo [--display=NAME] [--font=PATH] [--fallback-font=PATH]
  *           [--width=N] [--height=N] [--timeout-s=N] [--shm]
  */
@@ -93,6 +98,10 @@
 #define DEMO_ID_CHIP		13U
 #define DEMO_ID_WORKING		14U
 #define DEMO_ID_DIALOG		15U
+#define DEMO_ID_NOTES		16U
+
+/* The notes' text area: its height, three lines (ws190-p002). */
+#define DEMO_NOTES_HEIGHT	76
 
 /* The command line's options. */
 struct demo_options {
@@ -133,6 +142,15 @@ struct demo {
 	double volume;
 	struct kl_field name;
 	struct kl_field password;
+	struct kl_text_area notes;
+
+	/*
+	 * The selection of each text widget last logged (ws190-p002: the
+	 * fingers' selection is logged as it changes): the name's, the
+	 * password's and the notes', anchor and caret.
+	 */
+	size_t logged_anchor[3];
+	size_t logged_caret[3];
 
 	/* The list, and the row activated last (-1 for none). */
 	struct kl_list list;
@@ -201,6 +219,8 @@ static void demo_draw_list(struct demo *demo);
 static void demo_draw_dialogs(struct demo *demo, uint64_t now_us);
 static void demo_glass_refresh(struct demo *demo);
 static int demo_value_x(const struct kl_rect *card);
+static void demo_log_selection(struct demo *demo, unsigned slot, const char *name, size_t anchor, size_t caret);
+static void demo_log_notes(const struct demo *demo);
 
 /*
  * Runs the sampler.
@@ -596,6 +616,8 @@ demo_event(
 		demo->closed = 1;
 		break;
 	default:
+		/* An input method's text and the rest of the widgets' input. */
+		(void)kl_ui_window_input(demo->ui, event);
 		break;
 	}
 }
@@ -803,6 +825,9 @@ demo_draw(
 	/* The frame is drawn; frames go on while the input or a widget moves. */
 	moving = kl_ui_end(demo->ui, now_us);
 	demo->moving = moving;
+
+	/* The focused field's text input and the window's clipboard for the widgets (ws190-p002: the bar's Copy, Cut and Paste). */
+	kl_ui_window_text(demo->ui, demo->window);
 	if (demo->chip_until > now_us || (demo->page == DEMO_PAGE_DIALOGS && demo->working))
 		demo->moving = 1;
 
@@ -918,7 +943,7 @@ demo_draw_controls(
 
 	/* The settings' card: a row for each control. */
 	card.y += card.height + 12;
-	card.height = 46 + 5 * 40 + 14;
+	card.height = 46 + 5 * 40 + 14 + DEMO_NOTES_HEIGHT + 12;
 	top = kl_card(&demo->style, &card, "Settings", NULL);
 	value_x = demo_value_x(&card);
 
@@ -967,6 +992,20 @@ demo_draw_controls(
 	changes = kl_field(demo->ui, &demo->style, DEMO_ID_PASSWORD, &control, &demo->password, "Password");
 	if ((changes & KL_FIELD_CHANGED) != 0U)
 		demo_log("FIELD password length=%lu", (unsigned long)demo->password.length);
+	top += 40;
+
+	/* The notes: a text area of three lines (ws190-p002), its text logged with its newlines as "|". */
+	(void)kl_row(&demo->style, card.x, top, card.width, "Notes", "", 1);
+	control.y = top + 4;
+	control.height = DEMO_NOTES_HEIGHT;
+	changes = kl_text_area(demo->ui, &demo->style, DEMO_ID_NOTES, &control, &demo->notes, "Notes");
+	if ((changes & KL_FIELD_CHANGED) != 0U)
+		demo_log_notes(demo);
+
+	/* The fingers' (or the keys') selections that changed. */
+	demo_log_selection(demo, 0U, "name", demo->name.anchor, demo->name.caret);
+	demo_log_selection(demo, 1U, "password", demo->password.anchor, demo->password.caret);
+	demo_log_selection(demo, 2U, "notes", demo->notes.anchor, demo->notes.caret);
 
 	/* The progress card: the volume's share. */
 	card.y += card.height + 12;
@@ -1179,4 +1218,45 @@ demo_glass_refresh(
 		demo->style.glass = 0;
 		demo->dirty = 1;
 	}
+}
+
+/* Logs a text widget's selection when it changed since it was last logged (a slot each widget). */
+static void
+demo_log_selection(
+	struct demo *demo,
+	unsigned slot,
+	const char *name,
+	size_t anchor,
+	size_t caret)
+{
+	/* The same as last logged. */
+	if (demo->logged_anchor[slot] == anchor && demo->logged_caret[slot] == caret)
+		return;
+
+	/* The new selection, logged and kept. */
+	demo->logged_anchor[slot] = anchor;
+	demo->logged_caret[slot] = caret;
+	demo_log("SELECT id=%s anchor=%lu caret=%lu", name, (unsigned long)anchor, (unsigned long)caret);
+}
+
+/* Logs the notes' text on one line, each newline shown as "|". */
+static void
+demo_log_notes(
+	const struct demo *demo)
+{
+	char line[KL_TEXT_AREA_MAX];
+	size_t index;
+
+	/* The text with its newlines turned. */
+	for (index = 0; index < demo->notes.length; index++) {
+		line[index] = demo->notes.text[index];
+		if (line[index] == '\n')
+			line[index] = '|';
+	}
+
+	/* The end of the line. */
+	line[index] = '\0';
+
+	/* The line the tests read. */
+	demo_log("FIELD notes bytes=%lu text=%s", (unsigned long)demo->notes.length, line);
 }
