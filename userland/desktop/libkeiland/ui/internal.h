@@ -61,6 +61,19 @@ struct wl_registry *keiui_app_global(struct wl_display *display, const char *int
 #define KEIUI_DRAGGABLE		2U
 #define KEIUI_MODAL		4U
 
+/*
+ * ws190-p002: a press on a widget that keeps the focus where it is (the
+ * bar's buttons: a press there does not take the keyboard from the field
+ * whose selection it acts on), and a widget a finger's drag that starts on
+ * it does nothing for (neither a selection nor a scroll begins).
+ */
+#define KEIUI_KEEP_FOCUS	8U
+#define KEIUI_NO_DRAG		16U
+
+/* The ids of the library's own records (ws190-p002): the bar of a field's selection and its handles; programs use none from 0xfffffff0 up. */
+#define KEIUI_TEXT_BAR_ID	0xfffffffdU
+#define KEIUI_TEXT_HANDLE_ID	0xfffffffcU
+
 /* Records a widget with its flags and reports what the input did to it (ui.c, KL_HIT_* bits). */
 unsigned keiui_ui_widget(struct kl_ui *ui, uint32_t id, uint32_t index, const struct kl_rect *rect, unsigned flags);
 
@@ -91,6 +104,8 @@ struct keiui_input {
 	char text[KL_WINDOW_TEXT_MAX];
 	uint32_t before;
 	uint32_t after;
+	/* ws190-p002: a command of the bar of the fingers' selection (Ctrl+X, C, V or A the bar sent), not the keyboard's. */
+	int from_bar;
 };
 
 /* Takes the next key a widget wants, or text sent for it, in the order they came while it had the focus (ui.c); 1 with it, 0 when none is left for it. */
@@ -159,6 +174,9 @@ int keiui_ui_focus_ring(const struct kl_ui *ui);
  */
 void keiui_ui_inset_note(uint32_t width, uint32_t height, int right, int bottom, unsigned reason, const int32_t *caret);
 
+/* Begins a finger's drag of a named end's handle (text-touch.c; KL_TEXT_HANDLE_ANCHOR or _CARET), at a point of the view's content. */
+void keiui_text_touch_hold(struct kl_text_touch *touch, int end, double x, double y);
+
 /* Reports the time of the frame being drawn (ui.c, the time kl_ui_begin was given). */
 uint64_t keiui_ui_now(const struct kl_ui *ui);
 
@@ -167,5 +185,85 @@ int keiui_button(struct kl_ui *ui, const struct kl_style *style, uint32_t id, ui
 
 /* The line pictures, from KL_ICON_TILES on (icons-line.c). */
 void keiui_icon_line_draw(struct kl_canvas *canvas, enum kl_icon icon, float x, float y, float size, kl_color color);
+
+/*
+ * ws190-p002 (plan/ws190/phase001/phase.md section 2.3): the fingers'
+ * selection of a field or a text area, one a window's input (kl_ui keeps
+ * it from kl_ui_create to kl_ui_destroy).  A double tap of a finger puts
+ * the focused field in it; kl_ui records the handles and the bar over the
+ * field in kl_ui_end and carries the fingers on them out.
+ *
+ * The view's answers come from the field's own copy kept here (field or
+ * area, and for a text area its lines in layout), never from the
+ * application's memory between frames: the field is drawn each frame,
+ * compares its text with the copy (another text set by the application
+ * ends the mode) and copies itself again.  scroll is the content's scroll
+ * the handles' drag moves near the view's edges; it is made with the input
+ * and lives as long, as the records of the frame shown point at it.
+ */
+#define KEIUI_SELECT_FIELD	1
+#define KEIUI_SELECT_AREA	2
+
+/*
+ * The bar's calls (text-bar.c), given to kl_ui by the widget that begins
+ * the fingers' selection, so that ui.c does not link the bar's drawing and
+ * text (a window's input without fields does not need them).
+ */
+struct keiui_bar_calls {
+	unsigned (*buttons)(unsigned facts);
+	int (*layout)(struct kl_text_bar *bar, struct kl_text *text, unsigned buttons, const struct kl_rect *selection, const struct kl_rect *visible, const struct kl_rect *bounds);
+	unsigned (*hit)(struct kl_ui *ui, uint32_t id, const struct kl_text_bar *bar, unsigned *held);
+	void (*draw)(const struct kl_text_bar *bar, const struct kl_style *style, unsigned held);
+};
+
+/* The bar's calls of text-bar.c. */
+extern const struct keiui_bar_calls keiui_text_bar_calls;
+
+struct keiui_select {
+	int active;
+	uint32_t id;
+	uint32_t index;
+	const void *widget;
+	int kind;
+	struct kl_text_touch touch;
+	const struct keiui_bar_calls *bar_calls;
+	struct kl_scroll scroll;
+	struct kl_rect rect;
+	struct kl_rect box;
+	struct kl_rect clip;
+	struct kl_style style;
+	struct kl_field field;
+	struct kl_text_area area;
+	void *layout;
+	int drawn;
+	size_t order;
+};
+
+/* Gives a window's input's fingers' selection (ui.c). */
+struct keiui_select *keiui_ui_select(struct kl_ui *ui);
+
+/* Tells whether the fingers' selection is a widget's (ui.c): 1 while the widget is in the mode. */
+int keiui_ui_select_owned(struct kl_ui *ui, uint32_t id, uint32_t index);
+
+/* Puts a widget in the fingers' selection (ui.c): its id and index, its kind and its view's answers; the widget then gives its copy each frame (keiui_ui_select_drawn). */
+void keiui_ui_select_begin(struct kl_ui *ui, uint32_t id, uint32_t index, int kind, const struct kl_text_view *view, const void *widget, const struct keiui_bar_calls *bar_calls);
+
+/* Takes the fingers' selection's mode away (ui.c; the widget keeps its selection). */
+void keiui_ui_select_end(struct kl_ui *ui);
+
+/* Notes that the widget in the mode was drawn in the frame being drawn, at its rectangle and text box, with its style (ui.c). */
+void keiui_ui_select_drawn(struct kl_ui *ui, const struct kl_rect *rect, const struct kl_rect *box, const struct kl_style *style);
+
+/* Tells whether the fingers' selection may begin in this window's input (kl_ui_set_text_bar). */
+int keiui_ui_select_enabled(const struct kl_ui *ui);
+
+/* Ties the window's calls the bar asks of it (text-input.c): whether the clipboard has text, and the on-screen keyboard's inset. */
+void keiui_ui_set_window_extras(struct kl_ui *ui, int (*can_paste)(const struct kl_window *), void (*keyboard_inset)(const struct kl_window *, int *, int *));
+
+/* Gives the part two rectangles share (ui.c); 1 with it, 0 when they share no area. */
+int keiui_rect_intersect(const struct kl_rect *first, const struct kl_rect *second, struct kl_rect *result);
+
+/* The word around a position of a text (text-select.c, the fingers' word: section 2.4); start = end off a word. */
+void keiui_select_word(const char *text, size_t length, size_t position, size_t *start, size_t *end);
 
 #endif

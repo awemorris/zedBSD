@@ -25,10 +25,16 @@
  * Ctrl+Y take a change back and do it again, Ctrl+C, Ctrl+X and Ctrl+V
  * copy, cut and paste through the window's clipboard, and Ctrl+Left and
  * Ctrl+Right move a word.
+ *
+ * KL_VERSION 74 (ws190-p002): a finger's double tap selects the word there
+ * with the fingers' selection, as in a field (field.c): handles at the
+ * ends, which a finger drags across lines (the area scrolls itself near
+ * its top and bottom), and the bar of editing buttons.
  */
 
 #include "internal.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 /* The text's size, a line's height and the margins inside the area. */
@@ -68,6 +74,20 @@ static void area_lay_out(struct area_layout *layout, const struct kl_style *styl
 static size_t area_line_of(const struct area_layout *layout, size_t offset);
 static int area_x_of(const struct area_layout *layout, const struct kl_style *style, size_t line, size_t offset);
 static size_t area_at_x(const struct area_layout *layout, const struct kl_style *style, size_t line, int x);
+static void area_select_click(struct kl_ui *ui, const struct kl_style *style, uint32_t id, const struct kl_rect *rect, struct kl_text_area *area, unsigned state, const struct area_layout *layout, int top);
+static void area_select_after(struct kl_ui *ui, uint32_t id, struct kl_text_area *area, const struct keiui_input *input);
+static int area_select_check(struct kl_ui *ui, uint32_t id, struct kl_text_area *area);
+static void area_select_drawn(struct kl_ui *ui, const struct kl_style *style, uint32_t id, const struct kl_rect *rect, const struct kl_text_area *area, const struct area_layout *layout);
+static size_t area_view_position(void *data, double x, double y);
+static void area_view_caret(void *data, size_t position, struct kl_rect *rect);
+static void area_view_word(void *data, size_t position, size_t *start, size_t *end);
+
+/* The answers of a text area's view to the fingers' selection, from its copy and lines in kl_ui (ws190-p002). */
+static const struct kl_text_view area_view = {
+	area_view_position,
+	area_view_caret,
+	area_view_word
+};
 
 /*
  * Sets a text area's text, with the caret at its end, nothing selected
@@ -136,8 +156,8 @@ kl_text_area(
 	int caret_shown;
 	int taken;
 	int focused;
-	double pointer_x;
-	double pointer_y;
+	int holding;
+	int owned;
 
 	/* The record: it takes the keyboard. */
 	theme = style->theme;
@@ -152,22 +172,10 @@ kl_text_area(
 		width = 1;
 	top = rect->y + AREA_TOP - area->scroll;
 
-	/* A click or a tap puts the caret at the point (twice: the whole text selected). */
+	/* A click or a tap puts the caret at the point (twice: the whole text selected; a finger's: the fingers' selection, ws190-p002). */
 	if ((state & KL_HIT_CLICKED) != 0U) {
 		area_lay_out(&layout, style, area->text, area->length, width);
-		kl_ui_pointer(ui, &pointer_x, &pointer_y);
-		line = 0;
-		if ((int)pointer_y > top)
-			line = (size_t)(((int)pointer_y - top) / AREA_LINE);
-		if (line >= layout.count)
-			line = layout.count - 1U;
-		area->caret = area_at_x(&layout, style, line, (int)pointer_x - rect->x - AREA_SIDE);
-		area->anchor = area->caret;
-		area->goal_x = -1;
-		if ((state & KL_HIT_DOUBLE) != 0U) {
-			area->anchor = 0;
-			area->caret = area->length;
-		}
+		area_select_click(ui, style, id, rect, area, state, &layout, top);
 	}
 
 	/* The keys while it has the keyboard, and the text an input method sent for it, in the order they came. */
@@ -177,12 +185,22 @@ kl_text_area(
 		if (!taken)
 			break;
 		changes |= area_take(ui, id, area, style, width, &input);
+		area_select_after(ui, id, area, &input);
 	}
 
-	/* The text an input method is composing for it. */
+	/* The fingers' selection's ends, as the area shows them (another text the program set ends it). */
+	holding = area_select_check(ui, id, area);
+
+	/* The text an input method is composing for it; it ends the fingers' selection. */
 	preedit_begin = -1;
 	preedit_end = -1;
 	preedit = keiui_ui_preedit(ui, id, 0U, focused, &preedit_begin, &preedit_end);
+	if (preedit != NULL) {
+		owned = keiui_ui_select_owned(ui, id, 0U);
+		if (owned)
+			keiui_ui_select_end(ui);
+		holding = 0;
+	}
 
 	/*
 	 * The text as shown: the one being composed in it at the caret (no
@@ -215,11 +233,11 @@ kl_text_area(
 	}
 	area_lay_out(&layout, style, text, area->length + preedit_length, width);
 
-	/* The area scrolls down or up just enough to keep the caret's line inside. */
+	/* The area scrolls down or up just enough to keep the caret's line inside (a finger dragging a handle scrolls it itself). */
 	caret_line = area_line_of(&layout, caret_offset);
-	if ((int)caret_line * AREA_LINE + AREA_LINE + 2 * AREA_TOP - area->scroll > rect->height)
+	if (!holding && (int)caret_line * AREA_LINE + AREA_LINE + 2 * AREA_TOP - area->scroll > rect->height)
 		area->scroll = (int)caret_line * AREA_LINE + AREA_LINE + 2 * AREA_TOP - rect->height;
-	if ((int)caret_line * AREA_LINE < area->scroll)
+	if (!holding && (int)caret_line * AREA_LINE < area->scroll)
 		area->scroll = (int)caret_line * AREA_LINE;
 	if (area->scroll < 0)
 		area->scroll = 0;
@@ -297,6 +315,10 @@ kl_text_area(
 		caret.height = AREA_LINE - 4;
 		keiui_ui_text_caret(ui, &caret);
 	}
+
+	/* The fingers' selection's copy of the area and its lines, drawn in this frame (no text is composed in it then). */
+	if (preedit == NULL)
+		area_select_drawn(ui, style, id, rect, area, &layout);
 
 	/* Reports what happened. */
 	return changes;
@@ -968,4 +990,308 @@ area_at_x(
 
 	/* Reports the nearest boundary. */
 	return best;
+}
+
+/*
+ * Carries out a click or a tap on a text area: the caret at the point (a
+ * double click: the whole text), or for a finger (ws190-p002) the word
+ * there with the fingers' selection on a double tap, the bar shown or
+ * hidden by a tap within the selection, and the selection's end by a tap
+ * elsewhere or a click.  layout is the area's lines, top where its first
+ * line stands in the window.
+ */
+static void
+area_select_click(
+	struct kl_ui *ui,
+	const struct kl_style *style,
+	uint32_t id,
+	const struct kl_rect *rect,
+	struct kl_text_area *area,
+	unsigned state,
+	const struct area_layout *layout,
+	int top)
+{
+	struct keiui_select *select;
+	double pointer_x;
+	double pointer_y;
+	size_t position;
+	size_t line;
+	size_t start;
+	size_t end;
+	int owned;
+	int enabled;
+
+	/* Where the click is in the text: its line, and the place across it. */
+	kl_ui_pointer(ui, &pointer_x, &pointer_y);
+	line = 0;
+	if ((int)pointer_y > top)
+		line = (size_t)(((int)pointer_y - top) / AREA_LINE);
+	if (line >= layout->count)
+		line = layout->count - 1U;
+	position = area_at_x(layout, style, line, (int)pointer_x - rect->x - AREA_SIDE);
+	select = keiui_ui_select(ui);
+	owned = keiui_ui_select_owned(ui, id, 0U);
+	enabled = keiui_ui_select_enabled(ui);
+
+	/* Room for the lines the fingers' selection keeps (made once a window's input). */
+	if (enabled && select->layout == NULL) {
+		select->layout = malloc(sizeof(struct area_layout));
+		if (select->layout == NULL)
+			enabled = 0;
+	}
+
+	/* A finger's double tap: the word there, in the fingers' selection. */
+	if ((state & KL_HIT_TOUCHED) != 0U &&
+	    (state & KL_HIT_DOUBLE) != 0U &&
+	    enabled) {
+		select->area = *area;
+		select->style = *style;
+		select->rect = *rect;
+		memcpy(select->layout, layout, sizeof(*layout));
+		keiui_ui_select_begin(ui, id, 0U, KEIUI_SELECT_AREA, &area_view, area, &keiui_text_bar_calls);
+		kl_text_touch_tap(&select->touch, pointer_x - (double)(rect->x + AREA_SIDE), pointer_y - (double)top, 1);
+		(void)kl_text_touch_take(&select->touch);
+		area->anchor = select->touch.anchor;
+		area->caret = select->touch.caret;
+		area->goal_x = -1;
+		return;
+	}
+
+	/* The selection's ends in order. */
+	start = area->anchor;
+	end = area->caret;
+	if (start > end) {
+		start = area->caret;
+		end = area->anchor;
+	}
+
+	/* A finger's tap within the fingers' selection shows or hides the bar. */
+	if ((state & KL_HIT_TOUCHED) != 0U &&
+	    owned &&
+	    start != end &&
+	    position >= start &&
+	    position <= end) {
+		kl_text_touch_toggle_bar(&select->touch);
+		return;
+	}
+
+	/* Anything else ends the fingers' selection and puts the caret at the point (twice: the whole text). */
+	if (owned)
+		keiui_ui_select_end(ui);
+	area->caret = position;
+	area->anchor = position;
+	area->goal_x = -1;
+	if ((state & KL_HIT_DOUBLE) != 0U) {
+		area->anchor = 0;
+		area->caret = area->length;
+	}
+}
+
+/*
+ * Follows an input the area took with the fingers' selection (ws190-p002):
+ * the bar's Copy hides the bar, its Select All selects the whole text with
+ * handles and the bar, and its Cut and Paste, and any key or text of the
+ * keyboard's, end the selection.
+ */
+static void
+area_select_after(
+	struct kl_ui *ui,
+	uint32_t id,
+	struct kl_text_area *area,
+	const struct keiui_input *input)
+{
+	struct keiui_select *select;
+	int owned;
+
+	/* Only an area in the fingers' selection. */
+	owned = keiui_ui_select_owned(ui, id, 0U);
+	if (!owned)
+		return;
+
+	/* The keyboard's input ends it. */
+	select = keiui_ui_select(ui);
+	if (!input->from_bar) {
+		keiui_ui_select_end(ui);
+		return;
+	}
+
+	/* Copy keeps the selection; the bar goes. */
+	if (input->code == 46U) {
+		kl_text_touch_hide_bar(&select->touch);
+		return;
+	}
+
+	/* Select All: the whole text, as the fingers' selection. */
+	if (input->code == 30U) {
+		kl_text_touch_select(&select->touch, 0, area->length);
+		(void)kl_text_touch_take(&select->touch);
+		area->anchor = 0;
+		area->caret = area->length;
+		return;
+	}
+
+	/* Cut and Paste end it at the caret. */
+	keiui_ui_select_end(ui);
+}
+
+/*
+ * Brings the fingers' selection to the area before it is drawn: a text the
+ * program set (other than the copy kept) or another area ends it;
+ * otherwise the selection's ends the fingers moved become the area's, and
+ * while a finger drags a handle the area shows the selection's scroll.
+ * Reports whether a finger holds the area's scroll.
+ */
+static int
+area_select_check(
+	struct kl_ui *ui,
+	uint32_t id,
+	struct kl_text_area *area)
+{
+	struct keiui_select *select;
+	int owned;
+	int same;
+	int difference;
+
+	/* Only an area in the fingers' selection. */
+	owned = keiui_ui_select_owned(ui, id, 0U);
+	if (!owned)
+		return 0;
+
+	/* Whether it is the area the copy was made of, with the same text. */
+	select = keiui_ui_select(ui);
+	same = 0;
+	if (select->widget == area && select->area.length == area->length) {
+		difference = memcmp(select->area.text, area->text, area->length);
+		if (difference == 0)
+			same = 1;
+	}
+
+	/* Another widget under the id, or a text the program set: the selection ends. */
+	if (!same) {
+		keiui_ui_select_end(ui);
+		return 0;
+	}
+
+	/* The ends the fingers moved, within the text. */
+	if (select->touch.anchor > area->length)
+		select->touch.anchor = area->length;
+	if (select->touch.caret > area->length)
+		select->touch.caret = area->length;
+	area->anchor = select->touch.anchor;
+	area->caret = select->touch.caret;
+	area->goal_x = -1;
+	(void)kl_text_touch_take(&select->touch);
+
+	/* No finger on a handle: the area keeps its own scroll. */
+	if (!select->touch.selecting)
+		return 0;
+
+	/* Succeeded: the finger's scroll is the area's. */
+	area->scroll = (int)select->scroll.y;
+	return 1;
+}
+
+/*
+ * Gives the fingers' selection the area as it was drawn (ws190-p002): its
+ * copy and lines, its rectangle and text box, its style and the scroll its
+ * content is shown at.
+ */
+static void
+area_select_drawn(
+	struct kl_ui *ui,
+	const struct kl_style *style,
+	uint32_t id,
+	const struct kl_rect *rect,
+	const struct kl_text_area *area,
+	const struct area_layout *layout)
+{
+	struct keiui_select *select;
+	struct kl_rect box;
+	int owned;
+	int content;
+
+	/* Only an area in the fingers' selection. */
+	owned = keiui_ui_select_owned(ui, id, 0U);
+	if (!owned)
+		return;
+
+	/* The copy and its lines, and where the text is. */
+	select = keiui_ui_select(ui);
+	select->area = *area;
+	memcpy(select->layout, layout, sizeof(*layout));
+	box.x = rect->x + AREA_SIDE;
+	box.y = rect->y + AREA_TOP;
+	box.width = rect->width - 2 * AREA_SIDE;
+	box.height = rect->height - 2 * AREA_TOP;
+	keiui_ui_select_drawn(ui, rect, &box, style);
+
+	/* The content's scroll down: all the lines in the box's height, at the area's scroll unless a finger holds it. */
+	content = (int)layout->count * AREA_LINE;
+	kl_scroll_set_size(&select->scroll, (double)box.width, (double)content, (double)box.width, (double)box.height);
+	if (!select->touch.selecting)
+		kl_scroll_move_to(&select->scroll, 0.0, (double)area->scroll, 0, keiui_ui_now(ui));
+}
+
+/* Reports the text position nearest a point of the area's copy (from the text's start and the first line's top). */
+static size_t
+area_view_position(
+	void *data,
+	double x,
+	double y)
+{
+	struct keiui_select *select;
+	const struct area_layout *layout;
+	size_t line;
+	size_t position;
+
+	/* The line at the point, within the lines. */
+	select = data;
+	layout = select->layout;
+	line = 0;
+	if (y > 0.0)
+		line = (size_t)(y / (double)AREA_LINE);
+	if (line >= layout->count)
+		line = layout->count - 1U;
+
+	/* The nearest boundary across that line. */
+	position = area_at_x(layout, &select->style, line, (int)x);
+
+	/* Reports the boundary. */
+	return position;
+}
+
+/* Gives the caret's rectangle at a position of the area's copy (its line's top and height). */
+static void
+area_view_caret(
+	void *data,
+	size_t position,
+	struct kl_rect *rect)
+{
+	struct keiui_select *select;
+	const struct area_layout *layout;
+	size_t line;
+
+	/* The position's line, and its place across it. */
+	select = data;
+	layout = select->layout;
+	line = area_line_of(layout, position);
+	rect->x = area_x_of(layout, &select->style, line, position);
+	rect->y = (int)line * AREA_LINE;
+	rect->width = 2;
+	rect->height = AREA_LINE;
+}
+
+/* Gives the word around a position of the area's copy. */
+static void
+area_view_word(
+	void *data,
+	size_t position,
+	size_t *start,
+	size_t *end)
+{
+	struct keiui_select *select;
+
+	/* The word of the text. */
+	select = data;
+	keiui_select_word(select->area.text, select->area.length, position, start, end);
 }
