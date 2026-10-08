@@ -24,4 +24,5 @@ $cc $extra -Wl,--gc-sections "$OUT/hid-input-host-test.o" "$OUT/hid-input-old.o"
 timeout 300 "$OUT/hid-input-host-test" check \
 	plan/ws159/tests/latitude5330-linux/synaptics-06cb-ce65-rdesc.bin \
 	plan/bugs/bug105/logi-bolt-c548-if0.rdesc plan/bugs/bug105/logi-bolt-c548-if1.rdesc \
-	plan/bugs/bug105/logi-bolt-c548-if2.rdesc
+	plan/bugs/bug105/logi-bolt-c548-if2.rdesc \
+	plan/bugs/BUG-267/touchscreen-if0.rdesc plan/bugs/BUG-267/touchscreen-if1.rdesc
