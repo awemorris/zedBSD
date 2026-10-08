@@ -217,6 +217,14 @@ static void i915_trace_irq_on(void *ctx);
 static void i915_trace_arm_event(void *ctx, int pipe);
 static int i915_trace_wait_event(void *ctx, int pipe, unsigned timeout_ms);
 static void i915_trace_cancel_event(void *ctx, int pipe);
+static void i915_trace_tc_put_link(void *ctx, int tc_port);
+static void i915_trace_tc_get_link(void *ctx, int tc_port, int lanes);
+static int i915_trace_tc_mode(void *ctx, int tc_port);
+static void i915_trace_tc_set_fia_lane_count(void *ctx, int tc_port, int lanes, int lane_reversal);
+static unsigned i915_trace_tc_pin_assignment(void *ctx, int tc_port);
+static uint32_t i915_trace_dkl_read(void *ctx, int tc_port, uint32_t phy_address);
+static void i915_trace_dkl_write(void *ctx, int tc_port, uint32_t phy_address, uint32_t value);
+static void i915_trace_dkl_rmw(void *ctx, int tc_port, uint32_t phy_address, uint32_t clear, uint32_t set);
 static void i915_trace_lock(void *ctx, int which, int take);
 static void i915_trace_named(struct i915_lcd_trace *trace, int kind, const char *name);
 static void i915_trace_step(void *ctx, const char *name);
@@ -322,6 +330,28 @@ drv_i915_lcd_trace_init(
 		/* The event cancel is optional even then. */
 		if (backend->cancel_event != NULL)
 			trace->ops.cancel_event = i915_trace_cancel_event;
+	}
+
+	/*
+	 * Forwards the Type-C ports' links only for a backend that has them
+	 * (BUG-266): without them a DisplayPort output on a Type-C port in
+	 * DP-alt mode would be lit as if the port were held in no mode -- its
+	 * PHY not taken for the lanes, the FIA's lanes not programmed -- and
+	 * its link would not train.
+	 */
+	if (backend->tc_get_link != NULL) {
+		trace->ops.tc_put_link = i915_trace_tc_put_link;
+		trace->ops.tc_get_link = i915_trace_tc_get_link;
+		trace->ops.tc_mode = i915_trace_tc_mode;
+		trace->ops.tc_set_fia_lane_count = i915_trace_tc_set_fia_lane_count;
+		trace->ops.tc_pin_assignment = i915_trace_tc_pin_assignment;
+	}
+
+	/* Forwards the Type-C ports' DKL PHY access, behind the backend's lock, only for a backend that has it. */
+	if (backend->dkl_read != NULL) {
+		trace->ops.dkl_read = i915_trace_dkl_read;
+		trace->ops.dkl_write = i915_trace_dkl_write;
+		trace->ops.dkl_rmw = i915_trace_dkl_rmw;
 	}
 
 	/* Binds the lock, error and debug hooks. */
@@ -2142,6 +2172,147 @@ i915_trace_cancel_event(
 
 	/* Cancels the pending event. */
 	trace->backend->cancel_event(trace->backend->ctx, pipe);
+}
+
+/* Forwards the giving back of a Type-C port's link; it is not recorded. */
+static void
+i915_trace_tc_put_link(
+	void *ctx,
+	int tc_port)
+{
+	struct i915_lcd_trace *trace;
+
+	/* The run log the hook was bound with. */
+	trace = ctx;
+
+	/* Gives the port's link back; the last one gives its PHY back. */
+	trace->backend->tc_put_link(trace->backend->ctx, tc_port);
+}
+
+/* Forwards the taking of a Type-C port's link; it is not recorded. */
+static void
+i915_trace_tc_get_link(
+	void *ctx,
+	int tc_port,
+	int lanes)
+{
+	struct i915_lcd_trace *trace;
+
+	/* The run log the hook was bound with. */
+	trace = ctx;
+
+	/* Takes the port's link, and with it the PHY for the lanes. */
+	trace->backend->tc_get_link(trace->backend->ctx, tc_port, lanes);
+}
+
+/* Forwards the question of the mode a Type-C port is held in; it is not recorded. */
+static int
+i915_trace_tc_mode(
+	void *ctx,
+	int tc_port)
+{
+	struct i915_lcd_trace *trace;
+	int mode;
+
+	/* The run log the hook was bound with. */
+	trace = ctx;
+
+	/* Asks the Type-C core. */
+	mode = trace->backend->tc_mode(trace->backend->ctx, tc_port);
+
+	/* Succeeded: the mode the port is held in. */
+	return mode;
+}
+
+/* Forwards the programming of a Type-C port's FIA lanes; it is not recorded. */
+static void
+i915_trace_tc_set_fia_lane_count(
+	void *ctx,
+	int tc_port,
+	int lanes,
+	int lane_reversal)
+{
+	struct i915_lcd_trace *trace;
+
+	/* The run log the hook was bound with. */
+	trace = ctx;
+
+	/* Programs the FIA's DisplayPort lanes. */
+	trace->backend->tc_set_fia_lane_count(trace->backend->ctx, tc_port, lanes, lane_reversal);
+}
+
+/* Forwards the reading of a Type-C port's pin assignment; it is not recorded. */
+static unsigned
+i915_trace_tc_pin_assignment(
+	void *ctx,
+	int tc_port)
+{
+	struct i915_lcd_trace *trace;
+	unsigned pin_assignment;
+
+	/* The run log the hook was bound with. */
+	trace = ctx;
+
+	/* Asks the Type-C core for the FIA's pin assignment. */
+	pin_assignment = trace->backend->tc_pin_assignment(trace->backend->ctx, tc_port);
+
+	/* Succeeded: the pin assignment. */
+	return pin_assignment;
+}
+
+/* Forwards a read of a Type-C port's DKL PHY register; it is not recorded. */
+static uint32_t
+i915_trace_dkl_read(
+	void *ctx,
+	int tc_port,
+	uint32_t phy_address)
+{
+	struct i915_lcd_trace *trace;
+	uint32_t value;
+
+	/* The run log the hook was bound with. */
+	trace = ctx;
+
+	/* Reads the register behind the ports' bank index lock. */
+	value = trace->backend->dkl_read(trace->backend->ctx, tc_port, phy_address);
+
+	/* Succeeded: the register's value. */
+	return value;
+}
+
+/* Forwards a write of a Type-C port's DKL PHY register; it is not recorded. */
+static void
+i915_trace_dkl_write(
+	void *ctx,
+	int tc_port,
+	uint32_t phy_address,
+	uint32_t value)
+{
+	struct i915_lcd_trace *trace;
+
+	/* The run log the hook was bound with. */
+	trace = ctx;
+
+	/* Writes the register behind the ports' bank index lock. */
+	trace->backend->dkl_write(trace->backend->ctx, tc_port, phy_address, value);
+}
+
+/* Forwards a read-modify-write of a Type-C port's DKL PHY register; it is not recorded. */
+static void
+i915_trace_dkl_rmw(
+	void *ctx,
+	int tc_port,
+	uint32_t phy_address,
+	uint32_t clear,
+	uint32_t set)
+{
+	struct i915_lcd_trace *trace;
+
+	/* The run log the hook was bound with. */
+	trace = ctx;
+
+	/* Changes the register's bits behind the ports' bank index lock. */
+	trace->backend->dkl_rmw(trace->backend->ctx, tc_port, phy_address, clear, set);
 }
 
 /* Forwards a modeset lock operation; it is not recorded. */

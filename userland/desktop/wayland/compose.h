@@ -242,6 +242,24 @@ struct kwl_compose {
 	unsigned display_count;
 	uint32_t limited;
 	/*
+	 * The displays the output moved to that failed at the move's first
+	 * frame (BUG-266), a bit for each place of the last enumeration: the
+	 * output does not move to them again until the next hotplug.  Unlike
+	 * limited, they may still be heads (which light a display another
+	 * way).
+	 */
+	uint32_t move_failed;
+	/*
+	 * A move not proven yet (BUG-266): switch_proving is 1 from a move
+	 * until its first frame is presented; switch_failed is 1 when the
+	 * display refused that frame, until the output goes back to
+	 * switch_from, the display it left (named switch_from_name).
+	 */
+	unsigned switch_proving;
+	unsigned switch_failed;
+	VkDisplayKHR switch_from;
+	char switch_from_name[KWL_COMPOSE_NAME];
+	/*
 	 * The display under the output was lost (unplugged): 1 until the output
 	 * moves (output-switch.c), 2 when no display took it (or the list of
 	 * displays could not be read) and the next hotplug is waited for; no
@@ -376,6 +394,7 @@ void kwl_heads_frame_skipped(struct kwl_server *server);
 int kwl_displays_apply(struct kwl_server *server, const struct kwl_display_config *wanted, int *saved);
 int kwl_displays_set_shown(struct kwl_server *server, const char *key, unsigned shown, int *saved);
 void kwl_displays_anchor_follow(struct kwl_server *server);
+void kwl_displays_move_failed(struct kwl_server *server, const char *back);
 size_t kwl_displays_describe(struct kwl_server *server, char *text, size_t size);
 
 #endif

@@ -2380,6 +2380,30 @@ compose_submit(
 	present.pImageIndices = &image;
 	result = vkQueuePresentKHR(compose->queue, &present);
 
+	/*
+	 * A move's first frame that the display refused (BUG-266: the display
+	 * could not be lit): the frame still completes, and the output goes
+	 * back to the display it left (output-switch.c) instead of the
+	 * compositor ending.
+	 */
+	if (compose->switch_proving &&
+	    (result == VK_ERROR_SURFACE_LOST_KHR ||
+	     result == VK_ERROR_OUT_OF_DATE_KHR ||
+	     result == VK_ERROR_DEVICE_LOST)) {
+		printf("KWL OUTPUT switch unshown name=%s result=%d\n", compose->display_name, (int)result);
+		compose->switch_proving = 0U;
+		compose->switch_failed = 1U;
+		if (!compose->output_lost)
+			compose->output_lost = 1U;
+		result = VK_SUCCESS;
+	}
+
+	/* A move's first frame presented: the move holds, and a result held back for it is answered. */
+	if (compose->switch_proving && (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR)) {
+		compose->switch_proving = 0U;
+		kwl_displays_move_settled(server, 0);
+	}
+
 	/* The display went: the frame still completes, and the output moves (ws113-p004a). */
 	if (result == VK_ERROR_SURFACE_LOST_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
 		printf("KWL OUTPUT lost operation=present result=%d\n", (int)result);

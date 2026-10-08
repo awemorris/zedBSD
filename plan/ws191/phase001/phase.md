@@ -69,3 +69,24 @@ p002 の先行の WIP（未 build・未登録、Makefile の source 一覧に入
 - `userland/desktop/libkeiland-backend/keiland-backend.h` に stream の節（`struct kl_backend_audio_ring`・report・`kl_backend_audio_stream_*`・`_reap`）と `kl_backend_peer_pid`
 - `libkeiland-backend-zedbsd/audio-stream-zedbsd.c`（新、host の cc の -fsyntax-only は通る。style-check の残り: 517・566・599 の blank-after-brace、524 の CMSG_LEN の call-in-condition）、`peer-zedbsd.c`（新）、`libkeiland-backend-freebsd/peer-freebsd.c`（新）、`libkeiland-backend-linux/peer-linux.c` に `kl_backend_peer_pid`（Linux の keiland の build に入る）
 - 再開: 第 2 版の review の結果をここに記録 → blocking を直す → Q1 の判定 → p002 の残り（style の直し、sources.mk・Makefile.linux・Makefile.freebsd への登録、unsupported の stream、compositor の audio-stream.c、libkeiland の audio.c・keiland.h・exports、host 試験）。
+
+## 第 2 版への review（design-reviewer、2026-10-08 夜、未反映）
+
+blocking 1:
+- B-1 §3 の flush の意味: audiod の FLUSH は read を write に揃えるだけで running・draining を変えない（audiod main.c 374〜389、draining 中は drain が続く device.c 499〜515）。player は running のまま flush して seek を続ける（media.c 663、play.c 523、engine.c 892）。→ flush は running・stopped を変えない、draining の flush は drain を取り消して stopped（zedBSD は STOP と FLUSH を送り 2 つの DONE で 1 つの result）、状態は result NONE で移す、想定外の事象は捨てる、host 試験に「running の flush の後 start 無しで consumed が進む」。
+
+should-fix 10:
+1. drain の result が 2 回（§3 74 行の compositor と §6.3 の backend）。→ result は backend の report だけ、control の EAGAIN は result(UNAVAILABLE)、ENOTCONN は result(GONE)。
+2. 時計の基準点（media.c 193・673、play.c 194・531、engine.c 309・538・902）も played から取る（Linux・FreeBSD で pause ごとに delay が積もる）。
+3. audiod は amd64 でも played_sequence を進め played の 2 語を seqlock で書く（mix.c 431〜444）。→ played は seqlock で読む（pump も同じ形で書く）か、組のずれを書く。keiland-backend.h の注記も直す。
+4. `_reap` を設計に書く、compositor の終わりで join。
+5. 遅れた READY の fd は backend の close が閉じる（§6.2）、試験は backend 単体と pump の host 試験へ。
+6. 送れない時は接続を閉じる（kwl_error か切断）、libkeiland は接続の EOF を lost(GONE) として黙った sink に。
+7. pump の無音の埋め: 書いた無音を delay から引く、played は単調、draining では無音を足さない、drain の終わりは avail ≥ buffer か XRUN。
+8. p004 の FreeBSD の環境（compositor は passthrough の guest だけ）、guest は `-audiodev none`（tools の変更は Q1 への依頼）。→ backend 単体の試験 program か passthrough と明記。
+9. 規約の全文の見直しの Phase（p005）が無い。
+10. zedBSD の audiod は broken を知らせない（mix.c 207〜216）→ BROKEN は Linux・FreeBSD だけと書く。
+
+minor 15: D11 の誤り（videoplayer・music は libmedia を使わず vp_audio を直に、表を埋める者がこの WS にいない → libmedia から音を外すだけにするか表は後で）、libmedia は要素ごとに stream（ベータ 3 へ申し送り）、lost・failed の stream を本数に数えない、zedBSD の非 block connect は EAGAIN（unix-socket.c 2161〜2165）、audiod の ERROR の errno の写し、buffer の下限、EPIPE でも vp_audio の running を更新、struct vp_audio の field の直の参照（engine.c 985〜990 等）、WAYLAND_DISPLAY が無ければ ENOTSUP、§8 の 1 の作り方（wire.c と偽の server、libwayland は試験の BUILD で source から）、alsa の open を mutex で順に、pump の signal の block は PipeWire の thread に継がれる（U3）、書き間違い（D7 の §6.3→§6.4、phase.md 22 行の KL_VERSION 72、ws.md の PipeWire）、peer の file の置き場所の意図、kl_audio_format に版の欄が無い。
+確かめて正しかった: ring の offset、D9 の値、S-1 の audiod の振る舞い、kwl_emit_fd、visibility、D4・M-7、libwayland の prepare_read、pid の取得、D5、D11 の理由、S-8 の行、PENDING の 3 行、D2 と境界の検査、HAL は不要。
+再開: 第 3 版で B-1・should-fix を反映 → 再 review。

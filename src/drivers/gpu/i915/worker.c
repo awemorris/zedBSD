@@ -1535,6 +1535,7 @@ i915_worker_run_sync_item(
 	struct i915_worker_context *record;
 	unsigned long irq;
 	uint64_t start;
+	int lease_failed;
 	int error;
 
 	device = worker->device;
@@ -1573,7 +1574,16 @@ i915_worker_run_sync_item(
 			if (in_display)
 				error = drv_i915_head_frame(device, item->present);
 		} else if (!in_display) {
+			/*
+			 * The output of a move that failed is gone for the rest of
+			 * its lease (ENXIO: the session's Vulkan sees its surface
+			 * lost and moves its output back, BUG-266); a panel that
+			 * could not come up is a failure (EIO).
+			 */
 			error = EIO;
+			lease_failed = drv_i915_present_lease_failed(device);
+			if (lease_failed)
+				error = ENXIO;
 		} else if (item->kind == I915_WORKER_SYNC_PRESENT) {
 			error = drv_i915_present_frame(device, item->present);
 		} else {

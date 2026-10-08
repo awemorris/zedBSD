@@ -408,6 +408,10 @@ kwl_object_destroy(
 	    object->kind == KWL_MENU)
 		kwl_menu_object_gone(object);
 
+	/* A displays object's held result has nobody to answer (displays-shell.c, BUG-266). */
+	if (object->kind == KWL_SYSTEM_DISPLAYS)
+		kwl_displays_object_gone(object);
+
 	/* The desktop surface's role ends with its surface or its object (desktop.c). */
 	if (object->kind == KWL_SURFACE || object->kind == KWL_DESKTOP_SURFACE)
 		kwl_desktop_object_gone(object);

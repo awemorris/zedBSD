@@ -69,6 +69,7 @@ void drv_i915_present_lease_close(struct i915_device *device, void *session);
 
 /* Reports whether a presentation should enter the display window (a panel exists and has not failed). */
 int drv_i915_present_window_ready(struct i915_device *device);
+int drv_i915_present_lease_failed(struct i915_device *device);
 
 /*
  * Runs the display window: lights the panel, serves every request from

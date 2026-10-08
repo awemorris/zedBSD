@@ -1884,6 +1884,10 @@ void kwl_printers_tick(struct kwl_server *server);
 int kwl_displays_create(struct kwl_object *manager, const unsigned char *bytes, size_t size);
 int kwl_displays_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 void kwl_displays_tell(struct kwl_server *server);
+/* A result held back while the output's move is not proven (displays-shell.c, BUG-266). */
+void kwl_displays_move_settled(struct kwl_server *server, int failed);
+void kwl_displays_pending_tick(struct kwl_server *server, uint64_t now);
+void kwl_displays_object_gone(struct kwl_object *object);
 int kwl_displays_key(struct kwl_server *server, uint32_t key, uint32_t state);
 void kwl_displays_tick(struct kwl_server *server);
 
