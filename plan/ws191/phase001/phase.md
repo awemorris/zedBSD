@@ -2,7 +2,7 @@
 
 # ws191-p001: 再生の音の stream の口の設計
 
-Status: in-progress（Q1 の判定待ち。q895、P2。2026-10-08 夕 設計の第 1 版（c9b8ccefa）と design-reviewer の review（blocking 3・should-fix 12・minor 12、下）。2026-10-08 夜 P2 の新しい世代が review と午後の判断を反映した**第 2 版**（[design.md](../design.md)、§12 に対応表）。第 2 版の design-reviewer を起動した（結果は下の「第 2 版への review」に追記）。2026-10-08 夜 Q1 の割り込み（q900 BUG-266 が最優先）で区切った）
+Status: cleared（2026-10-08 Q1 の判定: 第 4・5 版の design-reviewer が blocking 0、should-fix・minor は第 5 版と code に反映）
 Disposition: normal
 Parent: [WS191](../ws.md)
 
