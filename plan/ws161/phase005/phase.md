@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws161-p005 -->
 # ws161-p005: libpasskey の NFC の transport と zedBSD の `/dev/smartcard*`
 
-Status: test-wait（2026-10-08 P1: 実装と host 試験まで、T1 の QEMU（loopback の card）待ち。実機は p006）
+Status: cleared（2026-10-08 Q1、T1-374 QEMU PASS（ws.md の表）。実機は p006）（旧: test-wait（2026-10-08 P1: 実装と host 試験まで、T1 の QEMU（loopback の card）待ち。実機は p006））
 Disposition: normal
 Parent: [WS161](../ws.md)、設計 [phase001](../phase001/phase.md) §9.4・§9.5・M5・M9
 Queue: P1 の列（Q1、ユーザーの優先順の 7 番、2026-10-08。Q1 の ACK「範囲 1〜4 で進めてよい」）

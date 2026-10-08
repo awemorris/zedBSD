@@ -3,7 +3,7 @@
 # ws177-p019: Browser の IME・form と shell の fd（案 O）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（2026-10-08 P1 q890 の 3: 実装・host PASS（plain・ASan）・zedBSD と Linux の build warning 0。QEMU は T1）
+Status: test-wait（2026-10-08 q902 P1 の照合: T1-425 で (a) 日本語の IME・(c) 選んだ文節の太い下線・(e) textarea の value は確認、(b)(d) は期待どおりでない。残りは q893 とともにベータ3（2026-10-08 ユーザー「ブラウザはベータ3に移します」））（旧: test-wait（2026-10-08 P1 q890 の 3: 実装・host PASS（plain・ASan）・zedBSD と Linux の build warning 0。QEMU は T1））
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q890 の 3（P1、2026-10-08）

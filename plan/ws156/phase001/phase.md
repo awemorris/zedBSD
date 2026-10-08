@@ -4,7 +4,7 @@
 
 Phase ID: `ws156-p001`
 Parent: [WS156](../ws.md)
-Status: planning（2026-10-05 P1 generation17。設計の第 1 版。code は §9 の判断の後。2026-10-05 夜: H1〜H7 決定済み）
+Status: planning → Q1 の判定待ち（2026-10-08 q902 P1 の照合: H1〜H7 は 2026-10-05 夜に決定、p002〜p004 がこの設計で実装され cleared（T1-269・T1-375b））（旧: planning（2026-10-05 P1 generation17。設計の第 1 版。code は §9 の判断の後。2026-10-05 夜: H1〜H7 決定済み））
 Phase disposition: normal
 Queue: ベータ2 の P1 の列の 3 番目（q は Q1 が振る）
 

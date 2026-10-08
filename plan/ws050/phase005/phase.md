@@ -4,7 +4,7 @@
 
 Phase ID: `ws050-p005`
 Parent: [WS050](../ws.md)
-Status: in-progress（2026-10-07 P2: 範囲 1〜5 の正常系を実装、host ucsi-host 66・ucsi-acpi-host 28・host-tc 71・tables 34、kernel と I915_TESTS の build warning 0。実機の確認は ws050-p006（Type-C は QEMU に無い））
+Status: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: 下の「5330 の実機の値（2026-10-08 の UAT の log）」）（旧: in-progress（2026-10-07 P2: 範囲 1〜5 の正常系を実装、host ucsi-host 66・ucsi-acpi-host 28・host-tc 71・tables 34、kernel と I915_TESTS の build warning 0。実機の確認は ws050-p006（Type-C は QEMU に無い）））
 Phase disposition: normal
 Queue: q834 の続き（P2、Q1 の ACK 2026-10-07「範囲 1〜5 で ACK、weak の口は coding-style に合う形で」）
 
@@ -108,3 +108,21 @@ ws051 の監査（q874）で残りと分かった「対応の出所が無く、k
 - 5330 の実際の GNVS の `TPnP`・`TPnT`・`TPnD`（CR0n の group position）は table に無い。新しい kernel を 5330 で起動した時の dmesg の `typec: display port TC1: ...`・`TC2: ...` の 2 行で分かる（Linux も GNVS も要らない）。
 - 物理の確かめ: TC1・TC2 に順に USB-C の機器を挿し、`/dev/typec` で `display-port=N` の付いた connector が挿した connector になることを見る（ws050-p006 の実機）。
 - 合わなかった時の案: 5330 の値で bind が外れたら、VBT の child の `dp_usb_type_c`・`usb_type_c` の番号を第 2 の出所にする（今は実装しない）。
+
+## 5330 の実機の値（2026-10-08 の UAT の log、q902 P1 が引用）
+
+出典: [kernel-5330-uat-20261008.log](../../bugs/BUG-256/kernel-5330-uat-20261008.log)（ユーザーの UAT の image、BUG-256 の調べで Q1 が SSH で採った）。
+
+```
+ucsi: \_SB_.UBTC, mailbox 0x614e3000 (0x1000 bytes), version 0x0100, the 1.x arrangement
+typec: display port TC1: connector 0 (group 0 position 1), bound (error 0)
+typec: display port TC2: connector 1 (group 0 position 2), bound (error 0)
+typec: display port TC3: no single connector at group 0 position 0 (visible 0), not bound
+typec: display port TC4: no single connector at group 0 position 0 (visible 0), not bound
+ucsi: version 1.0.0, 1.x mailbox
+ucsi: 2 connectors, 4 Alternate Modes, features 0x000014
+```
+
+- 上の「GNVS の TPnP・TPnT・TPnD は table に無い」の答え: TC1 → connector 0、TC2 → connector 1（5330 の物理の USB-C は 2 つ）。
+- `ucsi: ... timed out`・`did not start` は 0 行。同じ起動で TC2 の DP-alt の出力が点いた（BUG-256 の resolved）。
+- 未確認: 二つの出所（i915 と UCSI 1.x）の HPD・pin の統合の log（1.x は GET_CAM_CS が無い）、/dev/typec の読み出し。判定は Q1。

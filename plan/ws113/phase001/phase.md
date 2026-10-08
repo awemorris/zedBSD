@@ -3,7 +3,7 @@
 # ws113-p001: 契約・能力と実機fixture
 
 Parent: [WS113](../ws.md)
-Status: in-progress（q702-i01、P2、2026-10-05。残りの契約を [contracts-beta2.md](contracts-beta2.md) に確定。確認の 4 点 C1〜C4 は Q1・ユーザー、判定は Q1）
+Status: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: C1〜C4 は 2026-10-05 に決定済み（contracts-beta2.md の「ユーザーの決定」）、後続の p002〜p015 がこの契約で実装済み）（旧: in-progress（q702-i01、P2、2026-10-05。残りの契約を [contracts-beta2.md](contracts-beta2.md) に確定。確認の 4 点 C1〜C4 は Q1・ユーザー、判定は Q1））
 Disposition: normal
 Primary Milestone: MG006（WSから継承）
 Queue / attempts: q586 / q586-i01 / A3（契約調査のみ、uncleared）、q702 / q702-i01 / P2（残りの契約の確定）

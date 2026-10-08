@@ -3,12 +3,12 @@
 # WS157: Keiland の app: 写真の管理
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-07 q835 P2: ユーザーの要件（~/Pictures/Library・取り込み・db・縮小画像の管理）で作り直し。p004・p005 を実装、T1 待ち）
+Status: incomplete（2026-10-08 q902 P1 の照合: p001・p004・p005 cleared（2026-10-07 Q1、T1-331）。ベータ2 の範囲の残りは無い、続きはベータ3）
 Primary Milestone: MG006
 Related Milestones: —
 Parent: [Master](../master.md)
-Queue: q835（2026-10-07、P2）
-Resume point: p005 の T1 の結果（`apps.photos.*`）。T1-307 は最初の既定案の AAT なので判定しない（Q1）。
+Queue: なし（q835 は終了）
+Resume point: 2026-10-08 q902 P1 の照合: p004・p005 cleared（T1-331）。T1-314 の FAIL は古い image（protocol の 2026-10-08 の節）。Photos の drag の元は WS189（T1-434・437）。続き（写真の続き）はベータ3。旧: p005 の T1 の結果（`apps.photos.*`）。
 Target: **ベータ3**（続き）（2026-10-07 ユーザー「下記をベータ3に移動します。・左手デバイスOSK、ゲームパッドOSK, 写真の続き, カレンダーの続き, IMEの続き、POSIX, NVMe, make, RTL8822C, Sleep」）
 <!-- awesome-plan-current:end -->
 
@@ -27,8 +27,8 @@ Keiland の標準 app として、写真を集めて整理し、見る app を�
 | [ws157-p001](phase001/phase.md) | 要件と設計（2026-10-07 ユーザーの要件で書き直し、D1〜D7） | cleared | — |
 | [ws157-p002](phase002/phase.md) | 最初の既定案の library（~/Pictures を読む） | uncleared・canceled（置き換え） | — |
 | [ws157-p003](phase003/phase.md) | 最初の既定案の app | uncleared・canceled（置き換え） | — |
-| [ws157-p004](phase004/phase.md) | library・db（月ごとの TSV・album ごと）・取り込み（複写、重複は取り込まない）と host 試験 | in-progress（host PASS） | p001 |
-| [ws157-p005](phase005/phase.md) | app（取り込み・album の card・縮小画像の cache、AAT） | in-progress（host PASS、T1 待ち） | p004 |
+| [ws157-p004](phase004/phase.md) | library・db（月ごとの TSV・album ごと）・取り込み（複写、重複は取り込まない）と host 試験 | cleared（2026-10-07 Q1、T1-331） | p001 |
+| [ws157-p005](phase005/phase.md) | app（取り込み・album の card・縮小画像の cache、AAT） | cleared（2026-10-07 Q1、T1-331） | p004 |
 
 ## p001 の観点（要件の検討）
 

@@ -2,7 +2,7 @@
 # ws090-p018: 設計 — pointer の追従の再描画を一定の frame rate に（hover・drag の範囲選択）
 
 Parent: [WS090](../ws.md)
-Status: test-wait（T1 依頼中。q791-i01、P1、2026-10-06 実装済み。Files の host での一致の確かめは安全の判定で保留、下の「残り」）
+Status: test-wait → Q1 の判定待ち（2026-10-08 q902 P1 の照合: T1-233 (b) files-regress PASS、Mail・Calendar は T1-389、Phone は T1-393（跡なし、PNG は Q1 の目視）。frame の callback の集約は任意の残り）（旧: test-wait（T1 依頼中。q791-i01、P1、2026-10-06 実装済み。Files の host での一致の確かめは安全の判定で保留、下の「残り」））
 Disposition: normal
 Related: [BUG-221](../../bugs/BUG-221.md)・[BUG-226](../../bugs/BUG-226.md)
 

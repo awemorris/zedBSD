@@ -3,12 +3,12 @@
 # WS189: app の間の drag and drop（画像・受け入れの見た目・dock・desktop・画面をまたぐ）
 
 <!-- awesome-plan-current:start -->
-Status: planned
+Status: incomplete（2026-10-08 q902 P1 の照合: p001・p004 cleared、p002・p003 は T1 の手操作で大半を確認、残りの項目は T1 の束）
 Primary Milestone: MG006
 Objectives: O2
 Parent: [Master](../master.md)
 Focused goal: fg019（ベータ2）
-Queue: q892（P1 の新しい世代）
+Queue: なし（q892 は終了）
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-08 ユーザー）
@@ -38,7 +38,7 @@ Queue: q892（P1 の新しい世代）
 
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 設計: 画像の型（image/png）の source と offer、libkeiland の口（kl_window_drag_image・KL_DROP_IMAGE、受け入れの答え）、compositor の badge の見た目（コピー可・不可）、app の落とす場所の光らせ方、dock の spring-loaded、desktop への file の保存、画面をまたぐ drag、試験（AAT）。design-reviewer | planned | — |
-| p002 | libkeiland と compositor（画像の型、badge、dock の spring-loaded、画面をまたぐ） | planned | p001 |
-| p003 | app: 画像の drag の元（Photos・Notes・PDF Viewer・Browser）と受け（Notes・desktop の file）、文字の drag の元と受け（Text Editor・PDF Viewer） | planned | p002 |
-| p004 | Mail の作成の添付（multipart/mixed・base64、添付の一覧の UI）と drop の受け（2026-10-08 ユーザーの決定「WS189 で添付も作る」） | planned | p002・p003 |
+| [p001](phase001/phase.md) | 設計: 画像の型（image/png）の source と offer、libkeiland の口（kl_window_drag_image・KL_DROP_IMAGE、受け入れの答え）、compositor の badge の見た目（コピー可・不可）、app の落とす場所の光らせ方、dock の spring-loaded、desktop への file の保存、画面をまたぐ drag、試験（AAT）。design-reviewer | cleared（2026-10-08 Q1） | | — |
+| p002 | libkeiland と compositor（画像の型、badge、dock の spring-loaded、画面をまたぐ） | test-wait（T1-433・436・437・439・442 で early-receive・refused-mark・dock-spring・即離し・same-program-windows（devices=2、F7 の直しの後 PASS）・browser の image-drag を確認。未: desktop.dnd.across-displays（2 出力の guest）、content-to-desktop。dnd のシナリオは今は active だが helper が無く run-aat.sh では by-agent（T1-439）、手操作で流す） | | p001 |
+| p003 | app: 画像の drag の元（Photos・Notes・PDF Viewer・Browser）と受け（Notes・desktop の file）、文字の drag の元と受け（Text Editor・PDF Viewer） | test-wait（T1-434・437・439 で text-between-windows・photo-to-notes 1〜2・browser の image-drag を確認。未: apps.pdfviewer.drag-out、photo-to-notes 3〜4） | | p002 |
+| p004 | Mail の作成の添付（multipart/mixed・base64、添付の一覧の UI）と drop の受け（2026-10-08 ユーザーの決定「WS189 で添付も作る」） | cleared（2026-10-08 Q1、T1-441。シナリオの期待（uri-list・type=2）を直すのは P1） | | p002・p003 |

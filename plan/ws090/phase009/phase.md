@@ -2,7 +2,7 @@
 
 # ws090-p009: Files と Settings の描画の層を libkeiland へ（canvas・text・icons）
 
-Status: planned（2026-10-06 P1 が作成、q817）
+Status: test-wait → Q1 の判定待ち（2026-10-08 q902 P1 の照合: T1-261 で files-regress・files-p018・desktop-guest・settings-regress PASS、T1-272 で files-desktop-guest PASS。ユーザーが見る撮影は T1-373 (4)（t1 の worktree build/t1-373/shots/）、前の T1-266 との並べての比較は未）（旧: planned（2026-10-06 P1 が作成、q817））
 Disposition: normal
 Parent: [WS090](../ws.md)、設計 [design.md](../design.md) §10
 Queue: q817（2026-10-06 ユーザーの決定「今 libkeiland の canvas へ移す」）

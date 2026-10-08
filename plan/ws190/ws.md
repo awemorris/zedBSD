@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Objectives: O2
 Parent: [Master](../master.md)
 Focused goal: fg019（ベータ2）
-Queue: q899（P1、2026-10-08 午後、WS189 の drag の後）
+Queue: q899（P1、2026-10-08 午後）。2026-10-08 q902 P1 の照合: p002・p003 は T1-443・T1-445 が未実行
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-08 ユーザー）
@@ -34,7 +34,7 @@ Queue: q899（P1、2026-10-08 午後、WS189 の drag の後）
 
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 設計: kl_field・text area への kl_text_touch の組み込み、popup の部品（位置・画面の端・画面 keyboard との重なり）、Text Editor の popup | in-progress（第 2 版、review 1 を反映、Q1 の判定と §7 の Q1・Q2 待ち） | WS189 |
-| [p002](phase002/phase.md) | libkeiland の欄 | in-progress（実装・host 試験済み、T1 の AAT 待ち） | p001 |
-| [p003](phase003/phase.md) | Text Editor | in-progress（実装・host 試験済み、T1 の AAT 待ち） | p002（kl_text_bar・kl_text_touch の bar） |
+| [p001](phase001/phase.md) | 設計: kl_field・text area への kl_text_touch の組み込み、popup の部品（位置・画面の端・画面 keyboard との重なり）、Text Editor の popup | in-progress → Q1 の判定待ち（第 2 版、review 1 を反映、§7 の Q1・Q2 は 2026-10-08 Q1 が回答、p002・p003 がこの設計で実装済み） | WS189 |
+| [p002](phase002/phase.md) | libkeiland の欄 | test-wait（T1-443、未実行） | p001 |
+| [p003](phase003/phase.md) | Text Editor | test-wait（T1-445、未実行） | p002（kl_text_bar・kl_text_touch の bar） |
 | p004 | 規約の全文の見直し（WS の変えた C） | planned（ベータ3 に回す: 2026-10-08 ユーザーの決定「規約の整形はベータ3」、Q1） | p002・p003 |

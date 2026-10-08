@@ -2,7 +2,7 @@
 
 # ws083-p001: Vulkan Video（H.264 decode）と i915 VCS・MFX の設計
 
-Status: in-progress（q833、P1）
+Status: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: 第 3.1 版、H1〜H5・HD1〜HD6 は 2026-10-07 に決定、q897 の設計と実装の照合の review は blocking 無し）（旧: in-progress（q833、P1））
 Disposition: normal
 Parent: [WS083](../ws.md)
 

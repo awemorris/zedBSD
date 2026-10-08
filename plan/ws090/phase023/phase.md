@@ -1,6 +1,6 @@
 # ws090-p023: Files・Settings の残りの自前の UI 部品を libkeiland の部品へ
 
-Status: planned（2026-10-06 Q1 が作成）
+Status: test-wait → Q1 の判定待ち（2026-10-08 q902 P1 の照合: T1-266 の regress PASS。T1-373 (1) で Favorites の ×・tab の ×・Help の ×・Quick Look の ×・Get Info の × を確認。copy の取り消しの ×（QEMU では copy が速すぎる）と Settings の Wi-Fi の Disconnect（QEMU に Wi-Fi が無い）は未、5330 で）（旧: planned（2026-10-06 Q1 が作成））
 WS: [WS090](../ws.md)
 Related: ws090-p007・p009・p010（q817、canvas と文字の欄）
 

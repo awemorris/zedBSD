@@ -4,7 +4,7 @@
 
 Phase ID: `ws161-p001`
 Parent: [WS161](../ws.md)
-Status: planning（2026-10-05 P1 generation17 q734 で第 1 版。2026-10-05 夕のユーザーの決定で第 2 版（§9）に改めた、P1 generation19 q770。U1〜U5 は 2026-10-05 承認、node は `/dev/smartcardN`）
+Status: planning → Q1 の判定待ち（2026-10-08 q902 P1 の照合: 第 2 版 §9、U1〜U5 は 2026-10-05 承認、p002〜p005 がこの設計で実装され cleared）（旧: planning（2026-10-05 P1 generation17 q734 で第 1 版。2026-10-05 夕のユーザーの決定で第 2 版（§9）に改めた、P1 generation19 q770。U1〜U5 は 2026-10-05 承認、node は `/dev/smartcardN`））
 Phase disposition: normal
 Queue: q734（第 1 版）、q770（第 2 版）
 

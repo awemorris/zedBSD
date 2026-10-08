@@ -2,7 +2,7 @@
 
 # ws090-p007: Settings を libkeiui へ
 
-Status: planned（2026-10-06 q817 で範囲を今の形に合わせた。下の「2026-10-06 の範囲」が正）
+Status: test-wait → Q1 の判定待ち（2026-10-08 q902 P1 の照合: q817 で実装。T1-263 settings-regress・volume PASS、T1-260・T1-338 で Full name の IME と User name、T1-373 (3) で有線の手動（数字と点・15 字）・Languages の password・Users の password と Show を確認。PIN の欄の crash（T1-373）は BUG-257 で直り T1-376 (b) PASS。Wi-Fi の鍵の欄は QEMU に Wi-Fi が無く未、5330 で）（旧: planned（2026-10-06 q817 で範囲を今の形に合わせた。下の「2026-10-06 の範囲」が正））
 Disposition: normal
 Parent: [WS090](../ws.md)
 Queue: q817（2026-10-06 ユーザーの決定「今 libkeiland の canvas へ移す」）

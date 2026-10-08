@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws190-p003 -->
 # ws190-p003: Text Editor の指の選択の編集の bar
 
-Status: in-progress（実装・host 試験は済み、T1 の AAT の依頼を Q1 へ）
+Status: test-wait（T1-445、未実行。2026-10-08 q902 P1 の照合: 実装・host 試験まで）（旧: in-progress（実装・host 試験は済み、T1 の AAT の依頼を Q1 へ））
 Disposition: normal
 Parent: [WS190](../ws.md)
 Queue: q899（P1、2026-10-08）

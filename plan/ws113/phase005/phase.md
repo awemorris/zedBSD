@@ -3,7 +3,7 @@
 # ws113-p005: compositor拡張とlibkeiland
 
 Parent: [WS113](../ws.md)
-Status: planned
+Status: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: q855 P1 実装、T1-366 QEMU で displays-p005.sh PASS（T1 の台帳）。5330 の明るさの slider と Fn の key は未、p008）（旧: planned）
 Disposition: normal
 Primary Milestone: MG006（WSから継承）
 Queue / attempts: none / 実装未承認

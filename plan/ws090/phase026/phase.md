@@ -2,7 +2,7 @@
 # ws090-p026: 変わった所だけを present する（damage の present、BUG-221 の残り）
 
 Parent: [WS090](../ws.md)
-Status: in-progress（2026-10-08 P1 q879: 層 1・2・4 を実装・host 試験・build warning 0。層 3（compositor）は design-reviewer の review の後）
+Status: in-progress（2026-10-08 q902 P1 の照合: 層 1・2・4 は T1-400 で回帰 fail 0（下の「Q1 の判定」）。層 3 は Q1 の判断で保留、5330 の測定の後に決める）（旧: in-progress（2026-10-08 P1 q879: 層 1・2・4 を実装・host 試験・build warning 0。層 3（compositor）は design-reviewer の review の後））
 Disposition: normal
 Queue: q879（P1、2026-10-08 Q1 の承認の 1 番）
 Related: [BUG-221](../../bugs/BUG-221.md)・[ws090-p018](../phase018/phase.md)（部分の再描画、frame の描画の側）
