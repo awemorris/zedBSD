@@ -611,7 +611,9 @@ def layout_session(item):
 	time.sleep(0.8)
 	mark = run.mark()
 	switch_to(item, "files", mark)
-	floated = run.wait(rf"KWL LAYOUT switch surface={files.surface} action=float mode=windowed", mark, 5)
+	# Leaving the docked mode by the bar's button floats every window quietly (KWL LAYOUT float-quiet), so Files is
+	# floating already and the switch keeps it so ("action=keep"); one still docked would be floated ("action=float").
+	floated = run.wait(rf"KWL LAYOUT switch surface={files.surface} action=(float|keep) mode=windowed", mark, 5)
 	time.sleep(1.0)
 	run.shot(item, "files-floating")
 	item.check(floated, "BUG-217 reproduced: Files, docked before, did not float when switched to in the windowed mode")
