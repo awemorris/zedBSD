@@ -291,13 +291,15 @@ def settings_wifi(item):
 	# (T1-481: with only the socket moved aside, the old watch kept "wifi=absent" and the page had no Wi-Fi switch).
 	# Stopping networkd leaves the wired interface as it is (it retires only the Wi-Fi radios).
 	mark = run.mark()
-	run.sh("service networkd stop >/dev/null 2>&1; i=0; while [ -S /run/networkd.sock ] && [ $i -lt 20 ]; do sleep 0.5; i=$((i+1)); done; "
+	run.sh("/sbin/service stop networkd > /tmp/aat-networkd-stop.log 2>&1; i=0; while [ -S /run/networkd.sock ] && [ $i -lt 20 ]; do sleep 0.5; i=$((i+1)); done; "
 		"[ -S /run/networkd.sock.aat ] || [ ! -S /run/networkd.sock ] || mv /run/networkd.sock /run/networkd.sock.aat; "
 		"nohup /bin/network-probe 300 > /tmp/aat-probe.log 2>&1 </dev/null & sleep 1; true")
 	try:
 		listening = run.wait(r"NETPROBE listening", None, 10, log="/tmp/aat-probe.log")
 		watched = run.wait(r"KWL NETWORK state reachable=1 .* wifi=(off|searching|connecting|connected|disconnected) ", mark, 10)
-		item.step("networkd stopped, network-probe in its place (three networks, Wi-Fi on)", f"{listening}; {watched}")
+		_, stopped = run.sh("cat /tmp/aat-networkd-stop.log; /sbin/service status networkd 2>&1 | head -3; true")
+		item.step("networkd stopped, network-probe in its place (three networks, Wi-Fi on)",
+			f"{listening}; {watched}; service: {' '.join(stopped.split())[:200]}")
 		item.check(listening, "network-probe did not start")
 		item.check(watched, "the compositor did not watch network-probe (no KWL NETWORK state with a Wi-Fi radio)")
 		window, since = run.settings(item, "wifi")
@@ -338,7 +340,7 @@ def settings_wifi(item):
 	finally:
 		kill_program("network-probe")
 		run.sh("if [ -S /run/networkd.sock.aat ]; then rm -f /run/networkd.sock; mv /run/networkd.sock.aat /run/networkd.sock; fi; "
-			"service networkd start >/dev/null 2>&1; true")
+			"/sbin/service start networkd > /tmp/aat-networkd-start.log 2>&1; true")
 
 
 # BUG-203 and BUG-204: Japanese in Phone's field, by the input method and by the flick panel's kana.
@@ -762,14 +764,17 @@ def files_open_programs(item):
 		opened = run.mark()
 		run.click(*clip, "--count", "2")
 		chosen = run.wait(r"ZFILES DESKTOP open name=aat-clip.mp4 via=double-click", opened, 10)
-		video = run.wait(r"VIDEOPLAYER (READY|OPEN) ", opened, 20)
+		# The desktop's Files starts Video Player, whose own lines do not reach the session's log (T1-488): Files'
+		# LAUNCH line and the program running tell that it opened the clip, the screenshot shows the picture.
+		launched = run.wait(r"ZFILES LAUNCH name=Video Player command=/bin/videoplayer .*aat-clip\.mp4", opened, 20)
+		time.sleep(3.0)
+		video = program_running("videoplayer")
 		terminal = run.lines(r"ZTERM START ", opened)
 		ways = run.lines(r"ZFILES (OPEN|LAUNCH|SPAWN) ", opened)
-		item.step(f"double-clicked aat-clip.mp4 (x bits) at {clip[0]},{clip[1]}", f"{chosen}; {ways[-1] if ways else ''}; {video}; terminals {len(terminal)}")
-		time.sleep(1.0)
+		item.step(f"double-clicked aat-clip.mp4 (x bits) at {clip[0]},{clip[1]}", f"{chosen}; {ways[-1] if ways else ''}; videoplayer running {video}; terminals {len(terminal)}")
 		run.shot(item, "video")
 		item.check(chosen, "the desktop did not open the clip")
-		item.check(video and not terminal, "BUG-233 reproduced: the video was not opened in Video Player (or a Terminal ran it)")
+		item.check(launched and video and not terminal, "BUG-233 reproduced: the video was not opened in Video Player (or a Terminal ran it)")
 		run.stop_programs()
 		opened = run.mark()
 		run.click(*ls, "--count", "2")

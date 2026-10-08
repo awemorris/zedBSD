@@ -13,7 +13,7 @@ since: BUG-184
 BUG-184（on の後に off を押すと Scan が押されて off にならない）と BUG-188（AP の一覧で 1 回の tap では接続されず 2 回で接続）を、networkd の代わりの network-probe（模擬の Wi-Fi、3 つの AP）で確かめる。
 
 ## 準備
-image は `plan/tools/aat/config-amd64-aat-bugs.mk`（`/bin/network-probe` 入り）。helper が `service networkd stop` で networkd を止め（compositor の networkd の watch の接続が切れる。有線の interface はそのまま、networkd が退けるのは Wi-Fi の radio だけ）、`network-probe 300` を立てる。compositor は 1 秒以内に watch をやり直して probe とつながる（`KWL NETWORK state … wifi=off|searching|…`、Settings は compositor を通して probe と話す）。終わりに probe を止め、`service networkd start` で networkd を戻す。2026-10-09 P1（T1-481）: 前の準備（socket を退けるだけ）では compositor の古い watch が `wifi=absent` のままで、頁に Wi-Fi の switch が無かった。
+image は `plan/tools/aat/config-amd64-aat-bugs.mk`（`/bin/network-probe` 入り）。helper が `/sbin/service stop networkd` で networkd を止め（compositor の networkd の watch の接続が切れる。有線の interface はそのまま、networkd が退けるのは Wi-Fi の radio だけ）、`network-probe 300` を立てる。compositor は 1 秒以内に watch をやり直して probe とつながる（`KWL NETWORK state … wifi=off|searching|…`、Settings は compositor を通して probe と話す）。終わりに probe を止め、`/sbin/service start networkd` で networkd を戻す。2026-10-09 P1（T1-481）: 前の準備（socket を退けるだけ）では compositor の古い watch が `wifi=absent` のままで、頁に Wi-Fi の switch が無かった。
 
 ## 操作と確認
 1. 操作: Settings を Wi-Fi の頁で開く。
