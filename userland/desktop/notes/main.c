@@ -324,6 +324,20 @@ struct notes_app {
 	int drag_moved;
 
 	/*
+	 * Drag and drop with other windows (ws189-p003): the chosen image
+	 * dragged out of the window (the object and the page point it was
+	 * held at) while that drag goes on; and where a picture dragged over
+	 * the page would be put (window pixels), while that is shown.
+	 */
+	int dragging_out;
+	size_t dnd_object;
+	double dnd_from_x;
+	double dnd_from_y;
+	int drop_shown;
+	float drop_x;
+	float drop_y;
+
+	/*
 	 * ws175-p008: a text chosen (a line of the page's own or an inserted
 	 * one): whether its words cannot be changed, its font (enum
 	 * pdf_edit_font) and its size in points; and the last press of the
@@ -504,6 +518,12 @@ static void app_apply_map(struct notes_app *app, const double map[6]);
 static void app_delete_object(struct notes_app *app);
 static void app_reset_object(struct notes_app *app);
 static void app_put_image(struct notes_app *app, const char *path, unsigned purpose);
+static void app_dnd(struct notes_app *app);
+static void app_drag_out(struct notes_app *app);
+static void app_drop_take(struct notes_app *app);
+static void app_drop_draw(struct notes_app *app);
+static int app_drop_place(struct notes_app *app, double *page_x, double *page_y);
+static int app_place_image(struct notes_app *app, struct notes_image *image, unsigned purpose, int at_point, double point_x, double point_y);
 static void app_selection_draw(struct notes_app *app, const struct notes_view *view);
 static void app_map_multiply(const double left[6], const double right[6], double product[6]);
 static void app_map_point(const double map[6], double x, double y, double *mapped_x, double *mapped_y);
@@ -682,6 +702,9 @@ main(
 			if (app.box.open)
 				app_box_frame(&app);
 		}
+
+		/* Drag and drop with other windows: the answers for a picture over the page, a drop, the end of Notes' own drag. */
+		app_dnd(&app);
 
 		/*
 		 * The text box's inputs (the keys and an input method's text
@@ -2370,8 +2393,9 @@ app_draw(
 			notes_frame_polygon(&app->frame, app->live->outline, app->live->outline_count, &view, app->live->color);
 	}
 
-	/* The chosen object's frame and handles (ws175-p008), then the pen's mark on the page. */
+	/* The chosen object's frame and handles (ws175-p008), where a picture dragged over the page would go (ws189-p003), then the pen's mark on the page. */
 	app_selection_draw(app, &view);
+	app_drop_draw(app);
 	app_mark(app, &view, 0);
 
 	/* The text box moved with the page shown (ws177-p012): its frame drawn again where it is now. */
@@ -3426,6 +3450,16 @@ app_select_motion(
 	/* A drag under way, at the point on the page. */
 	if (app->drag == MAIN_DRAG_NONE)
 		return;
+
+	/* An image moved out of the window goes on as a drag to other windows (ws189-p003). */
+	if (app->drag == MAIN_DRAG_MOVE &&
+	    (x < 0.0f || y < 0.0f || x >= (float)app->window.width || y >= (float)app->window.height)) {
+		app_drag_out(app);
+		if (app->dragging_out)
+			return;
+	}
+
+	/* The point on the page. */
 	page_x = (double)((x - app->view.x) / app->view.scale);
 	page_y = (double)((y - app->view.y) / app->view.scale);
 
@@ -3779,20 +3813,7 @@ app_put_image(
 	const char *path,
 	unsigned purpose)
 {
-	struct pdf_page_editor *editor;
 	struct notes_image *image;
-	struct notes_page *page;
-	struct notes_edit state;
-	double shown_width;
-	double shown_height;
-	double left;
-	double top;
-	double right;
-	double bottom;
-	double scale;
-	double width;
-	double height;
-	unsigned status;
 	int error;
 
 	/* The image. */
@@ -3808,6 +3829,53 @@ app_put_image(
 			app_status(app, "Could not read the image");
 		return;
 	}
+
+	/* Put on the page, at the middle of its part in the window. */
+	error = app_place_image(app, image, purpose, 0, 0.0, 0.0);
+	if (error != 0) {
+		printf("NOTES EDIT image failed error=%d path=%s\n", error, path);
+		fflush(stdout);
+		app_status(app, "Could not put the image on this page");
+		return;
+	}
+
+	/* Succeeded: the image is on the page. */
+	app_changed(app);
+}
+
+/*
+ * Puts an image on the page shown: in the chosen object's place
+ * (MAIN_CHOOSE_REPLACE), or inserted -- at a point of the page
+ * (ws189-p003: where it was dropped), else at the middle of the page's
+ * part in the window -- at most half the page's width and height and its
+ * own size at 72 dpi, then chosen with the Select tool.  The caller's hold
+ * on the image goes.  Returns 0 or an errno value.
+ */
+static int
+app_place_image(
+	struct notes_app *app,
+	struct notes_image *image,
+	unsigned purpose,
+	int at_point,
+	double point_x,
+	double point_y)
+{
+	struct pdf_page_editor *editor;
+	struct notes_page *page;
+	struct notes_edit state;
+	double shown_width;
+	double shown_height;
+	double left;
+	double top;
+	double right;
+	double bottom;
+	double middle_x;
+	double middle_y;
+	double scale;
+	double width;
+	double height;
+	unsigned status;
+	int error;
 
 	/* In the chosen object's place. */
 	if (purpose == MAIN_CHOOSE_REPLACE) {
@@ -3856,6 +3924,14 @@ app_put_image(
 		width = shown_width * scale;
 		height = shown_height * scale;
 
+		/* Its middle: the point asked for, else the middle of the page's part in the window. */
+		middle_x = (left + right) / 2.0;
+		middle_y = (top + bottom) / 2.0;
+		if (at_point) {
+			middle_x = point_x;
+			middle_y = point_y;
+		}
+
 		/* Its unit square onto the middle (its top left where (0, 1) goes). */
 		memset(&state, 0, sizeof(state));
 		state.flags = NOTES_EDIT_INSERTED | NOTES_EDIT_IMAGE;
@@ -3863,8 +3939,8 @@ app_put_image(
 		state.image = image;
 		state.transform[0] = (float)width;
 		state.transform[3] = (float)-height;
-		state.transform[4] = (float)((left + right) / 2.0 - width / 2.0);
-		state.transform[5] = (float)((top + bottom) / 2.0 + height / 2.0);
+		state.transform[4] = (float)(middle_x - width / 2.0);
+		state.transform[5] = (float)(middle_y + height / 2.0);
 		if (error == 0) {
 			app->document.next_id++;
 			error = notes_document_edit_object(&app->document, app->page, &state);
@@ -3881,18 +3957,14 @@ app_put_image(
 		}
 	}
 
-	/* The caller's hold on the image goes (the edit holds its own); a failure is shown. */
+	/* The caller's hold on the image goes (the edit holds its own). */
 	notes_image_release(image);
 	fflush(stdout);
-	if (error != 0) {
-		printf("NOTES EDIT image failed error=%d path=%s\n", error, path);
-		fflush(stdout);
-		app_status(app, "Could not put the image on this page");
-		return;
-	}
+	if (error != 0)
+		return error;
 
 	/* Succeeded: the image is on the page. */
-	app_changed(app);
+	return 0;
 }
 
 /*
@@ -5036,4 +5108,271 @@ app_buttons_signature(
 
 	/* Reports it. */
 	return hash;
+}
+
+/*
+ * Follows drag and drop with other windows (ws189-p003): the end of Notes'
+ * own drag, a picture dragged over the page (answered for the place: a
+ * copy, or a move of Notes' own image; nothing off the page), and a drop.
+ */
+static void
+app_dnd(
+	struct notes_app *app)
+{
+	double page_x;
+	double page_y;
+	int on_page;
+
+	/* Notes' own drag ended: the press that started it is over too. */
+	if (app->window.drag_done) {
+		app->window.drag_done = 0;
+		app->dragging_out = 0;
+		if (app->contact == MAIN_CONTACT_SELECT)
+			app_end_contact(app, NULL);
+		printf("NOTES DND drag done dropped=%d\n", app->window.drag_dropped);
+		fflush(stdout);
+	}
+
+	/* A drag over the window moved, came or went: answered for its place, and its frame drawn. */
+	if (app->window.drop_moved) {
+		app->window.drop_moved = 0;
+		on_page = 0;
+		if (app->window.drop_over)
+			on_page = app_drop_place(app, &page_x, &page_y);
+		if (on_page && app->window.drop_own) {
+			kl_window_answer_drop(app->window.kui, KL_DND_MOVE, KL_DND_MOVE);
+		} else if (on_page) {
+			kl_window_answer_drop(app->window.kui, KL_DND_COPY, KL_DND_COPY);
+		} else {
+			kl_window_answer_drop(app->window.kui, 0U, 0U);
+		}
+
+		/* The frame where it would go. */
+		app->drop_shown = on_page;
+		app->drop_x = (float)app->window.drop_x;
+		app->drop_y = (float)app->window.drop_y;
+		app->redraw = 1;
+	}
+
+	/* A drop waiting. */
+	if (app->window.drop_pending) {
+		app->window.drop_pending = 0;
+		app_drop_take(app);
+	}
+}
+
+/*
+ * Drags the chosen image out of the window (ws189-p003): the move within
+ * the page is given up (the image stays where it was), and the image goes
+ * as a picture ("image/png"), a copy for other windows or a move back
+ * onto Notes' own page.  Its PNG is made after the drag starts.  An object
+ * that is not an image with its bytes stays in the page's move.
+ */
+static void
+app_drag_out(
+	struct notes_app *app)
+{
+	struct kl_drag_data data;
+	struct notes_edit state;
+	unsigned char *png;
+	size_t size;
+	int error;
+
+	/* Only an image whose bytes Notes has. */
+	if (app->selected_kind != PDF_EDIT_IMAGE)
+		return;
+	error = app_selected_state(app, &state);
+	if (error != 0 || state.image == NULL || state.image->data == NULL)
+		return;
+
+	/* The drag, from the press, its picture filled in after it starts. */
+	data.type = "image/png";
+	data.data = NULL;
+	data.length = 0;
+	error = kl_window_start_drag(app->window.kui, &data, 1U, KL_DND_COPY | KL_DND_MOVE, kl_window_press_serial(app->window.kui));
+	if (error != 0) {
+		printf("NOTES DND drag failed errno=%d\n", error);
+		fflush(stdout);
+		return;
+	}
+
+	/* The move within the page is given up; what it held is kept for a drop back on the page. */
+	app->dragging_out = 1;
+	app->dnd_object = app->selected;
+	app->dnd_from_x = (double)app->drag_x;
+	app->dnd_from_y = (double)app->drag_y;
+	app->drag = MAIN_DRAG_NONE;
+	app->drag_moved = 0;
+	if (app->drag_previews > 0U) {
+		notes_page_close_editor(app->document.pages[app->page]);
+		app->drag_previews++;
+	}
+
+	/* The page drawn again without the move. */
+	app->redraw = 1;
+
+	/* The picture, made now and filled in. */
+	png = NULL;
+	size = 0;
+	error = notes_picture_png(state.image, &png, &size);
+	if (error == 0)
+		error = kl_window_drag_fill(app->window.kui, "image/png", png, size);
+	free(png);
+
+	/* The tests' line. */
+	printf("NOTES DND drag start object=%lu bytes=%lu errno=%d\n", (unsigned long)app->dnd_object, (unsigned long)size, error);
+	fflush(stdout);
+}
+
+/*
+ * Takes a picture dropped on the page (ws189-p003): Notes' own image moves
+ * to the drop's point; another program's picture is put there as a new
+ * image.  The drop is finished with what was done, or given up.
+ */
+static void
+app_drop_take(
+	struct notes_app *app)
+{
+	struct notes_image *image;
+	unsigned char *data;
+	double map[6];
+	double page_x;
+	double page_y;
+	size_t length;
+	unsigned type;
+	int on_page;
+	int error;
+
+	/* The point on the page; off it nothing is taken. */
+	app->drop_shown = 0;
+	app->redraw = 1;
+	on_page = app_drop_place(app, &page_x, &page_y);
+	if (!on_page) {
+		kl_window_finish_drop(app->window.kui, 0U);
+		return;
+	}
+
+	/* Notes' own image moves by the way from where it was held to the drop. */
+	if (app->window.drop_own) {
+		if (!app->dragging_out || app->selected != app->dnd_object) {
+			kl_window_finish_drop(app->window.kui, 0U);
+			return;
+		}
+
+		/* The move, one change, and the drop finished as a move. */
+		map[0] = 1.0;
+		map[1] = 0.0;
+		map[2] = 0.0;
+		map[3] = 1.0;
+		map[4] = page_x - app->dnd_from_x;
+		map[5] = page_y - app->dnd_from_y;
+		app_apply_map(app, map);
+		kl_window_finish_drop(app->window.kui, KL_DND_MOVE);
+		printf("NOTES EDIT move page=%lu object=%lu dx=%.1f dy=%.1f\n", (unsigned long)app->page, (unsigned long)app->selected, map[4], map[5]);
+		fflush(stdout);
+		return;
+	}
+
+	/* Another program's picture. */
+	data = NULL;
+	error = kl_window_receive_drop(app->window.kui, (char **)&data, &length, &type);
+	if (error == 0 && type != KL_DROP_IMAGE)
+		error = ENOTSUP;
+	if (error == 0)
+		error = notes_picture_load_bytes(&app->document, data, length, &image);
+	free(data);
+
+	/* Put where it was dropped. */
+	if (error == 0)
+		error = app_place_image(app, image, MAIN_CHOOSE_INSERT, 1, page_x, page_y);
+	if (error != 0) {
+		printf("NOTES DND drop failed errno=%d\n", error);
+		fflush(stdout);
+		app_status(app, "Could not put the image on this page");
+		kl_window_finish_drop(app->window.kui, 0U);
+		return;
+	}
+
+	/* Succeeded: the image is on the page, the drop finished as a copy. */
+	kl_window_finish_drop(app->window.kui, KL_DND_COPY);
+	printf("NOTES DND drop bytes=%lu x=%.1f y=%.1f\n", (unsigned long)length, page_x, page_y);
+	fflush(stdout);
+	app_changed(app);
+}
+
+/*
+ * Finds the page point of the drag over the window: 1 when it is on the
+ * page shown (below the toolbar), 0 when not.
+ */
+static int
+app_drop_place(
+	struct notes_app *app,
+	double *page_x,
+	double *page_y)
+{
+	const struct notes_page *page;
+
+	/* The page shown. */
+	*page_x = 0.0;
+	*page_y = 0.0;
+	if (app->document.page_count == 0U || app->window.drop_y < (double)NOTES_TOOLBAR_HEIGHT)
+		return 0;
+	page = app->document.pages[app->page];
+
+	/* The point in the page's points. */
+	*page_x = (app->window.drop_x - (double)app->view.x) / (double)app->view.scale;
+	*page_y = (app->window.drop_y - (double)app->view.y) / (double)app->view.scale;
+
+	/* Within the page. */
+	if (*page_x < 0.0 || *page_y < 0.0)
+		return 0;
+	if (*page_x > (double)page->width || *page_y > (double)page->height)
+		return 0;
+
+	/* Succeeded: on the page. */
+	return 1;
+}
+
+/*
+ * Draws where a picture dragged over the page would go (ws189-p003): a
+ * frame of the accent, KL_DROP_RING wide around a square a third of the
+ * window's shorter side, with the accent faint inside, at the drag's
+ * point (as libkeiland's kl_drop_frame looks).
+ */
+static void
+app_drop_draw(
+	struct notes_app *app)
+{
+	uint32_t accent;
+	uint32_t fill;
+	uint32_t ring;
+	float side;
+	float left;
+	float top;
+	float edge;
+
+	/* Only while a picture is over the page. */
+	if (!app->drop_shown)
+		return;
+
+	/* The accent faint and strong, as the frames take colours (0xRRGGBBAA). */
+	accent = kl_theme_default()->accent & 0xffffffU;
+	fill = (accent << 8) | KL_DROP_FILL_ALPHA;
+	ring = (accent << 8) | 0xe6U;
+
+	/* The square around the point. */
+	side = (float)app->window.width;
+	if ((float)app->window.height < side)
+		side = (float)app->window.height;
+	side = side / 3.0f;
+	left = app->drop_x - side / 2.0f;
+	top = app->drop_y - side / 2.0f;
+	edge = (float)KL_DROP_RING;
+
+	/* Its inside, then its four sides. */
+	notes_frame_rect(&app->frame, left, top, side, side, fill);
+	notes_frame_rect(&app->frame, left, top, side, edge, ring);
+	notes_frame_rect(&app->frame, left, top + side - edge, side, edge, ring);
+	notes_frame_rect(&app->frame, left, top, edge, side, ring);
+	notes_frame_rect(&app->frame, left + side - edge, top, edge, side, ring);
 }

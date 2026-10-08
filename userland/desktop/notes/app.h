@@ -226,6 +226,21 @@ struct notes_window {
 	struct kl_rect box_rect;
 	int box_touching;
 	int32_t box_touch_id;
+
+	/*
+	 * Drag and drop with other windows (ws189-p003): a picture's drag over
+	 * the window and where it is, whether it is Notes' own, whether its
+	 * place changed since the main loop answered, whether it was dropped
+	 * and waits; and whether Notes' own drag out ended (dropped or not).
+	 */
+	int drop_over;
+	double drop_x;
+	double drop_y;
+	int drop_own;
+	int drop_moved;
+	int drop_pending;
+	int drag_done;
+	int drag_dropped;
 };
 
 /*

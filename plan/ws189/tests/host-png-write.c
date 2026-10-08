@@ -30,6 +30,8 @@ static void test_opaque(void);
 static void test_alpha(void);
 static void test_edges(void);
 static void test_refused(void);
+static void test_fit(void);
+static void test_rows(void);
 
 int
 main(
@@ -40,6 +42,8 @@ main(
 	test_alpha();
 	test_edges();
 	test_refused();
+	test_fit();
+	test_rows();
 
 	/* The verdict. */
 	if (test_failures != 0) {
@@ -257,4 +261,70 @@ test_refused(void)
 	check(error == EINVAL, "refused: height past the limit");
 	error = kl_picture_png(&one, 2, 1, 1U, &png, &size);
 	check(error == EINVAL && png == NULL && size == 0U, "refused: stride below width");
+}
+
+/* A picture shrunk to a side keeps its shape and averages what it covers; one that fits is copied. */
+static void
+test_fit(void)
+{
+	static uint32_t big[100 * 50];
+	uint32_t *out;
+	int width;
+	int height;
+	int error;
+	int index;
+	int same;
+
+	/* Half the columns one colour, half another: the shrunk halves keep them. */
+	for (index = 0; index < 100 * 50; index++)
+		big[index] = (index % 100) < 50 ? 0xff102030U : 0xff405060U;
+	error = kl_picture_fit(big, 100, 50, 100U, 20, &out, &width, &height);
+	check(error == 0 && width == 20 && height == 10, "fit: size");
+	if (error == 0) {
+		check(out[0] == 0xff102030U && out[19] == 0xff405060U, "fit: averages");
+		free(out);
+	}
+
+	/* A picture that fits is copied as it is. */
+	error = kl_picture_fit(big, 100, 50, 100U, 200, &out, &width, &height);
+	check(error == 0 && width == 100 && height == 50, "fit: copy size");
+	if (error == 0) {
+		same = memcmp(out, big, sizeof(big));
+		check(same == 0, "fit: copy pixels");
+		free(out);
+	}
+}
+
+/* Rows a PNG has already are wrapped: gray and RGB, with the header saying so, and inflated back to the rows. */
+static void
+test_rows(void)
+{
+	unsigned char rows[2 * (1 + 3)];
+	unsigned char packed[256];
+	unsigned char back[64];
+	unsigned char *png;
+	uLongf packed_size;
+	uLongf back_size;
+	size_t size;
+	int error;
+
+	/* Two rows of three gray samples, each after its filter byte, compressed. */
+	memcpy(rows, "\0\x10\x20\x30\0\x40\x50\x60", sizeof(rows));
+	packed_size = sizeof(packed);
+	(void)compress(packed, &packed_size, rows, sizeof(rows));
+
+	/* Wrapped as gray. */
+	error = kl_picture_png_rows(packed, (size_t)packed_size, 3, 2, 1, &png, &size);
+	check(error == 0, "rows: gray written");
+	if (error == 0) {
+		check(png[8 + 4 + 4 + 8 + 1] == 0U, "rows: gray colour type");
+		back_size = sizeof(back);
+		error = uncompress(back, &back_size, png + 8 + 12 + 13 + 8, (uLong)packed_size);
+		check(error == Z_OK && back_size == sizeof(rows) && memcmp(back, rows, sizeof(rows)) == 0, "rows: data as given");
+		free(png);
+	}
+
+	/* Four components are not a PNG's rows here. */
+	error = kl_picture_png_rows(packed, (size_t)packed_size, 3, 2, 4, &png, &size);
+	check(error == EINVAL, "rows: four components refused");
 }
