@@ -251,6 +251,12 @@ struct hid_parser {
 	int finger_contact;
 	int no_id_report_used;
 	int supported_field_seen;
+	/*
+	 * Where the item being parsed starts in the descriptor (BUG-267: a
+	 * refusal names it); the descriptor's length once every item was taken
+	 * and the checks of the whole descriptor run.
+	 */
+	size_t item_offset;
 };
 
 static uint32_t item_unsigned(const uint8_t *data, size_t size);
@@ -293,6 +299,7 @@ static int parse_main(struct hid_parser *parser, unsigned tag, const uint8_t *da
 static int parse_global(struct hid_parser *parser, unsigned tag, const uint8_t *data, size_t size);
 static int parse_local(struct hid_parser *parser, unsigned tag, const uint8_t *data, size_t size);
 static int parse_descriptor(struct hid_parser *parser);
+static int layout_parse(const void *descriptor, size_t length, struct hid_report_layout **result, size_t *item_offset);
 static struct hid_report_layout * layout_allocate(void);
 static int boot_layout_begin(struct hid_report_layout **result, struct hid_report_layout **layout_result, struct hid_report_description **report_result);
 static int extract_value(const uint8_t *data, size_t length, uint32_t bit_offset, uint8_t bit_size, uint32_t *result);
@@ -1733,6 +1740,7 @@ parse_descriptor(
 	/* Process each remaining element. */
 	while (offset < length) {
 		/* Handles the prefix condition. */
+		parser->item_offset = offset;
 		prefix = descriptor[offset++];
 		if (prefix == 0xfeU) {
 			/* Checks the current data length. */
@@ -1776,6 +1784,9 @@ parse_descriptor(
 			return error;
 		offset += size;
 	}
+
+	/* The checks of the whole descriptor, past its last item. */
+	parser->item_offset = length;
 
 	/* Checks the parser state. */
 	if (parser->collection_depth != 0U || parser->global_depth != 0U)
@@ -1821,9 +1832,63 @@ drv_hid_report_layout_parse(
 	size_t length,
 	struct hid_report_layout **result)
 {
+	size_t item_offset;
+	int error;
+
+	/* The layout; where a refusal happened is not wanted here. */
+	error = layout_parse(descriptor, length, result, &item_offset);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller owns the layout. */
+	return 0;
+}
+
+/*
+ * Tells where the parser refuses a report descriptor (BUG-267, for the
+ * kernel's log): the offset of the item it refused, or the descriptor's
+ * length when every item was taken and the whole descriptor was refused
+ * (a collection left open, a usage left over, nothing this kernel uses).
+ * Returns the parser's error (0 when it takes the descriptor; *item_offset
+ * is then the length).  Nothing is kept.
+ */
+int
+drv_hid_report_layout_diagnose(
+	const void *descriptor,
+	size_t length,
+	size_t *item_offset)
+{
+	struct hid_report_layout *layout;
+	int error;
+
+	/* The parse, with where it stopped. */
+	*item_offset = 0;
+	layout = NULL;
+	error = layout_parse(descriptor, length, &layout, item_offset);
+	if (error != 0)
+		return error;
+
+	/* A layout that parsed is not kept. */
+	drv_hid_report_layout_destroy(layout);
+
+	/* Succeeded: the parser takes the descriptor. */
+	return 0;
+}
+
+/* Parses a report descriptor into a layout, telling where the parser stopped (the item it refused). */
+static int
+layout_parse(
+	const void *descriptor,
+	size_t length,
+	struct hid_report_layout **result,
+	size_t *item_offset)
+{
 	struct hid_report_layout *layout;
 	struct hid_parser *parser;
 	int error;
+
+	/* Nowhere yet. */
+	*item_offset = 0;
 
 	/* Handles the descriptor availability. */
 	if (descriptor == NULL || length == 0U || result == NULL)
@@ -1850,8 +1915,10 @@ drv_hid_report_layout_parse(
 		return ENOMEM;
 	}
 
+	/* The walk of the items, and where it stopped. */
 	parser->layout = layout;
 	error = parse_descriptor(parser);
+	*item_offset = parser->item_offset;
 	kern_free(parser);
 	if (error != 0) {
 		kern_free(layout);
@@ -1860,8 +1927,8 @@ drv_hid_report_layout_parse(
 		return error;
 	}
 
+	/* Succeeded: the caller owns the layout. */
 	*result = layout;
-	/* Succeeded. */
 	return 0;
 }
 

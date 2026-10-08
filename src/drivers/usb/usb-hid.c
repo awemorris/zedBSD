@@ -16,12 +16,14 @@
 #include <drivers/generic/hid-report.h>
 #include <drivers/usb/usb-hid.h>
 #include <drivers/usb/usb.h>
+#include <kern/boot.h>
 #include <kern/clock.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
 #include <kern/kmem.h>
 #include <kern/kcrt.h>
+#include <kern/platform.h>
 
 #include <stdint.h>
 #include <uapi/errno.h>
@@ -46,6 +48,16 @@
 #define USB_HID_ERROR_MARKERS		16U
 #define USB_HID_WORK_ARM		(1U << 0)
 #define USB_HID_WORK_COMPLETE		(1U << 1)
+
+/*
+ * BUG-267's diagnosis: the boot parameter that asks for every HID
+ * interface's report descriptor and its first reports in the kernel's log,
+ * how many reports of an interface are logged, and how many bytes go on
+ * one line of a descriptor's or a report's hex.
+ */
+#define USB_HID_DUMP_TOKEN		"usbhid.dump=1"
+#define USB_HID_DUMP_REPORTS		300U
+#define USB_HID_DUMP_LINE		32U
 
 struct usb_hid {
 	struct drv_usb_interface *interface;
@@ -100,12 +112,26 @@ struct usb_hid {
 	struct drv_hidraw *hidraw;
 	struct drv_usb_endpoint *out_endpoint;
 	uint8_t *out_buffer;
+	/*
+	 * BUG-267: the step of the attachment under way, named in the
+	 * kernel's log when it fails, and how many of the interface's reports
+	 * were logged under usbhid.dump=1.
+	 */
+	const char *stage;
+	unsigned reports_dumped;
 };
 
 static struct spinlock usb_hid_pending_lock;
 static struct usb_hid *usb_hid_pending;
 static unsigned usb_hid_input_is_ready;
 static unsigned usb_hid_registered;
+
+/*
+ * Whether usbhid.dump=1 is among the boot parameters (BUG-267): 0 until
+ * the first attachment looks, then 1 without it and 2 with it.  The boot
+ * parameters do not change while the kernel runs.
+ */
+static unsigned usb_hid_dump_state;
 
 /*
  * Forward declaration
@@ -139,6 +165,10 @@ static int usb_hid_raw_prepare(struct usb_hid *hid);
 static int usb_hid_raw_publish(struct usb_hid *hid);
 static int usb_hid_raw_output(void *context, const uint8_t *report, size_t length);
 static void usb_hid_free(struct usb_hid *hid);
+static int usb_hid_dump_wanted(void);
+static void usb_hid_location(const struct usb_hid *hid, unsigned *bus, unsigned *address, unsigned *interface_number);
+static void usb_hid_log_hex(const struct usb_hid *hid, const char *prefix, const uint8_t *bytes, size_t length);
+static void usb_hid_log_refusal(const struct usb_hid *hid, const uint8_t *descriptor, size_t length, int error);
 
 /* What a raw interface's transport does: its output reports (ws161-p002). */
 static const struct drv_hidraw_ops usb_hid_raw_ops = {
@@ -301,6 +331,9 @@ usb_hid_attach(
 	const struct drv_usb_interface_descriptor *interface_descriptor;
 	struct usb_hid *hid;
 	unsigned long irq;
+	unsigned bus;
+	unsigned address;
+	unsigned interface_number;
 	int error, ready;
 
 	(void)id;
@@ -323,6 +356,7 @@ usb_hid_attach(
 	spin_init(&hid->lock, LOCK_RANK_DEVICE, "usb hid");
 
 	/* Checks the operation status. */
+	hid->stage = "endpoint";
 	error = usb_hid_find_endpoint(interface, &hid->endpoint);
 	if (error != 0)
 		goto fail;
@@ -334,6 +368,7 @@ usb_hid_attach(
 
 	/* A raw interface's output endpoint and buffer. */
 	if (hid->raw) {
+		hid->stage = "raw";
 		error = usb_hid_raw_prepare(hid);
 		if (error != 0)
 			goto fail;
@@ -345,9 +380,11 @@ usb_hid_attach(
 	 */
 
 	/* Checks the operation status. */
+	hid->stage = "protocol";
 	error = usb_hid_set_report_protocol(hid);
 	if (error != 0)
 		goto fail;
+	hid->stage = "resources";
 	usb_hid_identity(hid);
 	hid->buffer = kern_malloc(hid->buffer_size);
 
@@ -384,6 +421,7 @@ usb_hid_attach(
 	/* Handles the ready condition. */
 	if (ready) {
 		/* Checks the operation status. */
+		hid->stage = "activate";
 		error = usb_hid_activate(hid, 0);
 		if (error != 0) {
 			(void)drv_usb_interface_set_driver_data(interface,
@@ -396,6 +434,15 @@ usb_hid_attach(
 	return 0;
 
 fail:
+
+	/* BUG-267: the kernel's log says which step refused the interface. */
+	usb_hid_location(hid, &bus, &address, &interface_number);
+	kern_logf("usb-hid-diag: usb%u device %u interface %u attach error=%d stage=%s\n",
+		  bus,
+		  address,
+		  interface_number,
+		  error,
+		  hid->stage);
 
 	/* Everything allocated for the interface goes. */
 	usb_hid_free(hid);
@@ -634,9 +681,12 @@ usb_hid_fetch_layout(
 	size_t capacity;
 	size_t maximum_report;
 	int raw;
+	int dump;
+	int prepared;
 	int error;
 
 	/* How long the report descriptor is. */
+	hid->stage = "descriptor-length";
 	error = usb_hid_report_descriptor_length(hid->interface, &descriptor_length);
 	if (error != 0)
 		return error;
@@ -647,6 +697,7 @@ usb_hid_fetch_layout(
 		return ENOMEM;
 
 	/* The descriptor, read whole from the interface. */
+	hid->stage = "descriptor-read";
 	actual = 0;
 	error = drv_usb_control(
 		hid->device,
@@ -678,9 +729,25 @@ usb_hid_fetch_layout(
 		}
 	}
 
-	/* Any other interface's descriptor is parsed for its input, and is no longer needed. */
-	if (error == 0)
+	/* Any other interface's descriptor is parsed for its input. */
+	prepared = 0;
+	if (error == 0) {
+		hid->stage = "prepare";
+		prepared = 1;
 		error = drv_hid_input_prepare(descriptor, descriptor_length, &hid->hidinput);
+	}
+
+	/* BUG-267: a refused descriptor is logged with where it was refused; any other under usbhid.dump=1. */
+	if (error != 0 && prepared) {
+		usb_hid_log_hex(hid, "usb-hid-rdesc", descriptor, descriptor_length);
+		usb_hid_log_refusal(hid, descriptor, descriptor_length, error);
+	} else if (error == 0) {
+		dump = usb_hid_dump_wanted();
+		if (dump)
+			usb_hid_log_hex(hid, "usb-hid-rdesc", descriptor, descriptor_length);
+	}
+
+	/* The descriptor is no longer needed. */
 	kern_free(descriptor);
 
 	/* A descriptor that could not be read or described. */
@@ -688,11 +755,13 @@ usb_hid_fetch_layout(
 		return error;
 
 	/* The interrupt endpoint's room for one transfer. */
+	hid->stage = "capacity";
 	error = usb_hid_endpoint_capacity(hid->interface, hid->endpoint, &capacity);
 	if (error != 0)
 		return error;
 
 	/* The longest report must fit one transfer, which is the buffer's size. */
+	hid->stage = "report-size";
 	maximum_report = drv_hid_input_report_max(hid->hidinput);
 	if (maximum_report > capacity)
 		return EOVERFLOW;
@@ -926,6 +995,7 @@ usb_hid_publish_report(
 {
 	uint64_t milliseconds;
 	unsigned long irq;
+	int dump;
 
 	/* A raw interface's report goes to its readers as it came. */
 	if (hid->raw) {
@@ -939,6 +1009,13 @@ usb_hid_publish_report(
 	milliseconds = hid->completed_milliseconds;
 
 	spin_unlock_irqrestore(&hid->lock, irq);
+
+	/* BUG-267: under usbhid.dump=1 the interface's first reports go to the kernel's log as they came. */
+	dump = usb_hid_dump_wanted();
+	if (dump && hid->reports_dumped < USB_HID_DUMP_REPORTS) {
+		hid->reports_dumped++;
+		usb_hid_log_hex(hid, "usb-hid-report", buffer, length);
+	}
 
 	/* The glue decodes the report and tells the devices what changed. */
 	drv_hid_input_report(hid->hidinput, buffer, length, milliseconds);
@@ -1532,4 +1609,148 @@ usb_hid_le16(
 {
 	/* Returns the computed result. */
 	return (uint16_t)bytes[0] | (uint16_t)((uint16_t)bytes[1] << 8U);
+}
+
+/* Tells whether the boot parameters ask for the HID interfaces' descriptors and reports in the kernel's log (BUG-267). */
+static int
+usb_hid_dump_wanted(
+	void)
+{
+	const char *line;
+	int present;
+
+	/* Looked at once: the parameters do not change. */
+	if (usb_hid_dump_state != 0U) {
+		if (usb_hid_dump_state == 2U)
+			return 1;
+		return 0;
+	}
+
+	/* The line the loader handed over, and whether it holds usbhid.dump=1. */
+	line = kern_boot_handoff("boot.command-line");
+	present = 0;
+	if (line != NULL)
+		present = kern_boot_parameters_token_present(line, USB_HID_DUMP_TOKEN);
+
+	/* Kept for the next look. */
+	usb_hid_dump_state = 1U;
+	if (present)
+		usb_hid_dump_state = 2U;
+
+	/* Reports what the parameters ask. */
+	if (present)
+		return 1;
+	return 0;
+}
+
+/* Gives the bus, the device's address and the interface's number, which name an interface in the kernel's log. */
+static void
+usb_hid_location(
+	const struct usb_hid *hid,
+	unsigned *bus,
+	unsigned *address,
+	unsigned *interface_number)
+{
+	/* The device's place on its bus and the interface's number. */
+	*bus = drv_usb_bus_number(drv_usb_device_bus(hid->device));
+	*address = drv_usb_device_address(hid->device);
+	*interface_number = drv_usb_interface_number(hid->interface);
+}
+
+/*
+ * Logs bytes as hex (BUG-267): a line with their length, then
+ * USB_HID_DUMP_LINE bytes a line, each line led by the prefix, the
+ * interface and the offset of its first byte.
+ */
+static void
+usb_hid_log_hex(
+	const struct usb_hid *hid,
+	const char *prefix,
+	const uint8_t *bytes,
+	size_t length)
+{
+	char line[USB_HID_DUMP_LINE * 3U + 1U];
+	unsigned bus;
+	unsigned address;
+	unsigned interface_number;
+	size_t offset;
+	size_t index;
+	size_t used;
+
+	/* The interface, and how many bytes follow. */
+	usb_hid_location(hid, &bus, &address, &interface_number);
+	kern_logf("%s: usb%u device %u interface %u length=%u\n",
+		  prefix,
+		  bus,
+		  address,
+		  interface_number,
+		  (unsigned)length);
+
+	/* Each line of bytes. */
+	for (offset = 0; offset < length; offset += USB_HID_DUMP_LINE) {
+		/* The line's bytes as hex, a space before each. */
+		used = 0;
+		for (index = offset; index < length && index < offset + USB_HID_DUMP_LINE; index++) {
+			(void)kern_snprintf(line + used, sizeof(line) - used, " %02x", (unsigned)bytes[index]);
+			used += 3U;
+		}
+
+		/* The end of the line's text. */
+		line[used] = '\0';
+
+		/* The line, with the offset of its first byte. */
+		kern_logf("%s: usb%u device %u interface %u %04x:%s\n",
+			  prefix,
+			  bus,
+			  address,
+			  interface_number,
+			  (unsigned)offset,
+			  line);
+	}
+}
+
+/*
+ * Logs where a report descriptor was refused (BUG-267): the parser's item
+ * and its prefix byte, or, when the parser takes the descriptor, that the
+ * devices it declares did not fit (stage=describe).
+ */
+static void
+usb_hid_log_refusal(
+	const struct usb_hid *hid,
+	const uint8_t *descriptor,
+	size_t length,
+	int error)
+{
+	size_t item_offset;
+	unsigned bus;
+	unsigned address;
+	unsigned interface_number;
+	unsigned prefix;
+	int parsed;
+
+	/* Where the parser stops on the descriptor. */
+	usb_hid_location(hid, &bus, &address, &interface_number);
+	parsed = drv_hid_report_layout_diagnose(descriptor, length, &item_offset);
+
+	/* The parser takes it: what it declares does not fit the glue's records. */
+	if (parsed == 0) {
+		kern_logf("usb-hid-diag: usb%u device %u interface %u refused error=%d stage=describe\n",
+			  bus,
+			  address,
+			  interface_number,
+			  error);
+		return;
+	}
+
+	/* The parser refused an item, or (at the length) the whole descriptor. */
+	prefix = 0;
+	if (item_offset < length)
+		prefix = descriptor[item_offset];
+	kern_logf("usb-hid-diag: usb%u device %u interface %u refused error=%d stage=parse item=0x%04x prefix=0x%02x\n",
+		  bus,
+		  address,
+		  interface_number,
+		  parsed,
+		  (unsigned)item_offset,
+		  prefix);
 }

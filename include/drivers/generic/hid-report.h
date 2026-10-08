@@ -146,6 +146,8 @@ struct hid_report_report_info {
 
 int drv_hid_report_layout_parse(const void *, size_t,
 	struct hid_report_layout **);
+/* BUG-267: where the parser refuses a descriptor (the item's offset, or the length for the whole), and its error. */
+int drv_hid_report_layout_diagnose(const void *descriptor, size_t length, size_t *item_offset);
 int drv_hid_report_layout_boot_keyboard(struct hid_report_layout **);
 int drv_hid_report_layout_boot_mouse(struct hid_report_layout **);
 void drv_hid_report_layout_destroy(struct hid_report_layout *);
