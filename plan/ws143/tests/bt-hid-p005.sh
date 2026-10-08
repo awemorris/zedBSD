@@ -11,10 +11,13 @@
 #     a new node with REL_X 5 again.  bt disconnect 02, then bt connect 02 is unreachable (the mouse is not connectable).
 #  3. Permissions: btuser may not connect but may read the status.
 #  4. PAIR while a HID connection is under way is busy (a race: noted, not failed, when the connection was too quick).
-#  5. The daemon started again: 01 (bluetoothd pages it) is open by itself, 02 (it comes by itself) waits.
+#  4b. (i03) The LE HOG mouse 04, bonded by the test (its bond's file written as root: LTK 00 11 .. FF): bt connect 04
+#     le-public connects it over HOGP (transport=hog, battery=80), evdev-probe reads REL_X 5 every second.
+#  5. The daemon started again: 01 (bluetoothd pages it) is open by itself, 02 (it comes by itself) waits, 04 is open
+#     by the auto-connect (its filter accept list).
 #  6. The controller gone (bt-probe -W, the loopback withdraws itself): 01's node goes with KEY_B released, the daemon
-#     sees the node go, and 01 is open again on the controller's return.
-#  7. bt forget 01 while open: its node goes, its bond and HID record are gone.  bt forget 02 (cleanup).
+#     sees the node go, and 01 and 04 are open again on the controller's return.
+#  7. bt forget 01 while open: its node goes, its bond and HID record are gone.  bt forget 02 and 04 (cleanup).
 #  8. The btsnoop record starts with its header and holds the traffic (copied out to the run's folder for tshark).
 #  9. The guest's USB input nodes are still there (the Bluetooth nodes did not disturb them).
 # PASS: every "ok" line and the last line bt-hid-p005: PASS.  Run bt-loopback-p002.sh, bt-daemon-p003.sh and
@@ -46,11 +49,12 @@ start_daemon() {
 folder=/var/db/bluetooth/00:11:22:33:44:55
 keyboard=0A:0B:0C:0D:0E:01
 mouse=0A:0B:0C:0D:0E:02
+hog=0A:0B:0C:0D:0E:04
 
 # 0. A daemon of its own, without the HID devices' bonds of an earlier run, and the loopback's devices as at power-on
 #    (a withdrawal forgets that the mouse was paired).
 stop_daemon
-guest "rm -f $folder/$keyboard-bredr $folder/$keyboard-bredr.hid $folder/$mouse-bredr $folder/$mouse-bredr.hid /tmp/btd-p005*.snoop; true" >/dev/null
+guest "rm -f $folder/$keyboard-bredr $folder/$keyboard-bredr.hid $folder/$mouse-bredr $folder/$mouse-bredr.hid $folder/$hog-le-public $folder/$hog-le-public.hid /tmp/btd-p005*.snoop; true" >/dev/null
 has "the loopback withdraws and comes back" "$(guest '/bin/bt-probe -W 100; sleep 2')" "BT WITHDRAW delay_ms=100"
 start_daemon /tmp/btd-p005.snoop /tmp/btd-p005.log
 has "bt show is ready" "$(guest '/bin/bt show')" "BT SHOW state=ready"
@@ -131,7 +135,22 @@ fi
 # Whichever went first, the keyboard connects (at once when it is open already).
 has "the keyboard connected" "$(guest "sleep 2; /bin/bt connect $keyboard")" "BT CONNECT result=connected"
 
-# 5. The daemon again: the keyboard comes back (paged), the mouse waits for itself.
+# 4b. The LE HOG mouse: its bond written as root (the daemon's account owns it), then connected over HOGP.
+guest "printf 'type=le-public\nname=HOG Mouse\nltk=00112233445566778899aabbccddeeff\nediv=0\nrand=0000000000000000\nkey_size=16\nauthenticated=0\nsecure=1\nlegacy=0\n' > $folder/$hog-le-public && chown 80 $folder/$hog-le-public && chmod 600 $folder/$hog-le-public; ls -ln $folder/$hog-le-public" > "$out/hog-bond.txt"
+expect "the HOG mouse's bond, _bluetooth's" '^-rw------- *[0-9]* *80 ' "$out/hog-bond.txt"
+guest "/bin/evdev-probe -b bluetooth -p $hog -N -t 20000 -r 5000 > /tmp/p005-hog1.txt 2>&1 </dev/null & echo started" >/dev/null
+guest "/bin/bt connect $hog le-public" > "$out/connect-hog.txt"
+cat "$out/connect-hog.txt"
+expect "the HOG mouse connected over HOGP" "CONNECTED address=$hog type=le-public transport=hog input=/dev/input/event" "$out/connect-hog.txt"
+expect "bt connect of the HOG mouse" "BT CONNECT result=connected input=/dev/input/event" "$out/connect-hog.txt"
+sleep 4
+guest '/bin/bt status' > "$out/status-hog.txt"
+guest 'cat /tmp/p005-hog1.txt' > "$out/hog1.txt"
+expect "the HOG mouse open, its battery read" "address=$hog type=le-public transport=hog state=open .*battery=80" "$out/status-hog.txt"
+expect "the HOG mouse's node, Bluetooth's bus" "^EVDEV node=.*bus=5 vendor=1209 product=4842" "$out/hog1.txt"
+expect "REL_X 5 from its notifications" '^EVDEV event type=2 code=0 value=5$' "$out/hog1.txt"
+
+# 5. The daemon again: the keyboard comes back (paged), the mouse waits for itself, the HOG mouse comes by the auto-connect.
 stop_daemon
 start_daemon /tmp/btd-p005b.snoop /tmp/btd-p005b.log
 sleep 3
@@ -139,6 +158,7 @@ guest '/bin/bt status' > "$out/status4.txt"
 cat "$out/status4.txt"
 expect "the keyboard open after the restart" "address=$keyboard .*state=open" "$out/status4.txt"
 expect "the mouse waits" "address=$mouse .*state=waiting" "$out/status4.txt"
+expect "the HOG mouse open by the auto-connect" "address=$hog .*state=open" "$out/status4.txt"
 
 # 6. The controller gone and back.
 stop_daemon
@@ -160,6 +180,7 @@ expect "the daemon saw the node go" "closed (lost" "$out/daemon-lost.log"
 sleep 3
 guest '/bin/bt status' > "$out/status5.txt"
 expect "the keyboard open on the controller's return" "address=$keyboard .*state=open" "$out/status5.txt"
+expect "the HOG mouse open on the controller's return" "address=$hog .*state=open" "$out/status5.txt"
 
 # 7. FORGET while open, then the mouse's (cleanup).
 guest "/bin/evdev-probe -b bluetooth -p $keyboard -t 5000 -r 10000 > /tmp/p005-kbd3.txt 2>&1 </dev/null & echo started" >/dev/null
@@ -171,6 +192,7 @@ expect "its node went" '^EVDEV gone$' "$out/keyboard3.txt"
 count=$(guest "ls $folder | grep -c $keyboard; true" | tail -1)
 [ "$count" = 0 ] && ok "its bond and record are gone" || fail "its bond and record are gone" "$count files"
 has "bt forget of the mouse" "$(guest "/bin/bt forget $mouse")" "BT FORGET result=ok"
+has "bt forget of the HOG mouse" "$(guest "/bin/bt forget $hog le-public")" "BT FORGET result=ok"
 count=$(guest "ls $folder | grep -c 'hid\$'; true" | tail -1)
 [ "$count" = 0 ] && ok "no HID record left" || fail "no HID record left" "$count records"
 
