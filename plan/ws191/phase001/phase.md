@@ -2,7 +2,7 @@
 
 # ws191-p001: 再生の音の stream の口の設計
 
-Status: in-progress（q895、P2。2026-10-08 夕 設計の第 1 版（[design.md](../design.md)、c9b8ccefa）と design-reviewer の review（blocking 3・should-fix 12・minor 12、下）。review の反映は未、次の世代が反映する）
+Status: in-progress（q895、P2。2026-10-08 夕 設計の第 1 版（c9b8ccefa）と design-reviewer の review（blocking 3・should-fix 12・minor 12、下）。2026-10-08 夜 P2 の新しい世代が review と午後の判断を反映した**第 2 版**（[design.md](../design.md)、§12 に対応表）。第 2 版の design-reviewer を起動した（結果は下の「第 2 版への review」に追記）。2026-10-08 夜 Q1 の割り込み（q900 BUG-266 が最優先）で区切った）
 Disposition: normal
 Parent: [WS191](../ws.md)
 
@@ -22,7 +22,7 @@ Parent: [WS191](../ws.md)
 - **libkeiland の口（KL_VERSION 72 の予定）**: `kl_audio_stream_open(options, &stream)`（stream ごとに自分の Wayland の接続を WAYLAND_DISPLAY で開く: libmedia のような窓の無い利用者と、別 thread からの利用のため。制御は stream の mutex の下の往復で同期）、`_close`、`_start`・`_stop`・`_flush`・`_drain`、`_write`（ring に、wire 無し、1 thread の書き手）、`_written`・`_read`・`_played(frames, time_ns)`、`_capacity`・`_rate`、`_fd`・`_dispatch`（drained・underrun・lost の event）。
 - **zedBSD の backend**: `kl_backend_audio_stream_*`（keiland-backend.h）、stream ごとに audiod への接続 1 本（今の client と同じ単位）、待たない（作成の答えの STREAM_CREATED と fd は tick で受けて ready を送る）。
 
-## design-reviewer の review（第 1 版へ、2026-10-08 夕、未反映）
+## design-reviewer の review（第 1 版へ、2026-10-08 夕、第 2 版で反映）
 
 blocking:
 - B-1 Linux・FreeBSD の ring（memfd）を client が `ftruncate` で縮めると、compositor の中の pump thread が SIGBUS で desktop ごと落ちる（audiod は sigsetjmp で受けている: userland/base/audiod/main.c 110〜115、mix.c 190〜199）。→ Linux は `memfd_create(MFD_ALLOW_SEALING)` と `F_SEAL_SHRINK|F_SEAL_GROW|F_SEAL_SEAL`、FreeBSD も memfd_create（13 以降）、pump は write_position を範囲で検べる（mix.c 207〜216 の形）。§4・§6 に書く。
@@ -49,10 +49,10 @@ minor: M-1 zedBSD の played_position は mix の時点の read_position と同�
 
 ## 残り（再開の時）
 
-0. 上の review を design.md に反映する（第 2 版）。ユーザーに聞き直す判断: H2（B-2、Linux の再生の経路の 3 案）、D4 の再評価（S-2）、p004 の受け入れ（B-3）。その後 Q1 に判定を頼む。
-
-
-design.md として書き上げる（A/V の同期の時計、audiod の再起動、i386 の sequence、Linux・FreeBSD の thread の起こし方と drain・underrun、host 試験の計画、Phase の受け入れ）→ design-reviewer → Q1 の判定。
+0. ~~review を design.md に反映（第 2 版）~~ 済み（2026-10-08 夜）。
+1. 第 2 版を design-reviewer で再 review し、blocking が 0 になるまで直す。
+2. Q1 に判定を頼む。新しい判断 H3（browser の音の経路、design.md §10）は Q1 経由でユーザーへ。
+3. 待たずに p002 へ（H3 は p003 の libmedia・libbrowser の部分だけに効く）。
 
 ## 判断（2026-10-08 午後）
 
@@ -60,3 +60,12 @@ design.md として書き上げる（A/V の同期の時計、audiod の再起�
 - **D4 の再評価（S-2）**: Q1 の判断: stream ごとに自分の Wayland の接続を持つ（libmedia の thread のため）を保つ。限りは compositor が接続の相手の資格（SO_PEERCRED の pid・uid）で数え、同じ pid の stream の本数に上限を置く。
 - **p004 の受け入れ（B-3）**: Q1 の判断: Linux・FreeBSD で build できる最小の試験の client（正弦波を鳴らす、libkeiland の audio stream だけを使う）を p004 に入れる。音の観測は QEMU の wav の audiodev か backend の書いた frame の数。
 - **置き場所と名前（2026-10-08 午後 ユーザー）**:「サウンドはlibkeiland-backendに入れてください。libkeilandのAPIはkl_audio_がいいです。」→ 音の出力（zedBSD の audiod、Linux の alsa-lib の dlopen、FreeBSD の OSS）は libkeiland-backend の中に置き、compositor の本体には置かない。libkeiland の公開の API の接頭は `kl_audio_`（`kl_system_audio_stream_*` などにしない）。
+- **H3（browser の音）**: Q1 の決定（2026-10-08 夜、ユーザー「ブラウザはベータ3に移します」）: (c)。libmedia は kl_audio_* を直に呼ばず出力の関数の表（media_set_audio_output）だけを持ち、videoplayer・music が kl_audio_* で埋める。browser は埋めない（音無し）、ベータ 3 で browser.h に足す。design.md D11・§10 に反映。
+
+## 区切り（2026-10-08 夜、q900 BUG-266 の割り込み）
+
+p002 の先行の WIP（未 build・未登録、Makefile の source 一覧に入れていない）:
+- `userland/desktop/libkeiland/audio/kl-audio-protocol.h`（新、§3・§4 の定数）
+- `userland/desktop/libkeiland-backend/keiland-backend.h` に stream の節（`struct kl_backend_audio_ring`・report・`kl_backend_audio_stream_*`・`_reap`）と `kl_backend_peer_pid`
+- `libkeiland-backend-zedbsd/audio-stream-zedbsd.c`（新、host の cc の -fsyntax-only は通る。style-check の残り: 517・566・599 の blank-after-brace、524 の CMSG_LEN の call-in-condition）、`peer-zedbsd.c`（新）、`libkeiland-backend-freebsd/peer-freebsd.c`（新）、`libkeiland-backend-linux/peer-linux.c` に `kl_backend_peer_pid`（Linux の keiland の build に入る）
+- 再開: 第 2 版の review の結果をここに記録 → blocking を直す → Q1 の判定 → p002 の残り（style の直し、sources.mk・Makefile.linux・Makefile.freebsd への登録、unsupported の stream、compositor の audio-stream.c、libkeiland の audio.c・keiland.h・exports、host 試験）。
