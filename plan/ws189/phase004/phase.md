@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws189-p004 -->
 # ws189-p004: Mail の作成の添付（multipart/mixed・base64、添付の一覧の UI）と drop の受け
 
-Status: in-progress（q892、P1、2026-10-08。2026-10-08 午後のユーザーの決定で WS143 p006（q896）を先に。p004 は q896 の後に再開: 残りは自己レビュー・AAT のシナリオ・T1 の依頼）
+Status: test-wait（q892、P1、2026-10-08 夕。実装・host 試験・自己レビュー・AAT のシナリオ済み、QEMU は T1 へ）
 Disposition: normal
 Parent: [WS189](../ws.md)
 Queue: q892（P1）
@@ -41,4 +41,13 @@ Design: [p001](../phase001/phase.md) §4.8。由来: 2026-10-08 ユーザーの�
 - `sh plan/ws189/tests/run-host-mail-attach.sh`: ok（multipart、ASCII と日本語の名前、base64 の bytes の一致、Mail 自身の `ml_mime_parse` で本文と 1 つ目の添付の名前、添付 0 は単一の part、17 個は EINVAL）。
 - 回帰の host 試験（変えた file を compile する物）: `run-host-mailer.sh` PASS、`run-host-notes-edit.sh` PASS、`run-pdfviewer-host.sh` ok、`run-host-pdfviewer-find.sh` PASS。
 - style-check（変えた file）: 新しい指摘 0。
-- 未実施: AAT `apps.mailer.attach-drop` のシナリオ（未作成）、QEMU（T1）、自己レビュー。
+- 未実施（2026-10-08 の時点）: AAT `apps.mailer.attach-drop` のシナリオ（未作成）、QEMU（T1）、自己レビュー。
+
+### 再開（2026-10-08 夕、q896 と ws189 F2〜F6 の後）
+
+- 自己レビュー: drop の data は libkeiland が NUL で終える（`kl_window_receive_drop`）ので uri-list の行の走査は安全。`file://`（host 無しか localhost）だけを
+  path にし、%XX を戻し、`\r\n` を落とす。作成中でない・問いのある時は 0 と答え、drop は finish 0。名前は 255 bytes までなので RFC 2231 の行（%XX で 3 倍）も
+  998 文字に収まる。添付の file は 25 MiB を越えると読まない、合計と 16 個は `ml_view_attach` が断る。直すべき点は見つからなかった。
+- AAT: `tests/scenarios/apps/mailer/attach-drop.md`（`apps.mailer.attach-drop`、active）: Attach... と chooser、Files からの file の drop、Photos からの画像の
+  drop、chip の x、送った message の multipart/mixed と base64 の中身（SHA-256）、作成していない時の refused。
+- 確認: `check-scenarios.py` PASS。build と host 試験は 2026-10-08 の記録のまま（その後の mailer の変更は無い）。

@@ -453,6 +453,7 @@ kwl_object_destroy(
 			server->click_surface = NULL;
 		if (server->click_docked == object)
 			server->click_docked = NULL;
+		kwl_title_tap_forget(&server->title_tap, object);
 		if (server->anim == object)
 			server->anim = NULL;
 		if (server->wiseview_current == object)
