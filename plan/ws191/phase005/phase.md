@@ -2,7 +2,7 @@
 
 # ws191-p005: 規約の全文の見直し
 
-Status: 見直し済み、Q1 の判定待ち
+Status: cleared（2026-10-09 Q1 の判定: P3（Haiku low）の 1da4f4cea、本体の file は style-check の指摘 0 を Q1 も確かめた、試験の file の書き方を直し、build 0・host 試験 PASS。制限: 本体は自動の検査の範囲で、全文の読みの深さは Haiku の範囲）
 Disposition: normal
 Parent: [WS191](../ws.md)
 Depends: p003・p004 cleared
