@@ -57,6 +57,7 @@ static uint64_t test_now = 1000000000U;
 int main(int argc, char **argv);
 static void test_frame(struct mu_view *view, struct kl_ui *ui, const struct kl_style *style);
 static void test_click(struct mu_view *view, struct kl_ui *ui, const struct kl_style *style, int x, int y, int twice);
+static void test_requests(struct mu_view *view, const char *name, unsigned action, unsigned expected);
 static void test_check(const char *name, const char *expected);
 static void test_request(struct mu_view *view, const char *name, unsigned action, long song);
 static int test_save(const struct mu_view *view, const struct kl_canvas *canvas, const char *prefix, const char *name);
@@ -153,6 +154,19 @@ main(
 	/* Next, in the bar. */
 	test_click(&view, ui, &style, TEST_MIDDLE + 52, TEST_BAR_Y, 0);
 	test_request(&view, "next", MU_ACTION_NEXT, 5);
+
+	/* Two Nexts in one frame are two requests, and so are two in two frames (ws177-p021). */
+	test_click(&view, ui, &style, TEST_MIDDLE + 52, TEST_BAR_Y, 0);
+	test_request(&view, "next-alone", MU_ACTION_NEXT, 5);
+	test_now += 1000000U;
+	(void)kl_ui_pointer_button(ui, 1, test_now);
+	(void)kl_ui_pointer_button(ui, 0, test_now + 20000U);
+	(void)kl_ui_pointer_button(ui, 1, test_now + 60000U);
+	(void)kl_ui_pointer_button(ui, 0, test_now + 80000U);
+	test_frame(&view, ui, &style);
+	test_requests(&view, "next-twice-one-frame", MU_ACTION_NEXT, 2U);
+	test_click(&view, ui, &style, TEST_MIDDLE + 52, TEST_BAR_Y, 1);
+	test_requests(&view, "next-twice-two-frames", MU_ACTION_NEXT, 2U);
 
 	/* The play button pauses. */
 	test_click(&view, ui, &style, TEST_MIDDLE, TEST_BAR_Y, 0);
@@ -331,6 +345,45 @@ test_click(
 	(void)kl_ui_pointer_button(ui, 1, test_now);
 	(void)kl_ui_pointer_button(ui, 0, test_now + 50000U);
 	test_frame(view, ui, style);
+}
+
+/*
+ * Checks that the view asked for one action a number of times, and nothing else.
+ */
+static void
+test_requests(
+	struct mu_view *view,
+	const char *name,
+	unsigned action,
+	unsigned expected)
+{
+	struct mu_request request;
+	unsigned found;
+	unsigned other;
+	int taken;
+
+	/* Counts the requests of the action, and any other. */
+	found = 0U;
+	other = 0U;
+	for (;;) {
+		taken = mu_view_take_request(view, &request);
+		if (!taken)
+			break;
+		if (request.action == action)
+			found++;
+		else
+			other++;
+	}
+
+	/* The count asked for, and nothing else. */
+	if (found != expected || other != 0U) {
+		printf("FAIL %s expected %u of action=%u, got %u and %u other\n", name, expected, action, found, other);
+		test_failures++;
+		return;
+	}
+	printf("PASS %s\n", name);
+	test_log_length = 0;
+	test_log[0] = '\0';
 }
 
 /*

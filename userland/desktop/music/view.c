@@ -53,6 +53,12 @@
 #define VIEW_SLIDER_US		400000U
 #define VIEW_SEEK_US		150000U
 
+/*
+ * How long before a double click its first click may have been counted
+ * (the input's 400 ms between the clicks, and a frame's lateness).
+ */
+#define VIEW_DOUBLE_US		450000U
+
 /* How far Left and Right go (s). */
 #define VIEW_STEP		10.0
 
@@ -90,7 +96,7 @@ static void view_content(struct mu_view *view, struct kl_ui *ui, const struct kl
 static void view_header(struct mu_view *view, struct kl_ui *ui, const struct kl_style *style, const struct kl_rect *area, const size_t *indices, size_t count, uint64_t now_us);
 static void view_song_row(const struct mu_view *view, const struct kl_style *style, size_t song, size_t place, const struct kl_rect *row, unsigned hit);
 static void view_bar(struct mu_view *view, struct kl_ui *ui, const struct kl_style *style, const struct kl_rect *area, uint64_t now_us);
-static int view_round_button(struct kl_ui *ui, const struct kl_style *style, uint32_t id, int cx, int cy, int radius, int filled);
+static unsigned view_round_button(struct mu_view *view, struct kl_ui *ui, const struct kl_style *style, uint32_t id, int cx, int cy, int radius, int filled, uint64_t now_us);
 static void view_glyph_play(struct kl_canvas *canvas, float cx, float cy, float size, kl_color color);
 static void view_glyph_pause(struct kl_canvas *canvas, float cx, float cy, float size, kl_color color);
 static void view_glyph_skip(struct kl_canvas *canvas, float cx, float cy, float size, int forward, kl_color color);
@@ -890,7 +896,8 @@ view_bar(
 	char remaining[24];
 	size_t count;
 	double length;
-	int clicked;
+	unsigned presses;
+	unsigned press;
 	int changed;
 	int middle;
 	int width;
@@ -905,22 +912,22 @@ view_bar(
 		kl_canvas_fill(style->canvas, &edge, style->theme->separator);
 	}
 
-	/* The three buttons in the middle, over the position. */
+	/* The three buttons in the middle, over the position; each press is a request, two in one frame as well. */
 	middle = area->x + area->width / 2;
-	clicked = view_round_button(ui, style, VIEW_ID_PREVIOUS, middle - 52, area->y + 28, 16, 0);
+	presses = view_round_button(view, ui, style, VIEW_ID_PREVIOUS, middle - 52, area->y + 28, 16, 0, now_us);
 	view_glyph_skip(style->canvas, (float)(middle - 52), (float)area->y + 28.0f, 14.0f, 0, style->theme->text);
-	if (clicked)
+	for (press = 0U; press < presses; press++)
 		mu_view_action(view, MU_ACTION_PREVIOUS, now_us);
-	clicked = view_round_button(ui, style, VIEW_ID_PLAY, middle, area->y + 28, 20, 1);
+	presses = view_round_button(view, ui, style, VIEW_ID_PLAY, middle, area->y + 28, 20, 1, now_us);
 	if (view->state == MU_PLAYING)
 		view_glyph_pause(style->canvas, (float)middle, (float)area->y + 28.0f, 16.0f, style->theme->accent_ink);
 	else
 		view_glyph_play(style->canvas, (float)middle + 2.0f, (float)area->y + 28.0f, 16.0f, style->theme->accent_ink);
-	if (clicked)
+	for (press = 0U; press < presses; press++)
 		mu_view_action(view, MU_ACTION_PLAY, now_us);
-	clicked = view_round_button(ui, style, VIEW_ID_NEXT, middle + 52, area->y + 28, 16, 0);
+	presses = view_round_button(view, ui, style, VIEW_ID_NEXT, middle + 52, area->y + 28, 16, 0, now_us);
 	view_glyph_skip(style->canvas, (float)(middle + 52), (float)area->y + 28.0f, 14.0f, 1, style->theme->text);
-	if (clicked)
+	for (press = 0U; press < presses; press++)
 		mu_view_action(view, MU_ACTION_NEXT, now_us);
 
 	/* The position follows the song, unless the user just moved it. */
@@ -983,18 +990,26 @@ view_bar(
 	(void)kl_text_draw_fit(style->text, style->canvas, left + 68, area->y + 56, songs[view->playing].artist, VIEW_TEXT_SMALL, 0, words, style->theme->text_secondary);
 }
 
-/* Draws a round button (filled in the accent, or a ground under the pointer); reports a click. */
-static int
+/*
+ * Draws a round button of the bar and reports how many times it was
+ * pressed since the last frame: a click is one, and a double click is two
+ * unless its first click was counted just before (both clicks came within
+ * one frame, which the input keeps as one click, ws177-p021).
+ */
+static unsigned
 view_round_button(
+	struct mu_view *view,
 	struct kl_ui *ui,
 	const struct kl_style *style,
 	uint32_t id,
 	int cx,
 	int cy,
 	int radius,
-	int filled)
+	int filled,
+	uint64_t now_us)
 {
 	struct kl_rect rect;
+	unsigned presses;
 	unsigned hit;
 
 	/* Its input. */
@@ -1010,8 +1025,27 @@ view_round_button(
 	else if ((hit & KL_HIT_HOT) != 0U)
 		kl_canvas_circle(style->canvas, (float)cx, (float)cy, (float)radius, style->theme->hover);
 
-	/* Clicked. */
-	return (hit & KL_HIT_CLICKED) != 0U;
+	/* Not clicked. */
+	if ((hit & KL_HIT_CLICKED) == 0U)
+		return 0U;
+
+	/* A click, or a double click whose first click came in this frame as well. */
+	presses = 1U;
+	if ((hit & KL_HIT_DOUBLE) != 0U)
+		presses = 2U;
+
+	/* A double click whose first click was counted at a frame just before is one more press. */
+	if (presses == 2U &&
+	    view->bar_pressed == id &&
+	    now_us - view->bar_pressed_us <= VIEW_DOUBLE_US)
+		presses = 1U;
+
+	/* Remembered, for the second click of a double click in a later frame. */
+	view->bar_pressed = id;
+	view->bar_pressed_us = now_us;
+
+	/* Succeeded: the presses since the last frame. */
+	return presses;
 }
 
 /* Draws the play triangle of a size centred on a point. */

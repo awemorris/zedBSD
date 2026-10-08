@@ -162,6 +162,15 @@ struct mu_view {
 	size_t *shown;
 	size_t shown_room;
 	int cover_told;
+
+	/*
+	 * The bar's button last pressed (its widget id, 0 for none) and the
+	 * frame's time it was counted at: a double click on a button whose
+	 * first click was not counted just before came within one frame, which
+	 * the input keeps as one click, and is two presses (ws177-p021).
+	 */
+	uint32_t bar_pressed;
+	uint64_t bar_pressed_us;
 };
 
 /* The tags of a file (tags.c). */
