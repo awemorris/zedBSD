@@ -558,6 +558,7 @@ struct kl_backend_bluetooth;
 #define KL_BACKEND_BT_ADDRESS_MAX	18U
 #define KL_BACKEND_BT_NAME_MAX		64U
 #define KL_BACKEND_BT_REASON_MAX	32U
+#define KL_BACKEND_BT_USER_MAX		32U
 
 /* The controller's state. */
 #define KL_BACKEND_BT_ABSENT		0U	/* no service to ask */
@@ -598,7 +599,7 @@ struct kl_backend_bluetooth;
 #define KL_BACKEND_BT_ASK_CONFIRM	1U	/* the same number on both sides? (yes or no) */
 #define KL_BACKEND_BT_ASK_CONSENT	2U	/* pair with it at all? (yes or no) */
 #define KL_BACKEND_BT_ASK_PASSKEY	3U	/* type this number on the device (no answer) */
-#define KL_BACKEND_BT_ASK_END		4U	/* the question asked before is over */
+#define KL_BACKEND_BT_ASK_END		4U	/* the question of the same id is over */
 
 /* What kl_backend_bluetooth_update found changed (bits). */
 #define KL_BACKEND_BT_CHANGED_STATE	1U
@@ -609,7 +610,10 @@ struct kl_backend_bluetooth;
 /*
  * The state as last read: whether the service answers, the controller's
  * state, whether it scans and whether a pairing runs, what the service can
- * do (KL_BACKEND_BT_CAN_*), and the controller's address and name.
+ * do (KL_BACKEND_BT_CAN_*), whether the user's switch is on (it holds when
+ * there is no controller), whether this answers the pairings' questions
+ * (0: another program of the user does), and the controller's address and
+ * name.
  */
 struct kl_backend_bluetooth_state {
 	unsigned reachable;
@@ -617,6 +621,8 @@ struct kl_backend_bluetooth_state {
 	unsigned scanning;
 	unsigned pairing;
 	unsigned features;
+	unsigned power;
+	unsigned agent;
 	char address[KL_BACKEND_BT_ADDRESS_MAX];
 	char name[KL_BACKEND_BT_NAME_MAX];
 };
@@ -673,14 +679,34 @@ int kl_backend_bluetooth_request(struct kl_backend_bluetooth *bluetooth, unsigne
 int kl_backend_bluetooth_take_result(struct kl_backend_bluetooth *bluetooth, uint32_t *id, int *error, char *reason, size_t size);
 
 /*
- * Takes the oldest question of a pairing (KL_BACKEND_BT_ASK_*), its number
- * (CONFIRM and PASSKEY), and the device being paired.  Returns 1 with one,
- * 0 when none waits.
+ * One question of a pairing: its id (an ASK_END names the id it ends),
+ * kind (KL_BACKEND_BT_ASK_*), number (CONFIRM and PASSKEY), the device
+ * being paired (address, type, name as known), and who started the
+ * pairing (the user's name, and whether it is this program's own).
  */
-int kl_backend_bluetooth_take_question(struct kl_backend_bluetooth *bluetooth, unsigned *kind, uint32_t *number, char *address, char *name, size_t name_size);
+struct kl_backend_bluetooth_question {
+	uint32_t id;
+	unsigned kind;
+	uint32_t number;
+	char address[KL_BACKEND_BT_ADDRESS_MAX];
+	unsigned type;
+	char name[KL_BACKEND_BT_NAME_MAX];
+	char user[KL_BACKEND_BT_USER_MAX];
+	unsigned own;
+};
 
-/* Answers the question asked last (CONFIRM and CONSENT): 1 yes, 0 no.  Returns 0, or ENOENT when none is asked. */
-int kl_backend_bluetooth_answer(struct kl_backend_bluetooth *bluetooth, unsigned yes);
+/* Takes the oldest question.  Returns 1 with one, 0 when none waits. */
+int kl_backend_bluetooth_take_question(struct kl_backend_bluetooth *bluetooth, struct kl_backend_bluetooth_question *question);
+
+/*
+ * Answers the question of an id (CONFIRM and CONSENT): 1 yes, 0 no.
+ * Returns 0, or ENOENT when that question is not the one asked now (it
+ * ended, or a newer one came).
+ */
+int kl_backend_bluetooth_answer(struct kl_backend_bluetooth *bluetooth, uint32_t id, unsigned yes);
+
+/* Gives up this program's own pairing going on (its connection closes; the service stops it).  Returns 0, or ENOENT. */
+int kl_backend_bluetooth_cancel(struct kl_backend_bluetooth *bluetooth);
 
 /*
  * The printers (ws145-p003, plan/ws145/design.md section 4): the user's

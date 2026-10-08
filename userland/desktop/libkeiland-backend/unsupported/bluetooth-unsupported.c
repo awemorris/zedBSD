@@ -170,19 +170,11 @@ kl_backend_bluetooth_take_result(
 int
 kl_backend_bluetooth_take_question(
 	struct kl_backend_bluetooth *bluetooth,
-	unsigned *kind,
-	uint32_t *number,
-	char *address,
-	char *name,
-	size_t name_size)
+	struct kl_backend_bluetooth_question *question)
 {
 	/* None. */
 	(void)bluetooth;
-	(void)kind;
-	(void)number;
-	(void)address;
-	(void)name;
-	(void)name_size;
+	(void)question;
 	return 0;
 }
 
@@ -192,10 +184,24 @@ kl_backend_bluetooth_take_question(
 int
 kl_backend_bluetooth_answer(
 	struct kl_backend_bluetooth *bluetooth,
+	uint32_t id,
 	unsigned yes)
 {
 	/* None asked. */
 	(void)bluetooth;
+	(void)id;
 	(void)yes;
+	return ENOENT;
+}
+
+/*
+ * Has no pairing to give up.
+ */
+int
+kl_backend_bluetooth_cancel(
+	struct kl_backend_bluetooth *bluetooth)
+{
+	/* None. */
+	(void)bluetooth;
 	return ENOENT;
 }
