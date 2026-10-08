@@ -475,8 +475,13 @@ static void
 shell_text_input(
 	struct shell_state *state)
 {
+	char text[KL_TEXT_SURROUNDING_MAX];
 	float caret[4];
+	size_t cursor;
+	unsigned hints;
+	int purpose;
 	int wanted;
+	int known;
 
 	/* On while the focus is in a field or a textarea, off otherwise. */
 	wanted = browser_view_text_target(state->view, caret);
@@ -486,6 +491,16 @@ shell_text_input(
 
 	/* Where its caret is, for the candidates and the on-screen keyboard. */
 	kl_window_text_cursor(state->window.kui, (int)caret[0], (int)caret[1], (int)caret[2], (int)caret[3]);
+
+	/*
+	 * Its text around the caret and what it is for (ws177-p019): the
+	 * browser's purposes and hints are text-input-v3's numbers, as
+	 * libkeiland's are.
+	 */
+	known = browser_view_text_context(state->view, text, sizeof(text), &cursor, &purpose, &hints);
+	if (!known)
+		return;
+	kl_window_text_context(state->window.kui, text, cursor, cursor, hints, (unsigned)purpose);
 }
 
 /*

@@ -84,6 +84,7 @@ static struct dom_element *form_editable(struct page *page);
 static int form_is_text(int kind);
 static int form_edit_of(const char *key);
 static int form_insert(struct page *page, struct dom_element *element, const char *text);
+static int form_compose_finish(struct page *page, struct dom_element *element);
 static int form_edit(struct page *page, struct dom_element *element, int edit);
 static int form_changed(struct page *page, struct dom_element *element);
 static size_t form_step_back(const struct wb_units *units, size_t offset);
@@ -360,6 +361,11 @@ page_place_caret(
 	element = form_editable(page);
 	if (element == NULL)
 		return 0;
+
+	/* What an input method was composing goes into the value before the caret moves (ws177-p019). */
+	error = form_compose_finish(page, element);
+	if (error != 0)
+		return error;
 	kind = dom_control_kind(element);
 	if (kind != DOM_CONTROL_TEXT && kind != DOM_CONTROL_PASSWORD)
 		return 0;
@@ -507,21 +513,123 @@ page_compose_element(
 }
 
 /*
+ * Gives what an input method reads around the focused control's caret
+ * (ws177-p019): its value as UTF-8 into text, the caret's byte offset in
+ * it, and what the control is for (PAGE_PURPOSE_*: by its inputmode, else
+ * by its type) with its hints (a textarea is PAGE_HINT_MULTILINE).
+ * Returns 1 with them, 0 when the focus takes no input method's text, or
+ * a negative errno value.
+ */
+int
+page_compose_context(
+	struct page *page,
+	struct wb_buffer *text,
+	size_t *caret,
+	int *purpose,
+	unsigned *hints)
+{
+	static const char *const modes[] = { "numeric", "decimal", "tel", "email", "url" };
+	static const int mode_purposes[] = { PAGE_PURPOSE_DIGITS, PAGE_PURPOSE_NUMBER, PAGE_PURPOSE_PHONE, PAGE_PURPOSE_EMAIL, PAGE_PURPOSE_URL };
+	static const char *const types[] = { "number", "tel", "email", "url" };
+	static const int type_purposes[] = { PAGE_PURPOSE_NUMBER, PAGE_PURPOSE_PHONE, PAGE_PURPOSE_EMAIL, PAGE_PURPOSE_URL };
+	struct dom_element *element;
+	struct dom_control *control;
+	struct vm_string *mode;
+	struct vm_string *type;
+	struct wb_units value;
+	size_t before;
+	size_t index;
+	int kind;
+	int same;
+	int error;
+
+	/* The control an input method composes in. */
+	*caret = 0;
+	*purpose = PAGE_PURPOSE_NORMAL;
+	*hints = 0U;
+	element = page_compose_element(page);
+	if (element == NULL)
+		return 0;
+	control = element->control;
+	if (control == NULL)
+		return 0;
+
+	/* Its value (its own, or its default before it was changed). */
+	wb_units_init(&value);
+	error = dom_control_value(element, &value);
+	if (error != 0) {
+		wb_units_release(&value);
+		return -error;
+	}
+
+	/* Before the caret, then the rest, as UTF-8. */
+	before = control->caret;
+	if (before > value.length)
+		before = value.length;
+	error = wb_units_to_utf8(value.data, before, text);
+	if (error == 0) {
+		*caret = text->length;
+		error = wb_units_to_utf8(value.data + before, value.length - before, text);
+	}
+
+	/* The value is not needed after. */
+	wb_units_release(&value);
+	if (error != 0)
+		return -error;
+
+	/* A textarea is of several lines. */
+	kind = dom_control_kind(element);
+	if (kind == DOM_CONTROL_TEXTAREA)
+		*hints |= PAGE_HINT_MULTILINE;
+
+	/* Its inputmode, which says it best. */
+	mode = dom_attribute_ascii(element, "inputmode");
+	if (mode != NULL) {
+		for (index = 0; index < sizeof(modes) / sizeof(modes[0]); index++) {
+			same = form_equal_folded(mode, modes[index]);
+			if (same) {
+				*purpose = mode_purposes[index];
+				return 1;
+			}
+		}
+	}
+
+	/* Else its type. */
+	type = dom_attribute_ascii(element, "type");
+	if (type != NULL) {
+		for (index = 0; index < sizeof(types) / sizeof(types[0]); index++) {
+			same = form_equal_folded(type, types[index]);
+			if (same) {
+				*purpose = type_purposes[index];
+				return 1;
+			}
+		}
+	}
+
+	/* Succeeded: plain text. */
+	return 1;
+}
+
+/*
  * Shows text an input method is composing at the focused control's caret
  * (an empty text ends the composing), with its cursor cursor bytes into it
- * (past the end when negative).  Line breaks are dropped; the value does
- * not change and no event fires.
+ * (past the end when negative) and its chosen part from begin bytes to the
+ * cursor (none when begin is negative or not before the cursor;
+ * ws177-p019).  Line breaks are dropped; the value does not change and no
+ * event fires.
  */
 int
 page_compose(
 	struct page *page,
 	const char *text,
+	int begin,
 	int cursor)
 {
 	struct dom_element *element;
 	struct dom_control *control;
 	struct wb_units composed;
 	struct wb_units before;
+	struct wb_units chosen;
 	size_t length;
 	size_t index;
 	size_t kept;
@@ -574,11 +682,23 @@ page_compose(
 		return error;
 	}
 
-	/* The cursor, which a dropped line break may have left past the end; the control is painted again with both. */
+	/* The cursor, which a dropped line break may have left past the end. */
 	control->preedit_cursor = before.length;
 	if (control->preedit_cursor > control->preedit.length)
 		control->preedit_cursor = control->preedit.length;
 	wb_units_release(&before);
+
+	/* The chosen part's start in units (at the cursor when there is none). */
+	control->preedit_begin = control->preedit_cursor;
+	if (begin >= 0 && begin < cursor) {
+		wb_units_init(&chosen);
+		error = wb_utf8_to_units((const unsigned char *)text, (size_t)begin, &chosen);
+		if (error == 0 && chosen.length < control->preedit_cursor)
+			control->preedit_begin = chosen.length;
+		wb_units_release(&chosen);
+	}
+
+	/* The control is painted again with them. */
 	page->focus_generation++;
 
 	/* Succeeded: the composed text is shown at the caret. */
@@ -615,6 +735,7 @@ page_commit_text(
 	if (control->preedit.length != 0) {
 		wb_units_clear(&control->preedit);
 		control->preedit_cursor = 0;
+		control->preedit_begin = 0;
 		page->focus_generation++;
 	}
 
@@ -659,7 +780,47 @@ page_compose_end(
 	/* The composed text goes, and the control is painted again without it. */
 	wb_units_clear(&element->control->preedit);
 	element->control->preedit_cursor = 0;
+	element->control->preedit_begin = 0;
 	page->focus_generation++;
+}
+
+/*
+ * Ends what an input method was composing in a control by putting it into
+ * the value at the caret, as typing would (input fires); nothing when it
+ * composes nothing.
+ */
+static int
+form_compose_finish(
+	struct page *page,
+	struct dom_element *element)
+{
+	struct wb_buffer composed;
+	int error;
+
+	/* Nothing composed. */
+	if (element->control == NULL || element->control->preedit.length == 0)
+		return 0;
+
+	/* The composed text as UTF-8, and it goes from the control. */
+	wb_buffer_init(&composed);
+	error = wb_units_to_utf8(element->control->preedit.data, element->control->preedit.length, &composed);
+	wb_units_clear(&element->control->preedit);
+	element->control->preedit_cursor = 0;
+	element->control->preedit_begin = 0;
+	page->focus_generation++;
+	if (error != 0) {
+		wb_buffer_release(&composed);
+		return error;
+	}
+
+	/* Into the value, like typing. */
+	error = form_insert(page, element, wb_buffer_string(&composed));
+	wb_buffer_release(&composed);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the composed text is in the value. */
+	return 0;
 }
 
 /* Finds the focused element when it is a text control that takes typing (NULL otherwise). */

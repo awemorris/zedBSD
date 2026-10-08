@@ -26,8 +26,14 @@
 
 #include <keiland/keiland.h>
 
-/* How many descriptors of the network the main loop polls at most besides the compositor's. */
-#define SHELL_NET_FDS		64U
+/*
+ * How many descriptors of the network the main loop polls at most besides
+ * the compositor's (ws177-p019: more than the application watches, the
+ * rest polled by the shell itself), and how many of them the application
+ * watches at most (libkeiland's own limit).
+ */
+#define SHELL_NET_FDS		256U
+#define SHELL_WATCHED_MAX	KL_APP_FDS_MAX
 
 /* How many inputs wait for the main loop at most. */
 #define SHELL_WINDOW_EVENTS	256U
@@ -128,9 +134,14 @@ struct shell_window {
 	int pointer_x;
 	int pointer_y;
 
-	/* The network's descriptors the application watches now. */
-	int watched[SHELL_NET_FDS];
+	/*
+	 * The network's descriptors the application watches now, and how many
+	 * of the last round's it could not watch (polled by the shell itself;
+	 * the log tells when that number changes).
+	 */
+	int watched[SHELL_WATCHED_MAX];
 	unsigned watched_count;
+	size_t unwatched_count;
 
 	/* The titlebar that hears its controls' inputs (NULL until it opens). */
 	struct shell_titlebar *titlebar;

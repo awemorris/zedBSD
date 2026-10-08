@@ -37,6 +37,8 @@ static void text_delete(void *data, struct zwp_text_input_v3 *input, uint32_t be
 static void text_done(void *data, struct zwp_text_input_v3 *input, uint32_t serial);
 static void text_state(struct kl_window *window);
 static void text_copy(char *out, const char *text);
+static void text_send_context(struct kl_window *window);
+static size_t text_cut(const char *text, size_t *cursor, char *part, size_t size, size_t *part_length);
 
 /* The text input's events. */
 static const struct zwp_text_input_v3_listener text_listener = {
@@ -145,6 +147,67 @@ kl_window_text_cursor(
 	if (!window->text_enabled || window->text_input == NULL)
 		return;
 	zwp_text_input_v3_set_cursor_rectangle(window->text_input, x, y, width, height);
+	zwp_text_input_v3_commit(window->text_input);
+	window->text_commits++;
+}
+
+/*
+ * Tells what an input method reads around the caret: the field's text (NULL
+ * for none; cut around the caret when it is too long), the caret's and the
+ * anchor's byte offsets, the hints and the purpose; sent when it changes.
+ */
+void
+kl_window_text_context(
+	struct kl_window *window,
+	const char *text,
+	size_t cursor,
+	size_t anchor,
+	unsigned hint,
+	unsigned purpose)
+{
+	char part[KL_TEXT_SURROUNDING_MAX];
+	size_t part_length;
+	size_t start;
+	int same;
+
+	/* The part of the text around the caret that fits (none without a text). */
+	part[0] = '\0';
+	part_length = 0;
+	start = 0;
+	if (text != NULL) {
+		start = text_cut(text, &cursor, part, sizeof(part), &part_length);
+	} else {
+		cursor = 0;
+	}
+
+	/* The offsets in the part (an anchor outside it is at the caret). */
+	if (anchor < start || anchor - start > part_length) {
+		anchor = cursor;
+	} else {
+		anchor -= start;
+	}
+
+	/* The same as before: nothing to say. */
+	same = strcmp(part, window->text_surrounding);
+	if (window->text_context_set == (text != NULL) && same == 0 &&
+	    window->text_surrounding_cursor == (uint32_t)cursor &&
+	    window->text_surrounding_anchor == (uint32_t)anchor &&
+	    window->text_hint == hint &&
+	    window->text_purpose == purpose)
+		return;
+
+	/* Kept for each time the text input is enabled. */
+	window->text_context_set = text != NULL;
+	memcpy(window->text_surrounding, part, sizeof(part));
+	window->text_surrounding_cursor = (uint32_t)cursor;
+	window->text_surrounding_anchor = (uint32_t)anchor;
+	window->text_hint = hint;
+	window->text_purpose = purpose;
+
+	/* Sent and committed while enabled. */
+	if (!window->text_enabled || window->text_input == NULL)
+		return;
+	text_send_context(window);
 	zwp_text_input_v3_commit(window->text_input);
 	window->text_commits++;
 }
@@ -306,10 +369,10 @@ text_state(
 		return;
 	window->text_enabled = enabled;
 
-	/* Enabled: plain text, and where the caret is. */
+	/* Enabled: what the field is (and its text), and where the caret is. */
 	if (enabled) {
 		zwp_text_input_v3_enable(window->text_input);
-		zwp_text_input_v3_set_content_type(window->text_input, ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE, ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL);
+		text_send_context(window);
 		zwp_text_input_v3_set_cursor_rectangle(window->text_input, window->text_cursor[0], window->text_cursor[1], window->text_cursor[2], window->text_cursor[3]);
 	} else {
 		zwp_text_input_v3_disable(window->text_input);
@@ -429,4 +492,66 @@ kl_ui_window_text(
 
 	/* Where its caret is, for the candidates and the on-screen keyboard. */
 	kl_window_text_cursor(window, caret.x, caret.y, caret.width, caret.height);
+}
+
+/* Sends the field's text around the caret (when told) and what the field is, for the next commit. */
+static void
+text_send_context(
+	struct kl_window *window)
+{
+	/* The text around the caret. */
+	if (window->text_context_set)
+		zwp_text_input_v3_set_surrounding_text(window->text_input, window->text_surrounding, (int32_t)window->text_surrounding_cursor, (int32_t)window->text_surrounding_anchor);
+
+	/* The hints and the purpose (none and normal until the application tells them). */
+	zwp_text_input_v3_set_content_type(window->text_input, window->text_hint, window->text_purpose);
+}
+
+/*
+ * Copies the part of a text around its caret that fits a room, cut at
+ * characters' starts: from up to half the room before the caret.  The
+ * caret becomes its offset in the part.  Returns where the part starts in
+ * the text.
+ */
+static size_t
+text_cut(
+	const char *text,
+	size_t *cursor,
+	char *part,
+	size_t size,
+	size_t *part_length)
+{
+	size_t length;
+	size_t start;
+	size_t room;
+
+	/* The whole text, and the caret within it. */
+	length = strlen(text);
+	room = size - 1U;
+	if (*cursor > length)
+		*cursor = length;
+
+	/* Too long: the part around the caret, at characters' starts. */
+	start = 0;
+	if (length > room) {
+		if (*cursor > room / 2U)
+			start = *cursor - room / 2U;
+		if (start + room > length)
+			start = length - room;
+		while (start < *cursor && ((unsigned char)text[start] & 0xc0U) == 0x80U)
+			start++;
+		length = start + room;
+		while (length > *cursor && ((unsigned char)text[length] & 0xc0U) == 0x80U)
+			length--;
+		length -= start;
+	}
+
+	/* The part, and the caret in it. */
+	memcpy(part, text + start, length);
+	part[length] = '\0';
+	*part_length = length;
+	*cursor -= start;
+
+	/* Where it starts. */
+	return start;
 }

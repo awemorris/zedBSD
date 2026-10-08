@@ -521,6 +521,11 @@ dom_input_set_value(
 	control->caret = length;
 	wb_units_release(&previous);
 
+	/* A script's value ends what an input method was composing (ws177-p019). */
+	wb_units_clear(&control->preedit);
+	control->preedit_cursor = 0;
+	control->preedit_begin = 0;
+
 	/* Painting and submission must observe a script's new dirty text value. */
 	element->node.document->generation++;
 

@@ -1806,6 +1806,7 @@ list_preedit_underline(
 {
 	layout_unit into;
 	layout_unit width;
+	layout_unit start;
 	int error;
 
 	/* How far the cursor is into the composed text, and how wide the text is. */
@@ -1822,6 +1823,18 @@ list_preedit_underline(
 
 	/* The line under it. */
 	list_rect(walk, caret_x - into, baseline + LAYOUT_UNIT, width, LAYOUT_UNIT, color);
+
+	/* The chosen part (an input method's clause), under a line three times as thick (ws177-p019). */
+	if (control->preedit_begin >= control->preedit_cursor)
+		return;
+	error = layout_units_width(walk->text, font, control->preedit.data, control->preedit_begin, &start);
+	if (error != 0) {
+		walk->error = error;
+		return;
+	}
+
+	/* Its line, from its start to the cursor. */
+	list_rect(walk, caret_x - into + start, baseline + LAYOUT_UNIT, into - start, 3 * LAYOUT_UNIT, color);
 }
 
 /* Picks the font a style draws text with (as the layout picks it). */

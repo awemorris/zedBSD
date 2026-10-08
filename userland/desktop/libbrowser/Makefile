@@ -120,6 +120,7 @@ LIBBROWSER_SOURCES := $(LIBBROWSER_DIR)/base/arena.c \
 	$(LIBBROWSER_DIR)/bind/submit.c \
 	$(LIBBROWSER_DIR)/bind/html-reflection.c \
 	$(LIBBROWSER_DIR)/bind/html-input.c \
+	$(LIBBROWSER_DIR)/bind/html-textarea.c \
 	$(LIBBROWSER_DIR)/bind/text.c \
 	$(LIBBROWSER_DIR)/bind/xml.c \
 	$(LIBBROWSER_DIR)/bind/document.c \

@@ -1189,6 +1189,77 @@ browser_view_focus_field(
 }
 
 /*
+ * Gives what an input method reads around the caret: the focused
+ * control's value (cut around the caret to the room), the caret's byte
+ * offset, its purpose and its hints.  Returns 1 with them, 0 when the
+ * focus takes no text or there was no memory.
+ */
+int
+browser_view_text_context(
+	struct browser_view *view,
+	char *text,
+	size_t size,
+	size_t *cursor,
+	int *purpose,
+	unsigned *hints)
+{
+	struct wb_buffer value;
+	size_t caret;
+	size_t start;
+	size_t length;
+	int page_purpose;
+	unsigned page_hints;
+	int found;
+
+	/* Nothing yet. */
+	*cursor = 0;
+	*purpose = BROWSER_TEXT_PURPOSE_NORMAL;
+	*hints = 0U;
+	if (size != 0U)
+		text[0] = '\0';
+	if (view->page == NULL || size == 0U)
+		return 0;
+
+	/* The page's control. */
+	wb_buffer_init(&value);
+	found = page_compose_context(view->page, &value, &caret, &page_purpose, &page_hints);
+	if (found != 1) {
+		wb_buffer_release(&value);
+		return 0;
+	}
+
+	/* The part around the caret that fits: from up to half the room before it, at a character's start. */
+	start = 0;
+	length = value.length;
+	if (length > size - 1U) {
+		if (caret > (size - 1U) / 2U)
+			start = caret - (size - 1U) / 2U;
+		if (start + size - 1U > length)
+			start = length - (size - 1U);
+		while (start < caret && (value.data[start] & 0xc0U) == 0x80U)
+			start++;
+		length = start + size - 1U;
+		if (length > value.length)
+			length = value.length;
+		while (length > caret && length < value.length && (value.data[length] & 0xc0U) == 0x80U)
+			length--;
+		length -= start;
+	}
+
+	/* Given to the program. */
+	if (length != 0U)
+		memcpy(text, value.data + start, length);
+	text[length] = '\0';
+	*cursor = caret - start;
+	*purpose = page_purpose;
+	*hints = page_hints;
+	wb_buffer_release(&value);
+
+	/* Succeeded: the focus takes text. */
+	return 1;
+}
+
+/*
  * Tells whether the focused element takes an input method's text: a text
  * field or a textarea that takes typing (a password field does not).
  * caret gets the caret's rectangle in the view's pixels as the last
@@ -1251,17 +1322,19 @@ browser_view_compose(
 	if (view->page == NULL)
 		return 0;
 
-	/* The cursor: its end, its begin, or none (the text's end). */
+	/* The cursor: its end, its begin, or none (the text's end); the chosen part runs from begin to end when both are given. */
 	cursor = end;
-	if (cursor < 0)
+	if (cursor < 0) {
 		cursor = begin;
+		begin = -1;
+	}
 
 	/* A missing text ends the composing. */
 	if (preedit == NULL)
 		preedit = "";
 
 	/* The control shows it, drawn again. */
-	error = page_compose(view->page, preedit, cursor);
+	error = page_compose(view->page, preedit, begin, cursor);
 	if (error != 0)
 		return error;
 	view_changed(view);
