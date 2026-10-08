@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Objectives: O2
 Parent: [Master](../master.md)
 Focused goal: fg019（ベータ2）
-Queue: なし（WS189 の drag の後、2026-10-08 ユーザー）
+Queue: q899（P1、2026-10-08 午後、WS189 の drag の後）
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-08 ユーザー）

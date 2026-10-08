@@ -55,6 +55,7 @@
 #include "sleep-rules.h"
 #include "super-tap.h"
 #include "plane.h"
+#include "title-tap.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <sys/types.h>
@@ -1179,6 +1180,12 @@ struct kwl_server {
 	 * sends the window to the back instead (ws079-p013).
 	 */
 	unsigned click_count;
+	/*
+	 * BUG-265: a double click's second press on a floating title bar, which
+	 * its release decides (title-tap.c): near it, the window docks; moved
+	 * further, it was a move (a tap and drag).
+	 */
+	struct kwl_title_tap title_tap;
 	struct kwl_object *click_docked;
 	uint64_t click_docked_due_ms;
 	int32_t click_docked_x;
