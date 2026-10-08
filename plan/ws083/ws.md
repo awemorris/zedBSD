@@ -53,3 +53,17 @@ Resume point: 2026-10-08 午後 P2（q897）: 人の判断 H1〜H5・HD1〜HD6 �
 | [ws083-p007](phase007/phase.md) | `GRDOM_MEDIA` の engine 単位の reset と VCS の hang の回復 | in-progress（q876、P2。host の範囲は済み、実機の人工の hang は 5330 の後、hang を起こす試験の道具は未作成） | p005 |
 | ws083-p008 | 性能、`i915.debug=video` の門の既定化（p007 の後）、利用者への案内、SAMPLED・TRANSFER_SRC（HD5: 要らない）、result status query | planning（q897 で host の分: result status query と案内） | p006b、p007（host の分は無し） |
 | ws083-p009 | 全文規約確認と回帰（必須の最終確認） | planning（ベータ3、2026-10-08 ユーザー） | 全 Phase |
+
+## 設計と実装の照合の review（2026-10-08 q897、design-reviewer、HEAD 40766787a、読むだけ）
+
+blocking 無し。MFX の命令列（順・opcode・長さ・全 field）・slice の開始と長さ・zig-zag と default の表・wire の並び・NV12 の pitch と Y offset・GRDOM 0x20 は Mesa の genxml・ANV と一致。残りの指摘（未対応、p005 の前に直すかは Q1 の判断待ち）:
+
+| ID | 内容 | 所在 | 案 |
+| --- | --- | --- | --- |
+| R-S1 | bitstream の Upper Bound が 4 KiB に整列していない（PRM は bits 47:12 の見込み、未確認）。ANV は 0 を書く | render/video.c（`bitstream_end`）、video-mfx.c | 4 KiB に切り上げるか ANV と同じ 0、U18 は実機で |
+| R-S2 | video が止まった後の EIO（何も走らせない）を hang と見て無関係な session を quarantine | worker.c（`video_dead` で EIO）、render/video.c（EIO → quarantine） | 止まっている時は別の errno、quarantine は wait の ETIMEDOUT・EIO だけ |
+| R-S3 | quarantine の session が新しい video session を作り decode を続けられる（hang の上限 3 を 1 つの app が使い切れる） | render/video.c の session create・`drv_i915_video_submit` | quarantined なら submit は DEVICE_LOST、create は INITIALIZATION_FAILED |
+| R-S4 | ready-to-reset が来ないと engine reset を諦める（R1） | reset.c | VCS0 だけ handshake を省いた 2 回目の GDRST 0x20、実機で |
+| R-S5 | VCS も RCS 用の 10 秒の timeout、worker 1 本なので desktop が止まる | worker.c | VCS0 は 1 秒程度 |
+| R-S6 | 試験の空白: libvulkan の native の経路（context.c の 176 byte、`physical_load_video`、D3、device.c の依存）は host 試験が無い／D17 の 1〜4・7〜9 の境界試験が無い／Tile Y の試験は同じ関数で往復／golden は同じ判断（D21・upper bound・MOCS）から | plan/ws083/tests | native の経路の stub の host 試験、D17 の境界試験、実機で 64x64 の tile 0 の生の bytes を ffmpeg の plane と比べる手順 |
+| R-M1〜M9 | setup の slot が参照と同じでも拒まない、4 byte の start code の直後の次の slice で BSD の長さ 0、skew＋開始の 29 bit の切り捨てを検べない、1 submit に session 5 つ以上で DEVICE_LOST、`i915_video_write` の ENOSPC が DEVICE_LOST、skip の log の static の数え上げ（32 回で無言）、parameters NULL の decode が skip（D18 が筋）、design §3.2 の event・ExecuteCommands と実装の違い、§6.2 の flush と 1 decode ごとの run | render/video.c ほか | 各々の案は review の原文（Q1 への報告）に |
