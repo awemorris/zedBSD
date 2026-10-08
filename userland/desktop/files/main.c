@@ -18,6 +18,7 @@
  */
 
 #include "window.h"
+#include "mounts.h"
 
 #include "userland/desktop/paths.h"
 
@@ -143,6 +144,19 @@ static struct kl_system *main_system;
  */
 static uint32_t main_home_free_request;
 
+/*
+ * The mounted file systems for Places and the Trash (ws188-p004): whether
+ * a new reading is wanted (at the start and after a device was mounted or
+ * ejected), the reading waiting for its answer (0: none), and the serial
+ * of the mounts last put in place.
+ */
+static int main_mounts_wanted = 1;
+static uint32_t main_mounts_request;
+static uint32_t main_mounts_serial;
+
+/* The serial of the file systems last taken for Today's space left. */
+static uint32_t main_home_free_serial;
+
 /* The desktop's appearance watched for the window (ws089-p017): Files draws in its colours (palette.c); NULL without it. */
 static struct kl_appearance *main_appearance;
 
@@ -225,6 +239,8 @@ static void main_devices_poll(void);
 static void main_devices_take(int blink_all);
 static void main_home_free_ask(void);
 static void main_home_free_take(void);
+static void main_mounts_ask(void);
+static void main_mounts_take(void);
 static void main_devices_ask(unsigned request);
 static void main_devices_result(uint32_t request, int error);
 
@@ -1535,20 +1551,25 @@ main_devices_poll(
 	if (main_system == NULL)
 		return;
 
-	/* Today's space left, asked of the desktop when Today wants it (ws188-p002). */
+	/* Today's space left and the mounts, asked of the desktop when they are wanted (ws188-p002, ws188-p004). */
 	main_home_free_ask();
+	main_mounts_ask();
 
 	/* The news; a desktop that went leaves the list as it was. */
 	changed = 0U;
 	status = kl_system_dispatch(main_system, &changed);
 	if (status != 0)
 		return;
-	if ((changed & KL_SYSTEM_CHANGED_DEVICES) != 0U)
+	if ((changed & KL_SYSTEM_CHANGED_DEVICES) != 0U) {
 		main_devices_take(0);
+		main_mounts_wanted = 1;
+	}
 
-	/* The file systems the desktop read, for Today. */
-	if ((changed & KL_SYSTEM_CHANGED_MACHINE) != 0U)
+	/* The file systems the desktop read, for Today, and the mounts, for Places and the Trash. */
+	if ((changed & KL_SYSTEM_CHANGED_MACHINE) != 0U) {
 		main_home_free_take();
+		main_mounts_take();
+	}
 
 	/* Each answer: the reading's ends its wait (its parts came before it), the others are the devices'. */
 	for (;;) {
@@ -1558,6 +1579,11 @@ main_devices_poll(
 		if (request == main_home_free_request && request != 0U) {
 			main_home_free_request = 0U;
 			fm_log("HOME free result errno=%d", error);
+			continue;
+		}
+		if (request == main_mounts_request && request != 0U) {
+			main_mounts_request = 0U;
+			fm_log("MOUNTS result errno=%d", error);
 			continue;
 		}
 		main_devices_result(request, error);
@@ -1594,6 +1620,7 @@ main_home_free_take(
 	void)
 {
 	struct kl_machine_filesystem list[KL_MACHINE_FILESYSTEMS_MAX];
+	uint32_t serial;
 	size_t count;
 	size_t index;
 	size_t length;
@@ -1601,6 +1628,12 @@ main_home_free_take(
 	size_t best_length;
 	int found;
 	int same;
+
+	/* Only an answer with new file systems (the mounts' answers are not theirs). */
+	serial = kl_system_machine_serial(main_system, KL_MACHINE_FILESYSTEMS);
+	if (serial == main_home_free_serial)
+		return;
+	main_home_free_serial = serial;
 
 	/* The file systems of the last answer. */
 	count = kl_system_machine_filesystems(main_system, list, KL_MACHINE_FILESYSTEMS_MAX);
@@ -1640,6 +1673,69 @@ main_home_free_take(
 	fm_home_summary(&main_app);
 	main_app.dirty = 1;
 	fm_log("HOME free path=%s available=%llu", list[best].path, (unsigned long long)list[best].available);
+}
+
+/* Asks the desktop to read the mounts when they are wanted and no reading waits (ws188-p004). */
+static void
+main_mounts_ask(
+	void)
+{
+	uint32_t request;
+	int wanted;
+	int error;
+
+	/* A walk of Places or the Trash that found the mounts old wants them too. */
+	wanted = fm_mounts_wanted();
+	if (wanted)
+		main_mounts_wanted = 1;
+
+	/* Not wanted, or a reading already waits for its answer (the change after it is asked next). */
+	if (!main_mounts_wanted || main_mounts_request != 0U)
+		return;
+	main_mounts_wanted = 0;
+
+	/* The reading (a desktop without it leaves Places without mounted volumes, the Trash the home's alone). */
+	error = kl_system_machine_query(main_system, KL_MACHINE_MOUNTS, &request);
+	if (error != 0) {
+		fm_log("MOUNTS query errno=%d", error);
+		return;
+	}
+	main_mounts_request = request;
+}
+
+/*
+ * Puts the desktop's mounts in place when an answer brought new ones: the
+ * sidebar is made again, and a Trash shown is read again (a volume's Trash
+ * may have come or gone).
+ */
+static void
+main_mounts_take(
+	void)
+{
+	static struct kl_machine_mount list[KL_MACHINE_MOUNTS_MAX];
+	const struct fm_location *location;
+	struct fm_tab *tab;
+	uint32_t serial;
+	size_t count;
+
+	/* Only an answer with new mounts. */
+	serial = kl_system_machine_serial(main_system, KL_MACHINE_MOUNTS);
+	if (serial == main_mounts_serial)
+		return;
+	main_mounts_serial = serial;
+
+	/* The mounts, and the sidebar with them. */
+	count = kl_system_machine_mounts(main_system, list, KL_MACHINE_MOUNTS_MAX);
+	fm_mounts_set(list, count);
+	fm_places_init(&main_app.places, main_app.home);
+	main_app.dirty = 1;
+	fm_log("MOUNTS count=%u", (unsigned)count);
+
+	/* The Trash shown, read again. */
+	tab = fm_ui_tab(&main_app);
+	location = &tab->history[tab->history_index].location;
+	if (location->kind == FM_LOCATION_TRASH)
+		fm_ui_reload(&main_app, tab);
 }
 
 /* Gives the file manager the desktop's list of devices. */

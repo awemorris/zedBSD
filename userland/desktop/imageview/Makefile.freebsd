@@ -15,7 +15,7 @@ KEILAND_FREEBSD_IMAGEVIEW_SOURCES := userland/desktop/imageview/main.c \
 	userland/desktop/imageview/share.c \
 	userland/desktop/files/trash.c \
 	userland/desktop/files/apps.c \
-	userland/desktop/files/freebsd/mounts-freebsd.c \
+	userland/desktop/files/mounts.c \
 	userland/desktop/artwork/mark.c \
 	userland/desktop/picture/picture.c
 $(eval $(call KEILAND_FREEBSD_PROGRAM,imageview,bin,$(KEILAND_FREEBSD_IMAGEVIEW_SOURCES),libkeiland.so libtruetype.so libpng-compat.so libjpeg-compat.so libgif-compat.so libz-compat.so libwayland-client.so libvulkan.so.1,-lm))

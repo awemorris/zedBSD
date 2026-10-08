@@ -25,6 +25,7 @@
 #include "userland/desktop/libkeiland-backend/backend-private.h"
 #include "userland/desktop/libkeiland/system/system-private.h"
 #include "userland/desktop/wayland/machine-wait.h"
+#include "userland/desktop/files/mounts.h"
 
 #include <errno.h>
 #include <stdarg.h>
@@ -39,6 +40,7 @@ static void test_copy(void);
 static void test_host(void);
 static void test_wait(void);
 static void test_view(void);
+static void test_mounts(void);
 
 /* The checks that failed and those that ran, the directory the files go to, and the next file's number. */
 static int failures;
@@ -356,6 +358,91 @@ test_view(void)
 	check(view.machine_filesystem_count == KL_MACHINE_FILESYSTEMS_MAX, "view: the room's file systems kept");
 }
 
+/* The mounts (ws188-p004): the backend's choice of file systems, the view's fifth part, the file manager's copy. */
+static void
+test_mounts(void)
+{
+	static struct kl_backend_mount mounts[KL_BACKEND_MOUNTS_MAX];
+	static struct system_view view;
+	struct kl_machine_mount machine[2];
+	struct fm_mounts *walk;
+	struct fm_mount mount;
+	char long_path[400];
+	size_t count;
+	size_t index;
+	unsigned skipped;
+	int seen_system;
+	int root;
+	int added;
+	int error;
+	int next;
+
+	/* The virtual file systems are left out, the file systems of files kept. */
+	check(!kl_backend_mounts_keep("proc") && !kl_backend_mounts_keep("sysfs") && !kl_backend_mounts_keep("devfs") && !kl_backend_mounts_keep("mqueuefs"), "mounts: pseudo ones left out");
+	check(kl_backend_mounts_keep("tmpfs") && kl_backend_mounts_keep("overlay"), "mounts: tmpfs and overlays have files (zedBSD's root, a user's tmpfs Trash)");
+	check(kl_backend_mounts_system("/dev/shm") && kl_backend_mounts_system("/run") && !kl_backend_mounts_system("/runner") && !kl_backend_mounts_system("/media/USB"), "mounts: the system's trees");
+	check(kl_backend_mounts_keep("ext4") && kl_backend_mounts_keep("ufs") && kl_backend_mounts_keep("msdosfs") && kl_backend_mounts_keep("vfat"), "mounts: file systems of files kept");
+
+	/* A path too long is left out, never cut. */
+	memset(long_path, 'a', sizeof(long_path) - 1U);
+	long_path[0] = '/';
+	long_path[sizeof(long_path) - 1U] = '\0';
+	added = kl_backend_mounts_add(&mounts[0], long_path, "ext4");
+	check(!added, "mounts: a path too long refused");
+
+	/* This host's table: the root is there, nothing virtual, each with a type. */
+	error = kl_backend_mounts_read(mounts, KL_BACKEND_MOUNTS_MAX, &count, &skipped);
+	check(error == 0, "mounts: the table read");
+	root = 0;
+	seen_system = 0;
+	for (index = 0; index < count; index++) {
+		if (strcmp(mounts[index].path, "/") == 0)
+			root = 1;
+		check(kl_backend_mounts_keep(mounts[index].type), "mounts: %s (%s) is not a pseudo one", mounts[index].path, mounts[index].type);
+		if (kl_backend_mounts_system(mounts[index].path))
+			seen_system = 1;
+		else
+			check(!seen_system, "mounts: %s after a system tree's mount", mounts[index].path);
+	}
+	check(root, "mounts: the root among %u (skipped %u)", (unsigned)count, skipped);
+	error = kl_backend_mounts_read(mounts, 1U, &count, &skipped);
+	check(error == 0 && count == 1U, "mounts: one with room for one");
+
+	/* The view's fifth part, its own serial. */
+	system_view_init(&view);
+	memset(machine, 0, sizeof(machine));
+	(void)snprintf(machine[0].path, sizeof(machine[0].path), "/");
+	(void)snprintf(machine[0].type, sizeof(machine[0].type), "ufs");
+	(void)snprintf(machine[1].path, sizeof(machine[1].path), "/media/USB");
+	(void)snprintf(machine[1].type, sizeof(machine[1].type), "msdosfs");
+	system_view_machine_mount(&view, &machine[0]);
+	check(view.machine_mounts_pending_count == 0U, "view: a mount before parts ignored");
+	system_view_machine_parts(&view, 1U, KL_SYSTEM_MACHINE_MOUNTS);
+	system_view_machine_mount(&view, &machine[0]);
+	system_view_machine_mount(&view, &machine[1]);
+	system_view_machine_result(&view, 1U, KL_SYSTEM_RESULT_OK);
+	check(view.machine_mount_count == 2U && view.machine_serials[4] == 1U && view.machine_serials[1] == 0U, "view: the mounts in effect, their serial alone");
+
+	/* The file manager's copy: empty before an answer, then the walk over a copy. */
+	error = fm_mounts_open(&walk);
+	check(error == 0, "files: a walk before an answer");
+	next = fm_mounts_next(walk, &mount);
+	check(next == 0, "files: nothing before an answer");
+	fm_mounts_close(walk);
+	fm_mounts_set(machine, 2U);
+	error = fm_mounts_open(&walk);
+	fm_mounts_set(machine, 1U);
+	next = fm_mounts_next(walk, &mount);
+	check(error == 0 && next == 1 && strcmp(mount.path, "/") == 0 && strcmp(mount.type, "ufs") == 0, "files: the first mount");
+	next = fm_mounts_next(walk, &mount);
+	check(next == 1 && strcmp(mount.path, "/media/USB") == 0, "files: the walk keeps its copy after a new answer");
+	next = fm_mounts_next(walk, &mount);
+	check(next == 0, "files: the walk's end");
+	fm_mounts_close(walk);
+	next = fm_mounts_next(NULL, &mount);
+	check(next == -1 && errno == EINVAL, "files: no walk refused");
+}
+
 /* Runs the checks with the directory for the test's files. */
 int
 main(
@@ -375,6 +462,7 @@ main(
 	test_host();
 	test_wait();
 	test_view();
+	test_mounts();
 
 	/* Reports failed checks. */
 	if (failures != 0) {

@@ -8,6 +8,8 @@ KL_BACKEND_ZEDBSD_SOURCES := userland/desktop/libkeiland-backend/backend.c \
 	userland/desktop/libkeiland-backend/machine/machine.c \
 	userland/desktop/libkeiland-backend/machine/filesystems.c \
 	userland/desktop/libkeiland-backend/machine/users.c \
+	userland/desktop/libkeiland-backend/machine/mounts.c \
+	userland/desktop/libkeiland-backend/machine/mounts-mntent.c \
 	userland/desktop/libkeiland-backend-zedbsd/network-zedbsd.c \
 	userland/desktop/libkeiland-backend-zedbsd/network-link-zedbsd.c \
 	userland/desktop/libkeiland-backend-zedbsd/monitor-zedbsd.c \

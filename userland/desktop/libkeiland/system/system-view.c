@@ -910,6 +910,7 @@ system_view_machine_parts(
 	view->machine_filesystems_pending_count = 0U;
 	view->machine_users_pending_count = 0U;
 	view->machine_language_pending[0] = '\0';
+	view->machine_mounts_pending_count = 0U;
 }
 
 /*
@@ -1035,6 +1036,13 @@ system_view_machine_result(
 		view->machine_serials[3]++;
 	}
 
+	/* The mounts, as one list (ws188-p004). */
+	if ((parts & KL_SYSTEM_MACHINE_MOUNTS) != 0U) {
+		memcpy(view->machine_mounts, view->machine_mounts_pending, view->machine_mounts_pending_count * sizeof(view->machine_mounts[0]));
+		view->machine_mount_count = view->machine_mounts_pending_count;
+		view->machine_serials[4]++;
+	}
+
 	/* The parts now known, and the change told. */
 	if (parts != 0U) {
 		view->machine_known |= parts;
@@ -1043,4 +1051,26 @@ system_view_machine_result(
 
 	/* The result, as every request's. */
 	system_view_result(view, request, applied);
+}
+
+/*
+ * Adds a mount to the answer being received, while there is room
+ * (ws188-p004).
+ */
+void
+system_view_machine_mount(
+	struct system_view *view,
+	const struct kl_machine_mount *mount)
+{
+	/* Only an open answer that holds them. */
+	if (!view->machine_open || (view->machine_parts & KL_SYSTEM_MACHINE_MOUNTS) == 0U)
+		return;
+
+	/* A mount more than the room is not kept. */
+	if (view->machine_mounts_pending_count >= KL_MACHINE_MOUNTS_MAX)
+		return;
+
+	/* The mount. */
+	view->machine_mounts_pending[view->machine_mounts_pending_count] = *mount;
+	view->machine_mounts_pending_count++;
 }

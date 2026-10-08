@@ -12,7 +12,7 @@
  * compositor serves them and libkeiland speaks them; both include this
  * header and neither the other's code (WS131 D4 (c)).
  *
- * kl_system_manager_v1 (a global, version 21; its objects are made at its version)
+ * kl_system_manager_v1 (a global, version 22; its objects are made at its version)
  *   request 0 destroy
  *   request 1 get_settings(new_id kl_system_settings_v1)
  *   request 2 get_network(new_id kl_system_network_v1)    (WS131 p010)
@@ -143,6 +143,9 @@
  *   event   3 user(string name, string full_name, string home, uint flags)   KL_SYSTEM_MACHINE_USER_*
  *   event   4 login_language(string code)             "en", "ja", or "" (no file, or another word)
  *   event   5 result(uint request, uint applied, uint saved)
+ *   event   6 mount(string path, string type)         since version 22 (ws188-p004): a mounted file system a
+ *                                                     user may keep files on (the part _MOUNTS, a query of an
+ *                                                     object of version 21 asking it is invalid)
  *   The compositor reads on a thread of its own (a file system's size or a directory service may wait),
  *   one reading at a time; a query that comes during one waits for the next (at most 16 waiting, 4 of a
  *   client; one more is answered busy), and a reading reads what its waiting queries asked together.  An
@@ -281,7 +284,7 @@
 
 /* The interfaces' names and versions. */
 #define KL_SYSTEM_MANAGER_NAME			"kl_system_manager_v1"
-#define KL_SYSTEM_MANAGER_VERSION		21U
+#define KL_SYSTEM_MANAGER_VERSION		22U
 #define KL_SYSTEM_SETTINGS_NAME			"kl_system_settings_v1"
 
 /* kl_system_manager_v1's requests and event. */
@@ -355,6 +358,9 @@
 /* Since when the manager has get_machine (ws188-p002). */
 #define KL_SYSTEM_SINCE_MACHINE			21U
 
+/* Since when the computer's object reads the mounts (ws188-p004). */
+#define KL_SYSTEM_SINCE_MOUNTS			22U
+
 /* The interfaces' names (WS131 p010). */
 #define KL_SYSTEM_NETWORK_NAME			"kl_system_network_v1"
 #define KL_SYSTEM_AUDIO_NAME			"kl_system_audio_v1"
@@ -384,11 +390,14 @@
 #define KL_SYSTEM_MACHINE_EVENT_USER		3U
 #define KL_SYSTEM_MACHINE_EVENT_LOGIN_LANGUAGE	4U
 #define KL_SYSTEM_MACHINE_EVENT_RESULT		5U
+#define KL_SYSTEM_MACHINE_EVENT_MOUNT		6U
 #define KL_SYSTEM_MACHINE_ABOUT			0x1U
 #define KL_SYSTEM_MACHINE_FILESYSTEMS		0x2U
 #define KL_SYSTEM_MACHINE_USERS			0x4U
 #define KL_SYSTEM_MACHINE_LOGIN_LANGUAGE	0x8U
-#define KL_SYSTEM_MACHINE_PARTS			0xfU
+#define KL_SYSTEM_MACHINE_MOUNTS		0x10U
+#define KL_SYSTEM_MACHINE_PARTS			0x1fU
+#define KL_SYSTEM_MACHINE_PARTS_21		0xfU
 #define KL_SYSTEM_MACHINE_USER_PERSON		0x1U
 #define KL_SYSTEM_MACHINE_USER_SELF		0x2U
 #define KL_SYSTEM_MACHINE_USER_ADMIN		0x4U
@@ -405,6 +414,9 @@
 #define KL_SYSTEM_MACHINE_CODE_MAX		8U
 #define KL_SYSTEM_MACHINE_FILESYSTEMS_MAX	8U
 #define KL_SYSTEM_MACHINE_USERS_MAX		64U
+#define KL_SYSTEM_MACHINE_MOUNT_PATH_MAX	256U
+#define KL_SYSTEM_MACHINE_MOUNT_TYPE_MAX	32U
+#define KL_SYSTEM_MACHINE_MOUNTS_MAX		64U
 
 /*
  * kl_system_displays_v1's requests and events (ws113-p005), the modes, a

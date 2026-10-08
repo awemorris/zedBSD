@@ -169,6 +169,7 @@ struct system_machine_listener {
 	void (*user)(void *data, struct wl_proxy *proxy, const char *name, const char *full_name, const char *home, uint32_t flags);
 	void (*login_language)(void *data, struct wl_proxy *proxy, const char *code);
 	void (*result)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t applied, uint32_t saved);
+	void (*mount)(void *data, struct wl_proxy *proxy, const char *path, const char *type);
 };
 
 /* The listener of kl_system_devices_v1's events, in their order. */
@@ -200,6 +201,7 @@ static void system_machine_filesystem(void *data, struct wl_proxy *proxy, const 
 static void system_machine_user(void *data, struct wl_proxy *proxy, const char *name, const char *full_name, const char *home, uint32_t flags);
 static void system_machine_login_language(void *data, struct wl_proxy *proxy, const char *code);
 static void system_machine_result(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t applied, uint32_t saved);
+static void system_machine_mount(void *data, struct wl_proxy *proxy, const char *path, const char *type);
 static void system_print_queued(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t job);
 static int system_print_title(const char *title, char *out, size_t size);
 static void system_global_remove(void *data, struct wl_registry *registry, uint32_t name);
@@ -336,7 +338,8 @@ static const struct system_machine_listener system_machine_listener = {
 	system_machine_filesystem,
 	system_machine_user,
 	system_machine_login_language,
-	system_machine_result
+	system_machine_result,
+	system_machine_mount
 };
 
 /* The devices object's callbacks. */
@@ -1445,6 +1448,10 @@ kl_system_machine_query(
 	if (system->machine == NULL || system->lost)
 		return ENOTSUP;
 
+	/* The mounts, from a compositor that reads them (ws188-p004). */
+	if ((what & KL_MACHINE_MOUNTS) != 0U && system->manager_version < KL_SYSTEM_SINCE_MOUNTS)
+		return ENOTSUP;
+
 	/* Sent with the application's next flush. */
 	number = system_number(system, request);
 	wl_proxy_marshal(system->machine, KL_SYSTEM_MACHINE_QUERY, number, (uint32_t)what);
@@ -1491,6 +1498,8 @@ kl_system_machine_serial(
 		return system->view.machine_serials[2];
 	case KL_MACHINE_LOGIN_LANGUAGE:
 		return system->view.machine_serials[3];
+	case KL_MACHINE_MOUNTS:
+		return system->view.machine_serials[4];
 	default:
 		break;
 	}
@@ -1591,6 +1600,31 @@ kl_system_machine_login_language(
 	/* Succeeded: the code, cut to fit. */
 	system_view_copy(code, size, system->view.machine_language);
 	return 0;
+}
+
+/*
+ * Copies the mounts of the last answer (ws188-p004); returns how many.
+ */
+size_t
+kl_system_machine_mounts(
+	const struct kl_system *system,
+	struct kl_machine_mount *list,
+	size_t capacity)
+{
+	size_t count;
+
+	/* A system and the room. */
+	if (system == NULL || list == NULL)
+		return 0;
+
+	/* As many as fit. */
+	count = system->view.machine_mount_count;
+	if (count > capacity)
+		count = capacity;
+	memcpy(list, system->view.machine_mounts, count * sizeof(list[0]));
+
+	/* Succeeded: the mounts copied. */
+	return count;
 }
 
 /*
@@ -3616,4 +3650,33 @@ system_machine_result(
 	/* The parts into effect when they came whole, then the result. */
 	system = data;
 	system_view_machine_result(&system->view, request, applied);
+}
+
+/* A mount of the answer being received (ws188-p004). */
+static void
+system_machine_mount(
+	void *data,
+	struct wl_proxy *proxy,
+	const char *path,
+	const char *type)
+{
+	struct kl_machine_mount mount;
+	struct kl_system *system;
+	size_t length;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* A path that does not fit whole names another place: it is dropped, never cut. */
+	system = data;
+	length = strlen(path);
+	if (length == 0U || length >= sizeof(mount.path))
+		return;
+
+	/* The mount. */
+	memset(&mount, 0, sizeof(mount));
+	memcpy(mount.path, path, length + 1U);
+	system_view_copy(mount.type, sizeof(mount.type), type);
+
+	/* Kept until the answer's result. */
+	system_view_machine_mount(&system->view, &mount);
 }
