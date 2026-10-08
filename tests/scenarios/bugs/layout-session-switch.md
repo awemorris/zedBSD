@@ -19,7 +19,7 @@ AAT の image。
 1. 操作: Files を開いて dock、Terminal を開く。
    確認事項: Terminal も dock で開く。正解: `KWL GLASS open-docked …`。確認方法: log。
 2. 操作: bar の restore の button で窓の mode に戻し、Alt+Tab で Files へ。
-   確認事項: Files が浮く。正解: `KWL LAYOUT mode=windowed`、`KWL LAYOUT switch surface=<Files> action=float mode=windowed`。確認方法: log、撮影 files-floating。
+   確認事項: Files が浮く。正解: `KWL LAYOUT mode=windowed`、`KWL LAYOUT switch surface=<Files> action=float mode=windowed` か `action=keep`（restore の button で mode を出ると全部の窓が静かに浮く `KWL LAYOUT float-quiet` ので、Files は既に浮いていて keep になる。2026-10-09 P1、T1-481）。確認方法: log、撮影 files-floating（Files が title bar の付いた窓）。
 3. 操作: Files を double click で dock し、Alt+Tab で Terminal へ。
    確認事項: Terminal も dock する。正解: `KWL LAYOUT switch surface=… action=dock mode=docked`。確認方法: log、撮影 terminal-docked。
 
