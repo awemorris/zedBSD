@@ -293,6 +293,7 @@
 		kl_ui_destroy;
 		kl_ui_pointer_motion;
 		kl_ui_pointer_leave;
+		kl_ui_pointer_cancel;
 		kl_ui_take_damage;
 		kl_ui_pointer_button;
 		kl_ui_wheel;
@@ -387,6 +388,7 @@
 		kl_window_take_drop;
 		kl_window_drag_text;
 		kl_window_start_drag_icon;
+		kl_window_drag_fill;
 		kl_drop_frame;
 		kl_drop_caret;
 		kl_window_vulkan_surface;

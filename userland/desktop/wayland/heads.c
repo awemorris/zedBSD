@@ -1338,6 +1338,10 @@ heads_shows(
 	if (count > 0U)
 		shows |= 1U;
 
+	/* A drag and drop's icon and mark may reach into any head: every head draws while it goes on (ws189-p002). */
+	if (server->dnd_active)
+		shows |= 2U;
+
 	/* The pointer, a cursor's size around the head's rectangle included. */
 	left = (int64_t)head->x - compose->output_x - HEADS_CURSOR_REACH;
 	top = (int64_t)head->y - compose->output_y - HEADS_CURSOR_REACH;

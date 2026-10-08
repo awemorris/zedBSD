@@ -905,6 +905,7 @@ surface_request(
 	uint32_t x;
 	uint32_t y;
 	int error;
+	int icon;
 
 	/* Surface request availability follows the bound compositor version. */
 	if ((opcode == 7U && surface->version < 2U) ||
@@ -929,12 +930,15 @@ surface_request(
 
 		/*
 		 * Nonzero offsets cannot describe this full-output scanout
-		 * contract for a window or a cursor; a surface of no role (a
-		 * drag's icon, ws189-p002) keeps them, and they move it.
+		 * contract; only the icon of the drag going on (ws189-p002)
+		 * keeps them, and they move it from the pointer.
 		 */
 		x = word_at(bytes, 4);
 		y = word_at(bytes, 8);
-		if ((x != 0 || y != 0) && (surface->role != NULL || surface->cursor_role))
+		icon = 0;
+		if (surface->client->server->dnd_active && surface == surface->client->server->dnd_icon)
+			icon = 1;
+		if ((x != 0 || y != 0) && !icon)
 			return EPROTO;
 		surface->pending_dx += (int32_t)x;
 		surface->pending_dy += (int32_t)y;

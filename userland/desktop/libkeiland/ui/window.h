@@ -355,6 +355,7 @@ struct kl_window {
 	unsigned drop_types;
 	int pending_uris;
 	int pending_image;
+	int pending_utf8;
 	struct wl_data_offer *drop_offer;
 	uint32_t drop_serial;
 	unsigned drop_offered;
@@ -368,6 +369,9 @@ struct kl_window {
 	int drop_answered;
 	unsigned drop_answer_actions;
 	unsigned drop_answer_preferred;
+
+	/* Whether the drag over the window offers UTF-8 text (else its text is read as plain text, ws189-p002). */
+	int drop_utf8;
 
 	/*
 	 * A pen tablet (tablet.c, WS131 p018): the manager and the seat's

@@ -1072,11 +1072,19 @@ start_drag(
 		return 0;
 	}
 
-	/* The drag, with no target yet. */
+	/* The drag, with no target yet; its icon's corner starts at the pointer (offsets attached from here move it). */
 	server->dnd_active = 1;
 	server->dnd_source = source;
 	server->dnd_origin = origin;
 	server->dnd_icon = icon;
+	if (icon != NULL) {
+		icon->offset_x = 0;
+		icon->offset_y = 0;
+		icon->pending_dx = 0;
+		icon->pending_dy = 0;
+	}
+
+	/* No target, no breadcrumb part, nothing to say yet. */
 	drag_clear_target(server);
 	server->dnd_titlebar = NULL;
 	server->dnd_part_id = 0;
@@ -1378,8 +1386,12 @@ drag_update(
 	uint32_t detail;
 	unsigned index;
 
-	/* The surface under the pointer, and the part of a breadcrumb there. */
+	/* The surface under the pointer, and the part of a breadcrumb there; none while the drag rests on the bar's applications (apps-bar.c). */
 	surface = drag_surface_at(server, &titlebar, &id, &detail);
+	if (server->dnd_on_bar) {
+		surface = NULL;
+		titlebar = NULL;
+	}
 
 	/* A drag inside its client has only that client's surfaces as targets. */
 	if (surface != NULL && server->dnd_source == NULL && surface->client != server->dnd_origin->client) {

@@ -317,6 +317,10 @@ kwl_seat_pointer_update(
 	struct kwl_object *target;
 	struct kwl_object *deeper;
 
+	/* A drag and drop has the pointer; its end gives it back (data.c, ws189-p002: a window brought forward by the bar's spring-loading hears no enter during it). */
+	if (server->dnd_active)
+		return;
+
 	/* The surface the pointer belongs to: the grab's chain, or the focus. */
 	if (server->pointer_grabbed) {
 		base = kwl_popup_chain_at(server);

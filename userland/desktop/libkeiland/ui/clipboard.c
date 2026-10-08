@@ -89,6 +89,7 @@ static size_t clipboard_read(struct kl_window *window, struct wl_data_offer *off
 static void clipboard_drop_input(struct kl_window *window, unsigned kind, unsigned code, double x, double y);
 static const char *clipboard_drop_type(const struct kl_window *window, unsigned *type);
 static int clipboard_own_data(const struct kl_window *window, const char *type, const char **data, size_t *length);
+static const struct kl_window *clipboard_drag_owner(const struct kl_window *window);
 static void clipboard_drag_free(struct kl_window *window);
 static void clipboard_drag_end(struct kl_window *window, unsigned dropped);
 static size_t clipboard_drop_max(unsigned type);
@@ -597,9 +598,12 @@ kl_window_start_drag_icon(
 			return ENOMEM;
 		}
 
-		/* The data copied, kept until the drag ends. */
-		memcpy(window->drag_data[index], data[index].data, data[index].length);
+		/* The data copied, kept until the drag ends (a type without data yet is filled later, kl_window_drag_fill). */
+		if (data[index].data != NULL && data[index].length != 0U)
+			memcpy(window->drag_data[index], data[index].data, data[index].length);
 		window->drag_lengths[index] = data[index].length;
+		if (data[index].data == NULL)
+			window->drag_lengths[index] = 0;
 	}
 
 	/* The source, offering the types. */
@@ -620,20 +624,78 @@ kl_window_start_drag_icon(
 	if (version >= CLIPBOARD_VERSION)
 		wl_data_source_set_actions(window->drag_source, actions);
 
-	/* The picture's surface, placed by its hot point, committed before the drag names it. */
+	/* The picture's surface. */
 	hot_x = 0;
 	hot_y = 0;
 	if (icon != NULL)
 		clipboard_icon_make(window, icon, &hot_x, &hot_y);
+
+	/* The drag starts from the window. */
+	wl_data_device_start_drag(window->data_device, window->drag_source, window->surface, window->drag_icon, serial);
+
+	/*
+	 * Its picture's corner starts at the pointer; attached after the drag
+	 * names it, its offset puts the hot point under the pointer (Wayland's
+	 * rule for a drag's icon).
+	 */
 	if (window->drag_icon != NULL) {
 		wl_surface_attach(window->drag_icon, window->drag_icon_buffer.buffer, -hot_x, -hot_y);
 		wl_surface_damage(window->drag_icon, 0, 0, window->drag_icon_buffer.width, window->drag_icon_buffer.height);
 		wl_surface_commit(window->drag_icon);
 	}
 
-	/* Succeeded: the drag starts from the window. */
-	wl_data_device_start_drag(window->data_device, window->drag_source, window->surface, window->drag_icon, serial);
+	/* Succeeded: the drag goes on. */
 	(void)wl_display_flush(window->display);
+	return 0;
+}
+
+/*
+ * Gives the data of a type of the window's drag that started without it
+ * (KL_VERSION 70): a program that must make it (a picture encoded) starts
+ * the drag first, while the button is still held, and fills it before it
+ * dispatches again -- the compositor asks for the data only after a drop,
+ * which the program hears in a later dispatch.  Returns 0, ENOENT without
+ * the drag or the type, or ENOMEM.
+ */
+int
+kl_window_drag_fill(
+	struct kl_window *window,
+	const char *type,
+	const void *data,
+	size_t length)
+{
+	char *copy;
+	unsigned index;
+	int same;
+
+	/* Only the window's own drag. */
+	if (window == NULL || type == NULL || window->drag_source == NULL)
+		return ENOENT;
+
+	/* The type among the drag's. */
+	for (index = 0; index < window->drag_count; index++) {
+		same = strcmp(window->drag_types[index], type);
+		if (same == 0)
+			break;
+	}
+
+	/* Not one of the drag's types. */
+	if (index == window->drag_count)
+		return ENOENT;
+
+	/* A copy of the data, in place of what was there. */
+	copy = malloc(length + 1U);
+	if (copy == NULL)
+		return ENOMEM;
+	if (data != NULL && length != 0U)
+		memcpy(copy, data, length);
+	free(window->drag_data[index]);
+	window->drag_data[index] = copy;
+	window->drag_lengths[index] = length;
+	if (data == NULL)
+		window->drag_lengths[index] = 0;
+
+	/* Succeeded: a drop reads it. */
 	return 0;
 }
 
@@ -709,6 +771,7 @@ clipboard_offer(
 	window->pending_text = 0;
 	window->pending_uris = 0;
 	window->pending_image = 0;
+	window->pending_utf8 = 0;
 	(void)wl_data_offer_add_listener(offer, &offer_listener, window);
 }
 
@@ -761,6 +824,7 @@ clipboard_enter(
 	window->drop_offer = offer;
 	window->drop_serial = serial;
 	window->drop_offered = offered;
+	window->drop_utf8 = window->pending_utf8;
 	window->drop_x = wl_fixed_to_double(x);
 	window->drop_y = wl_fixed_to_double(y);
 	kl_window_answer_drop(window, KL_DND_COPY, KL_DND_COPY);
@@ -892,6 +956,10 @@ clipboard_type(
 	plain = strcmp(mime_type, CLIPBOARD_TYPE_PLAIN);
 	if (utf8 == 0 || plain == 0)
 		window->pending_text = 1;
+
+	/* Which of the two (a drop reads the one the source has, ws189-p002). */
+	if (utf8 == 0)
+		window->pending_utf8 = 1;
 
 	/* File names. */
 	uris = strcmp(mime_type, CLIPBOARD_TYPE_URIS);
@@ -1165,7 +1233,9 @@ clipboard_drop_type(
 	/* Text. */
 	if ((window->drop_offered & KL_DROP_TEXT) != 0U) {
 		*type = KL_DROP_TEXT;
-		return CLIPBOARD_TYPE_UTF8;
+		if (window->drop_utf8)
+			return CLIPBOARD_TYPE_UTF8;
+		return CLIPBOARD_TYPE_PLAIN;
 	}
 
 	/* Nothing the window takes. */
@@ -1173,7 +1243,7 @@ clipboard_drop_type(
 	return NULL;
 }
 
-/* Finds the window's own drag's data of a type (1), or tells there is none (0). */
+/* Finds the data of a type of the drag of the window or of another window of its program (1), or tells there is none (0). */
 static int
 clipboard_own_data(
 	const struct kl_window *window,
@@ -1181,20 +1251,22 @@ clipboard_own_data(
 	const char **data,
 	size_t *length)
 {
+	const struct kl_window *owner;
 	unsigned index;
 	int same;
 
-	/* No drag of the window's own. */
-	if (window->drag_source == NULL)
+	/* No drag of the window's own, or of another window of its program (whose source it cannot wait on in this dispatch, ws189-p002). */
+	owner = clipboard_drag_owner(window);
+	if (owner == NULL)
 		return 0;
 
 	/* The type among the drag's. */
-	for (index = 0; index < window->drag_count; index++) {
-		same = strcmp(window->drag_types[index], type);
+	for (index = 0; index < owner->drag_count; index++) {
+		same = strcmp(owner->drag_types[index], type);
 		if (same != 0)
 			continue;
-		*data = window->drag_data[index];
-		*length = window->drag_lengths[index];
+		*data = owner->drag_data[index];
+		*length = owner->drag_lengths[index];
 		return 1;
 	}
 
@@ -1451,4 +1523,33 @@ clipboard_icon_free(
 		wl_surface_destroy(window->drag_icon);
 	window->drag_icon = NULL;
 	keiui_shm_free(&window->drag_icon_buffer);
+}
+
+/*
+ * Finds the window of the program whose drag goes on: the window itself,
+ * or another window of its application (one drag at a time); NULL when
+ * none of them drags.
+ */
+static const struct kl_window *
+clipboard_drag_owner(
+	const struct kl_window *window)
+{
+	const struct kl_window *other;
+
+	/* The window's own drag. */
+	if (window->drag_source != NULL)
+		return window;
+
+	/* A window alone has no other. */
+	if (window->app == NULL)
+		return NULL;
+
+	/* Another window of the application. */
+	for (other = window->app->windows; other != NULL; other = other->app_next) {
+		if (other->drag_source != NULL)
+			return other;
+	}
+
+	/* None drags. */
+	return NULL;
 }

@@ -428,6 +428,26 @@ kl_ui_pointer_leave(
 }
 
 /*
+ * Forgets the press the pointer holds on a widget without a click
+ * (KL_VERSION 70, ws189-p002): the press became a drag and drop, whose
+ * release the compositor keeps.  Returns 1 when a press was held.
+ */
+int
+kl_ui_pointer_cancel(
+	struct kl_ui *ui)
+{
+	/* No widget held. */
+	if (!ui->active.valid)
+		return 0;
+
+	/* Succeeded: the widget is let go unclicked, its region drawn again. */
+	ui_damage_key(ui, &ui->active);
+	ui->active.valid = 0;
+	ui->released.valid = 0;
+	return 1;
+}
+
+/*
  * Takes the part of the window that the changes of the lit widget since
  * the last frame (kl_ui_pointer_motion, kl_ui_pointer_leave) need drawn
  * again, when that is all that changed (KL_VERSION 62, BUG-226): the
