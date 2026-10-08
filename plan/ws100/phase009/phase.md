@@ -4,7 +4,7 @@
 
 Phase ID: `ws100-p009`
 Parent: [WS100](../ws.md)
-Status: in-progress（2026-10-08 P2（Q1 の投入、sweep-beta2-rc2 の後）: 実装・host・build。QEMU の curve の case は T1、5330 は実機）（旧: planned（2026-10-01 に phase.md を作った。手順は下））
+Status: test-wait（T1-478、2026-10-08 夜 Q1）
 Phase disposition: normal
 Queue: Q1 の投入（2026-10-08「WS100 p009（音量の曲線、約 0.5 LW）を実装し T1 の依頼文を」）
 依存: p006 の a（codec の amplifier の段の log。QEMU と 5330 の段数・1 段の dB を読むため）。実機の確かめは p006 の b の後。
