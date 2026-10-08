@@ -220,7 +220,7 @@ def sign_in_code(item):
 		# The page with a field that has the keyboard, in Browser.
 		page = run.outdir / "mail-server" / "code.html"
 		page.write_text("<!doctype html><title>Code</title><p>Sign-in code:</p>"
-			"<input id=c autofocus style=\"font-size:24px;width:300px;height:40px\" "
+			"<input id=c autofocus autocomplete=one-time-code style=\"font-size:24px;width:300px;height:40px\" "
 			"oninput=\"console.log('code-length=' + this.value.length)\">\n")
 		run.aat("put", str(page), f"{aatlib.WORK}/code.html")
 		run.sh(f"chmod 644 {aatlib.WORK}/code.html")
@@ -229,7 +229,9 @@ def sign_in_code(item):
 		listening = run.wait(r"ZBROWSER MAIL listen error=0", mark, 15)
 		item.step("Browser opened the page", listening or "")
 		item.check(listening, "Browser does not listen to the mail")
-		run.click(*field_point(browser))
+		# The words above the field clicked: the page's focus leaves the field, so the code must find it by its
+		# autocomplete="one-time-code" (ws177-p018).
+		run.click(browser.x + 80, browser.y + 25)
 		# Mail with the codes allowed: its idling inbox gets a message with a code.
 		window, gap = open_mail(item)
 		mark = sign_in(item, window, gap, server, codes=True)
@@ -254,10 +256,11 @@ def sign_in_code(item):
 			run.click(width // 2, height - 48 - 38)
 			activated = run.wait(rf"KWL NOTIFY activate id={number}$", mark, 5)
 			filled = run.wait(r"ZBROWSER MAIL fill length=4 error=0", mark, 5)
+			field = run.wait(r"ZBROWSER MAIL one-time-code-field error=0", mark, 5)
 			typed = run.wait(r"ZBROWSER CONSOLE level=\d+ code-length=4", mark, 5)
 			removed = run.wait(r"ZBROWSER TITLEBAR code=0", mark, 5)
-			item.step("clicked the notification", f"{activated}; {filled}; {typed}; {removed}")
-			item.check(activated and filled and typed and removed, "the notification's click did not fill the field in")
+			item.step("clicked the notification", f"{activated}; {field}; {filled}; {typed}; {removed}")
+			item.check(activated and field and filled and typed and removed, "the notification's click did not fill the field in")
 		# Browser in front: the field shows the code, and the titlebar has no code's control any more.
 		run.close(item, window)
 		run.click(*field_point(browser))
