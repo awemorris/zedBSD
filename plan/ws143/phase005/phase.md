@@ -4,7 +4,7 @@
 
 Phase ID: `ws143-p005`
 Parent: [WS143](../ws.md)
-Status: in-progress（2026-10-08 q904 P1: i02a（純粋な部品と host 試験）まで済み、i02b〜i02d は未。下の「i02a の記録」。i01a〜c の判定は Q1）（旧: in-progress（2026-10-08 q902 P1 の照合: i01a T1-419 PASS、i01b T1-421 FAIL の後 T1-426 input-bridge-p005 PASS・T1-432 PASS、i01c T1-423 boot-test PASS（i2c-hid の touchpad の実機の回帰は 5330）→ i01a〜c は Q1 の判定待ち。i02・i03 は未着手、i04 は 5330）（旧: in-progress / test-wait（i01a、q888 P2 2026-10-08: glue の refactor と USB の回帰を実装し host 試験 PASS。QEMU は T1 待ち。以前: 詳細設計の第 1 版と改訂 2、design-reviewer の review-1（[review-1.md](review-1.md)）を反映済み）））
+Status: in-progress（2026-10-08 夜 q904 P1: i02a・i02b 済み（host 試験 PASS、QEMU は i02d の T1 で）、i02c は hid.c と main の口まで（build のみ、host 試験は未、pair の handoff は未接続）、i02d は未。下の「i02c の途中の記録」が再開点。i01a〜c の判定は Q1）（旧: in-progress（2026-10-08 q904 P1: i02a（純粋な部品と host 試験）まで済み、i02b〜i02d は未。下の「i02a の記録」。i01a〜c の判定は Q1）（旧: in-progress（2026-10-08 q902 P1 の照合: i01a T1-419 PASS、i01b T1-421 FAIL の後 T1-426 input-bridge-p005 PASS・T1-432 PASS、i01c T1-423 boot-test PASS（i2c-hid の touchpad の実機の回帰は 5330）→ i01a〜c は Q1 の判定待ち。i02・i03 は未着手、i04 は 5330）（旧: in-progress / test-wait（i01a、q888 P2 2026-10-08: glue の refactor と USB の回帰を実装し host 試験 PASS。QEMU は T1 待ち。以前: 詳細設計の第 1 版と改訂 2、design-reviewer の review-1（[review-1.md](review-1.md)）を反映済み）））
 Phase disposition: normal
 Queue: 設計（P2、2026-10-08）→ q888（P2、2026-10-08、承認済み）: i01a → i01b。実装の attempt の区切りは §「attempt の区切り」。
 
