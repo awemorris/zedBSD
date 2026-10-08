@@ -520,6 +520,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
+- 2026-10-08 夜 ユーザー:「Touchpadは動作確認できたので、下記をすべてclose します。BUG-156・166・167・178・190・211・215・216・228・247・254、BUG-218 の touchpad の部分」→ resolved（P2 が Board と ticket に反映、BUG-218 の Phone の padding は T1-481 待ち）。
 - 2026-10-08 夜 ユーザー:「BUG-220, BUG-236,BUG-227,  BUG-241,はcomplete.」→ resolved（P2 が Board と ticket に反映）。
 - 2026-10-08 夜 ユーザー:「UI関連のバグは、なんだかほとんど片付いているのに残っている気がします。まとめてAATを流して、再現できなかったらcloseしたいです。」→ q911（P2）: UI の Bug を QEMU の AAT（aat-input の pointer・key・touch）でまとめて再現を試し、再現しない物はユーザーの決定で resolved（unreproduced、AAT の証拠つき）に。実機の device（touchpad の物理の click・5330 の network など）が要る物は QEMU で閉じず 5330 の UAT の一覧へ。
 - 2026-10-08 夜 ユーザー: BUG-225・BUG-101・BUG-201 は completed（resolved）、BUG-130 は「今テストしたら動いているので、もう問題ないかも」→ resolved、BUG-013・023・024・025（PC-98・LX6）はベータ4。
