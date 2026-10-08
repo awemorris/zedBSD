@@ -442,14 +442,14 @@ test_connect(void)
 	/* DISCONNECT: the channels (interrupt first), the link; the input device goes; not wanted back. */
 	fake.opcode_count = 0U;
 	fake.host_closes = 0U;
-	error = btd_hid_disconnect(&host, address);
+	error = btd_hid_disconnect(&host, address, BTD_ADDRESS_BREDR);
 	settle();
 	expect(error == 0 && fake.host_closes == 2U && fake_saw(0x0406U) && !fake.connected, "connect: DISCONNECT (%d, %u closes)", error, fake.host_closes);
 	expect(bridge_closed(), "connect: the input device gone");
 	status_of(0x21U, line, sizeof(line));
 	expect(strstr(line, "state=idle input=-") != NULL && strstr(line, "reconnect=off") != NULL && strstr(line, "last=user") != NULL,
 	       "connect: STATUS after DISCONNECT (%s)", line);
-	error = btd_hid_disconnect(&host, address);
+	error = btd_hid_disconnect(&host, address, BTD_ADDRESS_BREDR);
 	expect(error == ENOTCONN, "connect: DISCONNECT of a device not connected (%d)", error);
 
 	/* CONNECT again: open again, wanted back. */
@@ -493,7 +493,7 @@ test_refusals(void)
 	expect(answered == 1 && strcmp(answer_line, "ERROR busy") == 0, "refusals: CONNECT while connecting (%s)", answer_line);
 	settle();
 	(void)bridge_read(bytes, sizeof(bytes), &length);
-	(void)btd_hid_disconnect(&host, address);
+	(void)btd_hid_disconnect(&host, address, BTD_ADDRESS_BREDR);
 	settle();
 	btd_hid_hold(&host, 1);
 	answered = connect_device(0x30U);
@@ -564,7 +564,7 @@ test_refusals(void)
 	       answer_line, bridge_opens);
 	(void)bridge_read(bytes, sizeof(bytes), &length);
 	address_of(0x31U, address);
-	(void)btd_hid_disconnect(&host, address);
+	(void)btd_hid_disconnect(&host, address, BTD_ADDRESS_BREDR);
 	settle();
 
 	/* Refused with EINVAL four times: given up. */
@@ -697,7 +697,7 @@ test_inbound(void)
 	expect(error == 0 && length == 3U && bytes[1] == 0x05U, "inbound: its report (%zu)", length);
 
 	/* DISCONNECT: its next connection is refused (the user's decision Q5). */
-	(void)btd_hid_disconnect(&host, address);
+	(void)btd_hid_disconnect(&host, address, BTD_ADDRESS_BREDR);
 	settle();
 	fake.opcode_count = 0U;
 	fake_connect_request();
@@ -857,6 +857,13 @@ test_lifecycle(void)
 	status_of(0x41U, line, sizeof(line));
 	expect(bridge_closed() && strstr(line, "state=waiting") != NULL && strstr(line, "last=lost") != NULL && !host.page_scan,
 	       "lifecycle: the controller lost (%s)", line);
+
+	/* The controller back (ready again): the device is paged at once and open again (T1-463). */
+	fake.opcode_count = 0U;
+	btd_hid_refresh(&host);
+	tick_after(100U);
+	status_of(0x41U, line, sizeof(line));
+	expect(fake_saw(0x0c1aU) && fake_saw(0x0405U) && strstr(line, "state=open") != NULL, "lifecycle: paged again on the controller's return (%s)", line);
 	run_close();
 
 	/* The device's unplug: its bond and record go, no unplug sent back, the link ended. */
@@ -883,7 +890,7 @@ test_lifecycle(void)
 	(void)bridge_read(bytes, sizeof(bytes), &length);
 	fake.opcode_count = 0U;
 	address_of(0x43U, address);
-	btd_hid_forget(&host, address);
+	btd_hid_forget(&host, address, BTD_ADDRESS_BREDR);
 	settle();
 	status_of(0x43U, line, sizeof(line));
 	expect(fake.unplugs == 1U && fake_saw(0x0406U) && line[0] == '\0' && bridge_closed(), "lifecycle: FORGET's unplug");
@@ -896,7 +903,7 @@ test_lifecycle(void)
 	(void)bridge_read(bytes, sizeof(bytes), &length);
 	fake.opcode_count = 0U;
 	address_of(0x44U, address);
-	btd_hid_release(&host, address);
+	btd_hid_release(&host, address, BTD_ADDRESS_BREDR);
 	settle();
 	status_of(0x44U, line, sizeof(line));
 	error = btd_keys_read(keys_folder, controller, address, BTD_ADDRESS_BREDR, &gone);
@@ -1142,7 +1149,7 @@ connect_device(
 	/* The request. */
 	address_of(last, address);
 	answer[0] = '\0';
-	answered = btd_hid_connect(&host, address, answer, sizeof(answer));
+	answered = btd_hid_connect(&host, address, BTD_ADDRESS_BREDR, answer, sizeof(answer));
 	if (answered)
 		(void)snprintf(answer_line, sizeof(answer_line), "%s", answer);
 

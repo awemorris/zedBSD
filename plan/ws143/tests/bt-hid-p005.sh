@@ -92,9 +92,11 @@ guest "echo y | /bin/bt pair $mouse" > "$out/pair-mouse.txt"
 cat "$out/pair-mouse.txt"
 expect "the mouse asks for agreement" "CONSENT" "$out/pair-mouse.txt"
 expect "the mouse paired" "PAIRED address=$mouse type=bredr authenticated=0" "$out/pair-mouse.txt"
-sleep 1
-guest "/bin/evdev-probe -b bluetooth -p $mouse -N -t 15000 -r 4000 > /tmp/p005-mouse2.txt 2>&1 </dev/null & echo started" >/dev/null
-sleep 9
+# The mouse goes 4 s into its connection and comes back a second later; the node it comes back with reuses the
+# number of the first (the lowest free), so its reader starts after it is back (-N would take the name as not new).
+sleep 8
+guest "/bin/evdev-probe -b bluetooth -p $mouse -t 5000 -r 4000 > /tmp/p005-mouse2.txt 2>&1 </dev/null & echo started" >/dev/null
+sleep 3
 guest 'cat /tmp/p005-mouse1.txt' > "$out/mouse1.txt"
 guest 'cat /tmp/p005-mouse2.txt' > "$out/mouse2.txt"
 guest '/bin/bt status' > "$out/status3.txt"
@@ -102,9 +104,11 @@ cat "$out/status3.txt"
 expect "the mouse's node" "^EVDEV node=.*bus=5 vendor=1209 product=4d53" "$out/mouse1.txt"
 expect "REL_X 5" '^EVDEV event type=2 code=0 value=5$' "$out/mouse1.txt"
 expect "the mouse went by itself" '^EVDEV gone$' "$out/mouse1.txt"
-expect "the mouse came back by itself: a new node" "^EVDEV node=.*bus=5 vendor=1209 product=4d53" "$out/mouse2.txt"
+expect "the mouse came back by itself: its node again" "^EVDEV node=.*bus=5 vendor=1209 product=4d53" "$out/mouse2.txt"
 expect "REL_X 5 again" '^EVDEV event type=2 code=0 value=5$' "$out/mouse2.txt"
 expect "the mouse is open again" "address=$mouse type=bredr transport=hid state=open" "$out/status3.txt"
+since=$(sed -n "s/.*address=$mouse .*state=open .*since=\([0-9]*\) .*/\1/p" "$out/status3.txt")
+if [ -n "$since" ] && [ "$since" -le 8 ]; then ok "open again since its own connection (${since} s)"; else fail "open again since its own connection" "since=${since:-?}"; fi
 has "bt disconnect of the mouse" "$(guest "/bin/bt disconnect $mouse")" "BT DISCONNECT result=ok"
 has "the mouse cannot be paged" "$(guest "/bin/bt connect $mouse; true")" "ERROR unreachable"
 

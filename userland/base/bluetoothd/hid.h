@@ -22,8 +22,16 @@
  * connects by itself and asks for its channels before the link is
  * encrypted is answered Pending until it is (section 9.8).
  *
- * LE (HOGP) is i03's; this file serves BR/EDR only.  It is the router's
- * HID host (router.h) and the pairing's handoff (pair.h).
+ * LE (ws143-p005 i03, sections 4.6, 4.7 and 4.9): a bonded LE device is
+ * connected directly (CONNECT), or by the controller from its filter
+ * accept list while bluetoothd waits for it (auto-connect), encrypted with
+ * the bond's LTK, and its attributes are discovered over ATT (hog.c); its
+ * reports come as notifications.  Its record keeps no descriptor (the map
+ * is read at each connection).  A pairing, a scan, CONNECT and a change of
+ * the list cancel the auto-connect first and it is set again after.
+ *
+ * It is the router's HID host (router.h) and the pairing's handoff
+ * (pair.h).
  */
 
 #ifndef BLUETOOTHD_HID_H
@@ -31,6 +39,7 @@
 
 #include "userland/base/bluetoothd/acl.h"
 #include "userland/base/bluetoothd/hidcache.h"
+#include "userland/base/bluetoothd/hog.h"
 #include "userland/base/bluetoothd/keys.h"
 #include "userland/base/bluetoothd/l2cap.h"
 #include "userland/base/bluetoothd/router.h"
@@ -63,6 +72,13 @@
 #define BTD_HID_SETUP_TRIES	3U
 #define BTD_HID_SETUP_MS	100U
 
+/* How long a resumed link has to answer an Echo Request (review S5). */
+#define BTD_HID_ECHO_MS		3000U
+
+/* The auto-connect's scan: an interval of 1.28 s and a window of 11.25 ms (0.625 ms units, review S4). */
+#define BTD_HID_LE_INTERVAL	0x0800U
+#define BTD_HID_LE_WINDOW	0x0012U
+
 /* The pages again of a wanted device that went: the first wait, the longest, and how many before it is paused (review S5). */
 #define BTD_HID_RETRY_FIRST_MS	5000U
 #define BTD_HID_RETRY_LAST_MS	60000U
@@ -71,8 +87,9 @@
 /*
  * Where a device's connection is: none, paging (or accepting its own
  * connection), authenticating, encrypting, the SDP channel and records,
- * the HID channels, the handshake of SET_PROTOCOL, open, closing, and the
- * setup to be written again.
+ * the HID channels, the handshake of SET_PROTOCOL, open, closing, the
+ * setup to be written again; LE's discovery over ATT, and its
+ * notifications turned on after the input device is made.
  */
 #define BTD_HID_IDLE		0U
 #define BTD_HID_PAGING		1U
@@ -84,6 +101,8 @@
 #define BTD_HID_OPEN		7U
 #define BTD_HID_CLOSING		8U
 #define BTD_HID_SETUP		9U
+#define BTD_HID_GATT		10U
+#define BTD_HID_SUBSCRIBE	11U
 
 /* One report that came before the input device was made. */
 struct btd_hid_report {
@@ -100,6 +119,7 @@ struct btd_hid_report {
 struct btd_hid_device {
 	int used;
 	uint8_t address[BTD_ADDRESS_BYTES];
+	unsigned type;
 	struct btd_hidcache record;
 	int have_descriptor;
 
@@ -126,6 +146,11 @@ struct btd_hid_device {
 	int32_t event;
 	int32_t touch_event;
 	unsigned setup_tries;
+
+	/* LE's attribute discovery (hog.c), whether its encryption was asked for, and a resumed link's Echo Request's deadline (0: none). */
+	struct btd_hog hog;
+	int le_encrypting;
+	uint64_t echo_deadline;
 
 	/* The reports that came before the input device. */
 	unsigned queued;
@@ -179,14 +204,20 @@ struct btd_hid {
 	int held;
 	int page_scan;
 	unsigned refused;
+
+	/* LE's auto-connect: whether it is set (an LE Create Connection from the filter accept list), how often it was, and when a refused one is tried again (0: at once). */
+	int le_armed;
+	unsigned le_arms;
+	uint64_t le_retry_at;
 };
 
 void btd_hid_init(struct btd_hid *hid, struct btd_session *session, const char *keys_folder, struct btd_router *router, const struct btd_hid_hooks *hooks);
 void btd_hid_refresh(struct btd_hid *hid);
-int btd_hid_connect(struct btd_hid *hid, const uint8_t *address, char *answer, size_t size);
-int btd_hid_disconnect(struct btd_hid *hid, const uint8_t *address);
-void btd_hid_forget(struct btd_hid *hid, const uint8_t *address);
-void btd_hid_release(struct btd_hid *hid, const uint8_t *address);
+int btd_hid_connect(struct btd_hid *hid, const uint8_t *address, unsigned type, char *answer, size_t size);
+int btd_hid_disconnect(struct btd_hid *hid, const uint8_t *address, unsigned type);
+void btd_hid_forget(struct btd_hid *hid, const uint8_t *address, unsigned type);
+void btd_hid_release(struct btd_hid *hid, const uint8_t *address, unsigned type);
+void btd_hid_resume(struct btd_hid *hid);
 void btd_hid_status(const struct btd_hid *hid, unsigned index, char *line, size_t size);
 unsigned btd_hid_open_count(const struct btd_hid *hid);
 int btd_hid_busy(const struct btd_hid *hid, const uint8_t *address);
@@ -199,6 +230,7 @@ int btd_hid_wants(void *context, const uint8_t *address);
 int btd_hid_claims(void *context, const uint8_t *address);
 void btd_hid_handle(void *context, struct btd_session *session, const uint8_t *packet, size_t length);
 int btd_hid_policy_after_pair(uint32_t device_class);
+int btd_hid_policy_after_le_pair(uint16_t appearance);
 int btd_hid_policy_after_disconnect(void);
 
 #endif

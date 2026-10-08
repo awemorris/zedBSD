@@ -93,6 +93,7 @@
 
 /* LE's Connection Complete subevent, and Connection Complete's link type of an ACL connection. */
 #define SESSION_LE_CONNECTED		0x01U
+#define SESSION_LE_ENHANCED		0x0aU
 #define SESSION_LINK_ACL		0x01U
 
 /* A connection handle's bits. */
@@ -1287,9 +1288,10 @@ session_core(
 	/*
 	 * LE's subevents (bit n is subevent n + 1, §7.8.1): Connection Complete,
 	 * Advertising Report, Connection Update Complete, Read Local P-256
-	 * Public Key Complete, Generate DHKey Complete.
+	 * Public Key Complete, Generate DHKey Complete, Enhanced Connection
+	 * Complete (ws143-p005 i03: the identity of a resolved address).
 	 */
-	static const uint8_t le_event_mask[8] = { 0x87U, 0x01U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U };
+	static const uint8_t le_event_mask[8] = { 0x87U, 0x03U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U };
 	static const uint8_t extended_inquiry[1] = { 0x02U };
 	static const uint8_t enabled[1] = { 0x01U };
 	static const uint8_t le_host[2] = { 0x01U, 0x00U };
@@ -1685,9 +1687,9 @@ session_counted_event(
 		return 1;
 	}
 
-	/* LE's Connection Complete: subevent, status, handle, and the rest. */
-	if (event->code == BTD_EVENT_LE_META && event->length >= 1U && event->parameters[0] == SESSION_LE_CONNECTED) {
-		if (event->length < 19U)
+	/* LE's (Enhanced, ws143-p005 i03) Connection Complete: subevent, status, handle, and the rest. */
+	if (event->code == BTD_EVENT_LE_META && event->length >= 1U && (event->parameters[0] == SESSION_LE_CONNECTED || event->parameters[0] == SESSION_LE_ENHANCED)) {
+		if (event->length < 19U || (event->parameters[0] == SESSION_LE_ENHANCED && event->length < 31U))
 			return -1;
 
 		/* A connection made. */

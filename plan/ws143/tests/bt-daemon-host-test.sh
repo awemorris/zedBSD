@@ -37,5 +37,8 @@ cc $flags -o "$OUT/bt-hidhost-host-test" plan/ws143/tests/bt-hidhost-host-test.c
 	userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/acl.c \
 	userland/base/bluetoothd/l2cap.c userland/base/bluetoothd/smp.c userland/base/bluetoothd/crypto.c \
 	userland/base/bluetoothd/keys.c userland/base/bluetoothd/sdp.c userland/base/bluetoothd/hidp.c \
-	userland/base/bluetoothd/hidcache.c -lpthread
+	userland/base/bluetoothd/hidcache.c userland/base/bluetoothd/hog.c userland/base/bluetoothd/att.c -lpthread
 timeout 300 "$OUT/bt-hidhost-host-test" "$hidhost"
+cc $flags -o "$OUT/bt-hog-host-test" plan/ws143/tests/bt-hog-host-test.c userland/base/bluetoothd/hog.c \
+	userland/base/bluetoothd/att.c
+timeout 60 "$OUT/bt-hog-host-test"

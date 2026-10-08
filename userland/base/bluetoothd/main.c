@@ -57,6 +57,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <uapi/system.h>
 #include <unistd.h>
 
 /* How often the nodes are looked for while there is no controller. */
@@ -153,6 +154,8 @@ static void btd_hid_told(void *context, const uint8_t *address, const char *line
 static void btd_hid_holding(void);
 static void btd_trace(void *context, const uint8_t *packet, size_t length, int received);
 static int btd_arguments(int argc, char **argv);
+static void btd_system_open(void);
+static void btd_system_events(void);
 static int btd_parse_device(const char *text, uint8_t *address, unsigned *type);
 static void btd_write(struct btd_client *client, const char *format, ...) __attribute__((format(printf, 2, 3)));
 static void btd_client_close(int index);
@@ -205,6 +208,9 @@ static struct btd_privsep btd_separation;
 /* The node given with -f, or NULL for the lowest that opens. */
 static const char *btd_node;
 
+/* The child's /dev/system, subscribed to the power events (-1: none). */
+static int btd_system = -1;
+
 /* The btsnoop record given with -s (ws143-p005 section 9.11): its path (NULL: none) and the child's open file (-1). */
 static const char *btd_snoop_path;
 static int btd_snoop = -1;
@@ -251,7 +257,7 @@ main(
 	int argc,
 	char **argv)
 {
-	struct pollfd descriptors[3U + BTD_CLIENTS_MAX];
+	struct pollfd descriptors[4U + BTD_CLIENTS_MAX];
 	struct btd_hid_hooks hid_hooks;
 	struct btd_router_hid router_hid;
 	unsigned count;
@@ -298,6 +304,9 @@ main(
 			btd_log("bluetoothd: %s: %s\n", btd_snoop_path, strerror(errno));
 	}
 
+	/* The system's power events (the end of a sleep, phase005 section 4.9); without them the links are not checked after a sleep. */
+	btd_system_open();
+
 	/* The user's switch, as it was left (ws143-p006). */
 	btd_power_load();
 
@@ -341,12 +350,15 @@ main(
 		descriptors[count].events = POLLIN;
 		count++;
 
-		/* Each client's descriptor. */
+		/* Each client's descriptor, then the system's events (-1: none). */
 		for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
 			descriptors[count].fd = btd_clients[index].descriptor;
 			descriptors[count].events = POLLIN;
 			count++;
 		}
+		descriptors[count].fd = btd_system;
+		descriptors[count].events = POLLIN;
+		count++;
 
 		/* The wait, as long as the earliest deadline allows. */
 		timeout = btd_timeout();
@@ -421,6 +433,10 @@ main(
 			if (btd_clients[index].descriptor >= 0 && btd_clients[index].dead)
 				btd_client_close((int)index);
 		}
+
+		/* The system's events: the end of a sleep checks the HID links. */
+		if (btd_system >= 0 && (descriptors[3U + BTD_CLIENTS_MAX].revents & POLLIN) != 0)
+			btd_system_events();
 	}
 }
 
@@ -1286,8 +1302,7 @@ btd_pair(
 	}
 
 	/* A HID device of that address (open or waiting) lets go first: the pairing makes it anew (review B7). */
-	if (type == BTD_ADDRESS_BREDR)
-		btd_hid_release(&btd_hid_host, address);
+	btd_hid_release(&btd_hid_host, address, type);
 
 	/* The client waits for the end (which may come at once). */
 	btd_pair_client = index;
@@ -1399,9 +1414,8 @@ btd_forget(
 		return;
 	}
 
-	/* A HID device's record goes too; a connected one hears the unplug and is disconnected (design section 6.3). */
-	if (type == BTD_ADDRESS_BREDR)
-		btd_hid_forget(&btd_hid_host, address);
+	/* A HID device's record goes too; a connected one hears the unplug (BR/EDR) and is disconnected (design section 6.3). */
+	btd_hid_forget(&btd_hid_host, address, type);
 
 	/* Succeeded: forgotten. */
 	btd_log("bluetoothd: forgot %s\n", argument);
@@ -1851,16 +1865,10 @@ btd_connect(
 		return;
 	}
 
-	/* The device: BR/EDR's. */
+	/* The device: BR/EDR's or LE's. */
 	error = btd_parse_device(argument, address, &type);
 	if (error != 0) {
 		btd_write(client, "ERROR address\nDONE\n");
-		return;
-	}
-
-	/* LE's HID devices are not connected yet (i03). */
-	if (type != BTD_ADDRESS_BREDR) {
-		btd_write(client, "ERROR not-supported\nDONE\n");
 		return;
 	}
 
@@ -1878,7 +1886,7 @@ btd_connect(
 
 	/* The connection: answered now, or the client waits for its end. */
 	btd_hid_holding();
-	answered = btd_hid_connect(&btd_hid_host, address, answer, sizeof(answer));
+	answered = btd_hid_connect(&btd_hid_host, address, type, answer, sizeof(answer));
 	if (answered) {
 		btd_write(client, "%s\nDONE\n", answer);
 		return;
@@ -1910,13 +1918,13 @@ btd_disconnect(
 
 	/* The device. */
 	error = btd_parse_device(argument, address, &type);
-	if (error != 0 || type != BTD_ADDRESS_BREDR) {
+	if (error != 0) {
 		btd_write(client, "ERROR address\nDONE\n");
 		return;
 	}
 
 	/* Its disconnection. */
-	error = btd_hid_disconnect(&btd_hid_host, address);
+	error = btd_hid_disconnect(&btd_hid_host, address, type);
 	if (error != 0) {
 		btd_write(client, "ERROR not-connected\nDONE\n");
 		return;
@@ -2004,10 +2012,10 @@ btd_hid_holding(
 	int pairing;
 	int held;
 
-	/* A pairing, or a scan. */
+	/* A pairing, a scan, or Bluetooth turned off (no page, no auto-connect, ws143-p006's note). */
 	pairing = btd_pair_active(&btd_pairing);
 	held = 0;
-	if (pairing || btd_session.scanning)
+	if (pairing || btd_session.scanning || btd_powered_off)
 		held = 1;
 
 	/* Succeeded: told. */
@@ -2063,4 +2071,56 @@ btd_arguments(
 
 	/* Succeeded: understood. */
 	return 0;
+}
+
+/* Opens /dev/system for its power events (the child's own open: the node is everyone's to read). */
+static void
+btd_system_open(
+	void)
+{
+	struct system_event_subscription subscription;
+	int status;
+
+	/* The node, without waiting. */
+	btd_system = open("/dev/system", O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+	if (btd_system < 0) {
+		btd_log("bluetoothd: /dev/system: %s (no check after a sleep)\n", strerror(errno));
+		return;
+	}
+
+	/* Succeeded: the power events only. */
+	memset(&subscription, 0, sizeof(subscription));
+	subscription.classes = KERN_SYSTEM_EVENT_POWER;
+	status = ioctl(btd_system, KERN_SYSTEM_EVENT_SUBSCRIBE, &subscription);
+	if (status != 0) {
+		btd_log("bluetoothd: /dev/system: %s (no check after a sleep)\n", strerror(errno));
+		(void)close(btd_system);
+		btd_system = -1;
+	}
+}
+
+/* Reads the waiting system events; the end of a sleep makes the HID host check its links (review S5). */
+static void
+btd_system_events(
+	void)
+{
+	struct system_event event;
+	ssize_t got;
+	int same;
+
+	/* Each whole record until none waits. */
+	for (;;) {
+		got = read(btd_system, &event, sizeof(event));
+		if (got != (ssize_t)sizeof(event))
+			return;
+		event.subject[sizeof(event.subject) - 1U] = '\0';
+		same = strcmp(event.subject, "sleep.end");
+		if (same != 0)
+			continue;
+
+		/* A sleep ended: the links are checked, while there is a controller. */
+		btd_log("bluetoothd: sleep.end, the HID links checked\n");
+		if (btd_session_open && btd_session.state == BTD_STATE_READY)
+			btd_hid_resume(&btd_hid_host);
+	}
 }
