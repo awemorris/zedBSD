@@ -68,7 +68,7 @@
 | WS169 ws169-p002 → [ws177-p005](phase005/phase.md) | mail を出せるのは同じ uid の誰でも | arrived を送れる client を Mail に限る（今は system manager の見える client なら誰でも arrived を送れる） | `wayland/mail-shell.c` の `mail_arrived` | 2026-10-06 |
 | WS169 ws169-p003（IMAP・SMTP の backend） | ISO-2022-JP・Shift_JIS・EUC-JP の本文と件名 | UTF-8 に変換して出す（今は bytes のまま、文字化けする） | `mailer/mime.c` の `mime_to_utf8` | 2026-10-07 |
 | WS169 ws169-p003 | 1 MiB を超えるメール | 本文の部分だけを取る（BODYSTRUCTURE と BODY.PEEK[1]）、添付の大きさを正しく（今は先頭 1 MiB を取り、添付の大きさは encode の大きさからの見積もり） | `mailer/imap.c` の `ml_imap_fetch`、`mime.c` | 2026-10-07 |
-| WS169 ws169-p003 | 証明書の検証の失敗・TLS の無い server・接続の timeout・server の BYE | 理由を画面に出し、自己署名を許すかを聞く（今は error の文だけ） | `mailer/tls.c`・`conn.c` | 2026-10-07 |
+| WS169 ws169-p003 → [ws177-p015](phase015/phase.md) | 証明書の検証の失敗・TLS の無い server・接続の timeout・server の BYE | 理由を画面に出し、自己署名を許すかを聞く（今は error の文だけ） | `mailer/tls.c`・`conn.c` | 2026-10-07 |
 | WS169 ws169-p003 | modified UTF-7 の folder 名、`\Noselect` の親、literal の folder 名 | 正しく読み、表示する（今は quoted・atom だけ、名前は bytes のまま） | `mailer/imap.c` の `imap_list_name` | 2026-10-07 |
 | WS169 ws169-p003 | MOVE・UIDPLUS の server | `UID MOVE`・`UID EXPUNGE` を使う（今は COPY＋\Deleted＋EXPUNGE で、他の \Deleted の message も消える） | `mailer/imap.c` の `ml_imap_move` | 2026-10-07 |
 | WS169 ws169-p003 | 宛先の名前が ASCII でない、To・Cc の長い行 | encoded word と header の折り返し（今は打ったまま 1 行） | `mailer/compose.c` の `compose_field` | 2026-10-07 |
@@ -77,11 +77,11 @@
 | WS169 ws169-p004（メーラの app） | password の保存 | desktop の秘密の store に置く（今は 0600 の平文の file、2026-10-06 ユーザーの仮置き。`secret.c` の 2 関数を置き換える） | `mailer/secret.c` | 2026-10-07 |
 | WS169 ws169-p004 | 起動ごとの取り直し、offline | local の cache に message を保ち、起動を速く・offline でも読む（今は memory だけ、起動のたびに各 folder の最新 50 通） | `mailer/store.c`・`sync.c` | 2026-10-07 |
 | WS169 ws169-p004 | 一覧の先（51 通目より古い）、server の側の既読・削除の変化 | scroll で古い物を取る、FLAGS・EXPUNGE の変化を一覧に反映する（今は取った時のまま） | `mailer/sync.c`・`imap.c` | 2026-10-07 |
-| WS169 ws169-p004 | Trash の中の Delete、Sent を自分で保つ server（Gmail）で Sent が 2 通 | 完全な削除、APPEND しない（今は Trash で Delete は何もしない、Gmail では 2 通） | `mailer/main.c` の `ml_request_move`、`sync.c` の ML_JOB_SEND | 2026-10-07 |
+| WS169 ws169-p004 → [ws177-p015](phase015/phase.md) | Trash の中の Delete、Sent を自分で保つ server（Gmail）で Sent が 2 通 | 完全な削除、APPEND しない（今は Trash で Delete は何もしない、Gmail では 2 通） | `mailer/main.c` の `ml_request_move`、`sync.c` の ML_JOB_SEND | 2026-10-07 |
 | WS169 ws169-p004 | 送信の失敗の後の書きかけ、下書き、添付の保存・送信 | 書きかけを Drafts に保つ、添付を保存・付ける（今は失敗の通知だけ、書いた物は画面に残る） | `mailer/view.c`・`main.c` | 2026-10-07 |
-| WS169 ws169-p004 | account の削除・編集、5 個目の account | Settings か Mail の中で消す・直す（今は追加だけ、4 個まで） | `mailer/account.c`・`view.c` | 2026-10-07 |
-| WS169 ws169-p004 | 日付の語が古くなる（Yesterday のまま日をまたぐ） | 描く時に今から作る（今は取った時の語） | `mailer/store.c` の `store_dates` | 2026-10-07 |
-| WS169 ws169-p004 | 一覧が 512 通を超える | 全部を出す（今は 512 通まで） | `mailer/view.c` の `ML_MESSAGES_MAX` | 2026-10-07 |
+| WS169 ws169-p004 → [ws177-p015](phase015/phase.md) | account の削除・編集、5 個目の account | Settings か Mail の中で消す・直す（今は追加だけ、4 個まで） | `mailer/account.c`・`view.c` | 2026-10-07 |
+| WS169 ws169-p004 → [ws177-p015](phase015/phase.md) | 日付の語が古くなる（Yesterday のまま日をまたぐ） | 描く時に今から作る（今は取った時の語） | `mailer/store.c` の `store_dates` | 2026-10-07 |
+| WS169 ws169-p004 → [ws177-p015](phase015/phase.md) | 一覧が 512 通を超える | 全部を出す（今は 512 通まで） | `mailer/view.c` の `ML_MESSAGES_MAX` | 2026-10-07 |
 | WS169 ws169-p005（browser の code の入力） → [ws177-p014](phase014/phase.md) | page に focus の欄が無い、別の tab・別の窓 | code を clipboard に置いて知らせる、どの tab に入れるかを選ぶ（今は focus の要素に打つだけ、無ければ何も起きない） | `browser/shell/mail.c` の `shell_mail_fill` | 2026-10-07 |
 | WS169 ws169-p005 → [ws177-p014](phase014/phase.md) | 英字を含む code、`autocomplete="one-time-code"` の欄 | 英字の DOM の code、one-time-code の欄を探して入れる（今は数字の code だけ、focus の欄へ） | `browser/shell/mail.c`、`mailer/code.c` | 2026-10-07 |
 | WS169 ws169-p005 → [ws177-p014](phase014/phase.md) | 通知の popup（WS156 p003）が無い間 | 通知の click で入る経路の QEMU の確認（今は titlebar の control だけが見える） | `browser/shell/mail.c`、WS156 p003 | 2026-10-07 |

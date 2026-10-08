@@ -30,8 +30,8 @@
 #define SECRET_NAME		"mailer-accounts"
 #define SECRET_NEW_NAME		"mailer-accounts.new"
 
-/* The most accounts the file keeps. */
-#define SECRET_LINES_MAX	8U
+/* The most accounts the file keeps (two lines for each account Mail can have). */
+#define SECRET_LINES_MAX	(ML_ACCOUNTS_MAX * 2U)
 
 /* One line of the file: the account's address and its password. */
 struct secret_line {
@@ -80,9 +80,11 @@ ml_secret_load(
 }
 
 /*
- * Keeps the password of an address (in place of an earlier one): the
- * file written anew beside the old one with mode 0600, then renamed over
- * it.  Returns 0 or an errno value of the file.
+ * Keeps the password of an address (in place of an earlier one), or
+ * forgets it when the password is empty (ws177-p015: an account removed,
+ * or its address changed): the file written anew beside the old one with
+ * mode 0600, then renamed over it.  Returns 0 or an errno value of the
+ * file.
  */
 int
 ml_secret_save(
@@ -123,16 +125,36 @@ ml_secret_save(
 			break;
 	}
 
+	/* Forgetting: the address's line goes, the later ones move up (an address without one has nothing to forget). */
+	if (password[0] == '\0') {
+		if (index == count) {
+			memset(lines, 0, sizeof(lines));
+			return 0;
+		}
+
+		/* The later lines move up over it, and the last place is wiped. */
+		while (index + 1U < count) {
+			lines[index] = lines[index + 1U];
+			index++;
+		}
+
+		/* One line fewer. */
+		count--;
+		memset(&lines[count], 0, sizeof(lines[count]));
+	}
+
 	/* A new address: one more line. */
-	if (index == count) {
+	if (password[0] != '\0' && index == count) {
 		if (count == SECRET_LINES_MAX)
 			return ENOSPC;
 		count++;
 	}
 
 	/* The line's address and password. */
-	(void)snprintf(lines[index].address, sizeof(lines[index].address), "%s", address);
-	(void)snprintf(lines[index].password, sizeof(lines[index].password), "%s", password);
+	if (password[0] != '\0') {
+		(void)snprintf(lines[index].address, sizeof(lines[index].address), "%s", address);
+		(void)snprintf(lines[index].password, sizeof(lines[index].password), "%s", password);
+	}
 
 	/* The new file, its owner's only. */
 	(void)snprintf(path, sizeof(path), "%s/%s", folder, SECRET_NAME);
@@ -211,9 +233,9 @@ secret_read(
 			continue;
 		*tab = '\0';
 
-		/* Kept. */
-		(void)snprintf(lines[*count].address, sizeof(lines[*count].address), "%s", line);
-		(void)snprintf(lines[*count].password, sizeof(lines[*count].password), "%s", tab + 1);
+		/* Kept, each cut to its room. */
+		(void)snprintf(lines[*count].address, sizeof(lines[*count].address), "%.*s", (int)(ML_TEXT_MAX - 1U), line);
+		(void)snprintf(lines[*count].password, sizeof(lines[*count].password), "%.*s", (int)(ML_TEXT_MAX - 1U), tab + 1);
 		(*count)++;
 	}
 

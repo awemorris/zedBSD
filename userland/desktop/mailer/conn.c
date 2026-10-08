@@ -10,11 +10,15 @@
  * host and port, TLS from the start or after STARTTLS (tls.c), and reads
  * of a whole line or of a counted run of bytes through a buffer, each
  * waiting at most the connection's timeout for the server.
+ *
+ * ws177-p015: a connection that the server does not take within
+ * CONN_CONNECT_MS fails with ETIMEDOUT instead of the system's long wait.
  */
 
 #include "mail.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <poll.h>
 #include <stdio.h>
@@ -26,10 +30,14 @@
 /* How long a read waits for the server by default (ms). */
 #define CONN_TIMEOUT_MS		30000
 
+/* How long a connection waits for the server to take it (ms). */
+#define CONN_CONNECT_MS		15000
+
 /* The highest port number. */
 #define CONN_PORT_MAX		65535UL
 
 static int conn_fill(struct ml_conn *conn);
+static int conn_connect(int fd, const struct sockaddr *address, socklen_t length);
 
 /*
  * Reads a server as "host" or "host:port": the port (the fallback when
@@ -124,10 +132,10 @@ ml_conn_open(
 			continue;
 		}
 
-		/* Connected, or the next address. */
-		status = connect(fd, address->ai_addr, address->ai_addrlen);
+		/* Connected in time, or the next address. */
+		status = conn_connect(fd, address->ai_addr, address->ai_addrlen);
 		if (status != 0) {
-			error = errno;
+			error = status;
 			(void)close(fd);
 			continue;
 		}
@@ -146,7 +154,7 @@ ml_conn_open(
 
 	/* A secure server: TLS at once. */
 	if (server->secure) {
-		error = ml_conn_start_tls(conn, server->host);
+		error = ml_conn_start_tls(conn, server);
 		if (error != 0) {
 			ml_conn_close(conn);
 			return error;
@@ -159,12 +167,13 @@ ml_conn_open(
 
 /*
  * Starts TLS on an open plain connection (after STARTTLS), checking the
- * certificate against a host.  Returns 0 or a TLS failure.
+ * certificate against the server's host, or against its pin.  Returns 0
+ * or a TLS failure.
  */
 int
 ml_conn_start_tls(
 	struct ml_conn *conn,
-	const char *host)
+	const struct ml_server *server)
 {
 	int error;
 
@@ -173,7 +182,7 @@ ml_conn_start_tls(
 		return EPROTO;
 
 	/* The handshake. */
-	error = ml_tls_open(conn->fd, host, &conn->tls);
+	error = ml_tls_open(conn->fd, server->host, server->pin, &conn->tls);
 	if (error != 0)
 		return error;
 
@@ -395,5 +404,66 @@ conn_fill(
 
 	/* Succeeded: the buffer has bytes. */
 	conn->end = (size_t)received;
+	return 0;
+}
+
+/*
+ * Connects a socket to an address, waiting at most CONN_CONNECT_MS for
+ * the server to take it; the socket blocks again after.  Returns 0,
+ * ETIMEDOUT, or the connection's errno value.
+ */
+static int
+conn_connect(
+	int fd,
+	const struct sockaddr *address,
+	socklen_t length)
+{
+	struct pollfd watched;
+	socklen_t size;
+	int flags;
+	int status;
+	int ready;
+	int error;
+
+	/* The socket does not block while it connects. */
+	flags = fcntl(fd, F_GETFL, 0);
+	if (flags < 0)
+		return errno;
+	status = fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+	if (status != 0)
+		return errno;
+
+	/* The connection started (a local one may be made at once). */
+	status = connect(fd, address, length);
+	if (status != 0 && errno != EINPROGRESS)
+		return errno;
+
+	/* Its end, waited for in time. */
+	if (status != 0) {
+		watched.fd = fd;
+		watched.events = POLLOUT;
+		watched.revents = 0;
+		ready = poll(&watched, 1, CONN_CONNECT_MS);
+		if (ready < 0)
+			return errno;
+		if (ready == 0)
+			return ETIMEDOUT;
+
+		/* How it ended. */
+		error = 0;
+		size = sizeof(error);
+		status = getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &size);
+		if (status != 0)
+			return errno;
+		if (error != 0)
+			return error;
+	}
+
+	/* The socket blocks again, as the reads and writes expect. */
+	status = fcntl(fd, F_SETFL, flags);
+	if (status != 0)
+		return errno;
+
+	/* Succeeded: the server took the connection. */
 	return 0;
 }

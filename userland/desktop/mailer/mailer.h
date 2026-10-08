@@ -82,18 +82,27 @@ struct ml_message {
 #define ML_ACTION_SIGN_IN	12U
 #define ML_ACTION_SEEN		13U
 #define ML_ACTION_CODES		14U
+#define ML_ACTION_EDIT_ACCOUNT	15U	/* the form with the account shown (ws177-p015) */
+#define ML_ACTION_ASK_REMOVE	16U	/* the form's Remove Account: asks first */
+#define ML_ACTION_REMOVE_ACCOUNT	17U	/* the account edited removed (the request's message is its index) */
+#define ML_ACTION_TRUST		18U	/* the answer about a certificate (the request's message: 1 trusted, 0 not) */
 
-/* The longest message body quoted in a reply, with its NUL, and the most messages a list shows. */
+/* The questions the view asks over the window (ws177-p015). */
+#define ML_QUESTION_NONE	0U
+#define ML_QUESTION_TRUST	1U	/* whether to trust a server's certificate that does not verify */
+#define ML_QUESTION_REMOVE	2U	/* whether to remove the account edited */
+
+/* The longest message body quoted in a reply, with its NUL. */
 #define ML_BODY_MAX		8192U
-#define ML_MESSAGES_MAX		512U
 
 /* The most requests the view queues for the window between two frames. */
 #define ML_REQUESTS_MAX		8U
 
 /*
  * Something the view asks of the servers (ML_ACTION_SEND, _GET, _ARCHIVE,
- * _DELETE, _SIGN_IN, _SEEN, _CODES), for the window to carry out: the
- * action and the message it is about (-1 for none).
+ * _DELETE, _SIGN_IN, _SEEN, _CODES, _REMOVE_ACCOUNT, _TRUST), for the
+ * window to carry out: the action and the message it is about (-1 for
+ * none; an account's index or an answer for the last two).
  */
 struct ml_request {
 	unsigned action;
@@ -105,16 +114,23 @@ struct ml_request {
  *
  * What is shown: the account and folder, the message (-1 for none),
  * whether a narrow window shows the message instead of the list, whether
- * the last frame was narrow, and the scrolls of the list and of the
- * message.
+ * the last frame was narrow, the scrolls of the list and of the message,
+ * and (ws177-p015) the scroll of the accounts' folders with their height
+ * as the last frame measured it, and the messages the list shows, in its
+ * order (allocated and grown as the folder grows, so that a list has no
+ * limit).
  *
  * The search, and the message being written: whether it is open, its
  * fields and its body (libkeiland's text area, ws090-p022), and the ID of
  * the message it answers (empty for a new one).
  *
- * An account being added: whether its form shows, its fields, and whether
- * the browser may fill in sign-in codes from Mail (the desktop's setting,
- * as the window last read it).
+ * An account being added or edited: whether its form shows, the account
+ * edited (-1 for a new one), its fields, and whether the browser may fill
+ * in sign-in codes from Mail (the desktop's setting, as the window last
+ * read it).
+ *
+ * The question asked over the window (ML_QUESTION_*), its title and its
+ * words.
  *
  * The requests queued for the window, the status under Get Mail (when
  * mail was last got, or what failed), the notice shown at the bottom until
@@ -129,6 +145,10 @@ struct ml_view {
 	int narrow;
 	struct kl_scroll list_scroll;
 	struct kl_scroll reader_scroll;
+	struct kl_scroll sidebar_scroll;
+	int sidebar_height;
+	size_t *shown;
+	size_t shown_capacity;
 
 	struct kl_field search;
 	int composing;
@@ -139,12 +159,17 @@ struct ml_view {
 	char reply_id[ML_TEXT_MAX];
 
 	int adding;
+	int editing;
 	struct kl_field setup_name;
 	struct kl_field setup_address;
 	struct kl_field setup_password;
 	struct kl_field setup_imap;
 	struct kl_field setup_smtp;
 	int codes_allowed;
+
+	unsigned question;
+	char question_title[ML_TEXT_MAX];
+	char question_body[ML_TEXT_MAX * 2U];
 
 	struct ml_request requests[ML_REQUESTS_MAX];
 	size_t request_count;
@@ -160,6 +185,10 @@ const struct ml_account_config *ml_accounts(size_t *count);
 const struct ml_message *ml_messages(size_t *count);
 const char *ml_folder_name(enum ml_folder folder);
 int ml_store_add_account(const struct ml_account_config *config);
+int ml_store_set_account(int index, const struct ml_account_config *config);
+int ml_store_remove_account(int index);
+void ml_store_drop_messages(int account);
+int ml_store_redate(time_t now);
 int ml_store_insert(const struct ml_message *message);
 int ml_store_add_parsed(int account, enum ml_folder folder, uint32_t uid, unsigned flags, const struct ml_parsed *parsed, time_t now);
 long ml_store_find(int account, enum ml_folder folder, uint32_t uid);
@@ -184,6 +213,8 @@ size_t ml_view_panels(struct ml_view *view, int width, int height, struct kl_gla
 int ml_view_wait(const struct ml_view *view, uint64_t now_us);
 int ml_view_take_request(struct ml_view *view, struct ml_request *request);
 void ml_view_notice(struct ml_view *view, const char *message, uint64_t now_us);
+void ml_view_ask(struct ml_view *view, unsigned question, const char *title, const char *body);
+void ml_view_question(struct ml_view *view, struct kl_ui *ui, const struct kl_style *style, int width, int height, uint64_t now_us);
 
 /* The log for the tests (main.c, and the host tests' own). */
 void ml_log(const char *format, ...);
