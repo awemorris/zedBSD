@@ -3,7 +3,7 @@
 # ws177-p035: 整列の枠より大きい窓と大きさの固定の窓、枠を desktop の swipe の帯の外へ
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 P2 q908 実装・host・build。QEMU は T1）
+Status: test-wait（T1-475、2026-10-08 夜 Q1）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q908 / q908-i01

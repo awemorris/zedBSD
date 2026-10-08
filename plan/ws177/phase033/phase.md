@@ -3,7 +3,7 @@
 # ws177-p033: 上端の帯の長押し（apps bar の preview）と、Home が開ききった後の desktop の層を描かない
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 P2 q908 実装・host・build。QEMU は T1）
+Status: test-wait（T1-475、2026-10-08 夜 Q1）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q908（承認済み、Q1 の dispatch 2026-10-08「WS177 案 U」）/ q908-i01

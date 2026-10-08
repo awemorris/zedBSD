@@ -3,7 +3,7 @@
 # ws177-p036: 出力の大きさの変更で整列し直す、メニューを先に閉じる、swap の取り消し
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 P2 q908 実装・build。QEMU は T1、出力の変更は実機）
+Status: test-wait（T1-475、2026-10-08 夜 Q1）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q908 / q908-i01
