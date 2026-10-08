@@ -78,6 +78,15 @@ def find_select(item):
 	run.shot(item, "line-page-3")
 	item.check(third, "Enter did not reach page 3's line")
 
+	# After Enter the field keeps its words with the caret at their end: what is typed is added (ws177-p043).
+	mark = run.mark()
+	run.type("s")
+	appended = run.wait(r'PDFVIEWER FIND \w+ query="lines"', mark, 10)
+	item.step("typed s after Enter", appended or "")
+	item.check(appended, "the s typed after Enter did not add to the words")
+	run.key("backspace")
+	time.sleep(0.4)
+
 	# The first line's "The quick" selected and copied.
 	run.key("esc")
 	run.click(*window.middle())

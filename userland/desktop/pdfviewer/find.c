@@ -463,8 +463,8 @@ pv_select_button(
 		}
 
 		/* Selected (logged). */
-		pv_log("SELECT page=%lu from=%lu to-page=%lu to=%lu", (unsigned long)app->select_page, (unsigned long)app->select_anchor,
-		       (unsigned long)app->select_caret_page, (unsigned long)app->select_caret);
+		pv_log("SELECT page=%lu from=%lu to=%lu to-page=%lu", (unsigned long)app->select_page, (unsigned long)app->select_anchor,
+		       (unsigned long)app->select_caret, (unsigned long)app->select_caret_page);
 		return 1;
 	}
 
@@ -798,7 +798,7 @@ pv_select_copy(
 	free(app->copy_text);
 	app->copy_text = out;
 	app->copy_length = length;
-	pv_log("COPY bytes=%lu unreadable=%lu text=\"%.40s\"", (unsigned long)length, (unsigned long)unreadable, out);
+	pv_log("COPY bytes=%lu text=\"%.40s\" unreadable=%lu", (unsigned long)length, out, (unsigned long)unreadable);
 
 	/* Told when it was cut short. */
 	if (copied_pages < last_page - first_page + 1U) {
