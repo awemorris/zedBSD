@@ -383,6 +383,22 @@ kl_backend_session_reason(const struct kl_backend *backend)
 }
 
 /* The user's home: the test's scratch folder. */
+/* The pairing window (bluetooth-ask.c, ws143-p006): no question comes from the unsupported backend. */
+void
+kwl_bluetooth_ask_take(struct kwl_server *server, const struct kl_backend_bluetooth_question *question)
+{
+	(void)server;
+	(void)question;
+}
+
+/* The pairing window's tick: nothing shows. */
+void
+kwl_bluetooth_ask_tick(struct kwl_server *server, unsigned reachable)
+{
+	(void)server;
+	(void)reachable;
+}
+
 int
 kwl_settings_home(char *home, size_t size)
 {
@@ -1517,6 +1533,8 @@ test_both_ends(void)
 	struct kl_display displays[KL_DISPLAYS_MAX];
 	struct kl_display_place places[1];
 	struct kl_machine_about machine_about;
+	struct kl_bluetooth_state bluetooth;
+	struct kl_bluetooth_device bluetooth_devices[KL_BLUETOOTH_DEVICES_MAX];
 	struct kl_machine_filesystem machine_filesystems[KL_MACHINE_FILESYSTEMS_MAX];
 	struct kl_machine_user machine_users[KL_MACHINE_USERS_MAX];
 	struct kl_machine_mount machine_mounts[KL_MACHINE_MOUNTS_MAX];
@@ -1564,7 +1582,7 @@ test_both_ends(void)
 		return;
 	/* The library's table describes the version it binds (zedBSD's libwayland refuses more than the table; T1-144). */
 	CHECK(kl_system_manager_v1_interface.version == (int)KL_SYSTEM_MANAGER_VERSION, "manager table version %d", kl_system_manager_v1_interface.version);
-	CHECK(kl_system_capabilities(system) == (KL_SYSTEM_HAS_NETWORK | KL_SYSTEM_HAS_AUDIO | KL_SYSTEM_HAS_POWER | KL_SYSTEM_HAS_DEVICES | KL_SYSTEM_HAS_MONITOR | KL_SYSTEM_HAS_ACCOUNT | KL_SYSTEM_HAS_SHARING | KL_SYSTEM_HAS_PIN | KL_SYSTEM_HAS_NOTIFY | KL_SYSTEM_HAS_KEYS | KL_SYSTEM_HAS_MAIL | KL_SYSTEM_HAS_PHONE | KL_SYSTEM_HAS_DISPLAYS | KL_SYSTEM_HAS_MACHINE), "capabilities");
+	CHECK(kl_system_capabilities(system) == (KL_SYSTEM_HAS_NETWORK | KL_SYSTEM_HAS_AUDIO | KL_SYSTEM_HAS_POWER | KL_SYSTEM_HAS_DEVICES | KL_SYSTEM_HAS_MONITOR | KL_SYSTEM_HAS_ACCOUNT | KL_SYSTEM_HAS_SHARING | KL_SYSTEM_HAS_PIN | KL_SYSTEM_HAS_NOTIFY | KL_SYSTEM_HAS_KEYS | KL_SYSTEM_HAS_MAIL | KL_SYSTEM_HAS_PHONE | KL_SYSTEM_HAS_DISPLAYS | KL_SYSTEM_HAS_MACHINE | KL_SYSTEM_HAS_BLUETOOTH), "capabilities");
 	kl_system_network_get_state(system, &state);
 	CHECK(state.reachable == 1U && state.connected == 1U && state.kind == KL_NETWORK_WIFI && state.wifi == KL_WIFI_CONNECTED, "first network state");
 	CHECK(strcmp(state.interface, "wlan0") == 0 && strcmp(state.ssid, "Home") == 0 && state.wired[0] == '\0', "first network names");
@@ -1731,6 +1749,21 @@ test_both_ends(void)
 	CHECK(kl_system_machine_serial(system, KL_MACHINE_USERS | KL_MACHINE_ABOUT) == 0U, "machine: two parts are no part");
 	CHECK(kl_system_machine_query(system, 0U, NULL) == EINVAL, "machine: no part refused");
 	CHECK(kl_system_machine_query(system, 0x20U, NULL) == EINVAL, "machine: an unknown part refused");
+
+	/*
+	 * Bluetooth (ws143-p006) with the backend of a system that has none: offered, unreachable, no
+	 * devices; the switch asked and answered ENOTSUP; a device's action of the wrong form refused at once.
+	 */
+	CHECK(kl_system_bluetooth_state(system, &bluetooth) == 0 && bluetooth.reachable == 0U && bluetooth.state == KL_BLUETOOTH_ABSENT, "bluetooth: unreachable");
+	CHECK(kl_system_bluetooth_devices(system, bluetooth_devices, KL_BLUETOOTH_DEVICES_MAX) == 0U, "bluetooth: no devices");
+	CHECK(kl_system_bluetooth_watch(system, 1U) == 0 && kl_system_bluetooth_scan(system, 1U) == 0, "bluetooth: watch and scan asked");
+	CHECK(kl_system_bluetooth_power(system, 1U, &first) == 0, "bluetooth: power asked");
+	expect_result(display, system, first, ENOTSUP, "bluetooth: power not supported here");
+	CHECK(kl_system_bluetooth_device(system, KL_BLUETOOTH_PAIR, "0A:0B:0C:0D:0E:01", KL_BLUETOOTH_BREDR, &first) == 0, "bluetooth: pair asked");
+	expect_result(display, system, first, ENOTSUP, "bluetooth: pair not supported here");
+	CHECK(kl_system_bluetooth_device(system, KL_BLUETOOTH_PAIR, "0A:0B", KL_BLUETOOTH_BREDR, NULL) == EINVAL, "bluetooth: a short address refused");
+	CHECK(kl_system_bluetooth_device(system, 9U, "0A:0B:0C:0D:0E:01", KL_BLUETOOTH_BREDR, NULL) == EINVAL, "bluetooth: an unknown action refused");
+	CHECK(kl_system_bluetooth_scan(system, 0U) == 0 && kl_system_bluetooth_watch(system, 0U) == 0, "bluetooth: watch and scan let go");
 
 	/* The notifications (ws156-p002): a post numbered, new words for it, a body too long refused, a withdrawal closed and answered. */
 	CHECK((kl_system_capabilities(system) & KL_SYSTEM_HAS_NOTIFY) != 0U, "notify offered");
