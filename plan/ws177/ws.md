@@ -48,3 +48,5 @@ Primary Milestone: MG006（関係: MG002・MG003・MG005）
 | [ws177-p017](phase017/phase.md) | libbrowser の `browser_view_focus_field`（autocomplete の token で欄を探して focus、public の口の追加） | test-wait（2026-10-08 P1 q890 実装・host PASS・build） | ws177-p014 の判断（2026-10-08 ユーザー許可） |
 | [ws177-p018](phase018/phase.md) | sign-in code を `autocomplete="one-time-code"` の欄に直に入れる（p014 の後半、無ければ clipboard） | test-wait（2026-10-08 P1 q890 実装・host PASS・build） | ws177-p017 |
 | [ws177-p019](phase019/phase.md) | 案 O: Browser の IME・form と shell の fd（surrounding text・purpose（KL_VERSION 68）、選んだ文節、click で合成を値に、script の value、textarea の value、64 を超える fd を shell が poll。13 は不要と判断） | test-wait（2026-10-08 P1 q890 実装・host PASS・build） | ws177-p017 |
+| [ws177-p020](phase020/phase.md) | 案 M の 1: 音楽の collection と cover（絵のある .mp4 の音、4096 曲・深さ 4 の上限を外す、tags の cache と folder の変化、album の同じさと Unicode の大小、cover の切り抜きと知らせ） | in-progress（2026-10-08 P2 q903） | ws120-p008・p009 |
+| [ws177-p021](phase021/phase.md) | 案 M の 2: 音楽の再生の失敗と key（decode・読み・file の消失で次へ、音の service の lost で開き直し（WS191）、Files の理由、検索の field の Escape、連打のまとめ） | in-progress（2026-10-08 P2 q903） | ws120-p009・ws191-p003 |
