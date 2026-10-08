@@ -118,6 +118,7 @@ static void hid_gatt(struct btd_hid *hid, struct btd_hid_device *device, unsigne
 static void hid_open(struct btd_hid *hid, struct btd_hid_device *device);
 static void hid_cancel_page(struct btd_hid *hid, struct btd_hid_device *device);
 static int hid_le_type(unsigned type);
+static int hid_pages_again(const struct btd_hid_device *device);
 static void hid_send_fixed(struct btd_hid *hid, struct btd_hid_device *device, uint16_t cid, const uint8_t *payload, size_t length);
 static void hid_event(struct btd_hid *hid, const uint8_t *parameters, size_t length, uint8_t code);
 static void hid_request(struct btd_hid *hid, const uint8_t *parameters, size_t length);
@@ -227,10 +228,13 @@ btd_hid_refresh(
 		if (bonds[index].type == BTD_ADDRESS_BREDR)
 			found++;
 
-		/* A device in the table already stays as it is. */
+		/* A device in the table already stays as it is, but a wanted BR/EDR one idle (the controller came back) is paged again. */
 		device = hid_find_type(hid, bonds[index].address, bonds[index].type);
-		if (device != NULL)
+		if (device != NULL) {
+			if (hid_pages_again(device))
+				device->retry_at = btd_now_ms();
 			continue;
+		}
 
 		/* A new one, wanted back; one that does not fit is not taken. */
 		device = hid_slot(hid, bonds[index].address, bonds[index].type);
@@ -3085,6 +3089,27 @@ hid_cancel_page(
 
 	/* Succeeded: BR/EDR's, by the device's address. */
 	(void)hid_command(hid, HID_CREATE_CANCEL, device->address, BTD_ADDRESS_BYTES);
+}
+
+/*
+ * Tells whether a device of the table is paged again at a refresh: a
+ * wanted BR/EDR device, idle and not waiting for a page already, that
+ * bluetoothd pages (it does not only come by itself).
+ */
+static int
+hid_pages_again(
+	const struct btd_hid_device *device)
+{
+	/* LE's come through the auto-connect; a device under way or waiting for its page stays. */
+	if (device->type != BTD_ADDRESS_BREDR || !device->wanted || device->state != BTD_HID_IDLE || device->retry_at != 0U)
+		return 0;
+
+	/* A device that only comes by itself is waited for. */
+	if (device->record.reconnect_initiate && !device->record.normally_connectable)
+		return 0;
+
+	/* Succeeded: paged again. */
+	return 1;
 }
 
 /* Tells whether an address type is LE's. */

@@ -79,7 +79,7 @@ has "btuser may not pair" "$(guest 'echo y | runas btuser /bin/bt pair 0A:0B:0C:
 has "btuser may not scan" "$(guest 'runas btuser /bin/bt scan 1 2>&1; true')" "ERROR permission"
 has "btuser may not forget" "$(guest 'runas btuser /bin/bt forget 0A:0B:0C:0D:0E:07 2>&1; true')" "ERROR permission"
 has "btuser may list the bonds" "$(guest 'runas btuser /bin/bt bonds 2>&1; true')" "BT BONDS bonds=1"
-has "kei (wheel) may scan" "$(guest 'runas kei /bin/bt scan 2 2>&1; true')" "BT SCAN devices=4"
+has "kei (wheel) may scan (the loopback's five devices, 07 since T1-438)" "$(guest 'runas kei /bin/bt scan 2 2>&1; true')" "BT SCAN devices=5"
 
 # 5. LE.
 has "the LE mouse refuses the pairing" "$(guest 'echo y | /bin/bt pair 0A:0B:0C:0D:0E:03 le-public; true')" "ERROR rejected"

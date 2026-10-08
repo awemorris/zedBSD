@@ -857,6 +857,13 @@ test_lifecycle(void)
 	status_of(0x41U, line, sizeof(line));
 	expect(bridge_closed() && strstr(line, "state=waiting") != NULL && strstr(line, "last=lost") != NULL && !host.page_scan,
 	       "lifecycle: the controller lost (%s)", line);
+
+	/* The controller back (ready again): the device is paged at once and open again (T1-463). */
+	fake.opcode_count = 0U;
+	btd_hid_refresh(&host);
+	tick_after(100U);
+	status_of(0x41U, line, sizeof(line));
+	expect(fake_saw(0x0c1aU) && fake_saw(0x0405U) && strstr(line, "state=open") != NULL, "lifecycle: paged again on the controller's return (%s)", line);
 	run_close();
 
 	/* The device's unplug: its bond and record go, no unplug sent back, the link ended. */
