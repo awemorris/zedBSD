@@ -3,7 +3,7 @@
 # ws177-p012: Notes の文字の box（案 K、Notes の側）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（2026-10-08 P1 q887 の 2: 実装・build warning 0。QEMU は T1 の AAT `apps.notes.text-box-follow` と `apps.notes.pdf-edit-text`、指は UAT）
+Status: cleared（2026-10-08 Q1 判定、T1-415。指は実機の UAT、回転（11）は backlog）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q887 の 2（P1、2026-10-08）
@@ -38,3 +38,7 @@ Origin: [backlog-p2](../backlog-p2.md) の 7・8・10〜14（WS175 ws175-p008）
 ## Event
 
 2026-10-08 / q887-i02（P1）: 実装と build の確認。
+
+## T1-415 の判定（2026-10-08 Q1）
+
+text-box-follow: box を開き（rect=339,161,255,36）、F11 で `box moved rect=432,175,303,36`、打って Ctrl+S で保存、pdftotext に打った again、Ctrl+W で dirty=0。pdf-edit-text の回帰も fail なし。Q1 が PNG（build/review/t1-415/ の box・fullscreen）で、box が窓でも全画面でも編集する行のすぐ下の同じ相対の位置に付いて動くのを目視。指は AAT に touch の口が無いので 5330 の UAT。cleared。
