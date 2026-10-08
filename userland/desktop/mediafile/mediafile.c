@@ -8,7 +8,7 @@
 /*
  * The media file reader's common part (WS122 p003): it opens the file,
  * tells its format from the first bytes, hands the work to that format's
- * reader (mp4.c, mkv.c, ts.c) and gives the helpers both use.
+ * reader (mp4.c, mkv.c, ts.c, ogg.c) and gives the helpers both use.
  */
 
 #include "mediafile-private.h"
@@ -426,8 +426,8 @@ mf_be64(
 
 /*
  * Tells a file's format from its first bytes: Matroska's EBML header, an
- * MP4 box whose type is one an MP4 starts with, or a transport stream's
- * packets.  NULL for none of them.
+ * MP4 box whose type is one an MP4 starts with, an Ogg page that begins a
+ * stream, or a transport stream's packets.  NULL for none of them.
  */
 static const struct mf_format *
 format_of(
@@ -435,6 +435,7 @@ format_of(
 	size_t length)
 {
 	int transport;
+	int ogg;
 	int compared;
 
 	/* Too short for either header. */
@@ -459,6 +460,11 @@ format_of(
 	compared = memcmp(head + 4, "mdat", 4);
 	if (compared == 0)
 		return &mf_mp4_format;
+
+	/* An Ogg file: its first page begins a stream (ws177-p029). */
+	ogg = mf_ogg_detect(head, length);
+	if (ogg)
+		return &mf_ogg_format;
 
 	/* A transport stream: packets of 188 or 192 bytes, each with its sync byte (ws177-p028). */
 	transport = mf_ts_detect(head, length);
