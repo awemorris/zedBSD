@@ -11,6 +11,7 @@
  *   printtest [--timeout-s=N] list
  *   printtest [--timeout-s=N] add ipp|lpd HOST PORT [PATH]
  *   printtest [--timeout-s=N] default PRINTER | remove PRINTER | cancel JOB
+ *   printtest [--timeout-s=N] edit PRINTER NAME [PATH]    (ws177-p025; "" keeps each)
  *   printtest [--timeout-s=N] print [--printer=N] FILE [TITLE]
  *
  * Each answer is a "PRINTTEST result" line; list prints the printers and
@@ -66,7 +67,7 @@ main(
 
 	/* A command. */
 	if (arg >= argc) {
-		fprintf(stderr, "usage: printtest [--timeout-s=N] list|add|default|remove|cancel|print ...\n");
+		fprintf(stderr, "usage: printtest [--timeout-s=N] list|add|default|remove|cancel|edit|print ...\n");
 		return 2;
 	}
 
@@ -178,6 +179,15 @@ test_command(
 	same = strcmp(words[0], "cancel");
 	if (same == 0 && count >= 2)
 		error = kl_system_print_cancel(system, (uint32_t)atoi(words[1]), &request);
+
+	/* edit: a number, a name and a path (each "" to keep it). */
+	same = strcmp(words[0], "edit");
+	if (same == 0 && count >= 3) {
+		path = "";
+		if (count >= 4)
+			path = words[3];
+		error = kl_system_printers_edit(system, (uint32_t)atoi(words[1]), words[2], path, &request);
+	}
 
 	/* The answer, and the lists after it. */
 	if (error == 0) {

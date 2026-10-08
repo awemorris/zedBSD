@@ -16,6 +16,8 @@
  *   add(request, protocol, host, port, path)  remove(request, printer)
  *   set_default(request, printer)            cancel(request, job)
  *   print(request, printer, title, document)  the document's descriptor beside it
+ *   edit(request, printer, name, path)        since 24: a printer's name, IPP path or LPD queue
+ *                                            ("" keeps each; ws177-p025)
  *
  * Every printers object is sent the printers, the jobs and done when it is
  * made and whenever they change; the object that asked gets queued
@@ -33,10 +35,11 @@
 #include <string.h>
 #include <unistd.h>
 
-/* The longest host, path and title a request carries, with their NULs. */
+/* The longest host, path, title and name a request carries, with their NULs. */
 #define PRINTERS_HOST_MAX	64U
 #define PRINTERS_PATH_MAX	64U
 #define PRINTERS_TITLE_MAX	128U
+#define PRINTERS_NAME_MAX	128U
 
 /* The longest event: a printer's (four words, three strings). */
 #define PRINTERS_EVENT_MAX	(4U * 4U + 4U + PRINTERS_HOST_MAX + 4U + PRINTERS_PATH_MAX + 4U + KL_BACKEND_PRINTER_NAME_MAX + 4U)
@@ -69,6 +72,8 @@ static struct kl_backend_print *printers_backend(void);
 static int printers_add(struct kwl_object *object, const unsigned char *bytes, size_t size);
 static int printers_number_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 static int printers_print(struct kwl_object *object, const unsigned char *bytes, size_t size);
+static int printers_edit(struct kwl_object *object, const unsigned char *bytes, size_t size);
+static int printers_path_ok(const char *path);
 static void printers_wait(struct kwl_object *object, uint32_t backend, uint32_t request, uint32_t job);
 static void printers_state_to(struct kwl_client *client, uint32_t id);
 static void printers_tell(struct kwl_server *server);
@@ -152,6 +157,8 @@ kwl_printers_request(
 		error = printers_print(object, bytes, size);
 	else if (opcode == KL_SYSTEM_PRINTERS_REMOVE || opcode == KL_SYSTEM_PRINTERS_SET_DEFAULT || opcode == KL_SYSTEM_PRINTERS_CANCEL)
 		error = printers_number_request(object, opcode, bytes, size);
+	else if (opcode == KL_SYSTEM_PRINTERS_EDIT && object->version >= KL_SYSTEM_SINCE_PRINTER_EDIT)
+		error = printers_edit(object, bytes, size);
 	else
 		error = EPROTO;
 	return error;
@@ -354,6 +361,85 @@ printers_print(
 	/* Answered at the next tick, queued first. */
 	printers_wait(object, backend_request, request, job);
 	return 0;
+}
+
+/*
+ * Carries out edit(request, printer, name, path) (since 24, ws177-p025): a
+ * name of the title's rules and a path or queue without spaces or control
+ * characters, each "" to keep it; others are answered invalid.
+ */
+static int
+printers_edit(
+	struct kwl_object *object,
+	const unsigned char *bytes,
+	size_t size)
+{
+	struct kl_backend_print *backend;
+	const char *name;
+	const char *path;
+	uint32_t backend_request;
+	uint32_t request;
+	uint32_t printer;
+	size_t offset;
+	int name_ok;
+	int path_ok;
+	int error;
+
+	/* request, printer, name, path. */
+	if (size < 8U)
+		return EPROTO;
+	request = printers_word(bytes, 0U);
+	printer = printers_word(bytes, 4U);
+	error = printers_string(bytes, size, 8U, PRINTERS_NAME_MAX, &name, &offset);
+	if (error != 0)
+		return EPROTO;
+	error = printers_string(bytes, size, offset, PRINTERS_PATH_MAX, &path, &offset);
+	if (error != 0 || offset != size)
+		return EPROTO;
+
+	/* A name and a path of the rules. */
+	name_ok = printers_title_ok(name);
+	path_ok = printers_path_ok(path);
+	if (!name_ok || !path_ok) {
+		printers_result(object->client, object->id, request, KL_SYSTEM_RESULT_INVALID, 0U);
+		return 0;
+	}
+
+	/* The backend's. */
+	backend = printers_backend();
+	if (backend == NULL) {
+		printers_result(object->client, object->id, request, KL_SYSTEM_RESULT_UNAVAILABLE, 0U);
+		return 0;
+	}
+
+	/* Asked of the backend. */
+	error = kl_backend_print_edit(backend, printer, name, path, &backend_request);
+	printf("KWL PRINTERS edit client=%llu printer=%u error=%d\n", (unsigned long long)object->client->number, printer, error);
+	if (error != 0) {
+		printers_result(object->client, object->id, request, printers_applied(error), 0U);
+		return 0;
+	}
+
+	/* Answered at the next tick. */
+	printers_wait(object, backend_request, request, 0U);
+	return 0;
+}
+
+/* Tells whether an IPP path or LPD queue keeps the rules: no space and no control character (C0, DEL). */
+static int
+printers_path_ok(
+	const char *path)
+{
+	const unsigned char *byte;
+
+	/* Each byte. */
+	for (byte = (const unsigned char *)path; *byte != '\0'; byte++) {
+		if (*byte <= 0x20U || *byte == 0x7fU)
+			return 0;
+	}
+
+	/* Succeeded: the path keeps the rules. */
+	return 1;
 }
 
 /* Keeps a request waiting for its answer (a full table answers it busy). */

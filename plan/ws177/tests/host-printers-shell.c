@@ -43,6 +43,7 @@ struct event {
 	uint32_t opcode;
 	uint32_t words[4];
 	size_t size;
+	unsigned char bytes[512];
 };
 
 /* The checks that failed, the events sent, the descriptors the client "sent", and the home. */
@@ -60,6 +61,8 @@ static size_t put_string(unsigned char *bytes, size_t offset, const char *text);
 static int print_request(struct kwl_object *object, uint32_t request, const char *title, int fd);
 static int wait_event(struct kwl_server *server, uint32_t opcode, uint32_t request, int seconds, size_t *found);
 static int fd_open(int fd);
+static int edit_request(struct kwl_object *object, uint32_t request, uint32_t printer, const char *name, const char *path);
+static int printer_told(const char *text, size_t since);
 static void pause_ms(unsigned ms);
 
 /* The compositor's calls the printers object makes, stood in for. */
@@ -84,6 +87,7 @@ kwl_emit(
 	event->opcode = opcode;
 	event->size = size;
 	memcpy(event->words, payload, size < sizeof(event->words) ? size : sizeof(event->words));
+	memcpy(event->bytes, payload, size < sizeof(event->bytes) ? size : sizeof(event->bytes));
 	return 0;
 }
 
@@ -160,7 +164,9 @@ main(
 	char long_title[160];
 	size_t length;
 	size_t found;
+	size_t since;
 	size_t queued_at;
+	int tries;
 	int status;
 	int fd;
 	int ok;
@@ -204,6 +210,30 @@ main(
 	check("add", ok && events[found].words[1] == KL_SYSTEM_RESULT_OK, "result OK");
 	ok = wait_event(server, KL_SYSTEM_PRINTERS_EVENT_PRINTER, 1U, 5, &found);
 	check("add-told", ok, "a printer event with id 1");
+
+	/* 2b. edit (since 24, ws177-p025): the name and the queue changed and told; names and paths of the rules only. */
+	since = event_count;
+	status = edit_request(object, 20U, 1U, "Front Desk", "q2");
+	ok = status == 0 && wait_event(server, KL_SYSTEM_PRINTERS_EVENT_RESULT, 20U, 5, &found);
+	check("edit", ok && events[found].words[1] == KL_SYSTEM_RESULT_OK, "result OK");
+	for (tries = 0; tries < 100 && !printer_told("Front Desk", since); tries++) {
+		kwl_printers_tick(server);
+		pause_ms(20);
+	}
+	check("edit-told", printer_told("Front Desk", since) && printer_told("q2", since), "a printer event with the new name and queue");
+	status = edit_request(object, 21U, 1U, "c1 \xc2\x85", "");
+	ok = status == 0 && wait_event(server, KL_SYSTEM_PRINTERS_EVENT_RESULT, 21U, 1, &found);
+	check("edit-name-c1", ok && events[found].words[1] == KL_SYSTEM_RESULT_INVALID, "INVALID");
+	status = edit_request(object, 22U, 1U, "", "a b");
+	ok = status == 0 && wait_event(server, KL_SYSTEM_PRINTERS_EVENT_RESULT, 22U, 1, &found);
+	check("edit-path-space", ok && events[found].words[1] == KL_SYSTEM_RESULT_INVALID, "INVALID");
+	status = edit_request(object, 23U, 9U, "Nowhere", "");
+	ok = status == 0 && wait_event(server, KL_SYSTEM_PRINTERS_EVENT_RESULT, 23U, 5, &found);
+	check("edit-unknown-printer", ok && events[found].words[1] == KL_SYSTEM_RESULT_INVALID, "INVALID");
+	object->version = 23U;
+	status = edit_request(object, 24U, 1U, "Old", "");
+	check("edit-before-24", status == EPROTO, "EPROTO from an object of version 23");
+	object->version = 30U;
 
 	/* 3. Titles that break the rules: INVALID, the document closed. */
 	fd = open(argv[2], O_RDONLY | O_CLOEXEC);
@@ -384,4 +414,49 @@ pause_ms(
 	wait.tv_sec = ms / 1000U;
 	wait.tv_nsec = (long)(ms % 1000U) * 1000000L;
 	nanosleep(&wait, NULL);
+}
+
+/* Sends edit(request, printer, name, path). */
+static int
+edit_request(
+	struct kwl_object *object,
+	uint32_t request,
+	uint32_t printer,
+	const char *name,
+	const char *path)
+{
+	unsigned char bytes[512];
+	size_t length;
+	int status;
+
+	/* The bytes. */
+	length = put_word(bytes, 0, request);
+	length = put_word(bytes, length, printer);
+	length = put_string(bytes, length, name);
+	length = put_string(bytes, length, path);
+	status = kwl_printers_request(object, KL_SYSTEM_PRINTERS_EDIT, bytes, length);
+	return status;
+}
+
+/* Tells whether a printer event since an index carried a text. */
+static int
+printer_told(
+	const char *text,
+	size_t since)
+{
+	size_t index;
+	size_t length;
+	size_t at;
+
+	/* Each printer event's bytes. */
+	length = strlen(text);
+	for (index = since; index < event_count; index++) {
+		if (events[index].opcode != KL_SYSTEM_PRINTERS_EVENT_PRINTER)
+			continue;
+		for (at = 0; at + length <= sizeof(events[index].bytes); at++) {
+			if (memcmp(events[index].bytes + at, text, length) == 0)
+				return 1;
+		}
+	}
+	return 0;
 }

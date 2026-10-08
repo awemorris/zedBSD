@@ -1157,6 +1157,49 @@ kl_system_printers_set_default(
 }
 
 /*
+ * Changes a printer's name and its IPP path or LPD queue ("" or NULL keeps
+ * each, ws177-p025).
+ */
+int
+kl_system_printers_edit(
+	struct kl_system *system,
+	uint32_t printer,
+	const char *name,
+	const char *path,
+	uint32_t *request)
+{
+	char clean[KL_PRINTER_NAME_MAX];
+	const char *space;
+	size_t length;
+	uint32_t asked;
+	int error;
+
+	/* A name made one line, a path without a space. */
+	if (system == NULL)
+		return EINVAL;
+	if (name == NULL)
+		name = "";
+	if (path == NULL)
+		path = "";
+	error = system_print_title(name, clean, sizeof(clean));
+	if (error != 0)
+		return error;
+	length = strlen(path);
+	space = strchr(path, ' ');
+	if (length >= KL_PRINTER_PATH_MAX || space != NULL)
+		return EINVAL;
+
+	/* The compositor's printers, with edit. */
+	if (system->printers == NULL || system->lost || system->manager_version < KL_SYSTEM_SINCE_PRINTER_EDIT)
+		return ENOTSUP;
+
+	/* Sent with the application's next flush. */
+	asked = system_number(system, request);
+	wl_proxy_marshal(system->printers, KL_SYSTEM_PRINTERS_EDIT, asked, printer, clean, path);
+	return 0;
+}
+
+/*
  * Prints a PDF file on a printer (0: the default) under a title: the file
  * is opened and checked here, and its descriptor goes to the compositor
  * (libwayland sends a copy; this one is closed after).  The title is made

@@ -285,7 +285,7 @@
 
 /* The interfaces' names and versions. */
 #define KL_SYSTEM_MANAGER_NAME			"kl_system_manager_v1"
-#define KL_SYSTEM_MANAGER_VERSION		23U
+#define KL_SYSTEM_MANAGER_VERSION		24U
 #define KL_SYSTEM_SETTINGS_NAME			"kl_system_settings_v1"
 
 /* kl_system_manager_v1's requests and event. */
@@ -348,6 +348,9 @@
 
 /* Since when the manager has get_printers (ws145-p003). */
 #define KL_SYSTEM_SINCE_PRINTERS		17U
+
+/* Since when the printers have edit (ws177-p025). */
+#define KL_SYSTEM_SINCE_PRINTER_EDIT		24U
 
 /* The displays (ws113-p005). */
 #define KL_SYSTEM_SINCE_DISPLAYS		18U
@@ -593,6 +596,8 @@
  *   request 4 print(uint request, uint printer, string title, fd document)
  *       printer 0: the default; the document is a PDF the client opened
  *   request 5 cancel(uint request, uint job)
+ *   request 6 edit(uint request, uint printer, string name, string path)    since 24 (ws177-p025)
+ *       name: the printer's name ("" keeps it); path: the IPP path or the LPD queue ("" keeps it)
  *   event   0 printer(uint id, uint protocol, string host, uint port, string path, string name, uint flags)
  *   event   1 job(uint job, uint printer, uint state, string title, string detail)
  *   event   2 done(uint serial)    the printers and jobs before it are the whole state
@@ -606,6 +611,7 @@
 #define KL_SYSTEM_PRINTERS_SET_DEFAULT		3U
 #define KL_SYSTEM_PRINTERS_PRINT		4U
 #define KL_SYSTEM_PRINTERS_CANCEL		5U
+#define KL_SYSTEM_PRINTERS_EDIT			6U
 #define KL_SYSTEM_PRINTERS_EVENT_PRINTER	0U
 #define KL_SYSTEM_PRINTERS_EVENT_JOB		1U
 #define KL_SYSTEM_PRINTERS_EVENT_DONE		2U

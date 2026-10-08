@@ -114,7 +114,7 @@ static const struct wl_message system_manager_events[] = {
 	{ "capabilities", "u", system_plain_types },
 };
 
-/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: sixteen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19; the mail's allowed since 20; get_machine since 21; the machine's mounts since 22; get_bluetooth since 23) and one event.  It lives for the program. */
+/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: sixteen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19; the mail's allowed since 20; get_machine since 21; the machine's mounts since 22; get_bluetooth since 23; the printers' edit since 24) and one event.  It lives for the program. */
 const struct wl_interface kl_system_manager_v1_interface = {
 	KL_SYSTEM_MANAGER_NAME,
 	KL_SYSTEM_MANAGER_VERSION,
@@ -420,6 +420,7 @@ static const struct wl_message system_printers_requests[] = {
 	{ "set_default", "uu", system_plain_types },
 	{ "print", "uush", system_plain_types },
 	{ "cancel", "uu", system_plain_types },
+	{ "edit", "24uuss", system_plain_types },
 };
 
 /* The events of kl_system_printers_v1. */
@@ -431,11 +432,11 @@ static const struct wl_message system_printers_events[] = {
 	{ "result", "uuu", system_plain_types },
 };
 
-/* kl_system_printers_v1, made at the manager's version (17): six requests and five events.  It lives for the program. */
+/* kl_system_printers_v1, made at the manager's version (17; edit since 24, ws177-p025): seven requests and five events.  It lives for the program. */
 const struct wl_interface kl_system_printers_v1_interface = {
 	KL_SYSTEM_PRINTERS_NAME,
-	KL_SYSTEM_SINCE_PRINTERS,
-	6,
+	KL_SYSTEM_SINCE_PRINTER_EDIT,
+	7,
 	system_printers_requests,
 	5,
 	system_printers_events

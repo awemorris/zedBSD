@@ -155,7 +155,8 @@ enum print_change_kind {
 	PRINT_CHANGE_REMOVE,
 	PRINT_CHANGE_DEFAULT,
 	PRINT_CHANGE_PATH,
-	PRINT_CHANGE_NAMED
+	PRINT_CHANGE_NAMED,
+	PRINT_CHANGE_EDIT
 };
 
 /*
@@ -555,6 +556,54 @@ kl_backend_print_set_default(
 		return ENOMEM;
 	change->kind = PRINT_CHANGE_DEFAULT;
 	change->printer = printer;
+
+	/* Its request, answered when the writer made it. */
+	*request = print->next_request;
+	print->next_request++;
+	change->request = *request;
+	error = print_change(print, change);
+	if (error != 0)
+		print_result(print, *request, error, 0);
+
+	/* Asked: the answer comes as a result. */
+	return 0;
+}
+
+/*
+ * Changes a printer's name and its IPP path or LPD queue ("" keeps each):
+ * the writer thread writes them in the settings file (ws177-p025).
+ */
+int
+kl_backend_print_edit(
+	struct kl_backend_print *print,
+	uint32_t printer,
+	const char *name,
+	const char *path,
+	uint32_t *request)
+{
+	struct print_change *change;
+	const char *space;
+	size_t name_length;
+	size_t path_length;
+	int error;
+
+	/* A name and a path that fit, the path without a space. */
+	if (name == NULL || path == NULL)
+		return EINVAL;
+	name_length = strlen(name);
+	path_length = strlen(path);
+	space = strchr(path, ' ');
+	if (name_length >= KL_BACKEND_PRINTER_NAME_MAX || path_length >= KL_BACKEND_PRINTER_PATH_MAX || space != NULL)
+		return EINVAL;
+
+	/* The change. */
+	change = calloc(1, sizeof(*change));
+	if (change == NULL)
+		return ENOMEM;
+	change->kind = PRINT_CHANGE_EDIT;
+	change->printer = printer;
+	print_copy(change->name, sizeof(change->name), name);
+	print_copy(change->path, sizeof(change->path), path);
 
 	/* Its request, answered when the writer made it. */
 	*request = print->next_request;
@@ -1880,6 +1929,20 @@ print_apply(
 		for (index = 0; index < table->count; index++)
 			table->printers[index].is_default = 0;
 		found->is_default = 1;
+		return;
+	case PRINT_CHANGE_EDIT:
+		/* The printer, its name and path where they are given. */
+		found = print_printer(table, change->printer);
+		if (found == NULL) {
+			change->error = EINVAL;
+			return;
+		}
+
+		/* What is given replaces what was. */
+		if (change->name[0] != '\0')
+			print_copy(found->name, sizeof(found->name), change->name);
+		if (change->path[0] != '\0')
+			print_copy(found->path, sizeof(found->path), change->path);
 		return;
 	case PRINT_CHANGE_PATH:
 	case PRINT_CHANGE_NAMED:
