@@ -83,6 +83,7 @@ main(int argc, char **argv)
 			frames[2U * index + 1U] = frames[2U * index];
 			phase += 2.0 * M_PI * TONE_HZ / TONE_RATE;
 		}
+
 		done = 0U;
 		for (;;) {
 			written = kl_audio_stream_write(stream, frames + 2U * done, 480U - done);
@@ -94,6 +95,7 @@ main(int argc, char **argv)
 			if (waited % 500U == 0U)
 				printf("TONE at written=%llu heard=%llu\n", (unsigned long long)kl_audio_stream_written(stream), (unsigned long long)kl_audio_stream_position(stream, NULL));
 		}
+
 		made += 480U;
 	}
 
@@ -108,6 +110,7 @@ main(int argc, char **argv)
 			drained = 1U;
 		pause_ms(10);
 	}
+
 	printf("TONE done written=%llu heard=%llu drained=%u\n", (unsigned long long)kl_audio_stream_written(stream), (unsigned long long)kl_audio_stream_position(stream, NULL), drained);
 	kl_audio_stream_close(stream);
 	return 0;
