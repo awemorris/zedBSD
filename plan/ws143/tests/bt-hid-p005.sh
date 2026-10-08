@@ -41,7 +41,7 @@ has() {
 }
 expect() { if grep -q -- "$2" "$3"; then ok "$1"; else fail "$1" "no '$2' in $3"; fi; }
 stop_daemon() {
-	guest 'for p in $(ps -A -o pid,args | grep "[/]sbin/bluetoothd" | awk "{print \$1}"); do kill $p; done; sleep 2; true' >/dev/null
+	guest 'service stop bluetoothd >/dev/null 2>&1; for p in $(ps -A -o pid,args | grep "[/]sbin/bluetoothd" | awk "{print \$1}"); do kill $p; done; sleep 2; true' >/dev/null
 }
 start_daemon() {
 	guest "/sbin/bluetoothd -s $1 >$2 2>&1 & sleep 3; true" >/dev/null

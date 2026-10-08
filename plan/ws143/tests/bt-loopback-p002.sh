@@ -23,6 +23,9 @@ expect() {
 	if [ "$2" = "$3" ]; then echo "ok: $1"; else echo "FAIL: $1 (got '$2', want '$3')"; status=1; fi
 }
 
+# The probes open the node alone: the bluetoothd the base's rc.conf starts (when the image has it) is stopped first.
+guest 'service stop bluetoothd >/dev/null 2>&1; for p in $(ps -A -o pid,args | grep "[/]sbin/bluetoothd" | awk "{print \$1}"); do kill $p; done; sleep 1; true' >/dev/null
+
 # 1. The node, and no other.
 expect "/dev/bluetooth0 is a character device" "$(guest 'test -c /dev/bluetooth0 && echo yes' | tail -1)" yes
 expect "it is root's alone" "$(guest 'ls -l /dev/bluetooth0' | tail -1 | cut -c1-10)" "crw-------"

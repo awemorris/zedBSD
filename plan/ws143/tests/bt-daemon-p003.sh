@@ -1,7 +1,7 @@
 #!/bin/sh
 # ws143-p003: bluetoothd and bt on a running zedBSD guest of plan/ws143/tests/config-amd64-bt.mk (the test kernel's
 # loopback controller /dev/bluetooth0; QEMU has no Bluetooth controller).
-#  1. bluetoothd (started here, not by rc) is ready on the loopback controller: bt show says ready, its address
+#  1. bluetoothd (the one rc starts is stopped; started here) is ready on the loopback controller: bt show says ready, its address
 #     00:11:22:33:44:55, LE and the P-256 and DHKey commands.
 #  2. bt scan 3 finds exactly the loopback's five devices with their fields: the extended result's
 #     "Loopback Keyboard" (class 0x002540), the RSSI results (0A:0B:0C:0D:0E:02, class 0x002580, RSSI -60; the Just Works 07, class 0x240404, RSSI -50), the public
@@ -28,7 +28,7 @@ has() {
 	if printf '%s\n' "$2" | grep -qF -- "$3"; then echo "ok: $1"; else echo "FAIL: $1 (no '$3' in: $(printf '%s' "$2" | tr '\n' '|'))"; status=1; fi
 }
 stop_daemon() {
-	guest 'for p in $(ps -A -o pid,args | grep "[/]sbin/bluetoothd" | awk "{print \$1}"); do kill $p; done; sleep 1; true' >/dev/null
+	guest 'service stop bluetoothd >/dev/null 2>&1; for p in $(ps -A -o pid,args | grep "[/]sbin/bluetoothd" | awk "{print \$1}"); do kill $p; done; sleep 1; true' >/dev/null
 }
 
 # 1. The daemon, ready.

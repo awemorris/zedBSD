@@ -50,3 +50,9 @@ HID の経路は p002〜p005、利用者に見える形は p006。
 ## UAT（2026-10-08 夕、5330）
 
 - ユーザー:「Bluetooth is not available on this computerになっています。」→ 今の段階では想定どおり（Q1）: UAT の image（config.mk・current-uat）に bluetoothd・bt が入っていない（入っているのは試験の config の plan/ws143/tests/config-amd64-bt-desktop.mk だけ）、5330 の AX211 の Bluetooth は firmware の package `intelbt` の load（p003 i02）が未実装で controller が上がらない、BR/EDR・LE の HID host（p005 i02〜i04）も未。実機で使えるようになるのは p003 i02・p005 i02 の後に UAT の config へ bluetoothd を足してから。
+- 2026-10-08 夜 q907 P1: `config/current-uat.mk` に `bluetoothd bt intelbt-firmware`（D14）を足し、base の `etc/rc.conf` に
+  `bluetoothd`（enabled・optional: package の無い image では黙って飛ばす）。account（`_bluetooth`）の無い install では daemon が
+  log を出して exit 0 で起動しない（B6 のまま、init は再起動しない）。`config.mk` は git の外（`.gitignore`）なので、手元の config.mk
+  で UAT を作る時は同じ 3 つを足す（Q1）。rc が boot で起動するようになったので、loopback の試験（bt-loopback-p002・bt-daemon-p003・
+  bt-pair-p004・bt-hid-p005）と AAT の bluetooth-pair・bluetooth-menu は先に `service stop bluetoothd` で止めてから自分の daemon を
+  起こす形に直した。QEMU の確認は T1（Q1 経由）。
