@@ -2,7 +2,7 @@
 
 # ws191-p004: Linux（alsa-lib の dlopen）・FreeBSD（OSS）の backend と試験の client
 
-Status: in-progress（2026-10-08 夜 Q1: T1-448 FreeBSD PASS、T1-451 Linux の kei の session で 2 回目から PASS（written=96000 heard=96000 drained=1、root は 95 で期待どおり）。1 回目だけ login の約 20 秒後の最初の stream で `KWL AUDIO stream … failed error=1`・`TONE open error=22` → P2 が調べる）
+Status: cleared（2026-10-08 夜 Q1: T1-448 FreeBSD PASS、T1-454 Linux の gdm の kei の最初の tone PASS（`alsa format error=2` が 1 回の後 ready・drained、試し直しが効いた）、root は 95）
 Disposition: normal
 Parent: [WS191](../ws.md)。設計は [design.md](../design.md) §6.4（第 5 版）。
 
