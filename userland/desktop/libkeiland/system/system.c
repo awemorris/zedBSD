@@ -61,6 +61,7 @@ struct kl_system {
 	struct wl_proxy *phone;
 	struct wl_proxy *printers;
 	struct wl_proxy *displays;
+	struct wl_proxy *machine;
 	struct system_view view;
 	uint32_t next_request;
 	unsigned lost;
@@ -160,6 +161,16 @@ struct system_displays_listener {
 	void (*result)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t applied, uint32_t saved);
 };
 
+/* The listener of kl_system_machine_v1's events (ws188-p002), in their order. */
+struct system_machine_listener {
+	void (*parts)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t what);
+	void (*about)(void *data, struct wl_proxy *proxy, const char *name, const char *kernel, const char *architecture, const char *processor, const char *host, uint32_t cpus);
+	void (*filesystem)(void *data, struct wl_proxy *proxy, const char *path, uint32_t total_high, uint32_t total_low, uint32_t available_high, uint32_t available_low, uint32_t used_high, uint32_t used_low);
+	void (*user)(void *data, struct wl_proxy *proxy, const char *name, const char *full_name, const char *home, uint32_t flags);
+	void (*login_language)(void *data, struct wl_proxy *proxy, const char *code);
+	void (*result)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t applied, uint32_t saved);
+};
+
 /* The listener of kl_system_devices_v1's events, in their order. */
 struct system_devices_listener {
 	void (*device)(void *data, struct wl_proxy *proxy, const char *id, uint32_t kind, uint32_t state, const char *name, const char *location);
@@ -183,6 +194,12 @@ static void system_print_job(void *data, struct wl_proxy *proxy, uint32_t job, u
 static void system_printers_done(void *data, struct wl_proxy *proxy, uint32_t serial);
 static void system_display(void *data, struct wl_proxy *proxy, const char *key, const char *label, int32_t x, int32_t y, uint32_t width, uint32_t height, uint32_t refresh_mhz, uint32_t flags, uint32_t brightness);
 static void system_displays_done(void *data, struct wl_proxy *proxy, uint32_t serial, uint32_t mode);
+static void system_machine_parts(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t what);
+static void system_machine_about(void *data, struct wl_proxy *proxy, const char *name, const char *kernel, const char *architecture, const char *processor, const char *host, uint32_t cpus);
+static void system_machine_filesystem(void *data, struct wl_proxy *proxy, const char *path, uint32_t total_high, uint32_t total_low, uint32_t available_high, uint32_t available_low, uint32_t used_high, uint32_t used_low);
+static void system_machine_user(void *data, struct wl_proxy *proxy, const char *name, const char *full_name, const char *home, uint32_t flags);
+static void system_machine_login_language(void *data, struct wl_proxy *proxy, const char *code);
+static void system_machine_result(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t applied, uint32_t saved);
 static void system_print_queued(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t job);
 static int system_print_title(const char *title, char *out, size_t size);
 static void system_global_remove(void *data, struct wl_registry *registry, uint32_t name);
@@ -312,6 +329,16 @@ static const struct system_displays_listener system_displays_listener = {
 	system_result
 };
 
+/* The computer's object's callbacks (ws188-p002). */
+static const struct system_machine_listener system_machine_listener = {
+	system_machine_parts,
+	system_machine_about,
+	system_machine_filesystem,
+	system_machine_user,
+	system_machine_login_language,
+	system_machine_result
+};
+
 /* The devices object's callbacks. */
 static const struct system_devices_listener system_devices_listener = {
 	system_device,
@@ -387,6 +414,7 @@ kl_system_close(
 	system_destroy(system->phone, KL_SYSTEM_PHONE_DESTROY);
 	system_destroy(system->printers, KL_SYSTEM_PRINTERS_DESTROY);
 	system_destroy(system->displays, KL_SYSTEM_DISPLAYS_DESTROY);
+	system_destroy(system->machine, KL_SYSTEM_MACHINE_DESTROY);
 	system_destroy(system->manager, KL_SYSTEM_MANAGER_DESTROY);
 
 	/* Then the queue they lived on. */
@@ -465,6 +493,8 @@ kl_system_capabilities(
 		bits |= KL_SYSTEM_HAS_PRINTERS;
 	if (system->displays != NULL)
 		bits |= KL_SYSTEM_HAS_DISPLAYS;
+	if (system->machine != NULL)
+		bits |= KL_SYSTEM_HAS_MACHINE;
 
 	/* The administration of the accounts, offered with the account to a manager bound at version 8 (ws089-p026). */
 	if (system->account != NULL && (system->view.capabilities & KL_SYSTEM_CAPABILITY_ADMINISTER) != 0U && system->manager_version >= KL_SYSTEM_SINCE_ADMINISTER)
@@ -1391,6 +1421,175 @@ kl_system_displays_set_shown(
 	wl_proxy_marshal(system->displays, KL_SYSTEM_DISPLAYS_SET_SHOWN, number, key, (uint32_t)shown);
 
 	/* Succeeded: the snapshot and the answer come later. */
+	return 0;
+}
+
+/*
+ * Asks the compositor to read parts of the computer (ws188-p002).
+ */
+int
+kl_system_machine_query(
+	struct kl_system *system,
+	unsigned what,
+	uint32_t *request)
+{
+	uint32_t number;
+
+	/* A system, and parts that are known. */
+	if (system == NULL)
+		return EINVAL;
+	if (what == 0U || (what & ~(unsigned)KL_SYSTEM_MACHINE_PARTS) != 0U)
+		return EINVAL;
+
+	/* The computer's object, from a compositor that offers it. */
+	if (system->machine == NULL || system->lost)
+		return ENOTSUP;
+
+	/* Sent with the application's next flush. */
+	number = system_number(system, request);
+	wl_proxy_marshal(system->machine, KL_SYSTEM_MACHINE_QUERY, number, (uint32_t)what);
+
+	/* Succeeded: the parts and the answer come later. */
+	return 0;
+}
+
+/*
+ * Tells the parts of the computer that were answered at least once.
+ */
+unsigned
+kl_system_machine_known(
+	const struct kl_system *system)
+{
+	/* No system knows nothing. */
+	if (system == NULL)
+		return 0U;
+
+	/* The parts answered. */
+	return system->view.machine_known;
+}
+
+/*
+ * Tells how often a part (one KL_MACHINE_* bit) was put into effect; 0
+ * for one never answered or not a part.
+ */
+uint32_t
+kl_system_machine_serial(
+	const struct kl_system *system,
+	unsigned part)
+{
+	/* No system has no answer. */
+	if (system == NULL)
+		return 0U;
+
+	/* Each part's own count. */
+	switch (part) {
+	case KL_MACHINE_ABOUT:
+		return system->view.machine_serials[0];
+	case KL_MACHINE_FILESYSTEMS:
+		return system->view.machine_serials[1];
+	case KL_MACHINE_USERS:
+		return system->view.machine_serials[2];
+	case KL_MACHINE_LOGIN_LANGUAGE:
+		return system->view.machine_serials[3];
+	default:
+		break;
+	}
+
+	/* Not a part. */
+	return 0U;
+}
+
+/*
+ * Copies the system's names of the last answer.
+ */
+int
+kl_system_machine_about(
+	const struct kl_system *system,
+	struct kl_machine_about *about)
+{
+	/* A system and the room. */
+	if (system == NULL || about == NULL)
+		return EINVAL;
+
+	/* Never answered. */
+	if ((system->view.machine_known & KL_MACHINE_ABOUT) == 0U)
+		return ENOENT;
+
+	/* Succeeded: the names. */
+	*about = system->view.machine_about;
+	return 0;
+}
+
+/*
+ * Copies the file systems of the last answer; returns how many.
+ */
+size_t
+kl_system_machine_filesystems(
+	const struct kl_system *system,
+	struct kl_machine_filesystem *list,
+	size_t capacity)
+{
+	size_t count;
+
+	/* A system and the room. */
+	if (system == NULL || list == NULL)
+		return 0;
+
+	/* As many as fit. */
+	count = system->view.machine_filesystem_count;
+	if (count > capacity)
+		count = capacity;
+	memcpy(list, system->view.machine_filesystems, count * sizeof(list[0]));
+
+	/* Succeeded: the file systems copied. */
+	return count;
+}
+
+/*
+ * Copies the accounts of the last answer; returns how many.
+ */
+size_t
+kl_system_machine_users(
+	const struct kl_system *system,
+	struct kl_machine_user *list,
+	size_t capacity)
+{
+	size_t count;
+
+	/* A system and the room. */
+	if (system == NULL || list == NULL)
+		return 0;
+
+	/* As many as fit. */
+	count = system->view.machine_user_count;
+	if (count > capacity)
+		count = capacity;
+	memcpy(list, system->view.machine_users, count * sizeof(list[0]));
+
+	/* Succeeded: the accounts copied. */
+	return count;
+}
+
+/*
+ * Copies the login screen's language of the last answer ("en", "ja", or
+ * "" when it is not set).
+ */
+int
+kl_system_machine_login_language(
+	const struct kl_system *system,
+	char *code,
+	size_t size)
+{
+	/* A system and the room. */
+	if (system == NULL || code == NULL || size == 0U)
+		return EINVAL;
+
+	/* Never answered. */
+	if ((system->view.machine_known & KL_MACHINE_LOGIN_LANGUAGE) == 0U)
+		return ENOENT;
+
+	/* Succeeded: the code, cut to fit. */
+	system_view_copy(code, size, system->view.machine_language);
 	return 0;
 }
 
@@ -2967,6 +3166,10 @@ system_bind(
 	if (system->manager_version >= KL_SYSTEM_SINCE_DISPLAYS)
 		system->displays = system_make(system, KL_SYSTEM_CAPABILITY_DISPLAYS, KL_SYSTEM_MANAGER_GET_DISPLAYS, &kl_system_displays_v1_interface, &system_displays_listener);
 
+	/* What Settings reads of the computer, offered to a manager bound at version 21 (ws188-p002); it has no first state. */
+	if (system->manager_version >= KL_SYSTEM_SINCE_MACHINE)
+		system->machine = system_make(system, KL_SYSTEM_CAPABILITY_MACHINE, KL_SYSTEM_MANAGER_GET_MACHINE, &kl_system_machine_v1_interface, &system_machine_listener);
+
 	/* Waits for their first state: each object's state and its done. */
 	status = wl_display_roundtrip_queue(system->display, system->queue);
 	if (status < 0)
@@ -3267,4 +3470,150 @@ system_print_title(
 	/* Ended. */
 	out[kept] = '\0';
 	return 0;
+}
+
+/* The start of an answer of the computer's query: its request and parts (ws188-p002). */
+static void
+system_machine_parts(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t request,
+	uint32_t what)
+{
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* The answer is received from here. */
+	system = data;
+	system_view_machine_parts(&system->view, request, what);
+}
+
+/* The system's names of the answer being received. */
+static void
+system_machine_about(
+	void *data,
+	struct wl_proxy *proxy,
+	const char *name,
+	const char *kernel,
+	const char *architecture,
+	const char *processor,
+	const char *host,
+	uint32_t cpus)
+{
+	struct kl_machine_about about;
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* The names, each cut to its room. */
+	system = data;
+	memset(&about, 0, sizeof(about));
+	system_view_copy(about.system, sizeof(about.system), name);
+	system_view_copy(about.kernel, sizeof(about.kernel), kernel);
+	system_view_copy(about.architecture, sizeof(about.architecture), architecture);
+	system_view_copy(about.processor, sizeof(about.processor), processor);
+	system_view_copy(about.host, sizeof(about.host), host);
+	about.cpus = cpus;
+
+	/* Kept until the answer's result. */
+	system_view_machine_about(&system->view, &about);
+}
+
+/* A file system of the answer being received. */
+static void
+system_machine_filesystem(
+	void *data,
+	struct wl_proxy *proxy,
+	const char *path,
+	uint32_t total_high,
+	uint32_t total_low,
+	uint32_t available_high,
+	uint32_t available_low,
+	uint32_t used_high,
+	uint32_t used_low)
+{
+	struct kl_machine_filesystem filesystem;
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* The place and the sizes, each a u64 sent as its halves. */
+	system = data;
+	memset(&filesystem, 0, sizeof(filesystem));
+	system_view_copy(filesystem.path, sizeof(filesystem.path), path);
+	filesystem.total = ((uint64_t)total_high << 32) | total_low;
+	filesystem.available = ((uint64_t)available_high << 32) | available_low;
+	filesystem.used = ((uint64_t)used_high << 32) | used_low;
+
+	/* Kept until the answer's result. */
+	system_view_machine_filesystem(&system->view, &filesystem);
+}
+
+/* An account of the answer being received. */
+static void
+system_machine_user(
+	void *data,
+	struct wl_proxy *proxy,
+	const char *name,
+	const char *full_name,
+	const char *home,
+	uint32_t flags)
+{
+	struct kl_machine_user user;
+	struct kl_system *system;
+	size_t length;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* A name that does not fit whole is not an account's to act on: it is dropped, never cut. */
+	system = data;
+	length = strlen(name);
+	if (length == 0U || length >= sizeof(user.name))
+		return;
+
+	/* The account. */
+	memset(&user, 0, sizeof(user));
+	memcpy(user.name, name, length + 1U);
+	system_view_copy(user.full_name, sizeof(user.full_name), full_name);
+	system_view_copy(user.home, sizeof(user.home), home);
+	user.flags = flags;
+
+	/* Kept until the answer's result. */
+	system_view_machine_user(&system->view, &user);
+}
+
+/* The login screen's language of the answer being received. */
+static void
+system_machine_login_language(
+	void *data,
+	struct wl_proxy *proxy,
+	const char *code)
+{
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* Kept until the answer's result. */
+	system = data;
+	system_view_machine_login_language(&system->view, code);
+}
+
+/* The end of an answer of the computer's query, or a query's refusal. */
+static void
+system_machine_result(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t request,
+	uint32_t applied,
+	uint32_t saved)
+{
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+	UNUSED_PARAMETER(saved);
+
+	/* The parts into effect when they came whole, then the result. */
+	system = data;
+	system_view_machine_result(&system->view, request, applied);
 }

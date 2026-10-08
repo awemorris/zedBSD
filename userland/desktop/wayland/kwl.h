@@ -241,6 +241,8 @@ enum kwl_kind {
 	KWL_SYSTEM_PRINTERS,
 	/* The system extension's displays (displays-shell.c, ws113-p005). */
 	KWL_SYSTEM_DISPLAYS,
+	/* The system extension's computer, what Settings reads of it (machine-shell.c, ws188-p002). */
+	KWL_SYSTEM_MACHINE,
 };
 
 /*
@@ -1797,6 +1799,13 @@ int kwl_displays_request(struct kwl_object *object, uint32_t opcode, const unsig
 void kwl_displays_tell(struct kwl_server *server);
 int kwl_displays_key(struct kwl_server *server, uint32_t key, uint32_t state);
 void kwl_displays_tick(struct kwl_server *server);
+
+/* The system extension's computer (machine-shell.c, ws188-p002). */
+int kwl_machine_create(struct kwl_object *manager, const unsigned char *bytes, size_t size);
+int kwl_machine_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
+void kwl_machine_tick(struct kwl_server *server);
+void kwl_machine_gone(struct kwl_object *object);
+void kwl_machine_close(struct kwl_server *server);
 
 /* The outputs of the plane, the windows and the pointer on them (heads.c, ws113-p007). */
 unsigned kwl_outputs(struct kwl_server *server, struct kwl_plane_rect *outputs);

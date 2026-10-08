@@ -5,6 +5,9 @@
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 KL_BACKEND_ZEDBSD_SOURCES := userland/desktop/libkeiland-backend/backend.c \
 	userland/desktop/libkeiland-backend/print/print.c \
+	userland/desktop/libkeiland-backend/machine/machine.c \
+	userland/desktop/libkeiland-backend/machine/filesystems.c \
+	userland/desktop/libkeiland-backend/machine/users.c \
 	userland/desktop/libkeiland-backend-zedbsd/network-zedbsd.c \
 	userland/desktop/libkeiland-backend-zedbsd/network-link-zedbsd.c \
 	userland/desktop/libkeiland-backend-zedbsd/monitor-zedbsd.c \

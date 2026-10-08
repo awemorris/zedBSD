@@ -35,32 +35,18 @@ void
 kwl_language_system(
 	struct kwl_server *server)
 {
-	char line[LANGUAGE_LINE_MAX];
-	FILE *file;
-	char *read;
-	size_t length;
+	char word[LANGUAGE_LINE_MAX];
+	int error;
 
-	/* No file is English. */
-	file = fopen(KWL_LANGUAGE_SYSTEM_PATH, "r");
-	if (file == NULL) {
+	/* The file's first line; no file, or an empty one, is English. */
+	error = kwl_language_system_word(word, sizeof(word));
+	if (error != 0) {
 		language_open(server, "en", "system");
 		return;
 	}
-
-	/* Its first line. */
-	read = fgets(line, sizeof(line), file);
-	(void)fclose(file);
-	if (read == NULL) {
-		language_open(server, "en", "system");
-		return;
-	}
-
-	/* The line without its end. */
-	length = strcspn(line, "\r\n");
-	line[length] = '\0';
 
 	/* Succeeded: the language it names (a name the catalogs refuse is English). */
-	language_open(server, line, "system");
+	language_open(server, word, "system");
 }
 
 /*

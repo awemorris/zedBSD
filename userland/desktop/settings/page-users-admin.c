@@ -107,9 +107,7 @@ int
 se_users_admin_available(
 	const struct se_app *app)
 {
-	const struct se_users *users;
 	unsigned bits;
-	int i;
 
 	/* A desktop that administers the accounts. */
 	if (app->system == NULL)
@@ -118,16 +116,12 @@ se_users_admin_available(
 	if ((bits & KL_SYSTEM_HAS_ADMINISTER) == 0U)
 		return 0;
 
-	/* The user an administrator. */
-	users = &app->users;
-	for (i = 0; i < users->row_count; i++) {
-		/* The user's own row. */
-		if (users->rows[i].self && users->rows[i].admin)
-			return 1;
-	}
+	/* Not an administrator, as the desktop told of the user's own account (ws188-p002). */
+	if (!app->users.self_admin)
+		return 0;
 
-	/* Not one. */
-	return 0;
+	/* An administrator. */
+	return 1;
 }
 
 /*
@@ -227,15 +221,29 @@ se_users_admin_press(
 	int index)
 {
 	struct se_users *users;
+	int reading;
 	int ready;
 
-	/* A user of the list chosen (a click on the chosen one lets it go). */
+	/*
+	 * While the list is read again (ws188-p002), its rows and changes wait:
+	 * a row chosen now could be another user's in the new list.
+	 */
 	users = &app->users;
+	reading = se_machine_reading(app, KL_MACHINE_USERS);
+	if (reading &&
+	    index >= ADMIN_ROW_FIRST &&
+	    index < ADMIN_ROW_FIRST + users->row_count)
+		return 1;
+
+	/* A user of the list chosen (a click on the chosen one lets it go), remembered by name. */
 	if (index >= ADMIN_ROW_FIRST && index < ADMIN_ROW_FIRST + users->row_count) {
-		if (users->selected == index - ADMIN_ROW_FIRST + 1)
+		if (users->selected == index - ADMIN_ROW_FIRST + 1) {
 			users->selected = 0;
-		else
+			users->selected_name[0] = '\0';
+		} else {
 			users->selected = index - ADMIN_ROW_FIRST + 1;
+			(void)snprintf(users->selected_name, sizeof(users->selected_name), "%s", users->rows[users->selected - 1].name);
+		}
 		se_users_admin_wipe(users);
 		users->admin_mode = SE_ADMIN_NONE;
 		users->admin_message[0] = '\0';
@@ -373,7 +381,8 @@ se_users_admin_result(
 		users->admin_mode = SE_ADMIN_NONE;
 		users->keyboard = SE_USERS_KEYBOARD_PASSWORD;
 		users->selected = 0;
-		se_users_reload(users);
+		users->selected_name[0] = '\0';
+		se_users_reload(app);
 		app->dirty = 1;
 		se_log("USERS admin result request=%u errno=0", request);
 		return 1;
@@ -505,12 +514,18 @@ admin_ready(
 	const struct se_app *app)
 {
 	const struct se_users *users;
+	int reading;
 	int index;
 	int shown;
 
 	/* One change at a time, of one being made. */
 	users = &app->users;
 	if (users->admin_asked || users->admin_mode == SE_ADMIN_NONE)
+		return 0;
+
+	/* Not while the list is read again (its rows may name other users then, ws188-p002). */
+	reading = se_machine_reading(app, KL_MACHINE_USERS);
+	if (reading)
 		return 0;
 
 	/* Each field it uses typed. */

@@ -10,11 +10,13 @@
  * SettingsのUsers画面でもGUI実装します。"): the account of the user Settings
  * runs as, and the change of its password.
  *
- * The account card shows the user's name, full name and home (the
- * passwd database, read once).  The list card (ws089-p026) shows the
- * people's accounts of the computer: those with a user ID from 1000 and a
- * shell to log in with, each with its full name, whether it is an
- * administrator (a member of wheel) and whether it is the user's own.  The password card has three fields, the
+ * The account card shows the user's name, full name and home.  The list
+ * card (ws089-p026) shows the people's accounts of the computer: those
+ * with a user ID from 1000 and a shell to log in with, each with its full
+ * name, whether it is an administrator and whether it is the user's own.
+ * Both are read by the desktop (ws188-p002: libkeiland's
+ * kl_system_machine_users through the compositor, machine.c); Settings
+ * reads no account database itself.  The password card has three fields, the
  * current password, the new one and the new one again, shown as dots
  * unless Show is on; the field with the keyboard has the accent's edge,
  * Tab and a click move between them.  Change Password (and Enter) asks the
@@ -38,11 +40,8 @@
 #include <keiland/keiland.h>
 
 #include <errno.h>
-#include <grp.h>
-#include <pwd.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 
 /* The controls of the page: the three fields, Show, and Change Password. */
 #define USERS_FIELD_FIRST	1
@@ -64,27 +63,12 @@
 /* The space between two cards. */
 #define USERS_GAP		16
 
-/* The first user ID of a person's account, and the one of nobody, which is not one. */
-#define USERS_FIRST_UID		1000U
-#define USERS_NOBODY_UID	65534U
-
-/* A group copied with its members: getpwent may reuse the storage getgrnam returned. */
-struct users_group {
-	int found;
-	struct group group;
-	char *members[64];
-	char names[64][64];
-};
-
 /* The fields' labels and placeholders. */
 static const char *const users_labels[SE_USERS_FIELDS] = { "Current password", "New password", "New password again" };
 static const char *const users_placeholders[SE_USERS_FIELDS] = { "Your password now", "At least 8 characters", "The same again" };
 
 static int users_available(const struct se_app *app);
-static void users_read(struct se_users *users);
-static void users_group_copy(const char *name, struct users_group *copy);
-static int users_person(const struct passwd *account);
-static int users_member(const struct passwd *account, const struct users_group *group);
+static void users_text(char *to, size_t size, const char *from, size_t room);
 static int users_list_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
 static int users_ready(const struct se_app *app);
 static void users_change(struct se_app *app);
@@ -118,10 +102,9 @@ se_users_draw(
 	int index;
 	int y;
 
-	/* The account, read once. */
+	/* The account and the list, asked of the desktop until they are known. */
 	users = &app->users;
-	if (!users->read)
-		users_read(users);
+	se_users_load(app);
 
 	/* The account card: the name, the full name and the home. */
 	height = se_card_height(3, 1);
@@ -418,199 +401,118 @@ se_users_close(
 }
 
 /*
- * Reads the user's account and the list of users once, for a page that
- * needs to know whether the user is an administrator before the Users page
- * was shown (the Languages page's system language, ws158-p004).
+ * Asks for the user's account and the list of users until they are known,
+ * for a page that needs to know whether the user is an administrator
+ * before the Users page was shown (the Languages page's system language,
+ * ws158-p004).
  */
 void
 se_users_load(
-	struct se_users *users)
+	struct se_app *app)
 {
-	/* Read already. */
-	if (users->read)
-		return;
-
-	/* The account and the list. */
-	users_read(users);
-}
-
-/* Reads the account of the user Settings runs as. */
-static void
-users_read(
-	struct se_users *users)
-{
-	struct passwd *account;
-	size_t length;
-
-	/* The passwd entry of the real user ID. */
-	users->read = 1;
-	account = getpwuid(getuid());
-	if (account == NULL)
-		return;
-
-	/* The name, the full name (the first field of the comment), and the home. */
-	(void)snprintf(users->name, sizeof(users->name), "%s", account->pw_name);
-	(void)snprintf(users->full_name, sizeof(users->full_name), "%s", account->pw_gecos);
-	length = strcspn(users->full_name, ",");
-	users->full_name[length] = '\0';
-	(void)snprintf(users->home, sizeof(users->home), "%s", account->pw_dir);
-	se_log("USERS account name=%s", users->name);
-
-	/* The list, with the name known. */
-	se_users_reload(users);
+	/* Wanted until the desktop's answer is copied (machine.c). */
+	se_machine_want(app, KL_MACHINE_USERS);
 }
 
 /*
- * Reads the list of the computer's users from the passwd database: the
- * people's accounts, the administrators among them (wheel), those who may
- * control Wi-Fi (network), and the one Settings runs as.
+ * Asks for the list again at once, after a change of the accounts was
+ * made (the administration's, ws089-p026).
  */
 void
 se_users_reload(
-	struct se_users *users)
+	struct se_app *app)
 {
-	static struct users_group wheel;
-	static struct users_group network;
+	/* A new reading, whatever reading waits. */
+	(void)se_machine_ask_now(app, KL_MACHINE_USERS | KL_MACHINE_LOGIN_LANGUAGE);
+}
+
+/*
+ * Copies the users of the desktop's last answer: the own account's name,
+ * full name and home and whether it is an administrator, and the people's
+ * accounts for the list.  The administration's choice follows its user by
+ * name (a list read again may put the rows in another order), and is let
+ * go when the user is gone.
+ */
+void
+se_users_copy(
+	struct se_app *app)
+{
+	static struct kl_machine_user list[KL_MACHINE_USERS_MAX];
+	struct se_users *users;
 	struct se_user_row *row;
-	struct passwd *account;
-	size_t length;
-	int person;
+	size_t count;
+	size_t index;
 	int differs;
 
-	/* The two groups, copied before the accounts are read. */
-	users_group_copy("wheel", &wheel);
-	users_group_copy("network", &network);
+	/* The accounts of the last answer. */
+	users = &app->users;
+	count = kl_system_machine_users(app->system, list, KL_MACHINE_USERS_MAX);
+	users->read = 1;
 
-	/* Each person's account, as far as there is room. */
-	users->row_count = 0;
-	setpwent();
-	for (;;) {
-		/* The next account, or the end. */
-		account = getpwent();
-		if (account == NULL || users->row_count == SE_USERS_LIST_MAX)
-			break;
-
-		/* Only the people's accounts. */
-		person = users_person(account);
-		if (!person)
+	/* The own account, when the answer has it. */
+	users->name[0] = '\0';
+	users->full_name[0] = '\0';
+	users->home[0] = '\0';
+	users->self_admin = 0;
+	for (index = 0; index < count; index++) {
+		if ((list[index].flags & KL_MACHINE_USER_SELF) == 0U)
 			continue;
 
-		/* Its name, its full name (the comment's first field), and what it is. */
-		row = &users->rows[users->row_count];
-		(void)snprintf(row->name, sizeof(row->name), "%s", account->pw_name);
-		(void)snprintf(row->full_name, sizeof(row->full_name), "%s", account->pw_gecos);
-		length = strcspn(row->full_name, ",");
-		row->full_name[length] = '\0';
-		row->admin = users_member(account, &wheel);
-		row->network = users_member(account, &network);
-		differs = strcmp(row->name, users->name);
-		row->self = 0;
-		if (differs == 0)
-			row->self = 1;
+		/* Its names, its home, and whether it administers. */
+		users_text(users->name, sizeof(users->name), list[index].name, sizeof(list[index].name));
+		users_text(users->full_name, sizeof(users->full_name), list[index].full_name, sizeof(list[index].full_name));
+		users_text(users->home, sizeof(users->home), list[index].home, sizeof(list[index].home));
+		if ((list[index].flags & KL_MACHINE_USER_ADMIN) != 0U)
+			users->self_admin = 1;
+		se_log("USERS account name=%s", users->name);
+	}
 
-		/* Counted. */
+	/* The people's accounts, as far as the list has room. */
+	users->row_count = 0;
+	for (index = 0; index < count; index++) {
+		if ((list[index].flags & KL_MACHINE_USER_PERSON) == 0U)
+			continue;
+		if (users->row_count == SE_USERS_LIST_MAX)
+			break;
+
+		/* Its name, its full name, and what it is. */
+		row = &users->rows[users->row_count];
+		memset(row, 0, sizeof(*row));
+		users_text(row->name, sizeof(row->name), list[index].name, sizeof(list[index].name));
+		users_text(row->full_name, sizeof(row->full_name), list[index].full_name, sizeof(list[index].full_name));
+		if ((list[index].flags & KL_MACHINE_USER_ADMIN) != 0U)
+			row->admin = 1;
+		if ((list[index].flags & KL_MACHINE_USER_NETWORK) != 0U)
+			row->network = 1;
+		if ((list[index].flags & KL_MACHINE_USER_SELF) != 0U)
+			row->self = 1;
 		users->row_count++;
 	}
 
-	/* The database closed, and the count in the log. */
-	endpwent();
-	se_log("USERS list count=%d", users->row_count);
-}
-
-/*
- * Copies a group and its members (none found: found is 0).
- */
-static void
-users_group_copy(
-	const char *name,
-	struct users_group *copy)
-{
-	struct group *group;
-	size_t i;
-
-	/* The group. */
-	memset(copy, 0, sizeof(copy[0]));
-	group = getgrnam(name);
-	if (group == NULL)
+	/* The administration's choice, found again by its name (none chosen: nothing to find). */
+	users->selected = 0;
+	if (users->selected_name[0] == '\0') {
+		se_log("USERS list count=%d", users->row_count);
 		return;
-
-	/* Its ID and its members, as far as there is room, ended by NULL. */
-	copy->found = 1;
-	copy->group.gr_gid = group->gr_gid;
-	for (i = 0; group->gr_mem != NULL && group->gr_mem[i] != NULL && i + 1U < sizeof(copy->members) / sizeof(copy->members[0]); i++) {
-		(void)snprintf(copy->names[i], sizeof(copy->names[i]), "%s", group->gr_mem[i]);
-		copy->members[i] = copy->names[i];
 	}
-
-	/* The list ended. */
-	copy->members[i] = NULL;
-	copy->group.gr_mem = copy->members;
-}
-
-/*
- * Says whether an account is a person's: a user ID from 1000 (not
- * nobody's) and a shell that lets it log in.
- */
-static int
-users_person(
-	const struct passwd *account)
-{
-	const char *shell;
-	const char *refusing;
-
-	/* The system's accounts and nobody. */
-	if (account->pw_uid < USERS_FIRST_UID || account->pw_uid == USERS_NOBODY_UID)
-		return 0;
-
-	/* A shell that refuses the login (nologin, false). */
-	shell = account->pw_shell;
-	if (shell == NULL)
-		return 1;
-
-	/* Nologin. */
-	refusing = strstr(shell, "nologin");
-	if (refusing != NULL)
-		return 0;
-
-	/* False, at the end of the path. */
-	refusing = strstr(shell, "/false");
-	if (refusing != NULL)
-		return 0;
-
-	/* A person's. */
-	return 1;
-}
-
-/*
- * Says whether an account is in a group: it is its group, or it is among
- * its members (wheel: an administrator; network: may control Wi-Fi).
- */
-static int
-users_member(
-	const struct passwd *account,
-	const struct users_group *group)
-{
-	size_t i;
-	int differs;
-
-	/* No such group: not in it. */
-	if (!group->found)
-		return 0;
-
-	/* The group as its own. */
-	if (account->pw_gid == group->group.gr_gid)
-		return 1;
-
-	/* Among the members. */
-	for (i = 0; group->group.gr_mem != NULL && group->group.gr_mem[i] != NULL; i++) {
-		/* The same name. */
-		differs = strcmp(group->group.gr_mem[i], account->pw_name);
+	for (index = 0; index < (size_t)users->row_count; index++) {
+		/* The chosen user's row. */
+		differs = strcmp(users->rows[index].name, users->selected_name);
 		if (differs == 0)
-			return 1;
+			users->selected = (int)index + 1;
 	}
 
-	/* Not in it. */
-	return 0;
+	/* A chosen user who is gone is chosen no longer, nor is a change of it made. */
+	if (users->selected == 0) {
+		users->selected_name[0] = '\0';
+		if (users->admin_mode != SE_ADMIN_NONE && users->admin_mode != SE_ADMIN_ADD) {
+			se_users_admin_wipe(users);
+			users->admin_mode = SE_ADMIN_NONE;
+		}
+	}
+
+	/* The count in the log. */
+	se_log("USERS list count=%d", users->row_count);
 }
 
 /*
@@ -803,4 +705,27 @@ users_field_draw(
 	if (users->shown)
 		kind = SE_FIELD_PLAIN;
 	(void)se_field_draw(app, canvas, &users->fields[index], &box, users_placeholders[index], kind, focused);
+}
+
+/*
+ * Copies a text of the desktop's answer (its room of room bytes, ended
+ * within it) into a field of size bytes, cut to fit.
+ */
+static void
+users_text(
+	char *to,
+	size_t size,
+	const char *from,
+	size_t room)
+{
+	size_t length;
+
+	/* The text's length within its room, and as much as fits. */
+	length = strnlen(from, room);
+	if (length >= size)
+		length = size - 1U;
+
+	/* The bytes, ended. */
+	memcpy(to, from, length);
+	to[length] = '\0';
 }

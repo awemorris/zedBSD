@@ -38,6 +38,12 @@ struct kwl_server;
 void kwl_language_system(struct kwl_server *server);
 
 /*
+ * Reads the first line of the system's language file as it is (0, or
+ * ENOENT without one); the machine's thread uses it (ws188-p002).
+ */
+int kwl_language_system_word(char *word, size_t size);
+
+/*
  * Takes the session's language from the setting ui.language (0 English,
  * 1 Japanese): the catalogs are read and the screen drawn again.
  */

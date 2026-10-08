@@ -10,7 +10,7 @@ KEILAND_LINUX_SETTINGS_SOURCES := userland/desktop/settings/main.c \
 	userland/desktop/settings/widgets.c \
 	userland/desktop/settings/glyphs.c \
 	userland/desktop/settings/pages.c \
-	userland/desktop/settings/about.c \
+	userland/desktop/settings/machine.c \
 	userland/desktop/settings/page-home.c \
 	userland/desktop/settings/page-about.c \
 	userland/desktop/settings/welcome.c \

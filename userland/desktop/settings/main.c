@@ -199,9 +199,8 @@ main(
 		return 1;
 	}
 
-	/* The interface, and what About shows of the machine, the graphics device and the screen among it. */
+	/* The interface, and what About shows of the window: the graphics device and the screen (the machine's names come from the desktop, ws188-p002). */
 	main_app.now = se_clock();
-	se_about_read(&main_app.about);
 	main_about_window();
 	se_ui_init(&main_app, &main_text, options.page);
 	if (options.welcome)
@@ -209,6 +208,7 @@ main(
 
 	/* The desktop's system (the network and the sound follow it), and the desktop's settings. */
 	se_system_open(&main_app, main_window.display);
+	se_machine_open(&main_app);
 	se_network_open(&main_app);
 	se_look_open(&main_app, main_window.display);
 	se_sound_open(&main_app);
@@ -488,6 +488,7 @@ main_loop(
 		/* Time passes for the interface (the minute About shows), and the system reports (the network and the sound follow it). */
 		se_ui_tick(&main_app, now);
 		se_system_poll(&main_app);
+		se_machine_poll(&main_app, now);
 		se_network_poll(&main_app, now);
 		se_look_poll(&main_app, now);
 		se_storage_poll(&main_app, now);
@@ -653,6 +654,7 @@ main_timeout(
 	int sound;
 	int look;
 	int storage;
+	int machine;
 	int limit;
 
 	/* A frame the last one asked for (a scroll it corrected), or the lit region's, is drawn at once. */
@@ -683,6 +685,11 @@ main_timeout(
 	storage = se_storage_wait(&main_app);
 	if (storage >= 0 && storage < limit)
 		limit = storage;
+
+	/* And while a reading of the computer is due or waited for (ws188-p002). */
+	machine = se_machine_wait(&main_app);
+	if (machine >= 0 && machine < limit)
+		limit = machine;
 
 	/* The limit (a held key's repeat shortens the wait within the application's). */
 	(void)now;

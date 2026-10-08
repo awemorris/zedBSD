@@ -124,7 +124,10 @@ main(
 	error = kl_canvas_init(&canvas, pixels, (size_t)width, width, height);
 	if (error != 0)
 		return 1;
-	se_about_read(&app.about);
+	/* About's names are the desktop's (ws188-p002); the host test shows fixed ones. */
+	(void)snprintf(app.about.system, sizeof(app.about.system), "%s", "Host test");
+	(void)snprintf(app.about.kernel, sizeof(app.about.kernel), "%s", "Host kernel");
+	(void)snprintf(app.about.machine, sizeof(app.about.machine), "%s", "host");
 	(void)snprintf(app.about.graphics, sizeof(app.about.graphics), "%s", "Host test (no GPU)");
 	(void)snprintf(app.about.display, sizeof(app.about.display), "%dx%d", width, height);
 	app.now = 3723000U;

@@ -83,12 +83,18 @@ se_system_poll(
 	/* The machine's memory for About (ws089-p013): the newest frame of the monitor, when one came. */
 	se_about_follow(app);
 
+	/* The parts of the computer an answer changed (ws188-p002), copied before their answers are taken. */
+	if ((app->system_changed & KL_SYSTEM_CHANGED_MACHINE) != 0U)
+		se_machine_follow(app);
+
 	/* Each answer: the network's own, or one of the sound's, logged. */
 	for (;;) {
 		taken = kl_system_take_result(app->system, &request, &error);
 		if (!taken)
 			break;
-		consumed = se_network_result(app, request, error);
+		consumed = se_machine_result(app, request, error);
+		if (!consumed)
+			consumed = se_network_result(app, request, error);
 		if (!consumed)
 			consumed = se_users_result(app, request, error);
 		if (!consumed)

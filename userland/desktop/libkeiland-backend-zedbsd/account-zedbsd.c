@@ -22,9 +22,12 @@
  * threads.  The lines are wiped after they are written.  SIGPIPE, when
  * passwd ends before it read them, is held for this thread and taken back
  * before the thread goes on.
+ *
+ * The people's accounts as Settings lists them (ws188-p002) are read by
+ * the shared machine/users.c with zedBSD's group of administrators.
  */
 
-#include "userland/desktop/libkeiland-backend/keiland-backend.h"
+#include "userland/desktop/libkeiland-backend/backend-private.h"
 
 #include "userland/base/common/account.h"
 
@@ -341,6 +344,26 @@ kl_backend_account_administer(
 
 	/* Any other refusal. */
 	return EINVAL;
+}
+
+/*
+ * Reads the people's accounts (ws188-p002): zedBSD's administrators are
+ * wheel's members (account-admin's rule, docs/architecture/security.md).
+ */
+size_t
+kl_backend_users_read(
+	struct kl_backend_user *list,
+	size_t capacity,
+	unsigned *skipped)
+{
+	static const char *const admin_groups[] = { "wheel", NULL };
+	size_t count;
+
+	/* The shared reading with zedBSD's group. */
+	count = kl_backend_users_posix(list, capacity, skipped, admin_groups);
+
+	/* Succeeded: the accounts read. */
+	return count;
 }
 
 /*

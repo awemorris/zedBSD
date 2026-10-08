@@ -16,15 +16,14 @@
  *                     WS158): English or Japanese, each named in its own
  *                     language; the desktop and its programs follow at once.
  *   Login screen      for an administrator only: the language of the login
- *                     screen (the system's, KEILAND_SYSCONFDIR
- *                     /keiland/language), changed through the desktop's
- *                     account administration (account-admin's
+ *                     screen (the system's, which the desktop reads,
+ *                     ws188-p002: libkeiland's
+ *                     kl_system_machine_login_language), changed through
+ *                     the desktop's account administration (account-admin's
  *                     system-language) with the administrator's password.
  */
 
 #include "settings.h"
-
-#include "userland/desktop/paths.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -55,10 +54,6 @@
 #define LANGUAGES_FIELD_X	200
 #define LANGUAGES_FIELD_HEIGHT	36
 
-/* The file of the system's language, and the most of it read. */
-#define LANGUAGES_SYSTEM_PATH	KEILAND_SYSCONFDIR "/keiland/language"
-#define LANGUAGES_LINE_MAX	16
-
 /* The languages, by ui.language's number: their codes, and their names in their own language (never translated). */
 #define LANGUAGES_COUNT		2
 
@@ -85,7 +80,6 @@ static const char *const languages_words[] = { "not-administrator", "bad-passwor
 
 static int languages_draw_system(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
 static void languages_field_draw(struct se_app *app, struct kl_canvas *canvas, int x, int y, int width);
-static void languages_read_system(struct se_languages *languages);
 static int languages_ready(const struct se_app *app);
 static void languages_apply(struct se_app *app);
 static const char *languages_saying(const char *word);
@@ -166,16 +160,15 @@ languages_draw_system(
 	int y;
 	int i;
 
-	/* Whether the user is an administrator (the users read once, as the Users page reads them). */
-	se_users_load(&app->users);
+	/* Whether the user is an administrator (the users asked of the desktop, as the Users page asks them). */
+	se_users_load(app);
 	administer = se_users_admin_available(app);
 	if (!administer)
 		return top;
 
-	/* The system's language, read once (and again after a change). */
+	/* The system's language, asked of the desktop until it is known (and again after a change). */
 	languages = &app->languages;
-	if (!languages->system_read)
-		languages_read_system(languages);
+	se_machine_want(app, KL_MACHINE_LOGIN_LANGUAGE);
 
 	/* The card: the language now, one row a language, the password, Apply and the answer. */
 	top += LANGUAGES_GAP;
@@ -397,12 +390,18 @@ se_languages_result(
 	languages->asked = 0;
 	app->dirty = 1;
 
-	/* Made: the language read again from the system's file. */
+	/*
+	 * Made: the language is read again by the desktop, and the change's
+	 * log line waits for that reading (se_languages_reloaded), so that it
+	 * carries the language set (ws188-p002).
+	 */
 	if (error == 0) {
-		languages_read_system(languages);
 		(void)snprintf(languages->message, sizeof(languages->message), "%s", kl_tr("Changed. The login screen uses it from the next time it shows."));
 		languages->message_bad = 0;
-		se_log("LANGUAGES system result request=%u errno=0 system=%d", request, languages->system);
+		languages->reload_for = request;
+		languages->reload_request = se_machine_ask_now(app, KL_MACHINE_USERS | KL_MACHINE_LOGIN_LANGUAGE);
+		if (languages->reload_request == 0U)
+			se_languages_reloaded(app, ENOTSUP);
 		return 1;
 	}
 
@@ -421,52 +420,70 @@ se_languages_result(
 }
 
 /*
- * Reads the system's language from its file ("en" or "ja" on one line);
- * without the file, or with another word, it is not set.  The language to
- * set starts as the system's (English when it is not set).
+ * Copies the login screen's language of the desktop's last answer ("en",
+ * "ja", or not set).  The language to set starts as the system's (English
+ * when it is not set) the first time it is known, and follows it when it
+ * changes, but not while the administrator's choice is the only change.
  */
-static void
-languages_read_system(
-	struct se_languages *languages)
+void
+se_languages_copy(
+	struct se_app *app)
 {
-	char text[LANGUAGES_LINE_MAX];
+	struct se_languages *languages;
+	char text[8];
 	const char *code;
-	FILE *file;
-	size_t length;
+	int previous;
+	int error;
 	int same;
 	int i;
 
-	/* Not set until the file says otherwise. */
-	languages->system_read = 1;
-	languages->system = -1;
-	text[0] = '\0';
-	file = fopen(LANGUAGES_SYSTEM_PATH, "r");
-	if (file != NULL) {
-		length = fread(text, 1, sizeof(text) - 1U, file);
-		text[length] = '\0';
-		fclose(file);
-	}
+	/* The language's code; one never answered stays as it was. */
+	languages = &app->languages;
+	error = kl_system_machine_login_language(app->system, text, sizeof(text));
+	if (error != 0)
+		return;
 
-	/* The first line's word. */
-	length = strcspn(text, "\r\n \t");
-	text[length] = '\0';
+	/* A language this page knows, else not set. */
+	previous = languages->system;
+	languages->system = -1;
 	for (i = 0; i < LANGUAGES_COUNT; i++) {
-		/* A language this page knows. */
 		same = strcmp(text, languages_codes[i]);
 		if (same == 0)
 			languages->system = i;
 	}
 
-	/* The one to set starts as the system's. */
-	languages->chosen = 0;
-	code = "none";
-	if (languages->system >= 0) {
-		languages->chosen = languages->system;
-		code = languages_codes[languages->system];
+	/* The one to set: the system's, when first known or when the system's changed. */
+	if (!languages->system_read || previous != languages->system) {
+		languages->chosen = 0;
+		if (languages->system >= 0)
+			languages->chosen = languages->system;
 	}
+	languages->system_read = 1;
 
 	/* The log line the tests read. */
+	code = "none";
+	if (languages->system >= 0)
+		code = languages_codes[languages->system];
 	se_log("LANGUAGES system language=%s", code);
+}
+
+/*
+ * Reports a change of the login screen's language once the desktop read it
+ * again (the reading's error; the change itself was made).
+ */
+void
+se_languages_reloaded(
+	struct se_app *app,
+	int error)
+{
+	struct se_languages *languages;
+
+	/* The change's line with the language read after it (-1 when it could not be read). */
+	languages = &app->languages;
+	se_log("LANGUAGES system result request=%u errno=0 system=%d reread=%d", languages->reload_for, languages->system, error);
+	languages->reload_request = 0U;
+	languages->reload_for = 0U;
+	app->dirty = 1;
 }
 
 /* Tells whether the login screen's change can be asked: another language chosen, the password typed, no change under way. */

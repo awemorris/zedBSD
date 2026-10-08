@@ -636,6 +636,13 @@ struct se_languages {
 	int focused;
 	int asked;
 	uint32_t request;
+	/*
+	 * The reading of the computer asked after a change was made (ws188-p002;
+	 * 0 for none) and the change's request it reports, so that the change's
+	 * log line carries the language read after it.
+	 */
+	uint32_t reload_request;
+	uint32_t reload_for;
 	char message[SE_MESSAGE];
 	int message_bad;
 };
@@ -656,7 +663,7 @@ struct se_languages {
 #define SE_USERS_KEYBOARD_KEYS		3
 
 /* The most users the Users page lists (ws089-p026). */
-#define SE_USERS_LIST_MAX	32
+#define SE_USERS_LIST_MAX	64
 
 /*
  * One user of the list (ws089-p026): the name, the full name, whether the
@@ -724,7 +731,9 @@ struct se_users {
 	int read;
 	char name[64];
 	char full_name[128];
-	char home[160];
+	char home[256];
+	int self_admin;
+	char selected_name[64];
 	struct se_user_row rows[SE_USERS_LIST_MAX];
 	int row_count;
 	struct kl_field fields[SE_USERS_FIELDS];
@@ -766,8 +775,34 @@ struct se_users {
 };
 
 /*
- * What About shows of the machine, read once when the program starts
- * (about.c).  An empty text is a value that could not be read, and the
+ * The readings of the computer Settings asks the desktop for (machine.c,
+ * ws188-p002, plan/ws188/phase001/phase.md section D6), one slot a part
+ * (About's names, the file systems, the users, the login screen's
+ * language): the request asked and when (0: none asked), when the last
+ * one failed (0: it did not), when the part was last copied and its serial
+ * then.  wanted has the KL_MACHINE_* parts the pages want known, and
+ * filesystems_ms when Home or Storage last wanted the file systems.
+ * recent keeps the last queries' numbers, so that an answer to one a
+ * newer query replaced is still recognised as the computer's.
+ */
+#define SE_MACHINE_PARTS	4
+#define SE_MACHINE_RECENT	8
+struct se_machine {
+	uint32_t asked[SE_MACHINE_PARTS];
+	uint64_t asked_ms[SE_MACHINE_PARTS];
+	uint64_t failed_ms[SE_MACHINE_PARTS];
+	uint64_t copied_ms[SE_MACHINE_PARTS];
+	uint32_t serials[SE_MACHINE_PARTS];
+	unsigned wanted;
+	uint64_t filesystems_ms;
+	uint32_t recent[SE_MACHINE_RECENT];
+	unsigned recent_next;
+};
+
+/*
+ * What About shows of the machine: the system's names as the desktop read
+ * them (machine.c, ws188-p002), the graphics device and the screen as the
+ * window learned them, and the memory as the monitor tells it.  An empty text is a value that could not be read, and the
  * row is not shown; system is the version's name of /etc/os-release
  * (PRETTY_NAME, ws089-p027), shown as the operating system, which is
  * "Kei" when it is empty.
@@ -1193,6 +1228,9 @@ struct se_app {
 	struct kl_system *system;
 	unsigned system_changed;
 
+	/* The readings of the computer asked of the desktop (machine.c, ws188-p002). */
+	struct se_machine machine;
+
 	/* The machine's monitor while About is shown (ws089-p013: its memory; NULL before About or without one). */
 	struct kl_system_monitor *monitor;
 
@@ -1447,7 +1485,7 @@ int se_soon_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, i
 int se_users_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
 void se_users_press(struct se_app *app, int index);
 int se_users_key(struct se_app *app, const struct se_event *event);
-void se_users_load(struct se_users *users);
+void se_users_load(struct se_app *app);
 int se_users_result(struct se_app *app, uint32_t request, int error);
 void se_users_close(struct se_app *app);
 int se_users_admin_available(const struct se_app *app);
@@ -1467,10 +1505,21 @@ int se_users_keys_key(struct se_app *app, const struct se_event *event);
 int se_users_keys_result(struct se_app *app, uint32_t request, int error);
 void se_users_keys_touched(struct se_app *app);
 void se_users_keys_wipe(struct se_users *users);
-void se_users_reload(struct se_users *users);
+void se_users_reload(struct se_app *app);
+void se_users_copy(struct se_app *app);
+void se_languages_copy(struct se_app *app);
+void se_languages_reloaded(struct se_app *app, int error);
 
-/* What About shows of the machine (about.c). */
-void se_about_read(struct se_about *about);
-int se_about_pretty_name(const char *path, char *name, size_t size);
+/* The readings of the computer asked of the desktop (machine.c, ws188-p002). */
+void se_machine_open(struct se_app *app);
+void se_machine_want(struct se_app *app, unsigned parts);
+uint32_t se_machine_ask_now(struct se_app *app, unsigned parts);
+int se_machine_reading(const struct se_app *app, unsigned part);
+int se_machine_known(const struct se_app *app, unsigned part);
+int se_machine_offered(const struct se_app *app);
+void se_machine_follow(struct se_app *app);
+int se_machine_result(struct se_app *app, uint32_t request, int error);
+void se_machine_poll(struct se_app *app, uint64_t now);
+int se_machine_wait(const struct se_app *app);
 
 #endif
