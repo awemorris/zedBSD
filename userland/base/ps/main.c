@@ -431,12 +431,14 @@ snapshot_arguments(
 	char *arguments)
 {
 	struct system_process_arguments line;
+	int status;
 
 	/* None until the kernel gives one. */
 	arguments[0] = '\0';
 	memset(&line, 0, sizeof(line));
 	line.pid = process->pid;
-	if (ioctl(descriptor, KERN_SYSTEM_GET_PROCESS_ARGUMENTS, &line) != 0)
+	status = ioctl(descriptor, KERN_SYSTEM_GET_PROCESS_ARGUMENTS, &line);
+	if (status != 0)
 		return;
 
 	/* Only an answer of this version and size. */
@@ -534,10 +536,13 @@ print_value(
 		break;
 	case FIELD_ARGUMENTS:
 		/* The command line, or the command when there is none. */
-		if (arguments[0] != '\0')
+		if (arguments[0] != '\0') {
 			printf("%s", arguments);
-		else
-			printf("%s", process->command[0] ? process->command : "kernel");
+		} else if (process->command[0] != '\0') {
+			printf("%s", process->command);
+		} else {
+			printf("kernel");
+		}
 		break;
 	}
 }

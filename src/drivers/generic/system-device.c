@@ -1016,6 +1016,8 @@ system_get_process_arguments(
 	} else {
 		kern_memcpy(output.arguments, process->arguments, sizeof(output.arguments));
 	}
+
+	/* The line ends within its field. */
 	output.arguments[sizeof(output.arguments) - 1U] = '\0';
 	spin_unlock_irqrestore(&process->lock, irq);
 
