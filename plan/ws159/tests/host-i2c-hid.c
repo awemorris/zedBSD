@@ -42,6 +42,7 @@
 #include <drivers/acpi/acpi.h>
 #include <drivers/i2c/i2c.h>
 #include <kern/input-device.h>
+#include <kern/irq.h>
 #include <uapi/input.h>
 
 #include <setjmp.h>
@@ -859,6 +860,93 @@ drv_input_device_register(
 	return 0;
 }
 
+/* Takes a device out (the glue's undoing of a failed publication; the test's never fails). */
+void
+drv_input_device_unregister(
+	struct input_device *device)
+{
+	/* Nothing is kept for it. */
+	(void)device;
+}
+
+/* Allocates for the HID input glue, as the kernel heap does. */
+void *
+kern_malloc(
+	size_t size)
+{
+	/* The host's heap. */
+	return malloc(size);
+}
+
+/* Refuses an interrupt line: the test's devices are read on their GPIO pad or sampled (ws183-p001 added the lines). */
+int
+kern_irq_register(
+	int irq,
+	kern_irq_handler_t handler,
+	void *argument)
+{
+	/* No line is taken. */
+	(void)irq;
+	(void)handler;
+	(void)argument;
+	return 95;
+}
+
+/* Gives a line back. */
+int
+kern_irq_unregister(
+	int irq,
+	kern_irq_handler_t handler,
+	void *argument)
+{
+	/* Nothing was taken. */
+	(void)irq;
+	(void)handler;
+	(void)argument;
+	return 0;
+}
+
+/* Sets a line's trigger and polarity. */
+int
+kern_irq_set_mode(
+	int irq,
+	unsigned trigger,
+	unsigned polarity)
+{
+	/* Nothing to set. */
+	(void)irq;
+	(void)trigger;
+	(void)polarity;
+	return 0;
+}
+
+/* Masks a line. */
+void
+kern_irq_mask(
+	int irq)
+{
+	/* Nothing to mask. */
+	(void)irq;
+}
+
+/* Unmasks a line. */
+void
+kern_irq_unmask(
+	int irq)
+{
+	/* Nothing to unmask. */
+	(void)irq;
+}
+
+/* Ends an interrupt. */
+void
+kern_irq_send_eoi(
+	kern_irq_ack_t acknowledge)
+{
+	/* Nothing to end. */
+	(void)acknowledge;
+}
+
 /* Records an event the driver emits. */
 void
 drv_input_device_emit_at(
@@ -868,8 +956,11 @@ drv_input_device_emit_at(
 	int32_t value,
 	uint64_t milliseconds)
 {
+	/* No device tells nothing, as the input layer does (the glue's unpublished main device, ws143-p005). */
+	if (device == NULL)
+		return;
+
 	/* The device is the registered one; the time is the fake clock's. */
-	(void)device;
 	(void)milliseconds;
 
 	/* Keeps the event. */

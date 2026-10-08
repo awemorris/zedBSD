@@ -6,8 +6,8 @@
  */
 
 /*
- * The oracle of the HID input glue's host test (ws143-p005 i01a): the old
- * usb-hid report handling, copied in hid-input-old.c.
+ * The oracle of the HID input glue's host test (ws143-p005 i01a, i01c):
+ * the old usb-hid and i2c-hid report handling, copied in hid-input-old.c.
  */
 
 #ifndef WS143_TESTS_HID_INPUT_OLD_H
@@ -50,6 +50,18 @@ struct old_hid {
 	unsigned malformed_logged;
 };
 
+/* The fields of the old struct i2c_hid_device that its report handling used. */
+struct old_i2c {
+	struct hid_report_layout *layout;
+	struct hid_report_touch_info touch;
+	struct hid_touch_description description;
+	struct hid_touch_state state;
+	struct hid_report_input decoded;
+	struct hid_touch_output output;
+	struct input_device *input;
+	char name[64];
+};
+
 int old_hid_prepare(struct old_hid *hid, const uint8_t *descriptor, size_t descriptor_length);
 void old_hid_fallback_name(const struct old_hid *hid, char *name, size_t size);
 int old_hid_publish(struct old_hid *hid, const char *name, const char *physical_path, const char *unique_id,
@@ -58,5 +70,10 @@ void old_hid_report(struct old_hid *hid, const uint8_t *buffer, size_t length, u
 void old_hid_unpublish(struct old_hid *hid);
 void old_hid_destroy(struct old_hid *hid);
 int old_hid_enodev(void);
+int old_i2c_prepare(struct old_i2c *device, const uint8_t *descriptor, size_t length);
+int old_i2c_publish(struct old_i2c *device, const char *path, uint16_t vendor, uint16_t product, uint16_t version);
+void old_i2c_report(struct old_i2c *device, const uint8_t *report, size_t length, uint64_t now);
+void old_i2c_unpublish(struct old_i2c *device);
+void old_i2c_destroy(struct old_i2c *device);
 
 #endif
