@@ -2028,6 +2028,7 @@ int kwl_corner_showing(void);
 int kwl_keyboard_button(struct kwl_server *server, uint32_t button, uint32_t state);
 int kwl_keyboard_motion(struct kwl_server *server);
 void kwl_keyboard_tick(struct kwl_server *server);
+void kwl_keyboard_surface_commit(struct kwl_object *surface);
 int kwl_keyboard_showing(void);
 int kwl_keyboard_at(int32_t x, int32_t y);
 void kwl_keyboard_close(struct kwl_server *server, const char *reason);

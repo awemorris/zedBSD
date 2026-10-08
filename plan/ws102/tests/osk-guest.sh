@@ -56,6 +56,9 @@
 #   emoji     (p022) the emoji tab (1238,141): category 0's first emoji and category 1's fourth reach ime-probe as
 #             commits (PROBE TEXT); wltest (no text input) refuses one (sent=0); one tapped into Text Editor and saved
 #             is its UTF-8 (od); emoji.png, emoji-sent.png.  The cells' places are read from the log (KWL OSK erect)
+#   latency   (p010) L3's measurements in three rounds (20 QWERTY keys into Text Editor, the panels' slides): the
+#             release to the key sent, to Text Editor's next buffer, and the slides' frames (osk-latency.py,
+#             OUTDIR/latency.txt)
 #   touch     (p002; the pen image) 10 injected swipes from the bottom-right corner open and close the panel 10 times
 #             (5 opens, 5 closes); 10 straight-up strokes from the corner open nothing
 #   OUTDIR is the first argument:  GUEST_RUNTIME=... BIN=build/ws102-amd64 plan/ws102/tests/osk-guest.sh OUTDIR STEP...
@@ -949,6 +952,41 @@ hold 800"
 		pointer move 6 700 sleep 200 down sleep 80 move 60 700 sleep 60 move 200 700 sleep 60 move 420 700 sleep 120 up sleep 1200
 		expect_log 'KWL GLASS desktop swipe'
 		expect_count 'KWL OSK press' 1
+		;;
+	latency)
+		# (ws102-p010) L3's measurements, three rounds: in Text Editor, the QWERTY panel opened, 20 letters tapped, the
+		# flick panel taken in its place and closed; zdesktop's "KWL OSK latency" and "KWL OSK slide end" lines into
+		# OUTDIR/latency.log, summed up by osk-latency.py into OUTDIR/latency.txt (the targets are reported, not judged
+		# here: QEMU's are reference values).  Judged: every tap measured (send_us 60), a frame of Text Editor after 54
+		# of them or more, and 9 slides or more.
+		: > "$out/latency.log"
+		round=1
+		while [ $round -le 3 ]; do
+			compositor
+			guest 'rm -f /root/lat.txt; touch /root/lat.txt' >/dev/null
+			guest "export XDG_RUNTIME_DIR=/tmp HOME=/root; /bin/textedit --timeout-s=600 /root/lat.txt > /tmp/te.log 2>&1 </dev/null & sleep 5; echo started" >/dev/null
+			expect_log 'KWL MAP client='
+			swipe 6 792 150 650
+			expect_log 'KWL OSK open kind=qwerty'
+			qkey_refresh
+			for label in a s d f g h j k l q w e r t y u i o p z; do
+				qkey_tap "$label"
+			done
+			swipe 1272 792 1130 650
+			expect_log 'KWL OSK open kind=flick'
+			swipe 1272 792 1130 650
+			sleep 1
+			guest "grep -a -e 'KWL OSK latency' -e 'KWL OSK slide end' /tmp/zdesktop.log" >> "$out/latency.log"
+			round=$((round + 1))
+		done
+		python3 -I plan/ws102/tests/osk-latency.py "$out/latency.log" > "$out/latency.txt"
+		cat "$out/latency.txt"
+		sends=$(grep -c 'latency send_us=' "$out/latency.log")
+		frames=$(grep -c 'latency frame_us=' "$out/latency.log")
+		slides=$(grep -c 'slide end' "$out/latency.log")
+		[ "$sends" -ge 60 ] && echo "latency: $sends keys measured ok" || { echo "latency: $sends keys measured MISSING"; status=1; }
+		[ "$frames" -ge 54 ] && echo "latency: $frames frames measured ok" || { echo "latency: $frames frames measured MISSING"; status=1; }
+		[ "$slides" -ge 9 ] && echo "latency: $slides slides measured ok" || { echo "latency: $slides slides measured MISSING"; status=1; }
 		;;
 	touch)
 		compositor
