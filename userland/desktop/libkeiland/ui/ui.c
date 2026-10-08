@@ -673,6 +673,8 @@ kl_ui_axis(
 		if (!shown)
 			scroll = NULL;
 	}
+
+	/* If no scroll was found, looks for one at the pointer location. */
 	if (scroll == NULL) {
 		record = ui_find(ui, ui->pointer_x, ui->pointer_y, 1);
 		if (record != NULL)
@@ -2917,6 +2919,8 @@ ui_inset_center(
 		touch->view->caret_rect(touch->data, touch->caret, &caret);
 		middle = (double)caret.y + (double)caret.height / 2.0;
 	}
+
+	/* Computes the scroll target, clamped to the valid range. */
 	target = middle - (double)visible / 2.0;
 	if (target > largest)
 		target = largest;

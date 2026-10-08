@@ -630,6 +630,8 @@ main_loop(
 			te_log("DONE reason=disconnected");
 			return 0;
 		}
+
+		/* Updates the app's notion of the current time. */
 		now = te_clock();
 		main_app.now = now;
 
@@ -651,6 +653,8 @@ main_loop(
 			} else if (now >= ready_due) {
 				ready_told = 1;
 			}
+
+			/* Logs the ready event if it was just set. */
 			if (ready_told)
 				te_log("READY width=%u height=%u lines=%lu focus=%d", main_width, main_height, (unsigned long)main_app.buffer.line_count, main_focus_came);
 		}
