@@ -15,7 +15,7 @@ Queue: なし
 
 ## 制限・移管
 
-run-host-files-recents.sh は WS177 の recents-p008.sh が使うので plan/tools へ移す案（Q1）。
+run-host-files-recents.sh は WS177 の recents-p008.sh が使うので plan/tools/files/ へ移した（2026-10-08）。
 
 ## Phase
 

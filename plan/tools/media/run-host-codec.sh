@@ -10,7 +10,7 @@
 #     AAC in MP4 and Matroska, H.265 in MP4, VP9 and Opus in WebM, Theora and Vorbis in Ogg, MJPEG and PCM in AVI,
 #     H.264 and MP3 in MPEG-TS, 4 s each).
 # Last line: run-host-codec: PASS.
-#   sh plan/ws122/tests/run-host-codec.sh
+#   sh plan/tools/media/run-host-codec.sh
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
@@ -23,22 +23,22 @@ status=0
 
 # 1. The layouts.
 if [ -f /usr/include/x86_64-linux-gnu/libavcodec/avcodec.h ]; then
-	cc -I. -I/usr/include/x86_64-linux-gnu plan/ws122/tests/host-layout.c -o "$out/layout-host" && "$out/layout-host" 61 | tail -1 || status=1
+	cc -I. -I/usr/include/x86_64-linux-gnu plan/tools/media/host-layout.c -o "$out/layout-host" && "$out/layout-host" 61 | tail -1 || status=1
 else
 	echo "layout 61: skipped (libavcodec-dev is not installed)"
 fi
 if [ -f "$stage/libavcodec/avcodec.h" ]; then
-	cc -I. -isystem "$stage" plan/ws122/tests/host-layout.c -o "$out/layout-image" && "$out/layout-image" 63 | tail -1 || status=1
+	cc -I. -isystem "$stage" plan/tools/media/host-layout.c -o "$out/layout-image" && "$out/layout-image" 63 | tail -1 || status=1
 else
 	echo "layout 63: skipped (no staged FFmpeg 9.0.2 headers at $stage)"
 fi
 
 # 2. The decoding.
 cc -std=gnu99 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -fsanitize=address,undefined -fno-omit-frame-pointer -I. \
-    plan/ws122/tests/host-codec.c userland/desktop/libmedia/decoder.c userland/desktop/libmedia/avcodec.c userland/desktop/libmedia/bitstream.c \
+    plan/tools/media/host-codec.c userland/desktop/libmedia/decoder.c userland/desktop/libmedia/avcodec.c userland/desktop/libmedia/bitstream.c \
     userland/desktop/mediafile/mediafile.c userland/desktop/mediafile/mp4.c userland/desktop/mediafile/mkv.c userland/desktop/mediafile/ts.c userland/desktop/mediafile/ogg.c userland/desktop/mediafile/avi.c \
     -ldl -lpthread -o "$out/host-codec" || { echo "run-host-codec: FAIL (build)"; exit 1; }
-files=plan/ws122/tests/sample.mp4
+files=plan/tools/media/sample.mp4
 if command -v ffmpeg > /dev/null 2>&1; then
 	src="-f lavfi -i testsrc2=size=320x180:rate=25 -f lavfi -i sine=frequency=440:sample_rate=44100 -t 4"
 	ffmpeg -loglevel error -y $src -c:v libx264 -bf 2 -g 25 -c:a aac "$out/media/h264-aac.mp4" && files="$files $out/media/h264-aac.mp4"

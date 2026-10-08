@@ -15,7 +15,7 @@ Queue: なし
 
 ## 制限・移管
 
-GPU の decode は WS083、独自の container の読みは libmedia（WS177 の案 T）、独自の AAC は後。全文規約はベータ3。実機の direct=1 は UAT。回帰に使う試験（run-host-codec.sh・run-host-mediafile.sh・sample.mp4・host-layout.c）は plan/tools へ移す案（Q1）。
+GPU の decode は WS083、独自の container の読みは libmedia（WS177 の案 T）、独自の AAC は後。全文規約はベータ3。実機の direct=1 は UAT。回帰に使う試験（run-host-codec.sh・run-host-mediafile.sh・sample.mp4・host-layout.c ほか）は plan/tools/media/ へ移した（2026-10-08）。
 
 ## Phase
 

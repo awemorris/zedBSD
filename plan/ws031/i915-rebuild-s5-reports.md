@@ -29,7 +29,7 @@
 ## T1 host render/legacy (done)
 - PASS: run-vk-host-tests.sh full default list (plain+ASan/UBSan); run-vk-analyzer.sh 0 warnings (25 sources); ws029 run-i915-host-tests.sh "ppgtt stream"; run-i915-analyzer.sh gcc 0 / clang 2; run-i915-build-selection-test.py PASS (was failing).
 - new stubs i915-vk-render-stubs.inc, README-vk-host-tests.md; ws029 README-retired.md, i915-ppgtt-test.c, stubs; retired uncore/gtt/irq/lrc/backend tests.
-- analyzer logs rewritten (plan/ws031/phase012/analyzer-gcc.log, plan/ws029/phase007/analyzer-*.log).
+- analyzer logs rewritten (plan/ws031/phase012/analyzer-gcc.log, plan/ws029/phase007/analyzer-*.log（git の履歴、2026-10-08 の WS の完了で削除）).
 - production issues: pipeline leak on compile failure (known XXX); descriptor sets never freed (78 refused); reply bodies written when reply flag 0 (latent); clang: submit.c:577 shift by 32 when ring size<=1 (UB, not reachable), workarounds.c:428 null wal (likely false positive); CONFIG_DRIVER_PCI_I915_SELFTEST selects nothing now.
 
 ## T4b kernel display tests (done)

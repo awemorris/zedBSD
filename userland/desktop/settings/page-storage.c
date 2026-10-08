@@ -13,7 +13,7 @@
  *               what is counted so far, and the folders in it the largest
  *               first, each with a bar; a click on a folder analyses it.
  *   Trash       its size, and Empty Trash, which asks to be confirmed.
- *   Recent items  Keep recent items (q824, plan/ws148/phase001): the
+ *   Recent items  Keep recent items (q824, WS148 p001, in the git history): the
  *               desktop's list of the files applications opened, which
  *               Files shows as Recents; off empties the list and stops it.
  */

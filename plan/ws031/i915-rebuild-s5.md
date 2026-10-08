@@ -19,7 +19,7 @@
 
 | 担当 | 旧 | 新 | 受入 |
 | --- | --- | --- | --- |
-| T1 host render/legacy | `plan/ws031/tests/i915-vk-{res,resdispatch,pipe,cmdbuf,sync}-test.c`、`i915-vk-e127-stubs.inc`、`run-vk-host-tests.sh`、`run-vk-analyzer.sh`、`plan/ws029/tests/*` | 新 render / session / command / ppgtt に向けた fixture。旧 module（res/pipe/cmdbuf/sync/wsi）専用の検査は、同じ意味の新関数（objects/memory/command/fence）へ移すか、廃止理由を書く。ws029: stream parse と session PPGTT は新ファイルへ、uncore/gtt/irq/lrc/backend は廃止（本番から到達しないコードの試験） | `run-vk-host-tests.sh` 既定一覧 PASS（通常＋ASan/UBSan）、analyzer PASS |
+| T1 host render/legacy | `plan/ws031/tests/i915-vk-{res,resdispatch,pipe,cmdbuf,sync}-test.c`、`i915-vk-e127-stubs.inc`、`run-vk-host-tests.sh`、`run-vk-analyzer.sh`、`plan/ws029/tests/*`（git の履歴、2026-10-08 の WS の完了で削除） | 新 render / session / command / ppgtt に向けた fixture。旧 module（res/pipe/cmdbuf/sync/wsi）専用の検査は、同じ意味の新関数（objects/memory/command/fence）へ移すか、廃止理由を書く。ws029: stream parse と session PPGTT は新ファイルへ、uncore/gtt/irq/lrc/backend は廃止（本番から到達しないコードの試験） | `run-vk-host-tests.sh` 既定一覧 PASS（通常＋ASan/UBSan）、analyzer PASS |
 | T2 contract | `parity/tests/*`（mock mmio/dma/pci、contract 6 本、run.sh） | `tests/contracts/`（mock と contract、run.sh） | 全 contract PASS |
 | T3 host display | `run-dp-host-test.sh`、`run-lcd-host-test.sh`、`run-lcd-modeset-host-test.sh`、`run-opregion-host-test.sh`、`run-native-decide-host-test.sh` と fixture、`lcd_fake_hw.c`、`dp_fake_hw.c` | `tests/display/`（fake HW）＋ `plan/ws031/tests/` の script を新ファイルへ | 5 script PASS |
 | T4a kernel 実行試験 | `parity/ktest.c`、`eu_test.c`、`runner.c` の試験部、`selftest.c`（本番から到達しない legacy HW 試験は廃止）、`draw_fixture.h`、`tex_fixture*_gen.inc`、`vk/vkref-generated.inc` | `tests/execution/`（runner、ktest、eu_test）、`tests/fixtures/`、`device.c` の weak 呼出し 1 行 | 実機: ktest PASS 件数、EU test PASS |

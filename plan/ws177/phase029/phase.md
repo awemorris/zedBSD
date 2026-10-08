@@ -28,6 +28,6 @@ Origin: [backlog-p2](../backlog-p2.md) の 116〜123 のうち browser の video
 ## 確認
 
 - host: `sh plan/ws177/tests/host-media-t.sh mp4 ts ogg` → PASS（ASan・UBSan）。ffmpeg で作った 4 つ（Opus 48 kHz、Vorbis 44.1 kHz、Theora＋Vorbis、Theora（GOP 7）＋Opus）を ffprobe の packet（pts・size・key・Adler-32）と照合、seek 5 点（Theora は key frame、音だけの file は時刻以前 2 秒以内）。壊した 2 つ: 途中の page の 1 byte（その page の packet が落ちて数えられ、他は読める）、途中で切る（各 track が ffprobe の先頭と一致）。
-- host（他の WS）: `plan/ws122/tests/run-host-mediafile.sh`・`run-host-codec.sh`・`plan/ws121/tests/run-host-engine.sh` PASS、`plan/ws074/tests/host-build.sh plain` exit 0。
+- host（他の WS）: `plan/tools/media/run-host-mediafile.sh`・`run-host-codec.sh`・`plan/ws121/tests/run-host-engine.sh` PASS、`plan/ws074/tests/host-build.sh plain` exit 0。
 - build: videoplayer・music・libmedia.so exit 0・warning 0。style-check 指摘なし。
 - QEMU: 未実施（p031 の後に T1 へ）。

@@ -18,7 +18,7 @@ cc -std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -I"$base/include" -o "$
 cp plan/ws121/tests/video.html "$dir/video.html"
 cp plan/ws121/tests/script.html "$dir/script.html"
 cp plan/ws121/tests/controls.html "$dir/controls.html"
-cp plan/ws122/tests/sample.mp4 "$dir/sample.mp4"
+cp plan/tools/media/sample.mp4 "$dir/sample.mp4"
 timeout 60 "$out" "$(pwd)/$dir/video.html" "$(pwd)/$dir/script.html" "$(pwd)/$dir/controls.html" "$out"
 for p in "$out"-*.ppm; do
 	python3 -c "import sys; from PIL import Image; Image.open(sys.argv[1]).save(sys.argv[2])" "$p" "${p%.ppm}.png"
