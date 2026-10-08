@@ -29,7 +29,7 @@ lacks() {
 	if printf '%s\n' "$2" | grep -qF -- "$3"; then echo "FAIL: $1 ('$3' in: $(printf '%s' "$2" | tr '\n' '|'))"; status=1; else echo "ok: $1"; fi
 }
 stop_daemon() {
-	guest 'for p in $(ps -A -o pid,args | grep "[/]sbin/bluetoothd" | awk "{print \$1}"); do kill $p; done; sleep 2; true' >/dev/null
+	guest 'service stop bluetoothd >/dev/null 2>&1; for p in $(ps -A -o pid,args | grep "[/]sbin/bluetoothd" | awk "{print \$1}"); do kill $p; done; sleep 2; true' >/dev/null
 }
 folder=/var/db/bluetooth/00:11:22:33:44:55
 

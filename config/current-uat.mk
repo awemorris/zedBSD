@@ -9,3 +9,6 @@
 include config/release/config-amd64-beta2.mk
 ZEDBSD_RELEASE_BUILD := n
 ZEDBSD_USER_PROGRAMS += systemevents sleepctl phone calendar mailer account-admin keiland-settings music photos keiland-printd printtest
+# Bluetooth (ws143, the UAT's "Bluetooth is not available on this computer"): the daemon (base rc.conf starts it; without the
+# _bluetooth account it does not start, the 2026-10-08 user decision B6), the CLI, and the AX211's Bluetooth firmware (D14).
+ZEDBSD_USER_PROGRAMS += $(filter-out $(ZEDBSD_USER_PROGRAMS),bluetoothd bt intelbt-firmware)

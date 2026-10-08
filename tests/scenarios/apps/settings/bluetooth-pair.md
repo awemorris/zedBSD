@@ -15,7 +15,7 @@ WS143 p006 の desktop: app（Settings）→ libkeiland `kl_system_bluetooth_*` 
 
 ## 準備
 `plan/ws143/tests/config-amd64-bt-desktop.mk` の image（AAT の image に試験の kernel の loopback の controller・bluetoothd・bt）。desktop に kei で login。
-root で `/sbin/bluetoothd >/tmp/btd.log 2>&1 &` を起動し 3 秒待つ（この image は boot で起動しない）。前の pairing の鍵が残っていれば root で
+root で `service stop bluetoothd`（boot で rc.conf が起動した物を止める）の後に `/sbin/bluetoothd >/tmp/btd.log 2>&1 &` を起動し 3 秒待つ。前の pairing の鍵が残っていれば root で
 `bt forget 0A:0B:0C:0D:0E:01` と `bt forget 0A:0B:0C:0D:0E:07`、`bt power on`。loopback の機器: 01 は数字の比較（123456）、07 は Just Works。
 
 ## 操作と確認

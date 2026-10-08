@@ -13,7 +13,7 @@ since: ws143-p006
 controller のある機械で bar に Bluetooth の rune が出て、menu から電源を切り替え、pairing した機器を見て、Settings の Bluetooth の頁を開けることを確かめる。
 
 ## 準備
-`plan/ws143/tests/config-amd64-bt-desktop.mk` の image、kei で login、root で `/sbin/bluetoothd >/tmp/btd.log 2>&1 &`、3 秒待つ。root で
+`plan/ws143/tests/config-amd64-bt-desktop.mk` の image、kei で login、root で `service stop bluetoothd`（boot で rc.conf が起動した物）の後に `/sbin/bluetoothd >/tmp/btd.log 2>&1 &`、3 秒待つ。root で
 `echo y | bt pair 0A:0B:0C:0D:0E:07` を 1 回（自分の機器を 1 つ。窓が出たら Pair を click）。
 
 ## 操作と確認
