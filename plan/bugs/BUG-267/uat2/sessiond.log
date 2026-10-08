@@ -1,0 +1,15 @@
+1791453578 SESSIOND SEAT events subscribed classes=0xa0
+1791453578 SESSIOND START greeter=/bin/wayland session=/etc/keiland/session pid=23
+1791453578 SESSIOND AUTOLOGIN user=kei
+1791453578 SESSIOND SEAT path=/dev/gpu0 uid=1000 mode=0600
+1791453578 SESSIOND SEAT path=/dev/input/event0 uid=1000 mode=0600
+1791453578 SESSIOND SEAT path=/dev/input/event1 uid=1000 mode=0600
+1791453578 SESSIOND SEAT path=/dev/input/event2 uid=1000 mode=0600
+1791453578 SESSIOND SEAT path=/dev/backlight/backlight0 uid=1000 mode=0600
+1791453578 SESSIOND SEAT path=/dev/smartcard0 uid=1000 mode=0600
+1791453578 SESSIOND SESSION start user=kei uid=1000 pid=26 runtime=/run/user/1000
+1791453578 SESSIOND NETWORK session open uid=1000
+1791453581 SESSIOND HANDOFF session ready=1 waited_ms=2832
+1791453581 SESSIOND HANDOFF go written=3 at_ms=16744
+1791453632 SESSIOND SEAT path=/dev/input/event3 uid=1000 mode=0600
+1791453632 SESSIOND SEAT path=/dev/input/event4 uid=1000 mode=0600
