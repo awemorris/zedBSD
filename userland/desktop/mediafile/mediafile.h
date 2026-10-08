@@ -7,7 +7,7 @@
 
 /*
  * Reads a media file's container without FFmpeg (WS122 p003): MP4 and MOV
- * (ISO BMFF), Matroska and WebM.  It finds the tracks and hands out their
+ * (ISO BMFF, also fragmented, ws177-p027), Matroska and WebM.  It finds the tracks and hands out their
  * packets, the compressed frames, with their times, in the order the file
  * stores them; it does not decode.  The player chooses a decoder from a
  * track's codec and private data (the H.264 avcC, the AAC
@@ -49,8 +49,10 @@
  * the picture's size or the sound's rate and channels, the codec's private
  * data as the container holds it (an avcC, an esds's decoder-specific
  * information, a Matroska CodecPrivate; NULL when there is none), its
- * length, and how many packets it has when the container says (an MP4's
- * index; 0 when unknown).
+ * length, how many packets it has when the container says (an MP4's
+ * index; 0 when unknown), and how many packets its index names that were
+ * left out because they lie outside the file (a file cut short or a
+ * damaged index; ws177-p027).
  */
 struct mf_track {
 	unsigned kind;
@@ -64,6 +66,7 @@ struct mf_track {
 	size_t private_size;
 	int64_t duration_us;
 	uint64_t packet_count;
+	uint64_t dropped_count;
 };
 
 /*
