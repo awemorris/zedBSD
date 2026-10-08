@@ -231,7 +231,7 @@ def failures(item):
 		run.click(window.x + 16 + 40, window.y + 52 + 16)
 		time.sleep(0.5)
 		mark = run.mark()
-		run.key("escape")
+		run.key("esc")
 		time.sleep(0.3)
 		run.key("space")
 		toggled = run.wait(r"MUSIC (PAUSE|RESUME) song=2", mark, 5)

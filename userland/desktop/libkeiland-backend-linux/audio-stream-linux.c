@@ -22,8 +22,10 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* The library opened (a test builds with another one). */
 #ifndef KL_BACKEND_ALSA_LIBRARY
@@ -43,6 +45,15 @@
 
 /* The latency asked of the PCM (microseconds). */
 #define ALSA_LATENCY_US			40000U
+
+/*
+ * How many times a PCM is tried, and how long apart (milliseconds): the
+ * sound service of a session that has just started (PipeWire) can refuse
+ * the first open or its format for a moment (T1-451).  The open runs on the
+ * stream's pump, so the waiting holds nothing else up.
+ */
+#define ALSA_OPEN_TRIES			5U
+#define ALSA_RETRY_MS			200U
 
 /*
  * alsa-lib's calls, found once (alsa_load): the table is written before
@@ -99,6 +110,8 @@ static void alsa_start(struct pump_device *device);
 static int alsa_idle(struct pump_device *device);
 static void alsa_close(struct pump_device *device);
 static unsigned alsa_error(int error);
+static unsigned alsa_open_once(int alsa_format, unsigned channels, unsigned rate, void **pcm, int *retry);
+static void alsa_sleep_ms(unsigned ms);
 
 /* The device calls of an alsa-lib PCM. */
 static const struct pump_device_ops alsa_ops = {
@@ -238,8 +251,11 @@ alsa_open(
 	unsigned long period_size;
 	unsigned long threshold;
 	void *params;
+	unsigned tries;
+	unsigned error;
 	int alsa_format;
 	int status;
+	int retry;
 
 	/* The record. */
 	device = calloc(1, sizeof(*device));
@@ -253,25 +269,28 @@ alsa_open(
 	if (format->format == KL_BACKEND_AUDIO_FORMAT_F32_LE)
 		alsa_format = ALSA_FORMAT_FLOAT_LE;
 
-	/* The PCM, opened one at a time, without blocking. */
-	pthread_mutex_lock(&alsa_lock);
+	/* The PCM with the format, tried again a few times while the service is not ready. */
+	error = KL_BACKEND_AUDIO_ERROR_NONE;
+	for (tries = 1U; tries <= ALSA_OPEN_TRIES; tries++) {
+		/* One try. */
+		retry = 0;
+		error = alsa_open_once(alsa_format, format->channels, format->rate, &device->pcm, &retry);
+		if (error == KL_BACKEND_AUDIO_ERROR_NONE)
+			break;
 
-	status = alsa.pcm_open(&device->pcm, "default", ALSA_STREAM_PLAYBACK, ALSA_NONBLOCK);
+		/* A failure that another try would not change. */
+		if (!retry)
+			break;
 
-	pthread_mutex_unlock(&alsa_lock);
-
-	/* Not opened: no device, or the service not there. */
-	if (status < 0) {
-		free(device);
-		return alsa_error(status);
+		/* A while before the next try. */
+		if (tries < ALSA_OPEN_TRIES)
+			alsa_sleep_ms(ALSA_RETRY_MS);
 	}
 
-	/* The format, resampled by alsa-lib when the device's rate differs, at about 40 ms of latency. */
-	status = alsa.pcm_set_params(device->pcm, alsa_format, ALSA_ACCESS_RW_INTERLEAVED, format->channels, format->rate, 1, ALSA_LATENCY_US);
-	if (status < 0) {
-		(void)alsa.pcm_close(device->pcm);
+	/* Not opened: why. */
+	if (error != KL_BACKEND_AUDIO_ERROR_NONE) {
 		free(device);
-		return KL_BACKEND_AUDIO_ERROR_INVALID;
+		return error;
 	}
 
 	/* The buffer and the period it chose. */
@@ -457,6 +476,70 @@ alsa_close(
 	/* The PCM, then the record. */
 	(void)alsa.pcm_close(device->pcm);
 	free(device);
+}
+
+/*
+ * Opens the default PCM once and sets its format (resampled by alsa-lib
+ * when the device's rate differs, at about 40 ms of latency).  Reports the
+ * backend's error, and whether another try may succeed (a service not
+ * ready yet), not for a device that is not there.
+ */
+static unsigned
+alsa_open_once(
+	int alsa_format,
+	unsigned channels,
+	unsigned rate,
+	void **pcm,
+	int *retry)
+{
+	unsigned error;
+	int status;
+
+	/* The PCM, opened one at a time, without blocking. */
+	*retry = 0;
+	pthread_mutex_lock(&alsa_lock);
+
+	status = alsa.pcm_open(pcm, "default", ALSA_STREAM_PLAYBACK, ALSA_NONBLOCK);
+
+	pthread_mutex_unlock(&alsa_lock);
+
+	/* Not opened: no device, or the service not there (yet). */
+	if (status < 0) {
+		printf("KWL AUDIO alsa open error=%d\n", -status);
+		error = alsa_error(status);
+		if (error == KL_BACKEND_AUDIO_ERROR_UNAVAILABLE)
+			*retry = 1;
+		return error;
+	}
+
+	/* The format; a service that has just started may refuse it for a moment. */
+	status = alsa.pcm_set_params(*pcm, alsa_format, ALSA_ACCESS_RW_INTERLEAVED, channels, rate, 1, ALSA_LATENCY_US);
+	if (status < 0) {
+		printf("KWL AUDIO alsa format error=%d\n", -status);
+		(void)alsa.pcm_close(*pcm);
+		*pcm = NULL;
+		*retry = 1;
+		if (status == -EINVAL)
+			return KL_BACKEND_AUDIO_ERROR_INVALID;
+		error = alsa_error(status);
+		return error;
+	}
+
+	/* Succeeded: the PCM takes the format. */
+	return KL_BACKEND_AUDIO_ERROR_NONE;
+}
+
+/* Waits a number of milliseconds (a signal cuts it short; the next try comes sooner). */
+static void
+alsa_sleep_ms(
+	unsigned ms)
+{
+	struct timespec wait;
+
+	/* The time, in seconds and nanoseconds. */
+	wait.tv_sec = (time_t)(ms / 1000U);
+	wait.tv_nsec = (long)(ms % 1000U) * 1000000L;
+	(void)nanosleep(&wait, NULL);
 }
 
 /* Gives the backend's error for an open that failed. */
