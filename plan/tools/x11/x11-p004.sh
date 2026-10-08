@@ -78,7 +78,11 @@ fi
 
 # 3. The bar's close button ends glxtest (the server keeps running).
 close=$(guest "grep 'GLASS dock surface=' /tmp/zdesktop.log | tail -1" | sed -n 's/.* buttons=\([0-9]*\),.*/\1/p')
-pointer move ${close:-0} 17 sleep 500 down sleep 60 up sleep 3000
+# The middle of the 44-pixel bar, as aatlib.close presses it.
+pointer move ${close:-0} 22 sleep 500 down sleep 60 up sleep 3000
+# What the press did, for BUG-273: the close, or the press on the buttons with no docked window to take it.
+guest "grep -anE 'GLASS (close|bar button|anim|dock|resized)|KWL HOME|KWL ARRANGE' /tmp/zdesktop.log | tail -20" > "$out/close-lines.txt"
+grep -E 'GLASS (close|bar button)' "$out/close-lines.txt" || echo "close: no KWL GLASS close and no bar button line (the press did not reach the bar)"
 left=$(guest 'ps -A -o args | grep -c "[g]lxtest"' | tail -1)
 servers=$(guest 'ps -A -o args | grep -c "[x]server"' | tail -1)
 echo "after close: glxtest=${left:-?} x11server=${servers:-?}"
