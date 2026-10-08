@@ -2205,6 +2205,7 @@ sys_recvmsg_call(
 	ssize_t part;
 	socklen_t amount;
 	socklen_t name_copied;
+	int hop_limit;
 
 	process = current_process();
 	buffer = NULL;
@@ -2221,7 +2222,7 @@ sys_recvmsg_call(
 	if (error != 0)
 		return -error;
 	if (request.reserved != 0 ||
-	    request.reserved2 != 0 ||
+	    request.hop_limit != 0 ||
 	    request.data_capacity > SIZE_MAX ||
 	    request.name_capacity > sizeof(address) ||
 	    request.descriptor_capacity > KERN_MSG_FD_MAX ||
@@ -2276,9 +2277,10 @@ sys_recvmsg_call(
 		name_length_argument = NULL;
 	}
 
-	/* A non-AF_UNIX socket receives through recvfrom without descriptors. */
+	/* A non-AF_UNIX socket receives through recvfrom without descriptors (with the hop limit where it keeps it). */
 	if (reference.socket->family != AF_UNIX) {
 		wire_result = 0;
+		hop_limit = -1;
 		if (reference.socket->ops == NULL ||
 		    reference.socket->ops->recvfrom == NULL) {
 			kern_free(buffer);
@@ -2305,10 +2307,17 @@ sys_recvmsg_call(
 				buffer_argument = (uint8_t *)buffer + (size_t)wire_result;
 			else
 				buffer_argument = (uint8_t *)"";
-			part = reference.socket->ops->recvfrom(
-			    reference.socket, buffer_argument,
-			    buffer_capacity - (size_t)wire_result, receive_flags,
-			    address_argument, name_length_argument);
+			if (reference.socket->ops->recvfrom_hop != NULL) {
+				part = reference.socket->ops->recvfrom_hop(
+				    reference.socket, buffer_argument,
+				    buffer_capacity - (size_t)wire_result, receive_flags,
+				    address_argument, name_length_argument, &hop_limit);
+			} else {
+				part = reference.socket->ops->recvfrom(
+				    reference.socket, buffer_argument,
+				    buffer_capacity - (size_t)wire_result, receive_flags,
+				    address_argument, name_length_argument);
+			}
 			if (part < 0) {
 				if (wire_result == 0)
 					wire_result = part;
@@ -2356,6 +2365,14 @@ sys_recvmsg_call(
 			request.output_flags = MSG_TRUNC;
 		else
 			request.output_flags = 0;
+
+		/* The hop limit the datagram came with, when its socket kept it (ws177-p044). */
+		if (hop_limit >= 0) {
+			request.hop_limit = (uint32_t)hop_limit;
+			request.output_flags |= RECVMSG_HOP_LIMIT;
+		}
+
+		/* The request with what was received. */
 		if (error == 0)
 			error = copyout(&request, args[1], sizeof(request));
 		kern_free(buffer);

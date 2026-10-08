@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <time.h>
@@ -31,9 +32,7 @@ static uint32_t resolver_counter;
 static pthread_mutex_t resolver_counter_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int resolver_query_server_depth(const char *name, uint16_t type, const struct sockaddr *server, socklen_t server_length, struct resolver_result *result, unsigned depth);
-static int resolver_query_server6(const char *name, uint16_t type, const struct in6_addr *address, uint32_t scope, uint16_t port, struct resolver_result *result);
 static int resolver_same_peer(const struct sockaddr *server, const struct sockaddr_storage *source);
-static int resolver_parse_server6(char *text, struct resolver_server *server);
 static uint16_t query_id(const char *name);
 static int tcp_query(const struct sockaddr *server, socklen_t server_length, const uint8_t *query, size_t query_length, uint16_t id, const char *name, uint16_t type, struct resolver_result *result);
 static int write_all_socket(int descriptor, const uint8_t *buffer, size_t length);
@@ -71,6 +70,8 @@ static int gai_hosts(const char *node, int family, int flags, struct gai_list *l
 static int gai_lookup(const char *node, int family, int flags, struct gai_list *list);
 static int gai_source(const struct gai_address *item, struct sockaddr_storage *source);
 static void gai_reachable_only(struct gai_list *list);
+static int gai_configured(int *have4, int *have6);
+static int gai_service_name(uint16_t port, int flags, char *service, socklen_t service_length);
 static void gai_order(struct gai_list *list);
 static int gai_build(const struct gai_list *list, uint16_t port, int socktype, int protocol, int flags, struct addrinfo **output);
 static int gni_numeric6(const struct sockaddr_in6 *inet6, int flags, char *host, socklen_t host_length);
@@ -173,6 +174,7 @@ resolver_query_server(
 	if (function_result == 0) {
 		result->server = *server_address;
 		result->port = port;
+		result->server_family = AF_INET;
 	}
 	return function_result;
 }
@@ -400,11 +402,11 @@ getnameinfo(
 		return EAI_FAMILY;
 	}
 
-	/* The service: the port's number. */
+	/* The service: its name in /etc/services (udp's with NI_DGRAM, ws177-p044), else the port's number. */
 	if (service != NULL && service_length != 0U) {
-		needed = snprintf(service, service_length, "%u", ntohs(port));
-		if (needed < 0 || (socklen_t)needed >= service_length)
-			return EAI_OVERFLOW;
+		error = gai_service_name(ntohs(port), flags, service, service_length);
+		if (error != 0)
+			return error;
 	}
 
 	/* No host asked for. */
@@ -420,6 +422,9 @@ getnameinfo(
 		if (error == 0)
 			error = resolver_query(buffer, DNS_TYPE_PTR, &result);
 		if (error == 0) {
+			/* Its first label alone with NI_NOFQDN (ws177-p044). */
+			if ((flags & NI_NOFQDN) != 0)
+				resolver_short_name(result.ptr_name);
 			needed = (int)strlen(result.ptr_name);
 			if ((socklen_t)needed + 1U > host_length)
 				return EAI_OVERFLOW;
@@ -552,7 +557,7 @@ resolver_query_server_depth(
 }
 
 /* Asks an IPv6 server (the interface of a link-local one in scope) (ws130-p004). */
-static int
+int
 resolver_query_server6(
 	const char *name,
 	uint16_t type,
@@ -573,7 +578,15 @@ resolver_query_server6(
 
 	/* The question. */
 	error = resolver_query_server_depth(name, type, (const struct sockaddr *)&server, sizeof(server), result, 0);
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the server that answered (ws177-p044). */
+	result->server_family = AF_INET6;
+	result->server6 = *address;
+	result->server6_scope = scope;
+	result->port = port;
+	return 0;
 }
 
 /* Tells whether an answer came from the server asked: its family, address and port (ws130-p004). */
@@ -615,7 +628,7 @@ resolver_same_peer(
  * name or number after the address of a link-local one) (ws130-p004).
  * Returns 1 when it is one.
  */
-static int
+int
 resolver_parse_server6(
 	char *text,
 	struct resolver_server *server)
@@ -976,12 +989,25 @@ gai_reachable_only(
 	int tried4;
 	int tried6;
 	int reach;
+	int configured;
 
-	/* Each family judged by its first address. */
+	/*
+	 * Each family kept when an interface has an address of it that is
+	 * not loopback's (RFC 3493, ws177-p044); only when the interfaces
+	 * cannot be read, each judged by whether its first address can be
+	 * reached.
+	 */
 	reach4 = 0;
 	reach6 = 0;
 	tried4 = 0;
 	tried6 = 0;
+	configured = gai_configured(&reach4, &reach6);
+	if (configured == 0) {
+		tried4 = 1;
+		tried6 = 1;
+	}
+
+	/* Each address, its family judged once. */
 	kept = 0;
 	for (index = 0; index < list->count; index++) {
 		if (list->items[index].family == AF_INET6 && !tried6) {
@@ -1004,6 +1030,125 @@ gai_reachable_only(
 
 	/* The list without the others. */
 	list->count = kept;
+}
+
+/*
+ * Tells which families have an address on an interface that counts for
+ * AI_ADDRCONFIG (resolver_usable4, resolver_usable6): every interface
+ * (SIOCGIFCONF), its IPv4 address (SIOCGIFADDR) and its IPv6 ones
+ * (SIOCGIFADDRS_IN6).  Returns 0, or -1 when the interfaces cannot be read.
+ */
+static int
+gai_configured(
+	int *have4,
+	int *have6)
+{
+	struct ifreq names[32];
+	struct ifreq request;
+	struct ifconf list;
+	struct in6_ifaddrs addresses;
+	const struct sockaddr_in *inet;
+	const struct in6_ifaddr_entry *entry;
+	unsigned count;
+	unsigned index;
+	unsigned at;
+	int descriptor;
+	int status;
+	int settled;
+	int usable;
+
+	/* A socket to ask on, and the interfaces' names. */
+	*have4 = 0;
+	*have6 = 0;
+	descriptor = socket(AF_INET, SOCK_DGRAM, 0);
+	if (descriptor < 0)
+		return -1;
+	memset(&list, 0, sizeof(list));
+	memset(names, 0, sizeof(names));
+	list.ifc_len = (uint32_t)sizeof(names);
+	list.ifc_buf = (uint64_t)(uintptr_t)names;
+	status = ioctl(descriptor, SIOCGIFCONF, &list);
+	if (status != 0) {
+		close(descriptor);
+		return -1;
+	}
+
+	/* How many names came. */
+	count = list.ifc_len / (uint32_t)sizeof(names[0]);
+
+	/* Each interface's addresses. */
+	for (index = 0; index < count; index++) {
+		/* Its IPv4 address. */
+		memset(&request, 0, sizeof(request));
+		memcpy(request.ifr_name, names[index].ifr_name, sizeof(request.ifr_name));
+		status = ioctl(descriptor, SIOCGIFADDR, &request);
+		if (status == 0) {
+			inet = (const struct sockaddr_in *)(const void *)&request.ifr_addr;
+			usable = resolver_usable4(ntohl(inet->sin_addr.s_addr));
+			if (usable)
+				*have4 = 1;
+		}
+
+		/* Its IPv6 ones (none: IPv6 off there). */
+		memset(&addresses, 0, sizeof(addresses));
+		memcpy(addresses.ifa_name, names[index].ifr_name, sizeof(addresses.ifa_name));
+		status = ioctl(descriptor, SIOCGIFADDRS_IN6, &addresses);
+		if (status != 0)
+			continue;
+		for (at = 0; at < addresses.ifa_count && at < IN6_IFADDRS_MAX; at++) {
+			entry = &addresses.ifa_list[at];
+			settled = 1;
+			if ((entry->ife_flags & (IN6_IFF_TENTATIVE | IN6_IFF_DUPLICATED)) != 0U)
+				settled = 0;
+			usable = resolver_usable6(entry->ife_addr.s6_addr, settled);
+			if (usable)
+				*have6 = 1;
+		}
+	}
+
+	/* Succeeded: the families found. */
+	close(descriptor);
+	return 0;
+}
+
+/*
+ * Writes a port's service: its name in /etc/services for the protocol
+ * (udp with NI_DGRAM, tcp otherwise) unless NI_NUMERICSERV, else its
+ * number.  Returns 0 or EAI_OVERFLOW.
+ */
+static int
+gai_service_name(
+	uint16_t port,
+	int flags,
+	char *service,
+	socklen_t service_length)
+{
+	const struct servent *entry;
+	const char *protocol;
+	int needed;
+
+	/* Its name, unless the number was asked for. */
+	entry = NULL;
+	if ((flags & NI_NUMERICSERV) == 0) {
+		protocol = "tcp";
+		if ((flags & NI_DGRAM) != 0)
+			protocol = "udp";
+		entry = getservbyport((int)htons(port), protocol);
+	}
+
+	/* The name found, or the number. */
+	if (entry != NULL && entry->s_name != NULL) {
+		needed = snprintf(service, service_length, "%s", entry->s_name);
+	} else {
+		needed = snprintf(service, service_length, "%u", (unsigned)port);
+	}
+
+	/* Refuses a field too short for it. */
+	if (needed < 0 || (socklen_t)needed >= service_length)
+		return EAI_OVERFLOW;
+
+	/* Succeeded: written. */
+	return 0;
 }
 
 /*

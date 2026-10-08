@@ -37,6 +37,9 @@ struct resolver_result {
 	uint32_t ttl;
 	struct in_addr server;
 	uint16_t port;
+	int server_family;		/* the answering server's: AF_INET or AF_INET6 (ws177-p044) */
+	struct in6_addr server6;
+	uint32_t server6_scope;
 };
 
 /*
@@ -70,6 +73,18 @@ int resolver_query(const char *, uint16_t, struct resolver_result *);
 /* IPv6 (ws130-p004): an address's PTR name, and whether a destination comes before IPv4 by its source (RFC 6724). */
 int resolver_inet6_ptr_name(const uint8_t *address, char *output, size_t capacity);
 int resolver_inet6_preferred(const uint8_t *destination, const uint8_t *source);
+
+/*
+ * ws177-p044: an IPv6 server named in text ("ADDRESS[%ZONE]") and asked,
+ * whether an interface's address counts for AI_ADDRCONFIG (not loopback,
+ * not link-local, and for IPv6 settled: not tentative nor duplicated), and
+ * a host name cut to its first label (NI_NOFQDN).
+ */
+int resolver_parse_server6(char *text, struct resolver_server *server);
+int resolver_query_server6(const char *name, uint16_t type, const struct in6_addr *address, uint32_t scope, uint16_t port, struct resolver_result *result);
+int resolver_usable4(uint32_t address);
+int resolver_usable6(const uint8_t *address, int settled);
+void resolver_short_name(char *name);
 
 /* A line of /etc/hosts that names a host: its address (IPv4 or IPv6) and its canonical (first) name. */
 struct resolver_hosts_entry {
