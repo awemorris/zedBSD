@@ -435,9 +435,10 @@ mu_view_notice(
 	const char *message,
 	uint64_t now_us)
 {
-	/* The words and until when. */
+	/* The words and until when, told in the log as well (for the tests, ws177-p021). */
 	(void)snprintf(view->notice, sizeof(view->notice), "%s", message);
 	view->notice_until = now_us + VIEW_NOTICE_US;
+	mu_log("NOTICE text=%s", message);
 }
 
 /*

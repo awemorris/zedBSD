@@ -3,7 +3,7 @@
 # ws177-p021: 音楽の準正常系の 2 — 再生の失敗と key（案 M）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 夜 P2 q903 の 2）
+Status: in-progress（2026-10-08 夜 P2 q903 の 2。実装・host PASS、T1 の依頼を Q1 へ送付、test-wait の ID は Q1 が割当）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q903（P2、2026-10-08 夜、承認済み）
@@ -33,11 +33,13 @@ Origin: [backlog-p2](../backlog-p2.md) の 113・114（ws120-p009）、[案](../
   - 音の stream の lost: `mu_lost`（位置を覚え、`mu_player_open` で開き直し（`vp_audio_renew`）、seek、一時停止中なら一時停止。開けなければ止めて理由の notice）。log `AUDIO lost song= ms=`・`AUDIO reopened song= error=`。
   - Files から開いた file の理由: EOPNOTSUPP「This file has no sound Music can play.」、EINVAL「This file is not a song Music can play.」、ENOENT「The file is gone.」、他「The file could not be read.」。
   - Next・Previous: 同じ pass の続いた要求を和の 1 つの step に（log `STEP step= requests=`）。3 秒の規則は step の最初の Previous に当てる。
-- `music/view.c`: 検索の field の SUBMITTED・CANCELLED で `kl_ui_clear_focus`。
+- `music/view.c`: 検索の field の SUBMITTED・CANCELLED で `kl_ui_clear_focus`。notice を log にも出す（`MUSIC NOTICE text=`、AAT が notice を log で判定するため。2026-10-08 P2 の新しい世代）。
+- AAT: `plan/tools/aat/scenarios/helpers_music.py` に `apps.music.failures` の helper（3 曲と not-a-song.m4a を作る、audiod を ps と kill -KILL で止める（zedBSD に pkill は無い）、Next の double click、Search の field、`touch -r` で folder の時刻を戻して mv した Tone B の double click、`/bin/music not-a-song.m4a`）。`tests/scenarios/apps/music/failures.md` を helper に合わせた（pkill → ps・kill、folder の時刻を戻す手順、`MUSIC NOTICE` の行）。
 
 ## 確認
 
 - build: `make -j16 ZEDBSD_CONFIG=config/current-uat.mk BUILD=build/amd64 build/amd64/bin/music build/amd64/bin/videoplayer` → exit 0、warning 0（-Werror）。style-check（music の全部と videoplayer/audio.c）→ 指摘なし。
 - host（新規）: `sh plan/ws177/tests/host-music-play.sh` → PASS（3 回連続、ASan・UBSan。play.c を container・decoder・音の stream の stand-in で: 最後まで鳴る、16 個続けて decode できない → MU_FAIL_DECODE・止まる・1 回だけ、15 個続けてを 2 回 → 失敗にならず終わる（`draining` の不具合の回帰も兼ねる）、読みの誤り → MU_FAIL_READ、次の曲で失敗が残らない）。
 - host（既存に追加）: `plan/ws120/tests/run-host-music.sh` → PASS（search-space・search-escape・search-enter を足した。view.c の直しを外すと search-escape・search-enter が FAIL になることを確かめた）。`plan/ws177/tests/host-music-m.sh` → PASS（p020 の回帰）。
+- 新しい世代（2026-10-08 夜）: NOTICE の log を足して build（`build/amd64/bin/music`）exit 0・warning 0、style-check 指摘なし、host 4 本（run-host-music・host-music-play・host-music-m・run-host-music-library）PASS、`check-scenarios.py` PASS、helper は `py_compile` のみ（QEMU は T1）。
 - 未実施: main.c の流れ（連打のまとめ、gone、lost の開き直し、Files の理由）は host で組めず、QEMU の T1 に `apps.music.failures`（新しい scenario、`tests/scenarios/apps/music/failures.md`）で依頼する。
