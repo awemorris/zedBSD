@@ -61,7 +61,6 @@ Primary Milestone: MG006（関係: MG002・MG003・MG005）
 | [ws177-p030](phase030/phase.md) | 案 T の 4: AVI の reader（RIFF・hdrl/strl・movi・idx1） | in-progress（2026-10-08 P2 q906 実装・host PASS・build） | ws177-p029 |
 | [ws177-p031](phase031/phase.md) | 案 T の 5: videoplayer・Music を libmedia へ（media_ の接頭辞、decoder の ops の表、落とした packet の知らせ）（backlog-p2 119） | in-progress（2026-10-08 P2 q906 実装・host PASS・build） | ws177-p030 |
 | [ws177-p032](phase032/phase.md) | printd の IPP の Print-Job の本体を chunked で、job-state-reasons の log、busy でも job-id があれば送り直さない（BUG-271、実機は未実施） | in-progress（2026-10-08 P2 実装・host（mock）PASS・build） | ws177-p022 |
-<<<<<<< HEAD
 | [ws177-p033](phase033/phase.md) | 案 U の 1: 上端の帯の長押し（500 ms で press を流し直す、apps bar は preview）、Home が開ききった後の desktop の層を描かない（backlog-p2 151） | in-progress（2026-10-08 P2 q908 実装・host・build） | ws181-p003 |
 | [ws177-p034](phase034/phase.md) | 案 U の 2: 全画面の app へ上端の帯の press を流し直す（touch.c の `kwl_touch_shell_handback`）（backlog-p2 151） | in-progress（2026-10-08 P2 q908 実装・build） | ws177-p033 |
 | [ws177-p035](phase035/phase.md) | 案 U の 3: 整列の枠より大きい最小の大きさの窓は外して詰め直す、大きさの固定の窓は枠の中に置く（letterbox）、枠の左右を desktop の swipe の帯の外へ（backlog-p2 152） | planned | ws181-p004 |
@@ -72,9 +71,3 @@ Primary Milestone: MG006（関係: MG002・MG003・MG005）
 | [ws177-p041](phase041/phase.md) | 案 L の 2: PDF Viewer の検索の一致の規則（行・ハイフン・空白、Unicode の大小・全角半角・濁点・合字）、一致の数と背景の読み、U+FFFD を知らせる（backlog-p2 18・19・22・25） | in-progress（2026-10-08 夜 P1 q907） | ws177-p040 |
 | [ws177-p042](phase042/phase.md) | 案 L の 3: 選択（頁をまたぐ、語・行・全て、指の長押しと handle、回転した字の塗り）（backlog-p2 20・21・24） | in-progress（2026-10-08 夜 P1 q907） | ws177-p041 |
 | [ws177-p043](phase043/phase.md) | 案 L の 4: titlebar の無い時の窓の中の検索の欄、Enter の後の caret を末尾に（backlog-p2 23・41） | in-progress（2026-10-08 夜 P1 q907） | ws177-p042 |
-=======
-| [ws177-p040](phase040/phase.md) | 案 L の 1: libpdf の頁の文字に form XObject の中の文字（注釈は描かないので範囲の外）（backlog-p2 17） | 実装・host PASS・build（2026-10-08 夜 P1 q907）、T1 待ち | ws128-p004 |
-| [ws177-p041](phase041/phase.md) | 案 L の 2: PDF Viewer の検索の一致の規則（行・ハイフン・空白、Unicode の大小・全角半角・濁点・合字）、一致の数と背景の読み、U+FFFD を知らせる（backlog-p2 18・19・22・25） | 実装・host PASS・build（2026-10-08 夜 P1 q907）、T1 待ち | ws177-p040 |
-| [ws177-p042](phase042/phase.md) | 案 L の 3: 選択（頁をまたぐ、語・行・全て、指の長押しと handle、回転した字の塗り）（backlog-p2 20・21・24） | 実装・host PASS・build（2026-10-08 夜 P1 q907）、T1 待ち | ws177-p041 |
-| [ws177-p043](phase043/phase.md) | 案 L の 4: titlebar の無い時の窓の中の検索の欄、Enter の後の caret を末尾に（backlog-p2 23・41） | 実装・host PASS・build（2026-10-08 夜 P1 q907）、T1 待ち | ws177-p042 |
->>>>>>> 9b9a5c0a2
