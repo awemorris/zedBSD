@@ -345,6 +345,7 @@ static uint32_t i915_blend_factor(uint32_t factor);
 static uint32_t i915_blend_function(uint32_t op);
 static int i915_blend_uses_second_source(uint32_t factor);
 static uint32_t i915_state_input_slot(const struct i915_gfx_kernels *kernels, uint32_t inputs, uint32_t input);
+static uint32_t i915_state_primitive_id_override(const struct i915_gfx_kernels *kernels);
 static uint64_t i915_state_scratch(uint32_t per_thread_bytes, uint64_t offset);
 static uint32_t i915_state_binding_instanced(const struct i915_gfx_pipeline *pipeline, uint32_t binding);
 
@@ -1850,13 +1851,14 @@ drv_i915_gfx_emit_pixel_shader(
 			    (1U << 21) |
 			    (GEN12_SBE_POINT_SPRITE_ORIGIN_UPPER_LEFT << GEN12_SBE_POINT_SPRITE_ORIGIN_SHIFT) |
 			    (read_length << 11) |
-			    (1U << 5));
+			    (1U << 5) |
+			    i915_state_primitive_id_override(kernels));
 	drv_i915_batch_emit(batch, kernels->ps_point_sprite_mask);
 	drv_i915_batch_emit(batch, kernels->ps_flat_mask);
 	drv_i915_batch_emit(batch, 0xffffffffU);
 	drv_i915_batch_emit(batch, 0xffffffffU);
 
-	/* Programs SBE_SWIZ: the source slot of each fragment input, two inputs to a dword. */
+	/* Programs SBE_SWIZ: the source slot of each fragment input (the primitive's number for gl_PrimitiveID the setup gives), two inputs to a dword. */
 	drv_i915_batch_emit(batch, GEN12_CMD_HEADER(GEN12_CMD_3DSTATE_SBE_SWIZ, GEN12_3DSTATE_SBE_SWIZ_DWORDS));
 	for (index = 0U; index < I915_GFX_MAX_VARYINGS; index += 2U) {
 		low = i915_state_input_slot(kernels, inputs, index);
@@ -3202,9 +3204,11 @@ i915_state_format_takes_logic_op(
 }
 
 /*
- * Returns the VUE slot after the position fragment input `input` is read
- * from: the one the pipeline routed it from, or for a rectangle kernel the
- * input's own number; an input past the kernel's `inputs` takes slot 0.
+ * Returns the SBE_SWIZ attribute of fragment input `input`: the VUE slot
+ * after the position it is read from (the one the pipeline routed it from,
+ * or for a rectangle kernel the input's own number; an input past the
+ * kernel's `inputs` takes slot 0), or for gl_PrimitiveID that no stage
+ * writes the primitive's number as a constant source.
  */
 static uint32_t
 i915_state_input_slot(
@@ -3216,12 +3220,39 @@ i915_state_input_slot(
 	if (input >= inputs)
 		return 0U;
 
+	/* gl_PrimitiveID that no stage writes is the primitive's number in all four components. */
+	if (input < 32U && ((kernels->ps_primitive_id_mask >> input) & 1U) != 0U)
+		return GEN12_SBE_SWIZ_PRIMITIVE_ID;
+
 	/* A rectangle kernel reads its slots in order. */
 	if (kernels->ps_inputs_mapped == 0U)
 		return input;
 
 	/* Succeeded: the slot the pipeline routed the input from. */
 	return kernels->ps_input_slots[input];
+}
+
+/*
+ * Returns the Primitive ID Override bits of 3DSTATE_SBE dword 1 for the
+ * fragment input that is gl_PrimitiveID no stage writes: its attribute
+ * number and all four components, as anv sets them with the constant
+ * source of SBE_SWIZ (genX_pipeline.c, emit_3dstate_sbe()); 0 when there
+ * is none.
+ */
+static uint32_t
+i915_state_primitive_id_override(
+	const struct i915_gfx_kernels *kernels)
+{
+	uint32_t input;
+
+	/* Finds the input; there is at most one gl_PrimitiveID. */
+	for (input = 0U; input < I915_GFX_MAX_VARYINGS; input++) {
+		if (((kernels->ps_primitive_id_mask >> input) & 1U) != 0U)
+			return input | GEN12_SBE_PRIMITIVE_ID_OVERRIDE_XYZW;
+	}
+
+	/* Succeeded: no input the setup gives. */
+	return 0U;
 }
 
 /* Reports 1 when the pipeline's vertex binding `binding` advances per instance, 0 otherwise. */

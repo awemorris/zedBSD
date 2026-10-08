@@ -314,6 +314,20 @@ _Static_assert(GEN12_PIPELINE_SELECT_DWORD(2U) == 0x69041312U,
 #define GEN12_SBE_POINT_SPRITE_ORIGIN_SHIFT		20U
 #define GEN12_SBE_POINT_SPRITE_ORIGIN_UPPER_LEFT	0U
 
+/*
+ * gl_PrimitiveID that no stage writes (ws075-p007b b4): 3DSTATE_SBE dword 1
+ * bits 4:0 Primitive ID Override Attribute Select and bits 19:16 Primitive
+ * ID Override Component X..W (the same gen90.xml), and the attribute's
+ * SF_OUTPUT_ATTRIBUTE_DETAIL in SBE_SWIZ: Constant Source PRIM_ID (3) in
+ * bits 10:9 and Component Override X..W in bits 15:12 (Mesa 25.0.7
+ * gen60.xml, imported by gen120.xml; sha256
+ * 30fac841448b4239bbaedf92a77424ec054629d28f266c7190b3f592f4b9185c), as
+ * anv sets both (src/intel/vulkan/genX_pipeline.c, emit_3dstate_sbe();
+ * sha256 9bf244df1284531767529980909176d09b72db037b6fdaa7f5874d997ebf7545).
+ */
+#define GEN12_SBE_PRIMITIVE_ID_OVERRIDE_XYZW		(0xFU << 16)
+#define GEN12_SBE_SWIZ_PRIMITIVE_ID			((3U << 9) | (0xFU << 12))
+
 /* 3D_Vertex_Component_Control. */
 #define GEN12_VFCOMP_NOSTORE			0U
 #define GEN12_VFCOMP_STORE_SRC			1U
