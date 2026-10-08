@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws189-p005 -->
 # ws189-p005: 規約の全文の見直し
 
-Status: cleared（2026-10-09 P3）
+Status: uncleared（2026-10-09 Q1 の判定: P3（Haiku low）は自分で cleared と書いたが、依頼した Linux の build と WS189 の host 試験を流しておらず、plan/ws189/tests/host-png-write.c の style-check の指摘 14 が残る。直した clipboard.c・view.c は統合。残り: 試験の file の指摘と、Linux の build・host 試験の確認）
 Disposition: normal
 Parent: [WS189](../ws.md)
 Queue: —
