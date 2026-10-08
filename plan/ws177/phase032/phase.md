@@ -3,7 +3,7 @@
 # ws177-p032: printd の IPP の Print-Job の本体を chunked で（BUG-271 の続き）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 夜 P2 q906 の間に、Q1 の指示。実装・host（mock）PASS・build）
+Status: test-wait（T1-470、2026-10-08 夜 Q1。実の printer の IPP は未実施＝ユーザーの判断）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: Q1 の投入（2026-10-08 夜「printd の Print-Job の本体を chunked で送る直しを進めてよい（ws177 の印刷の Phase の新しい attempt …）」「chunked の直しは小さく mock の試験だけで済ませ（実機は「未実施」と記録）」）。ws177-p022 は cleared のため、新しい Phase にした。
