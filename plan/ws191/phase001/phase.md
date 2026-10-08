@@ -53,3 +53,9 @@ minor: M-1 zedBSD の played_position は mix の時点の read_position と同�
 
 
 design.md として書き上げる（A/V の同期の時計、audiod の再起動、i386 の sequence、Linux・FreeBSD の thread の起こし方と drain・underrun、host 試験の計画、Phase の受け入れ）→ design-reviewer → Q1 の判定。
+
+## 判断（2026-10-08 午後）
+
+- **H2（B-2、Linux の再生の経路）**: ユーザー（クリック）「alsa-lib を dlopen」。実行時に alsa-lib を読み、ALSA の default（普通は pipewire-alsa 経由で PipeWire）へ。alsa-lib が無ければ再生の stream を断る（音量の操作は今のまま）。
+- **D4 の再評価（S-2）**: Q1 の判断: stream ごとに自分の Wayland の接続を持つ（libmedia の thread のため）を保つ。限りは compositor が接続の相手の資格（SO_PEERCRED の pid・uid）で数え、同じ pid の stream の本数に上限を置く。
+- **p004 の受け入れ（B-3）**: Q1 の判断: Linux・FreeBSD で build できる最小の試験の client（正弦波を鳴らす、libkeiland の audio stream だけを使う）を p004 に入れる。音の観測は QEMU の wav の audiodev か backend の書いた frame の数。
