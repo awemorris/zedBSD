@@ -19,6 +19,15 @@
  * plain port whose server refuses STARTTLS is ML_ERROR_NO_TLS; and the
  * words of a server's goodbye (BYE) are kept as the failure's.
  *
+ * ws177-p016: a move is UID MOVE when the server has MOVE, else COPY,
+ * \Deleted and the expunge of that message alone when the server has
+ * UIDPLUS (EXPUNGE otherwise); a folder's name sent as a literal is read,
+ * and a name in modified UTF-7 (RFC 3501 5.1.3) is decoded to be matched
+ * against the usual names, Japanese ones too (it is still sent as the
+ * server gave it).  A message larger than ML_FETCH_BYTES is fetched by
+ * its structure: its header, its BODYSTRUCTURE, and the section of its
+ * words alone (ml_imap_fetch_large).
+ *
  * A command is sent with its tag ("A0001") and its answer read up to the
  * tagged line; the untagged lines before it go to the command's reader.
  * A line that ends in a literal ("{123}") is followed by that many bytes
@@ -36,11 +45,36 @@
 /* The longest command line, with its NUL. */
 #define IMAP_COMMAND_MAX	1024U
 
-/* The usual names of the folders, when the server does not mark them (any case). */
-static const char *const imap_sent_names[] = { "Sent", "Sent Items", "Sent Messages", "Sent Mail" };
-static const char *const imap_drafts_names[] = { "Drafts", "Draft" };
-static const char *const imap_archive_names[] = { "Archive", "Archives", "All Mail" };
-static const char *const imap_trash_names[] = { "Trash", "Deleted Items", "Deleted Messages", "Bin" };
+/* The usual names of the folders, when the server does not mark them (ASCII ones in any case; the Japanese ones in UTF-8). */
+static const char *const imap_sent_names[] = {
+	"Sent",
+	"Sent Items",
+	"Sent Messages",
+	"Sent Mail",
+	"\xe9\x80\x81\xe4\xbf\xa1\xe6\xb8\x88\xe3\x81\xbf",	/* 送信済み */
+	"\xe9\x80\x81\xe4\xbf\xa1\xe6\xb8\x88\xe3\x81\xbf\xe3\x83\xa1\xe3\x83\xbc\xe3\x83\xab",	/* 送信済みメール */
+	"\xe9\x80\x81\xe4\xbf\xa1\xe6\xb8\x88\xe3\x81\xbf\xe3\x82\xa2\xe3\x82\xa4\xe3\x83\x86\xe3\x83\xa0"	/* 送信済みアイテム */
+};
+static const char *const imap_drafts_names[] = {
+	"Drafts",
+	"Draft",
+	"\xe4\xb8\x8b\xe6\x9b\xb8\xe3\x81\x8d"	/* 下書き */
+};
+static const char *const imap_archive_names[] = {
+	"Archive",
+	"Archives",
+	"All Mail",
+	"\xe3\x82\xa2\xe3\x83\xbc\xe3\x82\xab\xe3\x82\xa4\xe3\x83\x96"	/* アーカイブ */
+};
+static const char *const imap_trash_names[] = {
+	"Trash",
+	"Deleted Items",
+	"Deleted Messages",
+	"Bin",
+	"\xe3\x81\x94\xe3\x81\xbf\xe7\xae\xb1",	/* ごみ箱 */
+	"\xe3\x82\xb4\xe3\x83\x9f\xe7\xae\xb1",	/* ゴミ箱 */
+	"\xe5\x89\x8a\xe9\x99\xa4\xe6\xb8\x88\xe3\x81\xbf\xe3\x82\xa2\xe3\x82\xa4\xe3\x83\x86\xe3\x83\xa0"	/* 削除済みアイテム */
+};
 
 /*
  * What reads the untagged lines of a command: given the session, the line
@@ -55,6 +89,19 @@ struct imap_fetch {
 	ml_imap_fetched_fn fetched;
 	void *data;
 	uint32_t first_uid;
+};
+
+/* What a section's reader fills: the bytes of the first literal (allocated) and how many. */
+struct imap_section {
+	char *bytes;
+	size_t length;
+};
+
+/* What BODYSTRUCTURE's reader fills: the structure, whether its line came, and whether it read. */
+struct imap_structure {
+	struct ml_structure *structure;
+	int read;
+	int error;
 };
 
 /* What LIST's reader fills: the folders' names by special use, and by usual names. */
@@ -74,6 +121,14 @@ static int imap_read_list(struct ml_imap *imap, const char *line, void *data, in
 static int imap_read_fetch(struct ml_imap *imap, const char *line, void *data, int *took_literal);
 static void imap_fetch_items(const char *text, uint32_t *uid, unsigned *flags, size_t *size, int *seen_flags);
 static void imap_list_name(const char *line, char *name, size_t size);
+static int imap_list_literal(struct ml_imap *imap, const char *line, char *name, size_t size, int *took_literal);
+static void imap_utf7_decode(const char *name, char *decoded, size_t size);
+static int imap_utf7_value(int c);
+static size_t imap_utf8_put(unsigned long code_point, char *bytes);
+static int imap_expunge_one(struct ml_imap *imap, uint32_t uid);
+static int imap_read_section(struct ml_imap *imap, const char *line, void *data, int *took_literal);
+static int imap_read_structure(struct ml_imap *imap, const char *line, void *data, int *took_literal);
+static int imap_fetch_start(struct ml_imap *imap, uint32_t uid, struct ml_parsed *parsed);
 static int imap_quote(const char *text, char *quoted, size_t size);
 static int imap_same(const char *a, const char *b);
 static int imap_has(const char *text, const char *word);
@@ -303,8 +358,8 @@ ml_imap_flag(
 }
 
 /*
- * Moves a message of the selected folder to another: copied, marked
- * deleted and expunged.
+ * Moves a message of the selected folder to another: UID MOVE when the
+ * server has MOVE, else copied, marked deleted and expunged.
  */
 int
 ml_imap_move(
@@ -320,6 +375,14 @@ ml_imap_move(
 	if (error != 0)
 		return error;
 
+	/* A server with MOVE moves it in one step. */
+	if ((imap->capabilities & ML_IMAP_CAN_MOVE) != 0U) {
+		error = imap_run(imap, imap_read_exists, NULL, "UID MOVE %lu %s", (unsigned long)uid, quoted);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
 	/* The copy. */
 	error = imap_run(imap, NULL, NULL, "UID COPY %lu %s", (unsigned long)uid, quoted);
 	if (error != 0)
@@ -331,7 +394,7 @@ ml_imap_move(
 		return error;
 
 	/* And gone. */
-	error = imap_run(imap, imap_read_exists, NULL, "EXPUNGE");
+	error = imap_expunge_one(imap, uid);
 	if (error != 0)
 		return error;
 
@@ -356,18 +419,156 @@ ml_imap_delete(
 	if (error != 0)
 		return error;
 
-	/* Expunged: this message alone, or every one marked. */
-	if ((imap->capabilities & ML_IMAP_CAN_UIDPLUS) != 0U) {
-		error = imap_run(imap, imap_read_exists, NULL, "UID EXPUNGE %lu", (unsigned long)uid);
-	} else {
-		error = imap_run(imap, imap_read_exists, NULL, "EXPUNGE");
-	}
-
-	/* Reports a refused expunge. */
+	/* Expunged. */
+	error = imap_expunge_one(imap, uid);
 	if (error != 0)
 		return error;
 
 	/* Succeeded: the message is gone. */
+	return 0;
+}
+
+/*
+ * Fetches a section of a message of the selected folder ("HEADER", "1",
+ * "2.1", or "" for the whole), up to ML_FETCH_BYTES of it.  Returns 0
+ * with its bytes (the caller frees them; NUL ended), ENOENT when the
+ * server gave none, or an error.
+ */
+int
+ml_imap_section(
+	struct ml_imap *imap,
+	uint32_t uid,
+	const char *section,
+	char **bytes,
+	size_t *length)
+{
+	struct imap_section read;
+	int error;
+
+	/* Nothing yet. */
+	*bytes = NULL;
+	*length = 0;
+	read.bytes = NULL;
+	read.length = 0;
+
+	/* The section, without marking the message read. */
+	error = imap_run(imap, imap_read_section, &read, "UID FETCH %lu (BODY.PEEK[%s]<0.%u>)", (unsigned long)uid, section, ML_FETCH_BYTES);
+	if (error != 0) {
+		free(read.bytes);
+		return error;
+	}
+
+	/* None given. */
+	if (read.bytes == NULL)
+		return ENOENT;
+
+	/* Succeeded: the caller has the bytes. */
+	*bytes = read.bytes;
+	*length = read.length;
+	return 0;
+}
+
+/*
+ * Fetches the structure of a message of the selected folder.  Returns 0
+ * with it, EPROTO when it does not read (a literal in it), or an error.
+ */
+int
+ml_imap_structure(
+	struct ml_imap *imap,
+	uint32_t uid,
+	struct ml_structure *structure)
+{
+	struct imap_structure read;
+	int error;
+
+	/* Its BODYSTRUCTURE. */
+	memset(structure, 0, sizeof(*structure));
+	read.structure = structure;
+	read.read = 0;
+	read.error = 0;
+	error = imap_run(imap, imap_read_structure, &read, "UID FETCH %lu (BODYSTRUCTURE)", (unsigned long)uid);
+	if (error != 0)
+		return error;
+
+	/* Not given. */
+	if (!read.read)
+		return EPROTO;
+
+	/* Not read. */
+	if (read.error != 0)
+		return read.error;
+
+	/* Succeeded: the structure is read. */
+	return 0;
+}
+
+/*
+ * Fetches a message larger than ML_FETCH_BYTES by its structure: its
+ * header, then the section of its words (plain text, else HTML), the file
+ * it carries named with its real size.  A structure that does not read
+ * falls back on the message's first ML_FETCH_BYTES.  Returns 0 with the
+ * message read (ml_mime_release frees it), or an error.
+ */
+int
+ml_imap_fetch_large(
+	struct ml_imap *imap,
+	uint32_t uid,
+	struct ml_parsed *parsed)
+{
+	struct ml_structure structure;
+	const struct ml_structure_part *part;
+	char *header;
+	char *body;
+	size_t header_length;
+	size_t body_length;
+	int error;
+
+	/* The structure; without it, the message's start as before. */
+	memset(parsed, 0, sizeof(*parsed));
+	error = ml_imap_structure(imap, uid, &structure);
+	if (error == EPROTO) {
+		error = imap_fetch_start(imap, uid, parsed);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Another failure of the structure. */
+	if (error != 0)
+		return error;
+
+	/* The header. */
+	error = ml_imap_section(imap, uid, "HEADER", &header, &header_length);
+	if (error != 0)
+		return error;
+
+	/* The words' section: the plain text, else the HTML, else none. */
+	part = NULL;
+	if (structure.text.section[0] != '\0') {
+		part = &structure.text;
+	} else if (structure.html.section[0] != '\0') {
+		part = &structure.html;
+	}
+
+	/* Its bytes. */
+	body = NULL;
+	body_length = 0;
+	if (part != NULL) {
+		error = ml_imap_section(imap, uid, part->section, &body, &body_length);
+		if (error != 0) {
+			free(header);
+			return error;
+		}
+	}
+
+	/* The message read from them. */
+	error = ml_mime_parse_large(header, header_length, &structure, part, body, body_length, parsed);
+	free(header);
+	free(body);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the message is read. */
 	return 0;
 }
 
@@ -835,19 +1036,24 @@ imap_read_list(
 	int *took_literal)
 {
 	static const char *const *const usual[ML_FOLDERS] = { NULL, imap_sent_names, imap_drafts_names, imap_archive_names, imap_trash_names };
-	static const size_t usual_counts[ML_FOLDERS] = { 0, 4, 2, 3, 4 };
+	static const size_t usual_counts[ML_FOLDERS] = {
+		0,
+		sizeof(imap_sent_names) / sizeof(imap_sent_names[0]),
+		sizeof(imap_drafts_names) / sizeof(imap_drafts_names[0]),
+		sizeof(imap_archive_names) / sizeof(imap_archive_names[0]),
+		sizeof(imap_trash_names) / sizeof(imap_trash_names[0])
+	};
 	static const char *const marks[ML_FOLDERS] = { NULL, "\\Sent", "\\Drafts", "\\Archive", "\\Trash" };
 	struct imap_list *list;
 	const char *last;
 	char name[ML_MAILBOX_MAX];
+	char decoded[ML_MAILBOX_MAX * 2U];
 	size_t index;
 	int folder;
 	int marked;
 	int same;
 	int listed;
-
-	UNUSED_PARAMETER(imap);
-	UNUSED_PARAMETER(took_literal);
+	int error;
 
 	/* A LIST line. */
 	listed = strncmp(line, "* LIST ", 7U);
@@ -855,8 +1061,12 @@ imap_read_list(
 		return 0;
 	list = data;
 
-	/* The folder's name, after the delimiter. */
-	imap_list_name(line, name, sizeof(name));
+	/* The folder's name, after the delimiter: a literal after the line, or in the line. */
+	error = imap_list_literal(imap, line, name, sizeof(name), took_literal);
+	if (error != 0)
+		return error;
+	if (!*took_literal)
+		imap_list_name(line, name, sizeof(name));
 	if (name[0] == '\0')
 		return 0;
 
@@ -866,11 +1076,12 @@ imap_read_list(
 		return 0;
 
 	/* Each kind: marked by its attribute (Gmail's archive is \All), or by a usual last part of its name. */
-	last = strrchr(name, '/');
+	imap_utf7_decode(name, decoded, sizeof(decoded));
+	last = strrchr(decoded, '/');
 	if (last == NULL)
-		last = strrchr(name, '.');
+		last = strrchr(decoded, '.');
 	if (last == NULL)
-		last = name;
+		last = decoded;
 	else
 		last++;
 	for (folder = ML_SENT; folder < ML_FOLDERS; folder++) {
@@ -890,6 +1101,111 @@ imap_read_list(
 	}
 
 	/* Succeeded: the folder is noted. */
+	return 0;
+}
+
+/* Reads a section's FETCH: the first literal's bytes, and the rest of its line. */
+static int
+imap_read_section(
+	struct ml_imap *imap,
+	const char *line,
+	void *data,
+	int *took_literal)
+{
+	struct imap_section *read;
+	char rest[ML_LINE_MAX];
+	size_t literal;
+	int has_literal;
+	int is_fetch;
+	int error;
+
+	/* A FETCH line ending in a literal, the first one. */
+	read = data;
+	is_fetch = imap_has(line, " FETCH (");
+	has_literal = imap_literal(line, &literal);
+	if (!is_fetch || !has_literal || read->bytes != NULL)
+		return 0;
+
+	/* Its bytes. */
+	read->bytes = malloc(literal + 1U);
+	if (read->bytes == NULL)
+		return ENOMEM;
+	*took_literal = 1;
+	error = ml_conn_bytes(&imap->conn, read->bytes, literal);
+	if (error != 0)
+		return error;
+
+	/* Ended, for the reader of a text. */
+	read->bytes[literal] = '\0';
+	read->length = literal;
+
+	/* The rest of the line. */
+	error = ml_conn_line(&imap->conn, rest, sizeof(rest));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the section is read. */
+	return 0;
+}
+
+/* Reads BODYSTRUCTURE's FETCH line (one with a literal does not read). */
+static int
+imap_read_structure(
+	struct ml_imap *imap,
+	const char *line,
+	void *data,
+	int *took_literal)
+{
+	struct imap_structure *read;
+	const char *at;
+	size_t literal;
+	int has_literal;
+
+	UNUSED_PARAMETER(imap);
+	UNUSED_PARAMETER(took_literal);
+
+	/* A FETCH line with the structure. */
+	read = data;
+	at = strstr(line, "BODYSTRUCTURE ");
+	if (at == NULL)
+		return 0;
+	read->read = 1;
+
+	/* A literal in it is not read (the caller fetches the message as before). */
+	has_literal = imap_literal(line, &literal);
+	if (has_literal) {
+		read->error = EPROTO;
+		return 0;
+	}
+
+	/* The structure, from its parenthesis. */
+	read->error = ml_structure_parse(at + 14, read->structure);
+	return 0;
+}
+
+/* Fetches a message's first ML_FETCH_BYTES and reads them (a large message whose structure does not read). */
+static int
+imap_fetch_start(
+	struct ml_imap *imap,
+	uint32_t uid,
+	struct ml_parsed *parsed)
+{
+	char *bytes;
+	size_t length;
+	int error;
+
+	/* The bytes. */
+	error = ml_imap_section(imap, uid, "", &bytes, &length);
+	if (error != 0)
+		return error;
+
+	/* Read. */
+	error = ml_mime_parse(bytes, length, parsed);
+	free(bytes);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the message is read. */
 	return 0;
 }
 
@@ -1058,6 +1374,228 @@ imap_list_name(
 
 	/* An atom. */
 	(void)snprintf(name, size, "%s", at);
+}
+
+/*
+ * Reads a LIST line's name given as a literal ("{N}" at the line's end):
+ * its bytes, then the rest of the line.  *took_literal says whether it
+ * was one; a name too long for the room is left to be skipped.
+ */
+static int
+imap_list_literal(
+	struct ml_imap *imap,
+	const char *line,
+	char *name,
+	size_t size,
+	int *took_literal)
+{
+	char rest[ML_LINE_MAX];
+	size_t literal;
+	int has_literal;
+	int error;
+
+	/* No literal, or one too long. */
+	*took_literal = 0;
+	name[0] = '\0';
+	has_literal = imap_literal(line, &literal);
+	if (!has_literal || literal >= size)
+		return 0;
+
+	/* Its bytes. */
+	error = ml_conn_bytes(&imap->conn, name, literal);
+	if (error != 0)
+		return error;
+	name[literal] = '\0';
+	*took_literal = 1;
+
+	/* The rest of the line after it. */
+	error = ml_conn_line(&imap->conn, rest, sizeof(rest));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the name is read. */
+	return 0;
+}
+
+/*
+ * Decodes a folder's name from IMAP's modified UTF-7 into UTF-8: "&...-"
+ * holds UTF-16 in base64 with "," for "/", and "&-" is "&".  A name with
+ * a run that does not decode is kept as it is.
+ */
+static void
+imap_utf7_decode(
+	const char *name,
+	char *decoded,
+	size_t size)
+{
+	char bytes[4];
+	unsigned long bits;
+	unsigned long unit;
+	unsigned long high;
+	unsigned long code_point;
+	size_t length;
+	size_t at;
+	size_t index;
+	int count;
+	int value;
+
+	/* Each byte as it is, or a run of base64. */
+	at = 0;
+	high = 0;
+	index = 0;
+	while (name[index] != '\0' && at + 1U < size) {
+		/* A byte as it is. */
+		if (name[index] != '&') {
+			decoded[at] = name[index];
+			at++;
+			index++;
+			continue;
+		}
+
+		/* "&-" is "&". */
+		if (name[index + 1U] == '-') {
+			decoded[at] = '&';
+			at++;
+			index += 2U;
+			continue;
+		}
+
+		/* The run of base64 up to "-", its bits taken 16 at a time. */
+		bits = 0;
+		count = 0;
+		index++;
+		while (name[index] != '\0' && name[index] != '-') {
+			/* A character that is not base64: the name is kept as it is. */
+			value = imap_utf7_value((unsigned char)name[index]);
+			if (value < 0) {
+				(void)snprintf(decoded, size, "%s", name);
+				return;
+			}
+
+			/* Its six bits; a unit when there are sixteen. */
+			bits = (bits << 6) | (unsigned long)value;
+			count += 6;
+			index++;
+			if (count < 16)
+				continue;
+			count -= 16;
+			unit = (bits >> count) & 0xffffUL;
+			bits &= (1UL << count) - 1UL;
+
+			/* A high surrogate waits for its low one. */
+			if (unit >= 0xd800UL && unit <= 0xdbffUL) {
+				high = unit;
+				continue;
+			}
+
+			/* The code point, of a pair or alone. */
+			code_point = unit;
+			if (unit >= 0xdc00UL && unit <= 0xdfffUL && high != 0UL)
+				code_point = 0x10000UL + ((high - 0xd800UL) << 10) + (unit - 0xdc00UL);
+			high = 0;
+
+			/* In UTF-8, while it fits. */
+			length = imap_utf8_put(code_point, bytes);
+			if (at + length >= size)
+				break;
+			memcpy(decoded + at, bytes, length);
+			at += length;
+		}
+
+		/* The run's "-". */
+		if (name[index] == '-')
+			index++;
+	}
+
+	/* Its end. */
+	decoded[at] = '\0';
+}
+
+/* Gives a modified base64 character's value ("," for "/"), or -1. */
+static int
+imap_utf7_value(
+	int c)
+{
+	/* A capital. */
+	if (c >= 'A' && c <= 'Z')
+		return c - 'A';
+
+	/* A small letter. */
+	if (c >= 'a' && c <= 'z')
+		return c - 'a' + 26;
+
+	/* A digit. */
+	if (c >= '0' && c <= '9')
+		return c - '0' + 52;
+
+	/* The plus. */
+	if (c == '+')
+		return 62;
+
+	/* The comma in place of the slash. */
+	if (c == ',')
+		return 63;
+
+	/* Not base64. */
+	return -1;
+}
+
+/* Writes a code point in UTF-8 (one to four bytes); returns how many. */
+static size_t
+imap_utf8_put(
+	unsigned long code_point,
+	char *bytes)
+{
+	/* One byte. */
+	if (code_point < 0x80UL) {
+		bytes[0] = (char)code_point;
+		return 1;
+	}
+
+	/* Two. */
+	if (code_point < 0x800UL) {
+		bytes[0] = (char)(0xc0UL | (code_point >> 6));
+		bytes[1] = (char)(0x80UL | (code_point & 0x3fUL));
+		return 2;
+	}
+
+	/* Three. */
+	if (code_point < 0x10000UL) {
+		bytes[0] = (char)(0xe0UL | (code_point >> 12));
+		bytes[1] = (char)(0x80UL | ((code_point >> 6) & 0x3fUL));
+		bytes[2] = (char)(0x80UL | (code_point & 0x3fUL));
+		return 3;
+	}
+
+	/* Four. */
+	bytes[0] = (char)(0xf0UL | (code_point >> 18));
+	bytes[1] = (char)(0x80UL | ((code_point >> 12) & 0x3fUL));
+	bytes[2] = (char)(0x80UL | ((code_point >> 6) & 0x3fUL));
+	bytes[3] = (char)(0x80UL | (code_point & 0x3fUL));
+	return 4;
+}
+
+/* Expunges a message marked deleted: by its UID alone when the server has UIDPLUS, else every one marked. */
+static int
+imap_expunge_one(
+	struct ml_imap *imap,
+	uint32_t uid)
+{
+	int error;
+
+	/* This message alone, or every one marked. */
+	if ((imap->capabilities & ML_IMAP_CAN_UIDPLUS) != 0U) {
+		error = imap_run(imap, imap_read_exists, NULL, "UID EXPUNGE %lu", (unsigned long)uid);
+	} else {
+		error = imap_run(imap, imap_read_exists, NULL, "EXPUNGE");
+	}
+
+	/* Reports a refused expunge. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the message is gone. */
+	return 0;
 }
 
 /* Writes a text as an IMAP quoted string (backslash and quote escaped); E2BIG when it does not fit. */

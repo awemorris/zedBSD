@@ -15,8 +15,9 @@
  * file it carries.  Base64 encoding is here too, for compose.c and
  * SMTP's AUTH PLAIN.
  *
- * Other character sets (ISO-2022-JP, Shift_JIS) are kept as their bytes
- * (plan/ws177/backlog-p2.md).
+ * ws177-p016: ISO-2022-JP, Shift_JIS and EUC-JP are read to UTF-8
+ * (jis.c), in the words and in the encoded words of the header fields.
+ * Other character sets are kept as their bytes.
  */
 
 #include "mail.h"
@@ -104,6 +105,7 @@ static int mime_same(const char *a, const char *b, size_t length);
 static int mime_lower(int c);
 static void mime_copy(char *to, size_t size, const char *from, size_t length);
 static void mime_trim(char *text);
+static int mime_finish(struct mime_text *plain, struct ml_parsed *parsed);
 
 /*
  * Reads a raw message into its parts the view shows.  Returns 0 or ENOMEM
@@ -118,9 +120,7 @@ ml_mime_parse(
 	struct mime_part part;
 	struct mime_text plain;
 	struct mime_text html;
-	struct mime_text crlf_free;
 	char value[MIME_FIELD_MAX];
-	size_t index;
 	int found;
 	int error;
 
@@ -128,7 +128,6 @@ ml_mime_parse(
 	memset(parsed, 0, sizeof(parsed[0]));
 	memset(&plain, 0, sizeof(plain));
 	memset(&html, 0, sizeof(html));
-	memset(&crlf_free, 0, sizeof(crlf_free));
 
 	/* The header fields and the body of the whole message. */
 	(void)mime_split(raw, length, &part);
@@ -174,32 +173,89 @@ ml_mime_parse(
 		return error;
 	}
 
-	/* The line ends made line feeds. */
-	for (index = 0; index < plain.length; index++) {
-		/* A CR before a line feed goes. */
-		if (plain.bytes[index] == '\r' && index + 1U < plain.length && plain.bytes[index + 1U] == '\n')
-			continue;
-
-		/* Every other byte stays. */
-		error = mime_append(&crlf_free, plain.bytes + index, 1U);
-		if (error != 0)
-			break;
-	}
-
-	/* The text with its CRs is not needed after. */
-	free(plain.bytes);
-
-	/* An empty body is an empty text. */
-	if (error == 0 && crlf_free.bytes == NULL)
-		error = mime_append(&crlf_free, "", 0U);
-	if (error != 0) {
-		free(crlf_free.bytes);
+	/* The words with line feeds, and the sign-in code in them. */
+	error = mime_finish(&plain, parsed);
+	if (error != 0)
 		return error;
+
+	/* Succeeded: the message is read. */
+	return 0;
+}
+
+/*
+ * Reads a message larger than Mail fetches whole from its pieces
+ * (imap.c's ml_imap_fetch_large): its header, its structure, and the
+ * bytes of the part of its words (NULL for none) as the server keeps them
+ * (still in their transfer encoding and character set).  Returns 0 or
+ * ENOMEM.
+ */
+int
+ml_mime_parse_large(
+	const char *header,
+	size_t header_length,
+	const struct ml_structure *structure,
+	const struct ml_structure_part *part,
+	const char *body,
+	size_t body_length,
+	struct ml_parsed *parsed)
+{
+	struct mime_part words;
+	struct mime_text decoded;
+	struct mime_text plain;
+	int same;
+	int error;
+
+	/* The header fields (the sender, the subject, the date ...), without words. */
+	error = ml_mime_parse(header, header_length, parsed);
+	if (error != 0)
+		return error;
+	ml_mime_release(parsed);
+	parsed->code[0] = '\0';
+
+	/* The file it carries, with its real size. */
+	if (structure->file_name[0] != '\0') {
+		(void)mime_words(structure->file_name, parsed->file_name, sizeof(parsed->file_name));
+		parsed->file_size = structure->file_size;
 	}
 
-	/* The sign-in code in it. */
-	parsed->body = crlf_free.bytes;
-	(void)ml_code_find(parsed->subject, parsed->body, parsed->code, sizeof(parsed->code));
+	/* The part of the words: its type, character set and transfer encoding. */
+	memset(&decoded, 0, sizeof(decoded));
+	memset(&plain, 0, sizeof(plain));
+	if (part != NULL && body != NULL) {
+		memset(&words, 0, sizeof(words));
+		words.body = body;
+		words.body_length = body_length;
+		mime_copy(words.type, sizeof(words.type), part->type, strlen(part->type));
+		mime_copy(words.charset, sizeof(words.charset), part->charset, strlen(part->charset));
+		words.encoding = MIME_ENCODING_PLAIN;
+		same = mime_same(part->encoding, "quoted-printable", 16U);
+		if (same)
+			words.encoding = MIME_ENCODING_QUOTED;
+		same = mime_same(part->encoding, "base64", 6U);
+		if (same)
+			words.encoding = MIME_ENCODING_BASE64;
+
+		/* Decoded, and HTML made text. */
+		error = mime_decode_part(&words, &decoded);
+		same = mime_same(words.type, "text/html", 9U);
+		if (error == 0 && same) {
+			error = mime_html_to_text(decoded.bytes, decoded.length, &plain);
+			free(decoded.bytes);
+		} else {
+			plain = decoded;
+		}
+
+		/* A part that could not be decoded. */
+		if (error != 0) {
+			free(plain.bytes);
+			return error;
+		}
+	}
+
+	/* The words with line feeds, and the sign-in code in them. */
+	error = mime_finish(&plain, parsed);
+	if (error != 0)
+		return error;
 
 	/* Succeeded: the message is read. */
 	return 0;
@@ -319,6 +375,54 @@ ml_base64_encode(
 	/* The text's end. */
 	text[at] = '\0';
 	return at;
+}
+
+/*
+ * Finishes the words of a message: CR LF made line feeds, an empty text
+ * when there are none, given to the message (plain is freed), and the
+ * sign-in code found in them.  Returns 0 or ENOMEM.
+ */
+static int
+mime_finish(
+	struct mime_text *plain,
+	struct ml_parsed *parsed)
+{
+	struct mime_text crlf_free;
+	size_t index;
+	int error;
+
+	/* The line ends made line feeds. */
+	memset(&crlf_free, 0, sizeof(crlf_free));
+	error = 0;
+	for (index = 0; index < plain->length; index++) {
+		/* A CR before a line feed goes. */
+		if (plain->bytes[index] == '\r' && index + 1U < plain->length && plain->bytes[index + 1U] == '\n')
+			continue;
+
+		/* Every other byte stays. */
+		error = mime_append(&crlf_free, plain->bytes + index, 1U);
+		if (error != 0)
+			break;
+	}
+
+	/* The text with its CRs is not needed after. */
+	free(plain->bytes);
+	plain->bytes = NULL;
+
+	/* An empty body is an empty text. */
+	if (error == 0 && crlf_free.bytes == NULL)
+		error = mime_append(&crlf_free, "", 0U);
+	if (error != 0) {
+		free(crlf_free.bytes);
+		return error;
+	}
+
+	/* The sign-in code in it. */
+	parsed->body = crlf_free.bytes;
+	(void)ml_code_find(parsed->subject, parsed->body, parsed->code, sizeof(parsed->code));
+
+	/* Succeeded: the words are the message's. */
+	return 0;
 }
 
 /* Splits a message or a part at the empty line between its header fields and its body. */
@@ -741,7 +845,11 @@ mime_decode_part(
 	return 0;
 }
 
-/* Appends bytes of a character set as UTF-8: UTF-8 and US-ASCII as they are, ISO-8859-1 by its code points, others as they are. */
+/*
+ * Appends bytes of a character set as UTF-8: UTF-8 and US-ASCII as they
+ * are, ISO-8859-1 by its code points, the Japanese sets by jis.c, others
+ * as they are.
+ */
 static int
 mime_to_utf8(
 	const char *bytes,
@@ -749,9 +857,34 @@ mime_to_utf8(
 	const char *charset,
 	struct mime_text *text)
 {
+	unsigned long code_point;
 	size_t index;
+	int japanese;
+	int state;
 	int latin;
+	int read;
 	int error;
+
+	/* A Japanese set: each character read, as its code point. */
+	japanese = ml_jis_charset(charset);
+	if (japanese != ML_JIS_NONE) {
+		index = 0;
+		state = 0;
+		for (;;) {
+			read = ml_jis_next(japanese, (const unsigned char *)bytes, length, &index, &state, &code_point);
+			if (!read)
+				break;
+			error = mime_append_code_point(text, code_point);
+			if (error != 0)
+				return error;
+		}
+
+		/* An empty text is still a text. */
+		error = mime_append(text, "", 0U);
+		if (error != 0)
+			return error;
+		return 0;
+	}
 
 	/* ISO-8859-1 and its kin (Windows-1252 is near enough for the letters). */
 	latin = mime_same(charset, "iso-8859-1", 10U);

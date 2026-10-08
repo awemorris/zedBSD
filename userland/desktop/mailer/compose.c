@@ -11,6 +11,12 @@
  * word when it is not ASCII, the date in UTC, a new Message-ID, and
  * In-Reply-To and References for a reply) and the words as UTF-8 text
  * in quoted-printable, every line ended with CR LF.
+ *
+ * ws177-p016: the names of To and Cc that are not ASCII are encoded words
+ * too ("=?UTF-8?B?...?= <addr>"), a long encoded value is split into words
+ * of whole characters, and the long fields are folded (a line end and a
+ * space) before 78 characters, at the commas of a list and the spaces of
+ * a subject.
  */
 
 #include "mail.h"
@@ -24,6 +30,12 @@
 
 /* The longest line of quoted-printable, before its soft line break. */
 #define COMPOSE_LINE_MAX	75U
+
+/* The longest line of a header field before it is folded (RFC 5322 2.1.1 asks for 78). */
+#define COMPOSE_FIELD_MAX	78U
+
+/* The most bytes of text in one encoded word (60 of base64, a word of 72 with its "=?UTF-8?B?" and "?="). */
+#define COMPOSE_WORD_BYTES	45U
 
 /* The days and months of a date (RFC 5322 section 3.3). */
 static const char *const compose_days[7] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
@@ -49,7 +61,11 @@ static unsigned long compose_serial;
 static void compose_append(struct compose_text *text, const char *bytes, size_t length);
 static void compose_string(struct compose_text *text, const char *string);
 static void compose_field(struct compose_text *text, const char *name, const char *value);
-static void compose_encoded(struct compose_text *text, const char *value);
+static size_t compose_encoded(struct compose_text *text, const char *value, size_t column);
+static void compose_addresses(struct compose_text *text, const char *name, const char *value);
+static size_t compose_address(struct compose_text *text, const char *item, size_t length, size_t column);
+static void compose_subject(struct compose_text *text, const char *subject);
+static void compose_field_bytes(struct compose_text *text, const char *bytes, size_t length);
 static void compose_body(struct compose_text *text, const char *body);
 static int compose_is_ascii(const char *text);
 
@@ -88,7 +104,7 @@ ml_compose(
 		(void)snprintf(line, sizeof(line), "\"%s\" ", account->name);
 		compose_string(&text, line);
 	} else if (account->name[0] != '\0') {
-		compose_encoded(&text, account->name);
+		(void)compose_encoded(&text, account->name, 6U);
 		compose_string(&text, " ");
 	}
 
@@ -96,19 +112,13 @@ ml_compose(
 	(void)snprintf(line, sizeof(line), "<%s>\r\n", account->address);
 	compose_string(&text, line);
 
-	/* The receivers. */
-	compose_field(&text, "To", to);
+	/* The receivers, their names encoded when they are not ASCII. */
+	compose_addresses(&text, "To", to);
 	if (cc[0] != '\0')
-		compose_field(&text, "Cc", cc);
+		compose_addresses(&text, "Cc", cc);
 
-	/* The subject, an encoded word when it is not ASCII. */
-	compose_string(&text, "Subject: ");
-	ascii = compose_is_ascii(subject);
-	if (ascii)
-		compose_string(&text, subject);
-	else
-		compose_encoded(&text, subject);
-	compose_string(&text, "\r\n");
+	/* The subject, encoded words when it is not ASCII, folded when it is long. */
+	compose_subject(&text, subject);
 
 	/* The date, in UTC. */
 	(void)gmtime_r(&now, &parts);
@@ -223,26 +233,260 @@ compose_field(
 	compose_string(text, "\r\n");
 }
 
-/* Appends a value as one encoded word "=?UTF-8?B?...?=". */
-static void
+/*
+ * Appends a value as encoded words "=?UTF-8?B?...?=", each of at most
+ * COMPOSE_WORD_BYTES bytes of whole characters, folded onto a new line
+ * when the line would grow past COMPOSE_FIELD_MAX.  column is where the
+ * line is; returns where it is after.
+ */
+static size_t
 compose_encoded(
 	struct compose_text *text,
-	const char *value)
+	const char *value,
+	size_t column)
 {
-	char encoded[ML_TEXT_MAX * 2U];
+	char encoded[COMPOSE_WORD_BYTES * 2U];
+	size_t start;
+	size_t end;
+	size_t total;
 	size_t length;
 
-	/* The value in base64. */
-	length = ml_base64_encode((const unsigned char *)value, strlen(value), encoded, sizeof(encoded));
-	if (length == 0U) {
-		compose_string(text, "=?UTF-8?B?" "?=");
+	/* Each piece of whole characters. */
+	total = strlen(value);
+	start = 0;
+	while (start < total) {
+		/* As many bytes as fit, back to the start of a character. */
+		end = start + COMPOSE_WORD_BYTES;
+		if (end > total)
+			end = total;
+		while (end < total && end > start && ((unsigned char)value[end] & 0xc0U) == 0x80U)
+			end--;
+		if (end == start)
+			end = start + 1U;
+
+		/* Its word, on a new line when this one is full. */
+		length = ml_base64_encode((const unsigned char *)value + start, end - start, encoded, sizeof(encoded));
+		if (column != 0U && column + length + 12U > COMPOSE_FIELD_MAX) {
+			compose_string(text, "\r\n ");
+			column = 1;
+		} else if (start != 0U) {
+			compose_string(text, " ");
+			column++;
+		}
+
+		/* The word. */
+		compose_string(text, "=?UTF-8?B?");
+		compose_append(text, encoded, length);
+		compose_string(text, "?=");
+		column += length + 12U;
+
+		/* The next piece. */
+		start = end;
+	}
+
+	/* Where the line is. */
+	return column;
+}
+
+/*
+ * Appends a field of receivers ("To", "Cc") as the user wrote it: each
+ * item between commas outside quotes, a name that is not ASCII as encoded
+ * words, the items folded at their commas when the line grows long.
+ */
+static void
+compose_addresses(
+	struct compose_text *text,
+	const char *name,
+	const char *value)
+{
+	size_t column;
+	size_t start;
+	size_t index;
+	int first;
+	int quoted;
+	int ends;
+
+	/* The name. */
+	compose_string(text, name);
+	compose_string(text, ": ");
+	column = strlen(name) + 2U;
+
+	/* Each item, split at a comma outside quotes. */
+	first = 1;
+	start = 0;
+	quoted = 0;
+	for (index = 0;; index++) {
+		/* A quote opens or closes a name. */
+		if (value[index] == '"')
+			quoted = !quoted;
+
+		/* An item ends at an unquoted comma or the value's end. */
+		ends = 0;
+		if (value[index] == '\0') {
+			ends = 1;
+		} else if (!quoted && value[index] == ',') {
+			ends = 1;
+		}
+
+		/* Inside an item: on. */
+		if (!ends)
+			continue;
+
+		/* Its spaces around taken off; an empty item is skipped. */
+		while (start < index && (value[start] == ' ' || value[start] == '\t'))
+			start++;
+		if (start < index) {
+			/* After the first, a comma, and a new line when the next item would not fit. */
+			if (!first) {
+				compose_string(text, ",");
+				column++;
+				if (column + (index - start) + 1U > COMPOSE_FIELD_MAX) {
+					compose_string(text, "\r\n");
+					column = 0;
+				}
+
+				/* The space before it. */
+				compose_string(text, " ");
+				column++;
+			}
+
+			/* The item. */
+			column = compose_address(text, value + start, index - start, column);
+			first = 0;
+		}
+
+		/* The value's end. */
+		if (value[index] == '\0')
+			break;
+		start = index + 1U;
+	}
+
+	/* The line end. */
+	compose_string(text, "\r\n");
+}
+
+/*
+ * Appends one receiver: as written when it is ASCII, else its name before
+ * "<" as encoded words (its quotes taken off) and the address after.
+ * Line ends in it become spaces.  Returns where the line is after.
+ */
+static size_t
+compose_address(
+	struct compose_text *text,
+	const char *item,
+	size_t length,
+	size_t column)
+{
+	char name[ML_TEXT_MAX];
+	const char *angle;
+	size_t name_length;
+	size_t index;
+	int ascii;
+
+	/* The item's text, its line ends as spaces. */
+	if (length >= sizeof(name))
+		length = sizeof(name) - 1U;
+	for (index = 0; index < length; index++) {
+		name[index] = item[index];
+		if (item[index] == '\r' || item[index] == '\n')
+			name[index] = ' ';
+	}
+
+	/* Its end, and whether it is ASCII. */
+	name[length] = '\0';
+	ascii = compose_is_ascii(name);
+
+	/* ASCII, or no address in angle brackets: as written. */
+	angle = strchr(name, '<');
+	if (ascii || angle == NULL) {
+		compose_string(text, name);
+		return column + length;
+	}
+
+	/* The name before the angle bracket, without its spaces and quotes. */
+	name_length = (size_t)(angle - name);
+	while (name_length > 0U && (name[name_length - 1U] == ' ' || name[name_length - 1U] == '"'))
+		name_length--;
+	index = 0;
+	while (index < name_length && (name[index] == ' ' || name[index] == '"'))
+		index++;
+
+	/* The name encoded, then the address. */
+	name[name_length] = '\0';
+	column = compose_encoded(text, name + index, column);
+	compose_string(text, " ");
+	compose_string(text, angle);
+
+	/* Where the line is. */
+	return column + 1U + strlen(angle);
+}
+
+/* Appends the subject: encoded words when it is not ASCII, else its words folded at spaces before the line grows too long. */
+static void
+compose_subject(
+	struct compose_text *text,
+	const char *subject)
+{
+	size_t column;
+	size_t start;
+	size_t end;
+	int ascii;
+
+	/* The field's name. */
+	compose_string(text, "Subject: ");
+	column = 9;
+
+	/* Not ASCII: encoded words. */
+	ascii = compose_is_ascii(subject);
+	if (!ascii) {
+		(void)compose_encoded(text, subject, column);
+		compose_string(text, "\r\n");
 		return;
 	}
 
-	/* Its word. */
-	compose_string(text, "=?UTF-8?B?");
-	compose_append(text, encoded, length);
-	compose_string(text, "?=");
+	/* ASCII: word by word, a space folded into a line end when the next word would not fit. */
+	start = 0;
+	while (subject[start] != '\0') {
+		/* The word and the spaces before it. */
+		end = start;
+		while (subject[end] == ' ')
+			end++;
+		while (subject[end] != '\0' && subject[end] != ' ')
+			end++;
+
+		/* Folded before its space when it would not fit (never before the first word). */
+		if (start != 0U && column + (end - start) > COMPOSE_FIELD_MAX) {
+			compose_string(text, "\r\n");
+			column = 0;
+		}
+
+		/* The word, its line ends as spaces. */
+		compose_field_bytes(text, subject + start, end - start);
+		column += end - start;
+		start = end;
+	}
+
+	/* The line end. */
+	compose_string(text, "\r\n");
+}
+
+/* Appends bytes of a field's value, a line end in them as a space (it would start a new field). */
+static void
+compose_field_bytes(
+	struct compose_text *text,
+	const char *bytes,
+	size_t length)
+{
+	size_t index;
+
+	/* Each byte. */
+	for (index = 0; index < length; index++) {
+		if (bytes[index] == '\r' || bytes[index] == '\n') {
+			compose_append(text, " ", 1U);
+		} else {
+			compose_append(text, bytes + index, 1U);
+		}
+	}
 }
 
 /* Appends the words in quoted-printable, each line ended with CR LF. */
