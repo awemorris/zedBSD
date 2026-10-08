@@ -39,6 +39,12 @@ aat click 1 2 --count 3 && expect_record triple "click left 1 2
 click left 1 2
 click left 1 2"
 aat drag 0 0 10 20 --steps 2 && expect_record drag "drag 0 0 10 20 2"
+aat tap 10 20 && expect_record tap "tap 10 20"
+aat tap 10 20 --count 2 && expect_record "double tap" "double-tap 10 20"
+aat touch-drag 0 0 10 20 --steps 3 && expect_record "touch drag" "touch-drag 0 0 10 20 3"
+aat touch-down 1 5 6 && aat touch-move 1 7 8 && aat touch-up 1 && expect_record fingers "touch-down 1 5 6
+touch-move 1 7 8
+touch-up 1"
 aat wheel 3 4 -2 1 && expect_record wheel "move-to 3 4
 wheel -2
 hwheel 1"
