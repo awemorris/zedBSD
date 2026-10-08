@@ -94,6 +94,16 @@ struct tcp_segment_addresses {
 #else
 #define TCP_RECEIVE_PACKETS SOCKET_RECEIVE_MESSAGES_MAX
 #endif
+/*
+ * How many segments ahead of a gap a connection keeps (BUG-222): the
+ * larger pool of the 64-bit machines has room for TCP_REORDER_MAX of them,
+ * the small pool of the 32-bit boards for a few.
+ */
+#if PACKET_BUF_POOL_COUNT >= 256U
+#define TCP_REORDER_LIMIT TCP_REORDER_MAX
+#else
+#define TCP_REORDER_LIMIT 4U
+#endif
 #define TCP_EPHEMERAL_FIRST 49152U
 /* The initial retransmission timeout of RFC 6298, one second. */
 #define TCP_INITIAL_RTO KERN_MS_TO_TICKS(1000U)
@@ -173,6 +183,9 @@ static void tcp_discard_free(struct tcp_discard *discard);
 static uint32_t tcp_in_flight(const struct tcp_endpoint *endpoint);
 static void tcp_retire_acknowledged(struct tcp_endpoint *endpoint, uint32_t acknowledgement, struct tcp_discard *discard);
 static void tcp_retransmit_clear(struct tcp_endpoint *endpoint);
+static void tcp_reorder_keep(struct tcp_endpoint *endpoint, struct packet_buf **packet, uint32_t sequence);
+static void tcp_reorder_drain(struct tcp_endpoint *endpoint, int discard);
+static void tcp_reorder_free(struct tcp_endpoint *endpoint);
 static void tcp_connect_cancel_locked(struct tcp_endpoint *endpoint, uint32_t generation, struct tcp_discard *discard);
 static int tcp_send_reliable(struct tcp_endpoint *endpoint, uint8_t flags, const void *data, size_t length);
 static int tcp_bind(struct socket *socket, const struct sockaddr *address, socklen_t length);
@@ -1301,6 +1314,19 @@ tcp_retire_acknowledged(
 	}
 
 	/*
+	 * An acknowledgement that takes nothing (a duplicate, which a peer
+	 * sends for each segment after a gap, or the answer of a peer whose
+	 * window is closed) leaves the timer as it is (RFC 6298 section 5.3):
+	 * restarting it would put the resend of the lost segment off for as
+	 * long as duplicates come.  The peer answered, so the attempts start
+	 * over: a connection is not given up while its peer answers.
+	 */
+	if (!progressed) {
+		endpoint->tcp.retransmit_count = 0;
+		return;
+	}
+
+	/*
 	 * The timer follows whatever is now the oldest segment.  An
 	 * acknowledgement for a segment that had to be resent shows the peer
 	 * is back, and the segments sent after the lost one were most likely
@@ -2352,6 +2378,7 @@ tcp_close(
 	spin_unlock_irqrestore(&tcp_registry_lock, irq);
 
 	tcp_retransmit_clear(endpoint);
+	tcp_reorder_free(endpoint);
 	kern_free(endpoint);
 }
 
@@ -2955,6 +2982,7 @@ tcp_segment_input(
 	int retired;
 	int accept_fin;
 	struct packet_buf *eof;
+	void *pulled;
 
 	/* Drops a segment whose header does not fit. */
 	tcp = (const struct tcp_wire *)packet->data;
@@ -3191,14 +3219,29 @@ tcp_segment_input(
 		/*
 		 * A segment wholly before receive_next was already taken; the
 		 * peer sends it again because it did not see the acknowledgement,
-		 * so it gets one (RFC 793).  A segment ahead of receive_next is
-		 * left unanswered: the peer resends from the gap on its timer, and
-		 * answering each such segment makes the two ends of a loopback
-		 * connection feed each other.
+		 * so it gets one (RFC 793).
+		 */
+		if (!accept_payload && old_payload) {
+			(void)tcp_send_segment_at(endpoint, ack_sequence, TCP_ACK, NULL, 0);
+			goto payload_done;
+		}
+
+		/*
+		 * A segment ahead of receive_next (one before it was lost) is
+		 * kept until the gap is filled, and the peer is told of the gap
+		 * at once by a duplicate acknowledgement (RFC 5681 section 4.2),
+		 * so that it resends the one segment missing after three of them
+		 * rather than the whole window after its timer (BUG-222).  A
+		 * duplicate acknowledgement retires nothing and restarts no
+		 * timer of this end's own sender (tcp_retire_acknowledged).
 		 */
 		if (!accept_payload) {
-			if (old_payload)
-				(void)tcp_send_segment_at(endpoint, ack_sequence, TCP_ACK, NULL, 0);
+			pulled = NULL;
+			if (!discard_payload)
+				pulled = packet_buf_pull(packet, header_length);
+			if (pulled != NULL)
+				tcp_reorder_keep(endpoint, &packet, sequence);
+			(void)tcp_send_segment_at(endpoint, ack_sequence, TCP_ACK, NULL, 0);
 			goto payload_done;
 		}
 
@@ -3221,6 +3264,10 @@ tcp_segment_input(
 			endpoint->tcp.receive_next += (uint32_t)payload_length;
 		ack_sequence = endpoint->tcp.send_next;
 		spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
+
+		/* The segments kept ahead that now follow on, then one acknowledgement for all. */
+		if (queued)
+			tcp_reorder_drain(endpoint, discard_payload);
 		(void)tcp_send_segment_at(endpoint, ack_sequence, TCP_ACK, NULL, 0);
 		if (!queued)
 			goto fin_done;
@@ -3415,4 +3462,192 @@ tcp_send_reset6(
 	(void)ipv6_output(device, &addresses->destination6, &addresses->source6, IPPROTO_TCP, 0U, packet);
 	if (device != NULL)
 		net_device_release(device);
+}
+
+/*
+ * Keeps a payload that came ahead of receive_next (its header pulled off)
+ * in the connection's reorder queue, in sequence order, when it lies
+ * within the window and the queue has room (a full queue gives up its
+ * farthest segment for a nearer one).  A segment already kept, or none
+ * kept, leaves *packet for the caller to free; a kept one is taken.
+ */
+static void
+tcp_reorder_keep(
+	struct tcp_endpoint *endpoint,
+	struct packet_buf **packet,
+	uint32_t sequence)
+{
+	struct tcp_socket *tcp = &endpoint->tcp;
+	struct packet_buf *dropped;
+	unsigned long irq;
+	uint32_t length;
+	uint32_t window;
+	uint32_t offset;
+	unsigned index;
+	unsigned place;
+
+	/* The payload's place: within the window this end last advertised. */
+	length = (uint32_t)(*packet)->length;
+	if (length == 0U)
+		return;
+	dropped = NULL;
+	irq = spin_lock_irqsave(&tcp->inet.socket.lock);
+
+	window = tcp->advertised_window;
+	if (window < TCP_RECEIVE_MSS)
+		window = TCP_RECEIVE_MSS;
+	offset = sequence - tcp->receive_next;
+	if (offset == 0U || offset >= window || length > window - offset) {
+		spin_unlock_irqrestore(&tcp->inet.socket.lock, irq);
+		return;
+	}
+
+	/* Its place in the order (a segment of the same start is kept already). */
+	for (place = 0; place < tcp->reorder_count; place++) {
+		if (tcp->reorder_sequence[place] == sequence) {
+			spin_unlock_irqrestore(&tcp->inet.socket.lock, irq);
+			return;
+		}
+
+		/* The first one after it. */
+		if ((int32_t)(sequence - tcp->reorder_sequence[place]) < 0)
+			break;
+	}
+
+	/* A full queue: the farthest goes for a nearer one, or the new one is not kept. */
+	if (tcp->reorder_count >= TCP_REORDER_LIMIT) {
+		if (place >= tcp->reorder_count) {
+			spin_unlock_irqrestore(&tcp->inet.socket.lock, irq);
+			return;
+		}
+
+		/* The farthest taken out. */
+		tcp->reorder_count--;
+		dropped = tcp->reorder[tcp->reorder_count];
+		tcp->reorder[tcp->reorder_count] = NULL;
+	}
+
+	/* Kept in its place. */
+	for (index = tcp->reorder_count; index > place; index--) {
+		tcp->reorder[index] = tcp->reorder[index - 1U];
+		tcp->reorder_sequence[index] = tcp->reorder_sequence[index - 1U];
+		tcp->reorder_length[index] = tcp->reorder_length[index - 1U];
+	}
+
+	/* Into the place made. */
+	tcp->reorder[place] = *packet;
+	tcp->reorder_sequence[place] = sequence;
+	tcp->reorder_length[place] = length;
+	tcp->reorder_count++;
+	*packet = NULL;
+
+	spin_unlock_irqrestore(&tcp->inet.socket.lock, irq);
+
+	/* Succeeded: the farthest one given up, when one was. */
+	if (dropped != NULL)
+		packet_buf_free(dropped);
+}
+
+/*
+ * Moves the kept segments that now follow receive_next into the receive
+ * queue, a part already taken cut off, and moves receive_next past them;
+ * those wholly taken already are freed.  With discard (the read side shut
+ * down) they are taken and freed.  Stops at the next gap, or at a segment
+ * the queue has no room for (freed: the peer sends it again).
+ */
+static void
+tcp_reorder_drain(
+	struct tcp_endpoint *endpoint,
+	int discard)
+{
+	struct tcp_socket *tcp = &endpoint->tcp;
+	struct packet_buf *packet;
+	unsigned long irq;
+	uint32_t sequence;
+	uint32_t length;
+	uint32_t taken;
+	unsigned index;
+	void *pulled;
+	int error;
+
+	/* Each kept segment at the front, while it reaches receive_next. */
+	for (;;) {
+		irq = spin_lock_irqsave(&tcp->inet.socket.lock);
+
+		if (tcp->reorder_count == 0U ||
+		    (int32_t)(tcp->reorder_sequence[0] - tcp->receive_next) > 0) {
+			spin_unlock_irqrestore(&tcp->inet.socket.lock, irq);
+			return;
+		}
+
+		/* The front one taken out, and how much of it was taken already. */
+		packet = tcp->reorder[0];
+		sequence = tcp->reorder_sequence[0];
+		length = tcp->reorder_length[0];
+		for (index = 1; index < tcp->reorder_count; index++) {
+			tcp->reorder[index - 1U] = tcp->reorder[index];
+			tcp->reorder_sequence[index - 1U] = tcp->reorder_sequence[index];
+			tcp->reorder_length[index - 1U] = tcp->reorder_length[index];
+		}
+
+		/* The queue one shorter. */
+		tcp->reorder_count--;
+		tcp->reorder[tcp->reorder_count] = NULL;
+		taken = tcp->receive_next - sequence;
+
+		spin_unlock_irqrestore(&tcp->inet.socket.lock, irq);
+
+		/* Wholly taken already, or not wanted: freed. */
+		if (taken >= length || discard) {
+			if (discard && taken < length) {
+				irq = spin_lock_irqsave(&tcp->inet.socket.lock);
+				if (tcp->receive_next == sequence + taken)
+					tcp->receive_next = sequence + length;
+				spin_unlock_irqrestore(&tcp->inet.socket.lock, irq);
+			}
+
+			/* Freed. */
+			packet_buf_free(packet);
+			continue;
+		}
+
+		/* The part taken already cut off. */
+		if (taken != 0U) {
+			pulled = packet_buf_pull(packet, taken);
+			if (pulled == NULL) {
+				packet_buf_free(packet);
+				return;
+			}
+		}
+
+		/* The rest queued (a queue without room frees it: the peer sends it again). */
+		error = socket_enqueue_stream(&tcp->inet.socket, packet);
+		if (error != 0)
+			return;
+
+		/* Succeeded for this one: receive_next past it. */
+		irq = spin_lock_irqsave(&tcp->inet.socket.lock);
+
+		if (tcp->receive_next == sequence + taken)
+			tcp->receive_next = sequence + length;
+
+		spin_unlock_irqrestore(&tcp->inet.socket.lock, irq);
+	}
+}
+
+/* Frees the segments a closing connection kept ahead of a gap. */
+static void
+tcp_reorder_free(
+	struct tcp_endpoint *endpoint)
+{
+	unsigned index;
+
+	/* Each one kept. */
+	for (index = 0; index < endpoint->tcp.reorder_count; index++) {
+		packet_buf_free(endpoint->tcp.reorder[index]);
+		endpoint->tcp.reorder[index] = NULL;
+	}
+
+	/* None kept now. */
+	endpoint->tcp.reorder_count = 0;
 }
