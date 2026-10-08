@@ -26,13 +26,13 @@ Files を `files ~/attach` で開き、Photos を開いて `sample.png` が grid
    確認事項: file の drop。正解: 止めた間 `KWL DATA drag state=copy`、添付の行が枠で光る。離すと `MAIL ATTACH add name=report.pdf type=application/pdf … count=2`、
    `MAIL DND drop type=2 added=1 count=2`、`KWL DATA drag finish`、Files の `ZFILES DND end dropped=1`（file は Files に残る）。確認方法: log、撮影。
 3. 操作: Photos の grid の 1 枚目を Mail の作成の pane へ drag して離す。
-   確認事項: 画像の drop。正解: `MAIL ATTACH add name=image.png type=image/png … count=3`、`MAIL DND drop type=4 added=1 count=3`、chip「image.png」。確認方法: log、撮影。
+   確認事項: 画像の drop。正解: Photos の drag は file 名（text/uri-list）と image/png の両方を出し、Mail は file 名を先に受ける（ws189 の設計 p001 §2.1「Photos の drag は Files・desktop・Mail には file として」）: `MAIL ATTACH add name=sample.png type=image/png … count=3`、`MAIL DND drop type=2 added=1 count=3`、chip「sample.png」。確認方法: log、撮影。
 4. 操作: chip「note.txt」の x を click。
    確認事項: 外す。正解: `MAIL ATTACH remove index=0 count=2`、chip が 2 つ。確認方法: log、撮影。
 5. 操作: To に `ben@example.com`、Subject に `Attachments from AAT`、本文に `Two files.`、Send。
    確認事項: 送信。正解: `MAIL SENT account=0`、添付の行が空に戻る。server の最新の `smtp-N.eml` が `Content-Type: multipart/mixed; boundary=` で、本文の part に
-   `Two files.`、`filename="report.pdf"` と `filename="image.png"` の part（`Content-Transfer-Encoding: base64`）。report.pdf の part を base64 から戻すと
-   `sample.pdf` と同じ（SHA-256）、image.png は PNG の署名で始まる。確認方法: log、host の server の file。
+   `Two files.`、`filename="report.pdf"` と `filename="sample.png"` の part（`Content-Transfer-Encoding: base64`）。report.pdf の part を base64 から戻すと
+   `sample.pdf` と同じ（SHA-256）、sample.png は Photos の試料 `sample.png` と同じ（SHA-256）。確認方法: log、host の server の file。
 6. 操作: Mail の受信箱の一覧を出したまま（作成していない）、Files の `report.pdf` を Mail の窓の上へ drag して離す。
    確認事項: 作成していない時は受けない。正解: `KWL DATA drag state=refused`、`MAIL ATTACH add` が増えない。確認方法: log。
 

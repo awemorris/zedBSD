@@ -51,3 +51,8 @@ Design: [p001](../phase001/phase.md) §4.8。由来: 2026-10-08 ユーザーの�
 - AAT: `tests/scenarios/apps/mailer/attach-drop.md`（`apps.mailer.attach-drop`、active）: Attach... と chooser、Files からの file の drop、Photos からの画像の
   drop、chip の x、送った message の multipart/mixed と base64 の中身（SHA-256）、作成していない時の refused。
 - 確認: `check-scenarios.py` PASS。build と host 試験は 2026-10-08 の記録のまま（その後の mailer の変更は無い）。
+
+### シナリオの直し（2026-10-08、P1、T1-441 の差）
+
+- T1-441 の手順 3: Photos からの drop は `MAIL DND drop type=2`（file 名、`name=sample.png`）で、シナリオの期待 `type=4`・`image.png` と違った。**期待が誤り**: ws189 の設計 p001 §2.1 は「Photos の drag（uri-list と png）は Files・desktop・Mail には file として、Notes には画像として届く」（受ける型の順は file 名が先）。Photos は元の file を text/uri-list でも出すので、Mail は元の file を名前のまま添付する（`image.png` は image/png だけの drag、例えば Notes・PDF Viewer・Browser からの時）。
+- `tests/scenarios/apps/mailer/attach-drop.md` の手順 3（`name=sample.png`・`type=2`・chip「sample.png」）と手順 5（`filename="sample.png"`、Photos の試料と SHA-256 が一致）を直した。`check-scenarios.py` PASS。実装は変えない。

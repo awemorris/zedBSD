@@ -886,7 +886,9 @@ loopback_status(
  * Queues an inquiry's answer and results: Command Status, an Extended
  * Inquiry Result (address 0A:0B:0C:0D:0E:01, class 0x002540, RSSI -40,
  * the complete name "Loopback Keyboard"), an Inquiry Result with RSSI
- * (0A:0B:0C:0D:0E:02, class 0x002580, RSSI -60) and Inquiry Complete.
+ * (0A:0B:0C:0D:0E:02, class 0x002580, RSSI -60), another for the Just
+ * Works device (0A:0B:0C:0D:0E:07, class 0x240404, RSSI -50; T1-438: so
+ * that Settings can pair with it) and Inquiry Complete.
  */
 static int
 loopback_inquiry(
@@ -942,6 +944,16 @@ loopback_inquiry(
 	plain[12] = 0x25U;
 	plain[13] = 0x00U;
 	plain[16] = (uint8_t)(int8_t)-60;
+	error = loopback_queue(BT_PACKET_EVENT, plain, sizeof(plain));
+	if (error != 0)
+		return error;
+
+	/* The Just Works device's result with RSSI, the same shape. */
+	plain[3] = LOOPBACK_DEVICE_JUST_WORKS;
+	plain[11] = 0x04U;
+	plain[12] = 0x04U;
+	plain[13] = 0x24U;
+	plain[16] = (uint8_t)(int8_t)-50;
 	error = loopback_queue(BT_PACKET_EVENT, plain, sizeof(plain));
 	if (error != 0)
 		return error;

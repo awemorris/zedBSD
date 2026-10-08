@@ -621,12 +621,14 @@ struct se_printers {
 };
 
 /*
- * The Bluetooth page (ws143-p006): whether the desktop was told to watch,
+ * The Bluetooth page (ws143-p006): whether its state was logged once
+ * (T1-438: the log says it even when no change comes), whether the desktop was told to watch,
  * when the scan was last asked (0: not scanning), the devices as last
  * drawn (the clicks name them by their place), the request asked (0 for
  * none) and its kind, and the last answer (red for a failure).
  */
 struct se_bluetooth {
+	int state_logged;
 	int watching;
 	uint64_t scan_at;
 	struct kl_bluetooth_device drawn[KL_BLUETOOTH_DEVICES_MAX];
