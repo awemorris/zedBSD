@@ -56,6 +56,7 @@ fake_alsa_play(unsigned long frames)
 		if (fake_queued == 0UL)
 			fake_state = STATE_XRUN;
 	}
+
 	pthread_mutex_unlock(&fake_lock);
 }
 
@@ -73,7 +74,9 @@ snd_pcm_open(void **pcm, const char *name, int stream, int mode)
 		fake_state = STATE_PREPARED;
 		fake_queued = 0UL;
 	}
+
 	pthread_mutex_unlock(&fake_lock);
+
 	if (error != 0)
 		return -error;
 	*pcm = &fake_dummy;
@@ -97,7 +100,9 @@ int snd_pcm_set_params(void *pcm, int format, int access, unsigned channels, uns
 		fake_fail_params_times--;
 		error = -fake_fail_params;
 	}
+
 	pthread_mutex_unlock(&fake_lock);
+
 	return error;
 }
 
@@ -157,7 +162,10 @@ snd_pcm_pause(void *pcm, int enable)
 {
 	(void)pcm;
 	pthread_mutex_lock(&fake_lock);
-	fake_state = enable ? STATE_PAUSED : STATE_RUNNING;
+	if (enable)
+		fake_state = STATE_PAUSED;
+	else
+		fake_state = STATE_RUNNING;
 	pthread_mutex_unlock(&fake_lock);
 	return 0;
 }
@@ -181,7 +189,14 @@ int snd_pcm_recover(void *pcm, int error, int silent) { (void)error; (void)silen
 int snd_pcm_poll_descriptors_count(void *pcm) { (void)pcm; return 0; }
 int snd_pcm_poll_descriptors(void *pcm, struct pollfd *descriptors, unsigned space) { (void)pcm; (void)descriptors; (void)space; return 0; }
 int snd_pcm_close(void *pcm) { (void)pcm; pthread_mutex_lock(&fake_lock); fake_opened--; pthread_mutex_unlock(&fake_lock); return 0; }
-int snd_pcm_sw_params_malloc(void **params) { *params = malloc(8); return *params == NULL ? -ENOMEM : 0; }
+int
+snd_pcm_sw_params_malloc(void **params)
+{
+	*params = malloc(8);
+	if (*params == NULL)
+		return -ENOMEM;
+	return 0;
+}
 int snd_pcm_sw_params_current(void *pcm, void *params) { (void)pcm; (void)params; return 0; }
 int snd_pcm_sw_params_set_start_threshold(void *pcm, void *params, unsigned long value) { (void)pcm; (void)params; pthread_mutex_lock(&fake_lock); fake_threshold = value; pthread_mutex_unlock(&fake_lock); return 0; }
 int snd_pcm_sw_params(void *pcm, void *params) { (void)pcm; (void)params; return 0; }
