@@ -3,7 +3,7 @@
 # ws177-p021: 音楽の準正常系の 2 — 再生の失敗と key（案 M）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（T1-450、2026-10-08 夜 Q1）
+Status: in-progress（2026-10-08 夜 Q1: T1-450 の apps.music.failures の手順 2（Next の 2 回の press の 2 回目が落ちる、4 回中 3 回）を P2 が直す。3〜5 は pass、helper の escape は esc に）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q903（P2、2026-10-08 夜、承認済み）
