@@ -3,7 +3,7 @@
 # ws177-p046: dhcpc の DHCPv6 の準正常系・異常系と DNSSL の不正な label（案 R）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 夜 P1 q909: 実装・host PASS・build warning 0、T1 の依頼文を Q1 へ（p045 と一緒に `ipv6-r-dnsmasq.sh`））
+Status: test-wait（T1-479、2026-10-08 夜 Q1）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q909（P1、承認は p044 と同じ）
