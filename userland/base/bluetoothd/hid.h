@@ -186,6 +186,7 @@ void btd_hid_refresh(struct btd_hid *hid);
 int btd_hid_connect(struct btd_hid *hid, const uint8_t *address, char *answer, size_t size);
 int btd_hid_disconnect(struct btd_hid *hid, const uint8_t *address);
 void btd_hid_forget(struct btd_hid *hid, const uint8_t *address);
+void btd_hid_release(struct btd_hid *hid, const uint8_t *address);
 void btd_hid_status(const struct btd_hid *hid, unsigned index, char *line, size_t size);
 unsigned btd_hid_open_count(const struct btd_hid *hid);
 int btd_hid_busy(const struct btd_hid *hid, const uint8_t *address);

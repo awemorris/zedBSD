@@ -31,7 +31,8 @@
  *               not (a computer's)
  *   lifecycle   the pages again (5, 10, 20, 40, 60 seconds, paused after
  *               10, started again by CONNECT), the table full, the
- *               controller lost, the device's unplug, FORGET's unplug
+ *               controller lost, the device's unplug, FORGET's unplug, a
+ *               device let go for its pairing again
  *
  *   plan/ws143/tests/bt-daemon-host-test.sh
  */
@@ -740,6 +741,7 @@ test_handoff(void)
 	status_of(0x23U, line, sizeof(line));
 	expect(strstr(line, "state=open input=/dev/input/event7") != NULL && strstr(line, "name=\"Paired Keyboard\"") != NULL, "handoff: open (%s)", line);
 	expect(!fake_saw(0x0405U) && !fake_saw(0x0411U) && fake.sdp_requests >= 2U, "handoff: no page nor authentication, SDP on the link");
+	expect(fake.scan_enable == 0x02U && host.page_scan, "handoff: page scan on, the device may come back by itself");
 	error = bridge_read((uint8_t *)&setup, sizeof(setup), &length);
 	expect(error == 0 && length == sizeof(setup) && strcmp(setup.name, "Paired Keyboard") == 0, "handoff: the setup");
 	error = btd_hidcache_read(keys_folder, controller, address, BTD_ADDRESS_BREDR, &record);
@@ -763,6 +765,7 @@ static void
 test_lifecycle(void)
 {
 	static const uint64_t waits[5] = { 5000U, 10000U, 20000U, 40000U, 60000U };
+	static struct btd_hidcache record;
 	struct btd_bond gone;
 	uint8_t address[6];
 	uint8_t bytes[5000];
@@ -878,6 +881,22 @@ test_lifecycle(void)
 	settle();
 	status_of(0x43U, line, sizeof(line));
 	expect(fake.unplugs == 1U && fake_saw(0x0406U) && line[0] == '\0' && bridge_closed(), "lifecycle: FORGET's unplug");
+
+	/* PAIR of an open device lets it go first: no unplug, the link ended, the record gone, the bond kept. */
+	fake_reset(0x44U);
+	bond(0x44U, "Paired Again");
+	(void)connect_device(0x44U);
+	settle();
+	(void)bridge_read(bytes, sizeof(bytes), &length);
+	fake.opcode_count = 0U;
+	address_of(0x44U, address);
+	btd_hid_release(&host, address);
+	settle();
+	status_of(0x44U, line, sizeof(line));
+	error = btd_keys_read(keys_folder, controller, address, BTD_ADDRESS_BREDR, &gone);
+	expect(fake.unplugs == 0U && fake_saw(0x0406U) && line[0] == '\0' && bridge_closed() && error == 0, "lifecycle: released for a pairing (%d)", error);
+	error = btd_hidcache_read(keys_folder, controller, address, BTD_ADDRESS_BREDR, &record);
+	expect(error != 0, "lifecycle: the released device's record gone (%d)", error);
 	run_close();
 }
 

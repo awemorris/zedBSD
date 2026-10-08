@@ -299,10 +299,9 @@ main(
 	btd_router_init(&btd_routing, &btd_pairing);
 
 	/*
-	 * The HID host, the router's owner of its connections.  The pairing's
-	 * handoff (btd_hid_handoff) is given in i02d, with the loopback
-	 * controller that answers SDP (until then a paired device is ended as
-	 * in p004, which its tests expect).
+	 * The HID host, the router's owner of its connections, and the
+	 * pairing's handoff: a paired device that looks like a HID device goes
+	 * on to HID on the same link (phase005 section 9.2).
 	 */
 	hid_hooks.context = NULL;
 	hid_hooks.open_bridge = btd_hid_bridge;
@@ -313,6 +312,7 @@ main(
 	router_hid.claims = btd_hid_claims;
 	router_hid.handle = btd_hid_handle;
 	btd_router_set_hid(&btd_routing, &router_hid);
+	btd_pair_set_handoff(&btd_pairing, btd_hid_handoff, &btd_hid_host);
 
 	/* The controller there is now. */
 	btd_open();
@@ -1276,6 +1276,10 @@ btd_pair(
 		btd_write(client, "ERROR busy\nDONE\n");
 		return;
 	}
+
+	/* A HID device of that address (open or waiting) lets go first: the pairing makes it anew (review B7). */
+	if (type == BTD_ADDRESS_BREDR)
+		btd_hid_release(&btd_hid_host, address);
 
 	/* The client waits for the end (which may come at once). */
 	btd_pair_client = index;
