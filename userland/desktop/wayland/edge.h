@@ -11,8 +11,9 @@
  * from the top edge's band that opens Wiseview (a touch only, the band
  * holding its press until it knows), a drag on Home that is mostly down
  * (closing Home) or sideways (the pages), how far a docked title has
- * been pulled out of the system bar, and how deep the desktop and Home's
- * content are while Home opens or closes (ws181-p008).
+ * been pulled out of the system bar, how deep the desktop and Home's
+ * content are while Home opens or closes (ws181-p008), and which edge a
+ * group of fingers on a touch screen swipes in from (BUG-267).
  *
  * It knows nothing of the server: the caller gives points and distances,
  * and acts on what the rules say (shell.c, home.c).  So the host tests
@@ -60,6 +61,34 @@
 #define KWL_EDGE_DRAG_NONE		2U
 
 /*
+ * The edges a group of fingers on a touch screen swipes in from (BUG-267,
+ * the 2026-10-08 UAT: a swipe of two fingers from the edge is the swipe
+ * one finger makes there): none, the left side, the right side (both under
+ * the system bar: the desktops' swipe), or the bottom (App Home's).
+ */
+#define KWL_EDGE_SIDE_NONE		0U
+#define KWL_EDGE_SIDE_LEFT		1U
+#define KWL_EDGE_SIDE_RIGHT		2U
+#define KWL_EDGE_SIDE_BOTTOM		3U
+
+/*
+ * The group of fingers: the finger nearest the edge touches within
+ * KWL_EDGE_GROUP_BAND of it (two fingers side by side do not both fit in
+ * the one finger's strip), each of the others within KWL_EDGE_GROUP_REACH,
+ * all within KWL_EDGE_GROUP_MS of the first; every finger then moves in by
+ * KWL_EDGE_GROUP_START, more in than across.
+ */
+#define KWL_EDGE_GROUP_BAND		64
+#define KWL_EDGE_GROUP_REACH		192
+#define KWL_EDGE_GROUP_MS		150U
+#define KWL_EDGE_GROUP_START		12
+
+/* What a finger of the group is after a motion: still waiting, going in, or doing something else. */
+#define KWL_EDGE_GROUP_WAIT		0U
+#define KWL_EDGE_GROUP_IN		1U
+#define KWL_EDGE_GROUP_OTHER		2U
+
+/*
  * App Home's way in and out (ws181-p008, the 2026-10-07 UAT: as on iOS).
  * The desktop layer goes back into the distance: it shrinks about the
  * output's middle to KWL_EDGE_HOME_DESKTOP_DEPTH of its size as Home
@@ -92,5 +121,9 @@ unsigned kwl_edge_drag_axis(int32_t dx, int32_t dy);
 int32_t kwl_edge_distance(int32_t dx, int32_t dy);
 void kwl_edge_home_desktop(float progress, int32_t width, int32_t height, struct kwl_edge_depth *depth);
 void kwl_edge_home_content(float progress, int32_t width, int32_t height, struct kwl_edge_depth *depth);
+unsigned kwl_edge_group_side(int32_t x, int32_t y, int32_t width, int32_t height, int32_t top);
+int32_t kwl_edge_group_distance(unsigned side, int32_t x, int32_t y, int32_t width, int32_t height, int32_t top);
+unsigned kwl_edge_group_motion(unsigned side, int32_t dx, int32_t dy);
+void kwl_edge_group_point(unsigned side, int32_t x, int32_t y, int32_t width, int32_t height, int32_t *edge_x, int32_t *edge_y);
 
 #endif
