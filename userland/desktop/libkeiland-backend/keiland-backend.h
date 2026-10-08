@@ -962,6 +962,13 @@ int kl_backend_print_submit(struct kl_backend_print *print, uint32_t printer, co
 int kl_backend_print_cancel(struct kl_backend_print *print, uint32_t job, uint32_t *request);
 
 /*
+ * Ask for a printer's name and its IPP path or LPD queue to be changed
+ * ("" keeps each, ws177-p025); *request numbers the answer.  Returns 0
+ * when asked, or EINVAL (a path with a space or too long, a name too long).
+ */
+int kl_backend_print_edit(struct kl_backend_print *print, uint32_t printer, const char *name, const char *path, uint32_t *request);
+
+/*
  * Takes the oldest answer: its request, its errno value (0, EINVAL, EBUSY,
  * EIO) and whether the settings file was written.  Returns 1 with one, 0
  * when none is waiting.

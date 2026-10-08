@@ -600,18 +600,23 @@ struct se_display {
 	int taken;
 };
 
-/* The Printers page's fields (ws145-p004): the address, the port, the path or queue. */
+/* The Printers page's fields (ws145-p004): the address, the port, the path or queue; an edit's name and path or queue (ws177-p025). */
 #define SE_PRINTER_FIELDS	3
+#define SE_PRINTER_EDIT_FIELDS	2
 
 /*
  * The Printers page (ws145-p004): the protocol chosen for an addition
- * (KL_PRINTER_IPP or _LPD, 0 for IPP), the fields, the field with the
- * keyboard and whether one has it, the request asked (0 for none) and its
- * kind, and the last answer (red for a failure).
+ * (KL_PRINTER_IPP or _LPD, 0 for IPP), the fields, the printer being
+ * edited (0 for none) and its fields (ws177-p025), the field with the
+ * keyboard (0 to 2 the addition's, 3 and 4 the edit's) and whether one has
+ * it, the request asked (0 for none) and its kind, and the last answer
+ * (red for a failure).
  */
 struct se_printers {
 	unsigned protocol;
 	struct kl_field fields[SE_PRINTER_FIELDS];
+	uint32_t editing;
+	struct kl_field edit_fields[SE_PRINTER_EDIT_FIELDS];
 	int focus;
 	int typing;
 	uint32_t request;

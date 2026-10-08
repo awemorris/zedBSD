@@ -22,11 +22,13 @@ host で `plan/ws145/tests/mock-printers.py`（IPP は `/ipp/print` で名前「
    確認事項: 印刷。正解: `PRINTTEST done job=1 state=4`・`job=2 state=4`、host の mock が受けた `ipp-1.pdf` と `lpd-1.data` が試料と同じ（SHA-256）。確認方法: printtest の出力、host の file。
 3. 操作: kei として `pdfviewer /tmp/aat-samples/sample.pdf`、窓を click して Ctrl+P（File > Print）。
    確認事項: PDF Viewer の印刷（D6）。正解: `PDFVIEWER PRINT asked error=0`、`PDFVIEWER PRINT job=3 state=4`、mock の `ipp-2.pdf` が試料と同じ、窓に「Printed.」。確認方法: log、host の file、撮影。
-4. 操作: Settings の Printers の頁を開く。
-   確認事項: 頁。正解: Mock Printer に「Default」、LPD の printer、Add a Printer の form、Print Jobs に 3 つの Done。確認方法: 撮影。
+4. 操作: kei として `printtest edit LPD の id Basement raw2`（ws177-p025、printer の名前と queue を変える）。
+   確認事項: 変更。正解: `PRINTTEST result error=0`、list の LPD の printer が `path=raw2 … name=Basement`。確認方法: printtest の出力。
+5. 操作: Settings の Printers の頁を開く。
+   確認事項: 頁。正解: Mock Printer に「Default」、Basement（LPD、raw2）、各行に Edit、Add a Printer の form、Print Jobs に 3 つの Done。確認方法: 撮影。
 
 ## 合格
-1〜4 の正解。
+1〜5 の正解。
 
 ## 注記
 助け: `plan/tools/aat/scenarios/helpers_printers.py`（前後に printers.conf を消す）。

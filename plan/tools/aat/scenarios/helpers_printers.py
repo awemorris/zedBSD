@@ -96,12 +96,18 @@ def printers(item):
 		got = hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else "none"
 		item.check(got == want, f"PDF Viewer's document is not the sample ({got[:12]})")
 		run.close(item, viewer)
+		# A printer's name and queue changed (ws177-p025, the printers' edit since manager version 24).
+		_, out = run.as_user(f"/bin/printtest edit {lpd_line.group(1)} Basement raw2", wait=True)
+		item.step(f"printtest edit {lpd_line.group(1)} Basement raw2", "; ".join(line for line in out.splitlines() if "result" in line or "printer id=" in line))
+		item.check(re.search(r"PRINTTEST result error=0", out), "the edit was not taken")
+		item.check(re.search(rf"printer id={lpd_line.group(1)} protocol=2 .*path=raw2 default=0 name=Basement$", out, re.M),
+			"the LPD printer is not named Basement with the queue raw2")
 		# The Settings page.
 		window, _ = run.settings(item, "printers")
 		run.shot(item, "page")
 		run.close(item, window)
-		item.person("the Printers page: Mock Printer (Default) and the LPD printer, the form, and the three jobs Done; PDF Viewer's "
-			"message Printed")
+		item.person("the Printers page: Mock Printer (Default) and Basement (LPD, raw2), each with Edit, the form, and the three "
+			"jobs Done; PDF Viewer's message Printed")
 	finally:
 		mock.terminate()
 		forget()

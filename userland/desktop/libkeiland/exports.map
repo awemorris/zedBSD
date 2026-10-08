@@ -148,6 +148,7 @@
 		kl_system_printers_print;
 		kl_system_print_job_of;
 		kl_system_print_cancel;
+		kl_system_printers_edit;
 		kl_system_displays_get;
 		kl_system_displays_mode;
 		kl_system_displays_apply;
