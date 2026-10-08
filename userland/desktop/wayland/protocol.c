@@ -1059,6 +1059,9 @@ surface_commit(
 	uint32_t replaced;
 	int error;
 
+	/* A key of the on-screen keyboard awaits its application's frame (ws102-p010). */
+	kwl_keyboard_surface_commit(surface);
+
 	/* A window waiting for its image of a new size: when its latest commit came (BUG-179). */
 	if (surface->resized_ms != 0U)
 		surface->resized_commit_ms = kwl_milliseconds();

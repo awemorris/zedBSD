@@ -125,6 +125,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 /* The corners a contact starts in: this many pixels from the bottom and from the side (kwl.h). */
 #define KEYBOARD_ZONE		KWL_KEYBOARD_ZONE
@@ -537,6 +538,29 @@ struct keyboard_state {
 	unsigned field_kind;
 	unsigned field_qface;
 	unsigned flick_chosen;
+
+	/*
+	 * The measurements of L3 (ws102-p010), logged for
+	 * plan/ws102/tests/osk-latency.py: when the release of the panel's
+	 * press was taken (microseconds, 0 when no key's sending waits for
+	 * it), and after a key was sent, the client it went to (NULL when no
+	 * frame is awaited) and when its release was taken, until that client
+	 * commits its next buffer.  slide_seen is the slide being followed
+	 * (its slide_ms), with its frames, the time of its last frame, its
+	 * largest gap between frames, the time to its first frame, whether it
+	 * was logged, and whether it is a panel leaving (when one panel takes
+	 * another's place, the first drawn of the two is followed).
+	 */
+	uint64_t latency_release_us;
+	struct kwl_client *latency_client;
+	uint64_t latency_start_us;
+	uint64_t slide_seen;
+	unsigned slide_frames;
+	uint64_t slide_last_ms;
+	uint64_t slide_gap_ms;
+	uint64_t slide_first_ms;
+	unsigned slide_done;
+	unsigned slide_leaving;
 };
 
 /*
@@ -646,6 +670,10 @@ static void keyboard_emoji_rect(struct kwl_server *server, unsigned slot, int32_
 static int keyboard_emoji_at(struct kwl_server *server, int32_t x, int32_t y, unsigned *slot);
 static void keyboard_emoji_release(struct kwl_server *server);
 static void keyboard_emoji_log(struct kwl_server *server);
+static int keyboard_panel_release(struct kwl_server *server, uint32_t button);
+static uint64_t keyboard_microseconds(void);
+static void keyboard_latency_sent(struct kwl_server *server);
+static void keyboard_slide_frame(int leaving, uint64_t elapsed);
 static void keyboard_draw_emoji(struct kwl_server *server, VkCommandBuffer command);
 static const char *keyboard_kind_name(enum keyboard_kind kind);
 static const char *keyboard_source_name(enum kwl_contact_source source);
@@ -676,7 +704,7 @@ kwl_keyboard_button(
 			return 1;
 
 		/* Or the press on the panel. */
-		taken = keyboard_panel_button(server, button, state);
+		taken = keyboard_panel_release(server, button);
 		return taken;
 	}
 
@@ -880,7 +908,10 @@ keyboard_touch_button(
 	saved_y = server->pointer_y;
 	server->pointer_x = x;
 	server->pointer_y = y;
-	taken = keyboard_panel_button(server, KWL_BUTTON_LEFT, state);
+	if (state == 0U)
+		taken = keyboard_panel_release(server, KWL_BUTTON_LEFT);
+	else
+		taken = keyboard_panel_button(server, KWL_BUTTON_LEFT, state);
 	server->pointer_x = saved_x;
 	server->pointer_y = saved_y;
 	return taken;
@@ -1152,6 +1183,30 @@ kwl_keyboard_draw(
 	    keyboard.contact.armed &&
 	    !keyboard.contact.expired)
 		keyboard_draw_hint(server, command);
+}
+
+/*
+ * Measures a key's way to its application (ws102-p010): the first buffer
+ * the client a key was sent to commits after it ends the measurement, and
+ * its time since the key's release is logged.  wl_surface.commit calls it
+ * (protocol.c) for every surface.
+ */
+void
+kwl_keyboard_surface_commit(
+	struct kwl_object *surface)
+{
+	uint64_t now;
+
+	/* Only a buffer of the client awaited. */
+	if (keyboard.latency_client == NULL || surface->client != keyboard.latency_client)
+		return;
+	if (surface->pending == NULL)
+		return;
+
+	/* Succeeded: logged, and no longer awaited. */
+	now = keyboard_microseconds();
+	printf("KWL OSK latency frame_us=%llu\n", (unsigned long long)(now - keyboard.latency_start_us));
+	keyboard.latency_client = NULL;
 }
 
 /*
@@ -2111,6 +2166,9 @@ keyboard_draw_sliding(
 	if (leaving)
 		out = t;
 
+	/* The slide's frames measured (ws102-p010). */
+	keyboard_slide_frame(leaving, elapsed);
+
 	/* The panel moved by that much of its size towards its edge, drawn, and put back. */
 	memcpy(kept, keyboard.panel, sizeof(kept));
 	if (keyboard.open == PANEL_FLICK)
@@ -2513,8 +2571,9 @@ keyboard_send_key(
 		kwl_seat_modifiers(server);
 	}
 
-	/* Succeeded: the key was sent. */
+	/* Succeeded: the key was sent (and its latency measured). */
 	printf("KWL OSK send via=key code=%u shift=%d held=%u\n", code, shift, used);
+	keyboard_latency_sent(server);
 	return 1;
 }
 
@@ -2581,8 +2640,9 @@ keyboard_send_commit(
 	/* The deletion and the commit, applied together. */
 	kwl_text_input_deliver(input, NULL, 0, 0, text, before, 0U);
 
-	/* Succeeded: the field has the text. */
+	/* Succeeded: the field has the text (and its latency is measured). */
 	printf("KWL OSK send via=commit text=%s before=%u\n", text, before);
+	keyboard_latency_sent(server);
 	return 1;
 }
 
@@ -4977,3 +5037,110 @@ keyboard_draw_candidates(
 	}
 }
 
+/*
+ * Ends a press on the panel with its release, timed for the measurement
+ * of L3 (ws102-p010): a key that sends from it measures from here.
+ * Returns 1 when the panel took the release.
+ */
+static int
+keyboard_panel_release(
+	struct kwl_server *server,
+	uint32_t button)
+{
+	int taken;
+
+	/* The release's time, for the key it sends. */
+	keyboard.latency_release_us = keyboard_microseconds();
+	taken = keyboard_panel_button(server, button, 0U);
+
+	/* A send later than the release (a candidate's, a prediction's) is not this release's. */
+	keyboard.latency_release_us = 0;
+	return taken;
+}
+
+/* Gives the monotonic clock in microseconds (0 when it cannot be read). */
+static uint64_t
+keyboard_microseconds(void)
+{
+	struct timespec now;
+	int error;
+
+	/* The clock. */
+	error = clock_gettime(CLOCK_MONOTONIC, &now);
+	if (error != 0)
+		return 0;
+
+	/* Succeeded: in microseconds. */
+	return (uint64_t)now.tv_sec * 1000000U + (uint64_t)now.tv_nsec / 1000U;
+}
+
+/*
+ * Logs the time from the panel's release to the key's sending, and waits
+ * for the next buffer of the client it went to (ws102-p010).  A send that
+ * no release caused is not measured.
+ */
+static void
+keyboard_latency_sent(
+	struct kwl_server *server)
+{
+	uint64_t now;
+
+	/* Only a send of a release. */
+	if (keyboard.latency_release_us == 0U)
+		return;
+
+	/* The time to the sending. */
+	now = keyboard_microseconds();
+	printf("KWL OSK latency send_us=%llu\n", (unsigned long long)(now - keyboard.latency_release_us));
+
+	/* Succeeded: the focused client's next buffer awaited, measured from the release. */
+	keyboard.latency_client = NULL;
+	if (server->focus != NULL)
+		keyboard.latency_client = server->focus->client;
+	keyboard.latency_start_us = keyboard.latency_release_us;
+	keyboard.latency_release_us = 0;
+}
+
+/*
+ * Follows a slide's frames (ws102-p010): its first frame's delay from the
+ * slide's start, and the largest gap between its frames, logged once when
+ * the first frame past its end is drawn.
+ */
+static void
+keyboard_slide_frame(
+	int leaving,
+	uint64_t elapsed)
+{
+	uint64_t now;
+	uint64_t gap;
+
+	/* A new slide: followed from its first frame. */
+	now = kwl_milliseconds();
+	if (keyboard.slide_seen != keyboard.slide_ms) {
+		keyboard.slide_seen = keyboard.slide_ms;
+		keyboard.slide_frames = 0;
+		keyboard.slide_gap_ms = 0;
+		keyboard.slide_first_ms = elapsed;
+		keyboard.slide_last_ms = now;
+		keyboard.slide_done = 0;
+		keyboard.slide_leaving = (unsigned)leaving;
+	}
+
+	/* A slide already logged, or the other panel of a change (one panel's frames are the frames). */
+	if (keyboard.slide_done || keyboard.slide_leaving != (unsigned)leaving)
+		return;
+
+	/* This frame: its gap from the one before. */
+	gap = now - keyboard.slide_last_ms;
+	if (gap > keyboard.slide_gap_ms)
+		keyboard.slide_gap_ms = gap;
+	keyboard.slide_last_ms = now;
+	keyboard.slide_frames++;
+
+	/* The slide's end: logged once. */
+	if (elapsed < KEYBOARD_SLIDE_MS)
+		return;
+	keyboard.slide_done = 1;
+	printf("KWL OSK slide end leaving=%d frames=%u first_ms=%llu max_gap_ms=%llu\n", leaving, keyboard.slide_frames,
+	    (unsigned long long)keyboard.slide_first_ms, (unsigned long long)keyboard.slide_gap_ms);
+}
