@@ -29,6 +29,7 @@ timeout 120  sh plan/tools/keiland-freebsd/guest.sh stop
   `ssh 'CMD'` は root（`SSH_USER=kei` で利用者、上限 `GUEST_COMMAND_TIMEOUT` 秒、既定 120）。`copy DEST PATH...` は working tree の
   追跡中と無視されない file を tar で guest の DEST（専用の directory、先に消す）へ写す。`shot PNG` は QMP の screendump。
   2 つの guest を同時に動かす時は `GUEST_RUN` と `SSH_PORT` を変える。
+  音の試験の時だけ `GUEST_AUDIO_WAV=PATH` で intel-hda と hda-duplex を足し、出力を WAV（48 kHz・2 ch・S16）に書く（WS191 p004。既定は音の device 無し）。
 - `backend-test.sh [OUT]`: tree（build に要る path と `plan/ws131/tests`、`BACKEND_TEST_EXTRA_PATHS` で追加）を guest の
   `/root/keiland-src` に写し、base の clang で `keiland-freebsd.mk all`（exit 0 と `warning:` 0）、DESTDIR の install と
   `header-dependencies`、`native-build-audit.py`、`plan/ws131/tests` の host-seat-freebsd・host-session・host-power（ASan・UBSan）、

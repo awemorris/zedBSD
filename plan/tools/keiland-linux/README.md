@@ -28,7 +28,7 @@ image は raw ext4、8 GiB。mmdebstrap unshare mode なので sudo 不要。`pa
 
 ## 操作
 
-`guest.sh` は `guest.py` を呼ぶ。既定 `GUEST_DIR=build/keiland-linux/guest`、`GUEST_IMAGE=$GUEST_DIR/guest.img`、`GUEST_RUN=build/keiland-linux/run`、`SSH_PORT=2225`。
+`guest.sh` は `guest.py` を呼ぶ。既定 `GUEST_DIR=build/keiland-linux/guest`、`GUEST_IMAGE=$GUEST_DIR/guest.img`、`GUEST_RUN=build/keiland-linux/run`、`SSH_PORT=2225`。音の試験の時だけ `GUEST_AUDIO_WAV=PATH` で HD Audio の出力を WAV（48 kHz・2 ch・S16）に書く（WS191 p004。既定は `-audiodev none`）。
 path は絶対 path に変換する。起動ごとに overlay を作り、停止後に消す。base image は読み取り専用。
 
 | Command | 操作 |

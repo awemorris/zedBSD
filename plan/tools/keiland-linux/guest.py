@@ -86,12 +86,17 @@ def start():
 		(GUEST_RUN / name).unlink(missing_ok=True)
 	run(['qemu-img', 'create', '-f', 'qcow2', '-b', str(GUEST_IMAGE), '-F', 'raw',
 		str(GUEST_RUN / 'overlay.qcow2')])
+	# The sound device's output: nowhere, or for the sound tests (WS191 p004) the WAV GUEST_AUDIO_WAV names.
+	audiodev = 'none,id=snd0'
+	wav = os.environ.get('GUEST_AUDIO_WAV')
+	if wav:
+		audiodev = f'wav,id=snd0,path={Path(wav).resolve()},out.frequency=48000,out.channels=2,out.format=s16'
 	run(['qemu-system-x86_64', '-machine', 'q35,vmport=off', '-accel', 'kvm', '-cpu', 'host',
 		'-m', '4G', '-smp', '4', '-display', 'none', '-kernel', str(GUEST_DIR / 'vmlinuz'),
 		'-initrd', str(GUEST_DIR / 'initrd.img'), '-append', 'root=/dev/vda rw console=ttyS0 quiet',
 		'-drive', f'file={GUEST_RUN}/overlay.qcow2,format=qcow2,if=virtio',
 		'-device', 'virtio-vga,id=video0', '-device', 'virtio-keyboard-pci,display=video0',
-		'-device', 'virtio-tablet-pci,display=video0', '-audiodev', 'none,id=snd0',
+		'-device', 'virtio-tablet-pci,display=video0', '-audiodev', audiodev,
 		'-device', 'intel-hda', '-device', 'hda-duplex,audiodev=snd0',
 		'-netdev', f'user,id=n0,hostfwd=tcp:127.0.0.1:{PORT}-:22', '-device', 'virtio-net-pci,netdev=n0',
 		'-qmp', f'unix:{GUEST_RUN}/qmp.sock,server=on,wait=off',
