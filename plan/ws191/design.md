@@ -1,9 +1,9 @@
 <!-- awesome-plan project=zedbsd record=ws191-design -->
 
-# WS191 の設計: 再生の音の stream を libkeiland の口へ（第 4 版、ws191-p001）
+# WS191 の設計: 再生の音の stream を libkeiland の口へ（第 5 版、ws191-p001）
 
 Parent: [WS191](ws.md)。事実の調べと第 1 版への review（blocking 3・should-fix 12・minor 12）は [phase001](phase001/phase.md)。
-第 2 版の変更の要点は §12 の対応表（第 1 版の review の ID ごと）、第 3 版は §13（第 2 版の review、blocking 1・should-fix 10・minor 15、phase001 に記録）、第 4 版は §14（第 3 版の review、blocking 1・should-fix 7・minor 12）。
+第 2 版の変更の要点は §12 の対応表（第 1 版の review の ID ごと）、第 3 版は §13（第 2 版の review、blocking 1・should-fix 10・minor 15、phase001 に記録）、第 4 版は §14（第 3 版の review、blocking 1・should-fix 7・minor 12）、第 5 版は §15（第 4 版の review、blocking 0・should-fix 5・minor 12）。
 
 ## 1. 目的と境界
 
@@ -151,9 +151,9 @@ int kl_audio_stream_dispatch(struct kl_audio_stream *stream, unsigned *events);	
 ```
 
 - open: 接続（D4）→ registry で `kl_audio_v1` → `create_stream` → `ready` か `failed` を最大 2 秒待つ → §4 の検べと map → fd を閉じる。stream の object は自分の接続の既定の queue だけを使う。
-- 制御（start・stop・flush・drain）: stream の mutex の下で request を送り、その request の `result` を最大 2 秒待つ（`ETIMEDOUT`）。lost・接続の EOF が来たら待ちを切り上げて黙った sink に入り `EPIPE`。待つ間に来た他の event（drained・underrun）は stream の手元の bit に溜める。flush の成功で `flush_floor = consumed`（D8）。
+- 制御（start・stop・flush・drain）: stream の mutex の下で request を送り、その request の `result` を最大 2 秒待つ。**2 秒で答えが無ければ stream を destroy して lost とし（黙った sink）、`EPIPE`**（第 4 版 review SF-2: 遅れた答えで compositor と stream の状態が離れないように）。lost・接続の EOF が来たら待ちを切り上げて黙った sink に入り `EPIPE`。待つ間に来た他の event（drained・underrun）は stream の手元の bit に溜める。flush の成功で `flush_floor = consumed`（D8）。
 - `write`: 書き手は 1 つの thread。room（capacity − (written − consumed)）の分だけ ring に写し、write_position を release で進める。room が 0 の時は非 block の dispatch を 1 回（mutex を **trylock**、取れなければしない）: 読まない client でも underrun・lost の event が compositor に溜まらず、lost を知る（S-6）。
-- `written`・`consumed`・`position`・`capacity`: lock 無し、どの thread からでも。position は `max(played, flush_floor)` の frame の数（time_ns に見積りの時刻）で、played は played_sequence の seqlock で組を読む（§4、D8）。
+- `written`・`consumed`・`position`・`capacity`: lock 無し、どの thread からでも。time_ns は running の間の補間にだけ使える（floor が勝った時と sink では今の時刻、第 4 版 review SF-3）。p003 の player は time_ns を使わない。played の seqlock の読み直しは 1000 回で諦め最後の値（書き手が書きかけで死んだ時、SF-4）。position は `max(played, flush_floor)` の frame の数（time_ns に見積りの時刻）で、played は played_sequence の seqlock で組を読む（§4、D8）。
 - `dispatch`: 非 block（trylock、取れなければ events 0 で 0 を返す）。socket に有る分を読み、溜まった bit を返して消す。**fd の口は出さない**（S-5: 制御の往復の間に libwayland が読んだ event は queue に移り、fd は読めなくなる。今の player は drained を待たない）。
 - lost（event、または自分の接続の EOF・error、§3）の後（D10）: write は ring に書き続け（害は無い）、consumed・position は黙った sink の値（lost の時点の値から monotonic の時計で running の間だけ rate の速さで、written を超えない）。黙った sink の基準（時刻・位置・running）は mutex の下で書き、読み手は stream の中の sequence の語で 1 つに読む。制御は手元の running を変えて `EPIPE` を返す（p003 の vp_audio は EPIPE でも running の更新を成功と同じにする: そうしないと pause の後も sink が進む、audio.c 179・193）。
 - close: 呼ぶ側の約束 — **他の thread がその stream を使い終わってから**（今の vp_audio_close と同じ。p003 は各 player の close の順を確かめる）。destroy を送り、munmap し、接続を閉じる（compositor では切断で `kwl_compose_quiesce` が走る、objects.c 533。M-8: player は曲・file ごとに開き直さない）。
@@ -162,7 +162,7 @@ int kl_audio_stream_dispatch(struct kl_audio_stream *stream, unsigned *events);	
 
 ### 6.1 compositor（`wayland/audio-stream.c`、新）
 
-- kind `KWL_AUDIO`（global）と `KWL_AUDIO_STREAM`。stream の record: client、object、pid（接続の最初の create で `kl_backend_peer_pid`、失敗は pid 0 として 1 つの組に数える）、状態（§3）、backend の stream、最後の underrun を送った時刻。
+- kind `KWL_AUDIO`（global）と `KWL_AUDIO_STREAM`。stream の record: client、object、pid（create のたびに `kl_backend_peer_pid`、失敗は pid 0 として 1 つの組に数える）、状態（§3）、backend の stream、未決の request（1 つ）、underrun を送ってよいか（制御の後に 1 回）。failed の stream は slot を持たない（その object の制御は result(STATE)）。backend の RESULT で未決に無い物は捨てる。
 - create_stream: D9 の検べ（値 → INVALID、本数 → TOO_MANY）→ `kl_backend_audio_stream_open`。`kwl_audio_tick`（`kwl_system_tick` から）で全 stream の `kl_backend_audio_stream_next` を空になるまで取り、§3 の状態機械で event にする。client の切断・destroy で backend の stream を閉じる。compositor の終わりで全部閉じる。
 - `_Static_assert`: `struct kl_backend_audio_ring` の各 offset（played_sequence を含む）と `KL_AUDIO_RING_*`（kl-audio-protocol.h）、`KL_BACKEND_AUDIO_ERROR_*` と `KL_AUDIO_ERROR_*`、`KL_BACKEND_AUDIO_FORMAT_*` と `KL_AUDIO_WIRE_FORMAT_*` の値。backend の open が NULL の時の errno: ENOTSUP は UNSUPPORTED、他は NO_MEMORY。
 - log: `KWL AUDIO stream client=N id=M pid=P create format=F channels=C rate=R buffer=B period=Q`、`ready capacity=… bytes=…`、`failed error=…`、`start|stop|flush|drain request=… error=…`、`drained request=…`、`underrun count=…`（送った物）、`lost error=…`、`closed`。
@@ -222,6 +222,7 @@ int kl_backend_peer_pid(int descriptor, pid_t *pid);
 
 - `videoplayer/audio.c` の `vp_audio_*`（口の名と意味は保つ: open・close・start・stop・flush・write・write_position・read_position に clock_position を足す）の中身を `kl_audio_stream_*` に。audiod の header と socket を使わない。videoplayer・music は既に libkeiland を link している。player の時計（media.c 276・music/play.c 276・562 など）**と時計の基準点（media.c 193・673、music/play.c 194・531 の clock_frames）**は `clock_position`（D8 の position）に、room の計算は read_position（consumed）のまま。外から直に触られている `struct vp_audio` の field（`created`・`rate`: media.c 275・278、play.c 271）も名と意味を保つ。申し送り（Linux で player を動かす時）: 曲の終わりの判定（play.c 562〜565）は read ≥ written ではなく position で。start が `EPIPE`（黙った sink）でも `running` の更新は成功と同じにする（D10）。zedBSD では played と read は同じ値（D8）で振る舞いは変わらない。
 - libmedia（D11）: engine.c の音の部分（vp_audio の open・write・時計の read）を外し、音は decode しても捨てる（または decode しない）。時計は monotonic。libmedia の Makefile から `videoplayer/audio.c` を外す。ベータ 3 への申し送り: libmedia は要素・file ごとに stream を開いていた（engine.c 620・581、libbrowser/page/media.c 659〜690）ので、表を作る時は D9 の pid ごと 8 本（全部のタブで 1 つの pid）と切断ごとの quiesce（M-8）に当たる。
+- player の約束: flush は書く thread から（または書く thread を止めて）呼ぶ（flush_floor は flush の答えの後の consumed、第 4 版 review minor 9）。今の player は seek の flush を reader の thread（書く thread）で行う。
 - 時計と close（S-7）: lost で開き直さない（D10）。各 player の close（videoplayer main.c 255、music play.c 85）が、書く thread・時計を読む thread の終わりの後であることを確かめる（違えば順を直す）。
 - host の build（S-8）: libmedia が `videoplayer/audio.c` を build しなくなるので、`plan/ws074/tests/host-build.sh`（77〜88 行）と `plan/ws121/tests/run-host-engine.sh`（15 行）の file の並びから `videoplayer/audio.c` を外すだけ（Q1: WS121 の試験の中身の変更は要らない）。他の WS の file なので Q1 に知らせて直す。
 - 境界の許可の表の PENDING 3 行を外し、`check.sh` の A1・A2・A5 が通ること。
@@ -229,7 +230,7 @@ int kl_backend_peer_pid(int descriptor, pid_t *pid);
 ## 8. 試験
 
 - host（p002）、`plan/ws191/tests/host-audio-stream.sh`（ASan・UBSan）:
-  1. 端から端: libkeiland の `libkeiland/audio/` を **tree の libwayland**（試験の `BUILD` の中で `libwayland/Makefile.linux` の source の並びから build する。共有の `build/keiland-linux` に頼らない。S-9: host の libwayland-client は fd の受け取りが tree の物と違う）で link し、server の役の thread（compositor の `wayland/audio-stream.c` と `wire.c`（外への依存は `kwl_dispatch` だけ）、偽の display・registry・`kwl_create`・`kwl_settings_global_visible`: `plan/ws131/tests/host-system.c` の偽の server の形、`WAYLAND_DISPLAY` に試験の socket）と偽の backend（試験が事象を作る）に繋ぐ。確かめる: 未決の request の 2 つ目が result(STATE)、制御の途中の lost で result(GONE) と EPIPE、underrun が start の後に 1 回だけ、flush の後の position が flush_floor 以上、open → ready の fd・map・頭の検べ（version・format の不一致は EPROTO）、format・channels 3・buffer の超過の EINVAL、同じ pid の 9 本目の EMFILE、制御の result（1 つの request に 1 つ）、**running の flush の後 start 無しで consumed が進む**、drain の result と drained、drain の途中の stop・flush で drained が来ない、backend の control の EAGAIN が result(UNAVAILABLE)、偽の backend の 100 回の underrun が 1 秒に 1 回以下の event に、lost で EPIPE と黙った sink の position が rate で進む、client の切断・destroy で backend の close、event を送れない時に接続が閉じ libkeiland が黙った sink に入る、played の seqlock の組、`WAYLAND_SOCKET` が有る時・`WAYLAND_DISPLAY` が無い時の ENOTSUP。
+  1. 端から端: libkeiland の `libkeiland/audio/` を **tree の libwayland**（試験の `BUILD` の中で `libwayland/Makefile.linux` の source の並びから build する。共有の `build/keiland-linux` に頼らない。S-9: host の libwayland-client は fd の受け取りが tree の物と違う）で link し、server の役の thread（compositor の `wayland/audio-stream.c` と `wire.c`（外への依存は `kwl_dispatch` だけ）、偽の display・registry・`kwl_create`・`kwl_settings_global_visible`: `plan/ws131/tests/host-system.c` の偽の server の形、`WAYLAND_DISPLAY` に試験の socket）と偽の backend（試験が事象を作る）に繋ぐ。確かめる: 未決の request の 2 つ目が result(STATE)、制御の途中の lost で result(GONE) と EPIPE、underrun が start の後に 1 回だけ、flush の後の position が flush_floor 以上、open → ready の fd・map・頭の検べ（version・format の不一致は EPROTO）、format・channels 3・buffer の超過の EINVAL、同じ pid の 9 本目の EMFILE、制御の result（1 つの request に 1 つ）、**running の flush の後 start 無しで consumed が進む**、drain の result と drained、drain の途中の stop・flush で drained が来ない、backend の control の EAGAIN が result(UNAVAILABLE)、偽の backend の何回もの underrun が制御の後に 1 回の event に、lost で EPIPE と黙った sink の position が rate で進む、client の切断・destroy で backend の close、event を送れない時に接続が閉じ libkeiland が黙った sink に入る、played の seqlock の組、`WAYLAND_SOCKET` が有る時・`WAYLAND_DISPLAY` が無い時の ENOTSUP。
   2. zedBSD の backend: `audio-stream-zedbsd.c` を host で、偽の audiod（played を running の間だけ書き FLUSH では変えない本物の振る舞い、`plan/ws100/tests/host-audio.c` の形、socket の path は `AUDIO_SOCKET_PATH` の macro で試験の path、audio-zedbsd.c 37 の先例）に: WELCOME の device 0 → NO_DEVICE、接続できない・accept の直後の close → UNAVAILABLE、STREAM_CREATED の fd → READY、DONE・ERROR → RESULT、DRAIN → すぐの RESULT と DRAINED、draining の flush → STOP と FLUSH の 2 つの DONE で 1 つの RESULT、UNDERRUN の まとめ、EOF → LOST(GONE)、close が未取り出しの READY の fd を閉じる（開いた fd の数）、libkeiland と組んで stopped の flush → start の後の position の差が新しく書いた分だけ（BL-1）。
 - build（p002・p003）: zedBSD amd64 の libkeiland・wayland・videoplayer・music・libmedia・libbrowser（target を名指す）、Linux の keiland（`make keiland-linux`）、どれも warning 0。境界の検査 `sh plan/tools/keiland-os-boundary/check.sh`。
 - QEMU（T1、p003 の後）: audiod の入った image（`plan/ws100/tests/config-amd64-audiod.mk` の形、WS191 の tests/ の config.mk）で Music の再生と Video Player の再生: compositor の log の `KWL AUDIO stream … ready` と `start`、player の再生の位置の表示が進む（screenshot 2 枚の差）、**再生中と pause 中の seek の後も位置の表示と音が続き seek の先の時刻から進む**（BL-1・S-2）、QEMU の wav の audiodev に無音でない音が書かれる、player を閉じて `closed`。browser の `<audio>` は H3 (c) で範囲の外。（M-9: audiod の client の数と drain は観測できないので受け入れに入れない）。compositor の log は guest の file を `plan/tools/guest/guest.sh`・serial.py で読む（console・serial の log は判定に使わない）。wav の audiodev の形は `plan/ws100/tests/audiod-qemu.sh` 29・105。
@@ -263,7 +264,7 @@ int kl_backend_peer_pid(int descriptor, pid_t *pid);
 ## 11. 未確認・リスク
 
 - U1: Linux・FreeBSD の stop で PCM の buffer の ≤ 40 ms が捨てられる device（`snd_pcm_pause` が無い物）。played は delay を引くので時計は ≤ 40 ms 進む。体感は p004 の guest と実機で見る。
-- U2: compositor の tick が 10 ms より遅れる時（重い合成）の制御の遅れ。player は start・stop の答えを待つので、体感に出るかは QEMU で見る。
+- U2: compositor の tick が 10 ms より遅れる時（重い合成）の制御の遅れ。2 秒を超えると stream は lost（§5）。audiod は socket が詰まった client を切る（main.c 621〜630）ので、compositor が約 10 秒以上止まると zedBSD の stream は LOST。player は start・stop の答えを待つので、体感に出るかは QEMU で見る。
 - U3: alsa-lib の PCM `default` が pipewire-alsa の時、compositor の process に libpipewire の plugin と thread が読み込まれる（ユーザーの決定 H2 の結果）。pump は全 signal を block するので、pump から作られる PipeWire の thread もその mask を継ぐ（signal の半分は解ける）。compositor の終わりの順（reap_all の後に exit）を p004 で確かめる。compositor は thread を持ったまま fork し子で setenv する（wayland/home.c 1316〜1350）ので、alsa-lib・PipeWire の thread（malloc の lock を持ちうる）が増えると子の deadlock の危険が上がる（既にある危険が大きくなる）。
 - U4: FreeBSD 15 の OSS が AFMT_F32_LE・AFMT_S32_LE を受けるか（受けなければ pump の S16 への変換）。
 - U5: libkeiland の stream の接続は compositor の「client」になり、client の一覧・ping・切断の処理（quiesce）の対象になる。窓の無い client が ping の対象にならないことを p002 で確かめる（xdg_wm_base を bind しないので来ない見込み）。
@@ -330,3 +331,14 @@ int kl_backend_peer_pid(int descriptor, pid_t *pid);
 | S-6 alsa の start_threshold | §6.4: sw_params、snd_pcm_start、pause は RUNNING だけ |
 | S-7 sequence の offset | §4・§6.1: played_sequence の assert、write・read の sequence は使わない |
 | minor | §3（M-6 の Music、underrun の単位、draining の flush）、§4（period は照らさない）、§6.1（WIRE_FORMAT の名、open の errno）、§6.3（EMFILE は FAILED）、§7（終わりの判定の申し送り、engine の参照を除いた）、§8（判定は guest の file、audiod-qemu.sh の参照）、§9（FreeBSD の compile は p004）、§11 U3（fork） |
+
+## 15. 第 4 版の review への対応（第 5 版、blocking 0）
+
+| review | 対応 |
+| --- | --- |
+| SF-1 open 中の切断で NULL 参照 | audio_lose は ring が無ければ sink を作らない。host 試験「ready の前に compositor が切る → EPIPE」 |
+| SF-2 ETIMEDOUT の後の食い違い | §5: 2 秒で答えが無ければ stream を destroy して lost、EPIPE |
+| SF-3 time_ns | §5: floor が勝った時・sink では今の時刻、補間は running の間だけ |
+| SF-4 seqlock の上限 | 1000 回 |
+| SF-5 試験の項目 | 足した: ready の前の切断、ring の版の不一致（EPROTO）、drain の途中の stop で drained 無し、audiod の ERROR の RESULT への写し。足していない（理由）: 生の client で未決の 2 つ目（libkeiland は lock で 1 つずつしか送らない）、event を送れない時の切断（1 MiB を溜める試験は重い）、played の seqlock の書きかけ（実装の読みで確かめた）、未取り出しの READY の fd の close（next は取り出しと一緒）、libkeiland と zedBSD の backend を組んだ BL-1（QEMU の seek で） |
+| minor | RESULT の照合、settings.c の判定の順（login 画面で alsa-lib を開かない）、failed の slot、zedBSD の GREETING・DRAIN の ERROR、READY の period の注記、close の注記、WIRE_FORMAT の static assert、flush の約束（§7）、U2、sink の flush と drain と追いついた後の anchor、draining の flush の running |

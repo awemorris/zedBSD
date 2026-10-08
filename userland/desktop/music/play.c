@@ -9,9 +9,9 @@
  * The player of a song (ws120-p009): a thread reads the file's sound track
  * with mediafile, decodes it with Video Player's add-in of libavcodec
  * (codec.c, opened with dlopen) and writes it, converted to 16-bit stereo
- * at audiod's rate, into the stream's ring (audio.c), which paces the
- * reading.  The position is the sound's: what audiod has read since an
- * anchor.  At the end of the file the thread waits for the ring to be
+ * at the stream's rate, into the stream's ring (audio.c, libkeiland's sound
+ * stream), which paces the reading.  The position is the sound's: what the
+ * stream has played since an anchor.  At the end of the file the thread waits for the ring to be
  * played out and says the song ended, for the window to go to the next.
  */
 
@@ -54,7 +54,7 @@ static int play_stopping(struct mu_player *player);
 static void play_sleep_ms(unsigned ms);
 
 /*
- * Makes the player and its sound: connects to audiod.  Returns 0, or an
+ * Makes the player and its sound: opens its stream.  Returns 0, or an
  * errno value when there is no sound (the player cannot play then).
  */
 int
@@ -101,8 +101,9 @@ mu_player_open(
 	int64_t length_us;
 	int error;
 
-	/* What played goes. */
+	/* What played goes; the sound is opened again when its service went or came (WS191). */
 	mu_player_close(player);
+	vp_audio_renew(&player->audio);
 	if (!player->audio.created)
 		return ENODEV;
 
@@ -130,7 +131,7 @@ mu_player_open(
 	player->quit = 0;
 	player->seek_wanted = 0;
 	player->clock_time = 0.0;
-	player->clock_frames = vp_audio_write_position(&player->audio);
+	player->clock_frames = vp_audio_clock_position(&player->audio);
 	(void)pthread_mutex_unlock(&player->lock);
 
 	/* The thread reads ahead from here. */
@@ -191,7 +192,7 @@ mu_player_play(
 	}
 
 	/* The position goes on from where it stood. */
-	player->clock_frames = vp_audio_read_position(&player->audio);
+	player->clock_frames = vp_audio_clock_position(&player->audio);
 	player->state = MU_PLAYING;
 	(void)pthread_cond_broadcast(&player->wake);
 	(void)pthread_mutex_unlock(&player->lock);
@@ -272,8 +273,8 @@ mu_player_position(
 	if (player->state != MU_PLAYING || player->seek_wanted || player->audio.rate == 0U)
 		return player->clock_time;
 
-	/* The sound read since the anchor, within the song. */
-	frames = vp_audio_read_position(&player->audio);
+	/* The sound heard since the anchor, within the song. */
+	frames = vp_audio_clock_position(&player->audio);
 	if (frames < player->clock_frames)
 		return player->clock_time;
 	position = player->clock_time + (double)(frames - player->clock_frames) / (double)player->audio.rate;
@@ -528,7 +529,7 @@ play_seek(
 	/* The position anchored at the time sought. */
 	(void)pthread_mutex_lock(&player->lock);
 	player->clock_time = seconds;
-	player->clock_frames = vp_audio_read_position(&player->audio);
+	player->clock_frames = vp_audio_clock_position(&player->audio);
 	player->seek_wanted = 0;
 	player->ended = 0;
 	player->draining = 0;
@@ -540,8 +541,8 @@ play_seek(
 }
 
 /*
- * At the end of the file: drains the decoder once, then waits for audiod
- * to have read all that was written, and says the song ended.
+ * At the end of the file: drains the decoder once, then waits for the stream
+ * to have taken all that was written, and says the song ended.
  */
 static void
 play_end(

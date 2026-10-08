@@ -2,7 +2,7 @@
 
 # ws191-p001: 再生の音の stream の口の設計
 
-Status: in-progress（q895、P2。2026-10-08 夕 設計の第 1 版（c9b8ccefa）と design-reviewer の review（blocking 3・should-fix 12・minor 12、下）。2026-10-08 夜 P2 の新しい世代が review と午後の判断を反映した**第 2 版**（[design.md](../design.md)、§12 に対応表）。第 2 版の design-reviewer を起動した（結果は下の「第 2 版への review」に追記）。2026-10-08 夜 Q1 の割り込み（q900 BUG-266 が最優先）で区切った）
+Status: cleared（2026-10-08 Q1 の判定: 第 4・5 版の design-reviewer が blocking 0、should-fix・minor は第 5 版と code に反映）
 Disposition: normal
 Parent: [WS191](../ws.md)
 
@@ -98,3 +98,7 @@ should-fix 7: S-1 制御の答えの前の lost（compositor は lost の前に�
 minor 12: Music は stream が無いと曲を開かない（M-6 の記述）、READY の period（libkeiland は照らさない、buffer 0 の時は capacity も event の値だけ）、audiod の EMFILE は FAILED、underrun の count の単位は OS ごと、throttle の最後の値（S-3 の規則で解消）、draining の flush の STOP 後の EAGAIN（error に依らず stopped）、unsupported の open の errno の写し、名の食い違い（KL_AUDIO_WIRE_FORMAT_*）、FreeBSD の compile の確かめは p004、Linux の終わりの判定は played で（申し送り）、U3 に fork の危険、QEMU の判定は guest の file から。
 
 2026-10-08 夜: 第 4 版（0cee7ee9b）を design-reviewer で再 review 中。
+
+## 第 4 版への review（2026-10-08 夜）: blocking 0
+
+design-reviewer: 設計の blocking 0、p002 の実装の blocking 0。should-fix 5（SF-1 open 中の切断の NULL 参照、SF-2 ETIMEDOUT の後の食い違い、SF-3 position の time_ns、SF-4 seqlock の読みの上限、SF-5 §8 の試験の項目）と minor 12。全部を第 5 版（design.md §15）と p002 の code（2b7ae6531）に反映した。→ p001 は Q1 の判定待ち。

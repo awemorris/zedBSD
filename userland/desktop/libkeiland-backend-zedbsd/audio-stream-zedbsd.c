@@ -632,8 +632,8 @@ stream_message(
 		return;
 	}
 
-	/* ERROR before the stream is made: audiod refused what was asked for. */
-	if (header.type == AUDIOD_ERROR && stream->stage == STREAM_CREATING) {
+	/* ERROR before the stream is made: audiod refused the greeting or what was asked for. */
+	if (header.type == AUDIOD_ERROR && (stream->stage == STREAM_GREETING || stream->stage == STREAM_CREATING)) {
 		memset(&result, 0, sizeof(result));
 		if (length >= sizeof(result))
 			memcpy(&result, bytes, sizeof(result));
@@ -646,6 +646,13 @@ stream_message(
 		memset(&result, 0, sizeof(result));
 		if (length >= sizeof(result))
 			memcpy(&result, bytes, sizeof(result));
+
+		/* A drain audiod refused: its DRAINED will never come, so the stream is given up. */
+		if (header.type == AUDIOD_ERROR && stream->draining && header.serial == stream->drain_serial) {
+			stream->draining = 0U;
+			stream_end(stream, KL_BACKEND_AUDIO_LOST, KL_BACKEND_AUDIO_ERROR_FAILED);
+			return;
+		}
 
 		/* Which error, none for DONE. */
 		error = KL_BACKEND_AUDIO_ERROR_NONE;

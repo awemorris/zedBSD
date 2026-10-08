@@ -566,7 +566,7 @@ struct kl_backend_audio_stream_report {
 	int fd;				/* READY: the ring's memory, now the caller's to close */
 	uint32_t bytes;			/* READY: the memory's size */
 	uint32_t capacity_frames;	/* READY */
-	uint32_t period_frames;		/* READY */
+	uint32_t period_frames;		/* READY: the device's period, 0 when not known (the client does not use it) */
 };
 
 /*
@@ -597,7 +597,8 @@ int kl_backend_audio_stream_control(struct kl_backend_audio_stream *stream, unsi
 int kl_backend_audio_stream_next(struct kl_backend_audio_stream *stream, struct kl_backend_audio_stream_report *report);
 
 /*
- * Ends a stream without waiting (a pump thread is let go and joined later).
+ * Ends a stream without waiting (a pump thread is let go and joined later);
+ * a ring handed over in a READY report not taken yet is closed with it.
  */
 void kl_backend_audio_stream_close(struct kl_backend_audio_stream *stream);
 

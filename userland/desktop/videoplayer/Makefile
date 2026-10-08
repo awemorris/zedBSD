@@ -1,7 +1,7 @@
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
 # Video Player (WS122): opens, plays, pauses, stops and seeks a video file, in a libkeiland window; the sound goes to
-# audiod.  The container is read by the player's own reader (userland/desktop/mediafile, p003); the decoding is an
+# libkeiland's sound stream (WS191).  The container is read by the player's own reader (userland/desktop/mediafile, p003); the decoding is an
 # add-in (codec.c, p004) that opens FFmpeg's libavcodec, libavutil and libswscale (the libavcodec package, LGPL) with
 # dlopen when the system has them, built without FFmpeg's headers and not linked to it.  amd64 zedBSD.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib

@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: Zlib
  */
 
-/* Only the calls media.h declares leave the library; the reader, the add-in and the audiod client stay inside it. */
+/* Only the calls media.h declares leave the library; the reader and the add-in stay inside it. */
 {
 	global:
 		media_set_log;

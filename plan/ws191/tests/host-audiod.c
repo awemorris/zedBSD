@@ -56,8 +56,9 @@ static struct {
 	unsigned send_drained;
 	unsigned send_underruns;
 	unsigned hang_up;
+	unsigned refuse_start;
 	unsigned stop;
-} audiod = { PTHREAD_MUTEX_INITIALIZER, -1, -1, 1U, 0U, { 0 }, 0U, 0U, 0U, 0U, 0U, 0U };
+} audiod = { PTHREAD_MUTEX_INITIALIZER, -1, -1, 1U, 0U, { 0 }, 0U, 0U, 0U, 0U, 0U, 0U, 0U };
 
 static void
 pause_ms(unsigned ms)
@@ -149,6 +150,11 @@ audiod_answer(int fd, const struct audiod_header *request)
 	default:
 		memset(&result, 0, sizeof(result));
 		result.header.type = AUDIOD_DONE;
+		if (request->type == AUDIOD_STREAM_START && audiod.refuse_start) {
+			audiod.refuse_start = 0U;
+			result.header.type = AUDIOD_ERROR;
+			result.error = EINVAL;
+		}
 		result.header.length = sizeof(result);
 		result.header.serial = request->serial;
 		audiod_send(fd, &result, sizeof(result), -1);
@@ -352,6 +358,14 @@ main(void)
 	taken = next_report(stream, &report, 500U);
 	CHECK(taken && report.what == KL_BACKEND_AUDIO_RESULT && report.request == 12U, "flush's result");
 	CHECK(seen(AUDIOD_STREAM_STOP) == 0U, "a running flush sends no STOP");
+
+	/* 5b. audiod's ERROR: the RESULT carries its error. */
+	pthread_mutex_lock(&audiod.lock);
+	audiod.refuse_start = 1U;
+	pthread_mutex_unlock(&audiod.lock);
+	error = kl_backend_audio_stream_control(stream, KL_BACKEND_AUDIO_START, 20U);
+	taken = next_report(stream, &report, 500U);
+	CHECK(taken && report.what == KL_BACKEND_AUDIO_RESULT && report.request == 20U && report.error == KL_BACKEND_AUDIO_ERROR_INVALID, "an ERROR's result: %u", report.error);
 
 	/* 6. DRAIN: answered at once; DRAINED with its serial. */
 	error = kl_backend_audio_stream_control(stream, KL_BACKEND_AUDIO_DRAIN, 13U);

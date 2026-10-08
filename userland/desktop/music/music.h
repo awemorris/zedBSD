@@ -13,7 +13,7 @@
  * from the files' MP4 metadata (tags.c), and the collection groups them by
  * album (library.c).  Playing (play.c) reads the file with mediafile,
  * decodes the AAC with Video Player's add-in of libavcodec (codec.c, opened
- * with dlopen) and writes the sound to audiod (audio.c).
+ * with dlopen) and writes the sound to libkeiland's sound stream (audio.c).
  *
  * The view (view.c) draws a frame with libkeiland's canvas and widgets and
  * knows nothing of the window or the player -- what the user asks it
