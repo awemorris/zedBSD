@@ -42,7 +42,7 @@ HID の経路は p002〜p005、利用者に見える形は p006。
 | [ws143-p003](phase003/phase.md) | firmware の package `intelbt`、bluetoothd の transport・firmware の load（§3）・HCI core・scan、CLI `bt show`・`bt scan`、Read Local Supported Commands の記録。T1 の passthrough で load と scan | in-progress（q878-i01 P2: intelbt 以外を実装・host 試験済み、QEMU は T1。i02 は intelbt と 5330（D13）） | p002 |
 | [ws143-p004](phase004/phase.md) | L2CAP、SSP の event、LE の SMP（D10）、暗号（D5 b1、無ければ b2）、鍵の保存、特権の分離（D16 a）、`_bluetooth` の account（D17）、socket の口の権限（D8） | test-wait（q883-i02 P2: review の反映、session の queue と初期化、pair・privsep・口・bt・loopback を実装し host 試験 PASS。QEMU は T1（bt-pair-p004.sh ほか）。Q4 は判断待ち、i03 は 5330） | p003 |
 | [ws143-p005](phase005/phase.md) | usb-hid の glue の共有の module への refactor と USB の回帰、`/dev/input/bridge`（D3）、hid-report.c の fuzz、SDP・GATT client、HID host（BR/EDR と HOGP）、再接続、切断で key を離す | in-progress / test-wait（q888 P2 2026-10-08: i01a は T1-419 PASS（Q1 の判定待ち）。i01b（/dev/input/bridge、名前の変更を含む）は T1-421 待ち。i01c（i2c-hid を glue に）を実装し host 試験 PASS（実機の回帰は UAT）。次は i02（p004 の cleared の後）。ユーザーの決定: Q1 は i2c-hid も glue に、Q2 は ioctl を足す、Q4 は pairing の後に自動で接続、Q5 は人が切った機器からの再接続を断る） | p004（i02 は p004 の cleared） |
-| ws143-p006 | desktop: backend の口、zedBSD の backend、API と protocol の版、Settings の頁、system bar、pairing の確認の窓 | planned | p005 |
+| ws143-p006 | desktop: backend の口、zedBSD の backend、API と protocol の版、Settings の頁、system bar、pairing の確認の窓 | planned（q896 P1、2026-10-08 午後） | p005 |
 | ws143-p007 | Linux の backend（D-Bus の拡張、BlueZ）、FreeBSD の未対応の表示 | planned | p006 |
 | ws143-p008 | UAT（5330 の素の機械、D18。ユーザーの BR/EDR と LE のキーボード・マウス）、Wi-Fi との共存 | planned | p006、device の機種 |
 | ws143-p009 | 規約の全文との照合と回帰 | planned | p002〜p008 |

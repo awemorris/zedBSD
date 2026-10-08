@@ -520,6 +520,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 ユーザーの決定と Q1 の技術の決定の記録。決まった判断は先頭の open-decisions からここへ移す。各 WS の phase.md・ws.md が正本で、ここは索引。
 
 <!-- master:decisions-log:start -->
+- 2026-10-08 午後 ユーザー（クリック）: Mail の添付（ws189-p004）より先に **WS143 p006 Bluetooth の desktop**（Settings の頁・system bar・pairing の確認の窓、app → libkeiland → compositor → backend）を P1 で。p004 はその後。（Q1 の推奨は WS083 Vulkan Video だった）
 - 2026-10-08 午後 ユーザー（クリック）: WS189 の DnD で、drop の前の wl_data_offer.receive を compositor が空にする（データは落とした窓にだけ渡す。drop の前に中身を読む GTK4 などは空を読む）→「これでよい」。ws189-p001 は Q1 の判定で cleared。
 - 2026-10-08 朝 ユーザー:「/dev/hid-hostは、/dev/input/bridgeに変更し、/dev/bt0は、/dev/bluetooth0に変更できますか？」→ クリックの回答「揃える」: node を `/dev/input/bridge`・`/dev/bluetoothN` に。UAPI も揃える（include/uapi/hid-host.h → input-bridge.h、HID_HOST_* → INPUT_BRIDGE_*、struct も input_bridge_*）。bluetooth.h と BT_IOC_* は元から Bluetooth の名前なのでそのまま。P2 が i01c の前に行う。
 - 2026-10-08 昼 ユーザー（クリック）: WS189 の DnD は専用の受け渡し・同じ app の中は app で・画像（PNG）から・見た目は compositor と app で分担・dock の spring-loaded・desktop に file・画面をまたぐ。WS190 の popup はコピー・切り取り・貼り付け・すべて選択。Files の mount の表は kl_system へ、再生の音は libkeiland の audio stream の口へ（WS191）。
