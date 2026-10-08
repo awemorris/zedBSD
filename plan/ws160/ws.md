@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws160 -->
 # WS160: su・sudo・passwd
 
-Status: incomplete（2026-10-05 P1: p001 を実装、QEMU は T1 に依頼。**ベータ1**）
+Status: incomplete（2026-10-08 q910 P2 の照合: p001・p002 は cleared。WS の完了を Q1 が判定）（2026-10-05 P1: p001 を実装、QEMU は T1 に依頼。**ベータ1**）
 Master: [master](../master.md)
 Primary Milestone: MG002
 Related: WS129（ベータ1 の release、U3・U10）

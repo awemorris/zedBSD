@@ -3,7 +3,7 @@
 # WS066: 動的 link の program の起動を速くする（`ld.so` の最適化）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: p002 cleared、p001 は T1-165 の測定で Q1 の判定待ち。判定の後に WS の完了（規約はベータ3））
 Primary Milestone: MG002
 Related Milestones: MG004
 Objectives: O1

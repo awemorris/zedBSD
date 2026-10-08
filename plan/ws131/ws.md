@@ -3,7 +3,7 @@
 # WS131: libkeiland-backend の分離と libkeiui の吸収
 
 <!-- awesome-plan-current:start -->
-Status: planning（構成は決定、移行計画 [design.md](design.md) は p002 で作成、ユーザーのレビュー待ち）
+Status: incomplete（2026-10-08 q910 P2 の照合: p001・p003〜p012・p014〜p023・p025〜p027 cleared（p003 の表を直した）。p002（設計、ユーザーのレビュー済み、D7 は確認中）と p013（T1-085 は流さない指示のまま、kl_ の改名は後の p021 で済み）は Q1 の判定、p024（規約と 3 OS の回帰）は規約がベータ3・Linux/FreeBSD が 10/13 以降。旧: planning（構成は決定、移行計画 [design.md](design.md) は p002 で作成、ユーザーのレビュー待ち））
 Primary Milestone: MG006
 Related Milestones: MG007（Linux・FreeBSD の Keiland）
 Objectives: O2, O3
@@ -54,7 +54,7 @@ app は OS の抽象化を直接持たない。例: Settings → libkeiland → 
 | --- | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 実現性の検討（[study.md](study.md)） | cleared | — | — |
 | [p002](phase002/phase.md) | 移行計画（[design.md](design.md) 第 2 版、[rename-map.md](rename-map.md)・[rename-map-kwl.md](rename-map-kwl.md)） | in-progress（2026-10-03 ユーザーのレビュー済み、q630 で D4・D8・D9 を反映、D7 は確認中） | p001 | — |
-| [p003](phase003/phase.md) | backend の土台と network | planning | p002 の承認、P1 の network-zedbsd.c の merge（2026-10-03 満たされた）、P2 の終了 | 4〜5h |
+| [p003](phase003/phase.md) | backend の土台と network | cleared（Q1 判定 2026-10-03、統合 bfeb2faf8。T1（QEMU、main d169912dd の image）: zdesktop-p013 PASS、settings-regress 8/8 PASS、C1・C2・C9 13/13 PASS。Linu…）（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: planning） | p002 の承認、P1 の network-zedbsd.c の merge（2026-10-03 満たされた）、P2 の終了 | 4〜5h |
 | [p004](phase004/phase.md) | backend の音声 | cleared（q650、T2-009 の再試験 PASS） | p003 | 3〜4h |
 | [p005](phase005/phase.md) | backend の電源 | cleared（q650、T1-040 C1 PASS、log の順は未確認） | p004 | 3〜4h |
 | [p006](phase006/phase.md) | backend の seat・session | cleared（q650、T2-007・T2-011・T1-042） | p005 | 4〜5h |

@@ -2,7 +2,7 @@
 
 # ws100-p008: L3 確かめの音の遅れの計測と短縮
 
-Status: uncleared（2026-09-30、サブエージェント P4、worktree `ws100-volume`（branch `wt/ws100`）。QEMU だけ、実機は未実施）
+Status: cleared（2026-10-08 q910 P2 の照合: ws.md の表の 2026-09-30 Q1 の判断（QEMU で 50 ms 以内）に合わせた。実機は未実施）（旧: uncleared（2026-09-30、サブエージェント P4、worktree `ws100-volume`（branch `wt/ws100`）。QEMU だけ、実機は未実施））
 - 計測の道具と内訳はそろった。
 - guest の中の経路（zdesktop の変更 → device がその音の byte を取るまで）は中央値 31〜37 ms で、50 ms 以内。
 - host で QEMU の WAV に音が出るまで（QMP の入力 → WAV の音の始まり）は中央値 106〜111 ms で、50 ms を超える。超えた分は QEMU の HD Audio の codec の buffer と USB の入力の経路で、guest からは縮められない。

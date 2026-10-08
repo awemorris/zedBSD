@@ -3,7 +3,7 @@
 # WS089: 設定のアプリ（Settings）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: p012（T1-238 PASS）・p013（T1-278 PASS）は Q1 の判定待ち、p019 は p012 の q805 の compositor の直しで済み（Q1 の判定）、p015 は表に合わせて canceled（WS158、ベータ3）。残りは p011・p014 の実機（p014 は 5330 の Wi-Fi の driver が要る）、p018 は規約（ベータ3））
 Primary Milestone: MG006
 Related Milestones: MG002
 Objectives: O2

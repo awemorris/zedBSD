@@ -3,7 +3,7 @@
 # WS148: Settings の Privacy の頁の検討（要らなければ削除、要るなら設計と実装）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: p002 は 2026-10-08 Q1 が cleared（T1-271）。WS の完了を Q1 が判定（Resume point の「T1 の後に完了」の条件は満たした））
 Primary Milestone: MG006
 Related Milestones: —
 Parent: [Master](../master.md)

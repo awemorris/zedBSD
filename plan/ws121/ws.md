@@ -3,7 +3,7 @@
 # WS121: Web ブラウザでのアクセラレーションつきのビデオ再生
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-07 q831 P2: U0〜U7 は既定（推奨）で進めた。p002・p004〜p006 を実装、p003（Range）は後）
+Status: incomplete（2026-10-08 q910 P2 の照合: p002・p004〜p006 cleared（T1-315）、p001（設計、U0〜U7 は既定で進めた）は Q1 の判定、p003（Range）は未着手。browser はベータ3（2026-10-08 ユーザー）なので WS121 の残りもベータ3 か Q1 が決める）（2026-10-07 q831 P2: U0〜U7 は既定（推奨）で進めた。p002・p004〜p006 を実装、p003（Range）は後）
 Primary Milestone: MG006
 Objectives: O2
 Parent: [Master](../master.md)

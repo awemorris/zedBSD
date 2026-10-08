@@ -3,7 +3,7 @@
 # WS151: Settings の Accessibility の頁の検討（要らなければ削除、要るなら設計と実装）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: ws148-p002 は 2026-10-08 Q1 が cleared（T1-271）。WS の完了を Q1 が判定）
 Primary Milestone: MG006
 Related Milestones: —
 Parent: [Master](../master.md)

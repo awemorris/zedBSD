@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws173 -->
 # WS173: AAT（Agent Acceptance Test）— エージェントが素の実機を SSH で操作して受け入れを確かめる枠組み
 
-Status: incomplete（2026-10-05 追加、最優先。p001〜p003 は QEMU で PASS、p004 のシナリオ 75 本・runner・補助と p006 の選択は merge 済みで T1-202 待ち。5330 の AAT はその後）
+Status: incomplete（2026-10-08 q910 P2 の照合: p004 cleared（表を直した）、p001・p002（T1-200 PASS）と p003・p006（test-done）は Q1 の判定、p005（素の 5330 の AAT）が残り）（2026-10-05 追加、最優先。p001〜p003 は QEMU で PASS、p004 のシナリオ 75 本・runner・補助と p006 の選択は merge 済みで T1-202 待ち。5330 の AAT はその後）
 Master: [master](../master.md)
 Primary Milestone: MG006
 
@@ -19,10 +19,10 @@ Q1 の問い「実機をベアメタル起動したときに、SSH越しにマ�
 
 | Phase | 内容 | 担当 | Status | 依存 |
 | --- | --- | --- | --- | --- |
-| p001 | kernel: `/dev/input-inject` にマウスとキーボード（UAPI の追加、試験の kernel の設定だけ） | P1 | planning | — |
-| p002 | compositor: 試験の image だけの画面の撮影の口と `keiland-shot`（i915 の実機で合成した画面を読み戻して PNG、QEMU でも同じ口） | P1 | planning | — |
+| p001 | kernel: `/dev/input-inject` にマウスとキーボード（UAPI の追加、試験の kernel の設定だけ） | P1 | Q1 の判定待ち（2026-10-05 Q1 の注記: T1-200 で aat-p002 PASS（2026-10-08 q910 P2 の照合。旧: planning） | — |
+| p002 | compositor: 試験の image だけの画面の撮影の口と `keiland-shot`（i915 の実機で合成した画面を読み戻して PNG、QEMU でも同じ口） | P1 | Q1 の判定待ち（2026-10-05 Q1 の注記: T1-200 で aat-p002 PASS。phase.md は in-progress のまま（2026-10-08 q910 P2 の照合。旧: planning） | — |
 | [p003](phase003/phase.md) | host の道具 `plan/tools/aat/`（SSH で click・drag・wheel・key・type・shot の取得・log の行の待ち）と AAT の image の config | P2 | test-done（2026-10-07: T1-200c 以降の AAT の実行で target で確認、判定は Q1） | p001・p002 |
-| p004 | AAT の項目の一覧（今の実装済みの機能、UAT の項目から機器と使用感を除いた物）と判定の基準 | Q1 | planning | — |
+| p004 | AAT の項目の一覧（今の実装済みの機能、UAT の項目から機器と使用感を除いた物）と判定の基準 | Q1 | cleared（2026-10-06 Q1 判定: T1-202c の smoke 8 本 pass、full 79 本の判定の一覧（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: planning） | — |
 | p005 | 素の 5330 で AAT を行い、結果を記録 | T1 か専任 | planning | p001〜p004、素の起動の方法（ユーザーの判断） |
 
 - 2026-10-05 Q1: p001・p002（P1）は T1-200 で aat-p002 PASS、p003（P2 の host の道具）は T1-200c で PASS（QEMU、注入・撮影・転送・log の待ち）。AAT の土台は QEMU で動く。残り: p004 の項目と scenarios、素の 5330 での最初の実行（ユーザーが USB で起動）。

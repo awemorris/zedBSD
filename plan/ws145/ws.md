@@ -3,7 +3,7 @@
 # WS145: 印刷（printer の daemon・IPP/LPD で PDF を送る、libkeiland の印刷の口、Settings の Printers の頁）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: p001〜p004・p007 cleared（2026-10-07・08）。残り: p005（Linux・FreeBSD の guest、10/13 以降）、p006（規約、ベータ3）。準正常系は WS177 の案 Q・BUG-271）
 Primary Milestone: MG006
 Related Milestones: MG005
 Parent: [Master](../master.md)

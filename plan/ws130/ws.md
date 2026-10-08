@@ -3,7 +3,7 @@
 # WS130: IPv6 の network stack
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-06: p001・p002 cleared（p002 は T1-206b PASS）、p003 cleared（T1-243）、次は p004 libc）
+Status: incomplete（2026-10-08 q910 P2 の照合: p002〜p007 cleared、p008 は T1-316 PASS で 5330 の DHCPv6 の UAT 待ち、p001（設計）は Q1 の判定（後続が実装済み））（2026-10-06: p001・p002 cleared（p002 は T1-206b PASS）、p003 cleared（T1-243）、次は p004 libc）
 Primary Milestone: MG005
 Related Milestones: MG002（POSIX の socket API）
 Objectives: O1, O3

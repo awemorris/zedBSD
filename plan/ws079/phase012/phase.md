@@ -3,7 +3,7 @@
 # ws079-p012: kernel の multitouch（USB HID の touch screen の指 → evdev の protocol B）と注入の device の touch
 
 <!-- awesome-plan-current:start -->
-Status: in-progress（2026-09-28 の区切り: 実装・host 試験・amd64 の build・QEMU の guest の確認まで。実機（touch LCD）は未着で未実施。clearance は main の判断）
+Status: cleared（2026-10-08 q910 P2 の照合: ws.md の表の 2026-09-28 main の判断（QEMU と host）に合わせた。実機の touch の LCD は未実施）（旧: in-progress（2026-09-28 の区切り: 実装・host 試験・amd64 の build・QEMU の guest の確認まで。実機（touch LCD）は未着で未実施。clearance は main の判断））
 Disposition: normal
 Parent: [WS079](../ws.md)
 Queue: main の指示（Kei desktop subagent、2026-09-28）。Awesome Plan の Queue の item ではない

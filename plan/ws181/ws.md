@@ -2,7 +2,7 @@
 
 # WS181: 窓の docked・floating・最小化の状態、App Home の独立のモード、gesture、整列のメニューと整列モード（UAT 2026-10-07）
 
-Status: incomplete（2026-10-07 p001 cleared、p002〜p004 は実装・build・host 試験まで、QEMU は T1 の `plan/ws181/tests/ws181-guest.sh` 待ち）。作成: 2026-10-07 ユーザーの UAT、クリック「ベータ2、UAT として優先」
+Status: incomplete（2026-10-08 q910 P2 の照合: p001〜p010 は cleared（表を直した）、p011 は T1-462 の log PASS で PNG をユーザーが見た後に Q1 の判定。準正常系は WS177 の案 U（p033〜p038、T1-475））（2026-10-07 p001 cleared、p002〜p004 は実装・build・host 試験まで、QEMU は T1 の `plan/ws181/tests/ws181-guest.sh` 待ち）。作成: 2026-10-07 ユーザーの UAT、クリック「ベータ2、UAT として優先」
 Master: [master](../master.md)
 Primary Milestone: MG006
 
@@ -33,15 +33,15 @@ Primary Milestone: MG006
 | Phase | 内容 | Status |
 | --- | --- | --- |
 | [p001](phase001/phase.md) | 設計（窓の状態の機械: floating・docked・docking の隠れ・最小化・整列、App Home の独立のモード、gesture、整列のメニューと整列モード）、design-reviewer 2 回 | cleared（2026-10-07 Q1） |
-| [p002](phase002/phase.md) | 状態（目標 1・2） | in-progress（実装済み、QEMU 待ち） |
-| [p003](phase003/phase.md) | App Home の独立のモードと gesture（目標 3・4） | in-progress（実装済み、QEMU 待ち） |
-| [p004](phase004/phase.md) | 整列のメニューと整列モード（目標 5・6） | in-progress（実装済み、QEMU 待ち） |
-| [p005](phase005/phase.md) | UAT 2026-10-07 の 2 回目: App Home の上の bar（status と時計だけ白）、整列のメニュー（絵だけ・今の desktop・glass）、pill（印を外す・capsule 半分・点を正円）、整列の適用で窓が枠の大きさにならない件 | in-progress（実装・host まで、QEMU は T1） |
+| [p002](phase002/phase.md) | 状態（目標 1・2） | cleared（2026-10-07 Q1 の判定: T1-342 で ws181-guest.sh status 0（A1〜C12）・p010-guest.sh・zdesktop-p013-touch.sh・zdesktop-p010.sh・zdesktop-p065.sh P…）（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: in-progress（実装済み、QEMU 待ち）） |
+| [p003](phase003/phase.md) | App Home の独立のモードと gesture（目標 3・4） | cleared（2026-10-07 Q1 の判定: T1-342 で ws181-guest.sh status 0（A1〜C12）・p010-guest.sh・zdesktop-p013-touch.sh・zdesktop-p010.sh・zdesktop-p065.sh P…）（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: in-progress（実装済み、QEMU 待ち）） |
+| [p004](phase004/phase.md) | 整列のメニューと整列モード（目標 5・6） | cleared（2026-10-07 Q1 の判定: T1-342 で ws181-guest.sh status 0（A1〜C12）・p010-guest.sh・zdesktop-p013-touch.sh・zdesktop-p010.sh・zdesktop-p065.sh P…）（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: in-progress（実装済み、QEMU 待ち）） |
+| [p005](phase005/phase.md) | UAT 2026-10-07 の 2 回目: App Home の上の bar（status と時計だけ白）、整列のメニュー（絵だけ・今の desktop・glass）、pill（印を外す・capsule 半分・点を正円）、整列の適用で窓が枠の大きさにならない件 | cleared（2026-10-07 Q1 の判定: T1-345 で ws181-guest.sh status 0（arranged-size を含む）、Q1 が PNG を目視: App Home の上は bar 無しで status と時計だけ白、整列のメニューは 5 つ…）（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: in-progress（実装・host まで、QEMU は T1）） |
 | [p006](phase006/phase.md) | UAT 2026-10-07 の 3 回目: 整列のメニューの大きな grid（7 つの形）、App Home の時計と下寄せ・page、3 つの仮想 desktop（真ん中から、猫・鳥・ウサギ） | cleared（2026-10-07 Q1、T1-346・347） |
 | [p007](phase007/phase.md) | UAT 2026-10-07 の 4 回目: 整列のメニューを窓の panel と同じ本当の glass（後ろが blur で透ける）に、pill から広がって透けていく開き方（180 ms）と閉じる fade | cleared（T1-349 QEMU） |
-| [p008](phase008/phase.md) | UAT 2026-10-07 の 5 回目: App Home への遷移を iOS と同じ奥へ・奥から、touchpad の端の 2 本指 swipe は 1 本が端なら、上端の swipe down を App Home へ、左上の角の drag を外す | in-progress（実装・host まで、QEMU は T1） |
+| [p008](phase008/phase.md) | UAT 2026-10-07 の 5 回目: App Home への遷移を iOS と同じ奥へ・奥から、touchpad の端の 2 本指 swipe は 1 本が端なら、上端の swipe down を App Home へ、左上の角の drag を外す | cleared（2026-10-07 Q1 の判定: T1-359 QEMU PASS（ws181-guest・p003-guest 7b/7c・p010-guest・zdesktop-p010・zdesktop-p013-touch、全 status 0）。5320 の実機の …）（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: in-progress（実装・host まで、QEMU は T1）） |
 | [p009](phase009/phase.md) | UAT 2026-10-07 の 6 回目（5320）: 整列の popup のちらつき、描画の重さ、App Home の下端の 2 本指で戻る・頁の端・日付、整列モードの calendar、仮想 desktop の island を通知の左へ | cleared（T1-362 QEMU） | p008 |
-| [p010](phase010/phase.md) | Alt+Shift+左右で仮想 desktop を移る（2026-10-08 ユーザー「では、Alt+Shift+左右で仮想デスクトップ移動、ではどうですか？」、Ctrl+Shift+左右は app の単語の選択と重なるので変えた）。compositor に既存の Alt+Shift+矢印の bind は無い。Emacs の M-S-左右（shift-select の単語）と terminal の Alt+Shift+矢印の escape は compositor が取ると app に届かなくなる | test-wait（2026-10-08 P1 q875 実装・build、QEMU は p010-guest.sh を T1 へ） | p009 |
+| [p010](phase010/phase.md) | Alt+Shift+左右で仮想 desktop を移る（2026-10-08 ユーザー「では、Alt+Shift+左右で仮想デスクトップ移動、ではどうですか？」、Ctrl+Shift+左右は app の単語の選択と重なるので変えた）。compositor に既存の Alt+Shift+矢印の bind は無い。Emacs の M-S-左右（shift-select の単語）と terminal の Alt+Shift+矢印の escape は compositor が取ると app に届かなくなる | cleared（2026-10-08 Q1 判定、T1-391 QEMU PASS）（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: test-wait（2026-10-08 P1 q875 実装・build、QEMU は p010-guest.sh を T1 へ）） | p009 |
 | [p011](phase011/phase.md) | 2026-10-08 夜 の UAT: bar の仮想 desktop の island を bar の中央に、窓が dock している時は今の位置（status のすぐ左）のまま、dock の animation で 2 つの位置の間を動く | in-progress（2026-10-08 P2 実装・build、QEMU と撮影は T1） | p009 |
 
 ## 関連

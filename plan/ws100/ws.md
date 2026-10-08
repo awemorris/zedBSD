@@ -3,7 +3,7 @@
 # WS100: system bar の音量（icon・slider・確かめの音）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: p008 は表の cleared（Q1 2026-09-30）に phase.md を合わせた、p013 は T1-087 PASS で Q1 の判定待ち。残り: p006（5330 の HDA、実機）、p009（L3 の音量の曲線、planned））
 Primary Milestone: MG006
 Related Milestones: MG003
 Objectives: O2

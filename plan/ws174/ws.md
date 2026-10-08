@@ -2,7 +2,7 @@
 # WS174: 起動時の Ctrl / Shift で boot の選択を変える
 
 Master: [master](../master.md)
-Status: incomplete（2026-10-06 P1: p002・p005 の実装と記録。p003 は T1-213 が FAIL（key の検出・試験の sysctl）、同日直して T1 の再試験待ち。2026-10-05 夜 追加。設計の第 3 版まで。ユーザーが仕様を変更: Ctrl = kmsg を console（logo なし、640x480 の希望）、Shift = login を console、config の形式は変えず UEFI の bootloader だけ。ユーザーの実装の指示あり（BIOS は後日））
+Status: incomplete（2026-10-08 q910 P2 の照合: p003 は T1-214 の再試行で全 cell PASS（1 回目は C3 だけ FAIL）→ Q1 の判定（間欠の C3 を Bug にするか）。実機（UEFI の 5330）は UAT）（2026-10-06 P1: p002・p005 の実装と記録。p003 は T1-213 が FAIL（key の検出・試験の sysctl）、同日直して T1 の再試験待ち。2026-10-05 夜 追加。設計の第 3 版まで。ユーザーが仕様を変更: Ctrl = kmsg を console（logo なし、640x480 の希望）、Shift = login を console、config の形式は変えず UEFI の bootloader だけ。ユーザーの実装の指示あり（BIOS は後日））
 Primary Milestone: MG003
 Related: MG006（graphical boot）
 

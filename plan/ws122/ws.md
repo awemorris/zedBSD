@@ -3,7 +3,7 @@
 # WS122: 動画プレーヤアプリ
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-07 q831 P2: p001・p002・p004 cleared、p003・p005 は Q1 の判定待ち、残りは全文規約の Phase と別 WS（GPU decode＝WS083、独自 AAC））
+Status: incomplete（2026-10-08 q910 P2 の照合: p001〜p005 は全部 cleared。残りは規約（ベータ3）と別 WS（GPU の decode＝WS083）。WS の完了を Q1 が判定）（2026-10-07 q831 P2: p001・p002・p004 cleared、p003・p005 は Q1 の判定待ち、残りは全文規約の Phase と別 WS（GPU decode＝WS083、独自 AAC））
 Primary Milestone: MG006
 Objectives: O2
 Parent: [Master](../master.md)
