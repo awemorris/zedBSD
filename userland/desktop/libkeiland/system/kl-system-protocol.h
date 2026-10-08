@@ -392,6 +392,7 @@
  *   request 3 power(uint request, uint on)
  *   request 4 device(uint request, uint action, string address, uint type)   action: KL_SYSTEM_BT_PAIR and the others
  *   event   0 state(uint reachable, uint state, uint flags, uint features, string address, string name)
+ *                                     flags: scanning, pairing, the user's switch on, this desktop answers the pairings' questions
  *   event   1 device(string address, uint type, string name, uint kind, uint flags, int battery, int rssi)
  *   event   2 done(uint serial)       the state and the devices before it are the whole state
  *   event   3 result(uint request, uint applied, uint saved)
@@ -417,6 +418,8 @@
 #define KL_SYSTEM_BT_DISCONNECT			4U
 #define KL_SYSTEM_BT_SCANNING			0x1U
 #define KL_SYSTEM_BT_PAIRING			0x2U
+#define KL_SYSTEM_BT_POWERED			0x4U
+#define KL_SYSTEM_BT_ANSWERS			0x8U
 #define KL_SYSTEM_BT_PAIRED			0x1U
 #define KL_SYSTEM_BT_LEGACY			0x2U
 #define KL_SYSTEM_BT_CONNECTED			0x4U

@@ -345,7 +345,8 @@ kwl_dispatch(
 	case KWL_SYSTEM_PRINTERS:
 	case KWL_SYSTEM_DISPLAYS:
 	case KWL_SYSTEM_MACHINE:
-		/* Keiland's system extension: the manager, the network, the sound, the power, the devices, the account, Remote Login, the notifications, the arrivals of mail, the phone, the printers, the displays and the computer (system.c, WS131 p010, ws160-p002, ws089-p025, ws156-p002, ws169-p002, ws170-p004, ws145-p003, ws113-p005, ws188-p002). */
+	case KWL_SYSTEM_BLUETOOTH:
+		/* Keiland's system extension: the manager, the network, the sound, the power, the devices, the account, Remote Login, the notifications, the arrivals of mail, the phone, the printers, the displays, the computer and Bluetooth (system.c, WS131 p010, ws160-p002, ws089-p025, ws156-p002, ws169-p002, ws170-p004, ws145-p003, ws113-p005, ws188-p002, ws143-p006). */
 		error = kwl_system_request(object, opcode, bytes, size);
 		break;
 	case KWL_SYSTEM_MONITOR:

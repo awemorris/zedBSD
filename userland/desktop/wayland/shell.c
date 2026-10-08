@@ -368,6 +368,7 @@ struct shell_bar {
 	int32_t signal_x;
 	int32_t volume_x;
 	int32_t media_x;
+	int32_t bluetooth_x;
 	int32_t ime_x;
 	int32_t desktops_x;
 	int32_t desktops_width;
@@ -627,6 +628,7 @@ kwl_glass_draw(
 		kwl_backdrop_reset(server);
 		kwl_popup_draw(server, command);
 		kwl_power_dialog_draw(server, command);
+		kwl_bluetooth_ask_draw(server, command);
 		return;
 	}
 
@@ -726,14 +728,16 @@ kwl_glass_draw(
 	/* An open menu's popups over the system bar (menu-shell.c). */
 	kwl_menu_draw_popups(server, command);
 
-	/* The power dialog over everything (power-dialog.c, ws099-p037). */
+	/* The power dialog over everything (power-dialog.c, ws099-p037), and a pairing's question over that (bluetooth-ask.c, ws143-p006). */
 	kwl_power_dialog_draw(server, command);
+	kwl_bluetooth_ask_draw(server, command);
 
 	/* The suggestions under a titlebar's field with the keyboard (titlebar-shell.c, ws127-p010). */
 	kwl_titlebar_draw_suggestions(server, command);
 
-	/* The network's menu, when open (network.c). */
+	/* The network's menu, when open (network.c), and Bluetooth's (bluetooth-bar.c). */
 	kwl_network_draw_menu(server, command);
+	kwl_bluetooth_draw_menu(server, command);
 
 	/*
 	 * The arrangement menu, when it shows (arrange-shell.c), on the scene
@@ -844,6 +848,7 @@ kwl_glass_draw_head(
 	kwl_apps_bar_draw_popup(server, command);
 	kwl_menu_draw_popups(server, command);
 	kwl_network_draw_menu(server, command);
+	kwl_bluetooth_draw_menu(server, command);
 	kwl_arrange_draw(server, command);
 	kwl_volume_draw_popup(server, command);
 	server->layer_on = layer;
@@ -886,6 +891,11 @@ kwl_glass_button(
 	/* A double click is measured from the release before too (BUG-247, click_quick). */
 	if (button == KWL_BUTTON_LEFT && state == 0)
 		server->click_release_ms = kwl_milliseconds();
+
+	/* A pairing's question, while it shows, takes every button (bluetooth-ask.c, ws143-p006). */
+	pressed = kwl_bluetooth_ask_button(server, button, state);
+	if (pressed)
+		return 1;
 
 	/* The power dialog, while it shows, takes every button (power-dialog.c, ws099-p037). */
 	pressed = kwl_power_dialog_button(server, button, state);
@@ -1019,6 +1029,14 @@ kwl_glass_button(
 	open = kwl_network_is_open();
 	if (cover == NULL || remote || open) {
 		pressed = kwl_network_button(server, button, state);
+		if (pressed)
+			return 1;
+	}
+
+	/* Bluetooth takes a press on its icon on any output's bar, and every button while its menu is open (bluetooth-bar.c, ws143-p006). */
+	open = kwl_bluetooth_is_open();
+	if (cover == NULL || remote || open) {
+		pressed = kwl_bluetooth_button(server, button, state);
 		if (pressed)
 			return 1;
 	}
@@ -1810,6 +1828,9 @@ kwl_glass_title_at(
 	open = kwl_network_is_open();
 	if (open)
 		return NULL;
+	open = kwl_bluetooth_is_open();
+	if (open)
+		return NULL;
 	open = kwl_volume_is_open();
 	if (open)
 		return NULL;
@@ -2003,6 +2024,9 @@ kwl_glass_still(
 	if (open)
 		return 0;
 	open = (unsigned)kwl_network_is_open();
+	if (open)
+		return 0;
+	open = (unsigned)kwl_bluetooth_is_open();
 	if (open)
 		return 0;
 	open = (unsigned)kwl_volume_is_open();
@@ -2986,6 +3010,11 @@ kwl_glass_key(
 	int step;
 	int taken;
 
+	/* A pairing's question, while it shows, takes every key (bluetooth-ask.c, ws143-p006). */
+	taken = kwl_bluetooth_ask_key(server, key, state);
+	if (taken)
+		return 1;
+
 	/* The power dialog, while it shows, takes every key (power-dialog.c, ws099-p037). */
 	taken = kwl_power_dialog_key(server, key, state);
 	if (taken)
@@ -3146,6 +3175,9 @@ kwl_glass_tick(
 	/* What the network watch brought (network.c). */
 	kwl_network_tick(server);
 
+	/* Bluetooth's menu: the answer to its request, and its end with the lock (bluetooth-bar.c, ws143-p006). */
+	kwl_bluetooth_bar_tick(server);
+
 	/* What audiod reported, and the volume's sends held back (volume.c). */
 	kwl_volume_tick(server);
 
@@ -3229,6 +3261,7 @@ bar_layout_on(
 	int32_t shift;
 	int ime_width;
 	int media_width;
+	int bluetooth_width;
 	int button;
 
 	/* The output's rectangle, the bar along its top. */
@@ -3279,10 +3312,13 @@ bar_layout_on(
 	 */
 	ime_width = kwl_ime_indicator_width(server);
 	media_width = kwl_media_width();
+	bluetooth_width = kwl_bluetooth_bar_width();
 	slots = 2 * BAR_SLOT;
 	if (ime_width > 0)
 		slots += BAR_SLOT;
 	if (media_width > 0)
+		slots += BAR_SLOT;
+	if (bluetooth_width > 0)
 		slots += BAR_SLOT;
 	battery_slot = 0;
 	if (server->power.percent >= 0) {
@@ -3296,13 +3332,16 @@ bar_layout_on(
 	bar->status_width = slots + 2 * BAR_STATUS_PAD;
 	bar->status_x = bar->clock_pill_x - BAR_PILL_GAP - bar->status_width;
 
-	/* Each icon centred in its slot, from the left: the language, the media, the network, the volume, the battery. */
+	/* Each icon centred in its slot, from the left: the language, the media, Bluetooth (ws143-p006), the network, the volume, the battery. */
 	place = bar->status_x + BAR_STATUS_PAD;
 	bar->ime_x = place + (BAR_SLOT - 26) / 2;
 	if (ime_width > 0)
 		place += BAR_SLOT;
 	bar->media_x = place + (BAR_SLOT - 20) / 2;
 	if (media_width > 0)
+		place += BAR_SLOT;
+	bar->bluetooth_x = place + (BAR_SLOT - 20) / 2;
+	if (bluetooth_width > 0)
 		place += BAR_SLOT;
 	bar->signal_x = place + (BAR_SLOT - 20) / 2;
 	place += BAR_SLOT;
@@ -4697,6 +4736,9 @@ draw_status(
 	/* The network: Wi-Fi's fan or the wired tree, which opens its menu (network.c). */
 	kwl_network_draw_icon(server, command, bar->signal_x, bar->top, ink);
 
+	/* Bluetooth's rune while there is a controller, which opens its menu (bluetooth-bar.c, ws143-p006). */
+	kwl_bluetooth_draw_icon(server, command, bar->bluetooth_x, bar->top, ink);
+
 	/* The volume's speaker, which opens its popup (volume.c, ws100-p004). */
 	kwl_volume_draw_icon(server, command, bar->volume_x, bar->top, ink);
 
@@ -4751,11 +4793,14 @@ home_bar_passes(
 	if (server->home_press || server->home_page_press || server->home_rise_press)
 		return 0;
 
-	/* The volume's popup and the network's menu, while open, have every button. */
+	/* The volume's popup, the network's menu and Bluetooth's, while open, have every button. */
 	open = kwl_volume_is_open();
 	if (open)
 		return 1;
 	open = kwl_network_is_open();
+	if (open)
+		return 1;
+	open = kwl_bluetooth_is_open();
 	if (open)
 		return 1;
 
@@ -9269,7 +9314,10 @@ glass_motion_take(
 		return 1;
 	}
 
-	/* So does the power dialog while it shows (power-dialog.c). */
+	/* So do a pairing's question and the power dialog while they show (bluetooth-ask.c, power-dialog.c). */
+	taken = kwl_bluetooth_ask_motion(server);
+	if (taken)
+		return 1;
 	taken = kwl_power_dialog_motion(server);
 	if (taken)
 		return 1;
@@ -9309,8 +9357,11 @@ glass_motion_take(
 	if (taken)
 		return 1;
 
-	/* The network's open menu lights the row under the pointer (network.c). */
+	/* The network's open menu lights the row under the pointer (network.c), and so does Bluetooth's (bluetooth-bar.c). */
 	taken = kwl_network_motion(server);
+	if (taken)
+		return 1;
+	taken = kwl_bluetooth_motion(server);
 	if (taken)
 		return 1;
 

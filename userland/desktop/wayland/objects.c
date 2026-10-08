@@ -368,6 +368,10 @@ kwl_object_destroy(
 	if (object->kind == KWL_SYSTEM_MACHINE)
 		kwl_machine_gone(object);
 
+	/* A Bluetooth object lets go of its watching and scanning (bluetooth-shell.c, ws143-p006). */
+	if (object->kind == KWL_SYSTEM_BLUETOOTH)
+		kwl_bluetooth_gone(object);
+
 	/* A toplevel's keyboard insets name nothing (inset.c). */
 	if (object->kind == KWL_TOPLEVEL)
 		kwl_inset_object_gone(object);

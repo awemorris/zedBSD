@@ -165,6 +165,11 @@ int kwl_arrange_showing(struct kwl_server *server);
 void kwl_volume_draw_icon(struct kwl_server *server, VkCommandBuffer command, int32_t x, int32_t top, const float *ink);
 void kwl_volume_draw_popup(struct kwl_server *server, VkCommandBuffer command);
 
+/* Bluetooth's icon in the system bar and its menu, and the pairing's window over everything (bluetooth-bar.c, bluetooth-ask.c, ws143-p006). */
+void kwl_bluetooth_draw_icon(struct kwl_server *server, VkCommandBuffer command, int32_t x, int32_t top, const float *ink);
+void kwl_bluetooth_draw_menu(struct kwl_server *server, VkCommandBuffer command);
+void kwl_bluetooth_ask_draw(struct kwl_server *server, VkCommandBuffer command);
+
 /* App Home under the desktop layer (home.c). */
 void kwl_home_draw(struct kwl_server *server, VkCommandBuffer command, float progress);
 void kwl_home_draw_head(struct kwl_server *server, VkCommandBuffer command);

@@ -161,6 +161,12 @@
 		kl_system_machine_users;
 		kl_system_machine_login_language;
 		kl_system_machine_mounts;
+		kl_system_bluetooth_state;
+		kl_system_bluetooth_devices;
+		kl_system_bluetooth_watch;
+		kl_system_bluetooth_scan;
+		kl_system_bluetooth_power;
+		kl_system_bluetooth_device;
 		kl_system_network_get_links;
 		kl_system_network_get_dns;
 		kl_system_network_get_saved;
