@@ -25,9 +25,11 @@
  * A triple click on a floating title bar sends the window to the back and
  * gives the focus to the window now on top (ws079-p013, "go away"; a quick
  * two-finger flick up on it on a touch screen does the same, touch.c).  A
- * double click docks at its second press (BUG-179); a third press near it
- * within DOUBLE_CLICK_MS takes that dock back before it sends the window
- * to the back.
+ * double click docks at the release of its second press (BUG-265: a double
+ * tap whose second touch moves is a tap and drag, which moves the window;
+ * BUG-179 had it dock at the press); a third press near it within
+ * DOUBLE_CLICK_MS takes that dock back before it sends the window to the
+ * back.
  *
  * The system bar has three zones: on the left the launcher (the Kei mark,
  * ws035-p117) and the docked window; towards the right four virtual
@@ -470,6 +472,7 @@ static void dock_restore_default(struct kwl_server *server, struct kwl_object *s
 static int window_centred_over(struct kwl_server *server, const struct kwl_object *surface);
 static void draw_centred_cover(struct kwl_server *server, VkCommandBuffer command);
 static unsigned double_click(struct kwl_server *server, struct kwl_object *surface);
+static int title_tap_release(struct kwl_server *server);
 static unsigned title_clicks(struct kwl_server *server, struct kwl_object *surface);
 static int click_quick(struct kwl_server *server, struct kwl_object *surface, uint64_t now);
 static int click_docked_third(struct kwl_server *server);
@@ -1095,6 +1098,11 @@ kwl_glass_button(
 			return 1;
 		}
 
+		/* The release of a double click's second press: near it the window docks, moved further it was a move (BUG-265). */
+		pressed = title_tap_release(server);
+		if (pressed)
+			return 1;
+
 		/* A swap of arranged windows ends (arrange-shell.c). */
 		pressed = kwl_arrange_move_end(server);
 		if (pressed)
@@ -1204,18 +1212,16 @@ kwl_glass_button(
 	}
 
 	/*
-	 * A second quick press on the title bar is a double click, which docks
-	 * the window now (BUG-179); a third press near it soon after takes the
-	 * dock back and sends the window to the back (click_docked_third).
+	 * A second quick press on the title bar may be a double click: its
+	 * release decides (BUG-265, title_tap_release), and meanwhile it is a
+	 * move as any press (a tap and drag); a third press near a double
+	 * click's dock soon after takes the dock back and sends the window to
+	 * the back (click_docked_third).
 	 */
 	clicks = title_clicks(server, surface);
 	if (clicks == 2U) {
-		server->click_docked = surface;
-		server->click_docked_due_ms = server->click_ms + DOUBLE_CLICK_MS;
-		server->click_docked_x = server->pointer_x;
-		server->click_docked_y = server->pointer_y;
-		window_dock(server, surface, surface->x, surface->y, "double-click");
-		return 1;
+		kwl_title_tap_press(&server->title_tap, surface, server->pointer_x, server->pointer_y);
+		printf("KWL GLASS double-click wait surface=%u\n", surface->id);
 	}
 
 	/* A third quick press on a title bar that did not dock sends the window to the back. */
@@ -6788,6 +6794,58 @@ title_clicks(
 }
 
 /*
+ * Takes the release of a double click's second press on a floating title
+ * bar (BUG-265): near the press, the move it started ends where it began
+ * and the window docks (a third press near it soon after takes that back,
+ * click_docked_third); moved further, it was a move (a tap and drag),
+ * which ends as any move, and the run of clicks ends.  Returns 1 when the
+ * release was taken here (the dock).
+ */
+static int
+title_tap_release(
+	struct kwl_server *server)
+{
+	struct kwl_object *surface;
+	const void *waited;
+	int decided;
+
+	/* What the release was. */
+	decided = kwl_title_tap_release(&server->title_tap, server->pointer_x, server->pointer_y, &waited);
+	if (decided == TITLE_TAP_NONE)
+		return 0;
+	surface = (struct kwl_object *)(uintptr_t)waited;
+
+	/* Moved: a move's end as any, with no third click after it. */
+	if (decided == TITLE_TAP_MOVED) {
+		server->click_surface = NULL;
+		server->click_count = 0;
+		printf("KWL GLASS double-click moved surface=%u\n", surface->id);
+		return 0;
+	}
+
+	/* The move the press started ends where it began (a swap of arranged windows ends as it would). */
+	if (server->drag == surface) {
+		server->drag = NULL;
+		surface->x = server->drag_start_x;
+		surface->y = server->drag_start_y;
+	} else {
+		(void)kwl_arrange_move_end(server);
+	}
+
+	/* A window that went, was docked or left the desktop meanwhile stays as it is. */
+	if (surface->dead || !surface->mapped || surface->maximized || surface->desktop != server->desktop)
+		return 1;
+
+	/* Succeeded: docked, and a third press near it soon takes it back. */
+	server->click_docked = surface;
+	server->click_docked_due_ms = kwl_milliseconds() + DOUBLE_CLICK_MS;
+	server->click_docked_x = server->pointer_x;
+	server->click_docked_y = server->pointer_y;
+	window_dock(server, surface, surface->x, surface->y, "double-click");
+	return 1;
+}
+
+/*
  * Tells whether a press on a window's title is quick after the one before
  * on the same window: within DOUBLE_CLICK_MS of that press, or of its
  * release.  A touch pad's tap gives its press at the lift and holds it
@@ -9301,6 +9359,7 @@ glass_motion_take(
 	int32_t y;
 	int32_t dx;
 	int taken;
+	int still;
 	int calm;
 
 	/* The hover of buttons, the dock hint and the moves are redrawn (over a window's own area only the cursor is, damage.c). */
@@ -9469,6 +9528,11 @@ glass_motion_take(
 	 */
 	if (surface->output != server->pointer_output)
 		kwl_window_set_output(server, surface, server->pointer_output, "drag");
+
+	/* A double click's second press does not move the window within its slop (BUG-265). */
+	still = kwl_title_tap_still(&server->title_tap, surface, server->pointer_x, server->pointer_y);
+	if (still)
+		return 1;
 
 	/* The body follows the pointer; the title bar stays below the system bar (below the head's top on a head). */
 	surface->x = server->pointer_x - server->drag_dx;
