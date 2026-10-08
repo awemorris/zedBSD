@@ -78,7 +78,7 @@ p015〜p018は大きすぎるため、1 Queueのスロットで終わる大き�
 | ws031-p023 | 確認と修正: blend・UBOの境界（`SRC_ALPHA_SATURATE`等、float target、動的定数、dynamic offset範囲外、短いUBO range） | planning | 同上 | p015 | `render/` |
 | [ws031-p024](phase024/phase.md) | 確認と修正: compilerの境界（0除算・`INT_MIN/-1`、mod・FRem、ループ内discard・sample、shift、入れ子、SBE属性0、spillの組合せ） | blocked（UAT 待ち）（2026-10-09 P1: host の分は全部済み、実機 vke2 は T1-190b PASS。spill の組み合わせの実機の step が残り） | 同上 | p015 | `compiler/` |
 | ws031-p025 | 異常系: 範囲外index/offset、command buffer 65536超、descriptor上限、終わらないループ（hangの扱いの記録） | planning | 同上 | p015 | `render/`、`vk/` |
-| ws031-p026 | 小さな欠落: uint8 index、非整列 `vkCmdCopyBuffer`、viewport index>0・負の高さ、compile失敗時のpipeline漏れ、discardのHALT、host試験（ws031のdisplay 6件とws029）が `perf.c` 未linkで `drv_i915_perf_*` のlinkに失敗する件（ws035-p002で発見） | planning | 同上 | p015 | `render/`、`compiler/` |
+| [ws031-p026](phase026/phase.md) | 小さな欠落: uint8 index、非整列 `vkCmdCopyBuffer`、viewport index>0・負の高さ、compile失敗時のpipeline漏れ、discardのHALT、host試験（ws031のdisplay 6件とws029）が `perf.c` 未linkで `drv_i915_perf_*` のlinkに失敗する件（ws035-p002で発見） | blocked（UAT 待ち）（2026-10-09 P1: uint8 index・非整列の copy・負の viewport の高さ・pipeline の漏れを実装、host PASS。HALT は未着手。perf.c の件は試験が tree に無い） | 同上 | p015 | `render/`、`compiler/` |
 | ws031-p027 | present mode（FIFO/MAILBOX/IMMEDIATE）でvsyncを選ぶ。UAPIで運べなければ変更を事前に提示 | 移した（2026-09-27、[WS075](../ws075/ws.md) の p008） | 同上 | p015・p018 | `libvulkan`、`zwl`、i915 display |
 | ws031-p028 | 入力とmview: PS/2 keyboardのkeyがzwlに届かない件、QMP abortの回避記録、mviewの再現性・blend material・pixel shadingのLCD写真 | planning | 同上 | p015 | `zwl`、input |
 | ws031-p029 | WS031の統合回帰（p014の回帰一覧を1回） | planning | p022〜p028 | p015 | 試験のみ |

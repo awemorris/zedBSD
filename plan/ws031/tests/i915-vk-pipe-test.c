@@ -553,14 +553,8 @@ test_graphics_pipeline(void)
 	pipeline = drv_i915_object_lookup(stub_session, I915_VK_OBJ_PIPELINE, FIXTURE_BAD_PIPELINE);
 	assert(pipeline == NULL);
 
-	/*
-	 * XXX: the refused pipeline's record is neither published nor freed
-	 * (render/pipeline.c, "happy path only"): exactly that one block is
-	 * left behind, and its kernels were released.  The fixture reclaims it
-	 * so the rest of the run starts clean.
-	 */
-	assert(stub_live_since(mark) == 1U);
-	assert(stub_release_since(mark) == 1U);
+	/* The refused pipeline's record and kernels are freed with the refusal (ws031-p026): nothing is left behind. */
+	assert(stub_live_since(mark) == 0U);
 
 	/* The pipeline made from the shipped shaders: [65][VK_SUCCESS][count 1][identity]. */
 	stub_wire_begin(&fixture_wire);
