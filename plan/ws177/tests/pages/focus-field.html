@@ -1,0 +1,8 @@
+<!doctype html>
+<title>focus field</title>
+<p>Sign in</p>
+<input id=a autocomplete="email" onfocus="console.log('focus=' + this.id)">
+<div style="display:none"><input id=h autocomplete="one-time-code" onfocus="console.log('focus=' + this.id)"></div>
+<input id=d disabled autocomplete="one-time-code" onfocus="console.log('focus=' + this.id)">
+<input id=b autocomplete="section-x ONE-TIME-CODE" onfocus="console.log('focus=' + this.id)" oninput="console.log('value=' + this.value)">
+<input id=c autocomplete="one-time-code" onfocus="console.log('focus=' + this.id)">
