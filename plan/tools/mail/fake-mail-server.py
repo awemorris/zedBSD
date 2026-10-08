@@ -14,6 +14,16 @@ their special use), three messages in INBOX.  IDLE tells a new message (a sign-i
 the first N times only with --arrivals (Mail idles again after each).  The
 messages SMTP receives are written to OUTDIR/smtp-N.eml with their envelope in OUTDIR/smtp-N.env, and the
 messages APPENDed to OUTDIR/append-N.eml.  Runs until it is killed.
+
+ws177-p016 (each only when asked, so that the other tests see the server as before):
+    --caps "MOVE UIDPLUS"   more words in CAPABILITY (UID MOVE and UID EXPUNGE are always understood)
+    --large                 a fourth INBOX message of about 1.5 MiB: a file first, then its words in ISO-2022-JP,
+                            for the fetch by BODYSTRUCTURE and BODY.PEEK[section]
+    --smtp-auth "LOGIN"     the logins EHLO offers (AUTH PLAIN by default); each login taken is written to
+                            OUTDIR/logins (PLAIN or LOGIN, a line each)
+    --japanese-folders      the folders without special use, named in Japanese (modified UTF-7), the trash's name
+                            sent as a literal
+A FETCH honours a partial range <0.N>, BODY.PEEK[HEADER] and BODY.PEEK[1], [2.1] ..., and BODYSTRUCTURE.
 """
 
 import os
@@ -23,6 +33,8 @@ import sys
 import threading
 import time
 import base64
+import email
+import email.policy
 
 USER = "kei@example.net"
 PASSWORD = "secret 1"
@@ -80,6 +92,103 @@ NEW_MESSAGE = (b"From: Shop <shop@example.com>\r\n"
                b"Order 2026 is ready. Your one-time code is 7351.\r\n")
 
 FOLDERS = [("INBOX", ""), ("Sent", "\\Sent"), ("Drafts", "\\Drafts"), ("Archive", "\\Archive"), ("Trash", "\\Trash")]
+
+# --japanese-folders: the names LIST gives (modified UTF-7 of 送信済み, 下書き, アーカイブ, ごみ箱) for the store's boxes.
+JAPANESE_NAMES = {"Sent": "&kAFP4W4IMH8-", "Drafts": "&Tgtm+DBN-", "Archive": "&MKIw,DCrMKQw1g-", "Trash": "&MFQwf3ux-"}
+JAPANESE = False
+EXTRA_CAPS = ""
+SMTP_AUTH = "PLAIN"
+LOGINS = []
+
+
+def large_message():
+    """A message of about 1.5 MiB: a file first, then its words in ISO-2022-JP (--large)."""
+    words = "大きな添付のメールです。".encode("iso-2022-jp")
+    data = base64.encodebytes(bytes(range(256)) * 6144).replace(b"\n", b"\r\n")
+    return (b"From: Big <big@example.org>\r\n"
+            b"To: kei@example.net\r\n"
+            b"Subject: =?ISO-2022-JP?B?" + base64.b64encode("大きな添付".encode("iso-2022-jp")) + b"?=\r\n"
+            b"Date: Wed, 7 Oct 2026 08:00:00 +0000\r\n"
+            b"MIME-Version: 1.0\r\n"
+            b"Content-Type: multipart/mixed; boundary=\"L1\"\r\n"
+            b"\r\n"
+            b"--L1\r\n"
+            b"Content-Type: application/octet-stream; name=\"big.bin\"\r\n"
+            b"Content-Disposition: attachment; filename=\"big.bin\"\r\n"
+            b"Content-Transfer-Encoding: base64\r\n"
+            b"\r\n" + data +
+            b"--L1\r\n"
+            b"Content-Type: text/plain; charset=iso-2022-jp\r\n"
+            b"Content-Transfer-Encoding: 7bit\r\n"
+            b"\r\n" + words + b"\r\n"
+            b"--L1--\r\n")
+
+
+def box_name(name):
+    """The store's box for a name LIST gave."""
+    for box, japanese in JAPANESE_NAMES.items():
+        if JAPANESE and name == japanese:
+            return box
+    return name
+
+
+def imap_string(text):
+    if text is None:
+        return "NIL"
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def body_structure(part):
+    """BODYSTRUCTURE of a part of email's message (RFC 3501 7.4.2)."""
+    if part.is_multipart():
+        inner = "".join(body_structure(child) for child in part.get_payload())
+        return "(%s %s)" % (inner, imap_string(part.get_content_subtype().upper()))
+    params = []
+    for key in ("charset", "name"):
+        value = part.get_param(key)
+        if value is not None:
+            params += [imap_string(key.upper()), imap_string(str(value))]
+    params_text = "(" + " ".join(params) + ")" if params else "NIL"
+    encoding = part.get("Content-Transfer-Encoding", "7bit").strip().upper()
+    body = section_body(part)
+    fields = "%s %s %s NIL NIL %s %d" % (imap_string(part.get_content_maintype().upper()),
+                                         imap_string(part.get_content_subtype().upper()),
+                                         params_text, imap_string(encoding), len(body))
+    if part.get_content_maintype() == "text":
+        fields += " %d" % body.count(b"\n")
+    disposition = "NIL"
+    if part.get_content_disposition() is not None:
+        filename = part.get_param("filename", header="content-disposition")
+        disposition = "(%s %s)" % (imap_string(part.get_content_disposition().upper()),
+                                   "(" + imap_string("FILENAME") + " " + imap_string(str(filename)) + ")" if filename else "NIL")
+    return "(%s NIL %s NIL NIL)" % (fields, disposition)
+
+
+def section_body(part):
+    """A part's body as the message keeps it (still in its transfer encoding)."""
+    payload = part.get_payload(decode=False)
+    if isinstance(payload, str):
+        return payload.encode("ascii", "surrogateescape")
+    return b""
+
+
+def section_bytes(raw, section):
+    """BODY[section] of a message: HEADER, "" for the whole, or a part's number ("2", "1.2")."""
+    if section == "":
+        return raw
+    head, _, body = raw.partition(b"\r\n\r\n")
+    if section.upper() == "HEADER":
+        return head + b"\r\n\r\n"
+    message = email.message_from_bytes(raw, policy=email.policy.compat32)
+    part = message
+    for number in section.split("."):
+        if part.is_multipart():
+            part = part.get_payload()[int(number) - 1]
+        elif number != "1":
+            return b""
+    if not part.is_multipart() and part is message:
+        return body
+    return section_body(part)
 
 
 class Store:
@@ -191,7 +300,8 @@ def imap_session(conn, context, secure):
             sub, _, args = args.partition(" ")
             command = "UID " + sub.upper()
         if command == "CAPABILITY":
-            io.send(b"* CAPABILITY IMAP4rev1 IDLE STARTTLS\r\n" + tag.encode() + b" OK done\r\n")
+            caps = "IMAP4rev1 IDLE STARTTLS" + (" " + EXTRA_CAPS if EXTRA_CAPS else "")
+            io.send(("* CAPABILITY %s\r\n" % caps).encode() + tag.encode() + b" OK done\r\n")
         elif command == "STARTTLS":
             io.send(tag.encode() + b" OK begin TLS\r\n")
             io.wrap(context)
@@ -205,10 +315,18 @@ def imap_session(conn, context, secure):
             out = b""
             for name, use in FOLDERS:
                 attrs = "\\HasNoChildren" + (" " + use if use else "")
+                if JAPANESE and name in JAPANESE_NAMES:
+                    attrs = "\\HasNoChildren"
+                    name = JAPANESE_NAMES[name]
+                    if name == JAPANESE_NAMES["Trash"]:
+                        out += ('* LIST (%s) "/" {%d}\r\n%s\r\n' % (attrs, len(name), name)).encode()
+                        continue
                 out += ('* LIST (%s) "/" "%s"\r\n' % (attrs, name)).encode()
+            if JAPANESE:
+                out += b"* LIST (\\Noselect \\HasChildren) \"/\" \"Sent Items\"\r\n"
             io.send(out + tag.encode() + b" OK listed\r\n")
         elif command == "SELECT":
-            selected = quoted_args(args)[0]
+            selected = box_name(quoted_args(args)[0])
             with STORE.lock:
                 count = len(STORE.boxes[selected])
             io.send(("* %d EXISTS\r\n* 0 RECENT\r\n" % count).encode() + tag.encode() + b" OK [READ-WRITE] selected\r\n")
@@ -226,9 +344,24 @@ def imap_session(conn, context, secure):
                     first, last = seq_range(spec, box[-1][0] if box else 0)
                     if not (first <= uid <= last or (spec.endswith(":*") and uid == box[-1][0])):
                         continue
-                out += ("* %d FETCH (UID %d FLAGS (%s) RFC822.SIZE %d BODY[]<0> {%d}\r\n"
-                        % (seq, uid, " ".join(sorted(flags)), len(raw), len(raw))).encode()
-                out += raw + b")\r\n"
+                upper = items.upper()
+                if "BODYSTRUCTURE" in upper:
+                    structure = body_structure(email.message_from_bytes(raw, policy=email.policy.compat32))
+                    out += ("* %d FETCH (UID %d BODYSTRUCTURE %s)\r\n" % (seq, uid, structure)).encode()
+                    continue
+                start = upper.find("BODY.PEEK[")
+                end = upper.find("]", start)
+                section = items[start + 10:end] if start >= 0 else ""
+                data = section_bytes(raw, section)
+                partial = items[end + 1:].split(")")[0] if start >= 0 else ""
+                if partial.startswith("<0.") and partial.endswith(">"):
+                    data = data[:int(partial[3:-1])]
+                if section:
+                    out += ("* %d FETCH (UID %d BODY[%s]<0> {%d}\r\n" % (seq, uid, section, len(data))).encode()
+                else:
+                    out += ("* %d FETCH (UID %d FLAGS (%s) RFC822.SIZE %d BODY[]<0> {%d}\r\n"
+                            % (seq, uid, " ".join(sorted(flags)), len(raw), len(data))).encode()
+                out += data + b")\r\n"
             io.send(out + tag.encode() + b" OK fetched\r\n")
         elif command == "UID STORE":
             uid_text, mode, flag_list = args.split(" ", 2)
@@ -241,9 +374,32 @@ def imap_session(conn, context, secure):
                         else:
                             entry[1].difference_update(flags)
             io.send(tag.encode() + b" OK stored\r\n")
+        elif command == "UID MOVE":
+            uid_text, destination = args.split(" ", 1)
+            destination = box_name(quoted_args(destination)[0])
+            out = b""
+            with STORE.lock:
+                box = STORE.boxes[selected]
+                for seq, entry in enumerate(box, 1):
+                    if entry[0] == int(uid_text):
+                        STORE.add(destination, entry[2], entry[1])
+                        del box[seq - 1]
+                        out += ("* %d EXPUNGE\r\n" % seq).encode()
+                        break
+            io.send(out + tag.encode() + b" OK moved\r\n")
+        elif command == "UID EXPUNGE":
+            out = b""
+            with STORE.lock:
+                box = STORE.boxes[selected]
+                for seq, entry in enumerate(box, 1):
+                    if entry[0] == int(args) and "\\Deleted" in entry[1]:
+                        del box[seq - 1]
+                        out += ("* %d EXPUNGE\r\n" % seq).encode()
+                        break
+            io.send(out + tag.encode() + b" OK expunged\r\n")
         elif command == "UID COPY":
             uid_text, destination = args.split(" ", 1)
-            destination = quoted_args(destination)[0]
+            destination = box_name(quoted_args(destination)[0])
             with STORE.lock:
                 for entry in STORE.boxes[selected]:
                     if entry[0] == int(uid_text):
@@ -263,7 +419,7 @@ def imap_session(conn, context, secure):
             io.send(out + tag.encode() + b" OK expunged\r\n")
         elif command == "APPEND":
             parts = quoted_args(args)
-            mailbox = parts[0]
+            mailbox = box_name(parts[0])
             size = int(args[args.rindex("{") + 1:-1])
             io.send(b"+ go ahead\r\n")
             raw = io.exact(size)
@@ -315,7 +471,7 @@ def smtp_session(conn, context, secure):
             out = b"250-fake\r\n"
             if not tls:
                 out += b"250-STARTTLS\r\n"
-            out += b"250-8BITMIME\r\n250 AUTH PLAIN\r\n"
+            out += b"250-8BITMIME\r\n250 AUTH " + SMTP_AUTH.encode() + b"\r\n"
             io.send(out)
         elif verb == "STARTTLS":
             io.send(b"220 go ahead\r\n")
@@ -325,8 +481,18 @@ def smtp_session(conn, context, secure):
             if not tls:
                 io.send(b"530 TLS first\r\n")
                 continue
-            blob = base64.b64decode(text.split(" ", 2)[2])
-            _, user, password = blob.split(b"\0")
+            if text.split(" ")[1].upper() == "LOGIN":
+                io.send(b"334 VXNlcm5hbWU6\r\n")
+                user = base64.b64decode(io.line() or b"")
+                io.send(b"334 UGFzc3dvcmQ6\r\n")
+                password = base64.b64decode(io.line() or b"")
+                LOGINS.append("LOGIN")
+            else:
+                blob = base64.b64decode(text.split(" ", 2)[2])
+                _, user, password = blob.split(b"\0")
+                LOGINS.append("PLAIN")
+            with open(os.path.join(OUTDIR, "logins"), "a") as handle:
+                handle.write(LOGINS[-1] + "\n")
             if user.decode() == USER and password.decode() == PASSWORD:
                 authed = True
                 io.send(b"235 ok\r\n")
@@ -385,7 +551,7 @@ def run_session(handler, conn, context, secure):
 
 
 def main():
-    global OUTDIR, ARRIVALS_MAX
+    global OUTDIR, ARRIVALS_MAX, EXTRA_CAPS, JAPANESE, SMTP_AUTH
     cert, key, OUTDIR = sys.argv[1:4]
     bind = "127.0.0.1"
     options = sys.argv[4:]
@@ -395,6 +561,14 @@ def main():
             bind = options.pop(0)
         elif name == "--arrivals":
             ARRIVALS_MAX = int(options.pop(0))
+        elif name == "--caps":
+            EXTRA_CAPS = options.pop(0)
+        elif name == "--large":
+            STORE.add("INBOX", large_message(), set())
+        elif name == "--smtp-auth":
+            SMTP_AUTH = options.pop(0)
+        elif name == "--japanese-folders":
+            JAPANESE = True
         else:
             sys.exit("fake-mail-server.py: unknown option " + name)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

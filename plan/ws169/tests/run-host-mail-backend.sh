@@ -14,11 +14,11 @@ out=$(mktemp -d "$base/run.XXXXXX")
 M=userland/desktop/mailer
 ${CC:-cc} -std=gnu99 -D_GNU_SOURCE -O1 -g -Wall -Wextra -Werror -pthread \
 	-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -I. \
-	plan/ws169/tests/host-mail-backend.c $M/tls.c $M/conn.c $M/imap.c $M/smtp.c $M/mime.c $M/compose.c $M/code.c \
+	plan/ws169/tests/host-mail-backend.c $M/tls.c $M/conn.c $M/imap.c $M/smtp.c $M/mime.c $M/jis.c $M/structure.c $M/compose.c $M/code.c \
 	-ldl -o "$out/host-mail-backend"
 ${CC:-cc} -std=gnu99 -D_GNU_SOURCE -O1 -g -Wall -Wextra -Werror -pthread \
 	-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -I. \
-	plan/ws169/tests/host-mail-sync.c $M/sync.c $M/tls.c $M/conn.c $M/imap.c $M/smtp.c $M/mime.c $M/compose.c $M/code.c \
+	plan/ws169/tests/host-mail-sync.c $M/sync.c $M/tls.c $M/conn.c $M/imap.c $M/smtp.c $M/mime.c $M/jis.c $M/structure.c $M/compose.c $M/code.c \
 	-ldl -o "$out/host-mail-sync"
 # The tests' CA and the server's certificate for localhost.
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=ws169-test-ca -keyout "$out/ca.key" -out "$out/ca.pem" \

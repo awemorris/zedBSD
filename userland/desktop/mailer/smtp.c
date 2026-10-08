@@ -14,6 +14,11 @@
  *
  * ws177-p015: a plain port whose server does not offer STARTTLS is
  * ML_ERROR_NO_TLS (the password is never sent in the clear).
+ *
+ * ws177-p016: the login follows what EHLO offers: AUTH PLAIN, or AUTH
+ * LOGIN when the server offers LOGIN alone.  The message is written in
+ * 7 bits (quoted-printable, compose.c), so a server without 8BITMIME
+ * takes it as it is.
  */
 
 #include "mail.h"
@@ -30,17 +35,25 @@
 /* The name the client gives in EHLO (no host name is told). */
 #define SMTP_HELLO_NAME		"[127.0.0.1]"
 
-/* What a session holds: the connection, the server's last reply's words, and whether it offers STARTTLS. */
+/*
+ * What a session holds: the connection, the server's last reply's words,
+ * whether it offers STARTTLS, and the logins its EHLO offers (AUTH PLAIN,
+ * AUTH LOGIN).
+ */
 struct smtp_session {
 	struct ml_conn conn;
 	char reply[ML_TEXT_MAX];
 	int starttls;
+	int auth_plain;
+	int auth_login;
 };
 
 static int smtp_command(struct smtp_session *session, int expected, const char *format, ...);
 static int smtp_reply(struct smtp_session *session, int expected);
 static int smtp_hello(struct smtp_session *session);
 static int smtp_login(struct smtp_session *session, const struct ml_account_config *account);
+static int smtp_login_words(struct smtp_session *session, const struct ml_account_config *account);
+static void smtp_offers(struct smtp_session *session, const char *line);
 static int smtp_data(struct smtp_session *session, const char *raw, size_t length);
 
 /*
@@ -188,6 +201,9 @@ smtp_reply(
 		if (offers == 0)
 			session->starttls = 1;
 
+		/* An EHLO line offering logins. */
+		smtp_offers(session, line);
+
 		/* The last line. */
 		if (line[0] != '\0' && line[1] != '\0' && line[2] != '\0' && line[3] != '-')
 			break;
@@ -216,8 +232,10 @@ smtp_hello(
 {
 	int error;
 
-	/* EHLO with the client's address as its name. */
+	/* EHLO with the client's address as its name (what it offers is read again). */
 	session->starttls = 0;
+	session->auth_plain = 0;
+	session->auth_login = 0;
 	error = smtp_command(session, 250, "EHLO %s", SMTP_HELLO_NAME);
 	if (error != 0)
 		return error;
@@ -226,7 +244,10 @@ smtp_hello(
 	return 0;
 }
 
-/* Logs in with AUTH PLAIN: base64 of "\0user\0password". */
+/*
+ * Logs in with AUTH PLAIN: base64 of "\0user\0password"; or with AUTH
+ * LOGIN when the server offers LOGIN and not PLAIN.
+ */
 static int
 smtp_login(
 	struct smtp_session *session,
@@ -238,6 +259,14 @@ smtp_login(
 	size_t password_length;
 	size_t encoded_length;
 	int error;
+
+	/* LOGIN alone offered. */
+	if (session->auth_login && !session->auth_plain) {
+		error = smtp_login_words(session, account);
+		if (error != 0)
+			return error;
+		return 0;
+	}
 
 	/* The authorization (empty), the user and the password, each after a NUL. */
 	user_length = strlen(account->user);
@@ -261,6 +290,89 @@ smtp_login(
 
 	/* Succeeded: logged in. */
 	return 0;
+}
+
+/* Logs in with AUTH LOGIN: the user and the password, each in base64 when the server asks (334). */
+static int
+smtp_login_words(
+	struct smtp_session *session,
+	const struct ml_account_config *account)
+{
+	char encoded[ML_TEXT_MAX * 2U];
+	size_t encoded_length;
+	int error;
+
+	/* AUTH LOGIN: 334 asks for the user. */
+	error = smtp_command(session, 334, "AUTH LOGIN");
+	if (error != 0)
+		return error;
+
+	/* The user; 334 asks for the password. */
+	encoded_length = ml_base64_encode((const unsigned char *)account->user, strlen(account->user), encoded, sizeof(encoded));
+	if (encoded_length == 0U)
+		return E2BIG;
+	error = smtp_command(session, 334, "%s", encoded);
+	if (error != 0)
+		return error;
+
+	/* The password; 235 is a login taken. */
+	encoded_length = ml_base64_encode((const unsigned char *)account->password, strlen(account->password), encoded, sizeof(encoded));
+	if (encoded_length == 0U)
+		return E2BIG;
+	error = smtp_command(session, 235, "%s", encoded);
+	memset(encoded, 0, sizeof(encoded));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: logged in. */
+	return 0;
+}
+
+/* Notes the logins an EHLO line offers ("250-AUTH PLAIN LOGIN", or the old "AUTH=LOGIN"). */
+static void
+smtp_offers(
+	struct smtp_session *session,
+	const char *line)
+{
+	const char *word;
+	size_t length;
+	int same;
+
+	/* An AUTH line. */
+	length = strlen(line);
+	if (length < 9U)
+		return;
+	same = strncmp(line + 4, "AUTH", 4U);
+	if (same != 0 || (line[8] != ' ' && line[8] != '='))
+		return;
+
+	/* Each mechanism after it. */
+	word = line + 9;
+	while (*word != '\0') {
+		/* The mechanism, up to a space. */
+		length = 0;
+		while (word[length] != '\0' && word[length] != ' ')
+			length++;
+
+		/* PLAIN. */
+		if (length == 5U) {
+			same = strncmp(word, "PLAIN", 5U);
+			if (same == 0)
+				session->auth_plain = 1;
+		}
+
+		/* LOGIN. */
+		if (length == 5U) {
+			same = strncmp(word, "LOGIN", 5U);
+			if (same == 0)
+				session->auth_login = 1;
+		}
+
+		/* The next one. */
+		word += length;
+		while (*word == ' ')
+			word++;
+	}
 }
 
 /* Sends DATA, the message with its leading dots doubled and its line ends CR LF, and the closing dot. */
