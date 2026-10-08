@@ -132,3 +132,9 @@ verdict は runner の物（pass・fail・needs-person）。「再現した」�
 - 2 つの helper（settings-wifi、x11）は bugs の config の image が要る。標準の AAT の image では needs-person（理由つき）になり、他は動く。
 - `bugs.*` は full の suite に入れていない（bugs の config が要る物があるため）。Bug を close した後も回帰に残す物は Q1 が `tests/scenarios/` の分野へ移して full に入れる（2026-10-06 の試験の整理の基準）。
 - 見積もりは 1 シナリオ 1〜2 分。helper の座標は log の行から取る（aatlib の方針）。log の行の名前は今の main の source で確かめた（読み）。QEMU では未実行なので、helper の誤りでの fail はありうる（試験の失敗として P2 に返す）。
+
+## 2026-10-08 夜の決定（T1-481 の前、Q1 の依頼で P2 が Board と ticket に記録）
+
+- ユーザー「BUG-220, BUG-236,BUG-227,  BUG-241,はcomplete.」→ (C) の 4 つは resolved。
+- ユーザー「Touchpadは動作確認できたので、下記をすべてclose します。…」→ (B) の touchpad の BUG-156・166・167・178・190・211・215・216・228・247・254 は resolved。BUG-218 は touchpad の部分だけ閉じ、Phone の padding（bugs.phone-padding）は T1-481 の結果待ち。
+- BUG-253 は Board の resolved を scheduled（実機の確認待ち）に戻した（BUG-255 の診断の UAT では蓋の事象が届かない起動があった）。
