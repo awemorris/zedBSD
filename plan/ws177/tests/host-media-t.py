@@ -1,0 +1,308 @@
+#!/usr/bin/env python3
+# ws177-p027〜p030 (案 T): makes media files with the host's ffmpeg, reads each with the media file reader
+# (host-media-t, built by host-media-t.sh) and with ffprobe, and compares the packets of each track: their times (in
+# microseconds, the reader's rounding), sizes, key flags and the Adler-32 of their bytes.  Some files are changed
+# after they are made (a box renamed, a track's ID, an offset past the end, the file cut short) and compared with
+# what the unchanged file's packets say the reader must find.  Seeks are checked against the key frames ffprobe
+# lists.  Prints one line a case and, last, "host-media-t: PASS" or "host-media-t: FAIL".
+#   python3 -I plan/ws177/tests/host-media-t.py DRIVER OUTDIR [GROUP...]
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+import json
+import os
+import struct
+import subprocess
+import sys
+
+DRIVER = sys.argv[1]
+OUT = sys.argv[2]
+GROUPS = sys.argv[3:] or ["mp4"]
+FAILED = []
+
+# The inputs every file is made from: 3 s of a test picture (10 fps) and a tone.
+VIDEO_IN = ["-f", "lavfi", "-i", "testsrc=size=64x48:rate=10"]
+AUDIO_IN = ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=8000"]
+H264 = ["-c:v", "libx264", "-g", "10", "-bf", "2", "-pix_fmt", "yuv420p"]
+AAC = ["-c:a", "aac", "-b:a", "16k"]
+
+
+def ffmpeg(name, args):
+    """Makes OUT/name with ffmpeg from the test inputs."""
+    path = os.path.join(OUT, name)
+    subprocess.run(["ffmpeg", "-v", "error", "-y"] + args + [path], check=True)
+    return path
+
+
+def scale_us(value, den, num=1):
+    """The reader's microseconds of value units of num/den seconds (whole seconds and the rest, each truncated)."""
+    units = den // num if num != 0 and den % num == 0 else None
+    if units is None:
+        return int(value * num * 1000000 // den)
+    whole = int(value / units) if value >= 0 else -int(-value // units)
+    rest = value - whole * units
+    return whole * 1000000 + int(rest * 1000000 / units)
+
+
+def probe(path):
+    """ffprobe's streams and, for each, its packets (pts_us, dts_us, size, key, adler32, pos)."""
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_data_hash", "adler32", "-show_streams",
+                          "-show_packets", "-of", "json", path], check=True, capture_output=True, text=True).stdout
+    data = json.loads(out)
+    streams = []
+    for stream in data["streams"]:
+        num, den = (int(x) for x in stream["time_base"].split("/"))
+        streams.append({"type": stream["codec_type"], "num": num, "den": den, "packets": []})
+    for packet in data.get("packets", []):
+        stream = streams[packet["stream_index"]]
+        pts = packet.get("pts", packet.get("dts"))
+        dts = packet.get("dts", pts)
+        stream["packets"].append({
+            "pts": scale_us(int(pts), stream["den"], stream["num"]),
+            "dts": scale_us(int(dts), stream["den"], stream["num"]),
+            "size": int(packet["size"]),
+            "key": 1 if "K" in packet["flags"] else 0,
+            "adler32": packet["data_hash"].split(":")[1],
+            "pos": int(packet.get("pos", -1)),
+        })
+    return [s for s in streams if s["type"] in ("video", "audio")]
+
+
+def run(path, seeks=()):
+    """The reader's tracks and packets of a file (and its seeks)."""
+    result = subprocess.run([DRIVER, path] + [str(s) for s in seeks], capture_output=True, text=True, timeout=60)
+    tracks, packets, end, afters = [], {}, None, []
+    for line in result.stdout.splitlines():
+        words = line.split()
+        fields = dict(w.split("=", 1) for w in words[1:] if "=" in w)
+        if words[0] == "OPEN":
+            return {"open": int(fields["error"]), "stderr": result.stderr}
+        if words[0] == "FORMAT":
+            fmt = {"name": words[1], "duration": int(fields["duration_us"])}
+        elif words[0] == "TRACK":
+            tracks.append(fields)
+            packets[int(words[1])] = []
+        elif words[0] == "PACKET":
+            packets[int(fields["track"])].append({"pts": int(fields["pts"]), "dts": int(fields["dts"]),
+                                                   "size": int(fields["size"]), "key": int(fields["key"]),
+                                                   "adler32": fields["adler32"]})
+        elif words[0] == "END":
+            end = int(fields["error"])
+        elif words[0] == "SEEK":
+            afters.append({"time": int(words[1]), "error": int(fields["error"]), "packets": {}})
+        elif words[0] == "AFTER":
+            afters[-1]["packets"][int(fields["track"])] = {"pts": int(fields["pts"]), "dts": int(fields["dts"]),
+                                                            "key": int(fields["key"])}
+    return {"open": 0, "format": fmt, "tracks": tracks, "packets": packets, "end": end, "afters": afters,
+            "status": result.returncode, "stderr": result.stderr}
+
+
+def compare(name, got, streams, dropped=None, fmt=None, seeks=(), ignore=()):
+    """Checks the reader's tracks against ffprobe's streams; returns a list of problems."""
+    problems = []
+    if got["open"] != 0:
+        return ["open error %d %s" % (got["open"], got.get("stderr", "")[:200])]
+    if got["status"] != 0 or got["stderr"]:
+        problems.append("exit %d stderr %s" % (got["status"], got["stderr"][:300]))
+    if fmt is not None and got["format"]["name"] != fmt:
+        problems.append("format %s, not %s" % (got["format"]["name"], fmt))
+    if got["end"] != 61:  # ENODATA
+        problems.append("reading ended with %s" % got["end"])
+    if len(got["tracks"]) != len(streams):
+        problems.append("%d tracks, ffprobe %d" % (len(got["tracks"]), len(streams)))
+        return problems
+    for index, stream in enumerate(streams):
+        mine = got["packets"][index]
+        theirs = stream["packets"]
+        keys = [k for k in ("pts", "dts", "size", "key", "adler32") if k not in ignore]
+        if len(mine) != len(theirs):
+            problems.append("track %d: %d packets, expected %d" % (index, len(mine), len(theirs)))
+        for i, (a, b) in enumerate(zip(mine, theirs)):
+            diff = [k for k in keys if a[k] != b[k]]
+            if diff:
+                problems.append("track %d packet %d: %s, expected %s" % (
+                    index, i, {k: a[k] for k in diff}, {k: b[k] for k in diff}))
+                break
+        if int(got["tracks"][index]["packets"]) != len(mine):
+            problems.append("track %d: packet_count %s, read %d" % (index, got["tracks"][index]["packets"], len(mine)))
+        want_dropped = 0 if dropped is None else dropped[index]
+        if int(got["tracks"][index]["dropped"]) != want_dropped:
+            problems.append("track %d: dropped %s, expected %d" % (index, got["tracks"][index]["dropped"], want_dropped))
+    for after in got["afters"]:
+        problems += check_seek(after, streams)
+    return problems
+
+
+def check_seek(after, streams):
+    """The first video packet after a seek is the last key frame at or before the time (the first one when none is)."""
+    problems = []
+    if after["error"] != 0:
+        return ["seek %d: error %d" % (after["time"], after["error"])]
+    for index, stream in enumerate(streams):
+        if stream["type"] != "video":
+            continue
+        keys = [p for p in stream["packets"] if p["key"]]
+        chosen = keys[0]
+        for p in keys:
+            if p["pts"] <= after["time"]:
+                chosen = p
+        got = after["packets"].get(index)
+        if got is None or got["pts"] != chosen["pts"] or not got["key"]:
+            problems.append("seek %d: video %s, expected the key frame at %d" % (after["time"], got, chosen["pts"]))
+        break
+    return problems
+
+
+def report(name, problems):
+    """Prints a case's result."""
+    if problems:
+        FAILED.append(name)
+        print("%s: FAILED" % name)
+        for problem in problems[:8]:
+            print("    " + problem)
+    else:
+        print("%s: ok" % name)
+
+
+# MP4 boxes: the ones that hold other boxes, and a walker that lists every box with its place.
+CONTAINERS = {b"moov", b"trak", b"mdia", b"minf", b"stbl", b"mvex", b"moof", b"traf", b"edts", b"dinf"}
+
+
+def boxes(data, start=0, end=None, depth=0):
+    """Every box in data[start:end] and inside the containers: (type, offset, header size, size, depth)."""
+    end = len(data) if end is None else end
+    found = []
+    position = start
+    while position + 8 <= end:
+        size, kind = struct.unpack(">I4s", data[position:position + 8])
+        header = 8
+        if size == 1:
+            size = struct.unpack(">Q", data[position + 8:position + 16])[0]
+            header = 16
+        elif size == 0:
+            size = end - position
+        if size < header or position + size > end:
+            break
+        found.append((kind, position, header, size, depth))
+        if kind in CONTAINERS:
+            found += boxes(data, position + header, position + size, depth + 1)
+        position += size
+    return found
+
+
+def mutate(source, name, change):
+    """Writes a copy of source as OUT/name after change(bytearray) edits it."""
+    data = bytearray(open(source, "rb").read())
+    change(data)
+    path = os.path.join(OUT, name)
+    open(path, "wb").write(data)
+    return path
+
+
+def rename_boxes(kind, new):
+    """A change that renames every box of a type (the reader then skips it)."""
+    def change(data):
+        for found, offset, header, size, depth in boxes(bytes(data)):
+            if found == kind:
+                data[offset + 4:offset + 8] = new
+    return change
+
+
+def renumber_tracks(mapping):
+    """A change that gives the tracks new IDs in tkhd, trex and tfhd."""
+    def change(data):
+        for kind, offset, header, size, depth in boxes(bytes(data)):
+            payload = offset + header
+            if kind == b"tkhd":
+                place = payload + (20 if data[payload] == 1 else 12)
+            elif kind in (b"trex", b"tfhd"):
+                place = payload + 4
+            else:
+                continue
+            old = struct.unpack(">I", data[place:place + 4])[0]
+            data[place:place + 4] = struct.pack(">I", mapping[old])
+    return change
+
+
+def cut(streams, length, fragment_end=None):
+    """The packets left when a file is cut at length, and how many of each track's are counted as left out."""
+    kept, dropped = [], []
+    for stream in streams:
+        inside = [p for p in stream["packets"] if p["pos"] + p["size"] <= length]
+        known = [p for p in stream["packets"] if p["pos"] + p["size"] > length and
+                 (fragment_end is None or p["pos"] < fragment_end)]
+        kept.append(dict(stream, packets=inside))
+        dropped.append(len(known))
+    return kept, dropped
+
+
+def group_mp4():
+    """ws177-p027: fragmented MP4 and damaged indexes."""
+    base = VIDEO_IN + AUDIO_IN + ["-t", "3"] + H264 + AAC + ["-use_editlist", "0"]
+    seeks = (0, 1000000, 1550000, 2900000, 10000000)
+    made = {}
+    for name, flags in (("fmp4-moof", "frag_keyframe+empty_moov+default_base_moof"),
+                        ("fmp4-base", "frag_keyframe+empty_moov"),
+                        ("fmp4-moov-first", "frag_keyframe"),
+                        ("fmp4-separate", "frag_keyframe+empty_moov+separate_moof+default_base_moof"),
+                        ("fmp4-every-frame", "frag_every_frame+empty_moov+default_base_moof"),
+                        ("mp4-faststart", "faststart")):
+        made[name] = ffmpeg(name + ".mp4", base + ["-movflags", flags])
+        streams = probe(made[name])
+        report(name, compare(name, run(made[name], seeks), streams, fmt="mp4", seeks=seeks))
+
+    # Without tfdt the times go on from the track's last sample: the same packets.
+    source = made["fmp4-moof"]
+    streams = probe(source)
+    path = mutate(source, "fmp4-no-tfdt.mp4", rename_boxes(b"tfdt", b"free"))
+    report("fmp4-no-tfdt", compare("fmp4-no-tfdt", run(path, seeks), streams, seeks=seeks))
+
+    # Tracks named by IDs that are not their places (7 and 3): the fragments still find them.
+    path = mutate(source, "fmp4-ids.mp4", renumber_tracks({1: 7, 2: 3}))
+    report("fmp4-ids", compare("fmp4-ids", run(path, seeks), streams, seeks=seeks))
+
+    # A fragmented file cut in the middle of a fragment's data: what is in the file plays; the cut fragment's
+    # samples past the end are counted, the fragments after it are not known.
+    data = open(source, "rb").read()
+    moofs = [offset for kind, offset, header, size, depth in boxes(data) if kind == b"moof"]
+    length = moofs[len(moofs) // 2] + 300
+    following = [m for m in moofs if m > length]
+    path = mutate(source, "fmp4-cut.mp4", lambda d: d.__delitem__(slice(length, None)))
+    kept, dropped = cut(streams, length, following[0] if following else None)
+    report("fmp4-cut", compare("fmp4-cut", run(path, (0, 1000000)), kept, dropped=dropped))
+
+    # A plain MP4 (index first) cut short: every sample past the end is known and counted.
+    source = made["mp4-faststart"]
+    streams = probe(source)
+    length = os.path.getsize(source) * 6 // 10
+    path = mutate(source, "mp4-cut.mp4", lambda d: d.__delitem__(slice(length, None)))
+    kept, dropped = cut(streams, length)
+    report("mp4-cut", compare("mp4-cut", run(path, (0, 1000000)), kept, dropped=dropped))
+
+    # A plain MP4 whose video track's last chunk is placed past the end of the file: that chunk's samples go.
+    data = open(source, "rb").read()
+    found = boxes(data)
+    stco = [(offset, header) for kind, offset, header, size, depth in found if kind == b"stco"][0]
+    count = struct.unpack(">I", data[stco[0] + stco[1] + 4:stco[0] + stco[1] + 8])[0]
+    place = stco[0] + stco[1] + 8 + (count - 1) * 4
+    last = struct.unpack(">I", data[place:place + 4])[0]
+
+    def move_last_chunk(d):
+        d[place:place + 4] = struct.pack(">I", 0xfffffff0)
+    path = mutate(source, "mp4-bad-offset.mp4", move_last_chunk)
+    kept = [dict(streams[0], packets=[p for p in streams[0]["packets"] if p["pos"] < last])] + streams[1:]
+    dropped = [len(streams[0]["packets"]) - len(kept[0]["packets"])] + [0] * (len(streams) - 1)
+    report("mp4-bad-offset", compare("mp4-bad-offset", run(path, (0,)), kept, dropped=dropped))
+
+
+def main():
+    """Runs the groups asked for."""
+    os.makedirs(OUT, exist_ok=True)
+    for group in GROUPS:
+        globals()["group_" + group]()
+    if FAILED:
+        print("host-media-t: FAIL (%s)" % " ".join(FAILED))
+        return 1
+    print("host-media-t: PASS")
+    return 0
+
+
+sys.exit(main())

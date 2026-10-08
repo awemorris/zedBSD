@@ -12,7 +12,14 @@
  * samples with their offsets, sizes, times and sync flags, and packets are
  * handed out in the order of their offsets in the file.  An edit list's
  * first edit shifts the presentation times (the delay B-frames bring, or
- * an empty edit at the start).  Fragmented files (moof) are not read.
+ * an empty edit at the start).
+ *
+ * A fragmented file (ws177-p027: a movie box with mvex, then movie
+ * fragments, moof) is read whole when it is opened: each fragment's track
+ * runs (traf: tfhd, tfdt, trun) are added to the samples of the track
+ * whose tkhd has the same track_ID, with the defaults of its trex.  A
+ * sample the index places outside the file (a file cut short, a damaged
+ * table) is left out and counted (mf_track.dropped_count).
  */
 
 #include "mediafile-private.h"
@@ -25,6 +32,38 @@
 
 /* The most samples a track may have (a day of 120 fps video is about 10 million). */
 #define MP4_SAMPLES_MAX		(16U * 1024U * 1024U)
+
+/* The largest movie fragment box read into memory. */
+#define MP4_MOOF_MAX		(16U * 1024U * 1024U)
+
+/*
+ * The latest decoding time a fragment's sample may have, in seconds (about
+ * 272 years): its time in microseconds, and the sums made of it, then fit
+ * in 64 bits whatever the track's timescale.
+ */
+#define MP4_SECONDS_MAX		((int64_t)1 << 33)
+
+/* The samples a track's list first makes room for when fragments add to it. */
+#define MP4_SAMPLES_FIRST	256U
+
+/* The fields a track fragment header (tfhd) holds, by its flags. */
+#define MP4_TFHD_BASE_OFFSET	0x000001U
+#define MP4_TFHD_DESCRIPTION	0x000002U
+#define MP4_TFHD_DURATION	0x000008U
+#define MP4_TFHD_SIZE		0x000010U
+#define MP4_TFHD_FLAGS		0x000020U
+#define MP4_TFHD_BASE_IS_MOOF	0x020000U
+
+/* The fields a track run (trun) holds, by its flags. */
+#define MP4_TRUN_DATA_OFFSET	0x000001U
+#define MP4_TRUN_FIRST_FLAGS	0x000004U
+#define MP4_TRUN_DURATION	0x000100U
+#define MP4_TRUN_SIZE		0x000200U
+#define MP4_TRUN_FLAGS		0x000400U
+#define MP4_TRUN_CTS		0x000800U
+
+/* A sample's flags: set when a decoder cannot start at it (sample_is_non_sync_sample). */
+#define MP4_SAMPLE_NON_SYNC	0x00010000U
 
 /* An esds's descriptor tags. */
 #define MP4_TAG_ES		3U
@@ -52,23 +91,53 @@ struct mp4_sample {
 };
 
 /*
- * One track's samples, the next one to hand out, its timescale and how far
- * its presentation times are moved (the edit list: subtracted from each).
+ * One track's samples (room for capacity of them; the movie fragments add
+ * to the list), the next one to hand out, its timescale and how far its
+ * presentation times are moved (the edit list: subtracted from each), the
+ * decoding time after its last sample (where a fragment without a tfdt
+ * goes on), its track_ID (tkhd), and the defaults its trex gives the
+ * samples of its fragments (duration, size, flags).
  */
 struct mp4_track {
 	struct mp4_sample *samples;
 	uint64_t count;
+	uint64_t capacity;
 	uint64_t next;
 	uint32_t timescale;
 	int64_t shift;
+	int64_t end;
+	uint32_t id;
+	uint32_t default_duration;
+	uint32_t default_size;
+	uint32_t default_flags;
 };
 
-/* The reader's state: the movie box and each track's samples. */
+/*
+ * The reader's state: the movie box, whether the movie is fragmented (its
+ * mvex, which says moof boxes follow), and each track's samples.
+ */
 struct mp4_state {
 	unsigned char *moov;
 	size_t moov_size;
 	uint32_t movie_timescale;
+	unsigned fragmented;
 	struct mp4_track tracks[MF_TRACK_MAX];
+};
+
+/*
+ * What one track fragment (traf) says its samples are, before each run
+ * (trun) gives its own: the track, where its data starts and goes on (the
+ * end of the run before), its decoding time, and the defaults of its tfhd
+ * (or the track's trex).
+ */
+struct mp4_fragment {
+	struct mp4_track *track;
+	uint64_t base;
+	uint64_t cursor;
+	int64_t time;
+	uint32_t duration;
+	uint32_t size;
+	uint32_t flags;
 };
 
 /* The tables of one track's sample table box, found before they are combined. */
@@ -90,6 +159,7 @@ static int mp4_read(struct mf_file *file, struct mf_packet *packet);
 static int mp4_seek(struct mf_file *file, int64_t time_us);
 static void mp4_close(struct mf_file *file);
 static int find_moov(struct mf_file *file, uint64_t *offset, uint64_t *size);
+static int top_box(struct mf_file *file, uint64_t position, char *type, uint64_t *header_size, uint64_t *box_size);
 static int box_next(const unsigned char *data, size_t size, size_t *offset, struct mp4_box *box);
 static int box_find(const unsigned char *data, size_t size, const char *type, struct mp4_box *box);
 static int read_movie_header(struct mp4_state *state, struct mf_file *file);
@@ -111,6 +181,18 @@ static int fill_times(const struct mp4_tables *tables, struct mp4_track *track);
 static int fill_sync(const struct mp4_tables *tables, struct mp4_track *track);
 static int64_t sample_pts_us(const struct mp4_track *track, const struct mp4_sample *sample);
 static int64_t sample_dts_us(const struct mp4_track *track, const struct mp4_sample *sample);
+static void read_track_id(const struct mp4_box *trak, struct mp4_track *track);
+static void read_extends(struct mf_file *file, struct mp4_state *state);
+static struct mp4_track *track_by_id(struct mf_file *file, struct mp4_state *state, uint32_t id);
+static int read_fragments(struct mf_file *file, struct mp4_state *state);
+static int read_moof(struct mf_file *file, struct mp4_state *state, uint64_t moof_offset, uint64_t size);
+static int read_traf(struct mf_file *file, struct mp4_state *state, const struct mp4_box *traf, uint64_t moof_offset, uint64_t *implicit);
+static int read_tfhd(struct mf_file *file, struct mp4_state *state, const struct mp4_box *tfhd, uint64_t moof_offset, uint64_t implicit, struct mp4_fragment *fragment);
+static void read_tfdt(const struct mp4_box *tfdt, struct mp4_fragment *fragment);
+static int read_trun(const struct mp4_box *trun, struct mp4_fragment *fragment);
+static int append_sample(struct mp4_track *track, const struct mp4_sample *sample);
+static void drop_outside(const struct mf_file *file, struct mp4_track *track, struct mf_track *info);
+static void finish_tracks(struct mf_file *file, struct mp4_state *state);
 
 /* A sample entry's type and the codec it carries. */
 struct mp4_entry_codec {
@@ -151,6 +233,7 @@ mp4_open(
 {
 	struct mp4_state *state;
 	struct mp4_box trak;
+	struct mp4_box mvex;
 	uint64_t offset;
 	uint64_t size;
 	size_t cursor;
@@ -190,6 +273,11 @@ mp4_open(
 	if (error != 0)
 		return error;
 
+	/* A movie extends box says the samples are (also) in movie fragments after the movie. */
+	error = box_find(state->moov, state->moov_size, "mvex", &mvex);
+	if (error == 0)
+		state->fragmented = 1U;
+
 	/* Each track. */
 	cursor = 0;
 	for (;;) {
@@ -216,6 +304,17 @@ mp4_open(
 	/* Refuses a movie without a track. */
 	if (file->track_count == 0)
 		return EINVAL;
+
+	/* A fragmented movie: the trex defaults, then the samples of every fragment. */
+	if (state->fragmented) {
+		read_extends(file, state);
+		error = read_fragments(file, state);
+		if (error != 0)
+			return error;
+	}
+
+	/* The samples outside the file left out, the counts and the lengths. */
+	finish_tracks(file, state);
 
 	/* Succeeded: the tracks are read. */
 	return 0;
@@ -391,42 +490,25 @@ find_moov(
 	uint64_t *offset,
 	uint64_t *size)
 {
-	unsigned char header[16];
+	char type[4];
 	uint64_t position;
+	uint64_t header_size;
 	uint64_t box_size;
-	size_t header_size;
 	int compared;
 	int error;
 
 	/* Each top-level box in turn. */
 	position = 0;
-	while (position + 8U <= file->size) {
-		/* Its header (16 bytes when the file has them, for a 64-bit size). */
-		header_size = 8U;
-		error = mf_read_at(file, position, header, 8U);
+	for (;;) {
+		/* Its header; the end of the file, or a damaged box, without a movie box. */
+		error = top_box(file, position, type, &header_size, &box_size);
+		if (error == ENODATA)
+			return EINVAL;
 		if (error != 0)
 			return error;
 
-		/* The size: 32-bit, 64-bit after the type (1), or to the end of the file (0). */
-		box_size = mf_be32(header);
-		if (box_size == 1U) {
-			error = mf_read_at(file, position + 8U, header + 8, 8U);
-			if (error != 0)
-				return error;
-
-			/* The 64-bit size. */
-			box_size = mf_be64(header + 8);
-			header_size = 16U;
-		} else if (box_size == 0U) {
-			box_size = file->size - position;
-		}
-
-		/* Refuses a box smaller than its header or past the end. */
-		if (box_size < header_size || box_size > file->size - position)
-			return EINVAL;
-
 		/* The movie box. */
-		compared = memcmp(header + 4, "moov", 4);
+		compared = memcmp(type, "moov", 4);
 		if (compared == 0) {
 			*offset = position + header_size;
 			*size = box_size - header_size;
@@ -436,9 +518,56 @@ find_moov(
 		/* The next box. */
 		position += box_size;
 	}
+}
 
-	/* No movie box: not a playable MP4 (or a fragmented one without it). */
-	return EINVAL;
+/*
+ * Reads the header of the top-level box at a position of the file: its
+ * type, the header's size and the box's size.  Returns 0, ENODATA when too
+ * few bytes are left for a header, EINVAL for a box smaller than its
+ * header or running past the end of the file, or the reading's error.
+ */
+static int
+top_box(
+	struct mf_file *file,
+	uint64_t position,
+	char *type,
+	uint64_t *header_size,
+	uint64_t *box_size)
+{
+	unsigned char header[16];
+	int error;
+
+	/* The end of the file (trailing bytes too few for a header are ignored). */
+	if (position > file->size || file->size - position < 8U)
+		return ENODATA;
+
+	/* The 32-bit size and the type. */
+	error = mf_read_at(file, position, header, 8U);
+	if (error != 0)
+		return error;
+
+	/* The size: 32-bit, 64-bit after the type (1), or to the end of the file (0). */
+	*header_size = 8U;
+	*box_size = mf_be32(header);
+	if (*box_size == 1U) {
+		error = mf_read_at(file, position + 8U, header + 8, 8U);
+		if (error != 0)
+			return error;
+
+		/* The 64-bit size. */
+		*box_size = mf_be64(header + 8);
+		*header_size = 16U;
+	} else if (*box_size == 0U) {
+		*box_size = file->size - position;
+	}
+
+	/* Refuses a box smaller than its header or past the end. */
+	if (*box_size < *header_size || *box_size > file->size - position)
+		return EINVAL;
+
+	/* Succeeded: the box's type and sizes. */
+	memcpy(type, header + 4, 4);
+	return 0;
 }
 
 /*
@@ -617,23 +746,25 @@ read_track(
 	if (error != 0)
 		return error;
 
-	/* The tables, then the samples they describe. */
+	/* The tables; a fragmented movie's track may have none, its samples all in the fragments. */
 	error = find_tables(&stbl, &tables);
-	if (error == ENODATA)
+	if (error == ENODATA && !state->fragmented)
 		return 0;
 
 	/* Refuses a damaged sample table. */
-	if (error != 0)
+	if (error != 0 && error != ENODATA)
 		return error;
 
-	/* The samples. */
-	error = build_samples(&tables, track);
-	if (error != 0)
-		return error;
+	/* The samples the tables describe. */
+	if (error == 0) {
+		error = build_samples(&tables, track);
+		if (error != 0)
+			return error;
+	}
 
-	/* The edit list's shift, and the track is counted. */
+	/* The track's ID (for its fragments), the edit list's shift, and the track is counted. */
+	read_track_id(trak, track);
 	read_edit_list(trak, state->movie_timescale, track);
-	info->packet_count = track->count;
 	file->track_count++;
 
 	/* Succeeded: the track is read. */
@@ -1231,8 +1362,9 @@ fill_sizes(
 	if (track->samples == NULL)
 		return ENOMEM;
 
-	/* The count of samples listed. */
+	/* The count of samples listed, which is all the list has room for. */
 	track->count = count;
+	track->capacity = count;
 
 	/* Each size: the fixed one, or its entry of the field's width. */
 	for (i = 0; i < count; i++) {
@@ -1384,6 +1516,9 @@ fill_times(
 		}
 	}
 
+	/* A fragment without its own decoding time goes on after the last sample. */
+	track->end = time;
+
 	/* No composition offsets: presentation is decoding order. */
 	if (!tables->has_ctts)
 		return 0;
@@ -1484,4 +1619,660 @@ sample_dts_us(
 {
 	/* Decoding time less the shift. */
 	return mf_scale_us(sample->dts - track->shift, track->timescale);
+}
+
+/*
+ * Reads a track's ID from its header (tkhd), which its fragments name it
+ * by.  A track without a header keeps 0, which no fragment names.
+ */
+static void
+read_track_id(
+	const struct mp4_box *trak,
+	struct mp4_track *track)
+{
+	struct mp4_box tkhd;
+	int error;
+
+	/* The track header. */
+	error = box_find(trak->payload, trak->size, "tkhd", &tkhd);
+	if (error != 0)
+		return;
+
+	/* Version 1 has 64-bit creation and modification times before the ID; version 0 32-bit ones. */
+	if (tkhd.size >= 24U && tkhd.payload[0] == 1U)
+		track->id = mf_be32(tkhd.payload + 20);
+	else if (tkhd.size >= 16U)
+		track->id = mf_be32(tkhd.payload + 12);
+}
+
+/*
+ * Reads the movie extends box's track extends (trex): the defaults each
+ * track's fragments use for a sample's duration, size and flags when
+ * neither the fragment nor the run gives them.
+ */
+static void
+read_extends(
+	struct mf_file *file,
+	struct mp4_state *state)
+{
+	struct mp4_box mvex;
+	struct mp4_box trex;
+	struct mp4_track *track;
+	uint32_t id;
+	size_t offset;
+	int compared;
+	int error;
+
+	/* The movie extends box. */
+	error = box_find(state->moov, state->moov_size, "mvex", &mvex);
+	if (error != 0)
+		return;
+
+	/* Each of its boxes. */
+	offset = 0;
+	for (;;) {
+		/* The next one; the end or a damaged one ends the defaults. */
+		error = box_next(mvex.payload, mvex.size, &offset, &trex);
+		if (error != 0)
+			return;
+
+		/* Only a whole track extends box (version and flags, then five numbers). */
+		compared = memcmp(trex.type, "trex", 4);
+		if (compared != 0 || trex.size < 24U)
+			continue;
+
+		/* The track it is for; one left out has no defaults to keep. */
+		id = mf_be32(trex.payload + 4);
+		track = track_by_id(file, state, id);
+		if (track == NULL)
+			continue;
+
+		/* Its defaults (the sample description index after the ID is not used: the first entry is). */
+		track->default_duration = mf_be32(trex.payload + 12);
+		track->default_size = mf_be32(trex.payload + 16);
+		track->default_flags = mf_be32(trex.payload + 20);
+	}
+}
+
+/*
+ * Finds the track whose track_ID is id, or NULL when no track read has it.
+ */
+static struct mp4_track *
+track_by_id(
+	struct mf_file *file,
+	struct mp4_state *state,
+	uint32_t id)
+{
+	unsigned i;
+
+	/* ID 0 names no track. */
+	if (id == 0)
+		return NULL;
+
+	/* Each track read. */
+	for (i = 0; i < file->track_count; i++) {
+		/* The track with the ID. */
+		if (state->tracks[i].id == id)
+			return &state->tracks[i];
+	}
+
+	/* No track has it (or it was left out). */
+	return NULL;
+}
+
+/*
+ * Reads every movie fragment (moof) among the file's top-level boxes and
+ * adds its samples to their tracks.  A box running past the end of the
+ * file, or a damaged fragment, ends the fragments (a file cut short plays
+ * to where it ends).  Returns 0, or ENOMEM.
+ */
+static int
+read_fragments(
+	struct mf_file *file,
+	struct mp4_state *state)
+{
+	char type[4];
+	uint64_t position;
+	uint64_t header_size;
+	uint64_t box_size;
+	int compared;
+	int error;
+
+	/* Each top-level box in turn. */
+	position = 0;
+	for (;;) {
+		/* Its header; the end of the file or a box cut short ends the fragments. */
+		error = top_box(file, position, type, &header_size, &box_size);
+		if (error == ENODATA || error == EINVAL)
+			return 0;
+		if (error != 0)
+			return error;
+
+		/* A movie fragment, read whole (with its header, as offsets in it count from its start). */
+		compared = memcmp(type, "moof", 4);
+		if (compared == 0) {
+			error = read_moof(file, state, position, box_size);
+			if (error == ENOMEM)
+				return error;
+
+			/* A damaged fragment ends the fragments. */
+			if (error != 0)
+				return 0;
+		}
+
+		/* The next box. */
+		position += box_size;
+	}
+}
+
+/*
+ * Reads one movie fragment at moof_offset of the file (size bytes with its
+ * header) and adds the samples of each of its track fragments.  Returns 0,
+ * EINVAL for a damaged fragment, ENOMEM, or the reading's error.
+ */
+static int
+read_moof(
+	struct mf_file *file,
+	struct mp4_state *state,
+	uint64_t moof_offset,
+	uint64_t size)
+{
+	unsigned char *moof;
+	struct mp4_box box;
+	struct mp4_box traf;
+	uint64_t implicit;
+	size_t offset;
+	int compared;
+	int error;
+
+	/* Refuses a fragment too large to be real. */
+	if (size > MP4_MOOF_MAX)
+		return EINVAL;
+
+	/* The fragment's bytes. */
+	moof = malloc((size_t)size);
+	if (moof == NULL)
+		return ENOMEM;
+
+	/* Read from the file. */
+	error = mf_read_at(file, moof_offset, moof, (size_t)size);
+	if (error != 0) {
+		free(moof);
+		return error;
+	}
+
+	/* The fragment itself, inside the box read (box_next takes its header off). */
+	offset = 0;
+	error = box_next(moof, (size_t)size, &offset, &box);
+	if (error != 0) {
+		free(moof);
+		return EINVAL;
+	}
+
+	/* The first track fragment's data starts at the fragment, unless its header says where. */
+	implicit = moof_offset;
+	offset = 0;
+	for (;;) {
+		/* The next child of the fragment; its end ends the reading. */
+		error = box_next(box.payload, box.size, &offset, &traf);
+		if (error == ENODATA)
+			break;
+
+		/* Refuses a damaged fragment. */
+		if (error != 0) {
+			free(moof);
+			return EINVAL;
+		}
+
+		/* Only the track fragments. */
+		compared = memcmp(traf.type, "traf", 4);
+		if (compared != 0)
+			continue;
+
+		/* The track fragment's samples. */
+		error = read_traf(file, state, &traf, moof_offset, &implicit);
+		if (error != 0) {
+			free(moof);
+			return error;
+		}
+	}
+
+	/* Succeeded: the fragment's samples are in their tracks. */
+	free(moof);
+	return 0;
+}
+
+/*
+ * Reads one track fragment: its header (tfhd), its decoding time (tfdt)
+ * and each of its runs (trun), whose samples are added to the track.
+ * *implicit is where its data starts when the header does not say, and
+ * becomes where its data ends (for the next track fragment).  A fragment of
+ * a track that was left out is skipped.  Returns 0, EINVAL or ENOMEM.
+ */
+static int
+read_traf(
+	struct mf_file *file,
+	struct mp4_state *state,
+	const struct mp4_box *traf,
+	uint64_t moof_offset,
+	uint64_t *implicit)
+{
+	struct mp4_fragment fragment;
+	struct mp4_box tfhd;
+	struct mp4_box tfdt;
+	struct mp4_box trun;
+	size_t offset;
+	int compared;
+	int error;
+
+	/* The header, which names the track; a fragment without one is damaged. */
+	error = box_find(traf->payload, traf->size, "tfhd", &tfhd);
+	if (error != 0)
+		return EINVAL;
+
+	/* The track, its defaults and where the data starts. */
+	error = read_tfhd(file, state, &tfhd, moof_offset, *implicit, &fragment);
+	if (error == ENOENT)
+		return 0;
+	if (error != 0)
+		return error;
+
+	/* The decoding time of its first sample: its tfdt's, else after the track's last sample. */
+	error = box_find(traf->payload, traf->size, "tfdt", &tfdt);
+	if (error == 0)
+		read_tfdt(&tfdt, &fragment);
+
+	/* Each run of the fragment. */
+	offset = 0;
+	for (;;) {
+		/* The next child; the end ends the fragment. */
+		error = box_next(traf->payload, traf->size, &offset, &trun);
+		if (error == ENODATA)
+			break;
+
+		/* Refuses a damaged track fragment. */
+		if (error != 0)
+			return EINVAL;
+
+		/* Only the runs. */
+		compared = memcmp(trun.type, "trun", 4);
+		if (compared != 0)
+			continue;
+
+		/* The run's samples. */
+		error = read_trun(&trun, &fragment);
+		if (error != 0)
+			return error;
+	}
+
+	/* The next track fragment's data starts after this one's, and the track goes on from its time. */
+	*implicit = fragment.cursor;
+	fragment.track->end = fragment.time;
+
+	/* Succeeded: the samples are in the track. */
+	return 0;
+}
+
+/*
+ * Reads a track fragment header: the track it is for, where its data
+ * starts (its base data offset; else the fragment's start when it says so,
+ * else implicit) and the defaults of its samples (else the track's trex).
+ * Returns 0, ENOENT for a track that was left out, or EINVAL.
+ */
+static int
+read_tfhd(
+	struct mf_file *file,
+	struct mp4_state *state,
+	const struct mp4_box *tfhd,
+	uint64_t moof_offset,
+	uint64_t implicit,
+	struct mp4_fragment *fragment)
+{
+	const unsigned char *field;
+	const unsigned char *end;
+	uint32_t flags;
+	uint32_t id;
+
+	/* The version and flags, then the track's ID. */
+	if (tfhd->size < 8U)
+		return EINVAL;
+
+	/* The flags say which fields follow the ID. */
+	memset(fragment, 0, sizeof(*fragment));
+	flags = mf_be32(tfhd->payload) & 0x00ffffffU;
+	id = mf_be32(tfhd->payload + 4);
+
+	/* The track; a fragment of a track that was left out is skipped. */
+	fragment->track = track_by_id(file, state, id);
+	if (fragment->track == NULL)
+		return ENOENT;
+
+	/* The track's defaults and time, which the header's fields replace. */
+	fragment->duration = fragment->track->default_duration;
+	fragment->size = fragment->track->default_size;
+	fragment->flags = fragment->track->default_flags;
+	fragment->time = fragment->track->end;
+	fragment->base = implicit;
+	if ((flags & MP4_TFHD_BASE_IS_MOOF) != 0U)
+		fragment->base = moof_offset;
+
+	/* The optional fields, in their order, each present when its flag is set. */
+	field = tfhd->payload + 8;
+	end = tfhd->payload + tfhd->size;
+
+	/* The base data offset, 64 bits. */
+	if ((flags & MP4_TFHD_BASE_OFFSET) != 0U) {
+		if (end - field < 8)
+			return EINVAL;
+		fragment->base = mf_be64(field);
+		field += 8;
+	}
+
+	/* The sample description index (not used: the first entry is). */
+	if ((flags & MP4_TFHD_DESCRIPTION) != 0U) {
+		if (end - field < 4)
+			return EINVAL;
+		field += 4;
+	}
+
+	/* The default duration. */
+	if ((flags & MP4_TFHD_DURATION) != 0U) {
+		if (end - field < 4)
+			return EINVAL;
+		fragment->duration = mf_be32(field);
+		field += 4;
+	}
+
+	/* The default size. */
+	if ((flags & MP4_TFHD_SIZE) != 0U) {
+		if (end - field < 4)
+			return EINVAL;
+		fragment->size = mf_be32(field);
+		field += 4;
+	}
+
+	/* The default flags. */
+	if ((flags & MP4_TFHD_FLAGS) != 0U) {
+		if (end - field < 4)
+			return EINVAL;
+		fragment->flags = mf_be32(field);
+	}
+
+	/* Succeeded: the first run starts at the base. */
+	fragment->cursor = fragment->base;
+	return 0;
+}
+
+/*
+ * Reads a track fragment's decoding time (tfdt): the decoding time of its
+ * first sample, 64 bits in version 1 and 32 in version 0.  A box too short
+ * for its version is ignored.
+ */
+static void
+read_tfdt(
+	const struct mp4_box *tfdt,
+	struct mp4_fragment *fragment)
+{
+	uint64_t time;
+
+	/* Version 1: 64 bits, kept within what a signed time holds. */
+	if (tfdt->size >= 12U && tfdt->payload[0] == 1U) {
+		time = mf_be64(tfdt->payload + 4);
+		fragment->time = (int64_t)(time & 0x7fffffffffffffffULL);
+		return;
+	}
+
+	/* Version 0: 32 bits. */
+	if (tfdt->size >= 8U && tfdt->payload[0] == 0U)
+		fragment->time = mf_be32(tfdt->payload + 4);
+}
+
+/*
+ * Reads one track run and adds its samples to the fragment's track: each
+ * sample's duration, size, flags and composition offset (from the run, else
+ * the fragment's defaults), its bytes one after another from the run's data
+ * offset (from the fragment's base; else after the run before), and its
+ * decoding time the running sum of the durations.  Returns 0, EINVAL or
+ * ENOMEM.
+ */
+static int
+read_trun(
+	const struct mp4_box *trun,
+	struct mp4_fragment *fragment)
+{
+	struct mp4_sample sample;
+	const unsigned char *field;
+	uint32_t flags;
+	uint32_t count;
+	uint32_t first_flags;
+	uint32_t sample_flags;
+	uint32_t duration;
+	uint32_t i;
+	size_t per_sample;
+	size_t needed;
+	unsigned has_first_flags;
+	int error;
+
+	/* The version and flags, and the count of samples. */
+	if (trun->size < 8U)
+		return EINVAL;
+
+	/* The flags say which fields the run and each sample hold. */
+	flags = mf_be32(trun->payload) & 0x00ffffffU;
+	count = mf_be32(trun->payload + 4);
+	field = trun->payload + 8;
+	needed = 8U;
+
+	/* The fields of each sample, 4 bytes each. */
+	per_sample = 0;
+	if ((flags & MP4_TRUN_DURATION) != 0U)
+		per_sample += 4U;
+	if ((flags & MP4_TRUN_SIZE) != 0U)
+		per_sample += 4U;
+	if ((flags & MP4_TRUN_FLAGS) != 0U)
+		per_sample += 4U;
+	if ((flags & MP4_TRUN_CTS) != 0U)
+		per_sample += 4U;
+
+	/* The run's own fields. */
+	if ((flags & MP4_TRUN_DATA_OFFSET) != 0U)
+		needed += 4U;
+	if ((flags & MP4_TRUN_FIRST_FLAGS) != 0U)
+		needed += 4U;
+
+	/* Refuses a run longer than its box, or one that would make the track too long. */
+	if (count > MP4_SAMPLES_MAX || fragment->track->count + count > MP4_SAMPLES_MAX)
+		return EINVAL;
+	if (needed > trun->size || (uint64_t)count * per_sample > trun->size - needed)
+		return EINVAL;
+
+	/* The data offset, signed, from the fragment's base; without one the run goes on after the last. */
+	if ((flags & MP4_TRUN_DATA_OFFSET) != 0U) {
+		fragment->cursor = fragment->base + (uint64_t)(int64_t)(int32_t)mf_be32(field);
+		field += 4;
+	}
+
+	/* The first sample's own flags (a key frame among frames that are not). */
+	has_first_flags = 0;
+	first_flags = 0;
+	if ((flags & MP4_TRUN_FIRST_FLAGS) != 0U) {
+		has_first_flags = 1U;
+		first_flags = mf_be32(field);
+		field += 4;
+	}
+
+	/* Each sample. */
+	for (i = 0; i < count; i++) {
+		/* The defaults, which the sample's own fields replace. */
+		memset(&sample, 0, sizeof(sample));
+		duration = fragment->duration;
+		sample.size = fragment->size;
+		sample_flags = fragment->flags;
+		if (i == 0 && has_first_flags)
+			sample_flags = first_flags;
+
+		/* Its duration. */
+		if ((flags & MP4_TRUN_DURATION) != 0U) {
+			duration = mf_be32(field);
+			field += 4;
+		}
+
+		/* Its size. */
+		if ((flags & MP4_TRUN_SIZE) != 0U) {
+			sample.size = mf_be32(field);
+			field += 4;
+		}
+
+		/* Its flags. */
+		if ((flags & MP4_TRUN_FLAGS) != 0U) {
+			sample_flags = mf_be32(field);
+			field += 4;
+		}
+
+		/* Its composition offset (read as signed, as writers use both versions so). */
+		if ((flags & MP4_TRUN_CTS) != 0U) {
+			sample.cts = (int32_t)mf_be32(field);
+			field += 4;
+		}
+
+		/* Refuses a time too late to be real (a damaged tfdt or durations). */
+		if (fragment->time / (int64_t)fragment->track->timescale > MP4_SECONDS_MAX)
+			return EINVAL;
+
+		/* Where its bytes are, when it decodes, and whether a decoder can start at it. */
+		sample.offset = fragment->cursor;
+		sample.dts = fragment->time;
+		sample.key = 1U;
+		if ((sample_flags & MP4_SAMPLE_NON_SYNC) != 0U)
+			sample.key = 0;
+
+		/* Added to the track's list. */
+		error = append_sample(fragment->track, &sample);
+		if (error != 0)
+			return error;
+
+		/* The next sample follows its bytes and its duration. */
+		fragment->cursor += sample.size;
+		fragment->time += duration;
+	}
+
+	/* Succeeded: the run's samples are in the track. */
+	return 0;
+}
+
+/*
+ * Adds a sample at the end of a track's list, making room by doubling it.
+ * Returns 0 or ENOMEM.
+ */
+static int
+append_sample(
+	struct mp4_track *track,
+	const struct mp4_sample *sample)
+{
+	struct mp4_sample *samples;
+	uint64_t capacity;
+
+	/* Room for one more: twice the list (MP4_SAMPLES_FIRST at least). */
+	if (track->count == track->capacity) {
+		capacity = track->capacity * 2U;
+		if (capacity < MP4_SAMPLES_FIRST)
+			capacity = MP4_SAMPLES_FIRST;
+
+		/* The larger list. */
+		samples = realloc(track->samples, (size_t)capacity * sizeof(*samples));
+		if (samples == NULL)
+			return ENOMEM;
+
+		/* The track keeps it. */
+		track->samples = samples;
+		track->capacity = capacity;
+	}
+
+	/* The sample. */
+	track->samples[track->count] = *sample;
+	track->count++;
+
+	/* Succeeded: the list holds the sample. */
+	return 0;
+}
+
+/*
+ * Leaves out of a track the samples its index places outside the file
+ * (or that are larger than any packet read), keeping the others in their
+ * order, and counts them in the track's information.
+ */
+static void
+drop_outside(
+	const struct mf_file *file,
+	struct mp4_track *track,
+	struct mf_track *info)
+{
+	const struct mp4_sample *sample;
+	uint64_t kept;
+	uint64_t i;
+
+	/* Each sample, moved down over the ones left out. */
+	kept = 0;
+	for (i = 0; i < track->count; i++) {
+		/* A sample past the end of the file, running past it, or too large is left out. */
+		sample = &track->samples[i];
+		if (sample->offset > file->size ||
+		    sample->size > file->size - sample->offset ||
+		    sample->size > MF_PACKET_MAX) {
+			info->dropped_count++;
+			continue;
+		}
+
+		/* Kept, in its order. */
+		track->samples[kept] = *sample;
+		kept++;
+	}
+
+	/* The samples kept. */
+	track->count = kept;
+}
+
+/*
+ * Finishes each track once its samples are all known: leaves out the ones
+ * outside the file, counts the packets, and gives a track (and the movie)
+ * the length its samples make when its header has none or a shorter one
+ * (a fragmented movie's header says 0, or the length before its fragments).
+ */
+static void
+finish_tracks(
+	struct mf_file *file,
+	struct mp4_state *state)
+{
+	struct mp4_track *track;
+	struct mf_track *info;
+	int64_t length_us;
+	unsigned from_tracks;
+	unsigned i;
+
+	/* The movie's length comes from its tracks when its header has none, or fragments add to it. */
+	from_tracks = 0;
+	if (file->duration_us == 0 || state->fragmented)
+		from_tracks = 1U;
+
+	/* Each track. */
+	for (i = 0; i < file->track_count; i++) {
+		/* The samples outside the file left out, and the count of the rest. */
+		track = &state->tracks[i];
+		info = &file->tracks[i];
+		drop_outside(file, track, info);
+		info->packet_count = track->count;
+
+		/* The length the samples make: to the decoding time after the last one. */
+		length_us = 0;
+		if (track->count != 0 && track->end > track->shift)
+			length_us = mf_scale_us(track->end - track->shift, track->timescale);
+
+		/* The track's length, when its header has none or a shorter one. */
+		if (length_us > info->duration_us)
+			info->duration_us = length_us;
+
+		/* The movie is as long as its longest track. */
+		if (from_tracks && info->duration_us > file->duration_us)
+			file->duration_us = info->duration_us;
+	}
 }
