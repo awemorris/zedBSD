@@ -858,6 +858,8 @@ te_app_drop_text(
 	/* Only a drop over the text. */
 	if (!app->drop_over)
 		return;
+
+	/* The caret's place is taken, and the caret goes. */
 	position = app->drop_position;
 	app->drop_over = 0;
 
@@ -1244,6 +1246,8 @@ app_drag_out(
 	te_edit_selection(app, &start, &end);
 	if (end <= start)
 		return;
+
+	/* A selection past what a file holds is cut short. */
 	if (end - start > TE_FILE_MAX)
 		end = start + TE_FILE_MAX;
 

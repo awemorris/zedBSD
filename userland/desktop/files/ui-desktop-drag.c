@@ -178,7 +178,9 @@ fm_desktop_drop_event(
 
 		/* A picture or text without file names becomes a new file on the desktop (ws189-p003). */
 		app->drop_content = 0;
-		if (!app->drop_self && !app->drop_files && (app->drop_kinds & (KL_DROP_IMAGE | KL_DROP_TEXT)) != 0U)
+		if (!app->drop_self &&
+		    !app->drop_files &&
+		    (app->drop_kinds & (KL_DROP_IMAGE | KL_DROP_TEXT)) != 0U)
 			app->drop_content = 1;
 		app->drag_target = FM_DRAG_NONE;
 		desk->drop_item = -1;

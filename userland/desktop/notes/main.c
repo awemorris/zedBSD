@@ -5183,7 +5183,9 @@ app_drag_out(
 	if (app->selected_kind != PDF_EDIT_IMAGE)
 		return;
 	error = app_selected_state(app, &state);
-	if (error != 0 || state.image == NULL || state.image->data == NULL)
+	if (error != 0 ||
+	    state.image == NULL ||
+	    state.image->data == NULL)
 		return;
 
 	/* The drag, from the press, its picture filled in after it starts. */

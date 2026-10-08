@@ -67,21 +67,23 @@ kwl_lock_clock_layout(
 	int32_t limit;
 	int32_t room;
 
-	/* The time's size from the shorter side, within its least and largest. */
+	/* Takes the output's shorter side as the base of the time's size. */
 	shorter = width;
 	if (height < shorter)
 		shorter = height;
+
+	/* Sizes the time as a share of that side, within its least and largest. */
 	pixels = shorter * LOCK_CLOCK_SHARE / 100;
 	if (pixels < LOCK_CLOCK_LEAST)
 		pixels = LOCK_CLOCK_LEAST;
 	if (pixels > LOCK_CLOCK_MOST)
 		pixels = LOCK_CLOCK_MOST;
 
-	/* The two lines centred a third of the way down. */
+	/* Centres the two lines a third of the way down. */
 	block = lock_clock_height(pixels);
 	top = height * LOCK_CLOCK_CENTRE / 100 - block / 2;
 
-	/* A clock that would come near the card goes up to keep the gap. */
+	/* Moves a clock that would come near the card up to keep the gap. */
 	limit = card_top - LOCK_CLOCK_GAP;
 	if (top + block > limit)
 		top = limit - block;

@@ -696,10 +696,12 @@ ph_drag_start(
 	size_t png_size;
 	int error;
 
-	/* The photo, and its file as a URI with its line's end. */
+	/* Only a photo of the library. */
 	list = ph_photos(&count);
 	if (photo < 0 || (size_t)photo >= count)
 		return;
+
+	/* Its file as a URI with its line's end. */
 	error = ph_uri(list[photo].path, uri, sizeof(uri));
 	if (error != 0) {
 		ph_log("DND failed photo=%ld errno=%d", photo, error);
@@ -857,9 +859,17 @@ ph_uri(
 
 		/* Letters, digits, "-._~" and "/" stay as they are. */
 		plain = 0;
-		if ((*byte >= 'a' && *byte <= 'z') || (*byte >= 'A' && *byte <= 'Z') || (*byte >= '0' && *byte <= '9'))
+		if (*byte >= 'a' && *byte <= 'z')
 			plain = 1;
-		if (*byte == '-' || *byte == '.' || *byte == '_' || *byte == '~' || *byte == '/')
+		if (*byte >= 'A' && *byte <= 'Z')
+			plain = 1;
+		if (*byte >= '0' && *byte <= '9')
+			plain = 1;
+		if (*byte == '-' ||
+		    *byte == '.' ||
+		    *byte == '_' ||
+		    *byte == '~' ||
+		    *byte == '/')
 			plain = 1;
 		if (plain) {
 			uri[used++] = (char)*byte;

@@ -395,6 +395,8 @@ probe_connect(
 	/* The seat's data device. */
 	probe->device = wl_data_device_manager_get_data_device(probe->manager, probe->seat);
 	wl_data_device_add_listener(probe->device, &device_listener, probe);
+
+	/* A second device on the same seat, as a program with two windows has (--two-devices). */
 	if (probe->two_devices) {
 		probe->second = wl_data_device_manager_get_data_device(probe->manager, probe->seat);
 		wl_data_device_add_listener(probe->second, &second_listener, probe);
@@ -944,6 +946,8 @@ device_enter(
 	probe->drag_serial = serial;
 	printf("DATAPROBE drag enter text=%d\n", probe->offer_text);
 	fflush(stdout);
+
+	/* A drag without data has nothing to take. */
 	if (offer == NULL)
 		return;
 
@@ -1228,6 +1232,8 @@ second_enter(
 	probe->second_offer = offer;
 	printf("DATAPROBE drag enter device=2 text=%d\n", probe->offer_text);
 	fflush(stdout);
+
+	/* A drag without data has nothing to take. */
 	if (offer == NULL)
 		return;
 

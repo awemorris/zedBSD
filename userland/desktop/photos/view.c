@@ -88,13 +88,13 @@
 #define VIEW_ID_NEXT		12U
 #define VIEW_ID_IMPORT		13U
 #define VIEW_ID_PICTURE		14U
-
-/* How far a press held on a photo moves before the photo is dragged out of the window (pixels, ws189-p003). */
-#define VIEW_DRAG_DISTANCE	8
 #define VIEW_ID_CARD_ALBUM	1000U
 #define VIEW_ID_CARD_NAME	15U
 #define VIEW_ID_CARD_NEW	16U
 #define VIEW_ID_CARD_CANCEL	17U
+
+/* How far a press held on a photo moves before the photo is dragged out of the window (pixels, ws189-p003). */
+#define VIEW_DRAG_DISTANCE	8
 
 /* The card of Add to Album: its width, a row's height, and the most albums it lists. */
 #define VIEW_CARD_WIDTH		360
@@ -1942,7 +1942,9 @@ view_drag_arm(
 	double y;
 
 	/* The same press seen again: only its frame. */
-	if (view->drag_armed && view->drag_photo == photo && view->drag_frame + 1U >= view->frame) {
+	if (view->drag_armed &&
+	    view->drag_photo == photo &&
+	    view->drag_frame + 1U >= view->frame) {
 		view->drag_frame = view->frame;
 		return;
 	}
