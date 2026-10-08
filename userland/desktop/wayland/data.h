@@ -23,6 +23,7 @@ void kwl_data_drag_motion(struct kwl_server *server, uint32_t time);
 void kwl_data_drag_release(struct kwl_server *server);
 void kwl_data_drag_cancel(struct kwl_server *server);
 void kwl_data_drag_mark(struct kwl_server *server);
+void kwl_data_tick(struct kwl_server *server);
 int kwl_data_emit_string(struct kwl_client *client, uint32_t id, uint32_t opcode, const char *text, int descriptor);
 int kwl_data_read_string(const unsigned char *bytes, size_t size, size_t offset, const char **text, size_t *next);
 

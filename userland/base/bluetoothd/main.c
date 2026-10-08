@@ -84,6 +84,9 @@
 
 /* The display whose owner is the seat's user, the greeter's account, and the group whose members may change things. */
 #define BTD_SEAT_NODE		"/dev/gpu0"
+
+/* The file that keeps the user's switch (design D11a: the state before is kept, on the first time), in the keys' folder. */
+#define BTD_POWER_FILE		BTD_KEYS_FOLDER "/power"
 #define BTD_GREETER		"_greeter"
 #define BTD_ADMIN_GROUP		"wheel"
 #define BTD_GROUPS_MAX		64
@@ -130,6 +133,10 @@ static void btd_agent(int index);
 static void btd_answer(int index, int accepted);
 static void btd_forget(struct btd_client *client, const char *argument);
 static void btd_bonds(struct btd_client *client);
+static void btd_power(struct btd_client *client, const char *argument);
+static void btd_power_load(void);
+static int btd_power_save(void);
+static void btd_question_end(void);
 static void btd_ask(void *context, unsigned kind, uint32_t number);
 static void btd_paired(void *context, const char *answer);
 static int btd_permitted(uid_t uid);
@@ -189,6 +196,22 @@ static unsigned btd_load_count;
 static uint64_t btd_reappear_ms;
 
 /*
+ * Whether the user turned Bluetooth off (POWER off, ws143-p006): the
+ * daemon then starts no scan and no pairing (they are answered
+ * "ERROR off"), and SHOW says "STATE off" over a ready controller and
+ * "POWER off".  The saved keys stay.  It is kept in BTD_POWER_FILE across
+ * starts (design D11a, the user's decision); without the file it is on.
+ */
+static int btd_powered_off;
+
+/*
+ * The client last asked a question of a pairing (CONFIRM, CONSENT or the
+ * PASSKEY shown; BTD_NO_CLIENT for none): it hears ASK-END when the
+ * question is over (answered, or the pairing ended).
+ */
+static int btd_question_client = BTD_NO_CLIENT;
+
+/*
  * Runs the daemon until it is killed.
  */
 int
@@ -240,6 +263,9 @@ main(
 		btd_log("bluetoothd: privilege separation: %s\n", strerror(error));
 		return 1;
 	}
+
+	/* The user's switch, as it was left (ws143-p006). */
+	btd_power_load();
 
 	/* The pairing, handed the session's connection packets from each start on. */
 	btd_pair_init(&btd_pairing, &btd_session, BTD_KEYS_FOLDER, btd_ask, btd_paired, NULL, btd_random, NULL);
@@ -766,8 +792,161 @@ btd_line(
 		return;
 	}
 
+	/* POWER on|off (ws143-p006). */
+	same = strncmp(line, "POWER ", 6U);
+	if (same == 0) {
+		btd_power(client, line + 6);
+		return;
+	}
+
 	/* Anything else. */
 	btd_write(client, "ERROR request\nDONE\n");
+}
+
+/*
+ * Answers POWER on|off (ws143-p006): those D8 permits turn Bluetooth on or
+ * off.  Off is refused while a scan or a pairing runs (ERROR busy); the
+ * saved keys stay either way.
+ */
+static void
+btd_power(
+	struct btd_client *client,
+	const char *argument)
+{
+	int permitted;
+	int pairing;
+	int error;
+	int on;
+	int off;
+
+	/* Only those D8 permits. */
+	permitted = btd_permitted(client->uid);
+	if (!permitted) {
+		btd_write(client, "ERROR permission\nDONE\n");
+		return;
+	}
+
+	/* on or off. */
+	on = strcmp(argument, "on");
+	off = strcmp(argument, "off");
+	if (on != 0 && off != 0) {
+		btd_write(client, "ERROR power\nDONE\n");
+		return;
+	}
+
+	/* On: scans and pairings may start again; kept for the next start. */
+	if (on == 0) {
+		btd_powered_off = 0;
+		error = btd_power_save();
+		btd_log("BLUETOOTHD POWER on uid=%u saved=%d\n", (unsigned)client->uid, error == 0);
+		btd_write(client, "POWER on\nDONE\n");
+		return;
+	}
+
+	/* Off waits for no scan or pairing that runs. */
+	pairing = btd_pair_active(&btd_pairing);
+	if ((btd_session_open && btd_session.scanning) || pairing || btd_pair_client != BTD_NO_CLIENT) {
+		btd_write(client, "ERROR busy\nDONE\n");
+		return;
+	}
+
+	/* Succeeded: off until POWER on, kept for the next start. */
+	btd_powered_off = 1;
+	error = btd_power_save();
+	btd_log("BLUETOOTHD POWER off uid=%u saved=%d\n", (unsigned)client->uid, error == 0);
+	btd_write(client, "POWER off\nDONE\n");
+}
+
+/* Reads the user's switch as it was left: off when the file says so, else on. */
+static void
+btd_power_load(
+	void)
+{
+	char text[8];
+	ssize_t got;
+	int descriptor;
+	int same;
+
+	/* On unless the file says off. */
+	btd_powered_off = 0;
+	descriptor = open(BTD_POWER_FILE, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+	if (descriptor < 0)
+		return;
+	got = read(descriptor, text, sizeof(text) - 1U);
+	(void)close(descriptor);
+	if (got <= 0)
+		return;
+
+	/* Its word. */
+	text[got] = '\0';
+	same = strncmp(text, "off", 3U);
+	if (same == 0) {
+		btd_powered_off = 1;
+		btd_log("BLUETOOTHD POWER loaded=off\n");
+	}
+}
+
+/*
+ * Keeps the user's switch for the next start: written beside, synced and
+ * renamed in place, as the keys are.  Returns 0 or an errno value (the
+ * switch holds for this run either way).
+ */
+static int
+btd_power_save(
+	void)
+{
+	const char *text;
+	ssize_t written;
+	size_t length;
+	int descriptor;
+	int error;
+
+	/* The word. */
+	text = "on\n";
+	if (btd_powered_off)
+		text = "off\n";
+
+	/* The temporary file (never a link), written and synced. */
+	descriptor = open(BTD_POWER_FILE ".tmp", O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
+	if (descriptor < 0)
+		return errno;
+	length = strlen(text);
+	written = write(descriptor, text, length);
+	if (written != (ssize_t)length) {
+		(void)close(descriptor);
+		return EIO;
+	}
+
+	/* On the disk before the rename. */
+	error = fsync(descriptor);
+	(void)close(descriptor);
+	if (error != 0)
+		return EIO;
+
+	/* In place of the old one (the folder is the keys', synced with them). */
+	error = rename(BTD_POWER_FILE ".tmp", BTD_POWER_FILE);
+	if (error != 0)
+		return errno;
+
+	/* Succeeded: kept. */
+	return 0;
+}
+
+/* Tells the client last asked a question of a pairing that the question is over (ASK-END). */
+static void
+btd_question_end(
+	void)
+{
+	int index;
+
+	/* Only a question asked. */
+	index = btd_question_client;
+	btd_question_client = BTD_NO_CLIENT;
+	if (index == BTD_NO_CLIENT || btd_clients[index].descriptor < 0)
+		return;
+
+	/* Succeeded: told. */
+	btd_write(&btd_clients[index], "ASK-END\n");
 }
 
 /* Answers SHOW: the state, and the controller when one is open. */
@@ -781,8 +960,10 @@ btd_show(
 	int pairing;
 	int error;
 
-	/* The state, and why. */
-	if (btd_session.reason[0] != '\0')
+	/* The state, and why; a ready controller the user turned off is "off" (ws143-p006). */
+	if (btd_powered_off && btd_session_open && btd_session.state == BTD_STATE_READY)
+		btd_write(client, "STATE off\n");
+	else if (btd_session.reason[0] != '\0')
 		btd_write(client, "STATE %s %s\n", btd_state_name(btd_session.state), btd_session.reason);
 	else
 		btd_write(client, "STATE %s\n", btd_state_name(btd_session.state));
@@ -815,6 +996,13 @@ btd_show(
 			  btd_session.ssp,
 			  btd_session.secure_connections,
 			  pairing);
+	}
+
+	/* The user's switch (ws143-p006), whatever the controller's state. */
+	if (btd_powered_off) {
+		btd_write(client, "POWER off\n");
+	} else {
+		btd_write(client, "POWER on\n");
 	}
 
 	/* The end. */
@@ -894,6 +1082,12 @@ btd_scan(
 	/* A controller. */
 	if (!btd_session_open) {
 		btd_write(client, "ERROR no-controller\nDONE\n");
+		return;
+	}
+
+	/* None while the user has Bluetooth off (ws143-p006). */
+	if (btd_powered_off) {
+		btd_write(client, "ERROR off\nDONE\n");
 		return;
 	}
 
@@ -983,9 +1177,15 @@ btd_pair(
 		return;
 	}
 
-	/* A ready controller. */
+	/* A ready controller, which the user has not turned off (ws143-p006). */
 	if (!btd_session_open || btd_session.state != BTD_STATE_READY) {
 		btd_write(client, "ERROR not-ready\nDONE\n");
+		return;
+	}
+
+	/* None while the user has Bluetooth off. */
+	if (btd_powered_off) {
+		btd_write(client, "ERROR off\nDONE\n");
 		return;
 	}
 
@@ -1055,8 +1255,9 @@ btd_answer(
 	if (btd_asked_client != index)
 		return;
 
-	/* Answered. */
+	/* Answered; the question is over for the client asked. */
 	btd_asked_client = BTD_NO_CLIENT;
+	btd_question_end();
 	btd_pair_answer(&btd_pairing, accepted);
 }
 
@@ -1168,6 +1369,7 @@ btd_ask(
 	struct btd_client *pairer;
 	struct btd_client *agent;
 	struct stat status;
+	char address[24];
 	uid_t seat;
 	int asked;
 	int error;
@@ -1195,18 +1397,27 @@ btd_ask(
 			asked = btd_agent_client;
 	}
 
+	/*
+	 * The device being paired and who started the pairing, after the
+	 * question's words (ws143-p006: the desktop's window names them, and
+	 * a seat's user may be asked for another user's pairing).
+	 */
+	btd_format_address(btd_pairing.address, address, sizeof(address));
+	btd_question_client = asked;
+
 	/* The question: a number to confirm, an agreement, or a passkey to show (no answer). */
 	if (kind == BTD_PAIR_ASK_PASSKEY) {
-		btd_write(&btd_clients[asked], "PASSKEY %06u\n", (unsigned)number);
+		btd_write(&btd_clients[asked], "PASSKEY %06u address=%s type=%s uid=%u\n", (unsigned)number, address, btd_address_type_name(btd_pairing.type), (unsigned)pairer->uid);
 		return;
 	}
 
 	/* A question that waits for YES or NO from the client asked. */
 	btd_asked_client = asked;
-	if (kind == BTD_PAIR_ASK_CONSENT)
-		btd_write(&btd_clients[asked], "CONSENT\n");
-	else
-		btd_write(&btd_clients[asked], "CONFIRM %06u\n", (unsigned)number);
+	if (kind == BTD_PAIR_ASK_CONSENT) {
+		btd_write(&btd_clients[asked], "CONSENT address=%s type=%s uid=%u\n", address, btd_address_type_name(btd_pairing.type), (unsigned)pairer->uid);
+	} else {
+		btd_write(&btd_clients[asked], "CONFIRM %06u address=%s type=%s uid=%u\n", (unsigned)number, address, btd_address_type_name(btd_pairing.type), (unsigned)pairer->uid);
+	}
 }
 
 /* Tells the pairing's client the end (the pairing's hook) and logs it. */
@@ -1222,8 +1433,9 @@ btd_paired(
 	/* Logged. */
 	btd_log("bluetoothd: pairing: %s\n", answer);
 
-	/* No question waits any more; the client that asked hears the end. */
+	/* No question waits any more (the one asked hears it is over); the client that asked hears the end. */
 	btd_asked_client = BTD_NO_CLIENT;
+	btd_question_end();
 	index = btd_pair_client;
 	btd_pair_client = BTD_NO_CLIENT;
 	if (index == BTD_NO_CLIENT)
@@ -1397,9 +1609,11 @@ btd_client_close(
 	client->waits_scan = 0;
 	client->waits_pair = 0;
 
-	/* The agent is gone; a question it was asked is no. */
+	/* The agent is gone; a question it was asked is no, and it hears no ASK-END. */
 	if (btd_agent_client == index)
 		btd_agent_client = BTD_NO_CLIENT;
+	if (btd_question_client == index)
+		btd_question_client = BTD_NO_CLIENT;
 	if (btd_asked_client == index) {
 		btd_asked_client = BTD_NO_CLIENT;
 		btd_pair_answer(&btd_pairing, 0);

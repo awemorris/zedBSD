@@ -20,11 +20,13 @@
  *   bt bonds                    the bonds
  *   bt agent                    answers the pairings' questions on the
  *                               terminal until it is ended
+ *   bt power on|off             Bluetooth on or off for the user (ws143-p006)
  *
  * Changing things (scan, pair, forget, agent) is for root, the seat's user
  * and wheel.  It prints the daemon's lines as they are, then one line the
  * tests read: "BT SHOW state=WORD", "BT SCAN devices=N", "BT PAIR
- * result=paired|error", "BT FORGET result=ok|error" or "BT BONDS bonds=N".
+ * result=paired|error", "BT FORGET result=ok|error", "BT BONDS bonds=N" or
+ * "BT POWER result=on|off|error".
  * A question ("CONFIRM NUMBER", "CONSENT") is answered from standard input
  * (y for yes, anything else or its end for no).  It exits with 0, 1 when
  * the daemon answered ERROR, or 2 when there is no daemon.
@@ -150,6 +152,14 @@ main(
 		return status;
 	}
 
+	/* bt power on|off (ws143-p006). */
+	same = strcmp(argv[1], "power");
+	if (same == 0 && argc == 3) {
+		(void)snprintf(request, sizeof(request), "POWER %s", argv[2]);
+		status = bt_ask(request, "POWER");
+		return status;
+	}
+
 	/* Anything else. */
 	bt_usage();
 	return BT_EXIT_USAGE;
@@ -256,6 +266,7 @@ bt_ask(
 {
 	char line[BTD_LINE_MAX + 1024U];
 	char state[64];
+	const char *word;
 	FILE *answer;
 	ssize_t written;
 	char *got;
@@ -267,6 +278,7 @@ bt_ask(
 	int failed;
 	int done;
 	int same;
+	int off;
 
 	/* The daemon. */
 	descriptor = bt_connect();
@@ -413,6 +425,17 @@ bt_ask(
 	same = strcmp(summary, "BONDS");
 	if (same == 0)
 		(void)printf("BT BONDS bonds=%u\n", bonds);
+	same = strcmp(summary, "POWER");
+	if (same == 0 && failed)
+		(void)printf("BT POWER result=error\n");
+	if (same == 0 && !failed) {
+		/* The word the request asked for. */
+		word = "on";
+		off = strcmp(request, "POWER off");
+		if (off == 0)
+			word = "off";
+		(void)printf("BT POWER result=%s\n", word);
+	}
 
 	/* An ERROR answer. */
 	if (failed)
@@ -430,5 +453,5 @@ bt_usage(
 	/* The commands. */
 	(void)fprintf(stderr,
 		      "usage: bt show | bt scan [SECONDS] | bt devices | bt pair ADDRESS [bredr|le-public|le-random] |\n"
-		      "       bt forget ADDRESS [TYPE] | bt bonds | bt agent\n");
+		      "       bt forget ADDRESS [TYPE] | bt bonds | bt agent | bt power on|off\n");
 }

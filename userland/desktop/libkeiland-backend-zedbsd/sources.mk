@@ -19,6 +19,7 @@ KL_BACKEND_ZEDBSD_SOURCES := userland/desktop/libkeiland-backend/backend.c \
 	userland/desktop/libkeiland-backend-zedbsd/power-zedbsd.c userland/desktop/libkeiland-backend-zedbsd/power-outcome.c \
 	userland/desktop/libkeiland-backend-zedbsd/backlight-zedbsd.c \
 	userland/desktop/libkeiland-backend-zedbsd/volume-zedbsd.c \
+	userland/desktop/libkeiland-backend-zedbsd/bluetooth-zedbsd.c \
 	userland/desktop/libkeiland-backend-zedbsd/events-zedbsd.c \
 	userland/desktop/libkeiland-backend-zedbsd/account-zedbsd.c \
 	userland/desktop/libkeiland-backend-zedbsd/session-zedbsd.c \

@@ -15,6 +15,20 @@
  *   DEVICES            the devices of the last scan
  *   SCAN SECONDS       a scan of 1 to 30 seconds (root only in this Phase),
  *                      answered when it ends with the devices found
+ *   POWER on|off       Bluetooth on or off for the user (ws143-p006): off,
+ *                      no scan or pairing starts (ERROR off) and SHOW says
+ *                      STATE off; the saved keys stay; the switch is kept
+ *                      across starts (on the first time)
+ *
+ * ws143-p004 to p006 add PAIR, AGENT, FORGET and BONDS (plan/ws143/phase004
+ * section 5).  SHOW ends with "POWER on|off" (ws143-p006).  A pairing's
+ * questions, to the agent or the pairing's client, name the device and
+ * who started it:
+ *
+ *   CONFIRM NUMBER address=... type=... uid=...   answered YES or NO
+ *   CONSENT address=... type=... uid=...          answered YES or NO
+ *   PASSKEY NUMBER address=... type=... uid=...   shown, not answered
+ *   ASK-END                                       the question is over
  *
  * and reads the answer's lines up to DONE:
  *

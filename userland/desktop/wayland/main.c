@@ -1020,6 +1020,9 @@ event_loop(
 		/* The clipboard's history reads what a source has written so far (clipboard.c; the pass is at most 10 ms). */
 		kwl_clipboard_poll(server);
 
+		/* A drag let go before its target answered is decided once it has (data.c, ws189-p002 F1). */
+		kwl_data_tick(server);
+
 		/* A test image's screen capture takes its requests (shot.c, ws173-p002). */
 		kwl_shot_tick(server);
 

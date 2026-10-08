@@ -12,7 +12,7 @@
  * compositor serves them and libkeiland speaks them; both include this
  * header and neither the other's code (WS131 D4 (c)).
  *
- * kl_system_manager_v1 (a global, version 22; its objects are made at its version)
+ * kl_system_manager_v1 (a global, version 23; its objects are made at its version)
  *   request 0 destroy
  *   request 1 get_settings(new_id kl_system_settings_v1)
  *   request 2 get_network(new_id kl_system_network_v1)    (WS131 p010)
@@ -28,6 +28,7 @@
  *   request 12 get_printers(new_id kl_system_printers_v1) since version 17 (ws145-p003)
  *   request 13 get_displays(new_id kl_system_displays_v1) since version 18 (ws113-p005)
  *   request 14 get_machine(new_id kl_system_machine_v1)   since version 21 (ws188-p002)
+ *   request 15 get_bluetooth(new_id kl_system_bluetooth_v1) since version 23 (ws143-p006)
  *   event   0 capabilities(uint bits)              sent when it is bound
  *
  * kl_system_settings_v1
@@ -284,7 +285,7 @@
 
 /* The interfaces' names and versions. */
 #define KL_SYSTEM_MANAGER_NAME			"kl_system_manager_v1"
-#define KL_SYSTEM_MANAGER_VERSION		22U
+#define KL_SYSTEM_MANAGER_VERSION		23U
 #define KL_SYSTEM_SETTINGS_NAME			"kl_system_settings_v1"
 
 /* kl_system_manager_v1's requests and event. */
@@ -303,6 +304,7 @@
 #define KL_SYSTEM_MANAGER_GET_PRINTERS		12U
 #define KL_SYSTEM_MANAGER_GET_DISPLAYS		13U
 #define KL_SYSTEM_MANAGER_GET_MACHINE		14U
+#define KL_SYSTEM_MANAGER_GET_BLUETOOTH		15U
 #define KL_SYSTEM_MANAGER_EVENT_CAPABILITIES	0U
 
 /* The capabilities' bits. */
@@ -322,6 +324,7 @@
 #define KL_SYSTEM_CAPABILITY_PRINTERS		0x2000U
 #define KL_SYSTEM_CAPABILITY_DISPLAYS		0x4000U
 #define KL_SYSTEM_CAPABILITY_MACHINE		0x8000U
+#define KL_SYSTEM_CAPABILITY_BLUETOOTH		0x10000U
 
 /* Since when the manager has get_sharing (ws089-p025), and the account administer and refused (ws089-p026). */
 #define KL_SYSTEM_SINCE_SHARING			7U
@@ -361,6 +364,9 @@
 /* Since when the computer's object reads the mounts (ws188-p004). */
 #define KL_SYSTEM_SINCE_MOUNTS			22U
 
+/* Since when the manager has get_bluetooth (ws143-p006). */
+#define KL_SYSTEM_SINCE_BLUETOOTH		23U
+
 /* The interfaces' names (WS131 p010). */
 #define KL_SYSTEM_NETWORK_NAME			"kl_system_network_v1"
 #define KL_SYSTEM_AUDIO_NAME			"kl_system_audio_v1"
@@ -375,6 +381,48 @@
 #define KL_SYSTEM_PRINTERS_NAME			"kl_system_printers_v1"
 #define KL_SYSTEM_DISPLAYS_NAME			"kl_system_displays_v1"
 #define KL_SYSTEM_MACHINE_NAME			"kl_system_machine_v1"
+#define KL_SYSTEM_BLUETOOTH_NAME		"kl_system_bluetooth_v1"
+
+/*
+ * kl_system_bluetooth_v1's requests and events (ws143-p006,
+ * plan/ws143/phase006/phase.md section 5):
+ *   request 0 destroy
+ *   request 1 watch(uint on)          the state read often while some object watches (a page or a menu shown)
+ *   request 2 scan(uint on)           the devices around looked for while some object asks
+ *   request 3 power(uint request, uint on)
+ *   request 4 device(uint request, uint action, string address, uint type)   action: KL_SYSTEM_BT_PAIR and the others
+ *   event   0 state(uint reachable, uint state, uint flags, uint features, string address, string name)
+ *   event   1 device(string address, uint type, string name, uint kind, uint flags, int battery, int rssi)
+ *   event   2 done(uint serial)       the state and the devices before it are the whole state
+ *   event   3 result(uint request, uint applied, uint saved)
+ * Sent whole when the object is made and each time something changed.
+ * A pairing's questions are the compositor's own window's, never a
+ * client's: no client answers them.  The values are keiland.h's
+ * KL_BLUETOOTH_* (the same numbers as libkeiland-backend's).
+ */
+#define KL_SYSTEM_BLUETOOTH_DESTROY		0U
+#define KL_SYSTEM_BLUETOOTH_WATCH		1U
+#define KL_SYSTEM_BLUETOOTH_SCAN		2U
+#define KL_SYSTEM_BLUETOOTH_POWER		3U
+#define KL_SYSTEM_BLUETOOTH_DEVICE		4U
+#define KL_SYSTEM_BLUETOOTH_EVENT_STATE		0U
+#define KL_SYSTEM_BLUETOOTH_EVENT_DEVICE	1U
+#define KL_SYSTEM_BLUETOOTH_EVENT_DONE		2U
+#define KL_SYSTEM_BLUETOOTH_EVENT_RESULT	3U
+
+/* A device's actions, the state's flags, a device's flags, and the longest texts (with their NULs). */
+#define KL_SYSTEM_BT_PAIR			1U
+#define KL_SYSTEM_BT_FORGET			2U
+#define KL_SYSTEM_BT_CONNECT			3U
+#define KL_SYSTEM_BT_DISCONNECT			4U
+#define KL_SYSTEM_BT_SCANNING			0x1U
+#define KL_SYSTEM_BT_PAIRING			0x2U
+#define KL_SYSTEM_BT_PAIRED			0x1U
+#define KL_SYSTEM_BT_LEGACY			0x2U
+#define KL_SYSTEM_BT_CONNECTED			0x4U
+#define KL_SYSTEM_BT_ADDRESS_MAX		18U
+#define KL_SYSTEM_BT_NAME_MAX			64U
+#define KL_SYSTEM_BT_DEVICES_MAX		32U
 
 /*
  * kl_system_machine_v1's requests and events (ws188-p002), the parts a

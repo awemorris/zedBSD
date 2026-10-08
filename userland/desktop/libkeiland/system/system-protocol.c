@@ -55,6 +55,10 @@ static const struct wl_interface *system_get_mail_types[] = {
 static const struct wl_interface *system_get_phone_types[] = {
 	&kl_system_phone_v1_interface,
 };
+static const struct wl_interface *system_get_bluetooth_types[] = {
+	&kl_system_bluetooth_v1_interface,
+};
+
 static const struct wl_interface *system_get_printers_types[] = {
 	&kl_system_printers_v1_interface,
 };
@@ -102,6 +106,7 @@ static const struct wl_message system_manager_requests[] = {
 	{ "get_printers", "17n", system_get_printers_types },
 	{ "get_displays", "18n", system_get_displays_types },
 	{ "get_machine", "21n", system_get_machine_types },
+	{ "get_bluetooth", "23n", system_get_bluetooth_types },
 };
 
 /* The events of kl_system_manager_v1. */
@@ -109,11 +114,11 @@ static const struct wl_message system_manager_events[] = {
 	{ "capabilities", "u", system_plain_types },
 };
 
-/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: fifteen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19; the mail's allowed since 20; get_machine since 21; the machine's mounts since 22) and one event.  It lives for the program. */
+/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: sixteen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19; the mail's allowed since 20; get_machine since 21; the machine's mounts since 22; get_bluetooth since 23) and one event.  It lives for the program. */
 const struct wl_interface kl_system_manager_v1_interface = {
 	KL_SYSTEM_MANAGER_NAME,
 	KL_SYSTEM_MANAGER_VERSION,
-	15,
+	16,
 	system_manager_requests,
 	1,
 	system_manager_events
@@ -434,6 +439,33 @@ const struct wl_interface kl_system_printers_v1_interface = {
 	system_printers_requests,
 	5,
 	system_printers_events
+};
+
+/* The requests of kl_system_bluetooth_v1 (ws143-p006). */
+static const struct wl_message system_bluetooth_requests[] = {
+	{ "destroy", "", NULL },
+	{ "watch", "u", system_plain_types },
+	{ "scan", "u", system_plain_types },
+	{ "power", "uu", system_plain_types },
+	{ "device", "uusu", system_plain_types },
+};
+
+/* The events of kl_system_bluetooth_v1. */
+static const struct wl_message system_bluetooth_events[] = {
+	{ "state", "uuuuss", system_plain_types },
+	{ "device", "susuuii", system_plain_types },
+	{ "done", "u", system_plain_types },
+	{ "result", "uuu", system_plain_types },
+};
+
+/* kl_system_bluetooth_v1, made at the manager's version (23): five requests and four events.  It lives for the program. */
+const struct wl_interface kl_system_bluetooth_v1_interface = {
+	KL_SYSTEM_BLUETOOTH_NAME,
+	KL_SYSTEM_SINCE_BLUETOOTH,
+	5,
+	system_bluetooth_requests,
+	4,
+	system_bluetooth_events
 };
 
 /* The requests of kl_system_displays_v1 (ws113-p005). */

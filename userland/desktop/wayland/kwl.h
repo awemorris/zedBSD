@@ -647,6 +647,8 @@ struct kwl_object {
 	unsigned dnd_offer;
 	unsigned dnd_accepted;
 	unsigned dnd_dropped;
+	/* Whether a drag's offer has answered at all (accept, with a type or none): a release waits for it (ws189-p002 F1). */
+	unsigned dnd_answered;
 	/*
 	 * ws035-p080: a toplevel's zxdg_toplevel_decoration_v1 and the
 	 * decoration's toplevel (each cleared from both ends when either
@@ -1541,6 +1543,14 @@ struct kwl_server {
 	 * answering a press (menu.c).
 	 */
 	uint32_t dnd_enter_serial;
+	/*
+	 * A release that came before the target answered (ws189-p002 F1: a
+	 * quick drag let go at once): the drop is decided when the answer
+	 * comes or at the deadline (kwl_milliseconds' clock); the pointer's
+	 * moves meanwhile change nothing.
+	 */
+	unsigned dnd_releasing;
+	uint64_t dnd_release_deadline;
 	uint64_t dnd_drop_client;
 	uint32_t dnd_drop_serial;
 	/*
