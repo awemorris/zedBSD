@@ -3,7 +3,7 @@
 # ws134-p009: K4 kernel: ACPI の温度（と電池の出どころの確認）
 
 Parent: [WS134](../ws.md)
-Status: in-progress（2026-10-08 夜 P1 q912: 実装・host PASS・build warning 0、T1 の依頼文を Q1 へ。実機は 5330 の UAT）
+Status: test-wait（T1-482、2026-10-08 夜 Q1。実機の温度は 5330 の UAT）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q912（P1、Q1 の投入「WS134 p009 ACPI の thermal と電池（kernel）。BUG-195・196 の DSDT の直しで namespace が読めるようになったか確かめ、host でできる所まで。実機は 5330 の UAT」）
