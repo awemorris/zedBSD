@@ -38,6 +38,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <time.h>
 #include <unistd.h>
 #include <uapi/input-bridge.h>
 #include <uapi/input.h>
@@ -78,6 +79,7 @@ static int probe_key(int descriptor, uint8_t usage);
 static int probe_device(int descriptor, struct input_bridge_device *device);
 static int probe_expect_write(int descriptor, const void *bytes, size_t size, int wanted, const char *step);
 static int probe_fail(const char *step, int error);
+static void probe_sleep_ms(long ms);
 
 /*
  * Runs the mode the first argument names.
@@ -179,7 +181,7 @@ probe_type(
 	       (unsigned)device.malformed);
 
 	/* A reader's time to find the node. */
-	usleep((useconds_t)wait_ms * 1000U);
+	probe_sleep_ms(wait_ms);
 
 	/* "a" pressed and released, then "b" pressed. */
 	error = probe_key(descriptor, PROBE_USAGE_A);
@@ -194,7 +196,7 @@ probe_type(
 	printf("BRIDGE typed a, holding b\n");
 
 	/* "b" still held when the file closes. */
-	usleep((useconds_t)hold_ms * 1000U);
+	probe_sleep_ms(hold_ms);
 	(void)close(descriptor);
 	printf("BRIDGE closed\n");
 	printf("BRIDGE PASS\n");
@@ -471,4 +473,31 @@ probe_fail(
 	/* The last line. */
 	printf("BRIDGE FAIL step=%s error=%d\n", step, error);
 	return 1;
+}
+
+/*
+ * Sleeps for a number of milliseconds (usleep refuses a second or more
+ * with EINVAL, as POSIX allows, so the waits of type returned at once).
+ */
+static void
+probe_sleep_ms(
+	long ms)
+{
+	struct timespec request;
+
+	/* Nothing to wait for. */
+	if (ms <= 0)
+		return;
+
+	/* The whole wait, again after a signal. */
+	request.tv_sec = (time_t)(ms / 1000);
+	request.tv_nsec = (ms % 1000) * 1000000L;
+	for (;;) {
+		int result;
+
+		/* Slept the whole wait, or failed other than by a signal. */
+		result = nanosleep(&request, &request);
+		if (result == 0 || errno != EINTR)
+			break;
+	}
 }
