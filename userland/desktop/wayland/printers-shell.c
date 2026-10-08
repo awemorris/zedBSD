@@ -181,10 +181,16 @@ kwl_printers_tick(
 	/* What came. */
 	changed = 0;
 	(void)kl_backend_print_update(printers_state.backend, &changed);
-	if ((changed & KL_BACKEND_PRINT_CHANGED_RESULT) != 0U)
-		printers_answers(server);
+
+	/*
+	 * The printers and jobs are told before the answers, so that a client
+	 * that has its answer already holds the list the change made (T1-459:
+	 * printtest edit printed the old list after its result).
+	 */
 	if ((changed & KL_BACKEND_PRINT_CHANGED_LIST) != 0U)
 		printers_tell(server);
+	if ((changed & KL_BACKEND_PRINT_CHANGED_RESULT) != 0U)
+		printers_answers(server);
 }
 
 /* Opens the backend once: the user's settings file and the daemon's program. */

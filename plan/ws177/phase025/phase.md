@@ -25,3 +25,11 @@ Origin: [backlog-p2](../backlog-p2.md) の 127（ws145-p004）、[案](../phasin
 - host（追加）: `sh plan/ws177/tests/host-printers-shell.sh` に edit の 6 項目（OK と printer の event の新しい名前・queue、名前の C1 と path の空白は INVALID、無い printer は INVALID、version 23 の object は EPROTO）→ PASS。`plan/ws131/tests/host-system.sh` PASS（manager の版 24）。
 - build: `make -j16 ZEDBSD_CONFIG=config/current-uat.mk BUILD=build/amd64 build/amd64/bin/wayland build/amd64/bin/settings build/amd64/bin/printtest build/amd64/bin/pdfviewer` exit 0・warning 0（libkeiland.so の exports の検査を含む）、`make -j16 keiland-linux` exit 0。style-check 指摘なし。
 - QEMU: 未実施（T1 に apps.settings.printers の手順 4・5）。
+
+## T1-459 の FAIL の直し（2026-10-08 夜 P2 q906 の間に、Q1 の依頼）
+
+- 原因: compositor の `kwl_printers_tick`（`wayland/printers-shell.c`）が、同じ tick の backend の変化で **答え（result）を printer の一覧の event より先に** 送っていた。`printtest edit` は答えを受けるとすぐ自分の一覧を印字するので、古い一覧（`path=raw name=10.0.2.2 (LPD)`）が出た。設定の file は writer の thread で正しく書かれていた（AAT の helper は edit の command 自身の出力の一覧を見ている）。
+- 直し: tick で一覧（`printers_tell`）を答え（`printers_answers`）より先に。答えを受けた client は変化の後の一覧を持っている。
+- 試験: `host-printers-shell.c` に `edit-told-first`（edit の答えより前の event に新しい名前の printer の event）。直しを外すと FAIL、直すと PASS を確かめた。`sh plan/ws177/tests/host-printers-shell.sh` → PASS。
+- build: `build/amd64/bin/wayland`・`build/amd64/bin/printtest` exit 0・warning 0。
+- T1: T1-459 の再試験（同じ手順 4・5）を Q1 に依頼。
