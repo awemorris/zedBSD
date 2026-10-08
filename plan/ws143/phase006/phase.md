@@ -13,7 +13,8 @@ Design: [design.md](../design.md) §1・§6.5・§8
   libkeiland-backend `kl_backend_bluetooth_*` → zedBSD は bluetoothd の socket。`plan/tools/keiland-os-boundary/check.sh` を PASS に保つ。
 - zedBSD の backend の実体、Linux・FreeBSD は口と stub（「未対応」、`reachable=0`）。Linux の BlueZ は p007。
 - bluetoothd に `POWER on|off` と `STATE off`（Q1 2026-10-08: P1 が最小の差分で。切っても保存の鍵は残す、off の間の SCAN・PAIR（と p005 の CONNECT）は
-  `ERROR off`、起動の既定は on、記憶しない）、CLI `bt power on|off`。
+  `ERROR off`）。**電源は記憶する（design D11a、ユーザーの決定「前の状態を記憶（初回 on）」。Q1 2026-10-08 が「記憶しない」を取り消し）**:
+  `/var/db/bluetooth/power`（鍵と同じ書き方）。SHOW の最後に `POWER on|off`。CLI `bt power on|off`。
 - 変化の通知: bluetoothd に SUBSCRIBE は足さない（Q1）。backend は**見ている client が居る間だけ** 2 秒ごとと各 request の直後に読み直す。
   SUBSCRIBE は Future Work **F-086**（Q1 が台帳に載せる）。
 - Settings の Bluetooth の頁（今の stub を置き換え）、system bar の icon と menu、compositor の pairing の確認の窓。
@@ -23,6 +24,35 @@ Design: [design.md](../design.md) §1・§6.5・§8
 - Q4: pairing の後、HID らしい device は自動で接続する（bluetoothd の p005 の仕事。desktop は PAIR の後に一覧を読み直すだけ）。
 - Q5: 人が切断した device からの再接続は断る（bluetoothd の p005。desktop の「切断」は DISCONNECT を送るだけ）。
 - B6: account（`_bluetooth`）の無い install では bluetoothd を起動しない。desktop は daemon が居ない時「Bluetooth は使えません」（`reachable=0`）。
+
+## 受け入れ（Q1 2026-10-08）
+
+1. bluetoothd: POWER（記憶・SHOW の行・off の間の断り）、問いの行の `address= type= uid=` と `ASK-END`。bt-daemon の host 試験 PASS。
+2. backend: zedBSD の実体と unsupported、host 試験（偽の bluetoothd、`bt-desktop-host-test`）PASS。
+3. compositor・libkeiland・Settings・bar・確認の窓: AAT（電源・一覧・scan・pairing（数字の確認・同意・他の人の pairing の窓）・削除・bar の menu）を T1 の QEMU
+   （bt の desktop の image、loopback の controller）で PASS。build（amd64・Linux）warning 0、`keiland-os-boundary/check.sh` PASS。
+4. 接続・切断（CONNECT・DISCONNECT・STATUS）は口と UI を作り、daemon が `ERROR request` なら出さない。確かめは p005 i02 の main への統合の後
+   （p008 の UAT か p006 の追加の attempt）。p005 i02 の未統合の物の在り処: P2 の branch `agent/p2` と `plan/ws143/wip-20261008/`（tracked.patch・untracked.tar.gz）。
+
+## design-reviewer の反映（2026-10-08、review 1）
+
+- B1: 問いは agent の接続にも PAIR の接続にも来る（backend は両方で読み、来た接続で答える）。他の uid の pairing の問いも seat の人の agent に来る（p004 S6）→
+  **窓に始めた人の名前と device を出し seat の人が判断する**（Q1 2026-10-08、推しの案）。bluetoothd の問いの行に `address= type= uid=`、終わりに `ASK-END`。
+- B2: SCAN は 4 本目の接続。scan の間に来た request は scan の終わりまで backend が待たせる（daemon は scan 中の PAIR・POWER off を busy で断るため）。scan は
+  6 秒、間 2 秒。scan が見た device は backend が 30 秒覚え、新しい scan が表を空にしても一覧が揺れない。scan の lease は compositor が object ごとに数え、
+  頁・menu が閉じれば止まる（Wi-Fi の 1 分の満了と同じ形を compositor に）。
+- B3: 電源は記憶（上）。
+- I1: 問いに id。答えは id で（終わった・新しい問いへの答えは送らない）。窓は ASK-END・PAIR の結果・daemon の不在で閉じる。PASSKEY の窓は終わりまで残り、
+  自分の pairing なら「やめる」で request の接続を閉じる（`kl_backend_bluetooth_cancel`）。窓の残り時間は 20 秒（daemon の 25 秒より前）。
+- I2: lock の間に来た問いは compositor が即 NO（log）、開いている窓は lock で閉じて NO。greeter の compositor は Bluetooth の backend を開かない。
+- I3: AGENT-END（同じ uid の別の program が agent になった）では取り返さない。自分の PAIR の前に AGENT を送り直す。state の `agent` が 0 の間、Settings は
+  「別の program が pairing の確認に答えます」と出す。
+- I4: off は今は daemon の旗（scan・pairing を断る）。p005 の自動の再接続・page scan・LE の auto-connect は off を守る必要がある → p005 への追記（Q1 経由）。
+  SHOW の `POWER on|off` で backend は機能の有無を知る（POWER を送って試さない）。
+- I5: 受け入れを書いた（上）。kind は BONDS に class・appearance が無いので、paired の device は scan で見えた時と STATUS（p005）の時だけ種類が分かる → Future Work。
+- I6: daemon の 8 本の枠: 接続の直後の EOF（行が 1 つも来ない）は「満ち」として状態を保ち、1 秒後に読み直す。枠の予約は Future Work。
+- I7: 番号は manager 23・request 15・wire 0x10000・HAS 0x20000・CHANGED 0x10000・KL_VERSION 72 を P1 が使う（Q1 2026-10-08）。
+- M5: host 試験の socket の path は backend の `BT_SOCKET_PATH`（`#ifndef`）で差し替える。M8: 拡張の client は誰でも pairing・削除・電源を頼める（uid の境界と同じ）。限界として記録。
 
 ## 設計
 
@@ -99,9 +129,14 @@ daemon が居ない・controller が無い・firmware が要る時の説明。le
   `STATE off`・scan が止まる）、`desktop.bar.bluetooth-menu`。
 - 境界: `plan/tools/keiland-os-boundary/check.sh` PASS。
 
-## Future Work
+## Future Work（Q1 が台帳に載せる、2026-10-08）
 
-- **F-086**: bluetoothd の SUBSCRIBE（状態の変化の通知）。今は見ている間の 2 秒ごとの読み直し（Q1 2026-10-08）。
+- **F-086**: bluetoothd の SUBSCRIBE（状態の変化の通知）。今は見ている間の 2 秒ごとの読み直し。
+- p004 の Q2: BR/EDR の legacy の PIN の pairing（D10「受けて警告」、PIN の入力の窓）。
+- p004 の Q6: こちらが passkey を打つ形（`PASSKEY?`、KeyboardDisplay の agent）。
+- bluetoothd の client の枠（8 本）の予約・uid ごとの上限・遊んでいる client の切断（他の uid が埋めると desktop が繋がらない）。
+- BONDS に class・appearance（再起動の後も paired の device の種類の icon）。
+- off の時の HCI（page scan・接続の切断・LE の auto-connect の停止。p005 の再接続との組）。
 
 ## 記録
 
