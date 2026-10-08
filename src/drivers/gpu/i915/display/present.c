@@ -681,6 +681,35 @@ drv_i915_present_window_ready(
 }
 
 /*
+ * Reports whether the current lease's moved output failed (ws113-p011a):
+ * its presentations fail until the next claim, as for an output that is
+ * gone (BUG-266).
+ */
+int
+drv_i915_present_lease_failed(
+	struct i915_device *device)
+{
+	struct i915_display *display;
+	unsigned long irq;
+	int failed;
+
+	/* A node without a display has no lease to fail. */
+	display = device->display;
+	if (display == NULL)
+		return 0;
+
+	/* The mark the fail-back sets under the lock the worker's readers share. */
+	irq = spin_lock_irqsave(&device->irq_lock);
+
+	failed = display->window.lease_failed;
+
+	spin_unlock_irqrestore(&device->irq_lock, irq);
+
+	/* Succeeded: whether the lease's moved output failed. */
+	return failed;
+}
+
+/*
  * Runs the display window on the worker.
  *
  * Lights the panel (the resident run); the window serves every request,

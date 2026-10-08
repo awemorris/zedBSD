@@ -39,10 +39,16 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Marks a parameter a function does not use. */
+#define UNUSED_PARAMETER(name)	((void)(name))
+
 /* The light keys (the evdev KEY_BRIGHTNESSDOWN and KEY_BRIGHTNESSUP), and how far one moves the light. */
 #define DISPLAYS_KEY_DOWN	224U
 #define DISPLAYS_KEY_UP		225U
 #define DISPLAYS_KEY_STEP	5U
+
+/* How long a result waits for the first frame of the output's move (ms) before it is answered as applied (BUG-266). */
+#define DISPLAYS_PENDING_MS	3000U
 
 /* The longest output event: seven words, two strings and their lengths. */
 #define DISPLAYS_EVENT_MAX	(7U * 4U + 4U + KL_SYSTEM_DISPLAY_KEY_MAX + 4U + KL_SYSTEM_DISPLAY_LABEL_MAX + 8U)
@@ -56,6 +62,20 @@ static struct {
 	unsigned boot_light_done;
 } displays_state;
 
+/*
+ * A result held back until the move of the output it caused is proven by
+ * the move's first frame (BUG-266): the object (NULL when none waits), its
+ * request, whether the choice was written, and since when it waits.  The
+ * object's going clears it (kwl_displays_object_gone); a newer held result
+ * answers the older one first.
+ */
+static struct {
+	struct kwl_object *object;
+	uint32_t request;
+	uint32_t written;
+	uint64_t since_ms;
+} displays_pending;
+
 static void displays_snapshot(struct kwl_object *object);
 static void displays_output(struct kwl_object *object, struct kwl_server *server, unsigned index);
 static void displays_label(const char *key, char *label, size_t size);
@@ -67,6 +87,7 @@ static int displays_brightness_request(struct kwl_object *object, const unsigned
 static int displays_shown_request(struct kwl_object *object, const unsigned char *bytes, size_t size);
 static int displays_places(const char *text, struct kwl_display_config *wanted);
 static void displays_result(struct kwl_object *object, uint32_t request, uint32_t applied, uint32_t saved);
+static void displays_answer(struct kwl_object *object, VkDisplayKHR before, uint32_t request, uint32_t applied, uint32_t written);
 static int displays_active(struct kwl_server *server);
 static int displays_string(const unsigned char *bytes, size_t size, size_t offset, size_t bound, const char **text, size_t *next);
 static size_t displays_put_word(unsigned char *payload, size_t offset, uint32_t word);
@@ -146,6 +167,69 @@ kwl_displays_request(
 
 	/* No other request. */
 	return EPROTO;
+}
+
+/*
+ * Answers the result held back for a move of the output (BUG-266), once
+ * the move's first frame was presented or refused: a refused one is
+ * FAILED, the choice not holding.
+ */
+void
+kwl_displays_move_settled(
+	struct kwl_server *server,
+	int failed)
+{
+	uint32_t applied;
+
+	UNUSED_PARAMETER(server);
+
+	/* Nothing held back. */
+	if (displays_pending.object == NULL)
+		return;
+
+	/* How the move ended. */
+	applied = KL_SYSTEM_RESULT_OK;
+	if (failed)
+		applied = KL_SYSTEM_RESULT_FAILED;
+
+	/* The answer, and nothing held back any more. */
+	printf("KWL DISPLAYS result held request=%u applied=%u\n", displays_pending.request, applied);
+	displays_result(displays_pending.object, displays_pending.request, applied, displays_pending.written);
+	displays_pending.object = NULL;
+}
+
+/*
+ * Answers a result held back too long (the move's first frame never came:
+ * nothing was drawn, or the output was moved again), as applied.
+ */
+void
+kwl_displays_pending_tick(
+	struct kwl_server *server,
+	uint64_t now)
+{
+	/* Nothing held back, or not long yet. */
+	if (displays_pending.object == NULL)
+		return;
+	if (now - displays_pending.since_ms < DISPLAYS_PENDING_MS)
+		return;
+
+	/* Answered as the choice applied. */
+	kwl_displays_move_settled(server, 0);
+}
+
+/*
+ * Forgets a held result of a displays object that goes.
+ */
+void
+kwl_displays_object_gone(
+	struct kwl_object *object)
+{
+	/* Only the object that waits. */
+	if (displays_pending.object != object)
+		return;
+
+	/* Nobody to answer. */
+	displays_pending.object = NULL;
 }
 
 /* Sends every displays object a new snapshot: the displays changed. */
@@ -534,6 +618,7 @@ displays_apply_request(
 	size_t size)
 {
 	struct kwl_server *server;
+	VkDisplayKHR before;
 	struct kwl_display_config wanted;
 	const char *places;
 	uint32_t request;
@@ -594,6 +679,7 @@ displays_apply_request(
 	}
 
 	/* Applied (heads.c tells every object the new snapshot), or refused with nothing changed. */
+	before = server->compose->display;
 	error = kwl_displays_apply(server, &wanted, &saved);
 	printf("KWL DISPLAYS apply client=%llu mode=%u error=%d saved=%d\n", (unsigned long long)object->client->number, mode, error, saved);
 	if (error != 0) {
@@ -601,11 +687,11 @@ displays_apply_request(
 		return 0;
 	}
 
-	/* Succeeded: applied, and whether it was written. */
+	/* Succeeded: applied, and whether it was written (held back while the output's move is not proven). */
 	written = 0U;
 	if (saved == 0)
 		written = 1U;
-	displays_result(object, request, KL_SYSTEM_RESULT_OK, written);
+	displays_answer(object, before, request, KL_SYSTEM_RESULT_OK, written);
 	return 0;
 }
 
@@ -696,6 +782,7 @@ displays_shown_request(
 	size_t size)
 {
 	struct kwl_server *server;
+	VkDisplayKHR before;
 	const char *key;
 	uint32_t request;
 	uint32_t shown;
@@ -724,6 +811,9 @@ displays_shown_request(
 	}
 
 	/* Turned off or on (heads.c), and the answer. */
+	before = VK_NULL_HANDLE;
+	if (server->compose != NULL)
+		before = server->compose->display;
 	error = kwl_displays_set_shown(server, key, shown != 0U, &saved);
 	printf("KWL DISPLAYS shown client=%llu key=%s shown=%u error=%d saved=%d\n", (unsigned long long)object->client->number, key, shown, error, saved);
 	switch (error) {
@@ -745,7 +835,7 @@ displays_shown_request(
 	written = 0U;
 	if (error == 0 && saved == 0)
 		written = 1U;
-	displays_result(object, request, applied, written);
+	displays_answer(object, before, request, applied, written);
 	return 0;
 }
 
@@ -793,6 +883,44 @@ displays_places(
 
 	/* Succeeded: the places are in the choice. */
 	return 0;
+}
+
+/*
+ * Answers a request that changed the displays: at once, or, when it moved
+ * the output to another display (from `before`), once the move's first
+ * frame tells whether the move holds (BUG-266).
+ */
+static void
+displays_answer(
+	struct kwl_object *object,
+	VkDisplayKHR before,
+	uint32_t request,
+	uint32_t applied,
+	uint32_t written)
+{
+	struct kwl_compose *compose;
+	struct kwl_server *server;
+
+	/* A refusal, or a change that did not move the output, is answered at once. */
+	server = object->client->server;
+	compose = server->compose;
+	if (applied != KL_SYSTEM_RESULT_OK ||
+	    compose == NULL ||
+	    !compose->switch_proving ||
+	    compose->display == before) {
+		displays_result(object, request, applied, written);
+		return;
+	}
+
+	/* An older result held back is answered first, as applied. */
+	kwl_displays_move_settled(server, 0);
+
+	/* Held back until the move's first frame. */
+	displays_pending.object = object;
+	displays_pending.request = request;
+	displays_pending.written = written;
+	displays_pending.since_ms = kwl_milliseconds();
+	printf("KWL DISPLAYS result held request=%u until the move's first frame\n", request);
 }
 
 /* Sends an object a request's result. */

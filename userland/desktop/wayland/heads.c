@@ -2127,6 +2127,8 @@ kwl_displays_anchor_follow(
 			continue;
 		if ((compose->limited & ((uint32_t)1U << index)) != 0U)
 			continue;
+		if ((compose->move_failed & ((uint32_t)1U << index)) != 0U)
+			continue;
 		off = heads_off(compose, index);
 		if (off)
 			continue;
@@ -2137,6 +2139,44 @@ kwl_displays_anchor_follow(
 		if (error == 0)
 			return;
 	}
+}
+
+/*
+ * Takes in a move of the output that failed at its first frame and went
+ * back to the display `back` (BUG-266): that display is on again in the
+ * choice (an anchor turned off gave the desktop to the display that
+ * failed), the heads follow, and the clients hear the displays as they
+ * are, so that Settings shows the choice did not hold.
+ */
+void
+kwl_displays_move_failed(
+	struct kwl_server *server,
+	const char *back)
+{
+	struct kwl_compose *compose;
+	int saved;
+	int off;
+	int error;
+
+	/* The display gone back to is the anchor again, and on when the choice turned it off. */
+	compose = server->compose;
+	(void)snprintf(compose->config.anchor, sizeof(compose->config.anchor), "%s", back);
+	off = kwl_displays_is_off(&compose->config, back);
+	if (off) {
+		error = kwl_displays_set_off(&compose->config, back, 0U);
+		if (error != 0)
+			printf("KWL DISPLAYS move failed: %s stays off errno=%d\n", back, error);
+	}
+
+	/* The choice written, apart from the displays as they are (D-STORE). */
+	saved = heads_save(&compose->config);
+	if (saved != 0)
+		printf("KWL DISPLAYS save failed errno=%d\n", saved);
+
+	/* The heads of the displays on, and the clients told. */
+	kwl_heads_sync(server);
+	heads_changed(server);
+	printf("KWL DISPLAYS move failed back=%s on_again=%d\n", back, off);
 }
 
 /* Finds a display's place in the last enumeration: its index, or -1 when it is not connected. */

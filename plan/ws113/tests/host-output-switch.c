@@ -17,7 +17,10 @@
  * goes; the output waiting when no display takes it; a display gone from
  * the list at a hotplug, with no frame drawn, losing the output; a
  * display still listed whose swapchain went out of date opened again
- * rather than left; and an unreadable list changing nothing.
+ * rather than left; and an unreadable list changing nothing.  BUG-266:
+ * a move whose first frame the display refused goes back to the display
+ * it left, the held result told it failed, and the display not moved to
+ * again until the next hotplug.
  */
 
 #include "userland/desktop/wayland/kwl.h"
@@ -62,6 +65,11 @@ static unsigned test_told;
 
 /* The clock. */
 static uint64_t test_now;
+
+/* BUG-266: the held displays results answered (and how), and the display a failed move went back to. */
+static unsigned test_settled;
+static int test_settled_failed;
+static char test_back[64];
 
 /* The number of failed checks. */
 static int test_failures;
@@ -255,6 +263,40 @@ kwl_displays_anchor_follow(
 	(void)server;
 }
 
+/* Stands in for the held displays result's answer (displays-shell.c, BUG-266). */
+void
+kwl_displays_move_settled(
+	struct kwl_server *server,
+	int failed)
+{
+	/* Counted, with how the move ended. */
+	(void)server;
+	test_settled++;
+	test_settled_failed = failed;
+}
+
+/* Stands in for the held displays result's wait (displays-shell.c, BUG-266): nothing is held here. */
+void
+kwl_displays_pending_tick(
+	struct kwl_server *server,
+	uint64_t now)
+{
+	/* Nothing to answer. */
+	(void)server;
+	(void)now;
+}
+
+/* Stands in for the choice taking in a failed move (heads.c, BUG-266). */
+void
+kwl_displays_move_failed(
+	struct kwl_server *server,
+	const char *back)
+{
+	/* The display gone back to. */
+	(void)server;
+	(void)snprintf(test_back, sizeof(test_back), "%s", back);
+}
+
 /* Stands in for a head's lost display (heads.c). */
 int
 kwl_heads_lost(
@@ -418,6 +460,46 @@ main(void)
 	test_hotplug_signaled = 1;
 	kwl_output_tick(&server);
 	check(compose.display == (VkDisplayKHR)(uintptr_t)0x44U && compose.output_lost == 0U && server.width == 1280U, "a display gone from the list loses the output and it moves");
+
+	/*
+	 * BUG-266: on the panel with a USB-C DisplayPort display; the move to it
+	 * is not proven until its first frame, which the display refuses: the
+	 * output goes back to the panel, the held result says the move failed,
+	 * and the DisplayPort display is not moved to again until a hotplug.
+	 */
+	test_display_set(0U, 0x11U, "zedbsd-port-v1:pci:0000:00:02.0:edp:A", 1920U, 1080U);
+	test_display_set(1U, 0x66U, "zedbsd-port-v1:pci:0000:00:02.0:dp:TC2", 1920U, 1280U);
+	test_display_count = 2U;
+	compose.display = (VkDisplayKHR)(uintptr_t)0x11U;
+	compose.boot_display = compose.display;
+	compose.output_open = 1U;
+	compose.output_lost = 0U;
+	compose.kept_off = VK_NULL_HANDLE;
+	test_now += 300U;
+	test_hotplug_signaled = 1;
+	kwl_output_tick(&server);
+	error = kwl_output_use_external(&server);
+	check(error == 0 && compose.display == (VkDisplayKHR)(uintptr_t)0x66U, "the output moves to the DisplayPort display");
+	check(compose.switch_proving == 1U && compose.switch_from == (VkDisplayKHR)(uintptr_t)0x11U, "the move waits for its first frame, the panel kept to go back to");
+	compose.switch_proving = 0U;
+	compose.switch_failed = 1U;
+	compose.output_lost = 1U;
+	test_settled = 0U;
+	test_now += 1U;
+	kwl_output_tick(&server);
+	check(compose.display == (VkDisplayKHR)(uintptr_t)0x11U && compose.output_lost == 0U && server.height == 1080U, "a refused first frame takes the output back to the panel");
+	check(compose.switch_failed == 0U && compose.switch_proving == 0U, "the way back is not a move to prove");
+	check(test_settled == 1U && test_settled_failed, "the held result says the move failed");
+	check(strcmp(test_back, "zedbsd-port-v1:pci:0000:00:02.0:edp:A") == 0, "the choice takes in the panel gone back to");
+	check((compose.move_failed & 2U) != 0U && (compose.limited & 2U) == 0U, "the failed display is marked, not limited (it may still be a head)");
+	available = kwl_output_external_available(&server);
+	check(!available, "a display whose move failed is not offered");
+	error = kwl_output_use_external(&server);
+	check(error == ENOENT && compose.display == (VkDisplayKHR)(uintptr_t)0x11U, "the output does not move to it again");
+	test_now += 300U;
+	test_hotplug_signaled = 1;
+	kwl_output_tick(&server);
+	check(compose.move_failed == 0U, "a hotplug forgets the failed move");
 
 	/* Reports the outcome. */
 	if (test_failures != 0) {
