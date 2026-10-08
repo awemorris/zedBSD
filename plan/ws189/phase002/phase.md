@@ -90,3 +90,19 @@ compositor（`userland/desktop/wayland/`）:
 - **F4**: ws189 の 10 のシナリオ（desktop.dnd.* の 8、apps.pdfviewer.drag-out、apps.browser.image-drag）を自己レビュー（log の行が source にあること、F2・F5・F6 の
   直し）して `status: active` にした。Files・Terminal の DnD の回帰として `apps.files.drag-between-windows`（Files の窓の間の移動、Terminal への path、即離し）を足した（active）。
 - 確認: amd64 の data-probe・libbrowser・browser と Linux all の build warning 0、境界 PASS、style の新しい指摘 0、`check-scenarios.py` PASS（122）。QEMU は T1 へ。
+
+### F7（2026-10-08、T1-439 の desktop.dnd.same-program-windows）
+
+- 観察（T1-439、撮影 `/home/awe/zedBSD-worktrees/t1/build/t1-439/shots/`）: enter は `devices=2` で両方の device に届いたが、drop は device 2 に行った
+  （`DATAPROBE drag leave`（device 1）、`DATAPROBE drag drop device=2`、`received device=2 when=drop bytes=7`）。期待は device 1 の drop と device 2 の leave。
+- 原因（**実装を直した**）: `drag_enter` は client の object の list（`objects.c` 119〜120 行: 新しい object を先頭に足す）を先頭から歩いて device を slot に入れていたので、
+  新しい device（data-probe の 2 つ目）が slot 0 になり、両方が型を受けた時に `drag_pick` の「型を受けた最初の組」が device 2 を選んだ。
+  設計 §3.6 の「最初の組」は作られた順（program の最初の窓）の意味で、data-probe の `--two-devices` の説明（「2 つ目は後に告げられ、最初の device が drop を受ける」）と
+  シナリオもその前提。Wayland の規格は複数の data device の間の drop の宛先を決めていない（wlroots は全部の device に drop を送る）ので、この compositor の
+  「落とした 1 つだけ」（ユーザーの原則「データは落とした窓にだけ」）の中で、順を作られた順に固定するのが筋。libkeiland の program では自分の surface の窓だけが型を受けるので、
+  順は今の program の振る舞いを変えない。
+- 直し: `userland/desktop/wayland/data.c` に `drag_devices_in_order`（生きた data device を古い順に、`KWL_DND_DEVICES` を越える時は古い 16 を残す）を足し、
+  `drag_enter` はその順で enter を送り slot に入れる。`drag_pick`・motion・leave・drop は slot の順のまま。シナリオと data-probe は変えない。
+- 確認: `make -j16 ZEDBSD_CONFIG=plan/ws035/tests/config-amd64-zdesktop.mk BUILD=build/ws189 build/ws189/bin/wayland` warning 0、
+  `make -j16 -f userland/desktop/keiland-linux.mk KEILAND_LINUX_BUILD=build/ws189-linux all` warning 0、`plan/tools/style-check.py userland/desktop/wayland/data.c` 指摘 0、
+  `git diff --check` 0。host の試験は無い（data.c の drag は compositor 全体が要る）。QEMU は T1 へ（desktop.dnd.same-program-windows 1〜2 の再試験）。

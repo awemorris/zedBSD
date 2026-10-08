@@ -1,0 +1,493 @@
+KWL LANGUAGE language=en from=setting error=0
+KWL SETTINGS open present=1
+KL EVENTS subscribed classes=0x2f
+KWL POWER source=ac percent=100 charging=0
+KWL DISPLAY device=zedBSD i915 (Gen12 Xe) width=1920 height=1080 refresh_mhz=60011
+KWL STARTUP step=vulkan-device ms=3
+KWL STARTUP step=vulkan-objects-arrow ms=1
+KWL STARTUP step=wallpaper-picture ms=11
+KWL STARTUP step=wallpaper ms=199
+KWL STARTUP step=glyphs-text ms=17
+KWL STARTUP step=glyphs-icons ms=6
+KWL STARTUP step=glyphs-mark ms=18
+KWL GLASS atlas cache-top=344 cells=294 faces=1
+KWL STARTUP step=glyphs ms=42
+KWL STARTUP step=tiles ms=114
+KWL GLASS ready text=1
+KWL STARTUP step=compose ms=360 at_ms=150916
+KWL INPUT device=/dev/input/event0 kind=pointer abs=0
+KWL INPUT device=/dev/input/event1 kind=keyboard abs=0
+KWL INPUT device=/dev/input/event2 kind=touchpad abs=0 resolution=12,12 size=1336,760
+KWL STARTUP step=input ms=0 at_ms=150916
+KWL KEYMAP format=xkb_v1 errno=0
+KWL STARTUP step=keymap ms=0 at_ms=150916
+KWL STARTUP step=socket ms=0 at_ms=150916
+KWL CLIENT client=1 fd=12 ime=1
+KWL IME started pid=112 client=1 --method=ja
+KWL READY socket=/run/user/1000/wayland-0 width=1920 height=1080 timeout_ms=18446744073709551615 pid=103 role=normal
+KWL BT open ok=1
+KWL CORNER zone x=1892 y=0 width=28 height=28
+KWL OSK zone kind=flick x=1892 y=1052 size=28
+KWL OSK zone kind=qwerty x=0 y=1052 size=28
+KWL ACTIVATION token client=0 app=KEILAND_DESKTOP_TOKEN=6b8faf47d62099a816da51b7d47f3e11 exec /bi granted=1 reason=spawn at_ms=150924
+KEI-IME METHOD 1
+KWL DESKTOP start pid=113 command=/bin/files --desktop at_ms=150929
+KWL ACTIVATION token client=0 app=exec /bin/settings --welcome granted=1 reason=spawn at_ms=150929
+KWL WELCOME start pid=114
+KWL STARTUP step=output-display ms=1
+KEI-IME LANGUAGE id=direct
+KWL STARTUP step=output-pipelines ms=9
+KWL HANDOFF go=1 waited_ms=23 at_ms=150968
+KWL STARTUP step=output-swapchain ms=18
+KWL STARTUP step=output-targets ms=0
+KWL DISPLAYS config mode=0 places=1
+KWL OUTPUT open width=1920 height=1080 images=3 format=37
+KWL MODE window switch_ms=51 at_ms=150986
+KWL GLASS desktops x=1526 step=34 width=30
+KWL NETWORK icon x=1654 y=3 width=30 height=38
+KWL VOLUME icon x=1688 y=3 width=30 height=38
+KWL MEDIA volumes=0 fresh=0
+KWL CLIENT client=2 fd=17
+KWL IME language=direct
+KWL OUTPUT display index=0 name=zedbsd-port-v1:pci:0000:00:02.0:edp:A internal=1 shown=1 width=1920 height=1080
+KWL OUTPUT displays count=1
+KWL HOME skip name=X terminal missing=/bin/zterm
+KWL HOME prepared names=17
+KWL NETWORK state reachable=1 connected=0 kind=none interface= wifi=searching ssid=
+KWL VOLUME reachable=1 device=1
+KWL IME indicator x=1622 label=A
+KWL CLIENT client=3 fd=18
+KEI-IME POPUP ready=1 error=0
+KEI-IME READY languages=2
+KWL INSET create client=2 inset=23 toplevel=21
+KWL EDIT create client=2 edit=25 toplevel=21
+KWL BOUNDS client=2 surface=19 width=1896 height=960
+KWL CONFIGURE client=2 surface=19 serial=2 width=0 height=0 fullscreen=0
+KWL SEAT client=2 pointer=1 keyboard=0 touch=0
+KWL SEAT client=2 pointer=1 keyboard=1 touch=0
+KWL DESKTOP role client=3 surface=19 x=0 y=44 width=1920 height=1036
+KWL SEAT client=3 pointer=1 keyboard=0 touch=0
+KWL SEAT client=3 pointer=1 keyboard=1 touch=0
+ZSETTINGS PAGE home
+ZSETTINGS WELCOME step=0 name=welcome
+KWL DESKTOP ack serial=3
+KWL IMPORT client=2 buffer=32 width=1180 height=800 bytes=3776512
+KWL IMPORT client=2 buffer=33 width=1180 height=800 bytes=3776512
+ZFILES DESKTOP configure x=0 y=44 width=1920 height=1036
+KWL IMPORT client=2 buffer=34 width=1180 height=800 bytes=3776512
+ZFILES LOCATION kind=folder path=/home/kei/Desktop items=0 error=0
+KWL IMPORT client=3 buffer=30 width=1920 height=1036 bytes=7958528
+KWL IMPORT client=2 buffer=35 width=1180 height=800 bytes=3776512
+KWL IMPORT client=3 buffer=31 width=1920 height=1036 bytes=7958528
+KWL IMPORT client=2 buffer=36 width=1180 height=800 bytes=3776512
+KWL IMPORT client=3 buffer=32 width=1920 height=1036 bytes=7958528
+KWL IMPORT client=2 buffer=37 width=1180 height=800 bytes=3776512
+KWL IMPORT client=3 buffer=33 width=1920 height=1036 bytes=7958528
+KWL IMPORT client=3 buffer=34 width=1920 height=1036 bytes=7958528
+KWL SYSTEM object client=2 get=2 id=42
+KWL SYSTEM object client=2 get=3 id=43
+KWL SYSTEM object client=2 get=4 id=44
+KWL SYSTEM object client=2 get=5 id=45
+KWL SYSTEM object client=2 get=7 id=46
+KWL SYSTEM object client=2 get=8 id=47
+KWL NOTIFY object client=2 id=48
+KWL MAIL object client=2 id=49
+KWL PHONE object client=2 id=50
+KWL PRINTERS object client=2 id=51
+KWL DISPLAYS object client=2 id=52
+KWL SYSTEM machine object client=2 id=53
+KWL BT object client=2 id=54
+ZSETTINGS SYSTEM open capabilities=0x3fefe
+ZSETTINGS MACHINE query request=1 parts=13
+ZSETTINGS NETWORK state reachable=1 connected=0 kind=0 interface= wifi=2 ssid=
+KWL IMPORT client=3 buffer=35 width=1920 height=1036 bytes=7958528
+KWL SYSTEM machine query client=2 request=1 what=13
+KWL SYSTEM result client=2 object=42 request=2 applied=0
+KWL SYSTEM machine answer client=2 request=1 what=13 result=0 users=1 filesystems=0 skipped=0 mounts=0 mounts_skipped=0
+KWL SETTINGS snapshot client=3 object=39
+KWL SETTINGS snapshot client=2 object=59
+ZFILES ACCENT index=0
+ZSETTINGS LOOK open opacity=100 wallpaper= writable=1
+ZSETTINGS SOUND open live=1 reachable=1 value=100 muted=0
+ZSETTINGS SOUND report reachable=1 device=1 value=100 muted=0
+ZSETTINGS APPEARANCE appearance=0
+ZSETTINGS GLASS blur=1
+ZSETTINGS GLASS on
+ZSETTINGS MENU state back=0 forward=0 sidebar=0 page=home
+ZSETTINGS MENU ready items=20
+ZSETTINGS TITLEBAR state back=0 forward=0 parts=1 last=Settings sidebar=0 query= focus=0
+ZSETTINGS TITLEBAR ready controls=6
+ZFILES DESKTOP layout saved=0 error=0
+ZFILES DESKTOP grid width=1920 height=1036 columns=19 rows=9
+ZFILES DESKTOP ready items=0 cells=0 width=1920 height=1036 at_ms=151241 newest_age_ms=-1 hidden=0
+ZSETTINGS LAYOUT page=home controls=2
+ZSETTINGS CONTROL index=9002 x=1089 y=28 width=59 height=32
+ZSETTINGS CONTROL index=9001 x=1094 y=752 width=62 height=32
+ZSETTINGS GLASS panels count=1
+KWL MENU set client=2 place=66 menu=67
+ZFILES MENU context-only
+ZFILES DESKTOP startup entered_ms=150935 fonts=11 instance=0 window=145 present=22 app=1 canvas=122 draw=5 shown=24 menus=0
+ZFILES READY width=1920 height=1036 token=-
+ZSETTINGS READY width=1180 height=800 glass=1 page=home
+KWL MENU commit client=2 menu=67 serial=1 items=41 generation=1
+KWL MENU commit client=2 menu=67 serial=2 items=41 generation=2
+KWL MENU commit client=2 menu=67 serial=3 items=41 generation=3
+KWL TITLEBAR create client=2 titlebar=69 toplevel=21
+KWL TITLEBAR commit client=2 titlebar=69 serial=1 mode=1 controls=0 tabs=0 generation=1
+KWL TITLEBAR commit client=2 titlebar=69 serial=2 mode=1 controls=6 tabs=0 generation=2
+KWL TITLEBAR commit client=2 titlebar=69 serial=3 mode=1 controls=6 tabs=0 generation=3
+KWL TITLEBAR commit client=2 titlebar=69 serial=4 mode=1 controls=6 tabs=0 generation=4
+KWL TITLEBAR commit client=2 titlebar=69 serial=5 mode=1 controls=6 tabs=0 generation=5
+KWL TITLEBAR commit client=2 titlebar=69 serial=6 mode=1 controls=6 tabs=0 generation=6
+KWL GLASS client=2 surface=19 blur=1
+KWL GLASS client=2 surface=19 panels=1 card:0,0,1180,800,16
+KWL DECORATION applied client=2 surface=19 mode=2
+KWL EDIT state client=2 edit=25 actions=0xff flags=0xd
+ZSETTINGS ABOUT system=Kei/zedBSD 1.0.0 Beta 2 kernel=zedBSD 1.0.0-beta2+g61f6b95 machine=x86_64 cores=12 host=kei
+ZSETTINGS USERS account name=kei
+KWL MAP client=2 surface=19 x=370 y=188
+ZSETTINGS USERS list count=1
+KWL SURFACE enter surface=19 output=0 client=2
+ZSETTINGS LANGUAGES system language=none
+KWL IME app key=app:settings language=direct from=inherited
+ZSETTINGS MACHINE result request=1 errno=0
+ZSETTINGS NETWORK open links=2 dns=1 saved=0
+KWL RENDER output=0 surfaces=19
+KWL DESKTOP drawn at_ms=151273
+KWL GLASS glyph codepoint=U+2026 size=0 face=0 cell=0
+KWL TITLEBAR control client=2 surface=19 where=floating id=1 x=493 y=143 width=30 height=30 shown=1
+KWL TITLEBAR control client=2 surface=19 where=floating id=2 x=527 y=143 width=30 height=30 shown=1
+KWL TITLEBAR control client=2 surface=19 where=floating id=3 x=561 y=143 width=30 height=30 shown=1
+KWL TITLEBAR control client=2 surface=19 where=floating id=4 x=601 y=143 width=72 height=30 shown=1
+KWL TITLEBAR control client=2 surface=19 where=floating id=5 x=1142 y=143 width=220 height=30 shown=1
+KWL TITLEBAR control client=2 surface=19 where=floating id=6 x=1366 y=143 width=30 height=30 shown=1
+KWL TITLEBAR control client=2 surface=19 where=floating id=0 x=1406 y=143 width=30 height=30 shown=1
+KWL APPS bar count=1 hidden=0 desktop=2 apps=settings
+KWL APPS icon app=settings x=58 y=0 width=34 height=44 windows=1
+KWL SYSTEM sharing answer error=0
+ZSETTINGS SHARING state available=1 enabled=1 running=1 port=22 allowed=1 fingerprint=SHA256:dJxgqqCIgLBZJwbMzrwgwrIUSI5cCxNdMKX9HeEtCG4
+KWL SYSTEM enrolled pin=0 keys=0 listed=0
+ZSETTINGS USERS enrolled changed
+KWL SYSTEM result client=2 object=42 request=3 applied=0
+KWL SUPER home
+KWL HOME open via=super at_ms=152385
+KWL IME activate field home
+KEI-IME ACTIVATE
+KWL HOME layer=cover after_ms=1
+KWL HOME layer=content after_ms=1
+KWL FIRST_FRAME what=home-open frame=22 request_ms=152385 ms=30
+KWL HOME search query="s" results=13 [Files] [Notes] [Settings] [Terminal] [Music] [Photos] [Phone] [Calendar] [Mail] [System Monitor] [Browser] [Lock Screen] [Power Off]
+KWL HOME icon name="Files" x=600 y=608
+KWL HOME icon name="Notes" x=744 y=608
+KWL HOME icon name="Settings" x=888 y=608
+KWL HOME icon name="Terminal" x=1032 y=608
+KWL HOME icon name="Music" x=1176 y=608
+KWL HOME icon name="Photos" x=1320 y=608
+KWL HOME icon name="Phone" x=600 y=760
+KWL HOME icon name="Calendar" x=744 y=760
+KWL HOME icon name="Mail" x=888 y=760
+KWL HOME icon name="System Monitor" x=1032 y=760
+KWL HOME icon name="Browser" x=1176 y=760
+KWL HOME icon name="Lock Screen" x=1320 y=760
+KWL HOME icon name="Power Off" x=600 y=912
+KWL HOME opened apps=13 pages=1 page=1 at_ms=152667
+KWL HOME icon name="Files" x=600 y=608
+KWL HOME icon name="Notes" x=744 y=608
+KWL HOME icon name="Settings" x=888 y=608
+KWL HOME icon name="Terminal" x=1032 y=608
+KWL HOME icon name="Music" x=1176 y=608
+KWL HOME icon name="Photos" x=1320 y=608
+KWL HOME icon name="Phone" x=600 y=760
+KWL HOME icon name="Calendar" x=744 y=760
+KWL HOME icon name="Mail" x=888 y=760
+KWL HOME icon name="System Monitor" x=1032 y=760
+KWL HOME icon name="Browser" x=1176 y=760
+KWL HOME icon name="Lock Screen" x=1320 y=760
+KWL HOME icon name="Power Off" x=600 y=912
+KWL HOME search query="se" results=4 [Files] [Settings] [Browser] [Power Off]
+KWL HOME icon name="Files" x=744 y=912
+KWL HOME icon name="Settings" x=888 y=912
+KWL HOME icon name="Browser" x=1032 y=912
+KWL HOME icon name="Power Off" x=1176 y=912
+KWL HOME search query="set" results=1 [Settings]
+KWL HOME icon name="Settings" x=960 y=912
+KWL HOME search query="sett" results=1 [Settings]
+KWL HOME icon name="Settings" x=960 y=912
+KWL SYSTEM result client=2 object=42 request=4 applied=0
+KWL HOME switch name=Settings surface=19 client=2
+KWL HOME close via=home at_ms=153641
+KWL IME deactivate
+KWL APPS raise surface=19 via=home at_ms=153641 client=2
+KWL LAYOUT switch surface=19 action=keep mode=windowed via=home client=2
+KEI-IME DEACTIVATE
+KWL FIRST_FRAME what=home-close frame=32 request_ms=153641 ms=25
+KWL HOME closed at_ms=153890
+KWL SYSTEM result client=2 object=42 request=5 applied=0
+KWL SYSTEM result client=2 object=42 request=6 applied=0
+KWL PERF 5001ms: passes=448 timeouts=261 | poll 58.6% work 42.7%
+KWL PERF compose frames=115 draw_ms=17.04 (acquire 3.47 submit+present 13.03) frame_ms=17.59
+KWL SYSTEM result client=2 object=42 request=7 applied=0
+KWL CURSOR frame edges=1
+KWL CURSOR frame edges=0
+KWL SYSTEM result client=2 object=42 request=8 applied=0
+KWL TITLEBAR activate client=2 id=3 detail=0 serial=11 via=pointer
+ZSETTINGS TITLEBAR activated id=3 detail=0
+ZSETTINGS WELCOME left page=home
+ZSETTINGS PAGE home
+ZSETTINGS TITLEBAR state back=0 forward=0 parts=1 last=Settings sidebar=1 query= focus=0
+ZSETTINGS MENU state back=0 forward=0 sidebar=1 page=home
+ZSETTINGS MACHINE query request=9 parts=2
+ZSETTINGS LAYOUT page=home controls=0
+ZSETTINGS GLASS panels count=2
+KWL TITLEBAR commit client=2 titlebar=69 serial=7 mode=1 controls=6 tabs=0 generation=7
+KWL TITLEBAR commit client=2 titlebar=69 serial=8 mode=1 controls=6 tabs=0 generation=8
+KWL TITLEBAR commit client=2 titlebar=69 serial=9 mode=1 controls=6 tabs=0 generation=9
+KWL MENU commit client=2 menu=67 serial=4 items=41 generation=4
+KWL SYSTEM machine query client=2 request=9 what=2
+KWL GLASS client=2 surface=19 panels=2 card:0,0,248,800,16 card:256,0,924,800,16
+KWL SYSTEM machine answer client=2 request=9 what=2 result=0 users=0 filesystems=2 skipped=0 mounts=0 mounts_skipped=0
+ZSETTINGS MACHINE result request=9 errno=0
+KWL SYSTEM result client=2 object=42 request=10 applied=0
+KWL PING pong client=2 serial=13
+ZSETTINGS PAGE display
+ZSETTINGS TITLEBAR state back=1 forward=0 parts=2 last=Display sidebar=1 query= focus=0
+ZSETTINGS MENU state back=1 forward=0 sidebar=1 page=display
+KWL SYSTEM result client=2 object=42 request=11 applied=0
+ZSETTINGS LAYOUT page=display controls=3
+ZSETTINGS CONTROL index=1 x=306 y=166 width=77 height=32
+ZSETTINGS CONTROL index=2 x=391 y=166 width=74 height=32
+ZSETTINGS CONTROL index=5 x=306 y=634 width=758 height=28
+KWL TITLEBAR commit client=2 titlebar=69 serial=10 mode=1 controls=6 tabs=0 generation=10
+KWL TITLEBAR commit client=2 titlebar=69 serial=11 mode=1 controls=6 tabs=0 generation=11
+KWL TITLEBAR commit client=2 titlebar=69 serial=12 mode=1 controls=6 tabs=0 generation=12
+KWL MENU commit client=2 menu=67 serial=5 items=41 generation=5
+KWL MENU commit client=2 menu=67 serial=6 items=41 generation=6
+KWL TITLEBAR control client=2 surface=19 where=floating id=1 x=493 y=143 width=30 height=30 shown=1
+KWL TITLEBAR control client=2 surface=19 where=floating id=2 x=527 y=143 width=30 height=30 shown=1
+KWL TITLEBAR control client=2 surface=19 where=floating id=3 x=561 y=143 width=30 height=30 shown=1
+KWL TITLEBAR control client=2 surface=19 where=floating id=4 x=601 y=143 width=149 height=30 shown=1
+KWL TITLEBAR control client=2 surface=19 where=floating id=5 x=1142 y=143 width=220 height=30 shown=1
+KWL TITLEBAR control client=2 surface=19 where=floating id=6 x=1366 y=143 width=30 height=30 shown=1
+KWL TITLEBAR control client=2 surface=19 where=floating id=0 x=1406 y=143 width=30 height=30 shown=1
+ZSETTINGS MACHINE query request=12 parts=2
+KWL SYSTEM machine query client=2 request=12 what=2
+KWL SYSTEM machine answer client=2 request=12 what=2 result=0 users=0 filesystems=2 skipped=0 mounts=0 mounts_skipped=0
+ZSETTINGS MACHINE result request=12 errno=0
+KWL SYSTEM result client=2 object=42 request=13 applied=0
+KWL PING pong client=2 serial=16
+ZSETTINGS LAYOUT page=display controls=5
+ZSETTINGS CONTROL index=1 x=306 y=166 width=77 height=32
+ZSETTINGS CONTROL index=2 x=391 y=166 width=74 height=32
+ZSETTINGS CONTROL index=3 x=1060 y=474 width=70 height=32
+ZSETTINGS CONTROL index=4 x=973 y=474 width=79 height=32
+ZSETTINGS CONTROL index=5 x=306 y=634 width=758 height=28
+KWL PERF 5005ms: passes=466 timeouts=158 | poll 49.8% work 49.7%
+KWL PERF compose frames=153 draw_ms=15.56 (acquire 4.37 submit+present 10.73) frame_ms=15.95
+KWL SYSTEM result client=2 object=42 request=14 applied=0
+ZSETTINGS MACHINE query request=15 parts=2
+KWL SYSTEM machine query client=2 request=15 what=2
+KWL SYSTEM machine answer client=2 request=15 what=2 result=0 users=0 filesystems=2 skipped=0 mounts=0 mounts_skipped=0
+ZSETTINGS MACHINE result request=15 errno=0
+ZSETTINGS DISPLAY apply mode=1 places=0 error=0
+ZSETTINGS LAYOUT page=display controls=1
+ZSETTINGS CONTROL index=5 x=306 y=634 width=758 height=28
+KWL PING pong client=2 serial=19
+KWL DISPLAYS applied mode=mirror
+KWL DISPLAYS apply client=2 mode=1 error=0 saved=0
+ZSETTINGS DISPLAY apply result errno=0
+ZSETTINGS LAYOUT page=display controls=3
+ZSETTINGS CONTROL index=1 x=306 y=166 width=77 height=32
+ZSETTINGS CONTROL index=2 x=391 y=166 width=74 height=32
+ZSETTINGS CONTROL index=5 x=306 y=634 width=758 height=28
+KWL PERF 8456ms: passes=163 timeouts=53 | poll 11.5% work 88.4%
+KWL PERF compose frames=45 draw_ms=15.99 (acquire 5.31 submit+present 10.24) frame_ms=16.05
+KWL SYSTEM result client=2 object=42 request=17 applied=0
+KWL SYSTEM result client=2 object=42 request=18 applied=0
+KWL SYSTEM result client=2 object=42 request=19 applied=0
+KWL SYSTEM result client=2 object=42 request=20 applied=0
+KWL SYSTEM result client=2 object=42 request=21 applied=0
+KWL SYSTEM result client=2 object=42 request=22 applied=0
+KWL OUTPUT display index=0 name=zedbsd-port-v1:pci:0000:00:02.0:edp:A internal=1 shown=1 width=1920 height=1080
+KWL OUTPUT display index=1 name=zedbsd-port-v1:pci:0000:00:02.0:dp:TC2 internal=0 shown=0 width=1920 height=1280
+KWL OUTPUT displays count=2
+KWL OUTPUT head open name=zedbsd-port-v1:pci:0000:00:02.0:dp:TC2 width=1920 height=1280 refresh_mhz=59999 x=1920 y=0 images=3
+KWL SURFACE enter surface=19 output=1 client=2
+ZSETTINGS LAYOUT page=display controls=3
+ZSETTINGS CONTROL index=1 x=306 y=166 width=77 height=32
+ZSETTINGS CONTROL index=2 x=391 y=166 width=74 height=32
+ZSETTINGS CONTROL index=5 x=306 y=674 width=758 height=28
+KWL PERF 5004ms: passes=466 timeouts=423 | poll 88.5% work 11.2%
+KWL PERF compose frames=29 draw_ms=15.76 (acquire 5.43 submit+present 9.96) frame_ms=16.49
+KWL SYSTEM result client=2 object=42 request=23 applied=0
+KWL SYSTEM result client=2 object=42 request=24 applied=0
+KWL SYSTEM result client=2 object=42 request=25 applied=0
+KWL EVENT input changed
+KWL TOUCH added device=/dev/input/event3 x=0..10368 y=0..6912
+KWL INPUT device=/dev/input/event3 kind=touch abs=1
+KWL SEAT client=3 pointer=1 keyboard=1 touch=1
+KWL SEAT client=2 pointer=1 keyboard=1 touch=1
+KWL SYSTEM result client=2 object=42 request=26 applied=0
+KWL PERF 5003ms: passes=507 timeouts=496 | poll 98.8% work 0.9%
+KWL SYSTEM result client=2 object=42 request=27 applied=0
+KWL SYSTEM result client=2 object=42 request=28 applied=0
+KWL PING pong client=2 serial=22
+KWL PING pong client=2 serial=25
+KWL PING pong client=2 serial=28
+KWL SYSTEM result client=2 object=42 request=29 applied=0
+KWL SYSTEM result client=2 object=42 request=30 applied=0
+KWL TOUCH down client=2 surface=19 contact=0 x=1109 y=507
+ZSETTINGS TOUCH scroll start pane=page
+KWL SYSTEM result client=2 object=42 request=31 applied=0
+ZSETTINGS TOUCH scroll end pane=page scroll=0
+KWL TOUCH down client=2 surface=19 contact=0 x=1294 y=480
+KWL TOUCH down client=2 surface=19 contact=0 x=975 y=655
+KWL PERF 5001ms: passes=535 timeouts=332 | poll 79.0% work 20.6%
+KWL PERF compose frames=55 draw_ms=17.50 (acquire 1.26 submit+present 15.69) frame_ms=17.94
+KWL SYSTEM result client=2 object=42 request=32 applied=0
+ZSETTINGS TOUCH scroll start pane=page
+ZSETTINGS TOUCH scroll end pane=page scroll=0
+KWL TOUCH down client=2 surface=19 contact=0 x=1058 y=418
+KWL SYSTEM result client=2 object=42 request=33 applied=0
+ZSETTINGS TOUCH scroll start pane=page
+ZSETTINGS TOUCH scroll end pane=page scroll=0
+KWL TOUCH down client=2 surface=19 contact=0 x=876 y=548
+KWL TOUCH down client=2 surface=19 contact=0 x=1112 y=566
+KWL SYSTEM result client=2 object=42 request=34 applied=0
+KWL DESKTOP focus client=3 surface=19
+KWL IME app key=desktop language=direct from=desktop
+KWL TOUCH down client=3 surface=19 contact=0 x=54 y=201
+KWL SYSTEM result client=2 object=42 request=35 applied=0
+KWL TOUCH down client=3 surface=19 contact=0 x=140 y=314
+KWL TOUCH down client=3 surface=19 contact=0 x=133 y=333
+ZFILES TOUCH tap x=54 y=157 caught=0
+ZFILES TOUCH rest area=1 scroll=0
+ZFILES DESKTOP band start x=54 y=157
+ZFILES DESKTOP band end first=-1
+ZFILES TOUCH tap x=141 y=270 caught=0
+ZFILES TOUCH tap x=133 y=290 caught=0
+ZFILES TOUCH rest area=1 scroll=0
+ZFILES DESKTOP band start x=140 y=270
+ZFILES DESKTOP band end first=-1
+ZFILES DESKTOP band start x=133 y=289
+ZFILES DESKTOP band end first=-1
+KWL SYSTEM result client=2 object=42 request=36 applied=0
+KWL TOUCH down client=3 surface=19 contact=0 x=217 y=517
+ZFILES TOUCH tap x=218 y=474 caught=0
+ZFILES TOUCH rest area=1 scroll=0
+ZFILES DESKTOP band start x=217 y=473
+ZFILES DESKTOP band end first=-1
+KWL TOUCH down client=3 surface=19 contact=0 x=217 y=502
+ZFILES TOUCH drag area=1 fingers=1 scroll=0 largest=0
+ZFILES TOUCH release vy=333 scroll=0
+ZFILES TOUCH rest area=1 scroll=0
+KWL PERF 5000ms: passes=609 timeouts=387 | poll 90.5% work 9.1%
+KWL PERF compose frames=20 draw_ms=19.94 (acquire 0.15 submit+present 19.37) frame_ms=20.83
+KWL TOUCH down client=3 surface=19 contact=0 x=175 y=636
+ZFILES TOUCH tap x=175 y=593 caught=0
+ZFILES TOUCH rest area=1 scroll=0
+ZFILES DESKTOP band start x=175 y=592
+ZFILES DESKTOP band end first=-1
+KWL SYSTEM result client=2 object=42 request=37 applied=0
+KWL TOUCH down client=3 surface=19 contact=0 x=219 y=539
+ZFILES TOUCH tap x=219 y=496 caught=0
+ZFILES TOUCH rest area=1 scroll=0
+ZFILES DESKTOP band start x=219 y=495
+ZFILES DESKTOP band end first=-1
+KWL SYSTEM result client=2 object=42 request=38 applied=0
+KWL TOUCH down client=3 surface=19 contact=0 x=245 y=683
+ZFILES TOUCH tap x=246 y=640 caught=0
+ZFILES TOUCH rest area=1 scroll=0
+ZFILES DESKTOP band start x=245 y=639
+ZFILES DESKTOP band end first=-1
+KWL SYSTEM result client=2 object=42 request=39 applied=0
+KWL IME app key=app:settings language=direct from=remembered
+KWL DESKTOP unfocus via=press
+KWL TOUCH down client=2 surface=19 contact=0 x=813 y=564
+KWL TOUCH down client=2 surface=19 contact=0 x=1044 y=517
+KWL TOUCH down client=2 surface=19 contact=0 x=1257 y=508
+KWL SYSTEM result client=2 object=42 request=40 applied=0
+KWL TOUCH down client=2 surface=19 contact=0 x=1059 y=610
+KWL TOUCH down client=2 surface=19 contact=0 x=1109 y=445
+KWL TOUCH down client=2 surface=19 contact=0 x=719 y=404
+KWL SYSTEM result client=2 object=42 request=41 applied=0
+KWL PERF 5000ms: passes=542 timeouts=418 | poll 89.4% work 10.4%
+KWL PERF compose frames=24 draw_ms=19.83 (acquire 0.14 submit+present 19.33) frame_ms=20.73
+KWL TOUCH down client=2 surface=19 contact=0 x=707 y=406
+KWL TOUCH down client=2 surface=19 contact=0 x=767 y=550
+KWL SYSTEM result client=2 object=42 request=42 applied=0
+ZSETTINGS TOUCH scroll start pane=page
+ZSETTINGS TOUCH scroll end pane=page scroll=0
+KWL TOUCH down client=2 surface=19 contact=0 x=720 y=392
+KWL SYSTEM result client=2 object=42 request=43 applied=0
+KWL TOUCH down client=2 surface=19 contact=0 x=712 y=396
+KWL SYSTEM result client=2 object=42 request=44 applied=0
+KWL TOUCH down client=2 surface=19 contact=0 x=711 y=370
+ZSETTINGS LAYOUT page=display controls=5
+ZSETTINGS CONTROL index=1 x=306 y=166 width=77 height=32
+ZSETTINGS CONTROL index=2 x=391 y=166 width=74 height=32
+ZSETTINGS CONTROL index=3 x=1060 y=514 width=70 height=32
+ZSETTINGS CONTROL index=4 x=973 y=514 width=79 height=32
+ZSETTINGS CONTROL index=5 x=306 y=674 width=758 height=28
+KWL PERF 5001ms: passes=565 timeouts=419 | poll 93.3% work 6.4%
+KWL PERF compose frames=15 draw_ms=17.91 (acquire 0.03 submit+present 17.45) frame_ms=18.94
+KWL SYSTEM result client=2 object=42 request=45 applied=0
+KWL SYSTEM result client=2 object=42 request=46 applied=0
+KWL SYSTEM result client=2 object=42 request=47 applied=0
+KWL PING pong client=2 serial=91
+ZSETTINGS DISPLAY apply mode=0 places=1 error=0
+KWL SYSTEM result client=2 object=42 request=48 applied=0
+ZSETTINGS LAYOUT page=display controls=1
+ZSETTINGS CONTROL index=5 x=306 y=674 width=758 height=28
+KWL DISPLAYS anchor off name=zedbsd-port-v1:pci:0000:00:02.0:edp:A to=zedbsd-port-v1:pci:0000:00:02.0:dp:TC2
+KWL SURFACE leave surface=19 output=1 client=2
+KWL OUTPUT head closed name=zedbsd-port-v1:pci:0000:00:02.0:dp:TC2
+KWL OUTPUT closed
+KWL STARTUP step=output-display ms=1
+KWL STARTUP step=output-pipelines ms=1
+KWL STARTUP step=output-swapchain ms=493
+KWL STARTUP step=output-targets ms=1
+KWL OUTPUT open width=1920 height=1280 images=3 format=37
+KWL STARTUP step=wallpaper-picture ms=21
+KWL GLASS resize width=1920 height=1280 ms=334
+KWL OUTPUT window surface=19 state=floating x=370 y=188 w=1180 h=800
+KWL OUTPUT resized width=1920 height=1280 refresh_mhz=59999
+KWL OUTPUT switch name=zedbsd-port-v1:pci:0000:00:02.0:dp:TC2 width=1920 height=1280 refresh_mhz=59999
+KWL DISPLAYS applied mode=extended
+KWL DISPLAYS apply client=2 mode=0 error=0 saved=0
+KWL OUTPUT display index=0 name=zedbsd-port-v1:pci:0000:00:02.0:dp:TC2 internal=0 shown=1 width=1920 height=1280
+KWL OUTPUT display index=1 name=zedbsd-port-v1:pci:0000:00:02.0:edp:A internal=1 shown=0 width=1920 height=1080
+KWL OUTPUT displays count=2
+ZSETTINGS DISPLAY apply result errno=0
+ZSETTINGS LAYOUT page=display controls=3
+ZSETTINGS CONTROL index=1 x=306 y=166 width=77 height=32
+ZSETTINGS CONTROL index=2 x=391 y=166 width=74 height=32
+ZSETTINGS CONTROL index=30 x=1082 y=432 width=52 height=32
+KWL BOUNDS changed width=1896 height=1160 was=1896x960
+ZFILES DESKTOP configure x=0 y=44 width=1920 height=1236
+KWL BOUNDS client=2 surface=19 width=1896 height=1160
+KWL CONFIGURE client=2 surface=19 serial=94 width=0 height=0 fullscreen=0
+ZFILES DESKTOP grid width=1920 height=1236 columns=19 rows=11
+ZFILES DESKTOP ready items=0 cells=0 width=1920 height=1236 at_ms=206841 newest_age_ms=-1 hidden=0
+ZFILES SLOW-FRAME draw=2 present=560 copy=9 acquire=0 queue=1 wait=0
+KWL VULKAN_ERROR operation=submit result=-4
+KWL FAILED site=compose_draw errno=5
+KWL PERF 7421ms: passes=300 timeouts=172 | poll 26.8% work 73.0%
+KWL PERF compose frames=60 draw_ms=15.45 (acquire 10.43 submit+present 13.65) frame_ms=15.71
+KWL CLEANUP client=3 objects=30 unread_fds=0
+KWL DESKTOP gone client=3
+KWL CLEANUP done client=3 ms=1 quiesce=0 surfaces=1 shell=0 objects=0 queued=3 import_us=0 backend_us=0
+ZFILES DONE reason=disconnected
+KWL IME app key=desktop language=direct from=desktop
+KWL CLEANUP client=2 objects=54 unread_fds=0
+KWL CLEANUP done client=2 ms=1 quiesce=0 surfaces=0 shell=0 objects=1 queued=3 import_us=0 backend_us=0
+KWL IME lost pid=112
+KWL CLEANUP client=1 objects=17 unread_fds=0
+ZSETTINGS DONE reason=disconnected
+KWL CLEANUP done client=1 ms=0 quiesce=0 surfaces=0 shell=0 objects=0 queued=0 import_us=0 backend_us=0
+KEI-IME DONE
+KWL RETIRE drained released=6 ms=5
+KWL OUTPUT closed
+KWL TOUCH removed device=/dev/input/event3
+KWL VOLUME kept value=100 muted=0 why=end write=0
+KWL SETTINGS saved error=0
+KWL EXIT frames=516 error=5 cleanup_failed=1 pid=103 input_events=5944 seat_events=2102 at_ms=207436

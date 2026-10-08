@@ -509,6 +509,34 @@ def command_drag(target: Target, arguments: argparse.Namespace) -> int:
 	return 0
 
 
+def command_tap(target: Target, arguments: argparse.Namespace) -> int:
+	"""Taps the touch screen at a point (ws190-p002): once, or twice (a double tap)."""
+	where = point(target, arguments.x, arguments.y)
+	if arguments.count == 2:
+		aat_input(target, ["double-tap", *where])
+	else:
+		for _ in range(arguments.count):
+			aat_input(target, ["tap", *where])
+	return 0
+
+
+def command_touch_drag(target: Target, arguments: argparse.Namespace) -> int:
+	"""Drags one finger on the touch screen from one point to another in steps, then lifts it."""
+	start = point(target, arguments.x1, arguments.y1)
+	end = point(target, arguments.x2, arguments.y2)
+	aat_input(target, ["touch-drag", *start, *end, str(max(1, arguments.steps))])
+	return 0
+
+
+def command_finger(target: Target, arguments: argparse.Namespace, verb: str) -> int:
+	"""Puts a finger of the touch screen down or moves it (at a point), or lifts it."""
+	if verb == "touch-up":
+		aat_input(target, [verb, str(arguments.id)])
+	else:
+		aat_input(target, [verb, str(arguments.id), *point(target, arguments.x, arguments.y)])
+	return 0
+
+
 def command_wheel(target: Target, arguments: argparse.Namespace) -> int:
 	"""Turns the wheel at a point: notches, N > 0 up (and H > 0 right)."""
 	aat_input(target, ["move-to", *point(target, arguments.x, arguments.y)])
@@ -668,6 +696,21 @@ def parser() -> argparse.ArgumentParser:
 	for name in ("x1", "y1", "x2", "y2"):
 		command.add_argument(name, type=float)
 	command.add_argument("--steps", type=int, default=20)
+	command = commands.add_parser("tap", help="the touch screen: a finger's tap (--count 2: a double tap)")
+	command.add_argument("x", type=float)
+	command.add_argument("y", type=float)
+	command.add_argument("--count", type=int, default=1)
+	command = commands.add_parser("touch-drag", help="the touch screen: one finger's drag, then its lift")
+	for name in ("x1", "y1", "x2", "y2"):
+		command.add_argument(name, type=float)
+	command.add_argument("--steps", type=int, default=20)
+	for name in ("touch-down", "touch-move"):
+		command = commands.add_parser(name, help="the touch screen: a finger (0..9) held at a point")
+		command.add_argument("id", type=int)
+		command.add_argument("x", type=float)
+		command.add_argument("y", type=float)
+	command = commands.add_parser("touch-up", help="the touch screen: a finger lifts")
+	command.add_argument("id", type=int)
 	command = commands.add_parser("wheel")
 	command.add_argument("x", type=float)
 	command.add_argument("y", type=float)
@@ -711,6 +754,10 @@ def main() -> int:
 		"type": command_type, "shot": command_shot, "mark": command_mark, "wait-log": command_wait_log,
 		"lines": command_lines, "windows": command_windows, "where": command_where,
 		"down": lambda t, a: command_button(t, a, "down"), "up": lambda t, a: command_button(t, a, "up"),
+		"tap": command_tap, "touch-drag": command_touch_drag,
+		"touch-down": lambda t, a: command_finger(t, a, "touch-down"),
+		"touch-move": lambda t, a: command_finger(t, a, "touch-move"),
+		"touch-up": lambda t, a: command_finger(t, a, "touch-up"),
 	}
 	return handlers[arguments.command](target, arguments)
 

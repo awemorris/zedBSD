@@ -13,9 +13,10 @@
  * root only.
  *
  *   aat-input start [--width W --height H]
- *           starts a server in the background that holds three devices: a
+ *           starts a server in the background that holds four devices: a
  *           relative mouse, an absolute pointer over W x H output pixels
- *           (default 1920 x 1200) and a keyboard, and listens on
+ *           (default 1920 x 1200), a keyboard and a touch screen over the
+ *           same pixels (ws190-p002), and listens on
  *           /run/aat-input.sock (root's, 0600).  Prints "AAT-INPUT ready".
  *   aat-input stop
  *   aat-input COMMAND [ARGUMENT...]
@@ -34,6 +35,15 @@
  *   key-down NAME | key-up NAME
  *   type TEXT                         US layout, ASCII; Shift added as needed
  *   sleep MS
+ *
+ * The touch screen (ws190-p002), its fingers in output pixels:
+ *   tap X Y                           one finger touches and lifts
+ *   double-tap X Y                    two taps, AAT_DOUBLE_TAP_MS apart
+ *   touch-drag X1 Y1 X2 Y2 [STEPS]    one finger, STEPS moves (20), then lifts
+ *   touch-down ID X Y | touch-move ID X Y | touch-up ID
+ *                                     a finger (ID 0..9) held, moved and lifted
+ *                                     by itself (a long press is touch-down,
+ *                                     sleep and touch-up)
  *
  * A name is the evdev key's name in lower case (a, enter, leftctrl, f5,
  * ...); ctrl, alt, shift, super and meta name the left ones.
@@ -71,6 +81,14 @@
 #define AAT_TYPE_MS		15U
 #define AAT_SETTLE_MS		2000U
 
+/* A finger's tap: how long it touches, and the pause between the two taps of a double tap (within libkeiland's 400 ms). */
+#define AAT_TAP_MS		40U
+#define AAT_DOUBLE_TAP_MS	120U
+
+/* The fingers the touch screen holds (its identifiers 0..AAT_FINGERS - 1), and how many go in one report. */
+#define AAT_FINGERS		10U
+#define AAT_TOUCH_REPORT	2U
+
 /* The most keys of one combination, and of one write. */
 #define AAT_COMBO_MAX		8U
 #define AAT_EVENTS_MAX		16U
@@ -81,13 +99,26 @@ struct aat_key {
 	uint16_t code;
 };
 
-/* The devices the server holds, and the absolute pointer's area. */
+/*
+ * One finger of the touch screen: whether it touches, and where (output
+ * pixels).  The server keeps every finger between commands, since each
+ * frame of the screen carries all the fingers that touch.
+ */
+struct aat_finger {
+	int touching;
+	int x;
+	int y;
+};
+
+/* The devices the server holds, the absolute pointer's area, and the touch screen's fingers. */
 struct aat_server {
 	int mouse;
 	int pointer;
 	int keyboard;
+	int touch;
 	int width;
 	int height;
+	struct aat_finger fingers[AAT_FINGERS];
 };
 
 /* Every key's name, the aliases last. */
@@ -141,6 +172,13 @@ static int aat_key(struct aat_server *server, uint16_t code, int value);
 static int aat_type(struct aat_server *server, const char *text);
 static void aat_sleep_ms(unsigned milliseconds);
 static int aat_connect(void);
+static int aat_declare_touch(int x_max, int y_max);
+static int aat_touch_command(struct aat_server *server, char **words, unsigned count, char *why, size_t why_size, int *matched);
+static int aat_touch_tap(struct aat_server *server, int x, int y);
+static int aat_touch_drag(struct aat_server *server, int x1, int y1, int x2, int y2, int steps);
+static int aat_finger(struct aat_server *server, unsigned id, int touching, int x, int y);
+static int aat_touch_frame(struct aat_server *server, unsigned lifting);
+static int aat_finger_id(const char *word, unsigned *id);
 
 /* Starts the server, stops it, or sends it one command. */
 int
@@ -204,14 +242,15 @@ aat_start(
 		return 1;
 	}
 
-	/* The three devices: a relative mouse, an absolute pointer over the output's pixels, a keyboard. */
+	/* The four devices: a relative mouse, an absolute pointer over the output's pixels, a keyboard, a touch screen over the same pixels. */
 	memset(&server, 0, sizeof(server));
 	server.width = width;
 	server.height = height;
 	server.mouse = aat_declare(INPUT_INJECT_KIND_MOUSE, 0, 0);
 	server.pointer = aat_declare(INPUT_INJECT_KIND_MOUSE, width - 1, height - 1);
 	server.keyboard = aat_declare(INPUT_INJECT_KIND_KEYBOARD, 0, 0);
-	if (server.mouse < 0 || server.pointer < 0 || server.keyboard < 0) {
+	server.touch = aat_declare_touch(width - 1, height - 1);
+	if (server.mouse < 0 || server.pointer < 0 || server.keyboard < 0 || server.touch < 0) {
 		printf("AAT-INPUT error inject errno=%d (%s)\n", errno, strerror(errno));
 		return 1;
 	}
@@ -449,6 +488,7 @@ aat_command(
 	int y2;
 	int steps;
 	int error;
+	int matched;
 
 	/* type keeps everything after its word as the text. */
 	if (strncmp(line, "type ", 5U) == 0) {
@@ -470,6 +510,11 @@ aat_command(
 		snprintf(why, why_size, "empty");
 		return EINVAL;
 	}
+
+	/* The touch screen's commands (ws190-p002). */
+	error = aat_touch_command(server, words, count, why, why_size, &matched);
+	if (matched)
+		return error;
 
 	/* move-to X Y. */
 	if (strcmp(words[0], "move-to") == 0 && count == 3U) {
@@ -819,4 +864,371 @@ aat_connect(
 		return -1;
 	}
 	return connection;
+}
+
+/* Opens the injector and declares the touch screen over the output's pixels; returns the descriptor, or -1 with errno. */
+static int
+aat_declare_touch(
+	int x_max,
+	int y_max)
+{
+	struct input_inject_setup setup;
+	ssize_t written;
+	int descriptor;
+	int saved;
+
+	/* The open. */
+	descriptor = open(AAT_INJECT, O_WRONLY | O_CLOEXEC);
+	if (descriptor < 0)
+		return -1;
+
+	/* The setup: the screen's axes are the output's pixels, two fingers a report as a USB touch screen sends. */
+	memset(&setup, 0, sizeof(setup));
+	setup.magic = INPUT_INJECT_MAGIC;
+	setup.kind = INPUT_INJECT_KIND_TOUCH;
+	setup.x_max = x_max;
+	setup.y_max = y_max;
+	setup.report_contacts = AAT_TOUCH_REPORT;
+	written = write(descriptor, &setup, sizeof(setup));
+	if (written != (ssize_t)sizeof(setup)) {
+		saved = errno;
+		(void)close(descriptor);
+		errno = saved;
+		return -1;
+	}
+
+	/* Succeeded: the device exists while the descriptor is open. */
+	return descriptor;
+}
+
+/*
+ * Runs a command of the touch screen, when the line is one (*matched 1):
+ * tap, double-tap, touch-drag, touch-down, touch-move and touch-up.
+ * Returns 0 or an errno value with the reason in why.
+ */
+static int
+aat_touch_command(
+	struct aat_server *server,
+	char **words,
+	unsigned count,
+	char *why,
+	size_t why_size,
+	int *matched)
+{
+	unsigned id;
+	int steps;
+	int error;
+	int same;
+
+	/* Not a touch command until one of the names matches. */
+	*matched = 0;
+
+	/* tap X Y: one finger touches and lifts. */
+	same = strcmp(words[0], "tap");
+	if (same == 0) {
+		*matched = 1;
+		if (count != 3U) {
+			snprintf(why, why_size, "usage: tap X Y");
+			return EINVAL;
+		}
+
+		/* The finger at the point. */
+		error = aat_touch_tap(server, atoi(words[1]), atoi(words[2]));
+		if (error != 0) {
+			snprintf(why, why_size, "tap errno=%d", error);
+			return error;
+		}
+
+		/* Succeeded: tapped. */
+		return 0;
+	}
+
+	/* double-tap X Y: two taps soon after each other at one place. */
+	same = strcmp(words[0], "double-tap");
+	if (same == 0) {
+		*matched = 1;
+		if (count != 3U) {
+			snprintf(why, why_size, "usage: double-tap X Y");
+			return EINVAL;
+		}
+
+		/* The first tap. */
+		error = aat_touch_tap(server, atoi(words[1]), atoi(words[2]));
+		if (error != 0) {
+			snprintf(why, why_size, "double-tap errno=%d", error);
+			return error;
+		}
+
+		/* The second tap after the pause. */
+		aat_sleep_ms(AAT_DOUBLE_TAP_MS);
+		error = aat_touch_tap(server, atoi(words[1]), atoi(words[2]));
+		if (error != 0) {
+			snprintf(why, why_size, "double-tap errno=%d", error);
+			return error;
+		}
+
+		/* Succeeded: tapped twice. */
+		return 0;
+	}
+
+	/* touch-drag X1 Y1 X2 Y2 [STEPS]: one finger from one point to another. */
+	same = strcmp(words[0], "touch-drag");
+	if (same == 0) {
+		*matched = 1;
+		if (count != 5U && count != 6U) {
+			snprintf(why, why_size, "usage: touch-drag X1 Y1 X2 Y2 [STEPS]");
+			return EINVAL;
+		}
+
+		/* The moves: 20 unless given, at least one. */
+		steps = 20;
+		if (count == 6U)
+			steps = atoi(words[5]);
+		if (steps < 1)
+			steps = 1;
+		error = aat_touch_drag(server, atoi(words[1]), atoi(words[2]), atoi(words[3]), atoi(words[4]), steps);
+		if (error != 0) {
+			snprintf(why, why_size, "touch-drag errno=%d", error);
+			return error;
+		}
+
+		/* Succeeded: dragged. */
+		return 0;
+	}
+
+	/* touch-down ID X Y and touch-move ID X Y: a finger held at a point. */
+	same = strcmp(words[0], "touch-down");
+	if (same != 0)
+		same = strcmp(words[0], "touch-move");
+	if (same == 0) {
+		*matched = 1;
+		if (count != 4U) {
+			snprintf(why, why_size, "usage: %s ID X Y", words[0]);
+			return EINVAL;
+		}
+
+		/* The finger named. */
+		error = aat_finger_id(words[1], &id);
+		if (error != 0) {
+			snprintf(why, why_size, "bad finger %s", words[1]);
+			return error;
+		}
+
+		/* It touches, or moves, at the point. */
+		error = aat_finger(server, id, 1, atoi(words[2]), atoi(words[3]));
+		if (error != 0) {
+			snprintf(why, why_size, "%s errno=%d", words[0], error);
+			return error;
+		}
+
+		/* Succeeded: the finger is there. */
+		return 0;
+	}
+
+	/* touch-up ID: a finger lifts where it is. */
+	same = strcmp(words[0], "touch-up");
+	if (same == 0) {
+		*matched = 1;
+		if (count != 2U) {
+			snprintf(why, why_size, "usage: touch-up ID");
+			return EINVAL;
+		}
+
+		/* The finger named. */
+		error = aat_finger_id(words[1], &id);
+		if (error != 0) {
+			snprintf(why, why_size, "bad finger %s", words[1]);
+			return error;
+		}
+
+		/* It lifts where it is. */
+		error = aat_finger(server, id, 0, server->fingers[id].x, server->fingers[id].y);
+		if (error != 0) {
+			snprintf(why, why_size, "touch-up errno=%d", error);
+			return error;
+		}
+
+		/* Succeeded: the finger lifted. */
+		return 0;
+	}
+
+	/* Not a touch command. */
+	return 0;
+}
+
+/* Taps one finger (finger 0) at a point: it touches, waits AAT_TAP_MS and lifts. */
+static int
+aat_touch_tap(
+	struct aat_server *server,
+	int x,
+	int y)
+{
+	int error;
+
+	/* The finger touches. */
+	error = aat_finger(server, 0U, 1, x, y);
+	if (error != 0)
+		return error;
+
+	/* And lifts after a short while. */
+	aat_sleep_ms(AAT_TAP_MS);
+	error = aat_finger(server, 0U, 0, x, y);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: one tap. */
+	return 0;
+}
+
+/* Drags one finger (finger 0) from one point to another in steps, then lifts it. */
+static int
+aat_touch_drag(
+	struct aat_server *server,
+	int x1,
+	int y1,
+	int x2,
+	int y2,
+	int steps)
+{
+	int index;
+	int x;
+	int y;
+	int error;
+
+	/* The finger touches at the start. */
+	error = aat_finger(server, 0U, 1, x1, y1);
+	if (error != 0)
+		return error;
+	aat_sleep_ms(AAT_CLICK_MS);
+
+	/* Each step along the line. */
+	for (index = 1; index <= steps; index++) {
+		aat_sleep_ms(AAT_TYPE_MS);
+		x = x1 + (x2 - x1) * index / steps;
+		y = y1 + (y2 - y1) * index / steps;
+		error = aat_finger(server, 0U, 1, x, y);
+		if (error != 0)
+			return error;
+	}
+
+	/* It lifts at the end. */
+	aat_sleep_ms(AAT_CLICK_MS);
+	error = aat_finger(server, 0U, 0, x2, y2);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the drag is over. */
+	return 0;
+}
+
+/* Puts a finger down or moves it (touching 1), or lifts it (0), at a point clamped to the screen, and sends the frame. */
+static int
+aat_finger(
+	struct aat_server *server,
+	unsigned id,
+	int touching,
+	int x,
+	int y)
+{
+	struct aat_finger *finger;
+	unsigned lifting;
+	int error;
+
+	/* The point within the screen's pixels. */
+	if (x < 0)
+		x = 0;
+	if (x > server->width - 1)
+		x = server->width - 1;
+	if (y < 0)
+		y = 0;
+	if (y > server->height - 1)
+		y = server->height - 1;
+
+	/* A finger that lifts is in this frame with its tip up, and no more after it. */
+	finger = &server->fingers[id];
+	lifting = AAT_FINGERS;
+	if (!touching) {
+		if (!finger->touching)
+			return EINVAL;
+		lifting = id;
+	}
+
+	/* Where the finger is now. */
+	finger->x = x;
+	finger->y = y;
+	if (touching)
+		finger->touching = 1;
+
+	/* The frame with every finger that touches. */
+	error = aat_touch_frame(server, lifting);
+	if (!touching)
+		finger->touching = 0;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the screen has the frame. */
+	return 0;
+}
+
+/*
+ * Writes one frame of the touch screen: every finger that touches, the one
+ * that lifts (lifting, AAT_FINGERS for none) with its tip up.  Returns 0 or
+ * errno.
+ */
+static int
+aat_touch_frame(
+	struct aat_server *server,
+	unsigned lifting)
+{
+	struct input_inject_touch_frame frame;
+	unsigned index;
+	ssize_t written;
+
+	/* The fingers of the frame. */
+	memset(&frame, 0, sizeof(frame));
+	for (index = 0; index < AAT_FINGERS; index++) {
+		if (!server->fingers[index].touching)
+			continue;
+		frame.contacts[frame.count].contact_id = (int32_t)index;
+		frame.contacts[frame.count].tip = 1;
+		if (index == lifting)
+			frame.contacts[frame.count].tip = 0;
+		frame.contacts[frame.count].x = server->fingers[index].x;
+		frame.contacts[frame.count].y = server->fingers[index].y;
+		frame.count++;
+	}
+
+	/* One write: the kernel takes the frame whole. */
+	written = write(server->touch, &frame, sizeof(frame));
+	if (written != (ssize_t)sizeof(frame)) {
+		if (errno != 0)
+			return errno;
+		return EIO;
+	}
+
+	/* Succeeded: the frame is written. */
+	return 0;
+}
+
+/* Reads a finger's identifier (0..AAT_FINGERS - 1); returns 0 or EINVAL. */
+static int
+aat_finger_id(
+	const char *word,
+	unsigned *id)
+{
+	char *end;
+	unsigned long value;
+
+	/* A whole decimal number. */
+	value = strtoul(word, &end, 10);
+	if (end == word || *end != '\0')
+		return EINVAL;
+
+	/* Within the fingers kept. */
+	if (value >= AAT_FINGERS)
+		return EINVAL;
+
+	/* Succeeded: the identifier. */
+	*id = (unsigned)value;
+	return 0;
 }

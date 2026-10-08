@@ -49,6 +49,14 @@ def valid(words, width, height):
 		return len(rest) == 1 and rest[0] in BUTTONS
 	if verb == "drag":
 		return len(rest) in (4, 5) and inside(rest[0:2], width, height) and inside(rest[2:4], width, height)
+	if verb in ("tap", "double-tap"):
+		return inside(rest, width, height)
+	if verb == "touch-drag":
+		return len(rest) in (4, 5) and inside(rest[0:2], width, height) and inside(rest[2:4], width, height)
+	if verb in ("touch-down", "touch-move"):
+		return len(rest) == 3 and numbers(rest[0:1], 1) and 0 <= int(rest[0]) < 10 and inside(rest[1:3], width, height)
+	if verb == "touch-up":
+		return numbers(rest, 1) and 0 <= int(rest[0]) < 10
 	if verb in ("wheel", "hwheel", "sleep"):
 		return numbers(rest, 1)
 	if verb == "key":

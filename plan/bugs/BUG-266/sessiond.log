@@ -1,0 +1,106 @@
+1791438084 SESSIOND SEAT events subscribed classes=0xa0
+1791438084 SESSIOND START greeter=/bin/wayland session=/etc/keiland/session pid=23
+1791438084 SESSIOND AUTOLOGIN user=kei
+1791438084 SESSIOND SEAT path=/dev/gpu0 uid=1000 mode=0600
+1791438084 SESSIOND SEAT path=/dev/input/event0 uid=1000 mode=0600
+1791438084 SESSIOND SEAT path=/dev/input/event1 uid=1000 mode=0600
+1791438084 SESSIOND SEAT path=/dev/input/event2 uid=1000 mode=0600
+1791438084 SESSIOND SEAT path=/dev/backlight/backlight0 uid=1000 mode=0600
+1791438084 SESSIOND SEAT path=/dev/smartcard0 uid=1000 mode=0600
+1791438084 SESSIOND SESSION start user=kei uid=1000 pid=26 runtime=/run/user/1000
+1791438084 SESSIOND NETWORK session open uid=1000
+1791438087 SESSIOND HANDOFF session ready=1 waited_ms=2625
+1791438087 SESSIOND HANDOFF go written=3 at_ms=16480
+1791440683 SESSIOND SESSION end user=kei pid=26 status=4
+1791440685 SESSIOND NETWORK session close uid=1000
+1791440685 SESSIOND SEAT path=/dev/gpu0 uid=78 mode=0600
+1791440685 SESSIOND SEAT path=/dev/input/event0 uid=78 mode=0600
+1791440685 SESSIOND SEAT path=/dev/input/event1 uid=78 mode=0600
+1791440685 SESSIOND SEAT path=/dev/input/event2 uid=78 mode=0600
+1791440685 SESSIOND SEAT path=/dev/backlight/backlight0 uid=78 mode=0600
+1791440685 SESSIOND SEAT path=/dev/smartcard0 uid=0 mode=0600
+1791440685 SESSIOND GREETER start pid=619 uid=78
+1791440685 SESSIOND HANDOFF greeter ready: go
+1791440737 SESSIOND SEAT path=/dev/gpu0 uid=0 mode=0666
+1791440737 SESSIOND SEAT path=/dev/input/event0 uid=0 mode=0640
+1791440737 SESSIOND SEAT path=/dev/input/event1 uid=0 mode=0640
+1791440737 SESSIOND SEAT path=/dev/input/event2 uid=0 mode=0640
+1791440737 SESSIOND SEAT path=/dev/backlight/backlight0 uid=0 mode=0644
+1791440737 SESSIOND STOP
+1791440770 SESSIOND SEAT events subscribed classes=0xa0
+1791440770 SESSIOND START greeter=/bin/wayland session=/etc/keiland/session pid=21
+1791440770 SESSIOND AUTOLOGIN user=kei
+1791440770 SESSIOND SEAT path=/dev/gpu0 uid=1000 mode=0600
+1791440770 SESSIOND SEAT path=/dev/input/event0 uid=1000 mode=0600
+1791440770 SESSIOND SEAT path=/dev/input/event1 uid=1000 mode=0600
+1791440770 SESSIOND SEAT path=/dev/input/event2 uid=1000 mode=0600
+1791440770 SESSIOND SEAT path=/dev/backlight/backlight0 uid=1000 mode=0600
+1791440770 SESSIOND SEAT path=/dev/smartcard0 uid=1000 mode=0600
+1791440770 SESSIOND SESSION start user=kei uid=1000 pid=23 runtime=/run/user/1000
+1791440770 SESSIOND NETWORK session open uid=1000
+1791440786 SESSIOND HANDOFF session ready=1 waited_ms=15573
+1791440786 SESSIOND HANDOFF go written=3 at_ms=27243
+1791440852 SESSIOND SEAT path=/dev/input/event3 uid=1000 mode=0600
+1791440888 SESSIOND SESSION end user=kei pid=23 status=256
+1791440890 SESSIOND NETWORK session close uid=1000
+1791440890 SESSIOND SEAT path=/dev/gpu0 uid=78 mode=0600
+1791440890 SESSIOND SEAT path=/dev/input/event0 uid=78 mode=0600
+1791440890 SESSIOND SEAT path=/dev/input/event1 uid=78 mode=0600
+1791440890 SESSIOND SEAT path=/dev/input/event2 uid=78 mode=0600
+1791440890 SESSIOND SEAT path=/dev/input/event3 uid=78 mode=0600
+1791440890 SESSIOND SEAT path=/dev/backlight/backlight0 uid=78 mode=0600
+1791440890 SESSIOND SEAT path=/dev/smartcard0 uid=0 mode=0600
+1791440890 SESSIOND GREETER start pid=79 uid=78
+1791440893 SESSIOND HANDOFF greeter ready: go
+1791440899 SESSIOND AUTH ok user=kei uid=1000 style=password
+1791440899 SESSIOND GREETER stays pid=79
+1791440899 SESSIOND SEAT path=/dev/gpu0 uid=1000 mode=0600
+1791440899 SESSIOND SEAT path=/dev/input/event0 uid=1000 mode=0600
+1791440899 SESSIOND SEAT path=/dev/input/event1 uid=1000 mode=0600
+1791440899 SESSIOND SEAT path=/dev/input/event2 uid=1000 mode=0600
+1791440899 SESSIOND SEAT path=/dev/input/event3 uid=1000 mode=0600
+1791440899 SESSIOND SEAT path=/dev/backlight/backlight0 uid=1000 mode=0600
+1791440899 SESSIOND SEAT path=/dev/smartcard0 uid=1000 mode=0600
+1791440899 SESSIOND SESSION start user=kei uid=1000 pid=83 runtime=/run/user/1000
+1791440899 SESSIOND NETWORK session open uid=1000
+1791440900 SESSIOND HANDOFF session ready=1 waited_ms=689
+1791440900 SESSIOND HANDOFF greeter released=1 at_ms=141222
+1791440900 SESSIOND HANDOFF go written=3 at_ms=141222
+1791440900 SESSIOND GREETER end pid=79 status=0
+1791440901 SESSIOND SESSION end user=kei pid=83 status=256
+1791440903 SESSIOND NETWORK session close uid=1000
+1791440903 SESSIOND SEAT path=/dev/gpu0 uid=78 mode=0600
+1791440903 SESSIOND SEAT path=/dev/input/event0 uid=78 mode=0600
+1791440903 SESSIOND SEAT path=/dev/input/event1 uid=78 mode=0600
+1791440903 SESSIOND SEAT path=/dev/input/event2 uid=78 mode=0600
+1791440903 SESSIOND SEAT path=/dev/input/event3 uid=78 mode=0600
+1791440903 SESSIOND SEAT path=/dev/backlight/backlight0 uid=78 mode=0600
+1791440903 SESSIOND SEAT path=/dev/smartcard0 uid=0 mode=0600
+1791440903 SESSIOND GREETER start pid=99 uid=78
+1791440904 SESSIOND HANDOFF greeter ready: go
+1791440909 SESSIOND AUTH ok user=kei uid=1000 style=password
+1791440909 SESSIOND GREETER stays pid=99
+1791440909 SESSIOND SEAT path=/dev/gpu0 uid=1000 mode=0600
+1791440909 SESSIOND SEAT path=/dev/input/event0 uid=1000 mode=0600
+1791440909 SESSIOND SEAT path=/dev/input/event1 uid=1000 mode=0600
+1791440909 SESSIOND SEAT path=/dev/input/event2 uid=1000 mode=0600
+1791440909 SESSIOND SEAT path=/dev/backlight/backlight0 uid=1000 mode=0600
+1791440909 SESSIOND SEAT path=/dev/smartcard0 uid=1000 mode=0600
+1791440909 SESSIOND SESSION start user=kei uid=1000 pid=103 runtime=/run/user/1000
+1791440909 SESSIOND NETWORK session open uid=1000
+1791440909 SESSIOND HANDOFF session ready=1 waited_ms=393
+1791440909 SESSIOND HANDOFF greeter released=1 at_ms=150968
+1791440909 SESSIOND HANDOFF go written=3 at_ms=150969
+1791440910 SESSIOND GREETER end pid=99 status=0
+1791440936 SESSIOND SEAT path=/dev/input/event3 uid=1000 mode=0600
+1791440966 SESSIOND SESSION end user=kei pid=103 status=256
+1791440968 SESSIOND NETWORK session close uid=1000
+1791440968 SESSIOND SEAT path=/dev/gpu0 uid=78 mode=0600
+1791440968 SESSIOND SEAT path=/dev/input/event0 uid=78 mode=0600
+1791440968 SESSIOND SEAT path=/dev/input/event1 uid=78 mode=0600
+1791440968 SESSIOND SEAT path=/dev/input/event2 uid=78 mode=0600
+1791440968 SESSIOND SEAT path=/dev/input/event3 uid=78 mode=0600
+1791440968 SESSIOND SEAT path=/dev/backlight/backlight0 uid=78 mode=0600
+1791440968 SESSIOND SEAT path=/dev/smartcard0 uid=0 mode=0600
+1791440968 SESSIOND GREETER start pid=125 uid=78
+1791440968 SESSIOND HANDOFF greeter ready: go

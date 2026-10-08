@@ -1,0 +1,171 @@
+<37>Oct  8 05:41:24 sessiond[23]: automatic login of kei
+<38>Oct  8 05:41:37 sshd[21]: Server listening on 0.0.0.0 port 22.
+<29>Oct  8 05:49:39 volumed[5]: VOLUMED EVENT class=0x80 subject=usb0.1 action=2
+<29>Oct  8 05:50:13 volumed[5]: VOLUMED EVENT class=0x80 subject=usb0.1 action=1
+<38>Oct  8 05:50:34 sshd-session[267]: Connection closed by 10.0.30.4 port 54990 [preauth]
+<38>Oct  8 05:50:35 sshd-session[269]: Connection closed by 10.0.30.4 port 54930 [preauth]
+<38>Oct  8 05:50:44 sshd-session[272]: Accepted password for kei from 10.0.30.4 port 54942 ssh2
+<38>Oct  8 05:50:54 sshd-session[278]: Connection closed by 10.0.10.2 port 54200 [preauth]
+<38>Oct  8 05:51:01 sshd-session[281]: Invalid user awe from 10.0.10.2 port 38792
+<35>Oct  8 05:51:03 sshd-session[281]: error: Could not get shadow information for NOUSER
+<38>Oct  8 05:51:03 sshd-session[281]: Failed password for invalid user awe from 10.0.10.2 port 38792 ssh2
+<38>Oct  8 05:51:05 sshd-session[281]: Connection closed by invalid user awe 10.0.10.2 port 38792 [preauth]
+<38>Oct  8 05:51:08 sshd-session[283]: Accepted password for kei from 10.0.10.2 port 36374 ssh2
+<38>Oct  8 05:51:09 sshd-session[286]: Received disconnect from 10.0.10.2 port 36374:11: disconnected by user
+<38>Oct  8 05:51:09 sshd-session[286]: Disconnected from user kei 10.0.10.2 port 36374
+<38>Oct  8 06:07:33 sshd-session[391]: Connection closed by authenticating user kei 10.0.10.2 port 47016 [preauth]
+<38>Oct  8 06:16:43 sshd-session[449]: Connection closed by authenticating user kei 10.0.10.2 port 53692 [preauth]
+<38>Oct  8 06:17:46 sshd-session[457]: Connection closed by authenticating user kei 10.0.10.2 port 53742 [preauth]
+<38>Oct  8 06:21:03 sshd-session[481]: Connection closed by authenticating user kei 10.0.10.2 port 55212 [preauth]
+<38>Oct  8 06:21:06 sshd-session[483]: Connection closed by 10.0.10.2 port 55226 [preauth]
+<38>Oct  8 06:21:06 sshd-session[484]: Unable to negotiate with 10.0.10.2 port 55234: no matching host key type found. Their offer: ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521 [preauth]
+<38>Oct  8 06:21:06 sshd-session[485]: Connection closed by 10.0.10.2 port 55236 [preauth]
+<38>Oct  8 06:21:06 sshd-session[487]: Unable to negotiate with 10.0.10.2 port 55250: no matching host key type found. Their offer: sk-ecdsa-sha2-nistp256@openssh.com [preauth]
+<38>Oct  8 06:21:06 sshd-session[489]: Unable to negotiate with 10.0.10.2 port 55252: no matching host key type found. Their offer: sk-ssh-ed25519@openssh.com [preauth]
+<38>Oct  8 06:21:14 sshd-session[493]: Connection closed by 10.0.10.2 port 55260 [preauth]
+<38>Oct  8 06:21:54 sshd-session[500]: Connection closed by authenticating user kei 10.0.10.2 port 34144 [preauth]
+<38>Oct  8 06:21:54 sshd-session[502]: Connection closed by authenticating user kei 10.0.10.2 port 34146 [preauth]
+<38>Oct  8 06:21:54 sshd-session[504]: Accepted password for kei from 10.0.10.2 port 34158 ssh2
+<38>Oct  8 06:21:54 sshd-session[506]: Received disconnect from 10.0.10.2 port 34158:11: disconnected by user
+<38>Oct  8 06:21:54 sshd-session[506]: Disconnected from user kei 10.0.10.2 port 34158
+<38>Oct  8 06:21:55 sshd-session[512]: Accepted publickey for kei from 10.0.10.2 port 34168 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:21:55 sshd-session[514]: Received disconnect from 10.0.10.2 port 34168:11: disconnected by user
+<38>Oct  8 06:21:55 sshd-session[514]: Disconnected from user kei 10.0.10.2 port 34168
+<38>Oct  8 06:22:34 sshd-session[524]: Accepted publickey for kei from 10.0.10.2 port 47354 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:22:34 sshd-session[526]: Received disconnect from 10.0.10.2 port 47354:11: disconnected by user
+<38>Oct  8 06:22:34 sshd-session[526]: Disconnected from user kei 10.0.10.2 port 47354
+<38>Oct  8 06:22:38 sshd-session[532]: Accepted publickey for kei from 10.0.10.2 port 47368 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<37>Oct  8 06:22:38 sudo[536]: kei : TTY=none ; USER=root ; COMMAND=id
+<38>Oct  8 06:22:38 sshd-session[534]: Received disconnect from 10.0.10.2 port 47368:11: disconnected by user
+<38>Oct  8 06:22:38 sshd-session[534]: Disconnected from user kei 10.0.10.2 port 47368
+<38>Oct  8 06:22:44 sshd-session[537]: Accepted publickey for kei from 10.0.10.2 port 51660 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:22:45 sshd-session[539]: Received disconnect from 10.0.10.2 port 51660:11: disconnected by user
+<38>Oct  8 06:22:45 sshd-session[539]: Disconnected from user kei 10.0.10.2 port 51660
+<38>Oct  8 06:22:45 sshd-session[541]: Accepted publickey for kei from 10.0.10.2 port 51666 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:22:45 sshd-session[543]: Received disconnect from 10.0.10.2 port 51666:11: disconnected by user
+<38>Oct  8 06:22:45 sshd-session[543]: Disconnected from user kei 10.0.10.2 port 51666
+<38>Oct  8 06:22:45 sshd-session[545]: Accepted publickey for kei from 10.0.10.2 port 51676 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:22:45 sshd-session[547]: Received disconnect from 10.0.10.2 port 51676:11: disconnected by user
+<38>Oct  8 06:22:45 sshd-session[547]: Disconnected from user kei 10.0.10.2 port 51676
+<38>Oct  8 06:22:46 sshd-session[549]: Accepted publickey for kei from 10.0.10.2 port 51678 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:22:46 sshd-session[551]: Received disconnect from 10.0.10.2 port 51678:11: disconnected by user
+<38>Oct  8 06:22:46 sshd-session[551]: Disconnected from user kei 10.0.10.2 port 51678
+<38>Oct  8 06:22:46 sshd-session[553]: Accepted publickey for kei from 10.0.10.2 port 51692 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:22:46 sshd-session[555]: Received disconnect from 10.0.10.2 port 51692:11: disconnected by user
+<38>Oct  8 06:22:46 sshd-session[555]: Disconnected from user kei 10.0.10.2 port 51692
+<38>Oct  8 06:22:46 sshd-session[557]: Accepted publickey for kei from 10.0.10.2 port 51704 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:22:46 sshd-session[559]: Received disconnect from 10.0.10.2 port 51704:11: disconnected by user
+<38>Oct  8 06:22:46 sshd-session[559]: Disconnected from user kei 10.0.10.2 port 51704
+<38>Oct  8 06:22:46 sshd-session[561]: Accepted publickey for kei from 10.0.10.2 port 51718 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<37>Oct  8 06:22:46 sudo[566]: kei : TTY=none ; USER=root ; COMMAND=sh -c mkdir -p /tmp/esp && mount -t msdos /dev/sda1 /tmp/esp 2>&1 || mount /dev/sda1 /tmp/esp; ls -la /tmp/esp /tmp/esp/* | head -30
+<38>Oct  8 06:22:46 sshd-session[563]: Received disconnect from 10.0.10.2 port 51718:11: disconnected by user
+<38>Oct  8 06:22:46 sshd-session[563]: Disconnected from user kei 10.0.10.2 port 51718
+<38>Oct  8 06:22:50 sshd-session[572]: Accepted publickey for kei from 10.0.10.2 port 51730 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:22:50 sshd-session[574]: Received disconnect from 10.0.10.2 port 51730:11: disconnected by user
+<38>Oct  8 06:22:50 sshd-session[574]: Disconnected from user kei 10.0.10.2 port 51730
+<38>Oct  8 06:23:01 sshd-session[577]: Accepted publickey for kei from 10.0.10.2 port 36702 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<37>Oct  8 06:23:02 sudo[581]: kei : TTY=none ; USER=root ; COMMAND=sh -c set -e; cp /tmp/esp/vmunix /tmp/esp/vmunix.prev; cp /tmp/vmunix.q1 /tmp/esp/vmunix; for p in bin/wayland bin/settings lib/libkeiland.so lib/libbrowser.so lib/libvulkan.so; do cp /$p /$p.orig; done; cp /tmp/wayland.q1 /bin/wayland; cp /tmp/settings.q1 /bin/settings; cp /tmp/libkeiland.q1 /lib/libkeiland.so; cp /tmp/libbrowser.q1 /lib/libbrowser.so; cp /tmp/libvulkan.q1 /lib/libvulkan.so; chmod 755 /bin/wayland /bin/settings; chmod 644 /lib/libkeiland.so /lib/libbrowser.so /lib/libvulkan.so; sync; cksu
+<38>Oct  8 06:24:31 sshd-session[579]: Received disconnect from 10.0.10.2 port 36702:11: disconnected by user
+<38>Oct  8 06:24:31 sshd-session[579]: Disconnected from user kei 10.0.10.2 port 36702
+<38>Oct  8 06:24:35 sshd-session[593]: Accepted publickey for kei from 10.0.10.2 port 50090 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:24:36 sshd-session[595]: Received disconnect from 10.0.10.2 port 50090:11: disconnected by user
+<38>Oct  8 06:24:36 sshd-session[595]: Disconnected from user kei 10.0.10.2 port 50090
+<35>Oct  8 06:24:43 sshd-session[272]: error: mm_reap: child terminated by signal 15
+<38>Oct  8 06:24:45 sshd-session[620]: Accepted publickey for kei from 10.0.10.2 port 35878 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:24:45 sshd-session[622]: Received disconnect from 10.0.10.2 port 35878:11: disconnected by user
+<38>Oct  8 06:24:45 sshd-session[622]: Disconnected from user kei 10.0.10.2 port 35878
+<38>Oct  8 06:25:07 sshd-session[629]: Accepted publickey for kei from 10.0.10.2 port 57254 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:25:07 sshd-session[631]: Received disconnect from 10.0.10.2 port 57254:11: disconnected by user
+<38>Oct  8 06:25:07 sshd-session[631]: Disconnected from user kei 10.0.10.2 port 57254
+<38>Oct  8 06:25:07 sshd-session[633]: Accepted publickey for kei from 10.0.10.2 port 57268 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<37>Oct  8 06:25:07 sudo[637]: kei : TTY=none ; USER=root ; COMMAND=sh /tmp/swap5330.sh
+<38>Oct  8 06:25:15 sshd-session[635]: Received disconnect from 10.0.10.2 port 57268:11: disconnected by user
+<38>Oct  8 06:25:15 sshd-session[635]: Disconnected from user kei 10.0.10.2 port 57268
+<38>Oct  8 06:25:28 sshd-session[655]: Accepted publickey for kei from 10.0.10.2 port 59750 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:25:28 sshd-session[657]: Received disconnect from 10.0.10.2 port 59750:11: disconnected by user
+<38>Oct  8 06:25:28 sshd-session[657]: Disconnected from user kei 10.0.10.2 port 59750
+<38>Oct  8 06:25:32 sshd-session[661]: Accepted publickey for kei from 10.0.10.2 port 47970 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<37>Oct  8 06:25:32 sudo[665]: kei : TTY=none ; USER=root ; COMMAND=sh -c sync; (sleep 1; reboot) >/dev/null 2>&1 &
+<38>Oct  8 06:25:32 sshd-session[663]: Received disconnect from 10.0.10.2 port 47970:11: disconnected by user
+<38>Oct  8 06:25:32 sshd-session[663]: Disconnected from user kei 10.0.10.2 port 47970
+<37>Oct  8 06:26:10 sessiond[21]: automatic login of kei
+<38>Oct  8 06:26:40 sshd[19]: Server listening on 0.0.0.0 port 22.
+<38>Oct  8 06:26:45 sshd-session[41]: Accepted publickey for kei from 10.0.10.2 port 55554 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:26:47 sshd-session[43]: Received disconnect from 10.0.10.2 port 55554:11: disconnected by user
+<38>Oct  8 06:26:47 sshd-session[43]: Disconnected from user kei 10.0.10.2 port 55554
+<38>Oct  8 06:26:52 sshd-session[45]: Accepted publickey for kei from 10.0.10.2 port 55074 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:26:53 sshd-session[47]: Received disconnect from 10.0.10.2 port 55074:11: disconnected by user
+<38>Oct  8 06:26:53 sshd-session[47]: Disconnected from user kei 10.0.10.2 port 55074
+<38>Oct  8 06:26:59 sshd-session[52]: Accepted publickey for kei from 10.0.10.2 port 58332 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:26:59 sshd-session[54]: Received disconnect from 10.0.10.2 port 58332:11: disconnected by user
+<38>Oct  8 06:26:59 sshd-session[54]: Disconnected from user kei 10.0.10.2 port 58332
+<38>Oct  8 06:27:13 sshd-session[61]: Accepted publickey for kei from 10.0.10.2 port 35484 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<37>Oct  8 06:27:16 sudo[65]: kei : TTY=none ; USER=root ; COMMAND=sh -c mount /dev/sda1 /tmp/esp && cat /tmp/esp/zedbsd.cfg; cksum /tmp/esp/vmunix; umount /tmp/esp
+<38>Oct  8 06:27:18 sshd-session[63]: Received disconnect from 10.0.10.2 port 35484:11: disconnected by user
+<38>Oct  8 06:27:18 sshd-session[63]: Disconnected from user kei 10.0.10.2 port 35484
+<29>Oct  8 06:27:21 volumed[5]: VOLUMED EVENT class=0x80 subject=usb0.1 action=2
+<29>Oct  8 06:27:32 volumed[5]: VOLUMED EVENT class=0x80 subject=usb1.4 action=1
+<29>Oct  8 06:27:32 volumed[5]: VOLUMED EVENT class=0x80 subject=usb1.5 action=1
+<37>Oct  8 06:28:19 sessiond[21]: login kei on the graphical seat (password)
+<29>Oct  8 06:28:27 volumed[5]: VOLUMED EVENT class=0x80 subject=usb1.5 action=2
+<29>Oct  8 06:28:27 volumed[5]: VOLUMED EVENT class=0x80 subject=usb1.4 action=2
+<37>Oct  8 06:28:29 sessiond[21]: login kei on the graphical seat (password)
+<29>Oct  8 06:28:56 volumed[5]: VOLUMED EVENT class=0x80 subject=usb1.4 action=1
+<29>Oct  8 06:28:56 volumed[5]: VOLUMED EVENT class=0x80 subject=usb1.5 action=1
+<29>Oct  8 06:29:32 volumed[5]: VOLUMED EVENT class=0x80 subject=usb1.5 action=2
+<29>Oct  8 06:29:32 volumed[5]: VOLUMED EVENT class=0x80 subject=usb1.4 action=2
+<29>Oct  8 06:30:36 volumed[5]: VOLUMED EVENT class=0x80 subject=usb0.1 action=1
+<38>Oct  8 06:30:43 sshd-session[138]: Accepted publickey for kei from 10.0.10.2 port 55098 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:30:43 sshd-session[140]: Received disconnect from 10.0.10.2 port 55098:11: disconnected by user
+<38>Oct  8 06:30:43 sshd-session[140]: Disconnected from user kei 10.0.10.2 port 55098
+<38>Oct  8 06:30:53 sshd-session[142]: Accepted publickey for kei from 10.0.10.2 port 34670 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:30:53 sshd-session[144]: Received disconnect from 10.0.10.2 port 34670:11: disconnected by user
+<38>Oct  8 06:30:53 sshd-session[144]: Disconnected from user kei 10.0.10.2 port 34670
+<38>Oct  8 06:31:03 sshd-session[147]: Accepted publickey for kei from 10.0.10.2 port 42062 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:31:03 sshd-session[149]: Received disconnect from 10.0.10.2 port 42062:11: disconnected by user
+<38>Oct  8 06:31:03 sshd-session[149]: Disconnected from user kei 10.0.10.2 port 42062
+<38>Oct  8 06:31:13 sshd-session[152]: Accepted publickey for kei from 10.0.10.2 port 40998 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:31:13 sshd-session[154]: Received disconnect from 10.0.10.2 port 40998:11: disconnected by user
+<38>Oct  8 06:31:13 sshd-session[154]: Disconnected from user kei 10.0.10.2 port 40998
+<38>Oct  8 06:31:23 sshd-session[157]: Accepted publickey for kei from 10.0.10.2 port 36400 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:31:23 sshd-session[159]: Received disconnect from 10.0.10.2 port 36400:11: disconnected by user
+<38>Oct  8 06:31:23 sshd-session[159]: Disconnected from user kei 10.0.10.2 port 36400
+<38>Oct  8 06:31:33 sshd-session[162]: Accepted publickey for kei from 10.0.10.2 port 55446 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:31:33 sshd-session[164]: Received disconnect from 10.0.10.2 port 55446:11: disconnected by user
+<38>Oct  8 06:31:33 sshd-session[164]: Disconnected from user kei 10.0.10.2 port 55446
+<38>Oct  8 06:31:43 sshd-session[167]: Accepted publickey for kei from 10.0.10.2 port 53020 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:31:43 sshd-session[170]: Received disconnect from 10.0.10.2 port 53020:11: disconnected by user
+<38>Oct  8 06:31:43 sshd-session[170]: Disconnected from user kei 10.0.10.2 port 53020
+<38>Oct  8 06:31:53 sshd-session[173]: Accepted publickey for kei from 10.0.10.2 port 42984 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:31:53 sshd-session[175]: Received disconnect from 10.0.10.2 port 42984:11: disconnected by user
+<38>Oct  8 06:31:53 sshd-session[175]: Disconnected from user kei 10.0.10.2 port 42984
+<38>Oct  8 06:32:03 sshd-session[178]: Accepted publickey for kei from 10.0.10.2 port 55722 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:32:03 sshd-session[180]: Received disconnect from 10.0.10.2 port 55722:11: disconnected by user
+<38>Oct  8 06:32:03 sshd-session[180]: Disconnected from user kei 10.0.10.2 port 55722
+<38>Oct  8 06:32:14 sshd-session[183]: Accepted publickey for kei from 10.0.10.2 port 60852 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:32:14 sshd-session[185]: Received disconnect from 10.0.10.2 port 60852:11: disconnected by user
+<38>Oct  8 06:32:14 sshd-session[185]: Disconnected from user kei 10.0.10.2 port 60852
+<38>Oct  8 06:32:24 sshd-session[188]: Accepted publickey for kei from 10.0.10.2 port 39668 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:32:24 sshd-session[190]: Received disconnect from 10.0.10.2 port 39668:11: disconnected by user
+<38>Oct  8 06:32:24 sshd-session[190]: Disconnected from user kei 10.0.10.2 port 39668
+<38>Oct  8 06:32:34 sshd-session[193]: Accepted publickey for kei from 10.0.10.2 port 42650 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:32:34 sshd-session[195]: Received disconnect from 10.0.10.2 port 42650:11: disconnected by user
+<38>Oct  8 06:32:34 sshd-session[195]: Disconnected from user kei 10.0.10.2 port 42650
+<38>Oct  8 06:32:44 sshd-session[198]: Accepted publickey for kei from 10.0.10.2 port 48606 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:32:44 sshd-session[200]: Received disconnect from 10.0.10.2 port 48606:11: disconnected by user
+<38>Oct  8 06:32:44 sshd-session[200]: Disconnected from user kei 10.0.10.2 port 48606
+<38>Oct  8 06:33:13 sshd-session[205]: Accepted publickey for kei from 10.0.10.2 port 58602 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<37>Oct  8 06:33:13 sudo[210]: kei : TTY=none ; USER=root ; COMMAND=sh -c mkdir -p /tmp/esp && mount -t msdos /dev/sda1 /tmp/esp; cat /tmp/esp/zedbsd.cfg; cksum /tmp/esp/vmunix; umount /tmp/esp
+<38>Oct  8 06:33:16 sshd-session[207]: Received disconnect from 10.0.10.2 port 58602:11: disconnected by user
+<38>Oct  8 06:33:16 sshd-session[207]: Disconnected from user kei 10.0.10.2 port 58602
+<38>Oct  8 06:33:21 sshd-session[215]: Accepted publickey for kei from 10.0.10.2 port 47414 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:33:21 sshd-session[217]: Received disconnect from 10.0.10.2 port 47414:11: disconnected by user
+<38>Oct  8 06:33:21 sshd-session[217]: Disconnected from user kei 10.0.10.2 port 47414
+<38>Oct  8 06:33:27 sshd-session[224]: Accepted publickey for kei from 10.0.10.2 port 53722 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:33:27 sshd-session[226]: Received disconnect from 10.0.10.2 port 53722:11: disconnected by user
+<38>Oct  8 06:33:27 sshd-session[226]: Disconnected from user kei 10.0.10.2 port 53722
+<38>Oct  8 06:33:28 sshd-session[229]: Accepted publickey for kei from 10.0.10.2 port 53738 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<38>Oct  8 06:33:28 sshd-session[231]: Received disconnect from 10.0.10.2 port 53738:11: disconnected by user
+<38>Oct  8 06:33:28 sshd-session[231]: Disconnected from user kei 10.0.10.2 port 53738
+<38>Oct  8 06:33:33 sshd-session[235]: Accepted publickey for kei from 10.0.10.2 port 53742 ssh2: ED25519 SHA256:XQLTXkH/zMCuwj+CktIDubD4BOFYl4QczJZBrBKxkx4
+<37>Oct  8 06:33:33 sudo[239]: kei : TTY=none ; USER=root ; COMMAND=sh -c mkdir -p /tmp/q1log && cp /var/log/messages /var/log/sessiond.log /var/log/greeter.log /var/log/kernel.log /tmp/q1log/ && chmod -R a+rX /tmp/q1log
