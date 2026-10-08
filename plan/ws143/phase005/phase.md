@@ -612,6 +612,26 @@ p005 を cleared にする条件: i01a〜i03 の T1 の PASS、仕様の値の�
 - `sh plan/ws143/tests/hid-report-fuzz.sh`: PASS（1000000 descriptor、6942 受理、2395601 comparisons、7753406 events、0 failures、ASan・UBSan の報告なし、約 24 秒）。
 - **未実施**: QEMU（T1: `hid-usb-p005.sh`、`plan/ws161/tests/fidoctl-p004.sh`（別の image `config-amd64-fidoctl.mk`）、`boot-test.sh`）。i2c-hid は触っていない（Q1）。実機は未実施。
 
+## i01b の記録（2026-10-08、P2、q888）
+
+ユーザーの決定（Q1 経由、2026-10-08 朝）: Q2 `HID_HOST_GET_DEVICE` を足す（推しのとおり）。kernel では `hid_host_ioctl()` の 1 か所が答える。
+
+**作った物**:
+- `include/uapi/hid-host.h`（§3 の形。`struct hid_host_setup` 4324 byte の `_Static_assert`、`struct hid_host_device`、`HID_HOST_GET_DEVICE`、group 'h'）。
+- `src/drivers/generic/hid-host.c`（cdev `hid-host`、rdev `0x00130000`、root だけ、6 open、最初の write が setup、FIDO の page は ENXIO、続く write が report（0 か 512 超は EINVAL、宣言より短い物は EINVAL、長い物は受ける、decode の失敗は数えて size を返す）、read は EAGAIN、poll は POLLOUT だけ、close で unpublish と destroy）。名前が空なら `Bluetooth HID keyboard` などを kernel が付ける（bus が virtual なら `Virtual HID …`）。touch の device は `<name> Touchscreen`・`<path>/touch` を 64 byte に切る。
+- `src/drivers/generic/hid-host-setup.c`: setup の純粋な検査 `drv_hid_host_setup_valid()`（host 試験のため node から分けた。設計の「hid-host.c から切り出した純粋な関数」）。`include/drivers/generic/hid-host.h`。
+- glue に `drv_hid_input_report_short()`（report ID ごとの宣言の長さ。report の状態に `minimum_size` を持つ）。
+- build: `Makefile` に `CONFIG_HID_HOST ?= $(if $(filter amd64,$(ZEDBSD_PLATFORM)),y,n)` と `-DCONFIG_HID_HOST`（設計の「既定 y、amd64 だけが見る」を、platform で既定を決める形にした: pcat・arm64 は n で flag も付かず、vfs.c の登録も入らない）。`platform/amd64/vmunix.mk` に hid-host.c・hid-host-setup.c と、USB_HID が n の時の hidraw-describe.c。HID の source の条件に `CONFIG_HID_HOST`。`src/kern/vfs.c` の `#ifdef CONFIG_HID_HOST` で登録、`src/kern/devfs.c` で 0600（既存の input-inject の行と同じ形の if の鎖に足した。鎖の既存の call-in-condition はそのまま）。
+- `userland/tests/hid-host-probe/`（`type`・`misuse`・`open`）。`config-amd64-bt.mk` に hid-host-probe と systemevents。
+- host 試験 §7.3: `hid-input-host-test.c` に setup の検査（正しい物、virtual、magic・version・USB の bus・descriptor 0 と 4097（4096 は可）・reserved・3 つの text の NUL 無し、63 byte の名前）と短い report の判定。
+- T1 の試験 `plan/ws143/tests/hid-host-p005.sh`（§7.5。6 枚の keyboard と PS/2・USB の device が同時に register できることは、旧の 8 を超えるので B1 の確かめになる。inject の device はこの image に無いので使わない）。
+
+**確かめ（P2、host）**: `config/ci/config-amd64.mk`・`config-amd64-bt.mk`（vmunix、hid-host-probe）・`config-rpi4.mk` は exit 0、warning 0。pcat は compile の error・warning 0、link は既知の sandbox の未定義で失敗（Q1 の既知）。style-check: hid-host.c・hid-host-setup.c・hid-host.h（uapi・driver）・hid-host-probe・試験の C は 0 件。`hid-input-host-test.sh` PASS（setup と短い report の検査を含む）、`hid-report-fuzz.sh` PASS。**未実施**: QEMU（T1: `hid-host-p005.sh`）。
+
+## i01c（予定、Q1 の決定 2026-10-08: 「i2c-hid も共有の glue に乗せる」）
+
+ユーザーの決定は推しと逆で、i2c-hid も hid-input に乗せる。touchpad の経路の作り替えなので、host で旧と新の event 列の突き合わせ（i01a と同じ方法、5330 の touchpad の descriptor）を必ず行い、実機の回帰は UAT で。設計 §5.2 の文言は元のまま。i01b の後に行う。
+
 ## 再開点（次の担当がこの file だけで i01a に入れる形）
 
 ### i01a: kernel の glue の refactor と USB の回帰

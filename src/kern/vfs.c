@@ -54,6 +54,9 @@
 #ifdef BT_TEST_LOOPBACK
 #include <drivers/generic/bt-hci.h>
 #endif
+#ifdef CONFIG_HID_HOST
+#include <drivers/generic/hid-host.h>
+#endif
 
 #include <uapi/errno.h>
 #include <uapi/fcntl.h>
@@ -375,6 +378,15 @@ kern_vfs_init(
 	}
 
 	drv_input_core_init();
+
+#ifdef CONFIG_HID_HOST
+	/* Publishes /dev/hid-host, where the Bluetooth daemon makes its HID devices (ws143-p005). */
+	error = drv_hid_host_register();
+	if (error != 0) {
+		error = vfs_fail("register hid-host", error);
+		return error;
+	}
+#endif
 
 #ifdef INPUT_TEST_INJECT
 	/* Publishes the test-only pen injector of test builds. */

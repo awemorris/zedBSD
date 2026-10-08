@@ -511,7 +511,8 @@ devfs_cdev_inode(
 	 * A security key's raw HID node and a smart card slot are root's alone
 	 * until sessiond gives them to the seat's user (ws161: whoever opens
 	 * them can ask the key to sign).  A Bluetooth controller is root's
-	 * alone: the daemon's privileged part opens it (ws143, D16).
+	 * alone: the daemon's privileged part opens it (ws143, D16), and so is
+	 * the node it makes its HID devices on (hid-host, ws143-p005).
 	 */
 	backlight = backlight_name(device->name);
 	raw = hidraw_name(device->name);
@@ -524,6 +525,8 @@ devfs_cdev_inode(
 	else if (raw || smartcard || bluetooth)
 		mode = 0600U;
 	else if (kern_strcmp(device->name, "input-inject") == 0)
+		mode = 0600U;
+	else if (kern_strcmp(device->name, "hid-host") == 0)
 		mode = 0600U;
 	else
 		mode = 0666U;

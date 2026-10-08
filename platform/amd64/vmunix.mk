@@ -267,7 +267,7 @@ endif
 # (ws143-p005) serve every HID transport (USB, I2C-HID) and the test injector
 # (ws159-p003).
 AMD64_HID_SOURCES :=
-ifneq ($(filter y,$(CONFIG_DRIVER_USB_HID) $(CONFIG_DRIVER_PCI_LPSS_I2C) $(CONFIG_INPUT_TEST_INJECT)),)
+ifneq ($(filter y,$(CONFIG_DRIVER_USB_HID) $(CONFIG_DRIVER_PCI_LPSS_I2C) $(CONFIG_INPUT_TEST_INJECT) $(CONFIG_HID_HOST)),)
 AMD64_HID_SOURCES += src/drivers/generic/hid-report.c src/drivers/generic/hid-digitizer.c src/drivers/generic/hid-touch.c \
 	src/drivers/generic/hid-input.c
 endif
@@ -339,6 +339,14 @@ AMD64_KERNEL_SOURCES := \
 	src/drivers/platform/pcat/graphics/vgafont.c src/drivers/platform/pcat/graphics/splash.c src/kern/init.c
 ifeq ($(CONFIG_INPUT_TEST_INJECT),y)
 AMD64_KERNEL_SOURCES += src/drivers/generic/input-inject.c
+endif
+# /dev/hid-host (ws143-p005): the Bluetooth daemon's HID devices, on the HID input glue; it refuses a FIDO descriptor
+# with hidraw-describe.c (built with usb-hid, or here without it).
+ifeq ($(CONFIG_HID_HOST),y)
+AMD64_KERNEL_SOURCES += src/drivers/generic/hid-host.c src/drivers/generic/hid-host-setup.c
+ifneq ($(CONFIG_DRIVER_USB_HID),y)
+AMD64_KERNEL_SOURCES += src/drivers/generic/hidraw-describe.c
+endif
 endif
 # The test kernel's loopback security key and card (ws161-p002, p003), on the raw HID and the smart card classes
 # (built with usb-hid and usb-ccid, or here without them).

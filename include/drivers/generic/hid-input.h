@@ -69,6 +69,7 @@ struct hid_input_identity {
 int drv_hid_input_prepare(const void *descriptor, size_t size, struct hid_input **result);
 size_t drv_hid_input_report_max(const struct hid_input *input);
 int drv_hid_input_report_ids(const struct hid_input *input);
+int drv_hid_input_report_short(const struct hid_input *input, const uint8_t *report, size_t length);
 unsigned drv_hid_input_kind(const struct hid_input *input);
 int drv_hid_input_publish(struct hid_input *input, const struct hid_input_identity *identity);
 void drv_hid_input_report(struct hid_input *input, const uint8_t *report, size_t length, uint64_t milliseconds);
