@@ -420,9 +420,10 @@ tags_item(
 			tags->track = (int)((unsigned)value[2] << 8 | (unsigned)value[3]);
 		break;
 	case TAGS_COVER:
-		/* The first picture, when there is none yet. */
+		/* The first picture, when there is none yet (has_cover tells there is one, for a reader that does not keep it). */
 		if (tags->cover != NULL || size == 0U || size > MU_COVER_MAX)
 			break;
+		tags->has_cover = 1;
 		tags->cover = malloc(size);
 		if (tags->cover == NULL)
 			break;

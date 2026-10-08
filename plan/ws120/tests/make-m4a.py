@@ -89,10 +89,10 @@ def main() -> None:
 		"trkn": 2})
 	# No tags: named after its file, an unknown artist and album.
 	m4a(music / "untagged.m4a", {})
-	# An .mp4 with sound only is a song; one with pictures is a video.
+	# An .mp4 with sound is a song, with pictures too (ws177-p020: its sound plays).
 	m4a(music / "voice.MP4", {"\xa9nam": "Voice Memo", "\xa9alb": "Memos"})
 	m4a(music / "clip.mp4", {"\xa9nam": "A Clip"}, handlers=(b"vide", b"soun"))
-	# Not looked at: too deep, hidden, not an MP4, not a song's name.
+	# Deep is looked at (ws177-p020: 16 folders down); not looked at: hidden, not an MP4, not a song's name.
 	m4a(music / "a/b/c/d/deep.m4a", {"\xa9nam": "Too Deep"})
 	m4a(music / ".hidden/secret.m4a", {"\xa9nam": "Hidden"})
 	(music / "broken.m4a").write_bytes(b"not an mp4 at all")

@@ -54,6 +54,9 @@ _Static_assert(KL_AUDIO_FORMAT_F32_LE == KL_AUDIO_WIRE_FORMAT_F32_LE, "F32_LE");
 /* The nanoseconds of a second. */
 #define AUDIO_NS		1000000000LL
 
+/* Marks a parameter a function does not use. */
+#define UNUSED_PARAMETER(name)	((void)(name))
+
 /*
  * One stream.
  *
@@ -1125,9 +1128,10 @@ audio_global(
 	struct kl_audio_stream *stream;
 	int differs;
 
+	UNUSED_PARAMETER(registry);
+	UNUSED_PARAMETER(version);
+
 	/* Only kl_audio_v1. */
-	(void)registry;
-	(void)version;
 	stream = data;
 	differs = strcmp(interface, KL_AUDIO_NAME);
 	if (differs != 0)
@@ -1144,10 +1148,9 @@ audio_global_remove(
 	struct wl_registry *registry,
 	uint32_t name)
 {
-	/* Nothing to do. */
-	(void)data;
-	(void)registry;
-	(void)name;
+	UNUSED_PARAMETER(data);
+	UNUSED_PARAMETER(registry);
+	UNUSED_PARAMETER(name);
 }
 
 /* The round trip's end. */
@@ -1159,8 +1162,9 @@ audio_sync_done(
 {
 	struct kl_audio_stream *stream;
 
+	UNUSED_PARAMETER(serial);
+
 	/* Every global before it is announced. */
-	(void)serial;
 	stream = data;
 	stream->synced = 1U;
 	wl_callback_destroy(callback);
@@ -1178,9 +1182,10 @@ audio_on_ready(
 {
 	struct kl_audio_stream *stream;
 
+	UNUSED_PARAMETER(proxy);
+	UNUSED_PARAMETER(period);
+
 	/* Only the first ring. */
-	(void)proxy;
-	(void)period;
 	stream = data;
 	if (stream->ready) {
 		(void)close(fd);
@@ -1203,8 +1208,9 @@ audio_on_failed(
 {
 	struct kl_audio_stream *stream;
 
+	UNUSED_PARAMETER(proxy);
+
 	/* Why. */
-	(void)proxy;
 	stream = data;
 	stream->failed = 1U;
 	stream->failed_error = error;
@@ -1220,8 +1226,9 @@ audio_on_result(
 {
 	struct kl_audio_stream *stream;
 
+	UNUSED_PARAMETER(proxy);
+
 	/* Only the control awaited. */
-	(void)proxy;
 	stream = data;
 	if (request != stream->awaited)
 		return;
@@ -1240,9 +1247,10 @@ audio_on_drained(
 {
 	struct kl_audio_stream *stream;
 
+	UNUSED_PARAMETER(proxy);
+	UNUSED_PARAMETER(request);
+
 	/* Told by the next dispatch. */
-	(void)proxy;
-	(void)request;
 	stream = data;
 	stream->running = 0U;
 	stream->draining = 0U;
@@ -1258,9 +1266,10 @@ audio_on_underrun(
 {
 	struct kl_audio_stream *stream;
 
+	UNUSED_PARAMETER(proxy);
+	UNUSED_PARAMETER(count);
+
 	/* Told by the next dispatch. */
-	(void)proxy;
-	(void)count;
 	stream = data;
 	stream->events |= KL_AUDIO_EVENT_UNDERRUN;
 }
@@ -1274,9 +1283,10 @@ audio_on_lost(
 {
 	struct kl_audio_stream *stream;
 
+	UNUSED_PARAMETER(proxy);
+	UNUSED_PARAMETER(error);
+
 	/* The sink (under the lock the dispatching holds). */
-	(void)proxy;
-	(void)error;
 	stream = data;
 	audio_lose(stream);
 }
