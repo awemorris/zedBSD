@@ -24,6 +24,7 @@
  */
 
 #include "app.h"
+#include "../picture/png-write.h"
 
 #include "userland/desktop/paths.h"
 
@@ -47,6 +48,9 @@
 
 /* The key Q, which quits with Ctrl. */
 #define PH_KEY_Q		16U
+
+/* The longest side of a photo handed to another program as a picture (ws189-p003). */
+#define PH_DRAG_SIDE		2048
 
 /* The application's id, which the file chooser's window takes too, and the thumbnails' folder under the cache folder. */
 #define PH_APPLICATION		"photos"
@@ -111,6 +115,9 @@ static void ph_chosen(struct ph_window *photos);
 static void ph_cache_folder(char *folder, size_t size);
 static int ph_loop(struct ph_window *photos, unsigned timeout);
 static void ph_input(struct ph_window *photos, const struct kl_window_event *event);
+static void ph_drag_start(struct ph_window *photos, long photo);
+static int ph_drag_picture(struct ph_window *photos, long photo, unsigned char **png, size_t *size);
+static int ph_uri(const char *path, char *uri, size_t size);
 static void ph_results(struct ph_window *photos);
 static void ph_jobs(struct ph_window *photos);
 static void ph_marks(struct ph_window *photos);
@@ -628,6 +635,7 @@ ph_input(
 	struct ph_window *photos,
 	const struct kl_window_event *event)
 {
+	long photo;
 	int taken;
 
 	/* Ctrl+Q quits. */
@@ -635,6 +643,20 @@ ph_input(
 		photos->view.quit = 1;
 		return;
 	}
+
+	/* A press on a photo held and moved far enough drags the photo out of the window (ws189-p003); a release spends it. */
+	if (event->kind == KL_WINDOW_MOTION) {
+		photo = ph_view_drag_check(&photos->view, event->x, event->y);
+		if (photo >= 0) {
+			ph_drag_start(photos, photo);
+			photos->dirty = 1;
+			return;
+		}
+	}
+
+	/* A release spends the press. */
+	if (event->kind == KL_WINDOW_BUTTON && !event->pressed)
+		photos->view.drag_armed = 0;
 
 	/* The widgets' input draws again. */
 	taken = kl_ui_window_input(photos->ui, event);
@@ -648,6 +670,213 @@ ph_input(
 		photos->resized = 1;
 	else if (event->kind == KL_WINDOW_CLOSE)
 		photos->view.quit = 1;
+}
+
+/*
+ * Drags a photo out of the window (ws189-p003): its file (a file:// URI)
+ * and its picture (a PNG, at most PH_DRAG_SIDE on its longer side, turned
+ * as shown), as a copy, with its thumbnail under the pointer.  The drag
+ * starts first, while the button is held; the picture is made after and
+ * filled in before the next dispatch.
+ */
+static void
+ph_drag_start(
+	struct ph_window *photos,
+	long photo)
+{
+	struct kl_drag_data data[2];
+	struct kl_drag_icon icon;
+	struct ph_photo *list;
+	struct ph_thumb *thumb;
+	const struct kl_image *picture;
+	unsigned char *png;
+	char uri[PH_PATH_MAX * 3 + 16];
+	size_t count;
+	size_t uri_length;
+	size_t png_size;
+	int error;
+
+	/* The photo, and its file as a URI with its line's end. */
+	list = ph_photos(&count);
+	if (photo < 0 || (size_t)photo >= count)
+		return;
+	error = ph_uri(list[photo].path, uri, sizeof(uri));
+	if (error != 0) {
+		ph_log("DND failed photo=%ld errno=%d", photo, error);
+		return;
+	}
+
+	/* The line's length. */
+	uri_length = strlen(uri);
+
+	/* The two types; the picture's data comes after the drag starts. */
+	data[0].type = "text/uri-list";
+	data[0].data = uri;
+	data[0].length = uri_length;
+	data[1].type = "image/png";
+	data[1].data = NULL;
+	data[1].length = 0;
+
+	/* Its thumbnail under the pointer (the photo shown whole, else the grid's thumbnail), held at its middle. */
+	picture = NULL;
+	if (photo == photos->view.open && photos->view.picture.pixels != NULL)
+		picture = &photos->view.picture;
+	thumb = NULL;
+	if ((size_t)photo < photos->view.thumb_count)
+		thumb = &photos->view.thumbs[photo];
+	if (picture == NULL && thumb != NULL && thumb->state == PH_THUMB_READY)
+		picture = &thumb->image;
+	memset(&icon, 0, sizeof(icon));
+	if (picture != NULL && picture->stride == (size_t)picture->width) {
+		icon.pixels = picture->pixels;
+		icon.width = picture->width;
+		icon.height = picture->height;
+		icon.hot_x = picture->width / 2;
+		icon.hot_y = picture->height / 2;
+	}
+
+	/* The drag, from the press, as a copy; the press is the drag's now. */
+	if (icon.pixels != NULL) {
+		error = kl_window_start_drag_icon(photos->window, data, 2U, KL_DND_COPY, kl_window_press_serial(photos->window), &icon);
+	} else {
+		error = kl_window_start_drag(photos->window, data, 2U, KL_DND_COPY, kl_window_press_serial(photos->window));
+	}
+
+	/* The press is the drag's now, whether it started or not. */
+	(void)kl_ui_pointer_cancel(photos->ui);
+	if (error != 0) {
+		ph_log("DND failed photo=%ld errno=%d", photo, error);
+		return;
+	}
+
+	/* The log line the tests read. */
+	ph_log("DND start photo=%ld path=%s", photo, list[photo].path);
+
+	/* The picture, made now and filled in. */
+	png = NULL;
+	png_size = 0;
+	error = ph_drag_picture(photos, photo, &png, &png_size);
+	if (error == 0)
+		error = kl_window_drag_fill(photos->window, "image/png", png, png_size);
+	free(png);
+
+	/* Succeeded or not, the drag goes on (a picture not made leaves the file alone). */
+	ph_log("DND picture photo=%ld bytes=%lu errno=%d", photo, (unsigned long)png_size, error);
+}
+
+/*
+ * Makes the PNG of a photo for a drag: the picture shown whole when it is
+ * the one, else its file decoded, fitted to PH_DRAG_SIDE and turned as the
+ * library says.  Returns 0 with the PNG (the caller frees it), or an errno
+ * value.
+ */
+static int
+ph_drag_picture(
+	struct ph_window *photos,
+	long photo,
+	unsigned char **png,
+	size_t *size)
+{
+	struct ph_photo *list;
+	struct kl_image decoded;
+	struct kl_image fitted;
+	struct kl_image turned;
+	const struct kl_image *source;
+	size_t count;
+	int error;
+
+	/* The picture shown whole is ready (fitted and turned already). */
+	*png = NULL;
+	*size = 0;
+	if (photo == photos->view.open && photos->view.picture.pixels != NULL) {
+		source = &photos->view.picture;
+		error = kl_picture_png(source->pixels, source->width, source->height, source->stride, png, size);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Otherwise the file, decoded. */
+	list = ph_photos(&count);
+	memset(&decoded, 0, sizeof(decoded));
+	error = ph_decode(list[photo].path, &decoded);
+	if (error != 0)
+		return error;
+
+	/* Fitted. */
+	memset(&fitted, 0, sizeof(fitted));
+	error = ph_fit(&decoded, PH_DRAG_SIDE, &fitted);
+	kl_image_release(&decoded);
+	if (error != 0)
+		return error;
+
+	/* Turned as the library says. */
+	memset(&turned, 0, sizeof(turned));
+	error = ph_turn(&fitted, list[photo].turns, &turned);
+	kl_image_release(&fitted);
+	if (error != 0)
+		return error;
+
+	/* The PNG. */
+	error = kl_picture_png(turned.pixels, turned.width, turned.height, turned.stride, png, size);
+	kl_image_release(&turned);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the PNG. */
+	return 0;
+}
+
+/*
+ * Writes a path as a "text/uri-list" line: file:// and the path, the
+ * bytes outside the unreserved set and "/" as %XX, then CRLF.  Returns 0,
+ * or ENAMETOOLONG when it does not fit.
+ */
+static int
+ph_uri(
+	const char *path,
+	char *uri,
+	size_t size)
+{
+	static const char hex[] = "0123456789ABCDEF";
+	const unsigned char *byte;
+	size_t used;
+	int plain;
+
+	/* The scheme. */
+	if (size < 16U)
+		return ENAMETOOLONG;
+	memcpy(uri, "file://", 7U);
+	used = 7U;
+
+	/* Each byte, as it is or as %XX. */
+	for (byte = (const unsigned char *)path; *byte != '\0'; byte++) {
+		/* Room for the longest form, the line's end and the NUL. */
+		if (used + 3U + 3U > size)
+			return ENAMETOOLONG;
+
+		/* Letters, digits, "-._~" and "/" stay as they are. */
+		plain = 0;
+		if ((*byte >= 'a' && *byte <= 'z') || (*byte >= 'A' && *byte <= 'Z') || (*byte >= '0' && *byte <= '9'))
+			plain = 1;
+		if (*byte == '-' || *byte == '.' || *byte == '_' || *byte == '~' || *byte == '/')
+			plain = 1;
+		if (plain) {
+			uri[used++] = (char)*byte;
+			continue;
+		}
+
+		/* Any other byte as %XX. */
+		uri[used++] = '%';
+		uri[used++] = hex[*byte >> 4];
+		uri[used++] = hex[*byte & 0x0fU];
+	}
+
+	/* Succeeded: the line ended. */
+	uri[used++] = '\r';
+	uri[used++] = '\n';
+	uri[used] = '\0';
+	return 0;
 }
 
 /* Gives the view the pictures the thread made. */

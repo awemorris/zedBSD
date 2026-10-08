@@ -442,6 +442,10 @@ size_t notes_document_stroke_total(const struct notes_document *document);
 struct notes_image *notes_image_create(struct notes_document *document, unsigned kind, const void *data, size_t size, size_t width, size_t height, int components, int orientation);
 void notes_image_release(struct notes_image *image);
 int notes_image_source(const struct notes_image *image, struct pdf_image_source *source, void **owned);
+
+/* An image from bytes in memory, and an image as a PNG for a drag (picture-file.c, ws189-p003). */
+int notes_picture_load_bytes(struct notes_document *document, const unsigned char *data, size_t size, struct notes_image **image);
+int notes_picture_png(const struct notes_image *image, unsigned char **png, size_t *size);
 int notes_image_set_bytes(struct notes_image *image, const struct pdf_image_source *source);
 struct notes_edit *notes_edit_copy(const struct notes_edit *edit);
 void notes_edit_free(struct notes_edit *edit);

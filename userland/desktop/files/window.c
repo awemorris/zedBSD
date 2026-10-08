@@ -97,6 +97,11 @@ fm_window_open_desktop(
 	if (status != 0)
 		return status;
 
+	/* The desktop takes pictures and text dropped on it as new files too (ws189-p003). */
+	status = kl_window_accept_drops(window->kui, KL_DROP_URIS | KL_DROP_IMAGE | KL_DROP_TEXT);
+	if (status != 0)
+		fm_log("DND none errno=%d", status);
+
 	/* The desktop has the keyboard when it is pressed; the log line the tests read. */
 	window->desktop = 1;
 	window->activated = 1;
@@ -503,7 +508,12 @@ window_drop(
 		input->x = (int)event->x;
 		input->y = (int)event->y;
 		input->pressed = event->pressed;
-		input->focused = 1;
+
+		/* Whether it carries file names, and what it carries that the window takes (KL_DROP_*, ws189-p003). */
+		input->focused = 0;
+		if ((event->code & KL_DROP_URIS) != 0U)
+			input->focused = 1;
+		input->button = event->code;
 		break;
 	case KL_WINDOW_DROP_MOTION:
 		/* Where it is. */

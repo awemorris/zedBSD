@@ -22,5 +22,7 @@
 #define KL_PICTURE_PNG_SIDE_MAX	16384
 
 int kl_picture_png(const uint32_t *pixels, int width, int height, size_t stride, unsigned char **png, size_t *size);
+int kl_picture_png_rows(const unsigned char *rows, size_t length, int width, int height, int components, unsigned char **png, size_t *size);
+int kl_picture_fit(const uint32_t *pixels, int width, int height, size_t stride, int side, uint32_t **fitted, int *fitted_width, int *fitted_height);
 
 #endif

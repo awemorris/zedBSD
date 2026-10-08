@@ -165,6 +165,8 @@ uint64_t fm_clock(void);
 /* Drag and drop (dnd.c). */
 int fm_dnd_start(struct fm_window *window, char *const *paths, size_t count);
 void fm_dnd_answer(struct fm_window *window, int accept, uint32_t preferred);
+void fm_dnd_answer_content(struct fm_window *window, int accept);
+int fm_dnd_receive_content(struct fm_window *window, const char *folder, char *path, size_t size);
 int fm_dnd_receive(struct fm_window *window, char ***paths, size_t *count);
 void fm_dnd_finish(struct fm_window *window, uint32_t action);
 void fm_dnd_abort(struct fm_window *window);

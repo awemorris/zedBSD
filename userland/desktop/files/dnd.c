@@ -24,9 +24,14 @@
 #include "window.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+/* The most names tried for a dropped picture's or text's new file ("Image", "Image 2", ...). */
+#define DND_NAME_TRIES		1000
 
 /* The type that carries file names, and the text of the paths (a line each) for applications that take text. */
 #define DND_URI_LIST		"text/uri-list"
@@ -36,6 +41,7 @@ static int dnd_uris(char *const *paths, size_t count, char **text, size_t *lengt
 static int dnd_parse(const char *text, size_t length, char ***paths, size_t *count);
 static int dnd_lines(char *const *paths, size_t count, char **text, size_t *length);
 static int dnd_hex(int character);
+static int dnd_write_new(const char *folder, const char *stem, const char *extension, const char *data, size_t length, char *path, size_t size);
 
 /*
  * Starts a drag and drop of paths from the window, answering the press
@@ -104,6 +110,75 @@ fm_dnd_answer(
 	} else {
 		kl_window_answer_drop(window->kui, 0U, 0U);
 	}
+}
+
+/*
+ * Answers the compositor for a picture or text over the desktop
+ * (ws189-p003): taken as a copy, or not.
+ */
+void
+fm_dnd_answer_content(
+	struct fm_window *window,
+	int accept)
+{
+	/* A copy, or nothing. */
+	if (accept != 0) {
+		kl_window_answer_drop(window->kui, KL_DND_COPY, KL_DND_COPY);
+	} else {
+		kl_window_answer_drop(window->kui, 0U, 0U);
+	}
+}
+
+/*
+ * Reads the picture or the text dropped on the window and writes it into
+ * a new file of a folder (ws189-p003): a picture as "Image.png", text as
+ * "Text Clipping.txt" (in the user's language), with " 2", " 3" ... when
+ * the name is taken.  Returns 0 with the new file's path, or an errno
+ * value.
+ */
+int
+fm_dnd_receive_content(
+	struct fm_window *window,
+	const char *folder,
+	char *path,
+	size_t size)
+{
+	const char *stem;
+	const char *extension;
+	unsigned type;
+	size_t length;
+	char *data;
+	int error;
+
+	/* Nothing yet. */
+	path[0] = '\0';
+
+	/* What was dropped. */
+	error = kl_window_receive_drop(window->kui, &data, &length, &type);
+	if (error != 0)
+		return error;
+
+	/* A picture or text, each with its name. */
+	if (type == KL_DROP_IMAGE) {
+		stem = kl_tr("Image");
+		extension = ".png";
+	} else if (type == KL_DROP_TEXT) {
+		stem = kl_tr("Text Clipping");
+		extension = ".txt";
+	} else {
+		free(data);
+		return ENOENT;
+	}
+
+	/* The new file. */
+	error = dnd_write_new(folder, stem, extension, data, length, path, size);
+	free(data);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the file written. */
+	fm_log("DND content path=%s bytes=%lu type=%u", path, (unsigned long)length, type);
+	return 0;
 }
 
 /*
@@ -381,4 +456,82 @@ dnd_hex(
 
 	/* Not a digit. */
 	return -1;
+}
+
+/*
+ * Writes data into a new file of a folder, named the stem and the
+ * extension, or the stem with " 2", " 3" ... while a name is taken (never
+ * over a file).  Returns 0 with the path, or an errno value.
+ */
+static int
+dnd_write_new(
+	const char *folder,
+	const char *stem,
+	const char *extension,
+	const char *data,
+	size_t length,
+	char *path,
+	size_t size)
+{
+	size_t written;
+	ssize_t count;
+	int descriptor;
+	int number;
+	int fitted;
+	int closed;
+	int error;
+
+	/* The first name not taken, made by this call alone (O_EXCL). */
+	descriptor = -1;
+	for (number = 1; number <= DND_NAME_TRIES; number++) {
+		/* The name with its number (none for the first). */
+		if (number == 1) {
+			fitted = snprintf(path, size, "%s/%s%s", folder, stem, extension);
+		} else {
+			fitted = snprintf(path, size, "%s/%s %d%s", folder, stem, number, extension);
+		}
+
+		/* A name that does not fit is no file. */
+		if (fitted < 0 || (size_t)fitted >= size)
+			return ENAMETOOLONG;
+
+		/* Made, or taken already. */
+		descriptor = open(path, O_WRONLY | O_CREAT | O_EXCL, 0644);
+		if (descriptor >= 0)
+			break;
+		if (errno != EEXIST)
+			return errno;
+	}
+
+	/* Every name taken. */
+	if (descriptor < 0)
+		return EEXIST;
+
+	/* All of the data. */
+	written = 0;
+	error = 0;
+	while (written < length) {
+		count = write(descriptor, data + written, length - written);
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0) {
+			error = errno;
+			if (error == 0)
+				error = EIO;
+			break;
+		}
+
+		/* The part written. */
+		written += (size_t)count;
+	}
+
+	/* The file closed; a short one stays for the user to see, with the error reported. */
+	closed = close(descriptor);
+	if (closed != 0 && error == 0)
+		error = errno;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the new file. */
+	return 0;
 }

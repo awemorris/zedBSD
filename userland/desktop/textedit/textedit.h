@@ -381,6 +381,8 @@ struct te_host {
 	size_t (*paste_primary)(void *data, char *text, size_t size);
 	void (*context_menu)(void *data, int x, int y);
 	int (*choose)(void *data, int saving, const char *folder, const char *name);
+	/* Starts a drag of text out of the window (ws189-p003); 0 when it started. */
+	int (*drag_text)(void *data, const char *text, size_t length);
 };
 
 /* A rectangle of the frame. */
@@ -458,6 +460,21 @@ struct te_app {
 	int click_count;
 	int click_x;
 	int click_y;
+
+	/*
+	 * Drag and drop with other windows (ws189-p003): a left press in the
+	 * selection waits to become a drag of its text (drag_armed, where it
+	 * pressed and the text position there); dragging_out while that drag
+	 * goes on; and a drag of text from elsewhere over the text, with the
+	 * position a drop would insert at (drop_over).
+	 */
+	int drag_armed;
+	int drag_press_x;
+	int drag_press_y;
+	size_t drag_position;
+	int dragging_out;
+	int drop_over;
+	size_t drop_position;
 
 	/* The find text, and whether the last search wrapped. */
 	char find[TE_FIND_MAX];
@@ -647,6 +664,11 @@ const char *te_app_name(const struct te_app *app);
 int te_app_modified(const struct te_app *app);
 void te_app_publish_primary(struct te_app *app);
 void te_app_tap(struct te_app *app, int x, int y, int count);
+int te_app_drop_over(struct te_app *app, int x, int y);
+void te_app_drop_leave(struct te_app *app);
+void te_app_drop_text(struct te_app *app, const char *text, size_t length);
+void te_app_drag_done(struct te_app *app);
+void te_app_drop_rect(const struct te_app *app, struct te_rect *rect);
 void te_app_dialog_choose(struct te_app *app, int button);
 void te_app_dialog_words(const struct te_app *app, char *title, size_t size, const char **words, const char *const **labels, int *count);
 void te_app_replace(struct te_app *app, const char *find, const char *with, int all);

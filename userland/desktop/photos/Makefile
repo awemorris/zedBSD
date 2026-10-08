@@ -9,5 +9,5 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 PHOTOS_SOURCES := userland/desktop/photos/main.c userland/desktop/photos/view.c userland/desktop/photos/thumbs.c \
 	userland/desktop/photos/decode.c userland/desktop/photos/library.c userland/desktop/photos/exif.c \
 	userland/desktop/photos/import.c \
-	userland/desktop/photos/db.c userland/desktop/picture/picture.c
+	userland/desktop/photos/db.c userland/desktop/picture/picture.c userland/desktop/picture/png-write.c
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,photos,Photos,amd64,n,basic,$(PHOTOS_SOURCES),y,desktop,desktop/photos,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype base/libz-compat base/libpng-compat base/libjpeg-compat base/libgif-compat,0755,program,,,bin))

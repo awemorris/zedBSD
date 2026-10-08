@@ -23,6 +23,7 @@
 #include "notes.h"
 
 #include "../picture/picture.h"
+#include "../picture/png-write.h"
 
 #include <compat/png/png.h>
 #include <compat/zlib/zlib.h>
@@ -30,6 +31,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* The longest side of an image handed to another program as a picture, and the largest PNG handed over as it is (ws189-p003). */
+#define PICTURE_DRAG_SIDE	2048
+#define PICTURE_DRAG_BYTES	((size_t)64 * 1024 * 1024)
 
 /* The largest file read, the largest side and the most pixels (libpdf's). */
 #define PICTURE_FILE_MAX	((size_t)256 * 1024 * 1024)
@@ -40,6 +45,7 @@ static int picture_read(const char *path, unsigned char **data, size_t *size);
 static int picture_jpeg(struct notes_document *document, const unsigned char *data, size_t size, struct notes_image **image);
 static int picture_png(struct notes_document *document, const unsigned char *data, size_t size, struct notes_image **image);
 static uint32_t picture_u32(const unsigned char *bytes);
+static int picture_drag_pixels(const uint32_t *pixels, int width, int height, unsigned char **png, size_t *size);
 
 /*
  * Reads an image file into a new image of the document (held once by the
@@ -54,10 +60,8 @@ notes_picture_load(
 	const char *path,
 	struct notes_image **image)
 {
-	static const unsigned char png_signature[8] = { 137, 80, 78, 71, 13, 10, 26, 10 };
 	unsigned char *data;
 	size_t size;
-	int differs;
 	int error;
 
 	/* The file's bytes. */
@@ -66,6 +70,38 @@ notes_picture_load(
 	error = picture_read(path, &data, &size);
 	if (error != 0)
 		return error;
+
+	/* The image from them. */
+	error = notes_picture_load_bytes(document, data, size, image);
+
+	/* The bytes go (the image has its own). */
+	free(data);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the image. */
+	return 0;
+}
+
+/*
+ * Reads an image from bytes in memory (a picture dropped on the page,
+ * ws189-p003) into a new image of the document, as notes_picture_load
+ * does a file's.  Returns as notes_picture_load does.
+ */
+int
+notes_picture_load_bytes(
+	struct notes_document *document,
+	const unsigned char *data,
+	size_t size,
+	struct notes_image **image)
+{
+	static const unsigned char png_signature[8] = { 137, 80, 78, 71, 13, 10, 26, 10 };
+	int differs;
+	int error;
+
+	/* No more than a file may be. */
+	if (size > PICTURE_FILE_MAX)
+		return E2BIG;
 
 	/* A JPEG by its start of image, a PNG by its signature. */
 	error = ENOTSUP;
@@ -76,10 +112,106 @@ notes_picture_load(
 		differs = memcmp(data, png_signature, sizeof(png_signature));
 	if (differs == 0)
 		error = picture_png(document, data, size, image);
+	if (error != 0)
+		return error;
 
-	/* The bytes go (the image has its own). */
-	free(data);
-	return error;
+	/* Succeeded: the image (with its own bytes). */
+	return 0;
+}
+
+/*
+ * Makes the PNG of an image for a drag out of the window (ws189-p003): a
+ * PNG file as it is (when not too large), a PNG's rows wrapped, a JPEG or
+ * RGBA decoded, turned upright and shrunk to PICTURE_DRAG_SIDE.  Returns 0
+ * with the PNG (the caller frees it), ENOENT for an image whose bytes are
+ * not known, or an errno value.
+ */
+int
+notes_picture_png(
+	const struct notes_image *image,
+	unsigned char **png,
+	size_t *size)
+{
+	struct pdf_image_source source;
+	struct kl_picture picture;
+	const unsigned char *straight;
+	uint32_t *pixels;
+	void *owned;
+	size_t count;
+	size_t index;
+	int orientation;
+	int error;
+
+	/* Nothing yet, and the image's bytes. */
+	*png = NULL;
+	*size = 0;
+	error = notes_image_source(image, &source, &owned);
+	if (error != 0)
+		return error;
+
+	/* A PNG file is handed over as it is, when it is not too large. */
+	if (source.kind == PDF_IMAGE_SOURCE_PNG && source.bytes <= PICTURE_DRAG_BYTES) {
+		*png = malloc(source.bytes);
+		if (*png == NULL)
+			return ENOMEM;
+		memcpy(*png, source.data, source.bytes);
+		*size = source.bytes;
+		return 0;
+	}
+
+	/* A PNG's rows are wrapped. */
+	if (source.kind == PDF_IMAGE_SOURCE_IDAT) {
+		error = kl_picture_png_rows(source.data, source.bytes, (int)source.width, (int)source.height, source.components, png, size);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* A JPEG is decoded and turned upright. */
+	if (source.kind == PDF_IMAGE_SOURCE_JPEG) {
+		error = kl_picture_jpeg(NULL, source.data, source.bytes, PICTURE_SIDE_MAX, (unsigned long)PICTURE_PIXELS_MAX, &picture, &orientation);
+		if (error != 0)
+			return error;
+		error = kl_picture_orient(&picture, orientation);
+		if (error == 0)
+			error = picture_drag_pixels(picture.pixels, picture.width, picture.height, png, size);
+		free(picture.pixels);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Otherwise RGBA of straight alpha (decompressed, owned), made premultiplied words. */
+	if (source.kind != PDF_IMAGE_SOURCE_RGBA) {
+		free(owned);
+		return EINVAL;
+	}
+
+	/* Room for the premultiplied words. */
+	count = source.width * source.height;
+	pixels = malloc(count * sizeof(*pixels));
+	if (pixels == NULL) {
+		free(owned);
+		return ENOMEM;
+	}
+
+	/* Each pixel: red, green, blue, alpha, multiplied by the alpha. */
+	straight = source.data;
+	for (index = 0; index < count; index++) {
+		pixels[index] = kl_picture_premultiply(straight[index * 4U], straight[index * 4U + 1U], straight[index * 4U + 2U], straight[index * 4U + 3U]);
+	}
+
+	/* The decompressed RGBA is not needed any more. */
+	free(owned);
+
+	/* Shrunk and written. */
+	error = picture_drag_pixels(pixels, (int)source.width, (int)source.height, png, size);
+	free(pixels);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the PNG. */
+	return 0;
 }
 
 /*
@@ -322,4 +454,33 @@ picture_u32(
 {
 	/* The first byte the highest. */
 	return ((uint32_t)bytes[0] << 24) | ((uint32_t)bytes[1] << 16) | ((uint32_t)bytes[2] << 8) | (uint32_t)bytes[3];
+}
+
+/* Shrinks premultiplied pixels to PICTURE_DRAG_SIDE and writes them as a PNG (the caller frees it). */
+static int
+picture_drag_pixels(
+	const uint32_t *pixels,
+	int width,
+	int height,
+	unsigned char **png,
+	size_t *size)
+{
+	uint32_t *fitted;
+	int fitted_width;
+	int fitted_height;
+	int error;
+
+	/* Shrunk. */
+	error = kl_picture_fit(pixels, width, height, (size_t)width, PICTURE_DRAG_SIDE, &fitted, &fitted_width, &fitted_height);
+	if (error != 0)
+		return error;
+
+	/* Written. */
+	error = kl_picture_png(fitted, fitted_width, fitted_height, (size_t)fitted_width, png, size);
+	free(fitted);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the PNG. */
+	return 0;
 }

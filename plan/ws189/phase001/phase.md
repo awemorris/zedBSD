@@ -325,8 +325,8 @@ drag の間、compositor は「今 drop したら何が起きるか」を印で�
 | apps.pdfviewer.drag-out | PDF Viewer の選択の文字と画像（長押し）を Text Editor・Notes へ | 各 drop の log |
 
 - 自分の drag（Text Editor の自分の窓）: text-between-windows の中で、自分の窓へ戻すと `state=neutral` で drop しても何も起きないことも見る。
-- 受け渡しの原則（review I4）: drop の前の receive を断ることは、enter で receive する小さな試験の client（`userland/tests/` に p002 で足す
-  `dnd-probe`、enter で receive して空を読むこと、compositor の log `refused=not-dropped`）で確かめる。zedBSD の app は drop の前に読まないので、app の AAT では見えない。
+- 受け渡しの原則（review I4）: drop の前の receive を断ることは、enter で receive する小さな試験の client（既存の `userland/tests/data-probe` に p002 で drag の受けを足した:
+  enter で receive して空を読むこと、compositor の log `refused=not-dropped`。AAT `desktop.dnd.early-receive`）で確かめる。zedBSD の app は drop の前に読まないので、app の AAT では見えない。
 - across-displays は QEMU の 2 出力が runner で作れない時は p002 の clearance を塞がない（未実施として記録し、実機の UAT へ）。
 
 ## 6. Phase の受け入れ
@@ -336,7 +336,7 @@ drag の間、compositor は「今 drop したら何が起きるか」を印で�
 - §2（KL_DROP_IMAGE、型の順と上限、`kl_window_start_drag_icon`、`kl_window_drag_fill`、答えの重複の抑止、`kl_drop_frame`・`kl_drop_caret`、`kl_ui_pointer_cancel`、同じ program の窓の drag の直読み、文字の型、SIGPIPE、型の数、export、KL_VERSION 70 の注）。
 - §3（印と状態の log、icon の hotspot、spring-loaded、画面をまたぐ enter の log、複数の data device と receive の制限、dirty）。
 - §5.1 の host 試験のうち `host-dnd-state` の pass（`host-png-write` は p003）。build（wayland・libkeiland・Linux の keiland）warning 0。style-check の新しい指摘 0。
-- `dnd-probe` の試験 client と、§5.2 の text-between-windows・same-program-windows・refused-mark・dock-spring（・across-displays）の AAT を T1 に。
+- data-probe の drag の受けと、§5.2 の text-between-windows・same-program-windows・refused-mark・dock-spring（・across-displays）の AAT を T1 に。
 - 既存の Files・Terminal の drag and drop を壊さない（T1 の AAT で Files の drag を含む既存のシナリオがあれば一緒に流す）。
 
 ### p003（app）

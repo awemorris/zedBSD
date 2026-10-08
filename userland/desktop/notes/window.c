@@ -105,6 +105,13 @@ notes_window_open(
 		fflush(stdout);
 	}
 
+	/* Pictures dragged from other windows are taken (ws189-p003). */
+	error = kl_window_accept_drops(window->kui, KL_DROP_IMAGE);
+	if (error != 0) {
+		printf("NOTES DND none errno=%d\n", error);
+		fflush(stdout);
+	}
+
 	/* What the window's making left queued (its size is already known). */
 	window_take(window);
 	window->resized = 0;
@@ -385,6 +392,30 @@ window_event(
 	case KL_WINDOW_CLOSE:
 		/* The main loop ends Notes. */
 		window->closed = 1;
+		break;
+	case KL_WINDOW_DROP_ENTER:
+	case KL_WINDOW_DROP_MOTION:
+		/* A picture's drag over the window, and where; the main loop answers for the place (ws189-p003). */
+		window->drop_over = 1;
+		window->drop_x = event->x;
+		window->drop_y = event->y;
+		if (event->kind == KL_WINDOW_DROP_ENTER)
+			window->drop_own = event->pressed;
+		window->drop_moved = 1;
+		break;
+	case KL_WINDOW_DROP_LEAVE:
+		window->drop_over = 0;
+		window->drop_moved = 1;
+		break;
+	case KL_WINDOW_DROP:
+		/* Dropped: the main loop reads it. */
+		window->drop_pending = 1;
+		break;
+	case KL_WINDOW_DRAG_DONE:
+		/* Notes' own drag ended; the press that started it was the drag's (its release did not come). */
+		window->drag_done = 1;
+		window->drag_dropped = (int)event->code;
+		window->pointer_down = 0;
 		break;
 	default:
 		break;

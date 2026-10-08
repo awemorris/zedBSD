@@ -174,11 +174,17 @@ fm_desktop_drop_event(
 		if (event->pressed != 0 && desk->dragging)
 			app->drop_self = 1;
 		app->drop_files = event->focused;
+		app->drop_kinds = event->button;
+
+		/* A picture or text without file names becomes a new file on the desktop (ws189-p003). */
+		app->drop_content = 0;
+		if (!app->drop_self && !app->drop_files && (app->drop_kinds & (KL_DROP_IMAGE | KL_DROP_TEXT)) != 0U)
+			app->drop_content = 1;
 		app->drag_target = FM_DRAG_NONE;
 		desk->drop_item = -1;
 		desk->drop_column = -1;
 		desk->drop_row = -1;
-		fm_log("DESKTOP drop enter self=%d files=%d x=%d y=%d", app->drop_self, app->drop_files, event->x, event->y);
+		fm_log("DESKTOP drop enter self=%d files=%d content=%d x=%d y=%d", app->drop_self, app->drop_files, app->drop_content, event->x, event->y);
 		drop_find(app, event->x, event->y);
 		break;
 	case FM_EVENT_DROP_MOTION:
@@ -211,6 +217,13 @@ fm_desktop_drop_event(
 		if (app->drop_action == FM_DND_COPY)
 			app->drop_operation = FM_TASK_COPY;
 		app->request = FM_REQUEST_DROP;
+
+		/* A picture or text becomes a new file, a copy, with no choice to ask (ws189-p003). */
+		if (app->drop_content) {
+			app->drop_operation = FM_TASK_COPY;
+			fm_log("DESKTOP drop content kinds=%u column=%d row=%d", app->drop_kinds, desk->drop_column, desk->drop_row);
+			break;
+		}
 
 		/* The desktop's own items on the desktop itself move to cells, whatever action was chosen. */
 		desk->drop_place = 0;
@@ -451,8 +464,8 @@ drop_find(
 	app->drop_x = x;
 	app->drop_y = y;
 
-	/* A drag without file names has no target here. */
-	if (!app->drop_self && !app->drop_files) {
+	/* A drag without file names, a picture or text has no target here. */
+	if (!app->drop_self && !app->drop_files && !app->drop_content) {
 		app->drag_target = FM_DRAG_NONE;
 		desk->drop_item = -1;
 		desk->drop_column = -1;
@@ -468,9 +481,11 @@ drop_find(
 		desk->drop_row = -1;
 	}
 
-	/* A folder item under it, not one of the desktop's own dragged items. */
+	/* A folder item under it, not one of the desktop's own dragged items (a picture or text goes to the desktop's folder alone). */
 	desk->drop_item = -1;
-	index = fm_desktop_item_at(app, x, y);
+	index = -1;
+	if (!app->drop_content)
+		index = fm_desktop_item_at(app, x, y);
 	if (index >= 0 &&
 	    (size_t)index < tab->listing.count &&
 	    tab->listing.entries[index].folder != 0) {

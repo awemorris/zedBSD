@@ -1343,6 +1343,14 @@ struct fm_app {
 	char drop_folder[FM_PATH_MAX];
 	unsigned drop_operation;
 
+	/*
+	 * ws189-p003: what a drag over the window carries that it takes
+	 * (KL_DROP_*), and whether it is a picture or text without file
+	 * names, which the desktop takes as a new file.
+	 */
+	unsigned drop_kinds;
+	int drop_content;
+
 	/* Whether a drop dropped with "ask" waits for its choice in the context menu (ws035-p088). */
 	int drop_asking;
 

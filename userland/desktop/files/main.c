@@ -220,6 +220,7 @@ static void main_request(const struct main_options *options);
 static void main_new_window(const struct main_options *options);
 static void main_drag_out(void);
 static void main_drop(void);
+static void main_drop_content(void);
 static void main_menu_update(void);
 static void main_touch_round(void);
 static unsigned main_touch_area(int x, int y);
@@ -706,7 +707,11 @@ main_loop(
 		/* A drag over the window whose target changed is answered: its file names taken (move preferred) or not (dnd.c). */
 		if (main_app.drop_answer != 0) {
 			main_app.drop_answer = 0;
-			fm_dnd_answer(&main_window, fm_drop_accepts(&main_app), FM_DND_MOVE);
+			if (main_app.drop_content) {
+				fm_dnd_answer_content(&main_window, fm_drop_accepts(&main_app));
+			} else {
+				fm_dnd_answer(&main_window, fm_drop_accepts(&main_app), FM_DND_MOVE);
+			}
 		}
 
 		/* Time passes for the file manager. */
@@ -1057,6 +1062,12 @@ main_drop(void)
 	int placed;
 	int error;
 
+	/* A picture or text dropped on the desktop becomes a new file at the drop's cell (ws189-p003). */
+	if (main_app.desktop && main_app.drop_content) {
+		main_drop_content();
+		return;
+	}
+
 	/* The desktop's own items dropped on the desktop move to cells, and no file moves (ui-desktop-drag.c). */
 	if (main_app.desktop) {
 		placed = fm_desktop_drop_place(&main_app);
@@ -1092,6 +1103,35 @@ main_drop(void)
 	if (main_app.drop_operation != FM_TASK_MOVE)
 		action = FM_DND_COPY;
 	fm_dnd_finish(&main_window, action);
+}
+
+/*
+ * Writes a picture or text dropped on the desktop into a new file of the
+ * desktop's folder, places it at the drop's cell, and finishes the drop as
+ * a copy (ws189-p003).  A failure gives the drop up and tells why.
+ */
+static void
+main_drop_content(void)
+{
+	char path[FM_PATH_MAX];
+	char *paths[1];
+	int error;
+
+	/* The new file. */
+	error = fm_dnd_receive_content(&main_window, main_app.drop_folder, path, sizeof(path));
+	if (error != 0) {
+		fm_log("DESKTOP drop-file failed errno=%d", error);
+		fm_dnd_abort(&main_window);
+		return;
+	}
+
+	/* Its place, from the drop's cell. */
+	paths[0] = path;
+	fm_desktop_dropped(&main_app, paths, 1U);
+	fm_log("DESKTOP drop-file path=%s", path);
+
+	/* Succeeded: the drop is done as a copy. */
+	fm_dnd_finish(&main_window, FM_DND_COPY);
 }
 
 /*
