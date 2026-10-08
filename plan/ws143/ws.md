@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Related Milestones: MG005
 Parent: [Master](../master.md)
 Queue: q752（P1、2026-10-05、p001）、q860（P2、2026-10-08、p001 の締め → p002 から HID の経路）
-Resume point: p001 は cleared の提案（Q1 の判定待ち）。p002（bt-usb と `/dev/btN`）に着手。
+Resume point: p001 は cleared の提案（Q1 の判定待ち）。p002（bt-usb と `/dev/bluetoothN`）に着手。
 Target: **ベータ2**（2026-10-05 の朝の user の「ベータ4以降」の後、同日の再編「ベータ3とベータ3の内容を、ベータ2に移動します」で WS143 を含むベータ3・ベータ4 以降の項目をベータ2 に移した（master の記録、Q1 の確認）。前の指示: user「WS037, WS044,WS048,WS141, ... WS143, ... は、ベータ4以降としてください。」）
 <!-- awesome-plan-current:end -->
 
@@ -22,7 +22,7 @@ Settings で stub になっている Bluetooth の頁を実体にし、zedBSD �
 
 ## 範囲（p001 で設計して確定、2026-10-05 夕 ユーザーが §9 の D1〜D18 を全部推奨どおりに決定）
 
-- kernel: USB の transport `bt-usb` と HCI の packet の char device `/dev/btN`、HID の入力の口 `/dev/hid-host`、`/dev/system` の resume の
+- kernel: USB の transport `bt-usb` と HCI の packet の char device `/dev/bluetoothN`、HID の入力の口 `/dev/input/bridge`、`/dev/system` の resume の
   class（D2・D3。D15 の決定で、firmware の load と HCI core は kernel から userland の daemon へ移した）。
 - userland: Bluetooth の daemon `bluetoothd`（firmware の load、HCI・L2CAP・SMP・SDP・GATT・HID host、pairing・鍵の保存・接続の管理、
   特権の分離）と CLI `bt`。firmware の optional の package `intelbt`。
@@ -38,10 +38,10 @@ HID の経路は p002〜p005、利用者に見える形は p006。
 | Phase | 内容 | Status | 依存 |
 | --- | --- | --- | --- |
 | [ws143-p001](phase001/phase.md) | 調査と設計（device・firmware・HCI・profile の範囲・desktop の経路・試験の方法） | in-progress（cleared の提案、q860） | — |
-| [ws143-p002](phase002/phase.md) | 5330 の descriptor と版を T1 で取る。kernel の `bt-usb`（普通と bootloader の経路、寿命、境界、backpressure）と `/dev/btN`（`include/uapi/bluetooth.h`、D2）。resume は `/dev/system` の POWER の `sleep.end` を使い、UAPI は足さない（詳細設計 §1）。試験の道具 `bt-probe`、試験の kernel の loopback の controller。host の試験（組み直しと境界、悪い device、取り外し） | test-wait（q860、P2 2026-10-08: review の反映まで済み。T1 の bt-loopback-p002.sh と、5330 の passthrough（T1-378 と一緒）を待つ） | p001 |
+| [ws143-p002](phase002/phase.md) | 5330 の descriptor と版を T1 で取る。kernel の `bt-usb`（普通と bootloader の経路、寿命、境界、backpressure）と `/dev/bluetoothN`（`include/uapi/bluetooth.h`、D2）。resume は `/dev/system` の POWER の `sleep.end` を使い、UAPI は足さない（詳細設計 §1）。試験の道具 `bt-probe`、試験の kernel の loopback の controller。host の試験（組み直しと境界、悪い device、取り外し） | test-wait（q860、P2 2026-10-08: review の反映まで済み。T1 の bt-loopback-p002.sh と、5330 の passthrough（T1-378 と一緒）を待つ） | p001 |
 | [ws143-p003](phase003/phase.md) | firmware の package `intelbt`、bluetoothd の transport・firmware の load（§3）・HCI core・scan、CLI `bt show`・`bt scan`、Read Local Supported Commands の記録。T1 の passthrough で load と scan | in-progress（q878-i01 P2: intelbt 以外を実装・host 試験済み、QEMU は T1。i02 は intelbt と 5330（D13）） | p002 |
 | [ws143-p004](phase004/phase.md) | L2CAP、SSP の event、LE の SMP（D10）、暗号（D5 b1、無ければ b2）、鍵の保存、特権の分離（D16 a）、`_bluetooth` の account（D17）、socket の口の権限（D8） | test-wait（q883-i02 P2: review の反映、session の queue と初期化、pair・privsep・口・bt・loopback を実装し host 試験 PASS。QEMU は T1（bt-pair-p004.sh ほか）。Q4 は判断待ち、i03 は 5330） | p003 |
-| [ws143-p005](phase005/phase.md) | usb-hid の glue の共有の module への refactor と USB の回帰、`/dev/hid-host`（D3）、hid-report.c の fuzz、SDP・GATT client、HID host（BR/EDR と HOGP）、再接続、切断で key を離す | in-progress / test-wait（q888 P2 2026-10-08: i01a は T1-419 PASS（Q1 の判定待ち）。i01b（/dev/hid-host）を実装し host 試験 PASS、T1 の hid-host-p005.sh 待ち。次は i01c（i2c-hid を glue に、Q1 の決定）。ユーザーの決定: Q1 は i2c-hid も glue に、Q2 は ioctl を足す、Q4 は pairing の後に自動で接続、Q5 は人が切った機器からの再接続を断る） | p004（i02 は p004 の cleared） |
+| [ws143-p005](phase005/phase.md) | usb-hid の glue の共有の module への refactor と USB の回帰、`/dev/input/bridge`（D3）、hid-report.c の fuzz、SDP・GATT client、HID host（BR/EDR と HOGP）、再接続、切断で key を離す | in-progress / test-wait（q888 P2 2026-10-08: i01a は T1-419 PASS（Q1 の判定待ち）。i01b（/dev/input/bridge）を実装し host 試験 PASS、T1 の input-bridge-p005.sh 待ち。次は i01c（i2c-hid を glue に、Q1 の決定）。ユーザーの決定: Q1 は i2c-hid も glue に、Q2 は ioctl を足す、Q4 は pairing の後に自動で接続、Q5 は人が切った機器からの再接続を断る） | p004（i02 は p004 の cleared） |
 | ws143-p006 | desktop: backend の口、zedBSD の backend、API と protocol の版、Settings の頁、system bar、pairing の確認の窓 | planned | p005 |
 | ws143-p007 | Linux の backend（D-Bus の拡張、BlueZ）、FreeBSD の未対応の表示 | planned | p006 |
 | ws143-p008 | UAT（5330 の素の機械、D18。ユーザーの BR/EDR と LE のキーボード・マウス）、Wi-Fi との共存 | planned | p006、device の機種 |

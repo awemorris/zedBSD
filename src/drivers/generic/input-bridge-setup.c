@@ -6,34 +6,34 @@
  */
 
 /*
- * The check of a /dev/hid-host setup (ws143-p005), apart from the node so
+ * The check of a /dev/input/bridge setup (ws143-p005), apart from the node so
  * that the host test can run it: pure, no lock, no allocation.
  */
 
-#include <drivers/generic/hid-host.h>
+#include <drivers/generic/input-bridge.h>
 #include <kern/kcrt.h>
-#include <uapi/hid-host.h>
+#include <uapi/input-bridge.h>
 #include <uapi/input.h>
 
-static int hid_host_text_ended(const char *text);
+static int input_bridge_text_ended(const char *text);
 
 /*
  * Reports whether a setup is well formed: its magic and version, a bus a
  * program may claim (Bluetooth or virtual, never USB), a descriptor size
- * in 1..HID_HOST_DESCRIPTOR_MAX, zero reserved words, and texts that end
+ * in 1..INPUT_BRIDGE_DESCRIPTOR_MAX, zero reserved words, and texts that end
  * within their fields.  The descriptor itself is the parser's to judge.
  */
 int
-drv_hid_host_setup_valid(
-	const struct hid_host_setup *setup)
+drv_input_bridge_setup_valid(
+	const struct input_bridge_setup *setup)
 {
 	size_t index;
 	int ended;
 
 	/* The form. */
-	if (setup->magic != HID_HOST_MAGIC)
+	if (setup->magic != INPUT_BRIDGE_MAGIC)
 		return 0;
-	if (setup->version != HID_HOST_VERSION)
+	if (setup->version != INPUT_BRIDGE_VERSION)
 		return 0;
 
 	/* A bus a program may claim. */
@@ -43,7 +43,7 @@ drv_hid_host_setup_valid(
 	/* A descriptor that fits its field. */
 	if (setup->descriptor_size == 0U)
 		return 0;
-	if (setup->descriptor_size > HID_HOST_DESCRIPTOR_MAX)
+	if (setup->descriptor_size > INPUT_BRIDGE_DESCRIPTOR_MAX)
 		return 0;
 
 	/* The reserved words, zero. */
@@ -54,13 +54,13 @@ drv_hid_host_setup_valid(
 	}
 
 	/* Each text ends within its field. */
-	ended = hid_host_text_ended(setup->name);
+	ended = input_bridge_text_ended(setup->name);
 	if (!ended)
 		return 0;
-	ended = hid_host_text_ended(setup->physical_path);
+	ended = input_bridge_text_ended(setup->physical_path);
 	if (!ended)
 		return 0;
-	ended = hid_host_text_ended(setup->unique_id);
+	ended = input_bridge_text_ended(setup->unique_id);
 	if (!ended)
 		return 0;
 
@@ -70,14 +70,14 @@ drv_hid_host_setup_valid(
 
 /* Reports whether a setup's text ends with a NUL within its field. */
 static int
-hid_host_text_ended(
+input_bridge_text_ended(
 	const char *text)
 {
 	size_t length;
 
 	/* The text's length within the field. */
-	length = kern_strnlen(text, HID_HOST_TEXT_MAX);
-	if (length >= HID_HOST_TEXT_MAX)
+	length = kern_strnlen(text, INPUT_BRIDGE_TEXT_MAX);
+	if (length >= INPUT_BRIDGE_TEXT_MAX)
 		return 0;
 
 	/* Succeeded: the text ends in its field. */

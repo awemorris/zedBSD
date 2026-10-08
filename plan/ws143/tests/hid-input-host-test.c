@@ -22,7 +22,7 @@
  *                   glue's own rules (held keys joined over report IDs, an
  *                   ErrorRollOver keeps the keys, no relative 0, a touch
  *                   screen alone, a full input layer, unpublishing twice),
- *                   and the pure checks of /dev/hid-host (its setup, a
+ *                   and the pure checks of /dev/input/bridge (its setup, a
  *                   report shorter than its ID declares).
  *   fuzz COUNT SEED FILE...
  *                   COUNT mutated and generated descriptors and random
@@ -40,7 +40,7 @@
 
 #include "hid-input-old.h"
 
-#include <drivers/generic/hid-host.h>
+#include <drivers/generic/input-bridge.h>
 #include <drivers/generic/hid-input.h>
 #include <kern/input-device.h>
 
@@ -1616,7 +1616,7 @@ events_of(
 	*count = taken;
 }
 
-/* Checks which reports /dev/hid-host refuses as shorter than their report ID declares. */
+/* Checks which reports /dev/input/bridge refuses as shorter than their report ID declares. */
 static void
 check_short_reports(
 	void)
@@ -1648,18 +1648,18 @@ check_short_reports(
 	printf("ok: short reports\n");
 }
 
-/* Checks the setup of /dev/hid-host: a good one, and each way one is malformed. */
+/* Checks the setup of /dev/input/bridge: a good one, and each way one is malformed. */
 static void
 check_setup(
 	void)
 {
-	static struct hid_host_setup good;
-	static struct hid_host_setup bad;
+	static struct input_bridge_setup good;
+	static struct input_bridge_setup bad;
 
 	/* A well formed setup: a Bluetooth keyboard. */
 	memset(&good, 0, sizeof(good));
-	good.magic = HID_HOST_MAGIC;
-	good.version = HID_HOST_VERSION;
+	good.magic = INPUT_BRIDGE_MAGIC;
+	good.version = INPUT_BRIDGE_VERSION;
 	good.bus = BUS_BLUETOOTH;
 	good.vendor = 0x1234;
 	good.product = 0x5678;
@@ -1669,47 +1669,47 @@ check_setup(
 	snprintf(good.unique_id, sizeof(good.unique_id), "0A:0B:0C:0D:0E:01");
 	memcpy(good.descriptor, boot_keyboard, sizeof(boot_keyboard));
 	check(sizeof(good) == 4324U, "setup: 4324 bytes");
-	check(drv_hid_host_setup_valid(&good) == 1, "setup: a good one");
+	check(drv_input_bridge_setup_valid(&good) == 1, "setup: a good one");
 
 	/* A virtual device is allowed too. */
 	bad = good;
 	bad.bus = BUS_VIRTUAL;
-	check(drv_hid_host_setup_valid(&bad) == 1, "setup: a virtual device");
+	check(drv_input_bridge_setup_valid(&bad) == 1, "setup: a virtual device");
 
 	/* Each malformed field. */
 	bad = good;
 	bad.magic ^= 1U;
-	check(drv_hid_host_setup_valid(&bad) == 0, "setup: the magic");
+	check(drv_input_bridge_setup_valid(&bad) == 0, "setup: the magic");
 	bad = good;
 	bad.version = 2U;
-	check(drv_hid_host_setup_valid(&bad) == 0, "setup: the version");
+	check(drv_input_bridge_setup_valid(&bad) == 0, "setup: the version");
 	bad = good;
 	bad.bus = BUS_USB;
-	check(drv_hid_host_setup_valid(&bad) == 0, "setup: a program may not claim USB");
+	check(drv_input_bridge_setup_valid(&bad) == 0, "setup: a program may not claim USB");
 	bad = good;
 	bad.descriptor_size = 0U;
-	check(drv_hid_host_setup_valid(&bad) == 0, "setup: an empty descriptor");
+	check(drv_input_bridge_setup_valid(&bad) == 0, "setup: an empty descriptor");
 	bad = good;
-	bad.descriptor_size = HID_HOST_DESCRIPTOR_MAX + 1U;
-	check(drv_hid_host_setup_valid(&bad) == 0, "setup: a descriptor of 4097");
+	bad.descriptor_size = INPUT_BRIDGE_DESCRIPTOR_MAX + 1U;
+	check(drv_input_bridge_setup_valid(&bad) == 0, "setup: a descriptor of 4097");
 	bad = good;
-	bad.descriptor_size = HID_HOST_DESCRIPTOR_MAX;
-	check(drv_hid_host_setup_valid(&bad) == 1, "setup: a descriptor of 4096");
+	bad.descriptor_size = INPUT_BRIDGE_DESCRIPTOR_MAX;
+	check(drv_input_bridge_setup_valid(&bad) == 1, "setup: a descriptor of 4096");
 	bad = good;
 	bad.reserved[3] = 1U;
-	check(drv_hid_host_setup_valid(&bad) == 0, "setup: a reserved word");
+	check(drv_input_bridge_setup_valid(&bad) == 0, "setup: a reserved word");
 	bad = good;
 	memset(bad.name, 'x', sizeof(bad.name));
-	check(drv_hid_host_setup_valid(&bad) == 0, "setup: a name without its NUL");
+	check(drv_input_bridge_setup_valid(&bad) == 0, "setup: a name without its NUL");
 	bad = good;
 	memset(bad.physical_path, 'x', sizeof(bad.physical_path));
-	check(drv_hid_host_setup_valid(&bad) == 0, "setup: a place without its NUL");
+	check(drv_input_bridge_setup_valid(&bad) == 0, "setup: a place without its NUL");
 	bad = good;
 	memset(bad.unique_id, 'x', sizeof(bad.unique_id));
-	check(drv_hid_host_setup_valid(&bad) == 0, "setup: a unique ID without its NUL");
+	check(drv_input_bridge_setup_valid(&bad) == 0, "setup: a unique ID without its NUL");
 	bad = good;
 	memset(bad.name, 'x', sizeof(bad.name) - 1U);
 	bad.name[sizeof(bad.name) - 1U] = '\0';
-	check(drv_hid_host_setup_valid(&bad) == 1, "setup: a name of 63 bytes");
-	printf("ok: hid-host setup\n");
+	check(drv_input_bridge_setup_valid(&bad) == 1, "setup: a name of 63 bytes");
+	printf("ok: input bridge setup\n");
 }

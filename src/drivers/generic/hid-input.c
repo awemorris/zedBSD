@@ -241,11 +241,53 @@ drv_hid_input_kind(
 }
 
 /*
+ * Reports what the descriptor says about its touch screen or pad (ENOENT
+ * for a descriptor without one).
+ */
+int
+drv_hid_input_touch(
+	const struct hid_input *input,
+	struct hid_report_touch_info *touch)
+{
+	int error;
+
+	/* The layout's answer. */
+	error = drv_hid_report_layout_get_touch(input->layout, touch);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the touch device is described. */
+	return 0;
+}
+
+/*
+ * Reports where a field of a feature report is (a Precision Touchpad's
+ * mode and switches), or the layout's error for a descriptor without it.
+ */
+int
+drv_hid_input_feature(
+	const struct hid_input *input,
+	uint32_t usage,
+	struct hid_report_feature_info *feature)
+{
+	int error;
+
+	/* The layout's answer. */
+	error = drv_hid_report_layout_get_feature(input->layout, usage, feature);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the field is found. */
+	return 0;
+}
+
+/*
  * Registers the devices a descriptor declares with the input layer.
  *
  * The main device is registered unless it would declare nothing but
- * EV_SYN (a touch screen and nothing else); a touch screen or pad is a
- * device of its own beside it.  Fails with ENODEV when there is no device
+ * EV_SYN (a touch screen and nothing else) or the identity asks for the
+ * touch device alone (HID_INPUT_TOUCH_ONLY; the main device's reports are
+ * then dropped); a touch screen or pad is a device of its own beside it.  Fails with ENODEV when there is no device
  * at all, or with the input layer's error (ENOSPC when it has no room); a
  * failure leaves nothing registered.
  */
@@ -271,9 +313,9 @@ drv_hid_input_publish(
 	info.absolute_axes = input->absolute_axes;
 	info.absolute_axis_count = input->absolute_axis_count;
 
-	/* The main device, unless it would declare EV_SYN alone. */
+	/* The main device, unless it would declare EV_SYN alone or the transport wants the touch device alone. */
 	error = 0;
-	if (input->capability_count > 1U)
+	if (input->capability_count > 1U && (identity->flags & HID_INPUT_TOUCH_ONLY) == 0U)
 		error = drv_input_device_register(&info, &input->input);
 
 	/* The touch screen's or pad's device beside it, under the same identity. */

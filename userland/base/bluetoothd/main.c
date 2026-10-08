@@ -30,7 +30,7 @@
  * display's owner, not the greeter), and the members of wheel.  Anyone
  * may read the state, the devices and the bonds.
  *
- *   bluetoothd [-f /dev/btN]   (a node of its own; else the lowest that opens)
+ *   bluetoothd [-f /dev/bluetoothN]   (a node of its own; else the lowest that opens)
  */
 
 #include "userland/base/bluetoothd/keys.h"
@@ -215,7 +215,7 @@ main(
 
 	/* Any other argument is a misuse. */
 	if (argc != 1 && btd_node == NULL) {
-		(void)fprintf(stderr, "usage: bluetoothd [-f /dev/btN]\n");
+		(void)fprintf(stderr, "usage: bluetoothd [-f /dev/bluetoothN]\n");
 		return 64;
 	}
 

@@ -10,7 +10,7 @@
  * ws143-p002; the node's interface is <uapi/bluetooth.h>).
  *
  * Each registered controller gets the lowest free number N and the
- * character device btN (devfs: /dev/btN, root's alone, mode 0600).  One
+ * character device bluetoothN (devfs: /dev/bluetoothN, root's alone, mode 0600).  One
  * open at a time holds it.  The transport hands the packets it receives
  * to drv_bt_hci_input(), which queues them, in the events' or the ACL
  * ring, under the controller's spinlock with a sequence number, and wakes
@@ -217,8 +217,8 @@ drv_bt_hci_register(
 		return error;
 	}
 
-	/* Publishes btN; the record lives as long as the node does. */
-	kern_snprintf(node_name, sizeof(node_name), "bt%u", hci->number);
+	/* Publishes bluetoothN; the record lives as long as the node does. */
+	kern_snprintf(node_name, sizeof(node_name), "bluetooth%u", hci->number);
 	error = cdev_register_managed(node_name,
 	    (dev_t)(BT_HCI_DEVICE_BASE + hci->number),
 	    &bt_hci_cdev_ops,

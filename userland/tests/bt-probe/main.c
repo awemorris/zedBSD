@@ -7,7 +7,7 @@
 
 /*
  * The Bluetooth HCI node probe (ws143-p002): tries a controller's
- * /dev/btN.
+ * /dev/bluetoothN.
  *
  *   bt-probe [-f DEVICE] [-r]
  *   bt-probe -L [-f DEVICE]      the class's test against the test kernel's
@@ -17,7 +17,7 @@
  *                                at once (ws143-p003: bluetoothd, opening the
  *                                node meanwhile, sees it go)
  *
- * Without -f it takes the first /dev/btN that opens.  It prints the node's
+ * Without -f it takes the first /dev/bluetoothN that opens.  It prints the node's
  * information, then sends Intel's Read Version (an Intel controller only,
  * in its TLV form), HCI_Reset, Read Local Version Information and Read
  * BD_ADDR, each waiting for its Command Complete, and prints what came
@@ -155,7 +155,7 @@ main(
 	/* The delayed withdrawal of the loopback controller. */
 	if (withdraw_ms >= 0) {
 		if (named == NULL)
-			named = "/dev/bt0";
+			named = "/dev/bluetooth0";
 		error = probe_withdraw_later(named, (unsigned)withdraw_ms);
 		return error;
 	}
@@ -163,7 +163,7 @@ main(
 	/* The class's test against the loopback controller. */
 	if (loopback_test) {
 		if (named == NULL)
-			named = "/dev/bt0";
+			named = "/dev/bluetooth0";
 		error = probe_loopback(named);
 		return error;
 	}
@@ -305,7 +305,7 @@ main(
 	return 0;
 }
 
-/* Opens the node named, or the first /dev/btN that opens; gives its path. */
+/* Opens the node named, or the first /dev/bluetoothN that opens; gives its path. */
 static int
 probe_open(
 	const char *named,
@@ -324,7 +324,7 @@ probe_open(
 
 	/* Each node in turn until one opens. */
 	for (index = 0U; index < PROBE_NODES; index++) {
-		snprintf(path, size, "/dev/bt%u", index);
+		snprintf(path, size, "/dev/bluetooth%u", index);
 		descriptor = open(path, O_RDWR | O_NONBLOCK);
 		if (descriptor >= 0)
 			return descriptor;

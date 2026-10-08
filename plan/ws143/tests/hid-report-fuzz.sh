@@ -16,13 +16,13 @@ san="-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-poin
 kflags="-std=gnu11 -O1 -g -Wall -Wextra -Werror -ffreestanding -nostdlibinc -fno-builtin -D__ZEDBSD__ \
 	-DKERN_USER_ABI_LP64 -Iinclude -Isrc $san"
 hflags="-std=gnu11 -O1 -g -Wall -Wextra -Werror -Wdeclaration-after-statement -Iinclude $san"
-for file in hid-report hid-digitizer hid-touch hid-input hid-host-setup; do
+for file in hid-report hid-digitizer hid-touch hid-input input-bridge-setup; do
 	$cc $kflags -c src/drivers/generic/$file.c -o "$OUT/$file.o"
 done
 $cc $kflags -c plan/ws143/tests/hid-input-old.c -o "$OUT/hid-input-old.o"
 $cc $hflags -c plan/ws143/tests/hid-input-host-test.c -o "$OUT/hid-input-host-test.o"
 $cc $san "$OUT/hid-input-host-test.o" "$OUT/hid-input-old.o" "$OUT/hid-report.o" "$OUT/hid-digitizer.o" \
-	"$OUT/hid-touch.o" "$OUT/hid-input.o" "$OUT/hid-host-setup.o" -o "$OUT/hid-report-fuzz"
+	"$OUT/hid-touch.o" "$OUT/hid-input.o" "$OUT/input-bridge-setup.o" -o "$OUT/hid-report-fuzz"
 timeout 300 "$OUT/hid-report-fuzz" fuzz "$total" "$seed" \
 	plan/ws159/tests/latitude5330-linux/synaptics-06cb-ce65-rdesc.bin \
 	plan/bugs/bug105/logi-bolt-c548-if0.rdesc plan/bugs/bug105/logi-bolt-c548-if1.rdesc \

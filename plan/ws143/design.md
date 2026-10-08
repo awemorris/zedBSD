@@ -81,7 +81,7 @@ operational のまま attach し直す（main.c 818〜824 行）が、**失敗�
 
 | 案 | kernel | userland | 評価 |
 | --- | --- | --- | --- |
-| **A（推奨）** | USB の transport だけ（`bt-usb`）。HCI の packet をそのまま運ぶ char device `/dev/btN` と、HID の入力の口 `/dev/hid-host` | daemon `bluetoothd` が firmware の load・HCI・L2CAP・SMP・SDP・GATT・HID host を持つ | kernel が小さい。電波の相手の解析が kernel の外。暗号は §6.6。daemon が落ちても kernel は無事。先例は Android の userspace の stack と BTstack（HCI の transport の上の userland の host stack） [F9] |
+| **A（推奨）** | USB の transport だけ（`bt-usb`）。HCI の packet をそのまま運ぶ char device `/dev/bluetoothN` と、HID の入力の口 `/dev/input/bridge` | daemon `bluetoothd` が firmware の load・HCI・L2CAP・SMP・SDP・GATT・HID host を持つ | kernel が小さい。電波の相手の解析が kernel の外。暗号は §6.6。daemon が落ちても kernel は無事。先例は Android の userspace の stack と BTstack（HCI の transport の上の userland の host stack） [F9] |
 | B | HCI・L2CAP を kernel に（Linux の BlueZ の kernel 部、FreeBSD の netgraph） | 管理の daemon と profile | 電波の相手の解析と暗号が kernel に入る。AF_BLUETOOTH の socket の UAPI が大きい |
 
 案 A を推奨する。ws.md の範囲（25 行: firmware の load・HCI の core を kernel に）から変わるので、その承認は D15。入力の遅れ:
@@ -89,7 +89,7 @@ HID の report が daemon を通る分は数十 µs で、Bluetooth の遅れは
 
 ## 5. kernel（案 A）
 
-### 5.1 `bt-usb`（`src/drivers/usb/usb-bt.c`、新規）と `/dev/btN`（D2）
+### 5.1 `bt-usb`（`src/drivers/usb/usb-bt.c`、新規）と `/dev/bluetoothN`（D2）
 
 - match: interface class E0/01/01。Intel 8087:0033 は「firmware が要る」印を device の情報に持つ。firmware の要らない標準の controller
   （CSR8510 など）はそのまま使う。class FF/01/01（vendor 固有）で出る Broadcom の dongle は E0/01/01 の match に入らない（p002 では
@@ -122,7 +122,7 @@ HID の report が daemon を通る分は数十 µs で、Bluetooth の遅れは
 - UAPI の header: `include/uapi/bluetooth.h`。D2 で承認するのは形（packet の型・ioctl の種類・境界）で、struct の配置は p002 の詳細設計で
   review する [F18]。
 
-### 5.2 HID の入力の口 `/dev/hid-host`（D3）
+### 5.2 HID の入力の口 `/dev/input/bridge`（D3）
 
 bluetoothd が受けた HID の report を kernel の HID の層に渡し、`/dev/input/eventN` を作る（Linux の uhid に当たる製品の口。
 `/dev/input-inject` は試験だけの口なので使わない）。
@@ -136,7 +136,7 @@ bluetoothd が受けた HID の report を kernel の HID の層に渡し、`/de
 - 名前: Bluetooth の名前（UTF-8 で 248 byte まで）は、`drv_input_device_register` の 63 byte の上限（`usb-hid.c:40`）に UTF-8 の境で切る [N16]。
 - close・相手の切断: device を消す前に押されている全ての key と button を離した report を流す（または device を消して evdev が離す）[F25]。
 - **kernel の作業**: report から input device を作る glue は今 `usb-hid.c`（128〜139、970〜1117、1424〜1435、1556〜1588 行）にあり、
-  i2c-hid にも写しがある。これを USB・I2C・hid-host が共有する module（`src/drivers/generic/hid-input.c`）に分ける refactor が要る
+  i2c-hid にも写しがある。これを USB・I2C・input bridge が共有する module（`src/drivers/generic/hid-input.c`）に分ける refactor が要る
   （全ての USB のキーボード・マウスの回帰の危険）。p005 の前半に置く。usb-hid.c は「XXX: Need coding style fitting.」で始まるので、
   動かす code は規約の全文に合わせる [F6, N16]。
 - 攻撃面: report descriptor が電波から来る。`hid-report.c` の host の fuzz 試験（ランダムと変異の descriptor・report）を p005 に置く [F6]。
@@ -151,7 +151,7 @@ re-enumerate で device が detach・attach し直すか（6087〜6125 行）。
 
 - 状態が戻る時: bt-usb には何も見えない。相手は supervision timeout で link を切るので、bluetoothd は切断の event を受け、HID の
   device を消し（key を離す）、再接続を待つ（§6.4）。
-- re-enumerate の時: 古い `/dev/btN` は取り外し（ENODEV）、新しい node が現れる。`/dev/system` の `KERN_SYSTEM_EVENT_USB`
+- re-enumerate の時: 古い `/dev/bluetoothN` は取り外し（ENODEV）、新しい node が現れる。`/dev/system` の `KERN_SYSTEM_EVENT_USB`
   （`include/uapi/system.h:307`）は USB の device（例 "usb1.3"）を言い node は言わず、node の作成と競うので、bluetoothd はその event と
   OVERFLOW（queue は 64）の時に `/dev/bt*` を少し待って数回 scan し直す。新しい controller として firmware を load し直し、bond 済みの
   device の再接続を始める [N11]。
@@ -168,14 +168,14 @@ re-enumerate で device が detach・attach し直すか（6087〜6125 行）。
 
 | 部品 | 内容 |
 | --- | --- |
-| transport | `/dev/btN` の読み書き、Num_HCI_Command_Packets による command の流れ、ACL の buffer の数の管理、0x80 の reset の通知で初期化のやり直し |
+| transport | `/dev/bluetoothN` の読み書き、Num_HCI_Command_Packets による command の流れ、ACL の buffer の数の管理、0x80 の reset の通知で初期化のやり直し |
 | firmware | §3 |
 | HCI core | reset、BD_ADDR、Read Local Supported Commands（controller の暗号の command の有無、§6.6）、Write_Simple_Pairing_Mode・Write_Secure_Connections_Host_Support、Write_Class_Of_Device・Write_Scan_Enable、BR/EDR の inquiry と page scan、LE の scan、接続と切断、名前。BR/EDR の鍵の流れ: Link Key Request に保存した鍵で Reply（無ければ Negative Reply）、PIN Code Request（D10 で legacy を受ける時）、Authentication_Requested、Set_Connection_Encryption と Encryption Change、HCI_Read_Encryption_Key_Size。filter accept list と resolving list [N5] |
 | L2CAP | BR/EDR の signalling（CID 0x0001、Information Request、basic mode の channel、HID の PSM 0x11・0x13、SDP の 0x01）、LE の固定の channel（ATT 4、signalling 5: Connection Parameter Update Request に答える、SMP 6） [F7] |
 | SMP・SSP | §6.2 |
 | SDP | client（HID の service record から report descriptor と PSM） |
 | GATT | client（HOGP: HID service 0x1812、Report Map の長い読み（Read Blob）、各 Report の Report Reference（ID と型）、CCC の有効化、Protocol Mode（report mode）、Battery service）。HID の characteristic を読む前に暗号化（security level）を満たす [F7] |
-| HID host | BR/EDR の HID（HIDP: control channel の HANDSHAKE・SET_PROTOCOL（report mode）・VIRTUAL_CABLE_UNPLUG、interrupt channel の DATA）と HOGP の report を `/dev/hid-host` へ。§6.4 の再接続 [N5] |
+| HID host | BR/EDR の HID（HIDP: control channel の HANDSHAKE・SET_PROTOCOL（report mode）・VIRTUAL_CABLE_UNPLUG、interrupt channel の DATA）と HOGP の report を `/dev/input/bridge` へ。§6.4 の再接続 [N5] |
 | 鍵の保存 | §6.3 |
 | 口 | §6.5 |
 | 試験の道具 | 偽の controller（§10.2） |
@@ -205,7 +205,7 @@ re-enumerate で device が detach・attach し直すか（6087〜6125 行）。
   page scan を有効にし、host から始める device には bluetoothd が接続する。どちらも bond 済みで暗号化し鍵の長さ 16 の link の HID の PSM だけ
   受ける [F3, F7, N4, N5]。
 - LE: host が始める。bond 済みの HOGP の device を filter accept list と resolving list に入れ、背景の scan（または auto-connect）で接続する [F7]。
-- 切断（supervision timeout を含む）: `/dev/hid-host` の device を消して key を離す。作り直す時も unique_id は同じ [F25]。
+- 切断（supervision timeout を含む）: `/dev/input/bridge` の device を消して key を離す。作り直す時も unique_id は同じ [F25]。
 
 ### 6.5 口と特権の分離（D4・D8・D16）[F3, F16, N1, N8, N15]
 
@@ -220,9 +220,9 @@ re-enumerate で device が detach・attach し直すか（6087〜6125 行）。
   agent が居ない時（console・SSH）に D8 の許す人が agent になる。login の画面（greeter）での pairing を許すかは D8。
 - 相手から始まる pairing は、pairing の mode（Settings で「device を足す」を開いている間、または `bt pair` の間）でなければ断る。Just Works
   でも人の同意を取る（確認の窓）。
-- 特権の分離（D16）: re-enumerate の後に新しい `/dev/btN` を開け直す必要がある（§5.3）ので、「開けた後に落ちる」だけでは足りない。選択肢:
+- 特権の分離（D16）: re-enumerate の後に新しい `/dev/bluetoothN` を開け直す必要がある（§5.3）ので、「開けた後に落ちる」だけでは足りない。選択肢:
   (a) 小さな特権の親（root）が node を開けて SCM_RIGHTS で fd を渡し、電波の相手を解析する子は専用の account で動く、(b) devfs が
-  `/dev/bt*` と `/dev/hid-host` を専用の account に与え、daemon は始めから root でない、(c) ENODEV で daemon が終わり service manager が
+  `/dev/bt*` と `/dev/input/bridge` を専用の account に与え、daemon は始めから root でない、(c) ENODEV で daemon が終わり service manager が
   root で起こし直す。推奨は (a)。専用の account `_bluetooth` と group `bluetooth` を base の `etc/passwd`・`etc/group` に足し、既存の install の
   更新でも作る。全ての parser（HCI・L2CAP・SDP・ATT・SMP）は長さを検査し上限を持つ。
 
@@ -281,8 +281,8 @@ D1 で尋ねる。LE Audio、OBEX、PAN は範囲の外。
 | --- | --- | --- | --- |
 | D15 | 構成（ws.md 25 行の「firmware の load と HCI core を kernel に」から変える） | 案 A: kernel は USB の transport と HID の口だけ、host stack は userland の daemon（D2・D3・D4 へ）。案 B: HCI・L2CAP を kernel に、AF_BLUETOOTH の socket（電波の相手の解析と暗号が kernel に入る。D2〜D4 は別の形で尋ね直す） | 案 A |
 | D1 | 最初の profile | A: キーボード・マウス（BR/EDR HID と LE HOGP）だけ、A2DP は別の WS。B: A と A2DP をこの WS で（§7 の方針の例外や xHCI の仕事を含む） | A |
-| D2 | UAPI `/dev/btN`（§5.1: HCI の packet の char device、bootloader の経路と reset の ioctl、`include/uapi/bluetooth.h`）と、`/dev/system` の resume の class（§5.3、1 bit の追加）。案 A の時 | 形を承認し struct は p002 で review / 別の形を示す | 形を承認 |
-| D3 | UAPI `/dev/hid-host`（§5.2）と usb-hid の glue の共有の module への refactor。案 A の時 | 形を承認し struct は p005 で review / 別の形を示す | 形を承認 |
+| D2 | UAPI `/dev/bluetoothN`（§5.1: HCI の packet の char device、bootloader の経路と reset の ioctl、`include/uapi/bluetooth.h`）と、`/dev/system` の resume の class（§5.3、1 bit の追加）。案 A の時 | 形を承認し struct は p002 で review / 別の形を示す | 形を承認 |
+| D3 | UAPI `/dev/input/bridge`（§5.2）と usb-hid の glue の共有の module への refactor。案 A の時 | 形を承認し struct は p005 で review / 別の形を示す | 形を承認 |
 | D4 | root の daemon `bluetoothd`・socket の口・CLI `bt` | §6.5 の形（networkd の形の group と SO_PEERCRED）/ group を使わず root と seat の人だけ / 口を開けず CLI だけ（desktop の頁が作れない） | §6.5 の形 |
 | D16 | 特権の分離と残る危険（§6.5、§5.2 の「口を持つ process が乗っ取られれば key を打てる」） | (a) 特権の親と fd の受け渡し / (b) devfs が node を専用の account に / (c) root で起こし直す / 分離しない | (a) |
 | D17 | 専用の account `_bluetooth` と group `bluetooth` を base の `etc/passwd`・`etc/group` に足す（既存の install の更新を含む） | 足す / 足さない（D16 の分離ができない） | 足す |
@@ -309,10 +309,10 @@ D1 で尋ねる。LE Audio、OBEX、PAN は範囲の外。
 
 | Phase | 内容 | 依存 |
 | --- | --- | --- |
-| p002 | 5330 の descriptor・版（CNVi・CNVR の id）を T1 で取る。kernel の `bt-usb`（普通と bootloader の経路、寿命、境界）と `/dev/btN`（D2）。小さな試験の道具（`/dev/btN` で Read Version と HCI_Reset だけ）。host の試験（組み直しと境界、悪い device、取り外し） | D2 |
+| p002 | 5330 の descriptor・版（CNVi・CNVR の id）を T1 で取る。kernel の `bt-usb`（普通と bootloader の経路、寿命、境界）と `/dev/bluetoothN`（D2）。小さな試験の道具（`/dev/bluetoothN` で Read Version と HCI_Reset だけ）。host の試験（組み直しと境界、悪い device、取り外し） | D2 |
 | p003 | firmware の package `intelbt`（p002 の id に合う block 全体）。bluetoothd の transport・firmware の load（§3、失敗の経路、失敗の後の USB の reset の振る舞いの確認）・HCI core・scan、CLI `bt show`・`bt scan`、Read Local Supported Commands の記録（D5 の b1 が使えるか）。T1 の passthrough で load と scan | p002、D4・D6・D13・D14・D16・D17 |
 | p004 | L2CAP（BR/EDR・LE の signalling）、SSP の event の処理、LE の SMP（D10）、暗号（D5）、鍵の保存、特権の分離、socket の口の権限（D8・D16）。host の試験（仕様の sample data、偽の controller） | p003、D5・D8・D10・D16 |
-| p005 | usb-hid の glue の共有の module への refactor と USB の回帰、`/dev/hid-host`（D3）、hid-report.c の fuzz、SDP・GATT client、HID host（BR/EDR と HOGP）、再接続、切断で key を離す | p004、D3 |
+| p005 | usb-hid の glue の共有の module への refactor と USB の回帰、`/dev/input/bridge`（D3）、hid-report.c の fuzz、SDP・GATT client、HID host（BR/EDR と HOGP）、再接続、切断で key を離す | p004、D3 |
 | p006 | desktop: backend の口、zedBSD の backend、API と protocol の版、Settings の頁、system bar、pairing の確認の窓 | p005 |
 | p007 | Linux の backend（D-Bus の拡張、BlueZ）、FreeBSD の未対応の表示 | p006 |
 | p008 | UAT（D18 の環境、ユーザーの device: pairing・入力・再接続・suspend の後・忘れる）。Wi-Fi との共存（F23）の確認（素の機械の時） | p006、D18、device の機種 |
@@ -327,10 +327,10 @@ D1 で尋ねる。LE Audio、OBEX、PAN は範囲の外。
 | --- | --- |
 | 暗号 | AES-CMAC を RFC 4493 の vector、SMP の f4・f5・f6・g2・ah・c1・s1 を Bluetooth Core Vol 3 Part H Appendix D の sample data |
 | bt-usb | host の試験: 組み直し（短い・長い・壊れた packet、悪い device の長さ）、queue の満ち（backpressure で捨てない）、bootloader の経路の振り分け、取り外しの間の read・poll（ENODEV で起きる）、EMSGSIZE |
-| hid | hid-report.c の fuzz（ランダムと変異）、`/dev/hid-host` の誤用（作成の前の report、壊れた descriptor、作成と破棄の繰り返し、切断で key が離れる）、refactor の後の USB HID の回帰（今の host の試験） |
-| 状態機械 | 偽の controller（`/dev/btN` の代わりの socketpair で HCI の event を返す試験の program）で HCI・L2CAP・SMP・GATT・SDP。相手の debug の鍵を断る、鍵の長さ 16 未満を断る、Link Key Request の Reply・Negative Reply。2 つの bluetoothd を偽の電波でつなぐ試験は LMP・SSP をする偽の controller が要り大きいので、HCI の event の台本で相手を演じる形にする |
+| hid | hid-report.c の fuzz（ランダムと変異）、`/dev/input/bridge` の誤用（作成の前の report、壊れた descriptor、作成と破棄の繰り返し、切断で key が離れる）、refactor の後の USB HID の回帰（今の host の試験） |
+| 状態機械 | 偽の controller（`/dev/bluetoothN` の代わりの socketpair で HCI の event を返す試験の program）で HCI・L2CAP・SMP・GATT・SDP。相手の debug の鍵を断る、鍵の長さ 16 未満を断る、Link Key Request の Reply・Negative Reply。2 つの bluetoothd を偽の電波でつなぐ試験は LMP・SSP をする偽の controller が要り大きいので、HCI の event の台本で相手を演じる形にする |
 | parser | L2CAP・SDP・ATT・SMP・HCI の event の parser の fuzz（壊れた長さ・切れた packet） |
-| 特権 | 特権の分離の後に daemon が `/dev/btN` を開け直せること（(a) の fd の受け渡し）、socket の口の権限（許されない uid の pairing が断られる） |
+| 特権 | 特権の分離の後に daemon が `/dev/bluetoothN` を開け直せること（(a) の fd の受け渡し）、socket の口の権限（許されない uid の pairing が断られる） |
 | 相手の実物 | firmware の要らない USB の dongle（CSR8510 など）を QEMU に渡し、host の Linux の BlueZ を相手に SMP・HID の相互の接続を試す（UAT の前の安い確かめ） [N13] |
 | Linux の backend | WS131 の Debian の QEMU+KVM の guest で、仮想の controller（hci_vhci と btvirt、guest の Linux の中）に BlueZ を動かし、backend が一覧・pairing の台本を通るか |
 | FreeBSD | WS109 の FreeBSD の guest で「未対応」の表示 |

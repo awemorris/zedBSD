@@ -1,6 +1,6 @@
 #!/bin/sh
 # ws143-p003: bluetoothd and bt on a running zedBSD guest of plan/ws143/tests/config-amd64-bt.mk (the test kernel's
-# loopback controller /dev/bt0; QEMU has no Bluetooth controller).
+# loopback controller /dev/bluetooth0; QEMU has no Bluetooth controller).
 #  1. bluetoothd (started here, not by rc) is ready on the loopback controller: bt show says ready, its address
 #     00:11:22:33:44:55, LE and the P-256 and DHKey commands.
 #  2. bt scan 3 finds exactly the loopback's four devices with their fields: the extended result's
@@ -65,7 +65,7 @@ log=$(guest 'cat /tmp/btd2.log')
 printf '%s\n' "$log"
 has "the daemon saw the node go" "$log" "closed (lost"
 has "and is ready again" "$(guest '/bin/bt show')" "BT SHOW state=ready"
-expect "it started twice on the controller" "$(printf '%s\n' "$log" | grep -c ': /dev/bt[0-9]* state=ready ')" 2
+expect "it started twice on the controller" "$(printf '%s\n' "$log" | grep -c ': /dev/bluetooth[0-9]* state=ready ')" 2
 
 # 5. p002's class test, the daemon stopped.
 stop_daemon

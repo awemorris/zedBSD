@@ -267,7 +267,7 @@ endif
 # (ws143-p005) serve every HID transport (USB, I2C-HID) and the test injector
 # (ws159-p003).
 AMD64_HID_SOURCES :=
-ifneq ($(filter y,$(CONFIG_DRIVER_USB_HID) $(CONFIG_DRIVER_PCI_LPSS_I2C) $(CONFIG_INPUT_TEST_INJECT) $(CONFIG_HID_HOST)),)
+ifneq ($(filter y,$(CONFIG_DRIVER_USB_HID) $(CONFIG_DRIVER_PCI_LPSS_I2C) $(CONFIG_INPUT_TEST_INJECT) $(CONFIG_INPUT_BRIDGE)),)
 AMD64_HID_SOURCES += src/drivers/generic/hid-report.c src/drivers/generic/hid-digitizer.c src/drivers/generic/hid-touch.c \
 	src/drivers/generic/hid-input.c
 endif
@@ -275,7 +275,7 @@ endif
 ifeq ($(CONFIG_DRIVER_USB_CCID),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-ccid.c src/drivers/usb/usb-ccid-proto.c src/drivers/generic/smartcard.c
 endif
-# The USB Bluetooth controllers and the HCI class, /dev/btN (ws143-p002).
+# The USB Bluetooth controllers and the HCI class, /dev/bluetoothN (ws143-p002).
 ifeq ($(CONFIG_DRIVER_USB_BT),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-bt.c src/drivers/generic/bt-hci.c src/drivers/generic/bt-hci-proto.c
 endif
@@ -340,10 +340,10 @@ AMD64_KERNEL_SOURCES := \
 ifeq ($(CONFIG_INPUT_TEST_INJECT),y)
 AMD64_KERNEL_SOURCES += src/drivers/generic/input-inject.c
 endif
-# /dev/hid-host (ws143-p005): the Bluetooth daemon's HID devices, on the HID input glue; it refuses a FIDO descriptor
+# /dev/input/bridge (ws143-p005): the Bluetooth daemon's HID devices, on the HID input glue; it refuses a FIDO descriptor
 # with hidraw-describe.c (built with usb-hid, or here without it).
-ifeq ($(CONFIG_HID_HOST),y)
-AMD64_KERNEL_SOURCES += src/drivers/generic/hid-host.c src/drivers/generic/hid-host-setup.c
+ifeq ($(CONFIG_INPUT_BRIDGE),y)
+AMD64_KERNEL_SOURCES += src/drivers/generic/input-bridge.c src/drivers/generic/input-bridge-setup.c
 ifneq ($(CONFIG_DRIVER_USB_HID),y)
 AMD64_KERNEL_SOURCES += src/drivers/generic/hidraw-describe.c
 endif

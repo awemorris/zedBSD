@@ -6,13 +6,13 @@
  */
 
 /*
- * /dev/hid-host (ws143-p005, design D3): HID devices a program makes from
+ * /dev/input/bridge (ws143-p005, design D3): HID devices a program makes from
  * a report descriptor, the Bluetooth daemon's keyboards and mice among
  * them.
  *
- * Only root may open the node, and at most HID_HOST_OPENS_MAX opens at a
+ * Only root may open the node, and at most INPUT_BRIDGE_OPENS_MAX opens at a
  * time.  The first write of an open declares one device (struct
- * hid_host_setup, include/uapi/hid-host.h); the HID input glue parses its
+ * input_bridge_setup, include/uapi/input-bridge.h); the HID input glue parses its
  * descriptor and registers the evdev devices it declares, as usb-hid does
  * for a USB device.  Every later write is one input report, which the glue
  * decodes into their events.  Closing the file unpublishes them, and the
@@ -20,12 +20,12 @@
  * link, leaves no key pressed.
  */
 
-#include <drivers/generic/hid-host.h>
+#include <drivers/generic/input-bridge.h>
 #include <drivers/generic/hid-input.h>
 #include <drivers/generic/hidraw.h>
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
-#include <uapi/hid-host.h>
+#include <uapi/input-bridge.h>
 #include <uapi/input.h>
 #include <uapi/poll.h>
 
@@ -38,11 +38,11 @@
 #include "kern/lock.h"
 #include "kern/uaccess.h"
 
-/* The device number of /dev/hid-host (the next free one after bt-hci's 0x00120000). */
-#define HID_HOST_DEVICE_NUMBER	0x00130000U
+/* The device number of /dev/input/bridge (the next free one after bt-hci's 0x00120000). */
+#define INPUT_BRIDGE_DEVICE_NUMBER	0x00130000U
 
 /* The longest text the input layer takes, as the setup's fields: 63 bytes and a NUL. */
-#define HID_HOST_NAME_MAX	HID_HOST_TEXT_MAX
+#define INPUT_BRIDGE_NAME_MAX	INPUT_BRIDGE_TEXT_MAX
 
 /*
  * One open of the node: the device it declared, NULL until its first write
@@ -50,61 +50,61 @@
  * writes and the requests of the open, and close comes after the last of
  * them.
  */
-struct hid_host_open {
+struct input_bridge_open {
 	struct mutex lock;
 	struct hid_input *input;
 };
 
-static int hid_host_open(struct file *file);
-static int hid_host_close(struct file *file);
-static ssize_t hid_host_read(struct file *file, void *buffer, size_t size);
-static ssize_t hid_host_write(struct file *file, const void *buffer, size_t size);
-static int hid_host_ioctl(struct file *file, unsigned long request, uintptr_t argument);
-static int hid_host_poll(struct file *file, short requested, short *returned);
-static int hid_host_declare(struct hid_host_open *state, const void *buffer, size_t size);
-static int hid_host_publish(struct hid_host_open *state, const struct hid_host_setup *setup);
-static int hid_host_report(struct hid_host_open *state, const void *buffer, size_t size);
-static void hid_host_release_node(void);
+static int input_bridge_open(struct file *file);
+static int input_bridge_close(struct file *file);
+static ssize_t input_bridge_read(struct file *file, void *buffer, size_t size);
+static ssize_t input_bridge_write(struct file *file, const void *buffer, size_t size);
+static int input_bridge_ioctl(struct file *file, unsigned long request, uintptr_t argument);
+static int input_bridge_poll(struct file *file, short requested, short *returned);
+static int input_bridge_declare(struct input_bridge_open *state, const void *buffer, size_t size);
+static int input_bridge_publish(struct input_bridge_open *state, const struct input_bridge_setup *setup);
+static int input_bridge_report(struct input_bridge_open *state, const void *buffer, size_t size);
+static void input_bridge_release_node(void);
 
 /* The file operations of the node. */
-static const struct cdev_ops hid_host_ops = {
-	.open = hid_host_open,
-	.close = hid_host_close,
-	.read = hid_host_read,
-	.write = hid_host_write,
-	.ioctl = hid_host_ioctl,
-	.poll = hid_host_poll,
+static const struct cdev_ops input_bridge_ops = {
+	.open = input_bridge_open,
+	.close = input_bridge_close,
+	.read = input_bridge_read,
+	.write = input_bridge_write,
+	.ioctl = input_bridge_ioctl,
+	.poll = input_bridge_poll,
 };
 
 /*
- * The lock of hid_host_busy.  Initialized when the node is registered, it
+ * The lock of input_bridge_busy.  Initialized when the node is registered, it
  * lives as long as the kernel.
  */
-static struct mutex hid_host_lock;
+static struct mutex input_bridge_lock;
 
 /*
  * How many opens hold the node: counted up by an open that admits itself
- * (at most HID_HOST_OPENS_MAX), down when it closes or fails to finish
- * opening.  hid_host_lock protects it.
+ * (at most INPUT_BRIDGE_OPENS_MAX), down when it closes or fails to finish
+ * opening.  input_bridge_lock protects it.
  */
-static unsigned hid_host_busy;
+static unsigned input_bridge_busy;
 
 /*
- * Publishes /dev/hid-host.
+ * Publishes /dev/input/bridge.
  */
 int
-drv_hid_host_register(
+drv_input_bridge_register(
 	void)
 {
 	int error;
 
 	/* The lock of the opens' count. */
-	error = mutex_init(&hid_host_lock, LOCK_RANK_DEVICE, "hid host");
+	error = mutex_init(&input_bridge_lock, LOCK_RANK_DEVICE, "input bridge");
 	if (error != 0)
 		return error;
 
 	/* The character device. */
-	error = cdev_register("hid-host", (dev_t)HID_HOST_DEVICE_NUMBER, &hid_host_ops, NULL);
+	error = cdev_register("bridge", (dev_t)INPUT_BRIDGE_DEVICE_NUMBER, &input_bridge_ops, NULL);
 	if (error != 0)
 		return error;
 
@@ -114,10 +114,10 @@ drv_hid_host_register(
 
 /* Admits one root open with no device declared yet. */
 static int
-hid_host_open(
+input_bridge_open(
 	struct file *file)
 {
-	struct hid_host_open *state;
+	struct input_bridge_open *state;
 	const struct ucred *credentials;
 	int superuser;
 	int busy;
@@ -129,16 +129,16 @@ hid_host_open(
 	if (!superuser)
 		return EPERM;
 
-	/* Admits up to HID_HOST_OPENS_MAX opens, each its own device. */
-	mutex_lock(&hid_host_lock);
+	/* Admits up to INPUT_BRIDGE_OPENS_MAX opens, each its own device. */
+	mutex_lock(&input_bridge_lock);
 
 	busy = 0;
-	if (hid_host_busy >= HID_HOST_OPENS_MAX)
+	if (input_bridge_busy >= INPUT_BRIDGE_OPENS_MAX)
 		busy = 1;
 	else
-		hid_host_busy++;
+		input_bridge_busy++;
 
-	mutex_unlock(&hid_host_lock);
+	mutex_unlock(&input_bridge_lock);
 
 	/* Refuses an open while all of them are held. */
 	if (busy)
@@ -147,16 +147,16 @@ hid_host_open(
 	/* The open's state; without it the place is given back. */
 	state = kern_malloc(sizeof(*state));
 	if (state == NULL) {
-		hid_host_release_node();
+		input_bridge_release_node();
 		return ENOMEM;
 	}
 
 	/* No device yet, and the open's own lock. */
 	kern_memset(state, 0, sizeof(*state));
-	error = mutex_init(&state->lock, LOCK_RANK_DEVICE, "hid host open");
+	error = mutex_init(&state->lock, LOCK_RANK_DEVICE, "input bridge open");
 	if (error != 0) {
 		kern_free(state);
-		hid_host_release_node();
+		input_bridge_release_node();
 		return error;
 	}
 
@@ -167,10 +167,10 @@ hid_host_open(
 
 /* Removes the declared devices and gives the open's place back. */
 static int
-hid_host_close(
+input_bridge_close(
 	struct file *file)
 {
-	struct hid_host_open *state;
+	struct input_bridge_open *state;
 
 	/* The devices go; the input layer releases what they held. */
 	state = file->f_data;
@@ -188,7 +188,7 @@ hid_host_close(
 	file->f_data = NULL;
 
 	/* The open's place. */
-	hid_host_release_node();
+	input_bridge_release_node();
 
 	/* Succeeded: the open is gone. */
 	return 0;
@@ -196,7 +196,7 @@ hid_host_close(
 
 /* Answers a read: no output report is passed back yet, and a read never waits. */
 static ssize_t
-hid_host_read(
+input_bridge_read(
 	struct file *file,
 	void *buffer,
 	size_t size)
@@ -211,12 +211,12 @@ hid_host_read(
 
 /* Declares the device on the first write, and takes one input report on each later one. */
 static ssize_t
-hid_host_write(
+input_bridge_write(
 	struct file *file,
 	const void *buffer,
 	size_t size)
 {
-	struct hid_host_open *state;
+	struct input_bridge_open *state;
 	int error;
 
 	/* The writes of one open are taken one at a time. */
@@ -225,9 +225,9 @@ hid_host_write(
 
 	/* The first write declares the device; every later one is a report. */
 	if (state->input == NULL)
-		error = hid_host_declare(state, buffer, size);
+		error = input_bridge_declare(state, buffer, size);
 	else
-		error = hid_host_report(state, buffer, size);
+		error = input_bridge_report(state, buffer, size);
 
 	mutex_unlock(&state->lock);
 
@@ -240,24 +240,24 @@ hid_host_write(
 }
 
 /*
- * Answers HID_HOST_GET_DEVICE: what the open made.  This is the one place
+ * Answers INPUT_BRIDGE_GET_DEVICE: what the open made.  This is the one place
  * the request is answered (ws143-p005 Q2).
  */
 static int
-hid_host_ioctl(
+input_bridge_ioctl(
 	struct file *file,
 	unsigned long request,
 	uintptr_t argument)
 {
-	struct hid_host_device device;
-	struct hid_host_open *state;
+	struct input_bridge_device device;
+	struct input_bridge_open *state;
 	int event;
 	int touch_event;
 	int numbered;
 	int error;
 
 	/* No other request. */
-	if (request != HID_HOST_GET_DEVICE)
+	if (request != INPUT_BRIDGE_GET_DEVICE)
 		return ENOTTY;
 
 	/* The open's devices, under its lock: none before the setup. */
@@ -275,7 +275,7 @@ hid_host_ioctl(
 		device.report_max = (uint32_t)drv_hid_input_report_max(state->input);
 		numbered = drv_hid_input_report_ids(state->input);
 		if (numbered)
-			device.flags |= HID_HOST_FLAG_REPORT_IDS;
+			device.flags |= INPUT_BRIDGE_FLAG_REPORT_IDS;
 	}
 
 	mutex_unlock(&state->lock);
@@ -291,7 +291,7 @@ hid_host_ioctl(
 
 /* Says what an open can do: write, always; never read. */
 static int
-hid_host_poll(
+input_bridge_poll(
 	struct file *file,
 	short requested,
 	short *returned)
@@ -312,12 +312,12 @@ hid_host_poll(
  * leaves the open without a device, so it may declare again.
  */
 static int
-hid_host_declare(
-	struct hid_host_open *state,
+input_bridge_declare(
+	struct input_bridge_open *state,
 	const void *buffer,
 	size_t size)
 {
-	struct hid_host_setup *setup;
+	struct input_bridge_setup *setup;
 	int valid;
 	int error;
 
@@ -332,14 +332,14 @@ hid_host_declare(
 	kern_memcpy(setup, buffer, sizeof(*setup));
 
 	/* A well formed setup. */
-	valid = drv_hid_host_setup_valid(setup);
+	valid = drv_input_bridge_setup_valid(setup);
 	if (!valid) {
 		kern_free(setup);
 		return EINVAL;
 	}
 
 	/* The devices it declares. */
-	error = hid_host_publish(state, setup);
+	error = input_bridge_publish(state, setup);
 	kern_free(setup);
 	if (error != 0)
 		return error;
@@ -354,16 +354,16 @@ hid_host_declare(
  * otherwise, with nothing left registered.
  */
 static int
-hid_host_publish(
-	struct hid_host_open *state,
-	const struct hid_host_setup *setup)
+input_bridge_publish(
+	struct input_bridge_open *state,
+	const struct input_bridge_setup *setup)
 {
 	struct drv_hidraw_layout raw;
 	struct hid_input_identity identity;
 	struct hid_input *input;
-	char name[HID_HOST_NAME_MAX];
-	char touch_name[HID_HOST_NAME_MAX];
-	char touch_physical_path[HID_HOST_NAME_MAX];
+	char name[INPUT_BRIDGE_NAME_MAX];
+	char touch_name[INPUT_BRIDGE_NAME_MAX];
+	char touch_physical_path[INPUT_BRIDGE_NAME_MAX];
 	const char *bus_name;
 	unsigned kind;
 	int described;
@@ -424,7 +424,7 @@ hid_host_publish(
 	/* The open's device from now on. */
 	state->input = input;
 	drv_hid_input_numbers(input, &event, &touch_event);
-	kern_logf("hid-host: %s: event=%d touch=%d bus=%u name=%s\n",
+	kern_logf("input-bridge: %s: event=%d touch=%d bus=%u name=%s\n",
 		  setup->physical_path,
 		  event,
 		  touch_event,
@@ -437,12 +437,12 @@ hid_host_publish(
 
 /*
  * Takes one input report: refused when empty, longer than
- * HID_HOST_REPORT_MAX or shorter than its report ID declares; otherwise the
+ * INPUT_BRIDGE_REPORT_MAX or shorter than its report ID declares; otherwise the
  * glue decodes it (counting and dropping one it cannot) at the time it came.
  */
 static int
-hid_host_report(
-	struct hid_host_open *state,
+input_bridge_report(
+	struct input_bridge_open *state,
 	const void *buffer,
 	size_t size)
 {
@@ -452,7 +452,7 @@ hid_host_report(
 	/* A report of a length no device sends in one write. */
 	if (size == 0U)
 		return EINVAL;
-	if (size > HID_HOST_REPORT_MAX)
+	if (size > INPUT_BRIDGE_REPORT_MAX)
 		return EINVAL;
 
 	/* A piece of a report, not a whole one. */
@@ -470,14 +470,14 @@ hid_host_report(
 
 /* Gives one open's place back. */
 static void
-hid_host_release_node(
+input_bridge_release_node(
 	void)
 {
 	/* One open fewer: the next open may take its place. */
-	mutex_lock(&hid_host_lock);
+	mutex_lock(&input_bridge_lock);
 
-	if (hid_host_busy > 0U)
-		hid_host_busy--;
+	if (input_bridge_busy > 0U)
+		input_bridge_busy--;
 
-	mutex_unlock(&hid_host_lock);
+	mutex_unlock(&input_bridge_lock);
 }

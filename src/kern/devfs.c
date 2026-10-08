@@ -132,6 +132,7 @@ static DEVFS_HIGH int component_equal(const struct componentname *component, con
 static DEVFS_HIGH int component_copy(const struct componentname *component, char *name, size_t capacity);
 static DEVFS_HIGH int event_name(const char *name);
 static DEVFS_HIGH int hidraw_name(const char *name);
+static DEVFS_HIGH int bridge_name(const char *name);
 static DEVFS_HIGH int smartcard_name(const char *name);
 static DEVFS_HIGH int bluetooth_name(const char *name);
 static DEVFS_HIGH int backlight_name(const char *name);
@@ -404,6 +405,26 @@ hidraw_name(
 	return 1;
 }
 
+/*
+ * Identifies the input bridge, /dev/input/bridge (ws143-p005): the node
+ * the Bluetooth daemon makes its HID devices on, beside the devices it
+ * makes.
+ */
+static DEVFS_HIGH int
+bridge_name(
+	const char *name)
+{
+	int comparison;
+
+	/* The one node named bridge. */
+	comparison = kern_strcmp(name, "bridge");
+	if (comparison != 0)
+		return 0;
+
+	/* Succeeded: the name is the bridge's. */
+	return 1;
+}
+
 /* Identifies the smart card readers' slots, /dev/smartcard<n> (ws161-p003). */
 static DEVFS_HIGH int
 smartcard_name(
@@ -420,20 +441,20 @@ smartcard_name(
 	return 1;
 }
 
-/* Identifies the Bluetooth controllers' HCI nodes, /dev/bt<n> (ws143-p002). */
+/* Identifies the Bluetooth controllers' HCI nodes, /dev/bluetooth<n> (ws143-p002). */
 static DEVFS_HIGH int
 bluetooth_name(
 	const char *name)
 {
 	int comparison;
 
-	/* Bluetooth nodes are named bt<n>. */
-	comparison = kern_strncmp(name, "bt", 2);
+	/* Bluetooth nodes are named bluetooth<n>. */
+	comparison = kern_strncmp(name, "bluetooth", 9);
 	if (comparison != 0)
 		return 0;
 
-	/* The number follows at once (no other node's name is bt and a digit). */
-	if (name[2] < '0' || name[2] > '9')
+	/* The number follows at once. */
+	if (name[9] < '0' || name[9] > '9')
 		return 0;
 
 	/* Succeeded: the name is a Bluetooth controller's. */
@@ -463,14 +484,18 @@ cdev_directory(
 {
 	int input;
 	int raw;
+	int bridge;
 	int backlight;
 
-	/* The event devices and the raw HID devices live in /dev/input. */
+	/* The event devices, the raw HID devices and the input bridge live in /dev/input. */
 	input = event_name(name);
 	if (input)
 		return DEVFS_INPUT_INO;
 	raw = hidraw_name(name);
 	if (raw)
+		return DEVFS_INPUT_INO;
+	bridge = bridge_name(name);
+	if (bridge)
 		return DEVFS_INPUT_INO;
 
 	/* The backlight devices live in /dev/backlight. */
@@ -496,6 +521,7 @@ devfs_cdev_inode(
 	int raw;
 	int smartcard;
 	int bluetooth;
+	int bridge;
 
 	/* Creates a generation-unique inode and gives it one cdev reference. */
 	number = cdev_generation(device);
@@ -512,21 +538,20 @@ devfs_cdev_inode(
 	 * until sessiond gives them to the seat's user (ws161: whoever opens
 	 * them can ask the key to sign).  A Bluetooth controller is root's
 	 * alone: the daemon's privileged part opens it (ws143, D16), and so is
-	 * the node it makes its HID devices on (hid-host, ws143-p005).
+	 * the node it makes its HID devices on (the input bridge, ws143-p005).
 	 */
 	backlight = backlight_name(device->name);
 	raw = hidraw_name(device->name);
 	smartcard = smartcard_name(device->name);
 	bluetooth = bluetooth_name(device->name);
+	bridge = bridge_name(device->name);
 	if (event_name(device->name))
 		mode = 0640U;
 	else if (backlight)
 		mode = 0644U;
-	else if (raw || smartcard || bluetooth)
+	else if (raw || smartcard || bluetooth || bridge)
 		mode = 0600U;
 	else if (kern_strcmp(device->name, "input-inject") == 0)
-		mode = 0600U;
-	else if (kern_strcmp(device->name, "hid-host") == 0)
 		mode = 0600U;
 	else
 		mode = 0666U;

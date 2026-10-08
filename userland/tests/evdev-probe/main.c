@@ -8,7 +8,7 @@
 /*
  * The evdev probe (ws143-p005): finds an input device's node and prints
  * what it reports, for the QEMU checks of the HID input glue (USB devices,
- * and the Bluetooth devices of /dev/hid-host).
+ * and the Bluetooth devices of /dev/input/bridge).
  *
  *   evdev-probe [-b BUS] [-n NAME] [-p PLACE] [-N] [-t MS] [-r MS] [-l]
  *
