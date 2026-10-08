@@ -51,3 +51,9 @@ Origin: [backlog-p2](../backlog-p2.md) の 113・114（ws120-p009）、[案](../
 - 直し（`music/view.c`・`music.h`）: bar の丸い button（Previous・Play・Next）は押された回数を返す。DOUBLE の click は、その button の最初の click が 450 ms（ui の double click の 400 ms と frame の遅れ）以内の frame で数えられていなければ、1 frame に 2 つ来た物として 2 回。`view->bar_pressed`・`bar_pressed_us` に最後に数えた button と frame の時刻。libkeiland の API は変えない。
 - helper: `run.key("esc")`。
 - 確認: `build/amd64/bin/music` exit 0・warning 0、style-check 指摘なし、`plan/ws120/tests/run-host-music.sh` PASS（新しい next-alone・next-twice-one-frame・next-twice-two-frames。直しを外すと next-twice-one-frame が FAIL になることを確かめた）。
+
+## T1-452 の結果と直し（2026-10-08 夜 P2）
+
+- T1-452: 手順 2 は直った（step=2 requests=2 と step=1 が 2 つの両方で pass）。3 回中 1 回（out5）手順 1 が FAIL: `MUSIC AUDIO lost song=0 ms=3903` の後、開き直しの stream が `failed error=3`（UNAVAILABLE、audiod が起き直る前）→ libkeiland の EAGAIN → `mu_player_open` は ENODEV、開き直しを諦めて NOTICE「There is no sound…」。
+- 直し（`music/main.c`）: 失った曲を覚え（曲・位置・一時停止か）、`mu_reopen` が開き直す。ENODEV の間は 500 ms おきに 10 秒まで試し直し（`mu_follow` の毎回、loop は 1 秒以内に回る）、開けたら同じ位置から（一時停止なら一時停止で）続ける。10 秒たっても開けなければ止めて理由の notice。曲を選び直すと試し直しは終わる。`MUSIC AUDIO reopened` の行は最後の試しで 1 回。helper の reopened の待ちを 15 秒に。
+- 確認: music の build exit 0・warning 0、style-check 指摘なし、`run-host-music.sh`・`host-music-play.sh` PASS（開き直しは host で組めない、T1 の apps.music.failures）。

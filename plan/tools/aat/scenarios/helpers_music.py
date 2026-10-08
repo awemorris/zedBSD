@@ -184,7 +184,7 @@ def failures(item):
 		mark = run.mark()
 		killed = kill_audiod()
 		lost = run.wait(r"MUSIC AUDIO lost song=0 ms=\d+", mark, 10)
-		reopened = run.wait(r"MUSIC AUDIO reopened song=0 error=-?\d+", mark, 10)
+		reopened = run.wait(r"MUSIC AUDIO reopened song=0 error=-?\d+", mark, 15)
 		item.step("killed audiod", f"{killed}; {lost}; {reopened}")
 		item.check(lost, "the stream's loss was not seen")
 		item.check(reopened, "the song was not opened again after the loss")

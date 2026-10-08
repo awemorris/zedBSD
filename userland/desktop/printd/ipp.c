@@ -12,11 +12,18 @@
  * document after the message, Get-Job-Attributes every five seconds until
  * the job ends, and Cancel-Job.  Version 2.0 first, 1.1 when the printer
  * says it does not take 2.0.
+ *
+ * A response is read within bounds (ws177-p022, design §5.3): a line of
+ * 1024 bytes, 16 KiB of header, and a body decoded as it comes, each value
+ * kept to 1024 bytes (a longer one passed over) and 256 attributes' names
+ * looked at (the rest passed over), so that a printer that answers with
+ * every attribute it has is still understood.
  */
 
 #include "printd.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,8 +66,26 @@
 #define IPP_ABORTED		8
 #define IPP_COMPLETED		9
 
-/* The most of a response kept, and how long and how often a job is watched (seconds). */
-#define IPP_RESPONSE_MAX	(256U * 1024U)
+/*
+ * The bounds of a response: a line, the header, a value kept, the
+ * attributes' names looked at, and the body read at most.
+ */
+#define IPP_LINE_MAX		1024U
+#define IPP_HEADER_MAX		(16U * 1024U)
+#define IPP_VALUE_MAX		1024U
+#define IPP_NAMES_MAX		256U
+#define IPP_BODY_MOST		(16U * 1024U * 1024U)
+
+/* The stages of a response's IPP message as it is decoded. */
+#define IPP_STAGE_HEADER	0
+#define IPP_STAGE_TAG		1
+#define IPP_STAGE_NAME_LENGTH	2
+#define IPP_STAGE_NAME		3
+#define IPP_STAGE_VALUE_LENGTH	4
+#define IPP_STAGE_VALUE		5
+#define IPP_STAGE_END		6
+
+/* How long and how often a job is watched (seconds). */
 #define IPP_WATCH_SECONDS	(30 * 60)
 #define IPP_WATCH_EVERY		5
 #define IPP_BUSY_TRIES		3
@@ -91,6 +116,40 @@ struct ipp_answer {
 	char model[PD_NAME_MAX];
 };
 
+/*
+ * A response's IPP message decoded as its bytes come: the stage and the
+ * bytes it still needs, the small fields gathered, the attribute's tag,
+ * name (its first bytes) and value (its first IPP_VALUE_MAX bytes) with
+ * their lengths, the name the next values belong to, the names counted,
+ * and the answer filled.
+ */
+struct ipp_stream {
+	struct ipp_answer *answer;
+	int stage;
+	size_t need;
+	size_t have;
+	unsigned char small[8];
+	unsigned tag;
+	char name[64];
+	size_t name_length;
+	unsigned char value[IPP_VALUE_MAX];
+	size_t value_length;
+	char last[64];
+	unsigned names;
+};
+
+/*
+ * A connection's bytes read ahead: the socket, the bytes not taken yet
+ * (from start to end), and whether the printer closed it.
+ */
+struct ipp_reader {
+	int fd;
+	unsigned char data[4096];
+	size_t start;
+	size_t end;
+	int closed;
+};
+
 /* The request-ids, one after another for the daemon's life. */
 static uint32_t ipp_next_request = 1;
 static pthread_mutex_t ipp_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -101,8 +160,17 @@ static void ipp_message_put(struct ipp_message *message, const void *data, size_
 static void ipp_message_u16(struct ipp_message *message, unsigned value);
 static void ipp_attribute(struct ipp_message *message, unsigned tag, const char *name, const void *value, size_t size);
 static void ipp_text_attribute(struct ipp_message *message, unsigned tag, const char *name, const char *value);
-static int ipp_exchange(const char *host, unsigned port, const char *path, const struct ipp_message *message, struct pd_job *document, unsigned char **body, size_t *body_length, int *http, const char **detail);
-static int ipp_parse(const unsigned char *body, size_t length, struct ipp_answer *answer);
+static int ipp_exchange(const char *host, unsigned port, const char *path, const struct ipp_message *message, struct pd_job *document, struct ipp_stream *stream, int *http, const char **detail);
+static int ipp_read_header(struct ipp_reader *reader, int *http, long long *length, int *chunked);
+static int ipp_read_body(struct ipp_reader *reader, long long length, int chunked, struct ipp_stream *stream);
+static int ipp_fill(struct ipp_reader *reader);
+static int ipp_line(struct ipp_reader *reader, char *line, size_t size, size_t *taken);
+static int ipp_feed_from(struct ipp_reader *reader, unsigned long long count, struct ipp_stream *stream, unsigned long long *total);
+static void ipp_stream_start(struct ipp_stream *stream, struct ipp_answer *answer);
+static int ipp_stream_feed(struct ipp_stream *stream, const unsigned char *bytes, size_t length);
+static int ipp_stream_field(struct ipp_stream *stream);
+static void ipp_stream_attribute(struct ipp_stream *stream);
+static int ipp_header_is(const char *line, const char *name, const char **value);
 static int ipp_named(const char *name);
 static void ipp_take_text(const unsigned char *value, size_t size, unsigned tag, char *text, size_t room);
 static const char *ipp_detail(const struct ipp_answer *answer);
@@ -165,10 +233,14 @@ pd_ipp_job(
 			return;
 		}
 
-		/* A busy printer is tried again later. */
+		/* A busy printer is tried again later; a job asked to stop meanwhile was not taken. */
 		if (answer.status != IPP_BUSY || tries + 1 >= IPP_BUSY_TRIES)
 			break;
-		sleep(IPP_BUSY_WAIT);
+		stop = pd_wait(job, IPP_BUSY_WAIT);
+		if (stop) {
+			pd_send("STATE %lu cancelled", (unsigned long)job->job);
+			return;
+		}
 	}
 
 	/* Refused. */
@@ -177,8 +249,9 @@ pd_ipp_job(
 		return;
 	}
 
-	/* Taken by the printer. */
+	/* Taken by the printer: the next job for it may be sent while this one is watched. */
 	pd_log("job %lu sent", (unsigned long)job->job);
+	pd_sent(job);
 
 	/* Without a job-id it cannot be watched: done, not confirmed. */
 	job_id = answer.job_id;
@@ -236,8 +309,8 @@ pd_ipp_job(
 			return;
 		}
 
-		/* The next look. */
-		sleep(IPP_WATCH_EVERY);
+		/* The next look, sooner when the job is asked to stop. */
+		(void)pd_wait(job, IPP_WATCH_EVERY);
 	}
 }
 
@@ -367,10 +440,9 @@ ipp_ask(
 	static const char *const printer_wanted[] = { "printer-state", "document-format-supported", "printer-info", "printer-make-and-model" };
 	static const char *const job_wanted[] = { "job-state", "job-state-reasons" };
 	struct ipp_message message;
-	unsigned char *body;
+	struct ipp_stream stream;
 	unsigned char number[4];
 	char uri[256];
-	size_t body_length;
 	size_t index;
 	uint32_t request;
 	int status;
@@ -435,24 +507,22 @@ ipp_ask(
 		return ENOMEM;
 	}
 
-	/* Sent and answered. */
-	status = ipp_exchange(host, port, path, &message, document, &body, &body_length, &answer->http, detail);
+	/* Sent and answered, the answer decoded as it came. */
+	ipp_stream_start(&stream, answer);
+	status = ipp_exchange(host, port, path, &message, document, &stream, &answer->http, detail);
 	free(message.data);
 	if (status != 0)
 		return status;
 
-	/* The answer read; a body that is not IPP is only its HTTP status. */
+	/* A whole IPP message for this request; a refusal by HTTP is only its status. */
 	if (answer->http == 200) {
-		status = ipp_parse(body, body_length, answer);
-		if (status != 0 || answer->request != request) {
-			free(body);
+		if (stream.stage != IPP_STAGE_END || answer->request != request) {
 			*detail = "protocol";
 			return EPROTO;
 		}
 	}
 
-	/* The body goes. */
-	free(body);
+	/* Succeeded: the answer. */
 	return 0;
 }
 
@@ -535,9 +605,9 @@ ipp_text_attribute(
 
 /*
  * Sends a message by HTTP POST (with a job's document after it) and reads
- * the response's status and body (the first IPP_RESPONSE_MAX bytes).
- * Returns 0 (the body is the caller's to free), ECANCELED, or an errno
- * value with the word of the failure.
+ * the response within its bounds: its final status, and for 200 its body
+ * fed to the stream.  Returns 0, ECANCELED, or an errno value with the
+ * word of the failure.
  */
 static int
 ipp_exchange(
@@ -546,32 +616,19 @@ ipp_exchange(
 	const char *path,
 	const struct ipp_message *message,
 	struct pd_job *document,
-	unsigned char **body,
-	size_t *body_length,
+	struct ipp_stream *stream,
 	int *http,
 	const char **detail)
 {
-	unsigned char *response;
-	unsigned char *start;
-	unsigned char *cursor;
-	unsigned char *out;
+	struct ipp_reader *reader;
 	char header[512];
+	long long declared;
 	uint64_t length;
-	size_t got;
-	size_t chunk;
-	ssize_t arrived;
-	long declared;
-	char *end;
-	char *field;
-	int informational;
 	int chunked;
-	int version;
 	int status;
 	int fd;
 
 	/* The connection. */
-	*body = NULL;
-	*body_length = 0;
 	*http = 0;
 	status = pd_connect(host, port, &fd, detail);
 	if (status != 0)
@@ -597,170 +654,557 @@ ipp_exchange(
 		return status;
 	}
 
-	/* The response, until the printer closes (or as much as is kept). */
-	response = malloc(IPP_RESPONSE_MAX + 1U);
-	if (response == NULL) {
+	/* The reader of the response. */
+	reader = calloc(1, sizeof(*reader));
+	if (reader == NULL) {
 		(void)close(fd);
+		*detail = "io";
 		return ENOMEM;
 	}
 
-	/* Read as it comes. */
-	got = 0;
-	for (;;) {
-		arrived = pd_read_some(fd, response + got, IPP_RESPONSE_MAX - got);
-		if (arrived <= 0)
-			break;
-		got += (size_t)arrived;
+	/* The reader reads the connection. */
+	reader->fd = fd;
 
-		/* A whole body by its length ends the reading early. */
-		response[got] = '\0';
-		start = (unsigned char *)strstr((char *)response, "\r\n\r\n");
-		field = strstr((char *)response, "Content-Length:");
-		if (field == NULL)
-			field = strstr((char *)response, "content-length:");
-		if (start != NULL && field != NULL && (unsigned char *)field < start) {
-			declared = strtol(field + 15, NULL, 10);
-			informational = strncmp((char *)response + 9, "100", 3U);
-			if (declared >= 0 && got >= (size_t)(start + 4 - response) + (size_t)declared && informational != 0)
-				break;
-		}
+	/* The final status and how the body comes. */
+	status = ipp_read_header(reader, http, &declared, &chunked);
 
-		/* As much as is kept. */
-		if (got == IPP_RESPONSE_MAX)
-			break;
-	}
+	/* A body of IPP is decoded; another status needs no body. */
+	if (status == 0 && *http == 200)
+		status = ipp_read_body(reader, declared, chunked, stream);
 
 	/* The connection ends. */
 	(void)close(fd);
-	response[got] = '\0';
+	free(reader);
 
-	/* Past the 1xx responses to the final one. */
-	cursor = response;
-	for (;;) {
-		start = (unsigned char *)strstr((char *)cursor, "\r\n\r\n");
-		version = strncmp((char *)cursor, "HTTP/1.", 7U);
-		if (start == NULL || version != 0) {
-			free(response);
-			*detail = "protocol";
-			return EPROTO;
-		}
-
-		/* Its status: a final one ends the search. */
-		*http = atoi((char *)cursor + 9);
-		if (*http >= 200)
-			break;
-		cursor = start + 4;
+	/* Not read: the printer stood still, or broke the protocol. */
+	if (status != 0) {
+		*detail = "protocol";
+		if (status == ETIMEDOUT || status == EAGAIN)
+			*detail = "timeout";
+		return status;
 	}
 
-	/* The body: chunked, or the rest. */
-	*start = '\0';
-	chunked = strstr((char *)cursor, "chunked") != NULL;
-	cursor = start + 4;
-	got = (size_t)(response + got - cursor);
-	if (chunked) {
-		/* Each chunk's size line and bytes, packed together. */
-		out = response;
-		start = cursor;
-		while (start < cursor + got) {
-			chunk = (size_t)strtoul((char *)start, &end, 16);
-			end = strstr(end, "\r\n");
-			if (end == NULL || chunk == 0U)
-				break;
-			start = (unsigned char *)end + 2;
-			if (start + chunk > cursor + got)
-				chunk = (size_t)(cursor + got - start);
-			memmove(out, start, chunk);
-			out += chunk;
-			start += chunk + 2U;
-		}
-
-		/* The bytes packed. */
-		got = (size_t)(out - response);
-	} else {
-		memmove(response, cursor, got);
-	}
-
-	/* Succeeded: the body. */
-	*body = response;
-	*body_length = got;
+	/* Succeeded: the response read. */
 	*detail = "";
 	return 0;
 }
 
-/* Reads an IPP response: its status, request-id and the attributes wanted.  Returns 0 or EPROTO. */
+/*
+ * Reads a response's header past any 1xx ones: the final status, the
+ * body's declared length (-1 for none) and whether it is chunked.  Lines
+ * are at most IPP_LINE_MAX bytes and the header IPP_HEADER_MAX.  Returns
+ * 0, EPROTO, or the read's errno.
+ */
 static int
-ipp_parse(
-	const unsigned char *body,
-	size_t length,
+ipp_read_header(
+	struct ipp_reader *reader,
+	int *http,
+	long long *length,
+	int *chunked)
+{
+	char line[IPP_LINE_MAX];
+	const char *value;
+	const char *found;
+	size_t total;
+	size_t taken;
+	int version;
+	int named;
+	int status;
+
+	/* Until a final status. */
+	total = 0;
+	for (;;) {
+		/* The status line. */
+		status = ipp_line(reader, line, sizeof(line), &taken);
+		if (status != 0)
+			return status;
+		total += taken;
+		version = strncmp(line, "HTTP/1.", 7U);
+		taken = strlen(line);
+		if (version != 0 || taken < 12U)
+			return EPROTO;
+		*http = atoi(line + 9);
+		*length = -1;
+		*chunked = 0;
+
+		/* Its fields, until the empty line. */
+		for (;;) {
+			status = ipp_line(reader, line, sizeof(line), &taken);
+			if (status != 0)
+				return status;
+			total += taken;
+			if (total > IPP_HEADER_MAX)
+				return EPROTO;
+			if (line[0] == '\0')
+				break;
+
+			/* The body's length. */
+			named = ipp_header_is(line, "content-length", &value);
+			if (named) {
+				*length = strtoll(value, NULL, 10);
+				continue;
+			}
+
+			/* The body in chunks. */
+			named = ipp_header_is(line, "transfer-encoding", &value);
+			found = NULL;
+			if (named)
+				found = strstr(value, "chunked");
+			if (found != NULL) {
+				/* Chunked: the body's size comes in its pieces. */
+				*chunked = 1;
+			}
+		}
+
+		/* A final status ends the search; an informational one is passed over. */
+		if (*http >= 200)
+			break;
+	}
+
+	/* Succeeded: the header read. */
+	return 0;
+}
+
+/*
+ * Reads a body and feeds it to the stream: in chunks, by its length, or
+ * to the connection's end; at most IPP_BODY_MOST bytes.  Returns 0,
+ * EPROTO, or the read's errno.
+ */
+static int
+ipp_read_body(
+	struct ipp_reader *reader,
+	long long length,
+	int chunked,
+	struct ipp_stream *stream)
+{
+	unsigned long long total;
+	unsigned long long size;
+	char line[IPP_LINE_MAX];
+	size_t taken;
+	char *end;
+	int status;
+
+	/* By its length, or to the connection's end. */
+	total = 0;
+	if (!chunked) {
+		size = ULLONG_MAX;
+		if (length >= 0)
+			size = (unsigned long long)length;
+		status = ipp_feed_from(reader, size, stream, &total);
+		if (status != 0)
+			return status;
+
+		/* Succeeded: the body read. */
+		return 0;
+	}
+
+	/* Each chunk: its size's line, its bytes and the line's end after them. */
+	for (;;) {
+		status = ipp_line(reader, line, sizeof(line), &taken);
+		if (status != 0)
+			return status;
+		size = strtoull(line, &end, 16);
+		if (end == line)
+			return EPROTO;
+
+		/* The last chunk: the trailer's lines until the empty one. */
+		if (size == 0U) {
+			for (;;) {
+				status = ipp_line(reader, line, sizeof(line), &taken);
+				if (status != 0)
+					return status;
+				if (line[0] == '\0')
+					break;
+			}
+
+			/* Succeeded: the body read. */
+			return 0;
+		}
+
+		/* Its bytes. */
+		status = ipp_feed_from(reader, size, stream, &total);
+		if (status != 0)
+			return status;
+
+		/* The end of its line. */
+		status = ipp_line(reader, line, sizeof(line), &taken);
+		if (status != 0)
+			return status;
+		if (line[0] != '\0')
+			return EPROTO;
+	}
+}
+
+/*
+ * Reads more of the connection into the reader (only when it holds
+ * nothing).  Returns 0 (closed when the printer ended it), or the read's
+ * errno.
+ */
+static int
+ipp_fill(
+	struct ipp_reader *reader)
+{
+	ssize_t got;
+
+	/* Bytes still held, or the end reached. */
+	if (reader->start < reader->end || reader->closed)
+		return 0;
+
+	/* One read. */
+	got = pd_read_some(reader->fd, reader->data, sizeof(reader->data));
+	if (got < 0)
+		return errno;
+
+	/* The printer ended the connection. */
+	reader->start = 0;
+	reader->end = 0;
+	if (got == 0) {
+		reader->closed = 1;
+		return 0;
+	}
+
+	/* Succeeded: the bytes held. */
+	reader->end = (size_t)got;
+	return 0;
+}
+
+/*
+ * Reads a line (its CR LF or LF taken off) of at most size - 1 bytes and
+ * counts the bytes it took.  Returns 0, EPROTO for a line too long or a
+ * connection that ended first, or the read's errno.
+ */
+static int
+ipp_line(
+	struct ipp_reader *reader,
+	char *line,
+	size_t size,
+	size_t *taken)
+{
+	size_t length;
+	unsigned char byte;
+	int status;
+
+	/* Byte by byte until the line feed. */
+	length = 0;
+	*taken = 0;
+	for (;;) {
+		status = ipp_fill(reader);
+		if (status != 0)
+			return status;
+		if (reader->closed)
+			return EPROTO;
+
+		/* The next byte. */
+		byte = reader->data[reader->start];
+		reader->start++;
+		(*taken)++;
+		if (byte == '\n')
+			break;
+
+		/* Too long for a line. */
+		if (length + 1U >= size)
+			return EPROTO;
+		line[length] = (char)byte;
+		length++;
+	}
+
+	/* The carriage return goes with the line feed. */
+	if (length > 0U && line[length - 1U] == '\r')
+		length--;
+	line[length] = '\0';
+
+	/* Succeeded: a line. */
+	return 0;
+}
+
+/*
+ * Feeds the stream a number of the connection's bytes (ULLONG_MAX: to its
+ * end), the body's total kept within IPP_BODY_MOST.  Returns 0, EPROTO,
+ * or the read's errno.
+ */
+static int
+ipp_feed_from(
+	struct ipp_reader *reader,
+	unsigned long long count,
+	struct ipp_stream *stream,
+	unsigned long long *total)
+{
+	size_t take;
+	int status;
+
+	/* Until the count is fed. */
+	while (count > 0U) {
+		status = ipp_fill(reader);
+		if (status != 0)
+			return status;
+
+		/* The connection's end: the end of a body without a length, too early for one with. */
+		if (reader->closed) {
+			if (count == ULLONG_MAX)
+				return 0;
+			return EPROTO;
+		}
+
+		/* The bytes held, up to the count. */
+		take = reader->end - reader->start;
+		if ((unsigned long long)take > count)
+			take = (size_t)count;
+		*total += take;
+		if (*total > IPP_BODY_MOST)
+			return EPROTO;
+		status = ipp_stream_feed(stream, reader->data + reader->start, take);
+		if (status != 0)
+			return status;
+		reader->start += take;
+		if (count != ULLONG_MAX)
+			count -= take;
+	}
+
+	/* Succeeded: the count fed. */
+	return 0;
+}
+
+/* Starts decoding a response's IPP message into an answer. */
+static void
+ipp_stream_start(
+	struct ipp_stream *stream,
 	struct ipp_answer *answer)
 {
-	char name[64];
-	char last[64];
-	size_t offset;
-	size_t name_length;
-	size_t value_length;
-	unsigned tag;
+	/* Nothing read: the header's eight bytes first. */
+	memset(stream, 0, sizeof(*stream));
+	stream->answer = answer;
+	stream->stage = IPP_STAGE_HEADER;
+	stream->need = 8U;
+}
+
+/*
+ * Feeds bytes of the IPP message to the stream.  Bytes after the end of
+ * the attributes (a document) are passed over.  Returns 0 or EPROTO.
+ */
+static int
+ipp_stream_feed(
+	struct ipp_stream *stream,
+	const unsigned char *bytes,
+	size_t length)
+{
+	size_t take;
+	size_t room;
+	int status;
+
+	/* Byte runs, a stage at a time. */
+	while (length > 0U) {
+		/* The message ended: the rest is not looked at. */
+		if (stream->stage == IPP_STAGE_END)
+			return 0;
+
+		/* As many bytes as the stage still needs. */
+		take = stream->need - stream->have;
+		if (take > length)
+			take = length;
+
+		/* A name or a value keeps its first bytes; the small fields gather whole. */
+		if (stream->stage == IPP_STAGE_NAME) {
+			room = 0;
+			if (stream->have < sizeof(stream->name) - 1U)
+				room = sizeof(stream->name) - 1U - stream->have;
+			if (room > take)
+				room = take;
+			memcpy(stream->name + stream->have, bytes, room);
+		} else if (stream->stage == IPP_STAGE_VALUE) {
+			room = 0;
+			if (stream->have < sizeof(stream->value))
+				room = sizeof(stream->value) - stream->have;
+			if (room > take)
+				room = take;
+			memcpy(stream->value + stream->have, bytes, room);
+		} else {
+			memcpy(stream->small + stream->have, bytes, take);
+		}
+
+		/* The bytes taken. */
+		stream->have += take;
+		bytes += take;
+		length -= take;
+
+		/* A field complete moves the stage on. */
+		if (stream->have == stream->need) {
+			status = ipp_stream_field(stream);
+			if (status != 0)
+				return status;
+		}
+	}
+
+	/* Succeeded: the bytes taken. */
+	return 0;
+}
+
+/* Takes a field that is complete and sets the next stage.  Returns 0 or EPROTO. */
+static int
+ipp_stream_field(
+	struct ipp_stream *stream)
+{
+	size_t length;
+
+	/* The next field starts empty. */
+	stream->have = 0;
+
+	/* By the stage the field ends. */
+	switch (stream->stage) {
+	case IPP_STAGE_HEADER:
+		/* The version, the status and the request-id. */
+		stream->answer->status = (unsigned)stream->small[2] << 8 | stream->small[3];
+		stream->answer->request = ipp_be32(stream->small + 4);
+		stream->stage = IPP_STAGE_TAG;
+		stream->need = 1U;
+		break;
+	case IPP_STAGE_TAG:
+		/* The end, a group's delimiter, or an attribute's tag. */
+		stream->tag = stream->small[0];
+		if (stream->tag == IPP_END) {
+			stream->stage = IPP_STAGE_END;
+			break;
+		}
+
+		/* A group's delimiter: the next tag. */
+		if (stream->tag <= 0x0fU) {
+			stream->need = 1U;
+			break;
+		}
+
+		/* An attribute: its name's length next. */
+		stream->stage = IPP_STAGE_NAME_LENGTH;
+		stream->need = 2U;
+		break;
+	case IPP_STAGE_NAME_LENGTH:
+		/* The name's length: none for another value of the attribute before. */
+		length = (size_t)stream->small[0] << 8 | stream->small[1];
+		stream->name_length = length;
+		memset(stream->name, 0, sizeof(stream->name));
+		stream->stage = IPP_STAGE_NAME;
+		stream->need = length;
+		if (length == 0U) {
+			stream->stage = IPP_STAGE_VALUE_LENGTH;
+			stream->need = 2U;
+		}
+
+		/* The name, or the value's length. */
+		break;
+	case IPP_STAGE_NAME:
+		/* A new attribute's name, counted. */
+		(void)snprintf(stream->last, sizeof(stream->last), "%s", stream->name);
+		stream->names++;
+		stream->stage = IPP_STAGE_VALUE_LENGTH;
+		stream->need = 2U;
+		break;
+	case IPP_STAGE_VALUE_LENGTH:
+		/* The value's length. */
+		length = (size_t)stream->small[0] << 8 | stream->small[1];
+		stream->value_length = length;
+		stream->stage = IPP_STAGE_VALUE;
+		stream->need = length;
+		if (length == 0U) {
+			ipp_stream_attribute(stream);
+			stream->stage = IPP_STAGE_TAG;
+			stream->need = 1U;
+		}
+
+		/* The value, or the next tag. */
+		break;
+	case IPP_STAGE_VALUE:
+		/* The value: taken, then the next tag. */
+		ipp_stream_attribute(stream);
+		stream->stage = IPP_STAGE_TAG;
+		stream->need = 1U;
+		break;
+	default:
+		return EPROTO;
+	}
+
+	/* Succeeded: the stage moved on. */
+	return 0;
+}
+
+/*
+ * Takes the values wanted from an attribute decoded: by the name they
+ * belong to, while no more than IPP_NAMES_MAX names were met and the value
+ * was kept whole.
+ */
+static void
+ipp_stream_attribute(
+	struct ipp_stream *stream)
+{
+	struct ipp_answer *answer;
+	const unsigned char *value;
+	size_t length;
 	int which;
 	int pdf;
 
-	/* The header: version, status, request-id. */
-	if (length < 9U)
-		return EPROTO;
-	answer->status = (unsigned)body[2] << 8 | body[3];
-	answer->request = ipp_be32(body + 4);
-	offset = 8;
-	last[0] = '\0';
+	/* Past the names looked at, or a value not kept whole. */
+	if (stream->names > IPP_NAMES_MAX)
+		return;
+	if (stream->value_length > sizeof(stream->value))
+		return;
 
-	/* The groups and their attributes, until the end. */
-	while (offset < length) {
-		tag = body[offset];
-		offset++;
-		if (tag == IPP_END)
+	/* The values wanted, by the attribute's name. */
+	answer = stream->answer;
+	value = stream->value;
+	length = stream->value_length;
+	which = ipp_named(stream->last);
+	if (which == 1 && stream->tag == IPP_INTEGER && length == 4U) {
+		answer->job_id = (int)ipp_be32(value);
+	} else if (which == 2 && stream->tag == IPP_ENUM && length == 4U) {
+		answer->job_state = (int)ipp_be32(value);
+	} else if (which == 3 && stream->tag == IPP_MIME) {
+		answer->has_formats = 1;
+		pdf = 1;
+		if (length == 15U)
+			pdf = memcmp(value, "application/pdf", 15U);
+		if (pdf == 0)
+			answer->has_pdf = 1;
+	} else if (which == 4 && answer->info[0] == '\0') {
+		ipp_take_text(value, length, stream->tag, answer->info, sizeof(answer->info));
+	} else if (which == 5 && answer->model[0] == '\0') {
+		ipp_take_text(value, length, stream->tag, answer->model, sizeof(answer->model));
+	}
+}
+
+/*
+ * Tells whether a header line is a field of a name (letters in any case)
+ * and where its value starts, past the spaces.
+ */
+static int
+ipp_header_is(
+	const char *line,
+	const char *name,
+	const char **value)
+{
+	size_t length;
+	size_t index;
+	int a;
+	int b;
+
+	/* The name, a letter at a time in any case. */
+	length = strlen(name);
+	for (index = 0; index < length; index++) {
+		a = line[index];
+		b = name[index];
+		if (a >= 'A' && a <= 'Z')
+			a = a - 'A' + 'a';
+		if (a != b)
 			return 0;
-		if (tag <= 0x0fU)
-			continue;
-
-		/* An attribute: its name (empty for another value of the last one) and its value. */
-		if (offset + 2U > length)
-			return EPROTO;
-		name_length = (size_t)body[offset] << 8 | body[offset + 1U];
-		offset += 2U;
-		if (offset + name_length + 2U > length)
-			return EPROTO;
-		if (name_length > 0U) {
-			(void)snprintf(name, sizeof(name), "%.*s", (int)name_length, (const char *)body + offset);
-			(void)snprintf(last, sizeof(last), "%s", name);
-		}
-
-		/* The value's length and bytes. */
-		offset += name_length;
-		value_length = (size_t)body[offset] << 8 | body[offset + 1U];
-		offset += 2U;
-		if (offset + value_length > length)
-			return EPROTO;
-
-		/* The values wanted, by the attribute's name. */
-		which = ipp_named(last);
-		if (which == 1 && tag == IPP_INTEGER && value_length == 4U)
-			answer->job_id = (int)ipp_be32(body + offset);
-		else if (which == 2 && tag == IPP_ENUM && value_length == 4U)
-			answer->job_state = (int)ipp_be32(body + offset);
-		else if (which == 3 && tag == IPP_MIME) {
-			answer->has_formats = 1;
-			pdf = 1;
-			if (value_length == 15U)
-				pdf = memcmp(body + offset, "application/pdf", 15U);
-			if (pdf == 0)
-				answer->has_pdf = 1;
-		} else if (which == 4 && answer->info[0] == '\0')
-			ipp_take_text(body + offset, value_length, tag, answer->info, sizeof(answer->info));
-		else if (which == 5 && answer->model[0] == '\0')
-			ipp_take_text(body + offset, value_length, tag, answer->model, sizeof(answer->model));
-		offset += value_length;
 	}
 
-	/* No end of the attributes. */
-	return EPROTO;
+	/* The colon after it. */
+	if (line[length] != ':')
+		return 0;
+
+	/* The value past the spaces. */
+	*value = line + length + 1U;
+	while (**value == ' ' || **value == '\t')
+		(*value)++;
+
+	/* Succeeded: the field is named so. */
+	return 1;
 }
 
 /*

@@ -19,7 +19,13 @@
  * and answers ACCEPTED or REJECTED for each job (after the copy into the
  * spool), STATE lines as its threads send them, PATH, NAMED, and IDLE <n>
  * once nothing was to do for a minute.  The end of descriptor 3 ends the
- * daemon at once: the jobs are stopped and the spool removed.
+ * daemon at once: the jobs are stopped and the spool removed.  So does a
+ * line it cannot take for a command, or a JOB without its descriptor: the
+ * backend starts another daemon (ws177-p022).
+ *
+ * The jobs accepted wait in the spool for their turn: one is sent at a time
+ * to each printer and four in all; an IPP job the printer took gives its
+ * place up while it is watched (ws177-p022, design §5.3).
  */
 
 #include "printd.h"
@@ -50,15 +56,17 @@
 #define PD_FDS_MAX		16U
 
 /*
- * The daemon: its spool, the jobs, the descriptors received and not yet
- * taken, the bytes of a line not yet ended, the commands received, the
- * spool's bytes in use, the user's and the host's names, the seed of the
- * LPD jobs' numbers, when it last had something to do and whether it said
- * it is idle; the lock of the socket's writes and of the jobs' flags.
+ * The daemon: its spool, the jobs and the order the next one accepted
+ * takes, the descriptors received and not yet taken, the bytes of a line
+ * not yet ended, the commands received, the spool's bytes in use, the
+ * user's and the host's names, the seed of the LPD jobs' numbers, when it
+ * last had something to do and whether it said it is idle; the lock of the
+ * socket's writes and of the jobs' flags.
  */
 struct pd_daemon {
 	char spool[512];
 	struct pd_job jobs[PD_JOBS_MAX];
+	uint64_t next_order;
 	int fds[PD_FDS_MAX];
 	size_t fd_count;
 	char line[PD_LINE_MAX + 1];
@@ -78,14 +86,17 @@ static struct pd_daemon daemon_state;
 
 int main(int argc, char **argv);
 static int pd_read(void);
-static void pd_command(char *line);
-static void pd_job(char *fields);
+static int pd_command(char *line);
+static int pd_job(char *fields);
 static void pd_cancel(char *fields);
 static void pd_name(char *fields);
 static int pd_bye(char *fields);
 static void *pd_job_thread(void *argument);
 static void *pd_name_thread(void *argument);
 static void pd_reap(void);
+static void pd_schedule(void);
+static int pd_place_free(const struct pd_job *job, unsigned *sending);
+static void pd_start_job(struct pd_job *job);
 static int pd_take_fd(void);
 static int pd_busy(void);
 static void pd_stop(void);
@@ -145,8 +156,9 @@ main(
 				break;
 		}
 
-		/* The jobs that ended, and a minute with nothing to do. */
+		/* The jobs that ended, those whose turn came, and a minute with nothing to do. */
 		pd_reap();
+		pd_schedule();
 		busy = pd_busy();
 		now = time(NULL);
 		if (!busy && !daemon_state.idle_told && now - daemon_state.active >= PD_IDLE_AFTER) {
@@ -214,6 +226,52 @@ pd_cancelled(
 	cancel = job->cancel;
 	(void)pthread_mutex_unlock(&daemon_state.lock);
 	return cancel;
+}
+
+/*
+ * Gives a job's sending place up: the printer took it (an IPP job watched
+ * from here), so that the next job for the printer may start.
+ */
+void
+pd_sent(
+	struct pd_job *job)
+{
+	/* The place, under the lock the main thread counts with. */
+	(void)pthread_mutex_lock(&daemon_state.lock);
+
+	job->sending = 0;
+
+	(void)pthread_mutex_unlock(&daemon_state.lock);
+}
+
+/*
+ * Waits a number of seconds, a second at a time, and stops early when the
+ * job is asked to stop.  Returns 1 when it was asked to stop, 0 after the
+ * wait.
+ */
+int
+pd_wait(
+	struct pd_job *job,
+	unsigned seconds)
+{
+	unsigned waited;
+	int stop;
+
+	/* A second at a time, looking at the job between. */
+	for (waited = 0; waited < seconds; waited++) {
+		stop = pd_cancelled(job);
+		if (stop)
+			return 1;
+		sleep(1);
+	}
+
+	/* The last look after the wait. */
+	stop = pd_cancelled(job);
+	if (stop)
+		return 1;
+
+	/* Succeeded: the whole wait went. */
+	return 0;
 }
 
 /* The user's login name, sent to the printers (IPP's requesting-user-name, LPD's P). */
@@ -327,19 +385,26 @@ pd_read(void)
 			continue;
 		}
 
-		/* A command. */
-		pd_command(daemon_state.line);
+		/* A command; one the daemon cannot take ends it. */
+		ending = pd_command(daemon_state.line);
+		if (ending)
+			return 1;
 	}
 
 	/* The socket goes on. */
 	return 0;
 }
 
-/* Carries out one command. */
-static void
+/*
+ * Carries out one command.  Returns 1 when the line breaks the protocol
+ * (a word that is no command, a JOB without its descriptor): the daemon
+ * then ends, and the backend starts another.
+ */
+static int
 pd_command(
 	char *line)
 {
+	int ending;
 	int job;
 	int cancel;
 	int name;
@@ -353,22 +418,34 @@ pd_command(
 	job = strncmp(line, "JOB ", 4U);
 	cancel = strncmp(line, "CANCEL ", 7U);
 	name = strncmp(line, "NAME ", 5U);
-	if (job == 0)
-		pd_job(line + 4);
-	else if (cancel == 0)
+	ending = 0;
+	if (job == 0) {
+		ending = pd_job(line + 4);
+	} else if (cancel == 0) {
 		pd_cancel(line + 7);
-	else if (name == 0)
+	} else if (name == 0) {
 		pd_name(line + 5);
-	else
+	} else {
+		/* A word that is no command: the two ends do not agree any more. */
 		pd_log("command not known");
+		ending = 1;
+	}
+
+	/* Reports whether the daemon is to end. */
+	if (ending)
+		return 1;
+
+	/* Succeeded: the command was carried out. */
+	return 0;
 }
 
 /*
  * A job: its document's descriptor taken from the FIFO, its fields
- * checked, the document copied into the spool (ACCEPTED or REJECTED), and
- * its thread started.
+ * checked, the document copied into the spool (ACCEPTED or REJECTED); it
+ * waits there for its turn (pd_schedule).  Returns 1 when no descriptor
+ * came with it (the daemon then ends).
  */
-static void
+static int
 pd_job(
 	char *fields)
 {
@@ -385,18 +462,21 @@ pd_job(
 	int lpd;
 	int fd;
 
-	/* The document, which every JOB line takes. */
+	/* The document, which every JOB line takes; a JOB without one breaks the protocol. */
 	fd = pd_take_fd();
+	if (fd < 0) {
+		pd_log("job without its document");
+		return 1;
+	}
 
 	/* The job's number. */
 	status = pd_word(&fields, word, sizeof(word));
 	if (status == 0)
 		status = pd_number(word, 0xffffffffUL, &number);
 	if (status != 0 || number == 0UL) {
-		if (fd >= 0)
-			(void)close(fd);
+		(void)close(fd);
 		pd_log("job line not readable");
-		return;
+		return 0;
 	}
 
 	/* A free slot. */
@@ -408,12 +488,11 @@ pd_job(
 		}
 	}
 
-	/* None free, or no document: busy. */
-	if (job == NULL || fd < 0) {
-		if (fd >= 0)
-			(void)close(fd);
+	/* None free: busy. */
+	if (job == NULL) {
+		(void)close(fd);
 		pd_send("REJECTED %lu busy", number);
-		return;
+		return 0;
 	}
 
 	/* The printer: protocol, host, port, path or queue; the title is the rest of the line. */
@@ -450,7 +529,7 @@ pd_job(
 		(void)close(fd);
 		memset(job, 0, sizeof(*job));
 		pd_send("REJECTED %lu protocol", number);
-		return;
+		return 0;
 	}
 
 	/* The document into the spool. */
@@ -459,26 +538,120 @@ pd_job(
 	if (status != 0) {
 		pd_send("REJECTED %lu %s", number, detail);
 		memset(job, 0, sizeof(*job));
-		return;
+		return 0;
 	}
 
-	/* Accepted: its bytes counted. */
+	/* Accepted: its bytes counted, its place in the order taken. */
 	daemon_state.used += job->size;
+	job->order = daemon_state.next_order;
+	daemon_state.next_order++;
 	pd_send("ACCEPTED %lu", number);
 	pd_log("job %lu accepted", number);
 
-	/* Sent by its own thread, after ACCEPTED is written. */
+	/* Sent when its turn comes, after ACCEPTED is written. */
+	pd_schedule();
+	return 0;
+}
+
+/*
+ * Starts the jobs whose turn came, oldest first: one at a time for each
+ * printer, PD_SENDING_MAX in all.
+ */
+static void
+pd_schedule(void)
+{
+	struct pd_job *oldest;
+	struct pd_job *job;
+	unsigned sending;
+	size_t index;
+	int free_place;
+
+	/* Until no waiting job may start. */
+	for (;;) {
+		/* The oldest waiting job whose printer has no job being sent. */
+		oldest = NULL;
+		sending = 0U;
+		for (index = 0; index < PD_JOBS_MAX; index++) {
+			job = &daemon_state.jobs[index];
+			if (job->job == 0U || job->started)
+				continue;
+			free_place = pd_place_free(job, &sending);
+			if (!free_place)
+				continue;
+			if (oldest == NULL || job->order < oldest->order)
+				oldest = job;
+		}
+
+		/* None, or every place taken. */
+		if (oldest == NULL || sending >= PD_SENDING_MAX)
+			return;
+
+		/* Its thread. */
+		pd_start_job(oldest);
+	}
+}
+
+/*
+ * Tells whether a job's printer has no job being sent, and counts the
+ * jobs being sent in all.
+ */
+static int
+pd_place_free(
+	const struct pd_job *job,
+	unsigned *sending)
+{
+	const struct pd_job *other;
+	size_t index;
+	int same_host;
+	int free_place;
+
+	/* The jobs holding a place, under the lock their threads change it with. */
+	free_place = 1;
+	*sending = 0U;
+	(void)pthread_mutex_lock(&daemon_state.lock);
+
+	for (index = 0; index < PD_JOBS_MAX; index++) {
+		other = &daemon_state.jobs[index];
+		if (other->job == 0U || !other->sending)
+			continue;
+		(*sending)++;
+		same_host = strcmp(other->host, job->host);
+		if (same_host == 0 &&
+		    other->port == job->port &&
+		    other->protocol == job->protocol)
+			free_place = 0;
+	}
+
+	(void)pthread_mutex_unlock(&daemon_state.lock);
+
+	/* Succeeded: whether the printer is free. */
+	return free_place;
+}
+
+/* Starts a job's thread, its place taken; a thread that cannot start fails the job. */
+static void
+pd_start_job(
+	struct pd_job *job)
+{
+	int status;
+
+	/* The place, taken before the thread runs. */
+	(void)pthread_mutex_lock(&daemon_state.lock);
+
+	job->sending = 1;
+
+	(void)pthread_mutex_unlock(&daemon_state.lock);
+
+	/* Its own thread sends it. */
+	job->started = 1;
 	status = pthread_create(&job->thread, NULL, pd_job_thread, job);
 	if (status != 0) {
-		pd_send("STATE %lu failed io", number);
+		pd_send("STATE %lu failed io", (unsigned long)job->job);
 		(void)unlink(job->file);
 		daemon_state.used -= job->size;
 		memset(job, 0, sizeof(*job));
 		return;
 	}
-
-	/* Started. */
-	job->started = 1;
 }
 
 /* Asks a job to stop; one not known is told as cancelled. */
@@ -486,6 +659,7 @@ static void
 pd_cancel(
 	char *fields)
 {
+	struct pd_job *job;
 	unsigned long number;
 	char word[16];
 	size_t index;
@@ -498,12 +672,26 @@ pd_cancel(
 	if (status != 0)
 		return;
 
-	/* The job, flagged; its thread stops at its next step. */
+	/* The job: one waiting for its turn ends at once, a thread's stops at its next step. */
 	for (index = 0; index < PD_JOBS_MAX; index++) {
-		if (daemon_state.jobs[index].job != (uint32_t)number)
+		job = &daemon_state.jobs[index];
+		if (job->job != (uint32_t)number)
 			continue;
+
+		/* Not started: its spool file goes, and it is cancelled. */
+		if (!job->started) {
+			(void)unlink(job->file);
+			daemon_state.used -= job->size;
+			memset(job, 0, sizeof(*job));
+			pd_send("STATE %lu cancelled", number);
+			return;
+		}
+
+		/* Flagged for its thread. */
 		(void)pthread_mutex_lock(&daemon_state.lock);
-		daemon_state.jobs[index].cancel = 1;
+
+		job->cancel = 1;
+
 		(void)pthread_mutex_unlock(&daemon_state.lock);
 		return;
 	}
@@ -596,10 +784,13 @@ pd_job_thread(
 	else
 		pd_lpd_job(job, (daemon_state.seed + job->job) % 1000U);
 
-	/* The spool file goes; the main thread reaps the job. */
+	/* The spool file goes; the main thread reaps the job, its place free. */
 	(void)unlink(job->file);
 	(void)pthread_mutex_lock(&daemon_state.lock);
+
+	job->sending = 0;
 	job->ended = 1;
+
 	(void)pthread_mutex_unlock(&daemon_state.lock);
 	return NULL;
 }
