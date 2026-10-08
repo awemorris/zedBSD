@@ -215,6 +215,8 @@ kl_text_area(
 		start = area->caret;
 		end = area->anchor;
 	}
+
+	/* Initializes the preedit composition. */
 	preedit_length = 0;
 	caret_offset = area->caret;
 	caret_shown = focused;
@@ -231,6 +233,8 @@ kl_text_area(
 			caret_offset += (size_t)preedit_begin;
 		}
 	}
+
+	/* Lays out the text with preedit composition for measurement. */
 	area_lay_out(&layout, style, text, area->length + preedit_length, width);
 
 	/* The area scrolls down or up just enough to keep the caret's line inside (a finger dragging a handle scrolls it itself). */
@@ -574,14 +578,20 @@ area_key(
 
 	/* Up and Down keep the place across; every other key forgets it. */
 	shift = modifiers & KL_MOD_SHIFT;
+
+	/* Scrolls up one line, preserving the column. */
 	if (code == KL_KEY_UP) {
 		area_vertical(area, style, width, -1, shift);
 		return 0;
 	}
+
+	/* Scrolls down one line, preserving the column. */
 	if (code == KL_KEY_DOWN) {
 		area_vertical(area, style, width, 1, shift);
 		return 0;
 	}
+
+	/* Other keys forget the goal column. */
 	area->goal_x = -1;
 
 	/* The keys that move along, erase, break the line and cancel. */

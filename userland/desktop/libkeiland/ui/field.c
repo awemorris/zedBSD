@@ -784,6 +784,8 @@ field_insert(
 		clean[length] = (char)byte;
 		length++;
 	}
+
+	/* Null-terminates the cleaned string. */
 	clean[length] = '\0';
 
 	/* The selection goes first. */
