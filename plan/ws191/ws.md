@@ -3,7 +3,7 @@
 # WS191: 再生の音を libkeiland の audio stream の口へ（compositor・backend、3 OS）
 
 <!-- awesome-plan-current:start -->
-Status: planned
+Status: incomplete
 Primary Milestone: MG006
 Related Milestones: MG007
 Objectives: O2
@@ -26,7 +26,7 @@ WS188 p003 の検査で、動画（videoplayer/audio.c）・音楽（music）・
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
 | p001 | 設計（stream の口、compositor の中継か fd の受け渡しか、遅れ、3 OS の backend）、design-reviewer | planned | — |
-| p002 | libkeiland・compositor・zedBSD の backend | planned | p001 |
+| [p002](phase002/phase.md) | libkeiland・compositor・zedBSD の backend | in-progress（実装と host 試験 PASS、2026-10-08 夜） | p001 |
 | p003 | app の移行（videoplayer・music・libmedia） | planned | p002 |
 | p004 | Linux・FreeBSD の backend | planned | p002 |
 | p005 | 規約の全文の見直し | planned | p003・p004 |

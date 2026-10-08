@@ -444,6 +444,18 @@
 		kl_progress;
 		kl_file_chooser_open;
 		kl_file_chooser_destroy;
+		kl_audio_stream_open;
+		kl_audio_stream_close;
+		kl_audio_stream_start;
+		kl_audio_stream_stop;
+		kl_audio_stream_flush;
+		kl_audio_stream_drain;
+		kl_audio_stream_write;
+		kl_audio_stream_written;
+		kl_audio_stream_consumed;
+		kl_audio_stream_position;
+		kl_audio_stream_capacity;
+		kl_audio_stream_dispatch;
 	local:
 		*;
 };

@@ -23,6 +23,8 @@ KEILAND_LINUX_KEILAND_SOURCES := userland/desktop/libkeiland/version.c \
 	userland/desktop/libkeiland/system/system-protocol.c \
 	userland/desktop/libkeiland/system/system-monitor.c \
 	userland/desktop/libkeiland/system/system-monitor-rate.c \
+	userland/desktop/libkeiland/audio/audio.c \
+	userland/desktop/libkeiland/audio/audio-protocol.c \
 	userland/desktop/settings-keys/settings-keys.c \
 	\
 	userland/desktop/libkeiland/ui/canvas.c \

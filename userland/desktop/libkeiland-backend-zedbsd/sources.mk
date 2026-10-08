@@ -14,6 +14,7 @@ KL_BACKEND_ZEDBSD_SOURCES := userland/desktop/libkeiland-backend/backend.c \
 	userland/desktop/libkeiland-backend-zedbsd/network-link-zedbsd.c \
 	userland/desktop/libkeiland-backend-zedbsd/monitor-zedbsd.c \
 	userland/desktop/libkeiland-backend-zedbsd/audio-zedbsd.c \
+	userland/desktop/libkeiland-backend-zedbsd/audio-stream-zedbsd.c \
 	userland/base/net/protocol.c userland/base/net/wifi-conf.c userland/base/net/wifi-store.c userland/base/net/netconf.c \
 	userland/desktop/libkeiland-backend-zedbsd/sharing-zedbsd.c userland/base/common/sha256.c \
 	userland/desktop/libkeiland-backend-zedbsd/power-zedbsd.c userland/desktop/libkeiland-backend-zedbsd/power-outcome.c \
@@ -27,6 +28,7 @@ KL_BACKEND_ZEDBSD_SOURCES := userland/desktop/libkeiland-backend/backend.c \
 	userland/desktop/libkeiland-backend-zedbsd/input-zedbsd.c \
 	userland/desktop/libkeiland-backend-zedbsd/display-zedbsd.c \
 	userland/desktop/libkeiland-backend/peer/peer-getpeereid.c \
+	userland/desktop/libkeiland-backend-zedbsd/peer-zedbsd.c \
 	userland/desktop/libkeiland-backend-zedbsd/gpu-zedbsd.c \
 	userland/desktop/libkeiland-backend-zedbsd/gpu-buffer-zedbsd.c \
 	userland/desktop/libkeiland-backend-zedbsd/scanout-zedbsd.c

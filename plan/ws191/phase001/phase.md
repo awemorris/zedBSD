@@ -90,3 +90,11 @@ should-fix 10:
 minor 15: D11 の誤り（videoplayer・music は libmedia を使わず vp_audio を直に、表を埋める者がこの WS にいない → libmedia から音を外すだけにするか表は後で）、libmedia は要素ごとに stream（ベータ 3 へ申し送り）、lost・failed の stream を本数に数えない、zedBSD の非 block connect は EAGAIN（unix-socket.c 2161〜2165）、audiod の ERROR の errno の写し、buffer の下限、EPIPE でも vp_audio の running を更新、struct vp_audio の field の直の参照（engine.c 985〜990 等）、WAYLAND_DISPLAY が無ければ ENOTSUP、§8 の 1 の作り方（wire.c と偽の server、libwayland は試験の BUILD で source から）、alsa の open を mutex で順に、pump の signal の block は PipeWire の thread に継がれる（U3）、書き間違い（D7 の §6.3→§6.4、phase.md 22 行の KL_VERSION 72、ws.md の PipeWire）、peer の file の置き場所の意図、kl_audio_format に版の欄が無い。
 確かめて正しかった: ring の offset、D9 の値、S-1 の audiod の振る舞い、kwl_emit_fd、visibility、D4・M-7、libwayland の prepare_read、pid の取得、D5、D11 の理由、S-8 の行、PENDING の 3 行、D2 と境界の検査、HAL は不要。
 再開: 第 3 版で B-1・should-fix を反映 → 再 review。
+
+## 第 3 版への review（design-reviewer、2026-10-08 夜）と第 4 版での扱い
+
+blocking 1: BL-1 時計の基準点を played にすると、audiod の FLUSH は played を変えない（main.c 374〜392、played は running の mix だけが書く mix.c 186〜188・274）ので、seek・file を開いた後・pause 中の seek のたびに時計が ring の残り（約 0.5 秒）先へずれる。→ 第 4 版: libkeiland は flush の成功の時に `flush_floor = consumed` を覚え、position は `max(played, flush_floor)`（単調）。Linux・FreeBSD の pump は flush と drop で played = read を書く。試験: 偽の audiod で stopped の flush → start の後の position の差、QEMU に seek。
+should-fix 7: S-1 制御の答えの前の lost（compositor は lost の前に未決の request に result(GONE)、libkeiland は lost・EOF で待ちを切り上げ EPIPE）、S-2 本物の audiod で running の flush 後も鳴ることを QEMU の seek で、S-3 曲の終わりの running のままの underrun の蓄積（→ underrun は start・制御の後に高々 1 回）、S-4 開き直す場所（lost の後、vp_open・mu_player_open の中で thread を join した後）、S-5 1 stream に未決の request は 1 つ（2 つ目は result(STATE)）、S-6 alsa の start_threshold（sw_params で 1 period、drain の初めに snd_pcm_start、pause は RUNNING の時だけ）、S-7 played_sequence 等の offset と assert。
+minor 12: Music は stream が無いと曲を開かない（M-6 の記述）、READY の period（libkeiland は照らさない、buffer 0 の時は capacity も event の値だけ）、audiod の EMFILE は FAILED、underrun の count の単位は OS ごと、throttle の最後の値（S-3 の規則で解消）、draining の flush の STOP 後の EAGAIN（error に依らず stopped）、unsupported の open の errno の写し、名の食い違い（KL_AUDIO_WIRE_FORMAT_*）、FreeBSD の compile の確かめは p004、Linux の終わりの判定は played で（申し送り）、U3 に fork の危険、QEMU の判定は guest の file から。
+
+2026-10-08 夜: 第 4 版（0cee7ee9b）を design-reviewer で再 review 中。

@@ -16,6 +16,7 @@ KEILAND_LINUX_BACKEND_SOURCES := userland/desktop/libkeiland-backend/backend.c \
 	userland/desktop/libkeiland-backend-linux/network-link-linux.c \
 	userland/desktop/libkeiland-backend-linux/monitor-linux.c \
 	userland/desktop/libkeiland-backend-linux/audio-linux.c \
+	userland/desktop/libkeiland-backend/unsupported/audio-stream-unsupported.c \
 	userland/desktop/libkeiland-backend-linux/power-linux.c \
 	userland/desktop/libkeiland-backend/unsupported/events-unsupported.c \
 	userland/desktop/libkeiland-backend/unsupported/account-unsupported.c \

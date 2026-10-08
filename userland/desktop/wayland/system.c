@@ -517,6 +517,9 @@ kwl_system_tick(
 	/* Bluetooth: the service's news, the answers and a pairing's questions (bluetooth-shell.c, ws143-p006). */
 	kwl_bluetooth_tick(server);
 
+	/* The sound's playback streams: what came of them, to their clients (audio-stream.c, WS191). */
+	kwl_audio_tick(server);
+
 	/* The removable media: a new list to every devices object, and volumed's answers (media.c, ws132-p004). */
 	changed = kwl_media_tick(server);
 	if ((changed & KL_BACKEND_VOLUMES_CHANGED_LIST) != 0U)
@@ -669,6 +672,7 @@ kwl_system_close(
 	kwl_sysmon_close(server);
 	kwl_machine_close(server);
 	kwl_bluetooth_close(server);
+	kwl_audio_close(server);
 
 	/* A job under way ends on its own (a file read or written to its end, a bus call answered). */
 	system_job_wait(&system_state.network_job);

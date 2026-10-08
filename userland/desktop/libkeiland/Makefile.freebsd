@@ -23,6 +23,8 @@ KEILAND_FREEBSD_KEILAND_SOURCES := userland/desktop/libkeiland/version.c \
 	userland/desktop/libkeiland/system/system-protocol.c \
 	userland/desktop/libkeiland/system/system-monitor.c \
 	userland/desktop/libkeiland/system/system-monitor-rate.c \
+	userland/desktop/libkeiland/audio/audio.c \
+	userland/desktop/libkeiland/audio/audio-protocol.c \
 	userland/desktop/settings-keys/settings-keys.c \
 	\
 	userland/desktop/libkeiland/ui/canvas.c \
@@ -59,4 +61,4 @@ KEILAND_FREEBSD_KEILAND_SOURCES := userland/desktop/libkeiland/version.c \
 	userland/desktop/libkeiland/ui/chooser-model.c \
 	userland/desktop/libkeiland/ui/chooser-view.c \
 	userland/desktop/picture/color-glyph.c
-$(eval $(call KEILAND_FREEBSD_LIBRARY,keiland,libkeiland.so,$(KEILAND_FREEBSD_KEILAND_SOURCES),libwayland-client.so libtruetype.so libpng-compat.so libvulkan.so.1,-lm,userland/desktop/libkeiland/exports.map))
+$(eval $(call KEILAND_FREEBSD_LIBRARY,keiland,libkeiland.so,$(KEILAND_FREEBSD_KEILAND_SOURCES),libwayland-client.so libtruetype.so libpng-compat.so libvulkan.so.1,-lm -pthread,userland/desktop/libkeiland/exports.map))
