@@ -2,7 +2,7 @@
 
 # ws191-p004: Linux（alsa-lib の dlopen）・FreeBSD（OSS）の backend と試験の client
 
-Status: in-progress（q895、P2。2026-10-08 夜 実装と host 試験。T1 の guest の試験を依頼する）
+Status: in-progress（q895、P2。2026-10-08 夜 実装と host 試験。T1 の guest の試験の依頼を Q1 に送った: test-wait）
 Disposition: normal
 Parent: [WS191](../ws.md)。設計は [design.md](../design.md) §6.4（第 5 版）。
 

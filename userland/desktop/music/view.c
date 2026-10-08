@@ -22,6 +22,7 @@
 #include "music.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* The albums' column: its width's share of the window and its limits, the title's band, a row's height. */
@@ -84,7 +85,7 @@ struct view_layout {
 static void view_layout(const struct mu_view *view, int width, int height, struct view_layout *layout);
 static void view_request(struct mu_view *view, unsigned action, long song, double seconds);
 static void view_sidebar(struct mu_view *view, struct kl_ui *ui, const struct kl_style *style, const struct kl_rect *area, uint64_t now_us);
-static void view_album_row(const struct kl_style *style, long album, const struct kl_rect *row, int selected);
+static void view_album_row(struct mu_view *view, const struct kl_style *style, long album, const struct kl_rect *row, int selected, uint64_t now_us);
 static void view_content(struct mu_view *view, struct kl_ui *ui, const struct kl_style *style, const struct kl_rect *area, uint64_t now_us);
 static void view_header(struct mu_view *view, struct kl_ui *ui, const struct kl_style *style, const struct kl_rect *area, const size_t *indices, size_t count, uint64_t now_us);
 static void view_song_row(const struct mu_view *view, const struct kl_style *style, size_t song, size_t place, const struct kl_rect *row, unsigned hit);
@@ -93,9 +94,9 @@ static int view_round_button(struct kl_ui *ui, const struct kl_style *style, uin
 static void view_glyph_play(struct kl_canvas *canvas, float cx, float cy, float size, kl_color color);
 static void view_glyph_pause(struct kl_canvas *canvas, float cx, float cy, float size, kl_color color);
 static void view_glyph_skip(struct kl_canvas *canvas, float cx, float cy, float size, int forward, kl_color color);
-static void view_cover(const struct kl_style *style, long album, int x, int y, int side, float radius);
+static void view_cover(struct mu_view *view, const struct kl_style *style, long album, int x, int y, int side, float radius, uint64_t now_us);
 static void view_time(double seconds, char *text, size_t size);
-static size_t view_shown(const struct mu_view *view, size_t *indices, size_t capacity);
+static size_t view_shown(struct mu_view *view, size_t **indices);
 
 /*
  * Makes the view's state: every song shown, nothing chosen or playing.
@@ -146,9 +147,33 @@ mu_view_release(
 		albums[index].picture_tried = 0;
 	}
 
-	/* The scrolls. */
+	/* The scrolls and the list. */
 	kl_scroll_release(&view->songs_scroll);
 	kl_scroll_release(&view->albums_scroll);
+	free(view->shown);
+	view->shown = NULL;
+	view->shown_room = 0;
+}
+
+/*
+ * Releases the albums' pictures the view made, before the collection is
+ * looked through again (the albums go with it).
+ */
+void
+mu_view_forget_pictures(
+	struct mu_view *view)
+{
+	struct mu_album *albums;
+	size_t count;
+	size_t index;
+
+	/* The pictures of the covers. */
+	(void)view;
+	albums = mu_albums(&count);
+	for (index = 0; index < count; index++) {
+		kl_image_release(&albums[index].picture);
+		albums[index].picture_tried = 0;
+	}
 }
 
 /*
@@ -161,7 +186,7 @@ mu_view_action(
 	unsigned action,
 	uint64_t now_us)
 {
-	size_t indices[MU_LIST_MAX];
+	size_t *indices;
 	size_t count;
 
 	/* Each action. */
@@ -170,7 +195,7 @@ mu_view_action(
 	case MU_ACTION_PLAY:
 		/* Nothing playing yet: the song chosen, or the first shown. */
 		if (view->playing < 0) {
-			count = view_shown(view, indices, MU_LIST_MAX);
+			count = view_shown(view, &indices);
 			if (view->chosen >= 0)
 				view_request(view, MU_ACTION_SONG, view->chosen, 0.0);
 			else if (count > 0U)
@@ -208,7 +233,7 @@ mu_view_key(
 	unsigned modifiers,
 	uint64_t now_us)
 {
-	size_t indices[MU_LIST_MAX];
+	size_t *indices;
 	size_t count;
 	size_t at;
 	size_t index;
@@ -239,7 +264,7 @@ mu_view_key(
 	}
 
 	/* Up and Down alone move, through the songs shown. */
-	count = view_shown(view, indices, MU_LIST_MAX);
+	count = view_shown(view, &indices);
 	if ((key != KL_KEY_UP && key != KL_KEY_DOWN) || count == 0U)
 		return;
 
@@ -555,7 +580,7 @@ view_sidebar(
 		/* The ground under the pointer, and the row. */
 		if ((hit & KL_HIT_HOT) != 0U)
 			kl_canvas_round(style->canvas, (float)row.x, (float)row.y, (float)row.width, (float)row.height, 10.0f, style->theme->hover);
-		view_album_row(style, album, &row, view->album == album);
+		view_album_row(view, style, album, &row, view->album == album, now_us);
 	}
 
 	/* The rows' clip goes, and the bar shows while the list moves. */
@@ -566,10 +591,12 @@ view_sidebar(
 /* Draws one row of the albums: the cover, the title and the artist (All Songs for -1). */
 static void
 view_album_row(
+	struct mu_view *view,
 	const struct kl_style *style,
 	long album,
 	const struct kl_rect *row,
-	int selected)
+	int selected,
+	uint64_t now_us)
 {
 	struct mu_album *albums;
 	const char *title;
@@ -585,7 +612,7 @@ view_album_row(
 
 	/* The cover. */
 	side = row->height - 12;
-	view_cover(style, album, row->x + 6, row->y + 6, side, 6.0f);
+	view_cover(view, style, album, row->x + 6, row->y + 6, side, 6.0f, now_us);
 
 	/* All Songs: the count of songs under it. */
 	albums = mu_albums(&count);
@@ -614,7 +641,7 @@ view_content(
 	const struct kl_rect *area,
 	uint64_t now_us)
 {
-	size_t indices[MU_LIST_MAX];
+	size_t *indices;
 	struct kl_rect header;
 	struct kl_rect list;
 	struct kl_rect row;
@@ -624,7 +651,7 @@ view_content(
 	size_t index;
 
 	/* The songs shown. */
-	count = view_shown(view, indices, MU_LIST_MAX);
+	count = view_shown(view, &indices);
 	(void)mu_songs(&total);
 
 	/* The header. */
@@ -713,7 +740,7 @@ view_header(
 
 	/* The cover. */
 	(void)now_us;
-	view_cover(style, view->album, area->x + 24, area->y + 24, VIEW_COVER, 10.0f);
+	view_cover(view, style, view->album, area->x + 24, area->y + 24, VIEW_COVER, 10.0f, now_us);
 
 	/* The title and the artist: the album's, or All Songs (the search's words when there are some). */
 	albums = mu_albums(&total);
@@ -946,7 +973,7 @@ view_bar(
 	}
 
 	/* The song. */
-	view_cover(style, (long)songs[view->playing].album, left, area->y + 12, 56, 6.0f);
+	view_cover(view, style, (long)songs[view->playing].album, left, area->y + 12, 56, 6.0f, now_us);
 	(void)kl_text_draw_fit(style->text, style->canvas, left + 68, area->y + 36, songs[view->playing].title, VIEW_TEXT_NAME, 1, words, style->theme->text);
 	(void)kl_text_draw_fit(style->text, style->canvas, left + 68, area->y + 56, songs[view->playing].artist, VIEW_TEXT_SMALL, 0, words, style->theme->text_secondary);
 }
@@ -1063,29 +1090,40 @@ view_glyph_skip(
 }
 
 /*
- * Draws an album's cover in a square (its picture, made from its bytes the
- * first time), or a tile with a note for an album without one and for All
- * Songs (-1).
+ * Draws an album's cover in a square (its picture, made from its file's
+ * bytes the first time it shows), or a tile with a note for an album
+ * without one, one whose cover could not be made (told once) and All Songs
+ * (-1).
  */
 static void
 view_cover(
+	struct mu_view *view,
 	const struct kl_style *style,
 	long album,
 	int x,
 	int y,
 	int side,
-	float radius)
+	float radius,
+	uint64_t now_us)
 {
 	struct mu_album *albums;
 	size_t count;
 	int error;
 
-	/* The album's picture, made once. */
+	/* The album's picture, made once: its bytes from the file, then the picture. */
 	albums = mu_albums(&count);
-	if (album >= 0 && (size_t)album < count && albums[album].cover != NULL && !albums[album].picture_tried) {
+	if (album >= 0 && (size_t)album < count && !albums[album].picture_tried && (albums[album].cover != NULL || albums[album].cover_path != NULL)) {
 		albums[album].picture_tried = 1;
-		error = mu_cover_picture(albums[album].cover, albums[album].cover_size, MU_COVER_SIDE, &albums[album].picture);
+		error = mu_library_cover_load((size_t)album);
+		if (error == 0)
+			error = mu_cover_picture(albums[album].cover, albums[album].cover_size, MU_COVER_SIDE, &albums[album].picture);
 		mu_log("COVER album=%ld error=%d", album, error);
+
+		/* A cover that could not be made: the note's tile, told the first time. */
+		if (error != 0 && !view->cover_told) {
+			view->cover_told = 1;
+			mu_view_notice(view, "A cover could not be shown.", now_us);
+		}
 	}
 
 	/* The picture. */
@@ -1126,16 +1164,36 @@ view_time(
 	(void)snprintf(text, size, "%ld:%02ld", whole / 60, whole % 60);
 }
 
-/* Lists the songs shown (those of the album chosen that match the search); reports how many. */
+/*
+ * Lists the songs shown (those of the album chosen that match the search)
+ * in the view's own list, as long as the collection; reports how many (0
+ * without memory for the list).
+ */
 static size_t
 view_shown(
-	const struct mu_view *view,
-	size_t *indices,
-	size_t capacity)
+	struct mu_view *view,
+	size_t **indices)
 {
+	size_t *grown;
+	size_t total;
 	size_t count;
 
+	/* The list as long as the collection. */
+	(void)mu_songs(&total);
+	if (view->shown_room < total || view->shown == NULL) {
+		grown = realloc(view->shown, (total + 1U) * sizeof(*grown));
+		if (grown == NULL) {
+			*indices = view->shown;
+			return 0;
+		}
+
+		/* The longer list. */
+		view->shown = grown;
+		view->shown_room = total + 1U;
+	}
+
 	/* The collection's list. */
-	count = mu_library_list(view->album, view->search.text, indices, capacity);
+	*indices = view->shown;
+	count = mu_library_list(view->album, view->search.text, view->shown, view->shown_room);
 	return count;
 }

@@ -71,12 +71,14 @@ def play(item):
 		audio = run.wait(r"MUSIC AUDIO error=\d+", mark, 5)
 		codec = run.wait(r"MUSIC CODEC load error=\d+", mark, 5)
 		glass = run.wait(r"MUSIC GLASS see_through=\d", mark, 5)
-		item.step("opened", f"{library}; {audio}; {codec}; {glass}")
+		cover = run.wait(r"MUSIC COVER album=0 error=-?\d+", mark, 5)
+		item.step("opened", f"{library}; {audio}; {codec}; {glass}; {cover}")
 		run.shot(item, "library")
 		item.check(library and library.endswith("songs=2 error=0"), "the two songs are not in the list")
 		item.check(audio and audio.endswith("error=0"), "no sound (audiod): on QEMU the guest needs a sound device, "
 			"--qemu-extra '-audiodev none,id=snd0 -device intel-hda -device hda-duplex,audiodev=snd0'")
 		item.check(codec and "error=0" in codec, "libavcodec did not load")
+		item.check(cover and cover.endswith("error=0"), "the album's cover was not read from its file and made (ws177-p020)")
 		gap = 8 if glass and glass.endswith("=1") else 0
 		share = min(max(int(window.width * 0.28), 220), 300)
 		# Play, at the top of the songs: the first song.
@@ -114,6 +116,13 @@ def play(item):
 		item.step("waited for the end", f"{ended}; {stopped}")
 		run.shot(item, "ended")
 		item.check(ended and stopped, "the last song did not end and stop")
+		# A folder added while Music is open: looked through again (ws177-p020); the same number in another folder is
+		# another album.
+		mark = run.mark()
+		run.sh(f"mkdir -p {FOLDER}/copy && cp {FOLDER}/01-tone-a.m4a {FOLDER}/copy/ && chmod -R a+rX {FOLDER}/copy")
+		rescan = run.wait(r"MUSIC RESCAN songs=\d+ albums=\d+ error=-?\d+", mark, 12)
+		item.step("a copy in ~/Music/AAT/copy", rescan or "")
+		item.check(rescan and rescan.endswith("songs=3 albums=2 error=0"), "the folder was not looked through again")
 		run.close(item, window)
 		# A file opened as Files opens it.
 		mark = run.mark()
@@ -122,8 +131,9 @@ def play(item):
 		found = run.wait(r"MUSIC FILE song=\d+ error=\d+", mark, 10)
 		started = run.wait(r"MUSIC PLAY song=\d+ error=\d+", mark, 10)
 		item.step("/bin/music 02-tone-b.m4a", f"{found}; {started}")
-		item.check(found and found.endswith("song=1 error=0"), "the file was not found in the list")
-		item.check(started and "song=1 error=0" in started, "the file did not play")
+		number = re.search(r"song=(\d+) error=0$", found or "")
+		item.check(number, "the file was not found in the list")
+		item.check(number and started and f"song={number.group(1)} error=0" in started, "the file did not play")
 		run.close(item, window)
 		item.person("the list with the album's cover, the bar with Tone A playing, the bar after the end")
 	finally:

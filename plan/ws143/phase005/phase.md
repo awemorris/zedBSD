@@ -692,3 +692,9 @@ i01a: hid-usb-p005 PASS、boot-test PASS、fidoctl-p004 PASS（USB の HID の�
 ## q896（ws143-p006）からの注記（2026-10-08、P1 の design review I4、Q1 が転記）
 
 Bluetooth の off は今は daemon の flag だけ。p005 の自動の再接続・page scan・LE の自動接続は off を守ること（off の間は再接続しない、page scan を止める）。
+
+## i02 の途中（2026-10-08 夜、P1 q904、BUG-267 の割り込みで区切った）
+
+- 方針: i02 を 4 つの commit の単位に分ける: i02a 純粋な部品（sdp・hidp・att・hidcache・snoop と host 試験）→ i02b router・l2cap の拡張・pair の handoff → i02c hid.c・privsep・main・protocol・bt の CLI → i02d loopback の作り直しと bt-hid-p005.sh、T1 の依頼。
+- ここまで（未試験、Makefile に未登録）: `userland/base/bluetoothd/sdp.[ch]`（ServiceSearchAttributeRequest の組み立て、continuation の繋ぎと 8 回の同じ continuation で protocol、data element の検査（深さ 8）、HID・PnP の record の読み）、`hidp.[ch]`（header）、`att.[ch]`（request の組み立て、PDU の解析、最小の server の答え）。host の cc で -Wall -Wextra -Werror の compile だけ通した。
+- 次: hidcache・snoop、`bt-daemon-host-test.sh` に i02a の host 試験（§7.4 の sdp・hidp・att・att の server・hidcache・snoop）、Makefile への登録。

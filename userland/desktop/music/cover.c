@@ -9,7 +9,8 @@
  * The picture of an album's cover (ws120-p009): the JPEG (libjpeg-compat,
  * through the decoding Image Viewer and Files share, userland/desktop/picture)
  * or the PNG (libpng-compat) an m4a holds, decoded and made a square of a
- * side for the view to draw at any size.
+ * side for the view to draw at any size: a cover that is not square gives
+ * its middle square (ws177-p020), as a record sleeve shows it.
  */
 
 #include "music.h"
@@ -29,8 +30,8 @@ static int cover_jpeg(const unsigned char *data, size_t size, struct kl_image *i
 static int cover_png(const unsigned char *data, size_t size, struct kl_image *image);
 
 /*
- * Makes the picture of a cover: a square of a side, the cover scaled into
- * it.  Returns 0 (the image's pixels are the caller's, kl_image_release),
+ * Makes the picture of a cover: a square of a side, the cover's middle
+ * square scaled into it.  Returns 0 (the image's pixels are the caller's, kl_image_release),
  * EINVAL for bytes that are not a JPEG or a PNG it reads, EFBIG, ENOMEM.
  */
 int
@@ -41,6 +42,8 @@ mu_cover_picture(
 	struct kl_image *image)
 {
 	struct kl_image decoded;
+	struct kl_image middle;
+	int shorter;
 	int error;
 
 	/* The cover as stored: a JPEG starts with FF D8, a PNG with its signature. */
@@ -61,8 +64,15 @@ mu_cover_picture(
 		return error;
 	}
 
-	/* Scaled. */
-	kl_image_scale(&decoded, image);
+	/* The middle square of the decoded cover (its rows and stride as they are), scaled. */
+	shorter = decoded.width;
+	if (decoded.height < shorter)
+		shorter = decoded.height;
+	middle = decoded;
+	middle.pixels = decoded.pixels + (size_t)((decoded.height - shorter) / 2) * decoded.stride + (size_t)((decoded.width - shorter) / 2);
+	middle.width = shorter;
+	middle.height = shorter;
+	kl_image_scale(&middle, image);
 
 	/* Succeeded: the decoded cover is not needed after. */
 	kl_image_release(&decoded);
