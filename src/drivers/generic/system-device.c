@@ -1036,8 +1036,13 @@ system_get_process_arguments(
 	output.version = KERN_SYSTEM_PROCESS_ARGUMENTS_VERSION;
 	output.struct_size = sizeof(output);
 
-	/* Succeeded or not as the copy is. */
-	return copyout(&output, argument, sizeof(output));
+	/* Gives the caller the line. */
+	error = copyout(&output, argument, sizeof(output));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller has the process's command line. */
+	return 0;
 }
 
 /* Finds the next process that uses a path or a mount. */

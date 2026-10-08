@@ -279,6 +279,9 @@ WINDOW_LINES = (
 	(re.compile(r"KWL GLASS dock surface=(\d+) .* x=(-?\d+) y=(-?\d+) w=(\d+) h=(\d+)"), "dock"),
 	(re.compile(r"KWL GLASS open-docked client=\d+ surface=(\d+) .* x=(-?\d+) y=(-?\d+) w=(\d+) h=(\d+)"), "dock"),
 	(re.compile(r"KWL GLASS undock surface=(\d+) via=\S+ x=(-?\d+) y=(-?\d+)"), "undock"),
+	# Leaving the docked mode floats every window quietly at its own place (T1-488: without it a window docked before
+	# kept the dock's place, and a click on its title went to the bar).
+	(re.compile(r"KWL LAYOUT float-quiet surface=(\d+) x=(-?\d+) y=(-?\d+) w=(\d+) h=(\d+)"), "float"),
 	(re.compile(r"KWL GLASS resized surface=(\d+) docked=(\d+) width=(\d+) height=(\d+)"), "resized"),
 	(re.compile(r"KWL WINDOW unfullscreen surface=(\d+) x=(-?\d+) y=(-?\d+)"), "at"),
 )
@@ -335,6 +338,9 @@ def windows_from(text: str) -> dict[tuple[int, int], dict]:
 				window["docked"] = 1
 			elif kind == "undock":
 				window["x"], window["y"] = numbers[1:3]
+				window["docked"] = 0
+			elif kind == "float":
+				window["x"], window["y"], window["width"], window["height"] = numbers[1:5]
 				window["docked"] = 0
 			elif kind == "resized":
 				window["docked"] = numbers[1]

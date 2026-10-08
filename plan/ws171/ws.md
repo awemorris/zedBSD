@@ -25,6 +25,6 @@ Primary Milestone: MG008
 
 | Phase | 内容 | Status | 依存 |
 | --- | --- | --- | --- |
-| p001 | 関数の一覧と今の comment の状態、各 architecture の実装の調べ、書き方の雛形（HAL v2 の comment を基に） | planning | — |
+| [p001](phase001/phase.md) | 関数の一覧と今の comment の状態、各 architecture の実装の調べ、書き方の雛形（HAL v2 の comment を基に） | cleared 候補（2026-10-09 P1: 130 関数、contract 20・short 62・none 42・placeholder 6、[inventory.md](phase001/inventory.md)） | — |
 | p002 | 差分の案（領域ごとに分けてよい: CPU・memory・IRQ・timer・console・rtc ほか）、ユーザーの review | planning | p001 |
 | p003 | 承認された差分の適用、build、実装と合わなかった点の bug 化 | planning | p002 |

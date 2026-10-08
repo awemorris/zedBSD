@@ -777,10 +777,20 @@ static int
 ecm_tx_status_is_error(
 	enum drv_usb_urb_status status)
 {
-	/* Succeeded or not as the status is one of the four. */
-	return status == DRV_USB_URB_STALL || status == DRV_USB_URB_TIMEOUT ||
-	       status == DRV_USB_URB_DISCONNECTED ||
-	       status == DRV_USB_URB_IO_ERROR;
+	/* A stall or a timeout of the endpoint. */
+	if (status == DRV_USB_URB_STALL)
+		return 1;
+	if (status == DRV_USB_URB_TIMEOUT)
+		return 1;
+
+	/* The device gone, or the controller's I/O error. */
+	if (status == DRV_USB_URB_DISCONNECTED)
+		return 1;
+	if (status == DRV_USB_URB_IO_ERROR)
+		return 1;
+
+	/* Succeeded: a completion or an administrative cancellation is no failure. */
+	return 0;
 }
 
 /*
