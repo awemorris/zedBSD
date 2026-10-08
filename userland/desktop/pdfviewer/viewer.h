@@ -350,7 +350,30 @@ struct pv_app {
 	size_t select_caret;
 	char *copy_text;
 	size_t copy_length;
+
+	/*
+	 * Drag and drop out of the window (ws189-p003): a press in the
+	 * selection that waits to drag its text (where it pressed), when the
+	 * last press went down (a press held still PV_DRAG_HOLD_MS on an
+	 * image drags the image), and the drag asked of main.c (PV_DRAG_*)
+	 * with the image's page and corners (page points, from the top left).
+	 */
+	int text_drag_armed;
+	int text_press_x;
+	int text_press_y;
+	uint64_t press_time;
+	int drag_request;
+	size_t drag_page;
+	double drag_quad[8];
 };
+
+/* The drags out of the window main.c is asked for (ws189-p003). */
+#define PV_DRAG_NONE		0
+#define PV_DRAG_TEXT		1
+#define PV_DRAG_IMAGE		2
+
+/* How long a press stays still on an image before its move drags the image, not the view (milliseconds). */
+#define PV_DRAG_HOLD_MS		400U
 
 /*
  * A place in the document: a page, and a point on it in points from its

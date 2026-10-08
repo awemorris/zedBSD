@@ -44,6 +44,9 @@
 /* Where the place shown stands in the view: across its middle, a third down. */
 #define FIND_SHOW_DOWN		3.0
 
+/* How far a press in the selection moves before its words are dragged out of the window (pixels, ws189-p003). */
+#define FIND_DRAG_DISTANCE	6
+
 static const struct pdf_page_text *find_page_text(struct pv_app *app, size_t index);
 static size_t find_query(const char *utf8, uint32_t *characters, size_t capacity);
 static int find_match(const struct pdf_page_text *text, size_t at, const uint32_t *query, size_t length);
@@ -184,11 +187,21 @@ pv_select_button(
 	const struct pdf_page_text *text;
 	struct pv_place place;
 	size_t index;
+	size_t low;
+	size_t high;
 	int hit;
 
 	/* The left button, over a document. */
 	if (event->button != PV_BUTTON_LEFT || !app->has_document)
 		return 0;
+
+	/* A release of a press in the selection that did not drag: a click, which lets the selection go (ws189-p003). */
+	if (!event->pressed && app->text_drag_armed) {
+		app->text_drag_armed = 0;
+		app->has_selection = 0;
+		app->dirty = 1;
+		return 1;
+	}
 
 	/* A release ends a selection under way. */
 	if (!event->pressed) {
@@ -224,6 +237,24 @@ pv_select_button(
 		return 0;
 	}
 
+	/* A press in the selection may drag its words out of the window, once it moves (ws189-p003). */
+	if (app->has_selection && place.page == app->select_page) {
+		low = app->select_anchor;
+		high = app->select_caret;
+		if (high < low) {
+			low = app->select_caret;
+			high = app->select_anchor;
+		}
+
+		/* The press is within it (a selection of one place is none). */
+		if (index >= low && index <= high && low != high) {
+			app->text_drag_armed = 1;
+			app->text_press_x = event->x;
+			app->text_press_y = event->y;
+			return 1;
+		}
+	}
+
 	/* The selection starts at the character. */
 	app->selecting = 1;
 	app->select_moved = 0;
@@ -250,7 +281,22 @@ pv_select_motion(
 	double top;
 	double left;
 	size_t index;
+	int distance_x;
+	int distance_y;
 	int hit;
+
+	/* A press in the selection moved far enough: its words are dragged out (main.c, ws189-p003). */
+	if (app->text_drag_armed) {
+		distance_x = abs(event->x - app->text_press_x);
+		distance_y = abs(event->y - app->text_press_y);
+		if (distance_x > FIND_DRAG_DISTANCE || distance_y > FIND_DRAG_DISTANCE) {
+			app->text_drag_armed = 0;
+			app->drag_request = PV_DRAG_TEXT;
+		}
+
+		/* The motion is the press's. */
+		return 1;
+	}
 
 	/* A selection under way. */
 	if (!app->selecting)
