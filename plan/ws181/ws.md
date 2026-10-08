@@ -47,3 +47,8 @@ Primary Milestone: MG006
 
 - ws142（app の切り替え・Alt+Tab・gesture）、ws099（compositor）、2026-10-06 の「最大化は desktop の tablet mode」の解釈（master の decisions-log）、docs/architecture/keiland.md の Desktop modes。
 
+
+## 追加の要望（2026-10-08 夜 ユーザーの UAT）
+
+- ユーザー:「ドックバーの仮想デスクトップのislandなのですが、使ってみたところ、やっぱりdockバーの中央がいい気がしました。ただ、dockingしたときは、今の位置にするのがいいと思います。試作の繰り返しで申し訳なく思いますが、通常優先度でスケジューリングしておいて、あとで見せてください！」
+- → 新しい Phase（次の番号、案）: bar の仮想 desktop の island を bar の中央に置く。窓が bar に dock している時は今の位置のまま。実装したら撮影をユーザーに見せる。優先度は通常（q906 以降で担当を割り当てる）。
