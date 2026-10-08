@@ -20,6 +20,13 @@
  *
  * --secret (ws102-p018) also offers x-kde-passwordManagerHint, the type a
  * password manager marks a secret with.
+ *
+ * A drag of text over the window (ws189-p002) is read at once at its
+ * enter -- before any drop, which the compositor answers with nothing,
+ * since a drag's data goes only to the window it is dropped on -- and is
+ * taken as a copy; dropped, it is read again and finished.  Lines:
+ * DATAPROBE drag enter|leave|drop and DATAPROBE drag received
+ * when=early|drop bytes=N text=...
  */
 
 #include <wayland-client.h>
@@ -86,6 +93,9 @@ struct probe {
 	const char *token;
 	/* Whether the text is secret (--secret: the source also offers the password managers' hint, ws102-p018). */
 	int secret;
+	/* The offer of a drag over the window (NULL for none), and the serial of its enter (ws189-p002). */
+	struct wl_data_offer *drag_offer;
+	uint32_t drag_serial;
 };
 
 static int probe_options(int count, char **arguments, struct probe *probe, unsigned *timeout);
@@ -94,6 +104,8 @@ static int probe_draw(struct probe *probe);
 static void probe_set_selection(struct probe *probe);
 static void probe_drop_source(struct probe *probe);
 static void probe_receive(struct probe *probe, struct wl_data_offer *offer);
+static size_t probe_read(struct probe *probe, struct wl_data_offer *offer, char *text);
+static void probe_drag_read(struct probe *probe, const char *when);
 static uint64_t probe_clock(void);
 static void registry_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version);
 static void registry_remove(void *data, struct wl_registry *registry, uint32_t name);
@@ -468,8 +480,7 @@ probe_drop_source(
 }
 
 /*
- * Receives an offer's text through a pipe: the offer is asked to write it,
- * then the pipe is read until its end (or a few seconds).
+ * Receives an offer's text through a pipe and logs it.
  */
 static void
 probe_receive(
@@ -477,6 +488,27 @@ probe_receive(
 	struct wl_data_offer *offer)
 {
 	char text[PROBE_TEXT_MAX + 1U];
+	size_t length;
+
+	/* The text. */
+	length = probe_read(probe, offer, text);
+
+	/* The log line (a line break in the text ends what is shown). */
+	printf("DATAPROBE received bytes=%u text=%s\n", (unsigned)length, text);
+	fflush(stdout);
+}
+
+/*
+ * Reads an offer's text through a pipe: the offer is asked to write it,
+ * then the pipe is read until its end (or a few seconds).  Returns the
+ * bytes, the text ended by a NUL.
+ */
+static size_t
+probe_read(
+	struct probe *probe,
+	struct wl_data_offer *offer,
+	char *text)
+{
 	struct pollfd descriptor;
 	uint64_t deadline;
 	uint64_t now;
@@ -487,10 +519,11 @@ probe_receive(
 	int ready;
 
 	/* The pipe; its writing end goes to the source's client. */
+	text[0] = '\0';
 	error = pipe(pipes);
 	if (error != 0) {
 		printf("DATAPROBE FAILED run=%s pipe errno=%d\n", probe->token, errno);
-		return;
+		return 0;
 	}
 
 	/* The offer is asked to write into it (the probe's copy of the writing end goes). */
@@ -525,9 +558,25 @@ probe_receive(
 	/* The reading end goes. */
 	close(pipes[0]);
 
-	/* The log line (a line break in the text ends what is shown). */
+	/* Succeeded: the text and its length. */
 	text[length] = '\0';
-	printf("DATAPROBE received bytes=%u text=%s\n", (unsigned)length, text);
+	return length;
+}
+
+/* Reads the drag's text over the window and logs it, with when it was read (early: at the enter; drop). */
+static void
+probe_drag_read(
+	struct probe *probe,
+	const char *when)
+{
+	char text[PROBE_TEXT_MAX + 1U];
+	size_t length;
+
+	/* The text. */
+	length = probe_read(probe, probe->drag_offer, text);
+
+	/* The log line the tests read. */
+	printf("DATAPROBE drag received when=%s bytes=%u text=%s\n", when, (unsigned)length, text);
 	fflush(stdout);
 }
 
@@ -829,7 +878,10 @@ device_data_offer(
 	fflush(stdout);
 }
 
-/* Drag and drop is not used. */
+/*
+ * A drag came over the window: its text is read at once (the compositor
+ * gives nothing before a drop), then taken as a copy when it has text.
+ */
 static void
 device_enter(
 	void *data,
@@ -840,26 +892,62 @@ device_enter(
 	wl_fixed_t y,
 	struct wl_data_offer *offer)
 {
-	UNUSED_PARAMETER(data);
+	struct probe *probe;
+	uint32_t version;
+
 	UNUSED_PARAMETER(device);
-	UNUSED_PARAMETER(serial);
 	UNUSED_PARAMETER(surface);
 	UNUSED_PARAMETER(x);
 	UNUSED_PARAMETER(y);
-	UNUSED_PARAMETER(offer);
+
+	/* An earlier drag's offer goes; a drag without data has nothing to read. */
+	probe = data;
+	if (probe->drag_offer != NULL && probe->drag_offer != offer)
+		wl_data_offer_destroy(probe->drag_offer);
+	probe->drag_offer = offer;
+	probe->drag_serial = serial;
+	printf("DATAPROBE drag enter text=%d\n", probe->offer_text);
+	fflush(stdout);
+	if (offer == NULL)
+		return;
+
+	/* Read before any drop. */
+	probe_drag_read(probe, "early");
+
+	/* Taken as a copy when it has text, refused otherwise. */
+	if (probe->offer_text) {
+		wl_data_offer_accept(offer, serial, PROBE_TYPE_UTF8);
+	} else {
+		wl_data_offer_accept(offer, serial, NULL);
+	}
+
+	/* A copy, the one action taken (version 3). */
+	version = wl_proxy_get_version((struct wl_proxy *)offer);
+	if (version >= 3U)
+		wl_data_offer_set_actions(offer, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
+	(void)wl_display_flush(probe->display);
 }
 
-/* Drag and drop is not used. */
+/* The drag left the window: its offer goes. */
 static void
 device_leave(
 	void *data,
 	struct wl_data_device *device)
 {
-	UNUSED_PARAMETER(data);
+	struct probe *probe;
+
 	UNUSED_PARAMETER(device);
+
+	/* The offer, and the line. */
+	probe = data;
+	if (probe->drag_offer != NULL)
+		wl_data_offer_destroy(probe->drag_offer);
+	probe->drag_offer = NULL;
+	printf("DATAPROBE drag leave\n");
+	fflush(stdout);
 }
 
-/* Drag and drop is not used. */
+/* The drag moves over the window: nothing to do. */
 static void
 device_motion(
 	void *data,
@@ -875,14 +963,34 @@ device_motion(
 	UNUSED_PARAMETER(y);
 }
 
-/* Drag and drop is not used. */
+/* The drag was dropped on the window: its text is read and the drop finished. */
 static void
 device_drop(
 	void *data,
 	struct wl_data_device *device)
 {
-	UNUSED_PARAMETER(data);
+	struct probe *probe;
+	uint32_t version;
+
 	UNUSED_PARAMETER(device);
+
+	/* Only a drag with an offer. */
+	probe = data;
+	printf("DATAPROBE drag drop\n");
+	fflush(stdout);
+	if (probe->drag_offer == NULL)
+		return;
+
+	/* The text, now the window's. */
+	probe_drag_read(probe, "drop");
+
+	/* Finished (version 3), and the offer goes. */
+	version = wl_proxy_get_version((struct wl_proxy *)probe->drag_offer);
+	if (version >= 3U)
+		wl_data_offer_finish(probe->drag_offer);
+	wl_data_offer_destroy(probe->drag_offer);
+	probe->drag_offer = NULL;
+	(void)wl_display_flush(probe->display);
 }
 
 /*
