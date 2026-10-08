@@ -38,8 +38,9 @@
 /*
  * What a song's file says of it: its title, artist, album's artist and
  * album, its number on the album (0 for none), its length, its cover (the
- * bytes of a JPEG or PNG, allocated; NULL for none), and whether it has a
- * track of sound and one of pictures.
+ * bytes of a JPEG or PNG, allocated; NULL for none; has_cover says the file
+ * has one even where the bytes are not kept), and whether it has a track of
+ * sound and one of pictures.
  */
 struct mu_tags {
 	char title[MU_TEXT_MAX];
@@ -50,6 +51,7 @@ struct mu_tags {
 	int64_t duration_ms;
 	unsigned char *cover;
 	size_t cover_size;
+	int has_cover;
 	int has_sound;
 	int has_video;
 };
@@ -69,15 +71,18 @@ struct mu_song {
 };
 
 /*
- * One album: its title and artist, its cover's bytes (the first song's
- * with one; NULL for none) and its picture made from them when it is first
- * drawn (its pixels NULL until then, or when it cannot be made: picture_tried
- * says it was tried).  The library owns the strings and the bytes; the view
- * makes the picture and releases it (mu_view_release).
+ * One album: its title and artist, the file of its first song with a cover
+ * (NULL for none), the cover's bytes read from it when the album is first
+ * drawn (mu_library_cover_load; NULL until then), and its picture made from
+ * them (its pixels NULL until then, or when it cannot be made:
+ * picture_tried says it was tried).  The library owns the strings and the
+ * bytes; the view makes the picture and releases it (mu_view_release,
+ * mu_view_forget_pictures).
  */
 struct mu_album {
 	char *title;
 	char *artist;
+	char *cover_path;
 	unsigned char *cover;
 	size_t cover_size;
 	struct kl_image picture;
@@ -106,9 +111,6 @@ struct mu_request {
 #define MU_STOPPED		0U
 #define MU_PLAYING		1U
 #define MU_PAUSED		2U
-
-/* The most songs a list shows. */
-#define MU_LIST_MAX		4096U
 
 /* The side of an album's picture made from its cover (pixels). */
 #define MU_COVER_SIDE		160
@@ -155,6 +157,11 @@ struct mu_view {
 	uint64_t notice_until;
 	int glass;
 	int quit;
+
+	/* The songs shown, the view's own list (as long as the collection), and whether a cover's failure was told. */
+	size_t *shown;
+	size_t shown_room;
+	int cover_told;
 };
 
 /* The tags of a file (tags.c). */
@@ -162,8 +169,13 @@ int mu_tags_read(const char *path, struct mu_tags *tags);
 void mu_tags_release(struct mu_tags *tags);
 
 /* The collection (library.c). */
+void mu_library_set_cache(const char *path);
 int mu_library_scan(const char *folder);
+int mu_library_changed(void);
+int mu_library_rescan(void);
 int mu_library_add_file(const char *path, long *song);
+long mu_library_find(const char *path);
+int mu_library_cover_load(size_t album);
 const struct mu_song *mu_songs(size_t *count);
 struct mu_album *mu_albums(size_t *count);
 size_t mu_library_list(long album, const char *search, size_t *indices, size_t capacity);
@@ -176,6 +188,7 @@ int mu_cover_picture(const unsigned char *data, size_t size, int side, struct kl
 /* The view (view.c). */
 int mu_view_init(struct mu_view *view);
 void mu_view_release(struct mu_view *view);
+void mu_view_forget_pictures(struct mu_view *view);
 void mu_view_action(struct mu_view *view, unsigned action, uint64_t now_us);
 void mu_view_key(struct mu_view *view, uint32_t key, unsigned modifiers, uint64_t now_us);
 int mu_view_wait(const struct mu_view *view, uint64_t now_us);

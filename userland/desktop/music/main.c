@@ -45,15 +45,17 @@
 /* Previous goes to the start of the song instead after this far into it (s). */
 #define MU_RESTART		3.0
 
-/* The folder of the songs under the home. */
+/* The folder of the songs under the home, and how often it is looked at for a change (microseconds). */
 #define MU_FOLDER		"Music"
+#define MU_LOOK_US		5000000U
 
 /*
  * The window's state: the application, the window and its input, the
  * frame (its pixels, size and canvas), the text and the style, the view,
  * the player, whether a frame is due, the window changed size, a widget
- * moves, the glass was decided, and the last quarter of a second and the
- * last two seconds of the position told (for the frames and the log).
+ * moves, the glass was decided, the last quarter of a second and the
+ * last two seconds of the position told (for the frames and the log), and
+ * when the folder was last looked at for a change.
  */
 struct mu_window {
 	struct kl_app *app;
@@ -74,6 +76,7 @@ struct mu_window {
 	int glass_decided;
 	long quarter;
 	long logged;
+	uint64_t looked;
 };
 
 /* The window's menu. */
@@ -96,6 +99,9 @@ static void mu_play_song(struct mu_window *music, long song, uint64_t now_us);
 static void mu_toggle(struct mu_window *music, uint64_t now_us);
 static void mu_step(struct mu_window *music, int step, uint64_t now_us);
 static void mu_follow(struct mu_window *music, uint64_t now_us);
+static void mu_look(struct mu_window *music, uint64_t now_us);
+static void mu_reload(struct mu_window *music, uint64_t now_us);
+static char *mu_copy(const char *text);
 static int mu_resize(struct mu_window *music);
 static void mu_draw(struct mu_window *music, uint64_t now_us);
 static int mu_wait(const struct mu_window *music, uint64_t now_us);
@@ -411,6 +417,7 @@ mu_loop(
 		now = kl_clock_us();
 		mu_requests(music, now);
 		mu_follow(music, now);
+		mu_look(music, now);
 
 		/* The end: the window closed or Quit. */
 		if (music->view.quit) {
@@ -672,6 +679,124 @@ mu_follow(
 		music->logged = two;
 		mu_log("POSITION song=%ld ms=%lld", music->view.playing, (long long)(position * 1000.0));
 	}
+}
+
+/* Looks at the folder every few seconds; when it changed, the collection is made again. */
+static void
+mu_look(
+	struct mu_window *music,
+	uint64_t now_us)
+{
+	int changed;
+
+	/* Not yet. */
+	if (now_us - music->looked < MU_LOOK_US)
+		return;
+	music->looked = now_us;
+
+	/* Changed: looked through again. */
+	changed = mu_library_changed();
+	if (changed)
+		mu_reload(music, now_us);
+}
+
+/*
+ * Looks through the folder again and keeps what plays, the song chosen and
+ * the album chosen (by the songs' files and the album's name); a song
+ * playing that went stops.
+ */
+static void
+mu_reload(
+	struct mu_window *music,
+	uint64_t now_us)
+{
+	const struct mu_song *songs;
+	struct mu_album *albums;
+	size_t song_count;
+	size_t album_count;
+	size_t index;
+	char *playing;
+	char *chosen;
+	char *title;
+	char *artist;
+	int same;
+	int error;
+
+	/* What is shown, by name. */
+	playing = NULL;
+	chosen = NULL;
+	title = NULL;
+	artist = NULL;
+	songs = mu_songs(&song_count);
+	albums = mu_albums(&album_count);
+	if (music->view.playing >= 0 && (size_t)music->view.playing < song_count)
+		playing = mu_copy(songs[music->view.playing].path);
+	if (music->view.chosen >= 0 && (size_t)music->view.chosen < song_count)
+		chosen = mu_copy(songs[music->view.chosen].path);
+	if (music->view.album >= 0 && (size_t)music->view.album < album_count) {
+		title = mu_copy(albums[music->view.album].title);
+		artist = mu_copy(albums[music->view.album].artist);
+	}
+
+	/* The collection again; the pictures go with the albums. */
+	mu_view_forget_pictures(&music->view);
+	error = mu_library_rescan();
+	songs = mu_songs(&song_count);
+	albums = mu_albums(&album_count);
+	mu_log("RESCAN songs=%lu albums=%lu error=%d", (unsigned long)song_count, (unsigned long)album_count, error);
+
+	/* The songs, found again by their files. */
+	music->view.playing = -1;
+	music->view.chosen = -1;
+	if (playing != NULL)
+		music->view.playing = mu_library_find(playing);
+	if (chosen != NULL)
+		music->view.chosen = mu_library_find(chosen);
+
+	/* A song playing that went: stopped. */
+	if (playing != NULL && music->view.playing < 0) {
+		mu_player_close(&music->player);
+		music->view.state = MU_STOPPED;
+		music->view.position = 0.0;
+		mu_log("GONE song=-1");
+		mu_view_notice(&music->view, "This song's file is gone.", now_us);
+	}
+
+	/* The album, found again by its name and artist (every song when it went). */
+	music->view.album = -1;
+	for (index = 0; title != NULL && artist != NULL && index < album_count; index++) {
+		same = strcmp(albums[index].title, title) == 0 && strcmp(albums[index].artist, artist) == 0;
+		if (same) {
+			music->view.album = (long)index;
+			break;
+		}
+	}
+
+	/* The names, and a frame. */
+	free(playing);
+	free(chosen);
+	free(title);
+	free(artist);
+	music->dirty = 1;
+}
+
+/* Copies a string (NULL without memory). */
+static char *
+mu_copy(
+	const char *text)
+{
+	size_t length;
+	char *copy;
+
+	/* The bytes with the NUL. */
+	length = strlen(text) + 1U;
+	copy = malloc(length);
+	if (copy == NULL)
+		return NULL;
+	memcpy(copy, text, length);
+
+	/* Succeeded: the copy. */
+	return copy;
 }
 
 /*

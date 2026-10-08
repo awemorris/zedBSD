@@ -115,6 +115,7 @@ main(
 
 	/* The collection. */
 	(void)snprintf(folder, sizeof(folder), "%s/Music", argv[4]);
+	mu_library_set_cache(NULL);
 	error = mu_library_scan(folder);
 	songs = mu_songs(&count);
 	if (error != 0 || count != 14U) {

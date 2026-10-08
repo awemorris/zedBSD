@@ -8,7 +8,9 @@
 /*
  * The host test of Music's tags and collection (ws120-p008): the files
  * make-m4a.py writes are read into the collection, and its order, names,
- * covers, search, next songs and the files added from outside are checked.
+ * covers, search, next songs and the files added from outside are checked
+ * (without the cache of the tags; ws177-p020 changed the depth, the .mp4
+ * with pictures and the covers read when first drawn).
  *   host-music-library FOLDER     (FOLDER/Music and the files beside it)
  */
 
@@ -70,16 +72,18 @@ main(
 	error = mu_tags_read(path, &tags);
 	test_check("tags-broken", error == EINVAL, "not an MP4");
 
-	/* The folder's songs, in order. */
+	/* The folder's songs, in order (no cache). */
+	mu_library_set_cache(NULL);
 	(void)snprintf(path, sizeof(path), "%s/Music", argv[1]);
 	error = mu_library_scan(path);
 	test_check("scan", error == 0, path);
 	songs = mu_songs(&song_count);
 	albums = mu_albums(&album_count);
-	test_check("scan-count", song_count == 6U && album_count == 4U, "6 songs in 4 albums");
+	test_check("scan-count", song_count == 8U && album_count == 4U, "8 songs in 4 albums");
 	test_check("order", test_title(0, "First Song") && test_title(1, "Second Song") && test_title(2, "Voice Memo") &&
-	    test_title(3, "Bob's Tune") && test_title(4, "Caf\xc3\xa9") && test_title(5, "untagged"), "by album, number, title");
-	if (song_count != 6U || album_count != 4U)
+	    test_title(3, "Bob's Tune") && test_title(4, "Caf\xc3\xa9") && test_title(5, "A Clip") &&
+	    test_title(6, "Too Deep") && test_title(7, "untagged"), "by album, number, title");
+	if (song_count != 8U || album_count != 4U)
 		return 1;
 
 	/* The albums: titles, artists, covers. */
@@ -87,9 +91,13 @@ main(
 	    strcmp(albums[2].title, "Mix") == 0 && strcmp(albums[3].title, "Unknown Album") == 0, albums[0].title);
 	test_check("album-artist", strcmp(albums[0].artist, "Ann") == 0 && strcmp(albums[2].artist, "Various") == 0 &&
 	    strcmp(albums[3].artist, "Unknown Artist") == 0, albums[2].artist);
-	test_check("album-cover", albums[0].cover != NULL && albums[0].cover_size == 10U && albums[2].cover == NULL,
-	    "Blue has a cover, Mix none");
-	test_check("song-artist", strcmp(songs[3].artist, "Bob") == 0 && strcmp(songs[5].artist, "Unknown Artist") == 0,
+	test_check("album-cover-later", albums[0].cover == NULL && albums[0].cover_path != NULL && albums[2].cover_path == NULL,
+	    "Blue's cover read later, Mix none");
+	error = mu_library_cover_load(0);
+	test_check("album-cover", error == 0 && albums[0].cover != NULL && albums[0].cover_size == 10U, "Blue's cover read");
+	error = mu_library_cover_load(2);
+	test_check("album-cover-none", error == 0 && albums[2].cover == NULL, "Mix has none");
+	test_check("song-artist", strcmp(songs[3].artist, "Bob") == 0 && strcmp(songs[7].artist, "Unknown Artist") == 0,
 	    songs[3].artist);
 	test_check("song-length", songs[0].duration_ms == 61000 && songs[3].duration_ms == 3723000, "61 s, 1:02:03");
 	test_check("song-album", songs[0].album == 0U && songs[1].album == 0U && songs[3].album == 2U && songs[4].album == 2U,
@@ -104,17 +112,17 @@ main(
 	test_check("list-capacity", mu_library_list(-1, "", indices, 3) == 3U, "at most the capacity");
 
 	/* The next songs. */
-	test_check("next", mu_library_next(1, 1) == 2 && mu_library_next(5, 1) == -1 && mu_library_next(0, -1) == -1 &&
+	test_check("next", mu_library_next(1, 1) == 2 && mu_library_next(7, 1) == -1 && mu_library_next(0, -1) == -1 &&
 	    mu_library_next(3, -1) == 2, "through the albums, -1 past the ends");
 
 	/* A file from outside, in its album's order; again, the same; a video, refused. */
 	(void)snprintf(path, sizeof(path), "%s/outside.m4a", argv[1]);
 	error = mu_library_add_file(path, &song);
 	songs = mu_songs(&song_count);
-	test_check("add", error == 0 && song == 2 && song_count == 7U && test_title(2, "Outside"), "third of Blue");
+	test_check("add", error == 0 && song == 2 && song_count == 9U && test_title(2, "Outside"), "third of Blue");
 	error = mu_library_add_file(path, &song);
 	mu_songs(&song_count);
-	test_check("add-again", error == 0 && song == 2 && song_count == 7U, "found");
+	test_check("add-again", error == 0 && song == 2 && song_count == 9U, "found");
 	(void)snprintf(path, sizeof(path), "%s/film.m4a", argv[1]);
 	error = mu_library_add_file(path, &song);
 	test_check("add-video", error == ENOTSUP, "no sound");
