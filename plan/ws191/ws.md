@@ -28,5 +28,5 @@ WS188 p003 の検査で、動画（videoplayer/audio.c）・音楽（music）・
 | p001 | 設計（stream の口、compositor の中継か fd の受け渡しか、遅れ、3 OS の backend）、design-reviewer | planned | — |
 | [p002](phase002/phase.md) | libkeiland・compositor・zedBSD の backend | in-progress（実装と host 試験 PASS、2026-10-08 夜） | p001 |
 | [p003](phase003/phase.md) | app の移行（videoplayer・music）、libmedia から音を外す | in-progress（実装と host の確認、T1 の試験を依頼） | p002 |
-| p004 | Linux・FreeBSD の backend | planned | p002 |
+| [p004](phase004/phase.md) | Linux・FreeBSD の backend | in-progress（実装と host 試験、T1 の guest の試験を依頼） | p002 |
 | p005 | 規約の全文の見直し | planned | p003・p004 |

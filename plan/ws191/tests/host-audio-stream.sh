@@ -39,3 +39,11 @@ $cc -std=gnu17 -D_GNU_SOURCE -O1 -g -Wall -Wextra -Werror -pthread $san -I. \
 	$U/libkeiland-backend-zedbsd/audio-stream-zedbsd.c plan/ws191/tests/host-audiod.c -o "$work/host-audiod"
 timeout 60 "$work/host-audiod"
 echo "WS191 p002 host audio stream tests PASS (ASan/UBSan)"
+
+# ws191-p004: the Linux backend (audio-stream-linux.c and the pump) over a stand-in alsa-lib.
+$cc -std=gnu17 -O1 -g -Wall -Wextra -Werror -fPIC -shared -pthread plan/ws191/tests/fake-alsa.c -o "$work/fake-alsa.so"
+$cc -std=gnu17 -D_GNU_SOURCE -O1 -g -Wall -Wextra -Werror -pthread $san -I. -DKL_BACKEND_ALSA_LIBRARY="\"$work/fake-alsa.so\"" \
+	$U/libkeiland-backend-linux/audio-stream-linux.c $U/libkeiland-backend/audio/pump.c plan/ws191/tests/host-pump.c -ldl \
+	-o "$work/host-pump"
+timeout 60 "$work/host-pump"
+echo "WS191 p004 host pump test PASS (ASan/UBSan)"
