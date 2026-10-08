@@ -24,6 +24,9 @@ structures, constants, errors and permissions that programs and people use
 - [Security keys and smart card readers](security-keys.md): the raw HID nodes
   of FIDO keys and the slots of USB CCID readers, their requests and
   permissions.
+- [Vulkan Video decode](vulkan-video.md): H.264 decode on Intel Gen12's video
+  engine through the Vulkan Video extensions, its limits, result status and
+  differences from the specification.
 
 ## System administration
 

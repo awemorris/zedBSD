@@ -1660,6 +1660,7 @@ test_properties(void)
 	VkPhysicalDeviceSynchronization2Features synchronization;
 	VkPhysicalDeviceFeatures2 features;
 	VkQueueFamilyQueryResultStatusPropertiesKHR result_status;
+	VkQueueFamilyQueryResultStatusPropertiesKHR graphics_status;
 	VkQueueFamilyVideoPropertiesKHR video[2];
 	VkQueueFamilyProperties2 properties[2];
 	VkVideoDecodeH264ProfileInfoKHR h264;
@@ -1679,12 +1680,16 @@ test_properties(void)
 	vkGetPhysicalDeviceFeatures2KHR(&physical, &features);
 	assert(synchronization.synchronization2 == VK_TRUE);
 
-	/* Each family reports its codec operations; no family reports result status. */
+	/* Each family reports its codec operations; the video family reports result status (ws083-p008), the other not. */
 	memset(video, 0, sizeof(video));
 	memset(&result_status, 0, sizeof(result_status));
 	result_status.sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_QUERY_RESULT_STATUS_PROPERTIES_KHR;
-	result_status.queryResultStatusSupport = VK_TRUE;
+	result_status.queryResultStatusSupport = VK_FALSE;
+	memset(&graphics_status, 0, sizeof(graphics_status));
+	graphics_status.sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_QUERY_RESULT_STATUS_PROPERTIES_KHR;
+	graphics_status.queryResultStatusSupport = VK_TRUE;
 	video[0].sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_VIDEO_PROPERTIES_KHR;
+	video[0].pNext = &graphics_status;
 	video[0].videoCodecOperations = 0xffff;
 	video[1].sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_VIDEO_PROPERTIES_KHR;
 	video[1].pNext = &result_status;
@@ -1699,7 +1704,8 @@ test_properties(void)
 	assert(properties[1].queueFamilyProperties.queueFlags == VK_QUEUE_VIDEO_DECODE_BIT_KHR);
 	assert(video[0].videoCodecOperations == 0);
 	assert(video[1].videoCodecOperations == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR);
-	assert(result_status.queryResultStatusSupport == VK_FALSE);
+	assert(result_status.queryResultStatusSupport == VK_TRUE);
+	assert(graphics_status.queryResultStatusSupport == VK_FALSE);
 
 	/* A decode picture with a profile list is checked locally, then given the renderer's limits. */
 	memset(&h264, 0, sizeof(h264));

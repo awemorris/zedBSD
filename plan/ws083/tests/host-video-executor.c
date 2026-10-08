@@ -13,7 +13,8 @@
  * services of i915-vk-render-stubs.inc), and checks the replies, the
  * capset's native word, the families, the slot rules a submission is held
  * to (refused with VK_ERROR_DEVICE_LOST) and the bitstream checks that skip
- * a picture.
+ * a picture; and the result status queries of decodes (ws083-p008), whose
+ * pool and query records are built here by hand.
  */
 
 #include "../../ws031/tests/i915-vk-render-stubs.inc"
@@ -30,6 +31,15 @@
 #define FIXTURE_ALLOCATE_COMMAND_BUFFERS	88U
 #define FIXTURE_BEGIN_COMMAND_BUFFER		90U
 #define FIXTURE_END_COMMAND_BUFFER		91U
+#define FIXTURE_CREATE_QUERY_POOL		47U
+#define FIXTURE_GET_QUERY_POOL_RESULTS		49U
+#define FIXTURE_CMD_BEGIN_QUERY			127U
+#define FIXTURE_CMD_END_QUERY			128U
+#define FIXTURE_CMD_RESET_QUERY_POOL		129U
+
+/* VkQueryResultStatusKHR (vulkan_video.h, which the executor's headers do not hold). */
+#define FIXTURE_STATUS_COMPLETE			1
+#define FIXTURE_STATUS_ERROR			(-1)
 
 /* The identities shared with host-video-wire.c, and the fixture's own. */
 #define FIXTURE_DEVICE		0xd0ULL
@@ -43,6 +53,8 @@
 #define FIXTURE_VIEW_B		0x401ULL
 #define FIXTURE_POOL		0x900ULL
 #define FIXTURE_CMDBUF		0xa00ULL
+#define FIXTURE_STATUS_POOL	0xb00ULL
+#define FIXTURE_OCCLUSION_POOL	0xb01ULL
 
 /* The storage of the memory and where its parts are. */
 #define FIXTURE_STORAGE_BYTES	262144U
@@ -69,6 +81,11 @@ static uint32_t fixture_submit(uint64_t queue);
 static void test_queries(void);
 static void test_session(void);
 static void test_submissions(void);
+static void fixture_query_pool(uint64_t identity, uint32_t type);
+static void fixture_query_record(const char *name, uint32_t opcode, uint64_t pool, uint32_t first, uint32_t count);
+static uint32_t fixture_statuses(int64_t *statuses);
+static uint32_t fixture_status32(uint32_t *status);
+static void test_status_queries(void);
 static void fixture_batch_expect(void);
 static void test_layouts(void);
 static void fixture_layout(uint32_t width, uint32_t height, uint32_t pitch, uint32_t rows, uint64_t chroma_offset, uint64_t bytes);
@@ -107,6 +124,7 @@ main(
 	/* The scenarios. */
 	test_queries();
 	test_session();
+	test_status_queries();
 	test_submissions();
 	test_layouts();
 
@@ -565,6 +583,250 @@ test_submissions(void)
 	assert(stub_gem_retained == 0U);
 	(void)fixture_run("destroy_session");
 	assert(stub_gem_retained == 1U);
+}
+
+/* vkCreateQueryPool of two queries of a type under an identity, as query.c sends it. */
+static void
+fixture_query_pool(
+	uint64_t identity,
+	uint32_t type)
+{
+	size_t reply_bytes;
+
+	/* [device][present][sType][pNext][flags][queryType][queryCount][statistics][pAllocator][present][identity]. */
+	stub_wire_begin(&fixture_wire);
+	stub_put32(&fixture_wire, FIXTURE_CREATE_QUERY_POOL);
+	stub_put32(&fixture_wire, 1U);
+	stub_put64(&fixture_wire, FIXTURE_DEVICE);
+	stub_put64(&fixture_wire, 1U);
+	stub_put32(&fixture_wire, VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO);
+	stub_put64(&fixture_wire, 0U);
+	stub_put32(&fixture_wire, 0U);
+	stub_put32(&fixture_wire, type);
+	stub_put32(&fixture_wire, 2U);
+	stub_put32(&fixture_wire, 0U);
+	stub_put64(&fixture_wire, 0U);
+	stub_put64(&fixture_wire, 1U);
+	stub_put64(&fixture_wire, identity);
+	reply_bytes = stub_execute_ok(&fixture_wire);
+	assert(reply_bytes == 24U);
+	assert(stub_get32(stub_reply, 4U) == VK_SUCCESS);
+	assert(stub_get64(stub_reply, 16U) == identity);
+}
+
+/*
+ * Writes one recorded query command into a stream file, as commands.c
+ * records it: vkCmdBeginQuery [pool][query][flags], vkCmdEndQuery
+ * [pool][query], vkCmdResetQueryPool [pool][first][count].
+ */
+static void
+fixture_query_record(
+	const char *name,
+	uint32_t opcode,
+	uint64_t pool,
+	uint32_t first,
+	uint32_t count)
+{
+	uint8_t bytes[32];
+	char path[512];
+	FILE *file;
+	size_t size;
+
+	/* The record's header: opcode, no reply, the command buffer; then the pool and the query. */
+	memset(bytes, 0, sizeof(bytes));
+	memcpy(bytes, &opcode, 4);
+	memcpy(bytes + 8, &(uint64_t){ FIXTURE_CMDBUF }, 8);
+	memcpy(bytes + 16, &pool, 8);
+	memcpy(bytes + 24, &first, 4);
+	size = 28U;
+	if (opcode != FIXTURE_CMD_END_QUERY) {
+		memcpy(bytes + 28, &count, 4);
+		size = 32U;
+	}
+
+	/* <directory>/<name>.bin */
+	snprintf(path, sizeof(path), "%s/%s.bin", fixture_directory, name);
+	file = fopen(path, "wb");
+	assert(file != NULL);
+	assert(fwrite(bytes, 1, size, file) == size);
+	assert(fclose(file) == 0);
+}
+
+/* vkGetQueryPoolResults of the status pool's two queries in 64 bits: the statuses, and the call's result. */
+static uint32_t
+fixture_statuses(
+	int64_t *statuses)
+{
+	size_t reply_bytes;
+
+	/* [device][pool][first][count][dataSize][bytes][stride][flags]: two records of a status and an availability. */
+	stub_wire_begin(&fixture_wire);
+	stub_put32(&fixture_wire, FIXTURE_GET_QUERY_POOL_RESULTS);
+	stub_put32(&fixture_wire, 1U);
+	stub_put64(&fixture_wire, FIXTURE_DEVICE);
+	stub_put64(&fixture_wire, FIXTURE_STATUS_POOL);
+	stub_put32(&fixture_wire, 0U);
+	stub_put32(&fixture_wire, 2U);
+	stub_put64(&fixture_wire, 32U);
+	stub_put64(&fixture_wire, 32U);
+	stub_put64(&fixture_wire, 16U);
+	stub_put32(&fixture_wire, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT | VK_QUERY_RESULT_WITH_STATUS_BIT_KHR);
+	reply_bytes = stub_execute_ok(&fixture_wire);
+	assert(reply_bytes == 16U + 32U);
+	assert(stub_get64(stub_reply, 8U) == 32U);
+
+	/* Each status where its query is available, 0 where not. */
+	statuses[0] = 0;
+	if (stub_get64(stub_reply, 24U) != 0U)
+		statuses[0] = (int64_t)stub_get64(stub_reply, 16U);
+	statuses[1] = 0;
+	if (stub_get64(stub_reply, 40U) != 0U)
+		statuses[1] = (int64_t)stub_get64(stub_reply, 32U);
+	return stub_get32(stub_reply, 4U);
+}
+
+/* vkGetQueryPoolResults of the status pool's first query in 32 bits: its status word, and the call's result. */
+static uint32_t
+fixture_status32(
+	uint32_t *status)
+{
+	size_t reply_bytes;
+
+	/* [device][pool][first][count][dataSize][bytes][stride][flags]: one record of a status and an availability. */
+	stub_wire_begin(&fixture_wire);
+	stub_put32(&fixture_wire, FIXTURE_GET_QUERY_POOL_RESULTS);
+	stub_put32(&fixture_wire, 1U);
+	stub_put64(&fixture_wire, FIXTURE_DEVICE);
+	stub_put64(&fixture_wire, FIXTURE_STATUS_POOL);
+	stub_put32(&fixture_wire, 0U);
+	stub_put32(&fixture_wire, 1U);
+	stub_put64(&fixture_wire, 8U);
+	stub_put64(&fixture_wire, 8U);
+	stub_put64(&fixture_wire, 8U);
+	stub_put32(&fixture_wire, VK_QUERY_RESULT_WITH_AVAILABILITY_BIT | VK_QUERY_RESULT_WITH_STATUS_BIT_KHR);
+	reply_bytes = stub_execute_ok(&fixture_wire);
+	assert(reply_bytes == 16U + 8U);
+	assert(stub_get32(stub_reply, 20U) == 1U);
+	*status = stub_get32(stub_reply, 16U);
+	return stub_get32(stub_reply, 4U);
+}
+
+/*
+ * Result status queries (ws083-p008): COMPLETE for a decode that ran,
+ * ERROR for a skipped one, unavailable after a reset; the rules a query is
+ * held to on the video family, and its begin on the graphics family.
+ */
+static void
+test_status_queries(void)
+{
+	static const char *const both[] = {
+		"q_reset", "begin1", "control", "q_begin0", "decode1", "q_end0", "end",
+		"begin2", "q_begin1", "decode2", "q_end1", "end"
+	};
+	static const char *const reset_only[] = { "q_reset" };
+	static const char *const outside[] = { "q_begin0", "begin1", "control", "decode1", "end" };
+	static const char *const unended[] = { "begin1", "control", "q_begin0", "decode1", "end" };
+	static const char *const twice[] = { "begin1", "control", "q_begin0", "q_begin1", "decode1", "q_end1", "q_end0", "end" };
+	static const char *const reset_inside[] = { "begin1", "control", "q_reset", "decode1", "end" };
+	static const char *const other_end[] = { "begin1", "control", "q_begin0", "decode1", "q_end1", "end" };
+	static const char *const occlusion[] = { "begin1", "control", "o_begin0", "decode1", "o_end0", "end" };
+	static const char *const graphics[] = { "q_reset", "q_begin0", "q_end0" };
+	static const char *const two_decodes[] = { "begin1", "control", "q_begin0", "decode1", "decode1", "q_end0", "end" };
+	static const char *const past[] = { "q_past" };
+	static const char *const reset_after[] = { "q_reset", "begin1", "control", "q_begin0", "decode1", "q_end0", "end", "q_reset" };
+	int64_t statuses[2];
+	uint32_t status32;
+	uint32_t result;
+
+	/* A result status pool of two queries on the video device, an occlusion pool beside it. */
+	fixture_query_pool(FIXTURE_STATUS_POOL, VK_QUERY_TYPE_RESULT_STATUS_ONLY_KHR);
+	fixture_query_pool(FIXTURE_OCCLUSION_POOL, VK_QUERY_TYPE_OCCLUSION);
+	fixture_query_record("q_reset", FIXTURE_CMD_RESET_QUERY_POOL, FIXTURE_STATUS_POOL, 0U, 2U);
+	fixture_query_record("q_begin0", FIXTURE_CMD_BEGIN_QUERY, FIXTURE_STATUS_POOL, 0U, 0U);
+	fixture_query_record("q_end0", FIXTURE_CMD_END_QUERY, FIXTURE_STATUS_POOL, 0U, 0U);
+	fixture_query_record("q_begin1", FIXTURE_CMD_BEGIN_QUERY, FIXTURE_STATUS_POOL, 1U, 0U);
+	fixture_query_record("q_end1", FIXTURE_CMD_END_QUERY, FIXTURE_STATUS_POOL, 1U, 0U);
+	fixture_query_record("o_begin0", FIXTURE_CMD_BEGIN_QUERY, FIXTURE_OCCLUSION_POOL, 0U, 0U);
+	fixture_query_record("o_end0", FIXTURE_CMD_END_QUERY, FIXTURE_OCCLUSION_POOL, 0U, 0U);
+	fixture_query_record("q_past", FIXTURE_CMD_RESET_QUERY_POOL, FIXTURE_STATUS_POOL, 1U, 2U);
+
+	/* A new pool's queries are unavailable: NOT_READY, no status. */
+	result = fixture_statuses(statuses);
+	assert(result == VK_NOT_READY);
+	assert(statuses[0] == 0 && statuses[1] == 0);
+
+	/* The IDR picture and the P picture both decode: COMPLETE twice. */
+	fixture_record(both, 12U);
+	result = fixture_submit(FIXTURE_VIDEO_QUEUE);
+	assert(result == VK_SUCCESS);
+	result = fixture_statuses(statuses);
+	assert(result == VK_SUCCESS);
+	assert(statuses[0] == FIXTURE_STATUS_COMPLETE && statuses[1] == FIXTURE_STATUS_COMPLETE);
+
+	/* A reset alone on the video family makes both unavailable again. */
+	fixture_record(reset_only, 1U);
+	result = fixture_submit(FIXTURE_VIDEO_QUEUE);
+	assert(result == VK_SUCCESS);
+	result = fixture_statuses(statuses);
+	assert(result == VK_NOT_READY);
+	assert(statuses[0] == 0 && statuses[1] == 0);
+
+	/* A second slice without its start code skips the IDR picture: ERROR for it, the submission succeeds. */
+	fixture_storage[FIXTURE_BUFFER_OFFSET + 67U] = 0x55U;
+	fixture_record(both, 12U);
+	result = fixture_submit(FIXTURE_VIDEO_QUEUE);
+	assert(result == VK_SUCCESS);
+	assert(strstr(stub_log, "skip decode: slice without a start code") != NULL);
+	result = fixture_statuses(statuses);
+	assert(result == VK_SUCCESS);
+	assert(statuses[0] == FIXTURE_STATUS_ERROR);
+	result = fixture_status32(&status32);
+	assert(result == VK_SUCCESS && status32 == 0xffffffffU);
+	fixture_storage[FIXTURE_BUFFER_OFFSET + 67U] = 1U;
+
+	/* A query begun outside a scope, one not ended in its scope, two at once, a reset within a scope, an end of another query, and an occlusion query in a scope break the rules. */
+	fixture_record(outside, 5U);
+	assert(fixture_submit(FIXTURE_VIDEO_QUEUE) == (uint32_t)VK_ERROR_DEVICE_LOST);
+	fixture_record(unended, 5U);
+	assert(fixture_submit(FIXTURE_VIDEO_QUEUE) == (uint32_t)VK_ERROR_DEVICE_LOST);
+	assert(strstr(stub_log, "a query not ended in its coding scope") != NULL);
+	fixture_record(twice, 8U);
+	assert(fixture_submit(FIXTURE_VIDEO_QUEUE) == (uint32_t)VK_ERROR_DEVICE_LOST);
+	fixture_record(reset_inside, 5U);
+	assert(fixture_submit(FIXTURE_VIDEO_QUEUE) == (uint32_t)VK_ERROR_DEVICE_LOST);
+	assert(strstr(stub_log, "a query reset within a coding scope") != NULL);
+	fixture_record(other_end, 6U);
+	assert(fixture_submit(FIXTURE_VIDEO_QUEUE) == (uint32_t)VK_ERROR_DEVICE_LOST);
+	fixture_record(occlusion, 6U);
+	assert(fixture_submit(FIXTURE_VIDEO_QUEUE) == (uint32_t)VK_ERROR_DEVICE_LOST);
+
+	/* Two decodes within one query, and a reset past the pool, break the rules before anything runs. */
+	fixture_record(two_decodes, 7U);
+	assert(fixture_submit(FIXTURE_VIDEO_QUEUE) == (uint32_t)VK_ERROR_DEVICE_LOST);
+	assert(strstr(stub_log, "a second decode within one query") != NULL);
+	fixture_record(past, 1U);
+	assert(fixture_submit(FIXTURE_VIDEO_QUEUE) == (uint32_t)VK_ERROR_DEVICE_LOST);
+	assert(strstr(stub_log, "a query reset past its pool") != NULL);
+
+	/* None of the refused submissions ran: the statuses are those of the skipped IDR and the decoded P picture. */
+	result = fixture_statuses(statuses);
+	assert(result == VK_SUCCESS);
+	assert(statuses[0] == FIXTURE_STATUS_ERROR && statuses[1] == FIXTURE_STATUS_COMPLETE);
+
+	/* A reset after the query's end in the same submission runs after it: the query is unavailable again. */
+	fixture_record(reset_after, 8U);
+	result = fixture_submit(FIXTURE_VIDEO_QUEUE);
+	assert(result == VK_SUCCESS);
+	result = fixture_statuses(statuses);
+	assert(result == VK_NOT_READY);
+	assert(statuses[0] == 0);
+
+	/* On the graphics family the reset runs, but a begin of a status query loses the submission. */
+	fixture_record(graphics, 3U);
+	assert(fixture_submit(FIXTURE_QUEUE) == (uint32_t)VK_ERROR_DEVICE_LOST);
+	assert(strstr(stub_log, "result status query begun or ended outside a video coding scope") != NULL);
+	result = fixture_statuses(statuses);
+	assert(result == VK_NOT_READY);
 }
 
 /* Writes a field check of the two decodes' batch for genxml-decode.py. */

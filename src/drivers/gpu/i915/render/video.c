@@ -145,6 +145,10 @@
 #define I915_VIDEO_USAGE_DECODE_DST		0x400U
 #define I915_VIDEO_USAGE_DECODE_DPB		0x1000U
 #define I915_VIDEO_CONTROL_RESET		0x1U
+
+/* VkQueryResultStatusKHR: a decode that ran, and one that was skipped (ws083-p008). */
+#define I915_VIDEO_STATUS_COMPLETE		1
+#define I915_VIDEO_STATUS_ERROR			(-1)
 #define I915_VIDEO_FORMAT_NV12			1000156003U
 
 /* The video results the executor replies (the pinned header's values). */
@@ -2237,7 +2241,9 @@ i915_video_simulated(
  * `apply` it runs: the same walk on the sessions themselves, where every
  * decode is checked against what the decoder takes and skipped, or written
  * and run; a batch that cannot be made returns ENOMEM, a run that fails on
- * the GPU its error.
+ * the GPU its error.  A result status query (ws083-p008) is begun and ended
+ * within a coding scope, one at a time; running, its end writes COMPLETE,
+ * or ERROR when a decode within it was skipped.
  */
 static int
 i915_video_simulate(
@@ -2253,11 +2259,18 @@ i915_video_simulate(
 	const struct i915_video_command *begin;
 	const struct i915_video_command *command;
 	const struct i915_gfx_op *op;
+	struct i915_gfx_query_pool *query_pool;
 	const char *reason;
 	uint32_t simulated;
 	uint32_t list;
 	uint32_t index;
 	uint32_t slot;
+	uint32_t query_index;
+	uint32_t query_decodes;
+	int32_t query_status;
+	int query_active;
+	int status_pool;
+	int in_range;
 	int error;
 
 	/* Starts with no session met. */
@@ -2268,17 +2281,75 @@ i915_video_simulate(
 	for (list = 0U; list < list_count; list++) {
 		begin = NULL;
 		state = NULL;
+		query_pool = NULL;
+		query_index = 0U;
+		query_status = I915_VIDEO_STATUS_COMPLETE;
+		query_decodes = 0U;
+		query_active = 0;
 		for (index = 0U; index < counts[list]; index++) {
 			op = &lists[list][index];
 
-			/* Only video commands and the query reset run on the video family. */
+			/* Only video commands and the queries run on the video family. */
 			if (op->kind == I915_GFX_OP_QUERY_RESET) {
-				/* A query reset runs on the render engine as on the graphics family. */
+				/* A reset belongs outside a coding scope, and within its pool. */
+				if (begin != NULL) {
+					kern_logf("i915: video: submission refused: a query reset within a coding scope\n");
+					return EBADMSG;
+				}
+				in_range = drv_i915_gfx_query_in_range(op->u.query.pool, op->u.query.first, op->u.query.count);
+				if (!in_range) {
+					kern_logf("i915: video: submission refused: a query reset past its pool\n");
+					return EBADMSG;
+				}
+
+				/* An occlusion pool's reset runs on the render engine, a result status pool's on the CPU now. */
 				if (apply) {
 					error = drv_i915_gfx_query_execute(session, op);
 					if (error != 0)
 						return error;
 				}
+				continue;
+			}
+			if (op->kind == I915_GFX_OP_QUERY_BEGIN) {
+				/* A result status query of its pool, begun in a scope, while no other is (ws083-p008). */
+				status_pool = drv_i915_gfx_query_status_pool(op->u.query.pool, op->u.query.first);
+				if (begin == NULL ||
+				    !status_pool ||
+				    query_active) {
+					kern_logf("i915: video: submission refused: a query begun outside a coding scope, of another type, or within another\n");
+					return EBADMSG;
+				}
+
+				/* The query takes what the decode within it does, COMPLETE unless it is skipped. */
+				query_pool = op->u.query.pool;
+				query_index = op->u.query.first;
+				query_status = I915_VIDEO_STATUS_COMPLETE;
+				query_decodes = 0U;
+				query_active = 1;
+				continue;
+			}
+			if (op->kind == I915_GFX_OP_QUERY_END) {
+				/* The end of the query begun in this scope. */
+				if (begin == NULL ||
+				    !query_active ||
+				    op->u.query.pool != query_pool ||
+				    op->u.query.first != query_index) {
+					kern_logf("i915: video: submission refused: a query ended that was not begun in the coding scope\n");
+					return EBADMSG;
+				}
+
+				/*
+				 * Running, the decode within it has run on VCS0 by now (each
+				 * decode's batch runs and is waited for before the next
+				 * operation, i915_video_run), and its status is written on the
+				 * CPU.  A walk that batched several decodes into one run would
+				 * have to run the batch here first.
+				 */
+				if (apply)
+					drv_i915_gfx_query_status_end(query_pool, query_index, query_status);
+
+				/* No query is active in the scope from here. */
+				query_active = 0;
 				continue;
 			}
 			if (op->kind != I915_GFX_OP_VIDEO_BEGIN &&
@@ -2333,9 +2404,15 @@ i915_video_simulate(
 				}
 				break;
 			case I915_GFX_OP_VIDEO_DECODE:
-				/* A decode outside a scope, or one breaking the slot rules, refuses the submission. */
+				/* A decode outside a scope, a second one within a query, or one breaking the slot rules, refuses the submission. */
 				if (begin == NULL)
 					return EBADMSG;
+				if (query_active && query_decodes != 0U) {
+					kern_logf("i915: video: submission refused: a second decode within one query\n");
+					return EBADMSG;
+				}
+				if (query_active)
+					query_decodes++;
 				error = i915_video_simulate_decode(command, begin, state);
 				if (error != 0)
 					return error;
@@ -2349,6 +2426,7 @@ i915_video_simulate(
 					reason = i915_video_check(session, command, begin, state->session, &decode);
 					if (reason != NULL) {
 						i915_video_skip(reason);
+						query_status = I915_VIDEO_STATUS_ERROR;
 					} else {
 						i915_video_resolve(session, command, begin, state->session, &decode);
 						error = i915_video_write(session, state->session, &decode);
@@ -2364,9 +2442,13 @@ i915_video_simulate(
 				}
 				break;
 			default:
-				/* An end closes the scope. */
+				/* An end closes the scope, and the queries begun in it must have ended. */
 				if (begin == NULL)
 					return EBADMSG;
+				if (query_active) {
+					kern_logf("i915: video: submission refused: a query not ended in its coding scope\n");
+					return EBADMSG;
+				}
 				begin = NULL;
 				state = NULL;
 				break;

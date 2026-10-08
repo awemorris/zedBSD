@@ -12,17 +12,24 @@
 #include <string.h>
 #include "sync-internal.h"
 
-/* One query pool retains the result cardinality used to preserve unavailable outputs. */
+/*
+ * One query pool retains the result cardinality used to preserve unavailable outputs.
+ *
+ * status_only marks a video decode's result status pool (ws083-p008): its one
+ * result is the VkQueryResultStatusKHR the executor wrote, and every query
+ * reports it, NOT_READY (0) while unavailable.
+ */
 struct vulkan_query_pool {
 	struct vulkan_object object;
 	uint32_t query_count;
 	uint32_t result_count;
+	VkBool32 status_only;
 };
 
 static struct vulkan_query_pool *query_pool_object(VkQueryPool pool);
 static VkResult query_fetch(struct VkDevice_T *device, struct vulkan_query_pool *pool, uint32_t first, uint32_t count, size_t packed_stride, VkQueryResultFlags flags, struct vulkan_reader *reader);
 static VkBool32 query_available(const struct vulkan_reader *reader, uint32_t count, size_t packed_stride, size_t width);
-static void query_copy(const struct vulkan_reader *reader, uint32_t count, uint32_t results, size_t packed_stride, size_t width, VkDeviceSize stride, VkQueryResultFlags flags, void *destination);
+static void query_copy(const struct vulkan_reader *reader, const struct vulkan_query_pool *pool, uint32_t count, size_t packed_stride, size_t width, VkDeviceSize stride, VkQueryResultFlags flags, void *destination);
 static uint64_t query_word(const uint8_t *bytes, size_t width);
 
 /*
@@ -56,8 +63,14 @@ vkCreateQueryPool(
 	pool = (struct vulkan_query_pool *)object;
 	pool->query_count = pCreateInfo->queryCount;
 	pool->result_count = 1;
+	pool->status_only = VK_FALSE;
+
+	/* A result status pool's one result is the status (ws083-p008). */
+	if (pCreateInfo->queryType == VK_QUERY_TYPE_RESULT_STATUS_ONLY_KHR)
+		pool->status_only = VK_TRUE;
+
+	/* Pipeline statistics produce one result for each selected standard flag. */
 	if (pCreateInfo->queryType == VK_QUERY_TYPE_PIPELINE_STATISTICS) {
-		/* Pipeline statistics produce one result for each selected standard flag. */
 		pool->result_count = 0;
 		statistics = pCreateInfo->pipelineStatistics;
 		while (statistics != 0) {
@@ -275,7 +288,7 @@ vkGetQueryPoolResults(
 	}
 
 	/* Preserve unavailable results unless the caller explicitly accepts partial values. */
-	query_copy(&reader, queryCount, pool->result_count, packed_stride, width, stride, flags, pData);
+	query_copy(&reader, pool, queryCount, packed_stride, width, stride, flags, pData);
 	vulkan_reader_finish(&reader);
 	if (status != VK_SUCCESS)
 		return status;
@@ -386,12 +399,16 @@ query_available(
 	return VK_TRUE;
 }
 
-/* Copy only the words the standard API permits this call to modify. */
+/*
+ * Copy only the words the standard API permits this call to modify; a
+ * result status pool's status is written for every query, 0 (NOT_READY)
+ * while it is unavailable.
+ */
 static void
 query_copy(
 	const struct vulkan_reader *reader,
+	const struct vulkan_query_pool *pool,
 	uint32_t count,
-	uint32_t results,
 	size_t packed_stride,
 	size_t width,
 	VkDeviceSize stride,
@@ -400,6 +417,7 @@ query_copy(
 {
 	uint32_t index;
 	uint32_t field;
+	uint32_t results;
 	uint32_t word32;
 	uint64_t word64;
 	uint64_t available;
@@ -408,6 +426,7 @@ query_copy(
 	VkBool32 copy_results;
 
 	/* Preserve the caller's stride and every byte between actual result fields. */
+	results = pool->result_count;
 	for (index = 0; index < count; index++) {
 		record = reader->data + reader->cursor + (size_t)index * packed_stride;
 		output = (uint8_t *)destination + (size_t)index * (size_t)stride;
@@ -419,6 +438,20 @@ query_copy(
 		/* Partial results are written only when explicitly requested by the caller. */
 		if ((flags & VK_QUERY_RESULT_PARTIAL_BIT) != 0)
 			copy_results = VK_TRUE;
+
+		/* A status is written for every query: the executor's while available, NOT_READY (0) before. */
+		if (pool->status_only) {
+			word64 = 0;
+			if (available != 0)
+				word64 = query_word(record, width);
+			word32 = (uint32_t)word64;
+			if (width == 8) {
+				memcpy(output, &word64, width);
+			} else {
+				memcpy(output, &word32, width);
+			}
+			copy_results = VK_FALSE;
+		}
 
 		/* Unavailable final-result words retain the application's original contents. */
 		if (copy_results) {
