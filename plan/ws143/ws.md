@@ -3,7 +3,7 @@
 # WS143: Bluetooth（Settings の Bluetooth の頁の実体、ベータ2）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q902 P1 の照合: p001・p002 cleared、p003〜p006 は一部実装・試験済み）
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc §2）: p004 cleared。p003・p005 は i02 以降まで保留。次は q904（p005 i02、P1）。 2026-10-08 q902 P1 の照合: p001・p002 cleared、p003〜p006 は一部実装・試験済み）
 Primary Milestone: MG006
 Related Milestones: MG005
 Parent: [Master](../master.md)
@@ -40,7 +40,7 @@ HID の経路は p002〜p005、利用者に見える形は p006。
 | [ws143-p001](phase001/phase.md) | 調査と設計（device・firmware・HCI・profile の範囲・desktop の経路・試験の方法） | cleared（2026-10-08 Q1） | | — |
 | [ws143-p002](phase002/phase.md) | 5330 の descriptor と版を T1 で取る。kernel の `bt-usb`（普通と bootloader の経路、寿命、境界、backpressure）と `/dev/bluetoothN`（`include/uapi/bluetooth.h`、D2）。resume は `/dev/system` の POWER の `sleep.end` を使い、UAPI は足さない（詳細設計 §1）。試験の道具 `bt-probe`、試験の kernel の loopback の controller。host の試験（組み直しと境界、悪い device、取り外し） | cleared（2026-10-08 Q1、T1-384 QEMU PASS。5330 の passthrough は未、T1-378 は 5330 が Linux の時） | | p001 |
 | [ws143-p003](phase003/phase.md) | firmware の package `intelbt`、bluetoothd の transport・firmware の load（§3）・HCI core・scan、CLI `bt show`・`bt scan`、Read Local Supported Commands の記録。T1 の passthrough で load と scan | in-progress（i01 は T1-402 PASS（2 回目、1 回目は FAIL）で Q1 の判定待ち。i02 の intelbt の package と 5330 の firmware の load・scan（D13）は未着手） | | p002 |
-| [ws143-p004](phase004/phase.md) | L2CAP、SSP の event、LE の SMP（D10）、暗号（D5 b1、無ければ b2）、鍵の保存、特権の分離（D16 a）、`_bluetooth` の account（D17）、socket の口の権限（D8） | test-wait → Q1 の判定待ち（i02 は T1-405 FAIL、i03 の直しは T1-409 PASS（p002→p003→p004）、T1-426 でも bt-pair-p004 PASS） | | p003 |
+| [ws143-p004](phase004/phase.md) | L2CAP、SSP の event、LE の SMP（D10）、暗号（D5 b1、無ければ b2）、鍵の保存、特権の分離（D16 a）、`_bluetooth` の account（D17）、socket の口の権限（D8） | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2）） | | | p003 |
 | [ws143-p005](phase005/phase.md) | usb-hid の glue の共有の module への refactor と USB の回帰、`/dev/input/bridge`（D3）、hid-report.c の fuzz、SDP・GATT client、HID host（BR/EDR と HOGP）、再接続、切断で key を離す | in-progress（i01a T1-419 PASS、i01b T1-421 FAIL → T1-426 input-bridge-p005 PASS・T1-432 の順序依存の直し PASS、i01c T1-423 boot PASS（i2c-hid の touchpad の実機の回帰は 5330）。i02（BR/EDR の HID host）・i03（LE の HOGP）は未着手、i04（5330 の実機の門、Q20 で p006 の前の必須）も未） | | p004（i02 は p004 の cleared） |
 | ws143-p006 | desktop: backend の口、zedBSD の backend、API と protocol の版、Settings の頁、system bar、pairing の確認の窓 | test-wait（q896 P1 実装、T1-438 一部 PASS（差 2 点）、直しの再試験 T1-446 は未実行） | | p005 |
 | ws143-p007 | Linux の backend（D-Bus の拡張、BlueZ）、FreeBSD の未対応の表示 | planned（Linux・FreeBSD は 10/13 以降、2026-10-08 ユーザー） | | p006 |

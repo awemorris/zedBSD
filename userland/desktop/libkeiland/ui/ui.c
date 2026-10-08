@@ -2549,6 +2549,17 @@ ui_gesture(
 		if (ui->drag == UI_DRAG_SCROLL && scroll != NULL)
 			kl_scroll_fling(scroll, gesture->vx, gesture->vy, now_us);
 		if (ui->drag == UI_DRAG_SELECT) {
+			/*
+			 * The selection ends where the finger lifted.  A frame follows the
+			 * finger's resampled place, which lags it, and a quick stroke lifts
+			 * before any frame has followed it to its end (ws190-p003, T1-445).
+			 */
+			ui->finger_x = gesture->x;
+			ui->finger_y = gesture->y;
+			ui_content(ui, gesture->x, gesture->y, &x, &y);
+			kl_text_touch_drag(ui->touch_region.touch, x, y);
+
+			/* The finger lets the selection go: it keeps its handles and bar, and the view stops. */
 			kl_text_touch_drag_end(ui->touch_region.touch);
 			kl_scroll_fling(scroll, 0.0, 0.0, now_us);
 		}

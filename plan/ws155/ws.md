@@ -3,7 +3,7 @@
 # WS155: Keiland の app: カレンダー・スケジューラ・オーガナイザ（まず簡単な物）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q902 P1 の照合: p001〜p004 cleared（2026-10-07 Q1、T1-297）。ベータ2 の範囲の残りは p000 の扱いだけ、続きはベータ3）
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc §2）: p000 cleared。 2026-10-08 q902 P1 の照合: p001〜p004 cleared（2026-10-07 Q1、T1-297）。ベータ2 の範囲の残りは p000 の扱いだけ、続きはベータ3）
 Primary Milestone: MG006
 Related Milestones: —
 Parent: [Master](../master.md)
@@ -55,7 +55,7 @@ Keiland の標準 app として、カレンダー・予定の管理（スケジ�
 
 | Phase | 内容 | Status | 依存 |
 | --- | --- | --- | --- |
-| ws155-p000 | **UI の mock**（デザイン案の要素と上の方針で。月の表示を中心に、sidebar・Add Event の panel・3D の日めくりの animation。data は固定の試験 data、保存は作らない）。ユーザーが見て再指示する | in-progress → Q1 の判定待ち（mock は T1-179・T1-179c で撮影、ユーザーの再指示は p001 に反映、本物の app は p003 で cleared。[phase](phase000/phase.md)） | — |
+| ws155-p000 | **UI の mock**（デザイン案の要素と上の方針で。月の表示を中心に、sidebar・Add Event の panel・3D の日めくりの animation。data は固定の試験 data、保存は作らない）。ユーザーが見て再指示する | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2）） | | — |
 | ws155-p001 | 外観の画像に基づく設計（画面・操作・保存・通知・試験） | cleared（q831、P2、[phase](phase001/phase.md)） | p000 の mock へのユーザーの再指示 |
 | ws155-p002 | 予定とメモの保存（`~/Documents/Calendar`、iCalendar） | cleared（2026-10-07、T1-297） | p001 |
 | ws155-p003 | app: 保存・編集・Week と Day・開始の通知 | cleared（2026-10-07、T1-297） | p002 |

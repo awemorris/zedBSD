@@ -3,7 +3,7 @@
 # ws177-p017: libbrowser に欄を autocomplete で探して focus する口
 
 Parent: [WS177](../ws.md)
-Status: test-wait → Q1 の判定待ち（2026-10-08 q902 P1 の照合: T1-424 PASS（ZBROWSER MAIL one-time-code-field error=0、fill length=4 error=0、PNG は Q1 の目視））（旧: test-wait（2026-10-08 P1 q890 の 1: 実装・host PASS（plain・ASan）・zedBSD の build warning 0。使う側は [ws177-p018](../phase018/phase.md)））
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2））（旧: test-wait → Q1 の判定待ち（2026-10-08 q902 P1 の照合: T1-424 PASS（ZBROWSER MAIL one-time-code-field error=0、fill length=4 error=0、PNG は Q1 の目視））（旧: test-wait（2026-10-08 P1 q890 の 1: 実装・host PASS（plain・ASan）・zedBSD の build warning 0。使う側は [ws177-p018](../phase018/phase.md)）））
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q890 の 1（P1、2026-10-08）

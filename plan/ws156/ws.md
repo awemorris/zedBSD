@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Related Milestones: —
 Parent: [Master](../master.md)
 Queue: なし（担当と時期は未定）
-Resume point: 2026-10-08 q902 P1 の照合: p002〜p004 cleared。p001（設計、H1〜H7 は 2026-10-05 夜に決定、p002〜p004 で実装）は Q1 の判定待ち。残りは p005 の 5330 の UAT（popup の動き・× ・hotkey の log）。p005 の全文規約はベータ3（2026-10-08 ユーザー）、p006（Linux の D-Bus）は 10/13 以降。旧: 2026-10-08 Q1: p003・p004 cleared（T1-375b PASS）。残りは p005 の全文の規約と実機の UAT。以前: p002 cleared（T1-269）。
+Resume point: 2026-10-08 Q1 の判定（sweep-beta2-rc §2）: p001 cleared。 2026-10-08 q902 P1 の照合: p002〜p004 cleared。p001（設計、H1〜H7 は 2026-10-05 夜に決定、p002〜p004 で実装）は Q1 の判定待ち。残りは p005 の 5330 の UAT（popup の動き・× ・hotkey の log）。p005 の全文規約はベータ3（2026-10-08 ユーザー）、p006（Linux の D-Bus）は 10/13 以降。旧: 2026-10-08 Q1: p003・p004 cleared（T1-375b PASS）。残りは p005 の全文の規約と実機の UAT。以前: p002 cleared（T1-269）。
 <!-- awesome-plan-current:end -->
 
 ## 単一目標
@@ -38,7 +38,7 @@ app から通知を出せる仕組みを作り、画面の下の中央を headli
 
 | Phase | 内容 | Status | 依存 |
 | --- | --- | --- | --- |
-| [ws156-p001](phase001/phase.md) | 設計（通知の口・内容・popup の動き・log と hotkey・保存・試験の方法） | planning → Q1 の判定待ち（H1〜H7 は 2026-10-05 夜に決定、p002〜p004 がこの設計で実装・cleared） | — |
+| [ws156-p001](phase001/phase.md) | 設計（通知の口・内容・popup の動き・log と hotkey・保存・試験の方法） | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2）） | | — |
 | [ws156-p002](phase002/phase.md) | 通知の口（protocol・libkeiland）と compositor の受け取り | cleared（2026-10-06 Q1、T1-269。実機は UAT） | p001 |
 | [ws156-p003](phase003/phase.md) | popup の描画と動き（右から中央、3 秒、左へ fade-out）、× で消す、全画面・lock、system の通知 | cleared（2026-10-08 Q1、T1-375b PASS 20 項目） | p002 |
 | [ws156-p004](phase004/phase.md) | log（hotkey、ring の左右、すべて消去、個別に消した物は残さない） | cleared（2026-10-08 Q1、T1-375b PASS） | p003 |

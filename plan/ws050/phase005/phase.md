@@ -4,7 +4,7 @@
 
 Phase ID: `ws050-p005`
 Parent: [WS050](../ws.md)
-Status: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: 下の「5330 の実機の値（2026-10-08 の UAT の log）」）（旧: in-progress（2026-10-07 P2: 範囲 1〜5 の正常系を実装、host ucsi-host 66・ucsi-acpi-host 28・host-tc 71・tables 34、kernel と I915_TESTS の build warning 0。実機の確認は ws050-p006（Type-C は QEMU に無い）））
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2））（旧: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: 下の「5330 の実機の値（2026-10-08 の UAT の log）」）（旧: in-progress（2026-10-07 P2: 範囲 1〜5 の正常系を実装、host ucsi-host 66・ucsi-acpi-host 28・host-tc 71・tables 34、kernel と I915_TESTS の build warning 0。実機の確認は ws050-p006（Type-C は QEMU に無い））））
 Phase disposition: normal
 Queue: q834 の続き（P2、Q1 の ACK 2026-10-07「範囲 1〜5 で ACK、weak の口は coding-style に合う形で」）
 
