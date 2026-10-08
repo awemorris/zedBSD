@@ -47,6 +47,10 @@ Esc).
 | Join, connect | 接続する | a network, a device; not つなぐ |
 | Connected / Not connected | 接続済み / 未接続 | |
 | Disconnect | 切断 | |
+| Pair, pairing (Bluetooth) | ペアリング | 「ペアリングした機器」 |
+| Device (Bluetooth) | 機器 | |
+| Adapter (Bluetooth) | アダプタ | not アダプター |
+| Firmware | ファームウェア | |
 | Key (of a Wi-Fi network) | パスワード | what a person types |
 | Wired | 有線 | |
 | Ethernet | イーサネット | |

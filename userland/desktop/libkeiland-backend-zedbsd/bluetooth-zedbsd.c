@@ -309,6 +309,15 @@ kl_backend_bluetooth_update(
 			bluetooth->scan_due_ms = now + BT_SCAN_FAILED_MS;
 	}
 
+	/*
+	 * Answers and questions not taken yet are told again (a pairing given
+	 * up by kl_backend_bluetooth_cancel ends between two updates).
+	 */
+	if (bluetooth->result_count > 0U)
+		*changed |= KL_BACKEND_BT_CHANGED_RESULT;
+	if (bluetooth->question_count > 0U)
+		*changed |= KL_BACKEND_BT_CHANGED_QUESTION;
+
 	/* Succeeded. */
 	return 0;
 }
@@ -465,9 +474,17 @@ kl_backend_bluetooth_request(
 	if (bluetooth->waiting)
 		return EBUSY;
 
-	/* This program's pairing asks to be the agent again first (another program of the user may have taken it). */
-	if (request == KL_BACKEND_BT_PAIR && bluetooth->agent.socket < 0)
+	/*
+	 * This program's pairing asks to be the agent again first (another
+	 * program of the user may have taken it): its AGENT goes before the
+	 * PAIR, so that the pairing's questions come to it.
+	 */
+	if (request == KL_BACKEND_BT_PAIR && bluetooth->agent.socket < 0) {
+		error = bt_connect(&bluetooth->agent, "AGENT\n");
 		bluetooth->agent_due_ms = 0U;
+		if (error == 0)
+			bluetooth->agent_due_ms = bt_milliseconds() + BT_AGENT_AGAIN_MS;
+	}
 
 	/* The line now, or when the scan going on ends (the daemon refuses it meanwhile). */
 	if (bluetooth->scan.socket >= 0) {
@@ -1252,7 +1269,7 @@ bt_question_push(
 	found = bt_field(line, "type=", value, sizeof(value));
 	if (found)
 		question->type = bt_type(value);
-	(void)snprintf(question->name, sizeof(question->name), "%s", question->address);
+	memcpy(question->name, question->address, sizeof(question->address));
 	for (index = 0; index < bluetooth->count; index++) {
 		same = strcmp(bluetooth->devices[index].address, question->address);
 		if (same == 0)
