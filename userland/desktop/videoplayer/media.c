@@ -36,9 +36,9 @@
  */
 struct media_reader {
 	struct vp_media *media;
-	struct mf_file *file;
-	struct vp_decoder *video;
-	struct vp_decoder *sound;
+	struct media_file *file;
+	struct media_decoder *video;
+	struct media_decoder *sound;
 	unsigned video_track;
 	unsigned sound_track;
 	double skip_before;
@@ -48,10 +48,10 @@ struct media_reader {
 static void *media_run(void *argument);
 static int media_reader_open(struct media_reader *reader, const char *path);
 static void media_reader_close(struct media_reader *reader);
-static int media_decoder(struct media_reader *reader, unsigned kind, struct vp_decoder **result, unsigned *track);
-static int media_feed(struct media_reader *reader, struct vp_decoder *decoder, const struct mf_packet *packet);
-static int media_drain(struct media_reader *reader, struct vp_decoder *decoder);
-static int media_picture(struct media_reader *reader, struct vp_frame *picture, double time);
+static int media_decoder(struct media_reader *reader, unsigned kind, struct media_decoder **result, unsigned *track);
+static int media_feed(struct media_reader *reader, struct media_decoder *decoder, const struct media_packet *packet);
+static int media_drain(struct media_reader *reader, struct media_decoder *decoder);
+static int media_picture(struct media_reader *reader, struct media_frame *picture, double time);
 static int media_sound(struct media_reader *reader, double time);
 static int media_seek(struct media_reader *reader);
 static void media_drop_pictures(struct vp_media *media);
@@ -78,7 +78,7 @@ vp_media_init(
 /*
  * Opens a file and starts reading it, paused at its start.  Returns 0, or
  * an errno value (the file is not one mediafile reads, or has no video it
- * can decode; media->codec_problem then says why, VP_CODEC_*).
+ * can decode; media->codec_problem then says why, MEDIA_PROBLEM_*).
  */
 int
 vp_media_open(
@@ -110,10 +110,10 @@ vp_media_open(
 	/* What is known of the file, paused at its start. */
 	(void)pthread_mutex_lock(&media->lock);
 	(void)snprintf(media->path, sizeof(media->path), "%s", path);
-	media->width = (int)mf_track(reader->file, reader->video_track)->width;
-	media->height = (int)mf_track(reader->file, reader->video_track)->height;
+	media->width = (int)media_file_track(reader->file, reader->video_track)->width;
+	media->height = (int)media_file_track(reader->file, reader->video_track)->height;
 	media->duration = 0.0;
-	length_us = mf_duration_us(reader->file);
+	length_us = media_file_duration_us(reader->file);
 	if (length_us > 0)
 		media->duration = (double)length_us / 1000000.0;
 	media->has_audio = reader->sound != NULL;
@@ -291,14 +291,14 @@ vp_media_clock(
  * dropped): its reference with its time, or NULL.  next is the time of the
  * picture after it, or -1 when none waits.
  */
-struct vp_frame *
+struct media_frame *
 vp_media_take(
 	struct vp_media *media,
 	double clock,
 	double *time,
 	double *next)
 {
-	struct vp_frame *taken;
+	struct media_frame *taken;
 	unsigned slot;
 
 	/* The latest due. */
@@ -314,7 +314,7 @@ vp_media_take(
 		}
 
 		/* Due: it replaces the one taken before it. */
-		vp_frame_free(&taken);
+		media_frame_free(&taken);
 		taken = media->pictures[slot];
 		*time = media->picture_times[slot];
 		media->pictures[slot] = NULL;
@@ -335,7 +335,7 @@ media_run(
 {
 	struct media_reader *reader;
 	struct vp_media *media;
-	struct mf_packet packet;
+	struct media_packet packet;
 	int drained;
 	int status;
 	int stop;
@@ -353,7 +353,7 @@ media_run(
 			continue;
 
 		/* The next packet; the end of the file drains the decoders and waits. */
-		status = mf_read(reader->file, &packet);
+		status = media_file_read(reader->file, &packet);
 		if (status != 0) {
 			(void)pthread_mutex_lock(&media->lock);
 			drained = media->eof;
@@ -367,7 +367,7 @@ media_run(
 			/* The end is noted once, and the reader waits for a seek or the end of the thread. */
 			(void)pthread_mutex_lock(&media->lock);
 			if (!media->eof)
-				vp_log("END reached");
+				vp_log("END reached dropped=%llu", (unsigned long long)media_file_dropped(reader->file));
 			media->eof = 1;
 			(void)pthread_mutex_unlock(&media->lock);
 			media_sleep_ms(MEDIA_WAIT_MS * 5);
@@ -398,12 +398,12 @@ media_reader_open(
 	int status;
 
 	/* The container. */
-	status = mf_open(path, &reader->file);
+	status = media_file_open(path, &reader->file);
 	if (status != 0)
 		return status;
 
 	/* The video, which a player needs. */
-	status = media_decoder(reader, MF_TRACK_VIDEO, &reader->video, &reader->video_track);
+	status = media_decoder(reader, MEDIA_TRACK_VIDEO, &reader->video, &reader->video_track);
 	if (status != 0) {
 		reader->media->codec_problem = status;
 		if (status == ENOMEM)
@@ -413,19 +413,20 @@ media_reader_open(
 
 	/* The sound, when there is a track it decodes and a stream plays it. */
 	if (reader->media->audio != NULL && reader->media->audio->created) {
-		status = media_decoder(reader, MF_TRACK_AUDIO, &reader->sound, &reader->sound_track);
+		status = media_decoder(reader, MEDIA_TRACK_AUDIO, &reader->sound, &reader->sound_track);
 		if (status != 0)
 			reader->sound = NULL;
 	}
 
 	/* Succeeded: the log line the tests read. */
 	length = -1;
-	length_us = mf_duration_us(reader->file);
+	length_us = media_file_duration_us(reader->file);
 	if (length_us > 0)
 		length = (long long)(length_us / 1000);
-	vp_log("OPEN path=%s width=%u height=%u duration_ms=%lld video=%s audio=%s container=%s",
-	    path, mf_track(reader->file, reader->video_track)->width, mf_track(reader->file, reader->video_track)->height, length,
-	    vp_decoder_name(reader->video), vp_decoder_name(reader->sound), mf_format_name(reader->file));
+	vp_log("OPEN path=%s width=%u height=%u duration_ms=%lld video=%s audio=%s container=%s dropped=%llu",
+	    path, media_file_track(reader->file, reader->video_track)->width, media_file_track(reader->file, reader->video_track)->height, length,
+	    media_decoder_name(reader->video), media_decoder_name(reader->sound), media_file_format_name(reader->file),
+	    (unsigned long long)media_file_dropped(reader->file));
 	return 0;
 }
 
@@ -435,28 +436,28 @@ media_reader_close(
 	struct media_reader *reader)
 {
 	/* Each part, when it was made. */
-	vp_decoder_close(reader->video);
+	media_decoder_close(reader->video);
 	reader->video = NULL;
-	vp_decoder_close(reader->sound);
+	media_decoder_close(reader->sound);
 	reader->sound = NULL;
 	if (reader->file != NULL)
-		mf_close(reader->file);
+		media_file_close(reader->file);
 	reader->file = NULL;
 }
 
 /*
  * Opens the decoder of the file's first track of a kind that has one.
- * Returns 0, the last VP_CODEC_* problem, or ENOENT when there is no track
+ * Returns 0, the last MEDIA_PROBLEM_* problem, or ENOENT when there is no track
  * of the kind.
  */
 static int
 media_decoder(
 	struct media_reader *reader,
 	unsigned kind,
-	struct vp_decoder **result,
+	struct media_decoder **result,
 	unsigned *track)
 {
-	const struct mf_track *found;
+	const struct media_track *found;
 	unsigned count;
 	unsigned index;
 	int problem;
@@ -464,12 +465,12 @@ media_decoder(
 
 	/* Each track of the kind, in the file's order. */
 	problem = ENOENT;
-	count = mf_track_count(reader->file);
+	count = media_file_track_count(reader->file);
 	for (index = 0; index < count; index++) {
-		found = mf_track(reader->file, index);
+		found = media_file_track(reader->file, index);
 		if (found == NULL || found->kind != kind)
 			continue;
-		status = vp_decoder_open(found, result);
+		status = media_decoder_open(found, result);
 		if (status == 0) {
 			*track = index;
 			return 0;
@@ -477,7 +478,7 @@ media_decoder(
 
 		/* The add-in missing ends the search; another codec may still have a decoder. */
 		problem = status;
-		if (status == VP_CODEC_MISSING || status == VP_CODEC_VERSION)
+		if (status == MEDIA_PROBLEM_MISSING || status == MEDIA_PROBLEM_VERSION)
 			break;
 	}
 
@@ -492,15 +493,15 @@ media_decoder(
 static int
 media_feed(
 	struct media_reader *reader,
-	struct vp_decoder *decoder,
-	const struct mf_packet *packet)
+	struct media_decoder *decoder,
+	const struct media_packet *packet)
 {
 	int status;
 	int tries;
 
 	/* Sent; a full decoder gives its pictures or sound first, then takes the packet. */
 	for (tries = 0; tries < 2; tries++) {
-		status = vp_decoder_send(decoder, packet);
+		status = media_decoder_send(decoder, packet);
 		if (status != EAGAIN)
 			break;
 		status = media_drain(reader, decoder);
@@ -517,20 +518,20 @@ media_feed(
 static int
 media_drain(
 	struct media_reader *reader,
-	struct vp_decoder *decoder)
+	struct media_decoder *decoder)
 {
-	struct vp_frame *picture;
+	struct media_frame *picture;
 	int64_t time_us;
 	int received;
 	int status;
 
 	/* Each one. */
 	for (;;) {
-		received = vp_decoder_receive(decoder, &time_us);
+		received = media_decoder_receive(decoder, &time_us);
 		if (!received)
 			return 0;
 		if (decoder == reader->video) {
-			picture = vp_decoder_picture(decoder);
+			picture = media_decoder_picture(decoder);
 			if (picture == NULL)
 				continue;
 			status = media_picture(reader, picture, (double)time_us / 1000000.0);
@@ -548,7 +549,7 @@ media_drain(
 static int
 media_picture(
 	struct media_reader *reader,
-	struct vp_frame *picture,
+	struct media_frame *picture,
 	double time)
 {
 	struct vp_media *media;
@@ -558,7 +559,7 @@ media_picture(
 	/* A picture before the time sought is passed over. */
 	media = reader->media;
 	if (time < reader->skip_before) {
-		vp_frame_free(&picture);
+		media_frame_free(&picture);
 		return 0;
 	}
 
@@ -579,7 +580,7 @@ media_picture(
 	/* Interrupted. */
 	if (media->quit || media->seek_wanted) {
 		(void)pthread_mutex_unlock(&media->lock);
-		vp_frame_free(&picture);
+		media_frame_free(&picture);
 		return 1;
 	}
 
@@ -610,7 +611,7 @@ media_sound(
 		return 0;
 
 	/* Converted. */
-	converted = vp_decoder_sound(reader->sound, reader->samples, MEDIA_SOUND_FRAMES, media->audio->rate);
+	converted = media_decoder_sound(reader->sound, reader->samples, MEDIA_SOUND_FRAMES, media->audio->rate);
 	if (converted == 0U)
 		return 0;
 
@@ -658,10 +659,10 @@ media_seek(
 		return 0;
 
 	/* The file at the key frame before it, the decoders and the sound emptied. */
-	(void)mf_seek(reader->file, (int64_t)(seconds * 1000000.0));
-	vp_decoder_flush(reader->video);
+	(void)media_file_seek(reader->file, (int64_t)(seconds * 1000000.0));
+	media_decoder_flush(reader->video);
 	if (reader->sound != NULL) {
-		vp_decoder_flush(reader->sound);
+		media_decoder_flush(reader->sound);
 		(void)vp_audio_flush(media->audio);
 	}
 
@@ -692,7 +693,7 @@ media_drop_pictures(
 
 	/* Each. */
 	for (index = 0; index < VP_PICTURES; index++)
-		vp_frame_free(&media->pictures[index]);
+		media_frame_free(&media->pictures[index]);
 	media->picture_first = 0;
 	media->picture_count = 0;
 }

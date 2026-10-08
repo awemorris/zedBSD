@@ -30,9 +30,9 @@
 #define HOST_TRACKS	16U
 
 int main(int argc, char **argv);
-static void print_tracks(const struct mf_file *file);
-static void print_packet(const char *tag, const struct mf_packet *packet);
-static void print_seek(struct mf_file *file, long long seek_us);
+static void print_tracks(const struct media_file *file);
+static void print_packet(const char *tag, const struct media_packet *packet);
+static void print_seek(struct media_file *file, long long seek_us);
 
 /*
  * Opens the file, prints what is in it, and seeks when asked.
@@ -42,8 +42,8 @@ main(
 	int argc,
 	char **argv)
 {
-	struct mf_file *file;
-	struct mf_packet packet;
+	struct media_file *file;
+	struct media_packet packet;
 	unsigned count;
 	int i;
 	int error;
@@ -55,7 +55,7 @@ main(
 	}
 
 	/* Opens it; a refusal is printed. */
-	error = mf_open(argv[1], &file);
+	error = media_file_open(argv[1], &file);
 	if (error != 0) {
 		printf("OPEN error=%d\n", error);
 		return 1;
@@ -68,7 +68,7 @@ main(
 	count = 0;
 	for (;;) {
 		/* The next one, or the end. */
-		error = mf_read(file, &packet);
+		error = media_file_read(file, &packet);
 		if (error != 0)
 			break;
 
@@ -81,38 +81,38 @@ main(
 	printf("END error=%d packets=%u\n", error, count);
 
 	/* The packets each track left out, which a reader without an index counts as it reads. */
-	for (i = 0; i < (int)mf_track_count(file); i++)
-		printf("DROPPED track=%d count=%llu\n", i, (unsigned long long)mf_track(file, (unsigned)i)->dropped_count);
+	for (i = 0; i < (int)media_file_track_count(file); i++)
+		printf("DROPPED track=%d count=%llu\n", i, (unsigned long long)media_file_track(file, (unsigned)i)->dropped_count);
 
 	/* Each seek asked for. */
 	for (i = 2; i < argc; i++)
 		print_seek(file, strtoll(argv[i], NULL, 10));
 
 	/* Succeeded: everything is printed. */
-	mf_close(file);
+	media_file_close(file);
 	return 0;
 }
 
 /* Prints the format, the length and each track. */
 static void
 print_tracks(
-	const struct mf_file *file)
+	const struct media_file *file)
 {
-	const struct mf_track *track;
+	const struct media_track *track;
 	unsigned tracks;
 	unsigned i;
 
 	/* The format and length. */
-	tracks = mf_track_count(file);
+	tracks = media_file_track_count(file);
 	printf("FORMAT %s duration_us=%lld tracks=%u\n",
-	       mf_format_name(file),
-	       (long long)mf_duration_us(file),
+	       media_file_format_name(file),
+	       (long long)media_file_duration_us(file),
 	       tracks);
 
 	/* Each track. */
 	for (i = 0; i < tracks; i++) {
 		/* One line. */
-		track = mf_track(file, i);
+		track = media_file_track(file, i);
 		printf("TRACK %u kind=%u codec=%u name=%s width=%u height=%u rate=%u channels=%u private=%zu packets=%llu dropped=%llu duration_us=%lld\n",
 		       i,
 		       track->kind,
@@ -132,10 +132,10 @@ print_tracks(
 /* Seeks and prints the first packet after it of each track (until each has one or the file ends). */
 static void
 print_seek(
-	struct mf_file *file,
+	struct media_file *file,
 	long long seek_us)
 {
-	struct mf_packet packet;
+	struct media_packet packet;
 	unsigned seen[HOST_TRACKS];
 	unsigned tracks;
 	unsigned left;
@@ -143,13 +143,13 @@ print_seek(
 	int error;
 
 	/* The seek. */
-	error = mf_seek(file, (int64_t)seek_us);
+	error = media_file_seek(file, (int64_t)seek_us);
 	printf("SEEK %lld error=%d\n", seek_us, error);
 	if (error != 0)
 		return;
 
 	/* No track has its first packet yet. */
-	tracks = mf_track_count(file);
+	tracks = media_file_track_count(file);
 	if (tracks > HOST_TRACKS)
 		tracks = HOST_TRACKS;
 	for (i = 0; i < tracks; i++)
@@ -159,7 +159,7 @@ print_seek(
 	left = tracks;
 	while (left != 0) {
 		/* The next packet, or the end. */
-		error = mf_read(file, &packet);
+		error = media_file_read(file, &packet);
 		if (error != 0)
 			break;
 
@@ -176,7 +176,7 @@ print_seek(
 static void
 print_packet(
 	const char *tag,
-	const struct mf_packet *packet)
+	const struct media_packet *packet)
 {
 	unsigned long low;
 	unsigned long high;

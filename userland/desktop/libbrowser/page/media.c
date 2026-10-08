@@ -651,7 +651,7 @@ media_start(
 	const unsigned char *bytes,
 	size_t length)
 {
-	struct mf_source source;
+	struct media_source source;
 	unsigned flags;
 	int error;
 

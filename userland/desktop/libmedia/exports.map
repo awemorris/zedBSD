@@ -5,11 +5,17 @@
  * SPDX-License-Identifier: Zlib
  */
 
-/* Only the calls media.h declares leave the library; the reader and the add-in stay inside it. */
+/* Only the calls media.h, media-decoder.h and mediafile.h declare leave the library; the formats' readers and the add-in stay inside it. */
 {
 	global:
 		media_set_log;
 		media_engine_*;
+		media_file_*;
+		media_codec_load;
+		media_codec_reason;
+		media_decoder_*;
+		media_frame_*;
+		media_scaler_free;
 	local:
 		*;
 };

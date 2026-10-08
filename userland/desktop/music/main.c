@@ -110,6 +110,7 @@ static const struct kl_menu_entry mu_menu[] = {
 
 int main(int argc, char **argv);
 static int mu_parse(int argc, char **argv, unsigned *width, unsigned *height, unsigned *timeout, const char **file);
+static void mu_media_log(void *context, const char *line);
 static int mu_library_start(const char *file, long *song);
 static void mu_file_notice(struct mu_window *music, int error, uint64_t now_us);
 static int mu_loop(struct mu_window *music, unsigned timeout);
@@ -152,6 +153,9 @@ main(
 	int status;
 	int error;
 
+	/* libmedia's log lines (the reader's and the decoders') among Music's. */
+	media_set_log(mu_media_log, NULL);
+
 	/* The command line. */
 	status = mu_parse(argc, argv, &width, &height, &timeout, &file);
 	if (status != 0) {
@@ -184,7 +188,7 @@ main(
 	mu_log("AUDIO error=%d", error);
 	if (error != 0)
 		(void)snprintf(music.view.problem, sizeof(music.view.problem), "No sound: the sound service is not running.");
-	error = vp_codec_load();
+	error = media_codec_load();
 	if (error != 0)
 		(void)snprintf(music.view.problem, sizeof(music.view.problem), "Playing needs libavcodec (the libavcodec package).");
 
@@ -294,6 +298,18 @@ vp_log(
 	vfprintf(stderr, format, arguments);
 	fputc('\n', stderr);
 	va_end(arguments);
+}
+
+/* Writes one of libmedia's log lines as a Music line. */
+static void
+mu_media_log(
+	void *context,
+	const char *line)
+{
+	(void)context;
+
+	/* The line, after Music's word. */
+	fprintf(stderr, "MUSIC %s\n", line);
 }
 
 /*
@@ -653,7 +669,7 @@ mu_tell(
 	uint64_t now_us)
 {
 	/* The add-in, the sound service, or the song. */
-	if (music->player.problem == VP_CODEC_MISSING || music->player.problem == VP_CODEC_VERSION)
+	if (music->player.problem == MEDIA_PROBLEM_MISSING || music->player.problem == MEDIA_PROBLEM_VERSION)
 		mu_view_notice(&music->view, "Playing needs libavcodec (the libavcodec package).", now_us);
 	else if (error == ENODEV)
 		mu_view_notice(&music->view, "There is no sound: the sound service is not running.", now_us);

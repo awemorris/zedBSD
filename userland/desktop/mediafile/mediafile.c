@@ -23,7 +23,7 @@
 #define MF_HEAD_SIZE		(3U * 192U + 8U)
 
 static const struct mf_format *format_of(const unsigned char *head, size_t length);
-static int mediafile_start(struct mf_file *opened);
+static int mediafile_start(struct media_file *opened);
 
 /*
  * Opens a media file and reads its tracks.  Returns 0 with *file set, or
@@ -31,11 +31,11 @@ static int mediafile_start(struct mf_file *opened);
  * is damaged.
  */
 int
-mf_open(
+media_file_open(
 	const char *path,
-	struct mf_file **file)
+	struct media_file **file)
 {
-	struct mf_file *opened;
+	struct media_file *opened;
 	struct stat status;
 	int error;
 
@@ -52,14 +52,14 @@ mf_open(
 	opened->fd = open(path, O_RDONLY | O_CLOEXEC);
 	if (opened->fd < 0) {
 		error = errno;
-		mf_close(opened);
+		media_file_close(opened);
 		return error;
 	}
 
 	/* Its size; a file too small to hold a header is not a media file. */
 	error = fstat(opened->fd, &status);
 	if (error != 0 || status.st_size < 12) {
-		mf_close(opened);
+		media_file_close(opened);
 		return EINVAL;
 	}
 
@@ -67,7 +67,7 @@ mf_open(
 	opened->size = (uint64_t)status.st_size;
 	error = mediafile_start(opened);
 	if (error != 0) {
-		mf_close(opened);
+		media_file_close(opened);
 		return error;
 	}
 
@@ -78,15 +78,15 @@ mf_open(
 
 /*
  * Opens a file whose bytes come from a source (ws121-p002) and reads its
- * header and index through it.  Returns 0 or an errno value as mf_open
+ * header and index through it.  Returns 0 or an errno value as media_file_open
  * does, or the source's (ECANCELED, EIO).
  */
 int
-mf_open_source(
-	const struct mf_source *source,
-	struct mf_file **file)
+media_file_open_source(
+	const struct media_source *source,
+	struct media_file **file)
 {
-	struct mf_file *opened;
+	struct media_file *opened;
 	int error;
 
 	/* The state, reading through the source. */
@@ -103,7 +103,7 @@ mf_open_source(
 	/* Its format, header and index. */
 	error = mediafile_start(opened);
 	if (error != 0) {
-		mf_close(opened);
+		media_file_close(opened);
 		return error;
 	}
 
@@ -116,8 +116,8 @@ mf_open_source(
  * Reports how many tracks the file has.
  */
 unsigned
-mf_track_count(
-	const struct mf_file *file)
+media_file_track_count(
+	const struct media_file *file)
 {
 	/* The tracks found when it was opened. */
 	return file->track_count;
@@ -126,9 +126,9 @@ mf_track_count(
 /*
  * Reports one track, or NULL for an index past the last.
  */
-const struct mf_track *
-mf_track(
-	const struct mf_file *file,
+const struct media_track *
+media_file_track(
+	const struct media_file *file,
 	unsigned index)
 {
 	/* Refuses an index past the last. */
@@ -143,8 +143,8 @@ mf_track(
  * Reports the presentation's length in microseconds (0 when unknown).
  */
 int64_t
-mf_duration_us(
-	const struct mf_file *file)
+media_file_duration_us(
+	const struct media_file *file)
 {
 	/* What the header said. */
 	return file->duration_us;
@@ -154,11 +154,31 @@ mf_duration_us(
  * Names the file's format.
  */
 const char *
-mf_format_name(
-	const struct mf_file *file)
+media_file_format_name(
+	const struct media_file *file)
 {
 	/* The reader's name. */
 	return file->format->name;
+}
+
+/*
+ * Counts the packets every track has left out so far (outside the file, or
+ * lost in a damaged stream; ws177-p027).
+ */
+uint64_t
+media_file_dropped(
+	const struct media_file *file)
+{
+	uint64_t dropped;
+	unsigned i;
+
+	/* Each track's count. */
+	dropped = 0;
+	for (i = 0; i < file->track_count; i++)
+		dropped += file->tracks[i].dropped_count;
+
+	/* The sum. */
+	return dropped;
 }
 
 /*
@@ -166,9 +186,9 @@ mf_format_name(
  * end, or another errno value for a damaged file.
  */
 int
-mf_read(
-	struct mf_file *file,
-	struct mf_packet *packet)
+media_file_read(
+	struct media_file *file,
+	struct media_packet *packet)
 {
 	int error;
 
@@ -184,11 +204,11 @@ mf_read(
 
 /*
  * Moves to the last place a decoder can start at or before a time, so that
- * the next mf_read returns its packets.
+ * the next media_file_read returns its packets.
  */
 int
-mf_seek(
-	struct mf_file *file,
+media_file_seek(
+	struct media_file *file,
 	int64_t time_us)
 {
 	int error;
@@ -210,8 +230,8 @@ mf_seek(
  * Closes the file and lets everything it holds go.
  */
 void
-mf_close(
-	struct mf_file *file)
+media_file_close(
+	struct media_file *file)
 {
 	unsigned i;
 
@@ -242,7 +262,7 @@ mf_close(
  */
 int
 mf_read_at(
-	struct mf_file *file,
+	struct media_file *file,
 	uint64_t offset,
 	void *data,
 	size_t size)
@@ -289,7 +309,7 @@ mf_read_at(
  */
 int
 mf_packet_room(
-	struct mf_file *file,
+	struct media_file *file,
 	size_t size)
 {
 	unsigned char *buffer;
@@ -319,7 +339,7 @@ mf_packet_room(
  */
 int
 mf_keep_private(
-	struct mf_track *track,
+	struct media_track *track,
 	const unsigned char *data,
 	size_t size)
 {
@@ -353,7 +373,7 @@ mf_keep_private(
  */
 void
 mf_set_codec_name(
-	struct mf_track *track,
+	struct media_track *track,
 	const char *name,
 	size_t length)
 {
@@ -484,7 +504,7 @@ format_of(
 /* Tells the format from the first bytes and reads its header and index; 0 or an errno value. */
 static int
 mediafile_start(
-	struct mf_file *opened)
+	struct media_file *opened)
 {
 	unsigned char head[MF_HEAD_SIZE];
 	size_t length;

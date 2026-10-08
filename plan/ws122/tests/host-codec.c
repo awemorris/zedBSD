@@ -19,7 +19,7 @@
  *   host-codec FILE          prints "host-codec: PASS ..." or FAIL lines
  */
 
-#include "userland/desktop/videoplayer/videoplayer.h"
+#include "userland/desktop/libmedia/media-private.h"
 
 #include <errno.h>
 #include <stdarg.h>
@@ -32,9 +32,9 @@
 
 static int failures;
 
-/* The player's log, to standard error. */
+/* libmedia's log (the library's own function; the test links the sources), to standard error. */
 void
-vp_log(
+media_log(
 	const char *format,
 	...)
 {
@@ -56,13 +56,13 @@ main(
 {
 	static int16_t samples[16384 * 2];
 	static uint32_t pixels[160 * 90];
-	struct vp_decoder *video;
-	struct vp_decoder *sound;
-	const struct mf_track *track;
-	struct mf_file *file;
-	struct mf_packet packet;
-	struct vp_frame *picture;
-	void *scaler;
+	struct media_decoder *video;
+	struct media_decoder *sound;
+	const struct media_track *track;
+	struct media_file *file;
+	struct media_packet packet;
+	struct media_frame *picture;
+	struct media_scaler *scaler;
 	unsigned video_track;
 	unsigned sound_track;
 	unsigned index;
@@ -81,13 +81,13 @@ main(
 	/* The file and its tracks' decoders. */
 	if (argc != 2)
 		return 2;
-	status = vp_codec_load();
+	status = media_codec_load();
 	check(status == 0, "the add-in loads the host's FFmpeg");
 	if (status != 0) {
-		printf("reason: %s\n", vp_codec_reason());
+		printf("reason: %s\n", media_codec_reason());
 		return 1;
 	}
-	status = mf_open(argv[1], &file);
+	status = media_file_open(argv[1], &file);
 	check(status == 0, "the file opens");
 	if (status != 0)
 		return 1;
@@ -95,15 +95,15 @@ main(
 	sound = NULL;
 	video_track = 0;
 	sound_track = 0;
-	for (index = 0; index < mf_track_count(file); index++) {
-		track = mf_track(file, index);
-		if (track->kind == MF_TRACK_VIDEO && video == NULL) {
-			status = vp_decoder_open(track, &video);
+	for (index = 0; index < media_file_track_count(file); index++) {
+		track = media_file_track(file, index);
+		if (track->kind == MEDIA_TRACK_VIDEO && video == NULL) {
+			status = media_decoder_open(track, &video);
 			if (status == 0)
 				video_track = index;
 		}
-		if (track->kind == MF_TRACK_AUDIO && sound == NULL) {
-			status = vp_decoder_open(track, &sound);
+		if (track->kind == MEDIA_TRACK_AUDIO && sound == NULL) {
+			status = media_decoder_open(track, &sound);
 			if (status == 0)
 				sound_track = index;
 		}
@@ -111,7 +111,7 @@ main(
 	check(video != NULL, "a video decoder opens");
 	if (video == NULL)
 		return 1;
-	printf("decoders: video=%s audio=%s\n", vp_decoder_name(video), vp_decoder_name(sound));
+	printf("decoders: video=%s audio=%s\n", media_decoder_name(video), media_decoder_name(sound));
 
 	/* Every packet, decoded. */
 	pictures = 0;
@@ -122,45 +122,45 @@ main(
 	last_us = -1;
 	scaler = NULL;
 	for (;;) {
-		status = mf_read(file, &packet);
+		status = media_file_read(file, &packet);
 		if (status != 0)
 			break;
 		if (packet.track == video_track) {
 			video_packets++;
-			while (vp_decoder_send(video, &packet) == EAGAIN) {
-				while (vp_decoder_receive(video, &time_us)) {
+			while (media_decoder_send(video, &packet) == EAGAIN) {
+				while (media_decoder_receive(video, &time_us)) {
 					pictures++;
 				}
 			}
-			while (vp_decoder_receive(video, &time_us)) {
+			while (media_decoder_receive(video, &time_us)) {
 				if (time_us < last_us)
 					out_of_order++;
 				last_us = time_us;
 				pictures++;
 				if (pictures == 10U) {
-					picture = vp_decoder_picture(video);
-					vp_frame_size(picture, &width, &height);
+					picture = media_decoder_picture(video);
+					media_frame_size(picture, &width, &height);
 					printf("picture: %dx%d\n", width, height);
 					memset(pixels, 0, sizeof(pixels));
-					status = vp_frame_scale(picture, &scaler, pixels, 160 * sizeof(uint32_t), 160, 90);
+					status = media_frame_scale(picture, &scaler, pixels, 160 * sizeof(uint32_t), 160, 90);
 					check(status == 0, "a picture scales to BGRA");
 					for (index = 0; index < 160U * 90U; index++) {
 						if ((pixels[index] & 0x00ffffffU) != 0U)
 							drawn++;
 					}
-					vp_frame_free(&picture);
+					media_frame_free(&picture);
 				}
 			}
 		} else if (sound != NULL && packet.track == sound_track) {
-			(void)vp_decoder_send(sound, &packet);
-			while (vp_decoder_receive(sound, &time_us))
-				sound_frames += vp_decoder_sound(sound, samples, 16384, HOST_RATE);
+			(void)media_decoder_send(sound, &packet);
+			while (media_decoder_receive(sound, &time_us))
+				sound_frames += media_decoder_sound(sound, samples, 16384, HOST_RATE);
 		}
 	}
 
 	/* The ends drained. */
-	(void)vp_decoder_send(video, NULL);
-	while (vp_decoder_receive(video, &time_us)) {
+	(void)media_decoder_send(video, NULL);
+	while (media_decoder_receive(video, &time_us)) {
 		if (time_us < last_us)
 			out_of_order++;
 		last_us = time_us;
@@ -172,33 +172,33 @@ main(
 	check(drawn > 1000U, "the scaled picture has something drawn");
 	if (sound != NULL) {
 		printf("sound: frames=%llu seconds=%.2f length=%.2f\n", (unsigned long long)sound_frames, (double)sound_frames / HOST_RATE,
-		    (double)mf_duration_us(file) / 1000000.0);
-		check((double)sound_frames / HOST_RATE > (double)mf_duration_us(file) / 1000000.0 * 0.9, "the sound converts for about the length");
+		    (double)media_file_duration_us(file) / 1000000.0);
+		check((double)sound_frames / HOST_RATE > (double)media_file_duration_us(file) / 1000000.0 * 0.9, "the sound converts for about the length");
 	}
 
 	/* A seek to the middle: the first picture after it. */
-	status = mf_seek(file, mf_duration_us(file) / 2);
+	status = media_file_seek(file, media_file_duration_us(file) / 2);
 	check(status == 0, "the seek works");
-	vp_decoder_flush(video);
+	media_decoder_flush(video);
 	first_after_seek = -1;
 	while (first_after_seek < 0) {
-		status = mf_read(file, &packet);
+		status = media_file_read(file, &packet);
 		if (status != 0)
 			break;
 		if (packet.track != video_track)
 			continue;
-		(void)vp_decoder_send(video, &packet);
-		if (vp_decoder_receive(video, &time_us))
+		(void)media_decoder_send(video, &packet);
+		if (media_decoder_receive(video, &time_us))
 			first_after_seek = time_us;
 	}
-	printf("seek: first picture at %lld us (middle %lld)\n", (long long)first_after_seek, (long long)(mf_duration_us(file) / 2));
-	check(first_after_seek >= 0 && first_after_seek <= mf_duration_us(file) / 2 + 500000, "a picture comes after the seek, at the key frame before the middle");
+	printf("seek: first picture at %lld us (middle %lld)\n", (long long)first_after_seek, (long long)(media_file_duration_us(file) / 2));
+	check(first_after_seek >= 0 && first_after_seek <= media_file_duration_us(file) / 2 + 500000, "a picture comes after the seek, at the key frame before the middle");
 
 	/* The end. */
-	vp_scaler_free(scaler);
-	vp_decoder_close(video);
-	vp_decoder_close(sound);
-	mf_close(file);
+	media_scaler_free(scaler);
+	media_decoder_close(video);
+	media_decoder_close(sound);
+	media_file_close(file);
 	if (failures != 0) {
 		printf("host-codec: FAIL %s failures=%d\n", argv[1], failures);
 		return 1;

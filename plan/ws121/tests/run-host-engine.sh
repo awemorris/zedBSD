@@ -11,8 +11,8 @@ dir=$(dirname -- "$out")
 mkdir -p "$dir"
 U=userland/desktop
 cc -std=gnu99 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -fsanitize=address,undefined -fno-sanitize-recover=all \
-	-fno-omit-frame-pointer -I. plan/ws121/tests/host-engine.c $U/libmedia/engine.c $U/videoplayer/codec.c \
-	$U/videoplayer/bitstream.c $U/mediafile/mediafile.c $U/mediafile/mp4.c $U/mediafile/mkv.c $U/mediafile/ts.c $U/mediafile/ogg.c $U/mediafile/avi.c \
+	-fno-omit-frame-pointer -I. plan/ws121/tests/host-engine.c $U/libmedia/engine.c $U/libmedia/decoder.c $U/libmedia/avcodec.c \
+	$U/libmedia/bitstream.c $U/mediafile/mediafile.c $U/mediafile/mp4.c $U/mediafile/mkv.c $U/mediafile/ts.c $U/mediafile/ogg.c $U/mediafile/avi.c \
 	-ldl -lpthread -o "$out"
 ffmpeg -loglevel error -y -f lavfi -i "sine=frequency=440:duration=2" -c:a aac -b:a 64k "$dir/song.m4a"
 timeout 60 "$out" plan/ws122/tests/sample.mp4 "$dir/song.m4a"

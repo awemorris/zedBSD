@@ -35,8 +35,8 @@
  * read.  The sound is turned into 16-bit stereo at the stream's rate here.
  */
 
-#include "videoplayer.h"
-#include "codec-layout.h"
+#include "media-private.h"
+#include "avcodec-layout.h"
 
 #include <dlfcn.h>
 #include <errno.h>
@@ -51,6 +51,9 @@
 
 /* AVERROR_EOF: the tag 'E', 'O', 'F', ' ' made negative. */
 #define CODEC_ERROR_EOF		(-(int)(0x45U | (0x4fU << 8) | (0x46U << 16) | (0x20U << 24)))
+
+/* The zeros FFmpeg wants after extradata (AV_INPUT_BUFFER_PADDING_SIZE). */
+#define CODEC_PADDING		64U
 
 /* How many packet times a video decoder may hold before pictures come out. */
 #define CODEC_PENDING_MAX	64U
@@ -109,6 +112,10 @@ struct codec_library {
 	int (*sws_scale)(void *context, const uint8_t *const source[], const int source_stride[], int slice_y, int slice_height,
 	    uint8_t *const destination[], const int destination_stride[]);
 	void (*sws_freeContext)(void *context);
+	void *(*avcodec_parameters_alloc)(void);
+	void (*avcodec_parameters_free)(void **parameters);
+	int (*avcodec_parameters_to_context)(void *context, const void *parameters);
+	void *(*av_mallocz)(size_t size);
 };
 
 /*
@@ -119,11 +126,11 @@ struct codec_library {
  * since, the container's rate and channels, and the resampler's place
  * between the last two samples.
  */
-struct vp_decoder {
+struct addin_decoder {
 	void *context;
 	void *packet;
 	void *frame;
-	struct vp_bitstream bitstream;
+	struct media_bitstream bitstream;
 	const char *name;
 	unsigned kind;
 	int64_t pending[CODEC_PENDING_MAX];
@@ -136,6 +143,7 @@ struct vp_decoder {
 	double resample_place;
 	int16_t resample_last[2];
 	int resample_primed;
+	char own_name[MEDIA_CODEC_NAME_MAX];
 };
 
 /*
@@ -154,17 +162,20 @@ static const struct codec_version add_versions[] = {
 
 /* FFmpeg's decoders by the codec a track carries (AV1's native decoder is GPU-only; dav1d's is tried first). */
 static const struct codec_name codec_names[] = {
-	{ MF_CODEC_H264, "h264" },
-	{ MF_CODEC_HEVC, "hevc" },
-	{ MF_CODEC_AV1, "libdav1d" },
-	{ MF_CODEC_AV1, "av1" },
-	{ MF_CODEC_VP9, "vp9" },
-	{ MF_CODEC_VP8, "vp8" },
-	{ MF_CODEC_MPEG4, "mpeg4" },
-	{ MF_CODEC_AAC, "aac" },
-	{ MF_CODEC_OPUS, "opus" },
-	{ MF_CODEC_MP3, "mp3float" },
-	{ MF_CODEC_MP3, "mp3" }
+	{ MEDIA_CODEC_H264, "h264" },
+	{ MEDIA_CODEC_HEVC, "hevc" },
+	{ MEDIA_CODEC_AV1, "libdav1d" },
+	{ MEDIA_CODEC_AV1, "av1" },
+	{ MEDIA_CODEC_VP9, "vp9" },
+	{ MEDIA_CODEC_VP8, "vp8" },
+	{ MEDIA_CODEC_MPEG4, "mpeg4" },
+	{ MEDIA_CODEC_AAC, "aac" },
+	{ MEDIA_CODEC_OPUS, "opus" },
+	{ MEDIA_CODEC_MP3, "mp3float" },
+	{ MEDIA_CODEC_MP3, "mp3" },
+	{ MEDIA_CODEC_VORBIS, "vorbis" },
+	{ MEDIA_CODEC_THEORA, "theora" },
+	{ MEDIA_CODEC_MJPEG, "mjpeg" }
 };
 
 /*
@@ -181,18 +192,52 @@ static int codec_open_set(const struct codec_version *version);
 static void *codec_open_library(const char *name, unsigned major);
 static int codec_find(void *library, const char *name, void *pointer);
 static int codec_find_all(void);
-static void codec_pending_add(struct vp_decoder *decoder, int64_t time_us);
-static int codec_channels(struct vp_decoder *decoder);
-static uint32_t codec_rate(struct vp_decoder *decoder);
+static void codec_pending_add(struct addin_decoder *decoder, int64_t time_us);
+static int codec_channels(struct addin_decoder *decoder);
+static uint32_t codec_rate(struct addin_decoder *decoder);
 static int codec_sample(const struct codec_frame *frame, const char *format, int channel, int planar, int channels, int index, int16_t *value);
+static int addin_extradata(struct addin_decoder *decoder, const void *found, const struct media_track *track);
+static int addin_load(void);
+static const char *addin_reason(void);
+static int addin_open(const struct media_track *track, void **result);
+static const char *addin_name(const void *state);
+static int addin_send(void *state, const struct media_packet *packet);
+static int addin_receive(void *state, int64_t *time_us);
+static void *addin_picture(void *state);
+static size_t addin_sound(void *state, int16_t *samples, size_t capacity, uint32_t rate);
+static void addin_flush(void *state);
+static void addin_close(void *state);
+static void addin_picture_free(void *picture);
+static void addin_picture_size(const void *frame, int *width, int *height);
+static int addin_picture_scale(const void *frame, void **scaler, uint32_t *pixels, size_t stride, int width, int height);
+static void addin_scaler_free(void *scaler);
+
+/* The add-in as libmedia's decoder.c calls it: the software decoding back end. */
+const struct media_decoder_ops media_avcodec_ops = {
+	"libavcodec",
+	addin_load,
+	addin_reason,
+	addin_open,
+	addin_name,
+	addin_send,
+	addin_receive,
+	addin_picture,
+	addin_sound,
+	addin_flush,
+	addin_close,
+	addin_picture_free,
+	addin_picture_size,
+	addin_picture_scale,
+	addin_scaler_free,
+};
 
 /*
- * Loads the add-in once.  Returns 0 when it can decode, VP_CODEC_MISSING
- * when libavcodec is not installed, VP_CODEC_VERSION for a version it does
- * not know (vp_codec_reason says more).
+ * Loads the add-in once.  Returns 0 when it can decode, MEDIA_PROBLEM_MISSING
+ * when libavcodec is not installed, MEDIA_PROBLEM_VERSION for a version it does
+ * not know (addin_reason says more).
  */
-int
-vp_codec_load(void)
+static int
+addin_load(void)
 {
 	/* Once for the program. */
 	(void)pthread_once(&codec_once, codec_load);
@@ -208,31 +253,32 @@ vp_codec_load(void)
 /*
  * Reports why the add-in could not load ("" when it loaded).
  */
-const char *
-vp_codec_reason(void)
+static const char *
+addin_reason(void)
 {
 	/* The text kept by the load. */
 	return codec.reason;
 }
 
 /*
- * Opens a decoder for a track.  Returns 0, VP_CODEC_MISSING or
- * VP_CODEC_VERSION (the add-in did not load), VP_CODEC_FORMAT (no decoder
+ * Opens a decoder for a track.  Returns 0, MEDIA_PROBLEM_MISSING or
+ * MEDIA_PROBLEM_VERSION (the add-in did not load), MEDIA_PROBLEM_FORMAT (no decoder
  * for the track's codec, or it would not open), or ENOMEM.
  */
-int
-vp_decoder_open(
-	const struct mf_track *track,
-	struct vp_decoder **result)
+static int
+addin_open(
+	const struct media_track *track,
+	void **result)
 {
-	struct vp_decoder *decoder;
+	struct addin_decoder *decoder;
 	const void *found;
 	unsigned index;
+	int needs_extradata;
 	int status;
 
 	/* The add-in. */
 	*result = NULL;
-	status = vp_codec_load();
+	status = addin_load();
 	if (status != 0)
 		return status;
 
@@ -251,17 +297,24 @@ vp_decoder_open(
 		}
 	}
 
+	/* PCM's decoder is named by its samples (the container's name for the codec: pcm_s16le, pcm_u8, ...). */
+	if (track->codec == MEDIA_CODEC_PCM) {
+		(void)snprintf(decoder->own_name, sizeof(decoder->own_name), "%s", track->codec_name);
+		found = codec.avcodec_find_decoder_by_name(decoder->own_name);
+		decoder->name = decoder->own_name;
+	}
+
 	/* No decoder for the codec. */
 	if (found == NULL) {
 		free(decoder);
-		return VP_CODEC_FORMAT;
+		return MEDIA_PROBLEM_FORMAT;
 	}
 
 	/* The stream's conversion (the configuration in the stream instead of extradata). */
-	status = vp_bitstream_open(&decoder->bitstream, track->codec, track->private_data, track->private_size);
+	status = media_bitstream_open(&decoder->bitstream, track->codec, track->private_data, track->private_size);
 	if (status != 0) {
 		free(decoder);
-		return VP_CODEC_FORMAT;
+		return MEDIA_PROBLEM_FORMAT;
 	}
 
 	/* The context, set by option names: threads chosen by FFmpeg, and the sound's rate and layout when known. */
@@ -270,37 +323,49 @@ vp_decoder_open(
 	decoder->track_channels = track->channels;
 	decoder->context = codec.avcodec_alloc_context3(found);
 	if (decoder->context == NULL) {
-		vp_decoder_close(decoder);
+		addin_close(decoder);
 		return ENOMEM;
+	}
+
+	/* Vorbis and Theora read their three headers from the extradata, which the stream does not repeat. */
+	needs_extradata = 0;
+	if (track->codec == MEDIA_CODEC_VORBIS || track->codec == MEDIA_CODEC_THEORA)
+		needs_extradata = 1;
+	if (needs_extradata && track->private_size != 0) {
+		status = addin_extradata(decoder, found, track);
+		if (status != 0) {
+			addin_close(decoder);
+			return MEDIA_PROBLEM_FORMAT;
+		}
 	}
 
 	/* Its options: the threads FFmpeg chooses, and the sound's rate and layout from the container. */
 	(void)codec.av_opt_set_int(decoder->context, "threads", 0, 0);
-	if (track->kind == MF_TRACK_AUDIO && track->sample_rate != 0U)
+	if (track->kind == MEDIA_TRACK_AUDIO && track->sample_rate != 0U)
 		(void)codec.av_opt_set_int(decoder->context, "ar", (int64_t)track->sample_rate, 0);
-	if (track->kind == MF_TRACK_AUDIO && track->channels == 1U)
+	if (track->kind == MEDIA_TRACK_AUDIO && track->channels == 1U)
 		(void)codec.av_opt_set(decoder->context, "ch_layout", "mono", 0);
-	if (track->kind == MF_TRACK_AUDIO && track->channels == 2U)
+	if (track->kind == MEDIA_TRACK_AUDIO && track->channels == 2U)
 		(void)codec.av_opt_set(decoder->context, "ch_layout", "stereo", 0);
 
 	/* Opened, with its packet and frame. */
 	status = codec.avcodec_open2(decoder->context, found, NULL);
 	if (status < 0) {
-		vp_decoder_close(decoder);
-		return VP_CODEC_FORMAT;
+		addin_close(decoder);
+		return MEDIA_PROBLEM_FORMAT;
 	}
 
 	/* The packet sent each time. */
 	decoder->packet = codec.av_packet_alloc();
 	if (decoder->packet == NULL) {
-		vp_decoder_close(decoder);
+		addin_close(decoder);
 		return ENOMEM;
 	}
 
 	/* The frame received each time. */
 	decoder->frame = codec.av_frame_alloc();
 	if (decoder->frame == NULL) {
-		vp_decoder_close(decoder);
+		addin_close(decoder);
 		return ENOMEM;
 	}
 
@@ -312,10 +377,15 @@ vp_decoder_open(
 /*
  * Reports the name of the decoder FFmpeg gave (the log names it).
  */
-const char *
-vp_decoder_name(
-	const struct vp_decoder *decoder)
+static const char *
+addin_name(
+	const void *state)
 {
+	const struct addin_decoder *decoder;
+
+	/* The add-in's decoder. */
+	decoder = state;
+
 	/* None without a decoder. */
 	if (decoder == NULL)
 		return "none";
@@ -329,15 +399,19 @@ vp_decoder_name(
  * EAGAIN when its pictures or sound must be received first (the packet is
  * not taken; send it again), or EINVAL for a packet that cannot be decoded.
  */
-int
-vp_decoder_send(
-	struct vp_decoder *decoder,
-	const struct mf_packet *packet)
+static int
+addin_send(
+	void *state,
+	const struct media_packet *packet)
 {
+	struct addin_decoder *decoder;
 	struct codec_packet *head;
 	const unsigned char *bytes;
 	size_t size;
 	int status;
+
+	/* The add-in's decoder. */
+	decoder = state;
 
 	/* The end: the decoder gives what it holds. */
 	if (packet == NULL) {
@@ -348,7 +422,7 @@ vp_decoder_send(
 	}
 
 	/* The bytes as the decoder reads them. */
-	status = vp_bitstream_convert(&decoder->bitstream, packet->data, packet->size, packet->keyframe, &bytes, &size);
+	status = media_bitstream_convert(&decoder->bitstream, packet->data, packet->size, packet->keyframe, &bytes, &size);
 	if (status != 0)
 		return EINVAL;
 	if (size == 0U || size > (size_t)0x7fffffff)
@@ -374,9 +448,9 @@ vp_decoder_send(
 		return EINVAL;
 
 	/* The time waits for its picture; the sound's first time anchors the samples. */
-	if (decoder->kind == MF_TRACK_VIDEO)
+	if (decoder->kind == MEDIA_TRACK_VIDEO)
 		codec_pending_add(decoder, packet->pts_us);
-	if (decoder->kind == MF_TRACK_AUDIO && !decoder->sound_started) {
+	if (decoder->kind == MEDIA_TRACK_AUDIO && !decoder->sound_started) {
 		decoder->sound_started = 1;
 		decoder->sound_start_us = packet->pts_us;
 		decoder->sound_samples = 0;
@@ -391,14 +465,18 @@ vp_decoder_send(
  * time.  Returns 1 with one, 0 when the decoder needs another packet or has
  * ended.
  */
-int
-vp_decoder_receive(
-	struct vp_decoder *decoder,
+static int
+addin_receive(
+	void *state,
 	int64_t *time_us)
 {
+	struct addin_decoder *decoder;
 	const struct codec_frame *frame;
 	uint32_t rate;
 	int status;
+
+	/* The add-in's decoder. */
+	decoder = state;
 
 	/* The next one. */
 	codec.av_frame_unref(decoder->frame);
@@ -408,7 +486,7 @@ vp_decoder_receive(
 
 	/* A picture takes the smallest time waiting. */
 	*time_us = 0;
-	if (decoder->kind == MF_TRACK_VIDEO) {
+	if (decoder->kind == MEDIA_TRACK_VIDEO) {
 		if (decoder->pending_count != 0U) {
 			*time_us = decoder->pending[0];
 			memmove(decoder->pending, decoder->pending + 1, (decoder->pending_count - 1U) * sizeof(decoder->pending[0]));
@@ -436,11 +514,15 @@ vp_decoder_receive(
  * Takes a reference of the picture received, for the window; NULL when it
  * cannot be made.
  */
-struct vp_frame *
-vp_decoder_picture(
-	struct vp_decoder *decoder)
+static void *
+addin_picture(
+	void *state)
 {
+	struct addin_decoder *decoder;
 	void *copy;
+
+	/* The add-in's decoder. */
+	decoder = state;
 
 	/* A new reference to the same picture. */
 	copy = codec.av_frame_clone(decoder->frame);
@@ -452,13 +534,14 @@ vp_decoder_picture(
  * resampling, the first two channels), up to capacity frames.  Returns how
  * many frames were written (0 for a format the add-in does not convert).
  */
-size_t
-vp_decoder_sound(
-	struct vp_decoder *decoder,
+static size_t
+addin_sound(
+	void *state,
 	int16_t *samples,
 	size_t capacity,
 	uint32_t rate)
 {
+	struct addin_decoder *decoder;
 	const struct codec_frame *frame;
 	const char *format;
 	int16_t current[2];
@@ -470,6 +553,9 @@ vp_decoder_sound(
 	int index;
 	int status;
 	size_t length;
+
+	/* The add-in's decoder. */
+	decoder = state;
 
 	/* The frame's format, by its name. */
 	frame = decoder->frame;
@@ -529,10 +615,15 @@ vp_decoder_sound(
  * Empties the decoder (after a seek): what it held is dropped, the times
  * waiting are forgotten and the sound starts its count again.
  */
-void
-vp_decoder_flush(
-	struct vp_decoder *decoder)
+static void
+addin_flush(
+	void *state)
 {
+	struct addin_decoder *decoder;
+
+	/* The add-in's decoder. */
+	decoder = state;
+
 	/* The decoder's own state. */
 	codec.avcodec_flush_buffers(decoder->context);
 
@@ -547,10 +638,15 @@ vp_decoder_flush(
 /*
  * Closes a decoder.
  */
-void
-vp_decoder_close(
-	struct vp_decoder *decoder)
+static void
+addin_close(
+	void *state)
 {
+	struct addin_decoder *decoder;
+
+	/* The add-in's decoder. */
+	decoder = state;
+
 	/* Nothing to close. */
 	if (decoder == NULL)
 		return;
@@ -562,35 +658,30 @@ vp_decoder_close(
 		codec.av_packet_free(&decoder->packet);
 	if (decoder->context != NULL)
 		codec.avcodec_free_context(&decoder->context);
-	vp_bitstream_close(&decoder->bitstream);
+	media_bitstream_close(&decoder->bitstream);
 	free(decoder);
 }
 
 /*
- * Frees a picture's reference (NULL is left alone).
+ * Frees a picture's reference (an AVFrame).
  */
-void
-vp_frame_free(
-	struct vp_frame **frame)
+static void
+addin_picture_free(
+	void *picture)
 {
 	void *reference;
 
-	/* Nothing to free. */
-	if (*frame == NULL)
-		return;
-
 	/* The reference. */
-	reference = *frame;
+	reference = picture;
 	codec.av_frame_free(&reference);
-	*frame = NULL;
 }
 
 /*
  * Reports a picture's size.
  */
-void
-vp_frame_size(
-	const struct vp_frame *frame,
+static void
+addin_picture_size(
+	const void *frame,
 	int *width,
 	int *height)
 {
@@ -607,9 +698,9 @@ vp_frame_size(
  * size, through a scaler kept between calls (remade when the sizes
  * change).  Returns 0, or EINVAL when it cannot be scaled.
  */
-int
-vp_frame_scale(
-	const struct vp_frame *frame,
+static int
+addin_picture_scale(
+	const void *frame,
 	void **scaler,
 	uint32_t *pixels,
 	size_t stride,
@@ -643,8 +734,8 @@ vp_frame_scale(
 /*
  * Frees a scaler (NULL is left alone).
  */
-void
-vp_scaler_free(
+static void
+addin_scaler_free(
 	void *scaler)
 {
 	/* Only one there is, with the library loaded. */
@@ -661,7 +752,7 @@ codec_load(void)
 	int status;
 
 	/* Each known set, newest first; the first whose libavcodec is there decides. */
-	codec.error = VP_CODEC_MISSING;
+	codec.error = MEDIA_PROBLEM_MISSING;
 	(void)snprintf(codec.reason, sizeof(codec.reason), "libavcodec is not installed");
 	for (index = 0; index < sizeof(add_versions) / sizeof(add_versions[0]); index++) {
 		status = codec_open_set(&add_versions[index]);
@@ -674,13 +765,13 @@ codec_load(void)
 	/* The pixel format the window takes, by name. */
 	if (codec.error == 0)
 		codec.bgra = codec.av_get_pix_fmt("bgra");
-	vp_log("CODEC load error=%d major=%u reason=%s", codec.error, codec.major, codec.reason);
+	media_log("CODEC load error=%d major=%u reason=%s", codec.error, codec.major, codec.reason);
 }
 
 /*
  * Opens one library set: ENOENT when its libavcodec is not there, 0 when
  * every library and function is there and the version is the one named,
- * VP_CODEC_VERSION or VP_CODEC_MISSING otherwise.
+ * MEDIA_PROBLEM_VERSION or MEDIA_PROBLEM_MISSING otherwise.
  */
 static int
 codec_open_set(
@@ -697,12 +788,12 @@ codec_open_set(
 	/* Its version must be the one its name says (a renamed library is not trusted). */
 	status = codec_find(codec.avcodec, "avcodec_version", &codec.avcodec_version);
 	if (status != 0)
-		return VP_CODEC_VERSION;
+		return MEDIA_PROBLEM_VERSION;
 	found = codec.avcodec_version() >> 16;
 	codec.major = found;
 	if (found != version->avcodec) {
 		(void)snprintf(codec.reason, sizeof(codec.reason), "libavcodec %u is not a version this player knows", found);
-		return VP_CODEC_VERSION;
+		return MEDIA_PROBLEM_VERSION;
 	}
 
 	/* libavutil and libswscale of the same release. */
@@ -710,13 +801,13 @@ codec_open_set(
 	codec.swscale = codec_open_library("libswscale", version->swscale);
 	if (codec.avutil == NULL || codec.swscale == NULL) {
 		(void)snprintf(codec.reason, sizeof(codec.reason), "libavutil %u or libswscale %u is not installed", version->avutil, version->swscale);
-		return VP_CODEC_MISSING;
+		return MEDIA_PROBLEM_MISSING;
 	}
 
 	/* Every function. */
 	status = codec_find_all();
 	if (status != 0)
-		return VP_CODEC_VERSION;
+		return MEDIA_PROBLEM_VERSION;
 
 	/* Succeeded: the add-in decodes. */
 	codec.reason[0] = '\0';
@@ -820,6 +911,16 @@ codec_find_all(void)
 	if (status == 0)
 		status = codec_find(codec.swscale, "sws_freeContext", &codec.sws_freeContext);
 
+	/* The codec parameters that carry a decoder's extradata (ws177-p031: Vorbis, Theora). */
+	if (status == 0)
+		status = codec_find(codec.avcodec, "avcodec_parameters_alloc", &codec.avcodec_parameters_alloc);
+	if (status == 0)
+		status = codec_find(codec.avcodec, "avcodec_parameters_free", &codec.avcodec_parameters_free);
+	if (status == 0)
+		status = codec_find(codec.avcodec, "avcodec_parameters_to_context", &codec.avcodec_parameters_to_context);
+	if (status == 0)
+		status = codec_find(codec.avutil, "av_mallocz", &codec.av_mallocz);
+
 	/* Reports a function missing. */
 	if (status != 0)
 		return status;
@@ -831,7 +932,7 @@ codec_find_all(void)
 /* Keeps a packet's time among those waiting for their pictures, in order (the oldest dropped when full). */
 static void
 codec_pending_add(
-	struct vp_decoder *decoder,
+	struct addin_decoder *decoder,
 	int64_t time_us)
 {
 	unsigned place;
@@ -861,7 +962,7 @@ codec_pending_add(
  */
 static int
 codec_channels(
-	struct vp_decoder *decoder)
+	struct addin_decoder *decoder)
 {
 	static const struct {
 		const char *name;
@@ -913,7 +1014,7 @@ codec_channels(
 /* Reports the sound's rate: the decoder's, else the container's. */
 static uint32_t
 codec_rate(
-	struct vp_decoder *decoder)
+	struct addin_decoder *decoder)
 {
 	int64_t rate;
 	int status;
@@ -991,5 +1092,60 @@ codec_sample(
 	if (real < -1.0)
 		real = -1.0;
 	*value = (int16_t)(real * 32767.0);
+	return 0;
+}
+
+/*
+ * Gives a decoder's context the track's private data as its extradata,
+ * through codec parameters (their first fields, avcodec-layout.h's, with the
+ * decoder's own type and ID from the head of its AVCodec): the context
+ * copies them.  Returns 0, ENOMEM, or EINVAL when FFmpeg refuses them.
+ */
+static int
+addin_extradata(
+	struct addin_decoder *decoder,
+	const void *found,
+	const struct media_track *track)
+{
+	struct codec_parameters *parameters;
+	const struct codec_head *head;
+	void *allocated;
+	uint8_t *extradata;
+	int status;
+
+	/* Refuses private data too large for FFmpeg's int. */
+	if (track->private_size > (size_t)0x7fffff00)
+		return EINVAL;
+
+	/* The parameters. */
+	allocated = codec.avcodec_parameters_alloc();
+	if (allocated == NULL)
+		return ENOMEM;
+	parameters = allocated;
+
+	/* The extradata, with FFmpeg's padding of zeros after it. */
+	extradata = codec.av_mallocz(track->private_size + CODEC_PADDING);
+	if (extradata == NULL) {
+		codec.avcodec_parameters_free(&allocated);
+		return ENOMEM;
+	}
+
+	/* The track's private data in it. */
+	memcpy(extradata, track->private_data, track->private_size);
+
+	/* The decoder's type and ID, and the extradata (the parameters own it now). */
+	head = found;
+	parameters->codec_type = head->type;
+	parameters->codec_id = head->id;
+	parameters->extradata = extradata;
+	parameters->extradata_size = (int)track->private_size;
+
+	/* Copied into the context; the parameters go. */
+	status = codec.avcodec_parameters_to_context(decoder->context, parameters);
+	codec.avcodec_parameters_free(&allocated);
+	if (status < 0)
+		return EINVAL;
+
+	/* Succeeded: the context has the extradata. */
 	return 0;
 }

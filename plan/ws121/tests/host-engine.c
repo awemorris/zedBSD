@@ -51,7 +51,7 @@ main(
 	struct media_engine *engine;
 	struct media_status status;
 	struct media_status later;
-	struct mf_source source;
+	struct media_source source;
 	struct stat file_status;
 	unsigned pictures;
 	char detail[160];
