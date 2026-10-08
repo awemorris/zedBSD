@@ -484,6 +484,7 @@ probe_sleep_ms(
 	long ms)
 {
 	struct timespec request;
+	int result;
 
 	/* Nothing to wait for. */
 	if (ms <= 0)
@@ -493,8 +494,6 @@ probe_sleep_ms(
 	request.tv_sec = (time_t)(ms / 1000);
 	request.tv_nsec = (ms % 1000) * 1000000L;
 	for (;;) {
-		int result;
-
 		/* Slept the whole wait, or failed other than by a signal. */
 		result = nanosleep(&request, &request);
 		if (result == 0 || errno != EINTR)
