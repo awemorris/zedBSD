@@ -2,7 +2,7 @@
 
 # ws001-p044: ps の XCU の形（台帳 #98）
 
-Status: test-wait（2026-10-09 P1: 実装、host 16/16、zedBSD の build warning 0。guest は T1）
+Status: test-wait（2026-10-09 P1: 実装、host 15/15、zedBSD の build warning 0。guest は T1）
 Parent: [WS001](../ws.md)
 Queue: Q1 の dispatch（P1、2026-10-09、ベータ3 の合間の仕事。Q1「ws001-p044 として ps の XCU の適合（-o の field=header、既定の選択、-f の args、field の幅）を足して進めて。WS001 は合計 4 LW の上限」）
 前提: [BUG-274](../../bugs/BUG-274.md)（kernel の command line と `KERN_SYSTEM_GET_PROCESS_ARGUMENTS`）。
@@ -28,7 +28,7 @@ Queue: Q1 の dispatch（P1、2026-10-09、ベータ3 の合間の仕事。Q1「
 
 ## 確かめ
 
-- host: `sh plan/ws001/tests/ps-host-test.sh` → 16 の case が全部 ok、`ps-host: PASS`。`plan/ws001/tests/ps-host-fake.c` は偽の /dev/system（GET_PROCESS・GET_PROCESS_ARGUMENTS）で、main.c の open・close・ioctl・geteuid・getsid を名前の置き換えで差し替える。5 つの process（init、呼び手の shell と sleep（session 100）、1 日を超えた root の daemon、command の無い kernel の process）で、次を確かめる。
+- host: `sh plan/ws001/tests/ps-host-test.sh` → 15 の case が全部 ok、`ps-host: PASS`。`plan/ws001/tests/ps-host-fake.c` は偽の /dev/system（GET_PROCESS・GET_PROCESS_ARGUMENTS）で、main.c の open・close・ioctl・geteuid・getsid を名前の置き換えで差し替える。5 つの process（init、呼び手の shell と sleep（session 100）、1 日を超えた root の daemon、command の無い kernel の process）で、次を確かめる。
   - 既定の選択
   - -A の args
   - `pid=`・`comm=` で header の行が無い
