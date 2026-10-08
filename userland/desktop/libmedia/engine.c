@@ -8,14 +8,14 @@
 /*
  * The engine (ws121-p002; media.h): one media file played by a thread of
  * its own.  The thread opens the file (through the caller's source when
- * there is one), opens a decoder for its first video track and, when the
- * sound is wanted, for its first audio track and a stream in audiod, then
- * reads and decodes ahead: the pictures wait in a small ring for the
- * caller to take them at their time, the sound is converted to 16-bit
- * stereo at audiod's rate and written into the stream's ring, which paces
- * the reading.  The clock is the sound's (audiod's read position) when
- * there is sound, otherwise the monotonic clock.  A seek drops what is
- * decoded and queued, and starts the clock again at the time sought.
+ * there is one), opens a decoder for its first video track, then reads and
+ * decodes ahead: the pictures wait in a small ring for the caller to take
+ * them at their time.  The engine plays no sound (WS191, design D11: the
+ * library is linked into libbrowser, which may not reach Keiland's sound
+ * streams; its users get a sound output of their own later), so a file of
+ * sound alone plays silent, and the clock is the monotonic clock.  A seek
+ * drops what is decoded and queued, and starts the clock again at the time
+ * sought.
  *
  * Built on Video Player's player (userland/desktop/videoplayer/media.c),
  * with the opening moved to the thread and the pictures made optional.
@@ -40,9 +40,6 @@
 /* The longest a full ring of sound or pictures is waited on before looking at the requests again (ms). */
 #define ENGINE_WAIT_MS		10
 
-/* The sound converted at once at most (frames). */
-#define ENGINE_SOUND_FRAMES	8192
-
 /* The largest picture an engine shows (pixels a side). */
 #define ENGINE_SIDE_MAX		4096
 
@@ -53,9 +50,9 @@
  * and the descriptor pair of the wake (the thread writes, the caller
  * polls the other end).
  *
- * The thread's own: the file, the decoders and their tracks, the time
- * before which what decodes is passed over (after a seek), the sound's
- * stream and the converted sound.
+ * The thread's own: the file, the decoders and their tracks (no sound's
+ * is opened), and the time before which what decodes is passed over
+ * (after a seek).
  *
  * The caller's own: the picture shown, its scaler, and the size it was
  * last scaled to.
@@ -79,8 +76,6 @@ struct media_engine {
 	unsigned video_track;
 	unsigned sound_track;
 	double skip_before;
-	struct vp_audio audio;
-	int16_t samples[ENGINE_SOUND_FRAMES * 2];
 
 	struct vp_frame *shown;
 	void *scaler;
@@ -102,7 +97,6 @@ struct media_engine {
 	unsigned picture_count;
 	int eof;
 	double clock_time;
-	uint64_t clock_frames;
 	uint64_t clock_us;
 	int seek_wanted;
 	double seek_to;
@@ -120,7 +114,6 @@ static int engine_decoder(struct media_engine *engine, unsigned kind, struct vp_
 static int engine_feed(struct media_engine *engine, struct vp_decoder *decoder, const struct mf_packet *packet);
 static int engine_drain(struct media_engine *engine, struct vp_decoder *decoder);
 static int engine_picture(struct media_engine *engine, struct vp_frame *picture, double time);
-static int engine_sound(struct media_engine *engine, double time);
 static int engine_seek(struct media_engine *engine);
 static void engine_end(struct media_engine *engine);
 static double engine_clock(struct media_engine *engine);
@@ -145,8 +138,7 @@ media_set_log(
 
 /*
  * Writes a log line of the library's: the engine's, and the decoding
- * add-in's and the audiod client's, which Video Player's sources write
- * through vp_log.
+ * add-in's, which Video Player's sources write through vp_log.
  */
 void
 vp_log(
@@ -193,7 +185,6 @@ media_engine_open(
 		return ENOMEM;
 	made->wake[0] = -1;
 	made->wake[1] = -1;
-	made->audio.socket = -1;
 	made->flags = flags;
 	made->state = MEDIA_OPENING;
 	(void)pthread_mutex_init(&made->lock, NULL);
@@ -306,15 +297,10 @@ media_engine_play(
 	/* The clock goes on from where it stood. */
 	(void)pthread_mutex_lock(&engine->lock);
 	engine->clock_time = engine_clock(engine);
-	engine->clock_frames = vp_audio_read_position(&engine->audio);
 	engine->clock_us = engine_now_us();
 	engine->state = MEDIA_PLAYING;
 	(void)pthread_cond_broadcast(&engine->ready);
 	(void)pthread_mutex_unlock(&engine->lock);
-
-	/* And the sound with it. */
-	if (engine->has_audio)
-		(void)vp_audio_start(&engine->audio);
 	vp_log("MEDIA play position_ms=%lld", (long long)(engine->clock_time * 1000.0));
 	engine_wake(engine);
 }
@@ -340,10 +326,6 @@ media_engine_pause(
 	engine->state = MEDIA_PAUSED;
 	engine->clock_time = now;
 	(void)pthread_mutex_unlock(&engine->lock);
-
-	/* And the sound with it. */
-	if (engine->has_audio)
-		(void)vp_audio_stop(&engine->audio);
 	vp_log("MEDIA pause position_ms=%lld", (long long)(now * 1000.0));
 	engine_wake(engine);
 }
@@ -527,7 +509,7 @@ engine_run(
 	int read;
 	int stop;
 
-	/* The file, its decoders and the sound. */
+	/* The file and its decoder. */
 	engine = argument;
 	status = engine_open_file(engine);
 	(void)pthread_mutex_lock(&engine->lock);
@@ -535,7 +517,6 @@ engine_run(
 	engine->state = MEDIA_PAUSED;
 	if (status != 0)
 		engine->state = MEDIA_FAILED;
-	engine->clock_frames = vp_audio_write_position(&engine->audio);
 	engine->clock_us = engine_now_us();
 	(void)pthread_mutex_unlock(&engine->lock);
 	engine_wake(engine);
@@ -578,14 +559,12 @@ engine_run(
 	if (engine->file != NULL)
 		mf_close(engine->file);
 	engine->file = NULL;
-	vp_audio_close(&engine->audio);
 	return NULL;
 }
 
 /*
- * Opens the file, the decoder of its first video track and, with
- * MEDIA_SOUND, of its first audio track and a stream in audiod.  A file
- * needs pictures or sound the add-in decodes.  Returns 0, or an errno value (engine->problem
+ * Opens the file and the decoder of its first video track.  A file needs
+ * pictures or sound the add-in decodes (the sound is not played).  Returns 0, or an errno value (engine->problem
  * says a decoding problem, VP_CODEC_*).
  */
 static int
@@ -614,19 +593,12 @@ engine_open_file(
 	/* The pictures, when there are some. */
 	video_status = engine_decoder(engine, MF_TRACK_VIDEO, &engine->video, &engine->video_track);
 
-	/* The sound, when it is wanted and audiod takes a stream. */
-	sound_status = ENOENT;
-	if ((engine->flags & MEDIA_SOUND) != 0U) {
-		sound_status = vp_audio_open(&engine->audio);
-		if (sound_status == 0)
-			sound_status = engine_decoder(engine, MF_TRACK_AUDIO, &engine->sound, &engine->sound_track);
-	}
-
 	/*
-	 * Without a stream (muted, or no audiod) a file of sound alone still
-	 * plays, silent, by the monotonic clock: its sound is only checked to
-	 * be one the add-in decodes.
+	 * No sound is played (WS191, design D11), MEDIA_SOUND or not: a file of
+	 * sound alone still plays, silent, by the monotonic clock; its sound is
+	 * only checked to be one the add-in decodes.
 	 */
+	sound_status = ENOENT;
 	silent = 0;
 	if (engine->video == NULL && engine->sound == NULL) {
 		sound_status = engine_decoder(engine, MF_TRACK_AUDIO, &probe, &probe_track);
@@ -757,14 +729,14 @@ engine_drain(
 		received = vp_decoder_receive(decoder, &time_us);
 		if (!received)
 			return 0;
-		if (decoder == engine->video) {
-			picture = vp_decoder_picture(decoder);
-			if (picture == NULL)
-				continue;
-			status = engine_picture(engine, picture, (double)time_us / 1000000.0);
-		} else {
-			status = engine_sound(engine, (double)time_us / 1000000.0);
-		}
+		if (decoder != engine->video)
+			continue;
+
+		/* A picture, queued at its time. */
+		picture = vp_decoder_picture(decoder);
+		if (picture == NULL)
+			continue;
+		status = engine_picture(engine, picture, (double)time_us / 1000000.0);
 
 		/* A seek or the end stops the drain. */
 		if (status != 0)
@@ -819,50 +791,6 @@ engine_picture(
 	return 0;
 }
 
-/* Converts the sound received and writes it, waiting for room; nonzero when a seek or the end came meanwhile. */
-static int
-engine_sound(
-	struct media_engine *engine,
-	double time)
-{
-	size_t converted;
-	size_t written;
-	size_t done;
-	int stop;
-
-	/* Sound before the time sought is passed over. */
-	if (time < engine->skip_before)
-		return 0;
-
-	/* Converted. */
-	converted = vp_decoder_sound(engine->sound, engine->samples, ENGINE_SOUND_FRAMES, engine->audio.rate);
-	if (converted == 0U)
-		return 0;
-
-	/* Written as room opens. */
-	done = 0;
-	while (done < converted) {
-		/* The end of the thread or a seek. */
-		stop = engine_stopping(engine);
-		if (stop)
-			return 1;
-		(void)pthread_mutex_lock(&engine->lock);
-		stop = engine->seek_wanted;
-		(void)pthread_mutex_unlock(&engine->lock);
-		if (stop)
-			return 1;
-
-		/* As much as fits. */
-		written = vp_audio_write(&engine->audio, engine->samples + done * 2U, converted - done);
-		done += written;
-		if (done < converted)
-			engine_sleep_ms(ENGINE_WAIT_MS);
-	}
-
-	/* Written. */
-	return 0;
-}
-
 /*
  * Carries out a seek asked for: the file at the time sought, the decoders
  * and the sound emptied, the clock anchored there.  Returns 1 when one
@@ -887,10 +815,8 @@ engine_seek(
 	(void)mf_seek(engine->file, (int64_t)(seconds * 1000000.0));
 	if (engine->video != NULL)
 		vp_decoder_flush(engine->video);
-	if (engine->sound != NULL) {
+	if (engine->sound != NULL)
 		vp_decoder_flush(engine->sound);
-		(void)vp_audio_flush(&engine->audio);
-	}
 
 	/* What decodes before the time sought is passed over. */
 	engine->skip_before = seconds;
@@ -899,7 +825,6 @@ engine_seek(
 	(void)pthread_mutex_lock(&engine->lock);
 	engine_drop_pictures(engine);
 	engine->clock_time = seconds;
-	engine->clock_frames = vp_audio_write_position(&engine->audio);
 	engine->clock_us = engine_now_us();
 	engine->eof = 0;
 	engine->seek_wanted = 0;
@@ -920,8 +845,6 @@ static void
 engine_end(
 	struct media_engine *engine)
 {
-	uint64_t read;
-	uint64_t written;
 	double clock;
 	int drained;
 	int ended;
@@ -938,14 +861,12 @@ engine_end(
 			(void)engine_feed(engine, engine->sound, NULL);
 	}
 
-	/* Played out: no picture waits and audiod read all that was written. */
-	read = vp_audio_read_position(&engine->audio);
-	written = vp_audio_write_position(&engine->audio);
+	/* Played out: no picture waits, and the clock reached the length. */
 	ended = 0;
 	(void)pthread_mutex_lock(&engine->lock);
 	clock = engine_clock(engine);
-	if (engine->state == MEDIA_PLAYING && engine->picture_count == 0U && read >= written &&
-	    (engine->sound != NULL || engine->duration <= 0.0 || clock >= engine->duration - 0.05)) {
+	if (engine->state == MEDIA_PLAYING && engine->picture_count == 0U &&
+	    (engine->duration <= 0.0 || clock >= engine->duration - 0.05)) {
 		engine->clock_time = clock;
 		engine->state = MEDIA_ENDED;
 		ended = 1;
@@ -956,8 +877,6 @@ engine_end(
 
 	/* The end told once. */
 	if (ended) {
-		if (engine->has_audio)
-			(void)vp_audio_stop(&engine->audio);
 		vp_log("MEDIA ended position_ms=%lld", (long long)(clock * 1000.0));
 		engine_wake(engine);
 	}
@@ -967,8 +886,8 @@ engine_end(
 }
 
 /*
- * Reports the clock (seconds): the sound's while playing with sound, the
- * monotonic clock's while playing without, standing still otherwise.
+ * Reports the clock (seconds): the monotonic clock's while playing,
+ * standing still otherwise.
  * Called with the lock held (or by the thread that alone writes the
  * anchors).
  */
@@ -976,7 +895,6 @@ static double
 engine_clock(
 	struct media_engine *engine)
 {
-	uint64_t frames;
 	uint64_t now;
 	double clock;
 
@@ -984,17 +902,9 @@ engine_clock(
 	if (engine->state != MEDIA_PLAYING || engine->seek_wanted)
 		return engine->clock_time;
 
-	/* The sound read since the anchor. */
-	if (engine->has_audio && engine->audio.created && engine->audio.rate != 0U) {
-		frames = vp_audio_read_position(&engine->audio);
-		if (frames < engine->clock_frames)
-			return engine->clock_time;
-		clock = engine->clock_time + (double)(frames - engine->clock_frames) / (double)engine->audio.rate;
-	} else {
-		/* The time since the anchor. */
-		now = engine_now_us();
-		clock = engine->clock_time + (double)(now - engine->clock_us) / 1000000.0;
-	}
+	/* The time since the anchor. */
+	now = engine_now_us();
+	clock = engine->clock_time + (double)(now - engine->clock_us) / 1000000.0;
 
 	/* Not past the end. */
 	if (engine->duration > 0.0 && clock > engine->duration)

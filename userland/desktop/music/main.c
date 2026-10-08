@@ -145,7 +145,7 @@ main(
 	error = mu_player_init(&music.player);
 	mu_log("AUDIO error=%d", error);
 	if (error != 0)
-		(void)snprintf(music.view.problem, sizeof(music.view.problem), "No sound: audiod is not running.");
+		(void)snprintf(music.view.problem, sizeof(music.view.problem), "No sound: the sound service is not running.");
 	error = vp_codec_load();
 	if (error != 0)
 		(void)snprintf(music.view.problem, sizeof(music.view.problem), "Playing needs libavcodec (the libavcodec package).");
@@ -547,7 +547,7 @@ mu_play_song(
 	if (music->player.problem == VP_CODEC_MISSING || music->player.problem == VP_CODEC_VERSION)
 		mu_view_notice(&music->view, "Playing needs libavcodec (the libavcodec package).", now_us);
 	else if (error == ENODEV)
-		mu_view_notice(&music->view, "There is no sound: audiod is not running.", now_us);
+		mu_view_notice(&music->view, "There is no sound: the sound service is not running.", now_us);
 	else
 		mu_view_notice(&music->view, "This song cannot be played.", now_us);
 }

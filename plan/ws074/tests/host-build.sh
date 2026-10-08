@@ -75,9 +75,9 @@ for file in userland/base/libjpeg-compat/*.c userland/base/libpng-compat/*.c use
 done
 
 # libmedia (ws121-p002), which the engine's <video> and <audio> play through: its engine, the container reader and
-# Video Player's decoding add-in (FFmpeg opened with dlopen) and audiod client.
+# Video Player's decoding add-in (FFmpeg opened with dlopen); it plays no sound (WS191).
 for file in userland/desktop/libmedia/engine.c userland/desktop/videoplayer/codec.c userland/desktop/videoplayer/bitstream.c \
-    userland/desktop/videoplayer/audio.c userland/desktop/mediafile/mediafile.c userland/desktop/mediafile/mp4.c \
+    userland/desktop/mediafile/mediafile.c userland/desktop/mediafile/mp4.c \
     userland/desktop/mediafile/mkv.c; do
 	object=$out/obj/media-$(basename "$(dirname "$file")")-$(basename "$file" .c).o
 	if [ ! -f "$object" ] || [ "$file" -nt "$object" ] || [ "$out/flags" -nt "$object" ]; then
