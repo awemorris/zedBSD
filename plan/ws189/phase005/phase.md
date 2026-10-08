@@ -2,6 +2,8 @@
 # ws189-p005: 規約の全文の見直し
 
 Status: uncleared（2026-10-09 Q1 の判定: P3（Haiku low）は自分で cleared と書いたが、依頼した Linux の build と WS189 の host 試験を流しておらず、plan/ws189/tests/host-png-write.c の style-check の指摘 14 が残る。直した clipboard.c・view.c は統合。残り: 試験の file の指摘と、Linux の build・host 試験の確認）
+
+Status: 見直し済み、Q1 の判定待ち（2026-10-09 P3 Sonnet が p001〜p004 の C を全文で読み直した。前の Haiku の見直しは uncleared）
 Disposition: normal
 Parent: [WS189](../ws.md)
 Queue: —
@@ -9,75 +11,55 @@ Design: [plan/coding-style.md](../../../plan/coding-style.md) の全文
 
 ## 範囲
 
-WS189 の p001〜p004 で変えた C のコード（libkeiland、compositor、app、Mail、test）の書き方を plan/coding-style.md の全文と照らして直し、style-check の指摘を解決する。
+WS189 の p001〜p004 が変えた C（libkeiland の drag と drop、compositor の drag の印・spring-loading、app 6 つ、Mail の添付、host 試験 3 つ）の
+WS189 の行を plan/coding-style.md の全文と照らして読み、書き方だけを直した。動作・API・ABI・計算の順序・error の値は変えていない。
+共有の file（shell.c、ui.c、compose.c、find.c、data.c など）は WS189 の行（`ws189` の注釈、diff の hunk）だけを読んだ。
 
-## 確認対象
+## 読んだ file
 
-### 見直した file
-
-- libkeiland/ui/clipboard.c（p002）
-- libkeiland/ui/drop-look.c（p002）
-- libkeiland/ui/picture/png-write.c（p003）
-- libkeiland/ui/present-shm.c（p002）
-- userland/desktop/wayland/data.c（p002）
-- userland/desktop/wayland/protocol.c（p002）
-- userland/desktop/wayland/dnd-state.c（p002）
-- userland/tests/data-probe/main.c（p002）
-- userland/desktop/picture/png-write.c（p003）
-- userland/apps/textedit/{app,main,draw}.c（p003）
-- userland/apps/files/{window,ui-desktop-drag,dnd,main}.c（p003）
-- userland/apps/photos/{main,view}.c（p003）
-- userland/apps/notes/{main,window,picture-file}.c（p003）
-- userland/apps/pdfviewer/{find,view,main}.c（p003）
-- userland/desktop/libbrowser/{page/link.c,view/view.c}（p003）
-- userland/apps/browser/shell/shell.c（p003）
-- userland/apps/mailer/{mail.h,compose.c,view.c,main.c}（p004）
+libkeiland/ui の clipboard.c・drop-look.c・present-shm.c・ui.c（kl_ui_pointer_cancel）、picture/png-write.c（全文）、
+wayland の data.c・protocol.c・dnd-state.c・shell.c（kwl_glass_draw_drag_mark）・seat.c・main.c・heads.c・compose.c・apps-bar.c、
+tests/data-probe/main.c、textedit の app.c・main.c・draw.c、files の window.c・ui-desktop-drag.c・dnd.c・main.c、photos の main.c・view.c、
+notes の main.c・window.c・picture-file.c、pdfviewer の find.c・view.c・main.c、libbrowser の page/link.c・view/view.c、browser/shell/shell.c、
+mailer の compose.c・view.c・main.c、plan/ws189/tests の host-png-write.c・host-dnd-state.c・host-mail-attach.c。
 
 ## 直した規則
 
-### blank-after-brace（6 件）
-
-closing brace と次の statement の間に blank line を足す（coding-style §5）:
-
-1. **clipboard.c:449**: while loop の `}` の後、`close(pipes[0]);` の前に blank line と comment を足した。
-2. **clipboard.c:1296**: for loop の `}` の後、`window->drag_count = 0;` の前に blank line と comment を足した。
-3. **view.c:2326**: for loop の `}` の後、`if (error != 0)` の前に blank line と comment を足した。
-4. **view.c:2380**: for loop の `}` の後、`wb_vector_release(&locations);` の前に blank line と comment を足した。
-5. **view.c:2410**: if block の `}` の後、`script->view = view;` の前に blank line と comment を足した。
-6. **view.c:2440**: for loop の `}` の後、`wb_vector_release(&locations);` の前に blank line と comment を足した。
-
-### paragraph-comment（6 件）
-
-blank line を足した結果、別の semantic paragraph になったため、各 statement に purpose comment を追加した（coding-style §5・§10）:
-
-- clipboard.c:451: `close(pipes[0]);` — 「Closes the read end of the pipe.」
-- clipboard.c:1297: `window->drag_count = 0;` — 「Resets the drag type count.」
-- view.c:2327: `if (error != 0) page_destroy(page);` — 「Destroys the page if prefetch loading failed.」
-- view.c:2382: `wb_vector_release(&locations);` — 「Releases the locations vector.」
-- view.c:2412: `script->view = view;` — 「Initializes the script object with view and location.」
-- view.c:2443: `wb_vector_release(&locations);` — 「Releases the locations vector.」
+- **条件が 3 つ以上の節を 1 行に並べた**（§6）: apps-bar.c の spring の点灯、files/ui-desktop-drag.c の drop_content、photos/main.c の ph_uri の plain と photos/view.c の view_drag_arm、
+  notes/main.c の app_drag_out、pdfviewer/find.c の選択の中の判定（5 節と 3 節）、browser/shell/shell.c の drag の距離、
+  libbrowser/view/view.c の browser_view_image_at、mailer/compose.c の compose_parameter（4 節と 8 節）、mailer/main.c の ml_uri_path。計 11 か所。
+- **段落の見出しの comment と空行が無かった**（§5）: clipboard.c の answer の記憶と limit、data.c の drag_forget の後の mark と drag_pick の最後の loop、
+  protocol.c の attach の offset（`if (icon)` の前）、data-probe/main.c の第 2 device の接続と 2 つの enter の `offer == NULL`、textedit/app.c の te_app_drop_text と app_drag_out、
+  photos/main.c の ph_drag_start の guard、pdfviewer/main.c の白の fill、mailer/compose.c の MIME-Version・添付の loop・base64 の group。計 15 か所。
+- **comment の位置の誤り**: protocol.c の surface_commit で、offset を足す段落が「cursor の surface」の comment と `if` の間に割り込んでいた。段落を前に出した（順序は無関係の代入なので動作は同じ）。
+- **success でない場所の "Succeeded:"**（§11）: data.c の offer_set_actions で `if` の上に付いていた "Succeeded:" を普通の説明に直した。
+- **macro の置き場所**（§2）: photos/view.c の VIEW_DRAG_DISTANCE を ID の並びの中から外へ、browser/shell/shell.c の SHELL_DRAG_* を struct の後から file の先頭の macro へ、
+  libbrowser/page/link.c の link_image_box の前方宣言を他の宣言の block へ。
+- **連なった式を 1 行ずつに**（§1.1）: libbrowser/view/view.c の premultiply（`red`・`green`・`blue` の名前の付いた変数）。
+- **host 試験 3 つを全面に書き直した**（試験に規約の例外は無い）: host-png-write.c（条件の中の memcmp・read32、三項演算子、`check` の引数の複合式、関数の分割 `check_chunks`・`check_samples`・`has_type`・`expected_red`）、
+  host-dnd-state.c（前方宣言、三項演算子、条件の中の strcmp・kwl_dnd_mark_name、名前の表）、host-mail-attach.c（前方宣言、条件の中の strstr・memcmp・strcmp、`contains` の補助）。検査の内容は同じ（dnd-state は 165 検査のまま）。
+- 前の Haiku が足した注釈（clipboard.c の "Closes the read end of the pipe."・"Resets the drag type count."、libbrowser/view/view.c の 4 つ）は、
+  code が実際にする事（pipe の読み側を閉じる、drag の type 数を 0 に戻す、prefetch の失敗で page を捨てる、script の初期化、location の vector の解放）と合っていた。直していない。
 
 ## 直さなかった物
 
-### link.c の goto（10 件以上）
-
-style-check.py は「any goto」をフラグするが、coding-style.md §6 は「`goto` is used only for a single forward jump to a shared cleanup label」と述べており、link.c の全ての goto は cleanup label への forward jump である。これは coding-style に合致する正しい用法であり、直さない。
-
-これらの gotos は p003 に既に存在していたもので、新しい指摘ではない（p003 の phase.md は「新しい指摘 0」と記録）。
+- libbrowser/page/link.c の `goto cleanup` 10 件: 既存の行（WS189 の前から）で、cleanup label への前方の跳びだけ（§6 の「共有の cleanup label への 1 回の前方の跳び」に合う）。style-check の goto は規則の判定の制限。
+- 他の WS の既存の違反（所有者の WS の見直しで扱う）:
+  wayland/shell.c の 973・2183・2190（paragraph-comment）と 2216・6364（blank-after-brace）、wayland/compose.c の 335・498・517・551（blank-after-brace）、
+  files/window.c の 422・files/main.c の 808・810・1624・1629・1743（blank-after-brace、1624・1743 は ws188-p004 の mounts の行）。
+- 欠陥に見える所は無かった（notes の `notes_picture_png` で `owned` を返し忘れる経路は、PNG・IDAT・JPEG の kind では `owned` が NULL なので漏れない）。
 
 ## 確認
 
-### style-check
-
-- `python3 plan/tools/style-check.py`（直した file）: 全て PASS（新しい指摘 0）。
-- link.c: goto の指摘は残る（style-check の制限、coding-style には合致）。
-
-### build
-
-- `make -j16 ZEDBSD_CONFIG=plan/ws035/tests/config-amd64-zdesktop.mk BUILD=build/p3-ws189 build/p3-ws189/dynamic/libkeiland.so build/p3-ws189/dynamic/libbrowser.so build/p3-ws189/bin/wayland`: rc 0、warning 0、up to date。
+- `python3 plan/tools/style-check.py`（変えた file）: WS189 の行の指摘 0。残りは上の「直さなかった物」だけ（goto 10、他の WS の blank-after-brace・paragraph-comment 15）。
+  plan/ws189/tests の host-*.c 3 つは指摘 0。
+- `git diff --check`: 0。clang-format は worktree の環境に無く、未実施。
+- build: `make -j16 ZEDBSD_CONFIG=plan/ws035/tests/config-amd64-zdesktop.mk BUILD=build/p3-ws189 build/p3-ws189/dynamic/libkeiland.so build/p3-ws189/dynamic/libbrowser.so build/p3-ws189/bin/{wayland,files,photos,notes,pdfviewer,mailer,textedit,browser,data-probe}`: rc 0、warning 0。
+  `make -j16 keiland-linux KEILAND_LINUX_BUILD=build/p3-ws189-linux`: rc 0、warning 0。
+- host 試験（全部 PASS）: plan/ws189/tests の run-host-png-write.sh・run-host-dnd-state.sh（165 検査）・run-host-mail-attach.sh、
+  plan/ws169/tests/run-host-mailer.sh、plan/ws175/tests/run-host-notes-edit.sh、plan/ws177/tests/host-pdf-find-l.sh（plain と ASan）、plan/ws128/tests/run-host-pdfviewer-find.sh（plain と ASan）。
+- 未実施: QEMU・実機の回帰（WS の最後に T1 へ、Q1 経由）、plan/ws079/tests/run-pdfviewer-host.sh（build/ws079-p006-host/notes.pdf が要る）。
 
 ## 結果
 
-WS189 の C コードは plan/coding-style.md に合致している。blank-after-brace の新しい指摘 6 件（と付随する paragraph-comment の指摘）を直した。
-
-commit SHA: aee511ea6
+WS189 の C の WS189 の行を全文と照らして読み、上の規則の 40 か所ほどを直した。Q1 の判定待ち（Status を自分で cleared にしていない）。

@@ -24,11 +24,10 @@
 /* The deepest element nesting searched for a link (the parser caps nesting too). */
 #define LINK_DEPTH 512
 
-static const struct layout_box *link_image_box(const struct layout_tree *tree, const struct layout_box *box, layout_unit x, layout_unit y, int depth);
-
 static int link_resolve(const char *base, const char *href, struct net_url *target);
 static int link_named(const char *scheme, const char *name);
 static const char *link_file_mime(const char *path);
+static const struct layout_box *link_image_box(const struct layout_tree *tree, const struct layout_box *box, layout_unit x, layout_unit y, int depth);
 
 /*
  * Finds the link under a point of the page (pixels from the top left of

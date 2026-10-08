@@ -1284,6 +1284,8 @@ main_drag_image_pixels(
 	*pixels = malloc(count * sizeof(**pixels));
 	if (*pixels == NULL)
 		return ENOMEM;
+
+	/* Every pixel white, the page's paper. */
 	for (index = 0; index < count; index++)
 		(*pixels)[index] = 0xffffffffU;
 

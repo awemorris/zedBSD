@@ -1966,7 +1966,9 @@ ml_uri_path(
 	int low;
 
 	/* The line without its end. */
-	while (length > 0U && (line[length - 1U] == '\n' || line[length - 1U] == '\r'))
+	while (length > 0U &&
+	       (line[length - 1U] == '\n' ||
+		line[length - 1U] == '\r'))
 		length--;
 
 	/* file:// first. */

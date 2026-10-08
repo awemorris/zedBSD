@@ -320,6 +320,8 @@ kl_window_answer_drop(
 	    window->drop_answer_actions == actions &&
 	    window->drop_answer_preferred == preferred)
 		return;
+
+	/* Remembers what was answered, so the next motion's identical answer is skipped. */
 	window->drop_answered = 1;
 	window->drop_answer_actions = actions;
 	window->drop_answer_preferred = preferred;
@@ -372,10 +374,12 @@ kl_window_receive_drop(
 	if (window->drop_offer == NULL)
 		return ENOENT;
 
-	/* The type it is read as, and the most of it that is read. */
+	/* The type it is read as. */
 	mime = clipboard_drop_type(window, type);
 	if (mime == NULL)
 		return ENOENT;
+
+	/* The most of that type that is read. */
 	limit = clipboard_drop_max(*type);
 
 	/*
