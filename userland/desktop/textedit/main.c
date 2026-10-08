@@ -235,6 +235,8 @@ static void main_select(void *data, const char *text, size_t length);
 static size_t main_paste_primary(void *data, char *text, size_t size);
 static void main_context_menu(void *data, int x, int y);
 static int main_choose(void *data, int saving, const char *folder, const char *name);
+static int main_drag_text(void *data, const char *text, size_t length);
+static void main_drop_event(const struct kl_window_event *event);
 static void main_window_event(const struct kl_window_event *event);
 static void main_fingers(uint64_t now_us);
 static int main_dialog_event(const struct kl_window_event *event);
@@ -319,6 +321,11 @@ main(
 		te_text_close(&main_body);
 		return 1;
 	}
+
+	/* Text dragged from other windows is taken (ws189-p003). */
+	error = kl_window_accept_drops(main_window.kui, KL_DROP_TEXT);
+	if (error != 0)
+		te_log("DND none errno=%d", error);
 
 	/* The editor at that size, with the file when one was given, and the window's services. */
 	te_app_init(&main_app, &main_body, &main_ui, (int)main_width, (int)main_height);
@@ -1326,6 +1333,101 @@ main_host(
 	app->host.paste_primary = main_paste_primary;
 	app->host.context_menu = main_context_menu;
 	app->host.choose = main_choose;
+	app->host.drag_text = main_drag_text;
+}
+
+/*
+ * Starts a drag of the selection's text out of the window, from the press
+ * that started it (ws189-p003); while it goes on the window takes no drop,
+ * so that the window's own drag over it shows nothing.  Returns 0 when the
+ * drag started, or an errno value.
+ */
+static int
+main_drag_text(
+	void *data,
+	const char *text,
+	size_t length)
+{
+	struct te_window *window;
+	uint32_t serial;
+	int error;
+
+	/* The drag, from the press. */
+	window = data;
+	serial = kl_window_press_serial(window->kui);
+	error = kl_window_drag_text(window->kui, text, length, serial);
+	if (error != 0) {
+		te_log("DND drag failed errno=%d", error);
+		return error;
+	}
+
+	/* The window's own drag is not taken back. */
+	(void)kl_window_accept_drops(window->kui, 0U);
+	te_log("DND drag start bytes=%lu", (unsigned long)length);
+
+	/* Succeeded: the drag goes on. */
+	return 0;
+}
+
+/*
+ * Takes drag and drop's inputs (ws189-p003): a drag of text over the
+ * window shows where it would go and is answered for that place, a drop
+ * inserts it there, and the end of the window's own drag lets the window
+ * take drops again.
+ */
+static void
+main_drop_event(
+	const struct kl_window_event *event)
+{
+	char *text;
+	size_t length;
+	unsigned type;
+	int taken;
+	int error;
+
+	/* What it is. */
+	switch (event->kind) {
+	case KL_WINDOW_DROP_ENTER:
+	case KL_WINDOW_DROP_MOTION:
+		/* Over the text it is taken as a copy; elsewhere not. */
+		taken = te_app_drop_over(&main_app, (int)event->x, (int)event->y);
+		if (taken) {
+			kl_window_answer_drop(main_window.kui, KL_DND_COPY, KL_DND_COPY);
+		} else {
+			kl_window_answer_drop(main_window.kui, 0U, 0U);
+		}
+
+		/* Answered. */
+		break;
+	case KL_WINDOW_DROP_LEAVE:
+		te_app_drop_leave(&main_app);
+		break;
+	case KL_WINDOW_DROP:
+		/* The text, inserted where the caret was; the drop finished as a copy, or given up. */
+		error = kl_window_receive_drop(main_window.kui, &text, &length, &type);
+		if (error != 0 || type != KL_DROP_TEXT || !main_app.drop_over) {
+			te_log("DND drop refused errno=%d type=%u", error, type);
+			free(text);
+			te_app_drop_leave(&main_app);
+			kl_window_finish_drop(main_window.kui, 0U);
+			break;
+		}
+
+		/* Inserted, and finished as a copy. */
+		te_app_drop_text(&main_app, text, length);
+		free(text);
+		kl_window_finish_drop(main_window.kui, KL_DND_COPY);
+		te_log("DND drop bytes=%lu", (unsigned long)length);
+		break;
+	case KL_WINDOW_DRAG_DONE:
+		/* The window's own drag ended: it takes drops again. */
+		te_app_drag_done(&main_app);
+		(void)kl_window_accept_drops(main_window.kui, KL_DROP_TEXT);
+		te_log("DND drag done dropped=%u", event->code);
+		break;
+	default:
+		break;
+	}
 }
 
 /* Copies text to the clipboard. */
@@ -1500,6 +1602,16 @@ main_window_event(
 	main_window.pointer_x = (int)event->x;
 	main_window.pointer_y = (int)event->y;
 	main_window.modifiers = event->modifiers;
+
+	/* Drag and drop with other windows, also under a dialog (which answers it as not taken, ws189-p003). */
+	if (event->kind == KL_WINDOW_DROP_ENTER ||
+	    event->kind == KL_WINDOW_DROP_MOTION ||
+	    event->kind == KL_WINDOW_DROP_LEAVE ||
+	    event->kind == KL_WINDOW_DROP ||
+	    event->kind == KL_WINDOW_DRAG_DONE) {
+		main_drop_event(event);
+		return;
+	}
 
 	/* A dialog takes the pointer and the keys (libkeiland's). */
 	main_dialog_input = 0;

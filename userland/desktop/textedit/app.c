@@ -33,6 +33,9 @@
 #define APP_CLICK_MS		400U
 #define APP_CLICK_DISTANCE	4
 
+/* How far a press in the selection moves before its text is dragged out (pixels, ws189-p003). */
+#define APP_DRAG_DISTANCE	6
+
 /* How often the view moves while it glides or a selection is dragged past the edge, in milliseconds. */
 #define APP_FRAME_MS		16
 
@@ -58,6 +61,7 @@ static void app_replace(struct te_app *app, char *text, size_t length);
 static void app_pointer(struct te_app *app, const struct te_event *event);
 static void app_press(struct te_app *app, const struct te_event *event);
 static void app_drag(struct te_app *app);
+static void app_drag_out(struct te_app *app);
 static void app_wheel(struct te_app *app, const struct te_event *event);
 static void app_axis_stop(struct te_app *app, const struct te_event *event);
 static size_t app_view_position(void *data, double x, double y);
@@ -779,6 +783,123 @@ te_app_publish_primary(
 }
 
 /*
+ * Follows a drag of text from elsewhere over the window (ws189-p003): the
+ * position a drop would insert at, shown by a caret.  Returns 1 when the
+ * text takes the drop there, 0 when it does not (outside the text, under
+ * a dialog, or the window's own drag).
+ */
+int
+te_app_drop_over(
+	struct te_app *app,
+	int x,
+	int y)
+{
+	struct te_rect card;
+	size_t position;
+	int inside;
+
+	/* Not under a dialog or the chooser, nor the window's own drag (it does not move text yet). */
+	if (app->dialog != TE_DIALOG_NONE || app->choosing || app->dragging_out) {
+		te_app_drop_leave(app);
+		return 0;
+	}
+
+	/* Only over the text's card. */
+	te_app_card(app, &card);
+	inside = app_inside(&card, x, y);
+	if (!inside) {
+		te_app_drop_leave(app);
+		return 0;
+	}
+
+	/* The position under the pointer, drawn again when it moved. */
+	position = te_edit_position_at(app, x, y);
+	if (!app->drop_over || position != app->drop_position)
+		app->dirty = 1;
+	app->drop_over = 1;
+	app->drop_position = position;
+
+	/* Succeeded: the drop is taken there. */
+	return 1;
+}
+
+/*
+ * The drag of text left the window, or is taken nowhere: its caret goes.
+ */
+void
+te_app_drop_leave(
+	struct te_app *app)
+{
+	/* Nothing shown. */
+	if (!app->drop_over)
+		return;
+
+	/* The caret goes. */
+	app->drop_over = 0;
+	app->dirty = 1;
+}
+
+/*
+ * Inserts dropped text where the drag's caret was, as one edit, and
+ * selects it.
+ */
+void
+te_app_drop_text(
+	struct te_app *app,
+	const char *text,
+	size_t length)
+{
+	size_t position;
+
+	/* Only a drop over the text. */
+	if (!app->drop_over)
+		return;
+	position = app->drop_position;
+	app->drop_over = 0;
+
+	/* The text at the position, one step of undo, then selected. */
+	te_edit_select(app, position, position);
+	te_edit_insert_text(app, text, length, TE_MERGE_NONE);
+	te_edit_select(app, position, position + length);
+	app->primary_changed = 1;
+	app->dirty = 1;
+}
+
+/*
+ * The window's own drag of text ended (dropped or not).
+ */
+void
+te_app_drag_done(
+	struct te_app *app)
+{
+	/* Neither a drag nor a press waits any more. */
+	app->dragging_out = 0;
+	app->drag_armed = 0;
+	app->selecting = 0;
+}
+
+/*
+ * Reports where the drag's caret is drawn: a row tall at the drop's
+ * position, in the window.
+ */
+void
+te_app_drop_rect(
+	const struct te_app *app,
+	struct te_rect *rect)
+{
+	struct kl_rect caret;
+	struct te_rect text;
+
+	/* The position's caret in the text's content, moved by the view's place and scroll. */
+	app_view_caret((void *)app, app->drop_position, &caret);
+	te_app_text_rect(app, &text);
+	rect->x = text.x + caret.x - (int)app->scroll_x;
+	rect->y = text.y + caret.y - (int)app->scroll_y;
+	rect->width = caret.width;
+	rect->height = caret.height;
+}
+
+/*
  * A finger tapped (count 1) or tapped twice (count 2): the pointer's click
  * there, and for a double tap in the text, the word there selected.
  */
@@ -960,10 +1081,20 @@ app_pointer(
 	if (event->type == TE_EVENT_LEAVE)
 		return;
 
-	/* A drag follows the pointer. */
+	/* A drag follows the pointer; a press in the selection that moves far enough drags its text out. */
 	if (event->type == TE_EVENT_MOTION) {
+		if (app->drag_armed)
+			app_drag_out(app);
 		if (app->selecting)
 			app_drag(app);
+		return;
+	}
+
+	/* A press in the selection let go without moving places the cursor there, as a click does. */
+	if (!event->pressed && app->drag_armed && event->button == TE_BUTTON_LEFT) {
+		app->drag_armed = 0;
+		te_edit_select(app, app->drag_position, app->drag_position);
+		app->dirty = 1;
 		return;
 	}
 
@@ -1044,6 +1175,21 @@ app_press(
 	app->click_x = event->x;
 	app->click_y = event->y;
 
+	/* One click in the selection may become a drag of its text (decided by the moves, ws189-p003). */
+	te_edit_selection(app, &start, &end);
+	if (app->click_count == 1 &&
+	    (event->modifiers & TE_MOD_SHIFT) == 0U &&
+	    start < end &&
+	    position >= start &&
+	    position < end &&
+	    app->host.drag_text != NULL) {
+		app->drag_armed = 1;
+		app->drag_press_x = event->x;
+		app->drag_press_y = event->y;
+		app->drag_position = position;
+		return;
+	}
+
 	/* One click places the cursor (Shift extends the selection); two a word; three a line. */
 	app->select_unit = APP_UNIT_CHARACTER;
 	start = position;
@@ -1069,6 +1215,45 @@ app_press(
 
 	/* The pointer's moves drag the selection until the release. */
 	app->selecting = 1;
+}
+
+/* Drags the selection's text out of the window once a press in it has moved far enough (ws189-p003). */
+static void
+app_drag_out(
+	struct te_app *app)
+{
+	size_t start;
+	size_t end;
+	char *text;
+	int distance_x;
+	int distance_y;
+	int error;
+
+	/* Not far enough yet. */
+	distance_x = abs(app->pointer_x - app->drag_press_x);
+	distance_y = abs(app->pointer_y - app->drag_press_y);
+	if (distance_x <= APP_DRAG_DISTANCE && distance_y <= APP_DRAG_DISTANCE)
+		return;
+
+	/* The press is spent, whatever comes of the drag. */
+	app->drag_armed = 0;
+	te_edit_selection(app, &start, &end);
+	if (end <= start)
+		return;
+	if (end - start > TE_FILE_MAX)
+		end = start + TE_FILE_MAX;
+
+	/* The selected text, which the window keeps its own copy of. */
+	text = malloc(end - start);
+	if (text == NULL)
+		return;
+	te_buffer_copy(&app->buffer, start, end, text);
+
+	/* The drag; while it goes on, the window does not take its own text. */
+	error = app->host.drag_text(app->host.data, text, end - start);
+	free(text);
+	if (error == 0)
+		app->dragging_out = 1;
 }
 
 /* Extends the selection being dragged to the pointer, scrolling when it is past the text's edge. */

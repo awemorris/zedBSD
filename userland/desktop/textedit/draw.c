@@ -61,6 +61,7 @@ static void draw_glyphs(struct te_app *app, struct te_canvas *canvas, const stru
 static unsigned draw_preedit(struct te_app *app, struct te_canvas *canvas, const struct te_rect *text, int top, unsigned column);
 static void draw_glyph(struct te_app *app, struct te_canvas *canvas, int x, int baseline, uint32_t codepoint, unsigned cells, uint32_t color);
 static void draw_numbers(struct te_app *app, struct te_canvas *canvas, const struct te_rect *text);
+static void draw_drop(struct te_app *app, struct te_canvas *canvas, const struct te_rect *text);
 static void draw_cursor(struct te_app *app, struct te_canvas *canvas, const struct te_rect *text);
 static void draw_scroll(struct te_app *app, struct te_canvas *canvas, const struct te_rect *text);
 static void draw_status(struct te_app *app, struct te_canvas *canvas);
@@ -98,6 +99,7 @@ te_draw(
 	draw_rows(app, canvas, &text);
 	draw_numbers(app, canvas, &text);
 	draw_cursor(app, canvas, &text);
+	draw_drop(app, canvas, &text);
 	te_canvas_unclip(canvas);
 
 	/* The scroll bar and the status (a message's chip and a dialog are libkeiland's, drawn over the frame by main.c). */
@@ -513,6 +515,37 @@ draw_cursor(
 	if ((since / DRAW_BLINK_MS) % 2U != 0U)
 		return;
 	te_canvas_fill(canvas, x - 1, top + 1, 2, app->row_height - 2, DRAW_CURSOR);
+}
+
+/*
+ * Draws where a drag of text from another window would go (ws189-p003):
+ * the drop's caret, as every application draws it (libkeiland's
+ * kl_drop_caret: the accent KL_DROP_CARET wide with a soft glow, not
+ * blinking).
+ */
+static void
+draw_drop(
+	struct te_app *app,
+	struct te_canvas *canvas,
+	const struct te_rect *text)
+{
+	const struct kl_theme *theme;
+	struct te_rect caret;
+	int x;
+
+	/* Only while a drag of text is over the text. */
+	if (!app->drop_over)
+		return;
+
+	/* The caret's place, within the text. */
+	te_canvas_clip(canvas, text->x - 4, text->y, text->width + 8, text->height);
+	te_app_drop_rect(app, &caret);
+	theme = kl_theme_default();
+
+	/* The glow on both sides, then the line. */
+	x = caret.x - KL_DROP_CARET / 2;
+	te_canvas_fill(canvas, x - 3, caret.y, KL_DROP_CARET + 6, caret.height, KL_RGBA(theme->accent, 64U));
+	te_canvas_fill(canvas, x, caret.y, KL_DROP_CARET, caret.height, KL_RGB(theme->accent));
 }
 
 /* Draws the scroll bar at the card's right edge when the text is taller than the view. */
