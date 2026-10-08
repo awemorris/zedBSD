@@ -353,8 +353,9 @@ struct shell_rect {
 /*
  * Where a bar's parts are (ws099-p034): the clock's pill and text at the
  * right, the status pill left of it with each icon's left edge, the
- * desktops' pill left of that (ws181-p009; desktops_line: where the room
- * left of it ends), the docked window's buttons at the right end, and on
+ * desktops' pill in the middle or, while a window is docked, left of the
+ * status pill (ws181-p009, p011; desktops_line: where the room left of it
+ * ends), the docked window's buttons at the right end, and on
  * the left the launcher's line and the docked title (or the applications'
  * pill).  Every place is in the plane: the system bar's on the anchor, a
  * head's bar on its output (ws113-p015), whose slot and top it keeps.
@@ -513,8 +514,13 @@ static int band_motion(struct kwl_server *server, int replays);
 static int32_t band_depth(struct kwl_server *server);
 static void band_replay(struct kwl_server *server, int release);
 
-/* Whether where the desktops' pictures are has been logged (once, for the tests that click them). */
+/*
+ * Whether where the desktops' pictures are has been logged, and where (for
+ * the tests that click them): logged again when the pill moves, between
+ * the middle and the docked place (ws181-p011).
+ */
 static unsigned shell_desktops_logged;
+static int32_t shell_desktops_logged_x;
 
 /*
  * Where each head's bar was last logged (ws113-p015): its desktops' pill's
@@ -3245,8 +3251,9 @@ bar_layout(
  * 2026-10-08 user decision): from the right the clock's pill and the
  * status pill (the input method's language, the removable media, the
  * network, the volume and the battery, each in a slot); the desktops' pill
- * left of the status pill (ws181-p009) and the docked window's buttons at
- * the right end; from the left the launcher, a line and the docked title.
+ * in the middle of the bar, and just left of the status pill while a window
+ * is docked (ws181-p011), and the docked window's buttons at the right
+ * end; from the left the launcher, a line and the docked title.
  * The system bar makes room for the buttons as its docked layout comes in
  * (animated); a head's bar at once while a window is docked on the head.
  */
@@ -3262,6 +3269,8 @@ bar_layout_on(
 	time_t now;
 	int32_t place;
 	int32_t right;
+	int32_t side;
+	int32_t middle;
 	float dock;
 	int32_t battery_slot;
 	int32_t slots;
@@ -3357,13 +3366,19 @@ bar_layout_on(
 	bar->battery_x = place + (BAR_SLOT - 26) / 2;
 
 	/*
-	 * The desktops' pill just left of the status pill (ws181-p009, the
-	 * 2026-10-07 UAT: the middle of the bar is where a camera's hole may
-	 * be, and an application's menus ran on past it); the room left of it
-	 * ends a gap before it.
+	 * The desktops' pill in the middle of the bar (ws181-p011, the
+	 * 2026-10-08 UAT: "dockバーの中央がいい"), and just left of the status
+	 * pill while a window is docked (ws181-p009: a docked window's menus run
+	 * across the middle), moving between the two as the docked layout comes
+	 * in.  The middle is never right of the status side (a narrow screen).
+	 * The room for the docked title and menus ends a gap before it.
 	 */
 	bar->desktops_width = 2 * DESKTOPS_PAD + DESKTOPS * DESKTOP_WIDTH + (DESKTOPS - 1) * DESKTOP_GAP;
-	bar->desktops_x = bar->status_x - BAR_PILL_GAP - bar->desktops_width;
+	side = bar->status_x - BAR_PILL_GAP - bar->desktops_width;
+	middle = output.x + ((int32_t)output.width - bar->desktops_width) / 2;
+	if (middle > side)
+		middle = side;
+	bar->desktops_x = middle + (int32_t)(dock * (float)(side - middle) + 0.5f);
 	bar->desktops_line = bar->desktops_x - 12;
 
 	/* On the left, after the launcher, a line and the docked title (ws035-p117: no word after the mark). */
@@ -4705,9 +4720,10 @@ draw_desktops(
 		glass_shape_draw(server, command, &shape);
 	}
 
-	/* Where the system bar's slots are, once (the tests click a desktop's slot). */
-	if (!shell_desktops_logged && bar->output == KWL_PLANE_ANCHOR) {
+	/* Where the system bar's slots are, when they first show and when they moved (the tests click a desktop's slot). */
+	if (bar->output == KWL_PLANE_ANCHOR && (!shell_desktops_logged || shell_desktops_logged_x != bar->desktops_x)) {
 		shell_desktops_logged = 1U;
+		shell_desktops_logged_x = bar->desktops_x;
 		printf("KWL GLASS desktops x=%d step=%d width=%d\n", bar->desktops_x + DESKTOPS_PAD, DESKTOP_WIDTH + DESKTOP_GAP, DESKTOP_WIDTH);
 	}
 
