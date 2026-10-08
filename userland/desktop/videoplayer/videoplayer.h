@@ -146,6 +146,7 @@ uint64_t vp_audio_read_position(const struct vp_audio *audio);
 uint64_t vp_audio_write_position(const struct vp_audio *audio);
 uint64_t vp_audio_clock_position(const struct vp_audio *audio);
 void vp_audio_renew(struct vp_audio *audio);
+int vp_audio_lost(struct vp_audio *audio);
 size_t vp_audio_write(struct vp_audio *audio, const int16_t *samples, size_t frames);
 
 /* The media (media.c). */

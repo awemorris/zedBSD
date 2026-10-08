@@ -27,8 +27,9 @@
  * mu_player_state) and how far the end's draining went (0 not begun, 1
  * the decoder drained, 2 told), the song's length (seconds), the
  * position's anchor (the time at the stream's position heard), a seek asked
- * for, the end of the thread, and why the last song could not be played
- * (VP_CODEC_*, 0 for another reason or none).
+ * for, the end of the thread, why the last song could not be played
+ * (VP_CODEC_*, 0 for another reason or none), and why the song stopped
+ * while it played (MU_FAIL_*, taken by mu_player_failure).
  */
 struct mu_player {
 	pthread_t thread;
@@ -47,7 +48,12 @@ struct mu_player {
 	double seek_to;
 	int quit;
 	int problem;
+	int failure;
 };
+
+/* Why a song stopped while it played (ws177-p021): its sound did not decode, or its file could not be read. */
+#define MU_FAIL_DECODE		1
+#define MU_FAIL_READ		2
 
 int mu_player_init(struct mu_player *player);
 void mu_player_release(struct mu_player *player);
@@ -58,5 +64,6 @@ void mu_player_pause(struct mu_player *player);
 void mu_player_seek(struct mu_player *player, double seconds);
 double mu_player_position(struct mu_player *player);
 unsigned mu_player_state(struct mu_player *player, int *ended);
+int mu_player_failure(struct mu_player *player);
 
 #endif

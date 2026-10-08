@@ -547,6 +547,10 @@ view_sidebar(
 	if ((changes & KL_FIELD_CHANGED) != 0U)
 		kl_scroll_move_to(&view->songs_scroll, 0.0, 0.0, 0, now_us);
 
+	/* Enter or Escape leaves the field: Space plays or pauses again (ws177-p021). */
+	if ((changes & (KL_FIELD_SUBMITTED | KL_FIELD_CANCELLED)) != 0U)
+		kl_ui_clear_focus(ui);
+
 	/* The list's viewport, which scrolls: All Songs, then each album. */
 	(void)mu_albums(&albums);
 	list.x = area->x;

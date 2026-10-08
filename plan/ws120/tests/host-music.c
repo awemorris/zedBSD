@@ -175,6 +175,34 @@ main(
 	test_frame(&view, ui, &style);
 	test_request(&view, "space", MU_ACTION_PLAY, 5);
 
+	/* The search field focused takes Space; Escape, then Enter, leave it and Space plays or pauses again (ws177-p021). */
+	{
+		struct mu_request stray;
+
+		test_click(&view, ui, &style, 100, 68, 0);
+		(void)kl_ui_key(ui, KL_KEY_SPACE, 1, 0U);
+		test_frame(&view, ui, &style);
+		if (mu_view_take_request(&view, &stray)) {
+			printf("FAIL search-space a request action=%u\n", stray.action);
+			test_failures++;
+		} else {
+			printf("PASS search-space\n");
+		}
+		(void)kl_ui_key(ui, KL_KEY_ESC, 1, 0U);
+		test_frame(&view, ui, &style);
+		(void)kl_ui_key(ui, KL_KEY_SPACE, 1, 0U);
+		test_frame(&view, ui, &style);
+		test_request(&view, "search-escape", MU_ACTION_PLAY, 5);
+		test_click(&view, ui, &style, 100, 68, 0);
+		(void)kl_ui_key(ui, KL_KEY_ENTER, 1, 0U);
+		test_frame(&view, ui, &style);
+		(void)mu_view_take_request(&view, &stray);
+		(void)kl_ui_key(ui, KL_KEY_SPACE, 1, 0U);
+		test_frame(&view, ui, &style);
+		test_request(&view, "search-enter", MU_ACTION_PLAY, 5);
+		kl_field_set(&view.search, "");
+	}
+
 	/* Paused, on glass. */
 	view.state = MU_PAUSED;
 	view.glass = 1;

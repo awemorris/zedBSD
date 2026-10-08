@@ -218,6 +218,32 @@ vp_audio_write(
 }
 
 /*
+ * Tells whether the stream was lost (its sound service went: it is a
+ * silent sink from now), for a player that opens it again at once
+ * (Music, ws177-p021).  Takes what the desktop told; 1 or 0.
+ */
+int
+vp_audio_lost(
+	struct vp_audio *audio)
+{
+	unsigned events;
+	int error;
+
+	/* No stream is not a lost one. */
+	if (!audio->created)
+		return 0;
+
+	/* Lost: the desktop said so, or says it now. */
+	events = 0U;
+	error = kl_audio_stream_dispatch(audio->stream, &events);
+	if (error == EPIPE || (events & KL_AUDIO_EVENT_LOST) != 0U)
+		return 1;
+
+	/* Succeeded: the stream plays on. */
+	return 0;
+}
+
+/*
  * Opens the stream again between files, when its sound service went (the
  * stream is a silent sink) or none was there when it was opened: a service
  * that came back is used.  No other thread uses the stream meanwhile.
