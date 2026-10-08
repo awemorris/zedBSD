@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Related Milestones: MG002
 Objectives: O1
 Parent: [Master](../master.md)
-Queue: なし
+Queue: q897（P2、2026-10-08 午後）
 Resume point: 2026-10-07 夕 P1（q833）: p001 の設計の第 2 版（[design.md](design.md)、review の反映は §14）、UAPI の差分は [proposed/](proposed/README.md)。次は design-reviewer の再 review と人の判断（design.md §10 の H1〜H5・HD1〜HD6）。判断の要らない p003 の engine record・worker の部分から実装できる。2026-10-07 ユーザーの回答で、p001・p002 と host で作れる所まで P1 が進める（10-02 の「別セッション」の指示を置き換え、p003 以降の実機は 5330 が戻ってから）。以前: p001（設計）から。OSC のデモ（fg010）には必須ではない
 2026-10-02 user: fg019（ベータ1、10/17）に入れる。「Vulkanのビデオ再生拡張をIntel Xe-LPで実装する。H.264を最初のターゲットとする。」動画プレーヤ（WS122）・ブラウザ（WS121）の土台（VA-API の WS123 は canceled、アプリが Vulkan Video を直接使う）。**別セッションでユーザーと進める。このセッションは割り当てない。ベータ1 では drop 可の努力目標。**
 <!-- awesome-plan-current:end -->

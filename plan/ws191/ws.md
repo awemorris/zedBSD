@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Related Milestones: MG007
 Objectives: O2
 Parent: [Master](../master.md)
-Queue: q895（P2、q893 の後）
+Queue: q895（P2、WS083 の後に回した 2026-10-08 午後）
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-08 昼 ユーザー、クリックの回答）
