@@ -257,6 +257,8 @@ enum kwl_kind {
 	KWL_SYSTEM_DISPLAYS,
 	/* The system extension's computer, what Settings reads of it (machine-shell.c, ws188-p002). */
 	KWL_SYSTEM_MACHINE,
+	/* The system extension's Bluetooth (bluetooth-shell.c, ws143-p006). */
+	KWL_SYSTEM_BLUETOOTH,
 };
 
 /*
@@ -422,6 +424,13 @@ struct kwl_object {
 	int32_t pending_dy;
 	int32_t offset_x;
 	int32_t offset_y;
+	/*
+	 * 1 once a start_drag named the surface as its icon, whether the drag
+	 * began or was refused (T1-436 F6: a drag refused because the button
+	 * was already up still has its icon attached with an offset, which is
+	 * then ignored rather than ending the client).
+	 */
+	unsigned drag_icon;
 	unsigned ready;
 	unsigned configured;
 	unsigned acknowledged;
@@ -742,6 +751,15 @@ struct kwl_object {
 	 */
 	unsigned network_scanning;
 	uint64_t network_scanning_until;
+	/*
+	 * A Bluetooth object of the system extension (bluetooth-shell.c,
+	 * ws143-p006): 1 while it watches (watch(1)) and while it asks for
+	 * scans (scan(1)), each counted once; an asking for scans not asked
+	 * again ends at bluetooth_scan_until (kwl_milliseconds' clock).
+	 */
+	unsigned bluetooth_watch;
+	unsigned bluetooth_scan;
+	uint64_t bluetooth_scan_until;
 	/*
 	 * An xdg_activation_token_v1 (activation.c, ws089-p016): the ID of the
 	 * surface set_surface named (0: none; the application's ID is kept in
@@ -1866,6 +1884,35 @@ int kwl_machine_request(struct kwl_object *object, uint32_t opcode, const unsign
 void kwl_machine_tick(struct kwl_server *server);
 void kwl_machine_gone(struct kwl_object *object);
 void kwl_machine_close(struct kwl_server *server);
+
+/* The system extension's Bluetooth, and the system bar's use of it (bluetooth-shell.c, ws143-p006). */
+int kwl_bluetooth_create(struct kwl_object *manager, const unsigned char *bytes, size_t size);
+int kwl_bluetooth_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
+void kwl_bluetooth_tick(struct kwl_server *server);
+void kwl_bluetooth_gone(struct kwl_object *object);
+void kwl_bluetooth_close(struct kwl_server *server);
+size_t kwl_bluetooth_view(struct kl_backend_bluetooth_state *state, struct kl_backend_bluetooth_device *devices, size_t capacity);
+void kwl_bluetooth_bar_watch(unsigned on);
+int kwl_bluetooth_bar_request(unsigned request, const char *address, unsigned type);
+int kwl_bluetooth_bar_answer(int *error);
+int kwl_bluetooth_answer(uint32_t id, unsigned yes);
+int kwl_bluetooth_cancel(void);
+
+/* The pairing's window (bluetooth-ask.c, ws143-p006). */
+void kwl_bluetooth_ask_take(struct kwl_server *server, const struct kl_backend_bluetooth_question *question);
+void kwl_bluetooth_ask_tick(struct kwl_server *server, unsigned reachable);
+int kwl_bluetooth_ask_showing(void);
+int kwl_bluetooth_ask_button(struct kwl_server *server, uint32_t button, uint32_t state);
+int kwl_bluetooth_ask_key(struct kwl_server *server, uint32_t key, uint32_t state);
+int kwl_bluetooth_ask_motion(struct kwl_server *server);
+
+/* Bluetooth in the system bar: the icon and its menu (bluetooth-bar.c, ws143-p006). */
+int kwl_bluetooth_bar_width(void);
+int kwl_bluetooth_button(struct kwl_server *server, uint32_t button, uint32_t state);
+int kwl_bluetooth_key(struct kwl_server *server, uint32_t key, uint32_t state);
+int kwl_bluetooth_motion(struct kwl_server *server);
+int kwl_bluetooth_is_open(void);
+void kwl_bluetooth_bar_tick(struct kwl_server *server);
 
 /* The outputs of the plane, the windows and the pointer on them (heads.c, ws113-p007). */
 unsigned kwl_outputs(struct kwl_server *server, struct kwl_plane_rect *outputs);

@@ -61,3 +61,18 @@ compositor（`userland/desktop/wayland/`）:
   `kwl_data_tick`（main loop の毎回）が、答えが来たら（型を受けて action が決まった時、または断った時）、または 500 ms で、release を決める（log
   `KWL DATA drag release decided answered=0|1`）。待つ間の pointer の動きは target を変えない。build（amd64 wayland・Linux all）warning 0、境界 PASS。
 - F2〜F4 は q896 の後（F2: same-program-windows の devices=1、F3: Browser の画像の url が path、F4: シナリオの status: draft と未実施の項目）。
+
+### T1-436 の結果と直し（2026-10-08、Q1 の伝達）
+
+- 確認できた: F1 の直し（text・refused-mark の即離しで release wait → decided answered=1 → drop / cancel）。
+- **F6（直した）**: Photos から画像を drag して 40 ms で離すと Photos が compositor に切られた（`KWL DATA drag refused` の後 `KWL CLIENT gone reason=error`）。
+  原因は start_drag そのものではない（ボタンが上がっていれば source に cancelled を送り 0 を返していた）。続けて client が icon の surface に
+  `attach(buffer, -hot_x, -hot_y)` を送り、protocol.c が「今の drag の icon でない surface の 0 でない offset」を EPROTO にしていた（ws189-p002 で足した規則）。
+  直し: start_drag が icon に名指した surface に `drag_icon` の印を付け（drag が始まっても断られても）、その surface の offset は今の drag の icon の時だけ数え、
+  それ以外（断られた・終わった drag の icon）は無視して client を切らない（`kwl.h`・`data.c`・`protocol.c`）。経路は libkeiland の `kl_window_start_drag_icon`
+  の 1 つなので、Notes・PDF Viewer・Browser・Files の画像の drag も同じく直る。client 側（clipboard.c）は cancelled で `clipboard_drag_end` するので変更なし。
+  シナリオ `desktop.dnd.photo-to-notes` に手順 5（Photos と Notes の 40 ms の即離しを 3 回ずつ、`KWL CLIENT gone` が無い）を足した。
+- **F5（記録、実装は設計どおり）**: 設計 §3.3 は「窓が 1 つの app は icon の上 700 ms で前に、2 つ以上は preview を出し preview の上 700 ms で前に」。T1-436 の
+  撮影 07 では Text Editor の窓が 2 つあった（前の手順の窓が残っていた）ので preview になった。シナリオ `desktop.dnd.dock-spring` の準備に「Text Editor の
+  窓を 1 つだけ」と書き、窓が 2 つの場合を手順 4 として足した。
+- 確認: build（amd64 wayland・Linux all）warning 0、`run-host-dnd-state.sh` ok（165）、style の新しい指摘 0、`check-scenarios.py` PASS。QEMU は T1 へ。

@@ -621,6 +621,23 @@ struct se_printers {
 };
 
 /*
+ * The Bluetooth page (ws143-p006): whether the desktop was told to watch,
+ * when the scan was last asked (0: not scanning), the devices as last
+ * drawn (the clicks name them by their place), the request asked (0 for
+ * none) and its kind, and the last answer (red for a failure).
+ */
+struct se_bluetooth {
+	int watching;
+	uint64_t scan_at;
+	struct kl_bluetooth_device drawn[KL_BLUETOOTH_DEVICES_MAX];
+	size_t drawn_count;
+	uint32_t request;
+	char doing[16];
+	char message[SE_MESSAGE];
+	int message_bad;
+};
+
+/*
  * The Languages page's system language (ws158-p004): the language of the
  * login screen as /etc/keiland/language holds it (whether it was read, and
  * -1 not set, else 0 English, 1 Japanese), the one an administrator chose
@@ -1259,6 +1276,9 @@ struct se_app {
 	/* The Printers page (ws145-p004). */
 	struct se_printers printers;
 
+	/* The Bluetooth page (ws143-p006). */
+	struct se_bluetooth bluetooth;
+
 	/* The Languages page's system language (ws158-p004). */
 	struct se_languages languages;
 
@@ -1372,6 +1392,14 @@ void se_display_drag(struct se_app *app, int index, int x, unsigned phase);
 void se_display_poll(struct se_app *app);
 int se_display_result(struct se_app *app, uint32_t request, int error);
 int se_printers_result(struct se_app *app, uint32_t request, int error);
+
+/* The Bluetooth page (page-bluetooth.c, ws143-p006). */
+int se_bluetooth_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
+void se_bluetooth_press(struct se_app *app, int index);
+void se_bluetooth_poll(struct se_app *app);
+int se_bluetooth_wait(const struct se_app *app);
+void se_bluetooth_close(struct se_app *app);
+int se_bluetooth_result(struct se_app *app, uint32_t request, int error);
 void se_storage_stop(struct se_app *app);
 void se_storage_empty_trash(struct se_app *app);
 void se_storage_poll(struct se_app *app, uint64_t now);

@@ -56,6 +56,8 @@ enum glass_icon {
 	GLASS_ICON_WIFI_2,
 	GLASS_ICON_WIFI_3,
 	GLASS_ICON_WIFI_4,
+	/* The system bar's Bluetooth (ws143-p006): the rune. */
+	GLASS_ICON_BLUETOOTH,
 	/*
 	 * The system bar's virtual desktops (ws181-p006, the 2026-10-07 UAT):
 	 * silhouettes of a cat (the left desktop), a bird (the middle one) and

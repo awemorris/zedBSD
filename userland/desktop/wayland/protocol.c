@@ -345,7 +345,8 @@ kwl_dispatch(
 	case KWL_SYSTEM_PRINTERS:
 	case KWL_SYSTEM_DISPLAYS:
 	case KWL_SYSTEM_MACHINE:
-		/* Keiland's system extension: the manager, the network, the sound, the power, the devices, the account, Remote Login, the notifications, the arrivals of mail, the phone, the printers, the displays and the computer (system.c, WS131 p010, ws160-p002, ws089-p025, ws156-p002, ws169-p002, ws170-p004, ws145-p003, ws113-p005, ws188-p002). */
+	case KWL_SYSTEM_BLUETOOTH:
+		/* Keiland's system extension: the manager, the network, the sound, the power, the devices, the account, Remote Login, the notifications, the arrivals of mail, the phone, the printers, the displays, the computer and Bluetooth (system.c, WS131 p010, ws160-p002, ws089-p025, ws156-p002, ws169-p002, ws170-p004, ws145-p003, ws113-p005, ws188-p002, ws143-p006). */
 		error = kwl_system_request(object, opcode, bytes, size);
 		break;
 	case KWL_SYSTEM_MONITOR:
@@ -931,17 +932,22 @@ surface_request(
 		/*
 		 * Nonzero offsets cannot describe this full-output scanout
 		 * contract; only the icon of the drag going on (ws189-p002)
-		 * keeps them, and they move it from the pointer.
+		 * keeps them, and they move it from the pointer.  A surface
+		 * named as a drag's icon whose drag was refused or is over
+		 * (T1-436 F6: the button was up before start_drag came) has
+		 * them ignored.
 		 */
 		x = word_at(bytes, 4);
 		y = word_at(bytes, 8);
 		icon = 0;
 		if (surface->client->server->dnd_active && surface == surface->client->server->dnd_icon)
 			icon = 1;
-		if ((x != 0 || y != 0) && !icon)
+		if ((x != 0 || y != 0) && !icon && !surface->drag_icon)
 			return EPROTO;
-		surface->pending_dx += (int32_t)x;
-		surface->pending_dy += (int32_t)y;
+		if (icon) {
+			surface->pending_dx += (int32_t)x;
+			surface->pending_dy += (int32_t)y;
+		}
 
 		/* Only a buffer created by this connection may supply pending surface content. */
 		id = word_at(bytes, 0);

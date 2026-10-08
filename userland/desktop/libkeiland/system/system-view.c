@@ -1074,3 +1074,66 @@ system_view_machine_mount(
 	view->machine_mounts_pending[view->machine_mounts_pending_count] = *mount;
 	view->machine_mounts_pending_count++;
 }
+
+/*
+ * Takes Bluetooth's state into the pending copy (ws143-p006), starting a
+ * new copy (the state and the devices) after the last done.
+ */
+void
+system_view_bluetooth_state(
+	struct system_view *view,
+	const struct kl_bluetooth_state *state)
+{
+	/* The first after a done starts the copy. */
+	if (!view->bluetooth_open) {
+		view->bluetooth_open = 1U;
+		view->bluetooth_pending_count = 0U;
+	}
+
+	/* The state. */
+	view->bluetooth_pending = *state;
+}
+
+/*
+ * Adds a Bluetooth device to the pending list (ws143-p006).
+ */
+void
+system_view_bluetooth_device(
+	struct system_view *view,
+	const struct kl_bluetooth_device *device)
+{
+	/* The first after a done starts the copy (the state kept as it was). */
+	if (!view->bluetooth_open) {
+		view->bluetooth_open = 1U;
+		view->bluetooth_pending = view->bluetooth;
+		view->bluetooth_pending_count = 0U;
+	}
+
+	/* The device, while there is room. */
+	if (view->bluetooth_pending_count >= KL_BLUETOOTH_DEVICES_MAX)
+		return;
+	view->bluetooth_devices_pending[view->bluetooth_pending_count] = *device;
+	view->bluetooth_pending_count++;
+}
+
+/*
+ * Puts the pending Bluetooth state and devices into effect (a done after
+ * nothing keeps the state and empties the devices).
+ */
+void
+system_view_bluetooth_done(
+	struct system_view *view)
+{
+	/* A done after nothing: the same state, no devices. */
+	if (!view->bluetooth_open) {
+		view->bluetooth_pending = view->bluetooth;
+		view->bluetooth_pending_count = 0U;
+	}
+
+	/* As one state. */
+	view->bluetooth_open = 0U;
+	view->bluetooth = view->bluetooth_pending;
+	memcpy(view->bluetooth_devices, view->bluetooth_devices_pending, view->bluetooth_pending_count * sizeof(view->bluetooth_devices[0]));
+	view->bluetooth_count = view->bluetooth_pending_count;
+	view->changed |= KL_SYSTEM_CHANGED_BLUETOOTH;
+}

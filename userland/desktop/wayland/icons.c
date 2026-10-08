@@ -353,6 +353,15 @@ static const struct icon_part icon_parts[GLASS_ICON_COUNT][ICON_PARTS] = {
 		{ ICON_ARC, 12.0f, 19.0f, 14.3f, 225.0f, 90.0f, 0.0f },
 		{ ICON_END, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f }
 	},
+	/* Bluetooth (ws143-p006): the rune, a stem with two arrowheads on its right and the cross that runs back through it. */
+	{
+		{ ICON_SEGMENT, 12.0f, 3.5f, 12.0f, 20.5f, 0.0f, 0.0f },
+		{ ICON_SEGMENT, 12.0f, 3.5f, 16.5f, 8.0f, 0.0f, 0.0f },
+		{ ICON_SEGMENT, 16.5f, 8.0f, 7.5f, 16.0f, 0.0f, 0.0f },
+		{ ICON_SEGMENT, 12.0f, 20.5f, 16.5f, 16.0f, 0.0f, 0.0f },
+		{ ICON_SEGMENT, 16.5f, 16.0f, 7.5f, 8.0f, 0.0f, 0.0f },
+		{ ICON_END, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f }
+	},
 	/* The left desktop: a cat sitting, seen from the front, its two ears, its body, and its tail curled up at the right. */
 	{
 		{ ICON_DOT, 11.0f, 8.8f, 4.4f, 0.0f, 0.0f, 0.0f },

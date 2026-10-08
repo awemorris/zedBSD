@@ -22,6 +22,7 @@ KEILAND_FREEBSD_SETTINGS_SOURCES := userland/desktop/settings/main.c \
 	userland/desktop/settings/page-storage.c \
 	userland/desktop/settings/page-sharing.c \
 	userland/desktop/settings/page-printers.c \
+	userland/desktop/settings/page-bluetooth.c \
 	userland/desktop/settings/page-languages.c \
 	userland/desktop/settings/storage.c \
 	userland/desktop/settings/storage-scan.c \

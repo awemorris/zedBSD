@@ -373,6 +373,10 @@ kwl_system_bind(
 	if (manager->version >= KL_SYSTEM_SINCE_MACHINE)
 		bits |= KL_SYSTEM_CAPABILITY_MACHINE;
 
+	/* Bluetooth, at version 23 (ws143-p006): the state says when there is no service or controller. */
+	if (manager->version >= KL_SYSTEM_SINCE_BLUETOOTH)
+		bits |= KL_SYSTEM_CAPABILITY_BLUETOOTH;
+
 	/* The administration of the accounts, at version 8 where the system has its tool (ws089-p026). */
 	administer = kl_backend_account_can_administer();
 	if (manager->version >= KL_SYSTEM_SINCE_ADMINISTER && administer)
@@ -444,6 +448,9 @@ kwl_system_request(
 	case KWL_SYSTEM_MACHINE:
 		error = kwl_machine_request(object, opcode, bytes, size);
 		break;
+	case KWL_SYSTEM_BLUETOOTH:
+		error = kwl_bluetooth_request(object, opcode, bytes, size);
+		break;
 	default:
 		error = EPROTO;
 		break;
@@ -506,6 +513,9 @@ kwl_system_tick(
 
 	/* The computer's readings: the answers, a reading given up, the next (machine-shell.c, ws188-p002). */
 	kwl_machine_tick(server);
+
+	/* Bluetooth: the service's news, the answers and a pairing's questions (bluetooth-shell.c, ws143-p006). */
+	kwl_bluetooth_tick(server);
 
 	/* The removable media: a new list to every devices object, and volumed's answers (media.c, ws132-p004). */
 	changed = kwl_media_tick(server);
@@ -658,6 +668,7 @@ kwl_system_close(
 	/* The monitor's sampling, and the computer's reading under way let go (ws188-p002). */
 	kwl_sysmon_close(server);
 	kwl_machine_close(server);
+	kwl_bluetooth_close(server);
 
 	/* A job under way ends on its own (a file read or written to its end, a bus call answered). */
 	system_job_wait(&system_state.network_job);
@@ -765,6 +776,16 @@ system_manager_request(
 		if (manager->version < KL_SYSTEM_SINCE_MACHINE)
 			return EPROTO;
 		error = kwl_machine_create(manager, bytes, size);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Bluetooth is bluetooth-shell.c's, since version 23 (ws143-p006). */
+	if (opcode == KL_SYSTEM_MANAGER_GET_BLUETOOTH) {
+		if (manager->version < KL_SYSTEM_SINCE_BLUETOOTH)
+			return EPROTO;
+		error = kwl_bluetooth_create(manager, bytes, size);
 		if (error != 0)
 			return error;
 		return 0;

@@ -191,6 +191,17 @@ struct system_view {
 	size_t machine_mount_count;
 	struct kl_machine_mount machine_mounts_pending[KL_MACHINE_MOUNTS_MAX];
 	size_t machine_mounts_pending_count;
+	/*
+	 * Bluetooth (ws143-p006): the state and the devices in effect, and the
+	 * ones being sent (open since the first event after the last done).
+	 */
+	struct kl_bluetooth_state bluetooth;
+	struct kl_bluetooth_device bluetooth_devices[KL_BLUETOOTH_DEVICES_MAX];
+	size_t bluetooth_count;
+	struct kl_bluetooth_state bluetooth_pending;
+	struct kl_bluetooth_device bluetooth_devices_pending[KL_BLUETOOTH_DEVICES_MAX];
+	size_t bluetooth_pending_count;
+	unsigned bluetooth_open;
 };
 
 /*
@@ -312,6 +323,9 @@ void system_view_machine_login_language(struct system_view *view, const char *co
 void system_view_machine_mount(struct system_view *view, const struct kl_machine_mount *mount);
 void system_view_machine_result(struct system_view *view, uint32_t request, uint32_t applied);
 int system_view_print_job_of(const struct system_view *view, uint32_t request, uint32_t *job);
+void system_view_bluetooth_state(struct system_view *view, const struct kl_bluetooth_state *state);
+void system_view_bluetooth_device(struct system_view *view, const struct kl_bluetooth_device *device);
+void system_view_bluetooth_done(struct system_view *view);
 unsigned system_view_take_changed(struct system_view *view);
 int system_view_error_of(uint32_t applied);
 void system_view_copy(char *to, size_t size, const char *from);

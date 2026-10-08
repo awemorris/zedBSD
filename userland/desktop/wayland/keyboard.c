@@ -1191,6 +1191,9 @@ keyboard_contact_begin(
 	open = kwl_network_is_open();
 	if (open)
 		return 0;
+	open = kwl_bluetooth_is_open();
+	if (open)
+		return 0;
 	open = kwl_menu_is_open();
 	if (open)
 		return 0;

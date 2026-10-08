@@ -1105,12 +1105,13 @@ start_drag(
 	if (origin == NULL || origin->kind != KWL_SURFACE)
 		return EPROTO;
 
-	/* And so must the icon, when there is one. */
+	/* And so must the icon, when there is one; it is a drag's icon from here, the drag refused or not. */
 	icon = NULL;
 	if (icon_id != 0U) {
 		icon = kwl_find(device->client, icon_id);
 		if (icon == NULL || icon->kind != KWL_SURFACE)
 			return EPROTO;
+		icon->drag_icon = 1U;
 	}
 
 	/*
