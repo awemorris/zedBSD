@@ -15,6 +15,9 @@
  *   DEVICES            the devices of the last scan
  *   SCAN SECONDS       a scan of 1 to 30 seconds (root only in this Phase),
  *                      answered when it ends with the devices found
+ *   POWER on|off       Bluetooth on or off for the user (ws143-p006): off,
+ *                      no scan or pairing starts (ERROR off) and SHOW says
+ *                      STATE off; the saved keys stay; a start is on
  *
  * and reads the answer's lines up to DONE:
  *

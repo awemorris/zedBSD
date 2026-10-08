@@ -130,6 +130,7 @@ static void btd_agent(int index);
 static void btd_answer(int index, int accepted);
 static void btd_forget(struct btd_client *client, const char *argument);
 static void btd_bonds(struct btd_client *client);
+static void btd_power(struct btd_client *client, const char *argument);
 static void btd_ask(void *context, unsigned kind, uint32_t number);
 static void btd_paired(void *context, const char *answer);
 static int btd_permitted(uid_t uid);
@@ -187,6 +188,14 @@ static int btd_busy_logged;
 static char btd_loads[BTD_LOADS_MAX][BTD_KEY_MAX];
 static unsigned btd_load_count;
 static uint64_t btd_reappear_ms;
+
+/*
+ * Whether the user turned Bluetooth off (POWER off, ws143-p006): the
+ * daemon then starts no scan and no pairing (they are answered
+ * "ERROR off"), and SHOW says "STATE off" over a ready controller.  The
+ * saved keys stay.  A start of the daemon has it on; it is not saved.
+ */
+static int btd_powered_off;
 
 /*
  * Runs the daemon until it is killed.
@@ -766,8 +775,66 @@ btd_line(
 		return;
 	}
 
+	/* POWER on|off (ws143-p006). */
+	same = strncmp(line, "POWER ", 6U);
+	if (same == 0) {
+		btd_power(client, line + 6);
+		return;
+	}
+
 	/* Anything else. */
 	btd_write(client, "ERROR request\nDONE\n");
+}
+
+/*
+ * Answers POWER on|off (ws143-p006): those D8 permits turn Bluetooth on or
+ * off.  Off is refused while a scan or a pairing runs (ERROR busy); the
+ * saved keys stay either way.
+ */
+static void
+btd_power(
+	struct btd_client *client,
+	const char *argument)
+{
+	int permitted;
+	int pairing;
+	int on;
+	int off;
+
+	/* Only those D8 permits. */
+	permitted = btd_permitted(client->uid);
+	if (!permitted) {
+		btd_write(client, "ERROR permission\nDONE\n");
+		return;
+	}
+
+	/* on or off. */
+	on = strcmp(argument, "on");
+	off = strcmp(argument, "off");
+	if (on != 0 && off != 0) {
+		btd_write(client, "ERROR power\nDONE\n");
+		return;
+	}
+
+	/* On: scans and pairings may start again. */
+	if (on == 0) {
+		btd_powered_off = 0;
+		btd_log("BLUETOOTHD POWER on uid=%u\n", (unsigned)client->uid);
+		btd_write(client, "POWER on\nDONE\n");
+		return;
+	}
+
+	/* Off waits for no scan or pairing that runs. */
+	pairing = btd_pair_active(&btd_pairing);
+	if ((btd_session_open && btd_session.scanning) || pairing || btd_pair_client != BTD_NO_CLIENT) {
+		btd_write(client, "ERROR busy\nDONE\n");
+		return;
+	}
+
+	/* Succeeded: off until POWER on or a start of the daemon. */
+	btd_powered_off = 1;
+	btd_log("BLUETOOTHD POWER off uid=%u\n", (unsigned)client->uid);
+	btd_write(client, "POWER off\nDONE\n");
 }
 
 /* Answers SHOW: the state, and the controller when one is open. */
@@ -781,8 +848,10 @@ btd_show(
 	int pairing;
 	int error;
 
-	/* The state, and why. */
-	if (btd_session.reason[0] != '\0')
+	/* The state, and why; a ready controller the user turned off is "off" (ws143-p006). */
+	if (btd_powered_off && btd_session_open && btd_session.state == BTD_STATE_READY)
+		btd_write(client, "STATE off\n");
+	else if (btd_session.reason[0] != '\0')
 		btd_write(client, "STATE %s %s\n", btd_state_name(btd_session.state), btd_session.reason);
 	else
 		btd_write(client, "STATE %s\n", btd_state_name(btd_session.state));
@@ -897,6 +966,12 @@ btd_scan(
 		return;
 	}
 
+	/* None while the user has Bluetooth off (ws143-p006). */
+	if (btd_powered_off) {
+		btd_write(client, "ERROR off\nDONE\n");
+		return;
+	}
+
 	/* One scan at a time, and none while a pairing runs. */
 	pairing = btd_pair_active(&btd_pairing);
 	if (btd_session.scanning || pairing) {
@@ -983,9 +1058,15 @@ btd_pair(
 		return;
 	}
 
-	/* A ready controller. */
+	/* A ready controller, which the user has not turned off (ws143-p006). */
 	if (!btd_session_open || btd_session.state != BTD_STATE_READY) {
 		btd_write(client, "ERROR not-ready\nDONE\n");
+		return;
+	}
+
+	/* None while the user has Bluetooth off. */
+	if (btd_powered_off) {
+		btd_write(client, "ERROR off\nDONE\n");
 		return;
 	}
 
