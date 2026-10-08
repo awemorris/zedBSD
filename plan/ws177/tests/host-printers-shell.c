@@ -62,6 +62,7 @@ static int print_request(struct kwl_object *object, uint32_t request, const char
 static int wait_event(struct kwl_server *server, uint32_t opcode, uint32_t request, int seconds, size_t *found);
 static int fd_open(int fd);
 static int edit_request(struct kwl_object *object, uint32_t request, uint32_t printer, const char *name, const char *path);
+static int printer_told_before(const char *text, size_t since, size_t before);
 static int printer_told(const char *text, size_t since);
 static void pause_ms(unsigned ms);
 
@@ -216,6 +217,7 @@ main(
 	status = edit_request(object, 20U, 1U, "Front Desk", "q2");
 	ok = status == 0 && wait_event(server, KL_SYSTEM_PRINTERS_EVENT_RESULT, 20U, 5, &found);
 	check("edit", ok && events[found].words[1] == KL_SYSTEM_RESULT_OK, "result OK");
+	check("edit-told-first", ok && printer_told_before("Front Desk", since, found), "the new name told before the answer (T1-459)");
 	for (tries = 0; tries < 100 && !printer_told("Front Desk", since); tries++) {
 		kwl_printers_tick(server);
 		pause_ms(20);
@@ -444,13 +446,27 @@ printer_told(
 	const char *text,
 	size_t since)
 {
+	int told;
+
+	/* Any printer event from the index on. */
+	told = printer_told_before(text, since, event_count);
+	return told;
+}
+
+/* Tells whether a printer event between two indexes (since, before) carried a text. */
+static int
+printer_told_before(
+	const char *text,
+	size_t since,
+	size_t before)
+{
 	size_t index;
 	size_t length;
 	size_t at;
 
 	/* Each printer event's bytes. */
 	length = strlen(text);
-	for (index = since; index < event_count; index++) {
+	for (index = since; index < before && index < event_count; index++) {
 		if (events[index].opcode != KL_SYSTEM_PRINTERS_EVENT_PRINTER)
 			continue;
 		for (at = 0; at + length <= sizeof(events[index].bytes); at++) {
