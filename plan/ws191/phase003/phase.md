@@ -2,7 +2,7 @@
 
 # ws191-p003: app の移行（videoplayer・music）と libmedia から音を外す
 
-Status: in-progress（q895、P2。2026-10-08 夜 実装と host の確認。T1 の QEMU の依頼を Q1 に送った: test-wait）
+Status: cleared（2026-10-08 Q1: T1-444 PASS、Music・Video Player の音が kl_audio_stream を通り WAV に音、pause で無音、seek で flush。注: Video Player の時計が wall の約 2 倍に見えた（未確認、P2 が確かめる））
 Disposition: normal
 Parent: [WS191](../ws.md)。設計は [design.md](../design.md) §7（第 4 版）、D11 は Q1 の決定（libmedia から音を外すだけ）。
 

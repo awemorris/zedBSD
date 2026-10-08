@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws190-p003 -->
 # ws190-p003: Text Editor の指の選択の編集の bar
 
-Status: test-wait（T1-445 の 3 の速い drag を直した、再試験を Q1 へ。下の「T1-443・T1-445 の結果と速い drag の直し」）（旧: test-wait（T1-445、未実行。2026-10-08 q902 P1 の照合: 実装・host 試験まで）（旧: in-progress（実装・host 試験は済み、T1 の AAT の依頼を Q1 へ）））
+Status: cleared（2026-10-08 Q1: T1-443 1〜5 PASS（6 は OSK の無い image で not-run）、T1-445 1〜6・T1-449 の速い drag PASS）
 Disposition: normal
 Parent: [WS190](../ws.md)
 Queue: q899（P1、2026-10-08）
