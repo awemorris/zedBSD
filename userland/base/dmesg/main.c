@@ -20,6 +20,16 @@
 #define DMESG_LIMIT (1024U * 1024U)
 
 /*
+ * Room beyond the size the kernel last reported: the log may grow between
+ * the size's query and the copy (a driver logging while dmesg runs), and a
+ * copy that does not fit fails with ENOMEM (T1-426, ws143-p002).
+ */
+#define DMESG_SLACK (64U * 1024U)
+
+/* How many times a copy that found the log grown is tried again. */
+#define DMESG_TRIES 4
+
+/*
  * Runs the dmesg command.
  */
 int
@@ -61,7 +71,10 @@ main(
 		return 1;
 	}
 	do {
-		capacity = size;
+		/* Room for the log as it was and what it may gain meanwhile. */
+		capacity = size + DMESG_SLACK;
+		if (capacity > DMESG_LIMIT)
+			capacity = DMESG_LIMIT;
 		buffer = malloc(capacity ? capacity : 1U);
 
 		/* Handles the buffer condition. */
@@ -79,7 +92,7 @@ main(
 		free(buffer);
 
 		/* Handles the reported system error. */
-		if (errno != ENOMEM || ++tries > 1) {
+		if (errno != ENOMEM || ++tries >= DMESG_TRIES) {
 			command_error("dmesg", NULL);
 
 			/* Reports operation failure. */
