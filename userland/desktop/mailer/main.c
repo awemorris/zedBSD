@@ -41,6 +41,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 /* The fonts, the window's first size, and the longest wait for input. */
@@ -116,6 +117,14 @@ struct ml_window {
 	int trust_smtp;
 	char trust_fingerprint[ML_PIN_MAX];
 	char declined[ML_PIN_MAX];
+
+	/*
+	 * Attach... (ws189-p004): the file chooser while it is open, whether it
+	 * answered, and the file chosen (empty when it was cancelled).
+	 */
+	struct kl_file_chooser *chooser;
+	int chooser_answered;
+	char chosen[ML_PATH_MAX];
 };
 
 /* The window's menu. */
@@ -163,6 +172,15 @@ static void ml_remove_account(struct ml_window *mailer, int index);
 static void ml_ask_trust(struct ml_window *mailer, const struct ml_result *result);
 static void ml_trust(struct ml_window *mailer, int trusted);
 static void ml_draw_question(struct ml_window *mailer, uint64_t now_us);
+static void ml_attach_choose(struct ml_window *mailer);
+static void ml_attach_chooser_done(void *data, struct kl_file_chooser *chooser, unsigned result, const char *path, size_t filter);
+static void ml_attach_chosen(struct ml_window *mailer);
+static int ml_attach_file(struct ml_window *mailer, const char *path);
+static void ml_drop(struct ml_window *mailer, const struct kl_window_event *event);
+static void ml_drop_take(struct ml_window *mailer);
+static const char *ml_attach_type(const char *name);
+static int ml_uri_path(const char *line, size_t length, char *path, size_t size);
+static int ml_hex_digit(char character);
 
 /*
  * Runs Mail.
@@ -243,6 +261,11 @@ main(
 		return 1;
 	}
 
+	/* Files and pictures dragged from other windows are attached to the message being written (ws189-p004). */
+	error = kl_window_accept_drops(mailer.window, KL_DROP_URIS | KL_DROP_IMAGE);
+	if (error != 0)
+		ml_log("DND none errno=%d", error);
+
 	/* The menu and the style (opaque until the first frame finds whether the window can stand on glass). */
 	(void)kl_window_set_menu(mailer.window, ml_menu, sizeof(ml_menu) / sizeof(ml_menu[0]));
 	mailer.style.text = &mailer.text;
@@ -256,8 +279,10 @@ main(
 	/* The loop until the window closes. */
 	status = ml_loop(&mailer, timeout);
 
-	/* Everything goes: the thread first (it ends its sessions), then the window. */
+	/* Everything goes: the thread first (it ends its sessions), the chooser, then the window. */
 	ml_sync_stop(mailer.sync);
+	if (mailer.chooser != NULL)
+		kl_file_chooser_destroy(mailer.chooser);
 	if (mailer.settings != NULL)
 		kl_settings_close(mailer.settings);
 	kl_ui_destroy(mailer.dialog_ui);
@@ -423,6 +448,15 @@ ml_loop(
 		/* What the view asked of the servers. */
 		ml_requests(mailer);
 
+		/* Attach... asked, and the file it chose (ws189-p004). */
+		if (mailer->view.attach_asked) {
+			mailer->view.attach_asked = 0;
+			ml_attach_choose(mailer);
+		}
+
+		/* The file the chooser chose, attached. */
+		ml_attach_chosen(mailer);
+
 		/* The end: the window closed or Quit. */
 		now = kl_clock_us();
 		if (mailer->view.quit) {
@@ -555,6 +589,13 @@ ml_input(
 		break;
 	case KL_WINDOW_CLOSE:
 		mailer->view.quit = 1;
+		break;
+	case KL_WINDOW_DROP_ENTER:
+	case KL_WINDOW_DROP_MOTION:
+	case KL_WINDOW_DROP_LEAVE:
+	case KL_WINDOW_DROP:
+		/* Files or a picture dragged over the window (ws189-p004). */
+		ml_drop(mailer, event);
 		break;
 	default:
 		break;
@@ -858,6 +899,7 @@ ml_results(
 		case ML_RESULT_SENT:
 			ml_log("SENT account=%d", result.account);
 			mailer->view.composing = 0;
+			ml_view_attach_clear(&mailer->view);
 			ml_view_notice(&mailer->view, "Message sent.", kl_clock_us());
 			break;
 		case ML_RESULT_SIGNED_IN:
@@ -1071,8 +1113,8 @@ ml_request_send(
 	memset(&job, 0, sizeof(job));
 	job.kind = ML_JOB_SEND;
 	job.account = mailer->view.account;
-	error = ml_compose(&accounts[mailer->view.account], mailer->view.to.text, mailer->view.cc.text, mailer->view.subject.text,
-	    mailer->view.body.text, mailer->view.reply_id, time(NULL), &job.raw, &job.length);
+	error = ml_compose_with(&accounts[mailer->view.account], mailer->view.to.text, mailer->view.cc.text, mailer->view.subject.text,
+	    mailer->view.body.text, mailer->view.reply_id, mailer->view.attachments, mailer->view.attachment_count, time(NULL), &job.raw, &job.length);
 	if (error != 0) {
 		ml_view_notice(&mailer->view, "The message could not be written.", kl_clock_us());
 		return;
@@ -1593,4 +1635,405 @@ ml_codes_changed(
 	mailer = data;
 	mailer->view.codes_allowed = atoi(value);
 	mailer->dirty = 1;
+}
+
+/* Opens the file chooser of Attach... (one at a time; ws189-p004). */
+static void
+ml_attach_choose(
+	struct ml_window *mailer)
+{
+	static const struct kl_file_chooser_listener listener = { ml_attach_chooser_done };
+	struct kl_file_chooser_options options;
+
+	/* One at a time, while a message is written. */
+	if (mailer->chooser != NULL || !mailer->view.composing)
+		return;
+
+	/* A file to open. */
+	memset(&options, 0, sizeof(options));
+	options.mode = KL_FILE_CHOOSER_OPEN;
+	options.title = "Attach File";
+	options.application = "mailer";
+	options.font = ML_FONT;
+	mailer->chooser = kl_file_chooser_open(kl_app_display(mailer->app), kl_window_toplevel(mailer->window), &options, &listener, mailer);
+	ml_log("ATTACH chooser ok=%d", mailer->chooser != NULL);
+	if (mailer->chooser == NULL)
+		ml_view_notice(&mailer->view, "The file chooser could not be shown.", kl_clock_us());
+}
+
+/* Takes the chooser's answer: the file, attached later in the loop (not from inside the chooser's own call). */
+static void
+ml_attach_chooser_done(
+	void *data,
+	struct kl_file_chooser *chooser,
+	unsigned result,
+	const char *path,
+	size_t filter)
+{
+	struct ml_window *mailer;
+
+	/* The path chosen, or none. */
+	(void)chooser;
+	(void)filter;
+	mailer = data;
+	mailer->chosen[0] = '\0';
+	if (result == KL_FILE_CHOOSER_CHOSEN && path != NULL)
+		(void)snprintf(mailer->chosen, sizeof(mailer->chosen), "%s", path);
+	mailer->chooser_answered = 1;
+}
+
+/* Attaches the file the chooser chose, once it answered; the chooser goes. */
+static void
+ml_attach_chosen(
+	struct ml_window *mailer)
+{
+	/* Only an answer. */
+	if (!mailer->chooser_answered)
+		return;
+	mailer->chooser_answered = 0;
+	kl_file_chooser_destroy(mailer->chooser);
+	mailer->chooser = NULL;
+	mailer->dirty = 1;
+
+	/* The file, unless it was cancelled. */
+	if (mailer->chosen[0] == '\0')
+		return;
+	(void)ml_attach_file(mailer, mailer->chosen);
+	mailer->chosen[0] = '\0';
+}
+
+/*
+ * Attaches a file by its path: its bytes read whole (no more than a
+ * message takes), under its name, its type from its name.  A failure is
+ * told.  Returns 0 or an errno value.
+ */
+static int
+ml_attach_file(
+	struct ml_window *mailer,
+	const char *path)
+{
+	unsigned char *data;
+	const char *name;
+	FILE *file;
+	long size;
+	size_t got;
+	int error;
+
+	/* The file. */
+	file = fopen(path, "rb");
+	if (file == NULL) {
+		error = errno;
+		ml_view_notice(&mailer->view, "The file could not be read.", kl_clock_us());
+		return error;
+	}
+
+	/* Its size, no more than a message takes. */
+	(void)fseek(file, 0L, SEEK_END);
+	size = ftell(file);
+	(void)fseek(file, 0L, SEEK_SET);
+	if (size < 0 || (unsigned long)size > ML_ATTACH_TOTAL_MAX) {
+		fclose(file);
+		ml_view_notice(&mailer->view, "The file is too large to send.", kl_clock_us());
+		return EFBIG;
+	}
+
+	/* Its bytes. */
+	data = malloc((size_t)size + 1U);
+	if (data == NULL) {
+		fclose(file);
+		return ENOMEM;
+	}
+
+	/* Read whole. */
+	got = fread(data, 1, (size_t)size, file);
+	fclose(file);
+	if (got != (size_t)size) {
+		free(data);
+		ml_view_notice(&mailer->view, "The file could not be read.", kl_clock_us());
+		return EIO;
+	}
+
+	/* Attached under its name. */
+	name = strrchr(path, '/');
+	if (name == NULL) {
+		name = path;
+	} else {
+		name++;
+	}
+
+	/* Its copy goes with the message. */
+	error = ml_view_attach(&mailer->view, name, ml_attach_type(name), data, got);
+	free(data);
+	if (error != 0) {
+		ml_view_notice(&mailer->view, "No more files fit in this message.", kl_clock_us());
+		return error;
+	}
+
+	/* Succeeded: drawn with the message. */
+	mailer->dirty = 1;
+	return 0;
+}
+
+/*
+ * Follows a drag over the window (ws189-p004): taken as a copy over a
+ * message being written (no question asked, no account's form), its
+ * attachments' row lit; a drop attaches what it carries.
+ */
+static void
+ml_drop(
+	struct ml_window *mailer,
+	const struct kl_window_event *event)
+{
+	int taken;
+
+	/* Dropped. */
+	if (event->kind == KL_WINDOW_DROP) {
+		ml_drop_take(mailer);
+		mailer->view.drop_over = 0;
+		mailer->dirty = 1;
+		return;
+	}
+
+	/* Over the message being written, or not; the window is drawn again when that changed. */
+	taken = 0;
+	if (event->kind != KL_WINDOW_DROP_LEAVE &&
+	    mailer->view.composing &&
+	    !mailer->view.adding &&
+	    mailer->view.question == ML_QUESTION_NONE)
+		taken = 1;
+	if (taken != mailer->view.drop_over)
+		mailer->dirty = 1;
+	mailer->view.drop_over = taken;
+
+	/* The answer for the place (only a changed answer is sent). */
+	if (taken) {
+		kl_window_answer_drop(mailer->window, KL_DND_COPY, KL_DND_COPY);
+	} else {
+		kl_window_answer_drop(mailer->window, 0U, 0U);
+	}
+}
+
+/*
+ * Attaches what was dropped (ws189-p004): each file of the file names, or
+ * the picture as "image.png" ("image 2.png" ... when that name is taken),
+ * then finishes the drop as a copy, or gives it up.
+ */
+static void
+ml_drop_take(
+	struct ml_window *mailer)
+{
+	char path[ML_PATH_MAX];
+	char name[ML_TEXT_MAX];
+	const char *line;
+	const char *end;
+	unsigned type;
+	size_t length;
+	size_t index;
+	size_t added;
+	char *data;
+	int number;
+	int taken;
+	int same;
+	int error;
+
+	/* Only over a message being written. */
+	if (!mailer->view.drop_over) {
+		kl_window_finish_drop(mailer->window, 0U);
+		return;
+	}
+
+	/* What was dropped. */
+	error = kl_window_receive_drop(mailer->window, &data, &length, &type);
+	if (error != 0) {
+		ml_log("DND drop failed errno=%d", error);
+		kl_window_finish_drop(mailer->window, 0U);
+		return;
+	}
+
+	/* A picture: the first name not taken among the files attached. */
+	added = 0;
+	if (type == KL_DROP_IMAGE) {
+		for (number = 1; number < 100; number++) {
+			/* The name with its number (none for the first). */
+			if (number == 1) {
+				(void)snprintf(name, sizeof(name), "image.png");
+			} else {
+				(void)snprintf(name, sizeof(name), "image %d.png", number);
+			}
+
+			/* Whether a file attached has it already. */
+			taken = 0;
+			for (index = 0; index < mailer->view.attachment_count; index++) {
+				same = strcmp(mailer->view.attachments[index].name, name);
+				if (same == 0)
+					taken = 1;
+			}
+
+			/* Not taken: this one. */
+			if (!taken)
+				break;
+		}
+
+		/* Attached. */
+		error = ml_view_attach(&mailer->view, name, "image/png", (const unsigned char *)data, length);
+		if (error == 0)
+			added++;
+	}
+
+	/* File names: a URI a line, each file read and attached. */
+	if (type == KL_DROP_URIS) {
+		for (line = data; line != NULL && *line != '\0'; line = end) {
+			/* The line, to its end. */
+			end = strchr(line, '\n');
+			if (end == NULL) {
+				end = line + strlen(line);
+			} else {
+				end++;
+			}
+
+			/* A file's path (comments and other schemes are not), attached. */
+			error = ml_uri_path(line, (size_t)(end - line), path, sizeof(path));
+			if (error != 0)
+				continue;
+			error = ml_attach_file(mailer, path);
+			if (error == 0)
+				added++;
+		}
+	}
+
+	/* The data is not needed any more. */
+	free(data);
+
+	/* Finished as a copy when anything was attached, else given up. */
+	if (added != 0U) {
+		kl_window_finish_drop(mailer->window, KL_DND_COPY);
+	} else {
+		kl_window_finish_drop(mailer->window, 0U);
+	}
+
+	/* The log line the tests read. */
+	ml_log("DND drop type=%u added=%zu count=%zu", type, added, mailer->view.attachment_count);
+	mailer->dirty = 1;
+}
+
+/* Names the MIME type of a file by its name's extension (application/octet-stream when it is not known). */
+static const char *
+ml_attach_type(
+	const char *name)
+{
+	static const char *const types[][2] = {
+		{ ".png", "image/png" },
+		{ ".jpg", "image/jpeg" },
+		{ ".jpeg", "image/jpeg" },
+		{ ".gif", "image/gif" },
+		{ ".pdf", "application/pdf" },
+		{ ".txt", "text/plain" }
+	};
+	const char *dot;
+	size_t index;
+	int same;
+
+	/* The extension. */
+	dot = strrchr(name, '.');
+	if (dot == NULL)
+		return "application/octet-stream";
+
+	/* A known one. */
+	for (index = 0; index < sizeof(types) / sizeof(types[0]); index++) {
+		same = strcasecmp(dot, types[index][0]);
+		if (same == 0)
+			return types[index][1];
+	}
+
+	/* Any other. */
+	return "application/octet-stream";
+}
+
+/*
+ * Reads the path of a "text/uri-list" line: file:// (with no host or
+ * localhost), %XX turned back into bytes, the line's end left out.
+ * Returns 0, EINVAL for another line (a comment, another scheme), or
+ * ENAMETOOLONG.
+ */
+static int
+ml_uri_path(
+	const char *line,
+	size_t length,
+	char *path,
+	size_t size)
+{
+	size_t used;
+	size_t index;
+	int differs;
+	int high;
+	int low;
+
+	/* The line without its end. */
+	while (length > 0U && (line[length - 1U] == '\n' || line[length - 1U] == '\r'))
+		length--;
+
+	/* file:// first. */
+	if (length < 8U)
+		return EINVAL;
+	differs = strncmp(line, "file://", 7U);
+	if (differs != 0)
+		return EINVAL;
+
+	/* A host that is no host, or this one. */
+	index = 7U;
+	if (length - index >= 9U) {
+		differs = strncmp(line + index, "localhost", 9U);
+		if (differs == 0)
+			index += 9U;
+	}
+
+	/* The path starts with its slash. */
+	if (index >= length || line[index] != '/')
+		return EINVAL;
+
+	/* The path's bytes, %XX turned back. */
+	used = 0;
+	while (index < length) {
+		/* Room for one more and the NUL. */
+		if (used + 1U >= size)
+			return ENAMETOOLONG;
+
+		/* An escape. */
+		if (line[index] == '%' && index + 2U < length) {
+			high = ml_hex_digit(line[index + 1U]);
+			low = ml_hex_digit(line[index + 2U]);
+			if (high >= 0 && low >= 0) {
+				path[used++] = (char)(high * 16 + low);
+				index += 3U;
+				continue;
+			}
+		}
+
+		/* A byte as it is. */
+		path[used++] = line[index];
+		index++;
+	}
+
+	/* Succeeded: the path. */
+	path[used] = '\0';
+	return 0;
+}
+
+/* Gives a hexadecimal digit's value, or -1. */
+static int
+ml_hex_digit(
+	char character)
+{
+	/* A decimal digit. */
+	if (character >= '0' && character <= '9')
+		return character - '0';
+
+	/* A letter, either way. */
+	if (character >= 'a' && character <= 'f')
+		return character - 'a' + 10;
+	if (character >= 'A' && character <= 'F')
+		return character - 'A' + 10;
+
+	/* Not one. */
+	return -1;
 }

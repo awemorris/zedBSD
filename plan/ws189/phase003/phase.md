@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws189-p003 -->
 # ws189-p003: app — 画像の drag の元と受け、文字の drag の元と受け、desktop の file
 
-Status: in-progress（q892、P1、2026-10-08: 実装・build・host 試験まで。QEMU の AAT は T1 に依頼（Q1 経由））
+Status: test-wait（T1-434、2026-10-08 Q1 が依頼。実装・build・host 試験は済み）
 Disposition: normal
 Parent: [WS189](../ws.md)
 Queue: q892（P1、2026-10-08）

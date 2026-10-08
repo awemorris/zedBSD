@@ -51,7 +51,7 @@ for variant in plain asan ubsan; do
 	"$cc" $loose -w -c src/libc/openbsd-digest.c -o "$out/digest-$variant.o"
 	objects="$objects $out/sha2-$variant.o $out/digest-$variant.o"
 	for file in userland/base/libz-compat/*.c userland/base/libjpeg-compat/*.c userland/desktop/libtruetype/*.c \
-		userland/base/libpng-compat/*.c userland/base/libgif-compat/*.c userland/desktop/picture/picture.c; do
+		userland/base/libpng-compat/*.c userland/base/libgif-compat/*.c userland/desktop/picture/picture.c userland/desktop/picture/png-write.c; do
 		object="$out/$(basename "$(dirname "$file")")-$(basename "$file" .c)-$variant.o"
 		"$cc" $loose -w -I"$(dirname "$file")" -c "$file" -o "$object"
 		objects="$objects $object"

@@ -233,6 +233,24 @@ void ml_mime_release(struct ml_parsed *parsed);
 int ml_mime_address_list(const char *list, char (*addresses)[ML_TEXT_MAX], size_t capacity, size_t *count);
 int ml_compose(const struct ml_account_config *account, const char *to, const char *cc, const char *subject, const char *body, const char *reply_to_id, time_t now, char **raw, size_t *length);
 
+/*
+ * A file attached to a message being written (ws189-p004): its name (UTF-8),
+ * its MIME type, and its bytes.  At most ML_ATTACH_MAX go with a message,
+ * ML_ATTACH_TOTAL_MAX bytes in all.
+ */
+#define ML_ATTACH_MAX		16U
+#define ML_ATTACH_TOTAL_MAX	((size_t)25 * 1024 * 1024)
+#define ML_ATTACH_TYPE_MAX	64U
+struct ml_attachment {
+	char name[ML_TEXT_MAX];
+	char type[ML_ATTACH_TYPE_MAX];
+	unsigned char *data;
+	size_t length;
+};
+
+int ml_compose_with(const struct ml_account_config *account, const char *to, const char *cc, const char *subject, const char *body, const char *reply_to_id,
+    const struct ml_attachment *attachments, size_t count, time_t now, char **raw, size_t *length);
+
 /* The Japanese character sets (jis.c, ws177-p016): which one a charset name is, and its next character. */
 #define ML_JIS_NONE		0
 #define ML_JIS_ISO2022		1

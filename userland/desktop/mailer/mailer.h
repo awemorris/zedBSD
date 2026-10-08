@@ -158,6 +158,20 @@ struct ml_view {
 	struct kl_text_area body;
 	char reply_id[ML_TEXT_MAX];
 
+	/*
+	 * The files attached to the message being written (ws189-p004): each
+	 * with its bytes (the view's, freed when they go), how many, their
+	 * bytes in all; whether Attach... was chosen (the window opens the
+	 * file chooser); whether a drag of files or a picture is over the
+	 * message being written; and where the attachments' row was drawn.
+	 */
+	struct ml_attachment attachments[ML_ATTACH_MAX];
+	size_t attachment_count;
+	size_t attachment_bytes;
+	int attach_asked;
+	int drop_over;
+	struct kl_rect attach_row;
+
 	int adding;
 	int editing;
 	struct kl_field setup_name;
@@ -215,6 +229,9 @@ int ml_view_take_request(struct ml_view *view, struct ml_request *request);
 void ml_view_notice(struct ml_view *view, const char *message, uint64_t now_us);
 void ml_view_ask(struct ml_view *view, unsigned question, const char *title, const char *body);
 void ml_view_question(struct ml_view *view, struct kl_ui *ui, const struct kl_style *style, int width, int height, uint64_t now_us);
+int ml_view_attach(struct ml_view *view, const char *name, const char *type, const unsigned char *data, size_t length);
+void ml_view_attach_remove(struct ml_view *view, size_t index);
+void ml_view_attach_clear(struct ml_view *view);
 
 /* The log for the tests (main.c, and the host tests' own). */
 void ml_log(const char *format, ...);
