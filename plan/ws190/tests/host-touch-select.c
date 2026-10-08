@@ -98,6 +98,7 @@ static void frame(void);
 static void tick(unsigned milliseconds);
 static void tap(double x, double y);
 static void drag(double x1, double y1, double x2, double y2);
+static void quick_drag(double x1, double y1, double x2, double y2);
 static double text_x(const char *text, size_t length);
 static void handle_centre(size_t position, double *x, double *y);
 static int bar_cell(unsigned button, double *x, double *y);
@@ -110,6 +111,7 @@ static void test_field_bar(void);
 static void test_field_end(void);
 static void test_field_off(void);
 static void test_area_select(void);
+static void test_quick_drag(void);
 
 /*
  * Runs the checks; the exit status says whether they all held.
@@ -159,6 +161,7 @@ main(
 	test_field_end();
 	test_field_off();
 	test_area_select();
+	test_quick_drag();
 
 	/* Reports the checks. */
 	kl_ui_destroy(test_page.ui);
@@ -289,6 +292,41 @@ drag(
 	tick(100U);
 	frame();
 	(void)kl_ui_touch_up(test_page.ui, 2, test_page.now_us, test_page.now_us);
+	frame();
+	tick(100U);
+}
+
+/*
+ * A quick finger's drag: it moves and lifts before the window draws a frame
+ * (aat touch-drag with no pause, T1-445), so only the lift tells where it
+ * ended.
+ */
+static void
+quick_drag(
+	double x1,
+	double y1,
+	double x2,
+	double y2)
+{
+	int step;
+	double x;
+	double y;
+
+	/* Down, with the frame the finger lands on. */
+	(void)kl_ui_touch_down(test_page.ui, 4, test_page.now_us, test_page.now_us, x1, y1);
+	frame();
+
+	/* Ten steps along the line a millisecond apart, no frame between them. */
+	for (step = 1; step <= 10; step++) {
+		tick(1U);
+		x = x1 + (x2 - x1) * (double)step / 10.0;
+		y = y1 + (y2 - y1) * (double)step / 10.0;
+		(void)kl_ui_touch_motion(test_page.ui, 4, test_page.now_us, test_page.now_us, x, y);
+	}
+
+	/* Up at once, then the next frame. */
+	tick(1U);
+	(void)kl_ui_touch_up(test_page.ui, 4, test_page.now_us, test_page.now_us);
 	frame();
 	tick(100U);
 }
@@ -756,4 +794,24 @@ test_area_select(void)
 	tap(x, y);
 	frame();
 	check(test_page.area.anchor == 0U && test_page.area.caret == 13U && select->touch.bar == 1, "area: Select All");
+}
+
+/* A quick drag of a handle ends where the finger lifted, not where the last frame saw it (ws190-p003, T1-445). */
+static void
+test_quick_drag(void)
+{
+	double x;
+	double y;
+	double end_x;
+	double end_y;
+
+	/* The whole text of the area selected (test_area_select left it so), the end's knob on the second line. */
+	frame();
+	handle_centre(13U, &x, &y);
+
+	/* The end's knob thrown up to just after "one" on the first line. */
+	end_x = (double)(TEST_FIELD_X + 12) + (double)kl_text_width(&test_page.text, "one", 3U, TEST_TEXT_SIZE, 0) + 1.0;
+	end_y = y - 20.0;
+	quick_drag(x, y, end_x, end_y);
+	check(test_page.area.anchor == 0U && test_page.area.caret == 3U, "area: a quick drag of the end's knob ends where the finger lifted");
 }
