@@ -134,6 +134,7 @@ static void offer_finish(struct kwl_object *offer);
 static struct kwl_object *drag_surface_at(struct kwl_server *server, struct kwl_object **titlebar, uint32_t *id, uint32_t *detail);
 static struct kwl_object *drag_plain_window_at(struct kwl_server *server, int32_t x, int32_t y);
 static struct kwl_object *drag_device_of(struct kwl_client *client);
+static unsigned drag_devices_in_order(struct kwl_client *client, struct kwl_object **devices);
 static void drag_update(struct kwl_server *server, uint32_t time);
 static void drag_enter(struct kwl_server *server, struct kwl_object *surface);
 static void drag_leave(struct kwl_server *server);
@@ -1431,6 +1432,55 @@ drag_device_of(
 }
 
 /*
+ * Gives a client's live data devices, the oldest first (the client's list
+ * holds its objects newest first), at most KWL_DND_DEVICES of them: the
+ * oldest ones when it has more.  Returns how many.
+ */
+static unsigned
+drag_devices_in_order(
+	struct kwl_client *client,
+	struct kwl_object **devices)
+{
+	struct kwl_object *object;
+	unsigned count;
+	unsigned index;
+	unsigned half;
+
+	/* A failed client has none. */
+	if (client->fatal)
+		return 0;
+
+	/* The live devices newest first; past the most kept, the newest goes so that the oldest stay. */
+	count = 0;
+	for (object = client->objects; object != NULL; object = object->next) {
+		/* Only data devices. */
+		if (object->kind != KWL_DATA_DEVICE || object->dead)
+			continue;
+
+		/* A full list drops its newest, at the front. */
+		if (count == KWL_DND_DEVICES) {
+			memmove(devices, devices + 1, sizeof(devices[0]) * (KWL_DND_DEVICES - 1U));
+			count--;
+		}
+
+		/* The device after the newer ones. */
+		devices[count] = object;
+		count++;
+	}
+
+	/* The list turned round: the oldest first. */
+	half = count / 2U;
+	for (index = 0; index < half; index++) {
+		object = devices[index];
+		devices[index] = devices[count - 1U - index];
+		devices[count - 1U - index] = object;
+	}
+
+	/* Succeeded: how many devices there are. */
+	return count;
+}
+
+/*
  * Finds the drag's target under the pointer and tells it: a new target
  * hears enter (the old one leave), the same one motion; a titlebar hears
  * the part of its breadcrumb first.
@@ -1511,13 +1561,16 @@ drag_enter(
 	struct kwl_server *server,
 	struct kwl_object *surface)
 {
+	struct kwl_object *devices[KWL_DND_DEVICES];
 	struct kwl_object *object;
 	struct kwl_object *offer;
 	struct kwl_object *source;
 	uint32_t words[5];
 	uint32_t word;
 	uint32_t serial;
+	unsigned found;
 	unsigned count;
+	unsigned slot;
 	unsigned index;
 
 	/* One serial for the enter on every device (kept: a context menu may answer it after a drop). */
@@ -1525,13 +1578,17 @@ drag_enter(
 	server->dnd_enter_serial = serial;
 	source = server->dnd_source;
 
-	/* Each live data device of the client, as many as are kept. */
+	/*
+	 * The client's live data devices in the order they were made (its
+	 * first window's first), so that when several windows take the drag
+	 * the first of them has the drop (drag_pick; ws189-p002 F7).
+	 */
+	found = drag_devices_in_order(surface->client, devices);
+
+	/* Each of them, as many as are kept. */
 	count = 0;
-	for (object = surface->client->objects; object != NULL; object = object->next) {
-		if (object->kind != KWL_DATA_DEVICE || object->dead)
-			continue;
-		if (count == KWL_DND_DEVICES)
-			break;
+	for (slot = 0; slot < found; slot++) {
+		object = devices[slot];
 
 		/* The offer of the source's types, made by the compositor, when there is a source. */
 		offer = NULL;
