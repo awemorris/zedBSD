@@ -103,7 +103,7 @@ done
 driver=$repo/src/drivers/gpu/i915
 executor=""
 for part in codec object dispatch transport instance vulkan fence objects reply memory image descriptor pipeline \
-    pipeline-prepare render-pass sync state batch math video video-mfx video-h264-tables; do
+    pipeline-prepare render-pass sync state batch math forget video video-mfx video-h264-tables; do
 	executor="$executor $driver/render/$part.c"
 done
 for part in spirv compile eu; do

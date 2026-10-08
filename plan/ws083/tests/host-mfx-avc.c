@@ -89,6 +89,8 @@ static void fixture_decode_base(struct i915_video_mfx_decode *decode, const stru
 static void case_intra_cqm(void);
 static void case_references(void);
 static void case_flat_and_defaults(void);
+static void case_set_bounds(void);
+static void bound_check(const struct i915_video_sps *sps, const struct i915_video_pps *pps, const char *expected);
 
 /*
  * Runs the cases into the directory.
@@ -113,6 +115,9 @@ main(
 
 	/* Flat matrices without any matrix, and default lists asked for by the flag. */
 	case_flat_and_defaults();
+
+	/* The checks of the sets' values at each bound (design §6.6, items 2, 3 and 4; ws083 R-S6). */
+	case_set_bounds();
 
 	/* Succeeded: every case's batch and checks are written. */
 	printf("host-mfx-avc: cases written to %s\n", fixture_directory);
@@ -893,4 +898,140 @@ case_flat_and_defaults(void)
 	golden_direct(&test, &decode);
 	golden_slices(&test, &decode);
 	fixture_end(&test);
+}
+
+/* Requires the set check's answer: NULL (taken), or a reason containing the expected words. */
+static void
+bound_check(
+	const struct i915_video_sps *sps,
+	const struct i915_video_pps *pps,
+	const char *expected)
+{
+	const char *reason;
+
+	/* The answer. */
+	reason = drv_i915_video_mfx_check_sets(sps, pps);
+	if (expected == NULL) {
+		if (reason != NULL) {
+			fprintf(stderr, "host-mfx-avc: sets refused: %s\n", reason);
+			abort();
+		}
+		return;
+	}
+
+	/* A refusal for the expected reason. */
+	if (reason == NULL || strstr(reason, expected) == NULL) {
+		fprintf(stderr, "host-mfx-avc: expected \"%s\", got \"%s\"\n", expected, reason == NULL ? "(taken)" : reason);
+		abort();
+	}
+}
+
+/*
+ * The values the decoder takes, each at its last taken value and its first
+ * refused one: chroma format, bit depths, frames only, the order count
+ * type, the frame number and order count widths, the picture's sides and
+ * macroblocks, the reference index counts, weighted bi-prediction, the
+ * initial quantizer and the chroma quantizer offsets.
+ */
+static void
+case_set_bounds(void)
+{
+	struct i915_video_sps sps;
+	struct i915_video_pps pps;
+	struct i915_video_sps edge;
+	struct i915_video_pps pedge;
+
+	/* A taken sequence and picture set. */
+	memset(&sps, 0, sizeof(sps));
+	sps.flags = I915_VIDEO_SPS_FRAME_MBS_ONLY;
+	sps.chroma_format_idc = 1U;
+	sps.pic_width_in_mbs_minus1 = 3U;
+	sps.pic_height_in_map_units_minus1 = 3U;
+	memset(&pps, 0, sizeof(pps));
+	bound_check(&sps, &pps, NULL);
+
+	/* Chroma format, bit depths, frames only. */
+	edge = sps;
+	edge.chroma_format_idc = 2U;
+	bound_check(&edge, &pps, "4:2:0");
+	edge = sps;
+	edge.bit_depth_luma_minus8 = 1U;
+	bound_check(&edge, &pps, "bit depth");
+	edge = sps;
+	edge.bit_depth_chroma_minus8 = 1U;
+	bound_check(&edge, &pps, "bit depth");
+	edge = sps;
+	edge.flags = 0U;
+	bound_check(&edge, &pps, "frames only");
+
+	/* Order count type 2 taken, 3 refused; widths 12 taken, 13 refused. */
+	edge = sps;
+	edge.pic_order_cnt_type = 2U;
+	bound_check(&edge, &pps, NULL);
+	edge.pic_order_cnt_type = 3U;
+	bound_check(&edge, &pps, "order count type");
+	edge = sps;
+	edge.log2_max_frame_num_minus4 = 12U;
+	edge.log2_max_pic_order_cnt_lsb_minus4 = 12U;
+	bound_check(&edge, &pps, NULL);
+	edge.log2_max_frame_num_minus4 = 13U;
+	bound_check(&edge, &pps, "16 bits");
+	edge.log2_max_frame_num_minus4 = 12U;
+	edge.log2_max_pic_order_cnt_lsb_minus4 = 13U;
+	bound_check(&edge, &pps, "16 bits");
+
+	/* Sides: 256 macroblocks taken, 257 refused; 36864 macroblocks taken, one row more refused. */
+	edge = sps;
+	edge.pic_width_in_mbs_minus1 = 255U;
+	edge.pic_height_in_map_units_minus1 = 143U;
+	bound_check(&edge, &pps, NULL);
+	edge.pic_width_in_mbs_minus1 = 256U;
+	bound_check(&edge, &pps, "4096");
+	edge.pic_width_in_mbs_minus1 = 255U;
+	edge.pic_height_in_map_units_minus1 = 256U;
+	bound_check(&edge, &pps, "4096");
+	edge.pic_height_in_map_units_minus1 = 144U;
+	bound_check(&edge, &pps, "36864");
+
+	/* Reference index counts 32 taken, 33 refused; weighted bi-prediction 2 taken, 3 refused. */
+	pedge = pps;
+	pedge.num_ref_idx_l0_default_active_minus1 = 31U;
+	pedge.num_ref_idx_l1_default_active_minus1 = 31U;
+	pedge.weighted_bipred_idc = 2U;
+	bound_check(&sps, &pedge, NULL);
+	pedge.num_ref_idx_l0_default_active_minus1 = 32U;
+	bound_check(&sps, &pedge, "reference index");
+	pedge.num_ref_idx_l0_default_active_minus1 = 31U;
+	pedge.num_ref_idx_l1_default_active_minus1 = 32U;
+	bound_check(&sps, &pedge, "reference index");
+	pedge.num_ref_idx_l1_default_active_minus1 = 31U;
+	pedge.weighted_bipred_idc = 3U;
+	bound_check(&sps, &pedge, "bi-prediction");
+
+	/* The initial quantizer -26 and 25 taken, -27 and 26 refused. */
+	pedge = pps;
+	pedge.pic_init_qp_minus26 = -26;
+	bound_check(&sps, &pedge, NULL);
+	pedge.pic_init_qp_minus26 = 25;
+	bound_check(&sps, &pedge, NULL);
+	pedge.pic_init_qp_minus26 = -27;
+	bound_check(&sps, &pedge, "initial quantizer");
+	pedge.pic_init_qp_minus26 = 26;
+	bound_check(&sps, &pedge, "initial quantizer");
+
+	/* The chroma offsets -12 and 12 taken, -13 and 13 refused, each of the two. */
+	pedge = pps;
+	pedge.chroma_qp_index_offset = -12;
+	pedge.second_chroma_qp_index_offset = 12;
+	bound_check(&sps, &pedge, NULL);
+	pedge.chroma_qp_index_offset = -13;
+	bound_check(&sps, &pedge, "chroma quantizer");
+	pedge.chroma_qp_index_offset = 12;
+	pedge.second_chroma_qp_index_offset = 13;
+	bound_check(&sps, &pedge, "chroma quantizer");
+	pedge.second_chroma_qp_index_offset = -13;
+	bound_check(&sps, &pedge, "chroma quantizer");
+
+	/* Every bound held. */
+	printf("host-mfx-avc: set bounds checked\n");
 }

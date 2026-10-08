@@ -63,7 +63,6 @@
 #define I915_VIDEO_MAX_DPB_SLOTS	17U
 #define I915_VIDEO_MAX_REFERENCES	16U
 #define I915_VIDEO_MAX_EXTENT		4096U
-#define I915_VIDEO_MAX_FRAME_MBS	36864U
 #define I915_VIDEO_MB			16U
 
 /* The most slices of a picture the decoder takes (N4), and of slots one begin binds. */
@@ -385,7 +384,6 @@ static const struct i915_video_slot_info *i915_video_begin_slot(const struct i91
 static int i915_video_begin_picture(const struct i915_video_command *begin, const struct i915_video_resource *picture);
 static int i915_video_same_picture(const struct i915_video_resource *first, const struct i915_video_resource *second);
 static const char *i915_video_check(struct i915_render_session *session, const struct i915_video_command *command, const struct i915_video_command *begin, struct i915_video_session *video, struct i915_video_mfx_decode *decode);
-static const char *i915_video_check_parameters(const struct i915_video_sps *sps, const struct i915_video_pps *pps);
 static const char *i915_video_check_slices(struct i915_render_session *session, const struct i915_video_command *command, struct i915_video_session *video, struct i915_video_mfx_decode *decode);
 static const char *i915_video_check_picture(struct i915_render_session *session, const struct i915_video_resource *picture, const struct i915_video_sps *sps, const struct i915_gfx_image *reference);
 static const char *i915_video_check_binds(struct i915_render_session *session, const struct i915_video_session *video);
@@ -623,6 +621,16 @@ drv_i915_video_submit(
 	state = drv_i915_worker_video_state(session->vk->i915);
 	if (state != 0)
 		return (uint32_t)VK_ERROR_DEVICE_LOST;
+
+	/*
+	 * A session quarantined by a hang of its own is lost: it decodes
+	 * nothing more, so one program cannot spend the device's engine resets
+	 * (ws083 R-S3).
+	 */
+	if (session->gpu->quarantined != 0U) {
+		kern_logf("i915: video: submission refused: the session is quarantined after a hang\n");
+		return (uint32_t)VK_ERROR_DEVICE_LOST;
+	}
 
 	/* Checks and simulates the whole submission before anything runs. */
 	error = i915_video_simulate(session, lists, counts, list_count, 0);
@@ -994,9 +1002,11 @@ i915_video_session_create(
 		result = I915_VIDEO_ERROR_STD_VERSION;
 	}
 
-	/* A hung video engine takes no new session. */
+	/* A hung video engine takes no new session, nor does a session quarantined by a hang of its own (ws083 R-S3). */
 	state = drv_i915_worker_video_state(session->vk->i915);
 	if (result == 0 && state != 0)
+		result = VK_ERROR_INITIALIZATION_FAILED;
+	if (result == 0 && session->gpu->quarantined != 0U)
 		result = VK_ERROR_INITIALIZATION_FAILED;
 
 	/* A refused session replies its reason only. */
@@ -2720,7 +2730,7 @@ i915_video_check(
 	sps = parameters->sps[pps->sps_id];
 
 	/* 2 and 4: the sets' values must be ones the decoder takes. */
-	reason = i915_video_check_parameters(sps, pps);
+	reason = drv_i915_video_mfx_check_sets(sps, pps);
 	if (reason != NULL)
 		return reason;
 
@@ -2764,52 +2774,6 @@ i915_video_check(
 	return NULL;
 }
 
-/* Checks the values of a picture's sequence and picture sets (design §6.6, items 2 and 4). */
-static const char *
-i915_video_check_parameters(
-	const struct i915_video_sps *sps,
-	const struct i915_video_pps *pps)
-{
-	uint32_t width;
-	uint32_t height;
-
-	/* 8-bit 4:2:0 frames only. */
-	if (sps->chroma_format_idc != 1U)
-		return "chroma format is not 4:2:0";
-	if (sps->bit_depth_luma_minus8 != 0U || sps->bit_depth_chroma_minus8 != 0U)
-		return "bit depth is not 8";
-	if ((sps->flags & I915_VIDEO_SPS_FRAME_MBS_ONLY) == 0U)
-		return "not frames only";
-
-	/* The numbering the decoder can follow. */
-	if (sps->pic_order_cnt_type > 2U)
-		return "picture order count type past 2";
-	if (sps->log2_max_frame_num_minus4 > 12U || sps->log2_max_pic_order_cnt_lsb_minus4 > 12U)
-		return "frame or order count width past 16 bits";
-
-	/* At most 36864 macroblocks (level 5.1's frame size, the 16-bit Frame Size field). */
-	width = sps->pic_width_in_mbs_minus1 + 1U;
-	height = sps->pic_height_in_map_units_minus1 + 1U;
-	if (width > I915_VIDEO_MAX_EXTENT / I915_VIDEO_MB || height > I915_VIDEO_MAX_EXTENT / I915_VIDEO_MB)
-		return "picture wider or taller than 4096";
-	if (width * height > I915_VIDEO_MAX_FRAME_MBS)
-		return "picture larger than 36864 macroblocks";
-
-	/* The picture set's ranges. */
-	if (pps->num_ref_idx_l0_default_active_minus1 > 31U || pps->num_ref_idx_l1_default_active_minus1 > 31U)
-		return "reference index count past 32";
-	if (pps->weighted_bipred_idc > 2U)
-		return "weighted bi-prediction mode past 2";
-	if (pps->pic_init_qp_minus26 < -26 || pps->pic_init_qp_minus26 > 25)
-		return "initial quantizer out of range";
-	if (pps->chroma_qp_index_offset < -12 || pps->chroma_qp_index_offset > 12 ||
-	    pps->second_chroma_qp_index_offset < -12 || pps->second_chroma_qp_index_offset > 12)
-		return "chroma quantizer offset out of range";
-
-	/* Succeeded: the decoder takes the values. */
-	return NULL;
-}
-
 /*
  * Checks a decode's slices (design §6.6, items 5, 8 and 9): one to 256 of
  * them, strictly increasing offsets at least four bytes apart, inside the
@@ -2817,7 +2781,9 @@ i915_video_check_parameters(
  * start code (three or four bytes) in its first four bytes.  Each slice's
  * bounds go into the session's scratch, and the bitstream's addresses into
  * `decode`: the page the range starts in, the bytes into that page, and
- * the end of the buffer's bound range.
+ * the end of the buffer's bound range rounded up to its page (the MFX's
+ * upper bound is a 4 KiB-aligned address, ws083 R-S1; the memory is bound
+ * in whole pages, so the rest of that page is the buffer's memory).
  */
 static const char *
 i915_video_check_slices(
@@ -2886,7 +2852,7 @@ i915_video_check_slices(
 	start = buffer_va + command->offset;
 	decode->bitstream_base = start & ~(uint64_t)(I915_VIDEO_ALIGN - 1U);
 	decode->skew = (uint32_t)(start - decode->bitstream_base);
-	decode->bitstream_end = buffer_va + buffer->size;
+	decode->bitstream_end = (buffer_va + buffer->size + I915_VIDEO_ALIGN - 1U) & ~(uint64_t)(I915_VIDEO_ALIGN - 1U);
 
 	/* The slices, from the session's scratch. */
 	decode->slice_count = command->slice_count;
@@ -3033,7 +2999,16 @@ i915_video_run(
 	video->cursor.count = 0U;
 	video->cursor.overflow = 0;
 
-	/* A decode that hung or failed quarantines the session; the device's video was reset or stopped. */
+	/*
+	 * A decode that hung or failed quarantines the session; the device's
+	 * video was reset or stopped.  A video engine stopped before this
+	 * request (ECANCELED: nothing ran) loses the submission without
+	 * quarantining a session that did not hang it (ws083 R-S2).
+	 */
+	if (error == ECANCELED) {
+		kern_logf("i915: video: the video engine is stopped; the decode did not run\n");
+		return EIO;
+	}
 	if (error == ETIMEDOUT || error == EIO) {
 		device = session->vk->i915;
 		irq = spin_lock_irqsave(&device->irq_lock);
