@@ -3,7 +3,7 @@
 # ws177-p021: 音楽の準正常系の 2 — 再生の失敗と key（案 M）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 夜 P2 q903 の 2。実装・host PASS、T1 の依頼を Q1 へ送付、test-wait の ID は Q1 が割当）
+Status: test-wait（T1-450、2026-10-08 夜 Q1）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q903（P2、2026-10-08 夜、承認済み）

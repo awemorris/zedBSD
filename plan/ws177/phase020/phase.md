@@ -3,7 +3,7 @@
 # ws177-p020: 音楽の準正常系の 1 — collection と cover（案 M）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 夜 P2 q903 の 1）
+Status: test-wait（T1-450、2026-10-08 夜 Q1）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q903（P2、2026-10-08 夜、承認済み）
