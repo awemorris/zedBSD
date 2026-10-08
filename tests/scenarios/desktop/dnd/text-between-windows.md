@@ -1,7 +1,7 @@
 ---
 id: desktop.dnd.text-between-windows
 title: Text Editor の選択を別の窓へ drag すると、そこに文字が入り、印が「コピー可」になる
-status: draft
+status: active
 areas: [compositor, dnd, textedit, terminal]
 paths: [userland/desktop/wayland/data.c, userland/desktop/wayland/dnd-state.c, userland/desktop/libkeiland/ui/clipboard.c, userland/desktop/textedit/]
 machine: either

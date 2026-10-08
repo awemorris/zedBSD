@@ -1,7 +1,7 @@
 ---
 id: desktop.dnd.dock-spring
 title: drag を bar の app の icon の上で止めると、その app の窓が前に出て、そこへ落とせる
-status: draft
+status: active
 areas: [compositor, dnd, bar]
 paths: [userland/desktop/wayland/apps-bar.c, userland/desktop/wayland/data.c, userland/desktop/wayland/seat.c]
 machine: either

@@ -1,7 +1,7 @@
 ---
 id: apps.browser.image-drag
 title: Browser の画像を Notes と Text Editor へ drag すると、画像と画像の URL が渡る
-status: draft
+status: active
 areas: [browser, libbrowser, dnd]
 paths: [userland/desktop/browser/shell/shell.c, userland/desktop/libbrowser/page/link.c, userland/desktop/libbrowser/view/view.c, userland/desktop/include/browser/browser.h]
 machine: either

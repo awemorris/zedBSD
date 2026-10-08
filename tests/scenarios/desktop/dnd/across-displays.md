@@ -1,7 +1,7 @@
 ---
 id: desktop.dnd.across-displays
 title: drag は画面をまたいで別の画面の窓へ落とせる
-status: draft
+status: active
 areas: [compositor, dnd, displays]
 paths: [userland/desktop/wayland/data.c, userland/desktop/wayland/heads.c, userland/desktop/wayland/compose.c]
 machine: either
