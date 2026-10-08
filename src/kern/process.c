@@ -1421,6 +1421,7 @@ fork_process(
 	kern_memcpy(child->command, parent->command, sizeof(child->command));
 	kern_memcpy(child->command_initial, parent->command_initial,
 	    sizeof(child->command_initial));
+	kern_memcpy(child->arguments, parent->arguments, sizeof(child->arguments));
 
 	/* Forks the task and thread, then publishes and starts the child. */
 	task = hal_task_fork_current(child->vmspace->space, 0);
