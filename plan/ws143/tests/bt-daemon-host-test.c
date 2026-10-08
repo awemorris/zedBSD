@@ -23,6 +23,10 @@
  *            allowed, a Secure Send refused, a timeout, a stray answer, a
  *            node that goes, a hardware error, a bootloader path left on
  *   fuzz     random and mutated bytes into every parser (fixed seed)
+ *   real     with the intelbt-firmware package's verified cache (the
+ *            second argument; ws143-p003 i02): each real .sfi file's plan
+ *            under both engines, and a scripted bootloader loaded with it
+ *            and its .ddc, every fragment checked against the plan
  *
  *   plan/ws143/tests/bt-daemon-host-test.sh
  */
@@ -68,6 +72,13 @@ struct fake {
 	const uint8_t *file;
 	size_t file_length;
 	size_t file_offset;
+	int custom_version;
+	uint32_t cnvi_top;
+	uint32_t cnvr_top;
+	uint32_t cnvi_bt;
+	uint8_t sbe_type;
+	const struct btd_intel_fragment *plan;
+	size_t plan_count;
 	unsigned fragments;
 	unsigned fragment_mismatch;
 	unsigned ddc_records;
@@ -90,6 +101,11 @@ static void test_session_plain(void);
 static void test_session_intel(void);
 static void test_session_failures(void);
 static void test_fuzz(void);
+static void test_real_firmware(const char *folder);
+static void test_real_plan(const char *name, const uint8_t *file, size_t length, uint8_t sbe_type, struct btd_intel_plan *plan);
+static void test_real_load(const char *folder, const char *name, uint32_t cnvi_top, uint32_t cnvr_top);
+static uint8_t *read_whole(const char *path, size_t *length);
+static void put_le32(uint8_t *at, uint32_t value);
 static size_t sfi_command(uint8_t *at, uint16_t opcode, size_t parameters, uint8_t fill);
 static size_t make_sfi(uint8_t *file, size_t size, int ecdsa);
 static void test_ddc(void);
@@ -101,9 +117,16 @@ static void fake_complete(struct fake *fake, uint16_t opcode, const uint8_t *ret
 static void fake_vendor(struct fake *fake, uint8_t code);
 static int fake_control(void *context, unsigned long request, void *argument);
 static int fake_saw(const struct fake *fake, uint16_t opcode);
+static int fake_planned(const struct fake *fake, uint8_t type, const uint8_t *data, size_t length);
 
 /* The synthetic firmware's folder (made under the build folder by the script). */
 static const char *firmware_folder;
+
+/*
+ * The intelbt-firmware package's verified cache, read only; NULL when the
+ * script found none, and the real files' tests are passed over.
+ */
+static const char *real_folder;
 
 /*
  * Runs every part; the exit status says whether every check held.
@@ -113,10 +136,13 @@ main(
 	int argc,
 	char **argv)
 {
-	/* The firmware folder the script made. */
+	/* The firmware folder the script made, and the package's cache when given. */
 	firmware_folder = "build/tmp";
+	real_folder = NULL;
 	if (argc > 1)
 		firmware_folder = argv[1];
+	if (argc > 2)
+		real_folder = argv[2];
 
 	/* The parts. */
 	test_hci();
@@ -129,6 +155,13 @@ main(
 	test_session_intel();
 	test_session_failures();
 	test_fuzz();
+
+	/* The real files, when the package's cache is at hand. */
+	if (real_folder != NULL) {
+		test_real_firmware(real_folder);
+	} else {
+		printf("bt-daemon-host-test: the real firmware files skipped (no cache given)\n");
+	}
 
 	/* The verdict. */
 	if (failures != 0U) {
@@ -1000,6 +1033,8 @@ fake_run(
 	size_t length;
 	size_t data;
 	uint8_t status;
+	unsigned last;
+	int recorded;
 	int differs;
 
 	/* Plays until the session's end closes. */
@@ -1012,7 +1047,12 @@ fake_run(
 		if (packet[0] != 0x01U || got < 4)
 			continue;
 		opcode = (uint16_t)(packet[1] | (packet[2] << 8));
-		if (fake->opcode_count < 256U)
+
+		/* The commands seen, but not a real file's thousands of fragments (the plan counts those). */
+		recorded = 1;
+		if (fake->plan != NULL && opcode == BTD_INTEL_SECURE_SEND)
+			recorded = 0;
+		if (recorded && fake->opcode_count < 256U)
 			fake->opcodes[fake->opcode_count++] = opcode;
 
 		/* The node goes. */
@@ -1028,10 +1068,17 @@ fake_run(
 		/* Each command's answer. */
 		switch (opcode) {
 		case BTD_INTEL_READ_VERSION:
-			/* The TLVs: ids, variant 0x17, the image, limited CCE 0, ECDSA. */
+			/* The TLVs: ids, variant 0x17 (or the test's ids, variant and engine), the image, limited CCE 0, ECDSA. */
 			length = 0U;
 			returned[length++] = 0x00U;
 			memcpy(returned + length, "\x10\x04\x67\x45\x23\x01\x11\x04\x00\x0a\x40\x00\x12\x04\x00\x00\x17\x00", 18U);
+			if (fake->custom_version) {
+				put_le32(returned + length + 2U, fake->cnvi_top);
+				put_le32(returned + length + 8U, fake->cnvr_top);
+				put_le32(returned + length + 14U, fake->cnvi_bt);
+			}
+
+			/* The image type: a bootloader until the boot. */
 			length += 18U;
 			returned[length++] = 0x1cU;
 			returned[length++] = 1U;
@@ -1040,24 +1087,37 @@ fake_run(
 				returned[length] = BTD_INTEL_IMAGE_BOOTLOADER;
 			length++;
 			memcpy(returned + length, "\x2e\x01\x00\x2f\x01\x01", 6U);
+			if (fake->custom_version)
+				returned[length + 5U] = fake->sbe_type;
 			length += 6U;
 			fake_complete(fake, opcode, returned, length);
 			break;
 		case BTD_INTEL_SECURE_SEND:
-			/* A fragment: its bytes must be the file's at the planned place. */
+			/* A fragment: its type and bytes must be the planned ones (the test's plan, or the synthetic file's order). */
 			data = (size_t)packet[3] - 1U;
-			if (fake->file_offset == 0U && packet[4] == 0x00U)
-				fake->file_offset = 644U;
 			differs = 1;
-			if (fake->file != NULL && fake->file_offset + data <= fake->file_length)
-				differs = memcmp(packet + 5, fake->file + fake->file_offset, data);
+			if (fake->plan != NULL) {
+				differs = fake_planned(fake, packet[4], packet + 5, data);
+			} else {
+				if (fake->file_offset == 0U && packet[4] == 0x00U)
+					fake->file_offset = 644U;
+				if (fake->file != NULL && fake->file_offset + data <= fake->file_length)
+					differs = memcmp(packet + 5, fake->file + fake->file_offset, data);
+				fake->file_offset += data;
+			}
+
+			/* Counted, and answered with the status asked for. */
 			if (differs != 0)
 				fake->fragment_mismatch++;
-			fake->file_offset += data;
 			fake->fragments++;
 			status = (uint8_t)fake->secure_send_status;
 			fake_complete(fake, opcode, &status, 1U);
-			if (fake->fragments == 7U)
+
+			/* The download's end after the last fragment. */
+			last = 7U;
+			if (fake->plan != NULL)
+				last = (unsigned)fake->plan_count;
+			if (fake->fragments == last)
 				fake_vendor(fake, BTD_INTEL_EVENT_DOWNLOADED);
 			break;
 		case BTD_INTEL_RESET:
@@ -1224,4 +1284,262 @@ fake_saw(
 
 	/* Not seen. */
 	return 0;
+}
+
+/* Tells whether a Secure Send fragment is the next one the test's plan holds: its type, length and the file's bytes. */
+static int
+fake_planned(
+	const struct fake *fake,
+	uint8_t type,
+	const uint8_t *data,
+	size_t length)
+{
+	const struct btd_intel_fragment *expected;
+	int differs;
+
+	/* A fragment past the plan's end is wrong. */
+	if (fake->fragments >= fake->plan_count)
+		return 1;
+
+	/* The planned fragment's type and length. */
+	expected = &fake->plan[fake->fragments];
+	if (type != expected->type)
+		return 1;
+	if (length != expected->length)
+		return 1;
+
+	/* The file's bytes at the planned place. */
+	differs = memcmp(data, fake->file + expected->offset, length);
+	if (differs != 0)
+		return 1;
+
+	/* Succeeded: the fragment is the planned one. */
+	return 0;
+}
+
+/*
+ * The intelbt-firmware package's real files: each .sfi planned under both
+ * secure-boot engines with a variant past 0x17 (the AX211's Solar), then a
+ * scripted bootloader of each file's ids loaded with it and its .ddc.
+ */
+static void
+test_real_firmware(
+	const char *folder)
+{
+	/* The three pairs of the Solar block, by their CNVi and CNVR ids. */
+	test_real_load(folder, "ibt-0040-0041", 0x00000400U, 0x00000410U);
+	test_real_load(folder, "ibt-0041-0041", 0x00000410U, 0x00000410U);
+	test_real_load(folder, "ibt-1040-0041", 0x00000401U, 0x00000410U);
+}
+
+/*
+ * Checks one real file's plan: the header's fragments, then command
+ * fragments that follow each other from byte 964 without a gap, each of
+ * 252 bytes or a multiple of 4, the boot parameter found, and what is
+ * left unsent at the end shorter than one fragment.
+ */
+static void
+test_real_plan(
+	const char *name,
+	const uint8_t *file,
+	size_t length,
+	uint8_t sbe_type,
+	struct btd_intel_plan *plan)
+{
+	struct btd_intel_version version;
+	const struct btd_intel_fragment *fragment;
+	const char *reason;
+	size_t next;
+	size_t index;
+	size_t header;
+	unsigned wrong;
+	int error;
+
+	/* A bootloader of variant 0x18 with the engine asked for. */
+	memset(&version, 0, sizeof(version));
+	version.have_image_type = 1;
+	version.image_type = BTD_INTEL_IMAGE_BOOTLOADER;
+	version.have_cnvi_bt = 1;
+	version.cnvi_bt = 0x00180000U;
+	version.have_sbe_type = 1;
+	version.sbe_type = sbe_type;
+	version.have_limited_cce = 1;
+
+	/* The plan of the file (the reason is NULL on success). */
+	reason = NULL;
+	error = btd_intel_plan_make(file, length, &version, plan, &reason);
+	if (reason == NULL)
+		reason = "-";
+	expect(error == 0 && plan->have_boot_parameter, "real: %s.sfi is planned under engine %u (%s)", name, sbe_type, reason);
+	if (error != 0)
+		return;
+
+	/* The header's three parts come first (CSS, key, signature; RSA splits the key and the signature in two). */
+	header = 3U;
+	if (sbe_type == 0U)
+		header = 5U;
+	expect(plan->count > header && plan->fragments[0].type == BTD_INTEL_FRAGMENT_CSS,
+	       "real: %s.sfi's header fragments (%zu in all)", name, plan->count);
+
+	/* The commands' fragments, one after another from the end of both headers. */
+	next = 964U;
+	wrong = 0U;
+	for (index = header; index < plan->count; index++) {
+		fragment = &plan->fragments[index];
+
+		/* A command fragment, just where the last one ended. */
+		if (fragment->type != BTD_INTEL_FRAGMENT_COMMANDS || fragment->offset != next)
+			wrong++;
+
+		/* A full fragment, or what waited at a command's end in a multiple of 4. */
+		if (fragment->length != BTD_INTEL_FRAGMENT_MAX && (fragment->length % 4U) != 0U)
+			wrong++;
+
+		/* Where the next one must start. */
+		next = fragment->offset + fragment->length;
+	}
+
+	/* No fragment out of place, and the whole file sent but less than one fragment. */
+	expect(wrong == 0U, "real: %s.sfi's command fragments follow each other (%u wrong)", name, wrong);
+	expect(next <= length && length - next < BTD_INTEL_FRAGMENT_MAX,
+	       "real: %s.sfi is sent up to %zu of %zu bytes", name, next, length);
+
+	/* The plan's shape for the log. */
+	printf("bt-daemon-host-test: real %s.sfi engine %u: %zu fragments, %zu of %zu bytes sent\n", name, sbe_type, plan->count,
+	       next, length);
+}
+
+/* Plans one real .sfi under both engines, then loads it and its .ddc into a scripted bootloader of its ids. */
+static void
+test_real_load(
+	const char *folder,
+	const char *name,
+	uint32_t cnvi_top,
+	uint32_t cnvr_top)
+{
+	struct btd_intel_fragment *fragments;
+	struct btd_intel_plan plan;
+	struct btd_session session;
+	struct fake fake;
+	pthread_t thread;
+	uint8_t *file;
+	char path[512];
+	size_t length;
+	size_t capacity;
+	int error;
+
+	/* The file, read whole. */
+	(void)snprintf(path, sizeof(path), "%s/%s.sfi", folder, name);
+	file = read_whole(path, &length);
+	expect(file != NULL, "real: %s is read", path);
+	if (file == NULL)
+		return;
+
+	/* Room for the plan's fragments. */
+	capacity = btd_intel_plan_capacity(length);
+	fragments = calloc(capacity, sizeof(*fragments));
+	if (fragments == NULL) {
+		perror("calloc");
+		exit(2);
+	}
+
+	/* The plan under RSA, then under ECDSA (kept for the load). */
+	plan.fragments = fragments;
+	plan.capacity = capacity;
+	test_real_plan(name, file, length, 0U, &plan);
+	test_real_plan(name, file, length, 1U, &plan);
+
+	/* A bootloader of the file's ids, variant 0x18, ECDSA: every fragment as planned, the boot, the .ddc's two records. */
+	memset(&fake, 0, sizeof(fake));
+	fake.intel = 1;
+	fake.bootloader = 1;
+	fake.info.vendor = 0x8087U;
+	fake.custom_version = 1;
+	fake.cnvi_top = cnvi_top;
+	fake.cnvr_top = cnvr_top;
+	fake.cnvi_bt = 0x00180000U;
+	fake.sbe_type = 1U;
+	fake.file = file;
+	fake.file_length = length;
+	fake.plan = plan.fragments;
+	fake.plan_count = plan.count;
+	fake_start(&fake, &session, &thread);
+	session.firmware_folder = folder;
+	error = btd_session_start(&session);
+	expect(error == 0 && session.state == BTD_STATE_READY && session.firmware_loaded,
+	       "real: %s is loaded (%d %s %s)", name, error, btd_state_name(session.state), session.reason);
+	expect(fake.fragments == plan.count && fake.fragment_mismatch == 0U,
+	       "real: %s's %zu fragments as planned (%u sent, %u wrong)", name, plan.count, fake.fragments, fake.fragment_mismatch);
+	expect(fake.resets_sent == 1U && fake.ddc_records == 2U && fake_saw(&fake, 0xfc52U),
+	       "real: %s boots once, its .ddc's two records, the event mask (%u %u)", name, fake.resets_sent, fake.ddc_records);
+	fake_stop(&fake, &session, thread);
+
+	/* The file and the plan go. */
+	free(fragments);
+	free(file);
+}
+
+/* Reads a whole file into memory the caller frees; NULL when it cannot be read. */
+static uint8_t *
+read_whole(
+	const char *path,
+	size_t *length)
+{
+	struct stat status;
+	uint8_t *bytes;
+	ssize_t got;
+	size_t done;
+	int descriptor;
+	int result;
+
+	/* The file and its size. */
+	descriptor = open(path, O_RDONLY);
+	if (descriptor < 0)
+		return NULL;
+
+	/* A file with something in it. */
+	result = fstat(descriptor, &status);
+	if (result != 0 || status.st_size <= 0) {
+		(void)close(descriptor);
+		return NULL;
+	}
+
+	/* Room for all of it. */
+	bytes = malloc((size_t)status.st_size);
+	if (bytes == NULL) {
+		(void)close(descriptor);
+		return NULL;
+	}
+
+	/* Every byte. */
+	done = 0U;
+	while (done < (size_t)status.st_size) {
+		got = read(descriptor, bytes + done, (size_t)status.st_size - done);
+		if (got <= 0) {
+			free(bytes);
+			(void)close(descriptor);
+			return NULL;
+		}
+
+		/* The part read. */
+		done += (size_t)got;
+	}
+
+	/* Succeeded: the file's bytes. */
+	(void)close(descriptor);
+	*length = done;
+	return bytes;
+}
+
+/* Writes a little-endian 32-bit value. */
+static void
+put_le32(
+	uint8_t *at,
+	uint32_t value)
+{
+	/* The four bytes, least significant first. */
+	at[0] = (uint8_t)(value & 0xffU);
+	at[1] = (uint8_t)((value >> 8) & 0xffU);
+	at[2] = (uint8_t)((value >> 16) & 0xffU);
+	at[3] = (uint8_t)((value >> 24) & 0xffU);
 }

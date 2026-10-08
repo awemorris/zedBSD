@@ -4,7 +4,7 @@
 
 Phase ID: `ws143-p003`
 Parent: [WS143](../ws.md)
-Status: in-progress（2026-10-08 q902 P1 の照合: i01（intelbt 以外）は T1-402 で 2 回目 PASS（1 回目 FAIL）→ i01 は Q1 の判定待ち。i02（intelbt の package、5330 の firmware の load と scan、D13）は未着手）（旧: in-progress（q878、P2、2026-10-08 夜。attempt i01 は intelbt の package 以外））
+Status: in-progress（2026-10-08 夜 q907 P1: i02 の host でできる分（intelbt の package と、実物の .sfi/.ddc での計画・load の host 試験）を実装、host 試験 PASS。5330 の実機の load と scan は Q1 の手配待ち。 2026-10-08 q902 P1 の照合: i01（intelbt 以外）は T1-402 で 2 回目 PASS（1 回目 FAIL）→ i01 は Q1 の判定待ち。i02（intelbt の package、5330 の firmware の load と scan、D13）は未着手）（旧: in-progress（q878、P2、2026-10-08 夜。attempt i01 は intelbt の package 以外））
 Phase disposition: normal
 Queue: q878-i01（P2、Q1 の投入「intelbt の firmware の id は T1-378（5330 が Linux の時）待ちなので、それ以外を。loopback（T1-384 の物）で QEMU で確かめられる形に」）
 
@@ -223,3 +223,50 @@ S12 fuzz と境界の試験、S13 必須の TLV、S14 loopback の Command Statu
 | `python3 plan/tools/style-check.py`（bluetoothd の全 file、bt、loopback、bt-probe、host 試験） | 0 |
 
 未実施: QEMU の `bt-daemon-p003.sh`（T1 に依頼）、i02 の全部（intelbt の package、5330 の実機）。
+
+## i02 の host でできる分（2026-10-08 夜、q907、P1）
+
+Q1 の投入（q907 の 1）: 「5330 の AX211 の Bluetooth（USB 8087:0033）の Intel の firmware の optional の package `intelbt`（userland/packages の
+規則、linux-firmware の該当の file の取得と検証と license）と、bluetoothd の firmware の load（bootloader の経路、design §3）を host 試験まで。
+5330 での確かめは後で Q1 が手配。」
+
+### 実装
+
+- `userland/firmware/intelbt/`（package `intelbt-firmware`、既定 off、amd64）: `Makefile`・`intelbt-firmware.manifest`。intelax211・i915 と同じ形
+  （linux-firmware の tag 20260410 の commit dc85cced に固定、production は command line の置き換えを受けない、fixture の goal は単独だけ、
+  cache は 8 file の型・大きさ・SHA-256 を全部確かめてから 1 回の rename で公開、壊れた cache は更新せず失敗）。
+  - 取得: WHENCE の Solar の block（`BT_Solar_REL82122_23.50.26053.82122`）全体: `intel/ibt-{0040,0041,1040}-0041.{sfi,ddc}` の 6 file と
+    `LICENCE.ibt_firmware`・`WHENCE`。
+  - install: `/lib/firmware/intel/` に 6 file と、WHENCE の Link 8 個（`ibt-{0040,1040}-{4150,1050}.{sfi,ddc}`）を**同じ cache file の複写**で
+    （design §3 は「package の中の link」としたが、image の `--file` は通常の file しか作れない。.sfi の重複は 4 個で約 2.9 MB）。
+    `/usr/share/licenses/intelbt-firmware/` に licence と WHENCE、`/usr/share/zedbsd/packages/intelbt-firmware.manifest`。
+  - license の監査: `LICENCE.ibt_firmware`（Intel 2014）は変更しない binary の再配布を許し、notice と disclaimer の同梱、reverse engineering・
+    decompilation・disassembly の禁止、OSI の OS との組み合わせの特許の許諾。package は binary を変えず、licence を同梱する。bluetoothd は
+    .sfi の HCI command の枠（opcode・長さ）と 0xFC0E の boot の parameter だけを読む（design §3 のとおり、firmware の中身は解釈しない）。
+    `tools/release/license-components.json` に `intelbt-firmware` の行（`LicenseRef-ibt-firmware`）。
+- 登録: 最上位の `Makefile` の config の要らない goal に `intelbt-firmware-fixture-cache`、`userland/firmware/README.md`。
+- 試験: `plan/ws143/tests/intelbt-firmware-package-test.sh`（新、host、network なし。fixture の取得、offline の再利用、無い cache・壊れた
+  file（大きさ違い・同じ大きさで中身違い）・余計な file・file の symlink・cache の symlink・途中で失敗した取得、既定 off、
+  command line の置き換えの拒否、install の 17 の写像と複写の元が WHENCE の Link の先と一致、検証済みの WHENCE の Solar の block が
+  File 6・Link 8 で package と一致）。出力は `build/tmp/intelbt-firmware-test`（fresh_out、消すのは Q1）。
+- `plan/ws143/tests/bt-daemon-host-test.{c,sh}`: package の cache（`build/sources/firmware/intelbt/<rev>`、`INTELBT_CACHE` で変更）が
+  あれば、実物の 3 つの .sfi を両方の engine（RSA・ECDSA、variant 0x18）で計画し（header の断片の後、byte 964 から隙間なく続く command の
+  断片、各 252 か 4 の倍数、boot の parameter あり）、各 file の id（CNVi top 0x400・0x410・0x401、CNVR top 0x410）を返す偽の bootloader に
+  session で load する（全ての断片が計画どおりの型・長さ・file の bytes、Reset 1 回、実物の .ddc の 2 record、0xFC52）。偽の controller に
+  ids・variant・engine と計画の照合を足した。
+
+### 確認（host、2026-10-08 夜）
+
+| コマンド | 結果 |
+| --- | --- |
+| `make -C userland/firmware/intelbt intelbt-firmware`（本物の取得、worktree の `build/sources/firmware/intelbt/dc85cced…`） | rc 0、8 file を検証して公開。2 回目は offline の再検証で rc 0 |
+| `bash plan/ws143/tests/intelbt-firmware-package-test.sh` | `intelbt firmware package: WHENCE Solar block matches`、`PASS` |
+| `OUT=build/p1-bt-host sh plan/ws143/tests/bt-daemon-host-test.sh`（ASan・UBSan） | bt-daemon `PASS (126 checks)`（実物: 0040-0041 は RSA 2911・ECDSA 2909 断片、0041-0041 は 2879・2877、1040-0041 は 2911・2909、3 つとも file の全 byte を送り残り 0）、pair 161・link 56・hid 75・hidhost 96・hog 24 の全て PASS |
+| `python3 plan/tools/style-check.py plan/ws143/tests/bt-daemon-host-test.c` | 0 |
+
+実物の header: 3 つの .sfi とも offset 644 が 0x06、offset 652 の CSS の版が 0x00020000（variant 0x17 以上の形）。.ddc は 9 byte で 2 record
+（4 byte と 5 byte）。
+
+未実施: QEMU（image に package を入れた時の install の形と `_bluetooth` が読めること。q907 の 2 の UAT の image の T1 依頼と一緒）、
+5330 の実機の load と scan（D13 の blacklist、Q1 の手配）。5330 の CNVi・CNVR の id と variant は未確認のまま（T1-378）。Solar の
+3 つの id 以外なら `firmware-needed`（file の名前を出す）になる。

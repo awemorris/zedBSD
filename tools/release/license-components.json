@@ -348,6 +348,20 @@
    "note": ""
   },
   {
+   "id": "intelbt-firmware",
+   "name": "Intel Bluetooth firmware (AX211, Solar)",
+   "when": "program:intelbt-firmware",
+   "license": "LicenseRef-ibt-firmware (redistribution allowed)",
+   "upstream": "linux-firmware",
+   "version": "",
+   "notices": [
+    "/usr/share/licenses/intelbt-firmware/LICENCE.ibt_firmware",
+    "/usr/share/licenses/intelbt-firmware/WHENCE"
+   ],
+   "paths": [],
+   "note": "Unmodified binaries only; the licence forbids reverse engineering."
+  },
+  {
    "id": "rtl8822b-firmware",
    "name": "Realtek RTL8822B firmware",
    "when": "program:rtl8822b-firmware",

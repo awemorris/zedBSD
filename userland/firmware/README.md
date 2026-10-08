@@ -9,8 +9,8 @@ explicitly selected, verifies all declared bytes before publishing its cache,
 and installs the firmware below `/lib/firmware` together with its applicable
 license, WHENCE record when required, and provenance manifest.
 
-The entries are `rtl8822b/`, `intelax211/`, and `i915/`; future RTL8822C
-support owns a separate `rtl8822c/` entry. RTL8822B uses its frozen GitHub
+The entries are `rtl8822b/`, `intelax211/`, `intelbt/`, and `i915/`; future
+RTL8822C support owns a separate `rtl8822c/` entry. RTL8822B uses its frozen GitHub
 acquisition mirror. AX211 uses the official `linux-firmware` tag `20260410`
 dereferenced commit and installs the exact `-89.ucode`, PNVM, complete Intel
 license, WHENCE, and manifest. `i915/` (package `i915-firmware`) uses the same
@@ -21,6 +21,15 @@ brought up with, together with the complete `LICENSE.i915`, WHENCE, and
 manifest. `LICENSE.i915` permits redistribution of the unmodified binaries
 only, with its notice, so these bytes belong to this package and not to the
 kernel. Its focused check is
-`plan/ws031/tests/run-i915-firmware-package-test.sh`. Every entry is
+`plan/ws031/tests/run-i915-firmware-package-test.sh`. `intelbt/` (package
+`intelbt-firmware`) uses the same official commit and installs the whole
+Solar block of WHENCE (`BT_Solar_REL82122_23.50.26053.82122`): the three
+`intel/ibt-*-0041.{sfi,ddc}` pairs that bluetoothd loads into an AX211's
+Bluetooth controller, and, as copies of the same verified bytes, the eight
+names WHENCE links to them, because the image builder installs files only.
+`LICENCE.ibt_firmware` permits redistribution of the unmodified binaries
+with its notice and forbids reverse engineering; bluetoothd reads only the
+HCI command frames a `.sfi` file is made of. Its focused check is
+`plan/ws143/tests/intelbt-firmware-package-test.sh`. Every entry is
 default-off, and ordinary builds perform no firmware fetch. This hierarchy
 is package organization, not a common hardware-driver layer.
