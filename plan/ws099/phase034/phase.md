@@ -2,7 +2,7 @@
 # ws099-p034: 上部の system bar のデザインの調整（グループの pill と黒い地）
 
 Parent: [WS099](../ws.md)
-Status: planned（2026-10-06 mock-1 にユーザーが回答、実装してよい）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: 第 1 版は p034b に置き換わり、p034b は T1-228 で cleared）（旧: planned（2026-10-06 mock-1 にユーザーが回答、実装してよい））
 Disposition: normal
 
 ## 由来

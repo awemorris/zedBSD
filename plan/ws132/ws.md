@@ -3,7 +3,7 @@
 # WS132: /dev/system の電源管理と PnP の通知、自動 mount、Files の eject
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q910 P2 の照合: p002〜p005・p009 cleared。p001（設計、D1〜D3）は Q1 の判定、p008（蓋の事象）は実機（蓋の自動の切り替えはベータ3））
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p001 を cleared。2026-10-08 q910 P2 の照合: p002〜p005・p009 cleared。p001（設計、D1〜D3）は Q1 の判定、p008（蓋の事象）は実機（蓋の自動の切り替えはベータ3））
 Primary Milestone: MG006
 Related Milestones: MG003、MG004
 Objectives: O2, O3
@@ -30,7 +30,7 @@ Resume point: p001（設計）を書いた（[phase001](phase001/phase.md)、D1�
 
 | Phase | 内容 | Status | 依存 |
 | --- | --- | --- | --- |
-| [ws132-p001](phase001/phase.md) | 設計 | in-progress（2026-10-05 q707-i01 P1: 設計を書いた、D1〜D3 は人間の判断待ち） | — |
+| [ws132-p001](phase001/phase.md) | 設計 | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: 後続の p002〜p005・p009 が実装・cleared。旧: in-progress（2026-10-05 q707-i01 P1: 設計を書いた、D1〜D3 は人間の判断待ち）） | — |
 | [ws132-p002](phase002/phase.md) | 事象の核（`/dev/system` の購読・read・poll）、UAPI、送り手（ACPI の電源ボタン・蓋・AC・電池、disk、input、USB、network）、`KERN_SYSTEM_GET_POWER` | cleared（2026-10-05 Q1、T1-132） | p001 |
 | [ws132-p003](phase003/phase.md) | Keiland の backend の事象（events-zedbsd.c、Linux・FreeBSD は stub）、compositor の input の探し直しと電池・AC の表示（D1・D2 に依らない分。2026-10-05 Q1 が電源ボタン・蓋の動作を p008 に分けた） | cleared（2026-10-05 Q1、T1-132） | p002 |
 | [ws132-p008](phase008/phase.md) | compositor の電源ボタン・蓋の動作。D1（2026-10-08 置き換え: 電源ボタンは WS182 の電源のメニュー、2026-10-07 ユーザー）: ~~電源ボタンの短押しは dialog 無しで S0i3（WS052 の後）~~。D2: 蓋を閉じたら画面を消して lock、15 分以内に開けたら password 無しで自動の unlock（S0i3 までの間）。蓋の分を先に（q724） | in-progress（2026-10-05 P1 / q724: 蓋の分を実装、build warning 0（zedBSD・Linux）、host 29 checks。QEMU は蓋が無く未実施、実機は UAT。電源ボタンは WS052 の後） | p003 |

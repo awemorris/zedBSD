@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws169 -->
 # WS169: メーラの app と compositor のメールの API
 
-Status: incomplete（2026-10-08 q910 P2 の照合: p002〜p005 cleared（T1-298・302）、p000（mock）は T1-181 の撮影の後に p002 以降で実装され Q1 の判定、p006 は作らない、p007（規約）はベータ3。準正常系は WS177 の案 N）（2026-10-07 q831 で p001〜p005 を実装、T1 の QEMU 待ち。p006 は今回作らない、p007 は規約の見直し（後回し）。2026-10-05 追加。まず UI の mock（p000）を優先、q744。段は未定（ユーザーに確認）、見積もり 6 LW（Q1 の概算: 設計 1・API 1・IMAP/SMTP 2・app 2。Gmail・Outlook は別に））
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p000 を cleared。2026-10-08 q910 P2 の照合: p002〜p005 cleared（T1-298・302）、p000（mock）は T1-181 の撮影の後に p002 以降で実装され Q1 の判定、p006 は作らない、p007（規約）はベータ3。準正常系は WS177 の案 N）（2026-10-07 q831 で p001〜p005 を実装、T1 の QEMU 待ち。p006 は今回作らない、p007 は規約の見直し（後回し）。2026-10-05 追加。まず UI の mock（p000）を優先、q744。段は未定（ユーザーに確認）、見積もり 6 LW（Q1 の概算: 設計 1・API 1・IMAP/SMTP 2・app 2。Gmail・Outlook は別に））
 Master: [master](../master.md)
 Primary Milestone: MG006
 
@@ -33,7 +33,7 @@ Primary Milestone: MG006
 
 | Phase | 内容 | Status | 依存 |
 | --- | --- | --- | --- |
-| p000 | **UI の mock（夕方の UAT にあると嬉しい・必須でない）**: メーラの app の外側だけ。account・folder の一覧、メールの一覧、読む画面、書く画面（送信は「backend が無い」）。data は固定の試験 data。API・backend は作らない | in-progress（q744、P2。実装・host の PNG・build 済み、QEMU は T1 待ち。[phase](phase000/phase.md)） | — |
+| p000 | **UI の mock（夕方の UAT にあると嬉しい・必須でない）**: メーラの app の外側だけ。account・folder の一覧、メールの一覧、読む画面、書く画面（送信は「backend が無い」）。data は固定の試験 data。API・backend は作らない | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-181 の撮影の後、p002〜p005 で実装・cleared。旧: in-progress（q744、P2。実装・host の PNG・build 済み、QEMU は T1 待ち。[phase](phase0…） | — |
 | p001 | 要件と設計（API・許可・backend・app） | cleared（q831、P2、[phase](phase001/phase.md)） | — |
 | p002 | compositor のメールの API と許可（host の試験） | cleared（2026-10-07、T1-298） | p001 |
 | p003 | IMAP4・SMTP の backend | cleared（2026-10-07、T1-298） | p001 |

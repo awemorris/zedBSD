@@ -4,7 +4,7 @@
 
 Phase ID: `ws167-p001`
 Parent: [WS167](../ws.md)
-Status: planning（2026-10-05 P1 generation17、q730。設計の第 1 版。code は §6 のユーザーの判断（license と UAPI の置き場所）の後。2026-10-05 夜: H1〜H3 決定）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: H1〜H3 決定済み、p002 が cleared）（旧: planning（2026-10-05 P1 generation17、q730。設計の第 1 版。code は §6 のユーザーの判断（license と UAPI の置き場所）の後。2026-10-05 夜: H1〜H3 決定））
 Phase disposition: normal
 Queue: q730（ベータ2 の P1 の列の 2 番目）
 

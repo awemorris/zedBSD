@@ -3,7 +3,7 @@
 # WS159: native のタッチパッド（Intel LPSS の I2C・ACPI の I2C-HID・HID の touchpad）と compositor のタッチパッドの層
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q910 P2 の照合: p003・p004 cleared、p001（設計）は Q1 の判定、p002・p006 は実装・host・T1-113 の boot まで（実機の I2C・GPIO の割り込みは WS183 と一緒に 5330）、p005 は実機の UAT。旧: planning）
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p001 を cleared。2026-10-08 q910 P2 の照合: p003・p004 cleared、p001（設計）は Q1 の判定、p002・p006 は実装・host・T1-113 の boot まで（実機の I2C・GPIO の割り込みは WS183 と一緒に 5330）、p005 は実機の UAT。旧: planning）
 Primary Milestone: MG006
 Related Milestones: MG003
 Parent: [Master](../master.md)
@@ -38,7 +38,7 @@ Resume point: p001（設計）から。WS049（ACPI AML）の後（ユーザー�
 
 | Phase | 内容 | Status | 依存 |
 | --- | --- | --- | --- |
-| [ws159-p001](phase001/phase.md) | 設計（LPSS I2C・I2C-HID・HID の digitizer・evdev の MT・PS/2 との切替・compositor の touchpad の層・試験） | in-progress（2026-10-05 q713-i01 P1: 5330 の Linux の採取と設計を書いた、Q1 の確認待ち） | WS049 |
+| [ws159-p001](phase001/phase.md) | 設計（LPSS I2C・I2C-HID・HID の digitizer・evdev の MT・PS/2 との切替・compositor の touchpad の層・試験） | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: Q1 の ACK（2026-10-05）、後続の p003・p004 が cleared。旧: in-progress（2026-10-05 q713-i01 P1: 5330 の Linux の採取と設計を書いた、Q1 の確認待ち）） | WS049 |
 | [ws159-p002](phase002/phase.md) | LPSS の DesignWare I2C の driver と ACPI の I2cSerialBus・GpioInt | in-progress（2026-10-05 q713-i01 P1: 実装・host・build、QEMU と実機の待ち） | p001 |
 | [ws159-p003](phase003/phase.md) | I2C-HID と Precision Touchpad、EVIOCGPROP、input-inject の touchpad | cleared（2026-10-05 Q1、T1-100） | p002 |
 | [ws159-p004](phase004/phase.md) | compositor の touchpad の層（tap・tap-drag・押し込み・2 本指のスクロール） | cleared（2026-10-05 Q1） | p003（host の試験は先に） |

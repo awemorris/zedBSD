@@ -2,7 +2,7 @@
 
 # ws121-p001: browser の `<video>` の再生の要件・設計
 
-Status: in-progress（2026-10-05 夜、P2 g16、q775。設計の第 3 版（review 2 回目の条件 a・b・c・e を反映）。ユーザーの判断 U0〜U7 待ち）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: U0〜U7 は既定で進め、p002・p004〜p006 が実装・cleared）（旧: in-progress（2026-10-05 夜、P2 g16、q775。設計の第 3 版（review 2 回目の条件 a・b・c・e を反映）。ユーザーの判断 U0〜U7 待ち））
 Disposition: normal
 Parent: [WS121](../ws.md)
 Queue: q775（Q1、2026-10-05）

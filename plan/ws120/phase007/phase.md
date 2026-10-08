@@ -3,7 +3,7 @@
 # ws120-p007: 全文規約と回帰
 
 Parent: [WS120](../ws.md)
-Status: planning
+Status: canceled（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: 2026-10-07 の決定（m4a＋libavcodec の add-in、p008・p009）で置き換え）（旧: planning）
 Disposition: normal
 Queue / attempts: none
 Goal: WS の全変更（libkeiland の再生の API、decoder の library、Music、Files の関連付け）を全文規約で見直し、3 OS の build と回帰、制限を整理する。

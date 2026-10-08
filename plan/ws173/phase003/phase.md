@@ -2,7 +2,7 @@
 
 # ws173-p003: AAT の host の道具と AAT の image の config
 
-Status: test-done（2026-10-07 q834 P2: target（QEMU）での確かめは T1 の AAT の実行で済み（T1-200c で注入・撮影・転送・log の待ちが PASS、その後 T1-202c・T1-232・T1-305・T1-315 などで runner と一緒に使われている）。判定は Q1）（旧: in-progress（2026-10-05 夜、host の自己試験まで））
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-200c PASS、その後の AAT の実行で使われている）（旧: test-done（2026-10-07 q834 P2: target（QEMU）での確かめは T1 の AAT の実行で済み（T1-200c で注入・撮影・転送・log の待ちが PASS、その後 T1-202c・T1-232・T1-305・T1-315 などで runner と一緒に使われている）。判定は Q1）（旧: in-progress（2026-10-05 夜、host の自己試験まで）））
 Disposition: normal
 Parent: [WS173](../ws.md)
 Queue: q777（Q1、2026-10-05 夜、最優先）

@@ -3,7 +3,7 @@
 # WS084: i915 の firmware の画面の引き継ぎ（素の実機の UEFI の起動でデスクトップを出す）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q910 P2 の照合: p003（再起動の 10 回）は 5330 の実機、p004 は乖離 1・3 を直すかの Q1 の判断待ち）
+Status: incomplete（2026-10-08 Q1: p004 は今は何もしない。2026-10-08 q910 P2 の照合: p003（再起動の 10 回）は 5330 の実機、p004 は乖離 1・3 を直すかの Q1 の判断待ち）
 Primary Milestone: MG006
 Related Milestones: —
 Objectives: O1

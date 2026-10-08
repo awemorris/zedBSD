@@ -3,7 +3,7 @@
 # WS014: virtio-gpu bring-up
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q910 P2 の照合: p011 は cleared（表を直した）。残りは p004（最終 API と規約の全文、規約はベータ3）と古い設計の p001（planning のまま、Q1 の判定）。実装の残りは無い）
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p001 を cleared。2026-10-08 q910 P2 の照合: p011 は cleared（表を直した）。残りは p004（最終 API と規約の全文、規約はベータ3）と古い設計の p001（planning のまま、Q1 の判定）。実装の残りは無い）
 Primary Milestone: MG006
 Related Milestones: MG003
 Objectives: O2, O4
@@ -30,7 +30,7 @@ i915実機対応、GLES2実装、デスクトップ全体の移植はこの単�
 
 | Combined ID | Phase | Status | Required result |
 | --- | --- | --- | --- |
-| ws014-p001 | [設計判断](https://github.com/awemorris/zedBSD/issues/213) | planning | interface/PCI/所有権の必要判断を供給。未決定を自動clearしない |
+| ws014-p001 | [設計判断](https://github.com/awemorris/zedBSD/issues/213) | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: 後続の p002〜p011 が実装・cleared。旧: planning） | interface/PCI/所有権の必要判断を供給。未決定を自動clearしない |
 | ws014-p002 | [ws014-p002](https://github.com/awemorris/zedBSD/issues/383) | cleared | frameworkのみ |
 | ws014-p003 | [ws014-p003](https://github.com/awemorris/zedBSD/issues/384) | cleared | QEMU＋VenusループとAPI改善 |
 | ws014-p005 | [標準APIの3D shader/API検証](https://github.com/awemorris/zedBSD/issues/387) | cleared | WS030標準library＋q308実測で訂正完了。p004へ引き渡し |

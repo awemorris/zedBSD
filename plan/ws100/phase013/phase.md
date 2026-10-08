@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws100-p013 -->
 # ws100-p013: 音量の slider のドラッグでのフリーズ（BUG-170）と、確認の音を離した時に 1 回にする
 
-Status: in-progress（実装済み・T1 の試験待ち。2026-10-04、P2 generation11）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-087 PASS 3/3）（旧: in-progress（実装済み・T1 の試験待ち。2026-10-04、P2 generation11））
 Disposition: normal
 Parent: [WS100](../ws.md)（Settings の側は WS089 の source。受け入れはこの Phase にまとめる）
 Queue: q683 / q683-i01（P2）。承認: 2026-10-04 user（AML と並走する UAT の Bug、17 時以降に実行）と 17 時の体制の指示（[queue](../../queue.md) の「2026-10-04 17 時以降の予定」）

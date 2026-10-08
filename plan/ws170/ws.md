@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws170 -->
 # WS170: Phone の app（連絡先・SMS/MMS/RCS・VoIP を統合したタイムライン）
 
-Status: incomplete（2026-10-08 q910 P2 の照合: p002〜p004 cleared（T1-298）、p000（mock）は T1-177b の撮影の後に実装され Q1 の判定、p005（規約）はベータ3。準正常系は WS177 の案 P）（2026-10-07 q831 で p001〜p004 を実装、T1 の QEMU 待ち。p005 は規約の見直し（後回し）。2026-10-05 追加。まず UI の mock（p000）を優先、q743。段は未定（ユーザーに確認）。最初の範囲（連絡先からタイムラインの表示まで）の見積もり 4 LW（Q1 の概算: 設計 1・連絡先と保存 1・タイムラインの UI 1.5・API の骨格 0.5）。本物の送受信・通話は後の Phase）
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p000 を cleared。2026-10-08 q910 P2 の照合: p002〜p004 cleared（T1-298）、p000（mock）は T1-177b の撮影の後に実装され Q1 の判定、p005（規約）はベータ3。準正常系は WS177 の案 P）（2026-10-07 q831 で p001〜p004 を実装、T1 の QEMU 待ち。p005 は規約の見直し（後回し）。2026-10-05 追加。まず UI の mock（p000）を優先、q743。段は未定（ユーザーに確認）。最初の範囲（連絡先からタイムラインの表示まで）の見積もり 4 LW（Q1 の概算: 設計 1・連絡先と保存 1・タイムラインの UI 1.5・API の骨格 0.5）。本物の送受信・通話は後の Phase）
 Master: [master](../master.md)
 Primary Milestone: MG006
 
@@ -59,7 +59,7 @@ Primary Milestone: MG006
 
 | Phase | 内容 | Status | 依存 |
 | --- | --- | --- | --- |
-| p000 | **UI の mock（優先、夕方の UAT が目安・必須でない）**: Phone の app の外側だけ。連絡先の一覧 → 連絡先ごとの iOS のメッセージ風のタイムライン（吹き出し・通話の記録・添付の表示）、送信の欄と電話の button（押すと「backend が無い」）。data は app の中の固定の試験 data。保存・API・backend は作らない | in-progress（q743、P2。実装・host の PNG・build 済み、QEMU は T1 待ち。[phase](phase000/phase.md)） | — |
+| p000 | **UI の mock（優先、夕方の UAT が目安・必須でない）**: Phone の app の外側だけ。連絡先の一覧 → 連絡先ごとの iOS のメッセージ風のタイムライン（吹き出し・通話の記録・添付の表示）、送信の欄と電話の button（押すと「backend が無い」）。data は app の中の固定の試験 data。保存・API・backend は作らない | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-177b の撮影の後、p002〜p004 で実装・cleared。旧: in-progress（q743、P2。実装・host の PNG・build 済み、QEMU は T1 待ち。[phase](phase0…） | — |
 | p001 | 要件と設計（保存の形・API・backend の口・UI。世界観の全体と最初の範囲を分ける） | cleared（q831、P2、[phase](phase001/phase.md)） | — |
 | p002 | 連絡先と会話の保存（`~/Documents/`）、host の試験 | cleared（2026-10-07、T1-298） | p001 |
 | p003 | Phone の app: 連絡先の一覧とタイムラインの表示（保存から、送受信と通話は p004 の口で） | cleared（2026-10-07、T1-298） | p002・p004 |

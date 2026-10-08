@@ -2,7 +2,7 @@
 
 # ws089-p013: About の memory と Storage の使用量
 
-Status: in-progress（2026-10-06 q821 P2: About の memory の行を実装、build warning 0 と host 試験 PASS。QEMU は T1 待ち）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-278 (1) PASS、About に Memory の行）（旧: in-progress（2026-10-06 q821 P2: About の memory の行を実装、build warning 0 と host 試験 PASS。QEMU は T1 待ち））
 Disposition: normal
 Parent: [WS089](../ws.md)
 Queue: q821（2026-10-06 ユーザー「採る（第 1 段で）」、Q1 が libkeiland の API の追加を許可）

@@ -3,7 +3,7 @@
 # WS130: IPv6 の network stack
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q910 P2 の照合: p002〜p007 cleared、p008 は T1-316 PASS で 5330 の DHCPv6 の UAT 待ち、p001（設計）は Q1 の判定（後続が実装済み））（2026-10-06: p001・p002 cleared（p002 は T1-206b PASS）、p003 cleared（T1-243）、次は p004 libc）
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p001 を cleared。2026-10-08 q910 P2 の照合: p002〜p007 cleared、p008 は T1-316 PASS で 5330 の DHCPv6 の UAT 待ち、p001（設計）は Q1 の判定（後続が実装済み））（2026-10-06: p001・p002 cleared（p002 は T1-206b PASS）、p003 cleared（T1-243）、次は p004 libc）
 Primary Milestone: MG005
 Related Milestones: MG002（POSIX の socket API）
 Objectives: O1, O3
@@ -41,7 +41,7 @@ Resume point: p001（2026-10-05 P1 が設計の第 1 版を書いた。UAPI（H1
 
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 設計（kernel と userland の境界、UAPI の案、`net.conf`、段、試験の方法） | planning（2026-10-05 第 1 版、H1〜H8 待ち） | ユーザーとの議論 |
+| [p001](phase001/phase.md) | 設計（kernel と userland の境界、UAPI の案、`net.conf`、段、試験の方法） | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: 後続の p002〜p007 が実装・cleared。旧: planning（2026-10-05 第 1 版、H1〜H8 待ち）） | ユーザーとの議論 |
 | [p002](phase002/phase.md) | kernel の核（UAPI、`ipv6.c`・ICMPv6・NDP・DAD・MLDv2・address と route の表、RS・RA と route socket） | cleared（2026-10-06、T1-206b PASS） | p001（H1〜H4・H6、ユーザー承認 2026-10-05） |
 | [p003](phase003/phase.md) | transport（address を 16 byte に、`AF_INET6` の UDP・TCP・ICMPv6、`IPV6_V6ONLY`、PMTU、source の選択） | cleared（2026-10-06、T1-243） | p002、H2 |
 | [p004](phase004/phase.md) | libc（`inet_pton`・`inet_ntop`・`getaddrinfo`・`getnameinfo`・resolver） | cleared（2026-10-07、T1-286） | p003 |

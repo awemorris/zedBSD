@@ -2,7 +2,7 @@
 
 # ws131-p013: 旧 libkeiui の名前を kl_・KL_ に
 
-Status: in-progress（q673 の続き、P2 generation10、2026-10-04。Q1「While T2 runs, start ws131-p013 … on top of 488f96c, under the same delegation」。実装・build・host 試験済み、QEMU は後でまとめて）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-085 は流さず、kl_ の改名は後続の p021〜p023 と多数の回帰で確かめ済み）（旧: in-progress（q673 の続き、P2 generation10、2026-10-04。Q1「While T2 runs, start ws131-p013 … on top of 488f96c, under the same delegation」。実装・build・host 試験済み、QEMU は後でまとめて））
 Disposition: normal
 Parent: [WS131](../ws.md)、計画の正本 [design.md](../design.md)
 Queue: q673（p012 と同じ Queue の続き、Q1 の指示）

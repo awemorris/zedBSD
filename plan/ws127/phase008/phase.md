@@ -2,7 +2,7 @@
 
 # ws127-p008: 全文規約と回帰（WS の最後）
 
-Status: in-progress（q667、P2、2026-10-04。規約の見直し・build・host は済み、QEMU の回帰と FreeBSD の build は T1 待ち。実機の p007 は実機待ち）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T2-025 PASS 8/8（QEMU）。FreeBSD の build の分は 10/13 以降）（旧: in-progress（q667、P2、2026-10-04。規約の見直し・build・host は済み、QEMU の回帰と FreeBSD の build は T1 待ち。実機の p007 は実機待ち））
 Disposition: normal
 Parent: [WS127](../ws.md)
 Queue: q667（Q1 の dispatch、2026-10-04。今できる分）

@@ -2,7 +2,7 @@
 # ws099-p035: 設計 — App Home の stage と 2 層の animation
 
 Parent: [WS099](../ws.md)
-Status: in-progress（2026-10-06 q783-i01 P2: p035a の montage を作り Q1 経由でユーザーに提示、選択待ち。p035b 以降は選択の後。以前: planned（Q1 の設計の第 1 版））
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: 案 A、T1-229 pass・T1-231 は needs-person 2 と回帰 pass。遅れの体感は 5330 の UAT）（旧: in-progress（2026-10-06 q783-i01 P2: p035a の montage を作り Q1 経由でユーザーに提示、選択待ち。p035b 以降は選択の後。以前: planned（Q1 の設計の第 1 版）））
 Disposition: normal
 Related: [BUG-236](../../bugs/BUG-236.md)・[BUG-225](../../bugs/BUG-225.md)・[BUG-232](../../bugs/BUG-232.md)・[BUG-237](../../bugs/BUG-237.md)・[ws128-p012](../../ws128/phase012/phase.md)
 

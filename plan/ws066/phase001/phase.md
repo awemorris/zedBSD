@@ -4,7 +4,7 @@
 
 Phase ID: `ws066-p001`
 Parent: [WS066](../ws.md)
-Status: in-progress（host の分析と設計の案は済み、guest の時間の測定は T1 待ち）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-165 の測定で受け入れ（true ≤ 700 µs、sh -c ≤ 950 µs））（旧: in-progress（host の分析と設計の案は済み、guest の時間の測定は T1 待ち））
 Queue: q729 の後、Q1（2026-10-05）
 Disposition: normal
 

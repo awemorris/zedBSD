@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws134-p013 -->
 # ws134-p013: M3d app の system の source
 
-Status: in-progress（q662、P2 generation8、2026-10-04。実装・build・host 試験済み、T の QEMU の試験待ち）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-070 で monitor-p013 PASS）（旧: in-progress（q662、P2 generation8、2026-10-04。実装・build・host 試験済み、T の QEMU の試験待ち））
 Disposition: normal
 Parent: [WS134](../ws.md)
 設計: [design.md](../design.md) §1.5（data source の層と stub）

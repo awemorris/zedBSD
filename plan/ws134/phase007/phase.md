@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws134-p007 -->
 # ws134-p007: K3 kernel の GPU の telemetry `hw.gputelemetry`
 
-Status: in-progress（q661、P2 generation8、2026-10-04。実装・build 済み、T の QEMU の試験待ち。i915 の値は実機（5330）でしか見えない）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-066 PASS。i915 の実の値は p010 の実機）（旧: in-progress（q661、P2 generation8、2026-10-04。実装・build 済み、T の QEMU の試験待ち。i915 の値は実機（5330）でしか見えない））
 Disposition: normal
 Parent: [WS134](../ws.md)
 設計: [design.md](../design.md) §1.2 の K3（Guardrail「compositor は GPU の UAPI を ioctl で呼ばない」により sysctl）
