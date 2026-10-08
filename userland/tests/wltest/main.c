@@ -38,6 +38,7 @@ struct wltest_options {
 	uint32_t color;
 	uint32_t fullscreen_at;
 	uint32_t unfullscreen_at;
+	uint32_t minimum[2];
 };
 
 static int options_parse(int argc, char **argv, struct wltest_options *options);
@@ -78,7 +79,7 @@ main(
 	/* Argument failure starts no connection or GPU namespace. */
 	status = options_parse(argc, argv, &options);
 	if (status != 0) {
-		fprintf(stderr, "usage: wltest [--display=NAME] [--frames=1..3600] [--mode=fifo|mailbox] [--verify-session] [--recreate-at=N] [--delay-ms=0..1000] [--token=NAME] [--windowed] [--fixed] [--size=WxH] [--color=RRGGBB] [--fullscreen-at=N] [--unfullscreen-at=N] [--app-id=NAME]\n");
+		fprintf(stderr, "usage: wltest [--display=NAME] [--frames=1..3600] [--mode=fifo|mailbox] [--verify-session] [--recreate-at=N] [--delay-ms=0..1000] [--token=NAME] [--windowed] [--fixed] [--min-size=WxH] [--size=WxH] [--color=RRGGBB] [--fullscreen-at=N] [--unfullscreen-at=N] [--app-id=NAME]\n");
 		return 2;
 	}
 
@@ -90,7 +91,7 @@ main(
 	completed = 0U;
 	result = VK_SUCCESS;
 	operation = "wltest_window_open";
-	status = wltest_window_open(&window, options.display, options.width, options.height, !options.windowed, options.fixed, options.app_id);
+	status = wltest_window_open(&window, options.display, options.width, options.height, !options.windowed, options.fixed, options.minimum, options.app_id);
 	if (status != 0)
 		goto cleanup;
 
@@ -257,6 +258,15 @@ options_parse(
 		match = strcmp(argv[index], "--fixed");
 		if (match == 0) {
 			options->fixed = 1;
+			continue;
+		}
+
+		/* The window's smallest size (ws177-p035). */
+		match = strncmp(argv[index], "--min-size=", 11U);
+		if (match == 0) {
+			status = option_size(argv[index] + 11U, &options->minimum[0], &options->minimum[1]);
+			if (status != 0)
+				return -1;
 			continue;
 		}
 

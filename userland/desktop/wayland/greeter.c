@@ -414,6 +414,9 @@ kwl_lock(
 	/* The clipboard's history goes (clipboard.c). */
 	kwl_clipboard_history_clear(server, "lock");
 
+	/* A swap of arranged windows being dragged is given up (arrange-shell.c, ws177-p036). */
+	kwl_arrange_swap_cancel(server, "lock");
+
 	/* Succeeded: the lock screen shows. */
 	server->locked = 1U;
 	server->dirty = 1;

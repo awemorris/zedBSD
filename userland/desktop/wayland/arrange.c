@@ -261,6 +261,61 @@ kwl_arrange_assign(
 }
 
 /*
+ * Places a window of limited size in the body its slot gives it
+ * (ws177-p035): its size is the body's, made no smaller than its smallest
+ * size and no larger than its largest (limits: the smallest width and
+ * height, the largest width and height, 0 for none), in the body's
+ * middle.  A window kept smaller than the body (one of a fixed size) sits
+ * in the middle of it with room around it.  Returns 1 when the window
+ * fits in the body, 0 when its smallest size is larger (placed then
+ * reaches past the body: the window does not go in that slot).
+ */
+int
+kwl_arrange_fit(
+	const struct kwl_arrange_rect *body,
+	const int32_t limits[4],
+	struct kwl_arrange_rect *placed)
+{
+	int32_t width;
+	int32_t height;
+	int fits;
+
+	/* The body's size, no larger than the window's largest size. */
+	width = body->width;
+	height = body->height;
+	if (limits[2] > 0 && width > limits[2])
+		width = limits[2];
+	if (limits[3] > 0 && height > limits[3])
+		height = limits[3];
+
+	/* No smaller than its smallest size, which may not fit. */
+	fits = 1;
+	if (width < limits[0]) {
+		width = limits[0];
+		fits = 0;
+	}
+
+	/* Likewise its smallest height. */
+	if (height < limits[1]) {
+		height = limits[1];
+		fits = 0;
+	}
+
+	/* In the body's middle. */
+	placed->x = body->x + (body->width - width) / 2;
+	placed->y = body->y + (body->height - height) / 2;
+	placed->width = width;
+	placed->height = height;
+
+	/* Too large for the body. */
+	if (!fits)
+		return 0;
+
+	/* Succeeded: the window fits. */
+	return 1;
+}
+
+/*
  * Gives part index of parts equal parts of a length from start, with
  * KWL_ARRANGE_GAP between them; the last part takes what the division
  * leaves over.
