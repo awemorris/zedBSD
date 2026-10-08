@@ -1318,22 +1318,25 @@ app_action(
 	int error;
 
 	/*
-	 * The text box open (ws175-p008): an undo before it is done puts its
-	 * words back as they were; another action than the box's own (its font,
+	 * The text box open (ws175-p008): an undo or a redo is the box's own,
+	 * one change a key (ws177-p013: the menu's Ctrl+Z and Ctrl+Shift+Z go to
+	 * its widget's history); another action than the box's own (its font,
 	 * size and colour, the window's) closes it first, keeping its words --
 	 * unless the editor refuses them, when the box stays and the action is
 	 * not carried out (Close ends Notes all the same).
 	 */
 	if (app->box.open && action == NOTES_ACTION_UNDO) {
-		notes_box_revert(&app->box);
-		app->box_changed = 1;
+		notes_box_key(&app->box, MAIN_KEY_Z, KL_MOD_CTRL);
 		app_box_frame(app);
 		return;
 	}
 
-	/* A redo has nothing to make again in the box. */
-	if (app->box.open && action == NOTES_ACTION_REDO)
+	/* A redo does the box's change taken back again. */
+	if (app->box.open && action == NOTES_ACTION_REDO) {
+		notes_box_key(&app->box, MAIN_KEY_Z, KL_MOD_CTRL | KL_MOD_SHIFT);
+		app_box_frame(app);
 		return;
+	}
 
 	/* Other actions close the box first. */
 	keeps = app_box_keeps(action);

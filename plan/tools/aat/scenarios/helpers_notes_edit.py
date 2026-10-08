@@ -407,10 +407,19 @@ def text_box_follow(item):
 	run.shot(item, "fullscreen")
 	item.check(moved and not closed, "the box did not move with the line, or it closed")
 
-	# Typed, then Ctrl+S with the box open: the words kept and saved.
+	# Typed; Ctrl+Z takes the last key back and Ctrl+Shift+Z does it again (ws177-p013: the box's own history).
 	run.key("end")
 	run.type(" again")
 	time.sleep(0.4)
+	mark = run.mark()
+	run.key("ctrl+z")
+	undone = run.wait(r"NOTES TEXT box reported=\d+ bytes=48\b", mark, 10)
+	run.key("ctrl+shift+z")
+	redone = run.wait(r"NOTES TEXT box reported=\d+ bytes=49\b", mark, 10)
+	item.step("Ctrl+Z, Ctrl+Shift+Z in the box", f"{undone}; {redone}")
+	item.check(undone and redone, "Ctrl+Z and Ctrl+Shift+Z did not take one key back and do it again")
+
+	# Ctrl+S with the box open: the words kept and saved.
 	mark = run.mark()
 	run.key("ctrl+s")
 	kept = run.wait(rf"NOTES EDIT text page=0 object={first} kind=line .*font=original", mark, 10)

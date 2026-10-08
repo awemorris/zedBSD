@@ -96,6 +96,44 @@ struct keiui_input {
 /* Takes the next key a widget wants, or text sent for it, in the order they came while it had the focus (ui.c); 1 with it, 0 when none is left for it. */
 int keiui_ui_take_input(struct kl_ui *ui, uint32_t id, uint32_t index, keiui_wants_key wants, struct keiui_input *input);
 
+/*
+ * The editing a text widget (a field, a text area) asks of its window's
+ * input (ui.c, ws177-p013): the commands of the keys with Control --
+ * undo (Ctrl+Z) and redo (Ctrl+Shift+Z, Ctrl+Y), copy, cut and paste
+ * (Ctrl+C, Ctrl+X, Ctrl+V) and a word left or right (Ctrl+Left,
+ * Ctrl+Right, with Shift the selection) -- and the history of the widget's
+ * text undo walks, one change a key or a commit.
+ */
+#define KEIUI_EDIT_NONE		0U
+#define KEIUI_EDIT_UNDO		1U
+#define KEIUI_EDIT_REDO		2U
+#define KEIUI_EDIT_COPY		3U
+#define KEIUI_EDIT_CUT		4U
+#define KEIUI_EDIT_PASTE	5U
+#define KEIUI_EDIT_WORD_LEFT	6U
+#define KEIUI_EDIT_WORD_RIGHT	7U
+
+/* Tells which editing command a key with its modifiers is (KEIUI_EDIT_*). */
+unsigned keiui_edit_command(uint32_t code, unsigned modifiers);
+
+/* Records a widget's change of its text (before and after) in the history, with the caret and the selection before it. */
+void keiui_edit_record(struct kl_ui *ui, uint32_t id, const char *before, size_t before_length, size_t caret_before, size_t anchor_before, const char *after, size_t after_length);
+
+/* Takes a change back (redo 0) or does it again (redo 1) on a widget's text; 1 when one was, 0 when none (or the text is no longer the history's). */
+int keiui_edit_undo(struct kl_ui *ui, uint32_t id, int redo, char *text, size_t *length, size_t capacity, size_t *caret, size_t *anchor);
+
+/* Puts text on the window's clipboard (nothing without a window). */
+void keiui_edit_copy(struct kl_ui *ui, const char *text, size_t length);
+
+/* Reads the window's clipboard's text, NUL-terminated; its length (0 without a window or a text). */
+size_t keiui_edit_paste(struct kl_ui *ui, char *text, size_t size);
+
+/* Gives the start of the word before an offset (forward 0), or the end of the word after it (forward 1). */
+size_t keiui_edit_word(const char *text, size_t length, size_t at, int forward);
+
+/* Ties a window's input to its window for the clipboard (text-input.c, which links the window's calls). */
+void keiui_ui_set_window(struct kl_ui *ui, struct kl_window *window, void (*copy)(struct kl_window *, const char *, size_t), size_t (*paste)(struct kl_window *, char *, size_t));
+
 /* Reports the text being composed for a widget, or NULL; a widget drawn without the focus drops it (ui.c). */
 const char *keiui_ui_preedit(struct kl_ui *ui, uint32_t id, uint32_t index, int focused, int32_t *begin, int32_t *end);
 
