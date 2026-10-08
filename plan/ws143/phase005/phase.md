@@ -4,7 +4,7 @@
 
 Phase ID: `ws143-p005`
 Parent: [WS143](../ws.md)
-Status: in-progress（2026-10-08 q902 P1 の照合: i01a T1-419 PASS、i01b T1-421 FAIL の後 T1-426 input-bridge-p005 PASS・T1-432 PASS、i01c T1-423 boot-test PASS（i2c-hid の touchpad の実機の回帰は 5330）→ i01a〜c は Q1 の判定待ち。i02・i03 は未着手、i04 は 5330）（旧: in-progress / test-wait（i01a、q888 P2 2026-10-08: glue の refactor と USB の回帰を実装し host 試験 PASS。QEMU は T1 待ち。以前: 詳細設計の第 1 版と改訂 2、design-reviewer の review-1（[review-1.md](review-1.md)）を反映済み））
+Status: in-progress（2026-10-08 q904 P1: i02a（純粋な部品と host 試験）まで済み、i02b〜i02d は未。下の「i02a の記録」。i01a〜c の判定は Q1）（旧: in-progress（2026-10-08 q902 P1 の照合: i01a T1-419 PASS、i01b T1-421 FAIL の後 T1-426 input-bridge-p005 PASS・T1-432 PASS、i01c T1-423 boot-test PASS（i2c-hid の touchpad の実機の回帰は 5330）→ i01a〜c は Q1 の判定待ち。i02・i03 は未着手、i04 は 5330）（旧: in-progress / test-wait（i01a、q888 P2 2026-10-08: glue の refactor と USB の回帰を実装し host 試験 PASS。QEMU は T1 待ち。以前: 詳細設計の第 1 版と改訂 2、design-reviewer の review-1（[review-1.md](review-1.md)）を反映済み）））
 Phase disposition: normal
 Queue: 設計（P2、2026-10-08）→ q888（P2、2026-10-08、承認済み）: i01a → i01b。実装の attempt の区切りは §「attempt の区切り」。
 
@@ -698,3 +698,16 @@ Bluetooth の off は今は daemon の flag だけ。p005 の自動の再接続�
 - 方針: i02 を 4 つの commit の単位に分ける: i02a 純粋な部品（sdp・hidp・att・hidcache・snoop と host 試験）→ i02b router・l2cap の拡張・pair の handoff → i02c hid.c・privsep・main・protocol・bt の CLI → i02d loopback の作り直しと bt-hid-p005.sh、T1 の依頼。
 - ここまで（未試験、Makefile に未登録）: `userland/base/bluetoothd/sdp.[ch]`（ServiceSearchAttributeRequest の組み立て、continuation の繋ぎと 8 回の同じ continuation で protocol、data element の検査（深さ 8）、HID・PnP の record の読み）、`hidp.[ch]`（header）、`att.[ch]`（request の組み立て、PDU の解析、最小の server の答え）。host の cc で -Wall -Wextra -Werror の compile だけ通した。
 - 次: hidcache・snoop、`bt-daemon-host-test.sh` に i02a の host 試験（§7.4 の sdp・hidp・att・att の server・hidcache・snoop）、Makefile への登録。
+
+## i02a の記録（2026-10-08 夜、P1 q904）
+
+- 純粋な部品（system call は hidcache・snoop の file の読み書きだけ）:
+  - `sdp.[ch]`: ServiceSearchAttributeRequest（UUID 0x1124 か 0x1200、全属性、MaximumAttributeByteCount 0x0280）、Response の断片の繋ぎ（8 KiB まで、超えたら `descriptor`）、同じ continuation 8 回で `protocol`、data element の検査（長さ・型ごとの size・深さ 8）、HID の record（PSM 0x0011・0x0013 の確かめ、flags・subclass・country・名前・descriptor 4096 まで（超えたら E2BIG））、PnP の record。
+  - `hidp.[ch]`: header の組み立てと解析、DATA の 512 byte 超は E2BIG（`oversize` の材料）。
+  - `att.[ch]`: request の組み立て（MTU・範囲・Read/Blob・Write・Confirmation・Error）、PDU の解析（list の要素の数と長さの整合、format 1・2）、最小の server（MTU 185、発見と読みは Attribute Not Found、書きは Request Not Supported、壊れた request は Invalid PDU、command・response・notification・confirmation には答えない）。
+  - `hidcache.[ch]`: `<address>-<型>.hid`（state・transport・flags・PnP・class・appearance・名前・descriptor の 128 byte の hex の行 32 まで）、一時 file → fsync → rename、欠け・重複・長さの不一致・state か transport の無い記録は EBADMSG、`btd_keys_list` は `.hid` を飛ばす（試験で確かめた）。
+  - `snoop.[ch]`: btsnoop（`btsnoop\0`、version 1、datalink 1002）の header と record、file の open と追記。
+- Makefile に 5 つの source を登録（main からはまだ呼ばない）。
+- 試験: 新 `plan/ws143/tests/bt-hid-host-test.c`（`bt-daemon-host-test.sh` に追加）75 checks: §6 の loopback のキーボードの HID・PnP の record（1 回の応答と 60 byte の continuation、繰り返す continuation、別の interrupt PSM、descriptor 無し、4097 byte、9 段・8 段の入れ子、holder を越える element、別の transaction・Error Response・短い PDU・parameters を越える count）、HIDP、ATT の組み立て・解析・server、hidcache の書き読み（4096 byte の descriptor、短い最後の行、欠け・重複・切れ・size だけ・state 無し・key の重複、bond の横）、snoop の byte、固定の seed の fuzz 20000 回（SDP の応答・ATT の PDU）。ASan・UBSan で PASS。既存の bt-daemon 90・bt-pair 143・bt-link 44 も PASS。
+- build: `make -j16 BUILD=build/p1-bt ZEDBSD_CONFIG=plan/ws143/tests/config-amd64-bt.mk build/p1-bt/bin/bluetoothd` warning 0。style-check: 新しい 10 file で指摘 0。
+- 次（i02b）: router（§4.1）、l2cap の inbound・Pending・option・Echo・opened/closed（§4.2）、pair の handoff（§9.2）。その後 i02c（hid.c・privsep の OPEN-HID・main・protocol・bt）、i02d（loopback の作り直しと bt-hid-p005.sh、T1 の依頼）。
