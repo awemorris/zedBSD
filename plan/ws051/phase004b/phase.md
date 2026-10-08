@@ -4,7 +4,7 @@
 
 Phase ID: `ws051-p004b`
 Parent: [WS051](../ws.md)
-Status: in-progress（2026-10-07 P1: ws113-p011a の merge（9036a7ad4）の後に code。D1〜D8 を実装と host 試験（D8 は p011a の口のまま）。実機は T1 への依頼文を Q1 へ。cleared は T1 の結果の Q1 の判定まで待つ）
+Status: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: 5330 の UAT 2026-10-08 午後でユーザー「拡張モードで出力されました。」「ミラーもうまくいきました。」（TC2）。拡張で eDP を off にした時の TC への 1 出力の付け替えの失敗は BUG-266（P2））（旧: in-progress（2026-10-07 P1: ws113-p011a の merge（9036a7ad4）の後に code。D1〜D8 を実装と host 試験（D8 は p011a の口のまま）。実機は T1 への依頼文を Q1 へ。cleared は T1 の結果の Q1 の判定まで待つ））
 Phase disposition: normal
 Queue: q847（P1）の続き。承認: ユーザー 2026-10-07「UCSIとDP alt modeってもう動いてるんですか？シェーダコンパイラより優先してほしいです」（Q1 経由）。設計の先行と code の順は Q1 2026-10-07。
 

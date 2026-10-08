@@ -7,8 +7,9 @@ Primary Milestone: MG006
 Related Milestones: MG001（GPU/API契約と回帰証拠）
 Parent: [Master](../master.md)
 Focused goal: fg019（ベータ1、2026-10-17。2026-10-02 user「複数 display は標準アプリの次」）
-Queue: q702（P2、p001 の残りの契約の確定と p002〜p006 の計画）
-Resume point（2026-10-05 q702、ベータ2、zedBSD 優先）: p001 の残りの契約を [contracts-beta2.md](phase001/contracts-beta2.md) に確定（判定は Q1、確認 C1〜C4）。順は **p002 → {p011, p012} → p003 → p004 → {p005 → p006, p007} → p008 → p009**、p013（明るさの下層）は C2 の許可の後いつでも、p005 の前に。p010（Linux・FreeBSD の KMS）は後。
+Queue: なし（2026-10-08 q902 P1 の照合: 進行中の Queue は無い。BUG-266 は P2）
+Resume point（2026-10-08 q902 P1 の照合）: p003・p004a・p006・p007・p015 cleared。p004（p004b、T1-367 PASS）・p005（T1-366 PASS）・p001（C1〜C4 決定済み）・p011（5330 の UAT「HDMIに出力されました。extendもmirrorも動いています」）は Q1 の判定待ち。p002・p012・p013 は QEMU 済み（T1-115・T1-135・T1-130）で i915 の分は 5330。p014 は 5330 で eDP の off が BUG-266（P2）。残り: BUG-266、p008（5330 の全経路）、p012・p013 の i915 の実機、p011a の蓋の UAT はベータ3（BUG-255）、p009 の全文規約はベータ3、p010 は 10/13 以降。
+旧 resume（2026-10-05 q702、ベータ2、zedBSD 優先）: p001 の残りの契約を [contracts-beta2.md](phase001/contracts-beta2.md) に確定（判定は Q1、確認 C1〜C4）。順は **p002 → {p011, p012} → p003 → p004 → {p005 → p006, p007} → p008 → p009**、p013（明るさの下層）は C2 の許可の後いつでも、p005 の前に。p010（Linux・FreeBSD の KMS）は後。
 過去の resume: p001/q586-i01 uncleared（90分上限、D-ATOMIC未決）。契約/能力20行/fixture/次候補保存、D-ID A2等main採択済み。
 
 ## ユーザーの指示（2026-10-04 夜、UAT-3 の後、原文）
@@ -50,23 +51,23 @@ zedBSD i915で外部ディスプレイの接続/切断をVulkan Display拡張か
 
 | ID/link | Purpose | Goal | Status | Dependencies |
 | --- | --- | --- | --- | --- |
-| [ws113-p001](phase001/phase.md) | 契約・能力と実機fixture | hotplug/複数出力/拡張とmirror/Settings/窓所属の仕様を確定 | in-progress（q702-i01、[contracts-beta2.md](phase001/contracts-beta2.md)、確認 C1〜C4、判定は Q1）。q586-i01 は uncleared | — |
-| [ws113-p002](phase002/phase.md) | i915 の scanout の規則・inventory・HPD（2026-10-05 に絞った） | GOP の出力先だけを引き継ぎ外部の優先を廃止、接続の全出力の列挙と HPD の topology の sequence（WS051 p002 と共有、C4） | in-progress（q702-i02、P2。part A・B の実装と host 済み、QEMU・実機は T1 待ち） | p001 |
-| [ws113-p003](phase003/phase.md) | Vulkan Displayの列挙・通知 | libvulkanから標準Display API/拡張でhotplugと複数出力を公開 | planned（3h） | p002、p012 |
+| [ws113-p001](phase001/phase.md) | 契約・能力と実機fixture | hotplug/複数出力/拡張とmirror/Settings/窓所属の仕様を確定 | in-progress → Q1 の判定待ち（q702-i01、[contracts-beta2.md](phase001/contracts-beta2.md)。C1〜C4 は 2026-10-05 に決定済み、後続の p002〜p015 が契約で実装済み）。q586-i01 は uncleared | — |
+| [ws113-p002](phase002/phase.md) | i915 の scanout の規則・inventory・HPD（2026-10-05 に絞った） | GOP の出力先だけを引き継ぎ外部の優先を廃止、接続の全出力の列挙と HPD の topology の sequence（WS051 p002 と共有、C4） | in-progress（q702-i02、P2。QEMU の回帰は T1-115 PASS。5330 の実機の (1)〜(4)（GOP の引き継ぎ・inventory・HPD・display= の ignored）は未、p008 にまとめてよい） | p001 |
+| [ws113-p003](phase003/phase.md) | Vulkan Displayの列挙・通知 | libvulkanから標準Display API/拡張でhotplugと複数出力を公開 | cleared（2026-10-07 T1-355c） | p002、p012 |
 | ws113-p004a | 1 出力の切り替え（2026-10-07 N8 のため p004 から分けた） | compositor が動いている間に使う 1 つの出力を替える（kwl_output_switch: swapchain を release → 別の display の surface・swapchain → server の大きさの変更と bar・stage・wallpaper・窓の詰め直し・wl_output の mode、失敗は元へ）。hotplug の fence（p003）で数え直し、ws052-p012 の蓋の方針（R4）へ。QEMU は Venus の 2 出力 | cleared（2026-10-07 T1-357b QEMU PASS、実機は p011a の UAT と一緒） | p003 |
-| ws113-p011a | i915 の 1 出力の付け替え（2026-10-07 N8 のため） | Keiland の lease が無い時に GOP の出力でない接続済みの出力の claim を許し、resident の pipe をその出力へ modeset し直す（eDP は消灯・panel の電源を落とす）。release で GOP の出力へ戻す。同時 2 つは p011 のまま | test-wait（2026-10-07 P2 9036a7ad4、実機 5330 の HDMI のユーザーの UAT、手順は phase011a/phase.md の「確認」） | p002 |
-| [ws113-p004](phase004/phase.md)（p004b） | 複数の同時の出力（p004a の後の残り） | 全拡張または全mirrorで複数outputを描画、hotplug、displays.conf | planned（4〜5h） | p003 |
-| [ws113-p005](phase005/phase.md) | compositor拡張とlibkeiland | `kl_system_manager_v1` v4 の `kl_system_displays_v1` と `kl_system_displays_*`、明るさ、Fn の key | planned（3〜4h） | p004、p013 |
-| [ws113-p006](phase006/phase.md) | Settings Displayページ | 拡張・mirror の二択、配置の drag、内蔵の panel の明るさの slider | planned（3h） | p005 |
-| [ws113-p007](phase007/phase.md) | 窓の出力所属と画面間移動 | 拡張表示で窓全体を1出力にだけ表示 | planned | p004 cleared/論理座標・出力描画（p006とは独立） |
-| [ws113-p008](phase008/phase.md) | 実i915の全経路受け入れ | 接続からSettings・表示・窓移動まで実機で確認 | planned | p002〜p007 cleared/実driver・API・UI・窓出力 |
-| [ws113-p009](phase009/phase.md) | 最終全文規約とWS受け入れ | 全変更sourceと実証結果の最終照合 | planned | p008 cleared/最終source・実機証拠 |
-| [ws113-p011](phase011/phase.md) | i915 の 2 つ目の出力 | Keiland の claim・present の時だけ 2 つ目の pipe で同時に scanout、release で消灯 | planned（4〜6h、実機） | p002 |
-| [ws113-p012](phase012/phase.md) | native の power と refresh の境界 | `GPU_DISPLAY_POWER`・`GPU_DISPLAY_REFRESH`（i915・Venus）、EXT display_control の下層（C2 の許可） | planned（3h） | p002、C2 |
-| [ws113-p013](phase013/phase.md) | 内蔵の panel の明るさの下層 | kernel の backlight の device（FreeBSD の backlight(9) と同じ形）、i915 の provider、backend の口（C2 の許可） | planned（2〜3h） | C2 |
-| [ws113-p014](phase014/phase.md) | 拡張の時に個々の display を off（Settings、2026-10-08 ユーザーの UAT、D-MODES の出力ごとの off を置き換え） | planned（P1、p007 の後） | p006、p007 |
-| [ws113-p015](phase015/phase.md) | 2 つ目以降の display の窓: リサイズ、display ごとの bar と dock、docked・floating・整列の状態、App Home の時は背景だけ（2026-10-08 ユーザーの UAT） | uncleared（2026-10-08 T1-376 (a) displays-p015.sh PASS（QEMU、PNG は no surface）。残り: head の dock bar（2026-10-08 ユーザーの決定: window icon・時計・状態・App Home・切り替えのつまみ、P1）、head の上の press（リサイズ・bar・dock）の 5330 実機） | p007 |
-| ws113-p010 | Linux・FreeBSD の KMS での互換の実装（libkeiland-backend-linux・-freebsd の出力の列挙・hotplug・出力の変更を zedBSD と同じ compositor の契約に） | 2026-10-04 ユーザー「KMSでのLinux・FreeBSD用互換実装は、あとまわしにしてよいです（別Phaseにする）」 | planning（後回し） | p004〜p006（zedBSD の経路） |
+| ws113-p011a | i915 の 1 出力の付け替え（2026-10-07 N8 のため） | Keiland の lease が無い時に GOP の出力でない接続済みの出力の claim を許し、resident の pipe をその出力へ modeset し直す（eDP は消灯・panel の電源を落とす）。release で GOP の出力へ戻す。同時 2 つは p011 のまま | test-wait（2026-10-07 P2 9036a7ad4、実機 5330）。手順の蓋の分（蓋で HDMI へ）は BUG-255 とともにベータ3（2026-10-07 ユーザー）。付け替えの口は p014 の anchor の移し替え・ws051-p004b が使う | p002 |
+| [ws113-p004](phase004/phase.md)（p004b） | 複数の同時の出力（p004a の後の残り） | 全拡張または全mirrorで複数outputを描画、hotplug、displays.conf | in-progress → Q1 の判定待ち（p004b q855 P1、T1-367 新しい guest で `displays-p004b: PASS`。5330 でユーザー「extendもmirrorも動いています」） | p003 |
+| [ws113-p005](phase005/phase.md) | compositor拡張とlibkeiland | `kl_system_manager_v1` v4 の `kl_system_displays_v1` と `kl_system_displays_*`、明るさ、Fn の key | in-progress → Q1 の判定待ち（q855 P1、T1-366 QEMU `displays-p005` PASS。明るさの slider と Fn の key は 5330 で未） | p004、p013 |
+| [ws113-p006](phase006/phase.md) | Settings Displayページ | 拡張・mirror の二択、配置の drag、内蔵の panel の明るさの slider | cleared（2026-10-08 T1-368） | p005 |
+| [ws113-p007](phase007/phase.md) | 窓の出力所属と画面間移動 | 拡張表示で窓全体を1出力にだけ表示 | cleared（2026-10-08 T1-369、5330 でユーザー確認） | p004 cleared/論理座標・出力描画（p006とは独立） |
+| [ws113-p008](phase008/phase.md) | 実i915の全経路受け入れ | 接続からSettings・表示・窓移動まで実機で確認 | planned（5330。2026-10-08 の UAT で HDMI・USB-C（TC2）の拡張・mirror と窓の移動は見えた。M1 の 10 回の抜き差し・M2 の 5 回・M3 の 10 回・明るさ・Fn は未） | p002〜p007 cleared/実driver・API・UI・窓出力 |
+| [ws113-p009](phase009/phase.md) | 最終全文規約とWS受け入れ | 全変更sourceと実証結果の最終照合 | planned（全文規約の分はベータ3、2026-10-08 ユーザー。Linux・FreeBSD の単一 display の維持は 10/13 以降） | p008 cleared/最終source・実機証拠 |
+| [ws113-p011](phase011/phase.md) | i915 の 2 つ目の出力 | Keiland の claim・present の時だけ 2 つ目の pipe で同時に scanout、release で消灯 | in-progress → Q1 の判定待ち（q856-i01 P2 実装、2026-10-08 5330 のユーザーの UAT「HDMIに出力されました。extendもmirrorも動いています。」。抜いた時の head の release は未確認） | p002 |
+| [ws113-p012](phase012/phase.md) | native の power と refresh の境界 | `GPU_DISPLAY_POWER`・`GPU_DISPLAY_REFRESH`（i915・Venus）、EXT display_control の下層（C2 の許可） | in-progress（Venus は T1-135 PASS。i915 の refresh 60 Hz・power off は 5330 で未） | p002、C2 |
+| [ws113-p013](phase013/phase.md) | 内蔵の panel の明るさの下層 | kernel の backlight の device（FreeBSD の backlight(9) と同じ形）、i915 の provider、backend の口（C2 の許可） | in-progress（QEMU は T1-130 PASS。5330 の `backlight-probe` の目視は未） | C2 |
+| [ws113-p014](phase014/phase.md) | 拡張の時に個々の display を off（Settings、2026-10-08 ユーザーの UAT、D-MODES の出力ごとの off を置き換え） | test-wait（T1-370 QEMU で機能は ok、試験の期待は Q1 が直した）。5330 で eDP を off にすると session が落ちる [BUG-266](../bugs/BUG-266.md)（P2）、直した後に UAT | p006、p007 |
+| [ws113-p015](phase015/phase.md) | 2 つ目以降の display の窓: リサイズ、display ごとの bar と dock、docked・floating・整列の状態、App Home の時は背景だけ（2026-10-08 ユーザーの UAT） | cleared（2026-10-08 Q1、T1-380 QEMU PASS。head の上の press の 5330 の UAT は未） | p007 |
+| ws113-p010 | Linux・FreeBSD の KMS での互換の実装（libkeiland-backend-linux・-freebsd の出力の列挙・hotplug・出力の変更を zedBSD と同じ compositor の契約に） | 2026-10-04 ユーザー「KMSでのLinux・FreeBSD用互換実装は、あとまわしにしてよいです（別Phaseにする）」 | planning（後回し。Linux・FreeBSD の作業は 10/13 以降、2026-10-08 ユーザー） | p004〜p006（zedBSD の経路） |
 
 Dependency graph（2026-10-05）: p001 → p002 → {p011, p012} → p003 → p004 → {p005 → p006, p007} → p008 → p009。C2 → p012・p013、p013 → p005。p010 は p004〜p006 の後。
 p008はp002〜p007の実出力を要する。見込みは実装許可ではない。

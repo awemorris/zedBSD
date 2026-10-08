@@ -3,7 +3,7 @@
 # ws113-p002: i915のHPD・複数display出力
 
 Parent: [WS113](../ws.md)
-Status: in-progress（q702、P2、2026-10-05。part A・B の実装・build・host 試験まで、QEMU・実機は T1 待ち。判定は Q1）
+Status: in-progress（2026-10-08 q902 P1 の照合: QEMU の回帰は T1-115 PASS（Venus で sequence=1 count=1、boot PASS）。5330 の実機の (1)〜(4) は未、p008 にまとめてよい。2026-10-08 の UAT で HDMI・TC2 の外部 display が Settings に出て拡張・mirror が動いたので inventory は実機で働いている）（旧: in-progress（q702、P2、2026-10-05。part A・B の実装・build・host 試験まで、QEMU・実機は T1 待ち。判定は Q1））
 Disposition: normal
 Primary Milestone: MG006（WSから継承）
 Queue / attempts: q702 / q702-i02（P2、C4 の Q1 の決定の後）

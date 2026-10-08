@@ -2,7 +2,7 @@
 
 # ws191-p002: libkeiland・compositor・zedBSD の backend
 
-Status: in-progress（q895、P2。2026-10-08 夜 実装と host 試験。設計の第 4 版の review の結果を待つ）
+Status: in-progress（2026-10-08 q902 P1 の照合: 実装と host 試験 PASS。設計の review は p001 で済み（blocking 0、Q1 が cleared）。QEMU の経路は p003 の T1-444（未実行）で通る）（旧: in-progress（q895、P2。2026-10-08 夜 実装と host 試験。設計の第 4 版の review の結果を待つ））
 Disposition: normal
 Parent: [WS191](../ws.md)。設計は [design.md](../design.md)（第 4 版）。
 

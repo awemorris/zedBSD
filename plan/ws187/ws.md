@@ -8,8 +8,8 @@ Primary Milestone: MG006
 Objectives: O2
 Parent: [Master](../master.md)
 Focused goal: fg019（ベータ2）
-Queue: q864（P2、2026-10-08）
-Resume point: p001〜p003 は実装・build・host 試験まで（2026-10-08 P2）。QEMU（T1）の結果と、猶予の既定（案 300 秒）のユーザーの確認を待つ。
+Queue: なし（q864 は終了）
+Resume point: 2026-10-08 q902 P1 の照合: p001〜p003 cleared（T1-379）、猶予は 5 分でユーザーが決定済み。残りは 5330 の実機の UAT（touchpad のスワイプ・wheel、PIN、Hardware Key（YubiKey））。旧: p001〜p003 は実装・build・host 試験まで。QEMU の結果と猶予の既定のユーザーの確認を待つ。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-08 ユーザー）

@@ -25,8 +25,8 @@ WS188 p003 の検査で、動画（videoplayer/audio.c）・音楽（music）・
 
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
-| p001 | 設計（stream の口、compositor の中継か fd の受け渡しか、遅れ、3 OS の backend）、design-reviewer | planned | — |
-| [p002](phase002/phase.md) | libkeiland・compositor・zedBSD の backend | in-progress（実装と host 試験 PASS、2026-10-08 夜） | p001 |
-| [p003](phase003/phase.md) | app の移行（videoplayer・music）、libmedia から音を外す | in-progress（実装と host の確認、T1 未依頼） | p002 |
-| p004 | Linux・FreeBSD の backend | planned | p002 |
-| p005 | 規約の全文の見直し | planned | p003・p004 |
+| [p001](phase001/phase.md) | 設計（stream の口、compositor の中継か fd の受け渡しか、遅れ、3 OS の backend）、design-reviewer | cleared（2026-10-08 Q1、第 4・5 版の review が blocking 0） | — |
+| [p002](phase002/phase.md) | libkeiland・compositor・zedBSD の backend | in-progress（実装と host 試験 PASS、2026-10-08 夜。QEMU は p003 の T1-444（未実行）が経路を通す） | p001 |
+| [p003](phase003/phase.md) | app の移行（videoplayer・music）、libmedia から音を外す | test-wait（T1-444、未実行） | p002 |
+| p004 | Linux・FreeBSD の backend | planned（Linux・FreeBSD は 10/13 以降、2026-10-08 ユーザー） | p002 |
+| p005 | 規約の全文の見直し | planned（ベータ3、2026-10-08 ユーザー） | p003・p004 |

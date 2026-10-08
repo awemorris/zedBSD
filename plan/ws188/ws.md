@@ -10,6 +10,7 @@ Objectives: O2
 Parent: [Master](../master.md)
 Focused goal: fg019（ベータ2）
 Queue: なし
+Resume point: 2026-10-08 q902 P1 の照合: p001〜p004 は全部 cleared（Q1）。WS の完了の判定は Q1（残る PENDING の audiod の 3 行は WS191 の範囲、取り出しの後の Devices の消え方は未実施）。ID の注意: 表の初めの p004（preview の spawn、canceled、directory 無し）と下の p004（Files の mount の一覧、phase004/ の実体、cleared）は同じ ID の 2 つの記録。番号は振り直さず、Q1 が扱いを決める。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-08 ユーザー）
@@ -38,7 +39,7 @@ Queue: なし
 | p002 | 実装: Settings の About・Storage・Users・Sharing・Welcome・Languages を libkeiland 経由に | cleared（T1-427） | p001 |
 | p002a | Files の Today の空き容量（statvfs）を machine の FILESYSTEMS へ（2026-10-08 Q1 の判断） | cleared（T1-428） | p002 |
 | p003 | 境界の検査の強化（app と libkeiland の literal・socket・getpw*・statvfs・spawn、許可の表） | cleared | p002（先に入れると FAIL） |
-| p004 | （取りやめ）preview の spawn は app の側の例外（2026-10-08 ユーザー）。p003 の検査の許可の表に preview/*/spawn.c を載せる。Files の起動（posix_spawn）は p001 で compositor の起動の要求にするかを決める | canceled | — |
+| p004（旧、canceled、directory 無し。phase004/ は下の行の Files の mount） | （取りやめ）preview の spawn は app の側の例外（2026-10-08 ユーザー）。p003 の検査の許可の表に preview/*/spawn.c を載せる。Files の起動（posix_spawn）は p001 で compositor の起動の要求にするかを決める | canceled | — |
 
 ## ユーザーの決定（2026-10-08）
 

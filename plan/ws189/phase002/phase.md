@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws189-p002 -->
 # ws189-p002: libkeiland と compositor — 画像の型、受け入れの印、icon、dock の spring-loaded、画面をまたぐ、複数の data device
 
-Status: test-wait（T1-433、2026-10-08 Q1 が依頼。実装・build・host 試験は済み）
+Status: test-wait（2026-10-08 q902 P1 の照合: T1-433・436・437・439・442 で early-receive・refused-mark・dock-spring・即離し（Photos が切られない）・same-program-windows（F7 の後 devices=2 で device 1 に drop、T1-442 PASS）を確認。未: desktop.dnd.across-displays（2 出力の guest で）・desktop.dnd.content-to-desktop。dnd のシナリオは今は active だが helper が無く run-aat.sh では by-agent（T1-439）、手操作で流す）（旧: test-wait（T1-433、2026-10-08 Q1 が依頼。実装・build・host 試験は済み））
 Disposition: normal
 Parent: [WS189](../ws.md)
 Queue: q892（P1、2026-10-08）

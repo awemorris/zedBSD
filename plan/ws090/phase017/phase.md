@@ -2,7 +2,7 @@
 # ws090-p017: 設計 — libkeiland の慣性 scroll（全ての窓）と開始の遅れ
 
 Parent: [WS090](../ws.md)
-Status: test-wait（T1 依頼中。q790-i01、P1、2026-10-06 実装済み。残りは下の「残り」）
+Status: test-wait → Q1 の判定待ち（2026-10-08 q902 P1 の照合: T1-230 の FAIL は 32137e34 で直し、T1-230b kinetic-guest PASS、T1-242・T1-246 kinetic-apps-guest PASS（26 項目）。下の「残り」は他の app の慣性と遅れの測定）（旧: test-wait（T1 依頼中。q790-i01、P1、2026-10-06 実装済み。残りは下の「残り」））
 Disposition: normal
 Related: [BUG-211](../../bugs/BUG-211.md)・[BUG-218](../../bugs/BUG-218.md)
 

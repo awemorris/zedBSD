@@ -10,7 +10,7 @@ Objectives: O2
 Parent: [Master](../master.md)
 Queue: P1 の列（2026-10-08）
 Target: ベータ2（他のベータ2 の WS と同じ優先度、後回し。2026-10-07 ユーザー）
-Resume point: p001 test-wait（2026-10-08 P1: 実装・build・host 試験まで。5320 の実機の確認がユーザーの時期）。
+Resume point: 2026-10-08 q902 P1 の照合: p001 は 5320 の実機待ち（5320 は電源オフ、ユーザーの時期）。p002 は 5330・5320 の実機の tap の UAT 待ち（QEMU に touchpad は無い）。関連: 5330 の touchpad の GPIO の割り込みが止まる [BUG-261](../bugs/BUG-261.md)（P2 q876 修正済み、5330 の確認待ち）。旧: p001 test-wait（2026-10-08 P1: 実装・build・host 試験まで。5320 の実機の確認がユーザーの時期）。
 <!-- awesome-plan-current:end -->
 
 ## 目標（2026-10-07 ユーザー）

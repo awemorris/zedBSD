@@ -4,7 +4,7 @@
 
 Phase ID: `ws143-p003`
 Parent: [WS143](../ws.md)
-Status: in-progress（q878、P2、2026-10-08 夜。attempt i01 は intelbt の package 以外）
+Status: in-progress（2026-10-08 q902 P1 の照合: i01（intelbt 以外）は T1-402 で 2 回目 PASS（1 回目 FAIL）→ i01 は Q1 の判定待ち。i02（intelbt の package、5330 の firmware の load と scan、D13）は未着手）（旧: in-progress（q878、P2、2026-10-08 夜。attempt i01 は intelbt の package 以外））
 Phase disposition: normal
 Queue: q878-i01（P2、Q1 の投入「intelbt の firmware の id は T1-378（5330 が Linux の時）待ちなので、それ以外を。loopback（T1-384 の物）で QEMU で確かめられる形に」）
 
