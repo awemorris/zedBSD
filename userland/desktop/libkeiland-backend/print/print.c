@@ -45,6 +45,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdarg.h>
@@ -63,6 +64,9 @@
 /* The longest line of the daemon's protocol, and the most lines waiting to be sent. */
 #define PRINT_LINE_MAX		1024U
 #define PRINT_QUEUE_MAX		64U
+
+/* The changes to the settings file waiting for the writer, and those made and not yet taken. */
+#define PRINT_CHANGES_MAX	16U
 
 /* The most jobs not ended, the results waiting, and the names asked. */
 #define PRINT_ACTIVE_MAX	16U
@@ -135,19 +139,72 @@ struct print_name {
 };
 
 /*
- * The printers: the settings file and its time when read, the printers
- * and the default, the jobs, the answers, the daemon (its pid, socket,
- * spool, the bytes of a line, the commands sent), the lines waiting, the
- * names asked, and the next numbers.
+ * The printers as the settings file holds them: the printers and the
+ * default, the next number, and the file's time when read.
+ */
+struct print_table {
+	struct kl_backend_printer printers[KL_BACKEND_PRINTERS_MAX];
+	size_t count;
+	uint32_t next_id;
+	struct timespec time;
+};
+
+/* The kinds of a change to the settings file. */
+enum print_change_kind {
+	PRINT_CHANGE_ADD,
+	PRINT_CHANGE_REMOVE,
+	PRINT_CHANGE_DEFAULT,
+	PRINT_CHANGE_PATH,
+	PRINT_CHANGE_NAMED
+};
+
+/*
+ * A change to the settings file, made by the writer thread (ws177-p024):
+ * what is asked (its request, 0 for the backend's own, the printer and the
+ * fields), then what came of it (the errno value, whether the file was
+ * written, the printer's number, and the table as the file holds it after).
+ */
+struct print_change {
+	enum print_change_kind kind;
+	uint32_t request;
+	uint32_t printer;
+	unsigned protocol;
+	char host[KL_BACKEND_PRINTER_HOST_MAX];
+	unsigned port;
+	char path[KL_BACKEND_PRINTER_PATH_MAX];
+	char name[KL_BACKEND_PRINTER_NAME_MAX];
+	int error;
+	unsigned saved;
+	struct print_table table;
+};
+
+/*
+ * The printers: the settings file and the table read from it, the jobs,
+ * the answers, the daemon (its pid, socket, spool, the bytes of a line,
+ * the commands sent), the lines waiting, the names asked, and the next
+ * numbers.
+ *
+ * The writer thread (started at the first change) makes the changes to
+ * the settings file: it takes the file's lock, reads it again, changes it
+ * and writes it, so that a lock another session holds never stops the
+ * compositor's thread.  lock guards the changes waiting (pending) and
+ * made (made) and stop; the table is the compositor's thread's, replaced
+ * by a made change's.
  */
 struct kl_backend_print {
 	char config[512];
 	char runtime[512];
 	char program[512];
-	struct timespec config_time;
-	struct kl_backend_printer printers[KL_BACKEND_PRINTERS_MAX];
-	size_t printer_count;
-	uint32_t next_id;
+	struct print_table table;
+	pthread_t writer;
+	int writer_started;
+	pthread_mutex_t lock;
+	pthread_cond_t wake;
+	struct print_change *pending[PRINT_CHANGES_MAX];
+	size_t pending_count;
+	struct print_change *made[PRINT_CHANGES_MAX];
+	size_t made_count;
+	int stop;
 	struct print_job jobs[KL_BACKEND_PRINT_JOBS_MAX];
 	size_t job_count;
 	struct print_result results[PRINT_RESULTS_MAX];
@@ -181,11 +238,11 @@ struct kl_backend_print {
 	time_t shut_until;
 };
 
-static int print_load(struct kl_backend_print *print);
-static int print_save(struct kl_backend_print *print);
-static int print_lock(const struct kl_backend_print *print);
+static int print_load(const char *config, struct print_table *table);
+static int print_save(const char *config, struct print_table *table);
+static int print_lock(const char *config);
 static void print_unlock(int fd);
-static struct kl_backend_printer *print_printer(struct kl_backend_print *print, uint32_t id);
+static struct kl_backend_printer *print_printer(struct print_table *table, uint32_t id);
 static struct print_job *print_find_job(struct kl_backend_print *print, uint32_t job);
 static struct print_job *print_new_job(struct kl_backend_print *print);
 static void print_end_job(struct kl_backend_print *print, struct print_job *job, unsigned state, const char *detail);
@@ -199,6 +256,11 @@ static void print_line(struct kl_backend_print *print, char *line);
 static void print_job_state(struct kl_backend_print *print, uint32_t number, const char *state, const char *detail);
 static void print_named(struct kl_backend_print *print, uint32_t seq, char *rest);
 static void print_remove_spool(const char *dir);
+static int print_change(struct kl_backend_print *print, struct print_change *change);
+static void *print_writer(void *argument);
+static void print_apply(struct print_change *change);
+static void print_made(struct kl_backend_print *print);
+static void print_ask_name(struct kl_backend_print *print, const struct kl_backend_printer *printer);
 static int print_send_job(struct kl_backend_print *print, struct print_job *job);
 static void print_resend(struct kl_backend_print *print);
 static void print_shut(struct kl_backend_print *print);
@@ -224,7 +286,7 @@ kl_backend_print_open(
 		return NULL;
 	print->socket = -1;
 	print->daemon = -1;
-	print->next_id = 1;
+	print->table.next_id = 1;
 	print->next_request = 1;
 	print->next_job = 1;
 	print->next_seq = 1;
@@ -236,8 +298,12 @@ kl_backend_print_open(
 	if (runtime != NULL)
 		print_copy(print->runtime, sizeof(print->runtime), runtime);
 
+	/* The writer's lock and wake (the thread starts at the first change). */
+	(void)pthread_mutex_init(&print->lock, NULL);
+	(void)pthread_cond_init(&print->wake, NULL);
+
 	/* The printers kept. */
-	(void)print_load(print);
+	(void)print_load(print->config, &print->table);
 	return print;
 }
 
@@ -260,6 +326,23 @@ kl_backend_print_close(
 		if (print->jobs[index].fd >= 0)
 			(void)close(print->jobs[index].fd);
 	}
+
+	/* The writer: the changes waiting made, then it stops. */
+	if (print->writer_started) {
+		(void)pthread_mutex_lock(&print->lock);
+
+		print->stop = 1;
+		(void)pthread_cond_signal(&print->wake);
+
+		(void)pthread_mutex_unlock(&print->lock);
+		(void)pthread_join(print->writer, NULL);
+	}
+
+	/* The changes made and not taken. */
+	for (index = 0; index < print->made_count; index++)
+		free(print->made[index]);
+	(void)pthread_cond_destroy(&print->wake);
+	(void)pthread_mutex_destroy(&print->lock);
 
 	/* The daemon's socket: its end ends the daemon. */
 	if (print->socket >= 0)
@@ -300,6 +383,7 @@ kl_backend_print_update(
 	*changed = 0;
 	if (print == NULL)
 		return 0;
+	print_made(print);
 	if (print->socket >= 0)
 		print_read(print);
 	if (print->socket >= 0)
@@ -312,8 +396,8 @@ kl_backend_print_update(
 
 	/* The settings file changed by another session. */
 	error = stat(print->config, &status);
-	if (error == 0 && (status.st_mtim.tv_sec != print->config_time.tv_sec || status.st_mtim.tv_nsec != print->config_time.tv_nsec)) {
-		(void)print_load(print);
+	if (error == 0 && (status.st_mtim.tv_sec != print->table.time.tv_sec || status.st_mtim.tv_nsec != print->table.time.tv_nsec)) {
+		(void)print_load(print->config, &print->table);
 		print->changed |= KL_BACKEND_PRINT_CHANGED_LIST;
 	}
 
@@ -335,10 +419,10 @@ kl_backend_print_printers(
 	size_t count;
 
 	/* As many as fit. */
-	count = print->printer_count;
+	count = print->table.count;
 	if (count > capacity)
 		count = capacity;
-	memcpy(list, print->printers, count * sizeof(list[0]));
+	memcpy(list, print->table.printers, count * sizeof(list[0]));
 	return count;
 }
 
@@ -366,8 +450,9 @@ kl_backend_print_jobs(
 }
 
 /*
- * Adds a printer (its path or queue "" for the protocol's usual one); an
- * IPP printer's name is asked of the daemon.
+ * Adds a printer (its path or queue "" for the protocol's usual one): the
+ * writer thread adds it to the settings file; an IPP printer's name is
+ * asked of the daemon once it is there.
  */
 int
 kl_backend_print_add(
@@ -378,15 +463,11 @@ kl_backend_print_add(
 	const char *path,
 	uint32_t *request)
 {
-	struct kl_backend_printer *printer;
+	struct print_change *change;
 	const char *space;
 	size_t path_length;
-	size_t index;
-	int same_host;
 	int host_ok;
-	int lock;
 	int error;
-	int saved;
 
 	/* A protocol, a host, a port. */
 	if (protocol != KL_BACKEND_PRINTER_IPP && protocol != KL_BACKEND_PRINTER_LPD)
@@ -401,74 +482,31 @@ kl_backend_print_add(
 			return EINVAL;
 	}
 
-	/* The file read again under its lock. */
+	/* The change. */
+	change = calloc(1, sizeof(*change));
+	if (change == NULL)
+		return ENOMEM;
+	change->kind = PRINT_CHANGE_ADD;
+	change->protocol = protocol;
+	print_copy(change->host, sizeof(change->host), host);
+	change->port = port;
+	print_copy(change->path, sizeof(change->path), path);
+
+	/* Its request, answered when the writer made it. */
 	*request = print->next_request;
 	print->next_request++;
-	lock = print_lock(print);
-	(void)print_load(print);
-
-	/* Room, and not the same printer twice. */
-	error = 0;
-	if (print->printer_count == KL_BACKEND_PRINTERS_MAX)
-		error = EBUSY;
-	for (index = 0; index < print->printer_count && error == 0; index++) {
-		same_host = strcmp(print->printers[index].host, host);
-		if (same_host == 0 && print->printers[index].port == port && print->printers[index].protocol == protocol)
-			error = EINVAL;
-	}
-
-	/* Refused: answered at once. */
-	if (error != 0) {
-		print_unlock(lock);
+	change->request = *request;
+	error = print_change(print, change);
+	if (error != 0)
 		print_result(print, *request, error, 0);
-		return 0;
-	}
-
-	/* The printer, the first one the default. */
-	printer = &print->printers[print->printer_count];
-	memset(printer, 0, sizeof(*printer));
-	printer->id = print->next_id;
-	print->next_id++;
-	printer->protocol = protocol;
-	print_copy(printer->host, sizeof(printer->host), host);
-	printer->port = port;
-	if (path != NULL && path[0] != '\0')
-		print_copy(printer->path, sizeof(printer->path), path);
-	else if (protocol == KL_BACKEND_PRINTER_IPP)
-		print_copy(printer->path, sizeof(printer->path), PRINT_IPP_PATH);
-	else
-		print_copy(printer->path, sizeof(printer->path), PRINT_LPD_QUEUE);
-	if (protocol == KL_BACKEND_PRINTER_IPP)
-		(void)snprintf(printer->name, sizeof(printer->name), "%.60s (IPP)", host);
-	else
-		(void)snprintf(printer->name, sizeof(printer->name), "%.60s (LPD)", host);
-	printer->is_default = print->printer_count == 0U;
-	print->printer_count++;
-
-	/* Written, then answered. */
-	saved = print_save(print) == 0;
-	print_unlock(lock);
-	print_result(print, *request, 0, (unsigned)saved);
-	print->changed |= KL_BACKEND_PRINT_CHANGED_LIST;
-
-	/* An IPP printer's name, asked of the daemon. */
-	if (protocol == KL_BACKEND_PRINTER_IPP && print->name_count < PRINT_NAMES_MAX) {
-		error = print_start(print);
-		if (error == 0) {
-			print->names[print->name_count].seq = print->next_seq;
-			print->names[print->name_count].printer = printer->id;
-			print->name_count++;
-			print_send(print, -1, 0, "NAME %lu %s %u", (unsigned long)print->next_seq, host, port);
-			print->next_seq++;
-		}
-	}
 
 	/* Asked: the answer comes as a result. */
 	return 0;
 }
 
 /*
- * Removes a printer; its jobs not ended are cancelled.
+ * Removes a printer: the writer thread takes it out of the settings file;
+ * its jobs not ended are cancelled once it is out.
  */
 int
 kl_backend_print_remove(
@@ -476,59 +514,31 @@ kl_backend_print_remove(
 	uint32_t printer,
 	uint32_t *request)
 {
-	struct kl_backend_printer *found;
-	uint32_t ignored;
-	size_t index;
-	int was_default;
-	int lock;
-	int saved;
+	struct print_change *change;
+	int error;
 
-	/* The file read again under its lock, and the printer. */
+	/* The change. */
+	change = calloc(1, sizeof(*change));
+	if (change == NULL)
+		return ENOMEM;
+	change->kind = PRINT_CHANGE_REMOVE;
+	change->printer = printer;
+
+	/* Its request, answered when the writer made it. */
 	*request = print->next_request;
 	print->next_request++;
-	lock = print_lock(print);
-	(void)print_load(print);
-	found = print_printer(print, printer);
-	if (found == NULL) {
-		print_unlock(lock);
-		print_result(print, *request, EINVAL, 0);
-		return 0;
-	}
-
-	/* Taken out; the default goes to the smallest number left. */
-	was_default = found->is_default;
-	index = (size_t)(found - print->printers);
-	memmove(&print->printers[index], &print->printers[index + 1U], (print->printer_count - index - 1U) * sizeof(print->printers[0]));
-	print->printer_count--;
-	if (was_default && print->printer_count > 0U) {
-		found = &print->printers[0];
-		for (index = 1; index < print->printer_count; index++) {
-			if (print->printers[index].id < found->id)
-				found = &print->printers[index];
-		}
-
-		/* It is the default. */
-		found->is_default = 1;
-	}
-
-	/* Written, then answered. */
-	saved = print_save(print) == 0;
-	print_unlock(lock);
-	print_result(print, *request, 0, (unsigned)saved);
-	print->changed |= KL_BACKEND_PRINT_CHANGED_LIST;
-
-	/* Its jobs not ended, cancelled. */
-	for (index = 0; index < print->job_count; index++) {
-		if (print->jobs[index].job.printer == printer && print->jobs[index].job.state < KL_BACKEND_PRINT_DONE)
-			(void)kl_backend_print_cancel(print, print->jobs[index].job.job, &ignored);
-	}
+	change->request = *request;
+	error = print_change(print, change);
+	if (error != 0)
+		print_result(print, *request, error, 0);
 
 	/* Asked: the answer comes as a result. */
 	return 0;
 }
 
 /*
- * Makes a printer the default.
+ * Makes a printer the default: the writer thread writes it in the
+ * settings file.
  */
 int
 kl_backend_print_set_default(
@@ -536,33 +546,25 @@ kl_backend_print_set_default(
 	uint32_t printer,
 	uint32_t *request)
 {
-	struct kl_backend_printer *found;
-	size_t index;
-	int lock;
-	int saved;
+	struct print_change *change;
+	int error;
 
-	/* The file read again under its lock, and the printer. */
+	/* The change. */
+	change = calloc(1, sizeof(*change));
+	if (change == NULL)
+		return ENOMEM;
+	change->kind = PRINT_CHANGE_DEFAULT;
+	change->printer = printer;
+
+	/* Its request, answered when the writer made it. */
 	*request = print->next_request;
 	print->next_request++;
-	lock = print_lock(print);
-	(void)print_load(print);
-	found = print_printer(print, printer);
-	if (found == NULL) {
-		print_unlock(lock);
-		print_result(print, *request, EINVAL, 0);
-		return 0;
-	}
+	change->request = *request;
+	error = print_change(print, change);
+	if (error != 0)
+		print_result(print, *request, error, 0);
 
-	/* It alone the default. */
-	for (index = 0; index < print->printer_count; index++)
-		print->printers[index].is_default = 0;
-	found->is_default = 1;
-
-	/* Written, then answered. */
-	saved = print_save(print) == 0;
-	print_unlock(lock);
-	print_result(print, *request, 0, (unsigned)saved);
-	print->changed |= KL_BACKEND_PRINT_CHANGED_LIST;
+	/* Asked: the answer comes as a result. */
 	return 0;
 }
 
@@ -591,9 +593,9 @@ kl_backend_print_submit(
 	print->next_request++;
 	*job = 0;
 	found = NULL;
-	for (index = 0; index < print->printer_count; index++) {
-		if ((printer == 0U && print->printers[index].is_default) || print->printers[index].id == printer)
-			found = &print->printers[index];
+	for (index = 0; index < print->table.count; index++) {
+		if ((printer == 0U && print->table.printers[index].is_default) || print->table.printers[index].id == printer)
+			found = &print->table.printers[index];
 	}
 
 	/* No such printer: refused. */
@@ -708,10 +710,11 @@ kl_backend_print_take_result(
 	return 1;
 }
 
-/* Reads the settings file (none: no printers).  Returns 0 or an errno value. */
+/* Reads the settings file into a table (none: no printers).  Returns 0 or an errno value. */
 static int
 print_load(
-	struct kl_backend_print *print)
+	const char *config,
+	struct print_table *table)
 {
 	struct kl_backend_printer *printer;
 	struct stat status;
@@ -730,13 +733,13 @@ print_load(
 	size_t index;
 
 	/* The file, and its time. */
-	print->printer_count = 0;
-	file = fopen(print->config, "r");
+	table->count = 0;
+	file = fopen(config, "r");
 	if (file == NULL)
 		return errno;
 	error = fstat(fileno(file), &status);
 	if (error == 0)
-		print->config_time = status.st_mtim;
+		table->time = status.st_mtim;
 
 	/* Each line; one that is not understood is passed over. */
 	for (;;) {
@@ -748,27 +751,27 @@ print_load(
 		/* The next number. */
 		fields = sscanf(line, "next-id %lu", &id);
 		if (fields == 1) {
-			if (id > print->next_id)
-				print->next_id = (uint32_t)id;
+			if (id > table->next_id)
+				table->next_id = (uint32_t)id;
 			continue;
 		}
 
 		/* The default. */
 		fields = sscanf(line, "default %lu", &id);
 		if (fields == 1) {
-			for (index = 0; index < print->printer_count; index++)
-				print->printers[index].is_default = print->printers[index].id == (uint32_t)id;
+			for (index = 0; index < table->count; index++)
+				table->printers[index].is_default = table->printers[index].id == (uint32_t)id;
 			continue;
 		}
 
 		/* A printer's line. */
 		consumed = 0;
 		fields = sscanf(line, "printer %lu %7s %63s %lu %63s %n", &id, protocol, host, &port, path, &consumed);
-		if (fields != 5 || consumed == 0 || print->printer_count == KL_BACKEND_PRINTERS_MAX || id == 0UL)
+		if (fields != 5 || consumed == 0 || table->count == KL_BACKEND_PRINTERS_MAX || id == 0UL)
 			continue;
 
 		/* A printer. */
-		printer = &print->printers[print->printer_count];
+		printer = &table->printers[table->count];
 		memset(printer, 0, sizeof(*printer));
 		printer->id = (uint32_t)id;
 		lpd = strcmp(protocol, "lpd");
@@ -779,9 +782,9 @@ print_load(
 		printer->port = (unsigned)port;
 		print_copy(printer->path, sizeof(printer->path), path);
 		print_copy(printer->name, sizeof(printer->name), line + consumed);
-		if (printer->id >= print->next_id)
-			print->next_id = printer->id + 1U;
-		print->printer_count++;
+		if (printer->id >= table->next_id)
+			table->next_id = printer->id + 1U;
+		table->count++;
 	}
 
 	/* Read. */
@@ -789,10 +792,11 @@ print_load(
 	return 0;
 }
 
-/* Writes the settings file through a file renamed over it.  Returns 0 or an errno value. */
+/* Writes a table into the settings file through a file renamed over it.  Returns 0 or an errno value. */
 static int
 print_save(
-	struct kl_backend_print *print)
+	const char *config,
+	struct print_table *table)
 {
 	struct stat status;
 	char temporary[600];
@@ -807,7 +811,7 @@ print_save(
 	int error;
 
 	/* The folder, made when it is not there. */
-	print_copy(directory, sizeof(directory), print->config);
+	print_copy(directory, sizeof(directory), config);
 	slash = strrchr(directory, '/');
 	if (slash != NULL) {
 		*slash = '\0';
@@ -815,23 +819,23 @@ print_save(
 	}
 
 	/* The new file. */
-	(void)snprintf(temporary, sizeof(temporary), "%s.new", print->config);
+	(void)snprintf(temporary, sizeof(temporary), "%s.new", config);
 	file = fopen(temporary, "w");
 	if (file == NULL)
 		return errno;
-	fprintf(file, "# Keiland printers\nnext-id %lu\n", (unsigned long)print->next_id);
-	for (index = 0; index < print->printer_count; index++) {
+	fprintf(file, "# Keiland printers\nnext-id %lu\n", (unsigned long)table->next_id);
+	for (index = 0; index < table->count; index++) {
 		protocol = "ipp";
-		if (print->printers[index].protocol == KL_BACKEND_PRINTER_LPD)
+		if (table->printers[index].protocol == KL_BACKEND_PRINTER_LPD)
 			protocol = "lpd";
-		fprintf(file, "printer %lu %s %s %u %s %s\n", (unsigned long)print->printers[index].id, protocol, print->printers[index].host,
-		    print->printers[index].port, print->printers[index].path, print->printers[index].name);
+		fprintf(file, "printer %lu %s %s %u %s %s\n", (unsigned long)table->printers[index].id, protocol, table->printers[index].host,
+		    table->printers[index].port, table->printers[index].path, table->printers[index].name);
 	}
 
 	/* The default's line. */
-	for (index = 0; index < print->printer_count; index++) {
-		if (print->printers[index].is_default)
-			fprintf(file, "default %lu\n", (unsigned long)print->printers[index].id);
+	for (index = 0; index < table->count; index++) {
+		if (table->printers[index].is_default)
+			fprintf(file, "default %lu\n", (unsigned long)table->printers[index].id);
 	}
 
 	/* Written out and closed. */
@@ -844,29 +848,29 @@ print_save(
 	}
 
 	/* In place. */
-	error = rename(temporary, print->config);
+	error = rename(temporary, config);
 	if (error != 0) {
 		(void)unlink(temporary);
 		return errno;
 	}
 
 	/* Its time kept (no reading again for this session's own change). */
-	error = stat(print->config, &status);
+	error = stat(config, &status);
 	if (error == 0)
-		print->config_time = status.st_mtim;
+		table->time = status.st_mtim;
 	return 0;
 }
 
 /* Takes the settings file's lock (the file beside it); the descriptor, or -1. */
 static int
 print_lock(
-	const struct kl_backend_print *print)
+	const char *config)
 {
 	char path[600];
 	int fd;
 
 	/* The lock file, held. */
-	(void)snprintf(path, sizeof(path), "%s.lock", print->config);
+	(void)snprintf(path, sizeof(path), "%s.lock", config);
 	fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
 	if (fd < 0)
 		return -1;
@@ -887,15 +891,15 @@ print_unlock(
 /* Finds a printer by its number. */
 static struct kl_backend_printer *
 print_printer(
-	struct kl_backend_print *print,
+	struct print_table *table,
 	uint32_t id)
 {
 	size_t index;
 
 	/* Each printer. */
-	for (index = 0; index < print->printer_count; index++) {
-		if (print->printers[index].id == id)
-			return &print->printers[index];
+	for (index = 0; index < table->count; index++) {
+		if (table->printers[index].id == id)
+			return &table->printers[index];
 	}
 
 	/* Not found. */
@@ -1199,7 +1203,7 @@ print_send_job(
 	int error;
 
 	/* The job's printer, still there. */
-	printer = print_printer(print, job->job.printer);
+	printer = print_printer(&print->table, job->job.printer);
 	if (printer == NULL)
 		return ENOENT;
 
@@ -1473,7 +1477,7 @@ print_line(
 	struct kl_backend_print *print,
 	char *line)
 {
-	struct kl_backend_printer *printer;
+	struct print_change *change;
 	struct print_job *job;
 	unsigned long number;
 	unsigned long count;
@@ -1483,7 +1487,6 @@ print_line(
 	int consumed;
 	int fields;
 	int same;
-	int lock;
 
 	/* Where its spool is. */
 	same = strncmp(line, "SPOOL ", 6U);
@@ -1534,23 +1537,19 @@ print_line(
 		return;
 	}
 
-	/* The path an IPP printer answered at, kept. */
+	/* The path an IPP printer answered at, kept in the file by the writer. */
 	fields = sscanf(line, "PATH %lu %63s", &number, path);
 	if (fields == 2) {
 		job = print_find_job(print, (uint32_t)number);
 		if (job == NULL)
 			return;
-		lock = print_lock(print);
-		(void)print_load(print);
-		printer = print_printer(print, job->job.printer);
-		if (printer != NULL) {
-			print_copy(printer->path, sizeof(printer->path), path);
-			(void)print_save(print);
-			print->changed |= KL_BACKEND_PRINT_CHANGED_LIST;
-		}
-
-		/* The lock let go. */
-		print_unlock(lock);
+		change = calloc(1, sizeof(*change));
+		if (change == NULL)
+			return;
+		change->kind = PRINT_CHANGE_PATH;
+		change->printer = job->job.printer;
+		print_copy(change->path, sizeof(change->path), path);
+		(void)print_change(print, change);
 		return;
 	}
 
@@ -1627,18 +1626,17 @@ print_job_state(
 	print_end_job(print, job, KL_BACKEND_PRINT_FAILED, detail);
 }
 
-/* Keeps a printer's name and path the daemon found (NAMED <seq> <path> <name>, or NAMED <seq> for none). */
+/* Keeps a printer's name and path the daemon found (NAMED <seq> <path> <name>, or NAMED <seq> for none), by the writer. */
 static void
 print_named(
 	struct kl_backend_print *print,
 	uint32_t seq,
 	char *rest)
 {
-	struct kl_backend_printer *printer;
+	struct print_change *change;
 	uint32_t id;
 	size_t index;
 	char *name;
-	int lock;
 
 	/* The printer asked about. */
 	id = 0;
@@ -1663,19 +1661,324 @@ print_named(
 	*name = '\0';
 	name++;
 
-	/* Kept in the file. */
-	lock = print_lock(print);
-	(void)print_load(print);
-	printer = print_printer(print, id);
-	if (printer != NULL) {
-		print_copy(printer->path, sizeof(printer->path), rest);
-		print_copy(printer->name, sizeof(printer->name), name);
-		(void)print_save(print);
-		print->changed |= KL_BACKEND_PRINT_CHANGED_LIST;
+	/* Kept in the file by the writer. */
+	change = calloc(1, sizeof(*change));
+	if (change == NULL)
+		return;
+	change->kind = PRINT_CHANGE_NAMED;
+	change->printer = id;
+	print_copy(change->path, sizeof(change->path), rest);
+	print_copy(change->name, sizeof(change->name), name);
+	(void)print_change(print, change);
+}
+
+/*
+ * Hands a change to the writer thread (started at the first).  The change
+ * is the writer's from here.  Returns 0, EBUSY when too many wait, or the
+ * thread's errno value (the change is then freed).
+ */
+static int
+print_change(
+	struct kl_backend_print *print,
+	struct print_change *change)
+{
+	int error;
+
+	/* The writer, started once. */
+	if (!print->writer_started) {
+		error = pthread_create(&print->writer, NULL, print_writer, print);
+		if (error != 0) {
+			free(change);
+			return error;
+		}
+
+		/* Started, joined at the close. */
+		print->writer_started = 1;
 	}
 
-	/* The lock let go. */
-	print_unlock(lock);
+	/* Queued for it; too many waiting is busy. */
+	(void)pthread_mutex_lock(&print->lock);
+
+	error = 0;
+	if (print->pending_count == PRINT_CHANGES_MAX) {
+		error = EBUSY;
+	} else {
+		print->pending[print->pending_count] = change;
+		print->pending_count++;
+		(void)pthread_cond_signal(&print->wake);
+	}
+
+	(void)pthread_mutex_unlock(&print->lock);
+
+	/* Too many waiting: this one goes. */
+	if (error != 0) {
+		free(change);
+		return error;
+	}
+
+	/* Succeeded: the writer has it. */
+	return 0;
+}
+
+/*
+ * The writer thread: each change in its turn under the settings file's
+ * lock (read again, changed, written), handed back as made, until the
+ * backend closes and nothing waits.
+ */
+static void *
+print_writer(
+	void *argument)
+{
+	struct kl_backend_print *print;
+	struct print_change *change;
+	int written;
+	int lock;
+
+	/* Until asked to stop with nothing left. */
+	print = argument;
+	for (;;) {
+		/* The next change, waited for. */
+		(void)pthread_mutex_lock(&print->lock);
+
+		while (print->pending_count == 0U && !print->stop)
+			(void)pthread_cond_wait(&print->wake, &print->lock);
+		change = NULL;
+		if (print->pending_count > 0U) {
+			change = print->pending[0];
+			memmove(&print->pending[0], &print->pending[1], (print->pending_count - 1U) * sizeof(print->pending[0]));
+			print->pending_count--;
+		}
+
+		(void)pthread_mutex_unlock(&print->lock);
+
+		/* Nothing left and asked to stop. */
+		if (change == NULL)
+			break;
+
+		/* The file read again under its lock, changed and written. */
+		lock = print_lock(print->config);
+		change->table.next_id = 1;
+		(void)print_load(print->config, &change->table);
+		print_apply(change);
+		if (change->error == 0) {
+			written = print_save(print->config, &change->table);
+			change->saved = written == 0;
+		}
+
+		/* The lock let go. */
+		print_unlock(lock);
+
+		/* Handed back; a full list of made changes drops the oldest. */
+		(void)pthread_mutex_lock(&print->lock);
+
+		if (print->made_count == PRINT_CHANGES_MAX) {
+			free(print->made[0]);
+			memmove(&print->made[0], &print->made[1], (PRINT_CHANGES_MAX - 1U) * sizeof(print->made[0]));
+			print->made_count--;
+		}
+
+		/* This one, the newest. */
+		print->made[print->made_count] = change;
+		print->made_count++;
+
+		(void)pthread_mutex_unlock(&print->lock);
+	}
+
+	/* Stopped. */
+	return NULL;
+}
+
+/* Makes a change in its table (the file as it was read); its errno value in change->error. */
+static void
+print_apply(
+	struct print_change *change)
+{
+	struct print_table *table;
+	struct kl_backend_printer *printer;
+	struct kl_backend_printer *found;
+	size_t index;
+	int same_host;
+	int was_default;
+
+	/* By its kind. */
+	table = &change->table;
+	change->error = 0;
+	switch (change->kind) {
+	case PRINT_CHANGE_ADD:
+		/* Room, and not the same printer twice. */
+		if (table->count == KL_BACKEND_PRINTERS_MAX) {
+			change->error = EBUSY;
+			return;
+		}
+
+		/* The same protocol, host and port is the same printer. */
+		for (index = 0; index < table->count; index++) {
+			same_host = strcmp(table->printers[index].host, change->host);
+			if (same_host == 0 && table->printers[index].port == change->port && table->printers[index].protocol == change->protocol) {
+				change->error = EINVAL;
+				return;
+			}
+		}
+
+		/* The printer, numbered from the file's next number, the first one the default. */
+		printer = &table->printers[table->count];
+		memset(printer, 0, sizeof(*printer));
+		printer->id = table->next_id;
+		table->next_id++;
+		printer->protocol = change->protocol;
+		print_copy(printer->host, sizeof(printer->host), change->host);
+		printer->port = change->port;
+		if (change->path[0] != '\0')
+			print_copy(printer->path, sizeof(printer->path), change->path);
+		else if (change->protocol == KL_BACKEND_PRINTER_IPP)
+			print_copy(printer->path, sizeof(printer->path), PRINT_IPP_PATH);
+		else
+			print_copy(printer->path, sizeof(printer->path), PRINT_LPD_QUEUE);
+		if (change->protocol == KL_BACKEND_PRINTER_IPP)
+			(void)snprintf(printer->name, sizeof(printer->name), "%.60s (IPP)", change->host);
+		else
+			(void)snprintf(printer->name, sizeof(printer->name), "%.60s (LPD)", change->host);
+		printer->is_default = table->count == 0U;
+		table->count++;
+		change->printer = printer->id;
+		return;
+	case PRINT_CHANGE_REMOVE:
+		/* The printer. */
+		found = print_printer(table, change->printer);
+		if (found == NULL) {
+			change->error = EINVAL;
+			return;
+		}
+
+		/* Taken out; the default goes to the smallest number left. */
+		was_default = found->is_default;
+		index = (size_t)(found - table->printers);
+		memmove(&table->printers[index], &table->printers[index + 1U], (table->count - index - 1U) * sizeof(table->printers[0]));
+		table->count--;
+		if (was_default && table->count > 0U) {
+			found = &table->printers[0];
+			for (index = 1; index < table->count; index++) {
+				if (table->printers[index].id < found->id)
+					found = &table->printers[index];
+			}
+
+			/* It is the default. */
+			found->is_default = 1;
+		}
+
+		/* Taken out. */
+		return;
+	case PRINT_CHANGE_DEFAULT:
+		/* The printer, it alone the default. */
+		found = print_printer(table, change->printer);
+		if (found == NULL) {
+			change->error = EINVAL;
+			return;
+		}
+
+		/* The others are not. */
+		for (index = 0; index < table->count; index++)
+			table->printers[index].is_default = 0;
+		found->is_default = 1;
+		return;
+	case PRINT_CHANGE_PATH:
+	case PRINT_CHANGE_NAMED:
+		/* The printer's path (and name), when it is still there. */
+		found = print_printer(table, change->printer);
+		if (found == NULL) {
+			change->error = ENOENT;
+			return;
+		}
+
+		/* What the daemon found. */
+		print_copy(found->path, sizeof(found->path), change->path);
+		if (change->kind == PRINT_CHANGE_NAMED)
+			print_copy(found->name, sizeof(found->name), change->name);
+		return;
+	default:
+		change->error = EINVAL;
+		return;
+	}
+}
+
+/*
+ * Takes the changes the writer made: the table as the file holds it, the
+ * answers, an IPP printer's name asked, a printer's jobs cancelled when it
+ * went.
+ */
+static void
+print_made(
+	struct kl_backend_print *print)
+{
+	struct print_change *change;
+	struct kl_backend_printer *printer;
+	uint32_t ignored;
+	size_t index;
+
+	/* Each change made, oldest first. */
+	for (;;) {
+		(void)pthread_mutex_lock(&print->lock);
+
+		change = NULL;
+		if (print->made_count > 0U) {
+			change = print->made[0];
+			memmove(&print->made[0], &print->made[1], (print->made_count - 1U) * sizeof(print->made[0]));
+			print->made_count--;
+		}
+
+		(void)pthread_mutex_unlock(&print->lock);
+
+		/* None left. */
+		if (change == NULL)
+			return;
+
+		/* The table as the file holds it now, and its answer. */
+		print->table = change->table;
+		print->changed |= KL_BACKEND_PRINT_CHANGED_LIST;
+		if (change->request != 0U)
+			print_result(print, change->request, change->error, change->saved);
+
+		/* An IPP printer added: its name asked of the daemon. */
+		if (change->kind == PRINT_CHANGE_ADD && change->error == 0 && change->protocol == KL_BACKEND_PRINTER_IPP) {
+			printer = print_printer(&print->table, change->printer);
+			if (printer != NULL)
+				print_ask_name(print, printer);
+		}
+
+		/* A printer removed: its jobs not ended, cancelled. */
+		if (change->kind == PRINT_CHANGE_REMOVE && change->error == 0) {
+			for (index = 0; index < print->job_count; index++) {
+				if (print->jobs[index].job.printer == change->printer && print->jobs[index].job.state < KL_BACKEND_PRINT_DONE)
+					(void)kl_backend_print_cancel(print, print->jobs[index].job.job, &ignored);
+			}
+		}
+
+		/* Taken. */
+		free(change);
+	}
+}
+
+/* Asks the daemon (started for it) an IPP printer's name and path. */
+static void
+print_ask_name(
+	struct kl_backend_print *print,
+	const struct kl_backend_printer *printer)
+{
+	int error;
+
+	/* Not more names asked than are kept. */
+	if (print->name_count == PRINT_NAMES_MAX)
+		return;
+
+	/* The daemon, and the question. */
+	error = print_start(print);
+	if (error != 0)
+		return;
+	print->names[print->name_count].seq = print->next_seq;
+	print->names[print->name_count].printer = printer->id;
+	print->name_count++;
+	print_send(print, -1, 0, "NAME %lu %s %u", (unsigned long)print->next_seq, printer->host, printer->port);
+	print->next_seq++;
 }
 
 /* Removes a dead daemon's spool: its files, the directory and its lock file. */

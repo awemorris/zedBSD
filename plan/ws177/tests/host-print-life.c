@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -42,6 +43,8 @@ static int wait_job(struct kl_backend_print *print, uint32_t job, unsigned state
 static int starts(const char *dir);
 static int logged(const char *dir, const char *text, int seconds);
 static void pause_ms(unsigned ms);
+static int took(struct kl_backend_print *print, uint32_t request);
+static long now_ms(void);
 
 /* Runs the scenarios. */
 int
@@ -51,9 +54,16 @@ main(
 {
 	struct kl_backend_print *print;
 	char dir[512];
+	char lock_path[600];
 	char text[128];
 	uint32_t request;
 	uint32_t job;
+	unsigned changed;
+	long took_ms;
+	long started;
+	int answered;
+	int tries;
+	int held;
 	int ok;
 
 	/* The arguments. */
@@ -122,6 +132,33 @@ main(
 	check("cancel-daemon-end", ok && starts(dir) == 1, text);
 	kl_backend_print_close(print);
 
+	/*
+	 * 7. Another session holds the settings file's lock (ws177-p024): an add
+	 * does not stop the caller's thread; it is made and answered once the
+	 * lock goes.
+	 */
+	print = scenario(argv[2], "locked", "normal\n", dir, sizeof(dir));
+	(void)snprintf(lock_path, sizeof(lock_path), "%s/printers.conf.lock", dir);
+	held = open(lock_path, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+	(void)flock(held, LOCK_EX);
+	started = now_ms();
+	(void)kl_backend_print_add(print, KL_BACKEND_PRINTER_LPD, "127.0.0.2", 515U, "", &request);
+	answered = 0;
+	for (tries = 0; tries < 10; tries++) {
+		(void)kl_backend_print_update(print, &changed);
+		answered = answered || took(print, request);
+	}
+	took_ms = now_ms() - started;
+	(void)close(held);
+	for (tries = 0; tries < 100 && !answered; tries++) {
+		(void)kl_backend_print_update(print, &changed);
+		answered = took(print, request);
+		pause_ms(20);
+	}
+	(void)snprintf(text, sizeof(text), "%ld ms while locked, answered %d", took_ms, answered);
+	check("locked-file-does-not-block", took_ms < 200 && answered, text);
+	kl_backend_print_close(print);
+
 	/* The outcome. */
 	printf("host-print-life: %s\n", failures == 0 ? "PASS" : "FAIL");
 	return failures == 0 ? 0 : 1;
@@ -160,8 +197,12 @@ scenario(
 	char path[1024];
 	char config[1024];
 	char runtime[1024];
+	struct kl_backend_printer printers[KL_BACKEND_PRINTERS_MAX];
 	uint32_t request;
+	unsigned changed;
+	size_t count;
 	FILE *file;
+	int tries;
 
 	/* The folder and the modes. */
 	(void)snprintf(dir, size, "%s/%s", folder, name);
@@ -192,6 +233,15 @@ scenario(
 		exit(1);
 	}
 	(void)kl_backend_print_add(print, KL_BACKEND_PRINTER_LPD, "127.0.0.1", 515U, "", &request);
+
+	/* The printer is in the table once the writer thread made the change (ws177-p024). */
+	for (tries = 0; tries < 100; tries++) {
+		(void)kl_backend_print_update(print, &changed);
+		count = kl_backend_print_printers(print, printers, KL_BACKEND_PRINTERS_MAX);
+		if (count == 1U)
+			break;
+		pause_ms(20);
+	}
 	return print;
 }
 
@@ -313,4 +363,35 @@ pause_ms(
 	wait.tv_sec = ms / 1000U;
 	wait.tv_nsec = (long)(ms % 1000U) * 1000000L;
 	nanosleep(&wait, NULL);
+}
+
+/* Tells whether a request's answer came (and takes it). */
+static int
+took(
+	struct kl_backend_print *print,
+	uint32_t request)
+{
+	uint32_t answered;
+	unsigned saved;
+	int error;
+
+	/* Each answer waiting. */
+	while (kl_backend_print_take_result(print, &answered, &error, &saved)) {
+		if (answered == request)
+			return 1;
+	}
+
+	/* Not yet. */
+	return 0;
+}
+
+/* The monotonic clock in milliseconds. */
+static long
+now_ms(void)
+{
+	struct timespec now;
+
+	/* The clock. */
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (long)now.tv_sec * 1000L + now.tv_nsec / 1000000L;
 }
