@@ -382,3 +382,63 @@ kl_system_power_get_state(const struct kl_system *system, struct kl_power_state 
 	(void)system;
 	memset(state, 0, sizeof(*state));
 }
+
+/* The computer's readings (ws188-p002): not offered without a compositor, so the pages show nothing read. */
+int
+kl_system_machine_query(struct kl_system *system, unsigned what, uint32_t *request)
+{
+	(void)system;
+	(void)what;
+	(void)request;
+	return ENOTSUP;
+}
+
+unsigned
+kl_system_machine_known(const struct kl_system *system)
+{
+	(void)system;
+	return 0U;
+}
+
+uint32_t
+kl_system_machine_serial(const struct kl_system *system, unsigned part)
+{
+	(void)system;
+	(void)part;
+	return 0U;
+}
+
+int
+kl_system_machine_about(const struct kl_system *system, struct kl_machine_about *about)
+{
+	(void)system;
+	(void)about;
+	return ENOENT;
+}
+
+size_t
+kl_system_machine_filesystems(const struct kl_system *system, struct kl_machine_filesystem *list, size_t capacity)
+{
+	(void)system;
+	(void)list;
+	(void)capacity;
+	return 0U;
+}
+
+size_t
+kl_system_machine_users(const struct kl_system *system, struct kl_machine_user *list, size_t capacity)
+{
+	(void)system;
+	(void)list;
+	(void)capacity;
+	return 0U;
+}
+
+int
+kl_system_machine_login_language(const struct kl_system *system, char *code, size_t size)
+{
+	(void)system;
+	(void)code;
+	(void)size;
+	return ENOENT;
+}

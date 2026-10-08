@@ -1516,6 +1516,13 @@ test_both_ends(void)
 	struct kl_sharing_state sharing;
 	struct kl_display displays[KL_DISPLAYS_MAX];
 	struct kl_display_place places[1];
+	struct kl_machine_about machine_about;
+	struct kl_machine_filesystem machine_filesystems[KL_MACHINE_FILESYSTEMS_MAX];
+	struct kl_machine_user machine_users[KL_MACHINE_USERS_MAX];
+	char machine_code[8];
+	size_t machine_count;
+	size_t machine_index;
+	unsigned machine_self;
 	struct kl_notification notification;
 	struct kl_notify_event event;
 	struct kl_notify_event second_event;
@@ -1556,7 +1563,7 @@ test_both_ends(void)
 		return;
 	/* The library's table describes the version it binds (zedBSD's libwayland refuses more than the table; T1-144). */
 	CHECK(kl_system_manager_v1_interface.version == (int)KL_SYSTEM_MANAGER_VERSION, "manager table version %d", kl_system_manager_v1_interface.version);
-	CHECK(kl_system_capabilities(system) == (KL_SYSTEM_HAS_NETWORK | KL_SYSTEM_HAS_AUDIO | KL_SYSTEM_HAS_POWER | KL_SYSTEM_HAS_DEVICES | KL_SYSTEM_HAS_MONITOR | KL_SYSTEM_HAS_ACCOUNT | KL_SYSTEM_HAS_SHARING | KL_SYSTEM_HAS_PIN | KL_SYSTEM_HAS_NOTIFY | KL_SYSTEM_HAS_KEYS | KL_SYSTEM_HAS_MAIL | KL_SYSTEM_HAS_PHONE | KL_SYSTEM_HAS_DISPLAYS), "capabilities");
+	CHECK(kl_system_capabilities(system) == (KL_SYSTEM_HAS_NETWORK | KL_SYSTEM_HAS_AUDIO | KL_SYSTEM_HAS_POWER | KL_SYSTEM_HAS_DEVICES | KL_SYSTEM_HAS_MONITOR | KL_SYSTEM_HAS_ACCOUNT | KL_SYSTEM_HAS_SHARING | KL_SYSTEM_HAS_PIN | KL_SYSTEM_HAS_NOTIFY | KL_SYSTEM_HAS_KEYS | KL_SYSTEM_HAS_MAIL | KL_SYSTEM_HAS_PHONE | KL_SYSTEM_HAS_DISPLAYS | KL_SYSTEM_HAS_MACHINE), "capabilities");
 	kl_system_network_get_state(system, &state);
 	CHECK(state.reachable == 1U && state.connected == 1U && state.kind == KL_NETWORK_WIFI && state.wifi == KL_WIFI_CONNECTED, "first network state");
 	CHECK(strcmp(state.interface, "wlan0") == 0 && strcmp(state.ssid, "Home") == 0 && state.wired[0] == '\0', "first network names");
@@ -1690,6 +1697,37 @@ test_both_ends(void)
 	expect_result(display, system, first, 0, "HDMI on");
 	CHECK(kl_system_displays_get(system, displays, KL_DISPLAYS_MAX) == 2U && displays[1].flags == KL_DISPLAY_SHOWN, "the HDMI display told on");
 	CHECK(kl_system_displays_set_shown(system, "", 1U, NULL) == EINVAL, "an empty key refused for set_shown");
+
+	/*
+	 * The computer (ws188-p002): the four parts read from this host on the compositor's thread and answered whole;
+	 * a second query of the file systems alone moves their serial only; no part and an unknown part refused.
+	 */
+	CHECK((kl_system_capabilities(system) & KL_SYSTEM_HAS_MACHINE) != 0U, "machine offered");
+	CHECK(kl_system_machine_known(system) == 0U, "machine: nothing known before a query");
+	CHECK(kl_system_machine_about(system, &machine_about) == ENOENT, "machine: about not known");
+	CHECK(kl_system_machine_query(system, KL_MACHINE_ABOUT | KL_MACHINE_FILESYSTEMS | KL_MACHINE_USERS | KL_MACHINE_LOGIN_LANGUAGE, &first) == 0, "machine asked");
+	expect_result(display, system, first, 0, "machine answered");
+	CHECK(kl_system_machine_known(system) == 0xfU, "machine: all four known (0x%x)", kl_system_machine_known(system));
+	CHECK(kl_system_machine_about(system, &machine_about) == 0 && machine_about.kernel[0] != '\0' && machine_about.architecture[0] != '\0' && machine_about.cpus > 0U, "machine: about read (%s, %s, %u)", machine_about.kernel, machine_about.architecture, machine_about.cpus);
+	machine_count = kl_system_machine_filesystems(system, machine_filesystems, KL_MACHINE_FILESYSTEMS_MAX);
+	CHECK(machine_count >= 1U && strcmp(machine_filesystems[0].path, "/") == 0 && machine_filesystems[0].total > 0U, "machine: the root file system");
+	machine_count = kl_system_machine_users(system, machine_users, KL_MACHINE_USERS_MAX);
+	machine_self = 0U;
+	for (machine_index = 0; machine_index < machine_count; machine_index++) {
+		if ((machine_users[machine_index].flags & KL_MACHINE_USER_SELF) != 0U && machine_users[machine_index].home[0] != '\0')
+			machine_self++;
+		if ((machine_users[machine_index].flags & KL_MACHINE_USER_SELF) == 0U)
+			CHECK(machine_users[machine_index].home[0] == '\0', "machine: another user's home not sent");
+	}
+	CHECK(machine_self == 1U, "machine: the own account once, with its home (%u of %u)", machine_self, (unsigned)machine_count);
+	CHECK(kl_system_machine_login_language(system, machine_code, sizeof(machine_code)) == 0, "machine: login language known");
+	CHECK(kl_system_machine_serial(system, KL_MACHINE_USERS) == 1U && kl_system_machine_serial(system, KL_MACHINE_FILESYSTEMS) == 1U, "machine: serials 1");
+	CHECK(kl_system_machine_query(system, KL_MACHINE_FILESYSTEMS, &first) == 0, "machine file systems asked");
+	expect_result(display, system, first, 0, "machine file systems answered");
+	CHECK(kl_system_machine_serial(system, KL_MACHINE_FILESYSTEMS) == 2U && kl_system_machine_serial(system, KL_MACHINE_USERS) == 1U, "machine: only the file systems' serial moved");
+	CHECK(kl_system_machine_serial(system, KL_MACHINE_USERS | KL_MACHINE_ABOUT) == 0U, "machine: two parts are no part");
+	CHECK(kl_system_machine_query(system, 0U, NULL) == EINVAL, "machine: no part refused");
+	CHECK(kl_system_machine_query(system, 0x10U, NULL) == EINVAL, "machine: an unknown part refused");
 
 	/* The notifications (ws156-p002): a post numbered, new words for it, a body too long refused, a withdrawal closed and answered. */
 	CHECK((kl_system_capabilities(system) & KL_SYSTEM_HAS_NOTIFY) != 0U, "notify offered");
