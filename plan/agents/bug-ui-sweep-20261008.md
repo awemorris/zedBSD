@@ -138,3 +138,4 @@ verdict は runner の物（pass・fail・needs-person）。「再現した」�
 - ユーザー「BUG-220, BUG-236,BUG-227,  BUG-241,はcomplete.」→ (C) の 4 つは resolved。
 - ユーザー「Touchpadは動作確認できたので、下記をすべてclose します。…」→ (B) の touchpad の BUG-156・166・167・178・190・211・215・216・228・247・254 は resolved。BUG-218 は touchpad の部分だけ閉じ、Phone の padding（bugs.phone-padding）は T1-481 の結果待ち。
 - BUG-253 は Board の resolved を scheduled（実機の確認待ち）に戻した（BUG-255 の診断の UAT では蓋の事象が届かない起動があった）。
+- ユーザー「BUG-221, 226, 239はcloesします。」→ (B) の描画の遅れの BUG-221・226・239 は resolved。
