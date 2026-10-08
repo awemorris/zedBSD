@@ -568,7 +568,9 @@ session_write(
 	if ((size_t)written != length)
 		return EIO;
 
-	/* Succeeded: written. */
+	/* Succeeded: written, and traced. */
+	if (session->packet_trace != NULL)
+		session->packet_trace(session->packet_trace_context, packet, length, 0);
 	return 0;
 }
 
@@ -616,9 +618,11 @@ session_read(
 		return ENODEV;
 	}
 
-	/* Succeeded: a packet, not counted yet. */
+	/* Succeeded: a packet, not counted yet, traced. */
 	session->packet_length = (size_t)got;
 	session->packet_counted = 0;
+	if (session->packet_trace != NULL)
+		session->packet_trace(session->packet_trace_context, session->packet, session->packet_length, 1);
 	return 0;
 }
 

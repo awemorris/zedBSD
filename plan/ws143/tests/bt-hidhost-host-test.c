@@ -195,6 +195,10 @@ static unsigned answers;
 /* A connection the test claims for the handoff (the stand-in of a pairing's), or none. */
 static int claim_handoff;
 
+/* The packets the session's trace saw written and read (the daemon's btsnoop record's hook). */
+static unsigned traced_written;
+static unsigned traced_read;
+
 /* The boot keyboard's report descriptor (HID 1.11 Appendix E.6, 63 bytes). */
 static const uint8_t keyboard_descriptor[] = {
 	0x05, 0x01, 0x09, 0x06, 0xa1, 0x01, 0x05, 0x07, 0x19, 0xe0, 0x29, 0xe7, 0x15, 0x00, 0x25, 0x01,
@@ -223,6 +227,7 @@ static void status_of(uint8_t last, char *line, size_t size);
 static int hook_bridge(void *context, int *descriptor);
 static void hook_answer(void *context, const uint8_t *address, const char *line);
 static int claims_hook(void *context, const uint8_t *address);
+static void trace_hook(void *context, const uint8_t *packet, size_t length, int received);
 static void *fake_run(void *argument);
 static void fake_command(const uint8_t *packet, size_t length);
 static void fake_acl(const uint8_t *packet, size_t length);
@@ -381,6 +386,7 @@ test_connect(void)
 	       "connect: page, authentication, the key, encryption, the key's size");
 	expect(fake.sdp_requests >= 4U, "connect: the HID and PnP records over continuations (%u requests)", fake.sdp_requests);
 	expect(fake.set_protocols == 1U, "connect: SET_PROTOCOL to a boot device");
+	expect(traced_written >= 10U && traced_read >= 10U, "connect: the trace saw the packets (%u written, %u read)", traced_written, traced_read);
 
 	/* The setup: Bluetooth, the PnP numbers, the names, the descriptor. */
 	error = bridge_read((uint8_t *)&setup, sizeof(setup), &length);
@@ -942,6 +948,9 @@ run_open(
 	session->acl_pool.total = 8U;
 	session->acl_pool.free = 8U;
 	session->le_shared = 1;
+	session->packet_trace = trace_hook;
+	traced_written = 0U;
+	traced_read = 0U;
 
 	/* The router with the pairing, as the daemon has them. */
 	btd_pair_init(&pairing, session, keys_folder, NULL, NULL, NULL, NULL, NULL);
@@ -1284,6 +1293,27 @@ claims_hook(
 	/* Succeeded: the HID host's answer. */
 	claimed = btd_hid_claims(context, address);
 	return claimed;
+}
+
+/* The session's trace: counts the packets each way (a command or ACL packet written, an event or ACL packet read). */
+static void
+trace_hook(
+	void *context,
+	const uint8_t *packet,
+	size_t length,
+	int received)
+{
+	/* Only whole H4 packets. */
+	(void)context;
+	if (length < 2U || (packet[0] != 0x01U && packet[0] != 0x02U && packet[0] != 0x04U))
+		return;
+
+	/* Counted by direction. */
+	if (received) {
+		traced_read++;
+	} else {
+		traced_written++;
+	}
 }
 
 /* The scripted controller: answers each command and ACL packet until its socket closes. */

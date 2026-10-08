@@ -40,6 +40,7 @@
 #include "userland/base/bluetoothd/protocol.h"
 #include "userland/base/bluetoothd/router.h"
 #include "userland/base/bluetoothd/session.h"
+#include "userland/base/bluetoothd/snoop.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -150,6 +151,8 @@ static void btd_status(struct btd_client *client);
 static int btd_hid_bridge(void *context, int *descriptor);
 static void btd_hid_told(void *context, const uint8_t *address, const char *line);
 static void btd_hid_holding(void);
+static void btd_trace(void *context, const uint8_t *packet, size_t length, int received);
+static int btd_arguments(int argc, char **argv);
 static int btd_parse_device(const char *text, uint8_t *address, unsigned *type);
 static void btd_write(struct btd_client *client, const char *format, ...) __attribute__((format(printf, 2, 3)));
 static void btd_client_close(int index);
@@ -201,6 +204,10 @@ static struct btd_privsep btd_separation;
 
 /* The node given with -f, or NULL for the lowest that opens. */
 static const char *btd_node;
+
+/* The btsnoop record given with -s (ws143-p005 section 9.11): its path (NULL: none) and the child's open file (-1). */
+static const char *btd_snoop_path;
+static int btd_snoop = -1;
 
 /*
  * How many starts in a row failed (0 again after a ready start), and
@@ -254,18 +261,11 @@ main(
 	int timeout;
 	int ready;
 	int error;
-	int same;
 
-	/* The node of its own, when given. */
-	if (argc == 3) {
-		same = strcmp(argv[1], "-f");
-		if (same == 0)
-			btd_node = argv[2];
-	}
-
-	/* Any other argument is a misuse. */
-	if (argc != 1 && btd_node == NULL) {
-		(void)fprintf(stderr, "usage: bluetoothd [-f /dev/bluetoothN]\n");
+	/* The node of its own and the record, when given; anything else is a misuse. */
+	error = btd_arguments(argc, argv);
+	if (error != 0) {
+		(void)fprintf(stderr, "usage: bluetoothd [-f /dev/bluetoothN] [-s SNOOP-FILE]\n");
 		return 64;
 	}
 
@@ -289,6 +289,13 @@ main(
 	if (error != 0) {
 		btd_log("bluetoothd: privilege separation: %s\n", strerror(error));
 		return 1;
+	}
+
+	/* The record of the HCI traffic, opened by the child (a failure leaves the daemon without it). */
+	if (btd_snoop_path != NULL) {
+		btd_snoop = btd_snoop_open(btd_snoop_path);
+		if (btd_snoop < 0)
+			btd_log("bluetoothd: %s: %s\n", btd_snoop_path, strerror(errno));
 	}
 
 	/* The user's switch, as it was left (ws143-p006). */
@@ -512,6 +519,7 @@ btd_open(
 	btd_session_init(&btd_session, descriptor, btd_node_control, &btd_session, path, BTD_FIRMWARE_FOLDER);
 	btd_session.handler = btd_router_handle;
 	btd_session.handler_context = &btd_routing;
+	btd_session.packet_trace = btd_trace;
 	btd_session_open = 1;
 	btd_reappear_ms = 0U;
 	error = ioctl(descriptor, BT_IOC_GET_INFO, &btd_session.info);
@@ -2004,4 +2012,55 @@ btd_hid_holding(
 
 	/* Succeeded: told. */
 	btd_hid_hold(&btd_hid_host, held);
+}
+
+/* Records one H4 packet of the session in the btsnoop file (the session's trace). */
+static void
+btd_trace(
+	void *context,
+	const uint8_t *packet,
+	size_t length,
+	int received)
+{
+	(void)context;
+
+	/* A packet with its type's byte, while the record is open. */
+	if (btd_snoop < 0 || length < 1U)
+		return;
+
+	/* Succeeded: appended. */
+	btd_snoop_write(btd_snoop, packet[0], received, packet + 1, length - 1U);
+}
+
+/*
+ * Reads the arguments: -f NODE (the node of its own) and -s FILE (the
+ * btsnoop record), each once at most.  Returns 0, or EINVAL for anything
+ * else.
+ */
+static int
+btd_arguments(
+	int argc,
+	char **argv)
+{
+	int index;
+	int is_node;
+	int is_snoop;
+
+	/* Each option and its value. */
+	for (index = 1; index < argc; index += 2) {
+		if (index + 1 >= argc)
+			return EINVAL;
+		is_node = strcmp(argv[index], "-f");
+		is_snoop = strcmp(argv[index], "-s");
+		if (is_node == 0 && btd_node == NULL) {
+			btd_node = argv[index + 1];
+		} else if (is_snoop == 0 && btd_snoop_path == NULL) {
+			btd_snoop_path = argv[index + 1];
+		} else {
+			return EINVAL;
+		}
+	}
+
+	/* Succeeded: understood. */
+	return 0;
 }
