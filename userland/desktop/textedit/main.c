@@ -59,6 +59,9 @@
 #define MAIN_FIND_PREVIOUS	10U
 #define MAIN_FIND_DONE		11U
 
+/* The bar of editing buttons over the fingers' selection (ws190-p003). */
+#define MAIN_TEXT_BAR		12U
+
 /* The Replace panel's size, its distance from the card's top, a field's and a button's height, and the space between rows. */
 #define MAIN_REPLACE_WIDTH	560
 #define MAIN_REPLACE_HEIGHT	232
@@ -239,6 +242,9 @@ static int main_drag_text(void *data, const char *text, size_t length);
 static void main_drop_event(const struct kl_window_event *event);
 static void main_window_event(const struct kl_window_event *event);
 static void main_fingers(uint64_t now_us);
+static unsigned main_bar(void);
+static void main_bar_press(unsigned button);
+static void main_bar_log(void);
 static int main_dialog_event(const struct kl_window_event *event);
 static void main_text_caret(void);
 static int main_resize(void);
@@ -720,6 +726,7 @@ main_loop(
 static int
 main_frame(void)
 {
+	struct kl_style style;
 	struct kl_rect clip;
 	struct te_rect text;
 	unsigned stale;
@@ -737,6 +744,15 @@ main_frame(void)
 		kl_canvas_clip_push(&main_handles, &clip);
 		kl_text_touch_draw_handles(&main_app.touch, &main_handles, (double)text.x - main_app.scroll_x, (double)text.y - main_app.scroll_y, kl_theme_default());
 		kl_canvas_clip_pop(&main_handles);
+
+		/* The bar of editing buttons over the selection, laid out by the fingers' input (ws190-p003). */
+		if (main_app.bar.count != 0U && main_widgets_text) {
+			style.canvas = &main_handles;
+			style.text = &main_widgets;
+			style.theme = kl_theme_default();
+			style.glass = main_app.glass;
+			kl_text_bar_draw(&main_app.bar, &style, main_app.bar_held);
+		}
 
 		/* A message's chip and a dialog over it all. */
 		main_overlay(kl_clock_us());
@@ -1805,6 +1821,7 @@ main_fingers(
 	struct kl_event event;
 	struct kl_rect region;
 	struct te_rect text;
+	unsigned pressed;
 	int taken;
 
 	/* Without the fingers' input, only the view's scroll moves. */
@@ -1814,12 +1831,17 @@ main_fingers(
 		return;
 	}
 
-	/* A dialog records its own frame of the input (main_overlay). */
-	if (main_app.dialog != TE_DIALOG_NONE)
+	/* A dialog records its own frame of the input (main_overlay); the bar is not drawn under it (ws190-p003). */
+	if (main_app.dialog != TE_DIALOG_NONE) {
+		main_app.bar.count = 0;
+		main_bar_log();
 		return;
+	}
 
-	/* The frame of the fingers' input: the text view, when nothing covers it. */
+	/* The frame of the fingers' input: the text view and the bar over it, when nothing covers them. */
 	kl_ui_begin(main_input, now_us);
+	pressed = 0U;
+	main_app.bar.count = 0;
 	if (main_app.dialog == TE_DIALOG_NONE && !main_app.choosing) {
 		te_app_text_rect(&main_app, &text);
 		region.x = text.x;
@@ -1827,13 +1849,16 @@ main_fingers(
 		region.width = text.width;
 		region.height = text.height;
 		kl_ui_text_region(main_input, MAIN_TEXT_REGION, &region, &main_app.scroll, &main_app.touch);
+		pressed = main_bar();
 	}
 
 	/* The frame is recorded; whether something still moves. */
 	main_moving = kl_ui_end(main_input, now_us);
 
-	/* The fingers' selection and context menu. */
+	/* The fingers' selection and context menu, then the bar's button pressed. */
 	te_app_touch(&main_app);
+	main_bar_press(pressed);
+	main_bar_log();
 
 	/* What no part took: a tap is a click (a dialog's button), a long press elsewhere asks for the menu. */
 	for (;;) {
@@ -1887,4 +1912,159 @@ main_action(
 
 	/* The editor's action, in its place among the keys. */
 	te_window_act(&main_window, event->code);
+}
+
+/*
+ * Lays the bar of editing buttons out over the fingers' selection and
+ * records its buttons in the fingers' input's frame (ws190-p003, plan/ws190/
+ * phase001/phase.md section 3): Cut, Copy, Paste and Select All as they
+ * apply, above the selection within the window less the on-screen
+ * keyboard.  Reports the button pressed since the last frame, 0 for none.
+ */
+static unsigned
+main_bar(void)
+{
+	struct kl_rect first;
+	struct kl_rect second;
+	struct kl_rect selection;
+	struct kl_rect visible;
+	struct kl_rect bounds;
+	struct te_rect text;
+	unsigned facts;
+	unsigned buttons;
+	unsigned pressed;
+	size_t length;
+	size_t start;
+	size_t end;
+	double origin_x;
+	double origin_y;
+	int right;
+	int bottom;
+	int paste;
+	int shown;
+
+	/* Only while the fingers' selection shows it, no finger drags it, and the interface's font is there. */
+	if (!main_app.touch.bar || main_app.touch.selecting || !main_widgets_text)
+		return 0U;
+
+	/* The selection's ends in order, and the text's length. */
+	start = main_app.anchor;
+	end = main_app.cursor;
+	if (start > end) {
+		start = main_app.cursor;
+		end = main_app.anchor;
+	}
+	length = te_buffer_length(&main_app.buffer);
+
+	/* What the text is: the window's clipboard is always there. */
+	facts = KL_TEXT_BAR_CLIPBOARD;
+	if (start != end)
+		facts |= KL_TEXT_BAR_SELECTED;
+	if (start == 0U && end == length && length != 0U)
+		facts |= KL_TEXT_BAR_WHOLE;
+	if (length == 0U)
+		facts |= KL_TEXT_BAR_EMPTY;
+	paste = kl_window_can_paste(main_window.kui);
+	if (paste)
+		facts |= KL_TEXT_BAR_CAN_PASTE;
+	buttons = kl_text_bar_buttons(facts);
+
+	/* The selection in the window: one line's ends, or its lines across the text. */
+	te_app_text_rect(&main_app, &text);
+	origin_x = (double)text.x - main_app.scroll_x;
+	origin_y = (double)text.y - main_app.scroll_y;
+	main_app.touch.view->caret_rect(main_app.touch.data, start, &first);
+	main_app.touch.view->caret_rect(main_app.touch.data, end, &second);
+	selection.x = (int)(origin_x + (double)first.x);
+	selection.y = (int)(origin_y + (double)first.y);
+	selection.width = second.x - first.x;
+	selection.height = first.height;
+	if (second.y != first.y) {
+		selection.x = text.x;
+		selection.width = text.width;
+		selection.height = second.y + second.height - first.y;
+	}
+
+	/* What shows of the text, and the window less the on-screen keyboard. */
+	visible.x = text.x;
+	visible.y = text.y;
+	visible.width = text.width;
+	visible.height = text.height;
+	kl_window_keyboard_inset(main_window.kui, &right, &bottom);
+	bounds.x = 0;
+	bounds.y = 0;
+	bounds.width = (int)main_width - right;
+	bounds.height = (int)main_height - bottom;
+
+	/* Laid out and recorded over the text. */
+	shown = kl_text_bar_layout(&main_app.bar, &main_widgets, buttons, &selection, &visible, &bounds);
+	if (!shown)
+		return 0U;
+	pressed = kl_text_bar_hit(main_input, MAIN_TEXT_BAR, &main_app.bar, &main_app.bar_held);
+
+	/* Reports the button pressed. */
+	return pressed;
+}
+
+/*
+ * Carries out a button of the bar (ws190-p003): Copy keeps the selection
+ * and hides the bar; Cut and Paste leave a caret, the fingers' handles and
+ * bar gone; Select All selects the whole text as the fingers' selection.
+ */
+static void
+main_bar_press(
+	unsigned button)
+{
+	size_t length;
+
+	/* Each button: its action, logged. */
+	switch (button) {
+	case KL_TEXT_BAR_COPY:
+		te_log("TOUCH bar press button=copy");
+		te_app_action(&main_app, TE_ACTION_COPY);
+		kl_text_touch_hide_bar(&main_app.touch);
+		break;
+	case KL_TEXT_BAR_CUT:
+		te_log("TOUCH bar press button=cut");
+		te_app_action(&main_app, TE_ACTION_CUT);
+		kl_text_touch_set_selection(&main_app.touch, main_app.anchor, main_app.cursor);
+		break;
+	case KL_TEXT_BAR_PASTE:
+		te_log("TOUCH bar press button=paste");
+		te_app_action(&main_app, TE_ACTION_PASTE);
+		kl_text_touch_set_selection(&main_app.touch, main_app.anchor, main_app.cursor);
+		break;
+	case KL_TEXT_BAR_SELECT_ALL:
+		te_log("TOUCH bar press button=select-all");
+		te_app_action(&main_app, TE_ACTION_SELECT_ALL);
+		length = te_buffer_length(&main_app.buffer);
+		kl_text_touch_select(&main_app.touch, 0, length);
+		(void)kl_text_touch_take(&main_app.touch);
+		break;
+	default:
+		return;
+	}
+
+	/* The next frame shows what the button did. */
+	main_app.dirty = 1;
+}
+
+/* Logs the bar's coming and going (for the tests). */
+static void
+main_bar_log(void)
+{
+	/* Shown since the last log. */
+	if (main_app.bar.count != 0U && !main_app.bar_logged) {
+		main_app.bar_logged = 1;
+		te_log("TOUCH bar shown buttons=%u rect=%d,%d,%d,%d", main_app.bar.buttons, main_app.bar.rect.x, main_app.bar.rect.y, main_app.bar.rect.width, main_app.bar.rect.height);
+		main_app.dirty = 1;
+		return;
+	}
+
+	/* Gone since the last log. */
+	if (main_app.bar.count == 0U && main_app.bar_logged) {
+		main_app.bar_logged = 0;
+		te_log("TOUCH bar hidden");
+		main_app.dirty = 1;
+	}
 }

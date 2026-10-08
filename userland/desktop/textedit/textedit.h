@@ -445,6 +445,16 @@ struct te_app {
 	struct kl_text_touch touch;
 	int handles_shown;
 
+	/*
+	 * ws190-p003: the bar of editing buttons over the fingers' selection
+	 * (libkeiland's kl_text_bar), laid out by the fingers' input's frame
+	 * and drawn by the next frame (count 0: none), the button the pointer
+	 * holds, and whether the log last said it shows.
+	 */
+	struct kl_text_bar bar;
+	unsigned bar_held;
+	int bar_logged;
+
 	/* The keyboard's focus and the cursor's blinking. */
 	int focused;
 	uint64_t blink_start;
