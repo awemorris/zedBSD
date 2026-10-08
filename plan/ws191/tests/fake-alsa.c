@@ -80,8 +80,26 @@ snd_pcm_open(void **pcm, const char *name, int stream, int mode)
 	return 0;
 }
 
+/* The next set_params calls that fail, and with what (T1-451: a service just started refuses for a moment). */
+static int fake_fail_params;
+static int fake_fail_params_times;
+
+void fake_alsa_fail_set_params(int error, int times) { pthread_mutex_lock(&fake_lock); fake_fail_params = error; fake_fail_params_times = times; pthread_mutex_unlock(&fake_lock); }
+
 int snd_pcm_set_params(void *pcm, int format, int access, unsigned channels, unsigned rate, int soft_resample, unsigned latency)
-{ (void)pcm; (void)format; (void)access; (void)channels; (void)rate; (void)soft_resample; (void)latency; return 0; }
+{
+	int error;
+
+	(void)pcm; (void)format; (void)access; (void)channels; (void)rate; (void)soft_resample; (void)latency;
+	pthread_mutex_lock(&fake_lock);
+	error = 0;
+	if (fake_fail_params_times > 0) {
+		fake_fail_params_times--;
+		error = -fake_fail_params;
+	}
+	pthread_mutex_unlock(&fake_lock);
+	return error;
+}
 
 int snd_pcm_get_params(void *pcm, unsigned long *buffer_size, unsigned long *period_size)
 { (void)pcm; *buffer_size = FAKE_BUFFER; *period_size = FAKE_PERIOD; return 0; }
