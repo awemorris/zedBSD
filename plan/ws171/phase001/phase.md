@@ -44,8 +44,8 @@ Queue: Q1 の dispatch（P1、2026-10-09、ベータ3 の合間の仕事。ユ�
 ## p002 の分け方（案）
 
 差分の案は、領域ごとに 6 つに分けて review を受ける:
-1. 文字列と console・assert・fatal（14）
-2. CPU・mask・idle・panic・halt・reset・poweroff（22）
+1. 文字列と console・assert・fatal（11）
+2. CPU・mask・idle・panic・halt・reset・poweroff（20）
 3. IRQ（19）
 4. task と context（28）
 5. 空間・pmem・mmio・io・barrier・cache（47）
