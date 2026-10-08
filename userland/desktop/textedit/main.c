@@ -1405,7 +1405,7 @@ main_drop_event(
 	int taken;
 	int error;
 
-	/* What it is. */
+	/* Each of the drag and drop inputs. */
 	switch (event->kind) {
 	case KL_WINDOW_DROP_ENTER:
 	case KL_WINDOW_DROP_MOTION:

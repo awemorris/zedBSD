@@ -521,11 +521,19 @@ pv_select_button(
 		inside = 0;
 		if (page > first_page && page < last_page)
 			inside = 1;
-		if (page == first_page && page == last_page && index >= low && index <= high && low != high)
+		if (page == first_page &&
+		    page == last_page &&
+		    index >= low &&
+		    index <= high &&
+		    low != high)
 			inside = 1;
-		if (page == first_page && page != last_page && index >= low)
+		if (page == first_page &&
+		    page != last_page &&
+		    index >= low)
 			inside = 1;
-		if (page == last_page && page != first_page && index <= high)
+		if (page == last_page &&
+		    page != first_page &&
+		    index <= high)
 			inside = 1;
 
 		/* The press is within it (a selection of one place is none). */

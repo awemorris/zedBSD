@@ -951,6 +951,8 @@ surface_request(
 			icon = 1;
 		if ((x != 0 || y != 0) && !icon && !surface->drag_icon)
 			return EPROTO;
+
+		/* The icon of the drag going on keeps the offsets until the next commit. */
 		if (icon) {
 			surface->pending_dx += (int32_t)x;
 			surface->pending_dy += (int32_t)y;
@@ -1083,6 +1085,12 @@ surface_commit(
 		return 0;
 	}
 
+	/* The offsets attached since the last commit move the surface from here (a drag's icon, ws189-p002). */
+	surface->offset_x += surface->pending_dx;
+	surface->offset_y += surface->pending_dy;
+	surface->pending_dx = 0;
+	surface->pending_dy = 0;
+
 	/*
 	 * A cursor surface's content is used directly, with no configure; a
 	 * surface with no role yet keeps its content the same way, unshown
@@ -1092,12 +1100,6 @@ surface_commit(
 	role = surface->role;
 	server = surface->client->server;
 	attached = surface->attached;
-
-	/* The offsets attached since the last commit move the surface from here (a drag's icon, ws189-p002). */
-	surface->offset_x += surface->pending_dx;
-	surface->offset_y += surface->pending_dy;
-	surface->pending_dx = 0;
-	surface->pending_dy = 0;
 	if (surface->cursor_role || role == NULL) {
 		error = kwl_surface_queue(surface);
 		if (error != 0)
