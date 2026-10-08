@@ -14,7 +14,11 @@
  * number is kept, its click types the code into the page key by key (and
  * takes the control away), the titlebar's control does the same, a
  * message without a code is not offered, an offer that ran out is taken
- * back, and the code is never in the log.
+ * back, and the code is never in the log.  ws177-p014: the notification
+ * names the page, a code with letters is typed with "KeyX" (Shift for a
+ * capital), a page without a field that takes text gets nothing but the
+ * clipboard and a notification without the code, and the main loop is
+ * told when the offer runs out.
  *
  * Prints "PASS name" or "FAIL name ..." for each check; exits with 1 when
  * one failed.
@@ -45,6 +49,10 @@ static struct {
 	int focused;
 	char label[32];
 	unsigned offers;
+	int text_target;
+	char copied[32];
+	unsigned shifted;
+	int bad_key;
 } fake;
 
 /* The checks that failed. */
@@ -162,7 +170,39 @@ shell_titlebar_offer_code(
 	return 0;
 }
 
+/* The window's clipboard. */
+void
+kl_window_copy(
+	struct kl_window *window,
+	const char *text,
+	size_t length)
+{
+	UNUSED_PARAMETER(window);
+	(void)snprintf(fake.copied, sizeof(fake.copied), "%.*s", (int)length, text);
+}
+
 /* The view's fakes. */
+const char *
+browser_view_title(
+	const struct browser_view *view)
+{
+	UNUSED_PARAMETER(view);
+	return "Example Bank - Sign in";
+}
+
+int
+browser_view_text_target(
+	struct browser_view *view,
+	float caret[4])
+{
+	UNUSED_PARAMETER(view);
+	caret[0] = 0.0f;
+	caret[1] = 0.0f;
+	caret[2] = 0.0f;
+	caret[3] = 0.0f;
+	return fake.text_target;
+}
+
 int
 browser_view_focus(
 	struct browser_view *view,
@@ -187,13 +227,18 @@ browser_view_key(
 
 	UNUSED_PARAMETER(view);
 	UNUSED_PARAMETER(repeat);
-	UNUSED_PARAMETER(modifiers);
 	if (!pressed) {
 		fake.releases++;
 		return 0;
 	}
-	if (strncmp(code, "Digit", 5U) != 0 || strcmp(key, text) != 0)
+	if (strcmp(key, text) != 0)
 		return EINVAL;
+	if (key[0] >= '0' && key[0] <= '9' && (strncmp(code, "Digit", 5U) != 0 || code[5] != key[0] || modifiers != 0U))
+		fake.bad_key = 1;
+	if (key[0] >= 'A' && key[0] <= 'Z' && (strncmp(code, "Key", 3U) != 0 || code[3] != key[0] || modifiers != BROWSER_MOD_SHIFT))
+		fake.bad_key = 1;
+	if (key[0] >= 'A' && key[0] <= 'Z')
+		fake.shifted++;
 	length = strlen(fake.typed);
 	if (length + 1U < sizeof(fake.typed)) {
 		fake.typed[length] = text[0];
@@ -215,6 +260,15 @@ main(void)
 	char label_first[32];
 	char label_after_fill[32];
 	char typed_by_notification[32];
+	char body_first[256];
+	char title_first[256];
+	unsigned flags_first;
+	char typed_before_copy[32];
+	char typed_by_titlebar[32];
+	unsigned releases_by_titlebar;
+	int due_offered;
+	int due_none;
+	int due_over;
 	FILE *log_file;
 	size_t length;
 	int saved;
@@ -228,6 +282,8 @@ main(void)
 	(void)dup2(fileno(log_file), 1);
 	view = (struct browser_view *)&test_system_token;
 	memset(&titlebar, 0, sizeof(titlebar));
+	titlebar.kui = (struct kl_window *)&test_system_token;
+	fake.text_target = 1;
 
 	/* Opened: listening as the browser. */
 	shell_mail_open(&mail, NULL);
@@ -239,6 +295,11 @@ main(void)
 	fake.mail_count = 2;
 	shell_mail_round(&mail, view, &titlebar, 1000U);
 	(void)snprintf(label_first, sizeof(label_first), "%s", fake.label);
+	(void)snprintf(body_first, sizeof(body_first), "%s", fake.body);
+	(void)snprintf(title_first, sizeof(title_first), "%s", fake.title);
+	flags_first = fake.flags;
+	due_offered = shell_mail_timeout(&mail, 1000U + 30U * 1000U);
+	due_over = shell_mail_timeout(&mail, 1000U + 3U * 60U * 1000U);
 
 	/* The notification's number, then its click. */
 	fake.notes[0].kind = KL_NOTIFY_POSTED;
@@ -262,12 +323,33 @@ main(void)
 	fake.note_count = 1;
 	shell_mail_round(&mail, view, &titlebar, 4000U);
 	shell_mail_round(&mail, view, &titlebar, 4000U + 2U * 60U * 1000U);
+	due_none = shell_mail_timeout(&mail, 5000U + 2U * 60U * 1000U);
 
 	/* A third code, typed by the titlebar's control. */
 	(void)snprintf(fake.mails[0].from, sizeof(fake.mails[0].from), "Club");
 	(void)snprintf(fake.mails[0].code, sizeof(fake.mails[0].code), "123456");
 	fake.mail_count = 1;
 	shell_mail_round(&mail, view, &titlebar, 200000U);
+	fake.typed[0] = '\0';
+	shell_mail_fill(&mail, view, &titlebar);
+	(void)snprintf(typed_by_titlebar, sizeof(typed_by_titlebar), "%s", fake.typed);
+	releases_by_titlebar = fake.releases;
+
+	/* A code with letters, typed by the titlebar's control. */
+	(void)snprintf(fake.mails[0].from, sizeof(fake.mails[0].from), "Cloud");
+	(void)snprintf(fake.mails[0].code, sizeof(fake.mails[0].code), "X7K2PQ");
+	fake.mail_count = 1;
+	shell_mail_round(&mail, view, &titlebar, 300000U);
+	fake.typed[0] = '\0';
+	shell_mail_fill(&mail, view, &titlebar);
+	(void)snprintf(typed_before_copy, sizeof(typed_before_copy), "%s", fake.typed);
+
+	/* A page without a field: the clipboard, nothing typed. */
+	(void)snprintf(fake.mails[0].from, sizeof(fake.mails[0].from), "Club");
+	(void)snprintf(fake.mails[0].code, sizeof(fake.mails[0].code), "246810");
+	fake.mail_count = 1;
+	shell_mail_round(&mail, view, &titlebar, 400000U);
+	fake.text_target = 0;
 	fake.typed[0] = '\0';
 	shell_mail_fill(&mail, view, &titlebar);
 	shell_mail_close(&mail, &titlebar);
@@ -283,14 +365,21 @@ main(void)
 
 	/* The checks. */
 	test_check("listen", strcmp(fake.listened, "browser") == 0, fake.listened);
-	test_check("offered-once-each", fake.next_request == 3U, "");
+	test_check("offered-once-each", fake.next_request == 6U, "");
+	test_check("offer-names-page", strstr(body_first, "on Example Bank - Sign in.") != NULL, body_first);
+	test_check("timeout", due_offered == 90 * 1000 && due_over == 0 && due_none == -1, "");
 	test_check("offer-titlebar", strcmp(label_first, "Code 482913") == 0, label_first);
-	test_check("offer-action", fake.flags == KL_NOTIFY_ACTION && strcmp(fake.title, "Sign-in code from Club") == 0, fake.title);
+	test_check("offer-action", flags_first == KL_NOTIFY_ACTION && strcmp(title_first, "Sign-in code from Example Bank") == 0, title_first);
+	test_check("lettered", strcmp(typed_before_copy, "X7K2PQ") == 0 && fake.shifted == 4U && !fake.bad_key, typed_before_copy);
+	test_check("no-field-copied", strcmp(fake.copied, "246810") == 0 && fake.typed[0] == '\0' && fake.label[0] == '\0', fake.copied);
+	test_check("no-field-told", fake.flags == 0U && strcmp(fake.title, "Sign-in code copied") == 0 && strstr(fake.body, "246810") == NULL, fake.title);
 	test_check("typed-by-notification", strcmp(typed_by_notification, "482913") == 0 && fake.focused == 1 && label_after_fill[0] == '\0', typed_by_notification);
 	test_check("ran-out", fake.withdrawn == 78U, "");
-	test_check("typed-by-titlebar", strcmp(fake.typed, "123456") == 0 && fake.releases == 12U && fake.label[0] == '\0', fake.typed);
-	test_check("no-code-in-log", strstr(log_text, "482913") == NULL && strstr(log_text, "7351") == NULL && strstr(log_text, "123456") == NULL, "");
-	test_check("log-lengths", strstr(log_text, "ZBROWSER MAIL fill length=6 error=0") != NULL, "");
+	test_check("typed-by-titlebar", strcmp(typed_by_titlebar, "123456") == 0 && releases_by_titlebar == 12U, typed_by_titlebar);
+	test_check("no-code-in-log", strstr(log_text, "482913") == NULL && strstr(log_text, "7351") == NULL && strstr(log_text, "123456") == NULL &&
+	    strstr(log_text, "X7K2PQ") == NULL && strstr(log_text, "246810") == NULL, "");
+	test_check("log-lengths", strstr(log_text, "ZBROWSER MAIL fill length=6 error=0") != NULL &&
+	    strstr(log_text, "ZBROWSER MAIL copied length=6 clipboard=1 notified=1") != NULL, "");
 
 	/* The outcome. */
 	if (test_failures != 0) {
